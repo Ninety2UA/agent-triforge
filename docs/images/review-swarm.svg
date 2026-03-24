@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 480">
+  <defs>
+    <linearGradient id="bg3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f172a"/>
+      <stop offset="100%" style="stop-color:#1e1b4b"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1000" height="480" fill="url(#bg3)" rx="12"/>
+
+  <!-- Title -->
+  <text x="500" y="35" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#94a3b8">Parallel Review Architecture — up to 8 simultaneous reviewers</text>
+
+  <!-- Code box at top -->
+  <g transform="translate(400, 55)">
+    <rect width="200" height="40" rx="8" fill="#374151" stroke="#4b5563" stroke-width="1"/>
+    <text x="100" y="25" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="#e2e8f0">Code Under Review</text>
+  </g>
+
+  <!-- Lines from code to reviewers -->
+  <g stroke="#475569" stroke-width="1" opacity="0.6">
+    <line x1="500" y1="95" x2="80"  y2="140"/>
+    <line x1="500" y1="95" x2="210" y2="140"/>
+    <line x1="500" y1="95" x2="345" y2="140"/>
+    <line x1="500" y1="95" x2="480" y2="140"/>
+    <line x1="500" y1="95" x2="615" y2="140"/>
+    <line x1="500" y1="95" x2="750" y2="140"/>
+    <line x1="500" y1="95" x2="790" y2="140"/>
+    <line x1="500" y1="95" x2="920" y2="140"/>
+  </g>
+
+  <!-- Reviewer boxes row 1 -->
+  <!-- Gemini -->
+  <g transform="translate(20, 140)">
+    <rect width="120" height="95" rx="8" fill="#10b981" opacity="0.15" stroke="#10b981" stroke-width="1.5"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#6ee7b7">Gemini CLI</text>
+    <line x1="15" y1="32" x2="105" y2="32" stroke="#10b981" stroke-width="0.5" opacity="0.3"/>
+    <text x="60" y="48" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Architecture</text>
+    <text x="60" y="61" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Design</text>
+    <text x="60" y="74" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Readability</text>
+    <text x="60" y="87" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Documentation</text>
+  </g>
+
+  <!-- Codex -->
+  <g transform="translate(150, 140)">
+    <rect width="120" height="95" rx="8" fill="#f59e0b" opacity="0.15" stroke="#f59e0b" stroke-width="1.5"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#fcd34d">Codex CLI</text>
+    <line x1="15" y1="32" x2="105" y2="32" stroke="#f59e0b" stroke-width="0.5" opacity="0.3"/>
+    <text x="60" y="48" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Logic</text>
+    <text x="60" y="61" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Edge cases</text>
+    <text x="60" y="74" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Type safety</text>
+    <text x="60" y="87" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Test coverage</text>
+  </g>
+
+  <!-- Security -->
+  <g transform="translate(285, 140)">
+    <rect width="120" height="95" rx="8" fill="#ef4444" opacity="0.15" stroke="#ef4444" stroke-width="1.5"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#fca5a5">security-sentinel</text>
+    <line x1="15" y1="32" x2="105" y2="32" stroke="#ef4444" stroke-width="0.5" opacity="0.3"/>
+    <text x="60" y="48" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">OWASP Top 10</text>
+    <text x="60" y="61" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Injection</text>
+    <text x="60" y="74" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Auth/authz</text>
+    <text x="60" y="87" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Data exposure</text>
+  </g>
+
+  <!-- Performance -->
+  <g transform="translate(420, 140)">
+    <rect width="120" height="95" rx="8" fill="#8b5cf6" opacity="0.15" stroke="#8b5cf6" stroke-width="1.5"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#c4b5fd">perf-oracle</text>
+    <line x1="15" y1="32" x2="105" y2="32" stroke="#8b5cf6" stroke-width="0.5" opacity="0.3"/>
+    <text x="60" y="48" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">O(n^2) detection</text>
+    <text x="60" y="61" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">N+1 queries</text>
+    <text x="60" y="74" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Memory leaks</text>
+    <text x="60" y="87" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Scale 10x/100x</text>
+  </g>
+
+  <!-- Simplicity -->
+  <g transform="translate(555, 140)">
+    <rect width="120" height="95" rx="8" fill="#06b6d4" opacity="0.15" stroke="#06b6d4" stroke-width="1.5"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#67e8f9">simplicity</text>
+    <line x1="15" y1="32" x2="105" y2="32" stroke="#06b6d4" stroke-width="0.5" opacity="0.3"/>
+    <text x="60" y="48" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Over-engineering</text>
+    <text x="60" y="61" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">YAGNI</text>
+    <text x="60" y="74" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Dead patterns</text>
+    <text x="60" y="87" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Abstraction debt</text>
+  </g>
+
+  <!-- Convention -->
+  <g transform="translate(690, 140)">
+    <rect width="120" height="95" rx="8" fill="#ec4899" opacity="0.15" stroke="#ec4899" stroke-width="1.5"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#f9a8d4">conventions</text>
+    <line x1="15" y1="32" x2="105" y2="32" stroke="#ec4899" stroke-width="0.5" opacity="0.3"/>
+    <text x="60" y="48" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Naming</text>
+    <text x="60" y="61" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">File structure</text>
+    <text x="60" y="74" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Code style</text>
+    <text x="60" y="87" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Patterns</text>
+  </g>
+
+  <!-- Architecture -->
+  <g transform="translate(825, 140)">
+    <rect width="120" height="95" rx="8" fill="#f97316" opacity="0.15" stroke="#f97316" stroke-width="1.5"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#fdba74">architecture</text>
+    <line x1="15" y1="32" x2="105" y2="32" stroke="#f97316" stroke-width="0.5" opacity="0.3"/>
+    <text x="60" y="48" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">SOLID</text>
+    <text x="60" y="61" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Coupling</text>
+    <text x="60" y="74" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Cohesion</text>
+    <text x="60" y="87" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Boundaries</text>
+  </g>
+
+  <!-- Lines from reviewers to synthesizer -->
+  <g stroke="#475569" stroke-width="1" opacity="0.4">
+    <line x1="80"  y1="235" x2="500" y2="295"/>
+    <line x1="210" y1="235" x2="500" y2="295"/>
+    <line x1="345" y1="235" x2="500" y2="295"/>
+    <line x1="480" y1="235" x2="500" y2="295"/>
+    <line x1="615" y1="235" x2="500" y2="295"/>
+    <line x1="750" y1="235" x2="500" y2="295"/>
+    <line x1="885" y1="235" x2="500" y2="295"/>
+  </g>
+
+  <!-- Synthesizer -->
+  <g transform="translate(370, 295)">
+    <rect width="260" height="65" rx="8" fill="#6366f1" opacity="0.2" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="130" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="700" fill="#a5b4fc">findings-synthesizer</text>
+    <line x1="20" y1="32" x2="240" y2="32" stroke="#6366f1" stroke-width="0.5" opacity="0.3"/>
+    <text x="130" y="48" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#94a3b8">Deduplicate  ·  Confidence tier (HIGH/MED/LOW)  ·  Priority rank (P1/P2/P3)</text>
+  </g>
+
+  <!-- Arrow to output -->
+  <g transform="translate(495, 365)">
+    <line x1="0" y1="0" x2="0" y2="20" stroke="#475569" stroke-width="1.5"/>
+    <polygon points="-4,20 0,28 4,20" fill="#475569"/>
+  </g>
+
+  <!-- Output -->
+  <g transform="translate(340, 395)">
+    <rect width="320" height="65" rx="8" fill="#374151" stroke="#4b5563" stroke-width="1"/>
+    <text x="160" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="700" fill="#e2e8f0">Synthesized Report</text>
+    <line x1="20" y1="32" x2="300" y2="32" stroke="#4b5563" stroke-width="0.5"/>
+    <text x="55" y="50" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#ef4444">P1 Critical</text>
+    <text x="160" y="50" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#f59e0b">P2 Important</text>
+    <text x="265" y="50" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#6b7280">P3 Suggestion</text>
+  </g>
+</svg>
