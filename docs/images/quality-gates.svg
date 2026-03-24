@@ -1,74 +1,70 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 160">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 155" style="background-color:transparent">
   <defs>
-    <linearGradient id="bg4" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#0f172a"/>
-      <stop offset="50%" style="stop-color:#1e1b4b"/>
-      <stop offset="100%" style="stop-color:#0f172a"/>
-    </linearGradient>
+    <marker id="arr2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6B7280"/>
+    </marker>
   </defs>
 
-  <rect width="900" height="160" fill="url(#bg4)" rx="12"/>
-
-  <!-- Decorative grid dots -->
-  <g opacity="0.08" fill="#8b5cf6">
-    <circle cx="20" cy="20" r="1.5"/><circle cx="40" cy="20" r="1.5"/><circle cx="60" cy="20" r="1.5"/>
-    <circle cx="840" cy="140" r="1.5"/><circle cx="860" cy="140" r="1.5"/><circle cx="880" cy="140" r="1.5"/>
+  <!-- Gate 1 — Plan validated -->
+  <g transform="translate(15, 10)">
+    <rect width="155" height="130" rx="10" fill="#FFB3B3" stroke="#CC6666" stroke-width="2"/>
+    <circle cx="78" cy="28" r="16" fill="#CC6666"/>
+    <text x="78" y="33" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="white">1</text>
+    <text x="78" y="60" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Plan validated</text>
+    <text x="78" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">plan-checker agent</text>
+    <text x="78" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">reviews before build</text>
+    <text x="78" y="116" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#718096" font-style="italic">max 3 iterations</text>
   </g>
 
-  <text x="450" y="28" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" font-weight="600" fill="#94a3b8">Five Non-Negotiable Quality Gates</text>
+  <line x1="175" y1="75" x2="195" y2="75" stroke="#6B7280" stroke-width="2" marker-end="url(#arr2)"/>
 
-  <!-- Gate 1 -->
-  <g transform="translate(25, 48)">
-    <rect width="155" height="90" rx="8" fill="none" stroke="#6366f1" stroke-width="1.5" opacity="0.6"/>
-    <circle cx="20" cy="22" r="12" fill="none" stroke="#6366f1" stroke-width="1.5" opacity="0.6"/>
-    <text x="20" y="26" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#a5b4fc">1</text>
-    <text x="90" y="26" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="600" fill="#a5b4fc">Plan validated</text>
-    <text x="78" y="50" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">plan-checker agent</text>
-    <text x="78" y="65" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">reviews before build</text>
-    <text x="78" y="82" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#64748b" font-style="italic">max 3 iterations</text>
+  <!-- Gate 2 — Failing test first -->
+  <g transform="translate(200, 10)">
+    <rect width="155" height="130" rx="10" fill="#FFB3B3" stroke="#CC6666" stroke-width="2"/>
+    <circle cx="78" cy="28" r="16" fill="#CC6666"/>
+    <text x="78" y="33" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="white">2</text>
+    <text x="78" y="60" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Failing test first</text>
+    <text x="78" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">TDD skill enforces</text>
+    <text x="78" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">RED-GREEN-REFACTOR</text>
+    <text x="78" y="116" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#718096" font-style="italic">no code without demand</text>
   </g>
 
-  <!-- Gate 2 -->
-  <g transform="translate(200, 48)">
-    <rect width="155" height="90" rx="8" fill="none" stroke="#10b981" stroke-width="1.5" opacity="0.6"/>
-    <circle cx="20" cy="22" r="12" fill="none" stroke="#10b981" stroke-width="1.5" opacity="0.6"/>
-    <text x="20" y="26" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#6ee7b7">2</text>
-    <text x="90" y="26" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="600" fill="#6ee7b7">Failing test first</text>
-    <text x="78" y="50" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">TDD skill enforces</text>
-    <text x="78" y="65" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">RED-GREEN-REFACTOR</text>
-    <text x="78" y="82" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#64748b" font-style="italic">no code without demand</text>
+  <line x1="360" y1="75" x2="380" y2="75" stroke="#6B7280" stroke-width="2" marker-end="url(#arr2)"/>
+
+  <!-- Gate 3 — Root cause first -->
+  <g transform="translate(385, 10)">
+    <rect width="155" height="130" rx="10" fill="#FFB3B3" stroke="#CC6666" stroke-width="2"/>
+    <circle cx="78" cy="28" r="16" fill="#CC6666"/>
+    <text x="78" y="33" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="white">3</text>
+    <text x="78" y="60" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Root cause first</text>
+    <text x="78" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">systematic-debugging</text>
+    <text x="78" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">requires diagnosis</text>
+    <text x="78" y="116" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#718096" font-style="italic">no symptom patches</text>
   </g>
 
-  <!-- Gate 3 -->
-  <g transform="translate(375, 48)">
-    <rect width="155" height="90" rx="8" fill="none" stroke="#f59e0b" stroke-width="1.5" opacity="0.6"/>
-    <circle cx="20" cy="22" r="12" fill="none" stroke="#f59e0b" stroke-width="1.5" opacity="0.6"/>
-    <text x="20" y="26" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#fcd34d">3</text>
-    <text x="90" y="26" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="600" fill="#fcd34d">Root cause first</text>
-    <text x="78" y="50" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">systematic-debugging</text>
-    <text x="78" y="65" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">requires diagnosis</text>
-    <text x="78" y="82" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#64748b" font-style="italic">no symptom patches</text>
+  <line x1="545" y1="75" x2="565" y2="75" stroke="#6B7280" stroke-width="2" marker-end="url(#arr2)"/>
+
+  <!-- Gate 4 — Evidence first -->
+  <g transform="translate(570, 10)">
+    <rect width="155" height="130" rx="10" fill="#FFB3B3" stroke="#CC6666" stroke-width="2"/>
+    <circle cx="78" cy="28" r="16" fill="#CC6666"/>
+    <text x="78" y="33" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="white">4</text>
+    <text x="78" y="60" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Evidence first</text>
+    <text x="78" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">verification checklist</text>
+    <text x="78" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">all checks must pass</text>
+    <text x="78" y="116" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#718096" font-style="italic">no "done" without proof</text>
   </g>
 
-  <!-- Gate 4 -->
-  <g transform="translate(550, 48)">
-    <rect width="155" height="90" rx="8" fill="none" stroke="#ef4444" stroke-width="1.5" opacity="0.6"/>
-    <circle cx="20" cy="22" r="12" fill="none" stroke="#ef4444" stroke-width="1.5" opacity="0.6"/>
-    <text x="20" y="26" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#fca5a5">4</text>
-    <text x="90" y="26" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="600" fill="#fca5a5">Evidence first</text>
-    <text x="78" y="50" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">verification checklist</text>
-    <text x="78" y="65" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">all checks must pass</text>
-    <text x="78" y="82" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#64748b" font-style="italic">no "done" without proof</text>
-  </g>
+  <line x1="730" y1="75" x2="750" y2="75" stroke="#6B7280" stroke-width="2" marker-end="url(#arr2)"/>
 
-  <!-- Gate 5 -->
-  <g transform="translate(725, 48)">
-    <rect width="155" height="90" rx="8" fill="none" stroke="#8b5cf6" stroke-width="1.5" opacity="0.6"/>
-    <circle cx="20" cy="22" r="12" fill="none" stroke="#8b5cf6" stroke-width="1.5" opacity="0.6"/>
-    <text x="20" y="26" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#c4b5fd">5</text>
-    <text x="90" y="26" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="600" fill="#c4b5fd">Review first</text>
-    <text x="78" y="50" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">parallel review swarm</text>
-    <text x="78" y="65" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">up to 8 reviewers</text>
-    <text x="78" y="82" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#64748b" font-style="italic">max 3 cycles</text>
+  <!-- Gate 5 — Review first -->
+  <g transform="translate(755, 10)">
+    <rect width="135" height="130" rx="10" fill="#FFB3B3" stroke="#CC6666" stroke-width="2"/>
+    <circle cx="68" cy="28" r="16" fill="#CC6666"/>
+    <text x="68" y="33" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="white">5</text>
+    <text x="68" y="60" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Review first</text>
+    <text x="68" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">parallel review swarm</text>
+    <text x="68" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">up to 8 reviewers</text>
+    <text x="68" y="116" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#718096" font-style="italic">max 3 cycles</text>
   </g>
 </svg>

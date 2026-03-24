@@ -1,151 +1,136 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 480">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 420" style="background-color:transparent">
   <defs>
-    <linearGradient id="bg3" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#0f172a"/>
-      <stop offset="50%" style="stop-color:#1e1b4b"/>
-      <stop offset="100%" style="stop-color:#0f172a"/>
-    </linearGradient>
+    <marker id="arr3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6B7280"/>
+    </marker>
   </defs>
 
-  <rect width="1000" height="480" fill="url(#bg3)" rx="12"/>
-
-  <!-- Decorative grid dots -->
-  <g opacity="0.08" fill="#8b5cf6">
-    <circle cx="20" cy="20" r="1.5"/><circle cx="40" cy="20" r="1.5"/><circle cx="60" cy="20" r="1.5"/><circle cx="80" cy="20" r="1.5"/>
-    <circle cx="920" cy="460" r="1.5"/><circle cx="940" cy="460" r="1.5"/><circle cx="960" cy="460" r="1.5"/><circle cx="980" cy="460" r="1.5"/>
-  </g>
-
-  <!-- Title -->
-  <text x="500" y="35" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" font-weight="600" fill="#94a3b8">Parallel Review Architecture — up to 8 simultaneous reviewers</text>
-
-  <!-- Code box at top -->
-  <g transform="translate(400, 55)">
-    <rect width="200" height="40" rx="8" fill="none" stroke="#475569" stroke-width="1.5"/>
-    <text x="100" y="25" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="700" fill="#e2e8f0">Code Under Review</text>
+  <!-- Code Under Review -->
+  <g transform="translate(400, 10)">
+    <rect width="200" height="42" rx="10" fill="#1a1a2e" stroke="#1a1a2e" stroke-width="2"/>
+    <text x="100" y="27" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="white">Code Under Review</text>
   </g>
 
   <!-- Lines from code to reviewers -->
-  <g stroke="#6B7280" stroke-width="1" opacity="0.4">
-    <line x1="500" y1="95" x2="80"  y2="140"/>
-    <line x1="500" y1="95" x2="210" y2="140"/>
-    <line x1="500" y1="95" x2="345" y2="140"/>
-    <line x1="500" y1="95" x2="480" y2="140"/>
-    <line x1="500" y1="95" x2="615" y2="140"/>
-    <line x1="500" y1="95" x2="750" y2="140"/>
-    <line x1="500" y1="95" x2="790" y2="140"/>
-    <line x1="500" y1="95" x2="920" y2="140"/>
+  <g stroke="#6B7280" stroke-width="1.5" opacity="0.35">
+    <line x1="500" y1="52" x2="80"  y2="85"/>
+    <line x1="500" y1="52" x2="210" y2="85"/>
+    <line x1="500" y1="52" x2="345" y2="85"/>
+    <line x1="500" y1="52" x2="480" y2="85"/>
+    <line x1="500" y1="52" x2="615" y2="85"/>
+    <line x1="500" y1="52" x2="750" y2="85"/>
+    <line x1="500" y1="52" x2="885" y2="85"/>
   </g>
 
-  <!-- Reviewer boxes -->
   <!-- Gemini -->
-  <g transform="translate(20, 140)">
-    <rect width="120" height="95" rx="8" fill="none" stroke="#10b981" stroke-width="1.5" opacity="0.6"/>
-    <text x="60" y="22" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#6ee7b7">Gemini CLI</text>
-    <line x1="15" y1="32" x2="105" y2="32" stroke="#10b981" stroke-width="0.5" opacity="0.3"/>
-    <text x="60" y="48" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Architecture</text>
-    <text x="60" y="61" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Design</text>
-    <text x="60" y="74" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Readability</text>
-    <text x="60" y="87" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Documentation</text>
+  <g transform="translate(20, 85)">
+    <rect width="120" height="100" rx="10" fill="#C9E4CA" stroke="#5C8A5E" stroke-width="2"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="700" fill="#1a1a2e">Gemini CLI</text>
+    <line x1="12" y1="32" x2="108" y2="32" stroke="#5C8A5E" stroke-width="1" opacity="0.3"/>
+    <text x="60" y="50" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Architecture</text>
+    <text x="60" y="65" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Design</text>
+    <text x="60" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Readability</text>
+    <text x="60" y="95" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Documentation</text>
   </g>
 
   <!-- Codex -->
-  <g transform="translate(150, 140)">
-    <rect width="120" height="95" rx="8" fill="none" stroke="#f59e0b" stroke-width="1.5" opacity="0.6"/>
-    <text x="60" y="22" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#fcd34d">Codex CLI</text>
-    <line x1="15" y1="32" x2="105" y2="32" stroke="#f59e0b" stroke-width="0.5" opacity="0.3"/>
-    <text x="60" y="48" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Logic</text>
-    <text x="60" y="61" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Edge cases</text>
-    <text x="60" y="74" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Type safety</text>
-    <text x="60" y="87" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Test coverage</text>
+  <g transform="translate(150, 85)">
+    <rect width="120" height="100" rx="10" fill="#D4A574" stroke="#8B6914" stroke-width="2"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="700" fill="#1a1a2e">Codex CLI</text>
+    <line x1="12" y1="32" x2="108" y2="32" stroke="#8B6914" stroke-width="1" opacity="0.3"/>
+    <text x="60" y="50" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Logic</text>
+    <text x="60" y="65" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Edge cases</text>
+    <text x="60" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Type safety</text>
+    <text x="60" y="95" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Test coverage</text>
   </g>
 
   <!-- Security -->
-  <g transform="translate(285, 140)">
-    <rect width="120" height="95" rx="8" fill="none" stroke="#ef4444" stroke-width="1.5" opacity="0.6"/>
-    <text x="60" y="22" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#fca5a5">security-sentinel</text>
-    <line x1="15" y1="32" x2="105" y2="32" stroke="#ef4444" stroke-width="0.5" opacity="0.3"/>
-    <text x="60" y="48" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">OWASP Top 10</text>
-    <text x="60" y="61" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Injection</text>
-    <text x="60" y="74" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Auth/authz</text>
-    <text x="60" y="87" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Data exposure</text>
+  <g transform="translate(285, 85)">
+    <rect width="120" height="100" rx="10" fill="#FFB3B3" stroke="#CC6666" stroke-width="2"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="700" fill="#1a1a2e">security-sentinel</text>
+    <line x1="12" y1="32" x2="108" y2="32" stroke="#CC6666" stroke-width="1" opacity="0.3"/>
+    <text x="60" y="50" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">OWASP Top 10</text>
+    <text x="60" y="65" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Injection</text>
+    <text x="60" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Auth/authz</text>
+    <text x="60" y="95" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Data exposure</text>
   </g>
 
   <!-- Performance -->
-  <g transform="translate(420, 140)">
-    <rect width="120" height="95" rx="8" fill="none" stroke="#8b5cf6" stroke-width="1.5" opacity="0.6"/>
-    <text x="60" y="22" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#c4b5fd">perf-oracle</text>
-    <line x1="15" y1="32" x2="105" y2="32" stroke="#8b5cf6" stroke-width="0.5" opacity="0.3"/>
-    <text x="60" y="48" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">O(n^2) detection</text>
-    <text x="60" y="61" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">N+1 queries</text>
-    <text x="60" y="74" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Memory leaks</text>
-    <text x="60" y="87" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Scale 10x/100x</text>
+  <g transform="translate(420, 85)">
+    <rect width="120" height="100" rx="10" fill="#D4B8E3" stroke="#7A4C9B" stroke-width="2"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="700" fill="#1a1a2e">perf-oracle</text>
+    <line x1="12" y1="32" x2="108" y2="32" stroke="#7A4C9B" stroke-width="1" opacity="0.3"/>
+    <text x="60" y="50" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">O(n^2) detection</text>
+    <text x="60" y="65" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">N+1 queries</text>
+    <text x="60" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Memory leaks</text>
+    <text x="60" y="95" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Scale 10x/100x</text>
   </g>
 
   <!-- Simplicity -->
-  <g transform="translate(555, 140)">
-    <rect width="120" height="95" rx="8" fill="none" stroke="#06b6d4" stroke-width="1.5" opacity="0.6"/>
-    <text x="60" y="22" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#67e8f9">simplicity</text>
-    <line x1="15" y1="32" x2="105" y2="32" stroke="#06b6d4" stroke-width="0.5" opacity="0.3"/>
-    <text x="60" y="48" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Over-engineering</text>
-    <text x="60" y="61" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">YAGNI</text>
-    <text x="60" y="74" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Dead patterns</text>
-    <text x="60" y="87" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Abstraction debt</text>
+  <g transform="translate(555, 85)">
+    <rect width="120" height="100" rx="10" fill="#B8D4E3" stroke="#4A7C9B" stroke-width="2"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="700" fill="#1a1a2e">simplicity</text>
+    <line x1="12" y1="32" x2="108" y2="32" stroke="#4A7C9B" stroke-width="1" opacity="0.3"/>
+    <text x="60" y="50" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Over-engineering</text>
+    <text x="60" y="65" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">YAGNI</text>
+    <text x="60" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Dead patterns</text>
+    <text x="60" y="95" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Abstraction debt</text>
   </g>
 
-  <!-- Convention -->
-  <g transform="translate(690, 140)">
-    <rect width="120" height="95" rx="8" fill="none" stroke="#ec4899" stroke-width="1.5" opacity="0.6"/>
-    <text x="60" y="22" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#f9a8d4">conventions</text>
-    <line x1="15" y1="32" x2="105" y2="32" stroke="#ec4899" stroke-width="0.5" opacity="0.3"/>
-    <text x="60" y="48" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Naming</text>
-    <text x="60" y="61" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">File structure</text>
-    <text x="60" y="74" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Code style</text>
-    <text x="60" y="87" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Patterns</text>
+  <!-- Conventions -->
+  <g transform="translate(690, 85)">
+    <rect width="120" height="100" rx="10" fill="#E8D5C4" stroke="#B8956A" stroke-width="2"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="700" fill="#1a1a2e">conventions</text>
+    <line x1="12" y1="32" x2="108" y2="32" stroke="#B8956A" stroke-width="1" opacity="0.3"/>
+    <text x="60" y="50" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Naming</text>
+    <text x="60" y="65" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">File structure</text>
+    <text x="60" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Code style</text>
+    <text x="60" y="95" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Patterns</text>
   </g>
 
   <!-- Architecture -->
-  <g transform="translate(825, 140)">
-    <rect width="120" height="95" rx="8" fill="none" stroke="#f97316" stroke-width="1.5" opacity="0.6"/>
-    <text x="60" y="22" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#fdba74">architecture</text>
-    <line x1="15" y1="32" x2="105" y2="32" stroke="#f97316" stroke-width="0.5" opacity="0.3"/>
-    <text x="60" y="48" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">SOLID</text>
-    <text x="60" y="61" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Coupling</text>
-    <text x="60" y="74" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Cohesion</text>
-    <text x="60" y="87" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Boundaries</text>
+  <g transform="translate(825, 85)">
+    <rect width="120" height="100" rx="10" fill="#FFE4B5" stroke="#D4A574" stroke-width="2"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="700" fill="#1a1a2e">architecture</text>
+    <line x1="12" y1="32" x2="108" y2="32" stroke="#D4A574" stroke-width="1" opacity="0.3"/>
+    <text x="60" y="50" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">SOLID</text>
+    <text x="60" y="65" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Coupling</text>
+    <text x="60" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Cohesion</text>
+    <text x="60" y="95" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Boundaries</text>
   </g>
 
   <!-- Lines from reviewers to synthesizer -->
-  <g stroke="#6B7280" stroke-width="1" opacity="0.3">
-    <line x1="80"  y1="235" x2="500" y2="295"/>
-    <line x1="210" y1="235" x2="500" y2="295"/>
-    <line x1="345" y1="235" x2="500" y2="295"/>
-    <line x1="480" y1="235" x2="500" y2="295"/>
-    <line x1="615" y1="235" x2="500" y2="295"/>
-    <line x1="750" y1="235" x2="500" y2="295"/>
-    <line x1="885" y1="235" x2="500" y2="295"/>
+  <g stroke="#6B7280" stroke-width="1.5" opacity="0.3">
+    <line x1="80"  y1="185" x2="500" y2="240"/>
+    <line x1="210" y1="185" x2="500" y2="240"/>
+    <line x1="345" y1="185" x2="500" y2="240"/>
+    <line x1="480" y1="185" x2="500" y2="240"/>
+    <line x1="615" y1="185" x2="500" y2="240"/>
+    <line x1="750" y1="185" x2="500" y2="240"/>
+    <line x1="885" y1="185" x2="500" y2="240"/>
   </g>
 
   <!-- Synthesizer -->
-  <g transform="translate(370, 295)">
-    <rect width="260" height="65" rx="8" fill="none" stroke="#6366f1" stroke-width="1.5" opacity="0.6"/>
-    <text x="130" y="22" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="700" fill="#a5b4fc">findings-synthesizer</text>
-    <line x1="20" y1="32" x2="240" y2="32" stroke="#6366f1" stroke-width="0.5" opacity="0.3"/>
-    <text x="130" y="50" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Deduplicate  ·  Confidence tier (HIGH/MED/LOW)  ·  Priority rank (P1/P2/P3)</text>
+  <g transform="translate(370, 240)">
+    <rect width="260" height="60" rx="10" fill="#D4A574" stroke="#8B6914" stroke-width="2"/>
+    <text x="130" y="24" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">findings-synthesizer</text>
+    <line x1="15" y1="34" x2="245" y2="34" stroke="#8B6914" stroke-width="1" opacity="0.3"/>
+    <text x="130" y="50" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#4a5568">Deduplicate  ·  Confidence tier  ·  Priority rank</text>
   </g>
 
   <!-- Arrow to output -->
-  <g transform="translate(495, 365)">
-    <line x1="0" y1="0" x2="0" y2="20" stroke="#6B7280" stroke-width="1.5"/>
-    <polygon points="-4,20 0,28 4,20" fill="#6B7280"/>
-  </g>
+  <line x1="500" y1="300" x2="500" y2="325" stroke="#6B7280" stroke-width="2" marker-end="url(#arr3)"/>
 
-  <!-- Output -->
-  <g transform="translate(340, 395)">
-    <rect width="320" height="65" rx="8" fill="none" stroke="#475569" stroke-width="1.5"/>
-    <text x="160" y="22" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="700" fill="#e2e8f0">Synthesized Report</text>
-    <line x1="20" y1="32" x2="300" y2="32" stroke="#475569" stroke-width="0.5" opacity="0.5"/>
-    <text x="55" y="50" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="600" fill="#ef4444">P1 Critical</text>
-    <text x="160" y="50" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="600" fill="#f59e0b">P2 Important</text>
-    <text x="265" y="50" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="600" fill="#6b7280">P3 Suggestion</text>
+  <!-- Synthesized Report -->
+  <g transform="translate(340, 330)">
+    <rect width="320" height="75" rx="10" fill="#f8f8f8" stroke="#d1d5db" stroke-width="2"/>
+    <text x="160" y="24" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Synthesized Report</text>
+    <line x1="20" y1="34" x2="300" y2="34" stroke="#d1d5db" stroke-width="1"/>
+    <circle cx="60" cy="54" r="8" fill="#CC6666"/>
+    <text x="95" y="58" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#CC6666">P1 Critical</text>
+    <circle cx="160" cy="54" r="8" fill="#D4A574"/>
+    <text x="200" y="58" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#8B6914">P2 Important</text>
+    <circle cx="265" cy="54" r="8" fill="#d1d5db"/>
+    <text x="295" y="58" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#6B7280">P3</text>
   </g>
 </svg>
