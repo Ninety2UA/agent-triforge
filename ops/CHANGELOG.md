@@ -1,5 +1,22 @@
 # Changelog
 
+## [2026-03-24] — README overhaul and SVG diagram redesign
+
+### Claude Code
+- Redesigned hero banner SVG: left-aligned layout with terminal mockup, matching Blueprint's design language
+- Redesigned all 4 diagram SVGs (sprint-lifecycle, knowledge-loop, quality-gates, review-swarm):
+  - Switched from dark navy backgrounds to white/light backgrounds with Blueprint's pastel palette
+  - Colors: #C9E4CA green, #B8D4E3 blue, #FFE4B5 yellow, #D4A574 tan, #FFB3B3 pink, #D4B8E3 purple
+  - Reduced stroke-width from 2px to 1px, softened stroke colors to blend with fills
+  - Review swarm: widened from 1000px to 1350px viewBox to eliminate box overlap
+- Comprehensive README.md rewrite:
+  - Restructured to match Blueprint's layout: nav bar, project structure early, expanded sections, FAQ
+  - Added 100+ hyperlinks to agents, skills, commands, and files
+  - Fixed broken links (GEMINI.md, CODEX.md don't exist → external GitHub URLs)
+  - Reordered sprint lifecycle table columns to prevent narrow-column squeeze
+  - Added typical session flow, assignment heuristic, key constraints sections
+  - Added collapsible FAQ with 8 common questions
+
 ## [2026-03-24] — Initial framework build
 
 ### Claude Code

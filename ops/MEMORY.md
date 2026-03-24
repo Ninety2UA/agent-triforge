@@ -20,6 +20,12 @@
 - Completion promise: Only emit `<promise>DONE</promise>` after verification checklist passes.
 
 ## Gotchas
+- SVG diagrams on GitHub: use white `<rect>` backgrounds, NOT transparent — transparent renders differently in dark mode and can make text invisible.
+- SVG borders: use stroke-width 1px with softened stroke colors (e.g., #9bc49d on #C9E4CA fill) — 2px + contrasting strokes create a shadow/overline artifact.
+- SVG viewBox sizing: when 7+ boxes in a row, viewBox must be ≥1300px to maintain readable gaps. GitHub renders SVGs at ~800px max width, so gaps under 20px in the viewBox become invisible.
+- GEMINI.md and CODEX.md files don't exist in the repo — link to external GitHub URLs instead.
+- ops/TASKS.md is generated at runtime, not committed — don't link to it in README.
+
 - ship-loop.sh (Stop hook) only blocks the session that activated it — won't affect other sessions.
 - context-monitor.sh state file (.claude/context-monitor.local.md) must be cleaned between sessions — session-start.sh handles this.
 - Gemini CLI's GEMINI.md files have a prompt injection risk when loading from untrusted sources.
