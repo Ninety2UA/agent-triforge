@@ -98,7 +98,7 @@ All agents coordinate through markdown files in [`ops/`](ops/). This is the sour
 
 | File | Purpose | Owner |
 |---|---|---|
-| [`TASKS.md`](ops/TASKS.md) | Work queue with `[ ]`/`[x]` status tracking | Claude generates, all agents read |
+| `TASKS.md` | Work queue with `[ ]`/`[x]` status tracking | Claude generates, all agents read |
 | [`MEMORY.md`](ops/MEMORY.md) | Architectural decisions, patterns, interface proposals | All agents append |
 | [`CHANGELOG.md`](ops/CHANGELOG.md) | Audit trail with `[agent-name]` attribution | All agents append |
 | [`STATE.md`](ops/STATE.md) | Session continuity — current phase, progress, next actions | Claude writes on pause/wrap |
@@ -115,16 +115,16 @@ Every goal flows through a structured lifecycle. Each phase has dedicated [comma
   <img src="docs/images/sprint-lifecycle.svg" alt="Sprint lifecycle — Phase 0 Analyze through Phase 6 Ship with review loop" width="95%">
 </p>
 
-| Phase | Agent(s) | Command | What happens |
-|---|---|---|---|
-| **0 — Analyze** | [Gemini CLI](GEMINI.md) + [`codebase-mapping`](.claude/skills/codebase-mapping/SKILL.md) skill | [`/plan`](.claude/commands/plan.md) | Full-repo scan: architecture, patterns, contracts, debt |
-| **Pre-Plan** | [`learnings-researcher`](.claude/agents/learnings-researcher.md) agent | [`/plan`](.claude/commands/plan.md), [`/deep-research`](.claude/commands/deep-research.md) | Search institutional knowledge for relevant past solutions |
-| **1 — Plan** | Claude + [`writing-plans`](.claude/skills/writing-plans/SKILL.md) skill | [`/plan`](.claude/commands/plan.md) | Decompose goal into tasks with shadow paths, error maps, wave grouping |
-| **1.5 — Validate** | [`plan-checker`](.claude/agents/plan-checker.md) agent | [`/plan`](.claude/commands/plan.md) | Validate assignments, dependencies, scope, shadow path coverage |
-| **2 — Build** | Claude subagents or [agent teams](.claude/agents/team-lead.md) | [`/build`](.claude/commands/build.md) | [Wave orchestration](.claude/skills/wave-orchestration/SKILL.md) with integration verification between waves |
-| **3–4 — Review** | Gemini + Codex + [Claude review agents](#review-specialists-6) | [`/review`](.claude/commands/review.md) | Up to 8 parallel reviewers, findings [synthesized](.claude/agents/findings-synthesizer.md) with confidence tiering |
-| **5 — Test** | [Codex CLI](CODEX.md) + [`test-driven-development`](.claude/skills/test-driven-development/SKILL.md) skill | [`/test`](.claude/commands/test.md) | TDD test writing, [gap analysis](.claude/agents/test-gap-analyzer.md), fix cycle until green |
-| **6 — Ship** | Claude + [`knowledge-compounding`](.claude/skills/knowledge-compounding/SKILL.md) skill | [`/wrap`](.claude/commands/wrap.md) | Document solutions, archive reviews, write [`STATE.md`](ops/STATE.md) |
+| Phase | What happens | Agent(s) | Command |
+|:---|:---|:---|:---|
+| **0 — Analyze** | Full-repo scan: architecture, patterns, contracts, debt | Gemini CLI + [`codebase-mapping`](.claude/skills/codebase-mapping/SKILL.md) | [`/plan`](.claude/commands/plan.md) |
+| **Pre-Plan** | Search institutional knowledge for relevant past solutions | [`learnings-researcher`](.claude/agents/learnings-researcher.md) | [`/plan`](.claude/commands/plan.md) |
+| **1 — Plan** | Decompose goal into tasks with shadow paths and error maps | Claude + [`writing-plans`](.claude/skills/writing-plans/SKILL.md) | [`/plan`](.claude/commands/plan.md) |
+| **1.5 — Validate** | Validate assignments, dependencies, scope, shadow paths | [`plan-checker`](.claude/agents/plan-checker.md) | [`/plan`](.claude/commands/plan.md) |
+| **2 — Build** | Wave orchestration with integration verification between waves | Claude subagents or [`team-lead`](.claude/agents/team-lead.md) | [`/build`](.claude/commands/build.md) |
+| **3–4 — Review** | Up to 8 parallel reviewers, synthesized with confidence tiering | Gemini + Codex + [review agents](#review-specialists-6) | [`/review`](.claude/commands/review.md) |
+| **5 — Test** | TDD test writing, gap analysis, fix cycle until green | Codex CLI + [`test-driven-development`](.claude/skills/test-driven-development/SKILL.md) | [`/test`](.claude/commands/test.md) |
+| **6 — Ship** | Document solutions, archive reviews, write STATE.md | Claude + [`knowledge-compounding`](.claude/skills/knowledge-compounding/SKILL.md) | [`/wrap`](.claude/commands/wrap.md) |
 
 ---
 
@@ -156,9 +156,9 @@ codex exec "$(cat .claude/skills/test-driven-development/SKILL.md) Write tests f
 | Question | Agent |
 |---|---|
 | Produces code? | Claude (subagents or [agent team](.claude/agents/team-lead.md) for parallel work) |
-| Evaluates existing code? | [Gemini](GEMINI.md) + [Codex](CODEX.md) + [Claude review agents](#review-specialists-6) in parallel |
-| Runs/executes something? | [Codex CLI](CODEX.md) |
-| Produces documentation? | [Gemini CLI](GEMINI.md) |
+| Evaluates existing code? | [Gemini](https://github.com/google-gemini/gemini-cli) + [Codex](https://github.com/openai/codex) + [Claude review agents](#review-specialists-6) in parallel |
+| Runs/executes something? | [Codex CLI](https://github.com/openai/codex) |
+| Produces documentation? | [Gemini CLI](https://github.com/google-gemini/gemini-cli) |
 | Touches shared interfaces? | Claude implements → Gemini reviews → Codex tests |
 | Ambiguous? | Claude takes it, flags for parallel review |
 
@@ -327,7 +327,7 @@ claude
 | [**`/plan <goal>`**](.claude/commands/plan.md) | 0 → 1.5 | Analyze codebase, plan with shadow paths, validate via [`plan-checker`](.claude/agents/plan-checker.md) |
 | [**`/build`**](.claude/commands/build.md) | 2 | [Wave orchestration](.claude/skills/wave-orchestration/SKILL.md) build. `--team` for [agent team](.claude/agents/team-lead.md) mode. |
 | [**`/review`**](.claude/commands/review.md) | 3 → 4 | Parallel review + [synthesis](.claude/agents/findings-synthesizer.md). `--full` for all 8 reviewers. |
-| [**`/test`**](.claude/commands/test.md) | 5 | [Gap analysis](.claude/agents/test-gap-analyzer.md) + [Codex TDD](CODEX.md). `--gaps-only` to just identify gaps. |
+| [**`/test`**](.claude/commands/test.md) | 5 | [Gap analysis](.claude/agents/test-gap-analyzer.md) + [Codex](https://github.com/openai/codex) TDD. `--gaps-only` to just identify gaps. |
 | [**`/wrap`**](.claude/commands/wrap.md) | 6 | [Compound knowledge](.claude/skills/knowledge-compounding/SKILL.md), archive reviews, write [`STATE.md`](ops/STATE.md). |
 
 ### Lightweight workflows
@@ -357,11 +357,11 @@ claude
 
 | Skill | Primary consumer | What it teaches the agent |
 |---|---|---|
-| [**`codebase-mapping`**](.claude/skills/codebase-mapping/SKILL.md) | [Gemini](GEMINI.md) (Phase 0) | Full-repo analysis: structure, data flow, patterns, debt |
+| [**`codebase-mapping`**](.claude/skills/codebase-mapping/SKILL.md) | [Gemini](https://github.com/google-gemini/gemini-cli) (Phase 0) | Full-repo analysis: structure, data flow, patterns, debt |
 | [**`writing-plans`**](.claude/skills/writing-plans/SKILL.md) | Claude (Phase 1) | Task decomposition with shadow paths, error maps, interface context |
 | [**`shadow-path-tracing`**](.claude/skills/shadow-path-tracing/SKILL.md) | Claude (Phase 1) | Enumerate every failure path alongside the happy path |
 | [**`wave-orchestration`**](.claude/skills/wave-orchestration/SKILL.md) | Claude (Phase 2) | Dependency-grouped parallel execution with integration checks |
-| [**`test-driven-development`**](.claude/skills/test-driven-development/SKILL.md) | [Codex](CODEX.md) (Phase 5) | RED-GREEN-REFACTOR: no production code without failing test |
+| [**`test-driven-development`**](.claude/skills/test-driven-development/SKILL.md) | [Codex](https://github.com/openai/codex) (Phase 5) | RED-GREEN-REFACTOR: no production code without failing test |
 | [**`systematic-debugging`**](.claude/skills/systematic-debugging/SKILL.md) | Codex, Claude | Error taxonomy, assumption tracking, bisection, root cause |
 | [**`iterative-refinement`**](.claude/skills/iterative-refinement/SKILL.md) | Claude (Phase 4) | Review-fix-review loops with convergence modes |
 | [**`review-synthesis`**](.claude/skills/review-synthesis/SKILL.md) | Claude (Phase 4) | Merge multi-reviewer findings with confidence tiering |
@@ -431,8 +431,8 @@ Two defense mechanisms prevent long sprints from dying to context limits:
 
 ### Key constraints
 
-- [`TASKS.md`](ops/TASKS.md) is never modified directly during review — changes must be proposed in [`MEMORY.md`](ops/MEMORY.md) first
-- Neither [Gemini](GEMINI.md) nor [Codex](CODEX.md) may modify source code; they only write to their designated `ops/` files
+- `TASKS.md` is never modified directly during review — changes must be proposed in [`MEMORY.md`](ops/MEMORY.md) first
+- Neither [Gemini](https://github.com/google-gemini/gemini-cli) nor [Codex](https://github.com/openai/codex) may modify source code; they only write to their designated `ops/` files
 - Parallel reviews are safe because agents write to separate files
 - Maximum 3 review cycles per sprint before escalating to user
 - Phase 0 can be skipped for small bug fixes, same-session continuations, or unchanged codebases (use [`/quick`](.claude/commands/quick.md))
@@ -448,8 +448,8 @@ This framework was informed by analyzing the [Claude Code Blueprint](https://git
 |---|---|---|
 | **Agent model** | Homogeneous (Claude-only) | Heterogeneous (Claude + Gemini + Codex) |
 | **Review agents** | 6 Claude subagents | 8 reviewers (2 external + 6 Claude subagents) |
-| **Codebase analysis** | Claude subagent | [Gemini CLI](GEMINI.md) (1M token context) |
-| **Test execution** | Claude subagent | [Codex CLI](CODEX.md) (sandboxed execution) |
+| **Codebase analysis** | Claude subagent | [Gemini CLI](https://github.com/google-gemini/gemini-cli) (1M token context) |
+| **Test execution** | Claude subagent | [Codex CLI](https://github.com/openai/codex) (sandboxed execution) |
 | **Coordination** | Native subagents + git | File protocol + bash + subagents + teams |
 | **Skills** | Claude-only | Portable across all 3 CLIs via [injection](#portable-skill-injection) |
 | **Dependencies** | Zero (markdown only) | Three CLIs (Claude + Gemini + Codex) |
@@ -544,6 +544,6 @@ MIT
 <p align="center">
   <a href="docs/multi-agent-framework.md">Full Documentation</a> ·
   <a href="CLAUDE.md">CLAUDE.md</a> ·
-  <a href="GEMINI.md">GEMINI.md</a> ·
-  <a href="CODEX.md">CODEX.md</a>
+  <a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a> ·
+  <a href="https://github.com/openai/codex">Codex CLI</a>
 </p>
