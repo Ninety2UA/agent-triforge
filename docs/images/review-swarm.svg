@@ -1,136 +1,136 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 440">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1350 470">
   <defs>
     <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#9ca3af"/>
     </marker>
   </defs>
 
-  <rect width="1060" height="440" rx="12" fill="white"/>
+  <rect width="1350" height="470" rx="12" fill="white"/>
 
   <!-- Code Under Review -->
-  <rect x="420" y="18" width="220" height="40" rx="8" fill="#1a1a2e"/>
-  <text x="530" y="43" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="700" fill="white">Code Under Review</text>
+  <rect x="535" y="20" width="280" height="44" rx="8" fill="#1a1a2e"/>
+  <text x="675" y="48" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="17" font-weight="700" fill="white">Code Under Review</text>
 
   <!-- Lines from code to reviewers -->
   <g stroke="#d1d5db" stroke-width="1">
-    <line x1="530" y1="58" x2="82"   y2="100"/>
-    <line x1="530" y1="58" x2="230"  y2="100"/>
-    <line x1="530" y1="58" x2="378"  y2="100"/>
-    <line x1="530" y1="58" x2="530"  y2="100"/>
-    <line x1="530" y1="58" x2="678"  y2="100"/>
-    <line x1="530" y1="58" x2="828"  y2="100"/>
-    <line x1="530" y1="58" x2="978"  y2="100"/>
+    <line x1="675" y1="64" x2="110"  y2="108"/>
+    <line x1="675" y1="64" x2="295"  y2="108"/>
+    <line x1="675" y1="64" x2="485"  y2="108"/>
+    <line x1="675" y1="64" x2="675"  y2="108"/>
+    <line x1="675" y1="64" x2="865"  y2="108"/>
+    <line x1="675" y1="64" x2="1055" y2="108"/>
+    <line x1="675" y1="64" x2="1240" y2="108"/>
   </g>
 
-  <!-- Gemini -->
-  <g transform="translate(15, 100)">
-    <rect width="135" height="105" rx="8" fill="#C9E4CA" stroke="#9bc49d" stroke-width="1"/>
-    <text x="67" y="22" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="700" fill="#2d5a30">Gemini CLI</text>
-    <line x1="10" y1="32" x2="125" y2="32" stroke="#9bc49d" stroke-width="0.5"/>
-    <text x="67" y="50" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Architecture</text>
-    <text x="67" y="66" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Design</text>
-    <text x="67" y="82" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Readability</text>
-    <text x="67" y="98" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Documentation</text>
+  <!-- Gemini CLI -->
+  <g transform="translate(30, 108)">
+    <rect width="160" height="115" rx="8" fill="#C9E4CA" stroke="#9bc49d" stroke-width="1"/>
+    <text x="80" y="26" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="15" font-weight="700" fill="#2d5a30">Gemini CLI</text>
+    <line x1="12" y1="36" x2="148" y2="36" stroke="#9bc49d" stroke-width="0.5"/>
+    <text x="80" y="56" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Architecture</text>
+    <text x="80" y="74" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Design</text>
+    <text x="80" y="92" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Readability</text>
+    <text x="80" y="110" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Documentation</text>
   </g>
 
-  <!-- Codex -->
-  <g transform="translate(163, 100)">
-    <rect width="135" height="105" rx="8" fill="#D4A574" stroke="#c49464" stroke-width="1"/>
-    <text x="67" y="22" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="700" fill="#5c3a0a">Codex CLI</text>
-    <line x1="10" y1="32" x2="125" y2="32" stroke="#c49464" stroke-width="0.5"/>
-    <text x="67" y="50" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Logic</text>
-    <text x="67" y="66" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Edge cases</text>
-    <text x="67" y="82" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Type safety</text>
-    <text x="67" y="98" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Test coverage</text>
+  <!-- Codex CLI -->
+  <g transform="translate(215, 108)">
+    <rect width="160" height="115" rx="8" fill="#D4A574" stroke="#c49464" stroke-width="1"/>
+    <text x="80" y="26" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="15" font-weight="700" fill="#5c3a0a">Codex CLI</text>
+    <line x1="12" y1="36" x2="148" y2="36" stroke="#c49464" stroke-width="0.5"/>
+    <text x="80" y="56" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Logic</text>
+    <text x="80" y="74" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Edge cases</text>
+    <text x="80" y="92" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Type safety</text>
+    <text x="80" y="110" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Test coverage</text>
   </g>
 
-  <!-- Security -->
-  <g transform="translate(311, 100)">
-    <rect width="135" height="105" rx="8" fill="#FFB3B3" stroke="#e6a0a0" stroke-width="1"/>
-    <text x="67" y="22" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="700" fill="#8b2525">security-sentinel</text>
-    <line x1="10" y1="32" x2="125" y2="32" stroke="#e6a0a0" stroke-width="0.5"/>
-    <text x="67" y="50" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">OWASP Top 10</text>
-    <text x="67" y="66" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Injection</text>
-    <text x="67" y="82" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Auth/authz</text>
-    <text x="67" y="98" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Data exposure</text>
+  <!-- security-sentinel -->
+  <g transform="translate(400, 108)">
+    <rect width="170" height="115" rx="8" fill="#FFB3B3" stroke="#e6a0a0" stroke-width="1"/>
+    <text x="85" y="26" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="15" font-weight="700" fill="#8b2525">security-sentinel</text>
+    <line x1="12" y1="36" x2="158" y2="36" stroke="#e6a0a0" stroke-width="0.5"/>
+    <text x="85" y="56" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">OWASP Top 10</text>
+    <text x="85" y="74" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Injection</text>
+    <text x="85" y="92" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Auth/authz</text>
+    <text x="85" y="110" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Data exposure</text>
   </g>
 
-  <!-- Performance -->
-  <g transform="translate(459, 100)">
-    <rect width="135" height="105" rx="8" fill="#D4B8E3" stroke="#bfa0d4" stroke-width="1"/>
-    <text x="67" y="22" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="700" fill="#4a2568">perf-oracle</text>
-    <line x1="10" y1="32" x2="125" y2="32" stroke="#bfa0d4" stroke-width="0.5"/>
-    <text x="67" y="50" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">O(n²) detection</text>
-    <text x="67" y="66" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">N+1 queries</text>
-    <text x="67" y="82" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Memory leaks</text>
-    <text x="67" y="98" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Scale 10x/100x</text>
+  <!-- perf-oracle -->
+  <g transform="translate(595, 108)">
+    <rect width="160" height="115" rx="8" fill="#D4B8E3" stroke="#bfa0d4" stroke-width="1"/>
+    <text x="80" y="26" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="15" font-weight="700" fill="#4a2568">perf-oracle</text>
+    <line x1="12" y1="36" x2="148" y2="36" stroke="#bfa0d4" stroke-width="0.5"/>
+    <text x="80" y="56" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">O(n²) detection</text>
+    <text x="80" y="74" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">N+1 queries</text>
+    <text x="80" y="92" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Memory leaks</text>
+    <text x="80" y="110" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Scale 10x/100x</text>
   </g>
 
-  <!-- Simplicity -->
-  <g transform="translate(607, 100)">
-    <rect width="135" height="105" rx="8" fill="#B8D4E3" stroke="#8dbcd4" stroke-width="1"/>
-    <text x="67" y="22" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="700" fill="#2a5a75">simplicity</text>
-    <line x1="10" y1="32" x2="125" y2="32" stroke="#8dbcd4" stroke-width="0.5"/>
-    <text x="67" y="50" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Over-engineering</text>
-    <text x="67" y="66" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">YAGNI</text>
-    <text x="67" y="82" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Dead patterns</text>
-    <text x="67" y="98" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Abstraction debt</text>
+  <!-- simplicity -->
+  <g transform="translate(780, 108)">
+    <rect width="170" height="115" rx="8" fill="#B8D4E3" stroke="#8dbcd4" stroke-width="1"/>
+    <text x="85" y="26" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="15" font-weight="700" fill="#2a5a75">simplicity</text>
+    <line x1="12" y1="36" x2="158" y2="36" stroke="#8dbcd4" stroke-width="0.5"/>
+    <text x="85" y="56" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Over-engineering</text>
+    <text x="85" y="74" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">YAGNI</text>
+    <text x="85" y="92" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Dead patterns</text>
+    <text x="85" y="110" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Abstraction debt</text>
   </g>
 
-  <!-- Conventions -->
-  <g transform="translate(755, 100)">
-    <rect width="135" height="105" rx="8" fill="#E8D5C4" stroke="#d4c0ad" stroke-width="1"/>
-    <text x="67" y="22" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="700" fill="#6b4a28">conventions</text>
-    <line x1="10" y1="32" x2="125" y2="32" stroke="#d4c0ad" stroke-width="0.5"/>
-    <text x="67" y="50" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Naming</text>
-    <text x="67" y="66" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">File structure</text>
-    <text x="67" y="82" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Code style</text>
-    <text x="67" y="98" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Patterns</text>
+  <!-- conventions -->
+  <g transform="translate(975, 108)">
+    <rect width="160" height="115" rx="8" fill="#E8D5C4" stroke="#d4c0ad" stroke-width="1"/>
+    <text x="80" y="26" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="15" font-weight="700" fill="#6b4a28">conventions</text>
+    <line x1="12" y1="36" x2="148" y2="36" stroke="#d4c0ad" stroke-width="0.5"/>
+    <text x="80" y="56" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Naming</text>
+    <text x="80" y="74" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">File structure</text>
+    <text x="80" y="92" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Code style</text>
+    <text x="80" y="110" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Patterns</text>
   </g>
 
-  <!-- Architecture -->
-  <g transform="translate(903, 100)">
-    <rect width="135" height="105" rx="8" fill="#FFE4B5" stroke="#e6cfa0" stroke-width="1"/>
-    <text x="67" y="22" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="700" fill="#7a5c1f">architecture</text>
-    <line x1="10" y1="32" x2="125" y2="32" stroke="#e6cfa0" stroke-width="0.5"/>
-    <text x="67" y="50" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">SOLID</text>
-    <text x="67" y="66" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Coupling</text>
-    <text x="67" y="82" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Cohesion</text>
-    <text x="67" y="98" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Boundaries</text>
+  <!-- architecture -->
+  <g transform="translate(1160, 108)">
+    <rect width="160" height="115" rx="8" fill="#FFE4B5" stroke="#e6cfa0" stroke-width="1"/>
+    <text x="80" y="26" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="15" font-weight="700" fill="#7a5c1f">architecture</text>
+    <line x1="12" y1="36" x2="148" y2="36" stroke="#e6cfa0" stroke-width="0.5"/>
+    <text x="80" y="56" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">SOLID</text>
+    <text x="80" y="74" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Coupling</text>
+    <text x="80" y="92" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Cohesion</text>
+    <text x="80" y="110" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#4a5568">Boundaries</text>
   </g>
 
   <!-- Lines from reviewers to synthesizer -->
   <g stroke="#d1d5db" stroke-width="1">
-    <line x1="82"  y1="205" x2="530" y2="265"/>
-    <line x1="230" y1="205" x2="530" y2="265"/>
-    <line x1="378" y1="205" x2="530" y2="265"/>
-    <line x1="530" y1="205" x2="530" y2="265"/>
-    <line x1="678" y1="205" x2="530" y2="265"/>
-    <line x1="828" y1="205" x2="530" y2="265"/>
-    <line x1="978" y1="205" x2="530" y2="265"/>
+    <line x1="110"  y1="223" x2="675" y2="290"/>
+    <line x1="295"  y1="223" x2="675" y2="290"/>
+    <line x1="485"  y1="223" x2="675" y2="290"/>
+    <line x1="675"  y1="223" x2="675" y2="290"/>
+    <line x1="865"  y1="223" x2="675" y2="290"/>
+    <line x1="1055" y1="223" x2="675" y2="290"/>
+    <line x1="1240" y1="223" x2="675" y2="290"/>
   </g>
 
   <!-- Synthesizer -->
-  <g transform="translate(390, 265)">
-    <rect width="280" height="58" rx="8" fill="#D4A574" stroke="#c49464" stroke-width="1"/>
-    <text x="140" y="24" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="700" fill="#5c3a0a">findings-synthesizer</text>
-    <line x1="14" y1="34" x2="266" y2="34" stroke="#c49464" stroke-width="0.5"/>
-    <text x="140" y="50" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Deduplicate · Confidence tier (HIGH/MED/LOW) · Priority rank</text>
+  <g transform="translate(505, 290)">
+    <rect width="340" height="60" rx="8" fill="#D4A574" stroke="#c49464" stroke-width="1"/>
+    <text x="170" y="24" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="16" font-weight="700" fill="#5c3a0a">findings-synthesizer</text>
+    <line x1="16" y1="36" x2="324" y2="36" stroke="#c49464" stroke-width="0.5"/>
+    <text x="170" y="53" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="12" fill="#4a5568">Deduplicate · Confidence tier (HIGH/MED/LOW) · Priority rank</text>
   </g>
 
   <!-- Arrow to output -->
-  <line x1="530" y1="323" x2="530" y2="348" stroke="#9ca3af" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <line x1="675" y1="350" x2="675" y2="378" stroke="#9ca3af" stroke-width="1.5" marker-end="url(#arr3)"/>
 
   <!-- Synthesized Report -->
-  <g transform="translate(365, 353)">
-    <rect width="330" height="68" rx="8" fill="#f8f9fa" stroke="#e5e7eb" stroke-width="1"/>
-    <text x="165" y="24" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Synthesized Report</text>
-    <line x1="16" y1="34" x2="314" y2="34" stroke="#e5e7eb" stroke-width="1"/>
-    <circle cx="50" cy="52" r="6" fill="#CC6666"/>
-    <text x="90" y="56" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#8b2525">P1 Critical</text>
-    <circle cx="155" cy="52" r="6" fill="#D4A574"/>
-    <text x="200" y="56" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#7a5c1f">P2 Important</text>
-    <circle cx="270" cy="52" r="6" fill="#d1d5db"/>
-    <text x="298" y="56" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#9ca3af">P3</text>
+  <g transform="translate(490, 383)">
+    <rect width="370" height="68" rx="8" fill="#f8f9fa" stroke="#e5e7eb" stroke-width="1"/>
+    <text x="185" y="26" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="16" font-weight="700" fill="#1a1a2e">Synthesized Report</text>
+    <line x1="18" y1="36" x2="352" y2="36" stroke="#e5e7eb" stroke-width="1"/>
+    <circle cx="55" cy="54" r="7" fill="#CC6666"/>
+    <text x="100" y="58" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="600" fill="#8b2525">P1 Critical</text>
+    <circle cx="172" cy="54" r="7" fill="#D4A574"/>
+    <text x="225" y="58" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="600" fill="#7a5c1f">P2 Important</text>
+    <circle cx="300" cy="54" r="7" fill="#d1d5db"/>
+    <text x="335" y="58" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="600" fill="#9ca3af">P3</text>
   </g>
 </svg>
