@@ -1,0 +1,29 @@
+# Shared memory
+
+## Decisions
+- [2026-03-24] Adopted 18 of 26 Blueprint agents, skipped 8 (Claude Code)
+  Reason: Skipped agents were either redundant (code-reviewer covered by Gemini+Codex+specialists), too niche (frontend-reviewer, schema-drift-detector), or overlapping (codebase-context-mapper duplicates Gemini Phase 0).
+  See: ops/decisions/2026-03-24-blueprint-pattern-adoption.md
+
+- [2026-03-24] Skills are model-agnostic and injectable into all CLIs (Claude Code)
+  Reason: Decouples methodology from model. Gemini and Codex consume skills via $(cat .claude/skills/SKILL/SKILL.md).
+  See: ops/solutions/2026-03-24-portable-skill-injection.md
+
+- [2026-03-24] Agent teams require CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 (Claude Code)
+  Reason: Experimental feature. Known limitations: no session resumption with in-process teammates, task status lag, one team per session.
+
+## Patterns
+- Confidence tiering: [HIGH] verified via grep, [MEDIUM] pattern match, [LOW] heuristic. LOW can NEVER be P1.
+- Suppressions: Each reviewer has "Do Not Flag" patterns to reduce false positives.
+- Review synthesis: findings-synthesizer agent merges all review outputs, deduplicates, and priority-ranks.
+- Wave orchestration: Group tasks by dependency into waves. Integration-verifier runs between waves.
+- Completion promise: Only emit `<promise>DONE</promise>` after verification checklist passes.
+
+## Gotchas
+- ship-loop.sh (Stop hook) only blocks the session that activated it — won't affect other sessions.
+- context-monitor.sh state file (.claude/context-monitor.local.md) must be cleaned between sessions — session-start.sh handles this.
+- Gemini CLI's GEMINI.md files have a prompt injection risk when loading from untrusted sources.
+- Codex CLI uses lazy loading for skills — only loads full body when relevant.
+
+## Interface proposals
+<!-- No active proposals -->
