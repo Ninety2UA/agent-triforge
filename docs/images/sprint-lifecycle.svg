@@ -1,114 +1,124 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 220" style="background-color:transparent">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 230">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#6B7280"/>
     </marker>
   </defs>
 
+  <!-- White background for GitHub rendering -->
+  <rect width="1080" height="230" rx="12" fill="white" stroke="#e5e7eb" stroke-width="1"/>
+
   <!-- Phase 0 — Analyze -->
-  <g transform="translate(20, 15)">
-    <rect width="110" height="120" rx="10" fill="#C9E4CA" stroke="#5C8A5E" stroke-width="2"/>
-    <circle cx="55" cy="28" r="16" fill="#5C8A5E"/>
-    <text x="55" y="33" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="white">0</text>
-    <text x="55" y="62" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Analyze</text>
-    <text x="55" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Gemini CLI</text>
-    <text x="55" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Full-repo scan</text>
+  <g transform="translate(15, 15)">
+    <rect width="112" height="125" rx="10" fill="#C9E4CA" stroke="#5C8A5E" stroke-width="2"/>
+    <circle cx="56" cy="28" r="16" fill="#5C8A5E"/>
+    <text x="56" y="33" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="700" fill="white">0</text>
+    <text x="56" y="62" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Analyze</text>
+    <text x="56" y="80" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Gemini CLI</text>
+    <text x="56" y="96" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Full-repo scan</text>
+    <text x="56" y="112" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="10" fill="#718096" font-style="italic">1M context</text>
   </g>
 
-  <!-- Arrow -->
-  <line x1="135" y1="75" x2="155" y2="75" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="132" y1="77" x2="148" y2="77" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Pre-Plan — Research -->
-  <g transform="translate(160, 15)">
-    <rect width="110" height="120" rx="10" fill="#B8D4E3" stroke="#4A7C9B" stroke-width="2"/>
-    <circle cx="55" cy="28" r="16" fill="#4A7C9B"/>
-    <text x="55" y="33" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="white">P</text>
-    <text x="55" y="62" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Research</text>
-    <text x="55" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">learnings agent</text>
-    <text x="55" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Past solutions</text>
+  <g transform="translate(152, 15)">
+    <rect width="112" height="125" rx="10" fill="#B8D4E3" stroke="#4A7C9B" stroke-width="2"/>
+    <circle cx="56" cy="28" r="16" fill="#4A7C9B"/>
+    <text x="56" y="33" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="700" fill="white">P</text>
+    <text x="56" y="62" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Research</text>
+    <text x="56" y="80" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">learnings agent</text>
+    <text x="56" y="96" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Past solutions</text>
+    <text x="56" y="112" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="10" fill="#718096" font-style="italic">ops/solutions/</text>
   </g>
 
-  <line x1="275" y1="75" x2="295" y2="75" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="269" y1="77" x2="285" y2="77" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Phase 1 — Plan -->
-  <g transform="translate(300, 15)">
-    <rect width="110" height="120" rx="10" fill="#B8D4E3" stroke="#4A7C9B" stroke-width="2"/>
-    <circle cx="55" cy="28" r="16" fill="#4A7C9B"/>
-    <text x="55" y="33" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="white">1</text>
-    <text x="55" y="62" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Plan</text>
-    <text x="55" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Shadow paths</text>
-    <text x="55" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Error maps</text>
+  <g transform="translate(289, 15)">
+    <rect width="112" height="125" rx="10" fill="#B8D4E3" stroke="#4A7C9B" stroke-width="2"/>
+    <circle cx="56" cy="28" r="16" fill="#4A7C9B"/>
+    <text x="56" y="33" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="700" fill="white">1</text>
+    <text x="56" y="62" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Plan</text>
+    <text x="56" y="80" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Shadow paths</text>
+    <text x="56" y="96" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Error maps</text>
+    <text x="56" y="112" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="10" fill="#718096" font-style="italic">wave grouping</text>
   </g>
 
-  <line x1="415" y1="75" x2="435" y2="75" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="406" y1="77" x2="422" y2="77" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Phase 1.5 — Validate -->
-  <g transform="translate(440, 15)">
-    <rect width="110" height="120" rx="10" fill="#D4B8E3" stroke="#7A4C9B" stroke-width="2"/>
-    <circle cx="55" cy="28" r="16" fill="#7A4C9B"/>
-    <text x="55" y="33" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" font-weight="700" fill="white">1.5</text>
-    <text x="55" y="62" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Validate</text>
-    <text x="55" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">plan-checker</text>
-    <text x="55" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Max 3 rounds</text>
+  <g transform="translate(426, 15)">
+    <rect width="112" height="125" rx="10" fill="#D4B8E3" stroke="#7A4C9B" stroke-width="2"/>
+    <circle cx="56" cy="28" r="16" fill="#7A4C9B"/>
+    <text x="56" y="33" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="10" font-weight="700" fill="white">1.5</text>
+    <text x="56" y="62" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Validate</text>
+    <text x="56" y="80" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">plan-checker</text>
+    <text x="56" y="96" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">agent review</text>
+    <text x="56" y="112" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="10" fill="#718096" font-style="italic">max 3 rounds</text>
   </g>
 
-  <line x1="555" y1="75" x2="575" y2="75" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="543" y1="77" x2="559" y2="77" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Phase 2 — Build -->
-  <g transform="translate(580, 15)">
-    <rect width="110" height="120" rx="10" fill="#D4A574" stroke="#8B6914" stroke-width="2"/>
-    <circle cx="55" cy="28" r="16" fill="#8B6914"/>
-    <text x="55" y="33" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="white">2</text>
-    <text x="55" y="62" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Build</text>
-    <text x="55" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Waves / teams</text>
-    <text x="55" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Integration checks</text>
+  <g transform="translate(563, 15)">
+    <rect width="112" height="125" rx="10" fill="#D4A574" stroke="#8B6914" stroke-width="2"/>
+    <circle cx="56" cy="28" r="16" fill="#8B6914"/>
+    <text x="56" y="33" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="700" fill="white">2</text>
+    <text x="56" y="62" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Build</text>
+    <text x="56" y="80" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Waves / teams</text>
+    <text x="56" y="96" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Integration</text>
+    <text x="56" y="112" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="10" fill="#718096" font-style="italic">verification</text>
   </g>
 
-  <line x1="695" y1="75" x2="715" y2="75" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="680" y1="77" x2="696" y2="77" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Phase 3-4 — Review -->
-  <g transform="translate(720, 15)">
-    <rect width="110" height="120" rx="10" fill="#FFB3B3" stroke="#CC6666" stroke-width="2"/>
-    <circle cx="55" cy="28" r="16" fill="#CC6666"/>
-    <text x="55" y="33" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" font-weight="700" fill="white">3-4</text>
-    <text x="55" y="62" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Review</text>
-    <text x="55" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">8 reviewers</text>
-    <text x="55" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Synthesize</text>
+  <g transform="translate(700, 15)">
+    <rect width="112" height="125" rx="10" fill="#FFB3B3" stroke="#CC6666" stroke-width="2"/>
+    <circle cx="56" cy="28" r="16" fill="#CC6666"/>
+    <text x="56" y="33" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="10" font-weight="700" fill="white">3-4</text>
+    <text x="56" y="62" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Review</text>
+    <text x="56" y="80" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">8 reviewers</text>
+    <text x="56" y="96" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Synthesize</text>
+    <text x="56" y="112" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="10" fill="#718096" font-style="italic">confidence tier</text>
   </g>
 
-  <line x1="835" y1="75" x2="855" y2="75" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="817" y1="77" x2="833" y2="77" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Phase 5 — Test -->
-  <g transform="translate(860, 15)">
-    <rect width="100" height="120" rx="10" fill="#FFE4B5" stroke="#D4A574" stroke-width="2"/>
-    <circle cx="50" cy="28" r="16" fill="#D4A574"/>
-    <text x="50" y="33" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="white">5</text>
-    <text x="50" y="62" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Test</text>
-    <text x="50" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Codex TDD</text>
-    <text x="50" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Gap analysis</text>
+  <g transform="translate(837, 15)">
+    <rect width="105" height="125" rx="10" fill="#FFE4B5" stroke="#D4A574" stroke-width="2"/>
+    <circle cx="52" cy="28" r="16" fill="#D4A574"/>
+    <text x="52" y="33" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="700" fill="white">5</text>
+    <text x="52" y="62" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Test</text>
+    <text x="52" y="80" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Codex TDD</text>
+    <text x="52" y="96" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Gap analysis</text>
+    <text x="52" y="112" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="10" fill="#718096" font-style="italic">fix cycle</text>
   </g>
 
-  <line x1="965" y1="75" x2="985" y2="75" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="947" y1="77" x2="963" y2="77" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Phase 6 — Ship -->
-  <g transform="translate(990, 15)">
-    <rect width="80" height="120" rx="10" fill="#E8D5C4" stroke="#B8956A" stroke-width="2"/>
-    <circle cx="40" cy="28" r="16" fill="#B8956A"/>
-    <text x="40" y="33" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="white">6</text>
-    <text x="40" y="62" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Ship</text>
-    <text x="40" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">Compound</text>
-    <text x="40" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4a5568">knowledge</text>
+  <g transform="translate(967, 15)">
+    <rect width="98" height="125" rx="10" fill="#E8D5C4" stroke="#B8956A" stroke-width="2"/>
+    <circle cx="49" cy="28" r="16" fill="#B8956A"/>
+    <text x="49" y="33" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="700" fill="white">6</text>
+    <text x="49" y="62" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">Ship</text>
+    <text x="49" y="80" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">Compound</text>
+    <text x="49" y="96" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#4a5568">knowledge</text>
+    <text x="49" y="112" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="10" fill="#718096" font-style="italic">STATE.md</text>
   </g>
 
-  <!-- Review loop (max 3x) — dashed arc from Review back to Build -->
-  <path d="M 830,140 Q 830,185 775,185 Q 720,185 720,140" fill="none" stroke="#CC6666" stroke-width="1.5" stroke-dasharray="6,4"/>
-  <polygon points="718,145 720,136 724,145" fill="#CC6666"/>
-  <rect x="745" y="178" width="60" height="20" rx="10" fill="#f8f8f8" stroke="#ddd" stroke-width="1"/>
-  <text x="775" y="192" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#6B7280">max 3x</text>
+  <!-- Review loop (max 3x) -->
+  <path d="M 812,145 Q 812,180 756,180 Q 700,180 700,145" fill="none" stroke="#CC6666" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <polygon points="698,149 700,140 704,149" fill="#CC6666"/>
+  <rect x="730" y="173" width="55" height="18" rx="9" fill="white" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="757" y="186" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="9" fill="#6B7280">max 3x</text>
 
-  <!-- Overall dashed loop from Ship back to Analyze -->
-  <path d="M 1030,140 Q 1055,140 1055,170 Q 1055,200 540,200 Q 20,200 20,170 Q 20,140 20,140" fill="none" stroke="#6B7280" stroke-width="1.5" stroke-dasharray="6,4" opacity="0.5"/>
-  <polygon points="18,145 20,136 24,145" fill="#6B7280" opacity="0.5"/>
-  <rect x="500" y="192" width="80" height="20" rx="10" fill="#f8f8f8" stroke="#ddd" stroke-width="1"/>
-  <text x="540" y="206" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#6B7280" font-style="italic">next goal</text>
+  <!-- Overall loop back -->
+  <path d="M 1016,145 Q 1040,145 1040,175 Q 1040,205 540,205 Q 15,205 15,175 Q 15,145 15,145" fill="none" stroke="#6B7280" stroke-width="1.5" stroke-dasharray="6,4" opacity="0.4"/>
+  <polygon points="13,149 15,140 19,149" fill="#6B7280" opacity="0.4"/>
+  <rect x="505" y="197" width="70" height="18" rx="9" fill="white" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="540" y="210" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="9" fill="#6B7280" font-style="italic">next goal</text>
 </svg>
