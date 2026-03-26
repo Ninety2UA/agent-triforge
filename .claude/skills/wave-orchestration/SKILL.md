@@ -39,7 +39,7 @@ For each wave:
 
 1. **Dispatch:** Launch all tasks in the wave in parallel
    - Each executor gets: task description, relevant CONTRACTS.md types, file paths
-   - Isolate tasks that touch overlapping directories (worktrees in Claude, sandboxes in Codex)
+   - Isolate tasks that touch overlapping directories (separate execution contexts)
 2. **Collect:** Wait for all executors to complete
 3. **Verify:** Run the integration verifier:
    - All tests pass

@@ -14,6 +14,10 @@ Read ops/TASKS.md, ops/CONTRACTS.md, ops/MEMORY.md, and ops/ARCHITECTURE.md firs
 ## Arguments
 $ARGUMENTS
 
+## Flags
+- `--team` — Activate agent team mode with team-lead (for 5+ tasks or cross-dependent work)
+- `--wave N` — Resume build starting from wave N (skip already-completed waves)
+
 ## Build mode selection
 
 Check the task count and dependencies:

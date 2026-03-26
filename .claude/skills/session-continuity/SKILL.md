@@ -67,6 +67,12 @@ Different from pause — wrap is a clean session end, not a checkpoint:
 5. Write STATE.md with next-session context
 6. Write sprint summary for user
 
+## Output
+
+- **Pause:** Produce `ops/STATE.md` with all fields from the template above
+- **Resume:** No artifact — read existing state and continue from recorded phase
+- **Wrap:** Produce updated `ops/STATE.md` + `ops/CHANGELOG.md` entry + archived review files
+
 ## When to use each
 
 | Situation | Action |

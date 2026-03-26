@@ -8,6 +8,10 @@ You are running a fully autonomous multi-agent sprint. Follow the complete frame
 ## Input
 Goal: $ARGUMENTS
 
+## Flags
+- `--convergence {fast|standard|deep}` — Review convergence mode (default: standard). Fast=P1 only, deep=P1+P2+P3<3.
+- `--team` — Activate agent team mode for build phase (5+ interdependent tasks)
+
 ## Activation
 
 Write the ship-loop state file to activate the inner loop guard:

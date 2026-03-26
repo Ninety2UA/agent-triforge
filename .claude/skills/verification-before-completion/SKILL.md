@@ -39,6 +39,12 @@ Before marking ANY task as done, verify:
 - [ ] MEMORY.md updated with any new decisions, patterns, or gotchas
 - [ ] TASKS.md updated (task moved to "Done" with result summary)
 
+## Output
+
+Produce a completed checklist with pass/fail status for each item, plus:
+- `<promise>DONE</promise>` if all checks pass
+- Blocker documentation in TASKS.md if any check fails
+
 ## Completion signal
 
 Only after ALL checks pass, emit the completion signal:

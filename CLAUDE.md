@@ -11,7 +11,7 @@ This is a multi-agent coordination framework where Claude Code serves as the **l
 ### Multi-agent system
 
 - **Claude Code (Opus)** — lead agent: plans work, builds features, coordinates all agents, merges review feedback
-- **Claude specialized agents** — 14 focused subagents (`.claude/agents/`): plan validation, review synthesis, security, performance, etc.
+- **Claude specialized agents** — 18 focused subagents (`.claude/agents/`): plan validation, review synthesis, security, performance, etc.
 - **Claude agent teams** — multi-instance collaboration for complex builds (5+ interdependent tasks)
 - **Gemini CLI** — analyst + reviewer: Phase 0 codebase scans (1M token context), architecture reviews, documentation
 - **Codex CLI** — tester + logic reviewer: writes/runs tests, security audits, infrastructure tasks

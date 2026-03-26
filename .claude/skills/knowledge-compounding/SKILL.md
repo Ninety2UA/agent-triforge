@@ -75,6 +75,14 @@ status: accepted | superseded | deprecated
 - [Negative consequence / tradeoff]
 ```
 
+## Output
+
+Produce one or both:
+- `ops/solutions/YYYY-MM-DD-slug.md` — for solved problems (using format above)
+- `ops/decisions/YYYY-MM-DD-slug.md` — for architectural decisions (using format above)
+
+If nothing meets the "when to compound" criteria, produce nothing (absence is valid).
+
 ## How compounded knowledge is used
 
 Before planning (Phase 1), the learnings-researcher agent searches `ops/solutions/` and `ops/decisions/` for patterns relevant to the current goal. This prevents:

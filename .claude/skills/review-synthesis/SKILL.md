@@ -64,6 +64,14 @@ Do NOT include findings that match these patterns:
 - Issues already addressed in the current diff
 - Harmless no-ops (return undefined at end of void function)
 
+## Output
+
+Produce a single markdown document with:
+- All findings grouped by file, ordered by priority (P1→P2→P3)
+- Each finding annotated with confidence tier and source reviewer(s)
+- Contradictions section (if any)
+- Summary counts by priority
+
 ## Step 7: Produce synthesized report
 
 Group findings by file, ordered by priority:

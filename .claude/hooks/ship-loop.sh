@@ -19,8 +19,6 @@ ITERATION=$(sed -n 's/^iteration: \([0-9]*\).*/\1/p' "$STATE_FILE" 2>/dev/null)
 ITERATION="${ITERATION:-0}"
 MAX_ITERATIONS=$(sed -n 's/^max_iterations: \([0-9]*\).*/\1/p' "$STATE_FILE" 2>/dev/null)
 MAX_ITERATIONS="${MAX_ITERATIONS:-5}"
-PROMPT=$(sed -n '/^---$/,/^---$/!p' "$STATE_FILE" | tail -n +1)
-
 # Check for completion signal in recent assistant output
 if echo "$CLAUDE_STOP_ASSISTANT_MESSAGE" 2>/dev/null | grep -q '<promise>DONE</promise>'; then
   # Sprint complete — clean up and allow exit
