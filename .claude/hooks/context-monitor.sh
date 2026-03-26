@@ -20,26 +20,30 @@ last_write_at: 0
 EOF
 fi
 
-# Read current state
-TOTAL=$(grep -oP 'total_calls: \K\d+' "$STATE_FILE" 2>/dev/null || echo "0")
-READS=$(grep -oP 'consecutive_reads: \K\d+' "$STATE_FILE" 2>/dev/null || echo "0")
-LAST_WRITE=$(grep -oP 'last_write_at: \K\d+' "$STATE_FILE" 2>/dev/null || echo "0")
+# Read current state (POSIX-compatible — no grep -P on BSD/macOS)
+TOTAL=$(sed -n 's/^total_calls: \([0-9]*\).*/\1/p' "$STATE_FILE" 2>/dev/null)
+TOTAL="${TOTAL:-0}"
+READS=$(sed -n 's/^consecutive_reads: \([0-9]*\).*/\1/p' "$STATE_FILE" 2>/dev/null)
+READS="${READS:-0}"
+LAST_WRITE=$(sed -n 's/^last_write_at: \([0-9]*\).*/\1/p' "$STATE_FILE" 2>/dev/null)
+LAST_WRITE="${LAST_WRITE:-0}"
 
 # Increment total
 NEW_TOTAL=$((TOTAL + 1))
 
-# Classify tool as read-only or write
+# Classify tool as read-only or action/write
 case "$TOOL_NAME" in
-  Read|Grep|Glob|LS|WebFetch|WebSearch|TaskList|TaskGet)
+  Read|Grep|Glob|LS|WebFetch|WebSearch|TaskList|TaskGet|NotebookRead)
     NEW_READS=$((READS + 1))
     ;;
-  Write|Edit|Bash|NotebookEdit)
+  Write|Edit|Bash|NotebookEdit|Agent|Skill|TaskCreate|TaskUpdate|SendMessage|CronCreate|CronDelete|TeamCreate|TeamDelete|RemoteTrigger)
     NEW_READS=0
     LAST_WRITE=$NEW_TOTAL
     ;;
   *)
-    # Unknown tools don't reset the counter
-    NEW_READS=$((READS + 1))
+    # Unknown tools are treated as actions (reset counter) to avoid false positives
+    NEW_READS=0
+    LAST_WRITE=$NEW_TOTAL
     ;;
 esac
 

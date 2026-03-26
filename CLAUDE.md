@@ -89,8 +89,8 @@ The full lifecycle for a goal:
 
 ```
 .claude/
-  agents/               # 14 specialized agent definitions
-  skills/               # 11 portable skill files (all agents consume)
+  agents/               # 18 specialized agent definitions
+  skills/               # 12 portable skill files (all agents consume)
   hooks/                # Lifecycle hooks (ship-loop, context-monitor)
   commands/             # Slash commands
 ops/                    # Shared coordination files (all agents read/write)
@@ -101,8 +101,7 @@ docs/                   # Framework design documentation
 scripts/
   coordinate.sh         # Outer loop for context exhaustion recovery
 CLAUDE.md               # This file (Claude Code protocol)
-GEMINI.md               # Gemini CLI protocol
-CODEX.md                # Codex CLI protocol
+# GEMINI.md / CODEX.md  # External — see github.com/google-gemini/gemini-cli and github.com/openai/codex
 src/                    # Source code (when project has implementation)
 ```
 
@@ -123,18 +122,19 @@ Skills are model-agnostic markdown files consumed by ALL agents:
 | `verification-before-completion` | All | Evidence-based completion checklist |
 | `knowledge-compounding` | Claude | Document solutions and decisions |
 | `session-continuity` | Claude | Save/resume across sessions |
+| `scope-cutting` | Claude | Systematically cut scope by priority |
 
 Inject into external agents: `gemini -p "$(cat .claude/skills/SKILL/SKILL.md) ..."` or `codex exec "$(cat .claude/skills/SKILL/SKILL.md) ..."`
 
 ## Specialized agents
 
-14 agents in `.claude/agents/` with restricted tools and focused expertise:
+18 agents in `.claude/agents/` with restricted tools and focused expertise:
 
 **Core workflow:** plan-checker, findings-synthesizer, integration-verifier, learnings-researcher, team-lead, research-synthesizer
 
-**Review enhancement:** security-sentinel, performance-oracle, code-simplicity-reviewer, convention-enforcer, test-gap-analyzer
+**Review enhancement:** security-sentinel, performance-oracle, code-simplicity-reviewer, convention-enforcer, architecture-strategist, test-gap-analyzer
 
-**Research:** framework-docs-researcher, git-history-analyzer, bug-reproduction-validator
+**Research & verification:** framework-docs-researcher, best-practices-researcher, git-history-analyzer, bug-reproduction-validator, deployment-verifier, pr-comment-resolver
 
 ## Agent invocation patterns
 

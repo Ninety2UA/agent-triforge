@@ -81,6 +81,14 @@ Rank gaps by:
 - Missing edge cases: [count]
 ```
 
+## Do NOT flag
+- Test utility code and test helpers (testing infrastructure is expected to be untested)
+- Test fixtures, mocks, and factories
+- Generated code or scaffolding
+- Development-only scripts and tooling
+- Code that is tested indirectly via integration tests (document coverage path instead)
+- Style-only differences in test approach (multiple valid testing patterns)
+
 ## Rules
 - Focus on what's MISSING, not what's present
 - Prioritize by risk (security > business logic > utilities)

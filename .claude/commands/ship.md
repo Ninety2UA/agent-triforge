@@ -31,7 +31,7 @@ Spawn the `learnings-researcher` agent to search ops/solutions/ and ops/decision
 ### Phase 0: Codebase analysis
 Invoke Gemini CLI with the codebase-mapping skill (skip if codebase unchanged or small fix):
 ```bash
-gemini -p "$(cat .claude/skills/codebase-mapping/SKILL.md) Analyze the full codebase. Write to ops/ARCHITECTURE.md, ops/MEMORY.md, ops/CONTRACTS.md." > /tmp/gemini_phase0.txt 2>&1 &
+gemini -p "$(cat .claude/skills/codebase-mapping/SKILL.md) Analyze the full codebase. Write to ops/ARCHITECTURE.md, ops/MEMORY.md (append), ops/CONTRACTS.md (append)." > /tmp/gemini_phase0.txt 2>&1 &
 ```
 
 ### Phase 1: Planning

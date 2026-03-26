@@ -48,3 +48,8 @@ Provide the user with:
 - What remains (if anything)
 - Any decisions that need user input
 - Metrics (tasks completed, tests passing, review cycles)
+
+## Completion
+
+Only when ALL work is verified complete and STATE.md is written:
+<promise>DONE</promise>

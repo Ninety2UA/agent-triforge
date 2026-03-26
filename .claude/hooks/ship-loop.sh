@@ -14,9 +14,11 @@ if [ ! -f "$STATE_FILE" ]; then
   exit 0
 fi
 
-# Read iteration count from state file
-ITERATION=$(grep -oP 'iteration: \K\d+' "$STATE_FILE" 2>/dev/null || echo "0")
-MAX_ITERATIONS=$(grep -oP 'max_iterations: \K\d+' "$STATE_FILE" 2>/dev/null || echo "5")
+# Read iteration count from state file (POSIX-compatible — no grep -P on BSD/macOS)
+ITERATION=$(sed -n 's/^iteration: \([0-9]*\).*/\1/p' "$STATE_FILE" 2>/dev/null)
+ITERATION="${ITERATION:-0}"
+MAX_ITERATIONS=$(sed -n 's/^max_iterations: \([0-9]*\).*/\1/p' "$STATE_FILE" 2>/dev/null)
+MAX_ITERATIONS="${MAX_ITERATIONS:-5}"
 PROMPT=$(sed -n '/^---$/,/^---$/!p' "$STATE_FILE" | tail -n +1)
 
 # Check for completion signal in recent assistant output
