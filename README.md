@@ -51,8 +51,6 @@ The framework achieves this through **institutional knowledge compounding**: eve
 ```
 your-project/
 ├── CLAUDE.md                    Master orchestration protocol (Claude reads this)
-├── GEMINI.md                    Gemini CLI protocol
-├── CODEX.md                     Codex CLI protocol
 │
 ├── .claude/
 │   ├── agents/                  18 specialized agent definitions
@@ -61,7 +59,7 @@ your-project/
 │   │   ├── security-sentinel.md     OWASP, auth, vulnerability scanning
 │   │   ├── performance-oracle.md    N+1, O(n²), memory, scalability
 │   │   ├── team-lead.md            Orchestrates agent team workers
-│   │   └── ...                      14 more specialized agents
+│   │   └── ...                      13 more specialized agents
 │   ├── skills/                  12 portable workflow modules
 │   │   ├── writing-plans/           Task decomposition with shadow paths
 │   │   ├── wave-orchestration/      Dependency-grouped parallel execution

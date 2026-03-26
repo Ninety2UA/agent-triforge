@@ -11,10 +11,10 @@ HAS_STATE=""
 HAS_TASKS=""
 HAS_GOALS=""
 HAS_REVIEWS=""
-HAS_SOLUTIONS=""
 BLOCKED_COUNT=0
 PENDING_COUNT=0
 IN_PROGRESS_COUNT=0
+SOLUTION_COUNT=0
 
 if [ -f "ops/STATE.md" ]; then
   HAS_STATE="yes"
@@ -46,6 +46,10 @@ fi
 
 if [ "$HAS_TASKS" = "yes" ]; then
   MSG="$MSG\nActive sprint found (ops/TASKS.md): $PENDING_COUNT pending, $IN_PROGRESS_COUNT in progress, $BLOCKED_COUNT blocked."
+fi
+
+if [ "$HAS_GOALS" = "yes" ]; then
+  MSG="$MSG\nProject goals found (ops/GOALS.md)."
 fi
 
 if [ "$HAS_REVIEWS" = "yes" ]; then
