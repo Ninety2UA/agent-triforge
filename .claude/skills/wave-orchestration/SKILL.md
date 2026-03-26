@@ -37,10 +37,10 @@ Wave 3: [tasks depending on Wave 1-2, no file conflicts]
 
 For each wave:
 
-1. **Dispatch:** Launch all tasks in the wave as parallel subagents (or agent team members)
-   - Each subagent gets: task description, relevant CONTRACTS.md types, file paths
-   - Use worktree isolation when tasks touch overlapping directories
-2. **Collect:** Wait for all subagents to complete
+1. **Dispatch:** Launch all tasks in the wave in parallel
+   - Each executor gets: task description, relevant CONTRACTS.md types, file paths
+   - Isolate tasks that touch overlapping directories (worktrees in Claude, sandboxes in Codex)
+2. **Collect:** Wait for all executors to complete
 3. **Verify:** Run the integration verifier:
    - All tests pass
    - Build succeeds
@@ -62,20 +62,20 @@ After all waves complete:
 
 ## Wave execution modes
 
-### Subagent mode (default, < 5 tasks per wave)
+### Parallel mode (default, < 5 tasks per wave)
 
-Each task dispatched as a native Claude subagent:
+Each task dispatched as an independent parallel executor:
 - Lighter weight, same session
 - Results returned directly
 - Good for focused, independent tasks
 
-### Agent team mode (complex, 5+ tasks or cross-dependent)
+### Team mode (complex, 5+ tasks or cross-dependent)
 
-Each task assigned to an agent team member:
-- Teammates coordinate via shared task list
+Each task assigned to a coordinated team worker:
+- Workers coordinate via shared task list
 - Direct messaging for cross-task questions
-- Quality gates via TaskCompleted hooks
-- Team-lead monitors and resolves conflicts
+- Quality gates enforced between waves
+- Orchestrator monitors and resolves conflicts
 
 ## Example
 
@@ -89,9 +89,9 @@ Wave 1 (parallel, no dependencies):
   → Integration verify: interfaces compile, config loads
 
 Wave 2 (parallel, depends on Wave 1):
-  T2a: Implement registration endpoint (Claude subagent)
-  T2b: Implement login endpoint (Claude subagent)
-  T2c: Implement token refresh endpoint (Claude subagent)
+  T2a: Implement registration endpoint
+  T2b: Implement login endpoint
+  T2c: Implement token refresh endpoint
 
   → Integration verify: all endpoints compile, unit tests pass
 
@@ -106,11 +106,20 @@ Wave 4 (depends on Wave 3):
   T7: Security review (Gemini + Codex parallel)
 ```
 
+## Output
+
+After execution, produce:
+- Wave execution summary (tasks per wave, pass/fail)
+- Integration verification results between each wave
+- Final verification results (tests, build, lint)
+- Risk score per executor (if any exceeded thresholds)
+- Updated TASKS.md with all tasks marked Done or Blocked
+
 ## Risk scoring during execution
 
-Track risk accumulation per subagent:
+Track risk accumulation per executor:
 - Revert of own changes: +15%
 - Each file modified beyond task scope: +20%
 - Each multi-file change: +5%
-- Halt subagent when risk > 20% or file changes > 50
+- Halt executor when risk > 20% or file changes > 50
 - Escalate to lead for manual review

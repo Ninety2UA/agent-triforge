@@ -57,6 +57,14 @@ Follow the RED-GREEN-REFACTOR cycle strictly. No production code without a faili
 - If a test requires a type change, do not modify CONTRACTS.md — propose the change in MEMORY.md
 - Import types from CONTRACTS.md (or the source they define) in test files
 
+## Output
+
+After each TDD cycle, produce:
+- Test file(s) created/modified with test count
+- Production code created/modified
+- Test results (all passing, coverage %)
+- Any proposed CONTRACTS.md changes (written to MEMORY.md, not CONTRACTS.md directly)
+
 ## Coverage targets
 
 - New code: aim for >90% line coverage

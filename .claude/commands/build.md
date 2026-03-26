@@ -42,8 +42,8 @@ Follow the `wave-orchestration` skill:
 4. Teammates coordinate via shared task list + messaging
 5. Teammates can invoke gemini/codex for specific reviews:
    ```bash
-   gemini -p "$(cat .claude/skills/codebase-mapping/SKILL.md) Review [files]..." &
-   codex exec "$(cat .claude/skills/test-driven-development/SKILL.md) Test [files]..." &
+   gemini -p "$(cat .claude/skills/codebase-mapping/SKILL.md) Review src/auth/ for architecture. Write to ops/REVIEW_GEMINI.md." &
+   codex exec "$(cat .claude/skills/test-driven-development/SKILL.md) Write tests for src/auth/login.ts." &
    ```
 6. Quality gates: tests + lint must pass before marking tasks done
 7. Integration-verifier runs between waves

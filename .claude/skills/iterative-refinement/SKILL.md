@@ -76,6 +76,14 @@ After each fix cycle:
 - If not converged AND cycles < 3 → re-trigger review on changed files only
 - If not converged AND cycles = 3 → escalate
 
+## Output
+
+After each cycle, produce:
+- Remaining issue counts by priority (P1/P2/P3)
+- What was fixed this cycle with confidence level
+- Convergence status (converged / not converged — cycle N of 3)
+- If escalating: summary of remaining issues, all perspectives, and recommendation
+
 ## Suppressions (do not flag)
 
 These patterns should NOT be treated as findings:

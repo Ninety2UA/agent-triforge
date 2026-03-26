@@ -65,6 +65,16 @@ When you find the proximate cause, ask "why" up to 5 times:
 3. Run the full test suite — no regressions
 4. Log the root cause in MEMORY.md#Gotchas for future reference
 
+## Output
+
+Produce a structured diagnosis:
+- Error classification (from Step 1)
+- Reproduction steps and failing test
+- Assumption ledger with confirmed/disproven status
+- Root cause chain (the "5 whys")
+- Fix applied and verification evidence (test results)
+- MEMORY.md entry if root cause was non-obvious
+
 ## Degradation detection
 
 Watch for signals that the system is under stress:

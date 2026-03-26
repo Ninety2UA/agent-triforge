@@ -1,6 +1,6 @@
 ---
 description: "Trigger parallel review: Gemini + Codex + Claude specialized agents. Synthesize findings."
-argument-hint: "[--full] [--security] [--perf] [--simple]"
+argument-hint: "[--full] [--security] [--perf] [--simple] [--conventions]"
 ---
 
 You are executing Phase 3 + Phase 4 of the multi-agent framework (parallel review + synthesis).
@@ -13,6 +13,7 @@ Flags:
 - `--security` — Add security-sentinel to default reviewers
 - `--perf` — Add performance-oracle to default reviewers
 - `--simple` — Add code-simplicity-reviewer to default reviewers
+- `--conventions` — Add convention-enforcer to default reviewers
 - No flags — Default: Gemini + Codex only
 
 ## Phase 3: Launch parallel reviews

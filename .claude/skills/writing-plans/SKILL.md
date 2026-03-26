@@ -88,6 +88,14 @@ Wave 3 (sequential): T4 — depends on T2
 Wave 4 (parallel): T5, T6 — independent
 ```
 
+## Output
+
+Produce ops/TASKS.md containing:
+- All sections above (goal, interfaces, tasks, shadow paths, error map, dependency graph, waves)
+- Each task in the standardized format with Agent, Files, Depends, Context, Accept fields
+- Wave assignments for the build phase
+- The plan quality checklist (all items checked)
+
 ## Plan quality checklist
 
 Before finalizing:
