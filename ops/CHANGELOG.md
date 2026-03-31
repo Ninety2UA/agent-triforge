@@ -1,5 +1,11 @@
 # Changelog
 
+## [2026-03-31] — Fix hooks settings.json format
+
+### Claude Code
+- **Critical fix:** `.claude/settings.json` hooks used flat format (`{ "command": "...", "timeout": ... }`) which Claude Code rejects — migrated to correct `{ "matcher": "...", "hooks": [{ "type": "command", "command": "..." }] }` format
+- Updated ops/solutions/2026-03-26-settings-json-required-for-hooks.md with correct format documentation
+
 ## [2026-03-26] — Diagram redesign, full audit, and framework hardening
 
 ### Claude Code

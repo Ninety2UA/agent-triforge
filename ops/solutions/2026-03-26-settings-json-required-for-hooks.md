@@ -12,7 +12,7 @@ All 3 lifecycle hooks (session-start.sh, ship-loop.sh, context-monitor.sh) exist
 Claude Code hooks must be **registered** in `.claude/settings.json` under the `hooks` key. Without this file, Claude Code has no way to discover hook scripts regardless of their location or permissions.
 
 ## Solution
-Created `.claude/settings.json` with all 3 hooks registered:
+Created `.claude/settings.json` with all 3 hooks registered. Each hook event requires objects with a `matcher` string and a `hooks` array (not flat command objects):
 
 ```json
 {
@@ -20,14 +20,32 @@ Created `.claude/settings.json` with all 3 hooks registered:
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   },
   "hooks": {
-    "SessionStart": [{ "command": ".claude/hooks/session-start.sh", "timeout": 5000 }],
-    "Stop": [{ "command": ".claude/hooks/ship-loop.sh", "timeout": 10000 }],
-    "PostToolUse": [{ "command": ".claude/hooks/context-monitor.sh", "timeout": 5000 }]
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [{ "type": "command", "command": ".claude/hooks/session-start.sh" }]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [{ "type": "command", "command": ".claude/hooks/ship-loop.sh" }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [{ "type": "command", "command": ".claude/hooks/context-monitor.sh" }]
+      }
+    ]
   }
 }
 ```
+
+**Important:** The flat format `{ "command": "...", "timeout": 5000 }` does NOT work. Each entry must have `matcher` (string — tool name, pipe-separated list, or `""` to match all) and `hooks` (array of `{ "type": "command", "command": "..." }` objects). Claude Code will skip the entire settings file if this format is wrong.
 
 ## Prevention
 - Always include `.claude/settings.json` when distributing hooks
 - Document required settings in README installation section
 - Verify hooks fire after cloning by running `/status` (session-start hook should produce orientation message)
+- Use the documented format: `{ "matcher": "...", "hooks": [{ "type": "command", "command": "..." }] }` — not the flat format

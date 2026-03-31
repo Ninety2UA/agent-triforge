@@ -27,7 +27,7 @@
 - ops/TASKS.md is generated at runtime, not committed — don't link to it in README.
 
 - **grep -oP is NOT portable** — BSD grep on macOS lacks -P flag. Use `sed -n 's/pattern/\1/p'` instead. See: ops/solutions/2026-03-26-grep-posix-portability.md
-- **Hooks require .claude/settings.json** — scripts alone aren't enough. Must register hooks in settings.json with event type, path, and timeout. See: ops/solutions/2026-03-26-settings-json-required-for-hooks.md
+- **Hooks require .claude/settings.json with correct format** — scripts alone aren't enough. Each hook entry needs `{ "matcher": "...", "hooks": [{ "type": "command", "command": "..." }] }`. The flat format `{ "command": "...", "timeout": ... }` causes Claude Code to skip the entire settings file. See: ops/solutions/2026-03-26-settings-json-required-for-hooks.md
 - ship-loop.sh (Stop hook) only blocks the session that activated it — won't affect other sessions.
 - context-monitor.sh state file (.claude/context-monitor.local.md) must be cleaned between sessions — session-start.sh handles this.
 - context-monitor.sh: unknown tools should reset the read counter (not increment it) to avoid false paralysis warnings.
