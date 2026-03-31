@@ -46,9 +46,9 @@ Follow the `wave-orchestration` skill:
 4. Teammates coordinate via shared task list + messaging
 5. Teammates can invoke gemini/codex for specific reviews (replace `<scope>` with actual paths):
    ```bash
-   gemini -p "$(cat .claude/skills/codebase-mapping/SKILL.md) Review <scope> for architecture. Write to ops/REVIEW_GEMINI.md." > /tmp/gemini_build.txt 2>&1 &
+   gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md) Review <scope> for architecture. Write to ops/REVIEW_GEMINI.md." > /tmp/gemini_build.txt 2>&1 &
    GEMINI_PID=$!
-   codex exec "$(cat .claude/skills/test-driven-development/SKILL.md) Write tests for <scope>." > /tmp/codex_build.txt 2>&1 &
+   codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md) Write tests for <scope>." > /tmp/codex_build.txt 2>&1 &
    CODEX_PID=$!
    wait $GEMINI_PID $CODEX_PID
    ```

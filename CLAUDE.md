@@ -1,22 +1,24 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with this plugin repository.
 
 ## Project overview
 
-This is a multi-agent coordination framework where Claude Code serves as the **lead agent**, orchestrating Gemini CLI, Codex CLI, and specialized Claude subagents through a hybrid file-based + bash-invocation + native-subagent protocol. The framework is defined in `docs/multi-agent-framework.md`.
+This is a **Claude Code plugin** providing a multi-agent coordination framework where Claude Code serves as the **lead agent**, orchestrating Gemini CLI, Codex CLI, and specialized Claude subagents through a hybrid file-based + bash-invocation + native-subagent protocol. The framework is defined in `docs/multi-agent-framework.md`.
+
+Install: `claude plugin add https://github.com/Ninety2UA/multi-agent-framework`
 
 ## Architecture
 
 ### Multi-agent system
 
 - **Claude Code (Opus)** — lead agent: plans work, builds features, coordinates all agents, merges review feedback
-- **Claude specialized agents** — 18 focused subagents (`.claude/agents/`): plan validation, review synthesis, security, performance, etc.
+- **Claude specialized agents** — 18 focused subagents (`agents/`): plan validation, review synthesis, security, performance, etc.
 - **Claude agent teams** — multi-instance collaboration for complex builds (5+ interdependent tasks)
 - **Gemini CLI** — analyst + reviewer: Phase 0 codebase scans (1M token context), architecture reviews, documentation
 - **Codex CLI** — tester + logic reviewer: writes/runs tests, security audits, infrastructure tasks
 
-Claude invokes Gemini via `gemini -p "..."` and Codex via `codex exec "..."` as background bash processes. Skills are injected into external agents via `$(cat .claude/skills/SKILL_NAME/SKILL.md)`. Reviews run in parallel (Gemini + Codex + Claude subagents simultaneously), never sequentially.
+Claude invokes Gemini via `gemini -p "..."` and Codex via `codex exec "..."` as background bash processes. Skills are injected into external agents via `$(cat ${CLAUDE_PLUGIN_ROOT}/skills/SKILL_NAME/SKILL.md)`. Reviews run in parallel (Gemini + Codex + Claude subagents simultaneously), never sequentially.
 
 ### Four coordination modes
 
@@ -85,24 +87,28 @@ The full lifecycle for a goal:
 4. Verification evidence before completion (verification-before-completion skill)
 5. Code review before shipping (parallel review, max 3 cycles)
 
-## Repository structure
+## Plugin structure
 
 ```
-.claude/
-  agents/               # 18 specialized agent definitions
-  skills/               # 12 portable skill files (all agents consume)
-  hooks/                # Lifecycle hooks (ship-loop, context-monitor)
-  commands/             # Slash commands
-ops/                    # Shared coordination files (all agents read/write)
-  solutions/            # Documented solved problems
-  decisions/            # Architecture decision records
-  archive/              # Archived review + test files by date
-docs/                   # Framework design documentation
+.claude-plugin/
+  plugin.json             # Plugin manifest
+agents/                   # 18 specialized agent definitions
+skills/                   # 12 portable skill files (all agents consume)
+commands/                 # 16 slash commands
+hooks/
+  hooks.json              # Hook registration (uses ${CLAUDE_PLUGIN_ROOT})
+  handlers/               # Lifecycle hook scripts
+    session-start.sh        Session orientation + ops/ bootstrapping
+    ship-loop.sh            Blocks premature exit during sprints
+    context-monitor.sh      Warns on analysis paralysis
+settings.json             # Default env vars (agent teams)
+templates/                # Project bootstrapping templates
+  CLAUDE.md                 Template for user projects
+  ops/                      Skeleton ops/ files
 scripts/
-  coordinate.sh         # Outer loop for context exhaustion recovery
-CLAUDE.md               # This file (Claude Code protocol)
-# GEMINI.md / CODEX.md  # External — see github.com/google-gemini/gemini-cli and github.com/openai/codex
-src/                    # Source code (when project has implementation)
+  coordinate.sh           # Outer loop for context exhaustion recovery
+ops/                      # This repo's own project state (not part of plugin)
+docs/                     # Framework design documentation
 ```
 
 ## Portable skills
@@ -124,11 +130,11 @@ Skills are model-agnostic markdown files consumed by ALL agents:
 | `session-continuity` | Claude | Save/resume across sessions |
 | `scope-cutting` | Claude | Systematically cut scope by priority |
 
-Inject into external agents: `gemini -p "$(cat .claude/skills/SKILL/SKILL.md) ..."` or `codex exec "$(cat .claude/skills/SKILL/SKILL.md) ..."`
+Inject into external agents: `gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/SKILL/SKILL.md) ..."` or `codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/SKILL/SKILL.md) ..."`
 
 ## Specialized agents
 
-18 agents in `.claude/agents/` with restricted tools and focused expertise:
+18 agents in `agents/` with restricted tools and focused expertise:
 
 **Core workflow:** plan-checker, findings-synthesizer, integration-verifier, learnings-researcher, team-lead, research-synthesizer
 
@@ -140,10 +146,12 @@ Inject into external agents: `gemini -p "$(cat .claude/skills/SKILL/SKILL.md) ..
 
 ```bash
 # Gemini with skill injection (non-interactive, background)
-gemini -p "$(cat .claude/skills/codebase-mapping/SKILL.md) Analyze codebase..." > /tmp/gemini_output.txt 2>&1 &
+gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md) Analyze codebase..." > /tmp/gemini_output.txt 2>&1 &
+GEMINI_PID=$!
 
 # Codex with skill injection (non-interactive, background)
-codex exec "$(cat .claude/skills/test-driven-development/SKILL.md) Write tests..." > /tmp/codex_output.txt 2>&1 &
+codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md) Write tests..." > /tmp/codex_output.txt 2>&1 &
+CODEX_PID=$!
 
 # Wait for parallel completion
 wait $GEMINI_PID $CODEX_PID
@@ -151,9 +159,9 @@ wait $GEMINI_PID $CODEX_PID
 
 ## Context management
 
-- **Inner loop:** `ship-loop.sh` Stop hook blocks premature exit during sprints (max 5 iterations, waits for `<promise>DONE</promise>`)
+- **Inner loop:** `hooks/handlers/ship-loop.sh` Stop hook blocks premature exit during sprints (max 5 iterations, waits for `<promise>DONE</promise>`)
 - **Outer loop:** `scripts/coordinate.sh` spawns fresh sessions on context exhaustion
-- **Analysis paralysis:** `context-monitor.sh` warns at 8+ consecutive reads without writes
+- **Analysis paralysis:** `hooks/handlers/context-monitor.sh` warns at 8+ consecutive reads without writes
 - **Risk scoring:** Subagents halted at risk >20% or 50+ file changes
 
 ## Prerequisites

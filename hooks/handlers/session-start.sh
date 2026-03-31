@@ -4,10 +4,28 @@
 # Provides orientation when starting a new session.
 #
 # Hook event: SessionStart
-# Configuration: add to .claude/settings.json hooks.SessionStart
+# Configuration: registered in hooks/hooks.json (plugin) or .claude/settings.json (project)
 
 # Clean stale state files from previous sessions
 rm -f .claude/context-monitor.local.md
+
+# Bootstrap ops/ directory if it doesn't exist
+if [ ! -d "ops" ]; then
+  mkdir -p ops/solutions ops/decisions ops/archive
+  # Copy skeleton files from plugin templates if available
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+    for f in MEMORY.md CHANGELOG.md; do
+      if [ -f "${CLAUDE_PLUGIN_ROOT}/templates/ops/${f}" ] && [ ! -f "ops/${f}" ]; then
+        cp "${CLAUDE_PLUGIN_ROOT}/templates/ops/${f}" "ops/${f}"
+      fi
+    done
+  fi
+fi
+
+# Suggest CLAUDE.md template if not present
+if [ ! -f "CLAUDE.md" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.md" ]; then
+  CLAUDE_MD_TIP="\nTip: No CLAUDE.md found. Copy the template: cp ${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.md ./CLAUDE.md"
+fi
 
 # Check for existing state
 HAS_STATE=""
@@ -66,6 +84,9 @@ fi
 if [ -z "$MSG" ]; then
   MSG="\nNo active sprint. Use /plan <goal> to start or /ship <goal> for full autonomous mode."
 fi
+
+# Append CLAUDE.md tip if set
+MSG="$MSG${CLAUDE_MD_TIP:-}"
 
 printf '%b\n' "Multi-agent framework ready.$MSG"
 echo ""

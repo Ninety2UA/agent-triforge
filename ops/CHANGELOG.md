@@ -1,5 +1,18 @@
 # Changelog
 
+## [2026-03-31] — v2.0.0: Claude Code plugin conversion
+
+### Claude Code
+- **Breaking:** Converted from git-clone installation to Claude Code plugin system
+- Created `.claude-plugin/plugin.json` (v2.0.0), `hooks/hooks.json`, root `settings.json`
+- Moved all components from `.claude/` to root: `agents/`, `skills/`, `commands/`, `hooks/handlers/`
+- Updated all skill injection paths: `.claude/skills/` → `${CLAUDE_PLUGIN_ROOT}/skills/`
+- Added ops/ bootstrapping to `session-start.sh` (creates dirs + copies templates on first run)
+- Created `templates/CLAUDE.md` and `templates/ops/` for project bootstrapping
+- Install: `claude plugin add https://github.com/Ninety2UA/multi-agent-framework`
+- Update: `claude plugin update multi-agent-framework`
+- Updated README, CLAUDE.md, and docs for plugin structure
+
 ## [2026-03-31] — Comprehensive framework audit, fix pass, and Blueprint alignment
 
 ### Claude Code (ship-loop rewrite)

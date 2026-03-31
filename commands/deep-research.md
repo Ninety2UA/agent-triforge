@@ -23,7 +23,7 @@ Launch ALL of these agents in a SINGLE message for maximum parallelism:
 
 ### Agent 4: Gemini codebase analysis (targeted)
 ```bash
-gemini -p "$(cat .claude/skills/codebase-mapping/SKILL.md)
+gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md)
 
 Analyze the codebase specifically for patterns, modules, and architecture related to: $ARGUMENTS
 

@@ -27,7 +27,7 @@ The coordination model is hybrid: file-based shared state (TASKS.md, MEMORY.md, 
 
 2. **Direct invocation layer (real-time):** Claude Code calls Gemini and Codex via bash within a single session. Output is captured, parsed, and acted on immediately.
 
-3. **Native subagent layer (parallel):** Claude Code uses its own subagent system (Agent tool) to parallelize build work. Each subagent gets an isolated context window and returns results to the lead agent. Specialized agent definitions (`.claude/agents/`) provide focused expertise.
+3. **Native subagent layer (parallel):** Claude Code uses its own subagent system (Agent tool) to parallelize build work. Each subagent gets an isolated context window and returns results to the lead agent. Specialized agent definitions (`agents/`) provide focused expertise.
 
 4. **Agent team layer (collaborative):** For complex builds, Claude Code spawns agent teams where multiple Claude instances coordinate via shared task lists, direct messaging, and file ownership rules. Each teammate gets an independent context window. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"`.
 
@@ -209,11 +209,11 @@ Session continuity file. Written when pausing or wrapping a session.
 
 ## Portable skill protocol
 
-Skills are model-agnostic markdown files that encode reusable methodologies. They live in `.claude/skills/` and can be consumed by ALL agents:
+Skills are model-agnostic markdown files that encode reusable methodologies. They live in `skills/` and can be consumed by ALL agents:
 
 - **Claude Code:** Uses skills natively via the skill system
-- **Gemini CLI:** Skills injected via prompt: `gemini -p "$(cat .claude/skills/SKILL_NAME/SKILL.md) Now apply..."`
-- **Codex CLI:** Skills injected via prompt: `codex exec "$(cat .claude/skills/SKILL_NAME/SKILL.md) Now apply..."`
+- **Gemini CLI:** Skills injected via prompt: `gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/SKILL_NAME/SKILL.md) Now apply..."`
+- **Codex CLI:** Skills injected via prompt: `codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/SKILL_NAME/SKILL.md) Now apply..."`
 
 ### Available skills and their primary consumers
 
@@ -235,7 +235,7 @@ Skills are model-agnostic markdown files that encode reusable methodologies. The
 
 ```bash
 # Gemini Phase 0 with codebase-mapping skill
-gemini -p "$(cat .claude/skills/codebase-mapping/SKILL.md)
+gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md)
 
 Apply this methodology to analyze the full codebase.
 Read every file in src/ and write results to:
@@ -244,14 +244,14 @@ Read every file in src/ and write results to:
 - ops/CONTRACTS.md (append only)" &
 
 # Codex testing with TDD skill
-codex exec "$(cat .claude/skills/test-driven-development/SKILL.md)
+codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md)
 
 Apply this methodology. Read ops/CONTRACTS.md for type definitions.
 Write tests for the files listed in ops/TASKS.md assigned to Codex.
 Write results to ops/TEST_RESULTS.md." &
 
 # Codex bug investigation with debugging skill
-codex exec "$(cat .claude/skills/systematic-debugging/SKILL.md)
+codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/systematic-debugging/SKILL.md)
 
 Investigate the bug: [description].
 Follow the diagnostic protocol. Write findings to ops/REVIEW_CODEX.md." &
@@ -261,7 +261,7 @@ Follow the diagnostic protocol. Write findings to ops/REVIEW_CODEX.md." &
 
 ## Specialized agent definitions
 
-Specialized agents live in `.claude/agents/` and provide focused expertise as Claude subagents. They have restricted tool access and preloaded context for their domain.
+Specialized agents live in `agents/` and provide focused expertise as Claude subagents. They have restricted tool access and preloaded context for their domain.
 
 ### Core workflow agents
 
@@ -366,7 +366,7 @@ Invoke Gemini for codebase analysis:
 ```
 
 ```bash
-gemini -p "$(cat .claude/skills/codebase-mapping/SKILL.md)
+gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md)
 
 Apply this methodology to analyze the full codebase.
 
@@ -736,10 +736,10 @@ Each subagent receives:
 Invoke Gemini/Codex from within a teammate:
 ```bash
 # Teammate invoking Gemini for a specific review
-gemini -p "$(cat .claude/skills/codebase-mapping/SKILL.md) Review the auth module changes in src/auth/..." &
+gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md) Review the auth module changes in src/auth/..." &
 
 # Teammate invoking Codex for testing
-codex exec "$(cat .claude/skills/test-driven-development/SKILL.md) Write tests for src/auth/login.ts..." &
+codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md) Write tests for src/auth/login.ts..." &
 ```
 
 #### Risk scoring during execution
@@ -884,7 +884,7 @@ After reviews converge:
 2. Invoke Codex with TDD skill for test writing:
 
 ```bash
-codex exec "$(cat .claude/skills/test-driven-development/SKILL.md)
+codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md)
 
 You are the testing agent in a multi-agent repository.
 
@@ -1269,13 +1269,13 @@ Add to `.claude/settings.json`:
   "hooks": {
     "Stop": [
       {
-        "command": ".claude/hooks/ship-loop.sh",
+        "command": "hooks/handlers/ship-loop.sh",
         "timeout": 10000
       }
     ],
     "PostToolUse": [
       {
-        "command": ".claude/hooks/context-monitor.sh",
+        "command": "hooks/handlers/context-monitor.sh",
         "timeout": 5000
       }
     ]

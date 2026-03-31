@@ -1,7 +1,4 @@
 {
-  "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
-  },
   "hooks": {
     "SessionStart": [
       {
@@ -9,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/session-start.sh"
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/handlers/session-start.sh"
           }
         ]
       }
@@ -20,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/ship-loop.sh"
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/handlers/ship-loop.sh"
           }
         ]
       }
@@ -31,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/context-monitor.sh"
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/handlers/context-monitor.sh"
           }
         ]
       }

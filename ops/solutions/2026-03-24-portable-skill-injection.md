@@ -14,8 +14,8 @@ Skills are just markdown files with structured prompts. Any LLM can consume mark
 ## Solution
 Inject skills into external agents via bash prompt expansion:
 ```bash
-gemini -p "$(cat .claude/skills/codebase-mapping/SKILL.md) Analyze the codebase..."
-codex exec "$(cat .claude/skills/test-driven-development/SKILL.md) Write tests..."
+gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md) Analyze the codebase..."
+codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md) Write tests..."
 ```
 
 This works because:

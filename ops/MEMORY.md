@@ -6,7 +6,7 @@
   See: ops/decisions/2026-03-24-blueprint-pattern-adoption.md
 
 - [2026-03-24] Skills are model-agnostic and injectable into all CLIs (Claude Code)
-  Reason: Decouples methodology from model. Gemini and Codex consume skills via $(cat .claude/skills/SKILL/SKILL.md).
+  Reason: Decouples methodology from model. Gemini and Codex consume skills via $(cat ${CLAUDE_PLUGIN_ROOT}/skills/SKILL/SKILL.md).
   See: ops/solutions/2026-03-24-portable-skill-injection.md
 
 - [2026-03-24] Agent teams require CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 (Claude Code)

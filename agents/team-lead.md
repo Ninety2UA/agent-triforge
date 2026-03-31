@@ -58,8 +58,8 @@ After all teammates complete:
 ### 6. Invoke external agents
 You can invoke Gemini and Codex for review/testing:
 ```bash
-gemini -p "$(cat .claude/skills/codebase-mapping/SKILL.md) Review the changes in [files]..." &
-codex exec "$(cat .claude/skills/test-driven-development/SKILL.md) Write tests for [files]..." &
+gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md) Review the changes in [files]..." &
+codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md) Write tests for [files]..." &
 ```
 
 ## Worker failure protocol

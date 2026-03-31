@@ -1,0 +1,13 @@
+{
+  "name": "multi-agent-framework",
+  "version": "2.0.0",
+  "description": "Multi-agent coordination framework: Claude Code as lead agent orchestrating Gemini CLI, Codex CLI, and 18 specialized subagents through file-based protocols, portable skills, and parallel review swarms.",
+  "author": {
+    "name": "Ninety2UA",
+    "url": "https://github.com/Ninety2UA"
+  },
+  "repository": "https://github.com/Ninety2UA/multi-agent-framework",
+  "license": "MIT",
+  "keywords": ["multi-agent", "gemini", "codex", "coordination", "sprint", "review-swarm", "wave-orchestration"],
+  "hooks": "./hooks/hooks.json"
+}

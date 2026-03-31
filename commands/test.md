@@ -29,7 +29,7 @@ If `--gaps-only` flag: report gaps and stop.
 ## Step 2: Invoke Codex for test writing
 
 ```bash
-codex exec "$(cat .claude/skills/test-driven-development/SKILL.md)
+codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md)
 
 You are the testing agent in a multi-agent repository.
 
