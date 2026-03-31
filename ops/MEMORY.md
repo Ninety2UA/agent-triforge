@@ -28,7 +28,9 @@
 
 - **grep -oP is NOT portable** — BSD grep on macOS lacks -P flag. Use `sed -n 's/pattern/\1/p'` instead. See: ops/solutions/2026-03-26-grep-posix-portability.md
 - **Hooks require .claude/settings.json with correct format** — scripts alone aren't enough. Each hook entry needs `{ "matcher": "...", "hooks": [{ "type": "command", "command": "..." }] }`. The flat format `{ "command": "...", "timeout": ... }` causes Claude Code to skip the entire settings file. See: ops/solutions/2026-03-26-settings-json-required-for-hooks.md
-- ship-loop.sh (Stop hook) only blocks the session that activated it — won't affect other sessions.
+- ship-loop.sh (Stop hook) only blocks the session that activated it — uses session_id from stdin JSON for isolation.
+- ship-loop.sh outputs JSON `{decision, reason, systemMessage}` to match Blueprint visual format — reason contains the original goal prompt re-injected on each iteration.
+- ship-loop.sh state file uses YAML frontmatter with `active`, `session_id`, `iteration`, `max_iterations`, `completion_promise` — prompt body goes after second `---`.
 - context-monitor.sh state file (.claude/context-monitor.local.md) must be cleaned between sessions — session-start.sh does this via `rm -f` on startup.
 - context-monitor.sh: unknown tools should reset the read counter (not increment it) to avoid false paralysis warnings.
 - Gemini CLI's GEMINI.md files have a prompt injection risk when loading from untrusted sources.

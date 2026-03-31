@@ -1,5 +1,17 @@
 # Changelog
 
+## [2026-03-31] — Comprehensive framework audit, fix pass, and Blueprint alignment
+
+### Claude Code (ship-loop rewrite)
+- Rewrote `ship-loop.sh` to match Blueprint's visual output and architecture
+- JSON output format: `{decision, reason, systemMessage}` (was plain text echo)
+- Session isolation via `session_id` matching from stdin JSON
+- Transcript-based promise detection via `transcript_path` JSONL parsing (was basic stdin grep)
+- Richer state file: `active`, `session_id`, `completion_promise` fields (was just iteration/max)
+- Atomic state updates via temp file + mv (was `sed -i.bak`)
+- Integer validation, `set -euo pipefail`, awk frontmatter parsing, perl promise extraction
+- Updated `ship.md` and `coordinate.md` state file templates to match
+
 ## [2026-03-31] — Comprehensive framework audit and fix pass
 
 ### Claude Code
