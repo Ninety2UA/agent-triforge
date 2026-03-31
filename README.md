@@ -596,7 +596,7 @@ After solving a non-trivial problem, <a href=".claude/commands/compound.md"><cod
 
 ### 2026-03-31 — Comprehensive audit and Blueprint alignment
 
-A 5-agent parallel audit reviewed all 49 framework components (3 hooks, 16 commands, 12 skills, 18 agents) and found **4 critical**, **10 high**, and **~20 medium** issues. All critical and high issues have been fixed.
+Two full audit passes (10 parallel agents total) reviewed all 49 framework components (3 hooks, 16 commands, 12 skills, 18 agents). The first pass found **4 critical**, **10 high**, and **~20 medium** issues. A second verification pass caught **1 additional critical** (JSON injection), **8 high**, and **4 medium** issues introduced or missed in the first round. All issues have been fixed.
 
 <details>
 <summary><strong>Critical fixes</strong></summary>
@@ -604,6 +604,7 @@ A 5-agent parallel audit reviewed all 49 framework components (3 hooks, 16 comma
 - **Hooks were completely non-functional** — both `ship-loop.sh` and `context-monitor.sh` read environment variables (`$CLAUDE_STOP_ASSISTANT_MESSAGE`, `$CLAUDE_TOOL_NAME`) that Claude Code does not set. Hook data arrives via stdin JSON. Both hooks now parse stdin correctly. This means completion detection and analysis paralysis detection were silently broken since the framework's creation.
 - **README shipped broken hook config** — the Getting Started section used the flat `{ "command", "timeout" }` format that Claude Code rejects. Migrated to the correct `{ "matcher", "hooks": [{ "type": "command", "command" }] }` format.
 - **`/coordinate` ran full sprints unguarded** — the command executed Phase 0–6 without activating the ship-loop Stop hook, so context exhaustion could silently kill mid-sprint. Now creates the state file and emits `<promise>DONE</promise>` on completion.
+- **Ship-loop JSON injection** (found in second pass) — the heredoc embedded raw `$PROMPT_TEXT` into JSON output. Any goal containing double quotes or newlines produced malformed JSON, silently breaking the Stop hook. Now uses `python3 json.dumps()` for safe encoding.
 </details>
 
 <details>
@@ -619,6 +620,7 @@ The Stop hook was rewritten to match the [Claude Code Blueprint](https://github.
 | `sed -i.bak` state updates | Atomic temp file + `mv` |
 | No input validation | Integer validation + `set -euo pipefail` |
 | Simple 2-field state file | Rich frontmatter: `active`, `session_id`, `iteration`, `max_iterations`, `completion_promise` + prompt body |
+| Raw shell variable in JSON | `python3 json.dumps()` for safe JSON encoding |
 </details>
 
 <details>
@@ -633,6 +635,10 @@ The Stop hook was rewritten to match the [Claude Code Blueprint](https://github.
 - **`team-lead.md`** added structured output format (was the only agent without one)
 - **`wave-orchestration`** skill flagged team mode as Claude-specific + experimental
 - **`review.md --full`** now includes `architecture-strategist` (was designed for Phase 3 but never wired in)
+- **`build.md`** agent team bash block now captures PIDs and waits (was fire-and-forget)
+- **`ship.md`**, **`plan.md`**, **`coordinate.md`** Phase 0 Gemini invocations now capture `GEMINI_PID` and `wait` (were backgrounded with no wait)
+- **`coordinate.md`** Phase 3 now includes all 5 review agents (was missing `convention-enforcer` and `architecture-strategist`)
+- **`pr-comment-resolver.md`** now checks `gh auth status` before fetching PR comments (was a hard failure if `gh` CLI unavailable)
 </details>
 
 <details>
@@ -643,6 +649,10 @@ The Stop hook was rewritten to match the [Claude Code Blueprint](https://github.
 - `git-history-analyzer.md` replaced interactive `git bisect` with non-interactive `git log -S` alternative
 - `deployment-verifier.md` added explicit "never execute rollbacks" safety rule
 - `session-start.sh` replaced `echo -e` with POSIX-portable `printf '%b\n'`
+- Fixed bare `ops/` path prefixes in `debug.md`, `review.md`, `coordinate.md`
+- `status.md` now lists all 16 commands (was missing `/coordinate`, `/analyze`, `/resolve-pr`)
+- `coordinate.md` Phase 5 now specifies max 3 fix cycles (was open-ended)
+- Standardized archive path wording to `[today's date]` across `ship.md` and `coordinate.md`
 </details>
 
 Documented solutions: [`ops/solutions/2026-03-31-hooks-stdin-json-parsing.md`](ops/solutions/2026-03-31-hooks-stdin-json-parsing.md)
