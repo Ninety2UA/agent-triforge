@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 560">
   <!-- Outer container -->
-  <rect width="720" height="560" rx="16" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect width="720" height="560" rx="16" fill="white"/>
 
   <!-- Review Swarm badge -->
   <rect x="244" y="28" width="232" height="44" rx="22" fill="#2D2B55"/>
@@ -9,7 +9,7 @@
   <text x="376" y="56" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="700" fill="white">Review Swarm</text>
 
   <!-- Command pill -->
-  <rect x="310" y="82" width="100" height="28" rx="14" fill="#F3F4F6" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="310" y="82" width="100" height="28" rx="14" fill="#F3F4F6"/>
   <text x="360" y="101" text-anchor="middle" font-family="'SF Mono', monospace" font-size="12" fill="#6B7280">/review</text>
 
   <!-- Section label -->
@@ -19,29 +19,29 @@
   <line x1="40" y1="152" x2="680" y2="152" stroke="#DDD6FE" stroke-width="1" stroke-dasharray="6,4"/>
 
   <!-- Agent container -->
-  <rect x="40" y="168" width="640" height="108" rx="12" fill="#F9FAFB" stroke="#E5E7EB" stroke-width="1" stroke-dasharray="6,4"/>
+  <rect x="40" y="168" width="640" height="108" rx="12" fill="#F9FAFB" stroke-dasharray="6,4"/>
 
   <!-- Row 1: 4 agents -->
-  <rect x="58" y="182" width="120" height="36" rx="18" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="58" y="182" width="120" height="36" rx="18" fill="white"/>
   <text x="118" y="205" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">Gemini CLI</text>
 
-  <rect x="192" y="182" width="110" height="36" rx="18" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="192" y="182" width="110" height="36" rx="18" fill="white"/>
   <text x="247" y="205" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">Codex CLI</text>
 
-  <rect x="316" y="182" width="150" height="36" rx="18" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="316" y="182" width="150" height="36" rx="18" fill="white"/>
   <text x="391" y="205" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">security-sentinel</text>
 
-  <rect x="480" y="182" width="125" height="36" rx="18" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="480" y="182" width="125" height="36" rx="18" fill="white"/>
   <text x="542" y="205" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">perf-oracle</text>
 
   <!-- Row 2: 3 agents -->
-  <rect x="140" y="228" width="110" height="36" rx="18" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="140" y="228" width="110" height="36" rx="18" fill="white"/>
   <text x="195" y="251" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">simplicity</text>
 
-  <rect x="264" y="228" width="120" height="36" rx="18" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="264" y="228" width="120" height="36" rx="18" fill="white"/>
   <text x="324" y="251" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">conventions</text>
 
-  <rect x="398" y="228" width="120" height="36" rx="18" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="398" y="228" width="120" height="36" rx="18" fill="white"/>
   <text x="458" y="251" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">architecture</text>
 
   <!-- Down arrow -->
@@ -80,6 +80,6 @@
   <rect x="340" y="504" width="100" height="32" rx="16" fill="#F3F4F6"/>
   <text x="390" y="525" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#6B7280">P3 Minor</text>
 
-  <rect x="454" y="504" width="110" height="32" rx="16" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="454" y="504" width="110" height="32" rx="16" fill="white"/>
   <text x="509" y="525" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#9CA3AF">Suppressed</text>
 </svg>

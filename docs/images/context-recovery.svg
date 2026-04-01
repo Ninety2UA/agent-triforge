@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 440">
   <!-- Outer container -->
-  <rect width="720" height="440" rx="16" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect width="720" height="440" rx="16" fill="white"/>
 
   <!-- Context Recovery badge -->
   <rect x="224" y="28" width="272" height="44" rx="22" fill="#2D2B55"/>
@@ -18,7 +18,7 @@
   <text x="52" y="144" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#991B1B" letter-spacing="1">INNER LOOP</text>
   <text x="140" y="144" font-family="system-ui, sans-serif" font-size="11" fill="#9CA3AF">prevents premature exit</text>
 
-  <rect x="40" y="154" width="640" height="56" rx="10" fill="#F9FAFB" stroke="#E5E7EB" stroke-width="1" stroke-dasharray="6,4"/>
+  <rect x="40" y="154" width="640" height="56" rx="10" fill="#F9FAFB" stroke-dasharray="6,4"/>
   <rect x="56" y="165" width="140" height="34" rx="17" fill="white" stroke="#FCA5A5" stroke-width="1.5"/>
   <text x="126" y="187" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">ship-loop.sh</text>
   <text x="220" y="187" font-family="system-ui, sans-serif" font-size="12" fill="#6B7280">Stop hook blocks exit, re-injects prompt</text>
@@ -32,7 +32,7 @@
   <text x="52" y="258" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#1E40AF" letter-spacing="1">OUTER LOOP</text>
   <text x="142" y="258" font-family="system-ui, sans-serif" font-size="11" fill="#9CA3AF">spawns fresh sessions</text>
 
-  <rect x="40" y="268" width="640" height="56" rx="10" fill="#F9FAFB" stroke="#E5E7EB" stroke-width="1" stroke-dasharray="6,4"/>
+  <rect x="40" y="268" width="640" height="56" rx="10" fill="#F9FAFB" stroke-dasharray="6,4"/>
   <rect x="56" y="279" width="140" height="34" rx="17" fill="white" stroke="#93C5FD" stroke-width="1.5"/>
   <text x="126" y="301" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">coordinate.sh</text>
   <text x="220" y="301" font-family="system-ui, sans-serif" font-size="12" fill="#6B7280">Fresh 200K context, state via git</text>
@@ -46,8 +46,8 @@
   <text x="52" y="372" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#92400E" letter-spacing="1">ANALYSIS PARALYSIS</text>
   <text x="190" y="372" font-family="system-ui, sans-serif" font-size="11" fill="#9CA3AF">detects overthinking</text>
 
-  <rect x="40" y="382" width="640" height="44" rx="10" fill="#F9FAFB" stroke="#E5E7EB" stroke-width="1" stroke-dasharray="6,4"/>
-  <rect x="56" y="390" width="170" height="28" rx="14" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="40" y="382" width="640" height="44" rx="10" fill="#F9FAFB" stroke-dasharray="6,4"/>
+  <rect x="56" y="390" width="170" height="28" rx="14" fill="white"/>
   <text x="141" y="409" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">context-monitor.sh</text>
   <text x="250" y="409" font-family="system-ui, sans-serif" font-size="12" fill="#6B7280">Warns at 8+ reads without writes</text>
   <rect x="520" y="390" width="140" height="28" rx="14" fill="#FEF3C7" stroke="#FCD34D" stroke-width="1"/>

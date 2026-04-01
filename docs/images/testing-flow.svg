@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 400">
   <!-- Outer container -->
-  <rect width="720" height="400" rx="16" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect width="720" height="400" rx="16" fill="white"/>
 
   <!-- Test Pipeline badge -->
   <rect x="244" y="28" width="232" height="44" rx="22" fill="#2D2B55"/>
@@ -9,7 +9,7 @@
   <text x="376" y="56" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="700" fill="white">Test Pipeline</text>
 
   <!-- Command pill -->
-  <rect x="320" y="82" width="80" height="28" rx="14" fill="#F3F4F6" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="320" y="82" width="80" height="28" rx="14" fill="#F3F4F6"/>
   <text x="360" y="101" text-anchor="middle" font-family="'SF Mono', monospace" font-size="12" fill="#6B7280">/test</text>
 
   <!-- Label -->
@@ -21,12 +21,12 @@
   <!-- Step 1: Gap Analysis -->
   <text x="52" y="180" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#991B1B" letter-spacing="1">IDENTIFY GAPS</text>
 
-  <rect x="40" y="190" width="640" height="44" rx="10" fill="#F9FAFB" stroke="#E5E7EB" stroke-width="1" stroke-dasharray="6,4"/>
-  <rect x="56" y="198" width="165" height="28" rx="14" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="40" y="190" width="640" height="44" rx="10" fill="#F9FAFB" stroke-dasharray="6,4"/>
+  <rect x="56" y="198" width="165" height="28" rx="14" fill="white"/>
   <text x="138" y="217" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">test-gap-analyzer</text>
-  <rect x="235" y="198" width="180" height="28" rx="14" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="235" y="198" width="180" height="28" rx="14" fill="white"/>
   <text x="325" y="217" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">Untested code paths</text>
-  <rect x="429" y="198" width="150" height="28" rx="14" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="429" y="198" width="150" height="28" rx="14" fill="white"/>
   <text x="504" y="217" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">Missing edge cases</text>
 
   <!-- Arrow -->
@@ -35,10 +35,10 @@
   <!-- Step 2: Codex TDD -->
   <text x="52" y="282" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#92400E" letter-spacing="1">WRITE + RUN TESTS</text>
 
-  <rect x="40" y="292" width="640" height="44" rx="10" fill="#F9FAFB" stroke="#E5E7EB" stroke-width="1" stroke-dasharray="6,4"/>
-  <rect x="56" y="300" width="200" height="28" rx="14" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="40" y="292" width="640" height="44" rx="10" fill="#F9FAFB" stroke-dasharray="6,4"/>
+  <rect x="56" y="300" width="200" height="28" rx="14" fill="white"/>
   <text x="156" y="319" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">Codex CLI &#x2014; sandboxed</text>
-  <rect x="270" y="300" width="200" height="28" rx="14" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="270" y="300" width="200" height="28" rx="14" fill="white"/>
   <text x="370" y="319" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">RED &#x2192; GREEN &#x2192; REFACTOR</text>
   <rect x="484" y="300" width="170" height="28" rx="14" fill="#FEF3C7" stroke="#FCD34D" stroke-width="1"/>
   <text x="569" y="319" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#92400E">fix cycle until green</text>

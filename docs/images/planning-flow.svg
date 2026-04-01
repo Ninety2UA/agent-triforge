@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420">
   <!-- Outer container -->
-  <rect width="720" height="420" rx="16" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect width="720" height="420" rx="16" fill="white"/>
 
   <!-- Planning Pipeline badge -->
   <rect x="224" y="28" width="272" height="44" rx="22" fill="#2D2B55"/>
@@ -9,7 +9,7 @@
   <text x="376" y="56" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="700" fill="white">Planning Pipeline</text>
 
   <!-- Command pill -->
-  <rect x="320" y="82" width="80" height="28" rx="14" fill="#F3F4F6" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="320" y="82" width="80" height="28" rx="14" fill="#F3F4F6"/>
   <text x="360" y="101" text-anchor="middle" font-family="'SF Mono', monospace" font-size="12" fill="#6B7280">/plan</text>
 
   <!-- Label -->
@@ -22,10 +22,10 @@
   <text x="52" y="180" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#065F46" letter-spacing="1">PHASE 0</text>
   <text x="118" y="180" font-family="system-ui, sans-serif" font-size="11" fill="#9CA3AF">Codebase Analysis</text>
 
-  <rect x="40" y="190" width="640" height="44" rx="10" fill="#F9FAFB" stroke="#E5E7EB" stroke-width="1" stroke-dasharray="6,4"/>
-  <rect x="56" y="198" width="200" height="28" rx="14" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="40" y="190" width="640" height="44" rx="10" fill="#F9FAFB" stroke-dasharray="6,4"/>
+  <rect x="56" y="198" width="200" height="28" rx="14" fill="white"/>
   <text x="156" y="217" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">Gemini CLI &#x2014; full repo scan</text>
-  <rect x="270" y="198" width="160" height="28" rx="14" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="270" y="198" width="160" height="28" rx="14" fill="white"/>
   <text x="350" y="217" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">codebase-mapping skill</text>
   <rect x="444" y="198" width="110" height="28" rx="14" fill="#ECFDF5" stroke="#A7F3D0" stroke-width="1"/>
   <text x="499" y="217" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#065F46">1M context</text>
@@ -37,14 +37,14 @@
   <text x="52" y="282" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#5B21B6" letter-spacing="1">PHASE 1</text>
   <text x="118" y="282" font-family="system-ui, sans-serif" font-size="11" fill="#9CA3AF">Research + Decompose</text>
 
-  <rect x="40" y="292" width="640" height="44" rx="10" fill="#F9FAFB" stroke="#E5E7EB" stroke-width="1" stroke-dasharray="6,4"/>
-  <rect x="56" y="300" width="170" height="28" rx="14" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="40" y="292" width="640" height="44" rx="10" fill="#F9FAFB" stroke-dasharray="6,4"/>
+  <rect x="56" y="300" width="170" height="28" rx="14" fill="white"/>
   <text x="141" y="319" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">learnings-researcher</text>
-  <rect x="240" y="300" width="140" height="28" rx="14" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="240" y="300" width="140" height="28" rx="14" fill="white"/>
   <text x="310" y="319" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">Shadow path tracing</text>
-  <rect x="394" y="300" width="100" height="28" rx="14" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="394" y="300" width="100" height="28" rx="14" fill="white"/>
   <text x="444" y="319" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">Error maps</text>
-  <rect x="508" y="300" width="140" height="28" rx="14" fill="white" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="508" y="300" width="140" height="28" rx="14" fill="white"/>
   <text x="578" y="319" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#374151">Wave grouping</text>
 
   <!-- Arrow -->
