@@ -17,6 +17,9 @@ set -euo pipefail
 
 SHIP_STATE_FILE=".claude/ship-loop.local.md"
 
+# Ensure .claude/ directory exists for project-local state files
+mkdir -p .claude
+
 # --------------------------------------------------
 # 1. Read hook input from stdin (JSON from Claude Code)
 # --------------------------------------------------
