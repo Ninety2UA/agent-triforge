@@ -1,11 +1,15 @@
 # Changelog
 
-## [2026-04-01] — Fourth audit pass + session wrap
+## [2026-04-01] — Fourth audit, README polish, SVG cleanup
 
 ### Claude Code
 - Fourth audit pass (5 agents + manual 11-point verification) found and fixed last remaining issue: `ship-loop.sh` missing `mkdir -p .claude` guard
 - Documented plugin conversion solution in ops/solutions/2026-04-01-plugin-conversion.md
-- Updated README with complete 4-pass audit history, convergence table, and verification section
+- Updated README: complete 4-pass audit history, convergence table, verification section
+- Added "What's new (v2.0.0)" section to README (plugin install, ship-loop rewrite, audit summary, bootstrapping)
+- Fixed hero SVG: "8 reviewers" → "7 reviewers"
+- Fixed TASKS.md table entry: marked as `(runtime)` since it's generated, not committed
+- Removed outer border strokes from all 10 diagram SVGs for cleaner appearance
 - All 49 framework components verified clean across 20 parallel agents + manual checks
 
 ## [2026-03-31] — v2.0.0: Claude Code plugin conversion
