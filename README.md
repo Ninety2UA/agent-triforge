@@ -46,6 +46,51 @@ The framework achieves this through **institutional knowledge compounding**: eve
 
 ---
 
+## What's new (v2.0.0)
+
+### Claude Code plugin
+
+The framework is now a **Claude Code plugin** — install with one command, update with one command. No more git clone, no manual file copying, no `.claude/settings.json` editing.
+
+```bash
+claude plugin add https://github.com/Ninety2UA/multi-agent-framework
+```
+
+All agents, skills, commands, and hooks register automatically. Your project's `ops/` directory is bootstrapped on first session.
+
+### Ship-loop rewrite (Blueprint alignment)
+
+The Stop hook was rewritten to match the [Claude Code Blueprint](https://github.com/Ninety2UA/claude-code-blueprint)'s architecture:
+
+- **JSON output** `{decision, reason, systemMessage}` — re-injects the original goal on each iteration
+- **Session isolation** — only blocks the session that started the sprint via `session_id` matching
+- **Transcript-based promise detection** — reads the actual JSONL transcript to find `<promise>DONE</promise>`
+- **JSON-safe encoding** — uses `python3 json.dumps()` so goals with quotes/newlines don't break the output
+- **Atomic state updates** — temp file + `mv` instead of `sed -i`
+
+### Four-pass audit (20 agents)
+
+Every component in the framework was reviewed by parallel audit agents across 4 passes, converging from **5 critical issues to zero**:
+
+| Pass | Issues found | Key fixes |
+|---|---|---|
+| 1st | 4 critical, 10 high | Hooks were reading non-existent env vars (stdin JSON fix), README shipped broken config |
+| 2nd | 1 critical, 8 high | JSON injection in ship-loop, missing PID captures, path consistency |
+| 3rd | 3 critical, 7 high | Post-migration stale docs, `mkdir .claude` guards, deep-research PID |
+| 4th | 1 high | Last hook missing `mkdir` guard |
+
+Plus a manual 11-point verification: bash syntax, JSON validity, stale path scans, file counts, executable permissions, `mkdir` guards, stdin parsing, agent cross-references, plugin hook paths, and state file template compatibility.
+
+### Automatic project bootstrapping
+
+On first session in a new project, the `session-start.sh` hook:
+- Creates `ops/solutions/`, `ops/decisions/`, `ops/archive/`
+- Copies skeleton `MEMORY.md` and `CHANGELOG.md` from plugin templates
+- Suggests copying the `CLAUDE.md` template if not present
+- Creates `.claude/` directory for session state files
+
+---
+
 ## Project structure
 
 The plugin provides agents, skills, commands, and hooks. Your project gets an `ops/` directory for state:
