@@ -554,14 +554,26 @@ The framework was converted from a `git clone` + manual copy installation to a *
 
 - **Install:** `claude plugin add https://github.com/Ninety2UA/multi-agent-framework`
 - **Update:** `claude plugin update multi-agent-framework`
-- All components moved from `.claude/` to root level (`agents/`, `skills/`, `commands/`, `hooks/`)
-- Hook registration moved to `hooks/hooks.json` with `${CLAUDE_PLUGIN_ROOT}` paths
-- Session-start hook now bootstraps `ops/` directory automatically on first run
-- Templates provided for CLAUDE.md and ops/ skeleton files
+- All components moved to root level (`agents/`, `skills/`, `commands/`, `hooks/`)
+- Plugin manifest at `.claude-plugin/plugin.json` (v2.0.0)
+- Hook registration via `hooks/hooks.json` with `${CLAUDE_PLUGIN_ROOT}` paths
+- Root `settings.json` for env vars (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`)
+- Session-start hook bootstraps `ops/` directory + copies skeleton templates on first run
+- CLAUDE.md template provided at `templates/CLAUDE.md` for user projects
+- All skill injection paths use `${CLAUDE_PLUGIN_ROOT}/skills/` (8 files updated)
+- `docs/multi-agent-framework.md` updated: plugin layout, hooks.json config, removed stale settings block
+- Solution docs updated for plugin hook system
 
-### 2026-03-31 — Comprehensive audit and Blueprint alignment
+### 2026-03-31 — Four-pass audit and Blueprint alignment
 
-Two full audit passes (10 parallel agents total) reviewed all 49 framework components (3 hooks, 16 commands, 12 skills, 18 agents). The first pass found **4 critical**, **10 high**, and **~20 medium** issues. A second verification pass caught **1 additional critical** (JSON injection), **8 high**, and **4 medium** issues introduced or missed in the first round. All issues have been fixed.
+Four full audit passes (**20 parallel agents** + manual 11-point verification) reviewed all 49 framework components (3 hooks, 16 commands, 12 skills, 18 agents). Each pass caught issues the previous missed — converging to zero remaining defects.
+
+| Pass | Found | Fixed |
+|---|---|---|
+| 1st (5 agents) | 4 critical, 10 high, ~20 medium | Hooks stdin parsing, README config, coordinate.md guard, all high+medium |
+| 2nd (5 agents) | 1 critical, 8 high, 4 medium | JSON injection, PID captures, path consistency, reviewer coverage |
+| 3rd (5 agents) | 3 critical, 7 high, 6 medium | mkdir .claude in hooks, stale docs, deep-research PID, ops refs |
+| 4th (5 agents + manual) | 1 high | ship-loop.sh mkdir guard (last hook missing it) |
 
 <details>
 <summary><strong>Critical fixes</strong></summary>
@@ -604,6 +616,11 @@ The Stop hook was rewritten to match the [Claude Code Blueprint](https://github.
 - **`ship.md`**, **`plan.md`**, **`coordinate.md`** Phase 0 Gemini invocations now capture `GEMINI_PID` and `wait` (were backgrounded with no wait)
 - **`coordinate.md`** Phase 3 now includes all 5 review agents (was missing `convention-enforcer` and `architecture-strategist`)
 - **`pr-comment-resolver.md`** now checks `gh auth status` before fetching PR comments (was a hard failure if `gh` CLI unavailable)
+- **All 3 hook scripts** now have `mkdir -p .claude` guards for project-local state files (`.claude/` dir no longer exists after plugin migration)
+- **`deep-research.md`** added `GEMINI_PID` capture + `wait` for background Gemini process
+- **`docs/multi-agent-framework.md`** rewrote repo tree + settings section for plugin layout (was still showing old structure)
+- **`ops/solutions/settings-json`** updated for plugin `hooks/hooks.json` approach
+- **Stale comment cleanup** in hook script headers (referenced old `.claude/settings.json`)
 </details>
 
 <details>
@@ -621,6 +638,13 @@ The Stop hook was rewritten to match the [Claude Code Blueprint](https://github.
 </details>
 
 Documented solutions: [`ops/solutions/2026-03-31-hooks-stdin-json-parsing.md`](ops/solutions/2026-03-31-hooks-stdin-json-parsing.md)
+
+### Verification
+
+The framework has been validated through:
+- **20 parallel audit agents** across 4 passes (hooks, commands, skills, agents, infrastructure)
+- **Manual 11-point verification**: bash syntax, JSON validity, stale path scans, file counts, skill injection paths, executable permissions, mkdir guards, stdin parsing, agent cross-references, plugin hook paths, state file template compatibility
+- All checks pass. Runtime behavior (plugin installation, hook firing, `${CLAUDE_PLUGIN_ROOT}` expansion) requires live testing via `claude --plugin-dir .`
 
 ---
 
