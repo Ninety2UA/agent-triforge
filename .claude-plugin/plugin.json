@@ -1,13 +1,13 @@
 {
-  "name": "multi-agent-framework",
-  "version": "2.0.0",
-  "description": "Multi-agent coordination framework: Claude Code as lead agent orchestrating Gemini CLI, Codex CLI, and 18 specialized subagents through file-based protocols, portable skills, and parallel review swarms.",
+  "name": "agent-triforge",
+  "version": "2.1.0",
+  "description": "Agent Triforge — Three AI models forging production-grade code together. Claude Code orchestrates Gemini CLI, Codex CLI, and 18 specialized subagents through file-based protocols, portable skills, and parallel review swarms.",
   "author": {
     "name": "Ninety2UA",
     "url": "https://github.com/Ninety2UA"
   },
-  "repository": "https://github.com/Ninety2UA/multi-agent-framework",
+  "repository": "https://github.com/Ninety2UA/agent-triforge",
   "license": "MIT",
-  "keywords": ["multi-agent", "gemini", "codex", "coordination", "sprint", "review-swarm", "wave-orchestration"],
+  "keywords": ["agent-triforge", "multi-agent", "gemini", "codex", "coordination", "sprint", "review-swarm", "wave-orchestration"],
   "hooks": "./hooks/hooks.json"
 }

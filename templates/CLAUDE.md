@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working with code in this project. It works with the **multi-agent-framework** plugin.
+This file provides guidance to Claude Code when working with code in this project. It works with the **Agent Triforge** plugin.
 
 ## Project overview
 

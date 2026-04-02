@@ -21,8 +21,8 @@
 - Updated all skill injection paths: `.claude/skills/` → `${CLAUDE_PLUGIN_ROOT}/skills/`
 - Added ops/ bootstrapping to `session-start.sh` (creates dirs + copies templates on first run)
 - Created `templates/CLAUDE.md` and `templates/ops/` for project bootstrapping
-- Install: `claude plugin add https://github.com/Ninety2UA/multi-agent-framework`
-- Update: `claude plugin update multi-agent-framework`
+- Install: `claude plugin add https://github.com/Ninety2UA/agent-triforge`
+- Update: `claude plugin update agent-triforge`
 - Updated README, CLAUDE.md, and docs for plugin structure
 
 ## [2026-03-31] — Comprehensive framework audit, fix pass, and Blueprint alignment
@@ -124,7 +124,7 @@
   - context-monitor.sh (PostToolUse — analysis paralysis detection)
 - Created scripts/coordinate.sh (outer loop for context exhaustion recovery)
 - Created ops/solutions/ and ops/decisions/ directories for knowledge compounding
-- Wrote comprehensive docs/multi-agent-framework.md with all phases, protocols, and patterns
+- Wrote comprehensive docs/agent-triforge.md with all phases, protocols, and patterns
 - Updated CLAUDE.md with full framework reference
 - Created README.md with SVG hero banner, sprint lifecycle diagram, review swarm diagram, quality gates visualization, and knowledge loop diagram
-- Published to GitHub: github.com/Ninety2UA/multi-agent-framework
+- Published to GitHub: github.com/Ninety2UA/agent-triforge

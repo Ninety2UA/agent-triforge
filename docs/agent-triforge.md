@@ -1203,13 +1203,13 @@ YOU: Review summary, check CHANGELOG, approve or request changes
 ### Plugin installation
 
 ```bash
-claude plugin add https://github.com/Ninety2UA/multi-agent-framework
+claude plugin add https://github.com/Ninety2UA/agent-triforge
 ```
 
 The plugin provides agents, skills, commands, and hooks automatically. Your project gets an `ops/` directory (bootstrapped on first session):
 
 ```
-multi-agent-framework/              (plugin — installed automatically)
+agent-triforge/                     (plugin — installed automatically)
 ├── .claude-plugin/plugin.json        Plugin manifest
 ├── agents/                           18 specialized agent definitions
 ├── skills/                           12 portable workflow modules

@@ -28,4 +28,4 @@ When creating new skills, write them model-agnostically — no Claude-specific t
 
 ## Related
 - skills/ directory (12 skills, at plugin root)
-- docs/multi-agent-framework.md (Portable skill protocol section)
+- docs/agent-triforge.md (Portable skill protocol section)

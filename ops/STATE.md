@@ -33,7 +33,7 @@ v2.0.0 plugin conversion + four-pass audit + README polish + SVG cleanup.
 - Runtime behavior (plugin install, hook firing, ${CLAUDE_PLUGIN_ROOT} expansion) requires live testing.
 
 ## Recommended next actions
-1. **Live test**: `claude --plugin-dir /path/to/multi-agent-framework` in a fresh project
+1. **Live test**: `claude --plugin-dir /path/to/agent-triforge` in a fresh project
 2. Run `/ship` on a real goal for end-to-end validation
 3. Verify Gemini/Codex skill injection with ${CLAUDE_PLUGIN_ROOT} paths
 4. Consider publishing to a Claude Code plugin marketplace

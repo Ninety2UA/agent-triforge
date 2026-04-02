@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="docs/images/hero-banner.svg" alt="Multi-Agent Framework — Hybrid coordination for Claude Code, Gemini CLI, and Codex CLI" width="100%">
+  <img src="docs/images/hero-banner.svg" alt="Agent Triforge — Three AI models forging production-grade code together" width="100%">
 </p>
 
 <p align="center">
-  <strong>Hybrid multi-agent coordination where Claude Code orchestrates Gemini CLI, Codex CLI, and specialized subagents through file-based protocols, portable skills, and parallel review swarms.</strong>
+  <strong>Agent Triforge — Three AI models forging production-grade code together. Claude Code orchestrates Gemini CLI, Codex CLI, and specialized subagents through file-based protocols, portable skills, and parallel review swarms.</strong>
 </p>
 
 <p align="center">
@@ -53,7 +53,7 @@ The framework achieves this through **institutional knowledge compounding**: eve
 The framework is now a **Claude Code plugin** — install with one command, update with one command. No more git clone, no manual file copying, no `.claude/settings.json` editing.
 
 ```bash
-claude plugin add https://github.com/Ninety2UA/multi-agent-framework
+claude plugin add https://github.com/Ninety2UA/agent-triforge
 ```
 
 All agents, skills, commands, and hooks register automatically. Your project's `ops/` directory is bootstrapped on first session.
@@ -96,7 +96,7 @@ On first session in a new project, the `session-start.sh` hook:
 The plugin provides agents, skills, commands, and hooks. Your project gets an `ops/` directory for state:
 
 ```
-multi-agent-framework/              (plugin — installed automatically)
+agent-triforge/                     (plugin — installed automatically)
 ├── .claude-plugin/plugin.json        Plugin manifest
 ├── agents/                           18 specialized agent definitions
 ├── skills/                           12 portable workflow modules
@@ -309,10 +309,10 @@ codex exec "Respond with only: READY"
 
 ```bash
 # User scope (available in all your projects)
-claude plugin add https://github.com/Ninety2UA/multi-agent-framework
+claude plugin add https://github.com/Ninety2UA/agent-triforge
 
 # Or project scope (shared with team via .claude/settings.json)
-claude plugin add https://github.com/Ninety2UA/multi-agent-framework --scope project
+claude plugin add https://github.com/Ninety2UA/agent-triforge --scope project
 ```
 
 That's it. No manual configuration needed — hooks, env vars, agents, skills, and commands are all registered automatically by the plugin system.
@@ -322,14 +322,14 @@ On first session, the plugin bootstraps your project's `ops/` directory and sugg
 ### Update
 
 ```bash
-claude plugin update multi-agent-framework
+claude plugin update agent-triforge
 ```
 
 ### Development (for contributors)
 
 ```bash
-git clone https://github.com/Ninety2UA/multi-agent-framework.git
-claude --plugin-dir ./multi-agent-framework
+git clone https://github.com/Ninety2UA/agent-triforge.git
+claude --plugin-dir ./agent-triforge
 ```
 
 ### Verify installation
@@ -646,8 +646,8 @@ Informed by a deep comparative analysis against the [official Codex plugin](http
 
 The framework was converted from a `git clone` + manual copy installation to a **Claude Code plugin**. This is a breaking change in how you install and update the framework.
 
-- **Install:** `claude plugin add https://github.com/Ninety2UA/multi-agent-framework`
-- **Update:** `claude plugin update multi-agent-framework`
+- **Install:** `claude plugin add https://github.com/Ninety2UA/agent-triforge`
+- **Update:** `claude plugin update agent-triforge`
 - All components moved to root level (`agents/`, `skills/`, `commands/`, `hooks/`)
 - Plugin manifest at `.claude-plugin/plugin.json` (v2.0.0)
 - Hook registration via `hooks/hooks.json` with `${CLAUDE_PLUGIN_ROOT}` paths
@@ -655,7 +655,7 @@ The framework was converted from a `git clone` + manual copy installation to a *
 - Session-start hook bootstraps `ops/` directory + copies skeleton templates on first run
 - CLAUDE.md template provided at `templates/CLAUDE.md` for user projects
 - All skill injection paths use `${CLAUDE_PLUGIN_ROOT}/skills/` (8 files updated)
-- `docs/multi-agent-framework.md` updated: plugin layout, hooks.json config, removed stale settings block
+- `docs/agent-triforge.md` updated: plugin layout, hooks.json config, removed stale settings block
 - Solution docs updated for plugin hook system
 
 ### 2026-03-31 — Four-pass audit and Blueprint alignment
@@ -712,7 +712,7 @@ The Stop hook was rewritten to match the [Claude Code Blueprint](https://github.
 - **`pr-comment-resolver.md`** now checks `gh auth status` before fetching PR comments (was a hard failure if `gh` CLI unavailable)
 - **All 3 hook scripts** now have `mkdir -p .claude` guards for project-local state files (`.claude/` dir no longer exists after plugin migration)
 - **`deep-research.md`** added `GEMINI_PID` capture + `wait` for background Gemini process
-- **`docs/multi-agent-framework.md`** rewrote repo tree + settings section for plugin layout (was still showing old structure)
+- **`docs/agent-triforge.md`** rewrote repo tree + settings section for plugin layout (was still showing old structure)
 - **`ops/solutions/settings-json`** updated for plugin `hooks/hooks.json` approach
 - **Stale comment cleanup** in hook script headers (referenced old `.claude/settings.json`)
 </details>
@@ -753,7 +753,7 @@ MIT
 </p>
 
 <p align="center">
-  <a href="docs/multi-agent-framework.md">Full Documentation</a> ·
+  <a href="docs/agent-triforge.md">Full Documentation</a> ·
   <a href="CLAUDE.md">CLAUDE.md</a> ·
   <a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a> ·
   <a href="https://github.com/openai/codex">Codex CLI</a>

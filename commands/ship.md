@@ -3,7 +3,7 @@ description: "Fully autonomous end-to-end sprint: analyze → plan → validate 
 argument-hint: "<goal description> [--convergence fast|standard|deep] [--team]"
 ---
 
-You are running a fully autonomous multi-agent sprint. Follow the complete framework lifecycle (docs/multi-agent-framework.md).
+You are running a fully autonomous multi-agent sprint. Follow the complete framework lifecycle (docs/agent-triforge.md).
 
 ## Input
 Goal: $ARGUMENTS

@@ -90,7 +90,7 @@ $USE_TEAM
 FIRST: Read ops/STATE.md to understand where the previous session left off.
 If this is iteration 1 and no STATE.md exists, start from Phase 0.
 
-Follow the multi-agent framework (docs/multi-agent-framework.md):
+Follow the Agent Triforge framework (docs/agent-triforge.md):
 - Phase 0: Codebase analysis (Gemini) — skip if STATE.md shows Phase 0 complete
 - Phase 1: Planning — skip if TASKS.md already exists for this goal
 - Phase 1.5: Plan validation — run plan-checker agent
@@ -109,7 +109,7 @@ When ALL work is verified complete, emit: <promise>DONE</promise>"
   # Check for completion signal
   if echo "$OUTPUT" | grep -q '<promise>DONE</promise>'; then
     DONE=true
-    notify "Multi-Agent Framework" "Sprint complete — converged in $ITERATION iterations"
+    notify "Agent Triforge" "Sprint complete — converged in $ITERATION iterations"
     echo ""
     echo "=== Sprint complete at iteration $ITERATION ==="
   else
@@ -121,7 +121,7 @@ done
 if [ "$DONE" = "false" ]; then
   echo ""
   echo "=== Max iterations ($MAX_ITERATIONS) reached without completion ==="
-  notify "Multi-Agent Framework" "Sprint did NOT converge after $MAX_ITERATIONS iterations"
+  notify "Agent Triforge" "Sprint did NOT converge after $MAX_ITERATIONS iterations"
   echo "Check ops/STATE.md for current progress."
   echo "Check ops/TASKS.md for remaining tasks."
   echo "Run again to continue, or review manually."

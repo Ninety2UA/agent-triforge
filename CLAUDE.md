@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ## Project overview
 
-This is a **Claude Code plugin** providing a multi-agent coordination framework where Claude Code serves as the **lead agent**, orchestrating Gemini CLI, Codex CLI, and specialized Claude subagents through a hybrid file-based + bash-invocation + native-subagent protocol. The framework is defined in `docs/multi-agent-framework.md`.
+This is a **Claude Code plugin** — **Agent Triforge** — providing a multi-agent coordination framework where Claude Code serves as the **lead agent**, orchestrating Gemini CLI, Codex CLI, and specialized Claude subagents through a hybrid file-based + bash-invocation + native-subagent protocol. The framework is defined in `docs/agent-triforge.md`.
 
-Install: `claude plugin add https://github.com/Ninety2UA/multi-agent-framework`
+Install: `claude plugin add https://github.com/Ninety2UA/agent-triforge`
 
 ## Architecture
 

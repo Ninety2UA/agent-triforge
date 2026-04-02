@@ -3,7 +3,7 @@ description: "Run the full Phase 0-6 multi-agent sprint cycle for a goal."
 argument-hint: "<goal description>"
 ---
 
-You are running a full multi-agent sprint cycle. Follow docs/multi-agent-framework.md through ALL phases.
+You are running a full multi-agent sprint cycle. Follow docs/agent-triforge.md through ALL phases.
 
 ## Goal
 $ARGUMENTS

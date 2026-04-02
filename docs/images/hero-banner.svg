@@ -36,12 +36,12 @@
 
   <!-- Main title -->
   <text x="80" y="155" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="46" font-weight="700" fill="#FEFCF9" letter-spacing="-1">
-    Multi-Agent Framework
+    Agent Triforge
   </text>
 
   <!-- Subtitle -->
   <text x="80" y="195" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="22" fill="#D4A574" font-weight="400">
-    Hybrid coordination for Claude Code, Gemini CLI, and Codex CLI
+    Three AI models forging production-grade code together
   </text>
 
   <!-- Tags (outlined pills — all gold/tan) -->
