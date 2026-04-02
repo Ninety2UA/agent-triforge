@@ -284,70 +284,52 @@ a:hover { color: var(--amber); }
 
 /* ═══ Feature Cards (Bento) ═══ */
 .bento {
-  display: grid; grid-template-columns: 1fr; gap: 20px;
+  display: grid; grid-template-columns: 1fr; gap: 16px;
   grid-auto-rows: 1fr;
 }
 .bento__card {
-  background: var(--forge-card); border: 1px solid var(--forge-border);
-  border-radius: 16px; padding: 36px 32px 32px; position: relative; overflow: hidden;
-  transition: transform 0.35s cubic-bezier(.22,.68,0,1), border-color 0.3s, box-shadow 0.35s;
+  background: linear-gradient(165deg, var(--forge-surface) 0%, var(--forge-card) 100%);
+  border: 1px solid var(--forge-border);
+  border-radius: 16px; padding: 32px; position: relative; overflow: hidden;
+  transition: transform 0.35s cubic-bezier(.22,.68,0,1), border-color 0.35s, box-shadow 0.35s;
   cursor: default;
-  border-top: 3px solid transparent;
+  display: flex; flex-direction: column;
 }
-.bento__card:nth-child(1) { border-image: linear-gradient(90deg, var(--molten), var(--amber)) 1; }
-.bento__card:nth-child(2) { border-image: linear-gradient(90deg, var(--steel), var(--steel-light)) 1; }
-.bento__card:nth-child(3) { border-image: linear-gradient(90deg, var(--gold), var(--amber)) 1; }
-.bento__card:nth-child(4) { border-image: linear-gradient(90deg, var(--ember), var(--molten)) 1; }
-.bento__card:nth-child(5) { border-image: linear-gradient(90deg, var(--molten-light), var(--gold)) 1; }
-.bento__card:nth-child(6) { border-image: linear-gradient(90deg, var(--steel), var(--molten)) 1; }
-
-.bento__card::after {
-  content: ''; position: absolute; inset: 0;
-  background: linear-gradient(180deg, rgba(255,107,43,0.03) 0%, transparent 40%);
-  pointer-events: none; opacity: 0; transition: opacity 0.3s;
-}
-.bento__card:hover::after { opacity: 1; }
 .bento__card:hover {
-  transform: translateY(-6px);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35), 0 0 30px rgba(255, 107, 43, 0.06);
+  transform: translateY(-5px); border-color: rgba(255,107,43,0.3);
+  box-shadow:
+    0 20px 50px rgba(0,0,0,0.4),
+    inset 0 1px 0 rgba(255,255,255,0.04);
 }
 .bento__card--wide { grid-column: span 1; }
+
+/* Icon row with number */
+.bento__top {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 20px;
+}
 .bento__icon {
-  width: 52px; height: 52px; border-radius: 14px; display: flex;
-  align-items: center; justify-content: center; margin-bottom: 22px;
-  font-size: 22px; font-weight: 700; font-family: var(--font-mono);
-  position: relative; z-index: 1;
+  width: 48px; height: 48px; border-radius: 12px; display: flex;
+  align-items: center; justify-content: center;
 }
-.bento__icon--molten {
-  background: linear-gradient(135deg, rgba(255,107,43,0.15), rgba(255,107,43,0.05));
-  color: var(--molten-light); box-shadow: 0 0 20px rgba(255,107,43,0.08);
+.bento__icon--molten { background: rgba(255,107,43,0.1); color: var(--molten-light); }
+.bento__icon--steel { background: rgba(74,158,255,0.1); color: var(--steel-light); }
+.bento__icon--ember { background: rgba(232,69,69,0.1); color: var(--ember); }
+.bento__icon--gold { background: rgba(255,215,0,0.1); color: var(--gold); }
+
+.bento__num {
+  font-family: var(--font-mono); font-size: 28px; font-weight: 800;
+  color: var(--forge-border-light); line-height: 1; user-select: none;
+  transition: color 0.3s;
 }
-.bento__icon--steel {
-  background: linear-gradient(135deg, rgba(74,158,255,0.15), rgba(74,158,255,0.05));
-  color: var(--steel-light); box-shadow: 0 0 20px rgba(74,158,255,0.08);
-}
-.bento__icon--ember {
-  background: linear-gradient(135deg, rgba(232,69,69,0.15), rgba(232,69,69,0.05));
-  color: var(--ember); box-shadow: 0 0 20px rgba(232,69,69,0.08);
-}
-.bento__icon--gold {
-  background: linear-gradient(135deg, rgba(255,215,0,0.15), rgba(255,215,0,0.05));
-  color: var(--gold); box-shadow: 0 0 20px rgba(255,215,0,0.08);
-}
+.bento__card:hover .bento__num { color: rgba(255,107,43,0.2); }
+
 .bento__card h3 {
-  font-size: 21px; font-weight: 700; margin-bottom: 10px;
-  position: relative; z-index: 1;
+  font-size: 19px; font-weight: 700; margin-bottom: 10px;
 }
 .bento__card p {
-  color: var(--text-secondary); font-size: 15px; line-height: 1.7;
-  position: relative; z-index: 1;
-}
-.bento__num {
-  position: absolute; bottom: 12px; right: 20px; font-family: var(--font-mono);
-  font-size: 64px; font-weight: 900; line-height: 1;
-  background: linear-gradient(180deg, rgba(255,107,43,0.1), rgba(255,107,43,0.02));
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  background-clip: text; user-select: none; z-index: 0;
+  color: var(--text-secondary); font-size: 14.5px; line-height: 1.7;
+  flex: 1;
 }
 
 @media (min-width: 768px) {
@@ -995,47 +977,59 @@ body::after {
     </div>
     <div class="bento reveal-stagger">
       <div class="bento__card bento__card--wide glow-card">
-        <div class="bento__icon bento__icon--molten">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        <div class="bento__top">
+          <div class="bento__icon bento__icon--molten">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          </div>
+          <span class="bento__num">3</span>
         </div>
         <h3>Three-Model Orchestration</h3>
         <p>Claude Code (Opus) as lead agent, Gemini CLI for 1M-token codebase analysis, Codex CLI for sandboxed test execution. Each assigned by a heuristic matrix to what they do best.</p>
-        <span class="bento__num">3</span>
       </div>
       <div class="bento__card glow-card">
-        <div class="bento__icon bento__icon--steel">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        <div class="bento__top">
+          <div class="bento__icon bento__icon--steel">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          </div>
+          <span class="bento__num">18</span>
         </div>
         <h3>18 Specialized Agents</h3>
         <p>Security sentinel, performance oracle, architecture strategist, test-gap analyzer, findings synthesizer, and 13 more — each with restricted tools and focused expertise.</p>
-        <span class="bento__num">18</span>
       </div>
       <div class="bento__card glow-card">
-        <div class="bento__icon bento__icon--gold">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+        <div class="bento__top">
+          <div class="bento__icon bento__icon--gold">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+          </div>
+          <span class="bento__num">12</span>
         </div>
         <h3>12 Portable Skills</h3>
         <p>Model-agnostic workflow modules injected into any agent — TDD, systematic debugging, wave orchestration, shadow-path tracing, knowledge compounding.</p>
-        <span class="bento__num">12</span>
       </div>
       <div class="bento__card glow-card">
-        <div class="bento__icon bento__icon--ember">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        <div class="bento__top">
+          <div class="bento__icon bento__icon--ember">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </div>
+          <span class="bento__num">7</span>
         </div>
         <h3>Parallel Review Swarm</h3>
         <p>Up to 7 reviewers analyze code simultaneously — Gemini + Codex + 5 Claude specialist agents — then a findings-synthesizer merges with confidence tiering.</p>
-        <span class="bento__num">7</span>
       </div>
       <div class="bento__card glow-card">
-        <div class="bento__icon bento__icon--molten">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <div class="bento__top">
+          <div class="bento__icon bento__icon--molten">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </div>
         </div>
         <h3>Knowledge Compounding</h3>
         <p>Every non-trivial solution is documented in <code>ops/solutions/</code>. A learnings-researcher automatically searches these before planning new work.</p>
       </div>
       <div class="bento__card bento__card--wide glow-card">
-        <div class="bento__icon bento__icon--steel">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <div class="bento__top">
+          <div class="bento__icon bento__icon--steel">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
         </div>
         <h3>File-Based Coordination Protocol</h3>
         <p>All agents coordinate through shared markdown in <code>ops/</code> — TASKS.md, MEMORY.md, CHANGELOG.md, STATE.md, CONTRACTS.md. Auditable, git-friendly, debuggable. No custom RPC, no databases — just files.</p>
