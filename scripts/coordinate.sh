@@ -50,6 +50,21 @@ if [ -z "$GOAL" ]; then
   exit 1
 fi
 
+# --- Notification (optional, env-var-gated) ---
+notify() {
+  local title="$1" body="$2"
+  if [ -n "${NOTIFY_WEBHOOK_URL:-}" ]; then
+    curl -s -X POST "$NOTIFY_WEBHOOK_URL" \
+      -H "Content-Type: application/json" \
+      -d "{\"text\": \"$title: $body\"}" > /dev/null 2>&1 || true
+  fi
+  if command -v osascript &>/dev/null; then
+    osascript -e "display notification \"$body\" with title \"$title\"" 2>/dev/null || true
+  elif command -v notify-send &>/dev/null; then
+    notify-send "$title" "$body" 2>/dev/null || true
+  fi
+}
+
 PROGRESS_FILE="ops/STATE.md"
 ITERATION=0
 DONE=false
@@ -94,6 +109,7 @@ When ALL work is verified complete, emit: <promise>DONE</promise>"
   # Check for completion signal
   if echo "$OUTPUT" | grep -q '<promise>DONE</promise>'; then
     DONE=true
+    notify "Multi-Agent Framework" "Sprint complete — converged in $ITERATION iterations"
     echo ""
     echo "=== Sprint complete at iteration $ITERATION ==="
   else
@@ -105,6 +121,7 @@ done
 if [ "$DONE" = "false" ]; then
   echo ""
   echo "=== Max iterations ($MAX_ITERATIONS) reached without completion ==="
+  notify "Multi-Agent Framework" "Sprint did NOT converge after $MAX_ITERATIONS iterations"
   echo "Check ops/STATE.md for current progress."
   echo "Check ops/TASKS.md for remaining tasks."
   echo "Run again to continue, or review manually."

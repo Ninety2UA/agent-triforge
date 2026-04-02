@@ -35,7 +35,13 @@ Focus on:
 
 Write a targeted analysis (not full ARCHITECTURE.md — just this topic)." > /tmp/gemini_research.txt 2>&1 &
 GEMINI_PID=$!
-wait $GEMINI_PID
+
+# Wait with timeout (10 min)
+AGENT_TIMEOUT=600
+( sleep $AGENT_TIMEOUT && kill -TERM $GEMINI_PID 2>/dev/null && sleep 5 && kill -9 $GEMINI_PID 2>/dev/null ) &
+WD=$!
+wait $GEMINI_PID 2>/dev/null
+kill $WD 2>/dev/null; wait $WD 2>/dev/null
 ```
 
 ### Agent 5: best-practices-researcher

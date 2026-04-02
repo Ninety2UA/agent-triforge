@@ -65,6 +65,22 @@ When you find the proximate cause, ask "why" up to 5 times:
 3. Run the full test suite — no regressions
 4. Log the root cause in MEMORY.md#Gotchas for future reference
 
+## Escalation ceiling (circuit breaker)
+
+If the same failing test or error recurs after 3 consecutive fix attempts:
+
+1. **STOP** — do not attempt a 4th fix
+2. Produce an escalation report:
+   - Error signature (test name or error message)
+   - What was tried (3 attempts summarized)
+   - Assumption ledger state (which assumptions were verified/disproven)
+   - Hypothesis: why the fix isn't working
+   - Suggested next step (different approach, user input needed, or upstream dependency)
+3. Surface the report to the user or team-lead for decision
+4. Do NOT continue iterating on the same failure — switch to a different task or wait for guidance
+
+This prevents infinite loops on hard bugs. The session-level ship-loop has its own iteration ceiling, but this rule catches per-issue repetition within a single session.
+
 ## Output
 
 Produce a structured diagnosis:

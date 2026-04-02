@@ -31,7 +31,13 @@ Invoke Gemini with codebase-mapping skill (skip if unnecessary):
 ```bash
 gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md) Analyze the full codebase. Write to ops/ARCHITECTURE.md, ops/MEMORY.md (append), ops/CONTRACTS.md (append)." > /tmp/gemini_phase0.txt 2>&1 &
 GEMINI_PID=$!
-wait $GEMINI_PID
+
+# Wait with timeout (10 min)
+AGENT_TIMEOUT=600
+( sleep $AGENT_TIMEOUT && kill -TERM $GEMINI_PID 2>/dev/null && sleep 5 && kill -9 $GEMINI_PID 2>/dev/null ) &
+WD=$!
+wait $GEMINI_PID 2>/dev/null
+kill $WD 2>/dev/null; wait $WD 2>/dev/null
 ```
 Read updated ops/ files after completion.
 

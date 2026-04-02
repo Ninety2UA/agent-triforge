@@ -84,6 +84,18 @@ CODEX_PID=$!
 wait $GEMINI_PID $CODEX_PID
 ```
 
+### Git trailer conventions
+
+Commits include structured trailers for decision context:
+
+| Trailer | When to use |
+|---|---|
+| `Constraint:` | What forced this approach (always include on non-trivial commits) |
+| `Rejected:` | Alternative considered and why it was dropped |
+| `Confidence:` | high/medium/low — certainty level (always include) |
+| `Scope-risk:` | What could break outside changed files |
+| `Not-tested:` | Known test coverage gaps |
+
 ## Prerequisites
 
 All three CLIs must be installed and working in non-interactive mode:

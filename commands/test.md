@@ -53,7 +53,13 @@ AFTER TESTING:
 - Update ops/CHANGELOG.md
 - If tests fail on existing code, log as tasks assigned to Claude in ops/TASKS.md" > /tmp/codex_test.txt 2>&1 &
 CODEX_PID=$!
-wait $CODEX_PID
+
+# Wait with timeout (15 min — TDD cycles take longer)
+AGENT_TIMEOUT=900
+( sleep $AGENT_TIMEOUT && kill -TERM $CODEX_PID 2>/dev/null && sleep 5 && kill -9 $CODEX_PID 2>/dev/null ) &
+WD=$!
+wait $CODEX_PID 2>/dev/null
+kill $WD 2>/dev/null; wait $WD 2>/dev/null
 ```
 
 ## Step 3: Process test results

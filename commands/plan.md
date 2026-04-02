@@ -24,7 +24,13 @@ Otherwise, invoke Gemini with codebase-mapping skill:
 ```bash
 gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md) Analyze the full codebase. Write to ops/ARCHITECTURE.md, ops/MEMORY.md (append), ops/CONTRACTS.md (append)." > /tmp/gemini_phase0.txt 2>&1 &
 GEMINI_PID=$!
-wait $GEMINI_PID
+
+# Wait with timeout (10 min)
+AGENT_TIMEOUT=600
+( sleep $AGENT_TIMEOUT && kill -TERM $GEMINI_PID 2>/dev/null && sleep 5 && kill -9 $GEMINI_PID 2>/dev/null ) &
+WD=$!
+wait $GEMINI_PID 2>/dev/null
+kill $WD 2>/dev/null; wait $WD 2>/dev/null
 ```
 
 Read updated ops/ files after completion.
@@ -45,6 +51,21 @@ Follow the `writing-plans` skill:
 6. Extract and embed relevant CONTRACTS.md types in each task's Context field
 7. Group tasks into waves for parallel execution
 8. Write ops/TASKS.md
+
+## Phase 1.1: Ambiguity resolution
+
+Before validating the plan, surface critical assumptions:
+
+1. List the **3 most critical assumptions** you are making about the goal that, if wrong, would invalidate the plan
+2. For each assumption, state:
+   - What you assumed
+   - What the alternative interpretation could be
+   - Impact if the assumption is wrong (which tasks would change)
+3. Present these to the user and ask for confirmation or correction
+4. If the user corrects any assumption → revise TASKS.md before proceeding to validation
+5. If the user confirms all assumptions → proceed to Phase 1.5
+
+Skip this step if: the goal is unambiguous (single file fix, explicit user instructions with no room for interpretation).
 
 ## Phase 1.5: Plan validation
 

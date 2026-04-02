@@ -43,8 +43,14 @@ DO NOT FLAG: test fixture hardcoded values, readability redundancy, dev-only con
 Write findings to ops/REVIEW_CODEX.md." > /tmp/codex_review.txt 2>&1 &
 CODEX_PID=$!
 
-# Wait for external reviewers before synthesis
-wait $GEMINI_PID $CODEX_PID
+# Wait for external reviewers with timeout (10 min per agent)
+AGENT_TIMEOUT=600
+for PID in $GEMINI_PID $CODEX_PID; do
+  ( sleep $AGENT_TIMEOUT && kill -TERM $PID 2>/dev/null && sleep 5 && kill -9 $PID 2>/dev/null ) &
+  WD=$!
+  wait $PID 2>/dev/null
+  kill $WD 2>/dev/null; wait $WD 2>/dev/null
+done
 ```
 
 ### Conditionally launch Claude subagent reviewers:

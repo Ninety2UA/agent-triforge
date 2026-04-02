@@ -50,7 +50,14 @@ Follow the `wave-orchestration` skill:
    GEMINI_PID=$!
    codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md) Write tests for <scope>." > /tmp/codex_build.txt 2>&1 &
    CODEX_PID=$!
-   wait $GEMINI_PID $CODEX_PID
+   # Wait with timeout (10 min per agent)
+   AGENT_TIMEOUT=600
+   for PID in $GEMINI_PID $CODEX_PID; do
+     ( sleep $AGENT_TIMEOUT && kill -TERM $PID 2>/dev/null && sleep 5 && kill -9 $PID 2>/dev/null ) &
+     WD=$!
+     wait $PID 2>/dev/null
+     kill $WD 2>/dev/null; wait $WD 2>/dev/null
+   done
    ```
 6. Quality gates: tests + lint must pass before marking tasks done
 7. Integration-verifier runs between waves
