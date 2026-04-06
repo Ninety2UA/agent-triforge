@@ -31,6 +31,10 @@ title: [Descriptive title]
 date: YYYY-MM-DD
 tags: [relevant technology/module tags]
 agent: [which agent solved this]
+sprint_id: [sprint or goal identifier, if applicable]
+task_id: [task ID from TASKS.md, if applicable]
+evidence_files: [list of files that demonstrate the fix]
+related_decisions: [list of related decision file slugs]
 ---
 
 ## Problem
@@ -58,6 +62,10 @@ Write to `ops/decisions/YYYY-MM-DD-slug.md`:
 title: [Decision title]
 date: YYYY-MM-DD
 status: accepted | superseded | deprecated
+sprint_id: [sprint or goal identifier, if applicable]
+task_id: [task ID from TASKS.md, if applicable]
+agent: [which agent made this decision]
+related_decisions: [list of related decision file slugs]
 ---
 
 ## Context

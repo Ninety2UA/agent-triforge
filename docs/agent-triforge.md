@@ -14,10 +14,10 @@ The coordination model is hybrid: file-based shared state (TASKS.md, MEMORY.md, 
 
 | Agent | Invocation | Strengths | Primary domain |
 |---|---|---|---|
-| Claude Code (Opus) | Native (lead agent) | Complex code generation, multi-file refactors, system design, business logic | Feature implementation, API design, database schemas, orchestration |
-| Claude Code subagents (Sonnet) | Native Agent tool | Parallel isolated tasks within Claude's domain | Splitting large build tasks into parallel tracks |
-| Claude Code agent teams | Native team coordination | Multi-instance collaboration with shared task lists | Complex builds with 5+ interdependent tasks |
-| Claude specialized agents | Agent tool with agent definitions | Focused expertise (security, performance, plan validation, etc.) | Review enhancement, research, verification |
+| Claude Code (Opus max) | Native (lead agent) | Complex code generation, multi-file refactors, system design, business logic | Feature implementation, API design, database schemas, orchestration |
+| Claude Code subagents (Opus max) | Native Agent tool | Parallel isolated tasks within Claude's domain | Splitting large build tasks into parallel tracks |
+| Claude Code agent teams (Opus max) | Native team coordination | Multi-instance collaboration with shared task lists | Complex builds with 5+ interdependent tasks |
+| Claude specialized agents (Opus max) | Agent tool with agent definitions | Focused expertise (security, performance, plan validation, etc.) | Review enhancement, research, verification |
 | Gemini CLI | `gemini -p "..."` via bash | Large context window (1M tokens), whole-repo analysis, different model perspective | Codebase analysis (Phase 0), code review, documentation, architecture audits |
 | Codex CLI | `codex exec "..."` via bash | Native test runner, subagent parallelism, CI/CD tooling, sandbox execution | Testing, infrastructure, deployment, benchmarking, security review |
 
@@ -335,8 +335,8 @@ The master operating protocol. All agents read this.
 
 ## Agents in this repo
 1. Claude Code (lead) -- reads CLAUDE.md for specific instructions
-2. Gemini CLI -- reads GEMINI.md for specific instructions
-3. Codex CLI -- reads CODEX.md for specific instructions
+2. Gemini CLI -- reads the GEMINI.md protocol embedded in docs/agent-triforge.md for specific instructions
+3. Codex CLI -- reads the CODEX.md protocol embedded in docs/agent-triforge.md for specific instructions
 
 ## Shared rules
 - Before acting: read TASKS.md, MEMORY.md, CHANGELOG.md, CONTRACTS.md
@@ -1211,12 +1211,12 @@ The plugin provides agents, skills, commands, and hooks automatically. Your proj
 ```
 agent-triforge/                     (plugin — installed automatically)
 ├── .claude-plugin/plugin.json        Plugin manifest
-├── agents/                           18 specialized agent definitions
+├── agents/                           19 specialized agent definitions
 ├── skills/                           12 portable workflow modules
 ├── commands/                         16 slash commands
 ├── hooks/
 │   ├── hooks.json                    Hook registration
-│   └── handlers/                     3 lifecycle hook scripts
+│   └── handlers/                     5 lifecycle hook scripts
 ├── settings.json                     Default env vars
 └── scripts/coordinate.sh            Outer loop for context recovery
 

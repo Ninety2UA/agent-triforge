@@ -12,9 +12,9 @@ Install: `claude plugin add https://github.com/Ninety2UA/agent-triforge`
 
 ### Multi-agent system
 
-- **Claude Code (Opus)** — lead agent: plans work, builds features, coordinates all agents, merges review feedback
-- **Claude specialized agents** — 18 focused subagents (`agents/`): plan validation, review synthesis, security, performance, etc.
-- **Claude agent teams** — multi-instance collaboration for complex builds (5+ interdependent tasks)
+- **Claude Code (Opus max effort)** — lead agent: plans work, builds features, coordinates all agents, merges review feedback
+- **Claude specialized agents (Opus max effort)** — 19 focused subagents (`agents/`): plan validation, review synthesis, security, performance, etc. Lead/team-lead may downgrade narrow tasks to Sonnet high effort at runtime.
+- **Claude agent teams (Opus max effort)** — multi-instance collaboration for complex builds (5+ interdependent tasks)
 - **Gemini CLI** — analyst + reviewer: Phase 0 codebase scans (1M token context), architecture reviews, documentation
 - **Codex CLI** — tester + logic reviewer: writes/runs tests, security audits, infrastructure tasks
 
@@ -51,8 +51,9 @@ Claude invokes Gemini via `gemini -p "..."` and Codex via `codex exec "..."` as 
 The full lifecycle for a goal:
 
 0. **Codebase analysis** — Gemini scans full repo with codebase-mapping skill
-1. **Pre-plan** — learnings-researcher agent searches institutional knowledge
-1. **Planning** — Claude decomposes goal with shadow path tracing, error maps, interface context extraction
+1a. **Pre-plan** — learnings-researcher agent searches institutional knowledge
+1b. **Planning** — Claude decomposes goal with shadow path tracing, error maps, interface context extraction
+1.1. **Ambiguity resolution** — Validate critical assumptions before building
 1.5. **Plan validation** — plan-checker agent validates TASKS.md (max 3 iterations)
 2. **Build** — Wave orchestration via subagents (< 5 tasks) or agent teams (5+ tasks)
 3. **Parallel review** — Gemini + Codex + Claude specialized agents (security-sentinel, performance-oracle, code-simplicity-reviewer) simultaneously
@@ -92,7 +93,7 @@ The full lifecycle for a goal:
 ```
 .claude-plugin/
   plugin.json             # Plugin manifest
-agents/                   # 18 specialized agent definitions
+agents/                   # 19 specialized agent definitions
 skills/                   # 12 portable skill files (all agents consume)
 commands/                 # 16 slash commands
 hooks/
@@ -134,9 +135,9 @@ Inject into external agents: `gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/SKIL
 
 ## Specialized agents
 
-18 agents in `agents/` with restricted tools and focused expertise:
+19 agents in `agents/` with restricted tools and focused expertise:
 
-**Core workflow:** plan-checker, findings-synthesizer, integration-verifier, learnings-researcher, team-lead, research-synthesizer
+**Core workflow:** plan-checker, findings-synthesizer, integration-verifier, learnings-researcher, team-lead, research-synthesizer, continuous-reviewer
 
 **Review enhancement:** security-sentinel, performance-oracle, code-simplicity-reviewer, convention-enforcer, architecture-strategist, test-gap-analyzer
 

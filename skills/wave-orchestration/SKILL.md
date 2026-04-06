@@ -51,6 +51,10 @@ For each wave:
    - All clear → proceed to next wave
    - Failures → fix before proceeding (do NOT start next wave with broken state)
    - If a fix requires changing a task in a future wave, update TASKS.md
+5. **Reflect (on retry):** Before retrying any failed task, the executor MUST answer:
+   - What specifically failed?
+   - What concrete change will fix it?
+   - Am I repeating the same broken approach? If yes, try a fundamentally different strategy.
 
 ### Step 4: Final verification
 
@@ -116,6 +120,40 @@ After execution, produce:
 - Final verification results (tests, build, lint)
 - Risk score per executor (if any exceeded thresholds)
 - Updated TASKS.md with all tasks marked Done or Blocked
+
+## Model routing discretion
+
+All agents default to Opus max effort. When spawning subagents for narrow, rubric-following tasks (e.g., learnings-researcher, convention-enforcer), you MAY override to Sonnet with high effort:
+- Use `model: sonnet` override when spawning the agent
+- Only downgrade for tasks with clear rubrics and limited scope
+- Never downgrade security-sentinel, plan-checker, or findings-synthesizer
+
+## Same-error kill criteria
+
+Track error recurrence per executor:
+1. When an executor hits an error, fingerprint it (core error message, stripped of line numbers and timestamps)
+2. If the same fingerprint appears **3+ times** across retries of the same task:
+   - **Kill** the executor immediately
+   - **Reassign** the task to a fresh executor with context: "Previous executor failed 3+ times on this error: [error fingerprint]. Do NOT repeat the same approach. Try a fundamentally different strategy."
+3. Log killed executors in the wave execution summary
+
+## Post-task reflection (conditional)
+
+After a task completes, check if reflection is warranted:
+- Task took **>3 retries/iterations** to complete, OR
+- Task produced **test failures** that required fixes, OR
+- Task modified **>5 files**
+
+If any condition is met, append a reflection entry to `ops/MEMORY.md`:
+
+```markdown
+## Reflection: [task ID] ([date])
+- **Surprise:** [What was unexpected or non-obvious]
+- **Pattern:** [One reusable pattern worth adding to conventions]
+- **Improvement:** [One prompt or process improvement suggestion]
+```
+
+Skip reflection for tasks that completed cleanly on first attempt.
 
 ## Risk scoring during execution
 

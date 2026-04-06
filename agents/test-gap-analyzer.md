@@ -6,7 +6,8 @@ tools:
   - Grep
   - Glob
   - Bash
-model: sonnet
+model: opus
+effort: max
 maxTurns: 10
 ---
 

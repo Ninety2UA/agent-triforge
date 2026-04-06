@@ -7,7 +7,8 @@ tools:
   - Glob
   - WebFetch
   - WebSearch
-model: sonnet
+model: opus
+effort: max
 maxTurns: 12
 ---
 

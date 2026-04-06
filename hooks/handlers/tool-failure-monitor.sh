@@ -1,6 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # PostToolUseFailure hook: Track tool failures, warn on accumulation
 # Hook: PostToolUseFailure (fires when any tool call fails)
+
+set -euo pipefail
 
 HOOK_INPUT=$(cat)
 

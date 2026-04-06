@@ -1,10 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Session Start — SessionStart hook
 # Scans for existing state, pending tasks, and available context.
 # Provides orientation when starting a new session.
 #
 # Hook event: SessionStart
 # Configuration: registered in hooks/hooks.json (plugin)
+
+set -euo pipefail
 
 # Ensure .claude/ directory exists for project-local state files
 mkdir -p .claude
@@ -27,7 +29,7 @@ fi
 
 # Suggest CLAUDE.md template if not present
 if [ ! -f "CLAUDE.md" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.md" ]; then
-  CLAUDE_MD_TIP="\nTip: No CLAUDE.md found. Copy the template: cp ${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.md ./CLAUDE.md"
+  CLAUDE_MD_TIP="\nTip: No CLAUDE.md found. Copy the template: cp \"${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.md\" ./CLAUDE.md"
 fi
 
 # Check for existing state
@@ -59,7 +61,7 @@ if [ -f "ops/REVIEW_GEMINI.md" ] || [ -f "ops/REVIEW_CODEX.md" ] || [ -f "ops/TE
   HAS_REVIEWS="yes"
 fi
 
-SOLUTION_COUNT=$(find ops/solutions -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
+SOLUTION_COUNT=$(find ops/solutions -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo "0")
 
 # Build orientation message
 MSG=""

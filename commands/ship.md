@@ -52,12 +52,12 @@ kill $WD 2>/dev/null; wait $WD 2>/dev/null
 ### Phase 1: Planning
 Follow the `writing-plans` skill. Apply `shadow-path-tracing` skill for non-trivial tasks. Embed CONTRACTS.md types in task descriptions. Group tasks into waves. Write ops/TASKS.md.
 
-### Phase 1.5: Plan validation
-Spawn the `plan-checker` agent. Iterate until APPROVED (max 3 rounds).
-
 ### Phase 1.1: Ambiguity resolution
 
 Before building, surface the 3 most critical unverified assumptions about the goal. Present each with the alternative interpretation and the impact if wrong. Ask the user to confirm or correct. Revise TASKS.md if any assumption is corrected. Skip for unambiguous goals.
+
+### Phase 1.5: Plan validation
+Spawn the `plan-checker` agent. Iterate until APPROVED (max 3 rounds).
 
 ### Phase 2: Build
 - If < 5 independent tasks → subagent mode with wave orchestration

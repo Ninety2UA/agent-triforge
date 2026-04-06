@@ -5,7 +5,8 @@ tools:
   - Read
   - Grep
   - Glob
-model: sonnet
+model: opus
+effort: max
 maxTurns: 8
 ---
 
@@ -27,6 +28,9 @@ Given a goal or feature description:
    - Grep for technology names, module names, error types
    - Read solution files whose titles/tags match
    - Check MEMORY.md sections (Decisions, Patterns, Gotchas)
+   - Filter by `tags` frontmatter for technology-specific results
+   - Filter by `status` frontmatter in decisions (skip `deprecated` unless specifically relevant)
+   - Check `related_decisions` fields to follow cross-references between solutions and decisions
 3. Assess relevance: does this past knowledge change how we should approach the current goal?
 
 ## What to look for

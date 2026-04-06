@@ -8,7 +8,8 @@ tools:
   - Bash
   - Edit
   - Write
-model: sonnet
+model: opus
+effort: max
 maxTurns: 20
 ---
 

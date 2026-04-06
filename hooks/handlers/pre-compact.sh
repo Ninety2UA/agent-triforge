@@ -1,7 +1,9 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # PreCompact hook: Auto-checkpoint STATE.md before context compaction
 # Hook: PreCompact (fires before Claude Code compacts the context window)
 # Must complete quickly — compaction waits for this hook.
+
+set -euo pipefail
 
 # Only checkpoint if ops/ directory exists (we're in an active sprint)
 [ -d "ops" ] || exit 0

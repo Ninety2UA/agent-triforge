@@ -109,10 +109,14 @@ print('')
 
   # Check for completion promise using exact match
   if [[ -n "$COMPLETION_PROMISE" ]] && [[ -n "$LAST_OUTPUT" ]]; then
-    # Extract text between <promise> tags
-    PROMISE_TEXT=$(echo "$LAST_OUTPUT" | perl -0777 -pe 's/.*?<promise>(.*?)<\/promise>.*/$1/s; s/^\s+|\s+$//g; s/\s+/ /g' 2>/dev/null || echo "")
+    # Only attempt extraction if <promise> tags are actually present
+    if echo "$LAST_OUTPUT" | grep -q '<promise>' 2>/dev/null; then
+      PROMISE_TEXT=$(echo "$LAST_OUTPUT" | perl -0777 -pe 's/.*?<promise>(.*?)<\/promise>.*/$1/s; s/^\s+|\s+$//g; s/\s+/ /g' 2>/dev/null || echo "")
+    else
+      PROMISE_TEXT=""
+    fi
 
-    if [[ "$PROMISE_TEXT" = "$COMPLETION_PROMISE" ]]; then
+    if [[ -n "$PROMISE_TEXT" ]] && [[ "$PROMISE_TEXT" = "$COMPLETION_PROMISE" ]]; then
       echo "Ship loop: Completion promise fulfilled. Pipeline done." >&2
       rm -f "$SHIP_STATE_FILE"
       exit 0  # Allow exit — work is done
@@ -143,7 +147,7 @@ fi
 # 9. Block exit and re-feed the prompt (JSON-safe encoding)
 # --------------------------------------------------
 REASON_JSON=$(printf '%s' "$PROMPT_TEXT" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")
-SYS_MSG="Ship loop iteration $NEXT_ITERATION/$MAX_ITERATIONS | To complete: output <promise>$COMPLETION_PROMISE</promise> (ONLY when ALL work is done and verified)"
+SYS_MSG="Ship loop iteration $NEXT_ITERATION/$MAX_ITERATIONS | REFLECT BEFORE CONTINUING: What specifically failed? What concrete change will fix it? Am I repeating the same broken approach? If yes, try a fundamentally different strategy. | To complete: output <promise>$COMPLETION_PROMISE</promise> (ONLY when ALL work is done and verified)"
 SYS_MSG_JSON=$(printf '%s' "$SYS_MSG" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")
 
 printf '{\n  "decision": "block",\n  "reason": %s,\n  "systemMessage": %s\n}\n' "$REASON_JSON" "$SYS_MSG_JSON"

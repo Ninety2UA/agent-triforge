@@ -47,6 +47,9 @@ Spawn `learnings-researcher` agent to search ops/solutions/ and ops/decisions/.
 ### Phase 1: Planning
 Follow `writing-plans` and `shadow-path-tracing` skills. Embed ops/CONTRACTS.md types. Group into waves. Write ops/TASKS.md.
 
+### Phase 1.1: Ambiguity resolution
+Before proceeding to build, list every critical assumption in your plan. If any assumption could change the architecture or approach, pause and ask the user to confirm. Do not build on unvalidated assumptions.
+
 ### Phase 1.5: Plan validation
 Spawn `plan-checker` agent. Iterate until APPROVED (max 3 rounds).
 

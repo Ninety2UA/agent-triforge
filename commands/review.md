@@ -16,6 +16,8 @@ Flags:
 - `--conventions` — Add convention-enforcer to default reviewers
 - No flags — Default: Gemini + Codex only
 
+> **Note:** For small changes (< 3 files, obvious fix), consider `/quick` instead — it uses self-review only, skipping the full review swarm.
+
 ## Phase 3: Launch parallel reviews
 
 Read ops/TASKS.md to determine review scope (tasks marked [R]).

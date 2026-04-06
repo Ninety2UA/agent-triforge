@@ -68,7 +68,7 @@ The Stop hook was rewritten to match the [Claude Code Blueprint](https://github.
 - **JSON-safe encoding** — uses `python3 json.dumps()` so goals with quotes/newlines don't break the output
 - **Atomic state updates** — temp file + `mv` instead of `sed -i`
 
-### Four-pass audit (20 agents)
+### Four-pass audit (20 auditor agents reviewing the framework)
 
 Every component in the framework was reviewed by parallel audit agents across 4 passes, converging from **5 critical issues to zero**:
 
@@ -98,7 +98,7 @@ The plugin provides agents, skills, commands, and hooks. Your project gets an `o
 ```
 agent-triforge/                     (plugin — installed automatically)
 ├── .claude-plugin/plugin.json        Plugin manifest
-├── agents/                           18 specialized agent definitions
+├── agents/                           19 specialized agent definitions
 ├── skills/                           12 portable workflow modules
 ├── commands/                         16 slash commands
 ├── hooks/
@@ -434,9 +434,9 @@ claude
 
 ## Agents reference
 
-18 agents in [`agents/`](agents/) with restricted tools and focused expertise. Each runs in its own context window.
+19 agents in [`agents/`](agents/) with restricted tools and focused expertise. Each runs in its own context window.
 
-### Core workflow (6)
+### Core workflow (7)
 
 | Agent | Phase | What it does |
 |---|---|---|
@@ -446,6 +446,7 @@ claude
 | [**`learnings-researcher`**](agents/learnings-researcher.md) | Pre-1 | Searches [`ops/solutions/`](ops/solutions/) and [`ops/decisions/`](ops/decisions/) for relevant patterns |
 | [**`team-lead`**](agents/team-lead.md) | 2 | Orchestrates agent team workers with file ownership and quality gates |
 | [**`research-synthesizer`**](agents/research-synthesizer.md) | 0 | Merges parallel research outputs into unified analysis |
+| [**`continuous-reviewer`**](agents/continuous-reviewer.md) | 2 | Per-task quality gate during team builds — auto-reviews every completed task |
 
 ### Review specialists (6)
 
@@ -601,6 +602,58 @@ After solving a non-trivial problem, <a href="commands/compound.md"><code>/compo
 
 ## Recent changes
 
+### 2026-04-06 — v2.2.0: Opus max effort, reliability patterns, and framework audit
+
+**All agents upgraded to Opus max effort** — All 19 agents now run at `model: opus` + `effort: max` for maximum reasoning quality. The team-lead and lead agent have runtime discretion to downgrade narrow, rubric-following tasks to Sonnet high effort via model override when spawning.
+
+**Forced reflection on retry** — Before any retry, agents must answer: *"What specifically failed? What concrete change will fix it? Am I repeating the same broken approach?"* Applied to the ship-loop Stop hook (`systemMessage`) and wave-orchestration skill. Prevents agents from looping on the same broken approach.
+
+**Same-error kill criteria** — Error fingerprinting tracks recurring failures per executor. If the same error appears 3+ times across retries, the executor is killed and the task reassigned to a fresh agent with anti-pattern context ("Previous executor failed on X — do NOT repeat the same approach"). Added to wave-orchestration skill and team-lead agent.
+
+**Dedicated continuous-reviewer teammate** — New [`continuous-reviewer`](agents/continuous-reviewer.md) agent (19th agent, Opus max, read-only) auto-reviews every completed task during team builds for test/lint/security compliance. Spawned by team-lead at 1:3-4 ratio with builders. The lead only sees green-reviewed code — like a permanent CI gate built into the team.
+
+**Per-task reflection (conditional)** — After task completion, if the task took >3 retries, produced test failures, or modified >5 files, a structured reflection is appended to `ops/MEMORY.md` (surprise, pattern proposal, improvement suggestion). Captures non-obvious learnings while they're fresh.
+
+**Provenance-enhanced institutional memory** — Solution and decision documents now include `sprint_id`, `task_id`, `agent`, `evidence_files`, and `related_decisions` fields. The learnings-researcher agent now filters by tags, status, and follows cross-references between related documents.
+
+**Full framework audit (5th pass)** — 5 parallel reviewer agents + team lead consolidation reviewed all 52 framework components (5 hooks, 16 commands, 12 skills, 19 agents). Found and fixed:
+
+| Category | Issues found | Key fixes |
+|---|---|---|
+| Hooks | 1 critical, 3 warnings | Promise tag false-positive in ship-loop.sh, `set -euo pipefail` added to all handlers, atomic state writes |
+| Commands | 1 error, 2 warnings | Phase 1.1 missing from /coordinate, reviewer list cross-references, /quick cross-ref in /review |
+| Skills | Clean (0 issues) | — |
+| Agents | Clean (0 issues) | — |
+| Infrastructure | 7 errors | Agent count 18→19 in 6 files + SVG, GEMINI.md/CODEX.md phantom file references clarified, plugin.json arrays added |
+
+<details>
+<summary><strong>Files changed</strong></summary>
+
+| File | Change |
+|---|---|
+| `agents/*.md` (all 19) | `model: opus` + `effort: max` |
+| `agents/team-lead.md` | Model routing discretion, continuous-reviewer spawning, reflection+kill criteria in failure protocol |
+| `agents/continuous-reviewer.md` | **New** — dedicated per-task reviewer for team builds |
+| `agents/learnings-researcher.md` | Enhanced search: tags, status, cross-references |
+| `skills/wave-orchestration/SKILL.md` | Reflection on retry, same-error kill criteria, per-task reflection, model routing discretion |
+| `skills/knowledge-compounding/SKILL.md` | Provenance fields in solution + decision templates |
+| `hooks/handlers/ship-loop.sh` | Promise tag false-positive fix, reflection in systemMessage |
+| `hooks/handlers/context-monitor.sh` | `set -euo pipefail`, `#!/usr/bin/env bash`, atomic state writes |
+| `hooks/handlers/session-start.sh` | `set -euo pipefail`, `#!/usr/bin/env bash`, quoted variable, pipeline fallback |
+| `hooks/handlers/tool-failure-monitor.sh` | `set -euo pipefail`, `#!/usr/bin/env bash` |
+| `hooks/handlers/pre-compact.sh` | `set -euo pipefail`, `#!/usr/bin/env bash` |
+| `.claude-plugin/plugin.json` | Agent count 19, version 2.2.0, agents/skills/commands path declarations |
+| `commands/coordinate.md` | Phase 1.1 added |
+| `commands/ship.md` | Phase ordering fixed (1.1 before 1.5) |
+| `commands/review.md` | /quick cross-reference note |
+| `docs/agent-triforge.md` | Agent count 19, GEMINI.md/CODEX.md reference fix, hook count fix |
+| `docs/index.html` | Agent count 19 (3 locations) |
+| `docs/images/hero-banner.svg` | Agent count 19 |
+| `CLAUDE.md` | Agent count 19, Opus max effort, phase numbering (1a/1b/1.1) |
+| `templates/CLAUDE.md` | Agent count 19, Opus max effort, phase numbering, scope-cutting reference |
+| `README.md` | Agent count 19 (3 locations), audit heading clarified, this changelog |
+</details>
+
 ### 2026-04-02 — Reliability hardening and tactical enhancements
 
 Informed by a deep comparative analysis against the [official Codex plugin](https://github.com/openai/codex-plugin-cc) and [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode), this update addresses operational reliability gaps and adds targeted capabilities identified through triaged review (P1/P2 findings only, no architectural changes).
@@ -660,7 +713,7 @@ The framework was converted from a `git clone` + manual copy installation to a *
 
 ### 2026-03-31 — Four-pass audit and Blueprint alignment
 
-Four full audit passes (**20 parallel agents** + manual 11-point verification) reviewed all 49 framework components (3 hooks, 16 commands, 12 skills, 18 agents). Each pass caught issues the previous missed — converging to zero remaining defects.
+Four full audit passes (**20 parallel agents** + manual 11-point verification) reviewed all 49 framework components (5 hooks, 16 commands, 12 skills, 19 agents). Each pass caught issues the previous missed — converging to zero remaining defects.
 
 | Pass | Found | Fixed |
 |---|---|---|

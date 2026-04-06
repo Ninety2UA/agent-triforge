@@ -1,10 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Context Monitor — PostToolUse hook
 # Detects analysis paralysis (excessive read-only ops without producing code)
 # and warns when approaching context limits.
 #
 # Hook event: PostToolUse
 # Configuration: registered in hooks/hooks.json (plugin)
+
+set -euo pipefail
 
 STATE_FILE=".claude/context-monitor.local.md"
 
@@ -53,14 +55,16 @@ case "$TOOL_NAME" in
     ;;
 esac
 
-# Update state file
-cat > "$STATE_FILE" << EOF
+# Update state file (atomic write via temp file + mv)
+TEMP_FILE="${STATE_FILE}.tmp.$$"
+cat > "$TEMP_FILE" << EOF
 ---
 total_calls: $NEW_TOTAL
 consecutive_reads: $NEW_READS
 last_write_at: $LAST_WRITE
 ---
 EOF
+mv "$TEMP_FILE" "$STATE_FILE"
 
 # Analysis paralysis detection: 8+ consecutive read-only ops
 if [ "$NEW_READS" -ge 8 ]; then

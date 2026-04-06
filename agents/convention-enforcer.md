@@ -5,7 +5,8 @@ tools:
   - Read
   - Grep
   - Glob
-model: sonnet
+model: opus
+effort: max
 maxTurns: 8
 ---
 

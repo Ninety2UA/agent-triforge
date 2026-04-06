@@ -11,7 +11,7 @@ This project uses the multi-agent coordination framework where Claude Code serve
 ### Multi-agent system
 
 - **Claude Code (Opus)** — lead agent: plans work, builds features, coordinates all agents, merges review feedback
-- **Claude specialized agents** — 18 focused subagents provided by the plugin: plan validation, review synthesis, security, performance, etc.
+- **Claude specialized agents (Opus max effort)** — 19 focused subagents provided by the plugin: plan validation, review synthesis, security, performance, continuous review, etc. Lead/team-lead may downgrade narrow tasks to Sonnet high effort at runtime.
 - **Claude agent teams** — multi-instance collaboration for complex builds (5+ interdependent tasks)
 - **Gemini CLI** — analyst + reviewer: Phase 0 codebase scans (1M token context), architecture reviews, documentation
 - **Codex CLI** — tester + logic reviewer: writes/runs tests, security audits, infrastructure tasks
@@ -36,8 +36,9 @@ Claude invokes Gemini via `gemini -p "..."` and Codex via `codex exec "..."` as 
 ### Execution phases
 
 0. **Codebase analysis** — Gemini scans full repo with codebase-mapping skill
-1. **Pre-plan** — learnings-researcher agent searches institutional knowledge
-1. **Planning** — Claude decomposes goal with shadow path tracing, error maps, interface context extraction
+1a. **Pre-plan** — learnings-researcher agent searches institutional knowledge
+1b. **Planning** — Claude decomposes goal with shadow path tracing, error maps, interface context extraction
+1.1. **Ambiguity resolution** — Validate critical assumptions before building
 1.5. **Plan validation** — plan-checker agent validates TASKS.md (max 3 iterations)
 2. **Build** — Wave orchestration via subagents (< 5 tasks) or agent teams (5+ tasks)
 3. **Parallel review** — Gemini + Codex + Claude specialized agents simultaneously
@@ -68,6 +69,7 @@ Claude invokes Gemini via `gemini -p "..."` and Codex via `codex exec "..."` as 
 3. Root cause analysis before fixes (systematic-debugging skill)
 4. Verification evidence before completion (verification-before-completion skill)
 5. Code review before shipping (parallel review, max 3 cycles)
+6. Scope cutting when overwhelmed (scope-cutting skill)
 
 ## Agent invocation patterns
 

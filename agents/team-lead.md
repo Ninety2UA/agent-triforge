@@ -7,6 +7,7 @@ tools:
   - Glob
   - Bash
 model: opus
+effort: max
 maxTurns: 30
 ---
 
@@ -49,13 +50,21 @@ For each teammate, provide:
 - If teammates' outputs are incompatible → mediate, decide approach, assign fix
 - If a teammate is stuck → reduce scope, provide hints, or reassign to another
 
-### 5. Integration
+### 5. Spawn dedicated reviewer
+At team startup, spawn a `continuous-reviewer` teammate:
+- Ratio: 1 reviewer per 3-4 builders
+- The reviewer auto-reviews every completed task (tests, lint, security scan)
+- Builders must wait for reviewer green-light before dependent tasks proceed
+- You (the lead) only process code that the reviewer has already approved
+- This acts as a built-in CI quality gate within the team
+
+### 6. Integration
 After all teammates complete:
 - Run the integration-verifier agent
 - If issues found → assign fixes to the responsible teammate
 - If clean → proceed to review phase
 
-### 6. Invoke external agents
+### 7. Invoke external agents
 You can invoke Gemini and Codex for review/testing:
 ```bash
 gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md) Review the changes in [files]..." &
@@ -63,9 +72,24 @@ codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md)
 ```
 
 ## Worker failure protocol
-- If a teammate fails on a task: retry once with reduced scope
-- If retry fails: skip the task, log it as blocked, continue with other work
-- Never spend more than 2 attempts on a failing task
+
+### Forced reflection on retry
+Before any retry, the failing teammate MUST answer:
+- What specifically failed?
+- What concrete change will fix it?
+- Am I repeating the same broken approach? If yes, try a fundamentally different strategy.
+
+### Same-error kill criteria
+Track error fingerprints per teammate (core error message, stripped of line numbers/timestamps):
+- If the same fingerprint appears **3+ times** → **kill** the teammate and reassign to a fresh one
+- The fresh teammate gets: task description + "Previous teammate failed 3+ times on: [error]. Do NOT repeat the same approach."
+- Log all kills in the team build report under Escalations
+
+### Retry escalation
+- 1st failure: retry with reflection prompt and reduced scope
+- 2nd failure: retry with fundamentally different approach
+- 3rd failure (or same-error kill): reassign to fresh teammate with anti-pattern context
+- If fresh teammate also fails: log as blocked, escalate to user
 
 ## Output format
 
@@ -91,6 +115,13 @@ codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md)
 - Blocked: [count]
 - Escalated: [count]
 ```
+
+## Model routing discretion
+
+All agents default to Opus max effort. When spawning agents for narrow, rubric-following tasks (e.g., learnings-researcher, convention-enforcer), you MAY override to Sonnet with high effort:
+- Use `model: sonnet` override when spawning the agent
+- Only downgrade for tasks with clear rubrics and limited scope
+- Never downgrade security-sentinel, plan-checker, or findings-synthesizer
 
 ## Quality gates
 - No task is "done" until tests pass and lint is clean
