@@ -18,6 +18,13 @@ This project uses the multi-agent coordination framework where Claude Code serve
 
 Claude invokes Gemini via `gemini -p "..."` and Codex via `codex exec "..."` as background bash processes. Skills are injected into external agents via `$(cat ${CLAUDE_PLUGIN_ROOT}/skills/SKILL_NAME/SKILL.md)`. Reviews run in parallel (Gemini + Codex + Claude subagents simultaneously), never sequentially.
 
+### Four coordination modes
+
+1. **File-based (persistent):** Shared markdown files in `ops/` are the source of truth
+2. **Direct invocation (real-time):** Claude calls Gemini/Codex via bash, captures output
+3. **Native subagents (parallel):** Claude's Agent tool for isolated parallel tasks with specialized agent definitions
+4. **Agent teams (collaborative):** Multiple Claude instances with shared task lists and messaging (requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"`)
+
 ### Shared file protocol (`ops/` directory)
 
 | File | Purpose | Owner |
@@ -27,11 +34,15 @@ Claude invokes Gemini via `gemini -p "..."` and Codex via `codex exec "..."` as 
 | `CHANGELOG.md` | Audit trail with agent attribution | All agents append |
 | `CONTRACTS.md` | Shared TypeScript interface definitions | Claude modifies, Gemini discovers |
 | `ARCHITECTURE.md` | System design document | Gemini writes during Phase 0 |
+| `AGENTS.md` | Master operating protocol read by all agents | Manual |
 | `GOALS.md` | High-level product goals | Manual |
 | `CONVENTIONS.md` | Code style and standards | Gemini discovers, Claude maintains |
 | `STATE.md` | Session continuity — current phase, progress, next actions | Claude writes on pause/wrap |
 | `solutions/` | Documented solved problems for institutional knowledge | Claude writes |
 | `decisions/` | Architecture decision records (ADRs) | Claude writes |
+| `REVIEW_GEMINI.md` | Gemini's review output (temporary) | Gemini writes, Claude reads |
+| `REVIEW_CODEX.md` | Codex's review output (temporary) | Codex writes, Claude reads |
+| `TEST_RESULTS.md` | Test results (temporary) | Codex writes, Claude reads |
 
 ### Execution phases
 
@@ -71,6 +82,50 @@ Claude invokes Gemini via `gemini -p "..."` and Codex via `codex exec "..."` as 
 5. Code review before shipping (parallel review, max 3 cycles)
 6. Scope cutting when overwhelmed (scope-cutting skill)
 
+## Reliability patterns
+
+- **Forced reflection on retry** — agents must self-diagnose before retrying failed work
+- **Same-error kill criteria** — 3 identical error fingerprints kills the executor and reassigns to a fresh agent
+- **Continuous reviewer** — dedicated per-task reviewer in team builds (1:3-4 ratio with builders)
+- **Per-task reflection** — automatic MEMORY.md entries when tasks took >3 retries, had test failures, or modified >5 files
+- **Provenance tracking** — solutions and decisions include sprint ID, task ID, agent, evidence files, and related decisions
+
+## Context management
+
+- **Inner loop (ship-loop):** Stop hook blocks premature exit during sprints (max 5 iterations, waits for completion signal)
+- **Outer loop (`/coordinate`):** Spawns fresh sessions on context exhaustion with progress tracking
+- **Analysis paralysis detection:** Warns at 8+ consecutive reads without writes
+- **Risk scoring:** Subagents halted at risk >20% or 50+ file changes
+
+## Portable skills
+
+12 model-agnostic methodology skills available to all agents:
+
+| Skill | Consumer | Purpose |
+|---|---|---|
+| `codebase-mapping` | Gemini | Full-repo analysis methodology |
+| `writing-plans` | Claude | Task decomposition with shadow paths |
+| `shadow-path-tracing` | Claude | Enumerate failure paths |
+| `wave-orchestration` | Claude | Dependency-grouped parallel execution |
+| `test-driven-development` | Codex | RED-GREEN-REFACTOR cycle |
+| `systematic-debugging` | Codex, Claude | Error taxonomy, root cause analysis |
+| `iterative-refinement` | Claude | Review-fix-review loops with convergence |
+| `review-synthesis` | Claude | Merge multi-reviewer findings |
+| `verification-before-completion` | All | Evidence-based completion checklist |
+| `knowledge-compounding` | Claude | Document solutions and decisions |
+| `session-continuity` | Claude | Save/resume across sessions |
+| `scope-cutting` | Claude | Systematically cut scope by priority |
+
+## Specialized agents
+
+19 agents with restricted tools and focused expertise:
+
+**Core workflow:** plan-checker, findings-synthesizer, integration-verifier, learnings-researcher, team-lead, research-synthesizer, continuous-reviewer
+
+**Review enhancement:** security-sentinel, performance-oracle, code-simplicity-reviewer, convention-enforcer, architecture-strategist, test-gap-analyzer
+
+**Research & verification:** framework-docs-researcher, best-practices-researcher, git-history-analyzer, bug-reproduction-validator, deployment-verifier, pr-comment-resolver
+
 ## Agent invocation patterns
 
 ```bash
@@ -104,4 +159,9 @@ All three CLIs must be installed and working in non-interactive mode:
 ```bash
 gemini -p "Respond with only: READY"
 codex exec "Respond with only: READY"
+```
+
+Python 3 is also required (used by hook handlers for JSON parsing):
+```bash
+python3 --version
 ```

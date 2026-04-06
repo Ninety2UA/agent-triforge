@@ -19,7 +19,7 @@ if [ ! -d "ops" ]; then
   mkdir -p ops/solutions ops/decisions ops/archive
   # Copy skeleton files from plugin templates if available
   if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-    for f in MEMORY.md CHANGELOG.md; do
+    for f in MEMORY.md CHANGELOG.md AGENTS.md GOALS.md; do
       if [ -f "${CLAUDE_PLUGIN_ROOT}/templates/ops/${f}" ] && [ ! -f "ops/${f}" ]; then
         cp "${CLAUDE_PLUGIN_ROOT}/templates/ops/${f}" "ops/${f}"
       fi
@@ -36,6 +36,7 @@ fi
 HAS_STATE=""
 HAS_TASKS=""
 HAS_GOALS=""
+HAS_AGENTS=""
 HAS_REVIEWS=""
 BLOCKED_COUNT=0
 PENDING_COUNT=0
@@ -57,6 +58,10 @@ if [ -f "ops/GOALS.md" ]; then
   HAS_GOALS="yes"
 fi
 
+if [ -f "ops/AGENTS.md" ]; then
+  HAS_AGENTS="yes"
+fi
+
 if [ -f "ops/REVIEW_GEMINI.md" ] || [ -f "ops/REVIEW_CODEX.md" ] || [ -f "ops/TEST_RESULTS.md" ]; then
   HAS_REVIEWS="yes"
 fi
@@ -76,6 +81,10 @@ fi
 
 if [ "$HAS_GOALS" = "yes" ]; then
   MSG="$MSG\nProject goals found (ops/GOALS.md)."
+fi
+
+if [ "$HAS_AGENTS" = "yes" ]; then
+  MSG="$MSG\nAgent protocol found (ops/AGENTS.md)."
 fi
 
 if [ "$HAS_REVIEWS" = "yes" ]; then

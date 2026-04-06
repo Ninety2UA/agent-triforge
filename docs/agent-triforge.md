@@ -230,6 +230,7 @@ Skills are model-agnostic markdown files that encode reusable methodologies. The
 | `verification-before-completion` | All | Phase 6 | Evidence-based completion checklist |
 | `knowledge-compounding` | Claude | Phase 6 | Document solutions and decisions for future sprints |
 | `session-continuity` | Claude | Any | Save and resume work across sessions |
+| `scope-cutting` | Claude | Any | Systematically cut scope when overwhelmed |
 
 ### Skill injection patterns
 

@@ -194,3 +194,8 @@ All three CLIs must be installed and working in non-interactive mode:
 gemini -p "Respond with only: READY"
 codex exec "Respond with only: READY"
 ```
+
+Python 3 is also required (used by hook handlers for JSON parsing):
+```bash
+python3 --version
+```

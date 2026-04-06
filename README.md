@@ -85,7 +85,7 @@ Plus a manual 11-point verification: bash syntax, JSON validity, stale path scan
 
 On first session in a new project, the `session-start.sh` hook:
 - Creates `ops/solutions/`, `ops/decisions/`, `ops/archive/`
-- Copies skeleton `MEMORY.md` and `CHANGELOG.md` from plugin templates
+- Copies skeleton `MEMORY.md`, `CHANGELOG.md`, `AGENTS.md`, and `GOALS.md` from plugin templates
 - Suggests copying the `CLAUDE.md` template if not present
 - Creates `.claude/` directory for session state files
 
@@ -111,6 +111,8 @@ agent-triforge/                     (plugin — installed automatically)
 your-project/                       (your repo — bootstrapped on first session)
 ├── CLAUDE.md                         Orchestration protocol (copy from template)
 ├── ops/                              Shared coordination files
+│   ├── AGENTS.md                       Master operating protocol for all agents
+│   ├── GOALS.md                        High-level product goals
 │   ├── MEMORY.md                       Decisions, patterns, gotchas
 │   ├── CHANGELOG.md                    Audit trail with agent attribution
 │   ├── STATE.md                        Session continuity checkpoint
@@ -127,6 +129,8 @@ All agents coordinate through markdown files in [`ops/`](ops/). This is the sour
 | File | Purpose | Owner |
 |---|---|---|
 | `TASKS.md` (runtime) | Work queue with `[ ]`/`[x]` status tracking | Claude generates, all agents read |
+| [`AGENTS.md`](templates/ops/AGENTS.md) | Master operating protocol read by all agents | Manual |
+| [`GOALS.md`](templates/ops/GOALS.md) | High-level product goals for sprint planning | Manual |
 | [`MEMORY.md`](ops/MEMORY.md) | Architectural decisions, patterns, interface proposals | All agents append |
 | [`CHANGELOG.md`](ops/CHANGELOG.md) | Audit trail with `[agent-name]` attribution | All agents append |
 | [`STATE.md`](ops/STATE.md) | Session continuity — current phase, progress, next actions | Claude writes on pause/wrap |
@@ -301,6 +305,9 @@ gemini -p "Respond with only: READY"
 
 # Codex CLI — https://github.com/openai/codex
 codex exec "Respond with only: READY"
+
+# Python 3 (used by hook handlers for JSON parsing)
+python3 --version
 ```
 
 ### Installation

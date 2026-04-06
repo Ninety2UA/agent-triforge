@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Coordinate — Outer loop script for context exhaustion recovery
 # Spawns fresh Claude Code sessions when context is exhausted.
 # Each iteration gets a clean context window.
