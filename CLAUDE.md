@@ -70,6 +70,28 @@ The full lifecycle for a goal:
 - **Touches shared interfaces?** → Claude implements → Gemini reviews → Codex tests
 - **Ambiguous?** → Claude takes it, flags for parallel review
 
+### Agent frontmatter fields
+
+Agent definitions in `agents/*.md` support these YAML frontmatter fields:
+- `name`, `description` (required) — identity and when-to-use trigger
+- `model` — `opus`, `sonnet`, `haiku`, or full model ID. Default: `opus`
+- `effort` — `low`, `medium`, `high`, `max` (max is Opus-only). Default: `max`
+- `tools` — list of allowed tools (Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, etc.)
+- `maxTurns` — maximum agentic turns before the agent stops
+- Other: `skills`, `mcpServers`, `hooks`, `memory`, `background`, `isolation`, `color`, `permissionMode`
+
+### Reliability patterns
+
+- **Forced reflection on retry** — agents must self-diagnose before retrying (ship-loop.sh + wave-orchestration)
+- **Same-error kill criteria** — 3x same error fingerprint = kill executor + reassign to fresh agent
+- **Continuous reviewer** — dedicated per-task reviewer in team builds (1:3-4 ratio with builders)
+- **Per-task reflection** — conditional MEMORY.md entries when task took >3 retries, had test failures, or modified >5 files
+- **Provenance tracking** — solutions/decisions include sprint_id, task_id, agent, evidence_files, related_decisions
+
+### Hook safety
+
+All 5 hook handlers use `set -euo pipefail`. When using `grep -c`, always add `|| echo "0"` fallback to prevent script termination on zero matches.
+
 ### Key constraints
 
 - CONTRACTS.md is never modified directly during review — changes must be proposed in MEMORY.md first
