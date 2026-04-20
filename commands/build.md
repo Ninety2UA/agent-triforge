@@ -46,18 +46,33 @@ Follow the `wave-orchestration` skill:
 4. Teammates coordinate via shared task list + messaging
 5. Teammates can invoke gemini/codex for specific reviews (replace `<scope>` with actual paths):
    ```bash
-   gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md) Review <scope> for architecture. Write to ops/REVIEW_GEMINI.md." > /tmp/gemini_build.txt 2>&1 &
+   source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
+
+   GEMINI_OUT="${TMPDIR:-/tmp}/gemini_build_$$_$(date +%s).txt"
+   CODEX_OUT="${TMPDIR:-/tmp}/codex_build_$$_$(date +%s).txt"
+
+   # Architecture review for build scope
+   invoke_gemini "architecture-reviewer" \
+     "Review <scope> for architecture. Write to ops/REVIEW_GEMINI.md." \
+     "$GEMINI_OUT" 600 &
    GEMINI_PID=$!
-   codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md) Write tests for <scope>." > /tmp/codex_build.txt 2>&1 &
+
+   # Test writing for build scope
+   invoke_codex "test_writer" \
+     "Write tests for <scope>." \
+     "$CODEX_OUT" 600 &
    CODEX_PID=$!
-   # Wait with timeout (10 min per agent)
-   AGENT_TIMEOUT=600
-   for PID in $GEMINI_PID $CODEX_PID; do
-     ( sleep $AGENT_TIMEOUT && kill -TERM $PID 2>/dev/null && sleep 5 && kill -9 $PID 2>/dev/null ) &
-     WD=$!
-     wait $PID 2>/dev/null
-     kill $WD 2>/dev/null; wait $WD 2>/dev/null
-   done
+
+   # Per-PID wait so a silent failure doesn't leave downstream agents staring at
+   # an empty file and calling it "no findings".
+   GEMINI_RC=0; CODEX_RC=0
+   wait $GEMINI_PID || GEMINI_RC=$?
+   wait $CODEX_PID  || CODEX_RC=$?
+   if [ $GEMINI_RC -ne 0 ] || [ $CODEX_RC -ne 0 ]; then
+     echo "build: helper failed — gemini=$GEMINI_RC codex=$CODEX_RC" >&2
+     echo "build: last stderr in $GEMINI_OUT / $CODEX_OUT" >&2
+     exit 1
+   fi
    ```
 6. Quality gates: tests + lint must pass before marking tasks done
 7. Integration-verifier runs between waves

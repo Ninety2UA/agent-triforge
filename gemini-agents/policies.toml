@@ -1,0 +1,64 @@
+# Gemini CLI Policy Engine — Agent Triforge
+# Per-subagent tool restrictions + universal safety rails.
+#
+# Loading: Gemini auto-discovers policies only from ~/.gemini/policies/*.toml
+# (user tier). For project-level enforcement we pass this file explicitly via
+# `--policy` (scripts/invoke-external.sh does this when the file exists).
+#
+# Schema reference: https://geminicli.com/docs/reference/policy-engine
+# Known fields: toolName, subagent, mcpName, toolAnnotations, argsPattern,
+# commandPrefix, commandRegex, decision, priority, denyMessage, modes,
+# interactive, allowRedirection.
+#
+# Notes:
+# - Decision values: "allow" | "deny" | "ask_user".
+# - priority: 0-999; highest matching rule wins.
+# - pathGlob / pathPrefix do NOT exist — file-path scoping must come from
+#   tool-list restrictions in agent frontmatter + prompt instructions, not
+#   policies. Shell commands CAN be scoped via commandPrefix / commandRegex.
+# - YOLO mode (--yolo / -y) installs a max-priority allow rule that overrides
+#   everything except exceptions the engine explicitly honors; treat deny
+#   rules below as defense-in-depth for non-YOLO interactive use.
+
+# --- Universal guardrails (apply to all subagents) ---
+
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = "rm -rf"
+decision = "deny"
+priority = 999
+denyMessage = "Destructive rm -rf blocked by policy."
+
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = "git push"
+decision = "deny"
+priority = 999
+denyMessage = "git push blocked for Gemini subagents — Claude (lead) handles remotes."
+
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = "sudo"
+decision = "deny"
+priority = 999
+denyMessage = "sudo blocked — subagents run unprivileged."
+
+# --- architecture-reviewer: read-only Phase 3 review ---
+# Tools declared: read_file, write_file, grep_search, glob, list_directory.
+# Explicitly deny shell (agent doesn't need it).
+
+[[rule]]
+subagent = "architecture-reviewer"
+toolName = "run_shell_command"
+decision = "deny"
+priority = 200
+denyMessage = "architecture-reviewer is read-only — no shell commands during review."
+
+# --- documentation-writer: writes docs, no shell ---
+
+[[rule]]
+subagent = "documentation-writer"
+toolName = "run_shell_command"
+decision = "deny"
+priority = 200
+denyMessage = "documentation-writer should not run shell commands."

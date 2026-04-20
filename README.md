@@ -609,6 +609,51 @@ After solving a non-trivial problem, <a href="commands/compound.md"><code>/compo
 
 ## Recent changes
 
+### 2026-04-20 — v2.3.0: Subagent hardening pass (Gemini + Codex docs alignment)
+
+Re-analyzed the [Gemini CLI subagents spec](https://geminicli.com/docs/core/subagents/) and [Codex CLI subagents spec](https://developers.openai.com/codex/subagents) against our current implementation and closed the concrete gaps. Focus: security hardening, invocation-layer parity, and observability — no new features, just making the existing integrations robust against real failure modes.
+
+**Codex per-agent `tools` allowlist** — [`logic_reviewer`](codex-agents/agents.toml) now has `tools = ["read", "grep", "glob"]` (no shell, no write); [`test_writer`](codex-agents/agents.toml) and [`debugger`](codex-agents/agents.toml) get `["read", "grep", "glob", "write", "bash"]`. Defense-in-depth pairs with the existing per-agent `sandbox_mode` — sandbox isolates the filesystem, the allowlist narrows the tool surface.
+
+**Codex nesting caps** — New top-level `[agents]` block in `codex-agents/agents.toml`: `max_depth = 2`, `max_threads = 4`, `job_max_runtime_seconds = 1800`. `logic_reviewer` and `test_writer` explicitly spawn sub-agents for 5+ file scopes — without explicit caps, nesting depth would default to 1 and silently block those spawn paths.
+
+**Codex retry parity** — [`invoke_codex`](scripts/invoke-external.sh) now retries once with a raw prompt on failure, mirroring `invoke_gemini`. Prior asymmetry meant a transient Codex failure killed the pipeline while Gemini kept going.
+
+**Parallel-wait exit-code capture** — [`/review`](commands/review.md) and [`/build`](commands/build.md) now capture per-PID exit codes (`GEMINI_RC`, `CODEX_RC`) and fail-fast when either reviewer died. Previously a silent failure would leave `ops/REVIEW_GEMINI.md` or `ops/REVIEW_CODEX.md` empty — which the [`findings-synthesizer`](agents/findings-synthesizer.md) treated as "no findings."
+
+**Loud failure paths** — `_extract_codex_agent_config` now exits 1 and emits a clear stderr warning instead of silently returning an empty config when Python's TOML parser isn't available. Both `invoke_gemini` and `invoke_codex` now log a warning listing available agents when the requested agent name doesn't resolve (instead of silently falling through to raw mode / session defaults).
+
+**Collision-safe tmp paths** — All output paths switched from `/tmp/gemini_review.txt` to `${TMPDIR:-/tmp}/gemini_review_$$_$(date +%s).txt`. Running `/review` in two tabs no longer clobbers cross-session output. Applied across all seven commands, `scripts/invoke-external.sh` defaults, `CLAUDE.md`, `templates/CLAUDE.md`, and `docs/agent-triforge.md` examples.
+
+**`include_plan_tool = false`** — All three Codex agents disable the Agents SDK plan tool. `logic_reviewer` / `test_writer` / `debugger` are focused executors; the plan tool adds cognitive overhead without value for single-purpose roles.
+
+**macOS coreutils hint** — [`session-start.sh`](hooks/handlers/session-start.sh) emits a one-time warning when neither `timeout` nor `gtimeout` is on PATH; [`CLAUDE.md`](CLAUDE.md) prerequisites now recommend `brew install coreutils` for macOS. Without one of those, `invoke-external.sh` silently ran without timeout enforcement.
+
+**Security model documentation** — New "Security model" section in [`CLAUDE.md`](CLAUDE.md) explains the `approval_policy = "never"` trust model, the defense-in-depth between `sandbox_mode` and the `tools` allowlist, and how `gemini-agents/policies.toml` layers shell-command denylists on top.
+
+<details>
+<summary><strong>Files changed (13 files)</strong></summary>
+
+| File | Change |
+|---|---|
+| `codex-agents/agents.toml` | `[agents]` top-level block (`max_depth`, `max_threads`, `job_max_runtime_seconds`) + per-agent `tools` allowlist + `include_plan_tool = false` |
+| `scripts/invoke-external.sh` | Codex retry, loud TOML parser failure, TMPDIR-scoped default output paths, `_list_gemini_agents` + `_list_codex_agents` helpers, unknown-agent warnings |
+| `commands/review.md` | Per-PID wait with fail-fast + TMPDIR paths |
+| `commands/build.md` | Per-PID wait with fail-fast + TMPDIR paths |
+| `commands/plan.md` | TMPDIR paths |
+| `commands/test.md` | TMPDIR paths |
+| `commands/deep-research.md` | TMPDIR paths |
+| `commands/ship.md` | TMPDIR paths |
+| `commands/coordinate.md` | TMPDIR paths |
+| `hooks/handlers/session-start.sh` | One-time `gtimeout` / `timeout` missing warning |
+| `CLAUDE.md` | Security model section + `brew install coreutils` hint + updated parallel-invocation example |
+| `templates/CLAUDE.md` | TMPDIR paths in the legacy `gemini -p` / `codex exec` example |
+| `docs/agent-triforge.md` | TMPDIR paths across all illustrative examples |
+| `.claude-plugin/plugin.json` | Version bump 2.2.0 → 2.3.0 |
+</details>
+
+---
+
 ### 2026-04-06 — v2.2.0: Opus max effort, reliability patterns, and framework audit
 
 **All agents upgraded to Opus max effort** — All 19 agents now run at `model: opus` + `effort: max` for maximum reasoning quality. The team-lead and lead agent have runtime discretion to downgrade narrow, rubric-following tasks to Sonnet high effort via model override when spawning.

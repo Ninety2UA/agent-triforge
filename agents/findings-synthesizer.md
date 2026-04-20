@@ -19,6 +19,8 @@ Read these files:
 - `ops/REVIEW_CODEX.md` — logic, security, test coverage findings
 - Any additional review outputs passed to you
 
+**Structured output shortcut:** If review files contain a `## Machine-readable summary` section with a JSON block, parse it first for quick counts (`{"p1": N, "p2": N, "p3": N, "verdict": "..."}`). Still read the full findings for deduplication and synthesis.
+
 ## Process
 
 ### 1. Normalize

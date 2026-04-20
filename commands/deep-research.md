@@ -23,25 +23,14 @@ Launch ALL of these agents in a SINGLE message for maximum parallelism:
 
 ### Agent 4: Gemini codebase analysis (targeted)
 ```bash
-gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md)
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
-Analyze the codebase specifically for patterns, modules, and architecture related to: $ARGUMENTS
-
-Focus on:
-- Existing code that touches this area
-- Dependencies and integration points
-- Patterns that must be followed for consistency
-- Technical debt or risks in this area
-
-Write a targeted analysis (not full ARCHITECTURE.md — just this topic)." > /tmp/gemini_research.txt 2>&1 &
-GEMINI_PID=$!
-
-# Wait with timeout (10 min)
-AGENT_TIMEOUT=600
-( sleep $AGENT_TIMEOUT && kill -TERM $GEMINI_PID 2>/dev/null && sleep 5 && kill -9 $GEMINI_PID 2>/dev/null ) &
-WD=$!
-wait $GEMINI_PID 2>/dev/null
-kill $WD 2>/dev/null; wait $WD 2>/dev/null
+# Targeted codebase analysis (uses targeted-researcher agent definition)
+invoke_gemini "targeted-researcher" \
+  "Analyze the codebase specifically for patterns, modules, and architecture related to: $ARGUMENTS
+Focus on: existing code, dependencies, integration points, patterns for consistency, technical debt.
+Write a targeted analysis (not full ARCHITECTURE.md — just this topic)." \
+  "${TMPDIR:-/tmp}/gemini_research_$$_$(date +%s).txt" 600
 ```
 
 ### Agent 5: best-practices-researcher

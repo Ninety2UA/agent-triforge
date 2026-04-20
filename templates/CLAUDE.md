@@ -129,12 +129,15 @@ Claude invokes Gemini via `gemini -p "..."` and Codex via `codex exec "..."` as 
 ## Agent invocation patterns
 
 ```bash
+GEMINI_OUT="${TMPDIR:-/tmp}/gemini_output_$$_$(date +%s).txt"
+CODEX_OUT="${TMPDIR:-/tmp}/codex_output_$$_$(date +%s).txt"
+
 # Gemini with skill injection (non-interactive, background)
-gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md) Analyze codebase..." > /tmp/gemini_output.txt 2>&1 &
+gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md) Analyze codebase..." > "$GEMINI_OUT" 2>&1 &
 GEMINI_PID=$!
 
 # Codex with skill injection (non-interactive, background)
-codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md) Write tests..." > /tmp/codex_output.txt 2>&1 &
+codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md) Write tests..." > "$CODEX_OUT" 2>&1 &
 CODEX_PID=$!
 
 # Wait for parallel completion

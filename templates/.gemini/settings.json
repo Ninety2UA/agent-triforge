@@ -1,0 +1,11 @@
+{
+  "_comment": "Agent Triforge — project-level Gemini CLI settings. Copied by hooks/handlers/session-start.sh.",
+  "agents": {
+    "overrides": {
+      "codebase_investigator": {
+        "enabled": false,
+        "_reason": "We use our own gemini-agents/codebase-analyst.md which writes to ops/ARCHITECTURE.md per our protocol. Disabling the built-in avoids routing ambiguity on @codebase_investigator-adjacent prompts."
+      }
+    }
+  }
+}

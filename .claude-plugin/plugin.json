@@ -1,6 +1,6 @@
 {
   "name": "agent-triforge",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Agent Triforge — Three AI models forging production-grade code together. Claude Code orchestrates Gemini CLI, Codex CLI, and 19 specialized subagents through file-based protocols, portable skills, and parallel review swarms.",
   "author": {
     "name": "Ninety2UA",

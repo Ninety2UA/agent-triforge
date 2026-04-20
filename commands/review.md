@@ -25,34 +25,34 @@ Read ops/TASKS.md to determine review scope (tasks marked [R]).
 ### Always launch (background bash):
 
 ```bash
-# Gemini architecture review
-gemini -p "You are reviewing code in a multi-agent repository.
-YOUR ROLE: Architecture reviewer + documentation specialist.
-READ: ops/CHANGELOG.md, ops/CONTRACTS.md, ops/ARCHITECTURE.md, ops/MEMORY.md, ops/TASKS.md
-USE CONFIDENCE TIERING: [HIGH] verified, [MEDIUM] pattern match, [LOW] heuristic
-RULE: [LOW] confidence can NEVER be P1.
-DO NOT FLAG: readability redundancy, documented thresholds, sufficient assertions, consistency-only style, already-addressed issues.
-Write findings to ops/REVIEW_GEMINI.md." > /tmp/gemini_review.txt 2>&1 &
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
+
+GEMINI_OUT="${TMPDIR:-/tmp}/gemini_review_$$_$(date +%s).txt"
+CODEX_OUT="${TMPDIR:-/tmp}/codex_review_$$_$(date +%s).txt"
+
+# Gemini architecture review (uses architecture-reviewer agent definition)
+invoke_gemini "architecture-reviewer" \
+  "Review scope: tasks marked [R] in ops/TASKS.md. Write findings to ops/REVIEW_GEMINI.md." \
+  "$GEMINI_OUT" 600 &
 GEMINI_PID=$!
 
-# Codex logic + security review
-codex exec "You are reviewing code in a multi-agent repository.
-YOUR ROLE: Logic reviewer + security auditor + test coverage analyst.
-READ: ops/CHANGELOG.md, ops/CONTRACTS.md, ops/MEMORY.md, ops/TASKS.md
-USE CONFIDENCE TIERING: [HIGH] verified, [MEDIUM] pattern match, [LOW] heuristic
-RULE: [LOW] confidence can NEVER be P1.
-DO NOT FLAG: test fixture hardcoded values, readability redundancy, dev-only config, sufficient assertions, already-addressed issues.
-Write findings to ops/REVIEW_CODEX.md." > /tmp/codex_review.txt 2>&1 &
+# Codex logic + security review (uses logic_reviewer agent definition)
+# If scope covers 5+ files, Codex will spawn internal subagents for parallel review
+invoke_codex "logic_reviewer" \
+  "Review scope: tasks marked [R] in ops/TASKS.md. If scope covers 5+ files, spawn separate agents for logic review, security audit, and test coverage analysis — merge all findings into ops/REVIEW_CODEX.md. Otherwise review sequentially and write to ops/REVIEW_CODEX.md." \
+  "$CODEX_OUT" 600 &
 CODEX_PID=$!
 
-# Wait for external reviewers with timeout (10 min per agent)
-AGENT_TIMEOUT=600
-for PID in $GEMINI_PID $CODEX_PID; do
-  ( sleep $AGENT_TIMEOUT && kill -TERM $PID 2>/dev/null && sleep 5 && kill -9 $PID 2>/dev/null ) &
-  WD=$!
-  wait $PID 2>/dev/null
-  kill $WD 2>/dev/null; wait $WD 2>/dev/null
-done
+# Wait for each PID individually so we can fail-fast if either reviewer died;
+# a silent failure would leave REVIEW_*.md empty and look like "no findings".
+GEMINI_RC=0; CODEX_RC=0
+wait $GEMINI_PID || GEMINI_RC=$?
+wait $CODEX_PID  || CODEX_RC=$?
+if [ $GEMINI_RC -ne 0 ] || [ $CODEX_RC -ne 0 ]; then
+  echo "review: reviewer failed — gemini=$GEMINI_RC codex=$CODEX_RC" >&2
+  echo "review: last stderr in $GEMINI_OUT / $CODEX_OUT" >&2
+  exit 1
+fi
 ```
 
 ### Conditionally launch Claude subagent reviewers:

@@ -18,8 +18,8 @@ The coordination model is hybrid: file-based shared state (TASKS.md, MEMORY.md, 
 | Claude Code subagents (Opus max) | Native Agent tool | Parallel isolated tasks within Claude's domain | Splitting large build tasks into parallel tracks |
 | Claude Code agent teams (Opus max) | Native team coordination | Multi-instance collaboration with shared task lists | Complex builds with 5+ interdependent tasks |
 | Claude specialized agents (Opus max) | Agent tool with agent definitions | Focused expertise (security, performance, plan validation, etc.) | Review enhancement, research, verification |
-| Gemini CLI | `gemini -p "..."` via bash | Large context window (1M tokens), whole-repo analysis, different model perspective | Codebase analysis (Phase 0), code review, documentation, architecture audits |
-| Codex CLI | `codex exec "..."` via bash | Native test runner, subagent parallelism, CI/CD tooling, sandbox execution | Testing, infrastructure, deployment, benchmarking, security review |
+| Gemini CLI | `gemini -p "..."` via bash, native subagent definitions in `.gemini/agents/` | Large context window (1M tokens), whole-repo analysis, different model perspective, policy-based tool restrictions | Codebase analysis (Phase 0), code review, documentation, architecture audits |
+| Codex CLI | `codex exec "..."` via bash, native agent definitions in `.codex/agents/` | Native test runner, subagent parallelism, sandbox execution, per-agent sandbox modes | Testing, infrastructure, deployment, benchmarking, security review |
 
 ### Four coordination modes
 
@@ -212,8 +212,9 @@ Session continuity file. Written when pausing or wrapping a session.
 Skills are model-agnostic markdown files that encode reusable methodologies. They live in `skills/` and can be consumed by ALL agents:
 
 - **Claude Code:** Uses skills natively via the skill system
-- **Gemini CLI:** Skills injected via prompt: `gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/SKILL_NAME/SKILL.md) Now apply..."`
-- **Codex CLI:** Skills injected via prompt: `codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/SKILL_NAME/SKILL.md) Now apply..."`
+- **Gemini CLI:** Skills embedded in native agent definitions (`gemini-agents/*.md`). The `invoke-external.sh` helper handles feature detection and falls back to prompt injection for older CLI versions.
+- **Codex CLI:** Skills embedded in native agent definitions (`codex-agents/agents.toml` as `developer_instructions`). The `invoke-external.sh` helper handles feature detection and falls back to prompt injection for older CLI versions.
+- **Legacy mode (fallback):** Skills injected via prompt: `gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/SKILL_NAME/SKILL.md) Now apply..."`
 
 ### Available skills and their primary consumers
 
@@ -232,31 +233,62 @@ Skills are model-agnostic markdown files that encode reusable methodologies. The
 | `session-continuity` | Claude | Any | Save and resume work across sessions |
 | `scope-cutting` | Claude | Any | Systematically cut scope when overwhelmed |
 
-### Skill injection patterns
+### External agent definitions
+
+Skills consumed by Gemini and Codex are embedded in their native agent definitions, loaded automatically at session start:
+
+| Agent definition | CLI | Embedded skill | Role |
+|---|---|---|---|
+| `gemini-agents/codebase-analyst.md` | Gemini | `codebase-mapping` | Phase 0 full-repo analysis |
+| `gemini-agents/architecture-reviewer.md` | Gemini | (inline review protocol) | Phase 3 architecture review |
+| `gemini-agents/targeted-researcher.md` | Gemini | `codebase-mapping` (subset) | Deep-research targeted analysis |
+| `gemini-agents/documentation-writer.md` | Gemini | (inline docs protocol) | Documentation generation |
+| `codex-agents/agents.toml → logic_reviewer` | Codex | (inline review protocol) | Phase 3 logic + security review |
+| `codex-agents/agents.toml → test_writer` | Codex | `test-driven-development` | Phase 5 TDD test writing |
+| `codex-agents/agents.toml → debugger` | Codex | `systematic-debugging` | Bug investigation |
+
+### Invocation via invoke-external.sh
+
+The shared helper `scripts/invoke-external.sh` provides unified invocation with feature detection:
 
 ```bash
-# Gemini Phase 0 with codebase-mapping skill
-gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md)
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
-Apply this methodology to analyze the full codebase.
-Read every file in src/ and write results to:
-- ops/ARCHITECTURE.md
-- ops/MEMORY.md (append only)
-- ops/CONTRACTS.md (append only)" &
+# Gemini Phase 0 with codebase-analyst agent
+invoke_gemini "codebase-analyst" \
+  "Analyze the full codebase. Write to ops/ARCHITECTURE.md, ops/MEMORY.md (append), ops/CONTRACTS.md (append)." \
+  "${TMPDIR:-/tmp}/gemini_phase0_$$_$(date +%s).txt" 600
 
-# Codex testing with TDD skill
-codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md)
+# Codex testing with test_writer agent
+invoke_codex "test_writer" \
+  "Test scope: changed files from ops/TASKS.md. Write results to ops/TEST_RESULTS.md." \
+  "${TMPDIR:-/tmp}/codex_test_$$_$(date +%s).txt" 900
 
-Apply this methodology. Read ops/CONTRACTS.md for type definitions.
-Write tests for the files listed in ops/TASKS.md assigned to Codex.
-Write results to ops/TEST_RESULTS.md." &
-
-# Codex bug investigation with debugging skill
-codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/systematic-debugging/SKILL.md)
-
-Investigate the bug: [description].
-Follow the diagnostic protocol. Write findings to ops/REVIEW_CODEX.md." &
+# Codex bug investigation with debugger agent
+invoke_codex "debugger" \
+  "Investigate the bug: [description]. Follow the diagnostic protocol. Write findings to ops/REVIEW_CODEX.md." \
+  "${TMPDIR:-/tmp}/codex_debug_$$_$(date +%s).txt" 600
 ```
+
+**How `invoke_gemini` works:** If `.gemini/agents/<name>.md` exists in the CWD, uses Gemini's `@<name>` mention syntax for native subagent routing. Otherwise falls back to extracting the plugin template's body and injecting it as a prompt prefix. Automatically passes `--policy .gemini/policies.toml` (or the plugin template policy) because Gemini only auto-discovers policies from `~/.gemini/policies/*.toml` (user tier), not the project tier. Retries once with a simplified prompt on failure. Each call logs `mode=native|legacy-injection|raw` and the resolved policy path to stderr.
+
+**How `invoke_codex` works:** Codex has no CLI flag to select a subagent — upstream "subagents" only spawn from within a running Codex session. The helper simulates agent selection by extracting the agent's config from `agents.toml` and passing it as `-m` (model), `-s` (sandbox), `-c approval_policy=` overrides, with `developer_instructions` injected as prompt prefix. Lookup order: project `.codex/agents/agents.toml` first, then plugin template.
+
+### Debugging the subagent layer
+
+- **Gemini:** `gemini agents list` / `gemini agents` — inspect loaded subagent definitions. `gemini -p "@<name> say hi"` is the minimal smoke test for native routing. Check `--policy` is honored via `gemini --policy path/to/policies.toml ...`.
+- **Codex:** In an interactive session, `/agent` switches between active agent threads and inspects ongoing ones. In non-interactive mode (`codex exec`), inspect the session transcript captured by `invoke_codex`'s output file.
+
+### Hard constraint: Gemini subagents cannot nest
+
+Per the Gemini CLI docs: *"Subagents cannot call other subagents. If a subagent is granted the `*` tool wildcard, it will still be unable to see or invoke other agents."* Our architecture complies because Claude (the lead) is the only agent that spawns Gemini subagents; no Gemini agent tries to fan out to other Gemini agents. If you need parallel Gemini work, launch multiple top-level `invoke_gemini` calls from Claude's shell in the background (as `/review` already does).
+
+### Why portable skills/hooks instead of Gemini's native subsystems
+
+Gemini CLI ships native `gemini skills {list,install,enable,disable,link,uninstall}` and `gemini hooks {migrate,...}` subsystems. We deliberately do **not** use them:
+
+- **Skills:** Our 12 portable skills in `skills/` are markdown files consumed by all three agents (Claude/Gemini/Codex) via prompt-prefix injection or native definition embedding. Adopting Gemini's native `skills install` registry would make each skill Gemini-specific and fragment the portability story. Revisit only if we need agent-installable skills distributed via git.
+- **Hooks:** Our `hooks/handlers/*.sh` are Claude Code lifecycle hooks (SessionStart, Stop, PostToolUse, etc.). Gemini's hooks cover Gemini CLI's own lifecycle, which is a subprocess of a Claude Code session — different layer, different events. `gemini hooks migrate` is one-way (Claude Code → Gemini) and assumes the target environment is Gemini-first, not Claude-first.
 
 ---
 
@@ -361,37 +393,34 @@ You are the lead agent in a multi-agent repository. You have three responsibilit
 
 ## Phase 0: Codebase analysis (Gemini CLI)
 
-Before planning any work, invoke Gemini CLI with the codebase-mapping skill to perform a full codebase scan.
-
-Invoke Gemini for codebase analysis:
-```
+Before planning any work, invoke Gemini CLI with the `codebase-analyst` agent definition to perform a full codebase scan. The agent definition embeds the codebase-mapping methodology and the ops/ file protocol.
 
 ```bash
-gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md)
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
-Apply this methodology to analyze the full codebase.
+# Full codebase analysis (uses codebase-analyst agent definition)
+invoke_gemini "codebase-analyst" \
+  "Analyze the full codebase. Write to ops/ARCHITECTURE.md, ops/MEMORY.md (append), ops/CONTRACTS.md (append)." \
+  "${TMPDIR:-/tmp}/gemini_phase0_$$_$(date +%s).txt" 600
+```
 
-Read every file in src/ and produce three outputs:
+For parallel fan-out (optional, for large codebases), launch a second Gemini process with a targeted researcher:
 
-1. Write a complete ops/ARCHITECTURE.md covering:
-   - Module structure and boundaries
-   - Data flow between modules
-   - External dependencies and integration points
-   - Patterns in use (naming, error handling, state management)
-   - Technical debt and inconsistencies
+```bash
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
-2. Update ops/MEMORY.md with:
-   - Patterns: reusable utilities, shared helpers, conventions
-   - Gotchas: inconsistencies, undocumented behavior, fragile code
-   - Decisions: any architectural choices evident from the code
+# Parallel: structural analysis + targeted risk analysis
+invoke_gemini "codebase-analyst" \
+  "Analyze the full codebase. Write to ops/ARCHITECTURE.md, ops/MEMORY.md (append), ops/CONTRACTS.md (append)." \
+  "${TMPDIR:-/tmp}/gemini_structure_$$_$(date +%s).txt" 600 &
+PID1=$!
 
-3. Update ops/CONTRACTS.md with:
-   - TypeScript interfaces found in the code but not yet documented
-   - API endpoint shapes
-   - Database model types
+invoke_gemini "targeted-researcher" \
+  "Analyze dependencies, risks, and technical debt related to: [goal]." \
+  "${TMPDIR:-/tmp}/gemini_risks_$$_$(date +%s).txt" 600 &
+PID2=$!
 
-Write all outputs to the ops/ directory.
-Preserve any existing content in MEMORY.md and CONTRACTS.md -- append, do not overwrite."
+wait $PID1 $PID2
 ```
 
 After Phase 0 completes, read the updated ops/ files. Optionally run the research-synthesizer agent to merge findings if multiple research sources were consulted.
@@ -736,11 +765,19 @@ Each subagent receives:
 
 Invoke Gemini/Codex from within a teammate:
 ```bash
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
+
 # Teammate invoking Gemini for a specific review
-gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md) Review the auth module changes in src/auth/..." &
+invoke_gemini "architecture-reviewer" \
+  "Review the auth module changes in src/auth/. Write to ops/REVIEW_GEMINI.md." \
+  "${TMPDIR:-/tmp}/gemini_build_$$_$(date +%s).txt" 600 &
 
 # Teammate invoking Codex for testing
-codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md) Write tests for src/auth/login.ts..." &
+invoke_codex "test_writer" \
+  "Write tests for src/auth/login.ts." \
+  "${TMPDIR:-/tmp}/codex_build_$$_$(date +%s).txt" 600 &
+
+wait
 ```
 
 #### Risk scoring during execution
@@ -765,84 +802,20 @@ After completing build tasks, invoke all reviewers in parallel.
 CRITICAL: All reviewers run simultaneously, not sequentially.
 
 ```bash
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
+
 # === External reviewers (background processes) ===
 
-# Gemini review (background)
-gemini -p "You are reviewing code in a multi-agent repository.
-
-YOUR ROLE: Architecture reviewer + documentation specialist.
-
-READ THESE FILES FIRST:
-- ops/CHANGELOG.md (recent changes section)
-- ops/CONTRACTS.md (interface specifications)
-- ops/ARCHITECTURE.md (system design)
-- ops/MEMORY.md (decisions and gotchas)
-- ops/TASKS.md (your assigned review tasks)
-
-REVIEW SCOPE:
-$(cat ops/TASKS.md | grep 'Agent: Gemini' | grep '\[R\]')
-
-USE CONFIDENCE TIERING: [HIGH] verified, [MEDIUM] pattern match, [LOW] heuristic
-USE SEVERITY LEVELS: P1 critical, P2 important, P3 suggestion
-RULE: [LOW] confidence can NEVER be P1.
-
-DO NOT FLAG (suppressions):
-- Redundancy that aids readability
-- Documented threshold values with comments
-- Sufficient test assertions
-- Consistency-only style changes
-- Already-addressed issues in the diff
-
-FOR EACH FILE IN SCOPE:
-1. Check architectural alignment with ARCHITECTURE.md
-2. Check interface conformance with CONTRACTS.md
-3. Check for design pattern violations
-4. Check documentation completeness
-5. Check naming consistency and readability
-
-Write findings to ops/REVIEW_GEMINI.md with confidence and severity on each finding.
-Update ops/CHANGELOG.md with your review entry." \
-  > /tmp/gemini_review_output.txt 2>&1 &
-
+# Gemini architecture review (uses architecture-reviewer agent definition)
+invoke_gemini "architecture-reviewer" \
+  "Review scope: tasks marked [R] in ops/TASKS.md. Write findings to ops/REVIEW_GEMINI.md." \
+  "${TMPDIR:-/tmp}/gemini_review_$$_$(date +%s).txt" 600 &
 GEMINI_PID=$!
 
-# Codex review (background)
-codex exec "You are reviewing code in a multi-agent repository.
-
-YOUR ROLE: Logic reviewer + test coverage analyst + security auditor.
-
-READ THESE FILES FIRST:
-- ops/CHANGELOG.md (recent changes section)
-- ops/CONTRACTS.md (interface specifications)
-- ops/MEMORY.md (decisions and gotchas)
-- ops/TASKS.md (your assigned review tasks)
-
-REVIEW SCOPE:
-$(cat ops/TASKS.md | grep 'Agent: Codex' | grep '\[R\]')
-
-USE CONFIDENCE TIERING: [HIGH] verified, [MEDIUM] pattern match, [LOW] heuristic
-USE SEVERITY LEVELS: P1 critical, P2 important, P3 suggestion
-RULE: [LOW] confidence can NEVER be P1.
-
-DO NOT FLAG (suppressions):
-- Test fixtures with hardcoded values
-- Readability-aiding redundancy
-- Development-only config properly gated
-- Sufficient assertions for behavior tested
-- Already-addressed issues in the diff
-
-FOR EACH FILE IN SCOPE:
-1. Check logic correctness and edge case handling
-2. Check error handling completeness
-3. Check type safety and contract conformance
-4. Check for security vulnerabilities
-5. Check test coverage gaps
-6. Run existing tests and report results
-
-Write findings to ops/REVIEW_CODEX.md with confidence and severity on each finding.
-Update ops/CHANGELOG.md with your review entry." \
-  > /tmp/codex_review_output.txt 2>&1 &
-
+# Codex logic + security review (uses logic_reviewer agent definition)
+invoke_codex "logic_reviewer" \
+  "Review scope: tasks marked [R] in ops/TASKS.md. Write findings to ops/REVIEW_CODEX.md." \
+  "${TMPDIR:-/tmp}/codex_review_$$_$(date +%s).txt" 600 &
 CODEX_PID=$!
 
 # === Claude specialized reviewers (subagents, parallel) ===
@@ -854,6 +827,8 @@ CODEX_PID=$!
 # Wait for all external reviewers
 wait $GEMINI_PID $CODEX_PID
 ```
+
+The review protocol (confidence tiering, suppression rules, output format) is embedded in each agent definition rather than repeated inline. The `invoke-external.sh` helper handles feature detection and fallback to legacy prompt injection.
 
 ### Phase 4: Process parallel review results (review synthesis)
 
@@ -882,36 +857,18 @@ After all reviews complete, use the review-synthesis skill and findings-synthesi
 After reviews converge:
 
 1. Optionally spawn test-gap-analyzer to identify coverage gaps before writing tests
-2. Invoke Codex with TDD skill for test writing:
+2. Invoke Codex with the `test_writer` agent definition:
 
 ```bash
-codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md)
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
-You are the testing agent in a multi-agent repository.
-
-READ THESE FILES FIRST:
-- ops/CONTRACTS.md (interface specifications -- your tests MUST use these types)
-- ops/CHANGELOG.md (what changed -- focus tests on changed code)
-- ops/REVIEW_GEMINI.md (architecture review -- test edge cases flagged here)
-- ops/REVIEW_CODEX.md (logic review -- test security concerns flagged here)
-- ops/TASKS.md (your assigned test tasks)
-
-TASKS:
-$(cat ops/TASKS.md | grep 'Agent: Codex' | grep -v '\[R\]' | grep -v '\[x\]')
-
-FOR EACH TEST TASK:
-1. Read the source files listed in the task
-2. Read CONTRACTS.md for the expected interfaces
-3. Apply the RED-GREEN-REFACTOR cycle
-4. Write tests that cover: happy path, error cases, edge cases, type conformance
-5. Run all tests
-6. Report results
-
-AFTER TESTING:
-- Write test results to ops/TEST_RESULTS.md
-- Update ops/CHANGELOG.md with test entries
-- If tests fail, log failing tests as new tasks assigned to Claude in TASKS.md"
+# TDD test writing (uses test_writer agent definition, 15 min timeout for TDD cycles)
+invoke_codex "test_writer" \
+  "Test scope: changed files from ops/TASKS.md and ops/CHANGELOG.md. Write results to ops/TEST_RESULTS.md." \
+  "${TMPDIR:-/tmp}/codex_test_$$_$(date +%s).txt" 900
 ```
+
+The TDD methodology (RED-GREEN-REFACTOR), ops/ file protocol, and coverage targets are embedded in the `test_writer` agent's `developer_instructions`.
 
 3. Read TEST_RESULTS.md
 4. If tests pass: proceed to Phase 6
@@ -1113,8 +1070,8 @@ YOU
 │ Pre-Plan: SEARCH INSTITUTIONAL KNOWLEDGE                       │
 │ └── learnings-researcher searches ops/solutions/, ops/decisions│
 │                                                                │
-│ Phase 0: CODEBASE ANALYSIS (Gemini + codebase-mapping skill)   │
-│ ├── bash: gemini -p "$(cat skill) Analyze codebase..."         │
+│ Phase 0: CODEBASE ANALYSIS (Gemini codebase-analyst agent)      │
+│ ├── invoke_gemini "codebase-analyst" "Analyze codebase..."     │
 │ ├── Gemini writes ARCHITECTURE.md, MEMORY.md, CONTRACTS.md     │
 │ ├── research-synthesizer merges findings (optional)            │
 │ └── Claude reads updated ops/ files                            │
@@ -1147,8 +1104,8 @@ YOU
 │ └── Update CHANGELOG.md + CONTRACTS.md                         │
 │                                                                │
 │ Phase 3: PARALLEL REVIEW                                       │
-│ ├── bash: gemini -p "Review..." &  ──── GEMINI_PID            │
-│ ├── bash: codex exec "Review..." & ──── CODEX_PID             │
+│ ├── invoke_gemini "architecture-reviewer" & ── GEMINI_PID     │
+│ ├── invoke_codex "logic_reviewer" &       ── CODEX_PID        │
 │ ├── Claude: security-sentinel agent ── parallel                │
 │ ├── Claude: performance-oracle agent ── parallel               │
 │ └── Claude: code-simplicity-reviewer ── parallel               │
@@ -1164,9 +1121,9 @@ YOU
 │ ├── Convergence check (fast/standard/deep)                     │
 │ └── If not converged → loop to Phase 3 (max 3x)               │
 │                                                                │
-│ Phase 5: TEST (Codex + TDD skill)                              │
+│ Phase 5: TEST (Codex test_writer agent)                         │
 │ ├── test-gap-analyzer identifies coverage gaps                 │
-│ ├── bash: codex exec "$(cat TDD skill) Write tests..."         │
+│ ├── invoke_codex "test_writer" "Write tests..."               │
 │ ├── Read TEST_RESULTS.md                                       │
 │ ├── Fix failing tests                                          │
 │ └── Re-run until green                                         │
@@ -1212,17 +1169,32 @@ The plugin provides agents, skills, commands, and hooks automatically. Your proj
 ```
 agent-triforge/                     (plugin — installed automatically)
 ├── .claude-plugin/plugin.json        Plugin manifest
-├── agents/                           19 specialized agent definitions
+├── agents/                           19 Claude specialized agent definitions
+├── gemini-agents/                    Gemini CLI agent definitions (native subagents)
+│   ├── codebase-analyst.md             Phase 0 full-repo analysis
+│   ├── architecture-reviewer.md        Phase 3 architecture review
+│   ├── targeted-researcher.md          Deep-research targeted analysis
+│   ├── documentation-writer.md         Documentation specialist
+│   └── policies.toml                   Gemini policy engine rules
+├── codex-agents/                     Codex CLI agent definitions (native subagents)
+│   └── agents.toml                     logic_reviewer, test_writer, debugger
 ├── skills/                           12 portable workflow modules
 ├── commands/                         16 slash commands
 ├── hooks/
 │   ├── hooks.json                    Hook registration
 │   └── handlers/                     5 lifecycle hook scripts
-├── settings.json                     Default env vars
-└── scripts/coordinate.sh            Outer loop for context recovery
+├── scripts/
+│   ├── coordinate.sh                 Outer loop for context recovery
+│   └── invoke-external.sh           Unified Gemini/Codex invocation helper
+└── settings.json                     Default env vars
 
 your-project/                       (bootstrapped on first session)
 ├── CLAUDE.md                         Orchestration protocol (copy from template)
+├── .gemini/                          Gemini agent definitions (copied from plugin)
+│   ├── agents/                         Agent definitions (.md files)
+│   └── policies.toml                   Policy engine rules
+├── .codex/                           Codex agent definitions (copied from plugin)
+│   └── agents/agents.toml              Agent definitions (TOML)
 ├── ops/                              Shared coordination files
 │   ├── MEMORY.md                       Decisions, patterns, gotchas
 │   ├── CHANGELOG.md                    Audit trail
