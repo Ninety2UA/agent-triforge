@@ -224,35 +224,450 @@ a:hover { color: var(--amber); }
   background: rgba(255, 107, 43, 0.05);
 }
 
-/* Terminal */
+/* ═══ Terminal ═══ */
 .hero__terminal {
-  background: var(--forge-dark); border: 1px solid var(--forge-border);
-  border-radius: 12px; overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(255, 107, 43, 0.05);
+  background: linear-gradient(180deg, var(--forge-dark) 0%, #0a0a14 100%);
+  border: 1px solid var(--forge-border);
+  border-radius: 14px;
+  overflow: hidden;
+  position: relative;
+  box-shadow:
+    0 24px 70px rgba(0,0,0,0.55),
+    0 0 60px rgba(255, 107, 43, 0.06),
+    inset 0 1px 0 rgba(255,255,255,0.04);
+  transition: box-shadow 0.6s ease, border-color 0.6s ease;
 }
+.hero__terminal::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(
+    180deg,
+    transparent 0px,
+    transparent 2px,
+    rgba(255,255,255,0.012) 3px,
+    transparent 4px
+  );
+  border-radius: inherit; pointer-events: none;
+  opacity: 0.65; z-index: 1;
+}
+.hero__terminal[data-state="building"] {
+  border-color: rgba(255, 107, 43, 0.28);
+  box-shadow:
+    0 24px 70px rgba(0,0,0,0.55),
+    0 0 60px rgba(255, 107, 43, 0.20),
+    inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.hero__terminal[data-state="done"] {
+  border-color: rgba(110, 231, 183, 0.24);
+  box-shadow:
+    0 24px 70px rgba(0,0,0,0.55),
+    0 0 70px rgba(110, 231, 183, 0.16),
+    inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.hero__terminal[data-paused="true"]::after {
+  content: 'PAUSED';
+  position: absolute; top: 14px; right: 56px; z-index: 5;
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 700;
+  letter-spacing: 0.18em; color: var(--amber);
+  padding: 3px 7px; border-radius: 4px;
+  background: rgba(255, 179, 71, 0.08);
+  border: 1px solid rgba(255, 179, 71, 0.25);
+}
+
+/* Window chrome */
 .term__bar {
-  display: flex; align-items: center; gap: 8px;
-  padding: 12px 16px; background: var(--forge-surface); border-bottom: 1px solid var(--forge-border);
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, #181826 0%, #131320 100%);
+  border-bottom: 1px solid var(--forge-border);
+  position: relative; z-index: 3;
 }
-.term__dot { width: 12px; height: 12px; border-radius: 50%; }
+.term__dots { display: flex; gap: 7px; }
+.term__dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  border: none; padding: 0; cursor: pointer;
+  box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.25);
+  transition: filter 0.2s, transform 0.2s;
+}
+.term__dot:hover { filter: brightness(1.18); transform: scale(1.1); }
 .term__dot--r { background: #ff5f57; }
 .term__dot--y { background: #febc2e; }
 .term__dot--g { background: #28c840; }
+
 .term__title {
-  flex: 1; text-align: center; font-size: 12px; font-family: var(--font-mono);
-  color: var(--text-muted);
+  flex: 1; text-align: center; font-size: 12px;
+  font-family: var(--font-mono); color: var(--text-muted);
+  letter-spacing: 0.02em;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
 }
-.term__body { padding: 20px; font-family: var(--font-mono); font-size: 13.5px; line-height: 2; }
-.term__line { display: block; white-space: nowrap; overflow: hidden; }
-.term__prompt { color: var(--steel); }
+.term__title-dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--molten-light);
+  box-shadow: 0 0 8px var(--molten-glow);
+  animation: termHeartbeat 2s ease-in-out infinite;
+}
+@keyframes termHeartbeat {
+  0%, 100% { opacity: 0.45; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+.term__actions { display: flex; gap: 4px; }
+.term__action {
+  width: 26px; height: 26px;
+  background: transparent; border: 1px solid transparent;
+  border-radius: 6px; padding: 0;
+  color: var(--text-muted); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: color 0.2s, background 0.2s, border-color 0.2s;
+}
+.term__action:hover {
+  color: var(--molten-light);
+  border-color: rgba(255, 107, 43, 0.28);
+  background: rgba(255, 107, 43, 0.06);
+}
+.term__action svg { transition: transform 0.55s cubic-bezier(.4,.2,.2,1); }
+.term__action:hover svg { transform: rotate(-180deg); }
+
+/* Body */
+.term__body {
+  padding: 14px 20px 16px;
+  font-family: var(--font-mono);
+  font-size: 13px; line-height: 1.7;
+  position: relative; z-index: 2;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(255, 107, 43, 0.03), transparent 70%);
+}
+
+/* System header — fills perceptual top with real-terminal context */
+.term__sys {
+  display: flex; align-items: center; gap: 10px;
+  padding-bottom: 10px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 10.5px; letter-spacing: 0.04em;
+  color: var(--text-muted);
+  opacity: 0; transform: translateY(2px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+.term__sys.is-shown { opacity: 1; transform: translateY(0); }
+.term__sys-item { display: inline-flex; align-items: center; gap: 5px; }
+.term__sys-item + .term__sys-item::before {
+  content: ''; display: inline-block;
+  width: 3px; height: 3px; border-radius: 50%;
+  background: var(--forge-border-light); margin-right: 2px;
+}
+.term__sys-icon {
+  display: inline-block; width: 8px; height: 8px;
+  border-radius: 2px;
+  background: linear-gradient(135deg, var(--molten), var(--amber));
+  box-shadow: 0 0 4px var(--molten-glow);
+}
+.term__sys-branch { color: var(--steel-light); }
+.term__sys-ver { color: var(--text-secondary); }
+
+.term__row,
+.term__phase {
+  display: flex; align-items: center; gap: 8px;
+  position: relative;
+  opacity: 0; transform: translateY(2px);
+  transition: opacity 0.28s ease, transform 0.28s ease;
+  min-height: 22px;
+}
+.term__row.is-shown,
+.term__phase.is-shown { opacity: 1; transform: translateY(0); }
+
+/* Hairline between command rows and phase block */
+.term__rule {
+  height: 1px; margin: 8px 0 6px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.06), transparent 70%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.term__rule.is-shown { opacity: 1; }
+
+.term__prompt { color: var(--steel); flex-shrink: 0; }
 .term__cmd { color: var(--text-primary); }
-.term__flag { color: var(--molten-light); }
+.term__flag { color: var(--molten-light); font-weight: 600; }
 .term__str { color: var(--amber); }
 .term__comment { color: var(--text-muted); }
-.term__success { color: #6ee7b7; }
+.term__success-text { color: #6ee7b7; font-weight: 500; }
+
+.term__text {
+  display: inline-flex; align-items: center; gap: 6px;
+  flex-wrap: wrap; min-height: 1.2em;
+}
+.term__caret {
+  display: inline-block; width: 7px; height: 14px;
+  background: var(--molten-light);
+  margin-left: 1px;
+  animation: caretBlink 0.95s step-end infinite;
+}
+@keyframes caretBlink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
 .term__cursor {
-  display: inline-block; width: 8px; height: 17px; background: var(--molten-light);
-  animation: blink 1.2s step-end infinite; vertical-align: text-bottom; opacity: 0.8;
+  display: inline-block; width: 8px; height: 16px; background: var(--molten-light);
+  animation: caretBlink 1.1s step-end infinite;
+  vertical-align: middle;
+  box-shadow: 0 0 8px rgba(255, 140, 66, 0.35);
+}
+
+.term__copy {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--forge-border);
+  border-radius: 5px; padding: 3px 6px;
+  color: var(--text-muted); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  opacity: 0;
+  transition: opacity 0.2s, color 0.2s, border-color 0.2s, background 0.2s;
+}
+.term__row--ship:hover .term__copy { opacity: 1; }
+.term__copy:hover {
+  color: var(--molten-light);
+  border-color: rgba(255, 107, 43, 0.4);
+  background: rgba(255, 107, 43, 0.08);
+}
+.term__copy.is-copied {
+  opacity: 1; color: #6ee7b7;
+  border-color: rgba(110, 231, 183, 0.4);
+  background: rgba(110, 231, 183, 0.08);
+}
+
+/* Phase rows */
+.term__phase {
+  cursor: default;
+  padding: 1px 8px 1px 8px;
+  margin-left: -8px;
+  border-radius: 6px;
+  transition: opacity 0.28s ease, transform 0.28s ease, background 0.3s ease;
+}
+.term__phase[data-state="running"] {
+  background: linear-gradient(90deg, rgba(255, 107, 43, 0.09), transparent 70%);
+}
+.term__phase[data-state="running"]::before {
+  content: '';
+  position: absolute; left: -3px; top: 4px; bottom: 4px;
+  width: 2px; border-radius: 1px;
+  background: var(--molten);
+  box-shadow: 0 0 10px var(--molten);
+}
+.term__phase[data-state="done"] { cursor: pointer; }
+.term__phase[data-state="done"]:hover { background: rgba(255, 255, 255, 0.025); }
+
+.term__status {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; flex-shrink: 0;
+}
+.term__spinner {
+  display: inline-block;
+  width: 12px; height: 12px;
+  border: 1.5px solid rgba(255, 107, 43, 0.18);
+  border-top-color: var(--molten-light);
+  border-radius: 50%;
+  animation: termSpin 0.7s linear infinite;
+}
+@keyframes termSpin { to { transform: rotate(360deg); } }
+.term__check {
+  display: inline-block;
+  color: #6ee7b7;
+  font-weight: 700; font-size: 13px;
+  line-height: 1;
+}
+.term__check--burst { animation: checkBurst 0.7s ease-out; }
+@keyframes checkBurst {
+  0% { transform: scale(0.4); filter: drop-shadow(0 0 0 rgba(110, 231, 183, 0)); }
+  50% { transform: scale(1.5); filter: drop-shadow(0 0 14px rgba(110, 231, 183, 0.7)); }
+  100% { transform: scale(1); filter: drop-shadow(0 0 4px rgba(110, 231, 183, 0.3)); }
+}
+
+.term__phase-label {
+  display: inline-flex; align-items: center; gap: 8px;
+  flex: 1; min-width: 0;
+}
+.term__phase-tag {
+  font-size: 9.5px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 3px;
+  background: rgba(74, 158, 255, 0.06);
+  color: var(--steel-light);
+  border: 1px solid rgba(74, 158, 255, 0.12);
+  flex-shrink: 0;
+  min-width: 58px; text-align: center;
+  font-variant-numeric: tabular-nums;
+  transition: background 0.3s, color 0.3s, border-color 0.3s;
+}
+.term__phase[data-state="pending"] .term__phase-tag {
+  opacity: 0.55;
+}
+.term__phase[data-state="running"] .term__phase-tag {
+  background: rgba(255, 107, 43, 0.13);
+  color: var(--molten-light);
+  border-color: rgba(255, 107, 43, 0.28);
+  box-shadow: 0 0 10px rgba(255, 107, 43, 0.18);
+}
+.term__phase[data-state="done"] .term__phase-tag {
+  background: transparent;
+  color: rgba(110, 231, 183, 0.7);
+  border-color: rgba(110, 231, 183, 0.15);
+}
+.term__phase[data-state="done"]:hover .term__phase-tag {
+  color: #6ee7b7;
+  border-color: rgba(110, 231, 183, 0.3);
+}
+.term__phase-text {
+  color: var(--text-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: color 0.3s;
+}
+.term__phase[data-state="pending"] .term__phase-text { color: var(--text-muted); opacity: 0.65; }
+.term__phase[data-state="running"] .term__phase-text { color: var(--text-primary); }
+.term__phase-dots {
+  display: none;
+  color: var(--molten-light);
+  letter-spacing: 0.1em;
+}
+.term__phase[data-state="running"] .term__phase-dots {
+  display: inline-block;
+  animation: dotsPulse 1.4s ease-in-out infinite;
+}
+@keyframes dotsPulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+.term__phase-time {
+  font-size: 10.5px; font-family: var(--font-mono);
+  color: var(--text-muted);
+  margin-left: auto; flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  opacity: 0; transform: translateX(4px);
+  transition: opacity 0.35s ease, transform 0.35s ease, color 0.25s;
+}
+.term__phase[data-state="done"] .term__phase-time { opacity: 1; transform: translateX(0); }
+.term__phase[data-state="done"]:hover .term__phase-time { color: var(--text-secondary); }
+.term__phase-chevron {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px;
+  color: var(--text-muted);
+  margin-left: 4px; flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.25s ease, color 0.2s;
+}
+.term__phase[data-state="done"] .term__phase-chevron { opacity: 0.45; }
+.term__phase[data-state="done"]:hover .term__phase-chevron { opacity: 1; color: var(--molten-light); }
+.term__phase[data-expanded="true"] .term__phase-chevron { transform: rotate(90deg); opacity: 1; color: var(--molten-light); }
+.term__phase-chevron svg { display: block; }
+
+.term__detail {
+  display: block;
+  max-height: 0; overflow: hidden;
+  margin-left: 32px;
+  padding: 0 0 0 12px;
+  font-size: 11.5px; font-family: var(--font-mono);
+  color: var(--text-muted);
+  border-left: 1px dashed rgba(74, 158, 255, 0.22);
+  opacity: 0;
+  transition: max-height 0.32s ease, opacity 0.25s ease, padding 0.32s ease, margin 0.32s ease;
+}
+.term__phase[data-expanded="true"] + .term__detail {
+  max-height: 60px; opacity: 1;
+  padding: 5px 0 5px 12px; margin-bottom: 4px;
+}
+.term__detail-item + .term__detail-item::before {
+  content: ' · '; color: var(--forge-border-light);
+}
+
+/* Status bar */
+.term__statusbar {
+  border-top: 1px solid var(--forge-border);
+  background: linear-gradient(180deg, #10101c 0%, #0c0c16 100%);
+  position: relative; z-index: 3;
+}
+.term__progress {
+  height: 2px;
+  background: rgba(255, 255, 255, 0.04);
+  position: relative; overflow: hidden;
+}
+.term__progress::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0,
+    transparent calc(100% / 6 - 1px),
+    rgba(0, 0, 0, 0.45) calc(100% / 6 - 1px),
+    rgba(0, 0, 0, 0.45) calc(100% / 6)
+  );
+  pointer-events: none;
+}
+.term__progress-fill {
+  height: 100%; width: 0;
+  background: linear-gradient(90deg, var(--molten), var(--amber));
+  box-shadow: 0 0 10px rgba(255, 107, 43, 0.55);
+  transition: width 0.45s cubic-bezier(.4, .14, .3, 1);
+  position: relative;
+}
+.term__progress-fill::after {
+  content: '';
+  position: absolute; right: -1px; top: -3px; bottom: -3px;
+  width: 2px;
+  background: var(--amber);
+  box-shadow: 0 0 8px var(--amber), 0 0 14px var(--molten-glow);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.hero__terminal[data-state="building"] .term__progress-fill::after { opacity: 0.95; }
+.hero__terminal[data-state="done"] .term__progress-fill {
+  background: linear-gradient(90deg, var(--molten) 0%, var(--amber) 50%, #6ee7b7 100%);
+  box-shadow: 0 0 12px rgba(110, 231, 183, 0.55);
+}
+.term__statusbar-meta {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 14px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-muted);
+}
+.term__sb-item { display: inline-flex; align-items: center; gap: 6px; }
+.term__sb-item--mono { font-variant-numeric: tabular-nums; }
+.term__sb-icon {
+  display: inline-block; width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.hero__terminal[data-state="building"] .term__sb-icon {
+  background: var(--molten-light);
+  box-shadow: 0 0 8px var(--molten-glow);
+  animation: termHeartbeat 1s ease-in-out infinite;
+}
+.hero__terminal[data-state="done"] .term__sb-icon {
+  background: #6ee7b7;
+  box-shadow: 0 0 8px rgba(110, 231, 183, 0.55);
+}
+.term__sb-divider {
+  width: 1px; height: 10px;
+  background: var(--forge-border);
+}
+.term__sb-replay {
+  margin-left: auto;
+  font-size: 10px; color: var(--text-muted);
+  letter-spacing: 0.06em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.term__kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+  min-width: 16px; padding: 1px 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--forge-border);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  letter-spacing: 0;
 }
 
 @media (min-width: 1024px) {
@@ -731,25 +1146,15 @@ body::after {
   mix-blend-mode: overlay;
 }
 
-/* ═══ Terminal Typing Animation ═══ */
-.term__line--animated {
-  overflow: hidden; white-space: nowrap;
-  opacity: 0; max-width: 0;
-  transition: none;
-}
-.term__line--animated.typed {
-  opacity: 1; max-width: 800px;
-  transition: max-width 0.6s steps(40, end), opacity 0.1s;
-}
-
 /* ═══ Hero Terminal Float ═══ */
 @keyframes termFloat {
-  0%, 100% { transform: translateY(0) rotate3d(1, 0.5, 0, 0deg); }
-  50% { transform: translateY(-8px) rotate3d(1, 0.5, 0, 1.5deg); }
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
 }
 .hero__terminal {
-  animation: termFloat 6s ease-in-out infinite;
+  animation: termFloat 7s ease-in-out infinite;
 }
+.hero__terminal:hover { animation-play-state: paused; }
 
 /* ═══ Stat Counter Animation ═══ */
 .hero__stat-num[data-target] {
@@ -847,7 +1252,8 @@ body::after {
 @media (prefers-reduced-motion: reduce) {
   .hero h1 .gradient-text { animation: none; }
   .hero__terminal { animation: none; }
-  .term__line--animated { opacity: 1; max-width: none; }
+  .term__row, .term__phase { opacity: 1; transform: none; }
+  .term__spinner, .term__title-dot, .term__caret, .term__cursor { animation: none; }
   .scroll-progress { display: none; }
 }
 </style>
@@ -937,24 +1343,175 @@ body::after {
           </a>
         </div>
       </div>
-      <div class="hero__terminal">
+      <div class="hero__terminal" id="hero-term" data-state="idle" data-paused="false">
         <div class="term__bar">
-          <div class="term__dot term__dot--r"></div>
-          <div class="term__dot term__dot--y"></div>
-          <div class="term__dot term__dot--g"></div>
-          <div class="term__title">claude</div>
+          <div class="term__dots">
+            <button class="term__dot term__dot--r" aria-label="Close" tabindex="-1"></button>
+            <button class="term__dot term__dot--y" aria-label="Minimize" tabindex="-1"></button>
+            <button class="term__dot term__dot--g" aria-label="Maximize" tabindex="-1"></button>
+          </div>
+          <div class="term__title">
+            <span class="term__title-dot"></span>
+            <span>claude — agent-triforge</span>
+          </div>
+          <div class="term__actions">
+            <button class="term__action" id="term-replay" aria-label="Replay sequence" title="Replay (R)">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M14 8a6 6 0 1 1-1.76-4.24"/>
+                <path d="M14 2v4h-4"/>
+              </svg>
+            </button>
+          </div>
         </div>
-        <div class="term__body" id="terminal-body">
-          <span class="term__line term__line--animated"><span class="term__prompt">$</span> <span class="term__cmd">claude</span></span>
-          <span class="term__line term__line--animated"><span class="term__prompt">></span> <span class="term__flag">/ship</span> <span class="term__str">add user authentication with JWT</span></span>
-          <span class="term__line term__line--animated"><span class="term__comment">  Phase 0: Gemini analyzing codebase...</span></span>
-          <span class="term__line term__line--animated"><span class="term__comment">  Phase 1: Planning with shadow paths...</span></span>
-          <span class="term__line term__line--animated"><span class="term__comment">  Phase 1.1: Ambiguity check — 0 corrections</span></span>
-          <span class="term__line term__line--animated"><span class="term__comment">  Phase 2: Building via wave orchestration...</span></span>
-          <span class="term__line term__line--animated"><span class="term__success">  Phase 3: 7 reviewers dispatched in parallel</span></span>
-          <span class="term__line term__line--animated"><span class="term__success">  Phase 5: Codex TDD — 47 tests, all green</span></span>
-          <span class="term__line term__line--animated"><span class="term__success">  &#10003; All gates passed. Shipping.</span></span>
-          <span class="term__line term__line--animated"><span class="term__prompt">></span> <span class="term__cursor"></span></span>
+        <div class="term__body" id="term-body" aria-live="polite">
+          <div class="term__sys" id="term-sys">
+            <span class="term__sys-item"><span class="term__sys-icon"></span><span>agent-triforge</span></span>
+            <span class="term__sys-item term__sys-branch">main</span>
+            <span class="term__sys-item term__sys-ver">claude v2.3.0</span>
+          </div>
+
+          <div class="term__row term__row--prompt" data-row="r0">
+            <span class="term__prompt">$</span>
+            <span class="term__text"><span class="term__cmd" data-type="claude"></span></span>
+          </div>
+
+          <div class="term__row term__row--prompt term__row--ship" data-row="r1">
+            <span class="term__prompt">&gt;</span>
+            <span class="term__text">
+              <span class="term__flag" data-type="/ship"></span>
+              <span class="term__str" data-type="add user authentication with JWT"></span>
+            </span>
+            <button class="term__copy" id="term-copy" aria-label="Copy command" title="Copy command">
+              <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="5" y="5" width="9" height="9" rx="1.5"/>
+                <path d="M11 5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h2"/>
+              </svg>
+              <span class="term__copy-label">copy</span>
+            </button>
+          </div>
+
+          <div class="term__rule" id="term-rule"></div>
+
+          <div class="term__phase" data-phase="0" data-state="pending" data-expanded="false">
+            <span class="term__status"><span class="term__spinner"></span></span>
+            <span class="term__phase-label">
+              <span class="term__phase-tag">Phase 0</span>
+              <span class="term__phase-text">Gemini analyzing codebase</span>
+              <span class="term__phase-dots">···</span>
+            </span>
+            <span class="term__phase-time"></span>
+            <span class="term__phase-chevron"><svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 3l3 3-3 3"/></svg></span>
+          </div>
+          <div class="term__detail">
+            <span class="term__detail-item">gemini-3.1-pro</span>
+            <span class="term__detail-item">1M context window</span>
+            <span class="term__detail-item">47 files mapped</span>
+          </div>
+
+          <div class="term__phase" data-phase="1" data-state="pending" data-expanded="false">
+            <span class="term__status"><span class="term__spinner"></span></span>
+            <span class="term__phase-label">
+              <span class="term__phase-tag">Phase 1</span>
+              <span class="term__phase-text">Planning with shadow paths</span>
+              <span class="term__phase-dots">···</span>
+            </span>
+            <span class="term__phase-time"></span>
+            <span class="term__phase-chevron"><svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 3l3 3-3 3"/></svg></span>
+          </div>
+          <div class="term__detail">
+            <span class="term__detail-item">shadow-path-tracing</span>
+            <span class="term__detail-item">23 paths enumerated</span>
+            <span class="term__detail-item">12 error states mapped</span>
+          </div>
+
+          <div class="term__phase" data-phase="2" data-state="pending" data-expanded="false">
+            <span class="term__status"><span class="term__spinner"></span></span>
+            <span class="term__phase-label">
+              <span class="term__phase-tag">Phase 1.1</span>
+              <span class="term__phase-text">Ambiguity check — 0 corrections</span>
+              <span class="term__phase-dots">···</span>
+            </span>
+            <span class="term__phase-time"></span>
+            <span class="term__phase-chevron"><svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 3l3 3-3 3"/></svg></span>
+          </div>
+          <div class="term__detail">
+            <span class="term__detail-item">plan-checker agent</span>
+            <span class="term__detail-item">0 blockers</span>
+            <span class="term__detail-item">approved on first pass</span>
+          </div>
+
+          <div class="term__phase" data-phase="3" data-state="pending" data-expanded="false">
+            <span class="term__status"><span class="term__spinner"></span></span>
+            <span class="term__phase-label">
+              <span class="term__phase-tag">Phase 2</span>
+              <span class="term__phase-text">Building via wave orchestration</span>
+              <span class="term__phase-dots">···</span>
+            </span>
+            <span class="term__phase-time"></span>
+            <span class="term__phase-chevron"><svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 3l3 3-3 3"/></svg></span>
+          </div>
+          <div class="term__detail">
+            <span class="term__detail-item">wave-orchestrator</span>
+            <span class="term__detail-item">4 waves</span>
+            <span class="term__detail-item">7 builders in parallel</span>
+          </div>
+
+          <div class="term__phase" data-phase="4" data-state="pending" data-expanded="false">
+            <span class="term__status"><span class="term__spinner"></span></span>
+            <span class="term__phase-label">
+              <span class="term__phase-tag">Phase 3</span>
+              <span class="term__phase-text">7 reviewers dispatched in parallel</span>
+              <span class="term__phase-dots">···</span>
+            </span>
+            <span class="term__phase-time"></span>
+            <span class="term__phase-chevron"><svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 3l3 3-3 3"/></svg></span>
+          </div>
+          <div class="term__detail">
+            <span class="term__detail-item">gemini</span>
+            <span class="term__detail-item">codex</span>
+            <span class="term__detail-item">security-sentinel</span>
+            <span class="term__detail-item">performance-oracle</span>
+            <span class="term__detail-item">simplicity-reviewer</span>
+            <span class="term__detail-item">convention-enforcer</span>
+            <span class="term__detail-item">architecture-strategist</span>
+          </div>
+
+          <div class="term__phase" data-phase="5" data-state="pending" data-expanded="false">
+            <span class="term__status"><span class="term__spinner"></span></span>
+            <span class="term__phase-label">
+              <span class="term__phase-tag">Phase 5</span>
+              <span class="term__phase-text">Codex TDD — 47 tests, all green</span>
+              <span class="term__phase-dots">···</span>
+            </span>
+            <span class="term__phase-time"></span>
+            <span class="term__phase-chevron"><svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 3l3 3-3 3"/></svg></span>
+          </div>
+          <div class="term__detail">
+            <span class="term__detail-item">codex gpt-5.4</span>
+            <span class="term__detail-item">RED → GREEN → REFACTOR</span>
+            <span class="term__detail-item">47 / 47 passing</span>
+          </div>
+
+          <div class="term__row term__row--final" data-row="final">
+            <span class="term__check term__check--final" aria-hidden="true">
+              <svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5l2.8 2.8L11.5 4"/></svg>
+            </span>
+            <span class="term__success-text">All gates passed. Shipping.</span>
+          </div>
+
+          <div class="term__row term__row--cursor" data-row="cursor">
+            <span class="term__prompt">&gt;</span>
+            <span class="term__cursor"></span>
+          </div>
+        </div>
+        <div class="term__statusbar">
+          <div class="term__progress"><div class="term__progress-fill" id="term-progress"></div></div>
+          <div class="term__statusbar-meta">
+            <span class="term__sb-item"><span class="term__sb-icon"></span><span id="term-status-text">Ready</span></span>
+            <span class="term__sb-divider"></span>
+            <span class="term__sb-item term__sb-item--mono"><span id="term-elapsed">0.0s</span></span>
+            <span class="term__sb-replay">Press <span class="term__kbd">R</span> to replay</span>
+          </div>
         </div>
       </div>
     </div>
@@ -1621,14 +2178,266 @@ const counterObserver = new IntersectionObserver(entries => {
 }, { threshold: 0.5 });
 document.querySelectorAll('[data-target]').forEach(el => counterObserver.observe(el));
 
-/* ── Terminal typing animation ── */
+/* ── Terminal state machine ── */
 (function() {
-  const lines = document.querySelectorAll('.term__line--animated');
-  let delay = 400;
-  lines.forEach((line, i) => {
-    setTimeout(() => line.classList.add('typed'), delay);
-    delay += 350 + Math.random() * 200;
+  const term = document.getElementById('hero-term');
+  if (!term) return;
+
+  const replayBtn  = term.querySelector('#term-replay');
+  const copyBtn    = term.querySelector('#term-copy');
+  const progressEl = term.querySelector('#term-progress');
+  const statusText = term.querySelector('#term-status-text');
+  const elapsedEl  = term.querySelector('#term-elapsed');
+
+  const promptRows = Array.from(term.querySelectorAll('.term__row--prompt'));
+  const phases     = Array.from(term.querySelectorAll('.term__phase'));
+  const finalRow   = term.querySelector('[data-row="final"]');
+  const cursorRow  = term.querySelector('[data-row="cursor"]');
+  const finalCheck = finalRow?.querySelector('.term__check');
+  const sysRow     = term.querySelector('#term-sys');
+  const ruleEl     = term.querySelector('#term-rule');
+  const typeTargets = Array.from(term.querySelectorAll('[data-type]'));
+
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const makeEl = (tag, cls, text) => {
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = text;
+    return el;
+  };
+  const CHECK_SVG_NS = 'http://www.w3.org/2000/svg';
+  const buildCheck = () => {
+    const wrap = makeEl('span', 'term__check');
+    const svg = document.createElementNS(CHECK_SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 14 14');
+    svg.setAttribute('width', '12');
+    svg.setAttribute('height', '12');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2.2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(CHECK_SVG_NS, 'path');
+    path.setAttribute('d', 'M2.5 7.5l2.8 2.8L11.5 4');
+    svg.appendChild(path);
+    wrap.appendChild(svg);
+    return wrap;
+  };
+  const setStatus = (el, kind) => {
+    while (el.firstChild) el.removeChild(el.firstChild);
+    if (kind === 'spinner') el.appendChild(makeEl('span', 'term__spinner'));
+    else if (kind === 'check') el.appendChild(buildCheck());
+  };
+
+  let token = 0;
+  let paused = false;
+  let elapsedTimer = null;
+
+  function sleep(ms, myToken) {
+    return new Promise(resolve => {
+      let remaining = ms;
+      let last = performance.now();
+      function tick(now) {
+        if (myToken !== token) return resolve();
+        if (paused) { last = now; return requestAnimationFrame(tick); }
+        remaining -= (now - last);
+        last = now;
+        if (remaining <= 0) return resolve();
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    });
+  }
+
+  async function typeInto(el, text, speed, myToken) {
+    while (el.firstChild) el.removeChild(el.firstChild);
+    const caret = makeEl('span', 'term__caret');
+    el.appendChild(caret);
+    for (let i = 0; i < text.length; i++) {
+      if (myToken !== token) return;
+      caret.before(text[i]);
+      await sleep(speed + Math.random() * 22, myToken);
+    }
+    caret.remove();
+  }
+
+  function resetUI() {
+    term.querySelectorAll('.term__row, .term__phase, .term__sys, .term__rule').forEach(r => r.classList.remove('is-shown'));
+    typeTargets.forEach(el => { while (el.firstChild) el.removeChild(el.firstChild); });
+    phases.forEach(p => {
+      p.dataset.state = 'pending';
+      p.dataset.expanded = 'false';
+      const status = p.querySelector('.term__status');
+      if (status) setStatus(status, 'spinner');
+      const time = p.querySelector('.term__phase-time');
+      if (time) time.textContent = '';
+    });
+    progressEl.style.width = '0%';
+    term.dataset.state = 'idle';
+    statusText.textContent = 'Ready';
+    elapsedEl.textContent = '0.0s';
+  }
+
+  function startElapsed() {
+    stopElapsed();
+    const start = performance.now();
+    let pausedAccum = 0;
+    let pausedAt = 0;
+    elapsedTimer = setInterval(() => {
+      if (paused) {
+        if (!pausedAt) pausedAt = performance.now();
+        return;
+      }
+      if (pausedAt) {
+        pausedAccum += performance.now() - pausedAt;
+        pausedAt = 0;
+      }
+      const e = (performance.now() - start - pausedAccum) / 1000;
+      elapsedEl.textContent = e.toFixed(1) + 's';
+    }, 80);
+  }
+  function stopElapsed() {
+    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  }
+
+  async function play() {
+    const myToken = ++token;
+    stopElapsed();
+    resetUI();
+
+    if (prefersReduced) {
+      term.querySelectorAll('.term__row, .term__phase, .term__sys, .term__rule').forEach(r => r.classList.add('is-shown'));
+      typeTargets[0].textContent = 'claude';
+      typeTargets[1].textContent = '/ship';
+      typeTargets[2].textContent = 'add user authentication with JWT';
+      phases.forEach((p, i) => {
+        p.dataset.state = 'done';
+        setStatus(p.querySelector('.term__status'), 'check');
+        p.querySelector('.term__phase-time').textContent = (0.6 + i * 0.2).toFixed(1) + 's';
+      });
+      progressEl.style.width = '100%';
+      term.dataset.state = 'done';
+      statusText.textContent = 'Complete';
+      elapsedEl.textContent = '7.4s';
+      return;
+    }
+
+    await sleep(280, myToken); if (myToken !== token) return;
+
+    /* System header */
+    if (sysRow) sysRow.classList.add('is-shown');
+    await sleep(280, myToken);
+
+    promptRows[0].classList.add('is-shown');
+    await sleep(120, myToken);
+    await typeInto(typeTargets[0], 'claude', 55, myToken);
+    if (myToken !== token) return;
+    await sleep(340, myToken);
+
+    promptRows[1].classList.add('is-shown');
+    await sleep(120, myToken);
+    await typeInto(typeTargets[1], '/ship', 42, myToken);
+    if (myToken !== token) return;
+    await sleep(80, myToken);
+    await typeInto(typeTargets[2], 'add user authentication with JWT', 24, myToken);
+    if (myToken !== token) return;
+    await sleep(380, myToken);
+
+    if (ruleEl) ruleEl.classList.add('is-shown');
+    await sleep(180, myToken);
+
+    term.dataset.state = 'building';
+    statusText.textContent = 'Building';
+    startElapsed();
+
+    for (let i = 0; i < phases.length; i++) {
+      if (myToken !== token) return;
+      const phase = phases[i];
+      phase.classList.add('is-shown');
+      phase.dataset.state = 'running';
+      const dur = 620 + Math.random() * 520;
+      const phaseStart = performance.now();
+      await sleep(dur, myToken);
+      if (myToken !== token) return;
+      const elapsed = ((performance.now() - phaseStart) / 1000).toFixed(1);
+      phase.dataset.state = 'done';
+      setStatus(phase.querySelector('.term__status'), 'check');
+      const time = phase.querySelector('.term__phase-time');
+      if (time) time.textContent = elapsed + 's';
+      progressEl.style.width = (((i + 1) / phases.length) * 100) + '%';
+      await sleep(110, myToken);
+    }
+
+    if (myToken !== token) return;
+    finalRow.classList.add('is-shown');
+    if (finalCheck) {
+      finalCheck.classList.remove('term__check--burst');
+      void finalCheck.offsetWidth;
+      finalCheck.classList.add('term__check--burst');
+    }
+    cursorRow.classList.add('is-shown');
+    term.dataset.state = 'done';
+    statusText.textContent = 'Complete';
+    stopElapsed();
+
+    await sleep(4200, myToken);
+    if (myToken === token) play();
+  }
+
+  term.addEventListener('mouseenter', () => { paused = true; term.dataset.paused = 'true'; });
+  term.addEventListener('mouseleave', () => { paused = false; term.dataset.paused = 'false'; });
+
+  replayBtn?.addEventListener('click', e => {
+    e.stopPropagation();
+    paused = false;
+    term.dataset.paused = 'false';
+    play();
   });
+
+  phases.forEach(p => {
+    p.addEventListener('click', () => {
+      if (p.dataset.state !== 'done') return;
+      p.dataset.expanded = p.dataset.expanded === 'true' ? 'false' : 'true';
+    });
+  });
+
+  copyBtn?.addEventListener('click', async e => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText('/ship add user authentication with JWT');
+      const label = copyBtn.querySelector('.term__copy-label');
+      const orig = label ? label.textContent : '';
+      copyBtn.classList.add('is-copied');
+      if (label) label.textContent = 'copied';
+      setTimeout(() => {
+        copyBtn.classList.remove('is-copied');
+        if (label) label.textContent = orig;
+      }, 1400);
+    } catch {}
+  });
+
+  let inView = false;
+  const visObs = new IntersectionObserver(entries => {
+    entries.forEach(en => { inView = en.isIntersecting; });
+  }, { threshold: 0.35 });
+  visObs.observe(term);
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'r' && e.key !== 'R') return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const tag = (e.target?.tagName || '').toLowerCase();
+    if (['input', 'textarea', 'select'].includes(tag) || e.target?.isContentEditable) return;
+    if (!inView) return;
+    play();
+  });
+
+  const startObs = new IntersectionObserver(entries => {
+    entries.forEach(en => {
+      if (en.isIntersecting) { play(); startObs.disconnect(); }
+    });
+  }, { threshold: 0.3 });
+  startObs.observe(term);
 })();
 
 /* ── Card mouse glow tracking ── */
