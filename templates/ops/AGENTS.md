@@ -12,6 +12,20 @@
 4. Custom agent — description of role
 -->
 
+## Invoking external agents
+
+All Gemini/Codex invocations go through the plugin's unified helper
+(handles policy loading, timeout, retries, native-agent routing with legacy
+prompt-prefix injection as a fallback):
+
+```bash
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
+invoke_gemini "<agent-name>" "<prompt>" "<output-file>" <timeout-seconds>
+invoke_codex  "<agent-name>" "<prompt>" "<output-file>" <timeout-seconds>
+```
+
+Available native agents live in the plugin at `gemini-agents/` and `codex-agents/`.
+
 ## Shared rules
 
 - Before acting: read TASKS.md, MEMORY.md, CHANGELOG.md, CONTRACTS.md

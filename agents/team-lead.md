@@ -65,10 +65,33 @@ After all teammates complete:
 - If clean → proceed to review phase
 
 ### 7. Invoke external agents
-You can invoke Gemini and Codex for review/testing:
+You can invoke Gemini and Codex for review/testing via the unified helper
+(which handles policy loading, timeouts, retries, and native-agent routing):
 ```bash
-gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md) Review the changes in [files]..." &
-codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md) Write tests for [files]..." &
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
+
+GEMINI_OUT="${TMPDIR:-/tmp}/gemini_team_$$_$(date +%s).txt"
+CODEX_OUT="${TMPDIR:-/tmp}/codex_team_$$_$(date +%s).txt"
+
+# Architecture review for changed scope (Gemini)
+invoke_gemini "architecture-reviewer" \
+  "Review the changes in [files]. Write to ops/REVIEW_GEMINI.md." \
+  "$GEMINI_OUT" 600 &
+GEMINI_PID=$!
+
+# TDD tests for changed scope (Codex)
+invoke_codex "test_writer" \
+  "Write tests for [files]." \
+  "$CODEX_OUT" 600 &
+CODEX_PID=$!
+
+# Per-PID wait so silent failures surface instead of producing empty review files
+GEMINI_RC=0; CODEX_RC=0
+wait $GEMINI_PID || GEMINI_RC=$?
+wait $CODEX_PID  || CODEX_RC=$?
+if [ $GEMINI_RC -ne 0 ] || [ $CODEX_RC -ne 0 ]; then
+  echo "team-lead: helper failed — gemini=$GEMINI_RC codex=$CODEX_RC" >&2
+fi
 ```
 
 ## Worker failure protocol

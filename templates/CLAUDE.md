@@ -16,7 +16,7 @@ This project uses the multi-agent coordination framework where Claude Code serve
 - **Gemini CLI** — analyst + reviewer: Phase 0 codebase scans (1M token context), architecture reviews, documentation
 - **Codex CLI** — tester + logic reviewer: writes/runs tests, security audits, infrastructure tasks
 
-Claude invokes Gemini via `gemini -p "..."` and Codex via `codex exec "..."` as background bash processes. Skills are injected into external agents via `$(cat ${CLAUDE_PLUGIN_ROOT}/skills/SKILL_NAME/SKILL.md)`. Reviews run in parallel (Gemini + Codex + Claude subagents simultaneously), never sequentially.
+Claude invokes Gemini and Codex through the unified helper `scripts/invoke-external.sh` (which handles policy loading, timeout enforcement, retry, and native-agent routing with a legacy `$(cat ...)` skill-injection fallback). Reviews run in parallel (Gemini + Codex + Claude subagents simultaneously), never sequentially.
 
 ### Four coordination modes
 
@@ -42,6 +42,7 @@ Claude invokes Gemini via `gemini -p "..."` and Codex via `codex exec "..."` as 
 | `decisions/` | Architecture decision records (ADRs) | Claude writes |
 | `REVIEW_GEMINI.md` | Gemini's review output (temporary) | Gemini writes, Claude reads |
 | `REVIEW_CODEX.md` | Codex's review output (temporary) | Codex writes, Claude reads |
+| `RESEARCH_GEMINI.md` | Gemini targeted-research output (temporary) | Gemini writes, Claude reads |
 | `TEST_RESULTS.md` | Test results (temporary) | Codex writes, Claude reads |
 
 ### Execution phases
@@ -129,20 +130,33 @@ Claude invokes Gemini via `gemini -p "..."` and Codex via `codex exec "..."` as 
 ## Agent invocation patterns
 
 ```bash
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
+
+# TMPDIR-scoped, PID+timestamped paths avoid collisions across concurrent runs.
 GEMINI_OUT="${TMPDIR:-/tmp}/gemini_output_$$_$(date +%s).txt"
 CODEX_OUT="${TMPDIR:-/tmp}/codex_output_$$_$(date +%s).txt"
 
-# Gemini with skill injection (non-interactive, background)
-gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md) Analyze codebase..." > "$GEMINI_OUT" 2>&1 &
+# Gemini codebase-analyst (runs in background)
+invoke_gemini "codebase-analyst" \
+  "Analyze the full codebase. Write findings to ops/ARCHITECTURE.md." \
+  "$GEMINI_OUT" 600 &
 GEMINI_PID=$!
 
-# Codex with skill injection (non-interactive, background)
-codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md) Write tests..." > "$CODEX_OUT" 2>&1 &
+# Codex test_writer (runs in background)
+invoke_codex "test_writer" \
+  "Write tests for changed files." \
+  "$CODEX_OUT" 900 &
 CODEX_PID=$!
 
-# Wait for parallel completion
-wait $GEMINI_PID $CODEX_PID
+# Per-PID wait — a silent failure in either helper leaves the downstream
+# ops/REVIEW_*.md or ops/TEST_RESULTS.md empty and looks like "no findings".
+GEMINI_RC=0; CODEX_RC=0
+wait $GEMINI_PID || GEMINI_RC=$?
+wait $CODEX_PID  || CODEX_RC=$?
+[ $GEMINI_RC -ne 0 ] || [ $CODEX_RC -ne 0 ] && { echo "helper failed — gemini=$GEMINI_RC codex=$CODEX_RC" >&2; exit 1; }
 ```
+
+The helper auto-detects native subagent support. If `.gemini/agents/<name>.md` or `.codex/agents/agents.toml` is present, it uses native routing; otherwise it injects the agent body as a prompt prefix (legacy mode).
 
 ### Git trailer conventions
 

@@ -101,9 +101,11 @@ fi
 
 if [ -f "ops/TASKS.md" ]; then
   HAS_TASKS="yes"
-  BLOCKED_COUNT=$(grep -c '\[B\]' ops/TASKS.md 2>/dev/null || echo "0")
-  PENDING_COUNT=$(grep -c '\[ \]' ops/TASKS.md 2>/dev/null || echo "0")
-  IN_PROGRESS_COUNT=$(grep -c '\[-\]' ops/TASKS.md 2>/dev/null || echo "0")
+  # `grep -c` already prints 0 when there are no matches (exiting 1).
+  # Use `|| true` to avoid set -e termination without duplicating the 0 via `echo "0"`.
+  BLOCKED_COUNT=$(grep -c '\[B\]' ops/TASKS.md 2>/dev/null || true)
+  PENDING_COUNT=$(grep -c '\[ \]' ops/TASKS.md 2>/dev/null || true)
+  IN_PROGRESS_COUNT=$(grep -c '\[-\]' ops/TASKS.md 2>/dev/null || true)
 fi
 
 if [ -f "ops/GOALS.md" ]; then
@@ -206,6 +208,6 @@ MSG="$MSG${CLAUDE_MD_TIP:-}"
 
 printf '%b\n' "Multi-agent framework ready.$MSG"
 echo ""
-echo "Commands: /ship /plan /build /review /test /debug /quick /deep-research /status /pause /resume /wrap /compound"
+echo "Commands: /ship /plan /build /review /test /debug /quick /deep-research /analyze /coordinate /resolve-pr /status /pause /resume /wrap /compound"
 
 exit 0

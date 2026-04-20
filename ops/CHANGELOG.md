@@ -1,5 +1,24 @@
 # Changelog
 
+## [2026-04-20] — v2.4.0: Framework self-audit — two blockers + four HIGH fixes
+
+### Claude Code
+- **BLOCKER fix:** Removed broken session_id comparison in `ship-loop.sh`. The slash commands wrote `session_id: "<current-branch-name>"` into the state file; the hook compared against Claude Code's runtime session UUID. Mismatch → the guard took the "different session" exit every call → the inner loop never blocked premature exits during autonomous `/ship`/`/coordinate` runs. State-file presence with `active: true` now indicates the active loop.
+- **BLOCKER fix:** `PostToolUseFailure` is not a valid Claude Code hook event — loader silently ignored the registration, so `tool-failure-monitor.sh` was dead code. Merged the handler into the existing `PostToolUse` hook and added in-handler filtering on `tool_response.is_error` / `tool_response.error`. Smoke-tested both success (no state change) and failure (counter increment) paths.
+- **HIGH fix:** Removed `-y` (YOLO) default from `invoke_gemini`. YOLO installs a max-priority allow rule that overrides every policies.toml deny (documented in the policy file itself) — the `rm -rf`/`git push`/`sudo` guardrails were effectively inert. Now gated on `GEMINI_YOLO=1` env var for the rare environment that genuinely needs it.
+- **HIGH fix:** Migrated `agents/team-lead.md` from legacy `gemini -p "$(cat SKILL.md) ..."` direct invocations to `invoke_gemini` / `invoke_codex`. Team-mode builds now get policy loading, timeout enforcement, retry, and native-agent routing like the rest of the framework.
+- **HIGH fix:** `templates/CLAUDE.md` and `README.md` updated — both documented the legacy invocation pattern as if current. New adopters now see `invoke_gemini` / `invoke_codex` as the primary pattern.
+- **MEDIUM fix:** `grep -c … || echo "0"` produced `"0\n0"` on zero matches because `grep -c` already prints `0` before exiting 1. Replaced with `|| true` in `session-start.sh` + `pre-compact.sh`. Fixed the broken CLAUDE.md "Hook safety" guidance that documented the buggy pattern.
+- **MEDIUM fix:** `pre-compact.sh` `CURRENT_PHASE` default was clobbered when `ops/STATE.md` existed but lacked a `## Current phase:` line (sed with no match exits 0, so `|| echo "unknown"` never fired). Fixed via explicit empty-check.
+- **MEDIUM fix:** `session-start.sh` commands banner now lists all 16 commands (was 13 — missing `/analyze`, `/coordinate`, `/resolve-pr`).
+- **MEDIUM fix:** State-file writes in `ship-loop.sh` and `tool-failure-monitor.sh` switched from `sed` to `python3` to eliminate sed-metacharacter injection risk.
+- **MEDIUM fix:** `_run_with_timeout` now emits a one-shot stderr warning the first time it falls back to no-timeout execution (neither `timeout` nor `gtimeout` on PATH).
+- **LOW fix:** Added `ops/RESEARCH_GEMINI.md` (written by `targeted-researcher`) to the shared-file tables in CLAUDE.md and templates/CLAUDE.md.
+- **LOW fix:** `scripts/coordinate.sh` now does a `claude` CLI preflight and fails fast instead of silently looping with empty output.
+- **LOW fix:** Removed redundant `agents`/`skills`/`commands` path declarations from `.claude-plugin/plugin.json` (auto-discovered under the current plugin spec).
+- **Verified upstream:** Gemini subagent frontmatter uses snake_case `max_turns`/`timeout_mins` per official spec — current frontmatter is correct. Codex `nickname_candidates` is a real, documented field — not dead config.
+- Smoke-tested: grep -c zero-match produces single `"0"` (length 1), sed-empty-output fallback yields `"unknown"`, tool-failure-monitor writes state only on `is_error:true` payloads.
+
 ## [2026-04-01] — Fourth audit, README polish, SVG cleanup
 
 ### Claude Code

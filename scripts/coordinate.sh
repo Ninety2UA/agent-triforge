@@ -50,6 +50,16 @@ if [ -z "$GOAL" ]; then
   exit 1
 fi
 
+# Preflight: coordinate.sh drives Claude via `claude --print`. If the CLI is
+# missing (e.g. user installed only the IDE extension), `|| true` below would
+# mask every iteration as a silent no-op.
+if ! command -v claude >/dev/null 2>&1; then
+  echo "coordinate.sh: ERROR \`claude\` CLI not found on PATH." >&2
+  echo "  This script requires the Claude Code command-line interface." >&2
+  echo "  Install from https://docs.claude.com/claude-code or ensure it is on PATH." >&2
+  exit 1
+fi
+
 # --- Notification (optional, env-var-gated) ---
 notify() {
   local title="$1" body="$2"

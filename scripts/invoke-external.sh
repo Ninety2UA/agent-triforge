@@ -69,13 +69,24 @@ ${PROMPT}"
   fi
   echo "invoke_gemini: agent=${AGENT_NAME} mode=${MODE} policy=${POLICY_LOG}" >&2
 
-  _run_with_timeout "${TIMEOUT}" gemini "${POLICY_ARGS[@]}" -y -p "$FULL_PROMPT" > "$OUTPUT_FILE" 2>&1 || EXIT_CODE=$?
+  # No `-y` / `--yolo`: YOLO installs a max-priority allow rule that overrides
+  # every policies.toml deny (rm -rf, git push, sudo), defeating defense-in-depth.
+  # Subagent safety comes from (1) each agent's `tools` allowlist and
+  # (2) policies.toml rules being honored at normal priority.
+  # If an environment genuinely requires YOLO (e.g. interactive-only setups
+  # without tool approval UI), set GEMINI_YOLO=1 to opt in explicitly.
+  local YOLO_ARG=()
+  if [ "${GEMINI_YOLO:-0}" = "1" ]; then
+    YOLO_ARG=(-y)
+  fi
+
+  _run_with_timeout "${TIMEOUT}" gemini "${POLICY_ARGS[@]}" "${YOLO_ARG[@]}" -p "$FULL_PROMPT" > "$OUTPUT_FILE" 2>&1 || EXIT_CODE=$?
 
   # Retry once with simplified prompt on failure (per docs/agent-triforge.md)
   if [ "$EXIT_CODE" -ne 0 ]; then
     echo "invoke_gemini: agent=${AGENT_NAME} exit=${EXIT_CODE}, retrying with raw prompt" >&2
     EXIT_CODE=0
-    _run_with_timeout "${TIMEOUT}" gemini "${POLICY_ARGS[@]}" -y -p "$PROMPT" > "${OUTPUT_FILE}.retry" 2>&1 || EXIT_CODE=$?
+    _run_with_timeout "${TIMEOUT}" gemini "${POLICY_ARGS[@]}" "${YOLO_ARG[@]}" -p "$PROMPT" > "${OUTPUT_FILE}.retry" 2>&1 || EXIT_CODE=$?
     if [ "$EXIT_CODE" -eq 0 ]; then
       mv "${OUTPUT_FILE}.retry" "$OUTPUT_FILE"
     else
@@ -175,7 +186,9 @@ ${PROMPT}"
 # ---------------------------------------------------------------------------
 
 # Run a command with a timeout. macOS lacks `timeout` by default; try `gtimeout`
-# from coreutils; fall back to direct exec (no timeout enforcement).
+# from coreutils; fall back to direct exec (no timeout enforcement, with a
+# one-per-process stderr warning so hung Gemini/Codex runs aren't silent).
+_INVOKE_TIMEOUT_WARNED=0
 _run_with_timeout() {
   local SECS=$1
   shift
@@ -184,6 +197,10 @@ _run_with_timeout() {
   elif command -v gtimeout >/dev/null 2>&1; then
     gtimeout "${SECS}s" "$@"
   else
+    if [ "$_INVOKE_TIMEOUT_WARNED" = "0" ]; then
+      echo "invoke-external.sh: WARNING neither \`timeout\` nor \`gtimeout\` on PATH — running without timeout enforcement; a hung Gemini/Codex process could run indefinitely. On macOS: brew install coreutils" >&2
+      _INVOKE_TIMEOUT_WARNED=1
+    fi
     "$@"
   fi
 }

@@ -44,6 +44,7 @@ Claude invokes Gemini via `invoke_gemini` and Codex via `invoke_codex` (from `sc
 | `decisions/` | Architecture decision records (ADRs) | Claude writes |
 | `REVIEW_GEMINI.md` | Gemini's review output (temporary) | Gemini writes, Claude reads |
 | `REVIEW_CODEX.md` | Codex's review output (temporary) | Codex writes, Claude reads |
+| `RESEARCH_GEMINI.md` | Gemini targeted-research output (temporary) | Gemini writes, Claude reads |
 | `TEST_RESULTS.md` | Test results (temporary) | Codex writes, Claude reads |
 
 ### Execution phases
@@ -90,7 +91,7 @@ Agent definitions in `agents/*.md` support these YAML frontmatter fields:
 
 ### Hook safety
 
-All 5 hook handlers use `set -euo pipefail`. When using `grep -c`, always add `|| echo "0"` fallback to prevent script termination on zero matches.
+All 5 hook handlers use `set -euo pipefail`. When using `grep -c`, add `|| true` (not `|| echo "0"`) to prevent script termination on zero matches — `grep -c` already prints `0` to stdout before exiting 1, so `|| echo "0"` duplicates the output and produces a multiline `"0\n0"` value that corrupts downstream display and numeric comparisons.
 
 ### Key constraints
 

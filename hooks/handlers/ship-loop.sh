@@ -11,7 +11,11 @@
 # Activation: /ship or /coordinate creates the state file
 # Termination: <promise>DONE</promise> in last assistant output, or max iterations (default 5)
 #
-# This hook is session-isolated — it only blocks exit for the session that started the loop.
+# Presence of the state file (with active: true) indicates an active loop.
+# Users who need to share a project directory across concurrent ship loops
+# should run them from separate checkouts; per-session isolation via the
+# hook-input session_id was removed because the slash commands can't know
+# the runtime UUID at the time they create the state file.
 
 set -euo pipefail
 
@@ -43,17 +47,7 @@ if [[ "$ACTIVE" != "true" ]]; then
 fi
 
 # --------------------------------------------------
-# 4. Session isolation — only block the session that started the loop
-# --------------------------------------------------
-STATE_SESSION=$(echo "$FRONTMATTER" | grep '^session_id:' | sed 's/session_id: *//' | tr -d '"')
-HOOK_SESSION=$(echo "$HOOK_INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null || echo "")
-
-if [[ -n "$STATE_SESSION" ]] && [[ -n "$HOOK_SESSION" ]] && [[ "$STATE_SESSION" != "$HOOK_SESSION" ]]; then
-  exit 0  # Different session — don't interfere
-fi
-
-# --------------------------------------------------
-# 5. Parse iteration state
+# 4. Parse iteration state
 # --------------------------------------------------
 ITERATION=$(echo "$FRONTMATTER" | grep '^iteration:' | sed 's/iteration: *//')
 MAX_ITERATIONS=$(echo "$FRONTMATTER" | grep '^max_iterations:' | sed 's/max_iterations: *//')
@@ -76,7 +70,7 @@ if ! [[ "$MAX_ITERATIONS" =~ ^[0-9]+$ ]]; then
 fi
 
 # --------------------------------------------------
-# 6. Check max iterations
+# 5. Check max iterations
 # --------------------------------------------------
 if [[ "$MAX_ITERATIONS" -gt 0 ]] && [[ "$ITERATION" -ge "$MAX_ITERATIONS" ]]; then
   echo "Ship loop: Max iterations ($MAX_ITERATIONS) reached." >&2
@@ -85,7 +79,7 @@ if [[ "$MAX_ITERATIONS" -gt 0 ]] && [[ "$ITERATION" -ge "$MAX_ITERATIONS" ]]; th
 fi
 
 # --------------------------------------------------
-# 7. Check for completion promise in last assistant output
+# 6. Check for completion promise in last assistant output
 # --------------------------------------------------
 TRANSCRIPT_PATH=$(echo "$HOOK_INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))" 2>/dev/null || echo "")
 
@@ -125,13 +119,19 @@ print('')
 fi
 
 # --------------------------------------------------
-# 8. Increment iteration and re-feed prompt
+# 7. Increment iteration and re-feed prompt
 # --------------------------------------------------
 NEXT_ITERATION=$((ITERATION + 1))
 
-# Atomically update iteration counter
+# Atomically update iteration counter (python avoids sed-injection risk)
 TEMP_FILE="${SHIP_STATE_FILE}.tmp.$$"
-sed "s/^iteration: .*/iteration: $NEXT_ITERATION/" "$SHIP_STATE_FILE" > "$TEMP_FILE"
+NEXT_ITERATION="$NEXT_ITERATION" python3 -c "
+import os, sys, re
+n = os.environ['NEXT_ITERATION']
+with open('$SHIP_STATE_FILE') as f:
+    src = f.read()
+sys.stdout.write(re.sub(r'^iteration: .*$', f'iteration: {n}', src, count=1, flags=re.MULTILINE))
+" > "$TEMP_FILE"
 mv "$TEMP_FILE" "$SHIP_STATE_FILE"
 
 # Extract prompt text (everything after second ---)
@@ -144,7 +144,7 @@ if [[ -z "$PROMPT_TEXT" ]]; then
 fi
 
 # --------------------------------------------------
-# 9. Block exit and re-feed the prompt (JSON-safe encoding)
+# 8. Block exit and re-feed the prompt (JSON-safe encoding)
 # --------------------------------------------------
 REASON_JSON=$(printf '%s' "$PROMPT_TEXT" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")
 SYS_MSG="Ship loop iteration $NEXT_ITERATION/$MAX_ITERATIONS | REFLECT BEFORE CONTINUING: What specifically failed? What concrete change will fix it? Am I repeating the same broken approach? If yes, try a fundamentally different strategy. | To complete: output <promise>$COMPLETION_PROMISE</promise> (ONLY when ALL work is done and verified)"

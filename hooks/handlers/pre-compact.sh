@@ -13,16 +13,21 @@ set -euo pipefail
 
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# Check for active tasks (lines containing [ ] or [-])
-PENDING=$(grep -c '^\s*- \[ \]' ops/TASKS.md 2>/dev/null || echo "0")
-IN_PROGRESS=$(grep -c '^\s*- \[-\]' ops/TASKS.md 2>/dev/null || echo "0")
-DONE=$(grep -c '^\s*- \[x\]' ops/TASKS.md 2>/dev/null || echo "0")
-BLOCKED=$(grep -c '^\s*- \[B\]' ops/TASKS.md 2>/dev/null || echo "0")
+# Check for active tasks (lines containing [ ] or [-]).
+# `grep -c` already prints 0 on zero matches; `|| true` stops set -e without
+# duplicating output. Using `|| echo "0"` would produce "0\n0" on zero matches.
+PENDING=$(grep -c '^\s*- \[ \]' ops/TASKS.md 2>/dev/null || true)
+IN_PROGRESS=$(grep -c '^\s*- \[-\]' ops/TASKS.md 2>/dev/null || true)
+DONE=$(grep -c '^\s*- \[x\]' ops/TASKS.md 2>/dev/null || true)
+BLOCKED=$(grep -c '^\s*- \[B\]' ops/TASKS.md 2>/dev/null || true)
 
-# Read current phase from existing STATE.md if present
+# Read current phase from existing STATE.md if present.
+# `sed -n` with no match exits 0 (not an error) so `|| echo "unknown"` would
+# never fire — check for empty output separately and fall back explicitly.
 CURRENT_PHASE="unknown"
 if [ -f "ops/STATE.md" ]; then
-  CURRENT_PHASE=$(sed -n 's/^## Current phase: *//p' ops/STATE.md 2>/dev/null || echo "unknown")
+  FOUND_PHASE=$(sed -n 's/^## Current phase: *//p' ops/STATE.md 2>/dev/null | head -n 1 || true)
+  [ -n "$FOUND_PHASE" ] && CURRENT_PHASE="$FOUND_PHASE"
 fi
 
 # Write minimal checkpoint (must be fast)

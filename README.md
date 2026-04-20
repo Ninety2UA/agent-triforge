@@ -205,14 +205,21 @@ Groups plan tasks by dependency into waves. Independent tasks within each wave r
 Skills are model-agnostic markdown files that ANY agent can consume. This decouples *what methodology to use* from *which model executes it*:
 
 ```bash
-# Claude uses skills natively (via commands and agent definitions)
+# All external-agent invocations go through the unified helper
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
-# Gemini receives skills via prompt injection
-gemini -p "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/codebase-mapping/SKILL.md) Analyze the full codebase..."
+# Gemini via native agent definition (skill embedded in the agent body)
+invoke_gemini "codebase-analyst" \
+  "Analyze the full codebase. Write findings to ops/ARCHITECTURE.md." \
+  "$GEMINI_OUT" 600
 
-# Codex receives skills the same way
-codex exec "$(cat ${CLAUDE_PLUGIN_ROOT}/skills/test-driven-development/SKILL.md) Write tests for..."
+# Codex via native agent definition (skill embedded in the agent body)
+invoke_codex "test_writer" \
+  "Write tests for changed files." \
+  "$CODEX_OUT" 900
 ```
+
+The helper detects native subagent support at runtime and falls back to legacy `gemini -p "$(cat .../SKILL.md) ..."` / `codex exec "$(cat .../SKILL.md) ..."` prompt-prefix injection if the CLI doesn't support agent definitions yet.
 
 ### Assignment heuristic
 
@@ -420,7 +427,7 @@ claude
 
 ## Skills reference
 
-12 portable, model-agnostic workflow modules that any agent can consume. Skills are injected into external agents via `$(cat ${CLAUDE_PLUGIN_ROOT}/skills/SKILL/SKILL.md)`.
+12 portable, model-agnostic workflow modules that any agent can consume. Skills embedded in native Gemini/Codex agent definitions (`gemini-agents/`, `codex-agents/`) at install time; legacy prompt-prefix injection (`$(cat ${CLAUDE_PLUGIN_ROOT}/skills/SKILL/SKILL.md)`) kicks in automatically when a CLI lacks native-agent support.
 
 | Skill | Primary consumer | What it teaches the agent |
 |---|---|---|
@@ -609,6 +616,55 @@ After solving a non-trivial problem, <a href="commands/compound.md"><code>/compo
 
 ## Recent changes
 
+### 2026-04-20 — v2.4.0: Framework self-audit — two blockers + four HIGH fixes
+
+A team-lead-orchestrated audit of the entire framework (hooks, commands, skills, agents, scripts, manifests, docs) surfaced **18 findings** — including 2 blockers that silently defeated core reliability invariants. Every finding was either fixed or verified as a false alarm against upstream Gemini/Codex/Claude Code specs. No functionality was added; existing behavior was corrected to match what the docs already promised.
+
+**[BLOCKER] Ship-loop guard never fired** — [`commands/ship.md`](commands/ship.md) and [`commands/coordinate.md`](commands/coordinate.md) wrote `session_id: "<current-branch-name>"` into the loop state file, but [`ship-loop.sh`](hooks/handlers/ship-loop.sh) compared that against Claude Code's runtime session UUID from hook-input JSON. Branch name ≠ UUID → the handler took the "different session — don't interfere" exit on every call. The inner loop guard (max iterations, `<promise>DONE</promise>` check, prompt re-feed) never actually blocked anything during autonomous `/ship` or `/coordinate` runs. **Fix:** removed session_id logic entirely — presence of the state file with `active: true` now indicates the loop. Cleaned the state template in both commands.
+
+**[BLOCKER] `PostToolUseFailure` hook event doesn't exist** — [`hooks/hooks.json`](hooks/hooks.json) registered [`tool-failure-monitor.sh`](hooks/handlers/tool-failure-monitor.sh) under an invented event name (`PostToolUseFailure`) that Claude Code's hook loader silently ignores. The advertised "warn at 5 consecutive or 10 total failures" feature was dead code; `.claude/tool-failures.local.md` was never written. **Fix:** merged the handler into the existing `PostToolUse` hook, with in-handler filtering on `tool_response.is_error` / `tool_response.error` so only actual failures increment the counters. Smoke-tested with both success and failure payloads.
+
+**[HIGH] Gemini `-y` (YOLO) flag silently nullified `policies.toml`** — [`scripts/invoke-external.sh`](scripts/invoke-external.sh) passed `-y` on every `gemini -p` invocation. The plugin's own [`gemini-agents/policies.toml`](gemini-agents/policies.toml) explicitly warns at the top of the file that YOLO installs a max-priority allow rule that overrides every `deny` — including the `rm -rf` / `git push` / `sudo` denylists documented in the "Security model" section of CLAUDE.md. **Fix:** `-y` is now gated on an explicit `GEMINI_YOLO=1` env var (off by default). Subagent isolation comes from the per-agent `tools` allowlist (always respected by Gemini) plus the restored policy rules.
+
+**[HIGH] `team-lead` bypassed `invoke-external.sh`** — [`agents/team-lead.md`](agents/team-lead.md) shelled out to `gemini -p "$(cat SKILL.md) ..."` / `codex exec "$(cat SKILL.md) ..."` directly, skipping policy loading, timeout enforcement, retry, and native-agent routing. Team-mode builds silently lost every piece of reliability infrastructure the rest of the framework relies on. **Fix:** migrated to `invoke_gemini` / `invoke_codex` with per-PID exit-code capture and fail-fast, matching the pattern in `/review` and `/build`.
+
+**[HIGH] Template and README docs drifted to legacy invocation** — [`templates/CLAUDE.md`](templates/CLAUDE.md) (the file `session-start.sh` offers new users as a starting template) and [`README.md`](README.md) both presented `gemini -p "$(cat ...)"` as the current invocation pattern, not the `invoke_gemini` helper. New adopters were being handed outdated guidance at first touch. **Fix:** both now document the helper as the primary path; legacy injection is labeled as the automatic fallback the helper applies when a CLI lacks native-agent support.
+
+**[MEDIUM] `grep -c … || echo "0"` produced `"0\n0"` on zero matches** — `grep -c` already prints `0` to stdout on zero matches and then exits with status `1`; pairing it with `|| echo "0"` ran the fallback and appended a second `0`, yielding a multiline `"0\n0"` value that garbled session-start's task banner and pre-compact's STATE.md checkpoint. The CLAUDE.md "Hook safety" section even documented this broken pattern as the correct one. **Fix:** switched to `|| true` in [`session-start.sh`](hooks/handlers/session-start.sh) and [`pre-compact.sh`](hooks/handlers/pre-compact.sh); rewrote the CLAUDE.md guidance to explain why.
+
+**[MEDIUM] `pre-compact.sh` `CURRENT_PHASE` default clobbered by empty sed output** — `sed -n` with no match exits `0`, so `|| echo "unknown"` never fired when `ops/STATE.md` existed but lacked a `## Current phase:` line. The heredoc then wrote a blank phase into STATE.md, breaking `/resume` heuristics. **Fix:** captures sed output into a temporary variable and falls back explicitly when empty.
+
+**[MEDIUM] Session-start commands banner stale + sed injection risk in state writes + silent timeout fallback** — the banner listed 13 of 16 commands (`/analyze`, `/coordinate`, `/resolve-pr` missing); `ship-loop.sh` and `tool-failure-monitor.sh` injected user-influenced values into `sed` patterns without escaping; [`_run_with_timeout`](scripts/invoke-external.sh) silently ran Gemini/Codex with no timeout when neither `timeout` nor `gtimeout` was on PATH. **Fix:** banner now lists all 16 commands; state-file writes switched from `sed` to `python3`; `_run_with_timeout` emits a one-shot stderr warning the first time it falls through.
+
+**[LOW] Shared-file table + coordinate.sh preflight + plugin.json cleanup** — [`targeted-researcher`](gemini-agents/targeted-researcher.md) writes to `ops/RESEARCH_GEMINI.md` but the shared-file table never mentioned it (added to both CLAUDE.md and templates/CLAUDE.md). [`scripts/coordinate.sh`](scripts/coordinate.sh) invoked `claude --print` via `|| true`, silently producing empty output if the CLI wasn't on PATH (now fails fast with an install hint). [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) declared `agents`/`skills`/`commands` path fields that are redundant under the current Claude Code plugin spec (auto-discovery handles them) — removed for clarity.
+
+**False alarms verified upstream, no change needed** — the Gemini CLI subagents spec explicitly uses snake_case `max_turns` / `timeout_mins` in its frontmatter schema, so `gemini-agents/*.md` is already correct. The Codex agent-roles source (`codex-rs/core/src/config/agent_roles.rs`) shows `nickname_candidates` is a real, documented field — not dead config. Audit flagged both for verification; both were clean.
+
+<details>
+<summary><strong>Files changed (16 files)</strong></summary>
+
+| File | Change |
+|---|---|
+| `hooks/hooks.json` | Removed non-existent `PostToolUseFailure` event; tool-failure-monitor merged into `PostToolUse` |
+| `hooks/handlers/tool-failure-monitor.sh` | Filters on `tool_response.is_error` / `tool_response.error`; resets consecutive counter on success; python3 state writes |
+| `hooks/handlers/ship-loop.sh` | Removed broken session_id comparison; switched state update from sed to python3 |
+| `hooks/handlers/session-start.sh` | `grep -c … \|\| true` fix; commands banner now lists all 16 |
+| `hooks/handlers/pre-compact.sh` | `grep -c … \|\| true` fix; `CURRENT_PHASE` fallback no longer clobbered by empty sed output |
+| `commands/ship.md` | Removed `session_id` from state template |
+| `commands/coordinate.md` | Removed `session_id` from state template |
+| `scripts/invoke-external.sh` | `-y` gated on `GEMINI_YOLO=1` env var; one-shot stderr warning when timeout fallback engages |
+| `scripts/coordinate.sh` | Preflight check for `claude` CLI availability |
+| `agents/team-lead.md` | Migrated from legacy `gemini -p`/`codex exec` to `invoke_gemini`/`invoke_codex` |
+| `templates/CLAUDE.md` | Invocation section rewritten around the helper; `RESEARCH_GEMINI.md` added to shared-file table |
+| `templates/ops/AGENTS.md` | Documents `invoke_gemini` / `invoke_codex` for new projects |
+| `CLAUDE.md` | Fixed `grep -c` guidance; `RESEARCH_GEMINI.md` added to shared-file table |
+| `README.md` | Invocation docs updated to helper-primary; this changelog |
+| `.claude-plugin/plugin.json` | Removed redundant `agents`/`skills`/`commands` path fields; bumped to 2.4.0 |
+| `docs/index.html` | Hero badge + terminal version bumped to v2.4.0 |
+</details>
+
+---
+
 ### 2026-04-20 — v2.3.0: Subagent hardening pass (Gemini + Codex docs alignment)
 
 Re-analyzed the [Gemini CLI subagents spec](https://geminicli.com/docs/core/subagents/) and [Codex CLI subagents spec](https://developers.openai.com/codex/subagents) against our current implementation and closed the concrete gaps. Focus: security hardening, invocation-layer parity, and observability — no new features, just making the existing integrations robust against real failure modes.
@@ -720,7 +776,7 @@ Informed by a deep comparative analysis against the [official Codex plugin](http
 
 **PreCompact hook** — New [`pre-compact.sh`](hooks/handlers/pre-compact.sh) handler auto-checkpoints `ops/STATE.md` with task status counts and current phase before Claude Code compacts the context window. Previously, if compaction hit mid-sprint without a `/wrap`, the outer loop could restart from stale state.
 
-**PostToolUseFailure hook** — New [`tool-failure-monitor.sh`](hooks/handlers/tool-failure-monitor.sh) handler tracks tool failures in `.claude/tool-failures.local.md` and warns at 5 consecutive or 10 total failures per session. Previously, tool failures during autonomous runs were silent.
+**PostToolUse failure tracker** — New [`tool-failure-monitor.sh`](hooks/handlers/tool-failure-monitor.sh) handler tracks tool failures in `.claude/tool-failures.local.md` and warns at 5 consecutive or 10 total failures per session. Registered under `PostToolUse` and filters on `tool_response.is_error`. Previously, tool failures during autonomous runs were silent.
 
 **Completion notifications** — [`scripts/coordinate.sh`](scripts/coordinate.sh) now sends macOS (`osascript`), Linux (`notify-send`), or webhook notifications on sprint completion and max-iteration exit. Gated on `NOTIFY_WEBHOOK_URL` env var for webhook delivery. Previously, long autonomous runs required manual polling.
 
@@ -739,7 +795,7 @@ Informed by a deep comparative analysis against the [official Codex plugin](http
 | `commands/wrap.md` | Step 7: git trailer conventions |
 | `skills/systematic-debugging/SKILL.md` | Circuit breaker (3-attempt ceiling) |
 | `templates/CLAUDE.md` | Git trailer conventions section |
-| `hooks/hooks.json` | PostToolUseFailure + PreCompact hook entries |
+| `hooks/hooks.json` | PostToolUse failure-tracker + PreCompact hook entries |
 | `hooks/handlers/tool-failure-monitor.sh` | **New** — failure tracking handler |
 | `hooks/handlers/pre-compact.sh` | **New** — STATE.md auto-checkpoint handler |
 | `scripts/coordinate.sh` | notify() function + completion/failure notification calls |
