@@ -46,40 +46,31 @@ The framework achieves this through **institutional knowledge compounding**: eve
 
 ---
 
-## What's new (v2.0.0)
+## What's new (v2.4.0)
+
+### Framework self-audit — two silent blockers fixed
+
+A team-lead-orchestrated audit of the entire framework surfaced **18 findings** across hooks, commands, skills, agents, and manifests. Two silently defeated core reliability invariants:
+
+- **Ship-loop guard never fired.** [`commands/ship.md`](commands/ship.md) and [`commands/coordinate.md`](commands/coordinate.md) wrote `session_id: "<current-branch-name>"` into the loop state file, but [`ship-loop.sh`](hooks/handlers/ship-loop.sh) compared that against Claude Code's runtime session UUID. Branch name ≠ UUID → the handler took the "different session — don't interfere" exit on every call. The max-iterations / `<promise>DONE</promise>` guard never actually blocked anything during autonomous `/ship` or `/coordinate` runs. **Fix:** removed session_id logic entirely — presence of the state file with `active: true` now indicates the loop.
+- **`PostToolUseFailure` hook event doesn't exist.** [`hooks/hooks.json`](hooks/hooks.json) registered [`tool-failure-monitor.sh`](hooks/handlers/tool-failure-monitor.sh) under an invented event name that Claude Code's hook loader silently ignored. The advertised "warn at 5 consecutive or 10 total failures" feature was dead code. **Fix:** merged the handler into the real `PostToolUse` hook with in-handler filtering on `tool_response.is_error`.
+
+Plus four HIGH fixes (Gemini `-y` YOLO flag now gated on opt-in `GEMINI_YOLO=1`, the [`team-lead`](agents/team-lead.md) agent migrated from legacy `gemini -p`/`codex exec` to the unified `invoke_gemini`/`invoke_codex` helper, template + README docs re-pointed at the helper, `grep -c … || echo "0"` hook-safety guidance corrected) and a dozen assorted medium/low cleanups. See [Recent changes](#recent-changes) for the full breakdown.
+
+### Also recent
+
+- **v2.3.0 — Subagent hardening.** Codex now has per-agent `tools` allowlists (defense-in-depth with `sandbox_mode`), nesting caps (`max_depth`, `max_threads`), retry parity with Gemini, and collision-safe `${TMPDIR}`-scoped tmp paths across all seven commands. Parallel reviews now capture per-PID exit codes and fail-fast instead of silently treating empty output as "no findings."
+- **v2.2.0 — Opus max effort + reliability patterns.** All 19 agents run at `model: opus` + `effort: max`. New [`continuous-reviewer`](agents/continuous-reviewer.md) agent auto-reviews every completed task during team builds (1:3-4 ratio with builders). Forced-reflection-on-retry and same-error kill criteria prevent retry loops.
 
 ### Claude Code plugin
 
-The framework is now a **Claude Code plugin** — install with one command, update with one command. No more git clone, no manual file copying, no `.claude/settings.json` editing.
+The framework is installed as a **Claude Code plugin** — install with one command, update with one command. No git clone, no manual file copying, no `.claude/settings.json` editing.
 
 ```bash
 claude plugin add https://github.com/Ninety2UA/agent-triforge
 ```
 
 All agents, skills, commands, and hooks register automatically. Your project's `ops/` directory is bootstrapped on first session.
-
-### Ship-loop rewrite (Blueprint alignment)
-
-The Stop hook was rewritten to match the [Claude Code Blueprint](https://github.com/Ninety2UA/claude-code-blueprint)'s architecture:
-
-- **JSON output** `{decision, reason, systemMessage}` — re-injects the original goal on each iteration
-- **Session isolation** — only blocks the session that started the sprint via `session_id` matching
-- **Transcript-based promise detection** — reads the actual JSONL transcript to find `<promise>DONE</promise>`
-- **JSON-safe encoding** — uses `python3 json.dumps()` so goals with quotes/newlines don't break the output
-- **Atomic state updates** — temp file + `mv` instead of `sed -i`
-
-### Four-pass audit (20 auditor agents reviewing the framework)
-
-Every component in the framework was reviewed by parallel audit agents across 4 passes, converging from **5 critical issues to zero**:
-
-| Pass | Issues found | Key fixes |
-|---|---|---|
-| 1st | 4 critical, 10 high | Hooks were reading non-existent env vars (stdin JSON fix), README shipped broken config |
-| 2nd | 1 critical, 8 high | JSON injection in ship-loop, missing PID captures, path consistency |
-| 3rd | 3 critical, 7 high | Post-migration stale docs, `mkdir .claude` guards, deep-research PID |
-| 4th | 1 high | Last hook missing `mkdir` guard |
-
-Plus a manual 11-point verification: bash syntax, JSON validity, stale path scans, file counts, executable permissions, `mkdir` guards, stdin parsing, agent cross-references, plugin hook paths, and state file template compatibility.
 
 ### Automatic project bootstrapping
 
