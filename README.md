@@ -47,22 +47,22 @@ The framework achieves this through **institutional knowledge compounding**: eve
 
 ---
 
-## What's new (v2.4.1)
+## What's new (v2.4.2)
 
-### Audit pass two — one surviving blocker plus 27 findings actioned
+### Audit pass three — both prior passes missed siblings of the same anti-pattern
 
-A second team-lead-orchestrated audit on top of v2.4.0 — **6 parallel specialist reviewers** (hooks/scripts, commands, skills, agents, plugin manifest, docs/cross-refs) plus Team Lead consolidation with spot-checks — surfaced **28 findings**, including one BLOCKER the prior self-audit had missed. The Team Lead's cross-check also caught one reviewer hallucinating a line number, demonstrating why the consolidation pass matters even with strong individual reviewers.
+A third adversarial audit on top of v2.4.0 and v2.4.1 — three parallel Explore agents covered shell safety + hooks + scripts, agent definitions + security model, and docs + commands + skills + templates — surfaced **1 MEDIUM + 3 doc-drift fixes plus one bonus bug caught during verification**. The audit agents reported four BLOCKER/HIGH findings; every one was rejected after manual cross-check against the actual code (hardcoded constants, framework-owned templates, tomllib-parsed config). Severity inflation is real; the consolidation step earns its keep.
 
-- **Surviving `grep -c || echo "0"` in [`hooks/handlers/session-start.sh:194`](hooks/handlers/session-start.sh).** v2.4.0 fixed three earlier instances of this bug pattern but missed one: the Codex-agent-count fallback chain still produced `"0\n0"` when both Python `tomllib` and `tomli` were unavailable and grep matched nothing. Line 195's `[ "$CODEX_AGENT_COUNT" -gt "0" ]` then errored with `integer expression expected` under `set -euo pipefail` — the handler died before printing the orientation banner. **Fix:** `|| echo "0"` → `|| true`.
-- **Broken ADR reference in [`CLAUDE.md:269`](CLAUDE.md).** Cited `ops/decisions/0001-cli-deprecation-watch.md`; the actual file is `2026-05-12-cli-deprecation-watch.md`. The link is the only documented justification for why Triforge does not auto-enable Codex hooks under `codex exec` — a security/reliability decision users should be able to find. **Fix:** path updated to the ISO-date naming the repo already uses for its other ADR.
+- **Two surviving `|| echo "0"` siblings in [`hooks/handlers/session-start.sh:138, 174`](hooks/handlers/session-start.sh).** v2.4.0 fixed three `grep -c` instances; v2.4.1 fixed a fourth `grep -c` instance both the team-lead audit and its consolidation pass missed; this pass found both prior audits only checked `grep -c` and never the `find … | wc -l` siblings. `SOLUTION_COUNT` (line 138) and `GEMINI_AGENT_COUNT` (line 174) both used the same broken `|| echo "0"` tail and would produce `"0\n0"` whenever `ops/solutions/` or `.gemini/agents/` was missing — bricking the downstream `[ "$VAR" -gt "0" ]` comparison under `set -euo pipefail`. **Fix:** `|| echo "0"` → `|| true`.
+- **Codex agent count off-by-3 in [`session-start.sh:193`](hooks/handlers/session-start.sh).** Caught during verification of the previous fix when the orientation banner reported "6 Codex" in an empty test project. The Python fast path did `len(data.get('agents', {}))`, but the `[agents]` table in `codex-agents/agents.toml` holds three scalar runtime caps (`max_depth`, `max_threads`, `job_max_runtime_seconds`) alongside the three agent subtables — so the count was 6 instead of 3. The fallback `grep -c '^\[agents\.'` already had the right shape; the Python path was missing the same filter. **Fix:** filter to dict values only, mirroring [`_list_codex_agents`](scripts/invoke-external.sh) which already had the correct pattern.
 
-Plus 11 MEDIUM and 8 LOW improvements: every command now declares `allowed-tools`; 7 inline bash blocks now start with `set -euo pipefail`; all 19 agents now carry a `color` for parallel-swarm UX; 4 commands gained `$ARGUMENTS` boundary guards; 3 commands gained "When to use" decision aids; 2 skill descriptions rewritten for trigger precision; 2 agents got `WebFetch`/`WebSearch` for upstream lookups; `templates/CLAUDE.md` self-contradiction repaired; `ops/research/` added to the shared-file protocol; `.gitignore` `*.local.md` pattern anchored. The `effort: max` field was verified as documented in Claude Code's plugin agent schema — no change needed. See [Recent changes](#recent-changes) for the full breakdown.
+Plus three doc-drift fixes: `CLAUDE.md`'s "Context management" section now lists all 5 hook handlers (it only named 3 of the 5 that `hooks.json` registers); `codex-agents/agents.toml` top-comment now explains `max_depth = 2` as the recursion cap (it only mentioned `max_threads`); `CLAUDE.md`'s agent-frontmatter-fields section now states explicitly that Gemini and Codex agent files use their CLIs' own conventions. See [Recent changes](#recent-changes) for the full breakdown including the four rejected BLOCKER/HIGH claims.
 
 ### Also recent
 
+- **v2.4.1 — Audit pass two.** A team-lead-orchestrated audit with 6 parallel specialist reviewers surfaced 28 findings (1 BLOCKER, 1 HIGH, 13 MEDIUM, 13 LOW); the consolidation pass also caught one reviewer hallucinating a line number — the load-bearing reason cross-checks earn their keep.
 - **v2.4.0 — Framework self-audit.** Two silent blockers fixed: ship-loop guard never fired (state-file `session_id` was a branch name being compared against Claude Code's runtime session UUID); the `PostToolUseFailure` event registered in `hooks.json` doesn't exist in Claude Code's hook schema. Plus four HIGH fixes (Gemini `-y` YOLO gated on `GEMINI_YOLO=1`, [`team-lead`](agents/team-lead.md) migrated to the unified `invoke_gemini`/`invoke_codex` helper, template + README docs re-pointed at the helper, broken `grep -c` hook-safety guidance corrected).
 - **v2.3.0 — Subagent hardening.** Codex now has per-agent `tools` allowlists (defense-in-depth with `sandbox_mode`), nesting caps (`max_depth`, `max_threads`), retry parity with Gemini, and collision-safe `${TMPDIR}`-scoped tmp paths across all seven commands. Parallel reviews now capture per-PID exit codes and fail-fast instead of silently treating empty output as "no findings."
-- **v2.2.0 — Opus max effort + reliability patterns.** All 19 agents run at `model: opus` + `effort: max`. New [`continuous-reviewer`](agents/continuous-reviewer.md) agent auto-reviews every completed task during team builds (1:3-4 ratio with builders). Forced-reflection-on-retry and same-error kill criteria prevent retry loops.
 
 ### Claude Code plugin
 
@@ -608,6 +608,40 @@ After solving a non-trivial problem, <a href="commands/compound.md"><code>/compo
 ---
 
 ## Recent changes
+
+### 2026-05-12 — v2.4.2: Third audit pass — both prior passes missed siblings of the same anti-pattern
+
+A third adversarial audit on top of v2.4.0 and v2.4.1 — three parallel Explore agents covered shell safety + hooks + scripts, agent definitions + security model, and docs + commands + skills + templates. **Surfaced 1 MEDIUM + 3 doc-drift fixes plus one bonus bug uncovered during verification.** The audit agents collectively reported four BLOCKER/HIGH findings; every one was verified false against the actual code. The framework is converging.
+
+**[MEDIUM] Two surviving `|| echo "0"` siblings in [`session-start.sh:138, 174`](hooks/handlers/session-start.sh)** — v2.4.0 fixed three `grep -c || echo "0"` instances; v2.4.1 fixed a fourth `grep -c` instance both the team-lead pass and its consolidation step missed; this pass found that both prior audits only ever checked `grep -c` and never the `find … | wc -l` siblings. `SOLUTION_COUNT` (line 138) and `GEMINI_AGENT_COUNT` (line 174) both used the same broken `|| echo "0"` tail. Triggered whenever `ops/solutions/` or `.gemini/agents/` is missing (e.g., user manually deletes the directory after bootstrap, or bootstrap is skipped because `ops/` already exists) — `wc -l` already emits `0`, then `echo "0"` appends another `0`, and the downstream `[ "$VAR" -gt "0" ]` comparison errors with `integer expression expected` under `set -euo pipefail`. The handler dies before printing the orientation banner. **Fix:** `|| echo "0"` → `|| true` on both lines.
+
+**[LOW, bonus] Codex agent count off-by-3 in [`session-start.sh:193`](hooks/handlers/session-start.sh)** — Caught when the verification reproducer for the previous fix ran in an empty test project and the orientation banner reported "External agent definitions loaded: 4 Gemini + 6 Codex" when there are only 3 Codex agents. The Python fast path did `len(data.get('agents', {}))`, but the `[agents]` table in `codex-agents/agents.toml` holds three scalar runtime caps (`max_depth`, `max_threads`, `job_max_runtime_seconds`) alongside the three agent subtables (`logic_reviewer`, `test_writer`, `debugger`) — so `len()` returned 6. The fallback `grep -c '^\[agents\.'` would have been correct (it matches only the dotted subtable headers), but the Python path wins whenever `tomllib` is available. **Fix:** filter to dict values only — `sum(1 for v in data.get('agents', {}).values() if isinstance(v, dict))` — mirroring the [`_list_codex_agents`](scripts/invoke-external.sh) helper which already had the correct pattern. Re-verified: "4 Gemini + 3 Codex".
+
+**[LOW] `CLAUDE.md` Context-management section omitted 2 of 5 hook handlers** — The Hook-safety subsection said "All 5 hook handlers use `set -euo pipefail`" but the Context-management subsection only named 3 (`ship-loop.sh`, `coordinate.sh`, `context-monitor.sh`). The two missing handlers were `pre-compact.sh` (auto-snapshots `ops/STATE.md` before context compaction, both already wired in `hooks/hooks.json`) and `tool-failure-monitor.sh` (tracks consecutive + total tool failures, warns at 5 consecutive / 10 total per session). **Fix:** both handlers now listed with one-line descriptions of what they do and when they fire.
+
+**[LOW] `codex-agents/agents.toml` top-comment explained `max_threads` only** — Sets three caps (`max_depth = 2`, `max_threads = 4`, `job_max_runtime_seconds = 1800`) but the inline comment only described the `max_depth` fallback issue and `max_threads`'s fan-out role. `max_depth = 2`'s actual semantics — raising the cap by exactly one level so a single spawn round is allowed but recursive spawn-of-spawn is blocked (runaway protection) — was invisible to anyone reading the TOML in isolation. **Fix:** comment now explains both `max_depth` and `max_threads` properly.
+
+**[NIT] `CLAUDE.md` agent-frontmatter-fields list was Claude-only without saying so** — Section listed `name/description/model/effort/tools/maxTurns/skills/mcpServers/hooks/memory/background/isolation/color/permissionMode` — all Claude conventions. Gemini definitions use `max_turns`/`timeout_mins` plus lowercase tool names; Codex uses `model_reasoning_effort`/`sandbox_mode`/`approval_policy`/`include_plan_tool`. **Fix:** one trailing sentence cross-references both CLIs' conventions so readers know where to look.
+
+**False alarms verified and rejected** — For the record so they're not re-raised next pass: (1) "BLOCKER path injection in `ship-loop.sh:131`" — `SHIP_STATE_FILE` is the hardcoded constant `.claude/ship-loop.local.md` declared at line 22, never user-controlled; (2) "BLOCKER JSON/command injection in `coordinate.sh:69,72` `notify()`" — only ever called from lines 122 and 134 with hardcoded `title="Agent Triforge"` and integer-templated bodies (`"converged in $ITERATION iterations"`); no user-controlled text flows through; (3) "HIGH approval_policy injection in `invoke-external.sh:157-161`" — values come from project-controlled `agents.toml`, parsed via `tomllib`, serialized via `json.dumps`; the auditor walked the claim back mid-analysis; (4) "HIGH `NEXT_ITERATION` arithmetic needs validation" — `ITERATION` is already validated as `^[0-9]+$` at `ship-loop.sh:60` before the `$((ITERATION + 1))` at line 124. Severity inflation is a real failure mode; manual cross-check against the actual code is non-negotiable.
+
+**Verified** — `grep -rn '|| echo "0"' hooks/ scripts/` returns only the cautionary comment at `pre-compact.sh:18` (which references the anti-pattern by name); `bash -n hooks/handlers/session-start.sh` clean; reproducer in `/tmp/empty/ops/` (where `ops/solutions/` and `.gemini/agents/` are missing) ran cleanly under the fixed handler with no `integer expression expected` errors and correct "4 Gemini + 3 Codex" count.
+
+<details>
+<summary><strong>Files changed (6 files)</strong></summary>
+
+| File | Change |
+|---|---|
+| `hooks/handlers/session-start.sh` | Two `\|\| echo "0"` → `\|\| true` fixes (lines 138, 174); Codex agent count filtered to dict values only (line 193) |
+| `CLAUDE.md` | Context-management section now names all 5 hook handlers; frontmatter-fields section cross-references Gemini/Codex conventions |
+| `codex-agents/agents.toml` | Top-comment extended to explain `max_depth = 2` recursion cap |
+| `.claude-plugin/plugin.json` | Bumped to 2.4.2 |
+| `README.md` | This changelog entry; What's new bumped to v2.4.2 |
+| `docs/index.html` | Hero badge + terminal version bumped to v2.4.2 |
+
+</details>
+
+---
 
 ### 2026-05-12 — v2.4.1: Second audit pass — surviving blocker + 27 findings actioned
 

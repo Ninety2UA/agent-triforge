@@ -82,6 +82,8 @@ Agent definitions in `agents/*.md` support these YAML frontmatter fields:
 - `maxTurns` — maximum agentic turns before the agent stops
 - Other: `skills`, `mcpServers`, `hooks`, `memory`, `background`, `isolation`, `color`, `permissionMode`
 
+Gemini and Codex agent files use their CLIs' own conventions: Gemini (`gemini-agents/*.md`) uses `max_turns`/`timeout_mins` plus `gemini-3.1-pro-preview`-style model IDs and lowercase tool names (`read_file`, `run_shell_command`); Codex (`codex-agents/agents.toml`) uses `model_reasoning_effort`, `sandbox_mode`, `approval_policy`, and `include_plan_tool`.
+
 ### Reliability patterns
 
 - **Forced reflection on retry** — agents must self-diagnose before retrying (ship-loop.sh + wave-orchestration)
@@ -237,6 +239,8 @@ Claude invokes Gemini via `invoke_gemini` and Codex via `invoke_codex` as backgr
 - **Inner loop:** `hooks/handlers/ship-loop.sh` Stop hook blocks premature exit during sprints (max 5 iterations, waits for `<promise>DONE</promise>`)
 - **Outer loop:** `scripts/coordinate.sh` spawns fresh sessions on context exhaustion
 - **Analysis paralysis:** `hooks/handlers/context-monitor.sh` warns at 8+ consecutive reads without writes
+- **Context checkpoint:** `hooks/handlers/pre-compact.sh` auto-snapshots `ops/STATE.md` (current phase + task counts) before Claude Code compacts the window, so a resume after compaction has a fresh anchor
+- **Tool-failure threshold:** `hooks/handlers/tool-failure-monitor.sh` tracks consecutive and total tool failures, warning at 5 consecutive or 10 total per session
 - **Risk scoring:** Subagents halted at risk >20% or 50+ file changes
 
 ## Prerequisites

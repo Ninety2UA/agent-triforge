@@ -135,7 +135,7 @@ if [ -f "ops/REVIEW_GEMINI.md" ] || [ -f "ops/REVIEW_CODEX.md" ] || [ -f "ops/TE
   HAS_REVIEWS="yes"
 fi
 
-SOLUTION_COUNT=$(find ops/solutions -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+SOLUTION_COUNT=$(find ops/solutions -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || true)
 
 # Build orientation message
 MSG=""
@@ -171,7 +171,7 @@ GEMINI_AGENT_COUNT=0
 CODEX_AGENT_COUNT=0
 
 if [ -d ".gemini/agents" ]; then
-  GEMINI_AGENT_COUNT=$(find .gemini/agents -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+  GEMINI_AGENT_COUNT=$(find .gemini/agents -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || true)
   if [ "$GEMINI_AGENT_COUNT" -gt "0" ]; then
     HAS_GEMINI_AGENTS="yes"
   fi
@@ -190,7 +190,9 @@ except ImportError:
         sys.exit(0)
 with open('.codex/agents/agents.toml','rb') as f:
     data = tomllib.load(f)
-print(len(data.get('agents', {})))
+# Filter to dict values only — [agents] also holds scalar runtime caps
+# (max_depth, max_threads, job_max_runtime_seconds) alongside the agent subtables.
+print(sum(1 for v in data.get('agents', {}).values() if isinstance(v, dict)))
 " 2>/dev/null || grep -c '^\[agents\.' .codex/agents/agents.toml 2>/dev/null || true)
   if [ "$CODEX_AGENT_COUNT" -gt "0" ]; then
     HAS_CODEX_AGENTS="yes"

@@ -6,7 +6,9 @@
 
 # Top-level agent runtime caps. logic_reviewer and test_writer spawn sub-agents
 # for 5+ file scopes; without explicit caps, nesting depth defaults to 1 and
-# would block those spawn paths. max_threads caps parallel fan-out.
+# would block those spawn paths. max_depth = 2 raises the cap by exactly one
+# level so a single spawn round is allowed but recursive spawn-of-spawn is
+# blocked — runaway protection. max_threads caps parallel fan-out at any depth.
 [agents]
 max_depth = 2
 max_threads = 4
