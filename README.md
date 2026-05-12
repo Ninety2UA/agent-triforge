@@ -47,22 +47,28 @@ The framework achieves this through **institutional knowledge compounding**: eve
 
 ---
 
-## What's new (v2.4.2)
+## What's new (v2.4.3)
 
-### Audit pass three — both prior passes missed siblings of the same anti-pattern
+### Sequential downgrade ladder for narrow runtime tasks
 
-A third adversarial audit on top of v2.4.0 and v2.4.1 — three parallel Explore agents covered shell safety + hooks + scripts, agent definitions + security model, and docs + commands + skills + templates — surfaced **1 MEDIUM + 3 doc-drift fixes plus one bonus bug caught during verification**. The audit agents reported four BLOCKER/HIGH findings; every one was rejected after manual cross-check against the actual code (hardcoded constants, framework-owned templates, tomllib-parsed config). Severity inflation is real; the consolidation step earns its keep.
+The team-lead and lead agent used to have exactly one runtime downgrade move: drop a narrow, rubric-following task from `opus`/`max` straight to `sonnet`/`high`. That was a big leap — it skipped past two cheaper same-family reductions that would often have been enough. The new four-tier ladder lets the orchestrator step down one notch at a time:
 
-- **Two surviving `|| echo "0"` siblings in [`hooks/handlers/session-start.sh:138, 174`](hooks/handlers/session-start.sh).** v2.4.0 fixed three `grep -c` instances; v2.4.1 fixed a fourth `grep -c` instance both the team-lead audit and its consolidation pass missed; this pass found both prior audits only checked `grep -c` and never the `find … | wc -l` siblings. `SOLUTION_COUNT` (line 138) and `GEMINI_AGENT_COUNT` (line 174) both used the same broken `|| echo "0"` tail and would produce `"0\n0"` whenever `ops/solutions/` or `.gemini/agents/` was missing — bricking the downstream `[ "$VAR" -gt "0" ]` comparison under `set -euo pipefail`. **Fix:** `|| echo "0"` → `|| true`.
-- **Codex agent count off-by-3 in [`session-start.sh:193`](hooks/handlers/session-start.sh).** Caught during verification of the previous fix when the orientation banner reported "6 Codex" in an empty test project. The Python fast path did `len(data.get('agents', {}))`, but the `[agents]` table in `codex-agents/agents.toml` holds three scalar runtime caps (`max_depth`, `max_threads`, `job_max_runtime_seconds`) alongside the three agent subtables — so the count was 6 instead of 3. The fallback `grep -c '^\[agents\.'` already had the right shape; the Python path was missing the same filter. **Fix:** filter to dict values only, mirroring [`_list_codex_agents`](scripts/invoke-external.sh) which already had the correct pattern.
+| Tier | Model + effort | When to pick it |
+|---|---|---|
+| 0 (default) | `opus`/`max` | All agents start here |
+| 1 (first downgrade) | `opus`/`xhigh` | Narrow rubric task; slight reasoning reduction, stays Opus |
+| 2 (further reduction) | `opus`/`high` | Very narrow / mechanical task; further reduction, still Opus |
+| 3 (final downgrade) | `sonnet`/`high` | Trivial rubric scan; only when Opus/high still feels overkill |
 
-Plus three doc-drift fixes: `CLAUDE.md`'s "Context management" section now lists all 5 hook handlers (it only named 3 of the 5 that `hooks.json` registers); `codex-agents/agents.toml` top-comment now explains `max_depth = 2` as the recursion cap (it only mentioned `max_threads`); `CLAUDE.md`'s agent-frontmatter-fields section now states explicitly that Gemini and Codex agent files use their CLIs' own conventions. See [Recent changes](#recent-changes) for the full breakdown including the four rejected BLOCKER/HIGH claims.
+**Locked agents stay locked.** `security-sentinel`, `plan-checker`, and `findings-synthesizer` remain hardwired to `opus`/`max` — no exceptions. They're the highest-stakes gate/synthesis agents and they earn their full reasoning budget every time.
+
+**Doc-drift bug fixed along the way.** `CLAUDE.md`'s agent-frontmatter-fields section listed effort values as `low/medium/high/max` — missing `xhigh`, which the v2.2.0 audit had already verified as a valid Claude Code value (recorded at `README.md:654`). Corrected so the new ladder references documented values. Documentation-only change — runtime behavior is unchanged; the team-lead's allowed move set widens. See [Recent changes](#recent-changes) for the full diff.
 
 ### Also recent
 
+- **v2.4.2 — Audit pass three.** A third adversarial audit on top of v2.4.0 and v2.4.1 — three parallel Explore agents — surfaced 1 MEDIUM + 3 doc-drift fixes plus one bonus bug caught during verification. The audit agents reported four BLOCKER/HIGH findings; every one was rejected after manual cross-check against the actual code. Severity inflation is real; the consolidation step earns its keep.
 - **v2.4.1 — Audit pass two.** A team-lead-orchestrated audit with 6 parallel specialist reviewers surfaced 28 findings (1 BLOCKER, 1 HIGH, 13 MEDIUM, 13 LOW); the consolidation pass also caught one reviewer hallucinating a line number — the load-bearing reason cross-checks earn their keep.
 - **v2.4.0 — Framework self-audit.** Two silent blockers fixed: ship-loop guard never fired (state-file `session_id` was a branch name being compared against Claude Code's runtime session UUID); the `PostToolUseFailure` event registered in `hooks.json` doesn't exist in Claude Code's hook schema. Plus four HIGH fixes (Gemini `-y` YOLO gated on `GEMINI_YOLO=1`, [`team-lead`](agents/team-lead.md) migrated to the unified `invoke_gemini`/`invoke_codex` helper, template + README docs re-pointed at the helper, broken `grep -c` hook-safety guidance corrected).
-- **v2.3.0 — Subagent hardening.** Codex now has per-agent `tools` allowlists (defense-in-depth with `sandbox_mode`), nesting caps (`max_depth`, `max_threads`), retry parity with Gemini, and collision-safe `${TMPDIR}`-scoped tmp paths across all seven commands. Parallel reviews now capture per-PID exit codes and fail-fast instead of silently treating empty output as "no findings."
 
 ### Claude Code plugin
 
@@ -609,6 +615,27 @@ After solving a non-trivial problem, <a href="commands/compound.md"><code>/compo
 
 ## Recent changes
 
+### 2026-05-12 — v2.4.3: Sequential downgrade ladder for narrow runtime tasks
+
+**Tiered downgrade ladder for the team-lead and lead agent.** The previous single-step downgrade (`opus`/`max` → `sonnet`/`high`) was a big leap that skipped past two cheaper same-family reductions. New ladder lets the orchestrator step down one notch at a time: `opus`/`max` → `opus`/`xhigh` → `opus`/`high` → `sonnet`/`high`. Locked agents (security-sentinel, plan-checker, findings-synthesizer) remain hardwired to `opus`/`max`. Documentation-only change — runtime behavior is unchanged; the team-lead's allowed move set widens. Also fixed a doc-drift bug in `CLAUDE.md`: the documented effort values were missing `xhigh` (a valid Claude Code value per the v2.2.0 audit at `README.md:654`).
+
+<details>
+<summary><strong>Files changed (6 files)</strong></summary>
+
+| File | Change |
+|---|---|
+| `CLAUDE.md` | Architecture line references new ladder; effort field values corrected to include `xhigh` |
+| `templates/CLAUDE.md` | Architecture line references new ladder |
+| `agents/team-lead.md` | "Model routing discretion" block rewritten as a 3-tier ladder table |
+| `skills/wave-orchestration/SKILL.md` | Mirrors the team-lead.md rewrite |
+| `README.md` | v2.2.0 changelog reference refreshed; this entry; "What's new" + version refs bumped |
+| `.claude-plugin/plugin.json` | Bumped to 2.4.3 |
+| `docs/index.html` | Hero badge + terminal version bumped to v2.4.3 |
+
+</details>
+
+---
+
 ### 2026-05-12 — v2.4.2: Third audit pass — both prior passes missed siblings of the same anti-pattern
 
 A third adversarial audit on top of v2.4.0 and v2.4.1 — three parallel Explore agents covered shell safety + hooks + scripts, agent definitions + security model, and docs + commands + skills + templates. **Surfaced 1 MEDIUM + 3 doc-drift fixes plus one bonus bug uncovered during verification.** The audit agents collectively reported four BLOCKER/HIGH findings; every one was verified false against the actual code. The framework is converging.
@@ -805,7 +832,7 @@ Re-analyzed the [Gemini CLI subagents spec](https://geminicli.com/docs/core/suba
 
 ### 2026-04-06 — v2.2.0: Opus max effort, reliability patterns, and framework audit
 
-**All agents upgraded to Opus max effort** — All 19 agents now run at `model: opus` + `effort: max` for maximum reasoning quality. The team-lead and lead agent have runtime discretion to downgrade narrow, rubric-following tasks to Sonnet high effort via model override when spawning.
+**All agents upgraded to Opus max effort** — All 19 agents now run at `model: opus` + `effort: max` for maximum reasoning quality. The team-lead and lead agent have runtime discretion to downgrade narrow, rubric-following tasks via model + effort override when spawning. (See v2.4.3 for the tiered ladder: `opus`/`xhigh` → `opus`/`high` → `sonnet`/`high`.)
 
 **Forced reflection on retry** — Before any retry, agents must answer: *"What specifically failed? What concrete change will fix it? Am I repeating the same broken approach?"* Applied to the ship-loop Stop hook (`systemMessage`) and wave-orchestration skill. Prevents agents from looping on the same broken approach.
 

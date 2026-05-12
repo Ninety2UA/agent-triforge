@@ -123,10 +123,17 @@ After execution, produce:
 
 ## Model routing discretion
 
-All agents default to Opus max effort. When spawning subagents for narrow, rubric-following tasks (e.g., learnings-researcher, convention-enforcer), you MAY override to Sonnet with high effort:
-- Use `model: sonnet` override when spawning the agent
-- Only downgrade for tasks with clear rubrics and limited scope
-- Never downgrade security-sentinel, plan-checker, or findings-synthesizer
+All agents default to Opus max effort. When spawning subagents for narrow, rubric-following tasks (e.g., learnings-researcher, convention-enforcer), you MAY step down the runtime ladder one tier at a time:
+
+| Tier | Override | When to pick it |
+|---|---|---|
+| 1 (preferred first step) | `model: opus`, `effort: xhigh` | Narrow rubric task; slight reasoning reduction, stays Opus |
+| 2 (further Opus reduction) | `model: opus`, `effort: high` | Very narrow / mechanical task; further reduction, still Opus |
+| 3 (final downgrade) | `model: sonnet`, `effort: high` | Trivial rubric scan; only when Opus/high still feels overkill |
+
+- Pick the smallest downgrade that fits the task — don't skip to Sonnet when Opus/xhigh would do.
+- Only downgrade for tasks with clear rubrics and limited scope.
+- Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
 
 ## Same-error kill criteria
 

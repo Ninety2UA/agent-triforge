@@ -13,7 +13,7 @@ Install: `claude plugin add https://github.com/Ninety2UA/agent-triforge`
 ### Multi-agent system
 
 - **Claude Code (Opus max effort)** — lead agent: plans work, builds features, coordinates all agents, merges review feedback
-- **Claude specialized agents (Opus max effort)** — 19 focused subagents (`agents/`): plan validation, review synthesis, security, performance, etc. Lead/team-lead may downgrade narrow tasks to Sonnet high effort at runtime.
+- **Claude specialized agents (Opus max effort)** — 19 focused subagents (`agents/`): plan validation, review synthesis, security, performance, etc. Lead/team-lead may step narrow tasks down the runtime ladder one tier at a time: `opus`+`max` → `opus`+`xhigh` → `opus`+`high` → `sonnet`+`high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
 - **Claude agent teams (Opus max effort)** — multi-instance collaboration for complex builds (5+ interdependent tasks)
 - **Gemini CLI** — analyst + reviewer: Phase 0 codebase scans (1M token context), architecture reviews, documentation
 - **Codex CLI** — tester + logic reviewer: writes/runs tests, security audits, infrastructure tasks
@@ -77,7 +77,7 @@ The full lifecycle for a goal:
 Agent definitions in `agents/*.md` support these YAML frontmatter fields:
 - `name`, `description` (required) — identity and when-to-use trigger
 - `model` — `opus`, `sonnet`, `haiku`, or full model ID. Default: `opus`
-- `effort` — `low`, `medium`, `high`, `max` (max is Opus-only). Default: `max`
+- `effort` — `low`, `medium`, `high`, `xhigh`, `max` (max is Opus-only). Default: `max`
 - `tools` — list of allowed tools (Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, etc.)
 - `maxTurns` — maximum agentic turns before the agent stops
 - Other: `skills`, `mcpServers`, `hooks`, `memory`, `background`, `isolation`, `color`, `permissionMode`

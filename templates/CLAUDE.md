@@ -13,7 +13,7 @@ This project uses the multi-agent coordination framework where Claude Code serve
 ### Multi-agent system
 
 - **Claude Code (Opus)** — lead agent: plans work, builds features, coordinates all agents, merges review feedback
-- **Claude specialized agents (Opus max effort)** — 19 focused subagents provided by the plugin: plan validation, review synthesis, security, performance, continuous review, etc. Lead/team-lead may downgrade narrow tasks to Sonnet high effort at runtime.
+- **Claude specialized agents (Opus max effort)** — 19 focused subagents provided by the plugin: plan validation, review synthesis, security, performance, continuous review, etc. Lead/team-lead may step narrow tasks down the runtime ladder one tier at a time: `opus`+`max` → `opus`+`xhigh` → `opus`+`high` → `sonnet`+`high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
 - **Claude agent teams** — multi-instance collaboration for complex builds (5+ interdependent tasks)
 - **Gemini CLI** — analyst + reviewer: Phase 0 codebase scans (1M token context), architecture reviews, documentation
 - **Codex CLI** — tester + logic reviewer: writes/runs tests, security audits, infrastructure tasks
