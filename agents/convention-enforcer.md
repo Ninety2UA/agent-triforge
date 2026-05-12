@@ -1,5 +1,6 @@
 ---
 name: convention-enforcer
+color: green
 description: "Checks code against project-specific conventions from CONVENTIONS.md, MEMORY.md patterns, and established codebase patterns. Use as additional reviewer in Phase 3."
 tools:
   - Read

@@ -8,6 +8,7 @@
 
 <p align="center">
   <a href="#what-is-this">Overview</a> ·
+  <a href="#recent-changes">Recent changes</a> ·
   <a href="#project-structure">Structure</a> ·
   <a href="#sprint-pipeline-ship">Pipeline</a> ·
   <a href="#planning-pipeline-plan">Plan</a> ·
@@ -46,19 +47,20 @@ The framework achieves this through **institutional knowledge compounding**: eve
 
 ---
 
-## What's new (v2.4.0)
+## What's new (v2.4.1)
 
-### Framework self-audit — two silent blockers fixed
+### Audit pass two — one surviving blocker plus 27 findings actioned
 
-A team-lead-orchestrated audit of the entire framework surfaced **18 findings** across hooks, commands, skills, agents, and manifests. Two silently defeated core reliability invariants:
+A second team-lead-orchestrated audit on top of v2.4.0 — **6 parallel specialist reviewers** (hooks/scripts, commands, skills, agents, plugin manifest, docs/cross-refs) plus Team Lead consolidation with spot-checks — surfaced **28 findings**, including one BLOCKER the prior self-audit had missed. The Team Lead's cross-check also caught one reviewer hallucinating a line number, demonstrating why the consolidation pass matters even with strong individual reviewers.
 
-- **Ship-loop guard never fired.** [`commands/ship.md`](commands/ship.md) and [`commands/coordinate.md`](commands/coordinate.md) wrote `session_id: "<current-branch-name>"` into the loop state file, but [`ship-loop.sh`](hooks/handlers/ship-loop.sh) compared that against Claude Code's runtime session UUID. Branch name ≠ UUID → the handler took the "different session — don't interfere" exit on every call. The max-iterations / `<promise>DONE</promise>` guard never actually blocked anything during autonomous `/ship` or `/coordinate` runs. **Fix:** removed session_id logic entirely — presence of the state file with `active: true` now indicates the loop.
-- **`PostToolUseFailure` hook event doesn't exist.** [`hooks/hooks.json`](hooks/hooks.json) registered [`tool-failure-monitor.sh`](hooks/handlers/tool-failure-monitor.sh) under an invented event name that Claude Code's hook loader silently ignored. The advertised "warn at 5 consecutive or 10 total failures" feature was dead code. **Fix:** merged the handler into the real `PostToolUse` hook with in-handler filtering on `tool_response.is_error`.
+- **Surviving `grep -c || echo "0"` in [`hooks/handlers/session-start.sh:194`](hooks/handlers/session-start.sh).** v2.4.0 fixed three earlier instances of this bug pattern but missed one: the Codex-agent-count fallback chain still produced `"0\n0"` when both Python `tomllib` and `tomli` were unavailable and grep matched nothing. Line 195's `[ "$CODEX_AGENT_COUNT" -gt "0" ]` then errored with `integer expression expected` under `set -euo pipefail` — the handler died before printing the orientation banner. **Fix:** `|| echo "0"` → `|| true`.
+- **Broken ADR reference in [`CLAUDE.md:269`](CLAUDE.md).** Cited `ops/decisions/0001-cli-deprecation-watch.md`; the actual file is `2026-05-12-cli-deprecation-watch.md`. The link is the only documented justification for why Triforge does not auto-enable Codex hooks under `codex exec` — a security/reliability decision users should be able to find. **Fix:** path updated to the ISO-date naming the repo already uses for its other ADR.
 
-Plus four HIGH fixes (Gemini `-y` YOLO flag now gated on opt-in `GEMINI_YOLO=1`, the [`team-lead`](agents/team-lead.md) agent migrated from legacy `gemini -p`/`codex exec` to the unified `invoke_gemini`/`invoke_codex` helper, template + README docs re-pointed at the helper, `grep -c … || echo "0"` hook-safety guidance corrected) and a dozen assorted medium/low cleanups. See [Recent changes](#recent-changes) for the full breakdown.
+Plus 11 MEDIUM and 8 LOW improvements: every command now declares `allowed-tools`; 7 inline bash blocks now start with `set -euo pipefail`; all 19 agents now carry a `color` for parallel-swarm UX; 4 commands gained `$ARGUMENTS` boundary guards; 3 commands gained "When to use" decision aids; 2 skill descriptions rewritten for trigger precision; 2 agents got `WebFetch`/`WebSearch` for upstream lookups; `templates/CLAUDE.md` self-contradiction repaired; `ops/research/` added to the shared-file protocol; `.gitignore` `*.local.md` pattern anchored. The `effort: max` field was verified as documented in Claude Code's plugin agent schema — no change needed. See [Recent changes](#recent-changes) for the full breakdown.
 
 ### Also recent
 
+- **v2.4.0 — Framework self-audit.** Two silent blockers fixed: ship-loop guard never fired (state-file `session_id` was a branch name being compared against Claude Code's runtime session UUID); the `PostToolUseFailure` event registered in `hooks.json` doesn't exist in Claude Code's hook schema. Plus four HIGH fixes (Gemini `-y` YOLO gated on `GEMINI_YOLO=1`, [`team-lead`](agents/team-lead.md) migrated to the unified `invoke_gemini`/`invoke_codex` helper, template + README docs re-pointed at the helper, broken `grep -c` hook-safety guidance corrected).
 - **v2.3.0 — Subagent hardening.** Codex now has per-agent `tools` allowlists (defense-in-depth with `sandbox_mode`), nesting caps (`max_depth`, `max_threads`), retry parity with Gemini, and collision-safe `${TMPDIR}`-scoped tmp paths across all seven commands. Parallel reviews now capture per-PID exit codes and fail-fast instead of silently treating empty output as "no findings."
 - **v2.2.0 — Opus max effort + reliability patterns.** All 19 agents run at `model: opus` + `effort: max`. New [`continuous-reviewer`](agents/continuous-reviewer.md) agent auto-reviews every completed task during team builds (1:3-4 ratio with builders). Forced-reflection-on-retry and same-error kill criteria prevent retry loops.
 
@@ -606,6 +608,72 @@ After solving a non-trivial problem, <a href="commands/compound.md"><code>/compo
 ---
 
 ## Recent changes
+
+### 2026-05-12 — v2.4.1: Second audit pass — surviving blocker + 27 findings actioned
+
+A second team-lead-orchestrated audit on top of v2.4.0 — **6 parallel specialist reviewers** (hooks/scripts, commands, skills, agents, plugin manifest, docs/cross-refs) plus Team Lead consolidation with spot-checks — surfaced **28 findings**: 1 BLOCKER, 1 HIGH, 13 MEDIUM, 13 LOW. The Team Lead's cross-check caught one reviewer mis-attributing a line number (proving the consolidation step earns its keep) and downgraded one reviewer-rated HIGH to MEDIUM pending independent verification.
+
+**[BLOCKER] Surviving `grep -c || echo "0"` in [`session-start.sh:194`](hooks/handlers/session-start.sh)** — v2.4.0 fixed three earlier instances of the bug pattern (`pre-compact.sh:19-22` + `session-start.sh:121-123`) but missed one. The Codex-agent-count fallback chain (`python tomllib || grep -c '^\[agents\.' || echo "0"`) produced `"0\n0"` when both Python toml libs were unavailable and grep matched nothing. Line 195's `[ "$CODEX_AGENT_COUNT" -gt "0" ]` then errored with `integer expression expected` under `set -euo pipefail` — the handler died before printing the orientation banner. **Fix:** `|| echo "0"` → `|| true`.
+
+**[HIGH] Broken ADR reference in [`CLAUDE.md:269`](CLAUDE.md)** — Cited `ops/decisions/0001-cli-deprecation-watch.md`; the actual file is `2026-05-12-cli-deprecation-watch.md`. The link is the only documented justification for why Triforge does not auto-enable Codex hooks under `codex exec`. **Fix:** path updated to the ISO-date naming the repo already uses for its other ADR.
+
+**[MEDIUM] `effort: max` field verified, kept as-is** — The audit raised a concern that Claude Code's agent-frontmatter schema might not recognize `effort:` and that the 19 agents' "Opus max effort" claim was unenforced. Spot-checked against the current Claude Code subagents spec: `effort` is documented (values `low`/`medium`/`high`/`xhigh`/`max`; max is Opus-only; overrides session effort while the subagent is active). All 19 declarations are honored. No change.
+
+**[MEDIUM] All 16 commands now declare `allowed-tools`** — Defense-in-depth narrowing; `/quick` was previously inheriting the full Claude Code tool surface despite being scoped to <3 file changes. Allowlists scoped per command's actual needs: `/status`, `/resume`, `/pause`, `/compound` are read-mostly; `/build`, `/plan`, `/ship`, `/coordinate`, `/wrap`, `/quick`, `/debug`, `/resolve-pr` get the full set; `/analyze` is read-only per its own constraint.
+
+**[MEDIUM] 7 inline bash blocks gained `set -euo pipefail`** — `commands/{build,plan,ship,coordinate,deep-research,review,test}.md` each ran multi-line `source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh` + parallel `invoke_gemini`/`invoke_codex` blocks without the safety flags, so a `source` failure or non-zero `wait` could fall through silently.
+
+**[MEDIUM] 4 commands gained `$ARGUMENTS` boundary guards** — `commands/{plan,ship,coordinate,deep-research,debug,resolve-pr,compound,quick}.md` (the ones that pipe user input directly into subagent prompts) now have an explicit `> **Note:**` block instructing downstream agents to treat the argument block as data, not as instructions overriding the command's own logic.
+
+**[MEDIUM] 3 commands gained "When to use" decision aids** — `commands/{build,plan,ship}.md` were missing the comparison block that `/quick` already had. New users now have a decision tree for picking between `/plan` → `/build` (manual phasing) vs `/ship` (autonomous end-to-end) vs `/coordinate` (autonomous, simpler) vs `/quick` (lightweight).
+
+**[MEDIUM] All 19 agents now carry a `color`** — Wave orchestration and team builds routinely fan out to 5+ agents at once; the parallel-swarm UI was monochrome. Categorized: planners/coordinators **blue** (`plan-checker`, `architecture-strategist`, `team-lead`); code reviewers **green** (`code-simplicity-reviewer`, `convention-enforcer`, `continuous-reviewer`); researchers + verifiers **cyan** (`learnings-researcher`, `framework-docs-researcher`, `best-practices-researcher`, `git-history-analyzer`, `integration-verifier`, `test-gap-analyzer`, `deployment-verifier`); synthesizers + resolver **magenta** (`findings-synthesizer`, `research-synthesizer`, `pr-comment-resolver`); security/perf/repro **red/yellow** (`security-sentinel`, `performance-oracle`, `bug-reproduction-validator`).
+
+**[MEDIUM] 2 skill descriptions rewritten for trigger precision** — `skills/scope-cutting` and `skills/verification-before-completion` lacked the "Primary consumer" + concrete trigger scenarios that the other 10 skills had. Both now name the consumer and the specific situations that should fire the skill.
+
+**[MEDIUM] `templates/CLAUDE.md` self-contradiction repaired** — Line 19 prose said the helper lived at `scripts/invoke-external.sh`; line 133 code block correctly used `${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh`. New users copying the template were being told to look for a file that doesn't exist in their own project. Prose now uses the `${CLAUDE_PLUGIN_ROOT}/` prefix. Same edit added a "this is the simplified per-project copy" preamble pointing back to the plugin's canonical `CLAUDE.md`.
+
+**[MEDIUM] `ops/research/` added to the shared-file protocol** — Both `CLAUDE.md`'s shared-file table and `templates/ops/` skeleton now include `research/`; the v2.4.0 work introduced `ops/research/cli-updates-2026-05.md` but the protocol table was never updated.
+
+**[MEDIUM] `.gitignore` `*.local.md` anchored to `.claude/*.local.md`** — Unanchored pattern was silently swallowing any `.local.md` at any depth, hiding user notes in places like `docs/notes.local.md`. Anchored; the two redundant explicit lines removed.
+
+**[MEDIUM] Root-level `.gemini/settings.json` artifact cleaned** — Running `session-start.sh` inside the plugin repo itself created a byte-identical duplicate of `templates/.gemini/settings.json` at the plugin root. Deleted the artifact and added `.gemini/` to `.gitignore` so future runs don't recreate it as an untracked file.
+
+**[LOW] Cleanup batch** — `tool-failure-monitor.sh` unicode `⚠` → ASCII `WARN:` (non-UTF8 portability); `continuous-reviewer` description picked up the `Use:` keyword to match the other 18 agents; `git-history-analyzer` and `bug-reproduction-validator` gained `WebFetch`/`WebSearch` for upstream lookups (CVE feeds, issue trackers, vendor notes); `codex-agents/agents.toml` lost the undocumented `nickname_candidates` fields; `status.md` description rewritten in prescriptive style; README TOC gained a `Recent changes` link.
+
+**Deferred** — One MEDIUM (`<example>` blocks in each agent's `description:` field, recommended by Anthropic's agent guidance for routing precision) deferred because it requires custom examples per agent's role; three LOW intentionally skipped (`context-monitor.sh` tool classifier drifts as Claude Code adds tools — kept conservative default; `knowledge-compounding` / `test-driven-development` skills don't need numbered "Step 1:" wrappers since they're already organized into cycles and templates; `templates/.codex/` directory will remain config-only until Codex hooks become viable under `codex exec`).
+
+**Verified** — Shell syntax (`bash -n` on all 5 hook handlers + 2 scripts), TOML (`codex-agents/agents.toml` still parses with all 3 agents + nesting caps intact), YAML (47 frontmatter files: 19 agents + 16 commands + 12 skills), git diff (45 files changed, +149/-20).
+
+<details>
+<summary><strong>Files changed (45 files, +149/-20)</strong></summary>
+
+| File | Change |
+|---|---|
+| `hooks/handlers/session-start.sh` | `\|\| true` fix at line 194 (the v2.4.0 audit miss) |
+| `hooks/handlers/tool-failure-monitor.sh` | Unicode `⚠` → ASCII `WARN:` for non-UTF8 portability |
+| `CLAUDE.md` | ADR reference path fixed; `research/` added to shared-file table |
+| `README.md` | `Recent changes` TOC link added; this changelog; What's new bumped to v2.4.1 |
+| `.gitignore` | `*.local.md` anchored to `.claude/*.local.md`; `.gemini/` added |
+| `templates/CLAUDE.md` | `${CLAUDE_PLUGIN_ROOT}/` prefix on helper reference; "simplified copy" preamble |
+| `templates/ops/research/.gitkeep` | New — skeleton for `ops/research/` |
+| `codex-agents/agents.toml` | `nickname_candidates` fields removed (undocumented in Codex 0.130.0 schema) |
+| `commands/{build,plan,ship,coordinate,deep-research,review,test}.md` | `set -euo pipefail` prepended to inline bash blocks |
+| `commands/*.md` (all 16) | `allowed-tools` declared in frontmatter, scoped per command |
+| `commands/{build,plan,ship}.md` | "When to use" decision-aid section added |
+| `commands/{plan,ship,coordinate,deep-research,debug,resolve-pr,compound,quick}.md` | `$ARGUMENTS` boundary guard added |
+| `commands/status.md` | Description rewritten in prescriptive style |
+| `agents/*.md` (all 19) | `color:` declared in frontmatter |
+| `agents/continuous-reviewer.md` | `Use:` keyword added to description for consistency |
+| `agents/{git-history-analyzer,bug-reproduction-validator}.md` | `WebFetch` + `WebSearch` added to `tools:` |
+| `skills/scope-cutting/SKILL.md` | Description rewritten with `Primary consumer:` + trigger scenarios |
+| `skills/verification-before-completion/SKILL.md` | Description rewritten with `Primary consumer:` + trigger scenarios |
+| `.claude-plugin/plugin.json` | Bumped to 2.4.1 |
+| `docs/index.html` | Hero badge + terminal version bumped to v2.4.1 |
+
+</details>
+
+---
 
 ### 2026-04-20 — v2.4.0: Framework self-audit — two blockers + four HIGH fixes
 

@@ -1,5 +1,6 @@
 ---
 description: "Deep compatibility analysis of an external repo/resource against our system."
+allowed-tools: Read, Grep, Glob, WebFetch, Bash
 argument-hint: "<github-url or local-path>"
 ---
 

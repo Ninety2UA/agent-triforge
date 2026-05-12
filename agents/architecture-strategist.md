@@ -1,5 +1,6 @@
 ---
 name: architecture-strategist
+color: blue
 description: "Analyzes code changes for system design pattern compliance, SOLID principles, coupling/cohesion, and module boundary integrity. Use as additional reviewer in Phase 3 for structural changes."
 tools:
   - Read

@@ -1,5 +1,6 @@
 ---
 name: framework-docs-researcher
+color: cyan
 description: "Fetches and synthesizes documentation and best practices for frameworks and libraries being used. Use when encountering unfamiliar technology or planning integrations."
 tools:
   - Read

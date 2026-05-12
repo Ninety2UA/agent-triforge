@@ -1,9 +1,16 @@
 ---
 description: "Execute Phase 2 build with wave orchestration. Assumes planning is already done (TASKS.md exists)."
+allowed-tools: Read, Grep, Glob, Edit, Write, Bash, Agent
 argument-hint: "[--team] [--wave N]"
 ---
 
 You are executing Phase 2 (Build) of the multi-agent framework.
+
+## When to use
+
+- `/build` — Phase 2 only. TASKS.md must already exist (run `/plan` first).
+- `/ship` — Full Phase 0–6 autonomous sprint (planning + build + review + test + wrap).
+- `/quick` — Small focused change (<3 files, obvious fix). Skips review swarm.
 
 ## Prerequisites
 - ops/TASKS.md must exist with assigned tasks
@@ -46,6 +53,7 @@ Follow the `wave-orchestration` skill:
 4. Teammates coordinate via shared task list + messaging
 5. Teammates can invoke gemini/codex for specific reviews (replace `<scope>` with actual paths):
    ```bash
+   set -euo pipefail
    source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
    GEMINI_OUT="${TMPDIR:-/tmp}/gemini_build_$$_$(date +%s).txt"

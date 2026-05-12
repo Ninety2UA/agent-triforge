@@ -1,5 +1,6 @@
 ---
 name: research-synthesizer
+color: magenta
 description: "Merges findings from parallel research agents into unified, actionable recommendations. Use after Phase 0 or deep-research to consolidate multiple analysis outputs."
 tools:
   - Read

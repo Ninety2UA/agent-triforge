@@ -1,5 +1,6 @@
 ---
 name: learnings-researcher
+color: cyan
 description: "Searches institutional knowledge (ops/solutions/, ops/decisions/, ops/MEMORY.md) for patterns relevant to the current task. Use before Phase 1 planning to surface past learnings."
 tools:
   - Read

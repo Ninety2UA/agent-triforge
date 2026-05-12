@@ -1,11 +1,14 @@
 ---
 name: git-history-analyzer
+color: cyan
 description: "Traces code evolution through git history to understand why patterns exist and who introduced them. Use when refactoring or investigating unfamiliar code."
 tools:
   - Read
   - Grep
   - Glob
   - Bash
+  - WebFetch
+  - WebSearch
 model: opus
 effort: max
 maxTurns: 10

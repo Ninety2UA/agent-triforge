@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code when working with code in this project. It works with the **Agent Triforge** plugin.
 
+> **Note**: This is the simplified per-project version of the framework's documentation. For the full architecture, security model, agent invocation patterns, version compatibility, and reliability patterns, see the canonical `CLAUDE.md` at the Agent Triforge plugin root.
+
 ## Project overview
 
 This project uses the multi-agent coordination framework where Claude Code serves as the **lead agent**, orchestrating Gemini CLI, Codex CLI, and specialized Claude subagents through a hybrid file-based + bash-invocation + native-subagent protocol.
@@ -16,7 +18,7 @@ This project uses the multi-agent coordination framework where Claude Code serve
 - **Gemini CLI** — analyst + reviewer: Phase 0 codebase scans (1M token context), architecture reviews, documentation
 - **Codex CLI** — tester + logic reviewer: writes/runs tests, security audits, infrastructure tasks
 
-Claude invokes Gemini and Codex through the unified helper `scripts/invoke-external.sh` (which handles policy loading, timeout enforcement, retry, and native-agent routing with a legacy `$(cat ...)` skill-injection fallback). Reviews run in parallel (Gemini + Codex + Claude subagents simultaneously), never sequentially.
+Claude invokes Gemini and Codex through the unified helper `${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh` (which handles policy loading, timeout enforcement, retry, and native-agent routing with a legacy `$(cat ...)` skill-injection fallback). Reviews run in parallel (Gemini + Codex + Claude subagents simultaneously), never sequentially.
 
 ### Four coordination modes
 

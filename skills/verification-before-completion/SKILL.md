@@ -1,6 +1,6 @@
 ---
 name: verification-before-completion
-description: "Evidence-based completion verification checklist. Used by all agents before marking work done."
+description: "Evidence-based completion verification checklist with pass/fail status per item. Primary consumer: every agent at task completion. Triggers: before emitting `<promise>DONE</promise>`, before moving a task to Done in TASKS.md, before tagging a sprint complete in Phase 6 wrap-up."
 ---
 
 # Verification Before Completion

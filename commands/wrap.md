@@ -1,5 +1,6 @@
 ---
 description: "Wrap the current session: compound knowledge, archive files, write STATE.md for next session."
+allowed-tools: Read, Grep, Glob, Edit, Write, Bash, Agent
 ---
 
 You are executing Phase 6 (Wrap up) of the multi-agent framework.

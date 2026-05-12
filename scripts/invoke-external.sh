@@ -145,13 +145,19 @@ invoke_codex() {
   fi
 
   # `codex exec` accepts -m/-s but NOT -a (approval is set via -c override).
+  # Codex v0.128.0 removed --full-auto; supply its prior semantics (workspace-write
+  # sandbox + never approve) explicitly when an agent has no overrides.
   local CMD=(codex exec)
   [ -n "$AGENT_MODEL" ]    && CMD+=(-m "$AGENT_MODEL")
-  [ -n "$AGENT_SANDBOX" ]  && CMD+=(-s "$AGENT_SANDBOX")
-  [ -n "$AGENT_APPROVAL" ] && CMD+=(-c "approval_policy=\"$AGENT_APPROVAL\"")
-  # --full-auto provides sensible defaults only when neither sandbox nor approval is set.
-  if [ -z "$AGENT_SANDBOX" ] && [ -z "$AGENT_APPROVAL" ]; then
-    CMD+=(--full-auto)
+  if [ -n "$AGENT_SANDBOX" ]; then
+    CMD+=(-s "$AGENT_SANDBOX")
+  else
+    CMD+=(-s workspace-write)
+  fi
+  if [ -n "$AGENT_APPROVAL" ]; then
+    CMD+=(-c "approval_policy=\"$AGENT_APPROVAL\"")
+  else
+    CMD+=(-c "approval_policy=\"never\"")
   fi
 
   local FULL_PROMPT="$PROMPT"

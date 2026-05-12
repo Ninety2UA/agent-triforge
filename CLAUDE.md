@@ -42,6 +42,7 @@ Claude invokes Gemini via `invoke_gemini` and Codex via `invoke_codex` (from `sc
 | `STATE.md` | Session continuity — current phase, progress, next actions | Claude writes on pause/wrap |
 | `solutions/` | Documented solved problems for institutional knowledge | Claude writes |
 | `decisions/` | Architecture decision records (ADRs) | Claude writes |
+| `research/` | Targeted research / gap analyses (CLI deprecations, library evaluations, etc.) | Claude or Gemini writes |
 | `REVIEW_GEMINI.md` | Gemini's review output (temporary) | Gemini writes, Claude reads |
 | `REVIEW_CODEX.md` | Codex's review output (temporary) | Codex writes, Claude reads |
 | `RESEARCH_GEMINI.md` | Gemini targeted-research output (temporary) | Gemini writes, Claude reads |
@@ -105,10 +106,13 @@ All 5 hook handlers use `set -euo pipefail`. When using `grep -c`, add `|| true`
 
 ### Security model
 
-- **Codex `approval_policy = "never"`** on all three agents — the framework is designed for trusted pipelines where user approval would block parallel fan-out. `sandbox_mode` (read-only for `logic_reviewer`, `workspace-write` for `test_writer`/`debugger`) plus the per-agent `tools` allowlist provide the actual isolation. If you deploy to an untrusted environment, change to `approval_policy = "on-request"` in `codex-agents/agents.toml`.
+- **Codex `approval_policy = "never"`** on all three agents — the framework is designed for trusted pipelines where user approval would block parallel fan-out. `sandbox_mode` (read-only for `logic_reviewer`, `workspace-write` for `test_writer`/`debugger`) plus the per-agent `tools` allowlist provide the actual isolation. If you deploy to an untrusted environment, change to `approval_policy = "on-request"` in `codex-agents/agents.toml`. The no-agent fallback in `scripts/invoke-external.sh` supplies the same defaults explicitly (`-s workspace-write -c approval_policy="never"`) since Codex v0.128.0 removed the `--full-auto` shorthand.
 - **Codex `tools` allowlist** narrows the tool surface beyond sandbox: `logic_reviewer` has no `write`/`bash`; `test_writer`/`debugger` get both (they need to run tests and reproduce bugs). Defense-in-depth pairs with `sandbox_mode`.
 - **Gemini `policies.toml`** enforces shell-command denylists (`rm -rf`, `git push`, `sudo`) and per-agent restrictions (e.g., `architecture-reviewer` is denied `run_shell_command` in addition to omitting it from `tools`).
 - **Codex `[agents]` nesting caps** (`max_depth = 2`, `max_threads = 4`) prevent runaway fan-out when `logic_reviewer`/`test_writer` call `spawn_agent` for 5+ file scopes.
+- **Codex auto-memory disabled by default** — Triforge ships `templates/.codex/config.toml` with `[memories] use_memories = false` to prevent Codex's v0.129.0 pipeline from writing `~/.codex/memories/{MEMORY.md, skills/, ...}` in parallel with Triforge's `ops/MEMORY.md` and `ops/solutions/`. Users who want Codex memories can remove the block or override in `~/.codex/config.toml`.
+- **Gemini skills interop** — `hooks/handlers/session-start.sh` copies `skills/` to `.agents/skills/` (the workspace skills tier per Gemini v0.36.0+ docs) so Gemini can auto-discover Triforge's portable skills via `activate_skill` instead of requiring per-prompt `$(cat ...)` injection.
+- **Gemini hooks (opt-in)** — `templates/.gemini/hooks.example.json` ships an audit-trail hook (`AfterTool` matcher on `write_file` → appends to `ops/CHANGELOG.md`). Verified to fire under `gemini -p` on v0.41.2; not auto-copied because Gemini's project-hook trust warning adds session-start friction. Users who want it merge the `hooks` block into `.gemini/settings.json`.
 
 ### Quality gates
 
@@ -144,6 +148,9 @@ settings.json             # Default env vars (agent teams)
 templates/                # Project bootstrapping templates
   CLAUDE.md                 Template for user projects
   ops/                      Skeleton ops/ files
+  .gemini/settings.json     Gemini project settings (disables built-in codebase_investigator)
+  .gemini/hooks.example.json Optional Gemini hooks (audit-trail; opt-in, not auto-copied)
+  .codex/config.toml        Codex project config (disables Codex's auto-memory pipeline)
 scripts/
   coordinate.sh           # Outer loop for context exhaustion recovery
   invoke-external.sh      # Unified Gemini/Codex invocation with feature detection
@@ -250,3 +257,15 @@ On macOS, install GNU `coreutils` so `timeout` enforcement works for Gemini/Code
 brew install coreutils
 ```
 `session-start.sh` emits a warning when neither `timeout` nor `gtimeout` is on PATH.
+
+## Compatibility
+
+Tested against **Codex 0.130.0** and **Gemini 0.41.2** (2026-05-12).
+
+**Minimum supported versions:**
+- **Codex ≥ 0.128.0** — first version after `--full-auto` was removed. Earlier versions still work but `scripts/invoke-external.sh` now passes `-s workspace-write -c approval_policy="never"` explicitly instead of relying on the removed shorthand.
+- **Gemini ≥ 0.39.0** — first version after legacy subagent wrappers were retired and `invoke_subagent` was unified. Triforge's `@<agent>` native routing aligns with this. Earlier versions fall through to the legacy prompt-prefix injection in `scripts/invoke-external.sh:51-56`.
+
+**Known-fails / partial support:**
+- Codex hooks (`PreToolUse`, `PostToolUse`, `SessionStart`, `Stop`, `UserPromptSubmit`, `PermissionRequest`) **do not fire under `codex exec`** in v0.130.0 even with a trusted workspace and `[features] codex_hooks` enabled — confirmed by probe on 2026-05-12. The `CodexHooks` feature is active in the feature list but only fires in interactive TUI mode at present. Triforge does not auto-enable Codex hooks for this reason; if upstream extends hooks to `codex exec`, revisit `ops/decisions/2026-05-12-cli-deprecation-watch.md`.
+- Gemini hooks **do** fire under `gemini -p` for `SessionStart`, `BeforeAgent`, `AfterAgent`, `AfterTool` (verified 2026-05-12 on v0.41.2). Shipped as opt-in example only because of the per-session trust-warning UX.

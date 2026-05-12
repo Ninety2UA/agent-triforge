@@ -1,5 +1,6 @@
 ---
 name: test-gap-analyzer
+color: cyan
 description: "Identifies untested code paths, missing edge case coverage, and test quality issues. Use before Phase 5 testing to guide Codex test writing."
 tools:
   - Read

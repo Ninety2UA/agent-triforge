@@ -1,6 +1,6 @@
 ---
 name: scope-cutting
-description: "Systematically cut scope when a sprint is too large. Prioritize by unblocking value and risk reduction."
+description: "Systematically cut scope when a sprint has too many tasks, is past review cycle 3, or is nearing context limits. Primary consumer: Claude (Phase 1.5 or mid-sprint). Triggers: >15 tasks, P2 issues remaining after cycle 3, 150+ tool calls, user requests faster delivery."
 ---
 
 # Scope Cutting

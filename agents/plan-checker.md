@@ -1,5 +1,6 @@
 ---
 name: plan-checker
+color: blue
 description: "Validates task plans for completeness, correctness, and feasibility before execution begins. Use in Phase 1.5 to catch bad plans before wasting build cycles."
 tools:
   - Read

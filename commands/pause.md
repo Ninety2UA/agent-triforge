@@ -1,5 +1,6 @@
 ---
 description: "Quick checkpoint: save current state to STATE.md without archiving or summarizing."
+allowed-tools: Read, Glob, Write
 ---
 
 You are saving a quick checkpoint. This is NOT a clean wrap — it's a mid-sprint save.

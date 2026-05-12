@@ -43,6 +43,14 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/gemini-agents
   fi
 fi
 
+# .agents/skills/ — interop path per Gemini docs/cli/skills.md (workspace skills tier).
+# Gemini v0.36.0+ auto-discovers SKILL.md files here. We copy (not symlink) so loaders
+# that refuse to follow symlinks across mount boundaries still see the skills.
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/skills" ] && [ ! -e ".agents/skills" ]; then
+  mkdir -p .agents
+  cp -R "${CLAUDE_PLUGIN_ROOT}/skills" .agents/skills 2>/dev/null || true
+fi
+
 # G12 guard: warn if user disabled Gemini agents globally in ~/.gemini/settings.json
 GEMINI_AGENTS_DISABLED_WARNING=""
 if [ -f "${HOME}/.gemini/settings.json" ]; then
@@ -77,6 +85,13 @@ fi
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/codex-agents/AGENTS.md" ]; then
   mkdir -p .codex
   [ ! -f ".codex/AGENTS.md" ] && cp "${CLAUDE_PLUGIN_ROOT}/codex-agents/AGENTS.md" ".codex/AGENTS.md"
+fi
+
+# Bootstrap .codex/config.toml (disables Codex's auto-memory pipeline to avoid
+# conflict with Triforge's ops/MEMORY.md — see template for rationale).
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.codex/config.toml" ]; then
+  mkdir -p .codex
+  [ ! -f ".codex/config.toml" ] && cp "${CLAUDE_PLUGIN_ROOT}/templates/.codex/config.toml" ".codex/config.toml"
 fi
 
 # Suggest CLAUDE.md template if not present
@@ -176,7 +191,7 @@ except ImportError:
 with open('.codex/agents/agents.toml','rb') as f:
     data = tomllib.load(f)
 print(len(data.get('agents', {})))
-" 2>/dev/null || grep -c '^\[agents\.' .codex/agents/agents.toml 2>/dev/null || echo "0")
+" 2>/dev/null || grep -c '^\[agents\.' .codex/agents/agents.toml 2>/dev/null || true)
   if [ "$CODEX_AGENT_COUNT" -gt "0" ]; then
     HAS_CODEX_AGENTS="yes"
   fi

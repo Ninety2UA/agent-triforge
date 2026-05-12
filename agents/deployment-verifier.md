@@ -1,5 +1,6 @@
 ---
 name: deployment-verifier
+color: cyan
 description: "Validates deployments via health checks, smoke tests, and monitoring verification. Use after deploying to verify the release is healthy."
 tools:
   - Read

@@ -1,5 +1,6 @@
 ---
-description: "Show current sprint state: phase, tasks by status, blockers, available commands."
+description: "Inspect sprint health: phase, task counts, blockers, pending reviews, uncommitted changes. Use to diagnose stuck sprints or to choose the next command."
+allowed-tools: Read, Grep, Glob, Bash
 ---
 
 You are providing a quick status overview of the current sprint.

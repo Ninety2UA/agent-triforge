@@ -1,0 +1,12 @@
+# Agent Triforge — project-level Codex CLI config.
+# Copied by hooks/handlers/session-start.sh on first session start.
+# Do not commit user-specific secrets here; user-tier config goes in ~/.codex/config.toml.
+
+[memories]
+# Codex v0.129.0 added an auto-memory pipeline that writes
+# ~/.codex/memories/{MEMORY.md, raw_memories.md, skills/, ...}.
+# Triforge maintains its own ops/MEMORY.md and ops/solutions/; disable
+# Codex's parallel system to avoid divergence. Users who want Codex memories
+# can remove this block or override in ~/.codex/config.toml.
+use_memories = false
+generate_memories = false

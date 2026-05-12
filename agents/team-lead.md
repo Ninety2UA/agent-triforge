@@ -1,5 +1,6 @@
 ---
 name: team-lead
+color: blue
 description: "Orchestrates agent team workers for complex builds. Coordinates task assignment, monitors progress, and enforces quality gates. Use for Phase 2 agent team mode."
 tools:
   - Read

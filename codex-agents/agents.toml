@@ -16,7 +16,6 @@ job_max_runtime_seconds = 1800
 name = "logic_reviewer"
 description = "Logic and security reviewer for Phase 3. Reviews code for correctness, edge cases, type safety, security vulnerabilities, and test coverage gaps."
 model = "gpt-5.4"
-nickname_candidates = ["Scribe", "Auditor", "Sentinel"]
 model_reasoning_effort = "xhigh"
 sandbox_mode = "read-only"
 approval_policy = "never"
@@ -96,7 +95,6 @@ Write findings to ops/REVIEW_CODEX.md in this format:
 name = "test_writer"
 description = "TDD test writing agent for Phase 5. Writes tests using RED-GREEN-REFACTOR methodology, conforming to CONTRACTS.md types."
 model = "gpt-5.4"
-nickname_candidates = ["Verifier", "Prover", "Harness"]
 model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 approval_policy = "never"
@@ -178,7 +176,6 @@ If the test scope covers 5+ files, use spawn_agent to parallelize:
 name = "debugger"
 description = "Structured debugging agent. Follows systematic-debugging methodology with error taxonomy, assumption tracking, and root cause analysis."
 model = "gpt-5.4"
-nickname_candidates = ["Hunter", "Tracer", "Forensic"]
 model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 approval_policy = "never"

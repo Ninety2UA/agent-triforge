@@ -1,5 +1,6 @@
 ---
 name: best-practices-researcher
+color: cyan
 description: "Researches industry-wide best practices, design patterns, and anti-patterns for any technology or approach. Use in /deep-research swarm or before planning unfamiliar features."
 tools:
   - Read

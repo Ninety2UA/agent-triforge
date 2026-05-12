@@ -1,11 +1,14 @@
 ---
 name: bug-reproduction-validator
+color: yellow
 description: "Validates bug reports by attempting to reproduce the reported behavior before fixes begin. Use when receiving bug reports to prevent wasted effort on phantom bugs."
 tools:
   - Read
   - Grep
   - Glob
   - Bash
+  - WebFetch
+  - WebSearch
 model: opus
 effort: max
 maxTurns: 10

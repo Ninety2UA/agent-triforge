@@ -76,9 +76,9 @@ mv "$TEMP_FILE" "$STATE_FILE"
 
 # Warn at thresholds
 if [ "$CONSECUTIVE" -ge 5 ]; then
-  printf '⚠ %s consecutive tool failures (latest: %s). Consider investigating before continuing.\n' "$CONSECUTIVE" "$TOOL_NAME"
+  printf 'WARN:%s consecutive tool failures (latest: %s). Consider investigating before continuing.\n' "$CONSECUTIVE" "$TOOL_NAME"
 elif [ "$FAILURE_COUNT" -ge 10 ]; then
-  printf '⚠ %s total tool failures this session (latest: %s). Check .claude/tool-failures.local.md for details.\n' "$FAILURE_COUNT" "$TOOL_NAME"
+  printf 'WARN:%s total tool failures this session (latest: %s). Check .claude/tool-failures.local.md for details.\n' "$FAILURE_COUNT" "$TOOL_NAME"
 fi
 
 exit 0

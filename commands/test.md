@@ -1,5 +1,6 @@
 ---
 description: "Run Phase 5 testing: gap analysis + Codex TDD test writing + fix cycle."
+allowed-tools: Read, Grep, Glob, Bash, Agent, Edit
 argument-hint: "[--gaps-only] [scope]"
 ---
 
@@ -29,6 +30,7 @@ If `--gaps-only` flag: report gaps and stop.
 ## Step 2: Invoke Codex for test writing
 
 ```bash
+set -euo pipefail
 source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
 # TDD test writing (uses test_writer agent definition, 15 min timeout for TDD cycles)

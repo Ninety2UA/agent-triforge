@@ -1,5 +1,6 @@
 ---
 name: performance-oracle
+color: yellow
 description: "Analyzes code for performance bottlenecks, algorithmic complexity, N+1 queries, memory leaks, and scalability issues. Use as additional reviewer in Phase 3."
 tools:
   - Read

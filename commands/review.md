@@ -1,5 +1,6 @@
 ---
 description: "Trigger parallel review: Gemini + Codex + Claude specialized agents. Synthesize findings."
+allowed-tools: Read, Grep, Glob, Bash, Agent, Edit
 argument-hint: "[--full] [--security] [--perf] [--simple] [--conventions]"
 ---
 
@@ -25,6 +26,7 @@ Read ops/TASKS.md to determine review scope (tasks marked [R]).
 ### Always launch (background bash):
 
 ```bash
+set -euo pipefail
 source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
 GEMINI_OUT="${TMPDIR:-/tmp}/gemini_review_$$_$(date +%s).txt"

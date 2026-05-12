@@ -1,6 +1,7 @@
 ---
 name: continuous-reviewer
-description: "Dedicated per-task reviewer for agent team builds. Auto-reviews every completed task for test/lint/security compliance. Spawned by team-lead at 1:3-4 ratio with builders."
+color: green
+description: "Dedicated per-task reviewer for agent team builds. Auto-reviews every completed task for test/lint/security compliance. Use when team-lead spawns builders in waves (1:3-4 reviewer-to-builder ratio) so regressions are caught as each task completes rather than at end-of-sprint."
 tools:
   - Read
   - Grep

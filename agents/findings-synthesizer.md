@@ -1,5 +1,6 @@
 ---
 name: findings-synthesizer
+color: magenta
 description: "Merges and deduplicates review findings from multiple reviewers with confidence tiering and priority ranking. Use in Phase 4 to process parallel review outputs."
 tools:
   - Read

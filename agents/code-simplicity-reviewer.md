@@ -1,5 +1,6 @@
 ---
 name: code-simplicity-reviewer
+color: green
 description: "Detects over-engineering, unnecessary abstractions, YAGNI violations, and premature optimization. Use as additional reviewer in Phase 3 or after complex builds."
 tools:
   - Read

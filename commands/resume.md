@@ -1,5 +1,6 @@
 ---
 description: "Resume work from a previous session using STATE.md."
+allowed-tools: Read, Grep, Glob, Bash, Agent
 ---
 
 You are resuming a multi-agent sprint from a previous session.

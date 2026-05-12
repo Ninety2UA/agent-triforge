@@ -1,5 +1,6 @@
 ---
 name: pr-comment-resolver
+color: magenta
 description: "Reads GitHub PR review comments and implements the requested changes. Use when PR feedback needs to be resolved with code changes."
 tools:
   - Read

@@ -1,5 +1,6 @@
 ---
 name: integration-verifier
+color: cyan
 description: "Verifies system integrity between waves: runs tests, checks build, lint, and detects conflicts. Use between wave-orchestration waves in Phase 2."
 tools:
   - Read
