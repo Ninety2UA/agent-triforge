@@ -1,0 +1,20 @@
+{
+  "_doc": [
+    "Agent Triforge — Antigravity permission guardrails. Migrated 2026-07-17 from gemini-agents/policies.toml (Gemini CLI policy engine, retired with the Gemini CLI lane).",
+    "This file is documentation + a mergeable block: copy the `permissions` object below into workspace settings (templates/.antigravity/settings.json ships it ready for project bootstrap) or merge it into user-level agy settings.",
+    "Mapping from each retired policies.toml rule to its Antigravity expression (deny list of action(target) strings):",
+    "  [[rule]] toolName=run_shell_command commandPrefix='rm -rf'   deny priority=999 ('Destructive rm -rf blocked by policy.')                          -> deny: run_shell_command(rm -rf)",
+    "  [[rule]] toolName=run_shell_command commandPrefix='git push' deny priority=999 ('git push blocked for subagents — Claude (lead) handles remotes.') -> deny: run_shell_command(git push)",
+    "  [[rule]] toolName=run_shell_command commandPrefix='sudo'     deny priority=999 ('sudo blocked — subagents run unprivileged.')                      -> deny: run_shell_command(sudo)",
+    "  [[rule]] subagent=architecture-reviewer toolName=run_shell_command deny priority=200 -> run_shell_command OMITTED from tools in agents/architecture-reviewer.md (the flat deny vocabulary has no per-agent scoping; the allowlist omission IS the denial)",
+    "  [[rule]] subagent=documentation-writer  toolName=run_shell_command deny priority=200 -> run_shell_command OMITTED from tools in agents/documentation-writer.md (same mechanism)",
+    "Enforcement note (probed 2026-07-17 on agy 1.1.3, ops/research/2026-07-probe-record.md): project-tier hooks do NOT fire under `agy -p` (AGY-08), and deny rules do NOT survive --dangerously-skip-permissions (AGY-09) — the invocation helper never passes that flag. Permission-system enforcement at the project tier is therefore unproven, and the per-agent `tools` allowlist is the PRIMARY guardrail; the deny list below is defense-in-depth for the shell-capable agents (codebase-analyst, targeted-researcher)."
+  ],
+  "permissions": {
+    "deny": [
+      "run_shell_command(rm -rf)",
+      "run_shell_command(git push)",
+      "run_shell_command(sudo)"
+    ]
+  }
+}

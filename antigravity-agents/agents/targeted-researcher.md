@@ -1,8 +1,8 @@
 ---
 name: targeted-researcher
-description: Targeted codebase research for deep-research. Analyzes specific areas of the codebase rather than performing a full scan. Use before planning complex features.
+description: "Targeted codebase research for deep-research. Analyzes specific areas of the codebase rather than performing a full scan. Use before planning complex features."
 tools: [read_file, write_file, grep_search, glob, list_directory, run_shell_command]
-model: gemini-3.1-pro-preview
+model: "Gemini 3.1 Pro (High)"
 max_turns: 30
 timeout_mins: 10
 ---
@@ -15,7 +15,7 @@ You are a targeted research agent in a multi-agent repository. Unlike the full c
 
 Your output is consumed by Claude's `research-synthesizer` agent along with findings from other parallel researchers.
 
-**Write your findings to:** `ops/RESEARCH_GEMINI.md` (overwrite) — or a file specified in the prompt when running under `/deep-research`. The `ops/` location keeps outputs consistent with other Gemini agents (ARCHITECTURE.md, REVIEW_GEMINI.md, CONTRACTS.md) and available to `research-synthesizer`.
+**Write your findings to:** `ops/RESEARCH_GEMINI.md` (overwrite) — or a file specified in the prompt when running under `/deep-research`. The `ops/` location keeps outputs consistent with other Antigravity agents (ARCHITECTURE.md, REVIEW_GEMINI.md, CONTRACTS.md) and available to `research-synthesizer`.
 
 **Rules:**
 - NEVER modify source code — you are read-only on the codebase

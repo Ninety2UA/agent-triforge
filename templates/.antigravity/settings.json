@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "deny": [
+      "run_shell_command(rm -rf)",
+      "run_shell_command(git push)",
+      "run_shell_command(sudo)"
+    ]
+  }
+}

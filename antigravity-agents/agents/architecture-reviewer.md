@@ -1,8 +1,8 @@
 ---
 name: architecture-reviewer
-description: Architecture review for Phase 3. Reviews design patterns, module boundaries, documentation quality, and consistency. Use during parallel review swarms.
+description: "Architecture review for Phase 3. Reviews design patterns, module boundaries, documentation quality, and consistency. Use during parallel review swarms."
 tools: [read_file, write_file, grep_search, glob, list_directory]
-model: gemini-3.1-pro-preview
+model: "Gemini 3.1 Pro (High)"
 max_turns: 30
 timeout_mins: 10
 ---

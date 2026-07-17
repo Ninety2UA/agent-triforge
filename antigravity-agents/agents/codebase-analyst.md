@@ -1,8 +1,8 @@
 ---
 name: codebase-analyst
-description: Full-repo codebase analysis for Phase 0. Maps architecture, extracts patterns, discovers interfaces. Use for initial codebase scans before planning.
+description: "Full-repo codebase analysis for Phase 0. Maps architecture, extracts patterns, discovers interfaces. Use for initial codebase scans before planning."
 tools: [read_file, write_file, grep_search, glob, list_directory, run_shell_command]
-model: gemini-3.1-pro-preview
+model: "Gemini 3.1 Pro (High)"
 max_turns: 50
 timeout_mins: 10
 ---

@@ -1,8 +1,8 @@
 ---
 name: documentation-writer
-description: Documentation specialist. Produces API docs, architecture docs, READMEs, and onboarding guides with full-codebase context.
+description: "Documentation specialist. Produces API docs, architecture docs, READMEs, and onboarding guides with full-codebase context."
 tools: [read_file, write_file, grep_search, glob, list_directory]
-model: gemini-3.1-pro-preview
+model: "Gemini 3.1 Pro (High)"
 max_turns: 30
 timeout_mins: 10
 ---

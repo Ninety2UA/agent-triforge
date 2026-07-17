@@ -319,8 +319,72 @@ EOF
   else
     row "AGY-11" "agy" "Headless thinking/effort control" "FAIL" "no thinking/effort/reasoning flag in agy --help and no variant-suffixed model list; effort not controllable headless" "static"
   fi
+
+  # Triforge plugin agents (U3): the four migrated definitions ship as the
+  # antigravity-agents/ plugin. Probed 2026-07-17 on agy 1.1.3: install,
+  # validate, and registry all work, but plugin agents do NOT surface in the
+  # headless runtime — `agy agents` stays empty and --agent silently ignores
+  # unknown names (control-verified) — so three states are distinguished:
+  # not installed (UNAVAILABLE, host state), installed but not discoverable
+  # (FAIL — invoke-external.sh's injection fallback is the operative mode),
+  # and listed (live round-trip + tools-allowlist negative; flips to PASS
+  # the day agy wires plugin agents into headless discovery).
+  if [ "$AGY_LIVE" = "1" ]; then
+    O="$WORK/agy-triforge-agents.txt"
+    _rwt 30 agy agents > "$O" 2>&1 || true
+    TRIFORGE_MISSING=""
+    for a in codebase-analyst architecture-reviewer targeted-researcher documentation-writer; do
+      grep -qE "(^|[[:space:]])${a}([[:space:]:,.]|$)" "$O" || TRIFORGE_MISSING="$TRIFORGE_MISSING $a"
+    done
+    TRIFORGE_INSTALLED=0
+    _rwt 30 agy plugin list > "$WORK/agy-plugin-list.txt" 2>&1 || true
+    grep -q '"agent-triforge"' "$WORK/agy-plugin-list.txt" && TRIFORGE_INSTALLED=1
+    if [ "$TRIFORGE_INSTALLED" = "1" ]; then
+      if [ -z "$TRIFORGE_MISSING" ]; then
+        O="$WORK/agy-triforge-ready.txt"
+        if (cd "$FIX" && _probe_run 180 agy --agent codebase-analyst -p "Respond with only: READY" > "$O" 2>&1) && _contains_ci "$O" "READY"; then
+          row "AGY-12" "agy" "Triforge plugin agents respond through their definitions" "PASS" "all four listed; codebase-analyst round-trip: $(_evidence "$O")" "live"
+        else
+          row "AGY-12" "agy" "Triforge plugin agents respond through their definitions" "FAIL" "all four listed but codebase-analyst round-trip failed: $(_evidence "$O")" "live"
+        fi
+      else
+        row "AGY-12" "agy" "Triforge plugin agents respond through their definitions" "FAIL" "installed (agy plugin list) but not in \`agy agents\` (missing:${TRIFORGE_MISSING}) — native discovery not functional on this agy; invoke helper falls back to injection" "live"
+      fi
+
+      # Negative: architecture-reviewer's tools allowlist omits
+      # run_shell_command — the omission IS the shell denial (primary
+      # guardrail per AGY-08/09: hooks don't fire headless and permission
+      # denies don't survive the skip flag; the allowlist holds regardless).
+      # Bind the fixture like AGY-09 and sweep agy's scratch tree too. Runs
+      # even while native discovery is down: a landed write is a FAIL in any
+      # mode, and an absent marker only counts as allowlist PASS when the
+      # definition demonstrably loaded (agents listed).
+      AGY_SCRATCH="$HOME/.gemini/antigravity-cli/scratch"
+      O="$WORK/agy-triforge-neg.txt"
+      (cd "$FIX" && _probe_run 180 agy --add-dir "$FIX" --agent architecture-reviewer -p "Run this exact shell command: touch agy-neg-marker.txt" > "$O" 2>&1) || true
+      NEG_HITS=""
+      [ -f "$FIX/agy-neg-marker.txt" ] && NEG_HITS="fixture"
+      SCRATCH_HIT=$(find "$AGY_SCRATCH" -name 'agy-neg-marker.txt' 2>/dev/null | head -1)
+      [ -n "$SCRATCH_HIT" ] && NEG_HITS="${NEG_HITS:+$NEG_HITS+}scratch"
+      if [ -n "$NEG_HITS" ]; then
+        row "AGY-13" "agy" "architecture-reviewer cannot run shell (tools-allowlist negative)" "FAIL" "shell write landed ($NEG_HITS) despite run_shell_command omitted from tools; $(_evidence "$O")" "negative"
+        rm -f "$FIX/agy-neg-marker.txt" "$SCRATCH_HIT"
+      elif [ -z "$TRIFORGE_MISSING" ]; then
+        row "AGY-13" "agy" "architecture-reviewer cannot run shell (tools-allowlist negative)" "PASS" "marker absent in fixture and scratch; $(_evidence "$O")" "negative"
+      else
+        row "AGY-13" "agy" "architecture-reviewer cannot run shell (tools-allowlist negative)" "FAIL" "marker absent but not attributable to the tools allowlist — native discovery not functional (see AGY-12); denial currently rests on headless auto-deny + prompt rules (injection mode)" "negative"
+      fi
+    else
+      row "AGY-12" "agy" "Triforge plugin agents respond through their definitions" "UNAVAILABLE" "triforge agy plugin not installed on this host" "live"
+      row "AGY-13" "agy" "architecture-reviewer cannot run shell (tools-allowlist negative)" "UNAVAILABLE" "triforge agy plugin not installed on this host" "live"
+    fi
+  else
+    for r in "AGY-12:Triforge plugin agents respond through their definitions" "AGY-13:architecture-reviewer cannot run shell (tools-allowlist negative)"; do
+      row "${r%%:*}" "agy" "${r#*:}" "$(_skip_reason)" "gated on AGY-04" "live"
+    done
+  fi
 else
-  for r in "AGY-01:Version capture" "AGY-02:Model list (latest Pro for KTD-8 pin)" "AGY-03:Native agent listing (agy agents)" "AGY-04:Headless READY (agy -p)" "AGY-05:Explicit Pro model pin" "AGY-06:/goal command exists in CLI" "AGY-07:/teamwork-preview command exists in CLI" "AGY-08:Hooks fire under agy -p (project tier)" "AGY-09:Explicit deny survives --dangerously-skip-permissions" "AGY-10:--sandbox confines writes to workspace" "AGY-11:Headless thinking/effort control flag"; do
+  for r in "AGY-01:Version capture" "AGY-02:Model list (latest Pro for KTD-8 pin)" "AGY-03:Native agent listing (agy agents)" "AGY-04:Headless READY (agy -p)" "AGY-05:Explicit Pro model pin" "AGY-06:/goal command exists in CLI" "AGY-07:/teamwork-preview command exists in CLI" "AGY-08:Hooks fire under agy -p (project tier)" "AGY-09:Explicit deny survives --dangerously-skip-permissions" "AGY-10:--sandbox confines writes to workspace" "AGY-11:Headless thinking/effort control flag" "AGY-12:Triforge plugin agents respond through their definitions" "AGY-13:architecture-reviewer cannot run shell (tools-allowlist negative)"; do
     row "${r%%:*}" "agy" "${r#*:}" "UNAVAILABLE" "agy not on PATH" "direct"
   done
 fi
@@ -863,6 +927,7 @@ N_PEND=$(cut -f4 "$ROWS" | grep -c '^PENDING' || true)
   echo "- **AGY-08** → U3/U5: hooks not firing project-tier ⇒ guardrails stay at agent \`tools\` allowlist + permission deny rules, not hook enforcement."
   echo "- **AGY-09/AGY-10** → U2: deny-survival decides whether \`--dangerously-skip-permissions\` is ever passed by the adapter; sandbox result feeds the R35 confinement profile."
   echo "- **AGY-11** → U8: roster \`effort\` field is inert for the agy adapter unless a headless control exists (documented per KTD-8)."
+  echo "- **AGY-12/AGY-13** → U3: native-lane health for the four migrated plugin agents — FAIL while agy does not surface installed plugin agents headless (injection fallback operative; probed 2026-07-17 on 1.1.3); flips to PASS when native discovery lands."
   echo "- **CDX-02** → U7/U8: \`codex features list\` replaces version-string detection."
   echo "- **CDX-04** → U7: positive ⇒ ship \`templates/.codex/hooks.json\` + flip D-004 in a new ADR; negative ⇒ AE5 (prompt-enforced conventions, ADR records the negative with date)."
   echo "- **CDX-05** → U7: structured review verdicts via \`--output-schema\`."

@@ -41,9 +41,16 @@ set -euo pipefail
 #   native    — `agy agents` (agents from installed agy plugins; empty by
 #               default) lists the name; select it with --agent. Workspace
 #               .gemini/agents/ and .agents/agents/ are NOT discovered by agy
-#               (probed 2026-07-17), so there is no project tier.
-#   injection — ${CLAUDE_PLUGIN_ROOT}/antigravity-agents/<name>.md exists;
-#               its body (after frontmatter) is prefixed onto the prompt.
+#               (probed 2026-07-17), so there is no project tier. Re-probed
+#               2026-07-17 on agy 1.1.3: installed plugin agents do not yet
+#               surface headless (`agy agents` stays empty and --agent
+#               silently ignores unknown names), so this lane engages only
+#               once agy starts listing them — injection is the operative
+#               mode until then (probe rows AGY-12/AGY-13 track it).
+#   injection — ${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents/<name>.md
+#               exists (agents/ subdir: antigravity-agents/ is a valid agy
+#               plugin); its body (after frontmatter) is prefixed onto the
+#               prompt.
 #   raw       — neither found; warn with the available agents and run the
 #               bare prompt (no system prompt applied).
 #
@@ -79,9 +86,9 @@ invoke_antigravity() {
   if [ -n "$NATIVE_LISTING" ] && printf '%s\n' "$NATIVE_LISTING" | grep -qE "(^|[[:space:]])${AGENT_NAME}([[:space:]:,.]|$)"; then
     FULL_PROMPT="$PROMPT"
     MODE="native"
-  elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/${AGENT_NAME}.md" ]; then
+  elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents/${AGENT_NAME}.md" ]; then
     local BODY
-    BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/${AGENT_NAME}.md")
+    BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents/${AGENT_NAME}.md")
     FULL_PROMPT="${BODY}
 
 ${PROMPT}"
@@ -300,12 +307,14 @@ _classify_invoke_failure() {
 # Raw `agy agents` listing (native agents come from installed agy plugins
 # only; header "Available agents:" then names, empty by default). 10s cap,
 # tolerant: any failure — including fail-closed timeout preflight — yields an
-# empty listing so mode resolution falls through to injection/raw. Carries the
-# model pin: no agy command is ever built without --model (AE2), even
-# metadata queries.
+# empty listing so mode resolution falls through to injection/raw.
+# NO flags here (probed 2026-07-17 on agy 1.1.3): `agy agents` rejects
+# --model/--add-dir ("flags provided but not defined") and exits 1 with empty
+# stdout, which silently disabled native matching forever. The AE2 model-pin
+# rule covers session commands; this metadata query cannot carry the flag.
 _agy_agents_listing() {
   command -v agy >/dev/null 2>&1 || return 0
-  _run_with_timeout 10 agy agents --model "${AGY_MODEL:-Gemini 3.1 Pro (High)}" --add-dir "$PWD" 2>/dev/null || true
+  _run_with_timeout 10 agy agents 2>/dev/null || true
 }
 
 # List known Antigravity agent names: plugin injection templates plus whatever
@@ -313,8 +322,8 @@ _agy_agents_listing() {
 # header is dropped).
 _list_antigravity_agents() {
   {
-    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/antigravity-agents" ]; then
-      for f in "${CLAUDE_PLUGIN_ROOT}/antigravity-agents"/*.md; do
+    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents" ]; then
+      for f in "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents"/*.md; do
         [ -f "$f" ] && basename "$f" .md
       done 2>/dev/null
     fi
