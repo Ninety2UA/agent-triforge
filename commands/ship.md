@@ -23,20 +23,23 @@ Goal: $ARGUMENTS
 - `--convergence {fast|standard|deep}` — Review convergence mode (default: standard). Fast=P1 only, deep=P1+P2+P3<3.
 - `--team` — Activate agent team mode for build phase (5+ interdependent tasks)
 
-## Activation
+## Completion gating
 
-Write the ship-loop state file to activate the inner loop guard:
+The sprint's completion condition is this checklist — ALL items must hold:
+
+1. Every phase below is done (or explicitly skipped with a stated reason)
+2. The `verification-before-completion` checklist passes with evidence
+3. ops/STATE.md is written for session handoff
+4. Temporary review files are archived to ops/archive/
+5. The runtime marker `ops/.sprint-complete` is created LAST, only after 1–4 hold
+
+At sprint start, print this copyable line for the user (a command file cannot invoke `/goal` itself — it is user-typed or the leading line of a `claude -p` prompt; typing it makes Claude Code hard-gate the session natively):
 
 ```
-Create .claude/ship-loop.local.md with:
----
-active: true
-iteration: 0
-max_iterations: 5
-completion_promise: "DONE"
----
-<the goal description from $ARGUMENTS>
+/goal Sprint complete ONLY when ALL of: every phase is done or explicitly skipped with a stated reason; the verification-before-completion checklist passes with evidence; ops/STATE.md is written; review files are archived to ops/archive/; ops/.sprint-complete is created last.
 ```
+
+Whether or not the user types it, hold yourself to that checklist as your completion condition. Create `ops/.sprint-complete` ONLY in Phase 6 after the checklist passes — never earlier. Outer tooling (`scripts/coordinate.sh`) detects sprint completion solely by that file's existence.
 
 ## Pipeline
 
@@ -98,7 +101,6 @@ Spawn the `findings-synthesizer` agent. Apply `iterative-refinement` skill.
 - Archive review files to ops/archive/[today's date]/
 - Apply `verification-before-completion` skill (all checks must pass)
 - Write ops/STATE.md for session handoff
-- Remove .claude/ship-loop.local.md
+- Only when the full completion-gating checklist passes: create the runtime marker `ops/.sprint-complete` (`touch ops/.sprint-complete`) as the LAST action
 
-Only when ALL work is verified complete:
-<promise>DONE</promise>
+If any checklist item fails, do NOT create `ops/.sprint-complete` — document the blocker in ops/TASKS.md and ops/STATE.md instead.

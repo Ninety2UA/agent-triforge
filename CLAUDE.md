@@ -47,6 +47,7 @@ Claude invokes Antigravity via `invoke_antigravity` and Codex via `invoke_codex`
 | `REVIEW_CODEX.md` | Codex's review output (temporary) | Codex writes, Claude reads |
 | `RESEARCH_ANTIGRAVITY.md` | Antigravity targeted-research output (temporary) | Antigravity writes, Claude reads |
 | `TEST_RESULTS.md` | Test results (temporary) | Codex writes, Claude reads |
+| `.sprint-complete` | Runtime completion marker — created only after the verification checklist passes; `scripts/coordinate.sh` detects sprint completion by its existence (gitignored, never committed) | Claude creates at Phase 6 wrap |
 
 ### Execution phases
 
@@ -61,7 +62,7 @@ The full lifecycle for a goal:
 3. **Parallel review** — Antigravity + Codex + Claude specialized agents (security-sentinel, performance-oracle, code-simplicity-reviewer) simultaneously
 4. **Process reviews** — findings-synthesizer agent merges with confidence tiering, iterative-refinement skill for fix cycles
 5. **Test** — Codex with TDD skill, test-gap-analyzer identifies coverage gaps
-6. **Wrap up** — Knowledge compounding, verification checklist, completion promise, session continuity
+6. **Wrap up** — Knowledge compounding, verification checklist, completion sentinel (`ops/.sprint-complete`), session continuity
 
 ### Assignment heuristic (quick reference)
 
@@ -86,7 +87,7 @@ Antigravity and Codex agent files use their CLIs' own conventions: Antigravity (
 
 ### Reliability patterns
 
-- **Forced reflection on retry** — agents must self-diagnose before retrying (ship-loop.sh + wave-orchestration)
+- **Forced reflection on retry** — agents must self-diagnose before retrying (wave-orchestration; workflow requeue prepends the reflection questions)
 - **Same-error kill criteria** — 3x same error fingerprint = kill executor + reassign to fresh agent
 - **Continuous reviewer** — dedicated per-task reviewer in team builds (1:3-4 ratio with builders)
 - **Per-task reflection** — conditional MEMORY.md entries when task took >3 retries, had test failures, or modified >5 files
@@ -94,7 +95,7 @@ Antigravity and Codex agent files use their CLIs' own conventions: Antigravity (
 
 ### Hook safety
 
-All 5 hook handlers use `set -euo pipefail`. When using `grep -c`, add `|| true` (not `|| echo "0"`) to prevent script termination on zero matches — `grep -c` already prints `0` to stdout before exiting 1, so `|| echo "0"` duplicates the output and produces a multiline `"0\n0"` value that corrupts downstream display and numeric comparisons.
+All 4 hook handlers use `set -euo pipefail`. When using `grep -c`, add `|| true` (not `|| echo "0"`) to prevent script termination on zero matches — `grep -c` already prints `0` to stdout before exiting 1, so `|| echo "0"` duplicates the output and produces a multiline `"0\n0"` value that corrupts downstream display and numeric comparisons.
 
 ### Key constraints
 
@@ -104,7 +105,7 @@ All 5 hook handlers use `set -euo pipefail`. When using `grep -c`, add `|| true`
 - Maximum 3 review cycles per sprint before escalating to user
 - Phase 0 can be skipped for small bug fixes, same-session continuations, or unchanged codebases
 - Risk scoring: halt subagent at risk >20% or file changes >50
-- Completion requires `<promise>DONE</promise>` after verification checklist passes
+- Completion requires creating the `ops/.sprint-complete` runtime marker, only after the verification checklist passes (never earlier)
 
 ### Security model
 
@@ -145,7 +146,6 @@ hooks/
   hooks.json              # Hook registration (uses ${CLAUDE_PLUGIN_ROOT})
   handlers/               # Lifecycle hook scripts
     session-start.sh        Session orientation + ops/ + agent bootstrapping
-    ship-loop.sh            Blocks premature exit during sprints
     context-monitor.sh      Warns on analysis paralysis
 settings.json             # Default env vars (agent teams)
 templates/                # Project bootstrapping templates
@@ -236,14 +236,19 @@ Claude invokes Antigravity via `invoke_antigravity` and Codex via `invoke_codex`
 
 ## Context management
 
-- **Inner loop:** `hooks/handlers/ship-loop.sh` Stop hook blocks premature exit during sprints (max 5 iterations, waits for `<promise>DONE</promise>`)
-- **Outer loop:** `scripts/coordinate.sh` spawns fresh sessions on context exhaustion
+- **Completion gating:** sprints are gated by a `/goal` checklist — `scripts/coordinate.sh` composes it as the leading line of each session prompt; `/ship` and `/coordinate` print a copyable `/goal` line for interactive use (probe CC-03; replaced the retired ship-loop.sh Stop hook)
+- **Outer loop:** `scripts/coordinate.sh` spawns fresh sessions on context exhaustion; detects completion via the `ops/.sprint-complete` sentinel (headless-observable, no output parsing)
 - **Analysis paralysis:** `hooks/handlers/context-monitor.sh` warns at 8+ consecutive reads without writes
 - **Context checkpoint:** `hooks/handlers/pre-compact.sh` auto-snapshots `ops/STATE.md` (current phase + task counts) before Claude Code compacts the window, so a resume after compaction has a fresh anchor
 - **Tool-failure threshold:** `hooks/handlers/tool-failure-monitor.sh` tracks consecutive and total tool failures, warning at 5 consecutive or 10 total per session
 - **Risk scoring:** Subagents halted at risk >20% or 50+ file changes
 
 ## Prerequisites
+
+**Claude Code ≥ 2.1.212** (floor per KTD-13: the session-caps/monitors line; `/goal` gating, dynamic workflows, and worktree isolation all landed earlier):
+```bash
+claude --version
+```
 
 All three CLIs must be installed and working in non-interactive mode:
 ```bash

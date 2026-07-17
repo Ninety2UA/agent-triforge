@@ -102,7 +102,7 @@ agent-triforge/                     (plugin — installed automatically)
 ├── commands/                         16 slash commands
 ├── hooks/
 │   ├── hooks.json                    Hook registration
-│   └── handlers/                     5 lifecycle hook scripts
+│   └── handlers/                     4 lifecycle hook scripts
 ├── settings.json                     Default env vars
 ├── templates/                        Project bootstrapping templates
 └── scripts/coordinate.sh            Outer loop for context recovery
@@ -303,7 +303,8 @@ Five non-negotiable checkpoints enforced at every stage:
 All three CLIs must be installed and authenticated:
 
 ```bash
-# Claude Code (you're probably already here)
+# Claude Code ≥ 2.1.212 — floor set by the session-caps/monitors line;
+# /goal gating, dynamic workflows, and worktree isolation all landed earlier
 claude --version
 
 # Antigravity CLI — https://antigravity.google/cli (run `agy` once interactively to log in)
@@ -495,8 +496,8 @@ Three defense mechanisms prevent long sprints from dying to context limits:
 
 | Layer | Mechanism | Guards against |
 |---|---|---|
-| **Inner loop** | [`ship-loop.sh`](hooks/handlers/ship-loop.sh) Stop hook — blocks exit with JSON re-feed, session-isolated, transcript-based promise detection (max 5x) | Claude giving up mid-pipeline |
-| **Outer loop** | [`scripts/coordinate.sh`](scripts/coordinate.sh) — spawns fresh sessions with clean context, notifies on completion | Context window filling up |
+| **Completion gating** | Native `/goal` checklist gate — [`coordinate.sh`](scripts/coordinate.sh) leads every session prompt with it; `/ship` and `/coordinate` print a copyable `/goal` line; completion signaled only by creating `ops/.sprint-complete` after verification passes | Claude declaring victory early |
+| **Outer loop** | [`scripts/coordinate.sh`](scripts/coordinate.sh) — spawns fresh sessions with clean context, detects completion via the `ops/.sprint-complete` sentinel, notifies on completion | Context window filling up |
 | **PreCompact** | [`pre-compact.sh`](hooks/handlers/pre-compact.sh) — auto-checkpoints `STATE.md` before context compaction | State loss during mid-sprint compaction |
 | **Analysis paralysis** | [`context-monitor.sh`](hooks/handlers/context-monitor.sh) — warns at 8+ consecutive reads without writes | Reading without producing |
 | **Tool failure monitor** | [`tool-failure-monitor.sh`](hooks/handlers/tool-failure-monitor.sh) — tracks and warns on accumulated tool failures | Silent failure accumulation |
@@ -518,7 +519,7 @@ NOTIFY_WEBHOOK_URL="https://hooks.slack.com/..." ./scripts/coordinate.sh "Build 
 - Parallel reviews are safe because agents write to separate files
 - Maximum 3 review cycles per sprint before escalating to user
 - Phase 0 can be skipped for small bug fixes, same-session continuations, or unchanged codebases (use [`/quick`](commands/quick.md))
-- Completion requires `<promise>DONE</promise>` after [verification checklist](skills/verification-before-completion/SKILL.md) passes
+- Completion requires creating the `ops/.sprint-complete` runtime marker only after the [verification checklist](skills/verification-before-completion/SKILL.md) passes
 
 ---
 
@@ -539,7 +540,7 @@ This framework was informed by analyzing the [Claude Code Blueprint](https://git
 <details>
 <summary><strong>What we adopted from Blueprint</strong></summary>
 
-Confidence tiering, suppressions lists, review synthesis, wave orchestration, quality gates, institutional knowledge compounding, dual-loop context management, risk scoring, completion promise pattern, shadow path tracing, session continuity. Ship-loop hook architecture: JSON `{decision, reason, systemMessage}` output, session isolation, transcript-based promise detection, atomic state updates, rich YAML frontmatter state file.
+Confidence tiering, suppressions lists, review synthesis, wave orchestration, quality gates, institutional knowledge compounding, dual-loop context management, risk scoring, shadow path tracing, session continuity. The Blueprint's completion-promise pattern and ship-loop Stop-hook architecture were also adopted, then retired in 2026-07 when Claude Code's native `/goal` gating covered them (probe CC-03) — completion is now signaled via the `ops/.sprint-complete` sentinel.
 </details>
 
 <details>
@@ -602,7 +603,7 @@ No. Use <a href="commands/quick.md"><code>/quick</code></a> for changes touching
 <details>
 <summary><strong>How does context exhaustion recovery work?</strong></summary>
 
-Two layers. <strong>Inside</strong> a session, <a href="hooks/handlers/ship-loop.sh"><code>ship-loop.sh</code></a> blocks premature exit — it reads the session transcript, checks for <code>&lt;promise&gt;DONE&lt;/promise&gt;</code>, and if not found, re-injects the original goal as a JSON response <code>{decision, reason, systemMessage}</code> (max 5 iterations, session-isolated). <strong>Outside</strong> a session, <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> spawns fresh Claude processes with clean context windows, with state persisting via git.
+Two layers. <strong>Inside</strong> a session, completion is hard-gated by Claude Code's native <code>/goal</code> command — <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> leads every composed prompt with a <code>/goal</code> checklist line, and <code>/ship</code>/<code>/coordinate</code> print a copyable <code>/goal</code> line for interactive runs. <strong>Outside</strong> a session, <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> spawns fresh Claude processes with clean context windows, detecting completion via the <code>ops/.sprint-complete</code> sentinel the session creates only after the verification checklist passes; state persists via git and <code>ops/STATE.md</code>. A PreCompact hook auto-checkpoints STATE.md before context compaction.
 </details>
 
 <details>

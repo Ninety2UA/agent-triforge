@@ -1,5 +1,6 @@
 .DS_Store
 .claude/*.local.md
+ops/.sprint-complete
 /.gemini/
 /.antigravity/
 /.agents/

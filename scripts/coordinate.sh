@@ -4,15 +4,26 @@
 # Each iteration gets a clean context window.
 # Progress tracked in ops/STATE.md.
 #
+# Completion contract (native /goal gating, probe CC-03):
+#   - Each composed prompt LEADS with a `/goal` line carrying the completion
+#     checklist, so Claude Code hard-gates the session natively.
+#   - The session creates the runtime marker ops/.sprint-complete ONLY after
+#     the verification checklist passes (Phase 6 wrap).
+#   - This loop clears the marker at start and detects completion solely by
+#     the file's existence — headless-observable, no output parsing.
+#
 # Usage:
 #   ./scripts/coordinate.sh "Build the authentication module"
 #   ./scripts/coordinate.sh "Build auth" --max 5
 #   ./scripts/coordinate.sh "Build auth" --convergence deep
+#   ./scripts/coordinate.sh "Build auth" --dry-run
 #
 # Flags:
 #   --max N          Maximum iterations (default: 5)
 #   --convergence    Convergence mode: fast|standard|deep (default: standard)
 #   --team           Use agent team mode for Phase 2
+#   --dry-run        Print the composed session prompt and exit without
+#                    invoking claude (verification hook)
 
 set -euo pipefail
 
@@ -21,6 +32,7 @@ GOAL=""
 MAX_ITERATIONS=5
 CONVERGENCE="standard"
 USE_TEAM=""
+DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -36,6 +48,10 @@ while [[ $# -gt 0 ]]; do
       USE_TEAM="--team"
       shift
       ;;
+    --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
     *)
       if [ -z "$GOAL" ]; then
         GOAL="$1"
@@ -46,8 +62,51 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ -z "$GOAL" ]; then
-  echo "Usage: ./scripts/coordinate.sh \"goal description\" [--max N] [--convergence fast|standard|deep] [--team]"
+  echo "Usage: ./scripts/coordinate.sh \"goal description\" [--max N] [--convergence fast|standard|deep] [--team] [--dry-run]"
   exit 1
+fi
+
+SENTINEL="ops/.sprint-complete"
+
+# Compose the per-iteration session prompt. Sets $PROMPT.
+# $1 = iteration number.
+# The leading /goal line makes Claude Code hard-gate the session on the
+# completion checklist (a slash command can only be user-typed or the first
+# line of a -p prompt — which is exactly what this is).
+compose_prompt() {
+  PROMPT="/goal Sprint complete ONLY when ALL of: (1) every framework phase for the goal is done or explicitly skipped with a stated reason; (2) the verification-before-completion checklist passes with evidence; (3) ops/STATE.md is written for session handoff; (4) temporary review files are archived to ops/archive/; (5) the runtime marker ops/.sprint-complete exists — created LAST, only after conditions 1-4 hold.
+
+You are continuing a multi-agent sprint.
+
+GOAL: $GOAL
+CONVERGENCE MODE: $CONVERGENCE
+ITERATION: $1 of $MAX_ITERATIONS
+$USE_TEAM
+
+FIRST: Read ops/STATE.md to understand where the previous session left off.
+If this is iteration 1 and no STATE.md exists, start from Phase 0.
+
+Follow the Agent Triforge framework (docs/agent-triforge.md):
+- Phase 0: Codebase analysis (Antigravity) — skip if STATE.md shows Phase 0 complete
+- Phase 1: Planning — skip if TASKS.md already exists for this goal
+- Phase 1.5: Plan validation — run plan-checker agent
+- Phase 2: Build — use wave orchestration for complex builds
+- Phase 3: Parallel review — Antigravity + Codex + Claude subagent reviewers
+- Phase 4: Process reviews — use findings-synthesizer agent
+- Phase 5: Test — Codex writes and runs tests
+- Phase 6: Wrap up — compound knowledge, update STATE.md
+
+Before exiting, ALWAYS update ops/STATE.md with current progress.
+Completion signal: ONLY when the /goal checklist above is fully satisfied, create the empty runtime marker ops/.sprint-complete (touch ops/.sprint-complete) as your LAST action. NEVER create it early — the outer loop detects completion solely by this file's existence."
+}
+
+# Dry run: print the composed prompt (iteration 1) and exit. No claude
+# invocation, no sentinel mutation — placed before the CLI preflight because
+# nothing is executed.
+if [ "$DRY_RUN" = "true" ]; then
+  compose_prompt 1
+  printf '%s\n' "$PROMPT"
+  exit 0
 fi
 
 # Preflight: coordinate.sh drives Claude via `claude --print`. If the CLI is
@@ -85,45 +144,28 @@ echo "Max iterations: $MAX_ITERATIONS"
 echo "Convergence: $CONVERGENCE"
 echo ""
 
+# Fresh run: clear any stale completion marker (runtime file, gitignored)
+rm -f "$SENTINEL"
+
 while [ "$ITERATION" -lt "$MAX_ITERATIONS" ] && [ "$DONE" = "false" ]; do
   ITERATION=$((ITERATION + 1))
   echo "--- Iteration $ITERATION/$MAX_ITERATIONS ---"
 
-  # Build the prompt for Claude Code
-  PROMPT="You are continuing a multi-agent sprint.
+  compose_prompt "$ITERATION"
 
-GOAL: $GOAL
-CONVERGENCE MODE: $CONVERGENCE
-ITERATION: $ITERATION of $MAX_ITERATIONS
-$USE_TEAM
+  # Run Claude Code with the goal-gated prompt (tail shown for observability)
+  OUTPUT=$(claude --print --permission-mode acceptEdits "$PROMPT" 2>&1) || true
+  printf '%s\n' "$OUTPUT" | tail -n 20
 
-FIRST: Read ops/STATE.md to understand where the previous session left off.
-If this is iteration 1 and no STATE.md exists, start from Phase 0.
-
-Follow the Agent Triforge framework (docs/agent-triforge.md):
-- Phase 0: Codebase analysis (Antigravity) — skip if STATE.md shows Phase 0 complete
-- Phase 1: Planning — skip if TASKS.md already exists for this goal
-- Phase 1.5: Plan validation — run plan-checker agent
-- Phase 2: Build — use wave orchestration for complex builds
-- Phase 3: Parallel review — Antigravity + Codex + Claude subagent reviewers
-- Phase 4: Process reviews — use findings-synthesizer agent
-- Phase 5: Test — Codex writes and runs tests
-- Phase 6: Wrap up — compound knowledge, update STATE.md
-
-Before exiting, ALWAYS update ops/STATE.md with current progress.
-When ALL work is verified complete, emit: <promise>DONE</promise>"
-
-  # Run Claude Code with the prompt
-  OUTPUT=$(claude --print "$PROMPT" 2>&1) || true
-
-  # Check for completion signal
-  if echo "$OUTPUT" | grep -q '<promise>DONE</promise>'; then
+  # Completion check: headless-observable sentinel created by the session
+  # only after the verification checklist passes
+  if [ -f "$SENTINEL" ]; then
     DONE=true
     notify "Agent Triforge" "Sprint complete — converged in $ITERATION iterations"
     echo ""
-    echo "=== Sprint complete at iteration $ITERATION ==="
+    echo "=== Sprint complete at iteration $ITERATION ($SENTINEL present) ==="
   else
-    echo "Session ended without completion signal. Spawning fresh session..."
+    echo "Session ended without creating $SENTINEL. Spawning fresh session..."
     echo ""
   fi
 done

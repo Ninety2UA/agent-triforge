@@ -12,20 +12,17 @@ You are running a full multi-agent sprint cycle. Follow docs/agent-triforge.md t
 
 $ARGUMENTS
 
-## Activation
+## Completion gating
 
-Write the ship-loop state file to activate the inner loop guard:
+The sprint's completion condition is this checklist — ALL items must hold: every phase is done (or explicitly skipped with a stated reason); the `verification-before-completion` checklist passes with evidence; ops/STATE.md is written; review files are archived to ops/archive/; the runtime marker `ops/.sprint-complete` is created LAST.
+
+At sprint start, print this copyable line for the user (a command file cannot invoke `/goal` itself — it is user-typed or the leading line of a `claude -p` prompt, which is exactly how `scripts/coordinate.sh` composes its per-iteration prompt):
 
 ```
-Create .claude/ship-loop.local.md with:
----
-active: true
-iteration: 0
-max_iterations: 5
-completion_promise: "DONE"
----
-<the goal description from $ARGUMENTS>
+/goal Sprint complete ONLY when ALL of: every phase is done or explicitly skipped with a stated reason; the verification-before-completion checklist passes with evidence; ops/STATE.md is written; review files are archived to ops/archive/; ops/.sprint-complete is created last.
 ```
+
+Whether or not the user types it, hold yourself to that checklist as your completion condition. Create `ops/.sprint-complete` ONLY in Phase 6 after the checklist passes — never earlier. Outer tooling (`scripts/coordinate.sh`) detects sprint completion solely by that file's existence.
 
 ## Execute the full lifecycle
 
@@ -78,8 +75,7 @@ Spawn `test-gap-analyzer`. Invoke Codex with TDD skill. Fix failures until green
 - Archive review files to ops/archive/[today's date]/
 - Apply `verification-before-completion` skill
 - Write ops/STATE.md
-- Remove .claude/ship-loop.local.md
+- Only when the full completion-gating checklist passes: create the runtime marker `ops/.sprint-complete` (`touch ops/.sprint-complete`) as the LAST action
 - Sprint summary for user
 
-Only when ALL work is verified complete:
-<promise>DONE</promise>
+If any checklist item fails, do NOT create `ops/.sprint-complete` — document the blocker in ops/TASKS.md and ops/STATE.md instead.

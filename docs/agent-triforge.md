@@ -683,7 +683,7 @@ Phase 2:   Build — subagent mode OR agent team mode with wave orchestration
 Phase 3:   Parallel review — Antigravity + Codex + Claude specialized agents
 Phase 4:   Process reviews — findings-synthesizer agent, iterative-refinement skill
 Phase 5:   Test — Codex with TDD skill, test-gap-analyzer agent
-Phase 6:   Wrap up — knowledge compounding, session continuity, completion promise
+Phase 6:   Wrap up — knowledge compounding, session continuity, completion sentinel
 ```
 
 ### Phase 0: Invoke Antigravity for codebase analysis
@@ -889,10 +889,11 @@ The TDD methodology (RED-GREEN-REFACTOR), ops/ file protocol, and coverage targe
    - All critical/major issues resolved
    - CHANGELOG updated
    - MEMORY.md updated
-7. **Completion signal:** Only after ALL checks pass:
+7. **Completion signal:** Only after ALL checks pass, create the runtime marker as the LAST action:
+   ```bash
+   touch ops/.sprint-complete
    ```
-   <promise>DONE</promise>
-   ```
+   The marker is gitignored and never committed; `scripts/coordinate.sh` detects sprint completion solely by its existence.
 8. **Session continuity** (session-continuity skill):
    - If more work remains: write STATE.md with current progress and next actions
    - If sprint complete: write STATE.md as clean handoff for next sprint
@@ -902,36 +903,24 @@ The TDD methodology (RED-GREEN-REFACTOR), ops/ file protocol, and coverage targe
 
 ## Context management
 
-### Dual-loop context exhaustion recovery
+### Completion gating + context exhaustion recovery
 
-Two defense mechanisms prevent context exhaustion from killing a sprint:
+Two mechanisms keep a sprint honest and alive:
 
-#### Inner loop (Stop hook)
+#### Completion gating (native /goal + sentinel)
 
-The `ship-loop.sh` Stop hook prevents premature session exit during active sprints:
-- Blocks exit until `<promise>DONE</promise>` signal is emitted
-- Re-feeds the task prompt up to 5 iterations
-- Session-isolated (only blocks the session that started the loop)
-- State tracked in `.claude/ship-loop.local.md`
-
-To activate:
-```bash
-# Write the ship-loop state file to activate the inner loop
-cat > .claude/ship-loop.local.md << EOF
----
-iteration: 0
-max_iterations: 5
----
-[Sprint goal and context here]
-EOF
-```
+Sprint completion is gated by Claude Code's native `/goal` command (probe CC-03; this replaced the retired `ship-loop.sh` Stop hook and its `<promise>` convention):
+- `scripts/coordinate.sh` composes each session prompt with a leading `/goal` line carrying the completion checklist, so headless sessions are hard-gated natively
+- Interactive `/ship` and `/coordinate` print a copyable `/goal` line at sprint start (a command file cannot invoke `/goal` itself — it is user-typed or the leading line of a `claude -p` prompt) and hold Claude to the same checklist
+- The session creates the runtime marker `ops/.sprint-complete` ONLY after the verification checklist passes — the marker is gitignored and is the sole completion signal outer tooling reads
 
 #### Outer loop (coordinate script)
 
 The `scripts/coordinate.sh` script spawns fresh Claude Code sessions when context is truly exhausted:
 - Each iteration gets a clean context window
 - Progress tracked in ops/STATE.md
-- Supports flags: `--max N`, `--convergence`, `--team`
+- Completion detected via the `ops/.sprint-complete` sentinel (cleared at loop start, checked after each iteration — no output parsing)
+- Supports flags: `--max N`, `--convergence`, `--team`, `--dry-run` (print the composed prompt without invoking claude)
 
 ```bash
 # Full autonomous sprint with context recovery
@@ -1136,7 +1125,7 @@ YOU
 │ ├── TASKS.md: all tasks marked done                            │
 │ ├── Archive review files to ops/archive/[date]/                │
 │ ├── Verification checklist (all checks must pass)              │
-│ ├── Completion signal: <promise>DONE</promise>                 │
+│ ├── Completion marker: touch ops/.sprint-complete              │
 │ └── STATE.md: session handoff                                  │
 └───────────────────────────────────────────────────────────────┘
  │
@@ -1150,7 +1139,7 @@ YOU: Review summary, check CHANGELOG, approve or request changes
 
 ### Prerequisites
 
-- Claude Code installed and configured with your project template
+- Claude Code ≥ 2.1.212 installed and configured with your project template (floor: session caps/monitors line; `/goal`, dynamic workflows, and worktree isolation all landed earlier)
 - Antigravity CLI installed and authenticated
 - Codex CLI installed and authenticated
 - All three CLIs working in non-interactive mode:
@@ -1185,7 +1174,7 @@ agent-triforge/                     (plugin — installed automatically)
 ├── commands/                         16 slash commands
 ├── hooks/
 │   ├── hooks.json                    Hook registration
-│   └── handlers/                     5 lifecycle hook scripts
+│   └── handlers/                     4 lifecycle hook scripts
 ├── scripts/
 │   ├── coordinate.sh                 Outer loop for context recovery
 │   └── invoke-external.sh           Unified Antigravity/Codex invocation helper
@@ -1216,10 +1205,10 @@ Hook registration uses `${CLAUDE_PLUGIN_ROOT}` for plugin-relative paths:
 ```json
 {
   "hooks": {
-    "Stop": [
+    "SessionStart": [
       {
         "matcher": "",
-        "hooks": [{ "type": "command", "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/handlers/ship-loop.sh" }]
+        "hooks": [{ "type": "command", "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/handlers/session-start.sh" }]
       }
     ]
   }

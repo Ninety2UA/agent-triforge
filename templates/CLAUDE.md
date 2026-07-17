@@ -46,6 +46,7 @@ Claude invokes Antigravity and Codex through the unified helper `${CLAUDE_PLUGIN
 | `REVIEW_CODEX.md` | Codex's review output (temporary) | Codex writes, Claude reads |
 | `RESEARCH_ANTIGRAVITY.md` | Antigravity targeted-research output (temporary) | Antigravity writes, Claude reads |
 | `TEST_RESULTS.md` | Test results (temporary) | Codex writes, Claude reads |
+| `.sprint-complete` | Runtime completion marker — created only after the verification checklist passes; `scripts/coordinate.sh` detects sprint completion by its existence (gitignored, never committed) | Claude creates at Phase 6 wrap |
 
 ### Execution phases
 
@@ -58,7 +59,7 @@ Claude invokes Antigravity and Codex through the unified helper `${CLAUDE_PLUGIN
 3. **Parallel review** — Antigravity + Codex + Claude specialized agents simultaneously
 4. **Process reviews** — findings-synthesizer agent merges with confidence tiering
 5. **Test** — Codex with TDD skill, test-gap-analyzer identifies coverage gaps
-6. **Wrap up** — Knowledge compounding, verification checklist, completion promise, session continuity
+6. **Wrap up** — Knowledge compounding, verification checklist, completion sentinel (`ops/.sprint-complete`), session continuity
 
 ### Assignment heuristic
 
@@ -74,7 +75,7 @@ Claude invokes Antigravity and Codex through the unified helper `${CLAUDE_PLUGIN
 - Neither Antigravity nor Codex may modify source code; they only write to their designated `ops/` files
 - Maximum 3 review cycles per sprint before escalating to user
 - Risk scoring: halt subagent at risk >20% or file changes >50
-- Completion requires `<promise>DONE</promise>` after verification checklist passes
+- Completion requires creating the `ops/.sprint-complete` runtime marker, only after the verification checklist passes (never earlier)
 
 ### Quality gates
 
@@ -95,8 +96,8 @@ Claude invokes Antigravity and Codex through the unified helper `${CLAUDE_PLUGIN
 
 ## Context management
 
-- **Inner loop (ship-loop):** Stop hook blocks premature exit during sprints (max 5 iterations, waits for completion signal)
-- **Outer loop (`/coordinate`):** Spawns fresh sessions on context exhaustion with progress tracking
+- **Completion gating:** sprints are gated by a `/goal` checklist (`scripts/coordinate.sh` leads each session prompt with it; `/ship` and `/coordinate` print a copyable `/goal` line); completion is signaled by creating `ops/.sprint-complete` after the verification checklist passes
+- **Outer loop (`/coordinate`):** Spawns fresh sessions on context exhaustion with progress tracking; detects completion via the `ops/.sprint-complete` sentinel
 - **Analysis paralysis detection:** Warns at 8+ consecutive reads without writes
 - **Risk scoring:** Subagents halted at risk >20% or 50+ file changes
 

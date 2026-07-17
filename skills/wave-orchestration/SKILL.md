@@ -66,14 +66,25 @@ After all waves complete:
 
 ## Wave execution modes
 
-### Parallel mode (default, < 5 tasks per wave)
+### Subagent mode (default, < 5 tasks per wave)
 
 Each task dispatched as an independent parallel executor:
 - Lighter weight, same session
 - Results returned directly
 - Good for focused, independent tasks
 
-### Team mode (complex, 5+ tasks or cross-dependent)
+### Dynamic workflow mode (5+ tasks or cross-dependent)
+
+For 5+-task waves, author the wave as a native Claude Code dynamic workflow (`ultracode:` prefix) instead of hand-dispatching each subagent. The dependency-grouping process above (Steps 1–2) IS the workflow-authoring method — the wave plan translates directly:
+
+- **Stages:** each wave becomes a workflow stage — tasks within a wave run as a `parallel` group; waves chain as a `pipeline` in dependency order
+- **Integration verification:** the between-wave verify (Step 3.3) runs as its own stage between parallel groups; external-CLI steps (Antigravity/Codex via `invoke_antigravity`/`invoke_codex`) dispatch as workflow steps like any other
+- **Mid-run requeue:** a failed task re-enters its stage via a workflow loop with the reflection questions (Step 3.5) prepended, instead of aborting the run
+- **Pinned reviewer:** give the continuous reviewer a fixed label so review work routes to the same instance across stages (1:3–4 ratio with builders)
+
+Capability basis: probe CC-04 in `ops/research/2026-07-probe-record.md` (PASS, expressibility) — dynamic workflows on Claude Code ≥ 2.1.212 can express external-CLI dispatch + requeue + pinned review. The live dogfooded wave lands with the builder-pool wave unit.
+
+### Team mode (experimental alternative for cross-dependent builds)
 
 > **Note:** Team mode requires Claude Code's experimental Agent Teams feature (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"`). This mode is Claude-specific and not available when this skill is injected into Antigravity or Codex.
 

@@ -1,6 +1,6 @@
 ---
 name: verification-before-completion
-description: "Evidence-based completion verification checklist with pass/fail status per item. Primary consumer: every agent at task completion. Triggers: before emitting `<promise>DONE</promise>`, before moving a task to Done in TASKS.md, before tagging a sprint complete in Phase 6 wrap-up."
+description: "Evidence-based completion verification checklist with pass/fail status per item. Primary consumer: every agent at task completion. Triggers: before creating the `ops/.sprint-complete` completion marker, before moving a task to Done in TASKS.md, before tagging a sprint complete in Phase 6 wrap-up."
 ---
 
 # Verification Before Completion
@@ -42,18 +42,23 @@ Before marking ANY task as done, verify:
 ## Output
 
 Produce a completed checklist with pass/fail status for each item, plus:
-- `<promise>DONE</promise>` if all checks pass
+- The completion signal for your scope (below) if all checks pass
 - Blocker documentation in TASKS.md if any check fails
 
 ## Completion signal
 
-Only after ALL checks pass, emit the completion signal:
+Only after ALL checks pass:
 
-```
-<promise>DONE</promise>
-```
+- **Task scope:** mark the task Done in TASKS.md with a result summary.
+- **Sprint scope (Phase 6 wrap):** create the runtime marker as the LAST action:
 
-This signal means: "I have verified that all work is complete and all checks pass." It is not a summary — it is a commitment.
+  ```bash
+  touch ops/.sprint-complete
+  ```
+
+  Outer tooling (`scripts/coordinate.sh`) detects sprint completion solely by this gitignored file's existence.
+
+The signal means: "I have verified that all work is complete and all checks pass." It is not a summary — it is a commitment.
 
 ## What to do when checks fail
 

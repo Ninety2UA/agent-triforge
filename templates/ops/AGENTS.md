@@ -35,6 +35,7 @@ Available native agents live in the plugin at `antigravity-agents/agents/` and `
 - If you discover a conflict with another agent's work, log it in TASKS.md
 - All code must conform to type definitions in CONTRACTS.md
 - Attribution is mandatory on every change
+- Never create or touch `ops/.sprint-complete` — it is the lead agent's runtime sprint-completion marker (gitignored), created only at Phase 6 wrap after the verification checklist passes
 
 ## Project-specific rules
 

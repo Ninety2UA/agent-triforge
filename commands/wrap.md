@@ -70,5 +70,10 @@ Rules:
 
 ## Completion
 
-Only when ALL work is verified complete and STATE.md is written:
-<promise>DONE</promise>
+Only when ALL work is verified complete and STATE.md is written, create the runtime completion marker as the LAST action:
+
+```bash
+touch ops/.sprint-complete
+```
+
+This gitignored marker is how outer tooling (`scripts/coordinate.sh`) detects sprint completion. If any verification item failed, do NOT create it — document the blocker instead.
