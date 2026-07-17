@@ -91,6 +91,15 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.co
   [ ! -f ".codex/config.toml" ] && cp "${CLAUDE_PLUGIN_ROOT}/templates/.codex/config.toml" ".codex/config.toml"
 fi
 
+# Bootstrap .codex/hooks.json (CHANGELOG attribution enforced under
+# `codex exec` — probe CDX-04 PASS on 0.144.4; invoke-external.sh passes
+# --dangerously-bypass-hook-trust when this file is present. See
+# templates/.codex/README.md and ops/decisions/2026-07-18-codex-hooks-under-exec.md).
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json" ]; then
+  mkdir -p .codex
+  [ ! -f ".codex/hooks.json" ] && cp "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json" ".codex/hooks.json"
+fi
+
 # Suggest CLAUDE.md template if not present (either supported location)
 if [ ! -f "CLAUDE.md" ] && [ ! -f ".claude/CLAUDE.md" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.md" ]; then
   CLAUDE_MD_TIP="\nTip: No CLAUDE.md found. Copy the template: cp \"${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.md\" ./CLAUDE.md"

@@ -310,7 +310,8 @@ claude --version
 # Antigravity CLI — https://antigravity.google/cli (run `agy` once interactively to log in)
 agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"   # always pin the model — agy defaults to a Flash variant
 
-# Codex CLI — https://github.com/openai/codex
+# Codex CLI ≥ 0.144.0 — https://github.com/openai/codex
+# (--output-schema, features list; hooks-under-exec verified on 0.144.4, tested 2026-07-17)
 codex exec "Respond with only: READY"
 
 # Python 3 (used by hook handlers for JSON parsing)

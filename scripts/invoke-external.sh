@@ -13,9 +13,9 @@
 #   invoke_antigravity <agent-name> <prompt> [output-file] [timeout-seconds]
 #   invoke_codex       <agent-name> <prompt> [output-file] [timeout-seconds]
 #
-# Failure taxonomy (KTD-9): invoke_antigravity classifies failures instead of
-# blindly retrying, and exposes the class via INVOKE_FAILURE_CLASS:
-#   deterministic — retry cannot help (agy binary missing, not logged in,
+# Failure taxonomy (KTD-9): both helpers classify failures instead of
+# blindly retrying, and expose the class via INVOKE_FAILURE_CLASS:
+#   deterministic — retry cannot help (CLI binary missing, not logged in,
 #                   timeout tool missing); fails fast with fix guidance and
 #                   does NOT burn a second timeout window
 #   timeout       — the timeout wrapper killed the run (exit 124/137);
@@ -26,6 +26,11 @@
 #   none          — invocation succeeded
 # The variable is only visible on synchronous calls in the same shell —
 # background invocations (`invoke_antigravity ... &`) cannot export it back.
+#
+# Codex feature detection: capability decisions for the Codex lane (hooks,
+# structured output) come from `codex features list` at runtime — cached once
+# per session by _codex_feature_enabled — never from version-string reasoning
+# (probe CDX-02, 2026-07-17).
 #
 # Timeout enforcement is fail-closed: when neither `timeout` nor `gtimeout`
 # is on PATH, the helpers refuse to run at all rather than silently running
@@ -178,6 +183,17 @@ invoke_codex() {
   local TIMEOUT=${4:-600}
   local EXIT_CODE=0
 
+  INVOKE_FAILURE_CLASS="none"
+
+  # Deterministic preflight (KTD-9), mirroring invoke_antigravity: a missing
+  # binary can never succeed on retry — fail fast with the exact fix instead
+  # of burning a timeout window.
+  if ! command -v codex >/dev/null 2>&1; then
+    echo "invoke_codex: ERROR \`codex\` (Codex CLI) not found on PATH — cannot invoke agent '${AGENT_NAME}'. Fix: install it (npm install -g @openai/codex or brew install codex), then run \`codex login\`. No retry (deterministic)." >&2
+    INVOKE_FAILURE_CLASS="deterministic"
+    return 127
+  fi
+
   local AGENT_TOML=""
   if [ -f ".codex/agents/agents.toml" ]; then
     AGENT_TOML=".codex/agents/agents.toml"
@@ -185,7 +201,7 @@ invoke_codex() {
     AGENT_TOML="${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml"
   fi
 
-  local AGENT_MODEL="" AGENT_SANDBOX="" AGENT_APPROVAL="" AGENT_INSTR_B64=""
+  local AGENT_MODEL="" AGENT_SANDBOX="" AGENT_APPROVAL="" AGENT_INSTR_B64="" AGENT_OUTPUT_SCHEMA=""
   if [ -n "$AGENT_TOML" ]; then
     local CONFIG_SH
     CONFIG_SH=$(_extract_codex_agent_config "$AGENT_TOML" "$AGENT_NAME") || CONFIG_SH=""
@@ -223,6 +239,59 @@ invoke_codex() {
     CMD+=(-c "approval_policy=\"never\"")
   fi
 
+  # Hooks trust (probe CDX-04, ADR 2026-07-18-codex-hooks-under-exec): hooks
+  # fire under `codex exec` when (a) the project ships .codex/hooks.json and
+  # (b) --dangerously-bypass-hook-trust is passed — codex does not persist
+  # project trust for arbitrary dirs, and the flag is the documented
+  # automation path (0.131.0+). Triforge ships and vets these hooks itself
+  # (trusted-pipeline posture, same rationale as approval_policy="never" —
+  # see the security model in .claude/CLAUDE.md), so bypassing the
+  # interactive trust prompt does not widen what the pipeline already accepts.
+  local HOOKS_MODE="off"
+  if [ -f ".codex/hooks.json" ] && _codex_feature_enabled hooks; then
+    CMD+=(--dangerously-bypass-hook-trust)
+    HOOKS_MODE="on"
+  fi
+
+  # Structured output (probe CDX-05): when the agent's agents.toml entry
+  # carries the Triforge-level `output_schema` key, resolve the schema file
+  # (project .codex/agents/ first, then the plugin's codex-agents/) and pass
+  # --output-schema plus -o so the schema-valid final message lands in
+  # ${OUTPUT_FILE}.last. Feature-gated only if `codex features list` carries
+  # a row named like output_schema/structured_output; 0.144.4 has no such
+  # row and CDX-05 proves the flag works there, so absent a row we just
+  # attempt the flag.
+  local SCHEMA_PATH="" SCHEMA_APPLIED=0
+  if [ -n "$AGENT_OUTPUT_SCHEMA" ]; then
+    local SCHEMA_GATE=1
+    if _codex_feature_row_present output_schema || _codex_feature_row_present structured_output; then
+      if ! _codex_feature_enabled output_schema && ! _codex_feature_enabled structured_output; then
+        SCHEMA_GATE=0
+        echo "invoke_codex: WARNING agent '${AGENT_NAME}' requests output_schema but codex features list reports the capability disabled — running without --output-schema" >&2
+      fi
+    fi
+    if [ "$SCHEMA_GATE" -eq 1 ]; then
+      if [ -f ".codex/agents/${AGENT_OUTPUT_SCHEMA}" ]; then
+        SCHEMA_PATH=".codex/agents/${AGENT_OUTPUT_SCHEMA}"
+      elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/codex-agents/${AGENT_OUTPUT_SCHEMA}" ]; then
+        SCHEMA_PATH="${CLAUDE_PLUGIN_ROOT}/codex-agents/${AGENT_OUTPUT_SCHEMA}"
+      else
+        echo "invoke_codex: WARNING agent '${AGENT_NAME}' requests output_schema '${AGENT_OUTPUT_SCHEMA}' but no such file in .codex/agents/ or plugin codex-agents/ — running without --output-schema" >&2
+      fi
+    fi
+  fi
+
+  # BASE_CMD carries everything retry-safe (model pin, sandbox, approval,
+  # hooks). Schema flags are first-attempt only: a schema-caused rejection
+  # (e.g. 400 invalid_json_schema) would fail identically on retry, so the
+  # retry drops agent augmentation — instructions prefix AND schema —
+  # mirroring invoke_antigravity's retry-with-raw-prompt.
+  local BASE_CMD=("${CMD[@]}")
+  if [ -n "$SCHEMA_PATH" ]; then
+    CMD+=(--output-schema "$SCHEMA_PATH" -o "${OUTPUT_FILE}.last")
+    SCHEMA_APPLIED=1
+  fi
+
   local FULL_PROMPT="$PROMPT"
   if [ -n "$INSTRUCTIONS" ]; then
     FULL_PROMPT="${INSTRUCTIONS}
@@ -231,20 +300,67 @@ invoke_codex() {
 ${PROMPT}"
   fi
 
-  echo "invoke_codex: agent=${AGENT_NAME} model=${AGENT_MODEL:-session-default} sandbox=${AGENT_SANDBOX:-session-default} approval=${AGENT_APPROVAL:-session-default}" >&2
+  echo "invoke_codex: agent=${AGENT_NAME} model=${AGENT_MODEL:-session-default} sandbox=${AGENT_SANDBOX:-session-default} approval=${AGENT_APPROVAL:-session-default} hooks=${HOOKS_MODE} schema=${SCHEMA_PATH:-none}" >&2
 
-  _run_with_timeout "${TIMEOUT}" "${CMD[@]}" "$FULL_PROMPT" > "$OUTPUT_FILE" 2>&1 || EXIT_CODE=$?
+  # `< /dev/null` is mandatory: codex exec reads piped stdin ("Reading
+  # additional input from stdin...") and hangs waiting for EOF whenever the
+  # caller's stdin is not a TTY (probe record 2026-07-17).
+  _run_with_timeout "${TIMEOUT}" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUTPUT_FILE" 2>&1 || EXIT_CODE=$?
 
-  # Retry once with raw prompt on failure (mirrors invoke_antigravity's
-  # retryable path; taxonomy wiring for this lane lands with the pool work).
+  # KTD-9: same taxonomy as invoke_antigravity — classify before reacting;
+  # only retryable failures get the retry-once-with-raw-prompt treatment.
   if [ "$EXIT_CODE" -ne 0 ]; then
-    echo "invoke_codex: agent=${AGENT_NAME} exit=${EXIT_CODE}, retrying with raw prompt" >&2
-    EXIT_CODE=0
-    _run_with_timeout "${TIMEOUT}" "${CMD[@]}" "$PROMPT" > "${OUTPUT_FILE}.retry" 2>&1 || EXIT_CODE=$?
-    if [ "$EXIT_CODE" -eq 0 ]; then
-      mv "${OUTPUT_FILE}.retry" "$OUTPUT_FILE"
+    _classify_invoke_failure "$EXIT_CODE" "$OUTPUT_FILE"
+    case "$INVOKE_FAILURE_CLASS" in
+      deterministic)
+        case "$_INVOKE_FAILURE_REASON" in
+          auth)
+            echo "invoke_codex: agent=${AGENT_NAME} exit=${EXIT_CODE} auth failure — codex is not logged in (output matched a credential/login pattern). Fix: run \`codex login\`. No retry (deterministic)." >&2
+            ;;
+          binary-missing)
+            echo "invoke_codex: agent=${AGENT_NAME} exit=${EXIT_CODE} — \`codex\` disappeared from PATH mid-run. Fix: install it (npm install -g @openai/codex or brew install codex), then run \`codex login\`. No retry (deterministic)." >&2
+            ;;
+          *)
+            echo "invoke_codex: agent=${AGENT_NAME} exit=${EXIT_CODE} deterministic failure (${_INVOKE_FAILURE_REASON:-see error above}). No retry." >&2
+            ;;
+        esac
+        return "$EXIT_CODE"
+        ;;
+      timeout)
+        echo "invoke_codex: agent=${AGENT_NAME} timed out after ${TIMEOUT}s (exit=${EXIT_CODE}). Requeue policy belongs to the caller (lease layer), not this helper." >&2
+        return "$EXIT_CODE"
+        ;;
+      retryable)
+        echo "invoke_codex: agent=${AGENT_NAME} exit=${EXIT_CODE} (retryable), retrying with raw prompt" >&2
+        EXIT_CODE=0
+        SCHEMA_APPLIED=0
+        _run_with_timeout "${TIMEOUT}" "${BASE_CMD[@]}" "$PROMPT" < /dev/null > "${OUTPUT_FILE}.retry" 2>&1 || EXIT_CODE=$?
+        if [ "$EXIT_CODE" -eq 0 ]; then
+          mv "${OUTPUT_FILE}.retry" "$OUTPUT_FILE"
+          INVOKE_FAILURE_CLASS="none"
+        else
+          _classify_invoke_failure "$EXIT_CODE" "${OUTPUT_FILE}.retry"
+          echo "invoke_codex: agent=${AGENT_NAME} retry also failed, exit=${EXIT_CODE} class=${INVOKE_FAILURE_CLASS}" >&2
+        fi
+        ;;
+    esac
+  fi
+
+  # Structured-verdict capture: validate the schema-constrained last message
+  # as JSON; valid → pretty-printed to ${OUTPUT_FILE}.verdict.json, invalid →
+  # warn and leave the raw output as the source of truth.
+  if [ "$EXIT_CODE" -eq 0 ] && [ "$SCHEMA_APPLIED" -eq 1 ]; then
+    if [ -f "${OUTPUT_FILE}.last" ] && VERDICT_IN="${OUTPUT_FILE}.last" VERDICT_OUT="${OUTPUT_FILE}.verdict.json" python3 -c "
+import json, os
+with open(os.environ['VERDICT_IN']) as f:
+    data = json.load(f)
+with open(os.environ['VERDICT_OUT'], 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\\n')
+" 2>/dev/null; then
+      echo "invoke_codex: structured verdict captured (${OUTPUT_FILE}.verdict.json)" >&2
     else
-      echo "invoke_codex: agent=${AGENT_NAME} retry also failed, exit=${EXIT_CODE}" >&2
+      echo "invoke_codex: WARNING --output-schema was passed but ${OUTPUT_FILE}.last is missing or not valid JSON — raw output ${OUTPUT_FILE} stays the source of truth" >&2
     fi
   fi
 
@@ -331,12 +447,48 @@ _list_antigravity_agents() {
   } | sort -u
 }
 
+# --- Codex runtime feature detection (probe CDX-02) -----------------------
+# `codex features list` emits rows like:
+#   hooks                                stable             true
+# Capability decisions come from this matrix at runtime — never from
+# version-string reasoning. The listing runs ONCE per session: the first call
+# caches it (keyed on $$, which bash keeps at the original shell's PID even
+# in background subshells) and later calls grep the cache.
+
+_CODEX_FEATURES_CACHE="${TMPDIR:-/tmp}/codex_features_$$.txt"
+
+# Populate the cache on first use. Tolerant: a missing binary returns 1
+# (features treated as absent); a failed listing leaves an empty cache file
+# so the (slow) listing is still attempted only once per session.
+_codex_features_cache_fill() {
+  [ -f "$_CODEX_FEATURES_CACHE" ] && return 0
+  command -v codex >/dev/null 2>&1 || return 1
+  _run_with_timeout 20 codex features list > "$_CODEX_FEATURES_CACHE" 2>/dev/null || true
+}
+
+# True (0) when the named feature row exists AND its enabled column is `true`.
+_codex_feature_enabled() {
+  local FLAG=$1
+  _codex_features_cache_fill || return 1
+  grep -E "^${FLAG}[[:space:]]" "$_CODEX_FEATURES_CACHE" 2>/dev/null | grep -qE "[[:space:]]true[[:space:]]*$"
+}
+
+# True (0) when a row for the named feature exists at all (any stage/state).
+# Lets callers distinguish "feature explicitly disabled" from "feature not in
+# the matrix" (in which case flags are attempted rather than gated).
+_codex_feature_row_present() {
+  local FLAG=$1
+  _codex_features_cache_fill || return 1
+  grep -qE "^${FLAG}[[:space:]]" "$_CODEX_FEATURES_CACHE" 2>/dev/null
+}
+
 # Emit bash variable assignments extracted from a Codex agents.toml entry.
 # Outputs:
 #   AGENT_MODEL=<string>
 #   AGENT_SANDBOX=<string>
 #   AGENT_APPROVAL=<string>
 #   AGENT_INSTR_B64=<base64 string>
+#   AGENT_OUTPUT_SCHEMA=<string>   (Triforge-level key; schema file name)
 # Missing fields emit empty values. Fails loudly (exit 1 + stderr warning) if
 # python or a TOML parser is unavailable, so callers can detect the condition
 # and log it rather than silently running with session defaults.
@@ -362,6 +514,7 @@ print('AGENT_MODEL='    + json.dumps(agent.get('model', '')))
 print('AGENT_SANDBOX='  + json.dumps(agent.get('sandbox_mode', '')))
 print('AGENT_APPROVAL=' + json.dumps(agent.get('approval_policy', '')))
 print('AGENT_INSTR_B64=' + json.dumps(instr_b64))
+print('AGENT_OUTPUT_SCHEMA=' + json.dumps(agent.get('output_schema', '')))
 "
 }
 

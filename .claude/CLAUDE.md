@@ -147,6 +147,7 @@ antigravity-agents/       # Antigravity CLI agent pack (valid agy plugin)
     documentation-writer.md   Documentation specialist
 codex-agents/             # Codex CLI native agent definitions
   agents.toml               logic_reviewer, test_writer, debugger
+  review-verdict.schema.json Structured review verdict (--output-schema, logic_reviewer)
 skills/                   # 12 portable skill files (all agents consume)
 commands/                 # 16 slash commands
 hooks/
@@ -160,6 +161,8 @@ templates/                # Project bootstrapping templates
   ops/                      Skeleton ops/ files
   .antigravity/settings.json Antigravity workspace settings (permission deny rules)
   .codex/config.toml        Codex project config (disables Codex's auto-memory pipeline)
+  .codex/hooks.json         Codex PostToolUse hook (CHANGELOG attribution under codex exec)
+  .codex/README.md          What the hook enforces, why bypass-trust, how to disable
 scripts/
   coordinate.sh           # Outer loop for context exhaustion recovery
   invoke-external.sh      # Unified Antigravity/Codex invocation with feature detection
@@ -276,14 +279,14 @@ brew install coreutils
 
 ## Compatibility
 
-Tested against **Codex 0.130.0** (2026-05-12) and **Antigravity CLI (agy) 1.1.3** (2026-07-17).
+Tested against **Codex 0.144.4** (2026-07-17) and **Antigravity CLI (agy) 1.1.3** (2026-07-17).
 
 **Minimum supported versions:**
-- **Codex ≥ 0.128.0** — first version after `--full-auto` was removed. Earlier versions still work but `scripts/invoke-external.sh` now passes `-s workspace-write -c approval_policy="never"` explicitly instead of relying on the removed shorthand.
+- **Codex ≥ 0.144.0** — `--output-schema` (structured review verdicts), `codex features list` (runtime capability detection); hooks-under-exec verified on 0.144.4. Older versions degrade: `invoke_codex` still runs, but hook enforcement and structured verdicts silently fall back to raw output.
 - **Gemini CLI floor removed** — the Gemini lane was replaced by Antigravity (agy ≥ 1.1.3, tested 1.1.3 2026-07-17); legacy Gemini users pin plugin v2.4.3.
 
 **Known-fails / partial support:**
-- Codex hooks (`PreToolUse`, `PostToolUse`, `SessionStart`, `Stop`, `UserPromptSubmit`, `PermissionRequest`) **do not fire under `codex exec`** in v0.130.0 even with a trusted workspace and `[features] codex_hooks` enabled — confirmed by probe on 2026-05-12. The `CodexHooks` feature is active in the feature list but only fires in interactive TUI mode at present. Triforge does not auto-enable Codex hooks for this reason; if upstream extends hooks to `codex exec`, revisit `ops/decisions/2026-05-12-cli-deprecation-watch.md`.
+- Codex hooks **fire under `codex exec`** as of 0.144.4 (D-004 reversed — probe CDX-04, 2026-07-17: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop` all fired), but only with all three preconditions: nested `hooks.json` shape, project-tier `.codex/hooks.json`, and `--dangerously-bypass-hook-trust` (project trust is not persisted for arbitrary dirs; the flag is the documented automation path, and `invoke_codex` passes it only when the project ships `.codex/hooks.json` and `codex features list` reports `hooks` enabled). See `ops/decisions/2026-07-18-codex-hooks-under-exec.md`.
 - Antigravity plugin agents are **not surfaced in headless mode** on agy 1.1.3 (`agy agents` stays empty and `--agent` silently ignores unknown names), so `invoke_antigravity` runs in injection mode; project-tier hooks and project-tier permission allow-rules also do not take effect under `agy -p` (probed 2026-07-17) — the `/review` and `/deep-research` commands compensate by promoting captured output into `ops/` when the agent could not write there directly.
 
 ### Release checklist

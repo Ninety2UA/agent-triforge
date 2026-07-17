@@ -1,0 +1,53 @@
+{
+  "type": "object",
+  "description": "Structured review verdict for logic_reviewer (passed via codex exec --output-schema). Vocabulary matches agents/findings-synthesizer.md: confidence tiers HIGH/MEDIUM/LOW, priority ranks P1/P2/P3. OpenAI strict rules: every property listed in required, additionalProperties false, at every level.",
+  "properties": {
+    "findings": {
+      "type": "array",
+      "description": "All findings. Empty array when the review found nothing to flag.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["P1", "P2", "P3"],
+            "description": "P1 critical (blocks ship), P2 important (fix this cycle), P3 suggestion (log for later)."
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["HIGH", "MEDIUM", "LOW"],
+            "description": "HIGH verified by code evidence, MEDIUM pattern match, LOW heuristic. LOW confidence can NEVER be P1."
+          },
+          "file": {
+            "type": "string",
+            "description": "Repository-relative path of the file the finding is in."
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-indexed line the finding anchors to (0 if not line-specific)."
+          },
+          "summary": {
+            "type": "string",
+            "description": "One-sentence statement of the defect."
+          },
+          "detail": {
+            "type": "string",
+            "description": "Issue description, evidence, and a specific fix recommendation."
+          }
+        },
+        "required": ["severity", "confidence", "file", "line", "summary", "detail"],
+        "additionalProperties": false
+      }
+    },
+    "summary": {
+      "type": "string",
+      "description": "1-2 sentence overall assessment of the reviewed code."
+    },
+    "review_scope": {
+      "type": "string",
+      "description": "What was reviewed (files, diff range, or scope statement from the prompt)."
+    }
+  },
+  "required": ["findings", "summary", "review_scope"],
+  "additionalProperties": false
+}
