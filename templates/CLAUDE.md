@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code when working with code in this project. It works with the **Agent Triforge** plugin.
 
-> **Note**: This is the simplified per-project version of the framework's documentation. For the full architecture, security model, agent invocation patterns, version compatibility, and reliability patterns, see the canonical `CLAUDE.md` at the Agent Triforge plugin root.
+> **Note**: This is the simplified per-project version of the framework's documentation. For the full architecture, security model, agent invocation patterns, version compatibility, and reliability patterns, see the canonical `.claude/CLAUDE.md` in the Agent Triforge plugin repo.
 
 ## Project overview
 
@@ -12,11 +12,15 @@ This project uses the multi-agent coordination framework where Claude Code serve
 
 ### Multi-agent system
 
-- **Claude Code (Opus)** — lead agent: plans work, builds features, coordinates all agents, merges review feedback
-- **Claude specialized agents (Opus max effort)** — 19 focused subagents provided by the plugin: plan validation, review synthesis, security, performance, continuous review, etc. Lead/team-lead may step narrow tasks down the runtime ladder one tier at a time: `opus`+`max` → `opus`+`xhigh` → `opus`+`high` → `sonnet`+`high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
+- **Claude Code (lead)** — plans work, builds features, coordinates all agents, merges review feedback. Runs Fable 5 at `max` effort when the host has it; otherwise latest Opus at `max`
+- **Claude specialized agents** — 19 focused subagents provided by the plugin: plan validation, review synthesis, security, performance, continuous review, etc. Shipped frontmatter floors at `opus`: team-lead and the never-downgrade trio (security-sentinel, plan-checker, findings-synthesizer) ship `effort: max`; the other 15 ship `effort: xhigh`. When the plugin's capability probe record shows Fable 5 PASS on the host (row CC-02), the lead spawns team-lead and the trio with a model override to `fable` (the Agent tool's `model` parameter)
 - **Claude agent teams** — multi-instance collaboration for complex builds (5+ interdependent tasks)
 - **Antigravity CLI (`agy`)** — analyst + reviewer: Phase 0 codebase scans (Gemini 3.1 Pro (High), 1M token context), architecture reviews, documentation
 - **Codex CLI** — tester + logic reviewer: writes/runs tests, security audits, infrastructure tasks
+
+For narrow, rubric-following runtime tasks the lead/team-lead may step down one tier at a time:
+
+Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (4.8) + `xhigh` → `opus`+`high` → `sonnet` (5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
 
 Claude invokes Antigravity and Codex through the unified helper `${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh` (which handles model pinning, fail-closed timeout enforcement, failure classification, and native-agent routing with a prompt-prefix injection fallback). Reviews run in parallel (Antigravity + Codex + Claude subagents simultaneously), never sequentially.
 

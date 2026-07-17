@@ -10,7 +10,7 @@ tools:
   - WebFetch
   - WebSearch
 model: opus
-effort: max
+effort: xhigh
 maxTurns: 10
 ---
 

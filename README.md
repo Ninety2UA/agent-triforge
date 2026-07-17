@@ -1038,7 +1038,7 @@ MIT
 
 <p align="center">
   <a href="docs/agent-triforge.md">Full Documentation</a> ·
-  <a href="CLAUDE.md">CLAUDE.md</a> ·
+  <a href=".claude/CLAUDE.md">CLAUDE.md</a> ·
   <a href="https://antigravity.google/cli">Antigravity CLI</a> ·
   <a href="https://github.com/openai/codex">Codex CLI</a>
 </p>

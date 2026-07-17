@@ -12,11 +12,16 @@ Install: `claude plugin add https://github.com/Ninety2UA/agent-triforge`
 
 ### Multi-agent system
 
-- **Claude Code (Opus max effort)** — lead agent: plans work, builds features, coordinates all agents, merges review feedback
-- **Claude specialized agents (Opus max effort)** — 19 focused subagents (`agents/`): plan validation, review synthesis, security, performance, etc. Lead/team-lead may step narrow tasks down the runtime ladder one tier at a time: `opus`+`max` → `opus`+`xhigh` → `opus`+`high` → `sonnet`+`high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
-- **Claude agent teams (Opus max effort)** — multi-instance collaboration for complex builds (5+ interdependent tasks)
+- **Claude Code (lead)** — plans work, builds features, coordinates all agents, merges review feedback. Runs Fable 5 at `max` effort when the host has it; otherwise latest Opus at `max`
+- **Claude specialized agents** — 19 focused subagents (`agents/`): plan validation, review synthesis, security, performance, etc. Shipped frontmatter floors at `opus` — no shipped file names a model a host may lack: team-lead and the never-downgrade trio (security-sentinel, plan-checker, findings-synthesizer) ship `model: opus`, `effort: max`; the other 15 ship `model: opus`, `effort: xhigh`
+- **Spawn-time Fable override** — when the current probe record (`ops/research/2026-07-probe-record.md`, row CC-02) shows Fable 5 PASS on the host, the lead spawns team-lead and the never-downgrade trio with a model override to `fable` (the Agent tool's `model` parameter)
+- **Claude agent teams** — multi-instance collaboration for complex builds (5+ interdependent tasks)
 - **Antigravity CLI (`agy`)** — analyst + reviewer: Phase 0 codebase scans (Gemini 3.1 Pro (High), 1M token context), architecture reviews, documentation
 - **Codex CLI** — tester + logic reviewer: writes/runs tests, security audits, infrastructure tasks
+
+For narrow, rubric-following runtime tasks the lead/team-lead may step down one tier at a time:
+
+Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (4.8) + `xhigh` → `opus`+`high` → `sonnet` (5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
 
 Claude invokes Antigravity via `invoke_antigravity` and Codex via `invoke_codex` (from `scripts/invoke-external.sh`) as background bash processes. Skills are embedded in native agent definitions (`antigravity-agents/agents/`, `codex-agents/`); the helper falls back to prompt-prefix injection when native agent routing isn't available. Reviews run in parallel (Antigravity + Codex + Claude subagents simultaneously), never sequentially.
 
@@ -75,13 +80,15 @@ The full lifecycle for a goal:
 
 ### Agent frontmatter fields
 
-Agent definitions in `agents/*.md` support these YAML frontmatter fields:
+Agent definitions in `agents/*.md` support these YAML frontmatter fields (verified against the official docs 2026-07-17):
 - `name`, `description` (required) — identity and when-to-use trigger
-- `model` — `opus`, `sonnet`, `haiku`, or full model ID. Default: `opus`
-- `effort` — `low`, `medium`, `high`, `xhigh`, `max` (max is Opus-only). Default: `max`
-- `tools` — list of allowed tools (Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, etc.)
+- `model` — `fable`, `opus`, `sonnet`, `haiku`, a full model ID, or `inherit`. Shipped Triforge agents floor at `opus`; the lead applies the spawn-time `fable` override (see the ladder above)
+- `effort` — `low`, `medium`, `high`, `xhigh`, `max` (`max` supported on Fable 5, Sonnet 5, and Opus 4.8/4.7)
+- `tools` — allowlist of tools (Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, etc.); `disallowedTools` is the deny-side counterpart
 - `maxTurns` — maximum agentic turns before the agent stops
-- Other: `skills`, `mcpServers`, `hooks`, `memory`, `background`, `isolation`, `color`, `permissionMode`
+- `initialPrompt` — new: auto-submitted first turn when the agent runs as the main session via `--agent`
+- Other top-level fields: `skills`, `memory`, `background`, `isolation` (accepts only `"worktree"`), `color`
+- **Plugin restriction:** plugin-shipped agents do not support `permissionMode`, `hooks`, or `mcpServers` (security restriction — those three apply only to user- and project-level agent files); no Triforge agent carries them
 
 Antigravity and Codex agent files use their CLIs' own conventions: Antigravity (`antigravity-agents/agents/*.md`) uses `max_turns`/`timeout_mins` plus display-name model IDs (`"Gemini 3.1 Pro (High)"`) and lowercase tool names (`read_file`, `run_shell_command`); Codex (`codex-agents/agents.toml`) uses `model_reasoning_effort`, `sandbox_mode`, `approval_policy`, and `include_plan_tool`.
 
@@ -278,3 +285,10 @@ Tested against **Codex 0.130.0** (2026-05-12) and **Antigravity CLI (agy) 1.1.3*
 **Known-fails / partial support:**
 - Codex hooks (`PreToolUse`, `PostToolUse`, `SessionStart`, `Stop`, `UserPromptSubmit`, `PermissionRequest`) **do not fire under `codex exec`** in v0.130.0 even with a trusted workspace and `[features] codex_hooks` enabled — confirmed by probe on 2026-05-12. The `CodexHooks` feature is active in the feature list but only fires in interactive TUI mode at present. Triforge does not auto-enable Codex hooks for this reason; if upstream extends hooks to `codex exec`, revisit `ops/decisions/2026-05-12-cli-deprecation-watch.md`.
 - Antigravity plugin agents are **not surfaced in headless mode** on agy 1.1.3 (`agy agents` stays empty and `--agent` silently ignores unknown names), so `invoke_antigravity` runs in injection mode; project-tier hooks and project-tier permission allow-rules also do not take effect under `agy -p` (probed 2026-07-17) — the `/review` and `/deep-research` commands compensate by promoting captured output into `ops/` when the agent could not write there directly.
+
+### Release checklist
+
+1. `claude plugin validate --strict .` passes green (warnings are errors) — required gate
+2. Doc-consistency greps pass (see Verification Contract in the active plan)
+3. Ladder byte-identity holds across `agents/team-lead.md`, `skills/wave-orchestration/SKILL.md`, and this file
+4. Version bumped in `.claude-plugin/plugin.json`; README "Recent changes" entry added

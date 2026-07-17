@@ -1,5 +1,6 @@
 {
   "name": "agent-triforge",
+  "displayName": "Agent Triforge",
   "version": "2.4.3",
   "description": "Agent Triforge — Three AI models forging production-grade code together. Claude Code orchestrates Antigravity CLI, Codex CLI, and 19 specialized subagents through file-based protocols, portable skills, and parallel review swarms.",
   "author": {
