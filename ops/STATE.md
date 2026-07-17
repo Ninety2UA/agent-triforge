@@ -6,12 +6,12 @@
 Planning complete for the v3.0.0 CLI modernization + builder pool. Implementation not started.
 
 ## The plan
-`docs/plans/2026-07-17-001-feat-cli-modernization-builder-pool-plan.md` — implementation-ready unified plan (ce-brainstorm → ce-plan → ce-doc-review, all 23 review findings applied). Self-contained: Product Contract (R1–R36), Planning Contract (KTD-1–14 + diagrams + risks), 16 implementation units in 3 phases, Verification Contract, Definition of Done.
+`docs/plans/2026-07-17-001-feat-cli-modernization-builder-pool-plan.md` — implementation-ready unified plan (ce-brainstorm → ce-plan → two ce-doc-review rounds; 23 + 13 findings applied). Self-contained: Product Contract (R1–R39, AE1–AE8), Planning Contract (KTD-1–14 + diagrams + risks), 17 implementation units in 3 phases, Verification Contract, Definition of Done. One open question deferred in-doc: release cadence (single v3.0.0 vs Phase-A-first split).
 
 Scope in one line: migrate the Gemini lane to Antigravity (`agy`), absorb Claude Code/Codex updates native-first, replace single-writer with a configurable six-CLI builder pool (worktree leases + cross-review), add OpenCode/Kimi Code/Cursor as optional members, ship `/cli-watch` + `/repo-watch`, produce the four-repo mining report, release as v3.0.0.
 
 ## Task status snapshot
-- All 16 units pending. U1 (capability probe harness) gates everything — run it first.
+- All 17 units pending. U1 (capability probe harness) gates everything — run it first. U17 (onboarding/enrollment) follows U8.
 - Delivery order (user-directed): Phase A (modernize incumbents, U1–U7) → Phase B (pool + optional CLIs, U8–U13) → Phase C (watch family + first runs + release, U14–U16).
 - U11→U12→U13 are serialized (all edit scripts/invoke-external.sh).
 
