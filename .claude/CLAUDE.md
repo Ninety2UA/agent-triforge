@@ -48,6 +48,7 @@ Claude invokes Antigravity via `invoke_antigravity` and Codex via `invoke_codex`
 | `solutions/` | Documented solved problems for institutional knowledge | Claude writes |
 | `decisions/` | Architecture decision records (ADRs) | Claude writes |
 | `research/` | Targeted research / gap analyses (CLI deprecations, library evaluations, etc.) | Claude or Antigravity writes |
+| `roster.toml` | Role→CLI/model/effort assignment with validated fallback chains (see "Roster and assignment") | User edits; session-start bootstraps; enrollment appends `[members.*]` |
 | `REVIEW_ANTIGRAVITY.md` | Antigravity's review output (temporary) | Antigravity writes, Claude reads |
 | `REVIEW_CODEX.md` | Codex's review output (temporary) | Codex writes, Claude reads |
 | `RESEARCH_ANTIGRAVITY.md` | Antigravity targeted-research output (temporary) | Antigravity writes, Claude reads |
@@ -77,6 +78,17 @@ The full lifecycle for a goal:
 - **Produces documentation?** → Antigravity
 - **Touches shared interfaces?** → Claude implements → Antigravity reviews → Codex tests
 - **Ambiguous?** → Claude takes it, flags for parallel review
+
+### Roster and assignment
+
+`ops/roster.toml` is the single assignment surface: five `[roles.<name>]` tables — builder, reviewer, tester, analyst, documenter (roles ARE the task types) — each carrying `cli`, `model`, `effort`, and an ordered `fallbacks` chain. The file is deliberately CLI-neutral (ops/-level, parsed via python3 `tomllib`) so every adapter can read its own role; `resolve_role <role>` in `scripts/invoke-external.sh` prints `cli<TAB>model<TAB>effort`.
+
+- **Resolution order:** `ops/roster.toml` overlays built-in shipped defaults PER-FIELD — a role overriding only `effort` keeps the default cli + model; no roster file at all resolves to the shipped builder-pool posture (defaults are mirrored inside `resolve_role`, kept in sync with `templates/ops/roster.toml`).
+- **Fallback chains:** resolution walks the primary `cli`, then `fallbacks` in order; a member is skipped when its binary is absent or its `[members.<cli>]` entry is disabled. Optional-member skips are silent (AE1); core-member skips log a degradation warning. Load-time validation (on every load) requires each chain to terminate at a core-trio member — a chain resolving entirely to optional members is rejected — so the only way a chain exhausts is an absent core-trio terminus, which is a hard error with install guidance (R21).
+- **Enabled flag (R38):** `[members.<cli>] enabled = false` means absent everywhere — no dispatches, every role falls back cleanly; re-enabling is the flag flip alone. The core trio (claude, antigravity, codex) cannot be disabled. The shipped template carries NO live `[members.*]` entries, so first-detection enrollment fires and a decline persists as `enabled = false`.
+- **Model rules:** agy pins are always `"Gemini 3.1 Pro (High)"`/`(Low)` — never Flash; the (High)/(Low) suffix is agy's effort control, so `effort` maps into the model-variant suffix. Cursor pins `grok-4.5` explicitly — never the Auto router — and has no effort control (`effort` inert). Builder's model is empty by design: the Claude downgrade ladder resolves it. Optional-member fallback models come from `[members.<cli>].model`, else the shipped defaults (opencode → `openrouter/z-ai/glm-5.2`, kimi → `kimi-k3`, cursor → `grok-4.5`).
+- **Promotion knob:** `[promotion] require_user_approval` (default `false`) gates wave-end promotion to main (KTD-5); protected-path diffs force approval on regardless — enforced by the wave protocol, not the roster.
+- **Lazy liveness:** `ensure_core_trio_live` (non-model `--version` checks, 15s each, success cached per session) runs in the `/build` and `/review` preambles only — never at session start, so a `/status`-only session never triggers it.
 
 ### Agent frontmatter fields
 
@@ -165,7 +177,7 @@ templates/                # Project bootstrapping templates
   .codex/README.md          What the hook enforces, why bypass-trust, how to disable
 scripts/
   coordinate.sh           # Outer loop for context exhaustion recovery
-  invoke-external.sh      # Unified Antigravity/Codex invocation with feature detection
+  invoke-external.sh      # Unified Antigravity/Codex invocation, roster resolution, feature detection
 ops/                      # This repo's own project state (not part of plugin)
 docs/                     # Framework design documentation
 ```

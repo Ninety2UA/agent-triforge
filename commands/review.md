@@ -6,6 +6,15 @@ argument-hint: "[--full] [--security] [--perf] [--simple] [--conventions]"
 
 You are executing Phase 3 + Phase 4 of the multi-agent framework (parallel review + synthesis).
 
+## Preflight
+
+Core-trio liveness is gated lazily here — never at session start, so a /status-only session never pays for it. Fast non-model checks (`--version`, cached per session); on failure it names the failing member and its install/login fix:
+
+```bash
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
+ensure_core_trio_live || exit 1
+```
+
 ## Arguments
 $ARGUMENTS
 

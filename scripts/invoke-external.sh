@@ -10,8 +10,10 @@
 # Usage: source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 #
 # Functions:
-#   invoke_antigravity <agent-name> <prompt> [output-file] [timeout-seconds]
-#   invoke_codex       <agent-name> <prompt> [output-file] [timeout-seconds]
+#   invoke_antigravity   <agent-name> <prompt> [output-file] [timeout-seconds]
+#   invoke_codex         <agent-name> <prompt> [output-file] [timeout-seconds]
+#   resolve_role         <role>   — roster lookup: prints cli<TAB>model<TAB>effort
+#   ensure_core_trio_live         — lazy liveness gate for build/review paths
 #
 # Failure taxonomy (KTD-9): both helpers classify failures instead of
 # blindly retrying, and expose the class via INVOKE_FAILURE_CLASS:
@@ -539,4 +541,204 @@ for k, v in sorted(data.get('agents', {}).items()):
     if isinstance(v, dict):
         print(k)
 " 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# Roster resolution (KTD-2) — ops/roster.toml decides who does what
+# ---------------------------------------------------------------------------
+
+# resolve_role <role> — map a task-type role (builder | reviewer | tester |
+# analyst | documenter) to the member that should handle it right now.
+# Prints one line on success:   cli<TAB>model<TAB>effort
+# (builder's model field is empty by design — the Claude lane resolves its
+# model via the downgrade ladder, not the roster).
+#
+# Sources of truth, in order: ops/roster.toml when present, overlaid
+# PER-FIELD onto built-in defaults — a role overriding only effort keeps the
+# default cli + model; no roster file at all resolves to the shipped
+# builder-pool posture. Load-time validation runs on EVERY load, not just for
+# the requested role:
+#   - unknown role / CLI / member names are rejected (typo guard)
+#   - each role's chain ([cli] + fallbacks) must terminate at a core-trio
+#     member — a chain resolving entirely to optional members cannot ship
+#   - [members.<core-trio>] enabled=false is rejected (cannot be disabled)
+# The resolution walk tries the primary cli, then fallbacks in order; a
+# member is SKIPPED when its binary is absent from PATH or its
+# [members.<cli>] entry says enabled=false (R38: disabled = absent
+# everywhere). Optional-member skips are silent (AE1); a skipped core member
+# logs a degradation warning; an absent core-trio terminus is a hard error
+# with install guidance (R21) — the only way a validated chain can exhaust.
+#
+# Distinct exit codes so callers can react without parsing stderr:
+#   2 unknown role requested    3 no TOML parser     4 malformed roster.toml
+#   5 roster validation failed  6 chain exhausted (core terminus binary absent)
+resolve_role() {
+  local ROLE=${1:?usage: resolve_role <role>}
+  ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
+import os, shutil, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.stderr.write('resolve_role: ERROR no TOML parser available. Fix: use Python 3.11+ (tomllib) or run: pip install tomli\n')
+        sys.exit(3)
+
+# Built-in defaults — the single source of truth in this function; mirrors
+# templates/ops/roster.toml (keep the two in sync). builder model '' means:
+# resolved by the Claude downgrade ladder, never by the roster.
+DEFAULTS = {
+    'builder':    {'cli': 'claude',      'model': '',                      'effort': 'max',   'fallbacks': ['codex', 'antigravity']},
+    'reviewer':   {'cli': 'codex',       'model': 'gpt-5.6-sol',           'effort': 'xhigh', 'fallbacks': ['antigravity', 'claude']},
+    'tester':     {'cli': 'codex',       'model': 'gpt-5.6-sol',           'effort': 'xhigh', 'fallbacks': ['claude']},
+    'analyst':    {'cli': 'antigravity', 'model': 'Gemini 3.1 Pro (High)', 'effort': 'high',  'fallbacks': ['claude']},
+    'documenter': {'cli': 'antigravity', 'model': 'Gemini 3.1 Pro (High)', 'effort': 'high',  'fallbacks': ['claude']},
+}
+CORE_TRIO = ('claude', 'antigravity', 'codex')
+# cli name -> binary looked up on PATH
+BINARY = {'claude': 'claude', 'antigravity': 'agy', 'codex': 'codex',
+          'opencode': 'opencode', 'kimi': 'kimi', 'cursor': 'cursor-agent'}
+# Shipped per-CLI default model, used when a member is reached via fallback
+# or chosen as an overridden primary with no explicit role model (KTD-8
+# session-settled pins: never a Flash variant for agy, never Auto for
+# cursor). A [members.<cli>].model entry overrides the shipped default.
+CLI_DEFAULT_MODEL = {
+    'claude': '',
+    'antigravity': 'Gemini 3.1 Pro (High)',
+    'codex': 'gpt-5.6-sol',
+    'opencode': 'openrouter/z-ai/glm-5.2',
+    'kimi': 'kimi-k3',
+    'cursor': 'grok-4.5',
+}
+# G12-style install/login guidance (R21), matching the invoke_* wording.
+INSTALL_FIX = {
+    'claude': 'install Claude Code (npm install -g @anthropic-ai/claude-code), then run claude once and /login',
+    'antigravity': 'install it (curl -fsSL https://antigravity.google/cli/install.sh | bash), then run agy interactively once to complete login',
+    'codex': 'install it (npm install -g @openai/codex or brew install codex), then run codex login',
+}
+
+path = os.environ.get('ROSTER_FILE', 'ops/roster.toml')
+roster = {}
+if os.path.isfile(path):
+    try:
+        with open(path, 'rb') as f:
+            roster = tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        # TOMLDecodeError text names the line ('... at line N, column M').
+        sys.stderr.write('resolve_role: ERROR malformed ' + path + ': ' + str(exc) + '\n')
+        sys.exit(4)
+
+user_roles = roster.get('roles', {})
+user_roles = user_roles if isinstance(user_roles, dict) else {}
+members = roster.get('members', {})
+members = members if isinstance(members, dict) else {}
+
+def reject(msg):
+    sys.stderr.write('resolve_role: ERROR invalid ' + path + ': ' + msg + '\n')
+    sys.exit(5)
+
+# --- Load-time validation (every load, all roles) --------------------------
+for name in user_roles:
+    if name not in DEFAULTS:
+        reject('unknown role ' + repr(name) + ' (valid: ' + ', '.join(DEFAULTS) + ')')
+for name, entry in members.items():
+    if name not in BINARY:
+        reject('unknown member ' + repr(name) + ' (known CLIs: ' + ', '.join(BINARY) + ')')
+    if name in CORE_TRIO and isinstance(entry, dict) and entry.get('enabled') is False:
+        reject('[members.' + name + '] enabled = false — the core trio cannot be disabled')
+
+merged = {}
+for name, dflt in DEFAULTS.items():
+    entry = dict(dflt)
+    user = user_roles.get(name, {})
+    user = user if isinstance(user, dict) else {}
+    for field in ('cli', 'model', 'effort', 'fallbacks'):
+        if field in user:
+            entry[field] = user[field]
+    entry['user_model'] = 'model' in user
+    if not isinstance(entry['cli'], str):
+        reject('role ' + repr(name) + ': cli must be a string')
+    if not isinstance(entry['fallbacks'], list) or not all(isinstance(x, str) for x in entry['fallbacks']):
+        reject('role ' + repr(name) + ': fallbacks must be an array of CLI names')
+    chain = [entry['cli']] + list(entry['fallbacks'])
+    for cli in chain:
+        if cli not in BINARY:
+            reject('role ' + repr(name) + ' names unknown CLI ' + repr(cli) + ' (known: ' + ', '.join(BINARY) + ')')
+    if chain[-1] not in CORE_TRIO:
+        reject('role ' + repr(name) + ' fallback chain ' + repr(chain) + ' does not terminate at a core-trio member (claude, antigravity, codex) — a chain resolving entirely to optional members cannot ship')
+    merged[name] = entry
+
+# --- Resolution walk -------------------------------------------------------
+role = os.environ.get('ROLE', '')
+if role not in merged:
+    sys.stderr.write('resolve_role: ERROR unknown role ' + repr(role) + ' (valid: ' + ', '.join(DEFAULTS) + ')\n')
+    sys.exit(2)
+entry = merged[role]
+chain = [entry['cli']] + list(entry['fallbacks'])
+for idx, cli in enumerate(chain):
+    m = members.get(cli, {})
+    m = m if isinstance(m, dict) else {}
+    if m.get('enabled') is False:
+        continue          # disabled = absent everywhere (R38); silent skip
+    if shutil.which(BINARY[cli]) is None:
+        if idx == len(chain) - 1:
+            break         # core-trio terminus absent -> hard error below
+        if cli in CORE_TRIO:
+            sys.stderr.write('resolve_role: WARNING core member ' + repr(cli) + ' (binary ' + BINARY[cli] + ') absent — role ' + repr(role) + ' degrades to the next fallback\n')
+        continue          # optional-member skip is silent (AE1)
+    if idx == 0 and (entry['user_model'] or cli == DEFAULTS[role]['cli']):
+        model = entry['model']      # explicit role model, or default primary
+    else:
+        model = m.get('model', '') or CLI_DEFAULT_MODEL[cli]
+    print(cli + '\t' + str(model) + '\t' + str(entry['effort']))
+    sys.exit(0)
+
+terminus = chain[-1]
+sys.stderr.write('resolve_role: ERROR role ' + repr(role) + ' chain exhausted — core-trio terminus ' + repr(terminus) + ' (binary ' + BINARY[terminus] + ') is not on PATH. Fix: ' + INSTALL_FIX[terminus] + '. No retry (deterministic).\n')
+sys.exit(6)
+"
+}
+
+# Cache file for ensure_core_trio_live — bash keeps $$ at the sourcing
+# shell's PID even in subshells, so one successful probe covers the session.
+_TRIO_LIVE_CACHE="${TMPDIR:-/tmp}/triforge_trio_live_$$"
+
+# ensure_core_trio_live — lazy liveness gate for the build/review paths.
+# Fast NON-MODEL checks only: command -v plus a 15s <cli> --version under
+# _run_with_timeout (fail-closed) — no tokens spent, no login round-trips.
+# Success is cached in _TRIO_LIVE_CACHE so repeat calls are free; failures
+# are re-probed each call so a mid-session fix is picked up.
+# NOT called at session start — a /status-only session must never trigger
+# it. Call sites live in the /build and /review preambles.
+# On failure: hard error listing exactly which member failed and its
+# install/login fix (KTD-9 wording), return 1.
+ensure_core_trio_live() {
+  [ -f "$_TRIO_LIVE_CACHE" ] && return 0
+  local FAILED=0
+  local PAIR NAME BIN FIX
+  for PAIR in "claude:claude" "antigravity:agy" "codex:codex"; do
+    NAME=${PAIR%%:*}
+    BIN=${PAIR##*:}
+    case "$NAME" in
+      claude)      FIX="install Claude Code (npm install -g @anthropic-ai/claude-code), then run \`claude\` once and /login" ;;
+      antigravity) FIX="install it (curl -fsSL https://antigravity.google/cli/install.sh | bash), then run \`agy\` interactively once to complete login" ;;
+      codex)       FIX="install it (npm install -g @openai/codex or brew install codex), then run \`codex login\`" ;;
+    esac
+    if ! command -v "$BIN" >/dev/null 2>&1; then
+      echo "ensure_core_trio_live: ERROR core member ${NAME} — \`${BIN}\` not found on PATH. Fix: ${FIX}. No retry (deterministic)." >&2
+      FAILED=1
+    elif ! _run_with_timeout 15 "$BIN" --version >/dev/null; then
+      # stderr stays visible so the fail-closed timeout-tool message (or the
+      # CLI's own complaint) names the real cause, not a generic wrapper line.
+      echo "ensure_core_trio_live: ERROR core member ${NAME} — \`${BIN} --version\` failed its 15s liveness check (broken install or hung binary). Fix: ${FIX}. No retry (deterministic)." >&2
+      FAILED=1
+    fi
+  done
+  if [ "$FAILED" -ne 0 ]; then
+    echo "ensure_core_trio_live: the core trio (claude, antigravity/agy, codex) must be live before /build or /review can dispatch — see fixes above." >&2
+    return 1
+  fi
+  : > "$_TRIO_LIVE_CACHE"
+  return 0
 }

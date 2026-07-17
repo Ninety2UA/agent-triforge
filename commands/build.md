@@ -6,6 +6,15 @@ argument-hint: "[--team] [--wave N]"
 
 You are executing Phase 2 (Build) of the multi-agent framework.
 
+## Preflight
+
+Core-trio liveness is gated lazily here — never at session start, so a /status-only session never pays for it. Fast non-model checks (`--version`, cached per session); on failure it names the failing member and its install/login fix:
+
+```bash
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
+ensure_core_trio_live || exit 1
+```
+
 ## When to use
 
 - `/build` — Phase 2 only. TASKS.md must already exist (run `/plan` first).

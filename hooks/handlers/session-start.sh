@@ -100,6 +100,80 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.co
   [ ! -f ".codex/hooks.json" ] && cp "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json" ".codex/hooks.json"
 fi
 
+# Bootstrap ops/roster.toml + ops/watch-registry.toml — per-file existence
+# guards, deliberately OUTSIDE the ops-dir bootstrap above so upgraded v2.x
+# projects (which already have ops/) still receive them. A user's existing
+# roster is never overwritten. The watch-registry template lands in a later
+# unit — the loop tolerates its absence today.
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  mkdir -p ops
+  for f in roster.toml watch-registry.toml; do
+    if [ -f "${CLAUDE_PLUGIN_ROOT}/templates/ops/${f}" ] && [ ! -f "ops/${f}" ]; then
+      cp "${CLAUDE_PLUGIN_ROOT}/templates/ops/${f}" "ops/${f}"
+    fi
+  done
+fi
+
+# Optional-CLI detection (roster tier): presence + version for opencode /
+# kimi / cursor-agent, written to .claude/roster-detected.local.md (runtime
+# state, regenerated each session start; .claude/*.local.md is gitignored).
+# Line format: cli|version|detected-date, plus one interactive=yes|no signal
+# line the enrollment unit keys off. [ -t 0 ] at hook time is best-effort —
+# hooks often run with stdin piped — documented as such; the enrollment
+# branch treats "no" as headless and enrolls shipped defaults silently.
+ROSTER_DETECTED=".claude/roster-detected.local.md"
+OPTIONAL_DETECTED_COUNT=0
+TIMEOUT_BIN=""
+command -v timeout >/dev/null 2>&1 && TIMEOUT_BIN="timeout"
+[ -z "$TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && TIMEOUT_BIN="gtimeout"
+{
+  echo "<!-- runtime state: optional roster CLI detection, regenerated each session start -->"
+  if [ -t 0 ]; then echo "interactive=yes"; else echo "interactive=no"; fi
+} > "$ROSTER_DETECTED"
+for PAIR in "opencode:opencode" "kimi:kimi" "cursor:cursor-agent"; do
+  CLI_NAME=${PAIR%%:*}
+  CLI_BIN=${PAIR##*:}
+  if command -v "$CLI_BIN" >/dev/null 2>&1; then
+    # Version capture is best-effort: --version first, -V fallback, 10s cap
+    # each; a CLI that answers neither is still recorded as present.
+    CLI_VERSION=""
+    if [ -n "$TIMEOUT_BIN" ]; then
+      CLI_VERSION=$("$TIMEOUT_BIN" 10s "$CLI_BIN" --version 2>/dev/null | head -1 || true)
+      [ -z "$CLI_VERSION" ] && CLI_VERSION=$("$TIMEOUT_BIN" 10s "$CLI_BIN" -V 2>/dev/null | head -1 || true)
+    else
+      CLI_VERSION=$("$CLI_BIN" --version 2>/dev/null | head -1 || true)
+      [ -z "$CLI_VERSION" ] && CLI_VERSION=$("$CLI_BIN" -V 2>/dev/null | head -1 || true)
+    fi
+    [ -z "$CLI_VERSION" ] && CLI_VERSION="unknown"
+    echo "${CLI_NAME}|${CLI_VERSION}|$(date +%Y-%m-%d)" >> "$ROSTER_DETECTED"
+    OPTIONAL_DETECTED_COUNT=$((OPTIONAL_DETECTED_COUNT + 1))
+  fi
+done
+
+# Enrolled count = [members.*] entries in ops/roster.toml when present
+# (tolerant: a malformed roster must not break session start — it reports 0
+# here and resolve_role raises the loud parse error at first use).
+ENROLLED_COUNT=0
+if [ -f "ops/roster.toml" ]; then
+  ENROLLED_COUNT=$(python3 -c "
+import sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        print(0); sys.exit(0)
+try:
+    with open('ops/roster.toml', 'rb') as f:
+        data = tomllib.load(f)
+    members = data.get('members', {})
+    print(sum(1 for v in members.values() if isinstance(v, dict)) if isinstance(members, dict) else 0)
+except Exception:
+    print(0)
+" 2>/dev/null || echo 0)
+fi
+
 # Suggest CLAUDE.md template if not present (either supported location)
 if [ ! -f "CLAUDE.md" ] && [ ! -f ".claude/CLAUDE.md" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.md" ]; then
   CLAUDE_MD_TIP="\nTip: No CLAUDE.md found. Copy the template: cp \"${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.md\" ./CLAUDE.md"
@@ -213,6 +287,10 @@ if [ "$HAS_ANTIGRAVITY_AGENTS" = "yes" ] || [ "$HAS_CODEX_AGENTS" = "yes" ]; the
   [ "$HAS_CODEX_AGENTS" = "yes" ] && AGENT_PARTS="${AGENT_PARTS:+${AGENT_PARTS} + }${CODEX_AGENT_COUNT} Codex"
   MSG="$MSG\nExternal agent definitions loaded: ${AGENT_PARTS}."
 fi
+
+# Roster orientation (KTD-2): optional members detected this session, and how
+# many carry [members.*] enrollment entries in ops/roster.toml.
+MSG="$MSG\nRoster: core trio + ${OPTIONAL_DETECTED_COUNT} optional member(s) detected (${ENROLLED_COUNT} enrolled)."
 
 if [ "$HAS_TASKS" != "yes" ] && [ "$HAS_STATE" != "yes" ]; then
   MSG="$MSG\nNo active sprint. Use /plan <goal> to start or /ship <goal> for full autonomous mode."
