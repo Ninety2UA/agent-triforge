@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Agent Triforge — Three AI models forging production-grade code together. Claude Code orchestrates Gemini CLI, Codex CLI, and specialized subagents through file-based protocols, portable skills, and parallel review swarms.</strong>
+  <strong>Agent Triforge — Three AI models forging production-grade code together. Claude Code orchestrates Antigravity CLI, Codex CLI, and specialized subagents through file-based protocols, portable skills, and parallel review swarms.</strong>
 </p>
 
 <p align="center">
@@ -31,7 +31,7 @@
 A production-grade framework that turns Claude Code into a **lead agent** coordinating multiple AI systems. Instead of using one model for everything, this framework assigns each model to what it does best:
 
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code) (Opus)** builds features and orchestrates the entire workflow
-- **[Gemini CLI](https://github.com/google-gemini/gemini-cli)** performs full-codebase analysis using its 1M token context window
+- **[Antigravity CLI](https://antigravity.google/cli)** (`agy`) performs full-codebase analysis with Gemini 3.1 Pro's 1M token context window
 - **[Codex CLI](https://github.com/openai/codex)** runs tests, security audits, and infrastructure tasks in sandboxed environments
 - **Claude specialized agents** provide deep expertise in [security](agents/security-sentinel.md), [performance](agents/performance-oracle.md), [architecture](agents/architecture-strategist.md), and more
 
@@ -148,13 +148,13 @@ Every goal flows through a structured pipeline. Run [`/ship`](commands/ship.md) 
 
 | Phase | What happens | Agent(s) | Command |
 |:---|:---|:---|:---|
-| **0 — Analyze** | Full-repo scan: architecture, patterns, contracts, debt | Gemini CLI + [`codebase-mapping`](skills/codebase-mapping/SKILL.md) | [`/plan`](commands/plan.md) |
+| **0 — Analyze** | Full-repo scan: architecture, patterns, contracts, debt | Antigravity CLI + [`codebase-mapping`](skills/codebase-mapping/SKILL.md) | [`/plan`](commands/plan.md) |
 | **Pre-Plan** | Search institutional knowledge for relevant past solutions | [`learnings-researcher`](agents/learnings-researcher.md) | [`/plan`](commands/plan.md) |
 | **1 — Plan** | Decompose goal into tasks with shadow paths and error maps | Claude + [`writing-plans`](skills/writing-plans/SKILL.md) | [`/plan`](commands/plan.md) |
 | **1.5 — Validate** | Validate assignments, dependencies, scope, shadow paths | [`plan-checker`](agents/plan-checker.md) | [`/plan`](commands/plan.md) |
 | **1.1 — Ambiguity** | Surface top 3 unverified assumptions, ask user to confirm/correct | Claude | [`/plan`](commands/plan.md), [`/ship`](commands/ship.md) |
 | **2 — Build** | Wave orchestration with integration verification between waves | Claude subagents or [`team-lead`](agents/team-lead.md) | [`/build`](commands/build.md) |
-| **3–4 — Review** | Up to 7 parallel reviewers, synthesized with confidence tiering | Gemini + Codex + [review agents](#review-specialists-6) | [`/review`](commands/review.md) |
+| **3–4 — Review** | Up to 7 parallel reviewers, synthesized with confidence tiering | Antigravity + Codex + [review agents](#review-specialists-6) | [`/review`](commands/review.md) |
 | **5 — Test** | TDD test writing, gap analysis, fix cycle until green | Codex CLI + [`test-driven-development`](skills/test-driven-development/SKILL.md) | [`/test`](commands/test.md) |
 | **6 — Ship** | Document solutions, archive reviews, write STATE.md | Claude + [`knowledge-compounding`](skills/knowledge-compounding/SKILL.md) | [`/wrap`](commands/wrap.md) |
 
@@ -162,10 +162,10 @@ Every goal flows through a structured pipeline. Run [`/ship`](commands/ship.md) 
 
 ## Planning Pipeline (`/plan`)
 
-Analyzes the full codebase with Gemini's 1M context, searches institutional knowledge, decomposes the goal with shadow paths and error maps, then validates via [`plan-checker`](agents/plan-checker.md).
+Analyzes the full codebase with Antigravity's 1M-token context, searches institutional knowledge, decomposes the goal with shadow paths and error maps, then validates via [`plan-checker`](agents/plan-checker.md).
 
 <p align="center">
-  <img src="docs/images/planning-flow.svg" alt="Planning pipeline — Gemini scan, learnings research, shadow path planning, plan validation" width="80%">
+  <img src="docs/images/planning-flow.svg" alt="Planning pipeline — Antigravity scan, learnings research, shadow path planning, plan validation" width="80%">
 </p>
 
 ---
@@ -195,7 +195,7 @@ Groups plan tasks by dependency into waves. Independent tasks within each wave r
 | Mode | Mechanism | When to use |
 |---|---|---|
 | **File-based** | Shared markdown in [`ops/`](ops/) | Persistent state across sessions, audit trails |
-| **Direct invocation** | `gemini -p` / `codex exec` via bash | Real-time external agent delegation |
+| **Direct invocation** | `agy -p` / `codex exec` via bash | Real-time external agent delegation |
 | **Native subagents** | Claude's Agent tool with [`agents/`](agents/) definitions | Parallel focused tasks, review swarms |
 | **Agent teams** | Multi-Claude with shared task lists ([`team-lead`](agents/team-lead.md)) | Complex builds with 5+ interdependent tasks |
 
@@ -207,10 +207,10 @@ Skills are model-agnostic markdown files that ANY agent can consume. This decoup
 # All external-agent invocations go through the unified helper
 source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
-# Gemini via native agent definition (skill embedded in the agent body)
-invoke_gemini "codebase-analyst" \
+# Antigravity via native agent definition (skill embedded in the agent body)
+invoke_antigravity "codebase-analyst" \
   "Analyze the full codebase. Write findings to ops/ARCHITECTURE.md." \
-  "$GEMINI_OUT" 600
+  "$AGY_OUT" 600
 
 # Codex via native agent definition (skill embedded in the agent body)
 invoke_codex "test_writer" \
@@ -218,17 +218,17 @@ invoke_codex "test_writer" \
   "$CODEX_OUT" 900
 ```
 
-The helper detects native subagent support at runtime and falls back to legacy `gemini -p "$(cat .../SKILL.md) ..."` / `codex exec "$(cat .../SKILL.md) ..."` prompt-prefix injection if the CLI doesn't support agent definitions yet.
+The helper detects native agent support at runtime and falls back to prompt-prefix injection of the agent body (with its embedded skill) when the CLI doesn't surface the agent definition — the operative mode on agy 1.1.3, which doesn't list plugin agents headless yet.
 
 ### Assignment heuristic
 
 | Question | Agent |
 |---|---|
 | Produces code? | Claude (subagents or [agent team](agents/team-lead.md) for parallel work) |
-| Evaluates existing code? | [Gemini](https://github.com/google-gemini/gemini-cli) + [Codex](https://github.com/openai/codex) + [Claude review agents](#review-specialists-6) in parallel |
+| Evaluates existing code? | [Antigravity](https://antigravity.google/cli) + [Codex](https://github.com/openai/codex) + [Claude review agents](#review-specialists-6) in parallel |
 | Runs/executes something? | [Codex CLI](https://github.com/openai/codex) |
-| Produces documentation? | [Gemini CLI](https://github.com/google-gemini/gemini-cli) |
-| Touches shared interfaces? | Claude implements → Gemini reviews → Codex tests |
+| Produces documentation? | [Antigravity CLI](https://antigravity.google/cli) |
+| Touches shared interfaces? | Claude implements → Antigravity reviews → Codex tests |
 | Ambiguous? | Claude takes it, flags for parallel review |
 
 ---
@@ -306,8 +306,8 @@ All three CLIs must be installed and authenticated:
 # Claude Code (you're probably already here)
 claude --version
 
-# Gemini CLI — https://github.com/google-gemini/gemini-cli
-gemini -p "Respond with only: READY"
+# Antigravity CLI — https://antigravity.google/cli (run `agy` once interactively to log in)
+agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"   # always pin the model — agy defaults to a Flash variant
 
 # Codex CLI — https://github.com/openai/codex
 codex exec "Respond with only: READY"
@@ -426,11 +426,11 @@ claude
 
 ## Skills reference
 
-12 portable, model-agnostic workflow modules that any agent can consume. Skills embedded in native Gemini/Codex agent definitions (`gemini-agents/`, `codex-agents/`) at install time; legacy prompt-prefix injection (`$(cat ${CLAUDE_PLUGIN_ROOT}/skills/SKILL/SKILL.md)`) kicks in automatically when a CLI lacks native-agent support.
+12 portable, model-agnostic workflow modules that any agent can consume. Skills embedded in native Antigravity/Codex agent definitions (`antigravity-agents/agents/`, `codex-agents/`) at install time; prompt-prefix injection of the agent body kicks in automatically when a CLI doesn't surface native agent definitions.
 
 | Skill | Primary consumer | What it teaches the agent |
 |---|---|---|
-| [**`codebase-mapping`**](skills/codebase-mapping/SKILL.md) | [Gemini](https://github.com/google-gemini/gemini-cli) (Phase 0) | Full-repo analysis: structure, data flow, patterns, debt |
+| [**`codebase-mapping`**](skills/codebase-mapping/SKILL.md) | [Antigravity](https://antigravity.google/cli) (Phase 0) | Full-repo analysis: structure, data flow, patterns, debt |
 | [**`writing-plans`**](skills/writing-plans/SKILL.md) | Claude (Phase 1) | Task decomposition with shadow paths, error maps, interface context |
 | [**`shadow-path-tracing`**](skills/shadow-path-tracing/SKILL.md) | Claude (Phase 1) | Enumerate every failure path alongside the happy path |
 | [**`wave-orchestration`**](skills/wave-orchestration/SKILL.md) | Claude (Phase 2) | Dependency-grouped parallel execution with integration checks |
@@ -500,7 +500,7 @@ Three defense mechanisms prevent long sprints from dying to context limits:
 | **PreCompact** | [`pre-compact.sh`](hooks/handlers/pre-compact.sh) — auto-checkpoints `STATE.md` before context compaction | State loss during mid-sprint compaction |
 | **Analysis paralysis** | [`context-monitor.sh`](hooks/handlers/context-monitor.sh) — warns at 8+ consecutive reads without writes | Reading without producing |
 | **Tool failure monitor** | [`tool-failure-monitor.sh`](hooks/handlers/tool-failure-monitor.sh) — tracks and warns on accumulated tool failures | Silent failure accumulation |
-| **Subprocess timeouts** | Watchdog pattern on all Gemini/Codex calls — SIGTERM after timeout, SIGKILL after 5s grace | Hung external agents blocking pipeline |
+| **Subprocess timeouts** | Watchdog pattern on all Antigravity/Codex calls — SIGTERM after timeout, SIGKILL after 5s grace | Hung external agents blocking pipeline |
 | **Risk scoring** | Per-subagent risk accumulation — halt at >20% or 50+ file changes | Runaway subagents |
 
 ```bash
@@ -514,7 +514,7 @@ NOTIFY_WEBHOOK_URL="https://hooks.slack.com/..." ./scripts/coordinate.sh "Build 
 ### Key constraints
 
 - `TASKS.md` is never modified directly during review — changes must be proposed in [`MEMORY.md`](ops/MEMORY.md) first
-- Neither [Gemini](https://github.com/google-gemini/gemini-cli) nor [Codex](https://github.com/openai/codex) may modify source code; they only write to their designated `ops/` files
+- Neither [Antigravity](https://antigravity.google/cli) nor [Codex](https://github.com/openai/codex) may modify source code; they only write to their designated `ops/` files
 - Parallel reviews are safe because agents write to separate files
 - Maximum 3 review cycles per sprint before escalating to user
 - Phase 0 can be skipped for small bug fixes, same-session continuations, or unchanged codebases (use [`/quick`](commands/quick.md))
@@ -528,13 +528,13 @@ This framework was informed by analyzing the [Claude Code Blueprint](https://git
 
 | Dimension | [Claude Code Blueprint](https://github.com/Ninety2UA/claude-code-blueprint) | This framework |
 |---|---|---|
-| **Agent model** | Homogeneous (Claude-only) | Heterogeneous (Claude + Gemini + Codex) |
+| **Agent model** | Homogeneous (Claude-only) | Heterogeneous (Claude + Antigravity + Codex) |
 | **Review agents** | 6 Claude subagents | 7 reviewers (2 external + 5 Claude subagents) |
-| **Codebase analysis** | Claude subagent | [Gemini CLI](https://github.com/google-gemini/gemini-cli) (1M token context) |
+| **Codebase analysis** | Claude subagent | [Antigravity CLI](https://antigravity.google/cli) (1M token context) |
 | **Test execution** | Claude subagent | [Codex CLI](https://github.com/openai/codex) (sandboxed execution) |
 | **Coordination** | Native subagents + git | File protocol + bash + subagents + teams |
 | **Skills** | Claude-only | Portable across all 3 CLIs via [injection](#portable-skill-injection) |
-| **Dependencies** | Zero (markdown only) | Three CLIs (Claude + Gemini + Codex) |
+| **Dependencies** | Zero (markdown only) | Three CLIs (Claude + Antigravity + Codex) |
 
 <details>
 <summary><strong>What we adopted from Blueprint</strong></summary>
@@ -545,7 +545,7 @@ Confidence tiering, suppressions lists, review synthesis, wave orchestration, qu
 <details>
 <summary><strong>What we added beyond Blueprint</strong></summary>
 
-Multi-model coordination, portable skill injection into external agents, agent teams as a build mode, Gemini Phase 0 analysis with 1M token context, Codex sandboxed testing, file-based coordination protocol for cross-model state sharing.
+Multi-model coordination, portable skill injection into external agents, agent teams as a build mode, Antigravity Phase 0 analysis with 1M token context, Codex sandboxed testing, file-based coordination protocol for cross-model state sharing.
 </details>
 
 ---
@@ -557,7 +557,7 @@ Multi-model coordination, portable skill injection into external agents, agent t
 | Trivial task (< 30 minutes) | Just use Claude Code directly, or [`/quick`](commands/quick.md) |
 | Pure exploration / brainstorming | Single agent conversation |
 | Tight deadline, no tests needed | Claude Code solo, skip review + test |
-| Non-code deliverables | [Gemini CLI](https://github.com/google-gemini/gemini-cli) solo with its large context |
+| Non-code deliverables | [Antigravity CLI](https://antigravity.google/cli) solo with its large context |
 
 ---
 
@@ -572,7 +572,7 @@ Yes. Use Option 2 or Option 3 from <a href="#installation">Installation</a> to c
 <details>
 <summary><strong>Do I need all three CLIs?</strong></summary>
 
-No. The framework degrades gracefully. Without Gemini, Phase 0 is skipped. Without Codex, testing is handled by Claude. You lose the multi-model benefits but everything still works.
+No. The framework degrades gracefully. Without Antigravity, Phase 0 is skipped. Without Codex, testing is handled by Claude. You lose the multi-model benefits but everything still works.
 </details>
 
 <details>
@@ -584,7 +584,7 @@ No. Skills activate contextually. If you never use TDD, the <a href="skills/test
 <details>
 <summary><strong>How do agents differ from skills?</strong></summary>
 
-<strong>Skills</strong> are instructions that guide an agent's behavior — methodology documents. <strong>Agents</strong> are separate subprocesses dispatched via the Agent tool, each with their own context window. Skills can be injected into any agent (including external ones like Gemini and Codex).
+<strong>Skills</strong> are instructions that guide an agent's behavior — methodology documents. <strong>Agents</strong> are separate subprocesses dispatched via the Agent tool, each with their own context window. Skills can be injected into any agent (including external ones like Antigravity and Codex).
 </details>
 
 <details>
@@ -614,6 +614,8 @@ After solving a non-trivial problem, <a href="commands/compound.md"><code>/compo
 ---
 
 ## Recent changes
+
+> **Historical note (2026-07):** entries below predate the Gemini → Antigravity migration and intentionally keep retired names (`Gemini CLI`, `invoke_gemini`, `gemini-agents/`, `ops/REVIEW_GEMINI.md`, `ops/RESEARCH_GEMINI.md`) as an accurate record of what those releases shipped. The live lane is Antigravity (`agy`, `invoke_antigravity`, `antigravity-agents/`, `ops/REVIEW_ANTIGRAVITY.md`, `ops/RESEARCH_ANTIGRAVITY.md`); legacy Gemini users pin plugin v2.4.3.
 
 ### 2026-05-12 — v2.4.3: Sequential downgrade ladder for narrow runtime tasks
 
@@ -1036,6 +1038,6 @@ MIT
 <p align="center">
   <a href="docs/agent-triforge.md">Full Documentation</a> ·
   <a href="CLAUDE.md">CLAUDE.md</a> ·
-  <a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a> ·
+  <a href="https://antigravity.google/cli">Antigravity CLI</a> ·
   <a href="https://github.com/openai/codex">Codex CLI</a>
 </p>

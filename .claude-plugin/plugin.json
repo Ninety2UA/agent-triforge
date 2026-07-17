@@ -1,13 +1,13 @@
 {
   "name": "agent-triforge",
   "version": "2.4.3",
-  "description": "Agent Triforge — Three AI models forging production-grade code together. Claude Code orchestrates Gemini CLI, Codex CLI, and 19 specialized subagents through file-based protocols, portable skills, and parallel review swarms.",
+  "description": "Agent Triforge — Three AI models forging production-grade code together. Claude Code orchestrates Antigravity CLI, Codex CLI, and 19 specialized subagents through file-based protocols, portable skills, and parallel review swarms.",
   "author": {
     "name": "Ninety2UA",
     "url": "https://github.com/Ninety2UA"
   },
   "repository": "https://github.com/Ninety2UA/agent-triforge",
   "license": "MIT",
-  "keywords": ["agent-triforge", "multi-agent", "gemini", "codex", "coordination", "sprint", "review-swarm", "wave-orchestration"],
+  "keywords": ["agent-triforge", "multi-agent", "antigravity", "codex", "coordination", "sprint", "review-swarm", "wave-orchestration"],
   "hooks": "./hooks/hooks.json"
 }

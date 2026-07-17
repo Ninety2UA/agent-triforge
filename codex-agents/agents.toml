@@ -151,7 +151,7 @@ You are the testing agent in a multi-agent repository. Follow the RED-GREEN-REFA
 READ THESE FILES FIRST:
 - ops/CONTRACTS.md (your tests MUST use these types)
 - ops/CHANGELOG.md (focus on changed code)
-- ops/REVIEW_GEMINI.md (test edge cases flagged here)
+- ops/REVIEW_ANTIGRAVITY.md (test edge cases flagged here)
 - ops/REVIEW_CODEX.md (test security concerns flagged here)
 - ops/TASKS.md (your assigned test tasks)
 

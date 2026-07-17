@@ -46,15 +46,15 @@ Execute ALL phases in order. Do not skip phases unless explicitly noted.
 Spawn the `learnings-researcher` agent to search ops/solutions/ and ops/decisions/ for relevant patterns.
 
 ### Phase 0: Codebase analysis
-Invoke Gemini with the codebase-analyst agent definition (skip if codebase unchanged or small fix):
+Invoke Antigravity with the codebase-analyst agent definition (skip if codebase unchanged or small fix):
 ```bash
 set -euo pipefail
 source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
 # Full codebase analysis (uses codebase-analyst agent definition)
-invoke_gemini "codebase-analyst" \
+invoke_antigravity "codebase-analyst" \
   "Analyze the full codebase. Write to ops/ARCHITECTURE.md, ops/MEMORY.md (append), ops/CONTRACTS.md (append)." \
-  "${TMPDIR:-/tmp}/gemini_phase0_$$_$(date +%s).txt" 600
+  "${TMPDIR:-/tmp}/antigravity_phase0_$$_$(date +%s).txt" 600
 ```
 
 ### Phase 1: Planning
@@ -75,7 +75,7 @@ Spawn the `plan-checker` agent. Iterate until APPROVED (max 3 rounds).
 
 ### Phase 3: Parallel review
 Launch ALL reviewers simultaneously:
-- Gemini CLI (architecture, design) — background bash
+- Antigravity CLI (agy) (architecture, design) — background bash
 - Codex CLI (logic, security, tests) — background bash
 - security-sentinel agent — Claude subagent
 - performance-oracle agent — Claude subagent

@@ -25,17 +25,29 @@ Launch ALL of these agents in a SINGLE message for maximum parallelism:
 ### Agent 3: git-history-analyzer
 "Analyze git history for code evolution, contributors, and architectural decisions related to: $ARGUMENTS"
 
-### Agent 4: Gemini codebase analysis (targeted)
+### Agent 4: Antigravity codebase analysis (targeted)
 ```bash
 set -euo pipefail
 source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
+AGY_OUT="${TMPDIR:-/tmp}/antigravity_research_$$_$(date +%s).txt"
+
 # Targeted codebase analysis (uses targeted-researcher agent definition)
-invoke_gemini "targeted-researcher" \
+invoke_antigravity "targeted-researcher" \
   "Analyze the codebase specifically for patterns, modules, and architecture related to: $ARGUMENTS
 Focus on: existing code, dependencies, integration points, patterns for consistency, technical debt.
-Write a targeted analysis (not full ARCHITECTURE.md — just this topic)." \
-  "${TMPDIR:-/tmp}/gemini_research_$$_$(date +%s).txt" 600
+Write a targeted analysis (not full ARCHITECTURE.md — just this topic) to ops/RESEARCH_ANTIGRAVITY.md if you can; otherwise return it as your response." \
+  "$AGY_OUT" 600
+
+# Headless resilience: agy auto-denies permission-requiring tools in -p mode,
+# so the researcher may have returned its analysis instead of writing ops/.
+# Promote the captured output so the synthesizer has a file to read either way.
+if [ ! -f "ops/RESEARCH_ANTIGRAVITY.md" ] && [ -s "$AGY_OUT" ]; then
+  {
+    echo "<!-- captured from invoke_antigravity output; agent could not write ops/ directly (headless permission auto-deny) -->"
+    cat "$AGY_OUT"
+  } > ops/RESEARCH_ANTIGRAVITY.md
+fi
 ```
 
 ### Agent 5: best-practices-researcher

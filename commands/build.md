@@ -51,19 +51,19 @@ Follow the `wave-orchestration` skill:
 2. Team-lead reads TASKS.md, groups into work streams
 3. Team-lead assigns teammates with explicit file ownership
 4. Teammates coordinate via shared task list + messaging
-5. Teammates can invoke gemini/codex for specific reviews (replace `<scope>` with actual paths):
+5. Teammates can invoke antigravity/codex for specific reviews (replace `<scope>` with actual paths):
    ```bash
    set -euo pipefail
    source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
-   GEMINI_OUT="${TMPDIR:-/tmp}/gemini_build_$$_$(date +%s).txt"
+   AGY_OUT="${TMPDIR:-/tmp}/antigravity_build_$$_$(date +%s).txt"
    CODEX_OUT="${TMPDIR:-/tmp}/codex_build_$$_$(date +%s).txt"
 
    # Architecture review for build scope
-   invoke_gemini "architecture-reviewer" \
-     "Review <scope> for architecture. Write to ops/REVIEW_GEMINI.md." \
-     "$GEMINI_OUT" 600 &
-   GEMINI_PID=$!
+   invoke_antigravity "architecture-reviewer" \
+     "Review <scope> for architecture. Write to ops/REVIEW_ANTIGRAVITY.md if you can; otherwise return findings as your response." \
+     "$AGY_OUT" 600 &
+   AGY_PID=$!
 
    # Test writing for build scope
    invoke_codex "test_writer" \
@@ -73,12 +73,12 @@ Follow the `wave-orchestration` skill:
 
    # Per-PID wait so a silent failure doesn't leave downstream agents staring at
    # an empty file and calling it "no findings".
-   GEMINI_RC=0; CODEX_RC=0
-   wait $GEMINI_PID || GEMINI_RC=$?
+   AGY_RC=0; CODEX_RC=0
+   wait $AGY_PID || AGY_RC=$?
    wait $CODEX_PID  || CODEX_RC=$?
-   if [ $GEMINI_RC -ne 0 ] || [ $CODEX_RC -ne 0 ]; then
-     echo "build: helper failed — gemini=$GEMINI_RC codex=$CODEX_RC" >&2
-     echo "build: last stderr in $GEMINI_OUT / $CODEX_OUT" >&2
+   if [ $AGY_RC -ne 0 ] || [ $CODEX_RC -ne 0 ]; then
+     echo "build: helper failed — antigravity=$AGY_RC codex=$CODEX_RC" >&2
+     echo "build: last stderr in $AGY_OUT / $CODEX_OUT" >&2
      exit 1
    fi
    ```

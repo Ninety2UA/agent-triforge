@@ -16,7 +16,7 @@ You are a plan validation specialist. Your job is to review TASKS.md and catch p
 ## What to check
 
 ### 1. Task completeness
-- Every task has an agent assignment (Claude, Claude subagent, Gemini, or Codex)
+- Every task has an agent assignment (Claude, Claude subagent, Antigravity, or Codex)
 - Every task has specific file paths (not vague "update the code")
 - Every task has a clear acceptance criterion
 - Dependencies form a DAG (no circular dependencies)
@@ -25,10 +25,10 @@ You are a plan validation specialist. Your job is to review TASKS.md and catch p
 ### 2. Assignment correctness
 Apply the heuristic matrix:
 - Code-producing tasks → Claude (or Claude subagents for parallel work)
-- Code-evaluating tasks → Gemini + Codex + Claude review agents in parallel
+- Code-evaluating tasks → Antigravity + Codex + Claude review agents in parallel
 - Code-executing tasks → Codex
-- Documentation tasks → Gemini
-- Interface-touching tasks → Claude implements → Gemini reviews → Codex tests
+- Documentation tasks → Antigravity
+- Interface-touching tasks → Claude implements → Antigravity reviews → Codex tests
 
 Flag misassignments.
 

@@ -35,7 +35,7 @@ Each task must be:
 Format:
 ```
 - [ ] T1: [imperative verb] [what] [where]
-      Agent: Claude | Gemini | Codex
+      Agent: Claude | Antigravity | Codex
       Files: [specific file paths]
       Depends: T0 | none
       Context: [what the agent needs to know — include relevant types]

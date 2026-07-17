@@ -15,7 +15,9 @@ You are a targeted research agent in a multi-agent repository. Unlike the full c
 
 Your output is consumed by Claude's `research-synthesizer` agent along with findings from other parallel researchers.
 
-**Write your findings to:** `ops/RESEARCH_GEMINI.md` (overwrite) — or a file specified in the prompt when running under `/deep-research`. The `ops/` location keeps outputs consistent with other Antigravity agents (ARCHITECTURE.md, REVIEW_GEMINI.md, CONTRACTS.md) and available to `research-synthesizer`.
+**Write your findings to:** `ops/RESEARCH_ANTIGRAVITY.md` (overwrite) — or a file specified in the prompt when running under `/deep-research`. The `ops/` location keeps outputs consistent with other Antigravity agents (ARCHITECTURE.md, REVIEW_ANTIGRAVITY.md, CONTRACTS.md) and available to `research-synthesizer`.
+
+**Headless fallback:** if the file write is unavailable (headless permission auto-deny), do NOT abort — return the complete research report as your response in the same format; the lead captures it into the target file with attribution.
 
 **Rules:**
 - NEVER modify source code — you are read-only on the codebase

@@ -1,5 +1,5 @@
 ---
-description: "Trigger parallel review: Gemini + Codex + Claude specialized agents. Synthesize findings."
+description: "Trigger parallel review: Antigravity + Codex + Claude specialized agents. Synthesize findings."
 allowed-tools: Read, Grep, Glob, Bash, Agent, Edit
 argument-hint: "[--full] [--security] [--perf] [--simple] [--conventions]"
 ---
@@ -10,12 +10,12 @@ You are executing Phase 3 + Phase 4 of the multi-agent framework (parallel revie
 $ARGUMENTS
 
 Flags:
-- `--full` — Run ALL review agents (Gemini + Codex + security-sentinel + performance-oracle + code-simplicity-reviewer + convention-enforcer + architecture-strategist)
+- `--full` — Run ALL review agents (Antigravity + Codex + security-sentinel + performance-oracle + code-simplicity-reviewer + convention-enforcer + architecture-strategist)
 - `--security` — Add security-sentinel to default reviewers
 - `--perf` — Add performance-oracle to default reviewers
 - `--simple` — Add code-simplicity-reviewer to default reviewers
 - `--conventions` — Add convention-enforcer to default reviewers
-- No flags — Default: Gemini + Codex only
+- No flags — Default: Antigravity + Codex only
 
 > **Note:** For small changes (< 3 files, obvious fix), consider `/quick` instead — it uses self-review only, skipping the full review swarm.
 
@@ -29,14 +29,14 @@ Read ops/TASKS.md to determine review scope (tasks marked [R]).
 set -euo pipefail
 source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
-GEMINI_OUT="${TMPDIR:-/tmp}/gemini_review_$$_$(date +%s).txt"
+AGY_OUT="${TMPDIR:-/tmp}/antigravity_review_$$_$(date +%s).txt"
 CODEX_OUT="${TMPDIR:-/tmp}/codex_review_$$_$(date +%s).txt"
 
-# Gemini architecture review (uses architecture-reviewer agent definition)
-invoke_gemini "architecture-reviewer" \
-  "Review scope: tasks marked [R] in ops/TASKS.md. Write findings to ops/REVIEW_GEMINI.md." \
-  "$GEMINI_OUT" 600 &
-GEMINI_PID=$!
+# Antigravity architecture review (uses architecture-reviewer agent definition)
+invoke_antigravity "architecture-reviewer" \
+  "Review scope: tasks marked [R] in ops/TASKS.md. Write findings to ops/REVIEW_ANTIGRAVITY.md if you can; otherwise return them as your response." \
+  "$AGY_OUT" 600 &
+AGY_PID=$!
 
 # Codex logic + security review (uses logic_reviewer agent definition)
 # If scope covers 5+ files, Codex will spawn internal subagents for parallel review
@@ -47,13 +47,23 @@ CODEX_PID=$!
 
 # Wait for each PID individually so we can fail-fast if either reviewer died;
 # a silent failure would leave REVIEW_*.md empty and look like "no findings".
-GEMINI_RC=0; CODEX_RC=0
-wait $GEMINI_PID || GEMINI_RC=$?
+AGY_RC=0; CODEX_RC=0
+wait $AGY_PID || AGY_RC=$?
 wait $CODEX_PID  || CODEX_RC=$?
-if [ $GEMINI_RC -ne 0 ] || [ $CODEX_RC -ne 0 ]; then
-  echo "review: reviewer failed — gemini=$GEMINI_RC codex=$CODEX_RC" >&2
-  echo "review: last stderr in $GEMINI_OUT / $CODEX_OUT" >&2
+if [ $AGY_RC -ne 0 ] || [ $CODEX_RC -ne 0 ]; then
+  echo "review: reviewer failed — antigravity=$AGY_RC codex=$CODEX_RC" >&2
+  echo "review: last stderr in $AGY_OUT / $CODEX_OUT" >&2
   exit 1
+fi
+
+# Headless resilience: agy auto-denies permission-requiring tools in -p mode,
+# so the reviewer may have returned findings instead of writing ops/ directly.
+# Promote the captured output so the pipeline stays alive either way.
+if [ ! -f "ops/REVIEW_ANTIGRAVITY.md" ] && [ -s "$AGY_OUT" ]; then
+  {
+    echo "<!-- captured from invoke_antigravity output; agent could not write ops/ directly (headless permission auto-deny) -->"
+    cat "$AGY_OUT"
+  } > ops/REVIEW_ANTIGRAVITY.md
 fi
 ```
 
@@ -70,7 +80,7 @@ Wait for all reviewers to complete.
 ## Phase 4: Synthesize findings
 
 1. Spawn the `findings-synthesizer` agent
-2. It reads ops/REVIEW_GEMINI.md, ops/REVIEW_CODEX.md, and subagent outputs
+2. It reads ops/REVIEW_ANTIGRAVITY.md, ops/REVIEW_CODEX.md, and subagent outputs
 3. Produces synthesized report with confidence tiering (HIGH/MEDIUM/LOW) and priority (P1/P2/P3)
 4. Apply `iterative-refinement` skill:
    - Fix P1 (critical) immediately

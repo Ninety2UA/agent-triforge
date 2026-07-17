@@ -27,51 +27,48 @@ if [ ! -d "ops" ]; then
   fi
 fi
 
-# Bootstrap Gemini agent definitions (.gemini/agents/)
-# Only copies files that don't already exist — preserves user customizations
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/gemini-agents" ]; then
-  mkdir -p .gemini/agents
-  for f in "${CLAUDE_PLUGIN_ROOT}/gemini-agents/"*.md; do
-    [ -f "$f" ] && [ ! -f ".gemini/agents/$(basename "$f")" ] && cp "$f" ".gemini/agents/$(basename "$f")"
-  done
-  if [ -f "${CLAUDE_PLUGIN_ROOT}/gemini-agents/policies.toml" ] && [ ! -f ".gemini/policies.toml" ]; then
-    cp "${CLAUDE_PLUGIN_ROOT}/gemini-agents/policies.toml" ".gemini/policies.toml"
-  fi
-  # Bootstrap .gemini/settings.json (disables built-in codebase_investigator; see template for rationale)
-  if [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.gemini/settings.json" ] && [ ! -f ".gemini/settings.json" ]; then
-    cp "${CLAUDE_PLUGIN_ROOT}/templates/.gemini/settings.json" ".gemini/settings.json"
+# Bootstrap the Antigravity agent pack (agy plugin install)
+# antigravity-agents/ is a valid agy plugin; installing it registers the four
+# external agents. Failure-tolerant: native listing doesn't surface plugin
+# agents headless yet (agy 1.1.3), so invoke_antigravity falls back to
+# injection mode from the plugin templates either way.
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && command -v agy >/dev/null 2>&1; then
+  if ! agy plugin list 2>/dev/null | grep -q "agent-triforge"; then
+    agy plugin install "${CLAUDE_PLUGIN_ROOT}/antigravity-agents" >/dev/null 2>&1 \
+      || { echo "session-start: agy plugin install failed — invoke_antigravity will use injection mode from plugin templates." >&2; true; }
   fi
 fi
 
-# .agents/skills/ — interop path per Gemini docs/cli/skills.md (workspace skills tier).
-# Gemini v0.36.0+ auto-discovers SKILL.md files here. We copy (not symlink) so loaders
-# that refuse to follow symlinks across mount boundaries still see the skills.
+# Deploy Antigravity workspace settings (permission deny rules), copy-if-absent.
+# Probe 2026-07-17 (agy 1.1.3): NO project-tier settings.json lifted the
+# headless permission auto-deny — .gemini/, .agents/, and .antigravity/
+# settings.json were each tried with permissions.allow rules (blanket
+# "command", full-command and prefix targets, both command()/
+# run_shell_command() spellings) and every run still auto-denied; the
+# settings.json the denial message refers to is the user tier
+# (~/.gemini/antigravity-cli/settings.json), which we never touch. We ship
+# the file anyway: it documents deny intent, covers interactive `agy` use
+# and future tiers, and the captured-output fallback in /review and
+# /deep-research carries the headless pipeline meanwhile.
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.antigravity/settings.json" ] && [ ! -f ".antigravity/settings.json" ]; then
+  mkdir -p .antigravity
+  cp "${CLAUDE_PLUGIN_ROOT}/templates/.antigravity/settings.json" ".antigravity/settings.json"
+fi
+
+# .agents/skills/ — the Antigravity workspace-skills tier AND the cross-CLI
+# agentskills.io interop path. We copy (not symlink) so loaders that refuse
+# to follow symlinks across mount boundaries still see the skills.
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/skills" ] && [ ! -e ".agents/skills" ]; then
   mkdir -p .agents
   cp -R "${CLAUDE_PLUGIN_ROOT}/skills" .agents/skills 2>/dev/null || true
 fi
 
-# G12 guard: warn if user disabled Gemini agents globally in ~/.gemini/settings.json
-GEMINI_AGENTS_DISABLED_WARNING=""
-if [ -f "${HOME}/.gemini/settings.json" ]; then
-  if python3 -c "
-import json, sys
-try:
-    with open('${HOME}/.gemini/settings.json') as f:
-        s = json.load(f)
-    exp = s.get('experimental', {})
-    sys.exit(0 if exp.get('enableAgents') is False else 1)
-" 2>/dev/null; then
-    GEMINI_AGENTS_DISABLED_WARNING="WARNING: ~/.gemini/settings.json has experimental.enableAgents=false — Gemini subagents will not load. Remove that flag to enable Agent Triforge's Gemini layer."
-  fi
-fi
-
-# Warn if neither `timeout` nor `gtimeout` is available — invoke-external.sh
-# silently runs without timeout enforcement in that case, which can leave
-# orphaned Gemini/Codex processes running for hours.
+# Warn if neither `timeout` nor `gtimeout` is available — timeout enforcement
+# is FAIL-CLOSED in invoke-external.sh, so without one of them every external
+# invocation (Antigravity/Codex) refuses to run at all.
 TIMEOUT_MISSING_WARNING=""
 if ! command -v timeout >/dev/null 2>&1 && ! command -v gtimeout >/dev/null 2>&1; then
-  TIMEOUT_MISSING_WARNING="WARNING: neither \`timeout\` nor \`gtimeout\` found on PATH — Gemini/Codex invocations will run without timeout enforcement. On macOS, install with: brew install coreutils"
+  TIMEOUT_MISSING_WARNING="WARNING: neither \`timeout\` nor \`gtimeout\` found on PATH — invoke-external.sh is fail-closed and will refuse to run Antigravity/Codex invocations. On macOS, install with: brew install coreutils"
 fi
 
 # Bootstrap Codex agent definitions (.codex/agents/)
@@ -131,7 +128,7 @@ if [ -f "ops/AGENTS.md" ]; then
   HAS_AGENTS="yes"
 fi
 
-if [ -f "ops/REVIEW_GEMINI.md" ] || [ -f "ops/REVIEW_CODEX.md" ] || [ -f "ops/TEST_RESULTS.md" ]; then
+if [ -f "ops/REVIEW_ANTIGRAVITY.md" ] || [ -f "ops/REVIEW_CODEX.md" ] || [ -f "ops/TEST_RESULTS.md" ]; then
   HAS_REVIEWS="yes"
 fi
 
@@ -165,15 +162,17 @@ if [ "$SOLUTION_COUNT" -gt "0" ]; then
 fi
 
 # Check for external agent definitions
-HAS_GEMINI_AGENTS=""
+HAS_ANTIGRAVITY_AGENTS=""
 HAS_CODEX_AGENTS=""
-GEMINI_AGENT_COUNT=0
+ANTIGRAVITY_AGENT_COUNT=0
 CODEX_AGENT_COUNT=0
 
-if [ -d ".gemini/agents" ]; then
-  GEMINI_AGENT_COUNT=$(find .gemini/agents -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || true)
-  if [ "$GEMINI_AGENT_COUNT" -gt "0" ]; then
-    HAS_GEMINI_AGENTS="yes"
+# Count the local plugin templates — `agy agents` stays empty headless on
+# agy 1.1.3, so the injection templates are the operative definitions.
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents" ]; then
+  ANTIGRAVITY_AGENT_COUNT=$(find "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents" -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || true)
+  if [ "$ANTIGRAVITY_AGENT_COUNT" -gt "0" ]; then
+    HAS_ANTIGRAVITY_AGENTS="yes"
   fi
 fi
 
@@ -199,20 +198,15 @@ print(sum(1 for v in data.get('agents', {}).values() if isinstance(v, dict)))
   fi
 fi
 
-if [ "$HAS_GEMINI_AGENTS" = "yes" ] || [ "$HAS_CODEX_AGENTS" = "yes" ]; then
+if [ "$HAS_ANTIGRAVITY_AGENTS" = "yes" ] || [ "$HAS_CODEX_AGENTS" = "yes" ]; then
   AGENT_PARTS=""
-  [ "$HAS_GEMINI_AGENTS" = "yes" ] && AGENT_PARTS="${GEMINI_AGENT_COUNT} Gemini"
+  [ "$HAS_ANTIGRAVITY_AGENTS" = "yes" ] && AGENT_PARTS="${ANTIGRAVITY_AGENT_COUNT} Antigravity"
   [ "$HAS_CODEX_AGENTS" = "yes" ] && AGENT_PARTS="${AGENT_PARTS:+${AGENT_PARTS} + }${CODEX_AGENT_COUNT} Codex"
   MSG="$MSG\nExternal agent definitions loaded: ${AGENT_PARTS}."
 fi
 
 if [ "$HAS_TASKS" != "yes" ] && [ "$HAS_STATE" != "yes" ]; then
   MSG="$MSG\nNo active sprint. Use /plan <goal> to start or /ship <goal> for full autonomous mode."
-fi
-
-# Append Gemini enableAgents warning if set
-if [ -n "${GEMINI_AGENTS_DISABLED_WARNING}" ]; then
-  MSG="$MSG\n${GEMINI_AGENTS_DISABLED_WARNING}"
 fi
 
 # Append timeout-missing warning if set

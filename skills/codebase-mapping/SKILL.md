@@ -1,6 +1,6 @@
 ---
 name: codebase-mapping
-description: "Systematic methodology for analyzing an entire codebase and producing structured architecture documentation. Primary consumer: Gemini CLI (Phase 0)."
+description: "Systematic methodology for analyzing an entire codebase and producing structured architecture documentation. Primary consumer: Antigravity CLI (Phase 0)."
 ---
 
 # Codebase Mapping

@@ -66,19 +66,19 @@ After all teammates complete:
 - If clean → proceed to review phase
 
 ### 7. Invoke external agents
-You can invoke Gemini and Codex for review/testing via the unified helper
-(which handles policy loading, timeouts, retries, and native-agent routing):
+You can invoke Antigravity and Codex for review/testing via the unified helper
+(which handles model pinning, timeouts, retries, and native-agent routing):
 ```bash
 source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
-GEMINI_OUT="${TMPDIR:-/tmp}/gemini_team_$$_$(date +%s).txt"
+AGY_OUT="${TMPDIR:-/tmp}/antigravity_team_$$_$(date +%s).txt"
 CODEX_OUT="${TMPDIR:-/tmp}/codex_team_$$_$(date +%s).txt"
 
-# Architecture review for changed scope (Gemini)
-invoke_gemini "architecture-reviewer" \
-  "Review the changes in [files]. Write to ops/REVIEW_GEMINI.md." \
-  "$GEMINI_OUT" 600 &
-GEMINI_PID=$!
+# Architecture review for changed scope (Antigravity)
+invoke_antigravity "architecture-reviewer" \
+  "Review the changes in [files]. Write to ops/REVIEW_ANTIGRAVITY.md if you can; otherwise return findings as your response." \
+  "$AGY_OUT" 600 &
+AGY_PID=$!
 
 # TDD tests for changed scope (Codex)
 invoke_codex "test_writer" \
@@ -87,11 +87,11 @@ invoke_codex "test_writer" \
 CODEX_PID=$!
 
 # Per-PID wait so silent failures surface instead of producing empty review files
-GEMINI_RC=0; CODEX_RC=0
-wait $GEMINI_PID || GEMINI_RC=$?
+AGY_RC=0; CODEX_RC=0
+wait $AGY_PID || AGY_RC=$?
 wait $CODEX_PID  || CODEX_RC=$?
-if [ $GEMINI_RC -ne 0 ] || [ $CODEX_RC -ne 0 ]; then
-  echo "team-lead: helper failed — gemini=$GEMINI_RC codex=$CODEX_RC" >&2
+if [ $AGY_RC -ne 0 ] || [ $CODEX_RC -ne 0 ]; then
+  echo "team-lead: helper failed — antigravity=$AGY_RC codex=$CODEX_RC" >&2
 fi
 ```
 

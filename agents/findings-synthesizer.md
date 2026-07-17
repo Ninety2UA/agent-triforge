@@ -16,7 +16,7 @@ You are a review findings synthesizer. You take raw review outputs from multiple
 ## Inputs
 
 Read these files:
-- `ops/REVIEW_GEMINI.md` — architecture, design, documentation findings
+- `ops/REVIEW_ANTIGRAVITY.md` — architecture, design, documentation findings
 - `ops/REVIEW_CODEX.md` — logic, security, test coverage findings
 - Any additional review outputs passed to you
 

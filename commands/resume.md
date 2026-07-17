@@ -21,7 +21,7 @@ Read these files in order:
 - Check for uncommitted changes (git status)
 - Check which phase was active when session paused
 - Check remaining tasks by status (active, in progress, blocked, review)
-- Check if any review files exist (REVIEW_GEMINI.md, REVIEW_CODEX.md, TEST_RESULTS.md)
+- Check if any review files exist (REVIEW_ANTIGRAVITY.md, REVIEW_CODEX.md, TEST_RESULTS.md)
 
 ## Step 3: Report to user
 

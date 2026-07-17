@@ -75,7 +75,7 @@ Each task dispatched as an independent parallel executor:
 
 ### Team mode (complex, 5+ tasks or cross-dependent)
 
-> **Note:** Team mode requires Claude Code's experimental Agent Teams feature (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"`). This mode is Claude-specific and not available when this skill is injected into Gemini or Codex.
+> **Note:** Team mode requires Claude Code's experimental Agent Teams feature (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"`). This mode is Claude-specific and not available when this skill is injected into Antigravity or Codex.
 
 Each task assigned to a coordinated team worker:
 - Workers coordinate via shared task list
@@ -108,8 +108,8 @@ Wave 3 (depends on Wave 2):
   → Integration verify: full test suite, build clean
 
 Wave 4 (depends on Wave 3):
-  T6: Documentation (Gemini)
-  T7: Security review (Gemini + Codex parallel)
+  T6: Documentation (Antigravity)
+  T7: Security review (Antigravity + Codex parallel)
 ```
 
 ## Output

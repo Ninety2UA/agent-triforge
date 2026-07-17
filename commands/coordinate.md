@@ -30,15 +30,15 @@ completion_promise: "DONE"
 ## Execute the full lifecycle
 
 ### Phase 0: Codebase analysis
-Invoke Gemini with the codebase-analyst agent definition (skip if unnecessary):
+Invoke Antigravity with the codebase-analyst agent definition (skip if unnecessary):
 ```bash
 set -euo pipefail
 source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
 # Full codebase analysis (uses codebase-analyst agent definition)
-invoke_gemini "codebase-analyst" \
+invoke_antigravity "codebase-analyst" \
   "Analyze the full codebase. Write to ops/ARCHITECTURE.md, ops/MEMORY.md (append), ops/CONTRACTS.md (append)." \
-  "${TMPDIR:-/tmp}/gemini_phase0_$$_$(date +%s).txt" 600
+  "${TMPDIR:-/tmp}/antigravity_phase0_$$_$(date +%s).txt" 600
 ```
 Read updated ops/ files after completion.
 
@@ -59,7 +59,7 @@ Use wave orchestration. Subagent mode for < 5 tasks, agent team mode for 5+.
 Run `integration-verifier` between waves. Apply risk scoring.
 
 ### Phase 3: Parallel review
-Launch Gemini + Codex (background bash) + Claude review agents simultaneously:
+Launch Antigravity + Codex (background bash) + Claude review agents simultaneously:
 - security-sentinel agent
 - performance-oracle agent
 - code-simplicity-reviewer agent

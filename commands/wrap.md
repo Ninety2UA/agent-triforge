@@ -21,7 +21,7 @@ Follow the `knowledge-compounding` skill:
 ## Step 3: Archive temporary files
 
 Move to ops/archive/[today's date]/:
-- ops/REVIEW_GEMINI.md (if exists)
+- ops/REVIEW_ANTIGRAVITY.md (if exists)
 - ops/REVIEW_CODEX.md (if exists)
 - ops/TEST_RESULTS.md (if exists)
 

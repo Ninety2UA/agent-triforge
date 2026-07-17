@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ## Project overview
 
-This is a **Claude Code plugin** — **Agent Triforge** — providing a multi-agent coordination framework where Claude Code serves as the **lead agent**, orchestrating Gemini CLI, Codex CLI, and specialized Claude subagents through a hybrid file-based + bash-invocation + native-subagent protocol. The framework is defined in `docs/agent-triforge.md`.
+This is a **Claude Code plugin** — **Agent Triforge** — providing a multi-agent coordination framework where Claude Code serves as the **lead agent**, orchestrating Antigravity CLI (binary: `agy`), Codex CLI, and specialized Claude subagents through a hybrid file-based + bash-invocation + native-subagent protocol. The framework is defined in `docs/agent-triforge.md`.
 
 Install: `claude plugin add https://github.com/Ninety2UA/agent-triforge`
 
@@ -15,15 +15,15 @@ Install: `claude plugin add https://github.com/Ninety2UA/agent-triforge`
 - **Claude Code (Opus max effort)** — lead agent: plans work, builds features, coordinates all agents, merges review feedback
 - **Claude specialized agents (Opus max effort)** — 19 focused subagents (`agents/`): plan validation, review synthesis, security, performance, etc. Lead/team-lead may step narrow tasks down the runtime ladder one tier at a time: `opus`+`max` → `opus`+`xhigh` → `opus`+`high` → `sonnet`+`high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
 - **Claude agent teams (Opus max effort)** — multi-instance collaboration for complex builds (5+ interdependent tasks)
-- **Gemini CLI** — analyst + reviewer: Phase 0 codebase scans (1M token context), architecture reviews, documentation
+- **Antigravity CLI (`agy`)** — analyst + reviewer: Phase 0 codebase scans (Gemini 3.1 Pro (High), 1M token context), architecture reviews, documentation
 - **Codex CLI** — tester + logic reviewer: writes/runs tests, security audits, infrastructure tasks
 
-Claude invokes Gemini via `invoke_gemini` and Codex via `invoke_codex` (from `scripts/invoke-external.sh`) as background bash processes. Skills are embedded in native agent definitions (`gemini-agents/`, `codex-agents/`), with automatic fallback to legacy `$(cat ...)` injection for older CLI versions. Reviews run in parallel (Gemini + Codex + Claude subagents simultaneously), never sequentially.
+Claude invokes Antigravity via `invoke_antigravity` and Codex via `invoke_codex` (from `scripts/invoke-external.sh`) as background bash processes. Skills are embedded in native agent definitions (`antigravity-agents/agents/`, `codex-agents/`); the helper falls back to prompt-prefix injection when native agent routing isn't available. Reviews run in parallel (Antigravity + Codex + Claude subagents simultaneously), never sequentially.
 
 ### Four coordination modes
 
 1. **File-based (persistent):** Shared markdown files in `ops/` are the source of truth
-2. **Direct invocation (real-time):** Claude calls Gemini/Codex via bash, captures output
+2. **Direct invocation (real-time):** Claude calls Antigravity/Codex via bash, captures output
 3. **Native subagents (parallel):** Claude's Agent tool for isolated parallel tasks with specialized agent definitions
 4. **Agent teams (collaborative):** Multiple Claude instances with shared task lists and messaging (requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"`)
 
@@ -34,31 +34,31 @@ Claude invokes Gemini via `invoke_gemini` and Codex via `invoke_codex` (from `sc
 | `TASKS.md` | Work queue with status tracking | Claude generates and maintains |
 | `MEMORY.md` | Architectural decisions, patterns, gotchas, interface proposals | All agents append |
 | `CHANGELOG.md` | Audit trail with agent attribution | All agents append |
-| `CONTRACTS.md` | Shared TypeScript interface definitions | Claude modifies, Gemini discovers |
-| `ARCHITECTURE.md` | System design document | Gemini writes during Phase 0 |
+| `CONTRACTS.md` | Shared TypeScript interface definitions | Claude modifies, Antigravity discovers |
+| `ARCHITECTURE.md` | System design document | Antigravity writes during Phase 0 |
 | `AGENTS.md` | Master operating protocol read by all agents | Manual |
 | `GOALS.md` | High-level product goals | Manual |
-| `CONVENTIONS.md` | Code style and standards | Gemini discovers, Claude maintains |
+| `CONVENTIONS.md` | Code style and standards | Antigravity discovers, Claude maintains |
 | `STATE.md` | Session continuity — current phase, progress, next actions | Claude writes on pause/wrap |
 | `solutions/` | Documented solved problems for institutional knowledge | Claude writes |
 | `decisions/` | Architecture decision records (ADRs) | Claude writes |
-| `research/` | Targeted research / gap analyses (CLI deprecations, library evaluations, etc.) | Claude or Gemini writes |
-| `REVIEW_GEMINI.md` | Gemini's review output (temporary) | Gemini writes, Claude reads |
+| `research/` | Targeted research / gap analyses (CLI deprecations, library evaluations, etc.) | Claude or Antigravity writes |
+| `REVIEW_ANTIGRAVITY.md` | Antigravity's review output (temporary) | Antigravity writes, Claude reads |
 | `REVIEW_CODEX.md` | Codex's review output (temporary) | Codex writes, Claude reads |
-| `RESEARCH_GEMINI.md` | Gemini targeted-research output (temporary) | Gemini writes, Claude reads |
+| `RESEARCH_ANTIGRAVITY.md` | Antigravity targeted-research output (temporary) | Antigravity writes, Claude reads |
 | `TEST_RESULTS.md` | Test results (temporary) | Codex writes, Claude reads |
 
 ### Execution phases
 
 The full lifecycle for a goal:
 
-0. **Codebase analysis** — Gemini scans full repo with codebase-mapping skill
+0. **Codebase analysis** — Antigravity scans full repo with codebase-mapping skill
 1a. **Pre-plan** — learnings-researcher agent searches institutional knowledge
 1b. **Planning** — Claude decomposes goal with shadow path tracing, error maps, interface context extraction
 1.1. **Ambiguity resolution** — Validate critical assumptions before building
 1.5. **Plan validation** — plan-checker agent validates TASKS.md (max 3 iterations)
 2. **Build** — Wave orchestration via subagents (< 5 tasks) or agent teams (5+ tasks)
-3. **Parallel review** — Gemini + Codex + Claude specialized agents (security-sentinel, performance-oracle, code-simplicity-reviewer) simultaneously
+3. **Parallel review** — Antigravity + Codex + Claude specialized agents (security-sentinel, performance-oracle, code-simplicity-reviewer) simultaneously
 4. **Process reviews** — findings-synthesizer agent merges with confidence tiering, iterative-refinement skill for fix cycles
 5. **Test** — Codex with TDD skill, test-gap-analyzer identifies coverage gaps
 6. **Wrap up** — Knowledge compounding, verification checklist, completion promise, session continuity
@@ -66,10 +66,10 @@ The full lifecycle for a goal:
 ### Assignment heuristic (quick reference)
 
 - **Produces code?** → Claude (subagents or agent team for parallel work)
-- **Evaluates existing code?** → Gemini + Codex + Claude specialized agents in parallel
+- **Evaluates existing code?** → Antigravity + Codex + Claude specialized agents in parallel
 - **Runs/executes something?** → Codex
-- **Produces documentation?** → Gemini
-- **Touches shared interfaces?** → Claude implements → Gemini reviews → Codex tests
+- **Produces documentation?** → Antigravity
+- **Touches shared interfaces?** → Claude implements → Antigravity reviews → Codex tests
 - **Ambiguous?** → Claude takes it, flags for parallel review
 
 ### Agent frontmatter fields
@@ -82,7 +82,7 @@ Agent definitions in `agents/*.md` support these YAML frontmatter fields:
 - `maxTurns` — maximum agentic turns before the agent stops
 - Other: `skills`, `mcpServers`, `hooks`, `memory`, `background`, `isolation`, `color`, `permissionMode`
 
-Gemini and Codex agent files use their CLIs' own conventions: Gemini (`gemini-agents/*.md`) uses `max_turns`/`timeout_mins` plus `gemini-3.1-pro-preview`-style model IDs and lowercase tool names (`read_file`, `run_shell_command`); Codex (`codex-agents/agents.toml`) uses `model_reasoning_effort`, `sandbox_mode`, `approval_policy`, and `include_plan_tool`.
+Antigravity and Codex agent files use their CLIs' own conventions: Antigravity (`antigravity-agents/agents/*.md`) uses `max_turns`/`timeout_mins` plus display-name model IDs (`"Gemini 3.1 Pro (High)"`) and lowercase tool names (`read_file`, `run_shell_command`); Codex (`codex-agents/agents.toml`) uses `model_reasoning_effort`, `sandbox_mode`, `approval_policy`, and `include_plan_tool`.
 
 ### Reliability patterns
 
@@ -99,7 +99,7 @@ All 5 hook handlers use `set -euo pipefail`. When using `grep -c`, add `|| true`
 ### Key constraints
 
 - CONTRACTS.md is never modified directly during review — changes must be proposed in MEMORY.md first
-- Neither Gemini nor Codex may modify source code; they only write to their designated `ops/` files
+- Neither Antigravity nor Codex may modify source code; they only write to their designated `ops/` files
 - Parallel reviews are safe because agents write to separate files
 - Maximum 3 review cycles per sprint before escalating to user
 - Phase 0 can be skipped for small bug fixes, same-session continuations, or unchanged codebases
@@ -110,11 +110,10 @@ All 5 hook handlers use `set -euo pipefail`. When using `grep -c`, add `|| true`
 
 - **Codex `approval_policy = "never"`** on all three agents — the framework is designed for trusted pipelines where user approval would block parallel fan-out. `sandbox_mode` (read-only for `logic_reviewer`, `workspace-write` for `test_writer`/`debugger`) plus the per-agent `tools` allowlist provide the actual isolation. If you deploy to an untrusted environment, change to `approval_policy = "on-request"` in `codex-agents/agents.toml`. The no-agent fallback in `scripts/invoke-external.sh` supplies the same defaults explicitly (`-s workspace-write -c approval_policy="never"`) since Codex v0.128.0 removed the `--full-auto` shorthand.
 - **Codex `tools` allowlist** narrows the tool surface beyond sandbox: `logic_reviewer` has no `write`/`bash`; `test_writer`/`debugger` get both (they need to run tests and reproduce bugs). Defense-in-depth pairs with `sandbox_mode`.
-- **Gemini `policies.toml`** enforces shell-command denylists (`rm -rf`, `git push`, `sudo`) and per-agent restrictions (e.g., `architecture-reviewer` is denied `run_shell_command` in addition to omitting it from `tools`).
+- **Antigravity permission guardrails** — `antigravity-agents/permissions.json` documents the shell-command deny rules migrated from the retired Gemini policy engine (`rm -rf`, `git push`, `sudo`); `templates/.antigravity/settings.json` ships them as a mergeable `permissions` block deployed to `.antigravity/settings.json` at session start. Headless enforcement at the project tier is unproven (probe 2026-07-17: no project-tier settings.json lifts agy's headless permission auto-deny, so the tier likely isn't read headless) — the per-agent `tools` allowlist in `antigravity-agents/agents/*.md` is the primary guardrail (e.g., `architecture-reviewer` and `documentation-writer` omit `run_shell_command` entirely).
 - **Codex `[agents]` nesting caps** (`max_depth = 2`, `max_threads = 4`) prevent runaway fan-out when `logic_reviewer`/`test_writer` call `spawn_agent` for 5+ file scopes.
 - **Codex auto-memory disabled by default** — Triforge ships `templates/.codex/config.toml` with `[memories] use_memories = false` to prevent Codex's v0.129.0 pipeline from writing `~/.codex/memories/{MEMORY.md, skills/, ...}` in parallel with Triforge's `ops/MEMORY.md` and `ops/solutions/`. Users who want Codex memories can remove the block or override in `~/.codex/config.toml`.
-- **Gemini skills interop** — `hooks/handlers/session-start.sh` copies `skills/` to `.agents/skills/` (the workspace skills tier per Gemini v0.36.0+ docs) so Gemini can auto-discover Triforge's portable skills via `activate_skill` instead of requiring per-prompt `$(cat ...)` injection.
-- **Gemini hooks (opt-in)** — `templates/.gemini/hooks.example.json` ships an audit-trail hook (`AfterTool` matcher on `write_file` → appends to `ops/CHANGELOG.md`). Verified to fire under `gemini -p` on v0.41.2; not auto-copied because Gemini's project-hook trust warning adds session-start friction. Users who want it merge the `hooks` block into `.gemini/settings.json`.
+- **Antigravity skills interop** — `hooks/handlers/session-start.sh` copies `skills/` to `.agents/skills/` (the Antigravity workspace-skills tier and the cross-CLI agentskills.io path) so agents that discover workspace skills can pick up Triforge's portable skills without per-prompt `$(cat ...)` injection. The retired Gemini hooks example (`templates/.gemini/hooks.example.json`) was removed with the Gemini lane — project-tier hooks do not fire under `agy -p` (probed 2026-07-17).
 
 ### Quality gates
 
@@ -130,12 +129,14 @@ All 5 hook handlers use `set -euo pipefail`. When using `grep -c`, add `|| true`
 .claude-plugin/
   plugin.json             # Plugin manifest
 agents/                   # 19 Claude specialized agent definitions
-gemini-agents/            # Gemini CLI native subagent definitions
-  codebase-analyst.md       Phase 0 full-repo analysis
-  architecture-reviewer.md  Phase 3 architecture review
-  targeted-researcher.md    Deep-research targeted analysis
-  documentation-writer.md   Documentation specialist
-  policies.toml             Policy engine rules (tool restrictions)
+antigravity-agents/       # Antigravity CLI agent pack (valid agy plugin)
+  plugin.json               agy plugin manifest
+  permissions.json          Permission guardrails (migrated deny rules + rationale)
+  agents/
+    codebase-analyst.md       Phase 0 full-repo analysis
+    architecture-reviewer.md  Phase 3 architecture review
+    targeted-researcher.md    Deep-research targeted analysis
+    documentation-writer.md   Documentation specialist
 codex-agents/             # Codex CLI native agent definitions
   agents.toml               logic_reviewer, test_writer, debugger
 skills/                   # 12 portable skill files (all agents consume)
@@ -150,12 +151,11 @@ settings.json             # Default env vars (agent teams)
 templates/                # Project bootstrapping templates
   CLAUDE.md                 Template for user projects
   ops/                      Skeleton ops/ files
-  .gemini/settings.json     Gemini project settings (disables built-in codebase_investigator)
-  .gemini/hooks.example.json Optional Gemini hooks (audit-trail; opt-in, not auto-copied)
+  .antigravity/settings.json Antigravity workspace settings (permission deny rules)
   .codex/config.toml        Codex project config (disables Codex's auto-memory pipeline)
 scripts/
   coordinate.sh           # Outer loop for context exhaustion recovery
-  invoke-external.sh      # Unified Gemini/Codex invocation with feature detection
+  invoke-external.sh      # Unified Antigravity/Codex invocation with feature detection
 ops/                      # This repo's own project state (not part of plugin)
 docs/                     # Framework design documentation
 ```
@@ -166,7 +166,7 @@ Skills are model-agnostic markdown files consumed by ALL agents:
 
 | Skill | Consumer | Purpose |
 |---|---|---|
-| `codebase-mapping` | Gemini | Full-repo analysis methodology |
+| `codebase-mapping` | Antigravity | Full-repo analysis methodology |
 | `writing-plans` | Claude | Task decomposition with shadow paths |
 | `shadow-path-tracing` | Claude | Enumerate failure paths |
 | `wave-orchestration` | Claude | Dependency-grouped parallel execution |
@@ -179,7 +179,7 @@ Skills are model-agnostic markdown files consumed by ALL agents:
 | `session-continuity` | Claude | Save/resume across sessions |
 | `scope-cutting` | Claude | Systematically cut scope by priority |
 
-Skills consumed by Gemini/Codex are embedded in their native agent definitions (`gemini-agents/`, `codex-agents/`). The `invoke-external.sh` helper handles feature detection and falls back to legacy `$(cat ...)` injection for older CLI versions.
+Skills consumed by Antigravity/Codex are embedded in their native agent definitions (`antigravity-agents/agents/`, `codex-agents/`). The `invoke-external.sh` helper handles feature detection and falls back to prompt-prefix injection when native agent routing isn't available.
 
 ## Specialized agents
 
@@ -193,18 +193,18 @@ Skills consumed by Gemini/Codex are embedded in their native agent definitions (
 
 ## Agent invocation patterns
 
-Commands invoke Gemini and Codex through the unified helper with feature detection:
+Commands invoke Antigravity and Codex through the unified helper with feature detection:
 
 ```bash
 source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
 # Use ${TMPDIR}-scoped, PID+timestamped paths so concurrent runs don't collide.
-GEMINI_OUT="${TMPDIR:-/tmp}/gemini_output_$$_$(date +%s).txt"
+AGY_OUT="${TMPDIR:-/tmp}/antigravity_output_$$_$(date +%s).txt"
 CODEX_OUT="${TMPDIR:-/tmp}/codex_output_$$_$(date +%s).txt"
 
-# Gemini codebase analysis (uses codebase-analyst agent definition)
-invoke_gemini "codebase-analyst" "Analyze codebase..." "$GEMINI_OUT" 600 &
-GEMINI_PID=$!
+# Antigravity codebase analysis (uses codebase-analyst agent definition)
+invoke_antigravity "codebase-analyst" "Analyze codebase..." "$AGY_OUT" 600 &
+AGY_PID=$!
 
 # Codex test writing (uses test_writer agent definition)
 invoke_codex "test_writer" "Write tests..." "$CODEX_OUT" 900 &
@@ -212,27 +212,27 @@ CODEX_PID=$!
 
 # Per-PID wait — a silent failure in either helper leaves the downstream
 # ops/REVIEW_*.md or ops/TEST_RESULTS.md empty and looks like "no findings".
-GEMINI_RC=0; CODEX_RC=0
-wait $GEMINI_PID || GEMINI_RC=$?
+AGY_RC=0; CODEX_RC=0
+wait $AGY_PID || AGY_RC=$?
 wait $CODEX_PID  || CODEX_RC=$?
-[ $GEMINI_RC -ne 0 ] || [ $CODEX_RC -ne 0 ] && { echo "helper failed — gemini=$GEMINI_RC codex=$CODEX_RC" >&2; exit 1; }
+[ $AGY_RC -ne 0 ] || [ $CODEX_RC -ne 0 ] && { echo "helper failed — antigravity=$AGY_RC codex=$CODEX_RC" >&2; exit 1; }
 ```
 
-The helper detects native subagent support at runtime. If available, the CLI loads agent definitions from `.gemini/agents/` or `.codex/agents/` automatically. If not, the helper extracts the agent body and injects it as a prompt prefix (legacy mode).
+The helper detects native agent support at runtime. If `agy agents` lists the requested agent (agents come from installed agy plugins; not yet surfaced in headless mode on agy 1.1.3), it routes natively via `--agent`. Otherwise it extracts the agent body from `antigravity-agents/agents/<name>.md` and injects it as a prompt prefix (the operative mode today). Codex agents load from `.codex/agents/agents.toml`.
 
 ### External agent definitions
 
 | Definition | CLI | Role |
 |---|---|---|
-| `gemini-agents/codebase-analyst.md` | Gemini | Phase 0 full-repo analysis |
-| `gemini-agents/architecture-reviewer.md` | Gemini | Phase 3 architecture review |
-| `gemini-agents/targeted-researcher.md` | Gemini | Deep-research targeted analysis |
-| `gemini-agents/documentation-writer.md` | Gemini | Documentation generation |
+| `antigravity-agents/agents/codebase-analyst.md` | Antigravity | Phase 0 full-repo analysis |
+| `antigravity-agents/agents/architecture-reviewer.md` | Antigravity | Phase 3 architecture review |
+| `antigravity-agents/agents/targeted-researcher.md` | Antigravity | Deep-research targeted analysis |
+| `antigravity-agents/agents/documentation-writer.md` | Antigravity | Documentation generation |
 | `codex-agents/agents.toml → logic_reviewer` | Codex | Phase 3 logic + security review |
 | `codex-agents/agents.toml → test_writer` | Codex | Phase 5 TDD test writing |
 | `codex-agents/agents.toml → debugger` | Codex | Bug investigation |
 
-Claude invokes Gemini via `invoke_gemini` and Codex via `invoke_codex` as background bash processes. Agent definitions are copied to `.gemini/agents/` and `.codex/agents/` in user projects at session start. Reviews run in parallel (Gemini + Codex + Claude subagents simultaneously), never sequentially.
+Claude invokes Antigravity via `invoke_antigravity` and Codex via `invoke_codex` as background bash processes. At session start, Codex definitions are copied to `.codex/agents/` in user projects and the Antigravity agent pack is registered once via `agy plugin install` (injection from the plugin templates covers the gap until agy surfaces plugin agents headless). Reviews run in parallel (Antigravity + Codex + Claude subagents simultaneously), never sequentially.
 
 ## Context management
 
@@ -247,7 +247,7 @@ Claude invokes Gemini via `invoke_gemini` and Codex via `invoke_codex` as backgr
 
 All three CLIs must be installed and working in non-interactive mode:
 ```bash
-gemini -p "Respond with only: READY"
+agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"   # always pin the model — agy defaults to a Flash variant
 codex exec "Respond with only: READY"
 ```
 
@@ -256,7 +256,7 @@ Python 3 is also required (used by hook handlers for JSON parsing):
 python3 --version
 ```
 
-On macOS, install GNU `coreutils` so `timeout` enforcement works for Gemini/Codex invocations (`invoke-external.sh` otherwise falls back to a no-timeout exec):
+On macOS, install GNU `coreutils` so `timeout` enforcement works for Antigravity/Codex invocations (`invoke-external.sh` is fail-closed: without `timeout`/`gtimeout` it refuses to run external invocations at all):
 ```bash
 brew install coreutils
 ```
@@ -264,12 +264,12 @@ brew install coreutils
 
 ## Compatibility
 
-Tested against **Codex 0.130.0** and **Gemini 0.41.2** (2026-05-12).
+Tested against **Codex 0.130.0** (2026-05-12) and **Antigravity CLI (agy) 1.1.3** (2026-07-17).
 
 **Minimum supported versions:**
 - **Codex ≥ 0.128.0** — first version after `--full-auto` was removed. Earlier versions still work but `scripts/invoke-external.sh` now passes `-s workspace-write -c approval_policy="never"` explicitly instead of relying on the removed shorthand.
-- **Gemini ≥ 0.39.0** — first version after legacy subagent wrappers were retired and `invoke_subagent` was unified. Triforge's `@<agent>` native routing aligns with this. Earlier versions fall through to the legacy prompt-prefix injection in `scripts/invoke-external.sh:51-56`.
+- **Gemini CLI floor removed** — the Gemini lane was replaced by Antigravity (agy ≥ 1.1.3, tested 1.1.3 2026-07-17); legacy Gemini users pin plugin v2.4.3.
 
 **Known-fails / partial support:**
 - Codex hooks (`PreToolUse`, `PostToolUse`, `SessionStart`, `Stop`, `UserPromptSubmit`, `PermissionRequest`) **do not fire under `codex exec`** in v0.130.0 even with a trusted workspace and `[features] codex_hooks` enabled — confirmed by probe on 2026-05-12. The `CodexHooks` feature is active in the feature list but only fires in interactive TUI mode at present. Triforge does not auto-enable Codex hooks for this reason; if upstream extends hooks to `codex exec`, revisit `ops/decisions/2026-05-12-cli-deprecation-watch.md`.
-- Gemini hooks **do** fire under `gemini -p` for `SessionStart`, `BeforeAgent`, `AfterAgent`, `AfterTool` (verified 2026-05-12 on v0.41.2). Shipped as opt-in example only because of the per-session trust-warning UX.
+- Antigravity plugin agents are **not surfaced in headless mode** on agy 1.1.3 (`agy agents` stays empty and `--agent` silently ignores unknown names), so `invoke_antigravity` runs in injection mode; project-tier hooks and project-tier permission allow-rules also do not take effect under `agy -p` (probed 2026-07-17) — the `/review` and `/deep-research` commands compensate by promoting captured output into `ops/` when the agent could not write there directly.

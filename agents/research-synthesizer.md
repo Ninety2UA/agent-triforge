@@ -17,7 +17,7 @@ You are a research synthesizer. You take outputs from multiple research agents a
 
 ### 1. Collect inputs
 Read all research outputs provided — these may come from:
-- Gemini codebase analysis (ARCHITECTURE.md, MEMORY.md)
+- Antigravity codebase analysis (ARCHITECTURE.md, MEMORY.md, RESEARCH_ANTIGRAVITY.md)
 - Learnings researcher (institutional knowledge search)
 - Framework docs researcher (external documentation)
 - Git history analyzer (code evolution)

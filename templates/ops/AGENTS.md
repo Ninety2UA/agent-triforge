@@ -5,7 +5,7 @@
 ## Agents in this repo
 
 1. Claude Code (lead) — reads CLAUDE.md for specific instructions
-2. Gemini CLI — analyst + reviewer (1M token context for full codebase analysis)
+2. Antigravity CLI (agy) — analyst + reviewer (large context for full codebase analysis)
 3. Codex CLI — tester + logic reviewer (sandbox execution)
 
 <!-- Add or remove agents as needed. For example:
@@ -14,17 +14,17 @@
 
 ## Invoking external agents
 
-All Gemini/Codex invocations go through the plugin's unified helper
-(handles policy loading, timeout, retries, native-agent routing with legacy
-prompt-prefix injection as a fallback):
+All Antigravity/Codex invocations go through the plugin's unified helper
+(handles model pinning, fail-closed timeout enforcement, retries, and
+native-agent routing with prompt-prefix injection as a fallback):
 
 ```bash
 source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
-invoke_gemini "<agent-name>" "<prompt>" "<output-file>" <timeout-seconds>
-invoke_codex  "<agent-name>" "<prompt>" "<output-file>" <timeout-seconds>
+invoke_antigravity "<agent-name>" "<prompt>" "<output-file>" <timeout-seconds>
+invoke_codex       "<agent-name>" "<prompt>" "<output-file>" <timeout-seconds>
 ```
 
-Available native agents live in the plugin at `gemini-agents/` and `codex-agents/`.
+Available native agents live in the plugin at `antigravity-agents/agents/` and `codex-agents/`.
 
 ## Shared rules
 

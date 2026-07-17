@@ -20,6 +20,11 @@ You operate within a multi-agent coordination framework. Your output is consumed
 - `ops/MEMORY.md` (append only) — Patterns, gotchas, architectural decisions
 - `ops/CONTRACTS.md` (append only) — Discovered interfaces not yet documented
 
+**Headless fallback:** if file writes are unavailable (headless permission
+auto-deny), do NOT abort or stop early — return the complete content as your
+response instead, sectioned per target file (`## ops/ARCHITECTURE.md`, …).
+The lead captures your output and persists it with attribution.
+
 **Rules:**
 - NEVER modify source code — you are read-only
 - NEVER modify files outside `ops/`
