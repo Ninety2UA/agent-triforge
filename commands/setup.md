@@ -21,6 +21,13 @@ walk that one (still print the closing table for context).
 ```bash
 set -uo pipefail
 source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
+# invoke-external.sh sets `set -euo pipefail` at its top, which sourcing folds
+# into THIS shell. /setup deliberately runs without errexit — the enrollment
+# helpers return nonzero by design (10 = not installed, 20 = needs interactive
+# ask), and those are normal control-flow, not failures to abort on. Reset -e
+# off after the source so a not-installed/needs-ask member does not kill the
+# guided walk before its status row prints.
+set +e
 ```
 
 Everything below calls functions from that file: `ensure_core_trio_live`,
@@ -121,7 +128,7 @@ for cli in claude antigravity codex opencode kimi cursor; do
         if roster_member_auth "$cli" >/dev/null 2>&1; then auth=ok; else auth=failed; fi
       else auth="-"; fi
       case "$st" in
-        enrolled\(*\)) model="${st#enrolled(}"; model="${model%)}" ;;
+        enrolled\(*\)) model="${st#enrolled\(}"; model="${model%\)}" ;;  # escape ( ) — glob metachars in zsh param-expansion patterns
         declined)      model="skipped" ;;
         *)             model="-" ;;
       esac ;;

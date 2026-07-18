@@ -2034,16 +2034,21 @@ _adapter_env() {
       [ -n "${OPENROUTER_API_KEY+x}" ] && PAIRS+=("OPENROUTER_API_KEY=${OPENROUTER_API_KEY}")
       ;;
     kimi)
-      # Forward every EXPORTED KIMI_* var. `compgen` and ${!V} are bash-only
-      # (see above); iterate `env` output instead so it works under zsh too.
-      # Split on the first `=` only (values may contain `=`).
-      local _kv_name _kv_val
-      while IFS='=' read -r _kv_name _kv_val; do
-        case "$_kv_name" in
-          KIMI_*) PAIRS+=("${_kv_name}=${_kv_val}") ;;
-        esac
+      # Forward every EXPORTED KIMI_* var. `compgen` and ${!V} are bash-only,
+      # so python3 (already required) enumerates os.environ and emits each
+      # matching NAME=VALUE pair base64-encoded, one per line. base64 has no
+      # internal newlines, so line-based read is portable across bash and zsh
+      # AND preserves values that themselves contain newlines or `=`.
+      local _kv_b64
+      while IFS= read -r _kv_b64; do
+        [ -n "$_kv_b64" ] && PAIRS+=("$(printf '%s' "$_kv_b64" | base64 -d 2>/dev/null)")
       done <<KIMIENV
-$(env)
+$(python3 -c "
+import os, base64, sys
+for k, v in os.environ.items():
+    if k.startswith('KIMI_'):
+        sys.stdout.write(base64.b64encode((k + '=' + v).encode()).decode() + '\n')
+")
 KIMIENV
       ;;
     cursor)
@@ -2724,9 +2729,9 @@ print('true' if v is True else 'false')
   }
 
   # (c) protected-path scan. A single match forces the gate ON regardless of the
-  # knob. Prefixes cover permission configs (antigravity-agents/permissions.json,
-  # templates/.antigravity/, templates/.opencode/, templates/.codex/, .codex/),
-  # deny/policy rules (gemini-agents/policies.toml et al.), ops/roster.toml (incl
+  # knob. Prefixes cover every shipped agent config, each CLI's permission/deny
+  # config (shipped templates/.*/ AND the project-level live .*/ dirs), and
+  # ops/roster.toml (incl
   # its [promotion] block), and the shipped agent configs (agents/, and every
   # <cli>-agents/ dir). No literal backticks in the heredoc.
   local PROTECTED_HIT=""
@@ -2739,10 +2744,21 @@ protected_prefixes = (
     'opencode-agents/',
     'kimi-agents/',
     'cursor-agents/',
+    # Shipped per-CLI templates (member-governing configs, permission/deny
+    # rules) — every optional member's dir, symmetric with the core trio's.
     'templates/.antigravity/',
     'templates/.opencode/',
     'templates/.codex/',
+    'templates/.kimi-code/',
+    'templates/.cursor/',
+    'templates/ops/roster.toml',
+    # Project-level live CLI configs — a wave must not silently rewrite the
+    # permission/governance config any adapter reads.
     '.codex/',
+    '.opencode/',
+    '.kimi-code/',
+    '.cursor/',
+    '.antigravity/',
     'ops/roster.toml',
 )
 for line in os.environ.get('CHANGED', '').splitlines():
