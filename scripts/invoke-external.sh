@@ -1555,3 +1555,410 @@ print('')
 print('states: ' + ', '.join(k + '=' + str(v) for k, v in sorted(counts.items())))
 "
 }
+
+# ---------------------------------------------------------------------------
+# Enrollment (R37/R39) — onboarding optional roster members
+# ---------------------------------------------------------------------------
+#
+# One routine serves both onboarding surfaces (AE6):
+#   - R37 first-detection: hooks/handlers/session-start.sh, after optional-CLI
+#     detection, calls roster_enroll_member <cli> headless for each newly
+#     detected optional member. A hook cannot prompt, so headless silently
+#     enrolls the shipped default (KTD-8); a later /setup then shows the member
+#     as already-enrolled instead of re-asking.
+#   - R39 guided walk: commands/setup.md drives the interactive ask (participate?
+#     + which model) and records the answer through roster_write_member.
+#
+# The [members.<cli>] table in ops/roster.toml is BOTH the enrollment record and
+# the idempotency key: its mere presence — enabled=true OR enabled=false —
+# suppresses the ask forever. A decline persists as enabled=false ("disabled =
+# absent everywhere", R38). roster_write_member is the SINGLE writer of that
+# table (mirrors the lease ledger's single-writer discipline): a text-surgical
+# tmp+mv with a tomllib round-trip verify, so it preserves the rest of the file
+# — role tables, comments, promotion gate — byte-for-byte.
+#
+# Shipped optional defaults (KTD-8, session-settled; MUST match CLI_DEFAULT_MODEL
+# in resolve_role): opencode -> openrouter/z-ai/glm-5.2 ; kimi -> kimi-k3 ;
+# cursor -> grok-4.5 (explicit pin, NEVER the Auto router). The core trio
+# (claude/antigravity/codex) is required, never enrolled.
+
+# cli name -> binary looked up on PATH (mirrors resolve_role's BINARY map).
+_roster_binary() {
+  case "${1:-}" in
+    claude)      echo "claude" ;;
+    antigravity) echo "agy" ;;
+    codex)       echo "codex" ;;
+    opencode)    echo "opencode" ;;
+    kimi)        echo "kimi" ;;
+    cursor)      echo "cursor-agent" ;;
+    *) return 2 ;;
+  esac
+}
+
+# Pinned install matrix — OFFICIAL installers only, last verified 2026-07-18.
+# /setup PRINTS these for the user to run themselves; Triforge NEVER executes an
+# installer. The optional-three URLs are the surface /cli-watch (U14) re-checks
+# each cycle — keep the two in sync when an upstream installer URL moves.
+_roster_install_cmd() {
+  case "${1:-}" in
+    opencode)    echo "curl -fsSL https://opencode.ai/install | bash" ;;
+    kimi)        echo "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash" ;;
+    cursor)      echo "curl https://cursor.com/install -fsS | bash" ;;
+    claude)      echo "npm install -g @anthropic-ai/claude-code" ;;
+    antigravity) echo "curl -fsSL https://antigravity.google/cli/install.sh | bash" ;;
+    codex)       echo "npm install -g @openai/codex   (or: brew install codex)" ;;
+    *) return 2 ;;
+  esac
+}
+
+# roster_member_default <cli> — print the shipped default model (KTD-8).
+# Mirrors CLI_DEFAULT_MODEL in resolve_role; claude is intentionally empty (the
+# Claude downgrade ladder resolves its model, never the roster).
+roster_member_default() {
+  case "${1:?usage: roster_member_default <cli>}" in
+    claude)      echo "" ;;
+    antigravity) echo "Gemini 3.1 Pro (High)" ;;
+    codex)       echo "gpt-5.6-sol" ;;
+    opencode)    echo "openrouter/z-ai/glm-5.2" ;;
+    kimi)        echo "kimi-k3" ;;
+    cursor)      echo "grok-4.5" ;;
+    *) echo "roster_member_default: ERROR unknown cli '${1}'" >&2; return 2 ;;
+  esac
+}
+
+# roster_has_member <cli> — 0 when ops/roster.toml carries a [members.<cli>]
+# table, 1 when it does not (or the file is absent — the writer will create it),
+# 2 when the file exists but is unparseable. Cheap (tomllib only, no live probe)
+# so the session-start trigger stays fast.
+roster_has_member() {
+  local CLI=${1:?usage: roster_has_member <cli>}
+  [ -f "ops/roster.toml" ] || return 1
+  ROSTER_FILE="ops/roster.toml" RH_CLI="$CLI" python3 -c "
+import os, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.exit(2)
+try:
+    with open(os.environ['ROSTER_FILE'], 'rb') as f:
+        data = tomllib.load(f)
+except Exception:
+    sys.exit(2)
+m = data.get('members', {})
+sys.exit(0 if isinstance(m, dict) and isinstance(m.get(os.environ['RH_CLI']), dict) else 1)
+"
+}
+
+# _roster_member_field <cli> <field> — print one field of [members.<cli>]
+# (enabled printed as true|false). Nonzero when the entry is absent/unparseable.
+_roster_member_field() {
+  local CLI=${1:?} FIELD=${2:?}
+  [ -f "ops/roster.toml" ] || return 1
+  ROSTER_FILE="ops/roster.toml" RF_CLI="$CLI" RF_FIELD="$FIELD" python3 -c "
+import os, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.exit(1)
+try:
+    with open(os.environ['ROSTER_FILE'], 'rb') as f:
+        data = tomllib.load(f)
+except Exception:
+    sys.exit(1)
+m = data.get('members', {}).get(os.environ['RF_CLI'], {})
+if not isinstance(m, dict):
+    sys.exit(1)
+v = m.get(os.environ['RF_FIELD'], '')
+print('true' if v is True else ('false' if v is False else v))
+"
+}
+
+# roster_write_member <cli> <true|false> <model> [enrolled-tag]
+# The SINGLE writer of [members.<cli>] in ops/roster.toml. Text-surgical so it
+# preserves everything else in the file (roles, comments, promotion gate): it
+# replaces an existing [members.<cli>] block in place, or appends a new one,
+# then round-trip-verifies the result parses AND reflects the intended values
+# before an atomic tmp+mv. Refuses unknown CLIs and refuses to disable a
+# core-trio member (mirrors resolve_role's load-time rule so the roster stays
+# resolvable). enrolled-tag defaults to today's date.
+roster_write_member() {
+  local CLI=${1:?usage: roster_write_member <cli> <true|false> <model> [enrolled-tag]}
+  local ENABLED=${2:?usage: roster_write_member <cli> <true|false> <model> [enrolled-tag]}
+  local MODEL=${3-}
+  local TAG=${4:-$(date +%Y-%m-%d)}
+  mkdir -p ops
+  ROSTER_FILE="ops/roster.toml" RW_CLI="$CLI" RW_ENABLED="$ENABLED" RW_MODEL="$MODEL" RW_TAG="$TAG" python3 -c "
+import json, os, re, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.stderr.write('roster_write_member: ERROR no TOML parser available. Fix: use Python 3.11+ (tomllib) or run: pip install tomli\n')
+        sys.exit(3)
+
+path = os.environ['ROSTER_FILE']
+cli = os.environ['RW_CLI']
+enabled = os.environ['RW_ENABLED']
+model = os.environ['RW_MODEL']
+tag = os.environ['RW_TAG']
+
+CORE = ('claude', 'antigravity', 'codex')
+KNOWN = ('claude', 'antigravity', 'codex', 'opencode', 'kimi', 'cursor')
+if cli not in KNOWN:
+    sys.stderr.write('roster_write_member: ERROR unknown CLI ' + repr(cli) + ' (known: ' + ', '.join(KNOWN) + ')\n')
+    sys.exit(2)
+if enabled not in ('true', 'false'):
+    sys.stderr.write('roster_write_member: ERROR enabled must be true|false, got ' + repr(enabled) + '\n')
+    sys.exit(2)
+if cli in CORE and enabled == 'false':
+    sys.stderr.write('roster_write_member: ERROR [members.' + cli + '] enabled=false rejected — the core trio cannot be disabled\n')
+    sys.exit(2)
+
+block = ('[members.' + cli + ']\n'
+         'enabled = ' + enabled + '\n'
+         'model = ' + json.dumps(model) + '\n'
+         'enrolled = ' + json.dumps(tag) + '\n')
+
+raw = ''
+if os.path.isfile(path):
+    with open(path, 'r') as f:
+        raw = f.read()
+lines = raw.splitlines(keepends=True)
+
+# An UNcommented header only: '# [members.x]' must not match (top scan below
+# uses the same rule so a comment never ends a block).
+hdr = re.compile(r'^\[members\.' + re.escape(cli) + r'\][ \t]*$')
+top = re.compile(r'^\[')
+start = None
+for i, ln in enumerate(lines):
+    if hdr.match(ln):
+        start = i
+        break
+
+if start is not None:
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if top.match(lines[j]):
+            end = j
+            break
+    prefix = ''.join(lines[:start])
+    suffix = ''.join(lines[end:])
+    if prefix and not prefix.endswith('\n'):
+        prefix += '\n'
+    new_raw = prefix + block
+    if suffix.strip():
+        if not suffix.startswith('\n'):
+            new_raw += '\n'
+        new_raw += suffix
+    else:
+        new_raw += suffix
+else:
+    new_raw = raw
+    if new_raw and not new_raw.endswith('\n'):
+        new_raw += '\n'
+    if new_raw and not new_raw.endswith('\n\n'):
+        new_raw += '\n'
+    new_raw += block
+
+tmp = path + '.tmp.' + str(os.getpid())
+with open(tmp, 'w') as f:
+    f.write(new_raw)
+# The roster MUST stay tomllib-parseable AND reflect our values after every
+# write — verify the tmp file BEFORE it replaces the live roster.
+try:
+    with open(tmp, 'rb') as f:
+        data = tomllib.load(f)
+    m = data.get('members', {}).get(cli, {})
+    assert isinstance(m, dict), 'members.' + cli + ' is not a table after write'
+    assert m.get('enabled') == (enabled == 'true'), 'enabled mismatch after write'
+    assert str(m.get('model', '')) == model, 'model mismatch after write'
+except Exception as exc:
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    sys.stderr.write('roster_write_member: ERROR serialized roster failed round-trip verify: ' + str(exc) + '\n')
+    sys.exit(4)
+os.replace(tmp, path)
+sys.stderr.write('roster_write_member: [members.' + cli + '] enabled=' + enabled + ' model=' + (model or '<none>') + ' enrolled=' + tag + '\n')
+"
+}
+
+# roster_member_auth <cli> — readiness (login) check for an OPTIONAL member.
+# Prints 'ok' (return 0) or 'auth-failed: <exact fix>' (return 1). Prints
+# 'unknown: ...' (return 2) for the core trio (their liveness is
+# ensure_core_trio_live's job) or an unknown cli. The result is cached per
+# shell ($$ stays the sourcing shell's PID across subshells) so a status table
+# that queries the same cli twice probes only once.
+#   cursor   -> cursor-agent status         (pure auth query, no tokens)
+#   opencode -> OPENROUTER_API_KEY set, else `opencode auth list` names openrouter
+#   kimi     -> bounded headless probe. kimi doctor validates CONFIG only and
+#               PASSES when signed out (probe KIMI-02 PASS vs KIMI-05 AUTH-FAIL),
+#               so login state needs a real headless call. Signed-out fails fast
+#               (no model configured, before any network round-trip) so the cap
+#               is cheap; signed-in answers the trivial READY quickly.
+roster_member_auth() {
+  local CLI=${1:?usage: roster_member_auth <cli>}
+  local CACHE="${TMPDIR:-/tmp}/triforge_auth_${CLI}_$$"
+  if [ -f "$CACHE" ]; then
+    local CACHED; CACHED=$(cat "$CACHE")
+    printf '%s\n' "$CACHED"
+    case "$CACHED" in
+      ok) return 0 ;;
+      unknown*) return 2 ;;
+      *) return 1 ;;
+    esac
+  fi
+  local LINE="" RC=0 OUT=""
+  case "$CLI" in
+    cursor)
+      OUT=$(_run_with_timeout 15 cursor-agent status 2>&1) || true
+      if printf '%s' "$OUT" | grep -qi 'logged in'; then
+        LINE="ok"
+      else
+        LINE="auth-failed: run 'cursor-agent login' to sign in"; RC=1
+      fi
+      ;;
+    opencode)
+      if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+        LINE="ok"
+      elif _run_with_timeout 15 opencode auth list 2>/dev/null | grep -qi 'openrouter'; then
+        LINE="ok"
+      else
+        LINE="auth-failed: set OPENROUTER_API_KEY, or run 'opencode auth login' and connect the openrouter provider (the openrouter/z-ai/glm-5.2 default needs it)"; RC=1
+      fi
+      ;;
+    kimi)
+      local KERR="${TMPDIR:-/tmp}/triforge_kimi_auth_err_$$"
+      OUT=$(_run_with_timeout 45 env KIMI_DISABLE_TELEMETRY=1 kimi --output-format stream-json -p "Respond with only: READY" 2>"$KERR") || true
+      local KE=""; KE=$(cat "$KERR" 2>/dev/null || true); rm -f "$KERR"
+      if printf '%s\n%s' "$OUT" "$KE" | grep -qiE 'no model configured|not (logged|signed) in|use /login|/login|unauthorized|401|credential|authentication (failed|required|expired)'; then
+        LINE="auth-failed: run 'kimi login' (or launch 'kimi' and use /login) to sign in"; RC=1
+      elif printf '%s' "$OUT" | grep -qi 'ready'; then
+        LINE="ok"
+      else
+        LINE="ok"   # inconclusive (no READY, no auth-shaped error) — do not block on an ambiguous probe
+      fi
+      ;;
+    claude|antigravity|codex)
+      LINE="unknown: core member (readiness via ensure_core_trio_live)"; RC=2
+      ;;
+    *)
+      LINE="unknown: cli '${CLI}'"; RC=2
+      ;;
+  esac
+  printf '%s\n' "$LINE" > "$CACHE" 2>/dev/null || true
+  printf '%s\n' "$LINE"
+  return $RC
+}
+
+# roster_member_status <cli> — single-token status for the /setup table:
+#   core                 core-trio member present (required, never enrolled)
+#   not-installed        binary absent from PATH
+#   enrolled(<model>)    [members.<cli>] enabled=true
+#   declined             [members.<cli>] enabled=false (shown "skipped" in table)
+#   detected-unenrolled  binary present, no entry, readiness ok
+#   auth-failed          binary present, no entry, readiness check failed
+# An enrolled member reports enrolled(model) regardless of current auth — the
+# table carries a separate auth column for live readiness; enrollment records
+# intent, not a live login.
+roster_member_status() {
+  local CLI=${1:?usage: roster_member_status <cli>}
+  local BIN; BIN=$(_roster_binary "$CLI") || { echo "unknown-cli"; return 2; }
+  case "$CLI" in
+    claude|antigravity|codex)
+      if command -v "$BIN" >/dev/null 2>&1; then echo "core"; else echo "not-installed"; fi
+      return 0
+      ;;
+  esac
+  if ! command -v "$BIN" >/dev/null 2>&1; then echo "not-installed"; return 0; fi
+  local HAS_RC=0
+  roster_has_member "$CLI" || HAS_RC=$?
+  if [ "$HAS_RC" -eq 0 ]; then
+    local ENABLED MODEL
+    ENABLED=$(_roster_member_field "$CLI" enabled 2>/dev/null || true)
+    MODEL=$(_roster_member_field "$CLI" model 2>/dev/null || true)
+    if [ "$ENABLED" = "false" ]; then echo "declined"; else echo "enrolled(${MODEL})"; fi
+    return 0
+  fi
+  if roster_member_auth "$CLI" >/dev/null 2>&1; then echo "detected-unenrolled"; else echo "auth-failed"; fi
+  return 0
+}
+
+# roster_enroll_member <cli> <interactive|headless> — the shared enrollment
+# routine both surfaces call. Idempotent (AE6): an existing [members.<cli>]
+# entry short-circuits to already-enrolled. Return codes let callers react
+# without parsing stderr:
+#   0  done          already enrolled, or headless just enrolled the default
+#   2  invalid       unknown cli, core-trio cli, or bad mode
+#   4  roster-error  ops/roster.toml exists but is unparseable
+#   10 not-installed binary absent — the OFFICIAL install command is PRINTED
+#                    (never run); /setup shows the row as "not installed"
+#   20 needs-ask     interactive + installed + unenrolled — the CALLER runs the
+#                    participate?/which-model ask, then roster_write_member
+roster_enroll_member() {
+  local CLI=${1:?usage: roster_enroll_member <cli> <interactive|headless>}
+  local MODE=${2:?usage: roster_enroll_member <cli> <interactive|headless>}
+  local BIN DEFAULT
+  BIN=$(_roster_binary "$CLI") || { echo "roster_enroll_member: unknown cli '${CLI}'" >&2; return 2; }
+  case "$CLI" in
+    claude|antigravity|codex)
+      echo "roster_enroll_member: '${CLI}' is core-trio (required, never enrolled) — nothing to do" >&2
+      return 2
+      ;;
+  esac
+  case "$MODE" in
+    interactive|headless) : ;;
+    *) echo "roster_enroll_member: ERROR mode must be interactive|headless, got '${MODE}'" >&2; return 2 ;;
+  esac
+  DEFAULT=$(roster_member_default "$CLI")
+
+  # Idempotency (AE6): any existing entry — enrolled OR declined — suppresses
+  # the ask. This is what makes /setup and first-detection re-runnable.
+  local HAS_RC=0
+  roster_has_member "$CLI" || HAS_RC=$?
+  if [ "$HAS_RC" -eq 0 ]; then
+    echo "already-enrolled: ${CLI} — $(roster_member_status "$CLI")"
+    return 0
+  fi
+  if [ "$HAS_RC" -eq 2 ]; then
+    echo "roster_enroll_member: ops/roster.toml is unparseable — not enrolling ${CLI} (resolve_role will surface the exact parse error)" >&2
+    return 4
+  fi
+
+  # Binary detection: absent -> PRINT the official install command (never run
+  # it) and return the not-installed code so the caller shows "not installed".
+  if ! command -v "$BIN" >/dev/null 2>&1; then
+    echo "not-installed: ${CLI} (binary '${BIN}' absent). Install it yourself — Triforge never runs installers for you:"
+    echo "    $(_roster_install_cmd "$CLI")"
+    return 10
+  fi
+
+  # Auth/READY check names the exact fix on failure. Skipped in headless mode
+  # so the session-start trigger stays fast (no live probe); a failed auth does
+  # not block enrollment (which records intent) — the caller surfaces the fix.
+  local AUTH="skipped"
+  if [ "$MODE" != "headless" ]; then
+    AUTH=$(roster_member_auth "$CLI") || true
+  fi
+
+  if [ "$MODE" = "headless" ]; then
+    roster_write_member "$CLI" true "$DEFAULT" "headless-default:$(date +%Y-%m-%d)" || return $?
+    echo "enrolled: ${CLI} model=${DEFAULT:-<ladder>} (headless-default)"
+    return 0
+  fi
+
+  # interactive: the CALLER (setup.md) runs the ask and writes the answer.
+  echo "needs-ask: ${CLI} installed=yes default-model=${DEFAULT} auth=${AUTH}"
+  echo "  enroll : roster_write_member ${CLI} true <model>   (recommended: ${DEFAULT})"
+  echo "  decline: roster_write_member ${CLI} false \"\""
+  return 20
+}

@@ -1,0 +1,148 @@
+---
+description: "Guided roster onboarding: verify the core trio is live, then enroll (or decline) each optional CLI with a chosen model. Idempotent — re-run any time."
+allowed-tools: Read, Grep, Bash
+argument-hint: "[optional: a single cli to (re)check — opencode|kimi|cursor]"
+---
+
+You are running the guided roster setup (R39). Walk every roster member — the
+core trio first, then the optional CLIs — and leave the user with a working,
+user-chosen roster in `ops/roster.toml`. This is the one guided path from a
+fresh install to a live roster (AE6/AE8).
+
+All enrollment state lives in `ops/roster.toml` under `[members.<cli>]` tables.
+Every write goes through `roster_write_member` (the single writer). Never edit
+`ops/roster.toml` by hand from this command.
+
+Optional argument `$ARGUMENTS`: if the user named a single optional CLI, only
+walk that one (still print the closing table for context).
+
+## Step 0 — Source the helpers
+
+```bash
+set -uo pipefail
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
+```
+
+Everything below calls functions from that file: `ensure_core_trio_live`,
+`roster_enroll_member`, `roster_member_default`, `roster_member_auth`,
+`roster_write_member`, `roster_member_status`, `_roster_binary`,
+`_roster_install_cmd`.
+
+## Step 1 — Core trio (required; loud until live)
+
+The core trio (claude, antigravity/`agy`, codex) is required — it is never
+enrolled and never optional. Gate it first:
+
+```bash
+ensure_core_trio_live && echo "CORE-TRIO: live" || echo "CORE-TRIO: UNRESOLVED"
+```
+
+- If it prints `live`: the trio is installed and answered its liveness probe.
+- If it prints `UNRESOLVED`: `ensure_core_trio_live` already named exactly which
+  member failed and its install/login fix on stderr. **Setup stays UNRESOLVED
+  (loud) until the user installs/logs in that member** (AE8). Print the exact
+  fix (or `_roster_install_cmd <cli>` for the install line), tell the user setup
+  cannot complete until the trio is live, and still print the closing table so
+  they can see the whole picture. Do NOT run any installer yourself — only the
+  user runs installers.
+
+## Step 2 — Optional members (guided ask)
+
+For each optional CLI in order — `opencode`, `kimi`, `cursor` (or just the one in
+`$ARGUMENTS`) — run the preflight, then act on its return code:
+
+```bash
+roster_enroll_member <cli> interactive; echo "rc=$?"
+```
+
+- **`already-enrolled: ...` (rc 0)** — the member already has an entry (enrolled
+  or declined). Show its current state from the message. Do NOT re-ask (AE6).
+- **`not-installed: ...` (rc 10)** — the helper PRINTED the official install
+  command. Relay it verbatim for the user to run themselves. Record nothing.
+  This is not an error — the row shows "not installed" / skipped and setup
+  continues (AE8).
+- **`needs-ask: <cli> installed=yes default-model=<default> auth=<...>` (rc 20)**
+  — installed and not yet enrolled. Run the ask:
+  1. **Participate?** Ask whether to enroll `<cli>` in the roster.
+     - **No** → record the decline (persists as `enabled=false`, shown "skipped";
+       no error, AE8):
+       ```bash
+       roster_write_member <cli> false ""
+       ```
+     - **Yes** → **which model?** Offer the shipped default (recommended) plus
+       the CLI's own live model list, then write the choice:
+       ```bash
+       roster_write_member <cli> true "<chosen-model>"
+       ```
+  - If the `auth=` field (or `readiness:` line) reported `auth-failed: <fix>`,
+    surface that fix — the member can still enroll (enrollment records intent),
+    but it will not dispatch until the user completes the named login step.
+
+**Live model lists** (offer the shipped default first, recommended):
+
+| CLI | Shipped default (recommended) | Live list command | Notes |
+|---|---|---|---|
+| opencode | `openrouter/z-ai/glm-5.2` | `opencode models openrouter` | needs the openrouter provider connected (`OPENROUTER_API_KEY` or `opencode auth login`) |
+| kimi | `kimi-k3` | (no list flag; `kimi --help` shows `-m`) | offer the default; sign in with `kimi login` |
+| cursor | `grok-4.5` | `cursor-agent --list-models` | pin `grok-4.5` explicitly — never the Auto router |
+
+Fetch a list only when the user wants to see options, e.g.:
+
+```bash
+cursor-agent --list-models 2>/dev/null | head -40
+opencode models openrouter 2>/dev/null | grep -i glm
+```
+
+If a list command fails or is unavailable, fall back to the shipped default —
+never block enrollment on a missing list.
+
+## Step 3 — Closing status table (all six rows)
+
+Always end with one row per CLI (core trio first). Build it mechanically so it
+reflects the roster you just wrote:
+
+```bash
+printf '%-12s  %-10s  %-8s  %-24s  %s\n' CLI INSTALLED AUTH ENROLLED-MODEL ROLE-ELIGIBILITY
+for cli in claude antigravity codex opencode kimi cursor; do
+  bin=$(_roster_binary "$cli")
+  if command -v "$bin" >/dev/null 2>&1; then inst=yes; else inst=no; fi
+  st=$(roster_member_status "$cli")
+  case "$cli" in
+    claude)      role="builder (lead); final fallback for all roles" ;;
+    codex)       role="reviewer + tester; builder fallback" ;;
+    antigravity) role="analyst + documenter; reviewer fallback" ;;
+    *)           role="optional — add to a role's fallbacks in ops/roster.toml to activate" ;;
+  esac
+  case "$cli" in
+    claude|antigravity|codex)
+      auth="(core)"; model="(required)" ;;
+    *)
+      if [ "$inst" = yes ]; then
+        if roster_member_auth "$cli" >/dev/null 2>&1; then auth=ok; else auth=failed; fi
+      else auth="-"; fi
+      case "$st" in
+        enrolled\(*\)) model="${st#enrolled(}"; model="${model%)}" ;;
+        declined)      model="skipped" ;;
+        *)             model="-" ;;
+      esac ;;
+  esac
+  printf '%-12s  %-10s  %-8s  %-24s  %s\n' "$cli" "$inst" "$auth" "$model" "$role"
+done
+```
+
+Present the table, then a one-line verdict:
+
+- **All core-trio rows installed and live** → setup resolved. Summarize which
+  optional members enrolled (and their model), which were skipped, which are not
+  installed.
+- **Any core-trio row `no`/unresolved** → setup UNRESOLVED. Repeat the exact
+  install/login fix for the missing core member(s); tell the user to install and
+  re-run `/setup`.
+
+## Idempotency & re-runs
+
+`/setup` is safe to re-run at any time. Already-enrolled and already-declined
+members show their current state and are not re-asked (AE6). To change a member,
+the user can re-run `roster_write_member <cli> true "<new-model>"` (or set
+`enabled=false` to disable it — disabled = absent everywhere, R38). The core
+trio can never be disabled.

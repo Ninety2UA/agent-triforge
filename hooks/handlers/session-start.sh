@@ -123,12 +123,14 @@ fi
 # branch treats "no" as headless and enrolls shipped defaults silently.
 ROSTER_DETECTED=".claude/roster-detected.local.md"
 OPTIONAL_DETECTED_COUNT=0
+DETECTED_OPTIONAL=()
 TIMEOUT_BIN=""
 command -v timeout >/dev/null 2>&1 && TIMEOUT_BIN="timeout"
 [ -z "$TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && TIMEOUT_BIN="gtimeout"
+if [ -t 0 ]; then INTERACTIVE_SIGNAL="yes"; else INTERACTIVE_SIGNAL="no"; fi
 {
   echo "<!-- runtime state: optional roster CLI detection, regenerated each session start -->"
-  if [ -t 0 ]; then echo "interactive=yes"; else echo "interactive=no"; fi
+  echo "interactive=${INTERACTIVE_SIGNAL}"
 } > "$ROSTER_DETECTED"
 for PAIR in "opencode:opencode" "kimi:kimi" "cursor:cursor-agent"; do
   CLI_NAME=${PAIR%%:*}
@@ -147,8 +149,35 @@ for PAIR in "opencode:opencode" "kimi:kimi" "cursor:cursor-agent"; do
     [ -z "$CLI_VERSION" ] && CLI_VERSION="unknown"
     echo "${CLI_NAME}|${CLI_VERSION}|$(date +%Y-%m-%d)" >> "$ROSTER_DETECTED"
     OPTIONAL_DETECTED_COUNT=$((OPTIONAL_DETECTED_COUNT + 1))
+    DETECTED_OPTIONAL+=("$CLI_NAME")
   fi
 done
+
+# First-detection enrollment trigger (R37). For each optional CLI detected THIS
+# session with no [members.<cli>] entry yet:
+#   headless (interactive=no) -> silently enroll its shipped default now (a hook
+#     cannot prompt); the lease layer records the resolved model at dispatch.
+#   interactive (=yes)        -> emit an orientation line pointing at /setup.
+# All writes go through the single-writer roster writer (roster_write_member) in
+# invoke-external.sh — never a hand-rolled write here. Fast: headless enrollment
+# does no live auth probe; each helper call is tomllib-only.
+ENROLLMENT_NOTICES=""
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh" ] && [ "${#DETECTED_OPTIONAL[@]}" -gt 0 ]; then
+  # shellcheck source=/dev/null
+  source "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh"
+  for CLI_NAME in "${DETECTED_OPTIONAL[@]}"; do
+    ENROLL_HAS_RC=0
+    roster_has_member "$CLI_NAME" || ENROLL_HAS_RC=$?
+    [ "$ENROLL_HAS_RC" -eq 0 ] && continue   # already enrolled or declined — never re-ask (AE6)
+    [ "$ENROLL_HAS_RC" -eq 2 ] && continue   # roster unparseable — leave it to resolve_role to surface loudly
+    if [ "$INTERACTIVE_SIGNAL" = "no" ]; then
+      roster_enroll_member "$CLI_NAME" headless >/dev/null 2>&1 || true
+    else
+      ENROLL_DEF=$(roster_member_default "$CLI_NAME" 2>/dev/null || true)
+      ENROLLMENT_NOTICES="${ENROLLMENT_NOTICES}\nNew optional CLI detected: ${CLI_NAME} (unenrolled). Run /setup to enroll, or it enrolls with its shipped default (${ENROLL_DEF}) on first headless use."
+    fi
+  done
+fi
 
 # Enrolled count = [members.*] entries in ops/roster.toml when present
 # (tolerant: a malformed roster must not break session start — it reports 0
@@ -291,6 +320,7 @@ fi
 # Roster orientation (KTD-2): optional members detected this session, and how
 # many carry [members.*] enrollment entries in ops/roster.toml.
 MSG="$MSG\nRoster: core trio + ${OPTIONAL_DETECTED_COUNT} optional member(s) detected (${ENROLLED_COUNT} enrolled)."
+MSG="$MSG${ENROLLMENT_NOTICES:-}"
 
 # Lease-ledger resume orientation (KTD-4/U9): report active leases left by a
 # previous session. Deliberately NO auto-prune here — a session-start hook
