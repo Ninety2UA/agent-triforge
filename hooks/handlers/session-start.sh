@@ -292,6 +292,37 @@ fi
 # many carry [members.*] enrollment entries in ops/roster.toml.
 MSG="$MSG\nRoster: core trio + ${OPTIONAL_DETECTED_COUNT} optional member(s) detected (${ENROLLED_COUNT} enrolled)."
 
+# Lease-ledger resume orientation (KTD-4/U9): report active leases left by a
+# previous session. Deliberately NO auto-prune here — a session-start hook
+# must never delete worktrees; /resume or the wave protocol runs
+# lease_heartbeat_check, whose safe-prune path does the reclamation.
+ACTIVE_LEASES=0
+if [ -f "ops/leases.toml" ]; then
+  ACTIVE_LEASES=$(python3 -c "
+import sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        print(0)
+        sys.exit(0)
+try:
+    with open('ops/leases.toml', 'rb') as f:
+        data = tomllib.load(f)
+    leases = data.get('lease', {})
+    active = ('building', 'leased', 'orphaned')
+    print(sum(1 for v in (leases.values() if isinstance(leases, dict) else [])
+              if isinstance(v, dict) and v.get('state') in active))
+except Exception:
+    print(0)
+" 2>/dev/null || echo 0)
+fi
+if [ "${ACTIVE_LEASES:-0}" -gt 0 ] 2>/dev/null; then
+  MSG="$MSG\nLease ledger: ${ACTIVE_LEASES} active lease(s) from a previous session — run lease_heartbeat_check (or /resume) to reclaim orphans."
+fi
+
 if [ "$HAS_TASKS" != "yes" ] && [ "$HAS_STATE" != "yes" ]; then
   MSG="$MSG\nNo active sprint. Use /plan <goal> to start or /ship <goal> for full autonomous mode."
 fi

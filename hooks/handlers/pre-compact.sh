@@ -50,4 +50,53 @@ $CURRENT_PHASE
 3. Re-read ops/MEMORY.md for architectural context
 EOF
 
+# Lease snapshot (KTD-4/U9): with an active ledger, a post-compaction resume
+# must reconstruct wave state from ops/leases.toml instead of restarting the
+# wave. Single tolerant python3 pass — a malformed ledger reports itself in
+# the snapshot rather than breaking the checkpoint (must stay fast).
+if [ -f "ops/leases.toml" ]; then
+  LEASE_SNAPSHOT=$(python3 -c "
+import sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        print('- ledger present but no TOML parser available')
+        sys.exit(0)
+try:
+    with open('ops/leases.toml', 'rb') as f:
+        data = tomllib.load(f)
+except Exception as exc:
+    print('- ledger present but unparseable: ' + str(exc))
+    sys.exit(0)
+leases = data.get('lease', {})
+leases = leases if isinstance(leases, dict) else {}
+NON_TERMINAL = ('leased', 'building', 'review', 'orphaned', 'requeued')
+counts = {}
+lines = []
+for t in sorted(leases):
+    r = leases[t]
+    if not isinstance(r, dict):
+        continue
+    state = str(r.get('state', '?'))
+    counts[state] = counts.get(state, 0) + 1
+    if state in NON_TERMINAL:
+        lines.append('- ' + str(t) + ': ' + str(r.get('builder_cli', '?')) + ' — ' + state)
+print('Counts: ' + (', '.join(k + '=' + str(v) for k, v in sorted(counts.items())) if counts else 'none'))
+for line in lines:
+    print(line)
+" 2>/dev/null || true)
+  if [ -n "$LEASE_SNAPSHOT" ]; then
+    {
+      echo ""
+      echo "## Lease snapshot"
+      printf '%s\n' "$LEASE_SNAPSHOT"
+      echo ""
+      echo "Reconstruct from ops/leases.toml on resume: lease_heartbeat_check reclaims orphans; never redo merged leases."
+    } >> "ops/STATE.md"
+  fi
+fi
+
 exit 0

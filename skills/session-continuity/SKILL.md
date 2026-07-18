@@ -43,6 +43,12 @@ When pausing a session, write `ops/STATE.md`:
 - Cycle: [N of 3]
 - Convergence mode: [fast | standard | deep]
 - Outstanding issues: [count by priority]
+
+## Lease snapshot
+<!-- Omit this section when ops/leases.toml does not exist -->
+Counts: [state=N, ... from ops/leases.toml]
+- [task_id]: [builder_cli] — [state]   (one line per non-terminal lease:
+  leased | building | review | orphaned | requeued)
 ```
 
 ## Resume (restore state)
@@ -53,8 +59,12 @@ When starting a new session on existing work:
 2. Read `ops/TASKS.md` — current task status
 3. Read `ops/MEMORY.md` — decisions and gotchas from previous sessions
 4. Read `ops/CHANGELOG.md` — what was already done
-5. Check for uncommitted changes (git status)
-6. Resume from the phase and action recorded in STATE.md
+5. Check `ops/leases.toml` — if it exists, reconstruct wave state from the
+   ledger: run `lease_heartbeat_check` to reclaim orphans, requeue or finish
+   open leases, and NEVER redo merged leases (their commits are already on
+   the integration branch)
+6. Check for uncommitted changes (git status)
+7. Resume from the phase and action recorded in STATE.md
 
 ## Wrap (clean handoff)
 

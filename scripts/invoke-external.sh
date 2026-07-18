@@ -571,7 +571,12 @@ for k, v in sorted(data.get('agents', {}).items()):
 #
 # Distinct exit codes so callers can react without parsing stderr:
 #   2 unknown role requested    3 no TOML parser     4 malformed roster.toml
-#   5 roster validation failed  6 chain exhausted (core terminus binary absent)
+#   5 roster validation failed  6 chain exhausted (core terminus binary absent
+#                                 or every remaining member excluded)
+#
+# RESOLVE_ROLE_EXCLUDE (comma-separated cli names): members skipped during
+# the walk as if absent — the lease layer's requeue hook (KTD-9: requeue
+# goes to a DIFFERENT builder, so lease_requeue excludes previous_builder).
 resolve_role() {
   local ROLE=${1:?usage: resolve_role <role>}
   ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
@@ -676,7 +681,10 @@ if role not in merged:
     sys.exit(2)
 entry = merged[role]
 chain = [entry['cli']] + list(entry['fallbacks'])
+exclude = set(x for x in os.environ.get('RESOLVE_ROLE_EXCLUDE', '').split(',') if x)
 for idx, cli in enumerate(chain):
+    if cli in exclude:
+        continue          # requeue hook (KTD-9): walk past the failed builder
     m = members.get(cli, {})
     m = m if isinstance(m, dict) else {}
     if m.get('enabled') is False:
@@ -695,6 +703,9 @@ for idx, cli in enumerate(chain):
     sys.exit(0)
 
 terminus = chain[-1]
+if terminus in exclude:
+    sys.stderr.write('resolve_role: ERROR role ' + repr(role) + ' chain exhausted — every remaining member is excluded (RESOLVE_ROLE_EXCLUDE=' + repr(','.join(sorted(exclude))) + ', the requeue hook walking past a failed builder). No alternative builder available.\n')
+    sys.exit(6)
 sys.stderr.write('resolve_role: ERROR role ' + repr(role) + ' chain exhausted — core-trio terminus ' + repr(terminus) + ' (binary ' + BINARY[terminus] + ') is not on PATH. Fix: ' + INSTALL_FIX[terminus] + '. No retry (deterministic).\n')
 sys.exit(6)
 "
@@ -741,4 +752,806 @@ ensure_core_trio_live() {
   fi
   : > "$_TRIO_LIVE_CACHE"
   return 0
+}
+
+# ---------------------------------------------------------------------------
+# Lease lifecycle (KTD-4) — the builder pool's spine
+# ---------------------------------------------------------------------------
+#
+# Every non-lead build runs under a per-task lease in an isolated git
+# worktree (R8, R20, R35). The ledger at ops/leases.toml is LEAD-OWNED and
+# single-writer (KTD-4): builders NEVER write it — status flows back through
+# the captured exit code and KTD-9 class the launcher drops beside the
+# output file (<out>.rc / <out>.class). Runtime state, gitignored.
+#
+# State machine (mirrors the plan's lease lifecycle diagram):
+#
+#   [*] -> leased -> building -> review -> merged -> [*]
+#              ^         |          |
+#              |         |          +-> building   findings, cycle < 3 (U10)
+#              |         |          +-> escalated  cycle 3 / no non-author reviewer
+#              |         +-> orphaned   heartbeat expiry or silent death
+#              |         |       +-> requeued   worktree pruned; once (KTD-9)
+#              |         |       +-> escalated  second failure
+#              |         +-> failed     deterministic (auth / absent CLI)
+#              |                 +-> escalated  fail fast with guidance, no requeue
+#              +-------- requeued (re-leased to a DIFFERENT builder)
+#
+# Confinement (KTD-3, KTD-14, R35): builders never read or write the
+# canonical ops/ tree — required context is injected into the dispatch
+# prompt; the builder runs with cwd = its worktree under a per-adapter env
+# allowlist (_adapter_env) so no cross-provider credential leaks; shared-file
+# mutations happen lead-side at collect/merge time on the main tree.
+
+# Repo root of the MAIN checkout (lease functions are lead-side and run from
+# the main tree, never from inside a worktree).
+_lease_repo_root() {
+  git rev-parse --show-toplevel 2>/dev/null
+}
+
+# BSD-portable realpath (no readlink -f on stock macOS).
+_lease_realpath() {
+  RP_TARGET="$1" python3 -c "
+import os
+print(os.path.realpath(os.environ['RP_TARGET']))
+"
+}
+
+# Lease root: TRIFORGE_LEASE_ROOT override, else
+# ${TMPDIR:-/tmp}/triforge-leases/<repo-basename>-<git-hash-of-repo-root-path>
+# (the hash is of the canonical root path STRING, so two checkouts of one
+# repo get distinct roots). Created, then canonicalized before printing —
+# every stored worktree path is canonical from birth, which is what lets
+# lease_reclaim compare stored vs canonical byte-for-byte.
+_lease_root() {
+  local ROOT REPO
+  REPO=$(_lease_repo_root) || { echo "lease: ERROR not inside a git repository — worktree leases require one (outside git the builder pool degrades to lead-only in-place execution)." >&2; return 1; }
+  REPO=$(_lease_realpath "$REPO")
+  if [ -n "${TRIFORGE_LEASE_ROOT:-}" ]; then
+    ROOT="$TRIFORGE_LEASE_ROOT"
+  else
+    local BASE HASH
+    BASE=$(basename "$REPO")
+    HASH=$(printf '%s' "$REPO" | git hash-object --stdin | cut -c1-12)
+    ROOT="${TMPDIR:-/tmp}"
+    ROOT="${ROOT%/}/triforge-leases/${BASE}-${HASH}"
+  fi
+  mkdir -p "$ROOT" || return 1
+  _lease_realpath "$ROOT"
+}
+
+_lease_ledger_path() {
+  local REPO
+  REPO=$(_lease_repo_root) || return 1
+  printf '%s\n' "${REPO}/ops/leases.toml"
+}
+
+# task_id doubles as a directory and branch component — constrain it before
+# it can constrain us (first char alphanumeric, then [A-Za-z0-9._-]).
+_lease_valid_task_id() {
+  case "$1" in
+    ""|[!A-Za-z0-9]*|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  return 0
+}
+
+# _ledger_update <task_id> key=value...
+# The ONLY writer of ops/leases.toml (KTD-4). Read-modify-write: parse with
+# tomllib (read-only stdlib), apply updates, re-serialize with a small flat
+# emitter (values stay flat strings/ints so the round trip is trivial),
+# round-trip-verify the tmp file, then atomic tmp+mv. `updated` is stamped
+# on every call. Int keys: pid, created, updated, heartbeat_deadline,
+# requeue_count.
+_ledger_update() {
+  local TASK_ID=$1
+  shift
+  local LEDGER
+  LEDGER=$(_lease_ledger_path) || return 1
+  mkdir -p "$(dirname "$LEDGER")"
+  LEDGER_FILE="$LEDGER" LEDGER_TASK="$TASK_ID" python3 -c "
+import json, os, sys, time
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.stderr.write('_ledger_update: ERROR no TOML parser available. Fix: use Python 3.11+ (tomllib) or run: pip install tomli\n')
+        sys.exit(3)
+
+path = os.environ['LEDGER_FILE']
+task = os.environ['LEDGER_TASK']
+data = {}
+if os.path.isfile(path):
+    with open(path, 'rb') as f:
+        data = tomllib.load(f)
+leases = data.get('lease', {})
+leases = leases if isinstance(leases, dict) else {}
+row = dict(leases.get(task, {})) if isinstance(leases.get(task, {}), dict) else {}
+INT_KEYS = ('pid', 'created', 'updated', 'heartbeat_deadline', 'requeue_count')
+for arg in sys.argv[1:]:
+    k, sep, v = arg.partition('=')
+    if not sep or not k:
+        sys.stderr.write('_ledger_update: ERROR malformed update ' + repr(arg) + ' (want key=value)\n')
+        sys.exit(2)
+    if k in INT_KEYS:
+        try:
+            row[k] = int(v)
+        except ValueError:
+            sys.stderr.write('_ledger_update: ERROR ' + k + ' must be an integer, got ' + repr(v) + '\n')
+            sys.exit(2)
+    else:
+        row[k] = str(v)
+row['updated'] = int(time.time())
+leases[task] = row
+
+# Flat serializer: only ints, bools, and strings ever land in a row.
+# json.dumps escaping is valid TOML for basic strings and quoted keys.
+lines = ['# ops/leases.toml — lead-owned lease ledger (KTD-4). Runtime state,',
+         '# gitignored. Single writer: the lead, via _ledger_update in',
+         '# scripts/invoke-external.sh. Builders never write this file.',
+         '']
+for t in sorted(leases):
+    r = leases[t]
+    if not isinstance(r, dict):
+        continue
+    lines.append('[lease.' + json.dumps(str(t)) + ']')
+    for k in sorted(r):
+        v = r[k]
+        if isinstance(v, bool):
+            lines.append(k + ' = ' + ('true' if v else 'false'))
+        elif isinstance(v, int):
+            lines.append(k + ' = ' + str(v))
+        else:
+            lines.append(k + ' = ' + json.dumps(str(v)))
+    lines.append('')
+
+tmp = path + '.tmp.' + str(os.getpid())
+with open(tmp, 'w') as f:
+    f.write('\n'.join(lines))
+# The ledger MUST stay tomllib-parseable after every transition: verify the
+# tmp file round-trips BEFORE it replaces the live ledger.
+try:
+    with open(tmp, 'rb') as f:
+        tomllib.load(f)
+except Exception as exc:
+    os.unlink(tmp)
+    sys.stderr.write('_ledger_update: ERROR serialized ledger failed round-trip parse: ' + str(exc) + '\n')
+    sys.exit(4)
+os.replace(tmp, path)
+" "$@"
+}
+
+# _ledger_get <task_id> <key> — print the value ('' when the key is unset);
+# nonzero when the ledger or the lease row is missing entirely.
+_ledger_get() {
+  local LEDGER
+  LEDGER=$(_lease_ledger_path) || return 1
+  [ -f "$LEDGER" ] || return 1
+  LEDGER_FILE="$LEDGER" LEDGER_TASK="$1" LEDGER_KEY="$2" python3 -c "
+import os, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.exit(1)
+with open(os.environ['LEDGER_FILE'], 'rb') as f:
+    data = tomllib.load(f)
+row = data.get('lease', {}).get(os.environ['LEDGER_TASK'])
+if not isinstance(row, dict):
+    sys.exit(1)
+print(row.get(os.environ['LEDGER_KEY'], ''))
+"
+}
+
+# _adapter_env <cli> <cmd...> — run an external command under the per-adapter
+# environment allowlist (KTD-14): base allowlist HOME PATH TMPDIR TERM LANG
+# COLORTERM plus ONLY the invoked CLI's own credential variables (opencode:
+# OPENROUTER_API_KEY; kimi: KIMI_*; cursor: CURSOR_API_KEY). claude, codex,
+# and antigravity authenticate via HOME-based stores and get nothing extra —
+# no cross-provider leakage. env -i execs external commands only; shell
+# functions cannot cross it, which is why lease_dispatch composes direct CLI
+# commands instead of calling the invoke_* helpers (see there).
+_adapter_env() {
+  local CLI=$1
+  shift
+  local -a PAIRS=()
+  local V
+  for V in HOME PATH TMPDIR TERM LANG COLORTERM; do
+    if [ -n "${!V+x}" ]; then
+      PAIRS+=("${V}=${!V}")
+    fi
+  done
+  case "$CLI" in
+    opencode)
+      [ -n "${OPENROUTER_API_KEY+x}" ] && PAIRS+=("OPENROUTER_API_KEY=${OPENROUTER_API_KEY}")
+      ;;
+    kimi)
+      for V in $(compgen -v KIMI_ 2>/dev/null || true); do
+        PAIRS+=("${V}=${!V}")
+      done
+      ;;
+    cursor)
+      [ -n "${CURSOR_API_KEY+x}" ] && PAIRS+=("CURSOR_API_KEY=${CURSOR_API_KEY}")
+      ;;
+  esac
+  env -i "${PAIRS[@]}" "$@"
+}
+
+# Absolute path of the timeout binary, for lanes that exec it via env -i.
+# Fail-closed like _run_with_timeout: no tool -> _RC_NO_TIMEOUT_TOOL.
+_timeout_tool() {
+  if command -v timeout >/dev/null 2>&1; then
+    command -v timeout
+  elif command -v gtimeout >/dev/null 2>&1; then
+    command -v gtimeout
+  else
+    echo "invoke-external.sh: ERROR neither \`timeout\` nor \`gtimeout\` is on PATH — refusing to dispatch a lease without timeout enforcement (fail-closed). Fix: on macOS run \`brew install coreutils\`, then retry." >&2
+    return "$_RC_NO_TIMEOUT_TOOL"
+  fi
+}
+
+# Worktrees lack .agents/skills/ (gitignored in user projects) — provision a
+# copy so portable-skill discovery survives isolation (mirrors the
+# session-start.sh bootstrap; KTD-3 groundwork).
+_lease_provision_skills() {
+  local WT=$1
+  local SRC=""
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/skills" ]; then
+    SRC="${CLAUDE_PLUGIN_ROOT}/skills"
+  elif [ -d "$(_lease_repo_root)/skills" ]; then
+    SRC="$(_lease_repo_root)/skills"
+  fi
+  if [ -z "$SRC" ]; then
+    echo "lease: WARNING no skills source found (CLAUDE_PLUGIN_ROOT/skills or repo skills/) — worktree gets no .agents/skills/" >&2
+    return 0
+  fi
+  mkdir -p "${WT}/.agents"
+  cp -R "$SRC" "${WT}/.agents/skills" 2>/dev/null || true
+}
+
+# lease_create <task_id> <role> — resolve the builder from the roster
+# (resolve_role), carve the worktree + lease branch, provision skills, write
+# the leased row. Echoes task_id on success so callers can chain.
+lease_create() {
+  local TASK_ID=${1:?usage: lease_create <task_id> <role>}
+  local ROLE=${2:?usage: lease_create <task_id> <role>}
+  if ! _lease_valid_task_id "$TASK_ID"; then
+    echo "lease_create: ERROR invalid task id '${TASK_ID}' — want [A-Za-z0-9][A-Za-z0-9._-]* (it becomes a branch and directory name)" >&2
+    return 1
+  fi
+  local REPO ROOT RESOLVED CLI MODEL EFFORT WT NOW
+  REPO=$(_lease_repo_root) || { echo "lease_create: ERROR not inside a git repository" >&2; return 1; }
+  ROOT=$(_lease_root) || return 1
+  RESOLVED=$(resolve_role "$ROLE") || return $?
+  CLI=$(printf '%s\n' "$RESOLVED" | cut -f1)
+  MODEL=$(printf '%s\n' "$RESOLVED" | cut -f2)
+  EFFORT=$(printf '%s\n' "$RESOLVED" | cut -f3)
+  WT="${ROOT}/${TASK_ID}"
+  if [ -e "$WT" ]; then
+    echo "lease_create: ERROR worktree path already exists: ${WT} (reclaim the previous lease first)" >&2
+    return 1
+  fi
+  if ! git -C "$REPO" worktree add "$WT" -b "lease/${TASK_ID}" >&2; then
+    echo "lease_create: ERROR git worktree add failed for task ${TASK_ID}" >&2
+    return 1
+  fi
+  _lease_provision_skills "$WT"
+  NOW=$(date +%s)
+  _ledger_update "$TASK_ID" \
+    task_id="$TASK_ID" role="$ROLE" \
+    builder_cli="$CLI" builder_model="$MODEL" builder_effort="$EFFORT" \
+    state=leased worktree="$WT" branch="lease/${TASK_ID}" \
+    pid=0 output_file="" created="$NOW" heartbeat_deadline=0 \
+    requeue_count=0 previous_builder="" reviewer="" merge_commit="" reason="" \
+    || return 1
+  echo "lease_create: task=${TASK_ID} role=${ROLE} builder=${CLI} model=${MODEL:-ladder-resolved} worktree=${WT}" >&2
+  echo "$TASK_ID"
+}
+
+# lease_dispatch <task_id> <prompt> [timeout-seconds]
+#
+# Composes the FULL dispatch prompt: injected context header (KTD-3 — the
+# lease's roster line plus the explicit confinement contract) + the
+# lead-provided task prompt (which carries the task row text and any
+# CONTRACTS.md slice — the builder never reads canonical ops/).
+#
+# The builder launches in the BACKGROUND with cwd = the worktree (subshell
+# cd), under _adapter_env's per-CLI allowlist (KTD-14). The invoke_* helpers
+# are shell functions and cannot cross env -i, so each lane composes the
+# adapter's command core directly: codex = exec + workspace-write + approval
+# never + stdin guard (codex's own sandbox then scopes writes to the
+# worktree cwd); antigravity = model pin + --add-dir + --print-timeout;
+# claude = -p --permission-mode acceptEdits (cwd IS the worktree, no
+# --add-dir needed). Exit code and KTD-9 class land in <out>.rc /
+# <out>.class for the single-writer lead to collect — the builder process
+# never touches the ledger.
+#
+# Test seam: TRIFORGE_TEST_BUILDER=<script path> replaces the real adapter
+# for lifecycle determinism — the script runs with the worktree as cwd and
+# the full prompt as its first argument, still under the recorded CLI's env
+# allowlist and timeout so the confinement/heartbeat paths stay honest.
+lease_dispatch() {
+  local TASK_ID=${1:?usage: lease_dispatch <task_id> <prompt> [timeout]}
+  local PROMPT=${2:?usage: lease_dispatch <task_id> <prompt> [timeout]}
+  local TIMEOUT=${3:-600}
+  local STATE CLI MODEL EFFORT ROLE WT ROOT OUT TOBIN NOW DEADLINE PID
+  STATE=$(_ledger_get "$TASK_ID" state) || { echo "lease_dispatch: ERROR no lease row for task '${TASK_ID}' — run lease_create first" >&2; return 1; }
+  if [ "$STATE" != "leased" ]; then
+    echo "lease_dispatch: ERROR task ${TASK_ID} is in state '${STATE}' (want leased)" >&2
+    return 1
+  fi
+  CLI=$(_ledger_get "$TASK_ID" builder_cli)
+  MODEL=$(_ledger_get "$TASK_ID" builder_model)
+  EFFORT=$(_ledger_get "$TASK_ID" builder_effort)
+  ROLE=$(_ledger_get "$TASK_ID" role)
+  WT=$(_ledger_get "$TASK_ID" worktree)
+  if [ ! -d "$WT" ]; then
+    echo "lease_dispatch: ERROR worktree missing: ${WT}" >&2
+    return 1
+  fi
+  ROOT=$(_lease_root) || return 1
+  OUT="${ROOT}/${TASK_ID}.out"
+  TOBIN=$(_timeout_tool) || return $?
+
+  local FULL_PROMPT
+  FULL_PROMPT="## Lease dispatch: ${TASK_ID}
+Roster entry: role=${ROLE} cli=${CLI} model=${MODEL:-<ladder-resolved>} effort=${EFFORT}
+
+## Confinement contract
+You are working in an isolated worktree at ${WT}. Never modify files outside it. Never read or write the project's canonical ops/ directory — required context is included below. Commit nothing; the lead collects.
+
+## Task
+${PROMPT}"
+
+  rm -f "$OUT" "${OUT}.rc" "${OUT}.class"
+
+  (
+    cd "$WT" || exit 97
+    RC=0
+    if [ -n "${TRIFORGE_TEST_BUILDER:-}" ]; then
+      # Test seam (see function comment): deterministic fake builder.
+      _adapter_env "$CLI" "$TOBIN" "${TIMEOUT}s" "$TRIFORGE_TEST_BUILDER" "$FULL_PROMPT" > "$OUT" 2>&1 || RC=$?
+    else
+      case "$CLI" in
+        claude)
+          local -a CMD=(claude -p --permission-mode acceptEdits)
+          [ -n "$MODEL" ] && CMD+=(--model "$MODEL")
+          _adapter_env claude "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+          ;;
+        codex)
+          # Mirrors invoke_codex's retry-safe core (sandbox, approval, model
+          # pin, stdin guard) — see the env -i note in the function comment.
+          # The two sandbox_workspace_write excludes drop codex's default
+          # temp-dir write allowance: lease worktrees live under TMPDIR, so
+          # without them a builder could cross into sibling worktrees or the
+          # lease root (R35: writes restricted to the lease worktree).
+          local -a CMD=(codex exec -s workspace-write -c 'approval_policy="never"'
+                        -c 'sandbox_workspace_write.exclude_tmpdir_env_var=true'
+                        -c 'sandbox_workspace_write.exclude_slash_tmp=true')
+          [ -n "$MODEL" ] && CMD+=(-m "$MODEL")
+          [ -n "$EFFORT" ] && CMD+=(-c "model_reasoning_effort=\"${EFFORT}\"")
+          _adapter_env codex "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+          ;;
+        antigravity)
+          _adapter_env antigravity "$TOBIN" "${TIMEOUT}s" agy --model "${MODEL:-Gemini 3.1 Pro (High)}" --add-dir "$WT" --print-timeout "${TIMEOUT}s" -p "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+          ;;
+        *)
+          echo "lease_dispatch: adapter for '${CLI}' not integrated yet (lands in U11-U13)" > "$OUT"
+          RC=95
+          ;;
+      esac
+    fi
+    # Only a nonzero exit has a failure class (matches invoke_antigravity /
+    # invoke_codex): a clean run is class=none, so lease_collect never reads a
+    # spurious 'retryable' off a builder that actually succeeded.
+    if [ "$RC" -eq 0 ]; then
+      INVOKE_FAILURE_CLASS="none"
+    else
+      _classify_invoke_failure "$RC" "$OUT"
+    fi
+    printf '%s\n' "$RC" > "${OUT}.rc"
+    printf '%s\n' "${INVOKE_FAILURE_CLASS:-none}" > "${OUT}.class"
+    exit "$RC"
+  ) &
+  PID=$!
+
+  NOW=$(date +%s)
+  DEADLINE=$((NOW + TIMEOUT))
+  _ledger_update "$TASK_ID" state=building pid="$PID" output_file="$OUT" heartbeat_deadline="$DEADLINE" || return 1
+  echo "lease_dispatch: task=${TASK_ID} builder=${CLI} pid=${PID} timeout=${TIMEOUT}s output=${OUT}" >&2
+}
+
+# lease_heartbeat_check [task_id] — sweep building leases (or just one).
+# Builder alive = the recorded pid answers kill -0 OR the output file was
+# modified within the grace window (TRIFORGE_HEARTBEAT_GRACE, default 60s —
+# covers a dead wrapper whose work just flushed). A dead pid that left
+# <out>.rc is NOT an orphan — the builder finished; run lease_collect. Dead
+# and stale, or alive past heartbeat_deadline (hung), goes state=orphaned
+# and straight into lease_reclaim's safe prune (KTD-9 timeout class).
+lease_heartbeat_check() {
+  local ONLY=${1:-}
+  local LEDGER GRACE NOW TASKS TASK
+  LEDGER=$(_lease_ledger_path) || return 1
+  if [ ! -f "$LEDGER" ]; then
+    echo "lease_heartbeat_check: no lease ledger at ${LEDGER} — nothing to sweep" >&2
+    return 0
+  fi
+  GRACE=${TRIFORGE_HEARTBEAT_GRACE:-60}
+  NOW=$(date +%s)
+  TASKS=$(LEDGER_FILE="$LEDGER" python3 -c "
+import os, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.exit(0)
+with open(os.environ['LEDGER_FILE'], 'rb') as f:
+    data = tomllib.load(f)
+for t, r in sorted(data.get('lease', {}).items()):
+    if isinstance(r, dict) and r.get('state') == 'building':
+        print(t)
+")
+  local SWEPT=0 ORPHANED=0
+  for TASK in $TASKS; do
+    if [ -n "$ONLY" ] && [ "$TASK" != "$ONLY" ]; then
+      continue
+    fi
+    SWEPT=$((SWEPT + 1))
+    local PID OUT DEADLINE ALIVE FRESH AGE
+    PID=$(_ledger_get "$TASK" pid)
+    OUT=$(_ledger_get "$TASK" output_file)
+    DEADLINE=$(_ledger_get "$TASK" heartbeat_deadline)
+    ALIVE=0
+    [ -n "$PID" ] && [ "$PID" -gt 0 ] 2>/dev/null && kill -0 "$PID" 2>/dev/null && ALIVE=1
+    if [ "$ALIVE" -eq 1 ]; then
+      if [ "$NOW" -le "${DEADLINE:-0}" ]; then
+        echo "lease_heartbeat_check: ${TASK} building (pid ${PID} alive, deadline in $((DEADLINE - NOW))s)" >&2
+        continue
+      fi
+      # Hung past its window: still breathing but the lease is expired —
+      # kill, then orphan (the launcher's own timeout should have fired;
+      # this is the belt to that suspender).
+      echo "lease_heartbeat_check: ${TASK} EXPIRED — pid ${PID} alive past heartbeat_deadline; killing and orphaning" >&2
+      kill "$PID" 2>/dev/null || true
+      sleep 1
+      kill -9 "$PID" 2>/dev/null || true
+    else
+      if [ -n "$OUT" ] && [ -f "${OUT}.rc" ]; then
+        echo "lease_heartbeat_check: ${TASK} builder exited (rc=$(cat "${OUT}.rc" 2>/dev/null || true)) — run: lease_collect ${TASK}" >&2
+        continue
+      fi
+      FRESH=0
+      AGE=999999
+      if [ -n "$OUT" ] && [ -f "$OUT" ]; then
+        AGE=$(OUT_FILE="$OUT" python3 -c "
+import os, time
+print(int(time.time() - os.path.getmtime(os.environ['OUT_FILE'])))
+" 2>/dev/null || echo 999999)
+        [ "$AGE" -lt "$GRACE" ] 2>/dev/null && FRESH=1
+      fi
+      if [ "$FRESH" -eq 1 ]; then
+        echo "lease_heartbeat_check: ${TASK} pid ${PID} gone but output active ${AGE}s ago (grace ${GRACE}s) — leaving as building" >&2
+        continue
+      fi
+      echo "lease_heartbeat_check: ${TASK} ORPHANED — pid ${PID} dead, no exit record, output stale; reclaiming" >&2
+    fi
+    ORPHANED=$((ORPHANED + 1))
+    _ledger_update "$TASK" state=orphaned || return 1
+    lease_reclaim "$TASK" || true
+  done
+  echo "lease_heartbeat_check: swept ${SWEPT} building lease(s), orphaned ${ORPHANED}" >&2
+  return 0
+}
+
+# Refusal helper for lease_reclaim: loud, escalates the row, deletes NOTHING.
+# Returns 0 so callers can '\; return 1' without tripping errexit.
+_lease_refuse_prune() {
+  local TASK_ID=$1 STORED=$2 MSG=$3
+  echo "lease_reclaim: REFUSING prune for ${TASK_ID}: ${MSG} (stored='${STORED}')" >&2
+  _ledger_update "$TASK_ID" state=escalated reason="lease identity mismatch" || true
+  return 0
+}
+
+# lease_reclaim <task_id> — SAFE PRUNE. Destructive cleanup runs only after
+# the lease identity survives, in this exact order:
+#   1. canonicalize the stored worktree path (python3 os.path.realpath)
+#   2. reject traversal ('..'/'.') components and non-canonical paths —
+#      stored paths are canonical from birth (_lease_root realpaths), so any
+#      canonical-vs-stored difference means a symlink or tampering
+#   3. REQUIRE the canonical path sits strictly beneath the canonical root
+#   4. REQUIRE git worktree list --porcelain knows the path
+# ANY mismatch: nothing is deleted, state=escalated with reason "lease
+# identity mismatch", nonzero return. A clean pass prunes worktree + branch,
+# then transitions per the current state:
+#   orphaned + requeue_count 0  -> requeued   (lease_requeue re-leases it)
+#   orphaned + requeue_count 1+ -> escalated  (KTD-9: requeue once, loudly)
+#   merged / anything else      -> state kept (prune only)
+lease_reclaim() {
+  local TASK_ID=${1:?usage: lease_reclaim <task_id>}
+  local REPO ROOT WT_STORED WT_CANON STATE RQ
+  REPO=$(_lease_repo_root) || return 1
+  ROOT=$(_lease_root) || return 1
+  WT_STORED=$(_ledger_get "$TASK_ID" worktree) || { echo "lease_reclaim: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
+  STATE=$(_ledger_get "$TASK_ID" state)
+
+  if [ -z "$WT_STORED" ]; then
+    _lease_refuse_prune "$TASK_ID" "$WT_STORED" "empty worktree path"; return 1
+  fi
+  case "$WT_STORED" in
+    /*) : ;;
+    *) _lease_refuse_prune "$TASK_ID" "$WT_STORED" "relative path"; return 1 ;;
+  esac
+  case "${WT_STORED}/" in
+    *"/../"*|*"/./"*) _lease_refuse_prune "$TASK_ID" "$WT_STORED" "path contains traversal"; return 1 ;;
+  esac
+  WT_CANON=$(_lease_realpath "$WT_STORED")
+  if [ "$WT_CANON" != "${WT_STORED%/}" ]; then
+    _lease_refuse_prune "$TASK_ID" "$WT_STORED" "stored path is not canonical (symlink component or traversal; canonical='${WT_CANON}')"; return 1
+  fi
+  case "$WT_CANON" in
+    "${ROOT}"/?*) : ;;
+    *) _lease_refuse_prune "$TASK_ID" "$WT_STORED" "path not strictly beneath lease root '${ROOT}'"; return 1 ;;
+  esac
+  if ! git -C "$REPO" worktree list --porcelain | grep -Fxq "worktree ${WT_CANON}"; then
+    _lease_refuse_prune "$TASK_ID" "$WT_STORED" "path not registered in git worktree list"; return 1
+  fi
+
+  if ! git -C "$REPO" worktree remove --force "$WT_CANON" >&2; then
+    echo "lease_reclaim: ERROR git worktree remove failed for ${WT_CANON}" >&2
+    _ledger_update "$TASK_ID" state=escalated reason="worktree remove failed" || true
+    return 1
+  fi
+  git -C "$REPO" branch -D "lease/${TASK_ID}" >/dev/null 2>&1 || true
+
+  case "$STATE" in
+    orphaned)
+      RQ=$(_ledger_get "$TASK_ID" requeue_count)
+      if [ "${RQ:-0}" -eq 0 ] 2>/dev/null; then
+        _ledger_update "$TASK_ID" state=requeued || return 1
+        echo "lease_reclaim: ${TASK_ID} pruned — requeued (one retry available via lease_requeue, KTD-9)" >&2
+      else
+        _ledger_update "$TASK_ID" state=escalated reason="second builder failure" || return 1
+        echo "lease_reclaim: ${TASK_ID} pruned — ESCALATED: second builder failure (requeue_count=${RQ}). KTD-9 allows exactly one requeue; the lead must diagnose or reassign manually." >&2
+      fi
+      ;;
+    *)
+      echo "lease_reclaim: ${TASK_ID} pruned (state stays '${STATE}')" >&2
+      ;;
+  esac
+  return 0
+}
+
+# lease_requeue <task_id> — one second chance, on a DIFFERENT builder
+# (KTD-9: exactly once). Walks the role's fallback chain past
+# previous_builder via resolve_role's RESOLVE_ROLE_EXCLUDE hook, carves a
+# fresh worktree, and re-leases. requeue_count >= 1 escalates instead.
+lease_requeue() {
+  local TASK_ID=${1:?usage: lease_requeue <task_id>}
+  local STATE RQ PREV ROLE OUT REPO ROOT WT RESOLVED CLI MODEL EFFORT
+  STATE=$(_ledger_get "$TASK_ID" state) || { echo "lease_requeue: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
+  RQ=$(_ledger_get "$TASK_ID" requeue_count)
+  OUT=$(_ledger_get "$TASK_ID" output_file)
+  if [ "${RQ:-0}" -ge 1 ] 2>/dev/null; then
+    _ledger_update "$TASK_ID" state=escalated reason="requeue budget exhausted" || true
+    echo "lease_requeue: ${TASK_ID} ESCALATED — requeue_count=${RQ}; KTD-9 allows exactly one requeue and a different builder already failed this task. The lead must diagnose (see ${OUT:-the builder output}) or reassign manually." >&2
+    return 1
+  fi
+  if [ "$STATE" != "requeued" ]; then
+    echo "lease_requeue: ERROR task ${TASK_ID} is in state '${STATE}' (want requeued — lease_reclaim sets it after a clean prune)" >&2
+    return 1
+  fi
+  PREV=$(_ledger_get "$TASK_ID" builder_cli)
+  ROLE=$(_ledger_get "$TASK_ID" role)
+  REPO=$(_lease_repo_root) || return 1
+  ROOT=$(_lease_root) || return 1
+  RESOLVED=$(RESOLVE_ROLE_EXCLUDE="$PREV" resolve_role "$ROLE") || {
+    _ledger_update "$TASK_ID" state=escalated reason="no alternative builder" || true
+    echo "lease_requeue: ${TASK_ID} ESCALATED — no live builder past previous '${PREV}' in role '${ROLE}' fallback chain." >&2
+    return 1
+  }
+  CLI=$(printf '%s\n' "$RESOLVED" | cut -f1)
+  MODEL=$(printf '%s\n' "$RESOLVED" | cut -f2)
+  EFFORT=$(printf '%s\n' "$RESOLVED" | cut -f3)
+  WT="${ROOT}/${TASK_ID}"
+  if [ -e "$WT" ]; then
+    echo "lease_requeue: ERROR stale worktree still present at ${WT} — reclaim first" >&2
+    return 1
+  fi
+  if ! git -C "$REPO" worktree add "$WT" -b "lease/${TASK_ID}" >&2; then
+    echo "lease_requeue: ERROR git worktree add failed for task ${TASK_ID}" >&2
+    return 1
+  fi
+  _lease_provision_skills "$WT"
+  _ledger_update "$TASK_ID" \
+    state=leased builder_cli="$CLI" builder_model="$MODEL" builder_effort="$EFFORT" \
+    previous_builder="$PREV" requeue_count=1 pid=0 heartbeat_deadline=0 reason="" \
+    || return 1
+  echo "lease_requeue: ${TASK_ID} re-leased to ${CLI} (previous builder: ${PREV}) — dispatch again with lease_dispatch" >&2
+  echo "$TASK_ID"
+}
+
+# lease_collect <task_id> — lead-side harvest of a finished builder. Exit 0:
+# state=review, prints the output-file path (U10 feeds it to the reviewer).
+# Nonzero: routed by the KTD-9 class the launcher recorded (<out>.class):
+#   deterministic       -> state=failed, fail fast with guidance, NO requeue
+#   timeout / retryable -> orphan path (reclaim -> requeue once -> escalate)
+lease_collect() {
+  local TASK_ID=${1:?usage: lease_collect <task_id>}
+  local STATE PID OUT RC CLASS
+  STATE=$(_ledger_get "$TASK_ID" state) || { echo "lease_collect: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
+  if [ "$STATE" != "building" ]; then
+    echo "lease_collect: ERROR task ${TASK_ID} is in state '${STATE}' (want building)" >&2
+    return 1
+  fi
+  PID=$(_ledger_get "$TASK_ID" pid)
+  OUT=$(_ledger_get "$TASK_ID" output_file)
+  if [ ! -f "${OUT}.rc" ]; then
+    if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+      echo "lease_collect: task ${TASK_ID} still running (pid ${PID}) — wait, or lease_heartbeat_check to enforce the deadline" >&2
+      return 1
+    fi
+    echo "lease_collect: task ${TASK_ID} builder died without an exit record — silent death, taking the orphan path" >&2
+    _ledger_update "$TASK_ID" state=orphaned || return 1
+    lease_reclaim "$TASK_ID" || true
+    return 1
+  fi
+  RC=$(cat "${OUT}.rc" 2>/dev/null || echo 1)
+  CLASS=$(cat "${OUT}.class" 2>/dev/null || true)
+  if [ "$RC" -eq 0 ] 2>/dev/null; then
+    _ledger_update "$TASK_ID" state=review || return 1
+    echo "lease_collect: task ${TASK_ID} builder exited 0 — state=review, output below" >&2
+    printf '%s\n' "$OUT"
+    return 0
+  fi
+  if [ -z "$CLASS" ]; then
+    _classify_invoke_failure "$RC" "$OUT"
+    CLASS="$INVOKE_FAILURE_CLASS"
+  fi
+  case "$CLASS" in
+    deterministic)
+      _ledger_update "$TASK_ID" state=failed reason="deterministic failure rc=${RC}" || return 1
+      echo "lease_collect: task ${TASK_ID} FAILED deterministically (rc=${RC}) — retry cannot help; fix the cause (see ${OUT}) and escalate. No requeue (KTD-9)." >&2
+      return 1
+      ;;
+    *)
+      echo "lease_collect: task ${TASK_ID} builder failed rc=${RC} class=${CLASS} — orphaning for the requeue path (see ${OUT})" >&2
+      _ledger_update "$TASK_ID" state=orphaned || return 1
+      lease_reclaim "$TASK_ID" || true
+      return 1
+      ;;
+  esac
+}
+
+# lease_merge <task_id> <reviewer-identity> — single-commit-per-task merge
+# (KTD-5) with the AE3 mechanical guard: reviewer must be nonempty and must
+# differ from the lease's builder_cli — self-review never merges (U10 layers
+# the full cross-review protocol on this check). The lead snapshots the
+# builder's uncommitted worktree changes onto the lease branch ("commit
+# nothing; the lead collects"), squash-merges into the MAIN tree, records
+# reviewer + merge_commit, then reclaims via the safe-prune path. Squash
+# conflicts leave a dirty index: reset --merge, state stays review, the lead
+# resolves manually.
+lease_merge() {
+  local TASK_ID=${1:?usage: lease_merge <task_id> <reviewer-identity>}
+  local REVIEWER=${2:-}
+  local STATE BUILDER WT BRANCH REPO SHA
+  STATE=$(_ledger_get "$TASK_ID" state) || { echo "lease_merge: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
+  if [ "$STATE" != "review" ]; then
+    echo "lease_merge: ERROR task ${TASK_ID} is in state '${STATE}' (want review — lease_collect sets it)" >&2
+    return 1
+  fi
+  if [ -z "$REVIEWER" ]; then
+    echo "lease_merge: ERROR reviewer identity is required — no merge without a named reviewer (AE3)" >&2
+    return 1
+  fi
+  BUILDER=$(_ledger_get "$TASK_ID" builder_cli)
+  if [ "$REVIEWER" = "$BUILDER" ]; then
+    echo "lease_merge: REFUSED — reviewer '${REVIEWER}' is the builder of ${TASK_ID}; self-review never merges (AE3). Pick a non-author reviewer." >&2
+    return 1
+  fi
+  WT=$(_ledger_get "$TASK_ID" worktree)
+  BRANCH=$(_ledger_get "$TASK_ID" branch)
+  REPO=$(_lease_repo_root) || return 1
+  if [ ! -d "$WT" ]; then
+    echo "lease_merge: ERROR worktree missing: ${WT}" >&2
+    return 1
+  fi
+
+  # Lead-side collect commit: the builder committed nothing (contract), so
+  # snapshot its work onto the lease branch. .agents/ (provisioned skills)
+  # is excluded even where a project forgot to gitignore it.
+  git -C "$WT" add -A -- . ":(exclude).agents" >&2 || return 1
+  if ! git -C "$WT" diff --cached --quiet 2>/dev/null; then
+    git -C "$WT" commit -m "lease(${TASK_ID}): builder output snapshot (${BUILDER})" >&2 || return 1
+  fi
+
+  # The squash commit must contain exactly this lease's work (KTD-5): a
+  # pre-dirtied main index would smuggle unrelated changes into it.
+  if ! git -C "$REPO" diff --cached --quiet 2>/dev/null; then
+    echo "lease_merge: ERROR main tree index has staged changes — commit or unstage them first; the lease commit must contain only ${TASK_ID}'s work" >&2
+    return 1
+  fi
+  if ! git -C "$REPO" merge --squash "$BRANCH" >&2; then
+    git -C "$REPO" reset --merge >&2 || true
+    echo "lease_merge: CONFLICT squash-merging ${BRANCH} into the main tree — index reset, state stays review. The lead resolves manually (rebase the lease branch onto HEAD, or cherry-pick), then reruns lease_merge." >&2
+    return 1
+  fi
+  if git -C "$REPO" diff --cached --quiet 2>/dev/null; then
+    echo "lease_merge: ERROR ${BRANCH} brought no changes (builder produced nothing?) — state stays review" >&2
+    return 1
+  fi
+  if ! git -C "$REPO" commit -m "lease(${TASK_ID}): merged from ${BUILDER}, reviewed by ${REVIEWER}" >&2; then
+    git -C "$REPO" reset --merge >&2 || true
+    echo "lease_merge: ERROR commit failed — index reset, state stays review" >&2
+    return 1
+  fi
+  SHA=$(git -C "$REPO" rev-parse HEAD)
+  _ledger_update "$TASK_ID" state=merged reviewer="$REVIEWER" merge_commit="$SHA" || return 1
+  echo "lease_merge: ${TASK_ID} merged as ${SHA} (builder ${BUILDER}, reviewer ${REVIEWER}) — reclaiming worktree" >&2
+  lease_reclaim "$TASK_ID" || true
+  return 0
+}
+
+# lease_status — human table of the ledger (task, builder, state, age) for
+# /status and resume orientation. Tolerant: reports a missing or unparseable
+# ledger instead of failing.
+lease_status() {
+  local LEDGER
+  LEDGER=$(_lease_ledger_path) || return 1
+  if [ ! -f "$LEDGER" ]; then
+    echo "lease_status: no lease ledger (${LEDGER}) — no leases have been created"
+    return 0
+  fi
+  LEDGER_FILE="$LEDGER" python3 -c "
+import os, sys, time
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.stderr.write('lease_status: ERROR no TOML parser available\n')
+        sys.exit(1)
+try:
+    with open(os.environ['LEDGER_FILE'], 'rb') as f:
+        data = tomllib.load(f)
+except Exception as exc:
+    sys.stderr.write('lease_status: ERROR ledger unparseable: ' + str(exc) + '\n')
+    sys.exit(1)
+leases = data.get('lease', {})
+now = int(time.time())
+counts = {}
+rows = [('TASK', 'BUILDER', 'MODEL', 'STATE', 'AGE')]
+for t in sorted(leases if isinstance(leases, dict) else {}):
+    r = leases[t]
+    if not isinstance(r, dict):
+        continue
+    state = str(r.get('state', '?'))
+    counts[state] = counts.get(state, 0) + 1
+    try:
+        age = max(0, now - int(r.get('updated') or now))
+    except (TypeError, ValueError):
+        age = 0
+    if age >= 3600:
+        age_s = str(age // 3600) + 'h' + str((age % 3600) // 60) + 'm'
+    elif age >= 60:
+        age_s = str(age // 60) + 'm' + str(age % 60) + 's'
+    else:
+        age_s = str(age) + 's'
+    rows.append((str(t), str(r.get('builder_cli', '?')),
+                 str(r.get('builder_model', '') or '-'), state, age_s))
+if len(rows) == 1:
+    print('lease_status: ledger is empty')
+    sys.exit(0)
+widths = [max(len(r[i]) for r in rows) for i in range(5)]
+for r in rows:
+    print('  '.join(r[i].ljust(widths[i]) for i in range(5)).rstrip())
+print('')
+print('states: ' + ', '.join(k + '=' + str(v) for k, v in sorted(counts.items())))
+"
 }

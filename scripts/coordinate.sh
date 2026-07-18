@@ -68,12 +68,47 @@ fi
 
 SENTINEL="ops/.sprint-complete"
 
+# Lease-ledger resume (KTD-4/U9): when ops/leases.toml still holds
+# non-terminal leases, the fresh session must reconstruct the wave from the
+# ledger instead of restarting it. Prints the extra prompt paragraph, or
+# nothing. (String presence in --dry-run output is the verification hook.)
+lease_resume_paragraph() {
+  [ -f "ops/leases.toml" ] || return 0
+  local ACTIVE
+  ACTIVE=$(python3 -c "
+import sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        print(0)
+        sys.exit(0)
+try:
+    with open('ops/leases.toml', 'rb') as f:
+        data = tomllib.load(f)
+    leases = data.get('lease', {})
+    live = ('leased', 'building', 'review', 'orphaned', 'requeued')
+    print(sum(1 for v in (leases.values() if isinstance(leases, dict) else [])
+              if isinstance(v, dict) and v.get('state') in live))
+except Exception:
+    print(0)
+" 2>/dev/null || echo 0)
+  if [ "${ACTIVE:-0}" -gt 0 ] 2>/dev/null; then
+    printf '%s' "A lease ledger exists (ops/leases.toml). FIRST reconstruct wave state from it — reclaim orphans (lease_heartbeat_check), keep merged work, requeue or finish open leases — instead of restarting the wave from scratch."
+  fi
+  return 0
+}
+
 # Compose the per-iteration session prompt. Sets $PROMPT.
 # $1 = iteration number.
 # The leading /goal line makes Claude Code hard-gate the session on the
 # completion checklist (a slash command can only be user-typed or the first
 # line of a -p prompt — which is exactly what this is).
 compose_prompt() {
+  local LEASE_RESUME
+  LEASE_RESUME=$(lease_resume_paragraph)
   PROMPT="/goal Sprint complete ONLY when ALL of: (1) every framework phase for the goal is done or explicitly skipped with a stated reason; (2) the verification-before-completion checklist passes with evidence; (3) ops/STATE.md is written for session handoff; (4) temporary review files are archived to ops/archive/; (5) the runtime marker ops/.sprint-complete exists — created LAST, only after conditions 1-4 hold.
 
 You are continuing a multi-agent sprint.
@@ -84,7 +119,9 @@ ITERATION: $1 of $MAX_ITERATIONS
 $USE_TEAM
 
 FIRST: Read ops/STATE.md to understand where the previous session left off.
-If this is iteration 1 and no STATE.md exists, start from Phase 0.
+If this is iteration 1 and no STATE.md exists, start from Phase 0.${LEASE_RESUME:+
+
+$LEASE_RESUME}
 
 Follow the Agent Triforge framework (docs/agent-triforge.md):
 - Phase 0: Codebase analysis (Antigravity) — skip if STATE.md shows Phase 0 complete
