@@ -143,6 +143,37 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && command -v kimi >/dev/null 2>&1; then
   fi
 fi
 
+# Bootstrap Cursor CLI project files, copy-if-absent so user customizations
+# survive. Guarded on `command -v cursor-agent`. Cursor has NO headless --agent
+# selector (re-probed 2026-07-18), so roles ride as prompt-prefix injection from
+# the plugin's cursor-agents/ briefs (invoke_cursor + the lease_dispatch cursor
+# case both inject); the .cursor/agents/ copies are delegation targets +
+# documentation, and .cursor/README.md records the --trust-required / grok-4.5-
+# pinned-never-Auto / CUR-06 headless-hooks-dead / CUR-07 --sandbox-doesn't-confine
+# facts. No afterFileEdit attribution hook is shipped (CUR-06 FAIL); builder
+# attribution is lead-side from the lease ledger (U9). Version capture (R26) is
+# handled by the optional-CLI detection block below (cursor-agent --version ->
+# .claude/roster-detected.local.md), since Cursor has no published semver.
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && command -v cursor-agent >/dev/null 2>&1; then
+  if [ -d "${CLAUDE_PLUGIN_ROOT}/cursor-agents" ]; then
+    mkdir -p .cursor/agents
+    for f in "${CLAUDE_PLUGIN_ROOT}/cursor-agents"/*.md; do
+      [ -f "$f" ] || continue
+      case "$(basename "$f")" in README.md) continue ;; esac
+      dest=".cursor/agents/$(basename "$f")"
+      [ ! -f "$dest" ] && cp "$f" "$dest"
+    done
+  fi
+  if [ -d "${CLAUDE_PLUGIN_ROOT}/templates/.cursor" ]; then
+    mkdir -p .cursor
+    for f in "${CLAUDE_PLUGIN_ROOT}/templates/.cursor"/*; do
+      [ -f "$f" ] || continue
+      dest=".cursor/$(basename "$f")"
+      [ ! -f "$dest" ] && cp "$f" "$dest"
+    done
+  fi
+fi
+
 # Bootstrap ops/roster.toml + ops/watch-registry.toml — per-file existence
 # guards, deliberately OUTSIDE the ops-dir bootstrap above so upgraded v2.x
 # projects (which already have ops/) still receive them. A user's existing
