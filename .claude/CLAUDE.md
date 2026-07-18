@@ -12,12 +12,14 @@ Install: `claude plugin add https://github.com/Ninety2UA/agent-triforge`
 
 ### Multi-agent system
 
-- **Claude Code (lead)** — plans work, builds features, coordinates all agents, merges review feedback. Runs Fable 5 at `max` effort when the host has it; otherwise latest Opus at `max`
+- **Claude Code (lead)** — plans work, orchestrates the builder pool, cross-reviews and merges, promotes to the main branch. Also the default builder and a valid reviewer. Runs Fable 5 at `max` effort when the host has it; otherwise latest Opus at `max`
 - **Claude specialized agents** — 19 focused subagents (`agents/`): plan validation, review synthesis, security, performance, etc. Shipped frontmatter floors at `opus` — no shipped file names a model a host may lack: team-lead and the never-downgrade trio (security-sentinel, plan-checker, findings-synthesizer) ship `model: opus`, `effort: max`; the other 15 ship `model: opus`, `effort: xhigh`
 - **Spawn-time Fable override** — when the current probe record (`ops/research/2026-07-probe-record.md`, row CC-02) shows Fable 5 PASS on the host, the lead spawns team-lead and the never-downgrade trio with a model override to `fable` (the Agent tool's `model` parameter)
 - **Claude agent teams** — multi-instance collaboration for complex builds (5+ interdependent tasks)
 - **Antigravity CLI (`agy`)** — analyst + reviewer: Phase 0 codebase scans (Gemini 3.1 Pro (High), 1M token context), architecture reviews, documentation
 - **Codex CLI** — tester + logic reviewer: writes/runs tests, security audits, infrastructure tasks
+
+**Builder pool.** All six supported CLIs — the core trio (Claude, Antigravity, Codex) plus any enrolled optional member (OpenCode, Kimi, Cursor) — are eligible builders; `ops/roster.toml` assigns each role (builder | reviewer | tester | analyst | documenter). The single-writer rule is retired: safety is per-task leases + worktree isolation + mandatory cross-review by a pinned non-author reviewer, not write-restriction. The role bullets above are the shipped default posture (Claude leads builds, Codex reviews and tests, Antigravity analyzes and documents), which `ops/roster.toml` can override. See "Builder-pool wave protocol" below.
 
 For narrow, rubric-following runtime tasks the lead/team-lead may step down one tier at a time:
 
@@ -72,12 +74,14 @@ The full lifecycle for a goal:
 
 ### Assignment heuristic (quick reference)
 
-- **Produces code?** → Claude (subagents or agent team for parallel work)
-- **Evaluates existing code?** → Antigravity + Codex + Claude specialized agents in parallel
-- **Runs/executes something?** → Codex
-- **Produces documentation?** → Antigravity
-- **Touches shared interfaces?** → Claude implements → Antigravity reviews → Codex tests
-- **Ambiguous?** → Claude takes it, flags for parallel review
+Assignment comes from `ops/roster.toml` (`resolve_role <role>`); the defaults below are the shipped posture, not a write-restriction — any roster member can be assigned as builder, and every build merges only after cross-review.
+
+- **Produces code?** → builder role (default Claude; roster-assignable to any member), built under a lease and cross-reviewed before merge
+- **Evaluates existing code?** → reviewer role + Claude specialized agents in parallel (default Codex + Antigravity)
+- **Runs/executes something?** → tester role (default Codex)
+- **Produces documentation?** → documenter role (default Antigravity)
+- **Touches shared interfaces?** → builder implements under a lease → pinned non-author reviewer cross-reviews → tester validates
+- **Ambiguous?** → the lead takes it as builder, flags for parallel review
 
 ### Roster and assignment
 
@@ -89,6 +93,15 @@ The full lifecycle for a goal:
 - **Model rules:** agy pins are always `"Gemini 3.1 Pro (High)"`/`(Low)` — never Flash; the (High)/(Low) suffix is agy's effort control, so `effort` maps into the model-variant suffix. Cursor pins `grok-4.5` explicitly — never the Auto router — and has no effort control (`effort` inert). Builder's model is empty by design: the Claude downgrade ladder resolves it. Optional-member fallback models come from `[members.<cli>].model`, else the shipped defaults (opencode → `openrouter/z-ai/glm-5.2`, kimi → `kimi-k3`, cursor → `grok-4.5`).
 - **Promotion knob:** `[promotion] require_user_approval` (default `false`) gates wave-end promotion to main (KTD-5); protected-path diffs force approval on regardless — enforced by the wave protocol, not the roster.
 - **Lazy liveness:** `ensure_core_trio_live` (non-model `--version` checks, 15s each, success cached per session) runs in the `/build` and `/review` preambles only — never at session start, so a `/status`-only session never triggers it.
+
+### Builder-pool wave protocol
+
+Phase 2 builds run a builder pool: every implementation task — including lead-authored ones — is assigned from `ops/roster.toml`, built under a per-task lease in an isolated worktree, and merged only after cross-review by a pinned non-author reviewer. The single-writer rule is retired; safety is leases + worktree isolation + cross-review. Full mechanics live in the `wave-orchestration` skill ("Builder-pool wave protocol"); the lead drives the lease lifecycle from `scripts/invoke-external.sh`.
+
+- **Assign + lease:** `resolve_role <role>` picks the builder; `lease_create` carves the worktree + `lease/<task>` branch; `lease_dispatch` launches the builder with context injected (task rows, CONTRACTS.md slice, roster entry). Builders commit nothing and never read the canonical `ops/` tree (KTD-3).
+- **Collect + pin a reviewer:** `lease_heartbeat_check` → `lease_collect` (state → review). The lead pins a reviewer that is a DIFFERENT roster member than the builder (the lead itself is valid); that reviewer stays pinned across all ≤3 fix cycles of the task (KTD-10). If no non-author reviewer is live, the merge blocks and escalates to the user.
+- **Merge + attribute:** approved → `lease_merge <task> <reviewer>` lands ONE squash commit per task on the sprint integration branch and records builder + reviewer + merge_commit; it REFUSES self-review (reviewer ≠ `builder_cli` — AE3). Findings re-dispatch the same lease/builder with the same pinned reviewer (cycle < 3); at cycle 3 escalate. `ops/CHANGELOG.md` rows carry builder + reviewer + merge commit from the ledger (`lease_status`).
+- **Verify + promote:** at wave end `integration-verifier` runs against the integration branch (combined verification across the wave's merged tasks); the lead promotes to the main branch honoring `[promotion] require_user_approval` (default false). Any diff touching protected paths (permission configs, deny rules, `ops/roster.toml` incl. `[promotion]`, shipped agent configs) forces the promotion gate on and requires the lead or the user as the cross-reviewer — never an external-CLI-only review.
 
 ### Agent frontmatter fields
 
@@ -119,15 +132,18 @@ All 4 hook handlers use `set -euo pipefail`. When using `grep -c`, add `|| true`
 ### Key constraints
 
 - CONTRACTS.md is never modified directly during review — changes must be proposed in MEMORY.md first
-- Neither Antigravity nor Codex may modify source code; they only write to their designated `ops/` files
-- Parallel reviews are safe because agents write to separate files
-- Maximum 3 review cycles per sprint before escalating to user
+- Every implementation task — lead-authored included — is built under a per-task lease and merges only after cross-review by a pinned non-author reviewer; no agent self-merges (AE3). The single-writer rule is retired — any roster member is an eligible builder; safety is leases + worktree isolation + cross-review, not write-restriction
+- Approved merges land as one commit per task on the sprint integration branch; the lead promotes to the main branch at wave end honoring `[promotion] require_user_approval` (default false)
+- Protected-path diffs (permission configs, deny rules, `ops/roster.toml` incl. `[promotion]`, shipped agent configs) force the promotion gate on and require the lead or user as the cross-reviewer — never an external-CLI-only review
+- Parallel reviews are safe because reviewers write to separate `ops/REVIEW_*.md` files
+- Maximum 3 review cycles per task before escalating to user
 - Phase 0 can be skipped for small bug fixes, same-session continuations, or unchanged codebases
 - Risk scoring: halt subagent at risk >20% or file changes >50
 - Completion requires creating the `ops/.sprint-complete` runtime marker, only after the verification checklist passes (never earlier)
 
 ### Security model
 
+- **Builder-pool safety model** — the framework runs a builder pool where any roster member can be assigned implementation tasks, so isolation replaces write-restriction as the safety boundary: (1) every non-lead build runs under a per-task lease in an isolated git worktree, confined by a per-adapter env allowlist (KTD-3, KTD-14) — builders never touch the canonical `ops/` tree; (2) the lease ledger `ops/leases.toml` is lead-owned and single-writer; (3) every task merges only after cross-review by a pinned non-author reviewer (AE3, KTD-10), landing as one squash commit per task on a sprint integration branch; (4) the lead promotes to the main branch at wave end honoring the `[promotion]` gate — and any diff touching protected paths (permission configs, deny rules, `ops/roster.toml` incl. `[promotion]`, shipped agent configs) forces the gate on and requires the lead or user as the reviewer, never an external-CLI-only review; (5) `ops/CHANGELOG.md` attribution carries builder + reviewer + merge commit from the ledger. A roster config can restore the reviewer-only posture (external CLIs off the builder role) for deployments that want it.
 - **Codex `approval_policy = "never"`** on all three agents — the framework is designed for trusted pipelines where user approval would block parallel fan-out. `sandbox_mode` (read-only for `logic_reviewer`, `workspace-write` for `test_writer`/`debugger`) plus the per-agent `tools` allowlist provide the actual isolation. If you deploy to an untrusted environment, change to `approval_policy = "on-request"` in `codex-agents/agents.toml`. The no-agent fallback in `scripts/invoke-external.sh` supplies the same defaults explicitly (`-s workspace-write -c approval_policy="never"`) since Codex v0.128.0 removed the `--full-auto` shorthand.
 - **Codex `tools` allowlist** narrows the tool surface beyond sandbox: `logic_reviewer` has no `write`/`bash`; `test_writer`/`debugger` get both (they need to run tests and reproduce bugs). Defense-in-depth pairs with `sandbox_mode`.
 - **Antigravity permission guardrails** — `antigravity-agents/permissions.json` documents the shell-command deny rules migrated from the retired Gemini policy engine (`rm -rf`, `git push`, `sudo`); `templates/.antigravity/settings.json` ships them as a mergeable `permissions` block deployed to `.antigravity/settings.json` at session start. Headless enforcement at the project tier is unproven (probe 2026-07-17: no project-tier settings.json lifts agy's headless permission auto-deny, so the tier likely isn't read headless) — the per-agent `tools` allowlist in `antigravity-agents/agents/*.md` is the primary guardrail (e.g., `architecture-reviewer` and `documentation-writer` omit `run_shell_command` entirely).

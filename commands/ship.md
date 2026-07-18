@@ -71,9 +71,10 @@ Before building, surface the 3 most critical unverified assumptions about the go
 Spawn the `plan-checker` agent. Iterate until APPROVED (max 3 rounds).
 
 ### Phase 2: Build
+- Assign every task from `ops/roster.toml` and build it under a per-task lease in an isolated worktree; merge only after cross-review by a pinned non-author reviewer (builder-pool wave protocol — see the `wave-orchestration` skill). The single-writer rule is retired; safety is leases + worktree isolation + cross-review.
 - If < 5 independent tasks → subagent mode with wave orchestration
 - If 5+ tasks or interdependent → agent team mode with team-lead
-- Run `integration-verifier` between waves
+- Approved merges land as one commit per task on the sprint integration branch; `integration-verifier` runs against that branch between waves, then the lead promotes to the main branch honoring `[promotion]` (protected-path diffs force the gate on)
 - Apply risk scoring (halt at >20% risk or 50+ file changes)
 
 ### Phase 3: Parallel review

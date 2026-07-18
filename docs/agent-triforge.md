@@ -6,7 +6,7 @@
 
 ## Overview
 
-This framework establishes Claude Code as the lead agent in a multi-agent system. Before any planning begins, Antigravity CLI performs a Phase 0 codebase analysis -- ingesting the full repository to produce an up-to-date picture of the architecture, patterns, and contracts. Claude Code then plans work, validates the plan, decomposes goals into tasks, assigns agents using a heuristic matrix, executes its own tasks (parallelized via native subagents or agent teams), and delegates review and testing to Antigravity CLI, Codex CLI, and specialized Claude subagents. Reviews run in parallel, never sequentially.
+This framework establishes Claude Code as the lead agent in a multi-agent system. Before any planning begins, Antigravity CLI performs a Phase 0 codebase analysis -- ingesting the full repository to produce an up-to-date picture of the architecture, patterns, and contracts. Claude Code then plans work, validates the plan, decomposes goals into tasks, and assigns each to a roster member (`ops/roster.toml`). Every implementation task — including the lead's own — is built under a per-task lease in an isolated worktree and merged only after cross-review by a pinned non-author reviewer; the lead orchestrates the pool, injects context, and performs all merges. Review and testing fan out to Antigravity CLI, Codex CLI, and specialized Claude subagents in parallel, never sequentially.
 
 The coordination model is hybrid: file-based shared state (TASKS.md, MEMORY.md, CHANGELOG.md, CONTRACTS.md) provides the persistent context layer, while direct bash invocation provides the real-time orchestration layer. Claude Code owns both.
 
@@ -20,6 +20,8 @@ The coordination model is hybrid: file-based shared state (TASKS.md, MEMORY.md, 
 | Claude specialized agents (Opus max) | Agent tool with agent definitions | Focused expertise (security, performance, plan validation, etc.) | Review enhancement, research, verification |
 | Antigravity CLI (`agy`) | `agy -p "..."` via bash, agent definitions in `antigravity-agents/agents/` (agy plugin; injected as prompt prefix until agy surfaces plugin agents headless) | Large context window (1M tokens, Gemini 3.1 Pro (High)), whole-repo analysis, different model perspective, per-agent tools allowlists | Codebase analysis (Phase 0), code review, documentation, architecture audits |
 | Codex CLI | `codex exec "..."` via bash, native agent definitions in `.codex/agents/` | Native test runner, subagent parallelism, sandbox execution, per-agent sandbox modes | Testing, infrastructure, deployment, benchmarking, security review |
+
+> **Builder pool.** The rows above are the shipped default posture. Under the builder pool, any roster member — the core trio plus enrolled optional members (OpenCode, Kimi, Cursor) — is an eligible builder assigned via `ops/roster.toml`; every build runs under a per-task lease in an isolated worktree and merges only after cross-review by a pinned non-author reviewer. The single-writer rule is retired: safety is leases + worktree isolation + cross-review, not write-restriction.
 
 ### Four coordination modes
 
@@ -466,17 +468,17 @@ Before building, validate the plan:
 
 ## Assignment heuristic
 
-Use this matrix to assign tasks. YOU make the assignment decision for every task.
+Assignment is roster-driven (`ops/roster.toml`, via `resolve_role <role>`); use this matrix as the default posture. YOU decide each task's role, and every build runs under a per-task lease with cross-review by a pinned non-author reviewer before merge — not a write-restriction on any CLI.
 
 ### Quick reference
 
-- **Produces code?** → Claude (subagents or agent team for parallel work)
-- **Evaluates existing code?** → Antigravity + Codex + Claude specialized agents in parallel
-- **Runs/executes something?** → Codex
-- **Produces documentation?** → Antigravity
-- **Touches shared interfaces?** → Claude implements → Antigravity reviews → Codex tests
-- **Ambiguous?** → Claude takes it, flags for parallel review
-- **Cross-cutting (all domains)?** → Claude leads, subagents for build, then parallel review + test
+- **Produces code?** → builder role (default Claude; roster-assignable to any member), built under a lease and cross-reviewed before merge
+- **Evaluates existing code?** → reviewer role + Claude specialized agents in parallel (default Codex + Antigravity)
+- **Runs/executes something?** → tester role (default Codex)
+- **Produces documentation?** → documenter role (default Antigravity)
+- **Touches shared interfaces?** → builder implements under a lease → pinned non-author reviewer cross-reviews → tester validates
+- **Ambiguous?** → the lead takes it as builder, flags for parallel review
+- **Cross-cutting (all domains)?** → the lead leads, leases per task for build, then parallel review + test
 
 ### Codebase analysis tasks (assign to Antigravity CLI -- Phase 0)
 
@@ -490,7 +492,9 @@ Use this matrix to assign tasks. YOU make the assignment decision for every task
 | Dependency graph analysis | Can trace imports and relationships across all files | Informs task decomposition |
 | Convention audit | Detects naming, structure, and style patterns in use | Updates CONVENTIONS.md |
 
-### Build tasks (assign to Claude Code)
+### Build tasks (default builder: Claude Code; roster-assignable)
+
+Assignment is roster-driven — any member can be the builder. Every build runs under a per-task lease and merges only after cross-review by a pinned non-author reviewer. The table below is the default-posture rationale for why Claude leads builds:
 
 | Task type | Why Claude | Notes |
 |---|---|---|
@@ -605,9 +609,9 @@ Write findings to ops/REVIEW_ANTIGRAVITY.md:
 - [topic] What needs to be documented
 
 ## Rules
-- Never modify source code directly
+- When reviewing, return findings — don't edit the code under review (a build lease is where you'd modify source, if the roster assigns you one)
 - Never modify CONTRACTS.md during review (propose changes in MEMORY.md)
-- Log issues as new tasks in TASKS.md with "Agent: Claude" assignment
+- Log issues as new tasks in TASKS.md, assigned from the roster
 - Be specific: include file paths and line numbers
 ```
 
@@ -663,9 +667,9 @@ Write findings to ops/REVIEW_CODEX.md:
 - [function/module] What needs testing
 
 ## Rules
-- Never modify source code (only test code and infra configs)
+- When reviewing, edit only test code and infra configs — return findings on the source under review rather than rewriting it (a build lease is where you'd modify source, if the roster assigns you one)
 - Never modify CONTRACTS.md directly (propose changes in MEMORY.md)
-- Log code issues as new tasks in TASKS.md with "Agent: Claude" assignment
+- Log code issues as new tasks in TASKS.md, assigned from the roster
 ```
 
 ---
@@ -727,6 +731,17 @@ Before building:
 
 Execute build tasks using wave orchestration (see wave-orchestration skill).
 
+#### Builder-pool wave protocol
+
+Every implementation task — including lead-authored ones — is assigned from `ops/roster.toml`, built under a per-task lease in an isolated worktree, and merged only after cross-review by a pinned non-author reviewer. The single-writer rule is retired: any roster member is an eligible builder; safety is leases + worktree isolation + cross-review, not write-restriction. The lead drives the lease lifecycle from `scripts/invoke-external.sh`:
+
+1. **Assign + lease:** `resolve_role <role>` picks the builder; `lease_create <task> <role>` carves the worktree + `lease/<task>` branch; `lease_dispatch <task> <prompt>` launches the builder in the background with context injected (task rows, CONTRACTS.md slice, roster entry). Builders commit nothing and never read the canonical `ops/` tree (KTD-3).
+2. **Collect + pin a reviewer:** `lease_heartbeat_check` until the builder exits, then `lease_collect` (state → review). The lead pins a reviewer that is a DIFFERENT roster member than the builder (the lead is valid); that reviewer stays pinned across all ≤3 fix cycles of the task (KTD-10). If no non-author reviewer is live, the merge blocks and escalates to the user.
+3. **Merge on approval:** `lease_merge <task> <reviewer>` snapshots the builder's work as ONE squash commit per task on the sprint integration branch and records builder + reviewer + merge_commit; it REFUSES self-review (reviewer ≠ `builder_cli` — AE3). Findings re-dispatch the same lease/builder with the same pinned reviewer (cycle < 3); at cycle 3 escalate.
+4. **Verify + promote:** at wave end `integration-verifier` runs against the integration branch (combined verification across the wave's merged tasks); the lead promotes to the main branch honoring `[promotion] require_user_approval` (default false). Protected-path diffs (permission configs, deny rules, `ops/roster.toml` incl. `[promotion]`, shipped agent configs) force the gate on and require the lead or user as the cross-reviewer — never an external-CLI-only review.
+
+CHANGELOG rows carry builder + reviewer + merge commit from the ledger. The subagent and agent-team modes below are the two ways to run this loop.
+
 #### Choosing the build mode
 
 | Condition | Mode | How |
@@ -739,13 +754,13 @@ Execute build tasks using wave orchestration (see wave-orchestration skill).
 #### Subagent mode (default)
 
 ```
-Wave 1: Dispatch parallel subagents → collect results → integration-verifier
-Wave 2: Dispatch parallel subagents → collect results → integration-verifier
+Wave 1: lease + dispatch per task → collect → cross-review → merge to integration branch → integration-verifier
+Wave 2: lease + dispatch per task → collect → cross-review → merge to integration branch → integration-verifier
 ...
-Final: Full test suite + build + lint
+Final: Full test suite + build + lint, then promote the integration branch per the [promotion] gate
 ```
 
-Each subagent receives:
+Each builder receives (injected into the dispatch prompt — it never reads canonical `ops/`):
 - Task description from TASKS.md
 - Relevant types from CONTRACTS.md (embedded, not referenced)
 - Skill injection if applicable (e.g., test-driven-development skill)
@@ -755,11 +770,11 @@ Each subagent receives:
 
 ```
 1. Spawn team-lead agent
-2. Team-lead reads plan, groups tasks into work streams
-3. Team-lead assigns teammates with explicit file ownership
-4. Teammates coordinate via shared task list + messaging
-5. Quality gates: TaskCompleted hook verifies tests/lint before accepting
-6. Integration-verifier runs between waves
+2. Team-lead reads plan, groups tasks into waves
+3. Team-lead assigns each task to a builder resolved from ops/roster.toml, dispatched under a lease, and pins a non-author reviewer per task
+4. Builders run confined in worktrees; the team-lead injects context and does all merges on the main tree (KTD-3)
+5. Quality gates: tests/lint pass and a pinned non-author reviewer approves before a task merges (self-review refused — AE3)
+6. Integration-verifier runs between waves against the integration branch; the lead promotes per the [promotion] gate
 7. Teammates can invoke antigravity/codex themselves for review/testing
 ```
 
@@ -793,7 +808,7 @@ Track risk accumulation per subagent/teammate:
 
 **Circuit breaker:** Halt subagent when risk > 20% or file changes > 50. Escalate to lead.
 
-After each task: update CHANGELOG.md, move task to "Done" in TASKS.md.
+After each task merges: its CHANGELOG.md row carries builder + reviewer + merge commit (from the ledger), and the task moves to "Done" in TASKS.md.
 
 ### Phase 3: Parallel review
 
