@@ -100,6 +100,30 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.co
   [ ! -f ".codex/hooks.json" ] && cp "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json" ".codex/hooks.json"
 fi
 
+# Bootstrap OpenCode agent definitions (.opencode/agents/) + project config
+# (.opencode/opencode.json), copy-if-absent so user customizations survive.
+# Guarded on `command -v opencode` — the optional-CLI detection below records
+# presence/version; this only provisions the agent-def/config surface when the
+# binary is actually installed. invoke_opencode routes builder/reviewer via
+# `--agent <name>` from .opencode/agents/ (project tier) with the plugin's
+# opencode-agents/ as fallback. Reviewer read-only safety is the agent-def
+# permission map (edit/bash deny), NOT opencode.json denies (OC-06: denies do
+# not survive --auto — see templates/.opencode/README.md).
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && command -v opencode >/dev/null 2>&1; then
+  if [ -d "${CLAUDE_PLUGIN_ROOT}/opencode-agents" ]; then
+    mkdir -p .opencode/agents
+    for f in "${CLAUDE_PLUGIN_ROOT}/opencode-agents"/*.md; do
+      [ -f "$f" ] || continue
+      dest=".opencode/agents/$(basename "$f")"
+      [ ! -f "$dest" ] && cp "$f" "$dest"
+    done
+  fi
+  if [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.opencode/opencode.json" ]; then
+    mkdir -p .opencode
+    [ ! -f ".opencode/opencode.json" ] && cp "${CLAUDE_PLUGIN_ROOT}/templates/.opencode/opencode.json" ".opencode/opencode.json"
+  fi
+fi
+
 # Bootstrap ops/roster.toml + ops/watch-registry.toml — per-file existence
 # guards, deliberately OUTSIDE the ops-dir bootstrap above so upgraded v2.x
 # projects (which already have ops/) still receive them. A user's existing
