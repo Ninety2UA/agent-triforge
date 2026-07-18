@@ -31,9 +31,10 @@
 
 [roles.builder]
 cli = "claude"
-# model is intentionally empty: the Claude lane resolves its model via the
-# downgrade ladder (Fable 5 when the probe record shows CC-02 PASS on the
-# host, else latest Opus) — the roster never second-guesses the ladder.
+# model is intentionally empty: the shell `claude -p` builder lease lane runs the
+# host's default Claude Code model (no --model pin), so the roster has no model to
+# carry here. The Fable/downgrade ladder applies to Agent-tool subagent spawns
+# (the Agent tool's `model` parameter), not this shell lease lane.
 model = ""
 effort = "max"
 fallbacks = ["codex", "antigravity"]

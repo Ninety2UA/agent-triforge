@@ -1,32 +1,34 @@
 # Session state
-<!-- Saved: 2026-07-17 -->
-<!-- Type: wrap (planning complete, execution not started) -->
+<!-- Saved: 2026-07-18 -->
+<!-- Type: mid-execution (v3.0.0 build in progress) -->
 
 ## Current phase
-Planning complete for the v3.0.0 CLI modernization + builder pool. Implementation not started.
+Executing the v3.0.0 CLI-modernization + builder-pool plan
+(`docs/plans/2026-07-17-001-feat-cli-modernization-builder-pool-plan.md`)
+via ce-work on branch `feat/cli-modernization-builder-pool`.
 
-## The plan
-`docs/plans/2026-07-17-001-feat-cli-modernization-builder-pool-plan.md` — implementation-ready unified plan (ce-brainstorm → ce-plan → two ce-doc-review rounds; 23 + 13 findings applied). Self-contained: Product Contract (R1–R39, AE1–AE8), Planning Contract (KTD-1–14 + diagrams + risks), 17 implementation units in 3 phases, Verification Contract, Definition of Done. One open question deferred in-doc: release cadence (single v3.0.0 vs Phase-A-first split).
+## Progress
+Phase A COMPLETE (committed): U1 probe harness + record, U2 invoke_antigravity,
+U3 antigravity-agents plugin, U4 Gemini sweep, U5 native-first (/goal + sentinel),
+U6 Claude ladder, U7 Codex refresh (gpt-5.6-sol, D-004 flip, structured verdicts).
+Phase B underway: U8 roster config COMMITTED; U9 lease lifecycle COMMITTED (23/23
+scenarios + live codex dogfood). U10 (wave protocol), U17 (onboarding), U14 (watch
+family) running in parallel now (file-disjoint). Then U11→U12→U13 (serialized on
+invoke-external.sh), U15 (first runs), U16 (release v3.0.0).
 
-Scope in one line: migrate the Gemini lane to Antigravity (`agy`), absorb Claude Code/Codex updates native-first, replace single-writer with a configurable six-CLI builder pool (worktree leases + cross-review), add OpenCode/Kimi Code/Cursor as optional members, ship `/cli-watch` + `/repo-watch`, produce the four-repo mining report, release as v3.0.0.
+## Probe record (U1, authoritative)
+ops/research/2026-07-probe-record.md — 30 PASS / 14 FAIL / 1 AUTH-FAIL(kimi) /
+1 PENDING(RTN-01, resolved by U15). Key: agy pin "Gemini 3.1 Pro (High)", codex
+hooks fire under exec (nested shape + bypass-trust), /goal gates, Fable 5 available.
 
-## Task status snapshot
-- All 17 units pending. U1 (capability probe harness) gates everything — run it first. U17 (onboarding/enrollment) follows U8.
-- Delivery order (user-directed): Phase A (modernize incumbents, U1–U7) → Phase B (pool + optional CLIs, U8–U13) → Phase C (watch family + first runs + release, U14–U16).
-- U11→U12→U13 are serialized (all edit scripts/invoke-external.sh).
+## Next actions
+1. Collect U10/U17/U14, review diffs, commit each (files disjoint — stage per unit).
+2. U11 OpenCode → U12 Kimi → U13 Cursor (serial: all edit scripts/invoke-external.sh).
+3. U15 first runs (cli-watch + repo-watch produce the cycle ADR + mining report;
+   resolves RTN-01), U16 release v3.0.0.
+4. Then 3 iteration loops (review→fix→verify) to 5/5, then shipping tail (PR).
 
-## Research artifacts (verified 2026-07-17)
-- `ops/research/2026-07-17-factsheet-claude-code.md` — /goal, workflows/ultracode, models (Fable 5, Sonnet 5 1M ctx), effort levels, plugin-system changes
-- `ops/research/2026-07-17-factsheet-antigravity.md` — Gemini service cutoff 2026-06-18, `agy` CLI, migration paths, Flash-default trap, permission-system rewrite
-- `ops/research/2026-07-17-factsheet-codex.md` — 0.144.5, gpt-5.6-sol, hooks-under-exec likely fixed (re-probe → D-004 flip), features list, --output-schema
-- `ops/research/2026-07-17-factsheet-new-clis.md` — OpenCode/Kimi Code/Cursor headless embedding facts + fragility flags
-- `ops/research/2026-07-17-grounding-dossier.md` — repo file:line quotes (42-file gemini footprint, invocation seams; may drift as code changes)
-
-## Known issues
-- None blocking. Working tree has uncommitted changes: the plan, these fact sheets, this STATE.md (memory files live outside the repo). Commit before or at the start of execution.
-
-## Recommended next actions
-1. New session, from repo root: `/compound-engineering:ce-work docs/plans/2026-07-17-001-feat-cli-modernization-builder-pool-plan.md`
-2. ce-work reads Goal Capsule → units in dependency order → Verification Contract gates. U1's probe record steers the probe-gated branches (Codex hooks, Kimi agents, Cursor hooks, monitors, Routine delivery).
-3. Alternative: run the plan as a `/goal` (thin objective pointing at the plan; see plan's Goal Capsule).
-4. Scope changes go back through `/ce-brainstorm`; plan adjustments via `/ce-plan` on the same file (it resumes/deepens in place).
+## Notes
+- CLAUDE.md moved to .claude/CLAUDE.md (U6, strict-validation fix).
+- ship-loop.sh retired; completion = ops/.sprint-complete sentinel + /goal.
+- Lease ledger ops/leases.toml + ops/roster.toml + ops/leases are gitignored runtime state.

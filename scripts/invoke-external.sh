@@ -204,11 +204,20 @@ invoke_codex() {
   fi
 
   local AGENT_MODEL="" AGENT_SANDBOX="" AGENT_APPROVAL="" AGENT_INSTR_B64="" AGENT_OUTPUT_SCHEMA=""
+  local AGENT_MODEL_B64="" AGENT_SANDBOX_B64="" AGENT_APPROVAL_B64="" AGENT_OUTPUT_SCHEMA_B64=""
   if [ -n "$AGENT_TOML" ]; then
     local CONFIG_SH
     CONFIG_SH=$(_extract_codex_agent_config "$AGENT_TOML" "$AGENT_NAME") || CONFIG_SH=""
     if [ -n "$CONFIG_SH" ]; then
+      # Every emitted line is NAME=<base64> — injection-safe under eval (base64
+      # has no shell metacharacters), unlike raw config values which could carry
+      # $()/backticks that eval would execute in this lead shell. Decode each
+      # field back to its real value after the (now-safe) eval.
       eval "$CONFIG_SH"
+      AGENT_MODEL=$(printf '%s' "${AGENT_MODEL_B64:-}" | base64 -d 2>/dev/null || true)
+      AGENT_SANDBOX=$(printf '%s' "${AGENT_SANDBOX_B64:-}" | base64 -d 2>/dev/null || true)
+      AGENT_APPROVAL=$(printf '%s' "${AGENT_APPROVAL_B64:-}" | base64 -d 2>/dev/null || true)
+      AGENT_OUTPUT_SCHEMA=$(printf '%s' "${AGENT_OUTPUT_SCHEMA_B64:-}" | base64 -d 2>/dev/null || true)
     fi
   fi
 
@@ -1426,16 +1435,16 @@ _codex_feature_row_present() {
   grep -qE "^${FLAG}[[:space:]]" "$_CODEX_FEATURES_CACHE" 2>/dev/null
 }
 
-# Emit bash variable assignments extracted from a Codex agents.toml entry.
-# Outputs:
-#   AGENT_MODEL=<string>
-#   AGENT_SANDBOX=<string>
-#   AGENT_APPROVAL=<string>
-#   AGENT_INSTR_B64=<base64 string>
-#   AGENT_OUTPUT_SCHEMA=<string>   (Triforge-level key; schema file name)
-# Missing fields emit empty values. Fails loudly (exit 1 + stderr warning) if
-# python or a TOML parser is unavailable, so callers can detect the condition
-# and log it rather than silently running with session defaults.
+# Emit shell variable assignments extracted from a Codex agents.toml entry.
+# EVERY value is base64-encoded so the caller can eval the lines without risk:
+# a raw config value like `model = "$(rm -rf ~)"` would command-substitute
+# inside eval, but base64 output has no shell metacharacters (injection-safe).
+# Outputs (all base64; caller decodes):
+#   AGENT_MODEL_B64 AGENT_SANDBOX_B64 AGENT_APPROVAL_B64
+#   AGENT_INSTR_B64 AGENT_OUTPUT_SCHEMA_B64
+# Missing fields emit base64 of the empty string. Fails loudly (exit 1 + stderr
+# warning) if python or a TOML parser is unavailable, so callers can detect the
+# condition and log it rather than silently running with session defaults.
 _extract_codex_agent_config() {
   local AGENT_TOML=$1
   local AGENT_NAME=$2
@@ -1453,12 +1462,18 @@ with open(os.environ['AGENT_TOML'], 'rb') as f:
     data = tomllib.load(f)
 agent_raw = data.get('agents', {}).get(os.environ['AGENT_NAME'], {})
 agent = agent_raw if isinstance(agent_raw, dict) else {}
-instr_b64 = base64.b64encode(agent.get('developer_instructions', '').encode()).decode()
-print('AGENT_MODEL='    + json.dumps(agent.get('model', '')))
-print('AGENT_SANDBOX='  + json.dumps(agent.get('sandbox_mode', '')))
-print('AGENT_APPROVAL=' + json.dumps(agent.get('approval_policy', '')))
-print('AGENT_INSTR_B64=' + json.dumps(instr_b64))
-print('AGENT_OUTPUT_SCHEMA=' + json.dumps(agent.get('output_schema', '')))
+def _b64(v):
+    return base64.b64encode(str(v).encode()).decode()
+# Emit EVERY field base64-encoded. The caller eval's these lines, and a raw
+# json.dumps'd value like \"\$(rm -rf ~)\" still command-substitutes inside
+# eval (json.dumps quotes but does not neutralize \$()/backticks). base64's
+# alphabet ([A-Za-z0-9+/=]) has no shell metacharacters, so eval of
+# NAME=<base64> is injection-proof; the caller base64-decodes each field.
+print('AGENT_MODEL_B64='         + _b64(agent.get('model', '')))
+print('AGENT_SANDBOX_B64='       + _b64(agent.get('sandbox_mode', '')))
+print('AGENT_APPROVAL_B64='      + _b64(agent.get('approval_policy', '')))
+print('AGENT_INSTR_B64='         + _b64(agent.get('developer_instructions', '')))
+print('AGENT_OUTPUT_SCHEMA_B64=' + _b64(agent.get('output_schema', '')))
 "
 }
 
@@ -1492,8 +1507,10 @@ for k, v in sorted(data.get('agents', {}).items()):
 # resolve_role <role> — map a task-type role (builder | reviewer | tester |
 # analyst | documenter) to the member that should handle it right now.
 # Prints one line on success:   cli<TAB>model<TAB>effort
-# (builder's model field is empty by design — the Claude lane resolves its
-# model via the downgrade ladder, not the roster).
+# (builder's model field is empty by design: the shell `claude -p` builder lane
+# runs the host's default Claude Code model with no --model pin, so the roster
+# has no model to carry there. The Fable/downgrade ladder is an Agent-tool
+# subagent concern — the Agent tool's `model` parameter — NOT this shell lane.)
 #
 # Sources of truth, in order: ops/roster.toml when present, overlaid
 # PER-FIELD onto built-in defaults — a role overriding only effort keeps the
@@ -1533,8 +1550,9 @@ except ImportError:
         sys.exit(3)
 
 # Built-in defaults — the single source of truth in this function; mirrors
-# templates/ops/roster.toml (keep the two in sync). builder model '' means:
-# resolved by the Claude downgrade ladder, never by the roster.
+# templates/ops/roster.toml (keep the two in sync). builder model '' means: the
+# shell claude -p lease lane runs the host default Claude model (no --model pin);
+# the Fable/downgrade ladder is an Agent-tool subagent concern, not this lane.
 DEFAULTS = {
     'builder':    {'cli': 'claude',      'model': '',                      'effort': 'max',   'fallbacks': ['codex', 'antigravity']},
     'reviewer':   {'cli': 'codex',       'model': 'gpt-5.6-sol',           'effort': 'xhigh', 'fallbacks': ['antigravity', 'claude']},
@@ -1653,6 +1671,80 @@ sys.exit(6)
 "
 }
 
+# Distinct return code meaning "this role resolved to the claude lane; spawn a
+# native Agent-tool subagent instead of a background CLI helper" (see
+# dispatch_role). Deliberately outside the codes the invoke_* helpers and
+# timeout(1) use (1, 124, 125-127) and outside resolve_role's 2-6.
+_RC_DISPATCH_ROLE_CLAUDE=40
+
+# dispatch_role <role> <agent-name> <prompt> [output-file] [timeout-seconds]
+#
+# Roster-driven dispatch for the REVIEW and TEST phases (R19, AE4). resolve_role
+# picks the cli+model+effort for the role; this then case-dispatches to the
+# resolved cli's invoke_* helper, threading the resolved model/effort through
+# that helper's override env var (AGY_MODEL / OPENCODE_MODEL / KIMI_MODEL /
+# CURSOR_MODEL) so a roster override actually reaches the CLI. This is what
+# makes the optional invoke_opencode/invoke_kimi/invoke_cursor helpers LIVE and
+# lets a [roles.tester] cli="opencode" override run opencode instead of codex —
+# without it, resolve_role only drove the builder lane (lease_create) and the
+# review/test phases hardcoded codex/antigravity.
+#
+# The claude lane is special: review/test work assigned to claude runs as a
+# NATIVE Claude Agent-tool subagent (a subagent has the ops/ context and tool
+# surface the shell CLIs lack), not a shell helper. So for cli=claude this prints
+#   DISPATCH_ROLE_CLAUDE <agent-name> <output-file>
+# to stdout and returns _RC_DISPATCH_ROLE_CLAUDE (40), signalling the calling
+# command to spawn a Claude subagent instead of a background CLI. Every other
+# lane invokes its helper and returns the helper's own exit code
+# (INVOKE_FAILURE_CLASS stays visible for a synchronous, same-shell caller).
+#
+# Callers MUST invoke this in a context that ignores set -e (e.g.
+# `dispatch_role ... || RC=$?`), exactly like the invoke_* helpers — otherwise a
+# nonzero helper return would abort the sourcing shell.
+dispatch_role() {
+  local ROLE=${1:?usage: dispatch_role <role> <agent-name> <prompt> [output-file] [timeout]}
+  local AGENT_NAME=${2:?usage: dispatch_role <role> <agent-name> <prompt> [output-file] [timeout]}
+  local PROMPT=${3:?usage: dispatch_role <role> <agent-name> <prompt> [output-file] [timeout]}
+  local OUTPUT_FILE=${4:-"${TMPDIR:-/tmp}/dispatch_${ROLE}_$$_$(date +%s).txt"}
+  local TIMEOUT=${5:-600}
+  local RESOLVED CLI MODEL EFFORT
+  RESOLVED=$(resolve_role "$ROLE") || return $?
+  CLI=$(printf '%s\n' "$RESOLVED" | cut -f1)
+  MODEL=$(printf '%s\n' "$RESOLVED" | cut -f2)
+  EFFORT=$(printf '%s\n' "$RESOLVED" | cut -f3)
+  echo "dispatch_role: role=${ROLE} -> cli=${CLI} model=${MODEL:-<default>} effort=${EFFORT} agent=${AGENT_NAME}" >&2
+  case "$CLI" in
+    antigravity)
+      AGY_MODEL="$MODEL" invoke_antigravity "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT"
+      ;;
+    codex)
+      # Codex resolves model/sandbox/approval from its agents.toml entry, so the
+      # roster model is advisory for this lane (no CODEX_MODEL override hook) —
+      # invoke_codex is called as-is, matching the shipped tester/reviewer default.
+      invoke_codex "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT"
+      ;;
+    opencode)
+      OPENCODE_MODEL="$MODEL" invoke_opencode "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
+      ;;
+    kimi)
+      KIMI_MODEL="$MODEL" invoke_kimi "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
+      ;;
+    cursor)
+      CURSOR_MODEL="$MODEL" invoke_cursor "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
+      ;;
+    claude)
+      # Review/test on the claude lane runs as a native Agent-tool subagent, not
+      # a shell helper — signal the caller to spawn one (see function comment).
+      printf 'DISPATCH_ROLE_CLAUDE %s %s\n' "$AGENT_NAME" "$OUTPUT_FILE"
+      return "$_RC_DISPATCH_ROLE_CLAUDE"
+      ;;
+    *)
+      echo "dispatch_role: ERROR role '${ROLE}' resolved to unknown cli '${CLI}' — not integrated. Known lanes: claude, codex, antigravity, opencode, kimi, cursor." >&2
+      return 1
+      ;;
+  esac
+}
+
 # Cache file for ensure_core_trio_live — bash keeps $$ at the sourcing
 # shell's PID even in subshells, so one successful probe covers the session.
 _TRIO_LIVE_CACHE="${TMPDIR:-/tmp}/triforge_trio_live_$$"
@@ -1737,6 +1829,31 @@ _lease_realpath() {
 import os
 print(os.path.realpath(os.environ['RP_TARGET']))
 "
+}
+
+# Repo default branch (KTD-5). origin/HEAD's target when set, else the first of
+# main/master that exists locally, else empty (a single-branch or detached repo
+# with no default-branch concept). Printed WITHOUT the refs/remotes/origin/
+# prefix. Tolerant: every probe is guarded so a repo with no remote still works.
+_lease_default_branch() {
+  local REPO=$1 REF="" B
+  REF=$(git -C "$REPO" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null) || REF=""
+  if [ -n "$REF" ]; then
+    printf '%s\n' "${REF#refs/remotes/origin/}"
+    return 0
+  fi
+  for B in main master; do
+    if git -C "$REPO" show-ref --verify --quiet "refs/heads/${B}" 2>/dev/null; then
+      printf '%s\n' "$B"
+      return 0
+    fi
+  done
+  return 0
+}
+
+# Current checked-out branch of the main tree, or empty on detached HEAD.
+_lease_current_branch() {
+  git -C "$1" symbolic-ref --quiet --short HEAD 2>/dev/null || true
 }
 
 # Lease root: TRIFORGE_LEASE_ROOT override, else
@@ -1900,20 +2017,34 @@ _adapter_env() {
   local CLI=$1
   shift
   local -a PAIRS=()
-  local V
-  for V in HOME PATH TMPDIR TERM LANG COLORTERM; do
-    if [ -n "${!V+x}" ]; then
-      PAIRS+=("${V}=${!V}")
-    fi
-  done
+  # Base allowlist — enumerated explicitly rather than via ${!V} indirect
+  # expansion. This file is `source`d under the CALLER's shell (the commands
+  # do a plain `source`, which ignores the bash shebang), and on macOS that is
+  # zsh, where ${!V} raises "bad substitution" and would kill every lease
+  # dispatch. Explicit ${HOME+x} tests and array append work under both bash
+  # and zsh (verified).
+  [ -n "${HOME+x}" ]      && PAIRS+=("HOME=${HOME}")
+  [ -n "${PATH+x}" ]      && PAIRS+=("PATH=${PATH}")
+  [ -n "${TMPDIR+x}" ]    && PAIRS+=("TMPDIR=${TMPDIR}")
+  [ -n "${TERM+x}" ]      && PAIRS+=("TERM=${TERM}")
+  [ -n "${LANG+x}" ]      && PAIRS+=("LANG=${LANG}")
+  [ -n "${COLORTERM+x}" ] && PAIRS+=("COLORTERM=${COLORTERM}")
   case "$CLI" in
     opencode)
       [ -n "${OPENROUTER_API_KEY+x}" ] && PAIRS+=("OPENROUTER_API_KEY=${OPENROUTER_API_KEY}")
       ;;
     kimi)
-      for V in $(compgen -v KIMI_ 2>/dev/null || true); do
-        PAIRS+=("${V}=${!V}")
-      done
+      # Forward every EXPORTED KIMI_* var. `compgen` and ${!V} are bash-only
+      # (see above); iterate `env` output instead so it works under zsh too.
+      # Split on the first `=` only (values may contain `=`).
+      local _kv_name _kv_val
+      while IFS='=' read -r _kv_name _kv_val; do
+        case "$_kv_name" in
+          KIMI_*) PAIRS+=("${_kv_name}=${_kv_val}") ;;
+        esac
+      done <<KIMIENV
+$(env)
+KIMIENV
       ;;
     cursor)
       [ -n "${CURSOR_API_KEY+x}" ] && PAIRS+=("CURSOR_API_KEY=${CURSOR_API_KEY}")
@@ -1989,7 +2120,7 @@ lease_create() {
     pid=0 output_file="" created="$NOW" heartbeat_deadline=0 \
     requeue_count=0 previous_builder="" reviewer="" merge_commit="" reason="" \
     || return 1
-  echo "lease_create: task=${TASK_ID} role=${ROLE} builder=${CLI} model=${MODEL:-ladder-resolved} worktree=${WT}" >&2
+  echo "lease_create: task=${TASK_ID} role=${ROLE} builder=${CLI} model=${MODEL:-host-default} worktree=${WT}" >&2
   echo "$TASK_ID"
 }
 
@@ -2040,7 +2171,7 @@ lease_dispatch() {
 
   local FULL_PROMPT
   FULL_PROMPT="## Lease dispatch: ${TASK_ID}
-Roster entry: role=${ROLE} cli=${CLI} model=${MODEL:-<ladder-resolved>} effort=${EFFORT}
+Roster entry: role=${ROLE} cli=${CLI} model=${MODEL:-<host-default>} effort=${EFFORT}
 
 ## Confinement contract
 You are working in an isolated worktree at ${WT}. Never modify files outside it. Never read or write the project's canonical ops/ directory — required context is included below. Commit nothing; the lead collects.
@@ -2090,7 +2221,13 @@ ${PROMPT}"
           # like every other lane. Shipped default is the OpenRouter GLM, so a
           # live build AUTH-FAILs until the provider is connected — that failure
           # is deterministic and the lead sees it via <out>.class (no requeue).
-          _adapter_env opencode "$TOBIN" "${TIMEOUT}s" opencode run --format json -m "${MODEL:-openrouter/z-ai/glm-5.2}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+          # Effort -> --variant (OC-05 best-effort), guarded on a non-empty effort
+          # exactly like the codex case guards model_reasoning_effort. The lease
+          # path has no retry, so a provider that rejects the variant surfaces as a
+          # KTD-9-classified failure the lead requeues — same as any other lane.
+          local -a CMD=(opencode run --format json -m "${MODEL:-openrouter/z-ai/glm-5.2}")
+          [ -n "$EFFORT" ] && CMD+=(--variant "$EFFORT")
+          _adapter_env opencode "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
           ;;
         kimi)
           # R35-confined optional-tier builder (U12): raw `kimi -p` with cwd =
@@ -2454,6 +2591,24 @@ lease_merge() {
     return 1
   fi
 
+  # Integration-branch guard (KTD-5): lease_merge lands a squash commit on the
+  # SPRINT INTEGRATION BRANCH, never the repo's default branch. Refuse when the
+  # main tree is checked out on the default branch — the lead must cut an
+  # integration branch first; promotion to the default branch is lease_promote's
+  # gated job. When there is no default-branch concept (detached HEAD, or a
+  # single-branch repo with no origin/HEAD and no local main/master), allow it
+  # but log so the honest boundary is visible.
+  local DEFAULT_BRANCH CURRENT_BRANCH
+  DEFAULT_BRANCH=$(_lease_default_branch "$REPO")
+  CURRENT_BRANCH=$(_lease_current_branch "$REPO")
+  if [ -n "$DEFAULT_BRANCH" ] && [ -n "$CURRENT_BRANCH" ] && [ "$CURRENT_BRANCH" = "$DEFAULT_BRANCH" ]; then
+    echo "lease_merge: REFUSED — the main tree is on the default branch '${DEFAULT_BRANCH}'. lease_merge lands on a sprint integration branch, not the default branch — cut/checkout an integration branch first (e.g. git checkout -b sprint/<name>), then rerun. Promotion to '${DEFAULT_BRANCH}' is lease_promote's gated job (KTD-5)." >&2
+    return 1
+  fi
+  if [ -z "$DEFAULT_BRANCH" ] || [ -z "$CURRENT_BRANCH" ]; then
+    echo "lease_merge: NOTE no default-branch concept (default='${DEFAULT_BRANCH:-<none>}' current='${CURRENT_BRANCH:-<detached>}') — proceeding without the integration-branch guard (single-branch or detached repo)." >&2
+  fi
+
   # Lead-side collect commit: the builder committed nothing (contract), so
   # snapshot its work onto the lease branch. .agents/ (provisioned skills)
   # is excluded even where a project forgot to gitignore it.
@@ -2486,6 +2641,150 @@ lease_merge() {
   _ledger_update "$TASK_ID" state=merged reviewer="$REVIEWER" merge_commit="$SHA" || return 1
   echo "lease_merge: ${TASK_ID} merged as ${SHA} (builder ${BUILDER}, reviewer ${REVIEWER}) — reclaiming worktree" >&2
   lease_reclaim "$TASK_ID" || true
+  return 0
+}
+
+# Distinct return code for "promotion is gated — the lead/user must approve"
+# (lease_promote). Outside the invoke_* / timeout / resolve_role code space.
+_RC_PROMOTE_BLOCKED=42
+
+# lease_promote [<default-branch>] — wave-end promotion of the sprint integration
+# branch to the repo default branch (KTD-5). This is the ONLY path that writes the
+# default branch; lease_merge only ever lands on the integration branch. Run it
+# from the main tree checked out ON the integration branch (where lease_merge put
+# the wave's squash commits), NOT on the default branch.
+#
+# Gate, in order:
+#   (a) read [promotion].require_user_approval from ops/roster.toml (default false)
+#   (b) compute the integration branch's changed paths vs the default branch:
+#       git diff --name-only <default>...HEAD
+#   (c) scan them against PROTECTED_PATHS — the controls that govern the pool:
+#       permission configs, deny/policy rules, ops/roster.toml (incl [promotion]),
+#       and the shipped agent configs
+#   (d) require_user_approval=true OR any protected path touched -> BLOCK: print
+#       that promotion needs lead/user approval (a protected-path diff forces the
+#       gate on and requires the lead or user as reviewer, never external-CLI-only),
+#       return _RC_PROMOTE_BLOCKED, do NOT merge
+#   (e) else fast-forward (or merge) the integration branch into the default
+#       branch and report the promotion.
+# Atomic where it matters: the default branch is never touched unless the gate
+# passes — the block path leaves the tree exactly as it found it.
+lease_promote() {
+  local REPO DEFAULT_BRANCH CURRENT_BRANCH INTEGRATION_BRANCH
+  REPO=$(_lease_repo_root) || { echo "lease_promote: ERROR not inside a git repository" >&2; return 1; }
+  DEFAULT_BRANCH=${1:-$(_lease_default_branch "$REPO")}
+  if [ -z "$DEFAULT_BRANCH" ]; then
+    echo "lease_promote: ERROR could not determine the default branch (no origin/HEAD, no local main/master). Pass it explicitly: lease_promote <default-branch>." >&2
+    return 1
+  fi
+  CURRENT_BRANCH=$(_lease_current_branch "$REPO")
+  if [ -z "$CURRENT_BRANCH" ]; then
+    echo "lease_promote: ERROR the main tree is in detached HEAD — check out the sprint integration branch first." >&2
+    return 1
+  fi
+  if [ "$CURRENT_BRANCH" = "$DEFAULT_BRANCH" ]; then
+    echo "lease_promote: ERROR the main tree is already on the default branch '${DEFAULT_BRANCH}' — nothing to promote. lease_promote runs from the sprint integration branch." >&2
+    return 1
+  fi
+  INTEGRATION_BRANCH="$CURRENT_BRANCH"
+  # A dirty index would ride into the promotion merge — refuse it.
+  if ! git -C "$REPO" diff --cached --quiet 2>/dev/null; then
+    echo "lease_promote: ERROR the main tree index has staged changes — commit or unstage them before promoting." >&2
+    return 1
+  fi
+
+  # (a) user-approval knob (default false; absent/unparseable roster -> false).
+  local REQUIRE_APPROVAL="false"
+  if [ -f "ops/roster.toml" ]; then
+    REQUIRE_APPROVAL=$(ROSTER_FILE="ops/roster.toml" python3 -c "
+import os, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        print('false'); sys.exit(0)
+try:
+    with open(os.environ['ROSTER_FILE'], 'rb') as f:
+        data = tomllib.load(f)
+except Exception:
+    print('false'); sys.exit(0)
+p = data.get('promotion', {})
+v = p.get('require_user_approval', False) if isinstance(p, dict) else False
+print('true' if v is True else 'false')
+" 2>/dev/null || echo "false")
+  fi
+
+  # (b) changed paths of the integration branch vs the default branch.
+  local CHANGED
+  CHANGED=$(git -C "$REPO" diff --name-only "${DEFAULT_BRANCH}...HEAD" 2>/dev/null) || {
+    echo "lease_promote: ERROR could not diff '${DEFAULT_BRANCH}...HEAD' — is '${DEFAULT_BRANCH}' a valid branch reachable from HEAD?" >&2
+    return 1
+  }
+
+  # (c) protected-path scan. A single match forces the gate ON regardless of the
+  # knob. Prefixes cover permission configs (antigravity-agents/permissions.json,
+  # templates/.antigravity/, templates/.opencode/, templates/.codex/, .codex/),
+  # deny/policy rules (gemini-agents/policies.toml et al.), ops/roster.toml (incl
+  # its [promotion] block), and the shipped agent configs (agents/, and every
+  # <cli>-agents/ dir). No literal backticks in the heredoc.
+  local PROTECTED_HIT=""
+  PROTECTED_HIT=$(CHANGED="$CHANGED" python3 -c "
+import os
+protected_prefixes = (
+    'agents/',
+    'antigravity-agents/',
+    'codex-agents/',
+    'opencode-agents/',
+    'kimi-agents/',
+    'cursor-agents/',
+    'templates/.antigravity/',
+    'templates/.opencode/',
+    'templates/.codex/',
+    '.codex/',
+    'ops/roster.toml',
+)
+for line in os.environ.get('CHANGED', '').splitlines():
+    p = line.strip()
+    if p and p.startswith(protected_prefixes):
+        print(p)
+" 2>/dev/null || true)
+
+  # (d) block when gated.
+  if [ "$REQUIRE_APPROVAL" = "true" ] || [ -n "$PROTECTED_HIT" ]; then
+    echo "lease_promote: BLOCKED — promotion of '${INTEGRATION_BRANCH}' to '${DEFAULT_BRANCH}' needs lead/user approval. No merge performed." >&2
+    if [ "$REQUIRE_APPROVAL" = "true" ]; then
+      echo "  reason: [promotion].require_user_approval = true in ops/roster.toml (KTD-5 user gate)." >&2
+    fi
+    if [ -n "$PROTECTED_HIT" ]; then
+      echo "  reason: the integration diff touches protected paths (controls that govern the pool). A protected-path diff forces the gate ON regardless of the knob and requires the LEAD or USER as reviewer — never an external-CLI-only review:" >&2
+      printf '%s\n' "$PROTECTED_HIT" | while IFS= read -r _ph; do
+        [ -n "$_ph" ] && echo "    ${_ph}" >&2
+      done
+    fi
+    echo "  Once the lead/user approves, promote by hand (git checkout ${DEFAULT_BRANCH} && git merge ${INTEGRATION_BRANCH}) or set [promotion].require_user_approval=false for a purely non-protected diff and rerun." >&2
+    return "$_RC_PROMOTE_BLOCKED"
+  fi
+
+  # (e) promote: fast-forward when possible, else a merge commit.
+  if ! git -C "$REPO" checkout "$DEFAULT_BRANCH" >&2; then
+    echo "lease_promote: ERROR could not checkout the default branch '${DEFAULT_BRANCH}'." >&2
+    return 1
+  fi
+  if git -C "$REPO" merge --ff-only "$INTEGRATION_BRANCH" >&2; then
+    :
+  elif git -C "$REPO" merge --no-edit "$INTEGRATION_BRANCH" >&2; then
+    :
+  else
+    git -C "$REPO" merge --abort 2>/dev/null || true
+    git -C "$REPO" checkout "$INTEGRATION_BRANCH" >&2 2>/dev/null || true
+    echo "lease_promote: ERROR merging '${INTEGRATION_BRANCH}' into '${DEFAULT_BRANCH}' failed (conflicts) — aborted and returned to '${INTEGRATION_BRANCH}'. Resolve manually." >&2
+    return 1
+  fi
+  local SHA
+  SHA=$(git -C "$REPO" rev-parse HEAD)
+  echo "lease_promote: PROMOTED '${INTEGRATION_BRANCH}' -> '${DEFAULT_BRANCH}' (HEAD ${SHA}); require_user_approval=${REQUIRE_APPROVAL}, protected-paths=none." >&2
   return 0
 }
 
@@ -2605,7 +2904,8 @@ _roster_install_cmd() {
 
 # roster_member_default <cli> — print the shipped default model (KTD-8).
 # Mirrors CLI_DEFAULT_MODEL in resolve_role; claude is intentionally empty (the
-# Claude downgrade ladder resolves its model, never the roster).
+# shell claude -p lane runs the host default model; the Fable/ladder override is
+# an Agent-tool subagent concern, not this lane).
 roster_member_default() {
   case "${1:?usage: roster_member_default <cli>}" in
     claude)      echo "" ;;

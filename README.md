@@ -63,7 +63,7 @@ The framework achieves this through **institutional knowledge compounding**: eve
 
 - **(a) Builder-pool default.** External CLIs are now eligible builders, not review-only. To restore the old reviewer-only posture, edit `ops/roster.toml` and take the external CLIs off the `builder` role (leave them on `reviewer` / `tester` / `analyst` / `documenter`, or set `[members.<cli>] enabled = false`). The core trio can't be disabled, and every fallback chain must still terminate at a core member.
 - **(b) Gemini → Antigravity.** The Gemini lane is gone. **Former Gemini-API-key users:** install Antigravity and run `/setup` to authenticate the `agy` lane (the old `GEMINI_API_KEY` is no longer used). **Users who must stay on legacy Gemini:** pin plugin **`v2.4.3`** — the last release with the Gemini lane.
-- **(c) Raised floors (KTD-13).** New enforcement floors: Claude Code ≥ 2.1.212, Codex ≥ 0.144.0, Antigravity `agy` ≥ 1.1.3; optional tier OpenCode ≥ 1.18, Kimi Code ≥ 0.15, Cursor (date-versioned). Full matrix with tested-against versions + READY probes in [Compatibility](#compatibility).
+- **(c) Raised floors (KTD-13).** New enforcement floors: Claude Code ≥ 2.1.212, Codex ≥ 0.144.0, Antigravity `agy` ≥ 1.1.3; optional tier OpenCode ≥ 1.18, Kimi Code ≥ 0.15 (re-baselined to the tested version — the plan's aspirational ≥ 0.27 predated the probe host, and Kimi's near-daily cadence makes the tested floor the honest one), Cursor (date-versioned). Full matrix with tested-against versions + READY probes in [Compatibility](#compatibility).
 - **(d) Retired mechanisms.** `ship-loop.sh` promise gate (`<promise>DONE</promise>`) → `/goal` + `ops/.sprint-complete` sentinel; single-writer rule → lease + cross-review. The historical changelog entries below keep the retired names on purpose — they record what past releases shipped, and are not rewritten.
 
 ### Also recent (history)
@@ -689,7 +689,7 @@ The largest release since the plugin conversion — the coordination model and t
 
 ---
 
-> **Historical note (2026-07):** entries below predate the Gemini → Antigravity migration and intentionally keep retired names (`Gemini CLI`, `invoke_gemini`, `gemini-agents/`, `ops/REVIEW_GEMINI.md`, `ops/RESEARCH_GEMINI.md`) as an accurate record of what those releases shipped. The live lane is Antigravity (`agy`, `invoke_antigravity`, `antigravity-agents/`, `ops/REVIEW_ANTIGRAVITY.md`, `ops/RESEARCH_ANTIGRAVITY.md`); legacy Gemini users pin plugin v2.4.3.
+> **Historical note (2026-07):** entries below predate the Gemini → Antigravity migration and intentionally keep retired names (`Gemini CLI`, `invoke_gemini`, `gemini-agents/`, `ops/REVIEW_GEMINI.md`, `ops/RESEARCH_GEMINI.md`) as an accurate record of what those releases shipped. The live lane is Antigravity (`agy`, `invoke_antigravity`, `antigravity-agents/`, `ops/REVIEW_ANTIGRAVITY.md`, `ops/RESEARCH_ANTIGRAVITY.md`); legacy Gemini users pin plugin v2.4.3. Some file links in these historical entries point at paths that have since moved or been removed by v3.0.0 (`CLAUDE.md` → `.claude/CLAUDE.md`; `gemini-agents/` → `antigravity-agents/`; `hooks/handlers/ship-loop.sh` retired) — they document where the file lived at that release, not the current tree.
 
 ### 2026-05-12 — v2.4.3: Sequential downgrade ladder for narrow runtime tasks
 

@@ -77,7 +77,7 @@ Source `${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh`, then for each task:
 2. `lease_dispatch <task_id> <prompt> [timeout]` — the lead injects context (the task's TASKS.md rows, the relevant CONTRACTS.md slice, the roster entry) into the prompt; the builder runs in the BACKGROUND in its worktree under a per-adapter env allowlist. The builder commits nothing.
 3. `lease_heartbeat_check [task_id]` — sweep until the builder exits. Orphan / timeout / silent-death handling requeues ONCE to a DIFFERENT builder (KTD-9) or escalates; a deterministic failure (auth, absent CLI) fails fast with guidance and does NOT requeue.
 4. `lease_collect <task_id>` — lead-side harvest. A clean exit sets state `review` and prints the output-file path.
-5. **Pin the reviewer.** Choose a reviewer that is a DIFFERENT roster member than the lease's `builder_cli` — the lead itself is a valid reviewer. The reviewer pinned here stays this task's reviewer for ALL ≤3 fix cycles (KTD-10): no rubric flip-flop when the roster shifts mid-sprint. Self-review is never allowed; **if no non-author agent is live, the merge blocks and escalates to the user.**
+5. **Pin the reviewer.** Choose a reviewer that is a DIFFERENT roster member than the lease's `builder_cli`. The lead (Claude) is a valid reviewer for any task built by a *different* CLI — but a Claude-built task needs a *non-Claude* reviewer (the `reviewer` role default, Codex, provides this), because the AE3 guard correctly refuses `reviewer == builder_cli`. The reviewer pinned here stays this task's reviewer for ALL ≤3 fix cycles (KTD-10): no rubric flip-flop when the roster shifts mid-sprint. Self-review is never allowed; **if no non-author agent is live, the merge blocks and escalates to the user.**
 6. **Review the collected output**, then:
    - **Approved →** `lease_merge <task_id> <reviewer>` — snapshots the builder's worktree changes as ONE squash commit on the sprint integration branch, records reviewer + merge_commit in the ledger, and reclaims the worktree. `lease_merge` REFUSES when the reviewer equals `builder_cli` (AE3) — self-review never merges.
    - **Findings, cycle < 3 →** re-dispatch the SAME lease's task to the SAME builder with the reviewer's findings appended, keeping the SAME pinned reviewer; the lease returns to `building` (state transition `review → building`).
@@ -85,11 +85,11 @@ Source `${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh`, then for each task:
 
 ### Integration branch and promotion gate
 
-Approved merges land as one commit per task on a **sprint integration branch**, never directly on the main branch. At wave end, the integration-verifier gate (Step 3 Verify) runs against the integration branch — combined verification across the wave's merged tasks — BEFORE the lead promotes to the main branch.
+Approved merges land as one commit per task on a **sprint integration branch**, never directly on the main branch (`lease_merge` REFUSES to run when the main tree is checked out on the default branch — cut an integration branch first). At wave end, the integration-verifier gate (Step 3 Verify) runs against the integration branch — combined verification across the wave's merged tasks — BEFORE the lead promotes to the main branch via **`lease_promote`** (the actual promotion mechanism).
 
-Promotion honors the KTD-5 `[promotion]` gate in `ops/roster.toml`: `require_user_approval` (default `false`) — when true, the lead pauses for explicit user approval before promoting.
+Promotion honors the KTD-5 `[promotion]` gate in `ops/roster.toml`: `lease_promote` reads `require_user_approval` (default `false`) — when true, it BLOCKS and the lead pauses for explicit user approval before promoting.
 
-**Protected-path override.** Any task whose diff touches permission configs, deny rules, `ops/roster.toml` (including its `[promotion]` block), or shipped agent configs forces the promotion gate ON regardless of the knob, AND requires the lead or the user as the cross-reviewer — never an external-CLI-only review. This keeps a builder from self-promoting a change to the very controls that govern the pool.
+**Protected-path override.** Any task whose diff touches permission configs, deny rules, `ops/roster.toml` (including its `[promotion]` block), or shipped agent configs forces the promotion gate ON regardless of the knob, AND requires the lead or the user as the cross-reviewer — never an external-CLI-only review. This keeps a builder from self-promoting a change to the very controls that govern the pool. `lease_promote` enforces this: it scans the integration diff against that protected-path set and BLOCKS (distinct nonzero rc, no merge) on any match, even when `require_user_approval = false`.
 
 ### Attribution
 
