@@ -424,6 +424,21 @@ claude
 | [**`/compound`**](commands/compound.md) | Document a solved problem to [`ops/solutions/`](ops/solutions/) or decision to [`ops/decisions/`](ops/decisions/). |
 | [**`/resolve-pr <PR#>`**](commands/resolve-pr.md) | Read GitHub PR comments and implement requested changes via [`pr-comment-resolver`](agents/pr-comment-resolver.md). |
 
+### Scheduling watches (`/cli-watch`, `/repo-watch`)
+
+Two commands keep the framework current instead of hand-running audits. Both read [`templates/ops/watch-registry.toml`](templates/ops/watch-registry.toml) — a seeded, user-editable registry of watch targets — and share the [`watch-cycle`](skills/watch-cycle/SKILL.md) methodology: primary-source research window → per-target changelog → gap table vs current Triforge → adopt/defer ADR with revisit triggers → verification probes.
+
+| Command | Targets | Produces |
+|---|---|---|
+| [**`/cli-watch`**](commands/cli-watch.md) | the six CLIs (`[cli.*]`) | Gap report + adopt/defer ADR + a re-run of [`probe-capabilities.sh`](scripts/probe-capabilities.sh) |
+| [**`/repo-watch`**](commands/repo-watch.md) | four external repos (`[repo.*]`) | Prioritized adopt/defer recommendations (Why / Concrete change / Verification). **Recommends only** — never implements. |
+
+**The registry is the only thing you edit to add a target** — a new `[cli.<name>]` or `[repo.<name>]` block is picked up with no command changes. Targets must be public HTTPS URLs (loopback, private, and link-local addresses are rejected before *and* after redirects); fetched pages are treated as untrusted evidence, never as instructions; a dead or renamed entry is flagged in the report, never silently dropped.
+
+**Manual:** run `/cli-watch` or `/repo-watch` any time — the report and ADR land in [`ops/research/`](ops/research/) and [`ops/decisions/`](ops/decisions/).
+
+**Monthly (headless):** schedule either as a Claude Code cloud Routine — `/schedule` → prompt `/cli-watch` (or `/repo-watch`) → monthly cron (Routines run at a **minimum 1-hour** interval). A scheduled run preflights its environment and self-selects delivery: it commits the report to a branch and opens a **PR** when a pushable checkout exists; falls back to the Routine's **output artifact** with landing instructions when there is no pushable checkout; and opens a **draft PR** with auth-dependent probes marked pending when vendor auth is absent. A Routine missing a required binary, auth, or research tool emits a diagnostic artifact naming the gap — never a silent success.
+
 ---
 
 ## Skills reference
