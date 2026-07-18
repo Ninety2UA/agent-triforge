@@ -168,7 +168,7 @@ wait $CODEX_PID  || CODEX_RC=$?
 [ $AGY_RC -ne 0 ] || [ $CODEX_RC -ne 0 ] && { echo "helper failed — antigravity=$AGY_RC codex=$CODEX_RC" >&2; exit 1; }
 ```
 
-The helper auto-detects native agent support. If `agy agents` lists the requested agent (from installed agy plugins), it routes natively via `--agent`; otherwise it injects the agent body from the plugin's `antigravity-agents/agents/` templates as a prompt prefix (the operative mode on agy 1.1.3, which doesn't surface plugin agents headless yet). Codex agents load from `.codex/agents/agents.toml`.
+The helper auto-detects native agent support. If `agy agents` lists the requested agent (from installed agy plugins), it routes natively via `--agent`; otherwise it injects the agent body from the plugin's `antigravity-agents/agents/` templates as a prompt prefix (the operative mode on agy 1.1.4, which doesn't surface plugin agents headless yet). Codex agents load from `.codex/agents/agents.toml`.
 
 ### Git trailer conventions
 

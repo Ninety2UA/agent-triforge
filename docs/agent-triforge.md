@@ -214,7 +214,7 @@ Session continuity file. Written when pausing or wrapping a session.
 Skills are model-agnostic markdown files that encode reusable methodologies. They live in `skills/` and can be consumed by ALL agents:
 
 - **Claude Code:** Uses skills natively via the skill system
-- **Antigravity CLI:** Skills embedded in native agent definitions (`antigravity-agents/agents/*.md`). The `invoke-external.sh` helper detects whether `agy agents` surfaces the definition and otherwise injects the agent body (skill included) as a prompt prefix — the operative mode on agy 1.1.3.
+- **Antigravity CLI:** Skills embedded in native agent definitions (`antigravity-agents/agents/*.md`). The `invoke-external.sh` helper detects whether `agy agents` surfaces the definition and otherwise injects the agent body (skill included) as a prompt prefix — the operative mode on agy 1.1.4.
 - **Codex CLI:** Skills embedded in native agent definitions (`codex-agents/agents.toml` as `developer_instructions`). The `invoke-external.sh` helper extracts the config and injects the instructions as a prompt prefix.
 - **Workspace tier:** `session-start.sh` also copies `skills/` to `.agents/skills/` (the Antigravity workspace-skills tier and cross-CLI agentskills.io path) for agents that discover workspace skills.
 
@@ -272,7 +272,7 @@ invoke_codex "debugger" \
   "${TMPDIR:-/tmp}/codex_debug_$$_$(date +%s).txt" 600
 ```
 
-**How `invoke_antigravity` works:** If `agy agents` lists the requested name (agents come from installed agy plugins; empty in headless mode on agy 1.1.3), it routes natively via `--agent`. Otherwise it extracts the body of `antigravity-agents/agents/<name>.md` and injects it as a prompt prefix (the operative mode today). Every call pins the model (`--model "Gemini 3.1 Pro (High)"` — agy defaults to a Flash variant), binds the workspace with `--add-dir "$PWD"`, and caps agy's own headless wait with `--print-timeout`. Failures are classified (KTD-9) via `INVOKE_FAILURE_CLASS`: `deterministic` fails fast with fix guidance, `timeout` returns to the caller for requeue policy, and only `retryable` failures get one retry with the raw prompt. Each call logs `agent/mode/model` to stderr.
+**How `invoke_antigravity` works:** If `agy agents` lists the requested name (agents come from installed agy plugins; empty in headless mode on agy 1.1.4), it routes natively via `--agent`. Otherwise it extracts the body of `antigravity-agents/agents/<name>.md` and injects it as a prompt prefix (the operative mode today). Every call pins the model (`--model "Gemini 3.1 Pro (High)"` — agy defaults to a Flash variant), binds the workspace with `--add-dir "$PWD"`, and caps agy's own headless wait with `--print-timeout`. Failures are classified (KTD-9) via `INVOKE_FAILURE_CLASS`: `deterministic` fails fast with fix guidance, `timeout` returns to the caller for requeue policy, and only `retryable` failures get one retry with the raw prompt. Each call logs `agent/mode/model` to stderr.
 
 **How `invoke_codex` works:** Codex has no CLI flag to select a subagent — upstream "subagents" only spawn from within a running Codex session. The helper simulates agent selection by extracting the agent's config from `agents.toml` and passing it as `-m` (model), `-s` (sandbox), `-c approval_policy=` overrides, with `developer_instructions` injected as prompt prefix. Lookup order: project `.codex/agents/agents.toml` first, then plugin template.
 
@@ -290,7 +290,7 @@ Claude (the lead) is the only agent that launches Antigravity agents; no Antigra
 Antigravity CLI ships its own plugin system (`agy plugin {install,uninstall,list,enable,disable}`) and a user-tier skills directory (`~/.gemini/antigravity-cli/skills/`). We use the plugin system only as an agent-definition carrier (`antigravity-agents/` is a valid agy plugin), not as a skills registry:
 
 - **Skills:** Our 13 portable skills in `skills/` are markdown files consumed by all three agents (Claude/Antigravity/Codex) via prompt-prefix injection or native definition embedding, plus the `.agents/skills/` workspace copy for agents that discover workspace skills. Registering them per-CLI would fragment the portability story.
-- **Hooks:** Our `hooks/handlers/*.sh` are Claude Code lifecycle hooks (SessionStart, Stop, PostToolUse, etc.) — the Antigravity CLI runs as a subprocess of a Claude Code session, a different layer with different events. Project-tier agy hooks do not fire under `agy -p` anyway (probed 2026-07-17 on agy 1.1.3).
+- **Hooks:** Our `hooks/handlers/*.sh` are Claude Code lifecycle hooks (SessionStart, Stop, PostToolUse, etc.) — the Antigravity CLI runs as a subprocess of a Claude Code session, a different layer with different events. Project-tier agy hooks do not fire under `agy -p` anyway (re-probed 2026-07-18 on agy 1.1.4).
 
 ---
 

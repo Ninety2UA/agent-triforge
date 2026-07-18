@@ -28,14 +28,14 @@
 
 ## What is this?
 
-A production-grade framework that turns Claude Code into a **lead agent** coordinating multiple AI systems. Instead of using one model for everything, this framework assigns each model to what it does best:
+A production-grade framework that turns Claude Code into a **lead agent** orchestrating a **six-CLI builder pool**. Instead of one model doing everything — or a fixed role for each CLI — a user-editable roster ([`ops/roster.toml`](templates/ops/roster.toml)) decides which CLI, model, and effort handles each role, and any member can implement code:
 
-- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code) (Opus)** builds features and orchestrates the entire workflow
-- **[Antigravity CLI](https://antigravity.google/cli)** (`agy`) performs full-codebase analysis with Gemini 3.1 Pro's 1M token context window
-- **[Codex CLI](https://github.com/openai/codex)** runs tests, security audits, and infrastructure tasks in sandboxed environments
-- **Claude specialized agents** provide deep expertise in [security](agents/security-sentinel.md), [performance](agents/performance-oracle.md), [architecture](agents/architecture-strategist.md), and more
+- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** is the lead — it plans, resolves the roster, dispatches builders, and merges reviewed work (ladder: Fable 5 → Opus 4.8 → Sonnet 5)
+- **Core trio (required):** Claude · **[Antigravity](https://antigravity.google/cli)** (`agy`, Gemini 3.1 Pro, 1M context) · **[Codex](https://github.com/openai/codex)** (`gpt-5.6-sol`, sandboxed)
+- **Optional tier (auto-detected):** **OpenCode** (OpenRouter) · **Kimi Code** (K3) · **Cursor** (Grok 4.5) — enrolled through [`/setup`](commands/setup.md), gracefully absent when not
+- **19 Claude specialized agents** provide deep expertise in [security](agents/security-sentinel.md), [performance](agents/performance-oracle.md), [architecture](agents/architecture-strategist.md), and more
 
-Every interaction between agents follows a structured protocol. Work is tracked in shared markdown files. Reviews run in parallel. Knowledge compounds across sessions.
+Every non-lead build runs under a **per-task lease in an isolated git worktree** and merges only after **cross-review by a pinned non-author reviewer** — safety is isolation + cross-review, not write-restriction. Work is tracked in shared markdown files. Reviews run in parallel. Knowledge compounds across sessions.
 
 > *Each sprint should make the next sprint easier — not harder.*
 
@@ -87,6 +87,30 @@ On first session in a new project, the `session-start.sh` hook:
 - Copies skeleton `MEMORY.md`, `CHANGELOG.md`, `AGENTS.md`, and `GOALS.md` from plugin templates
 - Suggests copying the `CLAUDE.md` template if not present
 - Creates `.claude/` directory for session state files
+
+---
+
+## The builder pool
+
+The heart of v3.0.0. A wave reads [`ops/roster.toml`](templates/ops/roster.toml), leases each task to a builder CLI in its own isolated git worktree, and merges only after a pinned non-author reviewer approves — then promotes the sprint integration branch to `main` through a protected-path gate.
+
+<p align="center">
+  <img src="docs/images/builder-pool.svg" alt="Builder-pool wave — roster resolves each task to a builder CLI in an isolated worktree lease, cross-reviewed by a pinned non-author reviewer, squash-merged onto a sprint integration branch, then promoted to main through a gated check" width="100%">
+</p>
+
+**The roster decides who does what.** Five roles — builder, reviewer, tester, analyst, documenter — each map to a CLI + model + effort with an ordered fallback chain that must terminate at a core-trio member. Optional members carry an `enabled` flag and are absent everywhere when off.
+
+<p align="center">
+  <img src="docs/images/roster.svg" alt="Roster and assignment — ops/roster.toml maps each role to a CLI, model, and effort with fallback chains; six CLIs across a required core trio and an optional tier" width="82%">
+</p>
+
+**Every builder runs under a lease.** The lead-owned ledger `ops/leases.toml` (runtime state) tracks each task through its lifecycle — with heartbeat-based orphan detection, a single requeue to a *different* builder, and escalation when a task can't converge.
+
+<p align="center">
+  <img src="docs/images/lease-lifecycle.svg" alt="Lease lifecycle state machine — leased, building, review, merged; with orphaned, requeued to a different builder, failed, and escalated paths" width="82%">
+</p>
+
+Safety comes from three mechanisms working together, not from restricting who may write code: **per-task worktree isolation** (builders never see the canonical `ops/` tree), a **per-adapter environment allowlist** (no cross-provider credential leaks), and **mandatory cross-review** before any merge (no agent merges its own build).
 
 ---
 
@@ -218,7 +242,7 @@ invoke_codex "test_writer" \
   "$CODEX_OUT" 900
 ```
 
-The helper detects native agent support at runtime and falls back to prompt-prefix injection of the agent body (with its embedded skill) when the CLI doesn't surface the agent definition — the operative mode on agy 1.1.3, which doesn't list plugin agents headless yet.
+The helper detects native agent support at runtime and falls back to prompt-prefix injection of the agent body (with its embedded skill) when the CLI doesn't surface the agent definition — the operative mode through agy 1.1.4, which doesn't list plugin agents headless yet (re-probed on the 2026-07-18 1.1.4 release; the lane auto-upgrades to native routing the day `agy` surfaces plugin agents).
 
 ### Assignment heuristic
 
@@ -341,7 +365,7 @@ Re-baselined from the capability probe record ([`ops/research/2026-07-probe-reco
 | CLI | Tier | Floor (KTD-13) | Tested | READY probe |
 |---|---|---|---|---|
 | Claude Code (`claude`) | core | ≥ 2.1.212 | 2.1.214 | `claude --version` |
-| Antigravity (`agy`) | core | ≥ 1.1.3 | 1.1.3 | `agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"` |
+| Antigravity (`agy`) | core | ≥ 1.1.3 | 1.1.4 | `agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"` |
 | Codex (`codex`) | core | ≥ 0.144.0 | 0.144.4 | `codex exec "Respond with only: READY"` |
 | OpenCode (`opencode`) | optional | ≥ 1.18 | 1.18.3 | `opencode run --format json -m openrouter/z-ai/glm-5.2 "…"` |
 | Kimi Code (`kimi`) | optional | ≥ 0.15 | 0.15 (near-daily; latest 0.27) | `kimi -p "…"` |

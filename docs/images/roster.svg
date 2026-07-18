@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 560" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#13131f"/>
+      <stop offset="100%" stop-color="#0c0c16"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="2.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="ahGold" markerWidth="13" markerHeight="13" refX="10" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L11,4.5 L0,9 Z" fill="#ffd700"/></marker>
+  </defs>
+
+  <rect width="1200" height="560" rx="14" fill="url(#bg)"/>
+
+  <!-- Title -->
+  <text x="60" y="42" font-size="24" font-weight="700" fill="#e8e8f0">Roster &amp; Assignment</text>
+  <text x="60" y="65" font-size="13" fill="#a0a0b8">One config maps each role to a CLI, model, and effort &#8212; fallback chains always terminate at the core trio.</text>
+
+  <!-- ===== Left: roster.toml config card ===== -->
+  <rect x="50" y="90" width="680" height="430" rx="12" fill="#161620" stroke="#2a2a3e" stroke-width="1.5"/>
+  <!-- header -->
+  <rect x="50" y="90" width="680" height="44" rx="12" fill="#16161f"/>
+  <rect x="50" y="112" width="680" height="22" fill="#16161f"/>
+  <line x1="50" y1="134" x2="730" y2="134" stroke="#2a2a3e" stroke-width="1"/>
+  <text x="70" y="118" font-family="'SF Mono','JetBrains Mono',monospace" font-size="16" font-weight="600" fill="#ff8c42">ops/roster.toml</text>
+  <rect x="525" y="101" width="185" height="24" rx="12" fill="#1a1a2a" stroke="#ffd700" stroke-opacity="0.5" stroke-width="1.2"/>
+  <text x="617" y="117" text-anchor="middle" font-family="'SF Mono','JetBrains Mono',monospace" font-size="10.5" fill="#ffd700">[promotion] approval = off</text>
+
+  <!-- dividers -->
+  <line x1="66" y1="213" x2="714" y2="213" stroke="#2a2a3e" stroke-width="1"/>
+  <line x1="66" y1="285" x2="714" y2="285" stroke="#2a2a3e" stroke-width="1"/>
+  <line x1="66" y1="357" x2="714" y2="357" stroke="#2a2a3e" stroke-width="1"/>
+  <line x1="66" y1="429" x2="714" y2="429" stroke="#2a2a3e" stroke-width="1"/>
+
+  <!-- Row 1: builder -> Claude -->
+  <rect x="70" y="161" width="128" height="32" rx="8" fill="#ff8c42" fill-opacity="0.12" stroke="#ff8c42" stroke-width="1.3"/>
+  <text x="134" y="182" text-anchor="middle" font-size="13.5" font-weight="700" fill="#ff8c42">builder</text>
+  <text x="212" y="182" font-size="17" fill="#6a6a82">&#8594;</text>
+  <text x="238" y="174" font-size="14"><tspan font-weight="700" fill="#ff8c42">Claude</tspan><tspan font-family="'SF Mono',monospace" font-size="12.5" fill="#8a8a9e">  default model</tspan><tspan fill="#ffd700">  &#183; max</tspan></text>
+  <text x="238" y="193" font-size="11" fill="#6a6a82">fallback &#8594; Codex &#8594; Antigravity</text>
+
+  <!-- Row 2: reviewer -> Codex -->
+  <rect x="70" y="233" width="128" height="32" rx="8" fill="#3fb950" fill-opacity="0.12" stroke="#3fb950" stroke-width="1.3"/>
+  <text x="134" y="254" text-anchor="middle" font-size="13.5" font-weight="700" fill="#3fb950">reviewer</text>
+  <text x="212" y="254" font-size="17" fill="#6a6a82">&#8594;</text>
+  <text x="238" y="246" font-size="14"><tspan font-weight="700" fill="#3fb950">Codex</tspan><tspan font-family="'SF Mono',monospace" font-size="12.5" fill="#c8c8d8">  gpt-5.6-sol</tspan><tspan fill="#ffd700">  &#183; xhigh</tspan></text>
+  <text x="238" y="265" font-size="11" fill="#6a6a82">fallback &#8594; Antigravity &#8594; Claude</text>
+
+  <!-- Row 3: tester -> Codex -->
+  <rect x="70" y="305" width="128" height="32" rx="8" fill="#3fb950" fill-opacity="0.12" stroke="#3fb950" stroke-width="1.3"/>
+  <text x="134" y="326" text-anchor="middle" font-size="13.5" font-weight="700" fill="#3fb950">tester</text>
+  <text x="212" y="326" font-size="17" fill="#6a6a82">&#8594;</text>
+  <text x="238" y="318" font-size="14"><tspan font-weight="700" fill="#3fb950">Codex</tspan><tspan font-family="'SF Mono',monospace" font-size="12.5" fill="#c8c8d8">  gpt-5.6-sol</tspan><tspan fill="#ffd700">  &#183; xhigh</tspan></text>
+  <text x="238" y="337" font-size="11" fill="#6a6a82">fallback &#8594; Claude</text>
+
+  <!-- Row 4: analyst -> Antigravity -->
+  <rect x="70" y="377" width="128" height="32" rx="8" fill="#4a9eff" fill-opacity="0.12" stroke="#4a9eff" stroke-width="1.3"/>
+  <text x="134" y="398" text-anchor="middle" font-size="13.5" font-weight="700" fill="#4a9eff">analyst</text>
+  <text x="212" y="398" font-size="17" fill="#6a6a82">&#8594;</text>
+  <text x="238" y="390" font-size="14"><tspan font-weight="700" fill="#4a9eff">Antigravity</tspan><tspan font-family="'SF Mono',monospace" font-size="12.5" fill="#c8c8d8">  3.1 Pro (High)</tspan><tspan fill="#ffd700">  &#183; high</tspan></text>
+  <text x="238" y="409" font-size="11" fill="#6a6a82">fallback &#8594; Claude</text>
+
+  <!-- Row 5: documenter -> Antigravity -->
+  <rect x="70" y="449" width="128" height="32" rx="8" fill="#4a9eff" fill-opacity="0.12" stroke="#4a9eff" stroke-width="1.3"/>
+  <text x="134" y="470" text-anchor="middle" font-size="13.5" font-weight="700" fill="#4a9eff">documenter</text>
+  <text x="212" y="470" font-size="17" fill="#6a6a82">&#8594;</text>
+  <text x="238" y="462" font-size="14"><tspan font-weight="700" fill="#4a9eff">Antigravity</tspan><tspan font-family="'SF Mono',monospace" font-size="12.5" fill="#c8c8d8">  3.1 Pro (High)</tspan><tspan fill="#ffd700">  &#183; high</tspan></text>
+  <text x="238" y="481" font-size="11" fill="#6a6a82">fallback &#8594; Claude</text>
+
+  <!-- ===== fallback bus to core trio ===== -->
+  <line x1="736" y1="177" x2="736" y2="465" stroke="#ffd700" stroke-width="1.6" stroke-dasharray="4 4" opacity="0.7"/>
+  <path d="M736,321 L756,321 L756,190 L767,190" fill="none" stroke="#ffd700" stroke-width="1.6" stroke-dasharray="4 4" opacity="0.85" marker-end="url(#ahGold)"/>
+
+  <!-- ===== Right: Core trio ===== -->
+  <rect x="770" y="90" width="380" height="200" rx="12" fill="#1a1a2a" stroke="#2a2a3e" stroke-width="1.5"/>
+  <text x="790" y="120" font-size="15" font-weight="700" fill="#e8e8f0">Core trio</text>
+  <rect x="1046" y="101" width="84" height="24" rx="12" fill="#ffd700" fill-opacity="0.12" stroke="#ffd700" stroke-opacity="0.6" stroke-width="1.2"/>
+  <text x="1088" y="117" text-anchor="middle" font-size="11" font-weight="600" fill="#ffd700">required</text>
+  <text x="790" y="140" font-size="11" fill="#6a6a82">every fallback chain terminates here</text>
+  <!-- Claude -->
+  <circle cx="801" cy="171" r="7" fill="#ff8c42"/>
+  <text x="818" y="169" font-size="15" font-weight="700" fill="#ff8c42">Claude</text>
+  <text x="818" y="185" font-size="11.5" fill="#a0a0b8">lead &#183; builder</text>
+  <!-- Antigravity -->
+  <circle cx="801" cy="213" r="7" fill="#4a9eff"/>
+  <text x="818" y="211" font-size="15" font-weight="700" fill="#4a9eff">Antigravity</text>
+  <text x="818" y="227" font-size="11.5" fill="#a0a0b8">analyst &#183; documenter</text>
+  <!-- Codex -->
+  <circle cx="801" cy="255" r="7" fill="#3fb950"/>
+  <text x="818" y="253" font-size="15" font-weight="700" fill="#3fb950">Codex</text>
+  <text x="818" y="269" font-size="11.5" fill="#a0a0b8">reviewer &#183; tester</text>
+
+  <!-- ===== Right: Optional members ===== -->
+  <rect x="770" y="306" width="380" height="170" rx="12" fill="#1a1a2a" stroke="#2a2a3e" stroke-width="1.5"/>
+  <text x="790" y="336" font-size="15" font-weight="700" fill="#e8e8f0">Optional members</text>
+  <rect x="1046" y="317" width="84" height="24" rx="12" fill="#6a6a82" fill-opacity="0.12" stroke="#6a6a82" stroke-width="1.2"/>
+  <text x="1088" y="333" text-anchor="middle" font-size="11" font-weight="600" fill="#a0a0b8">optional</text>
+  <text x="790" y="356" font-size="11" fill="#6a6a82">auto-enrolled on first detection</text>
+  <!-- OpenCode -->
+  <circle cx="801" cy="386" r="6.5" fill="#a371f7"/>
+  <text x="816" y="391" font-size="14" font-weight="700" fill="#a371f7">OpenCode</text>
+  <text x="912" y="391" font-family="'SF Mono',monospace" font-size="11" fill="#a0a0b8">openrouter/z-ai/glm-5.2</text>
+  <!-- Kimi -->
+  <circle cx="801" cy="418" r="6.5" fill="#f778ba"/>
+  <text x="816" y="423" font-size="14" font-weight="700" fill="#f778ba">Kimi</text>
+  <text x="912" y="423" font-family="'SF Mono',monospace" font-size="11" fill="#a0a0b8">kimi-k3</text>
+  <!-- Cursor -->
+  <circle cx="801" cy="450" r="6.5" fill="#56d4dd"/>
+  <text x="816" y="455" font-size="14" font-weight="700" fill="#56d4dd">Cursor</text>
+  <text x="912" y="455" font-family="'SF Mono',monospace" font-size="11" fill="#a0a0b8">grok-4.5 (pinned)</text>
+  <!-- enabled flag note -->
+  <text x="790" y="470" font-size="10.5" fill="#6a6a82">declined &#8594; <tspan font-family="'SF Mono',monospace" fill="#a0a0b8">enabled = false</tspan> &#183; skipped in every fallback chain</text>
+</svg>
