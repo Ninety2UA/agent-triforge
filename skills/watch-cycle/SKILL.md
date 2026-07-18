@@ -52,19 +52,21 @@ Map each finding onto Triforge's current state. Grep the repo to ground every "u
 - **CLIs** (`ops/research/cli-updates-2026-05.md` §3 shape): `Feature | CLI | Used in Triforge? | Action | Reasoning`, where Action ∈ {Adopt, Evaluate, Keep, Verify, Skip}.
 - **Repos** (May "top-N candidates" shape): a prioritized list of candidates, each with **Why** (the gap it closes), **Concrete change** (the exact files/edit Triforge would make), and **Verification** (how you'd prove it works).
 
-### Stage 5 — Adopt/defer ADR with revisit triggers
+### Stage 5 — Adopt/defer verdicts (ADR for /cli-watch; inline for /repo-watch)
 
-Record the verdicts as an ADR in `ops/decisions/` matching `2026-05-12-cli-deprecation-watch.md`:
+**Command split — read this first:** `/cli-watch` records its verdicts as a dedicated **ADR** in `ops/decisions/`; `/repo-watch` records its verdicts **inline in its report** and opens **no** ADR (it recommends only — see below). Do not emit an ADR for a `/repo-watch` run.
+
+For **`/cli-watch`**, write the ADR matching `2026-05-12-cli-deprecation-watch.md`:
 
 - One `D-xxx` decision per candidate with an explicit **ADOPT / DEFER / DOCUMENT** verdict and its reasoning (cite the affected Triforge file). When a new probe reverses a prior verdict, supersede it explicitly (as `2026-07-18-codex-hooks-under-exec.md` supersedes D-004) — never silently contradict.
 - A **Verification record** probe table (`Probe | Outcome | Date | Method`).
 - An **Open watches** table (`Risk | Source | Trigger to revisit`) so the next cycle knows what to re-check.
 
-`/repo-watch` **recommends only** — its verdicts are recommendations for a later, user-approved sprint. It never edits source to adopt a pattern.
+For **`/repo-watch`**, the verdicts live in the report itself: each candidate carries an explicit **ADOPT-in-follow-up / DEFER** verdict. `/repo-watch` **recommends only** — its verdicts are recommendations for a later, user-approved sprint; it never edits source to adopt a pattern and never opens an ADR.
 
 ### Stage 6 — Verification probes + file the artifacts
 
-- **CLIs:** re-run the capability harness — `bash scripts/probe-capabilities.sh` — so the report's verification section rests on fresh, machine-generated probe rows (`ops/research/2026-07-probe-record.md`), not claims. A verdict that flips a prior ADR (a capability that was absent now present, or vice-versa) MUST be backed by a re-run probe row.
+- **CLIs:** the report's verification section rests on machine-generated probe rows (`ops/research/2026-07-probe-record.md`), not claims. If a **fresh same-cycle** record already exists (regenerated this window — e.g. by the U1 harness or an earlier run today), **cite it** rather than regenerating; re-run `bash scripts/probe-capabilities.sh` only when the record is stale (older than the window) or absent, since the harness rewrites it and live model calls cost time and money. A verdict that flips a prior ADR (a capability absent-now-present or vice-versa) MUST be backed by a probe row in the current record — re-run first if the flip is not already covered.
 - File the **report** under `ops/research/<date>-<slug>.md` and the **ADR** under `ops/decisions/<date>-<slug>.md`. Close the report with a **Sources appendix** and a **cross-checks performed** list (as the May report does): random source re-verification, window-coverage check, gap-table grounding, pre-release flagging.
 
 ## Swarm shape
