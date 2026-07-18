@@ -1904,9 +1904,26 @@ _lease_valid_task_id() {
 _ledger_update() {
   local TASK_ID=$1
   shift
-  local LEDGER
+  local LEDGER LOCK RC=0 TRIES=0
   LEDGER=$(_lease_ledger_path) || return 1
   mkdir -p "$(dirname "$LEDGER")"
+  # Serialize the read-modify-write on the lead-owned ledger (KTD-4). The
+  # documented wave keeps writes lead-serial, but a mkdir-lock (portable —
+  # flock is not on macOS) makes the single-writer guarantee hold even under
+  # accidental concurrency (e.g. a dynamic-workflow parallel group). Atomic
+  # create; bounded wait with one stale-lock reclaim so a crashed writer can't
+  # wedge the ledger forever.
+  LOCK="${LEDGER}.lock"
+  while ! mkdir "$LOCK" 2>/dev/null; do
+    TRIES=$((TRIES + 1))
+    if [ "$TRIES" -gt 200 ]; then
+      rmdir "$LOCK" 2>/dev/null || true       # ~10s: assume holder died, reclaim once
+      mkdir "$LOCK" 2>/dev/null && break
+      echo "_ledger_update: WARNING could not acquire ledger lock after ~10s — proceeding unlocked" >&2
+      break
+    fi
+    sleep 0.05
+  done
   LEDGER_FILE="$LEDGER" LEDGER_TASK="$TASK_ID" python3 -c "
 import json, os, sys, time
 try:
@@ -1979,6 +1996,9 @@ except Exception as exc:
     sys.exit(4)
 os.replace(tmp, path)
 " "$@"
+  RC=$?
+  rmdir "$LOCK" 2>/dev/null || true
+  return $RC
 }
 
 # _ledger_get <task_id> <key> — print the value ('' when the key is unset);
@@ -2331,7 +2351,14 @@ for t, r in sorted(data.get('lease', {}).items()):
         print(t)
 ")
   local SWEPT=0 ORPHANED=0
-  for TASK in $TASKS; do
+  # $TASKS is NEWLINE-separated. Iterate with read, NOT `for TASK in $TASKS`:
+  # under zsh (the caller's shell on macOS) an unquoted $TASKS is not
+  # word-split, so `for` would run once on the whole "taskA\ntaskB" blob and
+  # corrupt the sweep for 2+ concurrent leases — the parallel-wave case. The
+  # heredoc (not a `printf | while` pipe) keeps the loop in THIS shell so the
+  # SWEPT/ORPHANED counters persist.
+  while IFS= read -r TASK; do
+    [ -z "$TASK" ] && continue
     if [ -n "$ONLY" ] && [ "$TASK" != "$ONLY" ]; then
       continue
     fi
@@ -2377,7 +2404,9 @@ print(int(time.time() - os.path.getmtime(os.environ['OUT_FILE'])))
     ORPHANED=$((ORPHANED + 1))
     _ledger_update "$TASK" state=orphaned || return 1
     lease_reclaim "$TASK" || true
-  done
+  done <<HEARTBEAT_TASKS
+$TASKS
+HEARTBEAT_TASKS
   echo "lease_heartbeat_check: swept ${SWEPT} building lease(s), orphaned ${ORPHANED}" >&2
   return 0
 }
