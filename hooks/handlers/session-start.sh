@@ -124,6 +124,25 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && command -v opencode >/dev/null 2>&1; then
   fi
 fi
 
+# Bootstrap Kimi Code project files (.kimi-code/), copy-if-absent so user
+# customizations survive. Guarded on `command -v kimi`. Kimi has NO native agent
+# CLI surface (probe KIMI-03), so there is NO agents/ dir to provision: roles
+# ride as (1) prompt-prefix injection from the plugin's kimi-agents/ briefs and
+# (2) the builder/reviewer role sections in .kimi-code/AGENTS.md that Kimi merges
+# into its system prompt. config.toml disables telemetry (R25) + ships a bash
+# denylist; the real headless confinement is the lease worktree + _adapter_env
+# KIMI_* allowlist (see templates/.kimi-code/README.md).
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && command -v kimi >/dev/null 2>&1; then
+  if [ -d "${CLAUDE_PLUGIN_ROOT}/templates/.kimi-code" ]; then
+    mkdir -p .kimi-code
+    for f in AGENTS.md config.toml; do
+      src="${CLAUDE_PLUGIN_ROOT}/templates/.kimi-code/${f}"
+      dest=".kimi-code/${f}"
+      [ -f "$src" ] && [ ! -f "$dest" ] && cp "$src" "$dest"
+    done
+  fi
+fi
+
 # Bootstrap ops/roster.toml + ops/watch-registry.toml — per-file existence
 # guards, deliberately OUTSIDE the ops-dir bootstrap above so upgraded v2.x
 # projects (which already have ops/) still receive them. A user's existing
