@@ -47,28 +47,28 @@ The framework achieves this through **institutional knowledge compounding**: eve
 
 ---
 
-## What's new (v2.4.3)
+## What's new (v3.0.0)
 
-### Sequential downgrade ladder for narrow runtime tasks
+**The biggest release since the plugin conversion.** Triforge moves from a fixed Claude + Gemini + Codex trio to a **six-CLI builder pool** coordinated by a roster, per-task leases, and mandatory cross-review — and swaps the retired Gemini CLI lane for Antigravity. The coordination model and the CLI surface both changed, so this is a major version.
 
-The team-lead and lead agent used to have exactly one runtime downgrade move: drop a narrow, rubric-following task from `opus`/`max` straight to `sonnet`/`high`. That was a big leap — it skipped past two cheaper same-family reductions that would often have been enough. The new four-tier ladder lets the orchestrator step down one notch at a time:
+### Headline changes
 
-| Tier | Model + effort | When to pick it |
-|---|---|---|
-| 0 (default) | `opus`/`max` | All agents start here |
-| 1 (first downgrade) | `opus`/`xhigh` | Narrow rubric task; slight reasoning reduction, stays Opus |
-| 2 (further reduction) | `opus`/`high` | Very narrow / mechanical task; further reduction, still Opus |
-| 3 (final downgrade) | `sonnet`/`high` | Trivial rubric scan; only when Opus/high still feels overkill |
+- **Builder pool (default).** All six supported CLIs — the core trio (Claude, Antigravity, Codex) plus enrolled optional members (OpenCode, Kimi, Cursor) — are eligible builders. [`ops/roster.toml`](templates/ops/roster.toml) assigns each role; every build runs under a per-task lease in an isolated worktree and merges only after cross-review by a pinned non-author reviewer. The single-writer rule is retired.
+- **Gemini → Antigravity.** Google shut down the hosted Gemini CLI service for consumer tiers on 2026-06-18; the analyst / reviewer / documenter lane is now **Antigravity (`agy`)** running Gemini 3.1 Pro (High), invoked via `invoke_antigravity`.
+- **Guided onboarding ([`/setup`](commands/setup.md)).** One idempotent command takes a fresh install to a working roster: gate the core trio, then enroll or decline each optional CLI.
+- **Self-maintenance ([`/cli-watch`](commands/cli-watch.md), [`/repo-watch`](commands/repo-watch.md)).** Scheduled or manual watch cycles keep the framework current against primary sources.
+- **Native-first runtime.** Completion gating moved from the retired `ship-loop.sh` promise gate to Claude Code's native `/goal` + an `ops/.sprint-complete` sentinel; Codex runs `gpt-5.6-sol` with structured `--output-schema` verdicts and hooks under `codex exec`.
 
-**Locked agents stay locked.** `security-sentinel`, `plan-checker`, and `findings-synthesizer` remain hardwired to `opus`/`max` — no exceptions. They're the highest-stakes gate/synthesis agents and they earn their full reasoning budget every time.
+### Migrating from v2.4.x
 
-**Doc-drift bug fixed along the way.** `CLAUDE.md`'s agent-frontmatter-fields section listed effort values as `low/medium/high/max` — missing `xhigh`, which the v2.2.0 audit had already verified as a valid Claude Code value (recorded at `README.md:654`). Corrected so the new ladder references documented values. Documentation-only change — runtime behavior is unchanged; the team-lead's allowed move set widens. See [Recent changes](#recent-changes) for the full diff.
+- **(a) Builder-pool default.** External CLIs are now eligible builders, not review-only. To restore the old reviewer-only posture, edit `ops/roster.toml` and take the external CLIs off the `builder` role (leave them on `reviewer` / `tester` / `analyst` / `documenter`, or set `[members.<cli>] enabled = false`). The core trio can't be disabled, and every fallback chain must still terminate at a core member.
+- **(b) Gemini → Antigravity.** The Gemini lane is gone. **Former Gemini-API-key users:** install Antigravity and run `/setup` to authenticate the `agy` lane (the old `GEMINI_API_KEY` is no longer used). **Users who must stay on legacy Gemini:** pin plugin **`v2.4.3`** — the last release with the Gemini lane.
+- **(c) Raised floors (KTD-13).** New enforcement floors: Claude Code ≥ 2.1.212, Codex ≥ 0.144.0, Antigravity `agy` ≥ 1.1.3; optional tier OpenCode ≥ 1.18, Kimi Code ≥ 0.15, Cursor (date-versioned). Full matrix with tested-against versions + READY probes in [Compatibility](#compatibility).
+- **(d) Retired mechanisms.** `ship-loop.sh` promise gate (`<promise>DONE</promise>`) → `/goal` + `ops/.sprint-complete` sentinel; single-writer rule → lease + cross-review. The historical changelog entries below keep the retired names on purpose — they record what past releases shipped, and are not rewritten.
 
-### Also recent
+### Also recent (history)
 
-- **v2.4.2 — Audit pass three.** A third adversarial audit on top of v2.4.0 and v2.4.1 — three parallel Explore agents — surfaced 1 MEDIUM + 3 doc-drift fixes plus one bonus bug caught during verification. The audit agents reported four BLOCKER/HIGH findings; every one was rejected after manual cross-check against the actual code. Severity inflation is real; the consolidation step earns its keep.
-- **v2.4.1 — Audit pass two.** A team-lead-orchestrated audit with 6 parallel specialist reviewers surfaced 28 findings (1 BLOCKER, 1 HIGH, 13 MEDIUM, 13 LOW); the consolidation pass also caught one reviewer hallucinating a line number — the load-bearing reason cross-checks earn their keep.
-- **v2.4.0 — Framework self-audit.** Two silent blockers fixed: ship-loop guard never fired (state-file `session_id` was a branch name being compared against Claude Code's runtime session UUID); the `PostToolUseFailure` event registered in `hooks.json` doesn't exist in Claude Code's hook schema. Plus four HIGH fixes (Gemini `-y` YOLO gated on `GEMINI_YOLO=1`, [`team-lead`](agents/team-lead.md) migrated to the unified `invoke_gemini`/`invoke_codex` helper, template + README docs re-pointed at the helper, broken `grep -c` hook-safety guidance corrected).
+v2.4.3 sequential downgrade ladder; v2.4.0–v2.4.2 framework self-audits; v2.2.0 Opus-max-effort + reliability patterns; v2.0.0 plugin conversion — full detail in [Recent changes](#recent-changes).
 
 ### Claude Code plugin
 
@@ -98,8 +98,8 @@ The plugin provides agents, skills, commands, and hooks. Your project gets an `o
 agent-triforge/                     (plugin — installed automatically)
 ├── .claude-plugin/plugin.json        Plugin manifest
 ├── agents/                           19 specialized agent definitions
-├── skills/                           12 portable workflow modules
-├── commands/                         16 slash commands
+├── skills/                           13 portable workflow modules
+├── commands/                         19 slash commands
 ├── hooks/
 │   ├── hooks.json                    Hook registration
 │   └── handlers/                     4 lifecycle hook scripts
@@ -222,14 +222,16 @@ The helper detects native agent support at runtime and falls back to prompt-pref
 
 ### Assignment heuristic
 
-| Question | Agent |
+Roles come from `ops/roster.toml` (`resolve_role <role>`); the defaults below are the shipped posture, not a write-restriction — any member can be the builder, and every build merges only after cross-review.
+
+| Question | Role (default; roster-assignable) |
 |---|---|
-| Produces code? | Claude (subagents or [agent team](agents/team-lead.md) for parallel work) |
-| Evaluates existing code? | [Antigravity](https://antigravity.google/cli) + [Codex](https://github.com/openai/codex) + [Claude review agents](#review-specialists-6) in parallel |
-| Runs/executes something? | [Codex CLI](https://github.com/openai/codex) |
-| Produces documentation? | [Antigravity CLI](https://antigravity.google/cli) |
-| Touches shared interfaces? | Claude implements → Antigravity reviews → Codex tests |
-| Ambiguous? | Claude takes it, flags for parallel review |
+| Produces code? | builder role — default Claude, assignable to any member; built under a lease and cross-reviewed before merge |
+| Evaluates existing code? | reviewer role ([Codex](https://github.com/openai/codex) + [Antigravity](https://antigravity.google/cli)) + [Claude review agents](#review-specialists-6) in parallel |
+| Runs/executes something? | tester role (default [Codex CLI](https://github.com/openai/codex)) |
+| Produces documentation? | documenter role (default [Antigravity CLI](https://antigravity.google/cli)) |
+| Touches shared interfaces? | builder implements under a lease → pinned non-author reviewer cross-reviews → tester validates |
+| Ambiguous? | the lead takes it as builder, flags for parallel review |
 
 ---
 
@@ -300,23 +302,56 @@ Five non-negotiable checkpoints enforced at every stage:
 
 ### Prerequisites
 
-All three CLIs must be installed and authenticated:
+**Run [`/setup`](commands/setup.md) first** — the guided path from a fresh install to a working roster. It gates the core trio live, then walks each optional CLI (enroll with a chosen model, or decline cleanly). Idempotent and re-runnable; the probes below are exactly what `/setup` automates.
+
+**Core trio (required):**
 
 ```bash
 # Claude Code ≥ 2.1.212 — floor set by the session-caps/monitors line;
 # /goal gating, dynamic workflows, and worktree isolation all landed earlier
 claude --version
 
-# Antigravity CLI — https://antigravity.google/cli (run `agy` once interactively to log in)
+# Antigravity CLI ≥ 1.1.3 — https://antigravity.google/cli (run `agy` once interactively to log in)
 agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"   # always pin the model — agy defaults to a Flash variant
 
 # Codex CLI ≥ 0.144.0 — https://github.com/openai/codex
-# (--output-schema, features list; hooks-under-exec verified on 0.144.4, tested 2026-07-17)
 codex exec "Respond with only: READY"
 
 # Python 3 (used by hook handlers for JSON parsing)
 python3 --version
 ```
+
+**Optional tier** — enroll via `/setup` to use them as builders/reviewers; each is skipped cleanly in every roster fallback chain when absent:
+
+```bash
+# OpenCode ≥ 1.18 — needs the OpenRouter provider connected (OPENROUTER_API_KEY or `opencode auth login`)
+opencode run --format json -m openrouter/z-ai/glm-5.2 "Respond with only: READY"
+
+# Kimi Code ≥ 0.15 — OAuth device-code or API key (`kimi login`)
+kimi -p "Respond with only: READY"
+
+# Cursor (date-versioned) — pin grok-4.5, never the Auto router (`cursor-agent login`)
+cursor-agent -p --trust --model grok-4.5 "Respond with only: READY"
+```
+
+### Compatibility
+
+Re-baselined from the capability probe record ([`ops/research/2026-07-probe-record.md`](ops/research/2026-07-probe-record.md), 2026-07-17). Core trio required; optional tier enrolled via `/setup`. This supersedes the old "Tested against Codex 0.130.0 and Gemini 0.41.2" baseline.
+
+| CLI | Tier | Floor (KTD-13) | Tested | READY probe |
+|---|---|---|---|---|
+| Claude Code (`claude`) | core | ≥ 2.1.212 | 2.1.214 | `claude --version` |
+| Antigravity (`agy`) | core | ≥ 1.1.3 | 1.1.3 | `agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"` |
+| Codex (`codex`) | core | ≥ 0.144.0 | 0.144.4 | `codex exec "Respond with only: READY"` |
+| OpenCode (`opencode`) | optional | ≥ 1.18 | 1.18.3 | `opencode run --format json -m openrouter/z-ai/glm-5.2 "…"` |
+| Kimi Code (`kimi`) | optional | ≥ 0.15 | 0.15 (near-daily; latest 0.27) | `kimi -p "…"` |
+| Cursor (`cursor-agent`) | optional | date-versioned | 2026.07.16 | `cursor-agent -p --trust --model grok-4.5 "…"` |
+
+The Gemini CLI floor was removed with the Antigravity migration (Google's hosted service stopped serving consumer tiers 2026-06-18); legacy Gemini users pin plugin `v2.4.3`. An absent or declined optional CLI is silently skipped — fallback chains always terminate at a core-trio member, which can't be disabled.
+
+### Data egress and credentials
+
+Each dispatched CLI sends its task prompt and the code context it is handed to that CLI's model provider. Under the shipped defaults, your code + task context reaches **Anthropic** (Claude), **Google** (Antigravity → Gemini 3.1 Pro), and **OpenAI** (Codex) for the core trio; and, for any optional member you enroll, **Zhipu / Z.ai** (GLM, routed through the **OpenRouter** intermediary — which also sees the traffic), **Moonshot** (Kimi), and **xAI** (Grok, via Cursor). `ops/roster.toml` is the control surface: disable a member (`enabled = false`) or drop a provider's model from every role to remove that provider from the egress set (the core trio always stays). Credentials never live in the repo — each adapter reads its own from the OS / vendor store (CLI logins, `OPENROUTER_API_KEY`, `CURSOR_API_KEY`, `kimi login` OAuth-or-API-key), scoped per-adapter by the lease env allowlist; captured output is scrubbed before it lands in `ops/`, and rotation follows each vendor's own token flow (revoke + re-login/re-key, then re-run `/setup`).
 
 ### Installation
 
@@ -416,6 +451,7 @@ claude
 
 | Command | What it does |
 |---|---|
+| [**`/setup`**](commands/setup.md) | Guided roster onboarding — gate the core trio live, then enroll/decline each optional CLI with a chosen model. Idempotent; re-run any time. |
 | [**`/deep-research <topic>`**](commands/deep-research.md) | Launch 5 parallel research agents + [`research-synthesizer`](agents/research-synthesizer.md). |
 | [**`/analyze <url>`**](commands/analyze.md) | Deep compatibility analysis of an external repo. |
 | [**`/status`**](commands/status.md) | Sprint overview: phase, tasks, blockers, available commands. |
@@ -443,7 +479,7 @@ Two commands keep the framework current instead of hand-running audits. Both rea
 
 ## Skills reference
 
-12 portable, model-agnostic workflow modules that any agent can consume. Skills embedded in native Antigravity/Codex agent definitions (`antigravity-agents/agents/`, `codex-agents/`) at install time; prompt-prefix injection of the agent body kicks in automatically when a CLI doesn't surface native agent definitions.
+13 portable, model-agnostic workflow modules that any agent can consume. Skills embedded in native Antigravity/Codex agent definitions (`antigravity-agents/agents/`, `codex-agents/`) at install time; prompt-prefix injection of the agent body kicks in automatically when a CLI doesn't surface native agent definitions.
 
 | Skill | Primary consumer | What it teaches the agent |
 |---|---|---|
@@ -459,6 +495,7 @@ Two commands keep the framework current instead of hand-running audits. Both rea
 | [**`knowledge-compounding`**](skills/knowledge-compounding/SKILL.md) | Claude (Phase 6) | Document solutions to [`ops/solutions/`](ops/solutions/) for future sprints |
 | [**`session-continuity`**](skills/session-continuity/SKILL.md) | Claude | Save and resume via [`STATE.md`](ops/STATE.md) across sessions |
 | [**`scope-cutting`**](skills/scope-cutting/SKILL.md) | Claude | Systematically cut scope by unblocking value and risk |
+| [**`watch-cycle`**](skills/watch-cycle/SKILL.md) | Claude (lead) | CLI/repo watch cycle: primary-source research → gap table → adopt/defer ADR |
 
 ---
 
@@ -531,8 +568,8 @@ NOTIFY_WEBHOOK_URL="https://hooks.slack.com/..." ./scripts/coordinate.sh "Build 
 ### Key constraints
 
 - `TASKS.md` is never modified directly during review — changes must be proposed in [`MEMORY.md`](ops/MEMORY.md) first
-- Neither [Antigravity](https://antigravity.google/cli) nor [Codex](https://github.com/openai/codex) may modify source code; they only write to their designated `ops/` files
-- Parallel reviews are safe because agents write to separate files
+- Any roster member is an eligible builder — the single-writer rule is retired. Safety is per-task leases + worktree isolation + mandatory cross-review by a pinned non-author reviewer, not write-restriction; no agent self-merges, and the lead promotes to the main branch only after the wave's integration check
+- Parallel reviews are safe because reviewers write to separate `ops/REVIEW_*.md` files
 - Maximum 3 review cycles per sprint before escalating to user
 - Phase 0 can be skipped for small bug fixes, same-session continuations, or unchanged codebases (use [`/quick`](commands/quick.md))
 - Completion requires creating the `ops/.sprint-complete` runtime marker only after the [verification checklist](skills/verification-before-completion/SKILL.md) passes
@@ -545,13 +582,13 @@ This framework was informed by analyzing the [Claude Code Blueprint](https://git
 
 | Dimension | [Claude Code Blueprint](https://github.com/Ninety2UA/claude-code-blueprint) | This framework |
 |---|---|---|
-| **Agent model** | Homogeneous (Claude-only) | Heterogeneous (Claude + Antigravity + Codex) |
+| **Agent model** | Homogeneous (Claude-only) | Heterogeneous six-CLI builder pool (core trio + optional OpenCode/Kimi/Cursor) |
 | **Review agents** | 6 Claude subagents | 7 reviewers (2 external + 5 Claude subagents) |
 | **Codebase analysis** | Claude subagent | [Antigravity CLI](https://antigravity.google/cli) (1M token context) |
 | **Test execution** | Claude subagent | [Codex CLI](https://github.com/openai/codex) (sandboxed execution) |
 | **Coordination** | Native subagents + git | File protocol + bash + subagents + teams |
-| **Skills** | Claude-only | Portable across all 3 CLIs via [injection](#portable-skill-injection) |
-| **Dependencies** | Zero (markdown only) | Three CLIs (Claude + Antigravity + Codex) |
+| **Skills** | Claude-only | Portable across all roster CLIs via [injection](#portable-skill-injection) |
+| **Dependencies** | Zero (markdown only) | Core trio required (Claude + Antigravity + Codex); optional tier adds OpenCode/Kimi/Cursor |
 
 <details>
 <summary><strong>What we adopted from Blueprint</strong></summary>
@@ -587,9 +624,9 @@ Yes. Use Option 2 or Option 3 from <a href="#installation">Installation</a> to c
 </details>
 
 <details>
-<summary><strong>Do I need all three CLIs?</strong></summary>
+<summary><strong>Do I need all the CLIs?</strong></summary>
 
-No. The framework degrades gracefully. Without Antigravity, Phase 0 is skipped. Without Codex, testing is handled by Claude. You lose the multi-model benefits but everything still works.
+The <strong>core trio</strong> (Claude, Antigravity, Codex) is the supported baseline — run <a href="commands/setup.md"><code>/setup</code></a> to get them live. The <strong>optional tier</strong> (OpenCode, Kimi, Cursor) is genuinely optional: enroll any subset via <code>/setup</code>, and an absent one is skipped cleanly in every roster fallback chain. Claude alone still runs the pipeline (degraded — you lose the multi-model review/test/analysis benefits).
 </details>
 
 <details>
@@ -631,6 +668,26 @@ After solving a non-trivial problem, <a href="commands/compound.md"><code>/compo
 ---
 
 ## Recent changes
+
+### 2026-07-18 — v3.0.0: CLI modernization + six-CLI builder pool
+
+The largest release since the plugin conversion — the coordination model and the CLI surface both changed.
+
+**Six-CLI builder pool.** The fixed single-writer trio is retired. All six supported CLIs — core trio (Claude, Antigravity, Codex) plus enrolled optional members (OpenCode, Kimi, Cursor) — are eligible builders assigned from [`ops/roster.toml`](templates/ops/roster.toml) (`resolve_role`). Every implementation task runs under a per-task lease (`ops/leases.toml` + isolated worktree) and merges only after cross-review by a pinned non-author reviewer; approved work lands one squash commit per task on a sprint integration branch, and the lead promotes to main honoring a `[promotion]` gate. Safety is leases + worktree isolation + cross-review, not write-restriction.
+
+**Gemini → Antigravity.** Google shut down the hosted Gemini CLI service for consumer tiers (2026-06-18). The analyst / reviewer / documenter lane migrated to **Antigravity (`agy`)** running Gemini 3.1 Pro (High): `invoke_gemini` → `invoke_antigravity`, `gemini-agents/` → `antigravity-agents/` (a valid agy plugin), `ops/REVIEW_GEMINI.md` → `ops/REVIEW_ANTIGRAVITY.md`. Legacy Gemini users pin `v2.4.3`.
+
+**Native-first runtime.** Completion gating moved from the retired `ship-loop.sh` Stop hook and its `<promise>DONE</promise>` convention to Claude Code's native `/goal` gate + an `ops/.sprint-complete` sentinel (probe CC-03). Wave orchestration delegates 5+-task waves to dynamic workflows. Claude runs a Fable-5-topped downgrade ladder (`fable`/`max` → `opus`/`xhigh` → `opus`/`high` → `sonnet`/`high`) with a spawn-time Fable override for the lead and the never-downgrade trio.
+
+**Codex modernization.** `gpt-5.6-sol` at `xhigh` (was `gpt-5.4`), structured `--output-schema` review verdicts, and hooks under `codex exec` (D-004 reversed — probe CDX-04; see [`ops/decisions/2026-07-18-codex-hooks-under-exec.md`](ops/decisions/2026-07-18-codex-hooks-under-exec.md)).
+
+**Onboarding + self-maintenance.** New [`/setup`](commands/setup.md) guides a fresh install to a live roster via first-detection enrollment. New [`/cli-watch`](commands/cli-watch.md) + [`/repo-watch`](commands/repo-watch.md) run watch cycles over [`templates/ops/watch-registry.toml`](templates/ops/watch-registry.toml) using the `watch-cycle` skill.
+
+**Raised floors (KTD-13).** Claude Code ≥ 2.1.212, Codex ≥ 0.144.0, Antigravity `agy` ≥ 1.1.3; optional OpenCode ≥ 1.18, Kimi Code ≥ 0.15, Cursor (date-versioned). See [Compatibility](#compatibility).
+
+**Docs.** Full refresh across README, `.claude/CLAUDE.md`, `templates/CLAUDE.md`, `docs/agent-triforge.md`, `docs/index.html`; single-writer statements reframed to the lease/cross-review contract; drift fixes (Codex `--full-auto` is deprecated-not-removed; `max` effort is not Opus-only). Known cosmetic gap: `docs/images/*.svg` still render "Gemini" labels (image assets, deferred).
+
+---
 
 > **Historical note (2026-07):** entries below predate the Gemini → Antigravity migration and intentionally keep retired names (`Gemini CLI`, `invoke_gemini`, `gemini-agents/`, `ops/REVIEW_GEMINI.md`, `ops/RESEARCH_GEMINI.md`) as an accurate record of what those releases shipped. The live lane is Antigravity (`agy`, `invoke_antigravity`, `antigravity-agents/`, `ops/REVIEW_ANTIGRAVITY.md`, `ops/RESEARCH_ANTIGRAVITY.md`); legacy Gemini users pin plugin v2.4.3.
 
@@ -697,7 +754,7 @@ A second team-lead-orchestrated audit on top of v2.4.0 — **6 parallel speciali
 
 **[HIGH] Broken ADR reference in [`CLAUDE.md:269`](CLAUDE.md)** — Cited `ops/decisions/0001-cli-deprecation-watch.md`; the actual file is `2026-05-12-cli-deprecation-watch.md`. The link is the only documented justification for why Triforge does not auto-enable Codex hooks under `codex exec`. **Fix:** path updated to the ISO-date naming the repo already uses for its other ADR.
 
-**[MEDIUM] `effort: max` field verified, kept as-is** — The audit raised a concern that Claude Code's agent-frontmatter schema might not recognize `effort:` and that the 19 agents' "Opus max effort" claim was unenforced. Spot-checked against the current Claude Code subagents spec: `effort` is documented (values `low`/`medium`/`high`/`xhigh`/`max`; max is Opus-only; overrides session effort while the subagent is active). All 19 declarations are honored. No change.
+**[MEDIUM] `effort: max` field verified, kept as-is** — The audit raised a concern that Claude Code's agent-frontmatter schema might not recognize `effort:` and that the 19 agents' "Opus max effort" claim was unenforced. Spot-checked against the current Claude Code subagents spec: `effort` is documented (values `low`/`medium`/`high`/`xhigh`/`max`; overrides session effort while the subagent is active). All 19 declarations are honored. No change. _[Corrected in v3.0.0: `max` is not Opus-only — it is documented on Fable 5, Sonnet 5, and Opus 4.8/4.7.]_
 
 **[MEDIUM] All 16 commands now declare `allowed-tools`** — Defense-in-depth narrowing; `/quick` was previously inheriting the full Claude Code tool surface despite being scoped to <3 file changes. Allowlists scoped per command's actual needs: `/status`, `/resume`, `/pause`, `/compound` are read-mostly; `/build`, `/plan`, `/ship`, `/coordinate`, `/wrap`, `/quick`, `/debug`, `/resolve-pr` get the full set; `/analyze` is read-only per its own constraint.
 

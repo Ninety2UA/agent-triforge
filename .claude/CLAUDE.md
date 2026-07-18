@@ -144,7 +144,8 @@ All 4 hook handlers use `set -euo pipefail`. When using `grep -c`, add `|| true`
 ### Security model
 
 - **Builder-pool safety model** — the framework runs a builder pool where any roster member can be assigned implementation tasks, so isolation replaces write-restriction as the safety boundary: (1) every non-lead build runs under a per-task lease in an isolated git worktree, confined by a per-adapter env allowlist (KTD-3, KTD-14) — builders never touch the canonical `ops/` tree; (2) the lease ledger `ops/leases.toml` is lead-owned and single-writer; (3) every task merges only after cross-review by a pinned non-author reviewer (AE3, KTD-10), landing as one squash commit per task on a sprint integration branch; (4) the lead promotes to the main branch at wave end honoring the `[promotion]` gate — and any diff touching protected paths (permission configs, deny rules, `ops/roster.toml` incl. `[promotion]`, shipped agent configs) forces the gate on and requires the lead or user as the reviewer, never an external-CLI-only review; (5) `ops/CHANGELOG.md` attribution carries builder + reviewer + merge commit from the ledger. A roster config can restore the reviewer-only posture (external CLIs off the builder role) for deployments that want it.
-- **Codex `approval_policy = "never"`** on all three agents — the framework is designed for trusted pipelines where user approval would block parallel fan-out. `sandbox_mode` (read-only for `logic_reviewer`, `workspace-write` for `test_writer`/`debugger`) plus the per-agent `tools` allowlist provide the actual isolation. If you deploy to an untrusted environment, change to `approval_policy = "on-request"` in `codex-agents/agents.toml`. The no-agent fallback in `scripts/invoke-external.sh` supplies the same defaults explicitly (`-s workspace-write -c approval_policy="never"`) since Codex v0.128.0 removed the `--full-auto` shorthand.
+- **Provider data egress (R36) + credential handling (KTD-14)** — every dispatched CLI sends its task prompt and the code context it is handed to that CLI's model provider. Under the shipped defaults, code + task context reaches: **Anthropic** (Claude), **Google** (Antigravity → Gemini 3.1 Pro), and **OpenAI** (Codex) for the core trio; and, for any enrolled optional member, **Zhipu / Z.ai** (GLM, routed through the **OpenRouter** intermediary — which also sees the traffic), **Moonshot** (Kimi), and **xAI** (Grok, via Cursor). `ops/roster.toml` is the control surface: disabling a member (`enabled = false`) or dropping a provider's model from every role removes that provider from the egress set (the core trio always stays; chains must still terminate at a core member). Credentials never live in the repo — each adapter reads its own from the OS / vendor store (Claude / Codex / `agy` logins, `OPENROUTER_API_KEY`, `kimi login` OAuth-or-API-key, `cursor-agent login` / `CURSOR_API_KEY`), scoped per-adapter by the lease env allowlist (KTD-14, `_adapter_env`); captured CLI output is scrubbed before it lands in `ops/`, and rotation follows each vendor's own token flow (revoke + re-login/re-key, then re-run `/setup`).
+- **Codex `approval_policy = "never"`** on all three agents — the framework is designed for trusted pipelines where user approval would block parallel fan-out. `sandbox_mode` (read-only for `logic_reviewer`, `workspace-write` for `test_writer`/`debugger`) plus the per-agent `tools` allowlist provide the actual isolation. If you deploy to an untrusted environment, change to `approval_policy = "on-request"` in `codex-agents/agents.toml`. The no-agent fallback in `scripts/invoke-external.sh` supplies the same defaults explicitly (`-s workspace-write -c approval_policy="never"`) rather than the `--full-auto` shorthand, which Codex has **deprecated** (it still runs but prints a warning; the docs steer new scripts to explicit `--sandbox workspace-write` — corrected from the earlier "removed in v0.128.0" wording per the 2026-07-18 cli-watch primary-source check).
 - **Codex `tools` allowlist** narrows the tool surface beyond sandbox: `logic_reviewer` has no `write`/`bash`; `test_writer`/`debugger` get both (they need to run tests and reproduce bugs). Defense-in-depth pairs with `sandbox_mode`.
 - **Antigravity permission guardrails** — `antigravity-agents/permissions.json` documents the shell-command deny rules migrated from the retired Gemini policy engine (`rm -rf`, `git push`, `sudo`); `templates/.antigravity/settings.json` ships them as a mergeable `permissions` block deployed to `.antigravity/settings.json` at session start. Headless enforcement at the project tier is unproven (probe 2026-07-17: no project-tier settings.json lifts agy's headless permission auto-deny, so the tier likely isn't read headless) — the per-agent `tools` allowlist in `antigravity-agents/agents/*.md` is the primary guardrail (e.g., `architecture-reviewer` and `documentation-writer` omit `run_shell_command` entirely).
 - **Codex `[agents]` nesting caps** (`max_depth = 2`, `max_threads = 4`) prevent runaway fan-out when `logic_reviewer`/`test_writer` call `spawn_agent` for 5+ file scopes.
@@ -176,8 +177,11 @@ antigravity-agents/       # Antigravity CLI agent pack (valid agy plugin)
 codex-agents/             # Codex CLI native agent definitions
   agents.toml               logic_reviewer, test_writer, debugger
   review-verdict.schema.json Structured review verdict (--output-schema, logic_reviewer)
-skills/                   # 12 portable skill files (all agents consume)
-commands/                 # 16 slash commands
+opencode-agents/          # OpenCode adapter role briefs (optional tier; prompt-injection)
+kimi-agents/              # Kimi Code adapter role briefs (optional tier; prompt-injection)
+cursor-agents/            # Cursor adapter role briefs (optional tier; prompt-injection)
+skills/                   # 13 portable skill files (all agents consume)
+commands/                 # 19 slash commands (adds /setup onboarding + /cli-watch + /repo-watch)
 hooks/
   hooks.json              # Hook registration (uses ${CLAUDE_PLUGIN_ROOT})
   handlers/               # Lifecycle hook scripts
@@ -186,14 +190,15 @@ hooks/
 settings.json             # Default env vars (agent teams)
 templates/                # Project bootstrapping templates
   CLAUDE.md                 Template for user projects
-  ops/                      Skeleton ops/ files
+  ops/                      Skeleton ops/ files (incl. roster.toml, watch-registry.toml)
   .antigravity/settings.json Antigravity workspace settings (permission deny rules)
   .codex/config.toml        Codex project config (disables Codex's auto-memory pipeline)
   .codex/hooks.json         Codex PostToolUse hook (CHANGELOG attribution under codex exec)
   .codex/README.md          What the hook enforces, why bypass-trust, how to disable
 scripts/
   coordinate.sh           # Outer loop for context exhaustion recovery
-  invoke-external.sh      # Unified Antigravity/Codex invocation, roster resolution, feature detection
+  invoke-external.sh      # Unified six-CLI invocation, roster resolution, lease lifecycle, feature detection
+  probe-capabilities.sh   # Rerunnable capability probe (feeds ops/research/*-probe-record.md)
 ops/                      # This repo's own project state (not part of plugin)
 docs/                     # Framework design documentation
 ```
@@ -216,6 +221,7 @@ Skills are model-agnostic markdown files consumed by ALL agents:
 | `knowledge-compounding` | Claude | Document solutions and decisions |
 | `session-continuity` | Claude | Save/resume across sessions |
 | `scope-cutting` | Claude | Systematically cut scope by priority |
+| `watch-cycle` | Claude | CLI/repo watch methodology (research → gap table → adopt/defer ADR) |
 
 Skills consumed by Antigravity/Codex are embedded in their native agent definitions (`antigravity-agents/agents/`, `codex-agents/`). The `invoke-external.sh` helper handles feature detection and falls back to prompt-prefix injection when native agent routing isn't available.
 
@@ -283,15 +289,20 @@ Claude invokes Antigravity via `invoke_antigravity` and Codex via `invoke_codex`
 
 ## Prerequisites
 
-**Claude Code ≥ 2.1.212** (floor per KTD-13: the session-caps/monitors line; `/goal` gating, dynamic workflows, and worktree isolation all landed earlier):
+**Run `/setup` — it is the one guided path** from a fresh install to a working roster (R39/AE8): it gates the core trio live, then walks each optional CLI (enroll with a chosen model, or decline cleanly). Idempotent and re-runnable. The manual probes below are exactly what `/setup` automates.
+
+**Core trio (required).** All three must be installed and answer a headless READY probe (floors per KTD-13):
 ```bash
-claude --version
+claude --version                                                   # Claude Code ≥ 2.1.212 (session-caps/monitors line; /goal, dynamic workflows, worktree isolation landed earlier)
+agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"  # Antigravity ≥ 1.1.3 — always pin the model (agy defaults to a Flash variant)
+codex exec "Respond with only: READY"                              # Codex ≥ 0.144.0
 ```
 
-All three CLIs must be installed and working in non-interactive mode:
+**Optional tier (enroll via `/setup` when you want them as builders/reviewers).** Each is skipped cleanly in every roster fallback chain when absent:
 ```bash
-agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"   # always pin the model — agy defaults to a Flash variant
-codex exec "Respond with only: READY"
+opencode run --format json -m openrouter/z-ai/glm-5.2 "Respond with only: READY"  # OpenCode ≥ 1.18 — needs the OpenRouter provider connected (OPENROUTER_API_KEY or `opencode auth login`)
+kimi -p "Respond with only: READY"                                                # Kimi Code ≥ 0.15 — OAuth device-code OR API key (`kimi login`)
+cursor-agent -p --trust --model grok-4.5 "Respond with only: READY"               # Cursor (date-versioned) — pin grok-4.5, never the Auto router
 ```
 
 Python 3 is also required (used by hook handlers for JSON parsing):
@@ -299,7 +310,7 @@ Python 3 is also required (used by hook handlers for JSON parsing):
 python3 --version
 ```
 
-On macOS, install GNU `coreutils` so `timeout` enforcement works for Antigravity/Codex invocations (`invoke-external.sh` is fail-closed: without `timeout`/`gtimeout` it refuses to run external invocations at all):
+On macOS, install GNU `coreutils` so `timeout` enforcement works for external invocations (`invoke-external.sh` is fail-closed: without `timeout`/`gtimeout` it refuses to run external invocations at all):
 ```bash
 brew install coreutils
 ```
@@ -307,11 +318,21 @@ brew install coreutils
 
 ## Compatibility
 
-Tested against **Codex 0.144.4** (2026-07-17) and **Antigravity CLI (agy) 1.1.3** (2026-07-17).
+Re-baselined from the capability probe record `ops/research/2026-07-probe-record.md` (2026-07-17). The framework runs a **core trio** (required) plus an **optional tier** (enroll via `/setup`). This supersedes the old single-line "Tested against Codex 0.130.0 and Gemini 0.41.2" baseline.
 
-**Minimum supported versions:**
+| CLI | Tier | Floor (KTD-13) | Tested | READY probe |
+|---|---|---|---|---|
+| Claude Code (`claude`) | core | ≥ 2.1.212 | 2.1.214 | `claude --version` |
+| Antigravity (`agy`) | core | ≥ 1.1.3 | 1.1.3 | `agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"` |
+| Codex (`codex`) | core | ≥ 0.144.0 | 0.144.4 | `codex exec "Respond with only: READY"` |
+| OpenCode (`opencode`) | optional | ≥ 1.18 | 1.18.3 | `opencode run --format json -m openrouter/z-ai/glm-5.2 "Respond with only: READY"` |
+| Kimi Code (`kimi`) | optional | ≥ 0.15 | 0.15 (probe host; near-daily cadence, latest 0.27) | `kimi -p "Respond with only: READY"` |
+| Cursor (`cursor-agent`) | optional | date-versioned | 2026.07.16 | `cursor-agent -p --trust --model grok-4.5 "Respond with only: READY"` |
+
+**Minimum supported versions / notes:**
 - **Codex ≥ 0.144.0** — `--output-schema` (structured review verdicts), `codex features list` (runtime capability detection); hooks-under-exec verified on 0.144.4. Older versions degrade: `invoke_codex` still runs, but hook enforcement and structured verdicts silently fall back to raw output.
-- **Gemini CLI floor removed** — the Gemini lane was replaced by Antigravity (agy ≥ 1.1.3, tested 1.1.3 2026-07-17); legacy Gemini users pin plugin v2.4.3.
+- **Gemini CLI floor removed** — the Gemini lane was replaced by Antigravity (agy ≥ 1.1.3, tested 1.1.3 2026-07-17). Google's hosted Gemini CLI service stopped serving consumer tiers 2026-06-18; legacy Gemini users pin plugin v2.4.3.
+- **Optional tier is skip-clean** — an absent or declined optional CLI is silently skipped in every roster fallback chain, which always terminates at a core-trio member; the core trio cannot be disabled.
 
 **Known-fails / partial support:**
 - Codex hooks **fire under `codex exec`** as of 0.144.4 (D-004 reversed — probe CDX-04, 2026-07-17: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop` all fired), but only with all three preconditions: nested `hooks.json` shape, project-tier `.codex/hooks.json`, and `--dangerously-bypass-hook-trust` (project trust is not persisted for arbitrary dirs; the flag is the documented automation path, and `invoke_codex` passes it only when the project ships `.codex/hooks.json` and `codex features list` reports `hooks` enabled). See `ops/decisions/2026-07-18-codex-hooks-under-exec.md`.

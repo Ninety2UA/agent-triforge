@@ -18,6 +18,8 @@ This project uses the multi-agent coordination framework where Claude Code serve
 - **Antigravity CLI (`agy`)** — analyst + reviewer: Phase 0 codebase scans (Gemini 3.1 Pro (High), 1M token context), architecture reviews, documentation
 - **Codex CLI** — tester + logic reviewer: writes/runs tests, security audits, infrastructure tasks
 
+**Builder pool.** All six supported CLIs — the core trio (Claude, Antigravity, Codex) plus any enrolled optional member (OpenCode, Kimi, Cursor) — are eligible builders; `ops/roster.toml` assigns each role (builder | reviewer | tester | analyst | documenter). The single-writer rule is retired: safety is per-task leases + worktree isolation + mandatory cross-review by a pinned non-author reviewer, not write-restriction. The role bullets above are the shipped default posture (Claude leads builds, Codex reviews and tests, Antigravity analyzes and documents), which `ops/roster.toml` can override.
+
 For narrow, rubric-following runtime tasks the lead/team-lead may step down one tier at a time:
 
 Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (4.8) + `xhigh` → `opus`+`high` → `sonnet` (5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
@@ -67,16 +69,18 @@ Claude invokes Antigravity and Codex through the unified helper `${CLAUDE_PLUGIN
 
 ### Assignment heuristic
 
-- **Produces code?** → Claude (subagents or agent team for parallel work)
-- **Evaluates existing code?** → Antigravity + Codex + Claude specialized agents in parallel
-- **Runs/executes something?** → Codex
-- **Produces documentation?** → Antigravity
-- **Touches shared interfaces?** → Claude implements → Antigravity reviews → Codex tests
+Assignment comes from `ops/roster.toml` (`resolve_role <role>`); the defaults below are the shipped posture, not a write-restriction — any roster member can be assigned as builder, and every build merges only after cross-review.
+
+- **Produces code?** → builder role (default Claude; roster-assignable to any member), built under a lease and cross-reviewed before merge
+- **Evaluates existing code?** → reviewer role + Claude specialized agents in parallel (default Codex + Antigravity)
+- **Runs/executes something?** → tester role (default Codex)
+- **Produces documentation?** → documenter role (default Antigravity)
+- **Touches shared interfaces?** → builder implements under a lease → pinned non-author reviewer cross-reviews → tester validates
 
 ### Key constraints
 
 - CONTRACTS.md is never modified directly during review — changes must be proposed in MEMORY.md first
-- Neither Antigravity nor Codex may modify source code; they only write to their designated `ops/` files
+- Every implementation task — lead-authored included — is built under a per-task lease and merges only after cross-review by a pinned non-author reviewer; no agent self-merges. The single-writer rule is retired — any roster member is an eligible builder; safety is leases + worktree isolation + cross-review, not write-restriction
 - Maximum 3 review cycles per sprint before escalating to user
 - Risk scoring: halt subagent at risk >20% or file changes >50
 - Completion requires creating the `ops/.sprint-complete` runtime marker, only after the verification checklist passes (never earlier)
@@ -107,7 +111,7 @@ Claude invokes Antigravity and Codex through the unified helper `${CLAUDE_PLUGIN
 
 ## Portable skills
 
-12 model-agnostic methodology skills available to all agents:
+13 model-agnostic methodology skills available to all agents:
 
 | Skill | Consumer | Purpose |
 |---|---|---|
@@ -123,6 +127,7 @@ Claude invokes Antigravity and Codex through the unified helper `${CLAUDE_PLUGIN
 | `knowledge-compounding` | Claude | Document solutions and decisions |
 | `session-continuity` | Claude | Save/resume across sessions |
 | `scope-cutting` | Claude | Systematically cut scope by priority |
+| `watch-cycle` | Claude | CLI/repo watch methodology (research → gap table → adopt/defer ADR) |
 
 ## Specialized agents
 
@@ -179,10 +184,20 @@ Commits include structured trailers for decision context:
 
 ## Prerequisites
 
-All three CLIs must be installed and working in non-interactive mode:
+**Run `/setup`** — the guided path from a fresh install to a working roster (gates the core trio live, then enrolls or declines each optional CLI with a chosen model). Idempotent and re-runnable. The probes below are what it automates.
+
+**Core trio (required)** — installed and answering a headless READY probe:
 ```bash
-agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"   # always pin the model — agy defaults to a Flash variant
-codex exec "Respond with only: READY"
+claude --version                                                   # Claude Code ≥ 2.1.212
+agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"  # Antigravity ≥ 1.1.3 — always pin the model (agy defaults to a Flash variant)
+codex exec "Respond with only: READY"                              # Codex ≥ 0.144.0
+```
+
+**Optional tier** (enroll via `/setup`; each is skipped cleanly in every roster fallback chain when absent):
+```bash
+opencode run --format json -m openrouter/z-ai/glm-5.2 "Respond with only: READY"  # OpenCode ≥ 1.18 (OpenRouter provider connected)
+kimi -p "Respond with only: READY"                                                # Kimi Code ≥ 0.15 (OAuth device-code or API key)
+cursor-agent -p --trust --model grok-4.5 "Respond with only: READY"               # Cursor (date-versioned; pin grok-4.5, never the Auto router)
 ```
 
 Python 3 is also required (used by hook handlers for JSON parsing):

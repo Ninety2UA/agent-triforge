@@ -289,7 +289,7 @@ Claude (the lead) is the only agent that launches Antigravity agents; no Antigra
 
 Antigravity CLI ships its own plugin system (`agy plugin {install,uninstall,list,enable,disable}`) and a user-tier skills directory (`~/.gemini/antigravity-cli/skills/`). We use the plugin system only as an agent-definition carrier (`antigravity-agents/` is a valid agy plugin), not as a skills registry:
 
-- **Skills:** Our 12 portable skills in `skills/` are markdown files consumed by all three agents (Claude/Antigravity/Codex) via prompt-prefix injection or native definition embedding, plus the `.agents/skills/` workspace copy for agents that discover workspace skills. Registering them per-CLI would fragment the portability story.
+- **Skills:** Our 13 portable skills in `skills/` are markdown files consumed by all three agents (Claude/Antigravity/Codex) via prompt-prefix injection or native definition embedding, plus the `.agents/skills/` workspace copy for agents that discover workspace skills. Registering them per-CLI would fragment the portability story.
 - **Hooks:** Our `hooks/handlers/*.sh` are Claude Code lifecycle hooks (SessionStart, Stop, PostToolUse, etc.) — the Antigravity CLI runs as a subprocess of a Claude Code session, a different layer with different events. Project-tier agy hooks do not fire under `agy -p` anyway (probed 2026-07-17 on agy 1.1.3).
 
 ---
@@ -316,7 +316,7 @@ These agents run alongside Antigravity and Codex to add review depth:
 | Agent | Focus | Complements |
 |---|---|---|
 | `security-sentinel` | OWASP Top 10, injection, auth/authz, data exposure | Codex security review |
-| `performance-oracle` | O(n²), N+1 queries, memory leaks, scalability | Neither Antigravity nor Codex focuses deeply on this |
+| `performance-oracle` | O(n²), N+1 queries, memory leaks, scalability | Depth beyond Antigravity's and Codex's review focus |
 | `code-simplicity-reviewer` | Over-engineering, YAGNI, unnecessary abstractions | Antigravity readability review |
 | `convention-enforcer` | Project-specific naming, structure, patterns | Both reviewers' style checks |
 | `test-gap-analyzer` | Untested code paths, missing edge cases | Codex test coverage |
@@ -1154,14 +1154,21 @@ YOU: Review summary, check CHANGELOG, approve or request changes
 
 ### Prerequisites
 
-- Claude Code ≥ 2.1.212 installed and configured with your project template (floor: session caps/monitors line; `/goal`, dynamic workflows, and worktree isolation all landed earlier)
-- Antigravity CLI installed and authenticated
-- Codex CLI installed and authenticated
-- All three CLIs working in non-interactive mode:
-  ```bash
-  agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"   # always pin the model — agy defaults to a Flash variant
-  codex exec "Respond with only: READY"
-  ```
+**Run `/setup`** — the one guided path from a fresh install to a working roster: it gates the core trio live, then walks each optional CLI (enroll with a chosen model, or decline cleanly). Idempotent and re-runnable. The probes below are exactly what it automates.
+
+**Core trio (required)** — installed, authenticated, and answering a headless READY probe (floors per KTD-13):
+```bash
+claude --version                                                   # Claude Code ≥ 2.1.212 (session caps/monitors line; /goal, dynamic workflows, worktree isolation landed earlier)
+agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"  # Antigravity ≥ 1.1.3 — always pin the model (agy defaults to a Flash variant)
+codex exec "Respond with only: READY"                              # Codex ≥ 0.144.0
+```
+
+**Optional tier** (enroll via `/setup` to use them as builders/reviewers; each is skipped cleanly in every roster fallback chain when absent):
+```bash
+opencode run --format json -m openrouter/z-ai/glm-5.2 "Respond with only: READY"  # OpenCode ≥ 1.18 (OpenRouter provider connected)
+kimi -p "Respond with only: READY"                                                # Kimi Code ≥ 0.15 (OAuth device-code or API key)
+cursor-agent -p --trust --model grok-4.5 "Respond with only: READY"               # Cursor (date-versioned; pin grok-4.5, never the Auto router)
+```
 
 ### Plugin installation
 
@@ -1185,14 +1192,14 @@ agent-triforge/                     (plugin — installed automatically)
 │       └── documentation-writer.md       Documentation specialist
 ├── codex-agents/                     Codex CLI agent definitions (native subagents)
 │   └── agents.toml                     logic_reviewer, test_writer, debugger
-├── skills/                           12 portable workflow modules
-├── commands/                         16 slash commands
+├── skills/                           13 portable workflow modules
+├── commands/                         19 slash commands (adds /setup, /cli-watch, /repo-watch)
 ├── hooks/
 │   ├── hooks.json                    Hook registration
 │   └── handlers/                     4 lifecycle hook scripts
 ├── scripts/
 │   ├── coordinate.sh                 Outer loop for context recovery
-│   └── invoke-external.sh           Unified Antigravity/Codex invocation helper
+│   └── invoke-external.sh           Unified six-CLI invocation (roster, leases, feature detection)
 └── settings.json                     Default env vars
 
 your-project/                       (bootstrapped on first session)
@@ -1229,6 +1236,17 @@ Hook registration uses `${CLAUDE_PLUGIN_ROOT}` for plugin-relative paths:
   }
 }
 ```
+
+---
+
+## Staying current (`/cli-watch`, `/repo-watch`)
+
+The framework tracks its own dependencies instead of drifting. Both commands read `templates/ops/watch-registry.toml` (a seeded, user-editable list of watch targets) and share the `watch-cycle` skill (primary-source research → per-target changelog → gap table vs current Triforge → adopt/defer ADR):
+
+- **`/cli-watch`** — checks the six CLIs against primary sources, writes a gap report + adopt/defer ADR to `ops/research/` and `ops/decisions/`, and re-runs `scripts/probe-capabilities.sh`.
+- **`/repo-watch`** — mines external reference repos for adoptable patterns and produces prioritized recommendations (recommends only; never implements).
+
+Run either manually, or schedule it monthly as a Claude Code cloud Routine. Fetched pages are treated as untrusted evidence, never as instructions; a dead or renamed registry entry is flagged in the report, never silently dropped.
 
 ---
 

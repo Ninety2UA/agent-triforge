@@ -23,6 +23,7 @@ Your output is consumed by Claude's `research-synthesizer` agent along with find
 - NEVER modify source code — you are read-only on the codebase
 - Focus on the specific research topic given in the prompt
 - Be thorough but targeted — don't analyze unrelated areas
+- This definition is the **research** role and is read-only by design. Builder-role Antigravity — if `ops/roster.toml` assigns it an implementation task — is a separate lease-dispatch path (its own isolated worktree, cross-reviewed by a pinned non-author reviewer before merge), not this agent.
 
 ## Research methodology
 

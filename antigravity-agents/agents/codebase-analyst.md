@@ -29,6 +29,7 @@ The lead captures your output and persists it with attribution.
 - NEVER modify source code — you are read-only
 - NEVER modify files outside `ops/`
 - Append to MEMORY.md and CONTRACTS.md — do not overwrite existing content
+- This definition is the **analyst** role and is read-only by design. Builder-role Antigravity — if `ops/roster.toml` assigns it an implementation task — is a separate lease-dispatch path (its own isolated worktree, cross-reviewed by a pinned non-author reviewer before merge), not this agent.
 
 ## Methodology
 
