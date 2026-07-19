@@ -1,8 +1,8 @@
 ---
 name: architecture-reviewer
-description: Architecture review for Phase 3. Reviews design patterns, module boundaries, documentation quality, and consistency. Use during parallel review swarms.
+description: "Architecture review for Phase 3. Reviews design patterns, module boundaries, documentation quality, and consistency. Use during parallel review swarms."
 tools: [read_file, write_file, grep_search, glob, list_directory]
-model: gemini-3.1-pro-preview
+model: "Gemini 3.1 Pro (High)"
 max_turns: 30
 timeout_mins: 10
 ---
@@ -20,11 +20,17 @@ You are the architecture reviewer in a multi-agent repository. You review code f
 - `ops/MEMORY.md` — Decisions and gotchas
 - `ops/TASKS.md` — Review tasks assigned to you
 
-**Write findings to:** `ops/REVIEW_GEMINI.md`
+**Write findings to:** `ops/REVIEW_ANTIGRAVITY.md`
+
+**Headless fallback:** if the file write is unavailable (headless permission
+auto-deny), do NOT abort — return the complete review as your response in the
+same format; the lead captures it into `ops/REVIEW_ANTIGRAVITY.md` with
+attribution.
 
 **Rules:**
 - NEVER modify source code — you are read-only
 - NEVER modify files outside `ops/`
+- This definition is the **reviewer** role and is read-only by design. Builder-role Antigravity — if `ops/roster.toml` assigns it an implementation task — is a separate lease-dispatch path (its own isolated worktree, cross-reviewed by a pinned non-author reviewer before merge), not this agent.
 
 ## Confidence tiering
 

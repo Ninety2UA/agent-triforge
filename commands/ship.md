@@ -23,20 +23,23 @@ Goal: $ARGUMENTS
 - `--convergence {fast|standard|deep}` — Review convergence mode (default: standard). Fast=P1 only, deep=P1+P2+P3<3.
 - `--team` — Activate agent team mode for build phase (5+ interdependent tasks)
 
-## Activation
+## Completion gating
 
-Write the ship-loop state file to activate the inner loop guard:
+The sprint's completion condition is this checklist — ALL items must hold:
+
+1. Every phase below is done (or explicitly skipped with a stated reason)
+2. The `verification-before-completion` checklist passes with evidence
+3. ops/STATE.md is written for session handoff
+4. Temporary review files are archived to ops/archive/
+5. The runtime marker `ops/.sprint-complete` is created LAST, only after 1–4 hold
+
+At sprint start, print this copyable line for the user (a command file cannot invoke `/goal` itself — it is user-typed or the leading line of a `claude -p` prompt; typing it makes Claude Code hard-gate the session natively):
 
 ```
-Create .claude/ship-loop.local.md with:
----
-active: true
-iteration: 0
-max_iterations: 5
-completion_promise: "DONE"
----
-<the goal description from $ARGUMENTS>
+/goal Sprint complete ONLY when ALL of: every phase is done or explicitly skipped with a stated reason; the verification-before-completion checklist passes with evidence; ops/STATE.md is written; review files are archived to ops/archive/; ops/.sprint-complete is created last.
 ```
+
+Whether or not the user types it, hold yourself to that checklist as your completion condition. Create `ops/.sprint-complete` ONLY in Phase 6 after the checklist passes — never earlier. Outer tooling (`scripts/coordinate.sh`) detects sprint completion solely by that file's existence.
 
 ## Pipeline
 
@@ -46,15 +49,15 @@ Execute ALL phases in order. Do not skip phases unless explicitly noted.
 Spawn the `learnings-researcher` agent to search ops/solutions/ and ops/decisions/ for relevant patterns.
 
 ### Phase 0: Codebase analysis
-Invoke Gemini with the codebase-analyst agent definition (skip if codebase unchanged or small fix):
+Invoke Antigravity with the codebase-analyst agent definition (skip if codebase unchanged or small fix):
 ```bash
 set -euo pipefail
 source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
 # Full codebase analysis (uses codebase-analyst agent definition)
-invoke_gemini "codebase-analyst" \
+invoke_antigravity "codebase-analyst" \
   "Analyze the full codebase. Write to ops/ARCHITECTURE.md, ops/MEMORY.md (append), ops/CONTRACTS.md (append)." \
-  "${TMPDIR:-/tmp}/gemini_phase0_$$_$(date +%s).txt" 600
+  "${TMPDIR:-/tmp}/antigravity_phase0_$$_$(date +%s).txt" 600
 ```
 
 ### Phase 1: Planning
@@ -68,14 +71,15 @@ Before building, surface the 3 most critical unverified assumptions about the go
 Spawn the `plan-checker` agent. Iterate until APPROVED (max 3 rounds).
 
 ### Phase 2: Build
+- Assign every task from `ops/roster.toml` and build it under a per-task lease in an isolated worktree; merge only after cross-review by a pinned non-author reviewer (builder-pool wave protocol — see the `wave-orchestration` skill). The single-writer rule is retired; safety is leases + worktree isolation + cross-review.
 - If < 5 independent tasks → subagent mode with wave orchestration
 - If 5+ tasks or interdependent → agent team mode with team-lead
-- Run `integration-verifier` between waves
+- Approved merges land as one commit per task on the sprint integration branch (`lease_merge` refuses the default branch); `integration-verifier` runs against that branch between waves, then the lead promotes to the main branch with `lease_promote`, which honors `[promotion]` and BLOCKS on protected-path diffs (they force the gate on)
 - Apply risk scoring (halt at >20% risk or 50+ file changes)
 
 ### Phase 3: Parallel review
 Launch ALL reviewers simultaneously:
-- Gemini CLI (architecture, design) — background bash
+- Antigravity CLI (agy) (architecture, design) — background bash
 - Codex CLI (logic, security, tests) — background bash
 - security-sentinel agent — Claude subagent
 - performance-oracle agent — Claude subagent
@@ -98,7 +102,6 @@ Spawn the `findings-synthesizer` agent. Apply `iterative-refinement` skill.
 - Archive review files to ops/archive/[today's date]/
 - Apply `verification-before-completion` skill (all checks must pass)
 - Write ops/STATE.md for session handoff
-- Remove .claude/ship-loop.local.md
+- Only when the full completion-gating checklist passes: create the runtime marker `ops/.sprint-complete` (`touch ops/.sprint-complete`) as the LAST action
 
-Only when ALL work is verified complete:
-<promise>DONE</promise>
+If any checklist item fails, do NOT create `ops/.sprint-complete` — document the blocker in ops/TASKS.md and ops/STATE.md instead.

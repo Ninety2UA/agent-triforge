@@ -1,0 +1,90 @@
+# ops/roster.toml — Agent Triforge roster: who does what (KTD-2).
+#
+# One config file decides which CLI + model + effort handles each role, for
+# every adapter. Roles ARE the task types — builder, reviewer, tester,
+# analyst, documenter — so choosing model and effort per task type is this
+# file's native grain.
+#
+# ANY adapter may read this file: it is deliberately CLI-neutral (ops/-level,
+# not .claude/-scoped) and parsed with python3 tomllib — the same pattern as
+# codex-agents/agents.toml — so non-Claude adapters can read their own role.
+#
+# Override semantics: any field left unset inherits the shipped default
+# (mirrored as built-in defaults inside resolve_role in
+# scripts/invoke-external.sh — deleting this file entirely is safe). A role
+# overriding only `effort` keeps the default cli + model. The shipped posture
+# is the builder pool: Claude leads builds, Codex reviews and tests,
+# Antigravity analyzes and documents, and validated fallback chains degrade
+# gracefully when a member is absent.
+#
+# Fallback chains ([cli] + fallbacks, walked in order) are validated at load:
+# each chain must terminate at a core-trio member (claude, antigravity,
+# codex), and the core trio cannot be disabled.
+#
+# Hard rules, never overridden by this file:
+#   - Antigravity (agy) never runs a Flash variant. Model pins are always
+#     "Gemini 3.1 Pro (High)" / "(Low)" — the (High)/(Low) suffix IS agy's
+#     thinking-effort control, so for agy the `effort` field maps into the
+#     model-variant suffix rather than a separate flag.
+#   - Cursor never uses the Auto router — grok-4.5 is pinned explicitly.
+#     Cursor has no effort control, so `effort` is inert for it.
+
+[roles.builder]
+cli = "claude"
+# model is intentionally empty: the shell `claude -p` builder lease lane runs the
+# host's default Claude Code model (no --model pin), so the roster has no model to
+# carry here. The Fable/downgrade ladder applies to Agent-tool subagent spawns
+# (the Agent tool's `model` parameter), not this shell lease lane.
+model = ""
+effort = "max"
+fallbacks = ["codex", "antigravity"]
+
+[roles.reviewer]
+cli = "codex"
+model = "gpt-5.6-sol"
+effort = "xhigh"
+fallbacks = ["antigravity", "claude"]
+
+[roles.tester]
+cli = "codex"
+model = "gpt-5.6-sol"
+effort = "xhigh"
+fallbacks = ["claude"]
+
+[roles.analyst]
+cli = "antigravity"
+model = "Gemini 3.1 Pro (High)"   # (High) suffix = agy effort control (see header)
+effort = "high"
+fallbacks = ["claude"]
+
+[roles.documenter]
+cli = "antigravity"
+model = "Gemini 3.1 Pro (High)"   # (High) suffix = agy effort control (see header)
+effort = "high"
+fallbacks = ["claude"]
+
+# --- Optional members --------------------------------------------------------
+# Optional members (opencode, kimi, cursor) are enrolled on first detection —
+# the session-start enrollment trigger or /setup writes their entries. They
+# must NOT appear as live entries in this shipped template: an existing
+# [members.<cli>] entry is exactly what suppresses the enrollment ask, and a
+# decline persists as `enabled = false` (disabled = absent everywhere — the
+# member is skipped in every fallback chain; re-enabling is the flag flip
+# alone, nothing else to restore).
+#
+# Example — uncomment and adjust, or let enrollment write it:
+# [members.opencode]
+# enabled = true
+# model = "openrouter/z-ai/glm-5.2"   # shipped default; validated against the live OpenRouter list at enrollment
+# enrolled = "2026-07-18"
+#
+# Shipped defaults for the other optional members, same shape:
+# [members.kimi]   -> enabled = true, model = "kimi-k3"
+# [members.cursor] -> enabled = true, model = "grok-4.5"  (explicit pin — NEVER the Auto router)
+
+[promotion]
+# KTD-5 user gate: when true, the lead pauses at wave end for explicit user
+# approval before promoting the sprint integration branch to main. Diffs that
+# touch protected paths force the approval on regardless of this setting —
+# enforced by the wave protocol, not by this file.
+require_user_approval = false

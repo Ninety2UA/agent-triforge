@@ -15,10 +15,13 @@ You are a review findings synthesizer. You take raw review outputs from multiple
 
 ## Inputs
 
-Read these files:
-- `ops/REVIEW_GEMINI.md` — architecture, design, documentation findings
+Glob and read **every** `ops/REVIEW_*.md` file — the set of review lanes is roster-driven, so do not assume a fixed list:
+- `ops/REVIEW_ANTIGRAVITY.md` — architecture, design, documentation findings
 - `ops/REVIEW_CODEX.md` — logic, security, test coverage findings
+- `ops/REVIEW_OPENCODE.md`, `ops/REVIEW_KIMI.md`, `ops/REVIEW_CURSOR.md` — optional-tier reviewer lanes, present only when an optional member is enrolled (or named the primary reviewer); synthesize them exactly like the core lanes when they exist
 - Any additional review outputs passed to you
+
+Use `Glob` on `ops/REVIEW_*.md` first to discover which lanes actually ran this cycle, then `Read` each. A lane that did not run leaves no file — that is expected, not a gap.
 
 **Structured output shortcut:** If review files contain a `## Machine-readable summary` section with a JSON block, parse it first for quick counts (`{"p1": N, "p2": N, "p3": N, "verdict": "..."}`). Still read the full findings for deduplication and synthesis.
 

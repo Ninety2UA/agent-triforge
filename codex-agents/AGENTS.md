@@ -49,7 +49,7 @@ Tag every finding with confidence and severity:
 
 ## Rules
 
-- Never modify source code directly (only test code and infra configs)
+- Writes are role-scoped, set by the task/roster (never self-selected): a Codex **review** or **test** invocation stays read-only / test-only — edit only test code and infra configs and return findings on the source rather than rewriting it. A Codex **builder** lease invocation implements source directly per the builder-pool contract (its own worktree, then cross-review by a pinned non-author reviewer before merge). The single-writer rule is retired — leases + worktree isolation + cross-review are the safety boundary, not write-restriction.
 - Never modify CONTRACTS.md directly — propose changes in MEMORY.md
 - Log code issues as new tasks in TASKS.md with "Agent: Claude" assignment
 - Be specific: include file paths and line numbers

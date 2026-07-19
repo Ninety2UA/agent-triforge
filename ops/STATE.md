@@ -1,40 +1,43 @@
 # Session state
-<!-- Saved: 2026-04-01 -->
-<!-- Type: wrap (clean session end) -->
+<!-- Saved: 2026-07-18 -->
+<!-- Type: wrap (v3.0.0 implemented + 3 review loops converged; PR opened) -->
 
 ## Current phase
-Phase 6 complete. Sprint finished.
+v3.0.0 CLI-modernization + builder-pool: COMPLETE. All 17 units implemented,
+3 review→fix→verify loops + a convergence-confirmation pass run to a stable
+5/5, PR opened from `feat/cli-modernization-builder-pool` → `main`.
 
-## Active sprint
-v2.0.0 plugin conversion + four-pass audit + README polish + SVG cleanup.
+## What shipped (branch: feat/cli-modernization-builder-pool, 21 commits)
+- Antigravity (`agy`) replaces the retired Gemini lane (U2-U4); native-first
+  /goal + sentinel completion (U5); Claude ladder fable+max→…→sonnet+high (U6);
+  Codex gpt-5.6-sol + structured verdicts + hooks-under-exec (D-004 flip, U7).
+- Six-CLI builder pool: ops/roster.toml drives all 5 roles via resolve_role +
+  dispatch_role (U8); lease ledger + worktree lifecycle + lease_promote gating
+  (U9); wave protocol with pinned cross-review + integration branch (U10);
+  OpenCode/Kimi/Cursor optional adapters (U11-13); /setup onboarding (U17).
+- Watch family /cli-watch + /repo-watch + registry (U14); first-run cycle ADR +
+  four-repo mining report (U15); v3.0.0 release docs + migration (U16).
 
-## Task status snapshot
-- Done: all tasks completed
+## Review-loop outcome (5/5)
+- Loop 1: fixed 2 P1 (zsh-dead builder pool; codex eval injection) + 2 breaks
+  (roster drove only builder → dispatch_role + dead-code kill; promotion/
+  protected-path prose-only → lease_merge guard + lease_promote).
+- Loop 2: /setup zsh glob crash + errexit-on-source; protected-path completeness.
+- Loop 3: parallel-wave heartbeat zsh word-split; pre-compact phase anchor;
+  ledger mkdir-lock. zsh-portability bug class exhaustively swept clean.
+- Loop 4 (convergence): CLEAN — ~76 live zsh assertions, 0 new defects.
+- Evidence: ops/research/2026-07-18-verification-evidence.md (gate-by-gate).
 
-## Completed this session
-1. **Comprehensive audit** (4 passes, 20 parallel agents + manual 11-point verification)
-   - Pass 1: fixed hooks stdin parsing, README config, coordinate.md guard, 10 high, ~20 medium
-   - Pass 2: fixed JSON injection, PID captures, path consistency, reviewer coverage
-   - Pass 3: fixed post-migration stale docs, mkdir .claude guards, deep-research PID
-   - Pass 4: fixed ship-loop.sh mkdir guard (last remaining issue)
-2. **Blueprint alignment**: rewrote ship-loop.sh — JSON output, session isolation, transcript detection, json.dumps encoding
-3. **Plugin conversion (v2.0.0)**: restructured as Claude Code plugin
-   - .claude-plugin/plugin.json, hooks/hooks.json, root settings.json
-   - All components at root: agents/, skills/, commands/, hooks/handlers/
-   - All skill injections use ${CLAUDE_PLUGIN_ROOT}/skills/
-   - session-start.sh bootstraps ops/ + .claude/ + suggests CLAUDE.md template
-4. **README overhaul**: "What's new (v2.0.0)" section, plugin install instructions, audit convergence table, verification section
-5. **SVG fixes**: hero banner "8→7 reviewers", removed border strokes from all 10 diagrams
-6. **Knowledge compounded**: 2 solutions documented (hooks-stdin-json-parsing, plugin-conversion)
-7. Published 12 commits to main
+## Known residuals (documented, non-blocking)
+- docs/images/*.svg still label "Gemini" (cosmetic, fixed-size exports).
+- OpenRouter + Kimi unauthenticated on the maintainer host → those two adapters
+  verified structurally + via their deterministic auth-fail paths (degradation
+  by design; core trio + Cursor are live-verified).
+- agy 1.1.3 native plugin-agent discovery not functional headless → injection
+  fallback operative (AGY-12/13 FAIL; flips to PASS when agy ships listing).
 
-## Known issues
-- None blocking. Framework verified clean across all 49 components.
-- Runtime behavior (plugin install, hook firing, ${CLAUDE_PLUGIN_ROOT} expansion) requires live testing.
-
-## Recommended next actions
-1. **Live test**: `claude --plugin-dir /path/to/agent-triforge` in a fresh project
-2. Run `/ship` on a real goal for end-to-end validation
-3. Verify Gemini/Codex skill injection with ${CLAUDE_PLUGIN_ROOT} paths
-4. Consider publishing to a Claude Code plugin marketplace
-5. Consider adding Blueprint's prompt-guard and task-completed hooks
+## Next actions (post-merge, follow-up sprints)
+- Repo-mining adoptions (ops/research/2026-07-18-repo-mining.md: 17 adopt-in-
+  follow-up candidates) after user approval.
+- Re-probe agy on 1.1.4+ (shipped 2026-07-18: headless settings.json
+  enforcement may flip AGY-08/09/10 — see the cycle ADR open watches).

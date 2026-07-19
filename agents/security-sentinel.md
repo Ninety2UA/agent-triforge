@@ -1,7 +1,7 @@
 ---
 name: security-sentinel
 color: red
-description: "Deep security review focused on OWASP Top 10, injection, auth/authz, data exposure, and dependency vulnerabilities. Use as additional reviewer alongside Gemini/Codex in Phase 3."
+description: "Deep security review focused on OWASP Top 10, injection, auth/authz, data exposure, and dependency vulnerabilities. Use as additional reviewer alongside Antigravity/Codex in Phase 3."
 tools:
   - Read
   - Grep

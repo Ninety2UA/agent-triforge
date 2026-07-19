@@ -3,6 +3,13 @@
 #
 # These define specialized Codex subagent roles used during
 # review (Phase 3), testing (Phase 5), and debugging.
+#
+# Convention: this file is Triforge-internal — scripts/invoke-external.sh
+# parses it and replays the values as `codex exec` flags/-c overrides
+# (developer_instructions becomes a prompt prefix). Codex CLI itself never
+# reads this file, so Triforge-level keys like `output_schema` (resolved by
+# the helper to a --output-schema path) are valid here even though they are
+# not part of Codex's own [agents] config schema.
 
 # Top-level agent runtime caps. logic_reviewer and test_writer spawn sub-agents
 # for 5+ file scopes; without explicit caps, nesting depth defaults to 1 and
@@ -17,10 +24,17 @@ job_max_runtime_seconds = 1800
 [agents.logic_reviewer]
 name = "logic_reviewer"
 description = "Logic and security reviewer for Phase 3. Reviews code for correctness, edge cases, type safety, security vulnerabilities, and test coverage gaps."
-model = "gpt-5.4"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "xhigh"
+# model_reasoning_effort = "max"    # opt-in — probe CDX-06 PASS on gpt-5.6-sol (2026-07-17)
+# model_reasoning_effort = "ultra"  # opt-in — probe CDX-07 PASS; NOTE: ultra fans out to internal subagents (changes execution shape/cost)
 sandbox_mode = "read-only"
 approval_policy = "never"
+# Triforge-level key (see header): invoke-external.sh resolves this file name
+# against .codex/agents/ then ${CLAUDE_PLUGIN_ROOT}/codex-agents/ and passes
+# it as --output-schema, capturing the schema-valid final message to
+# <output>.verdict.json (probe CDX-05 PASS, 2026-07-17).
+output_schema = "review-verdict.schema.json"
 tools = ["read", "grep", "glob"]
 include_plan_tool = false
 developer_instructions = """
@@ -96,8 +110,10 @@ Write findings to ops/REVIEW_CODEX.md in this format:
 [agents.test_writer]
 name = "test_writer"
 description = "TDD test writing agent for Phase 5. Writes tests using RED-GREEN-REFACTOR methodology, conforming to CONTRACTS.md types."
-model = "gpt-5.4"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "xhigh"
+# model_reasoning_effort = "max"    # opt-in — probe CDX-06 PASS on gpt-5.6-sol (2026-07-17)
+# model_reasoning_effort = "ultra"  # opt-in — probe CDX-07 PASS; NOTE: ultra fans out to internal subagents (changes execution shape/cost)
 sandbox_mode = "workspace-write"
 approval_policy = "never"
 tools = ["read", "grep", "glob", "write", "bash"]
@@ -151,7 +167,7 @@ You are the testing agent in a multi-agent repository. Follow the RED-GREEN-REFA
 READ THESE FILES FIRST:
 - ops/CONTRACTS.md (your tests MUST use these types)
 - ops/CHANGELOG.md (focus on changed code)
-- ops/REVIEW_GEMINI.md (test edge cases flagged here)
+- ops/REVIEW_ANTIGRAVITY.md (test edge cases flagged here)
 - ops/REVIEW_CODEX.md (test security concerns flagged here)
 - ops/TASKS.md (your assigned test tasks)
 
@@ -177,8 +193,10 @@ If the test scope covers 5+ files, use spawn_agent to parallelize:
 [agents.debugger]
 name = "debugger"
 description = "Structured debugging agent. Follows systematic-debugging methodology with error taxonomy, assumption tracking, and root cause analysis."
-model = "gpt-5.4"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "xhigh"
+# model_reasoning_effort = "max"    # opt-in — probe CDX-06 PASS on gpt-5.6-sol (2026-07-17)
+# model_reasoning_effort = "ultra"  # opt-in — probe CDX-07 PASS; NOTE: ultra fans out to internal subagents (changes execution shape/cost)
 sandbox_mode = "workspace-write"
 approval_policy = "never"
 tools = ["read", "grep", "glob", "write", "bash"]

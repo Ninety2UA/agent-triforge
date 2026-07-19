@@ -31,15 +31,15 @@ Skip if:
 - Continuing within same session
 - Small bug fix
 
-Otherwise, invoke Gemini with the codebase-analyst agent definition:
+Otherwise, invoke Antigravity with the codebase-analyst agent definition:
 ```bash
 set -euo pipefail
 source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
 # Full codebase analysis (uses codebase-analyst agent definition)
-invoke_gemini "codebase-analyst" \
+invoke_antigravity "codebase-analyst" \
   "Analyze the full codebase. Write to ops/ARCHITECTURE.md, ops/MEMORY.md (append), ops/CONTRACTS.md (append)." \
-  "${TMPDIR:-/tmp}/gemini_phase0_$$_$(date +%s).txt" 600
+  "${TMPDIR:-/tmp}/antigravity_phase0_$$_$(date +%s).txt" 600
 ```
 
 Read updated ops/ files after completion.
@@ -52,9 +52,9 @@ Follow the `writing-plans` skill:
 2. Decompose goal into atomic tasks (1-2 hours each)
 3. Assign using the heuristic matrix:
    - Produces code → Claude
-   - Evaluates code → Gemini + Codex + Claude agents in parallel
+   - Evaluates code → Antigravity + Codex + Claude agents in parallel
    - Runs/executes → Codex
-   - Documentation → Gemini
+   - Documentation → Antigravity
 4. Apply `shadow-path-tracing` skill: enumerate failure paths for non-trivial tasks
 5. Build error/rescue maps for external calls and DB operations (any "?" → subtask)
 6. Extract and embed relevant CONTRACTS.md types in each task's Context field

@@ -15,7 +15,7 @@ Read these files (silently — don't dump contents to user):
 
 Also check:
 - git status (uncommitted changes?)
-- Are there unprocessed review files? (REVIEW_GEMINI.md, REVIEW_CODEX.md, TEST_RESULTS.md)
+- Are there unprocessed review files? (REVIEW_ANTIGRAVITY.md, REVIEW_CODEX.md, TEST_RESULTS.md)
 
 ## Report
 
@@ -41,7 +41,7 @@ Present a concise status:
 - [last 3-5 CHANGELOG entries]
 
 ### Pending reviews
-- [REVIEW_GEMINI.md exists? processed?]
+- [REVIEW_ANTIGRAVITY.md exists? processed?]
 - [REVIEW_CODEX.md exists? processed?]
 - [TEST_RESULTS.md exists? processed?]
 

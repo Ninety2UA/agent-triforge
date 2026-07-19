@@ -1,0 +1,10 @@
+{
+  "name": "agent-triforge",
+  "version": "3.0.0",
+  "description": "Agent Triforge external-agent pack for Antigravity CLI: ships the codebase-analyst (Phase 0 analysis), architecture-reviewer (Phase 3 review), targeted-researcher (deep research), and documentation-writer agents.",
+  "keywords": [
+    "triforge",
+    "multi-agent",
+    "agents"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -f .claude/codex-changelog.$PPID ] || { mkdir -p .claude ops; printf \"%s | codex | tool activity in session\\n\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >> ops/CHANGELOG.md && touch .claude/codex-changelog.$PPID; }'"
+          }
+        ]
+      }
+    ]
+  }
+}

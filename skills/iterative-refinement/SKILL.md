@@ -15,7 +15,7 @@ REVIEW → TRIAGE → FIX → VERIFY → (loop or exit)
 
 ## Step 1: Triage findings
 
-Categorize all findings from all reviewers (REVIEW_GEMINI.md, REVIEW_CODEX.md, subagent reviews):
+Categorize all findings from all reviewers (REVIEW_ANTIGRAVITY.md, REVIEW_CODEX.md, subagent reviews):
 
 | Priority | Definition | Action |
 |---|---|---|

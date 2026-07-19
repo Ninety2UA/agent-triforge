@@ -10,7 +10,7 @@ tools:
   - Edit
   - Write
 model: opus
-effort: max
+effort: xhigh
 maxTurns: 20
 ---
 

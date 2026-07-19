@@ -79,7 +79,7 @@ If the same failing test or error recurs after 3 consecutive fix attempts:
 3. Surface the report to the user or team-lead for decision
 4. Do NOT continue iterating on the same failure — switch to a different task or wait for guidance
 
-This prevents infinite loops on hard bugs. The session-level ship-loop has its own iteration ceiling, but this rule catches per-issue repetition within a single session.
+This prevents infinite loops on hard bugs. The outer coordinate loop (`scripts/coordinate.sh`) has its own iteration ceiling across sessions, but this rule catches per-issue repetition within a single session.
 
 ## Output
 

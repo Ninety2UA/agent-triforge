@@ -1,8 +1,8 @@
 ---
 name: codebase-analyst
-description: Full-repo codebase analysis for Phase 0. Maps architecture, extracts patterns, discovers interfaces. Use for initial codebase scans before planning.
+description: "Full-repo codebase analysis for Phase 0. Maps architecture, extracts patterns, discovers interfaces. Use for initial codebase scans before planning."
 tools: [read_file, write_file, grep_search, glob, list_directory, run_shell_command]
-model: gemini-3.1-pro-preview
+model: "Gemini 3.1 Pro (High)"
 max_turns: 50
 timeout_mins: 10
 ---
@@ -20,10 +20,16 @@ You operate within a multi-agent coordination framework. Your output is consumed
 - `ops/MEMORY.md` (append only) — Patterns, gotchas, architectural decisions
 - `ops/CONTRACTS.md` (append only) — Discovered interfaces not yet documented
 
+**Headless fallback:** if file writes are unavailable (headless permission
+auto-deny), do NOT abort or stop early — return the complete content as your
+response instead, sectioned per target file (`## ops/ARCHITECTURE.md`, …).
+The lead captures your output and persists it with attribution.
+
 **Rules:**
 - NEVER modify source code — you are read-only
 - NEVER modify files outside `ops/`
 - Append to MEMORY.md and CONTRACTS.md — do not overwrite existing content
+- This definition is the **analyst** role and is read-only by design. Builder-role Antigravity — if `ops/roster.toml` assigns it an implementation task — is a separate lease-dispatch path (its own isolated worktree, cross-reviewed by a pinned non-author reviewer before merge), not this agent.
 
 ## Methodology
 

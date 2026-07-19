@@ -5,12 +5,12 @@ description: "Merge, deduplicate, and prioritize findings from multiple reviewer
 
 # Review Synthesis
 
-When processing findings from multiple reviewers (Gemini, Codex, Claude subagent reviewers), follow this protocol to produce a single, actionable, deduplicated report.
+When processing findings from multiple reviewers (Antigravity, Codex, Claude subagent reviewers), follow this protocol to produce a single, actionable, deduplicated report.
 
 ## Step 1: Collect all findings
 
 Read all review outputs:
-- `ops/REVIEW_GEMINI.md` (architecture, design, documentation)
+- `ops/REVIEW_ANTIGRAVITY.md` (architecture, design, documentation)
 - `ops/REVIEW_CODEX.md` (logic, security, tests)
 - Any subagent review outputs (security-sentinel, performance-oracle, etc.)
 
@@ -78,7 +78,7 @@ Group findings by file, ordered by priority:
 
 ```markdown
 ## Synthesized review findings
-<!-- Cycle [N] | Sources: Gemini, Codex, [subagents] -->
+<!-- Cycle [N] | Sources: Antigravity, Codex, [subagents] -->
 
 ### Critical (P1) — fix before proceeding
 - [HIGH] src/auth/login.ts:45 — SQL injection via unsanitized email input
@@ -87,7 +87,7 @@ Group findings by file, ordered by priority:
 
 ### Important (P2) — fix this cycle
 - [HIGH] src/api/users.ts:120 — Missing error handling for DB timeout
-  Sources: Codex (logic), Gemini (architecture)
+  Sources: Codex (logic), Antigravity (architecture)
   Fix: Add try/catch with 503 response
 - [MEDIUM] src/api/users.ts:89 — Possible N+1 query in user list
   Sources: performance-oracle
@@ -99,7 +99,7 @@ Group findings by file, ordered by priority:
   Note: Works correctly, style preference only
 
 ### Contradictions
-- src/auth/middleware.ts:30 — Gemini recommends extracting to utility, Codex recommends keeping inline for clarity
+- src/auth/middleware.ts:30 — Antigravity recommends extracting to utility, Codex recommends keeping inline for clarity
   Decision needed: [resolve based on ARCHITECTURE.md patterns]
 
 ### Summary
