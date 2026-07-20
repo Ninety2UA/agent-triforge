@@ -969,6 +969,7 @@ N_UNAV=$(cut -f4 "$ROWS" | grep -c '^UNAVAILABLE$' || true)
 N_AUTH=$(cut -f4 "$ROWS" | grep -c '^AUTH-FAIL$' || true)
 N_SKIP=$(cut -f4 "$ROWS" | grep -c '^SKIPPED' || true)
 N_PEND=$(cut -f4 "$ROWS" | grep -c '^PENDING' || true)
+N_INFO=$(cut -f4 "$ROWS" | grep -c '^INFO$' || true)
 
 {
   echo "# Capability probe record — 2026-07 cycle"
@@ -977,11 +978,11 @@ N_PEND=$(cut -f4 "$ROWS" | grep -c '^PENDING' || true)
   echo "**Host:** $(uname -s) $(uname -r); timeout via \`$TIMEOUT_BIN\`"
   echo "**Mode:** $([ "$SKIP_LIVE" = "1" ] && echo "skip-live (no model calls)" || echo "full (live probes)")"
   echo
-  echo "Outcome vocabulary: **PASS** capability demonstrated · **FAIL** capability absent or not demonstrated (consuming units take their documented fallback) · **UNAVAILABLE** CLI not installed · **AUTH-FAIL** CLI present but not authenticated on this machine · **SKIPPED / SKIPPED-GATED** not run (\`--skip-live\` or gated on a failed READY probe) · **PENDING-U15** resolved by a later unit, with the absorbing design noted."
+  echo "Outcome vocabulary: **PASS** capability demonstrated · **FAIL** capability absent or not demonstrated (consuming units take their documented fallback) · **UNAVAILABLE** CLI not installed · **AUTH-FAIL** CLI present but not authenticated on this machine · **SKIPPED / SKIPPED-GATED** not run (\`--skip-live\` or gated on a failed READY probe) · **PENDING-U15** resolved by a later unit, with the absorbing design noted · **INFO** an honest boundary note, not a pass/fail (e.g. a by-design non-confinement recorded so the record does not overclaim)."
   echo
   echo "## Summary"
   echo
-  echo "$TOTAL probes: $N_PASS PASS · $N_FAIL FAIL · $N_AUTH AUTH-FAIL · $N_UNAV UNAVAILABLE · $N_SKIP SKIPPED · $N_PEND PENDING"
+  echo "$TOTAL probes: $N_PASS PASS · $N_FAIL FAIL · $N_AUTH AUTH-FAIL · $N_UNAV UNAVAILABLE · $N_SKIP SKIPPED · $N_PEND PENDING · $N_INFO INFO"
   if [ "$ESCAPED" = "1" ]; then
     echo
     echo "> **ESCAPE DETECTED** — a permission probe modified state outside its allowed boundary. Do not trust this run; investigate before rerunning."
