@@ -799,16 +799,24 @@ if command -v claude >/dev/null 2>&1; then
 
     O="$WORK/cc-goal.txt"
     rm -f "$FIX/a.txt" "$FIX/b.txt"
-    (cd "$FIX" && _probe_run 420 claude -p --model sonnet --permission-mode acceptEdits "/goal The files a.txt and b.txt must both exist in the current directory, each containing exactly DONE. Create both files." > "$O" 2>&1) || true
+    # Fidelity probe — tests /goal GATING, not task-following. The /goal requires
+    # BOTH files, but the instruction deliberately says to create ONLY a.txt and
+    # stop. A real hard gate forces the un-instructed condition (b.txt) before the
+    # session may end; a merely-advisory /goal lets the model obey the instruction
+    # and stop after a.txt. So PASS = b.txt exists DESPITE being told not to create
+    # it (the gate blocked a premature stop); FAIL = only a.txt (no gating). This
+    # is the distinction the old "create both files" probe could not make — a model
+    # creates both when simply asked, proving nothing about the gate.
+    (cd "$FIX" && _probe_run 420 claude -p --model sonnet --permission-mode acceptEdits "/goal Both files a.txt and b.txt must exist in the current directory, each containing exactly DONE, before this session may end. IMPORTANT: create ONLY a.txt (with contents DONE) now, then STOP — do not create b.txt." > "$O" 2>&1) || true
     if [ -f "$FIX/a.txt" ] && [ -f "$FIX/b.txt" ] && grep -q "DONE" "$FIX/a.txt" && grep -q "DONE" "$FIX/b.txt"; then
-      row "CC-03" "claude" "/goal hard-gates a multi-condition checklist in -p" "PASS" "both goal conditions satisfied before session ended" "live"
+      row "CC-03" "claude" "/goal hard-gates an un-instructed checklist condition (-p)" "PASS" "b.txt was created despite the create-only-a.txt instruction — /goal blocked the premature stop (gating proven, not task-following)" "live"
     else
-      row "CC-03" "claude" "/goal hard-gates a multi-condition checklist in -p" "FAIL" "goal conditions not met (a.txt=$([ -f "$FIX/a.txt" ] && echo yes || echo no) b.txt=$([ -f "$FIX/b.txt" ] && echo yes || echo no)); ship-loop promise gate stays (KTD-7 fallback); $(_evidence "$O")" "live"
+      row "CC-03" "claude" "/goal hard-gates an un-instructed checklist condition (-p)" "FAIL" "a.txt=$([ -f "$FIX/a.txt" ] && echo yes || echo no) b.txt=$([ -f "$FIX/b.txt" ] && echo yes || echo no); /goal did not force the un-instructed condition -> ship-loop promise gate stays (KTD-7 fallback); $(_evidence "$O")" "live"
     fi
     rm -f "$FIX/a.txt" "$FIX/b.txt"
   else
     row "CC-02" "claude" "Fable 5 availability (KTD-8 ladder top tier)" "$(_skip_reason)" "live probes disabled" "live"
-    row "CC-03" "claude" "/goal hard-gates a multi-condition checklist in -p" "$(_skip_reason)" "live probes disabled" "live"
+    row "CC-03" "claude" "/goal hard-gates an un-instructed checklist condition (-p)" "$(_skip_reason)" "live probes disabled" "live"
   fi
 
   # Dynamic workflows: capability-grade question is expressibility (external-CLI
@@ -900,6 +908,35 @@ else
   row "SELF-02" "claude" "coordinate.sh --dry-run emits /goal line + lease-resume paragraph" "FAIL" "missing marker (goal_line=${_S2_GOAL} resume_para=${_S2_RESUME})" "static"
 fi
 rm -rf "$_S2_DIR"
+
+# SELF-03 (R35): the env-allowlist isolation IS enforced — _adapter_env scopes
+# env vars per adapter, so a planted cross-adapter credential is stripped.
+# Assert codex never sees opencode's OPENROUTER_API_KEY / kimi's KIMI_* /
+# cursor's CURSOR_API_KEY, and (positive control) opencode DOES see its own.
+# Deterministic, no real CLI: `_adapter_env <cli> env` prints the scoped env.
+# Runs in a subshell that sources the lib so the probe's own env stays clean.
+_S3_FAIL=$( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null; F=""
+  OPENROUTER_API_KEY=planted _adapter_env codex    env 2>/dev/null | grep -q '^OPENROUTER_API_KEY=' && F="${F} codex-saw-OPENROUTER"
+  KIMI_TOKEN=planted         _adapter_env codex    env 2>/dev/null | grep -q '^KIMI_TOKEN='         && F="${F} codex-saw-KIMI"
+  CURSOR_API_KEY=planted     _adapter_env codex    env 2>/dev/null | grep -q '^CURSOR_API_KEY='     && F="${F} codex-saw-CURSOR"
+  OPENROUTER_API_KEY=planted _adapter_env opencode env 2>/dev/null | grep -q '^OPENROUTER_API_KEY=' || F="${F} opencode-missing-OPENROUTER(positive-control)"
+  printf '%s' "$F" )
+if [ -z "$_S3_FAIL" ]; then
+  row "SELF-03" "claude" "_adapter_env strips cross-adapter credentials (R35/KTD-14)" "PASS" "codex env carries no OPENROUTER/KIMI/CURSOR key; opencode carries its own (positive control held)" "static"
+else
+  row "SELF-03" "claude" "_adapter_env strips cross-adapter credentials (R35/KTD-14)" "FAIL" "env-allowlist leak:${_S3_FAIL}" "static"
+fi
+
+# SELF-04 (R35, honest boundary): the OTHER two R35 escape classes are NOT
+# confined by design — do not fake them as passing. HOME is forwarded to every
+# adapter (the core trio authenticate via HOME-based stores), so a builder CAN
+# read credential files under $HOME; and there is no network filter, so egress
+# is not blocked. Recorded as INFO so the record matches the corrected KTD-14/R35
+# claim in .claude/CLAUDE.md instead of overclaiming confinement the code does
+# not provide. The enforced boundary is worktree writes + env-var allowlist +
+# prompt confinement (SELF-03 covers the env-var half).
+_S4_HOME=$( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null; _adapter_env codex env 2>/dev/null | grep -q '^HOME=' && echo yes || echo no )
+row "SELF-04" "claude" "R35 boundary: credential-store read + network egress are NOT confined (HOME forwarded, no net filter)" "INFO" "HOME reaches builder=${_S4_HOME}; enforced boundary is worktree writes + env-var allowlist + prompt, NOT home-credential read-isolation or egress filtering (see .claude/CLAUDE.md KTD-14)" "static"
 
 # --------------------------------------------------------------------------
 # Escape check
