@@ -23,7 +23,7 @@
 #   --convergence    Convergence mode: fast|standard|deep (default: standard)
 #   --team           Use agent team mode for Phase 2
 #   --dry-run        Print the composed session prompt and exit without
-#                    invoking claude (verification hook)
+#                    invoking claude (asserted by probe SELF-02)
 
 set -euo pipefail
 
@@ -71,7 +71,8 @@ SENTINEL="ops/.sprint-complete"
 # Lease-ledger resume (KTD-4/U9): when ops/leases.toml still holds
 # non-terminal leases, the fresh session must reconstruct the wave from the
 # ledger instead of restarting it. Prints the extra prompt paragraph, or
-# nothing. (String presence in --dry-run output is the verification hook.)
+# nothing. (probe-capabilities.sh SELF-02 asserts the /goal line + this resume
+# paragraph appear in --dry-run output — that probe is the verification hook.)
 lease_resume_paragraph() {
   [ -f "ops/leases.toml" ] || return 0
   local COUNTS ACTIVE ATTENTION

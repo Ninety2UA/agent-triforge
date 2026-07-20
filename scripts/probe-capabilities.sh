@@ -862,6 +862,45 @@ fi
 # decision is blocked on this value.
 row "RTN-01" "claude" "Scheduled Routine env: checkout, push/PR, binaries, non-interactive auth, research tools" "PENDING-U15" "resolved by the diagnostic first run in U15; delivery mode self-selects at runtime via KTD-11 preflight (commit+PR, else draft-PR-with-pending-probes, else output artifact)" "deferred"
 
+# --------------------------------------------------------- Self-verification
+# Framework SCRIPT invariants — static self-tests (no external CLI, no network),
+# so they always run. They exercise the lease/roster machinery directly, so a
+# regression is caught by the probe record rather than only in a live wave.
+_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
+# SELF-01 (R21): resolve_role REJECTS a fallback chain that resolves entirely to
+# optional members (no core-trio terminus) — the guard between a misconfigured
+# roster and a confusing runtime failure. Expect exit 5 + the terminus message.
+_S1_DIR="${WORK}/self-r21"
+mkdir -p "${_S1_DIR}/ops"
+printf '[roles.tester]\ncli = "opencode"\nfallbacks = ["kimi"]\n' > "${_S1_DIR}/ops/roster.toml"
+_S1_RC=0
+_S1_ERR=$( ( cd "$_S1_DIR" && source "${_SELF_DIR}/invoke-external.sh" && resolve_role tester ) 2>&1 >/dev/null ) || _S1_RC=$?
+if [ "$_S1_RC" -eq 5 ] && printf '%s' "$_S1_ERR" | grep -q "does not terminate at a core-trio member"; then
+  row "SELF-01" "claude" "resolve_role rejects an all-optional fallback chain (R21)" "PASS" "exit 5 + terminus message: $(printf '%s' "$_S1_ERR" | _scrub | cut -c1-100)" "static"
+else
+  row "SELF-01" "claude" "resolve_role rejects an all-optional fallback chain (R21)" "FAIL" "expected exit 5 + terminus message; got rc=${_S1_RC} err=$(printf '%s' "$_S1_ERR" | _scrub | cut -c1-100)" "static"
+fi
+rm -rf "$_S1_DIR"
+
+# SELF-02: coordinate.sh --dry-run is the composition "verification hook" — it
+# must emit the leading /goal line AND, when a live lease ledger exists, the
+# lease-resume paragraph. Asserting on it here makes that claim true (previously
+# no consumer checked --dry-run output).
+_S2_DIR="${WORK}/self-dryrun"
+mkdir -p "${_S2_DIR}/ops"
+( cd "$_S2_DIR" && git init -q 2>/dev/null ) || true
+printf '[lease.probe1]\nstate = "leased"\n' > "${_S2_DIR}/ops/leases.toml"
+_S2_OUT=$( ( cd "$_S2_DIR" && bash "${_SELF_DIR}/coordinate.sh" "probe goal" --dry-run ) 2>/dev/null || true )
+_S2_GOAL=no;   printf '%s' "$_S2_OUT" | grep -q "^/goal "            && _S2_GOAL=yes
+_S2_RESUME=no; printf '%s' "$_S2_OUT" | grep -q "A lease ledger exists" && _S2_RESUME=yes
+if [ "$_S2_GOAL" = yes ] && [ "$_S2_RESUME" = yes ]; then
+  row "SELF-02" "claude" "coordinate.sh --dry-run emits /goal line + lease-resume paragraph" "PASS" "both markers present in the composed prompt" "static"
+else
+  row "SELF-02" "claude" "coordinate.sh --dry-run emits /goal line + lease-resume paragraph" "FAIL" "missing marker (goal_line=${_S2_GOAL} resume_para=${_S2_RESUME})" "static"
+fi
+rm -rf "$_S2_DIR"
+
 # --------------------------------------------------------------------------
 # Escape check
 # --------------------------------------------------------------------------
