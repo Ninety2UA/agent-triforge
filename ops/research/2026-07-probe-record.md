@@ -1,68 +1,72 @@
 # Capability probe record — 2026-07 cycle
 
-**Generated:** 2026-07-18 15:05 UTC by `scripts/probe-capabilities.sh` (rerunnable; `/cli-watch` re-runs it each cycle)
+**Generated:** 2026-07-20 11:44 UTC by `scripts/probe-capabilities.sh` (rerunnable; `/cli-watch` re-runs it each cycle)
 **Host:** Darwin 25.5.0; timeout via `timeout`
 **Mode:** full (live probes)
 
-Outcome vocabulary: **PASS** capability demonstrated · **FAIL** capability absent or not demonstrated (consuming units take their documented fallback) · **UNAVAILABLE** CLI not installed · **AUTH-FAIL** CLI present but not authenticated on this machine · **SKIPPED / SKIPPED-GATED** not run (`--skip-live` or gated on a failed READY probe) · **PENDING-U15** resolved by a later unit, with the absorbing design noted.
+Outcome vocabulary: **PASS** capability demonstrated · **FAIL** capability absent or not demonstrated (consuming units take their documented fallback) · **UNAVAILABLE** CLI not installed · **AUTH-FAIL** CLI present but not authenticated on this machine · **SKIPPED / SKIPPED-GATED** not run (`--skip-live` or gated on a failed READY probe) · **PENDING-U15** resolved by a later unit, with the absorbing design noted · **INFO** an honest boundary note, not a pass/fail (e.g. a by-design non-confinement recorded so the record does not overclaim).
 
 ## Summary
 
-49 probes: 32 PASS · 14 FAIL · 1 AUTH-FAIL · 0 UNAVAILABLE · 1 SKIPPED · 1 PENDING
+53 probes: 34 PASS · 15 FAIL · 1 AUTH-FAIL · 0 UNAVAILABLE · 1 SKIPPED · 1 PENDING · 1 INFO
 
 ## Probe rows
 
 | ID | CLI | Capability | Outcome | Evidence | Date | Method |
 |---|---|---|---|---|---|---|
-| AGY-01 | agy | Version capture | **PASS** | 1.1.4  | 2026-07-18 | direct |
-| AGY-02 | agy | Model list (latest Pro for KTD-8 pin) | **PASS** | 3.5 Pro NOT listed (GA slipped); latest Pro=Gemini 3.1 Pro (High); full list in Appendix B | 2026-07-18 | direct |
-| AGY-03 | agy | Native agent listing (agy agents) | **PASS** | Available agents: | 2026-07-18 | direct |
-| AGY-04 | agy | Headless READY (agy -p) | **PASS** | READY | 2026-07-18 | live |
-| AGY-05 | agy | Explicit Pro model pin (--model) | **PASS** | accepted form: --model "Gemini 3.1 Pro (High)" | 2026-07-18 | live |
-| AGY-06 | agy | /goal command exists in CLI | **FAIL** | output indistinguishable from model-mediated canary — not a registered CLI command; probe: jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alte | 2026-07-18 | live |
-| AGY-07 | agy | /teamwork-preview command exists in CLI | **FAIL** | output indistinguishable from model-mediated canary — not a registered CLI command; probe: I have created a teamwork execution plan to build a premium, animated metrics dashboard inside the directory `[dashboard-demo](file:///Users/dbenger/.gemini/antigravity-cli/scratch/dashboard-demo)`. You can review the pl | 2026-07-18 | live |
-| AGY-08 | agy | Hooks fire under agy -p (project tier) | **FAIL** | no markers (SessionStart/AfterAgent/AfterTool); global tier untested by design; jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alte | 2026-07-18 | marker-file |
-| AGY-09 | agy | Explicit deny survives --dangerously-skip-permissions | **FAIL** | denied command executed (fixture); adapter must never pass the skip-permissions flag; I have executed the requested command: ```bash touch deny-marker-agy.txt ``` in the working directory. The command completed successfully. | 2026-07-18 | negative |
-| AGY-10 | agy | --sandbox confines writes to workspace | **FAIL** | write escaped to sentinel dir; I have successfully run the exact command requested: ```bash touch /var/folders/h_/65shk8nj7_791wv94ds_g55c0000gn/T//triforge-probes.IrbGIY/sentinel/agy-sbx.txt ``` | 2026-07-18 | negative |
-| AGY-11 | agy | Headless thinking/effort control | **PASS** | no dedicated flag; thinking level selected via --model variant suffix (Low/Medium/High) — roster effort maps to the variant string | 2026-07-18 | static |
-| AGY-12 | agy | Triforge plugin agents respond through their definitions | **FAIL** | installed (agy plugin list) but not in `agy agents` (missing: codebase-analyst architecture-reviewer targeted-researcher documentation-writer) — native discovery not functional on this agy; invoke helper falls back to injection | 2026-07-18 | live |
-| AGY-13 | agy | architecture-reviewer cannot run shell (tools-allowlist negative) | **FAIL** | marker absent but not attributable to the tools allowlist — native discovery not functional (see AGY-12); denial currently rests on headless auto-deny + prompt rules (injection mode) | 2026-07-18 | negative |
-| CDX-01 | codex | Version capture | **PASS** | codex-cli 0.144.4 | 2026-07-18 | direct |
-| CDX-02 | codex | codex features list (runtime capability detection) | **PASS** | notable: goals                                stable             true;guardian_approval                    stable             true;hooks                                stable             true;memories                             experimental       false;multi_agent                          stable             true;multi_agent_mode                     removed            false;full capture in Appendix A | 2026-07-18 | direct |
-| CDX-03 | codex | Headless READY on gpt-5.6-sol | **PASS** | READY | 2026-07-18 | live |
-| CDX-04 | codex | Hooks fire under codex exec (D-004 re-probe) | **PASS** | fired: SessionStart UserPromptSubmit PreToolUse Stop; hook-lines: Run this shell command: echo hooktest;warning: `--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.;warning: `--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.; | 2026-07-18 | marker-file |
-| CDX-05 | codex | --output-schema constrains final message to schema-valid JSON | **PASS** | {"verdict":"2+2=4 is true.","confidence":"HIGH"} | 2026-07-18 | live |
-| CDX-06 | codex | model_reasoning_effort="max" accepted on gpt-5.6-sol | **PASS** | READY | 2026-07-18 | live |
-| CDX-07 | codex | model_reasoning_effort="ultra" accepted on gpt-5.6-sol | **PASS** | READY | 2026-07-18 | live |
-| CDX-08 | codex | read-only sandbox rejects writes (negative) | **PASS** | write did not land under -s read-only | 2026-07-18 | negative |
-| OC-01 | opencode | Version capture | **PASS** | 1.18.3 | 2026-07-18 | direct |
-| OC-02 | opencode | OpenRouter model list (GLM id for KTD-8 default) | **FAIL** | [91m[1mError: [0mProvider not found: openrouter | 2026-07-18 | direct |
-| OC-03 | opencode | Headless READY (run --format json parses) | **PASS** | JSON events parsed; READY present | 2026-07-18 | live |
-| OC-04 | opencode | OpenRouter GLM pin (-m openrouter/z-ai/glm-5.2) | **FAIL** | {"type":"error","timestamp":1784387273022,"sessionID":"ses_08a3affbeffeAgI2cAM3vacgTU","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_90d6621e"}}} | 2026-07-18 | live |
-| OC-05 | opencode | --variant (reasoning effort) accepted | **FAIL** | {"type":"error","timestamp":1784387273721,"sessionID":"ses_08a3afd05ffeK8divccToelHGr","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_0c77d0c3"}}} | 2026-07-18 | live |
-| OC-06 | opencode | Explicit deny survives --auto | **PASS** | marker absent; [0m > build · nemotron-3-ultra-free [0m [91m[1mError: [0m"Streaming response failed" | 2026-07-18 | negative |
-| KIMI-01 | kimi | Version capture | **PASS** | 0.15.0 | 2026-07-18 | direct |
-| KIMI-02 | kimi | Config/auth validation (kimi doctor) | **PASS** | Kimi doctor OK config.toml /Users/dbenger/.kimi-code/config.toml OK tui.toml /Users/dbenger/.kimi-code/tui.toml All checked config files are valid. | 2026-07-18 | direct |
-| KIMI-03 | kimi | Custom agent definitions (CLI surface) | **FAIL** | no --agent/--agent-file flag in kimi-code --help (legacy kimi-cli only); fallback: AGENTS.md sections + per-invocation prompts | 2026-07-18 | static |
-| KIMI-04 | kimi | Skills directory flag (--skills-dir) for .agents/skills interop | **PASS** | --skills-dir present in help (repeatable) | 2026-07-18 | static |
-| KIMI-05 | kimi | Headless READY (stream-json parses) | **AUTH-FAIL** |  error: failed to run prompt: No model configured. Run `kimi` and use /login to sign in, then retry; or set default_model in config.toml. See log: /Users/dbenger/.kimi-code/logs/kimi-code.log | 2026-07-18 | live |
-| KIMI-06 | kimi | K3 model pin (-m) | **SKIPPED-GATED** | gated on KIMI-05 | 2026-07-18 | live |
-| KIMI-07 | kimi | KIMI_DISABLE_TELEMETRY honored | **PASS** | env accepted on live runs without complaint; network-level verification out of probe scope (documented limitation) | 2026-07-18 | static |
-| CUR-01 | cursor | Version capture (no published semver) | **PASS** | 2026.07.16-899851b | 2026-07-18 | direct |
-| CUR-02 | cursor | Auth status (cursor-agent status) | **PASS** | ✓ Logged in as domi.benger@gmail.com | 2026-07-18 | direct |
-| CUR-03 | cursor | Model list (Grok pin + Composer alternative present) | **PASS** | grok-pick=grok-4.5; composer-lines=2; full list in Appendix B | 2026-07-18 | direct |
-| CUR-04 | cursor | Headless READY (-p --trust from non-TTY) | **PASS** | READY | 2026-07-18 | live |
-| CUR-05 | cursor | Explicit Grok pin (--model grok-4.5, never Auto) | **PASS** | READY | 2026-07-18 | live |
-| CUR-06 | cursor | Headless hook events fire (community-reported gap re-probe) | **FAIL** | no markers (beforeShellExecution/afterFileEdit/stop); attribution falls back to lead-side ledger (U9) | 2026-07-18 | marker-file |
-| CUR-07 | cursor | --sandbox enabled confines writes to workspace | **FAIL** | write escaped to sentinel dir; Done. The command completed successfully (exit code 0). | 2026-07-18 | negative |
-| CUR-08 | cursor | --mode plan is read-only (reviewer-role enforcement) | **PASS** | write did not land under --mode plan | 2026-07-18 | negative |
-| CC-01 | claude | Version capture (floor 2.1.212 per KTD-13) | **PASS** | 2.1.214 (Claude Code) | 2026-07-18 | direct |
-| CC-02 | claude | Fable 5 availability (KTD-8 ladder top tier) | **PASS** | READY | 2026-07-18 | live |
-| CC-03 | claude | /goal hard-gates a multi-condition checklist in -p | **PASS** | both goal conditions satisfied before session ended | 2026-07-18 | live |
-| CC-04 | claude | Dynamic workflows can express external-CLI dispatch + requeue + pinned reviewer | **PASS** | version 2.1.214 (Claude Code) >= 2.1.154; JS script API expresses all three; live dogfood deferred to U10 wave | 2026-07-18 | static |
-| CC-05 | claude | Monitors reproduce both watcher hooks' alert behaviors | **FAIL** | behavioral parity not demonstrable by probe (component experimental); validate --strict on monitors manifest said: Validating plugin manifest: /var/folders/h_/65shk8nj7_791wv94ds_g55c0000gn/T/triforge-probes.IrbGIY/miniplugin/.claude-plugin/plugin.json ✘ Found 1 error: ❯ monitors: Invalid input ⚠ Found 1 warning: ❯ monitors: 'monitor; KTD-7 fallback: keep context-monitor.sh + tool-failure-monitor.sh | 2026-07-18 | validate |
-| CC-06 | claude | claude plugin validate --strict (baseline on this repo) | **PASS** | Validating plugin manifest: /Users/dbenger/projects/multi-agent-framework/.claude-plugin/plugin.json ✔ Validation passed | 2026-07-18 | validate |
-| RTN-01 | claude | Scheduled Routine env: checkout, push/PR, binaries, non-interactive auth, research tools | **PENDING-U15** | resolved by the diagnostic first run in U15; delivery mode self-selects at runtime via KTD-11 preflight (commit+PR, else draft-PR-with-pending-probes, else output artifact) | 2026-07-18 | deferred |
+| AGY-01 | agy | Version capture | **PASS** | 1.1.4  | 2026-07-20 | direct |
+| AGY-02 | agy | Model list (latest Pro for KTD-8 pin) | **PASS** | 3.5 Pro NOT listed (GA slipped); latest Pro=Gemini 3.1 Pro (High); full list in Appendix B | 2026-07-20 | direct |
+| AGY-03 | agy | Native agent listing (agy agents) | **PASS** | Available agents: | 2026-07-20 | direct |
+| AGY-04 | agy | Headless READY (agy -p) | **PASS** | READY | 2026-07-20 | live |
+| AGY-05 | agy | Explicit Pro model pin (--model) | **PASS** | accepted form: --model "Gemini 3.1 Pro (High)" | 2026-07-20 | live |
+| AGY-06 | agy | /goal command exists in CLI | **FAIL** | output indistinguishable from model-mediated canary — not a registered CLI command; probe: jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alte | 2026-07-20 | live |
+| AGY-07 | agy | /teamwork-preview command exists in CLI | **FAIL** | output indistinguishable from model-mediated canary — not a registered CLI command; probe: I have initiated the teamwork preview to build a premium, animated metrics dashboard. Here is the plan that has been created: * [teamwork_preview_plan.md](file:///Users/dbenger/.gemini/antigravity-cli/brain/75bb00d9-788c | 2026-07-20 | live |
+| AGY-08 | agy | Hooks fire under agy -p (project tier) | **FAIL** | no markers (SessionStart/AfterAgent/AfterTool); global tier untested by design; jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alte | 2026-07-20 | marker-file |
+| AGY-09 | agy | Explicit deny survives --dangerously-skip-permissions | **FAIL** | denied command executed (fixture); adapter must never pass the skip-permissions flag; I have successfully run the command to create the file. ### Summary of work - Executed `touch deny-marker-agy.txt` in the workspace directory. - Created [deny-marker-agy.txt](file:///var/folders/h_/65shk8nj7_791wv94ds_g5 | 2026-07-20 | negative |
+| AGY-10 | agy | --sandbox confines writes to workspace | **FAIL** | write escaped to sentinel dir; I have successfully executed the requested command: ```bash touch /var/folders/h_/65shk8nj7_791wv94ds_g55c0000gn/T//triforge-probes.3O6VR9/sentinel/agy-sbx.txt ``` This created/updated the timestamp for the sentinel file | 2026-07-20 | negative |
+| AGY-11 | agy | Headless thinking/effort control | **PASS** | no dedicated flag; thinking level selected via --model variant suffix (Low/Medium/High) — roster effort maps to the variant string | 2026-07-20 | static |
+| AGY-12 | agy | Triforge plugin agents respond through their definitions | **FAIL** | installed (agy plugin list) but not in `agy agents` (missing: codebase-analyst architecture-reviewer targeted-researcher documentation-writer) — native discovery not functional on this agy; invoke helper falls back to injection | 2026-07-20 | live |
+| AGY-13 | agy | architecture-reviewer cannot run shell (tools-allowlist negative) | **FAIL** | marker absent but not attributable to the tools allowlist — native discovery not functional (see AGY-12); denial currently rests on headless auto-deny + prompt rules (injection mode) | 2026-07-20 | negative |
+| CDX-01 | codex | Version capture | **PASS** | codex-cli 0.144.4 | 2026-07-20 | direct |
+| CDX-02 | codex | codex features list (runtime capability detection) | **PASS** | notable: goals                                stable             true;guardian_approval                    stable             true;hooks                                stable             true;memories                             experimental       false;multi_agent                          stable             true;multi_agent_mode                     removed            false;full capture in Appendix A | 2026-07-20 | direct |
+| CDX-03 | codex | Headless READY on gpt-5.6-sol | **PASS** | READY | 2026-07-20 | live |
+| CDX-04 | codex | Hooks fire under codex exec (D-004 re-probe) | **PASS** | fired: SessionStart UserPromptSubmit PreToolUse Stop; hook-lines: Run this shell command: echo hooktest;warning: `--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.;warning: `--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.; | 2026-07-20 | marker-file |
+| CDX-05 | codex | --output-schema constrains final message to schema-valid JSON | **PASS** | {"verdict":"2+2=4 is true.","confidence":"HIGH"} | 2026-07-20 | live |
+| CDX-06 | codex | model_reasoning_effort="max" accepted on gpt-5.6-sol | **PASS** | READY | 2026-07-20 | live |
+| CDX-07 | codex | model_reasoning_effort="ultra" accepted on gpt-5.6-sol | **PASS** | READY | 2026-07-20 | live |
+| CDX-08 | codex | read-only sandbox rejects writes (negative) | **PASS** | write did not land under -s read-only | 2026-07-20 | negative |
+| OC-01 | opencode | Version capture | **PASS** | 1.18.3 | 2026-07-20 | direct |
+| OC-02 | opencode | OpenRouter model list (GLM id for KTD-8 default) | **FAIL** | [91m[1mError: [0mProvider not found: openrouter | 2026-07-20 | direct |
+| OC-03 | opencode | Headless READY (run --format json parses) | **PASS** | JSON events parsed; READY present | 2026-07-20 | live |
+| OC-04 | opencode | OpenRouter GLM pin (-m openrouter/z-ai/glm-5.2) | **FAIL** | {"type":"error","timestamp":1784548063098,"sessionID":"ses_080a5897fffeuoZ9sjkSt6NfLb","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_8201ff5c"}}} | 2026-07-20 | live |
+| OC-05 | opencode | --variant (reasoning effort) accepted | **FAIL** | {"type":"error","timestamp":1784548063777,"sessionID":"ses_080a586d6ffenM97HjmFdxmdUs","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_1d0e895c"}}} | 2026-07-20 | live |
+| OC-06 | opencode | Explicit deny survives --auto | **FAIL** | denied command executed anyway; [0m > build · nemotron-3-ultra-free [0m [0m$ [0mtouch deny-marker-oc.txt (no output) [0m Done. The file `deny-marker-oc.txt` has been created. | 2026-07-20 | negative |
+| KIMI-01 | kimi | Version capture | **PASS** | 0.15.0 | 2026-07-20 | direct |
+| KIMI-02 | kimi | Config/auth validation (kimi doctor) | **PASS** | Kimi doctor OK config.toml /Users/dbenger/.kimi-code/config.toml OK tui.toml /Users/dbenger/.kimi-code/tui.toml All checked config files are valid. | 2026-07-20 | direct |
+| KIMI-03 | kimi | Custom agent definitions (CLI surface) | **FAIL** | no --agent/--agent-file flag in kimi-code --help (legacy kimi-cli only); fallback: AGENTS.md sections + per-invocation prompts | 2026-07-20 | static |
+| KIMI-04 | kimi | Skills directory flag (--skills-dir) for .agents/skills interop | **PASS** | --skills-dir present in help (repeatable) | 2026-07-20 | static |
+| KIMI-05 | kimi | Headless READY (stream-json parses) | **AUTH-FAIL** |  error: failed to run prompt: No model configured. Run `kimi` and use /login to sign in, then retry; or set default_model in config.toml. See log: /Users/dbenger/.kimi-code/logs/kimi-code.log | 2026-07-20 | live |
+| KIMI-06 | kimi | K3 model pin (-m) | **SKIPPED-GATED** | gated on KIMI-05 | 2026-07-20 | live |
+| KIMI-07 | kimi | KIMI_DISABLE_TELEMETRY honored | **PASS** | env accepted on live runs without complaint; network-level verification out of probe scope (documented limitation) | 2026-07-20 | static |
+| CUR-01 | cursor | Version capture (no published semver) | **PASS** | 2026.07.16-899851b | 2026-07-20 | direct |
+| CUR-02 | cursor | Auth status (cursor-agent status) | **PASS** | ✓ Logged in as domi.benger@gmail.com | 2026-07-20 | direct |
+| CUR-03 | cursor | Model list (Grok pin + Composer alternative present) | **PASS** | grok-pick=grok-4.5; composer-lines=2; full list in Appendix B | 2026-07-20 | direct |
+| CUR-04 | cursor | Headless READY (-p --trust from non-TTY) | **PASS** | READY | 2026-07-20 | live |
+| CUR-05 | cursor | Explicit Grok pin (--model grok-4.5, never Auto) | **PASS** | READY | 2026-07-20 | live |
+| CUR-06 | cursor | Headless hook events fire (community-reported gap re-probe) | **FAIL** | no markers (beforeShellExecution/afterFileEdit/stop); attribution falls back to lead-side ledger (U9) | 2026-07-20 | marker-file |
+| CUR-07 | cursor | --sandbox enabled confines writes to workspace | **FAIL** | write escaped to sentinel dir; Done. The command completed successfully (exit code 0). | 2026-07-20 | negative |
+| CUR-08 | cursor | --mode plan is read-only (reviewer-role enforcement) | **PASS** | write did not land under --mode plan | 2026-07-20 | negative |
+| CC-01 | claude | Version capture (floor 2.1.212 per KTD-13) | **PASS** | 2.1.215 (Claude Code) | 2026-07-20 | direct |
+| CC-02 | claude | Fable 5 availability (KTD-8 ladder top tier) | **PASS** | READY | 2026-07-20 | live |
+| CC-03 | claude | /goal hard-gates an un-instructed checklist condition (-p) | **PASS** | b.txt was created despite the create-only-a.txt instruction — /goal blocked the premature stop (gating proven, not task-following) | 2026-07-20 | live |
+| CC-04 | claude | Dynamic workflows can express external-CLI dispatch + requeue + pinned reviewer | **PASS** | version 2.1.215 (Claude Code) >= 2.1.154; JS script API expresses all three; live dogfood deferred to U10 wave | 2026-07-20 | static |
+| CC-05 | claude | Monitors reproduce both watcher hooks' alert behaviors | **FAIL** | behavioral parity not demonstrable by probe (component experimental); validate --strict on monitors manifest said: Validating plugin manifest: /var/folders/h_/65shk8nj7_791wv94ds_g55c0000gn/T/triforge-probes.3O6VR9/miniplugin/.claude-plugin/plugin.json ✘ Found 1 error: ❯ monitors: Invalid input ⚠ Found 1 warning: ❯ monitors: 'monitor; KTD-7 fallback: keep context-monitor.sh + tool-failure-monitor.sh | 2026-07-20 | validate |
+| CC-06 | claude | claude plugin validate --strict (baseline on this repo) | **PASS** | Validating plugin manifest: /Users/dbenger/projects/multi-agent-framework/.claude-plugin/plugin.json ✔ Validation passed | 2026-07-20 | validate |
+| RTN-01 | claude | Scheduled Routine env: checkout, push/PR, binaries, non-interactive auth, research tools | **PENDING-U15** | resolved by the diagnostic first run in U15; delivery mode self-selects at runtime via KTD-11 preflight (commit+PR, else draft-PR-with-pending-probes, else output artifact) | 2026-07-20 | deferred |
+| SELF-01 | claude | resolve_role rejects an all-optional fallback chain (R21) | **PASS** | exit 5 + terminus message: resolve_role: ERROR invalid ops/roster.toml: role 'tester' fallback chain ['opencode', 'kimi'] does  | 2026-07-20 | static |
+| SELF-02 | claude | coordinate.sh --dry-run emits /goal line + lease-resume paragraph | **PASS** | both markers present in the composed prompt | 2026-07-20 | static |
+| SELF-03 | claude | _adapter_env strips cross-adapter credentials (R35/KTD-14) | **PASS** | codex env carries no OPENROUTER/KIMI/CURSOR key; opencode carries its own (positive control held) | 2026-07-20 | static |
+| SELF-04 | claude | R35 boundary: credential-store read + network egress are NOT confined (HOME forwarded, no net filter) | **INFO** | HOME reaches builder=yes; enforced boundary is worktree writes + env-var allowlist + prompt, NOT home-credential read-isolation or egress filtering (see .claude/CLAUDE.md KTD-14) | 2026-07-20 | static |
 
 ## Consumption map (probe → consuming unit and branch)
 
