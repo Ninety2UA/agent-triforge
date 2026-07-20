@@ -128,6 +128,19 @@ ${PROMPT}"
 
   # KTD-9: classify before reacting — only retryable failures get the
   # retry-once-with-raw-prompt treatment.
+  #
+  # Per-CLI by design (KTD-1): the classify -> case -> report -> retry tail below
+  # LOOKS duplicated across the six invoke_* helpers, but the only shared part is
+  # the 3-arm control flow — every arm's CONTENT is CLI-specific. The
+  # deterministic messages name each CLI's own login/install fix; the capture
+  # file differs ($OUTPUT_FILE / $RAW / $ERR); and the retryable arm re-runs a
+  # DIFFERENT command per CLI. The one genuinely-shared primitive,
+  # _classify_invoke_failure, is already extracted. Folding the rest into one
+  # helper would need ~6 parameters (label, per-reason messages, retry command
+  # array, capture var), shrink no call site meaningfully, and risk subtle
+  # per-CLI behavior drift — so it stays inline. (Reviewed as an advisory dedup
+  # candidate 2026-07; left inline per KTD-1: per-CLI quirks resist a generic
+  # abstraction.)
   if [ "$EXIT_CODE" -ne 0 ]; then
     _classify_invoke_failure "$EXIT_CODE" "$OUTPUT_FILE"
     case "$INVOKE_FAILURE_CLASS" in
