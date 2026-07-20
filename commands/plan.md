@@ -50,11 +50,12 @@ Follow the `writing-plans` skill:
 
 1. Read: ops/GOALS.md, ops/ARCHITECTURE.md, ops/CONTRACTS.md, ops/MEMORY.md, ops/TASKS.md, learnings-researcher output
 2. Decompose goal into atomic tasks (1-2 hours each)
-3. Assign using the heuristic matrix:
-   - Produces code → Claude
-   - Evaluates code → Antigravity + Codex + Claude agents in parallel
-   - Runs/executes → Codex
-   - Documentation → Antigravity
+3. Assign each task a **role** (`ops/roster.toml` maps role → CLI + model via `resolve_role`; Phase 2 passes the role to `lease_create`):
+   - Produces code → builder (the builder pool; Claude Code leads by default)
+   - Evaluates code → reviewer (Claude specialized review agents run in parallel regardless)
+   - Runs/executes tests → tester
+   - Deep codebase analysis → analyst
+   - Documentation → documenter
 4. Apply `shadow-path-tracing` skill: enumerate failure paths for non-trivial tasks
 5. Build error/rescue maps for external calls and DB operations (any "?" → subtask)
 6. Extract and embed relevant CONTRACTS.md types in each task's Context field

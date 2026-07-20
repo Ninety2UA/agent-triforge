@@ -591,10 +591,10 @@ NOTIFY_WEBHOOK_URL="https://hooks.slack.com/..." ./scripts/coordinate.sh "Build 
 
 ### Key constraints
 
-- `TASKS.md` is never modified directly during review — changes must be proposed in [`MEMORY.md`](ops/MEMORY.md) first
+- `CONTRACTS.md` is never modified directly during review — changes must be proposed in [`MEMORY.md`](ops/MEMORY.md) first
 - Any roster member is an eligible builder — the single-writer rule is retired. Safety is per-task leases + worktree isolation + mandatory cross-review by a pinned non-author reviewer, not write-restriction; no agent self-merges, and the lead promotes to the main branch only after the wave's integration check
 - Parallel reviews are safe because reviewers write to separate `ops/REVIEW_*.md` files
-- Maximum 3 review cycles per sprint before escalating to user
+- Maximum 3 review cycles per task before escalating to user
 - Phase 0 can be skipped for small bug fixes, same-session continuations, or unchanged codebases (use [`/quick`](commands/quick.md))
 - Completion requires creating the `ops/.sprint-complete` runtime marker only after the [verification checklist](skills/verification-before-completion/SKILL.md) passes
 

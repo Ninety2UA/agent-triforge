@@ -23,7 +23,7 @@
 #   --convergence    Convergence mode: fast|standard|deep (default: standard)
 #   --team           Use agent team mode for Phase 2
 #   --dry-run        Print the composed session prompt and exit without
-#                    invoking claude (verification hook)
+#                    invoking claude (asserted by probe SELF-02)
 
 set -euo pipefail
 
@@ -71,11 +71,15 @@ SENTINEL="ops/.sprint-complete"
 # Lease-ledger resume (KTD-4/U9): when ops/leases.toml still holds
 # non-terminal leases, the fresh session must reconstruct the wave from the
 # ledger instead of restarting it. Prints the extra prompt paragraph, or
-# nothing. (String presence in --dry-run output is the verification hook.)
+# nothing. (probe-capabilities.sh SELF-02 asserts the /goal line + this resume
+# paragraph appear in --dry-run output — that probe is the verification hook.)
 lease_resume_paragraph() {
   [ -f "ops/leases.toml" ] || return 0
-  local ACTIVE
-  ACTIVE=$(python3 -c "
+  local COUNTS ACTIVE ATTENTION
+  # Two counts: live (mid-flight work to reconstruct) and attention (terminal
+  # failed/escalated rows a fresh session must still resolve, not silently drop
+  # — they are NOT "live" reclaimable work, so they get their own surface).
+  COUNTS=$(python3 -c "
 import sys
 try:
     import tomllib
@@ -83,20 +87,28 @@ except ImportError:
     try:
         import tomli as tomllib
     except ImportError:
-        print(0)
+        print('0 0')
         sys.exit(0)
 try:
     with open('ops/leases.toml', 'rb') as f:
         data = tomllib.load(f)
     leases = data.get('lease', {})
+    rows = [v for v in (leases.values() if isinstance(leases, dict) else []) if isinstance(v, dict)]
     live = ('leased', 'building', 'review', 'orphaned', 'requeued')
-    print(sum(1 for v in (leases.values() if isinstance(leases, dict) else [])
-              if isinstance(v, dict) and v.get('state') in live))
+    attention = ('failed', 'escalated')
+    print(sum(1 for v in rows if v.get('state') in live),
+          sum(1 for v in rows if v.get('state') in attention))
 except Exception:
-    print(0)
-" 2>/dev/null || echo 0)
+    print('0 0')
+" 2>/dev/null || echo '0 0')
+  ACTIVE=$(printf '%s' "$COUNTS" | awk '{print $1+0}')
+  ATTENTION=$(printf '%s' "$COUNTS" | awk '{print $2+0}')
   if [ "${ACTIVE:-0}" -gt 0 ] 2>/dev/null; then
     printf '%s' "A lease ledger exists (ops/leases.toml). FIRST reconstruct wave state from it — reclaim orphans (lease_heartbeat_check), keep merged work, requeue or finish open leases — instead of restarting the wave from scratch."
+  fi
+  if [ "${ATTENTION:-0}" -gt 0 ] 2>/dev/null; then
+    [ "${ACTIVE:-0}" -gt 0 ] && printf ' '
+    printf '%s' "${ATTENTION} lease(s) are in a failed/escalated state needing a decision — surface them (lease_status) and resolve or abandon them before the sprint is considered done; do NOT silently drop them."
   fi
   return 0
 }
@@ -160,7 +172,7 @@ fi
 notify() {
   local title="$1" body="$2"
   if [ -n "${NOTIFY_WEBHOOK_URL:-}" ]; then
-    curl -s -X POST "$NOTIFY_WEBHOOK_URL" \
+    curl -s --connect-timeout 5 --max-time 10 -X POST "$NOTIFY_WEBHOOK_URL" \
       -H "Content-Type: application/json" \
       -d "{\"text\": \"$title: $body\"}" > /dev/null 2>&1 || true
   fi

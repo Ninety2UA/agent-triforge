@@ -48,6 +48,8 @@ Claude invokes Antigravity and Codex through the unified helper `${CLAUDE_PLUGIN
 | `STATE.md` | Session continuity — current phase, progress, next actions | Claude writes on pause/wrap |
 | `solutions/` | Documented solved problems for institutional knowledge | Claude writes |
 | `decisions/` | Architecture decision records (ADRs) | Claude writes |
+| `research/` | Targeted research / gap analyses (CLI deprecations, library evaluations, etc.) | Claude or Antigravity writes |
+| `roster.toml` | Role→CLI/model/effort assignment with validated fallback chains | User edits; session-start bootstraps; enrollment appends `[members.*]` |
 | `REVIEW_ANTIGRAVITY.md` | Antigravity's review output (temporary) | Antigravity writes, Claude reads |
 | `REVIEW_CODEX.md` | Codex's review output (temporary) | Codex writes, Claude reads |
 | `RESEARCH_ANTIGRAVITY.md` | Antigravity targeted-research output (temporary) | Antigravity writes, Claude reads |
@@ -81,7 +83,7 @@ Assignment comes from `ops/roster.toml` (`resolve_role <role>`); the defaults be
 
 - CONTRACTS.md is never modified directly during review — changes must be proposed in MEMORY.md first
 - Every implementation task — lead-authored included — is built under a per-task lease and merges only after cross-review by a pinned non-author reviewer; no agent self-merges. The single-writer rule is retired — any roster member is an eligible builder; safety is leases + worktree isolation + cross-review, not write-restriction
-- Maximum 3 review cycles per sprint before escalating to user
+- Maximum 3 review cycles per task before escalating to user
 - Risk scoring: halt subagent at risk >20% or file changes >50
 - Completion requires creating the `ops/.sprint-complete` runtime marker, only after the verification checklist passes (never earlier)
 

@@ -71,33 +71,36 @@ if ! command -v timeout >/dev/null 2>&1 && ! command -v gtimeout >/dev/null 2>&1
   TIMEOUT_MISSING_WARNING="WARNING: neither \`timeout\` nor \`gtimeout\` found on PATH — invoke-external.sh is fail-closed and will refuse to run Antigravity/Codex invocations. On macOS, install with: brew install coreutils"
 fi
 
-# Bootstrap Codex agent definitions (.codex/agents/)
-# Only copies if not already present — preserves user customizations
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml" ]; then
-  mkdir -p .codex/agents
-  [ ! -f ".codex/agents/agents.toml" ] && cp "${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml" ".codex/agents/agents.toml"
-fi
+# _bootstrap_copy <src> <dest> — provision a template file into the project,
+# copy-if-absent so user customizations survive. Creates the parent dir. NEVER
+# aborts the hook on a filesystem error (read-only dir, a path component that is
+# a regular file): the step warns and is skipped so session start still
+# completes and every other bootstrap step still runs (this handler is under
+# `set -euo pipefail`, where a bare `mkdir`/`cp` failure would abort everything).
+_bootstrap_copy() {
+  local src="$1" dest="$2"
+  [ -f "$src" ] || return 0
+  [ -e "$dest" ] && return 0        # preserve an existing user file/dir
+  if ! mkdir -p "$(dirname "$dest")" 2>/dev/null; then
+    echo "session-start: WARNING could not create $(dirname "$dest") — skipping bootstrap of ${dest} (session continues)" >&2
+    return 0
+  fi
+  cp "$src" "$dest" 2>/dev/null || echo "session-start: WARNING could not copy ${dest} — skipping (session continues)" >&2
+  return 0
+}
 
-# Copy Codex AGENTS.md for custom instructions
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/codex-agents/AGENTS.md" ]; then
-  mkdir -p .codex
-  [ ! -f ".codex/AGENTS.md" ] && cp "${CLAUDE_PLUGIN_ROOT}/codex-agents/AGENTS.md" ".codex/AGENTS.md"
-fi
-
-# Bootstrap .codex/config.toml (disables Codex's auto-memory pipeline to avoid
-# conflict with Triforge's ops/MEMORY.md — see template for rationale).
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.codex/config.toml" ]; then
-  mkdir -p .codex
-  [ ! -f ".codex/config.toml" ] && cp "${CLAUDE_PLUGIN_ROOT}/templates/.codex/config.toml" ".codex/config.toml"
-fi
-
-# Bootstrap .codex/hooks.json (CHANGELOG attribution enforced under
-# `codex exec` — probe CDX-04 PASS on 0.144.4; invoke-external.sh passes
-# --dangerously-bypass-hook-trust when this file is present. See
-# templates/.codex/README.md and ops/decisions/2026-07-18-codex-hooks-under-exec.md).
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json" ]; then
-  mkdir -p .codex
-  [ ! -f ".codex/hooks.json" ] && cp "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json" ".codex/hooks.json"
+# Bootstrap Codex project files (.codex/*), copy-if-absent so user
+# customizations survive: agents.toml = agent defs; AGENTS.md = custom
+# instructions; config.toml disables Codex's auto-memory pipeline (conflict with
+# ops/MEMORY.md); hooks.json enforces CHANGELOG attribution under `codex exec`
+# (probe CDX-04 PASS on 0.144.4; invoke-external.sh passes
+# --dangerously-bypass-hook-trust when this file is present). See
+# templates/.codex/README.md and ops/decisions/2026-07-18-codex-hooks-under-exec.md.
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml"     ".codex/agents/agents.toml"
+  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/codex-agents/AGENTS.md"       ".codex/AGENTS.md"
+  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.codex/config.toml" ".codex/config.toml"
+  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json"  ".codex/hooks.json"
 fi
 
 # Bootstrap OpenCode agent definitions (.opencode/agents/) + project config
@@ -111,17 +114,12 @@ fi
 # not survive --auto — see templates/.opencode/README.md).
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && command -v opencode >/dev/null 2>&1; then
   if [ -d "${CLAUDE_PLUGIN_ROOT}/opencode-agents" ]; then
-    mkdir -p .opencode/agents
     for f in "${CLAUDE_PLUGIN_ROOT}/opencode-agents"/*.md; do
       [ -f "$f" ] || continue
-      dest=".opencode/agents/$(basename "$f")"
-      [ ! -f "$dest" ] && cp "$f" "$dest"
+      _bootstrap_copy "$f" ".opencode/agents/$(basename "$f")"
     done
   fi
-  if [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.opencode/opencode.json" ]; then
-    mkdir -p .opencode
-    [ ! -f ".opencode/opencode.json" ] && cp "${CLAUDE_PLUGIN_ROOT}/templates/.opencode/opencode.json" ".opencode/opencode.json"
-  fi
+  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.opencode/opencode.json" ".opencode/opencode.json"
 fi
 
 # Bootstrap Kimi Code project files (.kimi-code/), copy-if-absent so user
@@ -133,14 +131,9 @@ fi
 # denylist; the real headless confinement is the lease worktree + _adapter_env
 # KIMI_* allowlist (see templates/.kimi-code/README.md).
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && command -v kimi >/dev/null 2>&1; then
-  if [ -d "${CLAUDE_PLUGIN_ROOT}/templates/.kimi-code" ]; then
-    mkdir -p .kimi-code
-    for f in AGENTS.md config.toml; do
-      src="${CLAUDE_PLUGIN_ROOT}/templates/.kimi-code/${f}"
-      dest=".kimi-code/${f}"
-      [ -f "$src" ] && [ ! -f "$dest" ] && cp "$src" "$dest"
-    done
-  fi
+  for f in AGENTS.md config.toml; do
+    _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.kimi-code/${f}" ".kimi-code/${f}"
+  done
 fi
 
 # Bootstrap Cursor CLI project files, copy-if-absent so user customizations
@@ -156,20 +149,16 @@ fi
 # .claude/roster-detected.local.md), since Cursor has no published semver.
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && command -v cursor-agent >/dev/null 2>&1; then
   if [ -d "${CLAUDE_PLUGIN_ROOT}/cursor-agents" ]; then
-    mkdir -p .cursor/agents
     for f in "${CLAUDE_PLUGIN_ROOT}/cursor-agents"/*.md; do
       [ -f "$f" ] || continue
       case "$(basename "$f")" in README.md) continue ;; esac
-      dest=".cursor/agents/$(basename "$f")"
-      [ ! -f "$dest" ] && cp "$f" "$dest"
+      _bootstrap_copy "$f" ".cursor/agents/$(basename "$f")"
     done
   fi
   if [ -d "${CLAUDE_PLUGIN_ROOT}/templates/.cursor" ]; then
-    mkdir -p .cursor
     for f in "${CLAUDE_PLUGIN_ROOT}/templates/.cursor"/*; do
       [ -f "$f" ] || continue
-      dest=".cursor/$(basename "$f")"
-      [ ! -f "$dest" ] && cp "$f" "$dest"
+      _bootstrap_copy "$f" ".cursor/$(basename "$f")"
     done
   fi
 fi
@@ -180,11 +169,8 @@ fi
 # roster is never overwritten. The watch-registry template lands in a later
 # unit — the loop tolerates its absence today.
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-  mkdir -p ops
   for f in roster.toml watch-registry.toml; do
-    if [ -f "${CLAUDE_PLUGIN_ROOT}/templates/ops/${f}" ] && [ ! -f "ops/${f}" ]; then
-      cp "${CLAUDE_PLUGIN_ROOT}/templates/ops/${f}" "ops/${f}"
-    fi
+    _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/ops/${f}" "ops/${f}"
   done
 fi
 
@@ -301,9 +287,12 @@ if [ -f "ops/TASKS.md" ]; then
   HAS_TASKS="yes"
   # `grep -c` already prints 0 when there are no matches (exiting 1).
   # Use `|| true` to avoid set -e termination without duplicating the 0 via `echo "0"`.
-  BLOCKED_COUNT=$(grep -c '\[B\]' ops/TASKS.md 2>/dev/null || true)
-  PENDING_COUNT=$(grep -c '\[ \]' ops/TASKS.md 2>/dev/null || true)
-  IN_PROGRESS_COUNT=$(grep -c '\[-\]' ops/TASKS.md 2>/dev/null || true)
+  # Anchor to the checkbox-row shape (matches hooks/handlers/pre-compact.sh) so
+  # the two hand-maintained counters agree and bracket tokens inside a task's
+  # prose description are never miscounted as rows.
+  BLOCKED_COUNT=$(grep -c '^[[:space:]]*- \[B\]' ops/TASKS.md 2>/dev/null || true)
+  PENDING_COUNT=$(grep -c '^[[:space:]]*- \[ \]' ops/TASKS.md 2>/dev/null || true)
+  IN_PROGRESS_COUNT=$(grep -c '^[[:space:]]*- \[-\]' ops/TASKS.md 2>/dev/null || true)
 fi
 
 if [ -f "ops/GOALS.md" ]; then
