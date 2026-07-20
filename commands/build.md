@@ -41,7 +41,7 @@ Phase 2 runs the builder pool (see the `wave-orchestration` skill, "Builder-pool
 Per task (with `invoke-external.sh` sourced from the preflight):
 1. `lease_create <task> <role>` → `lease_dispatch <task> <prompt>` — builder resolved via `resolve_role`, context injected, builder runs confined in its worktree (commits nothing).
 2. `lease_heartbeat_check` until it exits → `lease_collect` (state → review, prints the output path).
-3. Pin a reviewer that is a DIFFERENT roster member than the builder (the lead is valid), review the collected output, then `lease_merge <task> <reviewer>` — ONE squash commit per task on the sprint integration branch; `lease_merge` REFUSES self-review (AE3). Findings re-dispatch the same lease/builder with the same pinned reviewer, cycle < 3; cycle 3 escalates.
+3. Pin a reviewer that is a DIFFERENT roster member than the builder (the lead is valid) with `lease_pin_reviewer <task> <reviewer>`, review the collected output, then `lease_merge <task> <reviewer>` — ONE squash commit per task on the sprint integration branch. `lease_merge` REFUSES self-review (AE3), an unknown reviewer identity, or a merge with no pin (the pin is the record that a review happened — pin, review, then merge). Findings re-dispatch the same lease/builder with the same pinned reviewer, cycle < 3; cycle 3 escalates.
 4. At wave end, `integration-verifier` runs against the integration branch, then the lead promotes to the main branch with `lease_promote` — it reads `[promotion] require_user_approval` (default false) and scans the integration diff, BLOCKING (no merge) when approval is required or a protected path is touched. Protected-path diffs (permission configs, deny rules, `ops/roster.toml`, shipped agent configs) force the gate on and require the lead or user as reviewer — never an external-CLI-only review. (`lease_merge` also refuses to run when the main tree is on the default branch — merges land on the sprint integration branch, promotion is `lease_promote`'s job.)
 
 CHANGELOG rows carry builder + reviewer + merge commit from the ledger (`lease_status`).
@@ -61,7 +61,7 @@ Follow the `wave-orchestration` skill (its "Builder-pool wave protocol" governs 
 2. For each wave:
    a. Assign + dispatch each task under a lease (`lease_create` → `lease_dispatch`), builder resolved from the roster, context injected
    b. Apply risk scoring (halt at >20% or 50+ file changes)
-   c. Collect each builder (`lease_collect`), pin a non-author reviewer, and merge approved work as one commit per task on the integration branch (`lease_merge` — refuses self-review, AE3)
+   c. Collect each builder (`lease_collect`), pin a non-author reviewer (`lease_pin_reviewer`), and merge approved work as one commit per task on the integration branch (`lease_merge` — refuses self-review AE3, an unknown reviewer, or a merge with no pin)
    d. Spawn `integration-verifier` agent against the integration branch: tests pass, build clean, lint clean, no conflicts
    e. If verification fails → fix before proceeding
 3. After all waves: run full test suite + build from clean state, then promote the integration branch honoring the `[promotion]` gate
