@@ -1364,6 +1364,22 @@ _scrub() {
     -e 's/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9._-]{20,}/[REDACTED-JWT]/g'
 }
 
+# _kill_tree <pid> [signal] — best-effort recursive process-tree kill, portable
+# across macOS + Linux (both ship `pgrep -P`). Signals descendants leaf-first so
+# a killed parent never re-parents its children to init before they are reached.
+# The heartbeat backstop needs this: a builder is launched as
+# subshell -> env -i -> timeout -> CLI, so killing only the recorded subshell
+# pid would orphan the timeout/CLI grandchildren (the very processes that
+# outlived their own `timeout` enforcement).
+_kill_tree() {
+  local ROOT=$1 SIG=${2:-TERM} KID
+  [ -n "$ROOT" ] && [ "$ROOT" -gt 0 ] 2>/dev/null || return 0
+  for KID in $(pgrep -P "$ROOT" 2>/dev/null || true); do
+    _kill_tree "$KID" "$SIG"
+  done
+  kill -"$SIG" "$ROOT" 2>/dev/null || true
+}
+
 # Classify a failed external-CLI invocation (KTD-9). Shared so future per-CLI
 # helpers reuse one taxonomy instead of reinventing bare retry-once. Sets:
 #   INVOKE_FAILURE_CLASS    deterministic | timeout | retryable
@@ -1918,7 +1934,7 @@ _lease_valid_task_id() {
 # emitter (values stay flat strings/ints so the round trip is trivial),
 # round-trip-verify the tmp file, then atomic tmp+mv. `updated` is stamped
 # on every call. Int keys: pid, created, updated, heartbeat_deadline,
-# requeue_count.
+# requeue_count, review_cycle.
 _ledger_update() {
   local TASK_ID=$1
   shift
@@ -1935,13 +1951,28 @@ _ledger_update() {
   while ! mkdir "$LOCK" 2>/dev/null; do
     TRIES=$((TRIES + 1))
     if [ "$TRIES" -gt 200 ]; then
-      rmdir "$LOCK" 2>/dev/null || true       # ~10s: assume holder died, reclaim once
-      mkdir "$LOCK" 2>/dev/null && break
-      echo "_ledger_update: WARNING could not acquire ledger lock after ~10s — proceeding unlocked" >&2
-      break
+      # ~10s of contention. Reclaim ONLY if the recorded holder is provably dead
+      # (kill -0 fails). Never steal a LIVE holder's lock — that silently loses a
+      # concurrent writer's lease transition. If the holder is alive, or reclaim
+      # still cannot acquire, FAIL CLOSED (never write unlocked): surface the
+      # wedged ledger instead of racing it. (PID reuse could in theory mark a
+      # dead holder as live and block once more — accepted: the lock is normally
+      # held <1s and fail-closed-then-retry is safe; a truly wedged lock is
+      # removed manually per the message.)
+      local HOLDER=""
+      [ -f "${LOCK}/pid" ] && HOLDER=$(cat "${LOCK}/pid" 2>/dev/null || true)
+      if [ -n "$HOLDER" ] && kill -0 "$HOLDER" 2>/dev/null; then
+        echo "_ledger_update: ERROR ledger lock held by LIVE pid ${HOLDER} after ~10s (${LOCK}) — refusing to write unlocked. Another writer is active; retry, or if it is wedged remove ${LOCK} and retry." >&2
+        return 1
+      fi
+      rm -rf "$LOCK" 2>/dev/null || true        # holder absent/dead — reclaim once
+      if mkdir "$LOCK" 2>/dev/null; then break; fi
+      echo "_ledger_update: ERROR could not acquire ledger lock after ~10s (${LOCK}) — refusing to write unlocked (fail-closed)." >&2
+      return 1
     fi
     sleep 0.05
   done
+  printf '%s\n' "$$" > "${LOCK}/pid" 2>/dev/null || true
   LEDGER_FILE="$LEDGER" LEDGER_TASK="$TASK_ID" python3 -c "
 import json, os, sys, time
 try:
@@ -2015,7 +2046,7 @@ except Exception as exc:
 os.replace(tmp, path)
 " "$@"
   RC=$?
-  rmdir "$LOCK" 2>/dev/null || true
+  rm -rf "$LOCK" 2>/dev/null || true   # lock dir now carries a pid file — rm -rf, not rmdir
   return $RC
 }
 
@@ -2161,7 +2192,7 @@ lease_create() {
     builder_cli="$CLI" builder_model="$MODEL" builder_effort="$EFFORT" \
     state=leased worktree="$WT" branch="lease/${TASK_ID}" \
     pid=0 output_file="" created="$NOW" heartbeat_deadline=0 \
-    requeue_count=0 review_cycle=0 previous_builder="" reviewer="" merge_commit="" reason="" \
+    requeue_count=0 review_cycle=0 pinned_reviewer="" previous_builder="" reviewer="" merge_commit="" reason="" \
     || return 1
   echo "lease_create: task=${TASK_ID} role=${ROLE} builder=${CLI} model=${MODEL:-host-default} worktree=${WT}" >&2
   echo "$TASK_ID"
@@ -2436,10 +2467,10 @@ for t, r in sorted(data.get('lease', {}).items()):
       # Hung past its window: still breathing but the lease is expired —
       # kill, then orphan (the launcher's own timeout should have fired;
       # this is the belt to that suspender).
-      echo "lease_heartbeat_check: ${TASK} EXPIRED — pid ${PID} alive past heartbeat_deadline; killing and orphaning" >&2
-      kill "$PID" 2>/dev/null || true
+      echo "lease_heartbeat_check: ${TASK} EXPIRED — pid ${PID} alive past heartbeat_deadline; killing the builder process tree and orphaning" >&2
+      _kill_tree "$PID" TERM
       sleep 1
-      kill -9 "$PID" 2>/dev/null || true
+      _kill_tree "$PID" KILL
     else
       if [ -n "$OUT" ] && [ -f "${OUT}.rc" ]; then
         echo "lease_heartbeat_check: ${TASK} builder exited (rc=$(cat "${OUT}.rc" 2>/dev/null || true)) — run: lease_collect ${TASK}" >&2
@@ -2649,6 +2680,32 @@ lease_collect() {
   esac
 }
 
+# lease_pin_reviewer <task_id> <reviewer> — record the non-author reviewer for a
+# lease (KTD-10). The reviewer pinned here stays this task's reviewer for ALL
+# <=3 fix cycles, and — because it lives in the ledger — that pin survives a
+# session boundary, so a fresh session cannot silently re-pin a different
+# reviewer mid-sprint. Idempotent: re-pinning the SAME reviewer is a no-op;
+# pinning a DIFFERENT one is refused. Refuses reviewer == builder_cli (AE3).
+# Call it after lease_collect (state=review), before reviewing.
+lease_pin_reviewer() {
+  local TASK_ID=${1:?usage: lease_pin_reviewer <task_id> <reviewer>}
+  local REVIEWER=${2:?usage: lease_pin_reviewer <task_id> <reviewer>}
+  local BUILDER PINNED
+  _ledger_get "$TASK_ID" state >/dev/null || { echo "lease_pin_reviewer: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
+  BUILDER=$(_ledger_get "$TASK_ID" builder_cli)
+  if [ "$REVIEWER" = "$BUILDER" ]; then
+    echo "lease_pin_reviewer: REFUSED — reviewer '${REVIEWER}' is the builder of ${TASK_ID}; self-review is never allowed (AE3). Pick a non-author reviewer." >&2
+    return 1
+  fi
+  PINNED=$(_ledger_get "$TASK_ID" pinned_reviewer 2>/dev/null || true)
+  if [ -n "$PINNED" ] && [ "$PINNED" != "$REVIEWER" ]; then
+    echo "lease_pin_reviewer: REFUSED — ${TASK_ID} is already pinned to reviewer '${PINNED}' (KTD-10: the same reviewer stays across all fix cycles). Re-review with '${PINNED}', or escalate to the user if that reviewer is unavailable." >&2
+    return 1
+  fi
+  _ledger_update "$TASK_ID" pinned_reviewer="$REVIEWER" || return 1
+  echo "lease_pin_reviewer: ${TASK_ID} reviewer pinned to '${REVIEWER}' (holds across all <=3 cycles)" >&2
+}
+
 # lease_merge <task_id> <reviewer-identity> — single-commit-per-task merge
 # (KTD-5) with the AE3 mechanical guard: reviewer must be nonempty and must
 # differ from the lease's builder_cli — self-review never merges (U10 layers
@@ -2661,7 +2718,7 @@ lease_collect() {
 lease_merge() {
   local TASK_ID=${1:?usage: lease_merge <task_id> <reviewer-identity>}
   local REVIEWER=${2:-}
-  local STATE BUILDER WT BRANCH REPO SHA
+  local STATE BUILDER WT BRANCH REPO SHA PINNED
   STATE=$(_ledger_get "$TASK_ID" state) || { echo "lease_merge: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
   if [ "$STATE" != "review" ]; then
     echo "lease_merge: ERROR task ${TASK_ID} is in state '${STATE}' (want review — lease_collect sets it)" >&2
@@ -2674,6 +2731,14 @@ lease_merge() {
   BUILDER=$(_ledger_get "$TASK_ID" builder_cli)
   if [ "$REVIEWER" = "$BUILDER" ]; then
     echo "lease_merge: REFUSED — reviewer '${REVIEWER}' is the builder of ${TASK_ID}; self-review never merges (AE3). Pick a non-author reviewer." >&2
+    return 1
+  fi
+  # KTD-10: if a reviewer was pinned for this lease (lease_pin_reviewer, or a
+  # prior merge attempt), the SAME reviewer must approve every cycle — reject a
+  # different reviewer rather than let a session boundary swap the reviewer.
+  PINNED=$(_ledger_get "$TASK_ID" pinned_reviewer 2>/dev/null || true)
+  if [ -n "$PINNED" ] && [ "$PINNED" != "$REVIEWER" ]; then
+    echo "lease_merge: REFUSED — ${TASK_ID} is pinned to reviewer '${PINNED}' (KTD-10) but lease_merge was called with '${REVIEWER}'. The same non-author reviewer must approve across all cycles; re-run with '${PINNED}' (or escalate if that reviewer is unavailable)." >&2
     return 1
   fi
   WT=$(_ledger_get "$TASK_ID" worktree)
@@ -2741,7 +2806,7 @@ lease_merge() {
     return 1
   fi
   SHA=$(git -C "$REPO" rev-parse HEAD)
-  _ledger_update "$TASK_ID" state=merged reviewer="$REVIEWER" merge_commit="$SHA" || return 1
+  _ledger_update "$TASK_ID" state=merged reviewer="$REVIEWER" pinned_reviewer="$REVIEWER" merge_commit="$SHA" || return 1
   echo "lease_merge: ${TASK_ID} merged as ${SHA} (builder ${BUILDER}, reviewer ${REVIEWER}) — reclaiming worktree" >&2
   lease_reclaim "$TASK_ID" || true
   return 0
