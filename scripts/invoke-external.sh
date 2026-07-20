@@ -1380,6 +1380,16 @@ _kill_tree() {
   kill -"$SIG" "$ROOT" 2>/dev/null || true
 }
 
+# The six integrated adapter identities. A valid reviewer/builder identity is
+# exactly one of these — canonicalizing against this set (rather than accepting
+# any free-form label) is what closes fabricated reviewer names like
+# "codex-reviewer", which would otherwise pass lease_merge's plain != builder
+# string compare (AE3) while no real review ran.
+_KNOWN_CLIS="claude antigravity codex opencode kimi cursor"
+_is_known_cli() {
+  case " ${_KNOWN_CLIS} " in *" ${1:-} "*) return 0 ;; *) return 1 ;; esac
+}
+
 # Classify a failed external-CLI invocation (KTD-9). Shared so future per-CLI
 # helpers reuse one taxonomy instead of reinventing bare retry-once. Sets:
 #   INVOKE_FAILURE_CLASS    deterministic | timeout | retryable
@@ -2692,6 +2702,10 @@ lease_pin_reviewer() {
   local REVIEWER=${2:?usage: lease_pin_reviewer <task_id> <reviewer>}
   local BUILDER PINNED
   _ledger_get "$TASK_ID" state >/dev/null || { echo "lease_pin_reviewer: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
+  if ! _is_known_cli "$REVIEWER"; then
+    echo "lease_pin_reviewer: REFUSED — '${REVIEWER}' is not a known reviewer identity (one of: ${_KNOWN_CLIS}). A fabricated label cannot stand in for a real reviewer (AE3)." >&2
+    return 1
+  fi
   BUILDER=$(_ledger_get "$TASK_ID" builder_cli)
   if [ "$REVIEWER" = "$BUILDER" ]; then
     echo "lease_pin_reviewer: REFUSED — reviewer '${REVIEWER}' is the builder of ${TASK_ID}; self-review is never allowed (AE3). Pick a non-author reviewer." >&2
@@ -2707,9 +2721,12 @@ lease_pin_reviewer() {
 }
 
 # lease_merge <task_id> <reviewer-identity> — single-commit-per-task merge
-# (KTD-5) with the AE3 mechanical guard: reviewer must be nonempty and must
-# differ from the lease's builder_cli — self-review never merges (U10 layers
-# the full cross-review protocol on this check). The lead snapshots the
+# (KTD-5) with the AE3 mechanical guard, hardened three ways: the reviewer must
+# be (1) a KNOWN adapter identity (a fabricated label like "codex-reviewer" is
+# rejected), (2) different from builder_cli (self-review never merges), and (3)
+# already PINNED via lease_pin_reviewer — the pin is the "a review happened"
+# receipt, so a merge with no pin is refused (U10 layers the full cross-review
+# protocol on these checks). The lead snapshots the
 # builder's uncommitted worktree changes onto the lease branch ("commit
 # nothing; the lead collects"), squash-merges into the MAIN tree, records
 # reviewer + merge_commit, then reclaims via the safe-prune path. Squash
@@ -2728,16 +2745,26 @@ lease_merge() {
     echo "lease_merge: ERROR reviewer identity is required — no merge without a named reviewer (AE3)" >&2
     return 1
   fi
+  if ! _is_known_cli "$REVIEWER"; then
+    echo "lease_merge: REFUSED — '${REVIEWER}' is not a known reviewer identity (one of: ${_KNOWN_CLIS}). A fabricated label like 'codex-reviewer' cannot pass the non-author gate (AE3)." >&2
+    return 1
+  fi
   BUILDER=$(_ledger_get "$TASK_ID" builder_cli)
   if [ "$REVIEWER" = "$BUILDER" ]; then
     echo "lease_merge: REFUSED — reviewer '${REVIEWER}' is the builder of ${TASK_ID}; self-review never merges (AE3). Pick a non-author reviewer." >&2
     return 1
   fi
-  # KTD-10: if a reviewer was pinned for this lease (lease_pin_reviewer, or a
-  # prior merge attempt), the SAME reviewer must approve every cycle — reject a
-  # different reviewer rather than let a session boundary swap the reviewer.
+  # Pin IS the "a review happened" receipt (KTD-10). A merge with NO pinned
+  # reviewer means the pin/review step (lease_pin_reviewer) never ran — refuse,
+  # rather than trust a bare argument that no review backs. When a pin exists,
+  # the SAME reviewer must approve every cycle: reject a mismatch so a session
+  # boundary cannot swap the reviewer.
   PINNED=$(_ledger_get "$TASK_ID" pinned_reviewer 2>/dev/null || true)
-  if [ -n "$PINNED" ] && [ "$PINNED" != "$REVIEWER" ]; then
+  if [ -z "$PINNED" ]; then
+    echo "lease_merge: REFUSED — no reviewer is pinned for ${TASK_ID}. Pin the reviewer first: 'lease_pin_reviewer ${TASK_ID} <reviewer>' (that step records that a review happened); merging without a pin is not allowed (AE3/KTD-10)." >&2
+    return 1
+  fi
+  if [ "$PINNED" != "$REVIEWER" ]; then
     echo "lease_merge: REFUSED — ${TASK_ID} is pinned to reviewer '${PINNED}' (KTD-10) but lease_merge was called with '${REVIEWER}'. The same non-author reviewer must approve across all cycles; re-run with '${PINNED}' (or escalate if that reviewer is unavailable)." >&2
     return 1
   fi
