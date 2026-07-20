@@ -29,13 +29,13 @@ Key interfaces (from CONTRACTS.md):
 Each task must be:
 - **Atomic:** completable in 1-2 hours of focused work
 - **Testable:** has a clear pass/fail condition
-- **Assigned:** agent specified using the heuristic matrix
+- **Assigned:** role specified from the roster (builder | reviewer | tester | analyst | documenter) — `resolve_role` maps it to a CLI via `ops/roster.toml`
 - **Scoped:** files listed, dependencies explicit
 
 Format:
 ```
 - [ ] T1: [imperative verb] [what] [where]
-      Agent: Claude | Antigravity | Codex
+      Role: builder | reviewer | tester | analyst | documenter
       Files: [specific file paths]
       Depends: T0 | none
       Context: [what the agent needs to know — include relevant types]

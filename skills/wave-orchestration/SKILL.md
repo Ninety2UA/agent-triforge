@@ -75,13 +75,13 @@ Source `${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh`, then for each task:
 
 1. `lease_create <task_id> <role>` — resolves the builder from the roster, carves an isolated worktree + `lease/<task_id>` branch, provisions `.agents/skills/`, writes the `leased` row.
 2. `lease_dispatch <task_id> <prompt> [timeout]` — the lead injects context (the task's TASKS.md rows, the relevant CONTRACTS.md slice, the roster entry) into the prompt; the builder runs in the BACKGROUND in its worktree under a per-adapter env allowlist. The builder commits nothing.
-3. `lease_heartbeat_check [task_id]` — sweep until the builder exits. Orphan / timeout / silent-death handling requeues ONCE to a DIFFERENT builder (KTD-9) or escalates; a deterministic failure (auth, absent CLI) fails fast with guidance and does NOT requeue.
+3. `lease_heartbeat_check [task_id]` — sweep until the builder exits. Orphan / timeout / silent-death handling reclaims the lease and requeues it ONCE to a DIFFERENT builder via `lease_requeue <task_id>` (KTD-9), or escalates; a deterministic failure (auth, absent CLI) fails fast with guidance and does NOT requeue.
 4. `lease_collect <task_id>` — lead-side harvest. A clean exit sets state `review` and prints the output-file path.
 5. **Pin the reviewer.** Choose a reviewer that is a DIFFERENT roster member than the lease's `builder_cli`. The lead (Claude) is a valid reviewer for any task built by a *different* CLI — but a Claude-built task needs a *non-Claude* reviewer (the `reviewer` role default, Codex, provides this), because the AE3 guard correctly refuses `reviewer == builder_cli`. The reviewer pinned here stays this task's reviewer for ALL ≤3 fix cycles (KTD-10): no rubric flip-flop when the roster shifts mid-sprint. Self-review is never allowed; **if no non-author agent is live, the merge blocks and escalates to the user.**
 6. **Review the collected output**, then:
    - **Approved →** `lease_merge <task_id> <reviewer>` — snapshots the builder's worktree changes as ONE squash commit on the sprint integration branch, records reviewer + merge_commit in the ledger, and reclaims the worktree. `lease_merge` REFUSES when the reviewer equals `builder_cli` (AE3) — self-review never merges.
-   - **Findings, cycle < 3 →** re-dispatch the SAME lease's task to the SAME builder with the reviewer's findings appended, keeping the SAME pinned reviewer; the lease returns to `building` (state transition `review → building`).
-   - **Cycle 3 reached →** escalate to the user.
+   - **Findings, cycle < 3 →** `lease_redispatch <task_id> <prompt-with-findings> [timeout]` re-dispatches the SAME lease's task to the SAME builder with the reviewer's findings appended, keeping the SAME pinned reviewer; it increments `review_cycle` and returns the lease to `building` (state transition `review → building`). This is the ONLY path from `review` back to `building` — `lease_dispatch` requires `leased`, `lease_requeue` requires `requeued`.
+   - **Cycle 3 reached →** `lease_redispatch` escalates instead of re-dispatching: it sets state `escalated` and returns a distinct code so the lead pauses for the user (KTD-10 / max 3 review cycles per task).
 
 ### Integration branch and promotion gate
 

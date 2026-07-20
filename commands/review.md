@@ -38,6 +38,18 @@ Read ops/TASKS.md to determine review scope (tasks marked [R]).
 set -euo pipefail
 source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
 
+# Fresh-cycle guard (prevents stale findings surviving a fix cycle). A reviewer
+# that returns findings as stdout (headless permission auto-deny) is promoted
+# into ops/REVIEW_*.md ONLY when that file is ABSENT (the `[ ! -f ... ]` guards
+# below). Without clearing prior-cycle files first, cycle N-1's REVIEW_*.md
+# would survive and findings-synthesizer would read it as cycle N's result —
+# a green-while-red review that hides newly-introduced findings. Archive (not
+# delete) so each prior cycle stays auditable under ops/archive/reviews/.
+if ls ops/REVIEW_*.md >/dev/null 2>&1; then
+  _REV_ARCH="ops/archive/reviews/$(date +%Y%m%d-%H%M%S)-$$"
+  mkdir -p "$_REV_ARCH" && mv ops/REVIEW_*.md "$_REV_ARCH"/ 2>/dev/null || true
+fi
+
 AGY_OUT="${TMPDIR:-/tmp}/antigravity_review_$$_$(date +%s).txt"
 CODEX_OUT="${TMPDIR:-/tmp}/codex_review_$$_$(date +%s).txt"
 
@@ -71,7 +83,7 @@ fi
 if [ ! -f "ops/REVIEW_ANTIGRAVITY.md" ] && [ -s "$AGY_OUT" ]; then
   {
     echo "<!-- captured from invoke_antigravity output; agent could not write ops/ directly (headless permission auto-deny) -->"
-    cat "$AGY_OUT"
+    _scrub < "$AGY_OUT"
   } > ops/REVIEW_ANTIGRAVITY.md
 fi
 ```
@@ -113,7 +125,7 @@ for OCLI in opencode kimi cursor; do
   # Headless resilience: promote captured output into ops/REVIEW_<CLI>.md when the
   # reviewer returned findings instead of writing ops/ directly.
   if [ ! -f "ops/REVIEW_${UP}.md" ] && [ -s "$OOUT" ]; then
-    { echo "<!-- captured from invoke_${OCLI} reviewer output; headless permission auto-deny -->"; cat "$OOUT"; } > "ops/REVIEW_${UP}.md"
+    { echo "<!-- captured from invoke_${OCLI} reviewer output; headless permission auto-deny -->"; _scrub < "$OOUT"; } > "ops/REVIEW_${UP}.md"
   fi
 done
 ```

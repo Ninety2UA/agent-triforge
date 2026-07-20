@@ -235,8 +235,11 @@ invoke_codex() {
   fi
 
   # `codex exec` accepts -m/-s but NOT -a (approval is set via -c override).
-  # Codex v0.128.0 removed --full-auto; supply its prior semantics (workspace-write
-  # sandbox + never approve) explicitly when an agent has no overrides.
+  # Codex has DEPRECATED --full-auto (it still runs but prints a warning; the docs
+  # steer new scripts to explicit --sandbox workspace-write — corrected from the
+  # earlier "removed in v0.128.0" wording per the 2026-07-18 cli-watch primary-source
+  # check). Supply its prior semantics (workspace-write sandbox + never approve)
+  # explicitly when an agent has no overrides.
   local CMD=(codex exec)
   [ -n "$AGENT_MODEL" ]    && CMD+=(-m "$AGENT_MODEL")
   if [ -n "$AGENT_SANDBOX" ]; then
@@ -1337,13 +1340,28 @@ _run_with_timeout() {
   local SECS=$1
   shift
   if command -v timeout >/dev/null 2>&1; then
-    timeout "${SECS}s" "$@"
+    timeout -k 10s "${SECS}s" "$@"
   elif command -v gtimeout >/dev/null 2>&1; then
-    gtimeout "${SECS}s" "$@"
+    gtimeout -k 10s "${SECS}s" "$@"
   else
     echo "invoke-external.sh: ERROR neither \`timeout\` nor \`gtimeout\` is on PATH — refusing to run \`${1:-}\` without timeout enforcement (fail-closed). Fix: on macOS run \`brew install coreutils\`, then retry." >&2
     return "$_RC_NO_TIMEOUT_TOOL"
   fi
+}
+
+# _scrub — redact known key/token shapes from captured external-CLI output
+# before it lands in a committed ops/ file (KTD-14 / R36). Reads stdin, writes
+# scrubbed stdout. Mirrors the standalone copy in probe-capabilities.sh (that
+# script is not sourced into this shell, so the two intentionally each carry
+# their own copy — keep the patterns in sync when either changes).
+_scrub() {
+  sed -E \
+    -e 's/sk-[A-Za-z0-9_-]{8,}/[REDACTED-KEY]/g' \
+    -e 's/AIza[0-9A-Za-z_-]{10,}/[REDACTED-KEY]/g' \
+    -e 's/gh[pousr]_[A-Za-z0-9]{16,}/[REDACTED-KEY]/g' \
+    -e 's/xox[baprs]-[A-Za-z0-9-]{10,}/[REDACTED-KEY]/g' \
+    -e 's/(Bearer|bearer) +[A-Za-z0-9._-]{12,}/Bearer [REDACTED]/g' \
+    -e 's/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9._-]{20,}/[REDACTED-JWT]/g'
 }
 
 # Classify a failed external-CLI invocation (KTD-9). Shared so future per-CLI
@@ -1944,7 +1962,7 @@ if os.path.isfile(path):
 leases = data.get('lease', {})
 leases = leases if isinstance(leases, dict) else {}
 row = dict(leases.get(task, {})) if isinstance(leases.get(task, {}), dict) else {}
-INT_KEYS = ('pid', 'created', 'updated', 'heartbeat_deadline', 'requeue_count')
+INT_KEYS = ('pid', 'created', 'updated', 'heartbeat_deadline', 'requeue_count', 'review_cycle')
 for arg in sys.argv[1:]:
     k, sep, v = arg.partition('=')
     if not sep or not k:
@@ -2143,7 +2161,7 @@ lease_create() {
     builder_cli="$CLI" builder_model="$MODEL" builder_effort="$EFFORT" \
     state=leased worktree="$WT" branch="lease/${TASK_ID}" \
     pid=0 output_file="" created="$NOW" heartbeat_deadline=0 \
-    requeue_count=0 previous_builder="" reviewer="" merge_commit="" reason="" \
+    requeue_count=0 review_cycle=0 previous_builder="" reviewer="" merge_commit="" reason="" \
     || return 1
   echo "lease_create: task=${TASK_ID} role=${ROLE} builder=${CLI} model=${MODEL:-host-default} worktree=${WT}" >&2
   echo "$TASK_ID"
@@ -2316,6 +2334,47 @@ ${PROMPT}"
   DEADLINE=$((NOW + TIMEOUT))
   _ledger_update "$TASK_ID" state=building pid="$PID" output_file="$OUT" heartbeat_deadline="$DEADLINE" || return 1
   echo "lease_dispatch: task=${TASK_ID} builder=${CLI} pid=${PID} timeout=${TIMEOUT}s output=${OUT}" >&2
+}
+
+# lease_redispatch <task_id> <prompt-with-findings> [timeout] — the review ->
+# building fix cycle (KTD-10; wave-orchestration "Findings, cycle < 3 -> re-
+# dispatch the SAME lease to the SAME builder"). This is the ONLY path from
+# state=review back to building: without it a reviewer that requests changes
+# strands the lease, because lease_dispatch requires state=leased and
+# lease_requeue requires state=requeued. Increments review_cycle and, at the
+# 3rd cycle, ESCALATES to the user instead of re-dispatching (state=escalated) —
+# the "Maximum 3 review cycles per task" cap. Builder, worktree, and roster
+# entry are unchanged; the reviewer's findings ride in <prompt-with-findings>.
+lease_redispatch() {
+  local TASK_ID=${1:?usage: lease_redispatch <task_id> <prompt-with-findings> [timeout]}
+  local PROMPT=${2:?usage: lease_redispatch <task_id> <prompt-with-findings> [timeout]}
+  local TIMEOUT=${3:-600}
+  local STATE WT CYCLE NEXT
+  STATE=$(_ledger_get "$TASK_ID" state) || { echo "lease_redispatch: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
+  if [ "$STATE" != "review" ]; then
+    echo "lease_redispatch: ERROR task ${TASK_ID} is in state '${STATE}' (want review — lease_collect sets it; redispatch is the findings path). Approved work goes to lease_merge; orphaned/timed-out work to lease_requeue." >&2
+    return 1
+  fi
+  WT=$(_ledger_get "$TASK_ID" worktree)
+  if [ ! -d "$WT" ]; then
+    echo "lease_redispatch: ERROR worktree missing: ${WT} (already merged/reclaimed?) — cannot re-dispatch" >&2
+    return 1
+  fi
+  CYCLE=$(_ledger_get "$TASK_ID" review_cycle 2>/dev/null || true)
+  case "${CYCLE:-}" in ''|*[!0-9]*) CYCLE=0 ;; esac
+  NEXT=$((CYCLE + 1))
+  # Cap at 3 cycles: the 3rd round of findings escalates to the user instead of a
+  # 4th builder run (KTD-10 / "Maximum 3 review cycles per task").
+  if [ "$NEXT" -ge 3 ]; then
+    _ledger_update "$TASK_ID" state=escalated review_cycle="$NEXT" || return 1
+    echo "lease_redispatch: task ${TASK_ID} reached review cycle ${NEXT} (cap 3) — ESCALATED to the user; no further auto re-dispatch (KTD-10). Resolve manually, then lease_merge or abandon the lease." >&2
+    return "$_RC_LEASE_ESCALATED"
+  fi
+  # review -> leased (transient), then reuse lease_dispatch's launch machinery to
+  # re-run the SAME builder in the SAME worktree; lease_dispatch sets state=building.
+  _ledger_update "$TASK_ID" state=leased review_cycle="$NEXT" || return 1
+  echo "lease_redispatch: task ${TASK_ID} findings re-dispatch — review cycle ${NEXT}/3, same builder, same worktree" >&2
+  lease_dispatch "$TASK_ID" "$PROMPT" "$TIMEOUT"
 }
 
 # lease_heartbeat_check [task_id] — sweep building leases (or just one).
@@ -2640,7 +2699,17 @@ lease_merge() {
     return 1
   fi
   if [ -z "$DEFAULT_BRANCH" ] || [ -z "$CURRENT_BRANCH" ]; then
-    echo "lease_merge: NOTE no default-branch concept (default='${DEFAULT_BRANCH:-<none>}' current='${CURRENT_BRANCH:-<detached>}') — proceeding without the integration-branch guard (single-branch or detached repo)." >&2
+    # No default-branch concept (detached HEAD, or a single-branch repo with no
+    # origin/HEAD and no local main/master). With no default branch there is no
+    # integration/promotion separation to enforce, so landing the squash here
+    # would silently bypass the KTD-5 gate (lease_promote would never run).
+    # Refuse unless the lead explicitly confirms this checkout IS the intended
+    # integration branch via TRIFORGE_INTEGRATION_BRANCH.
+    if [ -z "${TRIFORGE_INTEGRATION_BRANCH:-}" ]; then
+      echo "lease_merge: REFUSED — no default-branch concept (default='${DEFAULT_BRANCH:-<none>}' current='${CURRENT_BRANCH:-<detached>}'), so the integration/promotion separation (KTD-5) cannot be enforced and lease_promote's gate would be bypassed. Set TRIFORGE_INTEGRATION_BRANCH=<name> to confirm this checkout is the integration branch and proceed intentionally." >&2
+      return 1
+    fi
+    echo "lease_merge: NOTE no default-branch concept — proceeding because TRIFORGE_INTEGRATION_BRANCH='${TRIFORGE_INTEGRATION_BRANCH}' explicitly confirms the integration branch (single-branch or detached repo)." >&2
   fi
 
   # Lead-side collect commit: the builder committed nothing (contract), so
@@ -2681,6 +2750,10 @@ lease_merge() {
 # Distinct return code for "promotion is gated — the lead/user must approve"
 # (lease_promote). Outside the invoke_* / timeout / resolve_role code space.
 _RC_PROMOTE_BLOCKED=42
+
+# Distinct return code for "review fix cycle hit the 3-cycle cap — escalated to
+# the user" (lease_redispatch). Same reserved code space as the gates above.
+_RC_LEASE_ESCALATED=43
 
 # lease_promote [<default-branch>] — wave-end promotion of the sprint integration
 # branch to the repo default branch (KTD-5). This is the ONLY path that writes the
@@ -2732,22 +2805,28 @@ lease_promote() {
   if [ -f "ops/roster.toml" ]; then
     REQUIRE_APPROVAL=$(ROSTER_FILE="ops/roster.toml" python3 -c "
 import os, sys
+# Fail CLOSED: an existing roster that cannot be parsed (no TOML library, or a
+# malformed file) must NOT silently disable the approval gate — that would let
+# an unattended promotion land on the default branch despite a maintainer who
+# configured require_user_approval=true. A misconfigured roster requires human
+# approval. Only an ABSENT roster uses the documented false default, and that
+# case never reaches this block (the enclosing -f test guards it).
 try:
     import tomllib
 except ImportError:
     try:
         import tomli as tomllib
     except ImportError:
-        print('false'); sys.exit(0)
+        print('true'); sys.exit(0)
 try:
     with open(os.environ['ROSTER_FILE'], 'rb') as f:
         data = tomllib.load(f)
 except Exception:
-    print('false'); sys.exit(0)
+    print('true'); sys.exit(0)
 p = data.get('promotion', {})
 v = p.get('require_user_approval', False) if isinstance(p, dict) else False
 print('true' if v is True else 'false')
-" 2>/dev/null || echo "false")
+" 2>/dev/null || echo "true")
   fi
 
   # (b) changed paths of the integration branch vs the default branch.
@@ -2773,6 +2852,22 @@ protected_prefixes = (
     'opencode-agents/',
     'kimi-agents/',
     'cursor-agents/',
+    # Orchestration + lifecycle control plane — the framework's own files that
+    # IMPLEMENT the lease/confinement/promotion/review machinery and lifecycle
+    # hooks. Protected by SPECIFIC path (not whole top-level dirs) so a wave in a
+    # USER project whose own app code lives under scripts/ or commands/ is not
+    # force-gated on every touch; these are the plugin's control-plane files
+    # (when dogfooding this repo) plus the permission configs sensitive in ANY
+    # project. A wave must never promote a change to its own enforcement code or
+    # permission config on an external-CLI-only review.
+    'scripts/invoke-external.sh',
+    'scripts/coordinate.sh',
+    'scripts/probe-capabilities.sh',
+    'hooks/hooks.json',
+    'hooks/handlers/',
+    '.claude/settings.json',
+    '.claude/settings.local.json',
+    '.claude-plugin/',
     # Shipped per-CLI templates (member-governing configs, permission/deny
     # rules) — every optional member's dir, symmetric with the core trio's.
     'templates/.antigravity/',

@@ -45,7 +45,7 @@ Write a targeted analysis (not full ARCHITECTURE.md — just this topic) to ops/
 if [ ! -f "ops/RESEARCH_ANTIGRAVITY.md" ] && [ -s "$AGY_OUT" ]; then
   {
     echo "<!-- captured from invoke_antigravity output; agent could not write ops/ directly (headless permission auto-deny) -->"
-    cat "$AGY_OUT"
+    _scrub < "$AGY_OUT"
   } > ops/RESEARCH_ANTIGRAVITY.md
 fi
 ```
