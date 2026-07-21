@@ -61,7 +61,8 @@ probe = true
 # Closed-source distribution (license: null) — GitHub release notes are sparse;
 # cross-check the docs site and the Google developer blog for change detail.
 # agy defaults to a Flash model variant, so every audit note about model
-# selection must reflect Triforge's never-Flash pin (latest Pro explicit).
+# selection must reflect Triforge's shipped pin — the latest Pro model,
+# explicit; Flash runs only when a user sets it in the roster.
 note = "closed-source; sparse release notes — corroborate against docs + dev blog"
 
 [cli.codex]
