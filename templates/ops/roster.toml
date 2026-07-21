@@ -21,13 +21,17 @@
 # each chain must terminate at a core-trio member (claude, antigravity,
 # codex), and the core trio cannot be disabled.
 #
-# Hard rules, never overridden by this file:
-#   - Antigravity (agy) never runs a Flash variant. Model pins are always
-#     "Gemini 3.1 Pro (High)" / "(Low)" — the (High)/(Low) suffix IS agy's
-#     thinking-effort control, so for agy the `effort` field maps into the
-#     model-variant suffix rather than a separate flag.
-#   - Cursor never uses the Auto router — grok-4.5 is pinned explicitly.
-#     Cursor has no effort control, so `effort` is inert for it.
+# Model pins — shipped defaults; a role's `model` entry here overrides them:
+#   - Antigravity (agy) defaults to the latest Gemini Pro model: pins are
+#     "Gemini 3.1 Pro (High)" / "(Low)", and the shipped defaults never pick
+#     a Flash variant on their own. Set `model` on an agy-backed role to run
+#     another variant (Flash included) when you explicitly want it. The
+#     (High)/(Low) suffix IS agy's thinking-effort control, so for agy the
+#     `effort` field maps into the model-variant suffix rather than a
+#     separate flag.
+#   - Cursor pins grok-4.5 explicitly — the shipped defaults never select
+#     the Auto router. Cursor has no effort control, so `effort` is inert
+#     for it.
 
 [roles.builder]
 cli = "claude"
