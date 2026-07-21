@@ -98,7 +98,7 @@ The heart of v3.0.0. A wave reads [`ops/roster.toml`](templates/ops/roster.toml)
   <img src="docs/images/builder-pool.svg" alt="Builder-pool wave — roster resolves each task to a builder CLI in an isolated worktree lease, cross-reviewed by a pinned non-author reviewer, squash-merged onto a sprint integration branch, then promoted to main through a gated check" width="100%">
 </p>
 
-**The roster decides who does what.** Five roles — builder, reviewer, tester, analyst, documenter — each map to a CLI + model + effort with an ordered fallback chain that must terminate at a core-trio member. Optional members carry an `enabled` flag and are absent everywhere when off.
+**The roster decides who does what.** Five roles — builder, reviewer, tester, analyst, documenter — each map to a CLI + model + effort with an ordered fallback chain that must terminate at a core-trio member. Optional members carry an `enabled` flag and are absent everywhere when off. Model choice is yours per role: the shipped defaults pin the latest Gemini Pro for `agy` (never silently Flash) and grok-4.5 for Cursor, and a role's `model` entry selects any other variant — Flash included — when you explicitly want it.
 
 <p align="center">
   <img src="docs/images/roster.svg" alt="Roster and assignment — ops/roster.toml maps each role to a CLI, model, and effort with fallback chains; six CLIs across a required core trio and an optional tier" width="82%">
