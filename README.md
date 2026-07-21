@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="docs/images/hero-banner.svg" alt="Agent Triforge — Three AI models forging production-grade code together" width="100%">
+  <img src="docs/images/hero-banner.svg" alt="Agent Triforge — A core trio of AI coding CLIs forging production-grade code together" width="100%">
 </p>
 
 <p align="center">
-  <strong>Agent Triforge — Three AI models forging production-grade code together. Claude Code orchestrates Antigravity CLI, Codex CLI, and specialized subagents through file-based protocols, portable skills, and parallel review swarms.</strong>
+  <strong>Agent Triforge — A core trio of AI coding CLIs forging production-grade code together. Claude Code orchestrates Antigravity CLI, Codex CLI, and specialized subagents through file-based protocols, portable skills, and parallel review swarms.</strong>
 </p>
 
 <p align="center">
@@ -692,6 +692,14 @@ After solving a non-trivial problem, <a href="commands/compound.md"><code>/compo
 ---
 
 ## Recent changes
+
+### 2026-07-21 — v3.0.1: Landing-page copy + release hygiene
+
+**Messaging fixes.** The "Three AI models" tagline (page title, hero, footer, README, plugin manifest) now reads "a core trio of AI coding CLIs" — the old count clashed with the six-CLI builder pool introduced in v3.0.0. The Antigravity model wording on the landing page softened from "never Flash" to "Gemini 3.1 Pro by default, Flash opt-in": the shipped defaults still pin Pro on every `agy` path, but a `[roles.*] model` entry in `ops/roster.toml` (or `AGY_MODEL`) can select a Flash variant when a user explicitly wants one.
+
+**Rolls up post-v3.0.0 fixes.** v3.0.0 review hardening (#2) and the 2026-07-20 capability-record refresh (#3), which landed after the `v3.0.0` tag.
+
+---
 
 ### 2026-07-18 — v3.0.0: CLI modernization + six-CLI builder pool
 
