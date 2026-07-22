@@ -3304,7 +3304,7 @@ EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
 path = os.environ['ROSTER_FILE']
 role = os.environ['WR_ROLE']
 cli = os.environ['WR_CLI']
-model = os.environ['WR_MODEL']
+model = os.environ['WR_MODEL'].strip()
 effort = os.environ['WR_EFFORT']
 fb_arg = os.environ['WR_FALLBACKS']
 
@@ -3314,19 +3314,6 @@ if cli not in KNOWN:
 if effort not in EFFORTS:
     sys.stderr.write('roster_write_role: ERROR effort must be one of ' + '|'.join(EFFORTS) + ', got ' + repr(effort) + '\n')
     sys.exit(2)
-
-# agy's effort control IS the (High)/(Low) model-variant suffix (see the
-# roster template header): normalize the suffix from the chosen effort so the
-# written pair cannot contradict itself — dispatch passes only the model
-# string, so a mismatched suffix would silently win over effort. Models
-# without a (High)/(Low) suffix (e.g. an explicit Flash pin) are untouched.
-if cli == 'antigravity' and model:
-    m2 = re.match(r'^(.*)\((High|Low)\)\s*$', model)
-    if m2:
-        want = 'Low' if effort in ('low', 'medium') else 'High'
-        if m2.group(2) != want:
-            model = m2.group(1) + '(' + want + ')'
-            sys.stderr.write('roster_write_role: NOTE agy effort maps into the (High)/(Low) model suffix — model normalized to ' + repr(model) + ' to match effort=' + effort + '\n')
 
 raw = ''
 roster = {}
@@ -3357,6 +3344,27 @@ chain = [cli] + fallbacks
 if chain[-1] not in CORE_TRIO:
     sys.stderr.write('roster_write_role: ERROR chain ' + repr(chain) + ' does not terminate at a core-trio member (claude, antigravity, codex) — a chain resolving entirely to optional members cannot ship\n')
     sys.exit(2)
+
+# agy's effort control IS the (High)/(Low) model-variant suffix (see the
+# roster template header): normalize the written pair so it cannot contradict
+# itself — dispatch passes only the model string, so a mismatched suffix would
+# silently win over effort. An EMPTY agy model is auto-filled with the
+# effort-matched Pro pin (KTD-8: never a Flash variant on its own) — otherwise
+# the empty model falls back to the (High) default at dispatch and a low/medium
+# effort is silently lost. Models without a (High)/(Low) suffix (e.g. an
+# explicit Flash pin) are written through untouched, no note. This block runs
+# AFTER every rejecting check above so its stderr NOTE is only ever emitted on
+# a path that reaches the write.
+if cli == 'antigravity':
+    want = 'Low' if effort in ('low', 'medium') else 'High'
+    if not model:
+        model = 'Gemini 3.1 Pro (' + want + ')'
+        sys.stderr.write('roster_write_role: NOTE empty agy model auto-filled with the effort-matched pin ' + repr(model) + ' (agy effort rides in the (High)/(Low) suffix)\n')
+    else:
+        m2 = re.match(r'^(.*)\((High|Low)\)$', model)
+        if m2 and m2.group(2) != want:
+            model = m2.group(1) + '(' + want + ')'
+            sys.stderr.write('roster_write_role: NOTE agy effort maps into the (High)/(Low) model suffix — model normalized to ' + repr(model) + ' to match effort=' + effort + '\n')
 
 block = ('[roles.' + role + ']\n'
          'cli = ' + json.dumps(cli) + '\n'
