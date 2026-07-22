@@ -1453,10 +1453,6 @@ body::after {
             <span class="hero__stat-num" data-target="4">0</span>
             <span class="hero__stat-label">Hooks</span>
           </div>
-          <div class="hero__stat">
-            <span class="hero__stat-num" id="stars-count">--</span>
-            <span class="hero__stat-label">Stars</span>
-          </div>
         </div>
         <div class="hero__ctas">
           <a href="#install" class="btn btn--primary">Get Started</a>
@@ -2499,18 +2495,6 @@ document.querySelectorAll('.code-block__copy').forEach(btn => {
     } catch { btn.textContent = 'Failed'; }
   });
 });
-
-/* ── GitHub stars ── */
-fetch('https://api.github.com/repos/Ninety2UA/agent-triforge')
-  .then(r => r.json())
-  .then(d => {
-    const el = document.getElementById('stars-count');
-    if (d.stargazers_count != null) {
-      el.textContent = d.stargazers_count >= 1000
-        ? (d.stargazers_count / 1000).toFixed(1) + 'k'
-        : d.stargazers_count;
-    }
-  }).catch(() => {});
 
 /* ── Scroll progress bar ── */
 const progressBar = document.getElementById('scroll-progress');
