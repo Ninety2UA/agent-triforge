@@ -59,8 +59,9 @@ ensure_core_trio_live && echo "CORE-TRIO: live" || echo "CORE-TRIO: UNRESOLVED"
 
 ## Step 2 — Optional members (guided ask)
 
-For each optional CLI in order — `opencode`, `kimi`, `cursor` (or just the one in
-`$ARGUMENTS`) — run the preflight, then act on its return code:
+For each optional CLI in order — `opencode`, `kimi`, `cursor` (or just the one
+in `$ARGUMENTS`; `roles` is not a CLI — it routes straight to Step 3 per the
+argument note above) — run the preflight, then act on its return code:
 
 ```bash
 roster_enroll_member <cli> interactive; echo "rc=$?"
@@ -111,12 +112,26 @@ never block enrollment on a missing list.
 
 Roles ARE the task types — builder, reviewer, tester, analyst, documenter —
 and each maps to a CLI · model · effort with a validated fallback chain.
-Show the current assignment surface first:
+
+**Malformed-roster guard first:** if `ops/roster.toml` does not parse,
+`roster_role_entry` fails with rc 4 and the exact parse error on stderr. A
+broken roster must be LOUD, not rendered as empty-looking tables — probe once,
+and on failure treat it like Step 1's UNRESOLVED: relay the parse error, tell
+the user to fix `ops/roster.toml` (or delete it — the shipped defaults then
+apply), skip the role tables in this step AND in Step 4, and do not run any
+`roster_write_role`.
+
+```bash
+roster_role_entry builder >/dev/null || echo "ROSTER-UNREADABLE"
+```
+
+If it printed `ROSTER-UNREADABLE`, stop here as described. Otherwise show the
+current assignment surface:
 
 ```bash
 printf '%-11s  %-12s  %-26s  %-7s  %s\n' ROLE CLI MODEL EFFORT FALLBACKS
 for role in builder reviewer tester analyst documenter; do
-  entry=$(roster_role_entry "$role")
+  entry=$(roster_role_entry "$role") || { echo "roster_role_entry failed for $role — see stderr"; break; }
   printf '%-11s  %-12s  %-26s  %-7s  %s\n' "$role" \
     "$(printf '%s' "$entry" | cut -f1)" \
     "$(printf '%s' "$entry" | cut -f2 | sed 's/^$/<host default>/')" \
@@ -134,8 +149,11 @@ Then run ONE ask — **proceed with these defaults (recommended), or customize?*
 - **Customize** — ask which role(s) to change (any subset). For each chosen
   role, walk three sub-choices, then write:
   1. **CLI** — any core-trio member, or any optional member that enrolled in
-     Step 2 (an unenrolled/declined member would be skipped at dispatch — warn
-     and steer back to Step 2 if the user picks one).
+     Step 2. If the user picks an optional CLI that has NOT enrolled, run its
+     Step 2 enrollment first — dispatch skips a member only when it is
+     declined (`enabled = false`) or its binary is absent; an
+     installed-but-unenrolled member WOULD dispatch, just without the auth
+     check and recorded model Step 2 provides.
   2. **Model** — offer that CLI's shipped default first (recommended:
      `roster_member_default <cli>`), or a custom pin. Notes: agy pins are
      `"Gemini 3.1 Pro (High)"`/`(Low)` — Flash only when the user explicitly
@@ -143,19 +161,28 @@ Then run ONE ask — **proceed with these defaults (recommended), or customize?*
      may stay empty (the shell builder lane runs the host default; the
      Fable/downgrade ladder governs Agent-tool spawns).
   3. **Effort** — one of `low|medium|high|xhigh|max`. Notes: for agy the
-     effort maps into the model-variant `(High)`/`(Low)` suffix; cursor has no
-     effort control (`effort` is inert for it).
+     effort IS the model-variant `(High)`/`(Low)` suffix — the writer
+     normalizes the suffix to match the chosen effort (`low`/`medium` →
+     `(Low)`, `high`/`xhigh`/`max` → `(High)`) and says so on stderr; cursor
+     has no effort control (`effort` is inert for it).
   ```bash
-  roster_write_role <role> <cli> "<model>" <effort>
+  roster_write_role <role> <cli> "<model>" <effort>; echo "rc=$?"
   ```
+  **Check the rc:** nonzero means the write was REJECTED and nothing changed —
+  the stderr line names the violated rule (unknown CLI, bad effort, chain not
+  terminating at a core member, malformed roster). Relay it and re-ask; never
+  silently move on.
+
   Fallback chains keep a validated shape automatically — the displaced primary
   becomes the first fallback and the chain still terminates at a core-trio
   member. Pass an explicit fifth argument (`"cli1,cli2"`) only when the user
   asks for a specific chain.
 
-The writer enforces the same rules `resolve_role` validates at load: unknown
-role/CLI rejected, effort outside the enum rejected, and a chain that does not
-terminate at a core-trio member rejected — a written roster always still loads.
+The writer enforces a strict superset of the rules `resolve_role` validates at
+load: unknown role/CLI and a chain that does not terminate at a core-trio
+member are rejected (mirroring load validation), and the writer additionally
+rejects an effort outside the enum and normalizes the agy effort→suffix pair —
+so a written roster always still loads.
 
 Re-runs are safe (AE6-style): the table above always shows the CURRENT merged
 values, so re-running `/setup` (or `/setup roles`) lets the user revise any
@@ -165,13 +192,16 @@ earlier choice; writing a role is idempotent.
 
 Always end with one row per CLI (core trio first). Build it mechanically so it
 reflects the roster you just wrote — the ROLES column is DERIVED from the live
-roster (Step 3 may have customized it), never hardcoded:
+roster (Step 3 may have customized it), never hardcoded. If the Step 3
+malformed-roster guard fired (or fires now — same one-line probe), print the
+member table WITHOUT the ROLES column, mark the run UNRESOLVED, and relay the
+parse error instead of showing misleading "none" rows:
 
 ```bash
 _roles_for() {  # _roles_for <cli> -> "builder, reviewer(fb)" from the live roster
   local cli=$1 out="" role entry primary fb
   for role in builder reviewer tester analyst documenter; do
-    entry=$(roster_role_entry "$role") || continue
+    entry=$(roster_role_entry "$role") || { printf 'roster-unreadable'; return 1; }
     primary=$(printf '%s' "$entry" | cut -f1)
     fb=$(printf '%s' "$entry" | cut -f4)
     if [ "$primary" = "$cli" ]; then out="${out:+$out, }$role"
