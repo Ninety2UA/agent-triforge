@@ -186,7 +186,7 @@ Commits include structured trailers for decision context:
 
 ## Prerequisites
 
-**Run `/setup`** — the guided path from a fresh install to a working roster (gates the core trio live, then enrolls or declines each optional CLI with a chosen model). Idempotent and re-runnable. The probes below are what it automates.
+**Run `/setup`** — the guided path from a fresh install to a working roster (gates the core trio live, enrolls or declines each optional CLI with a chosen model, then offers role assignment: accept the shipped defaults or customize any role's CLI · model · effort; `/setup roles` jumps straight to that step). Idempotent and re-runnable. The probes below are what it automates.
 
 **Core trio (required)** — installed and answering a headless READY probe:
 ```bash

@@ -242,6 +242,16 @@ invoke_codex() {
     echo "invoke_codex: WARNING agent '${AGENT_NAME}' not found in agents.toml; running with session defaults (no model/sandbox/instructions applied). Available agents: ${AVAILABLE:-<none>}" >&2
   fi
 
+  # Roster model override (mirrors AGY_MODEL / OPENCODE_MODEL / KIMI_MODEL /
+  # CURSOR_MODEL on the sibling lanes): a caller-set CODEX_MODEL wins over the
+  # agents.toml pin so a [roles.*] model customization actually reaches
+  # `codex exec -m`. Unset -> agents.toml (or session default) as before.
+  # Sandbox, approval, and instructions always stay agents.toml-owned. Applied
+  # after the not-found warning so the override never masks a missing agent.
+  if [ -n "${CODEX_MODEL:-}" ]; then
+    AGENT_MODEL="$CODEX_MODEL"
+  fi
+
   local INSTRUCTIONS=""
   if [ -n "$AGENT_INSTR_B64" ]; then
     INSTRUCTIONS=$(printf '%s' "$AGENT_INSTR_B64" | base64 -d 2>/dev/null || echo "")
@@ -1775,10 +1785,12 @@ dispatch_role() {
       AGY_MODEL="$MODEL" invoke_antigravity "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT"
       ;;
     codex)
-      # Codex resolves model/sandbox/approval from its agents.toml entry, so the
-      # roster model is advisory for this lane (no CODEX_MODEL override hook) —
-      # invoke_codex is called as-is, matching the shipped tester/reviewer default.
-      invoke_codex "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT"
+      # Codex resolves sandbox/approval/instructions from its agents.toml entry;
+      # the roster model rides the CODEX_MODEL override (same pattern as the
+      # other lanes) so a [roles.*] model customization reaches `codex exec -m`.
+      # The shipped default (gpt-5.6-sol) matches the agents.toml pins, so this
+      # is a no-op until a user actually customizes the role's model.
+      CODEX_MODEL="$MODEL" invoke_codex "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT"
       ;;
     opencode)
       OPENCODE_MODEL="$MODEL" invoke_opencode "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
@@ -3161,6 +3173,274 @@ roster_member_default() {
     cursor)      echo "grok-4.5" ;;
     *) echo "roster_member_default: ERROR unknown cli '${1}'" >&2; return 2 ;;
   esac
+}
+
+# roster_role_entry <role> — print the role's MERGED configuration:
+#   cli<TAB>model<TAB>effort<TAB>fallbacks-csv
+# Shipped defaults overlaid per-field by any [roles.<role>] entry in
+# ops/roster.toml, WITHOUT the liveness walk: this reports what is configured
+# (for the /setup role table), not which member would answer right now. The
+# model column follows resolve_role's primary-model rule — an explicit role
+# model always wins, and a cli-only override displays that CLI's member/shipped
+# default (what dispatch would actually run), never the role-default model of a
+# different CLI. Nonzero on unknown role (rc 2) or unparseable roster (rc 4).
+roster_role_entry() {
+  local ROLE=${1:?usage: roster_role_entry <role>}
+  RE_ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
+import os, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.stderr.write('roster_role_entry: ERROR no TOML parser available. Fix: use Python 3.11+ (tomllib) or run: pip install tomli\n')
+        sys.exit(3)
+
+# Mirrors DEFAULTS and CLI_DEFAULT_MODEL in resolve_role (keep in sync).
+DEFAULTS = {
+    'builder':    {'cli': 'claude',      'model': '',                      'effort': 'max',   'fallbacks': ['codex', 'antigravity']},
+    'reviewer':   {'cli': 'codex',       'model': 'gpt-5.6-sol',           'effort': 'xhigh', 'fallbacks': ['antigravity', 'claude']},
+    'tester':     {'cli': 'codex',       'model': 'gpt-5.6-sol',           'effort': 'xhigh', 'fallbacks': ['claude']},
+    'analyst':    {'cli': 'antigravity', 'model': 'Gemini 3.1 Pro (High)', 'effort': 'high',  'fallbacks': ['claude']},
+    'documenter': {'cli': 'antigravity', 'model': 'Gemini 3.1 Pro (High)', 'effort': 'high',  'fallbacks': ['claude']},
+}
+CLI_DEFAULT_MODEL = {
+    'claude': '',
+    'antigravity': 'Gemini 3.1 Pro (High)',
+    'codex': 'gpt-5.6-sol',
+    'opencode': 'openrouter/z-ai/glm-5.2',
+    'kimi': 'kimi-k3',
+    'cursor': 'grok-4.5',
+}
+role = os.environ['RE_ROLE']
+if role not in DEFAULTS:
+    sys.stderr.write('roster_role_entry: ERROR unknown role ' + repr(role) + ' (valid: ' + ', '.join(DEFAULTS) + ')\n')
+    sys.exit(2)
+path = os.environ['ROSTER_FILE']
+roster = {}
+user = {}
+if os.path.isfile(path):
+    try:
+        with open(path, 'rb') as f:
+            roster = tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        sys.stderr.write('roster_role_entry: ERROR malformed ' + path + ': ' + str(exc) + '\n')
+        sys.exit(4)
+    # Normalize non-table shapes exactly like resolve_role does — a TOML-valid
+    # scalar roles value must degrade to defaults, not crash the reader.
+    # (NB: this python source lives in a double-quoted bash string; backticks
+    # here would be command-substituted by the shell.)
+    roles = roster.get('roles', {})
+    roles = roles if isinstance(roles, dict) else {}
+    user = roles.get(role, {})
+    user = user if isinstance(user, dict) else {}
+entry = dict(DEFAULTS[role])
+for field in ('cli', 'model', 'effort', 'fallbacks'):
+    if field in user:
+        entry[field] = user[field]
+# Primary-model display rule (mirrors resolve_role's walk): a hand-edited
+# cli-only override must show the model dispatch would use for that CLI —
+# [members.<cli>].model, else the CLI's shipped default — not the role-default
+# model that belongs to a different CLI.
+if 'model' not in user and str(entry['cli']) != DEFAULTS[role]['cli']:
+    m = roster.get('members', {})
+    m = m.get(str(entry['cli']), {}) if isinstance(m, dict) else {}
+    m = m if isinstance(m, dict) else {}
+    entry['model'] = m.get('model', '') or CLI_DEFAULT_MODEL.get(str(entry['cli']), '')
+fb = entry['fallbacks'] if isinstance(entry['fallbacks'], list) else []
+print(str(entry['cli']) + '\t' + str(entry['model']) + '\t' + str(entry['effort']) + '\t' + ','.join(str(x) for x in fb))
+"
+}
+
+# roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]
+# The SINGLE writer of [roles.<role>] in ops/roster.toml (R39 role step —
+# same discipline as roster_write_member for [members.*]). Text-surgical:
+# replaces an existing [roles.<role>] block in place (preserving any trailing
+# standalone comment block, e.g. the optional-members guidance after
+# [roles.documenter]; interior same-line comments on replaced field lines are
+# dropped — replace semantics), or appends a new block, then round-trip-verifies
+# the result parses AND reflects the intended values before an atomic tmp+mv.
+#
+# Validation is a strict SUPERSET of resolve_role's load-time rules, so a
+# written roster always still loads: unknown role/CLI rejected and the chain
+# (cli + fallbacks) must terminate at a core-trio member (both mirrored from
+# resolve_role's load validation), plus writer-only checks resolve_role does
+# not run at load — the effort enum (low|medium|high|xhigh|max) and the agy
+# effort→(High)/(Low) model-suffix normalization below.
+#
+# When fallbacks-csv is omitted, the chain is derived from the role's CURRENT
+# merged chain (read via roster_role_entry — the shared read surface, so this
+# function carries no defaults copy of its own): the new primary is removed
+# (the displaced primary becomes the first fallback) and 'claude' is appended
+# if the result would not terminate at a core member. Model may be empty
+# (builder's shell lane runs the host default Claude model by design).
+roster_write_role() {
+  local ROLE=${1:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
+  local CLI=${2:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
+  local MODEL=${3-}
+  local EFFORT=${4:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
+  local FALLBACKS=${5-__derive__}
+  mkdir -p ops
+  # Current merged chain from the sibling read surface — also surfaces an
+  # unknown role (rc 2) or malformed roster (rc 4) with its precise error
+  # before we touch the file.
+  local CUR CUR_CLI CUR_FB
+  CUR=$(roster_role_entry "$ROLE") || return $?
+  CUR_CLI=$(printf '%s' "$CUR" | cut -f1)
+  CUR_FB=$(printf '%s' "$CUR" | cut -f4)
+  ROSTER_FILE="ops/roster.toml" WR_ROLE="$ROLE" WR_CLI="$CLI" WR_MODEL="$MODEL" WR_EFFORT="$EFFORT" WR_FALLBACKS="$FALLBACKS" WR_CUR_CLI="$CUR_CLI" WR_CUR_FB="$CUR_FB" python3 -c "
+import json, os, re, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.stderr.write('roster_write_role: ERROR no TOML parser available. Fix: use Python 3.11+ (tomllib) or run: pip install tomli\n')
+        sys.exit(3)
+
+# Mirrors CORE_TRIO/KNOWN in resolve_role (keep in sync). Role names are
+# validated by the roster_role_entry call in the shell wrapper; the current
+# merged chain arrives via WR_CUR_* so no role-defaults copy lives here.
+CORE_TRIO = ('claude', 'antigravity', 'codex')
+KNOWN = ('claude', 'antigravity', 'codex', 'opencode', 'kimi', 'cursor')
+EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
+
+path = os.environ['ROSTER_FILE']
+role = os.environ['WR_ROLE']
+cli = os.environ['WR_CLI']
+model = os.environ['WR_MODEL'].strip()
+effort = os.environ['WR_EFFORT']
+fb_arg = os.environ['WR_FALLBACKS']
+
+if cli not in KNOWN:
+    sys.stderr.write('roster_write_role: ERROR unknown CLI ' + repr(cli) + ' (known: ' + ', '.join(KNOWN) + ')\n')
+    sys.exit(2)
+if effort not in EFFORTS:
+    sys.stderr.write('roster_write_role: ERROR effort must be one of ' + '|'.join(EFFORTS) + ', got ' + repr(effort) + '\n')
+    sys.exit(2)
+
+raw = ''
+roster = {}
+if os.path.isfile(path):
+    with open(path, 'r') as f:
+        raw = f.read()
+    try:
+        roster = tomllib.loads(raw)
+    except tomllib.TOMLDecodeError as exc:
+        sys.stderr.write('roster_write_role: ERROR malformed ' + path + ': ' + str(exc) + '\n')
+        sys.exit(4)
+
+# Current merged chain, as resolved by roster_role_entry in the wrapper.
+cur_chain = [os.environ['WR_CUR_CLI']] + [x for x in os.environ['WR_CUR_FB'].split(',') if x]
+
+if fb_arg == '__derive__':
+    fallbacks = [x for x in cur_chain if x != cli]
+    if not fallbacks or fallbacks[-1] not in CORE_TRIO:
+        fallbacks.append('claude')
+else:
+    fallbacks = [x.strip() for x in fb_arg.split(',') if x.strip()]
+
+for x in fallbacks:
+    if x not in KNOWN:
+        sys.stderr.write('roster_write_role: ERROR fallbacks name unknown CLI ' + repr(x) + ' (known: ' + ', '.join(KNOWN) + ')\n')
+        sys.exit(2)
+chain = [cli] + fallbacks
+if chain[-1] not in CORE_TRIO:
+    sys.stderr.write('roster_write_role: ERROR chain ' + repr(chain) + ' does not terminate at a core-trio member (claude, antigravity, codex) — a chain resolving entirely to optional members cannot ship\n')
+    sys.exit(2)
+
+# agy's effort control IS the (High)/(Low) model-variant suffix (see the
+# roster template header): normalize the written pair so it cannot contradict
+# itself — dispatch passes only the model string, so a mismatched suffix would
+# silently win over effort. An EMPTY agy model is auto-filled with the
+# effort-matched Pro pin (KTD-8: never a Flash variant on its own) — otherwise
+# the empty model falls back to the (High) default at dispatch and a low/medium
+# effort is silently lost. Models without a (High)/(Low) suffix (e.g. an
+# explicit Flash pin) are written through untouched, no note. This block runs
+# AFTER every rejecting check above so its stderr NOTE is only ever emitted on
+# a path that reaches the write.
+if cli == 'antigravity':
+    want = 'Low' if effort in ('low', 'medium') else 'High'
+    if not model:
+        model = 'Gemini 3.1 Pro (' + want + ')'
+        sys.stderr.write('roster_write_role: NOTE empty agy model auto-filled with the effort-matched pin ' + repr(model) + ' (agy effort rides in the (High)/(Low) suffix)\n')
+    else:
+        m2 = re.match(r'^(.*)\((High|Low)\)$', model)
+        if m2 and m2.group(2) != want:
+            model = m2.group(1) + '(' + want + ')'
+            sys.stderr.write('roster_write_role: NOTE agy effort maps into the (High)/(Low) model suffix — model normalized to ' + repr(model) + ' to match effort=' + effort + '\n')
+
+block = ('[roles.' + role + ']\n'
+         'cli = ' + json.dumps(cli) + '\n'
+         'model = ' + json.dumps(model) + '\n'
+         'effort = ' + json.dumps(effort) + '\n'
+         'fallbacks = ' + json.dumps(fallbacks) + '\n')
+
+lines = raw.splitlines(keepends=True)
+hdr = re.compile(r'^\[roles\.' + re.escape(role) + r'\][ \t]*$')
+top = re.compile(r'^\[')
+start = None
+for i, ln in enumerate(lines):
+    if hdr.match(ln):
+        start = i
+        break
+
+if start is not None:
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if top.match(lines[j]):
+            end = j
+            break
+    # Trailing standalone comment/blank lines after the table's last key are
+    # documentation for what FOLLOWS (e.g. the optional-members guidance block
+    # after [roles.documenter]) — walk end back so they survive the replace.
+    while end > start + 1 and (lines[end - 1].strip() == '' or lines[end - 1].lstrip().startswith('#')):
+        end -= 1
+    prefix = ''.join(lines[:start])
+    suffix = ''.join(lines[end:])
+    if prefix and not prefix.endswith('\n'):
+        prefix += '\n'
+    new_raw = prefix + block
+    if suffix.strip():
+        if not suffix.startswith('\n'):
+            new_raw += '\n'
+        new_raw += suffix
+    else:
+        new_raw += suffix
+else:
+    new_raw = raw
+    if new_raw and not new_raw.endswith('\n'):
+        new_raw += '\n'
+    if new_raw and not new_raw.endswith('\n\n'):
+        new_raw += '\n'
+    new_raw += block
+
+tmp = path + '.tmp.' + str(os.getpid())
+with open(tmp, 'w') as f:
+    f.write(new_raw)
+# The roster MUST stay tomllib-parseable AND reflect our values after every
+# write — verify the tmp file BEFORE it replaces the live roster.
+try:
+    with open(tmp, 'rb') as f:
+        data = tomllib.load(f)
+    r = data.get('roles', {}).get(role, {})
+    assert isinstance(r, dict), 'roles.' + role + ' is not a table after write'
+    assert r.get('cli') == cli, 'cli mismatch after write'
+    assert str(r.get('model', '')) == model, 'model mismatch after write'
+    assert r.get('effort') == effort, 'effort mismatch after write'
+    assert r.get('fallbacks') == fallbacks, 'fallbacks mismatch after write'
+except Exception as exc:
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    sys.stderr.write('roster_write_role: ERROR serialized roster failed round-trip verify: ' + str(exc) + '\n')
+    sys.exit(4)
+os.replace(tmp, path)
+sys.stderr.write('roster_write_role: [roles.' + role + '] cli=' + cli + ' model=' + (model or '<host default>') + ' effort=' + effort + ' fallbacks=' + ','.join(fallbacks) + '\n')
+"
 }
 
 # roster_has_member <cli> — 0 when ops/roster.toml carries a [members.<cli>]
