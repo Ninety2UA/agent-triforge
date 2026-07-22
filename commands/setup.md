@@ -201,9 +201,11 @@ For **Customize**, ask which role(s) to change (any subset). For each chosen
   2. **Model** — offer that CLI's shipped default first (recommended:
      `roster_member_default <cli>`), or a custom pin. Notes: agy pins are
      `"Gemini 3.1 Pro (High)"`/`(Low)` — Flash only when the user explicitly
-     wants it; cursor pins `grok-4.5` — never the Auto router; claude's model
-     may stay empty (the shell builder lane runs the host default; the
-     Fable/downgrade ladder governs Agent-tool spawns).
+     wants it (current Flash line: `"Gemini 3.6 Flash (High|Medium|Low)"`;
+     `agy models` prints the live catalog); cursor pins `grok-4.5` — never
+     the Auto router; claude's model may stay empty (the shell builder lane
+     runs the host default; the Fable/downgrade ladder governs Agent-tool
+     spawns).
   3. **Effort** — one of `low|medium|high|xhigh|max`. Notes: for agy the
      effort IS the model-variant `(High)`/`(Low)` suffix — when the model
      carries such a suffix the writer normalizes it to match the chosen effort

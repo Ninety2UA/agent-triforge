@@ -31,7 +31,9 @@
 #   - Antigravity (agy) defaults to the latest Gemini Pro model: pins are
 #     "Gemini 3.1 Pro (High)" / "(Low)", and the shipped defaults never pick
 #     a Flash variant on their own. Set `model` on an agy-backed role to run
-#     another variant (Flash included) when you explicitly want it. The
+#     another variant when you explicitly want it — Flash included, e.g.
+#     model = "Gemini 3.6 Flash (High)" (the current Flash line, released
+#     2026-07-21; see ops/research/2026-07-22-gemini-3.6-flash.md). The
 #     (High)/(Low) suffix IS agy's thinking-effort control, so for agy the
 #     `effort` field maps into the model-variant suffix rather than a
 #     separate flag.
