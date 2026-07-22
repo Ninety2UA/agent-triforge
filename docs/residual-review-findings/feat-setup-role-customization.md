@@ -37,9 +37,11 @@ The items below were accepted as known residuals — recorded, not dropped.
 1. **[P2-demoted] Concurrent roster writers are last-writer-wins**
    (`scripts/invoke-external.sh`, `roster_write_role` + `roster_write_member`).
    Both single-writer helpers do read-modify-verify-replace with no
-   cross-process lock; two concurrent sessions in one project dir (e.g.
-   `/setup roles` overlapping a session-start enrollment in another session)
-   can silently drop the earlier write. The pattern is pre-existing in
+   cross-process lock; two concurrent sessions in one project dir can silently
+   drop the earlier write — in any writer pairing: role-vs-member (e.g.
+   `/setup roles` overlapping a session-start enrollment) or role-vs-role
+   (two setup sessions each customizing a different role; the iteration-3
+   cross-model pass re-derived this variant). The pattern is pre-existing in
    `roster_write_member`; this branch extends it to a second table family.
    Fix if it ever bites: a shared lock file or changed-since-read detection
    around the replace. Single-session use (the designed posture — the roster
@@ -64,11 +66,15 @@ The items below were accepted as known residuals — recorded, not dropped.
 
 4. **[P3, anchor-50, narrowed by iteration 2] `roster_write_role` verifies
    only the written role's block** — a pre-existing load-invalid hand edit
-   elsewhere (e.g. a stray `[roles.reviewers]` table) still parses at write
-   time, so a write can succeed while `resolve_role` exits 5. Narrowed:
-   the `/setup` Step 3/4 guard now runs `resolve_role`'s full load validation
-   before any role work, so the guided flow catches this loudly; the residual
-   applies only to direct `roster_write_role` calls outside `/setup`.
+   elsewhere (e.g. a stray `[roles.reviewers]` or `[members.typo]` table —
+   the iteration-3 cross-model pass re-derived the members variant) still
+   parses at write time, so a write can succeed while `resolve_role` exits 5.
+   Narrowed: the `/setup` Step 3/4 guard now runs `resolve_role`'s full load
+   validation before any role work, so the guided flow catches this loudly
+   BEFORE any write; the residual applies only to direct `roster_write_role`
+   calls outside `/setup`. Full-file validation inside the writer would need
+   `resolve_role` to accept an alternate roster path — a control-plane change
+   deliberately deferred.
 
 5. **[P3, anchor-50] Canonical-header requirement for block replace** — a
    TOML-valid header spelled `[roles.builder]  # comment` is not matched by

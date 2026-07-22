@@ -161,7 +161,10 @@ Then check whether the roster already carries role overrides — the ask's
 options must be truthful about what "current" means:
 
 ```bash
-grep -c '^\[roles\.' ops/roster.toml 2>/dev/null || echo 0
+# Hook-safety rule: grep -c already prints 0 on zero matches before exiting 1,
+# so `|| echo 0` would duplicate it into a multiline "0\n0" — use || true and
+# reserve the echo for the file-absent case.
+if [ -f ops/roster.toml ]; then grep -c '^\[roles\.' ops/roster.toml || true; else echo 0; fi
 ```
 
 Run ONE ask, offering (the third option only when the count above is nonzero):
@@ -302,14 +305,17 @@ Present the table(s), then the verdict:
   optional members enrolled (and their model), which were skipped, which are
   not installed — and whether roles run the shipped defaults or were customized
   (name the changed roles).
-  - **Auth warning (required):** if any role's PRIMARY cli (field 1 of its
-    `roster_role_entry` line) is an optional member whose table row shows
+  - **Auth warning (required):** if any role's chain — the PRIMARY (field 1
+    of its `roster_role_entry` line) or any member of its fallbacks list
+    (field 4) — contains an enabled optional member whose table row shows
     `auth=failed`, the verdict must name it: dispatch does NOT skip
-    auth-failed members, so that role's next dispatch will fail at the
-    adapter's auth preflight instead of falling back. State the fix — complete
-    the named login, or `roster_write_member <cli> false ""` to disable the
-    member so the chain falls back — and call the run "resolved, with
-    warnings", never a bare "resolved".
+    auth-failed members, so that member will fail at its adapter's auth
+    preflight instead of the chain walking past it — as the primary that
+    breaks the role's next dispatch outright; as a fallback it lies in wait
+    and blocks recovery exactly when the primary degrades. State the fix —
+    complete the named login, or `roster_write_member <cli> false ""` to
+    disable the member so resolution skips it — and call the run "resolved,
+    with warnings", never a bare "resolved".
 - **Any core-trio row `no`/unresolved** → setup UNRESOLVED. Repeat the exact
   install/login fix for the missing core member(s); tell the user to install and
   re-run `/setup`.

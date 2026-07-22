@@ -3227,7 +3227,13 @@ if os.path.isfile(path):
     except tomllib.TOMLDecodeError as exc:
         sys.stderr.write('roster_role_entry: ERROR malformed ' + path + ': ' + str(exc) + '\n')
         sys.exit(4)
-    user = roster.get('roles', {}).get(role, {})
+    # Normalize non-table shapes exactly like resolve_role does — a TOML-valid
+    # scalar roles value must degrade to defaults, not crash the reader.
+    # (NB: this python source lives in a double-quoted bash string; backticks
+    # here would be command-substituted by the shell.)
+    roles = roster.get('roles', {})
+    roles = roles if isinstance(roles, dict) else {}
+    user = roles.get(role, {})
     user = user if isinstance(user, dict) else {}
 entry = dict(DEFAULTS[role])
 for field in ('cli', 'model', 'effort', 'fallbacks'):
