@@ -1154,7 +1154,7 @@ YOU: Review summary, check CHANGELOG, approve or request changes
 
 ### Prerequisites
 
-**Run `/setup`** — the one guided path from a fresh install to a working roster: it gates the core trio live, then walks each optional CLI (enroll with a chosen model, or decline cleanly). Idempotent and re-runnable. The probes below are exactly what it automates.
+**Run `/setup`** — the one guided path from a fresh install to a working roster: it gates the core trio live, walks each optional CLI (enroll with a chosen model, or decline cleanly), then offers role assignment — accept the shipped defaults (recommended) or customize any role's CLI · model · effort (`/setup roles` jumps straight to that step). Idempotent and re-runnable. The probes below are exactly what it automates.
 
 **Core trio (required)** — installed, authenticated, and answering a headless READY probe (floors per KTD-13):
 ```bash

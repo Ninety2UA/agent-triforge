@@ -1,20 +1,24 @@
 ---
-description: "Guided roster onboarding: verify the core trio is live, then enroll (or decline) each optional CLI with a chosen model. Idempotent — re-run any time."
+description: "Guided roster onboarding: verify the core trio is live, enroll (or decline) each optional CLI with a chosen model, then accept the shipped role defaults or customize who does what (CLI · model · effort per role). Idempotent — re-run any time."
 allowed-tools: Read, Grep, Bash
-argument-hint: "[optional: a single cli to (re)check — opencode|kimi|cursor]"
+argument-hint: "[optional: a single cli to (re)check — opencode|kimi|cursor — or 'roles' to jump to role assignment]"
 ---
 
 You are running the guided roster setup (R39). Walk every roster member — the
-core trio first, then the optional CLIs — and leave the user with a working,
+core trio first, then the optional CLIs — then offer role assignment (accept
+the shipped defaults or customize), and leave the user with a working,
 user-chosen roster in `ops/roster.toml`. This is the one guided path from a
 fresh install to a live roster (AE6/AE8).
 
-All enrollment state lives in `ops/roster.toml` under `[members.<cli>]` tables.
-Every write goes through `roster_write_member` (the single writer). Never edit
-`ops/roster.toml` by hand from this command.
+All enrollment state lives in `ops/roster.toml` under `[members.<cli>]` tables,
+and role assignment under `[roles.<name>]` tables. Every member write goes
+through `roster_write_member` and every role write through `roster_write_role`
+(the single writers). Never edit `ops/roster.toml` by hand from this command.
 
 Optional argument `$ARGUMENTS`: if the user named a single optional CLI, only
-walk that one (still print the closing table for context).
+walk that one (still print the closing table for context). If the user passed
+`roles`, skip straight to Step 3 (role assignment) — core trio and members are
+assumed already set up.
 
 ## Step 0 — Source the helpers
 
@@ -32,8 +36,8 @@ set +e
 
 Everything below calls functions from that file: `ensure_core_trio_live`,
 `roster_enroll_member`, `roster_member_default`, `roster_member_auth`,
-`roster_write_member`, `roster_member_status`, `_roster_binary`,
-`_roster_install_cmd`.
+`roster_write_member`, `roster_member_status`, `roster_role_entry`,
+`roster_write_role`, `_roster_binary`, `_roster_install_cmd`.
 
 ## Step 1 — Core trio (required; loud until live)
 
@@ -103,23 +107,86 @@ opencode models openrouter 2>/dev/null | grep -i glm
 If a list command fails or is unavailable, fall back to the shipped default —
 never block enrollment on a missing list.
 
-## Step 3 — Closing status table (all six rows)
+## Step 3 — Roles: shipped defaults or customize (who does what)
 
-Always end with one row per CLI (core trio first). Build it mechanically so it
-reflects the roster you just wrote:
+Roles ARE the task types — builder, reviewer, tester, analyst, documenter —
+and each maps to a CLI · model · effort with a validated fallback chain.
+Show the current assignment surface first:
 
 ```bash
-printf '%-12s  %-10s  %-8s  %-24s  %s\n' CLI INSTALLED AUTH ENROLLED-MODEL ROLE-ELIGIBILITY
+printf '%-11s  %-12s  %-26s  %-7s  %s\n' ROLE CLI MODEL EFFORT FALLBACKS
+for role in builder reviewer tester analyst documenter; do
+  entry=$(roster_role_entry "$role")
+  printf '%-11s  %-12s  %-26s  %-7s  %s\n' "$role" \
+    "$(printf '%s' "$entry" | cut -f1)" \
+    "$(printf '%s' "$entry" | cut -f2 | sed 's/^$/<host default>/')" \
+    "$(printf '%s' "$entry" | cut -f3)" \
+    "$(printf '%s' "$entry" | cut -f4)"
+done
+```
+
+Then run ONE ask — **proceed with these defaults (recommended), or customize?**
+
+- **Defaults** — record nothing. The shipped posture (Claude leads builds,
+  Codex reviews and tests, Antigravity analyzes and documents) is already live
+  via the per-field overlay; an unwritten role always inherits it. Continue to
+  Step 4.
+- **Customize** — ask which role(s) to change (any subset). For each chosen
+  role, walk three sub-choices, then write:
+  1. **CLI** — any core-trio member, or any optional member that enrolled in
+     Step 2 (an unenrolled/declined member would be skipped at dispatch — warn
+     and steer back to Step 2 if the user picks one).
+  2. **Model** — offer that CLI's shipped default first (recommended:
+     `roster_member_default <cli>`), or a custom pin. Notes: agy pins are
+     `"Gemini 3.1 Pro (High)"`/`(Low)` — Flash only when the user explicitly
+     wants it; cursor pins `grok-4.5` — never the Auto router; claude's model
+     may stay empty (the shell builder lane runs the host default; the
+     Fable/downgrade ladder governs Agent-tool spawns).
+  3. **Effort** — one of `low|medium|high|xhigh|max`. Notes: for agy the
+     effort maps into the model-variant `(High)`/`(Low)` suffix; cursor has no
+     effort control (`effort` is inert for it).
+  ```bash
+  roster_write_role <role> <cli> "<model>" <effort>
+  ```
+  Fallback chains keep a validated shape automatically — the displaced primary
+  becomes the first fallback and the chain still terminates at a core-trio
+  member. Pass an explicit fifth argument (`"cli1,cli2"`) only when the user
+  asks for a specific chain.
+
+The writer enforces the same rules `resolve_role` validates at load: unknown
+role/CLI rejected, effort outside the enum rejected, and a chain that does not
+terminate at a core-trio member rejected — a written roster always still loads.
+
+Re-runs are safe (AE6-style): the table above always shows the CURRENT merged
+values, so re-running `/setup` (or `/setup roles`) lets the user revise any
+earlier choice; writing a role is idempotent.
+
+## Step 4 — Closing status table (all six rows)
+
+Always end with one row per CLI (core trio first). Build it mechanically so it
+reflects the roster you just wrote — the ROLES column is DERIVED from the live
+roster (Step 3 may have customized it), never hardcoded:
+
+```bash
+_roles_for() {  # _roles_for <cli> -> "builder, reviewer(fb)" from the live roster
+  local cli=$1 out="" role entry primary fb
+  for role in builder reviewer tester analyst documenter; do
+    entry=$(roster_role_entry "$role") || continue
+    primary=$(printf '%s' "$entry" | cut -f1)
+    fb=$(printf '%s' "$entry" | cut -f4)
+    if [ "$primary" = "$cli" ]; then out="${out:+$out, }$role"
+    elif printf ',%s,' "$fb" | grep -q ",$cli,"; then out="${out:+$out, }$role(fb)"
+    fi
+  done
+  printf '%s' "${out:-none — enroll and add to a role or its fallbacks to activate}"
+}
+
+printf '%-12s  %-10s  %-8s  %-24s  %s\n' CLI INSTALLED AUTH ENROLLED-MODEL ROLES
 for cli in claude antigravity codex opencode kimi cursor; do
   bin=$(_roster_binary "$cli")
   if command -v "$bin" >/dev/null 2>&1; then inst=yes; else inst=no; fi
   st=$(roster_member_status "$cli")
-  case "$cli" in
-    claude)      role="builder (lead); final fallback for all roles" ;;
-    codex)       role="reviewer + tester; builder fallback" ;;
-    antigravity) role="analyst + documenter; reviewer fallback" ;;
-    *)           role="optional — add to a role's fallbacks in ops/roster.toml to activate" ;;
-  esac
+  role=$(_roles_for "$cli")
   case "$cli" in
     claude|antigravity|codex)
       auth="(core)"; model="(required)" ;;
@@ -137,11 +204,16 @@ for cli in claude antigravity codex opencode kimi cursor; do
 done
 ```
 
-Present the table, then a one-line verdict:
+Follow it with the role-assignment table (the Step 3 print — role → CLI ·
+model · effort · fallbacks) so the run closes on the full picture: who is
+enrolled AND who does what.
+
+Present both tables, then a one-line verdict:
 
 - **All core-trio rows installed and live** → setup resolved. Summarize which
-  optional members enrolled (and their model), which were skipped, which are not
-  installed.
+  optional members enrolled (and their model), which were skipped, which are
+  not installed — and whether roles run the shipped defaults or were customized
+  (name the changed roles).
 - **Any core-trio row `no`/unresolved** → setup UNRESOLVED. Repeat the exact
   install/login fix for the missing core member(s); tell the user to install and
   re-run `/setup`.
@@ -152,4 +224,7 @@ Present the table, then a one-line verdict:
 members show their current state and are not re-asked (AE6). To change a member,
 the user can re-run `roster_write_member <cli> true "<new-model>"` (or set
 `enabled=false` to disable it — disabled = absent everywhere, R38). The core
-trio can never be disabled.
+trio can never be disabled. Role assignment is equally revisable: `/setup roles`
+jumps straight to Step 3, where the current merged values are always shown and
+any role can be rewritten via `roster_write_role` — an unwritten role keeps
+inheriting the shipped default per-field.

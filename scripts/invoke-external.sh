@@ -3163,6 +3163,229 @@ roster_member_default() {
   esac
 }
 
+# roster_role_entry <role> — print the role's MERGED configuration:
+#   cli<TAB>model<TAB>effort<TAB>fallbacks-csv
+# Shipped defaults overlaid per-field by any [roles.<role>] entry in
+# ops/roster.toml — the same overlay resolve_role applies, but WITHOUT the
+# liveness walk: this reports what is configured (for the /setup role table),
+# not which member would answer right now. Nonzero on unknown role (rc 2) or
+# unparseable roster (rc 4).
+roster_role_entry() {
+  local ROLE=${1:?usage: roster_role_entry <role>}
+  RE_ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
+import os, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.stderr.write('roster_role_entry: ERROR no TOML parser available. Fix: use Python 3.11+ (tomllib) or run: pip install tomli\n')
+        sys.exit(3)
+
+# Mirrors DEFAULTS in resolve_role (keep the two in sync).
+DEFAULTS = {
+    'builder':    {'cli': 'claude',      'model': '',                      'effort': 'max',   'fallbacks': ['codex', 'antigravity']},
+    'reviewer':   {'cli': 'codex',       'model': 'gpt-5.6-sol',           'effort': 'xhigh', 'fallbacks': ['antigravity', 'claude']},
+    'tester':     {'cli': 'codex',       'model': 'gpt-5.6-sol',           'effort': 'xhigh', 'fallbacks': ['claude']},
+    'analyst':    {'cli': 'antigravity', 'model': 'Gemini 3.1 Pro (High)', 'effort': 'high',  'fallbacks': ['claude']},
+    'documenter': {'cli': 'antigravity', 'model': 'Gemini 3.1 Pro (High)', 'effort': 'high',  'fallbacks': ['claude']},
+}
+role = os.environ['RE_ROLE']
+if role not in DEFAULTS:
+    sys.stderr.write('roster_role_entry: ERROR unknown role ' + repr(role) + ' (valid: ' + ', '.join(DEFAULTS) + ')\n')
+    sys.exit(2)
+path = os.environ['ROSTER_FILE']
+user = {}
+if os.path.isfile(path):
+    try:
+        with open(path, 'rb') as f:
+            roster = tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        sys.stderr.write('roster_role_entry: ERROR malformed ' + path + ': ' + str(exc) + '\n')
+        sys.exit(4)
+    user = roster.get('roles', {}).get(role, {})
+    user = user if isinstance(user, dict) else {}
+entry = dict(DEFAULTS[role])
+for field in ('cli', 'model', 'effort', 'fallbacks'):
+    if field in user:
+        entry[field] = user[field]
+fb = entry['fallbacks'] if isinstance(entry['fallbacks'], list) else []
+print(str(entry['cli']) + '\t' + str(entry['model']) + '\t' + str(entry['effort']) + '\t' + ','.join(str(x) for x in fb))
+"
+}
+
+# roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]
+# The SINGLE writer of [roles.<role>] in ops/roster.toml (R39 role step —
+# same discipline as roster_write_member for [members.*]). Text-surgical:
+# replaces an existing [roles.<role>] block in place (preserving any trailing
+# standalone comment block, e.g. the optional-members guidance after
+# [roles.documenter]), or appends a new block, then round-trip-verifies the
+# result parses AND reflects the intended values before an atomic tmp+mv.
+#
+# Validation mirrors resolve_role's load-time rules so a written roster always
+# still loads: unknown role/CLI rejected; effort must be one of
+# low|medium|high|xhigh|max; the chain (cli + fallbacks) must terminate at a
+# core-trio member. When fallbacks-csv is omitted, the chain is derived: the
+# role's current merged chain minus the new primary (the displaced primary
+# becomes the first fallback), with 'claude' appended if the result would not
+# terminate at a core member. Model may be empty (builder's shell lane runs
+# the host default Claude model by design).
+roster_write_role() {
+  local ROLE=${1:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
+  local CLI=${2:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
+  local MODEL=${3-}
+  local EFFORT=${4:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
+  local FALLBACKS=${5-__derive__}
+  mkdir -p ops
+  ROSTER_FILE="ops/roster.toml" WR_ROLE="$ROLE" WR_CLI="$CLI" WR_MODEL="$MODEL" WR_EFFORT="$EFFORT" WR_FALLBACKS="$FALLBACKS" python3 -c "
+import json, os, re, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.stderr.write('roster_write_role: ERROR no TOML parser available. Fix: use Python 3.11+ (tomllib) or run: pip install tomli\n')
+        sys.exit(3)
+
+# Mirrors DEFAULTS/CORE_TRIO/BINARY in resolve_role (keep in sync).
+DEFAULTS = {
+    'builder':    {'cli': 'claude',      'model': '',                      'effort': 'max',   'fallbacks': ['codex', 'antigravity']},
+    'reviewer':   {'cli': 'codex',       'model': 'gpt-5.6-sol',           'effort': 'xhigh', 'fallbacks': ['antigravity', 'claude']},
+    'tester':     {'cli': 'codex',       'model': 'gpt-5.6-sol',           'effort': 'xhigh', 'fallbacks': ['claude']},
+    'analyst':    {'cli': 'antigravity', 'model': 'Gemini 3.1 Pro (High)', 'effort': 'high',  'fallbacks': ['claude']},
+    'documenter': {'cli': 'antigravity', 'model': 'Gemini 3.1 Pro (High)', 'effort': 'high',  'fallbacks': ['claude']},
+}
+CORE_TRIO = ('claude', 'antigravity', 'codex')
+KNOWN = ('claude', 'antigravity', 'codex', 'opencode', 'kimi', 'cursor')
+EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
+
+path = os.environ['ROSTER_FILE']
+role = os.environ['WR_ROLE']
+cli = os.environ['WR_CLI']
+model = os.environ['WR_MODEL']
+effort = os.environ['WR_EFFORT']
+fb_arg = os.environ['WR_FALLBACKS']
+
+if role not in DEFAULTS:
+    sys.stderr.write('roster_write_role: ERROR unknown role ' + repr(role) + ' (valid: ' + ', '.join(DEFAULTS) + ')\n')
+    sys.exit(2)
+if cli not in KNOWN:
+    sys.stderr.write('roster_write_role: ERROR unknown CLI ' + repr(cli) + ' (known: ' + ', '.join(KNOWN) + ')\n')
+    sys.exit(2)
+if effort not in EFFORTS:
+    sys.stderr.write('roster_write_role: ERROR effort must be one of ' + '|'.join(EFFORTS) + ', got ' + repr(effort) + '\n')
+    sys.exit(2)
+
+raw = ''
+roster = {}
+if os.path.isfile(path):
+    with open(path, 'r') as f:
+        raw = f.read()
+    try:
+        roster = tomllib.loads(raw)
+    except tomllib.TOMLDecodeError as exc:
+        sys.stderr.write('roster_write_role: ERROR malformed ' + path + ': ' + str(exc) + '\n')
+        sys.exit(4)
+
+# Current merged chain (defaults overlaid by any existing [roles.<role>]).
+cur = dict(DEFAULTS[role])
+user = roster.get('roles', {}).get(role, {})
+user = user if isinstance(user, dict) else {}
+for field in ('cli', 'fallbacks'):
+    if field in user:
+        cur[field] = user[field]
+cur_fb = cur['fallbacks'] if isinstance(cur['fallbacks'], list) else []
+cur_chain = [str(cur['cli'])] + [str(x) for x in cur_fb]
+
+if fb_arg == '__derive__':
+    fallbacks = [x for x in cur_chain if x != cli]
+    if not fallbacks or fallbacks[-1] not in CORE_TRIO:
+        fallbacks.append('claude')
+else:
+    fallbacks = [x.strip() for x in fb_arg.split(',') if x.strip()]
+
+for x in fallbacks:
+    if x not in KNOWN:
+        sys.stderr.write('roster_write_role: ERROR fallbacks name unknown CLI ' + repr(x) + ' (known: ' + ', '.join(KNOWN) + ')\n')
+        sys.exit(2)
+chain = [cli] + fallbacks
+if chain[-1] not in CORE_TRIO:
+    sys.stderr.write('roster_write_role: ERROR chain ' + repr(chain) + ' does not terminate at a core-trio member (claude, antigravity, codex) — a chain resolving entirely to optional members cannot ship\n')
+    sys.exit(2)
+
+block = ('[roles.' + role + ']\n'
+         'cli = ' + json.dumps(cli) + '\n'
+         'model = ' + json.dumps(model) + '\n'
+         'effort = ' + json.dumps(effort) + '\n'
+         'fallbacks = ' + json.dumps(fallbacks) + '\n')
+
+lines = raw.splitlines(keepends=True)
+hdr = re.compile(r'^\[roles\.' + re.escape(role) + r'\][ \t]*$')
+top = re.compile(r'^\[')
+start = None
+for i, ln in enumerate(lines):
+    if hdr.match(ln):
+        start = i
+        break
+
+if start is not None:
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if top.match(lines[j]):
+            end = j
+            break
+    # Trailing standalone comment/blank lines after the table's last key are
+    # documentation for what FOLLOWS (e.g. the optional-members guidance block
+    # after [roles.documenter]) — walk end back so they survive the replace.
+    while end > start + 1 and (lines[end - 1].strip() == '' or lines[end - 1].lstrip().startswith('#')):
+        end -= 1
+    prefix = ''.join(lines[:start])
+    suffix = ''.join(lines[end:])
+    if prefix and not prefix.endswith('\n'):
+        prefix += '\n'
+    new_raw = prefix + block
+    if suffix.strip():
+        if not suffix.startswith('\n'):
+            new_raw += '\n'
+        new_raw += suffix
+    else:
+        new_raw += suffix
+else:
+    new_raw = raw
+    if new_raw and not new_raw.endswith('\n'):
+        new_raw += '\n'
+    if new_raw and not new_raw.endswith('\n\n'):
+        new_raw += '\n'
+    new_raw += block
+
+tmp = path + '.tmp.' + str(os.getpid())
+with open(tmp, 'w') as f:
+    f.write(new_raw)
+# The roster MUST stay tomllib-parseable AND reflect our values after every
+# write — verify the tmp file BEFORE it replaces the live roster.
+try:
+    with open(tmp, 'rb') as f:
+        data = tomllib.load(f)
+    r = data.get('roles', {}).get(role, {})
+    assert isinstance(r, dict), 'roles.' + role + ' is not a table after write'
+    assert r.get('cli') == cli, 'cli mismatch after write'
+    assert str(r.get('model', '')) == model, 'model mismatch after write'
+    assert r.get('effort') == effort, 'effort mismatch after write'
+    assert r.get('fallbacks') == fallbacks, 'fallbacks mismatch after write'
+except Exception as exc:
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    sys.stderr.write('roster_write_role: ERROR serialized roster failed round-trip verify: ' + str(exc) + '\n')
+    sys.exit(4)
+os.replace(tmp, path)
+sys.stderr.write('roster_write_role: [roles.' + role + '] cli=' + cli + ' model=' + (model or '<host default>') + ' effort=' + effort + ' fallbacks=' + ','.join(fallbacks) + '\n')
+"
+}
+
 # roster_has_member <cli> — 0 when ops/roster.toml carries a [members.<cli>]
 # table, 1 when it does not (or the file is absent — the writer will create it),
 # 2 when the file exists but is unparseable. Cheap (tomllib only, no live probe)

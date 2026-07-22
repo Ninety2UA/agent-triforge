@@ -21,6 +21,12 @@
 # each chain must terminate at a core-trio member (claude, antigravity,
 # codex), and the core trio cannot be disabled.
 #
+# Guided editing: /setup walks member enrollment AND role assignment (accept
+# the shipped defaults or customize per role) — `/setup roles` jumps straight
+# to the role step. Guided role writes go through roster_write_role, which
+# enforces the load rules above before every write; hand-editing this file
+# stays valid too.
+#
 # Model pins — shipped defaults; a role's `model` entry here overrides them:
 #   - Antigravity (agy) defaults to the latest Gemini Pro model: pins are
 #     "Gemini 3.1 Pro (High)" / "(Low)", and the shipped defaults never pick

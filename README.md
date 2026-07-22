@@ -55,7 +55,7 @@ The framework achieves this through **institutional knowledge compounding**: eve
 
 - **Builder pool (default).** All six supported CLIs — the core trio (Claude, Antigravity, Codex) plus enrolled optional members (OpenCode, Kimi, Cursor) — are eligible builders. [`ops/roster.toml`](templates/ops/roster.toml) assigns each role; every build runs under a per-task lease in an isolated worktree and merges only after cross-review by a pinned non-author reviewer. The single-writer rule is retired.
 - **Gemini → Antigravity.** Google shut down the hosted Gemini CLI service for consumer tiers on 2026-06-18; the analyst / reviewer / documenter lane is now **Antigravity (`agy`)** running Gemini 3.1 Pro (High), invoked via `invoke_antigravity`.
-- **Guided onboarding ([`/setup`](commands/setup.md)).** One idempotent command takes a fresh install to a working roster: gate the core trio, then enroll or decline each optional CLI.
+- **Guided onboarding ([`/setup`](commands/setup.md)).** One idempotent command takes a fresh install to a working roster: gate the core trio, enroll or decline each optional CLI, then accept the shipped role defaults or customize who does what (CLI · model · effort per role).
 - **Self-maintenance ([`/cli-watch`](commands/cli-watch.md), [`/repo-watch`](commands/repo-watch.md)).** Scheduled or manual watch cycles keep the framework current against primary sources.
 - **Native-first runtime.** Completion gating moved from the retired `ship-loop.sh` promise gate to Claude Code's native `/goal` + an `ops/.sprint-complete` sentinel; Codex runs `gpt-5.6-sol` with structured `--output-schema` verdicts and hooks under `codex exec`.
 
@@ -326,7 +326,7 @@ Five non-negotiable checkpoints enforced at every stage:
 
 ### Prerequisites
 
-**Run [`/setup`](commands/setup.md) first** — the guided path from a fresh install to a working roster. It gates the core trio live, then walks each optional CLI (enroll with a chosen model, or decline cleanly). Idempotent and re-runnable; the probes below are exactly what `/setup` automates.
+**Run [`/setup`](commands/setup.md) first** — the guided path from a fresh install to a working roster. It gates the core trio live, walks each optional CLI (enroll with a chosen model, or decline cleanly), then offers role assignment: accept the shipped defaults (recommended) or customize any role's CLI · model · effort. Idempotent and re-runnable; the probes below are exactly what `/setup` automates.
 
 **Core trio (required):**
 
@@ -475,7 +475,7 @@ claude
 
 | Command | What it does |
 |---|---|
-| [**`/setup`**](commands/setup.md) | Guided roster onboarding — gate the core trio live, then enroll/decline each optional CLI with a chosen model. Idempotent; re-run any time. |
+| [**`/setup`**](commands/setup.md) | Guided roster onboarding — gate the core trio live, enroll/decline each optional CLI with a chosen model, then accept the shipped role defaults or customize each role's CLI · model · effort (`/setup roles` jumps to that step). Idempotent; re-run any time. |
 | [**`/deep-research <topic>`**](commands/deep-research.md) | Launch 5 parallel research agents + [`research-synthesizer`](agents/research-synthesizer.md). |
 | [**`/analyze <url>`**](commands/analyze.md) | Deep compatibility analysis of an external repo. |
 | [**`/status`**](commands/status.md) | Sprint overview: phase, tasks, blockers, available commands. |
@@ -692,6 +692,14 @@ After solving a non-trivial problem, <a href="commands/compound.md"><code>/compo
 ---
 
 ## Recent changes
+
+### 2026-07-22 — v3.1.0: Role customization in guided onboarding
+
+**`/setup` now covers who does what.** After the core-trio gate and optional-member enrollment, a new role step shows the current assignment table (role → CLI · model · effort · fallbacks) and asks one question: proceed with the shipped defaults (recommended) or customize. Customizing walks CLI, model, and effort per chosen role; `/setup roles` jumps straight to that step on re-runs. The closing status table now derives each CLI's roles from the live roster instead of hardcoding the shipped posture.
+
+**New single-writer helpers.** `roster_role_entry <role>` prints a role's merged configuration (shipped defaults overlaid per-field by `ops/roster.toml`, no liveness walk); `roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]` is the validated single writer for `[roles.*]` — it mirrors `resolve_role`'s load rules (known role/CLI, effort enum, core-trio chain terminus), derives a valid fallback chain when none is given (the displaced primary becomes the first fallback), and round-trip-verifies before an atomic replace, preserving comments elsewhere in the file.
+
+---
 
 ### 2026-07-21 — v3.0.1: Landing-page copy + release hygiene
 
