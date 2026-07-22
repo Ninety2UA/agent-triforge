@@ -47,11 +47,17 @@ The framework achieves this through **institutional knowledge compounding**: eve
 
 ---
 
-## What's new (v3.0.0)
+## What's new (v3.1.0)
 
-**The biggest release since the plugin conversion.** Triforge moves from a fixed Claude + Gemini + Codex trio to a **six-CLI builder pool** coordinated by a roster, per-task leases, and mandatory cross-review — and swaps the retired Gemini CLI lane for Antigravity. The coordination model and the CLI surface both changed, so this is a major version.
+**The roster is now yours to shape from onboarding.** `/setup` gained a role-assignment step: see the current role table (role → CLI · model · effort · fallbacks), then keep it, customize any role, or restore the shipped defaults — every write validated so the roster always still loads. Backed by new single-writer helpers (`roster_role_entry`, `roster_write_role`), roster model overrides that now reach every external-CLI dispatch lane (`CODEX_MODEL` joined its siblings), agy effort→`(High)`/`(Low)` suffix normalization, and a content-level roster guard that makes a broken `ops/roster.toml` loud instead of quietly rendering clean-looking tables. Hardened across three multi-agent review iterations (local roster + independent cross-model adversarial passes) — details in [Recent changes](#recent-changes).
 
-### Headline changes
+Also new: the 2026-07-21 **Gemini 3.6 Flash** release is recorded in the model watch — the shipped pins stay on the latest Pro (`Gemini 3.1 Pro`, still the newest Pro), with 3.6 Flash available as the explicit per-role opt-in (`model = "Gemini 3.6 Flash (High)"`).
+
+### v3.0.0 — the builder-pool foundation
+
+**The biggest release since the plugin conversion.** Triforge moved from a fixed Claude + Gemini + Codex trio to a **six-CLI builder pool** coordinated by a roster, per-task leases, and mandatory cross-review — and swapped the retired Gemini CLI lane for Antigravity. The coordination model and the CLI surface both changed, so this was a major version.
+
+#### Headline changes
 
 - **Builder pool (default).** All six supported CLIs — the core trio (Claude, Antigravity, Codex) plus enrolled optional members (OpenCode, Kimi, Cursor) — are eligible builders. [`ops/roster.toml`](templates/ops/roster.toml) assigns each role; every build runs under a per-task lease in an isolated worktree and merges only after cross-review by a pinned non-author reviewer. The single-writer rule is retired.
 - **Gemini → Antigravity.** Google shut down the hosted Gemini CLI service for consumer tiers on 2026-06-18; the analyst / reviewer / documenter lane is now **Antigravity (`agy`)** running Gemini 3.1 Pro (High), invoked via `invoke_antigravity`.
@@ -59,7 +65,7 @@ The framework achieves this through **institutional knowledge compounding**: eve
 - **Self-maintenance ([`/cli-watch`](commands/cli-watch.md), [`/repo-watch`](commands/repo-watch.md)).** Scheduled or manual watch cycles keep the framework current against primary sources.
 - **Native-first runtime.** Completion gating moved from the retired `ship-loop.sh` promise gate to Claude Code's native `/goal` + an `ops/.sprint-complete` sentinel; Codex runs `gpt-5.6-sol` with structured `--output-schema` verdicts and hooks under `codex exec`.
 
-### Migrating from v2.4.x
+#### Migrating from v2.4.x
 
 - **(a) Builder-pool default.** External CLIs are now eligible builders, not review-only. To restore the old reviewer-only posture, edit `ops/roster.toml` and take the external CLIs off the `builder` role (leave them on `reviewer` / `tester` / `analyst` / `documenter`, or set `[members.<cli>] enabled = false`). The core trio can't be disabled, and every fallback chain must still terminate at a core member.
 - **(b) Gemini → Antigravity.** The Gemini lane is gone. **Former Gemini-API-key users:** install Antigravity and run `/setup` to authenticate the `agy` lane (the old `GEMINI_API_KEY` is no longer used). **Users who must stay on legacy Gemini:** pin plugin **`v2.4.3`** — the last release with the Gemini lane.
@@ -98,7 +104,7 @@ The heart of v3.0.0. A wave reads [`ops/roster.toml`](templates/ops/roster.toml)
   <img src="docs/images/builder-pool.svg" alt="Builder-pool wave — roster resolves each task to a builder CLI in an isolated worktree lease, cross-reviewed by a pinned non-author reviewer, squash-merged onto a sprint integration branch, then promoted to main through a gated check" width="100%">
 </p>
 
-**The roster decides who does what.** Five roles — builder, reviewer, tester, analyst, documenter — each map to a CLI + model + effort with an ordered fallback chain that must terminate at a core-trio member. Optional members carry an `enabled` flag and are absent everywhere when off. Model choice is yours per role: the shipped defaults pin the latest Gemini Pro for `agy` (never silently Flash) and grok-4.5 for Cursor, and a role's `model` entry selects any other variant — Flash included — when you explicitly want it.
+**The roster decides who does what.** Five roles — builder, reviewer, tester, analyst, documenter — each map to a CLI + model + effort with an ordered fallback chain that must terminate at a core-trio member. Optional members carry an `enabled` flag and are absent everywhere when off. Model choice is yours per role: the shipped defaults pin the latest Gemini Pro for `agy` (never silently Flash) and grok-4.5 for Cursor, and a role's `model` entry selects any other variant when you explicitly want it — Flash included, e.g. `"Gemini 3.6 Flash (High)"` (the current Flash line). Since v3.1.0 you don't have to hand-edit the file: `/setup`'s role step walks keep-current / customize / restore-shipped-defaults with validated writes.
 
 <p align="center">
   <img src="docs/images/roster.svg" alt="Roster and assignment — ops/roster.toml maps each role to a CLI, model, and effort with fallback chains; six CLIs across a required core trio and an optional tier" width="82%">
@@ -700,6 +706,10 @@ After solving a non-trivial problem, <a href="commands/compound.md"><code>/compo
 **New single-writer helpers.** `roster_role_entry <role>` prints a role's merged configuration (shipped defaults overlaid per-field by `ops/roster.toml`, no liveness walk; the model column shows what dispatch would actually run, even for a hand-edited cli-only override); `roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]` is the validated single writer for `[roles.*]` — it enforces a strict superset of `resolve_role`'s load rules (known role/CLI and core-trio chain terminus, plus writer-only checks: the effort enum and agy effort→(High)/(Low) suffix normalization), derives a valid fallback chain when none is given (the displaced primary becomes the first fallback), and round-trip-verifies before an atomic replace, preserving comments elsewhere in the file.
 
 **Roster model overrides now reach every external-CLI dispatch lane.** `invoke_codex` gained a `CODEX_MODEL` override (same pattern as `AGY_MODEL`/`OPENCODE_MODEL`/`KIMI_MODEL`/`CURSOR_MODEL`), and `dispatch_role`'s codex lane passes the resolved roster model through it — a customized reviewer/tester model actually reaches `codex exec -m` instead of silently deferring to the `agents.toml` pin. The shipped default matches the pin, so behavior is unchanged until a user customizes. (The claude lane stays ladder-governed by design: work resolved to claude runs as a native Agent-tool subagent, whose model comes from the Fable/downgrade ladder, not the roster.)
+
+**Review-hardened across three multi-agent iterations** (full local roster + independent cross-model adversarial pass per round, every fix re-verified by execution in the next round): the roster guard runs `resolve_role`'s full load validation, so TOML-valid-but-content-invalid rosters (typo'd CLI, chain with no core-trio terminus, non-table shapes) are LOUD instead of rendering clean-looking tables; a missing TOML parser (rc 3) is distinguished from roster errors with its own fix; the closing verdict warns when any role chain contains an auth-failed member (dispatch never skips them — as a primary it breaks the role outright, as a fallback it blocks recovery exactly when the primary degrades); the role ask is truthful on re-runs (keep-current / customize / restore-shipped-defaults); agy writes normalize the effort→`(High)`/`(Low)` suffix and auto-fill an empty model with the effort-matched Pro pin. Deliberately-accepted residuals are recorded in [`docs/residual-review-findings/`](docs/residual-review-findings/feat-setup-role-customization.md).
+
+**Model watch — Gemini 3.6 Flash (released 2026-07-21).** Recorded in [`ops/research/2026-07-22-gemini-3.6-flash.md`](ops/research/2026-07-22-gemini-3.6-flash.md) and verified against the live `agy models` catalog: no new Pro shipped, so the `Gemini 3.1 Pro (High)`/`(Low)` pins remain the latest Pro and all defaults hold; `"Gemini 3.6 Flash (High|Medium|Low)"` is now the named per-role Flash opt-in example. Next Pro release (Gemini 4 teased) moves the pins under the latest-Pro policy.
 
 ---
 
