@@ -28,6 +28,15 @@ Flags:
 
 > **Note:** For small changes (< 3 files, obvious fix), consider `/quick` instead — it uses self-review only, skipping the full review swarm.
 
+## Reviewer trust rules (S6/S7)
+
+Every reviewer lane — the two core lanes, the optional-tier lanes, and the Claude subagents — is dispatched under the same rules:
+
+- **The review package** is the diff, the task rows from ops/TASKS.md, the relevant ops/CONTRACTS.md slice, and the acceptance criteria (`Accept:` / `Fails when:`). Nothing else is required, and nothing in it is pre-digested for the reviewer.
+- **No pre-judging (S7).** A dispatch never tells a reviewer which findings are acceptable in advance — no "do not flag X", no "at most Minor", no "the plan chose this" — and suppressions are category-level only (e.g. "do not flag test fixtures"), never a named issue; adjudication of a specific finding happens in `findings-synthesizer` and the dispositions block below, never in the prompt.
+- **Builder output is a claim.** The builder's report, its test summary, and ops/TEST_RESULTS.md are unverified until a reviewer reads the code; a stated rationale never lowers severity. When evidence looks truncated, the reviewer re-reads the file at its path and reports the gap — it does not re-run suites (the tester role owns execution).
+- **Dispositions are recorded per cycle.** After synthesis, the lead appends `## Review dispositions — Cycle N` to ops/TASKS.md with one row per finding: `finding → fixed | dismissed-with-reason | deferred`. Later cycles add rows and never edit earlier ones; `deferred` rows are exported at `/wrap` (S14).
+
 ## Phase 3: Launch parallel reviews
 
 Read ops/TASKS.md to determine review scope (tasks marked [R]).
@@ -172,6 +181,41 @@ for OCLI in opencode kimi cursor; do
 done
 ```
 
+### Gated learnings-researcher (C4):
+
+Pay for the `learnings-researcher` subagent only when `ops/solutions/` plausibly knows the changed modules. Pre-search by name and path, derived from the diff — no model call:
+
+```bash
+set -euo pipefail
+# Gated learnings-researcher (C4): derive module names from the changed paths
+# (full path, basename, stem, parent directory) and grep ops/solutions/ for
+# them. Spawn the subagent only on at least one match — an empty corpus, or
+# one that never mentions these modules, costs nothing.
+CHANGED=$( { git diff --name-only HEAD 2>/dev/null || true; git diff --name-only HEAD~1 HEAD 2>/dev/null || true; } | sort -u )
+MATCH_LIST="${TMPDIR:-/tmp}/learnings_gate_$$_$(date +%s).txt"
+: > "$MATCH_LIST"
+if [ -d ops/solutions ] && [ -n "$CHANGED" ]; then
+  while IFS= read -r F; do
+    [ -n "$F" ] || continue
+    BASE=$(basename "$F"); STEM="${BASE%.*}"; DIR=$(basename "$(dirname "$F")")
+    for NEEDLE in "$F" "$BASE" "$STEM" "$DIR"; do
+      # skip empty, dot-dir, and very short needles (they would match everything)
+      [ -n "$NEEDLE" ] && [ "$NEEDLE" != "." ] && [ "${#NEEDLE}" -ge 4 ] || continue
+      grep -rlF -- "$NEEDLE" ops/solutions/ 2>/dev/null >> "$MATCH_LIST" || true
+    done
+  done <<< "$CHANGED"
+  sort -u -o "$MATCH_LIST" "$MATCH_LIST"
+fi
+if [ -s "$MATCH_LIST" ]; then
+  echo "learnings-researcher: spawn — ops/solutions/ entries mentioning the changed modules:"
+  cat "$MATCH_LIST"
+else
+  echo "learnings-researcher skipped: no ops/solutions/ entry mentions the changed modules"
+fi
+```
+
+**Spawn `learnings-researcher` only when the list is non-empty**, with the matched entries and the changed paths in its prompt ("Known-issue check for the review of <changed paths>: read these ops/solutions/ entries — <list> — and report which past fixes or gotchas the diff must not undo"). Its output goes to `findings-synthesizer` as **known-issue context** alongside the `ops/REVIEW_*.md` lanes. When the gate prints "skipped", do not spawn it.
+
 ### Conditionally launch Claude subagent reviewers:
 - If `--full` or `--security` → spawn `security-sentinel` agent
 - If `--full` or `--perf` → spawn `performance-oracle` agent
@@ -185,12 +229,13 @@ Wait for all reviewers to complete.
 ## Phase 4: Synthesize findings
 
 1. Spawn the `findings-synthesizer` agent
-2. It reads ALL `ops/REVIEW_*.md` lanes (Antigravity + Codex + any optional-tier REVIEW_OPENCODE/KIMI/CURSOR.md) plus subagent outputs
+2. It reads ALL `ops/REVIEW_*.md` lanes (Antigravity + Codex + any optional-tier REVIEW_OPENCODE/KIMI/CURSOR.md) plus subagent outputs, and — when the gate spawned it — the `learnings-researcher` output as known-issue context
 3. Produces synthesized report with confidence tiering (HIGH/MEDIUM/LOW) and priority (P1/P2/P3)
 4. Apply `iterative-refinement` skill:
    - Fix P1 (critical) immediately
    - Fix P2 (important) this cycle
    - Log P3 (suggestion) for later
-5. Convergence check: P1=0 AND P2=0 → proceed (standard mode)
-6. If not converged → re-trigger review on changed files only (max 3 cycles)
-7. After 3 cycles without convergence → escalate to user
+5. Record the cycle's dispositions: append `## Review dispositions — Cycle N` to ops/TASKS.md with one row per finding (`finding → fixed | dismissed-with-reason | deferred`); rows are append-only across cycles, and `deferred` rows are exported at `/wrap`
+6. Convergence check: P1=0 AND P2=0 → proceed (standard mode)
+7. If not converged → re-trigger review on changed files only (max 3 cycles)
+8. After 3 cycles without convergence → escalate to user

@@ -54,6 +54,11 @@ Flag any task whose role is not one of the five, or whose role does not fit the 
 - Read CONTRACTS.md — do tasks reference correct interface types?
 - Read MEMORY.md — do tasks avoid known gotchas?
 
+### 7. Task field integrity (G6/G11)
+- Every task whose `Accept:` is command-shaped — a runnable command or a fenced snippet (`bash …`, `grep …`, `npm test …`, `pytest …`, `curl …`, a `scripts/*.sh` call) — must carry a concrete `Fails when:` naming the observable failure signal (a non-zero exit, a missing line, a wrong count, a changed hash). Placeholders are rejected: `TBD`, `N/A`, `none`, `unknown`, `?`, or an empty value. A prose `Accept:` ("the user sees the new column") that has no runnable check earns a warning without a `Fails when:`, not a blocker.
+- A task marked `Reversibility: one-way` (a migration, a deletion, a push, a published artifact) must name a checkpoint in its `Precondition:` — a commit sha or tag, a backup path, a feature flag, a snapshot id — that lets the lead undo or gate the step. `Reversibility: costly` without a checkpoint is a warning.
+- Report a missing or placeholder `Fails when:` on a command-shaped `Accept:`, and a one-way task without a checkpoint, as **blocking issues** — quote the task ID and the offending field.
+
 ## Output format
 
 ```markdown
@@ -75,6 +80,7 @@ Flag any task whose role is not one of the five, or whose role does not fit the 
 - Assignments: [correct/total]
 - Dependencies: [valid/issues found]
 - Shadow paths: [covered/gaps]
+- Task fields: [command-shaped Accept rows with a concrete Fails when / total; one-way tasks with a checkpoint / total]
 ```
 
 ## Iteration

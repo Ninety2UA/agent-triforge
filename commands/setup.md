@@ -145,14 +145,14 @@ roster_enroll_member <cli> interactive; echo "rc=$?"
 
 | CLI | Shipped default (recommended) | Live list command | Notes |
 |---|---|---|---|
-| opencode | `openrouter/z-ai/glm-5.2` | `opencode models openrouter` | needs the openrouter provider connected (`OPENROUTER_API_KEY` or `opencode auth login`) |
-| kimi | `kimi-k3` | (no list flag; `kimi --help` shows `-m`) | offer the default; sign in with `kimi login` |
-| cursor | `grok-4.5` | `cursor-agent --list-models` | pin `grok-4.5` explicitly — never the Auto router |
+| opencode | `openrouter/z-ai/glm-5.3` | `opencode models openrouter` | needs the openrouter provider connected (`OPENROUTER_API_KEY` or `opencode auth login`) |
+| kimi | `kimi-code/k3` | (no list flag) | the OAuth-managed alias — `kimi login` provisions it; offer the default |
+| cursor | `cursor-grok-4.6-xhigh` | `cursor-agent --list-models` (or `agent --list-models` when only the new binary name exists) | pin the suffixed Grok id explicitly — never the Auto router; effort rides in the `-low|-medium|-high|-xhigh` suffix. An unrelated `~/.grok/bin/agent` can shadow `agent`, so the helper (`_cursor_bin`) resolves `cursor-agent` first and accepts `agent` only when its `--version` matches `YYYY.MM.DD-<hex>` |
 
 Fetch a list only when the user wants to see options, e.g.:
 
 ```bash
-cursor-agent --list-models 2>/dev/null | head -40
+CURSOR_BIN=$(_cursor_bin) && "$CURSOR_BIN" --list-models 2>/dev/null | head -40   # cursor-agent, else a version-verified `agent`
 opencode models openrouter 2>/dev/null | grep -i glm
 ```
 
@@ -228,10 +228,10 @@ Run ONE ask, offering (the third option only when the count above is nonzero):
   `templates/ops/roster.toml` — keep this list in sync with it):
   ```bash
   roster_write_role builder    claude      ""                      max   "codex,antigravity"
-  roster_write_role reviewer   codex       "gpt-5.6-sol"           xhigh "antigravity,claude"
-  roster_write_role tester     codex       "gpt-5.6-sol"           xhigh "claude"
-  roster_write_role analyst    antigravity "Gemini 3.1 Pro (High)" high  "claude"
-  roster_write_role documenter antigravity "Gemini 3.1 Pro (High)" high  "claude"
+  roster_write_role reviewer   codex       "gpt-6-astra"             xhigh "antigravity,claude"
+  roster_write_role tester     codex       "gpt-6-astra"             xhigh "claude"
+  roster_write_role analyst    antigravity "Gemini 3.8 Flash (High)" high  "claude"
+  roster_write_role documenter antigravity "Gemini 3.8 Flash (High)" high  "claude"
   ```
   Note the trade: these are explicit pins, so a future plugin release that
   changes a shipped default will NOT auto-flow into this roster (an unwritten
@@ -246,21 +246,27 @@ For **Customize**, ask which role(s) to change (any subset). For each chosen
      installed-but-unenrolled member WOULD dispatch, just without the auth
      check and recorded model Step 2 provides.
   2. **Model** — offer that CLI's shipped default first (recommended:
-     `roster_member_default <cli>`), or a custom pin. Notes: agy pins are
-     `"Gemini 3.1 Pro (High)"`/`(Low)` — Flash only when the user explicitly
-     wants it (current Flash line: `"Gemini 3.6 Flash (High|Medium|Low)"`;
-     `agy models` prints the live catalog); cursor pins `grok-4.5` — never
-     the Auto router; claude's model may stay empty (the shell builder lane
-     runs the host default; the Fable/downgrade ladder governs Agent-tool
-     spawns).
+     `roster_member_default <cli>`), or a custom pin. Notes: agy pins the
+     newest Gemini model at its highest thinking level, Pro or Flash (D-022)
+     — currently `"Gemini 3.8 Flash (High)"`; `"Gemini 3.1 Pro (High)"` is
+     the opt-in (`agy models` prints the live catalog); cursor pins
+     `cursor-grok-4.6-xhigh` — never the Auto router — and its effort rides
+     in the model-id suffix (step 3); claude's model may stay empty (the
+     shell builder lane runs the host default; the Fable/downgrade ladder
+     governs Agent-tool spawns).
   3. **Effort** — one of `low|medium|high|xhigh|max`. Notes: for agy the
-     effort IS the model-variant `(High)`/`(Low)` suffix — when the model
-     carries such a suffix the writer normalizes it to match the chosen effort
-     (`low`/`medium` → `(Low)`, `high`/`xhigh`/`max` → `(High)`) with a stderr
-     NOTE, and an EMPTY agy model is auto-filled with the effort-matched Pro
-     pin; a suffix-less model (e.g. an explicit Flash pin) is written through
-     untouched with no note. Cursor has no effort control (`effort` is inert
-     for it).
+     effort IS the model-variant suffix — the `(Low)`/`(Medium)`/`(High)`
+     suffix is agy's effort control and the writer normalizes it to match
+     the chosen effort (`low` → `(Low)`, `medium` → `(Medium)`,
+     `high`/`xhigh`/`max` → `(High)`; 3.1 Pro has no Medium and maps
+     `medium` to `(Low)`) with a stderr NOTE, and an EMPTY agy model is
+     auto-filled with the effort-matched `Gemini 3.8 Flash (<variant>)` pin;
+     a suffix-less model is written through untouched with no note. For
+     cursor the effort is NOT inert: it rides in the model-id suffix
+     (`cursor-grok-4.6-low|medium|high|xhigh`; `xhigh` and `max` → `-xhigh`),
+     and the writer composes the suffixed id from a bare family name
+     (`grok-4.6` → `cursor-grok-4.6-<suffix>`) or re-suffixes an explicit id
+     to match the chosen effort.
   ```bash
   roster_write_role <role> <cli> "<model>" <effort>; echo "rc=$?"
   ```
@@ -371,6 +377,21 @@ Present the table(s), then the verdict:
 - **`ROSTER_OK=no`** → setup UNRESOLVED regardless of the rows above. Relay
   the roster error (or the missing-parser fix for rc 3) exactly as the Step 3
   guard describes.
+
+## Closing guidance — agy research lanes (`read_url`)
+
+`/deep-research` and `/analyze` fetch URLs through agy, which since 1.1.28 asks before `read_url` and soft-denies it headless — a research run then returns an empty response and `invoke_antigravity` fails it with reason `denied`. The only tier agy enforces headless is the USER tier, `~/.gemini/antigravity-cli/settings.json`, and Triforge never writes that file (R18). Print this block for the user to merge by hand — the allow rule the research lanes need, paired with the three deny rules that `templates/.antigravity/settings.json` records as intent at the project tier:
+
+```json
+{
+  "permissions": {
+    "allow": ["read_url(*)"],
+    "deny": ["command(rm -rf)", "command(git push)", "command(sudo)"]
+  }
+}
+```
+
+Say plainly that `read_url(*)` is a broad grant — every URL the agent chooses — and should be narrowed to the hosts the project actually researches as soon as agy accepts a pattern in that position. Without the allow rule the research lanes still run, but every URL fetch is denied and the run fails closed rather than silently returning less.
 
 ## Idempotency & re-runs
 

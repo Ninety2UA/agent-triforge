@@ -22,6 +22,12 @@ If the input describes an **architectural decision** (chose X over Y, tradeoff a
 
 If unclear, ask the user.
 
+## The counterfactual bar (CE-1)
+
+Before writing anything, apply the counterfactual: **would a future agent without this note plausibly repeat the mistake or re-derive the decision?** Compound only when the answer is yes — when the reasoning is *not recoverable* from the final code, tests, and docs, and losing it would plausibly cause a recurrence, a risk, or a rediscovery. Duration is not the bar: a three-hour fix whose cause is obvious from the diff does not qualify; a five-minute fix for a non-obvious race does.
+
+If the bar is not met, write nothing and say why in one line: "Not compounded: the reasoning is recoverable from `<file, diff, or test>`." Diff narrations, restatements of the commit message, and "we changed X to Y" entries never pass the bar.
+
 ## For solutions
 
 Write to `ops/solutions/YYYY-MM-DD-slug.md`:
