@@ -83,6 +83,7 @@ invoke_antigravity() {
   local EXIT_CODE=0
 
   INVOKE_FAILURE_CLASS="none"
+  _INVOKE_FAILURE_REASON=""
 
   # Deterministic preflight (KTD-9): a missing binary can never succeed on
   # retry — fail fast with the exact fix instead of burning a timeout window.
@@ -92,12 +93,32 @@ invoke_antigravity() {
     return 127
   fi
 
-  local NATIVE_LISTING=""
-  NATIVE_LISTING=$(_agy_agents_listing)
-  if [ -n "$NATIVE_LISTING" ] && printf '%s\n' "$NATIVE_LISTING" | grep -qE "(^|[[:space:]])${AGENT_NAME}([[:space:]:,.]|$)"; then
+  # Mode switch (KTD10): TRIFORGE_AGY_MODE=injection|native|auto, default
+  # injection this release. `auto` selects native when `agy agents` lists the
+  # name (the pre-3.3.0 behavior); `native` forces --agent and falls back to
+  # injection with a warning when the name is not listed; `injection` never
+  # consults the listing. The default flips to auto only after AGY-12 (native
+  # round-trip) AND AGY-16 (native-mode negative) pass for a full cycle —
+  # native mode drops the injected body, and a mistyped tool name in a
+  # definition can hang a reviewer. The resolved mode is written to
+  # ${OUTPUT_FILE}.mode so promoted ops/ files can record it.
+  local AGY_MODE_WANT="${TRIFORGE_AGY_MODE:-injection}"
+  case "$AGY_MODE_WANT" in injection|native|auto) : ;; *)
+    echo "invoke_antigravity: WARNING TRIFORGE_AGY_MODE='${AGY_MODE_WANT}' is not injection|native|auto — using injection" >&2
+    AGY_MODE_WANT="injection" ;;
+  esac
+  local NATIVE_LISTING="" LISTED=0
+  if [ "$AGY_MODE_WANT" != "injection" ]; then
+    NATIVE_LISTING=$(_agy_agents_listing)
+    if [ -n "$NATIVE_LISTING" ] && printf '%s\n' "$NATIVE_LISTING" | grep -qE "(^|[[:space:]])${AGENT_NAME}([[:space:]:,.]|$)"; then
+      LISTED=1
+    fi
+  fi
+  if [ "$LISTED" -eq 1 ]; then
     FULL_PROMPT="$PROMPT"
     MODE="native"
   elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents/${AGENT_NAME}.md" ]; then
+    [ "$AGY_MODE_WANT" = "native" ] && echo "invoke_antigravity: WARNING TRIFORGE_AGY_MODE=native but \`agy agents\` does not list '${AGENT_NAME}' — falling back to injection (reinstall the pack: agy plugin install \${CLAUDE_PLUGIN_ROOT}/antigravity-agents)" >&2
     local BODY
     BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents/${AGENT_NAME}.md")
     FULL_PROMPT="${BODY}
@@ -120,15 +141,44 @@ ${PROMPT}"
   # mechanism (probe: an absolute-path write outside the workspace landed).
   # --print-timeout (go-duration) keeps agy's own headless wait (default
   # 5m0s) inside our enforcement window.
-  local BASE_CMD=(agy --model "$MODEL" --add-dir "$PWD" --print-timeout "${TIMEOUT}s")
+  # --output-format json (D-032, KTD2): since agy 1.1.20/1.1.28 benign tool
+  # errors and --print-timeout expiry exit 0, and a denied tool leaves
+  # status=SUCCESS with an EMPTY response (lead probe 2026-09-11, agy 1.2.0:
+  # {"status":"SUCCESS","response":"","denied_actions":[{"action":"read_url",...}]}).
+  # The exit code is therefore not a completion signal — the envelope is.
+  # stdout (the JSON) goes to ${OUTPUT_FILE}.raw and stderr (progress, the
+  # "jetski:" line) to ${OUTPUT_FILE}.err; _agy_parse_envelope writes the prose
+  # response to OUTPUT_FILE plus the .status / .denied sidecars that background
+  # call sites read (they cannot see INVOKE_FAILURE_CLASS).
+  local BASE_CMD=(agy --model "$MODEL" --add-dir "$PWD" --print-timeout "${TIMEOUT}s" --output-format json)
   local CMD=("${BASE_CMD[@]}")
   if [ "$MODE" = "native" ]; then
     CMD+=(--agent "$AGENT_NAME")
   fi
+  local RAW="${OUTPUT_FILE}.raw" ERR="${OUTPUT_FILE}.err"
+  rm -f "$OUTPUT_FILE" "$RAW" "$ERR" "${OUTPUT_FILE}.status" "${OUTPUT_FILE}.denied"
+  printf '%s\n' "$MODE" > "${OUTPUT_FILE}.mode"
 
   echo "invoke_antigravity: agent=${AGENT_NAME} mode=${MODE} model=${MODEL}" >&2
 
-  _run_with_timeout "${TIMEOUT}" "${CMD[@]}" -p "$FULL_PROMPT" > "$OUTPUT_FILE" 2>&1 || EXIT_CODE=$?
+  _run_with_timeout "${TIMEOUT}" "${CMD[@]}" -p "$FULL_PROMPT" < /dev/null > "$RAW" 2> "$ERR" || EXIT_CODE=$?
+
+  # Envelope verdict on a clean exit: 0 usable prose; 11/13 empty (no denial /
+  # non-SUCCESS status) -> retry once with the raw prompt; 10 denied+empty ->
+  # deterministic (retry cannot lift a permission denial).
+  local PRC=0 AGY_REASON=""
+  if [ "$EXIT_CODE" -eq 0 ]; then
+    _agy_parse_envelope "$RAW" "$OUTPUT_FILE" || PRC=$?
+    case "$PRC" in
+      0|12) : ;;
+      10) EXIT_CODE=1; INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="denied"; AGY_REASON="denied" ;;
+      11) EXIT_CODE=1; INVOKE_FAILURE_CLASS="retryable"; AGY_REASON="no-output" ;;
+      13) EXIT_CODE=1; INVOKE_FAILURE_CLASS="retryable"; AGY_REASON="status" ;;
+    esac
+  else
+    _classify_invoke_failure "$EXIT_CODE" "$ERR"
+    [ "$INVOKE_FAILURE_CLASS" = "retryable" ] && _classify_invoke_failure "$EXIT_CODE" "$RAW"
+  fi
 
   # KTD-9: classify before reacting — only retryable failures get the
   # retry-once-with-raw-prompt treatment.
@@ -146,10 +196,19 @@ ${PROMPT}"
   # candidate 2026-07; left inline per KTD-1: per-CLI quirks resist a generic
   # abstraction.)
   if [ "$EXIT_CODE" -ne 0 ]; then
-    _classify_invoke_failure "$EXIT_CODE" "$OUTPUT_FILE"
     case "$INVOKE_FAILURE_CLASS" in
       deterministic)
         case "$_INVOKE_FAILURE_REASON" in
+          denied)
+            # Empty response + denied_actions: the run did nothing usable. Name
+            # the user-tier allow rule per denied action (Triforge never writes
+            # that file — R18). read_url is the common case since 1.1.28 made it
+            # Ask; write denials against ops/ are benign only when a response
+            # exists (then they ride the .denied sidecar into the promoted header).
+            local DENIED_RULES
+            DENIED_RULES=$(sed -E 's/^(.*)$/"\1(*)"/' "${OUTPUT_FILE}.denied" 2>/dev/null | paste -sd, - 2>/dev/null || true)
+            echo "invoke_antigravity: agent=${AGENT_NAME} exit=${EXIT_CODE} denied — the run returned an empty response and agy denied: $(paste -sd, "${OUTPUT_FILE}.denied" 2>/dev/null). Fix (user tier, never automated): add permissions.allow: [${DENIED_RULES:-\"read_url(*)\"}] to ~/.gemini/antigravity-cli/settings.json, then re-run. No retry (deterministic)." >&2
+            ;;
           auth)
             echo "invoke_antigravity: agent=${AGENT_NAME} exit=${EXIT_CODE} auth failure — agy is not logged in (output matched a credential/login pattern). Fix: run \`agy\` interactively once to complete login. No retry (deterministic)." >&2
             ;;
@@ -160,28 +219,128 @@ ${PROMPT}"
             echo "invoke_antigravity: agent=${AGENT_NAME} exit=${EXIT_CODE} deterministic failure (${_INVOKE_FAILURE_REASON:-see error above}). No retry." >&2
             ;;
         esac
+        # Denied leaves OUTPUT_FILE empty by contract (AE2: nothing is
+        # promoted); every other deterministic failure surfaces the streams so
+        # a captured-only caller never reads an empty file as "no findings".
+        if [ "$_INVOKE_FAILURE_REASON" != "denied" ]; then
+          cat "$ERR" "$RAW" > "$OUTPUT_FILE" 2>/dev/null || true
+        fi
         return "$EXIT_CODE"
         ;;
       timeout)
         echo "invoke_antigravity: agent=${AGENT_NAME} timed out after ${TIMEOUT}s (exit=${EXIT_CODE}). Requeue policy belongs to the caller (lease layer), not this helper." >&2
+        cat "$ERR" "$RAW" > "$OUTPUT_FILE" 2>/dev/null || true
         return "$EXIT_CODE"
         ;;
       retryable)
-        echo "invoke_antigravity: agent=${AGENT_NAME} exit=${EXIT_CODE} (retryable), retrying with raw prompt" >&2
+        echo "invoke_antigravity: agent=${AGENT_NAME} exit=${EXIT_CODE}${AGY_REASON:+ (${AGY_REASON})} (retryable), retrying with raw prompt" >&2
         EXIT_CODE=0
-        _run_with_timeout "${TIMEOUT}" "${BASE_CMD[@]}" -p "$PROMPT" > "${OUTPUT_FILE}.retry" 2>&1 || EXIT_CODE=$?
+        _run_with_timeout "${TIMEOUT}" "${BASE_CMD[@]}" -p "$PROMPT" < /dev/null > "${RAW}.retry" 2> "${ERR}.retry" || EXIT_CODE=$?
         if [ "$EXIT_CODE" -eq 0 ]; then
-          mv "${OUTPUT_FILE}.retry" "$OUTPUT_FILE"
-          INVOKE_FAILURE_CLASS="none"
+          mv "${RAW}.retry" "$RAW"; mv "${ERR}.retry" "$ERR" 2>/dev/null || true
+          PRC=0
+          _agy_parse_envelope "$RAW" "$OUTPUT_FILE" || PRC=$?
+          case "$PRC" in
+            0|12) INVOKE_FAILURE_CLASS="none" ;;
+            10) EXIT_CODE=1; INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="denied"
+                echo "invoke_antigravity: agent=${AGENT_NAME} retry denied — empty response, agy denied: $(paste -sd, "${OUTPUT_FILE}.denied" 2>/dev/null). Add the matching permissions.allow rule to ~/.gemini/antigravity-cli/settings.json (user tier)." >&2 ;;
+            *)  EXIT_CODE=1; INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="no-output"
+                echo "invoke_antigravity: agent=${AGENT_NAME} retry also returned an empty response (status=$(cat "${OUTPUT_FILE}.status" 2>/dev/null)) — no-output. See ${RAW} / ${ERR}." >&2 ;;
+          esac
         else
-          _classify_invoke_failure "$EXIT_CODE" "${OUTPUT_FILE}.retry"
+          _classify_invoke_failure "$EXIT_CODE" "${ERR}.retry"
           echo "invoke_antigravity: agent=${AGENT_NAME} retry also failed, exit=${EXIT_CODE} class=${INVOKE_FAILURE_CLASS}" >&2
+          cat "${ERR}.retry" "${RAW}.retry" > "$OUTPUT_FILE" 2>/dev/null || true
         fi
         ;;
     esac
   fi
 
+  if [ "$EXIT_CODE" -eq 0 ]; then
+    local DENIED_LIST
+    DENIED_LIST=$(paste -sd, "${OUTPUT_FILE}.denied" 2>/dev/null || true)
+    echo "invoke_antigravity: agent=${AGENT_NAME} mode=${MODE} status=$(cat "${OUTPUT_FILE}.status" 2>/dev/null || echo unknown) denied=${DENIED_LIST:-none} output=${OUTPUT_FILE}" >&2
+  fi
   return $EXIT_CODE
+}
+
+# _agy_parse_envelope <raw-json-file> <output-file> — parse agy's
+# --output-format json envelope. Writes the prose `response` to <output-file>
+# (only when non-empty), `status` to <output-file>.status (PARSE-FAIL when the
+# stream is not JSON), and one denied action per line to <output-file>.denied
+# (empty file when none). Return codes:
+#    0  non-empty response (denials, if any, are listed in .denied)
+#   10  empty response AND denied_actions present   -> deterministic (denied)
+#   11  empty response, no denial, status SUCCESS   -> no-output
+#   12  not JSON — raw stream copied to <output-file>, status PARSE-FAIL
+#   13  empty response with a non-SUCCESS status (ERROR/CANCELED/INTERRUPTED/
+#       INVALID/WAITING/RUNNING)
+# python3 reads its inputs from prefixed env vars (repo convention; no jq).
+_agy_parse_envelope() {
+  local RAW=$1 OUT=$2
+  local PRC=0
+  AGY_RAW="$RAW" AGY_OUT="$OUT" python3 - <<'PYAGY' || PRC=$?
+import json, os, sys
+raw_path = os.environ["AGY_RAW"]; out = os.environ["AGY_OUT"]
+try:
+    raw = open(raw_path, "r", errors="replace").read()
+except OSError:
+    raw = ""
+obj = None
+text = raw.strip()
+if text:
+    try:
+        obj = json.loads(text)
+    except Exception:
+        dec = json.JSONDecoder(); i = 0; n = len(text)
+        while i < n:
+            while i < n and text[i] != "{":
+                i += 1
+            if i >= n:
+                break
+            try:
+                val, end = dec.raw_decode(text, i)
+                if isinstance(val, dict) and ("status" in val or "response" in val):
+                    obj = val
+                i = end
+            except Exception:
+                i += 1
+if not isinstance(obj, dict):
+    with open(out, "w") as f:
+        f.write(raw)
+    with open(out + ".status", "w") as f:
+        f.write("PARSE-FAIL\n")
+    open(out + ".denied", "w").close()
+    sys.exit(12)
+status = str(obj.get("status") or "").strip() or "UNKNOWN"
+resp = obj.get("response")
+if not isinstance(resp, str):
+    resp = "" if resp is None else json.dumps(resp)
+denied = []
+for d in obj.get("denied_actions") or []:
+    if isinstance(d, dict):
+        name = d.get("action") or d.get("display_name") or d.get("name")
+    else:
+        name = d
+    if name:
+        denied.append(str(name))
+with open(out + ".status", "w") as f:
+    f.write(status + "\n")
+with open(out + ".denied", "w") as f:
+    for d in denied:
+        f.write(d + "\n")
+if resp.strip():
+    with open(out, "w") as f:
+        f.write(resp.strip() + "\n")
+    sys.exit(0)
+open(out, "w").close()
+if denied:
+    sys.exit(10)
+if status != "SUCCESS":
+    sys.exit(13)
+sys.exit(11)
+PYAGY
+  return $PRC
 }
 
 # ---------------------------------------------------------------------------
@@ -2308,6 +2467,7 @@ ${PROMPT}"
   (
     cd "$WT" || exit 97
     RC=0
+    CLASS_SET=0
     if [ -n "${TRIFORGE_TEST_BUILDER:-}" ]; then
       # Test seam (see function comment): deterministic fake builder.
       _adapter_env "$CLI" "$TOBIN" "${TIMEOUT}s" "$TRIFORGE_TEST_BUILDER" "$FULL_PROMPT" > "$OUT" 2>&1 || RC=$?
@@ -2333,7 +2493,24 @@ ${PROMPT}"
           _adapter_env codex "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
           ;;
         antigravity)
-          _adapter_env antigravity "$TOBIN" "${TIMEOUT}s" agy --model "${MODEL:-Gemini 3.8 Flash (High)}" --add-dir "$WT" --print-timeout "${TIMEOUT}s" -p "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+          # JSON envelope (KTD2, D-032): exit 0 is not a completion signal on
+          # agy >= 1.1.20 — parse status/response/denied_actions instead. The
+          # prose lands in $OUT (what lease_collect prints), the streams in
+          # $OUT.raw / $OUT.err, the verdict in $OUT.status / $OUT.denied.
+          _adapter_env antigravity "$TOBIN" "${TIMEOUT}s" agy --model "${MODEL:-Gemini 3.8 Flash (High)}" --add-dir "$WT" --print-timeout "${TIMEOUT}s" --output-format json -p "$FULL_PROMPT" < /dev/null > "${OUT}.raw" 2> "${OUT}.err" || RC=$?
+          if [ "$RC" -eq 0 ]; then
+            AGY_PRC=0
+            _agy_parse_envelope "${OUT}.raw" "$OUT" || AGY_PRC=$?
+            case "$AGY_PRC" in
+              0|12) : ;;
+              10) RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1
+                  echo "lease_dispatch: agy builder returned an empty response with denied actions: $(paste -sd, "${OUT}.denied" 2>/dev/null) — add the matching permissions.allow rule to ~/.gemini/antigravity-cli/settings.json (user tier)" >> "$OUT" ;;
+              *)  RC=1; INVOKE_FAILURE_CLASS="retryable"; CLASS_SET=1
+                  echo "lease_dispatch: agy builder returned an empty response (status=$(cat "${OUT}.status" 2>/dev/null)) — treated as failure, not review-ready" >> "$OUT" ;;
+            esac
+          else
+            cat "${OUT}.err" "${OUT}.raw" > "$OUT" 2>/dev/null || true
+          fi
           ;;
         opencode)
           # R35-confined optional-tier builder (U11): raw `opencode run` with
@@ -2402,7 +2579,7 @@ ${PROMPT}"
     # spurious 'retryable' off a builder that actually succeeded.
     if [ "$RC" -eq 0 ]; then
       INVOKE_FAILURE_CLASS="none"
-    else
+    elif [ "${CLASS_SET:-0}" -ne 1 ]; then
       _classify_invoke_failure "$RC" "$OUT"
     fi
     printf '%s\n' "$RC" > "${OUT}.rc"

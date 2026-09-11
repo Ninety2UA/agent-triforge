@@ -102,6 +102,20 @@ Follow the `wave-orchestration` skill (its "Builder-pool wave protocol" governs 
      echo "build: last stderr in $AGY_OUT / $CODEX_OUT" >&2
      exit 1
    fi
+
+   # Promotion guard (KTD2/D-032): promote captured agy output only when it is
+   # non-empty prose AND the JSON-envelope status sidecar written by
+   # invoke_antigravity reads SUCCESS (a denied/empty run leaves the file empty and
+   # returns non-zero — nothing is promoted, AE2). A non-agy roster lane writes no
+   # sidecar and is promoted on non-empty output as before. The header records the
+   # resolved mode (injection|native|raw) and any denied actions so a degraded run
+   # is attributable in the promoted file.
+   if [ ! -f "ops/REVIEW_ANTIGRAVITY.md" ] && [ -s "$AGY_OUT" ] && { [ ! -f "${AGY_OUT}.status" ] || [ "$(cat "${AGY_OUT}.status")" = "SUCCESS" ]; }; then
+     {
+       echo "<!-- captured from architecture-reviewer output; agent could not write ops/ directly (headless permission auto-deny); mode=$(cat "${AGY_OUT}.mode" 2>/dev/null || echo unknown); denied_actions=$([ -s "${AGY_OUT}.denied" ] && paste -sd, "${AGY_OUT}.denied" || echo none) -->"
+       _scrub < "$AGY_OUT"
+     } > ops/REVIEW_ANTIGRAVITY.md
+   fi
    ```
 6. Quality gates: tests + lint must pass, and a pinned non-author reviewer must approve, before a task merges (self-review refused — AE3)
 7. Integration-verifier runs between waves against the integration branch; the lead promotes to the main branch honoring the `[promotion]` gate
