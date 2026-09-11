@@ -2,8 +2,30 @@
 # PreCompact hook: Auto-checkpoint STATE.md before context compaction
 # Hook: PreCompact (fires before Claude Code compacts the context window)
 # Must complete quickly — compaction waits for this hook.
+#
+# ON_CRASH: ALLOW — a crash must never block compaction (R14/G7): a lost
+#   checkpoint is recoverable from ops/TASKS.md + ops/leases.toml, a blocked
+#   compaction is not. The EXIT trap below turns any unexpected non-zero status
+#   (set -e / set -u, e.g. an unwritable ops/STATE.md) into a stderr notice +
+#   exit 0, and every explicit exit path (the two early `|| exit 0` guards
+#   below) is `exit 0`.
+# Exit codes: 0 ok · 2 hook deny (never used by Triforge handlers) · 64 usage ·
+#   66 no-input · 69 unavailable · 70 internal · 80 degraded (documented only —
+#   Triforge handlers always return 0).
+# Hook stdout must never look like JSON: no stdout line may start with `{`
+#   (Claude Code ≥ 2.1.246 rejects hook stdout that parses as JSON — D-031c).
+#   Audited 2026-09-11: this handler writes ops/STATE.md and prints nothing to
+#   stdout.
 
 set -euo pipefail
+
+_pc_on_exit() {
+  local RC=$?
+  [ "$RC" -eq 0 ] && return 0
+  echo "pre-compact: WARNING hook crashed (rc=${RC}) — checkpoint may be incomplete; compaction continues (ON_CRASH: ALLOW)" >&2
+  exit 0
+}
+trap _pc_on_exit EXIT
 
 # Only checkpoint if ops/ directory exists (we're in an active sprint)
 [ -d "ops" ] || exit 0
