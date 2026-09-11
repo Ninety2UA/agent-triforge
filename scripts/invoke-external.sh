@@ -596,8 +596,10 @@ with open(os.environ['VERDICT_OUT'], 'w') as f:
 # OpenCode has a real `--agent <name>` flag (unlike Codex) that selects a
 # markdown agent def from `.opencode/agents/` (project tier) or, via the
 # session-start bootstrap, the plugin's `opencode-agents/`. Every call pins the
-# model with -m "${OPENCODE_MODEL:-openrouter/z-ai/glm-5.2}" — OPENCODE_MODEL is
-# the roster override hook; the shipped default is the OpenRouter GLM.
+# model with -m "${OPENCODE_MODEL:-openrouter/z-ai/glm-5.3}" — OPENCODE_MODEL is
+# the roster override hook; the shipped default is the OpenRouter GLM 5.3
+# (D-023, OC-04 PASS 2026-09-11; preloaded in models.dev, no provider entry
+# needed).
 #
 # Structured capture (probe OC-03): `--format json` streams SSE-style events
 # (message.updated carries the message role via properties.info; message.part.updated
@@ -607,11 +609,16 @@ with open(os.environ['VERDICT_OUT'], 'w') as f:
 # OUTPUT_FILE (no literal backticks in the heredoc). On any parse failure the
 # raw stream is preserved so nothing is lost.
 #
-# NEVER --auto (probe OC-06, 2026-07-17): a deny rule in opencode.json did NOT
-# survive --auto (the denied command executed), so this helper never passes it.
-# Reviewer read-only safety is the agent-def permission map (opencode-agents/
-# reviewer.md denies edit/bash); builder confinement is the lease worktree +
-# _adapter_env allowlist (R35), never opencode.json denies.
+# NEVER --auto (probe OC-06, 2026-07-17, still FAIL on 1.18.30 2026-09-11 —
+# docs and source say an explicit deny is enforced under --auto, the harness
+# disagrees, two lead re-probes hung; open watch D-033): a deny rule in
+# opencode.json did NOT survive --auto (the denied command executed), so this
+# helper never passes it. Defense-in-depth: every run also exports
+# OPENCODE_PERMISSION (the same deny set as templates/.opencode/opencode.json —
+# rm -rf, git push, sudo) unless the caller set its own. Reviewer read-only
+# safety is the agent-def permission map (opencode-agents/reviewer.md denies
+# edit/bash); builder confinement is the lease worktree + _adapter_env
+# allowlist (R35), never opencode.json denies.
 #
 # Effort (probe OC-05, unproven): a non-empty effort maps to --variant <effort>
 # (provider-specific reasoning effort). Best-effort — if the first attempt fails
@@ -622,6 +629,10 @@ with open(os.environ['VERDICT_OUT'], 'w') as f:
 # OpenRouter provider not connected) so a call that cannot succeed fails fast
 # with the exact fix instead of a retry-storm.
 #
+# Shipped OPENCODE_PERMISSION deny set — mirrors templates/.opencode/opencode.json
+# (D-033 defense-in-depth; the adapter stays off --auto regardless).
+_OPENCODE_PERMISSION_DEFAULT='{"bash":{"*":"allow","rm -rf *":"deny","git push*":"deny","sudo *":"deny"}}'
+
 # invoke_opencode <agent-name> <prompt> [output-file] [timeout-seconds] [effort]
 invoke_opencode() {
   local AGENT_NAME=$1
@@ -629,9 +640,10 @@ invoke_opencode() {
   local OUTPUT_FILE=${3:-"${TMPDIR:-/tmp}/opencode_output_$$_$(date +%s).txt"}
   local TIMEOUT=${4:-600}
   local EFFORT=${5:-${OPENCODE_EFFORT:-}}
-  local MODEL="${OPENCODE_MODEL:-openrouter/z-ai/glm-5.2}"
+  local MODEL="${OPENCODE_MODEL:-openrouter/z-ai/glm-5.3}"
   local MODE="" EXIT_CODE=0
   local RAW="${OUTPUT_FILE}.raw"
+  local OC_PERM="${OPENCODE_PERMISSION:-$_OPENCODE_PERMISSION_DEFAULT}"
 
   INVOKE_FAILURE_CLASS="none"
   _INVOKE_FAILURE_REASON=""
@@ -675,7 +687,7 @@ invoke_opencode() {
   # opencode-agents/<name>.md -> --agent <name>; else raw with a warning naming
   # the available agents. An empty AGENT_NAME is a deliberate raw run (used by
   # the READY plumbing probe and lease_dispatch's direct builder command).
-  local BASE=(opencode run --format json -m "$MODEL")
+  local BASE=(env "OPENCODE_PERMISSION=${OC_PERM}" opencode run --format json -m "$MODEL")
   local CMD=("${BASE[@]}")
   if [ -n "$AGENT_NAME" ] && { [ -f ".opencode/agents/${AGENT_NAME}.md" ] || { [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/opencode-agents/${AGENT_NAME}.md" ]; }; }; then
     CMD+=(--agent "$AGENT_NAME")
@@ -870,17 +882,23 @@ _list_opencode_agents() {
 # Kimi Code invocation (optional tier — builder + reviewer on Kimi)
 # ---------------------------------------------------------------------------
 #
-# Kimi Code (binary: kimi) has NO custom-agent CLI surface (probe KIMI-03,
-# kimi 0.15.0): --agent/--agent-file are legacy kimi-cli only. Roles are
-# therefore INJECTION-ONLY — the kimi-agents/<name>.md brief body is prefixed
-# onto the prompt (exactly like invoke_antigravity's injection mode), never a
-# native flag. The project-tier backstop is the role sections in
-# .kimi-code/AGENTS.md (shipped by the session-start bootstrap), which Kimi
-# merges into its system prompt.
+# Kimi Code (binary: kimi) >= 0.33 has a native agent surface (probe KIMI-03
+# flipped FAIL -> PASS on 0.42.0, 2026-09-11): `--agent-file <path>` loads a
+# Markdown agent definition whose body extends Kimi's own prompt through the
+# ${base_prompt} / ${skills} / ${agents_md} template variables and whose
+# frontmatter carries a `tools` allowlist (the reviewer's read-only boundary)
+# and `subagents: []` (no delegation). Roles therefore ride the plugin's
+# kimi-agents/<name>.md as --agent-file on BOTH attempts (D-024) — dropping it
+# on retry would re-run the reviewer with Kimi's full toolset. The absolute
+# plugin path is composed here so it also crosses env -i in the lease lane.
+# An agent-file load/parse error is deterministic (no retry). The project
+# .kimi-code/AGENTS.md role sections remain as documentation.
 #
-# Every call pins the model with -m "${KIMI_MODEL:-kimi-k3}" — KIMI_MODEL is the
-# roster override hook; the shipped default is Kimi K3 (kimi-k3). The coding
-# alternative is kimi-code/kimi-for-coding (Kimi K2.7 Code) via the override.
+# Every call pins the model with -m "${KIMI_MODEL:-kimi-code/k3}" — KIMI_MODEL
+# is the roster override hook; the shipped default is the OAuth-managed alias
+# kimi-code/k3 (D-024 — the former open-platform id kimi-k3 fails on OAuth
+# hosts). Live verification is PENDING-AUTH on this host until `kimi login`
+# (KIMI-05/06/08/09 in the newest probe record).
 #
 # Auth (probe KIMI-05, AUTH-FAIL on this host): `kimi doctor` validates CONFIG
 # ONLY and PASSES when signed out, so it cannot gate auth. A signed-out headless
@@ -892,8 +910,9 @@ _list_opencode_agents() {
 # Telemetry (probe KIMI-07, R25): env KIMI_DISABLE_TELEMETRY=1 is set on EVERY
 # invocation (and in templates/.kimi-code/config.toml via telemetry=false).
 #
-# Skills interop (probe KIMI-04): --skills-dir .agents/skills is passed when that
-# dir exists (repeatable flag) so portable skills are discovered without injection.
+# Skills interop (probe KIMI-04, D-024): Kimi discovers .agents/skills/ natively
+# and --skills-dir REPLACES that auto-discovery, so the flag is no longer passed;
+# skills are invoked as /skill:<name>.
 #
 # Structured capture: --output-format stream-json emits one JSON object per line
 # (assistant/tool chat messages; thinking stays on stderr — clean separation, so
@@ -916,10 +935,11 @@ invoke_kimi() {
   local OUTPUT_FILE=${3:-"${TMPDIR:-/tmp}/kimi_output_$$_$(date +%s).txt"}
   local TIMEOUT=${4:-600}
   local EFFORT=${5:-${KIMI_EFFORT:-}}
-  local MODEL="${KIMI_MODEL:-kimi-k3}"
+  local MODEL="${KIMI_MODEL:-kimi-code/k3}"
   local MODE="" EXIT_CODE=0
   local RAW="${OUTPUT_FILE}.raw"
   local ERR="${OUTPUT_FILE}.err"
+  local AGENT_FILE=""
 
   INVOKE_FAILURE_CLASS="none"
   _INVOKE_FAILURE_REASON=""
@@ -938,41 +958,40 @@ invoke_kimi() {
     return 127
   fi
 
-  # Agent resolution: kimi has NO native agent flag (KIMI-03) -> INJECTION ONLY.
-  # The kimi-agents/<name>.md body (after frontmatter) is prefixed onto the
-  # prompt (reusing invoke_antigravity's awk frontmatter-strip); else raw with a
-  # warning naming the available briefs. An empty AGENT_NAME is a deliberate raw
-  # run (the READY plumbing probe and lease_dispatch's direct builder command).
+  # Agent resolution (KIMI-03 PASS on 0.42.0, D-024): the plugin's
+  # kimi-agents/<name>.md is a native agent definition loaded through
+  # --agent-file (absolute path). It carries the reviewer's read-only `tools`
+  # allowlist and `subagents: []`, so it rides on BOTH attempts — never
+  # injected, never dropped on retry. Else raw with a warning naming the
+  # available definitions. An empty AGENT_NAME is a deliberate raw run (the
+  # READY plumbing probe and lease_dispatch's direct builder command).
   local FULL_PROMPT="$PROMPT"
   if [ -n "$AGENT_NAME" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/kimi-agents/${AGENT_NAME}.md" ]; then
-    local BODY
-    BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "${CLAUDE_PLUGIN_ROOT}/kimi-agents/${AGENT_NAME}.md")
-    FULL_PROMPT="${BODY}
-
-${PROMPT}"
-    MODE="injection"
+    AGENT_FILE="${CLAUDE_PLUGIN_ROOT}/kimi-agents/${AGENT_NAME}.md"
+    MODE="agent-file"
   elif [ -n "$AGENT_NAME" ]; then
     local AVAILABLE
     AVAILABLE=$(_list_kimi_agents | paste -sd, - 2>/dev/null || echo "")
-    echo "invoke_kimi: WARNING agent '${AGENT_NAME}' not found in plugin kimi-agents/ (kimi has no native agent flag — injection only); falling through to raw prompt (no role brief applied). Available briefs: ${AVAILABLE:-<none>}" >&2
+    echo "invoke_kimi: WARNING agent '${AGENT_NAME}' not found in plugin kimi-agents/; falling through to raw prompt (no agent definition applied). Available definitions: ${AVAILABLE:-<none>}" >&2
     MODE="raw"
   else
     MODE="raw"
   fi
 
-  # Command core: pin model, stream-json capture, telemetry off (R25).
-  # --skills-dir .agents/skills only when present (KIMI-04). No --yolo/--auto:
-  # -p already runs Kimi's auto policy, and reviewer read-only is prompt-level +
-  # worktree confinement (kimi-agents/reviewer.md), not a CLI flag.
+  # Command core: pin model, stream-json capture, telemetry off (R25), the
+  # agent definition when resolved. No --skills-dir (it would REPLACE Kimi's
+  # native .agents/skills discovery — KIMI-04/D-024). No --yolo/--auto: -p
+  # already runs Kimi's auto policy; reviewer read-only is the agent file's
+  # tools allowlist + worktree confinement (kimi-agents/reviewer.md).
   # Flag order matters (commander.js): `-p <prompt>` consumes the NEXT token as
   # its value, so -p MUST come last with the prompt right after it — otherwise
   # `-p --output-format` swallows the format flag and kimi errors "unknown
   # command 'stream-json'". BASE carries everything BEFORE the prompt; each call
   # appends `-p "<prompt>"` itself (matches the KIMI-05 probe invocation order).
   local BASE=(kimi --output-format stream-json -m "$MODEL")
-  [ -d ".agents/skills" ] && BASE+=(--skills-dir .agents/skills)
+  [ -n "$AGENT_FILE" ] && BASE+=(--agent-file "$AGENT_FILE")
 
-  echo "invoke_kimi: agent=${AGENT_NAME:-<none>} mode=${MODE} model=${MODEL} effort=${EFFORT:-none} (K3 max-only; effort inert — no headless flag)" >&2
+  echo "invoke_kimi: agent=${AGENT_NAME:-<none>} mode=${MODE} model=${MODEL} effort=${EFFORT:-none} (recorded for roster parity — Kimi exposes no headless effort flag) agent-file=${AGENT_FILE:-none}" >&2
 
   # stdout -> RAW (clean JSONL for the parser), stderr -> ERR (thinking/progress
   # AND the signed-out error text). KIMI_DISABLE_TELEMETRY rides via `env` so it
@@ -997,6 +1016,11 @@ ${PROMPT}"
     elif grep -qiE 'is not configured in config\.toml|config\.invalid|model .* (is )?not configured|no such model|unknown model' "$RAW" "$ERR" 2>/dev/null; then
       INVOKE_FAILURE_CLASS="deterministic"
       _INVOKE_FAILURE_REASON="model-config"
+    elif [ -n "$AGENT_FILE" ] && grep -qiE 'agent[- ]file|failed to (load|parse) agent|invalid agent|agent definition' "$RAW" "$ERR" 2>/dev/null; then
+      # A definition Kimi cannot load fails identically on retry — and a retry
+      # without it would silently drop the reviewer's tools allowlist.
+      INVOKE_FAILURE_CLASS="deterministic"
+      _INVOKE_FAILURE_REASON="agent-file"
     else
       _classify_invoke_failure "$EXIT_CODE" "$ERR"
     fi
@@ -1007,7 +1031,10 @@ ${PROMPT}"
             echo "invoke_kimi: agent=${AGENT_NAME} exit=${EXIT_CODE} auth failure — kimi is not signed in (\"No model configured\"). Fix: run \`kimi login\` (or launch \`kimi\` and use /login), or set the Kimi API key. No retry (deterministic)." >&2
             ;;
           model-config)
-            echo "invoke_kimi: agent=${AGENT_NAME} exit=${EXIT_CODE} model '${MODEL}' not configured — either kimi is not signed in (login provisions the managed model aliases) or KIMI_MODEL names a model with no [models.*] entry. Fix: run \`kimi login\`, or set KIMI_MODEL to a configured alias (e.g. kimi-code/kimi-for-coding). No retry (deterministic)." >&2
+            echo "invoke_kimi: agent=${AGENT_NAME} exit=${EXIT_CODE} model '${MODEL}' not configured — either kimi is not signed in (\`kimi login\` provisions the managed aliases, kimi-code/k3 included) or KIMI_MODEL names a model with no [models.*] entry in ~/.kimi-code/config.toml. Fix: run \`kimi login\`, or set KIMI_MODEL to a configured alias. No retry (deterministic)." >&2
+            ;;
+          agent-file)
+            echo "invoke_kimi: agent=${AGENT_NAME} exit=${EXIT_CODE} kimi could not load the agent definition ${AGENT_FILE} (see ${ERR}). The definition carries the role's tools allowlist, so it is never dropped on retry — fix the file. No retry (deterministic)." >&2
             ;;
           binary-missing)
             echo "invoke_kimi: agent=${AGENT_NAME} exit=${EXIT_CODE} — \`kimi\` disappeared from PATH mid-run. Fix: install it (curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash), then run \`kimi login\`. No retry (deterministic)." >&2
@@ -1026,7 +1053,7 @@ ${PROMPT}"
             echo "invoke_kimi: kimi is not signed in — run: kimi login (or launch kimi and use /login), or set the Kimi API key" >> "$OUTPUT_FILE" 2>/dev/null || true
             ;;
           model-config)
-            echo "invoke_kimi: model '${MODEL}' not configured — run: kimi login (provisions managed model aliases), or set KIMI_MODEL to a configured model" >> "$OUTPUT_FILE" 2>/dev/null || true
+            echo "invoke_kimi: model '${MODEL}' not configured — run: kimi login (provisions the managed aliases, kimi-code/k3 included), or set KIMI_MODEL to a configured model" >> "$OUTPUT_FILE" 2>/dev/null || true
             ;;
         esac
         rm -f "$RAW" "$ERR"
@@ -1039,8 +1066,10 @@ ${PROMPT}"
         return "$EXIT_CODE"
         ;;
       retryable)
-        # Single retry: raw prompt, no injected brief (mirrors the sibling
-        # helpers). BASE keeps the model pin, stream-json, and --skills-dir.
+        # Single retry: raw prompt. BASE keeps the model pin, stream-json, AND
+        # --agent-file (D-024: the definition is the reviewer's enforcement
+        # boundary, so it is never dropped — unlike the sibling helpers' prompt
+        # prefixes, which are safe to shed).
         echo "invoke_kimi: agent=${AGENT_NAME} exit=${EXIT_CODE} (retryable), retrying once with raw prompt" >&2
         EXIT_CODE=0
         _run_with_timeout "${TIMEOUT}" env KIMI_DISABLE_TELEMETRY=1 "${BASE[@]}" -p "$PROMPT" > "${RAW}.retry" 2>"${ERR}.retry" || EXIT_CODE=$?
@@ -1179,9 +1208,10 @@ with open(os.environ["K_OUT"], "w") as f:
   return $EXIT_CODE
 }
 
-# List known Kimi role-brief names: the plugin kimi-agents/ injection briefs
-# (basename without .md), excluding README. Kimi has NO native/project agent
-# tier (KIMI-03), so there is nothing else to enumerate.
+# List known Kimi agent-definition names: the plugin kimi-agents/ files
+# (basename without .md), excluding README. These are loaded via --agent-file
+# (D-024); nothing is bootstrapped into .agents/agents/ (KTD13: agy and Kimi
+# both scan it with incompatible vocabularies).
 _list_kimi_agents() {
   {
     if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/kimi-agents" ]; then
@@ -1207,10 +1237,16 @@ _list_kimi_agents() {
 # backstop is the copied .cursor/agents/ defs (valid cursor agent defs) plus the
 # AGENTS.md / CLAUDE.md at the repo root, which cursor reads.
 #
-# Every call pins the model with --model "${CURSOR_MODEL:-grok-4.5}" — NEVER the
-# Auto router (CUR-03/CUR-05): ledger attribution needs a named model, and Auto
-# resolves nondeterministically. CURSOR_MODEL is the roster override hook;
-# grok-4.5 is the shipped default (Composer 2.5 is the leading alternative).
+# Every call pins the model with --model "${CURSOR_MODEL:-cursor-grok-4.6-xhigh}"
+# — NEVER the Auto router (CUR-03/CUR-05): ledger attribution needs a named
+# model, and Auto resolves nondeterministically. CURSOR_MODEL is the roster
+# override hook; cursor-grok-4.6-xhigh is the shipped default (D-025; Composer
+# 2.5 is the leading alternative).
+#
+# Binary (D-025): the install script now names `agent` primary and `cursor-agent`
+# legacy, but an unrelated ~/.grok/bin/agent shadows it on some hosts, so
+# _cursor_bin resolves `cursor-agent` first and accepts an `agent` only when its
+# --version matches Cursor's YYYY.MM.DD-<hex> build id (CUR-11).
 #
 # --trust is MANDATORY headless (CUR-04): it bypasses the workspace-trust prompt
 # that otherwise blocks a non-TTY run. -p/--print is a BOOLEAN flag here (unlike
@@ -1237,16 +1273,91 @@ _list_kimi_agents() {
 # on any parse failure the raw stream is preserved so nothing looks like "no
 # findings".
 #
-# Effort: cursor has NO reasoning-effort flag (fact sheet + --help) — its effort
-# levels are separate model IDs (cursor-grok-4.5-high/medium/low), not a flag. So
-# the effort arg is INERT (KTD-8); it is recorded for roster parity, never
-# fabricated into a flag.
+# Effort (D-025, CUR-10/CUR-12): cursor has no reasoning-effort flag and REJECTS
+# the documented bracket form (grok-4.6[effort=xhigh] -> "Cannot use this
+# model"); effort is the model-id SUFFIX: cursor-grok-4.6-low|medium|high|xhigh.
+# _cursor_model_for_effort composes the suffixed id from a bare Grok family name
+# + the roster effort (xhigh/max -> -xhigh) and passes an explicit suffixed id
+# through untouched (effort recorded "in model id"). Never a fabricated suffix
+# for an unknown effort — the bare id is used with a warning.
 #
 # Failure taxonomy (KTD-9): reuses _classify_invoke_failure exactly like the
 # other helpers, plus a deterministic auth preflight (`cursor-agent status`) and a
 # missing-binary preflight, so a call that cannot succeed fails fast with the
 # exact fix.
 #
+# _cursor_bin — print the Cursor CLI binary to use (D-025, CUR-11). Order:
+#   1. TRIFORGE_CURSOR_BIN when already resolved this session (also honored by
+#      resolve_role's Python BINARY map)
+#   2. `cursor-agent` on PATH (the legacy name Cursor still ships as a symlink)
+#   3. every `agent` on PATH, in order, whose `--version` (15 s, fail-closed
+#      timeout wrapper) matches Cursor's ^YYYY.MM.DD-<hex> build id — an
+#      unrelated ~/.grok/bin/agent (prints "grok 0.2.118") is rejected
+# Returns 1 (prints nothing) when none qualifies. PATH is walked by python3 so
+# the same code runs under bash and zsh (this file is sourced under either).
+_cursor_bin() {
+  if [ -n "${TRIFORGE_CURSOR_BIN:-}" ] && [ -x "$TRIFORGE_CURSOR_BIN" ]; then
+    printf '%s\n' "$TRIFORGE_CURSOR_BIN"; return 0
+  fi
+  local CACHE="${TMPDIR:-/tmp}/triforge_cursor_bin_$$"
+  if [ -s "$CACHE" ]; then
+    local C; C=$(cat "$CACHE")
+    if [ -x "$C" ]; then export TRIFORGE_CURSOR_BIN="$C"; printf '%s\n' "$C"; return 0; fi
+  fi
+  local CAND="" V=""
+  if CAND=$(command -v cursor-agent 2>/dev/null) && [ -n "$CAND" ]; then
+    export TRIFORGE_CURSOR_BIN="$CAND"; printf '%s\n' "$CAND" > "$CACHE" 2>/dev/null || true
+    printf '%s\n' "$CAND"; return 0
+  fi
+  while IFS= read -r CAND; do
+    [ -n "$CAND" ] || continue
+    V=$(_run_with_timeout 15 "$CAND" --version 2>/dev/null | head -1 || true)
+    if printf '%s' "$V" | grep -qE '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]+'; then
+      export TRIFORGE_CURSOR_BIN="$CAND"; printf '%s\n' "$CAND" > "$CACHE" 2>/dev/null || true
+      printf '%s\n' "$CAND"; return 0
+    fi
+  done <<AGENTS
+$(python3 -c "
+import os
+seen = set()
+for d in os.environ.get('PATH', '').split(os.pathsep):
+    c = os.path.join(d, 'agent')
+    if os.path.isfile(c) and os.access(c, os.X_OK) and c not in seen:
+        seen.add(c); print(c)
+" 2>/dev/null)
+AGENTS
+  return 1
+}
+
+# _cursor_model_for_effort <model> <effort> — compose Cursor's suffixed model id
+# (D-025: effort rides in the id, cursor-grok-4.6-low|medium|high|xhigh).
+#   bare family (grok-4.6 / cursor-grok-4.6) + effort -> cursor-grok-4.6-<sfx>
+#   explicit suffixed id                              -> unchanged ("in model id")
+#   empty effort                                      -> unchanged
+#   unknown effort                                    -> bare id + warning (never a fabricated suffix)
+#   non-Grok id (composer-2.5, …)                      -> unchanged
+# Sets _CURSOR_EFFORT_NOTE for the stderr summary.
+_CURSOR_EFFORT_NOTE=""
+_cursor_model_for_effort() {
+  local M=${1:-} E=${2:-}
+  _CURSOR_EFFORT_NOTE="in model id"
+  CM_MODEL="$M" CM_EFFORT="$E" python3 -c "
+import os, re, sys
+m = os.environ['CM_MODEL']; e = os.environ['CM_EFFORT']
+sfx = {'low': 'low', 'medium': 'medium', 'high': 'high', 'xhigh': 'xhigh', 'max': 'xhigh'}
+mm = re.match(r'^(?:cursor-)?(grok-[0-9][0-9.]*?)(?:-(low|medium|high|xhigh))?(-fast)?\$', m)
+if not e or not mm:
+    print(m); sys.exit(0)
+fam, had, fast = mm.group(1), mm.group(2), mm.group(3) or ''
+if had:
+    print('cursor-' + fam + '-' + had + fast); sys.exit(0)   # explicit suffix wins
+if e not in sfx:
+    sys.stderr.write('invoke_cursor: WARNING unknown effort ' + repr(e) + ' — passing the bare model ' + repr(m) + ' through (no fabricated suffix)\n')
+    print(m); sys.exit(0)
+print('cursor-' + fam + '-' + sfx[e] + fast)
+"
+}
+
 # invoke_cursor <agent-name> <prompt> [output-file] [timeout-seconds] [effort]
 invoke_cursor() {
   local AGENT_NAME=$1
@@ -1254,19 +1365,24 @@ invoke_cursor() {
   local OUTPUT_FILE=${3:-"${TMPDIR:-/tmp}/cursor_output_$$_$(date +%s).txt"}
   local TIMEOUT=${4:-600}
   local EFFORT=${5:-${CURSOR_EFFORT:-}}
-  local MODEL="${CURSOR_MODEL:-grok-4.5}"
+  local MODEL="${CURSOR_MODEL:-cursor-grok-4.6-xhigh}"
   local MODE="" EXIT_CODE=0
   local RAW="${OUTPUT_FILE}.raw"
   local ERR="${OUTPUT_FILE}.err"
+  local CBIN=""
 
   INVOKE_FAILURE_CLASS="none"
   _INVOKE_FAILURE_REASON=""
 
+  # Effort -> model-id suffix (D-025); the composed id is what --model carries.
+  MODEL=$(_cursor_model_for_effort "$MODEL" "$EFFORT")
+
   # Deterministic preflight 1 (KTD-9): a missing binary can never succeed on
   # retry — fail fast with the exact fix (G12 install guidance) instead of
-  # burning a timeout window.
-  if ! command -v cursor-agent >/dev/null 2>&1; then
-    echo "invoke_cursor: ERROR \`cursor-agent\` (Cursor CLI) not found on PATH — cannot invoke agent '${AGENT_NAME}'. Fix: install it (curl https://cursor.com/install -fsS | bash), then run \`cursor-agent login\`. No retry (deterministic)." >&2
+  # burning a timeout window. _cursor_bin: cursor-agent first, verified `agent`
+  # fallback (CUR-11 rejects the unrelated ~/.grok/bin/agent).
+  if ! CBIN=$(_cursor_bin); then
+    echo "invoke_cursor: ERROR no Cursor CLI on PATH (\`cursor-agent\`, or an \`agent\` whose --version matches YYYY.MM.DD-<hex>) — cannot invoke agent '${AGENT_NAME}'. Fix: install it (curl https://cursor.com/install -fsS | bash), then run \`cursor-agent login\`. No retry (deterministic)." >&2
     # Write the guidance to OUTPUT_FILE too: a caller (e.g. a review fan-out)
     # that only reads the file must not mistake an empty file for "no findings"
     # (the exact trap CLAUDE.md warns about).
@@ -1283,7 +1399,7 @@ invoke_cursor() {
   # roster_member_auth's cursor branch). Output captured (not piped) so the
   # exit-code / pipefail interaction cannot misfire.
   local STATUS_OUT=""
-  STATUS_OUT=$(_run_with_timeout 15 cursor-agent status 2>&1) || true
+  STATUS_OUT=$(_run_with_timeout 15 "$CBIN" status 2>&1) || true
   if ! printf '%s' "$STATUS_OUT" | grep -qi 'logged in'; then
     echo "invoke_cursor: ERROR agent='${AGENT_NAME}' — cursor-agent is not logged in (\`cursor-agent status\` did not report 'Logged in'). Fix: run \`cursor-agent login\` (or set CURSOR_API_KEY). No retry (deterministic)." >&2
     # Guidance to OUTPUT_FILE too (see binary-missing note above).
@@ -1331,14 +1447,14 @@ ${PROMPT}"
   # CUR-04). BASE carries everything BEFORE the prompt; the prompt is appended
   # LAST on each call (trailing positional — -p is boolean, not value-consuming).
   # NEVER --model auto (CUR-03/CUR-05).
-  local BASE=(cursor-agent -p --output-format stream-json --model "$MODEL" --trust)
+  local BASE=("$CBIN" -p --output-format stream-json --model "$MODEL" --trust)
   local ROLE_FLAG_DESC="none"
   case "$ROLE" in
     reviewer) BASE+=(--mode plan); ROLE_FLAG_DESC="--mode plan (read-only, CUR-08)" ;;
     builder)  BASE+=(--force);     ROLE_FLAG_DESC="--force" ;;
   esac
 
-  echo "invoke_cursor: agent=${AGENT_NAME:-<none>} mode=${MODE} role=${ROLE:-raw} model=${MODEL} effort=${EFFORT:-none} (inert — no cursor effort flag) role-flags=${ROLE_FLAG_DESC}" >&2
+  echo "invoke_cursor: agent=${AGENT_NAME:-<none>} mode=${MODE} role=${ROLE:-raw} model=${MODEL} effort=${EFFORT:-none} (${_CURSOR_EFFORT_NOTE:-in model id}) binary=${CBIN} role-flags=${ROLE_FLAG_DESC}" >&2
 
   # stdout -> RAW (JSONL for the parser), stderr -> ERR (diagnostics). Prompt is
   # the trailing positional (after every flag).
@@ -2334,6 +2450,9 @@ _adapter_env() {
   case "$CLI" in
     opencode)
       [ -n "${OPENROUTER_API_KEY+x}" ] && PAIRS+=("OPENROUTER_API_KEY=${OPENROUTER_API_KEY}")
+      # D-033 defense-in-depth: the shipped deny set rides as OPENCODE_PERMISSION
+      # (caller's own value wins) — the adapter stays off --auto regardless.
+      PAIRS+=("OPENCODE_PERMISSION=${OPENCODE_PERMISSION:-$_OPENCODE_PERMISSION_DEFAULT}")
       ;;
     kimi)
       # Forward every EXPORTED KIMI_* var. `compgen` and ${!V} are bash-only,
@@ -2488,6 +2607,29 @@ ${PROMPT}"
 
   rm -f "$OUT" "${OUT}.rc" "${OUT}.class"
 
+  # Lane-specific composition that must happen LEAD-SIDE, before env -i: the
+  # Kimi builder definition's absolute plugin path (D-024), the Cursor binary and
+  # the effort-suffixed Cursor model id (D-025). The ledger records the id that
+  # was actually dispatched (dispatched_model) beside the roster values
+  # (builder_model / builder_effort).
+  local KIMI_AGENT_FILE="" CBIN="" DISPATCH_MODEL="$MODEL"
+  case "$CLI" in
+    kimi)
+      [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/kimi-agents/builder.md" ] && KIMI_AGENT_FILE="${CLAUDE_PLUGIN_ROOT}/kimi-agents/builder.md"
+      DISPATCH_MODEL="${MODEL:-kimi-code/k3}"
+      ;;
+    cursor)
+      DISPATCH_MODEL=$(_cursor_model_for_effort "${MODEL:-cursor-grok-4.6-xhigh}" "$EFFORT")
+      if ! CBIN=$(_cursor_bin); then
+        echo "lease_dispatch: ERROR no Cursor CLI on PATH (cursor-agent, or an agent whose --version matches YYYY.MM.DD-<hex>) — cannot dispatch ${TASK_ID}" >&2
+        return 1
+      fi
+      ;;
+    antigravity) DISPATCH_MODEL="${MODEL:-Gemini 3.8 Flash (High)}" ;;
+    opencode)    DISPATCH_MODEL="${MODEL:-openrouter/z-ai/glm-5.3}" ;;
+  esac
+  _ledger_update "$TASK_ID" dispatched_model="$DISPATCH_MODEL" || return 1
+
   (
     cd "$WT" || exit 97
     RC=0
@@ -2550,7 +2692,7 @@ ${PROMPT}"
           # exactly like the codex case guards model_reasoning_effort. The lease
           # path has no retry, so a provider that rejects the variant surfaces as a
           # KTD-9-classified failure the lead requeues — same as any other lane.
-          local -a CMD=(opencode run --format json -m "${MODEL:-openrouter/z-ai/glm-5.2}")
+          local -a CMD=(opencode run --format json -m "${MODEL:-openrouter/z-ai/glm-5.3}")
           [ -n "$EFFORT" ] && CMD+=(--variant "$EFFORT")
           _adapter_env opencode "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
           ;;
@@ -2563,13 +2705,17 @@ ${PROMPT}"
           # flag and -p uses the auto policy, so confinement is the worktree + env
           # allowlist; the role brief rides in FULL_PROMPT (injection — KIMI-03
           # has no --agent, so no invoke_kimi either: a shell function cannot
-          # cross env -i). Shipped default is kimi-k3, so a live build AUTH-FAILs
-          # until kimi is signed in — that failure is deterministic and the lead
-          # sees it via <out>.class (no requeue).
+          # cross env -i). Shipped default is kimi-code/k3 (the OAuth-managed
+          # alias, D-024), so a live build AUTH-FAILs until kimi is signed in —
+          # that failure is deterministic and the lead sees it via <out>.class
+          # (no requeue). The builder definition rides as --agent-file with the
+          # ABSOLUTE plugin path composed by the lead shell (KIMI_AGENT_FILE,
+          # below) so it survives env -i; no --skills-dir (it would replace
+          # Kimi's native .agents/skills discovery — KIMI-04).
           # -p LAST (commander.js consumes the next token as -p's value; see the
           # invoke_kimi note) — prompt right after -p.
-          local -a CMD=(kimi --output-format stream-json -m "${MODEL:-kimi-k3}")
-          [ -d ".agents/skills" ] && CMD+=(--skills-dir .agents/skills)
+          local -a CMD=(kimi --output-format stream-json -m "${MODEL:-kimi-code/k3}")
+          [ -n "$KIMI_AGENT_FILE" ] && CMD+=(--agent-file "$KIMI_AGENT_FILE")
           _adapter_env kimi "$TOBIN" "${TIMEOUT}s" env KIMI_DISABLE_TELEMETRY=1 "${CMD[@]}" -p "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
           ;;
         cursor)
@@ -2579,17 +2725,20 @@ ${PROMPT}"
           # so no cross-provider credential leak. --trust bypasses the
           # workspace-trust prompt (mandatory headless, CUR-04); --force applies
           # edits without confirmation (builder role, inside the worktree). Model
-          # pinned to grok-4.5 default, NEVER Auto (ledger attribution needs a
-          # named model). Confinement is the worktree + env allowlist, NOT
-          # --sandbox (CUR-07: --sandbox enabled did not confine — an
-          # absolute-path write escaped). -p is a BOOLEAN flag (unlike kimi's -p);
-          # the prompt is the TRAILING POSITIONAL (verified live 2026-07-18), so
-          # it comes LAST. No invoke_cursor (a shell function cannot cross env -i;
-          # the role brief rides in FULL_PROMPT via injection — cursor has no
-          # headless --agent selector either). Shipped default grok-4.5, so a live
-          # build AUTH-FAILs until cursor-agent is logged in — that failure is
-          # deterministic and the lead sees it via <out>.class (no requeue).
-          local -a CMD=(cursor-agent -p --output-format stream-json --model "${MODEL:-grok-4.5}" --trust --force)
+          # pinned to the suffixed id composed by _cursor_model_for_effort from
+          # the roster model + effort (D-025; default cursor-grok-4.6-xhigh),
+          # NEVER Auto (ledger attribution needs a named model). Binary resolved
+          # lead-side by _cursor_bin (CBIN — cursor-agent first, verified `agent`
+          # fallback) and exec'd by absolute path inside env -i. Confinement is
+          # the worktree + env allowlist, NOT --sandbox (CUR-07: --sandbox
+          # enabled did not confine — an absolute-path write escaped). -p is a
+          # BOOLEAN flag (unlike kimi's -p); the prompt is the TRAILING
+          # POSITIONAL (verified live 2026-07-18), so it comes LAST. No
+          # invoke_cursor (a shell function cannot cross env -i; the role brief
+          # rides in FULL_PROMPT via injection — cursor has no headless --agent
+          # selector). A live build AUTH-FAILs until cursor-agent is logged in —
+          # that failure is deterministic and the lead sees it via <out>.class.
+          local -a CMD=("$CBIN" -p --output-format stream-json --model "$DISPATCH_MODEL" --trust --force)
           _adapter_env cursor "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
           ;;
         *)
@@ -3355,7 +3504,7 @@ _roster_binary() {
     codex)       echo "codex" ;;
     opencode)    echo "opencode" ;;
     kimi)        echo "kimi" ;;
-    cursor)      echo "cursor-agent" ;;
+    cursor)      _cursor_bin 2>/dev/null || echo "cursor-agent" ;;
     *) return 2 ;;
   esac
 }
@@ -3903,11 +4052,13 @@ roster_member_auth() {
   local LINE="" RC=0 OUT=""
   case "$CLI" in
     cursor)
-      OUT=$(_run_with_timeout 15 cursor-agent status 2>&1) || true
+      local CBIN_AUTH=""
+      CBIN_AUTH=$(_cursor_bin) || CBIN_AUTH="cursor-agent"
+      OUT=$(_run_with_timeout 15 "$CBIN_AUTH" status 2>&1) || true
       if printf '%s' "$OUT" | grep -qi 'logged in'; then
         LINE="ok"
       else
-        LINE="auth-failed: run 'cursor-agent login' to sign in"; RC=1
+        LINE="auth-failed: run '${CBIN_AUTH##*/} login' to sign in"; RC=1
       fi
       ;;
     opencode)
@@ -3916,7 +4067,7 @@ roster_member_auth() {
       elif _run_with_timeout 15 opencode auth list 2>/dev/null | grep -qi 'openrouter'; then
         LINE="ok"
       else
-        LINE="auth-failed: set OPENROUTER_API_KEY, or run 'opencode auth login' and connect the openrouter provider (the openrouter/z-ai/glm-5.2 default needs it)"; RC=1
+        LINE="auth-failed: set OPENROUTER_API_KEY, or run 'opencode auth login' and connect the openrouter provider (the openrouter/z-ai/glm-5.3 default needs it)"; RC=1
       fi
       ;;
     kimi)
