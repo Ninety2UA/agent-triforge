@@ -57,6 +57,53 @@ ensure_core_trio_live && echo "CORE-TRIO: live" || echo "CORE-TRIO: UNRESOLVED"
   they can see the whole picture. Do NOT run any installer yourself — only the
   user runs installers.
 
+## Step 1b — Codex project trust (read-only detection, D-026)
+
+Since Codex 0.147.0, `codex exec` reads project-tier files (`.codex/hooks.json`,
+`.codex/config.toml`, `.codex/.rules`; `.codex/AGENTS.md` since 0.150.0) only in
+a **trusted** project. Trust lives at the user tier — `~/.codex/config.toml` —
+which Triforge never writes (R18). Detect the exact-path entry and report it;
+the user adds it by hand when missing:
+
+```bash
+CODEX_TRUST=$(CT_PROJECT="$(python3 -c 'import os; print(os.path.realpath(os.getcwd()))')" python3 -c '
+import os, sys
+try:
+    import tomllib
+except ImportError:
+    print("unknown (no tomllib)"); sys.exit(0)
+path = os.path.expanduser("~/.codex/config.toml")
+project = os.environ["CT_PROJECT"]
+try:
+    with open(path, "rb") as f:
+        cfg = tomllib.load(f)
+except FileNotFoundError:
+    print("no-user-config"); sys.exit(0)
+except Exception as exc:
+    print("unreadable (" + str(exc)[:60] + ")"); sys.exit(0)
+entry = (cfg.get("projects") or {}).get(project)
+if isinstance(entry, dict) and entry.get("trust_level"):
+    print("trusted (" + str(entry.get("trust_level")) + ")")
+else:
+    parents = [p for p in (cfg.get("projects") or {}) if project.startswith(p.rstrip("/") + "/")]
+    print("no exact-path trust entry" + ("; parent entries exist: " + ", ".join(parents) + " (whether a parent covers subdirectories is unverified)" if parents else ""))
+' 2>/dev/null)
+echo "CODEX-TRUST: ${CODEX_TRUST:-unknown}"
+```
+
+- `trusted (...)` — project-tier Codex files apply under `exec`; nothing to do.
+- `no exact-path trust entry` — print the block for the user to add to
+  `~/.codex/config.toml` (never write it yourself):
+  ```toml
+  [projects."<absolute project path>"]
+  trust_level = "trusted"
+  ```
+  Explain what stays covered without it: `invoke_codex` passes
+  `--dangerously-bypass-hook-trust` so the CHANGELOG hook still fires (CDX-04),
+  and the role instructions ride as a prompt prefix; `.codex/config.toml`
+  (memories off) and `.codex/AGENTS.md` are skipped until the entry exists.
+- `no-user-config` / `unreadable` / `unknown` — report as is; setup continues.
+
 ## Step 2 — Optional members (guided ask)
 
 For each optional CLI in order — `opencode`, `kimi`, `cursor` (or just the one

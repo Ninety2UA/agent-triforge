@@ -352,8 +352,11 @@ PYAGY
 # config from agents.toml and pass it as -c/-s/-a overrides, with the
 # developer_instructions injected as prompt prefix.
 #
-# Agents.toml lookup: project `.codex/agents/agents.toml` first, then plugin
-# template `${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml`.
+# Agents.toml lookup: the deployed project copy `.codex/triforge-agents.toml`
+# first (D-026: Codex >= 0.147 sweeps `.codex/agents/*.toml` as standalone role
+# files and warns on this multi-agent file, so session-start deploys it under a
+# name outside that sweep), then the plugin template
+# `${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml`.
 invoke_codex() {
   local AGENT_NAME=$1
   local PROMPT=$2
@@ -373,14 +376,14 @@ invoke_codex() {
   fi
 
   local AGENT_TOML=""
-  if [ -f ".codex/agents/agents.toml" ]; then
-    AGENT_TOML=".codex/agents/agents.toml"
+  if [ -f ".codex/triforge-agents.toml" ]; then
+    AGENT_TOML=".codex/triforge-agents.toml"
   elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml" ]; then
     AGENT_TOML="${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml"
   fi
 
-  local AGENT_MODEL="" AGENT_SANDBOX="" AGENT_APPROVAL="" AGENT_INSTR_B64="" AGENT_OUTPUT_SCHEMA=""
-  local AGENT_MODEL_B64="" AGENT_SANDBOX_B64="" AGENT_APPROVAL_B64="" AGENT_OUTPUT_SCHEMA_B64=""
+  local AGENT_MODEL="" AGENT_SANDBOX="" AGENT_APPROVAL="" AGENT_INSTR_B64="" AGENT_OUTPUT_SCHEMA="" AGENT_EFFORT=""
+  local AGENT_MODEL_B64="" AGENT_SANDBOX_B64="" AGENT_APPROVAL_B64="" AGENT_OUTPUT_SCHEMA_B64="" AGENT_EFFORT_B64=""
   if [ -n "$AGENT_TOML" ]; then
     local CONFIG_SH
     CONFIG_SH=$(_extract_codex_agent_config "$AGENT_TOML" "$AGENT_NAME") || CONFIG_SH=""
@@ -394,6 +397,7 @@ invoke_codex() {
       AGENT_SANDBOX=$(printf '%s' "${AGENT_SANDBOX_B64:-}" | base64 -d 2>/dev/null || true)
       AGENT_APPROVAL=$(printf '%s' "${AGENT_APPROVAL_B64:-}" | base64 -d 2>/dev/null || true)
       AGENT_OUTPUT_SCHEMA=$(printf '%s' "${AGENT_OUTPUT_SCHEMA_B64:-}" | base64 -d 2>/dev/null || true)
+      AGENT_EFFORT=$(printf '%s' "${AGENT_EFFORT_B64:-}" | base64 -d 2>/dev/null || true)
     fi
   fi
 
@@ -414,6 +418,13 @@ invoke_codex() {
   if [ -n "${CODEX_MODEL:-}" ]; then
     AGENT_MODEL="$CODEX_MODEL"
   fi
+  # Effort replay (R3, KTD5): agents.toml's model_reasoning_effort rides as a
+  # -c override on every exec; CODEX_EFFORT (set by dispatch_role from the
+  # roster's effort column) wins over the file so a [roles.*] effort actually
+  # reaches Codex — the lease lane already did this, the foreground lane did not.
+  if [ -n "${CODEX_EFFORT:-}" ]; then
+    AGENT_EFFORT="$CODEX_EFFORT"
+  fi
 
   local INSTRUCTIONS=""
   if [ -n "$AGENT_INSTR_B64" ]; then
@@ -421,13 +432,13 @@ invoke_codex() {
   fi
 
   # `codex exec` accepts -m/-s but NOT -a (approval is set via -c override).
-  # Codex has DEPRECATED --full-auto (it still runs but prints a warning; the docs
-  # steer new scripts to explicit --sandbox workspace-write — corrected from the
-  # earlier "removed in v0.128.0" wording per the 2026-07-18 cli-watch primary-source
-  # check). Supply its prior semantics (workspace-write sandbox + never approve)
-  # explicitly when an agent has no overrides.
+  # --full-auto was REMOVED in Codex 0.147.0 (PR 36054 — `error: unexpected
+  # argument` on 0.154.0; the 2026-07 "deprecated, prints a warning" wording is
+  # superseded per D-026). Its former semantics (workspace-write sandbox + never
+  # approve) are supplied explicitly when an agent has no overrides.
   local CMD=(codex exec)
   [ -n "$AGENT_MODEL" ]    && CMD+=(-m "$AGENT_MODEL")
+  [ -n "$AGENT_EFFORT" ]   && CMD+=(-c "model_reasoning_effort=\"${AGENT_EFFORT}\"")
   if [ -n "$AGENT_SANDBOX" ]; then
     CMD+=(-s "$AGENT_SANDBOX")
   else
@@ -454,8 +465,10 @@ invoke_codex() {
   fi
 
   # Structured output (probe CDX-05): when the agent's agents.toml entry
-  # carries the Triforge-level `output_schema` key, resolve the schema file
-  # (project .codex/agents/ first, then the plugin's codex-agents/) and pass
+  # carries the Triforge-level `output_schema` key, resolve the schema file at
+  # the plugin tier (`${CLAUDE_PLUGIN_ROOT}/codex-agents/` — nothing ever
+  # deployed a project copy, and `.codex/agents/` is now Codex's role-file
+  # sweep, D-026) and pass
   # --output-schema plus -o so the schema-valid final message lands in
   # ${OUTPUT_FILE}.last. Feature-gated only if `codex features list` carries
   # a row named like output_schema/structured_output; 0.144.4 has no such
@@ -471,12 +484,10 @@ invoke_codex() {
       fi
     fi
     if [ "$SCHEMA_GATE" -eq 1 ]; then
-      if [ -f ".codex/agents/${AGENT_OUTPUT_SCHEMA}" ]; then
-        SCHEMA_PATH=".codex/agents/${AGENT_OUTPUT_SCHEMA}"
-      elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/codex-agents/${AGENT_OUTPUT_SCHEMA}" ]; then
+      if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/codex-agents/${AGENT_OUTPUT_SCHEMA}" ]; then
         SCHEMA_PATH="${CLAUDE_PLUGIN_ROOT}/codex-agents/${AGENT_OUTPUT_SCHEMA}"
       else
-        echo "invoke_codex: WARNING agent '${AGENT_NAME}' requests output_schema '${AGENT_OUTPUT_SCHEMA}' but no such file in .codex/agents/ or plugin codex-agents/ — running without --output-schema" >&2
+        echo "invoke_codex: WARNING agent '${AGENT_NAME}' requests output_schema '${AGENT_OUTPUT_SCHEMA}' but no such file in the plugin's codex-agents/ (CLAUDE_PLUGIN_ROOT unset or file missing) — running without --output-schema" >&2
       fi
     fi
   fi
@@ -500,7 +511,7 @@ invoke_codex() {
 ${PROMPT}"
   fi
 
-  echo "invoke_codex: agent=${AGENT_NAME} model=${AGENT_MODEL:-session-default} sandbox=${AGENT_SANDBOX:-session-default} approval=${AGENT_APPROVAL:-session-default} hooks=${HOOKS_MODE} schema=${SCHEMA_PATH:-none}" >&2
+  echo "invoke_codex: agent=${AGENT_NAME} model=${AGENT_MODEL:-session-default} effort=${AGENT_EFFORT:-session-default} sandbox=${AGENT_SANDBOX:-session-default} approval=${AGENT_APPROVAL:-session-default} hooks=${HOOKS_MODE} schema=${SCHEMA_PATH:-none} agents-toml=${AGENT_TOML:-none}" >&2
 
   # `< /dev/null` is mandatory: codex exec reads piped stdin ("Reading
   # additional input from stdin...") and hangs waiting for EOF whenever the
@@ -544,6 +555,17 @@ ${PROMPT}"
         fi
         ;;
     esac
+  fi
+
+  # Codex prints two advisory lines into the captured stream that would
+  # otherwise be promoted verbatim into ops/REVIEW_CODEX.md (commands/review.md
+  # consumer): the --dangerously-bypass-hook-trust warning and, when a stale
+  # .codex/agents/agents.toml is still present, "Ignoring malformed agent role
+  # definition". Strip them from OUTPUT_FILE; the raw stream is not otherwise
+  # altered.
+  if [ -f "$OUTPUT_FILE" ]; then
+    grep -vE '^(warning|WARN|WARNING):? .*bypass-hook-trust|Ignoring malformed agent role definition' "$OUTPUT_FILE" > "${OUTPUT_FILE}.clean" 2>/dev/null || true
+    mv "${OUTPUT_FILE}.clean" "$OUTPUT_FILE" 2>/dev/null || true
   fi
 
   # Structured-verdict capture: validate the schema-constrained last message
@@ -1704,6 +1726,7 @@ print('AGENT_SANDBOX_B64='       + _b64(agent.get('sandbox_mode', '')))
 print('AGENT_APPROVAL_B64='      + _b64(agent.get('approval_policy', '')))
 print('AGENT_INSTR_B64='         + _b64(agent.get('developer_instructions', '')))
 print('AGENT_OUTPUT_SCHEMA_B64=' + _b64(agent.get('output_schema', '')))
+print('AGENT_EFFORT_B64='        + _b64(agent.get('model_reasoning_effort', '')))
 "
 }
 
@@ -1960,11 +1983,12 @@ dispatch_role() {
       ;;
     codex)
       # Codex resolves sandbox/approval/instructions from its agents.toml entry;
-      # the roster model rides the CODEX_MODEL override (same pattern as the
-      # other lanes) so a [roles.*] model customization reaches `codex exec -m`.
-      # The shipped default (gpt-6-astra) matches the agents.toml pins, so this
-      # is a no-op until a user actually customizes the role's model.
-      CODEX_MODEL="$MODEL" invoke_codex "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT"
+      # the roster model and effort ride the CODEX_MODEL / CODEX_EFFORT
+      # overrides (same pattern as the other lanes) so a [roles.*] model or
+      # effort customization reaches `codex exec -m` / -c model_reasoning_effort.
+      # The shipped defaults (gpt-6-astra, xhigh) match the agents.toml pins, so
+      # this is a no-op until a user actually customizes the role.
+      CODEX_MODEL="$MODEL" CODEX_EFFORT="$EFFORT" invoke_codex "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT"
       ;;
     opencode)
       OPENCODE_MODEL="$MODEL" invoke_opencode "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"

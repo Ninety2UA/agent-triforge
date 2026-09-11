@@ -1,42 +1,57 @@
 # Codex CLI Agent Definitions — Agent Triforge
-# Copied to .codex/agents/agents.toml at session start.
+# Deployed to .codex/triforge-agents.toml at session start (D-026: Codex >= 0.147
+# sweeps .codex/agents/*.toml as standalone role files and warns "Ignoring
+# malformed agent role definition" on this multi-agent file, so it must NOT live
+# under .codex/agents/; session-start.sh moves a pre-3.3.0 copy once).
 #
 # These define specialized Codex subagent roles used during
 # review (Phase 3), testing (Phase 5), and debugging.
 #
 # Convention: this file is Triforge-internal — scripts/invoke-external.sh
-# parses it and replays the values as `codex exec` flags/-c overrides
-# (developer_instructions becomes a prompt prefix). Codex CLI itself never
-# reads this file, so Triforge-level keys like `output_schema` (resolved by
-# the helper to a --output-schema path) are valid here even though they are
-# not part of Codex's own [agents] config schema.
+# parses it and replays `model`, `model_reasoning_effort`, `sandbox_mode`,
+# `approval_policy`, `output_schema`, and `developer_instructions` as
+# `codex exec` flags/-c overrides (developer_instructions becomes a prompt
+# prefix). Codex CLI itself never reads this file, so Triforge-level keys like
+# `output_schema` (resolved by the helper to a --output-schema path) and the
+# per-agent `tools` allowlist are declarations carried in the developer
+# instructions, not enforced Codex config; the enforced isolation is
+# sandbox_mode + approval_policy. Codex's own plan-tool switch is the
+# top-level config key `tools.update_plan.enabled` (default false since
+# 0.152.0) — the former per-agent `include_plan_tool` was never a Codex key
+# and is gone.
 
-# Top-level agent runtime caps. logic_reviewer and test_writer spawn sub-agents
-# for 5+ file scopes; without explicit caps, nesting depth defaults to 1 and
-# would block those spawn paths. max_depth = 2 raises the cap by exactly one
-# level so a single spawn round is allowed but recursive spawn-of-spawn is
-# blocked — runaway protection. max_threads caps parallel fan-out at any depth.
+# Top-level agent runtime caps (Triforge-internal declarations — see the
+# convention note above; nothing replays them as -c overrides yet, that is a
+# deferred item). logic_reviewer and test_writer spawn sub-agents for 5+ file
+# scopes; max_depth = 2 declares one spawn round with no spawn-of-spawn.
+# NOTE (D-026): `max_depth` is honored only by the V1 multi-agent runtime —
+# gpt-6-astra / gpt-5.6-sol run multi_agent_v2 by catalog and ignore it;
+# `job_max_runtime_seconds` is a no-op on current Codex. The two
+# default_subagent_* keys declare the model/effort every spawned sub-agent
+# should pin (S18: set model and effort on every spawn).
 [agents]
 max_depth = 2
 max_threads = 4
 job_max_runtime_seconds = 1800
+default_subagent_model = "gpt-6-astra"
+default_subagent_reasoning_effort = "xhigh"
 
 [agents.logic_reviewer]
 name = "logic_reviewer"
 description = "Logic and security reviewer for Phase 3. Reviews code for correctness, edge cases, type safety, security vulnerabilities, and test coverage gaps."
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 model_reasoning_effort = "xhigh"
-# model_reasoning_effort = "max"    # opt-in — probe CDX-06 PASS on gpt-5.6-sol (2026-07-17)
-# model_reasoning_effort = "ultra"  # opt-in — probe CDX-07 PASS; NOTE: ultra fans out to internal subagents (changes execution shape/cost)
+# model_reasoning_effort = "max"    # opt-in — CDX-06 re-probes it on gpt-6-astra each cycle (newest ops/research/*-probe-record.md)
+# model_reasoning_effort = "ultra"  # opt-in — CDX-07 re-probes it on gpt-6-astra; NOTE: ultra fans out to internal subagents (changes execution shape/cost)
 sandbox_mode = "read-only"
 approval_policy = "never"
 # Triforge-level key (see header): invoke-external.sh resolves this file name
-# against .codex/agents/ then ${CLAUDE_PLUGIN_ROOT}/codex-agents/ and passes
-# it as --output-schema, capturing the schema-valid final message to
-# <output>.verdict.json (probe CDX-05 PASS, 2026-07-17).
+# at the plugin tier (${CLAUDE_PLUGIN_ROOT}/codex-agents/ — D-026 retired the
+# .codex/agents/ sibling lookup) and passes it as --output-schema, capturing the
+# schema-valid final message to <output>.verdict.json (CDX-05 PASS 2026-07-17,
+# re-verified 2026-09-11 on 0.154.0).
 output_schema = "review-verdict.schema.json"
 tools = ["read", "grep", "glob"]
-include_plan_tool = false
 developer_instructions = """
 You are reviewing code in a multi-agent repository.
 
@@ -110,14 +125,13 @@ Write findings to ops/REVIEW_CODEX.md in this format:
 [agents.test_writer]
 name = "test_writer"
 description = "TDD test writing agent for Phase 5. Writes tests using RED-GREEN-REFACTOR methodology, conforming to CONTRACTS.md types."
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 model_reasoning_effort = "xhigh"
-# model_reasoning_effort = "max"    # opt-in — probe CDX-06 PASS on gpt-5.6-sol (2026-07-17)
-# model_reasoning_effort = "ultra"  # opt-in — probe CDX-07 PASS; NOTE: ultra fans out to internal subagents (changes execution shape/cost)
+# model_reasoning_effort = "max"    # opt-in — CDX-06 re-probes it on gpt-6-astra each cycle (newest ops/research/*-probe-record.md)
+# model_reasoning_effort = "ultra"  # opt-in — CDX-07 re-probes it on gpt-6-astra; NOTE: ultra fans out to internal subagents (changes execution shape/cost)
 sandbox_mode = "workspace-write"
 approval_policy = "never"
 tools = ["read", "grep", "glob", "write", "bash"]
-include_plan_tool = false
 developer_instructions = """
 You are the testing agent in a multi-agent repository. Follow the RED-GREEN-REFACTOR cycle strictly.
 
@@ -193,14 +207,13 @@ If the test scope covers 5+ files, use spawn_agent to parallelize:
 [agents.debugger]
 name = "debugger"
 description = "Structured debugging agent. Follows systematic-debugging methodology with error taxonomy, assumption tracking, and root cause analysis."
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 model_reasoning_effort = "xhigh"
-# model_reasoning_effort = "max"    # opt-in — probe CDX-06 PASS on gpt-5.6-sol (2026-07-17)
-# model_reasoning_effort = "ultra"  # opt-in — probe CDX-07 PASS; NOTE: ultra fans out to internal subagents (changes execution shape/cost)
+# model_reasoning_effort = "max"    # opt-in — CDX-06 re-probes it on gpt-6-astra each cycle (newest ops/research/*-probe-record.md)
+# model_reasoning_effort = "ultra"  # opt-in — CDX-07 re-probes it on gpt-6-astra; NOTE: ultra fans out to internal subagents (changes execution shape/cost)
 sandbox_mode = "workspace-write"
 approval_policy = "never"
 tools = ["read", "grep", "glob", "write", "bash"]
-include_plan_tool = false
 developer_instructions = """
 You are the debugging agent in a multi-agent repository. Never guess. Follow the diagnostic protocol.
 

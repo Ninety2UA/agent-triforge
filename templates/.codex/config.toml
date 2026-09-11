@@ -1,6 +1,9 @@
 # Agent Triforge — project-level Codex CLI config.
 # Copied by hooks/handlers/session-start.sh on first session start.
 # Do not commit user-specific secrets here; user-tier config goes in ~/.codex/config.toml.
+# Applies ONLY in a trusted project (Codex >= 0.147.0 skips project-tier config
+# under `exec` when the project is untrusted — see README.md for the
+# [projects."<abs-path>"] trust_level = "trusted" entry to add at the user tier).
 
 [memories]
 # Codex v0.129.0 added an auto-memory pipeline that writes

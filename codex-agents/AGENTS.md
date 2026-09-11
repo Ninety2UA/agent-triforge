@@ -63,3 +63,9 @@ You have access to `spawn_agent`, `wait_agent`, `send_input`, and `close_agent` 
 - **Scope is small (< 5 files):** Handle sequentially — spawning agents adds overhead.
 
 When merging results from subagents, deduplicate findings and use the highest confidence level when multiple agents flag the same issue.
+
+**Spawn hygiene (S18):**
+- Set the model and reasoning effort on every spawn explicitly (`gpt-6-astra`, `xhigh` — the roster's pins; never inherit an unpinned default).
+- Wait for every spawned agent before reading or merging its output: call `wait_agent` on each id you spawned, then `close_agent` it. Never merge a partial result, never poll with `send_input`, and never re-spawn an agent that has not been waited on.
+- One spawn round only (no spawn-of-spawn); if a sub-agent reports it needs more scope, finish sequentially instead of nesting.
+- A spawned agent that returns nothing is a failed sub-task: record it as such in the output file rather than silently dropping its scope.
