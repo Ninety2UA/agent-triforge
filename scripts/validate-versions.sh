@@ -459,6 +459,25 @@ for path in files:
                         + str(actual[kind]) + " — " + m.group(0).strip()
                     )
 
+# Landing-page hero counters carry the number in a data-target attribute and
+# the surface name in the next span, so the prose CLAIM regex never sees them.
+HERO = re.compile(
+    r'data-target="(?P<n>\d+)">0</span>\s*<span class="hero__stat-label">(?P<kind>Agents|Skills|Commands)</span>'
+)
+if os.path.exists("docs/index.html"):
+    with open("docs/index.html", encoding="utf-8") as fh:
+        html = fh.read()
+    for m in HERO.finditer(html):
+        kind = m.group("kind").lower().rstrip("s")
+        n = int(m.group("n"))
+        claims += 1
+        if n != actual[kind]:
+            lineno = html.count("\n", 0, m.start()) + 1
+            mismatches.append(
+                "docs/index.html:" + str(lineno) + ": hero counter says " + str(n) + " " + kind + "s, shipped "
+                + str(actual[kind]) + " — data-target=\"" + str(n) + "\" " + m.group("kind")
+            )
+
 for line in mismatches:
     print("FAIL: counts: " + line)
 if mismatches:
