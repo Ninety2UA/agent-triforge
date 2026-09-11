@@ -30,6 +30,16 @@
 # The variable is only visible on synchronous calls in the same shell —
 # background invocations (`invoke_antigravity ... &`) cannot export it back.
 #
+# Host-marker scrub (D-031c / U5): every foreground invoke_* helper runs its CLI
+# under _HOST_SCRUB — `env -u` of the markers the lead's own harness exports
+# (CLAUDECODE, CODEX_SANDBOX*, CODEX_SESSION_ID, CODEX_THREAD_ID, CODEX_CI,
+# GROK_AGENT, GROK_SESSION_ID, CURSOR_AGENT, CURSOR_CONVERSATION_ID,
+# OPENCODE_TERMINAL, CLICOLOR_FORCE, GH_FORCE_TTY) plus NO_COLOR=1 — so a
+# dispatched CLI never mistakes the lead's session for its own and never
+# colors captured output. The lease lane's _adapter_env is `env -i` with an
+# explicit allowlist, so those markers are already absent there; it adds the
+# same NO_COLOR=1.
+#
 # Codex feature detection: capability decisions for the Codex lane (hooks,
 # structured output) come from `codex features list` at runtime — cached once
 # per session by _codex_feature_enabled — never from version-string reasoning
@@ -40,6 +50,12 @@
 # without enforcement (macOS: brew install coreutils). Applies to both lanes.
 
 set -euo pipefail
+
+# Host-marker scrub prefix for the foreground invoke_* lanes (see the header).
+_HOST_SCRUB=(env -u CLAUDECODE -u CODEX_SANDBOX -u CODEX_SANDBOX_NETWORK_DISABLED
+             -u CODEX_SESSION_ID -u CODEX_THREAD_ID -u CODEX_CI -u GROK_AGENT
+             -u GROK_SESSION_ID -u CURSOR_AGENT -u CURSOR_CONVERSATION_ID
+             -u OPENCODE_TERMINAL -u CLICOLOR_FORCE -u GH_FORCE_TTY NO_COLOR=1)
 
 # ---------------------------------------------------------------------------
 # Antigravity invocation
@@ -161,7 +177,7 @@ ${PROMPT}"
 
   echo "invoke_antigravity: agent=${AGENT_NAME} mode=${MODE} model=${MODEL}" >&2
 
-  _run_with_timeout "${TIMEOUT}" "${CMD[@]}" -p "$FULL_PROMPT" < /dev/null > "$RAW" 2> "$ERR" || EXIT_CODE=$?
+  _run_with_timeout "${TIMEOUT}" "${_HOST_SCRUB[@]}" "${CMD[@]}" -p "$FULL_PROMPT" < /dev/null > "$RAW" 2> "$ERR" || EXIT_CODE=$?
 
   # Envelope verdict on a clean exit: 0 usable prose; 11/13 empty (no denial /
   # non-SUCCESS status) -> retry once with the raw prompt; 10 denied+empty ->
@@ -235,7 +251,7 @@ ${PROMPT}"
       retryable)
         echo "invoke_antigravity: agent=${AGENT_NAME} exit=${EXIT_CODE}${AGY_REASON:+ (${AGY_REASON})} (retryable), retrying with raw prompt" >&2
         EXIT_CODE=0
-        _run_with_timeout "${TIMEOUT}" "${BASE_CMD[@]}" -p "$PROMPT" < /dev/null > "${RAW}.retry" 2> "${ERR}.retry" || EXIT_CODE=$?
+        _run_with_timeout "${TIMEOUT}" "${_HOST_SCRUB[@]}" "${BASE_CMD[@]}" -p "$PROMPT" < /dev/null > "${RAW}.retry" 2> "${ERR}.retry" || EXIT_CODE=$?
         if [ "$EXIT_CODE" -eq 0 ]; then
           mv "${RAW}.retry" "$RAW"; mv "${ERR}.retry" "$ERR" 2>/dev/null || true
           PRC=0
@@ -516,7 +532,7 @@ ${PROMPT}"
   # `< /dev/null` is mandatory: codex exec reads piped stdin ("Reading
   # additional input from stdin...") and hangs waiting for EOF whenever the
   # caller's stdin is not a TTY (probe record 2026-07-17).
-  _run_with_timeout "${TIMEOUT}" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUTPUT_FILE" 2>&1 || EXIT_CODE=$?
+  _run_with_timeout "${TIMEOUT}" "${_HOST_SCRUB[@]}" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUTPUT_FILE" 2>&1 || EXIT_CODE=$?
 
   # KTD-9: same taxonomy as invoke_antigravity — classify before reacting;
   # only retryable failures get the retry-once-with-raw-prompt treatment.
@@ -545,7 +561,7 @@ ${PROMPT}"
         echo "invoke_codex: agent=${AGENT_NAME} exit=${EXIT_CODE} (retryable), retrying with raw prompt" >&2
         EXIT_CODE=0
         SCHEMA_APPLIED=0
-        _run_with_timeout "${TIMEOUT}" "${BASE_CMD[@]}" "$PROMPT" < /dev/null > "${OUTPUT_FILE}.retry" 2>&1 || EXIT_CODE=$?
+        _run_with_timeout "${TIMEOUT}" "${_HOST_SCRUB[@]}" "${BASE_CMD[@]}" "$PROMPT" < /dev/null > "${OUTPUT_FILE}.retry" 2>&1 || EXIT_CODE=$?
         if [ "$EXIT_CODE" -eq 0 ]; then
           mv "${OUTPUT_FILE}.retry" "$OUTPUT_FILE"
           INVOKE_FAILURE_CLASS="none"
@@ -708,7 +724,7 @@ invoke_opencode() {
   echo "invoke_opencode: agent=${AGENT_NAME:-<none>} mode=${MODE} model=${MODEL} effort=${EFFORT:-none}" >&2
 
   # No --auto, ever (OC-06). Reviewer safety is the agent-def permission map.
-  _run_with_timeout "${TIMEOUT}" "${ATTEMPT[@]}" "$PROMPT" > "$RAW" 2>&1 || EXIT_CODE=$?
+  _run_with_timeout "${TIMEOUT}" "${_HOST_SCRUB[@]}" "${ATTEMPT[@]}" "$PROMPT" > "$RAW" 2>&1 || EXIT_CODE=$?
 
   if [ "$EXIT_CODE" -ne 0 ]; then
     _classify_invoke_failure "$EXIT_CODE" "$RAW"
@@ -747,7 +763,7 @@ invoke_opencode() {
         # Single retry: raw prompt, no --agent, and — per OC-05 — no --variant.
         echo "invoke_opencode: agent=${AGENT_NAME} exit=${EXIT_CODE} (retryable), retrying once with raw prompt${EFFORT:+ (dropping --variant ${EFFORT})}" >&2
         EXIT_CODE=0
-        _run_with_timeout "${TIMEOUT}" "${BASE[@]}" "$PROMPT" > "${RAW}.retry" 2>&1 || EXIT_CODE=$?
+        _run_with_timeout "${TIMEOUT}" "${_HOST_SCRUB[@]}" "${BASE[@]}" "$PROMPT" > "${RAW}.retry" 2>&1 || EXIT_CODE=$?
         if [ "$EXIT_CODE" -eq 0 ]; then
           mv "${RAW}.retry" "$RAW"
           INVOKE_FAILURE_CLASS="none"
@@ -996,7 +1012,7 @@ invoke_kimi() {
   # stdout -> RAW (clean JSONL for the parser), stderr -> ERR (thinking/progress
   # AND the signed-out error text). KIMI_DISABLE_TELEMETRY rides via `env` so it
   # is set no matter the caller's environment.
-  _run_with_timeout "${TIMEOUT}" env KIMI_DISABLE_TELEMETRY=1 "${BASE[@]}" -p "$FULL_PROMPT" > "$RAW" 2>"$ERR" || EXIT_CODE=$?
+  _run_with_timeout "${TIMEOUT}" "${_HOST_SCRUB[@]}" KIMI_DISABLE_TELEMETRY=1 "${BASE[@]}" -p "$FULL_PROMPT" > "$RAW" 2>"$ERR" || EXIT_CODE=$?
 
   if [ "$EXIT_CODE" -ne 0 ]; then
     # Deterministic overrides FIRST (KIMI-05): kimi doctor cannot gate auth, so
@@ -1072,7 +1088,7 @@ invoke_kimi() {
         # prefixes, which are safe to shed).
         echo "invoke_kimi: agent=${AGENT_NAME} exit=${EXIT_CODE} (retryable), retrying once with raw prompt" >&2
         EXIT_CODE=0
-        _run_with_timeout "${TIMEOUT}" env KIMI_DISABLE_TELEMETRY=1 "${BASE[@]}" -p "$PROMPT" > "${RAW}.retry" 2>"${ERR}.retry" || EXIT_CODE=$?
+        _run_with_timeout "${TIMEOUT}" "${_HOST_SCRUB[@]}" KIMI_DISABLE_TELEMETRY=1 "${BASE[@]}" -p "$PROMPT" > "${RAW}.retry" 2>"${ERR}.retry" || EXIT_CODE=$?
         if [ "$EXIT_CODE" -eq 0 ]; then
           mv "${RAW}.retry" "$RAW"
           mv "${ERR}.retry" "$ERR" 2>/dev/null || true
@@ -1458,7 +1474,7 @@ ${PROMPT}"
 
   # stdout -> RAW (JSONL for the parser), stderr -> ERR (diagnostics). Prompt is
   # the trailing positional (after every flag).
-  _run_with_timeout "${TIMEOUT}" "${BASE[@]}" "$FULL_PROMPT" > "$RAW" 2>"$ERR" || EXIT_CODE=$?
+  _run_with_timeout "${TIMEOUT}" "${_HOST_SCRUB[@]}" "${BASE[@]}" "$FULL_PROMPT" > "$RAW" 2>"$ERR" || EXIT_CODE=$?
 
   if [ "$EXIT_CODE" -ne 0 ]; then
     # Deterministic auth override FIRST: a mid-run signed-out/credential error
@@ -1505,7 +1521,7 @@ ${PROMPT}"
         # retry-safe role flag.
         echo "invoke_cursor: agent=${AGENT_NAME} exit=${EXIT_CODE} (retryable), retrying once with raw prompt" >&2
         EXIT_CODE=0
-        _run_with_timeout "${TIMEOUT}" "${BASE[@]}" "$PROMPT" > "${RAW}.retry" 2>"${ERR}.retry" || EXIT_CODE=$?
+        _run_with_timeout "${TIMEOUT}" "${_HOST_SCRUB[@]}" "${BASE[@]}" "$PROMPT" > "${RAW}.retry" 2>"${ERR}.retry" || EXIT_CODE=$?
         if [ "$EXIT_CODE" -eq 0 ]; then
           mv "${RAW}.retry" "$RAW"
           mv "${ERR}.retry" "$ERR" 2>/dev/null || true
@@ -2447,6 +2463,7 @@ _adapter_env() {
   [ -n "${TERM+x}" ]      && PAIRS+=("TERM=${TERM}")
   [ -n "${LANG+x}" ]      && PAIRS+=("LANG=${LANG}")
   [ -n "${COLORTERM+x}" ] && PAIRS+=("COLORTERM=${COLORTERM}")
+  PAIRS+=("NO_COLOR=1")   # captured output is parsed, never rendered (U5)
   case "$CLI" in
     opencode)
       [ -n "${OPENROUTER_API_KEY+x}" ] && PAIRS+=("OPENROUTER_API_KEY=${OPENROUTER_API_KEY}")
@@ -2595,6 +2612,23 @@ lease_dispatch() {
   OUT="${ROOT}/${TASK_ID}.out"
   TOBIN=$(_timeout_tool) || return $?
 
+  # Dispatch contract (KTD11 / S5+S13+S14) — one block for EVERY lane, claude
+  # included: no sub-dispatch, git stays local, and a typed final report whose
+  # `Status:` line lease_collect parses (a clean exit without it is "report
+  # missing", never review-ready). The lane's builder brief body (opencode /
+  # cursor: opencode-agents|cursor-agents/builder.md, frontmatter stripped) is
+  # prepended here; Kimi's arrives natively via --agent-file; claude / codex /
+  # antigravity carry no separate builder brief (their role instructions are
+  # the contract itself). Wording is CLI-neutral on purpose.
+  local BRIEF_BODY="" BRIEF_FILE=""
+  case "$CLI" in
+    opencode|cursor)
+      BRIEF_FILE="${CLAUDE_PLUGIN_ROOT:-}/${CLI}-agents/builder.md"
+      if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "$BRIEF_FILE" ]; then
+        BRIEF_BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "$BRIEF_FILE")
+      fi
+      ;;
+  esac
   local FULL_PROMPT
   FULL_PROMPT="## Lease dispatch: ${TASK_ID}
 Roster entry: role=${ROLE} cli=${CLI} model=${MODEL:-<host-default>} effort=${EFFORT}
@@ -2602,6 +2636,19 @@ Roster entry: role=${ROLE} cli=${CLI} model=${MODEL:-<host-default>} effort=${EF
 ## Confinement contract
 You are working in an isolated worktree at ${WT}. Never modify files outside it. Never read or write the project's canonical ops/ directory — required context is included below. Commit nothing; the lead collects.
 
+## Dispatch contract (applies to every builder)
+- Do not spawn sub-agents, delegate, or invoke other coding tools; do the work yourself in this worktree.
+- Never run git push, git pull, or git fetch. Do not commit, rebase, or switch branches.
+- Finish with a final report in exactly this shape (the lead parses the Status line; a run without it is treated as incomplete):
+  Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+  Files changed: <list>
+  Tests: <one-line summary, or none>
+  Concerns: <list, or None>
+  Discoveries for later tasks: <list, or None>
+${BRIEF_BODY:+
+## Builder role brief
+${BRIEF_BODY}
+}
 ## Task
 ${PROMPT}"
 
@@ -2840,7 +2887,7 @@ for t, r in sorted(data.get('lease', {}).items()):
     if isinstance(r, dict) and r.get('state') == 'building':
         print(t)
 ")
-  local SWEPT=0 ORPHANED=0
+  local SWEPT=0 ORPHANED=0 UNVERIFIED=0
   # $TASKS is NEWLINE-separated. Iterate with read, NOT `for TASK in $TASKS`:
   # under zsh (the caller's shell on macOS) an unquoted $TASKS is not
   # word-split, so `for` would run once on the whole "taskA\ntaskB" blob and
@@ -2856,6 +2903,14 @@ for t, r in sorted(data.get('lease', {}).items()):
     local PID OUT DEADLINE ALIVE FRESH AGE
     PID=$(_ledger_get "$TASK" pid)
     OUT=$(_ledger_get "$TASK" output_file)
+    if [ -z "$PID" ] || [ -z "$OUT" ]; then
+      # Could not verify: a building row with no pid/output to judge liveness
+      # by (ledger written by an older version, or a crash between dispatch
+      # and its ledger update). Report it, leave it alone — never guess.
+      echo "lease_heartbeat_check: ${TASK} building but pid/output_file missing from the ledger — cannot verify liveness (degraded); inspect and reclaim by hand" >&2
+      UNVERIFIED=$((UNVERIFIED + 1))
+      continue
+    fi
     DEADLINE=$(_ledger_get "$TASK" heartbeat_deadline)
     ALIVE=0
     [ -n "$PID" ] && [ "$PID" -gt 0 ] 2>/dev/null && kill -0 "$PID" 2>/dev/null && ALIVE=1
@@ -2897,7 +2952,8 @@ print(int(time.time() - os.path.getmtime(os.environ['OUT_FILE'])))
   done <<HEARTBEAT_TASKS
 $TASKS
 HEARTBEAT_TASKS
-  echo "lease_heartbeat_check: swept ${SWEPT} building lease(s), orphaned ${ORPHANED}" >&2
+  echo "lease_heartbeat_check: swept ${SWEPT} building lease(s), orphaned ${ORPHANED}, unverifiable ${UNVERIFIED}" >&2
+  [ "$UNVERIFIED" -gt 0 ] && return "$_RC_DEGRADED"
   return 0
 }
 
@@ -3028,11 +3084,50 @@ lease_requeue() {
   echo "$TASK_ID"
 }
 
+# _lease_parse_status <output-file> — print the builder's typed completion
+# signal from its final report (KTD11): the LAST line matching
+# `Status: DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT` (case-insensitive,
+# optional leading list marker / bold). Prints MISSING when no such line exists.
+_lease_parse_status() {
+  local F=${1:?usage: _lease_parse_status <output-file>}
+  local S=""
+  S=$(grep -iE '^[[:space:]]*[-*]*[[:space:]]*\**Status\**:?\**[[:space:]]*\**(DONE_WITH_CONCERNS|DONE|BLOCKED|NEEDS_CONTEXT)\**' "$F" 2>/dev/null | tail -1 | grep -oiE 'DONE_WITH_CONCERNS|DONE|BLOCKED|NEEDS_CONTEXT' | head -1 | tr '[:lower:]' '[:upper:]' || true)
+  printf '%s\n' "${S:-MISSING}"
+}
+
+# _lease_copy_discoveries <task_id> <builder> <output-file> — copy the
+# builder's "Discoveries for later tasks" block into ops/MEMORY.md (scrubbed,
+# lead-side — builders never write ops/). Skips "None"/empty.
+_lease_copy_discoveries() {
+  local TASK_ID=$1 BUILDER=$2 F=$3
+  local BLOCK
+  BLOCK=$(awk 'BEGIN{p=0} /^[[:space:]]*[-*]?[[:space:]]*\**Discoveries for later tasks\**:?/{p=1; sub(/^[^:]*:[[:space:]]*/, ""); if ($0 != "") print; next} p==1{ if ($0 ~ /^[[:space:]]*$/) exit; print }' "$F" 2>/dev/null | _scrub || true)
+  case "$(printf '%s' "$BLOCK" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in ''|none|'-none'|'*none'|'none.') return 0 ;; esac
+  mkdir -p ops
+  {
+    echo ""
+    echo "## Discoveries from lease ${TASK_ID} (builder: ${BUILDER}, $(date -u +%Y-%m-%d))"
+    printf '%s\n' "$BLOCK"
+  } >> ops/MEMORY.md 2>/dev/null || true
+  echo "lease_collect: copied the builder's discoveries into ops/MEMORY.md" >&2
+}
+
 # lease_collect <task_id> — lead-side harvest of a finished builder. Exit 0:
 # state=review, prints the output-file path (U10 feeds it to the reviewer).
 # Nonzero: routed by the KTD-9 class the launcher recorded (<out>.class):
 #   deterministic       -> state=failed, fail fast with guidance, NO requeue
 #   timeout / retryable -> orphan path (reclaim -> requeue once -> escalate)
+# On a CLEAN exit the typed report decides (KTD11):
+#   Status: DONE / DONE_WITH_CONCERNS -> state=review (report_status recorded;
+#                                        discoveries copied to ops/MEMORY.md)
+#   Status: BLOCKED / NEEDS_CONTEXT    -> state=escalated, never review
+#   no Status line                     -> "report missing": state stays
+#                                        building, rc _RC_DEGRADED (80); the
+#                                        lead re-dispatches with the contract
+#                                        restated (lease_redispatch needs
+#                                        state=review, so use lease_requeue's
+#                                        sibling: mark orphaned -> reclaim ->
+#                                        requeue) or escalates after one repeat
 lease_collect() {
   local TASK_ID=${1:?usage: lease_collect <task_id>}
   local STATE PID OUT RC CLASS
@@ -3056,10 +3151,31 @@ lease_collect() {
   RC=$(cat "${OUT}.rc" 2>/dev/null || echo 1)
   CLASS=$(cat "${OUT}.class" 2>/dev/null || true)
   if [ "$RC" -eq 0 ] 2>/dev/null; then
-    _ledger_update "$TASK_ID" state=review || return 1
-    echo "lease_collect: task ${TASK_ID} builder exited 0 — state=review, output below" >&2
-    printf '%s\n' "$OUT"
-    return 0
+    local REPORT BUILDER
+    REPORT=$(_lease_parse_status "$OUT")
+    BUILDER=$(_ledger_get "$TASK_ID" builder_cli 2>/dev/null || true)
+    _ledger_update "$TASK_ID" report_status="$REPORT" || return 1
+    case "$REPORT" in
+      DONE|DONE_WITH_CONCERNS)
+        _ledger_update "$TASK_ID" state=review || return 1
+        _lease_copy_discoveries "$TASK_ID" "${BUILDER:-unknown}" "$OUT"
+        echo "lease_collect: task ${TASK_ID} builder exited 0 with Status: ${REPORT} — state=review, output below" >&2
+        printf '%s\n' "$OUT"
+        return 0
+        ;;
+      BLOCKED|NEEDS_CONTEXT)
+        local WHY
+        WHY=$(grep -iE '^[[:space:]]*[-*]?[[:space:]]*\**Concerns\**:?' "$OUT" 2>/dev/null | tail -1 | cut -c1-200 | _scrub || true)
+        _ledger_update "$TASK_ID" state=escalated reason="builder reported ${REPORT}: ${WHY:-see output}" || return 1
+        echo "lease_collect: task ${TASK_ID} builder reported Status: ${REPORT} — ESCALATED, never routed to review (see ${OUT}). Supply the missing context / unblock, then re-lease." >&2
+        return 1
+        ;;
+      *)
+        _ledger_update "$TASK_ID" reason="report missing: clean exit without a Status line" || return 1
+        echo "lease_collect: task ${TASK_ID} builder exited 0 but its output has NO final 'Status:' report line — report missing, NOT review-ready (state stays building; rc ${_RC_DEGRADED}). Re-dispatch with the contract restated, or escalate after one repeat. Output: ${OUT}" >&2
+        return "$_RC_DEGRADED"
+        ;;
+    esac
   fi
   if [ -z "$CLASS" ]; then
     _classify_invoke_failure "$RC" "$OUT"
@@ -3236,6 +3352,14 @@ _RC_PROMOTE_BLOCKED=42
 # Distinct return code for "review fix cycle hit the 3-cycle cap — escalated to
 # the user" (lease_redispatch). Same reserved code space as the gates above.
 _RC_LEASE_ESCALATED=43
+
+# Degraded: the operation completed but its result could not be verified —
+# lease_collect on a clean exit with NO final `Status:` report line (the lease
+# stays `building`, never review-ready), and lease_heartbeat_check when a row
+# lacks the pid/output it needs to judge liveness. Deliberately outside the
+# resolve_role roster errors (2–6), the invoke_* / timeout codes (1, 124–127),
+# and the gate codes above (40–43, 96).
+_RC_DEGRADED=80
 
 # lease_promote [<default-branch>] — wave-end promotion of the sprint integration
 # branch to the repo default branch (KTD-5). This is the ONLY path that writes the
