@@ -1431,7 +1431,7 @@ body::after {
   <div class="container">
     <div class="hero__content">
       <div>
-        <div class="hero__badge">v3.1.0 — Role Customization in Guided Onboarding</div>
+        <div class="hero__badge">v3.2.0 — Repo-Local Watch Cycle</div>
         <h1>
           <span class="gradient-text">Agent Triforge</span>
         </h1>
@@ -1486,7 +1486,7 @@ body::after {
           <div class="term__sys" id="term-sys">
             <span class="term__sys-item"><span class="term__sys-icon"></span><span>agent-triforge</span></span>
             <span class="term__sys-item term__sys-branch">main</span>
-            <span class="term__sys-item term__sys-ver">claude v3.1.0</span>
+            <span class="term__sys-item term__sys-ver">claude v3.2.0</span>
           </div>
 
           <div class="term__row term__row--prompt" data-row="r0">
@@ -1637,15 +1637,20 @@ body::after {
   </div>
 </section>
 
-<!-- ═══ What's New in v3.1.0 ═══ -->
+<!-- ═══ What's New in v3.2.0 ═══ -->
 <section class="section section--alt" id="whats-new">
   <div class="container">
     <div class="section__header reveal">
       <span class="section__label">What's New</span>
-      <h2 class="section__title">v3.1.0 — The Roster Is Yours to Shape</h2>
-      <p class="section__desc"><code>/setup</code> now walks role assignment — keep the shipped posture, customize any role's CLI · model · effort, or restore the defaults — with validated writes, a content-level roster guard, and model overrides that reach every external-CLI lane. Built on the v3.0.0 builder-pool foundation below.</p>
+      <h2 class="section__title">v3.2.0 — A Leaner Plugin</h2>
+      <p class="section__desc">The monthly watch cycle (<code>/cli-watch</code> · <code>/repo-watch</code>) moved out of the shipped command set into repo-local maintainer tooling — 17 commands and 12 skills ship, and nothing lands in your <code>ops/</code> that you did not ask for. The v3.1.0 role step and the v3.0.0 builder-pool foundation are unchanged below.</p>
     </div>
     <div class="whatsnew reveal-stagger">
+      <div class="whatsnew__row">
+        <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Watch cycle shipped as plugin commands — 19 commands, 13 skills</span></div>
+        <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Repo-local maintainer tooling in <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">.claude/commands/</code> — 17 commands, 12 skills ship</span></div>
+      </div>
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Role assignment — hand-edit ops/roster.toml</span></div>
         <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>

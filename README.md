@@ -47,7 +47,11 @@ The framework achieves this through **institutional knowledge compounding**: eve
 
 ---
 
-## What's new (v3.1.0)
+## What's new (v3.2.0)
+
+**The plugin got leaner: the watch cycle is now repo-local maintainer tooling.** `/cli-watch` and `/repo-watch` — the monthly cycles that keep Triforge itself current against its six CLIs and four reference repos — never belonged in the shipped command set. They now live in this checkout's `.claude/commands/`, with the `watch-cycle` skill in `.claude/skills/` and the watch registry tracked at `ops/watch-registry.toml`. The plugin ships 17 commands and 12 skills, and `session-start.sh` no longer copies a watch registry into your `ops/`. Run the watches from a clone of this repo (see [Keeping the framework current](#keeping-the-framework-current-cli-watch-repo-watch--maintainers)); nothing changes for `/setup`, `/ship`, or any other command.
+
+### v3.1.0 — role customization in guided onboarding
 
 **The roster is now yours to shape from onboarding.** `/setup` gained a role-assignment step: see the current role table (role → CLI · model · effort · fallbacks), then keep it, customize any role, or restore the shipped defaults — every write validated so the roster always still loads. Backed by new single-writer helpers (`roster_role_entry`, `roster_write_role`), roster model overrides that now reach every external-CLI dispatch lane (`CODEX_MODEL` joined its siblings), agy effort→`(High)`/`(Low)` suffix normalization, and a content-level roster guard that makes a broken `ops/roster.toml` loud instead of quietly rendering clean-looking tables. Hardened across three multi-agent review iterations (local roster + independent cross-model adversarial passes) — details in [Recent changes](#recent-changes).
 
@@ -702,6 +706,16 @@ After solving a non-trivial problem, <a href="commands/compound.md"><code>/compo
 ---
 
 ## Recent changes
+
+### 2026-09-11 — v3.2.0: Watch commands become repo-local maintainer tooling
+
+**`/cli-watch` + `/repo-watch` moved out of the plugin.** Both commands, the `watch-cycle` skill, and the watch registry are framework self-maintenance, not features for your projects. They now live in this checkout only: [`.claude/commands/`](.claude/commands/) (Claude Code discovers them when run from the repo root), [`.claude/skills/watch-cycle/`](.claude/skills/watch-cycle/SKILL.md), and the tracked registry [`ops/watch-registry.toml`](ops/watch-registry.toml). The commands read only that registry — the fallback through plugin templates is gone.
+
+**Plugin surface.** 17 shipped commands (was 19) and 12 portable skills (was 13). `session-start.sh` no longer bootstraps `ops/watch-registry.toml` into user projects and no longer lists the two commands in its orientation line. If you were running `/cli-watch` from an installed plugin, run it from a clone of this repo instead.
+
+**Docs.** README, `.claude/CLAUDE.md`, `templates/CLAUDE.md`, `docs/agent-triforge.md`, and the landing page updated to the new counts and paths; README's watch section renamed "Keeping the framework current".
+
+---
 
 ### 2026-07-22 — v3.1.0: Role customization in guided onboarding
 
