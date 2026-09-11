@@ -59,15 +59,18 @@ name = "Antigravity CLI"
 binary = "agy"
 tier = "core"
 releases = "https://github.com/google-antigravity/antigravity-cli/releases"
-changelog = "https://antigravity.google/docs"
-docs = "https://antigravity.google/cli"
+changelog = "https://antigravity.google/changelog?tab=cli"
+docs = "https://antigravity.google/docs/cli/getting-started"
 probe = true
-# Closed-source distribution (license: null) — GitHub release notes are sparse;
-# cross-check the docs site and the Google developer blog for change detail.
-# agy defaults to a Flash model variant, so every audit note about model
-# selection must reflect Triforge's shipped pin — the latest Pro model,
-# explicit; Flash runs only when a user sets it in the roster.
-note = "closed-source; sparse release notes — corroborate against docs + dev blog"
+# Closed-source distribution (license: null). Release notes are detailed as of
+# the 2026-09 cycle (D-035); `agy changelog` is a bundled primary source —
+# cross-check it against the GitHub releases page and the changelog URL above.
+# Model policy (D-022, 2026-09-11): Triforge pins the NEWEST Gemini model at its
+# highest thinking level, Pro or Flash — currently "Gemini 3.8 Flash (High)".
+# agy's own default is a (Medium) variant, so every dispatch pins explicitly;
+# "Gemini 3.1 Pro (High)" is the documented per-role opt-in. AGY-02 each cycle
+# checks for a newer Pro line (3.5 Pro), which reopens the pin question.
+note = "closed-source; detailed release notes — `agy changelog` is a bundled primary source; cross-check GitHub releases + the CLI changelog page"
 
 [cli.codex]
 name = "Codex CLI"
@@ -100,7 +103,7 @@ binary = "kimi"
 tier = "optional"
 releases = "https://github.com/MoonshotAI/kimi-code/releases"
 changelog = "https://github.com/MoonshotAI/kimi-code/releases"
-docs = "https://kimi.com/code/docs"
+docs = "https://moonshotai.github.io/kimi-code/"
 probe = true
 # Current product is Kimi Code CLI (github.com/MoonshotAI/kimi-code); the
 # legacy PyPI "Kimi CLI" is winding down and is NOT this target. Near-daily
@@ -115,10 +118,15 @@ releases = "https://cursor.com/changelog"
 changelog = "https://cursor.com/changelog"
 docs = "https://cursor.com/docs/cli"
 probe = true
-# Closed-source; NO published semver — the changelog is date-based. Cursor
-# auto-updates by default, so capture `cursor-agent --version` post-install
-# and treat version drift as expected.
-note = "closed-source; date-based changelog, no semver; auto-updates — capture --version each run"
+# Binary (D-025, 2026-09-11): the install script now ships `agent` as the
+# primary name and `cursor-agent` as a legacy symlink. `binary` stays
+# "cursor-agent" because it is the resolver's first choice (_cursor_bin in
+# scripts/invoke-external.sh): cursor-agent on PATH, else an `agent` whose
+# --version matches Cursor's YYYY.MM.DD-<hex> format (an unrelated
+# ~/.grok/bin/agent is rejected — CUR-11). Closed-source; NO published semver —
+# the changelog is date-based. Cursor auto-updates by default, so capture
+# `<binary> --version` post-install and treat version drift as expected.
+note = "closed-source; date-based changelog, no semver; auto-updates — capture --version each run; binary `agent` primary since 2026.09.10, `cursor-agent` legacy symlink (resolver tries cursor-agent first)"
 
 # ===========================================================================
 # [repo.*] — the four seeded repos mined by /repo-watch

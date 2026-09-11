@@ -201,10 +201,11 @@ fi
 # (~/.gemini/antigravity-cli/settings.json — never touched here; /setup
 # documents the `read_url(*)` allow rule there). The shipped file documents the
 # deny intent in agy's action syntax (`command(rm -rf)`, `command(git push)`,
-# `command(sudo)`) and covers interactive `agy` use. Hooks are a different
-# story: AGY-08 (D-028) — project-tier hooks DO fire under `agy -p` with the
+# `command(sudo)`) and covers interactive `agy` use. Hooks (AGY-08): the
 # documented `.agents/hooks.json` named-hook shape (PreInvocation, PostInvocation,
-# PreToolUse, PostToolUse, Stop), which is the enforcement path if one is wanted.
+# PreToolUse, PostToolUse, Stop) fired headless on agy 1.2.0 (lead re-probe
+# 2026-09-11) but NOT on agy 1.2.1 the same evening (harness FAIL with the hooks
+# loaded) — an open watch, not an enforcement path; Triforge ships no agy hook.
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.antigravity/settings.json" ] && [ ! -f ".antigravity/settings.json" ]; then
   mkdir -p .antigravity
   cp "${CLAUDE_PLUGIN_ROOT}/templates/.antigravity/settings.json" ".antigravity/settings.json"

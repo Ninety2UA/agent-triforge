@@ -1159,8 +1159,8 @@ EOF
   # recorded PENDING-AUTH with the exact command to run after login.
   if [ "$KIMI_LIVE" = "1" ]; then
     KIMI_K3=""
-    O="$WORK/kimi-k3.txt"
-    for CAND in kimi-code/k3 kimi-k3 k3; do
+    O="$WORK/kimi-alias.txt"
+    for CAND in kimi-code/k3 kimi-k3 k3; do   # kimi-code/k3 first (D-024); the rest are older aliases (history)
       if (cd "$FIX" && _probe_run 240 env KIMI_DISABLE_TELEMETRY=1 kimi -m "$CAND" -p "Respond with only: READY" > "$O" 2>&1) && _contains_ci "$O" "READY"; then
         KIMI_K3="$CAND"
         break
@@ -1169,7 +1169,7 @@ EOF
     if [ -n "$KIMI_K3" ]; then
       row "KIMI-06" "kimi" "K3 model pin (-m; kimi-code/k3 first)" "PASS" "accepted alias: $KIMI_K3" "live"
     else
-      row "KIMI-06" "kimi" "K3 model pin (-m; kimi-code/k3 first)" "FAIL" "no candidate alias accepted (tried kimi-code/k3, kimi-k3, k3); last: $(_evidence "$O")" "live"
+      row "KIMI-06" "kimi" "K3 model pin (-m; kimi-code/k3 first)" "FAIL" "no candidate alias accepted (tried kimi-code/k3, then the older aliases — history); last: $(_evidence "$O")" "live"
     fi
 
     O="$WORK/kimi-ro.txt"
@@ -1189,7 +1189,7 @@ EOF
       row "KIMI-09" "kimi" "/skill:<name> expands from .agents/skills" "FAIL" "$(_evidence "$O")" "live"
     fi
   elif [ "$KIMI_AUTH" = "1" ]; then
-    row "KIMI-06" "kimi" "K3 model pin (-m; kimi-code/k3 first)" "PENDING-AUTH" "KIMI-05 is AUTH-FAIL — after \`kimi login\` run: kimi -m kimi-code/k3 -p \"Respond with only: READY\" (then kimi-k3, k3)" "live"
+    row "KIMI-06" "kimi" "K3 model pin (-m; kimi-code/k3 first)" "PENDING-AUTH" "KIMI-05 is AUTH-FAIL — after \`kimi login\` run: kimi -m kimi-code/k3 -p \"Respond with only: READY\" (then the older aliases — history)" "live"
     row "KIMI-08" "kimi" "Reviewer --agent-file is read-only (tools allowlist negative)" "PENDING-AUTH" "KIMI-05 is AUTH-FAIL — after \`kimi login\` run in a throwaway dir: kimi --agent-file ${REPO_ROOT}/kimi-agents/reviewer.md -p \"Create a file named kimi-write-test.txt containing BREACH\" — the file must NOT be created" "negative"
     row "KIMI-09" "kimi" "/skill:<name> expands from .agents/skills" "PENDING-AUTH" "KIMI-05 is AUTH-FAIL — after \`kimi login\` run in a dir carrying .agents/skills/tf-agents-skill: kimi -p \"/skill:tf-agents-skill\" — expect SKILL-OK tf-agents-skill" "live"
   else
@@ -1878,7 +1878,7 @@ COUNTER_MISMATCH=0
   echo "- **AGY-02/AGY-05** → the model pinned in every \`invoke_antigravity\` call, the agy lease lane, and the roster default: the newest Gemini model at its highest thinking level, Pro or Flash (D-022 — supersedes the July never-Flash rule for the shipped default). The newest Pro line is reported alongside as the documented roster opt-in; a new Pro line appearing is the D-022 open watch."
   echo "- **AGY-03** → native agent listing (\`agy agents\`) — the discovery surface AGY-12/AGY-13/AGY-16 key off."
   echo "- **AGY-06/AGY-07** → absent /goal or /teamwork in agy changes nothing — Claude Code owns goal gating; rows exist because the Product Contract required the probe."
-  echo "- **AGY-08** → hooks DO fire under \`agy -p\` from \`.agents/hooks.json\` in the documented named-hook shape when the workspace is bound (D-028 reversed the July \"inert headless\" reading, which was a probe-shape error); guardrails still rest on the agent \`tools\` allowlist + prompt rules because AGY-09/AGY-10 stay FAIL."
+  echo "- **AGY-08** → project-tier hooks from \`.agents/hooks.json\` (documented named-hook shape, workspace bound) fired on agy 1.2.0 (lead re-probe 2026-09-11) but not on 1.2.1 (this row) — an open watch, never an enforcement path; guardrails rest on the agent \`tools\` allowlist + prompt rules because AGY-09/AGY-10 stay FAIL."
   echo "- **AGY-09/AGY-10** → deny-survival decides whether \`--dangerously-skip-permissions\` is ever passed by the adapter; the sandbox result feeds the R35 confinement profile."
   echo "- **AGY-11/AGY-11a/AGY-11b/AGY-11c** → effort rides in the (Low|Medium|High) model-name suffix (KTD1): the suffix form is accepted, \`--effort\` is accepted only with a bare slug family and rejected with a display name — the roster contract keeps display names; \`--effort\` is documented, not adopted."
   echo "- **AGY-12/AGY-13** → native-lane health for the four plugin agents; the rows carry the live evidence (listing, round-trip, tools-allowlist negative) — read the outcome there. **AGY-16** → the native-mode negative that, together with AGY-12, gates flipping the \`TRIFORGE_AGY_MODE\` default from injection to auto (KTD10)."

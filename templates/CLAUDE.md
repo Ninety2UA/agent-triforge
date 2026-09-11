@@ -12,17 +12,17 @@ This project uses the multi-agent coordination framework where Claude Code serve
 
 ### Multi-agent system
 
-- **Claude Code (lead)** — plans work, builds features, coordinates all agents, merges review feedback. Runs Fable 5 at `max` effort when the host has it; otherwise latest Opus at `max`
-- **Claude specialized agents** — 19 focused subagents provided by the plugin: plan validation, review synthesis, security, performance, continuous review, etc. Shipped frontmatter floors at `opus`: team-lead and the never-downgrade trio (security-sentinel, plan-checker, findings-synthesizer) ship `effort: max`; the other 15 ship `effort: xhigh`. When the plugin's capability probe record shows Fable 5 PASS on the host (row CC-02), the lead spawns team-lead and the trio with a model override to `fable` (the Agent tool's `model` parameter)
+- **Claude Code (lead)** — plans work, builds features, coordinates all agents, merges review feedback. Runs Fable 5.1 (the `fable` alias, Claude Code ≥ 2.1.257) at `max` effort when the host has it; otherwise Opus 5 (`opus`) at `max`
+- **Claude specialized agents** — 19 focused subagents provided by the plugin: plan validation, review synthesis, security, performance, continuous review, etc. Shipped frontmatter floors at `opus`: team-lead and the never-downgrade trio (security-sentinel, plan-checker, findings-synthesizer) ship `effort: max`; the other 15 ship `effort: xhigh`. When the plugin's newest capability probe record (`ops/research/*-probe-record.md`, row CC-02) shows Fable PASS on the host, the lead spawns team-lead and the trio with a model override to `fable` (the Agent tool's `model` parameter)
 - **Claude agent teams** — multi-instance collaboration for complex builds (5+ interdependent tasks)
-- **Antigravity CLI (`agy`)** — analyst + reviewer: Phase 0 codebase scans (Gemini 3.1 Pro (High), 1M token context), architecture reviews, documentation
+- **Antigravity CLI (`agy`)** — analyst + reviewer: Phase 0 codebase scans (Gemini 3.8 Flash (High) by default — the newest Gemini at its highest thinking level; the roster opt-in is 3.1 Pro (High); 1M token context), architecture reviews, documentation
 - **Codex CLI** — tester + logic reviewer: writes/runs tests, security audits, infrastructure tasks
 
 **Builder pool.** All six supported CLIs — the core trio (Claude, Antigravity, Codex) plus any enrolled optional member (OpenCode, Kimi, Cursor) — are eligible builders; `ops/roster.toml` assigns each role (builder | reviewer | tester | analyst | documenter). The single-writer rule is retired: safety is per-task leases + worktree isolation + mandatory cross-review by a pinned non-author reviewer, not write-restriction. The role bullets above are the shipped default posture (Claude leads builds, Codex reviews and tests, Antigravity analyzes and documents), which `ops/roster.toml` can override.
 
 For narrow, rubric-following runtime tasks the lead/team-lead may step down one tier at a time:
 
-Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (4.8) + `xhigh` → `opus`+`high` → `sonnet` (5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
+Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (Opus 5) + `xhigh` → `opus`+`high` → `sonnet` (Sonnet 5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
 
 Claude invokes Antigravity and Codex through the unified helper `${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh` (which handles model pinning, fail-closed timeout enforcement, failure classification, and native-agent routing with a prompt-prefix injection fallback). Reviews run in parallel (Antigravity + Codex + Claude subagents simultaneously), never sequentially.
 
@@ -83,6 +83,8 @@ Assignment comes from `ops/roster.toml` (`resolve_role <role>`); the defaults be
 
 - CONTRACTS.md is never modified directly during review — changes must be proposed in MEMORY.md first
 - Every implementation task — lead-authored included — is built under a per-task lease and merges only after cross-review by a pinned non-author reviewer; no agent self-merges. The single-writer rule is retired — any roster member is an eligible builder; safety is leases + worktree isolation + cross-review, not write-restriction
+- Every dispatched builder receives the same contract (no sub-dispatch, git stays local, a typed final report `Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT`); a bare exit 0 with no report is "report missing", never review-ready
+- **Compounding bar (CE-1):** Compound only when a future agent without the note would plausibly repeat the mistake or re-derive the decision; capture at task completion (`/compound` → `ops/solutions/`, `ops/decisions/`)
 - Maximum 3 review cycles per task before escalating to user
 - Risk scoring: halt subagent at risk >20% or file changes >50
 - Completion requires creating the `ops/.sprint-complete` runtime marker, only after the verification checklist passes (never earlier)
@@ -113,7 +115,7 @@ Assignment comes from `ops/roster.toml` (`resolve_role <role>`); the defaults be
 
 ## Portable skills
 
-13 model-agnostic methodology skills available to all agents:
+12 model-agnostic methodology skills available to all agents:
 
 | Skill | Consumer | Purpose |
 |---|---|---|
@@ -129,6 +131,8 @@ Assignment comes from `ops/roster.toml` (`resolve_role <role>`); the defaults be
 | `knowledge-compounding` | Claude | Document solutions and decisions |
 | `session-continuity` | Claude | Save/resume across sessions |
 | `scope-cutting` | Claude | Systematically cut scope by priority |
+
+Skills reach the other five CLIs through `.agents/skills/`, which `session-start.sh` copies from the plugin and refreshes whenever the plugin version changes (stamp `.agents/skills/.triforge-plugin-version`): shipped-name directories are Triforge-owned and overwritten on version change — keep customizations in a differently named directory. Claude Code reads the plugin's skills directly (it does not read `.agents/skills/`). Invocation forms: Claude `/name` · agy `agy --add-dir "$PWD" -p "/name"` · Codex `$name` · OpenCode `/name` (native `skill` tool; commands via `opencode run --command <name>`) · Cursor `/name` in `-p` · Kimi `/skill:name`. Slash commands are per-harness (Codex custom prompts are not expanded under `exec`); Triforge's commands are lead-only.
 
 ## Specialized agents
 
@@ -169,7 +173,7 @@ wait $CODEX_PID  || CODEX_RC=$?
 [ $AGY_RC -ne 0 ] || [ $CODEX_RC -ne 0 ] && { echo "helper failed — antigravity=$AGY_RC codex=$CODEX_RC" >&2; exit 1; }
 ```
 
-The helper auto-detects native agent support. If `agy agents` lists the requested agent (from installed agy plugins), it routes natively via `--agent`; otherwise it injects the agent body from the plugin's `antigravity-agents/agents/` templates as a prompt prefix (the operative mode on agy 1.1.4, which doesn't surface plugin agents headless yet). Codex agents load from `.codex/agents/agents.toml`.
+Antigravity routing is governed by `TRIFORGE_AGY_MODE` (`injection` | `native` | `auto`; default `injection`): `injection` injects the agent body from the plugin's `antigravity-agents/agents/` templates as a prompt prefix; `native` passes `--agent <name>` (falling back to injection with a warning when `agy agents` does not list it); `auto` goes native only when the name is listed. Every agy call runs `--output-format json` and reads the envelope's `status`/`denied_actions` as the completion signal — an empty response is a failure, never "no findings". Codex agents load from `.codex/triforge-agents.toml` (bootstrapped from the plugin's `codex-agents/agents.toml`; never under `.codex/agents/`, which Codex sweeps as standalone role files).
 
 ### Git trailer conventions
 
@@ -189,16 +193,16 @@ Commits include structured trailers for decision context:
 
 **Core trio (required)** — installed and answering a headless READY probe:
 ```bash
-claude --version                                                   # Claude Code ≥ 2.1.212
-agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"  # Antigravity ≥ 1.1.3 — always pin the model (agy defaults to a Flash variant)
-codex exec "Respond with only: READY"                              # Codex ≥ 0.144.0
+claude --version                                                     # Claude Code ≥ 2.1.267 (effort: frontmatter honored; fable alias = Fable 5.1)
+agy --model "Gemini 3.8 Flash (High)" -p "Respond with only: READY"  # Antigravity ≥ 1.1.27 — pin the model (agy's own default is a (Medium) variant)
+codex exec "Respond with only: READY"                                # Codex ≥ 0.153.0 (gpt-6-astra's minimal client version)
 ```
 
 **Optional tier** (enroll via `/setup`; each is skipped cleanly in every roster fallback chain when absent):
 ```bash
-opencode run --format json -m openrouter/z-ai/glm-5.2 "Respond with only: READY"  # OpenCode ≥ 1.18 (OpenRouter provider connected)
-kimi -p "Respond with only: READY"                                                # Kimi Code ≥ 0.15 (OAuth device-code or API key)
-cursor-agent -p --trust --model grok-4.5 "Respond with only: READY"               # Cursor (date-versioned; pin grok-4.5, never the Auto router)
+opencode run --format json -m openrouter/z-ai/glm-5.3 "Respond with only: READY"  # OpenCode ≥ 1.18.20 (OpenRouter provider connected)
+kimi -p "Respond with only: READY"                                                # Kimi Code ≥ 0.33.0 (OAuth device-code or API key)
+cursor-agent -p --trust --model cursor-grok-4.6-xhigh "Respond with only: READY"  # Cursor (date-versioned; pin the suffixed Grok id, never the Auto router; `agent` when only the new name exists)
 ```
 
 Python 3 is also required (used by hook handlers for JSON parsing):

@@ -1522,7 +1522,7 @@ body::after {
             <span class="term__phase-chevron"><svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 3l3 3-3 3"/></svg></span>
           </div>
           <div class="term__detail">
-            <span class="term__detail-item">agy · Gemini 3.1 Pro</span>
+            <span class="term__detail-item">agy · Gemini 3.8 Flash</span>
             <span class="term__detail-item">1M context window</span>
             <span class="term__detail-item">47 files mapped</span>
           </div>
@@ -1606,7 +1606,7 @@ body::after {
             <span class="term__phase-chevron"><svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 3l3 3-3 3"/></svg></span>
           </div>
           <div class="term__detail">
-            <span class="term__detail-item">codex gpt-5.6-sol</span>
+            <span class="term__detail-item">codex gpt-6-astra</span>
             <span class="term__detail-item">RED → GREEN → REFACTOR</span>
             <span class="term__detail-item">47 / 47 passing</span>
           </div>
@@ -1847,7 +1847,7 @@ body::after {
         <p class="roster-card__role">Lead agent and default builder — plans, builds, and coordinates every other CLI.</p>
         <div class="roster-card__meta">
           <span class="roster-card__chip"><b>Builder</b> · lead</span>
-          <span class="roster-card__chip">Fable 5 → Opus 4.8 → Sonnet 5</span>
+          <span class="roster-card__chip">Fable 5.1 → Opus 5 → Sonnet 5</span>
           <span class="roster-card__chip">effort: max</span>
         </div>
       </div>
@@ -1864,8 +1864,8 @@ body::after {
         <p class="roster-card__role">Analyst and documenter — 1M-token Phase 0 scans, architecture reviews, and docs.</p>
         <div class="roster-card__meta">
           <span class="roster-card__chip"><b>Analyst</b> · Documenter</span>
-          <span class="roster-card__chip">Gemini 3.1 Pro (High)</span>
-          <span class="roster-card__chip">Flash opt-in</span>
+          <span class="roster-card__chip">Gemini 3.8 Flash (High)</span>
+          <span class="roster-card__chip">Pro opt-in</span>
         </div>
       </div>
 
@@ -1881,7 +1881,7 @@ body::after {
         <p class="roster-card__role">Reviewer and tester — structured <code>--output-schema</code> verdicts and sandboxed TDD.</p>
         <div class="roster-card__meta">
           <span class="roster-card__chip"><b>Reviewer</b> · Tester</span>
-          <span class="roster-card__chip">gpt-5.6-sol</span>
+          <span class="roster-card__chip">gpt-6-astra</span>
           <span class="roster-card__chip">effort: xhigh</span>
         </div>
       </div>
@@ -1898,7 +1898,7 @@ body::after {
         <p class="roster-card__role">Eligible builder and reviewer once enrolled — skipped cleanly in every fallback chain when absent.</p>
         <div class="roster-card__meta">
           <span class="roster-card__chip">enroll via <b>/setup</b></span>
-          <span class="roster-card__chip">glm-5.2 (OpenRouter)</span>
+          <span class="roster-card__chip">glm-5.3 (OpenRouter)</span>
         </div>
       </div>
 
@@ -1914,7 +1914,7 @@ body::after {
         <p class="roster-card__role">Eligible builder once enrolled — a decline persists as a flag flip, nothing else to restore.</p>
         <div class="roster-card__meta">
           <span class="roster-card__chip">enroll via <b>/setup</b></span>
-          <span class="roster-card__chip">kimi-k3</span>
+          <span class="roster-card__chip">kimi-code/k3</span>
         </div>
       </div>
 
@@ -1923,14 +1923,14 @@ body::after {
           <div class="roster-card__badge">CU</div>
           <div class="roster-card__names">
             <div class="roster-card__name">Cursor</div>
-            <div class="roster-card__bin">cursor-agent</div>
+            <div class="roster-card__bin">cursor-agent · agent</div>
           </div>
           <span class="roster-card__tier roster-card__tier--opt">Optional</span>
         </div>
         <p class="roster-card__role">Eligible builder once enrolled — the model is pinned explicitly, never the Auto router.</p>
         <div class="roster-card__meta">
           <span class="roster-card__chip">enroll via <b>/setup</b></span>
-          <span class="roster-card__chip">grok-4.5 (pinned)</span>
+          <span class="roster-card__chip">cursor-grok-4.6-xhigh (pinned)</span>
         </div>
       </div>
     </div>
@@ -2265,7 +2265,7 @@ body::after {
 
 <span class="cmt"># Core trio (what /setup automates)</span>
 <span class="kw">claude</span> --version
-<span class="kw">agy</span> --model <span class="str">"Gemini 3.1 Pro (High)"</span> -p <span class="str">"Respond with only: READY"</span>
+<span class="kw">agy</span> --model <span class="str">"Gemini 3.8 Flash (High)"</span> -p <span class="str">"Respond with only: READY"</span>
 <span class="kw">codex</span> exec <span class="str">"Respond with only: READY"</span>
 
 <span class="cmt"># Python 3 (used by hook handlers for JSON parsing)</span>
@@ -2303,12 +2303,12 @@ body::after {
       <table class="cmd-table reveal">
         <thead><tr><th>CLI</th><th>Binary</th><th>Tier</th><th>Minimum</th><th>Notes</th></tr></thead>
         <tbody>
-          <tr><td>Claude Code</td><td><code>claude</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>2.1.212</code></td><td>Lead + builder; Fable&nbsp;5 → Opus&nbsp;4.8 → Sonnet&nbsp;5 ladder</td></tr>
-          <tr><td>Antigravity</td><td><code>agy</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>1.1.3</code></td><td>Tested 1.1.4; pins Gemini 3.1 Pro by default — still the latest Pro (Flash opt-in via roster, e.g. Gemini 3.6 Flash)</td></tr>
-          <tr><td>Codex</td><td><code>codex</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>0.144.0</code></td><td>Reviewer + tester; <code>--output-schema</code> structured verdicts</td></tr>
-          <tr><td>OpenCode</td><td><code>opencode</code></td><td><span class="cmd-badge cmd-badge--util" style="margin-left:0">Optional</span></td><td><code>1.18</code></td><td>OpenRouter provider connected (glm-5.2)</td></tr>
-          <tr><td>Kimi Code</td><td><code>kimi</code></td><td><span class="cmd-badge cmd-badge--util" style="margin-left:0">Optional</span></td><td><code>0.15</code></td><td>OAuth device-code or API key (kimi-k3)</td></tr>
-          <tr><td>Cursor</td><td><code>cursor-agent</code></td><td><span class="cmd-badge cmd-badge--util" style="margin-left:0">Optional</span></td><td>date-versioned</td><td>Pin grok-4.5, never the Auto router</td></tr>
+          <tr><td>Claude Code</td><td><code>claude</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>2.1.267</code></td><td>Tested 2.1.268. Lead + builder; Fable&nbsp;5.1 → Opus&nbsp;5 → Sonnet&nbsp;5 ladder (2.1.267 first honors <code>effort:</code> frontmatter)</td></tr>
+          <tr><td>Antigravity</td><td><code>agy</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>1.1.27</code></td><td>Tested 1.2.0; pins Gemini 3.8 Flash (High) by default — the newest Gemini at its highest thinking level (Gemini 3.1 Pro opt-in via roster)</td></tr>
+          <tr><td>Codex</td><td><code>codex</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>0.153.0</code></td><td>Tested 0.154.0. Reviewer + tester; <code>gpt-6-astra</code> at xhigh, <code>--output-schema</code> structured verdicts</td></tr>
+          <tr><td>OpenCode</td><td><code>opencode</code></td><td><span class="cmd-badge cmd-badge--util" style="margin-left:0">Optional</span></td><td><code>1.18.20</code></td><td>Tested 1.18.30. OpenRouter provider connected (glm-5.3)</td></tr>
+          <tr><td>Kimi Code</td><td><code>kimi</code></td><td><span class="cmd-badge cmd-badge--util" style="margin-left:0">Optional</span></td><td><code>0.33.0</code></td><td>Tested 0.42.0 (live rows pending <code>kimi login</code>). OAuth device-code or API key (kimi-code/k3)</td></tr>
+          <tr><td>Cursor</td><td><code>cursor-agent</code> · <code>agent</code></td><td><span class="cmd-badge cmd-badge--util" style="margin-left:0">Optional</span></td><td>date-versioned</td><td>Tested 2026.09.10. Pin cursor-grok-4.6-xhigh, never the Auto router</td></tr>
         </tbody>
       </table>
     </div>
@@ -2321,7 +2321,7 @@ body::after {
   <div class="container">
     <div class="section__header reveal">
       <span class="section__label">Commands Reference</span>
-      <h2 class="section__title">19 Slash Commands</h2>
+      <h2 class="section__title">17 Slash Commands</h2>
     </div>
     <div class="table-wrap reveal">
       <table class="cmd-table reveal">

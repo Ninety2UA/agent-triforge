@@ -25,7 +25,7 @@
 # deferred item). logic_reviewer and test_writer spawn sub-agents for 5+ file
 # scopes; max_depth = 2 declares one spawn round with no spawn-of-spawn.
 # NOTE (D-026): `max_depth` is honored only by the V1 multi-agent runtime —
-# gpt-6-astra / gpt-5.6-sol run multi_agent_v2 by catalog and ignore it;
+# gpt-6-astra (and the previous flagship generation) runs multi_agent_v2 by catalog and ignores it;
 # `job_max_runtime_seconds` is a no-op on current Codex. The two
 # default_subagent_* keys declare the model/effort every spawned sub-agent
 # should pin (S18: set model and effort on every spawn).

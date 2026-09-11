@@ -912,7 +912,7 @@ _list_opencode_agents() {
 #
 # Every call pins the model with -m "${KIMI_MODEL:-kimi-code/k3}" — KIMI_MODEL
 # is the roster override hook; the shipped default is the OAuth-managed alias
-# kimi-code/k3 (D-024 — the former open-platform id kimi-k3 fails on OAuth
+# kimi-code/k3 (D-024 — the former open-platform id (history: kimi-k3) fails on OAuth
 # hosts). Live verification is PENDING-AUTH on this host until `kimi login`
 # (KIMI-05/06/08/09 in the newest probe record).
 #
@@ -1021,7 +1021,7 @@ invoke_kimi() {
     # NEVER a retry-storm (mirrors roster_member_auth's kimi branch and
     # invoke_opencode's local provider-not-found override):
     #   auth         no -m  -> "No model configured ... use /login"
-    #   model-config with -m -> "config.invalid: Model \"kimi-k3\" is not
+    #   model-config with -m -> "config.invalid: Model \"kimi-code/k3\" is not
     #                configured in config.toml" — login provisions the managed
     #                model aliases, so a signed-out host has none (also fires on a
     #                genuinely bad KIMI_MODEL override). Distinct reason so the

@@ -42,7 +42,7 @@ Wave 3: [tasks depending on Wave 1-2, no file conflicts]
 For each wave, drive every task through the builder-pool protocol below (leases + cross-review); the per-task mechanics are detailed in "Builder-pool wave protocol":
 
 1. **Assign + dispatch:** For each task, resolve its builder from `ops/roster.toml` (`resolve_role <role>`) and open a lease — `lease_create` carves an isolated worktree, `lease_dispatch` launches the builder with context injected (task rows, relevant CONTRACTS.md slice, roster entry). Tasks in a wave run in parallel; each builder is confined to its own worktree, so overlapping-directory isolation is automatic.
-   - Spawn-time Fable override: when the current probe record (`ops/research/2026-07-probe-record.md`, row CC-02) shows Fable 5 PASS on the host, spawn team-lead and the never-downgrade trio (security-sentinel, plan-checker, findings-synthesizer) with a model override to `fable` (the Agent tool's `model` parameter)
+   - Spawn-time Fable override: when the newest `ops/research/*-probe-record.md` (`latest_probe_record` in scripts/invoke-external.sh), row CC-02, shows Fable PASS on the host, spawn team-lead and the never-downgrade trio (security-sentinel, plan-checker, findings-synthesizer) with a model override to `fable` (the Agent tool's `model` parameter)
 2. **Collect + cross-review:** `lease_heartbeat_check` until each builder exits, then `lease_collect`, which routes on the builder's typed report: `Status: DONE` or `DONE_WITH_CONCERNS` → state `review` (prints the output path); `BLOCKED` or `NEEDS_CONTEXT` → state `escalated`, never review; no `Status:` line → report-missing (rc 80; see "Report-missing leases" below). Pin a non-author reviewer (a DIFFERENT roster member than the builder — the lead itself is valid) and review the collected output. Approved work merges as ONE commit per task on the sprint integration branch (`lease_merge <task> <reviewer>`, which REFUSES self-review — AE3), **in wave order, never completion order** (see "Merge in wave order" below); findings re-dispatch the same lease to the same builder with the same pinned reviewer, cycle < 3. When a decision is needed and no user is available, rule and ledger it (see "Rulings, not stalls") instead of parking the wave.
 3. **Verify:** At wave end, run the integration-verifier against the sprint integration branch (combined verification across the wave's merged tasks):
    - All tests pass
@@ -173,7 +173,7 @@ For 5+-task waves, author the wave as a native Claude Code dynamic workflow (`ul
 - **Mid-run requeue:** a failed task re-enters its stage via a workflow loop with the reflection questions (Step 3.5) prepended, instead of aborting the run
 - **Pinned reviewer:** give the continuous reviewer a fixed label so review work routes to the same instance across stages (1:3–4 ratio with builders)
 
-Capability basis: probe CC-04 in `ops/research/2026-07-probe-record.md` (PASS, expressibility) — dynamic workflows on Claude Code ≥ 2.1.212 can express external-CLI dispatch + requeue + pinned review. The "Builder-pool wave protocol" above is the lease/cross-review contract those stages carry; it is dogfooded end-to-end (two-task wave, cross-review, single-commit merges, AE3 refusal) in the unit that introduced it.
+Capability basis: probe CC-04 in the newest `ops/research/*-probe-record.md` (PASS, expressibility; Claude Code floor ≥ 2.1.267 per D-034) — dynamic workflows can express external-CLI dispatch + requeue + pinned review. The "Builder-pool wave protocol" above is the lease/cross-review contract those stages carry; it is dogfooded end-to-end (two-task wave, cross-review, single-commit merges, AE3 refusal) in the unit that introduced it.
 
 ### Team mode (experimental alternative for cross-dependent builds)
 
@@ -229,7 +229,7 @@ After execution, produce:
 
 Shipped frontmatter floors at `opus` — no shipped file names a model a host may lack. team-lead and the never-downgrade trio (security-sentinel, plan-checker, findings-synthesizer) ship at `effort: max`; the other 15 agents ship at `effort: xhigh`. When spawning subagents for narrow, rubric-following tasks (e.g., learnings-researcher, convention-enforcer), you MAY step down the runtime ladder one tier at a time:
 
-Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (4.8) + `xhigh` → `opus`+`high` → `sonnet` (5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
+Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (Opus 5) + `xhigh` → `opus`+`high` → `sonnet` (Sonnet 5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
 
 - Pick the smallest downgrade that fits the task — don't skip to Sonnet when Opus/xhigh would do.
 - Only downgrade for tasks with clear rubrics and limited scope.

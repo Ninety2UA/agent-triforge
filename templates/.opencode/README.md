@@ -10,6 +10,8 @@ build/review lanes can make live calls.
 
 ## OC-06 caveat — deny under `--auto` is an open watch; the adapter stays off `--auto`
 
+**OC-06b (2026-09-11, opencode 1.18.30, live harness):** the deny rule was NOT honored headless even *without* `--auto`, with both the project `opencode.json` rule and `OPENCODE_PERMISSION` set — the denied `touch` executed. Neither the config denies nor the env-var denies are an enforced boundary under `opencode run`; they stay as documented intent + best-effort defense-in-depth. The reviewer's read-only posture rests on the agent-definition permission map (`edit`/`bash`/`webfetch: deny` in `opencode-agents/reviewer.md`, a different mechanism the harness does not probe) and the builder's on the lease worktree + env allowlist. Re-checked each cycle (row OC-06/OC-06b in the newest `ops/research/*-probe-record.md`).
+
 OpenCode's docs and source (`permission/index.ts`: an explicit deny raises
 before any approval ask) say an explicit `deny` rule is **still enforced under
 `--auto`** — auto mode only changes what would otherwise ask. The probe harness

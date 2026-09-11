@@ -14,12 +14,12 @@ The coordination model is hybrid: file-based shared state (TASKS.md, MEMORY.md, 
 
 | Agent | Invocation | Strengths | Primary domain |
 |---|---|---|---|
-| Claude Code (Opus max) | Native (lead agent) | Complex code generation, multi-file refactors, system design, business logic | Feature implementation, API design, database schemas, orchestration |
-| Claude Code subagents (Opus max) | Native Agent tool | Parallel isolated tasks within Claude's domain | Splitting large build tasks into parallel tracks |
-| Claude Code agent teams (Opus max) | Native team coordination | Multi-instance collaboration with shared task lists | Complex builds with 5+ interdependent tasks |
-| Claude specialized agents (Opus max) | Agent tool with agent definitions | Focused expertise (security, performance, plan validation, etc.) | Review enhancement, research, verification |
-| Antigravity CLI (`agy`) | `agy -p "..."` via bash, agent definitions in `antigravity-agents/agents/` (agy plugin; injected as prompt prefix until agy surfaces plugin agents headless) | Large context window (1M tokens, Gemini 3.1 Pro (High)), whole-repo analysis, different model perspective, per-agent tools allowlists | Codebase analysis (Phase 0), code review, documentation, architecture audits |
-| Codex CLI | `codex exec "..."` via bash, native agent definitions in `.codex/agents/` | Native test runner, subagent parallelism, sandbox execution, per-agent sandbox modes | Testing, infrastructure, deployment, benchmarking, security review |
+| Claude Code (Fable 5.1 at max; Opus 5 at max when the host lacks Fable) | Native (lead agent) | Complex code generation, multi-file refactors, system design, business logic | Feature implementation, API design, database schemas, orchestration |
+| Claude Code subagents (Opus 5 floor; Fable 5.1 via the spawn-time override) | Native Agent tool | Parallel isolated tasks within Claude's domain | Splitting large build tasks into parallel tracks |
+| Claude Code agent teams (Opus 5 floor; Fable 5.1 via the spawn-time override) | Native team coordination | Multi-instance collaboration with shared task lists | Complex builds with 5+ interdependent tasks |
+| Claude specialized agents (Opus 5 floor; never-downgrade trio at max with the spawn-time Fable override) | Agent tool with agent definitions | Focused expertise (security, performance, plan validation, etc.) | Review enhancement, research, verification |
+| Antigravity CLI (`agy`) | `agy -p "..."` via bash, agent definitions in `antigravity-agents/agents/` (an agy plugin in the agy Markdown-agent format; `TRIFORGE_AGY_MODE` selects prompt-prefix injection — the shipped default — or native `--agent`) | Large context window (1M tokens, Gemini 3.8 Flash (High) by default; 3.1 Pro opt-in), whole-repo analysis, different model perspective, per-agent tools allowlists | Codebase analysis (Phase 0), code review, documentation, architecture audits |
+| Codex CLI | `codex exec "..."` via bash, Triforge agent definitions deployed as `.codex/triforge-agents.toml` (replayed as flags by the helper) | Native test runner, subagent parallelism, sandbox execution, per-agent sandbox modes | Testing, infrastructure, deployment, benchmarking, security review |
 
 > **Builder pool.** The rows above are the shipped default posture. Under the builder pool, any roster member — the core trio plus enrolled optional members (OpenCode, Kimi, Cursor) — is an eligible builder assigned via `ops/roster.toml`; every build runs under a per-task lease in an isolated worktree and merges only after cross-review by a pinned non-author reviewer. The single-writer rule is retired: safety is leases + worktree isolation + cross-review, not write-restriction.
 
@@ -214,9 +214,9 @@ Session continuity file. Written when pausing or wrapping a session.
 Skills are model-agnostic markdown files that encode reusable methodologies. They live in `skills/` and can be consumed by ALL agents:
 
 - **Claude Code:** Uses skills natively via the skill system
-- **Antigravity CLI:** Skills embedded in native agent definitions (`antigravity-agents/agents/*.md`). The `invoke-external.sh` helper detects whether `agy agents` surfaces the definition and otherwise injects the agent body (skill included) as a prompt prefix — the operative mode on agy 1.1.4.
-- **Codex CLI:** Skills embedded in native agent definitions (`codex-agents/agents.toml` as `developer_instructions`). The `invoke-external.sh` helper extracts the config and injects the instructions as a prompt prefix.
-- **Workspace tier:** `session-start.sh` also copies `skills/` to `.agents/skills/` (the Antigravity workspace-skills tier and cross-CLI agentskills.io path) for agents that discover workspace skills.
+- **Antigravity CLI:** Skills embedded in native agent definitions (`antigravity-agents/agents/*.md`). The `invoke-external.sh` helper injects the agent body (skill included) as a prompt prefix by default (`TRIFORGE_AGY_MODE=injection`); `native`/`auto` route through `--agent` when `agy agents` lists the definition.
+- **Codex CLI:** Skills embedded in native agent definitions (`codex-agents/agents.toml` as `developer_instructions`, deployed as `.codex/triforge-agents.toml`). The `invoke-external.sh` helper extracts the config and injects the instructions as a prompt prefix.
+- **Workspace tier:** `session-start.sh` also copies `skills/` to `.agents/skills/` (the Antigravity workspace-skills tier and cross-CLI agentskills.io path, read by agy, Codex, OpenCode, Cursor, and Kimi — not Claude Code) and refreshes the copy on plugin version change under the `.agents/skills/.triforge-plugin-version` stamp (shipped-name directories are overwritten; customizations go in a differently named directory).
 
 ### Available skills and their primary consumers
 
@@ -272,13 +272,13 @@ invoke_codex "debugger" \
   "${TMPDIR:-/tmp}/codex_debug_$$_$(date +%s).txt" 600
 ```
 
-**How `invoke_antigravity` works:** If `agy agents` lists the requested name (agents come from installed agy plugins; empty in headless mode on agy 1.1.4), it routes natively via `--agent`. Otherwise it extracts the body of `antigravity-agents/agents/<name>.md` and injects it as a prompt prefix (the operative mode today). Every call pins the model (`--model "Gemini 3.1 Pro (High)"` — agy defaults to a Flash variant), binds the workspace with `--add-dir "$PWD"`, and caps agy's own headless wait with `--print-timeout`. Failures are classified (KTD-9) via `INVOKE_FAILURE_CLASS`: `deterministic` fails fast with fix guidance, `timeout` returns to the caller for requeue policy, and only `retryable` failures get one retry with the raw prompt. Each call logs `agent/mode/model` to stderr.
+**How `invoke_antigravity` works:** Routing follows `TRIFORGE_AGY_MODE` (`injection` | `native` | `auto`; default `injection` this release — KTD10): `injection` extracts the body of `antigravity-agents/agents/<name>.md` and injects it as a prompt prefix; `native` passes `--agent <name>` and falls back to injection with a warning when `agy agents` does not list it; `auto` goes native only when listed. Every call pins the model (`--model "Gemini 3.8 Flash (High)"` by default — agy's own default is a `(Medium)` variant; `AGY_MODEL`/the roster override it), binds the workspace with `--add-dir "$PWD"`, caps agy's own headless wait with `--print-timeout`, and runs `--output-format json`: the JSON envelope, not the exit code, is the completion signal (since agy 1.1.20/1.1.28 benign tool errors and timeout expiry exit 0). `_agy_parse_envelope` writes the prose `response` to the output file and `status`/`denied_actions`/resolved `mode` to `.status`/`.denied`/`.mode` sidecars; an empty response with denials is a deterministic failure naming the user-tier allow rule (`read_url(*)` for the research lanes), an empty response without denials is `no-output`. Failures are classified (KTD-9) via `INVOKE_FAILURE_CLASS`: `deterministic` fails fast with fix guidance, `timeout` returns to the caller for requeue policy, and only `retryable` failures get one retry with the raw prompt. Each call logs `agent/mode/model` to stderr.
 
-**How `invoke_codex` works:** Codex has no CLI flag to select a subagent — upstream "subagents" only spawn from within a running Codex session. The helper simulates agent selection by extracting the agent's config from `agents.toml` and passing it as `-m` (model), `-s` (sandbox), `-c approval_policy=` overrides, with `developer_instructions` injected as prompt prefix. Lookup order: project `.codex/agents/agents.toml` first, then plugin template.
+**How `invoke_codex` works:** Codex has no CLI flag to select a subagent — upstream "subagents" only spawn from within a running Codex session. The helper simulates agent selection by extracting the agent's config from the Triforge-internal TOML and passing it as `-m` (model), `-c model_reasoning_effort=` (effort replay — `gpt-6-astra` at `xhigh` on every lane), `-s` (sandbox), `-c approval_policy=` overrides, plus `--output-schema` when the agent declares one (resolved at the plugin tier), with `developer_instructions` injected as prompt prefix. Lookup order: project `.codex/triforge-agents.toml` first, then the plugin's `codex-agents/agents.toml`. The file never lives under `.codex/agents/` — Codex ≥ 0.147 sweeps that directory as standalone role files and warns on a multi-agent file.
 
 ### Debugging the subagent layer
 
-- **Antigravity:** `agy agents` — inspect loaded agent definitions (from installed agy plugins; run with NO other flags — `agy agents` rejects `--model`/`--add-dir`). `agy plugin list` shows whether the agent-triforge pack is installed. `agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"` is the minimal smoke test for the headless lane.
+- **Antigravity:** `agy agents` — inspect loaded agent definitions (from installed agy plugins; run with NO other flags — `agy agents` rejects `--model`/`--add-dir`). `agy plugin list` shows whether the agent-triforge pack is installed. `agy --model "Gemini 3.8 Flash (High)" -p "Respond with only: READY"` is the minimal smoke test for the headless lane.
 - **Codex:** In an interactive session, `/agent` switches between active agent threads and inspects ongoing ones. In non-interactive mode (`codex exec`), inspect the session transcript captured by `invoke_codex`'s output file.
 
 ### Hard constraint: Antigravity agents do not fan out
@@ -290,7 +290,7 @@ Claude (the lead) is the only agent that launches Antigravity agents; no Antigra
 Antigravity CLI ships its own plugin system (`agy plugin {install,uninstall,list,enable,disable}`) and a user-tier skills directory (`~/.gemini/antigravity-cli/skills/`). We use the plugin system only as an agent-definition carrier (`antigravity-agents/` is a valid agy plugin), not as a skills registry:
 
 - **Skills:** Our 12 portable skills in `skills/` are markdown files consumed by all three agents (Claude/Antigravity/Codex) via prompt-prefix injection or native definition embedding, plus the `.agents/skills/` workspace copy for agents that discover workspace skills. Registering them per-CLI would fragment the portability story.
-- **Hooks:** Our `hooks/handlers/*.sh` are Claude Code lifecycle hooks (SessionStart, Stop, PostToolUse, etc.) — the Antigravity CLI runs as a subprocess of a Claude Code session, a different layer with different events. Project-tier agy hooks do not fire under `agy -p` anyway (re-probed 2026-07-18 on agy 1.1.4).
+- **Hooks:** Our `hooks/handlers/*.sh` are Claude Code lifecycle hooks (SessionStart, Stop, PostToolUse, etc.) — the Antigravity CLI runs as a subprocess of a Claude Code session, a different layer with different events. Project-tier agy hooks DO fire under `agy -p` when written in the documented `.agents/hooks.json` named-hook shape (AGY-08 lead re-probe 2026-09-11 on agy 1.2.0 — the July "inert headless" reading was a probe-shape error), but Triforge ships none: its lifecycle logic stays in the Claude Code hooks.
 
 ---
 
@@ -1158,16 +1158,16 @@ YOU: Review summary, check CHANGELOG, approve or request changes
 
 **Core trio (required)** — installed, authenticated, and answering a headless READY probe (floors per KTD-13):
 ```bash
-claude --version                                                   # Claude Code ≥ 2.1.212 (session caps/monitors line; /goal, dynamic workflows, worktree isolation landed earlier)
-agy --model "Gemini 3.1 Pro (High)" -p "Respond with only: READY"  # Antigravity ≥ 1.1.3 — always pin the model (agy defaults to a Flash variant)
-codex exec "Respond with only: READY"                              # Codex ≥ 0.144.0
+claude --version                                                     # Claude Code ≥ 2.1.267 (effort: frontmatter honored on pinned-default models; fable alias = Fable 5.1 since 2.1.257)
+agy --model "Gemini 3.8 Flash (High)" -p "Respond with only: READY"  # Antigravity ≥ 1.1.27 — pin the model (agy's own default is a (Medium) variant)
+codex exec "Respond with only: READY"                                # Codex ≥ 0.153.0 (gpt-6-astra's minimal client version)
 ```
 
 **Optional tier** (enroll via `/setup` to use them as builders/reviewers; each is skipped cleanly in every roster fallback chain when absent):
 ```bash
-opencode run --format json -m openrouter/z-ai/glm-5.2 "Respond with only: READY"  # OpenCode ≥ 1.18 (OpenRouter provider connected)
-kimi -p "Respond with only: READY"                                                # Kimi Code ≥ 0.15 (OAuth device-code or API key)
-cursor-agent -p --trust --model grok-4.5 "Respond with only: READY"               # Cursor (date-versioned; pin grok-4.5, never the Auto router)
+opencode run --format json -m openrouter/z-ai/glm-5.3 "Respond with only: READY"  # OpenCode ≥ 1.18.20 (OpenRouter provider connected)
+kimi -p "Respond with only: READY"                                                # Kimi Code ≥ 0.33.0 (OAuth device-code or API key)
+cursor-agent -p --trust --model cursor-grok-4.6-xhigh "Respond with only: READY"  # Cursor (date-versioned; pin the suffixed Grok id, never the Auto router; `agent` when only the new name exists)
 ```
 
 ### Plugin installation

@@ -21,7 +21,7 @@ read-only. Triforge deliberately runs you WITHOUT `--auto`: OpenCode's docs and
 source say an explicit deny is still enforced under `--auto`, but the probe
 harness (OC-06, 1.18.30) still recorded a denied command executing and lead
 re-probes hung, so the adapter stays off `--auto` (open watch D-033) and
-additionally injects `OPENCODE_PERMISSION` with the same deny rules as
+additionally injects `OPENCODE_PERMISSION` (best-effort — OC-06b on 1.18.30 saw the deny ignored headless even without `--auto`, so only THIS permission map and the worktree are the boundary) with the same deny rules as
 defense-in-depth. Inspect code with `read`, `grep`, `glob`, and `list` only. Do
 not attempt to write files, run shell commands, or fetch the network.
 
