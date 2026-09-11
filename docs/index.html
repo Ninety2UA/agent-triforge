@@ -1431,7 +1431,7 @@ body::after {
   <div class="container">
     <div class="hero__content">
       <div>
-        <div class="hero__badge">v3.2.0 — Repo-Local Watch Cycle</div>
+        <div class="hero__badge">v3.3.0 — September Models</div>
         <h1>
           <span class="gradient-text">Agent Triforge</span>
         </h1>
@@ -1486,7 +1486,7 @@ body::after {
           <div class="term__sys" id="term-sys">
             <span class="term__sys-item"><span class="term__sys-icon"></span><span>agent-triforge</span></span>
             <span class="term__sys-item term__sys-branch">main</span>
-            <span class="term__sys-item term__sys-ver">claude v3.2.0</span>
+            <span class="term__sys-item term__sys-ver">claude v3.3.0</span>
           </div>
 
           <div class="term__row term__row--prompt" data-row="r0">
@@ -1637,17 +1637,32 @@ body::after {
   </div>
 </section>
 
-<!-- ═══ What's New in v3.2.0 ═══ -->
+<!-- ═══ What's New in v3.3.0 ═══ -->
 <section class="section section--alt" id="whats-new">
   <div class="container">
     <div class="section__header reveal">
       <span class="section__label">What's New</span>
-      <h2 class="section__title">v3.2.0 — A Leaner Plugin</h2>
-      <p class="section__desc">The monthly watch cycle (<code>/cli-watch</code> · <code>/repo-watch</code>) moved out of the shipped command set into repo-local maintainer tooling — 17 commands and 12 skills ship, and nothing lands in your <code>ops/</code> that you did not ask for. The v3.1.0 role step and the v3.0.0 builder-pool foundation are unchanged below.</p>
+      <h2 class="section__title">v3.3.0 — September Models, Trustworthy Signals</h2>
+      <p class="section__desc">Every lane runs on the September 2026 generation — Fable 5.1 → Opus 5 → Sonnet 5, Codex <code>gpt-6-astra</code>, Antigravity <code>Gemini 3.8 Flash (High)</code>, GLM 5.3, <code>kimi-code/k3</code>, <code>cursor-grok-4.6-xhigh</code> — and every headless run reports a completion signal the lead parses instead of a bare exit code. Native agent formats for Antigravity and Kimi, a version-stamped <code>.agents/skills/</code> refresh for all six CLIs, and two new release validators. The v3.2.0 watch-cycle move and the v3.0.0 builder-pool foundation are unchanged below.</p>
     </div>
     <div class="whatsnew reveal-stagger">
       <div class="whatsnew__row">
-        <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Watch cycle shipped as plugin commands — 19 commands, 13 skills</span></div>
+        <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Fable 5 → Opus 4.8 ladder, Codex gpt-5.6-sol, Gemini 3.1 Pro, Grok 4.5 (history)</span></div>
+        <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Fable 5.1 → Opus 5 → Sonnet 5 · <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">gpt-6-astra</code> · Gemini 3.8 Flash (High) · <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">cursor-grok-4.6-xhigh</code></span></div>
+      </div>
+      <div class="whatsnew__row">
+        <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Exit 0 read as "done" on every headless lane</span></div>
+        <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">agy JSON envelope (<code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">denied_actions</code>) + a typed <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">Status:</code> report parsed by <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">lease_collect</code></span></div>
+      </div>
+      <div class="whatsnew__row">
+        <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Copy-once <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">.agents/skills/</code>, injected role briefs</span></div>
+        <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Version-stamped skills refresh for all six CLIs; agy Markdown agents, Kimi <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">--agent-file</code>, Codex <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">.codex/triforge-agents.toml</code></span></div>
+      </div>
+      <div class="whatsnew__row">
+        <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Watch cycle shipped as plugin commands (v3.1 history) — 19 commands, 13 skills</span></div>
         <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
         <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Repo-local maintainer tooling in <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">.claude/commands/</code> — 17 commands, 12 skills ship</span></div>
       </div>
@@ -1689,7 +1704,7 @@ body::after {
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Codex gpt-5.4, free-text review output</span></div>
         <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
-        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__new">Codex gpt-5.6-sol — <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">--output-schema</code> structured verdicts</span></div>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__new">Codex flagship (history: gpt-5.6-sol in v3.0) — <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">--output-schema</code> structured verdicts</span></div>
       </div>
     </div>
   </div>
