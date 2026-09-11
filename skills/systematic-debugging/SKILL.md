@@ -1,6 +1,10 @@
 ---
 name: systematic-debugging
-description: "Structured debugging methodology with error taxonomy, assumption tracking, and root cause analysis. Primary consumer: Codex CLI (bug investigation), also Claude."
+description: "Diagnostic protocol: classify the error, reproduce it with a failing test, track assumptions in a ledger, bisect, find the root cause with five whys, then fix and verify, under a three-attempt circuit breaker. Use when a test fails, a bug is reported, output is wrong, or a previous fix did not hold. Not for building new behavior; that is test-driven-development."
+metadata:
+  triforge-consumer: "Codex (debugger), Claude"
+  triforge-phase: "bug investigation (any phase); 5 (test)"
+  version: "3.3.0"
 ---
 
 # Systematic Debugging
@@ -80,6 +84,26 @@ If the same failing test or error recurs after 3 consecutive fix attempts:
 4. Do NOT continue iterating on the same failure — switch to a different task or wait for guidance
 
 This prevents infinite loops on hard bugs. The outer coordinate loop (`scripts/coordinate.sh`) has its own iteration ceiling across sessions, but this rule catches per-issue repetition within a single session.
+
+## Red Flags
+
+Stop and return to Step 1 when:
+- You are editing code before the bug is reproduced.
+- You have a fix in mind and are looking for evidence that supports it.
+- The same error has come back after two fix attempts.
+- You are about to add a retry, a sleep, or a null check to make a symptom go away.
+- A hypothesis in the assumption ledger is still `unverified` and you are acting on it.
+
+## Common rationalizations
+
+| Excuse | Reality |
+|---|---|
+| "I know what this is, skip the reproduction" | A fix without a failing test cannot be shown to work. Reproduce first; the test is Step 2. |
+| "Just add a null check and move on" | A guard on the symptom leaves the cause in place and moves the failure downstream. Find the why. |
+| "Bisecting takes too long" | Bisection is logarithmic; linear reading is not. Halve the search space. |
+| "The fix works on my run" | One run is not a reproduction. Run the failing test, then the full suite. |
+| "One more attempt will get it" | Three consecutive misses is the circuit breaker. Stop, write the escalation report, switch tasks. |
+| "The two findings conflict, I will go with the likelier one" | Flag the contradiction and reconcile against system state. Picking one silently hides the bug. |
 
 ## Output
 

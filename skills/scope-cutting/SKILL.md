@@ -1,6 +1,10 @@
 ---
 name: scope-cutting
-description: "Systematically cut scope when a sprint has too many tasks, is past review cycle 3, or is nearing context limits. Primary consumer: Claude (Phase 1.5 or mid-sprint). Triggers: >15 tasks, P2 issues remaining after cycle 3, 150+ tool calls, user requests faster delivery."
+description: "Priority-ordered scope reduction: classify every task by value type, cut speculative work first and unblocking work never, and move cuts to a backlog with a reason. Use when a sprint has more than 15 tasks, when review cycle 3 still has P2 issues, when the context window is near its limit, or when the user asks for faster delivery. Not for choosing which review findings to fix; that is iterative-refinement."
+metadata:
+  triforge-consumer: "Claude (lead)"
+  triforge-phase: "1.5 (plan validation); mid-sprint"
+  version: "3.3.0"
 ---
 
 # Scope Cutting
@@ -63,6 +67,16 @@ After cutting:
 - Polish is valuable but never urgent
 - Document what was cut and why in MEMORY.md for the follow-up sprint
 - Always inform the user what was cut and what remains
+
+## Common rationalizations
+
+| Excuse | Reality |
+|---|---|
+| "Cut the types task, it is small and nobody will notice" | Unblocking tasks are never cut. Everything downstream stalls without them. |
+| "Keep the plugin system, we will need it later" | Speculative work is cut first. YAGNI is the rule, not a suggestion. |
+| "Delete the cut tasks so the plan is clean" | Cut tasks move to BACKLOG with a reason. Deleting them loses the work and the record. |
+| "The user does not need to know what was cut" | Always report what was cut and what remains. A silent cut is a broken promise. |
+| "Skip hardening, the happy path works" | Hardening is deferred, not forgotten: it gets a BACKLOG row and a follow-up sprint. |
 
 ## Output
 

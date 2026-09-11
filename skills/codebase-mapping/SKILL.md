@@ -1,6 +1,10 @@
 ---
 name: codebase-mapping
-description: "Systematic methodology for analyzing an entire codebase and producing structured architecture documentation. Primary consumer: Antigravity CLI (Phase 0)."
+description: "Full-repository analysis methodology producing ARCHITECTURE.md plus MEMORY.md and CONTRACTS.md appendices: structure, data flow, patterns, interfaces, technical debt, dependencies. Use when starting work on an unfamiliar or changed codebase (Phase 0), when a plan needs module boundaries it cannot find, or when CONTRACTS.md lacks interfaces the code already has. Not for reviewing a single change; that is an architecture review."
+metadata:
+  triforge-consumer: "Antigravity (analyst)"
+  triforge-phase: "0 (codebase analysis)"
+  version: "3.3.0"
 ---
 
 # Codebase Mapping
@@ -60,7 +64,16 @@ Map inter-module dependencies:
 - Tightly coupled modules (high change correlation)
 - Loosely coupled modules (good boundaries)
 
-## Output format
+## Common rationalizations
+
+| Excuse | Reality |
+|---|---|
+| "The repo is large, sample the main modules" | A map with gaps sends the planner into unmapped code. Walk every top-level module and mark the ones you could not read. |
+| "Rewrite CONTRACTS.md so it is consistent" | CONTRACTS.md and MEMORY.md are append-only for this skill. Discovered interfaces are appended; changes are proposed in MEMORY.md. |
+| "The circular dependency is probably fine" | Flag it as critical. The planner decides whether it is fine. |
+| "Skip the debt inventory, nobody asked for it" | Inconsistencies and missing error handling are inputs to shadow-path tracing. Record them. |
+
+## Output
 
 Produce three documents:
 
