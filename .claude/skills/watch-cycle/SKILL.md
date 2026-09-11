@@ -5,9 +5,9 @@ description: "Shared methodology for the watch commands (/cli-watch, /repo-watch
 
 # Watch Cycle
 
-The recurring audit that keeps Triforge current. Two commands consume this one methodology:
+The recurring audit that keeps Triforge current. **Repo-local:** this skill, the two commands (`.claude/commands/`), and the registry (`ops/watch-registry.toml`) live in the agent-triforge checkout and are not shipped with the plugin. Two commands consume this one methodology:
 
-- **`/cli-watch`** — audits the six CLIs in `templates/ops/watch-registry.toml` `[cli.*]`. Produces a **report + ADR + a re-run of the capability probe**.
+- **`/cli-watch`** — audits the six CLIs in `ops/watch-registry.toml` `[cli.*]`. Produces a **report + ADR + a re-run of the capability probe**.
 - **`/repo-watch`** — mines the four external repos in `[repo.*]`. Produces a **prioritized adopt/defer recommendations report** (recommends only — never implements).
 
 Both target the same house style: the May-cycle gap-analysis report (`ops/research/cli-updates-2026-05.md`) and the adopt/defer ADR with a probe table (`ops/decisions/2026-05-12-cli-deprecation-watch.md`, and its 2026-07 D-004 reversal `ops/decisions/2026-07-18-codex-hooks-under-exec.md`). Read those three before running — the output must match their shape.
@@ -30,7 +30,7 @@ The registry is data the user (or a future contributor) edits, and every target 
 
 ### Stage 1 — Load and validate the registry
 
-Read `ops/watch-registry.toml` (the user's project copy, bootstrapped from `templates/ops/watch-registry.toml`). Enumerate `[cli.*]` (for `/cli-watch`) or `[repo.*]` (for `/repo-watch`). Apply the Stage-0 HTTPS/public-host validation (Security rule 1) to every URL up front; build the working set from the entries that pass, and open a flagged list for the ones that don't.
+Read `ops/watch-registry.toml` (this repo's tracked registry). Enumerate `[cli.*]` (for `/cli-watch`) or `[repo.*]` (for `/repo-watch`). Apply the Stage-0 HTTPS/public-host validation (Security rule 1) to every URL up front; build the working set from the entries that pass, and open a flagged list for the ones that don't.
 
 **Adding a target is registry-only** — the command enumerates whatever is present, so a new `[cli.<name>]` or `[repo.<name>]` block is picked up with no command edit.
 

@@ -180,8 +180,8 @@ codex-agents/             # Codex CLI native agent definitions
 opencode-agents/          # OpenCode adapter role briefs (optional tier; prompt-injection)
 kimi-agents/              # Kimi Code adapter role briefs (optional tier; prompt-injection)
 cursor-agents/            # Cursor adapter role briefs (optional tier; prompt-injection)
-skills/                   # 13 portable skill files (all agents consume)
-commands/                 # 19 slash commands (adds /setup onboarding + /cli-watch + /repo-watch)
+skills/                   # 12 portable skill files (all agents consume)
+commands/                 # 17 slash commands (adds /setup onboarding)
 hooks/
   hooks.json              # Hook registration (uses ${CLAUDE_PLUGIN_ROOT})
   handlers/               # Lifecycle hook scripts
@@ -190,7 +190,7 @@ hooks/
 settings.json             # Default env vars (agent teams)
 templates/                # Project bootstrapping templates
   CLAUDE.md                 Template for user projects
-  ops/                      Skeleton ops/ files (incl. roster.toml, watch-registry.toml)
+  ops/                      Skeleton ops/ files (incl. roster.toml)
   .antigravity/settings.json Antigravity workspace settings (permission deny rules)
   .codex/config.toml        Codex project config (disables Codex's auto-memory pipeline)
   .codex/hooks.json         Codex PostToolUse hook (CHANGELOG attribution under codex exec)
@@ -200,8 +200,16 @@ scripts/
   invoke-external.sh      # Unified six-CLI invocation, roster resolution, lease lifecycle, feature detection
   probe-capabilities.sh   # Rerunnable capability probe (feeds ops/research/*-probe-record.md)
 ops/                      # This repo's own project state (not part of plugin)
+  watch-registry.toml       Watch targets for the repo-local /cli-watch + /repo-watch cycle
+.claude/                  # This repo's own Claude Code project config (not part of plugin)
+  commands/                 /cli-watch + /repo-watch — framework self-maintenance, run from this checkout only
+  skills/watch-cycle/       Shared methodology for the two watch commands
 docs/                     # Framework design documentation
 ```
+
+## Framework self-maintenance (repo-local, not shipped)
+
+`/cli-watch` and `/repo-watch` keep Triforge current against its six CLIs and four reference repos. They are maintainer tooling for THIS checkout — project-local commands in `.claude/commands/`, backed by `.claude/skills/watch-cycle/SKILL.md` and the tracked registry `ops/watch-registry.toml`. None of the three is part of the plugin: `commands/`, `skills/`, and `templates/ops/` ship without them, and `session-start.sh` never bootstraps the registry into user projects. Claude Code discovers `.claude/commands/` automatically when run from the repo root; schedule monthly via `/schedule`.
 
 ## Portable skills
 
@@ -221,7 +229,6 @@ Skills are model-agnostic markdown files consumed by ALL agents:
 | `knowledge-compounding` | Claude | Document solutions and decisions |
 | `session-continuity` | Claude | Save/resume across sessions |
 | `scope-cutting` | Claude | Systematically cut scope by priority |
-| `watch-cycle` | Claude | CLI/repo watch methodology (research → gap table → adopt/defer ADR) |
 
 Skills consumed by Antigravity/Codex are embedded in their native agent definitions (`antigravity-agents/agents/`, `codex-agents/`). The `invoke-external.sh` helper handles feature detection and falls back to prompt-prefix injection when native agent routing isn't available.
 

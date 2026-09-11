@@ -129,7 +129,6 @@ Assignment comes from `ops/roster.toml` (`resolve_role <role>`); the defaults be
 | `knowledge-compounding` | Claude | Document solutions and decisions |
 | `session-continuity` | Claude | Save/resume across sessions |
 | `scope-cutting` | Claude | Systematically cut scope by priority |
-| `watch-cycle` | Claude | CLI/repo watch methodology (research → gap table → adopt/defer ADR) |
 
 ## Specialized agents
 

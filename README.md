@@ -62,7 +62,7 @@ Also new: the 2026-07-21 **Gemini 3.6 Flash** release is recorded in the model w
 - **Builder pool (default).** All six supported CLIs — the core trio (Claude, Antigravity, Codex) plus enrolled optional members (OpenCode, Kimi, Cursor) — are eligible builders. [`ops/roster.toml`](templates/ops/roster.toml) assigns each role; every build runs under a per-task lease in an isolated worktree and merges only after cross-review by a pinned non-author reviewer. The single-writer rule is retired.
 - **Gemini → Antigravity.** Google shut down the hosted Gemini CLI service for consumer tiers on 2026-06-18; the analyst / reviewer / documenter lane is now **Antigravity (`agy`)** running Gemini 3.1 Pro (High), invoked via `invoke_antigravity`.
 - **Guided onboarding ([`/setup`](commands/setup.md)).** One idempotent command takes a fresh install to a working roster: gate the core trio, enroll or decline each optional CLI, then accept the shipped role defaults or customize who does what (CLI · model · effort per role).
-- **Self-maintenance ([`/cli-watch`](commands/cli-watch.md), [`/repo-watch`](commands/repo-watch.md)).** Scheduled or manual watch cycles keep the framework current against primary sources.
+- **Self-maintenance ([`/cli-watch`](.claude/commands/cli-watch.md), [`/repo-watch`](.claude/commands/repo-watch.md)).** Scheduled or manual watch cycles keep the framework current against primary sources.
 - **Native-first runtime.** Completion gating moved from the retired `ship-loop.sh` promise gate to Claude Code's native `/goal` + an `ops/.sprint-complete` sentinel; Codex runs `gpt-5.6-sol` with structured `--output-schema` verdicts and hooks under `codex exec`.
 
 #### Migrating from v2.4.x
@@ -128,8 +128,8 @@ The plugin provides agents, skills, commands, and hooks. Your project gets an `o
 agent-triforge/                     (plugin — installed automatically)
 ├── .claude-plugin/plugin.json        Plugin manifest
 ├── agents/                           19 specialized agent definitions
-├── skills/                           13 portable workflow modules
-├── commands/                         19 slash commands
+├── skills/                           12 portable workflow modules
+├── commands/                         17 slash commands
 ├── hooks/
 │   ├── hooks.json                    Hook registration
 │   └── handlers/                     4 lifecycle hook scripts
@@ -149,6 +149,11 @@ your-project/                       (your repo — bootstrapped on first session
 │   ├── decisions/                      Architecture decision records
 │   └── archive/                        Archived review + test files
 └── src/                              Your source code
+
+agent-triforge/ checkout            (maintainers only — not installed with the plugin)
+├── .claude/commands/                 /cli-watch + /repo-watch — framework self-maintenance
+├── .claude/skills/watch-cycle/       Shared watch methodology
+└── ops/watch-registry.toml           Watch targets: six CLIs + four reference repos
 ```
 
 ### Shared file protocol
@@ -490,14 +495,14 @@ claude
 | [**`/compound`**](commands/compound.md) | Document a solved problem to [`ops/solutions/`](ops/solutions/) or decision to [`ops/decisions/`](ops/decisions/). |
 | [**`/resolve-pr <PR#>`**](commands/resolve-pr.md) | Read GitHub PR comments and implement requested changes via [`pr-comment-resolver`](agents/pr-comment-resolver.md). |
 
-### Scheduling watches (`/cli-watch`, `/repo-watch`)
+### Keeping the framework current (`/cli-watch`, `/repo-watch` — maintainers)
 
-Two commands keep the framework current instead of hand-running audits. Both read [`templates/ops/watch-registry.toml`](templates/ops/watch-registry.toml) — a seeded, user-editable registry of watch targets — and share the [`watch-cycle`](skills/watch-cycle/SKILL.md) methodology: primary-source research window → per-target changelog → gap table vs current Triforge → adopt/defer ADR with revisit triggers → verification probes.
+Two **repo-local** commands keep the framework current instead of hand-running audits. They are maintainer tooling, not plugin features: they live in [`.claude/commands/`](.claude/commands/) of this checkout, so they are available when you run Claude Code inside a clone of this repo and are never installed into your projects. Both read [`ops/watch-registry.toml`](ops/watch-registry.toml) — a seeded, editable registry of watch targets — and share the [`watch-cycle`](.claude/skills/watch-cycle/SKILL.md) methodology: primary-source research window → per-target changelog → gap table vs current Triforge → adopt/defer ADR with revisit triggers → verification probes.
 
 | Command | Targets | Produces |
 |---|---|---|
-| [**`/cli-watch`**](commands/cli-watch.md) | the six CLIs (`[cli.*]`) | Gap report + adopt/defer ADR + a re-run of [`probe-capabilities.sh`](scripts/probe-capabilities.sh) |
-| [**`/repo-watch`**](commands/repo-watch.md) | four external repos (`[repo.*]`) | Prioritized adopt/defer recommendations (Why / Concrete change / Verification). **Recommends only** — never implements. |
+| [**`/cli-watch`**](.claude/commands/cli-watch.md) | the six CLIs (`[cli.*]`) | Gap report + adopt/defer ADR + a re-run of [`probe-capabilities.sh`](scripts/probe-capabilities.sh) |
+| [**`/repo-watch`**](.claude/commands/repo-watch.md) | four external repos (`[repo.*]`) | Prioritized adopt/defer recommendations (Why / Concrete change / Verification). **Recommends only** — never implements. |
 
 **The registry is the only thing you edit to add a target** — a new `[cli.<name>]` or `[repo.<name>]` block is picked up with no command changes. Targets must be public HTTPS URLs (loopback, private, and link-local addresses are rejected before *and* after redirects); fetched pages are treated as untrusted evidence, never as instructions; a dead or renamed entry is flagged in the report, never silently dropped.
 
@@ -509,7 +514,7 @@ Two commands keep the framework current instead of hand-running audits. Both rea
 
 ## Skills reference
 
-13 portable, model-agnostic workflow modules that any agent can consume. Skills embedded in native Antigravity/Codex agent definitions (`antigravity-agents/agents/`, `codex-agents/`) at install time; prompt-prefix injection of the agent body kicks in automatically when a CLI doesn't surface native agent definitions.
+12 portable, model-agnostic workflow modules that any agent can consume. Skills embedded in native Antigravity/Codex agent definitions (`antigravity-agents/agents/`, `codex-agents/`) at install time; prompt-prefix injection of the agent body kicks in automatically when a CLI doesn't surface native agent definitions.
 
 | Skill | Primary consumer | What it teaches the agent |
 |---|---|---|
@@ -525,7 +530,6 @@ Two commands keep the framework current instead of hand-running audits. Both rea
 | [**`knowledge-compounding`**](skills/knowledge-compounding/SKILL.md) | Claude (Phase 6) | Document solutions to [`ops/solutions/`](ops/solutions/) for future sprints |
 | [**`session-continuity`**](skills/session-continuity/SKILL.md) | Claude | Save and resume via [`STATE.md`](ops/STATE.md) across sessions |
 | [**`scope-cutting`**](skills/scope-cutting/SKILL.md) | Claude | Systematically cut scope by unblocking value and risk |
-| [**`watch-cycle`**](skills/watch-cycle/SKILL.md) | Claude (lead) | CLI/repo watch cycle: primary-source research → gap table → adopt/defer ADR |
 
 ---
 
@@ -733,7 +737,7 @@ The largest release since the plugin conversion — the coordination model and t
 
 **Codex modernization.** `gpt-5.6-sol` at `xhigh` (was `gpt-5.4`), structured `--output-schema` review verdicts, and hooks under `codex exec` (D-004 reversed — probe CDX-04; see [`ops/decisions/2026-07-18-codex-hooks-under-exec.md`](ops/decisions/2026-07-18-codex-hooks-under-exec.md)).
 
-**Onboarding + self-maintenance.** New [`/setup`](commands/setup.md) guides a fresh install to a live roster via first-detection enrollment. New [`/cli-watch`](commands/cli-watch.md) + [`/repo-watch`](commands/repo-watch.md) run watch cycles over [`templates/ops/watch-registry.toml`](templates/ops/watch-registry.toml) using the `watch-cycle` skill.
+**Onboarding + self-maintenance.** New [`/setup`](commands/setup.md) guides a fresh install to a live roster via first-detection enrollment. New [`/cli-watch`](.claude/commands/cli-watch.md) + [`/repo-watch`](.claude/commands/repo-watch.md) run watch cycles over [`ops/watch-registry.toml`](ops/watch-registry.toml) using the `watch-cycle` skill (since relocated to repo-local maintainer tooling — see [Keeping the framework current](#keeping-the-framework-current-cli-watch-repo-watch--maintainers)).
 
 **Raised floors (KTD-13).** Claude Code ≥ 2.1.212, Codex ≥ 0.144.0, Antigravity `agy` ≥ 1.1.3; optional OpenCode ≥ 1.18, Kimi Code ≥ 0.15, Cursor (date-versioned). See [Compatibility](#compatibility).
 

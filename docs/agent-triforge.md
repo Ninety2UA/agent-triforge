@@ -289,7 +289,7 @@ Claude (the lead) is the only agent that launches Antigravity agents; no Antigra
 
 Antigravity CLI ships its own plugin system (`agy plugin {install,uninstall,list,enable,disable}`) and a user-tier skills directory (`~/.gemini/antigravity-cli/skills/`). We use the plugin system only as an agent-definition carrier (`antigravity-agents/` is a valid agy plugin), not as a skills registry:
 
-- **Skills:** Our 13 portable skills in `skills/` are markdown files consumed by all three agents (Claude/Antigravity/Codex) via prompt-prefix injection or native definition embedding, plus the `.agents/skills/` workspace copy for agents that discover workspace skills. Registering them per-CLI would fragment the portability story.
+- **Skills:** Our 12 portable skills in `skills/` are markdown files consumed by all three agents (Claude/Antigravity/Codex) via prompt-prefix injection or native definition embedding, plus the `.agents/skills/` workspace copy for agents that discover workspace skills. Registering them per-CLI would fragment the portability story.
 - **Hooks:** Our `hooks/handlers/*.sh` are Claude Code lifecycle hooks (SessionStart, Stop, PostToolUse, etc.) — the Antigravity CLI runs as a subprocess of a Claude Code session, a different layer with different events. Project-tier agy hooks do not fire under `agy -p` anyway (re-probed 2026-07-18 on agy 1.1.4).
 
 ---
@@ -1192,8 +1192,8 @@ agent-triforge/                     (plugin — installed automatically)
 │       └── documentation-writer.md       Documentation specialist
 ├── codex-agents/                     Codex CLI agent definitions (native subagents)
 │   └── agents.toml                     logic_reviewer, test_writer, debugger
-├── skills/                           13 portable workflow modules
-├── commands/                         19 slash commands (adds /setup, /cli-watch, /repo-watch)
+├── skills/                           12 portable workflow modules
+├── commands/                         17 slash commands (adds /setup)
 ├── hooks/
 │   ├── hooks.json                    Hook registration
 │   └── handlers/                     4 lifecycle hook scripts
@@ -1241,12 +1241,12 @@ Hook registration uses `${CLAUDE_PLUGIN_ROOT}` for plugin-relative paths:
 
 ## Staying current (`/cli-watch`, `/repo-watch`)
 
-The framework tracks its own dependencies instead of drifting. Both commands read `templates/ops/watch-registry.toml` (a seeded, user-editable list of watch targets) and share the `watch-cycle` skill (primary-source research → per-target changelog → gap table vs current Triforge → adopt/defer ADR):
+The framework tracks its own dependencies instead of drifting. The two watch commands are **repo-local maintainer tooling**: they live in `.claude/commands/` of the agent-triforge checkout (not in the plugin's `commands/`), read `ops/watch-registry.toml` (a seeded, editable list of watch targets, tracked in this repo), and share the repo-local `.claude/skills/watch-cycle/SKILL.md` methodology (primary-source research → per-target changelog → gap table vs current Triforge → adopt/defer ADR):
 
 - **`/cli-watch`** — checks the six CLIs against primary sources, writes a gap report + adopt/defer ADR to `ops/research/` and `ops/decisions/`, and re-runs `scripts/probe-capabilities.sh`.
 - **`/repo-watch`** — mines external reference repos for adoptable patterns and produces prioritized recommendations (recommends only; never implements).
 
-Run either manually, or schedule it monthly as a Claude Code cloud Routine. Fetched pages are treated as untrusted evidence, never as instructions; a dead or renamed registry entry is flagged in the report, never silently dropped.
+Run either from a clone of this repo — manually, or scheduled monthly as a Claude Code cloud Routine. Fetched pages are treated as untrusted evidence, never as instructions; a dead or renamed registry entry is flagged in the report, never silently dropped.
 
 ---
 

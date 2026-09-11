@@ -1679,7 +1679,7 @@ body::after {
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Manual prerequisite probing of each CLI</span></div>
         <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
-        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__new"><code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">/setup</code> onboarding + <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">/cli-watch</code> · <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">/repo-watch</code></span></div>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__new"><code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">/setup</code> onboarding + monthly CLI/repo watch cycles</span></div>
       </div>
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Codex gpt-5.4, free-text review output</span></div>
@@ -1709,7 +1709,7 @@ body::after {
         <div class="stat-pill__text"><h4>Agents</h4><p>Opus/Fable, max effort</p></div>
       </div>
       <div class="stat-pill">
-        <div class="stat-pill__num">13</div>
+        <div class="stat-pill__num">12</div>
         <div class="stat-pill__text"><h4>Skills</h4><p>Portable workflows</p></div>
       </div>
       <div class="stat-pill">
@@ -2067,7 +2067,6 @@ body::after {
           <tr><td><code>knowledge-compounding</code></td><td>Claude (Phase 6)</td><td>Document solutions to ops/solutions/ for future sprints</td></tr>
           <tr><td><code>session-continuity</code></td><td>Claude</td><td>Save and resume via STATE.md across sessions</td></tr>
           <tr><td><code>scope-cutting</code></td><td>Claude</td><td>Systematically cut scope by unblocking value and risk</td></tr>
-          <tr><td><code>watch-cycle</code></td><td>Claude (lead)</td><td>CLI/repo watch cycle: primary-source research, gap table, adopt/defer ADR</td></tr>
         </tbody>
       </table>
     </div>
@@ -2340,8 +2339,6 @@ body::after {
           <tr><td><code>/analyze &lt;url&gt;</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Deep compatibility analysis of an external repo</td></tr>
           <tr><td><code>/resolve-pr &lt;#&gt;</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Read GitHub PR comments and implement changes</td></tr>
           <tr><td><code>/setup</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Guided roster onboarding — gate the core trio, enroll/decline each optional CLI</td></tr>
-          <tr><td><code>/cli-watch</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Watch the six CLIs vs primary sources — gap report + adopt/defer ADR + re-probe. Schedulable monthly via <code>/schedule</code></td></tr>
-          <tr><td><code>/repo-watch</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Mine external repos for adoptable patterns — prioritized recommendations (recommends only). Schedulable monthly via <code>/schedule</code></td></tr>
         </tbody>
       </table>
     </div>

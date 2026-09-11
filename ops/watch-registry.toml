@@ -1,8 +1,12 @@
 # watch-registry.toml — targets for the Triforge watch cycle (/cli-watch, /repo-watch)
 #
+# REPO-LOCAL: this file lives in the agent-triforge checkout's ops/ (tracked).
+# It is NOT a plugin template and is never bootstrapped into user projects —
+# the watch commands are maintainer tooling in .claude/commands/.
+#
 # Two sibling commands share this one registry (KTD-11): /cli-watch audits the
 # [cli.*] entries; /repo-watch mines the [repo.*] entries. Both invoke the
-# skills/watch-cycle methodology and file their output under ops/research/ +
+# .claude/skills/watch-cycle methodology and file their output under ops/research/ +
 # ops/decisions/ in the May-cycle report/ADR shape.
 #
 # HOW TO EXTEND
@@ -10,7 +14,7 @@
 #   edits. Add a [cli.<name>] block to widen the CLI audit, or a [repo.<name>]
 #   block to add a mining target. The commands enumerate whatever is present.
 #
-# TARGET RULES (enforced by the command / skills/watch-cycle before fetching)
+# TARGET RULES (enforced by the command / .claude/skills/watch-cycle before fetching)
 #   - Every URL MUST be a public HTTPS URL. Loopback (127.0.0.0/8, ::1,
 #     localhost), private (10/8, 172.16/12, 192.168/16), and link-local
 #     (169.254/16, fe80::/10) hosts are REJECTED — validated before AND after

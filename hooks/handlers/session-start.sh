@@ -163,15 +163,13 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && command -v cursor-agent >/dev/null 2>&1; 
   fi
 fi
 
-# Bootstrap ops/roster.toml + ops/watch-registry.toml — per-file existence
-# guards, deliberately OUTSIDE the ops-dir bootstrap above so upgraded v2.x
-# projects (which already have ops/) still receive them. A user's existing
-# roster is never overwritten. The watch-registry template lands in a later
-# unit — the loop tolerates its absence today.
+# Bootstrap ops/roster.toml — existence-guarded, deliberately OUTSIDE the
+# ops-dir bootstrap above so upgraded v2.x projects (which already have ops/)
+# still receive it. A user's existing roster is never overwritten. The watch
+# registry is NOT bootstrapped: /cli-watch + /repo-watch are repo-local
+# maintainer tooling in the agent-triforge checkout, not plugin features.
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-  for f in roster.toml watch-registry.toml; do
-    _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/ops/${f}" "ops/${f}"
-  done
+  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/ops/roster.toml" "ops/roster.toml"
 fi
 
 # Optional-CLI detection (roster tier): presence + version for opencode /
@@ -430,6 +428,6 @@ MSG="$MSG${CLAUDE_MD_TIP:-}"
 
 printf '%b\n' "Multi-agent framework ready.$MSG"
 echo ""
-echo "Commands: /setup /ship /plan /build /review /test /debug /quick /deep-research /analyze /coordinate /resolve-pr /status /pause /resume /wrap /compound /cli-watch /repo-watch"
+echo "Commands: /setup /ship /plan /build /review /test /debug /quick /deep-research /analyze /coordinate /resolve-pr /status /pause /resume /wrap /compound"
 
 exit 0
