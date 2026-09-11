@@ -14,6 +14,7 @@
 #   invoke_codex         <agent-name> <prompt> [output-file] [timeout-seconds]
 #   resolve_role         <role>   — roster lookup: prints cli<TAB>model<TAB>effort
 #   ensure_core_trio_live         — lazy liveness gate for build/review paths
+#   latest_probe_record           — path of the newest ops/research/*-probe-record.md
 #
 # Failure taxonomy (KTD-9): both helpers classify failures instead of
 # blindly retrying, and expose the class via INVOKE_FAILURE_CLASS:
@@ -61,10 +62,13 @@ set -euo pipefail
 #   raw       — neither found; warn with the available agents and run the
 #               bare prompt (no system prompt applied).
 #
-# Every constructed agy command pins the model (AE2): agy defaults to a Flash
-# variant, never acceptable, so --model "${AGY_MODEL:-Gemini 3.1 Pro (High)}"
-# is mandatory on every path — the "(Low)"/"(High)" suffix is how agy encodes
-# thinking effort, and AGY_MODEL is the override hook for a roster layer.
+# Every constructed agy command pins the model: agy's own default is a
+# (Medium) variant, so --model "${AGY_MODEL:-Gemini 3.8 Flash (High)}" is
+# mandatory on every path — the newest Gemini at its highest thinking level
+# (D-022, AGY-05 PASS 2026-09-11; "Gemini 3.1 Pro (High)" is the roster
+# opt-in). The "(Low)/(Medium)/(High)" suffix is how agy encodes thinking
+# effort (a dedicated --effort flag exists but is rejected for display names —
+# AGY-11, KTD1), and AGY_MODEL is the override hook for the roster layer.
 # Every command also passes --add-dir "$PWD": agy has no --cwd and otherwise
 # runs shell commands in its own scratch dir (~/.gemini/antigravity-cli/scratch)
 # instead of the project.
@@ -73,7 +77,7 @@ invoke_antigravity() {
   local PROMPT=$2
   local OUTPUT_FILE=${3:-"${TMPDIR:-/tmp}/antigravity_output_$$_$(date +%s).txt"}
   local TIMEOUT=${4:-600}
-  local MODEL="${AGY_MODEL:-Gemini 3.1 Pro (High)}"
+  local MODEL="${AGY_MODEL:-Gemini 3.8 Flash (High)}"
   local FULL_PROMPT=""
   local MODE=""
   local EXIT_CODE=0
@@ -1622,26 +1626,37 @@ except ImportError:
 # the Fable/downgrade ladder is an Agent-tool subagent concern, not this lane.
 DEFAULTS = {
     'builder':    {'cli': 'claude',      'model': '',                      'effort': 'max',   'fallbacks': ['codex', 'antigravity']},
-    'reviewer':   {'cli': 'codex',       'model': 'gpt-5.6-sol',           'effort': 'xhigh', 'fallbacks': ['antigravity', 'claude']},
-    'tester':     {'cli': 'codex',       'model': 'gpt-5.6-sol',           'effort': 'xhigh', 'fallbacks': ['claude']},
-    'analyst':    {'cli': 'antigravity', 'model': 'Gemini 3.1 Pro (High)', 'effort': 'high',  'fallbacks': ['claude']},
-    'documenter': {'cli': 'antigravity', 'model': 'Gemini 3.1 Pro (High)', 'effort': 'high',  'fallbacks': ['claude']},
+    'reviewer':   {'cli': 'codex',       'model': 'gpt-6-astra',           'effort': 'xhigh', 'fallbacks': ['antigravity', 'claude']},
+    'tester':     {'cli': 'codex',       'model': 'gpt-6-astra',           'effort': 'xhigh', 'fallbacks': ['claude']},
+    'analyst':    {'cli': 'antigravity', 'model': 'Gemini 3.8 Flash (High)', 'effort': 'high',  'fallbacks': ['claude']},
+    'documenter': {'cli': 'antigravity', 'model': 'Gemini 3.8 Flash (High)', 'effort': 'high',  'fallbacks': ['claude']},
 }
 CORE_TRIO = ('claude', 'antigravity', 'codex')
 # cli name -> binary looked up on PATH
 BINARY = {'claude': 'claude', 'antigravity': 'agy', 'codex': 'codex',
-          'opencode': 'opencode', 'kimi': 'kimi', 'cursor': 'cursor-agent'}
+          'opencode': 'opencode', 'kimi': 'kimi',
+          # cursor: cursor-agent first; _cursor_bin (KTD3 / D-025) exports the
+          # verified fallback path (an agent binary whose --version matches the
+          # Cursor YYYY.MM.DD-<hex> format) as TRIFORGE_CURSOR_BIN for this map.
+          'cursor': os.environ.get('TRIFORGE_CURSOR_BIN') or 'cursor-agent'}
 # Shipped per-CLI default model, used when a member is reached via fallback
-# or chosen as an overridden primary with no explicit role model (KTD-8
-# session-settled pins: never a Flash variant for agy, never Auto for
-# cursor). A [members.<cli>].model entry overrides the shipped default.
+# or chosen as an overridden primary with no explicit role model. Policy
+# (D-022, user-directed 2026-09-11): agy pins the NEWEST Gemini model at its
+# highest thinking level, Pro or Flash — currently Gemini 3.8 Flash (High)
+# (AGY-05 PASS 2026-09-11; Gemini 3.1 Pro (High) stays a documented roster
+# opt-in); codex gpt-6-astra (D-021, CDX-03); opencode glm-5.3 (D-023);
+# kimi kimi-code/k3 (D-024, the OAuth-managed alias); cursor
+# cursor-grok-4.6-xhigh (D-025 — effort rides in the model-id suffix, never
+# the Auto router). Keep in sync with roster_member_default and
+# templates/ops/roster.toml; scripts/validate-versions.sh diffs the copies.
+# A [members.<cli>].model entry overrides the shipped default.
 CLI_DEFAULT_MODEL = {
     'claude': '',
-    'antigravity': 'Gemini 3.1 Pro (High)',
-    'codex': 'gpt-5.6-sol',
-    'opencode': 'openrouter/z-ai/glm-5.2',
-    'kimi': 'kimi-k3',
-    'cursor': 'grok-4.5',
+    'antigravity': 'Gemini 3.8 Flash (High)',
+    'codex': 'gpt-6-astra',
+    'opencode': 'openrouter/z-ai/glm-5.3',
+    'kimi': 'kimi-code/k3',
+    'cursor': 'cursor-grok-4.6-xhigh',
 }
 # G12-style install/login guidance (R21), matching the invoke_* wording.
 INSTALL_FIX = {
@@ -1788,7 +1803,7 @@ dispatch_role() {
       # Codex resolves sandbox/approval/instructions from its agents.toml entry;
       # the roster model rides the CODEX_MODEL override (same pattern as the
       # other lanes) so a [roles.*] model customization reaches `codex exec -m`.
-      # The shipped default (gpt-5.6-sol) matches the agents.toml pins, so this
+      # The shipped default (gpt-6-astra) matches the agents.toml pins, so this
       # is a no-op until a user actually customizes the role's model.
       CODEX_MODEL="$MODEL" invoke_codex "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT"
       ;;
@@ -2318,7 +2333,7 @@ ${PROMPT}"
           _adapter_env codex "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
           ;;
         antigravity)
-          _adapter_env antigravity "$TOBIN" "${TIMEOUT}s" agy --model "${MODEL:-Gemini 3.1 Pro (High)}" --add-dir "$WT" --print-timeout "${TIMEOUT}s" -p "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+          _adapter_env antigravity "$TOBIN" "${TIMEOUT}s" agy --model "${MODEL:-Gemini 3.8 Flash (High)}" --add-dir "$WT" --print-timeout "${TIMEOUT}s" -p "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
           ;;
         opencode)
           # R35-confined optional-tier builder (U11): raw `opencode run` with
@@ -3126,9 +3141,10 @@ print('states: ' + ', '.join(k + '=' + str(v) for k, v in sorted(counts.items())
 # — role tables, comments, promotion gate — byte-for-byte.
 #
 # Shipped optional defaults (KTD-8, session-settled; MUST match CLI_DEFAULT_MODEL
-# in resolve_role): opencode -> openrouter/z-ai/glm-5.2 ; kimi -> kimi-k3 ;
-# cursor -> grok-4.5 (explicit pin, NEVER the Auto router). The core trio
-# (claude/antigravity/codex) is required, never enrolled.
+# in resolve_role): opencode -> openrouter/z-ai/glm-5.3 ; kimi -> kimi-code/k3 ;
+# cursor -> cursor-grok-4.6-xhigh (explicit suffixed pin — effort rides in the
+# suffix — NEVER the Auto router). The core trio (claude/antigravity/codex) is
+# required, never enrolled.
 
 # cli name -> binary looked up on PATH (mirrors resolve_role's BINARY map).
 _roster_binary() {
@@ -3159,19 +3175,38 @@ _roster_install_cmd() {
   esac
 }
 
-# roster_member_default <cli> — print the shipped default model (KTD-8).
+# roster_member_default <cli> — print the shipped default model (D-020..D-025).
 # Mirrors CLI_DEFAULT_MODEL in resolve_role; claude is intentionally empty (the
 # shell claude -p lane runs the host default model; the Fable/ladder override is
 # an Agent-tool subagent concern, not this lane).
 roster_member_default() {
   case "${1:?usage: roster_member_default <cli>}" in
     claude)      echo "" ;;
-    antigravity) echo "Gemini 3.1 Pro (High)" ;;
-    codex)       echo "gpt-5.6-sol" ;;
-    opencode)    echo "openrouter/z-ai/glm-5.2" ;;
-    kimi)        echo "kimi-k3" ;;
-    cursor)      echo "grok-4.5" ;;
+    antigravity) echo "Gemini 3.8 Flash (High)" ;;
+    codex)       echo "gpt-6-astra" ;;
+    opencode)    echo "openrouter/z-ai/glm-5.3" ;;
+    kimi)        echo "kimi-code/k3" ;;
+    cursor)      echo "cursor-grok-4.6-xhigh" ;;
     *) echo "roster_member_default: ERROR unknown cli '${1}'" >&2; return 2 ;;
+  esac
+}
+
+# latest_probe_record — print the path of the NEWEST ops/research/*-probe-record.md
+# (KTD9: "the current probe record" is always the newest file; the harness
+# writes a date-stamped record per cycle). rc 1 when none exists. Paths are
+# repo-relative when run from the repo root, absolute otherwise.
+latest_probe_record() {
+  local REPO
+  REPO=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  local NEWEST
+  NEWEST=$(ls -1 "${REPO}/ops/research/"*-probe-record.md 2>/dev/null | sort | tail -1)
+  if [ -z "$NEWEST" ]; then
+    echo "latest_probe_record: no ops/research/*-probe-record.md found — run: bash scripts/probe-capabilities.sh" >&2
+    return 1
+  fi
+  case "$PWD" in
+    "$REPO") printf '%s\n' "${NEWEST#"${REPO}/"}" ;;
+    *)       printf '%s\n' "$NEWEST" ;;
   esac
 }
 
@@ -3200,18 +3235,18 @@ except ImportError:
 # Mirrors DEFAULTS and CLI_DEFAULT_MODEL in resolve_role (keep in sync).
 DEFAULTS = {
     'builder':    {'cli': 'claude',      'model': '',                      'effort': 'max',   'fallbacks': ['codex', 'antigravity']},
-    'reviewer':   {'cli': 'codex',       'model': 'gpt-5.6-sol',           'effort': 'xhigh', 'fallbacks': ['antigravity', 'claude']},
-    'tester':     {'cli': 'codex',       'model': 'gpt-5.6-sol',           'effort': 'xhigh', 'fallbacks': ['claude']},
-    'analyst':    {'cli': 'antigravity', 'model': 'Gemini 3.1 Pro (High)', 'effort': 'high',  'fallbacks': ['claude']},
-    'documenter': {'cli': 'antigravity', 'model': 'Gemini 3.1 Pro (High)', 'effort': 'high',  'fallbacks': ['claude']},
+    'reviewer':   {'cli': 'codex',       'model': 'gpt-6-astra',           'effort': 'xhigh', 'fallbacks': ['antigravity', 'claude']},
+    'tester':     {'cli': 'codex',       'model': 'gpt-6-astra',           'effort': 'xhigh', 'fallbacks': ['claude']},
+    'analyst':    {'cli': 'antigravity', 'model': 'Gemini 3.8 Flash (High)', 'effort': 'high',  'fallbacks': ['claude']},
+    'documenter': {'cli': 'antigravity', 'model': 'Gemini 3.8 Flash (High)', 'effort': 'high',  'fallbacks': ['claude']},
 }
 CLI_DEFAULT_MODEL = {
     'claude': '',
-    'antigravity': 'Gemini 3.1 Pro (High)',
-    'codex': 'gpt-5.6-sol',
-    'opencode': 'openrouter/z-ai/glm-5.2',
-    'kimi': 'kimi-k3',
-    'cursor': 'grok-4.5',
+    'antigravity': 'Gemini 3.8 Flash (High)',
+    'codex': 'gpt-6-astra',
+    'opencode': 'openrouter/z-ai/glm-5.3',
+    'kimi': 'kimi-code/k3',
+    'cursor': 'cursor-grok-4.6-xhigh',
 }
 role = os.environ['RE_ROLE']
 if role not in DEFAULTS:
@@ -3351,26 +3386,56 @@ if chain[-1] not in CORE_TRIO:
     sys.stderr.write('roster_write_role: ERROR chain ' + repr(chain) + ' does not terminate at a core-trio member (claude, antigravity, codex) — a chain resolving entirely to optional members cannot ship\n')
     sys.exit(2)
 
-# agy's effort control IS the (High)/(Low) model-variant suffix (see the
-# roster template header): normalize the written pair so it cannot contradict
-# itself — dispatch passes only the model string, so a mismatched suffix would
-# silently win over effort. An EMPTY agy model is auto-filled with the
-# effort-matched Pro pin (KTD-8: never a Flash variant on its own) — otherwise
-# the empty model falls back to the (High) default at dispatch and a low/medium
-# effort is silently lost. Models without a (High)/(Low) suffix (e.g. an
-# explicit Flash pin) are written through untouched, no note. This block runs
+# agy's effort control IS the (Low)/(Medium)/(High) model-variant suffix (see
+# the roster template header): normalize the written pair so it cannot
+# contradict itself — dispatch passes only the model string, so a mismatched
+# suffix would silently win over effort. Three-state map (a behavior change
+# from v3.1, which collapsed medium to (Low)): low -> (Low), medium ->
+# (Medium), high/xhigh/max -> (High). Families without a (Medium) variant
+# (3.1 Pro: agy lists only (Low)/(High)) collapse medium to (Low) with a NOTE.
+# An EMPTY agy model is auto-filled with the effort-matched shipped default
+# (Gemini 3.8 Flash (<want>) — D-022: newest Gemini at its highest thinking
+# level, Pro or Flash); otherwise the empty model falls back to the (High)
+# default at dispatch and a low/medium effort is silently lost. Models without
+# a variant suffix are written through untouched, no note. This block runs
 # AFTER every rejecting check above so its stderr NOTE is only ever emitted on
 # a path that reaches the write.
 if cli == 'antigravity':
-    want = 'Low' if effort in ('low', 'medium') else 'High'
+    want = {'low': 'Low', 'medium': 'Medium'}.get(effort, 'High')
+    NO_MEDIUM = ('Gemini 3.1 Pro',)   # families agy lists without a (Medium) variant
     if not model:
-        model = 'Gemini 3.1 Pro (' + want + ')'
-        sys.stderr.write('roster_write_role: NOTE empty agy model auto-filled with the effort-matched pin ' + repr(model) + ' (agy effort rides in the (High)/(Low) suffix)\n')
+        model = 'Gemini 3.8 Flash (' + want + ')'
+        sys.stderr.write('roster_write_role: NOTE empty agy model auto-filled with the effort-matched pin ' + repr(model) + ' (agy effort rides in the (Low)/(Medium)/(High) suffix)\n')
     else:
-        m2 = re.match(r'^(.*)\((High|Low)\)$', model)
-        if m2 and m2.group(2) != want:
-            model = m2.group(1) + '(' + want + ')'
-            sys.stderr.write('roster_write_role: NOTE agy effort maps into the (High)/(Low) model suffix — model normalized to ' + repr(model) + ' to match effort=' + effort + '\n')
+        m2 = re.match(r'^(.*?)\s*\((High|Medium|Low)\)$', model)
+        if m2:
+            family = m2.group(1).strip()
+            eff_want = want
+            if eff_want == 'Medium' and family in NO_MEDIUM:
+                eff_want = 'Low'
+                sys.stderr.write('roster_write_role: NOTE ' + family + ' has no (Medium) variant — medium effort maps to (Low)\n')
+            if m2.group(2) != eff_want:
+                model = family + ' (' + eff_want + ')'
+                sys.stderr.write('roster_write_role: NOTE agy effort maps into the (Low)/(Medium)/(High) model suffix — model normalized to ' + repr(model) + ' to match effort=' + effort + '\n')
+
+# Cursor's effort control is likewise a model-id SUFFIX (D-025, CUR-10/12):
+# cursor-grok-4.6-low|medium|high|xhigh. A bare Grok family name (grok-4.6) is
+# composed into the suffixed id from effort; an explicit suffixed id is
+# normalized to match the effort; anything else (composer-2.5, a non-Grok id)
+# is written through untouched. Empty model -> the shipped default family.
+if cli == 'cursor':
+    sfx = {'low': 'low', 'medium': 'medium', 'high': 'high'}.get(effort, 'xhigh')
+    m3 = re.match(r'^(?:cursor-)?(grok-[0-9][0-9.]*?)(?:-(low|medium|high|xhigh))?(-fast)?$', model or 'grok-4.6')
+    if m3:
+        fam, had, fast = m3.group(1), m3.group(2), m3.group(3) or ''
+        new_model = 'cursor-' + fam + '-' + sfx + fast
+        if not model:
+            sys.stderr.write('roster_write_role: NOTE empty cursor model auto-filled with the effort-matched pin ' + repr(new_model) + ' (cursor effort rides in the model-id suffix)\n')
+        elif had and had != sfx:
+            sys.stderr.write('roster_write_role: NOTE cursor effort maps into the model-id suffix — model normalized to ' + repr(new_model) + ' to match effort=' + effort + '\n')
+        elif not had:
+            sys.stderr.write('roster_write_role: NOTE bare cursor model ' + repr(model) + ' composed to ' + repr(new_model) + ' (effort=' + effort + ' rides in the suffix)\n')
+        model = new_model
 
 block = ('[roles.' + role + ']\n'
          'cli = ' + json.dumps(cli) + '\n'

@@ -28,18 +28,23 @@
 # stays valid too.
 #
 # Model pins — shipped defaults; a role's `model` entry here overrides them:
-#   - Antigravity (agy) defaults to the latest Gemini Pro model: pins are
-#     "Gemini 3.1 Pro (High)" / "(Low)", and the shipped defaults never pick
-#     a Flash variant on their own. Set `model` on an agy-backed role to run
-#     another variant when you explicitly want it — Flash included, e.g.
-#     model = "Gemini 3.6 Flash (High)" (the current Flash line, released
-#     2026-07-21; see ops/research/2026-07-22-gemini-3.6-flash.md). The
-#     (High)/(Low) suffix IS agy's thinking-effort control, so for agy the
-#     `effort` field maps into the model-variant suffix rather than a
-#     separate flag.
-#   - Cursor pins grok-4.5 explicitly — the shipped defaults never select
-#     the Auto router. Cursor has no effort control, so `effort` is inert
-#     for it.
+#   - Antigravity (agy) pins the NEWEST Gemini model at its highest thinking
+#     level, Pro or Flash (policy D-022, user-directed 2026-09-11): currently
+#     "Gemini 3.8 Flash (High)" (AGY-05 PASS 2026-09-11). Set `model` on an
+#     agy-backed role to run another variant when you explicitly want it —
+#     e.g. model = "Gemini 3.1 Pro (High)" (the current Pro line, still the
+#     newest Pro; opt-in) or "Gemini 3.8 Flash (Medium)". The
+#     (Low)/(Medium)/(High) suffix IS agy's thinking-effort control, so for
+#     agy the `effort` field maps into the model-variant suffix (low -> Low,
+#     medium -> Medium, high/xhigh/max -> High; families without a (Medium)
+#     variant, such as 3.1 Pro, map medium to (Low)). `agy models` prints the
+#     live catalog.
+#   - Codex pins gpt-6-astra at xhigh (D-021; CDX-03 PASS 2026-09-11).
+#   - Cursor pins cursor-grok-4.6-xhigh explicitly — the shipped defaults never
+#     select the Auto router. Cursor's effort control is the model-id SUFFIX
+#     (cursor-grok-4.6-low|medium|high|xhigh — D-025, CUR-12), so `effort`
+#     maps into that suffix (xhigh/max -> -xhigh); a bare family name such as
+#     grok-4.6 is composed into the suffixed id by the roster writer.
 
 [roles.builder]
 cli = "claude"
@@ -53,25 +58,25 @@ fallbacks = ["codex", "antigravity"]
 
 [roles.reviewer]
 cli = "codex"
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 effort = "xhigh"
 fallbacks = ["antigravity", "claude"]
 
 [roles.tester]
 cli = "codex"
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 effort = "xhigh"
 fallbacks = ["claude"]
 
 [roles.analyst]
 cli = "antigravity"
-model = "Gemini 3.1 Pro (High)"   # (High) suffix = agy effort control (see header)
+model = "Gemini 3.8 Flash (High)"   # (High) suffix = agy effort control (see header)
 effort = "high"
 fallbacks = ["claude"]
 
 [roles.documenter]
 cli = "antigravity"
-model = "Gemini 3.1 Pro (High)"   # (High) suffix = agy effort control (see header)
+model = "Gemini 3.8 Flash (High)"   # (High) suffix = agy effort control (see header)
 effort = "high"
 fallbacks = ["claude"]
 
@@ -87,12 +92,12 @@ fallbacks = ["claude"]
 # Example — uncomment and adjust, or let enrollment write it:
 # [members.opencode]
 # enabled = true
-# model = "openrouter/z-ai/glm-5.2"   # shipped default; validated against the live OpenRouter list at enrollment
-# enrolled = "2026-07-18"
+# model = "openrouter/z-ai/glm-5.3"   # shipped default; validated against the live OpenRouter list at enrollment
+# enrolled = "2026-09-11"
 #
 # Shipped defaults for the other optional members, same shape:
-# [members.kimi]   -> enabled = true, model = "kimi-k3"
-# [members.cursor] -> enabled = true, model = "grok-4.5"  (explicit pin — NEVER the Auto router)
+# [members.kimi]   -> enabled = true, model = "kimi-code/k3"          (the OAuth-managed alias; `kimi login` provisions it)
+# [members.cursor] -> enabled = true, model = "cursor-grok-4.6-xhigh"  (explicit suffixed pin — NEVER the Auto router)
 
 [promotion]
 # KTD-5 user gate: when true, the lead pauses at wave end for explicit user
