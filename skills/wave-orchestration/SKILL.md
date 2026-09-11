@@ -105,10 +105,10 @@ Merge in wave order, never completion order. Within a wave, merge approved tasks
 
 ### Report-missing leases
 
-`lease_collect` returns rc 80 (degraded) when a builder exits cleanly but its output has no final `Status:` line. That lease is report-missing: it is NOT review-ready, its ledger state stays `building`, and its output is never handed to a reviewer as if it were a finished build. The lead:
+`lease_collect` returns rc 80 (degraded) when a builder exits cleanly but its output has no final `Status:` line. That lease is report-missing: it is NOT review-ready and its output is never handed to a reviewer as if it were a finished build. `lease_collect` itself drives the two-step recovery through the ledger's `report_missing_count`:
 
-1. **Re-dispatches once with the contract restated.** Same task, same builder, same pinned reviewer if one exists; the dispatch contract (typed `Status:` report, no sub-dispatch, git stays local) goes at the top of the prompt with one line saying the previous run ended without a report. `lease_redispatch` requires state `review`, so use the requeue path: mark the lease orphaned, reclaim it, `lease_requeue` it to the same builder.
-2. **Escalates on the second miss.** Two clean exits without a report mean the builder is not following the contract. Set the lease `escalated`, record both output paths in the ledger, and treat it like a same-error kill: the lead rules (ledgered as a `Ruling:`) whether to reassign the task to a different roster member or to stop the wave for the user.
+1. **First miss: re-dispatch once with the contract restated.** `lease_collect` moves the lease back to `leased` (same builder, same worktree — the builder's uncommitted work is kept; a pinned reviewer stays pinned). The lead runs `lease_dispatch <task> "<one line saying the previous run ended without a report> <original prompt>"`; `lease_dispatch` always prepends the dispatch contract (typed `Status:` report, no sub-dispatch, git stays local). Do not route through the requeue path — `lease_requeue` discards the worktree and re-leases to a different builder.
+2. **Second miss: escalated.** Two clean exits without a report mean the builder is not following the contract. `lease_collect` sets the lease `escalated` (rc 1) with both output paths in its reason; treat it like a same-error kill: the lead rules (ledgered as a `Ruling:`) whether to reassign the task to a different roster member or to stop the wave for the user.
 
 ## Rulings, not stalls
 

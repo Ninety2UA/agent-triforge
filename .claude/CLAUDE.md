@@ -370,8 +370,8 @@ Re-baselined from the newest capability probe record (`ops/research/2026-09-prob
 
 | CLI | Tier | Floor (KTD-13) | Tested | READY probe |
 |---|---|---|---|---|
-| Claude Code (`claude`) | core | ≥ 2.1.267 | 2.1.268 | `claude --version` |
-| Antigravity (`agy`) | core | ≥ 1.1.27 | 1.2.0 | `agy --model "Gemini 3.8 Flash (High)" -p "Respond with only: READY"` |
+| Claude Code (`claude`) | core | ≥ 2.1.267 | 2.1.269 | `claude --version` |
+| Antigravity (`agy`) | core | ≥ 1.1.27 | 1.2.1 | `agy --model "Gemini 3.8 Flash (High)" -p "Respond with only: READY"` |
 | Codex (`codex`) | core | ≥ 0.153.0 | 0.154.0 | `codex exec "Respond with only: READY"` |
 | OpenCode (`opencode`) | optional | ≥ 1.18.20 | 1.18.30 | `opencode run --format json -m openrouter/z-ai/glm-5.3 "Respond with only: READY"` |
 | Kimi Code (`kimi`) | optional | ≥ 0.33.0 | 0.42.0 (AUTH-FAIL on the probe host; live rows PENDING-AUTH until `kimi login`) | `kimi -p "Respond with only: READY"` |

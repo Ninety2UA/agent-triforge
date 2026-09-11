@@ -190,6 +190,10 @@ ${PROMPT}"
       10) EXIT_CODE=1; INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="denied"; AGY_REASON="denied" ;;
       11) EXIT_CODE=1; INVOKE_FAILURE_CLASS="retryable"; AGY_REASON="no-output" ;;
       13) EXIT_CODE=1; INVOKE_FAILURE_CLASS="retryable"; AGY_REASON="status" ;;
+      # Any other parser exit (an unguarded write failing inside the python
+      # helper, an interpreter error) must never read as success: the output
+      # file may be missing or stale. Same default the retry path carries.
+      *)  EXIT_CODE=1; INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="no-output"; AGY_REASON="parser-rc-${PRC}" ;;
     esac
   else
     _classify_invoke_failure "$EXIT_CODE" "$ERR"
@@ -649,6 +653,318 @@ with open(os.environ['VERDICT_OUT'], 'w') as f:
 # (D-033 defense-in-depth; the adapter stays off --auto regardless).
 _OPENCODE_PERMISSION_DEFAULT='{"bash":{"*":"allow","rm -rf *":"deny","git push*":"deny","sudo *":"deny"}}'
 
+# _oc_extract_text <raw-stream-file> <output-file> — extract the assistant's final
+# text from a opencode JSON event stream (`opencode run --format json`) into <output-file>; exits nonzero (writing nothing)
+# when no text is found so the caller can preserve the raw stream. Shared by
+# the foreground invoke_* helper and the lease lane (lease_dispatch), whose
+# builders answer in the same stream shape — the typed `Status:` report
+# (KTD11) is only parseable from the extracted prose.
+_oc_extract_text() {
+  OC_RAW="$1" OC_OUT="$2" python3 -c '
+import json, os, sys
+raw = open(os.environ["OC_RAW"], "r", errors="replace").read()
+
+def iter_events(text):
+    text = text.strip()
+    if not text:
+        return
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, list):
+            for e in obj:
+                yield e
+            return
+        if isinstance(obj, dict):
+            yield obj
+            return
+    except Exception:
+        pass
+    ok = False
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            yield json.loads(line)
+            ok = True
+        except Exception:
+            continue
+    if ok:
+        return
+    dec = json.JSONDecoder()
+    i, n = 0, len(text)
+    while i < n:
+        while i < n and text[i] not in "{[":
+            i += 1
+        if i >= n:
+            break
+        try:
+            val, end = dec.raw_decode(text, i)
+            yield val
+            i = end
+        except Exception:
+            i += 1
+
+roles = {}
+parts = {}
+order = 0
+for ev in iter_events(raw):
+    if not isinstance(ev, dict):
+        continue
+    props = ev.get("properties") if isinstance(ev.get("properties"), dict) else ev
+    info = props.get("info") if isinstance(props, dict) else None
+    if isinstance(info, dict) and info.get("id") is not None:
+        roles[info.get("id")] = info.get("role")
+    part = props.get("part") if isinstance(props, dict) else None
+    if not isinstance(part, dict) and ev.get("type") == "text" and "text" in ev:
+        part = ev
+    if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
+        pid = part.get("id") or ("_%d" % order)
+        prev = parts.get(pid)
+        o = prev[0] if prev else order
+        parts[pid] = (o, part.get("text"), part.get("messageID"), bool(part.get("synthetic")))
+        if not prev:
+            order += 1
+
+def collect(pred):
+    return "".join(t for (_, t, mid, syn) in
+                   sorted(parts.values(), key=lambda x: x[0]) if pred(mid, syn))
+
+text = collect(lambda mid, syn: roles.get(mid) == "assistant" and not syn)
+if not text.strip():
+    text = collect(lambda mid, syn: roles.get(mid) == "assistant")
+if not text.strip():
+    text = collect(lambda mid, syn: not syn)
+if not text.strip():
+    text = collect(lambda mid, syn: True)
+
+if not text.strip():
+    sys.stderr.write("no assistant text part found in opencode JSON stream\n")
+    sys.exit(3)
+
+with open(os.environ["OC_OUT"], "w") as f:
+    f.write(text.strip() + "\n")
+' 2>/dev/null
+}
+
+# _kimi_extract_text <raw-stream-file> <output-file> — extract the assistant's final
+# text from a kimi stream-json into <output-file>; exits nonzero (writing nothing)
+# when no text is found so the caller can preserve the raw stream. Shared by
+# the foreground invoke_* helper and the lease lane (lease_dispatch), whose
+# builders answer in the same stream shape — the typed `Status:` report
+# (KTD11) is only parseable from the extracted prose.
+_kimi_extract_text() {
+  K_RAW="$1" K_OUT="$2" python3 -c '
+import json, os, sys
+raw = open(os.environ["K_RAW"], "r", errors="replace").read()
+
+def iter_events(text):
+    text = text.strip()
+    if not text:
+        return
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, list):
+            for e in obj:
+                yield e
+            return
+        if isinstance(obj, dict):
+            yield obj
+            return
+    except Exception:
+        pass
+    ok = False
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            yield json.loads(line)
+            ok = True
+        except Exception:
+            continue
+    if ok:
+        return
+    dec = json.JSONDecoder()
+    i, n = 0, len(text)
+    while i < n:
+        while i < n and text[i] not in "{[":
+            i += 1
+        if i >= n:
+            break
+        try:
+            val, end = dec.raw_decode(text, i)
+            yield val
+            i = end
+        except Exception:
+            i += 1
+
+def norm(ev):
+    if not isinstance(ev, dict):
+        return None
+    msg = ev.get("message") if isinstance(ev.get("message"), dict) else ev
+    role = msg.get("role") or ev.get("role")
+    if role is None:
+        t = ev.get("type") or msg.get("type")
+        if t in ("assistant", "tool", "user", "system"):
+            role = t
+    mid = msg.get("id") or ev.get("id")
+    content = msg.get("content")
+    if content is None:
+        content = ev.get("content")
+    if content is None:
+        content = ev.get("text") or msg.get("text")
+    text = ""
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        parts = []
+        for p in content:
+            if isinstance(p, str):
+                parts.append(p)
+            elif isinstance(p, dict):
+                if isinstance(p.get("text"), str):
+                    parts.append(p["text"])
+                elif p.get("type") == "text" and isinstance(p.get("content"), str):
+                    parts.append(p["content"])
+        text = "".join(parts)
+    elif isinstance(content, dict):
+        if isinstance(content.get("text"), str):
+            text = content["text"]
+    return (role, mid, text)
+
+order = []
+by_id = {}
+seq = 0
+for ev in iter_events(raw):
+    r = norm(ev)
+    if r is None:
+        continue
+    role, mid, text = r
+    if role != "assistant" or not isinstance(text, str) or not text.strip():
+        continue
+    key = mid if mid is not None else ("_%d" % seq)
+    if key not in by_id:
+        by_id[key] = text
+        order.append(key)
+        seq += 1
+    elif len(text) >= len(by_id[key]):
+        by_id[key] = text
+
+final = by_id[order[-1]] if order else ""
+if not final.strip():
+    sys.stderr.write("no assistant text found in kimi stream-json\n")
+    sys.exit(3)
+
+with open(os.environ["K_OUT"], "w") as f:
+    f.write(final.strip() + "\n")
+' 2>/dev/null
+}
+
+# _cursor_extract_text <raw-stream-file> <output-file> — extract the assistant's final
+# text from a cursor-agent stream-json into <output-file>; exits nonzero (writing nothing)
+# when no text is found so the caller can preserve the raw stream. Shared by
+# the foreground invoke_* helper and the lease lane (lease_dispatch), whose
+# builders answer in the same stream shape — the typed `Status:` report
+# (KTD11) is only parseable from the extracted prose.
+_cursor_extract_text() {
+  C_RAW="$1" C_OUT="$2" python3 -c '
+import json, os, sys
+raw = open(os.environ["C_RAW"], "r", errors="replace").read()
+
+def iter_events(text):
+    text = text.strip()
+    if not text:
+        return
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, list):
+            for e in obj:
+                yield e
+            return
+        if isinstance(obj, dict):
+            yield obj
+            return
+    except Exception:
+        pass
+    ok = False
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            yield json.loads(line)
+            ok = True
+        except Exception:
+            continue
+    if ok:
+        return
+    dec = json.JSONDecoder()
+    i, n = 0, len(text)
+    while i < n:
+        while i < n and text[i] not in "{[":
+            i += 1
+        if i >= n:
+            break
+        try:
+            val, end = dec.raw_decode(text, i)
+            yield val
+            i = end
+        except Exception:
+            i += 1
+
+def extract_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for p in content:
+            if isinstance(p, str):
+                parts.append(p)
+            elif isinstance(p, dict) and isinstance(p.get("text"), str):
+                parts.append(p["text"])
+        return "".join(parts)
+    if isinstance(content, dict) and isinstance(content.get("text"), str):
+        return content["text"]
+    return ""
+
+assistant_texts = []
+result_text = ""
+result_seen = False
+result_is_error = False
+for ev in iter_events(raw):
+    if not isinstance(ev, dict):
+        continue
+    t = ev.get("type")
+    if t == "assistant":
+        msg = ev.get("message") if isinstance(ev.get("message"), dict) else ev
+        text = extract_text(msg.get("content"))
+        if text.strip():
+            assistant_texts.append(text)
+    elif t == "result":
+        r = ev.get("result")
+        if isinstance(r, str):
+            result_text = r
+            result_seen = True
+            result_is_error = bool(ev.get("is_error"))
+
+final = ""
+if result_seen and not result_is_error and result_text.strip():
+    final = result_text
+elif assistant_texts:
+    final = assistant_texts[-1]
+elif result_seen and result_text.strip():
+    final = result_text
+
+if not final.strip():
+    sys.stderr.write("no assistant/result text found in cursor stream-json\n")
+    sys.exit(3)
+
+with open(os.environ["C_OUT"], "w") as f:
+    f.write(final.strip() + "\n")
+' 2>/dev/null
+}
+
 # invoke_opencode <agent-name> <prompt> [output-file] [timeout-seconds] [effort]
 invoke_opencode() {
   local AGENT_NAME=$1
@@ -783,91 +1099,7 @@ invoke_opencode() {
   # part id (message.part.updated carries the full part text as it grows),
   # concatenates the assistant's non-synthetic text parts in order, and exits
   # nonzero when it finds none — in which case the raw stream is preserved.
-  if OC_RAW="$RAW" OC_OUT="$OUTPUT_FILE" python3 -c '
-import json, os, sys
-raw = open(os.environ["OC_RAW"], "r", errors="replace").read()
-
-def iter_events(text):
-    text = text.strip()
-    if not text:
-        return
-    try:
-        obj = json.loads(text)
-        if isinstance(obj, list):
-            for e in obj:
-                yield e
-            return
-        if isinstance(obj, dict):
-            yield obj
-            return
-    except Exception:
-        pass
-    ok = False
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            yield json.loads(line)
-            ok = True
-        except Exception:
-            continue
-    if ok:
-        return
-    dec = json.JSONDecoder()
-    i, n = 0, len(text)
-    while i < n:
-        while i < n and text[i] not in "{[":
-            i += 1
-        if i >= n:
-            break
-        try:
-            val, end = dec.raw_decode(text, i)
-            yield val
-            i = end
-        except Exception:
-            i += 1
-
-roles = {}
-parts = {}
-order = 0
-for ev in iter_events(raw):
-    if not isinstance(ev, dict):
-        continue
-    props = ev.get("properties") if isinstance(ev.get("properties"), dict) else ev
-    info = props.get("info") if isinstance(props, dict) else None
-    if isinstance(info, dict) and info.get("id") is not None:
-        roles[info.get("id")] = info.get("role")
-    part = props.get("part") if isinstance(props, dict) else None
-    if not isinstance(part, dict) and ev.get("type") == "text" and "text" in ev:
-        part = ev
-    if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
-        pid = part.get("id") or ("_%d" % order)
-        prev = parts.get(pid)
-        o = prev[0] if prev else order
-        parts[pid] = (o, part.get("text"), part.get("messageID"), bool(part.get("synthetic")))
-        if not prev:
-            order += 1
-
-def collect(pred):
-    return "".join(t for (_, t, mid, syn) in
-                   sorted(parts.values(), key=lambda x: x[0]) if pred(mid, syn))
-
-text = collect(lambda mid, syn: roles.get(mid) == "assistant" and not syn)
-if not text.strip():
-    text = collect(lambda mid, syn: roles.get(mid) == "assistant")
-if not text.strip():
-    text = collect(lambda mid, syn: not syn)
-if not text.strip():
-    text = collect(lambda mid, syn: True)
-
-if not text.strip():
-    sys.stderr.write("no assistant text part found in opencode JSON stream\n")
-    sys.exit(3)
-
-with open(os.environ["OC_OUT"], "w") as f:
-    f.write(text.strip() + "\n")
-' 2>/dev/null; then
+  if _oc_extract_text "$RAW" "$OUTPUT_FILE"; then
     :
   else
     echo "invoke_opencode: WARNING could not extract assistant text from opencode JSON stream — preserving raw stream in ${OUTPUT_FILE}" >&2
@@ -1110,111 +1342,7 @@ invoke_kimi() {
   # Assistant(tool_calls)+Tool messages. Parser keeps the longest text per
   # message id (cumulative-delta safe), returns the LAST non-empty assistant
   # message text, and exits nonzero when it finds none — raw stream preserved.
-  if K_RAW="$RAW" K_OUT="$OUTPUT_FILE" python3 -c '
-import json, os, sys
-raw = open(os.environ["K_RAW"], "r", errors="replace").read()
-
-def iter_events(text):
-    text = text.strip()
-    if not text:
-        return
-    try:
-        obj = json.loads(text)
-        if isinstance(obj, list):
-            for e in obj:
-                yield e
-            return
-        if isinstance(obj, dict):
-            yield obj
-            return
-    except Exception:
-        pass
-    ok = False
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            yield json.loads(line)
-            ok = True
-        except Exception:
-            continue
-    if ok:
-        return
-    dec = json.JSONDecoder()
-    i, n = 0, len(text)
-    while i < n:
-        while i < n and text[i] not in "{[":
-            i += 1
-        if i >= n:
-            break
-        try:
-            val, end = dec.raw_decode(text, i)
-            yield val
-            i = end
-        except Exception:
-            i += 1
-
-def norm(ev):
-    if not isinstance(ev, dict):
-        return None
-    msg = ev.get("message") if isinstance(ev.get("message"), dict) else ev
-    role = msg.get("role") or ev.get("role")
-    if role is None:
-        t = ev.get("type") or msg.get("type")
-        if t in ("assistant", "tool", "user", "system"):
-            role = t
-    mid = msg.get("id") or ev.get("id")
-    content = msg.get("content")
-    if content is None:
-        content = ev.get("content")
-    if content is None:
-        content = ev.get("text") or msg.get("text")
-    text = ""
-    if isinstance(content, str):
-        text = content
-    elif isinstance(content, list):
-        parts = []
-        for p in content:
-            if isinstance(p, str):
-                parts.append(p)
-            elif isinstance(p, dict):
-                if isinstance(p.get("text"), str):
-                    parts.append(p["text"])
-                elif p.get("type") == "text" and isinstance(p.get("content"), str):
-                    parts.append(p["content"])
-        text = "".join(parts)
-    elif isinstance(content, dict):
-        if isinstance(content.get("text"), str):
-            text = content["text"]
-    return (role, mid, text)
-
-order = []
-by_id = {}
-seq = 0
-for ev in iter_events(raw):
-    r = norm(ev)
-    if r is None:
-        continue
-    role, mid, text = r
-    if role != "assistant" or not isinstance(text, str) or not text.strip():
-        continue
-    key = mid if mid is not None else ("_%d" % seq)
-    if key not in by_id:
-        by_id[key] = text
-        order.append(key)
-        seq += 1
-    elif len(text) >= len(by_id[key]):
-        by_id[key] = text
-
-final = by_id[order[-1]] if order else ""
-if not final.strip():
-    sys.stderr.write("no assistant text found in kimi stream-json\n")
-    sys.exit(3)
-
-with open(os.environ["K_OUT"], "w") as f:
-    f.write(final.strip() + "\n")
-' 2>/dev/null; then
+  if _kimi_extract_text "$RAW" "$OUTPUT_FILE"; then
     :
   else
     echo "invoke_kimi: WARNING could not extract assistant text from kimi stream-json — preserving raw stream in ${OUTPUT_FILE}" >&2
@@ -1311,25 +1439,24 @@ _list_kimi_agents() {
 #      unrelated ~/.grok/bin/agent (prints "grok 0.2.118") is rejected
 # Returns 1 (prints nothing) when none qualifies. PATH is walked by python3 so
 # the same code runs under bash and zsh (this file is sourced under either).
+# No file cache: a PID-keyed path under TMPDIR is predictable on shared-/tmp
+# hosts and was executed after only an -x check (CWE-377/427). Reuse rides
+# solely on the exported TRIFORGE_CURSOR_BIN; a fresh shell re-resolves, which
+# costs one `--version` per PATH candidate only on hosts without cursor-agent.
 _cursor_bin() {
   if [ -n "${TRIFORGE_CURSOR_BIN:-}" ] && [ -x "$TRIFORGE_CURSOR_BIN" ]; then
     printf '%s\n' "$TRIFORGE_CURSOR_BIN"; return 0
   fi
-  local CACHE="${TMPDIR:-/tmp}/triforge_cursor_bin_$$"
-  if [ -s "$CACHE" ]; then
-    local C; C=$(cat "$CACHE")
-    if [ -x "$C" ]; then export TRIFORGE_CURSOR_BIN="$C"; printf '%s\n' "$C"; return 0; fi
-  fi
   local CAND="" V=""
   if CAND=$(command -v cursor-agent 2>/dev/null) && [ -n "$CAND" ]; then
-    export TRIFORGE_CURSOR_BIN="$CAND"; printf '%s\n' "$CAND" > "$CACHE" 2>/dev/null || true
+    export TRIFORGE_CURSOR_BIN="$CAND"
     printf '%s\n' "$CAND"; return 0
   fi
   while IFS= read -r CAND; do
     [ -n "$CAND" ] || continue
     V=$(_run_with_timeout 15 "$CAND" --version 2>/dev/null | head -1 || true)
     if printf '%s' "$V" | grep -qE '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]+'; then
-      export TRIFORGE_CURSOR_BIN="$CAND"; printf '%s\n' "$CAND" > "$CACHE" 2>/dev/null || true
+      export TRIFORGE_CURSOR_BIN="$CAND"
       printf '%s\n' "$CAND"; return 0
     fi
   done <<AGENTS
@@ -1353,6 +1480,11 @@ AGENTS
 #   unknown effort                                    -> bare id + warning (never a fabricated suffix)
 #   non-Grok id (composer-2.5, …)                      -> unchanged
 # Sets _CURSOR_EFFORT_NOTE for the stderr summary.
+# Sibling: roster_write_role's cursor branch is the WRITE-time composer — it
+# normalizes a conflicting explicit suffix to the effort (with a NOTE) so the
+# stored pin is self-consistent; this dispatch-time composer honors the stored
+# pin as written (cursor-agents/builder.md). Same regex in both — keep them in
+# step when the Cursor id format changes.
 _CURSOR_EFFORT_NOTE=""
 _cursor_model_for_effort() {
   local M=${1:-} E=${2:-}
@@ -1542,101 +1674,7 @@ ${PROMPT}"
   # (cursor's canonical final answer); fall back to the last assistant message;
   # surface an error-result rather than an empty file; exit nonzero when nothing
   # is found so the raw stream is preserved (never "no findings" from an empty file).
-  if C_RAW="$RAW" C_OUT="$OUTPUT_FILE" python3 -c '
-import json, os, sys
-raw = open(os.environ["C_RAW"], "r", errors="replace").read()
-
-def iter_events(text):
-    text = text.strip()
-    if not text:
-        return
-    try:
-        obj = json.loads(text)
-        if isinstance(obj, list):
-            for e in obj:
-                yield e
-            return
-        if isinstance(obj, dict):
-            yield obj
-            return
-    except Exception:
-        pass
-    ok = False
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            yield json.loads(line)
-            ok = True
-        except Exception:
-            continue
-    if ok:
-        return
-    dec = json.JSONDecoder()
-    i, n = 0, len(text)
-    while i < n:
-        while i < n and text[i] not in "{[":
-            i += 1
-        if i >= n:
-            break
-        try:
-            val, end = dec.raw_decode(text, i)
-            yield val
-            i = end
-        except Exception:
-            i += 1
-
-def extract_text(content):
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for p in content:
-            if isinstance(p, str):
-                parts.append(p)
-            elif isinstance(p, dict) and isinstance(p.get("text"), str):
-                parts.append(p["text"])
-        return "".join(parts)
-    if isinstance(content, dict) and isinstance(content.get("text"), str):
-        return content["text"]
-    return ""
-
-assistant_texts = []
-result_text = ""
-result_seen = False
-result_is_error = False
-for ev in iter_events(raw):
-    if not isinstance(ev, dict):
-        continue
-    t = ev.get("type")
-    if t == "assistant":
-        msg = ev.get("message") if isinstance(ev.get("message"), dict) else ev
-        text = extract_text(msg.get("content"))
-        if text.strip():
-            assistant_texts.append(text)
-    elif t == "result":
-        r = ev.get("result")
-        if isinstance(r, str):
-            result_text = r
-            result_seen = True
-            result_is_error = bool(ev.get("is_error"))
-
-final = ""
-if result_seen and not result_is_error and result_text.strip():
-    final = result_text
-elif assistant_texts:
-    final = assistant_texts[-1]
-elif result_seen and result_text.strip():
-    final = result_text
-
-if not final.strip():
-    sys.stderr.write("no assistant/result text found in cursor stream-json\n")
-    sys.exit(3)
-
-with open(os.environ["C_OUT"], "w") as f:
-    f.write(final.strip() + "\n")
-' 2>/dev/null; then
+  if _cursor_extract_text "$RAW" "$OUTPUT_FILE"; then
     :
   else
     echo "invoke_cursor: WARNING could not extract assistant text from cursor stream-json — preserving raw stream in ${OUTPUT_FILE}" >&2
@@ -1923,6 +1961,11 @@ for k, v in sorted(data.get('agents', {}).items()):
 # goes to a DIFFERENT builder, so lease_requeue excludes previous_builder).
 resolve_role() {
   local ROLE=${1:?usage: resolve_role <role>}
+  # Prime TRIFORGE_CURSOR_BIN for the BINARY map below: on a host that ships
+  # only Cursor's `agent` binary the presence check would otherwise look for
+  # `cursor-agent` and skip the member silently (AE1) even when the roster
+  # names cursor as a role's primary. Cheap when cursor-agent exists.
+  [ -n "${TRIFORGE_CURSOR_BIN:-}" ] || _cursor_bin >/dev/null 2>&1 || true
   ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
 import os, shutil, sys
 try:
@@ -2358,7 +2401,7 @@ if os.path.isfile(path):
 leases = data.get('lease', {})
 leases = leases if isinstance(leases, dict) else {}
 row = dict(leases.get(task, {})) if isinstance(leases.get(task, {}), dict) else {}
-INT_KEYS = ('pid', 'created', 'updated', 'heartbeat_deadline', 'requeue_count', 'review_cycle')
+INT_KEYS = ('pid', 'created', 'updated', 'heartbeat_deadline', 'requeue_count', 'review_cycle', 'report_missing_count')
 for arg in sys.argv[1:]:
     k, sep, v = arg.partition('=')
     if not sep or not k:
@@ -2441,7 +2484,7 @@ print(row.get(os.environ['LEDGER_KEY'], ''))
 
 # _adapter_env <cli> <cmd...> — run an external command under the per-adapter
 # environment allowlist (KTD-14): base allowlist HOME PATH TMPDIR TERM LANG
-# COLORTERM plus ONLY the invoked CLI's own credential variables (opencode:
+# COLORTERM USER plus ONLY the invoked CLI's own credential variables (opencode:
 # OPENROUTER_API_KEY; kimi: KIMI_*; cursor: CURSOR_API_KEY). claude, codex,
 # and antigravity authenticate via HOME-based stores and get nothing extra —
 # no cross-provider leakage. env -i execs external commands only; shell
@@ -2463,6 +2506,11 @@ _adapter_env() {
   [ -n "${TERM+x}" ]      && PAIRS+=("TERM=${TERM}")
   [ -n "${LANG+x}" ]      && PAIRS+=("LANG=${LANG}")
   [ -n "${COLORTERM+x}" ] && PAIRS+=("COLORTERM=${COLORTERM}")
+  # USER is identity, not a secret: Claude Code resolves its keychain credential
+  # account from it, so without it `claude -p` under env -i answers "Not logged
+  # in" on every macOS host (live bisect 2026-09-11: +USER -> READY; LOGNAME
+  # alone does not help). Mirrored by _lane_run in scripts/probe-capabilities.sh.
+  [ -n "${USER+x}" ]      && PAIRS+=("USER=${USER}")
   PAIRS+=("NO_COLOR=1")   # captured output is parsed, never rendered (U5)
   case "$CLI" in
     opencode)
@@ -2524,8 +2572,18 @@ _lease_provision_skills() {
     echo "lease: WARNING no skills source found (CLAUDE_PLUGIN_ROOT/skills or repo skills/) — worktree gets no .agents/skills/" >&2
     return 0
   fi
-  mkdir -p "${WT}/.agents"
-  cp -R "$SRC" "${WT}/.agents/skills" 2>/dev/null || true
+  # `cp -R src/. dest/` — never `cp -R src dest`, which NESTS when the worktree
+  # already carries a committed .agents/skills/ (the stamp is safe to commit in
+  # user projects, so that layout is expected). Shipped-name directories are
+  # Triforge-owned and replaced, matching session-start's refresh (KTD7).
+  local NAME
+  mkdir -p "${WT}/.agents/skills"
+  for NAME in "$SRC"/*/; do
+    [ -d "$NAME" ] || continue
+    NAME=$(basename "$NAME")
+    rm -rf "${WT}/.agents/skills/${NAME}" 2>/dev/null || true
+    mkdir -p "${WT}/.agents/skills/${NAME}" 2>/dev/null && cp -R "${SRC}/${NAME}/." "${WT}/.agents/skills/${NAME}/" 2>/dev/null || true
+  done
 }
 
 # lease_create <task_id> <role> — resolve the builder from the roster
@@ -2565,6 +2623,29 @@ lease_create() {
     || return 1
   echo "lease_create: task=${TASK_ID} role=${ROLE} builder=${CLI} model=${MODEL:-host-default} worktree=${WT}" >&2
   echo "$TASK_ID"
+}
+
+# _lease_extract_stream <cli> <out> — for the stream-shaped lanes, turn the
+# captured JSON event stream in <out> into the assistant's final prose so the
+# builder's typed report can be parsed: <out> -> <out>.raw, extractor -> <out>.
+# Non-stream lanes and a failed extraction leave <out> untouched (a plain-text
+# TRIFORGE_TEST_BUILDER stream is simply not JSON).
+_lease_extract_stream() {
+  local CLI=$1 OUT=$2 X=""
+  case "$CLI" in
+    opencode) X=_oc_extract_text ;;
+    kimi)     X=_kimi_extract_text ;;
+    cursor)   X=_cursor_extract_text ;;
+    *) return 0 ;;
+  esac
+  [ -s "$OUT" ] || return 0
+  cp "$OUT" "${OUT}.raw" 2>/dev/null || return 0
+  if "$X" "${OUT}.raw" "${OUT}.text"; then
+    mv -f "${OUT}.text" "$OUT" 2>/dev/null || true
+  else
+    rm -f "${OUT}.text" 2>/dev/null || true
+    echo "lease_dispatch: WARNING could not extract assistant text from the ${CLI} stream — raw stream left in ${OUT} (report may parse as missing)" >&2
+  fi
 }
 
 # lease_dispatch <task_id> <prompt> [timeout-seconds]
@@ -2799,6 +2880,11 @@ ${PROMPT}"
     # spurious 'retryable' off a builder that actually succeeded.
     if [ "$RC" -eq 0 ]; then
       INVOKE_FAILURE_CLASS="none"
+      # The opencode / kimi / cursor lanes answer as a JSON event stream; the
+      # typed `Status:` report (KTD11) lives inside it as escaped text, so a
+      # line-anchored parser can never see it. Extract the prose into $OUT
+      # (raw stream kept in ${OUT}.raw); an extraction miss leaves $OUT as is.
+      _lease_extract_stream "$CLI" "$OUT"
     elif [ "${CLASS_SET:-0}" -ne 1 ]; then
       _classify_invoke_failure "$RC" "$OUT"
     fi
@@ -3088,28 +3174,42 @@ lease_requeue() {
 # signal from its final report (KTD11): the LAST line matching
 # `Status: DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT` (case-insensitive,
 # optional leading list marker / bold). Prints MISSING when no such line exists.
+# The token must END the line (a closing `**`, optional trailing punctuation,
+# then whitespace/EOL — never a `|`): the dispatch contract's own template line
+# `Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT` is echoed back
+# into the captured output by CLIs that print the prompt (codex exec does, on
+# stderr), and an unanchored match read every such run as DONE.
 _lease_parse_status() {
   local F=${1:?usage: _lease_parse_status <output-file>}
   local S=""
-  S=$(grep -iE '^[[:space:]]*[-*]*[[:space:]]*\**Status\**:?\**[[:space:]]*\**(DONE_WITH_CONCERNS|DONE|BLOCKED|NEEDS_CONTEXT)\**' "$F" 2>/dev/null | tail -1 | grep -oiE 'DONE_WITH_CONCERNS|DONE|BLOCKED|NEEDS_CONTEXT' | head -1 | tr '[:lower:]' '[:upper:]' || true)
+  S=$(grep -iE '^[[:space:]]*[-*]*[[:space:]]*\**Status\**:?\**[[:space:]]*\**(DONE_WITH_CONCERNS|DONE|BLOCKED|NEEDS_CONTEXT)\**[.,;)]?([[:space:]]*$|[[:space:]]+[^|[:space:]])' "$F" 2>/dev/null | tail -1 | grep -oiE 'DONE_WITH_CONCERNS|DONE|BLOCKED|NEEDS_CONTEXT' | head -1 | tr '[:lower:]' '[:upper:]' || true)
   printf '%s\n' "${S:-MISSING}"
 }
 
 # _lease_copy_discoveries <task_id> <builder> <output-file> — copy the
 # builder's "Discoveries for later tasks" block into ops/MEMORY.md (scrubbed,
 # lead-side — builders never write ops/). Skips "None"/empty.
+# The LAST block wins (the contract template echoed back by a prompt-printing
+# CLI carries an earlier placeholder block); the placeholder itself and the
+# None spellings are skipped; the copy is bounded (20 lines x 400 chars) and
+# labeled as unverified builder claims, never as lead decisions — MEMORY.md is
+# read as trusted institutional knowledge by later sessions. It lands as a
+# 4-space-indented literal block, never a fence: a builder line of three
+# backticks would close a fence and turn the rest into live Markdown.
 _lease_copy_discoveries() {
   local TASK_ID=$1 BUILDER=$2 F=$3
   local BLOCK
-  BLOCK=$(awk 'BEGIN{p=0} /^[[:space:]]*[-*]?[[:space:]]*\**Discoveries for later tasks\**:?/{p=1; sub(/^[^:]*:[[:space:]]*/, ""); if ($0 != "") print; next} p==1{ if ($0 ~ /^[[:space:]]*$/) exit; print }' "$F" 2>/dev/null | _scrub || true)
-  case "$(printf '%s' "$BLOCK" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in ''|none|'-none'|'*none'|'none.') return 0 ;; esac
+  BLOCK=$(awk 'BEGIN{p=0; b=""} /^[[:space:]]*[-*]?[[:space:]]*\**Discoveries for later tasks\**:?/{p=1; b=""; line=$0; sub(/^[^:]*:[[:space:]]*/, "", line); if (line != "") b=line "\n"; next} p==1{ if ($0 ~ /^[[:space:]]*$/) {p=0; next} b=b $0 "\n" } END{printf "%s", b}' "$F" 2>/dev/null | head -n 20 | cut -c1-400 | _scrub || true)
+  case "$(printf '%s' "$BLOCK" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in ''|none|'-none'|'*none'|'none.'|'<list,ornone>'|'<listornone>') return 0 ;; esac
   mkdir -p ops
   {
     echo ""
-    echo "## Discoveries from lease ${TASK_ID} (builder: ${BUILDER}, $(date -u +%Y-%m-%d))"
-    printf '%s\n' "$BLOCK"
+    echo "## Builder-reported discoveries — lease ${TASK_ID} (builder: ${BUILDER}, $(date -u +%Y-%m-%d))"
+    echo "Unverified builder claims, not lead decisions — promote into Decisions/Gotchas only after checking them:"
+    echo ""
+    printf '%s\n' "$BLOCK" | sed 's/^/    /'
   } >> ops/MEMORY.md 2>/dev/null || true
-  echo "lease_collect: copied the builder's discoveries into ops/MEMORY.md" >&2
+  echo "lease_collect: copied the builder's discoveries into ops/MEMORY.md (labeled unverified)" >&2
 }
 
 # lease_collect <task_id> — lead-side harvest of a finished builder. Exit 0:
@@ -3171,8 +3271,28 @@ lease_collect() {
         return 1
         ;;
       *)
-        _ledger_update "$TASK_ID" reason="report missing: clean exit without a Status line" || return 1
-        echo "lease_collect: task ${TASK_ID} builder exited 0 but its output has NO final 'Status:' report line — report missing, NOT review-ready (state stays building; rc ${_RC_DEGRADED}). Re-dispatch with the contract restated, or escalate after one repeat. Output: ${OUT}" >&2
+        # Report missing (KTD11). A finished builder with a dead pid is never
+        # orphaned by lease_heartbeat_check and lease_requeue refuses a building
+        # row, so the lease must transition here: the FIRST miss goes back to
+        # leased — lease_dispatch (which always prepends the contract) re-runs
+        # the SAME builder in the SAME worktree, keeping its uncommitted work —
+        # and the SECOND miss escalates (two clean exits without a report mean
+        # the builder is not following the contract).
+        local MISSES
+        MISSES=$(_ledger_get "$TASK_ID" report_missing_count 2>/dev/null || true)
+        case "${MISSES:-}" in ''|*[!0-9]*) MISSES=0 ;; esac
+        MISSES=$((MISSES + 1))
+        if [ "$MISSES" -ge 2 ]; then
+          local FIRST_OUT
+          FIRST_OUT=$(_ledger_get "$TASK_ID" report_missing_output 2>/dev/null || true)
+          _ledger_update "$TASK_ID" state=escalated report_missing_count="$MISSES" reason="report missing twice: clean exits without a Status line (outputs: ${FIRST_OUT:-?} ; ${OUT})" || return 1
+          echo "lease_collect: task ${TASK_ID} builder exited 0 without a final 'Status:' report for the SECOND time — ESCALATED, never review (KTD11: rule on reassigning the task to another roster member or stopping the wave; ledger the Ruling). Output: ${OUT}" >&2
+          return 1
+        fi
+        # Keep the first miss's output: the re-dispatch rewrites ${OUT} in place.
+        cp "$OUT" "${OUT}.miss1" 2>/dev/null || true
+        _ledger_update "$TASK_ID" state=leased report_missing_count="$MISSES" report_missing_output="${OUT}.miss1" reason="report missing: clean exit without a Status line (${OUT}; re-dispatch once, contract restated)" || return 1
+        echo "lease_collect: task ${TASK_ID} builder exited 0 but its output has NO final 'Status:' report line — report missing, NOT review-ready (rc ${_RC_DEGRADED}; state back to leased, same builder + worktree kept). Re-dispatch once: lease_dispatch ${TASK_ID} \"<one line: the previous run ended without a report> <original prompt>\" — a second miss escalates. Output: ${OUT}" >&2
         return "$_RC_DEGRADED"
         ;;
     esac
@@ -3897,6 +4017,9 @@ if cli == 'antigravity':
 # composed into the suffixed id from effort; an explicit suffixed id is
 # normalized to match the effort; anything else (composer-2.5, a non-Grok id)
 # is written through untouched. Empty model -> the shipped default family.
+# Sibling: _cursor_model_for_effort is the DISPATCH-time composer and keeps an
+# explicit suffix as written — the two precedence rules are deliberate (writer
+# normalizes the stored pin, dispatcher honors it). Same regex in both.
 if cli == 'cursor':
     sfx = {'low': 'low', 'medium': 'medium', 'high': 'high'}.get(effort, 'xhigh')
     m3 = re.match(r'^(?:cursor-)?(grok-[0-9][0-9.]*?)(?:-(low|medium|high|xhigh))?(-fast)?$', model or 'grok-4.6')

@@ -59,25 +59,18 @@ fi
 # never interpolated into the python source.
 _ss_json_version() {
   [ -f "$1" ] || return 0
+  local -a CMD=(python3 -c '
+import json, os
+try:
+    with open(os.environ["SS_JSON_FILE"], "r", encoding="utf-8") as f:
+        print(str(json.load(f).get("version", "")).strip())
+except Exception:
+    pass
+')
   if [ -n "$TIMEOUT_BIN" ]; then
-    SS_JSON_FILE="$1" "$TIMEOUT_BIN" 30s python3 -c '
-import json, os
-try:
-    with open(os.environ["SS_JSON_FILE"], "r", encoding="utf-8") as f:
-        print(str(json.load(f).get("version", "")).strip())
-except Exception:
-    pass
-' 2>/dev/null || true
-  else
-    SS_JSON_FILE="$1" python3 -c '
-import json, os
-try:
-    with open(os.environ["SS_JSON_FILE"], "r", encoding="utf-8") as f:
-        print(str(json.load(f).get("version", "")).strip())
-except Exception:
-    pass
-' 2>/dev/null || true
+    CMD=("$TIMEOUT_BIN" 30s "${CMD[@]}")
   fi
+  SS_JSON_FILE="$1" "${CMD[@]}" 2>/dev/null || true
 }
 
 PLUGIN_VERSION=""
@@ -182,7 +175,7 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -n "$TIMEOUT_BIN" ] && command -v agy >
         echo "version=${SHIPPED_PACK_VERSION}"
         echo "installed=$(date +%Y-%m-%d)"
         echo "importedAt=${IMPORTED_AFTER:-unknown}"
-      } > "$AGY_PACK_STAMP" 2>/dev/null || true
+      } > "${AGY_PACK_STAMP}.tmp.$$" 2>/dev/null && mv -f "${AGY_PACK_STAMP}.tmp.$$" "$AGY_PACK_STAMP" 2>/dev/null || rm -f "${AGY_PACK_STAMP}.tmp.$$" 2>/dev/null || true
       if [ -z "$AGY_MISSING" ]; then
         AGY_PACK_NOTICE="session-start: Antigravity agent pack installed ${INSTALLED_PACK_VERSION:-none} -> ${SHIPPED_PACK_VERSION} (importedAt ${IMPORTED_BEFORE:-none} -> ${IMPORTED_AFTER:-unknown}; agy agents lists all four Triforge agents)."
       else
@@ -269,8 +262,17 @@ _ss_refresh_skills() {
   local NAME SRC DEST OLD FAILED=0 I=0
   local -a OLD_NAMES=()
   [ -d "$SRC_ROOT" ] || return 0
-  if [ -L "$DEST_ROOT" ]; then
-    SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: .agents/skills is a symlink — left untouched (Triforge refreshes only a real directory; remove the link to let session start manage it)."
+  if [ -L "$DEST_ROOT" ] || [ -L ".agents" ]; then
+    SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: .agents or .agents/skills is a symlink — left untouched (Triforge refreshes only a real directory inside the project; remove the link to let session start manage it)."
+    return 0
+  fi
+  # The resolved destination must be THIS checkout's own .agents/skills. A
+  # symlinked ancestor (a repo can ship one) would otherwise let the refresh
+  # rm -rf and write shipped-name directories outside the project (CWE-59):
+  # _ss_skill_dir_ok anchors on realpath(.agents/skills), which already follows
+  # such a link, so the containment has to be checked against the checkout here.
+  if ! SS_DEST="$DEST_ROOT" python3 -c 'import os, sys; d = os.environ["SS_DEST"]; sys.exit(0 if os.path.realpath(d) == os.path.join(os.path.realpath("."), ".agents", "skills") else 1)' 2>/dev/null; then
+    SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: .agents/skills resolves outside the project (symlinked ancestor) — left untouched."
     return 0
   fi
   if [ -f "$STAMP" ]; then
@@ -608,7 +610,8 @@ fi
 # whatever its roster carries — a pin is never rewritten here — so one line per
 # differing pin points at /setup. The SHIPPED map mirrors CLI_DEFAULT_MODEL in
 # resolve_role (scripts/invoke-external.sh) and templates/ops/roster.toml; keep
-# the three in sync (validate-versions.sh DEFAULTS-drift check). An effort
+# the three in sync (validate-versions.sh check 3 diffs the SHIPPED / ROLE_CLI
+# literals below against CLI_DEFAULT_MODEL / DEFAULTS). An effort
 # variant of the default is NOT drift: the agy `(Low|Medium|High)` suffix and
 # the Cursor `-low|-medium|-high|-xhigh` suffix are effort controls (KTD3, KTD6),
 # so both sides are compared with that suffix stripped. Tolerant: a malformed

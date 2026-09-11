@@ -26,7 +26,11 @@
 #      roster_member_default case arms must equal CLI_DEFAULT_MODEL, and the
 #      templates/ops/roster.toml [roles.*] cli/model/effort/fallbacks must
 #      equal DEFAULTS; the template must also document each optional member's
-#      shipped default (model = "<CLI_DEFAULT_MODEL>").
+#      shipped default (model = "<CLI_DEFAULT_MODEL>"). The roster-drift
+#      notice in hooks/handlers/session-start.sh carries a third copy (SHIPPED
+#      = CLI_DEFAULT_MODEL minus the empty claude pin, ROLE_CLI = DEFAULTS
+#      role->cli) because the hook cannot source resolve_role; it must equal
+#      the canonical copy too.
 #   4. Scoped stale-pin sweep (KTD12) — patterns gpt-5.6-sol, grok-4.5,
 #      glm-5.2, kimi-k3, "Fable 5 →", "Opus 4.8", 2026-07-probe-record, and
 #      "Gemini 3.1 Pro (High)" ONLY on lines that also say "default" (so the
@@ -132,7 +136,7 @@ fi
 
 # --- 3. DEFAULTS drift (KTD6) ------------------------------------------------
 DRIFT_RC=0
-VV_SRC="scripts/invoke-external.sh" VV_ROSTER="templates/ops/roster.toml" python3 - <<'PYEOF' || DRIFT_RC=$?
+VV_SRC="scripts/invoke-external.sh" VV_ROSTER="templates/ops/roster.toml" VV_HOOK="hooks/handlers/session-start.sh" python3 - <<'PYEOF' || DRIFT_RC=$?
 import ast
 import os
 import re
@@ -268,6 +272,64 @@ if roster is not None and cli_defaults is not None:
     if not doc_fail:
         oks.append(roster_path + " documents the optional-member defaults from CLI_DEFAULT_MODEL")
 
+# hooks/handlers/session-start.sh roster-drift notice: its SHIPPED (per-CLI
+# model) and ROLE_CLI (role -> cli) literals are a third copy of
+# CLI_DEFAULT_MODEL / DEFAULTS. The hook cannot source resolve_role, so the
+# copy is validated here instead of being derived at runtime.
+hook_path = os.environ["VV_HOOK"]
+try:
+    with open(hook_path, encoding="utf-8") as fh:
+        hook_src = fh.read()
+except OSError as exc:
+    fails.append(hook_path + " unreadable: " + str(exc))
+    hook_src = None
+
+
+def hook_literal(name):
+    """The single '<name> = {...}' dict literal in the hook source (brace-matched)."""
+    m = re.search(r"^" + re.escape(name) + r" = \{", hook_src, re.M)
+    if not m:
+        fails.append(hook_path + ": " + name + " = { ... } literal not found")
+        return None
+    depth = 0
+    for i in range(m.end() - 1, len(hook_src)):
+        if hook_src[i] == "{":
+            depth += 1
+        elif hook_src[i] == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return ast.literal_eval(hook_src[m.end() - 1:i + 1])
+                except Exception as exc:  # noqa: BLE001
+                    fails.append(hook_path + ": " + name + " is not a pure literal: " + str(exc))
+                    return None
+    fails.append(hook_path + ": " + name + " literal is unterminated")
+    return None
+
+
+if hook_src is not None and cli_defaults is not None:
+    shipped = hook_literal("SHIPPED")
+    if shipped is not None:
+        want = {cli: model for cli, model in cli_defaults.items() if model}
+        if shipped == want:
+            oks.append(hook_path + " SHIPPED matches CLI_DEFAULT_MODEL (" + str(len(shipped)) + " members)")
+        else:
+            for key in sorted(set(shipped) | set(want)):
+                if shipped.get(key) != want.get(key):
+                    fails.append(hook_path + " SHIPPED[" + repr(key) + "] = " + repr(shipped.get(key))
+                                 + " but CLI_DEFAULT_MODEL = " + repr(want.get(key)))
+if hook_src is not None and role_defaults is not None:
+    role_cli = hook_literal("ROLE_CLI")
+    if role_cli is not None:
+        want = {role: entry.get("cli") for role, entry in role_defaults.items()}
+        if role_cli == want:
+            oks.append(hook_path + " ROLE_CLI matches DEFAULTS role->cli (" + str(len(role_cli)) + " roles)")
+        else:
+            for key in sorted(set(role_cli) | set(want)):
+                if role_cli.get(key) != want.get(key):
+                    fails.append(hook_path + " ROLE_CLI[" + repr(key) + "] = " + repr(role_cli.get(key))
+                                 + " but DEFAULTS cli = " + repr(want.get(key)))
+
 for line in oks:
     print("ok:   drift: " + line)
 for line in fails:
@@ -288,10 +350,14 @@ if [ "$NO_SWEEP" -eq 1 ]; then
 else
   # GNU grep prints ./path, BSD grep prints path — accept both prefixes.
   SWEEP_EXCLUDE_RE='^(\./)?(ops/research|ops/decisions|docs/plans|ops/solutions|docs/images|\.git|\.agents|\.gemini|\.antigravity|node_modules)/'
+  # Whole directories are pruned at walk time (grep never descends into .git's
+  # object store or a node_modules tree); the path-scoped exclusions above are
+  # applied on the output, where the RE also re-covers the pruned names.
+  SWEEP_EXCLUDE_DIRS=(--exclude-dir=.git --exclude-dir=.agents --exclude-dir=.gemini --exclude-dir=.antigravity --exclude-dir=node_modules)
   SWEEP_SELF_RE='^(\./)?scripts/validate-(versions|skills)\.sh:'
   SWEEP_HITS=$(
     {
-      grep -rnI \
+      grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" \
         -e 'gpt-5\.6-sol' \
         -e 'grok-4\.5' \
         -e 'glm-5\.2' \
@@ -300,7 +366,7 @@ else
         -e 'Opus 4\.8' \
         -e '2026-07-probe-record' \
         . || true
-      grep -rnI 'Gemini 3\.1 Pro (High)' . | grep -i 'default' || true
+      grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" 'Gemini 3\.1 Pro (High)' . | grep -i 'default' || true
     } \
       | grep -vE "$SWEEP_EXCLUDE_RE" \
       | grep -vE "$SWEEP_SELF_RE" \

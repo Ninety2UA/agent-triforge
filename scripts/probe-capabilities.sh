@@ -218,12 +218,20 @@ _probe_run() { # _probe_run <seconds> <cmd...>
   "$TIMEOUT_BIN" "${SECS}s" env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null "$@"
 }
 
-# The lease lane's env -i boundary (KTD-14 base allowlist: HOME PATH TMPDIR
-# LANG) + the same git isolation, for the SELF-06 lease-lane discovery rows.
+# The lease lane's env -i boundary — field-for-field the _adapter_env base
+# allowlist in scripts/invoke-external.sh (KTD-14: HOME PATH TMPDIR TERM LANG
+# COLORTERM USER + NO_COLOR=1) + the same git isolation, for the SELF-06
+# lease-lane discovery rows and CC-08. Keep the two lists identical: a probe
+# that runs under a wider or narrower env than the real lease proves nothing
+# about it (USER is what lets `claude -p` find its keychain account).
 _lane_run() { # _lane_run <seconds> <cmd...>
   local SECS=$1; shift
   local -a E=(HOME="${HOME:-}" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null)
-  [ -n "${LANG+x}" ] && E+=("LANG=${LANG}")
+  [ -n "${TERM+x}" ]      && E+=("TERM=${TERM}")
+  [ -n "${LANG+x}" ]      && E+=("LANG=${LANG}")
+  [ -n "${COLORTERM+x}" ] && E+=("COLORTERM=${COLORTERM}")
+  [ -n "${USER+x}" ]      && E+=("USER=${USER}")
+  E+=("NO_COLOR=1")
   "$TIMEOUT_BIN" "${SECS}s" env -i "${E[@]}" "$@"
 }
 
@@ -1447,6 +1455,17 @@ if command -v claude >/dev/null 2>&1; then
     else
       row "CC-07" "claude" "/<skill> expands in -p from .claude/skills" "FAIL" "$(_evidence "$O")" "live"
     fi
+    # CC-08 (KTD-14): the claude builder lane runs `claude -p` under the
+    # _adapter_env allowlist (mirrored by _lane_run) — the READY probe must pass
+    # under exactly that env, not only under the caller's full environment
+    # (2026-09-11: without USER the keychain account is not found and every
+    # claude lease answered "Not logged in").
+    O="$WORK/cc-lane-auth.txt"
+    if (cd "$FIX" && _lane_run 240 claude -p --model sonnet --output-format text "Respond with only: READY" > "$O" 2>&1) && _contains_ci "$O" "READY"; then
+      row "CC-08" "claude" "claude -p authenticates under the lease env -i allowlist (KTD-14 base allowlist incl. USER)" "PASS" "READY under env -i HOME PATH TMPDIR TERM LANG COLORTERM USER NO_COLOR" "live"
+    else
+      row "CC-08" "claude" "claude -p authenticates under the lease env -i allowlist (KTD-14 base allowlist incl. USER)" "FAIL" "the builder lane cannot reach Claude under the lease allowlist — every claude lease would fail: $(_evidence "$O")" "live"
+    fi
     O="$WORK/cc-skill-agents.txt"
     (cd "$FIX" && _probe_run 240 claude -p --model sonnet --output-format text "/tf-agents-skill" > "$O" 2>&1) || true
     if grep -q 'SKILL-OK tf-agents-skill' "$O"; then
@@ -1459,6 +1478,7 @@ if command -v claude >/dev/null 2>&1; then
     row "CC-03" "claude" "/goal hard-gates an un-instructed checklist condition (-p; best-effort, 3-run majority — D-030)" "$(_skip_reason)" "live probes disabled" "live"
     row "CC-07" "claude" "/<skill> expands in -p from .claude/skills" "$(_skip_reason)" "live probes disabled" "live"
     row "CC-07b" "claude" ".agents/skills is not a Claude path (/<skill> negative)" "$(_skip_reason)" "live probes disabled" "live"
+    row "CC-08" "claude" "claude -p authenticates under the lease env -i allowlist (KTD-14 base allowlist incl. USER)" "$(_skip_reason)" "live probes disabled" "live"
   fi
 
   # Dynamic workflows: capability-grade question is expressibility (external-CLI
@@ -1595,8 +1615,13 @@ if [ "$_S5_HAS" = yes ]; then
   printf 'could not proceed\n\nStatus: BLOCKED\nReason: probe\n' > "$_S5_DIR/blocked.txt"
   printf 'did the work\n\nStatus: DONE_WITH_CONCERNS\nConcerns: one\n' > "$_S5_DIR/concerns.txt"
   printf 'need input\n\nStatus: NEEDS_CONTEXT\nQuestion: probe\n' > "$_S5_DIR/needs.txt"
+  # Decoys: CLIs that echo the prompt (codex exec, on stderr) put the contract
+  # template `Status: DONE | DONE_WITH_CONCERNS | ...` into the captured file;
+  # it must never parse as DONE, and a real BLOCKED must survive a later echo.
+  printf 'echo of the prompt:\n  Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT\n  Discoveries for later tasks: <list, or None>\nno report written\n' > "$_S5_DIR/decoy.txt"
+  printf 'Status: BLOCKED\nFiles changed: none\n\n  Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT\n' > "$_S5_DIR/blocked-then-decoy.txt"
   _S5_OUT=$( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null
-    for f in done none blocked concerns needs; do
+    for f in done none blocked concerns needs decoy blocked-then-decoy; do
       printf '%s=' "$f"; _lease_parse_status "$_S5_DIR/$f.txt" 2>/dev/null | tr -d '[:space:]'; printf '\n'
     done )
   _S5_FAIL=""
@@ -1605,8 +1630,10 @@ if [ "$_S5_HAS" = yes ]; then
   printf '%s\n' "$_S5_OUT" | grep -q '^blocked=BLOCKED$'               || _S5_FAIL="$_S5_FAIL blocked"
   printf '%s\n' "$_S5_OUT" | grep -q '^concerns=DONE_WITH_CONCERNS$'   || _S5_FAIL="$_S5_FAIL concerns"
   printf '%s\n' "$_S5_OUT" | grep -q '^needs=NEEDS_CONTEXT$'           || _S5_FAIL="$_S5_FAIL needs"
+  printf '%s\n' "$_S5_OUT" | grep -q '^decoy=MISSING$'                 || _S5_FAIL="$_S5_FAIL decoy-template-read-as-status"
+  printf '%s\n' "$_S5_OUT" | grep -q '^blocked-then-decoy=BLOCKED$'    || _S5_FAIL="$_S5_FAIL blocked-lost-to-decoy"
   if [ -z "$_S5_FAIL" ]; then
-    row "SELF-05" "claude" "_lease_parse_status reads the Status: contract line (KTD11 seam)" "PASS" "Status: DONE -> DONE; no Status line -> MISSING; Status: BLOCKED -> BLOCKED (DONE_WITH_CONCERNS / NEEDS_CONTEXT also parsed)" "static"
+    row "SELF-05" "claude" "_lease_parse_status reads the Status: contract line (KTD11 seam)" "PASS" "Status: DONE -> DONE; no Status line -> MISSING; Status: BLOCKED -> BLOCKED (DONE_WITH_CONCERNS / NEEDS_CONTEXT also parsed); the echoed contract template -> MISSING, and a real BLOCKED survives a later echo" "static"
   else
     row "SELF-05" "claude" "_lease_parse_status reads the Status: contract line (KTD11 seam)" "FAIL" "mismatch:${_S5_FAIL}; parser output: $(printf '%s' "$_S5_OUT" | tr '\n' ' ' | cut -c1-120)" "static"
   fi
@@ -1726,10 +1753,12 @@ fi
 
 # SELF-07 (KTD11): the TRIFORGE_TEST_BUILDER lifecycle through lease_create /
 # lease_dispatch / lease_collect in a throwaway repo with its own lease root.
-# Three fake builders: a report ending "Status: DONE" must land state=review
-# (rc 0); a clean exit with NO Status line is "report missing" — state stays
-# building and lease_collect returns 80, never review-ready; "Status: BLOCKED"
-# must land state=escalated. The throwaway repo carries ops/roster.toml with
+# Four fake builders: a report ending "Status: DONE" must land state=review
+# (rc 0); a clean exit with NO Status line is "report missing" — lease_collect
+# returns 80 and moves the lease back to leased (same builder + worktree, one
+# re-dispatch allowed), never review-ready, and a SECOND miss escalates;
+# a builder that only echoes the contract template (as codex exec echoes the
+# prompt) is report-missing too; "Status: BLOCKED" must land state=escalated. The throwaway repo carries ops/roster.toml with
 # builder = claude so the lease is assigned the way a default roster would
 # assign it (the fake builder replaces the adapter, not the resolution).
 # FAIL outright when the parser is absent: without it lease_collect routes
@@ -1742,6 +1771,14 @@ if [ "$_S5_HAS" = yes ]; then
   printf '#!/bin/sh\necho "work done"\necho "Status: DONE"\n' > "$_S7/fb-done.sh"
   printf '#!/bin/sh\necho "work done, no report line"\n' > "$_S7/fb-none.sh"
   printf '#!/bin/sh\necho "Status: BLOCKED"\necho "reason: probe"\n' > "$_S7/fb-blocked.sh"
+  printf '#!/bin/sh\necho "echo of the prompt:"\necho "  Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT"\necho "  Discoveries for later tasks: <list, or None>"\necho "no report written"\n' > "$_S7/fb-echo.sh"
+  # A stream-shaped builder (the kimi lane's stream-json): the report lives
+  # inside a JSON string, so the lease lane must extract prose before parsing.
+  cat > "$_S7/fb-stream.sh" <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"role":"assistant","id":"m1","content":"working..."}'
+printf '%s\n' '{"role":"assistant","id":"m2","content":"Done.\n\nStatus: DONE\nFiles changed: a.txt\nTests: none\nConcerns: None\nDiscoveries for later tasks: None\n"}'
+EOF
   chmod +x "$_S7"/fb-*.sh
   _S7_RES=$( cd "$_S7/repo" && export TRIFORGE_LEASE_ROOT="$_S7/leases" && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && {
     _s7_case() { # _s7_case <task> <fake-builder>
@@ -1758,19 +1795,44 @@ if [ "$_S5_HAS" = yes ]; then
     _s7_case s7done "$_S7/fb-done.sh"
     _s7_case s7none "$_S7/fb-none.sh"
     _s7_case s7blocked "$_S7/fb-blocked.sh"
+    _s7_case s7echo "$_S7/fb-echo.sh"
+    # stream lane: re-lease the task as kimi (the seam replaces the CLI, not
+    # the lane), so _lease_extract_stream runs on the captured JSON stream.
+    printf '[roles.builder]\ncli = "kimi"\nfallbacks = ["claude"]\n[members.kimi]\nenabled = true\n' > ops/roster.toml
+    if command -v kimi >/dev/null 2>&1; then
+      _s7_case s7stream "$_S7/fb-stream.sh"
+    else
+      printf 's7stream:skipped-no-kimi-binary\n'
+    fi
+    # report-missing recovery: the s7none lease is back in leased — one
+    # re-dispatch of the same builder in the same worktree, then a second
+    # clean miss must escalate (never review).
+    _s7_again() { # _s7_again <task> <fake-builder> <label>
+      local T=$1 S=$2 L=$3 OUT RC=0 N=0
+      export TRIFORGE_TEST_BUILDER="$S"
+      lease_dispatch "$T" "probe task: previous run ended without a report" 60 >/dev/null 2>&1 || { printf '%s:dispatch-failed:state=%s\n' "$L" "$(_ledger_get "$T" state 2>/dev/null)"; return 0; }
+      OUT=$(_ledger_get "$T" output_file 2>/dev/null)
+      while [ ! -f "${OUT}.rc" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
+      lease_collect "$T" >/dev/null 2>&1 || RC=$?
+      printf '%s:rc=%s:state=%s:misses=%s\n' "$L" "$RC" "$(_ledger_get "$T" state 2>/dev/null)" "$(_ledger_get "$T" report_missing_count 2>/dev/null)"
+    }
+    _s7_again s7none "$_S7/fb-none.sh" s7none2
   } 2>/dev/null )
   _S7_FAIL=""
   printf '%s\n' "$_S7_RES" | grep -q '^s7done:rc=0:state=review$'                 || _S7_FAIL="$_S7_FAIL done"
-  printf '%s\n' "$_S7_RES" | grep -q '^s7none:rc=80:state=building$'              || _S7_FAIL="$_S7_FAIL report-missing"
+  printf '%s\n' "$_S7_RES" | grep -q '^s7none:rc=80:state=leased$'                || _S7_FAIL="$_S7_FAIL report-missing"
   printf '%s\n' "$_S7_RES" | grep -qE '^s7blocked:rc=[0-9]+:state=escalated$'     || _S7_FAIL="$_S7_FAIL blocked"
+  printf '%s\n' "$_S7_RES" | grep -q '^s7echo:rc=80:state=leased$'                || _S7_FAIL="$_S7_FAIL echoed-template-read-as-report"
+  printf '%s\n' "$_S7_RES" | grep -qE '^s7none2:rc=[0-9]+:state=escalated:misses=2$' || _S7_FAIL="$_S7_FAIL second-miss-not-escalated"
+  printf '%s\n' "$_S7_RES" | grep -qE '^s7stream:(rc=0:state=review|skipped-no-kimi-binary)$' || _S7_FAIL="$_S7_FAIL stream-lane-report-not-extracted"
   if [ -z "$_S7_FAIL" ]; then
-    row "SELF-07" "claude" "TRIFORGE_TEST_BUILDER lifecycle: DONE -> review; no Status line -> building + rc 80; BLOCKED -> escalated (KTD11)" "PASS" "$(printf '%s' "$_S7_RES" | tr '\n' ' ')" "static"
+    row "SELF-07" "claude" "TRIFORGE_TEST_BUILDER lifecycle: DONE -> review; no Status line -> leased + rc 80 (re-dispatch once), echoed template -> report-missing, second miss -> escalated; BLOCKED -> escalated (KTD11)" "PASS" "$(printf '%s' "$_S7_RES" | tr '\n' ' ')" "static"
   else
-    row "SELF-07" "claude" "TRIFORGE_TEST_BUILDER lifecycle: DONE -> review; no Status line -> building + rc 80; BLOCKED -> escalated (KTD11)" "FAIL" "mismatch:${_S7_FAIL}; got: $(printf '%s' "$_S7_RES" | tr '\n' ' ' | cut -c1-140)" "static"
+    row "SELF-07" "claude" "TRIFORGE_TEST_BUILDER lifecycle: DONE -> review; no Status line -> leased + rc 80 (re-dispatch once), echoed template -> report-missing, second miss -> escalated; BLOCKED -> escalated (KTD11)" "FAIL" "mismatch:${_S7_FAIL}; got: $(printf '%s' "$_S7_RES" | tr '\n' ' ' | cut -c1-160)" "static"
   fi
   rm -rf "$_S7"
 else
-  row "SELF-07" "claude" "TRIFORGE_TEST_BUILDER lifecycle: DONE -> review; no Status line -> building + rc 80; BLOCKED -> escalated (KTD11)" "FAIL" "_lease_parse_status is not defined by scripts/invoke-external.sh, so lease_collect cannot route on the typed report; run once it exists: TRIFORGE_LEASE_ROOT=<tmp> TRIFORGE_TEST_BUILDER=<fake-builder.sh> lease_create t builder && lease_dispatch t \"probe\" 60 && lease_collect t — expect review / rc 80 + building / escalated for DONE / no line / BLOCKED" "static"
+  row "SELF-07" "claude" "TRIFORGE_TEST_BUILDER lifecycle: DONE -> review; no Status line -> leased + rc 80 (re-dispatch once), echoed template -> report-missing, second miss -> escalated; BLOCKED -> escalated (KTD11)" "FAIL" "_lease_parse_status is not defined by scripts/invoke-external.sh, so lease_collect cannot route on the typed report; run once it exists: TRIFORGE_LEASE_ROOT=<tmp> TRIFORGE_TEST_BUILDER=<fake-builder.sh> lease_create t builder && lease_dispatch t \"probe\" 60 && lease_collect t — expect review / rc 80 + leased / escalated for DONE / no line / BLOCKED" "static"
 fi
 
 # SELF-08 (KTD7 / KTD8): session-start idempotence. hooks/handlers/session-
@@ -1805,7 +1867,41 @@ if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ]; then
 else
   row "SELF-08" "claude" "session-start.sh is idempotent (second run prints zero session-start: lines)" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160)" "static"
 fi
-rm -rf "$_S8"
+rm -rf "$_S8/proj" "$_S8/home"   # keep $_S8/bin (the stub agy) for SELF-08b; removed there
+
+# SELF-08b (KTD7 / CWE-59): the two destructive paths of the skills refresh.
+# (a) Retirement: an OLDER stamp naming a skill that no longer ships, with that
+#     directory present, must be removed on the version bump — while every
+#     shipped directory and a foreign (unstamped) user directory survive.
+# (b) Symlinked ancestor: with .agents -> a directory OUTSIDE the project the
+#     refresh must leave the target untouched (no rm -rf, no copies, no stamp).
+_S8B="${WORK}/self08b"
+mkdir -p "$_S8B/proj/.agents/skills/old-fake-skill" "$_S8B/proj/.agents/skills/my-own-skill" "$_S8B/link/target/skills/codebase-mapping" "$_S8B/link/proj" "$_S8B/home"
+printf 'version=0.0.1-probe\nskills=old-fake-skill,codebase-mapping\n' > "$_S8B/proj/.agents/skills/.triforge-plugin-version"
+echo "user skill" > "$_S8B/proj/.agents/skills/my-own-skill/SKILL.md"
+echo "old" > "$_S8B/proj/.agents/skills/old-fake-skill/SKILL.md"
+echo "marker" > "$_S8B/link/target/skills/codebase-mapping/USER-MARKER.txt"
+ln -s "$_S8B/link/target" "$_S8B/link/proj/.agents"
+( cd "$_S8B/proj" && git init -q 2>/dev/null; cd "$_S8B/link/proj" && git init -q 2>/dev/null ) || true
+_S8B_OUT=$( cd "$_S8B/proj" && HOME="$_S8B/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/bin:$PATH" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ); _S8B_RC=$?
+_S8B_FAIL=""
+[ ! -e "$_S8B/proj/.agents/skills/old-fake-skill" ]                 || _S8B_FAIL="$_S8B_FAIL retired-dir-still-present"
+[ -f "$_S8B/proj/.agents/skills/my-own-skill/SKILL.md" ]            || _S8B_FAIL="$_S8B_FAIL user-dir-removed"
+[ "$(ls -d "$_S8B"/proj/.agents/skills/*/ 2>/dev/null | wc -l | tr -d ' ')" -eq "$(( $(printf '%s\n' $SHIPPED_SKILLS | grep -c .) + 1 ))" ] || _S8B_FAIL="$_S8B_FAIL shipped-count($(ls -d "$_S8B"/proj/.agents/skills/*/ 2>/dev/null | wc -l | tr -d ' ')-incl-user)"
+printf '%s\n' "$_S8B_OUT" | grep -q 'retired' || _S8B_FAIL="$_S8B_FAIL no-retired-notice"
+[ "$_S8B_RC" -eq 0 ] || _S8B_FAIL="$_S8B_FAIL rc=${_S8B_RC}"
+_S8B_OUT2=$( cd "$_S8B/link/proj" && HOME="$_S8B/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/bin:$PATH" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ); _S8B_RC2=$?
+[ -f "$_S8B/link/target/skills/codebase-mapping/USER-MARKER.txt" ]  || _S8B_FAIL="$_S8B_FAIL symlink-target-marker-deleted"
+[ ! -e "$_S8B/link/target/skills/.triforge-plugin-version" ]        || _S8B_FAIL="$_S8B_FAIL symlink-target-stamped"
+[ "$(ls -d "$_S8B"/link/target/skills/*/ 2>/dev/null | wc -l | tr -d ' ')" -eq 1 ] || _S8B_FAIL="$_S8B_FAIL symlink-target-written($(ls -d "$_S8B"/link/target/skills/*/ 2>/dev/null | wc -l | tr -d ' ')-dirs)"
+printf '%s\n' "$_S8B_OUT2" | grep -qi 'symlink' || _S8B_FAIL="$_S8B_FAIL no-symlink-notice"
+[ "$_S8B_RC2" -eq 0 ] || _S8B_FAIL="$_S8B_FAIL link-rc=${_S8B_RC2}"
+if [ -z "$_S8B_FAIL" ]; then
+  row "SELF-08b" "claude" "skills refresh: retires a stamp-listed skill that no longer ships, keeps user dirs; a symlinked .agents ancestor is left untouched (KTD7, CWE-59)" "PASS" "old-fake-skill removed + notice; my-own-skill kept; shipped set present; symlinked target: marker kept, no stamp, no copies" "static"
+else
+  row "SELF-08b" "claude" "skills refresh: retires a stamp-listed skill that no longer ships, keeps user dirs; a symlinked .agents ancestor is left untouched (KTD7, CWE-59)" "FAIL" "mismatch:${_S8B_FAIL}; run1: $(printf '%s\n' "$_S8B_OUT" | grep '^session-start:' | head -2 | tr '\n' ' ' | _scrub | cut -c1-120)" "static"
+fi
+rm -rf "$_S8B" "$_S8"
 
 # --------------------------------------------------------------------------
 # Escape check

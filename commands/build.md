@@ -24,6 +24,7 @@ ensure_core_trio_live || exit 1
 ## Prerequisites
 - ops/TASKS.md must exist with assigned tasks
 - Phase 1.5 plan validation should have passed
+- Read the `Ceremony:` line at the top of ops/TASKS.md (written by `/plan` or `/quick`, S16) and honor it: `high-ceremony` means plan-checker must have passed (never skip Phase 1.5), the wave ends with `integration-verifier`, and the follow-on `/review` runs as `--full`; `trivial` may skip Phase 0 and Phase 1.5; `standard` (or no line) is the default posture below
 
 Read ops/TASKS.md, ops/CONTRACTS.md, ops/MEMORY.md, and ops/ARCHITECTURE.md first.
 

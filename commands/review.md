@@ -28,6 +28,8 @@ Flags:
 
 > **Note:** For small changes (< 3 files, obvious fix), consider `/quick` instead — it uses self-review only, skipping the full review swarm.
 
+**Ceremony (S16):** read the `Ceremony:` line at the top of ops/TASKS.md before choosing lanes. `high-ceremony` forces the full swarm — treat this run as `--full` regardless of the flags passed (security-sentinel, performance-oracle, code-simplicity-reviewer, convention-enforcer, architecture-strategist all on); `trivial` runs the default lanes; `standard` (or no line) follows the flags as given.
+
 ## Reviewer trust rules (S6/S7)
 
 Every reviewer lane — the two core lanes, the optional-tier lanes, and the Claude subagents — is dispatched under the same rules:
@@ -173,11 +175,23 @@ for OCLI in opencode kimi cursor; do
     cursor)   CURSOR_MODEL="${OMODEL:-}"   invoke_cursor   "reviewer" "$REVIEW_PROMPT" "$OOUT" 600 || ORC=$? ;;
   esac
   [ "$ORC" -ne 0 ] && echo "review: ${OCLI} reviewer lane exited $ORC (see $OOUT) — optional lane, continuing" >&2
-  # Headless resilience: promote captured output into ops/REVIEW_<CLI>.md when the
-  # reviewer returned findings instead of writing ops/ directly.
-  if [ ! -f "ops/REVIEW_${UP}.md" ] && [ -s "$OOUT" ]; then
-    { echo "<!-- captured from invoke_${OCLI} reviewer output; headless permission auto-deny -->"; _scrub < "$OOUT"; } > "ops/REVIEW_${UP}.md"
-  fi
+  # Typed completion signal (KTD11): the optional-tier reviewer briefs promise
+  # that the lead parses their final `Status:` line and treats a run without
+  # it as "report missing", never as review-ready — so promote captured output
+  # into ops/REVIEW_<CLI>.md ONLY on DONE / DONE_WITH_CONCERNS. BLOCKED,
+  # NEEDS_CONTEXT, and a missing report leave no REVIEW file (an absent lane is
+  # visible to findings-synthesizer; a truncated review promoted as complete is not).
+  OSTATUS=$(_lease_parse_status "$OOUT" 2>/dev/null || echo MISSING)
+  case "$OSTATUS" in
+    DONE|DONE_WITH_CONCERNS)
+      if [ ! -f "ops/REVIEW_${UP}.md" ] && [ -s "$OOUT" ]; then
+        { echo "<!-- captured from invoke_${OCLI} reviewer output; headless permission auto-deny; report_status=${OSTATUS} -->"; _scrub < "$OOUT"; } > "ops/REVIEW_${UP}.md"
+      fi ;;
+    BLOCKED|NEEDS_CONTEXT)
+      echo "review: ${OCLI} reviewer reported Status: ${OSTATUS} — not promoted to ops/REVIEW_${UP}.md; read ${OOUT}, supply the missing context, and re-run the lane" >&2 ;;
+    *)
+      echo "review: ${OCLI} reviewer output has no final 'Status:' line — report missing, NOT review-ready; nothing promoted (captured at ${OOUT}; re-run the lane with the contract restated)" >&2 ;;
+  esac
 done
 ```
 

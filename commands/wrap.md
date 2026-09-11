@@ -15,6 +15,7 @@ Follow the `knowledge-compounding` skill, gated by the counterfactual bar (CE-1)
 
 ## Step 2: Update shared files
 
+- If ops/TASKS.md opens with `Ceremony: high-ceremony` (S16), the session summary must cite the plan-checker pass, the `--full` review, and the integration-verifier result by name; a missing one is recorded as a gap in ops/STATE.md, never papered over
 - Update ops/CHANGELOG.md with final session summary
 - Update ops/MEMORY.md with new decisions, patterns, and gotchas discovered
 - Move all completed tasks to "Done" in ops/TASKS.md with result summaries
