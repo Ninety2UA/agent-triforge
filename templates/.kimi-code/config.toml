@@ -1,30 +1,35 @@
-# .kimi-code/config.toml — Triforge-shipped Kimi Code project config.
+# .kimi-code/config.toml — Triforge-shipped Kimi Code settings. DOCUMENTATION
+# ONLY: the CLI does not read this file.
 #
-# Validated by `kimi doctor` (its checked set is config.toml + tui.toml). This
-# file is copied to .kimi-code/config.toml at session start ONLY if absent, so
-# your edits are preserved.
+# Kimi Code 0.42.0 reads ONLY the user-tier ~/.kimi-code/config.toml
+# ($KIMI_CODE_HOME/config.toml). The documented project-local file is
+# .kimi-code/local.toml, and it carries only [workspace] (additional_dir). A
+# project .kimi-code/config.toml is never loaded (watch cycle 2026-09-11, ADR
+# D-024), so nothing below binds by itself. The file is bootstrapped
+# copy-if-absent so the intended settings travel with the repo; to make them
+# bind, copy the keys into ~/.kimi-code/config.toml (`kimi doctor` validates
+# that file).
 #
-# Telemetry (R25) — disabled in TWO layers:
-#   1. telemetry = false  (config tier, this file), and
-#   2. KIMI_DISABLE_TELEMETRY=1 exported on EVERY headless invocation by
-#      scripts/invoke-external.sh (invoke_kimi + the lease_dispatch kimi case).
-# The env var is the authoritative kill switch the CLI honors (probe KIMI-07);
-# the config key is defense-in-depth for interactive/direct `kimi` use.
+# What actually enforces each setting under Triforge's headless lanes:
+#   telemetry     -> KIMI_DISABLE_TELEMETRY=1, exported on every headless
+#                    invocation by scripts/invoke-external.sh (invoke_kimi +
+#                    the lease_dispatch kimi case). Honored in -p since 0.41.0
+#                    (probe KIMI-07). This env var is the authoritative switch.
+#   default_model -> -m "${KIMI_MODEL:-kimi-code/k3}" on every invocation.
+#   deny rules    -> NOT these. Reviewer read-only is the `tools` allowlist in
+#                    kimi-agents/reviewer.md (loaded via --agent-file) plus the
+#                    lease worktree and the KIMI_* env allowlist (R35).
 telemetry = false
 
-# Shipped default model (KTD-8): Kimi K3. The roster overrides it via KIMI_MODEL
-# / -m; the coding alternative is kimi-code/kimi-for-coding (Kimi K2.7 Code).
-# NOTE: `kimi login` provisions the managed provider + model aliases; this key
-# only names the default to select — `kimi doctor` does NOT require a matching
-# [models.*] block (verified 2026-07-18, kimi 0.15.0).
-default_model = "kimi-k3"
+# Managed OAuth alias that `kimi login` provisions. The older open-platform id is
+# not managed and fails on OAuth hosts. Coding alternative:
+# kimi-code/kimi-for-coding. The roster overrides via KIMI_MODEL / -m.
+default_model = "kimi-code/k3"
 
-# Minimal bash denylist — defense-in-depth for interactive/direct `kimi` use in
-# this project. Rules match in order; the first match wins. This is a config-tier
-# guard ONLY: headless `kimi -p` runs under Kimi's `auto` policy, so the REAL
-# builder/reviewer confinement is the lease worktree + the _adapter_env KIMI_*
-# environment allowlist (R35), and reviewer read-only is prompt-level
-# (kimi-agents/reviewer.md). See README.md.
+# Bash denylist — reference only. Rules match in order; the first match wins.
+# Even in the user file, whether they bind under headless -p ("Never Ask" mode,
+# no dangerous-command guard since 0.41.0) is unverified until `kimi login`
+# (PENDING-AUTH). Never rely on them for confinement.
 [[permission.rules]]
 decision = "deny"
 pattern = "Bash(rm -rf*)"
