@@ -528,10 +528,13 @@ ROSTER_DETECTED=".claude/roster-detected.local.md"
 OPTIONAL_DETECTED_COUNT=0
 DETECTED_OPTIONAL=()
 if [ -t 0 ]; then INTERACTIVE_SIGNAL="yes"; else INTERACTIVE_SIGNAL="no"; fi
+# Written to a temp file and moved into place (like the two stamps): a bare
+# redirect would follow a repo-shipped symlink at .claude/roster-detected.local.md.
+ROSTER_DETECTED_TMP="${ROSTER_DETECTED}.tmp.$$"
 {
   echo "<!-- runtime state: optional roster CLI detection, regenerated each session start -->"
   echo "interactive=${INTERACTIVE_SIGNAL}"
-} > "$ROSTER_DETECTED"
+} > "$ROSTER_DETECTED_TMP"
 for PAIR in "opencode:opencode" "kimi:kimi" "cursor:${CURSOR_BIN}"; do
   CLI_NAME=${PAIR%%:*}
   CLI_BIN=${PAIR#*:}
@@ -548,12 +551,13 @@ for PAIR in "opencode:opencode" "kimi:kimi" "cursor:${CURSOR_BIN}"; do
       [ -z "$CLI_VERSION" ] && CLI_VERSION=$("$CLI_BIN" -V 2>/dev/null | head -1 || true)
     fi
     [ -z "$CLI_VERSION" ] && CLI_VERSION="unknown"
-    echo "${CLI_NAME}|${CLI_VERSION}|$(date +%Y-%m-%d)" >> "$ROSTER_DETECTED"
-    [ "$CLI_NAME" = "cursor" ] && echo "cursor_bin=${CLI_BIN}" >> "$ROSTER_DETECTED"
+    echo "${CLI_NAME}|${CLI_VERSION}|$(date +%Y-%m-%d)" >> "$ROSTER_DETECTED_TMP"
+    [ "$CLI_NAME" = "cursor" ] && echo "cursor_bin=${CLI_BIN}" >> "$ROSTER_DETECTED_TMP"
     OPTIONAL_DETECTED_COUNT=$((OPTIONAL_DETECTED_COUNT + 1))
     DETECTED_OPTIONAL+=("$CLI_NAME")
   fi
 done
+mv -f "$ROSTER_DETECTED_TMP" "$ROSTER_DETECTED" 2>/dev/null || rm -f "$ROSTER_DETECTED_TMP" 2>/dev/null || true
 
 # First-detection enrollment trigger (R37). For each optional CLI detected THIS
 # session with no [members.<cli>] entry yet:

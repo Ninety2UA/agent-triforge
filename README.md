@@ -47,6 +47,16 @@ The framework achieves this through **institutional knowledge compounding**: eve
 
 ---
 
+## What's new (v3.3.1)
+
+Follow-ups from the v3.3.0 code review (PR #8 "Unapplied review findings"), shipped 2026-09-12:
+
+- **A lease builder cannot push.** The dispatch contract's "git stays local" is now mechanical: `_adapter_env` binds `core.hooksPath` to the shipped `scripts/lease-git-hooks/pre-push` (which refuses) and rewrites every push URL scheme to an unresolvable `no-push://` address via `url.*.pushInsteadOf` — per-process `GIT_CONFIG_*`, so `git push` fails whichever remote or path the builder names while status/log/diff keep working. New static row SELF-09 proves it against a bare remote.
+- **Quota exhaustion fails fast.** A provider usage-limit / quota error (Kimi's `403 … monthly usage limit`, or any lane's equivalent) is classified deterministic with "wait for the refresh or buy usage" guidance instead of a wasted retry; the probe record has a `QUOTA-FAIL` outcome and gates the dependent Kimi rows on the quota, not on a login.
+- **Effort-only roster overrides work.** `[roles.analyst] effort = "low"` on the shipped agy default now dispatches `Gemini 3.8 Flash (Low)` (and `cursor-grok-4.6-low` for Cursor): `resolve_role` recomposes the effort suffix when the role's model is the shipped default; an explicit roster model still wins.
+- **Smaller control-plane files.** `scripts/invoke-external.sh` is a loader over `scripts/lib/{common,antigravity,codex,opencode,kimi,cursor,roster,lease}.sh` (same 68 functions, same contracts — commands keep sourcing the one file; `validate-versions.sh` parses `lib/roster.sh`), and the probe harness's SELF-* rows live in `scripts/probe-self-tests.sh`.
+- **Smaller fixes.** The OpenCode deny set enumerates the common bypass spellings (`rm -fr`/`-Rf`/`-r`, `command sudo`, `doas`, `git -c`/`-C … push`) in both copies (still defense-in-depth); `invoke_antigravity` leaves its diagnostic in the output file when the retry also returns an empty envelope; session-start writes `.claude/roster-detected.local.md` tmp+mv.
+
 ## What's new (v3.3.0)
 
 **Install route fixed.** The plugin now installs on current Claude Code: the repository ships a single-plugin marketplace manifest (`.claude-plugin/marketplace.json`) so `claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge` + `claude plugin install agent-triforge@agent-triforge` works (the old `claude plugin add <url>` form is no longer a Claude Code command), and `plugin.json` no longer names `hooks/hooks.json` — Claude Code auto-loads that path and rejected the duplicate, which made the installed plugin fail to load. Verified from an installed project: all twelve skills discoverable headless, `/<skill>` expands, the session-start hook fires.
@@ -738,6 +748,10 @@ After solving a non-trivial problem, <a href="commands/compound.md"><code>/compo
 ---
 
 ## Recent changes
+
+### 2026-09-12 — v3.3.1: mechanical no-push backstop, quota failure class, split control-plane files
+
+The v3.3.0 review residuals, applied: a lease builder's `git push` is refused by shipped git config (pre-push hook + `no-push://` URL rewrite; SELF-09); provider quota exhaustion is a deterministic failure class with a `QUOTA-FAIL` probe outcome; effort-only roster overrides recompose the agy/Cursor effort suffix; `scripts/invoke-external.sh` became a loader over `scripts/lib/*.sh` and the probe harness's SELF-* rows moved to `scripts/probe-self-tests.sh` (behavior unchanged); the OpenCode deny set enumerates the common bypass spellings.
 
 ### 2026-09-11 — v3.3.0: September 2026 models, trustworthy completion signals, native agent formats
 
