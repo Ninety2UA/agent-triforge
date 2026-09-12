@@ -1,0 +1,73 @@
+# Publishes the GitHub release for the plugin version on main.
+#
+# Runs when a version bump lands (any push to main that touches
+# .claude-plugin/plugin.json) or by hand (workflow_dispatch). Idempotent: an
+# existing release for v<version> is left alone, an existing tag is released
+# as-is, and a missing tag is created at the commit that set the version.
+# Title and notes come from README.md's "## Recent changes" entry for the
+# version via scripts/release-notes.sh — the README stays the one ledger.
+# Both release-gate validators run first, so a release never ships with a
+# lockstep or ledger drift.
+name: release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .claude-plugin/plugin.json
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to (re)publish as X.Y.Z. Defaults to the version on main; an older version is published without the Latest mark."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # full history + tags: release-notes.sh finds the bump commit and the previous tag
+
+      - name: Release gates
+        run: |
+          bash scripts/validate-versions.sh
+          bash scripts/validate-skills.sh
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          CURRENT=$(python3 -c 'import json; print(json.load(open(".claude-plugin/plugin.json"))["version"])')
+          VERSION="${INPUT_VERSION:-$CURRENT}"
+          TAG="v$VERSION"
+          LATEST="--latest"
+          [ "$VERSION" = "$CURRENT" ] || LATEST="--latest=false"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists — nothing to do"
+            exit 0
+          fi
+
+          TITLE=$(bash scripts/release-notes.sh --title "$VERSION")
+          bash scripts/release-notes.sh --body "$VERSION" > "$RUNNER_TEMP/notes.md"
+
+          if git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null; then
+            echo "tag $TAG exists at $(git rev-list -n1 "$TAG") — publishing the release for it"
+            gh release create "$TAG" --verify-tag --title "$TITLE" --notes-file "$RUNNER_TEMP/notes.md" "$LATEST"
+          else
+            TARGET=$(bash scripts/release-notes.sh --target "$VERSION" || echo "$GITHUB_SHA")
+            echo "creating tag $TAG at $TARGET and publishing the release"
+            gh release create "$TAG" --target "$TARGET" --title "$TITLE" --notes-file "$RUNNER_TEMP/notes.md" "$LATEST"
+          fi
+          echo "published: $TITLE"

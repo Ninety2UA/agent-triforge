@@ -30,6 +30,7 @@ versions produced this change.
 - [ ] `bash scripts/validate-versions.sh` exits 0 — ladder hash: `<paste the hash it prints>`
 - [ ] `bash -n scripts/*.sh hooks/handlers/*.sh` exits 0
 - [ ] Probe record regenerated and cited: `ops/research/<YYYY-MM>-probe-record.md` — rows: <!-- e.g. AGY-05, CDX-03 -->
+- [ ] Version bump PRs only: README "Recent changes" has the `### <date> — v<version>: <title>` entry — it becomes the GitHub release when this merges (`.github/workflows/release.yml`; preview with `bash scripts/release-notes.sh --body`)
 
 ## Protected paths touched?
 

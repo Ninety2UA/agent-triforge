@@ -223,9 +223,11 @@ scripts/
   probe-capabilities.sh   # Rerunnable capability probe (writes the date-stamped ops/research/<YYYY-MM>-probe-record.md)
   probe-self-tests.sh     # The SELF-* rows (script invariants), sourced by probe-capabilities.sh
   validate-skills.sh      # Release gate: skill frontmatter / "Use when" / ## Output structure checks
-  validate-versions.sh    # Release gate: version lockstep, ladder md5 ×4, DEFAULTS drift, scoped stale-pin sweep, surface counts
+  validate-versions.sh    # Release gate: version lockstep (+ README ledger entry), ladder md5 ×4, DEFAULTS drift, scoped stale-pin sweep, surface counts
+  release-notes.sh        # GitHub release title / body / tag target for a version, from README's "Recent changes" entry (used by the release workflow)
 .github/
   PULL_REQUEST_TEMPLATE.md # PR template (S20): evidence table + validator results
+  workflows/release.yml   # Tags v<version> and publishes the GitHub release when a version bump lands on main
 ops/                      # This repo's own project state (not part of plugin)
   watch-registry.toml       Watch targets for the repo-local /cli-watch + /repo-watch cycle
 .claude/                  # This repo's own Claude Code project config (not part of plugin)
@@ -407,4 +409,5 @@ Re-baselined from the newest capability probe record (`ops/research/2026-09-prob
 3. `bash scripts/validate-versions.sh` exits 0 — version lockstep, the ladder md5 printed four times (byte-identity across `agents/team-lead.md`, `skills/wave-orchestration/SKILL.md`, `templates/CLAUDE.md`, and this file), `DEFAULTS` drift, the scoped stale-pin sweep (zero hits outside `ops/research/`, `ops/decisions/`, `docs/plans/`, `ops/solutions/`, `docs/images/`), and surface counts
 4. Doc-consistency greps pass (see Verification Contract in the active plan)
 5. The probe record is regenerated (`bash scripts/probe-capabilities.sh` writes `ops/research/<YYYY-MM>-probe-record.md`), committed, and cited by the release notes together with the ladder hash
-6. Version bumped in `.claude-plugin/plugin.json` and `antigravity-agents/plugin.json` (lockstep); README "What's new" + "Recent changes" entries added
+6. Version bumped in `.claude-plugin/plugin.json` and `antigravity-agents/plugin.json` (lockstep); README "What's new" + "Recent changes" entries added — the "Recent changes" heading must read `### <YYYY-MM-DD> — v<version>: <title>` because it becomes the GitHub release (checked by `validate-versions.sh`; preview with `bash scripts/release-notes.sh --title` / `--body`)
+7. Merge to `main`. `.github/workflows/release.yml` runs on every push to `main` that touches `.claude-plugin/plugin.json`: it re-runs both validators, tags `v<version>` at the commit that set the version (an existing tag is kept), and publishes the GitHub release with the title and body from `scripts/release-notes.sh`. It is idempotent — an existing release is left alone. Confirm with `gh release view v<version>`; if the run was skipped or failed, fix the cause and re-run it by hand with `gh workflow run release.yml` (an older version can be back-published via the `version` input). Never create the release by hand first and leave the ledger entry missing — the workflow is the record

@@ -448,6 +448,8 @@ git clone https://github.com/Ninety2UA/agent-triforge.git
 claude --plugin-dir ./agent-triforge
 ```
 
+Releases are cut by CI: when a version bump lands on `main`, [`release.yml`](.github/workflows/release.yml) tags `v<version>` and publishes the GitHub release with this README's matching "Recent changes" entry as the notes (`bash scripts/release-notes.sh --body` previews it; the full checklist is in [`.claude/CLAUDE.md`](.claude/CLAUDE.md)).
+
 ### Verify installation
 
 ```bash
@@ -754,6 +756,8 @@ After solving a non-trivial problem, <a href="commands/compound.md"><code>/compo
 The v3.3.0 review residuals, applied: a lease builder's `git push` is refused by shipped git config (pre-push hook + `no-push://` URL rewrite; SELF-09); provider quota exhaustion is a deterministic failure class with a `QUOTA-FAIL` probe outcome; effort-only roster overrides recompose the agy/Cursor effort suffix; `scripts/invoke-external.sh` became a loader over `scripts/lib/*.sh` and the probe harness's SELF-* rows moved to `scripts/probe-self-tests.sh` (behavior unchanged); the OpenCode deny set enumerates the common bypass spellings.
 
 ### 2026-09-11 — v3.3.0: September 2026 models, trustworthy completion signals, native agent formats
+
+**Install route fixed.** The plugin installs on current Claude Code again: the repository ships a single-plugin marketplace manifest (`.claude-plugin/marketplace.json`) so `claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge` + `claude plugin install agent-triforge@agent-triforge` works (the old `claude plugin add <url>` form is no longer a Claude Code command), and `plugin.json` no longer names `hooks/hooks.json` — Claude Code auto-loads that path and rejected the duplicate, which made the installed plugin fail to load. Verified from an installed project: all twelve skills discoverable headless, `/<skill>` expands, the session-start hook fires.
 
 **Model pins (D-020..D-025, user-directed).** Ladder `fable`+`max` → `opus` (Opus 5) + `xhigh` → `opus`+`high` → `sonnet` (Sonnet 5) + `high` (the `fable`/`opus` aliases resolve to Fable 5.1 / Opus 5 from Claude Code 2.1.257 / 2.1.219; floor raised to ≥ 2.1.267 so `effort:` frontmatter is honored). Codex `gpt-6-astra` at `xhigh` on all three roles, with `model_reasoning_effort` now replayed on every `codex exec` (roster `effort` reaches Codex). Antigravity `Gemini 3.8 Flash (High)` under the new policy "newest Gemini at its highest thinking level, Pro or Flash" — `Gemini 3.1 Pro (High)` is the documented opt-in and the roster writer normalizes effort into the `(Low)/(Medium)/(High)` suffix (3.1 Pro has no Medium). OpenCode `openrouter/z-ai/glm-5.3`; Kimi `kimi-code/k3` (the OAuth-managed alias — the old `kimi-k3` fails on OAuth hosts); Cursor `cursor-grok-4.6-xhigh`, effort composed into the model-id suffix from a bare `grok-4.6` (the documented bracket form is rejected headless), binary `cursor-agent` first with an `agent` fallback accepted only when its `--version` matches Cursor's build-id format.
 

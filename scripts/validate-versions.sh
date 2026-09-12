@@ -13,7 +13,11 @@
 # Checks (each prints "ok:" or "FAIL:" lines; the summary is the last line):
 #   1. Version lockstep — .claude-plugin/plugin.json .version ==
 #      antigravity-agents/plugin.json .version == the version in the NEWEST
-#      (first in file order) README "## What's new (vX.Y.Z)" heading.
+#      (first in file order) README "## What's new (vX.Y.Z)" heading. The
+#      README "## Recent changes" ledger must also carry that version's
+#      "### <date> — vX.Y.Z: <title>" entry: scripts/release-notes.sh turns it
+#      into the GitHub release title + body when the bump lands on main
+#      (.github/workflows/release.yml), so a missing entry fails here, not there.
 #   2. Ladder byte-identity — the single "Downgrade ladder for narrow runtime
 #      tasks:" line in .claude/CLAUDE.md, templates/CLAUDE.md,
 #      agents/team-lead.md, skills/wave-orchestration/SKILL.md is md5-hashed
@@ -98,6 +102,17 @@ elif [ "$PLUGIN_V" = "$AGY_V" ] && [ "$PLUGIN_V" = "$README_V" ]; then
   ok "version lockstep: $PLUGIN_V (.claude-plugin/plugin.json, antigravity-agents/plugin.json, README What's new)"
 else
   fail "version lockstep: .claude-plugin/plugin.json=$PLUGIN_V antigravity-agents/plugin.json=$AGY_V README What's new=$README_V"
+fi
+# Release-notes source: literal "v<version>:" on a "### " heading below
+# "## Recent changes" (the colon keeps v3.3.1 from matching v3.3.10).
+if awk -v v="$PLUGIN_V" '
+      /^## Recent changes/ { led = 1; next }
+      led && /^### / && index($0, "v" v ":") > 0 { found = 1; exit }
+      END { exit !found }
+    ' README.md; then
+  ok "release notes: README Recent changes carries the v$PLUGIN_V entry (GitHub release body source)"
+else
+  fail "release notes: README.md '## Recent changes' has no '### <date> — v$PLUGIN_V: <title>' entry — scripts/release-notes.sh needs it for the GitHub release"
 fi
 
 # --- 2. ladder byte-identity -------------------------------------------------
