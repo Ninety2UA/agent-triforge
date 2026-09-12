@@ -588,3 +588,18 @@ Method: throwaway git fixture (`scratchpad/harness-test-v2.sh`), each CLI asked 
 | kimi-skill | `kimi -p /skill:tf-agents-skill --output-format text` | 1 | 0/12 | — |
 
 Reading: agy (`/skills`, `/<skill>` with `--add-dir`), Codex (`$<skill>`, listing), OpenCode (`/<skill>` → native `skill` tool, `--command`) and Cursor (`/<skill>` in `-p`, `/<command>`) all discover the `.agents/skills/` copy — Cursor's echoed list is truncated by the model (its user-tier `~/.cursor/skills` entries fill the list first) while both SKILL-OK markers prove expansion; agy's `/verification-before-completion` expansion hit the headless command auto-deny (the skill asks to run commands — the denial itself shows the skill loaded); Codex printed the shipped skill's first heading. Claude Code reads `.claude/skills` + `.claude/commands` (CMD-OK, SKILL-OK) and the plugin path — the twelve shipped names are absent from the Claude listing on this host because the plugin is not installed via `claude plugin add` here (dev checkout, `~/.claude/plugins/installed_plugins.json` carries no agent-triforge entry); SELF-06f in the table above measures the same condition from a lease worktree. Kimi rows are PENDING-AUTH (`/skill:<name>` per the docs).
+
+## Appendix D: Claude Code plugin-path discovery via the marketplace install route (2026-09-12, after the review fixes)
+
+SELF-06f runs from a lease worktree on the dev checkout, where the plugin is not installed, so it cannot see the plugin path. The plugin-path half of R9 was verified by installing the checkout into a throwaway project the way a user installs it on Claude Code 2.1.269 (the documented `claude plugin add <url>` form is not a command any more — `error: unknown command 'add'`; installs go through a marketplace, and `claude plugin marketplace add <bare plugin repo>` fails with "Marketplace file not found" unless the repo ships `.claude-plugin/marketplace.json`, which it now does):
+
+| Step | Command (throwaway project, `--scope project`) | Result |
+|---|---|---|
+| 1 | `claude plugin marketplace add <checkout path> --scope project` | added (declared in project settings) |
+| 2 | `claude plugin install agent-triforge@agent-triforge --scope project -y` (with `plugin.json` still naming `hooks/hooks.json`) | installed, **Status: failed to load** — `Hook load failed: Duplicate hooks file detected: ./hooks/hooks.json resolves to already-loaded file … The standard hooks/hooks.json is loaded automatically, so manifest.hooks should only reference additional hook files.` |
+| 3 | same, after removing the `hooks` key from `plugin.json` | installed, **Status: enabled**, no errors |
+| 4 | `env -i HOME PATH TMPDIR TERM LANG USER NO_COLOR=1 claude -p --model sonnet "<list the twelve shipped skill names>"` | **12/12** shipped names listed (plugin path; `.agents/skills/` is not a Claude path) |
+| 5 | `claude -p --model sonnet "/scope-cutting — reply with the first H1"` | `# Scope Cutting` — the plugin skill expanded |
+| 6 | session-start hook in the installed project | fired: `.agents/skills/` provisioned (12 dirs), `ops/` bootstrapped |
+
+Consumption: R9 (Claude Code column of the six-harness matrix), the README / CLAUDE.md / landing-page install lines, and the `plugin.json` manifest fix in v3.3.0. The GitHub-URL form of step 1 resolves the repository's default branch, so it works once this branch is on `main`.

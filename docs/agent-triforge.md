@@ -1173,7 +1173,8 @@ cursor-agent -p --trust --model cursor-grok-4.6-xhigh "Respond with only: READY"
 ### Plugin installation
 
 ```bash
-claude plugin add https://github.com/Ninety2UA/agent-triforge
+claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge
+claude plugin install agent-triforge@agent-triforge
 ```
 
 The plugin provides agents, skills, commands, and hooks automatically. Your project gets an `ops/` directory (bootstrapped on first session):

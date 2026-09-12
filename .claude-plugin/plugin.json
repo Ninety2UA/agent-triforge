@@ -9,6 +9,14 @@
   },
   "repository": "https://github.com/Ninety2UA/agent-triforge",
   "license": "MIT",
-  "keywords": ["agent-triforge", "multi-agent", "antigravity", "codex", "coordination", "sprint", "review-swarm", "wave-orchestration"],
-  "hooks": "./hooks/hooks.json"
+  "keywords": [
+    "agent-triforge",
+    "multi-agent",
+    "antigravity",
+    "codex",
+    "coordination",
+    "sprint",
+    "review-swarm",
+    "wave-orchestration"
+  ]
 }

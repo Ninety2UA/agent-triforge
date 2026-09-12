@@ -49,6 +49,8 @@ The framework achieves this through **institutional knowledge compounding**: eve
 
 ## What's new (v3.3.0)
 
+**Install route fixed.** The plugin now installs on current Claude Code: the repository ships a single-plugin marketplace manifest (`.claude-plugin/marketplace.json`) so `claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge` + `claude plugin install agent-triforge@agent-triforge` works (the old `claude plugin add <url>` form is no longer a Claude Code command), and `plugin.json` no longer names `hooks/hooks.json` — Claude Code auto-loads that path and rejected the duplicate, which made the installed plugin fail to load. Verified from an installed project: all twelve skills discoverable headless, `/<skill>` expands, the session-start hook fires.
+
 **Every lane runs on the September 2026 generation, and every headless run reports a completion signal the lead can trust.** The shipped pins moved in lockstep — Claude **Fable 5.1 → Opus 5 → Sonnet 5** ladder, Codex **`gpt-6-astra`** at `xhigh`, Antigravity **`Gemini 3.8 Flash (High)`** (the new policy: the newest Gemini at its highest thinking level, Pro or Flash; `Gemini 3.1 Pro (High)` stays the one-line opt-in), OpenCode `openrouter/z-ai/glm-5.3`, Kimi `kimi-code/k3`, Cursor `cursor-grok-4.6-xhigh` (effort now rides in Cursor's model-id suffix, like agy's `(High)`). `invoke_antigravity` reads agy's JSON envelope (`status`, `response`, `denied_actions`) instead of the exit code, and every lease carries one dispatch contract with a typed `Status:` report that `lease_collect` parses — a clean exit without one is "report missing", never review-ready. The Antigravity agent pack ships in agy's Markdown-agent format (native `--agent` behind `TRIFORGE_AGY_MODE`; injection remains the shipped mode), Kimi roles load natively through `--agent-file`, the Codex declarations deploy as `.codex/triforge-agents.toml`, and `.agents/skills/` refreshes on every plugin version change so all six CLIs see the current skills in their own invocation form (`/name`, `$name`, the `skill` tool, `/skill:name`). Two new release gates — `scripts/validate-skills.sh` and `scripts/validate-versions.sh` — and the Tier-1 process patterns from the September repo mining (a counterfactual bar for compounding, `Accept:`/`Fails when:` task fields, rulings-not-stalls, review dispositions, evidence-gated verification) round it out. Details in [Recent changes](#recent-changes); floors and tested versions in [Compatibility](#compatibility).
 
 ### v3.2.0 — the watch cycle became repo-local maintainer tooling
@@ -89,7 +91,8 @@ v2.4.3 sequential downgrade ladder; v2.4.0–v2.4.2 framework self-audits; v2.2.
 The framework is installed as a **Claude Code plugin** — install with one command, update with one command. No git clone, no manual file copying, no `.claude/settings.json` editing.
 
 ```bash
-claude plugin add https://github.com/Ninety2UA/agent-triforge
+claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge
+claude plugin install agent-triforge@agent-triforge
 ```
 
 All agents, skills, commands, and hooks register automatically. Your project's `ops/` directory is bootstrapped on first session.
@@ -408,11 +411,14 @@ Each dispatched CLI sends its task prompt and the code context it is handed to t
 **Install as a Claude Code plugin:**
 
 ```bash
+# Register the repository as a single-plugin marketplace once (it ships .claude-plugin/marketplace.json)
+claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge
+
 # User scope (available in all your projects)
-claude plugin add https://github.com/Ninety2UA/agent-triforge
+claude plugin install agent-triforge@agent-triforge
 
 # Or project scope (shared with team via .claude/settings.json)
-claude plugin add https://github.com/Ninety2UA/agent-triforge --scope project
+claude plugin install agent-triforge@agent-triforge --scope project
 ```
 
 That's it. No manual configuration needed — hooks, env vars, agents, skills, and commands are all registered automatically by the plugin system.
@@ -1117,8 +1123,8 @@ Informed by a deep comparative analysis against the [official Codex plugin](http
 
 The framework was converted from a `git clone` + manual copy installation to a **Claude Code plugin**. This is a breaking change in how you install and update the framework.
 
-- **Install:** `claude plugin add https://github.com/Ninety2UA/agent-triforge`
-- **Update:** `claude plugin update agent-triforge`
+- **Install:** `claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge`, then `claude plugin install agent-triforge@agent-triforge` (the pre-3.3.0 `claude plugin add <url>` form is not a Claude Code command any more — plugins install from a marketplace, and the repository now ships its own single-plugin marketplace manifest)
+- **Update:** `claude plugin update agent-triforge@agent-triforge`
 - All components moved to root level (`agents/`, `skills/`, `commands/`, `hooks/`)
 - Plugin manifest at `.claude-plugin/plugin.json` (v2.0.0)
 - Hook registration via `hooks/hooks.json` with `${CLAUDE_PLUGIN_ROOT}` paths

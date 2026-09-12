@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 This is a **Claude Code plugin** — **Agent Triforge** — providing a multi-agent coordination framework where Claude Code serves as the **lead agent**, orchestrating Antigravity CLI (binary: `agy`), Codex CLI, and specialized Claude subagents through a hybrid file-based + bash-invocation + native-subagent protocol. The framework is defined in `docs/agent-triforge.md`.
 
-Install: `claude plugin add https://github.com/Ninety2UA/agent-triforge`
+Install: `claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge` then `claude plugin install agent-triforge@agent-triforge` (the repository ships `.claude-plugin/marketplace.json`, a single-plugin marketplace; `hooks/hooks.json` is auto-loaded, so `plugin.json` must NOT also name it — current Claude Code rejects the duplicate and the plugin fails to load)
 
 ## Architecture
 
