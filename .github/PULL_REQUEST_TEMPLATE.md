@@ -34,8 +34,9 @@ versions produced this change.
 ## Protected paths touched?
 
 <!-- Protected: permission configs, deny rules, ops/roster.toml (incl. [promotion]),
-shipped agent configs, scripts/invoke-external.sh, scripts/coordinate.sh,
-scripts/probe-capabilities.sh, hooks/handlers/*, .claude/settings*.json -->
+shipped agent configs, scripts/invoke-external.sh + scripts/lib/*.sh, scripts/lease-git-hooks/*,
+scripts/coordinate.sh, scripts/probe-capabilities.sh + scripts/probe-self-tests.sh,
+hooks/handlers/*, .claude/settings*.json -->
 
 - [ ] No
 - [ ] Yes — cross-reviewed by the lead or the user: <!-- name --> (an external-CLI-only review does not satisfy this gate)

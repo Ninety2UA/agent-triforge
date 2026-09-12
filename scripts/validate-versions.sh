@@ -21,7 +21,7 @@
 #      must carry exactly one such line and all four hashes must match.
 #   3. DEFAULTS drift (KTD6) — the DEFAULTS and CLI_DEFAULT_MODEL python
 #      literals are duplicated inside resolve_role and roster_role_entry in
-#      scripts/invoke-external.sh; the two copies must be equal (parsed with
+#      scripts/lib/roster.sh (sourced by invoke-external.sh); the two copies must be equal (parsed with
 #      ast.literal_eval, so comments and spacing do not matter). The
 #      roster_member_default case arms must equal CLI_DEFAULT_MODEL, and the
 #      templates/ops/roster.toml [roles.*] cli/model/effort/fallbacks must
@@ -136,7 +136,7 @@ fi
 
 # --- 3. DEFAULTS drift (KTD6) ------------------------------------------------
 DRIFT_RC=0
-VV_SRC="scripts/invoke-external.sh" VV_ROSTER="templates/ops/roster.toml" VV_HOOK="hooks/handlers/session-start.sh" python3 - <<'PYEOF' || DRIFT_RC=$?
+VV_SRC="scripts/lib/roster.sh" VV_ROSTER="templates/ops/roster.toml" VV_HOOK="hooks/handlers/session-start.sh" python3 - <<'PYEOF' || DRIFT_RC=$?
 import ast
 import os
 import re
