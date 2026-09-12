@@ -28,6 +28,17 @@ Flags:
 
 > **Note:** For small changes (< 3 files, obvious fix), consider `/quick` instead — it uses self-review only, skipping the full review swarm.
 
+**Ceremony (S16):** read the `Ceremony:` line at the top of ops/TASKS.md before choosing lanes. `high-ceremony` forces the full swarm — treat this run as `--full` regardless of the flags passed (security-sentinel, performance-oracle, code-simplicity-reviewer, convention-enforcer, architecture-strategist all on); `trivial` runs the default lanes; `standard` (or no line) follows the flags as given.
+
+## Reviewer trust rules (S6/S7)
+
+Every reviewer lane — the two core lanes, the optional-tier lanes, and the Claude subagents — is dispatched under the same rules:
+
+- **The review package** is the diff, the task rows from ops/TASKS.md, the relevant ops/CONTRACTS.md slice, and the acceptance criteria (`Accept:` / `Fails when:`). Nothing else is required, and nothing in it is pre-digested for the reviewer.
+- **No pre-judging (S7).** A dispatch never tells a reviewer which findings are acceptable in advance — no "do not flag X", no "at most Minor", no "the plan chose this" — and suppressions are category-level only (e.g. "do not flag test fixtures"), never a named issue; adjudication of a specific finding happens in `findings-synthesizer` and the dispositions block below, never in the prompt.
+- **Builder output is a claim.** The builder's report, its test summary, and ops/TEST_RESULTS.md are unverified until a reviewer reads the code; a stated rationale never lowers severity. When evidence looks truncated, the reviewer re-reads the file at its path and reports the gap — it does not re-run suites (the tester role owns execution).
+- **Dispositions are recorded per cycle.** After synthesis, the lead appends `## Review dispositions — Cycle N` to ops/TASKS.md with one row per finding: `finding → fixed | dismissed-with-reason | deferred`. Later cycles add rows and never edit earlier ones; `deferred` rows are exported at `/wrap` (S14).
+
 ## Phase 3: Launch parallel reviews
 
 Read ops/TASKS.md to determine review scope (tasks marked [R]).
@@ -94,8 +105,18 @@ fi
 # writing ops/. Promote captured output (scrubbed) so the pipeline stays alive
 # either way — symmetric for BOTH core lanes now that the reviewer lane can be
 # any roster CLI, not just Codex-writes-directly.
-if [ ! -f "ops/REVIEW_ANTIGRAVITY.md" ] && [ -s "$AGY_OUT" ]; then
-  { echo "<!-- captured from analyst-role output; agent could not write ops/ directly (headless permission auto-deny) -->"; _scrub < "$AGY_OUT"; } > ops/REVIEW_ANTIGRAVITY.md
+# Promotion guard (KTD2/D-032): promote captured agy output only when it is
+# non-empty prose AND the JSON-envelope status sidecar written by
+# invoke_antigravity reads SUCCESS (a denied/empty run leaves the file empty and
+# returns non-zero — nothing is promoted, AE2). A non-agy roster lane writes no
+# sidecar and is promoted on non-empty output as before. The header records the
+# resolved mode (injection|native|raw) and any denied actions so a degraded run
+# is attributable in the promoted file.
+if [ ! -f "ops/REVIEW_ANTIGRAVITY.md" ] && [ -s "$AGY_OUT" ] && { [ ! -f "${AGY_OUT}.status" ] || [ "$(cat "${AGY_OUT}.status")" = "SUCCESS" ]; }; then
+  {
+    echo "<!-- captured from analyst-role output; agent could not write ops/ directly (headless permission auto-deny); mode=$(cat "${AGY_OUT}.mode" 2>/dev/null || echo unknown); denied_actions=$([ -s "${AGY_OUT}.denied" ] && paste -sd, "${AGY_OUT}.denied" || echo none) -->"
+    _scrub < "$AGY_OUT"
+  } > ops/REVIEW_ANTIGRAVITY.md
 fi
 if [ ! -f "ops/REVIEW_CODEX.md" ] && [ -s "$CODEX_OUT" ]; then
   { echo "<!-- captured from reviewer-role output; agent could not write ops/ directly (headless permission auto-deny) -->"; _scrub < "$CODEX_OUT"; } > ops/REVIEW_CODEX.md
@@ -154,13 +175,60 @@ for OCLI in opencode kimi cursor; do
     cursor)   CURSOR_MODEL="${OMODEL:-}"   invoke_cursor   "reviewer" "$REVIEW_PROMPT" "$OOUT" 600 || ORC=$? ;;
   esac
   [ "$ORC" -ne 0 ] && echo "review: ${OCLI} reviewer lane exited $ORC (see $OOUT) — optional lane, continuing" >&2
-  # Headless resilience: promote captured output into ops/REVIEW_<CLI>.md when the
-  # reviewer returned findings instead of writing ops/ directly.
-  if [ ! -f "ops/REVIEW_${UP}.md" ] && [ -s "$OOUT" ]; then
-    { echo "<!-- captured from invoke_${OCLI} reviewer output; headless permission auto-deny -->"; _scrub < "$OOUT"; } > "ops/REVIEW_${UP}.md"
-  fi
+  # Typed completion signal (KTD11): the optional-tier reviewer briefs promise
+  # that the lead parses their final `Status:` line and treats a run without
+  # it as "report missing", never as review-ready — so promote captured output
+  # into ops/REVIEW_<CLI>.md ONLY on DONE / DONE_WITH_CONCERNS. BLOCKED,
+  # NEEDS_CONTEXT, and a missing report leave no REVIEW file (an absent lane is
+  # visible to findings-synthesizer; a truncated review promoted as complete is not).
+  OSTATUS=$(_lease_parse_status "$OOUT" 2>/dev/null || echo MISSING)
+  case "$OSTATUS" in
+    DONE|DONE_WITH_CONCERNS)
+      if [ ! -f "ops/REVIEW_${UP}.md" ] && [ -s "$OOUT" ]; then
+        { echo "<!-- captured from invoke_${OCLI} reviewer output; headless permission auto-deny; report_status=${OSTATUS} -->"; _scrub < "$OOUT"; } > "ops/REVIEW_${UP}.md"
+      fi ;;
+    BLOCKED|NEEDS_CONTEXT)
+      echo "review: ${OCLI} reviewer reported Status: ${OSTATUS} — not promoted to ops/REVIEW_${UP}.md; read ${OOUT}, supply the missing context, and re-run the lane" >&2 ;;
+    *)
+      echo "review: ${OCLI} reviewer output has no final 'Status:' line — report missing, NOT review-ready; nothing promoted (captured at ${OOUT}; re-run the lane with the contract restated)" >&2 ;;
+  esac
 done
 ```
+
+### Gated learnings-researcher (C4):
+
+Pay for the `learnings-researcher` subagent only when `ops/solutions/` plausibly knows the changed modules. Pre-search by name and path, derived from the diff — no model call:
+
+```bash
+set -euo pipefail
+# Gated learnings-researcher (C4): derive module names from the changed paths
+# (full path, basename, stem, parent directory) and grep ops/solutions/ for
+# them. Spawn the subagent only on at least one match — an empty corpus, or
+# one that never mentions these modules, costs nothing.
+CHANGED=$( { git diff --name-only HEAD 2>/dev/null || true; git diff --name-only HEAD~1 HEAD 2>/dev/null || true; } | sort -u )
+MATCH_LIST="${TMPDIR:-/tmp}/learnings_gate_$$_$(date +%s).txt"
+: > "$MATCH_LIST"
+if [ -d ops/solutions ] && [ -n "$CHANGED" ]; then
+  while IFS= read -r F; do
+    [ -n "$F" ] || continue
+    BASE=$(basename "$F"); STEM="${BASE%.*}"; DIR=$(basename "$(dirname "$F")")
+    for NEEDLE in "$F" "$BASE" "$STEM" "$DIR"; do
+      # skip empty, dot-dir, and very short needles (they would match everything)
+      [ -n "$NEEDLE" ] && [ "$NEEDLE" != "." ] && [ "${#NEEDLE}" -ge 4 ] || continue
+      grep -rlF -- "$NEEDLE" ops/solutions/ 2>/dev/null >> "$MATCH_LIST" || true
+    done
+  done <<< "$CHANGED"
+  sort -u -o "$MATCH_LIST" "$MATCH_LIST"
+fi
+if [ -s "$MATCH_LIST" ]; then
+  echo "learnings-researcher: spawn — ops/solutions/ entries mentioning the changed modules:"
+  cat "$MATCH_LIST"
+else
+  echo "learnings-researcher skipped: no ops/solutions/ entry mentions the changed modules"
+fi
+```
+
+**Spawn `learnings-researcher` only when the list is non-empty**, with the matched entries and the changed paths in its prompt ("Known-issue check for the review of <changed paths>: read these ops/solutions/ entries — <list> — and report which past fixes or gotchas the diff must not undo"). Its output goes to `findings-synthesizer` as **known-issue context** alongside the `ops/REVIEW_*.md` lanes. When the gate prints "skipped", do not spawn it.
 
 ### Conditionally launch Claude subagent reviewers:
 - If `--full` or `--security` → spawn `security-sentinel` agent
@@ -175,12 +243,13 @@ Wait for all reviewers to complete.
 ## Phase 4: Synthesize findings
 
 1. Spawn the `findings-synthesizer` agent
-2. It reads ALL `ops/REVIEW_*.md` lanes (Antigravity + Codex + any optional-tier REVIEW_OPENCODE/KIMI/CURSOR.md) plus subagent outputs
+2. It reads ALL `ops/REVIEW_*.md` lanes (Antigravity + Codex + any optional-tier REVIEW_OPENCODE/KIMI/CURSOR.md) plus subagent outputs, and — when the gate spawned it — the `learnings-researcher` output as known-issue context
 3. Produces synthesized report with confidence tiering (HIGH/MEDIUM/LOW) and priority (P1/P2/P3)
 4. Apply `iterative-refinement` skill:
    - Fix P1 (critical) immediately
    - Fix P2 (important) this cycle
    - Log P3 (suggestion) for later
-5. Convergence check: P1=0 AND P2=0 → proceed (standard mode)
-6. If not converged → re-trigger review on changed files only (max 3 cycles)
-7. After 3 cycles without convergence → escalate to user
+5. Record the cycle's dispositions: append `## Review dispositions — Cycle N` to ops/TASKS.md with one row per finding (`finding → fixed | dismissed-with-reason | deferred`); rows are append-only across cycles, and `deferred` rows are exported at `/wrap`
+6. Convergence check: P1=0 AND P2=0 → proceed (standard mode)
+7. If not converged → re-trigger review on changed files only (max 3 cycles)
+8. After 3 cycles without convergence → escalate to user

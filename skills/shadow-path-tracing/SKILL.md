@@ -1,6 +1,10 @@
 ---
 name: shadow-path-tracing
-description: "Enumerate failure paths alongside happy paths during planning. Primary consumer: Claude Code (Phase 1 planning)."
+description: "Failure-path enumeration for every planned task across inputs, external dependencies, and state transitions, each with a handling status, producing the shadow-path table and the error/rescue map. Use when writing or validating a plan, when a task touches external calls, storage, or state, or when a review asks what happens on the unhappy path. Not for diagnosing a failure that already happened; that is systematic-debugging."
+metadata:
+  triforge-consumer: "Claude (lead)"
+  triforge-phase: "1b (planning); 1.5 (plan validation)"
+  version: "3.3.0"
 ---
 
 # Shadow Path Tracing
@@ -45,7 +49,16 @@ What state changes does this operation cause? For each:
 - What if concurrent operations are modifying the same state?
 - What if the operation partially completes (crash mid-way)?
 
-## Output format
+## Common rationalizations
+
+| Excuse | Reality |
+|---|---|
+| "The happy path is the feature; error handling is polish" | Shadow paths are task scope. A task without them ships the 500. |
+| "Mark it Handled, we will add the code later" | Handled means the code exists or is in a task row. Otherwise it is a "?" and becomes a subtask. |
+| "Leave the ? rows, the builder will figure it out" | Every "?" becomes a subtask before the plan is validated. The builder is not the planner. |
+| "This path cannot happen in practice" | Then write why as the handling ("acceptable risk: ..."). An unwritten reason is an unhandled path. |
+
+## Output
 
 ### Shadow path table
 

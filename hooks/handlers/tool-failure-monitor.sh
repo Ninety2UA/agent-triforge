@@ -4,8 +4,30 @@
 # PostToolUse fires on every tool call (success and failure). This handler
 # inspects tool_response for an error signal and only counts failures.
 # Warns at 5 consecutive or 10 total failures per session.
+#
+# Hook event: PostToolUse
+# Configuration: registered in hooks/hooks.json (plugin)
+#
+# ON_CRASH: ALLOW — a crash must never block the tool call (R14/G7): this hook
+#   is advisory only; the EXIT trap below turns any unexpected non-zero status
+#   (set -e / set -u, e.g. an unwritable .claude/) into a stderr notice + exit 0,
+#   and every explicit exit path (the non-failure early return) is `exit 0`.
+# Exit codes: 0 ok · 2 hook deny (never used by Triforge handlers) · 64 usage ·
+#   66 no-input · 69 unavailable · 70 internal · 80 degraded (documented only —
+#   Triforge handlers always return 0).
+# Hook stdout must never look like JSON: no stdout line may start with `{`
+#   (Claude Code ≥ 2.1.246 rejects hook stdout that parses as JSON — D-031c).
+#   Audited 2026-09-11: the only stdout lines start "WARN:".
 
 set -euo pipefail
+
+_tf_on_exit() {
+  local RC=$?
+  [ "$RC" -eq 0 ] && return 0
+  echo "tool-failure-monitor: WARNING hook crashed (rc=${RC}) — advisory only, tool call continues (ON_CRASH: ALLOW)" >&2
+  exit 0
+}
+trap _tf_on_exit EXIT
 
 HOOK_INPUT=$(cat)
 

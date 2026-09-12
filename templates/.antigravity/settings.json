@@ -1,9 +1,14 @@
 {
+  "_doc": [
+    "Agent Triforge — Antigravity deny intent in agy action(target) syntax (`command(<prefix>)`; agy's shell tool is `run_command`, not the Gemini-CLI `run_shell_command`).",
+    "Project-tier settings.json is NOT read by headless `agy -p`; this file records intent and covers interactive `agy` use. The tier agy documents and enforces headless is the user tier, ~/.gemini/antigravity-cli/settings.json — merge the `permissions` block below into it yourself to enforce these denies for the two shell-capable Triforge agents (codebase-analyst, targeted-researcher, `commandExecutionPolicy: auto`) in native mode. Triforge never writes the user tier (R18). Research lanes also need the user-tier allow rule `read_url(*)` for web fetches (agy >= 1.1.28 asks by default).",
+    "Primary guardrail in every mode is the per-agent `tools` allowlist + `commandExecutionPolicy` in the plugin's antigravity-agents/agents/*.md; the shipped injection mode (TRIFORGE_AGY_MODE=injection) keeps headless auto-deny. Full rationale and probe evidence: antigravity-agents/permissions.json and the newest ops/research/*-probe-record.md."
+  ],
   "permissions": {
     "deny": [
-      "run_shell_command(rm -rf)",
-      "run_shell_command(git push)",
-      "run_shell_command(sudo)"
+      "command(rm -rf)",
+      "command(git push)",
+      "command(sudo)"
     ]
   }
 }

@@ -43,11 +43,18 @@ Rank findings by impact on the current goal:
 - **Good-to-know:** Informs decisions but doesn't block
 - **Background:** Useful context, no immediate action
 
+### 4b. Merge the endpoint ledger (AS-9)
+
+Every fetching agent in the swarm (`framework-docs-researcher`, `best-practices-researcher`, Antigravity's `targeted-researcher`) must end its report with a `### Sources consulted` section — host + path, one per line, what it covered. Collect those sections into ONE merged list for the synthesis, deduplicated by host + path. A report that fetched anything but carries no `### Sources consulted` section, or that cites a page not in its own list, is a finding against that report: name it under Open questions as "endpoint hygiene: <agent> — unlisted fetch" rather than silently merging its claims. Never carry an outbound endpoint (telemetry, analytics, callback URL) from a fetched example into a recommendation without surfacing it as such.
+
 ### 5. Produce synthesis
 
 ```markdown
 ## Research synthesis: [goal/topic]
 Sources: [list of research agents/outputs consulted]
+
+### Sources consulted (merged, AS-9)
+- [host + path] — [which agent fetched it] — [what it covered]
 
 ### Must-know findings
 - [finding] — Source: [agent/file]

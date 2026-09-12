@@ -1,22 +1,40 @@
 ---
 name: session-continuity
-description: "Save and resume work across sessions using STATE.md. Primary consumer: Claude Code (session management)."
+description: "Pause, resume, and wrap protocol built on an ops/STATE.md snapshot whose YAML frontmatter records the verification baseline and the commit it describes. Use when the context window is filling and work remains, when starting a session on existing work, or when ending a sprint cleanly. Not for recording decisions or solutions; that is knowledge-compounding."
+metadata:
+  triforge-consumer: "Claude (lead)"
+  triforge-phase: "session boundaries (pause, resume, wrap)"
+  version: "3.3.0"
 ---
 
 # Session Continuity
 
-Work persists across sessions through explicit state capture.
+Work persists across sessions through explicit state capture. The snapshot records not only where work stopped but what was last proven green, and at which commit, so a resume knows whether that proof still holds.
 
 ## Pause (save state)
 
-When pausing a session, write `ops/STATE.md`:
+When pausing a session, write `ops/STATE.md`. The YAML frontmatter is machine-readable and comes first; the prose sections follow.
 
 ```markdown
+---
+saved: [ISO timestamp]
+phase: [0-6 — which phase was active when the session paused]
+wave: [N, or none]
+tasks:
+  total: [N]
+  done: [N]
+  blocked: [N]
+verification_baseline:
+  command: "[the last command that proved the tree green, e.g. the test suite or the validators]"
+  result: "[its exit code and summary line, quoted]"
+  commit: [the commit that command ran against]
+verification_command: "[the command a resume must re-run to re-establish the baseline]"
+state_head: [the commit this snapshot describes — the output of git rev-parse HEAD at save time]
+---
 # Session state
-<!-- Saved: [ISO timestamp] -->
 
 ## Current phase
-[Phase 0-6 — which phase was active when session paused]
+[Phase 0-6 — same value as the frontmatter, for readers]
 
 ## Active sprint
 [Goal being worked on]
@@ -30,7 +48,7 @@ When pausing a session, write `ops/STATE.md`:
 - [Branch name if applicable]
 
 ## Context
-- [Key decisions made this session]
+- [Key decisions made this session, including any `Ruling:` lines]
 - [Blockers encountered]
 - [Pending questions for user]
 
@@ -51,37 +69,44 @@ Counts: [state=N, ... from ops/leases.toml]
   leased | building | review | orphaned | requeued)
 ```
 
+Frontmatter rules:
+
+- `verification_baseline` is a claim about one commit. Record the command exactly as run, its result verbatim, and the commit it ran against. If nothing has been proven green this session, write `command: none` and `result: "not verified"` rather than copying an older baseline.
+- `state_head` is the commit the snapshot describes. When the tree has uncommitted changes, still record HEAD and list the dirty paths under "In-progress work".
+- A snapshot written by tooling that cannot run verification (the pre-compaction checkpoint) may omit `verification_baseline`; a resume treats a missing baseline as "not verified".
+
 ## Resume (restore state)
 
 When starting a new session on existing work:
 
 1. Read `ops/STATE.md` — understand where you left off
-2. Read `ops/TASKS.md` — current task status
-3. Read `ops/MEMORY.md` — decisions and gotchas from previous sessions
-4. Read `ops/CHANGELOG.md` — what was already done
-5. Check `ops/leases.toml` — if it exists, reconstruct wave state from the
+2. Compare the frontmatter with the tree: if `git rev-parse HEAD` differs from `state_head`, or `verification_baseline.commit` differs from HEAD, or the baseline is missing, re-run `verification_command` before continuing and record the fresh result. A baseline from another commit proves nothing about this one
+3. Read `ops/TASKS.md` — current task status
+4. Read `ops/MEMORY.md` — decisions and gotchas from previous sessions
+5. Read `ops/CHANGELOG.md` — what was already done
+6. Check `ops/leases.toml` — if it exists, reconstruct wave state from the
    ledger: run `lease_heartbeat_check` to reclaim orphans, requeue or finish
    open leases, and NEVER redo merged leases (their commits are already on
    the integration branch)
-6. Check for uncommitted changes (git status)
-7. Resume from the phase and action recorded in STATE.md
+7. Check for uncommitted changes (git status)
+8. Resume from the phase and action recorded in STATE.md
 
 ## Wrap (clean handoff)
 
 Different from pause — wrap is a clean session end, not a checkpoint:
 
-1. Update CHANGELOG.md with session summary
-2. Update MEMORY.md with new decisions/patterns/gotchas
+1. Update CHANGELOG.md with session summary, including every `Ruling:` line made this session
+2. Update MEMORY.md with new decisions/patterns/gotchas (apply the knowledge-compounding skill's bar)
 3. Move completed tasks to Done in TASKS.md
 4. Archive temporary files (REVIEW_*.md, TEST_RESULTS.md) to ops/archive/[date]/
-5. Write STATE.md with next-session context
+5. Write STATE.md with next-session context, with a fresh `verification_baseline` from a run performed now
 6. Write sprint summary for user
 
 ## Output
 
-- **Pause:** Produce `ops/STATE.md` with all fields from the template above
-- **Resume:** No artifact — read existing state and continue from recorded phase
-- **Wrap:** Produce updated `ops/STATE.md` + `ops/CHANGELOG.md` entry + archived review files
+- **Pause:** Produce `ops/STATE.md` with the frontmatter and all prose sections from the template above
+- **Resume:** No artifact — read existing state, re-establish the verification baseline when HEAD moved, and continue from the recorded phase
+- **Wrap:** Produce updated `ops/STATE.md` (fresh baseline) + `ops/CHANGELOG.md` entry + archived review files
 
 ## When to use each
 

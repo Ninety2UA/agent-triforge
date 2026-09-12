@@ -1,6 +1,10 @@
 ---
 name: review-synthesis
-description: "Merge, deduplicate, and prioritize findings from multiple reviewers with confidence tiering. Primary consumer: Claude Code (Phase 4)."
+description: "Merge, deduplicate, and prioritize findings from parallel reviewers into one report with confidence tiers, priorities, and an explicit contradictions section. Use when two or more review outputs (ops/REVIEW_*.md, subagent reviews) exist for the same change and the lead needs a single actionable list. Not for deciding what to fix or when to stop; that is iterative-refinement, which consumes this report."
+metadata:
+  triforge-consumer: "Claude (lead)"
+  triforge-phase: "4 (process reviews)"
+  version: "3.3.0"
 ---
 
 # Review Synthesis
@@ -63,6 +67,16 @@ Do NOT include findings that match these patterns:
 - Consistency-only style changes (project convention already applied)
 - Issues already addressed in the current diff
 - Harmless no-ops (return undefined at end of void function)
+
+## Common rationalizations
+
+| Excuse | Reality |
+|---|---|
+| "The reviewer sounded confident, make it P1" | Priority follows the confidence tier. A LOW-confidence finding is at most P2 until verified. |
+| "One reviewer approved, so the other's flag is noise" | The flag wins. Address the concern, or dismiss it with evidence in the dispositions ledger. |
+| "The two reviewers disagree, pick the better argument" | Record it as a CONTRADICTION with what would resolve it. Silent resolution hides a real ambiguity. |
+| "The review file is empty, so there were no findings" | An empty REVIEW_*.md means the lane failed. Report a missing review, never a clean one. |
+| "Drop the suppressed-looking findings before merging" | Suppressions are category-level. A specific finding is kept and dismissed with a reason, not filtered out. |
 
 ## Output
 

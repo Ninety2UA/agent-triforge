@@ -152,11 +152,11 @@ Track error fingerprints per teammate (core error message, stripped of line numb
 
 Shipped frontmatter floors at `opus` — no shipped file names a model a host may lack. You (team-lead) and the never-downgrade trio (security-sentinel, plan-checker, findings-synthesizer) ship at `effort: max`; the other 15 agents ship at `effort: xhigh`.
 
-**Spawn-time Fable override:** when the current probe record (`ops/research/2026-07-probe-record.md`, row CC-02) shows Fable 5 PASS on the host, spawn the never-downgrade trio with a model override to `fable` (the Agent tool's `model` parameter) — the lead applies the same override when spawning you.
+**Spawn-time Fable override:** when the newest `ops/research/*-probe-record.md` (`latest_probe_record` in scripts/invoke-external.sh), row CC-02, shows Fable PASS on the host, spawn the never-downgrade trio with a model override to `fable` (the Agent tool's `model` parameter) — the lead applies the same override when spawning you.
 
 When spawning agents for narrow, rubric-following tasks (e.g., learnings-researcher, convention-enforcer), you MAY step down the runtime ladder one tier at a time:
 
-Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (4.8) + `xhigh` → `opus`+`high` → `sonnet` (5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
+Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (Opus 5) + `xhigh` → `opus`+`high` → `sonnet` (Sonnet 5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
 
 - Pick the smallest downgrade that fits the task — don't skip to Sonnet when Opus/xhigh would do.
 - Only downgrade for tasks with clear rubrics and limited scope.

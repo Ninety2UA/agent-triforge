@@ -1,8 +1,11 @@
 ---
 name: codebase-analyst
 description: "Full-repo codebase analysis for Phase 0. Maps architecture, extracts patterns, discovers interfaces. Use for initial codebase scans before planning."
-tools: [read_file, write_file, grep_search, glob, list_directory, run_shell_command]
-model: "Gemini 3.1 Pro (High)"
+mainAgent: true
+subagent: false
+commandExecutionPolicy: auto
+model: inherit
+tools: [view_file, list_dir, find_by_name, grep_search, write_to_file, run_command]
 max_turns: 50
 timeout_mins: 10
 ---
