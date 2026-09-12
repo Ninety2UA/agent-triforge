@@ -51,6 +51,19 @@
 
 set -euo pipefail
 
+# Directory of this file, resolved for both shells that `source` it (bash via
+# BASH_SOURCE, zsh via its prompt-expansion %x — evaluated through eval so
+# bash never parses the zsh form). CLAUDE_PLUGIN_ROOT wins when set.
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/scripts" ]; then
+  _TRIFORGE_SCRIPTS_DIR="${CLAUDE_PLUGIN_ROOT}/scripts"
+elif [ -n "${BASH_SOURCE:-}" ]; then
+  _TRIFORGE_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+elif [ -n "${ZSH_VERSION:-}" ]; then
+  _TRIFORGE_SCRIPTS_DIR="$(cd "$(dirname "$(eval 'echo "${(%):-%x}"')")" && pwd)"
+else
+  _TRIFORGE_SCRIPTS_DIR="$(pwd)/scripts"
+fi
+
 # Host-marker scrub prefix for the foreground invoke_* lanes (see the header).
 _HOST_SCRUB=(env -u CLAUDECODE -u CODEX_SANDBOX -u CODEX_SANDBOX_NETWORK_DISABLED
              -u CODEX_SESSION_ID -u CODEX_THREAD_ID -u CODEX_CI -u GROK_AGENT
@@ -265,7 +278,10 @@ ${PROMPT}"
             10) EXIT_CODE=1; INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="denied"
                 echo "invoke_antigravity: agent=${AGENT_NAME} retry denied — empty response, agy denied: $(paste -sd, "${OUTPUT_FILE}.denied" 2>/dev/null). Add the matching permissions.allow rule to ~/.gemini/antigravity-cli/settings.json (user tier)." >&2 ;;
             *)  EXIT_CODE=1; INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="no-output"
-                echo "invoke_antigravity: agent=${AGENT_NAME} retry also returned an empty response (status=$(cat "${OUTPUT_FILE}.status" 2>/dev/null)) — no-output. See ${RAW} / ${ERR}." >&2 ;;
+                echo "invoke_antigravity: agent=${AGENT_NAME} retry also returned an empty response (status=$(cat "${OUTPUT_FILE}.status" 2>/dev/null)) — no-output. See ${RAW} / ${ERR}." >&2
+                # Leave the diagnostic in OUTPUT_FILE, like the first-pass branch: a
+                # captured-only caller must never read an empty file as "no findings".
+                cat "$ERR" "$RAW" > "$OUTPUT_FILE" 2>/dev/null || true ;;
           esac
         else
           _classify_invoke_failure "$EXIT_CODE" "${ERR}.retry"
@@ -650,8 +666,12 @@ with open(os.environ['VERDICT_OUT'], 'w') as f:
 # with the exact fix instead of a retry-storm.
 #
 # Shipped OPENCODE_PERMISSION deny set — mirrors templates/.opencode/opencode.json
-# (D-033 defense-in-depth; the adapter stays off --auto regardless).
-_OPENCODE_PERMISSION_DEFAULT='{"bash":{"*":"allow","rm -rf *":"deny","git push*":"deny","sudo *":"deny"}}'
+# (D-033 defense-in-depth; the adapter stays off --auto regardless). The
+# patterns are prefix globs on the command string, so the common bypass
+# spellings are enumerated (rm -fr / -Rf / -r, `command sudo`, `doas`,
+# `git -c … push`, `git -C … push`); a pattern set can never be complete —
+# the enforced boundary stays the lease worktree + the no-push git config.
+_OPENCODE_PERMISSION_DEFAULT='{"bash":{"*":"allow","rm -rf*":"deny","rm -fr*":"deny","rm -Rf*":"deny","rm -fR*":"deny","rm -r *":"deny","rm -R *":"deny","git push*":"deny","git -c * push*":"deny","git -C * push*":"deny","sudo*":"deny","command sudo*":"deny","doas *":"deny"}}'
 
 # _oc_extract_text <raw-stream-file> <output-file> — extract the assistant's final
 # text from a opencode JSON event stream (`opencode run --format json`) into <output-file>; exits nonzero (writing nothing)
@@ -1258,7 +1278,12 @@ invoke_kimi() {
     #                model aliases, so a signed-out host has none (also fires on a
     #                genuinely bad KIMI_MODEL override). Distinct reason so the
     #                fix guidance is accurate for both causes.
-    if grep -qiE 'no model configured|use /login|/login|not (logged|signed) in|unauthorized|401|credential|authentication (failed|required|expired)' "$RAW" "$ERR" 2>/dev/null; then
+    if grep -qiE 'usage limit|quota (exceeded|exhausted|reached)|reached your (monthly|daily|usage)|billing cycle|purchase extra usage' "$RAW" "$ERR" 2>/dev/null; then
+      # Quota exhaustion arrives as `provider.auth_error: 403 You've reached
+      # your monthly usage limit …` — auth-shaped text, but login cannot fix it.
+      INVOKE_FAILURE_CLASS="deterministic"
+      _INVOKE_FAILURE_REASON="quota"
+    elif grep -qiE 'no model configured|use /login|/login|not (logged|signed) in|unauthorized|401|credential|authentication (failed|required|expired)' "$RAW" "$ERR" 2>/dev/null; then
       INVOKE_FAILURE_CLASS="deterministic"
       _INVOKE_FAILURE_REASON="auth"
     elif grep -qiE 'is not configured in config\.toml|config\.invalid|model .* (is )?not configured|no such model|unknown model' "$RAW" "$ERR" 2>/dev/null; then
@@ -1275,6 +1300,9 @@ invoke_kimi() {
     case "$INVOKE_FAILURE_CLASS" in
       deterministic)
         case "$_INVOKE_FAILURE_REASON" in
+          quota)
+            echo "invoke_kimi: agent=${AGENT_NAME} exit=${EXIT_CODE} Kimi usage quota exhausted for this billing cycle — wait for the refresh or purchase extra usage (https://www.kimi.com/membership/subscription?tab=quota); the roster falls back to the next member. No retry (deterministic)." >&2
+            ;;
           auth)
             echo "invoke_kimi: agent=${AGENT_NAME} exit=${EXIT_CODE} auth failure — kimi is not signed in (\"No model configured\"). Fix: run \`kimi login\` (or launch \`kimi\` and use /login), or set the Kimi API key. No retry (deterministic)." >&2
             ;;
@@ -1771,7 +1799,7 @@ _is_known_cli() {
 # Classify a failed external-CLI invocation (KTD-9). Shared so future per-CLI
 # helpers reuse one taxonomy instead of reinventing bare retry-once. Sets:
 #   INVOKE_FAILURE_CLASS    deterministic | timeout | retryable
-#   _INVOKE_FAILURE_REASON  binary-missing | timeout-tool-missing | auth | ""
+#   _INVOKE_FAILURE_REASON  binary-missing | timeout-tool-missing | auth | quota | ""
 # Args: <exit-code> [output-file] — the output file is scanned for
 # auth-shaped patterns when present.
 _classify_invoke_failure() {
@@ -1787,6 +1815,11 @@ _classify_invoke_failure() {
   elif [ "$RC" -eq "$_RC_NO_TIMEOUT_TOOL" ] && ! command -v timeout >/dev/null 2>&1 && ! command -v gtimeout >/dev/null 2>&1; then
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="timeout-tool-missing"
+  elif [ -n "$OUT" ] && [ -f "$OUT" ] && grep -qiE 'usage limit|quota (exceeded|exhausted|reached)|reached your (monthly|daily|usage)|billing cycle|purchase extra usage|insufficient (credit|balance|quota)' "$OUT" 2>/dev/null; then
+    # Provider quota / usage-limit exhaustion: a retry cannot help and burns a
+    # second timeout window; the fix is a refreshed cycle or purchased usage.
+    INVOKE_FAILURE_CLASS="deterministic"
+    _INVOKE_FAILURE_REASON="quota"
   elif [ -n "$OUT" ] && [ -f "$OUT" ] && grep -qiE 'not logged in|login required|unauthorized|401|credential|authentication (failed|required|expired)' "$OUT" 2>/dev/null; then
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="auth"
@@ -1967,7 +2000,7 @@ resolve_role() {
   # names cursor as a role's primary. Cheap when cursor-agent exists.
   [ -n "${TRIFORGE_CURSOR_BIN:-}" ] || _cursor_bin >/dev/null 2>&1 || true
   ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
-import os, shutil, sys
+import os, re, shutil, sys
 try:
     import tomllib
 except ImportError:
@@ -2061,6 +2094,7 @@ for name, dflt in DEFAULTS.items():
         if field in user:
             entry[field] = user[field]
     entry['user_model'] = 'model' in user
+    entry['user_effort'] = 'effort' in user
     if not isinstance(entry['cli'], str):
         reject('role ' + repr(name) + ': cli must be a string')
     if not isinstance(entry['fallbacks'], list) or not all(isinstance(x, str) for x in entry['fallbacks']):
@@ -2098,6 +2132,24 @@ for idx, cli in enumerate(chain):
         model = entry['model']      # explicit role model, or default primary
     else:
         model = m.get('model', '') or CLI_DEFAULT_MODEL[cli]
+    # An effort-only override on a role whose model is the shipped default:
+    # agy and Cursor carry effort IN the model id, so the default's suffix
+    # would silently win over the roster effort. Recompose the suffix from the
+    # effort (same maps as roster_write_role); an explicit roster model is a
+    # user pin and passes through unchanged (explicit suffix wins).
+    if entry['user_effort'] and not entry['user_model'] and isinstance(model, str):
+        e = str(entry['effort'])
+        if cli == 'antigravity':
+            fam = re.sub(r'\s*\((Low|Medium|High)\)\s*$', '', model)
+            sfx = {'low': 'Low', 'medium': 'Medium'}.get(e, 'High')
+            if sfx == 'Medium' and '3.1 Pro' in fam:
+                sfx = 'Low'                     # the 3.1 Pro line has no (Medium)
+            model = fam + ' (' + sfx + ')'
+        elif cli == 'cursor':
+            mm = re.match(r'^(?:cursor-)?(grok-[0-9][0-9.]*?)(?:-(low|medium|high|xhigh))?(-fast)?$', model)
+            if mm:
+                sfx = {'low': 'low', 'medium': 'medium', 'high': 'high'}.get(e, 'xhigh')
+                model = 'cursor-' + mm.group(1) + '-' + sfx + (mm.group(3) or '')
     print(cli + '\t' + str(model) + '\t' + str(entry['effort']))
     sys.exit(0)
 
@@ -2484,7 +2536,8 @@ print(row.get(os.environ['LEDGER_KEY'], ''))
 
 # _adapter_env <cli> <cmd...> — run an external command under the per-adapter
 # environment allowlist (KTD-14): base allowlist HOME PATH TMPDIR TERM LANG
-# COLORTERM USER plus ONLY the invoked CLI's own credential variables (opencode:
+# COLORTERM USER (+ the GIT_CONFIG_* no-push backstop, CS1) plus ONLY the
+# invoked CLI's own credential variables (opencode:
 # OPENROUTER_API_KEY; kimi: KIMI_*; cursor: CURSOR_API_KEY). claude, codex,
 # and antigravity authenticate via HOME-based stores and get nothing extra —
 # no cross-provider leakage. env -i execs external commands only; shell
@@ -2512,6 +2565,20 @@ _adapter_env() {
   # alone does not help). Mirrored by _lane_run in scripts/probe-capabilities.sh.
   [ -n "${USER+x}" ]      && PAIRS+=("USER=${USER}")
   PAIRS+=("NO_COLOR=1")   # captured output is parsed, never rendered (U5)
+  # No-push backstop (CS1): git honors GIT_CONFIG_COUNT/KEY_n/VALUE_n as
+  # per-process config, so every git in the builder's process tree sees (a)
+  # core.hooksPath -> the shipped pre-push hook that refuses, and (b)
+  # url.<scheme>.pushInsteadOf rewrites that turn any push URL into an
+  # unresolvable no-push:// address. Builders commit nothing and never push
+  # (KTD11); this makes the prompt-level rule mechanical. Reads (status, log,
+  # diff, fetch) are untouched.
+  PAIRS+=("GIT_CONFIG_COUNT=6"
+          "GIT_CONFIG_KEY_0=core.hooksPath" "GIT_CONFIG_VALUE_0=${_TRIFORGE_SCRIPTS_DIR}/lease-git-hooks"
+          "GIT_CONFIG_KEY_1=url.no-push://lease-worktree/.pushInsteadOf" "GIT_CONFIG_VALUE_1=https://"
+          "GIT_CONFIG_KEY_2=url.no-push://lease-worktree/.pushInsteadOf" "GIT_CONFIG_VALUE_2=ssh://"
+          "GIT_CONFIG_KEY_3=url.no-push://lease-worktree/.pushInsteadOf" "GIT_CONFIG_VALUE_3=git@"
+          "GIT_CONFIG_KEY_4=url.no-push://lease-worktree/.pushInsteadOf" "GIT_CONFIG_VALUE_4=git://"
+          "GIT_CONFIG_KEY_5=url.no-push://lease-worktree/.pushInsteadOf" "GIT_CONFIG_VALUE_5=file://")
   case "$CLI" in
     opencode)
       [ -n "${OPENROUTER_API_KEY+x}" ] && PAIRS+=("OPENROUTER_API_KEY=${OPENROUTER_API_KEY}")

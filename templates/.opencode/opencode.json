@@ -10,9 +10,18 @@
   "permission": {
     "bash": {
       "*": "allow",
-      "rm -rf *": "deny",
+      "rm -rf*": "deny",
+      "rm -fr*": "deny",
+      "rm -Rf*": "deny",
+      "rm -fR*": "deny",
+      "rm -r *": "deny",
+      "rm -R *": "deny",
       "git push*": "deny",
-      "sudo *": "deny"
+      "git -c * push*": "deny",
+      "git -C * push*": "deny",
+      "sudo*": "deny",
+      "command sudo*": "deny",
+      "doas *": "deny"
     }
   }
 }

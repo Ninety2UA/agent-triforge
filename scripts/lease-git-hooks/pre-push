@@ -1,0 +1,9 @@
+#!/bin/sh
+# Agent Triforge lease worktree — no-push backstop (CS1 / KTD11 dispatch contract).
+# Builders commit nothing and never push; the lead collects, reviews, and merges.
+# This hook is bound into every lease builder's process tree through
+# core.hooksPath (GIT_CONFIG_* env in _adapter_env, scripts/invoke-external.sh),
+# together with url.*.pushInsteadOf rewrites that make every push URL
+# unresolvable — so a push attempt fails whichever remote or URL scheme it names.
+echo "lease worktree: git push is blocked — builders never push (KTD11 dispatch contract); leave the worktree dirty and report Status: BLOCKED if the task demands a push" >&2
+exit 1

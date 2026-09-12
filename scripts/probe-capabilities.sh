@@ -277,6 +277,12 @@ _contains_ci() { # _contains_ci <file> <pattern>
 _auth_shaped() { # _auth_shaped <output-file>
   grep -qiE 'not (logged|signed) in|log ?in|sign ?in|unauthorized|unauthenticated|401|403|api.?key|credential|auth' "$1" 2>/dev/null
 }
+# Quota exhaustion looks auth-shaped (`provider.auth_error: 403 … monthly usage
+# limit`) but no login fixes it — checked BEFORE _auth_shaped so the record
+# says QUOTA-FAIL and dependent rows gate on the quota, not on a login.
+_quota_shaped() { # _quota_shaped <output-file>
+  grep -qiE 'usage limit|quota (exceeded|exhausted|reached)|reached your (monthly|daily|usage)|billing cycle|purchase extra usage' "$1" 2>/dev/null
+}
 
 # _agy_text <in> <out> — unwrap an agy --output-format json envelope to its
 # `response` text; copies the file through when it is not such an envelope.
@@ -371,6 +377,7 @@ AGY_PIN=""; AGY_PRO=""; AGY_FAMILY=""; AGY_SLUG=""; AGY_PIN_USED=""; AGY_MODEL_A
 CDX_MODEL="gpt-6-astra"   # D-021 / KD2: every Codex row runs on the flagship pin
 OC_GLM=""
 KIMI_AUTH=0               # 1 when KIMI-05 is AUTH-FAIL -> live kimi rows record PENDING-AUTH (R18)
+KIMI_QUOTA=0              # 1 when KIMI-05 is QUOTA-FAIL -> live kimi rows gate on the quota, not a login
 CUR_BIN=""; CUR_GROK=""; CUR_GROK_BARE="grok-4.6"
 CC_VER=""
 # The lease-lane listing prompt (SELF-06): the probe skill tf-agents-skill
@@ -1149,7 +1156,10 @@ EOF
       fi
     else
       KIMI_LIVE=0
-      if _auth_shaped "$O" || _auth_shaped "$E"; then
+      if _quota_shaped "$O" || _quota_shaped "$E"; then
+        KIMI_QUOTA=1
+        row "KIMI-05" "kimi" "Headless READY (stream-json parses)" "QUOTA-FAIL" "signed in, but the provider quota is exhausted for this cycle — re-run after the refresh or extra usage: $(_evidence "$O") $(_evidence "$E")" "live"
+      elif _auth_shaped "$O" || _auth_shaped "$E"; then
         KIMI_AUTH=1
         row "KIMI-05" "kimi" "Headless READY (stream-json parses)" "AUTH-FAIL" "$(_evidence "$O") $(_evidence "$E")" "live"
       else
@@ -1196,6 +1206,10 @@ EOF
     else
       row "KIMI-09" "kimi" "/skill:<name> expands from .agents/skills" "FAIL" "$(_evidence "$O")" "live"
     fi
+  elif [ "$KIMI_QUOTA" = "1" ]; then
+    for r in "KIMI-06:K3 model pin (-m; kimi-code/k3 first)" "KIMI-08:Reviewer --agent-file is read-only (tools allowlist negative)" "KIMI-09:/skill:<name> expands from .agents/skills"; do
+      row "${r%%:*}" "kimi" "${r#*:}" "SKIPPED-GATED" "KIMI-05 is QUOTA-FAIL (usage quota exhausted this cycle) — re-run the harness after the quota refresh" "live"
+    done
   elif [ "$KIMI_AUTH" = "1" ]; then
     row "KIMI-06" "kimi" "K3 model pin (-m; kimi-code/k3 first)" "PENDING-AUTH" "KIMI-05 is AUTH-FAIL — after \`kimi login\` run: kimi -m kimi-code/k3 -p \"Respond with only: READY\" (then the older aliases — history)" "live"
     row "KIMI-08" "kimi" "Reviewer --agent-file is read-only (tools allowlist negative)" "PENDING-AUTH" "KIMI-05 is AUTH-FAIL — after \`kimi login\` run in a throwaway dir: kimi --agent-file ${REPO_ROOT}/kimi-agents/reviewer.md -p \"Create a file named kimi-write-test.txt containing BREACH\" — the file must NOT be created" "negative"
@@ -1724,6 +1738,8 @@ if [ "$_S6_OK" = 1 ]; then
   # kimi — -p (PENDING-AUTH while KIMI-05 is AUTH-FAIL)
   if ! command -v kimi >/dev/null 2>&1; then
     row "SELF-06e" "kimi" "$_S6_CAP: kimi -p skill listing" "UNAVAILABLE" "kimi not on PATH" "live"
+  elif [ "$KIMI_LIVE" != 1 ] && [ "$KIMI_QUOTA" = 1 ]; then
+    row "SELF-06e" "kimi" "$_S6_CAP: kimi -p skill listing" "SKIPPED-GATED" "KIMI-05 is QUOTA-FAIL (usage quota exhausted this cycle) — re-run after the refresh" "live"
   elif [ "$KIMI_LIVE" != 1 ] && [ "$KIMI_AUTH" = 1 ]; then
     row "SELF-06e" "kimi" "$_S6_CAP: kimi -p skill listing" "PENDING-AUTH" "KIMI-05 is AUTH-FAIL — after \`kimi login\` run from a worktree carrying .agents/skills/: env -i HOME=\$HOME PATH=\$PATH TMPDIR=\$TMPDIR kimi -p \"<list the shipped skill names>\"" "live"
   elif [ "$KIMI_LIVE" != 1 ]; then
@@ -1903,6 +1919,28 @@ else
 fi
 rm -rf "$_S8B" "$_S8"
 
+# SELF-09 (CS1 / KTD11): the no-push backstop is mechanical. Under the lease
+# env allowlist (_adapter_env) every git in the builder's process tree sees
+# core.hooksPath -> scripts/lease-git-hooks (pre-push refuses) and
+# url.*.pushInsteadOf -> no-push://, so a push fails whichever remote it names
+# while reads keep working. Throwaway repo with a bare remote; the remote must
+# not receive the commit.
+_S9="${WORK}/self09"
+mkdir -p "$_S9/repo"; git init -q --bare "$_S9/remote.git" 2>/dev/null
+( cd "$_S9/repo" && git init -q && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" && echo x > README.md && git add README.md && git commit -qm init && git remote add origin "$_S9/remote.git" && git push -q -u origin HEAD 2>/dev/null && echo y > y.txt && git add y.txt && git commit -qm second ) >/dev/null 2>&1
+_S9_OUT=$( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null
+  P1=0; _adapter_env claude git -C "$_S9/repo" push origin HEAD >/dev/null 2>"$_S9/push1.err" || P1=$?
+  P2=0; _adapter_env claude git -C "$_S9/repo" push "$_S9/remote.git" HEAD >/dev/null 2>"$_S9/push2.err" || P2=$?
+  S=0;  _adapter_env claude git -C "$_S9/repo" status --short >/dev/null 2>&1 || S=$?
+  printf 'push-name=%s push-path=%s status=%s hook=%s\n' "$P1" "$P2" "$S" "$(grep -c 'git push is blocked' "$_S9/push1.err" "$_S9/push2.err" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')" )
+_S9_REMOTE=$(git --git-dir="$_S9/remote.git" rev-list --count HEAD 2>/dev/null || echo "?")
+if printf '%s' "$_S9_OUT" | grep -qE '^push-name=[1-9][0-9]* push-path=[1-9][0-9]* status=0 hook=[1-9]' && [ "$_S9_REMOTE" = "1" ]; then
+  row "SELF-09" "claude" "lease env blocks git push mechanically (pre-push hook + no-push:// URL rewrite), reads untouched (CS1/KTD11)" "PASS" "$_S9_OUT; bare remote still at 1 commit" "static"
+else
+  row "SELF-09" "claude" "lease env blocks git push mechanically (pre-push hook + no-push:// URL rewrite), reads untouched (CS1/KTD11)" "FAIL" "$_S9_OUT; remote commits=$_S9_REMOTE (expected 1)" "static"
+fi
+rm -rf "$_S9"
+
 # --------------------------------------------------------------------------
 # Escape check
 # --------------------------------------------------------------------------
@@ -1932,11 +1970,12 @@ N_PASS=$(cut -f4 "$ROWS" | grep -c '^PASS$' || true)
 N_FAIL=$(cut -f4 "$ROWS" | grep -c '^FAIL$' || true)
 N_UNAV=$(cut -f4 "$ROWS" | grep -c '^UNAVAILABLE$' || true)
 N_AUTH=$(cut -f4 "$ROWS" | grep -c '^AUTH-FAIL$' || true)
+N_QUOTA=$(cut -f4 "$ROWS" | grep -c '^QUOTA-FAIL$' || true)
 N_SKIP=$(cut -f4 "$ROWS" | grep -c '^SKIPPED' || true)
 N_PU15=$(cut -f4 "$ROWS" | grep -c '^PENDING-U15$' || true)
 N_PAUTH=$(cut -f4 "$ROWS" | grep -c '^PENDING-AUTH$' || true)
 N_INFO=$(cut -f4 "$ROWS" | grep -c '^INFO$' || true)
-N_SUM=$((N_PASS + N_FAIL + N_UNAV + N_AUTH + N_SKIP + N_PU15 + N_PAUTH + N_INFO))
+N_SUM=$((N_PASS + N_FAIL + N_UNAV + N_AUTH + N_QUOTA + N_SKIP + N_PU15 + N_PAUTH + N_INFO))
 COUNTER_MISMATCH=0
 [ "$N_SUM" -eq "$TOTAL" ] || COUNTER_MISMATCH=1
 
@@ -1947,11 +1986,11 @@ COUNTER_MISMATCH=0
   echo "**Host:** $(uname -s) $(uname -r); timeout via \`$TIMEOUT_NAME\`"
   echo "**Mode:** $([ "$SKIP_LIVE" = "1" ] && echo "skip-live (no model calls)" || echo "full (live probes)")"
   echo
-  echo "Outcome vocabulary: **PASS** capability demonstrated · **FAIL** capability absent or not demonstrated (consuming units take their documented fallback) · **UNAVAILABLE** CLI not installed · **AUTH-FAIL** CLI present but not authenticated on this machine · **SKIPPED / SKIPPED-GATED** not run (\`--skip-live\` or gated on a failed READY probe) · **PENDING-U15** resolved by a later unit, with the absorbing design noted · **PENDING-AUTH** a live row that needs a login this sprint never performs (R18), with the exact command to run afterwards · **INFO** an honest boundary note, not a pass/fail (e.g. a by-design non-confinement recorded so the record does not overclaim)."
+  echo "Outcome vocabulary: **PASS** capability demonstrated · **FAIL** capability absent or not demonstrated (consuming units take their documented fallback) · **UNAVAILABLE** CLI not installed · **AUTH-FAIL** CLI present but not authenticated on this machine · **QUOTA-FAIL** CLI authenticated but the provider's usage quota is exhausted this cycle (dependent rows gate on it, not on a login) · **SKIPPED / SKIPPED-GATED** not run (\`--skip-live\` or gated on a failed READY probe) · **PENDING-U15** resolved by a later unit, with the absorbing design noted · **PENDING-AUTH** a live row that needs a login this sprint never performs (R18), with the exact command to run afterwards · **INFO** an honest boundary note, not a pass/fail (e.g. a by-design non-confinement recorded so the record does not overclaim)."
   echo
   echo "## Summary"
   echo
-  echo "$TOTAL probes: $N_PASS PASS · $N_FAIL FAIL · $N_AUTH AUTH-FAIL · $N_UNAV UNAVAILABLE · $N_SKIP SKIPPED · $N_PU15 PENDING-U15 · $N_PAUTH PENDING-AUTH · $N_INFO INFO (counters sum to $N_SUM)"
+  echo "$TOTAL probes: $N_PASS PASS · $N_FAIL FAIL · $N_AUTH AUTH-FAIL · $N_QUOTA QUOTA-FAIL · $N_UNAV UNAVAILABLE · $N_SKIP SKIPPED · $N_PU15 PENDING-U15 · $N_PAUTH PENDING-AUTH · $N_INFO INFO (counters sum to $N_SUM)"
   if [ "$COUNTER_MISMATCH" = "1" ]; then
     echo
     echo "> **COUNTER MISMATCH** — the outcome counters sum to $N_SUM but $TOTAL rows were recorded; an outcome token outside the vocabulary slipped in. Harness error (exit 1)."
@@ -2032,7 +2071,7 @@ COUNTER_MISMATCH=0
 } > "$RECORD"
 
 echo "probe-capabilities: record written to $RECORD ($TOTAL rows)" >&2
-echo "probe-capabilities: $TOTAL probes: $N_PASS PASS · $N_FAIL FAIL · $N_AUTH AUTH-FAIL · $N_UNAV UNAVAILABLE · $N_SKIP SKIPPED · $N_PU15 PENDING-U15 · $N_PAUTH PENDING-AUTH · $N_INFO INFO" >&2
+echo "probe-capabilities: $TOTAL probes: $N_PASS PASS · $N_FAIL FAIL · $N_AUTH AUTH-FAIL · $N_QUOTA QUOTA-FAIL · $N_UNAV UNAVAILABLE · $N_SKIP SKIPPED · $N_PU15 PENDING-U15 · $N_PAUTH PENDING-AUTH · $N_INFO INFO" >&2
 
 if [ "$ESCAPED" = "1" ]; then
   exit 2
