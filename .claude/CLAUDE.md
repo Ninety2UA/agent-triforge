@@ -390,7 +390,7 @@ Re-baselined from the newest capability probe record (`ops/research/2026-09-prob
 
 ### Release checklist
 
-1. `claude plugin validate --strict .` passes green (warnings are errors) — required gate
+1. `claude plugin validate --strict .claude-plugin/plugin.json` and `claude plugin validate --strict .claude-plugin/marketplace.json` both pass green (warnings are errors) — required gate; a bare `validate .` now picks the marketplace manifest only, so name both
 2. `bash scripts/validate-skills.sh` exits 0 (all shipped skills: portable frontmatter, "Use when" descriptions, `## Output` sections)
 3. `bash scripts/validate-versions.sh` exits 0 — version lockstep, the ladder md5 printed four times (byte-identity across `agents/team-lead.md`, `skills/wave-orchestration/SKILL.md`, `templates/CLAUDE.md`, and this file), `DEFAULTS` drift, the scoped stale-pin sweep (zero hits outside `ops/research/`, `ops/decisions/`, `docs/plans/`, `ops/solutions/`, `docs/images/`), and surface counts
 4. Doc-consistency greps pass (see Verification Contract in the active plan)
