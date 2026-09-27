@@ -238,7 +238,7 @@ docs/                     # Framework design documentation
 
 ## Framework self-maintenance (repo-local, not shipped)
 
-`/cli-watch` and `/repo-watch` keep Triforge current against its six CLIs and four reference repos. They are maintainer tooling for THIS checkout — project-local commands in `.claude/commands/`, backed by `.claude/skills/watch-cycle/SKILL.md` and the tracked registry `ops/watch-registry.toml`. None of the three is part of the plugin: `commands/`, `skills/`, and `templates/ops/` ship without them, and `session-start.sh` never bootstraps the registry into user projects. Claude Code discovers `.claude/commands/` automatically when run from the repo root; schedule monthly via `/schedule`.
+`/cli-watch` and `/repo-watch` keep Triforge current against its six CLIs, the three research tools the watch cycle uses (firecrawl, chrome-devtools, gh), and seven reference repos. They are maintainer tooling for THIS checkout — project-local commands in `.claude/commands/`, backed by `.claude/skills/watch-cycle/SKILL.md` and the tracked registry `ops/watch-registry.toml`. None of the three is part of the plugin: `commands/`, `skills/`, and `templates/ops/` ship without them, and `session-start.sh` never bootstraps the registry into user projects. Claude Code discovers `.claude/commands/` automatically when run from the repo root; schedule monthly via `/schedule`.
 
 ## Portable skills
 

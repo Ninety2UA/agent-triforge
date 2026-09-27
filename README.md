@@ -180,7 +180,7 @@ agent-triforge/ checkout            (maintainers only — not installed with the
 ├── .claude/commands/                 /cli-watch + /repo-watch — framework self-maintenance
 ├── .claude/skills/watch-cycle/       Shared watch methodology
 ├── .github/PULL_REQUEST_TEMPLATE.md  PR template: evidence table + validator results
-└── ops/watch-registry.toml           Watch targets: six CLIs + four reference repos
+└── ops/watch-registry.toml           Watch targets: six CLIs + three research tools + seven reference repos
 ```
 
 ### Shared file protocol
@@ -534,8 +534,8 @@ Two **repo-local** commands keep the framework current instead of hand-running a
 
 | Command | Targets | Produces |
 |---|---|---|
-| [**`/cli-watch`**](.claude/commands/cli-watch.md) | the six CLIs (`[cli.*]`) | Gap report + adopt/defer ADR + a re-run of [`probe-capabilities.sh`](scripts/probe-capabilities.sh) |
-| [**`/repo-watch`**](.claude/commands/repo-watch.md) | four external repos (`[repo.*]`) | Prioritized adopt/defer recommendations (Why / Concrete change / Verification). **Recommends only** — never implements. |
+| [**`/cli-watch`**](.claude/commands/cli-watch.md) | the six CLIs + three research tools (`[cli.*]`) | Gap report + adopt/defer ADR + a re-run of [`probe-capabilities.sh`](scripts/probe-capabilities.sh) |
+| [**`/repo-watch`**](.claude/commands/repo-watch.md) | seven external repos (`[repo.*]`) | Prioritized adopt/defer recommendations (Why / Concrete change / Verification). **Recommends only** — never implements. |
 
 **The registry is the only thing you edit to add a target** — a new `[cli.<name>]` or `[repo.<name>]` block is picked up with no command changes. Targets must be public HTTPS URLs (loopback, private, and link-local addresses are rejected before *and* after redirects); fetched pages are treated as untrusted evidence, never as instructions; a dead or renamed entry is flagged in the report, never silently dropped.
 

@@ -31,18 +31,21 @@
 # already covers this CLI (its rows feed the report's verification section and
 # /cli-watch re-runs the harness each cycle). `probe = false` means a
 # newly-added CLI the harness does not yet probe — the report flags it as
-# "no capability coverage" so the harness can be extended.
+# "no capability coverage" so the harness can be extended. Exception: tier =
+# "tooling" entries are research tools the watch cycle itself uses, not CLIs
+# Triforge dispatches; they are never probed and are not flagged for it.
 
 [meta]
 schema_version = 1
 seeded = "2026-07-18"
-cli_count = 6
-repo_count = 4
-# The consuming command asserts len(cli)==6 and len(repo)==4 against the
+cli_count = 9
+repo_count = 7
+# The consuming command asserts len(cli)==9 and len(repo)==7 against the
 # seeded baseline; bump the *_count fields when the seeded set changes.
 
 # ===========================================================================
-# [cli.*] — the six CLIs audited by /cli-watch
+# [cli.*] — audited by /cli-watch: the six CLIs Triforge dispatches (tier core |
+# optional) plus three research tools the watch cycle uses (tier tooling)
 # ===========================================================================
 
 [cli.claude]
@@ -128,8 +131,50 @@ probe = true
 # `<binary> --version` post-install and treat version drift as expected.
 note = "closed-source; date-based changelog, no semver; auto-updates — capture --version each run; binary `agent` primary since 2026.09.10, `cursor-agent` legacy symlink (resolver tries cursor-agent first)"
 
+[cli.firecrawl]
+name = "Firecrawl CLI"
+binary = "firecrawl"
+tier = "tooling"
+releases = "https://github.com/firecrawl/cli/releases"
+changelog = "https://github.com/firecrawl/cli/releases"
+docs = "https://docs.firecrawl.dev/cli"
+probe = false
+# Watch-cycle research tool (docs, changelogs, blogs) — not a Triforge worker.
+# Audit for command or flag changes that break the routing in
+# .claude/skills/watch-cycle/SKILL.md (scrape, search, --only-main-content) and
+# for concurrency-limit changes. npm package: firecrawl-cli.
+note = "research tooling, not dispatched by Triforge; check scrape/search flags used by the watch-cycle routing"
+
+[cli.chrome-devtools]
+name = "Chrome DevTools CLI (chrome-devtools-mcp)"
+binary = "chrome-devtools"
+tier = "tooling"
+releases = "https://github.com/ChromeDevTools/chrome-devtools-mcp/releases"
+changelog = "https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/CHANGELOG.md"
+docs = "https://github.com/ChromeDevTools/chrome-devtools-mcp#readme"
+probe = false
+# Watch-cycle browser fallback for pages firecrawl can't render — not a Triforge
+# worker. 1.10.x made --pageId required on evaluate_script; audit for further
+# changes to new_page / list_pages / evaluate_script / take_snapshot and to
+# start --headless --isolated. npm package: chrome-devtools-mcp.
+note = "research tooling, not dispatched by Triforge; check the commands the watch-cycle browser fallback uses"
+
+[cli.gh]
+name = "GitHub CLI"
+binary = "gh"
+tier = "tooling"
+releases = "https://github.com/cli/cli/releases"
+changelog = "https://github.com/cli/cli/releases"
+docs = "https://cli.github.com/manual/"
+probe = false
+# Watch-cycle source for repo files, releases and tags (gh api), and the
+# release workflow's `gh release view` / `gh workflow run` checks. Not a
+# Triforge worker. Audit for gh api / release / workflow changes.
+note = "research + release tooling, not dispatched by Triforge; check gh api, gh release, gh workflow"
+
 # ===========================================================================
-# [repo.*] — the four seeded repos mined by /repo-watch
+# [repo.*] — the seven repos mined by /repo-watch (four seeded 2026-07-18;
+# agentskills, openai-skills, openai-plugins added 2026-09-27)
 # ===========================================================================
 # repo-watch RECOMMENDS only. It never implements an adoption — that is a
 # follow-up sprint after user approval. `focus` is a one-line hint for the
@@ -143,7 +188,7 @@ focus = "Skill-authoring conventions and portable SKILL.md structure — compare
 [repo.compound-engineering-plugin]
 name = "EveryInc/compound-engineering-plugin"
 url = "https://github.com/EveryInc/compound-engineering-plugin"
-focus = "Compounding-knowledge command/skill workflows — compare against Triforge's knowledge-compounding skill + ops/solutions/ + ops/decisions/ loop."
+focus = "Skill-authoring conventions (short trigger-first descriptions, \"Use when\" / \"Not for — use X instead\" pointers between sibling skills, references/ + scripts/ progressive disclosure) and the compounding-knowledge loop — compare against Triforge's skills/ and its knowledge-compounding skill + ops/solutions/ + ops/decisions/."
 
 [repo.superpowers]
 name = "obra/superpowers"
@@ -154,3 +199,18 @@ focus = "Subagent, skill, and hook primitives for Claude Code plugins — mine f
 name = "open-gsd/gsd-core"
 url = "https://github.com/open-gsd/gsd-core"
 focus = "Task decomposition and workflow-orchestration conventions — compare against Triforge's writing-plans + wave-orchestration skills."
+
+[repo.agentskills]
+name = "agentskills/agentskills"
+url = "https://github.com/agentskills/agentskills"
+focus = "The Agent Skills specification and its reference validator — frontmatter rules (name/description limits, optional compatibility/metadata/allowed-tools), the optional scripts/ references/ assets/ directories, progressive disclosure — produce a conformance checklist for Triforge's skills/ and validate-skills.sh."
+
+[repo.openai-skills]
+name = "openai/skills"
+url = "https://github.com/openai/skills"
+focus = "OpenAI's curated Codex skills — how they write descriptions for Codex's shortened skill list, root-SKILL.md-as-router structure, agents/openai.yaml metadata, and what that implies for Triforge skills run by a Codex lead ($name invocation)."
+
+[repo.openai-plugins]
+name = "openai/plugins"
+url = "https://github.com/openai/plugins"
+focus = "The portable Agent Plugins layout (root plugin.json, skills/, mcp.json, lifecycle hooks; .codex-plugin/ compatibility) — how Triforge could ship one skills tree installable by both Claude Code and a Codex lead."
