@@ -208,6 +208,10 @@ focus = "The Agent Skills specification and its reference validator — frontmat
 [repo.openai-skills]
 name = "openai/skills"
 url = "https://github.com/openai/skills"
+# Deprecated upstream on 2026-06-22 ("use the OpenAI Plugins repository").
+# Kept as a frozen reference for one more cycle; retire it or keep it
+# frozen at the next /repo-watch.
+note = "deprecated upstream 2026-06-22 in favor of openai/plugins; frozen reference"
 focus = "OpenAI's curated Codex skills — how they write descriptions for Codex's shortened skill list, root-SKILL.md-as-router structure, agents/openai.yaml metadata, and what that implies for Triforge skills run by a Codex lead ($name invocation)."
 
 [repo.openai-plugins]

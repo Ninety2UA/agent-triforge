@@ -193,7 +193,7 @@ The replay model in `scripts/lib/codex.sh` remains correct. Native agents become
 
 **What carries over to Codex:**
 - Shareable: `skills/`, and `hooks/hooks.json` (Codex sets `CLAUDE_PLUGIN_ROOT`; plugin hooks are trust-gated).
-- Lossy: `commands/` become skills, and anything over 4,000 bytes is silently dropped. 9 of 17 Triforge commands exceed that.
+- Lossy: `commands/` become skills, and anything over 4,000 bytes is silently dropped. 8 of 17 Triforge (lead recount 2026-09-28; the first draft said 9) commands exceed that.
 - Claude-only: `agents/`, `settings.json`.
 - Marketplace entries should add `policy.*` for Codex.
 

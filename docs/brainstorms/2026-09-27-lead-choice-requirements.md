@@ -65,7 +65,7 @@ The evidence files above are on the `docs/watch-cycle-2026-09-27` branch (PR #10
 
 - **R13.** One `skills/` tree.
   - The 17 commands become skills. Workflows with side effects (`setup`, `ship`, `build`, `wrap`, `coordinate`, …) set `disable-model-invocation: true`, and argument syntax moves to `argument-hint`.
-  - `commands/*.md` either go away or become thin wrappers (OS-1 / OP-3). Codex drops converted commands over 4 KB, which is 9 of today's 17.
+  - `commands/*.md` either go away or become thin wrappers (OS-1 / OP-3). Codex drops converted commands over 4,000 bytes, which is 8 of today's 17.
 - **R14.** The 19 agents become persona prompt files inside the skills that dispatch them (`references/agents/` or `references/personas/`), with no frontmatter. The dispatching skill chooses the model, tools and effort.
   - The enforcement that frontmatter gives today has to survive the move, mechanically: read-only tool sets for reviewers, and the never-downgrade trio (security-sentinel, plan-checker, findings-synthesizer) held at the top tier. The plan decides how, for example restricted subagent types, sandboxes or scripts.
 - **R15.** Spec conformance:
