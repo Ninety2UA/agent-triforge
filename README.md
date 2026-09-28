@@ -575,7 +575,7 @@ Two **repo-local** commands keep the framework current instead of hand-running a
 
 ### Portable skills across the six CLIs
 
-`session-start.sh` copies the plugin's `skills/` into `.agents/skills/` — the agentskills.io path — and refreshes that copy whenever the plugin version changes (stamp `.agents/skills/.triforge-plugin-version`; shipped-name directories are Triforge-owned and overwritten, so keep customizations in a differently named directory). Fixture evidence from the 2026-09-11 watch cycle ([`ops/research/2026-09-11-cli-updates.md`](ops/research/2026-09-11-cli-updates.md) §3.1) shows which path each CLI actually reads:
+`session-start.sh` copies the plugin's `skills/` into `.agents/skills/` — the agentskills.io path — and refreshes that copy whenever the plugin version changes (stamp `.agents/skills/.triforge-plugin-version`, with a content digest per directory Triforge wrote: only Triforge's own unchanged copies are replaced or retired — an edited copy, or your own directory under a shipped name, is kept with a notice; customizations are safest in a differently named directory). Fixture evidence from the 2026-09-11 watch cycle ([`ops/research/2026-09-11-cli-updates.md`](ops/research/2026-09-11-cli-updates.md) §3.1) shows which path each CLI actually reads:
 
 | Path | Claude Code | agy | Codex | OpenCode | Cursor | Kimi (docs) |
 |---|---|---|---|---|---|---|

@@ -216,7 +216,7 @@ Skills are model-agnostic markdown files that encode reusable methodologies. The
 - **Claude Code:** Uses skills natively via the skill system
 - **Antigravity CLI:** Skills embedded in native agent definitions (`antigravity-agents/agents/*.md`). The `invoke-external.sh` helper injects the agent body (skill included) as a prompt prefix by default (`TRIFORGE_AGY_MODE=injection`); `native`/`auto` route through `--agent` when `agy agents` lists the definition.
 - **Codex CLI:** Skills embedded in native agent definitions (`codex-agents/agents.toml` as `developer_instructions`, deployed as `.codex/triforge-agents.toml`). The `invoke-external.sh` helper extracts the config and injects the instructions as a prompt prefix.
-- **Workspace tier:** `session-start.sh` also copies `skills/` to `.agents/skills/` (the Antigravity workspace-skills tier and cross-CLI agentskills.io path, read by agy, Codex, OpenCode, Cursor, and Kimi — not Claude Code) and refreshes the copy on plugin version change under the `.agents/skills/.triforge-plugin-version` stamp (shipped-name directories are overwritten; customizations go in a differently named directory).
+- **Workspace tier:** `session-start.sh` also copies `skills/` to `.agents/skills/` (the Antigravity workspace-skills tier and cross-CLI agentskills.io path, read by agy, Codex, OpenCode, Cursor, and Kimi — not Claude Code) and refreshes the copy on plugin version change under the `.agents/skills/.triforge-plugin-version` stamp, which records a content digest per directory Triforge wrote: only Triforge's own unchanged copies are replaced or retired; an edited copy is kept with a notice (customizations are safest in a differently named directory).
 
 ### Available skills and their primary consumers
 

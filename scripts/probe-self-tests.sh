@@ -380,37 +380,106 @@ else
 fi
 rm -rf "$_S8/proj" "$_S8/home"   # keep $_S8/bin (the stub agy) for SELF-08b; removed there
 
-# SELF-08b (KTD7 / CWE-59): the two destructive paths of the skills refresh.
-# (a) Retirement: an OLDER stamp naming a skill that no longer ships, with that
-#     directory present, must be removed on the version bump — while every
-#     shipped directory and a foreign (unstamped) user directory survive.
-# (b) Symlinked ancestor: with .agents -> a directory OUTSIDE the project the
-#     refresh must leave the target untouched (no rm -rf, no copies, no stamp).
+# SELF-08b (KTD12 / R31 / CWE-59): the skills refresh touches only what it can
+# prove it wrote. Session start (CLAUDE_PLUGIN_ROOT = this checkout) on:
+#   legacy  a 3.3.2-format stamp (names only) listing one pristine released
+#           copy and one user-edited copy: the pristine copy is refreshed, the
+#           edited one survives with a notice; the new stamp carries digests
+#   owned   a digest stamp listing a no-longer-shipped skill whose content still
+#           matches (retired, with a notice) and FORGING an entry for a user
+#           directory with a marker (kept, notice names it)
+#   first   no stamp: a user directory in a shipped slot survives with a
+#           notice, every empty slot gets the shipped skill
+#   link    .agents -> a directory outside the project: target untouched
+# and _lease_provision_skills on a worktree-shaped directory carrying a user
+# directory in a shipped slot (kept) and on one whose .agents/skills is a
+# committed symlink to an outside directory (target untouched).
 _S8B="${WORK}/self08b"
-mkdir -p "$_S8B/proj/.agents/skills/old-fake-skill" "$_S8B/proj/.agents/skills/my-own-skill" "$_S8B/link/target/skills/codebase-mapping" "$_S8B/link/proj" "$_S8B/home"
-printf 'version=0.0.1-probe\nskills=old-fake-skill,codebase-mapping\n' > "$_S8B/proj/.agents/skills/.triforge-plugin-version"
-echo "user skill" > "$_S8B/proj/.agents/skills/my-own-skill/SKILL.md"
-echo "old" > "$_S8B/proj/.agents/skills/old-fake-skill/SKILL.md"
-echo "marker" > "$_S8B/link/target/skills/codebase-mapping/USER-MARKER.txt"
-ln -s "$_S8B/link/target" "$_S8B/link/proj/.agents"
-( cd "$_S8B/proj" && git init -q 2>/dev/null; cd "$_S8B/link/proj" && git init -q 2>/dev/null ) || true
-_S8B_OUT=$( cd "$_S8B/proj" && HOME="$_S8B/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/bin:$PATH" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ); _S8B_RC=$?
+_S8B_SYNC="${REPO_ROOT}/scripts/lib/skills-sync.py"
+_S8B_TABLE="${REPO_ROOT}/scripts/lib/skill-digests.txt"
 _S8B_FAIL=""
-[ ! -e "$_S8B/proj/.agents/skills/old-fake-skill" ]                 || _S8B_FAIL="$_S8B_FAIL retired-dir-still-present"
-[ -f "$_S8B/proj/.agents/skills/my-own-skill/SKILL.md" ]            || _S8B_FAIL="$_S8B_FAIL user-dir-removed"
-[ "$(ls -d "$_S8B"/proj/.agents/skills/*/ 2>/dev/null | wc -l | tr -d ' ')" -eq "$(( $(printf '%s\n' $SHIPPED_SKILLS | grep -c .) + 1 ))" ] || _S8B_FAIL="$_S8B_FAIL shipped-count($(ls -d "$_S8B"/proj/.agents/skills/*/ 2>/dev/null | wc -l | tr -d ' ')-incl-user)"
-printf '%s\n' "$_S8B_OUT" | grep -q 'retired' || _S8B_FAIL="$_S8B_FAIL no-retired-notice"
-[ "$_S8B_RC" -eq 0 ] || _S8B_FAIL="$_S8B_FAIL rc=${_S8B_RC}"
-_S8B_OUT2=$( cd "$_S8B/link/proj" && HOME="$_S8B/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/bin:$PATH" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ); _S8B_RC2=$?
-[ -f "$_S8B/link/target/skills/codebase-mapping/USER-MARKER.txt" ]  || _S8B_FAIL="$_S8B_FAIL symlink-target-marker-deleted"
-[ ! -e "$_S8B/link/target/skills/.triforge-plugin-version" ]        || _S8B_FAIL="$_S8B_FAIL symlink-target-stamped"
-[ "$(ls -d "$_S8B"/link/target/skills/*/ 2>/dev/null | wc -l | tr -d ' ')" -eq 1 ] || _S8B_FAIL="$_S8B_FAIL symlink-target-written($(ls -d "$_S8B"/link/target/skills/*/ 2>/dev/null | wc -l | tr -d ' ')-dirs)"
-printf '%s\n' "$_S8B_OUT2" | grep -qi 'symlink' || _S8B_FAIL="$_S8B_FAIL no-symlink-notice"
-[ "$_S8B_RC2" -eq 0 ] || _S8B_FAIL="$_S8B_FAIL link-rc=${_S8B_RC2}"
-if [ -z "$_S8B_FAIL" ]; then
-  row "SELF-08b" "claude" "skills refresh: retires a stamp-listed skill that no longer ships, keeps user dirs; a symlinked .agents ancestor is left untouched (KTD7, CWE-59)" "PASS" "old-fake-skill removed + notice; my-own-skill kept; shipped set present; symlinked target: marker kept, no stamp, no copies" "static"
+set -- $SHIPPED_SKILLS
+_S8B_USER=$1; _S8B_EDIT=$2
+# A pristine released copy that differs from the shipped one, rebuilt from its
+# release tag, so the refresh has to prove ownership through the released-
+# digest table (the path a 3.3.2-stamped project takes once a skill changes).
+# Without tags (a shallow checkout) it falls back to a shipped skill whose
+# current content is itself a released copy.
+_S8B_PRISTINE=""; _S8B_PRISTINE_SRC=""; _S8B_PATH=""
+mkdir -p "$_S8B/released"
+while IFS="$(printf '\t')" read -r _n _d _tags; do
+  case "$_n" in ''|'#'*) continue ;; esac
+  case " $SHIPPED_SKILLS " in *" $_n "*) : ;; *) continue ;; esac
+  [ "$_n" = "$_S8B_USER" ] || [ "$_n" = "$_S8B_EDIT" ] && continue
+  [ "$_d" = "$(python3 "$_S8B_SYNC" digest "${REPO_ROOT}/skills/${_n}")" ] && continue
+  _tag=${_tags##*,}
+  if git -C "$REPO_ROOT" archive "$_tag" "skills/${_n}" 2>/dev/null | tar -xf - -C "$_S8B/released" 2>/dev/null \
+     && [ "$(python3 "$_S8B_SYNC" digest "$_S8B/released/skills/${_n}")" = "$_d" ]; then
+    _S8B_PRISTINE=$_n; _S8B_PRISTINE_SRC="$_S8B/released/skills/${_n}"; _S8B_PATH="released ${_tag} copy, owned via the digest table"; break
+  fi
+done < "$_S8B_TABLE"
+if [ -z "$_S8B_PRISTINE" ]; then
+  for s in $SHIPPED_SKILLS; do
+    [ "$s" = "$_S8B_USER" ] || [ "$s" = "$_S8B_EDIT" ] && continue
+    if grep -q "^${s}	$(python3 "$_S8B_SYNC" digest "${REPO_ROOT}/skills/${s}")	" "$_S8B_TABLE" 2>/dev/null; then
+      _S8B_PRISTINE=$s; _S8B_PRISTINE_SRC="${REPO_ROOT}/skills/${s}"; _S8B_PATH="shipped copy equal to a released one (no tags: table path not exercised)"; break
+    fi
+  done
+fi
+_s8b_start() { # _s8b_start <project> — session start there; prints its output
+  ( cd "$1" && HOME="$_S8B/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/bin:$PATH" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 )
+}
+_s8b_count() { ls -d "$1"/*/ 2>/dev/null | wc -l | tr -d ' '; }
+mkdir -p "$_S8B/home"
+( for d in legacy owned first; do mkdir -p "$_S8B/$d"; (cd "$_S8B/$d" && git init -q); done ) >/dev/null 2>&1
+if [ -z "$_S8B_PRISTINE" ]; then
+  _S8B_FAIL="$_S8B_FAIL no-pristine-released-copy(fetch-tags)"
 else
-  row "SELF-08b" "claude" "skills refresh: retires a stamp-listed skill that no longer ships, keeps user dirs; a symlinked .agents ancestor is left untouched (KTD7, CWE-59)" "FAIL" "mismatch:${_S8B_FAIL}; run1: $(printf '%s\n' "$_S8B_OUT" | grep '^session-start:' | head -2 | tr '\n' ' ' | _scrub | cut -c1-120)" "static"
+  # legacy
+  L="$_S8B/legacy/.agents/skills"; mkdir -p "$L"
+  cp -R "$_S8B_PRISTINE_SRC" "$L/$_S8B_PRISTINE"
+  cp -R "${REPO_ROOT}/skills/${_S8B_EDIT}" "$L/$_S8B_EDIT"; echo "USER-EDIT" >> "$L/$_S8B_EDIT/SKILL.md"
+  printf 'version=3.3.2\nskills=%s,%s\n' "$_S8B_PRISTINE" "$_S8B_EDIT" > "$L/.triforge-plugin-version"
+  _O=$(_s8b_start "$_S8B/legacy")
+  [ "$(python3 "$_S8B_SYNC" digest "$L/$_S8B_PRISTINE")" = "$(python3 "$_S8B_SYNC" digest "${REPO_ROOT}/skills/${_S8B_PRISTINE}")" ] || _S8B_FAIL="$_S8B_FAIL legacy-pristine-not-refreshed"
+  grep -q '^USER-EDIT$' "$L/$_S8B_EDIT/SKILL.md" || _S8B_FAIL="$_S8B_FAIL legacy-edited-copy-overwritten"
+  printf '%s\n' "$_O" | grep 'user-owned' | grep -q "$_S8B_EDIT" || _S8B_FAIL="$_S8B_FAIL legacy-no-notice-for-edited"
+  grep -q '^format=2$' "$L/.triforge-plugin-version" && grep -q "^digest ${_S8B_PRISTINE} " "$L/.triforge-plugin-version" || _S8B_FAIL="$_S8B_FAIL legacy-stamp-not-migrated"
+  grep -q "^digest ${_S8B_EDIT} " "$L/.triforge-plugin-version" && _S8B_FAIL="$_S8B_FAIL legacy-stamp-claims-edited-copy"
+fi
+# owned: retire an unchanged no-longer-shipped copy; a forged entry can't claim a user dir
+O="$_S8B/owned/.agents/skills"; mkdir -p "$O/old-fake-skill" "$O/$_S8B_USER"
+echo "old" > "$O/old-fake-skill/SKILL.md"; echo "mine" > "$O/$_S8B_USER/SKILL.md"; echo "marker" > "$O/$_S8B_USER/USER-MARKER.txt"
+printf 'version=0.0.1-probe\nformat=2\nskills=old-fake-skill,%s\ndigest old-fake-skill %s\ndigest %s %s\n' "$_S8B_USER" "$(python3 "$_S8B_SYNC" digest "$O/old-fake-skill")" "$_S8B_USER" "$(printf 'forged' | shasum -a 256 | cut -d' ' -f1)" > "$O/.triforge-plugin-version"
+_O=$(_s8b_start "$_S8B/owned")
+[ ! -e "$O/old-fake-skill" ] || _S8B_FAIL="$_S8B_FAIL owned-retired-dir-still-present"
+printf '%s\n' "$_O" | grep -q 'retired no-longer-shipped: old-fake-skill' || _S8B_FAIL="$_S8B_FAIL owned-no-retired-notice"
+[ -f "$O/$_S8B_USER/USER-MARKER.txt" ] || _S8B_FAIL="$_S8B_FAIL forged-stamp-deleted-user-dir"
+printf '%s\n' "$_O" | grep 'user-owned' | grep -q "$_S8B_USER" || _S8B_FAIL="$_S8B_FAIL owned-no-notice-for-user-dir"
+# first: no stamp — empty slots only
+F="$_S8B/first/.agents/skills"; mkdir -p "$F/$_S8B_USER"; echo "marker" > "$F/$_S8B_USER/USER-MARKER.txt"
+_O=$(_s8b_start "$_S8B/first")
+[ -f "$F/$_S8B_USER/USER-MARKER.txt" ] && [ ! -f "$F/$_S8B_USER/SKILL.md" ] || _S8B_FAIL="$_S8B_FAIL first-install-wrote-into-user-slot"
+[ "$(_s8b_count "$F")" -eq "$SHIPPED_COUNT" ] || _S8B_FAIL="$_S8B_FAIL first-install-count($(_s8b_count "$F"))"
+printf '%s\n' "$_O" | grep 'user-owned' | grep -q "$_S8B_USER" || _S8B_FAIL="$_S8B_FAIL first-no-notice"
+# link: .agents -> outside the project
+mkdir -p "$_S8B/link/target/skills/$_S8B_USER" "$_S8B/link/proj"; echo "marker" > "$_S8B/link/target/skills/$_S8B_USER/USER-MARKER.txt"
+ln -s "$_S8B/link/target" "$_S8B/link/proj/.agents"; ( cd "$_S8B/link/proj" && git init -q ) >/dev/null 2>&1
+_O=$(_s8b_start "$_S8B/link/proj")
+[ -f "$_S8B/link/target/skills/$_S8B_USER/USER-MARKER.txt" ] && [ ! -e "$_S8B/link/target/skills/.triforge-plugin-version" ] && [ "$(_s8b_count "$_S8B/link/target/skills")" -eq 1 ] || _S8B_FAIL="$_S8B_FAIL symlinked-ancestor-target-written"
+printf '%s\n' "$_O" | grep -qi 'symlink' || _S8B_FAIL="$_S8B_FAIL no-symlink-notice"
+# lease provisioning: a user dir in a shipped slot, and a committed .agents/skills symlink
+mkdir -p "$_S8B/wt1/.agents/skills/$_S8B_USER" "$_S8B/wt2/.agents" "$_S8B/outside"
+echo "marker" > "$_S8B/wt1/.agents/skills/$_S8B_USER/USER-MARKER.txt"; echo "marker" > "$_S8B/outside/USER-MARKER.txt"
+ln -s "$_S8B/outside" "$_S8B/wt2/.agents/skills"
+( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null; _lease_provision_skills "$_S8B/wt1"; _lease_provision_skills "$_S8B/wt2" ) > "$_S8B/prov.out" 2>&1 || true
+[ -f "$_S8B/wt1/.agents/skills/$_S8B_USER/USER-MARKER.txt" ] && [ ! -f "$_S8B/wt1/.agents/skills/$_S8B_USER/SKILL.md" ] || _S8B_FAIL="$_S8B_FAIL provisioning-wrote-into-user-slot"
+[ "$(_s8b_count "$_S8B/wt1/.agents/skills")" -eq "$SHIPPED_COUNT" ] || _S8B_FAIL="$_S8B_FAIL provisioning-count($(_s8b_count "$_S8B/wt1/.agents/skills"))"
+[ "$(ls -A "$_S8B/outside" | tr '\n' ' ')" = "USER-MARKER.txt " ] || _S8B_FAIL="$_S8B_FAIL provisioning-wrote-through-symlink"
+if [ -z "$_S8B_FAIL" ]; then
+  row "SELF-08b" "claude" "skills refresh by content digest: user dirs survive refresh, forged stamps and lease provisioning; legacy stamp migrates; unchanged retired copy removed; symlinks untouched (KTD12, R31, CWE-59)" "PASS" "legacy stamp: pristine ${_S8B_PRISTINE} (${_S8B_PATH}) refreshed, edited ${_S8B_EDIT} kept + notice, stamp -> format 2 with digests; digest stamp: old-fake-skill retired, forged entry left ${_S8B_USER} intact; no stamp: empty slots only; symlinked .agents / .agents/skills targets untouched (session start + _lease_provision_skills)" "static"
+else
+  row "SELF-08b" "claude" "skills refresh by content digest: user dirs survive refresh, forged stamps and lease provisioning; legacy stamp migrates; unchanged retired copy removed; symlinks untouched (KTD12, R31, CWE-59)" "FAIL" "mismatch:${_S8B_FAIL}" "static"
 fi
 rm -rf "$_S8B" "$_S8"
 

@@ -352,33 +352,50 @@ _timeout_tool() {
   fi
 }
 
+# _lease_plugin_root — the Triforge plugin root this library belongs to:
+# CLAUDE_PLUGIN_ROOT when set, else the directory above the loaded scripts/
+# when it IS a Triforge root (.claude-plugin/plugin.json named agent-triforge
+# plus scripts/invoke-external.sh). Never the project's own tree: a user
+# project's skills/ or scripts/ is not Triforge's (R42). Empty + rc 1 when no
+# root qualifies.
+_lease_plugin_root() {
+  local C
+  for C in "${CLAUDE_PLUGIN_ROOT:-}" "${_TRIFORGE_SCRIPTS_DIR:-}/.."; do
+    [ -n "$C" ] && [ -f "${C}/scripts/invoke-external.sh" ] || continue
+    if PR_MANIFEST="${C}/.claude-plugin/plugin.json" python3 -c '
+import json, os, sys
+try:
+    with open(os.environ["PR_MANIFEST"], encoding="utf-8") as f:
+        sys.exit(0 if json.load(f).get("name") == "agent-triforge" else 1)
+except Exception:
+    sys.exit(1)
+' 2>/dev/null; then
+      _lease_realpath "$C"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Worktrees lack .agents/skills/ (gitignored in user projects) — provision a
-# copy so portable-skill discovery survives isolation (mirrors the
-# session-start.sh bootstrap; KTD-3 groundwork).
+# copy so portable-skill discovery survives isolation. Same ownership rule as
+# session start (KTD12): scripts/lib/skills-sync.py writes empty slots and
+# refreshes only directories whose digest matches the stamp, so a user's own
+# committed .agents/skills/<name>/ survives provisioning; a symlinked .agents
+# or .agents/skills (or one resolving outside the worktree) is left untouched.
 _lease_provision_skills() {
-  local WT=$1
-  local SRC=""
-  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/skills" ]; then
-    SRC="${CLAUDE_PLUGIN_ROOT}/skills"
-  elif [ -d "$(_lease_repo_root)/skills" ]; then
-    SRC="$(_lease_repo_root)/skills"
-  fi
-  if [ -z "$SRC" ]; then
-    echo "lease: WARNING no skills source found (CLAUDE_PLUGIN_ROOT/skills or repo skills/) — worktree gets no .agents/skills/" >&2
+  local WT=$1 PROOT
+  if ! PROOT=$(_lease_plugin_root); then
+    echo "lease: WARNING no Triforge plugin root found (CLAUDE_PLUGIN_ROOT, or the directory above the loaded scripts/) — worktree gets no .agents/skills/" >&2
     return 0
   fi
-  # `cp -R src/. dest/` — never `cp -R src dest`, which NESTS when the worktree
-  # already carries a committed .agents/skills/ (the stamp is safe to commit in
-  # user projects, so that layout is expected). Shipped-name directories are
-  # Triforge-owned and replaced, matching session-start's refresh (KTD7).
-  local NAME
-  mkdir -p "${WT}/.agents/skills"
-  for NAME in "$SRC"/*/; do
-    [ -d "$NAME" ] || continue
-    NAME=$(basename "$NAME")
-    rm -rf "${WT}/.agents/skills/${NAME}" 2>/dev/null || true
-    mkdir -p "${WT}/.agents/skills/${NAME}" 2>/dev/null && cp -R "${SRC}/${NAME}/." "${WT}/.agents/skills/${NAME}/" 2>/dev/null || true
-  done
+  if [ ! -f "${_TRIFORGE_SCRIPTS_DIR}/lib/skills-sync.py" ]; then
+    echo "lease: WARNING ${_TRIFORGE_SCRIPTS_DIR}/lib/skills-sync.py is missing — worktree gets no .agents/skills/ (reinstall the plugin)" >&2
+    return 0
+  fi
+  python3 "${_TRIFORGE_SCRIPTS_DIR}/lib/skills-sync.py" sync --plugin-root "$PROOT" --project "$WT" --prefix "lease: " >&2 \
+    || echo "lease: WARNING skills provisioning failed for ${WT} (the builder may not see the portable skills)" >&2
+  return 0
 }
 
 # lease_create <task_id> <role> — resolve the builder from the roster
