@@ -121,7 +121,9 @@ roster_enroll_member <cli> interactive; echo "rc=$?"
   This is not an error — the row shows "not installed" / skipped and setup
   continues (AE8).
 - **`unsupported: ...` (rc 30)** — installed, but an unsupported line: today
-  only OpenCode V2 (`opencode --version` 2.x, npm `@opencode/cli` — D-049). V2
+  only OpenCode V2 (`opencode --version` 2.x, npm `@opencode/cli` — D-049), or
+  an OpenCode whose version can't be read (refused fail-closed; the message
+  says so and what to check). V2
   ignores `OPENCODE_PERMISSION`, so Triforge's deny set would be dropped. Report
   the row as "unsupported (V2)" and relay the printed V1 pin
   (`npm i -g opencode-ai@1`) for the user to run themselves. Do NOT offer
@@ -349,6 +351,7 @@ for cli in claude antigravity codex opencode kimi cursor; do
       elif roster_member_auth "$cli" >/dev/null 2>&1; then auth=ok; else auth=failed; fi
       case "$st" in
         enrolled\(*\)) model="${st#enrolled\(}"; model="${model%\)}" ;;  # escape ( ) — glob metachars in zsh param-expansion patterns
+        unsupported-version\(unreadable\)) model="unsupported (version unreadable)" ;;  # D-049 fail-closed
         unsupported-version\(*\)) model="unsupported (V2)" ;;  # OpenCode V2 (D-049) — never "enrolled"
         declined)      model="skipped" ;;
         *)             model="-" ;;

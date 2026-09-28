@@ -46,6 +46,8 @@ fi
 # RESOLVE_ROLE_EXCLUDE (comma-separated cli names): members skipped during
 # the walk as if absent — the lease layer's requeue hook (KTD-9: requeue
 # goes to a DIFFERENT builder, so lease_requeue excludes previous_builder).
+# resolve_role also adds opencode itself when the installed binary is V2 or
+# its version can't be read (D-049), with one stderr WARNING per call.
 resolve_role() {
   local ROLE=${1:?usage: resolve_role <role>}
   # Prime TRIFORGE_CURSOR_BIN for the BINARY map below: on a host that ships
@@ -53,7 +55,18 @@ resolve_role() {
   # `cursor-agent` and skip the member silently (AE1) even when the roster
   # names cursor as a role's primary. Cheap when cursor-agent exists.
   [ -n "${TRIFORGE_CURSOR_BIN:-}" ] || _cursor_bin >/dev/null 2>&1 || true
-  ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
+  # OpenCode V2, or an OpenCode whose version can't be read (D-049): every
+  # dispatch to it refuses, so walk past it like an absent member and let the
+  # fallback chain pick the next CLI, instead of failing the role on every
+  # task. Only a roster that names opencode can put it in a chain (no shipped
+  # default chain does), so a stock roster never pays for the version probe.
+  local RR_EXCLUDE=${RESOLVE_ROLE_EXCLUDE:-}
+  if [ -f ops/roster.toml ] && grep -q 'opencode' ops/roster.toml 2>/dev/null \
+     && command -v opencode >/dev/null 2>&1 && ! _opencode_v2_check opencode; then
+    RR_EXCLUDE="${RR_EXCLUDE:+${RR_EXCLUDE},}opencode"
+    echo "resolve_role: WARNING opencode skipped in every role's chain — version ${_OPENCODE_VERSION:-unreadable} is unsupported or unconfirmed (D-049); pin V1 with: ${_OPENCODE_V1_PIN}" >&2
+  fi
+  RESOLVE_ROLE_EXCLUDE="$RR_EXCLUDE" ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
 import os, re, shutil, sys
 ${_CURSOR_ID_PY}
 try:
@@ -993,7 +1006,8 @@ roster_member_auth() {
 #   declined             [members.<cli>] enabled=false (shown "skipped" in table)
 #   detected-unenrolled  binary present, no entry, readiness ok
 #   auth-failed          binary present, no entry, readiness check failed
-#   unsupported-version(<ver>)  OpenCode V2 binary (D-049) — enrolled or not;
+#   unsupported-version(<ver>)  OpenCode V2 binary, or <ver> = unreadable when
+#                        `opencode --version` can't be read (D-049) — enrolled or not;
 #                        every dispatch refuses it, so never shown as enrolled
 # An enrolled member reports enrolled(model) regardless of current auth — the
 # table carries a separate auth column for live readiness; enrollment records
@@ -1009,7 +1023,12 @@ roster_member_status() {
   esac
   if ! command -v "$BIN" >/dev/null 2>&1; then echo "not-installed"; return 0; fi
   if [ "$CLI" = opencode ] && ! _opencode_v2_check "$BIN"; then
-    echo "unsupported-version(${_OPENCODE_VERSION:-2.x})"; return 0
+    if [ "$_OPENCODE_CHECK" = unreadable ]; then
+      echo "unsupported-version(unreadable)"
+    else
+      echo "unsupported-version(${_OPENCODE_VERSION:-2.x})"
+    fi
+    return 0
   fi
   local HAS_RC=0
   roster_has_member "$CLI" || HAS_RC=$?
@@ -1059,7 +1078,7 @@ roster_enroll_member() {
   # flags an already-enrolled V1 member whose binary was upgraded to V2 —
   # dispatches to it refuse until the V1 pin is restored. Nothing is recorded.
   if [ "$CLI" = "opencode" ] && command -v "$BIN" >/dev/null 2>&1 && ! _opencode_v2_check "$BIN"; then
-    echo "unsupported: $(_opencode_v2_reason) Run the pin yourself — Triforge never runs installers. Until then every dispatch to opencode refuses; set [members.opencode] enabled = false to route its roles past it."
+    echo "unsupported: $(_opencode_v2_reason) Run the pin yourself — Triforge never runs installers. Until then every role's fallback chain skips opencode automatically, and direct dispatches to it refuse."
     return 30
   fi
 

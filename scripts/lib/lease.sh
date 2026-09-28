@@ -616,8 +616,8 @@ ${PROMPT}"
           # path has no retry, so a provider that rejects the variant surfaces as a
           # KTD-9-classified failure the lead requeues — same as any other lane.
           # OpenCode V2 guard (D-049): V2 ignores OPENCODE_PERMISSION and runs
-          # a shared background service outside env -i, so a V2 binary never
-          # dispatches — deterministic refusal naming the V1 pin, recorded in
+          # a shared background service outside env -i, so a V2 binary (or one
+          # whose version can't be read — fail-closed) never dispatches — deterministic refusal naming the V1 pin, recorded in
           # <out>.class like the agy denied-actions arm (no requeue).
           if ! _opencode_v2_check opencode; then
             _opencode_v2_refusal lease_dispatch > "$OUT"
