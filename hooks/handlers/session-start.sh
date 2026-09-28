@@ -73,11 +73,6 @@ except Exception:
   SS_JSON_FILE="$1" "${CMD[@]}" 2>/dev/null || true
 }
 
-PLUGIN_VERSION=""
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-  PLUGIN_VERSION=$(_ss_json_version "${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json")
-fi
-
 # Bootstrap ops/ directory if it doesn't exist
 if [ ! -d "ops" ]; then
   mkdir -p ops/solutions ops/decisions ops/archive

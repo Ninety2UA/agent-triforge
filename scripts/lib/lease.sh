@@ -57,8 +57,9 @@ fi
 
 # _lease_ctx — resolve, and cache for the current directory, the lead's
 # checkout (_LEASE_REPO), its git dir (_LEASE_GITDIR) and common dir
-# (_LEASE_COMMON), the lease root (_LEASE_ROOT), the lead state directory
-# (_LEASE_STATE = <root>/lead) and the trusted git config _lead_git reads
+# (_LEASE_COMMON), the ledger (_LEASE_LEDGER), the lease root (_LEASE_ROOT),
+# the lead state directory (_LEASE_STATE = <root>/lead) and the trusted git
+# config _lead_git reads
 # (_LEAD_CFG, captured on first use). Found WITHOUT git: a planted
 # core.worktree in .git/config would make `git rev-parse --show-toplevel`
 # answer with a path the worker chose, and with it the ledger path and the
@@ -110,6 +111,7 @@ for p in (repo, os.path.realpath(gitdir), os.path.realpath(common), os.path.real
   _LEASE_COMMON=$(printf '%s\n' "$OUT" | sed -n 3p)
   _LEASE_ROOT=$(printf '%s\n' "$OUT" | sed -n 4p)
   _LEASE_STATE="${_LEASE_ROOT}/lead"
+  _LEASE_LEDGER="${_LEASE_REPO}/ops/leases.toml"
   _LEAD_CFG="${_LEASE_STATE}/gitconfig"
   if [ ! -f "$_LEAD_CFG" ] && ! _lead_gitconfig_capture "$_LEAD_CFG"; then
     echo "lease: ERROR could not capture the trusted git config into ${_LEAD_CFG}" >&2
@@ -223,6 +225,16 @@ _lease_default_branch() {
   return 0
 }
 
+# _lease_default_ref — set _LEASE_DEF (the default branch, or empty) and
+# _LEASE_DEF_SHA (its commit, or empty): what the integrity baseline records.
+_lease_default_ref() {
+  _LEASE_DEF=$(_lease_default_branch)
+  _LEASE_DEF_SHA=""
+  if [ -n "$_LEASE_DEF" ]; then
+    _LEASE_DEF_SHA=$(_lgr rev-parse --verify --quiet "refs/heads/${_LEASE_DEF}^{commit}" 2>/dev/null || true)
+  fi
+}
+
 # Current checked-out branch of the main tree, or empty on detached HEAD.
 _lease_current_branch() {
   _lease_ctx || return 0
@@ -236,7 +248,7 @@ _lease_root() {
 
 _lease_ledger_path() {
   _lease_ctx || return 1
-  printf '%s\n' "${_LEASE_REPO}/ops/leases.toml"
+  printf '%s\n' "$_LEASE_LEDGER"
 }
 
 # task_id doubles as a directory and branch component — constrain it before
@@ -272,7 +284,7 @@ _ledger_update() {
   shift
   local LEDGER LOCK RC=0 TRIES=0
   _lease_ctx || return 1
-  LEDGER="${_LEASE_REPO}/ops/leases.toml"
+  LEDGER=$_LEASE_LEDGER
   mkdir -p "$(dirname "$LEDGER")"
   # Serialize the read-modify-write on the lead-owned ledger (KTD-4). The
   # documented wave keeps writes lead-serial, but a mkdir-lock (portable —
@@ -431,7 +443,7 @@ if alert:
 _ledger_get() {
   local LEDGER
   _lease_ctx || return 1
-  LEDGER="${_LEASE_REPO}/ops/leases.toml"
+  LEDGER=$_LEASE_LEDGER
   [ -f "$LEDGER" ] || return 1
   LEDGER_FILE="$LEDGER" LEDGER_TASK="$1" LEDGER_KEY="$2" python3 -c "
 import os, sys
@@ -450,6 +462,37 @@ if not isinstance(row, dict):
     sys.exit(1)
 print(row.get(os.environ['LEDGER_KEY'], ''))
 "
+}
+
+# _ledger_get_row <task_id> <key...> — several keys of one row in one ledger
+# read, printed one value per line in the order asked ('' for an unset key).
+# Nonzero when the ledger or the row is missing, or when a value spans lines
+# (one line per key could not carry it). Callers read the lines with
+# `IFS= read -r VAR || true`.
+_ledger_get_row() {
+  local T=$1
+  shift
+  _lease_ctx || return 1
+  [ -f "$_LEASE_LEDGER" ] || return 1
+  LEDGER_FILE="$_LEASE_LEDGER" LEDGER_TASK="$T" python3 -c "
+import os, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.exit(1)
+with open(os.environ['LEDGER_FILE'], 'rb') as f:
+    data = tomllib.load(f)
+row = data.get('lease', {}).get(os.environ['LEDGER_TASK'])
+if not isinstance(row, dict):
+    sys.exit(1)
+vals = [str(row.get(k, '')) for k in sys.argv[1:]]
+if any('\n' in v for v in vals):
+    sys.exit(1)
+print('\n'.join(vals))
+" "$@"
 }
 
 # ---------------------------------------------------------------------------
@@ -677,12 +720,10 @@ for row in out:
 # [baseline] digests + the copies in the lead state dir). Callers run it only
 # on a state they just verified or explicitly accept (lease_rebaseline).
 _lead_baseline_record() {
-  local DEF DEF_SHA L
+  local L
   local -a ARGS=()
   _lease_ctx || return 1
-  DEF=$(_lease_default_branch)
-  DEF_SHA=""
-  [ -n "$DEF" ] && DEF_SHA=$(_lgr rev-parse --verify --quiet "refs/heads/${DEF}^{commit}" 2>/dev/null || true)
+  _lease_default_ref
   while IFS= read -r L; do
     if [ -n "$L" ]; then ARGS+=("$L"); fi
   done <<BASELINE_EOF
@@ -692,7 +733,7 @@ BASELINE_EOF
     echo "lease: ERROR could not record the integrity baseline (KTD18)" >&2
     return 1
   fi
-  _ledger_update @baseline "${ARGS[@]}" default_branch="$DEF" default_sha="$DEF_SHA" ledger_alert="" \
+  _ledger_update @baseline "${ARGS[@]}" default_branch="$_LEASE_DEF" default_sha="$_LEASE_DEF_SHA" ledger_alert="" \
     recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 
@@ -709,20 +750,18 @@ _lead_lease_digests() {
 # restoring and escalating (see the section comment). Fails closed: a check
 # that can't run is reported as a change.
 _lead_integrity_check() {
-  local OP=${1:-lease} LEDGER OUT RC=0 DEF DEF_SHA KIND A B C D TAB NL
+  local OP=${1:-lease} LEDGER OUT RC=0 KIND A B C D TAB NL
   local REPO_DESC="" OPEN="" LEASE_HITS="" ALERT=0 NOBASE=0 T S ESCALATED=""
   TAB=$(printf '\t'); NL='
 '
   _lease_ctx || return 1
-  LEDGER="${_LEASE_REPO}/ops/leases.toml"
+  LEDGER=$_LEASE_LEDGER
   if [ ! -f "$LEDGER" ] && [ ! -f "${_LEASE_STATE}/ledger.sha256" ]; then
     return 0    # no lease was ever created here: nothing to compare against
   fi
-  DEF=$(_lease_default_branch)
-  DEF_SHA=""
-  [ -n "$DEF" ] && DEF_SHA=$(_lgr rev-parse --verify --quiet "refs/heads/${DEF}^{commit}" 2>/dev/null || true)
+  _lease_default_ref
   OUT=$(LI_MODE=check LI_RESTORE=1 LI_COMMON="$_LEASE_COMMON" LI_STATE="$_LEASE_STATE" LI_LEDGER="$LEDGER" \
-        LI_DEF="$DEF" LI_DEF_SHA="$DEF_SHA" python3 -c "$_LEAD_INTEGRITY_PY" 2>&1) || RC=$?
+        LI_DEF="$_LEASE_DEF" LI_DEF_SHA="$_LEASE_DEF_SHA" python3 -c "$_LEAD_INTEGRITY_PY" 2>&1) || RC=$?
   if [ "$RC" -ne 0 ]; then
     echo "${OP}: INTEGRITY CHECK COULD NOT RUN — treated as a change (fail closed, KTD18): $(printf '%s' "$OUT" | tail -3 | tr '\n' ' ' | cut -c1-300)" >&2
     return "$_RC_LEASE_INTEGRITY"
@@ -800,19 +839,17 @@ _lead_integration_check() {
 # Run it only after inspecting what it prints; it is the lead's or the user's
 # acceptance, never a worker's.
 lease_rebaseline() {
-  local LEDGER OUT DEF DEF_SHA KIND A B C D TAB T PREV CUR HEAD_SHA
+  local LEDGER OUT KIND A B C D TAB T PREV CUR HEAD_SHA
   TAB=$(printf '\t')
   _lease_ctx || return 1
-  LEDGER="${_LEASE_REPO}/ops/leases.toml"
+  LEDGER=$_LEASE_LEDGER
   if [ ! -f "$LEDGER" ]; then
     echo "lease_rebaseline: no lease ledger (${LEDGER}) — nothing to rebaseline" >&2
     return 0
   fi
-  DEF=$(_lease_default_branch)
-  DEF_SHA=""
-  [ -n "$DEF" ] && DEF_SHA=$(_lgr rev-parse --verify --quiet "refs/heads/${DEF}^{commit}" 2>/dev/null || true)
+  _lease_default_ref
   OUT=$(LI_MODE=check LI_RESTORE=0 LI_FORCE_RECORD=1 LI_COMMON="$_LEASE_COMMON" LI_STATE="$_LEASE_STATE" LI_LEDGER="$LEDGER" \
-        LI_DEF="$DEF" LI_DEF_SHA="$DEF_SHA" python3 -c "$_LEAD_INTEGRITY_PY") || { echo "lease_rebaseline: ERROR the integrity check could not run" >&2; return 1; }
+        LI_DEF="$_LEASE_DEF" LI_DEF_SHA="$_LEASE_DEF_SHA" python3 -c "$_LEAD_INTEGRITY_PY") || { echo "lease_rebaseline: ERROR the integrity check could not run" >&2; return 1; }
   while IFS="$TAB" read -r KIND A B C D; do
     case "$KIND" in
       REPO) echo "lease_rebaseline: accepting — ${B}" >&2 ;;
@@ -836,7 +873,7 @@ REBASE_EOF
       echo "lease_rebaseline: ${T} was not escalated by an integrity check — state unchanged" >&2
     fi
   done
-  echo "lease_rebaseline: baseline recorded (default ${DEF:-<none>} ${DEF_SHA:0:12}, integration ${CUR:-<detached>} ${HEAD_SHA:0:12})" >&2
+  echo "lease_rebaseline: baseline recorded (default ${_LEASE_DEF:-<none>} ${_LEASE_DEF_SHA:0:12}, integration ${CUR:-<detached>} ${HEAD_SHA:0:12})" >&2
 }
 
 # _adapter_env <cli> <cmd...> — run an external command under the per-adapter
@@ -1026,13 +1063,12 @@ _lease_tree_of_worktree() {
 # itself (against the contract) are kept under the snapshot, recorded in
 # builder_commits, and make lease_merge refuse (KTD19).
 _lease_snapshot() {
-  local T=$1 WT ADMIN BASE BRANCH PREV BUILDER TIP BC="" C TREE PARENT SNAP
-  WT=$(_ledger_get "$T" worktree)
-  ADMIN=$(_ledger_get "$T" admin_dir)
-  BASE=$(_ledger_get "$T" base_sha)
-  BRANCH=$(_ledger_get "$T" branch)
-  PREV=$(_ledger_get "$T" snapshot_sha)
-  BUILDER=$(_ledger_get "$T" builder_cli)
+  local T=$1 ROW WT ADMIN BASE BRANCH PREV BUILDER TIP BC="" C TREE PARENT SNAP
+  ROW=$(_ledger_get_row "$T" worktree admin_dir base_sha branch snapshot_sha builder_cli) || ROW=""
+  { IFS= read -r WT || true; IFS= read -r ADMIN || true; IFS= read -r BASE || true
+    IFS= read -r BRANCH || true; IFS= read -r PREV || true; IFS= read -r BUILDER || true; } <<SNAP_ROW_EOF
+${ROW}
+SNAP_ROW_EOF
   if [ ! -d "$WT" ]; then
     echo "lease_collect: ERROR worktree missing: ${WT}" >&2
     return 1
@@ -1071,9 +1107,12 @@ _lease_snapshot() {
 # not touch the lead-owned ops/. Prints the refusal (naming the commit, the
 # moved ref or the files) and returns 1 on any mismatch.
 _lease_verify_snapshot() {
-  local T=$1 WT ADMIN BASE BRANCH SNAP STREE TIP PARENT NOW LOG OPS
-  WT=$(_ledger_get "$T" worktree); ADMIN=$(_ledger_get "$T" admin_dir); BASE=$(_ledger_get "$T" base_sha)
-  BRANCH=$(_ledger_get "$T" branch); SNAP=$(_ledger_get "$T" snapshot_sha); STREE=$(_ledger_get "$T" snapshot_tree)
+  local T=$1 ROW WT ADMIN BASE BRANCH SNAP STREE TIP PARENT NOW LOG OPS
+  ROW=$(_ledger_get_row "$T" worktree admin_dir base_sha branch snapshot_sha snapshot_tree) || ROW=""
+  { IFS= read -r WT || true; IFS= read -r ADMIN || true; IFS= read -r BASE || true
+    IFS= read -r BRANCH || true; IFS= read -r SNAP || true; IFS= read -r STREE || true; } <<VERIFY_ROW_EOF
+${ROW}
+VERIFY_ROW_EOF
   TIP=$(_lgr rev-parse --verify --quiet "refs/heads/${BRANCH}^{commit}" 2>/dev/null || true)
   if [ "$TIP" != "$SNAP" ]; then
     echo "lease_merge: REFUSED — ${BRANCH} is at ${TIP:-<missing>}, not the lead's recorded collect snapshot ${SNAP} (the branch moved after collect). Merging it would merge an unreviewed state (KTD19); re-collect through lease_redispatch or reclaim the lease." >&2
@@ -1213,11 +1252,12 @@ lease_dispatch() {
     echo "lease_dispatch: ERROR task ${TASK_ID} is in state '${STATE}' (want leased)" >&2
     return 1
   fi
-  CLI=$(_ledger_get "$TASK_ID" builder_cli)
-  MODEL=$(_ledger_get "$TASK_ID" builder_model)
-  EFFORT=$(_ledger_get "$TASK_ID" builder_effort)
-  ROLE=$(_ledger_get "$TASK_ID" role)
-  WT=$(_ledger_get "$TASK_ID" worktree)
+  local ROW
+  ROW=$(_ledger_get_row "$TASK_ID" builder_cli builder_model builder_effort role worktree) || ROW=""
+  { IFS= read -r CLI || true; IFS= read -r MODEL || true; IFS= read -r EFFORT || true
+    IFS= read -r ROLE || true; IFS= read -r WT || true; } <<DISPATCH_ROW_EOF
+${ROW}
+DISPATCH_ROW_EOF
   if [ ! -d "$WT" ]; then
     echo "lease_dispatch: ERROR worktree missing: ${WT}" >&2
     return 1
@@ -2142,7 +2182,7 @@ lease_promote() {
     return 1
   fi
   INTEGRATION_BRANCH="$CURRENT_BRANCH"
-  if [ -f "${REPO}/ops/leases.toml" ]; then
+  if [ -f "$_LEASE_LEDGER" ]; then
     _lead_integration_check lease_promote || return $?
   fi
   # A dirty index would ride into the promotion merge — refuse it.
@@ -2244,7 +2284,7 @@ print('true' if v is True else 'false')
   SHA=$(_lgr rev-parse HEAD)
   # The lead's own promotion moves the default branch: record it, so the next
   # check compares against this state rather than escalating it (KTD18).
-  if [ -f "${REPO}/ops/leases.toml" ]; then
+  if [ -f "$_LEASE_LEDGER" ]; then
     _ledger_update @baseline default_branch="$DEFAULT_BRANCH" default_sha="$SHA" >/dev/null || true
   fi
   echo "lease_promote: PROMOTED '${INTEGRATION_BRANCH}' -> '${DEFAULT_BRANCH}' (HEAD ${SHA}); require_user_approval=${REQUIRE_APPROVAL}, protected-paths=none." >&2
