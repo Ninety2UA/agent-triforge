@@ -1525,11 +1525,19 @@ EOF
   _rwt 60 claude plugin validate --strict "$MONP" > "$O" 2>&1 || true
   row "CC-05" "claude" "Monitors reproduce both watcher hooks' alert behaviors" "FAIL" "behavioral parity not demonstrable by probe (component experimental); validate --strict on monitors manifest said: $(_evidence "$O"); KTD-7 fallback: keep context-monitor.sh + tool-failure-monitor.sh" "validate"
 
-  O="$WORK/cc-validate.txt"
-  if _rwt 60 claude plugin validate --strict "$REPO_ROOT" > "$O" 2>&1; then
-    row "CC-06" "claude" "claude plugin validate --strict (baseline on this repo)" "PASS" "$(_evidence "$O")" "validate"
+  # Both manifests, validated separately (D-039): a bare `validate --strict
+  # "$REPO_ROOT"` resolves to the marketplace manifest only, so the plugin
+  # manifest (and the hooks.json it pulls in) went unchecked and CC-06 reported
+  # PASS while release checklist item 1 was red. PASS only when both pass.
+  O_PL="$WORK/cc-validate-plugin.txt"
+  O_MP="$WORK/cc-validate-marketplace.txt"
+  CC06_PL=PASS; CC06_MP=PASS
+  _rwt 60 claude plugin validate --strict "$REPO_ROOT/.claude-plugin/plugin.json" > "$O_PL" 2>&1 || CC06_PL=FAIL
+  _rwt 60 claude plugin validate --strict "$REPO_ROOT/.claude-plugin/marketplace.json" > "$O_MP" 2>&1 || CC06_MP=FAIL
+  if [ "$CC06_PL" = PASS ] && [ "$CC06_MP" = PASS ]; then
+    row "CC-06" "claude" "claude plugin validate --strict (baseline on this repo)" "PASS" "plugin.json: $(_evidence "$O_PL"); marketplace.json: $(_evidence "$O_MP")" "validate"
   else
-    row "CC-06" "claude" "claude plugin validate --strict (baseline on this repo)" "FAIL" "release gate red — must be green before the version bump: $(_evidence "$O")" "validate"
+    row "CC-06" "claude" "claude plugin validate --strict (baseline on this repo)" "FAIL" "release gate red — must be green before the version bump: plugin.json ${CC06_PL}: $(_evidence "$O_PL"); marketplace.json ${CC06_MP}: $(_evidence "$O_MP")" "validate"
   fi
 else
   for r in "CC-01:Version capture (floor 2.1.267 per D-034)" "CC-02:Fable (alias) availability" "CC-03:/goal hard-gates checklist (best-effort)" "CC-04:Dynamic workflows expressibility" "CC-05:Monitors parity" "CC-06:plugin validate --strict" "CC-07:/<skill> expands in -p from .claude/skills" "CC-07b:.agents/skills is not a Claude path (negative)"; do
@@ -1648,7 +1656,7 @@ COUNTER_MISMATCH=0
   echo "- **CC-03** → best-effort (D-030): three runs, majority; \`ops/.sprint-complete\` + \`coordinate.sh\` stay the completion mechanism and \`/goal\` remains an assist composed into the prompt."
   echo "- **CC-04** → wave-orchestration may delegate 5+-task waves to dynamic workflows."
   echo "- **CC-05** → monitors parity not demonstrated ⇒ context-monitor.sh and tool-failure-monitor.sh stay, with this row as the recorded reason."
-  echo "- **CC-06** → \`claude plugin validate --strict\` release gate baseline."
+  echo "- **CC-06** → \`claude plugin validate --strict\` release gate baseline — \`.claude-plugin/plugin.json\` and \`.claude-plugin/marketplace.json\` validated separately, PASS only when both pass (D-039)."
   echo "- **CC-07/CC-07b** → \`.claude/skills/\` expands via \`/<skill>\`; \`.agents/skills/\` is not a Claude path (the plugin path carries the shipped skills — KTD13 discovery matrix)."
   echo "- **RTN-01** → headless watch delivery mode; runtime preflight absorbs all three outcomes."
   echo "- **SELF-01..SELF-04** → roster chain rejection, coordinate.sh composition, adapter env allowlist, the R35 boundary. **SELF-05** → the Status-line parser seam (KTD11: DONE / MISSING / BLOCKED). **SELF-06** → lease-lane skill discovery per CLI under the env -i boundary (KTD7/R9; PASS = the probe skill is listed, shipped coverage in the evidence). **SELF-07** → the TRIFORGE_TEST_BUILDER lifecycle: DONE → review, report missing → never review-ready, BLOCKED → escalated (KTD11). **SELF-08** → session-start idempotence (KTD7/KTD8)."

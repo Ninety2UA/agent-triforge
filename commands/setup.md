@@ -120,6 +120,15 @@ roster_enroll_member <cli> interactive; echo "rc=$?"
   command. Relay it verbatim for the user to run themselves. Record nothing.
   This is not an error — the row shows "not installed" / skipped and setup
   continues (AE8).
+- **`unsupported: ...` (rc 30)** — installed, but an unsupported line: today
+  only OpenCode V2 (`opencode --version` 2.x, npm `@opencode/cli` — D-049), or
+  an OpenCode whose version can't be read (refused fail-closed; the message
+  says so and what to check). V2
+  ignores `OPENCODE_PERMISSION`, so Triforge's deny set would be dropped. Report
+  the row as "unsupported (V2)" and relay the printed V1 pin
+  (`npm i -g opencode-ai@1`) for the user to run themselves. Do NOT offer
+  enrollment and record nothing; setup continues. Never suggest the npm package
+  `opencode2` — it is a third-party decoy, not V2.
 - **`needs-ask: <cli> installed=yes default-model=<default> auth=<...>` (rc 20)**
   — installed and not yet enrolled. Run the ask:
   1. **Participate?** Ask whether to enroll `<cli>` in the roster.
@@ -306,8 +315,12 @@ UNRESOLVED and relay the exact stderr error:
 ROSTER_OK=yes
 resolve_role builder >/dev/null || case $? in 0|6) : ;; *) ROSTER_OK=no ;; esac
 
-_roles_for() {  # _roles_for <cli> -> "builder, reviewer(fb)" from the live roster
-  local cli=$1 out="" role entry primary fb
+# _roles_for -> "builder, reviewer(fb)" for the CLI named in ROLES_CLI, from the
+# live roster. The CLI rides in a NAMED variable, never a positional parameter:
+# Claude Code substitutes positional tokens in a command body before the model
+# reads it, code blocks included (S28).
+_roles_for() {
+  local cli=${ROLES_CLI:?} out="" role entry primary fb
   for role in builder reviewer tester analyst documenter; do
     entry=$(roster_role_entry "$role") || { printf 'roster-unreadable'; return 1; }
     primary=$(printf '%s' "$entry" | cut -f1)
@@ -328,16 +341,18 @@ for cli in claude antigravity codex opencode kimi cursor; do
   bin=$(_roster_binary "$cli")
   if command -v "$bin" >/dev/null 2>&1; then inst=yes; else inst=no; fi
   st=$(roster_member_status "$cli")
-  if [ "$ROSTER_OK" = yes ]; then role=$(_roles_for "$cli"); else role=""; fi
+  if [ "$ROSTER_OK" = yes ]; then role=$(ROLES_CLI=$cli _roles_for); else role=""; fi
   case "$cli" in
     claude|antigravity|codex)
       auth="(core)"; model="(required)" ;;
     *)
-      if [ "$inst" = yes ]; then
-        if roster_member_auth "$cli" >/dev/null 2>&1; then auth=ok; else auth=failed; fi
-      else auth="-"; fi
+      if [ "$inst" = no ]; then auth="-"
+      elif [ "${st#unsupported-version}" != "$st" ]; then auth="n/a"  # OpenCode V2: every dispatch refuses it — skip the readiness probe
+      elif roster_member_auth "$cli" >/dev/null 2>&1; then auth=ok; else auth=failed; fi
       case "$st" in
         enrolled\(*\)) model="${st#enrolled\(}"; model="${model%\)}" ;;  # escape ( ) — glob metachars in zsh param-expansion patterns
+        unsupported-version\(unreadable\)) model="unsupported (version unreadable)" ;;  # D-049 fail-closed
+        unsupported-version\(*\)) model="unsupported (V2)" ;;  # OpenCode V2 (D-049) — never "enrolled"
         declined)      model="skipped" ;;
         *)             model="-" ;;
       esac ;;

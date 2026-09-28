@@ -63,9 +63,10 @@ fi
 # the documented bracket form (grok-4.6[effort=xhigh] -> "Cannot use this
 # model"); effort is the model-id SUFFIX: cursor-grok-4.6-low|medium|high|xhigh.
 # _cursor_model_for_effort composes the suffixed id from a bare Grok family name
-# + the roster effort (xhigh/max -> -xhigh) and passes an explicit suffixed id
-# through untouched (effort recorded "in model id"). Never a fabricated suffix
-# for an unknown effort — the bare id is used with a warning.
+# + the roster effort (xhigh/max -> -xhigh) and keeps an explicit suffixed id's
+# suffix (effort recorded "in model id"). The cursor- prefix is the family's
+# (4.5/4.6 carry it, 4.7 does not — D-050, _CURSOR_ID_PY). Never a fabricated
+# suffix for an unknown effort — the bare id is used with a warning.
 #
 # Failure taxonomy (KTD-9): reuses _classify_invoke_failure exactly like the
 # other helpers, plus a deterministic auth preflight (`cursor-agent status`) and a
@@ -114,37 +115,72 @@ AGENTS
   return 1
 }
 
+# _CURSOR_ID_PY — the ONE place the Cursor Grok model-id format is decided
+# (D-050). Python source, spliced into every composer's python3 -c program:
+# _cursor_model_for_effort below (dispatch time), and in scripts/lib/roster.sh
+# resolve_role, roster_role_entry and roster_write_role (write time). The
+# loader sources this file before roster.sh, so the variable is always set
+# when those functions run. Each composer keeps its own precedence rule for an
+# explicit suffix; only the parse and the prefix live here.
+#   cursor_grok_match(model) -> match with groups (family, suffix|None, '-fast'|None),
+#                               or None for a non-Grok id (composer-2.5, …)
+#   cursor_grok_id(fam, sfx, fast) -> the catalog id for that family + suffix
+# The prefix belongs to the FAMILY, not to how the user typed it: the Grok 4.5
+# and 4.6 catalog ids carry cursor- (cursor-grok-4.6-xhigh), Grok 4.7 and later
+# do not (grok-4.7-xhigh — CUR-12 FAIL on cursor-grok-4.7-xhigh, probe record
+# 2026-09 Appendix B). The known-family table is the only source: the host
+# catalog (cursor-agent --list-models) is a network call and resolve_role runs
+# on every dispatch. A family missing from the table gets no prefix, the
+# convention from 4.7 on. Single-quoted: no bash expansion inside, so the regex
+# keeps a literal $ and the python uses double quotes only.
+_CURSOR_ID_PY='
+import re as _cursor_re
+CURSOR_GROK_RE = r"^(?:cursor-)?(grok-[0-9][0-9.]*?)(?:-(low|medium|high|xhigh))?(-fast)?$"
+CURSOR_PREFIXED_FAMILIES = ("grok-4.5", "grok-4.6")   # catalog history: the families that carry cursor-
+def cursor_grok_match(model):
+    return _cursor_re.match(CURSOR_GROK_RE, model or "")
+def cursor_grok_id(fam, sfx, fast=""):
+    prefix = "cursor-" if fam in CURSOR_PREFIXED_FAMILIES else ""
+    return prefix + fam + "-" + sfx + (fast or "")
+'
+
 # _cursor_model_for_effort <model> <effort> — compose Cursor's suffixed model id
-# (D-025: effort rides in the id, cursor-grok-4.6-low|medium|high|xhigh).
+# (D-025: effort rides in the id, cursor-grok-4.6-low|medium|high|xhigh; the
+# cursor- prefix comes from the family via _CURSOR_ID_PY — D-050).
 #   bare family (grok-4.6 / cursor-grok-4.6) + effort -> cursor-grok-4.6-<sfx>
-#   explicit suffixed id                              -> unchanged ("in model id")
-#   empty effort                                      -> unchanged
+#   bare family (grok-4.7 / cursor-grok-4.7) + effort -> grok-4.7-<sfx>
+#   explicit suffixed id                              -> suffix kept, family prefix ("in model id")
+#   empty effort (bare family)                        -> unchanged
 #   unknown effort                                    -> bare id + warning (never a fabricated suffix)
 #   non-Grok id (composer-2.5, …)                      -> unchanged
 # Sets _CURSOR_EFFORT_NOTE for the stderr summary.
-# Sibling: roster_write_role's cursor branch is the WRITE-time composer — it
+# Siblings: roster_write_role's cursor branch is the WRITE-time composer — it
 # normalizes a conflicting explicit suffix to the effort (with a NOTE) so the
 # stored pin is self-consistent; this dispatch-time composer honors the stored
-# pin as written (cursor-agents/builder.md). Same regex in both — keep them in
-# step when the Cursor id format changes.
+# pin's suffix as written (cursor-agents/builder.md). resolve_role and
+# roster_role_entry recompose on an effort-only override. All four share
+# _CURSOR_ID_PY, so the id format cannot drift between them.
 _CURSOR_EFFORT_NOTE=""
 _cursor_model_for_effort() {
   local M=${1:-} E=${2:-}
   _CURSOR_EFFORT_NOTE="in model id"
   CM_MODEL="$M" CM_EFFORT="$E" python3 -c "
-import os, re, sys
+import os, sys
+${_CURSOR_ID_PY}
 m = os.environ['CM_MODEL']; e = os.environ['CM_EFFORT']
 sfx = {'low': 'low', 'medium': 'medium', 'high': 'high', 'xhigh': 'xhigh', 'max': 'xhigh'}
-mm = re.match(r'^(?:cursor-)?(grok-[0-9][0-9.]*?)(?:-(low|medium|high|xhigh))?(-fast)?\$', m)
-if not e or not mm:
+mm = cursor_grok_match(m)
+if not mm:
     print(m); sys.exit(0)
 fam, had, fast = mm.group(1), mm.group(2), mm.group(3) or ''
 if had:
-    print('cursor-' + fam + '-' + had + fast); sys.exit(0)   # explicit suffix wins
+    print(cursor_grok_id(fam, had, fast)); sys.exit(0)   # explicit suffix wins
+if not e:
+    print(m); sys.exit(0)
 if e not in sfx:
     sys.stderr.write('invoke_cursor: WARNING unknown effort ' + repr(e) + ' — passing the bare model ' + repr(m) + ' through (no fabricated suffix)\n')
     print(m); sys.exit(0)
-print('cursor-' + fam + '-' + sfx[e] + fast)
+print(cursor_grok_id(fam, sfx[e], fast))
 "
 }
 

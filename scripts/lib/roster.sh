@@ -46,6 +46,8 @@ fi
 # RESOLVE_ROLE_EXCLUDE (comma-separated cli names): members skipped during
 # the walk as if absent — the lease layer's requeue hook (KTD-9: requeue
 # goes to a DIFFERENT builder, so lease_requeue excludes previous_builder).
+# resolve_role also adds opencode itself when the installed binary is V2 or
+# its version can't be read (D-049), with one stderr WARNING per call.
 resolve_role() {
   local ROLE=${1:?usage: resolve_role <role>}
   # Prime TRIFORGE_CURSOR_BIN for the BINARY map below: on a host that ships
@@ -53,8 +55,20 @@ resolve_role() {
   # `cursor-agent` and skip the member silently (AE1) even when the roster
   # names cursor as a role's primary. Cheap when cursor-agent exists.
   [ -n "${TRIFORGE_CURSOR_BIN:-}" ] || _cursor_bin >/dev/null 2>&1 || true
-  ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
+  # OpenCode V2, or an OpenCode whose version can't be read (D-049): every
+  # dispatch to it refuses, so walk past it like an absent member and let the
+  # fallback chain pick the next CLI, instead of failing the role on every
+  # task. Only a roster that names opencode can put it in a chain (no shipped
+  # default chain does), so a stock roster never pays for the version probe.
+  local RR_EXCLUDE=${RESOLVE_ROLE_EXCLUDE:-}
+  if [ -f ops/roster.toml ] && grep -q 'opencode' ops/roster.toml 2>/dev/null \
+     && command -v opencode >/dev/null 2>&1 && ! _opencode_v2_check opencode; then
+    RR_EXCLUDE="${RR_EXCLUDE:+${RR_EXCLUDE},}opencode"
+    echo "resolve_role: WARNING opencode skipped in every role's chain — version ${_OPENCODE_VERSION:-unreadable} is unsupported or unconfirmed (D-049); pin V1 with: ${_OPENCODE_V1_PIN}" >&2
+  fi
+  RESOLVE_ROLE_EXCLUDE="$RR_EXCLUDE" ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
 import os, re, shutil, sys
+${_CURSOR_ID_PY}
 try:
     import tomllib
 except ImportError:
@@ -200,10 +214,10 @@ for idx, cli in enumerate(chain):
                 sfx = 'Low'                     # the 3.1 Pro line has no (Medium)
             model = fam + ' (' + sfx + ')'
         elif cli == 'cursor':
-            mm = re.match(r'^(?:cursor-)?(grok-[0-9][0-9.]*?)(?:-(low|medium|high|xhigh))?(-fast)?$', model)
+            mm = cursor_grok_match(model)     # shared id format (_CURSOR_ID_PY, D-050)
             if mm:
                 sfx = {'low': 'low', 'medium': 'medium', 'high': 'high'}.get(e, 'xhigh')
-                model = 'cursor-' + mm.group(1) + '-' + sfx + (mm.group(3) or '')
+                model = cursor_grok_id(mm.group(1), sfx, mm.group(3))
     print(cli + '\t' + str(model) + '\t' + str(entry['effort']))
     sys.exit(0)
 
@@ -441,6 +455,7 @@ roster_role_entry() {
   local ROLE=${1:?usage: roster_role_entry <role>}
   RE_ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
 import os, sys, re
+${_CURSOR_ID_PY}
 try:
     import tomllib
 except ImportError:
@@ -512,10 +527,10 @@ if 'effort' in user and 'model' not in user and isinstance(entry['model'], str):
             sfx = 'Low'
         entry['model'] = fam + ' (' + sfx + ')'
     elif cli == 'cursor':
-        mm = re.match(r'^(?:cursor-)?(grok-[0-9][0-9.]*?)(?:-(low|medium|high|xhigh))?(-fast)?$', model)
+        mm = cursor_grok_match(model)         # shared id format (_CURSOR_ID_PY, D-050)
         if mm:
             sfx = {'low': 'low', 'medium': 'medium', 'high': 'high'}.get(e, 'xhigh')
-            entry['model'] = 'cursor-' + mm.group(1) + '-' + sfx + (mm.group(3) or '')
+            entry['model'] = cursor_grok_id(mm.group(1), sfx, mm.group(3))
 fb = entry['fallbacks'] if isinstance(entry['fallbacks'], list) else []
 print(str(entry['cli']) + '\t' + str(entry['model']) + '\t' + str(entry['effort']) + '\t' + ','.join(str(x) for x in fb))
 "
@@ -559,6 +574,7 @@ roster_write_role() {
   CUR_FB=$(printf '%s' "$CUR" | cut -f4)
   ROSTER_FILE="ops/roster.toml" WR_ROLE="$ROLE" WR_CLI="$CLI" WR_MODEL="$MODEL" WR_EFFORT="$EFFORT" WR_FALLBACKS="$FALLBACKS" WR_CUR_CLI="$CUR_CLI" WR_CUR_FB="$CUR_FB" python3 -c "
 import json, os, re, sys
+${_CURSOR_ID_PY}
 try:
     import tomllib
 except ImportError:
@@ -652,19 +668,22 @@ if cli == 'antigravity':
                 sys.stderr.write('roster_write_role: NOTE agy effort maps into the (Low)/(Medium)/(High) model suffix — model normalized to ' + repr(model) + ' to match effort=' + effort + '\n')
 
 # Cursor's effort control is likewise a model-id SUFFIX (D-025, CUR-10/12):
-# cursor-grok-4.6-low|medium|high|xhigh. A bare Grok family name (grok-4.6) is
-# composed into the suffixed id from effort; an explicit suffixed id is
-# normalized to match the effort; anything else (composer-2.5, a non-Grok id)
-# is written through untouched. Empty model -> the shipped default family.
+# cursor-grok-4.6-low|medium|high|xhigh, grok-4.7-low|…. A bare Grok family
+# name (grok-4.6) is composed into the suffixed id from effort; an explicit
+# suffixed id is normalized to match the effort; anything else (composer-2.5,
+# a non-Grok id) is written through untouched. Empty model -> the shipped
+# default family. The cursor- prefix comes from the family, never from how
+# the user typed it (D-050): cursor_grok_id in _CURSOR_ID_PY (cursor.sh).
 # Sibling: _cursor_model_for_effort is the DISPATCH-time composer and keeps an
 # explicit suffix as written — the two precedence rules are deliberate (writer
-# normalizes the stored pin, dispatcher honors it). Same regex in both.
+# normalizes the stored pin, dispatcher honors it). Both parse and prefix
+# through the same _CURSOR_ID_PY helper.
 if cli == 'cursor':
     sfx = {'low': 'low', 'medium': 'medium', 'high': 'high'}.get(effort, 'xhigh')
-    m3 = re.match(r'^(?:cursor-)?(grok-[0-9][0-9.]*?)(?:-(low|medium|high|xhigh))?(-fast)?$', model or 'grok-4.6')
+    m3 = cursor_grok_match(model or 'grok-4.6')
     if m3:
         fam, had, fast = m3.group(1), m3.group(2), m3.group(3) or ''
-        new_model = 'cursor-' + fam + '-' + sfx + fast
+        new_model = cursor_grok_id(fam, sfx, fast)
         if not model:
             sys.stderr.write('roster_write_role: NOTE empty cursor model auto-filled with the effort-matched pin ' + repr(new_model) + ' (cursor effort rides in the model-id suffix)\n')
         elif had and had != sfx:
@@ -987,6 +1006,9 @@ roster_member_auth() {
 #   declined             [members.<cli>] enabled=false (shown "skipped" in table)
 #   detected-unenrolled  binary present, no entry, readiness ok
 #   auth-failed          binary present, no entry, readiness check failed
+#   unsupported-version(<ver>)  OpenCode V2 binary, or <ver> = unreadable when
+#                        `opencode --version` can't be read (D-049) — enrolled or not;
+#                        every dispatch refuses it, so never shown as enrolled
 # An enrolled member reports enrolled(model) regardless of current auth — the
 # table carries a separate auth column for live readiness; enrollment records
 # intent, not a live login.
@@ -1000,6 +1022,14 @@ roster_member_status() {
       ;;
   esac
   if ! command -v "$BIN" >/dev/null 2>&1; then echo "not-installed"; return 0; fi
+  if [ "$CLI" = opencode ] && ! _opencode_v2_check "$BIN"; then
+    if [ "$_OPENCODE_CHECK" = unreadable ]; then
+      echo "unsupported-version(unreadable)"
+    else
+      echo "unsupported-version(${_OPENCODE_VERSION:-2.x})"
+    fi
+    return 0
+  fi
   local HAS_RC=0
   roster_has_member "$CLI" || HAS_RC=$?
   if [ "$HAS_RC" -eq 0 ]; then
@@ -1024,6 +1054,8 @@ roster_member_status() {
 #                    (never run); /setup shows the row as "not installed"
 #   20 needs-ask     interactive + installed + unenrolled — the CALLER runs the
 #                    participate?/which-model ask, then roster_write_member
+#   30 unsupported   installed but an unsupported line (OpenCode V2, D-049) —
+#                    the V1 pin is PRINTED; nothing is recorded, never enrolled
 roster_enroll_member() {
   local CLI=${1:?usage: roster_enroll_member <cli> <interactive|headless>}
   local MODE=${2:?usage: roster_enroll_member <cli> <interactive|headless>}
@@ -1040,6 +1072,15 @@ roster_enroll_member() {
     *) echo "roster_enroll_member: ERROR mode must be interactive|headless, got '${MODE}'" >&2; return 2 ;;
   esac
   DEFAULT=$(roster_member_default "$CLI")
+
+  # OpenCode V2 (D-049): unsupported, so never offered for enrollment (and never
+  # auto-enrolled headless). Checked before the idempotency gate so /setup also
+  # flags an already-enrolled V1 member whose binary was upgraded to V2 —
+  # dispatches to it refuse until the V1 pin is restored. Nothing is recorded.
+  if [ "$CLI" = "opencode" ] && command -v "$BIN" >/dev/null 2>&1 && ! _opencode_v2_check "$BIN"; then
+    echo "unsupported: $(_opencode_v2_reason) Run the pin yourself — Triforge never runs installers. Until then every role's fallback chain skips opencode automatically, and direct dispatches to it refuse."
+    return 30
+  fi
 
   # Idempotency (AE6): any existing entry — enrolled OR declined — suppresses
   # the ask. This is what makes /setup and first-detection re-runnable.
