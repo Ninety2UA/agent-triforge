@@ -220,13 +220,14 @@ scripts/
     lease.sh                Lease lifecycle, _adapter_env (+ no-push backstop), the typed-report parser (KTD11)
   lease-git-hooks/
     pre-push                Refuses every push inside a lease builder's process tree (bound via core.hooksPath by _adapter_env)
-  probe-capabilities.sh   # Rerunnable capability probe (writes the date-stamped ops/research/<YYYY-MM>-probe-record.md)
+  probe-capabilities.sh   # Rerunnable capability probe (writes the date-stamped ops/research/<YYYY-MM>-probe-record.md; --self-only is the SELF gate: static rows, scratch record, exit 3 on a SELF FAIL)
   probe-self-tests.sh     # The SELF-* rows (script invariants), sourced by probe-capabilities.sh
   validate-skills.sh      # Release gate: skill frontmatter / "Use when" / ## Output structure checks
   validate-versions.sh    # Release gate: version lockstep (+ README ledger entry), ladder md5 ×4, DEFAULTS drift, scoped stale-pin sweep, surface counts
   release-notes.sh        # GitHub release title / body / tag target for a version, from README's "Recent changes" entry (used by the release workflow)
 .github/
   PULL_REQUEST_TEMPLATE.md # PR template (S20): evidence table + validator results
+  workflows/gates.yml     # PR gates on macOS (/bin/bash 3.2): shell syntax, both validators, the SELF gate — for PRs to main and release/4.0
   workflows/release.yml   # Tags v<version> and publishes the GitHub release when a version bump lands on main
 ops/                      # This repo's own project state (not part of plugin)
   watch-registry.toml       Watch targets for the repo-local /cli-watch + /repo-watch cycle
@@ -405,7 +406,7 @@ Re-baselined from the newest capability probe record (`ops/research/2026-09-prob
 ### Release checklist
 
 1. `claude plugin validate --strict .claude-plugin/plugin.json` and `claude plugin validate --strict .claude-plugin/marketplace.json` both pass green (warnings are errors) — required gate; a bare `validate .` now picks the marketplace manifest only, so name both
-2. `bash scripts/validate-skills.sh` exits 0 (all shipped skills: portable frontmatter, "Use when" descriptions, `## Output` sections)
+2. `bash scripts/validate-skills.sh` exits 0 (all shipped skills: portable frontmatter, "Use when" descriptions, `## Output` sections), and `bash scripts/probe-capabilities.sh --self-only` exits 0 (the SELF gate: static SELF rows only, record to a scratch path, exit 3 on any SELF FAIL — `.github/workflows/gates.yml` runs both on every PR to `main` and `release/4.0`)
 3. `bash scripts/validate-versions.sh` exits 0 — version lockstep, the ladder md5 printed four times (byte-identity across `agents/team-lead.md`, `skills/wave-orchestration/SKILL.md`, `templates/CLAUDE.md`, and this file), `DEFAULTS` drift, the scoped stale-pin sweep (zero hits outside `ops/research/`, `ops/decisions/`, `docs/plans/`, `ops/solutions/`, `docs/images/`), and surface counts
 4. Doc-consistency greps pass (see Verification Contract in the active plan)
 5. The probe record is regenerated (`bash scripts/probe-capabilities.sh` writes `ops/research/<YYYY-MM>-probe-record.md`), committed, and cited by the release notes together with the ladder hash

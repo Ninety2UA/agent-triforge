@@ -13,6 +13,8 @@
 # SHIPPED_SKILLS, the *_LIVE / KIMI_AUTH / KIMI_QUOTA gates, TIMEOUT_BIN) and
 # its `set -euo pipefail`. Split out of the harness (review finding #17 on
 # the v3.3.0 branch) so the harness proper stays the per-CLI probe list.
+# Under --self-only (SELF_ONLY=1, the KTD15 gate) these rows are the whole
+# run; the live SELF-06 rows record SKIPPED and every other row is static.
 if [ -z "${WORK:-}" ] || [ -z "${REPO_ROOT:-}" ] || ! declare -F row >/dev/null 2>&1; then
   echo "probe-self-tests.sh: must be sourced by scripts/probe-capabilities.sh (harness state missing)" >&2
   return 2 2>/dev/null || exit 2
@@ -24,6 +26,20 @@ fi
 # CLI, no network) and always run; SELF-06 reproduces the lease lane per CLI
 # and is gated on each CLI's live gate.
 _SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+SELF_ONLY=${SELF_ONLY:-0}
+
+# Stub core-trio binaries for the rows that walk the roster (resolve_role
+# needs the builder's binary on PATH) but never run a real CLI — the fake
+# builder (TRIFORGE_TEST_BUILDER) replaces the adapter. Prepended to PATH in
+# those rows only, so the rows pass the same way on a host with no CLI
+# installed (the PR workflow's macOS runner) as on a developer machine.
+_SELF_STUBS="${WORK}/self-stubs"
+mkdir -p "$_SELF_STUBS"
+for _stub in claude codex agy; do
+  printf '#!/bin/sh\n# probe stub: answers --version; resolution only, never dispatched\necho "0.0.0-probe-stub"\nexit 0\n' > "${_SELF_STUBS}/${_stub}"
+  chmod +x "${_SELF_STUBS}/${_stub}"
+done
+unset _stub
 
 # SELF-01 (R21): resolve_role REJECTS a fallback chain that resolves entirely to
 # optional members (no core-trio terminus) — the guard between a misconfigured
@@ -153,7 +169,12 @@ _s6_record() { # _s6_record <id> <cli> <capability> <file> <note>
 }
 _S6_WT="$WORK/self06-wt"
 _S6_OK=0
-if git -C "$FIX" worktree add -q "$_S6_WT" -b probe/self-06 >/dev/null 2>&1; then
+_S6_CAP="Lease-lane discovery under env -i from a TMPDIR worktree"
+if [ "$SELF_ONLY" = 1 ]; then
+  for r in "SELF-06a:agy" "SELF-06b:codex" "SELF-06c:opencode" "SELF-06d:cursor" "SELF-06e:kimi" "SELF-06f:claude"; do
+    row "${r%%:*}" "${r#*:}" "$_S6_CAP: ${r#*:}" "SKIPPED" "--self-only: live lease-lane rows are not part of the SELF gate (run the full probe)" "live"
+  done
+elif git -C "$FIX" worktree add -q "$_S6_WT" -b probe/self-06 >/dev/null 2>&1; then
   mkdir -p "$_S6_WT/.agents/skills"
   for s in $SHIPPED_SKILLS; do
     mkdir -p "$_S6_WT/.agents/skills/$s"
@@ -161,8 +182,9 @@ if git -C "$FIX" worktree add -q "$_S6_WT" -b probe/self-06 >/dev/null 2>&1; the
   done
   _S6_OK=1
 fi
-_S6_CAP="Lease-lane discovery under env -i from a TMPDIR worktree"
-if [ "$_S6_OK" = 1 ]; then
+if [ "$SELF_ONLY" = 1 ]; then
+  :   # SKIPPED rows recorded above
+elif [ "$_S6_OK" = 1 ]; then
   # agy — /skills answers headless without a model call (the AGY-14 form)
   if ! command -v agy >/dev/null 2>&1; then
     row "SELF-06a" "agy" "$_S6_CAP: agy /skills" "UNAVAILABLE" "agy not on PATH" "live"
@@ -269,7 +291,7 @@ printf '%s\n' '{"role":"assistant","id":"m1","content":"working..."}'
 printf '%s\n' '{"role":"assistant","id":"m2","content":"Done.\n\nStatus: DONE\nFiles changed: a.txt\nTests: none\nConcerns: None\nDiscoveries for later tasks: None\n"}'
 EOF
   chmod +x "$_S7"/fb-*.sh
-  _S7_RES=$( cd "$_S7/repo" && export TRIFORGE_LEASE_ROOT="$_S7/leases" && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && {
+  _S7_RES=$( cd "$_S7/repo" && export TRIFORGE_LEASE_ROOT="$_S7/leases" PATH="${_SELF_STUBS}:$PATH" && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && {
     _s7_case() { # _s7_case <task> <fake-builder>
       local T=$1 S=$2 OUT RC=0 ST N=0
       export TRIFORGE_TEST_BUILDER="$S"

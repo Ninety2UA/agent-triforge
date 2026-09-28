@@ -7,7 +7,7 @@
 # every cycle and the record is rewritten idempotently.
 #
 # Usage:
-#   bash scripts/probe-capabilities.sh [--record <path>] [--skip-live]
+#   bash scripts/probe-capabilities.sh [--record <path>] [--skip-live | --self-only]
 #
 #   --record <path>  Write the record somewhere else. Default:
 #                    ops/research/<YYYY-MM>-probe-record.md under the repo
@@ -17,14 +17,23 @@
 #   --skip-live      Skip probes that invoke a CLI's -p / exec / run surface
 #                    (records SKIPPED rows). Harness plumbing, fixtures, and
 #                    static probes still run.
+#   --self-only      The SELF gate (KTD15): run only the static SELF-* rows
+#                    (scripts/probe-self-tests.sh) — no per-CLI section, no
+#                    live row — and exit 3 when any SELF row is FAIL. The
+#                    record goes to a scratch path under ${TMPDIR} (printed),
+#                    never to ops/research/: a --record whose basename is a
+#                    dated probe-record name is refused, so the committed
+#                    record can't be overwritten by a gate run.
 #
 # Exit codes:
 #   0  harness completed — probe FAIL/UNAVAILABLE/AUTH-FAIL results are data,
-#      never a nonzero exit
-#   1  harness error (missing prerequisite, fixture setup failure, or summary
-#      counters that do not add up to the row count)
+#      never a nonzero exit (except SELF rows under --self-only, below)
+#   1  harness error (missing prerequisite, fixture setup failure, bad
+#      arguments, or summary counters that do not add up to the row count)
 #   2  probe escape — a permission probe modified state outside its allowed
 #      boundary; the run's results must not be trusted
+#   3  SELF gate failed (--self-only only) — at least one SELF row is FAIL,
+#      or none was recorded; the failing row IDs are printed on stderr
 #
 # Isolation model: all permission and auto-approval probes run inside a
 # disposable git fixture with no remotes; GIT_CONFIG_GLOBAL/SYSTEM point at
@@ -50,15 +59,33 @@ REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # KTD9: date-stamped default so the newest ops/research/*-probe-record.md is
 # always the current record; the title below derives from the basename.
 RECORD="$REPO_ROOT/ops/research/$(date -u +%Y-%m)-probe-record.md"
+RECORD_SET=0
 SKIP_LIVE=0
+SELF_ONLY=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --record) RECORD=${2:?--record needs a path}; shift 2 ;;
+    --record) RECORD=${2:?--record needs a path}; RECORD_SET=1; shift 2 ;;
     --skip-live) SKIP_LIVE=1; shift ;;
+    --self-only) SELF_ONLY=1; SKIP_LIVE=1; shift ;;
     *) echo "probe-capabilities: unknown argument: $1" >&2; exit 1 ;;
   esac
 done
+
+# --self-only never writes a dated probe record (KTD15): the gate runs on every
+# PR, and the committed record is the watch cycle's full-run evidence.
+if [ "$SELF_ONLY" = 1 ]; then
+  if [ "$RECORD_SET" = 0 ]; then
+    RECORD="${TMPDIR:-/tmp}"
+    RECORD="${RECORD%/}/triforge-self-only-$(date -u +%Y%m%dT%H%M%S)-$$.md"
+  else
+    case "$(basename "$RECORD")" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-probe-record.md)
+        echo "probe-capabilities: --self-only refuses --record $RECORD — a dated probe-record name is the committed full-run record; pass a scratch path or omit --record" >&2
+        exit 1 ;;
+    esac
+  fi
+fi
 
 RECORD_BASE=$(basename "$RECORD")
 case "$RECORD_BASE" in
@@ -361,7 +388,7 @@ _names_missing() {
 # Probes
 # --------------------------------------------------------------------------
 
-echo "probe-capabilities: run $RUN_TS (skip_live=$SKIP_LIVE)" >&2
+echo "probe-capabilities: run $RUN_TS (skip_live=$SKIP_LIVE self_only=$SELF_ONLY)" >&2
 echo "probe-capabilities: fixture=$FIX" >&2
 
 # Per-CLI live gate: set to 0 when the CLI's READY probe fails so remaining
@@ -383,6 +410,11 @@ CC_VER=""
 # The lease-lane listing prompt (SELF-06): the probe skill tf-agents-skill
 # (the PASS criterion) plus the shipped names (coverage evidence).
 LIST12_PROMPT="From the skills available to you, list which of these names are present: tf-agents-skill, ${SHIPPED_SKILLS// /, }. Output only the present names, one per line, nothing else. Do not invoke any skill or tool."
+
+# The per-CLI sections (Antigravity through Routines) are the probe proper;
+# --self-only skips all of them and runs the SELF rows alone (KTD15). The
+# block is not re-indented, so its diff stays reviewable.
+if [ "$SELF_ONLY" != 1 ]; then
 
 # ---------------------------------------------------------------- Antigravity
 if command -v agy >/dev/null 2>&1; then
@@ -1553,6 +1585,8 @@ fi
 # design decision is blocked on this value.
 row "RTN-01" "claude" "Scheduled Routine env: checkout, push/PR, binaries, non-interactive auth, research tools" "PENDING-U15" "resolved by the diagnostic first scheduled run; delivery mode self-selects at runtime via KTD-11 preflight (commit+PR, else draft-PR-with-pending-probes, else output artifact)" "deferred"
 
+fi  # end of the per-CLI sections skipped by --self-only
+
 # --------------------------------------------------------- Self-verification
 # Framework SCRIPT invariants (SELF-01..SELF-09) live in scripts/probe-self-
 # tests.sh, sourced here inside the same shell so they see every helper and
@@ -1604,7 +1638,7 @@ COUNTER_MISMATCH=0
   echo
   echo "**Generated:** $RUN_TS by \`scripts/probe-capabilities.sh\` (rerunnable; \`/cli-watch\` re-runs it each cycle)"
   echo "**Host:** $(uname -s) $(uname -r); timeout via \`$TIMEOUT_NAME\`"
-  echo "**Mode:** $([ "$SKIP_LIVE" = "1" ] && echo "skip-live (no model calls)" || echo "full (live probes)")"
+  echo "**Mode:** $(if [ "$SELF_ONLY" = "1" ]; then echo "self-only (SELF rows only — the KTD15 gate; scratch record, not committed)"; elif [ "$SKIP_LIVE" = "1" ]; then echo "skip-live (no model calls)"; else echo "full (live probes)"; fi)"
   echo
   echo "Outcome vocabulary: **PASS** capability demonstrated · **FAIL** capability absent or not demonstrated (consuming units take their documented fallback) · **UNAVAILABLE** CLI not installed · **AUTH-FAIL** CLI present but not authenticated on this machine · **QUOTA-FAIL** CLI authenticated but the provider's usage quota is exhausted this cycle (dependent rows gate on it, not on a login) · **SKIPPED / SKIPPED-GATED** not run (\`--skip-live\` or gated on a failed READY probe) · **PENDING-U15** resolved by a later unit, with the absorbing design noted · **PENDING-AUTH** a live row that needs a login this sprint never performs (R18), with the exact command to run afterwards · **INFO** an honest boundary note, not a pass/fail (e.g. a by-design non-confinement recorded so the record does not overclaim)."
   echo
@@ -1699,5 +1733,20 @@ fi
 if [ "$COUNTER_MISMATCH" = "1" ]; then
   echo "probe-capabilities: HARNESS ERROR — outcome counters ($N_SUM) do not add up to the row count ($TOTAL)" >&2
   exit 1
+fi
+# The SELF gate (KTD15): under --self-only a SELF FAIL is the exit status, so
+# the PR workflow (and a release) can fail on a broken script invariant.
+if [ "$SELF_ONLY" = "1" ]; then
+  N_SELF=$(cut -f1 "$ROWS" | grep -c '^SELF-' || true)
+  SELF_FAILED=$(awk -F'\t' '$1 ~ /^SELF-/ && $4 == "FAIL" { printf "%s%s", sep, $1; sep = " " }' "$ROWS")
+  if [ "$N_SELF" -eq 0 ]; then
+    echo "probe-capabilities: SELF GATE FAILED — no SELF row was recorded (scripts/probe-self-tests.sh did not run)" >&2
+    exit 3
+  fi
+  if [ -n "$SELF_FAILED" ]; then
+    echo "probe-capabilities: SELF GATE FAILED — ${SELF_FAILED} (see $RECORD)" >&2
+    exit 3
+  fi
+  echo "probe-capabilities: SELF gate passed — ${N_SELF} SELF rows, none FAIL" >&2
 fi
 exit 0
