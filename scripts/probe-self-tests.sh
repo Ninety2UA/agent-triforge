@@ -811,7 +811,7 @@ _s18_expect late "$O" 'collect-rc=0' 'merge-rc=1' '^state=review$' 'no longer ma
 # static: every git call in lease.sh goes through _lead_git
 _S18_RAW=$(S18_LIB="${_SELF_DIR}/lib/lease.sh" python3 -c '
 import os, re
-allowed = ("git config \"$SCOPE\" --null --get-regexp", "git config --file \"$TMP\" --add")
+allowed = ("git -C \"$_LEASE_REPO\" config \"$SCOPE\" --includes --null --get-regexp", "git config --file \"$TMP\" --add")
 pat = re.compile(r"(?:^|[;&|(!]\s*|\b(?:if|then|do|elif)\s+|\$\(\s*)(?:[A-Z_]+=\S*\s+)*git\s+(?:-C|-c|--git-dir|[a-z][a-z-]+)")
 bad = []
 for n, line in enumerate(open(os.environ["S18_LIB"], encoding="utf-8"), 1):

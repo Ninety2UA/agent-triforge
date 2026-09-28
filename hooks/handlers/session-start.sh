@@ -221,17 +221,23 @@ SKILLS_NOTICES=""
 SS_SKILLS_SYNC="${CLAUDE_PLUGIN_ROOT:-}/scripts/lib/skills-sync.py"
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/skills" ]; then
   if [ -f "$SS_SKILLS_SYNC" ]; then
+    # A crash or a timeout must not abort the hook (set -e), but it must not be
+    # silent either: the exit status is kept and reported as a notice below.
     SS_SYNC_OUT=""
+    SS_SYNC_RC=0
     if [ -n "$TIMEOUT_BIN" ]; then
-      SS_SYNC_OUT=$("$TIMEOUT_BIN" 60s python3 "$SS_SKILLS_SYNC" sync --plugin-root "$CLAUDE_PLUGIN_ROOT" --project . --prefix "session-start: " 2>/dev/null) || true
+      SS_SYNC_OUT=$("$TIMEOUT_BIN" 60s python3 "$SS_SKILLS_SYNC" sync --plugin-root "$CLAUDE_PLUGIN_ROOT" --project . --prefix "session-start: " 2>/dev/null) || SS_SYNC_RC=$?
     else
-      SS_SYNC_OUT=$(python3 "$SS_SKILLS_SYNC" sync --plugin-root "$CLAUDE_PLUGIN_ROOT" --project . --prefix "session-start: " 2>/dev/null) || true
+      SS_SYNC_OUT=$(python3 "$SS_SKILLS_SYNC" sync --plugin-root "$CLAUDE_PLUGIN_ROOT" --project . --prefix "session-start: " 2>/dev/null) || SS_SYNC_RC=$?
     fi
     while IFS= read -r SS_LINE; do
       if [ -n "$SS_LINE" ]; then SKILLS_NOTICES="${SKILLS_NOTICES}\n${SS_LINE}"; fi
     done <<SS_SYNC_EOF
 ${SS_SYNC_OUT}
 SS_SYNC_EOF
+    if [ "$SS_SYNC_RC" -ne 0 ]; then
+      SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: WARNING .agents/skills refresh failed (skills-sync.py exit ${SS_SYNC_RC}; 124 means the 60 s timeout) — skills may be stale; the refresh re-runs next session."
+    fi
   else
     SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: WARNING ${SS_SKILLS_SYNC} is missing — .agents/skills not refreshed (reinstall the plugin)."
   fi

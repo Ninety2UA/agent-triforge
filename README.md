@@ -162,7 +162,7 @@ Prefer the Pro line? Set a role's `model` to `"Gemini 3.1 Pro (High)"` (or `(Low
   <img src="docs/images/lease-lifecycle.svg" alt="Lease lifecycle state machine — leased, building, review, merged; with orphaned, requeued to a different builder, failed, and escalated paths" width="82%">
 </p>
 
-Safety comes from three mechanisms working together, not from restricting who may write code: **per-task worktree isolation** (builders never see the canonical `ops/` tree), a **per-adapter environment allowlist** (no cross-provider credential leaks), and **mandatory cross-review** before any merge (no agent merges its own build).
+Safety comes from three mechanisms working together, not from restricting who may write code: **per-task worktrees with lead-side checks** (a builder starts in its own worktree and is contracted to stay out of the canonical `ops/` tree; the worktree limits where it starts, not where it writes, so the lead detects changes it didn't make and merges only its own collect snapshot — detection, not prevention), a **per-adapter environment allowlist** (no cross-provider credential leaks), and **mandatory cross-review** before any merge (no agent merges its own build).
 
 ---
 

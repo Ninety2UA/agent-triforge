@@ -46,7 +46,8 @@ fi
 # ignore worker-writable settings (_lead_git), detects changes the lead did not
 # make at the next check (_lead_integrity_check: collect, merge, promote,
 # create, dispatch, pin, requeue, heartbeat), restores .git/config, .git/hooks,
-# .git/info and the ledger from the lead's copies, escalates, and merges only
+# the lead's trusted git config and the ledger from the lead's copies (keeping
+# the changed version beside them), escalates, and merges only
 # the lead's own recorded snapshot of each lease (KTD19). Other git callers —
 # the harness's own git, ad-hoc git the lead model runs, other builders — are
 # covered only by that detection. All of it is detection, not prevention.
@@ -124,17 +125,23 @@ for p in (repo, os.path.realpath(gitdir), os.path.realpath(common), os.path.real
 # _lead_gitconfig_capture <dest> — build the trusted "global" config _lead_git
 # uses (KTD18): the user's identity, LFS filter, ignore-file, line-ending and
 # safe.directory settings, read once from the system and global config files.
-# The only git this file runs outside _lead_git: `git config --<scope>` reads
-# that one scope (include.* is off for a named scope) and executes nothing.
-# Captured before any builder runs, so a later worker edit to ~/.gitconfig never
-# reaches the lead's git (and the integrity check reports it).
+# The only git this file runs outside _lead_git: `git -C <lead checkout> config
+# --<scope> --includes` reads that one scope and the files it includes, and
+# executes nothing. Includes are on (a named scope turns them off by default)
+# and the read runs from the lead checkout (_LEASE_REPO, set by _lease_ctx
+# before it calls this) so [include] and [includeIf "gitdir:..."] files resolve:
+# a user.name/user.email kept in one would otherwise be dropped, and every lead
+# commit would carry the wrong identity. Captured before any builder runs, so a
+# later worker edit to ~/.gitconfig never reaches the lead's git (and the
+# integrity check reports it); the capture itself is a digested, restorable
+# integrity surface (lead_gitconfig).
 _lead_gitconfig_capture() {
   local DEST=$1 TMP="${1}.tmp.$$" SCOPE K V LIST
   mkdir -p "$(dirname "$DEST")" || return 1
-  printf '# Triforge trusted git config (KTD18) — captured from your system/global git config on\n# first use. The lead-side git calls in scripts/lib/lease.sh read ONLY this file as global\n# config. Delete it to re-capture.\n' > "$TMP" || return 1
+  printf '# Triforge trusted git config (KTD18) — captured from your system/global git config on\n# first use. The lead-side git calls in scripts/lib/lease.sh read ONLY this file as global\n# config. The integrity check digests it: to re-capture, delete it and run lease_rebaseline.\n' > "$TMP" || return 1
   for SCOPE in --system --global; do
     LIST=$(env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT -u GIT_DIR -u GIT_WORK_TREE \
-             git config "$SCOPE" --null --get-regexp '^(user\.(name|email)|core\.(excludesfile|autocrlf|eol)|init\.defaultbranch|safe\.directory|filter\.lfs\..*)$' 2>/dev/null \
+             git -C "$_LEASE_REPO" config "$SCOPE" --includes --null --get-regexp '^(user\.(name|email)|core\.(excludesfile|autocrlf|eol)|init\.defaultbranch|safe\.directory|filter\.lfs\..*)$' 2>/dev/null \
            | python3 -c '
 import sys
 for item in sys.stdin.buffer.read().split(b"\0"):
@@ -158,7 +165,8 @@ CAPTURE_EOF
 # per-invocation overrides for hooks (core.hooksPath=/dev/null), fsmonitor,
 # the global attributes file, signing, pager and editor, plus gc/maintenance
 # off. .git/config itself can't be switched off, so it (and .git/hooks,
-# .git/info) is digest-checked before these calls run. Inherited GIT_* that
+# .git/info, and the trusted capture itself) is digest-checked before these
+# calls run. Inherited GIT_* that
 # would redirect the call are unset; _LEAD_GIT_INDEX, when set, becomes
 # GIT_INDEX_FILE (the temporary index a snapshot is built in).
 _lead_git() {
@@ -270,8 +278,10 @@ _lease_valid_task_id() {
 #
 # The reserved id @baseline (never a valid task id) writes the [baseline]
 # table instead of a lease row: the lead's last verified git state (KTD18) —
-# digests of .git/config, .git/hooks, .git/info and the global git config, the
-# default branch and its SHA, the integration branch and its SHA.
+# digests of .git/config, .git/hooks, .git/info, the global git config, the
+# lead's trusted git config and the lead checkout's .git, the default branch
+# and its SHA, the integration branch and its SHA — plus the lease_rebaseline
+# audit (last_rebaseline, rebaseline_log).
 #
 # Integrity (KTD18): after every write the ledger's digest and a copy of it are
 # kept in the lead state dir (<lease root>/lead/ledger.sha256, ledger.copy).
@@ -501,23 +511,38 @@ print('\n'.join(vals))
 #
 # The baseline is the lead's last verified state:
 #   [baseline] in the ledger  digests of .git/config, .git/hooks/, .git/info/
-#                             and the global git config files; the default
+#                             (info/refs left out: git gc/repack rewrites it),
+#                             the global git config files, the lead's trusted
+#                             git config (<lease root>/lead/gitconfig, which
+#                             every _lead_git call reads) and the lead
+#                             checkout's own .git (a linked-worktree checkout's
+#                             pointer file could be redirected); the default
 #                             branch and its SHA; the integration branch and
-#                             its SHA (updated after each of the lead's merges)
+#                             its SHA (updated after each of the lead's merges,
+#                             cleared by a promotion)
 #   each lease row            its worktree's .git pointer file and admin dir
 #                             (.git/worktrees/<name>: HEAD, gitdir, commondir,
 #                             config.worktree), base_sha, and the collect
 #                             snapshot (snapshot_sha, snapshot_tree)
-#   <lease root>/lead/        copies of .git/config, .git/hooks, .git/info and
-#                             the ledger (with its digest), for restoring
+#   <lease root>/lead/        copies of .git/config (config.copy), .git/hooks
+#                             (hooks.copy), the trusted git config
+#                             (gitconfig.copy) and the ledger (with its
+#                             digest), for restoring
 # _lead_integrity_check runs at lease_create, lease_dispatch, lease_pin_reviewer,
 # lease_collect, lease_merge, lease_promote, lease_requeue and
 # lease_heartbeat_check. A change the lead did not make restores what can be
-# restored (.git/config, .git/hooks, .git/info, the ledger), escalates, names
-# the changed surface, and returns _RC_LEASE_INTEGRITY (44). A repo-wide change
+# restored (.git/config, .git/hooks, the trusted git config, the ledger) —
+# only from a lead copy whose digest still equals the baseline, and only after
+# saving the changed version as <lease root>/lead/<name>.changed-<UTC time>
+# (it may have been the lead's or the user's: git remote add, pre-commit
+# install) — escalates, names the changed surface, and returns
+# _RC_LEASE_INTEGRITY (44). .git/info, the global git config and the lead
+# checkout's .git are detect-only. A repo-wide change
 # escalates every building/review lease (any of their builders could have made
 # it); a per-lease change escalates that lease. lease_rebaseline accepts a
-# change the lead or user made (and resumes the leases it escalated).
+# change the lead or user made (and resumes the leases it escalated), recording
+# each acceptance in [baseline] (last_rebaseline, rebaseline_log) — an audit
+# trail, not prevention.
 _RC_LEASE_INTEGRITY=44
 
 _LEAD_INTEGRITY_PY='
@@ -543,13 +568,19 @@ def file_digest(p):
     except OSError as e:
         return "unreadable:" + type(e).__name__
 
-def tree_digest(p):
+# ignore: top-level entry names left out of the digest. Only .git/info uses it
+# (refs: git gc and repack rewrite info/refs through update-server-info during
+# normal use, and would otherwise escalate every lease).
+def tree_digest(p, ignore=()):
     if os.path.islink(p):
         return "link:" + os.readlink(p)
     if not os.path.isdir(p):
         return file_digest(p) if os.path.lexists(p) else "absent"
     entries = []
     for root, dirs, files in os.walk(p):
+        if ignore and root == p:
+            dirs[:] = [n for n in dirs if n not in ignore]
+            files = [n for n in files if n not in ignore]
         dirs.sort()
         for n in dirs + files:
             full = os.path.join(root, n)
@@ -583,15 +614,33 @@ def global_digest():
     files = [os.path.join(home, ".gitconfig"), os.path.join(xdg, "git", "config")]
     return _sha("\n".join(f + "=" + file_digest(f) for f in files).encode("utf-8", "surrogateescape"))
 
-def repo_surfaces(common):
-    return {"config": file_digest(os.path.join(common, "config")),
-            "hooks": tree_digest(os.path.join(common, "hooks")),
-            "info": tree_digest(os.path.join(common, "info")),
-            "global_gitconfig": global_digest()}
+# The .git of the lead checkout: "dir" for a real directory, "link:<target>"
+# for a symlink, else the digest of the pointer file of a linked-worktree
+# checkout (a builder could point it at a lease admin dir, and _lease_ctx would
+# bind every _lgr call to it).
+def checkout_digest(repo):
+    p = os.path.join(repo, ".git")
+    try:
+        if os.path.islink(p):
+            return "link:" + os.readlink(p)
+        if os.path.isdir(p):
+            return "dir"
+        with open(p, "rb") as f:
+            return _sha(f.read())
+    except FileNotFoundError:
+        return "absent"
+    except OSError as e:
+        return "unreadable:" + type(e).__name__
 
-NAMES = {"config": ".git/config", "hooks": ".git/hooks/", "info": ".git/info/",
-         "global_gitconfig": "the global git config (~/.gitconfig, ~/.config/git/config)"}
-RESTORABLE = ("config", "hooks", "info")
+def repo_surfaces(common, state, repo):
+    cur = {"config": file_digest(os.path.join(common, "config")),
+           "hooks": tree_digest(os.path.join(common, "hooks")),
+           "info": tree_digest(os.path.join(common, "info"), ("refs",)),
+           "global_gitconfig": global_digest(),
+           "lead_gitconfig": file_digest(os.path.join(state, "gitconfig"))}
+    if repo:
+        cur["checkout"] = checkout_digest(repo)
+    return cur
 
 def _remove(p):
     if os.path.islink(p) or os.path.isfile(p):
@@ -599,9 +648,34 @@ def _remove(p):
     elif os.path.isdir(p):
         shutil.rmtree(p)
 
-def save_copies(common, state):
+mode = os.environ["LI_MODE"]
+common = os.environ.get("LI_COMMON", "")
+state = os.environ.get("LI_STATE", "")
+repo = os.environ.get("LI_REPO", "")
+
+# The restorable surfaces: name -> (live path, digest of that kind). The lead
+# copy is <state>/<stem>.copy and a changed version kept before a restore is
+# <state>/<stem>.changed-<UTC time>, where stem is the live basename (config,
+# hooks, gitconfig). .git/config and .git/hooks live under the common dir, the
+# trusted git config under the lead state dir. Everything else is detect-only:
+# .git/info (KTD18 restores config and hooks only), the global git config (a
+# user file) and the .git of the lead checkout.
+LIVE = {"config": (os.path.join(common, "config"), file_digest),
+        "hooks": (os.path.join(common, "hooks"), tree_digest),
+        "lead_gitconfig": (os.path.join(state, "gitconfig"), file_digest)}
+RESTORABLE = tuple(sorted(LIVE))
+NAMES = {"config": ".git/config", "hooks": ".git/hooks/", "info": ".git/info/",
+         "global_gitconfig": "the global git config (~/.gitconfig, ~/.config/git/config)",
+         "lead_gitconfig": "the lead trusted git config (" + os.path.join(state, "gitconfig") + ")",
+         "checkout": "the .git pointer of the lead checkout (" + os.path.join(repo, ".git") + ")"}
+
+def _copy_path(name):
+    return os.path.join(state, os.path.basename(LIVE[name][0]) + ".copy")
+
+def save_copies():
+    _remove(os.path.join(state, "info.copy"))    # left by builds that still restored .git/info
     for name in RESTORABLE:
-        src, dst = os.path.join(common, name), os.path.join(state, name + ".copy")
+        src, dst = LIVE[name][0], _copy_path(name)
         _remove(dst)
         if os.path.islink(src):
             continue
@@ -610,20 +684,66 @@ def save_copies(common, state):
         elif os.path.isfile(src):
             shutil.copyfile(src, dst)
 
-def restore(common, state, name, baseline_digest):
-    src, dst = os.path.join(state, name + ".copy"), os.path.join(common, name)
-    if not os.path.lexists(src) and baseline_digest != "absent":
-        return "no lead copy to restore from"
-    if os.path.isfile(src) and not os.path.islink(src):
-        shutil.copyfile(src, dst + ".triforge-restore")
-        if os.path.isdir(dst) and not os.path.islink(dst):
-            shutil.rmtree(dst)
-        os.replace(dst + ".triforge-restore", dst)
+# save_changed <name> — keep the changed surface before a restore overwrites
+# it: the change may have been made by the lead or the user (git remote add,
+# git push -u, pre-commit install), and lease_rebaseline can only accept what
+# still exists.
+# Returns the saved path, or "" when there is nothing to save (deleted).
+def save_changed(name):
+    live = LIVE[name][0]
+    if not os.path.lexists(live):
+        return ""
+    base = os.path.join(state, os.path.basename(live) + ".changed-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()))
+    dst, n = base, 1
+    while os.path.lexists(dst):
+        n += 1
+        dst = base + "-" + str(n)
+    if os.path.islink(live):
+        os.symlink(os.readlink(live), dst)
+    elif os.path.isdir(live):
+        shutil.copytree(live, dst, symlinks=True)
     else:
-        _remove(dst)
-        if os.path.isdir(src):
-            shutil.copytree(src, dst, symlinks=True)
-    return "restored from the lead copy"
+        shutil.copyfile(live, dst)
+    return dst
+
+# restore <name> <baseline digest> — put the surface back as the baseline
+# recorded it, and say how. Only from a lead copy whose digest (of the same
+# kind as the live one) still equals the baseline: the copy sits in the
+# worker-writable lead state dir too. A surface absent at the baseline is
+# restored by removing it. The changed version is saved first; a surface that
+# can not be saved is not overwritten.
+def restore(name, base_digest):
+    live, digest = LIVE[name]
+    copy = _copy_path(name)
+    inspect = ", so it was NOT restored; inspect before lease_rebaseline"
+    if base_digest != "absent":
+        if not os.path.lexists(copy):
+            return "no lead copy to restore from" + inspect
+        if digest(copy) != base_digest:
+            return "the lead copy also changed" + inspect
+    try:
+        saved = save_changed(name)
+    except OSError as e:
+        return "the changed version could not be saved (" + type(e).__name__ + ")" + inspect
+    try:
+        if base_digest == "absent":
+            _remove(live)
+            how = "removed: it did not exist at the baseline"
+        else:
+            tmp = live + ".triforge-restore"
+            _remove(tmp)
+            if os.path.isdir(copy) and not os.path.islink(copy):
+                shutil.copytree(copy, tmp, symlinks=True)
+                _remove(live)
+            else:
+                shutil.copyfile(copy, tmp)
+                if os.path.isdir(live) and not os.path.islink(live):
+                    shutil.rmtree(live)
+            os.replace(tmp, live)
+            how = "restored from the lead copy"
+    except OSError as e:
+        how = "the restore failed (" + type(e).__name__ + ")" + inspect
+    return how + ("; the changed version is saved at " + saved if saved else "")
 
 def admin_from_pointer(wt, common):
     try:
@@ -635,13 +755,9 @@ def admin_from_pointer(wt, common):
     admin = os.path.realpath(os.path.join(wt, line[len("gitdir:"):].strip()))
     return admin if os.path.dirname(admin) == os.path.realpath(os.path.join(common, "worktrees")) else ""
 
-mode = os.environ["LI_MODE"]
-common = os.environ.get("LI_COMMON", "")
-state = os.environ.get("LI_STATE", "")
-
 if mode == "record":
-    save_copies(common, state)
-    for k, v in sorted(repo_surfaces(common).items()):
+    save_copies()
+    for k, v in sorted(repo_surfaces(common, state, repo).items()):
         print(k + "=" + v)
     sys.exit(0)
 
@@ -678,10 +794,16 @@ if not isinstance(base, dict) or not base.get("config"):
 else:
     if base.get("ledger_alert"):
         out.append(("REPO", "ledger_alert", str(base["ledger_alert"])))
-    cur = repo_surfaces(common)
+    cur = repo_surfaces(common, state, repo)
     for k in sorted(cur):
-        if str(base.get(k, "")) and cur[k] != str(base.get(k)):
-            how = restore(common, state, k, str(base.get(k))) if (restoring and k in RESTORABLE) else ("not restored: a user file" if k == "global_gitconfig" else "not restored")
+        b = str(base.get(k, ""))
+        if b and cur[k] != b:
+            if restoring and k in RESTORABLE:
+                how = restore(k, b)
+            elif k == "global_gitconfig":
+                how = "not restored: a user file"
+            else:
+                how = "detected; not restored"
             out.append(("REPO", k, NAMES[k] + " changed (" + how + ")"))
     dname, dsha = os.environ.get("LI_DEF", ""), os.environ.get("LI_DEF_SHA", "")
     bname, bsha = str(base.get("default_branch", "")), str(base.get("default_sha", ""))
@@ -727,9 +849,10 @@ _lead_baseline_record() {
   while IFS= read -r L; do
     if [ -n "$L" ]; then ARGS+=("$L"); fi
   done <<BASELINE_EOF
-$(LI_MODE=record LI_COMMON="$_LEASE_COMMON" LI_STATE="$_LEASE_STATE" python3 -c "$_LEAD_INTEGRITY_PY")
+$(LI_MODE=record LI_COMMON="$_LEASE_COMMON" LI_STATE="$_LEASE_STATE" LI_REPO="$_LEASE_REPO" python3 -c "$_LEAD_INTEGRITY_PY")
 BASELINE_EOF
-  if [ "${#ARGS[@]}" -lt 4 ]; then
+  # config, hooks, info, global_gitconfig, lead_gitconfig, checkout.
+  if [ "${#ARGS[@]}" -lt 6 ]; then
     echo "lease: ERROR could not record the integrity baseline (KTD18)" >&2
     return 1
   fi
@@ -751,7 +874,7 @@ _lead_lease_digests() {
 # that can't run is reported as a change.
 _lead_integrity_check() {
   local OP=${1:-lease} LEDGER OUT RC=0 KIND A B C D TAB NL
-  local REPO_DESC="" OPEN="" LEASE_HITS="" ALERT=0 NOBASE=0 T S ESCALATED=""
+  local REPO_DESC="" OPEN="" LEASE_HITS="" ALERT=0 NOBASE=0 SAVED=0 T S ESCALATED=""
   TAB=$(printf '\t'); NL='
 '
   _lease_ctx || return 1
@@ -760,7 +883,7 @@ _lead_integrity_check() {
     return 0    # no lease was ever created here: nothing to compare against
   fi
   _lease_default_ref
-  OUT=$(LI_MODE=check LI_RESTORE=1 LI_COMMON="$_LEASE_COMMON" LI_STATE="$_LEASE_STATE" LI_LEDGER="$LEDGER" \
+  OUT=$(LI_MODE=check LI_RESTORE=1 LI_COMMON="$_LEASE_COMMON" LI_STATE="$_LEASE_STATE" LI_REPO="$_LEASE_REPO" LI_LEDGER="$LEDGER" \
         LI_DEF="$_LEASE_DEF" LI_DEF_SHA="$_LEASE_DEF_SHA" python3 -c "$_LEAD_INTEGRITY_PY" 2>&1) || RC=$?
   if [ "$RC" -ne 0 ]; then
     echo "${OP}: INTEGRITY CHECK COULD NOT RUN — treated as a change (fail closed, KTD18): $(printf '%s' "$OUT" | tail -3 | tr '\n' ' ' | cut -c1-300)" >&2
@@ -769,7 +892,11 @@ _lead_integrity_check() {
   while IFS="$TAB" read -r KIND A B C D; do
     case "$KIND" in
       NOBASELINE) NOBASE=1 ;;
-      REPO) REPO_DESC="${REPO_DESC}${REPO_DESC:+${NL}}    ${B}"; if [ "$A" = "ledger_alert" ]; then ALERT=1; fi ;;
+      REPO)
+        REPO_DESC="${REPO_DESC}${REPO_DESC:+${NL}}    ${B}"
+        if [ "$A" = "ledger_alert" ]; then ALERT=1; fi
+        case "$B" in *"the changed version is saved at "*) SAVED=1 ;; esac
+        ;;
       OPEN) OPEN="${OPEN}${A}${TAB}${B}${NL}" ;;
       LEASE) LEASE_HITS="${LEASE_HITS}${A}${TAB}${B}${TAB}${C}${NL}" ;;
       RECORD) _ledger_update "$A" pointer_digest="$B" admin_digest="$C" admin_dir="$D" >/dev/null || return 1 ;;
@@ -806,25 +933,47 @@ LEASE_EOF
     if [ -n "$T" ]; then echo "    lease ${T}: ${C}" >&2; fi
   done
   echo "  escalated:${ESCALATED:- (no open lease)}. Nothing was merged or promoted. Inspect the change; a worker without an OS sandbox can write anything the user can. If you (the lead or the user) made it, accept it with: lease_rebaseline${ESCALATED}" >&2
+  if [ "$SAVED" -eq 1 ]; then
+    echo "  A restored surface's changed version is saved in the lead state dir (${_LEASE_STATE}/<name>.changed-<UTC time>): if the change was the lead's or the user's, copy that saved version back over the original, then run lease_rebaseline${ESCALATED}." >&2
+  fi
   return "$_RC_LEASE_INTEGRITY"
 }
 
+# _lead_branch_switched <op> <recorded-branch> <recorded-sha> <current-branch>
+# — print the refusal for a lead checkout that is no longer on the integration
+# branch the lead recorded (KTD18): a builder shares .git and can check out
+# another branch (or detach HEAD) in the lead's checkout, and the next merge,
+# promotion or carve would then build on commits the lead never verified.
+_lead_branch_switched() {
+  local OP=$1 IB=$2 ISHA=$3 CUR=${4:-}
+  echo "${OP}: REFUSED — the lead's integration branch is '${IB}' (at ${ISHA:0:12}) but the checkout is on '${CUR:-<detached HEAD>}' — a builder shares .git and can switch the lead's checkout; if you switched it yourself, run lease_rebaseline (it records the current branch) and rerun (KTD18)." >&2
+}
+
 # _lead_integration_check <op> — lease_merge and lease_promote build on the
-# integration branch only from a state the lead verified: its tip must equal
-# the SHA recorded after the lead's last merge (a builder can move the branch,
-# since it shares .git). A new integration branch is recorded as found.
+# integration branch only from a state the lead verified: the checkout must be
+# on the integration branch the lead recorded, and its tip must equal the SHA
+# recorded after the lead's last merge (a builder can switch the checkout or
+# move the branch, since it shares .git). Only when no integration branch is
+# recorded yet (a new sprint, or the first merge after a promotion cleared it)
+# is the current branch recorded as found.
 _lead_integration_check() {
   local OP=$1 IB ISHA CUR HEAD_SHA LOG
   CUR=$(_lease_current_branch)
-  [ -n "$CUR" ] || return 0
-  HEAD_SHA=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)
   IB=$(_ledger_get @baseline integration_branch 2>/dev/null || true)
   ISHA=$(_ledger_get @baseline integration_sha 2>/dev/null || true)
-  if [ "$IB" != "$CUR" ] || [ -z "$ISHA" ]; then
-    _ledger_update @baseline integration_branch="$CUR" integration_sha="$HEAD_SHA" >/dev/null || return 1
+  if [ -z "$IB" ] || [ -z "$ISHA" ]; then
+    if [ -n "$CUR" ]; then
+      HEAD_SHA=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)
+      _ledger_update @baseline integration_branch="$CUR" integration_sha="$HEAD_SHA" >/dev/null || return 1
+    fi
     return 0
   fi
-  [ "$ISHA" = "$HEAD_SHA" ] && return 0
+  if [ "$IB" != "$CUR" ]; then
+    _lead_branch_switched "$OP" "$IB" "$ISHA" "$CUR"
+    return "$_RC_LEASE_INTEGRITY"
+  fi
+  HEAD_SHA=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)
+  if [ "$ISHA" = "$HEAD_SHA" ]; then return 0; fi
   LOG=$(_lgr log --format='%h %s' "${ISHA}..${HEAD_SHA}" 2>/dev/null | head -5 | _scrub | cut -c1-100 | sed 's/^/      /' || true)
   echo "${OP}: REFUSED — the integration branch '${CUR}' moved since the lead's last merge (${ISHA:0:12} -> ${HEAD_SHA:0:12}). A builder shares .git and can move it, so Triforge merges and promotes only on top of a state it recorded (KTD18). New commits:" >&2
   if [ -n "$LOG" ]; then printf '%s\n' "$LOG" >&2; else echo "      (${ISHA:0:12} is no longer an ancestor — history was rewritten)" >&2; fi
@@ -837,9 +986,15 @@ _lead_integration_check() {
 # integration branch SHAs, and every open lease's pointer/admin digests. Named
 # leases that an integrity check escalated return to the state they were in.
 # Run it only after inspecting what it prints; it is the lead's or the user's
-# acceptance, never a worker's.
+# acceptance, never a worker's. Each acceptance is recorded (audit, not
+# prevention — a worker can call this too): [baseline].last_rebaseline gets
+# "<UTC ISO> by <user> via tty|non-tty; accepted: <surface keys that differed,
+# or none>; resumed: <tasks, or none>", and the same line is appended to
+# [baseline].rebaseline_log (the last 20, joined with " || "; ledger values
+# are flat strings). A detached checkout clears the integration branch, so the
+# next branch the lead merges on is recorded as found.
 lease_rebaseline() {
-  local LEDGER OUT KIND A B C D TAB T PREV CUR HEAD_SHA
+  local LEDGER OUT KIND A B C D TAB T PREV CUR HEAD_SHA="" IB ISHA ACCEPTED="" RESUMED="" VIA LINE LOG
   TAB=$(printf '\t')
   _lease_ctx || return 1
   LEDGER=$_LEASE_LEDGER
@@ -848,32 +1003,55 @@ lease_rebaseline() {
     return 0
   fi
   _lease_default_ref
-  OUT=$(LI_MODE=check LI_RESTORE=0 LI_FORCE_RECORD=1 LI_COMMON="$_LEASE_COMMON" LI_STATE="$_LEASE_STATE" LI_LEDGER="$LEDGER" \
+  OUT=$(LI_MODE=check LI_RESTORE=0 LI_FORCE_RECORD=1 LI_COMMON="$_LEASE_COMMON" LI_STATE="$_LEASE_STATE" LI_REPO="$_LEASE_REPO" LI_LEDGER="$LEDGER" \
         LI_DEF="$_LEASE_DEF" LI_DEF_SHA="$_LEASE_DEF_SHA" python3 -c "$_LEAD_INTEGRITY_PY") || { echo "lease_rebaseline: ERROR the integrity check could not run" >&2; return 1; }
   while IFS="$TAB" read -r KIND A B C D; do
     case "$KIND" in
-      REPO) echo "lease_rebaseline: accepting — ${B}" >&2 ;;
+      REPO)
+        echo "lease_rebaseline: accepting — ${B}" >&2
+        case ",${ACCEPTED}," in
+          *",${A},"*) ;;
+          *) ACCEPTED="${ACCEPTED:+${ACCEPTED},}${A}" ;;
+        esac
+        ;;
       RECORD) _ledger_update "$A" pointer_digest="$B" admin_digest="$C" admin_dir="$D" >/dev/null || return 1 ;;
     esac
   done <<REBASE_EOF
 ${OUT}
 REBASE_EOF
   _lead_baseline_record || return 1
+  IB=$(_ledger_get @baseline integration_branch 2>/dev/null || true)
+  ISHA=$(_ledger_get @baseline integration_sha 2>/dev/null || true)
   CUR=$(_lease_current_branch)
   if [ -n "$CUR" ]; then
     HEAD_SHA=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)
-    _ledger_update @baseline integration_branch="$CUR" integration_sha="$HEAD_SHA" >/dev/null || return 1
   fi
+  if [ -n "$IB" ] && [ -n "$ISHA" ] && { [ "$IB" != "$CUR" ] || [ "$ISHA" != "$HEAD_SHA" ]; }; then
+    echo "lease_rebaseline: accepting — the integration branch ${IB} ${ISHA:0:12} -> ${CUR:-<detached HEAD>} ${HEAD_SHA:0:12}" >&2
+    ACCEPTED="${ACCEPTED:+${ACCEPTED},}integration"
+  fi
+  _ledger_update @baseline integration_branch="$CUR" integration_sha="$HEAD_SHA" >/dev/null || return 1
   for T in "$@"; do
     PREV=$(_ledger_get "$T" integrity_prev_state 2>/dev/null || true)
     if [ -n "$PREV" ] && [ "$(_ledger_get "$T" state 2>/dev/null || true)" = "escalated" ]; then
       _ledger_update "$T" state="$PREV" integrity_prev_state="" reason="" >/dev/null || return 1
       echo "lease_rebaseline: ${T} back to '${PREV}'" >&2
+      RESUMED="${RESUMED:+${RESUMED},}${T}"
     else
       echo "lease_rebaseline: ${T} was not escalated by an integrity check — state unchanged" >&2
     fi
   done
-  echo "lease_rebaseline: baseline recorded (default ${_LEASE_DEF:-<none>} ${_LEASE_DEF_SHA:0:12}, integration ${CUR:-<detached>} ${HEAD_SHA:0:12})" >&2
+  if [ -t 0 ]; then VIA=tty; else VIA=non-tty; fi
+  LINE="$(date -u +%Y-%m-%dT%H:%M:%SZ) by ${USER:-unknown} via ${VIA}; accepted: ${ACCEPTED:-none}; resumed: ${RESUMED:-none}"
+  LOG=$(_ledger_get @baseline rebaseline_log 2>/dev/null || true)
+  LOG=$(RB_LOG="$LOG" RB_LINE="$LINE" python3 -c '
+import os
+log = [e for e in os.environ["RB_LOG"].split(" || ") if e.strip()]
+log.append(os.environ["RB_LINE"])
+print(" || ".join(log[-20:]))
+') || LOG=$LINE
+  _ledger_update @baseline last_rebaseline="$LINE" rebaseline_log="$LOG" >/dev/null || return 1
+  echo "lease_rebaseline: baseline recorded (default ${_LEASE_DEF:-<none>} ${_LEASE_DEF_SHA:0:12}, integration ${CUR:-<detached>} ${HEAD_SHA:0:12}); ${LINE}" >&2
 }
 
 # _adapter_env <cli> <cmd...> — run an external command under the per-adapter
@@ -1159,6 +1337,15 @@ lease_create() {
   # A change a worker made since the lead's last check (a planted hook, git
   # config, a moved ref) is caught before the next worktree is carved (KTD18).
   _lead_integrity_check lease_create || return $?
+  # The worktree is carved at the lead's HEAD, so the checkout must still be on
+  # the integration branch the lead recorded: a builder shares .git and can
+  # switch the lead's checkout to a branch of its own (KTD18).
+  CUR=$(_lease_current_branch)
+  IB=$(_ledger_get @baseline integration_branch 2>/dev/null || true)
+  if [ -n "$IB" ] && [ "$IB" != "$CUR" ]; then
+    _lead_branch_switched lease_create "$IB" "$(_ledger_get @baseline integration_sha 2>/dev/null || true)" "$CUR"
+    return "$_RC_LEASE_INTEGRITY"
+  fi
   RESOLVED=$(resolve_role "$ROLE") || return $?
   CLI=$(printf '%s\n' "$RESOLVED" | cut -f1)
   MODEL=$(printf '%s\n' "$RESOLVED" | cut -f2)
@@ -1171,7 +1358,6 @@ lease_create() {
   _lease_carve "$TASK_ID" "$WT" || return 1
   _lease_provision_skills "$WT"
   NOW=$(date +%s)
-  CUR=$(_lease_current_branch)
   _ledger_update "$TASK_ID" \
     task_id="$TASK_ID" role="$ROLE" \
     builder_cli="$CLI" builder_model="$MODEL" builder_effort="$EFFORT" \
@@ -1182,13 +1368,14 @@ lease_create() {
     integration_branch="$CUR" snapshot_sha="" snapshot_tree="" builder_commits="" integrity_prev_state="" \
     || return 1
   # First lease in this checkout: the lead's verified state becomes the
-  # integrity baseline before any builder runs; a new integration branch is
-  # recorded at the commit its first lease starts from.
+  # integrity baseline before any builder runs. With no integration branch
+  # recorded (a new sprint, or the first lease after a promotion cleared it),
+  # the current branch is recorded at the commit its first lease starts from;
+  # a recorded one that differs was refused above.
   if [ -z "$(_ledger_get @baseline config 2>/dev/null || true)" ]; then
     _lead_baseline_record || return 1
   fi
-  IB=$(_ledger_get @baseline integration_branch 2>/dev/null || true)
-  if [ -n "$CUR" ] && [ "$IB" != "$CUR" ]; then
+  if [ -n "$CUR" ] && [ -z "$IB" ]; then
     _ledger_update @baseline integration_branch="$CUR" integration_sha="$_CARVE_BASE" || return 1
   fi
   echo "lease_create: task=${TASK_ID} role=${ROLE} builder=${CLI} model=${MODEL:-host-default} worktree=${WT}" >&2
@@ -2139,8 +2326,10 @@ sys.exit(0 if isinstance(data, dict) and data.get("name") == "agent-triforge" el
 # Gate, in order:
 #   (0) the integrity check (KTD18) and, when a ledger exists, the
 #       integration-branch check: a moved default branch, planted git config
-#       or hooks, or an unrecorded commit on the integration branch refuses
-#       with rc 44 before anything else runs
+#       or hooks, a checkout switched off the recorded integration branch, or
+#       an unrecorded commit on the integration branch refuses with rc 44
+#       before anything else runs; a successful promotion clears the recorded
+#       integration branch (the sprint is done)
 #   (a) read [promotion].require_user_approval from ops/roster.toml (default false)
 #   (b) compute the integration branch's changed paths vs the default branch:
 #       git diff -z --name-only --no-renames <default>...HEAD — both sides of
@@ -2164,8 +2353,9 @@ lease_promote() {
   _lease_ctx || { echo "lease_promote: ERROR not inside a git repository" >&2; return 1; }
   REPO=$_LEASE_REPO
   # Promotion writes the default branch: only from a git state the lead
-  # verified (KTD18) — a moved default branch, planted config or hooks, or an
-  # unrecorded commit on the integration branch refuses here.
+  # verified (KTD18) — a moved default branch, planted config or hooks, a
+  # switched checkout, or an unrecorded commit on the integration branch
+  # refuses here.
   _lead_integrity_check lease_promote || return $?
   DEFAULT_BRANCH=${1:-$(_lease_default_branch "$REPO")}
   if [ -z "$DEFAULT_BRANCH" ]; then
@@ -2283,9 +2473,11 @@ print('true' if v is True else 'false')
   local SHA
   SHA=$(_lgr rev-parse HEAD)
   # The lead's own promotion moves the default branch: record it, so the next
-  # check compares against this state rather than escalating it (KTD18).
+  # check compares against this state rather than escalating it (KTD18). That
+  # sprint's integration branch is done: clear it, and the next lease_create
+  # (or merge) records the new one.
   if [ -f "$_LEASE_LEDGER" ]; then
-    _ledger_update @baseline default_branch="$DEFAULT_BRANCH" default_sha="$SHA" >/dev/null || true
+    _ledger_update @baseline default_branch="$DEFAULT_BRANCH" default_sha="$SHA" integration_branch="" integration_sha="" >/dev/null || true
   fi
   echo "lease_promote: PROMOTED '${INTEGRATION_BRANCH}' -> '${DEFAULT_BRANCH}' (HEAD ${SHA}); require_user_approval=${REQUIRE_APPROVAL}, protected-paths=none." >&2
   return 0

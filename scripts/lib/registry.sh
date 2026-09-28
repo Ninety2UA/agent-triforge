@@ -22,8 +22,11 @@ fi
 #   PROJECT_PROTECTED    what governs the pool in ANY project: the roster, each
 #                        CLI's permission/config tree, and every instruction
 #                        file at any depth.
-# Entries ending in "/" match a directory prefix; any other entry matches that
-# exact path (or a directory of that name). *_ANY_DEPTH entries match a
+# Entries ending in "/" match everything under that directory AND the bare
+# name itself (".claude/" also hits a changed path ".claude"), so a symlink or
+# file committed in the directory's place cannot redirect a CLI config tree
+# past the gate; ".clauder" or "claudeish" still do not match. Any other entry
+# matches that exact path (or a directory of that name). *_ANY_DEPTH entries match a
 # basename anywhere in the tree. Matching is case-folded, because the default
 # macOS filesystem treats Hooks/handlers/x.sh and hooks/handlers/x.sh as one
 # file. Callers feed BOTH sides of a rename (git diff --no-renames) and read
@@ -55,6 +58,10 @@ PROJECT_PROTECTED = (
     # each CLI project-tier config / permission tree (agy reads .agents/hooks.json
     # and .agents/agents/, so .agents/ is protected whole, skills included)
     ".claude/", ".codex/", ".agents/", ".antigravity/", ".gemini/", ".opencode/", ".kimi-code/", ".cursor/",
+    # project-root config files outside those trees: OpenCode reads its permission
+    # config from opencode.json / opencode.jsonc, and Cursor still reads the
+    # legacy root instruction file .cursorrules
+    "opencode.json", "opencode.jsonc", ".cursorrules",
 )
 PROJECT_PROTECTED_ANY_DEPTH = ("agents.md", "agents.override.md", "claude.md", "claude.local.md", ".mcp.json")
 
@@ -64,7 +71,7 @@ def _protected_hit(folded, base, entries, any_depth):
     for e in entries:
         e = e.casefold()
         if e.endswith("/"):
-            if folded.startswith(e):
+            if folded.startswith(e) or folded == e[:-1]:
                 return True
         elif folded == e or folded.startswith(e + "/"):
             return True
