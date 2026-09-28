@@ -1588,8 +1588,8 @@ row "RTN-01" "claude" "Scheduled Routine env: checkout, push/PR, binaries, non-i
 fi  # end of the per-CLI sections skipped by --self-only
 
 # --------------------------------------------------------- Self-verification
-# Framework SCRIPT invariants (SELF-01..SELF-10) live in scripts/probe-self-
-# tests.sh, sourced here inside the same shell so they see every helper and
+# Framework SCRIPT invariants (SELF-01..SELF-10, SELF-18) live in
+# scripts/probe-self-tests.sh, sourced here inside the same shell so they see every helper and
 # gate above. They are static (no external CLI, no network) except SELF-06,
 # which reproduces the lease lane per CLI and is gated on each CLI's live gate.
 # shellcheck source=probe-self-tests.sh
@@ -1693,7 +1693,7 @@ COUNTER_MISMATCH=0
   echo "- **CC-06** → \`claude plugin validate --strict\` release gate baseline — \`.claude-plugin/plugin.json\` and \`.claude-plugin/marketplace.json\` validated separately, PASS only when both pass (D-039)."
   echo "- **CC-07/CC-07b** → \`.claude/skills/\` expands via \`/<skill>\`; \`.agents/skills/\` is not a Claude path (the plugin path carries the shipped skills — KTD13 discovery matrix)."
   echo "- **RTN-01** → headless watch delivery mode; runtime preflight absorbs all three outcomes."
-  echo "- **SELF-01..SELF-04** → roster chain rejection, coordinate.sh composition, adapter env allowlist, the R35 boundary. **SELF-05** → the Status-line parser seam (KTD11: DONE / MISSING / BLOCKED). **SELF-06** → lease-lane skill discovery per CLI under the env -i boundary (KTD7/R9; PASS = the probe skill is listed, shipped coverage in the evidence). **SELF-07** → the TRIFORGE_TEST_BUILDER lifecycle: DONE → review, report missing → never review-ready, BLOCKED → escalated (KTD11). **SELF-08** → session-start idempotence (KTD7/KTD8). **SELF-08b** → the digest-stamped skills refresh: only Triforge's own unchanged copies are replaced or retired, in session start and lease provisioning alike (KTD12/R31). **SELF-09** → the no-push backstop (CS1). **SELF-10** → the protected-path lists in \`scripts/lib/registry.sh\` and the fail-closed scan in \`lease_promote\` (KTD8/R30). Under \`--self-only\` these rows are the whole run and any SELF FAIL exits 3 (KTD15)."
+  echo "- **SELF-01..SELF-04** → roster chain rejection, coordinate.sh composition, adapter env allowlist, the R35 boundary. **SELF-05** → the Status-line parser seam (KTD11: DONE / MISSING / BLOCKED). **SELF-06** → lease-lane skill discovery per CLI under the env -i boundary (KTD7/R9; PASS = the probe skill is listed, shipped coverage in the evidence). **SELF-07** → the TRIFORGE_TEST_BUILDER lifecycle: DONE → review, report missing → never review-ready, BLOCKED → escalated (KTD11). **SELF-08** → session-start idempotence (KTD7/KTD8). **SELF-08b** → the digest-stamped skills refresh: only Triforge's own unchanged copies are replaced or retired, in session start and lease provisioning alike (KTD12/R31). **SELF-09** → the no-push backstop (CS1). **SELF-10** → the protected-path lists in \`scripts/lib/registry.sh\` and the fail-closed scan in \`lease_promote\` (KTD8/R30). **SELF-18** → lead-side git hardening (\`_lead_git\`), integrity detection with restore and escalation, and snapshot-only merges (KTD18/KTD19, R46/R47/R49). Under \`--self-only\` these rows are the whole run and any SELF FAIL exits 3 (KTD15)."
   echo
   echo "## Appendix A: codex features list"
   echo
