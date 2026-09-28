@@ -615,9 +615,18 @@ ${PROMPT}"
           # exactly like the codex case guards model_reasoning_effort. The lease
           # path has no retry, so a provider that rejects the variant surfaces as a
           # KTD-9-classified failure the lead requeues — same as any other lane.
-          local -a CMD=(opencode run --format json -m "${MODEL:-openrouter/z-ai/glm-5.3}")
-          [ -n "$EFFORT" ] && CMD+=(--variant "$EFFORT")
-          _adapter_env opencode "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+          # OpenCode V2 guard (D-049): V2 ignores OPENCODE_PERMISSION and runs
+          # a shared background service outside env -i, so a V2 binary never
+          # dispatches — deterministic refusal naming the V1 pin, recorded in
+          # <out>.class like the agy denied-actions arm (no requeue).
+          if ! _opencode_v2_check opencode; then
+            _opencode_v2_refusal lease_dispatch > "$OUT"
+            RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1
+          else
+            local -a CMD=(opencode run --format json -m "${MODEL:-openrouter/z-ai/glm-5.3}")
+            [ -n "$EFFORT" ] && CMD+=(--variant "$EFFORT")
+            _adapter_env opencode "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+          fi
           ;;
         kimi)
           # R35-confined optional-tier builder (U12): raw `kimi -p` with cwd =

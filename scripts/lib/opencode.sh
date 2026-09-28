@@ -58,6 +58,44 @@ fi
 # the enforced boundary stays the lease worktree + the no-push git config.
 _OPENCODE_PERMISSION_DEFAULT='{"bash":{"*":"allow","rm -rf*":"deny","rm -fr*":"deny","rm -Rf*":"deny","rm -fR*":"deny","rm -r *":"deny","rm -R *":"deny","git push*":"deny","git -c * push*":"deny","git -C * push*":"deny","sudo*":"deny","command sudo*":"deny","doas *":"deny"}}'
 
+# OpenCode V2 guard (D-049). V2 (npm @opencode/cli, 2026-09-11) ships the same
+# `opencode` binary but does not read OPENCODE_PERMISSION, so the deny set above
+# would be silently dropped, and it defaults to a shared per-user background
+# service that ignores the caller's env -i environment. Until the V2 port lands
+# (deferred — its own sprint), every OpenCode entry point refuses a V2 binary:
+# invoke_opencode, the lease opencode) arm (scripts/lib/lease.sh), and /setup's
+# enrollment preflight (roster_enroll_member). The fix is the V1 pin below —
+# never the npm package `opencode2`, a third-party decoy.
+_OPENCODE_V1_PIN='npm i -g opencode-ai@1'
+
+# _opencode_v2_check [binary] — sets _OPENCODE_VERSION to the first x.y[.z]
+# token of `<binary> --version` (15 s, fail-closed timeout wrapper) and returns
+# 1 when its major is >= 2 (V2: refuse), else 0. A version that cannot be read
+# returns 0 — the refusal is keyed on a parsed V2 version, never on a flaky
+# probe, so a V1 host is not locked out.
+_OPENCODE_VERSION=""
+_opencode_v2_check() {
+  local BIN=${1:-opencode} MAJOR=""
+  _OPENCODE_VERSION=$(_run_with_timeout 15 "$BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true)
+  MAJOR=${_OPENCODE_VERSION%%.*}
+  if [ -n "$MAJOR" ] && [ "$MAJOR" -ge 2 ] 2>/dev/null; then
+    return 1
+  fi
+  return 0
+}
+
+# _opencode_v2_reason — the one explanation of the refusal (version, why, the
+# V1 pin); every entry point words its own prefix and next step around it.
+_opencode_v2_reason() {
+  echo "OpenCode V2 detected (\`opencode --version\` = ${_OPENCODE_VERSION:-2.x}) — unsupported: V2 does not read OPENCODE_PERMISSION (Triforge's deny set would be silently dropped) and runs a shared background service outside the env -i boundary (D-049). Fix: pin OpenCode V1: ${_OPENCODE_V1_PIN} (the V2 port is deferred)."
+}
+
+# _opencode_v2_refusal <caller> — the dispatch-time refusal (stderr + OUTPUT_FILE
+# for invoke_opencode, <out> for the lease arm).
+_opencode_v2_refusal() {
+  echo "${1:-opencode}: ERROR $(_opencode_v2_reason) No retry (deterministic)."
+}
+
 # _oc_extract_text <raw-stream-file> <output-file> — extract the assistant's final
 # text from a opencode JSON event stream (`opencode run --format json`) into <output-file>; exits nonzero (writing nothing)
 # when no text is found so the caller can preserve the raw stream. Shared by
@@ -180,6 +218,17 @@ invoke_opencode() {
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="binary-missing"
     return 127
+  fi
+
+  # Deterministic preflight 1b (KTD-9, D-049): an OpenCode V2 binary would run
+  # without the deny set — refuse before any model call. Same shape as the auth
+  # preflight: deterministic class, rc 1, guidance in OUTPUT_FILE too.
+  if ! _opencode_v2_check opencode; then
+    _opencode_v2_refusal invoke_opencode >&2
+    _opencode_v2_refusal invoke_opencode > "$OUTPUT_FILE" 2>/dev/null || true
+    INVOKE_FAILURE_CLASS="deterministic"
+    _INVOKE_FAILURE_REASON="unsupported-version"
+    return 1
   fi
 
   # Deterministic preflight 2 (KTD-9): an openrouter/* model needs a connected

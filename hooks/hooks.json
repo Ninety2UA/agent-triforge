@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/handlers/session-start.sh"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/handlers/session-start.sh\""
           }
         ]
       }
@@ -17,11 +17,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/handlers/context-monitor.sh"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/handlers/context-monitor.sh\""
           },
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/handlers/tool-failure-monitor.sh"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/handlers/tool-failure-monitor.sh\""
           }
         ]
       }
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/handlers/pre-compact.sh"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/handlers/pre-compact.sh\""
           }
         ]
       }

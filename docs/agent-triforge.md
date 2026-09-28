@@ -1223,7 +1223,7 @@ your-project/                       (bootstrapped on first session)
 
 The plugin handles all configuration automatically via `hooks/hooks.json` and `settings.json`. No manual `.claude/settings.json` editing needed.
 
-Hook registration uses `${CLAUDE_PLUGIN_ROOT}` for plugin-relative paths:
+Hook registration uses a double-quoted `"${CLAUDE_PLUGIN_ROOT}"` for plugin-relative paths (an unquoted placeholder fails `claude plugin validate --strict` since Claude Code 2.1.281 — D-039):
 
 ```json
 {
@@ -1231,7 +1231,7 @@ Hook registration uses `${CLAUDE_PLUGIN_ROOT}` for plugin-relative paths:
     "SessionStart": [
       {
         "matcher": "",
-        "hooks": [{ "type": "command", "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/handlers/session-start.sh" }]
+        "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/handlers/session-start.sh\"" }]
       }
     ]
   }
