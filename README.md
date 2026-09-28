@@ -47,6 +47,18 @@ The framework achieves this through **institutional knowledge compounding**: eve
 
 ---
 
+## What's new (v3.3.3)
+
+A safety hotfix, shipped before the lead-choice redesign (plan `docs/plans/2026-09-28-1946-feat-lead-choice-v4-plan.md`, Phase H):
+
+- **Promotion catches every control-plane change.** `lease_promote`'s protected list missed `scripts/lib/`, `scripts/lease-git-hooks/` and `scripts/probe-self-tests.sh`, saw only the new name of a renamed file, and read a scan error as "nothing protected". The lists now live in `scripts/lib/registry.sh`: a framework list that applies only in the Triforge checkout, and a project list that applies everywhere (`ops/roster.toml`, `.claude/`, `.codex/`, `.agents/` and the other CLI config trees, and every `AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`, `CLAUDE.local.md` and `.mcp.json` at any depth). The scan is case-folded, sees both sides of a rename, and blocks promotion (rc 42) when it can't run.
+- **Your own skills survive the refresh.** Session start used to delete any `.agents/skills/` directory whose name matched a shipped skill. The stamp now records a content digest for each directory Triforge wrote, and a directory is replaced or retired only while it still matches. An edited copy, or your own directory under a shipped name, is kept with a notice. A 3.3.0–3.3.2 stamp is migrated against the digests of every released copy (`scripts/lib/skill-digests.txt`). Lease worktrees follow the same rule and no longer write through a committed `.agents/skills` symlink.
+- **A builder can't steer the lead's git.** A worktree limits where a builder starts, not where it writes. Every git call in the lease lifecycle now goes through `_lead_git`: system config off, a trusted global config captured on first use, and hooks, fsmonitor, the global attributes file, signing and pager turned off. Before the lease functions act, they compare `.git/config`, `.git/hooks/`, `.git/info/`, the global git config, the ledger, the default branch and each lease's worktree pointer with the lead's recorded baseline. A change the lead didn't make is restored where possible, the open leases are escalated, and the call returns 44. `lease_rebaseline` accepts a change you made yourself. This is detection, not prevention.
+- **Only the lead's snapshot merges.** `lease_collect` now takes the snapshot (one lead-made commit on the recorded base) that the review and the merge bind to. `lease_merge` squashes that SHA and refuses, by name, a builder's own commit, an edit to `ops/`, or a worktree changed after collect. It also refuses when the integration branch moved since the lead's last merge.
+- **The SELF rows are a gate.** `bash scripts/probe-capabilities.sh --self-only` runs only the static SELF rows, writes its record to a scratch path, and exits 3 on any SELF FAIL. `.github/workflows/gates.yml` runs it with both validators on macOS for every PR to `main` and `release/4.0`. New rows: SELF-10 (protected paths) and SELF-18 (lead git integrity); SELF-08b covers the digest refresh.
+
+Upgrading: open 3.3.x leases keep working (a lease collected by 3.3.2 is snapshotted at merge under the new checks). Two behavior changes to know about. First, `lease_merge`'s commit no longer runs repository hooks. Second, if you commit on the integration branch between merges, `lease_merge` and `lease_promote` refuse until you run `lease_rebaseline`.
+
 ## What's new (v3.3.2)
 
 A hotfix from the 2026-09-27 watch cycle (D-039, D-049, D-050, S28), shipped before the lead-choice redesign:
@@ -759,6 +771,10 @@ After solving a non-trivial problem, <a href="commands/compound.md"><code>/compo
 ---
 
 ## Recent changes
+
+### 2026-09-28 — v3.3.3: protected-path registry, digest-stamped skills, lead git integrity
+
+A safety hotfix ahead of the lead-choice redesign (Phase H of `docs/plans/2026-09-28-1946-feat-lead-choice-v4-plan.md`). `lease_promote` classifies the integration diff against two lists in `scripts/lib/registry.sh`: framework paths in the Triforge checkout only, and project paths everywhere. The scan is case-folded, includes instruction files at any depth and both sides of a rename, and fails closed with rc 42 (U1, SELF-10). The `.agents/skills/` refresh and lease provisioning replace only directories whose content digest matches the stamp, and a 3.3.0–3.3.2 stamp is migrated against the released digests (U2, SELF-08b). Every lease git call goes through `_lead_git`. A planted config, hook, filter, ref, pointer redirect or ledger edit is restored where possible and escalated with rc 44 (`lease_rebaseline` accepts your own change). `lease_merge` squashes only the snapshot `lease_collect` recorded, refusing builder commits, `ops/` edits and post-collect changes (U27, SELF-18). `probe-capabilities.sh --self-only` is the SELF gate (exit 3 on a SELF FAIL), and `.github/workflows/gates.yml` runs it with both validators on macOS for PRs to `main` and `release/4.0` (U28). `lease_merge`'s commit no longer runs repository hooks. Ladder hash unchanged (`24a7ee2039c8c2e4907472e4cf82fdfd`); the probe record is not regenerated for this hotfix, and the SELF gate passes (17 SELF rows, none FAIL).
 
 ### 2026-09-28 — v3.3.2: release gate green, OpenCode V2 guard, Cursor Grok 4.7 ids
 
