@@ -1285,6 +1285,39 @@ _RC_LEASE_ESCALATED=43
 # and the gate codes above (40–43, 96).
 _RC_DEGRADED=80
 
+# _lease_is_framework_checkout <repo> <default-branch> — 0 when <repo> is the
+# Triforge checkout, where framework_protected applies (KTD8). Reads
+# .claude-plugin/plugin.json from the working tree, HEAD and the default
+# branch: a diff that renames the plugin can't switch the framework list off,
+# because the default branch still names agent-triforge. Fail closed: a
+# manifest that exists but doesn't parse counts as the Triforge checkout.
+_lease_is_framework_checkout() {
+  local REPO=$1 DEF=${2:-} REV M
+  M="${REPO}/.claude-plugin/plugin.json"
+  [ -f "$M" ] && _lease_manifest_is_triforge < "$M" && return 0
+  for REV in HEAD ${DEF:+"$DEF"}; do
+    git -C "$REPO" show "${REV}:.claude-plugin/plugin.json" 2>/dev/null | _lease_manifest_is_triforge && return 0
+  done
+  return 1
+}
+
+# _lease_manifest_is_triforge < manifest — 0 when stdin is a plugin manifest
+# named agent-triforge OR is non-empty but not valid JSON (fail closed); 1 for
+# an empty input or a manifest with another name.
+_lease_manifest_is_triforge() {
+  python3 -c '
+import json, sys
+raw = sys.stdin.read()
+if not raw.strip():
+    sys.exit(1)
+try:
+    data = json.loads(raw)
+except Exception:
+    sys.exit(0)
+sys.exit(0 if isinstance(data, dict) and data.get("name") == "agent-triforge" else 1)
+'
+}
+
 # lease_promote [<default-branch>] — wave-end promotion of the sprint integration
 # branch to the repo default branch (KTD-5). This is the ONLY path that writes the
 # default branch; lease_merge only ever lands on the integration branch. Run it
@@ -1294,14 +1327,18 @@ _RC_DEGRADED=80
 # Gate, in order:
 #   (a) read [promotion].require_user_approval from ops/roster.toml (default false)
 #   (b) compute the integration branch's changed paths vs the default branch:
-#       git diff --name-only <default>...HEAD
-#   (c) scan them against PROTECTED_PATHS — the controls that govern the pool:
-#       permission configs, deny/policy rules, ops/roster.toml (incl [promotion]),
-#       and the shipped agent configs
-#   (d) require_user_approval=true OR any protected path touched -> BLOCK: print
-#       that promotion needs lead/user approval (a protected-path diff forces the
-#       gate on and requires the lead or user as reviewer, never external-CLI-only),
-#       return _RC_PROMOTE_BLOCKED, do NOT merge
+#       git diff -z --name-only --no-renames <default>...HEAD — both sides of
+#       every rename, NUL-separated so no path is quoted out of a match
+#   (c) classify them against the registry's protected-path lists (KTD8,
+#       scripts/lib/registry.sh): project_protected always, framework_protected
+#       only in the Triforge checkout (_lease_is_framework_checkout). Case-
+#       folded; instruction files match at any depth. A classifier or diff
+#       error counts as a hit — the scan fails closed
+#   (d) require_user_approval=true OR any protected path touched OR the scan
+#       failed -> BLOCK: print that promotion needs lead/user approval (a
+#       protected-path diff forces the gate on and requires the lead or user as
+#       reviewer, never external-CLI-only), return _RC_PROMOTE_BLOCKED, do NOT
+#       merge
 #   (e) else fast-forward (or merge) the integration branch into the default
 #       branch and report the promotion.
 # Atomic where it matters: the default branch is never touched unless the gate
@@ -1359,78 +1396,45 @@ print('true' if v is True else 'false')
 " 2>/dev/null || echo "true")
   fi
 
-  # (b) changed paths of the integration branch vs the default branch.
-  local CHANGED
-  CHANGED=$(git -C "$REPO" diff --name-only "${DEFAULT_BRANCH}...HEAD" 2>/dev/null) || {
-    echo "lease_promote: ERROR could not diff '${DEFAULT_BRANCH}...HEAD' — is '${DEFAULT_BRANCH}' a valid branch reachable from HEAD?" >&2
+  # (b) changed paths of the integration branch vs the default branch, both
+  # sides of each rename (--no-renames), NUL-separated (-z) so core.quotePath
+  # can't wrap a non-ASCII path in quotes that dodge a prefix match.
+  if ! git -C "$REPO" rev-parse --verify --quiet "${DEFAULT_BRANCH}^{commit}" >/dev/null 2>&1; then
+    echo "lease_promote: ERROR '${DEFAULT_BRANCH}' is not a valid branch or commit — pass the default branch explicitly: lease_promote <default-branch>." >&2
     return 1
-  }
+  fi
+  local SCAN_DIR SCAN_ERR="" PROTECTED_HIT="" FRAMEWORK=0
+  SCAN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/triforge-promote-scan.XXXXXX") || return 1
+  if ! git -C "$REPO" diff -z --name-only --no-renames "${DEFAULT_BRANCH}...HEAD" > "${SCAN_DIR}/changed" 2> "${SCAN_DIR}/err"; then
+    SCAN_ERR="git diff ${DEFAULT_BRANCH}...HEAD failed: $(head -c 300 "${SCAN_DIR}/err" | tr '\n' ' ')"
+  fi
 
-  # (c) protected-path scan. A single match forces the gate ON regardless of the
-  # knob. Prefixes cover every shipped agent config, each CLI's permission/deny
-  # config (shipped templates/.*/ AND the project-level live .*/ dirs), and
-  # ops/roster.toml (incl
-  # its [promotion] block), and the shipped agent configs (agents/, and every
-  # <cli>-agents/ dir). No literal backticks in the heredoc.
-  local PROTECTED_HIT=""
-  PROTECTED_HIT=$(CHANGED="$CHANGED" python3 -c "
-import os
-protected_prefixes = (
-    'agents/',
-    'antigravity-agents/',
-    'codex-agents/',
-    'opencode-agents/',
-    'kimi-agents/',
-    'cursor-agents/',
-    # Orchestration + lifecycle control plane — the framework's own files that
-    # IMPLEMENT the lease/confinement/promotion/review machinery and lifecycle
-    # hooks. Protected by SPECIFIC path (not whole top-level dirs) so a wave in a
-    # USER project whose own app code lives under scripts/ or commands/ is not
-    # force-gated on every touch; these are the plugin's control-plane files
-    # (when dogfooding this repo) plus the permission configs sensitive in ANY
-    # project. A wave must never promote a change to its own enforcement code or
-    # permission config on an external-CLI-only review.
-    'scripts/invoke-external.sh',
-    'scripts/coordinate.sh',
-    'scripts/probe-capabilities.sh',
-    'hooks/hooks.json',
-    'hooks/handlers/',
-    '.claude/settings.json',
-    '.claude/settings.local.json',
-    '.claude-plugin/',
-    # Shipped per-CLI templates (member-governing configs, permission/deny
-    # rules) — every optional member's dir, symmetric with the core trio's.
-    'templates/.antigravity/',
-    'templates/.opencode/',
-    'templates/.codex/',
-    'templates/.kimi-code/',
-    'templates/.cursor/',
-    'templates/ops/roster.toml',
-    # Project-level live CLI configs — a wave must not silently rewrite the
-    # permission/governance config any adapter reads.
-    '.codex/',
-    '.opencode/',
-    '.kimi-code/',
-    '.cursor/',
-    '.antigravity/',
-    'ops/roster.toml',
-)
-for line in os.environ.get('CHANGED', '').splitlines():
-    p = line.strip()
-    if p and p.startswith(protected_prefixes):
-        print(p)
-" 2>/dev/null || true)
+  # (c) protected-path scan (KTD8). A hit forces the gate ON regardless of the
+  # knob. Fail closed: an unreadable plugin manifest counts as the Triforge
+  # checkout, and any classifier error blocks with its message.
+  if [ -z "$SCAN_ERR" ]; then
+    _lease_is_framework_checkout "$REPO" "$DEFAULT_BRANCH" && FRAMEWORK=1
+    if ! _protected_classify "$FRAMEWORK" < "${SCAN_DIR}/changed" > "${SCAN_DIR}/hits" 2> "${SCAN_DIR}/err"; then
+      SCAN_ERR="protected-path classifier failed: $(tail -c 300 "${SCAN_DIR}/err" | tr '\n' ' ')"
+    else
+      PROTECTED_HIT=$(cat "${SCAN_DIR}/hits")
+    fi
+  fi
+  rm -rf "$SCAN_DIR"
 
   # (d) block when gated.
-  if [ "$REQUIRE_APPROVAL" = "true" ] || [ -n "$PROTECTED_HIT" ]; then
+  if [ "$REQUIRE_APPROVAL" = "true" ] || [ -n "$PROTECTED_HIT" ] || [ -n "$SCAN_ERR" ]; then
     echo "lease_promote: BLOCKED — promotion of '${INTEGRATION_BRANCH}' to '${DEFAULT_BRANCH}' needs lead/user approval. No merge performed." >&2
     if [ "$REQUIRE_APPROVAL" = "true" ]; then
       echo "  reason: [promotion].require_user_approval = true in ops/roster.toml (KTD-5 user gate)." >&2
     fi
+    if [ -n "$SCAN_ERR" ]; then
+      echo "  reason: the protected-path scan could not run, so the diff is treated as protected (fail-closed, KTD8): ${SCAN_ERR}" >&2
+    fi
     if [ -n "$PROTECTED_HIT" ]; then
-      echo "  reason: the integration diff touches protected paths (controls that govern the pool). A protected-path diff forces the gate ON regardless of the knob and requires the LEAD or USER as reviewer — never an external-CLI-only review:" >&2
-      printf '%s\n' "$PROTECTED_HIT" | while IFS= read -r _ph; do
-        [ -n "$_ph" ] && echo "    ${_ph}" >&2
+      echo "  reason: the integration diff touches protected paths (controls that govern the pool; lists in scripts/lib/registry.sh — framework_protected applies in the Triforge checkout only). A protected-path diff forces the gate ON regardless of the knob and requires the LEAD or USER as reviewer — never an external-CLI-only review:" >&2
+      printf '%s\n' "$PROTECTED_HIT" | while IFS="$(printf '\t')" read -r _pl _ph; do
+        [ -n "$_ph" ] && echo "    ${_ph}  (${_pl}_protected)" >&2
       done
     fi
     echo "  Once the lead/user approves, promote by hand (git checkout ${DEFAULT_BRANCH} && git merge ${INTEGRATION_BRANCH}) or set [promotion].require_user_approval=false for a purely non-protected diff and rerun." >&2

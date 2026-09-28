@@ -436,3 +436,103 @@ else
 fi
 rm -rf "$_S9"
 
+# SELF-10 (KTD8 / R30): the protected-path lists. (a) Every path named on the
+# "**Protected paths**" line of .claude/CLAUDE.md classifies as protected in
+# this checkout (a glob is instantiated, a directory gets a child) — with a
+# negative control: the same check over a copy carrying one planted
+# unprotected path must name exactly that path. (b) lease_promote on
+# throwaway fixtures: in a Triforge-shaped repo (plugin.json named
+# agent-triforge) an edit to scripts/lib/roster.sh, a rename out of
+# scripts/lease-git-hooks/, a nested AGENTS.md, an AGENTS.override.md, a
+# .mcp.json and a case variant Hooks/handlers/x.sh each block with rc 42 and
+# name the path, while a docs-only change promotes; in a user-shaped repo an
+# edit to scripts/lib/util.sh promotes with the knob off and ops/roster.toml
+# still blocks; a corrupted registry literal blocks and names the error.
+_s10_doc_misses() { # _s10_doc_misses <doc> — protected-line paths the registry doesn't cover
+  ( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null
+    S10_DOC="$1" python3 -c '
+import os, re, sys
+toks = []
+for line in open(os.environ["S10_DOC"], encoding="utf-8"):
+    if line.startswith("- **Protected paths**"):
+        for t in re.findall(r"`([^`]+)`", line):
+            if re.fullmatch(r"[A-Za-z0-9._*/-]+", t) and ("/" in t or re.search(r"\.[A-Za-z]+$", t)):
+                toks.append(t)
+if len(toks) < 10:
+    print("LINE-MISSING(" + str(len(toks)) + "-paths)")
+    sys.exit(0)
+for t in toks:
+    p = t.replace("*", "x")
+    if p.endswith("/"):
+        p += "x"
+    sys.stdout.write(t + "\t" + p + "\0")
+' > "${WORK}/s10-doc-paths" || { echo "CHECK-ERROR"; return 0; }
+    if grep -q '^LINE-MISSING' "${WORK}/s10-doc-paths"; then cat "${WORK}/s10-doc-paths"; return 0; fi
+    # classify the instantiated paths; print the documented token of each miss
+    tr '\0' '\n' < "${WORK}/s10-doc-paths" | cut -f2 | tr '\n' '\0' | _protected_classify 1 > "${WORK}/s10-doc-hits" 2>/dev/null || { echo "CLASSIFIER-ERROR"; return 0; }
+    tr '\0' '\n' < "${WORK}/s10-doc-paths" | while IFS="$(printf '\t')" read -r _tok _inst; do
+      [ -n "$_inst" ] || continue
+      cut -f2 "${WORK}/s10-doc-hits" | grep -Fxq -- "$_inst" || printf '%s ' "$_tok"
+    done )
+}
+_S10_FAIL=""
+_S10_REAL=$(_s10_doc_misses "${REPO_ROOT}/.claude/CLAUDE.md")
+[ -z "$_S10_REAL" ] || _S10_FAIL="$_S10_FAIL doc-paths-unprotected:[${_S10_REAL% }]"
+sed 's#^- \*\*Protected paths\*\*\(.*\)$#- **Protected paths**\1 `scripts/not-a-protected-probe.sh`#' "${REPO_ROOT}/.claude/CLAUDE.md" > "${WORK}/s10-planted.md"
+_S10_NEG=$(_s10_doc_misses "${WORK}/s10-planted.md")
+[ "${_S10_NEG% }" = "scripts/not-a-protected-probe.sh" ] || _S10_FAIL="$_S10_FAIL negative-control(got:[${_S10_NEG% }])"
+
+_S10="${WORK}/self10"
+_s10_repo() { # _s10_repo <dir> <triforge:0|1> — main + checked-out integration branch sprint/s10
+  mkdir -p "$1"
+  ( cd "$1" && git init -q -b main && git config user.email "probe@triforge.local" && git config user.name "triforge-probe"
+    mkdir -p docs scripts/lib scripts/lease-git-hooks ops
+    echo "doc" > docs/readme.md; echo "lib" > scripts/lib/roster.sh; echo "lib" > scripts/lib/util.sh
+    echo "hook" > scripts/lease-git-hooks/pre-push
+    printf '[promotion]\nrequire_user_approval = false\n' > ops/roster.toml
+    if [ "$2" = 1 ]; then mkdir -p .claude-plugin; printf '{"name": "agent-triforge", "version": "0.0.0"}\n' > .claude-plugin/plugin.json; fi
+    git add -A && git commit -qm init && git checkout -q -b sprint/s10 ) >/dev/null 2>&1
+}
+_s10_case() { # _s10_case <repo> <label> <shell change> [registry-override] — rc + whether the change's path was named
+  local R=$1 L=$2 CHANGE=$3 OVR=${4:-} RC=0 ERR
+  ( cd "$R" && git checkout -q main && git checkout -q -B "sprint/$L" && eval "$CHANGE" && git add -A && git commit -qm "$L" ) >/dev/null 2>&1
+  ERR=$( cd "$R" && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && { [ -z "$OVR" ] || _PROTECTED_PY="$OVR"; } && lease_promote main 2>&1 >/dev/null ) || RC=$?
+  ( cd "$R" && git checkout -q main 2>/dev/null; git reset -q --hard "$(git rev-list --max-parents=0 HEAD)" ) >/dev/null 2>&1
+  printf '%s:rc=%s:%s\n' "$L" "$RC" "$(printf '%s' "$ERR" | tr '\n' ' ' | cut -c1-600)"
+}
+_s10_repo "$_S10/fw" 1
+_s10_repo "$_S10/user" 0
+_S10_RES=$(
+  _s10_case "$_S10/fw" roster  'echo x >> scripts/lib/roster.sh'
+  _s10_case "$_S10/fw" rename  'git mv scripts/lease-git-hooks/pre-push docs/pre-push'
+  _s10_case "$_S10/fw" nested  'mkdir -p sub && echo x > sub/AGENTS.md'
+  _s10_case "$_S10/fw" override 'echo x > AGENTS.override.md'
+  _s10_case "$_S10/fw" mcp     'echo "{}" > .mcp.json'
+  _s10_case "$_S10/fw" case    'mkdir -p Hooks/handlers && echo x > Hooks/handlers/x.sh'
+  _s10_case "$_S10/fw" docs    'echo x >> docs/readme.md'
+  _s10_case "$_S10/user" util  'echo x >> scripts/lib/util.sh'
+  _s10_case "$_S10/user" uroster 'echo "# x" >> ops/roster.toml'
+  _s10_case "$_S10/user" corrupt 'echo x >> docs/readme.md' 'def protected_match(:'
+)
+_s10_expect() { # _s10_expect <label> <rc> [text that must appear]
+  local LINE
+  LINE=$(printf '%s\n' "$_S10_RES" | grep "^$1:rc=" | head -1)
+  case "$LINE" in "$1:rc=$2:"*) : ;; *) _S10_FAIL="$_S10_FAIL $1(want-rc-$2:${LINE#*:})"; return 0 ;; esac
+  [ -z "${3:-}" ] || printf '%s' "$LINE" | grep -Fq -- "$3" || _S10_FAIL="$_S10_FAIL $1(no:$3)"
+}
+_s10_expect roster 42 'scripts/lib/roster.sh'
+_s10_expect rename 42 'scripts/lease-git-hooks/pre-push'
+_s10_expect nested 42 'sub/AGENTS.md'
+_s10_expect override 42 'AGENTS.override.md'
+_s10_expect mcp 42 '.mcp.json'
+_s10_expect case 42 'Hooks/handlers/x.sh'
+_s10_expect docs 0
+_s10_expect util 0
+_s10_expect uroster 42 'ops/roster.toml'
+_s10_expect corrupt 42 'classifier failed'
+if [ -z "$_S10_FAIL" ]; then
+  row "SELF-10" "claude" "protected paths: CLAUDE.md list ⊆ registry; lease_promote blocks rename/case/any-depth hits, fails closed, spares user code (KTD8/R30)" "PASS" "every path on the CLAUDE.md protected line classifies as protected (planted path caught); fw fixture: roster.sh / git mv pre-push / sub/AGENTS.md / AGENTS.override.md / .mcp.json / Hooks/handlers/x.sh -> rc 42 naming the path, docs-only -> promoted; user fixture: scripts/lib/util.sh -> promoted, ops/roster.toml -> 42; corrupted registry literal -> 42 naming the classifier error" "static"
+else
+  row "SELF-10" "claude" "protected paths: CLAUDE.md list ⊆ registry; lease_promote blocks rename/case/any-depth hits, fails closed, spares user code (KTD8/R30)" "FAIL" "mismatch:$(printf '%s' "$_S10_FAIL" | cut -c1-400)" "static"
+fi
+rm -rf "$_S10" "${WORK}"/s10-*
