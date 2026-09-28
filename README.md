@@ -57,7 +57,10 @@ A safety hotfix, shipped before the lead-choice redesign (plan `docs/plans/2026-
 - **Only the lead's snapshot merges.** `lease_collect` now takes the snapshot (one lead-made commit on the recorded base) that the review and the merge bind to. `lease_merge` squashes that SHA and refuses, by name, a builder's own commit, an edit to `ops/`, or a worktree changed after collect. It also refuses when the integration branch moved since the lead's last merge.
 - **The SELF rows are a gate.** `bash scripts/probe-capabilities.sh --self-only` runs only the static SELF rows, writes its record to a scratch path, and exits 3 on any SELF FAIL. `.github/workflows/gates.yml` runs it with both validators on macOS for every PR to `main` and `release/4.0`. New rows: SELF-10 (protected paths) and SELF-18 (lead git integrity); SELF-08b covers the digest refresh.
 
-Upgrading: open 3.3.x leases keep working (a lease collected by 3.3.2 is snapshotted at merge under the new checks). Two behavior changes to know about. First, `lease_merge`'s commit no longer runs repository hooks. Second, if you commit on the integration branch between merges, `lease_merge` and `lease_promote` refuse until you run `lease_rebaseline`.
+Upgrading: open 3.3.x leases keep working. A lease collected by 3.3.2 has no collect snapshot, so it is snapshotted at merge under the new checks; review its worktree as it stands at merge time. Behavior changes to know about:
+
+- `lease_merge`'s commit no longer runs repository hooks and is never GPG-signed (`_lead_git` turns hooks, fsmonitor and signing off), so a branch-protection rule that requires signed commits needs the squash signed by hand.
+- If you commit on the integration branch between merges, switch the lead's checkout to another branch, or promote by hand after a blocked `lease_promote`, the next lease call refuses with rc 44 until you run `lease_rebaseline`. A `.git/config` or hook change you made yourself (`git remote add`, `pre-commit install`) is also reverted at the next lease call and saved as `<lease root>/lead/<name>.changed-<UTC time>`: copy it back, then run `lease_rebaseline`. Each acceptance is recorded in `ops/leases.toml` `[baseline]`.
 
 ## What's new (v3.3.2)
 
@@ -162,7 +165,7 @@ Prefer the Pro line? Set a role's `model` to `"Gemini 3.1 Pro (High)"` (or `(Low
   <img src="docs/images/lease-lifecycle.svg" alt="Lease lifecycle state machine — leased, building, review, merged; with orphaned, requeued to a different builder, failed, and escalated paths" width="82%">
 </p>
 
-Safety comes from three mechanisms working together, not from restricting who may write code: **per-task worktrees with lead-side checks** (a builder starts in its own worktree and is contracted to stay out of the canonical `ops/` tree; the worktree limits where it starts, not where it writes, so the lead detects changes it didn't make and merges only its own collect snapshot — detection, not prevention), a **per-adapter environment allowlist** (no cross-provider credential leaks), and **mandatory cross-review** before any merge (no agent merges its own build).
+Safety comes from three mechanisms working together, not from restricting who may write code: **per-task worktrees with lead-side checks** (a builder starts in its own worktree and is contracted to stay out of the canonical `ops/` tree; the worktree limits where it starts, not where it writes, so the lead detects changes it didn't make and merges only its own collect snapshot — detection, not prevention), a **per-adapter environment allowlist** (no builder receives another provider's credential environment variables; credential files under `$HOME` are shared), and **mandatory cross-review** before any merge (no agent merges its own build).
 
 ---
 
