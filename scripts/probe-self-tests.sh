@@ -511,14 +511,36 @@ rm -rf "$_S9"
 # "**Protected paths**" line of .claude/CLAUDE.md classifies as protected in
 # this checkout (a glob is instantiated, a directory gets a child) — with a
 # negative control: the same check over a copy carrying one planted
-# unprotected path must name exactly that path. (b) lease_promote on
-# throwaway fixtures: in a Triforge-shaped repo (plugin.json named
-# agent-triforge) an edit to scripts/lib/roster.sh, a rename out of
-# scripts/lease-git-hooks/, a nested AGENTS.md, an AGENTS.override.md, a
-# .mcp.json and a case variant Hooks/handlers/x.sh each block with rc 42 and
-# name the path, while a docs-only change promotes; in a user-shaped repo an
-# edit to scripts/lib/util.sh promotes with the knob off and ops/roster.toml
-# still blocks; a corrupted registry literal blocks and names the error.
+# unprotected path must name exactly that path. (b) The classifier matches a
+# protected directory's bare name (review finding #2): of .agents, skills,
+# .clauder and claudeish, with the framework list on, it flags exactly .agents
+# (project) and skills (framework). (c) lease_promote on throwaway fixtures.
+# Each case gets its own lease root under the fixture dir and a throwaway
+# HOME with GIT_CONFIG_NOSYSTEM=1 (the fixture git calls too), so the
+# developer's global git config, hooks and identity never reach a fixture and
+# no lease root is left under ${TMPDIR}/triforge-leases (finding #22):
+#   fw fixture (plugin.json named agent-triforge):
+#     roster     edit scripts/lib/roster.sh                    -> 42 naming it
+#     rename     git mv scripts/lease-git-hooks/pre-push docs/ -> 42 naming the old path
+#     nested     sub/AGENTS.md                                 -> 42 naming it
+#     override   AGENTS.override.md                            -> 42 naming it
+#     mcp        .mcp.json                                     -> 42 naming it
+#     case       Hooks/handlers/x.sh (case variant)            -> 42 naming it
+#     symclaude  symlink .claude -> docs (bare protected name) -> 42 naming .claude
+#     symhooks   symlink hooks -> docs (bare protected name)   -> 42 naming hooks
+#     renamed    manifest renamed + roster.sh edit             -> 42 naming roster.sh (the
+#                default branch still names agent-triforge; finding #7)
+#     deleted    git rm the manifest + roster.sh edit          -> 42 naming roster.sh (HEAD and
+#                default-branch fallback)
+#     badjson    manifest replaced by "{" + roster.sh edit     -> 42 naming roster.sh (an
+#                unparseable manifest counts as the Triforge checkout)
+#     docs       docs-only                                     -> promoted
+#   user fixture (no manifest):
+#     util       scripts/lib/util.sh                           -> promoted (knob off)
+#     uroster    ops/roster.toml                               -> 42 naming it
+#     symcursor  symlink .cursor -> docs (bare protected name) -> 42 naming .cursor
+#     opencode   root opencode.json                            -> 42 naming it
+#     corrupt    corrupted registry literal                    -> 42 naming the classifier error
 _s10_doc_misses() { # _s10_doc_misses <doc> — protected-line paths the registry doesn't cover
   ( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null
     S10_DOC="$1" python3 -c '
@@ -553,10 +575,18 @@ sed 's#^- \*\*Protected paths\*\*\(.*\)$#- **Protected paths**\1 `scripts/not-a-
 _S10_NEG=$(_s10_doc_misses "${WORK}/s10-planted.md")
 [ "${_S10_NEG% }" = "scripts/not-a-protected-probe.sh" ] || _S10_FAIL="$_S10_FAIL negative-control(got:[${_S10_NEG% }])"
 
+# (b) bare-name classification, straight through the classifier
+_S10_BARE=$(source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null
+  R=0; printf '%s\0' .agents skills .clauder claudeish | _protected_classify 1 2>/dev/null || R=$?
+  echo "rc=$R")
+[ "$_S10_BARE" = "$(printf 'project\t.agents\nframework\tskills\nrc=0')" ] \
+  || _S10_FAIL="$_S10_FAIL bare-name-classify(want:project:.agents,framework:skills;got:[$(printf '%s' "$_S10_BARE" | tr '\t\n' ': ')])"
+
 _S10="${WORK}/self10"
+_S10_HOME="${_S10}/home"   # throwaway HOME for every fixture git call and lease_promote
 _s10_repo() { # _s10_repo <dir> <triforge:0|1> — main + checked-out integration branch sprint/s10
-  mkdir -p "$1"
-  ( cd "$1" && git init -q -b main && git config user.email "probe@triforge.local" && git config user.name "triforge-probe"
+  mkdir -p "$1" "$_S10_HOME"
+  ( cd "$1" && export HOME="$_S10_HOME" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main && git config user.email "probe@triforge.local" && git config user.name "triforge-probe"
     mkdir -p docs scripts/lib scripts/lease-git-hooks ops
     echo "doc" > docs/readme.md; echo "lib" > scripts/lib/roster.sh; echo "lib" > scripts/lib/util.sh
     echo "hook" > scripts/lease-git-hooks/pre-push
@@ -566,10 +596,14 @@ _s10_repo() { # _s10_repo <dir> <triforge:0|1> — main + checked-out integratio
 }
 _s10_case() { # _s10_case <repo> <label> <shell change> [registry-override] — rc + whether the change's path was named
   local R=$1 L=$2 CHANGE=$3 OVR=${4:-} RC=0 ERR
-  ( cd "$R" && git checkout -q main && git checkout -q -B "sprint/$L" && eval "$CHANGE" && git add -A && git commit -qm "$L" ) >/dev/null 2>&1
-  ERR=$( cd "$R" && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && { [ -z "$OVR" ] || _PROTECTED_PY="$OVR"; } && lease_promote main 2>&1 >/dev/null ) || RC=$?
-  ( cd "$R" && git checkout -q main 2>/dev/null; git reset -q --hard "$(git rev-list --max-parents=0 HEAD)" ) >/dev/null 2>&1
-  printf '%s:rc=%s:%s\n' "$L" "$RC" "$(printf '%s' "$ERR" | tr '\n' ' ' | cut -c1-600)"
+  ( cd "$R" && export HOME="$_S10_HOME" GIT_CONFIG_NOSYSTEM=1 && git checkout -q main && git checkout -q -B "sprint/$L" && eval "$CHANGE" && git add -A && git commit -qm "$L" ) >/dev/null 2>&1
+  # the lease root and HOME are the case's own (finding #22): _lease_ctx would
+  # otherwise create ${TMPDIR}/triforge-leases/<fixture>-<hash>/lead/ and
+  # capture the developer's real global git config into it
+  ERR=$( cd "$R" && export TRIFORGE_LEASE_ROOT="$_S10/leases-$L" HOME="$_S10_HOME" GIT_CONFIG_NOSYSTEM=1 \
+           && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && { [ -z "$OVR" ] || _PROTECTED_PY="$OVR"; } && lease_promote main 2>&1 >/dev/null ) || RC=$?
+  ( cd "$R" && export HOME="$_S10_HOME" GIT_CONFIG_NOSYSTEM=1 && git checkout -q main 2>/dev/null; git reset -q --hard "$(git rev-list --max-parents=0 HEAD)" ) >/dev/null 2>&1
+  printf '%s:rc=%s:%s\n' "$L" "$RC" "$(printf '%s' "$ERR" | tr '\n' ' ' | cut -c1-1200)"
 }
 _s10_repo "$_S10/fw" 1
 _s10_repo "$_S10/user" 0
@@ -580,9 +614,16 @@ _S10_RES=$(
   _s10_case "$_S10/fw" override 'echo x > AGENTS.override.md'
   _s10_case "$_S10/fw" mcp     'echo "{}" > .mcp.json'
   _s10_case "$_S10/fw" case    'mkdir -p Hooks/handlers && echo x > Hooks/handlers/x.sh'
+  _s10_case "$_S10/fw" symclaude 'ln -s docs .claude'
+  _s10_case "$_S10/fw" symhooks  'ln -s docs hooks'
+  _s10_case "$_S10/fw" renamed 'printf '"'"'{"name": "not-triforge", "version": "0.0.0"}\n'"'"' > .claude-plugin/plugin.json && echo x >> scripts/lib/roster.sh'
+  _s10_case "$_S10/fw" deleted 'git rm -q .claude-plugin/plugin.json && echo x >> scripts/lib/roster.sh'
+  _s10_case "$_S10/fw" badjson 'echo "{" > .claude-plugin/plugin.json && echo x >> scripts/lib/roster.sh'
   _s10_case "$_S10/fw" docs    'echo x >> docs/readme.md'
   _s10_case "$_S10/user" util  'echo x >> scripts/lib/util.sh'
   _s10_case "$_S10/user" uroster 'echo "# x" >> ops/roster.toml'
+  _s10_case "$_S10/user" symcursor 'ln -s docs .cursor'
+  _s10_case "$_S10/user" opencode  'echo "{}" > opencode.json'
   _s10_case "$_S10/user" corrupt 'echo x >> docs/readme.md' 'def protected_match(:'
 )
 _s10_expect() { # _s10_expect <label> <rc> [text that must appear]
@@ -597,14 +638,21 @@ _s10_expect nested 42 'sub/AGENTS.md'
 _s10_expect override 42 'AGENTS.override.md'
 _s10_expect mcp 42 '.mcp.json'
 _s10_expect case 42 'Hooks/handlers/x.sh'
+_s10_expect symclaude 42 ' .claude  (project_protected)'
+_s10_expect symhooks 42 ' hooks  (framework_protected)'
+_s10_expect renamed 42 'scripts/lib/roster.sh  (framework_protected)'
+_s10_expect deleted 42 'scripts/lib/roster.sh  (framework_protected)'
+_s10_expect badjson 42 'scripts/lib/roster.sh  (framework_protected)'
 _s10_expect docs 0
 _s10_expect util 0
 _s10_expect uroster 42 'ops/roster.toml'
+_s10_expect symcursor 42 ' .cursor  (project_protected)'
+_s10_expect opencode 42 ' opencode.json  (project_protected)'
 _s10_expect corrupt 42 'classifier failed'
 if [ -z "$_S10_FAIL" ]; then
-  row "SELF-10" "claude" "protected paths: CLAUDE.md list ⊆ registry; lease_promote blocks rename/case/any-depth hits, fails closed, spares user code (KTD8/R30)" "PASS" "every path on the CLAUDE.md protected line classifies as protected (planted path caught); fw fixture: roster.sh / git mv pre-push / sub/AGENTS.md / AGENTS.override.md / .mcp.json / Hooks/handlers/x.sh -> rc 42 naming the path, docs-only -> promoted; user fixture: scripts/lib/util.sh -> promoted, ops/roster.toml -> 42; corrupted registry literal -> 42 naming the classifier error" "static"
+  row "SELF-10" "claude" "protected paths: CLAUDE.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "PASS" "every path on the CLAUDE.md protected line classifies as protected (planted path caught); classifier flags bare .agents (project) + skills (framework), not .clauder/claudeish; fw fixture: roster.sh / git mv pre-push / sub/AGENTS.md / AGENTS.override.md / .mcp.json / Hooks/handlers/x.sh / symlinks .claude + hooks -> rc 42 naming the path; manifest renamed / deleted / unparseable -> still the Triforge checkout (roster.sh -> 42); docs-only -> promoted; user fixture: scripts/lib/util.sh -> promoted, ops/roster.toml / symlink .cursor / opencode.json -> 42; corrupted registry literal -> 42 naming the classifier error; per-case lease root + throwaway HOME" "static"
 else
-  row "SELF-10" "claude" "protected paths: CLAUDE.md list ⊆ registry; lease_promote blocks rename/case/any-depth hits, fails closed, spares user code (KTD8/R30)" "FAIL" "mismatch:$(printf '%s' "$_S10_FAIL" | cut -c1-400)" "static"
+  row "SELF-10" "claude" "protected paths: CLAUDE.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "FAIL" "mismatch:$(printf '%s' "$_S10_FAIL" | cut -c1-600)" "static"
 fi
 rm -rf "$_S10" "${WORK}"/s10-*
 
@@ -627,7 +675,21 @@ rm -rf "$_S10" "${WORK}"/s10-*
 #   pointer    redirects the worktree's .git pointer -> collect 44 names the pointer, the redirect is never followed
 #   late       worktree edited after collect         -> merge refused as not matching the snapshot
 # plus a static check that every git call in scripts/lib/lease.sh goes through
-# _lead_git (the trusted-config capture is the one documented exception).
+# _lead_git (review finding #23). _s18_git_scan lexes the file as shell,
+# carrying quote state across lines (the dispatch contract is a multi-line
+# double-quoted string that says "git push"): '...' / "..." / $'...' text and
+# quoted heredoc bodies are stripped, while $( ), backticks and ${ } stay code
+# wherever they sit, and comments are dropped. On what is left it flags an
+# unanchored token (?<![\w$./-])git\s+(-C|-c|--git-dir|<subcommand>), so
+# `{ git`, `|| { git`, `else git`, `while git`, `command git`, backticks and
+# `env -u X git` are all caught. Exactly three lines are allowed, each by a
+# distinctive substring, at most once, and only when the line carries no
+# second git token: the two capture lines in _lead_gitconfig_capture and the
+# "${E[@]}" git line in _lead_git itself. An allowlist entry no line uses, or
+# quoting still open at end of file (the lexer lost track), is reported too.
+# Negative control: the same scan over a copy of lease.sh with
+# `{ git -C x status; }`, `else git -C x reset --merge` and
+# `env -u GIT_DIR git -C x commit` appended must flag exactly those lines.
 _S18="${WORK}/self18"
 _S18_FAIL=""
 _s18_setup() { # _s18_setup <case>
@@ -809,22 +871,150 @@ O=$(_s18_lead late '_s18_go t; _s18_try collect lease_collect t; echo later >> "
 _s18_expect late "$O" 'collect-rc=0' 'merge-rc=1' '^state=review$' 'no longer matches the recorded snapshot'
 
 # static: every git call in lease.sh goes through _lead_git
-_S18_RAW=$(S18_LIB="${_SELF_DIR}/lib/lease.sh" python3 -c '
+# _s18_git_scan <file> — one line per finding: "<line>:<source line>" for a git
+# call outside the allowlist, "allowlist-unused:<entry>", or "scan-error:...".
+# Empty output = clean. The real file and the planted copy share this one scan.
+_s18_git_scan() {
+  S18_LIB="$1" python3 - 2>&1 <<'S18_SCAN_PY' || echo "scan-error:python-rc=$?"
 import os, re
-allowed = ("git -C \"$_LEASE_REPO\" config \"$SCOPE\" --includes --null --get-regexp", "git config --file \"$TMP\" --add")
-pat = re.compile(r"(?:^|[;&|(!]\s*|\b(?:if|then|do|elif)\s+|\$\(\s*)(?:[A-Z_]+=\S*\s+)*git\s+(?:-C|-c|--git-dir|[a-z][a-z-]+)")
-bad = []
-for n, line in enumerate(open(os.environ["S18_LIB"], encoding="utf-8"), 1):
-    s = line.strip()
-    if s.startswith(("#", "echo ", "printf ")) or not pat.search(s) or any(a in s for a in allowed):
+ALLOW = (
+    'git -C "$_LEASE_REPO" config "$SCOPE" --includes --null --get-regexp',  # _lead_gitconfig_capture: read one scope
+    'git config --file "$TMP" --add',                                        # _lead_gitconfig_capture: write the capture
+    '"${E[@]}" git -c core.hooksPath=/dev/null',                             # _lead_git itself
+)
+PAT = re.compile(r"(?<![\w$./-])git\s+(?:-C|-c|--git-dir|[a-z][a-z-]+)")
+HDOC = re.compile(r"<<(-?)[ \t]*(?:'([^']*)'|\"([^\"]*)\"|(\\?)([A-Za-z_][A-Za-z0-9_]*))")
+lines = open(os.environ["S18_LIB"], encoding="utf-8", errors="surrogateescape").read().split("\n")
+# the lexer's frame stack: [kind, paren/brace depth, line opened, (heredoc delim, strip tabs)]
+# CODE / SUB ($( )) / BQ (backticks) are code and kept; SQ, ANSI ($'...'), DQ,
+# HDOC (unquoted heredoc body) and PARAM/PARAMQ (${ } outside / inside "...")
+# drop their literal text but keep any $( ) / backtick / ${ } nested in them;
+# HDOCQ (quoted heredoc body) is skipped whole.
+stack = [["CODE", 0, 0, None]]
+used = [False] * len(ALLOW)
+out = []
+for n, raw in enumerate(lines, 1):
+    hd = [j for j, f in enumerate(stack) if f[0] in ("HDOC", "HDOCQ")]
+    if hd:
+        delim, strip = stack[hd[-1]][3]
+        if (raw.lstrip("\t") if strip else raw) == delim:
+            del stack[hd[-1]:]
+            continue
+        if stack[-1][0] == "HDOCQ":
+            continue
+    kept, pending, i, size = [], [], 0, len(raw)
+    while i < size:
+        c, nx, k = raw[i], raw[i + 1:i + 2], stack[-1][0]
+        if k in ("SQ", "ANSI"):
+            if k == "ANSI" and c == "\\":
+                i += 2
+                continue
+            if c == "'":
+                stack.pop()
+                kept.append(c)
+            i += 1
+            continue
+        if k in ("DQ", "HDOC", "PARAM", "PARAMQ"):
+            if c == "\\":
+                i += 2
+                continue
+            if k == "DQ" and c == '"':
+                stack.pop()
+                kept.append(c)
+            elif k in ("PARAM", "PARAMQ") and c == "}":
+                if stack[-1][1]:
+                    stack[-1][1] -= 1
+                else:
+                    stack.pop()
+                    kept.append(c)
+            elif k in ("PARAM", "PARAMQ") and c == "{":
+                stack[-1][1] += 1
+            elif k in ("PARAM", "PARAMQ") and c == '"':
+                stack.append(["DQ", 0, n, None])
+                kept.append(c)
+            elif k == "PARAM" and c == "'":
+                stack.append(["SQ", 0, n, None])
+                kept.append(c)
+            elif c == "$" and nx in ("(", "{"):
+                stack.append(["SUB" if nx == "(" else ("PARAM" if k == "PARAM" else "PARAMQ"), 0, n, None])
+                kept.append(c + nx)
+                i += 2
+                continue
+            elif c == "`":
+                stack.append(["BQ", 0, n, None])
+                kept.append(c)
+            i += 1
+            continue
+        # CODE, SUB, BQ: shell code, kept
+        if c == "\\":
+            kept.append(raw[i:i + 2])
+            i += 2
+            continue
+        if c == "#" and (i == 0 or raw[i - 1] in " \t;|&()"):
+            break
+        if c == "'":
+            stack.append(["ANSI" if i and raw[i - 1] == "$" else "SQ", 0, n, None])
+        elif c == '"':
+            stack.append(["DQ", 0, n, None])
+        elif c == "`":
+            if k == "BQ":
+                stack.pop()
+            else:
+                stack.append(["BQ", 0, n, None])
+        elif c == "$" and nx in ("(", "{"):
+            stack.append(["SUB" if nx == "(" else "PARAM", 0, n, None])
+            kept.append(c + nx)
+            i += 2
+            continue
+        elif c == "(" and k == "SUB":
+            stack[-1][1] += 1
+        elif c == ")" and k == "SUB":
+            if stack[-1][1]:
+                stack[-1][1] -= 1
+            else:
+                stack.pop()
+        elif c == "<" and raw.startswith("<<", i) and not raw.startswith("<<<", i):
+            m = HDOC.match(raw, i)
+            if m:
+                quoted = m.group(2) is not None or m.group(3) is not None or m.group(4) == "\\"
+                delim = next(g for g in (m.group(2), m.group(3), m.group(5)) if g is not None)
+                pending.append(("HDOCQ" if quoted else "HDOC", delim, m.group(1) == "-"))
+                kept.append(m.group(0))
+                i = m.end()
+                continue
+        kept.append(c)
+        i += 1
+    for kind, delim, strip in reversed(pending):
+        stack.append([kind, 0, n, (delim, strip)])
+    hits = PAT.findall("".join(kept))
+    if not hits:
         continue
-    bad.append(str(n))
-print(" ".join(bad))
-' 2>/dev/null || echo "scan-error")
-[ -z "$_S18_RAW" ] || _S18_FAIL="$_S18_FAIL raw-git-outside-_lead_git(lines:${_S18_RAW})"
+    j = next((j for j, a in enumerate(ALLOW) if not used[j] and len(hits) == 1 and a in raw), None)
+    if j is not None:
+        used[j] = True
+        continue
+    out.append(str(n) + ":" + raw.strip()[:100])
+for f in stack[1:]:
+    out.append("scan-error:" + f[0] + " opened at line " + str(f[2]) + " never closes (the lexer lost the quoting)")
+for j, a in enumerate(ALLOW):
+    if not used[j]:
+        out.append("allowlist-unused:" + a)
+if out:
+    print("\n".join(out))
+S18_SCAN_PY
+}
+_S18_RAW=$(_s18_git_scan "${_SELF_DIR}/lib/lease.sh")
+[ -z "$_S18_RAW" ] || _S18_FAIL="$_S18_FAIL raw-git-outside-_lead_git($(printf '%s' "$_S18_RAW" | tr '\n' '|'))"
+# negative control: three raw calls appended to a copy must be flagged, and only they
+{ cat "${_SELF_DIR}/lib/lease.sh"; [ -z "$(tail -c1 "${_SELF_DIR}/lib/lease.sh")" ] || echo
+  printf '%s\n' '{ git -C x status; }' 'else git -C x reset --merge' 'env -u GIT_DIR git -C x commit'; } > "$_S18/lease-planted.sh"
+_S18_N=$(wc -l < "$_S18/lease-planted.sh" | tr -d ' ')
+_S18_NEG=$(_s18_git_scan "$_S18/lease-planted.sh" | cut -d: -f1 | tr '\n' ' ')
+[ "${_S18_NEG% }" = "$((_S18_N - 2)) $((_S18_N - 1)) ${_S18_N}" ] \
+  || _S18_FAIL="$_S18_FAIL scan-negative-control(want-lines:$((_S18_N - 2)),$((_S18_N - 1)),${_S18_N};got:[${_S18_NEG% }])"
 
 if [ -z "$_S18_FAIL" ]; then
-  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer -> collect rc 44 naming the surface (config, hooks and ledger restored; marker never ran); post-checkout planted: next lease_create 44, and once accepted still never runs; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; every git call in lease.sh goes through _lead_git" "static"
+  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer -> collect rc 44 naming the surface (config, hooks and ledger restored; marker never ran); post-checkout planted: next lease_create 44, and once accepted still never runs; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; every git call in lease.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines; planted { git / else git / env -u git lines caught)" "static"
 else
   row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "FAIL" "mismatch:$(printf '%s' "$_S18_FAIL" | cut -c1-500)" "static"
 fi
