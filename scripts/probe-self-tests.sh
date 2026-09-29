@@ -661,7 +661,9 @@ rm -rf "$_S10" "${WORK}"/s10-*
 # merge. Each case is a throwaway repo (main + a checked-out sprint branch),
 # its own HOME and lease root, and a TRIFORGE_TEST_BUILDER that misbehaves one
 # way before reporting Status: DONE:
-#   fsmonitor  git config core.fsmonitor <marker>   -> collect 44 names .git/config, restored, marker never runs
+#   fsmonitor  git config core.fsmonitor <marker>   -> collect 44 names .git/config, restored, marker never runs;
+#              once accepted (re-planted as the user's, lease_rebaseline) collect snapshots, marker still never runs
+#              (_lead_git's own core.fsmonitor=false — no plain git runs in that fixture afterwards)
 #   hooks      writes .git/hooks/pre-commit          -> collect 44 names .git/hooks/, removed; lease_rebaseline resumes the lease
 #   ledger     rewrites its own ledger row           -> collect 44 names ops/leases.toml, the row restored
 #   commit     makes its own commit                  -> merge refused, naming the commit
@@ -669,11 +671,23 @@ rm -rf "$_S10" "${WORK}"/s10-*
 #   clean      writes a file; report discoveries with a shell line and a ``` fence
 #                                                    -> merges; the discoveries stay an indented literal block
 #   mainref    git update-ref refs/heads/main        -> collect 44 names the ref; lease_promote refuses (44)
-#   filter     a clean filter in ~/.gitconfig + .gitattributes -> collect 44 names the global config, filter never runs
+#   filter     a clean filter in ~/.gitconfig + .gitattributes -> collect 44 names the global config, filter never runs;
+#              once accepted (lease_rebaseline) collect snapshots, filter still never runs (_lead_git reads the trusted capture)
 #   postco     writes a common-dir post-checkout hook -> the next lease_create refuses (44) and never runs it;
 #              once accepted (lease_rebaseline) a lease_create still never runs it (_lead_git hooksPath)
-#   pointer    redirects the worktree's .git pointer -> collect 44 names the pointer, the redirect is never followed
+#   pointer    redirects the worktree's .git pointer -> collect 44 names the pointer, the redirect is never followed;
+#              once accepted (lease_rebaseline) collect snapshots through the recorded admin dir (the commit is in the lead's repo)
 #   late       worktree edited after collect         -> merge refused as not matching the snapshot
+#   leadcfg    appends a filter driver to <lease root>/lead/gitconfig + .gitattributes
+#                                                    -> collect 44 names the lead trusted git config, restored, a
+#                                                       gitconfig.changed-* copy kept, filter never runs
+#   copytamper the same pre-commit hook in .git/hooks/ and in the lead's hooks.copy
+#                                                    -> collect 44 says NOT restored; the hook is left, not "restored" from the copy
+#   legit      (a clean builder) the lead itself runs git remote add
+#                                                    -> collect 44 names .git/config and the saved changed version, remote gone;
+#                                                       saved copy put back + lease_rebaseline -> collect 0, git remote lists origin
+#   ledgerlink swaps ops/leases.toml for a symlink to an identical copy in its worktree
+#                                                    -> collect 44 names ops/leases.toml, a regular file again
 # plus a static check that every git call in scripts/lib/lease.sh goes through
 # _lead_git (review finding #23). _s18_git_scan lexes the file as shell,
 # carrying quote state across lines (the dispatch contract is a multi-line
@@ -734,17 +748,23 @@ _s18_expect() { # _s18_expect <case> <output> <pattern...> — every pattern (ER
 }
 _s18_builder() { cat > "$_S18/$1/fb.sh"; chmod +x "$_S18/$1/fb.sh"; }
 
-# fsmonitor
+# fsmonitor (+ once accepted, still never runs: _lead_git's own core.fsmonitor=false)
 _s18_setup fsmonitor
 _s18_builder fsmonitor <<EOF
 #!/bin/sh
 git config core.fsmonitor "$_S18/fsmonitor/mark.sh"
+echo x > f.txt
 echo "Status: DONE"
 EOF
 O=$(_s18_lead fsmonitor '_s18_go t; _s18_try collect lease_collect t; echo "state=$(_ledger_get t state)"')
 _s18_expect fsmonitor "$O" 'collect-rc=44' '\.git/config changed' 'state=escalated'
 [ ! -e "$_S18/fsmonitor/MARKER" ] || _S18_FAIL="$_S18_FAIL fsmonitor(marker-ran)"
 grep -q fsmonitor "$_S18/fsmonitor/repo/.git/config" && _S18_FAIL="$_S18_FAIL fsmonitor(config-not-restored)"
+# The user re-applies the setting and accepts it. From here on no plain git runs in this fixture.
+printf '[core]\n\tfsmonitor = %s\n' "$_S18/fsmonitor/mark.sh" >> "$_S18/fsmonitor/repo/.git/config"
+O=$(_s18_lead fsmonitor '_s18_try rebaseline lease_rebaseline t; _s18_try collect lease_collect t; echo "snap=[$(_ledger_get t snapshot_sha)]"')
+_s18_expect fsmonitor-accepted "$O" 'rebaseline-rc=0' 'collect-rc=0' 'snap=\[[0-9a-f]{40}\]'
+[ ! -e "$_S18/fsmonitor/MARKER" ] || _S18_FAIL="$_S18_FAIL fsmonitor-accepted(marker-ran)"
 
 # hooks (+ lease_rebaseline resumes the escalated lease)
 _s18_setup hooks
@@ -831,8 +851,9 @@ echo '* filter=evil' > .gitattributes
 echo x > f.txt
 echo "Status: DONE"
 EOF
-O=$(_s18_lead filter '_s18_go t; _s18_try collect lease_collect t; echo "snap=[$(_ledger_get t snapshot_sha)]"')
+O=$(_s18_lead filter '_s18_go t; _s18_try collect lease_collect t; echo "snap=[$(_ledger_get t snapshot_sha)]"; _s18_try rebaseline lease_rebaseline t; _s18_try recollect lease_collect t; echo "accepted-snap=[$(_ledger_get t snapshot_sha)]"')
 _s18_expect filter "$O" 'collect-rc=44' 'global git config .* changed' 'snap=\[\]'
+_s18_expect filter-accepted "$O" 'rebaseline-rc=0' 'recollect-rc=0' 'accepted-snap=\[[0-9a-f]{40}\]'
 [ ! -e "$_S18/filter/MARKER" ] || _S18_FAIL="$_S18_FAIL filter(clean-filter-ran)"
 
 # postco
@@ -856,8 +877,11 @@ printf 'gitdir: %s/.git\n' "$_S18/pointer/evil" > .git
 echo x > f.txt
 echo "Status: DONE"
 EOF
-O=$(_s18_lead pointer '_s18_go t; _s18_try collect lease_collect t')
+# once accepted: f.txt read back through _lgr proves the snapshot commit is in
+# the lead's repo, i.e. built through the recorded admin dir, not the redirect
+O=$(_s18_lead pointer '_s18_go t; _s18_try collect lease_collect t; _s18_try rebaseline lease_rebaseline t; _s18_try recollect lease_collect t; S=$(_ledger_get t snapshot_sha || true); echo "accepted-snap=[$S] f.txt=$(_lgr show "${S:-none}:f.txt" 2>&1)"')
 _s18_expect pointer "$O" 'collect-rc=44' 'pointer file\) changed'
+_s18_expect pointer-accepted "$O" 'rebaseline-rc=0' 'recollect-rc=0' 'accepted-snap=\[[0-9a-f]{40}\] f\.txt=x$'
 [ ! -e "$_S18/pointer/MARKER" ] || _S18_FAIL="$_S18_FAIL pointer(redirect-followed)"
 
 # late
@@ -869,6 +893,59 @@ echo "Status: DONE"
 EOF
 O=$(_s18_lead late '_s18_go t; _s18_try collect lease_collect t; echo later >> "$(_ledger_get t worktree)/feature.txt"; _s18_try pin lease_pin_reviewer t codex; _s18_try merge lease_merge t codex; echo "state=$(_ledger_get t state)"')
 _s18_expect late "$O" 'collect-rc=0' 'merge-rc=1' '^state=review$' 'no longer matches the recorded snapshot'
+
+# leadcfg (review finding #1: the trusted capture every _lead_git call reads)
+_s18_setup leadcfg
+_s18_builder leadcfg <<EOF
+#!/bin/sh
+printf '[filter "evil"]\n\tclean = %s\n' "$_S18/leadcfg/mark.sh" >> "$_S18/leadcfg/leases/lead/gitconfig"
+echo '* filter=evil' > .gitattributes
+echo x > f.txt
+echo "Status: DONE"
+EOF
+O=$(_s18_lead leadcfg '_s18_go t; _s18_try collect lease_collect t')
+_s18_expect leadcfg "$O" 'collect-rc=44' 'the lead trusted git config \(.*/lead/gitconfig\) changed \(restored from the lead copy'
+[ ! -e "$_S18/leadcfg/MARKER" ] || _S18_FAIL="$_S18_FAIL leadcfg(clean-filter-ran)"
+grep -q evil "$_S18/leadcfg/leases/lead/gitconfig" && _S18_FAIL="$_S18_FAIL leadcfg(gitconfig-not-restored)"
+ls "$_S18/leadcfg/leases/lead/"gitconfig.changed-* >/dev/null 2>&1 || _S18_FAIL="$_S18_FAIL leadcfg(no-gitconfig.changed-copy)"
+
+# copytamper (#11: a restore only from a lead copy that still matches the baseline)
+_s18_setup copytamper
+_s18_builder copytamper <<EOF
+#!/bin/sh
+for H in "\$(git rev-parse --git-common-dir)/hooks" "$_S18/copytamper/leases/lead/hooks.copy"; do
+  mkdir -p "\$H" && printf '#!/bin/sh\nexit 0\n' > "\$H/pre-commit" && chmod +x "\$H/pre-commit"
+done
+echo "Status: DONE"
+EOF
+O=$(_s18_lead copytamper '_s18_go t; _s18_try collect lease_collect t')
+_s18_expect copytamper "$O" 'collect-rc=44' '\.git/hooks/ changed \(the lead copy also changed, so it was NOT restored'
+printf '%s\n' "$O" | grep -q 'hooks/ changed (restored' && _S18_FAIL="$_S18_FAIL copytamper(restored-from-the-tampered-copy)"
+[ -e "$_S18/copytamper/repo/.git/hooks/pre-commit" ] || _S18_FAIL="$_S18_FAIL copytamper(planted-hook-gone)"
+
+# legit (#3: the lead's own change is saved, and putting it back + rebaseline resumes)
+_s18_setup legit
+_s18_builder legit <<'EOF'
+#!/bin/sh
+echo feature > feature.txt
+echo "Status: DONE"
+EOF
+O=$(_s18_lead legit '_s18_go t; git remote add origin https://example.invalid/x.git; _s18_try collect lease_collect t; echo "live-remote=[$(git config --get remote.origin.url || true)]"; cp "$(sed -n "s/.*the changed version is saved at \(.*\))\$/\1/p" "$HOME/collect.err")" .git/config; _s18_try rebaseline lease_rebaseline t; _s18_try recollect lease_collect t; echo "remotes=[$(git remote)]"')
+_s18_expect legit "$O" 'collect-rc=44' '\.git/config changed \(restored from the lead copy; the changed version is saved at .*/lead/config\.changed-' 'live-remote=\[\]'
+_s18_expect legit-accepted "$O" 'rebaseline-rc=0' 'recollect-rc=0' 'remotes=\[origin\]'
+
+# ledgerlink (#8: the ledger digest is lstat-aware)
+_s18_setup ledgerlink
+_s18_builder ledgerlink <<EOF
+#!/bin/sh
+L="$_S18/ledgerlink/repo/ops/leases.toml"
+cp "\$L" ledger-copy.toml && ln -sf "\$PWD/ledger-copy.toml" "\$L"
+echo "Status: DONE"
+EOF
+O=$(_s18_lead ledgerlink '_s18_go t; _s18_try collect lease_collect t')
+_s18_expect ledgerlink "$O" 'collect-rc=44' 'ops/leases\.toml changed outside the lead writes'
+_S18_L="$_S18/ledgerlink/repo/ops/leases.toml"
+[ -f "$_S18_L" ] && [ ! -L "$_S18_L" ] || _S18_FAIL="$_S18_FAIL ledgerlink(ledger-not-a-regular-file)"
 
 # static: every git call in lease.sh goes through _lead_git
 # _s18_git_scan <file> — one line per finding: "<line>:<source line>" for a git
@@ -1014,7 +1091,7 @@ _S18_NEG=$(_s18_git_scan "$_S18/lease-planted.sh" | cut -d: -f1 | tr '\n' ' ')
   || _S18_FAIL="$_S18_FAIL scan-negative-control(want-lines:$((_S18_N - 2)),$((_S18_N - 1)),${_S18_N};got:[${_S18_NEG% }])"
 
 if [ -z "$_S18_FAIL" ]; then
-  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer -> collect rc 44 naming the surface (config, hooks and ledger restored; marker never ran); post-checkout planted: next lease_create 44, and once accepted still never runs; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; every git call in lease.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines; planted { git / else git / env -u git lines caught)" "static"
+  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer/leadcfg -> collect rc 44 naming the surface (config, hooks, ledger and the lead trusted git config restored, gitconfig.changed-* kept; marker never ran); post-checkout planted: next lease_create 44; fsmonitor, filter, post-checkout and pointer once accepted (lease_rebaseline) still never run and collect snapshots (pointer via the recorded admin dir); tampered hooks.copy -> 44, NOT restored; ledger swapped for a symlink -> 44, a regular file again; the lead's own git remote add -> 44 naming the saved copy, put back + rebaselined -> collect 0, origin kept; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; every git call in lease.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines; planted { git / else git / env -u git lines caught)" "static"
 else
   row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "FAIL" "mismatch:$(printf '%s' "$_S18_FAIL" | cut -c1-500)" "static"
 fi
