@@ -688,6 +688,12 @@ rm -rf "$_S10" "${WORK}"/s10-*
 #                                                       saved copy put back + lease_rebaseline -> collect 0, git remote lists origin
 #   ledgerlink swaps ops/leases.toml for a symlink to an identical copy in its worktree
 #                                                    -> collect 44 names ops/leases.toml, a regular file again
+#   gc         (clean) the lead runs git gc after collect -> merges; .git/info/refs was written and is outside the digest (#10)
+#   switch     (clean) the lead checkout switched to a new branch rogue + a commit -> merge 44 naming both, state review; back -> merges (#12)
+#   onmain     lease_create on main -> 0, no integration branch recorded; sprint/two cut after it -> lease + merge, no 44 anywhere (#12)
+#   leadcommit (clean) the lead commits on the integration branch -> merge 44 "moved since the lead's last merge"; lease_rebaseline -> merges
+#   include    no identity in the repo, ~/.gitconfig only [include]s the file that sets it -> the merge commit carries that identity (#5)
+#   leadptr    lead checkout is a linked worktree, its .git pointer rewritten to the lease admin dir -> collect 44 names that pointer (#4)
 # plus a static check that every git call in scripts/lib/lease.sh goes through
 # _lead_git (review finding #23). _s18_git_scan lexes the file as shell,
 # carrying quote state across lines (the dispatch contract is a multi-line
@@ -715,12 +721,13 @@ _s18_setup() { # _s18_setup <case>
       && mkdir ops && printf '[roles.builder]\ncli = "claude"\n' > ops/roster.toml && echo r > README.md && git add -A && git commit -qm init \
       && git checkout -q -b sprint/s18 && echo s > s.txt && git add s.txt && git commit -qm sprint ) >/dev/null 2>&1
 }
-# _s18_lead <case> <script> — run lead-side steps in the fixture (the lib
-# sourced, the case's HOME / lease root / fake builder exported). The script
-# may call _s18_go <task> (create + dispatch + wait) and print its results.
+# _s18_lead <case> <script> [dir] — run lead-side steps in the fixture, from
+# <case>/<dir> (default repo; the lead checkout, which also holds ops/), with
+# the lib sourced and the case's HOME / lease root / fake builder exported. The
+# script may call _s18_go <task> (create + dispatch + wait) and print its results.
 _s18_lead() {
   local C="$_S18/$1"
-  ( cd "$C/repo" && export HOME="$C/home" TRIFORGE_LEASE_ROOT="$C/leases" PATH="${_SELF_STUBS}:$PATH" TRIFORGE_TEST_BUILDER="$C/fb.sh" GIT_CONFIG_NOSYSTEM=1 \
+  ( cd "$C/${3:-repo}" && export HOME="$C/home" TRIFORGE_LEASE_ROOT="$C/leases" PATH="${_SELF_STUBS}:$PATH" TRIFORGE_TEST_BUILDER="$C/fb.sh" GIT_CONFIG_NOSYSTEM=1 \
       && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && {
     _s18_go() { # _s18_go <task> — lease_create + lease_dispatch + wait for the exit record
       local T=$1 N=0 OUT
@@ -747,6 +754,8 @@ _s18_expect() { # _s18_expect <case> <output> <pattern...> — every pattern (ER
   done
 }
 _s18_builder() { cat > "$_S18/$1/fb.sh"; chmod +x "$_S18/$1/fb.sh"; }
+# _s18_clean <case> — a clean builder: writes feature.txt (no git), reports DONE
+_s18_clean() { printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s18_builder "$1"; }
 
 # fsmonitor (+ once accepted, still never runs: _lead_git's own core.fsmonitor=false)
 _s18_setup fsmonitor
@@ -947,6 +956,51 @@ _s18_expect ledgerlink "$O" 'collect-rc=44' 'ops/leases\.toml changed outside th
 _S18_L="$_S18/ledgerlink/repo/ops/leases.toml"
 [ -f "$_S18_L" ] && [ ! -L "$_S18_L" ] || _S18_FAIL="$_S18_FAIL ledgerlink(ledger-not-a-regular-file)"
 
+# gc (#10: git gc rewrites .git/info/refs, which the .git/info digest leaves out)
+_s18_setup gc
+_s18_clean gc
+O=$(_s18_lead gc '_s18_go t; _s18_try collect lease_collect t; git gc -q; echo "info-refs=$([ -f .git/info/refs ] && echo yes || echo no)"; _s18_try pin lease_pin_reviewer t codex; _s18_try merge lease_merge t codex')
+_s18_expect gc "$O" 'collect-rc=0' '^info-refs=yes$' 'merge-rc=0'
+
+# switch (#12: the checkout moved off the recorded integration branch)
+_s18_setup switch
+_s18_clean switch
+O=$(_s18_lead switch '_s18_go t; _s18_try collect lease_collect t; git checkout -q -b rogue && echo r > rogue.txt && git add rogue.txt && git commit -qm rogue; _s18_try pin lease_pin_reviewer t codex; _s18_try merge lease_merge t codex; echo "state=$(_ledger_get t state)"; git checkout -q sprint/s18; _s18_try remerge lease_merge t codex')
+_s18_expect switch "$O" 'collect-rc=0' 'merge-rc=44' "integration branch is 'sprint/s18' \\(at [0-9a-f]{12}\\) but the checkout is on 'rogue'" '^state=review$' 'remerge-rc=0'
+
+# onmain (#12: the default branch is never recorded as the integration branch)
+_s18_setup onmain
+_s18_clean onmain
+O=$(_s18_lead onmain 'git checkout -q main; _s18_try create-a lease_create a builder; echo "ib=[$(_ledger_get @baseline integration_branch)]"; git checkout -q -b sprint/two; _s18_go b; _s18_try collect lease_collect b; _s18_try pin lease_pin_reviewer b codex; _s18_try merge lease_merge b codex')
+_s18_expect onmain "$O" 'create-a-rc=0' '^ib=\[\]$' 'collect-rc=0' 'merge-rc=0'
+printf '%s\n' "$O" | grep -q -- '-rc=44' && _S18_FAIL="$_S18_FAIL onmain(an-rc-44:$(printf '%s\n' "$O" | grep -- '-rc=44' | tr '\n' ' '))"
+
+# leadcommit (the integration branch moved since the lead's last merge)
+_s18_setup leadcommit
+_s18_clean leadcommit
+O=$(_s18_lead leadcommit '_s18_go t; _s18_try collect lease_collect t; echo n > notes.txt && git add notes.txt && git commit -qm notes; _s18_try pin lease_pin_reviewer t codex; _s18_try merge lease_merge t codex; _s18_try rebaseline lease_rebaseline; _s18_try remerge lease_merge t codex; echo "notes=$(git show HEAD~1:notes.txt)"')
+_s18_expect leadcommit "$O" 'collect-rc=0' 'merge-rc=44' "integration branch 'sprint/s18' moved since the lead's last merge" 'rebaseline-rc=0' 'remerge-rc=0' '^notes=n$'
+
+# include (#5: the trusted capture follows [include], so an identity kept in an
+# included file signs the lead's commits). The fixture's own commits used the
+# repo-local identity; it is removed, and ~/.gitconfig written, before the
+# first lease_create captures the config and records the baseline.
+_s18_setup include
+_s18_clean include
+( cd "$_S18/include/repo" && export HOME="$_S18/include/home" GIT_CONFIG_NOSYSTEM=1 && git config --unset user.name && git config --unset user.email ) >/dev/null 2>&1
+printf '[include]\n\tpath = id.inc\n' > "$_S18/include/home/.gitconfig"
+printf '[user]\n\tname = Include Identity\n\temail = include@probe.local\n' > "$_S18/include/home/id.inc"
+O=$(_s18_lead include 'unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL EMAIL; _s18_go t; _s18_try collect lease_collect t; _s18_try pin lease_pin_reviewer t codex; _s18_try merge lease_merge t codex; echo "id=$(git log -1 --format="%an <%ae>")"')
+_s18_expect include "$O" 'collect-rc=0' 'merge-rc=0' '^id=Include Identity <include@probe\.local>$'
+
+# leadptr (#4: the lead checkout is a linked worktree; ops/ and the ledger live
+# in it, since _lease_ctx resolves the repo from the cwd)
+_s18_setup leadptr
+_s18_clean leadptr
+( cd "$_S18/leadptr/repo" && export HOME="$_S18/leadptr/home" GIT_CONFIG_NOSYSTEM=1 && git worktree add -q ../lead -b sprint/lead ) >/dev/null 2>&1
+O=$(_s18_lead leadptr '_s18_go t; A=$(_ledger_get t admin_dir); echo "admin=$A"; printf "gitdir: %s\n" "$A" > .git; _s18_try collect lease_collect t; echo "state=$(_ledger_get t state)"' lead)
+_s18_expect leadptr "$O" 'admin=.*/leadptr/repo/\.git/worktrees/t$' 'collect-rc=44' 'the \.git pointer of the lead checkout \(.*/leadptr/lead/\.git\) changed' '^state=escalated$'
+
 # static: every git call in lease.sh goes through _lead_git
 # _s18_git_scan <file> — one line per finding: "<line>:<source line>" for a git
 # call outside the allowlist, "allowlist-unused:<entry>", or "scan-error:...".
@@ -1091,8 +1145,10 @@ _S18_NEG=$(_s18_git_scan "$_S18/lease-planted.sh" | cut -d: -f1 | tr '\n' ' ')
   || _S18_FAIL="$_S18_FAIL scan-negative-control(want-lines:$((_S18_N - 2)),$((_S18_N - 1)),${_S18_N};got:[${_S18_NEG% }])"
 
 if [ -z "$_S18_FAIL" ]; then
-  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer/leadcfg -> collect rc 44 naming the surface (config, hooks, ledger and the lead trusted git config restored, gitconfig.changed-* kept; marker never ran); post-checkout planted: next lease_create 44; fsmonitor, filter, post-checkout and pointer once accepted (lease_rebaseline) still never run and collect snapshots (pointer via the recorded admin dir); tampered hooks.copy -> 44, NOT restored; ledger swapped for a symlink -> 44, a regular file again; the lead's own git remote add -> 44 naming the saved copy, put back + rebaselined -> collect 0, origin kept; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; every git call in lease.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines; planted { git / else git / env -u git lines caught)" "static"
+  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer/leadcfg -> collect rc 44 naming the surface (config, hooks, ledger and the lead trusted git config restored, gitconfig.changed-* kept; marker never ran); post-checkout planted: next lease_create 44; fsmonitor, filter, post-checkout and pointer once accepted (lease_rebaseline) still never run and collect snapshots (pointer via the recorded admin dir); tampered hooks.copy -> 44, NOT restored; ledger swapped for a symlink -> 44, a regular file again; the lead's own git remote add -> 44 naming the saved copy, put back + rebaselined -> collect 0, origin kept; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; git gc after collect (writes .git/info/refs) -> merges; lead checkout switched to rogue -> merge 44 naming sprint/s18 and rogue, state review, back on sprint/s18 -> merges; lease_create on main records no integration branch, sprint/two cut after it -> lease + merge, no 44; a lead commit on the integration branch -> merge 44 (moved), lease_rebaseline -> merges on top; identity only in an [include]d ~/.gitconfig file -> the merge commit carries it; linked-worktree lead checkout whose .git pointer is rewritten to the lease admin dir -> collect 44 naming it; every git call in lease.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines; planted { git / else git / env -u git lines caught)" "static"
 else
-  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "FAIL" "mismatch:$(printf '%s' "$_S18_FAIL" | cut -c1-500)" "static"
+  # the failed case names first, so a long pattern list can't cut them off
+  _S18_WHO=$(printf '%s' "$_S18_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
+  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "FAIL" "mismatch in ${_S18_WHO% }:$(printf '%s' "$_S18_FAIL" | cut -c1-500)" "static"
 fi
 rm -rf "$_S18"
