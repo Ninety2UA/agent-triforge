@@ -1,35 +1,57 @@
 ---
-saved: 2026-09-30T21:40:00Z
-phase: H-built
+saved: 2026-10-01T00:45:00Z
+phase: 0-starting
 wave: 0
 tasks:
   total: 29
   done: 4
   blocked: 0
 verification_baseline:
-  command: "bash scripts/validate-versions.sh; bash scripts/validate-skills.sh; claude plugin validate --strict .claude-plugin/plugin.json; claude plugin validate --strict .claude-plugin/marketplace.json"
-  result: "validate-versions: PASS — plugin 3.3.3, ladder 24a7ee2039c8c2e4907472e4cf82fdfd. validate-skills: 12 skills OK. Both manifests pass --strict. probe-capabilities.sh --self-only: 17 SELF rows, none FAIL."
-  commit: e91e5bb
+  command: "bash scripts/validate-versions.sh; bash scripts/validate-skills.sh; claude plugin validate --strict .claude-plugin/plugin.json; claude plugin validate --strict .claude-plugin/marketplace.json; bash scripts/probe-capabilities.sh --self-only"
+  result: "All PASS on main 79db9c0 (= release/4.0 start): validate-versions PASS, ladder 24a7ee2039c8c2e4907472e4cf82fdfd; 12 skills OK; both manifests --strict; SELF gate 17 rows none FAIL; gates.yml green (run 36786228612)."
+  commit: 79db9c0
 verification_command: "bash scripts/validate-versions.sh; bash scripts/validate-skills.sh; claude plugin validate --strict .claude-plugin/plugin.json; claude plugin validate --strict .claude-plugin/marketplace.json; bash scripts/probe-capabilities.sh --self-only"
-state_head: b77338a
+state_head: 79db9c0
 ---
 # Session state
-<!-- Saved: 2026-09-30T21:40:00Z -->
-<!-- Type: handoff after build — Phase H (v3.3.3) built, reviewed and fixed; PR #12 to main open, unmerged -->
+<!-- Saved: 2026-10-01T00:45:00Z -->
+<!-- Type: program handoff — Phase H released as v3.3.3; Phases 0–6 running autonomously on release/4.0 -->
 
 ## Current phase
 
-Phase H is built on `fix/v3.3.3` and reviewed. One PR to `main` for v3.3.3 is open — https://github.com/Ninety2UA/agent-triforge/pull/12 (branch pushed 2026-09-30, base `main`) — and must NOT be merged by an agent: the user cross-reviews every protected-path diff and merges. Nothing from Phases 0–6 has started.
+**Phase H is done:** PR #12 squash-merged to `main` as 79db9c0 on 2026-10-01 and `release.yml` published v3.3.3 (run 36786584796). `release/4.0` was cut from that commit and pushed. **Phase 0 (U21, U3, U22, U4) is next**, on `release/4.0`.
 
-## Active sprint
+## Authorization in force (2026-10-01)
 
-Plan: `docs/plans/2026-09-28-1946-feat-lead-choice-v4-plan.md` (29 units, 7 phases). Phase H = U28, U1, U2, U27, all delivered on this branch (commits 0ca243e, 0ea29a0, fa8dfc6, 7ba19ed), followed by a simplify pass (708ea30), the ce-code-review fix waves (6e01170, ee43dd9, 06364ab, fcda556, 4541b58) and a plugin-dev pass (e91e5bb).
+The user, before sleeping: "review the PR and if it passes fully 5/5, then merge … I'm going to sleep so you are in full charge. Make sure everything is running smoothly and that everything is delivered (all phases, continue running all the phases that are left after this one)." This supersedes, for this program only, the plan's "no autonomous /lfg" and "only the user merges" lines. Standing rules that still hold: each PR gets a real review (independent Opus 5.5 reviewers on the final diff + `gates.yml` green) and merges only on 5/5 (correctness vs the unit specs; gates + negative controls; guards not weakened; docs/release consistency; bash 3.2 + zsh + upgrade compatibility). The plan's stop conditions hold: a settled decision that can't work, a probe row a unit depends on failing with no designed fallback, or a change that would weaken a protected-path/push/approval/git-integrity guard → record the blocker here and in the PR, continue with independent work, leave the decision for the user. Never write user-tier config, never run CLI logins, never launch `danger-full-access` (R50). Memory: `autonomy_grant_2026_09_30.md`.
+
+## Program plan (PR by PR on release/4.0; each built with ce-work on Fable 5.1 @ high, reviewed on Opus 5.5 @ high)
+
+| PR | Units | Status |
+|---|---|---|
+| 0 | U21 validator prep + ladder source; U3 AGENTS.md + rule inventory; U22 session-start floor/stale-template; U4 removal test + pruning | next |
+| 1a | U5 plugin-root resolver + locator; U26 CLI registry; U6 skill conformance validator | pending |
+| 1b | U7 commands → at- skills; U24 split oversized skills; U23 remove commands/ | pending |
+| 2a | U29 capability/survival probe rows; U13 detached leases + lease_wait + lead exit; U11 worker marker | pending |
+| 2b | U9 [lead] table + resolution; U12 claude -p lane; U10 ledger lead CLI / reviewer class / approvals | pending |
+| 2c | U25 dispatch_persona lane; U8 personas home, agents/ removed | pending |
+| 3 | U14 Codex lead: bootstrap, monitors, coordinator | pending |
+| 4 | U16 Grok Build adapter; U17 Devin CLI adapter; U18 other-harness manifests | pending |
+| 5 | U15 at-setup lead step + instruction-file detection | pending |
+| 6 | U19 watch-cycle carry-ins; U20 two-lead fixture sprint + 4.0 release | pending |
+| final | release/4.0 → main as v4.0.0 (release.yml publishes) | pending |
+
+Update this table and the frontmatter at every PR boundary; the plan is `docs/plans/2026-09-28-1946-feat-lead-choice-v4-plan.md`.
 
 ## Next actions
 
-1. The user reviews and merges PR #12 (squash: `gh pr merge 12 --squash --delete-branch`). `gates.yml` runs for the first time on it; a red run is a finding against the PR. The release workflow tags v3.3.3 and publishes the GitHub release from the README ledger; confirm with `gh release view v3.3.3`.
-2. After 3.3.3 is on `main`: create `release/4.0` from `main`, then land Phases 0–6 PR by PR on it (KTD13), merging to `main` once as v4.0.0. Phase 0 starts with U21 (validator prep and ladder source), then U3.
-3. Follow-ups recorded in the PR body (not blocking 3.3.3): the plugin-level `settings.json` `env` block may be dropped by current Claude Code (confirm live); `tool-failure-monitor.sh` should also register on `PostToolUseFailure`; leases open across the 3.3.2→3.3.3 upgrade are snapshotted at merge time; the probe record was not regenerated for this hotfix.
+1. Phase 0 on `release/4.0`: `/ce-work` scoped to U21, U3, U22, U4 (read this file first). U3's `/doctor` baseline can't be taken headless — note it as "not taken (headless)" and rely on the validator budgets. U4's removal test uses `claude -p` (3 runs per arm minimum).
+2. Ship: PR to `release/4.0` (template, provenance table, protected paths = Yes, cross-reviewer = the lead under the authorization above), independent Opus reviewers on the final diff, `gates.yml` green, then squash-merge.
+3. Repeat per the table. At the end: regenerate the probe record (U20), bump to 4.0.0, PR `release/4.0` → `main`, confirm `gh release view v4.0.0`.
+
+## Blockers recorded for the user
+
+- (none yet)
 
 ## Model and effort (user-approved)
 
@@ -71,3 +93,5 @@ Plan: `docs/plans/2026-09-28-1946-feat-lead-choice-v4-plan.md` (29 units, 7 phas
 - **Git worktrees don't carry gitignored `.claude/settings.local.json`.** Copy it in for compound-engineering and plugin-dev to load there.
 - **Auth and quota:** Devin CLI 3000.11.3 is installed but not logged in, and Kimi returns 403 (AUTH-FAIL).
 - **Squash-merge PRs:** `gh pr merge <n> --squash --delete-branch`. With a worktree still open, remove the worktree first, then delete the branch.
+- **SELF fixtures that tamper with the ledger must wait for lease_dispatch's `state=building` row** (that write recreates the ledger anchors); the CI runner is faster than a local run and the `ledger-gone` case failed only there. The gate prints each FAIL row's evidence to stderr and fails when an expected SELF row is missing (`SELF_EXPECTED` in probe-capabilities.sh — add new rows there).
+- **Inside the single-quoted `_LEAD_INTEGRITY_PY` block in lease.sh no apostrophe may appear** (a comment saying "checkout's" broke the whole library once).
