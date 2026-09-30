@@ -73,11 +73,6 @@ except Exception:
   SS_JSON_FILE="$1" "${CMD[@]}" 2>/dev/null || true
 }
 
-PLUGIN_VERSION=""
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-  PLUGIN_VERSION=$(_ss_json_version "${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json")
-fi
-
 # Bootstrap ops/ directory if it doesn't exist
 if [ ! -d "ops" ]; then
   mkdir -p ops/solutions ops/decisions ops/archive
@@ -205,157 +200,47 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.an
 fi
 
 # ---------------------------------------------------------------------------
-# .agents/skills/ refresh (KTD7, R9) — the agy workspace-skills tier AND the
+# .agents/skills/ refresh (KTD12, R31) — the agy workspace-skills tier AND the
 # cross-CLI agentskills.io path (Codex, OpenCode, Cursor and Kimi all read it).
 # Copies, never symlinks, so loaders that refuse to follow symlinks across
 # mount boundaries still see the skills.
 #
-# Ownership rule: shipped-name directories under .agents/skills/ are Triforge-
-# OWNED and replaced whenever the plugin version changes; user customizations
-# belong in a differently named directory, which this block never touches.
-# The stamp .agents/skills/.triforge-plugin-version (line 1 `version=<plugin
-# version>`, line 2 `skills=<comma-separated shipped names>`) drives the
-# refresh: absent (a legacy v3.2.0-and-earlier copy) or different → refresh;
-# equal → no copies and no notice (idempotent). The stamp is safe to commit in
-# a user project (nothing gitignores it there; this repo ignores /.agents/) and
-# a second session start on the same version is a no-op. It is written LAST,
-# only after every copy succeeded, so an interrupted refresh re-runs on the
-# next session start.
-#
-# Safety: `.agents/skills` itself being a symlink → skipped with one notice.
-# Every name is validated against ^[a-z0-9][a-z0-9-]*$ and every existing
-# destination must be a non-symlink directory DIRECTLY inside .agents/skills
-# (python3 os.path.realpath containment) before it is replaced or retired;
-# anything else is skipped with one notice. A shipped directory is replaced
-# (rm -rf of the validated non-symlink dir, then `cp -R src/. dest/` — never
-# `cp -R src dest`, which nests) rather than copied over in place, so a symlink
-# planted inside it is never followed by cp. Retirement touches only names
-# recorded in the PREVIOUS stamp that no longer ship — foreign (user-added)
-# directories are never removed. _lease_provision_skills keeps its own fresh
-# per-worktree copy (current by construction) and is unaffected.
+# The work is done by scripts/lib/skills-sync.py, which _lease_provision_skills
+# also runs for each lease worktree, so both follow one ownership rule:
+# Triforge replaces or retires a directory only when its content digest
+# matches the digest recorded in the stamp .agents/skills/.triforge-plugin-
+# version for that name (a 3.3.0–3.3.2 stamp without digests is migrated
+# against scripts/lib/skill-digests.txt, the digests of every released copy).
+# Anything else is user-owned: kept, with one notice naming it. With no stamp,
+# only empty slots are written. The stamp is safe to commit in a user project
+# (this repo ignores /.agents/); an unchanged plugin version is a no-op with no
+# notice, and the stamp is written last, so an interrupted refresh re-runs on
+# the next session start. A symlinked .agents or .agents/skills, or one that
+# resolves outside the project, is left untouched with one notice.
 SKILLS_NOTICES=""
-
-_ss_skill_name_ok() {
-  printf '%s' "$1" | LC_ALL=C grep -Eq '^[a-z0-9][a-z0-9-]*$'
-}
-
-# _ss_skill_dir_ok <path> — 0 when <path> is a non-symlink directory whose
-# resolved location is directly inside the resolved .agents/skills.
-_ss_skill_dir_ok() {
-  [ -L "$1" ] && return 1
-  [ -d "$1" ] || return 1
-  SS_SKILL_PATH="$1" SS_SKILLS_ROOT=".agents/skills" python3 -c '
-import os, sys
-root = os.path.realpath(os.environ["SS_SKILLS_ROOT"])
-raw = os.environ["SS_SKILL_PATH"]
-path = os.path.realpath(raw)
-ok = (os.path.dirname(path) == root) and os.path.isdir(path) and not os.path.islink(raw)
-sys.exit(0 if ok else 1)
-' 2>/dev/null
-}
-
-_ss_refresh_skills() {
-  local VERSION="$1"
-  local SRC_ROOT="${CLAUDE_PLUGIN_ROOT}/skills" DEST_ROOT=".agents/skills"
-  local STAMP="${DEST_ROOT}/.triforge-plugin-version"
-  local STAMPED_VERSION="" PREV_SKILLS="" SHIPPED="" SKIPPED="" RETIRED=""
-  local NAME SRC DEST OLD FAILED=0 I=0
-  local -a OLD_NAMES=()
-  [ -d "$SRC_ROOT" ] || return 0
-  if [ -L "$DEST_ROOT" ] || [ -L ".agents" ]; then
-    SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: .agents or .agents/skills is a symlink — left untouched (Triforge refreshes only a real directory inside the project; remove the link to let session start manage it)."
-    return 0
-  fi
-  # The resolved destination must be THIS checkout's own .agents/skills. A
-  # symlinked ancestor (a repo can ship one) would otherwise let the refresh
-  # rm -rf and write shipped-name directories outside the project (CWE-59):
-  # _ss_skill_dir_ok anchors on realpath(.agents/skills), which already follows
-  # such a link, so the containment has to be checked against the checkout here.
-  if ! SS_DEST="$DEST_ROOT" python3 -c 'import os, sys; d = os.environ["SS_DEST"]; sys.exit(0 if os.path.realpath(d) == os.path.join(os.path.realpath("."), ".agents", "skills") else 1)' 2>/dev/null; then
-    SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: .agents/skills resolves outside the project (symlinked ancestor) — left untouched."
-    return 0
-  fi
-  if [ -f "$STAMP" ]; then
-    STAMPED_VERSION=$(sed -n 's/^version=//p' "$STAMP" 2>/dev/null | head -1 || true)
-    PREV_SKILLS=$(sed -n 's/^skills=//p' "$STAMP" 2>/dev/null | head -1 || true)
-  fi
-  if [ -d "$DEST_ROOT" ] && [ -n "$VERSION" ] && [ "$STAMPED_VERSION" = "$VERSION" ]; then
-    return 0    # current: no copies, no notice
-  fi
-  if [ -d "$DEST_ROOT" ] && [ -z "$VERSION" ]; then
-    return 0    # plugin version unreadable: keep what is deployed rather than refresh blind
-  fi
-  if ! mkdir -p "$DEST_ROOT" 2>/dev/null; then
-    SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: WARNING could not create .agents/skills — skills not refreshed (session continues)."
-    return 0
-  fi
-  # 1. Replace every shipped skill directory by name.
-  for SRC in "$SRC_ROOT"/*/; do
-    [ -d "$SRC" ] || continue
-    SRC="${SRC%/}"
-    NAME=$(basename "$SRC")
-    if ! _ss_skill_name_ok "$NAME"; then
-      SKIPPED="${SKIPPED} ${NAME}(invalid-name)"; continue
-    fi
-    SHIPPED="${SHIPPED:+${SHIPPED},}${NAME}"
-    DEST="${DEST_ROOT}/${NAME}"
-    if [ -e "$DEST" ] || [ -L "$DEST" ]; then
-      if ! _ss_skill_dir_ok "$DEST"; then
-        SKIPPED="${SKIPPED} ${NAME}(not-a-plain-directory)"; continue
-      fi
-      if ! rm -rf "$DEST" 2>/dev/null; then
-        FAILED=1; SKIPPED="${SKIPPED} ${NAME}(replace-failed)"; continue
-      fi
-    fi
-    if ! mkdir -p "$DEST" 2>/dev/null || ! cp -R "${SRC}/." "${DEST}/" 2>/dev/null; then
-      FAILED=1; SKIPPED="${SKIPPED} ${NAME}(copy-failed)"; continue
-    fi
-  done
-  # 2. Retire names from the PREVIOUS stamp that no longer ship (never a
-  #    foreign directory: only stamp-listed names are candidates).
-  if [ -n "$PREV_SKILLS" ]; then
-    IFS=',' read -r -a OLD_NAMES <<< "$PREV_SKILLS" || true
-    I=0
-    while [ "$I" -lt "${#OLD_NAMES[@]}" ]; do
-      OLD=$(printf '%s' "${OLD_NAMES[$I]}" | tr -d '[:space:]')
-      I=$((I + 1))
-      [ -n "$OLD" ] || continue
-      case ",${SHIPPED}," in *",${OLD},"*) continue ;; esac   # still ships — replaced above
-      if ! _ss_skill_name_ok "$OLD"; then
-        SKIPPED="${SKIPPED} ${OLD}(invalid-name)"; continue
-      fi
-      DEST="${DEST_ROOT}/${OLD}"
-      [ -e "$DEST" ] || [ -L "$DEST" ] || continue      # already gone
-      if ! _ss_skill_dir_ok "$DEST"; then
-        SKIPPED="${SKIPPED} ${OLD}(not-a-plain-directory)"; continue
-      fi
-      if rm -rf "$DEST" 2>/dev/null; then
-        RETIRED="${RETIRED:+${RETIRED} }${OLD}"
-      else
-        SKIPPED="${SKIPPED} ${OLD}(remove-failed)"
-      fi
-    done
-  fi
-  # 3. Stamp LAST — only when every copy succeeded (skips are refusals, not
-  #    failures: the skipped entry is reported and left alone for good).
-  if [ "$FAILED" -eq 0 ]; then
-    if { printf 'version=%s\n' "$VERSION"; printf 'skills=%s\n' "$SHIPPED"; } > "${STAMP}.tmp.$$" 2>/dev/null && mv "${STAMP}.tmp.$$" "$STAMP" 2>/dev/null; then
-      SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: .agents/skills refreshed to ${VERSION} (shipped-name directories are Triforge-owned and overwritten on version change; keep customizations in a differently named directory)${RETIRED:+; retired no-longer-shipped: ${RETIRED}}."
+SS_SKILLS_SYNC="${CLAUDE_PLUGIN_ROOT:-}/scripts/lib/skills-sync.py"
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/skills" ]; then
+  if [ -f "$SS_SKILLS_SYNC" ]; then
+    # A crash or a timeout must not abort the hook (set -e), but it must not be
+    # silent either: the exit status is kept and reported as a notice below.
+    SS_SYNC_OUT=""
+    SS_SYNC_RC=0
+    if [ -n "$TIMEOUT_BIN" ]; then
+      SS_SYNC_OUT=$("$TIMEOUT_BIN" 60s python3 "$SS_SKILLS_SYNC" sync --plugin-root "$CLAUDE_PLUGIN_ROOT" --project . --prefix "session-start: " 2>/dev/null) || SS_SYNC_RC=$?
     else
-      rm -f "${STAMP}.tmp.$$" 2>/dev/null || true
-      SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: WARNING .agents/skills refreshed but the version stamp could not be written — the refresh re-runs next session."
+      SS_SYNC_OUT=$(python3 "$SS_SKILLS_SYNC" sync --plugin-root "$CLAUDE_PLUGIN_ROOT" --project . --prefix "session-start: " 2>/dev/null) || SS_SYNC_RC=$?
+    fi
+    while IFS= read -r SS_LINE; do
+      if [ -n "$SS_LINE" ]; then SKILLS_NOTICES="${SKILLS_NOTICES}\n${SS_LINE}"; fi
+    done <<SS_SYNC_EOF
+${SS_SYNC_OUT}
+SS_SYNC_EOF
+    if [ "$SS_SYNC_RC" -ne 0 ]; then
+      SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: WARNING .agents/skills refresh failed (skills-sync.py exit ${SS_SYNC_RC}; 124 means the 60 s timeout) — skills may be stale; the refresh re-runs next session."
     fi
   else
-    SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: WARNING .agents/skills refresh incomplete (stamp not written; re-runs next session)."
+    SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: WARNING ${SS_SKILLS_SYNC} is missing — .agents/skills not refreshed (reinstall the plugin)."
   fi
-  if [ -n "$SKIPPED" ]; then
-    SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: .agents/skills entries left untouched (symlink, not a plain directory directly inside .agents/skills, or invalid name):${SKIPPED}."
-  fi
-  return 0
-}
-
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-  _ss_refresh_skills "$PLUGIN_VERSION"
 fi
 
 # _bootstrap_copy <src> <dest> — provision a template file into the project,

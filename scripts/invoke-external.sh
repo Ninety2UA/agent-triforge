@@ -13,6 +13,7 @@
 # sourced below, in this order, into the same shell:
 #   lib/common.sh       host-marker scrub, timeout wrapper, scrubbing, KTD-9
 #                       failure classifier, agy/codex listing helpers
+#   lib/registry.sh     shared data: the protected-path lists (KTD8)
 #   lib/antigravity.sh  invoke_antigravity + _agy_parse_envelope
 #   lib/codex.sh        invoke_codex
 #   lib/opencode.sh     invoke_opencode + the OPENCODE_PERMISSION deny set
@@ -80,7 +81,7 @@ fi
 
 # Load the lanes (fail-closed: a missing lib is a broken install, never a
 # silently narrower helper).
-for _triforge_lib in common antigravity codex opencode kimi cursor roster lease; do
+for _triforge_lib in common registry antigravity codex opencode kimi cursor roster lease; do
   if [ ! -f "${_TRIFORGE_SCRIPTS_DIR}/lib/${_triforge_lib}.sh" ]; then
     echo "invoke-external.sh: ERROR missing ${_TRIFORGE_SCRIPTS_DIR}/lib/${_triforge_lib}.sh — the plugin install is incomplete (reinstall: claude plugin install agent-triforge@agent-triforge)" >&2
     return 2 2>/dev/null || exit 2

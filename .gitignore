@@ -5,3 +5,4 @@ ops/leases.toml
 /.gemini/
 /.antigravity/
 /.agents/
+__pycache__/

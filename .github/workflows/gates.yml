@@ -1,0 +1,74 @@
+# The PR gates (KTD15): shell syntax, both release-gate validators, and the
+# SELF-row gate, on every pull request to main or release/4.0.
+#
+# macOS runner on purpose: the hook handlers and helper libraries run under
+# /bin/bash 3.2 (macOS), so every script runs under /bin/bash here. No live
+# row runs — `probe-capabilities.sh --self-only` executes only the static
+# SELF-* rows, writes its record to a scratch path (never the committed
+# ops/research/ record), and exits 3 on any SELF FAIL. The last step proves the
+# gate can fail: it breaks one invariant in a scratch copy and requires exit 3.
+# `claude plugin validate --strict` needs Claude Code and stays a local release
+# gate (.claude/CLAUDE.md "Release checklist").
+name: gates
+
+on:
+  pull_request:
+    branches: [main, "release/4.0"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # release tags: SELF-08b rebuilds a released skill copy for the legacy-stamp migration case
+
+      - uses: actions/setup-python@v7 # v5 runs on the deprecated Node 20
+        with:
+          python-version: "3.12" # tomllib (3.11+): the roster, ledger and probe parsers
+
+      - name: Tools
+        run: |
+          /bin/bash --version | head -1
+          python3 --version
+          git --version
+          command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install coreutils
+
+      - name: Shell syntax (/bin/bash 3.2)
+        run: |
+          for f in scripts/*.sh scripts/lib/*.sh hooks/handlers/*.sh scripts/lease-git-hooks/pre-push; do
+            /bin/bash -n "$f" || { echo "syntax error: $f"; exit 1; }
+          done
+
+      - name: validate-versions
+        run: /bin/bash scripts/validate-versions.sh
+
+      - name: validate-skills
+        run: /bin/bash scripts/validate-skills.sh
+
+      - name: SELF gate
+        run: /bin/bash scripts/probe-capabilities.sh --self-only
+
+      - name: SELF gate can fail
+        run: |
+          set -u
+          BROKEN="$RUNNER_TEMP/broken"
+          mkdir -p "$BROKEN"
+          git ls-files -z | tar --null -T - -cf - | tar -xf - -C "$BROKEN"   # one archive whatever the file count (xargs would split past ARG_MAX)
+          rm "$BROKEN/scripts/lease-git-hooks/pre-push"   # SELF-09's no-push hook
+          RC=0
+          /bin/bash "$BROKEN/scripts/probe-capabilities.sh" --self-only 2> "$RUNNER_TEMP/broken.err" || RC=$?
+          grep -E 'SELF GATE FAILED' "$RUNNER_TEMP/broken.err" || true
+          if [ "$RC" -ne 3 ] || ! grep -q 'SELF GATE FAILED — .*SELF-09' "$RUNNER_TEMP/broken.err"; then
+            echo "expected exit 3 naming SELF-09 from a tree without the pre-push hook; got rc=$RC"
+            exit 1
+          fi
+          echo "gate fails as designed (rc=$RC, SELF-09 named)"

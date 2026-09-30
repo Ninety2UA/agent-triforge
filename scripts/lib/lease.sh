@@ -33,16 +33,168 @@ fi
 #              |                 +-> escalated  fail fast with guidance, no requeue
 #              +-------- requeued (re-leased to a DIFFERENT builder)
 #
-# Confinement (KTD-3, KTD-14, R35): builders never read or write the
-# canonical ops/ tree — required context is injected into the dispatch
-# prompt; the builder runs with cwd = its worktree under a per-adapter env
-# allowlist (_adapter_env) so no cross-provider credential leaks; shared-file
-# mutations happen lead-side at collect/merge time on the main tree.
+# Contract (KTD-3, KTD-14, R35): builders never read or write the canonical
+# ops/ tree — required context is injected into the dispatch prompt; the
+# builder runs with cwd = its worktree under a per-adapter env allowlist
+# (_adapter_env) so no cross-provider credential leaks; shared-file mutations
+# happen lead-side at collect/merge time on the main tree.
 
-# Repo root of the MAIN checkout (lease functions are lead-side and run from
-# the main tree, never from inside a worktree).
-_lease_repo_root() {
-  git rev-parse --show-toplevel 2>/dev/null
+# Confinement, stated honestly (R4, R46): the worktree limits where a builder
+# STARTS, not where it writes. A builder with a shell and no OS sandbox can
+# write anything the user can — the lead's .git/config and hooks, the ledger,
+# other branches. Triforge does not prevent that; it makes its OWN git calls
+# ignore worker-writable settings (_lead_git), detects changes the lead did not
+# make at the next check (_lead_integrity_check: collect, merge, promote,
+# create, dispatch, pin, requeue, heartbeat), restores .git/config, .git/hooks,
+# the lead's trusted git config and the ledger from the lead's copies (keeping
+# the changed version beside them), escalates, and merges only
+# the lead's own recorded snapshot of each lease (KTD19). Other git callers —
+# the harness's own git, ad-hoc git the lead model runs, other builders — are
+# covered only by that detection. All of it is detection, not prevention.
+
+# ---------------------------------------------------------------------------
+# Lead context and hardened lead-side git (KTD18)
+# ---------------------------------------------------------------------------
+
+# _lease_ctx — resolve, and cache for the current directory, the lead's
+# checkout (_LEASE_REPO), its git dir (_LEASE_GITDIR) and common dir
+# (_LEASE_COMMON), the ledger (_LEASE_LEDGER), the lease root (_LEASE_ROOT),
+# the lead state directory (_LEASE_STATE = <root>/lead) and the trusted git
+# config _lead_git reads
+# (_LEAD_CFG, captured on first use). Found WITHOUT git: a planted
+# core.worktree in .git/config would make `git rev-parse --show-toplevel`
+# answer with a path the worker chose, and with it the ledger path and the
+# lease root. The walk-up mirrors git's own discovery (nearest ancestor holding
+# .git). Lease root: TRIFORGE_LEASE_ROOT, else
+# ${TMPDIR:-/tmp}/triforge-leases/<repo-basename>-<git-blob-hash-of-root-path>
+# (the same 12 hex chars `git hash-object --stdin` gave before 3.3.3, so open
+# 3.3.x leases keep their root). Every stored worktree path is canonical from
+# birth, which is what lets lease_reclaim compare stored vs canonical.
+_lease_ctx() {
+  local KEY="${PWD}|${TRIFORGE_LEASE_ROOT:-}|${TMPDIR:-}"
+  if [ "${_LEASE_CTX_KEY:-}" = "$KEY" ] && [ -n "${_LEAD_CFG:-}" ] && [ -f "${_LEAD_CFG}" ]; then
+    return 0
+  fi
+  local OUT
+  OUT=$(LC_ROOT="${TRIFORGE_LEASE_ROOT:-}" LC_TMP="${TMPDIR:-/tmp}" python3 -c '
+import hashlib, os, sys
+d = os.path.realpath(os.getcwd())
+while not os.path.lexists(os.path.join(d, ".git")):
+    parent = os.path.dirname(d)
+    if parent == d:
+        sys.exit(1)
+    d = parent
+repo, dotgit = d, os.path.join(d, ".git")
+if os.path.isdir(dotgit) and not os.path.islink(dotgit):
+    gitdir = dotgit
+else:
+    try:
+        line = open(dotgit, encoding="utf-8").read().strip()
+    except OSError:
+        sys.exit(2)
+    if not line.startswith("gitdir:"):
+        sys.exit(2)
+    gitdir = os.path.join(repo, line[len("gitdir:"):].strip())
+common = gitdir
+if os.path.isfile(os.path.join(gitdir, "commondir")):
+    common = os.path.join(gitdir, open(os.path.join(gitdir, "commondir"), encoding="utf-8").read().strip())
+root = os.environ.get("LC_ROOT", "")
+if not root:
+    b = repo.encode("utf-8", "surrogateescape")
+    h = hashlib.sha1(b"blob " + str(len(b)).encode() + b"\0" + b).hexdigest()[:12]
+    root = os.path.join(os.environ.get("LC_TMP") or "/tmp", "triforge-leases", os.path.basename(repo) + "-" + h)
+os.makedirs(os.path.join(root, "lead"), exist_ok=True)
+for p in (repo, os.path.realpath(gitdir), os.path.realpath(common), os.path.realpath(root)):
+    print(p)
+' 2>/dev/null) || { echo "lease: ERROR not inside a git repository — worktree leases require one (outside git the builder pool degrades to lead-only in-place execution)." >&2; return 1; }
+  _LEASE_REPO=$(printf '%s\n' "$OUT" | sed -n 1p)
+  _LEASE_GITDIR=$(printf '%s\n' "$OUT" | sed -n 2p)
+  _LEASE_COMMON=$(printf '%s\n' "$OUT" | sed -n 3p)
+  _LEASE_ROOT=$(printf '%s\n' "$OUT" | sed -n 4p)
+  _LEASE_STATE="${_LEASE_ROOT}/lead"
+  _LEASE_LEDGER="${_LEASE_REPO}/ops/leases.toml"
+  _LEAD_CFG="${_LEASE_STATE}/gitconfig"
+  if [ ! -f "$_LEAD_CFG" ] && ! _lead_gitconfig_capture "$_LEAD_CFG"; then
+    echo "lease: ERROR could not capture the trusted git config into ${_LEAD_CFG}" >&2
+    _LEAD_CFG=""
+    return 1
+  fi
+  _LEASE_CTX_KEY=$KEY
+}
+
+# _lead_gitconfig_capture <dest> — build the trusted "global" config _lead_git
+# uses (KTD18): the user's identity, LFS filter, ignore-file, line-ending and
+# safe.directory settings, read once from the system and global config files.
+# The only git this file runs outside _lead_git: `git -C <lead checkout> config
+# --<scope> --includes` reads that one scope and the files it includes, and
+# executes nothing. Includes are on (a named scope turns them off by default)
+# and the read runs from the lead checkout (_LEASE_REPO, set by _lease_ctx
+# before it calls this) so [include] and [includeIf "gitdir:..."] files resolve:
+# a user.name/user.email kept in one would otherwise be dropped, and every lead
+# commit would carry the wrong identity. Captured before any builder runs, so a
+# later worker edit to ~/.gitconfig never reaches the lead's git (and the
+# integrity check reports it); the capture itself is a digested, restorable
+# integrity surface (lead_gitconfig).
+_lead_gitconfig_capture() {
+  local DEST=$1 TMP="${1}.tmp.$$" SCOPE K V LIST
+  mkdir -p "$(dirname "$DEST")" || return 1
+  printf '# Triforge trusted git config (KTD18) — captured from your system/global git config on\n# first use. The lead-side git calls in scripts/lib/lease.sh read ONLY this file as global\n# config. The integrity check digests it: to re-capture, delete it and run lease_rebaseline.\n' > "$TMP" || return 1
+  for SCOPE in --system --global; do
+    LIST=$(env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT -u GIT_DIR -u GIT_WORK_TREE \
+             git -C "$_LEASE_REPO" config "$SCOPE" --includes --null --get-regexp '^(user\.(name|email)|core\.(excludesfile|autocrlf|eol)|init\.defaultbranch|safe\.directory|filter\.lfs\..*)$' 2>/dev/null \
+           | python3 -c '
+import sys
+for item in sys.stdin.buffer.read().split(b"\0"):
+    k, _, v = item.decode("utf-8", "replace").partition("\n")
+    if k and "\t" not in v and "\n" not in v:
+        print(k + "\t" + v)
+') || LIST=""
+    while IFS="$(printf '\t')" read -r K V; do
+      [ -n "$K" ] || continue
+      GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git config --file "$TMP" --add "$K" "$V" 2>/dev/null || true
+    done <<CAPTURE_EOF
+${LIST}
+CAPTURE_EOF
+  done
+  mv -f "$TMP" "$DEST"
+}
+
+# _lead_git <git args...> — every git call the lease lifecycle makes (KTD18).
+# Worker-writable settings can't change what it runs: system config off
+# (GIT_CONFIG_NOSYSTEM), global config = the trusted capture (_LEAD_CFG), and
+# per-invocation overrides for hooks (core.hooksPath=/dev/null), fsmonitor,
+# the global attributes file, signing, pager and editor, plus gc/maintenance
+# off. .git/config itself can't be switched off, so it (and .git/hooks,
+# .git/info, and the trusted capture itself) is digest-checked before these
+# calls run. Inherited GIT_* that
+# would redirect the call are unset; _LEAD_GIT_INDEX, when set, becomes
+# GIT_INDEX_FILE (the temporary index a snapshot is built in).
+_lead_git() {
+  if [ -z "${_LEAD_CFG:-}" ] || [ ! -f "${_LEAD_CFG}" ]; then
+    _lease_ctx || return 1
+  fi
+  local -a E=(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_OBJECT_DIRECTORY
+              -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_CONFIG -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT -u GIT_EXTERNAL_DIFF
+              GIT_CONFIG_NOSYSTEM=1 "GIT_CONFIG_GLOBAL=${_LEAD_CFG}" GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat GIT_EDITOR=true GIT_OPTIONAL_LOCKS=0 GIT_NO_REPLACE_OBJECTS=1)
+  [ -n "${_LEAD_GIT_INDEX:-}" ] && E+=("GIT_INDEX_FILE=${_LEAD_GIT_INDEX}")
+  "${E[@]}" git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.attributesFile=/dev/null \
+    -c commit.gpgSign=false -c tag.gpgSign=false -c core.pager=cat -c core.editor=true \
+    -c gc.auto=0 -c maintenance.auto=false "$@"
+}
+
+# _lgr <git args...> — _lead_git on the lead's own checkout, bound by explicit
+# --git-dir/--work-tree (a planted core.worktree can't move it).
+_lgr() {
+  _lead_git -C "$_LEASE_REPO" --git-dir="$_LEASE_GITDIR" --work-tree="$_LEASE_REPO" "$@"
+}
+
+# _lgw <worktree> <admin-dir> <git args...> — _lead_git on a lease worktree
+# through the admin dir RECORDED at create (.git/worktrees/<name>), never the
+# worktree's own .git pointer file, which the builder can rewrite (KTD18).
+_lgw() {
+  local W=$1 A=$2
+  shift 2
+  _lead_git -C "$W" --git-dir="$A" --work-tree="$W" "$@"
 }
 
 # BSD-portable realpath (no readlink -f on stock macOS).
@@ -58,14 +210,15 @@ print(os.path.realpath(os.environ['RP_TARGET']))
 # with no default-branch concept). Printed WITHOUT the refs/remotes/origin/
 # prefix. Tolerant: every probe is guarded so a repo with no remote still works.
 _lease_default_branch() {
-  local REPO=$1 REF="" B
-  REF=$(git -C "$REPO" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null) || REF=""
+  local REF="" B
+  _lease_ctx || return 0
+  REF=$(_lgr symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null) || REF=""
   if [ -n "$REF" ]; then
     printf '%s\n' "${REF#refs/remotes/origin/}"
     return 0
   fi
   for B in main master; do
-    if git -C "$REPO" show-ref --verify --quiet "refs/heads/${B}" 2>/dev/null; then
+    if _lgr show-ref --verify --quiet "refs/heads/${B}" 2>/dev/null; then
       printf '%s\n' "$B"
       return 0
     fi
@@ -73,38 +226,33 @@ _lease_default_branch() {
   return 0
 }
 
-# Current checked-out branch of the main tree, or empty on detached HEAD.
-_lease_current_branch() {
-  git -C "$1" symbolic-ref --quiet --short HEAD 2>/dev/null || true
+# _lease_default_ref — set _LEASE_DEF (the default branch, or empty) and
+# _LEASE_DEF_SHA (its commit, or empty): what the integrity baseline records.
+_lease_default_ref() {
+  _LEASE_DEF=$(_lease_default_branch)
+  _LEASE_DEF_SHA=""
+  if [ -n "$_LEASE_DEF" ]; then
+    _LEASE_DEF_SHA=$(_lgr rev-parse --verify --quiet "refs/heads/${_LEASE_DEF}^{commit}" 2>/dev/null || true)
+  fi
 }
 
-# Lease root: TRIFORGE_LEASE_ROOT override, else
-# ${TMPDIR:-/tmp}/triforge-leases/<repo-basename>-<git-hash-of-repo-root-path>
-# (the hash is of the canonical root path STRING, so two checkouts of one
-# repo get distinct roots). Created, then canonicalized before printing —
-# every stored worktree path is canonical from birth, which is what lets
-# lease_reclaim compare stored vs canonical byte-for-byte.
+# Current checked-out branch of the main tree, or empty on detached HEAD.
+_lease_current_branch() {
+  _lease_ctx || return 0
+  _lgr symbolic-ref --quiet --short HEAD 2>/dev/null || true
+}
+
+# _lease_root / _lease_ledger_path — print the lease root / the ledger path.
+# Kept for callers outside this file; inside it, _lease_ctx sets _LEASE_ROOT and
+# _LEASE_LEDGER in the caller's shell, so no subshell is needed.
 _lease_root() {
-  local ROOT REPO
-  REPO=$(_lease_repo_root) || { echo "lease: ERROR not inside a git repository — worktree leases require one (outside git the builder pool degrades to lead-only in-place execution)." >&2; return 1; }
-  REPO=$(_lease_realpath "$REPO")
-  if [ -n "${TRIFORGE_LEASE_ROOT:-}" ]; then
-    ROOT="$TRIFORGE_LEASE_ROOT"
-  else
-    local BASE HASH
-    BASE=$(basename "$REPO")
-    HASH=$(printf '%s' "$REPO" | git hash-object --stdin | cut -c1-12)
-    ROOT="${TMPDIR:-/tmp}"
-    ROOT="${ROOT%/}/triforge-leases/${BASE}-${HASH}"
-  fi
-  mkdir -p "$ROOT" || return 1
-  _lease_realpath "$ROOT"
+  _lease_ctx || return 1
+  printf '%s\n' "$_LEASE_ROOT"
 }
 
 _lease_ledger_path() {
-  local REPO
-  REPO=$(_lease_repo_root) || return 1
-  printf '%s\n' "${REPO}/ops/leases.toml"
+  _lease_ctx || return 1
+  printf '%s\n' "$_LEASE_LEDGER"
 }
 
 # task_id doubles as a directory and branch component — constrain it before
@@ -123,11 +271,31 @@ _lease_valid_task_id() {
 # round-trip-verify the tmp file, then atomic tmp+mv. `updated` is stamped
 # on every call. Int keys: pid, created, updated, heartbeat_deadline,
 # requeue_count, review_cycle.
+#
+# The reserved id @baseline (never a valid task id) writes the [baseline]
+# table instead of a lease row: the lead's last verified git state (KTD18) —
+# digests of .git/config, .git/hooks, .git/info, the global git config, the
+# lead's trusted git config and the lead checkout's .git, the default branch
+# and its SHA, the integration branch and its SHA — plus the lease_rebaseline
+# audit (last_rebaseline, rebaseline_log).
+#
+# Integrity (KTD18): after every write the ledger's digest and a copy of it are
+# kept in the lead state dir (<lease root>/lead/ledger.sha256, ledger.copy).
+# Before a write, a ledger that no longer matches the lead's last write was
+# changed by someone else: the write starts from the lead's copy instead
+# (restoring it) and sets [baseline].ledger_alert, which the next
+# _lead_integrity_check escalates. The digest is lstat-aware — a symlink
+# digests as "link:<target>", never through the link — so a ledger replaced
+# by a symlink counts as changed, and os.replace puts a regular file back over
+# the link itself. This is the ONE place that rule is decided, always under the
+# ledger lock: _lead_integrity_check and lease_rebaseline start with a no-op
+# `_ledger_update @baseline` (it only stamps `updated`) to run it.
 _ledger_update() {
   local TASK_ID=$1
   shift
   local LEDGER LOCK RC=0 TRIES=0
-  LEDGER=$(_lease_ledger_path) || return 1
+  _lease_ctx || return 1
+  LEDGER=$_LEASE_LEDGER
   mkdir -p "$(dirname "$LEDGER")"
   # Serialize the read-modify-write on the lead-owned ledger (KTD-4). The
   # documented wave keeps writes lead-serial, but a mkdir-lock (portable —
@@ -161,8 +329,8 @@ _ledger_update() {
     sleep 0.05
   done
   printf '%s\n' "$$" > "${LOCK}/pid" 2>/dev/null || true
-  LEDGER_FILE="$LEDGER" LEDGER_TASK="$TASK_ID" python3 -c "
-import json, os, sys, time
+  LEDGER_FILE="$LEDGER" LEDGER_TASK="$TASK_ID" LEDGER_STATE="$_LEASE_STATE" python3 -c "
+import hashlib, json, os, shutil, sys, time
 try:
     import tomllib
 except ImportError:
@@ -174,13 +342,48 @@ except ImportError:
 
 path = os.environ['LEDGER_FILE']
 task = os.environ['LEDGER_TASK']
+state = os.environ['LEDGER_STATE']
+digest_file = os.path.join(state, 'ledger.sha256')
+copy_file = os.path.join(state, 'ledger.copy')
+def _sha(p):
+    try:
+        if os.path.islink(p):
+            return 'link:' + os.readlink(p)
+        with open(p, 'rb') as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return 'absent'
+recorded = ''
+if os.path.isfile(digest_file):
+    recorded = open(digest_file).read().strip()
+source, alert = path, ''
+stamp = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+if recorded and _sha(path) != recorded:
+    if os.path.isfile(copy_file) and _sha(copy_file) == recorded:
+        source = copy_file
+        alert = stamp + ' ops/leases.toml changed outside the lead writes (restored from the lead copy before a write)'
+    else:
+        alert = stamp + ' ops/leases.toml changed outside the lead writes (no intact lead copy to restore from)'
+elif not recorded and os.path.isfile(copy_file):
+    # The digest is written right after the copy on every lead write, so a
+    # copy with no digest means the digest file was deleted (or a crash fell
+    # between the two writes): the rule can not run, and the current ledger
+    # is adopted unverified. Fail closed: alert, never a silent first use.
+    alert = stamp + ' the ledger digest ' + digest_file + ' is missing while the lead copy exists: an integrity anchor was deleted, and ops/leases.toml was adopted UNVERIFIED (compare it with ' + copy_file + ')'
 data = {}
-if os.path.isfile(path):
-    with open(path, 'rb') as f:
+if os.path.isfile(source):
+    with open(source, 'rb') as f:
         data = tomllib.load(f)
 leases = data.get('lease', {})
 leases = leases if isinstance(leases, dict) else {}
-row = dict(leases.get(task, {})) if isinstance(leases.get(task, {}), dict) else {}
+baseline = data.get('baseline', {})
+baseline = dict(baseline) if isinstance(baseline, dict) else {}
+if alert:
+    baseline['ledger_alert'] = alert
+if task == '@baseline':
+    row = baseline
+else:
+    row = dict(leases.get(task, {})) if isinstance(leases.get(task, {}), dict) else {}
 INT_KEYS = ('pid', 'created', 'updated', 'heartbeat_deadline', 'requeue_count', 'review_cycle', 'report_missing_count')
 for arg in sys.argv[1:]:
     k, sep, v = arg.partition('=')
@@ -196,19 +399,17 @@ for arg in sys.argv[1:]:
     else:
         row[k] = str(v)
 row['updated'] = int(time.time())
-leases[task] = row
+if task != '@baseline':
+    leases[task] = row
 
 # Flat serializer: only ints, bools, and strings ever land in a row.
 # json.dumps escaping is valid TOML for basic strings and quoted keys.
 lines = ['# ops/leases.toml — lead-owned lease ledger (KTD-4). Runtime state,',
          '# gitignored. Single writer: the lead, via _ledger_update in',
-         '# scripts/invoke-external.sh. Builders never write this file.',
+         '# scripts/lib/lease.sh. Builders never write this file; a change the',
+         '# lead did not make is restored from its copy and escalated (KTD18).',
          '']
-for t in sorted(leases):
-    r = leases[t]
-    if not isinstance(r, dict):
-        continue
-    lines.append('[lease.' + json.dumps(str(t)) + ']')
+def emit(r):
     for k in sorted(r):
         v = r[k]
         if isinstance(v, bool):
@@ -218,6 +419,15 @@ for t in sorted(leases):
         else:
             lines.append(k + ' = ' + json.dumps(str(v)))
     lines.append('')
+if baseline:
+    lines.append('[baseline]')
+    emit(baseline)
+for t in sorted(leases):
+    r = leases[t]
+    if not isinstance(r, dict):
+        continue
+    lines.append('[lease.' + json.dumps(str(t)) + ']')
+    emit(r)
 
 tmp = path + '.tmp.' + str(os.getpid())
 with open(tmp, 'w') as f:
@@ -232,6 +442,15 @@ except Exception as exc:
     sys.stderr.write('_ledger_update: ERROR serialized ledger failed round-trip parse: ' + str(exc) + '\n')
     sys.exit(4)
 os.replace(tmp, path)
+# The lead's own write is the new baseline for the ledger itself.
+os.makedirs(state, exist_ok=True)
+shutil.copyfile(path, copy_file + '.tmp')
+os.replace(copy_file + '.tmp', copy_file)
+with open(digest_file + '.tmp', 'w') as f:
+    f.write(_sha(path) + '\n')
+os.replace(digest_file + '.tmp', digest_file)
+if alert:
+    sys.stderr.write('_ledger_update: WARNING ' + alert + '\n')
 " "$@"
   RC=$?
   rm -rf "$LOCK" 2>/dev/null || true   # lock dir now carries a pid file — rm -rf, not rmdir
@@ -242,7 +461,8 @@ os.replace(tmp, path)
 # nonzero when the ledger or the lease row is missing entirely.
 _ledger_get() {
   local LEDGER
-  LEDGER=$(_lease_ledger_path) || return 1
+  _lease_ctx || return 1
+  LEDGER=$_LEASE_LEDGER
   [ -f "$LEDGER" ] || return 1
   LEDGER_FILE="$LEDGER" LEDGER_TASK="$1" LEDGER_KEY="$2" python3 -c "
 import os, sys
@@ -255,11 +475,673 @@ except ImportError:
         sys.exit(1)
 with open(os.environ['LEDGER_FILE'], 'rb') as f:
     data = tomllib.load(f)
-row = data.get('lease', {}).get(os.environ['LEDGER_TASK'])
+task = os.environ['LEDGER_TASK']
+row = data.get('baseline') if task == '@baseline' else data.get('lease', {}).get(task)
 if not isinstance(row, dict):
     sys.exit(1)
 print(row.get(os.environ['LEDGER_KEY'], ''))
 "
+}
+
+# _ledger_get_row <task_id> <key...> — several keys of one row in one ledger
+# read, printed one value per line in the order asked ('' for an unset key).
+# The reserved id @baseline reads the [baseline] table, as in _ledger_get.
+# Nonzero when the ledger or the row is missing, or when a value spans lines
+# (one line per key could not carry it). Callers read the lines with
+# `IFS= read -r VAR || true`.
+_ledger_get_row() {
+  local T=$1
+  shift
+  _lease_ctx || return 1
+  [ -f "$_LEASE_LEDGER" ] || return 1
+  LEDGER_FILE="$_LEASE_LEDGER" LEDGER_TASK="$T" python3 -c "
+import os, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.exit(1)
+with open(os.environ['LEDGER_FILE'], 'rb') as f:
+    data = tomllib.load(f)
+task = os.environ['LEDGER_TASK']
+row = data.get('baseline') if task == '@baseline' else data.get('lease', {}).get(task)
+if not isinstance(row, dict):
+    sys.exit(1)
+vals = [str(row.get(k, '')) for k in sys.argv[1:]]
+if any('\n' in v for v in vals):
+    sys.exit(1)
+print('\n'.join(vals))
+" "$@"
+}
+
+# ---------------------------------------------------------------------------
+# Integrity detection (KTD18) — the lead's verified git state and its check
+# ---------------------------------------------------------------------------
+#
+# The baseline is the lead's last verified state:
+#   [baseline] in the ledger  digests of .git/config, .git/hooks/, .git/info/
+#                             (info/refs left out: git gc/repack rewrites it),
+#                             the global git config files, the lead's trusted
+#                             git config (<lease root>/lead/gitconfig, which
+#                             every _lead_git call reads) and the lead
+#                             checkout's own .git (a linked-worktree checkout's
+#                             pointer file could be redirected); the default
+#                             branch and its SHA; the integration branch and
+#                             its SHA (updated after each of the lead's merges,
+#                             cleared by a promotion)
+#   each lease row            its worktree's .git pointer file and admin dir
+#                             (.git/worktrees/<name>: HEAD, gitdir, commondir,
+#                             config.worktree), base_sha, and the collect
+#                             snapshot (snapshot_sha, snapshot_tree)
+#   <lease root>/lead/        copies of .git/config (config.copy), .git/hooks
+#                             (hooks.copy) and the trusted git config
+#                             (gitconfig.copy), for restoring; plus the
+#                             ledger's copy and digest (ledger.copy,
+#                             ledger.sha256), which only _ledger_update writes
+# _lead_integrity_check runs at lease_create, lease_dispatch, lease_pin_reviewer,
+# lease_collect, lease_merge, lease_promote, lease_requeue and
+# lease_heartbeat_check. A change the lead did not make restores what can be
+# restored (.git/config, .git/hooks, the trusted git config) — only from a
+# lead copy whose digest still equals the baseline, and only after saving the
+# changed version as <lease root>/lead/<name>.changed-<UTC time> (it may have
+# been the lead's or the user's: git remote add, pre-commit install) —
+# escalates, names the changed surface, and returns _RC_LEASE_INTEGRITY (44).
+# The ledger is not compared here: the check first runs _ledger_update's own
+# rule under the ledger lock (a no-op @baseline write that restores a changed
+# ledger from its copy and sets [baseline].ledger_alert), then reports the
+# alert. .git/info, the global git config and the lead checkout's .git are
+# detect-only. A repo-wide change
+# escalates every building/review lease (any of their builders could have made
+# it); a per-lease change escalates that lease. lease_rebaseline accepts a
+# change the lead or user made to any surface but the ledger (a ledger change
+# is never accepted; its alert waits for the next check), resumes the named
+# leases the check escalated, and records each acceptance in [baseline]
+# (last_rebaseline, rebaseline_log) — an audit trail, not prevention.
+_RC_LEASE_INTEGRITY=44
+
+_LEAD_INTEGRITY_PY='
+import hashlib, os, shutil, stat, sys, time
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
+
+def _sha(b):
+    return hashlib.sha256(b).hexdigest()
+
+def file_digest(p):
+    try:
+        if os.path.islink(p):
+            return "link:" + os.readlink(p)
+        if os.path.isdir(p):
+            return "dir:" + tree_digest(p)
+        with open(p, "rb") as f:
+            return _sha(f.read())
+    except FileNotFoundError:
+        return "absent"
+    except OSError as e:
+        return "unreadable:" + type(e).__name__
+
+# ignore: top-level entry names left out of the digest. Only .git/info uses it
+# (refs: git gc and repack rewrite info/refs through update-server-info during
+# normal use, and would otherwise escalate every lease).
+def tree_digest(p, ignore=()):
+    if os.path.islink(p):
+        return "link:" + os.readlink(p)
+    if not os.path.isdir(p):
+        return file_digest(p) if os.path.lexists(p) else "absent"
+    entries = []
+    for root, dirs, files in os.walk(p):
+        if ignore and root == p:
+            dirs[:] = [n for n in dirs if n not in ignore]
+            files = [n for n in files if n not in ignore]
+        dirs.sort()
+        for n in dirs + files:
+            full = os.path.join(root, n)
+            rel = os.path.relpath(full, p)
+            try:
+                st = os.lstat(full)
+            except OSError:
+                continue
+            if stat.S_ISLNK(st.st_mode):
+                entries.append((rel, "L", os.readlink(full)))
+            elif stat.S_ISDIR(st.st_mode):
+                entries.append((rel, "D", ""))
+            else:
+                try:
+                    with open(full, "rb") as f:
+                        entries.append((rel, "F%o" % (st.st_mode & 0o111), _sha(f.read())))
+                except OSError:
+                    entries.append((rel, "U", ""))
+    h = hashlib.sha256()
+    for e in sorted(entries):
+        h.update(("\0".join(e) + "\n").encode("utf-8", "surrogateescape"))
+    return h.hexdigest()
+
+def admin_digest(admin):
+    parts = [n + "=" + file_digest(os.path.join(admin, n)) for n in ("HEAD", "commondir", "gitdir", "config.worktree")]
+    return _sha("\n".join(parts).encode("utf-8", "surrogateescape"))
+
+def global_digest():
+    home = os.environ.get("HOME", "")
+    xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
+    files = [os.path.join(home, ".gitconfig"), os.path.join(xdg, "git", "config")]
+    return _sha("\n".join(f + "=" + file_digest(f) for f in files).encode("utf-8", "surrogateescape"))
+
+# The .git of the lead checkout: "dir" for a real directory, "link:<target>"
+# for a symlink, else the digest of the pointer file of a linked-worktree
+# checkout (a builder could point it at a lease admin dir, and _lease_ctx would
+# bind every _lgr call to it).
+def checkout_digest(repo):
+    p = os.path.join(repo, ".git")
+    try:
+        if os.path.islink(p):
+            return "link:" + os.readlink(p)
+        if os.path.isdir(p):
+            return "dir"
+        with open(p, "rb") as f:
+            return _sha(f.read())
+    except FileNotFoundError:
+        return "absent"
+    except OSError as e:
+        return "unreadable:" + type(e).__name__
+
+def repo_surfaces(common, state, repo, gitdir):
+    # config.worktree lives in the gitdir of the checkout (== common for a
+    # plain checkout; .git/worktrees/<name> for a linked-worktree lead) and is
+    # read after .git/config once extensions.worktreeConfig is on, so a
+    # driver or hook setting planted there reaches every _lgr call.
+    cur = {"config": file_digest(os.path.join(common, "config")),
+           "config_worktree": file_digest(os.path.join(gitdir, "config.worktree")),
+           "hooks": tree_digest(os.path.join(common, "hooks")),
+           "info": tree_digest(os.path.join(common, "info"), ("refs",)),
+           "global_gitconfig": global_digest(),
+           "lead_gitconfig": file_digest(os.path.join(state, "gitconfig"))}
+    if repo:
+        cur["checkout"] = checkout_digest(repo)
+    return cur
+
+def _remove(p):
+    if os.path.islink(p) or os.path.isfile(p):
+        os.unlink(p)
+    elif os.path.isdir(p):
+        shutil.rmtree(p)
+
+mode = os.environ["LI_MODE"]
+common = os.environ.get("LI_COMMON", "")
+state = os.environ.get("LI_STATE", "")
+repo = os.environ.get("LI_REPO", "")
+gitdir = os.environ.get("LI_GITDIR", "") or common
+
+# The restorable surfaces: name -> (live path, digest of that kind). The lead
+# copy is <state>/<stem>.copy and a changed version kept before a restore is
+# <state>/<stem>.changed-<UTC time>, where stem is the live basename (config,
+# config.worktree, hooks, gitconfig). .git/config and .git/hooks live under the
+# common dir, config.worktree under the gitdir of the checkout, the trusted git
+# config under the lead state dir. Everything else is detect-only: .git/info
+# (KTD18 restores config and hooks only), the global git config (a user file)
+# and the .git of the lead checkout.
+LIVE = {"config": (os.path.join(common, "config"), file_digest),
+        "config_worktree": (os.path.join(gitdir, "config.worktree"), file_digest),
+        "hooks": (os.path.join(common, "hooks"), tree_digest),
+        "lead_gitconfig": (os.path.join(state, "gitconfig"), file_digest)}
+RESTORABLE = tuple(sorted(LIVE))
+NAMES = {"config": ".git/config", "config_worktree": ".git/config.worktree", "hooks": ".git/hooks/", "info": ".git/info/",
+         "global_gitconfig": "the global git config (~/.gitconfig, ~/.config/git/config)",
+         "lead_gitconfig": "the lead trusted git config (" + os.path.join(state, "gitconfig") + ")",
+         "checkout": "the .git pointer of the lead checkout (" + os.path.join(repo, ".git") + ")"}
+
+def _copy_path(name):
+    return os.path.join(state, os.path.basename(LIVE[name][0]) + ".copy")
+
+def save_copies():
+    _remove(os.path.join(state, "info.copy"))    # left by builds that still restored .git/info
+    for name in RESTORABLE:
+        src, dst = LIVE[name][0], _copy_path(name)
+        _remove(dst)
+        if os.path.islink(src):
+            continue
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, symlinks=True)
+        elif os.path.isfile(src):
+            shutil.copyfile(src, dst)
+
+# save_changed <name> — keep the changed surface before a restore overwrites
+# it: the change may have been made by the lead or the user (git remote add,
+# git push -u, pre-commit install), and lease_rebaseline can only accept what
+# still exists.
+# Returns the saved path, or "" when there is nothing to save (deleted).
+def save_changed(name):
+    live = LIVE[name][0]
+    if not os.path.lexists(live):
+        return ""
+    base = os.path.join(state, os.path.basename(live) + ".changed-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()))
+    dst, n = base, 1
+    while os.path.lexists(dst):
+        n += 1
+        dst = base + "-" + str(n)
+    if os.path.islink(live):
+        os.symlink(os.readlink(live), dst)
+    elif os.path.isdir(live):
+        shutil.copytree(live, dst, symlinks=True)
+    else:
+        shutil.copyfile(live, dst)
+    return dst
+
+# restore <name> <baseline digest> — put the surface back as the baseline
+# recorded it, and say how. Only from a lead copy whose digest (of the same
+# kind as the live one) still equals the baseline: the copy sits in the
+# worker-writable lead state dir too. A surface absent at the baseline is
+# restored by removing it. The changed version is saved first; a surface that
+# can not be saved is not overwritten.
+def restore(name, base_digest):
+    live, digest = LIVE[name]
+    copy = _copy_path(name)
+    inspect = ", so it was NOT restored; inspect before lease_rebaseline"
+    if base_digest != "absent":
+        if not os.path.lexists(copy):
+            return "no lead copy to restore from" + inspect
+        if digest(copy) != base_digest:
+            return "the lead copy also changed" + inspect
+    try:
+        saved = save_changed(name)
+    except OSError as e:
+        return "the changed version could not be saved (" + type(e).__name__ + ")" + inspect
+    try:
+        if base_digest == "absent":
+            _remove(live)
+            how = "removed: it did not exist at the baseline"
+        else:
+            tmp = live + ".triforge-restore"
+            _remove(tmp)
+            if os.path.isdir(copy) and not os.path.islink(copy):
+                shutil.copytree(copy, tmp, symlinks=True)
+                _remove(live)
+            else:
+                shutil.copyfile(copy, tmp)
+                if os.path.isdir(live) and not os.path.islink(live):
+                    shutil.rmtree(live)
+            os.replace(tmp, live)
+            how = "restored from the lead copy"
+    except OSError as e:
+        how = "the restore failed (" + type(e).__name__ + ")" + inspect
+    return how + ("; the changed version is saved at " + saved if saved else "")
+
+def admin_from_pointer(wt, common):
+    try:
+        line = open(os.path.join(wt, ".git"), encoding="utf-8").read().strip()
+    except OSError:
+        return ""
+    if not line.startswith("gitdir:"):
+        return ""
+    admin = os.path.realpath(os.path.join(wt, line[len("gitdir:"):].strip()))
+    return admin if os.path.dirname(admin) == os.path.realpath(os.path.join(common, "worktrees")) else ""
+
+if mode == "record":
+    save_copies()
+    for k, v in sorted(repo_surfaces(common, state, repo, gitdir).items()):
+        print(k + "=" + v)
+    sys.exit(0)
+
+if mode == "lease":
+    wt, admin = os.environ["LI_WT"], os.environ.get("LI_ADMIN", "")
+    admin = admin or admin_from_pointer(wt, common)
+    print(file_digest(os.path.join(wt, ".git")) + "\t" + admin_digest(admin) + "\t" + admin)
+    sys.exit(0)
+
+# mode == "check": compare, restore (LI_RESTORE=1), report one line per finding.
+# The ledger itself is not compared here: the caller ran _ledger_update first,
+# which decides that rule under the ledger lock and leaves [baseline].ledger_alert
+# set when it had to restore; reported even without a baseline, so an alert on a
+# ledger that lost its [baseline] is not recorded away as a first use.
+restoring = os.environ.get("LI_RESTORE") == "1"
+force_record = os.environ.get("LI_FORCE_RECORD") == "1"
+ledger = os.environ["LI_LEDGER"]
+out = []
+data = {}
+if os.path.isfile(ledger):
+    with open(ledger, "rb") as f:
+        data = tomllib.load(f)
+base = data.get("baseline")
+leases = data.get("lease", {})
+leases = leases if isinstance(leases, dict) else {}
+if isinstance(base, dict) and base.get("ledger_alert"):
+    out.append(("REPO", "ledger_alert", str(base["ledger_alert"])))
+if not isinstance(base, dict) or not base.get("config"):
+    # No [baseline]: first use, or a pre-3.3.3 ledger — unless the rows carry
+    # keys only a 3.3.3 lead writes with a baseline in place: then the table
+    # was removed from the ledger (and the digest anchors with it, or the
+    # ledger rule would have restored it). That is a change, never a first use.
+    stamped = sorted(t for t, r in leases.items() if isinstance(r, dict)
+                     and any(k in r for k in ("pointer_digest", "admin_digest", "admin_dir", "snapshot_sha", "integrity_prev_state")))
+    anchors = [n for n in ("config.copy", "hooks.copy", "ledger.copy") if os.path.lexists(os.path.join(state, n))]
+    if stamped or anchors:
+        why = ("lease row(s) " + ", ".join(stamped[:5]) + " were written with it in place") if stamped \
+              else ("the lead state dir holds " + ", ".join(anchors) + ", saved when that table was recorded")
+        out.append(("REPO", "baseline_missing", "the [baseline] table of the ledger is missing, but " + why
+                    + ": ops/leases.toml was edited outside the lead writes (not restored: no verified copy; compare it with "
+                    + os.path.join(state, "ledger.copy") + " and restore it yourself, then lease_rebaseline)"))
+    else:
+        out.append(("NOBASELINE", "", ""))
+    base = None
+else:
+    cur = repo_surfaces(common, state, repo, gitdir)
+    for k in sorted(cur):
+        b = str(base.get(k, ""))
+        if b and cur[k] != b:
+            if restoring and k in RESTORABLE:
+                how = restore(k, b)
+            elif k == "global_gitconfig":
+                how = "not restored: a user file"
+            else:
+                how = "detected; not restored"
+            out.append(("REPO", k, NAMES[k] + " changed (" + how + ")"))
+    dname, dsha = os.environ.get("LI_DEF", ""), os.environ.get("LI_DEF_SHA", "")
+    bname, bsha = str(base.get("default_branch", "")), str(base.get("default_sha", ""))
+    if bname and dname != bname:
+        out.append(("REPO", "default_branch", "the default branch now resolves to \"" + dname + "\" (was \"" + bname + "\"; origin/HEAD or the local main/master refs changed)"))
+    elif bname and bsha and dsha != bsha:
+        out.append(("REPO", "default_sha", "refs/heads/" + bname + " moved " + bsha[:12] + " -> " + (dsha[:12] or "<deleted>")))
+for t in sorted(leases):
+    r = leases[t]
+    if not isinstance(r, dict):
+        continue
+    st = str(r.get("state", ""))
+    if st in ("building", "review"):
+        out.append(("OPEN", t, st))
+    wt = str(r.get("worktree", ""))
+    if st not in ("leased", "building", "review") and not (force_record and st == "escalated"):
+        continue
+    if not wt or not os.path.isdir(wt):
+        continue
+    admin = str(r.get("admin_dir", "")) or admin_from_pointer(wt, common)
+    if not admin:
+        continue
+    pointer, adm = file_digest(os.path.join(wt, ".git")), admin_digest(admin)
+    if force_record or not r.get("pointer_digest") or not r.get("admin_digest"):
+        out.append(("RECORD", t, pointer, adm, admin))
+        continue
+    if pointer != str(r.get("pointer_digest")):
+        out.append(("LEASE", t, st, wt + "/.git (the worktree pointer file) changed"))
+    if adm != str(r.get("admin_digest")):
+        out.append(("LEASE", t, st, admin + " (HEAD, gitdir, commondir or config.worktree) changed"))
+for row in out:
+    print("\t".join(row))
+'
+
+# _lead_baseline_record — record the lead's verified repo-wide state (the
+# [baseline] digests + the copies in the lead state dir). Callers run it only
+# on a state they just verified or explicitly accept (lease_rebaseline). It
+# leaves [baseline].ledger_alert alone: only _lead_integrity_check clears it,
+# after escalating it, so a rebaseline can't accept a ledger change.
+_lead_baseline_record() {
+  local L
+  local -a ARGS=()
+  _lease_ctx || return 1
+  _lease_default_ref
+  while IFS= read -r L; do
+    if [ -n "$L" ]; then ARGS+=("$L"); fi
+  done <<BASELINE_EOF
+$(LI_MODE=record LI_COMMON="$_LEASE_COMMON" LI_GITDIR="$_LEASE_GITDIR" LI_STATE="$_LEASE_STATE" LI_REPO="$_LEASE_REPO" python3 -c "$_LEAD_INTEGRITY_PY")
+BASELINE_EOF
+  # config, config_worktree, hooks, info, global_gitconfig, lead_gitconfig, checkout.
+  if [ "${#ARGS[@]}" -lt 7 ]; then
+    echo "lease: ERROR could not record the integrity baseline (KTD18)" >&2
+    return 1
+  fi
+  _ledger_update @baseline "${ARGS[@]}" default_branch="$_LEASE_DEF" default_sha="$_LEASE_DEF_SHA" \
+    recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+
+# _lead_lease_digests <worktree> [admin-dir] — "<pointer-digest>\t<admin-digest>\t<admin-dir>"
+# for a lease worktree (the admin dir is derived from the pointer when not given
+# — only right after the lead itself created the worktree).
+_lead_lease_digests() {
+  _lease_ctx || return 1
+  LI_MODE=lease LI_COMMON="$_LEASE_COMMON" LI_WT="$1" LI_ADMIN="${2:-}" python3 -c "$_LEAD_INTEGRITY_PY"
+}
+
+# _lead_integrity_check <op> — compare the git state with the lead's baseline.
+# 0 when nothing changed (or no ledger exists yet); _RC_LEASE_INTEGRITY after
+# restoring and escalating (see the section comment). Fails closed: a check
+# that can't run is reported as a change.
+_lead_integrity_check() {
+  local OP=${1:-lease} LEDGER OUT RC=0 KIND A B C D TAB NL LU_ERR LU_RC=0
+  local REPO_DESC="" OPEN="" LEASE_HITS="" ALERT=0 NOBASE=0 SAVED=0 T S ESCALATED=""
+  TAB=$(printf '\t'); NL='
+'
+  _lease_ctx || return 1
+  LEDGER=$_LEASE_LEDGER
+  if [ ! -f "$LEDGER" ] && [ ! -f "${_LEASE_STATE}/ledger.sha256" ]; then
+    # No ledger and no ledger digest: nothing to compare against — unless the
+    # lead state dir still holds the copies the lead saved for earlier leases.
+    # Then a ledger existed and was deleted together with its digest, which
+    # is a change, not a first use (fail closed, KTD18).
+    if [ -e "${_LEASE_STATE}/ledger.copy" ] || [ -e "${_LEASE_STATE}/config.copy" ] || [ -e "${_LEASE_STATE}/hooks.copy" ]; then
+      echo "${OP}: INTEGRITY — ${LEDGER} and its digest are gone, but the lead state dir ${_LEASE_STATE} holds copies saved for earlier leases: the ledger was deleted outside the lead's writes (KTD18; detection, not prevention). Nothing was merged or promoted. Inspect; to recover, copy ${_LEASE_STATE}/ledger.copy back to ${LEDGER} and run lease_rebaseline — or, if you removed the ledger on purpose, remove ${_LEASE_STATE} too." >&2
+      return "$_RC_LEASE_INTEGRITY"
+    fi
+    return 0
+  fi
+  # The ledger first, before anything reads a value from it, by its one guarded
+  # writer (KTD18): a no-op @baseline write compares it with the lead's last
+  # write under the ledger lock, restores it from the lead copy when it changed
+  # and sets [baseline].ledger_alert, which the check below reports. On a ledger
+  # with no [baseline] yet it writes one holding only `updated`, which the check
+  # still reads as NOBASELINE. A write that can't run (a held lock, a ledger
+  # with no intact copy that no longer parses) leaves the ledger unverified, so
+  # it fails closed like a check that can't run.
+  LU_ERR=$(_ledger_update @baseline 2>&1 >/dev/null) || LU_RC=$?
+  if [ "$LU_RC" -ne 0 ]; then
+    echo "${OP}: INTEGRITY CHECK COULD NOT RUN — the ledger could not be verified under its lock; treated as a change (fail closed, KTD18): $(printf '%s' "$LU_ERR" | tail -3 | tr '\n' ' ' | cut -c1-300)" >&2
+    return "$_RC_LEASE_INTEGRITY"
+  fi
+  _lease_default_ref
+  OUT=$(LI_MODE=check LI_RESTORE=1 LI_COMMON="$_LEASE_COMMON" LI_GITDIR="$_LEASE_GITDIR" LI_STATE="$_LEASE_STATE" LI_REPO="$_LEASE_REPO" LI_LEDGER="$LEDGER" \
+        LI_DEF="$_LEASE_DEF" LI_DEF_SHA="$_LEASE_DEF_SHA" python3 -c "$_LEAD_INTEGRITY_PY" 2>&1) || RC=$?
+  if [ "$RC" -ne 0 ]; then
+    echo "${OP}: INTEGRITY CHECK COULD NOT RUN — treated as a change (fail closed, KTD18): $(printf '%s' "$OUT" | tail -3 | tr '\n' ' ' | cut -c1-300)" >&2
+    return "$_RC_LEASE_INTEGRITY"
+  fi
+  while IFS="$TAB" read -r KIND A B C D; do
+    case "$KIND" in
+      NOBASELINE) NOBASE=1 ;;
+      REPO)
+        REPO_DESC="${REPO_DESC}${REPO_DESC:+${NL}}    ${B}"
+        if [ "$A" = "ledger_alert" ]; then ALERT=1; fi
+        case "$B" in *"the changed version is saved at "*) SAVED=1 ;; esac
+        ;;
+      OPEN) OPEN="${OPEN}${A}${TAB}${B}${NL}" ;;
+      LEASE) LEASE_HITS="${LEASE_HITS}${A}${TAB}${B}${TAB}${C}${NL}" ;;
+      RECORD) _ledger_update "$A" pointer_digest="$B" admin_digest="$C" admin_dir="$D" >/dev/null || return 1 ;;
+    esac
+  done <<CHECK_EOF
+${OUT}
+CHECK_EOF
+  if [ "$NOBASE" -eq 1 ]; then
+    _lead_baseline_record || return 1
+    echo "${OP}: NOTE integrity baseline recorded now (first use or a pre-3.3.3 ledger); changes made before this point can't be detected (KTD18)." >&2
+  fi
+  if [ -z "$REPO_DESC" ] && [ -z "$LEASE_HITS" ]; then return 0; fi
+  if [ -n "$REPO_DESC" ]; then
+    while IFS="$TAB" read -r T S; do
+      [ -n "$T" ] || continue
+      _ledger_update "$T" state=escalated integrity_prev_state="$S" reason="integrity (${OP}): git state changed outside the lead's operations" >/dev/null || true
+      ESCALATED="${ESCALATED} ${T}"
+    done <<OPEN_EOF
+${OPEN}
+OPEN_EOF
+    if [ "$ALERT" -eq 1 ]; then _ledger_update @baseline ledger_alert="" >/dev/null || true; fi
+  fi
+  while IFS="$TAB" read -r T S C; do
+    [ -n "$T" ] || continue
+    case " ${ESCALATED} " in *" ${T} "*) continue ;; esac
+    _ledger_update "$T" state=escalated integrity_prev_state="$S" reason="integrity (${OP}): ${C}" >/dev/null || true
+    ESCALATED="${ESCALATED} ${T}"
+  done <<LEASE_EOF
+${LEASE_HITS}
+LEASE_EOF
+  echo "${OP}: INTEGRITY — git state changed outside the lead's own operations (KTD18; this is detection, not prevention):" >&2
+  if [ -n "$REPO_DESC" ]; then printf '%s\n' "$REPO_DESC" >&2; fi
+  printf '%s' "$LEASE_HITS" | while IFS="$TAB" read -r T S C; do
+    if [ -n "$T" ]; then echo "    lease ${T}: ${C}" >&2; fi
+  done
+  echo "  escalated:${ESCALATED:- (no open lease)}. Nothing was merged or promoted. Inspect the change; a worker without an OS sandbox can write anything the user can. If you (the lead or the user) made it, accept it with: lease_rebaseline${ESCALATED}" >&2
+  if [ "$SAVED" -eq 1 ]; then
+    echo "  A restored surface's changed version is saved in the lead state dir (${_LEASE_STATE}/<name>.changed-<UTC time>): if the change was the lead's or the user's, copy that saved version back over the original, then run lease_rebaseline${ESCALATED}." >&2
+  fi
+  return "$_RC_LEASE_INTEGRITY"
+}
+
+# _lead_branch_switched <op> <recorded-branch> <recorded-sha> <current-branch>
+# — print the refusal for a lead checkout that is no longer on the integration
+# branch the lead recorded (KTD18): a builder shares .git and can check out
+# another branch (or detach HEAD) in the lead's checkout, and the next merge,
+# promotion or carve would then build on commits the lead never verified.
+_lead_branch_switched() {
+  local OP=$1 IB=$2 ISHA=$3 CUR=${4:-}
+  echo "${OP}: REFUSED — the lead's integration branch is '${IB}' (at ${ISHA:0:12}) but the checkout is on '${CUR:-<detached HEAD>}' — a builder shares .git and can switch the lead's checkout; if you switched it yourself, run lease_rebaseline (it records the current branch) and rerun (KTD18)." >&2
+}
+
+# _lead_integration_check <op> — lease_merge and lease_promote build on the
+# integration branch only from a state the lead verified: the checkout must be
+# on the integration branch the lead recorded, and its tip must equal the SHA
+# recorded after the lead's last merge (a builder can switch the checkout or
+# move the branch, since it shares .git). Only when no integration branch is
+# recorded yet (a new sprint, or the first merge after a promotion cleared it)
+# is the current branch recorded as found. The default branch is never an
+# integration branch: on it this check neither records nor refuses — lease_merge
+# refuses to merge there on its own, lease_promote refuses to run from it, and
+# the default branch's SHA is in the integrity baseline.
+_lead_integration_check() {
+  local OP=$1 IB="" ISHA="" CUR HEAD_SHA LOG ROW
+  CUR=$(_lease_current_branch)
+  if [ -n "$CUR" ] && [ "$CUR" = "$(_lease_default_branch)" ]; then
+    return 0
+  fi
+  ROW=$(_ledger_get_row @baseline integration_branch integration_sha 2>/dev/null) || ROW=""
+  { IFS= read -r IB || true; IFS= read -r ISHA || true; } <<INTEGRATION_ROW_EOF
+${ROW}
+INTEGRATION_ROW_EOF
+  if [ -z "$IB" ] || [ -z "$ISHA" ]; then
+    if [ -n "$CUR" ]; then
+      HEAD_SHA=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)
+      _ledger_update @baseline integration_branch="$CUR" integration_sha="$HEAD_SHA" >/dev/null || return 1
+    fi
+    return 0
+  fi
+  if [ "$IB" != "$CUR" ]; then
+    _lead_branch_switched "$OP" "$IB" "$ISHA" "$CUR"
+    return "$_RC_LEASE_INTEGRITY"
+  fi
+  HEAD_SHA=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)
+  if [ "$ISHA" = "$HEAD_SHA" ]; then return 0; fi
+  LOG=$(_lgr log --format='%h %s' "${ISHA}..${HEAD_SHA}" 2>/dev/null | head -5 | _scrub | cut -c1-100 | sed 's/^/      /' || true)
+  echo "${OP}: REFUSED — the integration branch '${CUR}' moved since the lead's last merge (${ISHA:0:12} -> ${HEAD_SHA:0:12}). A builder shares .git and can move it, so Triforge merges and promotes only on top of a state it recorded (KTD18). New commits:" >&2
+  if [ -n "$LOG" ]; then printf '%s\n' "$LOG" >&2; else echo "      (${ISHA:0:12} is no longer an ancestor — history was rewritten)" >&2; fi
+  echo "  If these are your own commits, accept them with: lease_rebaseline — then rerun." >&2
+  return "$_RC_LEASE_INTEGRITY"
+}
+
+# lease_rebaseline [task_id...] — accept the current git state as the lead's
+# verified baseline: the repo-wide digests and copies, the default and
+# integration branch SHAs, and every open lease's pointer/admin digests. Named
+# leases that an integrity check escalated return to the state they were in.
+# Run it only after inspecting what it prints; it is the lead's or the user's
+# acceptance, never a worker's. Each acceptance is recorded (audit, not
+# prevention — a worker can call this too): [baseline].last_rebaseline gets
+# "<UTC ISO> by <user> via tty|non-tty; accepted: <surface keys that differed,
+# or none>; resumed: <tasks, or none>", and the same line is appended to
+# [baseline].rebaseline_log (the last 20, joined with " || "; ledger values
+# are flat strings). A detached checkout or the default branch clears the
+# integration branch (the default branch is never one, KTD18), so the next
+# sprint branch the lead leases or merges on is recorded as found. The ledger
+# itself is never accepted: a no-op @baseline write first runs _ledger_update's
+# own rule, so a changed ledger is restored from the lead copy before the check
+# reads a worktree or admin dir from it, and [baseline].ledger_alert stays set
+# (reported here as NOT accepted) for the next _lead_integrity_check to escalate.
+lease_rebaseline() {
+  local LEDGER OUT KIND A B C D TAB T PREV CUR NEW_IB="" IB_DESC HEAD_SHA="" IB="" ISHA="" ROW LU_ERR LU_RC=0 ACCEPTED="" RESUMED="" VIA LINE LOG
+  TAB=$(printf '\t')
+  _lease_ctx || return 1
+  LEDGER=$_LEASE_LEDGER
+  if [ ! -f "$LEDGER" ]; then
+    echo "lease_rebaseline: no lease ledger (${LEDGER}) — nothing to rebaseline" >&2
+    return 0
+  fi
+  LU_ERR=$(_ledger_update @baseline 2>&1 >/dev/null) || LU_RC=$?
+  if [ "$LU_RC" -ne 0 ]; then
+    echo "lease_rebaseline: ERROR the ledger could not be verified under its lock — nothing accepted: $(printf '%s' "$LU_ERR" | tail -3 | tr '\n' ' ' | cut -c1-300)" >&2
+    return 1
+  fi
+  _lease_default_ref
+  OUT=$(LI_MODE=check LI_RESTORE=0 LI_FORCE_RECORD=1 LI_COMMON="$_LEASE_COMMON" LI_GITDIR="$_LEASE_GITDIR" LI_STATE="$_LEASE_STATE" LI_REPO="$_LEASE_REPO" LI_LEDGER="$LEDGER" \
+        LI_DEF="$_LEASE_DEF" LI_DEF_SHA="$_LEASE_DEF_SHA" python3 -c "$_LEAD_INTEGRITY_PY") || { echo "lease_rebaseline: ERROR the integrity check could not run" >&2; return 1; }
+  while IFS="$TAB" read -r KIND A B C D; do
+    case "$KIND" in
+      REPO)
+        if [ "$A" = "ledger_alert" ]; then
+          echo "lease_rebaseline: NOT accepting — ${B}: a ledger change is never accepted; the alert stays set, so the next lease_* call escalates the open leases (KTD18)" >&2
+        elif [ "$A" = "baseline_missing" ]; then
+          # The table is re-recorded below from the current state; the edit
+          # itself is on record here, not accepted as a verified ledger.
+          echo "lease_rebaseline: recording a new baseline over an edited ledger — ${B}" >&2
+          ACCEPTED="${ACCEPTED:+${ACCEPTED},}baseline_missing"
+        else
+          echo "lease_rebaseline: accepting — ${B}" >&2
+          case ",${ACCEPTED}," in
+            *",${A},"*) ;;
+            *) ACCEPTED="${ACCEPTED:+${ACCEPTED},}${A}" ;;
+          esac
+        fi
+        ;;
+      RECORD) _ledger_update "$A" pointer_digest="$B" admin_digest="$C" admin_dir="$D" >/dev/null || return 1 ;;
+    esac
+  done <<REBASE_EOF
+${OUT}
+REBASE_EOF
+  _lead_baseline_record || return 1
+  ROW=$(_ledger_get_row @baseline integration_branch integration_sha 2>/dev/null) || ROW=""
+  { IFS= read -r IB || true; IFS= read -r ISHA || true; } <<REBASE_ROW_EOF
+${ROW}
+REBASE_ROW_EOF
+  CUR=$(_lease_current_branch)
+  if [ -n "$CUR" ] && [ "$CUR" != "$_LEASE_DEF" ]; then
+    NEW_IB=$CUR
+    HEAD_SHA=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)
+  fi
+  IB_DESC=$NEW_IB
+  if [ -z "$NEW_IB" ]; then
+    if [ -n "$CUR" ]; then IB_DESC="<none: ${CUR} is the default branch>"; else IB_DESC="<none: detached HEAD>"; fi
+  fi
+  if [ -n "$IB" ] && [ -n "$ISHA" ] && { [ "$IB" != "$NEW_IB" ] || [ "$ISHA" != "$HEAD_SHA" ]; }; then
+    echo "lease_rebaseline: accepting — the integration branch ${IB} ${ISHA:0:12} -> ${IB_DESC} ${HEAD_SHA:0:12}" >&2
+    ACCEPTED="${ACCEPTED:+${ACCEPTED},}integration"
+  fi
+  _ledger_update @baseline integration_branch="$NEW_IB" integration_sha="$HEAD_SHA" >/dev/null || return 1
+  for T in "$@"; do
+    PREV=$(_ledger_get "$T" integrity_prev_state 2>/dev/null || true)
+    if [ -n "$PREV" ] && [ "$(_ledger_get "$T" state 2>/dev/null || true)" = "escalated" ]; then
+      _ledger_update "$T" state="$PREV" integrity_prev_state="" reason="" >/dev/null || return 1
+      echo "lease_rebaseline: ${T} back to '${PREV}'" >&2
+      RESUMED="${RESUMED:+${RESUMED},}${T}"
+    else
+      echo "lease_rebaseline: ${T} was not escalated by an integrity check — state unchanged" >&2
+    fi
+  done
+  if [ -t 0 ]; then VIA=tty; else VIA=non-tty; fi
+  LINE="$(date -u +%Y-%m-%dT%H:%M:%SZ) by ${USER:-unknown} via ${VIA}; accepted: ${ACCEPTED:-none}; resumed: ${RESUMED:-none}"
+  LOG=$(_ledger_get @baseline rebaseline_log 2>/dev/null || true)
+  LOG=$(RB_LOG="$LOG" RB_LINE="$LINE" python3 -c '
+import os
+log = [e for e in os.environ["RB_LOG"].split(" || ") if e.strip()]
+log.append(os.environ["RB_LINE"])
+print(" || ".join(log[-20:]))
+') || LOG=$LINE
+  _ledger_update @baseline last_rebaseline="$LINE" rebaseline_log="$LOG" >/dev/null || return 1
+  echo "lease_rebaseline: baseline recorded (default ${_LEASE_DEF:-<none>} ${_LEASE_DEF_SHA:0:12}, integration ${IB_DESC} ${HEAD_SHA:0:12}); ${LINE}" >&2
 }
 
 # _adapter_env <cli> <cmd...> — run an external command under the per-adapter
@@ -352,33 +1234,203 @@ _timeout_tool() {
   fi
 }
 
+# _lease_plugin_root — the Triforge plugin root this library belongs to:
+# CLAUDE_PLUGIN_ROOT when set, else the directory above the loaded scripts/
+# when it IS a Triforge root (.claude-plugin/plugin.json named agent-triforge
+# plus scripts/invoke-external.sh). Never the project's own tree: a user
+# project's skills/ or scripts/ is not Triforge's (R42). Empty + rc 1 when no
+# root qualifies.
+_lease_plugin_root() {
+  local C
+  for C in "${CLAUDE_PLUGIN_ROOT:-}" "${_TRIFORGE_SCRIPTS_DIR:-}/.."; do
+    [ -n "$C" ] && [ -f "${C}/scripts/invoke-external.sh" ] || continue
+    if PR_MANIFEST="${C}/.claude-plugin/plugin.json" python3 -c '
+import json, os, sys
+try:
+    with open(os.environ["PR_MANIFEST"], encoding="utf-8") as f:
+        sys.exit(0 if json.load(f).get("name") == "agent-triforge" else 1)
+except Exception:
+    sys.exit(1)
+' 2>/dev/null; then
+      _lease_realpath "$C"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Worktrees lack .agents/skills/ (gitignored in user projects) — provision a
-# copy so portable-skill discovery survives isolation (mirrors the
-# session-start.sh bootstrap; KTD-3 groundwork).
+# copy so portable-skill discovery survives isolation. Same ownership rule as
+# session start (KTD12): scripts/lib/skills-sync.py writes empty slots and
+# refreshes only directories whose digest matches the stamp, so a user's own
+# committed .agents/skills/<name>/ survives provisioning; a symlinked .agents
+# or .agents/skills (or one resolving outside the worktree) is left untouched.
 _lease_provision_skills() {
-  local WT=$1
-  local SRC=""
-  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/skills" ]; then
-    SRC="${CLAUDE_PLUGIN_ROOT}/skills"
-  elif [ -d "$(_lease_repo_root)/skills" ]; then
-    SRC="$(_lease_repo_root)/skills"
-  fi
-  if [ -z "$SRC" ]; then
-    echo "lease: WARNING no skills source found (CLAUDE_PLUGIN_ROOT/skills or repo skills/) — worktree gets no .agents/skills/" >&2
+  local WT=$1 PROOT
+  if ! PROOT=$(_lease_plugin_root); then
+    echo "lease: WARNING no Triforge plugin root found (CLAUDE_PLUGIN_ROOT, or the directory above the loaded scripts/) — worktree gets no .agents/skills/" >&2
     return 0
   fi
-  # `cp -R src/. dest/` — never `cp -R src dest`, which NESTS when the worktree
-  # already carries a committed .agents/skills/ (the stamp is safe to commit in
-  # user projects, so that layout is expected). Shipped-name directories are
-  # Triforge-owned and replaced, matching session-start's refresh (KTD7).
-  local NAME
-  mkdir -p "${WT}/.agents/skills"
-  for NAME in "$SRC"/*/; do
-    [ -d "$NAME" ] || continue
-    NAME=$(basename "$NAME")
-    rm -rf "${WT}/.agents/skills/${NAME}" 2>/dev/null || true
-    mkdir -p "${WT}/.agents/skills/${NAME}" 2>/dev/null && cp -R "${SRC}/${NAME}/." "${WT}/.agents/skills/${NAME}/" 2>/dev/null || true
+  if [ ! -f "${_TRIFORGE_SCRIPTS_DIR}/lib/skills-sync.py" ]; then
+    echo "lease: WARNING ${_TRIFORGE_SCRIPTS_DIR}/lib/skills-sync.py is missing — worktree gets no .agents/skills/ (reinstall the plugin)" >&2
+    return 0
+  fi
+  python3 "${_TRIFORGE_SCRIPTS_DIR}/lib/skills-sync.py" sync --plugin-root "$PROOT" --project "$WT" --prefix "lease: " >&2 \
+    || echo "lease: WARNING skills provisioning failed for ${WT} (the builder may not see the portable skills)" >&2
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# Worktree carve, collect snapshot and snapshot-only merge (KTD3, KTD18, KTD19)
+# ---------------------------------------------------------------------------
+
+# _lease_carve <task_id> <worktree> — the lease worktree + lease/<task> branch
+# at the lead's current HEAD, through _lead_git (no hook runs, whatever a
+# worker planted). Sets _CARVE_BASE (the recorded base SHA), _CARVE_ADMIN (the
+# worktree's admin dir, read from the pointer the lead just created) and
+# _CARVE_POINTER / _CARVE_ADMIN_DIGEST (the per-lease integrity baseline), and
+# _CARVE_FIELDS: the key=value list every (re)carved lease row starts from
+# (those four, the branch it was carved on — empty on the default branch, which
+# is never an integration branch — and the cleared snapshot/integrity fields),
+# passed as "${_CARVE_FIELDS[@]}" by lease_create and lease_requeue. Set only on
+# success, and then never empty, so the expansion is safe under bash 3.2
+# `set -u` and in zsh.
+_lease_carve() {
+  local T=$1 WT=$2 D CUR
+  _CARVE_BASE=""; _CARVE_ADMIN=""; _CARVE_POINTER=""; _CARVE_ADMIN_DIGEST=""; _CARVE_FIELDS=()
+  _CARVE_BASE=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null) || {
+    echo "lease: ERROR the lead's checkout has no HEAD commit — commit something before leasing" >&2; return 1; }
+  if ! _lgr worktree add "$WT" -b "lease/${T}" "$_CARVE_BASE" >&2; then
+    echo "lease: ERROR git worktree add failed for task ${T}" >&2
+    return 1
+  fi
+  D=$(_lead_lease_digests "$WT") || return 1
+  _CARVE_POINTER=$(printf '%s\n' "$D" | cut -f1)
+  _CARVE_ADMIN_DIGEST=$(printf '%s\n' "$D" | cut -f2)
+  _CARVE_ADMIN=$(printf '%s\n' "$D" | cut -f3)
+  if [ -z "$_CARVE_ADMIN" ]; then
+    echo "lease: ERROR the new worktree's admin dir is not under ${_LEASE_COMMON}/worktrees — refusing to lease ${T}" >&2
+    return 1
+  fi
+  CUR=$(_lease_current_branch)
+  if [ -n "$CUR" ] && [ "$CUR" = "$(_lease_default_branch)" ]; then CUR=""; fi
+  _CARVE_FIELDS=(base_sha="$_CARVE_BASE" admin_dir="$_CARVE_ADMIN" pointer_digest="$_CARVE_POINTER" admin_digest="$_CARVE_ADMIN_DIGEST"
+                 integration_branch="$CUR" snapshot_sha= snapshot_tree= builder_commits= integrity_prev_state=)
+}
+
+# _lease_tree_of_worktree <worktree> <admin> <start-commit> — print the tree
+# the worktree holds now, built in a throwaway index seeded from <start-commit>
+# (the snapshot's own rule: every change, .agents/ excluded — provisioned
+# skills never merge). The worktree's own index and HEAD are not touched.
+_lease_tree_of_worktree() {
+  local W=$1 A=$2 START=$3 IDXD TREE RC=0
+  IDXD=$(mktemp -d "${TMPDIR:-/tmp}/triforge-snap.XXXXXX") || return 1
+  _LEAD_GIT_INDEX="${IDXD}/index"
+  { _lgw "$W" "$A" read-tree "$START" && _lgw "$W" "$A" add -A -- . ':(exclude).agents' >/dev/null && TREE=$(_lgw "$W" "$A" write-tree); } || RC=1
+  _LEAD_GIT_INDEX=""
+  rm -rf "$IDXD"
+  [ "$RC" -eq 0 ] || return 1
+  printf '%s\n' "$TREE"
+}
+
+# _lease_snapshot <task_id> — the lead's collect-time snapshot (KTD3): the
+# builder's worktree as ONE lead-made commit on top of the recorded base,
+# written to lease/<task> and recorded (snapshot_sha, snapshot_tree) so the
+# review, the merge and any later approval bind to exactly this state. Each
+# fix cycle writes a new snapshot on the same base. Commits the builder made
+# itself (against the contract) are kept under the snapshot, recorded in
+# builder_commits, and make lease_merge refuse (KTD19).
+_lease_snapshot() {
+  local T=$1 ROW WT ADMIN BASE BRANCH PREV BUILDER TIP BC="" C TREE PARENT SNAP
+  ROW=$(_ledger_get_row "$T" worktree admin_dir base_sha branch snapshot_sha builder_cli) || ROW=""
+  { IFS= read -r WT || true; IFS= read -r ADMIN || true; IFS= read -r BASE || true
+    IFS= read -r BRANCH || true; IFS= read -r PREV || true; IFS= read -r BUILDER || true; } <<SNAP_ROW_EOF
+${ROW}
+SNAP_ROW_EOF
+  if [ ! -d "$WT" ]; then
+    echo "lease_collect: ERROR worktree missing: ${WT}" >&2
+    return 1
+  fi
+  if [ -z "$ADMIN" ]; then
+    # A pre-3.3.3 lease: take the admin dir from the pointer once (trust at
+    # first use), then bind to it like any other lease.
+    ADMIN=$(_lead_lease_digests "$WT" | cut -f3)
+    [ -n "$ADMIN" ] || { echo "lease_collect: ERROR can't locate ${T}'s admin dir under ${_LEASE_COMMON}/worktrees" >&2; return 1; }
+    _ledger_update "$T" admin_dir="$ADMIN" || return 1
+  fi
+  TIP=$(_lgr rev-parse --verify --quiet "refs/heads/${BRANCH}^{commit}" 2>/dev/null) || {
+    echo "lease_collect: ERROR lease branch ${BRANCH} is missing — escalate; the builder's work is only in ${WT}" >&2; return 1; }
+  if [ -z "$BASE" ]; then
+    BASE=$(_lgr merge-base HEAD "$TIP" 2>/dev/null) || { echo "lease_collect: ERROR no merge base for ${BRANCH}" >&2; return 1; }
+  fi
+  for C in $(_lgr rev-list "$TIP" "^${BASE}" 2>/dev/null); do
+    [ "$C" = "$PREV" ] || BC="${BC:+${BC} }${C}"
   done
+  TREE=$(_lease_tree_of_worktree "$WT" "$ADMIN" "$TIP") || { echo "lease_collect: ERROR could not build the snapshot tree for ${T}" >&2; return 1; }
+  PARENT=$BASE
+  [ -z "$BC" ] || PARENT=$TIP
+  SNAP=$(_lgw "$WT" "$ADMIN" commit-tree "$TREE" -p "$PARENT" -m "lease(${T}): builder output snapshot (${BUILDER:-unknown}), taken by the lead at collect") || {
+    echo "lease_collect: ERROR git commit-tree failed for ${T} (is user.name/user.email configured?)" >&2; return 1; }
+  _lgr update-ref -m "lease collect snapshot" "refs/heads/${BRANCH}" "$SNAP" "$TIP" || { echo "lease_collect: ERROR could not move ${BRANCH} to the snapshot" >&2; return 1; }
+  _lgw "$WT" "$ADMIN" reset -q "$SNAP" >/dev/null 2>&1 || true
+  _ledger_update "$T" snapshot_sha="$SNAP" snapshot_tree="$TREE" base_sha="$BASE" builder_commits="$BC" || return 1
+  if [ -n "$BC" ]; then
+    echo "lease_collect: WARNING the builder made its own commit(s) on ${BRANCH} (the dispatch contract says commit nothing): ${BC} — lease_merge will refuse them (KTD19)" >&2
+  fi
+}
+
+# _lease_verify_snapshot <task_id> — lease_merge's KTD19 gate. The lease merges
+# only the lead's recorded snapshot: lease/<task> must be exactly base + that
+# one commit, the worktree must still hold the recorded tree, and the diff must
+# not touch the lead-owned ops/. Prints the refusal (naming the commit, the
+# moved ref or the files) and returns 1 on any mismatch.
+_lease_verify_snapshot() {
+  local T=$1 ROW WT ADMIN BASE BRANCH SNAP STREE TIP PARENT NOW LOG OPS
+  ROW=$(_ledger_get_row "$T" worktree admin_dir base_sha branch snapshot_sha snapshot_tree) || ROW=""
+  { IFS= read -r WT || true; IFS= read -r ADMIN || true; IFS= read -r BASE || true
+    IFS= read -r BRANCH || true; IFS= read -r SNAP || true; IFS= read -r STREE || true; } <<VERIFY_ROW_EOF
+${ROW}
+VERIFY_ROW_EOF
+  TIP=$(_lgr rev-parse --verify --quiet "refs/heads/${BRANCH}^{commit}" 2>/dev/null || true)
+  if [ "$TIP" != "$SNAP" ]; then
+    echo "lease_merge: REFUSED — ${BRANCH} is at ${TIP:-<missing>}, not the lead's recorded collect snapshot ${SNAP} (the branch moved after collect). Merging it would merge an unreviewed state (KTD19); re-collect through lease_redispatch or reclaim the lease." >&2
+    return 1
+  fi
+  PARENT=$(_lgr rev-parse --verify --quiet "${SNAP}^1" 2>/dev/null || true)
+  if [ "$PARENT" != "$BASE" ] || [ -n "$(_lgr rev-parse --verify --quiet "${SNAP}^2" 2>/dev/null || true)" ]; then
+    LOG=$(_lgr log --format='%h %s' "${SNAP}^" "^${BASE}" 2>/dev/null | head -5 | _scrub | cut -c1-100 | tr '\n' ';' || true)
+    echo "lease_merge: REFUSED — ${BRANCH} carries commits the builder made itself (the contract says commit nothing): ${LOG:-<unreadable>}. Only the lead's snapshot merges (KTD19). To keep the work, move the lease branch back to its base ${BASE:0:12} keeping the files, then re-collect via lease_redispatch; otherwise reclaim the lease." >&2
+    return 1
+  fi
+  if [ ! -d "$WT" ]; then
+    echo "lease_merge: ERROR worktree missing: ${WT}" >&2
+    return 1
+  fi
+  NOW=$(_lease_tree_of_worktree "$WT" "$ADMIN" "$SNAP") || { echo "lease_merge: REFUSED — could not read ${T}'s worktree to compare it with the snapshot" >&2; return 1; }
+  if [ "$NOW" != "$STREE" ]; then
+    echo "lease_merge: REFUSED — ${T}'s worktree changed after collect and no longer matches the recorded snapshot (tree ${STREE:0:12}, now ${NOW:0:12}). Something wrote it after the review target was fixed; re-collect via lease_redispatch (KTD19)." >&2
+    return 1
+  fi
+  # The diff lands in a file first so its own exit status is checked: in a
+  # pipeline only the classifier's status would be seen, and a failed diff
+  # would read as "nothing under ops/" (fails closed, KTD19).
+  local DIFF_TMP
+  DIFF_TMP=$(mktemp "${TMPDIR:-/tmp}/triforge-ops-diff.XXXXXX") || { echo "lease_merge: REFUSED — could not create a temp file for the ops/ check (KTD19)" >&2; return 1; }
+  if ! _lgr diff -z --name-only --no-renames --no-ext-diff --ignore-submodules=none "$BASE" "$SNAP" > "$DIFF_TMP" 2>/dev/null; then
+    rm -f "$DIFF_TMP"
+    echo "lease_merge: REFUSED — could not diff ${BASE:0:12}..${SNAP:0:12} for the ops/ check; nothing merges on an unreadable diff (KTD19)" >&2
+    return 1
+  fi
+  OPS=$(python3 -c '
+import sys
+bad = [p for p in sys.stdin.buffer.read().decode("utf-8", "replace").split("\0") if p and (p.casefold() == "ops" or p.casefold().startswith("ops/"))]
+print(" ".join(bad[:10]) + (" ..." if len(bad) > 10 else ""))
+' < "$DIFF_TMP") || { rm -f "$DIFF_TMP"; echo "lease_merge: REFUSED — the ops/ classifier failed; nothing merges on an unclassified diff (KTD19)" >&2; return 1; }
+  rm -f "$DIFF_TMP"
+  if [ -n "$OPS" ]; then
+    echo "lease_merge: REFUSED — ${T}'s diff touches the lead-owned ops/ tree (builders never write ops/; the lead does, on the main tree): ${OPS}. Remove those changes from the worktree and re-collect (KTD19)." >&2
+    return 1
+  fi
 }
 
 # lease_create <task_id> <role> — resolve the builder from the roster
@@ -391,22 +1443,33 @@ lease_create() {
     echo "lease_create: ERROR invalid task id '${TASK_ID}' — want [A-Za-z0-9][A-Za-z0-9._-]* (it becomes a branch and directory name)" >&2
     return 1
   fi
-  local REPO ROOT RESOLVED CLI MODEL EFFORT WT NOW
-  REPO=$(_lease_repo_root) || { echo "lease_create: ERROR not inside a git repository" >&2; return 1; }
-  ROOT=$(_lease_root) || return 1
+  local RESOLVED CLI MODEL EFFORT WT NOW CUR IB="" ISHA="" ROW
+  _lease_ctx || { echo "lease_create: ERROR not inside a git repository" >&2; return 1; }
+  # A change a worker made since the lead's last check (a planted hook, git
+  # config, a moved ref) is caught before the next worktree is carved (KTD18).
+  _lead_integrity_check lease_create || return $?
+  # The worktree is carved at the lead's HEAD, so the checkout must still be on
+  # the integration branch the lead recorded: a builder shares .git and can
+  # switch the lead's checkout to a branch of its own (KTD18).
+  CUR=$(_lease_current_branch)
+  ROW=$(_ledger_get_row @baseline integration_branch integration_sha 2>/dev/null) || ROW=""
+  { IFS= read -r IB || true; IFS= read -r ISHA || true; } <<CREATE_ROW_EOF
+${ROW}
+CREATE_ROW_EOF
+  if [ -n "$IB" ] && [ "$IB" != "$CUR" ]; then
+    _lead_branch_switched lease_create "$IB" "$ISHA" "$CUR"
+    return "$_RC_LEASE_INTEGRITY"
+  fi
   RESOLVED=$(resolve_role "$ROLE") || return $?
   CLI=$(printf '%s\n' "$RESOLVED" | cut -f1)
   MODEL=$(printf '%s\n' "$RESOLVED" | cut -f2)
   EFFORT=$(printf '%s\n' "$RESOLVED" | cut -f3)
-  WT="${ROOT}/${TASK_ID}"
+  WT="${_LEASE_ROOT}/${TASK_ID}"
   if [ -e "$WT" ]; then
     echo "lease_create: ERROR worktree path already exists: ${WT} (reclaim the previous lease first)" >&2
     return 1
   fi
-  if ! git -C "$REPO" worktree add "$WT" -b "lease/${TASK_ID}" >&2; then
-    echo "lease_create: ERROR git worktree add failed for task ${TASK_ID}" >&2
-    return 1
-  fi
+  _lease_carve "$TASK_ID" "$WT" || return 1
   _lease_provision_skills "$WT"
   NOW=$(date +%s)
   _ledger_update "$TASK_ID" \
@@ -415,7 +1478,21 @@ lease_create() {
     state=leased worktree="$WT" branch="lease/${TASK_ID}" \
     pid=0 output_file="" created="$NOW" heartbeat_deadline=0 \
     requeue_count=0 review_cycle=0 pinned_reviewer="" previous_builder="" reviewer="" merge_commit="" reason="" \
+    "${_CARVE_FIELDS[@]}" \
     || return 1
+  # First lease in this checkout: the lead's verified state becomes the
+  # integrity baseline before any builder runs. With no integration branch
+  # recorded (a new sprint, or the first lease after a promotion cleared it),
+  # the current branch is recorded at the commit its first lease starts from;
+  # a recorded one that differs was refused above. The default branch is never
+  # recorded as the integration branch (KTD18): a lease created on it leaves
+  # the record empty, and the first lease or merge on the sprint branch fills it.
+  if [ -z "$(_ledger_get @baseline config 2>/dev/null || true)" ]; then
+    _lead_baseline_record || return 1
+  fi
+  if [ -n "$CUR" ] && [ -z "$IB" ] && [ "$CUR" != "$(_lease_default_branch)" ]; then
+    _ledger_update @baseline integration_branch="$CUR" integration_sha="$_CARVE_BASE" || return 1
+  fi
   echo "lease_create: task=${TASK_ID} role=${ROLE} builder=${CLI} model=${MODEL:-host-default} worktree=${WT}" >&2
   echo "$TASK_ID"
 }
@@ -469,23 +1546,25 @@ lease_dispatch() {
   local TASK_ID=${1:?usage: lease_dispatch <task_id> <prompt> [timeout]}
   local PROMPT=${2:?usage: lease_dispatch <task_id> <prompt> [timeout]}
   local TIMEOUT=${3:-600}
-  local STATE CLI MODEL EFFORT ROLE WT ROOT OUT TOBIN NOW DEADLINE PID
+  local STATE CLI MODEL EFFORT ROLE WT OUT TOBIN NOW DEADLINE PID PID_START
+  _lease_ctx || return 1
+  _lead_integrity_check lease_dispatch || return $?
   STATE=$(_ledger_get "$TASK_ID" state) || { echo "lease_dispatch: ERROR no lease row for task '${TASK_ID}' — run lease_create first" >&2; return 1; }
   if [ "$STATE" != "leased" ]; then
     echo "lease_dispatch: ERROR task ${TASK_ID} is in state '${STATE}' (want leased)" >&2
     return 1
   fi
-  CLI=$(_ledger_get "$TASK_ID" builder_cli)
-  MODEL=$(_ledger_get "$TASK_ID" builder_model)
-  EFFORT=$(_ledger_get "$TASK_ID" builder_effort)
-  ROLE=$(_ledger_get "$TASK_ID" role)
-  WT=$(_ledger_get "$TASK_ID" worktree)
+  local ROW
+  ROW=$(_ledger_get_row "$TASK_ID" builder_cli builder_model builder_effort role worktree) || ROW=""
+  { IFS= read -r CLI || true; IFS= read -r MODEL || true; IFS= read -r EFFORT || true
+    IFS= read -r ROLE || true; IFS= read -r WT || true; } <<DISPATCH_ROW_EOF
+${ROW}
+DISPATCH_ROW_EOF
   if [ ! -d "$WT" ]; then
     echo "lease_dispatch: ERROR worktree missing: ${WT}" >&2
     return 1
   fi
-  ROOT=$(_lease_root) || return 1
-  OUT="${ROOT}/${TASK_ID}.out"
+  OUT="${_LEASE_ROOT}/${TASK_ID}.out"
   TOBIN=$(_timeout_tool) || return $?
 
   # Dispatch contract (KTD11 / S5+S13+S14) — one block for EVERY lane, claude
@@ -697,10 +1776,18 @@ ${PROMPT}"
     exit "$RC"
   ) &
   PID=$!
+  # The recorded pid's start time (ps lstart, runs of spaces squeezed), so
+  # lease_collect and lease_heartbeat_check can tell this dispatch subshell
+  # from a later process the OS gave the same pid. When the subshell already
+  # exited before ps ran, a marker no lstart can equal is recorded, so neither
+  # ever signals that pid (an EMPTY value is a pre-3.3.3 row, which keeps the
+  # plain liveness test). A string, not an int key.
+  PID_START=$(ps -o lstart= -p "$PID" 2>/dev/null | tr -s ' ' || true)
+  if [ -z "$PID_START" ]; then PID_START="exited-before-record"; fi
 
   NOW=$(date +%s)
   DEADLINE=$((NOW + TIMEOUT))
-  _ledger_update "$TASK_ID" state=building pid="$PID" output_file="$OUT" heartbeat_deadline="$DEADLINE" || return 1
+  _ledger_update "$TASK_ID" state=building pid="$PID" pid_started="$PID_START" output_file="$OUT" heartbeat_deadline="$DEADLINE" || return 1
   echo "lease_dispatch: task=${TASK_ID} builder=${CLI} pid=${PID} timeout=${TIMEOUT}s output=${OUT}" >&2
 }
 
@@ -745,7 +1832,8 @@ lease_redispatch() {
   lease_dispatch "$TASK_ID" "$PROMPT" "$TIMEOUT"
 }
 
-# lease_heartbeat_check [task_id] — sweep building leases (or just one).
+# lease_heartbeat_check [task_id] — sweep building leases (or just one). The
+# integrity check runs first (KTD18): a change is escalated and returns 44.
 # Builder alive = the recorded pid answers kill -0 OR the output file was
 # modified within the grace window (TRIFORGE_HEARTBEAT_GRACE, default 60s —
 # covers a dead wrapper whose work just flushed). A dead pid that left
@@ -755,11 +1843,13 @@ lease_redispatch() {
 lease_heartbeat_check() {
   local ONLY=${1:-}
   local LEDGER GRACE NOW TASKS TASK
-  LEDGER=$(_lease_ledger_path) || return 1
+  _lease_ctx || return 1
+  LEDGER=$_LEASE_LEDGER
   if [ ! -f "$LEDGER" ]; then
     echo "lease_heartbeat_check: no lease ledger at ${LEDGER} — nothing to sweep" >&2
     return 0
   fi
+  _lead_integrity_check lease_heartbeat_check || return $?
   GRACE=${TRIFORGE_HEARTBEAT_GRACE:-60}
   NOW=$(date +%s)
   TASKS=$(LEDGER_FILE="$LEDGER" python3 -c "
@@ -804,6 +1894,20 @@ for t, r in sorted(data.get('lease', {}).items()):
     DEADLINE=$(_ledger_get "$TASK" heartbeat_deadline)
     ALIVE=0
     [ -n "$PID" ] && [ "$PID" -gt 0 ] 2>/dev/null && kill -0 "$PID" 2>/dev/null && ALIVE=1
+    # A live pid whose start time differs from the one lease_dispatch recorded
+    # is a process the OS reused the pid for, not the builder: treat the
+    # builder as gone, and never signal it. A 3.3.3 row whose subshell had
+    # exited before its start time was read carries the marker
+    # "exited-before-record", which no lstart equals. Rows from before 3.3.3
+    # carry no pid_started and keep the plain liveness test.
+    if [ "$ALIVE" -eq 1 ]; then
+      local PID_STARTED PID_NOW
+      PID_STARTED=$(_ledger_get "$TASK" pid_started 2>/dev/null || true)
+      if [ -n "$PID_STARTED" ]; then
+        PID_NOW=$(ps -o lstart= -p "$PID" 2>/dev/null | tr -s ' ' || true)
+        if [ "$PID_NOW" != "$PID_STARTED" ]; then ALIVE=0; fi
+      fi
+    fi
     if [ "$ALIVE" -eq 1 ]; then
       if [ "$NOW" -le "${DEADLINE:-0}" ]; then
         echo "lease_heartbeat_check: ${TASK} building (pid ${PID} alive, deadline in $((DEADLINE - NOW))s)" >&2
@@ -860,7 +1964,8 @@ _lease_refuse_prune() {
 # the lease identity survives, in this exact order:
 #   1. canonicalize the stored worktree path (python3 os.path.realpath)
 #   2. reject traversal ('..'/'.') components and non-canonical paths —
-#      stored paths are canonical from birth (_lease_root realpaths), so any
+#      stored paths are canonical from birth (_lease_ctx realpaths the lease
+#      root every worktree path is built under), so any
 #      canonical-vs-stored difference means a symlink or tampering
 #   3. REQUIRE the canonical path sits strictly beneath the canonical root
 #   4. REQUIRE git worktree list --porcelain knows the path
@@ -872,9 +1977,9 @@ _lease_refuse_prune() {
 #   merged / anything else      -> state kept (prune only)
 lease_reclaim() {
   local TASK_ID=${1:?usage: lease_reclaim <task_id>}
-  local REPO ROOT WT_STORED WT_CANON STATE RQ
-  REPO=$(_lease_repo_root) || return 1
-  ROOT=$(_lease_root) || return 1
+  local ROOT WT_STORED WT_CANON STATE RQ
+  _lease_ctx || return 1
+  ROOT=$_LEASE_ROOT
   WT_STORED=$(_ledger_get "$TASK_ID" worktree) || { echo "lease_reclaim: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
   STATE=$(_ledger_get "$TASK_ID" state)
 
@@ -896,16 +2001,16 @@ lease_reclaim() {
     "${ROOT}"/?*) : ;;
     *) _lease_refuse_prune "$TASK_ID" "$WT_STORED" "path not strictly beneath lease root '${ROOT}'"; return 1 ;;
   esac
-  if ! git -C "$REPO" worktree list --porcelain | grep -Fxq "worktree ${WT_CANON}"; then
+  if ! _lgr worktree list --porcelain | grep -Fxq "worktree ${WT_CANON}"; then
     _lease_refuse_prune "$TASK_ID" "$WT_STORED" "path not registered in git worktree list"; return 1
   fi
 
-  if ! git -C "$REPO" worktree remove --force "$WT_CANON" >&2; then
+  if ! _lgr worktree remove --force "$WT_CANON" >&2; then
     echo "lease_reclaim: ERROR git worktree remove failed for ${WT_CANON}" >&2
     _ledger_update "$TASK_ID" state=escalated reason="worktree remove failed" || true
     return 1
   fi
-  git -C "$REPO" branch -D "lease/${TASK_ID}" >/dev/null 2>&1 || true
+  _lgr branch -D "lease/${TASK_ID}" >/dev/null 2>&1 || true
 
   case "$STATE" in
     orphaned)
@@ -931,7 +2036,9 @@ lease_reclaim() {
 # fresh worktree, and re-leases. requeue_count >= 1 escalates instead.
 lease_requeue() {
   local TASK_ID=${1:?usage: lease_requeue <task_id>}
-  local STATE RQ PREV ROLE OUT REPO ROOT WT RESOLVED CLI MODEL EFFORT
+  local STATE RQ PREV ROLE OUT WT RESOLVED CLI MODEL EFFORT
+  _lease_ctx || return 1
+  _lead_integrity_check lease_requeue || return $?
   STATE=$(_ledger_get "$TASK_ID" state) || { echo "lease_requeue: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
   RQ=$(_ledger_get "$TASK_ID" requeue_count)
   OUT=$(_ledger_get "$TASK_ID" output_file)
@@ -946,8 +2053,6 @@ lease_requeue() {
   fi
   PREV=$(_ledger_get "$TASK_ID" builder_cli)
   ROLE=$(_ledger_get "$TASK_ID" role)
-  REPO=$(_lease_repo_root) || return 1
-  ROOT=$(_lease_root) || return 1
   RESOLVED=$(RESOLVE_ROLE_EXCLUDE="$PREV" resolve_role "$ROLE") || {
     _ledger_update "$TASK_ID" state=escalated reason="no alternative builder" || true
     echo "lease_requeue: ${TASK_ID} ESCALATED — no live builder past previous '${PREV}' in role '${ROLE}' fallback chain." >&2
@@ -956,19 +2061,17 @@ lease_requeue() {
   CLI=$(printf '%s\n' "$RESOLVED" | cut -f1)
   MODEL=$(printf '%s\n' "$RESOLVED" | cut -f2)
   EFFORT=$(printf '%s\n' "$RESOLVED" | cut -f3)
-  WT="${ROOT}/${TASK_ID}"
+  WT="${_LEASE_ROOT}/${TASK_ID}"
   if [ -e "$WT" ]; then
     echo "lease_requeue: ERROR stale worktree still present at ${WT} — reclaim first" >&2
     return 1
   fi
-  if ! git -C "$REPO" worktree add "$WT" -b "lease/${TASK_ID}" >&2; then
-    echo "lease_requeue: ERROR git worktree add failed for task ${TASK_ID}" >&2
-    return 1
-  fi
+  _lease_carve "$TASK_ID" "$WT" || return 1
   _lease_provision_skills "$WT"
   _ledger_update "$TASK_ID" \
     state=leased builder_cli="$CLI" builder_model="$MODEL" builder_effort="$EFFORT" \
     previous_builder="$PREV" requeue_count=1 pid=0 heartbeat_deadline=0 reason="" \
+    worktree="$WT" "${_CARVE_FIELDS[@]}" \
     || return 1
   echo "lease_requeue: ${TASK_ID} re-leased to ${CLI} (previous builder: ${PREV}) — dispatch again with lease_dispatch" >&2
   echo "$TASK_ID"
@@ -1005,14 +2108,16 @@ _lease_copy_discoveries() {
   local BLOCK
   BLOCK=$(awk 'BEGIN{p=0; b=""} /^[[:space:]]*[-*]?[[:space:]]*\**Discoveries for later tasks\**:?/{p=1; b=""; line=$0; sub(/^[^:]*:[[:space:]]*/, "", line); if (line != "") b=line "\n"; next} p==1{ if ($0 ~ /^[[:space:]]*$/) {p=0; next} b=b $0 "\n" } END{printf "%s", b}' "$F" 2>/dev/null | head -n 20 | cut -c1-400 | _scrub || true)
   case "$(printf '%s' "$BLOCK" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in ''|none|'-none'|'*none'|'none.'|'<list,ornone>'|'<listornone>') return 0 ;; esac
-  mkdir -p ops
+  # Anchored to the lead checkout, not the cwd: lease_collect may run from a
+  # subdirectory, and a relative ops/ would land the block in the wrong tree.
+  mkdir -p "${_LEASE_REPO}/ops"
   {
     echo ""
     echo "## Builder-reported discoveries — lease ${TASK_ID} (builder: ${BUILDER}, $(date -u +%Y-%m-%d))"
     echo "Unverified builder claims, not lead decisions — promote into Decisions/Gotchas only after checking them:"
     echo ""
     printf '%s\n' "$BLOCK" | sed 's/^/    /'
-  } >> ops/MEMORY.md 2>/dev/null || true
+  } >> "${_LEASE_REPO}/ops/MEMORY.md" 2>/dev/null || true
   echo "lease_collect: copied the builder's discoveries into ops/MEMORY.md (labeled unverified)" >&2
 }
 
@@ -1034,14 +2139,21 @@ _lease_copy_discoveries() {
 #                                        requeue) or escalates after one repeat
 lease_collect() {
   local TASK_ID=${1:?usage: lease_collect <task_id>}
-  local STATE PID OUT RC CLASS
+  local STATE PID="" OUT="" PID_STARTED="" PID_NOW ROW RC CLASS
+  _lease_ctx || return 1
+  # Before anything reads the row or touches the worktree: a builder that
+  # planted git config, hooks, a pointer redirect or a ledger edit is caught
+  # here, and its snapshot is never taken (KTD18).
+  _lead_integrity_check lease_collect || return $?
   STATE=$(_ledger_get "$TASK_ID" state) || { echo "lease_collect: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
   if [ "$STATE" != "building" ]; then
     echo "lease_collect: ERROR task ${TASK_ID} is in state '${STATE}' (want building)" >&2
     return 1
   fi
-  PID=$(_ledger_get "$TASK_ID" pid)
-  OUT=$(_ledger_get "$TASK_ID" output_file)
+  ROW=$(_ledger_get_row "$TASK_ID" pid output_file pid_started) || ROW=""
+  { IFS= read -r PID || true; IFS= read -r OUT || true; IFS= read -r PID_STARTED || true; } <<COLLECT_ROW_EOF
+${ROW}
+COLLECT_ROW_EOF
   if [ ! -f "${OUT}.rc" ]; then
     if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
       echo "lease_collect: task ${TASK_ID} still running (pid ${PID}) — wait, or lease_heartbeat_check to enforce the deadline" >&2
@@ -1061,6 +2173,30 @@ lease_collect() {
     _ledger_update "$TASK_ID" report_status="$REPORT" || return 1
     case "$REPORT" in
       DONE|DONE_WITH_CONCERNS)
+        # The builder is finished: sweep anything it left running, then take
+        # the lead's snapshot, which the review, the merge and any approval
+        # bind to (KTD3). Best-effort until U13 detaches builders into their
+        # own process group: the sweep is the recorded pid's tree, and by now
+        # (.rc exists) the dispatch subshell behind that pid has exited, so a
+        # live pid may be one the OS reused for an unrelated process. It is
+        # signalled only while it still has the start time lease_dispatch
+        # recorded (pid_started); a reused pid is never killed.
+        if [ -n "$PID" ] && [ "$PID" -gt 0 ] 2>/dev/null && kill -0 "$PID" 2>/dev/null; then
+          PID_NOW=$(ps -o lstart= -p "$PID" 2>/dev/null | tr -s ' ' || true)
+          if [ -n "$PID_STARTED" ] && [ "$PID_NOW" = "$PID_STARTED" ]; then
+            _kill_tree "$PID" TERM
+          fi
+        fi
+        # Once more, right before the snapshot's `add -A` runs the clean
+        # filters: a builder process still alive between the check above and
+        # here (a daemonized child the sweep does not reach until U13) could
+        # have planted config in that window.
+        _lead_integrity_check lease_collect || return $?
+        if ! _lease_snapshot "$TASK_ID"; then
+          _ledger_update "$TASK_ID" state=escalated reason="collect snapshot failed (see stderr)" || true
+          echo "lease_collect: task ${TASK_ID} ESCALATED — the lead could not take its collect snapshot; the builder's work is still in its worktree" >&2
+          return 1
+        fi
         _ledger_update "$TASK_ID" state=review || return 1
         _lease_copy_discoveries "$TASK_ID" "${BUILDER:-unknown}" "$OUT"
         echo "lease_collect: task ${TASK_ID} builder exited 0 with Status: ${REPORT} — state=review, output below" >&2
@@ -1131,6 +2267,8 @@ lease_pin_reviewer() {
   local TASK_ID=${1:?usage: lease_pin_reviewer <task_id> <reviewer>}
   local REVIEWER=${2:?usage: lease_pin_reviewer <task_id> <reviewer>}
   local BUILDER PINNED
+  _lease_ctx || return 1
+  _lead_integrity_check lease_pin_reviewer || return $?
   _ledger_get "$TASK_ID" state >/dev/null || { echo "lease_pin_reviewer: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
   if ! _is_known_cli "$REVIEWER"; then
     echo "lease_pin_reviewer: REFUSED — '${REVIEWER}' is not a known reviewer identity (one of: ${_KNOWN_CLIS}). A fabricated label cannot stand in for a real reviewer (AE3)." >&2
@@ -1156,16 +2294,21 @@ lease_pin_reviewer() {
 # rejected), (2) different from builder_cli (self-review never merges), and (3)
 # already PINNED via lease_pin_reviewer — the pin is the "a review happened"
 # receipt, so a merge with no pin is refused (U10 layers the full cross-review
-# protocol on these checks). The lead snapshots the
-# builder's uncommitted worktree changes onto the lease branch ("commit
-# nothing; the lead collects"), squash-merges into the MAIN tree, records
-# reviewer + merge_commit, then reclaims via the safe-prune path. Squash
-# conflicts leave a dirty index: reset --merge, state stays review, the lead
-# resolves manually.
+# protocol on these checks). It squash-merges the lead's collect snapshot
+# (KTD3/KTD19 — recorded by lease_collect; "commit nothing; the lead
+# collects") into the MAIN tree only after the integrity check, the
+# integration-branch check and the snapshot checks pass (_lease_verify_snapshot:
+# branch = base + that one commit, worktree unchanged since collect, no ops/
+# path), records reviewer + merge_commit, then reclaims via the safe-prune
+# path. Every git call runs through _lead_git, so no repository hook runs on
+# the merge commit. Squash conflicts leave a dirty index: reset --merge, state
+# stays review, the lead resolves manually.
 lease_merge() {
   local TASK_ID=${1:?usage: lease_merge <task_id> <reviewer-identity>}
   local REVIEWER=${2:-}
-  local STATE BUILDER WT BRANCH REPO SHA PINNED
+  local STATE BUILDER WT BRANCH SHA PINNED SNAP
+  _lease_ctx || return 1
+  _lead_integrity_check lease_merge || return $?
   STATE=$(_ledger_get "$TASK_ID" state) || { echo "lease_merge: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
   if [ "$STATE" != "review" ]; then
     echo "lease_merge: ERROR task ${TASK_ID} is in state '${STATE}' (want review — lease_collect sets it)" >&2
@@ -1200,7 +2343,6 @@ lease_merge() {
   fi
   WT=$(_ledger_get "$TASK_ID" worktree)
   BRANCH=$(_ledger_get "$TASK_ID" branch)
-  REPO=$(_lease_repo_root) || return 1
   if [ ! -d "$WT" ]; then
     echo "lease_merge: ERROR worktree missing: ${WT}" >&2
     return 1
@@ -1214,8 +2356,8 @@ lease_merge() {
   # single-branch repo with no origin/HEAD and no local main/master), allow it
   # but log so the honest boundary is visible.
   local DEFAULT_BRANCH CURRENT_BRANCH
-  DEFAULT_BRANCH=$(_lease_default_branch "$REPO")
-  CURRENT_BRANCH=$(_lease_current_branch "$REPO")
+  DEFAULT_BRANCH=$(_lease_default_branch)
+  CURRENT_BRANCH=$(_lease_current_branch)
   if [ -n "$DEFAULT_BRANCH" ] && [ -n "$CURRENT_BRANCH" ] && [ "$CURRENT_BRANCH" = "$DEFAULT_BRANCH" ]; then
     echo "lease_merge: REFUSED — the main tree is on the default branch '${DEFAULT_BRANCH}'. lease_merge lands on a sprint integration branch, not the default branch — cut/checkout an integration branch first (e.g. git checkout -b sprint/<name>), then rerun. Promotion to '${DEFAULT_BRANCH}' is lease_promote's gated job (KTD-5)." >&2
     return 1
@@ -1234,36 +2376,44 @@ lease_merge() {
     echo "lease_merge: NOTE no default-branch concept — proceeding because TRIFORGE_INTEGRATION_BRANCH='${TRIFORGE_INTEGRATION_BRANCH}' explicitly confirms the integration branch (single-branch or detached repo)." >&2
   fi
 
-  # Lead-side collect commit: the builder committed nothing (contract), so
-  # snapshot its work onto the lease branch. .agents/ (provisioned skills)
-  # is excluded even where a project forgot to gitignore it.
-  git -C "$WT" add -A -- . ":(exclude).agents" >&2 || return 1
-  if ! git -C "$WT" diff --cached --quiet 2>/dev/null; then
-    git -C "$WT" commit -m "lease(${TASK_ID}): builder output snapshot (${BUILDER})" >&2 || return 1
+  # Snapshot-only merge (KTD19): the squash comes from the snapshot the lead
+  # recorded at collect, never the branch name, and only after the branch,
+  # the worktree and the diff still match it. A lease collected before 3.3.3
+  # has no snapshot yet: take it now, under the same checks.
+  _lead_integration_check lease_merge || return $?
+  SNAP=$(_ledger_get "$TASK_ID" snapshot_sha 2>/dev/null || true)
+  if [ -z "$SNAP" ]; then
+    echo "lease_merge: NOTE ${TASK_ID} was collected before 3.3.3 — taking the lead's snapshot now" >&2
+    _lease_snapshot "$TASK_ID" || return 1
+    SNAP=$(_ledger_get "$TASK_ID" snapshot_sha)
   fi
+  _lease_verify_snapshot "$TASK_ID" || return 1
 
   # The squash commit must contain exactly this lease's work (KTD-5): a
   # pre-dirtied main index would smuggle unrelated changes into it.
-  if ! git -C "$REPO" diff --cached --quiet 2>/dev/null; then
+  if ! _lgr diff --cached --quiet --no-ext-diff 2>/dev/null; then
     echo "lease_merge: ERROR main tree index has staged changes — commit or unstage them first; the lease commit must contain only ${TASK_ID}'s work" >&2
     return 1
   fi
-  if ! git -C "$REPO" merge --squash "$BRANCH" >&2; then
-    git -C "$REPO" reset --merge >&2 || true
-    echo "lease_merge: CONFLICT squash-merging ${BRANCH} into the main tree — index reset, state stays review. The lead resolves manually (rebase the lease branch onto HEAD, or cherry-pick), then reruns lease_merge." >&2
+  if ! _lgr merge --squash "$SNAP" >&2; then
+    _lgr reset --merge >&2 || true
+    echo "lease_merge: CONFLICT squash-merging ${TASK_ID}'s snapshot ${SNAP:0:12} into the main tree — index reset, state stays review. The lead resolves manually (rebase the work onto HEAD and re-collect), then reruns lease_merge." >&2
     return 1
   fi
-  if git -C "$REPO" diff --cached --quiet 2>/dev/null; then
-    echo "lease_merge: ERROR ${BRANCH} brought no changes (builder produced nothing?) — state stays review" >&2
+  if _lgr diff --cached --quiet --no-ext-diff 2>/dev/null; then
+    echo "lease_merge: ERROR ${TASK_ID}'s snapshot brought no changes (builder produced nothing?) — state stays review" >&2
     return 1
   fi
-  if ! git -C "$REPO" commit -m "lease(${TASK_ID}): merged from ${BUILDER}, reviewed by ${REVIEWER}" >&2; then
-    git -C "$REPO" reset --merge >&2 || true
+  if ! _lgr commit -q -m "lease(${TASK_ID}): merged from ${BUILDER}, reviewed by ${REVIEWER}" >&2; then
+    _lgr reset --merge >&2 || true
     echo "lease_merge: ERROR commit failed — index reset, state stays review" >&2
     return 1
   fi
-  SHA=$(git -C "$REPO" rev-parse HEAD)
+  SHA=$(_lgr rev-parse HEAD)
   _ledger_update "$TASK_ID" state=merged reviewer="$REVIEWER" pinned_reviewer="$REVIEWER" merge_commit="$SHA" || return 1
+  # The lead's own merge moves the integration branch: that is the new state
+  # the next merge or promotion must start from (KTD18).
+  _ledger_update @baseline integration_branch="$(_lease_current_branch)" integration_sha="$SHA" >/dev/null || return 1
   echo "lease_merge: ${TASK_ID} merged as ${SHA} (builder ${BUILDER}, reviewer ${REVIEWER}) — reclaiming worktree" >&2
   lease_reclaim "$TASK_ID" || true
   return 0
@@ -1282,8 +2432,42 @@ _RC_LEASE_ESCALATED=43
 # stays `building`, never review-ready), and lease_heartbeat_check when a row
 # lacks the pid/output it needs to judge liveness. Deliberately outside the
 # resolve_role roster errors (2–6), the invoke_* / timeout codes (1, 124–127),
-# and the gate codes above (40–43, 96).
+# and the gate codes (40–44, 96; 44 = _RC_LEASE_INTEGRITY, defined with the
+# integrity check).
 _RC_DEGRADED=80
+
+# _lease_is_framework_checkout <repo> <default-branch> — 0 when <repo> is the
+# Triforge checkout, where framework_protected applies (KTD8). Reads
+# .claude-plugin/plugin.json from the working tree, HEAD and the default
+# branch: a diff that renames the plugin can't switch the framework list off,
+# because the default branch still names agent-triforge. Fail closed: a
+# manifest that exists but doesn't parse counts as the Triforge checkout.
+_lease_is_framework_checkout() {
+  local REPO=$1 DEF=${2:-} REV M
+  M="${REPO}/.claude-plugin/plugin.json"
+  [ -f "$M" ] && _lease_manifest_is_triforge < "$M" && return 0
+  for REV in HEAD ${DEF:+"$DEF"}; do
+    _lgr show "${REV}:.claude-plugin/plugin.json" 2>/dev/null | _lease_manifest_is_triforge && return 0
+  done
+  return 1
+}
+
+# _lease_manifest_is_triforge < manifest — 0 when stdin is a plugin manifest
+# named agent-triforge OR is non-empty but not valid JSON (fail closed); 1 for
+# an empty input or a manifest with another name.
+_lease_manifest_is_triforge() {
+  python3 -c '
+import json, sys
+raw = sys.stdin.read()
+if not raw.strip():
+    sys.exit(1)
+try:
+    data = json.loads(raw)
+except Exception:
+    sys.exit(0)
+sys.exit(0 if isinstance(data, dict) and data.get("name") == "agent-triforge" else 1)
+'
+}
 
 # lease_promote [<default-branch>] — wave-end promotion of the sprint integration
 # branch to the repo default branch (KTD-5). This is the ONLY path that writes the
@@ -1292,29 +2476,48 @@ _RC_DEGRADED=80
 # the wave's squash commits), NOT on the default branch.
 #
 # Gate, in order:
+#   (0) the integrity check (KTD18) and, when a ledger exists, the
+#       integration-branch check: a moved default branch, planted git config
+#       or hooks, a checkout switched off the recorded integration branch, or
+#       an unrecorded commit on the integration branch refuses with rc 44
+#       before anything else runs; a successful promotion clears the recorded
+#       integration branch (the sprint is done)
 #   (a) read [promotion].require_user_approval from ops/roster.toml (default false)
 #   (b) compute the integration branch's changed paths vs the default branch:
-#       git diff --name-only <default>...HEAD
-#   (c) scan them against PROTECTED_PATHS — the controls that govern the pool:
-#       permission configs, deny/policy rules, ops/roster.toml (incl [promotion]),
-#       and the shipped agent configs
-#   (d) require_user_approval=true OR any protected path touched -> BLOCK: print
-#       that promotion needs lead/user approval (a protected-path diff forces the
-#       gate on and requires the lead or user as reviewer, never external-CLI-only),
-#       return _RC_PROMOTE_BLOCKED, do NOT merge
+#       git diff -z --name-only --no-renames --ignore-submodules=none
+#       <default>...HEAD — both sides of every rename, NUL-separated so no
+#       path is quoted out of a match, and a submodule entry (a nested repo
+#       the snapshot recorded as a gitlink) listed even when .gitmodules on
+#       the integration branch says `ignore = all`
+#   (c) classify them against the registry's protected-path lists (KTD8,
+#       scripts/lib/registry.sh): project_protected always, framework_protected
+#       only in the Triforge checkout (_lease_is_framework_checkout). Case-
+#       folded; instruction files match at any depth. A classifier or diff
+#       error counts as a hit — the scan fails closed
+#   (d) require_user_approval=true OR any protected path touched OR the scan
+#       failed -> BLOCK: print that promotion needs lead/user approval (a
+#       protected-path diff forces the gate on and requires the lead or user as
+#       reviewer, never external-CLI-only), return _RC_PROMOTE_BLOCKED, do NOT
+#       merge
 #   (e) else fast-forward (or merge) the integration branch into the default
 #       branch and report the promotion.
 # Atomic where it matters: the default branch is never touched unless the gate
 # passes — the block path leaves the tree exactly as it found it.
 lease_promote() {
   local REPO DEFAULT_BRANCH CURRENT_BRANCH INTEGRATION_BRANCH
-  REPO=$(_lease_repo_root) || { echo "lease_promote: ERROR not inside a git repository" >&2; return 1; }
-  DEFAULT_BRANCH=${1:-$(_lease_default_branch "$REPO")}
+  _lease_ctx || { echo "lease_promote: ERROR not inside a git repository" >&2; return 1; }
+  REPO=$_LEASE_REPO
+  # Promotion writes the default branch: only from a git state the lead
+  # verified (KTD18) — a moved default branch, planted config or hooks, a
+  # switched checkout, or an unrecorded commit on the integration branch
+  # refuses here.
+  _lead_integrity_check lease_promote || return $?
+  DEFAULT_BRANCH=${1:-$(_lease_default_branch)}
   if [ -z "$DEFAULT_BRANCH" ]; then
     echo "lease_promote: ERROR could not determine the default branch (no origin/HEAD, no local main/master). Pass it explicitly: lease_promote <default-branch>." >&2
     return 1
   fi
-  CURRENT_BRANCH=$(_lease_current_branch "$REPO")
+  CURRENT_BRANCH=$(_lease_current_branch)
   if [ -z "$CURRENT_BRANCH" ]; then
     echo "lease_promote: ERROR the main tree is in detached HEAD — check out the sprint integration branch first." >&2
     return 1
@@ -1324,16 +2527,21 @@ lease_promote() {
     return 1
   fi
   INTEGRATION_BRANCH="$CURRENT_BRANCH"
+  if [ -f "$_LEASE_LEDGER" ]; then
+    _lead_integration_check lease_promote || return $?
+  fi
   # A dirty index would ride into the promotion merge — refuse it.
-  if ! git -C "$REPO" diff --cached --quiet 2>/dev/null; then
+  if ! _lgr diff --cached --quiet --no-ext-diff 2>/dev/null; then
     echo "lease_promote: ERROR the main tree index has staged changes — commit or unstage them before promoting." >&2
     return 1
   fi
 
   # (a) user-approval knob (default false; absent/unparseable roster -> false).
   local REQUIRE_APPROVAL="false"
-  if [ -f "ops/roster.toml" ]; then
-    REQUIRE_APPROVAL=$(ROSTER_FILE="ops/roster.toml" python3 -c "
+  # The roster of the lead checkout, whatever the cwd: a relative path would
+  # read no roster from a subdirectory and default the gate to off.
+  if [ -f "${_LEASE_REPO}/ops/roster.toml" ]; then
+    REQUIRE_APPROVAL=$(ROSTER_FILE="${_LEASE_REPO}/ops/roster.toml" python3 -c "
 import os, sys
 # Fail CLOSED: an existing roster that cannot be parsed (no TOML library, or a
 # malformed file) must NOT silently disable the approval gate — that would let
@@ -1359,101 +2567,79 @@ print('true' if v is True else 'false')
 " 2>/dev/null || echo "true")
   fi
 
-  # (b) changed paths of the integration branch vs the default branch.
-  local CHANGED
-  CHANGED=$(git -C "$REPO" diff --name-only "${DEFAULT_BRANCH}...HEAD" 2>/dev/null) || {
-    echo "lease_promote: ERROR could not diff '${DEFAULT_BRANCH}...HEAD' — is '${DEFAULT_BRANCH}' a valid branch reachable from HEAD?" >&2
+  # (b) changed paths of the integration branch vs the default branch, both
+  # sides of each rename (--no-renames), NUL-separated (-z) so core.quotePath
+  # can't wrap a non-ASCII path in quotes that dodge a prefix match.
+  if ! _lgr rev-parse --verify --quiet "${DEFAULT_BRANCH}^{commit}" >/dev/null 2>&1; then
+    echo "lease_promote: ERROR '${DEFAULT_BRANCH}' is not a valid branch or commit — pass the default branch explicitly: lease_promote <default-branch>." >&2
     return 1
-  }
+  fi
+  local SCAN_DIR SCAN_ERR="" PROTECTED_HIT="" FRAMEWORK=0
+  SCAN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/triforge-promote-scan.XXXXXX") || return 1
+  if ! _lgr diff -z --name-only --no-renames --no-ext-diff --ignore-submodules=none "${DEFAULT_BRANCH}...HEAD" > "${SCAN_DIR}/changed" 2> "${SCAN_DIR}/err"; then
+    SCAN_ERR="git diff ${DEFAULT_BRANCH}...HEAD failed: $(head -c 300 "${SCAN_DIR}/err" | tr '\n' ' ')"
+  fi
 
-  # (c) protected-path scan. A single match forces the gate ON regardless of the
-  # knob. Prefixes cover every shipped agent config, each CLI's permission/deny
-  # config (shipped templates/.*/ AND the project-level live .*/ dirs), and
-  # ops/roster.toml (incl
-  # its [promotion] block), and the shipped agent configs (agents/, and every
-  # <cli>-agents/ dir). No literal backticks in the heredoc.
-  local PROTECTED_HIT=""
-  PROTECTED_HIT=$(CHANGED="$CHANGED" python3 -c "
-import os
-protected_prefixes = (
-    'agents/',
-    'antigravity-agents/',
-    'codex-agents/',
-    'opencode-agents/',
-    'kimi-agents/',
-    'cursor-agents/',
-    # Orchestration + lifecycle control plane — the framework's own files that
-    # IMPLEMENT the lease/confinement/promotion/review machinery and lifecycle
-    # hooks. Protected by SPECIFIC path (not whole top-level dirs) so a wave in a
-    # USER project whose own app code lives under scripts/ or commands/ is not
-    # force-gated on every touch; these are the plugin's control-plane files
-    # (when dogfooding this repo) plus the permission configs sensitive in ANY
-    # project. A wave must never promote a change to its own enforcement code or
-    # permission config on an external-CLI-only review.
-    'scripts/invoke-external.sh',
-    'scripts/coordinate.sh',
-    'scripts/probe-capabilities.sh',
-    'hooks/hooks.json',
-    'hooks/handlers/',
-    '.claude/settings.json',
-    '.claude/settings.local.json',
-    '.claude-plugin/',
-    # Shipped per-CLI templates (member-governing configs, permission/deny
-    # rules) — every optional member's dir, symmetric with the core trio's.
-    'templates/.antigravity/',
-    'templates/.opencode/',
-    'templates/.codex/',
-    'templates/.kimi-code/',
-    'templates/.cursor/',
-    'templates/ops/roster.toml',
-    # Project-level live CLI configs — a wave must not silently rewrite the
-    # permission/governance config any adapter reads.
-    '.codex/',
-    '.opencode/',
-    '.kimi-code/',
-    '.cursor/',
-    '.antigravity/',
-    'ops/roster.toml',
-)
-for line in os.environ.get('CHANGED', '').splitlines():
-    p = line.strip()
-    if p and p.startswith(protected_prefixes):
-        print(p)
-" 2>/dev/null || true)
+  # (c) protected-path scan (KTD8). A hit forces the gate ON regardless of the
+  # knob. Fail closed: an unreadable plugin manifest counts as the Triforge
+  # checkout, and any classifier error blocks with its message.
+  if [ -z "$SCAN_ERR" ]; then
+    _lease_is_framework_checkout "$REPO" "$DEFAULT_BRANCH" && FRAMEWORK=1
+    if ! _protected_classify "$FRAMEWORK" < "${SCAN_DIR}/changed" > "${SCAN_DIR}/hits" 2> "${SCAN_DIR}/err"; then
+      SCAN_ERR="protected-path classifier failed: $(tail -c 300 "${SCAN_DIR}/err" | tr '\n' ' ')"
+    else
+      PROTECTED_HIT=$(cat "${SCAN_DIR}/hits")
+    fi
+  fi
+  rm -rf "$SCAN_DIR"
 
   # (d) block when gated.
-  if [ "$REQUIRE_APPROVAL" = "true" ] || [ -n "$PROTECTED_HIT" ]; then
+  if [ "$REQUIRE_APPROVAL" = "true" ] || [ -n "$PROTECTED_HIT" ] || [ -n "$SCAN_ERR" ]; then
     echo "lease_promote: BLOCKED — promotion of '${INTEGRATION_BRANCH}' to '${DEFAULT_BRANCH}' needs lead/user approval. No merge performed." >&2
     if [ "$REQUIRE_APPROVAL" = "true" ]; then
       echo "  reason: [promotion].require_user_approval = true in ops/roster.toml (KTD-5 user gate)." >&2
     fi
+    if [ -n "$SCAN_ERR" ]; then
+      echo "  reason: the protected-path scan could not run, so the diff is treated as protected (fail-closed, KTD8): ${SCAN_ERR}" >&2
+    fi
     if [ -n "$PROTECTED_HIT" ]; then
-      echo "  reason: the integration diff touches protected paths (controls that govern the pool). A protected-path diff forces the gate ON regardless of the knob and requires the LEAD or USER as reviewer — never an external-CLI-only review:" >&2
-      printf '%s\n' "$PROTECTED_HIT" | while IFS= read -r _ph; do
-        [ -n "$_ph" ] && echo "    ${_ph}" >&2
+      echo "  reason: the integration diff touches protected paths (controls that govern the pool; lists in scripts/lib/registry.sh — framework_protected applies in the Triforge checkout only). A protected-path diff forces the gate ON regardless of the knob and requires the LEAD or USER as reviewer — never an external-CLI-only review:" >&2
+      printf '%s\n' "$PROTECTED_HIT" | while IFS="$(printf '\t')" read -r _pl _ph; do
+        if [ -n "$_ph" ]; then echo "    ${_ph}  (${_pl}_protected)" >&2; fi
       done
     fi
-    echo "  Once the lead/user approves, promote by hand (git checkout ${DEFAULT_BRANCH} && git merge ${INTEGRATION_BRANCH}) or set [promotion].require_user_approval=false for a purely non-protected diff and rerun." >&2
+    echo "  Once the lead/user approves, promote by hand (git checkout ${DEFAULT_BRANCH} && git merge ${INTEGRATION_BRANCH}), then run lease_rebaseline so the integrity baseline records the new ${DEFAULT_BRANCH} (a hand promotion moves it off [baseline].default_sha, and the next lease_* call would refuse with rc 44) — or set [promotion].require_user_approval=false for a purely non-protected diff and rerun." >&2
     return "$_RC_PROMOTE_BLOCKED"
   fi
 
   # (e) promote: fast-forward when possible, else a merge commit.
-  if ! git -C "$REPO" checkout "$DEFAULT_BRANCH" >&2; then
+  if ! _lgr checkout -q "$DEFAULT_BRANCH" >&2; then
     echo "lease_promote: ERROR could not checkout the default branch '${DEFAULT_BRANCH}'." >&2
     return 1
   fi
-  if git -C "$REPO" merge --ff-only "$INTEGRATION_BRANCH" >&2; then
+  if _lgr merge -q --ff-only "$INTEGRATION_BRANCH" >&2; then
     :
-  elif git -C "$REPO" merge --no-edit "$INTEGRATION_BRANCH" >&2; then
+  elif _lgr merge -q --no-edit "$INTEGRATION_BRANCH" >&2; then
     :
   else
-    git -C "$REPO" merge --abort 2>/dev/null || true
-    git -C "$REPO" checkout "$INTEGRATION_BRANCH" >&2 2>/dev/null || true
+    _lgr merge --abort 2>/dev/null || true
+    _lgr checkout -q "$INTEGRATION_BRANCH" >&2 2>/dev/null || true
     echo "lease_promote: ERROR merging '${INTEGRATION_BRANCH}' into '${DEFAULT_BRANCH}' failed (conflicts) — aborted and returned to '${INTEGRATION_BRANCH}'. Resolve manually." >&2
     return 1
   fi
   local SHA
-  SHA=$(git -C "$REPO" rev-parse HEAD)
+  SHA=$(_lgr rev-parse HEAD)
+  # The lead's own promotion moves the default branch: record it, so the next
+  # check compares against this state rather than escalating it (KTD18). The
+  # record is the default branch as the check resolves it (_lease_default_ref),
+  # not the argument, so an explicit <default-branch> that differs from
+  # origin/HEAD or main/master can't leave a baseline the next check disagrees
+  # with. That sprint's integration branch is done: clear it, and the next
+  # lease_create (or merge) records the new one.
+  if [ -f "$_LEASE_LEDGER" ]; then
+    _lease_default_ref
+    _ledger_update @baseline default_branch="$_LEASE_DEF" default_sha="$_LEASE_DEF_SHA" integration_branch="" integration_sha="" >/dev/null || true
+  fi
   echo "lease_promote: PROMOTED '${INTEGRATION_BRANCH}' -> '${DEFAULT_BRANCH}' (HEAD ${SHA}); require_user_approval=${REQUIRE_APPROVAL}, protected-paths=none." >&2
   return 0
 }
@@ -1463,7 +2649,8 @@ for line in os.environ.get('CHANGED', '').splitlines():
 # ledger instead of failing.
 lease_status() {
   local LEDGER
-  LEDGER=$(_lease_ledger_path) || return 1
+  _lease_ctx || return 1
+  LEDGER=$_LEASE_LEDGER
   if [ ! -f "$LEDGER" ]; then
     echo "lease_status: no lease ledger (${LEDGER}) — no leases have been created"
     return 0

@@ -94,14 +94,17 @@ json_version() {
 }
 PLUGIN_V=$(json_version .claude-plugin/plugin.json)
 AGY_V=$(json_version antigravity-agents/plugin.json)
+# The marketplace manifest carries the version twice (metadata + the one
+# plugin entry); both must move with plugin.json.
+MKT_V=$(VV_FILE=.claude-plugin/marketplace.json python3 -c 'import json, os; d = json.load(open(os.environ["VV_FILE"])); m = d.get("metadata", {}).get("version", ""); p = [x.get("version", "") for x in d.get("plugins", []) if x.get("name") == "agent-triforge"]; print(m if p == [m] else "mismatch(metadata=" + m + ",plugin=" + ",".join(p) + ")")' 2>/dev/null || echo "unreadable")
 README_V=$(grep -m1 -E "^## What's new \(v[0-9]+\.[0-9]+\.[0-9]+\)" README.md \
   | sed -E "s/^## What's new \(v([0-9]+\.[0-9]+\.[0-9]+)\).*/\1/" || true)
 if [ -z "$README_V" ]; then
   fail "version lockstep: README.md has no '## What's new (vX.Y.Z)' heading"
-elif [ "$PLUGIN_V" = "$AGY_V" ] && [ "$PLUGIN_V" = "$README_V" ]; then
-  ok "version lockstep: $PLUGIN_V (.claude-plugin/plugin.json, antigravity-agents/plugin.json, README What's new)"
+elif [ "$PLUGIN_V" = "$AGY_V" ] && [ "$PLUGIN_V" = "$README_V" ] && [ "$PLUGIN_V" = "$MKT_V" ]; then
+  ok "version lockstep: $PLUGIN_V (.claude-plugin/plugin.json, .claude-plugin/marketplace.json, antigravity-agents/plugin.json, README What's new)"
 else
-  fail "version lockstep: .claude-plugin/plugin.json=$PLUGIN_V antigravity-agents/plugin.json=$AGY_V README What's new=$README_V"
+  fail "version lockstep: .claude-plugin/plugin.json=$PLUGIN_V .claude-plugin/marketplace.json=$MKT_V antigravity-agents/plugin.json=$AGY_V README What's new=$README_V"
 fi
 # Release-notes source: literal "v<version>:" on a "### " heading below
 # "## Recent changes" (the colon keeps v3.3.1 from matching v3.3.10).
