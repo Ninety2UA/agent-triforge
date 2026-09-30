@@ -27,11 +27,11 @@ jobs:
   gates:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # release tags: SELF-08b rebuilds a released skill copy for the legacy-stamp migration case
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7 # v5 runs on the deprecated Node 20
         with:
           python-version: "3.12" # tomllib (3.11+): the roster, ledger and probe parsers
 
@@ -40,7 +40,7 @@ jobs:
           /bin/bash --version | head -1
           python3 --version
           git --version
-          command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1 || brew install coreutils
+          command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install coreutils
 
       - name: Shell syntax (/bin/bash 3.2)
         run: |
@@ -62,7 +62,7 @@ jobs:
           set -u
           BROKEN="$RUNNER_TEMP/broken"
           mkdir -p "$BROKEN"
-          git ls-files -z | xargs -0 tar -cf - | tar -xf - -C "$BROKEN"
+          git ls-files -z | tar --null -T - -cf - | tar -xf - -C "$BROKEN"   # one archive whatever the file count (xargs would split past ARG_MAX)
           rm "$BROKEN/scripts/lease-git-hooks/pre-push"   # SELF-09's no-push hook
           RC=0
           /bin/bash "$BROKEN/scripts/probe-capabilities.sh" --self-only 2> "$RUNNER_TEMP/broken.err" || RC=$?

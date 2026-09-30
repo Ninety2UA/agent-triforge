@@ -37,11 +37,11 @@ versions produced this change.
 <!-- The protected-path lists live in scripts/lib/registry.sh. In every project:
 ops/roster.toml (incl. [promotion]); each CLI's config and permission tree (.claude/,
 .codex/, .agents/, .antigravity/, .gemini/, .opencode/, .kimi-code/, .cursor/, plus
-opencode.json, opencode.jsonc and .cursorrules at the root); and every AGENTS.md,
+opencode.json, opencode.jsonc, .cursorrules and .gitmodules at the root); and every AGENTS.md,
 AGENTS.override.md, CLAUDE.md, CLAUDE.local.md and .mcp.json at any depth. In this
 repo (the Triforge checkout) also the framework's control plane: the enforcement,
 probe and release scripts, hooks/, skills/, commands/, the shipped agent configs,
-.claude-plugin/, settings.json, templates/, .github/, .gitmodules and every
+.claude-plugin/, settings.json, templates/, personas/, .github/ and every
 .gitattributes (full list in the "Protected paths" bullet of .claude/CLAUDE.md).
 The lease_promote scan is case-folded, sees both sides of a rename, and fails
 closed (rc 42). -->

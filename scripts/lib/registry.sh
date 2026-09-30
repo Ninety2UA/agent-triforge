@@ -49,8 +49,8 @@ FRAMEWORK_PROTECTED = (
     "agents/", "antigravity-agents/", "codex-agents/", "opencode-agents/", "kimi-agents/", "cursor-agents/",
     # manifests, plugin settings, and the templates copied into user projects
     ".claude-plugin/", "settings.json", "templates/",
-    # CI and repository plumbing
-    ".github/", ".gitmodules",
+    # CI plumbing (.gitmodules is on PROJECT_PROTECTED: every project)
+    ".github/",
 )
 FRAMEWORK_PROTECTED_ANY_DEPTH = (".gitattributes",)
 PROJECT_PROTECTED = (
@@ -62,6 +62,9 @@ PROJECT_PROTECTED = (
     # config from opencode.json / opencode.jsonc, and Cursor still reads the
     # legacy root instruction file .cursorrules
     "opencode.json", "opencode.jsonc", ".cursorrules",
+    # .gitmodules names the URL `git submodule update` pulls into any path a
+    # nested repo was recorded at (a builder can record one at .claude/)
+    ".gitmodules",
 )
 PROJECT_PROTECTED_ANY_DEPTH = ("agents.md", "agents.override.md", "claude.md", "claude.local.md", ".mcp.json")
 

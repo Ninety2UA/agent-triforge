@@ -175,7 +175,7 @@ _lead_git() {
   fi
   local -a E=(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_OBJECT_DIRECTORY
               -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_CONFIG -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT -u GIT_EXTERNAL_DIFF
-              GIT_CONFIG_NOSYSTEM=1 "GIT_CONFIG_GLOBAL=${_LEAD_CFG}" GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat GIT_EDITOR=true GIT_OPTIONAL_LOCKS=0)
+              GIT_CONFIG_NOSYSTEM=1 "GIT_CONFIG_GLOBAL=${_LEAD_CFG}" GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat GIT_EDITOR=true GIT_OPTIONAL_LOCKS=0 GIT_NO_REPLACE_OBJECTS=1)
   [ -n "${_LEAD_GIT_INDEX:-}" ] && E+=("GIT_INDEX_FILE=${_LEAD_GIT_INDEX}")
   "${E[@]}" git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.attributesFile=/dev/null \
     -c commit.gpgSign=false -c tag.gpgSign=false -c core.pager=cat -c core.editor=true \
@@ -357,13 +357,19 @@ recorded = ''
 if os.path.isfile(digest_file):
     recorded = open(digest_file).read().strip()
 source, alert = path, ''
+stamp = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 if recorded and _sha(path) != recorded:
-    stamp = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     if os.path.isfile(copy_file) and _sha(copy_file) == recorded:
         source = copy_file
         alert = stamp + ' ops/leases.toml changed outside the lead writes (restored from the lead copy before a write)'
     else:
         alert = stamp + ' ops/leases.toml changed outside the lead writes (no intact lead copy to restore from)'
+elif not recorded and os.path.isfile(copy_file):
+    # The digest is written right after the copy on every lead write, so a
+    # copy with no digest means the digest file was deleted (or a crash fell
+    # between the two writes): the rule can not run, and the current ledger
+    # is adopted unverified. Fail closed: alert, never a silent first use.
+    alert = stamp + ' the ledger digest ' + digest_file + ' is missing while the lead copy exists: an integrity anchor was deleted, and ops/leases.toml was adopted UNVERIFIED (compare it with ' + copy_file + ')'
 data = {}
 if os.path.isfile(source):
     with open(source, 'rb') as f:
@@ -642,8 +648,13 @@ def checkout_digest(repo):
     except OSError as e:
         return "unreadable:" + type(e).__name__
 
-def repo_surfaces(common, state, repo):
+def repo_surfaces(common, state, repo, gitdir):
+    # config.worktree lives in the gitdir of the checkout (== common for a
+    # plain checkout; .git/worktrees/<name> for a linked-worktree lead) and is
+    # read after .git/config once extensions.worktreeConfig is on, so a
+    # driver or hook setting planted there reaches every _lgr call.
     cur = {"config": file_digest(os.path.join(common, "config")),
+           "config_worktree": file_digest(os.path.join(gitdir, "config.worktree")),
            "hooks": tree_digest(os.path.join(common, "hooks")),
            "info": tree_digest(os.path.join(common, "info"), ("refs",)),
            "global_gitconfig": global_digest(),
@@ -662,19 +673,22 @@ mode = os.environ["LI_MODE"]
 common = os.environ.get("LI_COMMON", "")
 state = os.environ.get("LI_STATE", "")
 repo = os.environ.get("LI_REPO", "")
+gitdir = os.environ.get("LI_GITDIR", "") or common
 
 # The restorable surfaces: name -> (live path, digest of that kind). The lead
 # copy is <state>/<stem>.copy and a changed version kept before a restore is
 # <state>/<stem>.changed-<UTC time>, where stem is the live basename (config,
-# hooks, gitconfig). .git/config and .git/hooks live under the common dir, the
-# trusted git config under the lead state dir. Everything else is detect-only:
-# .git/info (KTD18 restores config and hooks only), the global git config (a
-# user file) and the .git of the lead checkout.
+# config.worktree, hooks, gitconfig). .git/config and .git/hooks live under the
+# common dir, config.worktree under the gitdir of the checkout, the trusted git
+# config under the lead state dir. Everything else is detect-only: .git/info
+# (KTD18 restores config and hooks only), the global git config (a user file)
+# and the .git of the lead checkout.
 LIVE = {"config": (os.path.join(common, "config"), file_digest),
+        "config_worktree": (os.path.join(gitdir, "config.worktree"), file_digest),
         "hooks": (os.path.join(common, "hooks"), tree_digest),
         "lead_gitconfig": (os.path.join(state, "gitconfig"), file_digest)}
 RESTORABLE = tuple(sorted(LIVE))
-NAMES = {"config": ".git/config", "hooks": ".git/hooks/", "info": ".git/info/",
+NAMES = {"config": ".git/config", "config_worktree": ".git/config.worktree", "hooks": ".git/hooks/", "info": ".git/info/",
          "global_gitconfig": "the global git config (~/.gitconfig, ~/.config/git/config)",
          "lead_gitconfig": "the lead trusted git config (" + os.path.join(state, "gitconfig") + ")",
          "checkout": "the .git pointer of the lead checkout (" + os.path.join(repo, ".git") + ")"}
@@ -767,7 +781,7 @@ def admin_from_pointer(wt, common):
 
 if mode == "record":
     save_copies()
-    for k, v in sorted(repo_surfaces(common, state, repo).items()):
+    for k, v in sorted(repo_surfaces(common, state, repo, gitdir).items()):
         print(k + "=" + v)
     sys.exit(0)
 
@@ -796,10 +810,24 @@ leases = leases if isinstance(leases, dict) else {}
 if isinstance(base, dict) and base.get("ledger_alert"):
     out.append(("REPO", "ledger_alert", str(base["ledger_alert"])))
 if not isinstance(base, dict) or not base.get("config"):
-    out.append(("NOBASELINE", "", ""))
+    # No [baseline]: first use, or a pre-3.3.3 ledger — unless the rows carry
+    # keys only a 3.3.3 lead writes with a baseline in place: then the table
+    # was removed from the ledger (and the digest anchors with it, or the
+    # ledger rule would have restored it). That is a change, never a first use.
+    stamped = sorted(t for t, r in leases.items() if isinstance(r, dict)
+                     and any(k in r for k in ("pointer_digest", "admin_digest", "admin_dir", "snapshot_sha", "integrity_prev_state")))
+    anchors = [n for n in ("config.copy", "hooks.copy", "ledger.copy") if os.path.lexists(os.path.join(state, n))]
+    if stamped or anchors:
+        why = ("lease row(s) " + ", ".join(stamped[:5]) + " were written with it in place") if stamped \
+              else ("the lead state dir holds " + ", ".join(anchors) + ", saved when that table was recorded")
+        out.append(("REPO", "baseline_missing", "the [baseline] table of the ledger is missing, but " + why
+                    + ": ops/leases.toml was edited outside the lead writes (not restored: no verified copy; compare it with "
+                    + os.path.join(state, "ledger.copy") + " and restore it yourself, then lease_rebaseline)"))
+    else:
+        out.append(("NOBASELINE", "", ""))
     base = None
 else:
-    cur = repo_surfaces(common, state, repo)
+    cur = repo_surfaces(common, state, repo, gitdir)
     for k in sorted(cur):
         b = str(base.get(k, ""))
         if b and cur[k] != b:
@@ -856,10 +884,10 @@ _lead_baseline_record() {
   while IFS= read -r L; do
     if [ -n "$L" ]; then ARGS+=("$L"); fi
   done <<BASELINE_EOF
-$(LI_MODE=record LI_COMMON="$_LEASE_COMMON" LI_STATE="$_LEASE_STATE" LI_REPO="$_LEASE_REPO" python3 -c "$_LEAD_INTEGRITY_PY")
+$(LI_MODE=record LI_COMMON="$_LEASE_COMMON" LI_GITDIR="$_LEASE_GITDIR" LI_STATE="$_LEASE_STATE" LI_REPO="$_LEASE_REPO" python3 -c "$_LEAD_INTEGRITY_PY")
 BASELINE_EOF
-  # config, hooks, info, global_gitconfig, lead_gitconfig, checkout.
-  if [ "${#ARGS[@]}" -lt 6 ]; then
+  # config, config_worktree, hooks, info, global_gitconfig, lead_gitconfig, checkout.
+  if [ "${#ARGS[@]}" -lt 7 ]; then
     echo "lease: ERROR could not record the integrity baseline (KTD18)" >&2
     return 1
   fi
@@ -887,7 +915,15 @@ _lead_integrity_check() {
   _lease_ctx || return 1
   LEDGER=$_LEASE_LEDGER
   if [ ! -f "$LEDGER" ] && [ ! -f "${_LEASE_STATE}/ledger.sha256" ]; then
-    return 0    # no lease was ever created here: nothing to compare against
+    # No ledger and no ledger digest: nothing to compare against — unless the
+    # lead state dir still holds the copies the lead saved for earlier leases.
+    # Then a ledger existed and was deleted together with its digest, which
+    # is a change, not a first use (fail closed, KTD18).
+    if [ -e "${_LEASE_STATE}/ledger.copy" ] || [ -e "${_LEASE_STATE}/config.copy" ] || [ -e "${_LEASE_STATE}/hooks.copy" ]; then
+      echo "${OP}: INTEGRITY — ${LEDGER} and its digest are gone, but the lead state dir ${_LEASE_STATE} holds copies saved for earlier leases: the ledger was deleted outside the lead's writes (KTD18; detection, not prevention). Nothing was merged or promoted. Inspect; to recover, copy ${_LEASE_STATE}/ledger.copy back to ${LEDGER} and run lease_rebaseline — or, if you removed the ledger on purpose, remove ${_LEASE_STATE} too." >&2
+      return "$_RC_LEASE_INTEGRITY"
+    fi
+    return 0
   fi
   # The ledger first, before anything reads a value from it, by its one guarded
   # writer (KTD18): a no-op @baseline write compares it with the lead's last
@@ -903,7 +939,7 @@ _lead_integrity_check() {
     return "$_RC_LEASE_INTEGRITY"
   fi
   _lease_default_ref
-  OUT=$(LI_MODE=check LI_RESTORE=1 LI_COMMON="$_LEASE_COMMON" LI_STATE="$_LEASE_STATE" LI_REPO="$_LEASE_REPO" LI_LEDGER="$LEDGER" \
+  OUT=$(LI_MODE=check LI_RESTORE=1 LI_COMMON="$_LEASE_COMMON" LI_GITDIR="$_LEASE_GITDIR" LI_STATE="$_LEASE_STATE" LI_REPO="$_LEASE_REPO" LI_LEDGER="$LEDGER" \
         LI_DEF="$_LEASE_DEF" LI_DEF_SHA="$_LEASE_DEF_SHA" python3 -c "$_LEAD_INTEGRITY_PY" 2>&1) || RC=$?
   if [ "$RC" -ne 0 ]; then
     echo "${OP}: INTEGRITY CHECK COULD NOT RUN — treated as a change (fail closed, KTD18): $(printf '%s' "$OUT" | tail -3 | tr '\n' ' ' | cut -c1-300)" >&2
@@ -1041,13 +1077,18 @@ lease_rebaseline() {
     return 1
   fi
   _lease_default_ref
-  OUT=$(LI_MODE=check LI_RESTORE=0 LI_FORCE_RECORD=1 LI_COMMON="$_LEASE_COMMON" LI_STATE="$_LEASE_STATE" LI_REPO="$_LEASE_REPO" LI_LEDGER="$LEDGER" \
+  OUT=$(LI_MODE=check LI_RESTORE=0 LI_FORCE_RECORD=1 LI_COMMON="$_LEASE_COMMON" LI_GITDIR="$_LEASE_GITDIR" LI_STATE="$_LEASE_STATE" LI_REPO="$_LEASE_REPO" LI_LEDGER="$LEDGER" \
         LI_DEF="$_LEASE_DEF" LI_DEF_SHA="$_LEASE_DEF_SHA" python3 -c "$_LEAD_INTEGRITY_PY") || { echo "lease_rebaseline: ERROR the integrity check could not run" >&2; return 1; }
   while IFS="$TAB" read -r KIND A B C D; do
     case "$KIND" in
       REPO)
         if [ "$A" = "ledger_alert" ]; then
           echo "lease_rebaseline: NOT accepting — ${B}: a ledger change is never accepted; the alert stays set, so the next lease_* call escalates the open leases (KTD18)" >&2
+        elif [ "$A" = "baseline_missing" ]; then
+          # The table is re-recorded below from the current state; the edit
+          # itself is on record here, not accepted as a verified ledger.
+          echo "lease_rebaseline: recording a new baseline over an edited ledger — ${B}" >&2
+          ACCEPTED="${ACCEPTED:+${ACCEPTED},}baseline_missing"
         else
           echo "lease_rebaseline: accepting — ${B}" >&2
           case ",${ACCEPTED}," in
@@ -1370,11 +1411,22 @@ VERIFY_ROW_EOF
     echo "lease_merge: REFUSED — ${T}'s worktree changed after collect and no longer matches the recorded snapshot (tree ${STREE:0:12}, now ${NOW:0:12}). Something wrote it after the review target was fixed; re-collect via lease_redispatch (KTD19)." >&2
     return 1
   fi
-  OPS=$(_lgr diff -z --name-only --no-renames --no-ext-diff "$BASE" "$SNAP" 2>/dev/null | python3 -c '
+  # The diff lands in a file first so its own exit status is checked: in a
+  # pipeline only the classifier's status would be seen, and a failed diff
+  # would read as "nothing under ops/" (fails closed, KTD19).
+  local DIFF_TMP
+  DIFF_TMP=$(mktemp "${TMPDIR:-/tmp}/triforge-ops-diff.XXXXXX") || { echo "lease_merge: REFUSED — could not create a temp file for the ops/ check (KTD19)" >&2; return 1; }
+  if ! _lgr diff -z --name-only --no-renames --no-ext-diff --ignore-submodules=none "$BASE" "$SNAP" > "$DIFF_TMP" 2>/dev/null; then
+    rm -f "$DIFF_TMP"
+    echo "lease_merge: REFUSED — could not diff ${BASE:0:12}..${SNAP:0:12} for the ops/ check; nothing merges on an unreadable diff (KTD19)" >&2
+    return 1
+  fi
+  OPS=$(python3 -c '
 import sys
 bad = [p for p in sys.stdin.buffer.read().decode("utf-8", "replace").split("\0") if p and (p.casefold() == "ops" or p.casefold().startswith("ops/"))]
 print(" ".join(bad[:10]) + (" ..." if len(bad) > 10 else ""))
-') || OPS="<diff failed>"
+' < "$DIFF_TMP") || { rm -f "$DIFF_TMP"; echo "lease_merge: REFUSED — the ops/ classifier failed; nothing merges on an unclassified diff (KTD19)" >&2; return 1; }
+  rm -f "$DIFF_TMP"
   if [ -n "$OPS" ]; then
     echo "lease_merge: REFUSED — ${T}'s diff touches the lead-owned ops/ tree (builders never write ops/; the lead does, on the main tree): ${OPS}. Remove those changes from the worktree and re-collect (KTD19)." >&2
     return 1
@@ -1725,10 +1777,13 @@ ${PROMPT}"
   ) &
   PID=$!
   # The recorded pid's start time (ps lstart, runs of spaces squeezed), so
-  # lease_collect can tell this dispatch subshell from a later process the OS
-  # gave the same pid. Empty when the subshell already exited: then collect
-  # never signals it. A string, not an int key.
+  # lease_collect and lease_heartbeat_check can tell this dispatch subshell
+  # from a later process the OS gave the same pid. When the subshell already
+  # exited before ps ran, a marker no lstart can equal is recorded, so neither
+  # ever signals that pid (an EMPTY value is a pre-3.3.3 row, which keeps the
+  # plain liveness test). A string, not an int key.
   PID_START=$(ps -o lstart= -p "$PID" 2>/dev/null | tr -s ' ' || true)
+  if [ -z "$PID_START" ]; then PID_START="exited-before-record"; fi
 
   NOW=$(date +%s)
   DEADLINE=$((NOW + TIMEOUT))
@@ -1841,8 +1896,10 @@ for t, r in sorted(data.get('lease', {}).items()):
     [ -n "$PID" ] && [ "$PID" -gt 0 ] 2>/dev/null && kill -0 "$PID" 2>/dev/null && ALIVE=1
     # A live pid whose start time differs from the one lease_dispatch recorded
     # is a process the OS reused the pid for, not the builder: treat the
-    # builder as gone, and never signal it (rows from before 3.3.3 carry no
-    # pid_started and keep the plain liveness test).
+    # builder as gone, and never signal it. A 3.3.3 row whose subshell had
+    # exited before its start time was read carries the marker
+    # "exited-before-record", which no lstart equals. Rows from before 3.3.3
+    # carry no pid_started and keep the plain liveness test.
     if [ "$ALIVE" -eq 1 ]; then
       local PID_STARTED PID_NOW
       PID_STARTED=$(_ledger_get "$TASK" pid_started 2>/dev/null || true)
@@ -2051,14 +2108,16 @@ _lease_copy_discoveries() {
   local BLOCK
   BLOCK=$(awk 'BEGIN{p=0; b=""} /^[[:space:]]*[-*]?[[:space:]]*\**Discoveries for later tasks\**:?/{p=1; b=""; line=$0; sub(/^[^:]*:[[:space:]]*/, "", line); if (line != "") b=line "\n"; next} p==1{ if ($0 ~ /^[[:space:]]*$/) {p=0; next} b=b $0 "\n" } END{printf "%s", b}' "$F" 2>/dev/null | head -n 20 | cut -c1-400 | _scrub || true)
   case "$(printf '%s' "$BLOCK" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in ''|none|'-none'|'*none'|'none.'|'<list,ornone>'|'<listornone>') return 0 ;; esac
-  mkdir -p ops
+  # Anchored to the lead checkout, not the cwd: lease_collect may run from a
+  # subdirectory, and a relative ops/ would land the block in the wrong tree.
+  mkdir -p "${_LEASE_REPO}/ops"
   {
     echo ""
     echo "## Builder-reported discoveries — lease ${TASK_ID} (builder: ${BUILDER}, $(date -u +%Y-%m-%d))"
     echo "Unverified builder claims, not lead decisions — promote into Decisions/Gotchas only after checking them:"
     echo ""
     printf '%s\n' "$BLOCK" | sed 's/^/    /'
-  } >> ops/MEMORY.md 2>/dev/null || true
+  } >> "${_LEASE_REPO}/ops/MEMORY.md" 2>/dev/null || true
   echo "lease_collect: copied the builder's discoveries into ops/MEMORY.md (labeled unverified)" >&2
 }
 
@@ -2128,6 +2187,11 @@ COLLECT_ROW_EOF
             _kill_tree "$PID" TERM
           fi
         fi
+        # Once more, right before the snapshot's `add -A` runs the clean
+        # filters: a builder process still alive between the check above and
+        # here (a daemonized child the sweep does not reach until U13) could
+        # have planted config in that window.
+        _lead_integrity_check lease_collect || return $?
         if ! _lease_snapshot "$TASK_ID"; then
           _ledger_update "$TASK_ID" state=escalated reason="collect snapshot failed (see stderr)" || true
           echo "lease_collect: task ${TASK_ID} ESCALATED — the lead could not take its collect snapshot; the builder's work is still in its worktree" >&2
@@ -2420,8 +2484,11 @@ sys.exit(0 if isinstance(data, dict) and data.get("name") == "agent-triforge" el
 #       integration branch (the sprint is done)
 #   (a) read [promotion].require_user_approval from ops/roster.toml (default false)
 #   (b) compute the integration branch's changed paths vs the default branch:
-#       git diff -z --name-only --no-renames <default>...HEAD — both sides of
-#       every rename, NUL-separated so no path is quoted out of a match
+#       git diff -z --name-only --no-renames --ignore-submodules=none
+#       <default>...HEAD — both sides of every rename, NUL-separated so no
+#       path is quoted out of a match, and a submodule entry (a nested repo
+#       the snapshot recorded as a gitlink) listed even when .gitmodules on
+#       the integration branch says `ignore = all`
 #   (c) classify them against the registry's protected-path lists (KTD8,
 #       scripts/lib/registry.sh): project_protected always, framework_protected
 #       only in the Triforge checkout (_lease_is_framework_checkout). Case-
@@ -2471,8 +2538,10 @@ lease_promote() {
 
   # (a) user-approval knob (default false; absent/unparseable roster -> false).
   local REQUIRE_APPROVAL="false"
-  if [ -f "ops/roster.toml" ]; then
-    REQUIRE_APPROVAL=$(ROSTER_FILE="ops/roster.toml" python3 -c "
+  # The roster of the lead checkout, whatever the cwd: a relative path would
+  # read no roster from a subdirectory and default the gate to off.
+  if [ -f "${_LEASE_REPO}/ops/roster.toml" ]; then
+    REQUIRE_APPROVAL=$(ROSTER_FILE="${_LEASE_REPO}/ops/roster.toml" python3 -c "
 import os, sys
 # Fail CLOSED: an existing roster that cannot be parsed (no TOML library, or a
 # malformed file) must NOT silently disable the approval gate — that would let
@@ -2507,7 +2576,7 @@ print('true' if v is True else 'false')
   fi
   local SCAN_DIR SCAN_ERR="" PROTECTED_HIT="" FRAMEWORK=0
   SCAN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/triforge-promote-scan.XXXXXX") || return 1
-  if ! _lgr diff -z --name-only --no-renames --no-ext-diff "${DEFAULT_BRANCH}...HEAD" > "${SCAN_DIR}/changed" 2> "${SCAN_DIR}/err"; then
+  if ! _lgr diff -z --name-only --no-renames --no-ext-diff --ignore-submodules=none "${DEFAULT_BRANCH}...HEAD" > "${SCAN_DIR}/changed" 2> "${SCAN_DIR}/err"; then
     SCAN_ERR="git diff ${DEFAULT_BRANCH}...HEAD failed: $(head -c 300 "${SCAN_DIR}/err" | tr '\n' ' ')"
   fi
 

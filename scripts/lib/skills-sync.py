@@ -38,6 +38,7 @@ Usage:
 exits 0 for a refusal or partial refresh; 2 is a usage error.
 """
 
+import errno
 import hashlib
 import json
 import os
@@ -50,18 +51,29 @@ STAMP_NAME = ".triforge-plugin-version"
 STAMP_FORMAT = "2"
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 IGNORED_FILES = (".DS_Store",)
+TMP_PREFIX = ".triforge-tmp-"   # copies in flight; never a valid skill name (NAME_RE), cleaned up on the next run
 
 
 def _entry_line(kind, rel, value):
     return (kind + "\0" + rel + "\0" + value + "\n").encode("utf-8", "surrogateescape")
 
 
+def _walk_error(err):
+    # A directory that can't be listed would otherwise be skipped silently, and a
+    # tree holding one would still digest as Triforge's own copy: raise, so
+    # safe_digest reports the directory instead of owning it.
+    raise err
+
+
 def dir_digest(path):
     """sha256 over the sorted (kind, relative path, content hash | link target)
     entries of a directory tree. Empty directories and .DS_Store don't count,
-    so the digest matches what git would record."""
+    so the digest matches what git would record. Anything that is not a
+    regular file, a symlink or a directory (a FIFO, a socket, a device — which
+    git can't carry, so it is never Triforge's) makes the tree unreadable:
+    opening a FIFO would block the refresh."""
     entries = []
-    for root, dirs, files in os.walk(path, followlinks=False):
+    for root, dirs, files in os.walk(path, followlinks=False, onerror=_walk_error):
         dirs.sort()
         for d in dirs:
             full = os.path.join(root, d)
@@ -75,6 +87,8 @@ def dir_digest(path):
             rel = os.path.relpath(full, path).replace(os.sep, "/")
             if os.path.islink(full):
                 entries.append(("L", rel, os.readlink(full)))
+            elif not os.path.isfile(full):
+                raise OSError(errno.EINVAL, "not a regular file", full)
             else:
                 with open(full, "rb") as fh:
                     entries.append(("F", rel, hashlib.sha256(fh.read()).hexdigest()))
@@ -192,6 +206,10 @@ def sync(plugin_root, project, prefix):
     shipped = []
     written = {}
     kept, skipped, retired, failed = [], [], [], False
+    for leftover in os.listdir(dest):
+        # a copy an earlier run did not finish
+        if leftover.startswith(TMP_PREFIX) and not os.path.islink(os.path.join(dest, leftover)):
+            shutil.rmtree(os.path.join(dest, leftover), ignore_errors=True)
     for name in sorted(os.listdir(src_root)):
         src = os.path.join(src_root, name)
         if not os.path.isdir(src) or os.path.islink(src):
@@ -216,18 +234,28 @@ def sync(plugin_root, project, prefix):
             if not owned(name, current):
                 kept.append(name)
                 continue
-            try:
-                shutil.rmtree(target)
-            except OSError:
-                failed = True
-                skipped.append(name + "(replace-failed)")
-                continue
+        # Copy into a temporary sibling first and rename it into place: a copy
+        # interrupted half-way (the hook's timeout, a crash) would otherwise
+        # leave a partial directory that no recorded digest matches, and the
+        # next refresh would keep it as the user's.
+        tmp_dir = os.path.join(dest, TMP_PREFIX + name + "-" + str(os.getpid()))
         try:
-            shutil.copytree(src, target, symlinks=True)
-            written[name] = dir_digest(target)
+            if os.path.lexists(tmp_dir):
+                shutil.rmtree(tmp_dir)
+            shutil.copytree(src, tmp_dir, symlinks=True)
+            digest = dir_digest(tmp_dir)
+            if os.path.lexists(target):
+                shutil.rmtree(target)
+            os.rename(tmp_dir, target)
+            written[name] = digest
         except (OSError, shutil.Error):
             failed = True
-            skipped.append(name + "(copy-failed)")
+            skipped.append(name + ("(replace-failed)" if os.path.lexists(target) else "(copy-failed)"))
+            try:
+                if os.path.lexists(tmp_dir):
+                    shutil.rmtree(tmp_dir)
+            except OSError:
+                pass
 
     previous = []
     if stamp:

@@ -624,6 +624,7 @@ _S10_RES=$(
   _s10_case "$_S10/user" uroster 'echo "# x" >> ops/roster.toml'
   _s10_case "$_S10/user" symcursor 'ln -s docs .cursor'
   _s10_case "$_S10/user" opencode  'echo "{}" > opencode.json'
+  _s10_case "$_S10/user" submodule 'mkdir .claude && (cd .claude && git init -q && git config user.email p@t.local && git config user.name p && echo x > s && git add s && git commit -qm s) && printf "[submodule \"c\"]\n\tpath = .claude\n\turl = https://example.invalid/c.git\n\tignore = all\n" > .gitmodules'
   _s10_case "$_S10/user" corrupt 'echo x >> docs/readme.md' 'def protected_match(:'
 )
 _s10_expect() { # _s10_expect <label> <rc> [text that must appear]
@@ -648,9 +649,11 @@ _s10_expect util 0
 _s10_expect uroster 42 'ops/roster.toml'
 _s10_expect symcursor 42 ' .cursor  (project_protected)'
 _s10_expect opencode 42 ' opencode.json  (project_protected)'
+_s10_expect submodule 42 ' .claude  (project_protected)'
+_s10_expect submodule 42 ' .gitmodules  (project_protected)'
 _s10_expect corrupt 42 'classifier failed'
 if [ -z "$_S10_FAIL" ]; then
-  row "SELF-10" "claude" "protected paths: CLAUDE.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "PASS" "every path on the CLAUDE.md protected line classifies as protected (planted path caught); classifier flags bare .agents (project) + skills (framework), not .clauder/claudeish; fw fixture: roster.sh / git mv pre-push / sub/AGENTS.md / AGENTS.override.md / .mcp.json / Hooks/handlers/x.sh / symlinks .claude + hooks -> rc 42 naming the path; manifest renamed / deleted / unparseable -> still the Triforge checkout (roster.sh -> 42); docs-only -> promoted; user fixture: scripts/lib/util.sh -> promoted, ops/roster.toml / symlink .cursor / opencode.json -> 42; corrupted registry literal -> 42 naming the classifier error; per-case lease root + throwaway HOME" "static"
+  row "SELF-10" "claude" "protected paths: CLAUDE.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "PASS" "every path on the CLAUDE.md protected line classifies as protected (planted path caught); classifier flags bare .agents (project) + skills (framework), not .clauder/claudeish; fw fixture: roster.sh / git mv pre-push / sub/AGENTS.md / AGENTS.override.md / .mcp.json / Hooks/handlers/x.sh / symlinks .claude + hooks -> rc 42 naming the path; manifest renamed / deleted / unparseable -> still the Triforge checkout (roster.sh -> 42); docs-only -> promoted; user fixture: scripts/lib/util.sh -> promoted, ops/roster.toml / symlink .cursor / opencode.json -> 42, a nested repo at .claude + .gitmodules ignore=all -> 42 naming .claude and .gitmodules (--ignore-submodules=none); corrupted registry literal -> 42 naming the classifier error; per-case lease root + throwaway HOME" "static"
 else
   row "SELF-10" "claude" "protected paths: CLAUDE.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "FAIL" "mismatch:$(printf '%s' "$_S10_FAIL" | cut -c1-600)" "static"
 fi
@@ -1000,6 +1003,54 @@ _s18_clean leadptr
 ( cd "$_S18/leadptr/repo" && export HOME="$_S18/leadptr/home" GIT_CONFIG_NOSYSTEM=1 && git worktree add -q ../lead -b sprint/lead ) >/dev/null 2>&1
 O=$(_s18_lead leadptr '_s18_go t; A=$(_ledger_get t admin_dir); echo "admin=$A"; printf "gitdir: %s\n" "$A" > .git; _s18_try collect lease_collect t; echo "state=$(_ledger_get t state)"' lead)
 _s18_expect leadptr "$O" 'admin=.*/leadptr/repo/\.git/worktrees/t$' 'collect-rc=44' 'the \.git pointer of the lead checkout \(.*/leadptr/lead/\.git\) changed' '^state=escalated$'
+
+# cfgwt: extensions.worktreeConfig is already on (as `git sparse-checkout` leaves
+# it), so .git/config is unchanged and the builder plants its command in
+# .git/config.worktree instead -> collect 44 names that file, restored, and
+# the marker never runs (cross-review B1)
+_s18_setup cfgwt
+( cd "$_S18/cfgwt/repo" && export HOME="$_S18/cfgwt/home" GIT_CONFIG_NOSYSTEM=1 && git config extensions.worktreeConfig true ) >/dev/null 2>&1
+_s18_builder cfgwt <<EOF
+#!/bin/sh
+printf '[core]\n\tfsmonitor = %s\n' "$_S18/cfgwt/mark.sh" >> "$_S18/cfgwt/repo/.git/config.worktree"
+echo x > f.txt
+echo "Status: DONE"
+EOF
+O=$(_s18_lead cfgwt '_s18_go t; _s18_try collect lease_collect t; echo "state=$(_ledger_get t state) cfgwt=[$(cat .git/config.worktree 2>/dev/null | tr -d "\n")]"')
+_s18_expect cfgwt "$O" 'collect-rc=44' '\.git/config\.worktree changed \(removed: it did not exist at the baseline' 'state=escalated cfgwt=\[\]'
+[ ! -e "$_S18/cfgwt/MARKER" ] || _S18_FAIL="$_S18_FAIL cfgwt(marker-ran)"
+
+# anchors: deleting an integrity anchor is a change, never a first use (B2)
+#   sha      the builder deletes <lease root>/lead/ledger.sha256 -> collect 44 names the missing digest
+#   table    it deletes the [baseline] table AND both ledger anchors -> collect 44 names the missing table
+#   ledger   it deletes ops/leases.toml and the digest (copies stay) -> the next lease_create refuses (44)
+_s18_setup sha
+_s18_builder sha <<EOF
+#!/bin/sh
+rm -f "$_S18/sha/leases/lead/ledger.sha256"
+echo "Status: DONE"
+EOF
+O=$(_s18_lead sha '_s18_go t; _s18_try collect lease_collect t; echo "state=$(_ledger_get t state)"')
+_s18_expect sha "$O" 'collect-rc=44' 'the ledger digest .*/lead/ledger\.sha256 is missing while the lead copy exists' 'state=escalated'
+_s18_setup table
+_s18_builder table <<EOF
+#!/bin/sh
+python3 -c "
+import re; p = '$_S18/table/repo/ops/leases.toml'; s = open(p).read()
+open(p, 'w').write(re.sub(r'\[baseline\]\n(?:(?!\[)[^\n]*\n)*', '', s))"
+rm -f "$_S18/table/leases/lead/ledger.sha256" "$_S18/table/leases/lead/ledger.copy"
+echo "Status: DONE"
+EOF
+O=$(_s18_lead table '_s18_go t; _s18_try collect lease_collect t; echo "state=$(_ledger_get t state) base=[$(_ledger_get @baseline config 2>/dev/null || true)]"')
+_s18_expect table "$O" 'collect-rc=44' 'the \[baseline\] table of the ledger is missing, but lease row\(s\) t were written with it in place' 'state=escalated base=\[\]'
+_s18_setup ledger-gone
+_s18_builder ledger-gone <<EOF
+#!/bin/sh
+rm -f "$_S18/ledger-gone/repo/ops/leases.toml" "$_S18/ledger-gone/leases/lead/ledger.sha256"
+echo "Status: DONE"
+EOF
+O=$(_s18_lead ledger-gone '_s18_go t; _s18_try create-b lease_create b builder; echo "ledger=$([ -f ops/leases.toml ] && echo yes || echo no)"')
+_s18_expect ledger-gone "$O" 'create-b-rc=44' 'and its digest are gone, but the lead state dir .*/lead holds copies saved for earlier leases' '^ledger=no$'
 
 # static: every git call in lease.sh goes through _lead_git
 # _s18_git_scan <file> — one line per finding: "<line>:<source line>" for a git
