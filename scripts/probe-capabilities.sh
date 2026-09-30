@@ -1756,6 +1756,9 @@ if [ "$SELF_ONLY" = "1" ]; then
     exit 3
   fi
   if [ -n "$SELF_FAILED" ]; then
+    # The evidence column of every FAIL row goes to stderr too: on a CI runner
+    # the scratch record is gone with the job, and the log is all that is left.
+    awk -F'\t' '$1 ~ /^SELF-/ && $4 == "FAIL" { printf "  %s evidence: %s\n", $1, substr($5, 1, 1500) }' "$ROWS" >&2
     echo "probe-capabilities: SELF GATE FAILED — ${SELF_FAILED} (see $RECORD)" >&2
     exit 3
   fi
