@@ -794,6 +794,7 @@ _s18_expect hooks "$O" 'collect-rc=44' '\.git/hooks/ changed' 'state=escalated' 
 _s18_setup ledger
 _s18_builder ledger <<EOF
 #!/bin/sh
+N=0; while ! grep -q "state = \"building\"" "$_S18/ledger/repo/ops/leases.toml" 2>/dev/null && [ "\$N" -lt 100 ]; do sleep 0.1; N=\$((N + 1)); done
 python3 -c "p = '$_S18/ledger/repo/ops/leases.toml'; s = open(p).read(); open(p, 'w').write(s.replace('pinned_reviewer = \"\"', 'pinned_reviewer = \"codex\"'))"
 echo "Status: DONE"
 EOF
@@ -950,6 +951,7 @@ _s18_expect legit-accepted "$O" 'rebaseline-rc=0' 'recollect-rc=0' 'remotes=\[or
 _s18_setup ledgerlink
 _s18_builder ledgerlink <<EOF
 #!/bin/sh
+N=0; while ! grep -q "state = \"building\"" "$_S18/ledgerlink/repo/ops/leases.toml" 2>/dev/null && [ "\$N" -lt 100 ]; do sleep 0.1; N=\$((N + 1)); done
 L="$_S18/ledgerlink/repo/ops/leases.toml"
 cp "\$L" ledger-copy.toml && ln -sf "\$PWD/ledger-copy.toml" "\$L"
 echo "Status: DONE"
@@ -1020,13 +1022,17 @@ O=$(_s18_lead cfgwt '_s18_go t; _s18_try collect lease_collect t; echo "state=$(
 _s18_expect cfgwt "$O" 'collect-rc=44' '\.git/config\.worktree changed \(removed: it did not exist at the baseline' 'state=escalated cfgwt=\[\]'
 [ ! -e "$_S18/cfgwt/MARKER" ] || _S18_FAIL="$_S18_FAIL cfgwt(marker-ran)"
 
-# anchors: deleting an integrity anchor is a change, never a first use (B2)
+# anchors: deleting an integrity anchor is a change, never a first use (B2).
+# Each builder first waits for lease_dispatch's own state=building row: that
+# write recreates the ledger anchors, so a builder faster than the dispatch
+# (a CI runner) would have its deletion overwritten before the check runs.
 #   sha      the builder deletes <lease root>/lead/ledger.sha256 -> collect 44 names the missing digest
 #   table    it deletes the [baseline] table AND both ledger anchors -> collect 44 names the missing table
 #   ledger   it deletes ops/leases.toml and the digest (copies stay) -> the next lease_create refuses (44)
 _s18_setup sha
 _s18_builder sha <<EOF
 #!/bin/sh
+N=0; while ! grep -q "state = \"building\"" "$_S18/sha/repo/ops/leases.toml" 2>/dev/null && [ "\$N" -lt 100 ]; do sleep 0.1; N=\$((N + 1)); done
 rm -f "$_S18/sha/leases/lead/ledger.sha256"
 echo "Status: DONE"
 EOF
@@ -1035,6 +1041,7 @@ _s18_expect sha "$O" 'collect-rc=44' 'the ledger digest .*/lead/ledger\.sha256 i
 _s18_setup table
 _s18_builder table <<EOF
 #!/bin/sh
+N=0; while ! grep -q "state = \"building\"" "$_S18/table/repo/ops/leases.toml" 2>/dev/null && [ "\$N" -lt 100 ]; do sleep 0.1; N=\$((N + 1)); done
 python3 -c "
 import re; p = '$_S18/table/repo/ops/leases.toml'; s = open(p).read()
 open(p, 'w').write(re.sub(r'\[baseline\]\n(?:(?!\[)[^\n]*\n)*', '', s))"
@@ -1046,6 +1053,7 @@ _s18_expect table "$O" 'collect-rc=44' 'the \[baseline\] table of the ledger is 
 _s18_setup ledger-gone
 _s18_builder ledger-gone <<EOF
 #!/bin/sh
+N=0; while ! grep -q "state = \"building\"" "$_S18/ledger-gone/repo/ops/leases.toml" 2>/dev/null && [ "\$N" -lt 100 ]; do sleep 0.1; N=\$((N + 1)); done
 rm -f "$_S18/ledger-gone/repo/ops/leases.toml" "$_S18/ledger-gone/leases/lead/ledger.sha256"
 echo "Status: DONE"
 EOF
