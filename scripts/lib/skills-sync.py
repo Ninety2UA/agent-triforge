@@ -84,6 +84,15 @@ def dir_digest(path):
     return h.hexdigest()
 
 
+def safe_digest(path):
+    """dir_digest, or None when a file in the tree can't be read: that one
+    directory is left alone and reported, and the rest of the refresh goes on."""
+    try:
+        return dir_digest(path)
+    except OSError:
+        return None
+
+
 def read_stamp(path):
     stamp = {"version": "", "format": "", "skills": [], "digests": {}}
     try:
@@ -196,8 +205,12 @@ def sync(plugin_root, project, prefix):
             if not plain_dir_inside(target, dest_real):
                 skipped.append(name + "(not-a-plain-directory)")
                 continue
-            current = dir_digest(target)
-            if current == dir_digest(src):
+            current, shipped_digest = safe_digest(target), safe_digest(src)
+            if current is None or shipped_digest is None:
+                failed = failed or shipped_digest is None
+                skipped.append(name + ("(unreadable)" if current is None else "(unreadable-source)"))
+                continue
+            if current == shipped_digest:
                 written[name] = current    # already the shipped copy
                 continue
             if not owned(name, current):
@@ -226,7 +239,8 @@ def sync(plugin_root, project, prefix):
         target = os.path.join(dest, name)
         if not os.path.lexists(target):
             continue
-        if plain_dir_inside(target, dest_real) and owned(name, dir_digest(target)):
+        digest = safe_digest(target) if plain_dir_inside(target, dest_real) else None
+        if digest is not None and owned(name, digest):
             try:
                 shutil.rmtree(target)
                 retired.append(name)
@@ -258,7 +272,7 @@ def sync(plugin_root, project, prefix):
     if retired_kept:
         note(".agents/skills kept as user-owned (no longer shipped, but changed since Triforge wrote it): " + " ".join(retired_kept) + ".")
     if skipped:
-        note(".agents/skills entries left untouched (symlink, not a plain directory directly inside .agents/skills, or invalid name): " + " ".join(skipped) + ".")
+        note(".agents/skills entries left untouched (symlink, not a plain directory directly inside .agents/skills, unreadable, or invalid name): " + " ".join(skipped) + ".")
     return out
 
 
