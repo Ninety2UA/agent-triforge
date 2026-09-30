@@ -187,7 +187,7 @@ agent-triforge/                     (plugin — installed automatically)
 ├── settings.json                     Default env vars
 ├── templates/                        Project bootstrapping templates
 ├── scripts/coordinate.sh            Outer loop for context recovery
-└── scripts/validate-*.sh            Release gates: skill structure; version lockstep + ladder md5 + stale-pin sweep
+└── scripts/validate-*.sh            Release gates: skill structure; version lockstep + ladder one-definition + stale-pin sweep
 
 your-project/                       (your repo — bootstrapped on first session)
 ├── CLAUDE.md                         Orchestration protocol (copy from template)

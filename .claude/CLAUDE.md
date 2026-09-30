@@ -23,7 +23,7 @@ Install: `claude plugin marketplace add https://github.com/Ninety2UA/agent-trifo
 
 For narrow, rubric-following runtime tasks the lead/team-lead may step down one tier at a time:
 
-Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (Opus 5) + `xhigh` → `opus`+`high` → `sonnet` (Sonnet 5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
+Downgrade ladder for narrow runtime tasks — the single definition is `TRIFORGE_MODEL_LADDER` in `scripts/lib/registry.sh` (`triforge_ladder` prints it after sourcing `scripts/invoke-external.sh`): `fable`+`max` → `opus` (Opus 5.5) + `xhigh` → `opus`+`high` → `sonnet`+`high`; never downgrade security-sentinel, plan-checker, or findings-synthesizer.
 
 Claude invokes Antigravity via `invoke_antigravity` and Codex via `invoke_codex` (from `scripts/invoke-external.sh`) as background bash processes. Skills are embedded in native agent definitions (`antigravity-agents/agents/`, `codex-agents/`); the helper falls back to prompt-prefix injection when native agent routing isn't available. Reviews run in parallel (Antigravity + Codex + Claude subagents simultaneously), never sequentially.
 
@@ -212,7 +212,7 @@ scripts/
   invoke-external.sh      # Loader for the six-CLI helper: sources scripts/lib/*.sh into the caller's shell (commands source only this file)
   lib/
     common.sh               Host-marker scrub, fail-closed timeout wrapper, output scrubbing, KTD-9 failure classifier, agy/codex listing helpers
-    registry.sh             Shared data: the two protected-path lists and their case-folded match rule (KTD8; lease_promote and SELF-10 read it)
+    registry.sh             Shared data: the two protected-path lists and their case-folded match rule (KTD8; lease_promote and SELF-10 read it), the model ladder TRIFORGE_MODEL_LADDER + triforge_ladder (KTD22; the ladder's one definition)
     antigravity.sh          invoke_antigravity + the JSON-envelope parser (KTD2)
     codex.sh                invoke_codex (triforge-agents.toml replay, --output-schema)
     opencode.sh             invoke_opencode + the OPENCODE_PERMISSION deny set
@@ -227,7 +227,7 @@ scripts/
   probe-capabilities.sh   # Rerunnable capability probe (writes the date-stamped ops/research/<YYYY-MM>-probe-record.md; --self-only is the SELF gate: static rows, scratch record, exit 3 on a SELF FAIL)
   probe-self-tests.sh     # The SELF-* rows (script invariants), sourced by probe-capabilities.sh
   validate-skills.sh      # Release gate: skill frontmatter / "Use when" / ## Output structure checks
-  validate-versions.sh    # Release gate: version lockstep (+ README ledger entry), ladder md5 ×4, DEFAULTS drift, scoped stale-pin sweep, surface counts
+  validate-versions.sh    # Release gate: version lockstep (+ README ledger entry), ladder one-definition, DEFAULTS drift, scoped stale-pin sweep, surface counts, AGENTS.md budget, rule-inventory completeness
   release-notes.sh        # GitHub release title / body / tag target for a version, from README's "Recent changes" entry (used by the release workflow)
 .github/
   PULL_REQUEST_TEMPLATE.md # PR template (S20): evidence table + validator results
@@ -411,8 +411,8 @@ Re-baselined from the newest capability probe record (`ops/research/2026-09-prob
 
 1. `claude plugin validate --strict .claude-plugin/plugin.json` and `claude plugin validate --strict .claude-plugin/marketplace.json` both pass green (warnings are errors) — required gate; a bare `validate .` now picks the marketplace manifest only, so name both
 2. `bash scripts/validate-skills.sh` exits 0 (all shipped skills: portable frontmatter, "Use when" descriptions, `## Output` sections), and `bash scripts/probe-capabilities.sh --self-only` exits 0 (the SELF gate: static SELF rows only, record to a scratch path, exit 3 on any SELF FAIL — `.github/workflows/gates.yml` runs both on every PR to `main` and `release/4.0`)
-3. `bash scripts/validate-versions.sh` exits 0 — version lockstep, the ladder md5 printed four times (byte-identity across `agents/team-lead.md`, `skills/wave-orchestration/SKILL.md`, `templates/CLAUDE.md`, and this file), `DEFAULTS` drift, the scoped stale-pin sweep (zero hits outside `ops/research/`, `ops/decisions/`, `docs/plans/`, `ops/solutions/`, `docs/images/`), and surface counts
+3. `bash scripts/validate-versions.sh` exits 0 — version lockstep, the ladder one-definition check (`TRIFORGE_MODEL_LADDER` in `scripts/lib/registry.sh` is the only line that spells the rungs out; `agents/team-lead.md`, `skills/wave-orchestration/SKILL.md`, `templates/CLAUDE.md` and this file carry pointers), `DEFAULTS` drift, the scoped stale-pin sweep (zero hits outside `ops/research/`, `ops/decisions/`, `docs/plans/`, `docs/brainstorms/`, `ops/solutions/`, `docs/images/`), surface counts, the root `AGENTS.md` budget (≤ 200 lines and ≤ 16 KiB, once the file exists) and `docs/rule-inventory.md` completeness (every row has a destination, no `TBD` cell, once the file exists)
 4. Doc-consistency greps pass (see Verification Contract in the active plan)
-5. The probe record is regenerated (`bash scripts/probe-capabilities.sh` writes `ops/research/<YYYY-MM>-probe-record.md`), committed, and cited by the release notes together with the ladder hash
+5. The probe record is regenerated (`bash scripts/probe-capabilities.sh` writes `ops/research/<YYYY-MM>-probe-record.md`), committed, and cited by the release notes
 6. Version bumped in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` (both fields) and `antigravity-agents/plugin.json` (lockstep, checked by `validate-versions.sh`); README "What's new" + "Recent changes" entries added — the "Recent changes" heading must read `### <YYYY-MM-DD> — v<version>: <title>` because it becomes the GitHub release (checked by `validate-versions.sh`; preview with `bash scripts/release-notes.sh --title` / `--body`)
 7. Merge to `main`. `.github/workflows/release.yml` runs on every push to `main` that touches `.claude-plugin/plugin.json`: it re-runs both validators, tags `v<version>` at the commit that set the version (an existing tag is kept), and publishes the GitHub release with the title and body from `scripts/release-notes.sh`. It is idempotent — an existing release is left alone. Confirm with `gh release view v<version>`; if the run was skipped or failed, fix the cause and re-run it by hand with `gh workflow run release.yml` (an older version can be back-published via the `version` input). Never create the release by hand first and leave the ledger entry missing — the workflow is the record

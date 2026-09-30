@@ -22,7 +22,7 @@ This project uses the multi-agent coordination framework where Claude Code serve
 
 For narrow, rubric-following runtime tasks the lead/team-lead may step down one tier at a time:
 
-Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (Opus 5) + `xhigh` → `opus`+`high` → `sonnet` (Sonnet 5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
+Downgrade ladder for narrow runtime tasks — the single definition is `TRIFORGE_MODEL_LADDER` in `scripts/lib/registry.sh` (`triforge_ladder` prints it after sourcing `scripts/invoke-external.sh`): `fable`+`max` → `opus` (Opus 5.5) + `xhigh` → `opus`+`high` → `sonnet`+`high`; never downgrade security-sentinel, plan-checker, or findings-synthesizer.
 
 Claude invokes Antigravity and Codex through the unified helper `${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh` (which handles model pinning, fail-closed timeout enforcement, failure classification, and native-agent routing with a prompt-prefix injection fallback). Reviews run in parallel (Antigravity + Codex + Claude subagents simultaneously), never sequentially.
 

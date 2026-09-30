@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # validate-versions.sh — release-gate consistency checks for Agent Triforge
 # (U10 of the v3.3.0 plan: R15, AS-4/AS-5; KTD6 drift check; KTD12 sweep scope;
-# KTD15 — structural assertions only, no test framework).
+# KTD15 — structural assertions only, no test framework. U21 of the v4 plan:
+# the one-definition ladder check (KTD22), the AGENTS.md budget (R10) and the
+# rule-inventory completeness check (R11)).
 #
 # Usage:
 #   bash scripts/validate-versions.sh [--no-sweep] [--no-counts]
@@ -18,11 +20,15 @@
 #      "### <date> — vX.Y.Z: <title>" entry: scripts/release-notes.sh turns it
 #      into the GitHub release title + body when the bump lands on main
 #      (.github/workflows/release.yml), so a missing entry fails here, not there.
-#   2. Ladder byte-identity — the single "Downgrade ladder for narrow runtime
-#      tasks:" line in .claude/CLAUDE.md, templates/CLAUDE.md,
-#      agents/team-lead.md, skills/wave-orchestration/SKILL.md is md5-hashed
-#      (md5 on macOS, md5sum fallback); one hash printed per file; every file
-#      must carry exactly one such line and all four hashes must match.
+#   2. Ladder one-definition (KTD22, R26) — the model ladder is defined exactly
+#      once, as the TRIFORGE_MODEL_LADDER literal in scripts/lib/registry.sh
+#      (triforge_ladder prints it). A definition is a line carrying the phrase
+#      "Downgrade ladder for narrow runtime tasks" + ": " + the rung list
+#      (`fable` first); the instruction files, agents/team-lead.md and
+#      skills/wave-orchestration/SKILL.md point at the registry with " — "
+#      instead. The sweep scope of check 4 applies (history directories, the
+#      README ledger and this script are not shipped surfaces); any second
+#      match, or a single match outside the registry literal, fails.
 #   3. DEFAULTS drift (KTD6) — the DEFAULTS and CLI_DEFAULT_MODEL python
 #      literals are duplicated inside resolve_role and roster_role_entry in
 #      scripts/lib/roster.sh (sourced by invoke-external.sh); the two copies must be equal (parsed with
@@ -39,11 +45,12 @@
 #      glm-5.2, kimi-k3, "Fable 5 →", "Opus 4.8", 2026-07-probe-record, and
 #      "Gemini 3.1 Pro (High)" ONLY on lines that also say "default" (so the
 #      documented opt-in survives). Excluded: ops/research/, ops/decisions/,
-#      docs/plans/, ops/solutions/, docs/images/, .git/, the gitignored
-#      deploy copies (.agents/ .gemini/ .antigravity/), node_modules/, the two
-#      validator scripts, lines marked as history ("history" or "was <word>"),
-#      and README.md at or below its "## Recent changes" heading (the release
-#      ledger: past entries name the pins they adopted at the time).
+#      docs/plans/, docs/brainstorms/, ops/solutions/, docs/images/, .git/,
+#      the gitignored deploy copies (.agents/ .gemini/ .antigravity/),
+#      node_modules/, the two validator scripts, lines marked as history
+#      ("history" or "was <word>"), and README.md at or below its
+#      "## Recent changes" heading (the release ledger: past entries name the
+#      pins they adopted at the time).
 #   5. Surface counts — agents/*.md, skills/*/SKILL.md, commands/*.md counts
 #      must match every count claim in .claude/CLAUDE.md, templates/CLAUDE.md,
 #      README.md (above "## Recent changes"), docs/index.html,
@@ -54,6 +61,16 @@
 #      subset phrasings ("+ 5 agents", "all 4 review agents", "5 parallel
 #      research agents") and history lines are skipped; "(was N)" is stripped
 #      before matching so the current number on the same line is still checked.
+#   6. AGENTS.md budget (R10) — when a root AGENTS.md exists it must be at most
+#      200 lines (a final unterminated line counts) and at most 16 KiB
+#      (16384 bytes; Codex's combined instruction budget is 32 KiB). Prints a
+#      "skip:" line while the file is absent.
+#   7. Rule-inventory completeness (R11) — when docs/rule-inventory.md exists,
+#      every markdown table in it must have a header cell naming the
+#      destination column ("Destination", "New home" or "Now lives"), every
+#      data row must fill that cell (not blank, not a lone dash or "?"), and
+#      no cell in any table may read "TBD" (case-insensitive, whole word).
+#      Prints a "skip:" line while the file is absent.
 #
 # Exit codes: 0 every check passed; 1 at least one check failed; 2 bad flag.
 set -euo pipefail
@@ -79,13 +96,26 @@ FAILED_CHECKS=0
 fail() { printf 'FAIL: %s\n' "$1"; FAILED_CHECKS=$((FAILED_CHECKS + 1)); }
 ok()   { printf 'ok:   %s\n' "$1"; }
 
-# md5 on macOS, md5sum fallback; reads stdin, prints the bare hash.
-_md5() {
-  if command -v md5 >/dev/null 2>&1; then
-    md5 -q
-  else
-    md5sum | awk '{print $1}'
-  fi
+# Shipped-surface scope, shared by checks 2 and 4 (and the README ledger
+# boundary by check 5). GNU grep prints ./path, BSD grep prints path — the RE
+# accepts both prefixes.
+SWEEP_EXCLUDE_RE='^(\./)?(ops/research|ops/decisions|docs/plans|docs/brainstorms|ops/solutions|docs/images|\.git|\.agents|\.gemini|\.antigravity|node_modules)/'
+# Whole directories are pruned at walk time (grep never descends into .git's
+# object store or a node_modules tree); the path-scoped exclusions above are
+# applied on the output, where the RE also re-covers the pruned names.
+SWEEP_EXCLUDE_DIRS=(--exclude-dir=.git --exclude-dir=.agents --exclude-dir=.gemini --exclude-dir=.antigravity --exclude-dir=node_modules)
+SWEEP_SELF_RE='^(\./)?scripts/validate-(versions|skills)\.sh:'
+README_HISTORY_START=$(grep -n '^## Recent changes' README.md | head -1 | cut -d: -f1 || true)
+README_HISTORY_START="${README_HISTORY_START:-0}"
+# _shipped_surfaces: filter grep -rn output (file:line:text) down to the
+# shipped surfaces — drops the excluded paths, this script, and README.md at
+# or below its release ledger.
+_shipped_surfaces() {
+  grep -vE "$SWEEP_EXCLUDE_RE" \
+    | grep -vE "$SWEEP_SELF_RE" \
+    | awk -F: -v start="$README_HISTORY_START" \
+        '!( (($1 == "README.md") || ($1 == "./README.md")) && start > 0 && ($2 + 0) >= start )' \
+    || true
 }
 
 # --- 1. version lockstep -----------------------------------------------------
@@ -118,38 +148,40 @@ else
   fail "release notes: README.md '## Recent changes' has no '### <date> — v$PLUGIN_V: <title>' entry — scripts/release-notes.sh needs it for the GitHub release"
 fi
 
-# --- 2. ladder byte-identity -------------------------------------------------
-LADDER_RE='Downgrade ladder for narrow runtime tasks:'
-LADDER_FILES="
-.claude/CLAUDE.md
-templates/CLAUDE.md
-agents/team-lead.md
-skills/wave-orchestration/SKILL.md
-"
-LADDER_HASHES=""
-LADDER_FILE_COUNT=0
-LADDER_BAD=0
-for f in $LADDER_FILES; do
-  LADDER_FILE_COUNT=$((LADDER_FILE_COUNT + 1))
-  if [ ! -f "$f" ]; then
-    fail "ladder: $f missing"; LADDER_BAD=1; continue
-  fi
-  n=$(grep -c "$LADDER_RE" "$f" || true)
-  if [ "$n" -ne 1 ]; then
-    fail "ladder: $f has $n ladder lines (expected exactly 1)"; LADDER_BAD=1; continue
-  fi
-  h=$(grep "$LADDER_RE" "$f" | _md5)
-  printf 'ladder %s  %s\n' "$h" "$f"
-  LADDER_HASHES="${LADDER_HASHES}${h}
-"
-done
-LADDER_DISTINCT=$(printf '%s' "$LADDER_HASHES" | sort -u | grep -c . || true)
-if [ "$LADDER_BAD" -eq 0 ] && [ "$LADDER_DISTINCT" -eq 1 ]; then
-  LADDER_HASH=$(printf '%s' "$LADDER_HASHES" | head -1)
-  ok "ladder byte-identity: $LADDER_HASH across $LADDER_FILE_COUNT files"
+# --- 2. ladder one-definition (KTD22) ----------------------------------------
+LADDER_SOURCE='scripts/lib/registry.sh'
+LADDER_VAR='TRIFORGE_MODEL_LADDER'
+# A definition spells the rungs out after a colon; pointer lines use " — " and
+# never carry the phrase-colon-rungs sequence, so only the registry literal
+# matches. (This script is filtered out by _shipped_surfaces.)
+LADDER_DEF_RE='Downgrade ladder for narrow runtime tasks: .*`fable`'
+LADDER_DEFS=$(
+  grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" -e "$LADDER_DEF_RE" . \
+    | _shipped_surfaces \
+    | sort -t: -k1,1 -k2,2n -u || true
+)
+LADDER_DEF_COUNT=$(printf '%s\n' "$LADDER_DEFS" | grep -c . || true)
+LADDER_DEF_FILE=$(printf '%s\n' "$LADDER_DEFS" | head -1 | cut -d: -f1 | sed 's#^\./##')
+LADDER_DEF_LINE=$(printf '%s\n' "$LADDER_DEFS" | head -1 | cut -d: -f2)
+LADDER_DEF_TEXT=$(printf '%s\n' "$LADDER_DEFS" | head -1 | cut -d: -f3-)
+# The one match must be the registry assignment itself, not a comment there.
+LADDER_IS_LITERAL=0
+case "$LADDER_DEF_TEXT" in
+  "${LADDER_VAR}='"*) LADDER_IS_LITERAL=1 ;;
+esac
+if [ "$LADDER_DEF_COUNT" -eq 1 ] && [ "$LADDER_DEF_FILE" = "$LADDER_SOURCE" ] && [ "$LADDER_IS_LITERAL" -eq 1 ]; then
+  ok "ladder: one definition ($LADDER_SOURCE:$LADDER_DEF_LINE $LADDER_VAR)"
+elif [ "$LADDER_DEF_COUNT" -eq 0 ]; then
+  fail "ladder: no definition — $LADDER_SOURCE must set $LADDER_VAR to the ladder text (phrase, colon, rungs)"
+elif [ "$LADDER_DEF_COUNT" -eq 1 ] && [ "$LADDER_DEF_FILE" = "$LADDER_SOURCE" ]; then
+  printf '%s\n' "$LADDER_DEFS"
+  fail "ladder: $LADDER_SOURCE:$LADDER_DEF_LINE carries the ladder text but is not the $LADDER_VAR='...' assignment (a comment or another variable)"
+elif [ "$LADDER_DEF_COUNT" -eq 1 ]; then
+  printf '%s\n' "$LADDER_DEFS"
+  fail "ladder: the single definition is in $LADDER_DEF_FILE:$LADDER_DEF_LINE, not the $LADDER_VAR literal in $LADDER_SOURCE"
 else
-  LADDER_HASH="(none)"
-  [ "$LADDER_BAD" -ne 0 ] || fail "ladder byte-identity: $LADDER_DISTINCT distinct hashes across $LADDER_FILE_COUNT files"
+  printf '%s\n' "$LADDER_DEFS"
+  fail "ladder: $LADDER_DEF_COUNT definitions (expected exactly 1: $LADDER_VAR in $LADDER_SOURCE) — replace the others with pointers (see file:line:text above)"
 fi
 
 # --- 3. DEFAULTS drift (KTD6) ------------------------------------------------
@@ -358,21 +390,10 @@ if [ "$DRIFT_RC" -ne 0 ]; then
   FAILED_CHECKS=$((FAILED_CHECKS + 1))
 fi
 
-# README release ledger boundary (shared by checks 4 and 5).
-README_HISTORY_START=$(grep -n '^## Recent changes' README.md | head -1 | cut -d: -f1 || true)
-README_HISTORY_START="${README_HISTORY_START:-0}"
-
 # --- 4. scoped stale-pin sweep (KTD12) ---------------------------------------
 if [ "$NO_SWEEP" -eq 1 ]; then
   echo "skip: stale-pin sweep (--no-sweep)"
 else
-  # GNU grep prints ./path, BSD grep prints path — accept both prefixes.
-  SWEEP_EXCLUDE_RE='^(\./)?(ops/research|ops/decisions|docs/plans|ops/solutions|docs/images|\.git|\.agents|\.gemini|\.antigravity|node_modules)/'
-  # Whole directories are pruned at walk time (grep never descends into .git's
-  # object store or a node_modules tree); the path-scoped exclusions above are
-  # applied on the output, where the RE also re-covers the pruned names.
-  SWEEP_EXCLUDE_DIRS=(--exclude-dir=.git --exclude-dir=.agents --exclude-dir=.gemini --exclude-dir=.antigravity --exclude-dir=node_modules)
-  SWEEP_SELF_RE='^(\./)?scripts/validate-(versions|skills)\.sh:'
   SWEEP_HITS=$(
     {
       grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" \
@@ -386,11 +407,8 @@ else
         . || true
       grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" 'Gemini 3\.1 Pro (High)' . | grep -i 'default' || true
     } \
-      | grep -vE "$SWEEP_EXCLUDE_RE" \
-      | grep -vE "$SWEEP_SELF_RE" \
       | grep -v 'history\|was [a-z]' \
-      | awk -F: -v start="$README_HISTORY_START" \
-          '!( (($1 == "README.md") || ($1 == "./README.md")) && start > 0 && ($2 + 0) >= start )' \
+      | _shipped_surfaces \
       | sort -t: -k1,1 -k2,2n -u || true
   )
   if [ -n "$SWEEP_HITS" ]; then
@@ -511,9 +529,91 @@ PYEOF
   fi
 fi
 
+# --- 6. AGENTS.md budget (R10) -----------------------------------------------
+AGENTS_MD='AGENTS.md'
+AGENTS_MD_MAX_LINES=200
+AGENTS_MD_MAX_BYTES=16384
+if [ -f "$AGENTS_MD" ]; then
+  # awk counts a final line without a trailing newline; wc -l would not.
+  AGENTS_MD_LINES=$(awk 'END { print NR }' "$AGENTS_MD")
+  AGENTS_MD_BYTES=$(wc -c < "$AGENTS_MD" | tr -d ' ')
+  if [ "$AGENTS_MD_LINES" -le "$AGENTS_MD_MAX_LINES" ] && [ "$AGENTS_MD_BYTES" -le "$AGENTS_MD_MAX_BYTES" ]; then
+    ok "AGENTS.md budget: $AGENTS_MD_LINES lines (max $AGENTS_MD_MAX_LINES), $AGENTS_MD_BYTES bytes (max $AGENTS_MD_MAX_BYTES)"
+  else
+    fail "AGENTS.md budget: $AGENTS_MD_LINES lines (max $AGENTS_MD_MAX_LINES), $AGENTS_MD_BYTES bytes (max $AGENTS_MD_MAX_BYTES) — over budget (R10)"
+  fi
+else
+  echo "skip: AGENTS.md budget (no root $AGENTS_MD yet)"
+fi
+
+# --- 7. rule-inventory completeness (R11) ------------------------------------
+INVENTORY_MD='docs/rule-inventory.md'
+if [ -f "$INVENTORY_MD" ]; then
+  INVENTORY_RC=0
+  VV_INVENTORY="$INVENTORY_MD" python3 - <<'PYEOF' || INVENTORY_RC=$?
+import os
+import re
+import sys
+
+path = os.environ["VV_INVENTORY"]
+with open(path, encoding="utf-8") as fh:
+    lines = fh.read().split("\n")
+
+CELL_SPLIT = re.compile(r"(?<!\\)\|")          # an escaped \| stays inside its cell
+SEPARATOR = re.compile(r"^\|?(\s*:?-{3,}:?\s*\|)*\s*:?-{3,}:?\s*\|?$")
+DEST_HEADER = re.compile(r"destination|new home|now lives", re.I)
+TBD = re.compile(r"\btbd\b", re.I)
+NO_DEST = re.compile(r"^[\s\-—–?`*]*$")         # blank, or only dashes / "?" / markup
+
+
+def cells(row):
+    return [c.strip() for c in CELL_SPLIT.split(row.strip().strip("|"))]
+
+
+fails = []
+tables = 0
+rows = 0
+i = 0
+while i < len(lines):
+    line = lines[i]
+    if not (line.lstrip().startswith("|") and i + 1 < len(lines) and SEPARATOR.match(lines[i + 1].strip())):
+        i += 1
+        continue
+    tables += 1
+    header_line = i + 1
+    header = cells(line)
+    dest = next((k for k, h in enumerate(header) if DEST_HEADER.search(h)), None)
+    if dest is None:
+        fails.append(path + ":" + str(header_line) + ": table has no Destination column (header: " + " | ".join(header) + ")")
+    i += 2
+    while i < len(lines) and lines[i].lstrip().startswith("|"):
+        row = cells(lines[i])
+        rows += 1
+        for k, cell in enumerate(row):
+            if TBD.search(cell):
+                fails.append(path + ":" + str(i + 1) + ": cell " + str(k + 1) + " reads TBD — " + cell)
+        if dest is not None and (dest >= len(row) or NO_DEST.match(row[dest])):
+            fails.append(path + ":" + str(i + 1) + ": row has no destination — " + lines[i].strip())
+        i += 1
+
+if tables == 0:
+    fails.append(path + ": no markdown table found (the inventory is a table with a Destination column)")
+for line in fails:
+    print("FAIL: rule inventory: " + line)
+if fails:
+    sys.exit(1)
+print("ok:   rule inventory: " + path + " — " + str(rows) + " rows in " + str(tables) + " table(s), every row has a destination, no TBD cell")
+PYEOF
+  if [ "$INVENTORY_RC" -ne 0 ]; then
+    FAILED_CHECKS=$((FAILED_CHECKS + 1))
+  fi
+else
+  echo "skip: rule-inventory completeness (no $INVENTORY_MD yet)"
+fi
+
 # --- summary -----------------------------------------------------------------
 if [ "$FAILED_CHECKS" -eq 0 ]; then
-  echo "validate-versions: PASS — plugin $PLUGIN_V, ladder $LADDER_HASH, $AGENT_COUNT agents / $SKILL_COUNT skills / $COMMAND_COUNT commands"
+  echo "validate-versions: PASS — plugin $PLUGIN_V, ladder: one definition ($LADDER_SOURCE), $AGENT_COUNT agents / $SKILL_COUNT skills / $COMMAND_COUNT commands"
   exit 0
 fi
 echo "validate-versions: FAIL — $FAILED_CHECKS check(s) failed (see FAIL: lines above)"
