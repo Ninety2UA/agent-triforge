@@ -1,5 +1,5 @@
 ---
-saved: 2026-09-30T21:28:56Z
+saved: 2026-09-30T21:40:00Z
 phase: H-built
 wave: 0
 tasks:
@@ -11,15 +11,15 @@ verification_baseline:
   result: "validate-versions: PASS — plugin 3.3.3, ladder 24a7ee2039c8c2e4907472e4cf82fdfd. validate-skills: 12 skills OK. Both manifests pass --strict. probe-capabilities.sh --self-only: 17 SELF rows, none FAIL."
   commit: e91e5bb
 verification_command: "bash scripts/validate-versions.sh; bash scripts/validate-skills.sh; claude plugin validate --strict .claude-plugin/plugin.json; claude plugin validate --strict .claude-plugin/marketplace.json; bash scripts/probe-capabilities.sh --self-only"
-state_head: e91e5bb
+state_head: b77338a
 ---
 # Session state
-<!-- Saved: 2026-09-30T21:28:56Z -->
-<!-- Type: handoff after build — Phase H (v3.3.3) built, reviewed and fixed; PR to main open, unmerged -->
+<!-- Saved: 2026-09-30T21:40:00Z -->
+<!-- Type: handoff after build — Phase H (v3.3.3) built, reviewed and fixed; PR #12 to main open, unmerged -->
 
 ## Current phase
 
-Phase H is built on `fix/v3.3.3` and reviewed. One PR to `main` for v3.3.3 is open and must NOT be merged by an agent: the user cross-reviews every protected-path diff and merges. Nothing from Phases 0–6 has started.
+Phase H is built on `fix/v3.3.3` and reviewed. One PR to `main` for v3.3.3 is open — https://github.com/Ninety2UA/agent-triforge/pull/12 (branch pushed 2026-09-30, base `main`) — and must NOT be merged by an agent: the user cross-reviews every protected-path diff and merges. Nothing from Phases 0–6 has started.
 
 ## Active sprint
 
@@ -27,7 +27,7 @@ Plan: `docs/plans/2026-09-28-1946-feat-lead-choice-v4-plan.md` (29 units, 7 phas
 
 ## Next actions
 
-1. The user reviews and merges the 3.3.3 PR (squash: `gh pr merge <n> --squash --delete-branch`). The release workflow tags v3.3.3 and publishes the GitHub release from the README ledger; confirm with `gh release view v3.3.3`.
+1. The user reviews and merges PR #12 (squash: `gh pr merge 12 --squash --delete-branch`). `gates.yml` runs for the first time on it; a red run is a finding against the PR. The release workflow tags v3.3.3 and publishes the GitHub release from the README ledger; confirm with `gh release view v3.3.3`.
 2. After 3.3.3 is on `main`: create `release/4.0` from `main`, then land Phases 0–6 PR by PR on it (KTD13), merging to `main` once as v4.0.0. Phase 0 starts with U21 (validator prep and ladder source), then U3.
 3. Follow-ups recorded in the PR body (not blocking 3.3.3): the plugin-level `settings.json` `env` block may be dropped by current Claude Code (confirm live); `tool-failure-monitor.sh` should also register on `PostToolUseFailure`; leases open across the 3.3.2→3.3.3 upgrade are snapshotted at merge time; the probe record was not regenerated for this hotfix.
 
