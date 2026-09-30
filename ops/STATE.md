@@ -1,35 +1,35 @@
 ---
-saved: 2026-09-28T18:41:09Z
-phase: 0
+saved: 2026-09-30T21:28:56Z
+phase: H-built
 wave: 0
 tasks:
   total: 29
-  done: 0
+  done: 4
   blocked: 0
 verification_baseline:
   command: "bash scripts/validate-versions.sh; bash scripts/validate-skills.sh; claude plugin validate --strict .claude-plugin/plugin.json; claude plugin validate --strict .claude-plugin/marketplace.json"
-  result: "validate-versions: PASS — plugin 3.3.2, ladder 24a7ee2039c8c2e4907472e4cf82fdfd, 19 agents / 12 skills / 17 commands. validate-skills: 12 skills OK. Both manifests pass --strict."
-  commit: 7352e99
-verification_command: "bash scripts/validate-versions.sh; bash scripts/validate-skills.sh; claude plugin validate --strict .claude-plugin/plugin.json; claude plugin validate --strict .claude-plugin/marketplace.json"
-state_head: 7352e99
+  result: "validate-versions: PASS — plugin 3.3.3, ladder 24a7ee2039c8c2e4907472e4cf82fdfd. validate-skills: 12 skills OK. Both manifests pass --strict. probe-capabilities.sh --self-only: 17 SELF rows, none FAIL."
+  commit: e91e5bb
+verification_command: "bash scripts/validate-versions.sh; bash scripts/validate-skills.sh; claude plugin validate --strict .claude-plugin/plugin.json; claude plugin validate --strict .claude-plugin/marketplace.json; bash scripts/probe-capabilities.sh --self-only"
+state_head: e91e5bb
 ---
 # Session state
-<!-- Saved: 2026-09-28T18:41:09Z -->
-<!-- Type: handoff before build — lead-choice (v4.0) plan written and reviewed; nothing built yet -->
+<!-- Saved: 2026-09-30T21:28:56Z -->
+<!-- Type: handoff after build — Phase H (v3.3.3) built, reviewed and fixed; PR to main open, unmerged -->
 
 ## Current phase
 
-Planning is complete; building has not started. The next step is Phase H of the plan: the v3.3.3 safety hotfix, as one PR to `main`.
+Phase H is built on `fix/v3.3.3` and reviewed. One PR to `main` for v3.3.3 is open and must NOT be merged by an agent: the user cross-reviews every protected-path diff and merges. Nothing from Phases 0–6 has started.
 
 ## Active sprint
 
-Let the user choose Claude Code or Codex as Triforge's lead, with every other CLI (Claude included) as a worker, while rebuilding instructions and skills to current best practice. Plan: `docs/plans/2026-09-28-1946-feat-lead-choice-v4-plan.md` (29 units, 7 phases, R1–R50, KTD1–KTD22). The plan is the authority; read its Goal Capsule first, and scan headings rather than reading it whole.
+Plan: `docs/plans/2026-09-28-1946-feat-lead-choice-v4-plan.md` (29 units, 7 phases). Phase H = U28, U1, U2, U27, all delivered on this branch (commits 0ca243e, 0ea29a0, fa8dfc6, 7ba19ed), followed by a simplify pass (708ea30), the ce-code-review fix waves (6e01170, ee43dd9, 06364ab, fcda556, 4541b58) and a plugin-dev pass (e91e5bb).
 
 ## Next actions
 
-1. Run `ce-work` on **Phase H only**: U28 (SELF-row gate and PR workflow), U1 (protected-path lists), U2 (digest-stamped skill refresh), U27 (lead git hardening, integrity, snapshot-only merge). One PR to `main`, released as v3.3.3.
-2. The user cross-reviews and merges every PR; each one touches protected paths. Only the user approves promotion to `main`. No autonomous `/lfg`.
-3. After 3.3.3 ships: create `release/4.0` from `main`, then land Phases 0–6 PR by PR on it (KTD13), and merge to `main` once as v4.0.0.
+1. The user reviews and merges the 3.3.3 PR (squash: `gh pr merge <n> --squash --delete-branch`). The release workflow tags v3.3.3 and publishes the GitHub release from the README ledger; confirm with `gh release view v3.3.3`.
+2. After 3.3.3 is on `main`: create `release/4.0` from `main`, then land Phases 0–6 PR by PR on it (KTD13), merging to `main` once as v4.0.0. Phase 0 starts with U21 (validator prep and ladder source), then U3.
+3. Follow-ups recorded in the PR body (not blocking 3.3.3): the plugin-level `settings.json` `env` block may be dropped by current Claude Code (confirm live); `tool-failure-monitor.sh` should also register on `PostToolUseFailure`; leases open across the 3.3.2→3.3.3 upgrade are snapshotted at merge time; the probe record was not regenerated for this hotfix.
 
 ## Model and effort (user-approved)
 
@@ -44,47 +44,30 @@ Let the user choose Claude Code or Codex as Triforge's lead, with every other CL
 
 - Lead is Claude Code or Codex only; Antigravity, OpenCode, Kimi and Cursor are workers only.
 - Only AGENTS.md ships (no CLAUDE.md anywhere); the Claude Code floor rises to 2.1.277.
-- Commands and agents become skills per the Agent Skills spec plus compound-engineering conventions.
-- Skills carry the `at-` prefix (`/at-build` in Claude Code, `$at-build` in Codex).
-- Context audit first (PR 0), and must-hold rules are enforced by scripts, not prose.
+- Commands and agents become skills per the Agent Skills spec plus compound-engineering conventions, with the `at-` prefix.
+- Context audit first (PR 0); must-hold rules are enforced by scripts, not prose.
 - Protected-path cross-review: the lead or the user. Promotion to `main`: the user only.
-- The never-downgrade trio (security-sentinel, plan-checker, findings-synthesizer) always runs as top-tier Claude, under either lead.
+- The never-downgrade trio always runs as top-tier Claude, under either lead.
 - Approvals are recorded (audit, not prevention).
 - Grok Build and Devin CLI become optional workers. Pi, oh-my-pi and Hermes are not workers.
 - The Codex pin stays `gpt-6-astra` at `xhigh`.
 - Integration branch `release/4.0`, plus the v3.3.3 hotfix first.
 - Completion gate: `/goal` under a Claude lead; the sentinel under a Codex lead.
-- **Skipped on purpose:** per-worker login isolation and sandbox-only safety builds. Non-Codex workers run as the user with no OS sandbox. The plan discloses this; it is deliberately not tracked as a follow-up.
+- Skipped on purpose: per-worker login isolation and sandbox-only safety builds.
 
-## What happened this session (2026-09-27 → 09-28)
+## What Phase H shipped (for Phase 0 to build on)
 
-- **Watch cycle** (PR #10, merged):
-  - `/cli-watch` wrote report `ops/research/2026-09-27-cli-updates.md`, ADR `ops/decisions/2026-09-27-cli-deprecation-watch.md` (D-037–D-053) and a new `ops/research/2026-09-probe-record.md`.
-  - `/repo-watch` wrote `ops/research/2026-09-27-repo-mining.md` (36 recommendations and a 26-check skill list).
-  - A fact sheet covers Grok, Devin, Pi and Hermes: `ops/research/2026-09-27-factsheet-grok-devin-pi-hermes.md`.
-  - The requirements brief is `docs/brainstorms/2026-09-27-lead-choice-requirements.md`. The plan supersedes it where they differ; for example, its R5 "required Claude reviewer" is superseded.
-- **Watch registry:**
-  - Now 9 `[cli.*]` entries: 6 CLIs plus firecrawl, chrome-devtools and gh as `tier = "tooling"`, which aren't probed.
-  - Now 7 `[repo.*]` entries.
-  - The watch-cycle skill routes GitHub content to gh or raw, docs pages to firecrawl, and pages firecrawl can't render to chrome-devtools (lead only).
-- **v3.3.2 hotfix** (PR #11, merged, released): quoted `${CLAUDE_PLUGIN_ROOT}` in hooks, CC-06 validates both manifests, a fail-closed OpenCode V2 guard plus the `resolve_role` skip, Cursor Grok 4.7 ids through `_CURSOR_ID_PY`, and no `$N` in `commands/setup.md`.
-- **Plan:** written with `ce-plan`, deepened by architecture, units and security reviews, then document-reviewed by five in-process personas plus a Codex cross-model pass. 25 fixes were applied. The review record is in the session scratch (not kept).
-- **Tools:**
-  - `plugin-dev` is installed at local scope (`.claude/settings.local.json`).
-  - chrome-devtools-mcp was updated to 1.10.1 (`evaluate_script` now needs `--pageId`; run `chrome-devtools start --headless --isolated` if the profile is locked).
-  - firecrawl was updated to 1.24.6.
+- `scripts/lib/registry.sh`: `FRAMEWORK_PROTECTED` / `PROJECT_PROTECTED` and `_protected_classify` (KTD8). U21/U26 extend this file (ladder source, CLI registry).
+- `scripts/lib/skills-sync.py` + `scripts/lib/skill-digests.txt`: the digest-stamped refresh (KTD12), used by `session-start.sh` and `_lease_provision_skills`. The table is frozen at the releases that wrote legacy stamps (v3.*); format-2 stamps carry their own digests.
+- `scripts/lib/lease.sh`: `_lease_ctx`, `_lead_git`/`_lgr`/`_lgw`, `[baseline]` in the ledger, `_lead_integrity_check` (rc 44), `_lead_integration_check`, `lease_rebaseline` (audited), collect-time snapshot, snapshot-only `lease_merge` (KTD18/KTD19). U13 moves the process-group handling; U14 moves the trusted-config capture into `triforge_bootstrap`.
+- `scripts/probe-capabilities.sh --self-only` (exit 3 on a SELF FAIL) and `.github/workflows/gates.yml`; new rows SELF-10 and SELF-18, SELF-08b rewritten (KTD15).
 
 ## Gotchas for the next session
 
-- **Live gap on `main` until 3.3.3 ships:**
-  - `lease_promote`'s protected list misses `scripts/lib/`, `scripts/lease-git-hooks/` and `scripts/probe-self-tests.sh`.
-  - A shell-capable worker can plant git config in the shared `.git/config`, edit `ops/leases.toml`, or make its own commits.
-
-  Phase H fixes these.
-- **`scripts/probe-capabilities.sh --skip-live`** exits 0 on FAIL rows and overwrites this month's committed probe record. Use a scratch `--record` path until U28 adds `--self-only`.
 - **Never edit the probe harness while a probe run is in progress** (`pgrep -f probe-capabilities`).
-- **Headless `claude -p` sessions exit when the model ends its turn to wait on a background job,** killing the job. Keep long jobs in the foreground, or resume with `claude -p --resume <id>`.
+- The SELF gate takes about 60 s; SELF-18 alone runs ~25 fixture cases. Each SELF-10/SELF-18 case isolates its lease root and HOME; a run should leave nothing under `$TMPDIR/triforge-leases`.
+- `lease_merge`'s commit no longer runs repository hooks and is never GPG-signed; a lead commit on the integration branch between merges, a switched checkout, or a manual promotion needs `lease_rebaseline` before the next lease call (see the wave-orchestration skill, "Integrity escalations (rc 44)").
+- **Headless `claude -p` sessions exit when the model ends its turn to wait on a background job,** killing the job.
 - **Git worktrees don't carry gitignored `.claude/settings.local.json`.** Copy it in for compound-engineering and plugin-dev to load there.
-- **Auth and quota:** Devin CLI 3000.11.3 is installed but not logged in, and Kimi returns 403 (AUTH-FAIL). Live rows for both stay PENDING-AUTH.
-- **Only 8 of 17 commands exceed Codex's 4,000-byte command limit** (not 9).
+- **Auth and quota:** Devin CLI 3000.11.3 is installed but not logged in, and Kimi returns 403 (AUTH-FAIL).
 - **Squash-merge PRs:** `gh pr merge <n> --squash --delete-branch`. With a worktree still open, remove the worktree first, then delete the branch.
