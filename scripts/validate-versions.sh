@@ -23,12 +23,15 @@
 #   2. Ladder one-definition (KTD22, R26) — the model ladder is defined exactly
 #      once, as the TRIFORGE_MODEL_LADDER literal in scripts/lib/registry.sh
 #      (triforge_ladder prints it). A definition is a line carrying the phrase
-#      "Downgrade ladder for narrow runtime tasks" + ": " + the rung list
-#      (`fable` first); the instruction files, agents/team-lead.md and
-#      skills/wave-orchestration/SKILL.md point at the registry with " — "
-#      instead. The sweep scope of check 4 applies (history directories, the
-#      README ledger and this script are not shipped surfaces); any second
-#      match, or a single match outside the registry literal, fails.
+#      "Downgrade ladder for narrow runtime tasks" followed by a colon —
+#      whatever comes after it, so a restatement that starts at another rung
+#      counts too (matched case-insensitively; whitespace and * _ ` markup may
+#      sit between the phrase and the colon). The instruction files,
+#      agents/team-lead.md and skills/wave-orchestration/SKILL.md point at the
+#      registry with " — " after the phrase instead. The sweep scope of check 4
+#      applies (history directories, the README ledger and this script are not
+#      shipped surfaces); any second match, or a single match outside the
+#      registry literal, fails.
 #   3. DEFAULTS drift (KTD6) — the DEFAULTS and CLI_DEFAULT_MODEL python
 #      literals are duplicated inside resolve_role and roster_role_entry in
 #      scripts/lib/roster.sh (sourced by invoke-external.sh); the two copies must be equal (parsed with
@@ -65,11 +68,26 @@
 #      200 lines (a final unterminated line counts) and at most 16 KiB
 #      (16384 bytes; Codex's combined instruction budget is 32 KiB). Prints a
 #      "skip:" line while the file is absent.
-#   7. Rule-inventory completeness (R11) — when docs/rule-inventory.md exists,
-#      every markdown table in it must have a header cell naming the
-#      destination column ("Destination", "New home" or "Now lives"), every
-#      data row must fill that cell (not blank, not a lone dash or "?"), and
-#      no cell in any table may read "TBD" (case-insensitive, whole word).
+#   7. Rule-inventory completeness (R11) — when docs/rule-inventory.md exists:
+#      - Tables: a table is any line with a "|" followed by a separator row
+#        (dashes, optional colons and pipes); outer pipes are optional on the
+#        header, the separator and every row, and a table runs until the next
+#        blank line, heading, blockquote or code fence — so a line without
+#        pipes directly under a table is a row (one cell), as it renders.
+#      - Every table must have a header cell naming the destination column
+#        ("Destination", "New home" or "Now lives").
+#      - Every data row must fill that cell. HTML comments, tags and entities
+#        (<br>, <!-- … -->, &nbsp;) are removed first; a cell with no letter or
+#        digit left is blank (dashes, "?", markup), and a cell that reads as a
+#        placeholder once lowercased and stripped of punctuation and spaces —
+#        tbd, tba, todo, to be determined, to be decided, unknown — fails.
+#      - No cell in any table may read "TBD" (case-insensitive, whole word).
+#      - Declared coverage: the file must carry exactly one line
+#        "**Totals.** <N> rows: `<source>` <n> · `<source>` <n> …". The parsed
+#        data-row count must equal <N>, and the rows under each
+#        "## <source>" heading must equal that source's <n> (rows above the
+#        first "## " heading, or under an undeclared one, fail) — a row can
+#        only disappear together with an edit to the declared totals.
 #      Prints a "skip:" line while the file is absent.
 #
 # Exit codes: 0 every check passed; 1 at least one check failed; 2 bad flag.
@@ -151,12 +169,14 @@ fi
 # --- 2. ladder one-definition (KTD22) ----------------------------------------
 LADDER_SOURCE='scripts/lib/registry.sh'
 LADDER_VAR='TRIFORGE_MODEL_LADDER'
-# A definition spells the rungs out after a colon; pointer lines use " — " and
-# never carry the phrase-colon-rungs sequence, so only the registry literal
-# matches. (This script is filtered out by _shipped_surfaces.)
-LADDER_DEF_RE='Downgrade ladder for narrow runtime tasks: .*`fable`'
+# A definition is the phrase followed by a colon, whatever rungs come after it
+# (a restatement that starts at `opus` is still a second definition); pointer
+# lines put " — " after the phrase, so only the registry literal matches.
+# Case-insensitive, and markup or spaces between the phrase and the colon do
+# not hide a definition. (This script is filtered out by _shipped_surfaces.)
+LADDER_DEF_RE='Downgrade ladder for narrow runtime tasks[[:space:]*_`]*:'
 LADDER_DEFS=$(
-  grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" -e "$LADDER_DEF_RE" . \
+  grep -rnIiE "${SWEEP_EXCLUDE_DIRS[@]}" -e "$LADDER_DEF_RE" . \
     | _shipped_surfaces \
     | sort -t: -k1,1 -k2,2n -u || true
 )
@@ -172,7 +192,7 @@ esac
 if [ "$LADDER_DEF_COUNT" -eq 1 ] && [ "$LADDER_DEF_FILE" = "$LADDER_SOURCE" ] && [ "$LADDER_IS_LITERAL" -eq 1 ]; then
   ok "ladder: one definition ($LADDER_SOURCE:$LADDER_DEF_LINE $LADDER_VAR)"
 elif [ "$LADDER_DEF_COUNT" -eq 0 ]; then
-  fail "ladder: no definition — $LADDER_SOURCE must set $LADDER_VAR to the ladder text (phrase, colon, rungs)"
+  fail "ladder: no definition — $LADDER_SOURCE must set $LADDER_VAR to the ladder text (the phrase 'Downgrade ladder for narrow runtime tasks', a colon, the rungs)"
 elif [ "$LADDER_DEF_COUNT" -eq 1 ] && [ "$LADDER_DEF_FILE" = "$LADDER_SOURCE" ]; then
   printf '%s\n' "$LADDER_DEFS"
   fail "ladder: $LADDER_SOURCE:$LADDER_DEF_LINE carries the ladder text but is not the $LADDER_VAR='...' assignment (a comment or another variable)"
@@ -181,7 +201,7 @@ elif [ "$LADDER_DEF_COUNT" -eq 1 ]; then
   fail "ladder: the single definition is in $LADDER_DEF_FILE:$LADDER_DEF_LINE, not the $LADDER_VAR literal in $LADDER_SOURCE"
 else
   printf '%s\n' "$LADDER_DEFS"
-  fail "ladder: $LADDER_DEF_COUNT definitions (expected exactly 1: $LADDER_VAR in $LADDER_SOURCE) — replace the others with pointers (see file:line:text above)"
+  fail "ladder: $LADDER_DEF_COUNT definitions (expected exactly 1: $LADDER_VAR in $LADDER_SOURCE) — every line with the phrase followed by a colon counts, whichever rung it starts at; replace the others with pointers (see file:line:text above)"
 fi
 
 # --- 3. DEFAULTS drift (KTD6) ------------------------------------------------
@@ -551,6 +571,7 @@ INVENTORY_MD='docs/rule-inventory.md'
 if [ -f "$INVENTORY_MD" ]; then
   INVENTORY_RC=0
   VV_INVENTORY="$INVENTORY_MD" python3 - <<'PYEOF' || INVENTORY_RC=$?
+import html
 import os
 import re
 import sys
@@ -560,23 +581,53 @@ with open(path, encoding="utf-8") as fh:
     lines = fh.read().split("\n")
 
 CELL_SPLIT = re.compile(r"(?<!\\)\|")          # an escaped \| stays inside its cell
-SEPARATOR = re.compile(r"^\|?(\s*:?-{3,}:?\s*\|)*\s*:?-{3,}:?\s*\|?$")
+SEPARATOR = re.compile(r"^\|?(\s*:?-+:?\s*\|)*\s*:?-+:?\s*\|?$")
+TABLE_END = re.compile(r"^(#{1,6}(\s|$)|>|```|~~~)")   # a blank line ends a table too
+SOURCE_HEADING = re.compile(r"^##\s+(.*?)\s*#*$")
 DEST_HEADER = re.compile(r"destination|new home|now lives", re.I)
 TBD = re.compile(r"\btbd\b", re.I)
-NO_DEST = re.compile(r"^[\s\-—–?`*]*$")         # blank, or only dashes / "?" / markup
+# HTML that renders as nothing: a comment (closed or not) or a tag. An autolink
+# (<https://…>, <a@b.c>) is not a tag: a tag name ends at a space, "/" or ">".
+HTML = re.compile(r"<!--.*?(-->|$)|</?[A-Za-z][A-Za-z0-9-]*(\s[^>]*)?/?>")
+PLACEHOLDERS = {"tbd", "tba", "todo", "tobedetermined", "tobedecided", "unknown"}
+TOTALS = re.compile(r"^\*\*Totals\.\*\*")
+TOTALS_COUNT = re.compile(r"^\*\*Totals\.\*\*\s+(\d+)\s+rows:")
+TOTALS_SOURCE = re.compile(r"\s*`([^`]+)`\s+(\d+)\s*")
 
 
 def cells(row):
-    return [c.strip() for c in CELL_SPLIT.split(row.strip().strip("|"))]
+    # Outer pipes are optional: drop at most one leading and one trailing
+    # (unescaped) pipe, so an empty first cell written "||" stays a cell.
+    row = row.strip()
+    if row.startswith("|"):
+        row = row[1:]
+    if row.endswith("|") and not row.endswith("\\|"):
+        row = row[:-1]
+    return [c.strip() for c in CELL_SPLIT.split(row)]
+
+
+def normalized(cell):
+    # What is left to read: HTML and entities gone, lowercase, letters and
+    # digits only ("T.B.D." -> "tbd", "<br>&nbsp;" -> "").
+    return re.sub(r"[\W_]+", "", html.unescape(HTML.sub("", cell))).lower()
+
+
+def source_name(name):
+    return "above the first '## <source>' heading" if name is None else "under '## " + name + "'"
 
 
 fails = []
 tables = 0
 rows = 0
+source = None       # text of the nearest "## " heading above
+by_source = {}      # heading text -> data rows under it
 i = 0
 while i < len(lines):
-    line = lines[i]
-    if not (line.lstrip().startswith("|") and i + 1 < len(lines) and SEPARATOR.match(lines[i + 1].strip())):
+    line = lines[i].strip()
+    if not (CELL_SPLIT.search(line) and i + 1 < len(lines) and SEPARATOR.match(lines[i + 1].strip())):
+        heading = SOURCE_HEADING.match(line)
+        if heading:
+            source = heading.group(1).strip("` ")
         i += 1
         continue
     tables += 1
@@ -586,23 +637,69 @@ while i < len(lines):
     if dest is None:
         fails.append(path + ":" + str(header_line) + ": table has no Destination column (header: " + " | ".join(header) + ")")
     i += 2
-    while i < len(lines) and lines[i].lstrip().startswith("|"):
+    while i < len(lines) and lines[i].strip() and not TABLE_END.match(lines[i].strip()):
         row = cells(lines[i])
         rows += 1
+        by_source[source] = by_source.get(source, 0) + 1
         for k, cell in enumerate(row):
             if TBD.search(cell):
                 fails.append(path + ":" + str(i + 1) + ": cell " + str(k + 1) + " reads TBD — " + cell)
-        if dest is not None and (dest >= len(row) or NO_DEST.match(row[dest])):
-            fails.append(path + ":" + str(i + 1) + ": row has no destination — " + lines[i].strip())
+        if dest is not None:
+            shown = row[dest] if dest < len(row) else ""
+            if dest >= len(row):
+                fails.append(path + ":" + str(i + 1) + ": row has no destination (" + str(len(row)) + " cell(s), Destination is cell " + str(dest + 1) + "; a table runs until the next blank line) — " + lines[i].strip())
+            elif not normalized(shown):
+                fails.append(path + ":" + str(i + 1) + ": row has no destination — " + lines[i].strip())
+            elif normalized(shown) in PLACEHOLDERS and not TBD.search(shown):
+                fails.append(path + ":" + str(i + 1) + ": destination is a placeholder (" + shown + ") — " + lines[i].strip())
         i += 1
 
 if tables == 0:
     fails.append(path + ": no markdown table found (the inventory is a table with a Destination column)")
+
+# Declared coverage: the parsed rows must equal the Totals line, in total and
+# per "## <source>" heading.
+TOTALS_SHAPE = "'**Totals.** <N> rows: `<source>` <n> · `<source>` <n> …'"
+totals_at = [n for n, text in enumerate(lines, 1) if TOTALS.match(text)]
+declared = {}
+if len(totals_at) != 1:
+    found = "none" if not totals_at else str(len(totals_at)) + " (lines " + ", ".join(str(n) for n in totals_at) + ")"
+    fails.append(path + ": expected exactly one " + TOTALS_SHAPE + " line, found " + found + " — the parsed rows are compared with it")
+else:
+    where = path + ":" + str(totals_at[0])
+    text = lines[totals_at[0] - 1]
+    count = TOTALS_COUNT.match(text)
+    if not count:
+        fails.append(where + ": the Totals line does not read " + TOTALS_SHAPE)
+    else:
+        pos = count.end()
+        while True:
+            pair = TOTALS_SOURCE.match(text, pos)
+            if not pair:
+                break
+            name = pair.group(1).strip()
+            declared[name] = declared.get(name, 0) + int(pair.group(2))
+            pos = pair.end()
+            if not text.startswith("·", pos):
+                break
+            pos += 1
+        if rows != int(count.group(1)):
+            fails.append(where + ": " + str(rows) + " data rows parsed, the Totals line declares " + count.group(1) + " — a row was added or removed without the totals")
+        if not declared:
+            fails.append(where + ": the Totals line declares no per-source counts (" + TOTALS_SHAPE + ")")
+        else:
+            for name, want in declared.items():
+                if by_source.get(name, 0) != want:
+                    fails.append(where + ": " + str(by_source.get(name, 0)) + " data row(s) under '## " + name + "', the Totals line declares " + str(want))
+            for name, got in by_source.items():
+                if name not in declared:
+                    fails.append(where + ": " + str(got) + " data row(s) " + source_name(name) + ", a source the Totals line does not declare")
+
 for line in fails:
     print("FAIL: rule inventory: " + line)
 if fails:
     sys.exit(1)
-print("ok:   rule inventory: " + path + " — " + str(rows) + " rows in " + str(tables) + " table(s), every row has a destination, no TBD cell")
+print("ok:   rule inventory: " + path + " — " + str(rows) + " rows in " + str(tables) + " table(s), matching the declared Totals for each of " + str(len(declared)) + " sources; every row has a destination, no TBD cell")
 PYEOF
   if [ "$INVENTORY_RC" -ne 0 ]; then
     FAILED_CHECKS=$((FAILED_CHECKS + 1))
