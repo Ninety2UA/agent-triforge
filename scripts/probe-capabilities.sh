@@ -226,7 +226,7 @@ EOF
   _mkskill .claude/skills  tf-claude-skill
   _mkskill .cursor/skills  tf-cursor-skill
   _mkcmd   .opencode/command/tf-cmd-opencode.md tf-cmd-opencode
-  # The twelve shipped skills, provisioned the way the lease lane does it
+  # The shipped skills, provisioned the way the lease lane does it
   # (cp -R src/. dest/ per skill — KTD7) so AGY-14 / SELF-06 can require all
   # shipped names. Committed so linked worktrees (CDX-09b, SELF-06) inherit.
   for s in $SHIPPED_SKILLS; do

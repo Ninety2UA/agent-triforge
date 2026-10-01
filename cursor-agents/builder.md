@@ -80,5 +80,4 @@ shared memory.
 Portable methodology skills are provisioned into `.agents/skills/` in your
 worktree; Cursor also reads `.cursor/skills/`, `.claude/skills/`, and
 `.codex/skills/`. Invoke one by name as `/<skill-name>` in the prompt —
-`/test-driven-development`, `/systematic-debugging`,
-`/verification-before-completion` — when it applies.
+for example `/verification-before-completion` — when it applies.

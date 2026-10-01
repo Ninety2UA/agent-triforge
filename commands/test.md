@@ -46,16 +46,16 @@ dispatch_role tester "test_writer" \
 if [ "$DISPATCH_RC" -eq 40 ]; then
   # tester resolved to the claude lane (codex absent -> fallback). dispatch_role
   # printed "DISPATCH_ROLE_CLAUDE <agent> <out>" instead of running a shell CLI:
-  # write the tests as a native Claude subagent (the test-driven-development
-  # skill on the scope, output to ops/TEST_RESULTS.md) rather than a background CLI.
-  echo "test: tester role resolved to the claude lane — write tests via a native Claude subagent (TDD skill), not a shell helper" >&2
+  # write the tests as a native Claude subagent (failing test first on the
+  # scope, output to ops/TEST_RESULTS.md) rather than a background CLI.
+  echo "test: tester role resolved to the claude lane — write tests via a native Claude subagent (failing test first), not a shell helper" >&2
 elif [ "$DISPATCH_RC" -ne 0 ]; then
   echo "test: tester dispatch failed (rc=$DISPATCH_RC) — see $TEST_OUT" >&2
   exit 1
 fi
 ```
 
-If `DISPATCH_RC` was 40 above, spawn a Claude subagent (Agent tool) to write the tests against the scope with the `test-driven-development` skill, writing results to `ops/TEST_RESULTS.md`.
+If `DISPATCH_RC` was 40 above, spawn a Claude subagent (Agent tool) to write the tests against the scope, writing results to `ops/TEST_RESULTS.md`. A failing test that names the behavior comes before any implementation change, and the report quotes the red run and the green run; a test for existing behavior is shown to fail when that behavior is broken.
 
 ## Step 3: Process test results
 

@@ -93,9 +93,9 @@ shared memory.
 Triforge's portable skills are provisioned into `.agents/skills/` in your
 worktree, which Kimi discovers natively (project tier: `.kimi-code/skills/`,
 `.agents/skills/`; user tier: `~/.kimi-code/skills/`, `~/.agents/skills/`).
-Invoke one as `/skill:<name>` — `/skill:test-driven-development`,
-`/skill:systematic-debugging`, `/skill:verification-before-completion` — when it
-applies. The merged skill list follows.
+Invoke one as `/skill:<name>` — for example
+`/skill:verification-before-completion` — when it applies. The merged skill list
+follows.
 
 ${skills}
 

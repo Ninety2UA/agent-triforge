@@ -226,10 +226,8 @@ Skills are model-agnostic markdown files that encode reusable methodologies. The
 | `writing-plans` | Claude | Phase 1 | Task decomposition with shadow paths and error maps |
 | `shadow-path-tracing` | Claude | Phase 1 | Enumerate failure paths alongside happy paths |
 | `wave-orchestration` | Claude | Phase 2 | Dependency-grouped parallel execution |
-| `test-driven-development` | Codex | Phase 2, 5 | RED-GREEN-REFACTOR cycle |
 | `iterative-refinement` | Claude | Phase 4 | Review-fix-review loop with convergence modes |
 | `review-synthesis` | Claude | Phase 4 | Merge and deduplicate multi-reviewer findings |
-| `systematic-debugging` | Codex, Claude | Any | Structured debugging with error taxonomy |
 | `verification-before-completion` | All | Phase 6 | Evidence-based completion checklist |
 | `knowledge-compounding` | Claude | Phase 6 | Document solutions and decisions for future sprints |
 | `session-continuity` | Claude | Any | Save and resume work across sessions |
@@ -246,8 +244,8 @@ Skills consumed by Antigravity and Codex are embedded in their native agent defi
 | `antigravity-agents/agents/targeted-researcher.md` | Antigravity | `codebase-mapping` (subset) | Deep-research targeted analysis |
 | `antigravity-agents/agents/documentation-writer.md` | Antigravity | (inline docs protocol) | Documentation generation |
 | `codex-agents/agents.toml → logic_reviewer` | Codex | (inline review protocol) | Phase 3 logic + security review |
-| `codex-agents/agents.toml → test_writer` | Codex | `test-driven-development` | Phase 5 TDD test writing |
-| `codex-agents/agents.toml → debugger` | Codex | `systematic-debugging` | Bug investigation |
+| `codex-agents/agents.toml → test_writer` | Codex | (inline TDD protocol) | Phase 5 TDD test writing |
+| `codex-agents/agents.toml → debugger` | Codex | (inline diagnostic protocol) | Bug investigation |
 
 ### Invocation via invoke-external.sh
 
@@ -289,7 +287,7 @@ Claude (the lead) is the only agent that launches Antigravity agents; no Antigra
 
 Antigravity CLI ships its own plugin system (`agy plugin {install,uninstall,list,enable,disable}`) and a user-tier skills directory (`~/.gemini/antigravity-cli/skills/`). We use the plugin system only as an agent-definition carrier (`antigravity-agents/` is a valid agy plugin), not as a skills registry:
 
-- **Skills:** Our 12 portable skills in `skills/` are markdown files consumed by all three agents (Claude/Antigravity/Codex) via prompt-prefix injection or native definition embedding, plus the `.agents/skills/` workspace copy for agents that discover workspace skills. Registering them per-CLI would fragment the portability story.
+- **Skills:** Our 10 portable skills in `skills/` are markdown files consumed by all three agents (Claude/Antigravity/Codex) via prompt-prefix injection or native definition embedding, plus the `.agents/skills/` workspace copy for agents that discover workspace skills. Registering them per-CLI would fragment the portability story.
 - **Hooks:** Our `hooks/handlers/*.sh` are Claude Code lifecycle hooks (SessionStart, Stop, PostToolUse, etc.) — the Antigravity CLI runs as a subprocess of a Claude Code session, a different layer with different events. Project-tier agy hooks are an open watch, not an enforcement path: they fired under `agy -p` on agy 1.2.0 in the documented `.agents/hooks.json` named-hook shape (lead marker-file re-probe 2026-09-11 — the July "inert headless" reading was a probe-shape error) but not on agy 1.2.1 the same evening (AGY-08 FAIL in the shipped record, both hooks.json files loaded, no handler executed). Triforge ships none either way: its lifecycle logic stays in the Claude Code hooks.
 
 ---
@@ -352,8 +350,8 @@ Five non-negotiable checkpoints enforced at every stage:
 | # | Gate | Phase | Enforcement |
 |---|---|---|---|
 | 1 | Plan validated before build | Phase 1.5 | plan-checker agent reviews TASKS.md, max 3 iterations |
-| 2 | Failing test before implementation (TDD) | Phase 2 | test-driven-development skill injected into build tasks |
-| 3 | Root cause analysis before fixes | Any | systematic-debugging skill requires diagnosis before implementation |
+| 2 | Failing test before implementation (TDD) | Phase 2 | Stated inline in `/test`, `/quick` and the Codex `test_writer` agent: a failing test that names the behavior comes before the implementation |
+| 3 | Root cause analysis before fixes | Any | Stated inline in `/debug` and the Codex `debugger` agent: reproduce first, name the root cause with evidence before changing code |
 | 4 | Verification evidence before completion | Phase 6 | verification-before-completion skill requires checklist |
 | 5 | Code review before shipping | Phase 3-4 | Parallel review (Antigravity + Codex + Claude subagents), max 3 cycles |
 
@@ -686,7 +684,7 @@ Phase 1.5: Plan validation (plan-checker agent)
 Phase 2:   Build — subagent mode OR agent team mode with wave orchestration
 Phase 3:   Parallel review — Antigravity + Codex + Claude specialized agents
 Phase 4:   Process reviews — findings-synthesizer agent, iterative-refinement skill
-Phase 5:   Test — Codex with TDD skill, test-gap-analyzer agent
+Phase 5:   Test — Codex test_writer (failing test first), test-gap-analyzer agent
 Phase 6:   Wrap up — knowledge compounding, session continuity, completion sentinel
 ```
 
@@ -763,7 +761,7 @@ Final: Full test suite + build + lint, then promote the integration branch per t
 Each builder receives (injected into the dispatch prompt — the contract keeps it out of canonical `ops/`):
 - Task description from TASKS.md
 - Relevant types from CONTRACTS.md (embedded, not referenced)
-- Skill injection if applicable (e.g., test-driven-development skill)
+- Skill injection if applicable (e.g., verification-before-completion skill)
 - Risk scoring rules: halt at risk >20% or file changes >50
 
 #### Agent team mode (complex builds)
@@ -1193,7 +1191,7 @@ agent-triforge/                     (plugin — installed automatically)
 │       └── documentation-writer.md       Documentation specialist
 ├── codex-agents/                     Codex CLI agent definitions (native subagents)
 │   └── agents.toml                     logic_reviewer, test_writer, debugger
-├── skills/                           12 portable workflow modules
+├── skills/                           10 portable workflow modules
 ├── commands/                         17 slash commands (adds /setup)
 ├── hooks/
 │   ├── hooks.json                    Hook registration

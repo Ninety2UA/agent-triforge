@@ -55,6 +55,5 @@ Triforge's portable skills are provisioned into `.agents/skills/`, which Kimi
 discovers natively (project tier: `.kimi-code/skills/`, `.agents/skills/`);
 the user tier (`~/.kimi-code/skills/`, `~/.agents/skills/`) is discovered as
 well, so skills you keep there are visible in this project too. Invoke a skill
-as `/skill:<name>` — `/skill:test-driven-development`,
-`/skill:systematic-debugging`, `/skill:verification-before-completion` — when it
-applies.
+as `/skill:<name>` — for example `/skill:verification-before-completion` — when
+it applies.

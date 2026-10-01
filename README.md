@@ -91,7 +91,7 @@ Follow-ups from the v3.3.0 code review (PR #8 "Unapplied review findings"), ship
 
 ### v3.2.0 — the watch cycle became repo-local maintainer tooling
 
-**The plugin got leaner: the watch cycle is now repo-local maintainer tooling.** `/cli-watch` and `/repo-watch` — the monthly cycles that keep Triforge itself current against its six CLIs and four reference repos — never belonged in the shipped command set. They now live in this checkout's `.claude/commands/`, with the `watch-cycle` skill in `.claude/skills/` and the watch registry tracked at `ops/watch-registry.toml`. The plugin ships 17 commands and 12 skills, and `session-start.sh` no longer copies a watch registry into your `ops/`. Run the watches from a clone of this repo (see [Keeping the framework current](#keeping-the-framework-current-cli-watch-repo-watch--maintainers)); nothing changes for `/setup`, `/ship`, or any other command.
+**The plugin got leaner: the watch cycle is now repo-local maintainer tooling.** `/cli-watch` and `/repo-watch` — the monthly cycles that keep Triforge itself current against its six CLIs and four reference repos — never belonged in the shipped command set. They now live in this checkout's `.claude/commands/`, with the `watch-cycle` skill in `.claude/skills/` and the watch registry tracked at `ops/watch-registry.toml`. At this release the plugin shipped 17 commands and 12 skills (previously 19 and 13), and `session-start.sh` no longer copies a watch registry into your `ops/`. Run the watches from a clone of this repo (see [Keeping the framework current](#keeping-the-framework-current-cli-watch-repo-watch--maintainers)); nothing changes for `/setup`, `/ship`, or any other command.
 
 ### v3.1.0 — role customization in guided onboarding
 
@@ -179,7 +179,7 @@ The plugin provides agents, skills, commands, and hooks. Your project gets an `o
 agent-triforge/                     (plugin — installed automatically)
 ├── .claude-plugin/plugin.json        Plugin manifest
 ├── agents/                           19 specialized agent definitions
-├── skills/                           12 portable workflow modules
+├── skills/                           10 portable workflow modules
 ├── commands/                         17 slash commands
 ├── hooks/
 │   ├── hooks.json                    Hook registration
@@ -244,7 +244,7 @@ Every goal flows through a structured pipeline. Run [`/ship`](commands/ship.md) 
 | **1.1 — Ambiguity** | Surface top 3 unverified assumptions, ask user to confirm/correct | Claude | [`/plan`](commands/plan.md), [`/ship`](commands/ship.md) |
 | **2 — Build** | Wave orchestration with integration verification between waves | Claude subagents or [`team-lead`](agents/team-lead.md) | [`/build`](commands/build.md) |
 | **3–4 — Review** | Up to 7 parallel reviewers, synthesized with confidence tiering | Antigravity + Codex + [review agents](#review-specialists-6) | [`/review`](commands/review.md) |
-| **5 — Test** | TDD test writing, gap analysis, fix cycle until green | Codex CLI + [`test-driven-development`](skills/test-driven-development/SKILL.md) | [`/test`](commands/test.md) |
+| **5 — Test** | TDD test writing, gap analysis, fix cycle until green | Codex CLI ([`test_writer`](codex-agents/agents.toml)) | [`/test`](commands/test.md) |
 | **6 — Ship** | Document solutions, archive reviews, write STATE.md | Claude + [`knowledge-compounding`](skills/knowledge-compounding/SKILL.md) | [`/wrap`](commands/wrap.md) |
 
 ---
@@ -350,7 +350,7 @@ Each reviewer has a "Do Not Flag" list to reduce noise — readability-aiding re
 
 ## Test Pipeline (`/test`)
 
-Identifies untested code paths with [`test-gap-analyzer`](agents/test-gap-analyzer.md), then writes and runs tests via [Codex CLI](https://github.com/openai/codex) using the TDD skill in a sandboxed environment.
+Identifies untested code paths with [`test-gap-analyzer`](agents/test-gap-analyzer.md), then writes and runs tests via [Codex CLI](https://github.com/openai/codex), failing test first, in a sandboxed environment.
 
 <p align="center">
   <img src="docs/images/testing-flow.svg" alt="Test pipeline — gap analysis, Codex TDD, fix cycle" width="80%">
@@ -360,7 +360,7 @@ Identifies untested code paths with [`test-gap-analyzer`](agents/test-gap-analyz
 
 ## Debugging (`/debug`)
 
-Structured debugging with [`systematic-debugging`](skills/systematic-debugging/SKILL.md): reproduce the bug first, perform root cause analysis, then fix with evidence. A **circuit breaker** enforces a 3-attempt ceiling per issue — if the same error recurs after 3 consecutive fix attempts, the agent stops and produces an escalation report instead of looping.
+Structured debugging: reproduce the bug first, perform root cause analysis, then fix with evidence. A **circuit breaker** enforces a 3-attempt ceiling per issue — if the same error recurs after 3 consecutive fix attempts, the agent stops and produces an escalation report instead of looping.
 
 <p align="center">
   <img src="docs/images/debug-flow.svg" alt="Debugging — reproduce, diagnose, fix" width="80%">
@@ -379,11 +379,11 @@ Five non-negotiable checkpoints enforced at every stage:
 | Gate | Enforced by | Rule |
 |---|---|---|
 | **1 — Plan validated** | [`plan-checker`](agents/plan-checker.md) agent | No build without validated plan (max 3 iterations) |
-| **2 — Failing test first** | [`test-driven-development`](skills/test-driven-development/SKILL.md) skill | No production code without a failing test |
-| **3 — Root cause first** | [`systematic-debugging`](skills/systematic-debugging/SKILL.md) skill | No fix without diagnosis |
+| **2 — Failing test first** | [`/test`](commands/test.md) workflow, Codex [`test_writer`](codex-agents/agents.toml) | No production code without a failing test |
+| **3 — Root cause first** | [`/debug`](commands/debug.md) workflow, Codex [`debugger`](codex-agents/agents.toml) | No fix without diagnosis |
 | **4 — Evidence first** | [`verification-before-completion`](skills/verification-before-completion/SKILL.md) skill | No "done" without proof |
 | **5 — Review first** | [`review-synthesis`](skills/review-synthesis/SKILL.md) skill | No merge without code review (max 3 cycles) |
-| **6 — Circuit breaker** | [`systematic-debugging`](skills/systematic-debugging/SKILL.md) skill | 3-attempt ceiling per issue, then escalation report |
+| **6 — Circuit breaker** | [`/debug`](commands/debug.md) workflow, Codex [`debugger`](codex-agents/agents.toml) | 3-attempt ceiling per issue, then escalation report |
 
 ---
 
@@ -541,7 +541,7 @@ claude
 | Command | What it does |
 |---|---|
 | [**`/quick <change>`**](commands/quick.md) | For changes touching < 3 files. Skips heavy machinery. |
-| [**`/debug <bug>`**](commands/debug.md) | Structured [debugging](skills/systematic-debugging/SKILL.md): reproduce, diagnose, fix with root cause analysis. |
+| [**`/debug <bug>`**](commands/debug.md) | Structured debugging: reproduce, diagnose, fix with root cause analysis. |
 
 ### Research and operations
 
@@ -575,7 +575,7 @@ Two **repo-local** commands keep the framework current instead of hand-running a
 
 ## Skills reference
 
-12 portable, model-agnostic workflow modules that any agent can consume. Skills embedded in native Antigravity/Codex agent definitions (`antigravity-agents/agents/`, `codex-agents/`) at install time; prompt-prefix injection of the agent body kicks in automatically when a CLI doesn't surface native agent definitions.
+10 portable, model-agnostic workflow modules that any agent can consume. Skills embedded in native Antigravity/Codex agent definitions (`antigravity-agents/agents/`, `codex-agents/`) at install time; prompt-prefix injection of the agent body kicks in automatically when a CLI doesn't surface native agent definitions.
 
 | Skill | Primary consumer | What it teaches the agent |
 |---|---|---|
@@ -583,8 +583,6 @@ Two **repo-local** commands keep the framework current instead of hand-running a
 | [**`writing-plans`**](skills/writing-plans/SKILL.md) | Claude (Phase 1) | Task decomposition with shadow paths, error maps, interface context |
 | [**`shadow-path-tracing`**](skills/shadow-path-tracing/SKILL.md) | Claude (Phase 1) | Enumerate every failure path alongside the happy path |
 | [**`wave-orchestration`**](skills/wave-orchestration/SKILL.md) | Claude (Phase 2) | Dependency-grouped parallel execution with integration checks |
-| [**`test-driven-development`**](skills/test-driven-development/SKILL.md) | [Codex](https://github.com/openai/codex) (Phase 5) | RED-GREEN-REFACTOR: no production code without failing test |
-| [**`systematic-debugging`**](skills/systematic-debugging/SKILL.md) | Codex, Claude | Error taxonomy, assumption tracking, bisection, root cause, circuit breaker |
 | [**`iterative-refinement`**](skills/iterative-refinement/SKILL.md) | Claude (Phase 4) | Review-fix-review loops with convergence modes |
 | [**`review-synthesis`**](skills/review-synthesis/SKILL.md) | Claude (Phase 4) | Merge multi-reviewer findings with confidence tiering |
 | [**`verification-before-completion`**](skills/verification-before-completion/SKILL.md) | All agents | Evidence-based completion checklist |
@@ -742,7 +740,7 @@ The <strong>core trio</strong> (Claude, Antigravity, Codex) is the supported bas
 <details>
 <summary><strong>Do I need all the skills?</strong></summary>
 
-No. Skills activate contextually. If you never use TDD, the <a href="skills/test-driven-development/SKILL.md">test-driven-development</a> skill won't activate. You can delete any skill directory you don't want.
+No. Skills activate contextually. If you never cut scope, the <a href="skills/scope-cutting/SKILL.md">scope-cutting</a> skill won't activate. You can delete any skill directory you don't want.
 </details>
 
 <details>

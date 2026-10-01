@@ -1442,7 +1442,7 @@ body::after {
             <span class="hero__stat-label">Agents</span>
           </div>
           <div class="hero__stat">
-            <span class="hero__stat-num" data-target="12">0</span>
+            <span class="hero__stat-num" data-target="10">0</span>
             <span class="hero__stat-label">Skills</span>
           </div>
           <div class="hero__stat">
@@ -1667,7 +1667,7 @@ body::after {
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Watch cycle shipped as plugin commands (v3.1 history) — 19 commands, 13 skills</span></div>
         <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
-        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Repo-local maintainer tooling in <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">.claude/commands/</code> — 17 commands, 12 skills ship</span></div>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Repo-local maintainer tooling in <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">.claude/commands/</code> — 17 commands, 10 skills ship</span></div>
       </div>
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Role assignment — hand-edit ops/roster.toml</span></div>
@@ -1762,7 +1762,7 @@ body::after {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
         </div>
         <h3>Portable Skills</h3>
-        <p>Model-agnostic workflow modules injected into any agent — TDD, systematic debugging, wave orchestration, shadow-path tracing, knowledge compounding.</p>
+        <p>Model-agnostic workflow modules injected into any agent — wave orchestration, shadow-path tracing, knowledge compounding.</p>
       </div>
       <div class="feat-card glow-card">
         <div class="feat-card__icon feat-card__icon--ember">
@@ -2071,7 +2071,7 @@ body::after {
   <div class="container">
     <div class="section__header reveal">
       <span class="section__label">Portable Skills</span>
-      <h2 class="section__title">13 Model-Agnostic Workflow Modules</h2>
+      <h2 class="section__title">10 Model-Agnostic Workflow Modules</h2>
       <p class="section__desc">Skills are markdown files that any agent can consume. Injected into Antigravity or Codex agent definitions, with prompt-prefix fallback via <code>$(cat skills/SKILL.md)</code>.</p>
     </div>
     <div class="table-wrap reveal">
@@ -2082,8 +2082,6 @@ body::after {
           <tr><td><code>writing-plans</code></td><td>Claude (Phase 1)</td><td>Task decomposition with shadow paths, error maps, interface context</td></tr>
           <tr><td><code>shadow-path-tracing</code></td><td>Claude (Phase 1)</td><td>Enumerate every failure path alongside the happy path</td></tr>
           <tr><td><code>wave-orchestration</code></td><td>Claude (Phase 2)</td><td>Dependency-grouped parallel execution with integration checks</td></tr>
-          <tr><td><code>test-driven-development</code></td><td>Codex (Phase 5)</td><td>RED-GREEN-REFACTOR: no production code without failing test</td></tr>
-          <tr><td><code>systematic-debugging</code></td><td>Codex, Claude</td><td>Error taxonomy, assumption tracking, bisection, circuit breaker</td></tr>
           <tr><td><code>iterative-refinement</code></td><td>Claude (Phase 4)</td><td>Review-fix-review loops with convergence modes (max 3 cycles)</td></tr>
           <tr><td><code>review-synthesis</code></td><td>Claude (Phase 4)</td><td>Merge multi-reviewer findings with confidence tiering</td></tr>
           <tr><td><code>verification-before-completion</code></td><td>All agents</td><td>Evidence-based completion checklist — no "done" without proof</td></tr>
@@ -2147,12 +2145,12 @@ body::after {
       <div class="gate">
         <div class="gate__num">2</div>
         <h4>Failing test before implementation</h4>
-        <p>No production code without a failing test <code>test-driven-development</code></p>
+        <p>No production code without a failing test <code>/test</code></p>
       </div>
       <div class="gate">
         <div class="gate__num">3</div>
         <h4>Root cause before fixes</h4>
-        <p>No fix without diagnosis <code>systematic-debugging</code></p>
+        <p>No fix without diagnosis <code>/debug</code></p>
       </div>
       <div class="gate">
         <div class="gate__num">4</div>
@@ -2167,7 +2165,7 @@ body::after {
       <div class="gate">
         <div class="gate__num">6</div>
         <h4>Circuit breaker on debugging</h4>
-        <p>3-attempt ceiling per issue, then escalation report <code>systematic-debugging</code></p>
+        <p>3-attempt ceiling per issue, then escalation report <code>/debug</code></p>
       </div>
     </div>
   </div>

@@ -112,7 +112,7 @@ Spawn the `findings-synthesizer` agent. Apply `iterative-refinement` skill.
 
 ### Phase 5: Test
 - Spawn `test-gap-analyzer` to identify coverage gaps
-- Invoke Codex with TDD skill
+- Invoke Codex to write tests, failing test first
 - Fix failures, re-run until green
 
 ### Phase 6: Wrap up

@@ -206,7 +206,7 @@ If the test scope covers 5+ files, use spawn_agent to parallelize:
 
 [agents.debugger]
 name = "debugger"
-description = "Structured debugging agent. Follows systematic-debugging methodology with error taxonomy, assumption tracking, and root cause analysis."
+description = "Structured debugging agent. Reproduces first, then diagnoses with error taxonomy, assumption tracking, and root cause analysis before any fix."
 model = "gpt-6-astra"
 model_reasoning_effort = "xhigh"
 # model_reasoning_effort = "max"    # opt-in — CDX-06 re-probes it on gpt-6-astra each cycle (newest ops/research/*-probe-record.md)
