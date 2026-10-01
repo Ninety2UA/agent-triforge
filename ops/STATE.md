@@ -1,6 +1,6 @@
 ---
-saved: 2026-10-01T00:45:00Z
-phase: 0-building
+saved: 2026-10-01T21:55:00Z
+phase: 0-review-fixes (PAUSED by the user 2026-10-01 ~23:55 local)
 wave: 0
 tasks:
   total: 29
@@ -29,7 +29,7 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 
 | PR | Units | Status |
 |---|---|---|
-| 0 | U21 validator prep + ladder source; U3 AGENTS.md + rule inventory; U22 session-start floor/stale-template; U4 removal test + pruning | building on `feat/v4-phase-0` (base `release/4.0`): U21 601277a ✓, U3 2a2011d ✓, U22 + U4 experiment in flight (2026-10-01 ~04:45 local); then simplify → ce-code-review → PR to release/4.0 → final-diff cross-review → merge |
+| 0 | U21 validator prep + ladder source; U3 AGENTS.md + rule inventory; U22 session-start floor/stale-template; U4 removal test + pruning | PAUSED mid review-fix wave on `feat/v4-phase-0` (base `release/4.0`, NOT yet pushed, no PR yet). Built + committed: U21 601277a, U3 2a2011d, U22 af66a5d, U4 cccbefd, simplify a33b680. ce-code-review run `20261001-225426-98b630ed` = status complete, verdict "Ready with fixes" (4 findings, no P0/P1; artifact `/tmp/compound-engineering-501/ce-code-review/20261001-225426-98b630ed/review.json`). Fix batches B (d6ccd83, validator gates V1–V5) and C (02fee4a, findings #1 #6 #12 + docs) are committed. Batch A is UNCOMMITTED and UNVERIFIED in the working tree (`hooks/handlers/session-start.sh`, `scripts/probe-self-tests.sh`): its worker was stopped at the pause before reporting |
 | 1a | U5 plugin-root resolver + locator; U26 CLI registry; U6 skill conformance validator | pending |
 | 1b | U7 commands → at- skills; U24 split oversized skills; U23 remove commands/ | pending |
 | 2a | U29 capability/survival probe rows; U13 detached leases + lease_wait + lead exit; U11 worker marker | pending |
@@ -45,9 +45,16 @@ Update this table and the frontmatter at every PR boundary; the plan is `docs/pl
 
 ## Next actions
 
-1. Phase 0 is mid-build on branch `feat/v4-phase-0` (see the table). A worker that dies on the session limit leaves its edits uncommitted in the tree: inspect `git status`, finish its verification yourself, commit per unit (path-limited). AGENTS.md is at 15,268 of 16,384 bytes — later units must trim before they add. Original scope: U21, U3, U22, U4. U3's `/doctor` baseline can't be taken headless — note it as "not taken (headless)" and rely on the validator budgets. U4's removal test uses `claude -p` (3 runs per arm minimum).
-2. Ship: PR to `release/4.0` (template, provenance table, protected paths = Yes, cross-reviewer = the lead under the authorization above), independent Opus reviewers on the final diff, `gates.yml` green, then squash-merge.
-3. Repeat per the table. At the end: regenerate the probe record (U20), bump to 4.0.0, PR `release/4.0` → `main`, confirm `gh release view v4.0.0`.
+1. **Finish fix batch A** (the worker was stopped at the pause; its edits parse under `/bin/bash -n` but were never verified). Read `git diff hooks/handlers/session-start.sh scripts/probe-self-tests.sh` and check each item, completing what is missing:
+   - #2 (P2): `_ss_imports_agents` must be path-aware — an `@…AGENTS.md` import counts only when it resolves (relative to the file that holds it, `~/` and absolute forms included) to this project's `AGENTS.md`; SELF-08 cases: a parent `CLAUDE.md` with bare `@AGENTS.md` still gets the notice, a 3.x copy at `.claude/CLAUDE.md` with `@AGENTS.md` still gets the stale notice (`@../AGENTS.md` does not), and the relative / `./` / absolute forms silence it.
+   - R1: bound the `claude --version` floor probe when no `timeout`/`gtimeout` exists (pure-bash 10 s watchdog, no job-control output, watchdog stdio to /dev/null); prove by hand with a stub that sleeps 60.
+   - R2: the stale-template notice must not say "Run /setup to convert it" (no conversion step exists until U15).
+   - R3: a `Tip:` line when the project root has no `AGENTS.md`: `cp "${CLAUDE_PLUGIN_ROOT}/templates/AGENTS.md" ./AGENTS.md` (commit 02fee4a's README/AGENTS.md wording already says session start prints this).
+   - T1: SELF-08 asserts the notices reprint on a second run. T2: a parent directory name with a literal backslash-n exercises `_ss_prose`. M1: name the three instruction-file names once.
+   Then: `/bin/bash -n` both files; `bash scripts/validate-versions.sh`; `bash scripts/validate-skills.sh`; `/bin/bash scripts/probe-capabilities.sh --self-only` (17 rows, none FAIL); commit as `fix(review): apply finding #2 and session-start residuals`.
+2. **Ship Phase 0:** push `feat/v4-phase-0`, open ONE PR to base `release/4.0` via `ce-commit-push-pr` with `branding:on` (PR template; Protected paths = Yes; cross-reviewer = the lead under the recorded authorization; review receipt = run `20261001-225426-98b630ed`, status complete, "Ready with fixes", all four findings applied). Unapplied items to list: SVG diagrams `docs/images/quality-gates.svg` + `debug-flow.svg` still name the removed skills (Excalidraw pipeline; do in U20's docs pass); signature-less 3.x template copies and a project's own non-template `CLAUDE.md` get no notice (U15, R9); the pre-existing un-timed optional-CLI version probes; validate-versions checks have no in-gate negative fixtures (shown red by hand); tables nested in blockquotes and a ladder split across two lines are not detected; the removal test covered one fixture, sonnet, Claude lead only; README release-ledger links to the deleted skills are history.
+3. `gates.yml` must be green on the PR; one independent Opus reviewer on the final diff (session-start + validator), then 5/5 rubric → squash-merge into `release/4.0`.
+4. Update the table, then Phase 1a (U5, U26, U6) on a new branch off `release/4.0`. Carry-forward for U7/U23: rename `/setup` → the at- skill in `templates/AGENTS.md` and the session-start notices; AGENTS.md is at 15,363 of 16,384 bytes — trim before adding.
 
 ## Blockers recorded for the user
 
