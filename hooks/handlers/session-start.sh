@@ -265,7 +265,7 @@ _bootstrap_copy() {
 # customizations survive: triforge-agents.toml = Triforge's agent declarations
 # (KTD5 — deployed OUTSIDE .codex/agents/, which Codex ≥ 0.147 sweeps as
 # per-agent role files and warns "Ignoring malformed agent role definition" on);
-# AGENTS.md = custom instructions; config.toml disables Codex's auto-memory
+# config.toml disables Codex's auto-memory
 # pipeline (conflict with ops/MEMORY.md); hooks.json enforces CHANGELOG
 # attribution under `codex exec` (probe CDX-04 PASS on 0.154.0 with
 # --dangerously-bypass-hook-trust, which invoke-external.sh passes when this
@@ -290,7 +290,6 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
     fi
   fi
   _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml"     ".codex/triforge-agents.toml"
-  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/codex-agents/AGENTS.md"       ".codex/AGENTS.md"
   _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.codex/config.toml" ".codex/config.toml"
   _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json"  ".codex/hooks.json"
 fi
@@ -562,11 +561,6 @@ except Exception:
 ' 2>/dev/null || true)
 fi
 
-# Suggest CLAUDE.md template if not present (either supported location)
-if [ ! -f "CLAUDE.md" ] && [ ! -f ".claude/CLAUDE.md" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.md" ]; then
-  CLAUDE_MD_TIP="\nTip: No CLAUDE.md found. Copy the template: cp \"${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.md\" ./CLAUDE.md"
-fi
-
 # Check for existing state
 HAS_STATE=""
 HAS_TASKS=""
@@ -737,9 +731,6 @@ fi
 if [ -n "${TIMEOUT_MISSING_WARNING}" ]; then
   MSG="$MSG\n${TIMEOUT_MISSING_WARNING}"
 fi
-
-# Append CLAUDE.md tip if set
-MSG="$MSG${CLAUDE_MD_TIP:-}"
 
 printf '%b\n' "Multi-agent framework ready.$MSG"
 echo ""

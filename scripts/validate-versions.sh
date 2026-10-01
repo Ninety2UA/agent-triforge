@@ -52,7 +52,7 @@
 #      "## Recent changes" heading (the release ledger: past entries name the
 #      pins they adopted at the time).
 #   5. Surface counts — agents/*.md, skills/*/SKILL.md, commands/*.md counts
-#      must match every count claim in .claude/CLAUDE.md, templates/CLAUDE.md,
+#      must match every count claim in AGENTS.md, templates/AGENTS.md,
 #      README.md (above "## Recent changes"), docs/index.html,
 #      docs/agent-triforge.md, .claude-plugin/plugin.json. A claim is
 #      "<N> [up to three words] agents|subagents|skills|commands" on a line
@@ -441,8 +441,8 @@ actual = {
 }
 readme_history_start = int(os.environ["VV_README_HISTORY_START"] or "0")
 files = [
-    ".claude/CLAUDE.md",
-    "templates/CLAUDE.md",
+    "AGENTS.md",
+    "templates/AGENTS.md",
     "README.md",
     "docs/index.html",
     "docs/agent-triforge.md",

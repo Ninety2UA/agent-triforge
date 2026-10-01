@@ -8,7 +8,7 @@
 # ops/research/ record), and exits 3 on any SELF FAIL. The last step proves the
 # gate can fail: it breaks one invariant in a scratch copy and requires exit 3.
 # `claude plugin validate --strict` needs Claude Code and stays a local release
-# gate (.claude/CLAUDE.md "Release checklist").
+# gate (AGENTS.md "Checks to run" and "Release").
 name: gates
 
 on:

@@ -97,13 +97,13 @@ fi
 # adapter (the core trio authenticate via HOME-based stores), so a builder CAN
 # read credential files under $HOME; and there is no network filter, so egress
 # is not blocked. Recorded as INFO so the record matches the corrected KTD-14/R35
-# claim in .claude/CLAUDE.md instead of overclaiming confinement the code does
+# claim in AGENTS.md instead of overclaiming confinement the code does
 # not provide. The worktree limits where a builder starts, not where it writes;
 # the enforced controls are the env-var allowlist (SELF-03), the no-push config
 # (SELF-09), hardened lead git + integrity detection + snapshot-only merges
 # (SELF-18) and the protected-path gate (SELF-10).
 _S4_HOME=$( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null; _adapter_env codex env 2>/dev/null | grep -q '^HOME=' && echo yes || echo no )
-row "SELF-04" "claude" "R35 boundary: credential-store read + network egress are NOT confined (HOME forwarded, no net filter)" "INFO" "HOME reaches builder=${_S4_HOME}; the worktree limits where a builder starts, not where it writes; enforced: env-var allowlist, no-push config, lead-git hardening + integrity detection + snapshot-only merge, protected-path gate — NOT home-credential read-isolation, a write scope, or egress filtering (see .claude/CLAUDE.md Security model)" "static"
+row "SELF-04" "claude" "R35 boundary: credential-store read + network egress are NOT confined (HOME forwarded, no net filter)" "INFO" "HOME reaches builder=${_S4_HOME}; the worktree limits where a builder starts, not where it writes; enforced: env-var allowlist, no-push config, lead-git hardening + integrity detection + snapshot-only merge, protected-path gate — NOT home-credential read-isolation, a write scope, or egress filtering (see the Security model in docs/agent-triforge.md)" "static"
 
 # SELF-05 (KTD11): the contract-parsing seam — _lease_parse_status <file>
 # reads the builder's final-report `Status:` line and prints DONE |
@@ -508,7 +508,7 @@ fi
 rm -rf "$_S9"
 
 # SELF-10 (KTD8 / R30): the protected-path lists. (a) Every path named on the
-# "**Protected paths**" line of .claude/CLAUDE.md classifies as protected in
+# "**Protected paths**" line of the root AGENTS.md classifies as protected in
 # this checkout (a glob is instantiated, a directory gets a child) — with a
 # negative control: the same check over a copy carrying one planted
 # unprotected path must name exactly that path. (b) The classifier matches a
@@ -569,9 +569,9 @@ for t in toks:
     done )
 }
 _S10_FAIL=""
-_S10_REAL=$(_s10_doc_misses "${REPO_ROOT}/.claude/CLAUDE.md")
+_S10_REAL=$(_s10_doc_misses "${REPO_ROOT}/AGENTS.md")
 [ -z "$_S10_REAL" ] || _S10_FAIL="$_S10_FAIL doc-paths-unprotected:[${_S10_REAL% }]"
-sed 's#^- \*\*Protected paths\*\*\(.*\)$#- **Protected paths**\1 `scripts/not-a-protected-probe.sh`#' "${REPO_ROOT}/.claude/CLAUDE.md" > "${WORK}/s10-planted.md"
+sed 's#^- \*\*Protected paths\*\*\(.*\)$#- **Protected paths**\1 `scripts/not-a-protected-probe.sh`#' "${REPO_ROOT}/AGENTS.md" > "${WORK}/s10-planted.md"
 _S10_NEG=$(_s10_doc_misses "${WORK}/s10-planted.md")
 [ "${_S10_NEG% }" = "scripts/not-a-protected-probe.sh" ] || _S10_FAIL="$_S10_FAIL negative-control(got:[${_S10_NEG% }])"
 
@@ -653,9 +653,9 @@ _s10_expect submodule 42 ' .claude  (project_protected)'
 _s10_expect submodule 42 ' .gitmodules  (project_protected)'
 _s10_expect corrupt 42 'classifier failed'
 if [ -z "$_S10_FAIL" ]; then
-  row "SELF-10" "claude" "protected paths: CLAUDE.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "PASS" "every path on the CLAUDE.md protected line classifies as protected (planted path caught); classifier flags bare .agents (project) + skills (framework), not .clauder/claudeish; fw fixture: roster.sh / git mv pre-push / sub/AGENTS.md / AGENTS.override.md / .mcp.json / Hooks/handlers/x.sh / symlinks .claude + hooks -> rc 42 naming the path; manifest renamed / deleted / unparseable -> still the Triforge checkout (roster.sh -> 42); docs-only -> promoted; user fixture: scripts/lib/util.sh -> promoted, ops/roster.toml / symlink .cursor / opencode.json -> 42, a nested repo at .claude + .gitmodules ignore=all -> 42 naming .claude and .gitmodules (--ignore-submodules=none); corrupted registry literal -> 42 naming the classifier error; per-case lease root + throwaway HOME" "static"
+  row "SELF-10" "claude" "protected paths: AGENTS.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "PASS" "every path on the AGENTS.md protected line classifies as protected (planted path caught); classifier flags bare .agents (project) + skills (framework), not .clauder/claudeish; fw fixture: roster.sh / git mv pre-push / sub/AGENTS.md / AGENTS.override.md / .mcp.json / Hooks/handlers/x.sh / symlinks .claude + hooks -> rc 42 naming the path; manifest renamed / deleted / unparseable -> still the Triforge checkout (roster.sh -> 42); docs-only -> promoted; user fixture: scripts/lib/util.sh -> promoted, ops/roster.toml / symlink .cursor / opencode.json -> 42, a nested repo at .claude + .gitmodules ignore=all -> 42 naming .claude and .gitmodules (--ignore-submodules=none); corrupted registry literal -> 42 naming the classifier error; per-case lease root + throwaway HOME" "static"
 else
-  row "SELF-10" "claude" "protected paths: CLAUDE.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "FAIL" "mismatch:$(printf '%s' "$_S10_FAIL" | cut -c1-600)" "static"
+  row "SELF-10" "claude" "protected paths: AGENTS.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "FAIL" "mismatch:$(printf '%s' "$_S10_FAIL" | cut -c1-600)" "static"
 fi
 rm -rf "$_S10" "${WORK}"/s10-*
 

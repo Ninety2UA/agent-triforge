@@ -123,7 +123,7 @@ invoke_codex() {
   # project trust for arbitrary dirs, and the flag is the documented
   # automation path (0.131.0+). Triforge ships and vets these hooks itself
   # (trusted-pipeline posture, same rationale as approval_policy="never" —
-  # see the security model in .claude/CLAUDE.md), so bypassing the
+  # see the Security model in docs/agent-triforge.md), so bypassing the
   # interactive trust prompt does not widen what the pipeline already accepts.
   local HOOKS_MODE="off"
   if [ -f ".codex/hooks.json" ] && _codex_feature_enabled hooks; then
