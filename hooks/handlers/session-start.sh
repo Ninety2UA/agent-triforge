@@ -17,10 +17,11 @@
 #   Triforge handlers always return 0).
 # Hook stdout must never look like JSON: no stdout line may start with `{`
 #   (Claude Code ≥ 2.1.246 rejects hook stdout that parses as JSON — D-031c).
-#   Audited 2026-09-11: every stdout line is prose ("Multi-agent framework
-#   ready.", "session-start: …", "Roster …", "Tip: …", "Commands: …"); every
-#   external-CLI capture (agy plugin list / agy agents) is consumed here and
-#   never echoed.
+#   Audited 2026-10-01: every stdout line is prose ("Multi-agent framework
+#   ready.", "session-start: …", "Roster …", "WARNING: …", "Commands: …");
+#   every external-CLI capture (agy plugin list / agy agents / claude
+#   --version) is consumed here and never echoed — the floor warning prints
+#   only the X.Y.Z digits parsed out of it.
 # Bash 3.2 compatible (macOS /bin/bash): no associative arrays, no mapfile, no
 #   "${arr[@]}" expansion of a possibly-empty array under set -u.
 
@@ -561,6 +562,138 @@ except Exception:
 ' 2>/dev/null || true)
 fi
 
+# ---------------------------------------------------------------------------
+# Upgrade notices (R40). Triforge 4 ships AGENTS.md only — no CLAUDE.md, no
+# template for one. Claude Code reads AGENTS.md from 2.1.277, and only while no
+# CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working
+# directory or above it (the user-tier ~/.claude/CLAUDE.md does not count); a
+# CLAUDE.md that imports it (`@AGENTS.md`) loads it on every build. Three
+# states leave a Claude lead without it, and each gets one line:
+#   floor   `claude --version` below 2.1.277
+#   stale   ./CLAUDE.md or ./.claude/CLAUDE.md is a 3.x copy of the retired
+#           templates/CLAUDE.md that does not import AGENTS.md
+#   above   a CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md in a directory
+#           above the project, with no AGENTS.md import anywhere in the chain
+# These describe a standing state, not a one-time action: they print on every
+# session start until the state is fixed, and so — like the roster-pin and
+# timeout lines — carry no "session-start:" prefix (that prefix marks a step
+# that acted once; SELF-08 counts it for idempotence). Nothing here edits a
+# file: converting a CLAUDE.md is setup's job, and it asks first.
+CLAUDE_FLOOR="2.1.277"
+INSTRUCTION_NOTICES=""
+
+# _ss_xyz <text> — the first X.Y.Z in the text, or nothing.
+_ss_xyz() {
+  printf '%s\n' "$1" | LC_ALL=C grep -Eo '[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}' | head -1 || true
+}
+
+# _ss_xyz_key <X.Y.Z> — one integer that orders versions (fields ≤ 6 digits).
+_ss_xyz_key() {
+  local A B C
+  IFS=. read -r A B C <<SS_XYZ_EOF
+$1
+SS_XYZ_EOF
+  echo $(( 10#$A * 1000000000000 + 10#$B * 1000000 + 10#$C ))
+}
+
+# Floor. The answer is read under the timeout binary when there is one (10 s);
+# without one it is read bare, like the optional-CLI detection above. A missing
+# `claude` or an answer with no X.Y.Z in it warns about nothing.
+if command -v claude >/dev/null 2>&1; then
+  if [ -n "$TIMEOUT_BIN" ]; then
+    SS_CLAUDE_XYZ=$(_ss_xyz "$("$TIMEOUT_BIN" 10s claude --version 2>/dev/null | head -1 || true)")
+  else
+    SS_CLAUDE_XYZ=$(_ss_xyz "$(claude --version 2>/dev/null | head -1 || true)")
+  fi
+  if [ -n "$SS_CLAUDE_XYZ" ] && [ "$(_ss_xyz_key "$SS_CLAUDE_XYZ")" -lt "$(_ss_xyz_key "$CLAUDE_FLOOR")" ]; then
+    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}\nWARNING: Claude Code ${SS_CLAUDE_XYZ} is below Triforge's floor ${CLAUDE_FLOOR}, the first build that reads AGENTS.md — Triforge's only instruction file, which older builds do not read. Update Claude Code (\`claude update\`)."
+  fi
+fi
+
+# _ss_imports_agents <file> — 0 when the file holds an AGENTS.md import: an
+# `@AGENTS.md` / `@<path>/AGENTS.md` token at a line start or after whitespace
+# (a backticked mention is prose, not an import).
+_ss_imports_agents() {
+  [ -f "$1" ] || return 1
+  LC_ALL=C grep -Eq '(^|[[:space:]])@([^[:space:]]*/)?AGENTS\.md([^[:alnum:]]|$)' "$1" 2>/dev/null
+}
+
+# _ss_is_3x_template <file> — 0 when the file is a copy, customized or not, of
+# the 3.x templates/CLAUDE.md. Fingerprint, taken from the template at every
+# v3.* tag (v3.0.0 … v3.3.3, five distinct versions): its signature line plus
+# at least 3 of the 8 Triforge-specific section headings all of them carry, at
+# any heading level. A copy with sections removed, added or reworded still
+# matches; a CLAUDE.md that only shares section names, or only quotes the
+# signature, does not.
+_ss_is_3x_template() {
+  local HITS
+  [ -f "$1" ] || return 1
+  LC_ALL=C grep -qF 'It works with the **Agent Triforge** plugin' "$1" 2>/dev/null || return 1
+  HITS=$(LC_ALL=C grep -Ec '^#{1,6}[[:space:]]+(Multi-agent system|Four coordination modes|Shared file protocol|Execution phases|Assignment heuristic|Portable skills|Specialized agents|Agent invocation patterns)' "$1" 2>/dev/null || true)
+  [ "${HITS:-0}" -ge 3 ]
+}
+
+# Stale template. An import path is relative to the file that holds it, so the
+# line to add differs by location.
+SS_CHAIN_IMPORTS=""
+for SS_FILE in CLAUDE.md .claude/CLAUDE.md CLAUDE.local.md; do
+  if _ss_imports_agents "$SS_FILE"; then SS_CHAIN_IMPORTS="yes"; fi
+done
+for SS_FILE in CLAUDE.md .claude/CLAUDE.md; do
+  if _ss_is_3x_template "$SS_FILE" && ! _ss_imports_agents "$SS_FILE"; then
+    case "$SS_FILE" in
+      .claude/*) SS_IMPORT="@../AGENTS.md" ;;
+      *)         SS_IMPORT="@AGENTS.md" ;;
+    esac
+    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}\nWARNING: ${SS_FILE} is a Triforge 3.x project template (a copy of the retired templates/CLAUDE.md). Triforge 4 ships AGENTS.md only, and Claude Code does not read AGENTS.md while this file exists without importing it. Run /setup to convert it, or add the line ${SS_IMPORT} to it yourself (session start never edits it)."
+  fi
+done
+
+# Above the project: every parent up to /. $HOME/.claude/CLAUDE.md is the
+# user-tier file and is skipped (both paths compared physically — /tmp and
+# /var are symlinks on macOS). One import anywhere in the chain, the project's
+# own files included, loads AGENTS.md, so it silences every line here.
+SS_ABOVE_NOTICES=""
+
+# _ss_prose <path> — the path as it may appear in MSG: control characters
+# dropped and backslashes doubled (MSG is expanded by printf %b, and no stdout
+# line may start with `{` — a newline in a directory name must not make one).
+_ss_prose() {
+  local TEXT
+  TEXT=$(printf '%s' "$1" | LC_ALL=C tr -d '\000-\037\177')
+  printf '%s' "${TEXT//\\/\\\\}"
+}
+
+SS_PROJECT=$(pwd -P 2>/dev/null || true)
+SS_HOME_REAL=""
+if [ -n "${HOME:-}" ] && [ -d "${HOME}" ]; then
+  SS_HOME_REAL=$(cd "$HOME" 2>/dev/null && pwd -P || true)
+fi
+case "$SS_PROJECT" in
+  /*)
+    SS_DIR="$SS_PROJECT"
+    while [ -n "$SS_DIR" ] && [ "$SS_DIR" != "/" ]; do
+      SS_DIR="${SS_DIR%/*}"
+      if [ -z "$SS_DIR" ]; then SS_DIR="/"; fi
+      SS_REL="${SS_PROJECT#"${SS_DIR%/}"/}"
+      for SS_NAME in CLAUDE.md .claude/CLAUDE.md CLAUDE.local.md; do
+        SS_FILE="${SS_DIR%/}/${SS_NAME}"
+        [ -f "$SS_FILE" ] || continue
+        if [ -n "$SS_HOME_REAL" ] && [ "$SS_FILE" = "${SS_HOME_REAL%/}/.claude/CLAUDE.md" ]; then continue; fi
+        if _ss_imports_agents "$SS_FILE"; then SS_CHAIN_IMPORTS="yes"; fi
+        case "$SS_NAME" in
+          .claude/*) SS_IMPORT="@../${SS_REL}/AGENTS.md" ;;
+          *)         SS_IMPORT="@${SS_REL}/AGENTS.md" ;;
+        esac
+        SS_ABOVE_NOTICES="${SS_ABOVE_NOTICES}\nWARNING: AGENTS.md is not loaded under a Claude lead: $(_ss_prose "$SS_FILE") sits above this project, and Claude Code reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working directory or above it. Add the line $(_ss_prose "$SS_IMPORT") to that file (an import path is relative to the file that holds it), or remove the file."
+      done
+    done
+    ;;
+esac
+if [ -z "$SS_CHAIN_IMPORTS" ]; then
+  INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_ABOVE_NOTICES}"
+fi
+
 # Check for existing state
 HAS_STATE=""
 HAS_TASKS=""
@@ -655,7 +788,7 @@ except ImportError:
     try:
         import tomli as tomllib
     except ImportError:
-        sys.exit(0)
+        sys.exit(3)    # no TOML parser: nonzero so the grep fallback below counts instead
 with open('.codex/triforge-agents.toml','rb') as f:
     data = tomllib.load(f)
 # Filter to dict values only — [agents] also holds scalar Triforge-internal
@@ -663,6 +796,9 @@ with open('.codex/triforge-agents.toml','rb') as f:
 # agent subtables.
 print(sum(1 for v in data.get('agents', {}).values() if isinstance(v, dict)))
 " 2>/dev/null || grep -c '^\[agents\.' .codex/triforge-agents.toml 2>/dev/null || true)
+  # A count that is empty or not a number (a parser that printed nothing)
+  # reads as 0 rather than breaking the integer test below.
+  case "$CODEX_AGENT_COUNT" in ''|*[!0-9]*) CODEX_AGENT_COUNT=0 ;; esac
   if [ "$CODEX_AGENT_COUNT" -gt "0" ]; then
     HAS_CODEX_AGENTS="yes"
   fi
@@ -691,6 +827,9 @@ fi
 if [ -n "$CODEX_MOVE_NOTICE" ]; then
   MSG="$MSG\n${CODEX_MOVE_NOTICE}"
 fi
+
+# Upgrade notices (R40): standing states, repeated every session until fixed.
+MSG="$MSG${INSTRUCTION_NOTICES:-}"
 
 # Lease-ledger resume orientation (KTD-4/U9): report active leases left by a
 # previous session. Deliberately NO auto-prune here — a session-start hook
