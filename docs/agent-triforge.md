@@ -14,10 +14,10 @@ The coordination model is hybrid: file-based shared state (TASKS.md, MEMORY.md, 
 
 | Agent | Invocation | Strengths | Primary domain |
 |---|---|---|---|
-| Claude Code (Fable 5.1 at max; Opus 5 at max when the host lacks Fable) | Native (lead agent) | Complex code generation, multi-file refactors, system design, business logic | Feature implementation, API design, database schemas, orchestration |
-| Claude Code subagents (Opus 5 floor; Fable 5.1 via the spawn-time override) | Native Agent tool | Parallel isolated tasks within Claude's domain | Splitting large build tasks into parallel tracks |
-| Claude Code agent teams (Opus 5 floor; Fable 5.1 via the spawn-time override) | Native team coordination | Multi-instance collaboration with shared task lists | Complex builds with 5+ interdependent tasks |
-| Claude specialized agents (Opus 5 floor; never-downgrade trio at max with the spawn-time Fable override) | Agent tool with agent definitions | Focused expertise (security, performance, plan validation, etc.) | Review enhancement, research, verification |
+| Claude Code (Fable 5.1 at max; Opus 5.5 at max when the host lacks Fable) | Native (lead agent) | Complex code generation, multi-file refactors, system design, business logic | Feature implementation, API design, database schemas, orchestration |
+| Claude Code subagents (Opus 5.5 floor; Fable 5.1 via the spawn-time override) | Native Agent tool | Parallel isolated tasks within Claude's domain | Splitting large build tasks into parallel tracks |
+| Claude Code agent teams (Opus 5.5 floor; Fable 5.1 via the spawn-time override) | Native team coordination | Multi-instance collaboration with shared task lists | Complex builds with 5+ interdependent tasks |
+| Claude specialized agents (Opus 5.5 floor; never-downgrade trio at max with the spawn-time Fable override) | Agent tool with agent definitions | Focused expertise (security, performance, plan validation, etc.) | Review enhancement, research, verification |
 | Antigravity CLI (`agy`) | `agy -p "..."` via bash, agent definitions in `antigravity-agents/agents/` (an agy plugin in the agy Markdown-agent format; `TRIFORGE_AGY_MODE` selects prompt-prefix injection — the shipped default — or native `--agent`) | Large context window (1M tokens, Gemini 3.8 Flash (High) by default; 3.1 Pro opt-in), whole-repo analysis, different model perspective, per-agent tools allowlists | Codebase analysis (Phase 0), code review, documentation, architecture audits |
 | Codex CLI | `codex exec "..."` via bash, Triforge agent definitions deployed as `.codex/triforge-agents.toml` (replayed as flags by the helper) | Native test runner, subagent parallelism, sandbox execution, per-agent sandbox modes | Testing, infrastructure, deployment, benchmarking, security review |
 
@@ -1300,10 +1300,9 @@ The sections below moved here on 2026-10-01 from `.claude/CLAUDE.md` when the ro
 ### Agent frontmatter fields
 
 Agent definitions in `agents/*.md` support these YAML frontmatter fields (verified against the official docs 2026-09-11):
-Agent definitions in `agents/*.md` support these YAML frontmatter fields (verified against the official docs 2026-09-11):
 - `name`, `description` (required) — identity and when-to-use trigger
 - `model` — `fable`, `opus`, `sonnet`, `haiku`, a full model ID, or `inherit`. Shipped Triforge agents floor at `opus`; the lead applies the spawn-time `fable` override (see the ladder above)
-- `effort` — `low`, `medium`, `high`, `xhigh`, `max` (`max` supported on Fable 5.1, Opus 5, and Sonnet 5); honored on pinned-default models only from Claude Code 2.1.267 — hence the floor
+- `effort` — `low`, `medium`, `high`, `xhigh`, `max` (`max` supported on Fable 5.1, Opus 5.5, and Sonnet 5); honored on pinned-default models only from Claude Code 2.1.267 — hence the floor
 - `tools` — allowlist of tools (Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, etc.); `disallowedTools` is the deny-side counterpart
 - `maxTurns` — maximum agentic turns before the agent stops
 - `initialPrompt` — new: auto-submitted first turn when the agent runs as the main session via `--agent`
@@ -1330,7 +1329,7 @@ Antigravity and Codex agent files use their CLIs' own conventions: Antigravity (
 Floors per KTD-13; the compatibility table itself is in the README.
 
 **Minimum supported versions / notes:**
-- **Claude Code ≥ 2.1.277** — the first build that reads a root `AGENTS.md` (D-037; only while no `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` exists in the working directory or above). It includes 2.1.267, the build that first honors `effort:` frontmatter on pinned-default models (Triforge's shipped `max`/`xhigh` only take effect from it); the `fable` alias resolves to Fable 5.1 from 2.1.257 and `opus` to Opus 5 from 2.1.219. Task/Todo tools are off on current models unless `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` (shipped in `settings.json`, D-031a).
+- **Claude Code ≥ 2.1.277** — the first build that reads a root `AGENTS.md` (D-037; only while no `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` exists in the working directory or above). It includes 2.1.267, the build that first honors `effort:` frontmatter on pinned-default models (Triforge's shipped `max`/`xhigh` only take effect from it); the `fable` alias resolves to Fable 5.1 from 2.1.257 and `opus` to Opus 5.5 from 2.1.280 (Opus 5 on 2.1.219–2.1.279). Task/Todo tools are off on current models unless `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` (shipped in `settings.json`, D-031a).
 - **Antigravity `agy` ≥ 1.1.27** — `denied_actions` in the JSON envelope (the completion signal `invoke_antigravity` reads); ≥ 1.1.10 is the hard minimum (`--model` was ignored under `-p` on 1.1.5–1.1.9). The Gemini CLI lane was retired in v3.0.0 (Google's hosted service stopped serving consumer tiers 2026-06-18; legacy Gemini users pin plugin v2.4.3).
 - **Codex ≥ 0.153.0** — `gpt-6-astra`'s `minimal_client_version`; `--output-schema` (structured review verdicts) and `codex features list` (runtime capability detection) predate it. Older versions degrade: `invoke_codex` still runs, but hook enforcement and structured verdicts silently fall back to raw output.
 - **OpenCode ≥ 1.18.20** — `opencode run` answers subagent permission asks. **Kimi ≥ 0.33.0** — agent-core-v2 engine; `--agent`/`--agent-file` in `-p` (KIMI-03 PASS on 0.42.0).

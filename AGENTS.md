@@ -72,7 +72,7 @@ for f in scripts/*.sh scripts/lib/*.sh hooks/handlers/*.sh; do /bin/bash -n "$f"
 | Writing user-tier config: the Codex trust entry, the agy allow/deny lists, Claude settings | the setup workflow (`commands/setup.md`) detects and prints; no Triforge writer touches `HOME` |
 | Launching a lead with `-s danger-full-access` | setup prints the launch line; nothing under `scripts/` execs a lead |
 | Consenting to a provider seeing code (enrolling an optional member, opting out of training) | `roster_enroll_member` returns 20 (needs-ask) interactively and leaves the question to the human; a decline persists as `enabled = false` |
-| Editing user-owned instruction files (a project's own `AGENTS.md` or `CLAUDE.md`) | `_bootstrap_copy` copies only where no file exists; the pointer block in `templates/AGENTS.md` is added by the human, or by setup after asking |
+| Editing user-owned instruction files (a project's own `AGENTS.md` or `CLAUDE.md`) | `_bootstrap_copy` copies only where no file exists; the pointer block in `templates/AGENTS.md` is added by the human (session start prints the copy line when a project has no `AGENTS.md`); nothing writes into an existing instruction file |
 | Approving a protected-path or `require_user_approval` promotion, and promoting to the main branch | `lease_promote` blocks (rc 42) and prints the by-hand merge; the approval is recorded, then `lease_rebaseline` |
 
 ## Where the rest lives

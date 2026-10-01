@@ -30,7 +30,7 @@
 
 A production-grade framework that turns Claude Code into a **lead agent** orchestrating a **six-CLI builder pool**. Instead of one model doing everything — or a fixed role for each CLI — a user-editable roster ([`ops/roster.toml`](templates/ops/roster.toml)) decides which CLI, model, and effort handles each role, and any member can implement code:
 
-- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** is the lead — it plans, resolves the roster, dispatches builders, and merges reviewed work (ladder: Fable 5.1 → Opus 5 → Sonnet 5)
+- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** is the lead — it plans, resolves the roster, dispatches builders, and merges reviewed work (ladder: Fable 5.1 → Opus 5.5 → Sonnet 5)
 - **Core trio (required):** Claude · **[Antigravity](https://antigravity.google/cli)** (`agy`, Gemini 3.8 Flash (High) by default, 1M context) · **[Codex](https://github.com/openai/codex)** (`gpt-6-astra`, sandboxed)
 - **Optional tier (auto-detected):** **OpenCode** (OpenRouter `glm-5.3`) · **Kimi Code** (`kimi-code/k3`) · **Cursor** (Grok 4.6) — enrolled through [`/setup`](commands/setup.md), gracefully absent when not
 - **19 Claude specialized agents** provide deep expertise in [security](agents/security-sentinel.md), [performance](agents/performance-oracle.md), [architecture](agents/architecture-strategist.md), and more
@@ -138,7 +138,7 @@ All agents, skills, commands, and hooks register automatically. Your project's `
 On first session in a new project, the `session-start.sh` hook:
 - Creates `ops/solutions/`, `ops/decisions/`, `ops/archive/`
 - Copies skeleton `MEMORY.md`, `CHANGELOG.md`, `AGENTS.md`, and `GOALS.md` from plugin templates into `ops/`
-- Your project's own instruction file is a root `AGENTS.md`; add Triforge's marked pointer block from [`templates/AGENTS.md`](templates/AGENTS.md) (the plugin ships no CLAUDE.md — a `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` in or above the project stops Claude Code from reading `AGENTS.md`)
+- Your project's own instruction file is a root `AGENTS.md`; add Triforge's marked pointer block from [`templates/AGENTS.md`](templates/AGENTS.md) to it yourself — session start prints the copy line when the project has none and never writes into an existing one (the plugin ships no CLAUDE.md — a `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` in or above the project stops Claude Code from reading `AGENTS.md`)
 - Creates `.claude/` directory for session state files
 
 ---
@@ -461,7 +461,7 @@ claude plugin install agent-triforge@agent-triforge --scope project
 
 That's it. No manual configuration needed — hooks, env vars, agents, skills, and commands are all registered automatically by the plugin system.
 
-On first session, the plugin bootstraps your project's `ops/` directory. Add the pointer block from `templates/AGENTS.md` to your project's root `AGENTS.md` (Triforge ships no CLAUDE.md).
+On first session, the plugin bootstraps your project's `ops/` directory. Add the pointer block from `templates/AGENTS.md` to your project's root `AGENTS.md` (Triforge ships no CLAUDE.md); session start prints the copy line when the project has none.
 
 ### Update
 

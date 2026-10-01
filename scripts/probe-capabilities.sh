@@ -1460,7 +1460,7 @@ if command -v claude >/dev/null 2>&1; then
     if (cd "$FIX" && _probe_run 240 claude -p --model fable "Respond with only: READY" > "$O" 2>&1) && _contains_ci "$O" "READY"; then
       row "CC-02" "claude" "Fable (alias) availability (ladder top rung)" "PASS" "$(_evidence "$O")" "live"
     else
-      row "CC-02" "claude" "Fable (alias) availability (ladder top rung)" "FAIL" "fable alias unavailable — the ladder falls to Opus 5 at max (model steps down, effort does not); $(_evidence "$O")" "live"
+      row "CC-02" "claude" "Fable (alias) availability (ladder top rung)" "FAIL" "fable alias unavailable — the ladder falls to the opus alias (Opus 5.5 from Claude Code 2.1.280) at max (model steps down, effort does not); $(_evidence "$O")" "live"
     fi
 
     # CC-03 — /goal fidelity probe, best-effort (D-030): three runs, majority.
@@ -1686,7 +1686,7 @@ COUNTER_MISMATCH=0
   echo "- **KIMI-03** → \`--agent-file\` carries the builder/reviewer briefs (D-024, KTD4). **KIMI-04** → \`--skills-dir\` is still present but no longer passed (D-024). **KIMI-05/KIMI-06** → stream-json capture shape; the \`kimi-code/k3\` alias. **KIMI-08/KIMI-09** → reviewer read-only allowlist + \`/skill:<name>\` expansion; PENDING-AUTH until \`kimi login\`."
   echo "- **CUR-01/CUR-03/CUR-05/CUR-12** → \`_cursor_bin\` resolution (cursor-agent first, verified \`agent\` fallback — CUR-11 is its fixture), the \`cursor-grok-4.6-xhigh\` pin, and the bare-family + effort → suffixed-id mapping (D-025, KTD3); **CUR-10** proves the bracket form is rejected."
   echo "- **CUR-06** → hook events not firing headless ⇒ no afterFileEdit attribution hook ships; lead-side ledger attribution covers it. **CUR-07/CUR-08** → sandbox + plan-mode read-only are the reviewer-role enforcement mechanisms. **CUR-09** → \`/<skill>\` expansion in \`-p\` from \`.cursor/skills/\`."
-  echo "- **CC-02** → the \`fable\` alias decides the spawn-time override for the lead + never-downgrade agents (ladder Fable 5.1 → Opus 5 → Sonnet 5, D-020)."
+  echo "- **CC-02** → the \`fable\` alias decides the spawn-time override for the lead + never-downgrade agents (ladder Fable 5.1 → Opus 5.5 → Sonnet 5, D-020/D-037; the one definition is TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh)."
   echo "- **CC-03** → best-effort (D-030): three runs, majority; \`ops/.sprint-complete\` + \`coordinate.sh\` stay the completion mechanism and \`/goal\` remains an assist composed into the prompt."
   echo "- **CC-04** → wave-orchestration may delegate 5+-task waves to dynamic workflows."
   echo "- **CC-05** → monitors parity not demonstrated ⇒ context-monitor.sh and tool-failure-monitor.sh stay, with this row as the recorded reason."
