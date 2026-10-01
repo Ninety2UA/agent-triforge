@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # validate-versions.sh — release-gate consistency checks for Agent Triforge
 # (U10 of the v3.3.0 plan: R15, AS-4/AS-5; KTD6 drift check; KTD12 sweep scope;
-# KTD15 — structural assertions only, no test framework. U21 of the v4 plan:
-# the one-definition ladder check (KTD22), the AGENTS.md budget (R10) and the
-# rule-inventory completeness check (R11)).
+# KTD15 — structural assertions only, no test framework; also the one-definition
+# ladder check (KTD22), the AGENTS.md budget (R10) and the rule-inventory
+# completeness check (R11)).
 #
 # Usage:
 #   bash scripts/validate-versions.sh [--no-sweep] [--no-counts]

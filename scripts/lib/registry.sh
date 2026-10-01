@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/registry.sh — data the other lanes read from one place (KTD7). In 3.3.3: the two protected-path lists and their match rule (KTD8); since U21 also the model ladder (KTD22)
+# scripts/lib/registry.sh — data the other lanes read from one place (KTD7). In 3.3.3: the two protected-path lists and their match rule (KTD8), and the model ladder (KTD22)
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh and before scripts/lib/lease.sh.

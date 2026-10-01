@@ -633,18 +633,26 @@ _ss_is_3x_template() {
   [ "${HITS:-0}" -ge 3 ]
 }
 
-# Stale template. An import path is relative to the file that holds it, so the
-# line to add differs by location.
+# _ss_import_line <name> <prefix> — set SS_IMPORT to the line that imports this
+# project's AGENTS.md from the instruction file <name> (CLAUDE.md,
+# CLAUDE.local.md or .claude/CLAUDE.md), <prefix> being the path from that
+# file's directory down to the project ("" in the project itself). An import
+# path is relative to the file that holds it, so a .claude/ file goes up one.
+_ss_import_line() {
+  case "$1" in
+    .claude/*) SS_IMPORT="@../${2}AGENTS.md" ;;
+    *)         SS_IMPORT="@${2}AGENTS.md" ;;
+  esac
+}
+
+# Stale template.
 SS_CHAIN_IMPORTS=""
 for SS_FILE in CLAUDE.md .claude/CLAUDE.md CLAUDE.local.md; do
   if _ss_imports_agents "$SS_FILE"; then SS_CHAIN_IMPORTS="yes"; fi
 done
 for SS_FILE in CLAUDE.md .claude/CLAUDE.md; do
   if _ss_is_3x_template "$SS_FILE" && ! _ss_imports_agents "$SS_FILE"; then
-    case "$SS_FILE" in
-      .claude/*) SS_IMPORT="@../AGENTS.md" ;;
-      *)         SS_IMPORT="@AGENTS.md" ;;
-    esac
+    _ss_import_line "$SS_FILE" ""
     INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}\nWARNING: ${SS_FILE} is a Triforge 3.x project template (a copy of the retired templates/CLAUDE.md). Triforge 4 ships AGENTS.md only, and Claude Code does not read AGENTS.md while this file exists without importing it. Run /setup to convert it, or add the line ${SS_IMPORT} to it yourself (session start never edits it)."
   fi
 done
@@ -681,10 +689,7 @@ case "$SS_PROJECT" in
         [ -f "$SS_FILE" ] || continue
         if [ -n "$SS_HOME_REAL" ] && [ "$SS_FILE" = "${SS_HOME_REAL%/}/.claude/CLAUDE.md" ]; then continue; fi
         if _ss_imports_agents "$SS_FILE"; then SS_CHAIN_IMPORTS="yes"; fi
-        case "$SS_NAME" in
-          .claude/*) SS_IMPORT="@../${SS_REL}/AGENTS.md" ;;
-          *)         SS_IMPORT="@${SS_REL}/AGENTS.md" ;;
-        esac
+        _ss_import_line "$SS_NAME" "${SS_REL}/"
         SS_ABOVE_NOTICES="${SS_ABOVE_NOTICES}\nWARNING: AGENTS.md is not loaded under a Claude lead: $(_ss_prose "$SS_FILE") sits above this project, and Claude Code reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working directory or above it. Add the line $(_ss_prose "$SS_IMPORT") to that file (an import path is relative to the file that holds it), or remove the file."
       done
     done

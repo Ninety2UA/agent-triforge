@@ -395,14 +395,14 @@ exit 0
 EOF
 chmod +x "$_S8/bin/claude"
 ( cd "$_S8/proj" && git init -q 2>/dev/null ) || true
-_S8_OUT1=$( cd "$_S8/proj" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/bin:$PATH" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ); _S8_RC1=$?
-_S8_OUT2=$( cd "$_S8/proj" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/bin:$PATH" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ); _S8_RC2=$?
-_S8_N1=$(printf '%s\n' "$_S8_OUT1" | grep -c '^session-start:' || true)
-_S8_N2=$(printf '%s\n' "$_S8_OUT2" | grep -c '^session-start:' || true)
-_S8_FAIL=""
 _s8_start() { # _s8_start <project> <claude --version answer> [HOME] — session start there; prints stdout + stderr
   ( cd "$1" && HOME="${3:-$_S8/home}" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/bin:$PATH" S8_CLAUDE_VERSION="$2" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 )
 }
+_S8_OUT1=$(_s8_start "$_S8/proj" "2.1.277"); _S8_RC1=$?
+_S8_OUT2=$(_s8_start "$_S8/proj" "2.1.277"); _S8_RC2=$?
+_S8_N1=$(printf '%s\n' "$_S8_OUT1" | grep -c '^session-start:' || true)
+_S8_N2=$(printf '%s\n' "$_S8_OUT2" | grep -c '^session-start:' || true)
+_S8_FAIL=""
 _s8_sane() { # _s8_sane <label> <output> — the hook did not crash and no line starts with `{`
   if printf '%s\n' "$2" | grep -q 'hook crashed'; then _S8_FAIL="$_S8_FAIL $1-hook-crashed"; fi
   if printf '%s\n' "$2" | grep -q '^{'; then _S8_FAIL="$_S8_FAIL $1-line-starts-with-brace"; fi
