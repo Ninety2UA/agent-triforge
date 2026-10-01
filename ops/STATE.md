@@ -1,6 +1,6 @@
 ---
 saved: 2026-10-01T00:45:00Z
-phase: 0-starting
+phase: 0-building
 wave: 0
 tasks:
   total: 29
@@ -29,7 +29,7 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 
 | PR | Units | Status |
 |---|---|---|
-| 0 | U21 validator prep + ladder source; U3 AGENTS.md + rule inventory; U22 session-start floor/stale-template; U4 removal test + pruning | next |
+| 0 | U21 validator prep + ladder source; U3 AGENTS.md + rule inventory; U22 session-start floor/stale-template; U4 removal test + pruning | building on `feat/v4-phase-0` (base `release/4.0`): U21 601277a ✓, U3 2a2011d ✓, U22 + U4 experiment in flight (2026-10-01 ~04:45 local); then simplify → ce-code-review → PR to release/4.0 → final-diff cross-review → merge |
 | 1a | U5 plugin-root resolver + locator; U26 CLI registry; U6 skill conformance validator | pending |
 | 1b | U7 commands → at- skills; U24 split oversized skills; U23 remove commands/ | pending |
 | 2a | U29 capability/survival probe rows; U13 detached leases + lease_wait + lead exit; U11 worker marker | pending |
@@ -45,7 +45,7 @@ Update this table and the frontmatter at every PR boundary; the plan is `docs/pl
 
 ## Next actions
 
-1. Phase 0 on `release/4.0`: `/ce-work` scoped to U21, U3, U22, U4 (read this file first). U3's `/doctor` baseline can't be taken headless — note it as "not taken (headless)" and rely on the validator budgets. U4's removal test uses `claude -p` (3 runs per arm minimum).
+1. Phase 0 is mid-build on branch `feat/v4-phase-0` (see the table). A worker that dies on the session limit leaves its edits uncommitted in the tree: inspect `git status`, finish its verification yourself, commit per unit (path-limited). AGENTS.md is at 15,268 of 16,384 bytes — later units must trim before they add. Original scope: U21, U3, U22, U4. U3's `/doctor` baseline can't be taken headless — note it as "not taken (headless)" and rely on the validator budgets. U4's removal test uses `claude -p` (3 runs per arm minimum).
 2. Ship: PR to `release/4.0` (template, provenance table, protected paths = Yes, cross-reviewer = the lead under the authorization above), independent Opus reviewers on the final diff, `gates.yml` green, then squash-merge.
 3. Repeat per the table. At the end: regenerate the probe record (U20), bump to 4.0.0, PR `release/4.0` → `main`, confirm `gh release view v4.0.0`.
 
