@@ -1,6 +1,6 @@
 ---
 saved: 2026-10-03T19:05:00Z
-phase: 1a-starting
+phase: 1a-simplify + 1b-building (overlapped)
 wave: 0
 tasks:
   total: 29
@@ -30,8 +30,8 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 | PR | Units | Status |
 |---|---|---|
 | 0 | U21 validator prep + ladder source; U3 AGENTS.md + rule inventory; U22 session-start floor/stale-template; U4 removal test + pruning | **merged** — PR #13 squash b647f3b on release/4.0 (2026-10-03); review run 20261001-225426-98b630ed + final cross-review PASS |
-| 1a | U5 plugin-root resolver + locator; U26 CLI registry; U6 skill conformance validator | next — branch `feat/v4-phase-1a` off release/4.0 |
-| 1b | U7 commands → at- skills; U24 split oversized skills; U23 remove commands/ | pending |
+| 1a | U5 plugin-root resolver + locator; U26 CLI registry; U6 skill conformance validator | built on `feat/v4-phase-1a`: U5 bf3a454, U6 5a7f5d0, U26 2d2aa41, fixtures protected d1f9192, validator simplify 2bfcbe5; hot-path simplify (worker simpA) in flight; then ce-code-review → PR → merge |
+| 1b | U7 commands → at- skills; U24 split oversized skills; U23 remove commands/ | building IN PARALLEL in worktree `/Users/dbenger/projects/.mafw-wt-phase-1b` (branch `feat/v4-phase-1b` off 2bfcbe5): U7 split over three workers (setup/build/ship/wrap/coordinate/review · plan/quick/test/debug/analyze/deep-research · status/pause/resume/compound/resolve-pr), U24 + the at- exclusion + the delivered-copy audit by a fourth; U23 after; PR targets release/4.0 once 1a merges (rebase) |
 | 2a | U29 capability/survival probe rows; U13 detached leases + lease_wait + lead exit; U11 worker marker | pending |
 | 2b | U9 [lead] table + resolution; U12 claude -p lane; U10 ledger lead CLI / reviewer class / approvals | pending |
 | 2c | U25 dispatch_persona lane; U8 personas home, agents/ removed | pending |
