@@ -3,8 +3,8 @@
 # SCRIPT invariants: roster chain rejection, coordinate.sh composition, the
 # adapter env allowlist and its no-push backstop, the R35 boundary note, the
 # Status-line parser seam, lease-lane skill discovery per CLI, the
-# TRIFORGE_TEST_BUILDER lifecycle, session-start idempotence and the skills
-# refresh's destructive paths).
+# TRIFORGE_TEST_BUILDER lifecycle, session-start idempotence plus its upgrade
+# notices (R40), and the skills refresh's destructive paths).
 #
 # NOT a standalone script: sourced by scripts/probe-capabilities.sh after the
 # per-CLI sections, inside the same shell, so it uses the harness's helpers
@@ -97,13 +97,13 @@ fi
 # adapter (the core trio authenticate via HOME-based stores), so a builder CAN
 # read credential files under $HOME; and there is no network filter, so egress
 # is not blocked. Recorded as INFO so the record matches the corrected KTD-14/R35
-# claim in .claude/CLAUDE.md instead of overclaiming confinement the code does
+# claim in AGENTS.md instead of overclaiming confinement the code does
 # not provide. The worktree limits where a builder starts, not where it writes;
 # the enforced controls are the env-var allowlist (SELF-03), the no-push config
 # (SELF-09), hardened lead git + integrity detection + snapshot-only merges
 # (SELF-18) and the protected-path gate (SELF-10).
 _S4_HOME=$( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null; _adapter_env codex env 2>/dev/null | grep -q '^HOME=' && echo yes || echo no )
-row "SELF-04" "claude" "R35 boundary: credential-store read + network egress are NOT confined (HOME forwarded, no net filter)" "INFO" "HOME reaches builder=${_S4_HOME}; the worktree limits where a builder starts, not where it writes; enforced: env-var allowlist, no-push config, lead-git hardening + integrity detection + snapshot-only merge, protected-path gate — NOT home-credential read-isolation, a write scope, or egress filtering (see .claude/CLAUDE.md Security model)" "static"
+row "SELF-04" "claude" "R35 boundary: credential-store read + network egress are NOT confined (HOME forwarded, no net filter)" "INFO" "HOME reaches builder=${_S4_HOME}; the worktree limits where a builder starts, not where it writes; enforced: env-var allowlist, no-push config, lead-git hardening + integrity detection + snapshot-only merge, protected-path gate — NOT home-credential read-isolation, a write scope, or egress filtering (see the Security model in docs/agent-triforge.md)" "static"
 
 # SELF-05 (KTD11): the contract-parsing seam — _lease_parse_status <file>
 # reads the builder's final-report `Status:` line and prints DONE |
@@ -356,6 +356,35 @@ fi
 # print ZERO lines starting with "session-start:" — every one-time action
 # (skills refresh + stamp, Codex file move, pack install + stamp) announces
 # itself with that prefix, so a repeat announcement is a non-idempotent step.
+#
+# R40 (upgrade notices), same throwaway tree, a stub `claude` on PATH whose
+# --version answer each run sets. The three notices describe a standing state,
+# so they print on EVERY session start until it is fixed and carry no
+# "session-start:" prefix — the idempotence count above is untouched by them.
+# Every run also asserts rc 0, no crash notice and no line starting with `{`.
+#   floor  2.1.276 -> warning naming 2.1.277 and AGENTS.md; 2.1.277 (runs 1+2),
+#          "2.1.284 (Claude Code)", 3.0.0 and an unparseable answer -> none;
+#          2.0.300 inside a JSON-shaped answer -> warning, answer never echoed
+#   stale  a customized 3.x templates/CLAUDE.md copy (signature line + at least
+#          3 of the 8 fingerprint headings) at ./CLAUDE.md and ./.claude/
+#          CLAUDE.md, no import of the project's AGENTS.md -> one notice each,
+#          files untouched; below 3 headings, or without the signature -> none
+#   above  CLAUDE.md, .claude/CLAUDE.md and CLAUDE.local.md in three levels
+#          above the project -> one notice per file, naming it and its import
+#          line; $HOME/.claude/CLAUDE.md (user tier) -> none; an import of the
+#          project's AGENTS.md in the chain (a parent file, or the project's
+#          own CLAUDE.md) -> none. One of the directories is named with a
+#          literal backslash-n and a `{`: every notice stays one line
+#   import an import path is relative to the file that holds it, so only one
+#          that RESOLVES to the project's AGENTS.md counts: `@AGENTS.md` and
+#          `@./AGENTS.md` in ./CLAUDE.md, `@../AGENTS.md` and an absolute path
+#          in ./.claude/CLAUDE.md, `@proj/AGENTS.md` in the parent -> silent;
+#          a bare `@AGENTS.md` in ./.claude/CLAUDE.md or in a parent's
+#          CLAUDE.md names some other AGENTS.md -> the notice stays
+#   repeat the floor and stale notices print again on a second run of the same
+#          unfixed project, still with zero "session-start:" lines
+#   tip    no ./AGENTS.md -> one `Tip:` line with the cp line for the pointer
+#          block (templates/AGENTS.md), every run; none once ./AGENTS.md exists
 _S8="${WORK}/self08"
 mkdir -p "$_S8/proj" "$_S8/bin" "$_S8/home"
 cat > "$_S8/bin/agy" <<'EOF'
@@ -370,17 +399,194 @@ esac
 exit 0
 EOF
 chmod +x "$_S8/bin/agy"
+cat > "$_S8/bin/claude" <<'EOF'
+#!/bin/sh
+# probe stub (SELF-08): `claude --version` answers $S8_CLAUDE_VERSION (default: the floor build), so the floor check never runs the host's claude
+case "${1:-}" in --version) printf '%s\n' "${S8_CLAUDE_VERSION:-2.1.277}" ;; esac
+exit 0
+EOF
+chmod +x "$_S8/bin/claude"
 ( cd "$_S8/proj" && git init -q 2>/dev/null ) || true
-_S8_OUT1=$( cd "$_S8/proj" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/bin:$PATH" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ); _S8_RC1=$?
-_S8_OUT2=$( cd "$_S8/proj" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/bin:$PATH" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ); _S8_RC2=$?
+_s8_start() { # _s8_start <project> <claude --version answer> [HOME] — session start there; prints stdout + stderr
+  ( cd "$1" && HOME="${3:-$_S8/home}" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/bin:$PATH" S8_CLAUDE_VERSION="$2" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 )
+}
+_S8_OUT1=$(_s8_start "$_S8/proj" "2.1.277"); _S8_RC1=$?
+_S8_OUT2=$(_s8_start "$_S8/proj" "2.1.277"); _S8_RC2=$?
 _S8_N1=$(printf '%s\n' "$_S8_OUT1" | grep -c '^session-start:' || true)
 _S8_N2=$(printf '%s\n' "$_S8_OUT2" | grep -c '^session-start:' || true)
-if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ]; then
-  row "SELF-08" "claude" "session-start.sh is idempotent (second run prints zero session-start: lines)" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy on PATH, CLAUDE_PLUGIN_ROOT=this checkout)" "static"
+_S8_FAIL=""
+_s8_sane() { # _s8_sane <label> <output> — the hook did not crash and no line starts with `{`
+  if printf '%s\n' "$2" | grep -q 'hook crashed'; then _S8_FAIL="$_S8_FAIL $1-hook-crashed"; fi
+  if printf '%s\n' "$2" | grep -q '^{'; then _S8_FAIL="$_S8_FAIL $1-line-starts-with-brace"; fi
+}
+_s8_run() { # _s8_run <label> <project> <claude --version answer> [HOME] — one session start; output in $_O
+  _O=$(_s8_start "$2" "$3" "${4:-}") || _S8_FAIL="$_S8_FAIL $1-rc-nonzero"
+  _s8_sane "$1" "$_O"
+}
+_s8_has() { printf '%s\n' "$_O" | grep -q -- "$1"; }
+# _s8_start_notimeout <project> — session start with no timeout/gtimeout on PATH and a
+# claude that never answers (sleeps 30 s): the floor probe's own watchdog must bound it.
+_s8_start_notimeout() {
+  local B="$_S8/bin-notimeout"
+  mkdir -p "$B"
+  printf '#!/bin/sh\nsleep 30\n' > "$B/claude"; chmod +x "$B/claude"
+  ln -sf "$_S8/bin/agy" "$B/agy" 2>/dev/null || true
+  ( cd "$1" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$B:/usr/bin:/bin" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 )
+}
+[ "$_S8_RC1" -eq 0 ] || _S8_FAIL="$_S8_FAIL run1-rc-nonzero"
+_s8_sane run1 "$_S8_OUT1"; _s8_sane run2 "$_S8_OUT2"
+# floor: 2.1.277 (the stub's default in runs 1 + 2) is at the floor
+printf '%s\n%s\n' "$_S8_OUT1" "$_S8_OUT2" | grep -q "below Triforge's floor" && _S8_FAIL="$_S8_FAIL floor-warning-at-2.1.277"
+printf '%s\n%s\n' "$_S8_OUT1" "$_S8_OUT2" | grep -q 'Triforge 3\.x project template' && _S8_FAIL="$_S8_FAIL stale-notice-in-a-clean-project"
+# tip: the throwaway project has no ./AGENTS.md, in run 1 and again in run 2
+for _S8_TEXT in "$_S8_OUT1" "$_S8_OUT2"; do
+  printf '%s\n' "$_S8_TEXT" | grep -q '^Tip: .*pointer block.*cp ".*/templates/AGENTS\.md" \./AGENTS\.md$' || _S8_FAIL="$_S8_FAIL no-pointer-block-tip-without-AGENTS.md"
+done
+# the 3.x template's headings (identical in every v3.* tag), without its signature line
+cat > "$_S8/skeleton.md" <<'EOF'
+## Project overview
+
+## Architecture
+
+### Multi-agent system
+
+### Four coordination modes
+
+### Shared file protocol (`ops/` directory)
+
+### Execution phases
+
+### Assignment heuristic
+
+### Key constraints
+
+### Quality gates
+
+## Reliability patterns
+
+## Context management
+
+## Portable skills
+
+## Specialized agents
+
+## Agent invocation patterns
+
+### Git trailer conventions
+
+## Prerequisites
+
+This project has not added an `@AGENTS.md` import yet.
+EOF
+{ printf '# CLAUDE.md\n\nThis file provides guidance to Claude Code when working with code in this project. It works with the **Agent Triforge** plugin.\n\n'; cat "$_S8/skeleton.md"; } > "$_S8/template.md"
+_s8_template() { # _s8_template <file> <last line> — the full 3.x template shape, ending in that line
+  { cat "$_S8/template.md"; printf '\n%s\n' "$2"; } > "$1"
+}
+# floor below + stale: ./CLAUDE.md is a heavily customized copy (text edited,
+# sections added and removed — exactly 3 fingerprint headings left);
+# ./.claude/CLAUDE.md is the full template shape plus a bare `@AGENTS.md`,
+# which from there names ./.claude/AGENTS.md. Neither imports the project's
+# AGENTS.md (the backticked mention in the skeleton is not an import). Two
+# runs: nothing was fixed in between, so the second repeats every notice.
+cat > "$_S8/proj/CLAUDE.md" <<'EOF'
+# CLAUDE.md — acme-api
+
+Guidance for Claude Code in acme-api. It works with the **Agent Triforge** plugin, plus our own deploy rules.
+
+## Deploy rules (ours)
+
+- never deploy on a Friday
+
+#### Four coordination modes
+
+trimmed
+
+### Execution phases
+
+trimmed
+
+## Portable skills
+
+trimmed
+EOF
+mkdir -p "$_S8/proj/.claude"
+_s8_template "$_S8/proj/.claude/CLAUDE.md" '@AGENTS.md'
+_S8_SUM=$(cksum "$_S8/proj/CLAUDE.md" "$_S8/proj/.claude/CLAUDE.md")
+for _S8_RUN in below below-again; do
+  _s8_run "$_S8_RUN" "$_S8/proj" "2.1.276"
+  _s8_has "^WARNING: Claude Code 2\.1\.276 is below Triforge's floor 2\.1\.277.*AGENTS\.md" || _S8_FAIL="$_S8_FAIL ${_S8_RUN}-no-floor-warning-at-2.1.276"
+  _s8_has '^WARNING: CLAUDE\.md is a Triforge 3\.x project template.*AGENTS\.md only.* @AGENTS\.md .*templates/AGENTS\.md.*never edits' || _S8_FAIL="$_S8_FAIL ${_S8_RUN}-no-stale-notice-for-CLAUDE.md"
+  _s8_has '^WARNING: \.claude/CLAUDE\.md is a Triforge 3\.x project template.*AGENTS\.md only.* @\.\./AGENTS\.md .*templates/AGENTS\.md.*never edits' || _S8_FAIL="$_S8_FAIL ${_S8_RUN}-no-stale-notice-for-.claude/CLAUDE.md-with-a-bare-import"
+  [ "$(cksum "$_S8/proj/CLAUDE.md" "$_S8/proj/.claude/CLAUDE.md")" = "$_S8_SUM" ] || _S8_FAIL="$_S8_FAIL ${_S8_RUN}-stale-template-file-edited"
+  [ "$(printf '%s\n' "$_O" | grep -c '^session-start:' || true)" -eq 0 ] || _S8_FAIL="$_S8_FAIL ${_S8_RUN}-standing-notice-printed-as-one-time-action"
+done
+# floor above + not stale: both full copies WITH the import line their notice
+# named, and a CLAUDE.md in the parent, which the project's own import answers.
+_s8_template "$_S8/proj/CLAUDE.md" '@AGENTS.md'
+_s8_template "$_S8/proj/.claude/CLAUDE.md" '@../AGENTS.md'
+printf '# monorepo rules\n' > "$_S8/CLAUDE.md"
+_s8_run imported "$_S8/proj" "2.1.284 (Claude Code)"
+_s8_has "below Triforge's floor" && _S8_FAIL="$_S8_FAIL floor-warning-at-2.1.284"
+_s8_has 'Triforge 3\.x project template' && _S8_FAIL="$_S8_FAIL stale-notice-for-imported-file"
+_s8_has 'self08/CLAUDE\.md' && _S8_FAIL="$_S8_FAIL parent-notice-despite-project-import"
+# the other forms that resolve to the project's AGENTS.md: ./ and an absolute path
+_s8_template "$_S8/proj/CLAUDE.md" '@./AGENTS.md'
+_s8_template "$_S8/proj/.claude/CLAUDE.md" "@$_S8/proj/AGENTS.md"
+_s8_run forms "$_S8/proj" "2.1.277"
+_s8_has 'Triforge 3\.x project template' && _S8_FAIL="$_S8_FAIL stale-notice-despite-dot-slash-or-absolute-import"
+_s8_has 'self08/CLAUDE\.md' && _S8_FAIL="$_S8_FAIL parent-notice-despite-dot-slash-or-absolute-import"
+rm -f "$_S8/CLAUDE.md"
+# above: a second project three levels down; all three file names. The top
+# level's name holds a literal backslash-n and a `{` — printed unescaped by
+# printf %b it would break the notice and start a line with `{`. The parent's
+# CLAUDE.md holds a bare `@AGENTS.md`: the parent's own AGENTS.md, not the
+# project's. The project has an AGENTS.md (so no tip), a CLAUDE.md with the
+# signature but only 2 fingerprint headings, and a .claude/CLAUDE.md with the
+# template's headings but not the signature.
+_S8A="$_S8/"'odd\n{dir}'
+_S8P="$_S8A/above/mid/proj"
+mkdir -p "$_S8P/.claude" "$_S8A/above/mid/.claude"
+( cd "$_S8P" && git init -q 2>/dev/null ) || true
+printf '# top rules\n' > "$_S8A/CLAUDE.md"
+printf '# local notes\n' > "$_S8A/above/CLAUDE.local.md"
+printf '# monorepo rules\n\n@AGENTS.md\n' > "$_S8A/above/mid/CLAUDE.md"
+printf '# more rules\n' > "$_S8A/above/mid/.claude/CLAUDE.md"
+printf '# acme-api agents\n' > "$_S8P/AGENTS.md"
+printf '# CLAUDE.md\n\nIt works with the **Agent Triforge** plugin.\n\n### Execution phases\n\n## Portable skills\n' > "$_S8P/CLAUDE.md"
+{ printf '# CLAUDE.md\n\nOur own notes, same section names.\n\n'; cat "$_S8/skeleton.md"; } > "$_S8P/.claude/CLAUDE.md"
+_s8_run above "$_S8P" "not-a-version"
+_s8_has '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/above/mid/CLAUDE\.md .* @proj/AGENTS\.md ' || _S8_FAIL="$_S8_FAIL no-notice-for-parent-CLAUDE.md-with-a-bare-import"
+_s8_has '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/above/mid/\.claude/CLAUDE\.md .* @\.\./proj/AGENTS\.md ' || _S8_FAIL="$_S8_FAIL no-notice-for-parent-.claude/CLAUDE.md"
+_s8_has '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/above/CLAUDE\.local\.md .* @mid/proj/AGENTS\.md ' || _S8_FAIL="$_S8_FAIL no-notice-for-grandparent-CLAUDE.local.md"
+_s8_has '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*self08/odd\\n{dir}/CLAUDE\.md .* @above/mid/proj/AGENTS\.md ' || _S8_FAIL="$_S8_FAIL no-notice-for-CLAUDE.md-in-the-backslash-n-directory"
+[ "$(printf '%s\n' "$_O" | grep -c '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*self08/odd\\n{dir}/.*, or remove the file\.$' || true)" -eq 4 ] || _S8_FAIL="$_S8_FAIL backslash-n-directory-name-not-intact-on-one-line"
+_s8_has "below Triforge's floor" && _S8_FAIL="$_S8_FAIL floor-warning-for-unparseable-version"
+_s8_has 'Triforge 3\.x project template' && _S8_FAIL="$_S8_FAIL stale-notice-without-signature-or-below-3-headings"
+_s8_has '^Tip: ' && _S8_FAIL="$_S8_FAIL pointer-block-tip-despite-AGENTS.md"
+# user tier: with HOME = the parent, its .claude/CLAUDE.md is ~/.claude/CLAUDE.md
+_s8_run user-tier "$_S8P" "3.0.0" "$_S8A/above/mid"
+_s8_has '/above/mid/\.claude/CLAUDE\.md' && _S8_FAIL="$_S8_FAIL user-tier-CLAUDE.md-named"
+_s8_has 'is not loaded under a Claude lead: [^ ]*/above/mid/CLAUDE\.md ' || _S8_FAIL="$_S8_FAIL parent-notice-lost-with-HOME-above"
+# watchdog: with no timeout binary a hung claude is given up on after 10 s, session start exits 0 and warns about nothing
+_S8_T0=$(date +%s)
+_O=$(_s8_start_notimeout "$_S8/proj") || _S8_FAIL="$_S8_FAIL notimeout-rc-nonzero"
+_S8_T1=$(( $(date +%s) - _S8_T0 ))
+_s8_sane notimeout "$_O"
+[ "$_S8_T1" -lt 20 ] || _S8_FAIL="$_S8_FAIL notimeout-hung-claude-not-bounded(${_S8_T1}s)"
+_s8_has 'below Triforge' && _S8_FAIL="$_S8_FAIL notimeout-floor-warning-without-an-answer"
+_s8_has "below Triforge's floor" && _S8_FAIL="$_S8_FAIL floor-warning-at-3.0.0"
+# fixed: the parent file now imports the project's AGENTS.md
+printf '\n@proj/AGENTS.md\n' >> "$_S8A/above/mid/CLAUDE.md"
+_s8_run chain-import "$_S8P" '{"version": "2.0.300"}'
+_s8_has 'is not loaded under a Claude lead' && _S8_FAIL="$_S8_FAIL parent-notice-despite-import-in-chain"
+_s8_has "^WARNING: Claude Code 2\.0\.300 is below Triforge's floor 2\.1\.277" || _S8_FAIL="$_S8_FAIL no-floor-warning-at-2.0.300"
+_S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines) and prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40)"
+if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
+  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; pointer-block tip without ./AGENTS.md, none with it; every run rc 0, no crash, no line starting with {" "static"
 else
-  row "SELF-08" "claude" "session-start.sh is idempotent (second run prints zero session-start: lines)" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160)" "static"
+  row "SELF-08" "claude" "$_S8_CAP" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160); mismatch:${_S8_FAIL:- none}" "static"
 fi
-rm -rf "$_S8/proj" "$_S8/home"   # keep $_S8/bin (the stub agy) for SELF-08b; removed there
+rm -rf "$_S8/proj" "$_S8/home" "$_S8A" "$_S8/skeleton.md" "$_S8/template.md"   # keep $_S8/bin (the stub agy + claude) for SELF-08b; removed there
 
 # SELF-08b (KTD12 / R31 / CWE-59): the skills refresh touches only what it can
 # prove it wrote. Session start (CLAUDE_PLUGIN_ROOT = this checkout) on:
@@ -508,7 +714,7 @@ fi
 rm -rf "$_S9"
 
 # SELF-10 (KTD8 / R30): the protected-path lists. (a) Every path named on the
-# "**Protected paths**" line of .claude/CLAUDE.md classifies as protected in
+# "**Protected paths**" line of the root AGENTS.md classifies as protected in
 # this checkout (a glob is instantiated, a directory gets a child) — with a
 # negative control: the same check over a copy carrying one planted
 # unprotected path must name exactly that path. (b) The classifier matches a
@@ -569,9 +775,9 @@ for t in toks:
     done )
 }
 _S10_FAIL=""
-_S10_REAL=$(_s10_doc_misses "${REPO_ROOT}/.claude/CLAUDE.md")
+_S10_REAL=$(_s10_doc_misses "${REPO_ROOT}/AGENTS.md")
 [ -z "$_S10_REAL" ] || _S10_FAIL="$_S10_FAIL doc-paths-unprotected:[${_S10_REAL% }]"
-sed 's#^- \*\*Protected paths\*\*\(.*\)$#- **Protected paths**\1 `scripts/not-a-protected-probe.sh`#' "${REPO_ROOT}/.claude/CLAUDE.md" > "${WORK}/s10-planted.md"
+sed 's#^- \*\*Protected paths\*\*\(.*\)$#- **Protected paths**\1 `scripts/not-a-protected-probe.sh`#' "${REPO_ROOT}/AGENTS.md" > "${WORK}/s10-planted.md"
 _S10_NEG=$(_s10_doc_misses "${WORK}/s10-planted.md")
 [ "${_S10_NEG% }" = "scripts/not-a-protected-probe.sh" ] || _S10_FAIL="$_S10_FAIL negative-control(got:[${_S10_NEG% }])"
 
@@ -653,9 +859,9 @@ _s10_expect submodule 42 ' .claude  (project_protected)'
 _s10_expect submodule 42 ' .gitmodules  (project_protected)'
 _s10_expect corrupt 42 'classifier failed'
 if [ -z "$_S10_FAIL" ]; then
-  row "SELF-10" "claude" "protected paths: CLAUDE.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "PASS" "every path on the CLAUDE.md protected line classifies as protected (planted path caught); classifier flags bare .agents (project) + skills (framework), not .clauder/claudeish; fw fixture: roster.sh / git mv pre-push / sub/AGENTS.md / AGENTS.override.md / .mcp.json / Hooks/handlers/x.sh / symlinks .claude + hooks -> rc 42 naming the path; manifest renamed / deleted / unparseable -> still the Triforge checkout (roster.sh -> 42); docs-only -> promoted; user fixture: scripts/lib/util.sh -> promoted, ops/roster.toml / symlink .cursor / opencode.json -> 42, a nested repo at .claude + .gitmodules ignore=all -> 42 naming .claude and .gitmodules (--ignore-submodules=none); corrupted registry literal -> 42 naming the classifier error; per-case lease root + throwaway HOME" "static"
+  row "SELF-10" "claude" "protected paths: AGENTS.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "PASS" "every path on the AGENTS.md protected line classifies as protected (planted path caught); classifier flags bare .agents (project) + skills (framework), not .clauder/claudeish; fw fixture: roster.sh / git mv pre-push / sub/AGENTS.md / AGENTS.override.md / .mcp.json / Hooks/handlers/x.sh / symlinks .claude + hooks -> rc 42 naming the path; manifest renamed / deleted / unparseable -> still the Triforge checkout (roster.sh -> 42); docs-only -> promoted; user fixture: scripts/lib/util.sh -> promoted, ops/roster.toml / symlink .cursor / opencode.json -> 42, a nested repo at .claude + .gitmodules ignore=all -> 42 naming .claude and .gitmodules (--ignore-submodules=none); corrupted registry literal -> 42 naming the classifier error; per-case lease root + throwaway HOME" "static"
 else
-  row "SELF-10" "claude" "protected paths: CLAUDE.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "FAIL" "mismatch:$(printf '%s' "$_S10_FAIL" | cut -c1-600)" "static"
+  row "SELF-10" "claude" "protected paths: AGENTS.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "FAIL" "mismatch:$(printf '%s' "$_S10_FAIL" | cut -c1-600)" "static"
 fi
 rm -rf "$_S10" "${WORK}"/s10-*
 

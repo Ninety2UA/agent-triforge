@@ -243,7 +243,7 @@ After execution, produce:
 
 Shipped frontmatter floors at `opus` — no shipped file names a model a host may lack. team-lead and the never-downgrade trio (security-sentinel, plan-checker, findings-synthesizer) ship at `effort: max`; the other 15 agents ship at `effort: xhigh`. When spawning subagents for narrow, rubric-following tasks (e.g., learnings-researcher, convention-enforcer), you MAY step down the runtime ladder one tier at a time:
 
-Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (Opus 5) + `xhigh` → `opus`+`high` → `sonnet` (Sonnet 5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.
+Downgrade ladder for narrow runtime tasks — the single definition is `TRIFORGE_MODEL_LADDER` in `scripts/lib/registry.sh` (`triforge_ladder` prints it after sourcing `scripts/invoke-external.sh`): `fable`+`max` → `opus` (Opus 5.5) + `xhigh` → `opus`+`high` → `sonnet`+`high`; never downgrade security-sentinel, plan-checker, or findings-synthesizer.
 
 - Pick the smallest downgrade that fits the task — don't skip to Sonnet when Opus/xhigh would do.
 - Only downgrade for tasks with clear rubrics and limited scope.

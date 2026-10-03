@@ -64,7 +64,7 @@ So Cursor's reviewer read-only is `--mode plan` (real) + the `readonly:` def
 ## Skills and commands
 
 Cursor discovers skills from `.agents/skills/` (where the lease provisions
-Triforge's twelve), `.cursor/skills/`, `.claude/skills/`, and `.codex/skills/`;
+Triforge's ten), `.cursor/skills/`, `.claude/skills/`, and `.codex/skills/`;
 `/name` in a `-p` prompt runs a skill or a `.cursor/commands/` command
 headless (probe CUR-09).
 

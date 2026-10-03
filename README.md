@@ -30,7 +30,7 @@
 
 A production-grade framework that turns Claude Code into a **lead agent** orchestrating a **six-CLI builder pool**. Instead of one model doing everything — or a fixed role for each CLI — a user-editable roster ([`ops/roster.toml`](templates/ops/roster.toml)) decides which CLI, model, and effort handles each role, and any member can implement code:
 
-- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** is the lead — it plans, resolves the roster, dispatches builders, and merges reviewed work (ladder: Fable 5.1 → Opus 5 → Sonnet 5)
+- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** is the lead — it plans, resolves the roster, dispatches builders, and merges reviewed work (ladder: Fable 5.1 → Opus 5.5 → Sonnet 5)
 - **Core trio (required):** Claude · **[Antigravity](https://antigravity.google/cli)** (`agy`, Gemini 3.8 Flash (High) by default, 1M context) · **[Codex](https://github.com/openai/codex)** (`gpt-6-astra`, sandboxed)
 - **Optional tier (auto-detected):** **OpenCode** (OpenRouter `glm-5.3`) · **Kimi Code** (`kimi-code/k3`) · **Cursor** (Grok 4.6) — enrolled through [`/setup`](commands/setup.md), gracefully absent when not
 - **19 Claude specialized agents** provide deep expertise in [security](agents/security-sentinel.md), [performance](agents/performance-oracle.md), [architecture](agents/architecture-strategist.md), and more
@@ -91,7 +91,7 @@ Follow-ups from the v3.3.0 code review (PR #8 "Unapplied review findings"), ship
 
 ### v3.2.0 — the watch cycle became repo-local maintainer tooling
 
-**The plugin got leaner: the watch cycle is now repo-local maintainer tooling.** `/cli-watch` and `/repo-watch` — the monthly cycles that keep Triforge itself current against its six CLIs and four reference repos — never belonged in the shipped command set. They now live in this checkout's `.claude/commands/`, with the `watch-cycle` skill in `.claude/skills/` and the watch registry tracked at `ops/watch-registry.toml`. The plugin ships 17 commands and 12 skills, and `session-start.sh` no longer copies a watch registry into your `ops/`. Run the watches from a clone of this repo (see [Keeping the framework current](#keeping-the-framework-current-cli-watch-repo-watch--maintainers)); nothing changes for `/setup`, `/ship`, or any other command.
+**The plugin got leaner: the watch cycle is now repo-local maintainer tooling.** `/cli-watch` and `/repo-watch` — the monthly cycles that keep Triforge itself current against its six CLIs and four reference repos — never belonged in the shipped command set. They now live in this checkout's `.claude/commands/`, with the `watch-cycle` skill in `.claude/skills/` and the watch registry tracked at `ops/watch-registry.toml`. At this release the plugin shipped 17 commands and 12 skills (previously 19 and 13), and `session-start.sh` no longer copies a watch registry into your `ops/`. Run the watches from a clone of this repo (see [Keeping the framework current](#keeping-the-framework-current-cli-watch-repo-watch--maintainers)); nothing changes for `/setup`, `/ship`, or any other command.
 
 ### v3.1.0 — role customization in guided onboarding
 
@@ -137,8 +137,8 @@ All agents, skills, commands, and hooks register automatically. Your project's `
 
 On first session in a new project, the `session-start.sh` hook:
 - Creates `ops/solutions/`, `ops/decisions/`, `ops/archive/`
-- Copies skeleton `MEMORY.md`, `CHANGELOG.md`, `AGENTS.md`, and `GOALS.md` from plugin templates
-- Suggests copying the `CLAUDE.md` template if not present
+- Copies skeleton `MEMORY.md`, `CHANGELOG.md`, `AGENTS.md`, and `GOALS.md` from plugin templates into `ops/`
+- Your project's own instruction file is a root `AGENTS.md`; add Triforge's marked pointer block from [`templates/AGENTS.md`](templates/AGENTS.md) to it yourself — session start prints the copy line when the project has none and never writes into an existing one (the plugin ships no CLAUDE.md — a `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` in or above the project stops Claude Code from reading `AGENTS.md`)
 - Creates `.claude/` directory for session state files
 
 ---
@@ -179,18 +179,19 @@ The plugin provides agents, skills, commands, and hooks. Your project gets an `o
 agent-triforge/                     (plugin — installed automatically)
 ├── .claude-plugin/plugin.json        Plugin manifest
 ├── agents/                           19 specialized agent definitions
-├── skills/                           12 portable workflow modules
+├── skills/                           10 portable workflow modules
 ├── commands/                         17 slash commands
 ├── hooks/
 │   ├── hooks.json                    Hook registration
 │   └── handlers/                     4 lifecycle hook scripts
 ├── settings.json                     Default env vars
-├── templates/                        Project bootstrapping templates
+├── AGENTS.md                         The plugin's own instructions: checks, conventions, confinement, human-only actions
+├── templates/                        Project bootstrapping templates (AGENTS.md pointer block, ops/ skeleton, per-CLI files)
 ├── scripts/coordinate.sh            Outer loop for context recovery
-└── scripts/validate-*.sh            Release gates: skill structure; version lockstep + ladder md5 + stale-pin sweep
+└── scripts/validate-*.sh            Release gates: skill structure; version lockstep + ladder one-definition + stale-pin sweep
 
 your-project/                       (your repo — bootstrapped on first session)
-├── CLAUDE.md                         Orchestration protocol (copy from template)
+├── AGENTS.md                         Your instruction file, with Triforge's pointer block (templates/AGENTS.md)
 ├── ops/                              Shared coordination files
 │   ├── AGENTS.md                       Master operating protocol for all agents
 │   ├── GOALS.md                        High-level product goals
@@ -243,7 +244,7 @@ Every goal flows through a structured pipeline. Run [`/ship`](commands/ship.md) 
 | **1.1 — Ambiguity** | Surface top 3 unverified assumptions, ask user to confirm/correct | Claude | [`/plan`](commands/plan.md), [`/ship`](commands/ship.md) |
 | **2 — Build** | Wave orchestration with integration verification between waves | Claude subagents or [`team-lead`](agents/team-lead.md) | [`/build`](commands/build.md) |
 | **3–4 — Review** | Up to 7 parallel reviewers, synthesized with confidence tiering | Antigravity + Codex + [review agents](#review-specialists-6) | [`/review`](commands/review.md) |
-| **5 — Test** | TDD test writing, gap analysis, fix cycle until green | Codex CLI + [`test-driven-development`](skills/test-driven-development/SKILL.md) | [`/test`](commands/test.md) |
+| **5 — Test** | TDD test writing, gap analysis, fix cycle until green | Codex CLI ([`test_writer`](codex-agents/agents.toml)) | [`/test`](commands/test.md) |
 | **6 — Ship** | Document solutions, archive reviews, write STATE.md | Claude + [`knowledge-compounding`](skills/knowledge-compounding/SKILL.md) | [`/wrap`](commands/wrap.md) |
 
 ---
@@ -349,7 +350,7 @@ Each reviewer has a "Do Not Flag" list to reduce noise — readability-aiding re
 
 ## Test Pipeline (`/test`)
 
-Identifies untested code paths with [`test-gap-analyzer`](agents/test-gap-analyzer.md), then writes and runs tests via [Codex CLI](https://github.com/openai/codex) using the TDD skill in a sandboxed environment.
+Identifies untested code paths with [`test-gap-analyzer`](agents/test-gap-analyzer.md), then writes and runs tests via [Codex CLI](https://github.com/openai/codex), failing test first, in a sandboxed environment.
 
 <p align="center">
   <img src="docs/images/testing-flow.svg" alt="Test pipeline — gap analysis, Codex TDD, fix cycle" width="80%">
@@ -359,7 +360,7 @@ Identifies untested code paths with [`test-gap-analyzer`](agents/test-gap-analyz
 
 ## Debugging (`/debug`)
 
-Structured debugging with [`systematic-debugging`](skills/systematic-debugging/SKILL.md): reproduce the bug first, perform root cause analysis, then fix with evidence. A **circuit breaker** enforces a 3-attempt ceiling per issue — if the same error recurs after 3 consecutive fix attempts, the agent stops and produces an escalation report instead of looping.
+Structured debugging: reproduce the bug first, perform root cause analysis, then fix with evidence. A **circuit breaker** enforces a 3-attempt ceiling per issue — if the same error recurs after 3 consecutive fix attempts, the agent stops and produces an escalation report instead of looping.
 
 <p align="center">
   <img src="docs/images/debug-flow.svg" alt="Debugging — reproduce, diagnose, fix" width="80%">
@@ -378,11 +379,11 @@ Five non-negotiable checkpoints enforced at every stage:
 | Gate | Enforced by | Rule |
 |---|---|---|
 | **1 — Plan validated** | [`plan-checker`](agents/plan-checker.md) agent | No build without validated plan (max 3 iterations) |
-| **2 — Failing test first** | [`test-driven-development`](skills/test-driven-development/SKILL.md) skill | No production code without a failing test |
-| **3 — Root cause first** | [`systematic-debugging`](skills/systematic-debugging/SKILL.md) skill | No fix without diagnosis |
+| **2 — Failing test first** | [`/test`](commands/test.md) workflow, Codex [`test_writer`](codex-agents/agents.toml) | No production code without a failing test |
+| **3 — Root cause first** | [`/debug`](commands/debug.md) workflow, Codex [`debugger`](codex-agents/agents.toml) | No fix without diagnosis |
 | **4 — Evidence first** | [`verification-before-completion`](skills/verification-before-completion/SKILL.md) skill | No "done" without proof |
 | **5 — Review first** | [`review-synthesis`](skills/review-synthesis/SKILL.md) skill | No merge without code review (max 3 cycles) |
-| **6 — Circuit breaker** | [`systematic-debugging`](skills/systematic-debugging/SKILL.md) skill | 3-attempt ceiling per issue, then escalation report |
+| **6 — Circuit breaker** | [`/debug`](commands/debug.md) workflow, Codex [`debugger`](codex-agents/agents.toml) | 3-attempt ceiling per issue, then escalation report |
 
 ---
 
@@ -395,8 +396,9 @@ Five non-negotiable checkpoints enforced at every stage:
 **Core trio (required):**
 
 ```bash
-# Claude Code ≥ 2.1.267 — the build that first honors `effort:` frontmatter on
-# pinned-default models; the `fable` alias resolves to Fable 5.1 from 2.1.257
+# Claude Code ≥ 2.1.277 — the first build that reads a root AGENTS.md (D-037);
+# 2.1.267 first honored `effort:` frontmatter on pinned-default models and the
+# `fable` alias resolves to Fable 5.1 from 2.1.257
 claude --version
 
 # Antigravity CLI ≥ 1.1.27 — https://antigravity.google/cli (run `agy` once interactively to log in)
@@ -429,14 +431,14 @@ Re-baselined from the newest capability probe record — currently [`ops/researc
 
 | CLI | Tier | Floor (KTD-13) | Tested | READY probe |
 |---|---|---|---|---|
-| Claude Code (`claude`) | core | ≥ 2.1.267 | 2.1.269 | `claude --version` |
+| Claude Code (`claude`) | core | ≥ 2.1.277 | 2.1.284 | `claude --version` |
 | Antigravity (`agy`) | core | ≥ 1.1.27 | 1.2.1 | `agy --model "Gemini 3.8 Flash (High)" -p "Respond with only: READY"` |
 | Codex (`codex`) | core | ≥ 0.153.0 | 0.154.0 | `codex exec "Respond with only: READY"` |
 | OpenCode (`opencode`) | optional | ≥ 1.18.20 | 1.18.30 | `opencode run --format json -m openrouter/z-ai/glm-5.3 "…"` |
 | Kimi Code (`kimi`) | optional | ≥ 0.33.0 | 0.42.0 (AUTH-FAIL on the probe host; live rows PENDING-AUTH until `kimi login`) | `kimi -p "…"` |
 | Cursor (`cursor-agent`; `agent` fallback) | optional | date-versioned | 2026.09.10 | `cursor-agent -p --trust --model cursor-grok-4.6-xhigh "…"` |
 
-Why these floors: Claude Code 2.1.267 is the first build that honors `effort:` frontmatter on pinned-default models; agy 1.1.27 adds `denied_actions` to the JSON envelope that `invoke_antigravity` reads as its completion signal; Codex 0.153.0 is `gpt-6-astra`'s minimal client; OpenCode 1.18.20 answers subagent permission asks under `run`; Kimi 0.33.0 is the agent-core-v2 engine with `--agent-file`. The Gemini CLI floor was removed with the Antigravity migration (Google's hosted service stopped serving consumer tiers 2026-06-18); legacy Gemini users pin plugin `v2.4.3`. An absent or declined optional CLI is silently skipped — fallback chains always terminate at a core-trio member, which can't be disabled.
+Why these floors: Claude Code 2.1.277 is the first build that reads a root `AGENTS.md`, Triforge's only instruction file (D-037; it includes the 2.1.267 fix that honors `effort:` frontmatter on pinned-default models); agy 1.1.27 adds `denied_actions` to the JSON envelope that `invoke_antigravity` reads as its completion signal; Codex 0.153.0 is `gpt-6-astra`'s minimal client; OpenCode 1.18.20 answers subagent permission asks under `run`; Kimi 0.33.0 is the agent-core-v2 engine with `--agent-file`. The Gemini CLI floor was removed with the Antigravity migration (Google's hosted service stopped serving consumer tiers 2026-06-18); legacy Gemini users pin plugin `v2.4.3`. An absent or declined optional CLI is silently skipped — fallback chains always terminate at a core-trio member, which can't be disabled.
 
 ### Data egress and credentials
 
@@ -459,7 +461,7 @@ claude plugin install agent-triforge@agent-triforge --scope project
 
 That's it. No manual configuration needed — hooks, env vars, agents, skills, and commands are all registered automatically by the plugin system.
 
-On first session, the plugin bootstraps your project's `ops/` directory and suggests copying the CLAUDE.md template.
+On first session, the plugin bootstraps your project's `ops/` directory. Add the pointer block from `templates/AGENTS.md` to your project's root `AGENTS.md` (Triforge ships no CLAUDE.md); session start prints the copy line when the project has none.
 
 ### Update
 
@@ -474,7 +476,7 @@ git clone https://github.com/Ninety2UA/agent-triforge.git
 claude --plugin-dir ./agent-triforge
 ```
 
-Releases are cut by CI: when a version bump lands on `main`, [`release.yml`](.github/workflows/release.yml) tags `v<version>` and publishes the GitHub release with this README's matching "Recent changes" entry as the notes (`bash scripts/release-notes.sh --body` previews it; the full checklist is in [`.claude/CLAUDE.md`](.claude/CLAUDE.md)).
+Releases are cut by CI: when a version bump lands on `main`, [`release.yml`](.github/workflows/release.yml) tags `v<version>` and publishes the GitHub release with this README's matching "Recent changes" entry as the notes (`bash scripts/release-notes.sh --body` previews it; the short checklist is in [`AGENTS.md`](AGENTS.md) "Release", the full one in [`docs/agent-triforge.md`](docs/agent-triforge.md) "Release checklist").
 
 ### Verify installation
 
@@ -539,7 +541,7 @@ claude
 | Command | What it does |
 |---|---|
 | [**`/quick <change>`**](commands/quick.md) | For changes touching < 3 files. Skips heavy machinery. |
-| [**`/debug <bug>`**](commands/debug.md) | Structured [debugging](skills/systematic-debugging/SKILL.md): reproduce, diagnose, fix with root cause analysis. |
+| [**`/debug <bug>`**](commands/debug.md) | Structured debugging: reproduce, diagnose, fix with root cause analysis. |
 
 ### Research and operations
 
@@ -573,7 +575,7 @@ Two **repo-local** commands keep the framework current instead of hand-running a
 
 ## Skills reference
 
-12 portable, model-agnostic workflow modules that any agent can consume. Skills embedded in native Antigravity/Codex agent definitions (`antigravity-agents/agents/`, `codex-agents/`) at install time; prompt-prefix injection of the agent body kicks in automatically when a CLI doesn't surface native agent definitions.
+10 portable, model-agnostic workflow modules that any agent can consume. Skills embedded in native Antigravity/Codex agent definitions (`antigravity-agents/agents/`, `codex-agents/`) at install time; prompt-prefix injection of the agent body kicks in automatically when a CLI doesn't surface native agent definitions.
 
 | Skill | Primary consumer | What it teaches the agent |
 |---|---|---|
@@ -581,8 +583,6 @@ Two **repo-local** commands keep the framework current instead of hand-running a
 | [**`writing-plans`**](skills/writing-plans/SKILL.md) | Claude (Phase 1) | Task decomposition with shadow paths, error maps, interface context |
 | [**`shadow-path-tracing`**](skills/shadow-path-tracing/SKILL.md) | Claude (Phase 1) | Enumerate every failure path alongside the happy path |
 | [**`wave-orchestration`**](skills/wave-orchestration/SKILL.md) | Claude (Phase 2) | Dependency-grouped parallel execution with integration checks |
-| [**`test-driven-development`**](skills/test-driven-development/SKILL.md) | [Codex](https://github.com/openai/codex) (Phase 5) | RED-GREEN-REFACTOR: no production code without failing test |
-| [**`systematic-debugging`**](skills/systematic-debugging/SKILL.md) | Codex, Claude | Error taxonomy, assumption tracking, bisection, root cause, circuit breaker |
 | [**`iterative-refinement`**](skills/iterative-refinement/SKILL.md) | Claude (Phase 4) | Review-fix-review loops with convergence modes |
 | [**`review-synthesis`**](skills/review-synthesis/SKILL.md) | Claude (Phase 4) | Merge multi-reviewer findings with confidence tiering |
 | [**`verification-before-completion`**](skills/verification-before-completion/SKILL.md) | All agents | Evidence-based completion checklist |
@@ -740,7 +740,7 @@ The <strong>core trio</strong> (Claude, Antigravity, Codex) is the supported bas
 <details>
 <summary><strong>Do I need all the skills?</strong></summary>
 
-No. Skills activate contextually. If you never use TDD, the <a href="skills/test-driven-development/SKILL.md">test-driven-development</a> skill won't activate. You can delete any skill directory you don't want.
+No. Skills activate contextually. If you never cut scope, the <a href="skills/scope-cutting/SKILL.md">scope-cutting</a> skill won't activate. You can delete any skill directory you don't want.
 </details>
 
 <details>
@@ -1283,7 +1283,7 @@ MIT
 
 <p align="center">
   <a href="docs/agent-triforge.md">Full Documentation</a> ·
-  <a href=".claude/CLAUDE.md">CLAUDE.md</a> ·
+  <a href="AGENTS.md">AGENTS.md</a> ·
   <a href="https://antigravity.google/cli">Antigravity CLI</a> ·
   <a href="https://github.com/openai/codex">Codex CLI</a>
 </p>

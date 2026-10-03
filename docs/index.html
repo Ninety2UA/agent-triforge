@@ -1442,7 +1442,7 @@ body::after {
             <span class="hero__stat-label">Agents</span>
           </div>
           <div class="hero__stat">
-            <span class="hero__stat-num" data-target="12">0</span>
+            <span class="hero__stat-num" data-target="10">0</span>
             <span class="hero__stat-label">Skills</span>
           </div>
           <div class="hero__stat">
@@ -1646,13 +1646,13 @@ body::after {
       <p><strong>3.3.3 (2026-10-01):</strong> a safety hotfix before the lead-choice redesign. Promotion scans every control-plane path (renames, case variants and instruction files at any depth included) and blocks when the scan itself fails; the <code>.agents/skills/</code> refresh replaces only Triforge's own unchanged copies, identified by content digest; the lead's git calls ignore settings a builder can plant, a changed <code>.git/config</code>, hook, ref or ledger is restored and escalated, and a lease merges only the snapshot the lead took at collect. A new PR workflow runs the SELF-row gate on macOS.</p>
       <p><strong>3.3.2 (2026-09-28):</strong> the release gate is green again (the four hook commands quote <code>"${CLAUDE_PLUGIN_ROOT}"</code>, and probe CC-06 validates both manifests); OpenCode V2 (or an OpenCode whose version can't be read) is refused with the V1 pin named, because V2 drops the deny set, and role fallback chains skip it; Cursor model ids take the <code>cursor-</code> prefix from the Grok family (<code>grok-4.7-xhigh</code>, <code>cursor-grok-4.6-xhigh</code>); <code>/setup</code> no longer carries a positional token that Claude Code would substitute.</p>
       <p><strong>3.3.1 (2026-09-12):</strong> a lease builder can no longer <code>git push</code> (pre-push hook + <code>no-push://</code> URL rewrite in the lease env); provider quota exhaustion fails fast with a <code>QUOTA-FAIL</code> probe outcome; effort-only roster overrides recompose the agy/Cursor effort suffix; the dispatch helper is a loader over <code>scripts/lib/*.sh</code> and the probe self-tests live in <code>scripts/probe-self-tests.sh</code>.</p>
-      <p class="section__desc">Every lane runs on the September 2026 generation — Fable 5.1 → Opus 5 → Sonnet 5, Codex <code>gpt-6-astra</code>, Antigravity <code>Gemini 3.8 Flash (High)</code>, GLM 5.3, <code>kimi-code/k3</code>, <code>cursor-grok-4.6-xhigh</code> — and every headless run reports a completion signal the lead parses instead of a bare exit code. Native agent formats for Antigravity and Kimi, a version-stamped <code>.agents/skills/</code> refresh for all six CLIs, and two new release validators. The v3.2.0 watch-cycle move and the v3.0.0 builder-pool foundation are unchanged below.</p>
+      <p class="section__desc">Every lane runs on the September 2026 generation — Fable 5.1 → Opus 5.5 → Sonnet 5, Codex <code>gpt-6-astra</code>, Antigravity <code>Gemini 3.8 Flash (High)</code>, GLM 5.3, <code>kimi-code/k3</code>, <code>cursor-grok-4.6-xhigh</code> — and every headless run reports a completion signal the lead parses instead of a bare exit code. Native agent formats for Antigravity and Kimi, a version-stamped <code>.agents/skills/</code> refresh for all six CLIs, and two new release validators. The v3.2.0 watch-cycle move and the v3.0.0 builder-pool foundation are unchanged below.</p>
     </div>
     <div class="whatsnew reveal-stagger">
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Fable 5 → Opus 4.8 ladder, Codex gpt-5.6-sol, Gemini 3.1 Pro, Grok 4.5 (history)</span></div>
         <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
-        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Fable 5.1 → Opus 5 → Sonnet 5 · <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">gpt-6-astra</code> · Gemini 3.8 Flash (High) · <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">cursor-grok-4.6-xhigh</code></span></div>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Fable 5.1 → Opus 5.5 → Sonnet 5 · <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">gpt-6-astra</code> · Gemini 3.8 Flash (High) · <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">cursor-grok-4.6-xhigh</code></span></div>
       </div>
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Exit 0 read as "done" on every headless lane</span></div>
@@ -1667,7 +1667,7 @@ body::after {
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Watch cycle shipped as plugin commands (v3.1 history) — 19 commands, 13 skills</span></div>
         <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
-        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Repo-local maintainer tooling in <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">.claude/commands/</code> — 17 commands, 12 skills ship</span></div>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Repo-local maintainer tooling in <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">.claude/commands/</code> — 17 commands, 10 skills ship</span></div>
       </div>
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Role assignment — hand-edit ops/roster.toml</span></div>
@@ -1762,7 +1762,7 @@ body::after {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
         </div>
         <h3>Portable Skills</h3>
-        <p>Model-agnostic workflow modules injected into any agent — TDD, systematic debugging, wave orchestration, shadow-path tracing, knowledge compounding.</p>
+        <p>Model-agnostic workflow modules injected into any agent — wave orchestration, shadow-path tracing, knowledge compounding.</p>
       </div>
       <div class="feat-card glow-card">
         <div class="feat-card__icon feat-card__icon--ember">
@@ -1865,7 +1865,7 @@ body::after {
         <p class="roster-card__role">Lead agent and default builder — plans, builds, and coordinates every other CLI.</p>
         <div class="roster-card__meta">
           <span class="roster-card__chip"><b>Builder</b> · lead</span>
-          <span class="roster-card__chip">Fable 5.1 → Opus 5 → Sonnet 5</span>
+          <span class="roster-card__chip">Fable 5.1 → Opus 5.5 → Sonnet 5</span>
           <span class="roster-card__chip">effort: max</span>
         </div>
       </div>
@@ -2071,7 +2071,7 @@ body::after {
   <div class="container">
     <div class="section__header reveal">
       <span class="section__label">Portable Skills</span>
-      <h2 class="section__title">13 Model-Agnostic Workflow Modules</h2>
+      <h2 class="section__title">10 Model-Agnostic Workflow Modules</h2>
       <p class="section__desc">Skills are markdown files that any agent can consume. Injected into Antigravity or Codex agent definitions, with prompt-prefix fallback via <code>$(cat skills/SKILL.md)</code>.</p>
     </div>
     <div class="table-wrap reveal">
@@ -2082,8 +2082,6 @@ body::after {
           <tr><td><code>writing-plans</code></td><td>Claude (Phase 1)</td><td>Task decomposition with shadow paths, error maps, interface context</td></tr>
           <tr><td><code>shadow-path-tracing</code></td><td>Claude (Phase 1)</td><td>Enumerate every failure path alongside the happy path</td></tr>
           <tr><td><code>wave-orchestration</code></td><td>Claude (Phase 2)</td><td>Dependency-grouped parallel execution with integration checks</td></tr>
-          <tr><td><code>test-driven-development</code></td><td>Codex (Phase 5)</td><td>RED-GREEN-REFACTOR: no production code without failing test</td></tr>
-          <tr><td><code>systematic-debugging</code></td><td>Codex, Claude</td><td>Error taxonomy, assumption tracking, bisection, circuit breaker</td></tr>
           <tr><td><code>iterative-refinement</code></td><td>Claude (Phase 4)</td><td>Review-fix-review loops with convergence modes (max 3 cycles)</td></tr>
           <tr><td><code>review-synthesis</code></td><td>Claude (Phase 4)</td><td>Merge multi-reviewer findings with confidence tiering</td></tr>
           <tr><td><code>verification-before-completion</code></td><td>All agents</td><td>Evidence-based completion checklist — no "done" without proof</td></tr>
@@ -2147,12 +2145,12 @@ body::after {
       <div class="gate">
         <div class="gate__num">2</div>
         <h4>Failing test before implementation</h4>
-        <p>No production code without a failing test <code>test-driven-development</code></p>
+        <p>No production code without a failing test <code>/test</code></p>
       </div>
       <div class="gate">
         <div class="gate__num">3</div>
         <h4>Root cause before fixes</h4>
-        <p>No fix without diagnosis <code>systematic-debugging</code></p>
+        <p>No fix without diagnosis <code>/debug</code></p>
       </div>
       <div class="gate">
         <div class="gate__num">4</div>
@@ -2167,7 +2165,7 @@ body::after {
       <div class="gate">
         <div class="gate__num">6</div>
         <h4>Circuit breaker on debugging</h4>
-        <p>3-attempt ceiling per issue, then escalation report <code>systematic-debugging</code></p>
+        <p>3-attempt ceiling per issue, then escalation report <code>/debug</code></p>
       </div>
     </div>
   </div>
@@ -2321,7 +2319,7 @@ body::after {
       <table class="cmd-table reveal">
         <thead><tr><th>CLI</th><th>Binary</th><th>Tier</th><th>Minimum</th><th>Notes</th></tr></thead>
         <tbody>
-          <tr><td>Claude Code</td><td><code>claude</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>2.1.267</code></td><td>Tested 2.1.269. Lead + builder; Fable&nbsp;5.1 → Opus&nbsp;5 → Sonnet&nbsp;5 ladder (2.1.267 first honors <code>effort:</code> frontmatter)</td></tr>
+          <tr><td>Claude Code</td><td><code>claude</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>2.1.277</code></td><td>Tested 2.1.284. Lead + builder; Fable&nbsp;5.1 → Opus&nbsp;5.5 → Sonnet&nbsp;5 ladder (2.1.277 first reads a root <code>AGENTS.md</code>; 2.1.267 first honors <code>effort:</code> frontmatter)</td></tr>
           <tr><td>Antigravity</td><td><code>agy</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>1.1.27</code></td><td>Tested 1.2.1; pins Gemini 3.8 Flash (High) by default — the newest Gemini at its highest thinking level (Gemini 3.1 Pro opt-in via roster)</td></tr>
           <tr><td>Codex</td><td><code>codex</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>0.153.0</code></td><td>Tested 0.154.0. Reviewer + tester; <code>gpt-6-astra</code> at xhigh, <code>--output-schema</code> structured verdicts</td></tr>
           <tr><td>OpenCode</td><td><code>opencode</code></td><td><span class="cmd-badge cmd-badge--util" style="margin-left:0">Optional</span></td><td><code>1.18.20</code></td><td>Tested 1.18.30. OpenRouter provider connected (glm-5.3)</td></tr>

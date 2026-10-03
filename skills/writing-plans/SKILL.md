@@ -61,8 +61,8 @@ Format:
 
 Field rules:
 
-- **Accept:** observable, and runnable wherever a command exists (`bash scripts/validate-skills.sh` exits 0 with twelve skills listed; the endpoint returns 201 with the user object). For documenter and analyst tasks, name the artifact and the sections it must contain.
-- **Fails when:** the concrete signal that proves the Accept is not met (`exit code nonzero or fewer than twelve skills listed`; `any 5xx on the happy path`). It is the falsifying direction of Accept, not a restatement. Placeholders such as `TBD`, `N/A`, `none`, `unknown`, or `?` are rejected by the plan-checker.
+- **Accept:** observable, and runnable wherever a command exists (`bash scripts/validate-skills.sh` exits 0 with ten skills listed; the endpoint returns 201 with the user object). For documenter and analyst tasks, name the artifact and the sections it must contain.
+- **Fails when:** the concrete signal that proves the Accept is not met (`exit code nonzero or fewer than ten skills listed`; `any 5xx on the happy path`). It is the falsifying direction of Accept, not a restatement. Placeholders such as `TBD`, `N/A`, `none`, `unknown`, or `?` are rejected by the plan-checker.
 - **Precondition:** a read-only check the lead runs before dispatch (`ops/CONTRACTS.md` defines `User`; branch `feat/x` exists; the fixture directory is empty). Omit only when the task has no prerequisite state beyond `Depends:`.
 - **Reversibility:** `reversible` (a VCS revert undoes it), `checkpointed` (undoable only from a checkpoint taken first: a backup, a tagged commit, a scratch copy; name the checkpoint in `Precondition:`), or `one-way` (cannot be undone: data deletion, schema drop, external publish, a push to a shared branch). A `one-way` task is a hard stop in wave execution; it needs a user checkpoint in the plan, and the plan-checker flags one without it.
 

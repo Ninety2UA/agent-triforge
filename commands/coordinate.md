@@ -86,7 +86,7 @@ Launch Antigravity + Codex (background bash) + Claude review agents simultaneous
 Spawn `findings-synthesizer`. Apply `iterative-refinement` skill. Fix P1+P2. Loop if needed (max 3 cycles).
 
 ### Phase 5: Test
-Spawn `test-gap-analyzer`. Invoke Codex with TDD skill. Fix failures until green (max 3 cycles).
+Spawn `test-gap-analyzer`. Invoke Codex to write tests, failing test first. Fix failures until green (max 3 cycles).
 
 ### Phase 6: Wrap up
 - Apply `knowledge-compounding` (document to ops/solutions/ if non-trivial)

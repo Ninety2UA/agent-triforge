@@ -223,7 +223,7 @@ invoke_opencode() {
     echo "invoke_opencode: ERROR \`opencode\` (OpenCode CLI) not found on PATH — cannot invoke agent '${AGENT_NAME}'. Fix: install it (curl -fsSL https://opencode.ai/install | bash). No retry (deterministic)." >&2
     # Write the guidance to OUTPUT_FILE too: a caller (e.g. a review fan-out)
     # that only reads the file must not mistake an empty file for "no findings"
-    # (the exact trap CLAUDE.md warns about).
+    # (the exact trap AGENTS.md warns about).
     echo "invoke_opencode: opencode CLI not on PATH — install: curl -fsSL https://opencode.ai/install | bash" > "$OUTPUT_FILE" 2>/dev/null || true
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="binary-missing"

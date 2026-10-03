@@ -226,7 +226,7 @@ EOF
   _mkskill .claude/skills  tf-claude-skill
   _mkskill .cursor/skills  tf-cursor-skill
   _mkcmd   .opencode/command/tf-cmd-opencode.md tf-cmd-opencode
-  # The twelve shipped skills, provisioned the way the lease lane does it
+  # The shipped skills, provisioned the way the lease lane does it
   # (cp -R src/. dest/ per skill — KTD7) so AGY-14 / SELF-06 can require all
   # shipped names. Committed so linked worktrees (CDX-09b, SELF-06) inherit.
   for s in $SHIPPED_SKILLS; do
@@ -1460,7 +1460,7 @@ if command -v claude >/dev/null 2>&1; then
     if (cd "$FIX" && _probe_run 240 claude -p --model fable "Respond with only: READY" > "$O" 2>&1) && _contains_ci "$O" "READY"; then
       row "CC-02" "claude" "Fable (alias) availability (ladder top rung)" "PASS" "$(_evidence "$O")" "live"
     else
-      row "CC-02" "claude" "Fable (alias) availability (ladder top rung)" "FAIL" "fable alias unavailable — the ladder falls to Opus 5 at max (model steps down, effort does not); $(_evidence "$O")" "live"
+      row "CC-02" "claude" "Fable (alias) availability (ladder top rung)" "FAIL" "fable alias unavailable — the ladder falls to the opus alias (Opus 5.5 from Claude Code 2.1.280) at max (model steps down, effort does not); $(_evidence "$O")" "live"
     fi
 
     # CC-03 — /goal fidelity probe, best-effort (D-030): three runs, majority.
@@ -1686,14 +1686,14 @@ COUNTER_MISMATCH=0
   echo "- **KIMI-03** → \`--agent-file\` carries the builder/reviewer briefs (D-024, KTD4). **KIMI-04** → \`--skills-dir\` is still present but no longer passed (D-024). **KIMI-05/KIMI-06** → stream-json capture shape; the \`kimi-code/k3\` alias. **KIMI-08/KIMI-09** → reviewer read-only allowlist + \`/skill:<name>\` expansion; PENDING-AUTH until \`kimi login\`."
   echo "- **CUR-01/CUR-03/CUR-05/CUR-12** → \`_cursor_bin\` resolution (cursor-agent first, verified \`agent\` fallback — CUR-11 is its fixture), the \`cursor-grok-4.6-xhigh\` pin, and the bare-family + effort → suffixed-id mapping (D-025, KTD3); **CUR-10** proves the bracket form is rejected."
   echo "- **CUR-06** → hook events not firing headless ⇒ no afterFileEdit attribution hook ships; lead-side ledger attribution covers it. **CUR-07/CUR-08** → sandbox + plan-mode read-only are the reviewer-role enforcement mechanisms. **CUR-09** → \`/<skill>\` expansion in \`-p\` from \`.cursor/skills/\`."
-  echo "- **CC-02** → the \`fable\` alias decides the spawn-time override for the lead + never-downgrade agents (ladder Fable 5.1 → Opus 5 → Sonnet 5, D-020)."
+  echo "- **CC-02** → the \`fable\` alias decides the spawn-time override for the lead + never-downgrade agents (ladder Fable 5.1 → Opus 5.5 → Sonnet 5, D-020/D-037; the one definition is TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh)."
   echo "- **CC-03** → best-effort (D-030): three runs, majority; \`ops/.sprint-complete\` + \`coordinate.sh\` stay the completion mechanism and \`/goal\` remains an assist composed into the prompt."
   echo "- **CC-04** → wave-orchestration may delegate 5+-task waves to dynamic workflows."
   echo "- **CC-05** → monitors parity not demonstrated ⇒ context-monitor.sh and tool-failure-monitor.sh stay, with this row as the recorded reason."
   echo "- **CC-06** → \`claude plugin validate --strict\` release gate baseline — \`.claude-plugin/plugin.json\` and \`.claude-plugin/marketplace.json\` validated separately, PASS only when both pass (D-039)."
   echo "- **CC-07/CC-07b** → \`.claude/skills/\` expands via \`/<skill>\`; \`.agents/skills/\` is not a Claude path (the plugin path carries the shipped skills — KTD13 discovery matrix)."
   echo "- **RTN-01** → headless watch delivery mode; runtime preflight absorbs all three outcomes."
-  echo "- **SELF-01..SELF-04** → roster chain rejection, coordinate.sh composition, adapter env allowlist, the R35 boundary. **SELF-05** → the Status-line parser seam (KTD11: DONE / MISSING / BLOCKED). **SELF-06** → lease-lane skill discovery per CLI under the env -i boundary (KTD7/R9; PASS = the probe skill is listed, shipped coverage in the evidence). **SELF-07** → the TRIFORGE_TEST_BUILDER lifecycle: DONE → review, report missing → never review-ready, BLOCKED → escalated (KTD11). **SELF-08** → session-start idempotence (KTD7/KTD8). **SELF-08b** → the digest-stamped skills refresh: only Triforge's own unchanged copies are replaced or retired, in session start and lease provisioning alike (KTD12/R31). **SELF-09** → the no-push backstop (CS1). **SELF-10** → the protected-path lists in \`scripts/lib/registry.sh\` and the fail-closed scan in \`lease_promote\` (KTD8/R30). **SELF-18** → lead-side git hardening (\`_lead_git\`), integrity detection with restore and escalation, and snapshot-only merges (KTD18/KTD19, R46/R47/R49). Under \`--self-only\` these rows are the whole run and any SELF FAIL exits 3 (KTD15)."
+  echo "- **SELF-01..SELF-04** → roster chain rejection, coordinate.sh composition, adapter env allowlist, the R35 boundary. **SELF-05** → the Status-line parser seam (KTD11: DONE / MISSING / BLOCKED). **SELF-06** → lease-lane skill discovery per CLI under the env -i boundary (KTD7/R9; PASS = the probe skill is listed, shipped coverage in the evidence). **SELF-07** → the TRIFORGE_TEST_BUILDER lifecycle: DONE → review, report missing → never review-ready, BLOCKED → escalated (KTD11). **SELF-08** → session-start idempotence (KTD7/KTD8) and the upgrade notices: the 2.1.277 floor, a stale 3.x template copy, a CLAUDE.md above the project (R40). **SELF-08b** → the digest-stamped skills refresh: only Triforge's own unchanged copies are replaced or retired, in session start and lease provisioning alike (KTD12/R31). **SELF-09** → the no-push backstop (CS1). **SELF-10** → the protected-path lists in \`scripts/lib/registry.sh\` and the fail-closed scan in \`lease_promote\` (KTD8/R30). **SELF-18** → lead-side git hardening (\`_lead_git\`), integrity detection with restore and escalation, and snapshot-only merges (KTD18/KTD19, R46/R47/R49). Under \`--self-only\` these rows are the whole run and any SELF FAIL exits 3 (KTD15)."
   echo
   echo "## Appendix A: codex features list"
   echo

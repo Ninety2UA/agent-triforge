@@ -60,8 +60,8 @@ ensure_core_trio_live && echo "CORE-TRIO: live" || echo "CORE-TRIO: UNRESOLVED"
 ## Step 1b — Codex project trust (read-only detection, D-026)
 
 Since Codex 0.147.0, `codex exec` reads project-tier files (`.codex/hooks.json`,
-`.codex/config.toml`, `.codex/.rules`; `.codex/AGENTS.md` since 0.150.0) only in
-a **trusted** project. Trust lives at the user tier — `~/.codex/config.toml` —
+`.codex/config.toml`, `.codex/.rules`) only in a **trusted** project; the root
+`AGENTS.md` is skipped only when trust is explicitly `untrusted` (D-045). Trust lives at the user tier — `~/.codex/config.toml` —
 which Triforge never writes (R18). Detect the exact-path entry and report it;
 the user adds it by hand when missing:
 
@@ -101,7 +101,8 @@ echo "CODEX-TRUST: ${CODEX_TRUST:-unknown}"
   Explain what stays covered without it: `invoke_codex` passes
   `--dangerously-bypass-hook-trust` so the CHANGELOG hook still fires (CDX-04),
   and the role instructions ride as a prompt prefix; `.codex/config.toml`
-  (memories off) and `.codex/AGENTS.md` are skipped until the entry exists.
+  (memories off) is skipped until the entry exists, while the root `AGENTS.md`
+  still loads (only an explicit `untrusted` blocks it, D-045).
 - `no-user-config` / `unreadable` / `unknown` — report as is; setup continues.
 
 ## Step 2 — Optional members (guided ask)

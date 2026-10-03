@@ -1,6 +1,6 @@
 ---
 name: shadow-path-tracing
-description: "Failure-path enumeration for every planned task across inputs, external dependencies, and state transitions, each with a handling status, producing the shadow-path table and the error/rescue map. Use when writing or validating a plan, when a task touches external calls, storage, or state, or when a review asks what happens on the unhappy path. Not for diagnosing a failure that already happened; that is systematic-debugging."
+description: "Failure-path enumeration for every planned task across inputs, external dependencies, and state transitions, each with a handling status, producing the shadow-path table and the error/rescue map. Use when writing or validating a plan, when a task touches external calls, storage, or state, or when a review asks what happens on the unhappy path. Not for diagnosing a failure that already happened."
 metadata:
   triforge-consumer: "Claude (lead)"
   triforge-phase: "1b (planning); 1.5 (plan validation)"

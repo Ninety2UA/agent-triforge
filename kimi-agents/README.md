@@ -69,7 +69,7 @@ shell, write, or edit entry.
 ## Skills
 
 `--skills-dir` is NO LONGER passed: on 0.42.0 it REPLACES auto-discovery, and
-`.agents/skills/` — where the lease provisions Triforge's twelve skills — is a
+`.agents/skills/` — where the lease provisions Triforge's ten skills — is a
 native project tier alongside `.kimi-code/skills/`; the user tier
 (`~/.kimi-code/skills/`, `~/.agents/skills/`) is discovered too. A skill is
 invoked as `/skill:<name>`; headless expansion is documented but unverified

@@ -11,10 +11,12 @@ Bootstrapped at session start, copy-if-absent so your edits survive:
 
 ## Project trust (D-026) — the durable path, and the automation path
 
-Since Codex 0.147.0 (0.150.0 for `AGENTS.md`), `codex exec` reads project-tier files
-only in a **trusted** project: `.codex/hooks.json`, `.codex/config.toml`, `.codex/.rules`,
-and `.codex/AGENTS.md` are skipped when the project is untrusted (unset = untrusted;
-`exec` never prompts). Linked worktrees inherit the root checkout's trust.
+Since Codex 0.147.0, `codex exec` reads project-tier files only in a **trusted**
+project: `.codex/hooks.json`, `.codex/config.toml` and `.codex/.rules` are skipped while
+trust is unset (unset = untrusted for these files; `exec` never prompts). The project's
+root `AGENTS.md` is different (0.150.0, D-045): it is skipped only when trust is
+explicitly `untrusted`, so an unset project still loads it. Linked worktrees inherit
+the root checkout's trust.
 
 - **Durable path (user tier, human-written):** add the project to
   `~/.codex/config.toml` — Triforge never writes this file:

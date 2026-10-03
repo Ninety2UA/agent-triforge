@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/registry.sh — data the other lanes read from one place (KTD7). In 3.3.3: the two protected-path lists and their match rule (KTD8)
+# scripts/lib/registry.sh — data the other lanes read from one place (KTD7). In 3.3.3: the two protected-path lists and their match rule (KTD8), and the model ladder (KTD22)
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh and before scripts/lib/lease.sh.
@@ -34,7 +34,7 @@ fi
 #
 # _PROTECTED_PY is spliced into the python that classifies paths (the
 # _CURSOR_ID_PY pattern in cursor.sh); SELF-10 checks the protected-path list
-# in .claude/CLAUDE.md against it. A new control-plane file joins the right
+# in the root AGENTS.md against it. A new control-plane file joins the right
 # list in the commit that creates it.
 _PROTECTED_PY='
 FRAMEWORK_PROTECTED = (
@@ -113,4 +113,22 @@ for item in raw.split(b'\0'):
     if hit:
         sys.stdout.write(hit + '\t' + path.encode('utf-8', 'surrogateescape').decode('utf-8', 'replace') + '\n')
 "
+}
+
+# ---------------------------------------------------------------------------
+# Model ladder (KTD22, R26)
+# ---------------------------------------------------------------------------
+#
+# The one definition of the downgrade ladder for narrow runtime tasks. The
+# instruction file (the root AGENTS.md), agents/team-lead.md and
+# skills/wave-orchestration/SKILL.md point here with a one-line summary
+# instead of restating the rungs; scripts/validate-versions.sh (check 2) fails
+# when any other shipped file carries the phrase, a colon, and the rung list
+# again. The `opus` rung names Opus 5.5 with its Claude Code floor (D-037).
+# Callers print the text with triforge_ladder.
+TRIFORGE_MODEL_LADDER='Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (Opus 5.5, Claude Code ≥ 2.1.280) + `xhigh` → `opus`+`high` → `sonnet` (Sonnet 5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.'
+
+# triforge_ladder — print the ladder text (one line, newline-terminated).
+triforge_ladder() {
+  printf '%s\n' "$TRIFORGE_MODEL_LADDER"
 }
