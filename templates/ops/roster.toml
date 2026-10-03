@@ -10,8 +10,8 @@
 # codex-agents/agents.toml — so non-Claude adapters can read their own role.
 #
 # Override semantics: any field left unset inherits the shipped default
-# (mirrored as built-in defaults inside resolve_role in
-# scripts/invoke-external.sh — deleting this file entirely is safe). A role
+# (the role table in scripts/lib/roster.sh plus the per-CLI registry in
+# scripts/lib/registry.sh — deleting this file entirely is safe). A role
 # overriding only `effort` keeps the default cli + model. The shipped posture
 # is the builder pool: Claude leads builds, Codex reviews and tests,
 # Antigravity analyzes and documents, and validated fallback chains degrade

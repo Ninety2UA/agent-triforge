@@ -1145,35 +1145,41 @@ print(" || ".join(log[-20:]))
 }
 
 # _adapter_env <cli> <cmd...> — run an external command under the per-adapter
-# environment allowlist (KTD-14): base allowlist HOME PATH TMPDIR TERM LANG
-# COLORTERM USER (+ the GIT_CONFIG_* no-push backstop, CS1) plus ONLY the
-# invoked CLI's own credential variables (opencode:
+# environment allowlist (KTD-14): the base allowlist TRIFORGE_ENV_BASE (HOME
+# PATH TMPDIR TERM LANG COLORTERM USER — scripts/lib/registry.sh; USER is
+# identity, not a secret: Claude Code resolves its keychain account from it, so
+# without it `claude -p` under env -i answers "Not logged in" on every macOS
+# host — live bisect 2026-09-11, LOGNAME alone does not help) + NO_COLOR=1 +
+# the GIT_CONFIG_* no-push backstop (CS1), plus ONLY the invoked CLI's own
+# credential variables: its registry entry's env_keys (opencode:
 # OPENROUTER_API_KEY; kimi: KIMI_*; cursor: CURSOR_API_KEY). claude, codex,
-# and antigravity authenticate via HOME-based stores and get nothing extra —
-# no cross-provider leakage. env -i execs external commands only; shell
+# and antigravity list none — they authenticate via HOME-based stores and get
+# nothing extra — no cross-provider leakage; a CLI the registry does not know
+# gets the base allowlist alone. env -i execs external commands only; shell
 # functions cannot cross it, which is why lease_dispatch composes direct CLI
-# commands instead of calling the invoke_* helpers (see there).
+# commands instead of calling the invoke_* helpers (see there). Mirrored by
+# _lane_run in scripts/probe-capabilities.sh, which reads the same base list.
 _adapter_env() {
   local CLI=$1
   shift
   local -a PAIRS=()
-  # Base allowlist — enumerated explicitly rather than via ${!V} indirect
-  # expansion. This file is `source`d under the CALLER's shell (the commands
-  # do a plain `source`, which ignores the bash shebang), and on macOS that is
-  # zsh, where ${!V} raises "bad substitution" and would kill every lease
-  # dispatch. Explicit ${HOME+x} tests and array append work under both bash
-  # and zsh (verified).
-  [ -n "${HOME+x}" ]      && PAIRS+=("HOME=${HOME}")
-  [ -n "${PATH+x}" ]      && PAIRS+=("PATH=${PATH}")
-  [ -n "${TMPDIR+x}" ]    && PAIRS+=("TMPDIR=${TMPDIR}")
-  [ -n "${TERM+x}" ]      && PAIRS+=("TERM=${TERM}")
-  [ -n "${LANG+x}" ]      && PAIRS+=("LANG=${LANG}")
-  [ -n "${COLORTERM+x}" ] && PAIRS+=("COLORTERM=${COLORTERM}")
-  # USER is identity, not a secret: Claude Code resolves its keychain credential
-  # account from it, so without it `claude -p` under env -i answers "Not logged
-  # in" on every macOS host (live bisect 2026-09-11: +USER -> READY; LOGNAME
-  # alone does not help). Mirrored by _lane_run in scripts/probe-capabilities.sh.
-  [ -n "${USER+x}" ]      && PAIRS+=("USER=${USER}")
+  local _K _SET _VAL _KEYS _kv_b64
+  # Base allowlist — each registry key forwarded when set (set-and-empty
+  # included). Read through eval rather than ${!V} indirect expansion: this
+  # file is `source`d under the CALLER's shell (the commands do a plain
+  # `source`, which ignores the bash shebang), and on macOS that is zsh, where
+  # ${!V} raises "bad substitution" and would kill every lease dispatch. The
+  # names are the registry's own literals (scripts/validate-versions.sh check 3
+  # keeps them to [A-Z_][A-Z0-9_]*), so the eval never sees anything else; the
+  # loop runs over a command substitution because zsh splits $(...) into words
+  # but never an unquoted parameter.
+  for _K in $(printf '%s' "$TRIFORGE_ENV_BASE"); do
+    eval "_SET=\${${_K}+x}"
+    if [ -n "$_SET" ]; then
+      eval "_VAL=\${${_K}}"
+      PAIRS+=("${_K}=${_VAL}")
+    fi
+  done
   PAIRS+=("NO_COLOR=1")   # captured output is parsed, never rendered (U5)
   # No-push backstop (CS1): git honors GIT_CONFIG_COUNT/KEY_n/VALUE_n as
   # per-process config, so every git in the builder's process tree sees (a)
@@ -1189,33 +1195,44 @@ _adapter_env() {
           "GIT_CONFIG_KEY_3=url.no-push://lease-worktree/.pushInsteadOf" "GIT_CONFIG_VALUE_3=git@"
           "GIT_CONFIG_KEY_4=url.no-push://lease-worktree/.pushInsteadOf" "GIT_CONFIG_VALUE_4=git://"
           "GIT_CONFIG_KEY_5=url.no-push://lease-worktree/.pushInsteadOf" "GIT_CONFIG_VALUE_5=file://")
-  case "$CLI" in
-    opencode)
-      [ -n "${OPENROUTER_API_KEY+x}" ] && PAIRS+=("OPENROUTER_API_KEY=${OPENROUTER_API_KEY}")
-      # D-033 defense-in-depth: the shipped deny set rides as OPENCODE_PERMISSION
-      # (caller's own value wins) — the adapter stays off --auto regardless.
-      PAIRS+=("OPENCODE_PERMISSION=${OPENCODE_PERMISSION:-$_OPENCODE_PERMISSION_DEFAULT}")
-      ;;
-    kimi)
-      # Forward every EXPORTED KIMI_* var. `compgen` and ${!V} are bash-only,
-      # so python3 (already required) enumerates os.environ and emits each
-      # matching NAME=VALUE pair base64-encoded, one per line. base64 has no
-      # internal newlines, so line-based read is portable across bash and zsh
-      # AND preserves values that themselves contain newlines or `=`.
-      local _kv_b64
-      while IFS= read -r _kv_b64; do
-        [ -n "$_kv_b64" ] && PAIRS+=("$(printf '%s' "$_kv_b64" | base64 -d 2>/dev/null)")
-      done <<KIMIENV
-$(python3 -c "
+  # The CLI's own credential variables — its registry env_keys. An exact name
+  # is forwarded when set; a trailing * (the one documented wildcard, kimi's
+  # KIMI_*) forwards every EXPORTED variable with that prefix: `compgen` and
+  # ${!V} are bash-only, so python3 (already required) enumerates os.environ
+  # and emits each matching NAME=VALUE pair base64-encoded, one per line.
+  # base64 has no internal newlines, so line-based read is portable across
+  # bash and zsh AND preserves values that themselves contain newlines or `=`.
+  _KEYS=$(cli_field "$CLI" env_keys 2>/dev/null) || _KEYS=""
+  for _K in $(printf '%s' "$_KEYS"); do
+    case "$_K" in
+      *\*)
+        while IFS= read -r _kv_b64; do
+          [ -n "$_kv_b64" ] && PAIRS+=("$(printf '%s' "$_kv_b64" | base64 -d 2>/dev/null)")
+        done <<PREFIXENV
+$(TRIFORGE_ENV_PREFIX="${_K%\*}" python3 -c "
 import os, base64, sys
+prefix = os.environ['TRIFORGE_ENV_PREFIX']
 for k, v in os.environ.items():
-    if k.startswith('KIMI_'):
+    if k.startswith(prefix) and k != 'TRIFORGE_ENV_PREFIX':
         sys.stdout.write(base64.b64encode((k + '=' + v).encode()).decode() + '\n')
 ")
-KIMIENV
-      ;;
-    cursor)
-      [ -n "${CURSOR_API_KEY+x}" ] && PAIRS+=("CURSOR_API_KEY=${CURSOR_API_KEY}")
+PREFIXENV
+        ;;
+      *)
+        eval "_SET=\${${_K}+x}"
+        if [ -n "$_SET" ]; then
+          eval "_VAL=\${${_K}}"
+          PAIRS+=("${_K}=${_VAL}")
+        fi
+        ;;
+    esac
+  done
+  case "$CLI" in
+    opencode)
+      # D-033 defense-in-depth: the shipped deny set rides as OPENCODE_PERMISSION
+      # (caller's own value wins) — the adapter stays off --auto regardless. A
+      # value injection, not an allowlist key, so it stays a lane arm here.
+      PAIRS+=("OPENCODE_PERMISSION=${OPENCODE_PERMISSION:-$_OPENCODE_PERMISSION_DEFAULT}")
       ;;
   esac
   env -i "${PAIRS[@]}" "$@"
@@ -1602,24 +1619,29 @@ ${PROMPT}"
 
   # Lane-specific composition that must happen LEAD-SIDE, before env -i: the
   # Kimi builder definition's absolute plugin path (D-024), the Cursor binary and
-  # the effort-suffixed Cursor model id (D-025). The ledger records the id that
-  # was actually dispatched (dispatched_model) beside the roster values
-  # (builder_model / builder_effort).
+  # the effort-suffixed Cursor model id (D-025). The lanes that always pin a
+  # model (agy — AE2 — and the optional three) fall back from an empty MODEL to
+  # that CLI's shipped default in the registry (cli_field <cli> model); claude
+  # and codex pass a model only when the roster set one and keep MODEL as is.
+  # The ledger records the id that was actually dispatched (dispatched_model)
+  # beside the roster values (builder_model / builder_effort).
   local KIMI_AGENT_FILE="" CBIN="" DISPATCH_MODEL="$MODEL"
   case "$CLI" in
     kimi)
       [ -f "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md" ] && KIMI_AGENT_FILE="${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md"
-      DISPATCH_MODEL="${MODEL:-kimi-code/k3}"
+      [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=$(cli_field kimi model 2>/dev/null || true)
       ;;
     cursor)
-      DISPATCH_MODEL=$(_cursor_model_for_effort "${MODEL:-cursor-grok-4.6-xhigh}" "$EFFORT")
+      [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=$(cli_field cursor model 2>/dev/null || true)
+      DISPATCH_MODEL=$(_cursor_model_for_effort "$DISPATCH_MODEL" "$EFFORT")
       if ! CBIN=$(_cursor_bin); then
         echo "lease_dispatch: ERROR no Cursor CLI on PATH (cursor-agent, or an agent whose --version matches YYYY.MM.DD-<hex>) — cannot dispatch ${TASK_ID}" >&2
         return 1
       fi
       ;;
-    antigravity) DISPATCH_MODEL="${MODEL:-Gemini 3.8 Flash (High)}" ;;
-    opencode)    DISPATCH_MODEL="${MODEL:-openrouter/z-ai/glm-5.3}" ;;
+    antigravity|opencode)
+      [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=$(cli_field "$CLI" model 2>/dev/null || true)
+      ;;
   esac
   _ledger_update "$TASK_ID" dispatched_model="$DISPATCH_MODEL" || return 1
 
@@ -1656,7 +1678,7 @@ ${PROMPT}"
           # agy >= 1.1.20 — parse status/response/denied_actions instead. The
           # prose lands in $OUT (what lease_collect prints), the streams in
           # $OUT.raw / $OUT.err, the verdict in $OUT.status / $OUT.denied.
-          _adapter_env antigravity "$TOBIN" "${TIMEOUT}s" agy --model "${MODEL:-Gemini 3.8 Flash (High)}" --add-dir "$WT" --print-timeout "${TIMEOUT}s" --output-format json -p "$FULL_PROMPT" < /dev/null > "${OUT}.raw" 2> "${OUT}.err" || RC=$?
+          _adapter_env antigravity "$TOBIN" "${TIMEOUT}s" agy --model "$DISPATCH_MODEL" --add-dir "$WT" --print-timeout "${TIMEOUT}s" --output-format json -p "$FULL_PROMPT" < /dev/null > "${OUT}.raw" 2> "${OUT}.err" || RC=$?
           if [ "$RC" -eq 0 ]; then
             AGY_PRC=0
             _agy_parse_envelope "${OUT}.raw" "$OUT" || AGY_PRC=$?
@@ -1678,7 +1700,8 @@ ${PROMPT}"
           # (KTD-14), so no cross-provider credential leak. No --auto (OC-06:
           # denies do not survive it) and no invoke_opencode (a shell function
           # cannot cross env -i); the confinement contract rides in FULL_PROMPT
-          # like every other lane. Shipped default is the OpenRouter GLM, so a
+          # like every other lane. Shipped default (DISPATCH_MODEL, from the
+          # registry when the roster carries no pin) is the OpenRouter GLM, so a
           # live build AUTH-FAILs until the provider is connected — that failure
           # is deterministic and the lead sees it via <out>.class (no requeue).
           # Effort -> --variant (OC-05 best-effort), guarded on a non-empty effort
@@ -1693,7 +1716,7 @@ ${PROMPT}"
             _opencode_v2_refusal lease_dispatch > "$OUT"
             RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1
           else
-            local -a CMD=(opencode run --format json -m "${MODEL:-openrouter/z-ai/glm-5.3}")
+            local -a CMD=(opencode run --format json -m "$DISPATCH_MODEL")
             [ -n "$EFFORT" ] && CMD+=(--variant "$EFFORT")
             _adapter_env opencode "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
           fi
@@ -1707,7 +1730,8 @@ ${PROMPT}"
           # flag and -p uses the auto policy, so confinement is the worktree + env
           # allowlist; the role brief rides in FULL_PROMPT (injection — KIMI-03
           # has no --agent, so no invoke_kimi either: a shell function cannot
-          # cross env -i). Shipped default is kimi-code/k3 (the OAuth-managed
+          # cross env -i). Shipped default (DISPATCH_MODEL, from the registry
+          # when the roster carries no pin) is kimi-code/k3 (the OAuth-managed
           # alias, D-024), so a live build AUTH-FAILs until kimi is signed in —
           # that failure is deterministic and the lead sees it via <out>.class
           # (no requeue). The builder definition rides as --agent-file with the
@@ -1716,7 +1740,7 @@ ${PROMPT}"
           # Kimi's native .agents/skills discovery — KIMI-04).
           # -p LAST (commander.js consumes the next token as -p's value; see the
           # invoke_kimi note) — prompt right after -p.
-          local -a CMD=(kimi --output-format stream-json -m "${MODEL:-kimi-code/k3}")
+          local -a CMD=(kimi --output-format stream-json -m "$DISPATCH_MODEL")
           [ -n "$KIMI_AGENT_FILE" ] && CMD+=(--agent-file "$KIMI_AGENT_FILE")
           _adapter_env kimi "$TOBIN" "${TIMEOUT}s" env KIMI_DISABLE_TELEMETRY=1 "${CMD[@]}" -p "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
           ;;
@@ -1744,7 +1768,7 @@ ${PROMPT}"
           _adapter_env cursor "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
           ;;
         *)
-          echo "lease_dispatch: ERROR unknown builder CLI '${CLI}' — not integrated. Known builder lanes: claude, codex, antigravity, opencode, kimi, cursor." > "$OUT"
+          echo "lease_dispatch: ERROR builder CLI '${CLI}' has no dispatch arm here — not integrated. Registered CLIs: ${_KNOWN_CLIS:-<registry unreadable>}." > "$OUT"
           RC=95
           ;;
       esac

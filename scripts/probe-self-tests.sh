@@ -1032,8 +1032,11 @@ _S11_D_RC=0
 _S11_D=$( cd "$_S11/proj" && unset CLAUDE_PLUGIN_ROOT && source "$_S11/bare/invoke-external.sh" 2>&1 >/dev/null && printf 'root=%s' "${_TRIFORGE_PLUGIN_ROOT:-}" ) || _S11_D_RC=$?
 [ "$_S11_D_RC" -ne 0 ] || _S11_FAIL="$_S11_FAIL d(bare-loader-loaded:$(printf '%s' "$_S11_D" | tr '\n' ' ' | cut -c1-120))"
 printf '%s' "$_S11_D" | grep -Fq 'at-setup' || _S11_FAIL="$_S11_FAIL d(no-at-setup:$(printf '%s' "$_S11_D" | tr '\n' ' ' | cut -c1-120))"
-# (e)
-_S11_E_LIB=$(cat "$REPO_ROOT"/scripts/lib/*.sh | grep -c 'CLAUDE_PLUGIN_ROOT' || true)
+# (e) — no lane READS the host variable (KTD6: they read _TRIFORGE_PLUGIN_ROOT).
+# The one line allowed to spell it is the CLI registry's lead field
+# `"plugin_root_env": "CLAUDE_PLUGIN_ROOT"` (KTD1/KTD7, scripts/lib/registry.sh):
+# data naming the variable a lead host exports, not a read of it.
+_S11_E_LIB=$(cat "$REPO_ROOT"/scripts/lib/*.sh | grep 'CLAUDE_PLUGIN_ROOT' | grep -vc '^[[:space:]]*"plugin_root_env": "' || true)
 [ "$_S11_E_LIB" = 0 ] || _S11_FAIL="$_S11_FAIL e(lib-reads=$_S11_E_LIB)"
 _S11_E_PWD=$(grep -c 'pwd)/scripts' "$_S11_LOADER" || true)
 [ "$_S11_E_PWD" = 0 ] || _S11_FAIL="$_S11_FAIL e(pwd-fallback=$_S11_E_PWD)"

@@ -32,18 +32,29 @@
 #      applies (history directories, the README ledger and this script are not
 #      shipped surfaces); any second match, or a single match outside the
 #      registry literal, fails.
-#   3. DEFAULTS drift (KTD6) — the DEFAULTS and CLI_DEFAULT_MODEL python
-#      literals are duplicated inside resolve_role and roster_role_entry in
-#      scripts/lib/roster.sh (sourced by invoke-external.sh); the two copies must be equal (parsed with
-#      ast.literal_eval, so comments and spacing do not matter). The
-#      roster_member_default case arms must equal CLI_DEFAULT_MODEL, and the
-#      templates/ops/roster.toml [roles.*] cli/model/effort/fallbacks must
-#      equal DEFAULTS; the template must also document each optional member's
-#      shipped default (model = "<CLI_DEFAULT_MODEL>"). The roster-drift
-#      notice in hooks/handlers/session-start.sh carries a third copy (SHIPPED
-#      = CLI_DEFAULT_MODEL minus the empty claude pin, ROLE_CLI = DEFAULTS
-#      role->cli) because the hook cannot source resolve_role; it must equal
-#      the canonical copy too.
+#   3. Registry drift (KTD7, R41) — the CLI registry is the _TRIFORGE_CLIS_PY
+#      literal in scripts/lib/registry.sh (one entry per CLI; parsed with
+#      ast.literal_eval, so comments and spacing do not matter) plus
+#      TRIFORGE_ENV_BASE beside it. The literal must be pure, free of single
+#      quotes (the shell string would end there), and every entry must carry
+#      the documented fields with the right types: tier core|optional, lane
+#      shell|subagent, env_keys as EXACT variable names — any wildcard other
+#      than the documented KIMI_* fails — and `lead` either {} or exactly the
+#      nine KTD1 fields. The role table is the single DEFAULTS literal
+#      (_ROLE_DEFAULTS_PY) in scripts/lib/roster.sh: each role's cli must be
+#      registered, its model must equal that CLI's registry model, and its
+#      chain must end at a core member; roster.sh must splice the registry and
+#      carry no literal copy of CLI_DEFAULT_MODEL / BINARY / INSTALL_FIX /
+#      KNOWN / CORE_TRIO. templates/ops/roster.toml [roles.*] must equal
+#      DEFAULTS and every `[members.<cli>] … model = "…"` it documents must
+#      name a registered CLI's registry model. The remaining readers must read,
+#      not copy: hooks/handlers/session-start.sh carries no SHIPPED / ROLE_CLI
+#      literal and references _TRIFORGE_CLIS_PY; _adapter_env in
+#      scripts/lib/lease.sh reads TRIFORGE_ENV_BASE + cli_field and names no
+#      base or credential key in code; lease.sh code names no shipped model;
+#      each lane's `${<model_env>:-…}` default in scripts/lib/*.sh equals the
+#      registry model; _lane_run in scripts/probe-capabilities.sh reads
+#      REG_ENV_BASE and the harness's CDX_MODEL pin equals the codex model.
 #   4. Scoped stale-pin sweep (KTD12) — patterns gpt-5.6-sol, grok-4.5,
 #      glm-5.2, kimi-k3, "Fable 5 →", "Opus 4.8", 2026-07-probe-record, and
 #      "Gemini 3.1 Pro (High)" ONLY on lines that also say "default" (so the
@@ -204,10 +215,13 @@ else
   fail "ladder: $LADDER_DEF_COUNT definitions (expected exactly 1: $LADDER_VAR in $LADDER_SOURCE) — every line with the phrase followed by a colon counts, whichever rung it starts at; replace the others with pointers (see file:line:text above)"
 fi
 
-# --- 3. DEFAULTS drift (KTD6) ------------------------------------------------
+# --- 3. registry drift (KTD7) ------------------------------------------------
 DRIFT_RC=0
-VV_SRC="scripts/lib/roster.sh" VV_ROSTER="templates/ops/roster.toml" VV_HOOK="hooks/handlers/session-start.sh" python3 - <<'PYEOF' || DRIFT_RC=$?
+VV_REGISTRY="scripts/lib/registry.sh" VV_SRC="scripts/lib/roster.sh" VV_ROSTER="templates/ops/roster.toml" \
+VV_HOOK="hooks/handlers/session-start.sh" VV_LEASE="scripts/lib/lease.sh" VV_PROBE="scripts/probe-capabilities.sh" \
+VV_LIBDIR="scripts/lib" python3 - <<'PYEOF' || DRIFT_RC=$?
 import ast
+import glob
 import os
 import re
 import sys
@@ -221,89 +235,202 @@ except ImportError:
         print("FAIL: drift: no TOML parser (Python 3.11+ tomllib or pip install tomli)")
         sys.exit(1)
 
-src_path = os.environ["VV_SRC"]
-roster_path = os.environ["VV_ROSTER"]
-with open(src_path, encoding="utf-8") as fh:
-    src = fh.read()
-
 fails = []
 oks = []
 
 
-def func_pos(name):
-    m = re.search(r"^" + re.escape(name) + r"\(\) \{", src, re.M)
-    return m.start() if m else None
+def read(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    except OSError as exc:
+        fails.append(path + " unreadable: " + str(exc))
+        return None
 
 
-def literal_blocks(name):
-    """Every '<name> = {' ... '}' block in the shell file, parsed as a python literal."""
-    pat = re.compile(
-        r"^([ \t]*)" + re.escape(name) + r" = \{\n(.*?)^\1\}[ \t]*$", re.M | re.S
-    )
-    found = []
-    for m in pat.finditer(src):
-        text = "{\n" + m.group(2) + "}"
-        try:
-            value = ast.literal_eval(text)
-        except Exception as exc:  # noqa: BLE001 — report, do not crash
-            fails.append(name + " block at line " + str(src.count("\n", 0, m.start()) + 1)
-                         + " is not a pure literal: " + str(exc))
-            value = None
-        found.append((m.start(), value))
-    return found
+def code_lines(text):
+    """(lineno, line) for every line that is not a comment."""
+    return [(n, ln) for n, ln in enumerate(text.split("\n"), 1) if not ln.lstrip().startswith("#")]
 
 
-pos_resolve = func_pos("resolve_role")
-pos_entry = func_pos("roster_role_entry")
-if pos_resolve is None:
-    fails.append("resolve_role() not found in " + src_path)
-if pos_entry is None:
-    fails.append("roster_role_entry() not found in " + src_path)
+def func_body(text, name, path):
+    """The body of a top-level shell function '<name>() {' ... '}' (first column brace)."""
+    m = re.search(r"^" + re.escape(name) + r"\(\) \{[^\n]*\n(.*?)^\}", text, re.M | re.S)
+    if not m:
+        fails.append(path + ": " + name + "() not found")
+        return None
+    return m.group(1)
 
-canonical = {}
-for name in ("DEFAULTS", "CLI_DEFAULT_MODEL"):
-    blocks = literal_blocks(name)
-    if len(blocks) != 2:
-        fails.append(name + ": expected 2 copies (resolve_role + roster_role_entry), found " + str(len(blocks)))
-        if blocks and blocks[0][1] is not None:
-            canonical[name] = blocks[0][1]
-        continue
-    (p0, v0), (p1, v1) = blocks
-    if pos_resolve is not None and pos_entry is not None and not (pos_resolve < p0 < pos_entry < p1):
-        fails.append(name + ": the two copies are not one inside resolve_role and one inside roster_role_entry")
-    if v0 is None or v1 is None:
-        continue
-    canonical[name] = v0
-    if v0 == v1:
-        oks.append(name + ": resolve_role and roster_role_entry copies identical (" + str(len(v0)) + " entries)")
+
+NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+WILDCARDS_OK = ("KIMI_*",)
+FIELDS = {
+    "name": str, "tier": str, "binary": str, "binary_env": str, "resolver": str, "version_re": str,
+    "model": str, "model_env": str, "install": str, "login": str, "env_keys": list, "lane": str,
+    "egress": str, "lead": dict,
+}
+LEAD_FIELDS = {
+    "launch_argv": str, "wait_budget_s": int, "tool_vocab_read": str, "tool_vocab_action": str,
+    "goal_gate": str, "ask_user": str, "native_subagents_enforced_tools": bool, "agent_teams": bool,
+    "plugin_root_env": str,
+}
+
+# --- the registry literal ----------------------------------------------------
+reg_path = os.environ["VV_REGISTRY"]
+reg = read(reg_path)
+clis = None
+env_base = []
+if reg is not None:
+    m = re.search(r"^_TRIFORGE_CLIS_PY='\n(.*?)\n'$", reg, re.M | re.S)
+    if not m:
+        fails.append(reg_path + ": _TRIFORGE_CLIS_PY='...' literal not found")
     else:
-        for key in sorted(set(v0) | set(v1)):
-            if v0.get(key) != v1.get(key):
-                fails.append(name + "[" + repr(key) + "] differs: resolve_role=" + repr(v0.get(key))
-                             + " roster_role_entry=" + repr(v1.get(key)))
+        body = m.group(1)
+        if "'" in body:
+            fails.append(reg_path + ": _TRIFORGE_CLIS_PY contains a single quote — the shell literal ends there (use double quotes inside)")
+        if not body.startswith("CLIS = {"):
+            fails.append(reg_path + ": _TRIFORGE_CLIS_PY must start with 'CLIS = {'")
+        else:
+            try:
+                clis = ast.literal_eval(body[len("CLIS = "):])
+            except Exception as exc:  # noqa: BLE001 — report, do not crash
+                fails.append(reg_path + ": _TRIFORGE_CLIS_PY is not a pure literal (ast.literal_eval): " + str(exc))
+            if clis is not None and not isinstance(clis, dict):
+                fails.append(reg_path + ": CLIS must be a dict of cli -> entry")
+                clis = None
+    m = re.search(r'^TRIFORGE_ENV_BASE="([^"]*)"[ \t]*$', reg, re.M)
+    if not m:
+        fails.append(reg_path + ': TRIFORGE_ENV_BASE="..." not found')
+    else:
+        env_base = m.group(1).split()
+        if not env_base:
+            fails.append(reg_path + ": TRIFORGE_ENV_BASE is empty")
+        for k in env_base:
+            if not NAME_RE.match(k):
+                fails.append(reg_path + ": TRIFORGE_ENV_BASE key " + repr(k) + " is not an exact variable name")
 
-cli_defaults = canonical.get("CLI_DEFAULT_MODEL")
-role_defaults = canonical.get("DEFAULTS")
+core = []
+if clis is not None:
+    shape_ok = True
+    for cli, e in clis.items():
+        where = reg_path + ": registry entry " + repr(cli)
+        if not re.match(r"^[a-z][a-z0-9_-]*$", str(cli)):
+            fails.append(where + ": name must be lowercase [a-z0-9_-]")
+            shape_ok = False
+        if not isinstance(e, dict):
+            fails.append(where + ": entry must be a dict")
+            shape_ok = False
+            continue
+        missing = [f for f in FIELDS if f not in e]
+        extra = [f for f in e if f not in FIELDS]
+        if missing:
+            fails.append(where + ": missing field(s) " + ", ".join(missing))
+            shape_ok = False
+        if extra:
+            fails.append(where + ": unknown field(s) " + ", ".join(extra))
+            shape_ok = False
+        for f, t in FIELDS.items():
+            if f in e and (type(e[f]) is not t):
+                fails.append(where + ": field " + f + " must be " + t.__name__ + ", got " + type(e[f]).__name__)
+                shape_ok = False
+        if e.get("tier") not in ("core", "optional"):
+            fails.append(where + ": tier must be core|optional, got " + repr(e.get("tier")))
+            shape_ok = False
+        if e.get("lane") not in ("shell", "subagent"):
+            fails.append(where + ": lane must be shell|subagent, got " + repr(e.get("lane")))
+            shape_ok = False
+        if not e.get("binary"):
+            fails.append(where + ": binary is empty")
+            shape_ok = False
+        for f in ("binary_env", "model_env"):
+            if e.get(f) and not NAME_RE.match(e[f]):
+                fails.append(where + ": " + f + " " + repr(e[f]) + " is not an exact variable name")
+                shape_ok = False
+        for k in e.get("env_keys", []) if isinstance(e.get("env_keys"), list) else []:
+            if not isinstance(k, str):
+                fails.append(where + ": env_keys entries must be strings")
+                shape_ok = False
+            elif "*" in k:
+                if k not in WILDCARDS_OK:
+                    fails.append(where + ": env_keys " + repr(k) + " carries a wildcard — allowlist keys are exact variable names; the one documented exception is KIMI_*")
+                    shape_ok = False
+            elif not NAME_RE.match(k):
+                fails.append(where + ": env_keys " + repr(k) + " is not an exact variable name")
+                shape_ok = False
+        lead = e.get("lead")
+        if isinstance(lead, dict) and lead:
+            lmissing = [f for f in LEAD_FIELDS if f not in lead]
+            lextra = [f for f in lead if f not in LEAD_FIELDS]
+            if lmissing or lextra:
+                fails.append(where + ": lead must carry exactly the KTD1 fields" + (" — missing " + ", ".join(lmissing) if lmissing else "") + (" — unknown " + ", ".join(lextra) if lextra else ""))
+                shape_ok = False
+            for f, t in LEAD_FIELDS.items():
+                if f in lead and type(lead[f]) is not t:
+                    fails.append(where + ": lead." + f + " must be " + t.__name__ + ", got " + type(lead[f]).__name__)
+                    shape_ok = False
+            if not lead.get("launch_argv"):
+                fails.append(where + ": lead.launch_argv is empty")
+                shape_ok = False
+        if e.get("tier") == "core":
+            core.append(cli)
+    if not core:
+        fails.append(reg_path + ": no core-tier CLI — every fallback chain must end at one")
+        shape_ok = False
+    if shape_ok:
+        leads = [c for c, e in clis.items() if isinstance(e.get("lead"), dict) and e["lead"]]
+        oks.append(reg_path + " registry: " + str(len(clis)) + " CLIs (" + ", ".join(clis) + "), core: " + ", ".join(core)
+                   + ", lead-capable: " + ", ".join(leads) + "; env_keys exact (KIMI_* the one wildcard); TRIFORGE_ENV_BASE " + " ".join(env_base))
 
-# roster_member_default case arms vs CLI_DEFAULT_MODEL
-m = re.search(r"^roster_member_default\(\) \{\n(.*?)^\}", src, re.M | re.S)
-if not m:
-    fails.append("roster_member_default() not found in " + src_path)
-elif cli_defaults is not None:
-    arms = dict(re.findall(r'^\s*([a-z]+)\)\s+echo "([^"]*)"\s*;;', m.group(1), re.M))
-    arm_fail = False
-    for cli, model in sorted(cli_defaults.items()):
-        if cli not in arms:
-            fails.append("roster_member_default has no arm for " + cli)
-            arm_fail = True
-        elif arms[cli] != model:
-            fails.append("roster_member_default " + cli + " = " + repr(arms[cli])
-                         + " but CLI_DEFAULT_MODEL = " + repr(model))
-            arm_fail = True
-    if not arm_fail:
-        oks.append("roster_member_default arms match CLI_DEFAULT_MODEL (" + str(len(cli_defaults)) + " members)")
+models = {c: e.get("model", "") for c, e in clis.items()} if clis is not None else {}
 
-# templates/ops/roster.toml vs DEFAULTS / CLI_DEFAULT_MODEL
+# --- scripts/lib/roster.sh: the one role table, no per-CLI copies -------------
+src_path = os.environ["VV_SRC"]
+src = read(src_path)
+role_defaults = None
+if src is not None:
+    pat = re.compile(r"^([ \t]*)DEFAULTS = \{\n(.*?)^\1\}[ \t]*$", re.M | re.S)
+    blocks = list(pat.finditer(src))
+    if len(blocks) != 1:
+        fails.append(src_path + ": expected exactly 1 DEFAULTS literal (_ROLE_DEFAULTS_PY), found " + str(len(blocks)))
+    else:
+        b = blocks[0]
+        try:
+            role_defaults = ast.literal_eval("{\n" + b.group(2) + "}")
+        except Exception as exc:  # noqa: BLE001
+            fails.append(src_path + ": DEFAULTS at line " + str(src.count("\n", 0, b.start()) + 1) + " is not a pure literal: " + str(exc))
+        decl = re.search(r"^_ROLE_DEFAULTS_PY='", src, re.M)
+        if not decl or not (decl.start() < b.start()):
+            fails.append(src_path + ": the DEFAULTS literal must live in _ROLE_DEFAULTS_PY (spliced into resolve_role and roster_role_entry)")
+    if "${_TRIFORGE_CLIS_PY}" not in src:
+        fails.append(src_path + ": does not splice ${_TRIFORGE_CLIS_PY} — per-CLI data must come from the registry")
+    copy_re = re.compile(r"^[ \t]*(CLI_DEFAULT_MODEL|BINARY|INSTALL_FIX|KNOWN|CORE_TRIO|CORE)[ \t]*=[ \t]*[\{\(\[][ \t]*($|['\"])")
+    for n, ln in code_lines(src):
+        if copy_re.match(ln):
+            fails.append(src_path + ":" + str(n) + ": literal copy of registry data (" + ln.strip()[:60] + ") — derive it from CLIS")
+    if role_defaults is not None and clis is not None:
+        role_fail = False
+        for role, d in role_defaults.items():
+            if not isinstance(d, dict):
+                fails.append(src_path + ": DEFAULTS[" + repr(role) + "] is not a table")
+                role_fail = True
+                continue
+            cli = d.get("cli")
+            chain = [cli] + list(d.get("fallbacks", []))
+            for c in chain:
+                if c not in clis:
+                    fails.append(src_path + ": DEFAULTS[" + repr(role) + "] names unregistered CLI " + repr(c))
+                    role_fail = True
+            if cli in clis and d.get("model") != models.get(cli):
+                fails.append(src_path + ": DEFAULTS[" + repr(role) + "].model = " + repr(d.get("model")) + " but the registry model for " + str(cli) + " is " + repr(models.get(cli)))
+                role_fail = True
+            if chain and chain[-1] in clis and chain[-1] not in core:
+                fails.append(src_path + ": DEFAULTS[" + repr(role) + "] chain " + repr(chain) + " does not end at a core CLI")
+                role_fail = True
+        if not role_fail:
+            oks.append(src_path + " DEFAULTS: one literal, " + str(len(role_defaults)) + " roles, each model equal to its CLI's registry model, chains end at a core CLI")
+
+# --- templates/ops/roster.toml vs DEFAULTS / the registry ---------------------
+roster_path = os.environ["VV_ROSTER"]
 try:
     with open(roster_path, "rb") as fh:
         roster = tomllib.load(fh)
@@ -330,75 +457,116 @@ if roster is not None and role_defaults is not None:
             role_fail = True
     if not role_fail:
         oks.append(roster_path + " [roles.*] match DEFAULTS (" + str(len(role_defaults)) + " roles)")
-if roster is not None and cli_defaults is not None:
-    with open(roster_path, encoding="utf-8") as fh:
-        roster_text = fh.read()
+roster_text = read(roster_path)
+if roster_text is not None and clis is not None:
     doc_fail = False
-    for cli in ("opencode", "kimi", "cursor"):
-        needle = 'model = "' + cli_defaults.get(cli, "") + '"'
-        if needle not in roster_text:
-            fails.append(roster_path + " does not document the shipped " + cli + " default: " + needle)
+    documented = re.findall(r"\[members\.([a-z0-9_-]+)\][^\[]*?model = \"([^\"]*)\"", roster_text, re.S)
+    for cli, model in documented:
+        if cli not in clis:
+            fails.append(roster_path + " documents [members." + cli + "], which the registry does not know")
+            doc_fail = True
+        elif model != models[cli]:
+            fails.append(roster_path + " documents [members." + cli + "] model = " + repr(model) + " but the registry model is " + repr(models[cli]))
             doc_fail = True
     if not doc_fail:
-        oks.append(roster_path + " documents the optional-member defaults from CLI_DEFAULT_MODEL")
+        oks.append(roster_path + " documented member pins match the registry (" + str(len(documented)) + " members)")
 
-# hooks/handlers/session-start.sh roster-drift notice: its SHIPPED (per-CLI
-# model) and ROLE_CLI (role -> cli) literals are a third copy of
-# CLI_DEFAULT_MODEL / DEFAULTS. The hook cannot source resolve_role, so the
-# copy is validated here instead of being derived at runtime.
+# --- hooks/handlers/session-start.sh: reads, never copies ---------------------
 hook_path = os.environ["VV_HOOK"]
-try:
-    with open(hook_path, encoding="utf-8") as fh:
-        hook_src = fh.read()
-except OSError as exc:
-    fails.append(hook_path + " unreadable: " + str(exc))
-    hook_src = None
+hook = read(hook_path)
+if hook is not None:
+    hook_fail = False
+    # A literal copy opens with a newline or a quoted key; the hook's own
+    # derivations (SHIPPED = {cli: e["model"] for ...}) open with a name.
+    for n, ln in code_lines(hook):
+        if re.match(r"^[ \t]*(SHIPPED|ROLE_CLI)[ \t]*=[ \t]*\{[ \t]*($|['\"])", ln):
+            fails.append(hook_path + ":" + str(n) + ": literal copy of registry data (" + ln.strip()[:40] + ") — the hook reads _TRIFORGE_CLIS_PY / _ROLE_DEFAULTS_PY")
+            hook_fail = True
+    if "_TRIFORGE_CLIS_PY" not in hook:
+        fails.append(hook_path + ": does not read the registry (_TRIFORGE_CLIS_PY)")
+        hook_fail = True
+    if "_ss_resolve_cursor_bin" in hook:
+        fails.append(hook_path + ": still carries _ss_resolve_cursor_bin — the registry names _cursor_bin as cursor's resolver")
+        hook_fail = True
+    if not hook_fail:
+        oks.append(hook_path + " reads the registry (no SHIPPED / ROLE_CLI / cursor-resolver copy)")
 
+# --- scripts/lib/lease.sh: _adapter_env reads the registry ---------------------
+lease_path = os.environ["VV_LEASE"]
+lease = read(lease_path)
+if lease is not None and clis is not None:
+    lease_fail = False
+    body = func_body(lease, "_adapter_env", lease_path)
+    if body is not None:
+        if "TRIFORGE_ENV_BASE" not in body or "cli_field" not in body:
+            fails.append(lease_path + ": _adapter_env must read TRIFORGE_ENV_BASE and cli_field (the registry), not a hand-written list")
+            lease_fail = True
+        keys = set()
+        for e in clis.values():
+            for k in e.get("env_keys", []):
+                keys.add(k[:-1] if k.endswith("*") else k)
+        start = lease.find(body)
+        base_line = lease.count("\n", 0, start) + 1
+        for i, ln in enumerate(body.split("\n")):
+            if ln.lstrip().startswith("#"):
+                continue
+            for k in env_base:
+                if re.search(r"\b" + k + r"=\$\{" + k + r"\b", ln):
+                    fails.append(lease_path + ":" + str(base_line + i) + ": _adapter_env hand-copies base key " + k + " — it is read from TRIFORGE_ENV_BASE")
+                    lease_fail = True
+            for k in sorted(keys):
+                if re.search(r"\b" + re.escape(k), ln):
+                    fails.append(lease_path + ":" + str(base_line + i) + ": _adapter_env names credential key " + k + " in code — keys come from the registry env_keys")
+                    lease_fail = True
+    for n, ln in code_lines(lease):
+        for cli, model in models.items():
+            if model and model in ln:
+                fails.append(lease_path + ":" + str(n) + ": shipped " + cli + " model " + repr(model) + " spelled out in code — read it with cli_field " + cli + " model")
+                lease_fail = True
+    if not lease_fail:
+        oks.append(lease_path + " _adapter_env reads TRIFORGE_ENV_BASE + env_keys; no model literal in code")
 
-def hook_literal(name):
-    """The single '<name> = {...}' dict literal in the hook source (brace-matched)."""
-    m = re.search(r"^" + re.escape(name) + r" = \{", hook_src, re.M)
-    if not m:
-        fails.append(hook_path + ": " + name + " = { ... } literal not found")
-        return None
-    depth = 0
-    for i in range(m.end() - 1, len(hook_src)):
-        if hook_src[i] == "{":
-            depth += 1
-        elif hook_src[i] == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    return ast.literal_eval(hook_src[m.end() - 1:i + 1])
-                except Exception as exc:  # noqa: BLE001
-                    fails.append(hook_path + ": " + name + " is not a pure literal: " + str(exc))
-                    return None
-    fails.append(hook_path + ": " + name + " literal is unterminated")
-    return None
+# --- the lanes: ${<model_env>:-default} equals the registry model -------------
+if clis is not None:
+    lane_fail = False
+    seen = 0
+    for path in sorted(glob.glob(os.path.join(os.environ["VV_LIBDIR"], "*.sh"))):
+        text = read(path)
+        if text is None:
+            continue
+        for cli, e in clis.items():
+            if not e.get("model_env"):
+                continue
+            for n, ln in code_lines(text):
+                for dflt in re.findall(r"\$\{" + re.escape(e["model_env"]) + r":-([^}]*)\}", ln):
+                    if dflt == "":
+                        continue    # ${X_MODEL:-} is a set-test, not a default
+                    seen += 1
+                    if dflt != e["model"]:
+                        fails.append(path + ":" + str(n) + ": ${" + e["model_env"] + ":-" + dflt + "} but the registry model for " + cli + " is " + repr(e["model"]))
+                        lane_fail = True
+    if not lane_fail:
+        oks.append("lane defaults: " + str(seen) + " ${<model_env>:-…} default(s) in scripts/lib/*.sh equal the registry model")
 
-
-if hook_src is not None and cli_defaults is not None:
-    shipped = hook_literal("SHIPPED")
-    if shipped is not None:
-        want = {cli: model for cli, model in cli_defaults.items() if model}
-        if shipped == want:
-            oks.append(hook_path + " SHIPPED matches CLI_DEFAULT_MODEL (" + str(len(shipped)) + " members)")
-        else:
-            for key in sorted(set(shipped) | set(want)):
-                if shipped.get(key) != want.get(key):
-                    fails.append(hook_path + " SHIPPED[" + repr(key) + "] = " + repr(shipped.get(key))
-                                 + " but CLI_DEFAULT_MODEL = " + repr(want.get(key)))
-if hook_src is not None and role_defaults is not None:
-    role_cli = hook_literal("ROLE_CLI")
-    if role_cli is not None:
-        want = {role: entry.get("cli") for role, entry in role_defaults.items()}
-        if role_cli == want:
-            oks.append(hook_path + " ROLE_CLI matches DEFAULTS role->cli (" + str(len(role_cli)) + " roles)")
-        else:
-            for key in sorted(set(role_cli) | set(want)):
-                if role_cli.get(key) != want.get(key):
-                    fails.append(hook_path + " ROLE_CLI[" + repr(key) + "] = " + repr(role_cli.get(key))
-                                 + " but DEFAULTS cli = " + repr(want.get(key)))
+# --- scripts/probe-capabilities.sh: _lane_run mirror + the codex pin ----------
+probe_path = os.environ["VV_PROBE"]
+probe = read(probe_path)
+if probe is not None and clis is not None:
+    probe_fail = False
+    body = func_body(probe, "_lane_run", probe_path)
+    if body is not None and "REG_ENV_BASE" not in body:
+        fails.append(probe_path + ": _lane_run must iterate REG_ENV_BASE (TRIFORGE_ENV_BASE read through the loader), not a hand-written list")
+        probe_fail = True
+    if "codex" in clis:
+        m = re.search(r'^CDX_MODEL="([^"]*)"', probe, re.M)
+        if not m:
+            fails.append(probe_path + ': CDX_MODEL="..." not found')
+            probe_fail = True
+        elif m.group(1) != models["codex"]:
+            fails.append(probe_path + ": CDX_MODEL = " + repr(m.group(1)) + " but the registry codex model is " + repr(models["codex"]))
+            probe_fail = True
+    if not probe_fail:
+        oks.append(probe_path + " _lane_run reads REG_ENV_BASE; CDX_MODEL equals the registry codex model")
 
 for line in oks:
     print("ok:   drift: " + line)

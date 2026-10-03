@@ -114,6 +114,15 @@ TIMEOUT_NAME=$(basename "$TIMEOUT_BIN")
 command -v python3 >/dev/null 2>&1 || { echo "probe-capabilities: FATAL — python3 required (JSON/schema checks)" >&2; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "probe-capabilities: FATAL — git required (fixture repo)" >&2; exit 1; }
 
+# The lease lane's base env allowlist, read from the CLI registry
+# (TRIFORGE_ENV_BASE in scripts/lib/registry.sh, KTD7) through the loader in a
+# subshell — this harness is not sourced into the helper's shell and carries no
+# copy of the list, so _lane_run and the CC-08 gate cannot drift from
+# _adapter_env when a key changes. Fatal when unreadable: a probe under a
+# guessed env proves nothing about the real lease.
+REG_ENV_BASE=$( source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 && printf '%s' "${TRIFORGE_ENV_BASE:-}" ) || REG_ENV_BASE=""
+[ -n "$REG_ENV_BASE" ] || { echo "probe-capabilities: FATAL — could not read TRIFORGE_ENV_BASE from scripts/lib/registry.sh through scripts/invoke-external.sh" >&2; exit 1; }
+
 _rwt() { # _rwt <seconds> <cmd...>
   local SECS=$1; shift
   "$TIMEOUT_BIN" "${SECS}s" "$@"
@@ -245,20 +254,27 @@ _probe_run() { # _probe_run <seconds> <cmd...>
   "$TIMEOUT_BIN" "${SECS}s" env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null "$@"
 }
 
-# The lease lane's env -i boundary — field-for-field the _adapter_env base
-# allowlist in scripts/invoke-external.sh (KTD-14: HOME PATH TMPDIR TERM LANG
-# COLORTERM USER + NO_COLOR=1) + the same git isolation, for the SELF-06
-# lease-lane discovery rows and CC-08. Keep the two lists identical: a probe
-# that runs under a wider or narrower env than the real lease proves nothing
-# about it (USER is what lets `claude -p` find its keychain account).
+# The lease lane's env -i boundary — the _adapter_env base allowlist in
+# scripts/lib/lease.sh, read from the same registry list (REG_ENV_BASE =
+# TRIFORGE_ENV_BASE: HOME PATH TMPDIR TERM LANG COLORTERM USER, + NO_COLOR=1)
+# + the same git isolation, for the SELF-06 lease-lane discovery rows and
+# CC-08. The two read one list, so a probe can never run under a wider or
+# narrower env than the real lease (USER is what lets `claude -p` find its
+# keychain account); as before, HOME / PATH / TMPDIR are always passed (with
+# their fallbacks) and the other keys only when set.
 _lane_run() { # _lane_run <seconds> <cmd...>
   local SECS=$1; shift
-  local -a E=(HOME="${HOME:-}" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null)
-  [ -n "${TERM+x}" ]      && E+=("TERM=${TERM}")
-  [ -n "${LANG+x}" ]      && E+=("LANG=${LANG}")
-  [ -n "${COLORTERM+x}" ] && E+=("COLORTERM=${COLORTERM}")
-  [ -n "${USER+x}" ]      && E+=("USER=${USER}")
-  E+=("NO_COLOR=1")
+  local -a E=()
+  local K
+  for K in $REG_ENV_BASE; do
+    case "$K" in
+      HOME)   E+=("HOME=${HOME:-}") ;;
+      PATH)   E+=("PATH=$PATH") ;;
+      TMPDIR) E+=("TMPDIR=${TMPDIR:-/tmp}") ;;
+      *)      if [ -n "${!K+x}" ]; then E+=("${K}=${!K}"); fi ;;
+    esac
+  done
+  E+=(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null "NO_COLOR=1")
   "$TIMEOUT_BIN" "${SECS}s" env -i "${E[@]}" "$@"
 }
 
@@ -1508,7 +1524,7 @@ if command -v claude >/dev/null 2>&1; then
     # claude lease answered "Not logged in").
     O="$WORK/cc-lane-auth.txt"
     if (cd "$FIX" && _lane_run 240 claude -p --model sonnet --output-format text "Respond with only: READY" > "$O" 2>&1) && _contains_ci "$O" "READY"; then
-      row "CC-08" "claude" "claude -p authenticates under the lease env -i allowlist (KTD-14 base allowlist incl. USER)" "PASS" "READY under env -i HOME PATH TMPDIR TERM LANG COLORTERM USER NO_COLOR" "live"
+      row "CC-08" "claude" "claude -p authenticates under the lease env -i allowlist (KTD-14 base allowlist incl. USER)" "PASS" "READY under env -i ${REG_ENV_BASE} NO_COLOR (TRIFORGE_ENV_BASE, scripts/lib/registry.sh)" "live"
     else
       row "CC-08" "claude" "claude -p authenticates under the lease env -i allowlist (KTD-14 base allowlist incl. USER)" "FAIL" "the builder lane cannot reach Claude under the lease allowlist — every claude lease would fail: $(_evidence "$O")" "live"
     fi

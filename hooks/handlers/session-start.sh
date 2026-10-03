@@ -75,6 +75,33 @@ except Exception:
   SS_JSON_FILE="$1" "${CMD[@]}" 2>/dev/null || true
 }
 
+# The helper (scripts/invoke-external.sh) — sourced ONCE, unconditionally, so
+# this hook reads the CLI registry (scripts/lib/registry.sh, KTD7) for the
+# optional members, their binaries and shipped models, and the roster helpers
+# for enrollment, instead of carrying copies. Degraded, never fatal: the loader
+# is tried in a subshell first (a loader that `exit`s rather than `return`s
+# would otherwise end this hook mid-way — the EXIT trap would still print
+# prose and exit 0, but every later bootstrap step would be skipped), then
+# sourced for real only when that probe passed. A helper that does not load
+# leaves SS_HELPER empty: optional-CLI detection, enrollment and the roster
+# pin check are skipped and one standing WARNING line (no "session-start:"
+# prefix — it repeats until fixed) names the cause.
+SS_HELPER=""
+SS_HELPER_NOTICE=""
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh" ]; then
+  SS_HELPER_RC=0
+  SS_HELPER_ERR=$( ( source "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh" ) 2>&1 >/dev/null ) || SS_HELPER_RC=$?
+  if [ "$SS_HELPER_RC" -eq 0 ]; then
+    # shellcheck source=/dev/null
+    if source "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh" 2>/dev/null; then
+      SS_HELPER="yes"
+    fi
+  fi
+  if [ -z "$SS_HELPER" ]; then
+    SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh exited ${SS_HELPER_RC}: $(printf '%s' "$SS_HELPER_ERR" | head -1 | cut -c1-160)) — optional-CLI detection, enrollment and the roster pin check were skipped this session. Reinstall the plugin: claude plugin install agent-triforge@agent-triforge"
+  fi
+fi
+
 # Bootstrap ops/ directory if it doesn't exist
 if [ ! -d "ops" ]; then
   mkdir -p ops/solutions ops/decisions ops/archive
@@ -333,32 +360,16 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && command -v kimi >/dev/null 2>&1; then
   done
 fi
 
-# _ss_resolve_cursor_bin — bash re-implementation of the helper's _cursor_bin
-# (KTD3, D-025; the hook cannot source invoke-external.sh cheaply): prefer
-# `cursor-agent` (the legacy symlink the 2026.09.10 install script still
-# ships) and otherwise walk every `agent` on PATH (`which -a agent`), keeping
-# the first whose --version (10 s cap) matches Cursor's `YYYY.MM.DD-<hex>`
-# format — an unrelated ~/.grok/bin/agent shadows Cursor's `agent` on the
-# probe host, so a bare command -v is not enough. Prints the resolved path or
-# nothing; without a timeout binary the `agent` walk is skipped (fail-closed).
-_ss_resolve_cursor_bin() {
-  local BIN VER
-  if command -v cursor-agent >/dev/null 2>&1; then
-    command -v cursor-agent
-    return 0
-  fi
-  [ -n "$TIMEOUT_BIN" ] || return 0
-  while IFS= read -r BIN; do
-    [ -n "$BIN" ] && [ -x "$BIN" ] || continue
-    VER=$("$TIMEOUT_BIN" 10s "$BIN" --version 2>/dev/null | head -1 || true)
-    if printf '%s' "$VER" | LC_ALL=C grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]+'; then
-      printf '%s\n' "$BIN"
-      return 0
-    fi
-  done < <(which -a agent 2>/dev/null || true)
-  return 0
-}
-CURSOR_BIN=$(_ss_resolve_cursor_bin)
+# The Cursor binary comes from the helper's own resolver, _cursor_bin (KTD3,
+# D-025 — `cursor-agent` first, else the first `agent` on PATH whose --version
+# matches Cursor's `YYYY.MM.DD-<hex>` format under a 15 s cap, fail-closed
+# without a timeout tool): the registry names it as cursor's resolver, so this
+# hook carries no re-implementation. Empty when the helper did not load or
+# nothing resolved.
+CURSOR_BIN=""
+if [ -n "$SS_HELPER" ]; then
+  CURSOR_BIN=$(_cursor_bin 2>/dev/null || true)
+fi
 
 # Bootstrap Cursor CLI project files, copy-if-absent so user customizations
 # survive. Guarded on the resolver above (binary `agent` primary, `cursor-agent`
@@ -401,15 +412,18 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/ops/roster.toml" "ops/roster.toml"
 fi
 
-# Optional-CLI detection (roster tier): presence + version for opencode /
-# kimi / cursor, written to .claude/roster-detected.local.md (runtime state,
+# Optional-CLI detection (roster tier): presence + version for every optional
+# member of the CLI registry (cli_list optional — opencode / kimi / cursor
+# today), written to .claude/roster-detected.local.md (runtime state,
 # regenerated each session start; .claude/*.local.md is gitignored).
 # Line format: cli|version|detected-date, plus one interactive=yes|no signal
-# line the enrollment unit keys off, plus `cursor_bin=<resolved path>` when the
-# resolver above found a Cursor binary (the helper's _cursor_bin may reuse it).
+# line the enrollment unit keys off, plus `<cli>_bin=<resolved path>` for a
+# member whose registry entry names a resolver (cursor: `cursor_bin=` from
+# _cursor_bin, since the binary that answered may be an `agent`, not the name).
 # [ -t 0 ] at hook time is best-effort — hooks often run with stdin piped —
 # documented as such; the enrollment branch treats "no" as headless and enrolls
-# shipped defaults silently.
+# shipped defaults silently. With no helper loaded nothing is detected (the
+# WARNING above says so).
 ROSTER_DETECTED=".claude/roster-detected.local.md"
 OPTIONAL_DETECTED_COUNT=0
 DETECTED_OPTIONAL=()
@@ -421,10 +435,13 @@ ROSTER_DETECTED_TMP="${ROSTER_DETECTED}.tmp.$$"
   echo "<!-- runtime state: optional roster CLI detection, regenerated each session start -->"
   echo "interactive=${INTERACTIVE_SIGNAL}"
 } > "$ROSTER_DETECTED_TMP"
-for PAIR in "opencode:opencode" "kimi:kimi" "cursor:${CURSOR_BIN}"; do
-  CLI_NAME=${PAIR%%:*}
-  CLI_BIN=${PAIR#*:}
-  [ -n "$CLI_BIN" ] || continue      # cursor: resolver found nothing
+SS_OPTIONAL=""
+if [ -n "$SS_HELPER" ]; then
+  SS_OPTIONAL=$(cli_list optional 2>/dev/null || true)
+fi
+for CLI_NAME in $SS_OPTIONAL; do
+  CLI_BIN=$(_registry_binary "$CLI_NAME" 2>/dev/null || true)
+  [ -n "$CLI_BIN" ] || continue
   if command -v "$CLI_BIN" >/dev/null 2>&1; then
     # Version capture is best-effort: --version first, -V fallback, 10s cap
     # each; a CLI that answers neither is still recorded as present.
@@ -438,7 +455,9 @@ for PAIR in "opencode:opencode" "kimi:kimi" "cursor:${CURSOR_BIN}"; do
     fi
     [ -z "$CLI_VERSION" ] && CLI_VERSION="unknown"
     echo "${CLI_NAME}|${CLI_VERSION}|$(date +%Y-%m-%d)" >> "$ROSTER_DETECTED_TMP"
-    [ "$CLI_NAME" = "cursor" ] && echo "cursor_bin=${CLI_BIN}" >> "$ROSTER_DETECTED_TMP"
+    if [ -n "$(cli_field "$CLI_NAME" resolver 2>/dev/null || true)" ]; then
+      echo "${CLI_NAME}_bin=${CLI_BIN}" >> "$ROSTER_DETECTED_TMP"
+    fi
     OPTIONAL_DETECTED_COUNT=$((OPTIONAL_DETECTED_COUNT + 1))
     DETECTED_OPTIONAL+=("$CLI_NAME")
   fi
@@ -451,12 +470,10 @@ mv -f "$ROSTER_DETECTED_TMP" "$ROSTER_DETECTED" 2>/dev/null || rm -f "$ROSTER_DE
 #     cannot prompt); the lease layer records the resolved model at dispatch.
 #   interactive (=yes)        -> emit an orientation line pointing at /setup.
 # All writes go through the single-writer roster writer (roster_write_member) in
-# invoke-external.sh — never a hand-rolled write here. Fast: headless enrollment
-# does no live auth probe; each helper call is tomllib-only.
+# the helper sourced above — never a hand-rolled write here. Fast: headless
+# enrollment does no live auth probe; each helper call is tomllib-only.
 ENROLLMENT_NOTICES=""
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh" ] && [ "${#DETECTED_OPTIONAL[@]}" -gt 0 ]; then
-  # shellcheck source=/dev/null
-  source "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh"
+if [ -n "$SS_HELPER" ] && [ "${#DETECTED_OPTIONAL[@]}" -gt 0 ]; then
   for CLI_NAME in "${DETECTED_OPTIONAL[@]}"; do
     ENROLL_HAS_RC=0
     roster_has_member "$CLI_NAME" || ENROLL_HAS_RC=$?
@@ -498,18 +515,21 @@ fi
 # Roster pin drift (informational): persisted [members.*].model / [roles.*].model
 # values that differ from the shipped defaults. An upgraded project keeps
 # whatever its roster carries — a pin is never rewritten here — so one line per
-# differing pin points at /setup. The SHIPPED map mirrors CLI_DEFAULT_MODEL in
-# resolve_role (scripts/invoke-external.sh) and templates/ops/roster.toml; keep
-# the three in sync (validate-versions.sh check 3 diffs the SHIPPED / ROLE_CLI
-# literals below against CLI_DEFAULT_MODEL / DEFAULTS). An effort
-# variant of the default is NOT drift: the agy `(Low|Medium|High)` suffix and
-# the Cursor `-low|-medium|-high|-xhigh` suffix are effort controls (KTD3, KTD6),
-# so both sides are compared with that suffix stripped. Tolerant: a malformed
-# roster prints nothing (resolve_role raises the loud error later).
+# differing pin points at /setup. The shipped defaults are read from the two
+# literals the helper exports — the CLI registry (_TRIFORGE_CLIS_PY,
+# scripts/lib/registry.sh: per-CLI model) and the role table (_ROLE_DEFAULTS_PY,
+# scripts/lib/roster.sh: role -> cli) — handed to python as environment
+# variables and exec'd, so this hook carries no copy (validate-versions.sh
+# check 3 fails one that creeps back). An effort variant of the default is NOT
+# drift: the agy `(Low|Medium|High)` suffix and the Cursor
+# `-low|-medium|-high|-xhigh` suffix are effort controls (KTD3, KTD6), so both
+# sides are compared with that suffix stripped. Tolerant: a malformed roster
+# prints nothing (resolve_role raises the loud error later); skipped without
+# the helper.
 ROSTER_DRIFT_NOTICES=""
-if [ -f "ops/roster.toml" ]; then
-  ROSTER_DRIFT_NOTICES=$(python3 -c '
-import re, sys
+if [ -n "$SS_HELPER" ] && [ -f "ops/roster.toml" ]; then
+  ROSTER_DRIFT_NOTICES=$(TRIFORGE_CLIS_PY="${_TRIFORGE_CLIS_PY:-}" TRIFORGE_ROLE_DEFAULTS_PY="${_ROLE_DEFAULTS_PY:-}" python3 -c '
+import os, re, sys
 try:
     import tomllib
 except ImportError:
@@ -517,15 +537,11 @@ except ImportError:
         import tomli as tomllib
     except ImportError:
         sys.exit(0)
-SHIPPED = {
-    "antigravity": "Gemini 3.8 Flash (High)",
-    "codex": "gpt-6-astra",
-    "opencode": "openrouter/z-ai/glm-5.3",
-    "kimi": "kimi-code/k3",
-    "cursor": "cursor-grok-4.6-xhigh",
-}
-ROLE_CLI = {"builder": "claude", "reviewer": "codex", "tester": "codex",
-            "analyst": "antigravity", "documenter": "antigravity"}
+ns = {}
+exec(os.environ["TRIFORGE_CLIS_PY"], ns)
+exec(os.environ["TRIFORGE_ROLE_DEFAULTS_PY"], ns)
+SHIPPED = {cli: e["model"] for cli, e in ns["CLIS"].items() if e["model"]}
+ROLE_CLI = {role: d["cli"] for role, d in ns["DEFAULTS"].items()}
 def norm(cli, model):
     if cli == "antigravity":
         return re.sub(r"\s*\((Low|Medium|High)\)\s*$", "", model)
@@ -895,6 +911,9 @@ MSG="$MSG\nRoster: core trio + ${OPTIONAL_DETECTED_COUNT} optional member(s) det
 MSG="$MSG${ENROLLMENT_NOTICES:-}"
 if [ -n "$ROSTER_DRIFT_NOTICES" ]; then
   MSG="$MSG\n${ROSTER_DRIFT_NOTICES}"
+fi
+if [ -n "$SS_HELPER_NOTICE" ]; then
+  MSG="$MSG\n${SS_HELPER_NOTICE}"
 fi
 
 # Migration notices (one per step that acted this session; silent otherwise).

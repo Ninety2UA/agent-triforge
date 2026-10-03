@@ -81,7 +81,7 @@ for f in scripts/*.sh scripts/lib/*.sh hooks/handlers/*.sh; do /bin/bash -n "$f"
 - `skills/wave-orchestration/SKILL.md` — the lease lifecycle (assign, dispatch, collect, pin, merge, verify, promote) and the dispatch contract.
 - `docs/agent-triforge.md` — the design: phases, coordination modes, shared `ops/` files, agent frontmatter fields, the security model in detail, compatibility notes.
 - `README.md` — install, prerequisites, compatibility floors, the six-CLI skills matrix, data egress, release process.
-- `scripts/lib/registry.sh` — protected-path lists and the model ladder; `templates/AGENTS.md` — the pointer block for user projects; `templates/ops/` — the `ops/` skeleton.
+- `scripts/lib/registry.sh` — the CLI registry (one entry per CLI: tier, binary, model, install hint, env allowlist keys, lane, egress, lead fields — adding a CLI starts here), protected-path lists and the model ladder; `templates/AGENTS.md` — the pointer block for user projects; `templates/ops/` — the `ops/` skeleton.
 
 ## Release
 
