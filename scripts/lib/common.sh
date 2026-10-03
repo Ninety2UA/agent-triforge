@@ -73,14 +73,16 @@ _kill_tree() {
   kill -"$SIG" "$ROOT" 2>/dev/null || true
 }
 
-# The registered adapter identities (_KNOWN_CLIS — set by scripts/lib/registry.sh,
-# sourced after this file, from the CLI registry; read here at call time). A
-# valid reviewer/builder identity is exactly one of these — canonicalizing
-# against the registry (rather than accepting any free-form label) is what
-# closes fabricated reviewer names like "codex-reviewer", which would otherwise
-# pass lease_merge's plain != builder string compare (AE3) while no real review
-# ran. An empty list (python3 missing) fails every identity closed.
+# The registered adapter identities (_known_clis — scripts/lib/registry.sh,
+# sourced after this file, reads them from the CLI registry on first use and
+# caches them in _KNOWN_CLIS; called here, not in a $(...), so the cache lands in
+# this shell). A valid reviewer/builder identity is exactly one of these —
+# canonicalizing against the registry (rather than accepting any free-form
+# label) is what closes fabricated reviewer names like "codex-reviewer", which
+# would otherwise pass lease_merge's plain != builder string compare (AE3) while
+# no real review ran. An empty list (python3 missing) fails every identity closed.
 _is_known_cli() {
+  _known_clis >/dev/null
   case " ${_KNOWN_CLIS:-} " in *" ${1:-} "*) return 0 ;; *) return 1 ;; esac
 }
 

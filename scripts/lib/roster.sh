@@ -294,7 +294,7 @@ dispatch_role() {
       CURSOR_MODEL="$MODEL" invoke_cursor "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
       ;;
     *)
-      echo "dispatch_role: ERROR role '${ROLE}' resolved to cli '${CLI}', which has no shell dispatch arm here — not integrated. Registered CLIs: ${_KNOWN_CLIS:-<registry unreadable>}." >&2
+      echo "dispatch_role: ERROR role '${ROLE}' resolved to cli '${CLI}', which has no shell dispatch arm here — not integrated. Registered CLIs: $(_known_clis '<registry unreadable>')." >&2
       return 1
       ;;
   esac
@@ -316,15 +316,16 @@ _TRIO_LIVE_CACHE="${TMPDIR:-/tmp}/triforge_trio_live_$$"
 ensure_core_trio_live() {
   [ -f "$_TRIO_LIVE_CACHE" ] && return 0
   local FAILED=0
-  local CORE NAME BIN FIX
-  # The core set and each member's binary + install fix come from the CLI
-  # registry (scripts/lib/registry.sh); the fix line is composed only when a
-  # member fails, so the happy path costs one lookup per member.
-  CORE=$(cli_list core) || return 1
-  # Loop over a command substitution, not the bare variable: zsh (the commands'
-  # shell) splits $(...) into words but never an unquoted parameter.
-  for NAME in $(printf '%s' "$CORE"); do
-    BIN=$(cli_field "$NAME" binary) || return 1
+  local ROWS CORE="" NAME BIN FIX
+  # The core set and each member's binary come from the CLI registry
+  # (scripts/lib/registry.sh) in one read — cli_table, one line per member —
+  # and the install fix is composed only when a member fails, so the happy path
+  # costs one lookup for the whole trio. The rows arrive on fd 3 so the probed
+  # commands keep the caller's stdin.
+  ROWS=$(cli_table core binary) || return 1
+  while IFS=$'\t' read -r -u 3 NAME BIN; do
+    [ -n "$NAME" ] || continue
+    CORE="${CORE:+${CORE} }${NAME}"
     if ! command -v "$BIN" >/dev/null 2>&1; then
       FIX=$(cli_install_fix "$NAME" 2>/dev/null || true)
       echo "ensure_core_trio_live: ERROR core member ${NAME} — \`${BIN}\` not found on PATH. Fix: ${FIX}. No retry (deterministic)." >&2
@@ -336,7 +337,9 @@ ensure_core_trio_live() {
       echo "ensure_core_trio_live: ERROR core member ${NAME} — \`${BIN} --version\` failed its 15s liveness check (broken install or hung binary). Fix: ${FIX}. No retry (deterministic)." >&2
       FAILED=1
     fi
-  done
+  done 3<<TRIO_ROWS_EOF
+${ROWS}
+TRIO_ROWS_EOF
   if [ "$FAILED" -ne 0 ]; then
     echo "ensure_core_trio_live: the core trio (${CORE// /, }) must be live before /build or /review can dispatch — see fixes above." >&2
     return 1

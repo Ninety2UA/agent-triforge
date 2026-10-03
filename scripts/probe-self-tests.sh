@@ -906,7 +906,7 @@ mkdir -p "$_S11/stubs" "$_S11/tmp" "$_S11/cwd" "$_S11/home" "$_S11/argv" "$_S11/
          "$_S11/proj/scripts" "$_S11/proj/skills/user-skill" "$_S11/proj/wt" \
          "$_S11/proj/.agents/skills/at-probe/scripts" "$_S11/proj/vendor/tri/.claude-plugin" "$_S11/proj/vendor/tri/scripts" \
          "$_S11/plugin/.claude-plugin" "$_S11/plugin/scripts" "$_S11/plugin/skills/at-probe/scripts"
-_s11_real() { RP_TARGET="$1" python3 -c 'import os; print(os.path.realpath(os.environ["RP_TARGET"]))'; }
+_s11_real() { ( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && _lease_realpath "$1" ); }   # the helper's own BSD-portable realpath
 _S11_ROOT=$(_s11_real "$REPO_ROOT")
 # argv-recording stubs for the three lanes: status / features / --version are
 # answered so the preflights pass; every other call writes one file per argument

@@ -330,33 +330,66 @@ print(' '.join(c for c, e in CLIS.items() if t == 'all' or e['tier'] == t))
 "
 }
 
-# cli_field <cli> <field>[.<subfield>] — print one registry value: a list
-# space-joined, a boolean as true|false, a table as its key names (cli_field
-# codex lead -> the KTD1 field names; an empty table prints nothing). rc 2 with
-# a message for an unknown CLI or field, so a typo never reads as "".
+# _CLI_FIELD_PY — the lookup the two accessors below share, spliced into their
+# python like _TRIFORGE_CLIS_PY (single-quoted: double quotes only inside).
+# cli_value(who, cli, entry, field) walks a dotted field name into the entry and
+# formats the value — a list space-joined, a boolean as true|false, a table as
+# its key names (an empty table formats as nothing) — or exits 2 with
+# "<who>: <cli> has no field '<field>'", so a typo never reads as "".
+_CLI_FIELD_PY='
+def cli_value(who, cli, entry, field):
+    v = entry
+    for k in field.split("."):
+        if not isinstance(v, dict) or k not in v:
+            sys.stderr.write(who + ": " + cli + " has no field " + repr(field) + "\n")
+            sys.exit(2)
+        v = v[k]
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (list, tuple)):
+        return " ".join(str(x) for x in v)
+    if isinstance(v, dict):
+        return " ".join(v)
+    return str(v)
+'
+
+# cli_field <cli> <field>[.<subfield>]... — print the registry values of one
+# CLI, tab-separated on one line (one field: the value alone; cli_field codex
+# lead -> the KTD1 field names). rc 2 with a message for an unknown CLI or
+# field. Two fields in one call is one python3 fork instead of two
+# (_registry_binary, lease_dispatch); the fields ride in as the argument list.
 cli_field() {
-  CF_CLI="${1:?usage: cli_field <cli> <field>[.<subfield>]}" CF_FIELD="${2:?usage: cli_field <cli> <field>[.<subfield>]}" python3 -c "
+  CF_ARGS="$*" CF_CLI="${1:?usage: cli_field <cli> <field>[.<subfield>]}" CF_FIELD="${2:?usage: cli_field <cli> <field>[.<subfield>]}" python3 -c "
 import os, sys
 ${_TRIFORGE_CLIS_PY}
+${_CLI_FIELD_PY}
 cli = os.environ['CF_CLI']
-field = os.environ['CF_FIELD']
 if cli not in CLIS:
     sys.stderr.write('cli_field: unknown cli ' + repr(cli) + ' (registered: ' + ' '.join(CLIS) + ')\n')
     sys.exit(2)
-v = CLIS[cli]
-for k in field.split('.'):
-    if not isinstance(v, dict) or k not in v:
-        sys.stderr.write('cli_field: ' + cli + ' has no field ' + repr(field) + '\n')
-        sys.exit(2)
-    v = v[k]
-if isinstance(v, bool):
-    print('true' if v else 'false')
-elif isinstance(v, (list, tuple)):
-    print(' '.join(str(x) for x in v))
-elif isinstance(v, dict):
-    print(' '.join(v))
-else:
-    print(v)
+fields = [os.environ['CF_FIELD']] + os.environ['CF_ARGS'].split()[2:]
+print('\t'.join(cli_value('cli_field', cli, CLIS[cli], f) for f in fields))
+"
+}
+
+# cli_table <core|optional|all> <field>[.<subfield>]... — one line per registered
+# CLI of that tier, registry order: the name, then each field, tab-separated and
+# formatted as cli_field prints them. One python3 fork where a cli_list +
+# cli_field loop forks once per lookup (ensure_core_trio_live, the session-start
+# detection loop). rc 2 with a message for an unknown tier or field.
+cli_table() {
+  CT_ARGS="$*" CT_TIER="${1:?usage: cli_table <core|optional|all> <field>[.<subfield>]...}" CT_FIELD="${2:?usage: cli_table <core|optional|all> <field>[.<subfield>]...}" python3 -c "
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_CLI_FIELD_PY}
+t = os.environ['CT_TIER']
+if t not in ('core', 'optional', 'all'):
+    sys.stderr.write('cli_table: unknown tier ' + repr(t) + ' (core|optional|all)\n')
+    sys.exit(2)
+fields = [os.environ['CT_FIELD']] + os.environ['CT_ARGS'].split()[2:]
+for cli, e in CLIS.items():
+    if t == 'all' or e['tier'] == t:
+        print('\t'.join([cli] + [cli_value('cli_table', cli, e, f) for f in fields]))
 "
 }
 
@@ -377,14 +410,19 @@ print('install ' + e['name'] + ' (' + e['install'] + ')' + (', then ' + e['login
 "
 }
 
-# _registry_binary <cli> — the binary to look up on PATH: the entry's
-# resolver's answer when the registry names one and the function is defined
-# (cursor: _cursor_bin, which prints the verified absolute path), else the
-# plain `binary` name. rc 2 for an unknown CLI.
+# _registry_binary <cli> [<binary> <resolver>] — the binary to look up on PATH:
+# the entry's resolver's answer when the registry names one and the function is
+# defined (cursor: _cursor_bin, which prints the verified absolute path), else
+# the plain `binary` name. The two fields are one registry read (cli_field)
+# unless the caller hands them over from a cli_table row (the session-start
+# detection loop: one read for the whole tier). rc 2 for an unknown CLI.
 _registry_binary() {
-  local CLI=${1:?usage: _registry_binary <cli>} BIN="" RESOLVER="" OUT=""
-  BIN=$(cli_field "$CLI" binary) || return 2
-  RESOLVER=$(cli_field "$CLI" resolver) || return 2
+  local CLI=${1:?usage: _registry_binary <cli>} BIN=${2:-} RESOLVER=${3:-} ROW="" OUT=""
+  if [ $# -lt 3 ]; then
+    ROW=$(cli_field "$CLI" binary resolver) || return 2
+    BIN=${ROW%%$'\t'*}
+    RESOLVER=${ROW#*$'\t'}
+  fi
   if [ -n "$RESOLVER" ] && command -v "$RESOLVER" >/dev/null 2>&1 && OUT=$("$RESOLVER" 2>/dev/null) && [ -n "$OUT" ]; then
     printf '%s\n' "$OUT"
     return 0
@@ -392,9 +430,19 @@ _registry_binary() {
   printf '%s\n' "$BIN"
 }
 
-# The registered CLI names as one space-separated string, for the identity
-# checks (_is_known_cli in common.sh) and the "one of: …" error messages in
-# lease.sh. Set once at load from the literal above; empty (so every identity
-# check fails closed) only when python3 is missing, which resolve_role refuses
-# on anyway.
-_KNOWN_CLIS=$(cli_list all 2>/dev/null) || _KNOWN_CLIS=""
+# _known_clis [<text when unreadable>] — the registered CLI names as one
+# space-separated line (cli_list all), for the identity checks (_is_known_cli
+# in common.sh) and the "one of: …" error messages in lease.sh and roster.sh.
+# Read on first use and cached in _KNOWN_CLIS, so loading the helper forks no
+# python; empty (every identity check fails closed) only when python3 is
+# missing, which resolve_role refuses on anyway — the optional argument is
+# printed in place of that empty list.
+_KNOWN_CLIS=""
+_KNOWN_CLIS_READ=""
+_known_clis() {
+  if [ -z "$_KNOWN_CLIS_READ" ]; then
+    _KNOWN_CLIS=$(cli_list all 2>/dev/null) || _KNOWN_CLIS=""
+    _KNOWN_CLIS_READ=1
+  fi
+  printf '%s\n' "${_KNOWN_CLIS:-${1:-}}"
+}

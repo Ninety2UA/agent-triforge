@@ -75,32 +75,12 @@ except Exception:
   SS_JSON_FILE="$1" "${CMD[@]}" 2>/dev/null || true
 }
 
-# The helper (scripts/invoke-external.sh) — sourced ONCE, unconditionally, so
-# this hook reads the CLI registry (scripts/lib/registry.sh, KTD7) for the
-# optional members, their binaries and shipped models, and the roster helpers
-# for enrollment, instead of carrying copies. Degraded, never fatal: the loader
-# is tried in a subshell first (a loader that `exit`s rather than `return`s
-# would otherwise end this hook mid-way — the EXIT trap would still print
-# prose and exit 0, but every later bootstrap step would be skipped), then
-# sourced for real only when that probe passed. A helper that does not load
-# leaves SS_HELPER empty: optional-CLI detection, enrollment and the roster
-# pin check are skipped and one standing WARNING line (no "session-start:"
-# prefix — it repeats until fixed) names the cause.
-SS_HELPER=""
-SS_HELPER_NOTICE=""
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh" ]; then
-  SS_HELPER_RC=0
-  SS_HELPER_ERR=$( ( source "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh" ) 2>&1 >/dev/null ) || SS_HELPER_RC=$?
-  if [ "$SS_HELPER_RC" -eq 0 ]; then
-    # shellcheck source=/dev/null
-    if source "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh" 2>/dev/null; then
-      SS_HELPER="yes"
-    fi
-  fi
-  if [ -z "$SS_HELPER" ]; then
-    SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh exited ${SS_HELPER_RC}: $(printf '%s' "$SS_HELPER_ERR" | head -1 | cut -c1-160)) — optional-CLI detection, enrollment and the roster pin check were skipped this session. Reinstall the plugin: claude plugin install agent-triforge@agent-triforge"
-  fi
-fi
+# _ss_run — the rest of this hook, from the ops/ bootstrap to the orientation
+# message, as one function: it runs inside the subshell that sources the helper
+# (the block at the end of this file) or, when the helper does not load, in the
+# hook's own shell with SS_HELPER empty. The body is the hook's linear flow and
+# stays at column 0.
+_ss_run() {
 
 # Bootstrap ops/ directory if it doesn't exist
 if [ ! -d "ops" ]; then
@@ -368,7 +348,9 @@ fi
 # nothing resolved.
 CURSOR_BIN=""
 if [ -n "$SS_HELPER" ]; then
-  CURSOR_BIN=$(_cursor_bin 2>/dev/null || true)
+  # Run in this shell, not a $(...): the TRIFORGE_CURSOR_BIN export a hit leaves
+  # behind makes the detection loop's resolver call below a lookup, not a probe.
+  if _cursor_bin >/dev/null 2>&1; then CURSOR_BIN="$TRIFORGE_CURSOR_BIN"; fi
 fi
 
 # Bootstrap Cursor CLI project files, copy-if-absent so user customizations
@@ -413,7 +395,7 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
 fi
 
 # Optional-CLI detection (roster tier): presence + version for every optional
-# member of the CLI registry (cli_list optional — opencode / kimi / cursor
+# member of the CLI registry (cli_table optional — opencode / kimi / cursor
 # today), written to .claude/roster-detected.local.md (runtime state,
 # regenerated each session start; .claude/*.local.md is gitignored).
 # Line format: cli|version|detected-date, plus one interactive=yes|no signal
@@ -422,8 +404,8 @@ fi
 # _cursor_bin, since the binary that answered may be an `agent`, not the name).
 # [ -t 0 ] at hook time is best-effort — hooks often run with stdin piped —
 # documented as such; the enrollment branch treats "no" as headless and enrolls
-# shipped defaults silently. With no helper loaded nothing is detected (the
-# WARNING above says so).
+# shipped defaults silently. With no helper loaded nothing is detected
+# (SS_HELPER_NOTICE says so).
 ROSTER_DETECTED=".claude/roster-detected.local.md"
 OPTIONAL_DETECTED_COUNT=0
 DETECTED_OPTIONAL=()
@@ -435,12 +417,17 @@ ROSTER_DETECTED_TMP="${ROSTER_DETECTED}.tmp.$$"
   echo "<!-- runtime state: optional roster CLI detection, regenerated each session start -->"
   echo "interactive=${INTERACTIVE_SIGNAL}"
 } > "$ROSTER_DETECTED_TMP"
-SS_OPTIONAL=""
+SS_OPTIONAL_ROWS=""
 if [ -n "$SS_HELPER" ]; then
-  SS_OPTIONAL=$(cli_list optional 2>/dev/null || true)
+  SS_OPTIONAL_ROWS=$(cli_table optional binary resolver 2>/dev/null || true)
 fi
-for CLI_NAME in $SS_OPTIONAL; do
-  CLI_BIN=$(_registry_binary "$CLI_NAME" 2>/dev/null || true)
+# One registry read for the tier (cli_table: name, binary, resolver per line);
+# each member's binary is then resolved from its own row (_registry_binary, no
+# further read) and probed with command -v before anything else runs. The rows
+# arrive on fd 3 so the version probes keep the hook's stdin.
+while IFS=$'\t' read -r -u 3 CLI_NAME CLI_BIN CLI_RESOLVER; do
+  [ -n "$CLI_NAME" ] || continue
+  CLI_BIN=$(_registry_binary "$CLI_NAME" "$CLI_BIN" "$CLI_RESOLVER" 2>/dev/null || true)
   [ -n "$CLI_BIN" ] || continue
   if command -v "$CLI_BIN" >/dev/null 2>&1; then
     # Version capture is best-effort: --version first, -V fallback, 10s cap
@@ -455,13 +442,15 @@ for CLI_NAME in $SS_OPTIONAL; do
     fi
     [ -z "$CLI_VERSION" ] && CLI_VERSION="unknown"
     echo "${CLI_NAME}|${CLI_VERSION}|$(date +%Y-%m-%d)" >> "$ROSTER_DETECTED_TMP"
-    if [ -n "$(cli_field "$CLI_NAME" resolver 2>/dev/null || true)" ]; then
+    if [ -n "$CLI_RESOLVER" ]; then
       echo "${CLI_NAME}_bin=${CLI_BIN}" >> "$ROSTER_DETECTED_TMP"
     fi
     OPTIONAL_DETECTED_COUNT=$((OPTIONAL_DETECTED_COUNT + 1))
     DETECTED_OPTIONAL+=("$CLI_NAME")
   fi
-done
+done 3<<SS_OPTIONAL_EOF
+${SS_OPTIONAL_ROWS}
+SS_OPTIONAL_EOF
 mv -f "$ROSTER_DETECTED_TMP" "$ROSTER_DETECTED" 2>/dev/null || rm -f "$ROSTER_DETECTED_TMP" 2>/dev/null || true
 
 # First-detection enrollment trigger (R37). For each optional CLI detected THIS
@@ -976,3 +965,50 @@ echo ""
 echo "Commands: /setup /ship /plan /build /review /test /debug /quick /deep-research /analyze /coordinate /resolve-pr /status /pause /resume /wrap /compound"
 
 exit 0
+}
+
+# The helper (scripts/invoke-external.sh) — sourced ONCE, in the subshell that
+# then runs _ss_run, so the hook reads the CLI registry (scripts/lib/registry.sh,
+# KTD7) for the optional members, their binaries and shipped models, and the
+# roster helpers for enrollment, instead of carrying copies. Degraded, never
+# fatal: a loader that `exit`s rather than `return`s, or trips set -u, ends only
+# that subshell. Its stderr lands in a private temp dir beside the `loaded`
+# marker the subshell writes once the source succeeded (plain files, no extra
+# fd: a descriptor would be inherited by every child, and a probe the watchdog
+# in _ss_bounded leaves behind must not hold the hook's stdout). No marker: the
+# helper did not load, so _ss_run runs below in this shell with SS_HELPER empty
+# — optional-CLI detection, enrollment and the roster pin check are skipped and
+# one standing WARNING line (no "session-start:" prefix — it repeats until
+# fixed) names the cause (the loader's first stderr line, or mktemp's when no
+# temp dir could be made under TMPDIR or, failing that, under the hook's own
+# .claude/ runtime dir). Marker: the helper loaded and _ss_run ran; a nonzero
+# status is a crash inside _ss_run, re-raised here so the EXIT trap reports it
+# as it would at top level.
+SS_HELPER=""
+SS_HELPER_NOTICE=""
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh" ]; then
+  SS_HELPER_RC=0
+  SS_HELPER_ERR=""
+  SS_HELPER_TMP=$(mktemp -d "${TMPDIR:-/tmp}/triforge-session-start.XXXXXX" 2>/dev/null || mktemp -d ".claude/triforge-session-start.XXXXXX" 2>&1) || SS_HELPER_RC=$?
+  if [ "$SS_HELPER_RC" -eq 0 ]; then
+    set +e
+    ( set -e
+      # shellcheck source=/dev/null
+      source "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh" 2>"${SS_HELPER_TMP}/err" || exit $?
+      : > "${SS_HELPER_TMP}/loaded"
+      SS_HELPER="yes"
+      _ss_run )
+    SS_HELPER_RC=$?
+    set -e
+    if [ -f "${SS_HELPER_TMP}/loaded" ]; then
+      rm -rf "$SS_HELPER_TMP"
+      exit "$SS_HELPER_RC"
+    fi
+    SS_HELPER_ERR=$(head -1 "${SS_HELPER_TMP}/err" 2>/dev/null | cut -c1-160 || true)
+    rm -rf "$SS_HELPER_TMP"
+  else
+    SS_HELPER_ERR=$(printf '%s' "$SS_HELPER_TMP" | head -1 | cut -c1-160)
+  fi
+  SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh exited ${SS_HELPER_RC}: ${SS_HELPER_ERR}) — optional-CLI detection, enrollment and the roster pin check were skipped this session. Reinstall the plugin: claude plugin install agent-triforge@agent-triforge"
+fi
+_ss_run

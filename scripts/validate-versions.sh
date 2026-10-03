@@ -55,6 +55,11 @@
 #      each lane's `${<model_env>:-…}` default in scripts/lib/*.sh equals the
 #      registry model; _lane_run in scripts/probe-capabilities.sh reads
 #      REG_ENV_BASE and the harness's CDX_MODEL pin equals the codex model.
+#      The Triforge-root test exists twice on purpose — _triforge_is_plugin_root
+#      in scripts/invoke-external.sh (the loader) and is_triforge_root in
+#      scripts/skill-locator/locate-triforge.sh (POSIX sh, executed, never
+#      sourced) — and the two function bodies must be identical apart from the
+#      function name.
 #   4. Scoped stale-pin sweep (KTD12) — patterns gpt-5.6-sol, grok-4.5,
 #      glm-5.2, kimi-k3, "Fable 5 →", "Opus 4.8", 2026-07-probe-record, and
 #      "Gemini 3.1 Pro (High)" ONLY on lines that also say "default" (so the
@@ -219,6 +224,7 @@ fi
 DRIFT_RC=0
 VV_REGISTRY="scripts/lib/registry.sh" VV_SRC="scripts/lib/roster.sh" VV_ROSTER="templates/ops/roster.toml" \
 VV_HOOK="hooks/handlers/session-start.sh" VV_LEASE="scripts/lib/lease.sh" VV_PROBE="scripts/probe-capabilities.sh" \
+VV_LOADER="scripts/invoke-external.sh" VV_LOCATOR="scripts/skill-locator/locate-triforge.sh" \
 VV_LIBDIR="scripts/lib" python3 - <<'PYEOF' || DRIFT_RC=$?
 import ast
 import glob
@@ -567,6 +573,20 @@ if probe is not None and clis is not None:
             probe_fail = True
     if not probe_fail:
         oks.append(probe_path + " _lane_run reads REG_ENV_BASE; CDX_MODEL equals the registry codex model")
+
+# --- the Triforge-root test: the loader and the skill locator carry one copy each
+loader_path = os.environ["VV_LOADER"]
+locator_path = os.environ["VV_LOCATOR"]
+loader = read(loader_path)
+locator = read(locator_path)
+if loader is not None and locator is not None:
+    root_a = func_body(loader, "_triforge_is_plugin_root", loader_path)
+    root_b = func_body(locator, "is_triforge_root", locator_path)
+    if root_a is not None and root_b is not None:
+        if root_a.replace("_triforge_is_plugin_root", "@") == root_b.replace("is_triforge_root", "@"):
+            oks.append("Triforge-root test: _triforge_is_plugin_root (" + loader_path + ") and is_triforge_root (" + locator_path + ") have the same body")
+        else:
+            fails.append(loader_path + " _triforge_is_plugin_root() and " + locator_path + " is_triforge_root() differ — the two copies of the Triforge-root test must stay identical apart from the function name (edit both)")
 
 for line in oks:
     print("ok:   drift: " + line)

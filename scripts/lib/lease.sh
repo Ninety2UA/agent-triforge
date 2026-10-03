@@ -1159,26 +1159,36 @@ print(" || ".join(log[-20:]))
 # functions cannot cross it, which is why lease_dispatch composes direct CLI
 # commands instead of calling the invoke_* helpers (see there). Mirrored by
 # _lane_run in scripts/probe-capabilities.sh, which reads the same base list.
+# The env_keys are one registry read here unless lease_dispatch, which already
+# read them together with the model, hands them over in _ADAPTER_ENV_KEYS (set
+# inside its dispatch subshell only, so the lead's shell never carries it).
+#
+# _adapter_env_forward <NAME> — append NAME=value to the caller's PAIRS when the
+# variable is set (set-and-empty included): the one rule for the base allowlist
+# and for a CLI's exact-named credential keys. Read through eval rather than
+# ${!V} indirect expansion: this file is `source`d under the CALLER's shell (the
+# commands do a plain `source`, which ignores the bash shebang), and on macOS
+# that is zsh, where ${!V} raises "bad substitution" and would kill every lease
+# dispatch. Every NAME is a registry literal (scripts/validate-versions.sh
+# check 3 keeps them to [A-Z_][A-Z0-9_]*), so the eval never sees anything else.
+_adapter_env_forward() {
+  local _SET="" _VAL=""
+  eval "_SET=\${${1}+x}"
+  if [ -n "$_SET" ]; then
+    eval "_VAL=\${${1}}"
+    PAIRS+=("${1}=${_VAL}")
+  fi
+}
 _adapter_env() {
   local CLI=$1
   shift
   local -a PAIRS=()
-  local _K _SET _VAL _KEYS _kv_b64
-  # Base allowlist — each registry key forwarded when set (set-and-empty
-  # included). Read through eval rather than ${!V} indirect expansion: this
-  # file is `source`d under the CALLER's shell (the commands do a plain
-  # `source`, which ignores the bash shebang), and on macOS that is zsh, where
-  # ${!V} raises "bad substitution" and would kill every lease dispatch. The
-  # names are the registry's own literals (scripts/validate-versions.sh check 3
-  # keeps them to [A-Z_][A-Z0-9_]*), so the eval never sees anything else; the
-  # loop runs over a command substitution because zsh splits $(...) into words
-  # but never an unquoted parameter.
+  local _K _KEYS _kv_b64
+  # Base allowlist — each registry key forwarded when set (_adapter_env_forward).
+  # The loop runs over a command substitution because zsh splits $(...) into
+  # words but never an unquoted parameter.
   for _K in $(printf '%s' "$TRIFORGE_ENV_BASE"); do
-    eval "_SET=\${${_K}+x}"
-    if [ -n "$_SET" ]; then
-      eval "_VAL=\${${_K}}"
-      PAIRS+=("${_K}=${_VAL}")
-    fi
+    _adapter_env_forward "$_K"
   done
   PAIRS+=("NO_COLOR=1")   # captured output is parsed, never rendered (U5)
   # No-push backstop (CS1): git honors GIT_CONFIG_COUNT/KEY_n/VALUE_n as
@@ -1195,14 +1205,19 @@ _adapter_env() {
           "GIT_CONFIG_KEY_3=url.no-push://lease-worktree/.pushInsteadOf" "GIT_CONFIG_VALUE_3=git@"
           "GIT_CONFIG_KEY_4=url.no-push://lease-worktree/.pushInsteadOf" "GIT_CONFIG_VALUE_4=git://"
           "GIT_CONFIG_KEY_5=url.no-push://lease-worktree/.pushInsteadOf" "GIT_CONFIG_VALUE_5=file://")
-  # The CLI's own credential variables — its registry env_keys. An exact name
-  # is forwarded when set; a trailing * (the one documented wildcard, kimi's
-  # KIMI_*) forwards every EXPORTED variable with that prefix: `compgen` and
-  # ${!V} are bash-only, so python3 (already required) enumerates os.environ
-  # and emits each matching NAME=VALUE pair base64-encoded, one per line.
-  # base64 has no internal newlines, so line-based read is portable across
-  # bash and zsh AND preserves values that themselves contain newlines or `=`.
-  _KEYS=$(cli_field "$CLI" env_keys 2>/dev/null) || _KEYS=""
+  # The CLI's own credential variables — its registry env_keys (_ADAPTER_ENV_KEYS
+  # when lease_dispatch pre-read them, see above). An exact name is forwarded
+  # when set; a trailing * (the one documented wildcard, kimi's KIMI_*) forwards
+  # every EXPORTED variable with that prefix: `compgen` and ${!V} are bash-only,
+  # so python3 (already required) enumerates os.environ and emits each matching
+  # NAME=VALUE pair base64-encoded, one per line. base64 has no internal
+  # newlines, so line-based read is portable across bash and zsh AND preserves
+  # values that themselves contain newlines or `=`.
+  if [ -n "${_ADAPTER_ENV_KEYS+x}" ]; then
+    _KEYS=$_ADAPTER_ENV_KEYS
+  else
+    _KEYS=$(cli_field "$CLI" env_keys 2>/dev/null) || _KEYS=""
+  fi
   for _K in $(printf '%s' "$_KEYS"); do
     case "$_K" in
       *\*)
@@ -1219,11 +1234,7 @@ for k, v in os.environ.items():
 PREFIXENV
         ;;
       *)
-        eval "_SET=\${${_K}+x}"
-        if [ -n "$_SET" ]; then
-          eval "_VAL=\${${_K}}"
-          PAIRS+=("${_K}=${_VAL}")
-        fi
+        _adapter_env_forward "$_K"
         ;;
     esac
   done
@@ -1619,34 +1630,37 @@ ${PROMPT}"
 
   # Lane-specific composition that must happen LEAD-SIDE, before env -i: the
   # Kimi builder definition's absolute plugin path (D-024), the Cursor binary and
-  # the effort-suffixed Cursor model id (D-025). The lanes that always pin a
+  # the effort-suffixed Cursor model id (D-025). One registry read serves the
+  # whole dispatch — cli_field <cli> model env_keys: the lanes that always pin a
   # model (agy — AE2 — and the optional three) fall back from an empty MODEL to
-  # that CLI's shipped default in the registry (cli_field <cli> model); claude
-  # and codex pass a model only when the roster set one and keep MODEL as is.
-  # The ledger records the id that was actually dispatched (dispatched_model)
-  # beside the roster values (builder_model / builder_effort).
-  local KIMI_AGENT_FILE="" CBIN="" DISPATCH_MODEL="$MODEL"
+  # the CLI's shipped default, while claude and codex pass a model only when the
+  # roster set one and keep MODEL as is; the env_keys reach _adapter_env through
+  # _ADAPTER_ENV_KEYS inside the dispatch subshell, so it does not read them
+  # again. The ledger records the id that was actually dispatched
+  # (dispatched_model) beside the roster values (builder_model / builder_effort).
+  local KIMI_AGENT_FILE="" CBIN="" DISPATCH_MODEL="$MODEL" REG_ROW="" REG_ENV_KEYS=""
+  REG_ROW=$(cli_field "$CLI" model env_keys 2>/dev/null) || REG_ROW=""
+  REG_ENV_KEYS=${REG_ROW#*$'\t'}
+  case "$CLI" in
+    antigravity|opencode|kimi|cursor) [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=${REG_ROW%%$'\t'*} ;;
+  esac
   case "$CLI" in
     kimi)
       [ -f "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md" ] && KIMI_AGENT_FILE="${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md"
-      [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=$(cli_field kimi model 2>/dev/null || true)
       ;;
     cursor)
-      [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=$(cli_field cursor model 2>/dev/null || true)
       DISPATCH_MODEL=$(_cursor_model_for_effort "$DISPATCH_MODEL" "$EFFORT")
       if ! CBIN=$(_cursor_bin); then
         echo "lease_dispatch: ERROR no Cursor CLI on PATH (cursor-agent, or an agent whose --version matches YYYY.MM.DD-<hex>) — cannot dispatch ${TASK_ID}" >&2
         return 1
       fi
       ;;
-    antigravity|opencode)
-      [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=$(cli_field "$CLI" model 2>/dev/null || true)
-      ;;
   esac
   _ledger_update "$TASK_ID" dispatched_model="$DISPATCH_MODEL" || return 1
 
   (
     cd "$WT" || exit 97
+    _ADAPTER_ENV_KEYS=$REG_ENV_KEYS   # the registry read above; _adapter_env reads none
     RC=0
     CLASS_SET=0
     if [ -n "${TRIFORGE_TEST_BUILDER:-}" ]; then
@@ -1768,7 +1782,7 @@ ${PROMPT}"
           _adapter_env cursor "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
           ;;
         *)
-          echo "lease_dispatch: ERROR builder CLI '${CLI}' has no dispatch arm here — not integrated. Registered CLIs: ${_KNOWN_CLIS:-<registry unreadable>}." > "$OUT"
+          echo "lease_dispatch: ERROR builder CLI '${CLI}' has no dispatch arm here — not integrated. Registered CLIs: $(_known_clis '<registry unreadable>')." > "$OUT"
           RC=95
           ;;
       esac
@@ -2286,7 +2300,7 @@ lease_pin_reviewer() {
   _lead_integrity_check lease_pin_reviewer || return $?
   _ledger_get "$TASK_ID" state >/dev/null || { echo "lease_pin_reviewer: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
   if ! _is_known_cli "$REVIEWER"; then
-    echo "lease_pin_reviewer: REFUSED — '${REVIEWER}' is not a known reviewer identity (one of: ${_KNOWN_CLIS}). A fabricated label cannot stand in for a real reviewer (AE3)." >&2
+    echo "lease_pin_reviewer: REFUSED — '${REVIEWER}' is not a known reviewer identity (one of: $(_known_clis)). A fabricated label cannot stand in for a real reviewer (AE3)." >&2
     return 1
   fi
   BUILDER=$(_ledger_get "$TASK_ID" builder_cli)
@@ -2334,7 +2348,7 @@ lease_merge() {
     return 1
   fi
   if ! _is_known_cli "$REVIEWER"; then
-    echo "lease_merge: REFUSED — '${REVIEWER}' is not a known reviewer identity (one of: ${_KNOWN_CLIS}). A fabricated label like 'codex-reviewer' cannot pass the non-author gate (AE3)." >&2
+    echo "lease_merge: REFUSED — '${REVIEWER}' is not a known reviewer identity (one of: $(_known_clis)). A fabricated label like 'codex-reviewer' cannot pass the non-author gate (AE3)." >&2
     return 1
   fi
   BUILDER=$(_ledger_get "$TASK_ID" builder_cli)
