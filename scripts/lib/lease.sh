@@ -1234,28 +1234,19 @@ _timeout_tool() {
   fi
 }
 
-# _lease_plugin_root — the Triforge plugin root this library belongs to:
-# CLAUDE_PLUGIN_ROOT when set, else the directory above the loaded scripts/
-# when it IS a Triforge root (.claude-plugin/plugin.json named agent-triforge
-# plus scripts/invoke-external.sh). Never the project's own tree: a user
-# project's skills/ or scripts/ is not Triforge's (R42). Empty + rc 1 when no
-# root qualifies.
+# _lease_plugin_root — the real path of the Triforge plugin root this library
+# was loaded from: ${_TRIFORGE_PLUGIN_ROOT}, which the loader resolved once
+# (KTD6: the Claude Code plugin-root variable when it names a Triforge root,
+# else the directory above the loader's own scripts/, else the loader refused
+# to load — scripts/invoke-external.sh holds the one read of that variable). The only
+# source for lease provisioning — never the project's own tree: a user
+# project's skills/ or scripts/ is not Triforge's (R42). Empty + rc 1 only when
+# the variable is somehow empty or no longer a Triforge root.
 _lease_plugin_root() {
-  local C
-  for C in "${CLAUDE_PLUGIN_ROOT:-}" "${_TRIFORGE_SCRIPTS_DIR:-}/.."; do
-    [ -n "$C" ] && [ -f "${C}/scripts/invoke-external.sh" ] || continue
-    if PR_MANIFEST="${C}/.claude-plugin/plugin.json" python3 -c '
-import json, os, sys
-try:
-    with open(os.environ["PR_MANIFEST"], encoding="utf-8") as f:
-        sys.exit(0 if json.load(f).get("name") == "agent-triforge" else 1)
-except Exception:
-    sys.exit(1)
-' 2>/dev/null; then
-      _lease_realpath "$C"
-      return 0
-    fi
-  done
+  if _triforge_is_plugin_root "${_TRIFORGE_PLUGIN_ROOT:-}"; then
+    _lease_realpath "$_TRIFORGE_PLUGIN_ROOT"
+    return 0
+  fi
   return 1
 }
 
@@ -1268,7 +1259,7 @@ except Exception:
 _lease_provision_skills() {
   local WT=$1 PROOT
   if ! PROOT=$(_lease_plugin_root); then
-    echo "lease: WARNING no Triforge plugin root found (CLAUDE_PLUGIN_ROOT, or the directory above the loaded scripts/) — worktree gets no .agents/skills/" >&2
+    echo "lease: WARNING the loaded plugin root (${_TRIFORGE_PLUGIN_ROOT:-<empty>}) is no longer a Triforge root — worktree gets no .agents/skills/ (reinstall the plugin)" >&2
     return 0
   fi
   if [ ! -f "${_TRIFORGE_SCRIPTS_DIR}/lib/skills-sync.py" ]; then
@@ -1578,8 +1569,8 @@ DISPATCH_ROW_EOF
   local BRIEF_BODY="" BRIEF_FILE=""
   case "$CLI" in
     opencode|cursor)
-      BRIEF_FILE="${CLAUDE_PLUGIN_ROOT:-}/${CLI}-agents/builder.md"
-      if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "$BRIEF_FILE" ]; then
+      BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/${CLI}-agents/builder.md"
+      if [ -f "$BRIEF_FILE" ]; then
         BRIEF_BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "$BRIEF_FILE")
       fi
       ;;
@@ -1617,7 +1608,7 @@ ${PROMPT}"
   local KIMI_AGENT_FILE="" CBIN="" DISPATCH_MODEL="$MODEL"
   case "$CLI" in
     kimi)
-      [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/kimi-agents/builder.md" ] && KIMI_AGENT_FILE="${CLAUDE_PLUGIN_ROOT}/kimi-agents/builder.md"
+      [ -f "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md" ] && KIMI_AGENT_FILE="${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md"
       DISPATCH_MODEL="${MODEL:-kimi-code/k3}"
       ;;
     cursor)

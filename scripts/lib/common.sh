@@ -133,8 +133,8 @@ _agy_agents_listing() {
 # header is dropped).
 _list_antigravity_agents() {
   {
-    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents" ]; then
-      for f in "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents"/*.md; do
+    if [ -d "${_TRIFORGE_PLUGIN_ROOT}/antigravity-agents/agents" ]; then
+      for f in "${_TRIFORGE_PLUGIN_ROOT}/antigravity-agents/agents"/*.md; do
         [ -f "$f" ] && basename "$f" .md
       done 2>/dev/null
     fi

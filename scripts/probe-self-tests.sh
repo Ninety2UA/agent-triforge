@@ -865,6 +865,186 @@ else
 fi
 rm -rf "$_S10" "${WORK}"/s10-*
 
+# SELF-11 (KTD6 / R16 / R42): plugin-root resolution without CLAUDE_PLUGIN_ROOT,
+# and never from a user project's own scripts/ or skills/.
+#   (a) loader   CLAUDE_PLUGIN_ROOT unset, the checkout's loader sourced by its
+#                own path -> _TRIFORGE_PLUGIN_ROOT is the checkout; invoke_codex,
+#                invoke_kimi and invoke_cursor run against argv-recording stubs
+#                on PATH (no live CLI) and each hands its CLI a non-empty brief
+#                read from that root: codex the developer-instructions prefix
+#                plus --output-schema <root>/codex-agents/review-verdict.schema.json,
+#                kimi --agent-file <root>/kimi-agents/reviewer.md, cursor the
+#                cursor-agents/reviewer.md body prefixed onto the prompt
+#   (b) project  cwd = a scratch user project with its own
+#                scripts/invoke-external.sh and skills/user-skill/, the real
+#                loader sourced by its own path -> the root is still the
+#                checkout (the project's loader never runs), _lease_plugin_root
+#                prints it, and _lease_provision_skills writes exactly the
+#                shipped skills into a worktree-shaped directory, none of the
+#                project's
+#   (c) locator  scripts/skill-locator/locate-triforge.sh copied to
+#                <fake plugin>/skills/at-probe/scripts/ resolves that plugin
+#                root under sh, bash and zsh with CLAUDE_PLUGIN_ROOT unset;
+#                copied into the project's .agents/skills/at-probe/scripts/: no
+#                pointer -> rc 1 naming at-setup; pointer inside the project ->
+#                rc 3; pointer to a non-root -> rc 3; tracked pointer -> rc 3;
+#                untracked pointer to the checkout -> prints it; a linked
+#                worktree of the project reads the main checkout's pointer
+#   (d) bare     only invoke-external.sh copied into a bare directory and
+#                sourced from the project's cwd -> nonzero naming at-setup and
+#                no root (a loader that fell back to the working directory's
+#                scripts/ would try to load the project's files here instead)
+#   (e) static   scripts/lib/*.sh read CLAUDE_PLUGIN_ROOT nowhere; the loader
+#                carries no pwd)/scripts fallback
+# Fixture git runs with a throwaway HOME + GIT_CONFIG_NOSYSTEM=1 (as SELF-10).
+_S11="${WORK}/self11"
+_S11_FAIL=""
+_S11_LOADER="${_SELF_DIR}/invoke-external.sh"
+_S11_LOCATOR="${REPO_ROOT}/scripts/skill-locator/locate-triforge.sh"
+rm -rf "$_S11"
+mkdir -p "$_S11/stubs" "$_S11/tmp" "$_S11/cwd" "$_S11/home" "$_S11/argv" "$_S11/bare" \
+         "$_S11/proj/scripts" "$_S11/proj/skills/user-skill" "$_S11/proj/wt" \
+         "$_S11/proj/.agents/skills/at-probe/scripts" "$_S11/proj/vendor/tri/.claude-plugin" "$_S11/proj/vendor/tri/scripts" \
+         "$_S11/plugin/.claude-plugin" "$_S11/plugin/scripts" "$_S11/plugin/skills/at-probe/scripts"
+_s11_real() { RP_TARGET="$1" python3 -c 'import os; print(os.path.realpath(os.environ["RP_TARGET"]))'; }
+_S11_ROOT=$(_s11_real "$REPO_ROOT")
+# argv-recording stubs for the three lanes: status / features / --version are
+# answered so the preflights pass; every other call writes one file per argument
+for _stub in codex kimi cursor-agent; do
+  cat > "${_S11}/stubs/${_stub}" <<'EOF'
+#!/bin/sh
+# probe stub (SELF-11): records argv for the row; never a real CLI
+case "${1:-}" in
+  status) echo "Logged in as probe"; exit 0 ;;
+  features) exit 0 ;;
+  --version) echo "2026.09.10-abcdef"; exit 0 ;;
+esac
+i=0
+for a in "$@"; do i=$((i + 1)); printf '%s' "$a" > "${S11_ARGV}.${i}"; done
+echo "$i" > "${S11_ARGV}.n"
+exit 0
+EOF
+  chmod +x "${_S11}/stubs/${_stub}"
+done
+unset _stub
+_s11_argv() { # _s11_argv <prefix> — the recorded arguments, one per line (a multi-line argument spans lines)
+  local N F
+  N=$(cat "$1.n" 2>/dev/null || echo 0)
+  for F in $(seq 1 "$N"); do printf '%s\n' "$(cat "$1.$F")"; done
+}
+_s11_last() { # _s11_last <prefix> — the last recorded argument (the prompt)
+  local N
+  N=$(cat "$1.n" 2>/dev/null || echo 0)
+  [ "$N" -gt 0 ] && cat "$1.$N" 2>/dev/null || true
+}
+# (a)
+_S11_A=$( cd "$_S11/cwd" && unset CLAUDE_PLUGIN_ROOT && export PATH="${_S11}/stubs:$PATH" TMPDIR="$_S11/tmp" && source "$_S11_LOADER" 2>/dev/null && {
+  printf 'root=%s\n' "${_TRIFORGE_PLUGIN_ROOT:-}"
+  export S11_ARGV="$_S11/argv/codex";  invoke_codex  logic_reviewer "S11-PROMPT" "$_S11/tmp/codex.out"  30 >/dev/null 2>"$_S11/tmp/codex.log"  || printf 'codex-rc=%s\n' "$?"
+  export S11_ARGV="$_S11/argv/kimi";   invoke_kimi   reviewer       "S11-PROMPT" "$_S11/tmp/kimi.out"   30 >/dev/null 2>"$_S11/tmp/kimi.log"   || printf 'kimi-rc=%s\n' "$?"
+  export S11_ARGV="$_S11/argv/cursor"; invoke_cursor reviewer       "S11-PROMPT" "$_S11/tmp/cursor.out" 30 >/dev/null 2>"$_S11/tmp/cursor.log" || printf 'cursor-rc=%s\n' "$?"
+} ) || _S11_FAIL="$_S11_FAIL a(subshell-rc=$?)"
+_S11_ROOT_A=$(printf '%s\n' "$_S11_A" | sed -n 's/^root=//p')
+[ -n "$_S11_ROOT_A" ] && [ "$(_s11_real "$_S11_ROOT_A")" = "$_S11_ROOT" ] || _S11_FAIL="$_S11_FAIL a(root=${_S11_ROOT_A:-<empty>})"
+_S11_RCS=$(printf '%s\n' "$_S11_A" | grep -- '-rc=' | tr '\n' ',' || true)
+[ -z "$_S11_RCS" ] || _S11_FAIL="$_S11_FAIL a(${_S11_RCS})"
+_S11_CX=$(_s11_argv "$_S11/argv/codex")
+_S11_CX_P=$(_s11_last "$_S11/argv/codex")
+_S11_CX_PRE=${_S11_CX_P%%===USER PROMPT===*}
+if ! printf '%s\n' "$_S11_CX" | grep -Fxq -- "--output-schema" || ! printf '%s\n' "$_S11_CX" | grep -Fxq -- "${_S11_ROOT_A:-/nonexistent}/codex-agents/review-verdict.schema.json"; then
+  _S11_FAIL="$_S11_FAIL a(codex:no-schema-from-root)"
+fi
+case "$_S11_CX_P" in
+  ""|S11-PROMPT) _S11_FAIL="$_S11_FAIL a(codex:empty-brief)" ;;
+  *"===USER PROMPT==="*S11-PROMPT) [ "${#_S11_CX_PRE}" -gt 200 ] || _S11_FAIL="$_S11_FAIL a(codex:instructions=${#_S11_CX_PRE}chars)" ;;
+  *) _S11_FAIL="$_S11_FAIL a(codex:prompt-shape)" ;;
+esac
+_S11_KM=$(_s11_argv "$_S11/argv/kimi")
+if ! printf '%s\n' "$_S11_KM" | grep -Fxq -- "--agent-file" || ! printf '%s\n' "$_S11_KM" | grep -Fxq -- "${_S11_ROOT_A:-/nonexistent}/kimi-agents/reviewer.md" || [ ! -s "${_S11_ROOT_A:-/nonexistent}/kimi-agents/reviewer.md" ]; then
+  _S11_FAIL="$_S11_FAIL a(kimi:no-agent-file-from-root)"
+fi
+_S11_CU_P=$(_s11_last "$_S11/argv/cursor")
+_S11_CU_SIG=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2 && NF {print; exit}' "${REPO_ROOT}/cursor-agents/reviewer.md" 2>/dev/null || true)
+case "$_S11_CU_P" in
+  ""|S11-PROMPT) _S11_FAIL="$_S11_FAIL a(cursor:empty-brief)" ;;
+  *S11-PROMPT) [ -n "$_S11_CU_SIG" ] && printf '%s' "$_S11_CU_P" | grep -Fq -- "$_S11_CU_SIG" || _S11_FAIL="$_S11_FAIL a(cursor:brief-body-missing)" ;;
+  *) _S11_FAIL="$_S11_FAIL a(cursor:prompt-shape)" ;;
+esac
+# (b)
+printf '#!/usr/bin/env bash\n# SELF-11 fixture: a user project'"'"'s own helper — Triforge must never source it\necho "S11 USER LOADER SOURCED" >&2\nS11_USER_LOADER=1\n' > "$_S11/proj/scripts/invoke-external.sh"
+printf -- '---\nname: user-skill\ndescription: Use when probing SELF-11 (fixture).\n---\n\n# user-skill\n' > "$_S11/proj/skills/user-skill/SKILL.md"
+( cd "$_S11/proj" && export HOME="$_S11/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" && git add scripts skills && git commit -qm init ) >/dev/null 2>&1 || _S11_FAIL="$_S11_FAIL b(fixture-git)"
+_S11_B=$( cd "$_S11/proj" && unset CLAUDE_PLUGIN_ROOT && export TMPDIR="$_S11/tmp" && source "$_S11_LOADER" 2>/dev/null && {
+  printf 'root=%s\nlease=%s\nuser=%s\n' "${_TRIFORGE_PLUGIN_ROOT:-}" "$(_lease_plugin_root 2>/dev/null || true)" "${S11_USER_LOADER:-0}"
+  _lease_provision_skills "$_S11/proj/wt" 2>>"$_S11/tmp/prov.log" || true
+  printf 'skills=%s\n' "$(ls -d "$_S11/proj/wt/.agents/skills"/*/ 2>/dev/null | while read -r d; do basename "$d"; done | sort | tr '\n' ' ')"
+} ) || _S11_FAIL="$_S11_FAIL b(subshell-rc=$?)"
+_S11_ROOT_B=$(printf '%s\n' "$_S11_B" | sed -n 's/^root=//p')
+[ -n "$_S11_ROOT_B" ] && [ "$(_s11_real "$_S11_ROOT_B")" = "$_S11_ROOT" ] || _S11_FAIL="$_S11_FAIL b(root=${_S11_ROOT_B:-<empty>})"
+[ "$(printf '%s\n' "$_S11_B" | sed -n 's/^lease=//p')" = "$_S11_ROOT" ] || _S11_FAIL="$_S11_FAIL b(lease_plugin_root=$(printf '%s\n' "$_S11_B" | sed -n 's/^lease=//p'))"
+[ "$(printf '%s\n' "$_S11_B" | sed -n 's/^user=//p')" = "0" ] || _S11_FAIL="$_S11_FAIL b(user-loader-sourced)"
+# shellcheck disable=SC2086
+_S11_EXP=$(printf '%s\n' $SHIPPED_SKILLS | sort | tr '\n' ' ')
+_S11_GOT=$(printf '%s\n' "$_S11_B" | sed -n 's/^skills=//p')
+[ "$_S11_GOT" = "$_S11_EXP" ] || _S11_FAIL="$_S11_FAIL b(provisioned='${_S11_GOT}' want='${_S11_EXP}')"
+# (c)
+printf '{"name": "agent-triforge", "version": "0.0.0-probe"}\n' > "$_S11/plugin/.claude-plugin/plugin.json"
+: > "$_S11/plugin/scripts/invoke-external.sh"
+printf '{"name": "agent-triforge"}\n' > "$_S11/proj/vendor/tri/.claude-plugin/plugin.json"
+: > "$_S11/proj/vendor/tri/scripts/invoke-external.sh"
+_S11_PLOC="$_S11/proj/.agents/skills/at-probe/scripts/locate-triforge.sh"
+_S11_PTR="$_S11/proj/.agents/triforge-plugin-root.local"
+if [ -f "$_S11_LOCATOR" ]; then
+  cp "$_S11_LOCATOR" "$_S11/plugin/skills/at-probe/scripts/locate-triforge.sh"
+  cp "$_S11_LOCATOR" "$_S11_PLOC"
+else
+  _S11_FAIL="$_S11_FAIL c(no-locator-at-scripts/skill-locator/locate-triforge.sh)"
+fi
+_s11_loc() { # _s11_loc <label> <cwd> <shell> <locator> <expected rc> [text that must appear in stdout+stderr]
+  local OUT="" RC=0
+  OUT=$( cd "$2" && env -u CLAUDE_PLUGIN_ROOT HOME="$_S11/home" GIT_CONFIG_NOSYSTEM=1 "$3" "$4" 2>&1 ) || RC=$?
+  [ "$RC" = "$5" ] || _S11_FAIL="$_S11_FAIL c:$1(rc=$RC want $5)"
+  [ -z "${6:-}" ] || printf '%s' "$OUT" | grep -Fq -- "$6" || _S11_FAIL="$_S11_FAIL c:$1(no:$(printf '%s' "$6" | cut -c1-40))"
+}
+_S11_FAKE=$(_s11_real "$_S11/plugin")
+for _sh in sh bash zsh; do
+  command -v "$_sh" >/dev/null 2>&1 || continue
+  _s11_loc "own-$_sh" "$_S11/cwd" "$_sh" "$_S11/plugin/skills/at-probe/scripts/locate-triforge.sh" 0 "$_S11_FAKE"
+done
+unset _sh
+_s11_loc nopointer "$_S11/proj" sh "$_S11_PLOC" 1 "at-setup"
+printf '%s\n' "$_S11/proj/vendor/tri" > "$_S11_PTR"
+_s11_loc inside "$_S11/proj" sh "$_S11_PLOC" 3 "inside the project"
+printf '%s\n' "$_S11/tmp" > "$_S11_PTR"
+_s11_loc nonroot "$_S11/proj" sh "$_S11_PLOC" 3 "not a Triforge plugin root"
+printf '%s\n' "$REPO_ROOT" > "$_S11_PTR"
+( cd "$_S11/proj" && export HOME="$_S11/home" GIT_CONFIG_NOSYSTEM=1 && git add -f .agents/triforge-plugin-root.local && git commit -qm pointer ) >/dev/null 2>&1 || _S11_FAIL="$_S11_FAIL c:tracked(fixture-git)"
+_s11_loc tracked "$_S11/proj" sh "$_S11_PLOC" 3 "tracked"
+( cd "$_S11/proj" && export HOME="$_S11/home" GIT_CONFIG_NOSYSTEM=1 && git rm -q --cached .agents/triforge-plugin-root.local && git commit -qm untrack ) >/dev/null 2>&1 || _S11_FAIL="$_S11_FAIL c:pointer(fixture-git)"
+_s11_loc pointer "$_S11/proj" sh "$_S11_PLOC" 0 "$_S11_ROOT"
+( cd "$_S11/proj" && export HOME="$_S11/home" GIT_CONFIG_NOSYSTEM=1 && git worktree add -q "$_S11/wt2" HEAD ) >/dev/null 2>&1 || _S11_FAIL="$_S11_FAIL c:worktree(fixture-git)"
+mkdir -p "$_S11/wt2/.agents/skills/at-probe/scripts"
+[ -f "$_S11_LOCATOR" ] && cp "$_S11_LOCATOR" "$_S11/wt2/.agents/skills/at-probe/scripts/locate-triforge.sh" || true
+_s11_loc worktree "$_S11/wt2" sh "$_S11/wt2/.agents/skills/at-probe/scripts/locate-triforge.sh" 0 "$_S11_ROOT"
+# (d)
+cp "$_S11_LOADER" "$_S11/bare/invoke-external.sh"
+_S11_D_RC=0
+_S11_D=$( cd "$_S11/proj" && unset CLAUDE_PLUGIN_ROOT && source "$_S11/bare/invoke-external.sh" 2>&1 >/dev/null && printf 'root=%s' "${_TRIFORGE_PLUGIN_ROOT:-}" ) || _S11_D_RC=$?
+[ "$_S11_D_RC" -ne 0 ] || _S11_FAIL="$_S11_FAIL d(bare-loader-loaded:$(printf '%s' "$_S11_D" | tr '\n' ' ' | cut -c1-120))"
+printf '%s' "$_S11_D" | grep -Fq 'at-setup' || _S11_FAIL="$_S11_FAIL d(no-at-setup:$(printf '%s' "$_S11_D" | tr '\n' ' ' | cut -c1-120))"
+# (e)
+_S11_E_LIB=$(cat "$REPO_ROOT"/scripts/lib/*.sh | grep -c 'CLAUDE_PLUGIN_ROOT' || true)
+[ "$_S11_E_LIB" = 0 ] || _S11_FAIL="$_S11_FAIL e(lib-reads=$_S11_E_LIB)"
+_S11_E_PWD=$(grep -c 'pwd)/scripts' "$_S11_LOADER" || true)
+[ "$_S11_E_PWD" = 0 ] || _S11_FAIL="$_S11_FAIL e(pwd-fallback=$_S11_E_PWD)"
+_S11_CAP="plugin root without CLAUDE_PLUGIN_ROOT: loader + lanes resolve the plugin, never a project's scripts/ or skills/; skill locator order and pointer refusals; bare loader fails closed naming at-setup (KTD6/R16/R42)"
+if [ -z "$_S11_FAIL" ]; then
+  row "SELF-11" "claude" "$_S11_CAP" "PASS" "CLAUDE_PLUGIN_ROOT unset: loader root = this checkout; against argv-recording stubs codex passed --output-schema <root>/codex-agents/review-verdict.schema.json + a ${#_S11_CX_PRE}-char instructions prefix, kimi --agent-file <root>/kimi-agents/reviewer.md, cursor the reviewer brief prefixed onto the prompt (no empty brief); from a user project with its own scripts/invoke-external.sh + skills/user-skill: root = checkout, the project's loader never sourced, _lease_plugin_root = checkout, worktree provisioned with exactly the shipped skills (${_S11_GOT% }); locator: own location resolves under sh/bash/zsh, no pointer -> rc 1 naming at-setup, pointer inside the project / to a non-root / tracked -> rc 3, untracked pointer to the checkout -> resolves, linked worktree reads the main checkout's pointer; bare-dir loader copy sourced from the project -> rc ${_S11_D_RC} naming at-setup; scripts/lib/*.sh: 0 CLAUDE_PLUGIN_ROOT reads, loader: no pwd)/scripts fallback" "static"
+else
+  row "SELF-11" "claude" "$_S11_CAP" "FAIL" "mismatch:$(printf '%s' "$_S11_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S11"
+
 # SELF-18 (KTD18/KTD19 — R46, R47, R49): a builder can't make the lead's git
 # run its commands, forge the ledger, or smuggle commits or ops/ edits into a
 # merge. Each case is a throwaway repo (main + a checked-out sprint branch),

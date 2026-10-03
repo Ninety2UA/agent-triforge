@@ -98,8 +98,8 @@ invoke_kimi() {
   # available definitions. An empty AGENT_NAME is a deliberate raw run (the
   # READY plumbing probe and lease_dispatch's direct builder command).
   local FULL_PROMPT="$PROMPT"
-  if [ -n "$AGENT_NAME" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/kimi-agents/${AGENT_NAME}.md" ]; then
-    AGENT_FILE="${CLAUDE_PLUGIN_ROOT}/kimi-agents/${AGENT_NAME}.md"
+  if [ -n "$AGENT_NAME" ] && [ -f "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/${AGENT_NAME}.md" ]; then
+    AGENT_FILE="${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/${AGENT_NAME}.md"
     MODE="agent-file"
   elif [ -n "$AGENT_NAME" ]; then
     local AVAILABLE
@@ -250,8 +250,8 @@ invoke_kimi() {
 # both scan it with incompatible vocabularies).
 _list_kimi_agents() {
   {
-    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/kimi-agents" ]; then
-      for f in "${CLAUDE_PLUGIN_ROOT}/kimi-agents"/*.md; do
+    if [ -d "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents" ]; then
+      for f in "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents"/*.md; do
         [ -f "$f" ] || continue
         case "$(basename "$f" .md)" in README) continue ;; esac
         basename "$f" .md

@@ -1746,7 +1746,7 @@ if [ "$SELF_ONLY" = "1" ]; then
   # Every expected row must be present: a `return` or an early exit in the
   # sourced self-tests would otherwise drop the rows after it and still pass.
   # A new SELF row joins this list in the commit that adds it.
-  SELF_EXPECTED="SELF-01 SELF-02 SELF-03 SELF-04 SELF-05 SELF-06a SELF-06b SELF-06c SELF-06d SELF-06e SELF-06f SELF-07 SELF-08 SELF-08b SELF-09 SELF-10 SELF-18"
+  SELF_EXPECTED="SELF-01 SELF-02 SELF-03 SELF-04 SELF-05 SELF-06a SELF-06b SELF-06c SELF-06d SELF-06e SELF-06f SELF-07 SELF-08 SELF-08b SELF-09 SELF-10 SELF-11 SELF-18"
   SELF_MISSING=""
   for SELF_ID in $SELF_EXPECTED; do
     if ! cut -f1 "$ROWS" | grep -qx "$SELF_ID"; then SELF_MISSING="${SELF_MISSING}${SELF_MISSING:+ }${SELF_ID}"; fi

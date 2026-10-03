@@ -23,7 +23,7 @@ fi
 # first (D-026: Codex >= 0.147 sweeps `.codex/agents/*.toml` as standalone role
 # files and warns on this multi-agent file, so session-start deploys it under a
 # name outside that sweep), then the plugin template
-# `${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml`.
+# `${_TRIFORGE_PLUGIN_ROOT}/codex-agents/agents.toml`.
 invoke_codex() {
   local AGENT_NAME=$1
   local PROMPT=$2
@@ -45,8 +45,8 @@ invoke_codex() {
   local AGENT_TOML=""
   if [ -f ".codex/triforge-agents.toml" ]; then
     AGENT_TOML=".codex/triforge-agents.toml"
-  elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml" ]; then
-    AGENT_TOML="${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml"
+  elif [ -f "${_TRIFORGE_PLUGIN_ROOT}/codex-agents/agents.toml" ]; then
+    AGENT_TOML="${_TRIFORGE_PLUGIN_ROOT}/codex-agents/agents.toml"
   fi
 
   local AGENT_MODEL="" AGENT_SANDBOX="" AGENT_APPROVAL="" AGENT_INSTR_B64="" AGENT_OUTPUT_SCHEMA="" AGENT_EFFORT=""
@@ -133,7 +133,7 @@ invoke_codex() {
 
   # Structured output (probe CDX-05): when the agent's agents.toml entry
   # carries the Triforge-level `output_schema` key, resolve the schema file at
-  # the plugin tier (`${CLAUDE_PLUGIN_ROOT}/codex-agents/` — nothing ever
+  # the plugin tier (`${_TRIFORGE_PLUGIN_ROOT}/codex-agents/` — nothing ever
   # deployed a project copy, and `.codex/agents/` is now Codex's role-file
   # sweep, D-026) and pass
   # --output-schema plus -o so the schema-valid final message lands in
@@ -151,10 +151,10 @@ invoke_codex() {
       fi
     fi
     if [ "$SCHEMA_GATE" -eq 1 ]; then
-      if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/codex-agents/${AGENT_OUTPUT_SCHEMA}" ]; then
-        SCHEMA_PATH="${CLAUDE_PLUGIN_ROOT}/codex-agents/${AGENT_OUTPUT_SCHEMA}"
+      if [ -f "${_TRIFORGE_PLUGIN_ROOT}/codex-agents/${AGENT_OUTPUT_SCHEMA}" ]; then
+        SCHEMA_PATH="${_TRIFORGE_PLUGIN_ROOT}/codex-agents/${AGENT_OUTPUT_SCHEMA}"
       else
-        echo "invoke_codex: WARNING agent '${AGENT_NAME}' requests output_schema '${AGENT_OUTPUT_SCHEMA}' but no such file in the plugin's codex-agents/ (CLAUDE_PLUGIN_ROOT unset or file missing) — running without --output-schema" >&2
+        echo "invoke_codex: WARNING agent '${AGENT_NAME}' requests output_schema '${AGENT_OUTPUT_SCHEMA}' but no such file under ${_TRIFORGE_PLUGIN_ROOT}/codex-agents/ — running without --output-schema" >&2
       fi
     fi
   fi
