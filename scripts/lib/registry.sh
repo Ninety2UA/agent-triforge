@@ -40,7 +40,7 @@ _PROTECTED_PY='
 FRAMEWORK_PROTECTED = (
     # enforcement code: the helper, its lanes, the no-push hook, the outer loop,
     # the skill locator every at- skill carries a copy of (KTD6)
-    "scripts/lib/", "scripts/lease-git-hooks/", "scripts/skill-locator/", "scripts/invoke-external.sh", "scripts/coordinate.sh",
+    "scripts/lib/", "scripts/lease-git-hooks/", "scripts/skill-locator/", "scripts/fixtures/", "scripts/invoke-external.sh", "scripts/coordinate.sh",
     # the probe harness and the release gates
     "scripts/probe-capabilities.sh", "scripts/probe-self-tests.sh",
     "scripts/validate-skills.sh", "scripts/validate-versions.sh", "scripts/release-notes.sh",
