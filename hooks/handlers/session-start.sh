@@ -18,7 +18,8 @@
 # Hook stdout must never look like JSON: no stdout line may start with `{`
 #   (Claude Code ≥ 2.1.246 rejects hook stdout that parses as JSON — D-031c).
 #   Audited 2026-10-01: every stdout line is prose ("Multi-agent framework
-#   ready.", "session-start: …", "Roster …", "WARNING: …", "Commands: …");
+#   ready.", "session-start: …", "Roster …", "WARNING: …", "Tip: …",
+#   "Commands: …");
 #   every external-CLI capture (agy plugin list / agy agents / claude
 #   --version) is consumed here and never echoed — the floor warning prints
 #   only the X.Y.Z digits parsed out of it.
@@ -573,14 +574,19 @@ fi
 #   stale   ./CLAUDE.md or ./.claude/CLAUDE.md is a 3.x copy of the retired
 #           templates/CLAUDE.md that does not import AGENTS.md
 #   above   a CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md in a directory
-#           above the project, with no AGENTS.md import anywhere in the chain
+#           above the project, with no import of the project's AGENTS.md
+#           anywhere in the chain
 # These describe a standing state, not a one-time action: they print on every
 # session start until the state is fixed, and so — like the roster-pin and
 # timeout lines — carry no "session-start:" prefix (that prefix marks a step
 # that acted once; SELF-08 counts it for idempotence). Nothing here edits a
-# file: converting a CLAUDE.md is setup's job, and it asks first.
+# file: each line names the edit and leaves it to the user.
 CLAUDE_FLOOR="2.1.277"
 INSTRUCTION_NOTICES=""
+# The instruction files Claude Code reads in a directory, and this project's
+# physical path (/tmp and /var are symlinks on macOS).
+SS_INSTRUCTION_FILES="CLAUDE.md .claude/CLAUDE.md CLAUDE.local.md"
+SS_PROJECT=$(pwd -P 2>/dev/null || true)
 
 # _ss_xyz <text> — the first X.Y.Z in the text, or nothing.
 _ss_xyz() {
@@ -596,26 +602,83 @@ SS_XYZ_EOF
   echo $(( 10#$A * 1000000000000 + 10#$B * 1000000 + 10#$C ))
 }
 
-# Floor. The answer is read under the timeout binary when there is one (10 s);
-# without one it is read bare, like the optional-CLI detection above. A missing
-# `claude` or an answer with no X.Y.Z in it warns about nothing.
-if command -v claude >/dev/null 2>&1; then
+# _ss_bounded <seconds> <command…> — the command's stdout, the command given
+# up on after <seconds>: under the timeout binary when there is one, and on a
+# host without one (stock macOS) under a watchdog — the command runs in the
+# background, a second background subshell kills it when the time is up, and
+# the watchdog is killed as soon as the command returns. The answer travels
+# through a temp file and the watchdog's stdio is /dev/null, so nothing a
+# killed command leaves running holds the caller's command substitution open;
+# each `wait` swallows bash's "Terminated" line.
+_ss_bounded() {
+  local SECS="$1" OUT CMD_PID DOG_PID
+  shift
   if [ -n "$TIMEOUT_BIN" ]; then
-    SS_CLAUDE_XYZ=$(_ss_xyz "$("$TIMEOUT_BIN" 10s claude --version 2>/dev/null | head -1 || true)")
-  else
-    SS_CLAUDE_XYZ=$(_ss_xyz "$(claude --version 2>/dev/null | head -1 || true)")
+    "$TIMEOUT_BIN" "${SECS}s" "$@" 2>/dev/null || true
+    return 0
   fi
+  OUT=$(mktemp "${TMPDIR:-/tmp}/triforge-session-start.XXXXXX" 2>/dev/null) || return 0
+  "$@" </dev/null >"$OUT" 2>/dev/null &
+  CMD_PID=$!
+  ( sleep "$SECS"; kill "$CMD_PID" ) </dev/null >/dev/null 2>&1 &
+  DOG_PID=$!
+  wait "$CMD_PID" 2>/dev/null || true
+  kill "$DOG_PID" 2>/dev/null || true
+  wait "$DOG_PID" 2>/dev/null || true
+  cat "$OUT" 2>/dev/null || true
+  rm -f "$OUT"
+}
+
+# Floor. The answer is read with a 10 s bound, timeout binary or not — a hung
+# `claude` must not stall session start. A missing `claude`, one that does not
+# answer in time, or an answer with no X.Y.Z in it warns about nothing.
+if command -v claude >/dev/null 2>&1; then
+  SS_CLAUDE_XYZ=$(_ss_xyz "$(_ss_bounded 10 claude --version | head -1 || true)")
   if [ -n "$SS_CLAUDE_XYZ" ] && [ "$(_ss_xyz_key "$SS_CLAUDE_XYZ")" -lt "$(_ss_xyz_key "$CLAUDE_FLOOR")" ]; then
     INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}\nWARNING: Claude Code ${SS_CLAUDE_XYZ} is below Triforge's floor ${CLAUDE_FLOOR}, the first build that reads AGENTS.md — Triforge's only instruction file, which older builds do not read. Update Claude Code (\`claude update\`)."
   fi
 fi
 
-# _ss_imports_agents <file> — 0 when the file holds an AGENTS.md import: an
-# `@AGENTS.md` / `@<path>/AGENTS.md` token at a line start or after whitespace
-# (a backticked mention is prose, not an import).
+# _ss_imports_agents <file> — 0 when the file imports THIS project's AGENTS.md.
+# An import is an `@AGENTS.md` / `@<path>/AGENTS.md` token at a line start or
+# after whitespace (a backticked mention is prose, not an import), and its path
+# is relative to the directory of the file that holds it (`~/` is the home
+# directory; an absolute path stands). So a bare `@AGENTS.md` in a parent's
+# CLAUDE.md, or in this project's .claude/CLAUDE.md, names some other
+# AGENTS.md and does not count: a token counts when its directory, resolved
+# physically, is the project's. A directory that does not exist counts for
+# nothing.
+SS_IMPORT_RE='^@(([^[:space:]]*/)?)AGENTS\.md([^[:alnum:]]|$)'
 _ss_imports_agents() {
+  local BASE WORDS WORD DIR
   [ -f "$1" ] || return 1
-  LC_ALL=C grep -Eq '(^|[[:space:]])@([^[:space:]]*/)?AGENTS\.md([^[:alnum:]]|$)' "$1" 2>/dev/null
+  [ -n "$SS_PROJECT" ] || return 1
+  case "$1" in
+    /*)  BASE="${1%/*}" ;;
+    */*) BASE="./${1%/*}" ;;
+    *)   BASE="." ;;
+  esac
+  WORDS=$(LC_ALL=C tr -s '[:space:]' '\n' 2>/dev/null < "$1" | LC_ALL=C grep -aE "$SS_IMPORT_RE" 2>/dev/null || true)
+  [ -n "$WORDS" ] || return 1
+  while IFS= read -r WORD; do
+    [[ "$WORD" =~ $SS_IMPORT_RE ]] || continue
+    DIR="${BASH_REMATCH[1]}"
+    case "$DIR" in
+      "~/"*)
+        case "${HOME:-}" in
+          /*) DIR="${HOME%/}/${DIR#??}" ;;
+          *)  continue ;;
+        esac
+        ;;
+      /*) ;;
+      *)  DIR="${BASE}/${DIR}" ;;
+    esac
+    DIR=$(cd "$DIR" 2>/dev/null && pwd -P 2>/dev/null) || continue
+    if [ "$DIR" = "$SS_PROJECT" ]; then return 0; fi
+  done <<SS_IMPORTS_EOF
+$WORDS
+SS_IMPORTS_EOF
+  return 1
 }
 
 # _ss_is_3x_template <file> — 0 when the file is a copy, customized or not, of
@@ -645,22 +708,23 @@ _ss_import_line() {
   esac
 }
 
-# Stale template.
+# Stale template. Only the two locations the 3.x template was copied to are
+# fingerprinted (it was never a CLAUDE.local.md).
 SS_CHAIN_IMPORTS=""
-for SS_FILE in CLAUDE.md .claude/CLAUDE.md CLAUDE.local.md; do
+for SS_FILE in $SS_INSTRUCTION_FILES; do
   if _ss_imports_agents "$SS_FILE"; then SS_CHAIN_IMPORTS="yes"; fi
 done
 for SS_FILE in CLAUDE.md .claude/CLAUDE.md; do
   if _ss_is_3x_template "$SS_FILE" && ! _ss_imports_agents "$SS_FILE"; then
     _ss_import_line "$SS_FILE" ""
-    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}\nWARNING: ${SS_FILE} is a Triforge 3.x project template (a copy of the retired templates/CLAUDE.md). Triforge 4 ships AGENTS.md only, and Claude Code does not read AGENTS.md while this file exists without importing it. Run /setup to convert it, or add the line ${SS_IMPORT} to it yourself (session start never edits it)."
+    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}\nWARNING: ${SS_FILE} is a Triforge 3.x project template (a copy of the retired templates/CLAUDE.md). Triforge 4 ships AGENTS.md only, and Claude Code does not read AGENTS.md while this file exists without importing it. Add the line ${SS_IMPORT} to it, or replace its Triforge content with the pointer block in the plugin's templates/AGENTS.md — session start never edits this file."
   fi
 done
 
 # Above the project: every parent up to /. $HOME/.claude/CLAUDE.md is the
-# user-tier file and is skipped (both paths compared physically — /tmp and
-# /var are symlinks on macOS). One import anywhere in the chain, the project's
-# own files included, loads AGENTS.md, so it silences every line here.
+# user-tier file and is skipped (both paths compared physically). One import
+# of the project's AGENTS.md anywhere in the chain, the project's own files
+# included, loads it, so it silences every line here.
 SS_ABOVE_NOTICES=""
 
 # _ss_prose <path> — the path as it may appear in MSG: control characters
@@ -672,7 +736,6 @@ _ss_prose() {
   printf '%s' "${TEXT//\\/\\\\}"
 }
 
-SS_PROJECT=$(pwd -P 2>/dev/null || true)
 SS_HOME_REAL=""
 if [ -n "${HOME:-}" ] && [ -d "${HOME}" ]; then
   SS_HOME_REAL=$(cd "$HOME" 2>/dev/null && pwd -P || true)
@@ -684,7 +747,7 @@ case "$SS_PROJECT" in
       SS_DIR="${SS_DIR%/*}"
       if [ -z "$SS_DIR" ]; then SS_DIR="/"; fi
       SS_REL="${SS_PROJECT#"${SS_DIR%/}"/}"
-      for SS_NAME in CLAUDE.md .claude/CLAUDE.md CLAUDE.local.md; do
+      for SS_NAME in $SS_INSTRUCTION_FILES; do
         SS_FILE="${SS_DIR%/}/${SS_NAME}"
         [ -f "$SS_FILE" ] || continue
         if [ -n "$SS_HOME_REAL" ] && [ "$SS_FILE" = "${SS_HOME_REAL%/}/.claude/CLAUDE.md" ]; then continue; fi
@@ -697,6 +760,14 @@ case "$SS_PROJECT" in
 esac
 if [ -z "$SS_CHAIN_IMPORTS" ]; then
   INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_ABOVE_NOTICES}"
+fi
+
+# Pointer-block tip: a project with no root AGENTS.md carries nothing that
+# tells an agent Triforge runs here. A standing tip, printed until the file
+# exists; session start does not create it.
+AGENTS_MD_TIP=""
+if [ ! -e "AGENTS.md" ] && [ ! -L "AGENTS.md" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/AGENTS.md" ]; then
+  AGENTS_MD_TIP="\nTip: No AGENTS.md in this project. Triforge's pointer block (the short section that tells every agent this project runs the framework) ships as the plugin's templates/AGENTS.md. Copy it: cp \"$(_ss_prose "$CLAUDE_PLUGIN_ROOT")/templates/AGENTS.md\" ./AGENTS.md"
 fi
 
 # Check for existing state
@@ -875,6 +946,9 @@ fi
 if [ -n "${TIMEOUT_MISSING_WARNING}" ]; then
   MSG="$MSG\n${TIMEOUT_MISSING_WARNING}"
 fi
+
+# Append the pointer-block tip if set
+MSG="$MSG${AGENTS_MD_TIP:-}"
 
 printf '%b\n' "Multi-agent framework ready.$MSG"
 echo ""

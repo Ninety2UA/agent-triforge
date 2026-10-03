@@ -367,12 +367,24 @@ fi
 #          2.0.300 inside a JSON-shaped answer -> warning, answer never echoed
 #   stale  a customized 3.x templates/CLAUDE.md copy (signature line + at least
 #          3 of the 8 fingerprint headings) at ./CLAUDE.md and ./.claude/
-#          CLAUDE.md, no AGENTS.md import -> one notice each, files untouched;
-#          with the import, below 3 headings, or without the signature -> none
-#   above  CLAUDE.md, .claude/CLAUDE.md and CLAUDE.local.md in the parent and
-#          grandparent -> one notice per file, naming it and its import line;
-#          $HOME/.claude/CLAUDE.md (user tier) -> none; an AGENTS.md import in
-#          the chain (a parent file, or the project's own CLAUDE.md) -> none
+#          CLAUDE.md, no import of the project's AGENTS.md -> one notice each,
+#          files untouched; below 3 headings, or without the signature -> none
+#   above  CLAUDE.md, .claude/CLAUDE.md and CLAUDE.local.md in three levels
+#          above the project -> one notice per file, naming it and its import
+#          line; $HOME/.claude/CLAUDE.md (user tier) -> none; an import of the
+#          project's AGENTS.md in the chain (a parent file, or the project's
+#          own CLAUDE.md) -> none. One of the directories is named with a
+#          literal backslash-n and a `{`: every notice stays one line
+#   import an import path is relative to the file that holds it, so only one
+#          that RESOLVES to the project's AGENTS.md counts: `@AGENTS.md` and
+#          `@./AGENTS.md` in ./CLAUDE.md, `@../AGENTS.md` and an absolute path
+#          in ./.claude/CLAUDE.md, `@proj/AGENTS.md` in the parent -> silent;
+#          a bare `@AGENTS.md` in ./.claude/CLAUDE.md or in a parent's
+#          CLAUDE.md names some other AGENTS.md -> the notice stays
+#   repeat the floor and stale notices print again on a second run of the same
+#          unfixed project, still with zero "session-start:" lines
+#   tip    no ./AGENTS.md -> one `Tip:` line with the cp line for the pointer
+#          block (templates/AGENTS.md), every run; none once ./AGENTS.md exists
 _S8="${WORK}/self08"
 mkdir -p "$_S8/proj" "$_S8/bin" "$_S8/home"
 cat > "$_S8/bin/agy" <<'EOF'
@@ -417,6 +429,10 @@ _s8_sane run1 "$_S8_OUT1"; _s8_sane run2 "$_S8_OUT2"
 # floor: 2.1.277 (the stub's default in runs 1 + 2) is at the floor
 printf '%s\n%s\n' "$_S8_OUT1" "$_S8_OUT2" | grep -q "below Triforge's floor" && _S8_FAIL="$_S8_FAIL floor-warning-at-2.1.277"
 printf '%s\n%s\n' "$_S8_OUT1" "$_S8_OUT2" | grep -q 'Triforge 3\.x project template' && _S8_FAIL="$_S8_FAIL stale-notice-in-a-clean-project"
+# tip: the throwaway project has no ./AGENTS.md, in run 1 and again in run 2
+for _S8_TEXT in "$_S8_OUT1" "$_S8_OUT2"; do
+  printf '%s\n' "$_S8_TEXT" | grep -q '^Tip: .*pointer block.*cp ".*/templates/AGENTS\.md" \./AGENTS\.md$' || _S8_FAIL="$_S8_FAIL no-pointer-block-tip-without-AGENTS.md"
+done
 # the 3.x template's headings (identical in every v3.* tag), without its signature line
 cat > "$_S8/skeleton.md" <<'EOF'
 ## Project overview
@@ -453,10 +469,16 @@ cat > "$_S8/skeleton.md" <<'EOF'
 
 This project has not added an `@AGENTS.md` import yet.
 EOF
+{ printf '# CLAUDE.md\n\nThis file provides guidance to Claude Code when working with code in this project. It works with the **Agent Triforge** plugin.\n\n'; cat "$_S8/skeleton.md"; } > "$_S8/template.md"
+_s8_template() { # _s8_template <file> <last line> — the full 3.x template shape, ending in that line
+  { cat "$_S8/template.md"; printf '\n%s\n' "$2"; } > "$1"
+}
 # floor below + stale: ./CLAUDE.md is a heavily customized copy (text edited,
 # sections added and removed — exactly 3 fingerprint headings left);
-# ./.claude/CLAUDE.md is the full template shape. Neither imports AGENTS.md
-# (the backticked mention in the skeleton is not an import).
+# ./.claude/CLAUDE.md is the full template shape plus a bare `@AGENTS.md`,
+# which from there names ./.claude/AGENTS.md. Neither imports the project's
+# AGENTS.md (the backticked mention in the skeleton is not an import). Two
+# runs: nothing was fixed in between, so the second repeats every notice.
 cat > "$_S8/proj/CLAUDE.md" <<'EOF'
 # CLAUDE.md — acme-api
 
@@ -479,57 +501,76 @@ trimmed
 trimmed
 EOF
 mkdir -p "$_S8/proj/.claude"
-{ printf '# CLAUDE.md\n\nThis file provides guidance to Claude Code when working with code in this project. It works with the **Agent Triforge** plugin.\n\n'; cat "$_S8/skeleton.md"; } > "$_S8/proj/.claude/CLAUDE.md"
+_s8_template "$_S8/proj/.claude/CLAUDE.md" '@AGENTS.md'
 _S8_SUM=$(cksum "$_S8/proj/CLAUDE.md" "$_S8/proj/.claude/CLAUDE.md")
-_s8_run below "$_S8/proj" "2.1.276"
-_s8_has "^WARNING: Claude Code 2\.1\.276 is below Triforge's floor 2\.1\.277.*AGENTS\.md" || _S8_FAIL="$_S8_FAIL no-floor-warning-at-2.1.276"
-_s8_has '^WARNING: CLAUDE\.md is a Triforge 3\.x project template.*AGENTS\.md only.*/setup.* @AGENTS\.md ' || _S8_FAIL="$_S8_FAIL no-stale-notice-for-CLAUDE.md"
-_s8_has '^WARNING: \.claude/CLAUDE\.md is a Triforge 3\.x project template.*AGENTS\.md only.*/setup.* @\.\./AGENTS\.md ' || _S8_FAIL="$_S8_FAIL no-stale-notice-for-.claude/CLAUDE.md"
-[ "$(cksum "$_S8/proj/CLAUDE.md" "$_S8/proj/.claude/CLAUDE.md")" = "$_S8_SUM" ] || _S8_FAIL="$_S8_FAIL stale-template-file-edited"
-[ "$(printf '%s\n' "$_O" | grep -c '^session-start:' || true)" -eq 0 ] || _S8_FAIL="$_S8_FAIL standing-notice-printed-as-one-time-action"
-# floor above + not stale: the full copy WITH an import line; a file with the
-# signature but only 2 fingerprint headings; and a CLAUDE.md in the parent,
-# which the project's own import answers.
-{ cat "$_S8/proj/.claude/CLAUDE.md"; printf '\n@AGENTS.md\n'; } > "$_S8/proj/CLAUDE.md"
-printf '# CLAUDE.md\n\nIt works with the **Agent Triforge** plugin.\n\n### Execution phases\n\n## Portable skills\n' > "$_S8/proj/.claude/CLAUDE.md"
+for _S8_RUN in below below-again; do
+  _s8_run "$_S8_RUN" "$_S8/proj" "2.1.276"
+  _s8_has "^WARNING: Claude Code 2\.1\.276 is below Triforge's floor 2\.1\.277.*AGENTS\.md" || _S8_FAIL="$_S8_FAIL ${_S8_RUN}-no-floor-warning-at-2.1.276"
+  _s8_has '^WARNING: CLAUDE\.md is a Triforge 3\.x project template.*AGENTS\.md only.* @AGENTS\.md .*templates/AGENTS\.md.*never edits' || _S8_FAIL="$_S8_FAIL ${_S8_RUN}-no-stale-notice-for-CLAUDE.md"
+  _s8_has '^WARNING: \.claude/CLAUDE\.md is a Triforge 3\.x project template.*AGENTS\.md only.* @\.\./AGENTS\.md .*templates/AGENTS\.md.*never edits' || _S8_FAIL="$_S8_FAIL ${_S8_RUN}-no-stale-notice-for-.claude/CLAUDE.md-with-a-bare-import"
+  [ "$(cksum "$_S8/proj/CLAUDE.md" "$_S8/proj/.claude/CLAUDE.md")" = "$_S8_SUM" ] || _S8_FAIL="$_S8_FAIL ${_S8_RUN}-stale-template-file-edited"
+  [ "$(printf '%s\n' "$_O" | grep -c '^session-start:' || true)" -eq 0 ] || _S8_FAIL="$_S8_FAIL ${_S8_RUN}-standing-notice-printed-as-one-time-action"
+done
+# floor above + not stale: both full copies WITH the import line their notice
+# named, and a CLAUDE.md in the parent, which the project's own import answers.
+_s8_template "$_S8/proj/CLAUDE.md" '@AGENTS.md'
+_s8_template "$_S8/proj/.claude/CLAUDE.md" '@../AGENTS.md'
 printf '# monorepo rules\n' > "$_S8/CLAUDE.md"
 _s8_run imported "$_S8/proj" "2.1.284 (Claude Code)"
 _s8_has "below Triforge's floor" && _S8_FAIL="$_S8_FAIL floor-warning-at-2.1.284"
-_s8_has 'Triforge 3\.x project template' && _S8_FAIL="$_S8_FAIL stale-notice-for-imported-or-unrelated-file"
+_s8_has 'Triforge 3\.x project template' && _S8_FAIL="$_S8_FAIL stale-notice-for-imported-file"
 _s8_has 'self08/CLAUDE\.md' && _S8_FAIL="$_S8_FAIL parent-notice-despite-project-import"
+# the other forms that resolve to the project's AGENTS.md: ./ and an absolute path
+_s8_template "$_S8/proj/CLAUDE.md" '@./AGENTS.md'
+_s8_template "$_S8/proj/.claude/CLAUDE.md" "@$_S8/proj/AGENTS.md"
+_s8_run forms "$_S8/proj" "2.1.277"
+_s8_has 'Triforge 3\.x project template' && _S8_FAIL="$_S8_FAIL stale-notice-despite-dot-slash-or-absolute-import"
+_s8_has 'self08/CLAUDE\.md' && _S8_FAIL="$_S8_FAIL parent-notice-despite-dot-slash-or-absolute-import"
 rm -f "$_S8/CLAUDE.md"
-# above: a second project two levels down; all three file names, two levels.
-# Its own .claude/CLAUDE.md has the template's headings but not the signature.
-_S8P="$_S8/above/mid/proj"
-mkdir -p "$_S8P/.claude" "$_S8/above/mid/.claude"
+# above: a second project three levels down; all three file names. The top
+# level's name holds a literal backslash-n and a `{` — printed unescaped by
+# printf %b it would break the notice and start a line with `{`. The parent's
+# CLAUDE.md holds a bare `@AGENTS.md`: the parent's own AGENTS.md, not the
+# project's. The project has an AGENTS.md (so no tip), a CLAUDE.md with the
+# signature but only 2 fingerprint headings, and a .claude/CLAUDE.md with the
+# template's headings but not the signature.
+_S8A="$_S8/"'odd\n{dir}'
+_S8P="$_S8A/above/mid/proj"
+mkdir -p "$_S8P/.claude" "$_S8A/above/mid/.claude"
 ( cd "$_S8P" && git init -q 2>/dev/null ) || true
-printf '# local notes\n' > "$_S8/above/CLAUDE.local.md"
-printf '# monorepo rules\n' > "$_S8/above/mid/CLAUDE.md"
-printf '# more rules\n' > "$_S8/above/mid/.claude/CLAUDE.md"
+printf '# top rules\n' > "$_S8A/CLAUDE.md"
+printf '# local notes\n' > "$_S8A/above/CLAUDE.local.md"
+printf '# monorepo rules\n\n@AGENTS.md\n' > "$_S8A/above/mid/CLAUDE.md"
+printf '# more rules\n' > "$_S8A/above/mid/.claude/CLAUDE.md"
+printf '# acme-api agents\n' > "$_S8P/AGENTS.md"
+printf '# CLAUDE.md\n\nIt works with the **Agent Triforge** plugin.\n\n### Execution phases\n\n## Portable skills\n' > "$_S8P/CLAUDE.md"
 { printf '# CLAUDE.md\n\nOur own notes, same section names.\n\n'; cat "$_S8/skeleton.md"; } > "$_S8P/.claude/CLAUDE.md"
 _s8_run above "$_S8P" "not-a-version"
-_s8_has '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*self08/above/mid/CLAUDE\.md .* @proj/AGENTS\.md ' || _S8_FAIL="$_S8_FAIL no-notice-for-parent-CLAUDE.md"
-_s8_has '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*self08/above/mid/\.claude/CLAUDE\.md .* @\.\./proj/AGENTS\.md ' || _S8_FAIL="$_S8_FAIL no-notice-for-parent-.claude/CLAUDE.md"
-_s8_has '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*self08/above/CLAUDE\.local\.md .* @mid/proj/AGENTS\.md ' || _S8_FAIL="$_S8_FAIL no-notice-for-grandparent-CLAUDE.local.md"
+_s8_has '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/above/mid/CLAUDE\.md .* @proj/AGENTS\.md ' || _S8_FAIL="$_S8_FAIL no-notice-for-parent-CLAUDE.md-with-a-bare-import"
+_s8_has '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/above/mid/\.claude/CLAUDE\.md .* @\.\./proj/AGENTS\.md ' || _S8_FAIL="$_S8_FAIL no-notice-for-parent-.claude/CLAUDE.md"
+_s8_has '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/above/CLAUDE\.local\.md .* @mid/proj/AGENTS\.md ' || _S8_FAIL="$_S8_FAIL no-notice-for-grandparent-CLAUDE.local.md"
+_s8_has '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*self08/odd\\n{dir}/CLAUDE\.md .* @above/mid/proj/AGENTS\.md ' || _S8_FAIL="$_S8_FAIL no-notice-for-CLAUDE.md-in-the-backslash-n-directory"
+[ "$(printf '%s\n' "$_O" | grep -c '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*self08/odd\\n{dir}/.*, or remove the file\.$' || true)" -eq 4 ] || _S8_FAIL="$_S8_FAIL backslash-n-directory-name-not-intact-on-one-line"
 _s8_has "below Triforge's floor" && _S8_FAIL="$_S8_FAIL floor-warning-for-unparseable-version"
-_s8_has 'Triforge 3\.x project template' && _S8_FAIL="$_S8_FAIL stale-notice-without-signature-line"
+_s8_has 'Triforge 3\.x project template' && _S8_FAIL="$_S8_FAIL stale-notice-without-signature-or-below-3-headings"
+_s8_has '^Tip: ' && _S8_FAIL="$_S8_FAIL pointer-block-tip-despite-AGENTS.md"
 # user tier: with HOME = the parent, its .claude/CLAUDE.md is ~/.claude/CLAUDE.md
-_s8_run user-tier "$_S8P" "3.0.0" "$_S8/above/mid"
-_s8_has 'self08/above/mid/\.claude/CLAUDE\.md' && _S8_FAIL="$_S8_FAIL user-tier-CLAUDE.md-named"
-_s8_has 'is not loaded under a Claude lead: [^ ]*self08/above/mid/CLAUDE\.md ' || _S8_FAIL="$_S8_FAIL parent-notice-lost-with-HOME-above"
+_s8_run user-tier "$_S8P" "3.0.0" "$_S8A/above/mid"
+_s8_has '/above/mid/\.claude/CLAUDE\.md' && _S8_FAIL="$_S8_FAIL user-tier-CLAUDE.md-named"
+_s8_has 'is not loaded under a Claude lead: [^ ]*/above/mid/CLAUDE\.md ' || _S8_FAIL="$_S8_FAIL parent-notice-lost-with-HOME-above"
 _s8_has "below Triforge's floor" && _S8_FAIL="$_S8_FAIL floor-warning-at-3.0.0"
 # fixed: the parent file now imports the project's AGENTS.md
-printf '\n@proj/AGENTS.md\n' >> "$_S8/above/mid/CLAUDE.md"
+printf '\n@proj/AGENTS.md\n' >> "$_S8A/above/mid/CLAUDE.md"
 _s8_run chain-import "$_S8P" '{"version": "2.0.300"}'
 _s8_has 'is not loaded under a Claude lead' && _S8_FAIL="$_S8_FAIL parent-notice-despite-import-in-chain"
 _s8_has "^WARNING: Claude Code 2\.0\.300 is below Triforge's floor 2\.1\.277" || _S8_FAIL="$_S8_FAIL no-floor-warning-at-2.0.300"
-_S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines) and prints the floor, stale-template and CLAUDE.md-above notices (R40)"
+_S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines) and prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40)"
 if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
-  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md, files untouched, silent with an @AGENTS.md import, below 3 fingerprint headings, or without the signature line; CLAUDE.md above the project: 3 files over 2 levels named with their import lines, silent for ~/.claude/CLAUDE.md and once the chain imports AGENTS.md; every run rc 0, no crash, no line starting with {" "static"
+  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; pointer-block tip without ./AGENTS.md, none with it; every run rc 0, no crash, no line starting with {" "static"
 else
   row "SELF-08" "claude" "$_S8_CAP" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160); mismatch:${_S8_FAIL:- none}" "static"
 fi
-rm -rf "$_S8/proj" "$_S8/home" "$_S8/above" "$_S8/skeleton.md"   # keep $_S8/bin (the stub agy + claude) for SELF-08b; removed there
+rm -rf "$_S8/proj" "$_S8/home" "$_S8A" "$_S8/skeleton.md" "$_S8/template.md"   # keep $_S8/bin (the stub agy + claude) for SELF-08b; removed there
 
 # SELF-08b (KTD12 / R31 / CWE-59): the skills refresh touches only what it can
 # prove it wrote. Session start (CLAUDE_PLUGIN_ROOT = this checkout) on:
