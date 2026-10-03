@@ -647,8 +647,10 @@ fi
 # CLAUDE.md, or in this project's .claude/CLAUDE.md, names some other
 # AGENTS.md and does not count: a token counts when its directory, resolved
 # physically, is the project's. A directory that does not exist counts for
-# nothing.
-SS_IMPORT_RE='^@(([^[:space:]]*/)?)AGENTS\.md([^[:alnum:]]|$)'
+# nothing, and neither does a token that goes on after the name
+# (@AGENTS.md.bak, @AGENTS.md_old): only trailing punctuation or a #fragment may
+# follow it.
+SS_IMPORT_RE='^@(([^[:space:]]*/)?)AGENTS\.md([.,;:!?)]*|#[^[:space:]]*)$'
 _ss_imports_agents() {
   local BASE WORDS WORD DIR
   [ -f "$1" ] || return 1

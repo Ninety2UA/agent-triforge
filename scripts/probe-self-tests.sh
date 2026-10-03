@@ -424,6 +424,15 @@ _s8_run() { # _s8_run <label> <project> <claude --version answer> [HOME] — one
   _s8_sane "$1" "$_O"
 }
 _s8_has() { printf '%s\n' "$_O" | grep -q -- "$1"; }
+# _s8_start_notimeout <project> — session start with no timeout/gtimeout on PATH and a
+# claude that never answers (sleeps 30 s): the floor probe's own watchdog must bound it.
+_s8_start_notimeout() {
+  local B="$_S8/bin-notimeout"
+  mkdir -p "$B"
+  printf '#!/bin/sh\nsleep 30\n' > "$B/claude"; chmod +x "$B/claude"
+  ln -sf "$_S8/bin/agy" "$B/agy" 2>/dev/null || true
+  ( cd "$1" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$B:/usr/bin:/bin" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 )
+}
 [ "$_S8_RC1" -eq 0 ] || _S8_FAIL="$_S8_FAIL run1-rc-nonzero"
 _s8_sane run1 "$_S8_OUT1"; _s8_sane run2 "$_S8_OUT2"
 # floor: 2.1.277 (the stub's default in runs 1 + 2) is at the floor
@@ -558,6 +567,13 @@ _s8_has '^Tip: ' && _S8_FAIL="$_S8_FAIL pointer-block-tip-despite-AGENTS.md"
 _s8_run user-tier "$_S8P" "3.0.0" "$_S8A/above/mid"
 _s8_has '/above/mid/\.claude/CLAUDE\.md' && _S8_FAIL="$_S8_FAIL user-tier-CLAUDE.md-named"
 _s8_has 'is not loaded under a Claude lead: [^ ]*/above/mid/CLAUDE\.md ' || _S8_FAIL="$_S8_FAIL parent-notice-lost-with-HOME-above"
+# watchdog: with no timeout binary a hung claude is given up on after 10 s, session start exits 0 and warns about nothing
+_S8_T0=$(date +%s)
+_O=$(_s8_start_notimeout "$_S8/proj") || _S8_FAIL="$_S8_FAIL notimeout-rc-nonzero"
+_S8_T1=$(( $(date +%s) - _S8_T0 ))
+_s8_sane notimeout "$_O"
+[ "$_S8_T1" -lt 20 ] || _S8_FAIL="$_S8_FAIL notimeout-hung-claude-not-bounded(${_S8_T1}s)"
+_s8_has 'below Triforge' && _S8_FAIL="$_S8_FAIL notimeout-floor-warning-without-an-answer"
 _s8_has "below Triforge's floor" && _S8_FAIL="$_S8_FAIL floor-warning-at-3.0.0"
 # fixed: the parent file now imports the project's AGENTS.md
 printf '\n@proj/AGENTS.md\n' >> "$_S8A/above/mid/CLAUDE.md"
