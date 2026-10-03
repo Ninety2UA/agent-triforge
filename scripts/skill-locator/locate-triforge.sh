@@ -67,11 +67,11 @@ refuse() { # refuse <pointer-file> <reason>
 # 1. CLAUDE_PLUGIN_ROOT
 CPR_NOTE="unset"
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-  if is_triforge_root "$CLAUDE_PLUGIN_ROOT"; then
-    phys "$CLAUDE_PLUGIN_ROOT"
+  if is_triforge_root "${CLAUDE_PLUGIN_ROOT:-}"; then
+    phys "${CLAUDE_PLUGIN_ROOT:-}"
     exit 0
   fi
-  CPR_NOTE="'$CLAUDE_PLUGIN_ROOT' is not a Triforge root"
+  CPR_NOTE="'${CLAUDE_PLUGIN_ROOT:-}' is not a Triforge root"
 fi
 
 # 2. this copy's own location: <plugin>/skills/<skill>/scripts/locate-triforge.sh
