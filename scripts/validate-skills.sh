@@ -23,7 +23,10 @@
 #                (each holds an EXPECT file: check, default mode, message
 #                substring) in both modes and assert the outcome, plus two
 #                computed cases (the C10 description-set budget and the C15
-#                token guard). Exit 0 when every fixture behaves as named.
+#                token guard). The cases run in-process; the conforming
+#                fixture's strict run also goes through this wrapper, so the
+#                flag parsing and the exit code are exercised end to end.
+#                Exit 0 when every fixture behaves as named.
 #
 # The checks (ids follow ops/research/2026-09-27-repo-mining.md §3; "new" means
 # WARN by default and FAIL under --strict; the rest FAIL in both modes):
@@ -163,7 +166,9 @@ fi
 VS_STRICT="$STRICT" VS_FIXTURE="$FIXTURE" VS_SELF_TEST="$SELF_TEST" \
 VS_SKILLS_DIR="$SKILLS_DIR" VS_SCRIPT="$PWD/scripts/validate-skills.sh" \
 python3 - <<'PYEOF'
+import contextlib
 import glob
+import io
 import os
 import re
 import shutil
@@ -291,6 +296,23 @@ def quoted_is_closed(text):
     return True
 
 
+def quoted_continuation(fm, i, quote):
+    """A quoted scalar opened on fm[i] did not close there: consume the
+    continuation lines. Return (closed, next_i, pieces) — whether a closing
+    quote was found, the index after the consumed lines, the stripped lines."""
+    pieces = []
+    closed = False
+    i += 1
+    while i < len(fm):
+        piece = fm[i].strip()
+        pieces.append(piece)
+        i += 1
+        if quoted_is_closed(quote + piece):
+            closed = True
+            break
+    return closed, i, pieces
+
+
 def parse_frontmatter(lines, errs, info):
     """Return (mapping, index of first body line). errs collects C2 messages;
     info gets 'deep' (parent key -> child keys nested one level too far),
@@ -358,16 +380,8 @@ def parse_frontmatter(lines, errs, info):
                 continue
             if rest[0] in ('"', "'") and not quoted_is_closed(rest):
                 # Quoted scalar continued on following lines.
-                parts = [rest]
-                closed = False
-                i += 1
-                while i < len(fm):
-                    piece = fm[i].strip()
-                    parts.append(piece)
-                    i += 1
-                    if piece.endswith(rest[0]) and quoted_is_closed(rest[0] + piece):
-                        closed = True
-                        break
+                closed, i, pieces = quoted_continuation(fm, i, rest[0])
+                parts = [rest] + pieces
                 if not closed:
                     info.setdefault("unclosed", []).append(key)
                     parts[-1] = parts[-1] + rest[0]
@@ -414,14 +428,7 @@ def strict_yaml_issues(fm):
             continue
         if rest and rest[0] in ('"', "'"):
             if not quoted_is_closed(rest):
-                closed = False
-                i += 1
-                while i < len(fm):
-                    piece = fm[i].strip()
-                    i += 1
-                    if piece.endswith(rest[0]) and quoted_is_closed(rest[0] + piece):
-                        closed = True
-                        break
+                closed, i, _ = quoted_continuation(fm, i, rest[0])
                 if not closed:
                     issues.append("unclosed quote: " + label)
                 continue
@@ -438,16 +445,6 @@ def strict_yaml_issues(fm):
                 issues.append("unquoted value ends with ':' — quote it: " + label)
         i += 1
     return issues
-
-
-def frontmatter_lines(text):
-    lines = text.split("\n")
-    if not lines or lines[0].strip() != "---":
-        return []
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            return lines[1:i]
-    return []
 
 
 def parse_simple_yaml(text):
@@ -932,7 +929,11 @@ def check_commands_and_agents(root):
     for sub, forms in (("commands", ("positional",)), ("agents", ("arguments", "positional"))):
         for path in sorted(glob.glob(os.path.join(root, sub, "*.md"))):
             text = read_text(path)
-            for e in strict_yaml_issues(frontmatter_lines(text)):
+            # Only the raw frontmatter lines are wanted here; the C2 structure
+            # messages are a skill rule and are dropped.
+            info = {}
+            parse_frontmatter(text.split("\n"), [], info)
+            for e in strict_yaml_issues(info.get("fm", [])):
                 new(path, "C26", "frontmatter: " + e)
             for i, line in enumerate(text.split("\n")):
                 for hit in interpolation_hits(line, forms):
@@ -1023,6 +1024,29 @@ def run_skills_ref(dirs):
 
 
 # --- main run ------------------------------------------------------------------
+def configure(strict, fixture, skills_dir_arg=""):
+    """Set the run's inputs (the wrapper's flags) and reset the findings. main()
+    reads these globals, so the self-test can run it once per case."""
+    global STRICT, FIXTURE, SKILLS_DIR_ARG, ROOT
+    STRICT, FIXTURE, SKILLS_DIR_ARG = strict, fixture, skills_dir_arg
+    ROOT = fixture or REPO
+    del F[:]
+    del SKIPS[:]
+
+
+def run_checks(strict, fixture):
+    """One --fixture run of the whole pipeline in-process: (rc, stdout, stderr)."""
+    configure(strict, os.path.realpath(fixture))  # the wrapper's pwd -P
+    out, errout = io.StringIO(), io.StringIO()
+    rc = 0
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(errout):
+            main()
+    except SystemExit as exc:
+        rc = exc.code or 0
+    return rc, out.getvalue(), errout.getvalue()
+
+
 def main():
     if SKILLS_DIR_ARG and not FIXTURE:
         skills_dir = SKILLS_DIR_ARG if os.path.isabs(SKILLS_DIR_ARG) else os.path.join(REPO, SKILLS_DIR_ARG)
@@ -1086,16 +1110,32 @@ def main():
 FINDING_LINE = re.compile(r"^(?P<path>.+?): (?:(?P<sev>warning|note): )?\[(?P<id>[A-Z0-9]+)\] (?P<msg>.*)$")
 
 
-def run_validator(args):
-    run = subprocess.run([BASH, SCRIPT] + args, capture_output=True, text=True)
+SMOKE_FIXTURE = "conforming"  # its strict run goes through the bash wrapper
+
+
+def parse_findings(stdout):
     findings = []
-    for line in run.stdout.split("\n"):
+    for line in stdout.split("\n"):
         if line.startswith("skip: "):
             continue
         m = FINDING_LINE.match(line)
         if m:
             findings.append((m.group("sev") or "error", m.group("id"), m.group("msg")))
-    return run.returncode, run.stdout + run.stderr, findings
+    return findings
+
+
+def run_validator(strict, fixture):
+    """One case in-process: (rc, stdout + stderr, findings)."""
+    rc, out, errout = run_checks(strict, fixture)
+    return rc, out + errout, parse_findings(out)
+
+
+def run_wrapper(strict, fixture):
+    """The same case through the bash wrapper (flag parsing, the env hand-off
+    and the exit code exercised end to end); run_validator's shape."""
+    args = (["--strict"] if strict else []) + ["--fixture", fixture]
+    run = subprocess.run([BASH, SCRIPT] + args, capture_output=True, text=True)
+    return run.returncode, run.stdout + run.stderr, parse_findings(run.stdout)
 
 
 def ids(findings, sev):
@@ -1162,8 +1202,8 @@ def self_test():
                 k, v = line.split(":", 1)
                 expect[k.strip()] = v.strip()
         count += 1
-        strict_run = run_validator(["--strict", "--fixture", path])
-        default_run = run_validator(["--fixture", path])
+        strict_run = (run_wrapper if entry == SMOKE_FIXTURE else run_validator)(True, path)
+        default_run = run_validator(False, path)
         problems = assess(entry, expect, strict_run, default_run)
         check = expect.get("check", "")
         if check == "none":
@@ -1189,8 +1229,8 @@ def self_test():
         assert len(desc) == 290, len(desc)
         for n in range(14):
             write_skill(tmp, "budget-skill-" + "%02d" % n, desc)
-        strict_run = run_validator(["--strict", "--fixture", tmp])
-        default_run = run_validator(["--fixture", tmp])
+        strict_run = run_validator(True, tmp)
+        default_run = run_validator(False, tmp)
         problems = []
         if default_run[0] != 0 or ids(default_run[2], "warning") != ["C10"] or not any("combined" in f[2] for f in default_run[2]):
             problems.append("default: expected rc 0 with one [C10] 'combined' warning, got rc " + str(default_run[0]) + " " + str(ids(default_run[2], "warning")))
@@ -1210,7 +1250,7 @@ def self_test():
     try:
         filler = ("Plain prose line for the token guard fixture, with no tool names.\n" * 320)
         write_skill(tmp, "token-guard", "Use when a fixture needs a long body.", filler)
-        run = run_validator(["--fixture", tmp])
+        run = run_validator(False, tmp)
         notes = [f for f in run[2] if f[0] == "note" and f[1] == "C15" and "5,000 tokens" in f[2]]
         if run[0] != 0 or not notes or ids(run[2], "warning") != ["C15"]:
             failures += 1
