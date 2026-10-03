@@ -1,0 +1,3 @@
+check: KTD6
+default: warn
+message: differs from

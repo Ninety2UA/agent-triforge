@@ -1,0 +1,3 @@
+check: C21
+default: warn
+message: does not exist in the skill

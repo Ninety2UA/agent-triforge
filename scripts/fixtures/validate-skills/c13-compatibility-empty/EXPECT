@@ -1,0 +1,3 @@
+check: C13
+default: warn
+message: 1–500

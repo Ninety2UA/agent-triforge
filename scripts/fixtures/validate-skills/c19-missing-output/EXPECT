@@ -1,0 +1,3 @@
+check: C19
+default: fail
+message: missing "## Output" section

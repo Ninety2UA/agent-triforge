@@ -15,13 +15,14 @@ Precedence: the user's own instructions, then this file, then a skill's defaults
 ```bash
 claude plugin validate --strict .claude-plugin/plugin.json
 claude plugin validate --strict .claude-plugin/marketplace.json
-bash scripts/validate-skills.sh
+bash scripts/validate-skills.sh            # 26 conformance checks + the KTD1/KTD6 gates; --strict turns warnings into errors
+bash scripts/validate-skills.sh --self-test   # its fixtures, scripts/fixtures/validate-skills/
 bash scripts/validate-versions.sh          # lockstep, ladder, drift, stale pins, counts, AGENTS.md budget, inventory
 bash scripts/probe-capabilities.sh --self-only   # the SELF gate: static rows only, ~90 s, exit 3 on any SELF FAIL
 for f in scripts/*.sh scripts/lib/*.sh hooks/handlers/*.sh; do /bin/bash -n "$f" || echo "SYNTAX $f"; done
 ```
 
-`.github/workflows/gates.yml` runs the last four on a macOS runner for pull requests to `main` and `release/4.0`; the two manifest validations need Claude Code and stay a local gate. A release also needs the steps under "Release".
+`.github/workflows/gates.yml` runs the last five on a macOS runner for pull requests to `main` and `release/4.0`; the two manifest validations need Claude Code and stay a local gate. A release also needs the steps under "Release".
 
 ## Expensive operations
 

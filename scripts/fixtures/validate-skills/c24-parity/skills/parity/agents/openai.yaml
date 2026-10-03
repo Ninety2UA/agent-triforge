@@ -1,0 +1,6 @@
+interface:
+  display_name: "Parity fixture"
+  short_description: "Disables model invocation on one side only."
+  default_prompt: "Run $parity and report."
+policy:
+  allow_implicit_invocation: true

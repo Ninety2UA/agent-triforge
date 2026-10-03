@@ -1,0 +1,3 @@
+check: C09
+default: warn
+message: must start within the first 150

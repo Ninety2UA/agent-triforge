@@ -54,6 +54,9 @@ jobs:
       - name: validate-skills
         run: /bin/bash scripts/validate-skills.sh
 
+      - name: validate-skills self-test # every fixture under scripts/fixtures/validate-skills/, both modes
+        run: /bin/bash scripts/validate-skills.sh --self-test
+
       - name: SELF gate
         run: /bin/bash scripts/probe-capabilities.sh --self-only
 
