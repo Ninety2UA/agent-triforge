@@ -1,17 +1,17 @@
 ---
-saved: 2026-10-01T21:55:00Z
-phase: 0-review-fixes (PAUSED by the user 2026-10-01 ~23:55 local)
+saved: 2026-10-03T19:05:00Z
+phase: 1a-starting
 wave: 0
 tasks:
   total: 29
-  done: 4
+  done: 8
   blocked: 0
 verification_baseline:
   command: "bash scripts/validate-versions.sh; bash scripts/validate-skills.sh; claude plugin validate --strict .claude-plugin/plugin.json; claude plugin validate --strict .claude-plugin/marketplace.json; bash scripts/probe-capabilities.sh --self-only"
-  result: "All PASS on main 79db9c0 (= release/4.0 start): validate-versions PASS, ladder 24a7ee2039c8c2e4907472e4cf82fdfd; 12 skills OK; both manifests --strict; SELF gate 17 rows none FAIL; gates.yml green (run 36786228612)."
-  commit: 79db9c0
+  result: "All PASS on release/4.0 b647f3b (Phase 0 merged): validate-versions PASS (one ladder definition; AGENTS.md 90 lines / 15,466 bytes; inventory 239 rows); 10 skills OK; both manifests --strict; SELF gate 17 rows none FAIL; gates.yml green on PR #13 (run 37145750213)."
+  commit: b647f3b
 verification_command: "bash scripts/validate-versions.sh; bash scripts/validate-skills.sh; claude plugin validate --strict .claude-plugin/plugin.json; claude plugin validate --strict .claude-plugin/marketplace.json; bash scripts/probe-capabilities.sh --self-only"
-state_head: 79db9c0
+state_head: b647f3b
 ---
 # Session state
 <!-- Saved: 2026-10-01T00:45:00Z -->
@@ -19,7 +19,7 @@ state_head: 79db9c0
 
 ## Current phase
 
-**Phase H is done:** PR #12 squash-merged to `main` as 79db9c0 on 2026-10-01 and `release.yml` published v3.3.3 (run 36786584796). `release/4.0` was cut from that commit and pushed. **Phase 0 (U21, U3, U22, U4) is next**, on `release/4.0`.
+**Phase 0 is merged** into `release/4.0` (PR #13 → b647f3b, 2026-10-03). The checkout now has one root `AGENTS.md` (90 lines, 15,466 of 16,384 bytes — trim before adding), 10 skills, the registry ladder, the stricter validator and the session-start upgrade notices. **Phase 1a (U5, U26, U6) is next.**
 
 ## Authorization in force (2026-10-01)
 
@@ -29,8 +29,8 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 
 | PR | Units | Status |
 |---|---|---|
-| 0 | U21 validator prep + ladder source; U3 AGENTS.md + rule inventory; U22 session-start floor/stale-template; U4 removal test + pruning | PAUSED mid review-fix wave on `feat/v4-phase-0` (base `release/4.0`, NOT yet pushed, no PR yet). Built + committed: U21 601277a, U3 2a2011d, U22 af66a5d, U4 cccbefd, simplify a33b680. ce-code-review run `20261001-225426-98b630ed` = status complete, verdict "Ready with fixes" (4 findings, no P0/P1; artifact `/tmp/compound-engineering-501/ce-code-review/20261001-225426-98b630ed/review.json`). Fix batches B (d6ccd83, validator gates V1–V5) and C (02fee4a, findings #1 #6 #12 + docs) are committed. Batch A is UNCOMMITTED and UNVERIFIED in the working tree (`hooks/handlers/session-start.sh`, `scripts/probe-self-tests.sh`): its worker was stopped at the pause before reporting |
-| 1a | U5 plugin-root resolver + locator; U26 CLI registry; U6 skill conformance validator | pending |
+| 0 | U21 validator prep + ladder source; U3 AGENTS.md + rule inventory; U22 session-start floor/stale-template; U4 removal test + pruning | **merged** — PR #13 squash b647f3b on release/4.0 (2026-10-03); review run 20261001-225426-98b630ed + final cross-review PASS |
+| 1a | U5 plugin-root resolver + locator; U26 CLI registry; U6 skill conformance validator | next — branch `feat/v4-phase-1a` off release/4.0 |
 | 1b | U7 commands → at- skills; U24 split oversized skills; U23 remove commands/ | pending |
 | 2a | U29 capability/survival probe rows; U13 detached leases + lease_wait + lead exit; U11 worker marker | pending |
 | 2b | U9 [lead] table + resolution; U12 claude -p lane; U10 ledger lead CLI / reviewer class / approvals | pending |
@@ -45,16 +45,9 @@ Update this table and the frontmatter at every PR boundary; the plan is `docs/pl
 
 ## Next actions
 
-1. **Finish fix batch A** (the worker was stopped at the pause; its edits parse under `/bin/bash -n` but were never verified). Read `git diff hooks/handlers/session-start.sh scripts/probe-self-tests.sh` and check each item, completing what is missing:
-   - #2 (P2): `_ss_imports_agents` must be path-aware — an `@…AGENTS.md` import counts only when it resolves (relative to the file that holds it, `~/` and absolute forms included) to this project's `AGENTS.md`; SELF-08 cases: a parent `CLAUDE.md` with bare `@AGENTS.md` still gets the notice, a 3.x copy at `.claude/CLAUDE.md` with `@AGENTS.md` still gets the stale notice (`@../AGENTS.md` does not), and the relative / `./` / absolute forms silence it.
-   - R1: bound the `claude --version` floor probe when no `timeout`/`gtimeout` exists (pure-bash 10 s watchdog, no job-control output, watchdog stdio to /dev/null); prove by hand with a stub that sleeps 60.
-   - R2: the stale-template notice must not say "Run /setup to convert it" (no conversion step exists until U15).
-   - R3: a `Tip:` line when the project root has no `AGENTS.md`: `cp "${CLAUDE_PLUGIN_ROOT}/templates/AGENTS.md" ./AGENTS.md` (commit 02fee4a's README/AGENTS.md wording already says session start prints this).
-   - T1: SELF-08 asserts the notices reprint on a second run. T2: a parent directory name with a literal backslash-n exercises `_ss_prose`. M1: name the three instruction-file names once.
-   Then: `/bin/bash -n` both files; `bash scripts/validate-versions.sh`; `bash scripts/validate-skills.sh`; `/bin/bash scripts/probe-capabilities.sh --self-only` (17 rows, none FAIL); commit as `fix(review): apply finding #2 and session-start residuals`.
-2. **Ship Phase 0:** push `feat/v4-phase-0`, open ONE PR to base `release/4.0` via `ce-commit-push-pr` with `branding:on` (PR template; Protected paths = Yes; cross-reviewer = the lead under the recorded authorization; review receipt = run `20261001-225426-98b630ed`, status complete, "Ready with fixes", all four findings applied). Unapplied items to list: SVG diagrams `docs/images/quality-gates.svg` + `debug-flow.svg` still name the removed skills (Excalidraw pipeline; do in U20's docs pass); signature-less 3.x template copies and a project's own non-template `CLAUDE.md` get no notice (U15, R9); the pre-existing un-timed optional-CLI version probes; validate-versions checks have no in-gate negative fixtures (shown red by hand); tables nested in blockquotes and a ladder split across two lines are not detected; the removal test covered one fixture, sonnet, Claude lead only; README release-ledger links to the deleted skills are history.
-3. `gates.yml` must be green on the PR; one independent Opus reviewer on the final diff (session-start + validator), then 5/5 rubric → squash-merge into `release/4.0`.
-4. Update the table, then Phase 1a (U5, U26, U6) on a new branch off `release/4.0`. Carry-forward for U7/U23: rename `/setup` → the at- skill in `templates/AGENTS.md` and the session-start notices; AGENTS.md is at 15,363 of 16,384 bytes — trim before adding.
+1. Phase 1a on branch `feat/v4-phase-1a` (off `release/4.0`): `/ce-work` scoped to U5 (plugin-root resolver `_TRIFORGE_PLUGIN_ROOT` + the per-skill locator source, SELF-11), U26 (one CLI registry in `scripts/lib/registry.sh` read by roster/lease/common/session-start/validators/probe lanes; `resolve_role` byte-identical before and after), U6 (26-check skill conformance validator with one fixture per rule under `scripts/fixtures/validate-skills/`, `--strict` opt-in, the repo-local authoring skill `.claude/skills/at-skill-work/SKILL.md`, the lead-name-branch gate). Dependency order: U5 → U26; U6 parallel to U26 (disjoint files: validate-skills.sh + fixtures vs registry/roster/lease/common/session-start).
+2. Ship as before: simplify → ce-code-review → fixes → PR to `release/4.0` → gates green → one final-diff reviewer → 5/5 → squash-merge; update the table.
+3. Then Phase 1b (U7 commands → at- skills, U24 split oversized skills, U23 remove commands/), which also renames `/setup` to the at- skill in `templates/AGENTS.md` and the session-start notices.
 
 ## Blockers recorded for the user
 
