@@ -521,7 +521,7 @@ claude
 ./scripts/coordinate.sh "add user authentication" --max 5 --team
 ```
 
-The same workflows run from a Codex prompt as `$at-<name>` (`codex exec "$at-ship add user authentication"`).
+The same workflows run from a Codex prompt as `$at-<name>` (`codex exec '$at-ship add user authentication'` — single quotes, so the shell leaves `$at-ship` alone).
 
 ---
 

@@ -854,7 +854,7 @@ def check_skill(skill_dir, sibling_names):
                         continue
                     if before.rstrip().endswith("`"):
                         continue
-                    new(path, "C23", "line " + str(idx + 1) + ": scripts/" + f + " invoked without its interpreter (write `bash scripts/" + f + "`)")
+                    new(path, "C23", "line " + str(idx + 1) + ": scripts/" + f + " invoked without its interpreter (write `bash \"$SKILL_DIR/scripts/" + f + "\"`)")
 
     # C24 — agents/openai.yaml and the parity with disable-model-invocation.
     oy = os.path.join(skill_dir, "agents", "openai.yaml")

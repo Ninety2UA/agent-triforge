@@ -126,7 +126,8 @@ inside_project() { # inside_project <dir> — strictly below TOP or MAIN (never 
 SELF_DIR=$(phys "$(dirname "$0")") || SELF_DIR=""
 if [ -n "$SELF_DIR" ]; then
   OWN_ROOT=$(dirname "$(dirname "$(dirname "$SELF_DIR")")")
-  case "${OWN_ROOT##*/}" in
+  # compared in lower case: a case-insensitive filesystem serves .Agents as .agents
+  case "$(printf '%s' "${OWN_ROOT##*/}" | tr '[:upper:]' '[:lower:]')" in
     .agents|.claude|.codex|.cursor|.opencode|.kimi-code|.gemini|.antigravity) ;;
     *)
       if ! inside_project "$OWN_ROOT" && is_triforge_root "$OWN_ROOT"; then
