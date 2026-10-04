@@ -1,10 +1,10 @@
 ---
-saved: 2026-10-03T19:05:00Z
-phase: 1a-simplify + 1b-building (overlapped)
+saved: 2026-10-04T12:00:00Z
+phase: 1a-review (merge leaf) + 1b-U23-building (overlapped)
 wave: 0
 tasks:
   total: 29
-  done: 8
+  done: 10
   blocked: 0
 verification_baseline:
   command: "bash scripts/validate-versions.sh; bash scripts/validate-skills.sh; claude plugin validate --strict .claude-plugin/plugin.json; claude plugin validate --strict .claude-plugin/marketplace.json; bash scripts/probe-capabilities.sh --self-only"
@@ -30,8 +30,8 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 | PR | Units | Status |
 |---|---|---|
 | 0 | U21 validator prep + ladder source; U3 AGENTS.md + rule inventory; U22 session-start floor/stale-template; U4 removal test + pruning | **merged** — PR #13 squash b647f3b on release/4.0 (2026-10-03); review run 20261001-225426-98b630ed + final cross-review PASS |
-| 1a | U5 plugin-root resolver + locator; U26 CLI registry; U6 skill conformance validator | built on `feat/v4-phase-1a`: U5 bf3a454, U6 5a7f5d0, U26 2d2aa41, fixtures protected d1f9192, validator simplify 2bfcbe5; hot-path simplify (worker simpA) in flight; then ce-code-review → PR → merge |
-| 1b | U7 commands → at- skills; U24 split oversized skills; U23 remove commands/ | building IN PARALLEL in worktree `/Users/dbenger/projects/.mafw-wt-phase-1b` (branch `feat/v4-phase-1b` off 2bfcbe5): U7 split over three workers (setup/build/ship/wrap/coordinate/review · plan/quick/test/debug/analyze/deep-research · status/pause/resume/compound/resolve-pr), U24 + the at- exclusion + the delivered-copy audit by a fourth; U23 after; PR targets release/4.0 once 1a merges (rebase) |
+| 1a | U5 plugin-root resolver + locator; U26 CLI registry; U6 skill conformance validator | built on `feat/v4-phase-1a` @ 47d319e (U5 bf3a454, U6 5a7f5d0, U26 2d2aa41, fixtures protected d1f9192, validator simplify 2bfcbe5, hot-path simplify eb9a2a4, locator C17 47d319e). ce-code-review run `20261003-230605-bed69c8a` (`/tmp/compound-engineering-501/ce-code-review/20261003-230605-bed69c8a`): 6 structured returns + agent-native collected, 11 candidates, Codex peer ran but produced no usable output (idle-reaped; recorded, no retry); merge leaf → validator → report leaf next, then fix wave → PR → gates → final-diff Opus review → 5/5 merge |
+| 1b | U7 commands → at- skills; U24 split oversized skills; U23 remove commands/ | worktree `/Users/dbenger/projects/.mafw-wt-phase-1b`, branch `feat/v4-phase-1b` rebased onto 1a@47d319e: **U7 committed e66f07d** (17 at- skills), **U24 committed d733156** (routers + references, 120-char descriptions, at-* excluded from skills-sync + SELF-08b audit). **U23 in flight** as two workers (u23-code: commands/ removal, strict-by-default with a `--warn` escape, count vocabulary "27 skills"/"10 portable skills"/"17 lead workflows", SHIPPED_SKILLS at-* exclusion, hook banner, manifests, templates, AGENTS.md row, rule-inventory pointers, locator hint + 17 re-copies; u23-docs: README, docs/agent-triforge.md, docs/index.html). After both: lead commits, full gate, simplify, review, `git rebase --onto release/4.0 47d319e feat/v4-phase-1b` once 1a merges, PR → release/4.0 |
 | 2a | U29 capability/survival probe rows; U13 detached leases + lease_wait + lead exit; U11 worker marker | pending |
 | 2b | U9 [lead] table + resolution; U12 claude -p lane; U10 ledger lead CLI / reviewer class / approvals | pending |
 | 2c | U25 dispatch_persona lane; U8 personas home, agents/ removed | pending |
@@ -45,9 +45,9 @@ Update this table and the frontmatter at every PR boundary; the plan is `docs/pl
 
 ## Next actions
 
-1. Phase 1a on branch `feat/v4-phase-1a` (off `release/4.0`): `/ce-work` scoped to U5 (plugin-root resolver `_TRIFORGE_PLUGIN_ROOT` + the per-skill locator source, SELF-11), U26 (one CLI registry in `scripts/lib/registry.sh` read by roster/lease/common/session-start/validators/probe lanes; `resolve_role` byte-identical before and after), U6 (26-check skill conformance validator with one fixture per rule under `scripts/fixtures/validate-skills/`, `--strict` opt-in, the repo-local authoring skill `.claude/skills/at-skill-work/SKILL.md`, the lead-name-branch gate). Dependency order: U5 → U26; U6 parallel to U26 (disjoint files: validate-skills.sh + fixtures vs registry/roster/lease/common/session-start).
-2. Ship as before: simplify → ce-code-review → fixes → PR to `release/4.0` → gates green → one final-diff reviewer → 5/5 → squash-merge; update the table.
-3. Then Phase 1b (U7 commands → at- skills, U24 split oversized skills, U23 remove commands/), which also renames `/setup` to the at- skill in `templates/AGENTS.md` and the session-start notices.
+1. Phase 1a review (run `20261003-230605-bed69c8a`): collect the merge leaf's receipt → read `references/validator-batch-template.md`, launch the validator batch from `validator-input.json` (session model), write `validator-outcome.json` → report leaf → `review.json`. Known candidates: P1 `_adapter_env` glob-expands `KIMI_*` under bash (lease.sh:1221 — fix with `set -f` guard or a line-read loop + identifier check, plus a SELF-03 case), P2 unchecked `cli_field` failure in `lease_dispatch` (lease.sh:1642), P2 locator step 2 resolves a root planted under `.agents` (locator:81), P3 pointer refusal bypass via `:(icase)`/symlinked `.agents` (locator:110), P1 `commands/setup.md` still calls removed `_roster_binary` (U23 deletes commands/ — decide: restore a shim or accept because 1b lands before 4.0.0), testing gap for the hook's degraded helper-load path, maintainability: validate-skills.sh 264→1,274 lines. Any locator change requires re-copying the locator into all 17 at- skills in the 1b worktree (KTD6).
+2. Fix wave on `feat/v4-phase-1a` (batched per file), re-gate (both validators, manifests, `bash -n`, SELF gate 18 rows), commit; then ce-commit-push-pr branding:on → PR `feat/v4-phase-1a` → `release/4.0` (template; protected paths Yes; cross-reviewer = lead under authorization; receipt; unapplied findings) → babysit → gates green → one Opus final-diff reviewer → 5/5 → `gh pr merge --squash --delete-branch`; update the table.
+3. Phase 1b: collect u23-code + u23-docs, commit U23 in the worktree, run the full gate there (expect "27 skills OK", validate-versions PASS incl. counts, SELF 18 rows none FAIL), simplify (3 Sonnet reviewers), ce-code-review, rebase onto `release/4.0` after 1a merges, PR → gates → final review → merge. Then Phase 2 (2a/2b/2c) per the table.
 
 ## Blockers recorded for the user
 
