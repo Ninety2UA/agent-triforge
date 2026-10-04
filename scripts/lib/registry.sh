@@ -45,12 +45,13 @@ FRAMEWORK_PROTECTED = (
     "scripts/probe-capabilities.sh", "scripts/probe-self-tests.sh",
     "scripts/validate-skills.sh", "scripts/validate-versions.sh", "scripts/release-notes.sh",
     # lifecycle hooks, the lead-facing workflows and the persona home. commands/
-    # ships empty since 4.0 (the workflows are skills/at-*/) but stays gated: the
-    # plugin host auto-loads a plugin-root commands/ directory, so a lease that
-    # re-creates commands/*.md must hit the gate (validate-versions.sh check 8)
-    "hooks/", "skills/", "commands/", "personas/",
+    # and agents/ ship empty since 4.0 (the workflows are skills/at-*/, the
+    # personas personas/*.md) but stay gated: the plugin host auto-loads both
+    # plugin-root directories, so a lease that re-creates commands/*.md or
+    # agents/*.md must hit the gate (validate-versions.sh check 8)
+    "hooks/", "skills/", "commands/", "agents/", "personas/",
     # shipped agent configs, one directory per CLI
-    "agents/", "antigravity-agents/", "codex-agents/", "opencode-agents/", "kimi-agents/", "cursor-agents/",
+    "antigravity-agents/", "codex-agents/", "opencode-agents/", "kimi-agents/", "cursor-agents/",
     # manifests, plugin settings, and the templates copied into user projects.
     # Pi reads its skill list from the root package.json; the Devin manifest is
     # skills/.devin-plugin/ (covered by skills/), and a root .devin-plugin/
@@ -129,7 +130,7 @@ for item in raw.split(b'\0'):
 # ---------------------------------------------------------------------------
 #
 # The one definition of the downgrade ladder for narrow runtime tasks. The
-# instruction file (the root AGENTS.md), agents/team-lead.md and
+# instruction file (the root AGENTS.md), personas/team-lead.md and
 # skills/wave-orchestration/SKILL.md point here with a one-line summary
 # instead of restating the rungs; scripts/validate-versions.sh (check 2) fails
 # when any other shipped file carries the phrase, a colon, and the rung list

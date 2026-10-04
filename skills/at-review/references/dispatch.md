@@ -4,7 +4,7 @@ Read `ops/TASKS.md` to determine the review scope (tasks marked `[R]`). `$SKILL_
 
 ## Contents
 
-- The dispatch block (fresh-cycle guard, roster-driven dispatch, per-PID waits, promotion of captured output, the structured-verdict fold).
+- The dispatch block (fresh-cycle guard, roster-driven dispatch, the specialist personas, per-PID waits, promotion of captured output, the structured-verdict fold).
 - What rc 40 means.
 
 ## The dispatch block
@@ -47,6 +47,21 @@ dispatch_role reviewer "logic_reviewer" \
   "$CODEX_OUT" 600 &
 CODEX_PID=$!
 
+# Specialist personas, launched in the same round. Keep the lines the flags
+# select and delete the rest (--full keeps all five; high-ceremony forces
+# --full). Each persona's manifest entry sets its tools, model tier and turns;
+# security-sentinel is in the never-downgrade trio and runs as top-tier Claude
+# whichever CLI leads, or its call fails naming the fix. Outputs land outside
+# ops/ first and are promoted (scrubbed) once every persona has finished.
+SPEC_SCOPE="Review scope: tasks marked [R] in ops/TASKS.md: the collect-snapshot diff, the task rows, the ops/CONTRACTS.md slice and the acceptance criteria."
+SPEC_DIR="${TMPDIR:-/tmp}/review_personas_$$_$(date +%s)"; mkdir -p "$SPEC_DIR"
+SPEC_PIDS=""
+dispatch_persona security-sentinel "$SPEC_SCOPE" "$SPEC_DIR/SECURITY_SENTINEL.md" & SPEC_PIDS="$SPEC_PIDS $!"
+dispatch_persona performance-oracle "$SPEC_SCOPE" "$SPEC_DIR/PERFORMANCE_ORACLE.md" & SPEC_PIDS="$SPEC_PIDS $!"
+dispatch_persona code-simplicity-reviewer "$SPEC_SCOPE" "$SPEC_DIR/CODE_SIMPLICITY_REVIEWER.md" & SPEC_PIDS="$SPEC_PIDS $!"
+dispatch_persona convention-enforcer "$SPEC_SCOPE" "$SPEC_DIR/CONVENTION_ENFORCER.md" & SPEC_PIDS="$SPEC_PIDS $!"
+dispatch_persona architecture-strategist "$SPEC_SCOPE" "$SPEC_DIR/ARCHITECTURE_STRATEGIST.md" & SPEC_PIDS="$SPEC_PIDS $!"
+
 # Wait per-PID so a silent failure (which would leave REVIEW_*.md empty and look
 # like "no findings") fails fast. rc 40 = resolved to the claude lane, handled
 # by a sub-agent below — NOT a failure.
@@ -63,6 +78,17 @@ if [ "$CODEX_RC" -eq 40 ]; then
 elif [ "$CODEX_RC" -ne 0 ]; then
   echo "review: reviewer (logic) reviewer failed rc=$CODEX_RC — see $CODEX_OUT" >&2; exit 1
 fi
+# A specialist persona that fails or writes nothing fails the review; it never
+# reads as "no findings". Each output becomes its own ops/REVIEW_<PERSONA>.md lane.
+for PID in $SPEC_PIDS; do
+  SPEC_RC=0; wait "$PID" || SPEC_RC=$?
+  [ "$SPEC_RC" -eq 0 ] || { echo "review: a specialist persona failed rc=$SPEC_RC — see $SPEC_DIR" >&2; exit 1; }
+done
+for F in "$SPEC_DIR"/*.md; do
+  [ -e "$F" ] || continue
+  [ -s "$F" ] || { echo "review: specialist output $F is empty" >&2; exit 1; }
+  { echo "<!-- persona output via dispatch_persona -->"; _scrub < "$F"; } > "ops/REVIEW_$(basename "$F")"
+done
 
 # Headless resilience: agy (and any optional-CLI primary) auto-denies file
 # writes in -p mode, so a reviewer may return findings as stdout instead of
@@ -105,4 +131,4 @@ fi
 
 ## rc 40
 
-If `AGY_RC` or `CODEX_RC` was 40, that role resolved to the claude lane (its default CLI is absent, or the roster pins `cli = "claude"`) under a lead whose sub-agents enforce their tools; under any other lead `dispatch_role` runs `claude -p` itself and returns its exit code. Run that reviewer as a sub-agent against the `[R]` scope (`architecture-strategist` for the analyst lane; a logic + security review for the reviewer lane), writing findings to `ops/REVIEW_ANTIGRAVITY.md` or `ops/REVIEW_CODEX.md` respectively, so `findings-synthesizer` sees them alongside the other lanes. The harness notes carry how a sub-agent is spawned under each lead.
+If `AGY_RC` or `CODEX_RC` was 40, that role resolved to the claude lane (its default CLI is absent, or the roster pins `cli = "claude"`) under a lead whose sub-agents enforce their tools; under any other lead `dispatch_role` runs `claude -p` itself and returns its exit code. For the analyst lane run `dispatch_persona architecture-strategist` against the `[R]` scope and promote its output (scrubbed) into `ops/REVIEW_ANTIGRAVITY.md`; for the reviewer lane run a logic + security review as a sub-agent writing `ops/REVIEW_CODEX.md`, so `findings-synthesizer` sees both alongside the other lanes. The harness notes carry how that sub-agent is spawned.

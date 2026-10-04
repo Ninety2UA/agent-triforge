@@ -1399,7 +1399,7 @@ body::after {
       <li><a href="#builder-pool">Builder Pool</a></li>
       <li><a href="#roster">Roster</a></li>
       <li><a href="#pipeline">Pipeline</a></li>
-      <li><a href="#agents">Agents</a></li>
+      <li><a href="#personas">Personas</a></li>
       <li><a href="#skills">Skills</a></li>
       <li><a href="#review">Review</a></li>
       <li><a href="#install">Install</a></li>
@@ -1417,7 +1417,7 @@ body::after {
     <a href="#builder-pool">Builder Pool</a>
     <a href="#roster">Six-CLI Roster</a>
     <a href="#pipeline">Pipeline</a>
-    <a href="#agents">Agents</a>
+    <a href="#personas">Personas</a>
     <a href="#skills">Skills</a>
     <a href="#review">Review Swarm</a>
     <a href="#quality">Quality Gates</a>
@@ -1440,11 +1440,11 @@ body::after {
         <h1>
           <span class="gradient-text">Agent Triforge</span>
         </h1>
-        <p class="hero__tagline">A core trio of AI coding CLIs forging production-grade code together. Claude Code leads a six-CLI builder pool (Antigravity CLI, Codex CLI and an optional tier of OpenCode, Kimi and Cursor) plus 19 specialized subagents, coordinated through a roster, per-task leases, portable skills and parallel review swarms.</p>
+        <p class="hero__tagline">A core trio of AI coding CLIs forging production-grade code together. Claude Code leads a six-CLI builder pool (Antigravity CLI, Codex CLI and an optional tier of OpenCode, Kimi and Cursor) plus 19 specialist personas, coordinated through a roster, per-task leases, portable skills and parallel review swarms.</p>
         <div class="hero__stats">
           <div class="hero__stat">
             <span class="hero__stat-num" data-target="19">0</span>
-            <span class="hero__stat-label">Agents</span>
+            <span class="hero__stat-label">Personas</span>
           </div>
           <div class="hero__stat">
             <span class="hero__stat-num" data-target="27">0</span>
@@ -1734,7 +1734,7 @@ body::after {
       </div>
       <div class="stat-pill">
         <div class="stat-pill__num">19</div>
-        <div class="stat-pill__text"><h4>Agents</h4><p>Opus/Fable, max effort</p></div>
+        <div class="stat-pill__text"><h4>Personas</h4><p>Tools and tier from one manifest</p></div>
       </div>
       <div class="stat-pill">
         <div class="stat-pill__num">27</div>
@@ -1759,8 +1759,8 @@ body::after {
         <div class="feat-card__icon feat-card__icon--steel">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
         </div>
-        <h3>Specialized Agents</h3>
-        <p>Security sentinel, performance oracle, architecture strategist, test-gap analyzer, findings synthesizer and more, each with restricted tools and one area of expertise.</p>
+        <h3>Specialist Personas</h3>
+        <p>Security sentinel, performance oracle, architecture strategist, test-gap analyzer, findings synthesizer and more. Each covers one area, with only the tools its manifest entry allows.</p>
       </div>
       <div class="feat-card glow-card">
         <div class="feat-card__icon feat-card__icon--gold">
@@ -1997,19 +1997,19 @@ body::after {
         <div class="pipeline__phase">
           <div class="pipeline__cell pipeline__num">1.5</div>
           <div class="pipeline__cell pipeline__name">Plan Validation</div>
-          <div class="pipeline__cell">plan-checker agent</div>
+          <div class="pipeline__cell">plan-checker persona</div>
           <div class="pipeline__cell pipeline__cmd">at-plan</div>
         </div>
         <div class="pipeline__phase">
           <div class="pipeline__cell pipeline__num">2</div>
           <div class="pipeline__cell pipeline__name">Build (Wave Orchestration)</div>
-          <div class="pipeline__cell">Claude subagents / team-lead</div>
+          <div class="pipeline__cell">Leased builders / team-lead</div>
           <div class="pipeline__cell pipeline__cmd">at-build</div>
         </div>
         <div class="pipeline__phase">
           <div class="pipeline__cell pipeline__num">3-4</div>
           <div class="pipeline__cell pipeline__name">Parallel Review + Synthesis</div>
-          <div class="pipeline__cell">Antigravity + Codex + 5 agents</div>
+          <div class="pipeline__cell">Antigravity + Codex + 5 personas</div>
           <div class="pipeline__cell pipeline__cmd">at-review</div>
         </div>
         <div class="pipeline__phase">
@@ -2029,13 +2029,13 @@ body::after {
   </div>
 </section>
 
-<!-- ═══ Agents ═══ -->
-<section class="section" id="agents">
+<!-- ═══ Personas ═══ -->
+<section class="section" id="personas">
   <div class="container">
     <div class="section__header reveal">
-      <span class="section__label">Agents</span>
-      <h2 class="section__title">19 Specialized Agents</h2>
-      <p class="section__desc">Each runs in its own context window with restricted tools and focused expertise.</p>
+      <span class="section__label">Personas</span>
+      <h2 class="section__title">19 Specialist Personas</h2>
+      <p class="section__desc">Each is one prompt file that runs in its own context, with the tools, model tier and turn budget one manifest sets.</p>
     </div>
 
     <div class="agent-group__title reveal">Core Workflow</div>
@@ -2066,7 +2066,7 @@ body::after {
       <div class="agent-grid__card"><div class="agent-grid__dot agent-grid__dot--gold"></div><div><h4>git-history-analyzer</h4><p>Code evolution and architectural decisions via git</p></div></div>
       <div class="agent-grid__card"><div class="agent-grid__dot agent-grid__dot--gold"></div><div><h4>bug-reproduction-validator</h4><p>Validates bugs are reproducible before fixes begin</p></div></div>
       <div class="agent-grid__card"><div class="agent-grid__dot agent-grid__dot--gold"></div><div><h4>deployment-verifier</h4><p>Post-deployment health checks and smoke tests</p></div></div>
-      <div class="agent-grid__card"><div class="agent-grid__dot agent-grid__dot--gold"></div><div><h4>pr-comment-resolver</h4><p>Reads GitHub PR comments and implements changes</p></div></div>
+      <div class="agent-grid__card"><div class="agent-grid__dot agent-grid__dot--gold"></div><div><h4>pr-comment-resolver</h4><p>Reads GitHub PR comments and implements changes in a lease</p></div></div>
     </div>
   </div>
 </section>
@@ -2388,8 +2388,8 @@ body::after {
         <div class="faq__answer"><div class="faq__answer-inner">The <strong>core trio</strong> (Claude, Antigravity, Codex) is the supported baseline; run <code>at-setup</code> to get them live. The <strong>optional tier</strong> (OpenCode, Kimi, Cursor) is optional: enroll any subset through <code>at-setup</code>, and an absent one is skipped cleanly in every roster fallback chain. Claude alone can still run the pipeline in a degraded mode, without the multi-model review, test and analysis lanes.</div></div>
       </div>
       <div class="faq__item">
-        <button class="faq__question">How do agents differ from skills?<svg class="faq__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
-        <div class="faq__answer"><div class="faq__answer-inner"><strong>Skills</strong> are methodology documents that guide an agent's behavior. <strong>Agents</strong> are separate subprocesses dispatched via the Agent tool, each with their own context window. Skills can be injected into any agent (including external ones like Antigravity and Codex).</div></div>
+        <button class="faq__question">How do personas differ from skills?<svg class="faq__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
+        <div class="faq__answer"><div class="faq__answer-inner"><strong>Skills</strong> are methodology documents that guide an agent's behavior. <strong>Personas</strong> are separate processes that <code>dispatch_persona</code> starts, each with its own context and only the tools its manifest entry allows. Skills can be injected into any agent (including external ones like Antigravity and Codex).</div></div>
       </div>
       <div class="faq__item">
         <button class="faq__question">What are Agent Teams?<svg class="faq__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>

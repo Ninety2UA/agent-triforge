@@ -1,7 +1,7 @@
 # validate-skills fixtures
 
 One scratch repo per rule for `bash scripts/validate-skills.sh --self-test` (C25). Each
-directory mirrors a repo root (`skills/`, `scripts/`, `agents/`) and carries an `EXPECT` file:
+directory mirrors a repo root (`skills/`, `scripts/`, `personas/`) and carries an `EXPECT` file:
 
 ```
 check: C04            # the one rule the fixture violates, or `none` for a conforming fixture

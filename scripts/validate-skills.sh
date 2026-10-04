@@ -13,14 +13,14 @@
 #                skills only (the per-at-skill locator check needs the shipped
 #                tree and prints a skip: line).
 #   --warn       The relaxed run: the newer rules (C1, C3, C8–C18, C20–C24,
-#                C26, KTD1, KTD6 and the newer parts of C4, C9, C14, C21) print
+#                C26, KTD1, KTD6, KTD21 and the newer parts of C4, C9, C14, C21) print
 #                as warnings and do not fail the run. Without it every finding
 #                is an error — the default since U23. --strict is accepted and
 #                changes nothing.
 #   --fixture    Treat <dir> as a scratch repo root: skills at <dir>/skills,
-#                shell files at <dir>/scripts and <dir>/hooks, agent files at
-#                <dir>/agents. Zero skills is allowed there (a fixture may hold
-#                only shell files).
+#                shell files at <dir>/scripts and <dir>/hooks, the persona home
+#                at <dir>/personas. Zero skills is allowed there (a fixture may
+#                hold only shell files).
 #   --self-test  Run every fixture under scripts/fixtures/validate-skills/
 #                (each holds an EXPECT file: check, the rule's severity under
 #                --warn, message substring) in both modes — default and --warn —
@@ -106,8 +106,9 @@
 #        mcp, cli; icon paths exist; policy.allow_implicit_invocation: false
 #        ⇔ SKILL.md disable-model-invocation: true                     (new)
 #   C25  --self-test: one fixture per rule under scripts/fixtures/validate-skills/
-#   C26  C3 and C17 over agents/*.md ($ARGUMENTS and $N: an agent takes no
-#        interpolation)                                                 (new)
+#   C26  personas/*.md: no frontmatter (a persona is a prompt body; its class,
+#        tier and turns live in personas/manifest.toml) and no $ARGUMENTS or
+#        $N (a persona takes no interpolation)                          (new)
 #   KTD1 lead-name-branch gate over scripts/**/*.sh, scripts/lease-git-hooks/*,
 #        hooks/**/*.sh and skills/*/scripts/* — except scripts/lib/registry.sh,
 #        scripts/lib/roster.sh, this file and scripts/fixtures/. A lead token
@@ -124,6 +125,18 @@
 #        (bash/sh/source/exec/env + path, $(path), . path) carries the
 #        skill-directory anchor $SKILL_DIR/ or ${SKILL_DIR}/: a cwd-relative
 #        call runs a project's own scripts/locate-triforge.sh (CWE-427)   (new)
+#   KTD21 the persona home (R14): every personas/*.md has a [personas.<name>]
+#        entry in personas/manifest.toml and every entry a file; each entry
+#        carries exactly class (read, read-web, exec, lease, agent-team), tier
+#        (top, opus-xhigh, opus-high, sonnet-high), never_downgrade (boolean;
+#        true needs tier top) and max_turns (positive integer); the
+#        never_downgrade set equals the personas TRIFORGE_MODEL_LADDER in
+#        scripts/lib/registry.sh names after "Never downgrade" (a skip: line
+#        when the literal has no such list). Every persona a skill names in
+#        SKILL.md, references/ or scripts/ — `dispatch_persona <name>`,
+#        `persona_prompt <name>` or "the `<name>` persona" — exists, and no
+#        skill spells out a personas/ path. Outside fixture mode a missing
+#        persona home fails                                             (new)
 #   SREF `skills-ref validate <skill>` runs when the binary is on PATH (its
 #        verdict on disable-model-invocation / argument-hint is pending until
 #        then); otherwise a skip: line
@@ -253,6 +266,13 @@ CASE_LINE = re.compile(r"^\s*case\s+(.+?)\s+in\b")
 COMPARISON = re.compile(r"(?:\[\[?|\btest\b)\s+(?P<left>.+?)\s+(?P<op>==?|!=|=~)\s+(?P<right>.+?)(?:\s+\]\]?|\s*(?:;|&&|\|\||$))")
 LEAD_LITERAL = re.compile(r"""^["']?(?:codex|claude)\*?["']?$""")
 FENCE_OPEN = re.compile(r"^( {0,3})(`{3,}|~{3,})(.*)$")
+PERSONA_CLASSES = ("read", "read-web", "exec", "lease", "agent-team")
+PERSONA_TIERS = ("top", "opus-xhigh", "opus-high", "sonnet-high")  # the ladder's rungs, top first (KTD22)
+PERSONA_FIELDS = ("class", "tier", "never_downgrade", "max_turns")
+PERSONA_CALL = re.compile(r"(?<![\w-])(?:dispatch_persona|persona_prompt)\s+[\"']?([A-Za-z0-9][A-Za-z0-9_.-]*)")
+PERSONA_PROSE = re.compile(r"`([a-z0-9]+(?:-[a-z0-9]+)*)` personas?\b")
+PERSONA_PATH = re.compile(r"(?<![\w.-])personas/[A-Za-z0-9_.-]+\.(?:md|toml)\b")
+LADDER_TRIO = re.compile(r"^TRIFORGE_MODEL_LADDER='[^']*?Never downgrade ([^.']+)\.", re.M)
 
 # --- findings ------------------------------------------------------------------
 F = []      # (severity, path, id, message)
@@ -932,19 +952,133 @@ def skill_dirs(skills_dir):
 
 
 # --- cross-file checks ---------------------------------------------------------
-def check_agents(root):
-    """C26: C3 and C17 over agents/*.md."""
-    for path in sorted(glob.glob(os.path.join(root, "agents", "*.md"))):
-        text = read_text(path)
-        # Only the raw frontmatter lines are wanted here; the C2 structure
-        # messages are a skill rule and are dropped.
-        info = {}
-        parse_frontmatter(text.split("\n"), [], info)
-        for e in strict_yaml_issues(info.get("fm", [])):
-            new(path, "C26", "frontmatter: " + e)
-        for i, line in enumerate(text.split("\n")):
+def persona_refs(dirs):
+    """KTD21: every persona a validated skill names — `dispatch_persona <name>`,
+    `persona_prompt <name>` or "the `<name>` persona" — and every persona path it spells out, from
+    SKILL.md, references/*.md and scripts/*: ([(path, line, name)], [(path, line, persona path)])."""
+    names, paths = [], []
+    for d in dirs:
+        files = [os.path.join(d, "SKILL.md")]
+        for sub in ("references", "scripts"):
+            top = os.path.join(d, sub)
+            if os.path.isdir(top):
+                for base, _, entries in os.walk(top):
+                    files.extend(os.path.join(base, f) for f in sorted(entries) if not f.startswith("."))
+        for path in files:
+            if not os.path.isfile(path):
+                continue
+            for i, line in enumerate(read_text(path).split("\n")):
+                for rx in (PERSONA_CALL, PERSONA_PROSE):
+                    for m in rx.finditer(line):
+                        names.append((path, i + 1, m.group(1)))
+                for m in PERSONA_PATH.finditer(line):
+                    paths.append((path, i + 1, m.group(0)))
+    return names, paths
+
+
+def load_manifest(path):
+    """personas/manifest.toml as {name: entry}; findings for an unreadable file."""
+    try:
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib
+        except ImportError:
+            new(path, "KTD21", "no TOML parser to read the manifest (Python 3.11+ tomllib or pip install tomli)")
+            return {}
+    try:
+        data = tomllib.loads(read_text(path))
+    except Exception as exc:  # tomllib.TOMLDecodeError, or a decode error from tomli
+        new(path, "KTD21", "unparseable manifest: " + str(exc))
+        return {}
+    for key in sorted(k for k in data if k != "personas"):
+        new(path, "KTD21", "unexpected top-level key '" + key + "' (the manifest holds only [personas.<name>] tables)")
+    personas = data.get("personas", {})
+    if not isinstance(personas, dict):
+        new(path, "KTD21", "personas must be a table of [personas.<name>] entries")
+        return {}
+    return personas
+
+
+def check_personas(root, dirs):
+    """C26 and KTD21 over the persona home: personas/*.md and personas/manifest.toml."""
+    home = os.path.join(root, "personas")
+    manifest = os.path.join(home, "manifest.toml")
+    files = sorted(glob.glob(os.path.join(home, "*.md")))
+    names = set(os.path.basename(p)[:-3] for p in files)
+    refs, ref_paths = persona_refs(dirs)
+    if not files and not os.path.exists(manifest) and not refs and not ref_paths:
+        if not FIXTURE:
+            new(home, "KTD21", "the persona home is missing (personas/<name>.md plus personas/manifest.toml)")
+        return
+
+    # C26 — a persona file is a prompt body: no frontmatter, no interpolation.
+    for path in files:
+        lines = read_text(path).lstrip("\ufeff").split("\n")
+        if lines[0].rstrip() == "---":
+            new(path, "C26", "frontmatter in a persona file (class, tier and turns live in personas/manifest.toml)")
+        for i, line in enumerate(lines):
             for hit in interpolation_hits(line, ("arguments", "positional")):
-                new(path, "C26", "line " + str(i + 1) + ": " + hit + " (agents take no interpolation)")
+                new(path, "C26", "line " + str(i + 1) + ": " + hit + " (personas take no interpolation)")
+        if not KEBAB_STRICT.match(os.path.basename(path)[:-3]):
+            new(path, "KTD21", "persona file name is not kebab-case")
+
+    # KTD21 — one manifest entry per persona file, every field valid.
+    entries = {}
+    if os.path.exists(manifest):
+        entries = load_manifest(manifest)
+    else:
+        new(manifest, "KTD21", "personas/manifest.toml missing (one [personas.<name>] entry per persona file)")
+    for name in sorted(names - set(entries)):
+        new(os.path.join(home, name + ".md"), "KTD21", "no [personas." + name + "] entry in personas/manifest.toml")
+    for name in sorted(set(entries) - names):
+        new(manifest, "KTD21", "[personas." + name + "] has no personas/" + name + ".md")
+    for name in sorted(entries):
+        entry = entries[name]
+        where = "[personas." + name + "] "
+        if not isinstance(entry, dict):
+            new(manifest, "KTD21", where + "is not a table")
+            continue
+        for key in sorted(set(PERSONA_FIELDS) - set(entry)):
+            new(manifest, "KTD21", where + "missing " + key)
+        for key in sorted(set(entry) - set(PERSONA_FIELDS)):
+            new(manifest, "KTD21", where + "unexpected key '" + key + "' (allowed: " + ", ".join(PERSONA_FIELDS) + ")")
+        if "class" in entry and entry["class"] not in PERSONA_CLASSES:
+            new(manifest, "KTD21", where + "class '" + str(entry["class"]) + "' (allowed: " + ", ".join(PERSONA_CLASSES) + ")")
+        if "tier" in entry and entry["tier"] not in PERSONA_TIERS:
+            new(manifest, "KTD21", where + "tier '" + str(entry["tier"]) + "' (allowed, top first: " + ", ".join(PERSONA_TIERS) + ")")
+        if "never_downgrade" in entry and not isinstance(entry["never_downgrade"], bool):
+            new(manifest, "KTD21", where + "never_downgrade must be true or false")
+        turns = entry.get("max_turns")
+        if "max_turns" in entry and (isinstance(turns, bool) or not isinstance(turns, int) or turns < 1):
+            new(manifest, "KTD21", where + "max_turns must be a positive integer")
+        if entry.get("never_downgrade") is True and entry.get("tier") != "top":
+            new(manifest, "KTD21", where + 'never_downgrade = true needs tier = "top"')
+
+    # KTD21 — the never-downgrade set is the one the ladder names (KTD22).
+    registry = os.path.join(root, "scripts", "lib", "registry.sh")
+    trio = None
+    if os.path.isfile(registry):
+        m = LADDER_TRIO.search(read_text(registry))
+        if m:
+            trio = set(n for n in re.split(r",\s*(?:or\s+)?|\s+or\s+", m.group(1).strip()) if n)
+    if trio is None:
+        if not FIXTURE:
+            SKIPS.append("[KTD21] no 'Never downgrade …' list in TRIFORGE_MODEL_LADDER — the never_downgrade set is not cross-checked")
+    elif entries:
+        pinned = set(n for n, e in entries.items() if isinstance(e, dict) and e.get("never_downgrade") is True)
+        for name in sorted(trio - pinned):
+            new(manifest, "KTD21", "TRIFORGE_MODEL_LADDER never downgrades " + name + " but [personas." + name
+                + "] does not set never_downgrade = true")
+        for name in sorted(pinned - trio):
+            new(manifest, "KTD21", "[personas." + name + "] sets never_downgrade = true but TRIFORGE_MODEL_LADDER does not name it")
+
+    # KTD21 — skills name personas that exist, and never their paths.
+    for path, lineno, name in refs:
+        if name not in names:
+            new(path, "KTD21", "line " + str(lineno) + ": names persona '" + name + "' but there is no personas/" + name + ".md")
+    for path, lineno, ppath in ref_paths:
+        new(path, "KTD21", "line " + str(lineno) + ": spells out " + ppath + " — a skill names the persona, never its path")
 
 
 def check_lead_branches(root):
@@ -1103,7 +1237,7 @@ def main():
         check_locators(ROOT, skills_dir, dirs)
     else:
         SKIPS.append("[KTD6] locator parity applies to the shipped skills/ tree; skipped for " + rel(skills_dir))
-    check_agents(ROOT)
+    check_personas(ROOT, dirs)
     check_lead_branches(ROOT)
     if not FIXTURE:
         run_skills_ref(dirs)

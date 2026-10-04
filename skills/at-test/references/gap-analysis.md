@@ -1,6 +1,6 @@
 # Step 1: identify test gaps
 
-Spawn a sub-agent with the `test-gap-analyzer` persona on the scope. It identifies:
+Run `dispatch_persona test-gap-analyzer` with the scope and an output file, after sourcing the helper. A persona that fails or writes nothing is a failed step, never "no gaps". Its report identifies:
 
 - Files with no tests
 - Functions without test coverage

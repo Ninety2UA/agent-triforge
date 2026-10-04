@@ -14,7 +14,7 @@ Skip this phase only when the goal is unambiguous (a single-file fix, explicit u
 
 ## Phase 1.5: plan validation
 
-Spawn a sub-agent with the `plan-checker` persona. It validates:
+Run `dispatch_persona plan-checker` with the plan as its scope and an output file, then read the verdict from that file. It validates:
 
 - Task completeness (agent, files, acceptance criteria)
 - Assignment correctness (the heuristic matrix)
@@ -24,6 +24,6 @@ Spawn a sub-agent with the `plan-checker` persona. It validates:
 - Architecture alignment
 - Task field integrity (G6/G11): every command-shaped `Accept:` carries a concrete `Fails when:` (placeholders such as TBD or N/A are rejected), and every `Reversibility: one-way` task names a checkpoint in `Precondition:`
 
-Trivial goals skip this phase (the `Ceremony:` line at the top of `ops/TASKS.md` says so); high-ceremony goals never skip it. The plan-checker is one of the never-downgrade trio: it runs on the top model tier whichever CLI leads.
+Trivial goals skip this phase (the `Ceremony:` line at the top of `ops/TASKS.md` says so); high-ceremony goals never skip it. The plan-checker is one of the never-downgrade trio: its manifest entry pins it to top-tier Claude whichever CLI leads, and no skill or lead overrides that.
 
 A NEEDS_REVISION verdict is fixed and resubmitted, at most 3 iterations. Only an APPROVED result is reported to the user.

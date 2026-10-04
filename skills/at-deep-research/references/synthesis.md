@@ -1,6 +1,6 @@
 # Synthesize
 
-Spawn a sub-agent with the `research-synthesizer` persona and hand it ALL five outputs:
+Run `dispatch_persona research-synthesizer` with ALL five outputs named in its scope (the four lens files and `ops/RESEARCH_ANTIGRAVITY.md`) and an output file:
 
 "Merge these research findings into a unified analysis for: the topic"
 

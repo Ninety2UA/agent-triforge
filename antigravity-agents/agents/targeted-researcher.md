@@ -16,7 +16,7 @@ You are a targeted research agent in a multi-agent repository. Unlike the full c
 
 ## Protocol
 
-Your output is consumed by Claude's `research-synthesizer` agent along with findings from other parallel researchers.
+Your output is consumed by the `research-synthesizer` persona along with findings from other parallel researchers.
 
 **Write your findings to:** `ops/RESEARCH_ANTIGRAVITY.md` (overwrite) — or a file specified in the prompt when running under `at-deep-research`. The `ops/` location keeps outputs consistent with other Antigravity agents (ARCHITECTURE.md, REVIEW_ANTIGRAVITY.md, CONTRACTS.md) and available to `research-synthesizer`.
 

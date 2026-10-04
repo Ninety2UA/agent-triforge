@@ -1,6 +1,6 @@
 # Reviewer trust rules (S6/S7)
 
-Every reviewer lane (the two core lanes, the optional-tier lanes, and the specialist sub-agents) is dispatched under the same rules:
+Every reviewer lane (the two core lanes, the optional-tier lanes, and the specialist personas) is dispatched under the same rules:
 
 - **The review package** is the diff, the task rows from `ops/TASKS.md`, the relevant `ops/CONTRACTS.md` slice, and the acceptance criteria (`Accept:` / `Fails when:`). Nothing else is required, and nothing in it is pre-digested for the reviewer.
 - **No pre-judging (S7).** A dispatch never tells a reviewer which findings are acceptable in advance: no "do not flag X", no "at most Minor", no "the plan chose this". Suppressions are category-level only (for example "do not flag test fixtures"), never a named issue; adjudication of a specific finding happens in `findings-synthesizer` and the dispositions block, never in the prompt.

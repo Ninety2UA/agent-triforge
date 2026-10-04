@@ -1,12 +1,12 @@
 # Gated learnings-researcher (C4)
 
-Pay for the `learnings-researcher` sub-agent only when `ops/solutions/` plausibly knows the changed modules. Pre-search by name and path, derived from the diff, with no model call:
+Pay for the `learnings-researcher` persona only when `ops/solutions/` plausibly knows the changed modules. Pre-search by name and path, derived from the diff, with no model call:
 
 ```bash
 set -euo pipefail
 # Gated learnings-researcher (C4): derive module names from the changed paths
 # (full path, basename, stem, parent directory) and grep ops/solutions/ for
-# them. Spawn the sub-agent only on at least one match — an empty corpus, or
+# them. Dispatch the persona only on at least one match — an empty corpus, or
 # one that never mentions these modules, costs nothing.
 CHANGED=$( { git diff --name-only HEAD 2>/dev/null || true; git diff --name-only HEAD~1 HEAD 2>/dev/null || true; } | sort -u )
 MATCH_LIST="${TMPDIR:-/tmp}/learnings_gate_$$_$(date +%s).txt"
@@ -24,11 +24,11 @@ if [ -d ops/solutions ] && [ -n "$CHANGED" ]; then
   sort -u -o "$MATCH_LIST" "$MATCH_LIST"
 fi
 if [ -s "$MATCH_LIST" ]; then
-  echo "learnings-researcher: spawn — ops/solutions/ entries mentioning the changed modules:"
+  echo "learnings-researcher: dispatch — ops/solutions/ entries mentioning the changed modules:"
   cat "$MATCH_LIST"
 else
   echo "learnings-researcher skipped: no ops/solutions/ entry mentions the changed modules"
 fi
 ```
 
-**Spawn `learnings-researcher` only when the list is non-empty**, with the matched entries and the changed paths in its prompt ("Known-issue check for the review of <changed paths>: read these ops/solutions/ entries — <list> — and report which past fixes or gotchas the diff must not undo"). Its output goes to `findings-synthesizer` as **known-issue context** alongside the `ops/REVIEW_*.md` lanes. When the gate prints "skipped", do not spawn it.
+**Run `dispatch_persona learnings-researcher` only when the list is non-empty**, with the matched entries and the changed paths as its scope ("Known-issue check for the review of <changed paths>: read these ops/solutions/ entries — <list> — and report which past fixes or gotchas the diff must not undo") and an output file outside `ops/REVIEW_*` (it is context, not a review lane). That file goes to `findings-synthesizer` as **known-issue context** alongside the `ops/REVIEW_*.md` lanes. When the gate prints "skipped", do not dispatch it.
