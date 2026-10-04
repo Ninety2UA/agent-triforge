@@ -223,7 +223,7 @@ def sync(plugin_root, project, prefix):
             shutil.rmtree(os.path.join(dest, leftover), ignore_errors=True)
     for name in sorted(os.listdir(src_root)):
         src = os.path.join(src_root, name)
-        if not os.path.isdir(src) or os.path.islink(src) or lead_workflow(name):
+        if lead_workflow(name) or not os.path.isdir(src) or os.path.islink(src):
             continue    # a lead workflow (at-*) stays in the plugin install
         if not NAME_RE.match(name):
             skipped.append(name + "(invalid-name)")

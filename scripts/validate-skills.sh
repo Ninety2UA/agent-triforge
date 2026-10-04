@@ -403,7 +403,7 @@ def parse_frontmatter(lines, errs, info):
 
 
 def strict_yaml_issues(fm):
-    """C3 over raw frontmatter lines (skills, commands and agents alike)."""
+    """C3 over raw frontmatter lines (skills and agents alike)."""
     issues = []
     i = 0
     while i < len(fm):

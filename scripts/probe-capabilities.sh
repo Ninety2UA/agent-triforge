@@ -136,10 +136,14 @@ RUN_DATE=$(date -u '+%Y-%m-%d')
 # a worktree (KTD12). The discovery rows (AGY-14, SELF-06) and the provisioning
 # rows (SELF-08b, SELF-11) require exactly these names.
 SHIPPED_SKILLS=""
+SHIPPED_LEAD_WORKFLOWS=""
 for d in "$REPO_ROOT"/skills/*/; do
   [ -f "${d}SKILL.md" ] || continue
-  case "$(basename "$d")" in at-*) continue ;; esac
-  SHIPPED_SKILLS="$SHIPPED_SKILLS $(basename "$d")"
+  name=$(basename "$d")
+  case "$name" in
+    at-*) SHIPPED_LEAD_WORKFLOWS="$SHIPPED_LEAD_WORKFLOWS $name" ;;   # lead workflows: never delivered (KTD12)
+    *)    SHIPPED_SKILLS="$SHIPPED_SKILLS $name" ;;
+  esac
 done
 SHIPPED_SKILLS=${SHIPPED_SKILLS# }
 _count_words() { printf '%s\n' "$#"; }

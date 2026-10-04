@@ -666,17 +666,11 @@ _S8B="${WORK}/self08b"
 _S8B_SYNC="${REPO_ROOT}/scripts/lib/skills-sync.py"
 _S8B_TABLE="${REPO_ROOT}/scripts/lib/skill-digests.txt"
 _S8B_FAIL=""
-# SHIPPED_SKILLS is the portable set (the harness drops at-* at discovery); the
-# at-* lead workflows are listed from the tree here so this row can assert that
-# the refresh never copies them (KTD12). Every count in this row is against the
-# portable set.
-_S8B_PORTABLE=$SHIPPED_SKILLS; _S8B_AT=""
-for _d in "$REPO_ROOT"/skills/at-*/; do
-  if [ -f "${_d}SKILL.md" ]; then _S8B_AT="$_S8B_AT $(basename "$_d")"; fi
-done
-_S8B_AT=${_S8B_AT# }
-# shellcheck disable=SC2086
-_S8B_PORTABLE_COUNT=$(_count_words $_S8B_PORTABLE)
+# SHIPPED_SKILLS is the portable set and SHIPPED_LEAD_WORKFLOWS the at-* lead
+# workflows (one discovery walk in the harness); this row asserts that the
+# refresh never copies the latter (KTD12). Every count in this row is against
+# the portable set (SHIPPED_COUNT).
+_S8B_PORTABLE=$SHIPPED_SKILLS; _S8B_AT=${SHIPPED_LEAD_WORKFLOWS# }
 set -- $_S8B_PORTABLE
 _S8B_USER=$1; _S8B_EDIT=$2
 # A pristine released copy that differs from the shipped one, rebuilt from its
@@ -742,7 +736,7 @@ grep -q 'at-foo' "$O/.triforge-plugin-version" && _S8B_FAIL="$_S8B_FAIL owned-st
 F="$_S8B/first/.agents/skills"; mkdir -p "$F/$_S8B_USER"; echo "marker" > "$F/$_S8B_USER/USER-MARKER.txt"
 _O=$(_s8b_start "$_S8B/first")
 [ -f "$F/$_S8B_USER/USER-MARKER.txt" ] && [ ! -f "$F/$_S8B_USER/SKILL.md" ] || _S8B_FAIL="$_S8B_FAIL first-install-wrote-into-user-slot"
-[ "$(_s8b_count "$F")" -eq "$_S8B_PORTABLE_COUNT" ] || _S8B_FAIL="$_S8B_FAIL first-install-count($(_s8b_count "$F"))"
+[ "$(_s8b_count "$F")" -eq "$SHIPPED_COUNT" ] || _S8B_FAIL="$_S8B_FAIL first-install-count($(_s8b_count "$F"))"
 printf '%s\n' "$_O" | grep 'user-owned' | grep -q "$_S8B_USER" || _S8B_FAIL="$_S8B_FAIL first-no-notice"
 # link: .agents -> outside the project
 mkdir -p "$_S8B/link/target/skills/$_S8B_USER" "$_S8B/link/proj"; echo "marker" > "$_S8B/link/target/skills/$_S8B_USER/USER-MARKER.txt"
@@ -756,18 +750,18 @@ echo "marker" > "$_S8B/wt1/.agents/skills/$_S8B_USER/USER-MARKER.txt"; echo "mar
 ln -s "$_S8B/outside" "$_S8B/wt2/.agents/skills"
 ( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null; _lease_provision_skills "$_S8B/wt1"; _lease_provision_skills "$_S8B/wt2" ) > "$_S8B/prov.out" 2>&1 || true
 [ -f "$_S8B/wt1/.agents/skills/$_S8B_USER/USER-MARKER.txt" ] && [ ! -f "$_S8B/wt1/.agents/skills/$_S8B_USER/SKILL.md" ] || _S8B_FAIL="$_S8B_FAIL provisioning-wrote-into-user-slot"
-[ "$(_s8b_count "$_S8B/wt1/.agents/skills")" -eq "$_S8B_PORTABLE_COUNT" ] || _S8B_FAIL="$_S8B_FAIL provisioning-count($(_s8b_count "$_S8B/wt1/.agents/skills"))"
+[ "$(_s8b_count "$_S8B/wt1/.agents/skills")" -eq "$SHIPPED_COUNT" ] || _S8B_FAIL="$_S8B_FAIL provisioning-count($(_s8b_count "$_S8B/wt1/.agents/skills"))"
 for _n in $_S8B_AT; do [ ! -e "$_S8B/wt1/.agents/skills/$_n" ] || _S8B_FAIL="$_S8B_FAIL provisioning-copied-$_n"; done
 [ "$(ls -A "$_S8B/outside" | tr '\n' ' ')" = "USER-MARKER.txt " ] || _S8B_FAIL="$_S8B_FAIL provisioning-wrote-through-symlink"
 # audit (clean): exactly the portable set, the stamp names exactly those, and the copy is strict-valid
 C="$_S8B/clean/.agents/skills"; mkdir -p "$_S8B/clean"; ( cd "$_S8B/clean" && git init -q ) >/dev/null 2>&1
 _O=$(_s8b_start "$_S8B/clean")
-[ "$(_s8b_count "$C")" -eq "$_S8B_PORTABLE_COUNT" ] || _S8B_FAIL="$_S8B_FAIL audit-count($(_s8b_count "$C"))"
+[ "$(_s8b_count "$C")" -eq "$SHIPPED_COUNT" ] || _S8B_FAIL="$_S8B_FAIL audit-count($(_s8b_count "$C"))"
 for _n in $_S8B_PORTABLE; do [ -f "$C/$_n/SKILL.md" ] || _S8B_FAIL="$_S8B_FAIL audit-missing-$_n"; done
 for _n in $_S8B_AT; do [ ! -e "$C/$_n" ] || _S8B_FAIL="$_S8B_FAIL audit-copied-$_n"; done
 _S8B_STAMPED=$(grep '^skills=' "$C/.triforge-plugin-version" 2>/dev/null | cut -d= -f2 | tr ',' ' ')
 # shellcheck disable=SC2086
-[ "$(_count_words $_S8B_STAMPED)" -eq "$_S8B_PORTABLE_COUNT" ] || _S8B_FAIL="$_S8B_FAIL audit-stamp-count($(_count_words $_S8B_STAMPED))"
+[ "$(_count_words $_S8B_STAMPED)" -eq "$SHIPPED_COUNT" ] || _S8B_FAIL="$_S8B_FAIL audit-stamp-count($(_count_words $_S8B_STAMPED))"
 for _n in $_S8B_STAMPED; do
   case " $_S8B_PORTABLE " in
     *" $_n "*) grep -q "^digest $_n " "$C/.triforge-plugin-version" || _S8B_FAIL="$_S8B_FAIL audit-stamp-no-digest-$_n" ;;
@@ -777,18 +771,18 @@ done
 grep -q '^digest at-' "$C/.triforge-plugin-version" && _S8B_FAIL="$_S8B_FAIL audit-stamp-digests-an-at-skill"
 # The default run is the strict one (U23): every finding is an error.
 _S8B_VAL=$(bash "$REPO_ROOT/scripts/validate-skills.sh" "$C" 2>&1) || _S8B_FAIL="$_S8B_FAIL audit-copy-fails-strict($(printf '%s\n' "$_S8B_VAL" | grep -v '^skip:' | head -1 | _scrub | cut -c1-120))"
-printf '%s\n' "$_S8B_VAL" | grep -q "^validate-skills: ${_S8B_PORTABLE_COUNT} skills OK\$" || _S8B_FAIL="$_S8B_FAIL audit-copy-summary($(printf '%s\n' "$_S8B_VAL" | tail -1 | _scrub | cut -c1-80))"
+printf '%s\n' "$_S8B_VAL" | grep -q "^validate-skills: ${SHIPPED_COUNT} skills OK\$" || _S8B_FAIL="$_S8B_FAIL audit-copy-summary($(printf '%s\n' "$_S8B_VAL" | tail -1 | _scrub | cut -c1-80))"
 # audit (users): a non-shipped user directory and a user at-foo directory beside the copy, both untouched and unclaimed
 U="$_S8B/users/.agents/skills"; mkdir -p "$U/my-notes" "$U/at-foo"
 echo "marker" > "$U/my-notes/USER-MARKER.txt"; echo "marker" > "$U/at-foo/USER-MARKER.txt"
 ( cd "$_S8B/users" && git init -q ) >/dev/null 2>&1
 _O=$(_s8b_start "$_S8B/users")
-[ "$(_s8b_count "$U")" -eq $((_S8B_PORTABLE_COUNT + 2)) ] || _S8B_FAIL="$_S8B_FAIL users-count($(_s8b_count "$U"))"
+[ "$(_s8b_count "$U")" -eq $((SHIPPED_COUNT + 2)) ] || _S8B_FAIL="$_S8B_FAIL users-count($(_s8b_count "$U"))"
 [ "$(ls -A "$U/my-notes" | tr '\n' ' ')" = "USER-MARKER.txt " ] || _S8B_FAIL="$_S8B_FAIL users-dir-touched"
 [ "$(ls -A "$U/at-foo" | tr '\n' ' ')" = "USER-MARKER.txt " ] || _S8B_FAIL="$_S8B_FAIL users-at-foo-touched"
 grep -q 'my-notes\|at-foo' "$U/.triforge-plugin-version" && _S8B_FAIL="$_S8B_FAIL users-stamp-claims-user-dir"
 if [ -z "$_S8B_FAIL" ]; then
-  row "SELF-08b" "claude" "skills refresh by content digest: user dirs survive refresh, forged stamps and lease provisioning; legacy stamp migrates; unchanged retired copy removed; symlinks untouched; delivered copy is exactly the portable set, no at-* lead workflow, strict-valid (KTD12, R16, R31, CWE-59)" "PASS" "legacy stamp: pristine ${_S8B_PRISTINE} (${_S8B_PATH}) refreshed, edited ${_S8B_EDIT} kept + notice, stamp -> format 2 with digests; digest stamp: old-fake-skill retired, forged entry left ${_S8B_USER} intact, stamp-listed at-foo not retired; no stamp: empty slots only; symlinked .agents / .agents/skills targets untouched (session start + _lease_provision_skills); delivered copy: ${_S8B_PORTABLE_COUNT} portable skills, none of ${_S8B_AT:-no at-* shipped} copied, stamp names exactly those, validate-skills OK on the copy (strict default); my-notes + at-foo user dirs untouched and unclaimed" "static"
+  row "SELF-08b" "claude" "skills refresh by content digest: user dirs survive refresh, forged stamps and lease provisioning; legacy stamp migrates; unchanged retired copy removed; symlinks untouched; delivered copy is exactly the portable set, no at-* lead workflow, strict-valid (KTD12, R16, R31, CWE-59)" "PASS" "legacy stamp: pristine ${_S8B_PRISTINE} (${_S8B_PATH}) refreshed, edited ${_S8B_EDIT} kept + notice, stamp -> format 2 with digests; digest stamp: old-fake-skill retired, forged entry left ${_S8B_USER} intact, stamp-listed at-foo not retired; no stamp: empty slots only; symlinked .agents / .agents/skills targets untouched (session start + _lease_provision_skills); delivered copy: ${SHIPPED_COUNT} portable skills, none of ${_S8B_AT:-no at-* shipped} copied, stamp names exactly those, validate-skills OK on the copy (strict default); my-notes + at-foo user dirs untouched and unclaimed" "static"
 else
   row "SELF-08b" "claude" "skills refresh by content digest: user dirs survive refresh, forged stamps and lease provisioning; legacy stamp migrates; unchanged retired copy removed; symlinks untouched; delivered copy is exactly the portable set, no at-* lead workflow, strict-valid (KTD12, R16, R31, CWE-59)" "FAIL" "mismatch:${_S8B_FAIL}" "static"
 fi
