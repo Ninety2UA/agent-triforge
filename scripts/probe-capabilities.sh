@@ -299,6 +299,11 @@ _probe_run() { # _probe_run <seconds> <cmd...>
   "$TIMEOUT_BIN" "${SECS}s" env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null "$@"
 }
 
+# The NAME=value pairs _lane_run sets beyond the base keys: the git isolation,
+# NO_COLOR, and the worker marker as _adapter_env sets it for a lease build
+# (KTD9). U29_BOUNDARY takes its names from the same list.
+LANE_FIXED=(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null NO_COLOR=1 TRIFORGE_LEASE_WORKER=builder)
+
 # The lease lane's env -i boundary — the _adapter_env base allowlist in
 # scripts/lib/lease.sh, read from the same registry list (REG_ENV_BASE =
 # TRIFORGE_ENV_BASE: HOME PATH TMPDIR TERM LANG COLORTERM USER, + NO_COLOR=1)
@@ -306,7 +311,7 @@ _probe_run() { # _probe_run <seconds> <cmd...>
 # CC-08. The two read one list, so a probe can never run under a wider or
 # narrower env than the real lease (USER is what lets `claude -p` find its
 # keychain account); as before, HOME / PATH / TMPDIR are always passed (with
-# their fallbacks) and the other keys only when set.
+# their fallbacks) and the other keys only when set, then LANE_FIXED.
 _lane_run() { # _lane_run <seconds> <cmd...>
   local SECS=$1; shift
   local -a E=()
@@ -324,8 +329,7 @@ _lane_run() { # _lane_run <seconds> <cmd...>
   done <<BASEKEYS
 $(printf '%s' "$REG_ENV_BASE" | tr ' ' '\n')
 BASEKEYS
-  # + the worker marker, as _adapter_env sets it for a lease build (KTD9)
-  E+=(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null "NO_COLOR=1" "TRIFORGE_LEASE_WORKER=builder")
+  E+=("${LANE_FIXED[@]}")
   "$TIMEOUT_BIN" "${SECS}s" env -i "${E[@]}" "$@"
 }
 
@@ -1660,10 +1664,12 @@ fi  # end of the per-CLI sections skipped by --self-only
 # against (R36, R44; KTD1, KTD10). Each row records PASS, FAIL or UNAVAILABLE
 # with evidence, keeps its ID on a host without the CLI, and records SKIPPED
 # under --skip-live like its siblings; --only runs any subset of them.
-#   CC-09 / CDX-12   a builder detached the KTD10 way (python3, its own session
-#                    and process group) survives the end of the lead's tool
-#                    call and the end of a `claude -p` / `codex exec` lead run;
-#                    an in-shell `&` job rides along as the control
+#   CC-09 / CDX-12   a builder started by the lease lane's own launcher
+#                    (_LEASE_LAUNCH_PY, read through the loader: its own
+#                    session and process group, KTD10) survives the end of the
+#                    lead's tool call and the end of a `claude -p` / `codex
+#                    exec` lead run; an in-shell `&` job rides along as the
+#                    control
 #   CC-10 / CDX-13   the same builder survives the lead's terminal closing: the
 #                    lead runs in a pty whose master is closed mid-turn
 #                    (SIGHUP). This is the headless stand-in for a closed TUI,
@@ -1699,21 +1705,52 @@ fi  # end of the per-CLI sections skipped by --self-only
 # Scratch state lives under $FIX (codex's workspace-write sandbox writes only
 # there) and $WORK; both go with the EXIT trap. Builders and the mid-turn
 # waiter stop on their own once <dir>/release exists or <dir> is gone.
+U29_CDX_FLAGS=()   # the codex lane's flags, filled below when a row needs them (SELF-15c reads them too)
 if [ "$SELF_ONLY" != 1 ]; then
 
 U29_VAL="triforge-probe-$$"   # the probe variable's value (worker marker stand-in)
-# Registry defaults for the worker lanes, read once through the loader like
-# REG_ENV_BASE (a per-CLI section's own pick wins when it ran), plus the
-# OpenCode deny set and V2 guard the lease lane applies.
-U29_REG=$(
-  source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 0
-  cli_table all model 2>/dev/null
-  printf 'ocperm\t%s\n' "${_OPENCODE_PERMISSION_DEFAULT:-}"
-  if command -v opencode >/dev/null 2>&1; then
-    if _opencode_v2_check opencode; then printf 'ocv2\tv1\n'; else printf 'ocv2\t%s %s\n' "${_OPENCODE_CHECK:-}" "${_OPENCODE_VERSION:-}"; fi
-  fi
-)
+# What the rows take from the lease lane itself, read once through the loader
+# like REG_ENV_BASE and only when a row that uses it runs: the real detached
+# launcher (_LEASE_LAUNCH_PY, written to U29_LAUNCH for the survival kit of
+# CC-09/10/11 and CDX-12/13/14/15) and the codex lane's flags
+# (_lease_codex_lane_flags, one cdxflag line per word, collected into
+# U29_CDX_FLAGS for CDX-16, CDX-17 and SELF-15c); for the worker-marker rows of
+# the other lanes also the registry defaults (a per-CLI section's own pick wins
+# when it ran), and the OpenCode deny set and V2 guard the lease lane applies.
+U29_REG=""
+U29_LAUNCH="$WORK/u29-launch.py"
+if _want CC-09 || _want CC-10 || _want CC-11 || _want CDX-12 || _want CDX-13 || _want CDX-14 || _want CDX-15 \
+   || _want CDX-16 || _want CDX-17 || _want AGY-17 || _want OC-09 || _want KIMI-10 || _want CUR-13; then
+  U29_REG=$(
+    source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 0
+    printf '%s' "$_LEASE_LAUNCH_PY" > "$U29_LAUNCH"
+    _lease_codex_lane_flags
+    printf 'cdxflag\t%s\n' "${_LEASE_CODEX_FLAGS[@]}"
+    if _want AGY-17 || _want OC-09 || _want KIMI-10 || _want CUR-13; then
+      cli_table all model 2>/dev/null
+      printf 'ocperm\t%s\n' "${_OPENCODE_PERMISSION_DEFAULT:-}"
+      if command -v opencode >/dev/null 2>&1; then
+        if _opencode_v2_check opencode; then printf 'ocv2\tv1\n'; else printf 'ocv2\t%s %s\n' "${_OPENCODE_CHECK:-}" "${_OPENCODE_VERSION:-}"; fi
+      fi
+    fi
+  )
+  while IFS="$(printf '\t')" read -r U29_K U29_V; do
+    if [ "$U29_K" = cdxflag ]; then U29_CDX_FLAGS+=("$U29_V"); fi
+  done <<U29_REG_EOF
+$U29_REG
+U29_REG_EOF
+fi
 _u29_reg() { printf '%s\n' "$U29_REG" | awk -F'\t' -v k="$1" '$1 == k { print $2; exit }'; }
+
+# _u29_rows <cli> <outcome> <evidence> <method> <ID:capability>... — the same
+# outcome and evidence for each named row that runs.
+_u29_rows() {
+  local CLI=$1 OUTC=$2 EV=$3 METHOD=$4 R
+  shift 4
+  for R in "$@"; do
+    if _want "${R%%:*}"; then row "${R%%:*}" "$CLI" "${R#*:}" "$OUTC" "$EV" "$METHOD"; fi
+  done
+}
 
 # _u29_lead <seconds> <cmd...> — a lead session: the lease boundary's base
 # allowlist without the worker marker (_lane_run carries it since U11).
@@ -1723,10 +1760,20 @@ _u29_lead() {
   _lane_run "$SECS" env -u TRIFORGE_LEASE_WORKER "$@"
 }
 
-# Names the boundary itself sets; anything else in a tool shell's env was added.
-U29_BOUNDARY="$REG_ENV_BASE GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM NO_COLOR TRIFORGE_LEASE_WORKER TRIFORGE_PROBE_WORKER PWD OLDPWD SHLVL _"
+# Names the boundary itself sets (the base keys, _lane_run's LANE_FIXED, the
+# probe variable, the shell's own); anything else in a tool shell's env was added.
+U29_BOUNDARY=$REG_ENV_BASE
+for U29_X in "${LANE_FIXED[@]}"; do U29_BOUNDARY="$U29_BOUNDARY ${U29_X%%=*}"; done
+U29_BOUNDARY="$U29_BOUNDARY TRIFORGE_PROBE_WORKER PWD OLDPWD SHLVL _"
 # _u29_envval <dump> <NAME> — NAME's value in an `env` dump (empty when absent).
 _u29_envval() { grep "^${2}=" "$1" 2>/dev/null | head -1 | sed "s/^${2}=//"; }
+# _u29_tmpdir <dump> — U29_TMP: the dump's TMPDIR; U29_TD: unchanged when it
+# equals the caller's, else changed.
+_u29_tmpdir() {
+  U29_TMP=$(_u29_envval "$1" TMPDIR)
+  U29_TD=changed
+  if [ "$U29_TMP" = "${TMPDIR:-/tmp}" ]; then U29_TD=unchanged; fi
+}
 # _u29_markers <dump> — the host-marker-shaped names an env dump carries beyond
 # the boundary (values only for the listed marker names: dumps can hold
 # credentials), plus a count of every other added name (user profile, settings
@@ -1752,12 +1799,15 @@ PYEOF
 }
 
 # Survival kit: builder.sh heartbeats once a second; launch.sh dumps the env,
-# starts one builder detached the KTD10 way and one as an in-shell `&` job;
-# check.sh (a later tool call) dumps the env again and records which builder
-# still beats; wait.sh holds the lead mid-turn for the pty rows.
+# starts one builder through the lease lane's launcher (launch.py, a copy of
+# U29_LAUNCH: its release handshake is harmless to a builder that never reads
+# the fd) and one as an in-shell `&` job; check.sh (a later tool call) dumps
+# the env again and records which builder still beats; wait.sh holds the lead
+# mid-turn for the pty rows.
 _u29_kit() { # _u29_kit <dir>
   rm -rf "$1"
   mkdir -p "$1"
+  cp "$U29_LAUNCH" "$1/launch.py" 2>/dev/null || true
   cat > "$1/builder.sh" <<'EOF'
 #!/bin/sh
 D=$1; T=$2
@@ -1772,7 +1822,7 @@ EOF
 #!/bin/sh
 D=$(cd "$(dirname "$0")" && pwd)
 env > "$D/env-1.txt"
-python3 -c 'import subprocess, sys; subprocess.Popen(["/bin/sh", sys.argv[1], sys.argv[2], "detached"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)' "$D/builder.sh" "$D"
+python3 "$D/launch.py" "$D/detached.log" /bin/sh "$D/builder.sh" "$D" detached > /dev/null 2> "$D/launch.err"
 /bin/sh "$D/builder.sh" "$D" control < /dev/null > /dev/null 2>&1 &
 echo LAUNCHED
 EOF
@@ -1925,14 +1975,13 @@ _u29_dump_prompt() { # _u29_dump_prompt <dir> <tag>
 # _u29_marker_verdict <id> <cli> <capability> <dump> <out> [<note>] — PASS when
 # the probe variable reached the worker's tool shell.
 _u29_marker_verdict() {
-  local ID=$1 CLI=$2 CAP=$3 DUMP=$4 O=$5 NOTE=${6:-} V LW TD
+  local ID=$1 CLI=$2 CAP=$3 DUMP=$4 O=$5 NOTE=${6:-} V LW
   if [ -f "$DUMP" ]; then
     V=$(_u29_envval "$DUMP" TRIFORGE_PROBE_WORKER)
     LW=$(_u29_envval "$DUMP" TRIFORGE_LEASE_WORKER)
-    TD=changed
-    if [ "$(_u29_envval "$DUMP" TMPDIR)" = "${TMPDIR:-/tmp}" ]; then TD=unchanged; fi
+    _u29_tmpdir "$DUMP"
     if [ "$V" = "$U29_VAL" ]; then
-      row "$ID" "$CLI" "$CAP" "PASS" "probe variable visible in the tool shell; TRIFORGE_LEASE_WORKER=${LW:-<unset>}; TMPDIR ${TD}; $(_u29_markers "$DUMP")${NOTE:+; $NOTE}" "live"
+      row "$ID" "$CLI" "$CAP" "PASS" "probe variable visible in the tool shell; TRIFORGE_LEASE_WORKER=${LW:-<unset>}; TMPDIR ${U29_TD}; $(_u29_markers "$DUMP")${NOTE:+; $NOTE}" "live"
     else
       row "$ID" "$CLI" "$CAP" "FAIL" "probe variable NOT visible (got '${V}') — stripped between the boundary and the tool shell; TRIFORGE_LEASE_WORKER=${LW:-<unset>}; $(_u29_markers "$DUMP")${NOTE:+; $NOTE}" "live"
     fi
@@ -2031,8 +2080,7 @@ if command -v claude >/dev/null 2>&1; then
         fi
         if _want CC-11; then
           U29_MK=$(_u29_markers "$D/env-1.txt")
-          U29_TD=changed
-          if [ "$(_u29_envval "$D/env-1.txt" TMPDIR)" = "${TMPDIR:-/tmp}" ]; then U29_TD=unchanged; fi
+          _u29_tmpdir "$D/env-1.txt"
           case "$U29_MK" in
             *CLAUDE*) row "CC-11" "claude" "$U29_CC11" "PASS" "${U29_MK}; TMPDIR ${U29_TD} (lead started under the base allowlist, no worker marker; a claude -p worker carries the same names — see CC-13)" "live" ;;
             *) row "CC-11" "claude" "$U29_CC11" "FAIL" "no CLAUDE* name added to the tool shell: ${U29_MK}" "live" ;;
@@ -2041,8 +2089,7 @@ if command -v claude >/dev/null 2>&1; then
       fi
       rm -rf "$D"
     else
-      if _want CC-09; then row "CC-09" "claude" "$U29_CC09" "$(_skip_reason)" "live probes disabled" "live"; fi
-      if _want CC-11; then row "CC-11" "claude" "$U29_CC11" "$(_skip_reason)" "live probes disabled" "live"; fi
+      _u29_rows claude "$(_skip_reason)" "live probes disabled" live "CC-09:$U29_CC09" "CC-11:$U29_CC11"
     fi
   fi
 
@@ -2111,9 +2158,7 @@ if command -v claude >/dev/null 2>&1; then
       printf '# Probe instructions\n\nAlways remember this marker line: %s\n' "$U29_MARK" > "$A/AGENTS.md"
       U29_PROMPT="Your project instructions may contain marker lines of the form TRIFORGE-MARKER-<WORD>-<digits>. Print every such marker you can see in your instructions verbatim, one per line, and nothing else. Do not run any tool and do not read any file. If you see none, print exactly: NONE"
       if [ -n "$U29_ABOVE" ]; then
-        for U29_R in "CC-14:$U29_CC14" "CC-14b:$U29_CC14B"; do
-          if _want "${U29_R%%:*}"; then row "${U29_R%%:*}" "claude" "${U29_R#*:}" "INFO" "${U29_ABOVE} sits above the scratch project and suppresses AGENTS.md by design, so the row cannot discriminate on this host" "live"; fi
-        done
+        _u29_rows claude INFO "${U29_ABOVE} sits above the scratch project and suppresses AGENTS.md by design, so the row cannot discriminate on this host" live "CC-14:$U29_CC14" "CC-14b:$U29_CC14B"
       else
         if _want CC-14; then
           (cd "$A" && _probe_run 240 claude -p --model sonnet --output-format json --tools "" -- "$U29_PROMPT" < /dev/null > "$O" 2> "$O.err") || true
@@ -2150,9 +2195,7 @@ if command -v claude >/dev/null 2>&1; then
     fi
   fi
 else
-  for U29_R in "CC-09:$U29_CC09" "CC-10:$U29_CC10" "CC-11:$U29_CC11" "CC-12:$U29_CC12" "CC-13:$U29_CC13" "CC-14:$U29_CC14" "CC-14b:$U29_CC14B"; do
-    if _want "${U29_R%%:*}"; then row "${U29_R%%:*}" "claude" "${U29_R#*:}" "UNAVAILABLE" "claude not on PATH" "direct"; fi
-  done
+  _u29_rows claude UNAVAILABLE "claude not on PATH" direct "CC-09:$U29_CC09" "CC-10:$U29_CC10" "CC-11:$U29_CC11" "CC-12:$U29_CC12" "CC-13:$U29_CC13" "CC-14:$U29_CC14" "CC-14b:$U29_CC14B"
 fi
 
 # ------- Codex: CDX-12 CDX-13 CDX-14 CDX-15 CDX-15b CDX-16 CDX-17 CDX-18
@@ -2177,9 +2220,7 @@ if command -v codex >/dev/null 2>&1; then
       U29_LEAD="lead rc=${U29_RC} after $(( $(date +%s) - U29_T0 ))s; -s workspace-write (danger-full-access, the registry's lead profile, needs a human-launched lead — R50)"
       if [ ! -f "$D/detached.pid" ]; then
         if _auth_shaped "$O"; then U29_OUTC=AUTH-FAIL; else U29_OUTC=FAIL; fi
-        for U29_R in "CDX-12:$U29_CDX12" "CDX-14:$U29_CDX14" "CDX-15:$U29_CDX15"; do
-          if _want "${U29_R%%:*}"; then row "${U29_R%%:*}" "codex" "${U29_R#*:}" "$U29_OUTC" "the lead never ran the launch command (${U29_LEAD}): $(_evidence "$O")" "live"; fi
-        done
+        _u29_rows codex "$U29_OUTC" "the lead never ran the launch command (${U29_LEAD}): $(_evidence "$O")" live "CDX-12:$U29_CDX12" "CDX-14:$U29_CDX14" "CDX-15:$U29_CDX15"
       else
         _u29_survival "$D"
         if _want CDX-12; then
@@ -2190,13 +2231,15 @@ if command -v codex >/dev/null 2>&1; then
           fi
         fi
         if _want CDX-14; then
-          U29_T1=$(_u29_envval "$D/env-1.txt" TMPDIR)
+          _u29_tmpdir "$D/env-1.txt"
+          U29_T1=$U29_TMP
           U29_T2="<not dumped: the second tool call did not run>"
           U29_OK=1
-          [ "$U29_T1" = "${TMPDIR:-/tmp}" ] || U29_OK=0
+          [ "$U29_TD" = unchanged ] || U29_OK=0
           if [ -f "$D/env-2.txt" ]; then
-            U29_T2=$(_u29_envval "$D/env-2.txt" TMPDIR)
-            [ "$U29_T2" = "${TMPDIR:-/tmp}" ] || U29_OK=0
+            _u29_tmpdir "$D/env-2.txt"
+            U29_T2=$U29_TMP
+            [ "$U29_TD" = unchanged ] || U29_OK=0
           fi
           if [ "$U29_OK" = 1 ]; then
             row "CDX-14" "codex" "$U29_CDX14" "PASS" "caller TMPDIR=${TMPDIR:-/tmp}; tool call 1: ${U29_T1}; tool call 2: ${U29_T2}; -s workspace-write" "live"
@@ -2214,9 +2257,7 @@ if command -v codex >/dev/null 2>&1; then
       fi
       rm -rf "$D"
     else
-      for U29_R in "CDX-12:$U29_CDX12" "CDX-14:$U29_CDX14" "CDX-15:$U29_CDX15"; do
-        if _want "${U29_R%%:*}"; then row "${U29_R%%:*}" "codex" "${U29_R#*:}" "$(_skip_reason)" "live probes disabled" "live"; fi
-      done
+      _u29_rows codex "$(_skip_reason)" "live probes disabled" live "CDX-12:$U29_CDX12" "CDX-14:$U29_CDX14" "CDX-15:$U29_CDX15"
     fi
   fi
 
@@ -2244,14 +2285,16 @@ if command -v codex >/dev/null 2>&1; then
       mkdir -p "$CH" "$MK/.claude-plugin"
       printf '{"name": "tf-probe", "owner": {"name": "triforge-probe"}, "plugins": [{"name": "tf-probe-hooks", "source": "./plugin", "description": "Triforge probe hooks"}]}\n' > "$MK/.claude-plugin/marketplace.json"
       _u29_plugin "$MK/plugin" "$HM"
-      if (cd "$WORK" && _rwt 60 env CODEX_HOME="$CH" codex plugin marketplace add "$MK" && _rwt 120 env CODEX_HOME="$CH" codex plugin add tf-probe-hooks@tf-probe) > "$O.install" 2>&1; then
+      if [ "${#U29_CDX_FLAGS[@]}" -eq 0 ]; then
+        row "CDX-16" "codex" "$U29_CDX16" "FAIL" "could not read the codex lane flags (_lease_codex_lane_flags) through scripts/invoke-external.sh" "marker-file"
+      elif (cd "$WORK" && _rwt 60 env CODEX_HOME="$CH" codex plugin marketplace add "$MK" && _rwt 120 env CODEX_HOME="$CH" codex plugin add tf-probe-hooks@tf-probe) > "$O.install" 2>&1; then
         # The lane's flags; the scratch home has no login, so each run ends at
         # the first model request (401).
-        (cd "$FIX" && _lane_run 120 env CODEX_HOME="$CH" "TRIFORGE_PROBE_WORKER=$U29_VAL" codex exec --skip-git-repo-check -s workspace-write -c 'approval_policy="never"' -c 'sandbox_workspace_write.exclude_tmpdir_env_var=true' -c 'sandbox_workspace_write.exclude_slash_tmp=true' -m "$CDX_MODEL" --dangerously-bypass-hook-trust "Respond with only: READY" < /dev/null > "$O" 2>&1) || true
+        (cd "$FIX" && _lane_run 120 env CODEX_HOME="$CH" "TRIFORGE_PROBE_WORKER=$U29_VAL" codex "${U29_CDX_FLAGS[@]}" --skip-git-repo-check -m "$CDX_MODEL" --dangerously-bypass-hook-trust "Respond with only: READY" < /dev/null > "$O" 2>&1) || true
         _u29_hooks_seen "$HM"
         U29_N1=$U29_FIRED; U29_E1=$U29_HOOKS
         rm -f "$HM"/hook-*
-        (cd "$FIX" && _lane_run 120 env CODEX_HOME="$CH" "TRIFORGE_PROBE_WORKER=$U29_VAL" codex exec --skip-git-repo-check -s workspace-write -c 'approval_policy="never"' -c 'sandbox_workspace_write.exclude_tmpdir_env_var=true' -c 'sandbox_workspace_write.exclude_slash_tmp=true' -m "$CDX_MODEL" "Respond with only: READY" < /dev/null > "$O.2" 2>&1) || true
+        (cd "$FIX" && _lane_run 120 env CODEX_HOME="$CH" "TRIFORGE_PROBE_WORKER=$U29_VAL" codex "${U29_CDX_FLAGS[@]}" --skip-git-repo-check -m "$CDX_MODEL" "Respond with only: READY" < /dev/null > "$O.2" 2>&1) || true
         _u29_hooks_seen "$HM"
         if [ "$U29_N1" -gt 0 ]; then
           row "CDX-16" "codex" "$U29_CDX16" "PASS" "with --dangerously-bypass-hook-trust: ${U29_E1}; lane flags alone (untrusted plugin hooks): ${U29_HOOKS} — plugin hooks are trust-gated, and the trust lives in the user's CODEX_HOME, which a lane worker reads through HOME; the scratch home has no login, so PreToolUse/Stop cannot fire there" "marker-file"
@@ -2272,10 +2315,14 @@ if command -v codex >/dev/null 2>&1; then
   if _want CDX-17; then
     if [ "$CDX_LIVE" = 1 ]; then
       D="$FIX/.u29-cdx-worker"; O="$WORK/u29-cdx-worker.txt"
-      _u29_dumper "$D"
-      (cd "$FIX" && _lane_run 300 env "TRIFORGE_PROBE_WORKER=$U29_VAL" codex exec --skip-git-repo-check -s workspace-write -c 'approval_policy="never"' -c 'sandbox_workspace_write.exclude_tmpdir_env_var=true' -c 'sandbox_workspace_write.exclude_slash_tmp=true' -m "$CDX_MODEL" -c 'model_reasoning_effort="low"' "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
-      _u29_marker_verdict "CDX-17" "codex" "$U29_CDX17" "$D/env-worker.txt" "$O" "lane flags: -s workspace-write with TMPDIR and /tmp excluded"
-      rm -rf "$D"
+      if [ "${#U29_CDX_FLAGS[@]}" -eq 0 ]; then
+        row "CDX-17" "codex" "$U29_CDX17" "FAIL" "could not read the codex lane flags (_lease_codex_lane_flags) through scripts/invoke-external.sh" "live"
+      else
+        _u29_dumper "$D"
+        (cd "$FIX" && _lane_run 300 env "TRIFORGE_PROBE_WORKER=$U29_VAL" codex "${U29_CDX_FLAGS[@]}" --skip-git-repo-check -m "$CDX_MODEL" -c 'model_reasoning_effort="low"' "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
+        _u29_marker_verdict "CDX-17" "codex" "$U29_CDX17" "$D/env-worker.txt" "$O" "lane flags (_lease_codex_lane_flags): -s workspace-write with TMPDIR and /tmp excluded"
+        rm -rf "$D"
+      fi
     else
       row "CDX-17" "codex" "$U29_CDX17" "$(_skip_reason)" "live probes disabled" "live"
     fi
@@ -2386,9 +2433,7 @@ EOF
     rm -rf "$CH" "$E18"
   fi
 else
-  for U29_R in "CDX-12:$U29_CDX12" "CDX-13:$U29_CDX13" "CDX-14:$U29_CDX14" "CDX-15:$U29_CDX15" "CDX-15b:$U29_CDX15B" "CDX-16:$U29_CDX16" "CDX-17:$U29_CDX17" "CDX-18:$U29_CDX18"; do
-    if _want "${U29_R%%:*}"; then row "${U29_R%%:*}" "codex" "${U29_R#*:}" "UNAVAILABLE" "codex not on PATH" "direct"; fi
-  done
+  _u29_rows codex UNAVAILABLE "codex not on PATH" direct "CDX-12:$U29_CDX12" "CDX-13:$U29_CDX13" "CDX-14:$U29_CDX14" "CDX-15:$U29_CDX15" "CDX-15b:$U29_CDX15B" "CDX-16:$U29_CDX16" "CDX-17:$U29_CDX17" "CDX-18:$U29_CDX18"
 fi
 
 # ------- Worker marker in the other lanes: AGY-17 OC-09 KIMI-10 CUR-13

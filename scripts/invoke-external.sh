@@ -16,7 +16,8 @@
 # Layout: this file is the loader. The lanes live in scripts/lib/ and are
 # sourced below, in this order, into the same shell:
 #   lib/common.sh       host-marker scrub, timeout wrapper, scrubbing, KTD-9
-#                       failure classifier, agy/codex listing helpers
+#                       failure classifier, the worker-marker guard _lead_only
+#                       (KTD9), agy/codex listing helpers
 #   lib/registry.sh     shared data: the protected-path lists (KTD8), the model
 #                       ladder TRIFORGE_MODEL_LADDER + triforge_ladder (KTD22)
 #   lib/antigravity.sh  invoke_antigravity + _agy_parse_envelope

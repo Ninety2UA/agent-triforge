@@ -278,6 +278,18 @@ _bootstrap_copy() {
   return 0
 }
 
+# _ss_is_3x_codex_hooks <file> — 0 when the file is byte-equal to the one 3.x
+# templates/.codex/hooks.json (sha256 below): Triforge's own copy of the
+# attribution hook that appended to ops/CHANGELOG.md and wrote
+# .claude/codex-changelog.* from every Codex session, inside lease worktrees
+# too. The grep is a cheap gate in front of the hash, which decides.
+SS_3X_CODEX_HOOKS_SHA256="9aece38547f04f98c9cd158538cb31e654c1fa3767de414afbab1bd50b8f140c"
+_ss_is_3x_codex_hooks() {
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  grep -qF 'codex-changelog' "$1" 2>/dev/null || return 1
+  [ "$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1" 2>/dev/null || true)" = "$SS_3X_CODEX_HOOKS_SHA256" ]
+}
+
 # Bootstrap Codex project files (.codex/*), copy-if-absent so user
 # customizations survive: triforge-agents.toml = Triforge's agent declarations
 # (KTD5 — deployed OUTSIDE .codex/agents/, which Codex ≥ 0.147 sweeps as
@@ -308,13 +320,10 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   fi
   _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml"     ".codex/triforge-agents.toml"
   _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.codex/config.toml" ".codex/config.toml"
-  # One-time migration (KTD9): a .codex/hooks.json still byte-equal to the one
-  # 3.x template (sha256 below) is Triforge's own copy of the attribution hook
-  # that appended to ops/CHANGELOG.md and wrote .claude/codex-changelog.* from
-  # every Codex session, inside lease worktrees too: replaced once by the 4.0
-  # template. An edited copy is the user's and is left alone.
-  if [ -f ".codex/hooks.json" ] && [ ! -L ".codex/hooks.json" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json" ] \
-     && [ "$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' .codex/hooks.json 2>/dev/null || true)" = "9aece38547f04f98c9cd158538cb31e654c1fa3767de414afbab1bd50b8f140c" ]; then
+  # One-time migration (KTD9): a .codex/hooks.json still byte-equal to the 3.x
+  # template (_ss_is_3x_codex_hooks) is replaced once by the 4.0 template. An
+  # edited copy is the user's and is left alone.
+  if [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json" ] && _ss_is_3x_codex_hooks ".codex/hooks.json"; then
     if cp "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json" ".codex/hooks.json" 2>/dev/null; then
       CODEX_HOOK_NOTICE="session-start: replaced .codex/hooks.json — the unchanged 3.x copy appended a line to ops/CHANGELOG.md from every Codex session, lease workers included; attribution now comes from the lease ledger."
     else
