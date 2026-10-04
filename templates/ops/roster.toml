@@ -39,7 +39,10 @@
 #     medium -> Medium, high/xhigh/max -> High; families without a (Medium)
 #     variant, such as 3.1 Pro, map medium to (Low)). `agy models` prints the
 #     live catalog.
-#   - Codex pins gpt-6-astra at xhigh (D-021; CDX-03 PASS 2026-09-11).
+#   - Codex pins gpt-6-astra at xhigh (D-021; CDX-03 PASS 2026-09-11). A role
+#     can run another Codex model, e.g. model = "gpt-6.1-sol" (the newest
+#     workhorse, close to Astra at lower cost; needs codex 0.160.0 or later),
+#     "gpt-6-sol" or "gpt-6-luna". Codex's /model picker lists the catalog.
 #   - Cursor pins cursor-grok-4.6-xhigh explicitly — the shipped defaults never
 #     select the Auto router. Cursor's effort control is the model-id SUFFIX
 #     (cursor-grok-4.6-low|medium|high|xhigh — D-025, CUR-12), so `effort`
