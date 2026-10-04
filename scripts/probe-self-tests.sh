@@ -1263,20 +1263,34 @@ rm -rf "$_S11"
 #            under Claude Code's markers (CLAUDECODE, then
 #            CLAUDE_CODE_ENTRYPOINT) refuse with 45 and one line naming
 #            at-setup lead; under Codex's marker lease_create runs, lead_via =
-#            lead-session; both families at once read as no host (45); no
-#            [lead] under CLAUDECODE -> lease_create runs
+#            lead-session; both families at once read as ambiguous: 45 naming
+#            it; no [lead] under CLAUDECODE -> lease_create runs
+#   ambig    both families and a pty on stdin: lease_create and
+#            roster_write_lead 45, lease_approve refused, each naming the
+#            ambiguity (the terminal does not settle it)
 #   tty      no markers, a pty on stdin -> lease_create runs, lead_via = tty
+#   ttysweep no markers, a pty on stdin, the fake builder alone (no seam):
+#            lease_heartbeat_check collects a finished builder (review, no
+#            refusal), lease_wait returns 0 on one, and roster_write_lead
+#            codex --force adopts a building lease (the sweeps keep the
+#            caller's stdin, so their nested helpers see the terminal)
 #   notty    no markers, no TTY -> 45 naming the markers; TRIFORGE_TEST_LEAD
 #            alone or TRIFORGE_TEST_BUILDER alone -> 45; both naming claude ->
 #            runs, lead_via = test; both naming codex under the claude lead ->
-#            45 naming at-setup lead
+#            45 naming at-setup lead; a lease_create after a host-check pass
+#            and a lease_approve run under CLAUDECODE=1 (a prefix assignment)
+#            still records lead_via = test, never the approval's origin
 #   worker   TRIFORGE_LEASE_WORKER=builder beside Claude's markers and the seam:
 #            lease_create and roster_write_lead refuse (45) by the marker, with
 #            a pty on stdin too; nothing carved, no [lead] written
-#   write    roster_write_lead cursor -> 2 naming it; an effort outside the
-#            enum -> 2; no arguments -> 64; codex -> one [lead] block, roles and
-#            comments kept, resolve_lead codex|gpt-6-astra|xhigh; claude "" high
-#            -> the same block replaced; --force with no ledger -> runs
+#   write    (under the seam) roster_write_lead cursor -> 2 naming it; an
+#            effort outside the enum -> 2; no arguments -> 64; codex -> one
+#            [lead] block, roles and comments kept, resolve_lead
+#            codex|gpt-6-astra|xhigh; claude "" high -> the same block
+#            replaced; --force with no ledger -> runs
+#   origin   roster_write_lead with no markers, no TTY and no seam -> 45
+#            naming via=none, the roster unchanged; from Claude Code's
+#            session, Codex's session, the seam and a pty -> written
 #   open     a leased t1 -> roster_write_lead codex refused (1) naming t1 and
 #            --force, the roster byte-identical; the same lead with a new
 #            effort -> runs
@@ -1289,6 +1303,11 @@ rm -rf "$_S11"
 #   reclaim  a lease created under claude with TMPDIR=A (its lease root under
 #            A) is reclaimed under codex with TMPDIR=B: pruned, state kept,
 #            no "lease identity mismatch"
+#   forged   a row naming a planted lease root (signature file, another name)
+#            and a registered worktree under it, written by the lead's own
+#            writer -> lease_reclaim refuses the prune, the worktree kept; the
+#            same edited into ops/leases.toml by hand -> 44 from the integrity
+#            check lease_reclaim now runs first, the worktree kept
 #   caps     a codex lead with hooks on in a stub `codex features list`, the
 #            project trusted in a throwaway ~/.codex/config.toml and a
 #            PostToolUse hook in .codex/hooks.json -> wait_budget_s 900,
@@ -1391,10 +1410,10 @@ echo "detect=$(lead_host_detect)"
 R=0; lease_create t3 builder >/dev/null 2>&1 || R=$?; echo "codexhost:rc=$R:via=$(_ledger_get t3 lead_via 2>/dev/null || true)"
 export CLAUDECODE=1
 echo "both=$(lead_host_detect 2>/dev/null)"
-R=0; lease_create t4 builder >/dev/null 2>&1 || R=$?; echo "both:rc=$R"
+R=0; E=$(lease_create t4 builder 2>&1 >/dev/null) || R=$?; echo "both:rc=$R:ambiguous=$(printf "%s" "$E" | grep -c "ambiguous" || true)"
 ')
 _S13_FAIL="${_S13_FAIL}$(_self_expect host "$O" '^merge:rc=45:setup=1:lines=1$' '^create:rc=45:setup=1:carved=no$' '^role:rc=45:setup=1$' \
-  '^entrypoint:rc=45$' '^detect=codex$' '^codexhost:rc=0:via=lead-session$' '^both=none$' '^both:rc=45$')"
+  '^entrypoint:rc=45$' '^detect=codex$' '^codexhost:rc=0:via=lead-session$' '^both=ambiguous$' '^both:rc=45:ambiguous=1$')"
 O=$(_s13_lead hostok 'export CLAUDECODE=1; R=0; lease_create t builder >/dev/null 2>&1 || R=$?; echo "claudehost:rc=$R:via=$(_ledger_get t lead_via 2>/dev/null || true)"')
 _S13_FAIL="${_S13_FAIL}$(_self_expect hostok "$O" '^claudehost:rc=0:via=lead-session$')"
 
@@ -1402,6 +1421,49 @@ _S13_FAIL="${_S13_FAIL}$(_self_expect hostok "$O" '^claudehost:rc=0:via=lead-ses
 _s13_repo tty
 O=$(_s13_lead tty 'python3 -c "$_S13_PTY" /bin/bash "$_S13/tty-step.sh" "$_SELF_DIR" t tty || true')
 _S13_FAIL="${_S13_FAIL}$(_self_expect tty "$O" '^tty:rc=0:via=tty:stdin=tty$')"
+
+# ambig: both marker families, a terminal on stdin too — still refused
+_s13_repo ambig
+cat > "$_S13/ambig-step.sh" <<'S13_AMBIG_EOF'
+# probe lead step (SELF-13): both lead host marker families and whatever stdin the caller gave
+source "$1/invoke-external.sh" 2>/dev/null || { echo "ambig:load-failed"; exit 0; }
+export CLAUDECODE=1 CODEX_THREAD_ID=probe-thread
+echo "ambig:stdin=$(if [ -t 0 ]; then echo tty; else echo none; fi)"
+R=0; E=$(lease_create a1 builder 2>&1 >/dev/null) || R=$?; echo "ambig-create:rc=$R:named=$(printf "%s" "$E" | grep -c "ambiguous" || true)"
+R=0; E=$(roster_write_lead codex 2>&1 >/dev/null) || R=$?; echo "ambig-writer:rc=$R:named=$(printf "%s" "$E" | grep -c "ambiguous" || true):written=$(grep -c "^cli = .codex" ops/roster.toml || true)"
+R=0; E=$(lease_approve task:a1 user 2>&1 >/dev/null) || R=$?; echo "ambig-approve:rc=$R:named=$(printf "%s" "$E" | grep -c "ambiguous" || true)"
+S13_AMBIG_EOF
+O=$(_s13_lead ambig 'python3 -c "$_S13_PTY" /bin/bash "$_S13/ambig-step.sh" "$_SELF_DIR" || true')
+_S13_FAIL="${_S13_FAIL}$(_self_expect ambig "$O" '^ambig:stdin=tty$' '^ambig-create:rc=45:named=1$' '^ambig-writer:rc=45:named=1:written=0$' '^ambig-approve:rc=1:named=1$')"
+
+# ttysweep: from a terminal, the sweeps' nested lead-only helpers pass the host check too
+_s13_repo ttysweep
+printf '#!/bin/sh\nN=0; while [ ! -f "%s" ] && [ "$N" -lt 600 ]; do sleep 0.1; N=$((N + 1)); done\necho "Status: DONE"\n' "$_S13/ttysweep.release" > "$_S13/ttysweep-held.sh"
+chmod +x "$_S13/ttysweep-held.sh"
+cat > "$_S13/ttysweep-step.sh" <<'S13_SWEEP_EOF'
+# probe lead step (SELF-13): the sweeps from a terminal, no markers, the fake builder alone
+source "$1/invoke-external.sh" 2>/dev/null || { echo "ttysweep:load-failed"; exit 0; }
+_w() { local OF N=0; OF=$(_ledger_get "$1" output_file); while [ ! -f "${OF}.rc" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done; }
+export TRIFORGE_TEST_BUILDER="$2/fb.sh"
+echo "ttysweep:stdin=$(if [ -t 0 ]; then echo tty; else echo none; fi)"
+R=0; { lease_create h1 builder && lease_dispatch h1 "probe task" 60; } >/dev/null 2>&1 || R=$?; _w h1
+R=0; lease_heartbeat_check >/dev/null 2>"$2/ttysweep-hb.err" || R=$?
+echo "ttysweep-hb:rc=$R:state=$(_ledger_get h1 state):refused=$(grep -c "REFUSED" "$2/ttysweep-hb.err" || true)"
+R=0; { lease_create w1 builder && lease_dispatch w1 "probe task" 60; } >/dev/null 2>&1 || R=$?; _w w1
+R=0; lease_wait w1 --budget 4 >/dev/null 2>"$2/ttysweep-wait.err" || R=$?
+echo "ttysweep-wait:rc=$R:state=$(_ledger_get w1 state):refused=$(grep -c "REFUSED" "$2/ttysweep-wait.err" || true)"
+export TRIFORGE_TEST_BUILDER="$2/ttysweep-held.sh"
+R=0; { lease_create f1 builder && lease_dispatch f1 "probe task" 60; } >/dev/null 2>&1 || R=$?
+R=0; roster_write_lead codex --force >/dev/null 2>"$2/ttysweep-force.err" || R=$?
+echo "ttysweep-force:rc=$R:lead=$(resolve_lead | cut -f1):state=$(_ledger_get f1 state):reason=$(_ledger_get f1 reason):adopted=$(grep -c "adopted by this lead" "$2/ttysweep-force.err" || true):refused=$(grep -c "REFUSED" "$2/ttysweep-force.err" || true)"
+: > "$2/ttysweep.release"; _w f1
+R=0; lease_heartbeat_check >/dev/null 2>&1 || R=$?
+echo "ttysweep-final:rc=$R:state=$(_ledger_get f1 state)"
+S13_SWEEP_EOF
+O=$(_s13_lead ttysweep 'python3 -c "$_S13_PTY" /bin/bash "$_S13/ttysweep-step.sh" "$_SELF_DIR" "$_S13" || true')
+: > "$_S13/ttysweep.release"
+_S13_FAIL="${_S13_FAIL}$(_self_expect ttysweep "$O" '^ttysweep:stdin=tty$' '^ttysweep-hb:rc=0:state=review:refused=0$' '^ttysweep-wait:rc=0:state=review:refused=0$' \
+  '^ttysweep-force:rc=0:lead=codex:state=building:reason=lead-exit:adopted=1:refused=0$' '^ttysweep-final:rc=0:state=review$')"
 
 # notty
 _s13_repo notty
@@ -1415,9 +1477,11 @@ R=0; (export TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S13/fb.sh"; leas
 echo "seam:rc=$R:via=$(_ledger_get n4 lead_via 2>/dev/null || true)"
 R=0; E=$(export TRIFORGE_TEST_LEAD=codex TRIFORGE_TEST_BUILDER="$_S13/fb.sh"; lease_create n5 builder 2>&1 >/dev/null) || R=$?
 echo "seamother:rc=$R:setup=$(printf "%s" "$E" | grep -c "at-setup lead" || true)"
+R=0; (export TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S13/fb.sh"; lease_create n6 builder >/dev/null 2>&1; CLAUDECODE=1 lease_approve task:n6 user >/dev/null 2>&1 || true; lease_create n7 builder >/dev/null 2>&1) || R=$?
+echo "stale:rc=$R:via=$(_ledger_get n7 lead_via 2>/dev/null || true)"
 ')
 _S13_FAIL="${_S13_FAIL}$(_self_expect notty "$O" '^bare:rc=45:named=1$' '^bare-step:rc=45:via=:stdin=none$' '^leadonly:rc=45$' '^builderonly:rc=45$' \
-  '^seam:rc=0:via=test$' '^seamother:rc=45:setup=1$')"
+  '^seam:rc=0:via=test$' '^seamother:rc=45:setup=1$' '^stale:rc=0:via=test$')"
 
 # worker: the seam and the markers never outrank the worker marker
 _s13_repo worker
@@ -1435,6 +1499,7 @@ _S13_FAIL="${_S13_FAIL}$(_self_expect worker "$O" '^marker:rc=45:worker=1:carved
 _s13_repo write
 _s13_repo forcenone
 O=$(_s13_lead write '
+export TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S13/fb.sh"
 R=0; E=$(roster_write_lead cursor 2>&1 >/dev/null) || R=$?; echo "cursor:rc=$R:named=$(printf "%s" "$E" | grep -c "cannot lead" || true)"
 R=0; roster_write_lead codex "" turbo >/dev/null 2>&1 || R=$?; echo "effort:rc=$R"
 R=0; roster_write_lead >/dev/null 2>&1 || R=$?; echo "usage:rc=$R"
@@ -1444,10 +1509,30 @@ R=0; roster_write_lead claude "" high >/dev/null 2>&1 || R=$?
 echo "claude:rc=$R:lead=$(resolve_lead | tr "\t" "|"):blocks=$(grep -c "^\[lead\]" ops/roster.toml || true)"
 ')
 O="${O}
-$(_s13_lead forcenone 'R=0; E=$(roster_write_lead codex --force 2>&1 >/dev/null) || R=$?; echo "forcenone:rc=$R:lead=$(resolve_lead | cut -f1):note=$(printf "%s" "$E" | grep -c "no open lease" || true)"')"
+$(_s13_lead forcenone 'export TRIFORGE_TEST_LEAD=codex TRIFORGE_TEST_BUILDER="$_S13/fb.sh"; R=0; E=$(roster_write_lead codex --force 2>&1 >/dev/null) || R=$?; echo "forcenone:rc=$R:lead=$(resolve_lead | cut -f1):note=$(printf "%s" "$E" | grep -c "no open lease" || true)"')"
 _S13_FAIL="${_S13_FAIL}$(_self_expect write "$O" '^cursor:rc=2:named=1$' '^effort:rc=2$' '^usage:rc=64$' \
   '^codex:rc=0:lead=codex\|gpt-6-astra\|xhigh:blocks=1:role=claude:comment=1$' '^claude:rc=0:lead=claude\|\|high:blocks=1$' \
   '^forcenone:rc=0:lead=codex:note=1$')"
+
+# origin: every lead switch needs a stated origin (R38)
+_s13_repo wlorigin
+cat > "$_S13/wlorigin-tty.sh" <<'S13_WLTTY_EOF'
+# probe lead step (SELF-13): roster_write_lead claude from a terminal, no markers, no seam
+source "$1/invoke-external.sh" 2>/dev/null || { echo "wl-tty:load-failed"; exit 0; }
+R=0; roster_write_lead claude >/dev/null 2>&1 || R=$?
+echo "wl-tty:rc=$R:lead=$(resolve_lead | cut -f1):stdin=$(if [ -t 0 ]; then echo tty; else echo none; fi)"
+S13_WLTTY_EOF
+O=$(_s13_lead wlorigin '
+cp ops/roster.toml "$_S13/wlorigin-roster.before"
+R=0; E=$(roster_write_lead codex 2>&1 >/dev/null) || R=$?
+echo "wl-none:rc=$R:named=$(printf "%s" "$E" | grep -c "via=none" || true):roster=$(if cmp -s ops/roster.toml "$_S13/wlorigin-roster.before"; then echo unchanged; else echo CHANGED; fi)"
+R=0; (export CLAUDECODE=1; roster_write_lead codex >/dev/null 2>&1) || R=$?; echo "wl-claude:rc=$R:lead=$(resolve_lead | cut -f1)"
+R=0; (export CODEX_THREAD_ID=probe-thread; roster_write_lead claude >/dev/null 2>&1) || R=$?; echo "wl-codex:rc=$R:lead=$(resolve_lead | cut -f1)"
+R=0; (export TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S13/fb.sh"; roster_write_lead codex >/dev/null 2>&1) || R=$?; echo "wl-seam:rc=$R:lead=$(resolve_lead | cut -f1)"
+python3 -c "$_S13_PTY" /bin/bash "$_S13/wlorigin-tty.sh" "$_SELF_DIR" || true
+')
+_S13_FAIL="${_S13_FAIL}$(_self_expect origin "$O" '^wl-none:rc=45:named=1:roster=unchanged$' '^wl-claude:rc=0:lead=codex$' '^wl-codex:rc=0:lead=claude$' \
+  '^wl-seam:rc=0:lead=codex$' '^wl-tty:rc=0:lead=claude:stdin=tty$')"
 
 # open
 _s13_repo open
@@ -1502,6 +1587,37 @@ echo "reclaim:rc=$R:state=$(_ledger_get r state):mismatch=$({ cat "$_S13/reclaim
 ')
 _S13_FAIL="${_S13_FAIL}$(_self_expect reclaim "$O" '^create:rc=0:under-a=yes$' '^switch:rc=0:lead=codex$' '^reclaim:rc=0:state=leased:mismatch=0:worktree=pruned$')"
 
+# forged: a row naming another lease root never gets a worktree outside this checkout's roots removed
+_s13_repo forged
+mkdir -p "$_S13/fakeroot/lead"
+( cd "$_S13/forged" && export HOME="$_S13/home" GIT_CONFIG_NOSYSTEM=1 && git worktree add -q "$_S13/fakeroot/victim" -b victim \
+    && git worktree add -q "$_S13/fakeroot/victim2" -b victim2 ) >/dev/null 2>&1 || _S13_FAIL="${_S13_FAIL} forged(fixture-git)"
+cat > "$_S13/forge.py" <<'S13_FORGE_EOF'
+# probe step (SELF-13): rewrite one lease row in ops/leases.toml by hand, as a worker could
+import re, sys
+root, task, wt = sys.argv[1], sys.argv[2], sys.argv[3]
+s = open("ops/leases.toml").read()
+i = s.index('[lease."' + task + '"]')
+head, tail = s[:i], s[i:]
+tail = re.sub(r'(?m)^lease_root = .*$', 'lease_root = "' + root + '"', tail, count=1)
+tail = re.sub(r'(?m)^worktree = .*$', 'worktree = "' + wt + '"', tail, count=1)
+open("ops/leases.toml", "w").write(head + tail)
+S13_FORGE_EOF
+O=$(_s13_lead forged '
+export TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S13/fb.sh"
+printf "%s\n" "$_LEAD_GITCONFIG_SIGNATURE" > "$_S13/fakeroot/lead/gitconfig"
+F=$(cd "$_S13/fakeroot" && pwd -P)
+lease_create f1 builder >/dev/null 2>&1; lease_create f2 builder >/dev/null 2>&1
+D=$(_lead_lease_digests "$F/victim")
+_ledger_update f1 worktree="$F/victim" lease_root="$F" pointer_digest="$(printf "%s" "$D" | cut -f1)" admin_digest="$(printf "%s" "$D" | cut -f2)" admin_dir="$(printf "%s" "$D" | cut -f3)" >/dev/null 2>&1
+R=0; E=$(lease_reclaim f1 2>&1 >/dev/null) || R=$?
+echo "forged-row:rc=$R:victim=$(if [ -d "$F/victim" ]; then echo kept; else echo REMOVED; fi):refused=$(printf "%s" "$E" | grep -c "REFUSING prune" || true)"
+python3 "$_S13/forge.py" "$F" f2 "$F/victim2"
+R=0; lease_reclaim f2 >/dev/null 2>&1 || R=$?
+echo "forged-file:rc=$R:victim=$(if [ -d "$F/victim2" ]; then echo kept; else echo REMOVED; fi)"
+')
+_S13_FAIL="${_S13_FAIL}$(_self_expect forged "$O" '^forged-row:rc=1:victim=kept:refused=1$' '^forged-file:rc=44:victim=kept$')"
+
 # caps: the lead's capabilities, a missing one reported once
 _s13_repo caps '[lead]\ncli = "codex"\n'
 _s13_repo capsclaude
@@ -1524,9 +1640,9 @@ _S13_FAIL="${_S13_FAIL}$(_self_expect caps "$O" '^caps-1:rc=0:caps=\[(.*;)?wait_
   '^caps-1:.*;hooks_trusted\.SessionStart=absent;' '^caps-1:.*;goal_gate=;' '^caps-1:.*:notes=1:named=1$' '^caps-2:rc=0:.*;hooks_trusted\.PostToolUse=present;.*:notes=0:named=0$' \
   '^capsclaude-1:rc=0:caps=\[(.*;)?wait_budget_s=600;' '^capsclaude-1:.*;hooks_trusted\.SessionStart=present;hooks_trusted\.PostToolUse=present;hooks_trusted\.PreCompact=present;\]:notes=0:named=0$')"
 
-_S13_CAP="[lead] table + lead host check: load validation (exit 5), absent = claude, no-parser exit 3, the non-lead CLI refused naming at-setup lead, a terminal runs as the user (via=tty), no TTY and no markers refused unless the SELF seam names the lead, the worker marker first, roster_write_lead refusing open leases, --force handing building leases over without spending requeue, reclaim under the other lead, capabilities with an absent one reported once (KTD1, R1, R38, R40, R44)"
+_S13_CAP="[lead] table + lead host check: load validation (exit 5), absent = claude, no-parser exit 3, the non-lead CLI refused naming at-setup lead, both leads' markers refused as ambiguous, a terminal runs as the user (via=tty) and so do the sweeps it starts, no TTY and no markers refused unless the SELF seam names the lead, the worker marker first, roster_write_lead needing a stated origin and refusing open leases, --force handing building leases over without spending requeue, reclaim under the other lead and never under a forged root, capabilities with an absent one reported once (KTD1, R1, R38, R40, R44)"
 if [ -z "$_S13_FAIL" ]; then
-  row "SELF-13" "claude" "$_S13_CAP" "PASS" "load: cursor / non-table / unknown key / bad effort -> resolve_lead and resolve_role 5 naming it; absent -> claude (default); claude + model + effort kept; codex alone -> gpt-6-astra xhigh; parser: tomllib and tomli hidden -> resolve_lead and resolve_lead_caps 3 with the parser message, never absent, lease_create 45 naming it; host: [lead] codex under CLAUDECODE -> lease_merge / lease_create / roster_write_role 45, one line naming at-setup lead, CLAUDE_CODE_ENTRYPOINT the same; CODEX_THREAD_ID -> runs, lead_via=lead-session; both families -> no host, 45; no [lead] under CLAUDECODE -> runs; tty: pty on stdin, no markers -> runs, lead_via=tty; notty: 45 naming the markers, either seam variable alone 45, both (claude) -> lead_via=test, both naming codex -> 45; worker: marker beside markers + seam (+ pty) -> 45 by the marker, nothing carved or written; write: cursor 2, bad effort 2, no args 64, codex -> one [lead] block, roles + comments kept, claude replaces it in place, --force with no ledger runs; open: t1 leased -> refused naming t1 and --force, roster byte-identical, same lead new effort runs; force: from the old lead refused before writing, from the new lead both building leases adopted (reason=lead-exit, lead_exit_at, requeue 0), released -> review, requeue 0; reclaim: created under TMPDIR=A as claude, reclaimed under TMPDIR=B as codex -> pruned, no identity mismatch; caps: codex 900 s, PostToolUse present, SessionStart absent, one NOTE then none; claude 600 s, every plugin event present, no NOTE" "static"
+  row "SELF-13" "claude" "$_S13_CAP" "PASS" "load: cursor / non-table / unknown key / bad effort -> resolve_lead and resolve_role 5 naming it; absent -> claude (default); claude + model + effort kept; codex alone -> gpt-6-astra xhigh; parser: tomllib and tomli hidden -> resolve_lead and resolve_lead_caps 3 with the parser message, never absent, lease_create 45 naming it; host: [lead] codex under CLAUDECODE -> lease_merge / lease_create / roster_write_role 45, one line naming at-setup lead, CLAUDE_CODE_ENTRYPOINT the same; CODEX_THREAD_ID -> runs, lead_via=lead-session; both families -> ambiguous, 45 naming it; no [lead] under CLAUDECODE -> runs; ambig: both families + a pty -> lease_create and roster_write_lead 45, lease_approve refused, each naming the ambiguity; tty: pty on stdin, no markers -> runs, lead_via=tty; ttysweep: from a pty, no markers -> lease_heartbeat_check collects a finished builder, lease_wait 0 on one, roster_write_lead --force adopts a building lease, no refusal; notty: 45 naming the markers, either seam variable alone 45, both (claude) -> lead_via=test, both naming codex -> 45, a cached host-check pass still records this shell's lead_via; worker: marker beside markers + seam (+ pty) -> 45 by the marker, nothing carved or written; write: cursor 2, bad effort 2, no args 64, codex -> one [lead] block, roles + comments kept, claude replaces it in place, --force with no ledger runs; origin: roster_write_lead with no origin -> 45 naming via=none, roster unchanged; from Claude Code's session, Codex's, the seam and a pty -> written; open: t1 leased -> refused naming t1 and --force, roster byte-identical, same lead new effort runs; force: from the old lead refused before writing, from the new lead both building leases adopted (reason=lead-exit, lead_exit_at, requeue 0), released -> review, requeue 0; reclaim: created under TMPDIR=A as claude, reclaimed under TMPDIR=B as codex -> pruned, no identity mismatch; forged: a planted root in a lead-written row -> prune refused, a hand-edited row -> 44, both worktrees kept; caps: codex 900 s, PostToolUse present, SessionStart absent, one NOTE then none; claude 600 s, every plugin event present, no NOTE" "static"
 else
   _S13_WHO=$(printf '%s' "$_S13_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
   row "SELF-13" "claude" "$_S13_CAP" "FAIL" "mismatch in ${_S13_WHO% }:$(printf '%s' "$_S13_FAIL" | cut -c1-900)" "static"
@@ -1562,7 +1678,8 @@ rm -rf "$_S13"
 #            Claude Code's (the other lead's) -> recorded, host=claude
 #            lead=codex, while a codex (lead) approval from there is refused;
 #            with no markers, no terminal and no seam (via=none) any approval
-#            is refused; from a pty -> via=tty; under the worker marker or
+#            is refused; the seam simulating claude can't record a codex
+#            (lead) approval; from a pty -> via=tty; under the worker marker or
 #            from the lease worktree -> 45, nothing written; a worker CLI ->
 #            refused; the tty record merges
 #   approver _approver_ok: user and a CLI 0, "lead", a fabricated label and
@@ -1586,7 +1703,17 @@ rm -rf "$_S13"
 #            is the lead again, yet the handover stamp still routes the merge
 #            to the user; the lead's own approval does not count
 #   legacy   a 3.3.x-shaped review row (no lead_cli, reviewer_class,
-#            protected) -> merges under the new checks, lead read as claude
+#            protected) -> merges under the new checks, lead read as claude;
+#            the class of such a pin comes from the row's lead (claude), not
+#            the current one: pinned to claude, then a forced handover to
+#            codex -> 42 needing the user's approval, which merges; pinned to
+#            codex (a worker then) and handed to codex -> still merges, class
+#            worker
+#   tmpdirs  TRIFORGE_LEASE_ROOT unset, the lease under TMPDIR=A: the user's
+#            approval from a shell under TMPDIR=B is written beside A's
+#            anchors and the merge under A succeeds with it; with A's
+#            lead/gitconfig away, that approval is refused naming export
+#            TRIFORGE_LEASE_ROOT
 _S14="${WORK}/self14"
 _S14_FAIL=""
 rm -rf "$_S14"
@@ -1754,6 +1881,7 @@ echo "own=$(_ledger_get t approval_via):host=$(_ledger_get t approval_host):lead
 echo "other=$(_ledger_get t approval_via):host=$(_ledger_get t approval_host):lead=$(_ledger_get t approval_lead_cli)"
 (unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; export CLAUDECODE=1; _s14_try othermerge lease_merge t codex)
 (unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; export CLAUDECODE=1; _s14_try otherlead lease_approve task:t codex)
+(export TRIFORGE_TEST_LEAD=claude; _s14_try seamother lease_approve task:t codex)
 (unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; _s14_try nonelead lease_approve task:t codex)
 (unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; _s14_try noneuser lease_approve task:t user)
 (unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; python3 -c "$_S14_PTY" /bin/bash "$_S14/origin-tty.sh" "$_SELF_DIR") || true
@@ -1767,7 +1895,7 @@ _s14_try merge lease_merge t codex
 echo "attr=$(lease_attribution t 2>/dev/null)"
 ')
 _S14_FAIL="${_S14_FAIL}$(_self_expect origin "$O" '^t:go=0:review$' '^pin:rc=0:' '^own:rc=0:' '^own=lead-session:host=codex:lead=codex$' \
-  '^other:rc=0:' '^other=lead-session:host=claude:lead=codex$' '^othermerge:rc=45:.*at-setup lead' '^otherlead:rc=1:.*own session.*host=claude' '^nonelead:rc=1:.*via=none' '^noneuser:rc=1:.*via=none.*stated origin' '^tty:rc=0:via=tty:host=none:stdin=tty$' \
+  '^other:rc=0:' '^other=lead-session:host=claude:lead=codex$' '^othermerge:rc=45:.*at-setup lead' '^otherlead:rc=1:.*own session.*host=claude' '^seamother:rc=1:.*own session.*via=test host=claude' '^nonelead:rc=1:.*via=none' '^noneuser:rc=1:.*via=none.*stated origin' '^tty:rc=0:via=tty:host=none:stdin=tty$' \
   '^marker:rc=45:.*TRIFORGE_LEASE_WORKER' '^inroot:rc=45:.*inside the lease root' '^ledger=unchanged$' '^worker:rc=1:.*(lead|user)' '^merge:rc=0:' \
   '^attr=.*approval user:user via=tty')"
 
@@ -1902,10 +2030,57 @@ echo "attr=$(lease_attribution t 2>/dev/null)"
 ')
 _S14_FAIL="${_S14_FAIL}$(_self_expect legacy "$O" '^t:go=0:review$' '^blank=$' '^status=t +codex .* claude ' '^merge:rc=0:' \
   '^attr=.*reviewer antigravity \(worker\).*lead claude.*approval none')"
+# legacylead / legacyworker: a legacy pin's class is the row's lead's, across a handover
+_s14_repo legacylead claude codex
+printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder legacylead
+O=$(_s14_lead legacylead claude '
+_s14_go t
+_s14_try pin lease_pin_reviewer t claude
+_ledger_update t lead_cli= lead_via= reviewer_class= protected= protected_paths= pin_handover_at= >/dev/null 2>&1
+export TRIFORGE_TEST_LEAD=codex
+_s14_try force roster_write_lead codex --force
+_s14_try bare lease_merge t claude
+_s14_try userapp lease_approve task:t user
+_s14_try merge lease_merge t claude
+echo "attr=$(lease_attribution t 2>/dev/null)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect legacylead "$O" '^t:go=0:review$' '^pin:rc=0:' '^force:rc=0:' '^bare:rc=42:.*handover.*lease_approve task:t user' \
+  '^userapp:rc=0:' '^merge:rc=0:' '^attr=.*reviewer claude \(lead\).*lead claude.*approval user:user')"
+_s14_repo legacyworker claude claude
+printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder legacyworker
+O=$(_s14_lead legacyworker claude '
+_s14_go t
+_s14_try pin lease_pin_reviewer t codex
+_ledger_update t lead_cli= lead_via= reviewer_class= protected= protected_paths= pin_handover_at= >/dev/null 2>&1
+export TRIFORGE_TEST_LEAD=codex
+_s14_try force roster_write_lead codex --force
+_s14_try merge lease_merge t codex
+echo "attr=$(lease_attribution t 2>/dev/null)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect legacyworker "$O" '^t:go=0:review$' '^pin:rc=0:' '^force:rc=0:' '^merge:rc=0:' '^attr=.*reviewer codex \(worker\).*lead claude.*approval none')"
+
+# tmpdirs: an approval from a shell under another TMPDIR (TRIFORGE_LEASE_ROOT unset) lands beside the lead's anchors
+_s14_repo tmpdirs claude claude
+printf '#!/bin/sh\nmkdir -p .claude && echo "{}" > .claude/settings.json\necho "Status: DONE"\n' | _s14_builder tmpdirs
+mkdir -p "$_S14/tmpA" "$_S14/tmpB"
+O=$(_s14_lead tmpdirs claude '
+unset TRIFORGE_LEASE_ROOT
+export TMPDIR="$_S14/tmpA"
+_s14_go t
+_s14_try pin lease_pin_reviewer t codex
+RT=$(_ledger_get t lease_root)
+mv "$RT/lead/gitconfig" "$RT/lead/gitconfig.away"
+(export TMPDIR="$_S14/tmpB"; _s14_try gone lease_approve task:t user)
+mv "$RT/lead/gitconfig.away" "$RT/lead/gitconfig"
+(export TMPDIR="$_S14/tmpB"; _s14_try app lease_approve task:t user)
+_s14_try merge lease_merge t codex
+echo "row=$(_ledger_get t state):by=$(_ledger_get t approval_by)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect tmpdirs "$O" '^t:go=0:review$' '^pin:rc=0:' '^gone:rc=1:.*export TRIFORGE_LEASE_ROOT' '^app:rc=0:' '^merge:rc=0:' '^row=merged:by=user$')"
 
 _S14_CAP="ledger approvals: lead_cli + reviewer class per row; a protected change (base to snapshot) merges only with a lead or user merge approval bound to the snapshot, the lead's own CLI's build routed to the user; a protected or require_user_approval promotion needs the user's approval bound to the tree, voided by a later merge or a default-branch move; every approval records its origin (KTD2-KTD4, R5, R6, R32, R33)"
 if [ -z "$_S14_FAIL" ]; then
-  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude" "static"
+  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused, and from the seam simulating claude; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude; a legacy claude pin after a handover to codex -> 42 needing the user, user merges; a legacy codex (worker) pin after it -> merges, class worker; tmpdirs: an approval from another TMPDIR lands beside the lead's anchors and merges, refused naming export TRIFORGE_LEASE_ROOT when the recorded root is gone" "static"
 else
   _S14_WHO=$(printf '%s' "$_S14_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
   row "SELF-14" "claude" "$_S14_CAP" "FAIL" "mismatch in ${_S14_WHO% }:$(printf '%s' "$_S14_FAIL" | cut -c1-900)" "static"
@@ -3722,6 +3897,11 @@ rm -rf "$_S19"
 #             worker marker, the background-task switch and the no-push config.
 #             A stub refusing for want of a sandbox -> class deterministic,
 #             naming TRIFORGE_CLAUDE_SANDBOX
+#   floor     the sandbox floor (TRIFORGE_CLAUDE_SANDBOX_FLOOR, 2.1.285): a stub
+#             answering --version 2.1.281, or no X.Y.Z -> the builder and
+#             dispatch_role refuse, class deterministic, naming 2.1.285 and
+#             TRIFORGE_CLAUDE_SANDBOX=off, the stub never run; 2.1.285 -> the
+#             builder runs; 2.1.281 with TRIFORGE_CLAUDE_SANDBOX=off -> runs
 #   lifecycle the seam with builder = claude: an envelope ending Status: DONE ->
 #             review with session_id and result_subtype recorded; the fix cycle
 #             (lease_redispatch) records resumed_session = that id; a max-turns
@@ -3748,7 +3928,7 @@ mkdir -p "$_S20/home" "$_S20/bin" "$_S20/tmp" "$_S20/wtb" "$_S20/link-target"
 cat > "$_S20/bin/claude" <<EOF
 #!/bin/sh
 # probe stub (SELF-20): a claude -p --output-format json stand-in; records argv and env
-case "\${1:-}" in --version) echo "2.1.289 (Claude Code)"; exit 0 ;; esac
+case "\${1:-}" in --version) cat "\${TMPDIR:?}/s20-version" 2>/dev/null || echo "2.1.289 (Claude Code)"; exit 0 ;; esac
 R="\${TMPDIR:?}/s20-rec"
 i=0
 for a in "\$@"; do i=\$((i + 1)); printf '%s' "\$a" > "\$R.\$i"; done
@@ -3874,6 +4054,41 @@ _s20_builder nosandbox "$_S20/n.out"
 O="rc=$(cat "$_S20/n.out.rc" 2>/dev/null):class=$(cat "$_S20/n.out.class" 2>/dev/null):names=$(grep -c 'TRIFORGE_CLAUDE_SANDBOX' "$_S20/n.out" 2>/dev/null || true)"
 _S20_FAIL="${_S20_FAIL}$(_self_expect nosandbox "$O" '^rc=[1-9][0-9]*:class=deterministic:names=[1-9]')"
 
+# floor: the claude lane's sandbox floor, read from the stub's --version
+_s20_floor() { # _s20_floor <label> <out> — the builder's exit record, what <out> names, whether the stub ran
+  printf '%s:rc=%s:class=%s:floor=%s:optout=%s:ran=%s\n' "$1" "$(cat "$2.rc" 2>/dev/null)" "$(cat "$2.class" 2>/dev/null)" \
+    "$(grep -c '2\.1\.285' "$2" 2>/dev/null || true)" "$(grep -c 'TRIFORGE_CLAUDE_SANDBOX=off' "$2" 2>/dev/null || true)" \
+    "$(if [ -f "$_S20/tmp/s20-rec.n" ]; then echo yes; else echo no; fi)"
+}
+printf '2.1.281 (Claude Code)\n' > "$_S20/tmp/s20-version"
+_s20_builder done "$_S20/old.out"
+O=$(_s20_floor old "$_S20/old.out")
+printf 'Claude Code (version unknown)\n' > "$_S20/tmp/s20-version"
+_s20_builder done "$_S20/unread.out"
+O="${O}
+$(_s20_floor unread "$_S20/unread.out")"
+printf '2.1.285 (Claude Code)\n' > "$_S20/tmp/s20-version"
+_s20_builder done "$_S20/floor.out"
+O="${O}
+$(_s20_floor floor "$_S20/floor.out")"
+printf '2.1.281 (Claude Code)\n' > "$_S20/tmp/s20-version"
+TRIFORGE_CLAUDE_SANDBOX=off _s20_builder done "$_S20/optout.out"
+O="${O}
+$(_s20_floor optout "$_S20/optout.out")"
+_s20_repo "$_S20/flead" '[lead]\ncli = "codex"\n\n[roles.reviewer]\ncli = "claude"\n'
+printf 'review\n' > "$_S20/tmp/s20-mode"
+rm -f "$_S20"/tmp/s20-rec.*
+# shellcheck disable=SC2086
+_S20_FD=$( cd "$_S20/flead" && export $_S20_ENV TRIFORGE_TEST_LEAD=codex && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  R=0; dispatch_role reviewer logic_reviewer "PROMPT-S20F" "$_S20/flead.out" 30 >/dev/null 2>"$_S20/flead.err" || R=$?
+  echo "fdispatch:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:floor=$(grep -c '2\.1\.285' "$_S20/flead.out" 2>/dev/null || true):err=$(grep -c 'TRIFORGE_CLAUDE_SANDBOX=off' "$_S20/flead.err" 2>/dev/null || true):ran=$(if [ -f "$_S20/tmp/s20-rec.n" ]; then echo yes; else echo no; fi)"
+) 2>&1 || true
+O="${O}
+${_S20_FD}"
+rm -f "$_S20/tmp/s20-version"
+_S20_FAIL="${_S20_FAIL}$(_self_expect floor "$O" '^old:rc=1:class=deterministic:floor=[1-9][0-9]*:optout=1:ran=no$' '^unread:rc=1:class=deterministic:floor=[1-9][0-9]*:optout=1:ran=no$' \
+  '^floor:rc=0:class=none:floor=0:optout=0:ran=yes$' '^optout:rc=0:class=none:floor=0:optout=0:ran=yes$' '^fdispatch:rc=1:class=deterministic:floor=[1-9][0-9]*:err=1:ran=no$')"
+
 # lifecycle + skills: a repo tracking this repo's .claude/skills/watch-cycle/
 # and a user copy under a shipped name
 _s20_repo "$_S20/repo" '[roles.builder]\ncli = "claude"\n'
@@ -3949,9 +4164,9 @@ O=$( cd "$_S20/clead" && export $_S20_ENV && source "${_SELF_DIR}/invoke-externa
 ) 2>&1 || true
 _S20_FAIL="${_S20_FAIL}$(_self_expect dispatch "$O" '^clead:rc=40:stub=idle:out=DISPATCH_ROLE_CLAUDE$' '^xlead:rc=0:out=REVIEW-OK no findings' '^xlead-argv:p=1:json=json:mode=dontAsk:edit=0:last=PROMPT-S20R$')"
 
-_S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON envelope (subtype, is_error, session_id), explicit tool sets, --max-turns, session resume, the sandbox settings, the claude env arm, .claude/skills provisioning that adds names only, max-turns routed as report missing, dispatch_role running claude -p under a codex lead (KTD16, R2/R3)"
+_S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON envelope (subtype, is_error, session_id), explicit tool sets, --max-turns, session resume, the sandbox settings and their Claude Code floor, the claude env arm, .claude/skills provisioning that adds names only, max-turns routed as report missing, dispatch_role running claude -p under a codex lead (KTD16, R2/R3)"
 if [ -z "$_S20_FAIL" ]; then
-  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools)" "static"
+  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools)" "static"
 else
   _S20_WHO=$(printf '%s' "$_S20_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
   row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in ${_S20_WHO% }:$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"

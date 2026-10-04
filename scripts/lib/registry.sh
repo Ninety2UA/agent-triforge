@@ -142,6 +142,16 @@ triforge_ladder() {
   printf '%s\n' "$TRIFORGE_MODEL_LADDER"
 }
 
+# The first Claude Code build the sandboxed claude worker lane (KTD16) runs
+# on. The lane's --settings turn off the unsandboxed retry, which makes the
+# sandbox admin-required: from 2.1.285 Claude Code then ignores every setting
+# in a repository's .claude/settings*.json that loosens it (excludedCommands,
+# network.allowedDomains, filesystem.allowWrite, ...); 2.1.282 to 2.1.284
+# ignore only excludedCommands, and older builds none, so a repository could
+# take a command out of the sandbox. _claude_sandbox_floor_ok (lease-wait.sh)
+# reads it for the lease builder and dispatch_role's claude arm; the one copy.
+TRIFORGE_CLAUDE_SANDBOX_FLOOR="2.1.285"
+
 # ---------------------------------------------------------------------------
 # CLI registry (KTD7, R25, R41)
 # ---------------------------------------------------------------------------

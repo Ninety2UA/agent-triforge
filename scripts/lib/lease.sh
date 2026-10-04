@@ -284,7 +284,9 @@ _lease_valid_task_id() {
 # guard skips only the lead host check (_lead_only --any-host): the two
 # writers exempt from that check write through it directly, lease_approve
 # (KTD4) and the forced handover's stamp (_lease_mark_handover, called by
-# roster_write_lead).
+# roster_write_lead). Both first move to the lease root the ledger was last
+# written under (_lease_at_ledger_root): every write stamps that root in
+# [baseline].lease_root, next to the anchors it updates.
 #
 # The reserved id @baseline (never a valid task id) writes the [baseline]
 # table instead of a lease row: the lead's last verified git state (KTD18) —
@@ -351,7 +353,7 @@ _ledger_write() {
     sleep 0.05
   done
   printf '%s\n' "$$" > "${LOCK}/pid" 2>/dev/null || true
-  LEDGER_FILE="$LEDGER" LEDGER_TASK="$TASK_ID" LEDGER_STATE="$_LEASE_STATE" python3 -c "
+  LEDGER_FILE="$LEDGER" LEDGER_TASK="$TASK_ID" LEDGER_STATE="$_LEASE_STATE" LEDGER_ROOT="$_LEASE_ROOT" python3 -c "
 import hashlib, json, os, shutil, sys, time
 try:
     import tomllib
@@ -400,8 +402,10 @@ if os.path.isfile(source):
 # last write and its copy, with a [baseline] in place: nothing to restore or
 # record, so nothing is rewritten (a write would only stamp [baseline].updated,
 # which nothing reads). Loaded first, so a ledger that no longer parses still
-# fails closed; any alert, update or missing anchor still writes.
+# fails closed; any alert, update, missing anchor or lease_root that is not
+# this root's still writes.
 if (task == '@baseline' and len(sys.argv) == 1 and not alert and recorded and isinstance(data.get('baseline'), dict)
+        and data['baseline'].get('lease_root') == os.environ['LEDGER_ROOT']
         and os.path.isfile(copy_file) and _sha(copy_file) == recorded):
     sys.exit(0)
 leases = data.get('lease', {})
@@ -410,6 +414,9 @@ baseline = data.get('baseline', {})
 baseline = dict(baseline) if isinstance(baseline, dict) else {}
 if alert:
     baseline['ledger_alert'] = alert
+# The lease root whose lead state dir holds the anchors this write updates:
+# where the any-host writers write next (_lease_at_ledger_root).
+baseline['lease_root'] = os.environ['LEDGER_ROOT']
 if task == '@baseline':
     row = baseline
 else:
@@ -1753,6 +1760,9 @@ CREATE_ROW_EOF
   _lease_carve "$TASK_ID" "$WT" || return 1
   _lease_provision "$WT" "$CLI" || return 1
   NOW=$(date +%s)
+  # lead_via from this shell's origin, read here: a cached host-check pass
+  # does not set it.
+  _lead_origin
   _ledger_update "$TASK_ID" \
     task_id="$TASK_ID" role="$ROLE" \
     builder_cli="$CLI" builder_model="$MODEL" builder_effort="$EFFORT" \
@@ -2059,30 +2069,100 @@ lease_redispatch() {
   lease_dispatch "$TASK_ID" "$PROMPT" "$TIMEOUT"
 }
 
-# _lease_recorded_root <task_id> — print the row's recorded lease_root when it
-# differs from this shell's lease root and is still a lease root: an absolute,
-# canonical path (no traversal, no symlink component, not /) whose
-# lead/gitconfig starts with _LEAD_GITCONFIG_SIGNATURE. rc 1 otherwise (no
-# record, the same root, or not a lease root), and lease_reclaim keeps its own.
-_lease_recorded_root() {
-  local REC H=""
-  REC=$(_ledger_get "$1" lease_root 2>/dev/null) || return 1
-  case "$REC" in
+# _lease_root_valid <dir> — 0 when <dir> can stand as one of this checkout's
+# lease roots: an absolute, canonical path (no traversal, no symlink
+# component, not /) named like this shell's root (the <repo>-<hash> basename
+# _lease_ctx derives), whose lead/gitconfig starts with
+# _LEAD_GITCONFIG_SIGNATURE. A path read from the ledger is checked with it
+# before anything is written or removed under it.
+_lease_root_valid() {
+  local D=${1:-} H=""
+  case "$D" in
     ""|/) return 1 ;;
     /*) ;;
     *) return 1 ;;
   esac
-  case "${REC}/" in *"/../"*|*"/./"*) return 1 ;; esac
-  if [ "$REC" = "$_LEASE_ROOT" ] || [ "$(_lease_realpath "$REC")" != "$REC" ]; then
+  case "${D}/" in *"/../"*|*"/./"*) return 1 ;; esac
+  if [ "${D##*/}" != "${_LEASE_ROOT##*/}" ] || [ "$(_lease_realpath "$D")" != "$D" ]; then
     return 1
   fi
-  if [ -f "${REC}/lead/gitconfig" ]; then
-    IFS= read -r H 2>/dev/null < "${REC}/lead/gitconfig" || true
+  if [ -f "${D}/lead/gitconfig" ]; then
+    IFS= read -r H 2>/dev/null < "${D}/lead/gitconfig" || true
   fi
-  case "$H" in
-    "${_LEAD_GITCONFIG_SIGNATURE}"*) printf '%s\n' "$REC" ;;
-    *) return 1 ;;
-  esac
+  case "$H" in "${_LEAD_GITCONFIG_SIGNATURE}"*) return 0 ;; esac
+  return 1
+}
+
+# _lease_recorded_root <task_id> — print the row's recorded lease_root when it
+# differs from this shell's lease root and is still one of this checkout's
+# lease roots (_lease_root_valid). rc 1 otherwise (no record, the same root,
+# or not such a root), and lease_reclaim keeps its own.
+_lease_recorded_root() {
+  local REC
+  REC=$(_ledger_get "$1" lease_root 2>/dev/null) || return 1
+  if [ "$REC" = "$_LEASE_ROOT" ] || ! _lease_root_valid "$REC"; then
+    return 1
+  fi
+  printf '%s\n' "$REC"
+}
+
+# _lease_at_ledger_root <op> — for the two helpers that write the ledger from
+# any shell (lease_approve; roster_write_lead's forced handover), which may run
+# under another TMPDIR than the lead (a terminal, the other lead's session,
+# Claude Code's sandboxed Bash): move this shell's lease context to the root
+# the ledger was last written under, [baseline].lease_root (a ledger from
+# before that stamp: the newest row's lease_root), so the write updates the
+# lead's own integrity anchors. Written beside a fresh set, it would read to
+# the lead as a change made outside its writes, and be restored away and
+# escalated (rc 44). The caller declares `local TRIFORGE_LEASE_ROOT` first;
+# this sets it. Nothing moves when TRIFORGE_LEASE_ROOT is already set (the
+# user chose the root), no root is recorded, or it is this shell's. rc 1 with
+# a refusal naming export TRIFORGE_LEASE_ROOT when the recorded root is not
+# one of this checkout's lease roots any more (_lease_root_valid).
+_lease_at_ledger_root() {
+  local OP=${1:-lease} REC SHOWN
+  if [ -n "${TRIFORGE_LEASE_ROOT:-}" ] || [ ! -f "$_LEASE_LEDGER" ]; then
+    return 0
+  fi
+  REC=$(LR_LEDGER="$_LEASE_LEDGER" python3 -c '
+import os, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.exit(0)
+try:
+    with open(os.environ["LR_LEDGER"], "rb") as f:
+        data = tomllib.load(f)
+except Exception:
+    sys.exit(0)
+b = data.get("baseline")
+root = str(b.get("lease_root", "") or "") if isinstance(b, dict) else ""
+if not root:
+    rows = data.get("lease")
+    best = None
+    for r in (rows.values() if isinstance(rows, dict) else []):
+        if isinstance(r, dict) and r.get("lease_root"):
+            c = r.get("created", 0)
+            c = c if isinstance(c, int) else 0
+            if best is None or c >= best[0]:
+                best = (c, str(r["lease_root"]))
+    root = best[1] if best else ""
+sys.stdout.write(root)
+' 2>/dev/null) || REC=""
+  if [ -z "$REC" ] || [ "$REC" = "$_LEASE_ROOT" ]; then
+    return 0
+  fi
+  if ! _lease_root_valid "$REC"; then
+    SHOWN=$(printf '%s' "$REC" | LC_ALL=C tr -d '\000-\037\177')
+    echo "${OP}: REFUSED — the ledger was last written under the lease root ${SHOWN}, this shell resolves ${_LEASE_ROOT} (another TMPDIR or TRIFORGE_LEASE_ROOT), and the recorded root is not one of this checkout's lease roots any more (missing, moved or renamed). Written from here, the ledger would read to the lead as a change made outside its writes (KTD18). Point this shell at the lead's lease root and rerun: export TRIFORGE_LEASE_ROOT=<the lead's lease root>" >&2
+    return 1
+  fi
+  TRIFORGE_LEASE_ROOT=$REC
+  _lease_ctx || return 1
+  echo "${OP}: NOTE this shell resolves another lease root; writing under ${REC}, where the ledger was last written" >&2
 }
 
 # Refusal helper for lease_reclaim: loud, escalates the row, deletes NOTHING.
@@ -2107,7 +2187,9 @@ _lease_refuse_prune() {
 # that differs and still holds a lease root's lead/gitconfig: a lease created
 # under one lead is reclaimed under the other, whose shell may resolve another
 # TMPDIR (_lease_recorded_root). Step 4 still has to pass, so a forged
-# lease_root reaches only a worktree git already lists.
+# lease_root reaches only a worktree git already lists, and the recorded root
+# must be named like this shell's (_lease_root_valid). The integrity check runs
+# first, so the row it reads is the lead's own write (KTD18).
 # ANY mismatch: nothing is deleted, state=escalated with reason "lease
 # identity mismatch", nonzero return. A clean pass prunes worktree + branch,
 # then transitions per the current state:
@@ -2119,6 +2201,7 @@ lease_reclaim() {
   local TASK_ID=${1:?usage: lease_reclaim <task_id>}
   local ROOT REC WT_STORED WT_CANON STATE RQ
   _lease_ctx || return 1
+  _lead_integrity_check lease_reclaim || return $?
   ROOT=$_LEASE_ROOT
   WT_STORED=$(_ledger_get "$TASK_ID" worktree) || { echo "lease_reclaim: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
   STATE=$(_ledger_get "$TASK_ID" state)
@@ -2470,8 +2553,8 @@ lease_pin_reviewer() {
 }
 
 # _lease_reviewer_class <reviewer> — user, lead (the CLI is the current lead,
-# lead_is) or worker (U10, KTD2). Also how lease_merge reads a pin from before
-# 4.0, which recorded no class.
+# lead_is) or worker (U10, KTD2): the class lease_pin_reviewer records and
+# lease_approve gives an approver.
 _lease_reviewer_class() {
   if [ "${1:-}" = user ]; then
     echo user
@@ -2482,26 +2565,26 @@ _lease_reviewer_class() {
   fi
 }
 
+# _lease_recorded_class <reviewer> <lead_cli> — the class of a pin recorded
+# with no reviewer_class (a row from before 4.0 or before U10): user, lead
+# when the reviewer is the row's own lead (its lead_cli; empty reads as
+# _LEAD_LEGACY_CLI, the only lead those versions had), else worker. Taken from
+# the row, never from the current lead, so it holds across handovers: a stale
+# lead pin still needs the user's merge approval after the lead changed
+# (KTD2), and a worker pin never turns into a lead one.
+_lease_recorded_class() {
+  if [ "${1:-}" = user ]; then
+    echo user
+  elif [ -n "${1:-}" ] && [ "$1" = "${2:-$_LEAD_LEGACY_CLI}" ]; then
+    echo lead
+  else
+    echo worker
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Approvals (U10 — KTD2, KTD4; R5, R32, R33)
 # ---------------------------------------------------------------------------
-
-# _lease_lead_origin_ok <via> <host> <cli> — 0 when a lead-class approval by
-# <cli> was recorded where the lead could have given it: the lead's own
-# session (via=lead-session, host <cli>), a terminal (via=tty: the user
-# relaying it) or the SELF seam (via=test). Under another CLI's markers, or
-# with nothing to say where it ran (via=none), a record claiming the lead's
-# review contradicts itself, so lease_approve refuses it and lease_merge does
-# not count it. A user-class approval is recorded from any stated origin.
-_lease_lead_origin_ok() {
-  case "${1:-}" in
-    tty|test) return 0 ;;
-    lead-session)
-      if [ -n "${3:-}" ] && [ "${2:-}" = "${3:-}" ]; then return 0; fi
-      ;;
-  esac
-  return 1
-}
 
 # lease_approve <scope> <approver> — record an approval in the ledger.
 #   task:<id>           a merge approval (lease_merge needs one for a protected
@@ -2518,23 +2601,32 @@ _lease_lead_origin_ok() {
 #                       and the default branch's commit, in [baseline]
 #                       (promotion_*): a later merge or a default-branch move
 #                       voids it, and lease_promote uses it once.
-# A worker CLI never approves, and a lead-class approval is refused from
-# another CLI's session or a shell with no origin (_lease_lead_origin_ok).
-# Every record carries its origin (_lead_origin):
-# via=lead-session with the host CLI when lead host markers are present,
-# via=tty from a terminal, via=test under the SELF seam, plus the lead's CLI
-# and the time; a shell with none of these (via=none) is refused, since the
-# record could not say where it came from. Exempt from the lead host check
+# A worker CLI never approves. Where it runs decides the rest
+# (_lead_origin_match): a lead-class approval by <cli> comes from <cli>'s own
+# session (via=lead-session, host <cli>), a terminal (via=tty: the user
+# relaying it) or the SELF seam simulating <cli> (via=test), and is refused
+# from another CLI's session, where a record claiming the lead's review would
+# contradict itself (lease_merge does not count such a record either); a
+# user-class approval is recorded from any stated origin. Both are refused
+# from a shell with none (via=none), since the record could not say where it
+# came from, and under both leads' host markers, before a terminal or the seam
+# is consulted. Every record carries its origin (_lead_origin): via, the host
+# CLI, the lead's CLI and the time. The record is written under the lease root
+# the ledger was last written under (_lease_at_ledger_root), so an approval
+# from a shell with another TMPDIR lands beside the lead's integrity anchors.
+# Exempt from the lead host check
 # (R38): run under the other lead's markers it records that origin instead of refusing; the worker marker
 # and the lease root still refuse (KTD9, rc 45). It runs no integrity check:
 # lease_merge and lease_promote run theirs, and check the record against the
 # state they act on. Audit, not prevention: any shell with the helper can
 # record a user approval, the lead's agent shell included (via=lead-session).
-# rc: 0 recorded; 1 refused; 45 a worker or a lease root; 64 usage.
+# rc: 0 recorded; 1 refused (an origin, the approver, the state, or a recorded
+# lease root that is gone); 45 a worker or a lease root; 64 usage.
 lease_approve() {
   _lead_only lease_approve --any-host || return $?
   local USAGE="lease_approve: usage: lease_approve task:<id>|promotion:<branch> user|<lead CLI>"
-  local SCOPE=${1:-} WHO=${2:-} OUT RC=0 TAB LEADNOW CLASS STAMP T B ROW STATE SNAP BUILDER TREE PDIG N
+  local SCOPE=${1:-} WHO=${2:-} OUT RC=0 TAB LEADNOW CLASS STAMP T B ROW STATE SNAP BUILDER TREE PDIG N M=0
+  local TRIFORGE_LEASE_ROOT="${TRIFORGE_LEASE_ROOT:-}"   # _lease_at_ledger_root may set it
   TAB=$(printf '\t')
   if [ -z "$SCOPE" ] || [ -z "$WHO" ] || [ "$#" -gt 2 ]; then
     echo "$USAGE" >&2
@@ -2545,6 +2637,7 @@ lease_approve() {
     return 1
   fi
   _lease_ctx || return 1
+  _lease_at_ledger_root lease_approve || return 1
   OUT=$(resolve_lead 2>&1) || RC=$?
   if [ "$RC" -ne 0 ]; then
     echo "lease_approve: REFUSED — the lead could not be resolved (rc ${RC}), so whose approval this is can't be told; fail closed: $(printf '%s' "$OUT" | tail -1)" >&2
@@ -2557,14 +2650,23 @@ lease_approve() {
     return 1
   fi
   _lead_origin
-  if [ "$_LEAD_VIA" = none ]; then
-    echo "lease_approve: REFUSED — via=none: no lead host markers (CLAUDECODE or CLAUDE_CODE_ENTRYPOINT, CODEX_THREAD_ID or CODEX_CI) and no terminal on stdin, so the record could not say where it was given; an approval needs a stated origin. Run it from a lead's tool shell or a terminal (KTD4)" >&2
-    return 1
-  fi
-  if [ "$CLASS" = lead ] && ! _lease_lead_origin_ok "$_LEAD_VIA" "$_LEAD_HOST" "$WHO"; then
-    echo "lease_approve: REFUSED — a ${WHO} (lead) approval comes from the ${WHO} lead's own session or a terminal; this shell runs with via=${_LEAD_VIA} host=${_LEAD_HOST}. Record the user's approval instead, on the user's say-so: lease_approve ${SCOPE} user (KTD2)" >&2
-    return 1
-  fi
+  _lead_origin_match "$_LEAD_VIA" "$_LEAD_HOST" "$WHO" || M=$?
+  case "$M" in
+    3)
+      echo "lease_approve: REFUSED — $(_lead_ambiguous_note); an approval records where it was given (KTD4)" >&2
+      return 1
+      ;;
+    2)
+      echo "lease_approve: REFUSED — via=none: no lead host markers (${_LEAD_HOST_MARKERS}) and no terminal on stdin, so the record could not say where it was given; an approval needs a stated origin. Run it from a lead's tool shell or a terminal (KTD4)" >&2
+      return 1
+      ;;
+    1)
+      if [ "$CLASS" = lead ]; then
+        echo "lease_approve: REFUSED — a ${WHO} (lead) approval comes from the ${WHO} lead's own session or a terminal; this shell runs with via=${_LEAD_VIA} host=${_LEAD_HOST}. Record the user's approval instead, on the user's say-so: lease_approve ${SCOPE} user (KTD2)" >&2
+        return 1
+      fi
+      ;;
+  esac
   STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   case "$SCOPE" in
     task:*)
@@ -2645,16 +2747,17 @@ lease_attribution() {
 ${ROW}
 ATTR_ROW_EOF
   REVIEWER=${REVIEWER:-$PINNED}
-  if [ -z "$CLASS" ] && [ -n "$REVIEWER" ]; then CLASS=$(_lease_reviewer_class "$REVIEWER"); fi
+  if [ -z "$CLASS" ] && [ -n "$REVIEWER" ]; then CLASS=$(_lease_recorded_class "$REVIEWER" "$LC"); fi
   printf '%s\n' "- lease ${T}: builder ${BUILDER:-?} (${MODEL:-host default}), reviewer ${REVIEWER:-none} (${CLASS:-none}), lead ${LC:-$_LEAD_LEGACY_CLI}, approval ${APPROVAL:-none}, merge ${MC:0:12}"
 }
 
 # _lease_mark_handover <from-cli> <to-cli> — stamp handover_from, handover_to
 # and handover_at on every open row (every state but merged and failed):
 # roster_write_lead --force calls it right before it writes the new [lead]
-# (KTD2), once its own checks passed (it runs from the new lead or a
-# terminal, so the write goes through _ledger_write, as roster_write_lead
-# skips the host check too). A lead-class pin made before it then needs the
+# (KTD2), once its own checks passed and it moved to the ledger's lease root
+# (_lease_at_ledger_root): it runs from the new lead or a terminal, so the
+# write goes through _ledger_write, as roster_write_lead skips the host check
+# too. A lead-class pin made before it then needs the
 # user's merge approval (_lease_merge_gate compares handover_at with the pin's
 # pin_handover_at).
 _lease_mark_handover() {
@@ -2840,26 +2943,27 @@ lease_merge() {
 # this snapshot (approval_snapshot): each fix cycle's collect writes a new one
 # and voids it. A user-class approval always counts; a lead-class one only
 # while its CLI is the current lead, did not build the task and recorded it
-# from its own session or a terminal (_lease_lead_origin_ok).
+# from its own session or a terminal (_lead_origin_match, roster.sh).
 #   protected    the diff base..snapshot touches a protected path, or the scan
 #                could not run (fail closed): needs a lead or user approval
 #   stale pin    the pin is lead class, but its CLI is no longer the lead or a
 #                forced handover came after the pin (handover_at differs from
 #                pin_handover_at): needs the user's approval, never a re-pin
-# Sets, for lease_merge's ledger write: _LMG_CLASS (the pin's class; derived
-# for a pin from before 4.0), _LMG_APPROVAL (a valid approval for this
+# Sets, for lease_merge's ledger write: _LMG_CLASS (the pin's class; for a pin
+# recorded with none, derived from the row's own lead, _lease_recorded_class),
+# _LMG_APPROVAL (a valid approval for this
 # snapshot, needed or not, "<class>:<by> via=<via> host=<host> lead=<lead>
 # at=<UTC>", else none) and the _LP_* values of the scan.
 _lease_merge_gate() {
-  local T=$1 B=$2 P=$3 SNAP=$4 ROW BASE CLASS PINHO HO HOFROM ACLASS ABY ASNAP AVIA AHOST ALEAD AAT
+  local T=$1 B=$2 P=$3 SNAP=$4 ROW BASE CLASS PINHO HO HOFROM ACLASS ABY ASNAP AVIA AHOST ALEAD AAT RLEAD
   local WHY="" USER_ONLY=0 NEED=0 VALID=0 RECORD=""
-  ROW=$(_ledger_get_row "$T" base_sha reviewer_class pin_handover_at handover_at handover_from approval_class approval_by approval_snapshot approval_via approval_host approval_lead_cli approval_at) || ROW=""
+  ROW=$(_ledger_get_row "$T" base_sha reviewer_class pin_handover_at handover_at handover_from approval_class approval_by approval_snapshot approval_via approval_host approval_lead_cli approval_at lead_cli) || ROW=""
   { IFS= read -r BASE || true; IFS= read -r CLASS || true; IFS= read -r PINHO || true; IFS= read -r HO || true; IFS= read -r HOFROM || true
     IFS= read -r ACLASS || true; IFS= read -r ABY || true; IFS= read -r ASNAP || true; IFS= read -r AVIA || true
-    IFS= read -r AHOST || true; IFS= read -r ALEAD || true; IFS= read -r AAT || true; } <<MERGE_GATE_EOF
+    IFS= read -r AHOST || true; IFS= read -r ALEAD || true; IFS= read -r AAT || true; IFS= read -r RLEAD || true; } <<MERGE_GATE_EOF
 ${ROW}
 MERGE_GATE_EOF
-  if [ -z "$CLASS" ]; then CLASS=$(_lease_reviewer_class "$P"); fi
+  if [ -z "$CLASS" ]; then CLASS=$(_lease_recorded_class "$P" "$RLEAD"); fi
   _LMG_CLASS=$CLASS
   _LMG_APPROVAL=none
   if [ "$CLASS" = lead ]; then
@@ -2877,7 +2981,7 @@ MERGE_GATE_EOF
   if [ -n "$ABY" ] && [ "$ASNAP" = "$SNAP" ]; then
     if [ "$ACLASS" = user ]; then
       VALID=1
-    elif [ "$ACLASS" = lead ] && [ "$USER_ONLY" -eq 0 ] && [ "$ABY" != "$B" ] && lead_is "$ABY" && _lease_lead_origin_ok "$AVIA" "$AHOST" "$ABY"; then
+    elif [ "$ACLASS" = lead ] && [ "$USER_ONLY" -eq 0 ] && [ "$ABY" != "$B" ] && lead_is "$ABY" && _lead_origin_match "$AVIA" "$AHOST" "$ABY"; then
       VALID=1
     fi
   fi

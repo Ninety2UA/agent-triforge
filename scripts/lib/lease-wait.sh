@@ -436,6 +436,54 @@ _CLAUDE_ALLOW_EDIT="Bash,Skill"
 _CLAUDE_TOOLS_READ="Read,Grep,Glob"
 _CLAUDE_CRED_PATHS="~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.git-credentials ~/.config/gh ~/.config/gcloud ~/.azure ~/.kube ~/.docker/config.json ~/.codex ~/.gemini ~/.kimi-code ~/.local/share/opencode ~/.cursor ~/.grok ~/.devin ~/.config/devin ~/.claude/.credentials.json"
 
+# _claude_sandbox_floor_ok — 0 when the claude worker lane may run here: its
+# sandbox is off (TRIFORGE_CLAUDE_SANDBOX=off: no OS confinement, the
+# disclosed opt-out), or `claude --version` reads at or above
+# TRIFORGE_CLAUDE_SANDBOX_FLOOR (registry.sh), the first build that ignores a
+# repository's sandbox-loosening settings under the lane's --settings. Below
+# it, or when the version can't be read (no timeout tool, a hang past 10 s,
+# no X.Y.Z in the answer), rc 1, and _claude_sandbox_refusal words why. The
+# version is read once per process for the claude on PATH (_CLAUDE_SBX_BIN /
+# _CLAUDE_SBX_VER), bounded like session start's probe.
+_CLAUDE_SBX_BIN=""
+_CLAUDE_SBX_VER=""
+_claude_sandbox_floor_ok() {
+  local BIN TO A B C X Y Z
+  case "${TRIFORGE_CLAUDE_SANDBOX:-on}" in off|0|false|no) return 0 ;; esac
+  BIN=$(command -v claude 2>/dev/null) || BIN=""
+  if [ -z "$BIN" ] || [ "$BIN" != "$_CLAUDE_SBX_BIN" ]; then
+    _CLAUDE_SBX_BIN=$BIN
+    _CLAUDE_SBX_VER=""
+    if [ -n "$BIN" ] && TO=$(_timeout_tool 2>/dev/null); then
+      _CLAUDE_SBX_VER=$("$TO" -k 2s 10s "$BIN" --version < /dev/null 2>/dev/null | head -1 \
+        | LC_ALL=C grep -Eo '[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}' | head -1) || _CLAUDE_SBX_VER=""
+    fi
+  fi
+  case "$_CLAUDE_SBX_VER" in ''|*[!0-9.]*) return 1 ;; esac
+  IFS=. read -r A B C <<SBX_VER_EOF
+$_CLAUDE_SBX_VER
+SBX_VER_EOF
+  IFS=. read -r X Y Z <<SBX_FLOOR_EOF
+$TRIFORGE_CLAUDE_SANDBOX_FLOOR
+SBX_FLOOR_EOF
+  if [ "$((10#$A))" -ne "$((10#$X))" ]; then [ "$((10#$A))" -gt "$((10#$X))" ]; return $?; fi
+  if [ "$((10#$B))" -ne "$((10#$Y))" ]; then [ "$((10#$B))" -gt "$((10#$Y))" ]; return $?; fi
+  [ "$((10#$C))" -ge "$((10#$Z))" ]
+}
+
+# _claude_sandbox_refusal <caller> — the one wording of that refusal: the
+# version read (or that none was), the floor, the upgrade, and the explicit
+# opt-out with what it costs.
+_claude_sandbox_refusal() {
+  local WHAT
+  if [ -n "$_CLAUDE_SBX_VER" ]; then
+    WHAT="Claude Code ${_CLAUDE_SBX_VER} is below ${TRIFORGE_CLAUDE_SANDBOX_FLOOR}"
+  else
+    WHAT="Claude Code's version could not be read (\`claude --version\` failed, timed out, or printed no X.Y.Z), so it can't be confirmed at ${TRIFORGE_CLAUDE_SANDBOX_FLOOR} or later"
+  fi
+  echo "${1:-claude}: ERROR ${WHAT} — the claude worker lane's sandbox needs ${TRIFORGE_CLAUDE_SANDBOX_FLOOR}, the first build that ignores a repository's sandbox-loosening settings (excludedCommands, network.allowedDomains, filesystem.allowWrite) under the lane's --settings; on an older build a repository's .claude/settings.json can run commands outside the sandbox. Fix: update Claude Code (\`claude update\`), or set TRIFORGE_CLAUDE_SANDBOX=off in the lead's environment, and the claude worker's Bash then runs without OS confinement. No retry (deterministic)."
+}
+
 # _claude_lane_argv <edit|read> <model> <effort> <resume-id> <deny-write>... —
 # set _LEASE_LANE_ARGV to a claude -p worker's command line up to the prompt,
 # which the caller appends (KTD16). One JSON envelope (--output-format json:
@@ -656,10 +704,16 @@ _lease_builder_run() {
         ;;
       claude)
         # The envelope alone on stdout (KTD16); stderr beside it, folded into
-        # $OUT below only when no envelope came back.
-        _adapter_env claude "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2> "${OUT}.err" || RC=$?
-        if [ "$RC" -ne 0 ] && grep -q 'without a working sandbox' "${OUT}.err" "$OUT" 2>/dev/null; then
-          RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1; SBX_REFUSED=1
+        # $OUT below only when no envelope came back. A Claude Code below the
+        # sandbox floor never starts (deterministic, like the opencode arm).
+        if ! _claude_sandbox_floor_ok; then
+          _claude_sandbox_refusal lease_dispatch > "$OUT"
+          RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1
+        else
+          _adapter_env claude "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2> "${OUT}.err" || RC=$?
+          if [ "$RC" -ne 0 ] && grep -q 'without a working sandbox' "${OUT}.err" "$OUT" 2>/dev/null; then
+            RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1; SBX_REFUSED=1
+          fi
         fi
         ;;
       *)
@@ -740,7 +794,8 @@ _lease_builder_run() {
 # from <row>: a builder that exits in between has written it by then, and a
 # stale "absent" would orphan a finished builder. Sets _LS_RESULT: building |
 # collected | orphaned | unverified | deferred | left (no longer building).
-# Returns 0, or the rc of an integrity check / ledger write that failed.
+# Returns 0, or the rc of an integrity check / ledger write that failed, or
+# of a collect that failed and left the row building.
 _lease_sweep_one() {
   local OP=$1 TASK=$2 LEAD_EXIT=${3:-0} MODE=${4:-sweep} ROW=${5:-}
   local T="" ST="" PID="" PGID="" STARTED="" OUT="" DEADLINE="" LPID="" LSTARTED="" B ACTION LEAD_GONE=0
@@ -854,6 +909,13 @@ print(max(0, int(time.time() - os.path.getmtime(os.environ['OUT_FILE']))))
       fi
       lease_collect "$TASK" >&2 || RC=$?
       if [ "$RC" -eq "$_RC_LEASE_INTEGRITY" ]; then return "$RC"; fi
+      # A collect that failed and left the row building collected nothing (it
+      # refused, 45, or a ledger write failed): the sweep stops with its rc.
+      # Its routed outcomes all leave building (review, leased on a missing
+      # report, escalated, failed, orphaned).
+      if [ "$RC" -ne 0 ] && [ "$(_ledger_get "$TASK" state 2>/dev/null || true)" = building ]; then
+        return "$RC"
+      fi
       _LS_RESULT=collected
       return 0
       ;;
@@ -938,8 +1000,9 @@ for t, r in sorted(leases.items() if isinstance(leases, dict) else []):
 # adopted or collected with reason=lead-exit and its requeue budget untouched.
 # --lead-exit treats every swept lease's lead as gone: the forced handover (U9)
 # calls it. rc 0; _RC_DEGRADED when a row could not be verified; 44 from either
-# integrity check, and a collect's 44 passes through; a failed ledger write
-# stops the sweep with its rc.
+# integrity check, and a collect's 44 passes through; a failed ledger write,
+# or a collect that fails and leaves the row building (a refused one, 45),
+# stops the sweep with its rc and is not counted as collected.
 lease_heartbeat_check() {
   _lead_only lease_heartbeat_check || return $?
   local ONLY="" LEAD_EXIT=0 LEDGER ROWS ROW TASK SWEPT=0 COLLECTED=0 ORPHANED=0 UNVERIFIED=0 RC=0
@@ -967,20 +1030,22 @@ lease_heartbeat_check() {
   # word-split, so `for` would run once on the whole blob and corrupt the
   # sweep for 2+ concurrent leases — the parallel-wave case. The heredoc (not
   # a `printf | while` pipe) keeps the loop in THIS shell so the counters
-  # persist; each sweep reads /dev/null, never the row list.
-  while IFS= read -r ROW; do
+  # persist. It arrives on fd 3, so each sweep keeps the caller's stdin: the
+  # lead-only helpers nested in it (lease_collect, _ledger_update,
+  # lease_reclaim) see the terminal this pass passed the host check on.
+  while IFS= read -r ROW <&3; do
     TASK=${ROW%%"$_LEASE_US"*}
     case "$TASK" in ""|@now) continue ;; esac
     if [ -n "$ONLY" ] && [ "$TASK" != "$ONLY" ]; then continue; fi
     SWEPT=$((SWEPT + 1))
-    _lease_sweep_one lease_heartbeat_check "$TASK" "$LEAD_EXIT" sweep "$ROW" < /dev/null || RC=$?
+    _lease_sweep_one lease_heartbeat_check "$TASK" "$LEAD_EXIT" sweep "$ROW" || RC=$?
     if [ "$RC" -ne 0 ]; then break; fi
     case "$_LS_RESULT" in
       collected)  COLLECTED=$((COLLECTED + 1)) ;;
       orphaned)   ORPHANED=$((ORPHANED + 1)) ;;
       unverified) UNVERIFIED=$((UNVERIFIED + 1)) ;;
     esac
-  done <<HEARTBEAT_ROWS
+  done 3<<HEARTBEAT_ROWS
 $ROWS
 HEARTBEAT_ROWS
   # Every return runs the integrity check (KTD10), as lease_wait's does: a
@@ -1168,7 +1233,9 @@ ALL_IN_EOF
 # too); 44: the integrity check found a change, on entry, mid-wait or on return
 # (restored and escalated, as in every lease helper; stdout still gives the
 # watched leases' states); 1: ledger error (missing, unparseable) or an
-# unknown task; 64: usage; 45: run by a worker or from inside the lease root.
+# unknown task; 64: usage; 45: run by a worker or from inside the lease root,
+# or a collect inside the wait refused (any collect that fails and leaves the
+# row building returns its rc).
 # Loop it in bounded slices until it prints no "still building:" line or
 # returns 80, each repeat naming only the leases on that line (or none): a
 # named lease that already left building returns at once.
@@ -1264,19 +1331,21 @@ lease_wait() {
   _LS_ACT_STOP_MS=$((START_MS + BUDGET * 1000))
   CHECK_MS=$((START_MS + 15000))
   while :; do
-    # One pass over the leases still building, from the rows of the last read.
+    # One pass over the leases still building, from the rows of the last read
+    # (on fd 3, so each sweep keeps the caller's stdin, as in
+    # lease_heartbeat_check).
     _LS_LEAD_KEY=""
     UNVER=""
-    while IFS= read -r ROW; do
+    while IFS= read -r ROW <&3; do
       if [ -z "$ROW" ]; then continue; fi
       T=${ROW%%"$_LEASE_US"*}
-      _lease_sweep_one lease_wait "$T" 0 poll "$ROW" < /dev/null || RC=$?
+      _lease_sweep_one lease_wait "$T" 0 poll "$ROW" || RC=$?
       if [ "$RC" -ne 0 ]; then break; fi
       case "$_LS_RESULT" in
         unverified) UNVER="${UNVER}${UNVER:+ }${T}" ;;
         deferred) DEFER=1; break ;;
       esac
-    done <<LEASE_WAIT_EOF
+    done 3<<LEASE_WAIT_EOF
 ${_LW_ROWS}
 LEASE_WAIT_EOF
     if [ "$RC" -ne 0 ]; then break; fi

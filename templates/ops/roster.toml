@@ -88,9 +88,10 @@ fallbacks = ["claude"]
 # [lead] names the CLI that leads this checkout. The lead plans the work, runs
 # the leases, reviews and merges. Claude Code or Codex can lead; with no [lead]
 # table, Claude Code leads. The lease and roster helpers refuse to run under
-# the other CLI. Switch from either CLI with `at-setup lead` (its writer is
-# roster_write_lead). The switch refuses while leases are open; --force hands
-# them to the new lead without spending a requeue.
+# the other CLI. Switch from either CLI with `at-setup lead`, or with
+# `roster_write_lead <cli>` from scripts/invoke-external.sh. The switch refuses
+# while leases are open; --force hands them to the new lead without spending a
+# requeue.
 #
 # To make Codex the lead, uncomment:
 # [lead]

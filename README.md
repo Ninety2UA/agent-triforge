@@ -451,14 +451,14 @@ Re-baselined from the newest capability probe record — currently [`ops/researc
 
 | CLI | Tier | Floor (KTD-13) | Tested | READY probe |
 |---|---|---|---|---|
-| Claude Code (`claude`) | core | ≥ 2.1.277 | 2.1.284 | `claude --version` |
+| Claude Code (`claude`) | core | ≥ 2.1.277 (a claude worker: ≥ 2.1.285) | 2.1.284 | `claude --version` |
 | Antigravity (`agy`) | core | ≥ 1.1.27 | 1.2.1 | `agy --model "Gemini 3.8 Flash (High)" -p "Respond with only: READY"` |
 | Codex (`codex`) | core | ≥ 0.153.0 | 0.154.0 | `codex exec "Respond with only: READY"` |
 | OpenCode (`opencode`) | optional | ≥ 1.18.20 | 1.18.30 | `opencode run --format json -m openrouter/z-ai/glm-5.3 "…"` |
 | Kimi Code (`kimi`) | optional | ≥ 0.33.0 | 0.42.0 (AUTH-FAIL on the probe host; live rows PENDING-AUTH until `kimi login`) | `kimi -p "…"` |
 | Cursor (`cursor-agent`; `agent` fallback) | optional | date-versioned | 2026.09.10 | `cursor-agent -p --trust --model cursor-grok-4.6-xhigh "…"` |
 
-Why these floors: Claude Code 2.1.277 is the first build that reads a root `AGENTS.md`, Triforge's only instruction file (D-037; it includes the 2.1.267 fix that honors `effort:` frontmatter on pinned-default models); agy 1.1.27 adds `denied_actions` to the JSON envelope that `invoke_antigravity` reads as its completion signal; Codex 0.153.0 is `gpt-6-astra`'s minimal client, and `gpt-6.1-sol`, which a role can pick, answered on Codex 0.160.0 and was refused on 0.155.1; OpenCode 1.18.20 answers subagent permission asks under `run`; Kimi 0.33.0 is the agent-core-v2 engine with `--agent-file`. The Gemini CLI floor was removed with the Antigravity migration (Google's hosted service stopped serving consumer tiers 2026-06-18); legacy Gemini users pin plugin `v2.4.3`. An absent or declined optional CLI is silently skipped — fallback chains always terminate at a core-trio member, which can't be disabled.
+Why these floors: Claude Code 2.1.277 is the first build that reads a root `AGENTS.md`, Triforge's only instruction file (D-037; it includes the 2.1.267 fix that honors `effort:` frontmatter on pinned-default models); a claude worker needs 2.1.285, the first build that ignores the repository settings that loosen its sandbox, and refuses to start on an older one unless `TRIFORGE_CLAUDE_SANDBOX=off` is set; agy 1.1.27 adds `denied_actions` to the JSON envelope that `invoke_antigravity` reads as its completion signal; Codex 0.153.0 is `gpt-6-astra`'s minimal client, and `gpt-6.1-sol`, which a role can pick, answered on Codex 0.160.0 and was refused on 0.155.1; OpenCode 1.18.20 answers subagent permission asks under `run`; Kimi 0.33.0 is the agent-core-v2 engine with `--agent-file`. The Gemini CLI floor was removed with the Antigravity migration (Google's hosted service stopped serving consumer tiers 2026-06-18); legacy Gemini users pin plugin `v2.4.3`. An absent or declined optional CLI is silently skipped — fallback chains always terminate at a core-trio member, which can't be disabled.
 
 ### Data egress and credentials
 

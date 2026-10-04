@@ -324,7 +324,10 @@ dispatch_role() {
 # reviewer or an analyst gets the read class: read tools, dontAsk, and Bash
 # only inside the sandbox with the working directory unwritable; a tester or a
 # documenter the edit class, the ledger unwritable. Both keep the lead's git
-# common dir unwritable. The envelope's result text lands in <output-file>
+# common dir unwritable. A Claude Code below TRIFORGE_CLAUDE_SANDBOX_FLOOR, or
+# one whose version can't be read, is refused with the sandbox on
+# (_claude_sandbox_floor_ok: rc 1, deterministic, the reason in <output-file>
+# and on stderr). The envelope's result text lands in <output-file>
 # (the envelope itself beside it, <output-file>.raw and .envelope); a run that
 # returns no envelope leaves the CLI's own output there. Returns the CLI's
 # exit code, with INVOKE_FAILURE_CLASS set as the invoke_* helpers set it.
@@ -338,6 +341,12 @@ _dispatch_role_claude() {
     return 127
   fi
   TOBIN=$(_timeout_tool) || { INVOKE_FAILURE_CLASS="deterministic"; return "$_RC_NO_TIMEOUT_TOOL"; }
+  if ! _claude_sandbox_floor_ok; then
+    _claude_sandbox_refusal dispatch_role >&2
+    _claude_sandbox_refusal dispatch_role > "$OUT" 2>/dev/null || true
+    INVOKE_FAILURE_CLASS="deterministic"
+    return 1
+  fi
   case "$ROLE" in tester|documenter) CLASS=edit ;; esac
   if _lease_ctx 2>/dev/null; then
     DENY+=("$_LEASE_COMMON")
@@ -575,62 +584,106 @@ lead_is() {
 # only the Claude Code lead, so such a row reads as claude (U10).
 _LEAD_LEGACY_CLI=claude
 
-# lead_host_detect — the lead CLI this shell runs under, from the host markers
-# each lead puts in its tool shell (U29: CC-11, CDX-15): claude for CLAUDECODE
-# or CLAUDE_CODE_ENTRYPOINT (Claude Code's hooks see both as well), codex for
-# CODEX_THREAD_ID or CODEX_CI, none for neither. A worker of the same CLI
-# carries the same names, which is why _lead_only tests the worker marker
-# first. Both families at once (one CLI started from inside the other) can't
-# say which leads: none, with a stderr note.
-lead_host_detect() {
+# The host markers each lead CLI puts in its tool shell (U29: CC-11, CDX-15),
+# as the refusal messages name them; _lead_host_read tests these four names.
+_LEAD_HOST_MARKERS='CLAUDECODE or CLAUDE_CODE_ENTRYPOINT for Claude Code, CODEX_THREAD_ID or CODEX_CI for Codex'
+
+# _lead_host_read — set _LEAD_HOST (no subshell) to the lead CLI this shell
+# runs under, from the host markers: claude for CLAUDECODE or
+# CLAUDE_CODE_ENTRYPOINT (Claude Code's hooks see both as well), codex for
+# CODEX_THREAD_ID or CODEX_CI, none for neither, ambiguous for both (one CLI
+# started from inside the other: neither can be told to lead). A worker of the
+# same CLI carries the same names, which is why _lead_only tests the worker
+# marker first.
+_lead_host_read() {
   local C="" X=""
   if [ -n "${CLAUDECODE:-}" ] || [ -n "${CLAUDE_CODE_ENTRYPOINT:-}" ]; then C=claude; fi
   if [ -n "${CODEX_THREAD_ID:-}" ] || [ -n "${CODEX_CI:-}" ]; then X=codex; fi
   if [ -n "$C" ] && [ -n "$X" ]; then
-    echo "lead_host_detect: NOTE both Claude Code's (CLAUDECODE / CLAUDE_CODE_ENTRYPOINT) and Codex's (CODEX_THREAD_ID / CODEX_CI) host markers are set — one CLI was started from inside the other — so the host reads as none" >&2
-    printf 'none\n'
-    return 0
+    _LEAD_HOST=ambiguous
+  else
+    _LEAD_HOST=${C:-${X:-none}}
   fi
-  printf '%s\n' "${C:-${X:-none}}"
+}
+
+# lead_host_detect — print _lead_host_read's answer: claude, codex, none or
+# ambiguous.
+lead_host_detect() {
+  local _LEAD_HOST
+  _lead_host_read
+  printf '%s\n' "$_LEAD_HOST"
 }
 
 # _lead_origin — set _LEAD_VIA and _LEAD_HOST for this shell (call it
-# directly, never in $(...)): lead-session and the host when host markers are
-# present; tty and none when stdin is a terminal (a person running the
-# helper); test and TRIFORGE_TEST_LEAD when neither but the SELF harness set
-# both TRIFORGE_TEST_BUILDER and TRIFORGE_TEST_LEAD; none and none otherwise.
-# lease_create records _LEAD_VIA in the row (lead_via); U10's approval helper
-# stamps its records with it instead of refusing.
+# directly, never in $(...)): ambiguous and ambiguous when both marker
+# families are set, before any other source can settle it; lead-session and
+# the host when one family is; tty and none when stdin is a terminal (a person
+# running the helper); test and TRIFORGE_TEST_LEAD when neither but the SELF
+# harness set both TRIFORGE_TEST_BUILDER and TRIFORGE_TEST_LEAD; none and none
+# otherwise. lease_create records _LEAD_VIA in the row (lead_via); U10's
+# approval helper stamps its records with it.
 _lead_origin() {
-  _LEAD_HOST=$(lead_host_detect)
-  if [ "$_LEAD_HOST" != none ]; then
-    _LEAD_VIA=lead-session
-  elif [ -t 0 ]; then
-    _LEAD_VIA=tty
-  elif [ -n "${TRIFORGE_TEST_BUILDER:-}" ] && [ -n "${TRIFORGE_TEST_LEAD:-}" ]; then
-    _LEAD_VIA=test
-    _LEAD_HOST=$TRIFORGE_TEST_LEAD
-  else
-    _LEAD_VIA=none
-  fi
+  _lead_host_read
+  case "$_LEAD_HOST" in
+    ambiguous) _LEAD_VIA=ambiguous ;;
+    none)
+      if [ -t 0 ]; then
+        _LEAD_VIA=tty
+      elif [ -n "${TRIFORGE_TEST_BUILDER:-}" ] && [ -n "${TRIFORGE_TEST_LEAD:-}" ]; then
+        _LEAD_VIA=test
+        _LEAD_HOST=$TRIFORGE_TEST_LEAD
+      else
+        _LEAD_VIA=none
+      fi
+      ;;
+    *) _LEAD_VIA=lead-session ;;
+  esac
+}
+
+# _lead_origin_match <via> <host> <cli> — whether an origin (_lead_origin's,
+# or one a ledger record carries) can stand for <cli>'s lead: 0 for via=tty (a
+# person at a terminal) or via=lead-session / via=test whose host (the
+# markers' CLI, the seam's simulated lead) is <cli>; 1 for another host; 2 for
+# no origin (via=none or empty); 3 for ambiguous markers. The one origin rule
+# behind the lead host check, roster_write_lead and lease_approve (and the
+# merge gate's reading of a recorded approval); each caller words its own
+# refusal.
+_lead_origin_match() {
+  case "${1:-}" in
+    ambiguous) return 3 ;;
+    tty) return 0 ;;
+    lead-session|test)
+      if [ -n "${3:-}" ] && [ "${2:-}" = "${3:-}" ]; then return 0; fi
+      return 1
+      ;;
+  esac
+  return 2
+}
+
+# _lead_ambiguous_note — the reason every refusal of ambiguous markers gives.
+_lead_ambiguous_note() {
+  printf '%s' "both lead host marker families are set (${_LEAD_HOST_MARKERS}): one CLI was started from inside the other, so which lead this shell runs under is ambiguous, and a terminal or the SELF seam does not settle it; run it from the lead's own tool shell, or unset the other CLI's markers"
 }
 
 # _lead_host_gate <helper> — R38, called by _lead_only (common.sh) after the
 # worker-marker and lease-root checks: 0 when this shell may run a lead-owned
 # helper, else one stderr line and _RC_LEAD_ONLY. It runs under the lead's own
 # host markers, from a terminal (as the user, lead_via=tty), or under the SELF
-# seam when TRIFORGE_TEST_LEAD names the lead. It refuses under the other
-# lead's markers (naming at-setup lead), with no markers and no terminal, and
-# when the lead can't be resolved (fail closed, with the resolver's message).
-# A pass is cached in this shell for the same directory, roster bytes, markers,
-# stdin and seam, so the nested calls (every _ledger_update) cost one cksum.
+# seam when TRIFORGE_TEST_LEAD names the lead (_lead_origin_match). It refuses
+# under the other lead's markers (naming at-setup lead and roster_write_lead
+# <cli>, the writer it runs), under both leads' markers at once, with no
+# markers and no terminal, and when the lead can't be resolved (fail closed,
+# with the resolver's message). A pass is cached in this
+# shell for the same directory, roster bytes and origin (_lead_origin's via
+# and host: the decision's whole input), so the nested calls (every
+# _ledger_update) cost one cksum.
 _lead_host_gate() {
-  local OP=$1 ROSTER SIG="" T="" KEY OUT RC=0 LEAD TAB LNAME HNAME SEAM=""
+  local OP=$1 ROSTER SIG="" KEY OUT RC=0 LEAD TAB LNAME HNAME SEAM="" M=0
   TAB=$(printf '\t')
   ROSTER=$(_lead_roster_path)
   if [ -f "$ROSTER" ]; then SIG=$(cksum < "$ROSTER" 2>/dev/null || true); fi
-  if [ -t 0 ]; then T=tty; fi
-  KEY="${PWD}|${SIG}|${CLAUDECODE:-}|${CLAUDE_CODE_ENTRYPOINT:-}|${CODEX_THREAD_ID:-}|${CODEX_CI:-}|${T}|${TRIFORGE_TEST_BUILDER:-}|${TRIFORGE_TEST_LEAD:-}"
+  _lead_origin
+  KEY="${PWD}|${ROSTER}|${SIG}|${_LEAD_VIA}|${_LEAD_HOST}"
   if [ -n "${_LEAD_GATE_KEY:-}" ] && [ "$_LEAD_GATE_KEY" = "$KEY" ]; then
     return 0
   fi
@@ -640,20 +693,22 @@ _lead_host_gate() {
     return "$_RC_LEAD_ONLY"
   fi
   LEAD=${OUT%%"$TAB"*}
-  _lead_origin
-  case "$_LEAD_VIA" in
-    tty) ;;
-    lead-session|test)
-      if [ "$_LEAD_HOST" != "$LEAD" ]; then
-        LNAME=$(cli_field "$LEAD" name 2>/dev/null) || LNAME=$LEAD
-        HNAME=$(cli_field "$_LEAD_HOST" name 2>/dev/null) || HNAME=$_LEAD_HOST
-        if [ "$_LEAD_VIA" = test ]; then SEAM=" (simulated: TRIFORGE_TEST_LEAD)"; fi
-        echo "${OP}: REFUSED — this checkout's lead is ${LNAME} ([lead] cli = \"${LEAD}\" in ${ROSTER}), but this shell runs under ${HNAME}${SEAM}; run it from the ${LNAME} lead, or make ${HNAME} the lead first with at-setup lead (R38, rc ${_RC_LEAD_ONLY})" >&2
-        return "$_RC_LEAD_ONLY"
-      fi
+  _lead_origin_match "$_LEAD_VIA" "$_LEAD_HOST" "$LEAD" || M=$?
+  case "$M" in
+    0) ;;
+    1)
+      LNAME=$(cli_field "$LEAD" name 2>/dev/null) || LNAME=$LEAD
+      HNAME=$(cli_field "$_LEAD_HOST" name 2>/dev/null) || HNAME=$_LEAD_HOST
+      if [ "$_LEAD_VIA" = test ]; then SEAM=" (simulated: TRIFORGE_TEST_LEAD)"; fi
+      echo "${OP}: REFUSED — this checkout's lead is ${LNAME} ([lead] cli = \"${LEAD}\" in ${ROSTER}), but this shell runs under ${HNAME}${SEAM}; run it from the ${LNAME} lead, or make ${HNAME} the lead first with at-setup lead or roster_write_lead ${_LEAD_HOST} (R38, rc ${_RC_LEAD_ONLY})" >&2
+      return "$_RC_LEAD_ONLY"
+      ;;
+    3)
+      echo "${OP}: REFUSED — $(_lead_ambiguous_note) (R38, rc ${_RC_LEAD_ONLY})" >&2
+      return "$_RC_LEAD_ONLY"
       ;;
     *)
-      echo "${OP}: REFUSED — no lead host markers (CLAUDECODE or CLAUDE_CODE_ENTRYPOINT for Claude Code, CODEX_THREAD_ID or CODEX_CI for Codex) and no terminal on stdin, so nothing says this shell is the ${LEAD} lead; run it from the lead's tool shell or from a terminal (KTD1, R38, rc ${_RC_LEAD_ONLY})" >&2
+      echo "${OP}: REFUSED — no lead host markers (${_LEAD_HOST_MARKERS}) and no terminal on stdin, so nothing says this shell is the ${LEAD} lead; run it from the lead's tool shell or from a terminal (KTD1, R38, rc ${_RC_LEAD_ONLY})" >&2
       return "$_RC_LEAD_ONLY"
       ;;
   esac
@@ -862,9 +917,11 @@ print(', '.join(t + ' (' + s + ')' for t, s in rows) + '\t' + str(sum(1 for t, s
 # effort left out: the lead default (xhigh for codex, the session default for
 # claude); an explicit "" is written as given.
 #
-# It runs from either lead CLI or a terminal, never from a worker or a lease
-# root (_lead_only --any-host): switching the lead is the user's call in
-# at-setup, and a lead-owned helper refused under the other CLI points here. A
+# It runs from either lead CLI's session, a terminal or the SELF seam, never
+# from a worker or a lease root (_lead_only --any-host), and never from a
+# shell with no stated origin (via=none) or with both leads' host markers
+# (_lead_origin_match): switching the lead is the user's call in at-setup, and
+# a lead-owned helper refused under the other CLI points here. A
 # switch to another CLI refuses while the ledger holds an open lease (every
 # state but merged and failed), naming each. --force hands them over: it runs
 # only from the new lead or a terminal, stamps handover_from and handover_at on
@@ -875,11 +932,12 @@ print(', '.join(t + ' (' + s + ')' for t, s in rows) + '\t' + str(sum(1 for t, s
 # are. The same CLI with a new model or effort is not a switch.
 # rc: 0 written; 1 refused (open leases, a forced handover from elsewhere than
 # the new lead, an unreadable ledger); 2 invalid argument; 3/4 roster
-# unreadable; 45 a worker or a lease root; 64 usage; after a write, the
-# sweep's own rc.
+# unreadable; 45 a worker, a lease root, no stated origin or ambiguous host
+# markers; 64 usage; after a write, the sweep's own rc.
 roster_write_lead() {
   _lead_only roster_write_lead --any-host || return $?   # never from a worker or a lease root (KTD9)
-  local CLI="" MODEL=__default__ EFFORT=__default__ FORCE=0 N=0 A TAB CAPABLE CUR RC=0 CUR_CLI="" ROSTER LEDGER OPEN="" LIST="" NB=0
+  local CLI="" MODEL=__default__ EFFORT=__default__ FORCE=0 N=0 A TAB CAPABLE CUR RC=0 CUR_CLI="" ROSTER LEDGER OPEN="" LIST="" NB=0 M=0
+  local TRIFORGE_LEASE_ROOT="${TRIFORGE_LEASE_ROOT:-}"   # _lease_at_ledger_root may set it for the handover
   local USAGE="roster_write_lead: usage: roster_write_lead <cli> [<model> [<effort>]] [--force]"
   TAB=$(printf '\t')
   for A in "$@"; do
@@ -915,6 +973,21 @@ roster_write_lead() {
       return 2
       ;;
   esac
+  # Where this runs (R38): either lead's session, a terminal or the SELF seam
+  # may switch the lead (M 0 or 1); a forced handover with open leases needs
+  # the new lead's (M 0, below).
+  _lead_origin
+  _lead_origin_match "$_LEAD_VIA" "$_LEAD_HOST" "$CLI" || M=$?
+  case "$M" in
+    3)
+      echo "roster_write_lead: REFUSED — $(_lead_ambiguous_note) (R38, rc ${_RC_LEAD_ONLY})" >&2
+      return "$_RC_LEAD_ONLY"
+      ;;
+    2)
+      echo "roster_write_lead: REFUSED — via=none: no lead host markers (${_LEAD_HOST_MARKERS}), no terminal on stdin and no SELF seam, so nothing says a lead or the user is switching the lead; run it from either lead's tool shell or from a terminal (R38, rc ${_RC_LEAD_ONLY})" >&2
+      return "$_RC_LEAD_ONLY"
+      ;;
+  esac
   CUR=$(roster_lead_entry 2>&1) || RC=$?
   case "$RC" in
     0) CUR_CLI=${CUR%%"$TAB"*} ;;
@@ -935,24 +1008,18 @@ roster_write_lead() {
       echo "roster_write_lead: REFUSED — switching the lead from ${CUR_CLI:-an invalid [lead]} to ${CLI} while leases are open: ${LIST}. Finish or reclaim them first, or hand them over with --force from the ${CLI} lead (R38)" >&2
       return 1
     fi
+    if [ -n "$LIST" ] && [ "$M" -ne 0 ]; then
+      echo "roster_write_lead: REFUSED — a forced handover runs from the new lead (${CLI}) or a terminal, so the new lead adopts the building leases; this shell runs under ${_LEAD_HOST} (R38)" >&2
+      return 1
+    fi
     if [ -n "$LIST" ]; then
-      _lead_origin
-      case "$_LEAD_VIA" in
-        tty) ;;
-        lead-session|test)
-          if [ "$_LEAD_HOST" != "$CLI" ]; then
-            echo "roster_write_lead: REFUSED — a forced handover runs from the new lead (${CLI}) or a terminal, so the new lead adopts the building leases; this shell runs under ${_LEAD_HOST} (R38)" >&2
-            return 1
-          fi
-          ;;
-        *)
-          echo "roster_write_lead: REFUSED — a forced handover runs from the new lead (${CLI}) or a terminal; this shell has no lead host markers and no terminal on stdin (R38)" >&2
-          return 1
-          ;;
-      esac
       # Every open row records the handover before [lead] changes (U10, KTD2):
       # a lead-class pin made before it then needs the user's merge approval,
-      # with no re-pin. A stamp that can't be written stops the switch.
+      # with no re-pin. A stamp that can't be written stops the switch. The
+      # stamp and the lead-exit sweep below run under the lease root the
+      # ledger was last written under, beside the lead's integrity anchors.
+      _lease_ctx || return 1
+      _lease_at_ledger_root roster_write_lead || return 1
       _lease_mark_handover "${CUR_CLI:-unknown}" "$CLI" || return 1
     fi
   fi

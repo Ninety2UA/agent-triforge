@@ -161,9 +161,10 @@ _LEAD_GITCONFIG_SIGNATURE='# Triforge trusted git config'
 # runs under [lead].cli, or a person runs it from a terminal, or the SELF
 # harness names the lead. --any-host skips only that last check: the lead
 # switch (roster_write_lead) runs from either lead CLI, and the approval
-# helper (lease_approve) records where it ran (_lead_origin) instead of
-# refusing; both write the ledger through _ledger_write, the ledger writer's
-# own --any-host form. The marker
+# helper (lease_approve) records where it ran (_lead_origin); each runs its
+# own origin check instead (_lead_origin_match, roster.sh: no stated origin
+# and ambiguous host markers refused), and both write the ledger through
+# _ledger_write, the ledger writer's own --any-host form. The marker
 # and the lease root come first, so neither host markers nor the SELF seam
 # (TRIFORGE_TEST_BUILDER + TRIFORGE_TEST_LEAD) ever let a worker through.
 _lead_only() {
