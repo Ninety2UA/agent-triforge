@@ -218,7 +218,7 @@ NOTE_LINES = 500
 NOTE_CHARS = 20000  # ≈ 5,000 tokens
 # Shrink-only allowlist for C15: a listed skill may stay over 8,000 bytes while
 # it is at or under its recorded ceiling (the size when the cap landed).
-OVER_BUDGET = {"wave-orchestration": 27410, "verification-before-completion": 9691}
+OVER_BUDGET = {}
 ALLOWED_ENTRIES = ("SKILL.md", "references", "scripts", "assets", "agents")
 HARNESS_NAMES = ("claude", "claude-code", "codex", "antigravity", "agy", "opencode", "kimi", "cursor", "grok", "devin")
 CLAUDE_TOOLS = ("Read", "Edit", "MultiEdit", "Write", "Bash", "Grep", "Glob", "WebFetch", "WebSearch",

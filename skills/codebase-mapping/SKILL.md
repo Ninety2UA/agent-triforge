@@ -1,8 +1,8 @@
 ---
 name: codebase-mapping
-description: "Full-repository analysis methodology producing ARCHITECTURE.md plus MEMORY.md and CONTRACTS.md appendices: structure, data flow, patterns, interfaces, technical debt, dependencies. Use when starting work on an unfamiliar or changed codebase (Phase 0), when a plan needs module boundaries it cannot find, or when CONTRACTS.md lacks interfaces the code already has. Not for reviewing a single change; that is an architecture review."
+description: "Use when mapping an unfamiliar or changed codebase (Phase 0): structure, data flow, interfaces and technical debt."
 metadata:
-  triforge-consumer: "Antigravity (analyst)"
+  triforge-consumer: "the analyst role"
   triforge-phase: "0 (codebase analysis)"
   version: "3.3.0"
 ---

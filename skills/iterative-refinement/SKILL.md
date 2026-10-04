@@ -1,8 +1,8 @@
 ---
 name: iterative-refinement
-description: "Review-fix-review loop with confidence tiering, convergence modes, a per-cycle dispositions ledger, and a three-cycle cap. Use when processing findings from parallel reviewers after a build, when deciding whether another review cycle is needed, or when a task returns from a fix cycle. Not for merging reviewer outputs into one report; that is review-synthesis, which runs first."
+description: "Use when processing review findings after a build: triage, fix, dispositions ledger, convergence check, three-cycle cap."
 metadata:
-  triforge-consumer: "Claude (lead)"
+  triforge-consumer: "the lead"
   triforge-phase: "4 (process reviews)"
   version: "3.3.0"
 ---
