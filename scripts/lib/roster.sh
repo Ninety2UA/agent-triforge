@@ -310,7 +310,7 @@ _TRIO_LIVE_CACHE="${TMPDIR:-/tmp}/triforge_trio_live_$$"
 # Success is cached in _TRIO_LIVE_CACHE so repeat calls are free; failures
 # are re-probed each call so a mid-session fix is picked up.
 # NOT called at session start — a /status-only session must never trigger
-# it. Call sites live in the /build and /review preambles.
+# it. Call sites live in the at-build and at-review preambles.
 # On failure: hard error listing exactly which member failed and its
 # install/login fix (KTD-9 wording), return 1.
 ensure_core_trio_live() {
@@ -341,7 +341,7 @@ ensure_core_trio_live() {
 ${ROWS}
 TRIO_ROWS_EOF
   if [ "$FAILED" -ne 0 ]; then
-    echo "ensure_core_trio_live: the core trio (${CORE// /, }) must be live before /build or /review can dispatch — see fixes above." >&2
+    echo "ensure_core_trio_live: the core trio (${CORE// /, }) must be live before at-build or at-review can dispatch — see fixes above." >&2
     return 1
   fi
   : > "$_TRIO_LIVE_CACHE"
@@ -357,9 +357,9 @@ TRIO_ROWS_EOF
 #   - R37 first-detection: hooks/handlers/session-start.sh, after optional-CLI
 #     detection, calls roster_enroll_member <cli> headless for each newly
 #     detected optional member. A hook cannot prompt, so headless silently
-#     enrolls the shipped default (KTD-8); a later /setup then shows the member
+#     enrolls the shipped default (KTD-8); a later at-setup then shows the member
 #     as already-enrolled instead of re-asking.
-#   - R39 guided walk: commands/setup.md drives the interactive ask (participate?
+#   - R39 guided walk: skills/at-setup/SKILL.md drives the interactive ask (participate?
 #     + which model) and records the answer through roster_write_member.
 #
 # The [members.<cli>] table in ops/roster.toml is BOTH the enrollment record and
@@ -420,7 +420,7 @@ latest_probe_record() {
 #   cli<TAB>model<TAB>effort<TAB>fallbacks-csv
 # Shipped defaults overlaid per-field by any [roles.<role>] entry in
 # ops/roster.toml, WITHOUT the liveness walk: this reports what is configured
-# (for the /setup role table), not which member would answer right now. The
+# (for the at-setup role table), not which member would answer right now. The
 # model column follows resolve_role's primary-model rule — an explicit role
 # model always wins, and a cli-only override displays that CLI's member/shipped
 # default (what dispatch would actually run), never the role-default model of a
@@ -970,7 +970,7 @@ roster_member_auth() {
   return $RC
 }
 
-# roster_member_status <cli> — single-token status for the /setup table:
+# roster_member_status <cli> — single-token status for the at-setup table:
 #   core                 core-trio member present (required, never enrolled)
 #   not-installed        binary absent from PATH
 #   enrolled(<model>)    [members.<cli>] enabled=true
@@ -1020,7 +1020,7 @@ roster_member_status() {
 #   2  invalid       unknown cli, core-trio cli, or bad mode
 #   4  roster-error  ops/roster.toml exists but is unparseable
 #   10 not-installed binary absent — the OFFICIAL install command is PRINTED
-#                    (never run); /setup shows the row as "not installed"
+#                    (never run); at-setup shows the row as "not installed"
 #   20 needs-ask     interactive + installed + unenrolled — the CALLER runs the
 #                    participate?/which-model ask, then roster_write_member
 #   30 unsupported   installed but an unsupported line (OpenCode V2, D-049) —
@@ -1041,7 +1041,7 @@ roster_enroll_member() {
   DEFAULT=$(roster_member_default "$CLI")
 
   # OpenCode V2 (D-049): unsupported, so never offered for enrollment (and never
-  # auto-enrolled headless). Checked before the idempotency gate so /setup also
+  # auto-enrolled headless). Checked before the idempotency gate so at-setup also
   # flags an already-enrolled V1 member whose binary was upgraded to V2 —
   # dispatches to it refuse until the V1 pin is restored. Nothing is recorded.
   if [ "$CLI" = "opencode" ] && command -v "$BIN" >/dev/null 2>&1 && ! _opencode_v2_check "$BIN"; then
@@ -1050,7 +1050,7 @@ roster_enroll_member() {
   fi
 
   # Idempotency (AE6): any existing entry — enrolled OR declined — suppresses
-  # the ask. This is what makes /setup and first-detection re-runnable.
+  # the ask. This is what makes at-setup and first-detection re-runnable.
   local HAS_RC=0
   roster_has_member "$CLI" || HAS_RC=$?
   if [ "$HAS_RC" -eq 0 ]; then

@@ -71,7 +71,7 @@ For **`/repo-watch`**, the verdicts live in the report itself: each candidate ca
 
 ## Swarm shape
 
-Follow the deep-research command's swarm shape (`commands/deep-research.md`): **fan out one research/mining worker per target in a single parallel dispatch, then the lead synthesizes.** Per Security rules 3–4, workers are read-only researchers (no `ops/` write, no secret access) that return findings; the lead validates targets, sanitizes returns, and is the sole writer of the report + ADR. For a large CLI set, group workers so no two contend for the same rate-limited source.
+Follow the at-deep-research skill's swarm shape (`skills/at-deep-research/SKILL.md`): **fan out one research/mining worker per target in a single parallel dispatch, then the lead synthesizes.** Per Security rules 3–4, workers are read-only researchers (no `ops/` write, no secret access) that return findings; the lead validates targets, sanitizes returns, and is the sole writer of the report + ADR. For a large CLI set, group workers so no two contend for the same rate-limited source.
 
 ## Continue-and-flag
 

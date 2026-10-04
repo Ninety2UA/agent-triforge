@@ -1,11 +1,11 @@
 ---
 name: at-skill-work
-description: "Use when writing or changing a Triforge skill (SKILL.md, references, scripts) so it passes validate-skills under --strict."
+description: "Use when writing or changing a Triforge skill (SKILL.md, references, scripts) so it passes validate-skills, where warnings are errors."
 ---
 
 # Skill Work
 
-**Goal:** a skill that every enrolled CLI can load and act on — Claude Code, Codex, Antigravity, OpenCode, Kimi or Cursor — from the plugin tree or from an `.agents/skills/` copy. **Done when** `bash ./scripts/validate-skills.sh --strict` passes for the shipped skills (its default scope is `./skills/`; a skill under `./.claude/skills/` is validated only when you name that directory: `bash ./scripts/validate-skills.sh --strict ./.claude/skills`) and `bash ./scripts/validate-skills.sh --self-test` still reports every fixture OK. **Safe failure:** a rule you cannot meet stays a warning in the default mode; never silence it by widening the validator — change the skill, or raise the rule in review.
+**Goal:** a skill that every enrolled CLI can load and act on — Claude Code, Codex, Antigravity, OpenCode, Kimi or Cursor — from the plugin tree or from an `.agents/skills/` copy. **Done when** `bash ./scripts/validate-skills.sh` passes for the shipped skills (its default scope is `./skills/`; a skill under `./.claude/skills/` is validated only when you name that directory: `bash ./scripts/validate-skills.sh ./.claude/skills`) and `bash ./scripts/validate-skills.sh --self-test` still reports every fixture OK. **Safe failure:** a rule you cannot meet fails the run (`--warn` only shows it as a warning while you work); never silence it by widening the validator — change the skill, or raise the rule in review.
 
 ## What a skill says (R17)
 
@@ -33,8 +33,8 @@ Prose carries what a model cannot infer: the goal, the done condition, the safe 
 
 ## Validate
 
-`bash ./scripts/validate-skills.sh` warns on the new rules and fails on the old ones; `--strict` fails on both and becomes the default in U23. `--self-test` runs the fixtures under `./scripts/fixtures/validate-skills/`, one scratch repo per rule with an `EXPECT` file: add or adjust a fixture whenever a rule changes. `skills-ref validate` runs when the binary is installed; until then its verdict on `disable-model-invocation` and `argument-hint` is pending.
+`bash ./scripts/validate-skills.sh` fails on every rule; `--warn` downgrades the newer rules to warnings while you iterate (`--strict` is accepted and changes nothing). `--self-test` runs the fixtures under `./scripts/fixtures/validate-skills/`, one scratch repo per rule with an `EXPECT` file: add or adjust a fixture whenever a rule changes. `skills-ref validate` runs when the binary is installed; until then its verdict on `disable-model-invocation` and `argument-hint` is pending.
 
 ## Output
 
-- The changed skill, the `bash ./scripts/validate-skills.sh --strict` lines it produces (none, when done — with `./.claude/skills` named when the skill lives there), and a `--self-test` run that still reports every case OK.
+- The changed skill, the `bash ./scripts/validate-skills.sh` lines it produces (none, when done — with `./.claude/skills` named when the skill lives there), and a `--self-test` run that still reports every case OK.

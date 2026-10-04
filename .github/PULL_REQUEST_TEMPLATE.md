@@ -26,7 +26,7 @@ versions produced this change.
 ## Verification
 
 - [ ] `claude plugin validate --strict .` passes (warnings are errors)
-- [ ] `bash scripts/validate-skills.sh` exits 0
+- [ ] `bash scripts/validate-skills.sh` exits 0 (warnings are errors; `--warn` is the relaxed run)
 - [ ] `bash scripts/validate-versions.sh` exits 0 — summary line: `<paste it: ladder: one definition (scripts/lib/registry.sh)>`
 - [ ] `bash -n scripts/*.sh hooks/handlers/*.sh` exits 0
 - [ ] Probe record regenerated and cited: `ops/research/<YYYY-MM>-probe-record.md` — rows: <!-- e.g. AGY-05, CDX-03 -->
@@ -40,7 +40,7 @@ ops/roster.toml (incl. [promotion]); each CLI's config and permission tree (.cla
 opencode.json, opencode.jsonc, .cursorrules and .gitmodules at the root); and every AGENTS.md,
 AGENTS.override.md, CLAUDE.md, CLAUDE.local.md and .mcp.json at any depth. In this
 repo (the Triforge checkout) also the framework's control plane: the enforcement,
-probe and release scripts, hooks/, skills/, commands/, the shipped agent configs,
+probe and release scripts, hooks/, skills/, the shipped agent configs,
 .claude-plugin/, settings.json, templates/, personas/, .github/ and every
 .gitattributes (full list in the "Protected paths" bullet of AGENTS.md, "Do not touch").
 The lease_promote scan is case-folded, sees both sides of a rename, and fails

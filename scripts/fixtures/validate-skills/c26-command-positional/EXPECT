@@ -1,3 +1,0 @@
-check: C26
-default: warn
-message: never $N

@@ -52,7 +52,7 @@
 set -eu
 
 POINTER_NAME=".agents/triforge-plugin-root.local"
-SETUP_HINT='run the Triforge setup skill (`/setup` today, `at-setup` from 4.0)'
+SETUP_HINT='run the Triforge setup skill at-setup (`/at-setup` under Claude Code, `$at-setup` in a Codex prompt)'
 
 is_triforge_root() { # is_triforge_root <dir>
   if [ -n "${1:-}" ] && [ -f "$1/scripts/invoke-external.sh" ] && [ -f "$1/.claude-plugin/plugin.json" ] \

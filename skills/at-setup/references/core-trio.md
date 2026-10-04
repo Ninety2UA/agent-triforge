@@ -7,7 +7,7 @@ ensure_core_trio_live && echo "CORE-TRIO: live" || echo "CORE-TRIO: UNRESOLVED"
 ```
 
 - `live`: the trio is installed and answered its liveness probe (fast non-model `--version` checks, 15 s each, cached per session).
-- `UNRESOLVED`: `ensure_core_trio_live` already named exactly which member failed and its install or login fix on stderr. Setup stays UNRESOLVED (loud) until the user installs or logs in that member (AE8). Print the exact fix (or `_roster_install_cmd <cli>` for the install line), say that setup cannot complete until the trio is live, and still print the closing table so the user sees the whole picture. Only the user runs installers and logins; nothing here does.
+- `UNRESOLVED`: `ensure_core_trio_live` already named exactly which member failed and its install or login fix on stderr. Setup stays UNRESOLVED (loud) until the user installs or logs in that member (AE8). Print the exact fix (or `cli_install_fix <cli>` for the install-then-login line), say that setup cannot complete until the trio is live, and still print the closing table so the user sees the whole picture. Only the user runs installers and logins; nothing here does.
 
 ## Idempotency and re-runs
 

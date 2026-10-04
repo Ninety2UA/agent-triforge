@@ -1,3 +1,3 @@
 check: C07
-default: fail
+under-warn: error
 message: description missing

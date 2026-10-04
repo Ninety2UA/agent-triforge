@@ -29,7 +29,7 @@ else
   printf '%-12s  %-10s  %-8s  %-24s\n' CLI INSTALLED AUTH ENROLLED-MODEL
 fi
 for cli in claude antigravity codex opencode kimi cursor; do
-  bin=$(_roster_binary "$cli")
+  bin=$(_registry_binary "$cli")
   if command -v "$bin" >/dev/null 2>&1; then inst=yes; else inst=no; fi
   st=$(roster_member_status "$cli")
   if [ "$ROSTER_OK" = yes ]; then role=$(ROLES_CLI=$cli _roles_for); else role=""; fi

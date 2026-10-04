@@ -19,7 +19,7 @@
 #   (Claude Code ≥ 2.1.246 rejects hook stdout that parses as JSON — D-031c).
 #   Audited 2026-10-01: every stdout line is prose ("Multi-agent framework
 #   ready.", "session-start: …", "Roster …", "WARNING: …", "Tip: …",
-#   "Commands: …");
+#   "Lead workflows: …");
 #   every external-CLI capture (agy plugin list / agy agents / claude
 #   --version) is consumed here and never echoed — the floor warning prints
 #   only the X.Y.Z digits parsed out of it.
@@ -195,7 +195,7 @@ fi
 # Project-tier settings are still NOT read headless: the July probe (no
 # project-tier settings.json lifted the `agy -p` auto-deny) stands, and D-032
 # records that settings.json enforcement is user-tier only
-# (~/.gemini/antigravity-cli/settings.json — never touched here; /setup
+# (~/.gemini/antigravity-cli/settings.json — never touched here; at-setup
 # documents the `read_url(*)` allow rule there). The shipped file documents the
 # deny intent in agy's action syntax (`command(rm -rf)`, `command(git push)`,
 # `command(sudo)`) and covers interactive `agy` use. Hooks (AGY-08): the
@@ -458,7 +458,7 @@ mv -f "$ROSTER_DETECTED_TMP" "$ROSTER_DETECTED" 2>/dev/null || rm -f "$ROSTER_DE
 # session with no [members.<cli>] entry yet:
 #   headless (interactive=no) -> silently enroll its shipped default now (a hook
 #     cannot prompt); the lease layer records the resolved model at dispatch.
-#   interactive (=yes)        -> emit an orientation line pointing at /setup.
+#   interactive (=yes)        -> emit an orientation line pointing at /at-setup.
 # All writes go through the single-writer roster writer (roster_write_member) in
 # the helper sourced above — never a hand-rolled write here. Fast: headless
 # enrollment does no live auth probe; each helper call is tomllib-only.
@@ -473,7 +473,7 @@ if [ -n "$SS_HELPER" ] && [ "${#DETECTED_OPTIONAL[@]}" -gt 0 ]; then
       roster_enroll_member "$CLI_NAME" headless >/dev/null 2>&1 || true
     else
       ENROLL_DEF=$(roster_member_default "$CLI_NAME" 2>/dev/null || true)
-      ENROLLMENT_NOTICES="${ENROLLMENT_NOTICES}\nNew optional CLI detected: ${CLI_NAME} (unenrolled). Run /setup to enroll, or it enrolls with its shipped default (${ENROLL_DEF}) on first headless use."
+      ENROLLMENT_NOTICES="${ENROLLMENT_NOTICES}\nNew optional CLI detected: ${CLI_NAME} (unenrolled). Run /at-setup to enroll, or it enrolls with its shipped default (${ENROLL_DEF}) on first headless use."
     fi
   done
 fi
@@ -505,7 +505,7 @@ fi
 # Roster pin drift (informational): persisted [members.*].model / [roles.*].model
 # values that differ from the shipped defaults. An upgraded project keeps
 # whatever its roster carries — a pin is never rewritten here — so one line per
-# differing pin points at /setup. The shipped defaults are read from the two
+# differing pin points at /at-setup. The shipped defaults are read from the two
 # literals the helper exports — the CLI registry (_TRIFORGE_CLIS_PY,
 # scripts/lib/registry.sh: per-CLI model) and the role table (_ROLE_DEFAULTS_PY,
 # scripts/lib/roster.sh: role -> cli) — handed to python as environment
@@ -550,7 +550,7 @@ try:
                 continue
             model = str(entry.get("model", "") or "")
             if model and norm(name, model) != norm(name, SHIPPED[name]):
-                lines.append("Roster pin differs from the shipped default: members.%s.model=%s (shipped: %s) — run /setup to re-enroll, or edit ops/roster.toml" % (name, model, SHIPPED[name]))
+                lines.append("Roster pin differs from the shipped default: members.%s.model=%s (shipped: %s) — run /at-setup to re-enroll, or edit ops/roster.toml" % (name, model, SHIPPED[name]))
     roles = data.get("roles", {})
     if isinstance(roles, dict):
         for name in sorted(roles):
@@ -561,7 +561,7 @@ try:
             model = str(entry.get("model", "") or "")
             shipped = SHIPPED.get(cli)
             if model and shipped is not None and norm(cli, model) != norm(cli, shipped):
-                lines.append("Roster pin differs from the shipped default: roles.%s.model=%s (shipped: %s) — run /setup roles to re-default" % (name, model, shipped))
+                lines.append("Roster pin differs from the shipped default: roles.%s.model=%s (shipped: %s) — run /at-setup roles to re-default" % (name, model, shipped))
     for line in lines:
         print(line)
 except Exception:
@@ -823,7 +823,7 @@ SOLUTION_COUNT=$(find ops/solutions -name "*.md" 2>/dev/null | wc -l | tr -d ' '
 MSG=""
 
 if [ "$HAS_STATE" = "yes" ]; then
-  MSG="$MSG\nPrevious session state found (ops/STATE.md). Use /resume to continue."
+  MSG="$MSG\nPrevious session state found (ops/STATE.md). Use /at-resume to continue."
 fi
 
 if [ "$HAS_TASKS" = "yes" ]; then
@@ -839,7 +839,7 @@ if [ "$HAS_AGENTS" = "yes" ]; then
 fi
 
 if [ "$HAS_REVIEWS" = "yes" ]; then
-  MSG="$MSG\nUnprocessed review files found. Consider running /review to process them."
+  MSG="$MSG\nUnprocessed review files found. Consider running /at-review to process them."
 fi
 
 if [ "$SOLUTION_COUNT" -gt "0" ]; then
@@ -920,7 +920,7 @@ MSG="$MSG${INSTRUCTION_NOTICES:-}"
 
 # Lease-ledger resume orientation (KTD-4/U9): report active leases left by a
 # previous session. Deliberately NO auto-prune here — a session-start hook
-# must never delete worktrees; /resume or the wave protocol runs
+# must never delete worktrees; at-resume or the wave protocol runs
 # lease_heartbeat_check, whose safe-prune path does the reclamation.
 ACTIVE_LEASES=0
 if [ -f "ops/leases.toml" ]; then
@@ -946,11 +946,11 @@ except Exception:
 " 2>/dev/null || echo 0)
 fi
 if [ "${ACTIVE_LEASES:-0}" -gt 0 ] 2>/dev/null; then
-  MSG="$MSG\nLease ledger: ${ACTIVE_LEASES} active lease(s) from a previous session — run lease_heartbeat_check (or /resume) to reclaim orphans."
+  MSG="$MSG\nLease ledger: ${ACTIVE_LEASES} active lease(s) from a previous session — run lease_heartbeat_check (or /at-resume) to reclaim orphans."
 fi
 
 if [ "$HAS_TASKS" != "yes" ] && [ "$HAS_STATE" != "yes" ]; then
-  MSG="$MSG\nNo active sprint. Use /plan <goal> to start or /ship <goal> for full autonomous mode."
+  MSG="$MSG\nNo active sprint. Use /at-plan <goal> to start or /at-ship <goal> for full autonomous mode."
 fi
 
 # Append timeout-missing warning if set
@@ -963,7 +963,7 @@ MSG="$MSG${AGENTS_MD_TIP:-}"
 
 printf '%b\n' "Multi-agent framework ready.$MSG"
 echo ""
-echo "Commands: /setup /ship /plan /build /review /test /debug /quick /deep-research /analyze /coordinate /resolve-pr /status /pause /resume /wrap /compound"
+echo 'Lead workflows (/at-<name> here, $at-<name> in a Codex prompt): at-setup at-ship at-plan at-build at-review at-test at-debug at-quick at-deep-research at-analyze at-coordinate at-resolve-pr at-status at-pause at-resume at-wrap at-compound'
 
 exit 0
 }

@@ -70,16 +70,20 @@
 #      ("history" or "was <word>"), and README.md at or below its
 #      "## Recent changes" heading (the release ledger: past entries name the
 #      pins they adopted at the time).
-#   5. Surface counts — agents/*.md, skills/*/SKILL.md, commands/*.md counts
-#      must match every count claim in AGENTS.md, templates/AGENTS.md,
-#      README.md (above "## Recent changes"), docs/index.html,
-#      docs/agent-triforge.md, .claude-plugin/plugin.json. A claim is
-#      "<N> [up to three words] agents|subagents|skills|commands" on a line
-#      about the shipped inventory (ship/plugin/portable/specialized/slash/
-#      surface/focused/model-agnostic/methodology, or a top-level dir path);
-#      subset phrasings ("+ 5 agents", "all 4 review agents", "5 parallel
-#      research agents") and history lines are skipped; "(was N)" is stripped
-#      before matching so the current number on the same line is still checked.
+#   5. Surface counts — agents/*.md and skills/*/SKILL.md, the skills counted
+#      three ways (every skill; the portable set, whose names do not start
+#      with at-; the at-* lead workflows), must match every count claim in
+#      AGENTS.md, templates/AGENTS.md, README.md (above "## Recent changes"),
+#      docs/index.html, docs/agent-triforge.md, .claude-plugin/plugin.json.
+#      The vocabulary: "<N> skills" is every skill, "<N> portable skills" the
+#      portable set, "<N> lead workflows" the at-* set, and "<N> [up to three
+#      words] agents|subagents" the agent count. A claim counts on a line
+#      about the shipped inventory (ship/plugin/portable/specialized/surface/
+#      focused/model-agnostic/methodology/lead workflow, or a top-level dir
+#      path); subset phrasings ("+ 5 agents", "all 4 review agents", "5
+#      parallel research agents") and history lines are skipped; "(was N)" is
+#      stripped before matching so the current number on the same line is
+#      still checked.
 #   6. AGENTS.md budget (R10) — when a root AGENTS.md exists it must be at most
 #      200 lines (a final unterminated line counts) and at most 16 KiB
 #      (16384 bytes; Codex's combined instruction budget is 32 KiB). Prints a
@@ -631,21 +635,25 @@ fi
 # --- 5. surface counts -------------------------------------------------------
 AGENT_COUNT=$(ls agents/*.md 2>/dev/null | grep -c . || true)
 SKILL_COUNT=$(ls skills/*/SKILL.md 2>/dev/null | grep -c . || true)
-COMMAND_COUNT=$(ls commands/*.md 2>/dev/null | grep -c . || true)
+WORKFLOW_COUNT=$(ls skills/at-*/SKILL.md 2>/dev/null | grep -c . || true)
+PORTABLE_COUNT=$((SKILL_COUNT - WORKFLOW_COUNT))
 if [ "$NO_COUNTS" -eq 1 ]; then
-  echo "skip: surface counts (--no-counts; shipped: $AGENT_COUNT agents, $SKILL_COUNT skills, $COMMAND_COUNT commands)"
+  echo "skip: surface counts (--no-counts; shipped: $AGENT_COUNT agents, $SKILL_COUNT skills: $PORTABLE_COUNT portable, $WORKFLOW_COUNT lead workflows)"
 else
   COUNTS_RC=0
-  VV_AGENTS="$AGENT_COUNT" VV_SKILLS="$SKILL_COUNT" VV_COMMANDS="$COMMAND_COUNT" \
+  VV_AGENTS="$AGENT_COUNT" VV_SKILLS="$SKILL_COUNT" VV_PORTABLE="$PORTABLE_COUNT" VV_WORKFLOWS="$WORKFLOW_COUNT" \
   VV_README_HISTORY_START="$README_HISTORY_START" python3 - <<'PYEOF' || COUNTS_RC=$?
 import os
 import re
 import sys
 
+# "N skills" is every skill, "N portable skills" the non-at- set, "N lead
+# workflows" the at-* set (U23 vocabulary); "N agents" the agent files.
 actual = {
     "agent": int(os.environ["VV_AGENTS"]),
     "skill": int(os.environ["VV_SKILLS"]),
-    "command": int(os.environ["VV_COMMANDS"]),
+    "portable skill": int(os.environ["VV_PORTABLE"]),
+    "lead workflow": int(os.environ["VV_WORKFLOWS"]),
 }
 readme_history_start = int(os.environ["VV_README_HISTORY_START"] or "0")
 files = [
@@ -658,17 +666,17 @@ files = [
 ]
 CLAIM = re.compile(
     r"(?P<pre>(?:\+|\ball|of the|the other|\bother)\s+)?"
-    r"\b(?P<n>\d+)\s+(?P<mods>(?:[A-Za-z-]+\s+){0,3}?)(?P<sub>sub)?(?P<kind>agent|skill|command)s?\b",
+    r"\b(?P<n>\d+)\s+(?P<mods>(?:[A-Za-z-]+\s+){0,3}?)(?P<sub>sub)?(?P<kind>agent|skill|lead workflow)s?\b",
     re.I,
 )
 SUBSET_WORDS = {
     "parallel", "review", "research", "external", "reviewer", "reviewers",
     "background", "concurrent", "additional", "new", "more", "remaining", "other",
 }
-SURFACE_MODS = {"specialized", "portable", "slash", "shipped", "focused", "model-agnostic", "methodology"}
+SURFACE_MODS = {"specialized", "portable", "shipped", "focused", "model-agnostic", "methodology"}
 SURFACE_LINE = re.compile(
-    r"\bship|plugin|portable|specialized|slash|surface|focused|model-agnostic|methodology"
-    r"|agents/|skills/|commands/|restricted tools",
+    r"\bship|plugin|portable|specialized|surface|focused|model-agnostic|methodology"
+    r"|lead workflows?|agents/|skills/|restricted tools",
     re.I,
 )
 HISTORY = re.compile(r"history|\bwas\b|previously", re.I)
@@ -695,6 +703,8 @@ for path in files:
                 if not (mods & SURFACE_MODS) and not SURFACE_LINE.search(line):
                     continue
                 kind = m.group("kind").lower()
+                if kind == "skill" and "portable" in mods:
+                    kind = "portable skill"
                 n = int(m.group("n"))
                 claims += 1
                 if n != actual[kind]:
@@ -706,7 +716,7 @@ for path in files:
 # Landing-page hero counters carry the number in a data-target attribute and
 # the surface name in the next span, so the prose CLAIM regex never sees them.
 HERO = re.compile(
-    r'data-target="(?P<n>\d+)">0</span>\s*<span class="hero__stat-label">(?P<kind>Agents|Skills|Commands)</span>'
+    r'data-target="(?P<n>\d+)">0</span>\s*<span class="hero__stat-label">(?P<kind>Agents|Skills|Portable skills|Lead workflows)</span>'
 )
 if os.path.exists("docs/index.html"):
     with open("docs/index.html", encoding="utf-8") as fh:
@@ -728,8 +738,8 @@ if mismatches:
     sys.exit(1)
 print(
     "ok:   surface counts: " + str(claims) + " claims match shipped "
-    + str(actual["agent"]) + " agents / " + str(actual["skill"]) + " skills / "
-    + str(actual["command"]) + " commands"
+    + str(actual["agent"]) + " agents / " + str(actual["skill"]) + " skills ("
+    + str(actual["portable skill"]) + " portable, " + str(actual["lead workflow"]) + " lead workflows)"
 )
 PYEOF
   if [ "$COUNTS_RC" -ne 0 ]; then
@@ -898,7 +908,7 @@ fi
 
 # --- summary -----------------------------------------------------------------
 if [ "$FAILED_CHECKS" -eq 0 ]; then
-  echo "validate-versions: PASS — plugin $PLUGIN_V, ladder: one definition ($LADDER_SOURCE), $AGENT_COUNT agents / $SKILL_COUNT skills / $COMMAND_COUNT commands"
+  echo "validate-versions: PASS — plugin $PLUGIN_V, ladder: one definition ($LADDER_SOURCE), $AGENT_COUNT agents / $SKILL_COUNT skills ($PORTABLE_COUNT portable, $WORKFLOW_COUNT lead workflows)"
   exit 0
 fi
 echo "validate-versions: FAIL — $FAILED_CHECKS check(s) failed (see FAIL: lines above)"

@@ -28,11 +28,11 @@ ROOT=$(bash scripts/locate-triforge.sh) || exit $?; source "$ROOT/scripts/invoke
 set +e   # sourcing folds the helper's errexit into this shell; the enrollment helpers return nonzero as control flow, so turn it back off
 ```
 
-Functions used: `ensure_core_trio_live`, `roster_enroll_member`, `roster_member_default`, `roster_member_auth`, `roster_write_member`, `roster_member_status`, `roster_role_entry`, `roster_write_role`, `resolve_role`, `_roster_binary`, `_roster_install_cmd`.
+Functions used: `ensure_core_trio_live`, `roster_enroll_member`, `roster_member_default`, `roster_member_auth`, `roster_write_member`, `roster_member_status`, `roster_role_entry`, `roster_write_role`, `resolve_role`, `_registry_binary`, `cli_install_fix`.
 
 ## Facts the tree does not tell you
 
-- The core trio (claude, antigravity/`agy`, codex) is required: never enrolled, never optional, never disabled. `ensure_core_trio_live` names the failing member and its fix on stderr; `_roster_install_cmd <cli>` prints an install line. Gate and re-run rules: [core trio](references/core-trio.md).
+- The core trio (claude, antigravity/`agy`, codex) is required: never enrolled, never optional, never disabled. `ensure_core_trio_live` names the failing member and its fix on stderr; `cli_install_fix <cli>` prints the install-then-login line. Gate and re-run rules: [core trio](references/core-trio.md).
 - Codex project trust lives at the user tier (`~/.codex/config.toml`), detected and printed, never written (R18, D-026, D-045): [Codex trust](references/codex.md).
 - `roster_enroll_member <cli> interactive` returns 0 already enrolled or declined (never re-ask, AE6), 10 not installed (relay the printed install command; not an error, AE8), 20 needs-ask (participate? which model?), 30 unsupported (OpenCode V2, or a version that cannot be read, D-049: relay the V1 pin, record nothing). A decline persists as `enabled = false`. Shipped default models and live-list commands: [optional members](references/optional-members.md).
 - Roles are the task types (builder, reviewer, tester, analyst, documenter), each CLI · model · effort with a validated fallback chain ending at a core member. Probe first with `resolve_role builder`: rc 0 or 6 loadable, 3 no TOML parser (not a roster problem), any other rc ROSTER-INVALID (4 parse, 5 content). The single ask offers keep current (recommended), customize, and, only when `[roles.*]` overrides exist, restore shipped defaults: [roles](references/roles.md).

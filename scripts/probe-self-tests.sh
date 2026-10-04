@@ -659,20 +659,22 @@ rm -rf "$_S8/proj" "$_S8/proj-degraded" "$_S8_BAD" "$_S8/home" "$_S8A" "$_S8/ske
 # committed symlink to an outside directory (target untouched).
 # Delivered-copy audit (KTD12 / R16): the refresh into a clean project yields
 # exactly the portable set — no at-* lead workflow — the stamp names exactly
-# those, and the copy passes `validate-skills.sh --strict`; a user directory
+# those, and the copy passes `validate-skills.sh` (strict by default); a user directory
 # under a non-shipped name and a user at-foo directory survive the same refresh
 # untouched and unclaimed, and a stamp entry for at-foo never gets it retired.
 _S8B="${WORK}/self08b"
 _S8B_SYNC="${REPO_ROOT}/scripts/lib/skills-sync.py"
 _S8B_TABLE="${REPO_ROOT}/scripts/lib/skill-digests.txt"
 _S8B_FAIL=""
-# The portable set is every shipped skill except the at-* lead workflows, which
-# the refresh never copies (KTD12); every count in this row is against it.
-_S8B_PORTABLE=""; _S8B_AT=""
-for _n in $SHIPPED_SKILLS; do
-  case "$_n" in at-*) _S8B_AT="$_S8B_AT $_n" ;; *) _S8B_PORTABLE="$_S8B_PORTABLE $_n" ;; esac
+# SHIPPED_SKILLS is the portable set (the harness drops at-* at discovery); the
+# at-* lead workflows are listed from the tree here so this row can assert that
+# the refresh never copies them (KTD12). Every count in this row is against the
+# portable set.
+_S8B_PORTABLE=$SHIPPED_SKILLS; _S8B_AT=""
+for _d in "$REPO_ROOT"/skills/at-*/; do
+  if [ -f "${_d}SKILL.md" ]; then _S8B_AT="$_S8B_AT $(basename "$_d")"; fi
 done
-_S8B_PORTABLE=${_S8B_PORTABLE# }; _S8B_AT=${_S8B_AT# }
+_S8B_AT=${_S8B_AT# }
 # shellcheck disable=SC2086
 _S8B_PORTABLE_COUNT=$(_count_words $_S8B_PORTABLE)
 set -- $_S8B_PORTABLE
@@ -773,8 +775,9 @@ for _n in $_S8B_STAMPED; do
   esac
 done
 grep -q '^digest at-' "$C/.triforge-plugin-version" && _S8B_FAIL="$_S8B_FAIL audit-stamp-digests-an-at-skill"
-_S8B_VAL=$(bash "$REPO_ROOT/scripts/validate-skills.sh" --strict "$C" 2>&1) || _S8B_FAIL="$_S8B_FAIL audit-copy-fails-strict($(printf '%s\n' "$_S8B_VAL" | grep -v '^skip:' | head -1 | _scrub | cut -c1-120))"
-printf '%s\n' "$_S8B_VAL" | grep -q "^validate-skills: ${_S8B_PORTABLE_COUNT} skills OK (strict)\$" || _S8B_FAIL="$_S8B_FAIL audit-copy-summary($(printf '%s\n' "$_S8B_VAL" | tail -1 | _scrub | cut -c1-80))"
+# The default run is the strict one (U23): every finding is an error.
+_S8B_VAL=$(bash "$REPO_ROOT/scripts/validate-skills.sh" "$C" 2>&1) || _S8B_FAIL="$_S8B_FAIL audit-copy-fails-strict($(printf '%s\n' "$_S8B_VAL" | grep -v '^skip:' | head -1 | _scrub | cut -c1-120))"
+printf '%s\n' "$_S8B_VAL" | grep -q "^validate-skills: ${_S8B_PORTABLE_COUNT} skills OK\$" || _S8B_FAIL="$_S8B_FAIL audit-copy-summary($(printf '%s\n' "$_S8B_VAL" | tail -1 | _scrub | cut -c1-80))"
 # audit (users): a non-shipped user directory and a user at-foo directory beside the copy, both untouched and unclaimed
 U="$_S8B/users/.agents/skills"; mkdir -p "$U/my-notes" "$U/at-foo"
 echo "marker" > "$U/my-notes/USER-MARKER.txt"; echo "marker" > "$U/at-foo/USER-MARKER.txt"
@@ -785,7 +788,7 @@ _O=$(_s8b_start "$_S8B/users")
 [ "$(ls -A "$U/at-foo" | tr '\n' ' ')" = "USER-MARKER.txt " ] || _S8B_FAIL="$_S8B_FAIL users-at-foo-touched"
 grep -q 'my-notes\|at-foo' "$U/.triforge-plugin-version" && _S8B_FAIL="$_S8B_FAIL users-stamp-claims-user-dir"
 if [ -z "$_S8B_FAIL" ]; then
-  row "SELF-08b" "claude" "skills refresh by content digest: user dirs survive refresh, forged stamps and lease provisioning; legacy stamp migrates; unchanged retired copy removed; symlinks untouched; delivered copy is exactly the portable set, no at-* lead workflow, strict-valid (KTD12, R16, R31, CWE-59)" "PASS" "legacy stamp: pristine ${_S8B_PRISTINE} (${_S8B_PATH}) refreshed, edited ${_S8B_EDIT} kept + notice, stamp -> format 2 with digests; digest stamp: old-fake-skill retired, forged entry left ${_S8B_USER} intact, stamp-listed at-foo not retired; no stamp: empty slots only; symlinked .agents / .agents/skills targets untouched (session start + _lease_provision_skills); delivered copy: ${_S8B_PORTABLE_COUNT} portable skills, none of ${_S8B_AT:-no at-* shipped} copied, stamp names exactly those, validate-skills --strict OK on the copy; my-notes + at-foo user dirs untouched and unclaimed" "static"
+  row "SELF-08b" "claude" "skills refresh by content digest: user dirs survive refresh, forged stamps and lease provisioning; legacy stamp migrates; unchanged retired copy removed; symlinks untouched; delivered copy is exactly the portable set, no at-* lead workflow, strict-valid (KTD12, R16, R31, CWE-59)" "PASS" "legacy stamp: pristine ${_S8B_PRISTINE} (${_S8B_PATH}) refreshed, edited ${_S8B_EDIT} kept + notice, stamp -> format 2 with digests; digest stamp: old-fake-skill retired, forged entry left ${_S8B_USER} intact, stamp-listed at-foo not retired; no stamp: empty slots only; symlinked .agents / .agents/skills targets untouched (session start + _lease_provision_skills); delivered copy: ${_S8B_PORTABLE_COUNT} portable skills, none of ${_S8B_AT:-no at-* shipped} copied, stamp names exactly those, validate-skills OK on the copy (strict default); my-notes + at-foo user dirs untouched and unclaimed" "static"
 else
   row "SELF-08b" "claude" "skills refresh by content digest: user dirs survive refresh, forged stamps and lease provisioning; legacy stamp migrates; unchanged retired copy removed; symlinks untouched; delivered copy is exactly the portable set, no at-* lead workflow, strict-valid (KTD12, R16, R31, CWE-59)" "FAIL" "mismatch:${_S8B_FAIL}" "static"
 fi
@@ -1201,7 +1204,7 @@ _S11_E_PWD=$(grep -c 'pwd)/scripts' "$_S11_LOADER" || true)
 [ "$_S11_E_PWD" = 0 ] || _S11_FAIL="$_S11_FAIL e(pwd-fallback=$_S11_E_PWD)"
 _S11_CAP="plugin root without CLAUDE_PLUGIN_ROOT: loader + lanes resolve the plugin, never a project's scripts/ or skills/; skill locator order and pointer refusals; bare loader fails closed naming at-setup (KTD6/R16/R42)"
 if [ -z "$_S11_FAIL" ]; then
-  row "SELF-11" "claude" "$_S11_CAP" "PASS" "CLAUDE_PLUGIN_ROOT unset: loader root = this checkout; against argv-recording stubs codex passed --output-schema <root>/codex-agents/review-verdict.schema.json + a ${#_S11_CX_PRE}-char instructions prefix, kimi --agent-file <root>/kimi-agents/reviewer.md, cursor the reviewer brief prefixed onto the prompt (no empty brief); from a user project with its own scripts/invoke-external.sh + skills/user-skill: root = checkout, the project's loader never sourced, _lease_plugin_root = checkout, worktree provisioned with exactly the shipped skills (${_S11_GOT% }); locator: own location resolves under sh/bash/zsh, no pointer -> rc 1 naming at-setup, pointer inside the project / to a non-root / tracked -> rc 3, untracked pointer to the checkout -> resolves, linked worktree reads the main checkout's pointer, a root planted at <project>/.agents is ignored by a project-tier copy (pointer wins, else rc 1), pointer tracked under another letter case / behind a symlinked .agents -> rc 3; bare-dir loader copy sourced from the project -> rc ${_S11_D_RC} naming at-setup; scripts/lib/*.sh: 0 CLAUDE_PLUGIN_ROOT reads, loader: no pwd)/scripts fallback" "static"
+  row "SELF-11" "claude" "$_S11_CAP" "PASS" "CLAUDE_PLUGIN_ROOT unset: loader root = this checkout; against argv-recording stubs codex passed --output-schema <root>/codex-agents/review-verdict.schema.json + a ${#_S11_CX_PRE}-char instructions prefix, kimi --agent-file <root>/kimi-agents/reviewer.md, cursor the reviewer brief prefixed onto the prompt (no empty brief); from a user project with its own scripts/invoke-external.sh + skills/user-skill: root = checkout, the project's loader never sourced, _lease_plugin_root = checkout, worktree provisioned with exactly the portable skills (${_S11_GOT% }); locator: own location resolves under sh/bash/zsh, no pointer -> rc 1 naming at-setup, pointer inside the project / to a non-root / tracked -> rc 3, untracked pointer to the checkout -> resolves, linked worktree reads the main checkout's pointer, a root planted at <project>/.agents is ignored by a project-tier copy (pointer wins, else rc 1), pointer tracked under another letter case / behind a symlinked .agents -> rc 3; bare-dir loader copy sourced from the project -> rc ${_S11_D_RC} naming at-setup; scripts/lib/*.sh: 0 CLAUDE_PLUGIN_ROOT reads, loader: no pwd)/scripts fallback" "static"
 else
   row "SELF-11" "claude" "$_S11_CAP" "FAIL" "mismatch:$(printf '%s' "$_S11_FAIL" | cut -c1-700)" "static"
 fi

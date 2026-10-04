@@ -45,7 +45,7 @@ FRAMEWORK_PROTECTED = (
     "scripts/probe-capabilities.sh", "scripts/probe-self-tests.sh",
     "scripts/validate-skills.sh", "scripts/validate-versions.sh", "scripts/release-notes.sh",
     # lifecycle hooks, the lead-facing workflows and the persona home
-    "hooks/", "skills/", "commands/", "personas/",
+    "hooks/", "skills/", "personas/",
     # shipped agent configs, one directory per CLI
     "agents/", "antigravity-agents/", "codex-agents/", "opencode-agents/", "kimi-agents/", "cursor-agents/",
     # manifests, plugin settings, and the templates copied into user projects
