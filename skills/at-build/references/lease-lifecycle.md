@@ -1,0 +1,18 @@
+# Builder-pool wave protocol: the per-task lease loop
+
+Phase 2 runs the builder pool (the `wave-orchestration` skill, "Builder-pool wave protocol", carries the full mechanics). The single-writer rule is retired: every implementation task, including lead-authored ones, is assigned from `ops/roster.toml`, built under a per-task lease in an isolated worktree, and merged only after cross-review by a pinned non-author reviewer. Safety is leases + worktree isolation + cross-review, not write-restriction.
+
+Per task, with the helper sourced from the preflight:
+
+1. `lease_create <task> <role>` → `lease_dispatch <task> <prompt>`: the builder is resolved via `resolve_role`, context is injected (task rows, the `ops/CONTRACTS.md` slice, the roster entry), and the builder runs confined in its worktree and commits nothing.
+2. `lease_heartbeat_check` until it exits → `lease_collect` (state → review; prints the output path). A typed final report ending in `Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT` is required: DONE and DONE_WITH_CONCERNS route to review; BLOCKED and NEEDS_CONTEXT route to escalated; a clean exit with no Status line is "report missing" (rc 80), so re-dispatch once with the contract restated and escalate on the second miss.
+3. Pin a reviewer that is a DIFFERENT roster member than the builder (the lead is valid) with `lease_pin_reviewer <task> <reviewer>`, review the collected output, then `lease_merge <task> <reviewer>`: ONE squash commit per task on the sprint integration branch, from the lead's own snapshot, never from the branch name. `lease_merge` REFUSES self-review (AE3), an unknown reviewer identity, or a merge with no pin (the pin is the record that a review happened: pin, review, then merge). Findings re-dispatch the same lease/builder with the same pinned reviewer while the cycle is below 3; cycle 3 escalates to the user.
+4. At wave end, `integration-verifier` runs against the integration branch, then the lead promotes to the main branch with `lease_promote`. It reads `[promotion] require_user_approval` (default false) and scans the integration diff, BLOCKING (no merge) when approval is required or a protected path is touched. Protected-path diffs (permission configs, deny rules, `ops/roster.toml`, shipped agent configs) force the gate on and require the lead or the user as reviewer, never an external-CLI-only review. `lease_merge` also refuses to run when the main tree is on the default branch: merges land on the sprint integration branch; promotion is `lease_promote`'s job.
+
+## Attribution
+
+`ops/CHANGELOG.md` rows carry builder + reviewer + merge commit from the ledger (`lease_status`).
+
+## Integrity
+
+Every lease helper first compares git config, hooks, refs, worktree pointers and the ledger with the baseline in `ops/leases.toml`; a change the lead did not make escalates the open leases and returns rc 44. After the lead or the user changes any of those on purpose, run `lease_rebaseline` before the next lease call.

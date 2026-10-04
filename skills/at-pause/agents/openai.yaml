@@ -1,0 +1,6 @@
+interface:
+  display_name: "Pause checkpoint"
+  short_description: "Save a mid-sprint checkpoint to ops/STATE.md, nothing else."
+  default_prompt: "Run $at-pause to checkpoint the current session state to ops/STATE.md."
+policy:
+  allow_implicit_invocation: false

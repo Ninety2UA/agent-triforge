@@ -1,0 +1,45 @@
+# Optional members (Step 2, guided ask)
+
+For each optional CLI in order, `opencode`, `kimi`, `cursor` (or just the one named in the invocation; `roles` is not a CLI and routes straight to role assignment), run the preflight, then act on its return code:
+
+```bash
+roster_enroll_member <cli> interactive; echo "rc=$?"
+```
+
+- **`already-enrolled: ...` (rc 0)**: the member already has an entry (enrolled or declined). Show its current state from the message. Do not re-ask (AE6).
+- **`not-installed: ...` (rc 10)**: the helper printed the official install command. Relay it verbatim for the user to run themselves. Record nothing. This is not an error: the row shows "not installed" / skipped and setup continues (AE8).
+- **`unsupported: ...` (rc 30)**: installed, but an unsupported line. Today that is only OpenCode V2 (`opencode --version` 2.x, npm `@opencode/cli`, D-049), or an OpenCode whose version cannot be read (refused fail-closed; the message says so and what to check). V2 ignores `OPENCODE_PERMISSION`, so Triforge's deny set would be dropped. Report the row as "unsupported (V2)" and relay the printed V1 pin (`npm i -g opencode-ai@1`) for the user to run themselves. Do not offer enrollment and record nothing; setup continues. Never suggest the npm package `opencode2`: it is a third-party decoy, not V2.
+- **`needs-ask: <cli> installed=yes default-model=<default> auth=<...>` (rc 20)**: installed and not yet enrolled. Run the ask:
+  1. **Participate?** Ask whether to enroll `<cli>` in the roster.
+     - **No**: record the decline (persists as `enabled=false`, shown "skipped"; no error, AE8):
+
+       ```bash
+       roster_write_member <cli> false ""
+       ```
+
+     - **Yes**: **which model?** Offer the shipped default (recommended) plus the CLI's own live model list, then write the choice:
+
+       ```bash
+       roster_write_member <cli> true "<chosen-model>"
+       ```
+
+  2. If the `auth=` field (or `readiness:` line) reported `auth-failed: <fix>`, surface that fix. The member can still enroll (enrollment records intent), but any dispatch to it will fail at the adapter's auth preflight until the user completes the named login step. `resolve_role` does not skip auth-failed members (only declined or binary-absent ones), so the fix is to complete the login, or to set the member `enabled = false` so every chain falls back past it.
+
+## Live model lists
+
+Offer the shipped default first (recommended):
+
+| CLI | Shipped default (recommended) | Live list command | Notes |
+|---|---|---|---|
+| opencode | `openrouter/z-ai/glm-5.3` | `opencode models openrouter` | needs the openrouter provider connected (`OPENROUTER_API_KEY` or `opencode auth login`) |
+| kimi | `kimi-code/k3` | (no list flag) | the OAuth-managed alias; `kimi login` provisions it; offer the default |
+| cursor | `cursor-grok-4.6-xhigh` | `cursor-agent --list-models` (or `agent --list-models` when only the new binary name exists) | pin the suffixed Grok id explicitly, never the Auto router; effort rides in the `-low`, `-medium`, `-high`, `-xhigh` suffix. An unrelated `~/.grok/bin/agent` can shadow `agent`, so the helper (`_cursor_bin`) resolves `cursor-agent` first and accepts `agent` only when its `--version` matches `YYYY.MM.DD-<hex>` |
+
+Fetch a list only when the user wants to see options, for example:
+
+```bash
+CURSOR_BIN=$(_cursor_bin) && "$CURSOR_BIN" --list-models 2>/dev/null | head -40   # cursor-agent, else a version-verified `agent`
+opencode models openrouter 2>/dev/null | grep -i glm
+```
+
+If a list command fails or is unavailable, fall back to the shipped default; never block enrollment on a missing list.

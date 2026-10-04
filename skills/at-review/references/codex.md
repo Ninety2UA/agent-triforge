@@ -1,0 +1,6 @@
+# Under a Codex lead
+
+- Invoke as `$at-review [flags]`. No plugin-root variable is exported, so the locator resolves this skill's own location inside the plugin tree, else the plugin-root pointer that the setup skill's bootstrap writes under `.agents/`.
+- The specialist reviewers, `learnings-researcher` and `findings-synthesizer` are spawned with `spawn_agent` (the collaboration tools), each carrying its brief and the review package; one spawn round, all applicable reviewers launched together, each waited for before Phase 4. `security-sentinel` and `findings-synthesizer` belong to the never-downgrade trio and run as top-tier Claude through the claude worker lane, so security review stays on a different model family from the lead.
+- rc 40 from `dispatch_role` says the role resolved to the claude lane. There is no Agent tool here: dispatch that reviewer through the claude worker lane (or, until the helper offers one, as a spawned agent carrying the reviewer brief) against the `[R]` scope, writing to the same `ops/REVIEW_ANTIGRAVITY.md` / `ops/REVIEW_CODEX.md`.
+- The Codex reviewer lane itself (`logic_reviewer` with its structured verdict) still runs through `dispatch_role reviewer` as a worker, exactly as under a Claude lead; the lead's own model does not review its builders' work alone, a pinned non-author reviewer does.

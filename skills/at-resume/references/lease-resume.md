@@ -1,0 +1,10 @@
+# Resuming with an open lease ledger
+
+`ops/leases.toml` is the lead's ledger: single-writer, lead-owned. When it exists at resume, wave state is reconstructed from it, never from memory.
+
+- `lease_heartbeat_check` first. It reclaims orphaned leases (a builder whose process is gone) and runs the git-integrity comparison every lease helper runs: `.git/config`, `.git/hooks/`, `.git/info/`, the global and the lead's trusted git config, the ledger, the default branch and each open lease's pointer files against the `[baseline]` in the ledger. rc 44 (`_RC_LEASE_INTEGRITY`) means something changed that the lead did not change: the open leases are escalated and the surface is named. Inspect it (a saved copy sits at `<lease root>/lead/<name>.changed-<UTC time>`); when you or the user made the change, `lease_rebaseline [task...]` accepts it and resumes the escalated leases.
+- Open leases by state: `leased` and `building` are requeued (`lease_requeue`, which prepends the forced-reflection questions) or finished (`lease_collect` once the builder's typed report exists); `review` leases keep their pinned reviewer (`lease_pin_reviewer` is already recorded; the same reviewer stays across all ≤ 3 fix cycles); `orphaned` leases were reclaimed by the heartbeat check and are requeued.
+- `merged` leases are already one squash commit each on the sprint integration branch. Never redo them, and never re-dispatch their tasks.
+- `lease_status` prints the counts and the per-lease rows for the summary.
+- Create, merge and promotion refuse when the checkout is no longer on the integration branch the lead recorded, and merge and promotion when that branch moved since the lead's last merge — a resume that finds the checkout elsewhere switches back before any lease call.
+- The session-start hook reports an active ledger ("N active lease(s) from a previous session") and points at `lease_heartbeat_check`; it never deletes worktrees.

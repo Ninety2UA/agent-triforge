@@ -1,0 +1,6 @@
+interface:
+  display_name: "Resume sprint"
+  short_description: "Restore ops/STATE.md, re-prove the baseline, continue."
+  default_prompt: "Run $at-resume to restore the saved sprint state and continue from the recorded phase."
+policy:
+  allow_implicit_invocation: false
