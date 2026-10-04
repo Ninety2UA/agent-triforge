@@ -129,6 +129,20 @@
 #      the names the session-start banner (hooks/handlers/session-start.sh)
 #      and skills/at-status/references/status-template.md enumerate equal the
 #      set of skills/at-*/ directories (the diff is printed).
+#  10. Other-harness skill manifests (R22) — skills/.devin-plugin/plugin.json
+#      (Devin; plugin root skills/, installed as <repo>#skills) and the root
+#      package.json "pi" key (Pi) each list exactly the portable skill
+#      directories, one explicit path per skill: an at-* entry, a missing
+#      portable skill, a path that is not a skill directory, a glob or
+#      !/+/- pattern, and a duplicate all fail. Each manifest carries only
+#      metadata and its skill list — no version (check 1 covers the release
+#      manifests), and nothing a harness would run or obey (Devin's plugin
+#      dependencies and MCP servers, npm scripts and dependencies, Pi
+#      extensions, prompts or themes). Its name equals .claude-plugin's. No
+#      root .devin-plugin/ may exist, and skills/ carries none of the names
+#      Devin loads from a plugin root besides skills (AGENTS.md, rules/,
+#      agents/, hooks.json, hooks/, .mcp.json, …): from the repo root Devin
+#      would also load this AGENTS.md as an always-on rule and run hooks/.
 #
 # Exit codes: 0 every check passed; 1 at least one check failed; 2 bad flag.
 set -euo pipefail
@@ -1063,6 +1077,111 @@ for line in fails:
 sys.exit(1 if fails else 0)
 PYEOF
 if [ "$LEADWF_RC" -ne 0 ]; then
+  FAILED_CHECKS=$((FAILED_CHECKS + 1))
+fi
+
+# --- 10. other-harness skill manifests (R22) ---------------------------------
+MANIFESTS_RC=0
+python3 - <<'PYEOF' || MANIFESTS_RC=$?
+import json
+import os
+import re
+import sys
+
+DEVIN = "skills/.devin-plugin/plugin.json"
+PI = "package.json"
+fails = []
+
+portable = sorted(d for d in os.listdir("skills")
+                  if not d.startswith(("at-", ".", "_")) and os.path.isfile(os.path.join("skills", d, "SKILL.md")))
+
+
+def load(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        fails.append(path + ": unreadable (" + str(exc) + ")")
+        return None
+    if not isinstance(data, dict):
+        fails.append(path + ": not a JSON object")
+        return None
+    return data
+
+
+def only_keys(where, data, allowed):
+    extra = sorted(set(data) - set(allowed))
+    if extra:
+        fails.append(where + ": carries " + ", ".join(extra) + " — only " + ", ".join(allowed) + " belong here")
+
+
+def check_list(where, entries, prefix):
+    """entries must name each portable skill directory exactly once, as <prefix><name>."""
+    if not isinstance(entries, list) or not all(isinstance(e, str) for e in entries):
+        fails.append(where + ": must be a list of paths, one per portable skill directory")
+        return
+    names = []
+    for e in entries:
+        if re.search(r"[*?\[\]{}]", e) or e[:1] in ("!", "+", "-"):
+            fails.append(where + ": '" + e + "' is a pattern — list each portable skill directory explicitly, so no glob can reach an at-* workflow")
+            continue
+        norm = e[2:] if e.startswith("./") else e
+        norm = norm.rstrip("/")
+        name = norm[len(prefix):] if norm.startswith(prefix) else ""
+        if not name or "/" in name:
+            fails.append(where + ": '" + e + "' is not " + prefix + "<skill> (one skill directory directly under skills/)")
+        elif name.startswith("at-"):
+            fails.append(where + ": '" + e + "' is a lead workflow — at-* workflows reach a lead only from its plugin install (KTD12)")
+        elif not os.path.isfile(os.path.join("skills", name, "SKILL.md")):
+            fails.append(where + ": '" + e + "' is not a skill directory (no skills/" + name + "/SKILL.md)")
+        else:
+            names.append(name)
+    dup = sorted(set(n for n in names if names.count(n) > 1))
+    missing = sorted(set(portable) - set(names))
+    if dup:
+        fails.append(where + ": lists " + ", ".join(dup) + " more than once")
+    if missing:
+        fails.append(where + ": misses the portable skill(s) " + ", ".join(missing))
+
+
+meta = ("name", "description", "author", "homepage", "repository", "license", "keywords")
+claude = load(".claude-plugin/plugin.json") or {}
+
+devin = load(DEVIN)
+if devin is not None:
+    only_keys(DEVIN, devin, meta + ("skills",))
+    check_list(DEVIN + " skills", devin.get("skills"), "")
+    if devin.get("name") != claude.get("name"):
+        fails.append(DEVIN + ": name " + repr(devin.get("name")) + " differs from .claude-plugin/plugin.json's " + repr(claude.get("name")))
+
+pi = load(PI)
+if pi is not None:
+    only_keys(PI, pi, meta + ("private", "pi"))
+    pi_key = pi.get("pi")
+    if not isinstance(pi_key, dict):
+        fails.append(PI + ": no \"pi\" object (Pi's package manifest key)")
+    else:
+        only_keys(PI + " pi", pi_key, ("skills",))
+        check_list(PI + " pi.skills", pi_key.get("skills"), "skills/")
+    if pi.get("name") != claude.get("name"):
+        fails.append(PI + ": name " + repr(pi.get("name")) + " differs from .claude-plugin/plugin.json's " + repr(claude.get("name")))
+
+if os.path.lexists(".devin-plugin"):
+    fails.append(".devin-plugin/ exists at the repo root — it outranks .claude-plugin/ for a Devin install of the root, which also loads this AGENTS.md as an always-on rule and runs hooks/; the Devin manifest is " + DEVIN)
+ROOT_LOADED = ("agents.md", "agents.local.md", "agent.md", ".windsurfrules", "rules", "agents",
+               "hooks.json", "hooks", ".mcp.json", "mcp.json")
+stray = sorted(e for e in os.listdir("skills") if e.casefold() in ROOT_LOADED)
+if stray:
+    fails.append("skills/ (the Devin plugin root) carries " + ", ".join(stray) + " — Devin loads that name from a plugin root as rules, subagents, hooks or MCP servers")
+
+for line in fails:
+    print("FAIL: skill manifests: " + line)
+if fails:
+    sys.exit(1)
+print("ok:   skill manifests: " + DEVIN + " (Devin) and " + PI + " pi.skills (Pi) list exactly the " + str(len(portable))
+      + " portable skill directories, no at-* workflow, metadata and skills only; no root .devin-plugin/, nothing else Devin loads under skills/")
+PYEOF
+if [ "$MANIFESTS_RC" -ne 0 ]; then
   FAILED_CHECKS=$((FAILED_CHECKS + 1))
 fi
 

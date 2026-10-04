@@ -51,8 +51,11 @@ FRAMEWORK_PROTECTED = (
     "hooks/", "skills/", "commands/", "personas/",
     # shipped agent configs, one directory per CLI
     "agents/", "antigravity-agents/", "codex-agents/", "opencode-agents/", "kimi-agents/", "cursor-agents/",
-    # manifests, plugin settings, and the templates copied into user projects
-    ".claude-plugin/", "settings.json", "templates/",
+    # manifests, plugin settings, and the templates copied into user projects.
+    # Pi reads its skill list from the root package.json; the Devin manifest is
+    # skills/.devin-plugin/ (covered by skills/), and a root .devin-plugin/
+    # would outrank .claude-plugin/ for a Devin install of the repo root
+    ".claude-plugin/", ".devin-plugin/", "package.json", "settings.json", "templates/",
     # CI plumbing (.gitmodules is on PROJECT_PROTECTED: every project)
     ".github/",
 )
@@ -60,8 +63,10 @@ FRAMEWORK_PROTECTED_ANY_DEPTH = (".gitattributes",)
 PROJECT_PROTECTED = (
     "ops/roster.toml",
     # each CLI project-tier config / permission tree (agy reads .agents/hooks.json
-    # and .agents/agents/, so .agents/ is protected whole, skills included)
-    ".claude/", ".codex/", ".agents/", ".antigravity/", ".gemini/", ".opencode/", ".kimi-code/", ".cursor/",
+    # and .agents/agents/, so .agents/ is protected whole, skills included; Devin
+    # loads .devin/config.json requiredPlugins with no login, and Pi reads
+    # .pi/settings.json packages once the project is trusted)
+    ".claude/", ".codex/", ".agents/", ".antigravity/", ".gemini/", ".opencode/", ".kimi-code/", ".cursor/", ".devin/", ".pi/",
     # project-root config files outside those trees: OpenCode reads its permission
     # config from opencode.json / opencode.jsonc, and Cursor still reads the
     # legacy root instruction file .cursorrules

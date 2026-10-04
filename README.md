@@ -178,8 +178,10 @@ The plugin provides agents, skills and hooks. Your project gets an `ops/` direct
 ```
 agent-triforge/                     (plugin — installed automatically)
 ├── .claude-plugin/plugin.json        Plugin manifest
+├── package.json                      Pi package manifest: the portable skills only
 ├── agents/                           19 specialized agent definitions
 ├── skills/                           27 skills in one tree
+│   ├── .devin-plugin/plugin.json       Devin plugin manifest (plugin root skills/): the portable skills only
 │   ├── <name>/SKILL.md                 10 portable skills, copied to .agents/skills/ and lease worktrees
 │   │   └── references/                 where a skill is split (wave-orchestration, verification-before-completion)
 │   └── at-<name>/                      17 lead workflows (/at-<name> in Claude Code, $at-<name> in a Codex prompt); never copied
@@ -469,6 +471,15 @@ That's it. No manual configuration needed — hooks, env vars, agents and skills
 
 On first session, the plugin bootstraps your project's `ops/` directory. Add the pointer block from `templates/AGENTS.md` to your project's root `AGENTS.md` (Triforge ships no CLAUDE.md); session start prints the copy line when the project has none.
 
+**Portable skills in other harnesses (Devin, Pi):** these two can install the 10 portable skills on their own. They get the skills and nothing else: no lead workflow (`at-*`), hook or agent. Installing the skills does not enroll the CLI; `ops/roster.toml` assigns roles only to the CLIs in [the builder pool](#the-builder-pool).
+
+| Harness | Install | Manifest | Invoke |
+|---|---|---|---|
+| Devin CLI | `devin plugins install Ninety2UA/agent-triforge#skills` (from a clone: `devin plugins install --local ./agent-triforge/skills`) | [`skills/.devin-plugin/plugin.json`](skills/.devin-plugin/plugin.json), plugin root `skills/` | `/agent-triforge:<name>` |
+| Pi | `pi install git:github.com/Ninety2UA/agent-triforge` (`-l` writes the project's `.pi/settings.json` instead of `~/.pi/agent/settings.json`) | [`package.json`](package.json), the `pi.skills` list | `/skill:<name>` |
+
+Install the Devin plugin from `#skills`, not from the repository root. At the root Devin falls back to `.claude-plugin/plugin.json`, so it also loads the 17 lead workflows, this repository's `AGENTS.md` as an always-on rule, and the Claude Code hooks. Every `devin plugins` command needs `devin auth login` first.
+
 ### Update
 
 ```bash
@@ -596,7 +607,7 @@ The plugin ships 27 skills in one `skills/` tree: the 10 portable skills below, 
 | `.cursor/skills/` | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
 | `.kimi-code/skills/` | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
 
-Claude Code is the one CLI that does not read `.agents/skills/` — it reads the plugin's skills directly. Each harness invokes a skill in its own form: Claude `/name` · agy `agy --add-dir "$PWD" -p "/name"` (headless expansion; `agy -p "/skills"` lists them without a model call) · Codex `$name` · OpenCode `/name` through its native `skill` tool (commands via `opencode run --command <name>` from `.opencode/command/`) · Cursor `/name` in `-p` · Kimi `/skill:name` (live verification pending `kimi login`). The 17 lead workflows (`skills/at-*/`) are not in this copy: they reach a lead only from its plugin install (KTD12), invoked as `/at-<name>` under Claude Code or `$at-<name>` in a Codex prompt. They are skills rather than slash commands because slash commands are per-harness, not portable — Codex custom prompts are deprecated and not expanded under `codex exec`. Agent definitions are never deployed into `.agents/agents/`: agy and Kimi both scan it with incompatible tool vocabularies, so agy stays on `agy plugin install` and Kimi loads its definitions through `--agent-file`.
+Claude Code is the one CLI that does not read `.agents/skills/` — it reads the plugin's skills directly. Outside the six, Devin (`devin skills paths`) and Pi (its skills docs) read `.agents/skills/` too, so in a Triforge project they see this copy; elsewhere they install the skills [from their own manifests](#installation). Each harness invokes a skill in its own form: Claude `/name` · agy `agy --add-dir "$PWD" -p "/name"` (headless expansion; `agy -p "/skills"` lists them without a model call) · Codex `$name` · OpenCode `/name` through its native `skill` tool (commands via `opencode run --command <name>` from `.opencode/command/`) · Cursor `/name` in `-p` · Kimi `/skill:name` (live verification pending `kimi login`). The 17 lead workflows (`skills/at-*/`) are not in this copy: they reach a lead only from its plugin install (KTD12), invoked as `/at-<name>` under Claude Code or `$at-<name>` in a Codex prompt. They are skills rather than slash commands because slash commands are per-harness, not portable — Codex custom prompts are deprecated and not expanded under `codex exec`. Agent definitions are never deployed into `.agents/agents/`: agy and Kimi both scan it with incompatible tool vocabularies, so agy stays on `agy plugin install` and Kimi loads its definitions through `--agent-file`.
 
 ---
 
