@@ -19,9 +19,10 @@ fi
 # scripts/lib/registry.sh, which supplies everything per-CLI). Mirrors
 # templates/ops/roster.toml; scripts/validate-versions.sh check 3 parses this
 # literal, requires each role's model to equal its CLI's registry model, and
-# diffs the template against it. builder model "" means: the shell claude -p
-# lease lane runs the host default Claude model (no --model pin); the
-# Fable/downgrade ladder is an Agent-tool subagent concern, not this lane.
+# diffs the template against it. builder model "" means: the claude -p lease
+# lane runs Claude Code's own default model (no --model pin; the lane reads no
+# user-tier settings, KTD16); the Fable/downgrade ladder is the lead's
+# spawn-time choice, never this lane's.
 # Single-quoted shell literal: python strings inside use double quotes only.
 _ROLE_DEFAULTS_PY='
 DEFAULTS = {
@@ -36,10 +37,11 @@ DEFAULTS = {
 # resolve_role <role> — map a task-type role (builder | reviewer | tester |
 # analyst | documenter) to the member that should handle it right now.
 # Prints one line on success:   cli<TAB>model<TAB>effort
-# (builder's model field is empty by design: the shell `claude -p` builder lane
-# runs the host's default Claude Code model with no --model pin, so the roster
-# has no model to carry there. The Fable/downgrade ladder is an Agent-tool
-# subagent concern — the Agent tool's `model` parameter — NOT this shell lane.)
+# (builder's model field is empty by design: the `claude -p` builder lane runs
+# Claude Code's own default model with no --model pin, so the roster has no
+# model to carry there. The Fable/downgrade ladder is the lead's spawn-time
+# choice — the Agent tool's `model` parameter under a Claude lead — NOT this
+# shell lane.)
 #
 # Sources of truth, in order: ops/roster.toml when present, overlaid
 # PER-FIELD onto built-in defaults — a role overriding only effort keeps the
@@ -245,14 +247,17 @@ _RC_DISPATCH_ROLE_CLAUDE=40
 # without it, resolve_role only drove the builder lane (lease_create) and the
 # review/test phases hardcoded codex/antigravity.
 #
-# The claude lane is special: review/test work assigned to claude runs as a
-# NATIVE Claude Agent-tool subagent (a subagent has the ops/ context and tool
-# surface the shell CLIs lack), not a shell helper. So for cli=claude this prints
+# The claude lane depends on the lead (R2, KTD16). A lead whose native
+# sub-agents enforce their tool lists (the registry's
+# lead.native_subagents_enforced_tools: Claude Code) runs review/test work
+# assigned to claude as a NATIVE Agent-tool subagent, so this prints
 #   DISPATCH_ROLE_CLAUDE <agent-name> <output-file>
 # to stdout and returns _RC_DISPATCH_ROLE_CLAUDE (40), signalling the calling
-# command to spawn a Claude subagent instead of a background CLI. Every other
-# lane invokes its helper and returns the helper's own exit code
-# (INVOKE_FAILURE_CLASS stays visible for a synchronous, same-shell caller).
+# command to spawn one. Any other lead (Codex) has no such sub-agent, and
+# claude is an ordinary worker there: _dispatch_role_claude runs `claude -p`
+# and writes its output file. Every other lane invokes its helper and returns
+# the helper's own exit code (INVOKE_FAILURE_CLASS stays visible for a
+# synchronous, same-shell caller).
 #
 # Callers MUST invoke this in a context that ignores set -e (e.g.
 # `dispatch_role ... || RC=$?`), exactly like the invoke_* helpers — otherwise a
@@ -270,11 +275,17 @@ dispatch_role() {
   EFFORT=$(printf '%s\n' "$RESOLVED" | cut -f3)
   echo "dispatch_role: role=${ROLE} -> cli=${CLI} model=${MODEL:-<default>} effort=${EFFORT} agent=${AGENT_NAME}" >&2
   # The registry's lane field decides the subagent path (claude today): review/
-  # test work on a "subagent" lane runs as a native Agent-tool subagent, not a
-  # shell helper — signal the caller to spawn one (see function comment).
+  # test work on a "subagent" lane runs as a native Agent-tool subagent when the
+  # lead's sub-agents enforce their tools, else as `claude -p` (see above).
   if [ "$(cli_field "$CLI" lane 2>/dev/null || true)" = "subagent" ]; then
-    printf 'DISPATCH_ROLE_CLAUDE %s %s\n' "$AGENT_NAME" "$OUTPUT_FILE"
-    return "$_RC_DISPATCH_ROLE_CLAUDE"
+    local NATIVE=""
+    NATIVE=$(lead_field lead.native_subagents_enforced_tools) || return $?
+    if [ "$NATIVE" = true ]; then
+      printf 'DISPATCH_ROLE_CLAUDE %s %s\n' "$AGENT_NAME" "$OUTPUT_FILE"
+      return "$_RC_DISPATCH_ROLE_CLAUDE"
+    fi
+    _dispatch_role_claude "$ROLE" "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$MODEL" "$EFFORT"
+    return $?
   fi
   case "$CLI" in
     antigravity)
@@ -303,6 +314,52 @@ dispatch_role() {
       return 1
       ;;
   esac
+}
+
+# _dispatch_role_claude <role> <agent-name> <prompt> <output-file> <timeout>
+#   <model> <effort> — dispatch_role's claude arm under a lead without native,
+# tool-enforcing sub-agents (R2, KTD16): `claude -p` from the caller's
+# directory under _adapter_env (the env allowlist, the worker marker, the
+# no-push config, the claude values), composed by _claude_lane_argv. A
+# reviewer or an analyst gets the read class: read tools, dontAsk, and Bash
+# only inside the sandbox with the working directory unwritable; a tester or a
+# documenter the edit class, the ledger unwritable. Both keep the lead's git
+# common dir unwritable. The envelope's result text lands in <output-file>
+# (the envelope itself beside it, <output-file>.raw and .envelope); a run that
+# returns no envelope leaves the CLI's own output there. Returns the CLI's
+# exit code, with INVOKE_FAILURE_CLASS set as the invoke_* helpers set it.
+_dispatch_role_claude() {
+  local ROLE=$1 AGENT_NAME=$2 PROMPT=$3 OUT=$4 TIMEOUT=$5 MODEL=$6 EFFORT=$7 CLASS=read RC=0 TOBIN
+  local -a DENY=()
+  INVOKE_FAILURE_CLASS="none"
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "dispatch_role: ERROR \`claude\` (Claude Code) not found on PATH — cannot run '${AGENT_NAME}'. Fix: $(cli_install_fix claude 2>/dev/null || true). No retry (deterministic)." >&2
+    INVOKE_FAILURE_CLASS="deterministic"
+    return 127
+  fi
+  TOBIN=$(_timeout_tool) || { INVOKE_FAILURE_CLASS="deterministic"; return "$_RC_NO_TIMEOUT_TOOL"; }
+  case "$ROLE" in tester|documenter) CLASS=edit ;; esac
+  if _lease_ctx 2>/dev/null; then
+    DENY+=("$_LEASE_COMMON")
+    if [ "$CLASS" = edit ]; then DENY+=("$_LEASE_LEDGER"); fi
+  fi
+  if [ "$CLASS" = read ]; then DENY+=("$(pwd -P)"); fi
+  # Expanded only when set: outside a git repository the edit class has none.
+  if [ "${#DENY[@]}" -gt 0 ]; then
+    _claude_lane_argv "$CLASS" "$MODEL" "$EFFORT" "" "${DENY[@]}" || return 1
+  else
+    _claude_lane_argv "$CLASS" "$MODEL" "$EFFORT" "" || return 1
+  fi
+  echo "dispatch_role: claude -p (${CLASS} class) agent=${AGENT_NAME} model=${MODEL:-<default>} effort=${EFFORT:-<default>}" >&2
+  _adapter_env claude "$TOBIN" -k 10s "${TIMEOUT}s" "${_LEASE_LANE_ARGV[@]}" "$PROMPT" < /dev/null > "$OUT" 2> "${OUT}.err" || RC=$?
+  if ! _lease_claude_envelope "$OUT" && [ -s "${OUT}.err" ]; then
+    cat "${OUT}.err" >> "$OUT" 2>/dev/null || true
+  fi
+  if [ "$RC" -ne 0 ]; then
+    _classify_invoke_failure "$RC" "$OUT"
+    echo "dispatch_role: claude -p agent=${AGENT_NAME} exit=${RC} class=${INVOKE_FAILURE_CLASS} (see ${OUT})" >&2
+  fi
+  return "$RC"
 }
 
 # Cache file for ensure_core_trio_live — bash keeps $$ at the sourcing
@@ -1045,9 +1102,9 @@ sys.stderr.write(who + ': [lead] cli=' + cli + ' model=' + (model or '<host defa
 # is the registry's install field (the surface /cli-watch re-checks each cycle).
 
 # roster_member_default <cli> — print the shipped default model (D-020..D-025):
-# the registry's model field; claude is intentionally empty (the shell claude
-# -p lane runs the host default model; the Fable/ladder override is an
-# Agent-tool subagent concern, not this lane). rc 2 for an unknown cli.
+# the registry's model field; claude is intentionally empty (the claude -p
+# lane runs Claude Code's own default model; the Fable/ladder override is the
+# lead's spawn-time choice, not this lane's). rc 2 for an unknown cli.
 roster_member_default() {
   local CLI=${1:?usage: roster_member_default <cli>} MODEL=""
   if ! MODEL=$(cli_field "$CLI" model 2>/dev/null); then
@@ -1185,7 +1242,7 @@ print(str(entry['cli']) + '\t' + str(entry['model']) + '\t' + str(entry['effort'
 # function carries no defaults copy of its own): the new primary is removed
 # (the displaced primary becomes the first fallback) and 'claude' is appended
 # if the result would not terminate at a core member. Model may be empty
-# (builder's shell lane runs the host default Claude model by design).
+# (the claude -p builder lane runs Claude Code's own default model by design).
 roster_write_role() {
   _lead_only roster_write_role || return $?   # workers never write the roster (KTD9, common.sh)
   local ROLE=${1:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}

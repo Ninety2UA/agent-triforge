@@ -424,9 +424,88 @@ STOP_ROW_EOF
   return "$RC"
 }
 
+# The claude -p lane (KTD16): a builder's turn cap, the explicit tool sets of
+# its two classes, and the credential paths no claude worker reads. The tool
+# sets name built-in tools only (--tools; anything else, the Agent tool and the
+# web tools included, is not offered) and approve without a prompt only what
+# needs approving: edits inside the working directory ride acceptEdits, and an
+# unscoped Edit, Write or Read rule would approve them anywhere.
+_CLAUDE_MAX_TURNS=200
+_CLAUDE_TOOLS_EDIT="Bash,Read,Edit,Write,Glob,Grep,NotebookEdit,Skill"
+_CLAUDE_ALLOW_EDIT="Bash,Skill"
+_CLAUDE_TOOLS_READ="Read,Grep,Glob"
+_CLAUDE_CRED_PATHS="~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.git-credentials ~/.config/gh ~/.config/gcloud ~/.azure ~/.kube ~/.docker/config.json ~/.codex ~/.gemini ~/.kimi-code ~/.local/share/opencode ~/.cursor ~/.grok ~/.devin ~/.config/devin ~/.claude/.credentials.json"
+
+# _claude_lane_argv <edit|read> <model> <effort> <resume-id> <deny-write>... —
+# set _LEASE_LANE_ARGV to a claude -p worker's command line up to the prompt,
+# which the caller appends (KTD16). One JSON envelope (--output-format json:
+# subtype, is_error, session_id; _lease_claude_envelope reads it), project and
+# local settings only (the user's own hooks, plugins and env stay out), no MCP
+# server, and an explicit tool set: edit (a lease builder, a tester, a
+# documenter) adds the edit tools under acceptEdits; read (a reviewer, an
+# analyst) runs dontAsk, so nothing outside the read set runs. --settings
+# carries the confinement, and a --settings file outranks the project's own
+# sandbox settings: Bash runs in Claude Code's sandbox (row CC-15: writes stay
+# in the working directory, no network), fail-closed when the sandbox can't
+# start, with no unsandboxed retry; <deny-write> (the lead's git common dir,
+# which the sandbox otherwise opens to a worktree's git; for the read class
+# the working directory itself) and the credential paths are blocked, the
+# latter also for the Read tool. TRIFORGE_CLAUDE_SANDBOX=off runs Bash without
+# the sandbox, and then a claude worker with Bash has no OS confinement; the
+# read class drops Bash there. --model and --effort ride only when the roster
+# set them (the ladder and the Fable override are the lead's spawn choice,
+# never this lane's); --resume only for a UUID-shaped session id (the fix
+# cycle resumes the builder's session); --max-turns comes last, so the prompt
+# after it is never read as one more tool name.
+_claude_lane_argv() {
+  local CLASS=$1 MODEL=$2 EFFORT=$3 RESUME=$4 SBX=on TOOLS ALLOW MODE SETTINGS
+  shift 4
+  case "${TRIFORGE_CLAUDE_SANDBOX:-on}" in off|0|false|no) SBX=off ;; esac
+  if [ "$CLASS" = edit ]; then
+    TOOLS=$_CLAUDE_TOOLS_EDIT ALLOW=$_CLAUDE_ALLOW_EDIT MODE=acceptEdits
+  else
+    TOOLS=$_CLAUDE_TOOLS_READ ALLOW=$_CLAUDE_TOOLS_READ MODE=dontAsk
+    if [ "$SBX" = on ]; then TOOLS="${TOOLS},Bash" ALLOW="${ALLOW},Bash"; fi
+  fi
+  SETTINGS=$(CL_SBX="$SBX" CL_CRED="$_CLAUDE_CRED_PATHS" python3 -c '
+import json, os, sys
+cred = os.environ["CL_CRED"].split()
+deny = []
+for p in cred:
+    deny += ["Read(" + p + ")", "Read(" + p + "/**)"]
+s = {"permissions": {"deny": deny}}
+if os.environ["CL_SBX"] == "on":
+    s["sandbox"] = {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,
+                    "autoAllowBashIfSandboxed": True,
+                    "filesystem": {"denyRead": cred, "denyWrite": [d for d in sys.argv[1:] if d]}}
+else:
+    s["sandbox"] = {"enabled": False}
+print(json.dumps(s, separators=(",", ":")))
+' "$@") || return 1
+  _LEASE_LANE_ARGV=(claude -p --output-format json --setting-sources project,local --strict-mcp-config
+                    --permission-mode "$MODE" --tools "$TOOLS" --allowedTools "$ALLOW" --settings "$SETTINGS")
+  if [ -n "$MODEL" ]; then _LEASE_LANE_ARGV+=(--model "$MODEL"); fi
+  if [ -n "$EFFORT" ]; then _LEASE_LANE_ARGV+=(--effort "$EFFORT"); fi
+  if _claude_session_ok "$RESUME"; then _LEASE_LANE_ARGV+=(--resume "$RESUME"); fi
+  _LEASE_LANE_ARGV+=(--max-turns "$_CLAUDE_MAX_TURNS")
+  return 0
+}
+
+# _claude_session_ok <id> — 0 when <id> has a Claude Code session id's shape
+# (a UUID). The id comes back in a worker's envelope, so it is checked before
+# it reaches the ledger (lease_collect) or a command line (--resume).
+_claude_session_ok() {
+  case "${1:-}" in
+    *[!0-9a-fA-F-]* | *-*-*-*-*-*) return 1 ;;
+    ????????-????-????-????-????????????) return 0 ;;
+  esac
+  return 1
+}
+
 # _lease_lane_argv <cli> <model> <effort> <dispatch-model> <kimi-agent-file>
-#   <cursor-bin> <worktree> <timeout-s> — set _LEASE_LANE_ARGV to the lane's
-# command line up to the prompt, which the caller appends (agy and kimi end in
+#   <cursor-bin> <worktree> <timeout-s> [<git-common-dir> <resume-id>] — set
+# _LEASE_LANE_ARGV to the lane's command line up to the prompt, which the
+# caller appends (agy and kimi end in
 # -p, whose value it is; the others take it as the trailing positional); rc 1
 # for a CLI with no arm. The one place each lane's argv is composed:
 # _lease_builder_run runs it under _adapter_env, and the probe's worker-marker
@@ -435,8 +514,9 @@ STOP_ROW_EOF
 # own flags. The invoke_* helpers are shell functions and can't cross env -i,
 # so each arm composes the adapter's command core directly, and the role brief
 # rides in the prompt (lease_dispatch) for every lane but kimi.
-#   claude       -p --permission-mode acceptEdits (cwd IS the worktree, so no
-#                --add-dir), --model only when the roster set one
+#   claude       the edit class of _claude_lane_argv (cwd IS the worktree, so
+#                no --add-dir): the lead's <git-common-dir> unwritable, the
+#                session <resume-id> on a fix cycle
 #   codex        exec in the workspace-write sandbox with approval never, plus
 #                two sandbox_workspace_write excludes that drop codex's default
 #                temp-dir write allowance: lease worktrees live under TMPDIR,
@@ -466,8 +546,7 @@ _lease_lane_argv() {
   local CLI=$1 MODEL=$2 EFFORT=$3 DMODEL=$4 KAF=$5 CBIN=$6 WT=$7 TIMEOUT=$8
   case "$CLI" in
     claude)
-      _LEASE_LANE_ARGV=(claude -p --permission-mode acceptEdits)
-      if [ -n "$MODEL" ]; then _LEASE_LANE_ARGV+=(--model "$MODEL"); fi
+      _claude_lane_argv edit "$MODEL" "$EFFORT" "${10:-}" "${9:-}" || return 1
       ;;
     codex)
       _LEASE_LANE_ARGV=(codex exec -s workspace-write -c 'approval_policy="never"'
@@ -500,7 +579,7 @@ _lease_lane_argv() {
 
 # _lease_builder_run <cli> <model> <effort> <dispatch-model> <kimi-agent-file>
 #   <cursor-bin> <timeout-bin> <timeout-s> <out> <worktree> <env-keys>
-#   <test-builder> <prompt>
+#   <test-builder> <prompt> [<git-common-dir> <resume-id>]
 # The detached builder's body: from the worktree, the lane command for <cli>
 # (_lease_lane_argv) under _adapter_env's per-CLI allowlist (or the
 # TRIFORGE_TEST_BUILDER script <test-builder>), output in <out>; then the sweep
@@ -509,10 +588,12 @@ _lease_lane_argv() {
 # process _LEASE_LAUNCH_PY started, never in the lead's shell, and never writes
 # the ledger (KTD-4). A live build of a lane whose CLI is not signed in
 # AUTH-FAILs; that failure is deterministic, and the lead sees it in
-# <out>.class (no requeue).
+# <out>.class (no requeue). The claude lane's JSON envelope, the seam's
+# included, is split by _lease_claude_envelope into the result text (<out>)
+# and the record lease_collect reads (<out>.envelope).
 _lease_builder_run() {
   local CLI=$1 MODEL=$2 EFFORT=$3 DISPATCH_MODEL=$4 KIMI_AGENT_FILE=$5 CBIN=$6 TOBIN=$7 TIMEOUT=$8 OUT=$9
-  local WT=${10} TEST_BUILDER=${12} FULL_PROMPT=${13} RC=0 CLASS_SET=0 AGY_PRC=0
+  local WT=${10} TEST_BUILDER=${12} FULL_PROMPT=${13} COMMON=${14:-} RESUME=${15:-} RC=0 CLASS_SET=0 AGY_PRC=0 SBX_REFUSED=0
   local -a TO
   _ADAPTER_ENV_KEYS=${11}   # the registry read lease_dispatch did; _adapter_env reads none
   cd "$WT" || return 97
@@ -526,7 +607,7 @@ _lease_builder_run() {
   if [ -n "$TEST_BUILDER" ]; then
     # Test seam (see lease_dispatch): deterministic fake builder.
     _adapter_env "$CLI" "${TO[@]}" "$TEST_BUILDER" "$FULL_PROMPT" > "$OUT" 2>&1 || RC=$?
-  elif ! _lease_lane_argv "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$KIMI_AGENT_FILE" "$CBIN" "$WT" "$TIMEOUT"; then
+  elif ! _lease_lane_argv "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$KIMI_AGENT_FILE" "$CBIN" "$WT" "$TIMEOUT" "$COMMON" "$RESUME"; then
     echo "lease_dispatch: ERROR builder CLI '${CLI}' has no dispatch arm here — not integrated. Registered CLIs: $(_known_clis '<registry unreadable>')." > "$OUT"
     RC=95
   else
@@ -565,11 +646,29 @@ _lease_builder_run() {
           _adapter_env opencode "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
         fi
         ;;
+      claude)
+        # The envelope alone on stdout (KTD16); stderr beside it, folded into
+        # $OUT below only when no envelope came back.
+        _adapter_env claude "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2> "${OUT}.err" || RC=$?
+        if [ "$RC" -ne 0 ] && grep -q 'without a working sandbox' "${OUT}.err" "$OUT" 2>/dev/null; then
+          RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1; SBX_REFUSED=1
+        fi
+        ;;
       *)
         _adapter_env "$CLI" "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
         ;;
     esac
   fi
+  case "$CLI" in
+    claude)
+      if ! _lease_claude_envelope "$OUT" && [ -s "${OUT}.err" ]; then
+        cat "${OUT}.err" >> "$OUT" 2>/dev/null || true
+      fi
+      if [ "$SBX_REFUSED" -eq 1 ]; then
+        echo "lease_dispatch: the claude builder refused to start without Claude Code's sandbox (KTD16) — on Linux install bubblewrap and socat; or set TRIFORGE_CLAUDE_SANDBOX=off in the lead's environment, and the claude builder's Bash then runs without OS confinement" >> "$OUT"
+      fi
+      ;;
+  esac
   python3 -c "$_LEASE_OWN_GROUP_PY" 2>/dev/null || true
   # Only a nonzero exit has a failure class (matches invoke_antigravity /
   # invoke_codex): a clean run is class=none, so lease_collect never reads a

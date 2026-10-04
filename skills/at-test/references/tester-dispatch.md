@@ -16,7 +16,8 @@ dispatch_role tester "test_writer" \
   "$TEST_OUT" 900 || DISPATCH_RC=$?
 
 if [ "$DISPATCH_RC" -eq 40 ]; then
-  # tester resolved to the lead's native sub-agent lane (codex absent -> fallback).
+  # tester resolved to the lead's native sub-agent lane (codex absent -> fallback;
+  # a Claude lead only: under a Codex lead dispatch_role runs claude -p itself).
   # dispatch_role printed "DISPATCH_ROLE_CLAUDE <agent> <out>" instead of running
   # a shell CLI: write the tests as a native sub-agent (failing test first on the
   # scope, output to ops/TEST_RESULTS.md) rather than a background CLI.

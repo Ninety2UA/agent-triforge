@@ -37,13 +37,22 @@ for refresh purposes the at- prefix means "not Triforge-shipped". A dot entry
 under skills/ (skills/.devin-plugin/, the Devin manifest) is packaging, not a
 skill: never copied, digested or reported.
 
+Add-only copies (KTD12, KTD16): `add` writes the same portable set into
+another skills directory of a fresh lease worktree, .claude/skills for a
+claude -p worker. It adds names only: an entry already present (a tracked
+directory such as this repo's .claude/skills/watch-cycle/, or a user's own
+copy) and every name passed in --skip (the names git tracks there) are left
+alone. It never replaces, retires or stamps anything, and keeps the same
+symlink and realpath guards.
+
 Usage:
     skills-sync.py sync --plugin-root <dir> --project <dir> [--prefix <text>]
+    skills-sync.py add --plugin-root <dir> --project <dir> --dest <rel dir> [--skip <a,b>] [--prefix <text>]
     skills-sync.py digest <dir>
     skills-sync.py table --repo <git checkout> [--tags <glob>]
 
-`sync` prints one notice per line (each starting with --prefix) and always
-exits 0 for a refusal or partial refresh; 2 is a usage error.
+`sync` and `add` print one notice per line (each starting with --prefix) and
+always exit 0 for a refusal or partial copy; 2 is a usage error.
 """
 
 import errno
@@ -319,6 +328,78 @@ def sync(plugin_root, project, prefix):
     return out
 
 
+def portable_names(src_root):
+    """The shipped portable skill names, sorted: every plain directory under
+    skills/ except a dot entry (packaging) and an at-* lead workflow."""
+    names = []
+    for name in sorted(os.listdir(src_root)):
+        src = os.path.join(src_root, name)
+        if name.startswith(".") or lead_workflow(name) or not os.path.isdir(src) or os.path.islink(src):
+            continue
+        if NAME_RE.match(name):
+            names.append(name)
+    return names
+
+
+def add(plugin_root, project, dest_rel, skip, prefix):
+    """Write each portable skill missing from <project>/<dest_rel> (add-only)."""
+    out = []
+
+    def note(msg):
+        out.append(prefix + msg)
+
+    src_root = os.path.join(plugin_root, "skills")
+    parts = [p for p in dest_rel.split("/") if p]
+    if not os.path.isdir(src_root) or not parts or any(p in (".", "..") for p in parts):
+        return out
+    real_project = os.path.realpath(project)
+    path = project
+    for i, p in enumerate(parts):
+        path = os.path.join(path, p)
+        if os.path.islink(path):
+            note(dest_rel + ": " + "/".join(parts[:i + 1]) + " is a symlink — left untouched (skills not added).")
+            return out
+        if os.path.lexists(path) and not os.path.isdir(path):
+            note(dest_rel + ": " + "/".join(parts[:i + 1]) + " exists and is not a directory — skills not added.")
+            return out
+    dest = os.path.join(project, *parts)
+    expected = os.path.join(real_project, *parts)
+    try:
+        os.makedirs(dest, exist_ok=True)
+    except OSError:
+        note("WARNING could not create " + dest_rel + " — skills not added.")
+        return out
+    dest_real = os.path.realpath(dest)
+    if dest_real != expected:
+        note(dest_rel + " resolves outside the project (symlinked ancestor) — left untouched.")
+        return out
+    added, present, failed = [], [], []
+    for name in portable_names(src_root):
+        target = os.path.join(dest, name)
+        if name in skip or os.path.lexists(target):
+            present.append(name)
+            continue
+        tmp_dir = os.path.join(dest, TMP_PREFIX + name + "-" + str(os.getpid()))
+        try:
+            if os.path.lexists(tmp_dir):
+                shutil.rmtree(tmp_dir)
+            shutil.copytree(os.path.join(src_root, name), tmp_dir, symlinks=True)
+            os.rename(tmp_dir, target)
+            added.append(name)
+        except (OSError, shutil.Error):
+            failed.append(name)
+            try:
+                if os.path.lexists(tmp_dir):
+                    shutil.rmtree(tmp_dir)
+            except OSError:
+                pass
+    if failed:
+        note("WARNING " + dest_rel + ": could not add " + " ".join(failed) + ".")
+    if present:
+        note(dest_rel + ": left as they are (already present or tracked there): " + " ".join(present) + ".")
+    return out
+
+
 def table(repo, tag_glob):
     tags = subprocess.run(["git", "-C", repo, "tag", "-l", tag_glob], check=True,
                           capture_output=True, text=True).stdout.split()
@@ -364,16 +445,24 @@ def main(argv):
     if len(argv) >= 2 and argv[1] == "digest" and len(argv) == 3:
         print(dir_digest(argv[2]))
         return 0
-    if len(argv) >= 2 and argv[1] in ("sync", "table"):
+    if len(argv) >= 2 and argv[1] in ("sync", "add", "table"):
         opts = {}
         i = 2
         while i < len(argv):
-            if argv[i] in ("--plugin-root", "--project", "--prefix", "--repo", "--tags") and i + 1 < len(argv):
+            if argv[i] in ("--plugin-root", "--project", "--prefix", "--repo", "--tags", "--dest", "--skip") and i + 1 < len(argv):
                 opts[argv[i]] = argv[i + 1]
                 i += 2
             else:
                 sys.stderr.write("skills-sync.py: unknown argument " + argv[i] + "\n")
                 return 2
+        if argv[1] == "add":
+            if "--plugin-root" not in opts or "--project" not in opts or "--dest" not in opts:
+                sys.stderr.write("skills-sync.py add: --plugin-root, --project and --dest are required\n")
+                return 2
+            skip = set(n for n in opts.get("--skip", "").split(",") if n)
+            for line in add(opts["--plugin-root"], opts["--project"], opts["--dest"], skip, opts.get("--prefix", "")):
+                print(line)
+            return 0
         if argv[1] == "sync":
             if "--plugin-root" not in opts or "--project" not in opts:
                 sys.stderr.write("skills-sync.py sync: --plugin-root and --project are required\n")

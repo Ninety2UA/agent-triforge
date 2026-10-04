@@ -173,11 +173,11 @@ triforge_ladder() {
 #   resolver    shell function that resolves the binary ("" = plain `binary`);
 #               _registry_binary calls it when it is defined
 #   version_re  the --version shape an alternate binary name must match ("")
-#   model       shipped default model; "" for claude (the shell lane runs the
-#               host default, the ladder is an Agent-tool concern — see
-#               TRIFORGE_MODEL_LADDER)
+#   model       shipped default model; "" for claude (the claude -p lane then
+#               runs Claude Code's own default, user-tier settings unread; the
+#               ladder is the lead's spawn choice — see TRIFORGE_MODEL_LADDER)
 #   model_env   the override variable the CLI's dispatch lane honors ("" for
-#               claude: the ladder, never the roster, picks its model)
+#               claude: a roster model rides the claude -p lane's --model)
 #   install     the official install command — PRINTED for the user, never run
 #               (R18/R21); `login` is the step printed after it ("" when none)
 #   env_keys    variables _adapter_env forwards into a lease besides the base
@@ -185,8 +185,10 @@ triforge_ladder() {
 #               documented wildcard is kimi's "KIMI_*" (check 3 fails any other)
 #   lane        how a role dispatch reaches the CLI: "shell" (its invoke_*
 #               helper, or a command composed under env -i in lease_dispatch)
-#               | "subagent" (a native Agent-tool subagent — review and test
-#               work on the claude lane; dispatch_role returns 40)
+#               | "subagent" (review and test work on the claude lane: a native
+#               Agent-tool subagent when the lead's lead.native_subagents_
+#               enforced_tools is true — dispatch_role returns 40 — else a
+#               claude -p worker that dispatch_role runs itself, KTD16)
 #   egress      the model provider that receives the prompt and the code (R36)
 #   lead        the KTD1 static lead fields, or {} for a CLI that cannot lead
 #               (Key Decision: Claude Code or Codex only). launch_argv is the

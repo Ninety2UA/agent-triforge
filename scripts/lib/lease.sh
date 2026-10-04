@@ -1190,11 +1190,13 @@ print(" || ".join(log[-20:]))
 # OPENROUTER_API_KEY; kimi: KIMI_*; cursor: CURSOR_API_KEY). claude, codex,
 # and antigravity list none — they authenticate via HOME-based stores and get
 # nothing extra — no cross-provider leakage; a CLI the registry does not know
-# gets the base allowlist alone. env -i execs external commands only; shell
-# functions cannot cross it, which is why the lease lane composes direct CLI
-# commands (_lease_lane_argv, scripts/lib/lease-wait.sh) instead of calling the
-# invoke_* helpers. Mirrored by
-# _lane_run in scripts/probe-capabilities.sh, which reads the same base list.
+# gets the base allowlist alone. Two lanes add fixed values of their own:
+# claude _ADAPTER_ENV_CLAUDE, opencode its OPENCODE_PERMISSION deny set. env -i
+# execs external commands only; shell functions cannot cross it, which is why
+# the lease lane composes direct CLI commands (_lease_lane_argv,
+# scripts/lib/lease-wait.sh) instead of calling the invoke_* helpers. Mirrored
+# by _lane_run in scripts/probe-capabilities.sh, which reads the same base
+# list, and by _lane_run_claude there, which reads _ADAPTER_ENV_CLAUDE.
 # The env_keys are one registry read here unless lease_dispatch, which already
 # read them together with the model, hands them over in _ADAPTER_ENV_KEYS (set
 # inside the detached builder process only, so the lead's shell never carries it).
@@ -1225,6 +1227,11 @@ _adapter_env_forward() {
     PAIRS+=("${1}=${_VAL}")
   fi
 }
+# The claude lane's own values (KTD16): no background task outlives a worker's
+# turn (a headless `claude -p` that ends its turn waiting on one dies with it),
+# and a worker never updates the user's Claude Code install. _lane_run's claude
+# rows in scripts/probe-capabilities.sh read this array through the loader.
+_ADAPTER_ENV_CLAUDE=(CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 DISABLE_AUTOUPDATER=1)
 _adapter_env() {
   local CLI=$1
   shift
@@ -1304,6 +1311,9 @@ PREFIXENV
 $(printf '%s' "$_KEYS" | tr ' ' '\n')
 ENVKEYS
   case "$CLI" in
+    claude)
+      PAIRS+=("${_ADAPTER_ENV_CLAUDE[@]}")
+      ;;
     opencode)
       # D-033 defense-in-depth: the shipped deny set rides as OPENCODE_PERMISSION
       # (caller's own value wins) — the adapter stays off --auto regardless. A
@@ -1364,15 +1374,48 @@ _lease_provision_skills() {
   return 0
 }
 
-# _lease_provision <worktree> — provision a worktree _lease_carve just made
-# (it reads _CARVE_ADMIN) and append provisioned=<the paths that wrote> to
-# _CARVE_FIELDS, the lease row's `provisioned` field (KTD9). rc 1 when the
-# list can't be read: a row without it would fall back to excluding all of
-# .agents/.
+# _lease_provision_claude_skills <worktree> [<names,>] — the claude worker's
+# copy (KTD16): Claude Code reads skills from .claude/skills, not .agents/skills.
+# skills-sync.py add writes the same portable set there, names only: an entry
+# already present (a tracked one, like this repo's .claude/skills/watch-cycle/)
+# and each name in <names,> (the names git tracks there) stay as they are, and
+# nothing is replaced, retired or stamped; the same symlink and realpath guards
+# apply (KTD12).
+_lease_provision_claude_skills() {
+  local WT=$1 SKIP=${2:-} PROOT
+  PROOT=$(_lease_plugin_root) || return 0
+  [ -f "${_TRIFORGE_SCRIPTS_DIR}/lib/skills-sync.py" ] || return 0
+  python3 "${_TRIFORGE_SCRIPTS_DIR}/lib/skills-sync.py" add --plugin-root "$PROOT" --project "$WT" --dest .claude/skills --skip "$SKIP" --prefix "lease: " >&2 \
+    || echo "lease: WARNING .claude/skills provisioning failed for ${WT} (the claude builder may not see the portable skills)" >&2
+  return 0
+}
+
+# _lease_provision <worktree> <builder-cli> — provision a worktree _lease_carve
+# just made (it reads _CARVE_ADMIN) and append provisioned=<the paths that
+# wrote> to _CARVE_FIELDS, the lease row's `provisioned` field (KTD9): the
+# portable skills in .agents/skills, and for a claude builder in .claude/skills
+# too. rc 1 when the list can't be read: a row without it would fall back to
+# excluding all of .agents/.
 _lease_provision() {
-  local WT=$1 LIST
+  local WT=$1 CLI=${2:-} LIST TRACKED=""
+  local -a DIRS=(.agents/skills)
   _lease_provision_skills "$WT"
-  LIST=$(_lease_provisioned "$WT" "$_CARVE_ADMIN" .agents/skills) || {
+  case "$CLI" in
+    claude)
+      TRACKED=$(_lgw "$WT" "$_CARVE_ADMIN" ls-files -z -- .claude/skills 2>/dev/null | python3 -c '
+import sys
+names = set()
+for p in sys.stdin.buffer.read().decode("utf-8", "surrogateescape").split("\0"):
+    parts = p.split("/")
+    if len(parts) > 2 and parts[0] == ".claude" and parts[1] == "skills":
+        names.add(parts[2])
+print(",".join(sorted(names)))
+') || TRACKED=""
+      _lease_provision_claude_skills "$WT" "$TRACKED"
+      DIRS+=(.claude/skills)
+      ;;
+  esac
+  LIST=$(_lease_provisioned "$WT" "$_CARVE_ADMIN" "${DIRS[@]}") || {
     echo "lease: ERROR could not list the paths provisioning wrote into ${WT}, so the snapshot could not exclude exactly those (KTD9)" >&2
     return 1
   }
@@ -1438,7 +1481,8 @@ print(" ".join(sorted(found)) or "none")
 # _CARVE_FIELDS: the key=value list every (re)carved lease row starts from
 # (those four, the branch it was carved on — empty on the default branch, which
 # is never an integration branch — the lease root it was carved under, and the
-# cleared snapshot, integrity and protected-status fields; _lease_provision then appends
+# cleared snapshot, integrity and protected-status fields and the claude
+# session record (a fresh worktree starts a fresh session); _lease_provision then appends
 # `provisioned`), passed as "${_CARVE_FIELDS[@]}" by lease_create and
 # lease_requeue. Set only on success, and then never empty, so the expansion
 # is safe under bash 3.2 `set -u` and in zsh.
@@ -1463,7 +1507,8 @@ _lease_carve() {
   if [ -n "$CUR" ] && [ "$CUR" = "$(_lease_default_branch)" ]; then CUR=""; fi
   _CARVE_FIELDS=(base_sha="$_CARVE_BASE" admin_dir="$_CARVE_ADMIN" pointer_digest="$_CARVE_POINTER" admin_digest="$_CARVE_ADMIN_DIGEST"
                  integration_branch="$CUR" lease_root="$_LEASE_ROOT" snapshot_sha= snapshot_tree= builder_commits= integrity_prev_state=
-                 protected= protected_paths=)
+                 protected= protected_paths=
+                 session_id= resumed_session= result_subtype= result_is_error=)
 }
 
 # _lease_tree_of_worktree <worktree> <admin> <start-commit> [<provisioned>] —
@@ -1706,7 +1751,7 @@ CREATE_ROW_EOF
   LEAD=$(resolve_lead 2>/dev/null) || LEAD=""
   LEAD=${LEAD%%"$TAB"*}
   _lease_carve "$TASK_ID" "$WT" || return 1
-  _lease_provision "$WT" || return 1
+  _lease_provision "$WT" "$CLI" || return 1
   NOW=$(date +%s)
   _ledger_update "$TASK_ID" \
     task_id="$TASK_ID" role="$ROLE" \
@@ -1757,6 +1802,44 @@ _lease_extract_stream() {
   fi
 }
 
+# _lease_claude_envelope <out> — the claude lane's JSON envelope (KTD16). When
+# <out> holds one (an object whose type is "result"), keep it as <out>.raw, put
+# its result text in <out>, where the typed report is parsed, and write
+# <out>.envelope: subtype=, is_error=, session_id=, num_turns=, each value
+# checked against its shape (a session id must look like a UUID) or left
+# empty. rc 1, nothing touched, when <out> is not an envelope (a plain-text
+# TRIFORGE_TEST_BUILDER, an auth failure printed as text).
+_lease_claude_envelope() {
+  [ -s "$1" ] || return 1
+  CE_OUT="$1" python3 -c '
+import json, os, re, shutil, sys
+out = os.environ["CE_OUT"]
+src = open(out, encoding="utf-8", errors="replace").read()
+i = src.find("{")
+try:
+    obj = json.JSONDecoder().raw_decode(src[i:])[0] if i >= 0 else None
+except ValueError:
+    obj = None
+if not isinstance(obj, dict) or obj.get("type") != "result":
+    sys.exit(1)
+def shaped(v, rx):
+    v = "" if v is None else str(v)
+    return v if re.fullmatch(rx, v) else ""
+meta = ["subtype=" + shaped(obj.get("subtype"), r"[a-z_]{1,40}"),
+        "is_error=" + ("true" if obj.get("is_error") is True else "false"),
+        "session_id=" + shaped(obj.get("session_id"), r"[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"),
+        "num_turns=" + shaped(obj.get("num_turns"), r"[0-9]{1,6}")]
+res = obj.get("result")
+res = res if isinstance(res, str) else ""
+shutil.copyfile(out, out + ".raw")
+with open(out + ".text", "w", encoding="utf-8") as f:
+    f.write(res + ("\n" if res and not res.endswith("\n") else ""))
+os.replace(out + ".text", out)
+with open(out + ".envelope", "w", encoding="utf-8") as f:
+    f.write("\n".join(meta) + "\n")
+' 2>/dev/null
+}
+
 # lease_dispatch <task_id> <prompt> [timeout-seconds]
 #
 # Composes the FULL dispatch prompt: injected context header (KTD-3 — the
@@ -1799,10 +1882,10 @@ lease_dispatch() {
     echo "lease_dispatch: ERROR task ${TASK_ID} is in state '${STATE}' (want leased)" >&2
     return 1
   fi
-  local ROW
-  ROW=$(_ledger_get_row "$TASK_ID" builder_cli builder_model builder_effort role worktree) || ROW=""
+  local ROW SESSION="" RESUME=""
+  ROW=$(_ledger_get_row "$TASK_ID" builder_cli builder_model builder_effort role worktree session_id) || ROW=""
   { IFS= read -r CLI || true; IFS= read -r MODEL || true; IFS= read -r EFFORT || true
-    IFS= read -r ROLE || true; IFS= read -r WT || true; } <<DISPATCH_ROW_EOF
+    IFS= read -r ROLE || true; IFS= read -r WT || true; IFS= read -r SESSION || true; } <<DISPATCH_ROW_EOF
 ${ROW}
 DISPATCH_ROW_EOF
   if [ ! -d "$WT" ]; then
@@ -1839,6 +1922,7 @@ You are working in an isolated worktree at ${WT}. Never modify files outside it.
 ## Dispatch contract (applies to every builder)
 - Do not spawn sub-agents, delegate, or invoke other coding tools; do the work yourself in this worktree.
 - Never run git push, git pull, or git fetch. Do not commit, rebase, or switch branches.
+- Do not end your final turn while a command you started in the background is still running: wait for it or stop it first.
 - Finish with a final report in exactly this shape (the lead parses the Status line; a run without it is treated as incomplete):
   Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
   Files changed: <list>
@@ -1863,7 +1947,7 @@ ${PROMPT}"
       return 1
     fi
   fi
-  rm -f "$OUT" "${OUT}.rc" "${OUT}.class" "${OUT}.log" "${OUT}.launch"
+  rm -f "$OUT" "${OUT}.rc" "${OUT}.class" "${OUT}.log" "${OUT}.launch" "${OUT}.err" "${OUT}.raw" "${OUT}.envelope"
 
   # Lane-specific composition that must happen LEAD-SIDE, before env -i: the
   # Kimi builder definition's absolute plugin path (D-024), the Cursor binary and
@@ -1893,7 +1977,13 @@ ${PROMPT}"
       fi
       ;;
   esac
-  _ledger_update "$TASK_ID" dispatched_model="$DISPATCH_MODEL" || return 1
+  # The claude lane resumes the session its last run recorded (KTD16): a fix
+  # cycle, or the re-dispatch after a report-missing collect, continues the
+  # same conversation in the same worktree; a requeue re-carves and clears it.
+  case "$CLI" in
+    claude) if _claude_session_ok "$SESSION"; then RESUME=$SESSION; fi ;;
+  esac
+  _ledger_update "$TASK_ID" dispatched_model="$DISPATCH_MODEL" resumed_session="$RESUME" || return 1
 
   # Detached launch (KTD10): the builder process is a fresh bash that sources
   # this loader and runs _lease_builder_run with the composition above, in its
@@ -1903,7 +1993,8 @@ ${PROMPT}"
   if [ ! -x "$BASH_BIN" ]; then BASH_BIN=$(command -v bash 2>/dev/null || printf 'bash'); fi
   LAUNCH=$(python3 -c "$_LEASE_LAUNCH_PY" "${OUT}.log" "$BASH_BIN" -c "$_LEASE_BUILDER_SH" triforge-lease-builder \
              "${_TRIFORGE_SCRIPTS_DIR}/invoke-external.sh" "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$KIMI_AGENT_FILE" \
-             "$CBIN" "$TOBIN" "$TIMEOUT" "$OUT" "$WT" "$REG_ENV_KEYS" "${TRIFORGE_TEST_BUILDER:-}" "$FULL_PROMPT") || LAUNCH=""
+             "$CBIN" "$TOBIN" "$TIMEOUT" "$OUT" "$WT" "$REG_ENV_KEYS" "${TRIFORGE_TEST_BUILDER:-}" "$FULL_PROMPT" \
+             "$_LEASE_COMMON" "$RESUME") || LAUNCH=""
   { IFS="$TAB" read -r PID PGID PID_START || true; } <<LAUNCH_EOF
 ${LAUNCH}
 LAUNCH_EOF
@@ -2121,7 +2212,7 @@ lease_requeue() {
     return 1
   fi
   _lease_carve "$TASK_ID" "$WT" || return 1
-  _lease_provision "$WT" || return 1
+  _lease_provision "$WT" "$CLI" || return 1
   _ledger_update "$TASK_ID" \
     state=leased builder_cli="$CLI" builder_model="$MODEL" builder_effort="$EFFORT" \
     previous_builder="$PREV" requeue_count=1 pid=0 heartbeat_deadline=0 reason="" \
@@ -2191,6 +2282,10 @@ _lease_copy_discoveries() {
 #                                        state=review, so use lease_requeue's
 #                                        sibling: mark orphaned -> reclaim ->
 #                                        requeue) or escalates after one repeat
+# The claude lane's envelope (<out>.envelope) is recorded first: result_subtype,
+# result_is_error and session_id (the next dispatch resumes it), and a
+# max-turns stop (subtype error_max_turns, nonzero exit) is routed as a clean
+# exit without a report: report missing (KTD16).
 lease_collect() {
   _lead_only lease_collect || return $?
   local TASK_ID=${1:?usage: lease_collect <task_id>}
@@ -2221,6 +2316,24 @@ COLLECT_ROW_EOF
   fi
   RC=$(cat "${OUT}.rc" 2>/dev/null || echo 1)
   CLASS=$(cat "${OUT}.class" 2>/dev/null || true)
+  # The claude lane's envelope (KTD16, _lease_claude_envelope): subtype and
+  # is_error go to the row, and the session id the next dispatch resumes. A
+  # max-turns stop is the lane's turn cap, not a crash: the work so far stays in
+  # the worktree, and with no report it routes as report missing.
+  if [ -f "${OUT}.envelope" ]; then
+    local ESUB="" EERR="" ESID=""
+    ESUB=$(sed -n 's/^subtype=//p' "${OUT}.envelope" 2>/dev/null | head -1)
+    EERR=$(sed -n 's/^is_error=//p' "${OUT}.envelope" 2>/dev/null | head -1)
+    ESID=$(sed -n 's/^session_id=//p' "${OUT}.envelope" 2>/dev/null | head -1)
+    case "$ESUB" in *[!a-z_]*) ESUB="" ;; esac
+    case "$EERR" in true|false) ;; *) EERR="" ;; esac
+    _claude_session_ok "$ESID" || ESID=$(_ledger_get "$TASK_ID" session_id 2>/dev/null || true)
+    _ledger_update "$TASK_ID" result_subtype="$ESUB" result_is_error="$EERR" session_id="$ESID" || return 1
+    if [ "$ESUB" = error_max_turns ] && [ "$RC" != 0 ]; then
+      echo "lease_collect: task ${TASK_ID} claude builder stopped at its turn cap (subtype error_max_turns, rc ${RC}) before its final report — routed as report missing" >&2
+      RC=0
+    fi
+  fi
   if [ "$RC" -eq 0 ] 2>/dev/null; then
     local REPORT BUILDER
     REPORT=$(_lease_parse_status "$OUT")

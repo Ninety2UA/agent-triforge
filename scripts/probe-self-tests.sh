@@ -5,8 +5,8 @@
 # Status-line parser seam, lease-lane skill discovery per CLI, the
 # TRIFORGE_TEST_BUILDER lifecycle, session-start idempotence plus its upgrade
 # notices (R40), the skills refresh's destructive paths, the [lead] table,
-# ledger approvals, the worker marker, lead-side git hardening, and detached
-# leases with lease_wait).
+# ledger approvals, the worker marker, lead-side git hardening, detached
+# leases with lease_wait, and the claude -p lane).
 #
 # NOT a standalone script: sourced by scripts/probe-capabilities.sh after the
 # per-CLI sections, inside the same shell, so it uses the harness's helpers
@@ -210,9 +210,9 @@ fi
 # row per CLI, gated on that CLI's live gate (kimi: PENDING-AUTH while
 # KIMI-05 is AUTH-FAIL). PASS when the probe skill tf-agents-skill (inherited
 # from the fixture commit, exactly like a user-added skill) is listed; the
-# shipped-name coverage rides in the evidence. The claude lane is the honest
-# exception: .agents/skills/ is not a Claude path, so its row reports what
-# the plugin path delivers into a lease worktree.
+# shipped-name coverage rides in the evidence. The claude lane is the
+# exception: .agents/skills/ is not a Claude path, so its row (SELF-06f) checks
+# the .claude/skills/ copy the real provisioner writes for a claude builder.
 _s6_record() { # _s6_record <id> <cli> <capability> <file> <note>
   local ID=$1 CLI=$2 CAP=$3 F=$4 NOTE=$5 MISS N_PRESENT
   MISS=$(_names_missing "$F")
@@ -301,22 +301,18 @@ elif [ "$_S6_OK" = 1 ]; then
     (cd "$_S6_WT" && _lane_run 240 env KIMI_DISABLE_TELEMETRY=1 kimi --output-format text -p "$LIST12_PROMPT" > "$O" 2>&1) || true
     _s6_record "SELF-06e" "kimi" "$_S6_CAP: kimi -p skill listing" "$O" "kimi --output-format text -p"
   fi
-  # claude — the plugin path, not .agents/skills (CC-07b)
-  if ! command -v claude >/dev/null 2>&1; then
-    row "SELF-06f" "claude" "$_S6_CAP: claude -p skill listing (plugin path)" "UNAVAILABLE" "claude not on PATH" "live"
-  elif [ "$CC_LIVE" != 1 ]; then
-    row "SELF-06f" "claude" "$_S6_CAP: claude -p skill listing (plugin path)" "$(_skip_reason)" "gated on CC-02" "live"
-  else
-    O="$WORK/self06-cc.txt"
-    (cd "$_S6_WT" && _lane_run 240 claude -p --model sonnet --output-format text "$LIST12_PROMPT" > "$O" 2>&1) || true
-    _s6_record "SELF-06f" "claude" "$_S6_CAP: claude -p skill listing (plugin path)" "$O" "claude -p --model sonnet; .agents/skills is not a Claude path — names come from the installed plugin"
-  fi
   git -C "$FIX" worktree remove --force "$_S6_WT" >/dev/null 2>&1 || rm -rf "$_S6_WT"
   git -C "$FIX" branch -D probe/self-06 >/dev/null 2>&1 || true
 else
-  for r in "SELF-06a:agy" "SELF-06b:codex" "SELF-06c:opencode" "SELF-06d:cursor" "SELF-06e:kimi" "SELF-06f:claude"; do
+  for r in "SELF-06a:agy" "SELF-06b:codex" "SELF-06c:opencode" "SELF-06d:cursor" "SELF-06e:kimi"; do
     row "${r%%:*}" "${r#*:}" "$_S6_CAP: ${r#*:}" "FAIL" "git worktree add failed in the fixture — no lease-shaped worktree to probe" "live"
   done
+fi
+# claude reads .claude/skills, not .agents/skills (CC-07b): SELF-06f runs the
+# real provisioner into a worktree of its own and the lane's own argv
+# (_self06f_row in scripts/probe-capabilities.sh, which --only SELF-06f runs too).
+if [ "$SELF_ONLY" != 1 ]; then
+  _self06f_row
 fi
 
 # SELF-07 (KTD11): the TRIFORGE_TEST_BUILDER lifecycle through lease_create /
@@ -1940,7 +1936,8 @@ rm -rf "$_S14"
 #   squash   a project tracking .agents/skills/my-skill/ and
 #            .claude/commands/cli-watch.md, once with .agents/ gitignored (as
 #            this repo does) and once without: `provisioned` lists the stamp
-#            and every shipped portable skill, never my-skill; the builder
+#            and every shipped portable skill (in .agents/skills, and in
+#            .claude/skills for this claude builder, KTD16), never my-skill; the builder
 #            edits feature.txt, my-skill and cli-watch.md; the snapshot and the
 #            merged commit carry exactly those three; lease_promote blocks (42)
 #            naming my-skill and cli-watch.md.
@@ -1949,7 +1946,7 @@ rm -rf "$_S14"
 #            gitignored project, where the old exclude pathspec made `git add`
 #            fail and every collect escalate.
 #   none     a project that already tracks the shipped skills at the current
-#            digest: provisioning writes nothing, so `provisioned` = none and
+#            digest (both copies): provisioning writes nothing, so `provisioned` = none and
 #            the snapshot excludes nothing — the builder's edit to a tracked
 #            shipped copy is in it, beside feature.txt.
 #   codexhook session start (marker unset) replaces a .codex/hooks.json still
@@ -2200,7 +2197,7 @@ echo "promote=$R"; printf "%s\n" "$E" | grep "_protected)" | sed "s/^ */hit=/"
 ')
   _S15_PROV=$(printf '%s\n' "$_S15_SQ" | sed -n 's/^provisioned=//p')
   _S15_PWANT=".agents/skills/.triforge-plugin-version"
-  for _s15_s in $SHIPPED_SKILLS; do _S15_PWANT="${_S15_PWANT} .agents/skills/${_s15_s}"; done
+  for _s15_s in $SHIPPED_SKILLS; do _S15_PWANT="${_S15_PWANT} .agents/skills/${_s15_s} .claude/skills/${_s15_s}"; done
   _S15_PWANT=$(printf '%s\n' $_S15_PWANT | sort | tr '\n' ' ')
   [ "$(printf '%s\n' $_S15_PROV | sort | tr '\n' ' ')" = "$_S15_PWANT" ] || _S15_FAIL="$_S15_FAIL squash-${_s15_ign}(provisioned=[$(printf '%s' "$_S15_PROV" | cut -c1-120)])"
   _S15_FAIL="${_S15_FAIL}$(_self_expect "squash-${_s15_ign}" "$_S15_SQ" '^create=0$' '^collect=0 state=review$' "^snapshot=${_S15_WANT} \$" '^unapproved=42$' '^merge=0$' \
@@ -2209,10 +2206,12 @@ done
 unset _s15_ign _s15_s
 
 # legacy: a row without `provisioned` keeps the whole-.agents/ rule and collects
+# (a pre-4.0 carve wrote no .claude/skills copies, so the stand-in drops them)
 _s15_repo "$_S15/lg" yes
 _S15_LG=$(_s15_lead "$_S15/lg" "$_S15/fb-edit.sh" '
 lease_create t builder >/dev/null 2>&1; echo "create=$?"
 _ledger_update t provisioned= >/dev/null 2>&1
+rm -rf "$(_ledger_get t worktree)/.claude/skills"
 _s15_go t
 R=0; lease_collect t >/dev/null 2>&1 || R=$?; echo "collect=$R state=$(_ledger_get t state)"
 echo "snapshot=$(git diff --name-only "$(_ledger_get t base_sha)" "$(_ledger_get t snapshot_sha)" | tr "\n" " ")"
@@ -2220,10 +2219,11 @@ echo "snapshot=$(git diff --name-only "$(_ledger_get t base_sha)" "$(_ledger_get
 _S15_FAIL="${_S15_FAIL}$(_self_expect legacy "$_S15_LG" '^create=0$' '^collect=0 state=review$' '^snapshot=\.claude/commands/cli-watch\.md feature\.txt $')"
 
 # none: provisioning wrote nothing (the shipped skills are tracked at the
-# current digest), so the snapshot excludes nothing
+# current digest, in .claude/skills too), so the snapshot excludes nothing
 _s15_repo "$_S15/pn" no
 ( cd "$_S15/pn" && export HOME="$_S15/home" GIT_CONFIG_NOSYSTEM=1 \
     && python3 "${_SELF_DIR}/lib/skills-sync.py" sync --plugin-root "$REPO_ROOT" --project . --prefix "probe: " \
+    && python3 "${_SELF_DIR}/lib/skills-sync.py" add --plugin-root "$REPO_ROOT" --project . --dest .claude/skills --prefix "probe: " \
     && git add -A && git commit -qm "track the shipped skills" ) >/dev/null 2>&1
 _S15_PN_SKILL=$(printf '%s\n' $SHIPPED_SKILLS | head -1)
 printf '#!/bin/sh\necho feature > feature.txt\necho edited >> .agents/skills/%s/SKILL.md\necho "Status: DONE"\n' "$_S15_PN_SKILL" > "$_S15/fb-none.sh"
@@ -3692,3 +3692,261 @@ else
   row "SELF-19" "claude" "$_S19_CAP" "FAIL" "mismatch in ${_S19_WHO% }:$(printf '%s' "$_S19_FAIL" | cut -c1-600)" "static"
 fi
 rm -rf "$_S19"
+
+# SELF-20 (KTD16 — R2, R3): the claude -p lane as a full builder, reviewer and
+# tester lane under either lead. No live CLI: a recording `claude` stub first on
+# PATH answers the way `claude -p --output-format json` does (mode from
+# $TMPDIR/s20-mode; argv and env to $TMPDIR/s20-rec.*), and the
+# TRIFORGE_TEST_BUILDER seam drives the lifecycle cases, under the SELF-18
+# conventions (throwaway HOME, GIT_CONFIG_NOSYSTEM, a lease root per case).
+#   argv      _lease_lane_argv claude: -p, the JSON envelope, project and local
+#             settings only, no MCP server, acceptEdits, the explicit --tools
+#             and --allowedTools sets (no Agent, no web tool), --settings with
+#             the sandbox on, fail-closed, no unsandboxed retry, the known
+#             credential paths unreadable (sandbox denyRead and Read deny
+#             rules) and the lead's git common dir unwritable; --model and
+#             --effort from the roster; --resume only for a UUID-shaped id; and
+#             --max-turns last, so the prompt after it is never read as a tool
+#             name. TRIFORGE_CLAUDE_SANDBOX=off: the sandbox off, the deny
+#             rules kept
+#   env       _adapter_env claude adds CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
+#             and DISABLE_AUTOUPDATER=1; codex gets neither
+#   builder   _lease_builder_run's claude arm against the stub, in a session of
+#             its own: the result text in <out> (its Status line parses), the
+#             envelope in <out>.raw, subtype, is_error and session_id in
+#             <out>.envelope; the stub saw --resume <id>, the prompt last, the
+#             worker marker, the background-task switch and the no-push config.
+#             A stub refusing for want of a sandbox -> class deterministic,
+#             naming TRIFORGE_CLAUDE_SANDBOX
+#   lifecycle the seam with builder = claude: an envelope ending Status: DONE ->
+#             review with session_id and result_subtype recorded; the fix cycle
+#             (lease_redispatch) records resumed_session = that id; a max-turns
+#             envelope (exit 1, error_max_turns) -> rc 80, leased,
+#             report_missing_count 1, result_subtype error_max_turns
+#   skills    lease_create in a repo tracking this repo's
+#             .claude/skills/watch-cycle/ and a user copy under a shipped name:
+#             the worktree's .claude/skills/ holds every other portable skill,
+#             byte-equal to the plugin's, and no at-* workflow; watch-cycle and
+#             the user copy are untouched; `provisioned` lists the written
+#             .claude/skills entries and neither tracked one; the builder's
+#             edit to watch-cycle reaches the collect snapshot and the
+#             provisioned copies don't; a symlinked .claude is left alone
+#   dispatch  dispatch_role reviewer resolving to claude: under a claude lead
+#             (native_subagents_enforced_tools) rc 40 and the stub never runs;
+#             under a codex lead the stub runs as claude -p with the read-only
+#             tool set and dontAsk, and the result text lands in the output
+#             file, rc 0
+_S20="${WORK}/self20"
+_S20_FAIL=""
+_S20_SID="7d0f3a52-1b2c-4d5e-8f90-0123456789ab"
+rm -rf "$_S20"
+mkdir -p "$_S20/home" "$_S20/bin" "$_S20/tmp" "$_S20/wtb" "$_S20/link-target"
+cat > "$_S20/bin/claude" <<EOF
+#!/bin/sh
+# probe stub (SELF-20): a claude -p --output-format json stand-in; records argv and env
+case "\${1:-}" in --version) echo "2.1.289 (Claude Code)"; exit 0 ;; esac
+R="\${TMPDIR:?}/s20-rec"
+i=0
+for a in "\$@"; do i=\$((i + 1)); printf '%s' "\$a" > "\$R.\$i"; done
+echo "\$i" > "\$R.n"
+env > "\$R.env"
+case "\$(cat "\$TMPDIR/s20-mode" 2>/dev/null)" in
+  review) printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"session_id":"${_S20_SID}","result":"REVIEW-OK no findings"}' ;;
+  nosandbox) echo "Error: sandbox.failIfUnavailable is set — refusing to start without a working sandbox." >&2; exit 1 ;;
+  *) printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"num_turns":2,"session_id":"${_S20_SID}","result":"did it\n\nStatus: DONE\nFiles changed: none\nTests: none\nConcerns: None\nDiscoveries for later tasks: None"}' ;;
+esac
+EOF
+chmod +x "$_S20/bin/claude"
+_s20_rec() { # _s20_rec — the stub's recorded argv, one word per line
+  local N F
+  N=$(cat "$_S20/tmp/s20-rec.n" 2>/dev/null || echo 0)
+  [ "$N" -gt 0 ] 2>/dev/null || return 0
+  for F in $(seq 1 "$N"); do printf '%s\n' "$(cat "$_S20/tmp/s20-rec.$F")"; done
+}
+_s20_repo() { # _s20_repo <dir> <roster text, %b escapes> — a lead repo on a sprint branch
+  ( mkdir -p "$1" && cd "$1" && export HOME="$_S20/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
+      && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
+      && mkdir ops && printf '%b' "$2" > ops/roster.toml && echo r > README.md \
+      && git add -A && git commit -qm init && git checkout -q -b sprint/s20 ) >/dev/null 2>&1
+}
+_S20_ENV="HOME=$_S20/home GIT_CONFIG_NOSYSTEM=1 TMPDIR=$_S20/tmp PATH=$_S20/bin:${_SELF_STUBS}:$PATH"
+# shellcheck disable=SC2086
+set -- $SHIPPED_SKILLS
+_S20_COLLIDE=$1
+_S20_OTHER=${2:-}
+set --
+
+# argv
+O=$( export TMPDIR="$_S20/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  _s20_argv() { # _s20_argv <label> <_lease_lane_argv args...> — the words, then python's verdict
+    local L=$1 W
+    shift
+    if ! _lease_lane_argv claude "$@"; then echo "${L}:no-claude-arm"; return 0; fi
+    for W in "${_LEASE_LANE_ARGV[@]}"; do printf '%s\n' "$W"; done > "$_S20/argv.$L"
+    S20_F="$_S20/argv.$L" S20_L="$L" S20_SID="$_S20_SID" S20_COMMON="/s20/lead/.git" python3 - <<'PYEOF'
+import json, os
+w = open(os.environ['S20_F'], encoding='utf-8').read().split('\n')[:-1]
+L, sid = os.environ['S20_L'], os.environ['S20_SID']
+bad = []
+def val(flag):
+    return w[w.index(flag) + 1] if flag in w and w.index(flag) + 1 < len(w) else None
+for need in ('-p', '--strict-mcp-config'):
+    if need not in w: bad.append('no' + need)
+for flag, want in (('--output-format', 'json'), ('--setting-sources', 'project,local'), ('--permission-mode', 'acceptEdits')):
+    if val(flag) != want: bad.append(flag + '=' + str(val(flag)))
+tools = (val('--tools') or '').split(',')
+for t in ('Bash', 'Read', 'Edit', 'Write', 'Skill'):
+    if t not in tools: bad.append('tools-missing-' + t)
+for t in ('Agent', 'Task', 'WebFetch', 'WebSearch'):
+    if t in tools: bad.append('tools-has-' + t)
+allowed = (val('--allowedTools') or '').split(',')
+if 'Bash' not in allowed or 'Skill' not in allowed: bad.append('allowedTools=' + str(val('--allowedTools')))
+if any(t in allowed for t in ('Edit', 'Write', 'Read')): bad.append('allowedTools-unscoped-file-tool')
+if len(w) < 2 or w[-2] != '--max-turns' or not w[-1].isdigit(): bad.append('max-turns-not-last')
+try:
+    s = json.loads(val('--settings') or '')
+except ValueError:
+    s = None
+    bad.append('settings-not-json')
+if s is not None:
+    sb = s.get('sandbox', {})
+    deny = s.get('permissions', {}).get('deny', [])
+    if 'Read(~/.ssh/**)' not in deny: bad.append('no-read-deny-ssh')
+    if L == 'off':
+        if sb.get('enabled') is not False: bad.append('off-sandbox-enabled=' + str(sb.get('enabled')))
+    else:
+        for k, v in (('enabled', True), ('failIfUnavailable', True), ('allowUnsandboxedCommands', False)):
+            if sb.get(k) is not v: bad.append('sandbox.' + k + '=' + str(sb.get(k)))
+        fs = sb.get('filesystem', {})
+        if '~/.ssh' not in fs.get('denyRead', []): bad.append('no-denyRead-ssh')
+        if os.environ['S20_COMMON'] not in fs.get('denyWrite', []): bad.append('no-denyWrite-common')
+if L == 'full':
+    if val('--model') != 'claude-x' or val('--effort') != 'high': bad.append('model/effort=' + str(val('--model')) + '/' + str(val('--effort')))
+    if val('--resume') != sid: bad.append('resume=' + str(val('--resume')))
+if L in ('bare', 'badsid', 'off'):
+    for f in ('--model', '--effort', '--resume'):
+        if f in w: bad.append('unexpected' + f)
+print(L + ':' + (','.join(bad) or 'ok'))
+PYEOF
+  }
+  _s20_argv full claude-x high "" "" "" "$_S20/wtb" 60 /s20/lead/.git "$_S20_SID"
+  _s20_argv bare "" "" "" "" "" "$_S20/wtb" 60 /s20/lead/.git ""
+  _s20_argv badsid "" "" "" "" "" "$_S20/wtb" 60 /s20/lead/.git 'x;touch /tmp/s20-pwned'
+  TRIFORGE_CLAUDE_SANDBOX=off _s20_argv off "" "" "" "" "" "$_S20/wtb" 60 /s20/lead/.git ""
+) 2>&1 || true
+_S20_FAIL="${_S20_FAIL}$(_self_expect argv "$O" '^full:ok$' '^bare:ok$' '^badsid:ok$' '^off:ok$')"
+
+# env
+O=$( source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  printf 'claude:%s\n' "$(_adapter_env claude env 2>/dev/null | grep -cE '^(CLAUDE_CODE_DISABLE_BACKGROUND_TASKS|DISABLE_AUTOUPDATER)=1$' || true)"
+  printf 'codex:%s\n' "$(_adapter_env codex env 2>/dev/null | grep -cE '^(CLAUDE_CODE_DISABLE_BACKGROUND_TASKS|DISABLE_AUTOUPDATER)=' || true)"
+) 2>&1 || true
+_S20_FAIL="${_S20_FAIL}$(_self_expect env "$O" '^claude:2$' '^codex:0$')"
+
+# builder: the real claude arm against the stub, the builder process in a
+# session of its own (its exit sweep reaches only its own group)
+_s20_builder() { # _s20_builder <mode> <out> — run _lease_builder_run's claude arm once
+  printf '%s\n' "$1" > "$_S20/tmp/s20-mode"
+  rm -f "$_S20"/tmp/s20-rec.*
+  # shellcheck disable=SC2086
+  ( cd "$_S20/wtb" && env $_S20_ENV python3 -c 'import os, sys; os.setsid(); os.execv("/bin/bash", ["/bin/bash", "-c", sys.argv[1], "s20-builder"] + sys.argv[2:])' \
+      '. "$1" >/dev/null 2>&1 || exit 97; shift; _lease_builder_run "$@"' "${_SELF_DIR}/invoke-external.sh" \
+      claude claude-x high claude-x "" "" "$TIMEOUT_BIN" 30 "$2" "$_S20/wtb" "" "" "PROMPT-S20B" /s20/lead/.git "$_S20_SID" ) >/dev/null 2>&1 || true
+}
+_s20_builder done "$_S20/b.out"
+O=$( source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  printf 'rc=%s:class=%s:status=%s\n' "$(cat "$_S20/b.out.rc" 2>/dev/null)" "$(cat "$_S20/b.out.class" 2>/dev/null)" "$(_lease_parse_status "$_S20/b.out")"
+  printf 'raw=%s\n' "$(grep -c '"type":"result"' "$_S20/b.out.raw" 2>/dev/null || true)"
+  printf 'envelope=%s\n' "$(tr '\n' ' ' < "$_S20/b.out.envelope" 2>/dev/null)"
+  printf 'resume=%s\n' "$(_s20_rec | grep -A1 -x -- '--resume' | tail -1)"
+  printf 'last=%s\n' "$(_s20_rec | tail -1)"
+  printf 'marker=%s\n' "$(grep -cE '^(TRIFORGE_LEASE_WORKER=builder|CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1|GIT_CONFIG_COUNT=6)$' "$_S20/tmp/s20-rec.env" 2>/dev/null || true)"
+) 2>&1 || true
+_S20_FAIL="${_S20_FAIL}$(_self_expect builder "$O" '^rc=0:class=none:status=DONE$' '^raw=1$' "^envelope=.*session_id=${_S20_SID}" '^envelope=.*subtype=success' '^envelope=.*is_error=false' "^resume=${_S20_SID}$" '^last=PROMPT-S20B$' '^marker=3$')"
+_s20_builder nosandbox "$_S20/n.out"
+O="rc=$(cat "$_S20/n.out.rc" 2>/dev/null):class=$(cat "$_S20/n.out.class" 2>/dev/null):names=$(grep -c 'TRIFORGE_CLAUDE_SANDBOX' "$_S20/n.out" 2>/dev/null || true)"
+_S20_FAIL="${_S20_FAIL}$(_self_expect nosandbox "$O" '^rc=[1-9][0-9]*:class=deterministic:names=[1-9]')"
+
+# lifecycle + skills: a repo tracking this repo's .claude/skills/watch-cycle/
+# and a user copy under a shipped name
+_s20_repo "$_S20/repo" '[roles.builder]\ncli = "claude"\n'
+( cd "$_S20/repo" && export HOME="$_S20/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p .claude/skills/watch-cycle ".claude/skills/${_S20_COLLIDE}" \
+    && cp "${REPO_ROOT}/.claude/skills/watch-cycle/SKILL.md" .claude/skills/watch-cycle/SKILL.md \
+    && printf -- '---\nname: %s\ndescription: Use when probing SELF-20 (a user copy under a shipped name).\n---\n\nuser copy\n' "$_S20_COLLIDE" > ".claude/skills/${_S20_COLLIDE}/SKILL.md" \
+    && git add -A && git commit -qm "track .claude/skills" ) >/dev/null 2>&1 || _S20_FAIL="$_S20_FAIL skills(fixture-git)"
+printf '#!/bin/sh\nprintf "builder edit\\n" >> .claude/skills/watch-cycle/SKILL.md\nprintf "%%s\\n" '"'"'{"type":"result","subtype":"success","is_error":false,"num_turns":2,"session_id":"%s","result":"did it\\n\\nStatus: DONE\\nConcerns: None\\nDiscoveries for later tasks: None"}'"'"'\n' "$_S20_SID" > "$_S20/fb-done.sh"
+printf '#!/bin/sh\nprintf "%%s\\n" '"'"'{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":3,"session_id":"%s","result":""}'"'"'\nexit 1\n' "$_S20_SID" > "$_S20/fb-maxturns.sh"
+chmod +x "$_S20/fb-done.sh" "$_S20/fb-maxturns.sh"
+# shellcheck disable=SC2086
+O=$( cd "$_S20/repo" && export $_S20_ENV TRIFORGE_LEASE_ROOT="$_S20/leases" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  _s20_wait() { local OUT N=0; OUT=$(_ledger_get "$1" output_file 2>/dev/null); while [ ! -f "${OUT}.rc" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done; }
+  export TRIFORGE_TEST_BUILDER="$_S20/fb-done.sh"
+  lease_create s20a builder >/dev/null 2>&1 || echo "create-failed"
+  WT=$(_ledger_get s20a worktree 2>/dev/null)
+  PROV=" $(_ledger_get s20a provisioned 2>/dev/null) "
+  M="" D=""
+  for S in $SHIPPED_SKILLS; do
+    [ "$S" = "$_S20_COLLIDE" ] && continue
+    if [ "$(python3 "${_SELF_DIR}/lib/skills-sync.py" digest "$WT/.claude/skills/$S" 2>/dev/null)" != "$(python3 "${_SELF_DIR}/lib/skills-sync.py" digest "${REPO_ROOT}/skills/$S" 2>/dev/null)" ]; then D="$D $S"; fi
+    case "$PROV" in (*" .claude/skills/$S "*) ;; (*) M="$M $S" ;; esac
+  done
+  echo "copies:${D:- ok}"
+  echo "prov-missing:${M:- none}"
+  case "$PROV" in (*" .claude/skills/watch-cycle "*|*" .claude/skills/${_S20_COLLIDE} "*) echo "prov-tracked:listed" ;; (*) echo "prov-tracked:none" ;; esac
+  echo "at:$(ls -d "$WT"/.claude/skills/at-*/ 2>/dev/null | grep -v '/at-skill-work/$' | wc -l | tr -d ' ')"
+  cmp -s "$WT/.claude/skills/watch-cycle/SKILL.md" "${REPO_ROOT}/.claude/skills/watch-cycle/SKILL.md" && echo "watch-cycle:intact" || echo "watch-cycle:changed"
+  grep -q '^user copy$' "$WT/.claude/skills/${_S20_COLLIDE}/SKILL.md" 2>/dev/null && echo "collide:intact" || echo "collide:replaced"
+  lease_dispatch s20a "probe task" 60 >/dev/null 2>&1 || echo "dispatch-failed"
+  _s20_wait s20a
+  R=0; lease_collect s20a >/dev/null 2>&1 || R=$?
+  echo "a:rc=${R}:state=$(_ledger_get s20a state 2>/dev/null):sid=$(_ledger_get s20a session_id 2>/dev/null):sub=$(_ledger_get s20a result_subtype 2>/dev/null)"
+  SNAP=$(_ledger_get s20a snapshot_sha 2>/dev/null)
+  echo "snap-edit:$(git show "${SNAP:-none}:.claude/skills/watch-cycle/SKILL.md" 2>/dev/null | grep -c '^builder edit$' || true)"
+  git cat-file -e "${SNAP:-none}:.claude/skills/${_S20_OTHER}" 2>/dev/null && echo "snap-prov:merged" || echo "snap-prov:excluded"
+  lease_redispatch s20a "findings: fix the probe" 60 >/dev/null 2>&1 || echo "redispatch-failed"
+  echo "fix:resumed=$(_ledger_get s20a resumed_session 2>/dev/null)"
+  _s20_wait s20a
+  R=0; lease_collect s20a >/dev/null 2>&1 || R=$?
+  echo "fix:rc=${R}:state=$(_ledger_get s20a state 2>/dev/null)"
+  export TRIFORGE_TEST_BUILDER="$_S20/fb-maxturns.sh"
+  lease_create s20m builder >/dev/null 2>&1 || echo "create-m-failed"
+  lease_dispatch s20m "probe task" 60 >/dev/null 2>&1 || echo "dispatch-m-failed"
+  _s20_wait s20m
+  R=0; lease_collect s20m >/dev/null 2>&1 || R=$?
+  echo "m:rc=${R}:state=$(_ledger_get s20m state 2>/dev/null):sub=$(_ledger_get s20m result_subtype 2>/dev/null):misses=$(_ledger_get s20m report_missing_count 2>/dev/null)"
+) 2>&1 || true
+_S20_FAIL="${_S20_FAIL}$(_self_expect skills "$O" '^copies: ok$' '^prov-missing: none$' '^prov-tracked:none$' '^at:0$' '^watch-cycle:intact$' '^collide:intact$' '^snap-edit:1$' '^snap-prov:excluded$')"
+_S20_FAIL="${_S20_FAIL}$(_self_expect lifecycle "$O" "^a:rc=0:state=review:sid=${_S20_SID}:sub=success$" "^fix:resumed=${_S20_SID}$" '^fix:rc=0:state=review$' '^m:rc=80:state=leased:sub=error_max_turns:misses=1$')"
+# a symlinked .claude: provisioning writes nothing through it
+mkdir -p "$_S20/linkwt"
+ln -s "$_S20/link-target" "$_S20/linkwt/.claude"
+( export TMPDIR="$_S20/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 && _lease_provision_claude_skills "$_S20/linkwt" ) >/dev/null 2>&1 || true
+O="link:$(find "$_S20/link-target" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')"
+_S20_FAIL="${_S20_FAIL}$(_self_expect symlink "$O" '^link:0$')"
+
+# dispatch: a codex lead's reviewer resolving to claude runs claude -p
+_s20_repo "$_S20/clead" '[roles.reviewer]\ncli = "claude"\n'
+_s20_repo "$_S20/xlead" '[lead]\ncli = "codex"\n\n[roles.reviewer]\ncli = "claude"\n'
+printf 'review\n' > "$_S20/tmp/s20-mode"
+rm -f "$_S20"/tmp/s20-rec.*
+# shellcheck disable=SC2086
+O=$( cd "$_S20/clead" && export $_S20_ENV && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  R=0; S=$(dispatch_role reviewer logic_reviewer "PROMPT-S20R" "$_S20/clead.out" 30 2>/dev/null) || R=$?
+  echo "clead:rc=${R}:stub=$([ -f "$_S20/tmp/s20-rec.n" ] && echo ran || echo idle):out=$(printf '%s' "$S" | cut -d' ' -f1)"
+  cd "$_S20/xlead" || exit 0
+  export TRIFORGE_TEST_LEAD=codex
+  R=0; dispatch_role reviewer logic_reviewer "PROMPT-S20R" "$_S20/xlead.out" 30 >/dev/null 2>&1 || R=$?
+  echo "xlead:rc=${R}:out=$(tr '\n' ' ' < "$_S20/xlead.out" 2>/dev/null)"
+  W=$(_s20_rec)
+  echo "xlead-argv:p=$(printf '%s\n' "$W" | grep -cx -- '-p'):json=$(printf '%s\n' "$W" | grep -A1 -x -- '--output-format' | tail -1):mode=$(printf '%s\n' "$W" | grep -A1 -x -- '--permission-mode' | tail -1):edit=$(printf '%s\n' "$W" | grep -A1 -x -- '--tools' | tail -1 | tr ',' '\n' | grep -cxE 'Edit|Write|NotebookEdit' || true):last=$(printf '%s\n' "$W" | tail -1)"
+) 2>&1 || true
+_S20_FAIL="${_S20_FAIL}$(_self_expect dispatch "$O" '^clead:rc=40:stub=idle:out=DISPATCH_ROLE_CLAUDE$' '^xlead:rc=0:out=REVIEW-OK no findings' '^xlead-argv:p=1:json=json:mode=dontAsk:edit=0:last=PROMPT-S20R$')"
+
+_S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON envelope (subtype, is_error, session_id), explicit tool sets, --max-turns, session resume, the sandbox settings, the claude env arm, .claude/skills provisioning that adds names only, max-turns routed as report missing, dispatch_role running claude -p under a codex lead (KTD16, R2/R3)"
+if [ -z "$_S20_FAIL" ]; then
+  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only; builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools)" "static"
+else
+  _S20_WHO=$(printf '%s' "$_S20_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
+  row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in ${_S20_WHO% }:$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S20"
