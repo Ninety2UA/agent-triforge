@@ -86,6 +86,18 @@ _is_known_cli() {
   case " ${_KNOWN_CLIS:-} " in *" ${1:-} "*) return 0 ;; *) return 1 ;; esac
 }
 
+# _approver_ok <name> — 0 when <name> can stand behind a review or an approval
+# (U10, KTD2): `user`, the person, or a registered CLI (_is_known_cli). `user`
+# is not a CLI and never joins _KNOWN_CLIS, so no builder, roster role or
+# resolve_role can name it; only lease_pin_reviewer, lease_merge and
+# lease_approve accept it, through this check.
+_approver_ok() {
+  case "${1:-}" in
+    user) return 0 ;;
+  esac
+  _is_known_cli "${1:-}"
+}
+
 # Classify a failed external-CLI invocation (KTD-9). Shared so future per-CLI
 # helpers reuse one taxonomy instead of reinventing bare retry-once. Sets:
 #   INVOKE_FAILURE_CLASS    deterministic | timeout | retryable
@@ -148,8 +160,10 @@ _LEAD_GITCONFIG_SIGNATURE='# Triforge trusted git config'
 # lease root, then the lead host check (_lead_host_gate, roster.sh): this shell
 # runs under [lead].cli, or a person runs it from a terminal, or the SELF
 # harness names the lead. --any-host skips only that last check: the lead
-# switch (roster_write_lead) runs from either lead CLI, and U10's approval
-# helper records where it ran (_lead_origin) instead of refusing. The marker
+# switch (roster_write_lead) runs from either lead CLI, and the approval
+# helper (lease_approve) records where it ran (_lead_origin) instead of
+# refusing; both write the ledger through _ledger_write, the ledger writer's
+# own --any-host form. The marker
 # and the lease root come first, so neither host markers nor the SELF seam
 # (TRIFORGE_TEST_BUILDER + TRIFORGE_TEST_LEAD) ever let a worker through.
 _lead_only() {

@@ -4,8 +4,9 @@
 # adapter env allowlist and its no-push backstop, the R35 boundary note, the
 # Status-line parser seam, lease-lane skill discovery per CLI, the
 # TRIFORGE_TEST_BUILDER lifecycle, session-start idempotence plus its upgrade
-# notices (R40), the skills refresh's destructive paths, the worker marker,
-# lead-side git hardening, and detached leases with lease_wait).
+# notices (R40), the skills refresh's destructive paths, the [lead] table,
+# ledger approvals, the worker marker, lead-side git hardening, and detached
+# leases with lease_wait).
 #
 # NOT a standalone script: sourced by scripts/probe-capabilities.sh after the
 # per-CLI sections, inside the same shell, so it uses the harness's helpers
@@ -1536,6 +1537,383 @@ else
 fi
 rm -rf "$_S13"
 
+# SELF-14 (KTD2, KTD3, KTD4 — R5, R6, R32, R33): who stands behind a merge and
+# a promotion. The ledger stamps the lead's CLI on every row (lead_cli) and a
+# reviewer class on the pin (lead, worker or user); a protected change merges
+# only with a lead or user merge approval bound to its collect snapshot; a
+# protected or require_user_approval promotion needs the user's approval,
+# bound to the integration tree. Throwaway repos under the SELF-13 conventions
+# (throwaway HOME, GIT_CONFIG_NOSYSTEM, the stub trio, a lease root per case);
+# each case names its lead through the SELF seam (TRIFORGE_TEST_LEAD + a fake
+# builder) unless it tests host markers or a terminal:
+#   cells    claude or codex lead x a claude- or codex-built task writing
+#            .claude/settings.json: the pin alone -> 42 naming the path; the
+#            lead's CLI approving its own CLI's build -> refused, routed to the
+#            user; then the user's approval (own build) or the lead's (the
+#            other CLI's build) -> merges; lease_attribution names builder,
+#            reviewer + class, lead, approval origin and merge commit
+#   agents   a codex build adds .agents/hooks.json and .agents/skills/x/
+#            (the Phase 2a residual): a worker-class pin alone -> 42 naming
+#            both; the lead's approval -> merges, both in the squash
+#   cycle    a merge approval given in cycle 1 -> the cycle-2 collect voids it
+#            (42 naming the earlier snapshot); an approval rewritten to
+#            another snapshot -> 42; re-approved -> merges
+#   late     non-protected in cycle 1 (merge needs no approval; lease_status
+#            protected=no), protected in cycle 2 (lease_status yes, needed):
+#            42 with the same pin, the approval -> merges, no re-pin
+#   origin   [lead] codex, a claude-built protected task: lease_approve user
+#            under Codex's markers -> via=lead-session host=codex; under
+#            Claude Code's (the other lead's) -> recorded, host=claude
+#            lead=codex, while a codex (lead) approval from there or from a
+#            shell with no origin is refused; from a pty -> via=tty; under the worker marker or
+#            from the lease worktree -> 45, nothing written; a worker CLI ->
+#            refused; the tty record merges
+#   approver _approver_ok: user and a CLI 0, "lead", a fabricated label and
+#            "" 1; _is_known_cli user 1; lease_pin_reviewer user -> class
+#            user, lease_merge with user -> merges
+#   promote  an approval the non-protected task did not need still shows in
+#            its attribution; require_user_approval = true: promote -> 42 naming
+#            lease_approve promotion:<branch> user, no "by hand" text; a
+#            lead-class promotion approval refused under the claude lead and
+#            under a codex lead; the user's -> promotes, printing the origin;
+#            under the codex lead with no ledger yet the approval records the
+#            baseline and promotes
+#   voidmerge a promotion approval, then one more merge -> promote 42 voided
+#   voiddef  a promotion approval, then main moves (accepted with
+#            lease_rebaseline) -> promote 42 voided
+#   handover a claude lead pins itself (lead class), then a forced handover
+#            to codex: handover_from/_to/_at on the open row; merge -> 42
+#            needing the user's approval, the codex lead's own refused (it
+#            built it); the user's -> merges
+#   handback the same pin, handed to codex and back to claude: the pinned claude
+#            is the lead again, yet the handover stamp still routes the merge
+#            to the user; the lead's own approval does not count
+#   legacy   a 3.3.x-shaped review row (no lead_cli, reviewer_class,
+#            protected) -> merges under the new checks, lead read as claude
+_S14="${WORK}/self14"
+_S14_FAIL=""
+rm -rf "$_S14"
+mkdir -p "$_S14/home" "$_S14/tmp"
+_s14_repo() { # _s14_repo <case> <lead> <builder> [extra roster lines, %b escapes] — a repo on sprint/s14
+  ( mkdir -p "$_S14/$1" && cd "$_S14/$1" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
+      && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
+      && mkdir ops && printf '# probe roster (SELF-14)\n[lead]\ncli = "%s"\n\n[roles.builder]\ncli = "%s"\n%b' "$2" "$3" "${4:-}" > ops/roster.toml \
+      && echo r > README.md && git add -A && git commit -qm init && git checkout -q -b sprint/s14 ) >/dev/null 2>&1
+}
+_s14_builder() { cat > "$_S14/$1.fb"; chmod +x "$_S14/$1.fb"; }   # _s14_builder <case> < script
+# _s14_lead <case> <seam lead> <script> — lead-side steps from the case's repo,
+# library sourced: no host markers, stdin from /dev/null, the SELF seam naming
+# <seam lead> with the case's builder (<case>.fb). Helpers for the script:
+# _s14_go <task> (create, dispatch, wait, collect), _s14_fix <task> (the
+# findings path: redispatch, wait, collect), _s14_try <label> <cmd...>.
+_s14_lead() {
+  ( cd "$_S14/$1" && export HOME="$_S14/home" TRIFORGE_LEASE_ROOT="$_S14/$1.leases" PATH="${_SELF_STUBS}:$PATH" GIT_CONFIG_NOSYSTEM=1 \
+        TMPDIR="$_S14/tmp" S14_CASE="$1" TRIFORGE_TEST_LEAD="$2" TRIFORGE_TEST_BUILDER="$_S14/$1.fb" \
+      && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID TRIFORGE_LEASE_WORKER TRIFORGE_LEAD_PID CODEX_HOME \
+      && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && {
+    _s14_wait() { # _s14_wait <task> — until the builder's exit record exists (30 s cap)
+      local N=0 OUT
+      OUT=$(_ledger_get "$1" output_file 2>/dev/null || true)
+      while [ ! -f "${OUT}.rc" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
+    }
+    _s14_go() {
+      local R=0
+      { lease_create "$1" builder && lease_dispatch "$1" "probe task" 60; } >/dev/null 2>&1 || R=$?
+      if [ "$R" -eq 0 ]; then _s14_wait "$1"; lease_collect "$1" >/dev/null 2>&1 || R=$?; fi
+      echo "$1:go=$R:$(_ledger_get "$1" state 2>/dev/null || true)"
+    }
+    _s14_fix() {
+      local R=0
+      lease_redispatch "$1" "probe fix" 60 >/dev/null 2>&1 || R=$?
+      if [ "$R" -eq 0 ]; then _s14_wait "$1"; lease_collect "$1" >/dev/null 2>&1 || R=$?; fi
+      echo "$1:fix=$R:$(_ledger_get "$1" state 2>/dev/null || true)"
+    }
+    _s14_try() { # "<label>:rc=<n>:<the call's stderr, one line>"
+      local L=$1 R=0 E
+      shift
+      E=$("$@" 2>&1 >/dev/null) || R=$?
+      echo "$L:rc=$R:$(printf '%s' "$E" | tr '\n' ' ' | cut -c1-900)"
+    }
+    eval "$3"
+  } ) < /dev/null 2>&1 || true
+}
+# _S14_PTY — python: run argv with a pty on stdin (as SELF-13's)
+_S14_PTY='import os, subprocess, sys
+m, s = os.openpty()
+r = subprocess.run(sys.argv[1:], stdin=s)
+os.close(s)
+os.close(m)
+sys.exit(r.returncode)'
+
+# cells: <case> <lead> <builder> <pinned reviewer> <own build: yes|no>
+while read -r _s14_c _s14_l _s14_b _s14_p _s14_own; do
+  [ -n "$_s14_c" ] || continue
+  _s14_repo "$_s14_c" "$_s14_l" "$_s14_b"
+  printf '#!/bin/sh\nmkdir -p .claude && echo "{}" > .claude/settings.json\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder "$_s14_c"
+  O=$(_s14_lead "$_s14_c" "$_s14_l" '
+_s14_go t
+_s14_try pin lease_pin_reviewer t '"$_s14_p"'
+echo "row:lead=$(_ledger_get t lead_cli):class=$(_ledger_get t reviewer_class):prot=$(_ledger_get t protected)"
+_s14_try bare lease_merge t '"$_s14_p"'
+_s14_try leadapp lease_approve task:t '"$_s14_l"'
+if [ '"$_s14_own"' = yes ]; then _s14_try userapp lease_approve task:t user; fi
+_s14_try merge lease_merge t '"$_s14_p"'
+echo "state=$(_ledger_get t state):mc=$(_ledger_get t merge_commit | cut -c1-12)"
+echo "attr=$(lease_attribution t 2>/dev/null)"
+')
+  _S14_MC=$(printf '%s\n' "$O" | sed -n 's/^state=merged:mc=//p')
+  if [ "$_s14_own" = yes ]; then
+    _S14_FAIL="${_S14_FAIL}$(_self_expect "cell-$_s14_c" "$O" '^t:go=0:review$' '^pin:rc=0:' "^row:lead=${_s14_l}:class=worker:prot=yes\$" \
+      '^bare:rc=42:.*\.claude/settings\.json' '^leadapp:rc=1:.*routes to the user' '^userapp:rc=0:' '^merge:rc=0:' '^state=merged:mc=[0-9a-f]{12}$' \
+      "^attr=.*builder ${_s14_b}.*reviewer ${_s14_p} \\(worker\\).*lead ${_s14_l}.*approval user:user via=test.*merge ${_S14_MC:-none}")"
+  else
+    _S14_FAIL="${_S14_FAIL}$(_self_expect "cell-$_s14_c" "$O" '^t:go=0:review$' '^pin:rc=0:' "^row:lead=${_s14_l}:class=lead:prot=yes\$" \
+      '^bare:rc=42:.*\.claude/settings\.json' '^leadapp:rc=0:' '^merge:rc=0:' '^state=merged:mc=[0-9a-f]{12}$' \
+      "^attr=.*builder ${_s14_b}.*reviewer ${_s14_p} \\(lead\\).*lead ${_s14_l}.*approval lead:${_s14_l} via=test.*merge ${_S14_MC:-none}")"
+  fi
+done <<'S14_CELLS_EOF'
+cc claude claude codex yes
+cx claude codex claude no
+xx codex codex claude yes
+xc codex claude codex no
+S14_CELLS_EOF
+unset _s14_c _s14_l _s14_b _s14_p _s14_own
+
+# agents: the Phase 2a residual — builder edits under .agents/ meet the merge gate
+_s14_repo agents claude codex
+printf '#!/bin/sh\nmkdir -p .agents/skills/x && echo "{}" > .agents/hooks.json && printf "x\\n" > .agents/skills/x/SKILL.md\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder agents
+O=$(_s14_lead agents claude '
+_s14_go t
+_s14_try pin lease_pin_reviewer t antigravity
+echo "class=$(_ledger_get t reviewer_class)"
+_s14_try bare lease_merge t antigravity
+_s14_try leadapp lease_approve task:t claude
+_s14_try merge lease_merge t antigravity
+echo "squash=$(git diff-tree --no-commit-id --name-only -r HEAD | tr "\n" " ")"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect agents "$O" '^t:go=0:review$' '^class=worker$' '^bare:rc=42:.*\.agents/hooks\.json.*\.agents/skills/x/SKILL\.md' \
+  '^leadapp:rc=0:' '^merge:rc=0:' '^squash=.*\.agents/hooks\.json .*\.agents/skills/x/SKILL\.md .*feature\.txt')"
+
+# cycle: a cycle-1 approval is voided by the cycle-2 collect; a rewritten snapshot binding refuses
+_s14_repo cycle claude codex
+printf '#!/bin/sh\nN=$(cat "%s" 2>/dev/null || echo 0); N=$((N + 1)); echo "$N" > "%s"\nmkdir -p .claude && echo "run $N" >> .claude/settings.json && echo "run $N" >> feature.txt\necho "Status: DONE"\n' \
+  "$_S14/cycle.count" "$_S14/cycle.count" | _s14_builder cycle
+O=$(_s14_lead cycle claude '
+_s14_go t
+_s14_try pin lease_pin_reviewer t claude
+_s14_try app1 lease_approve task:t claude
+S1=$(_ledger_get t snapshot_sha)
+_s14_fix t
+S2=$(_ledger_get t snapshot_sha)
+echo "snaps-differ=$(if [ -n "$S1" ] && [ "$S1" != "$S2" ]; then echo yes; else echo no; fi):s1=$(printf "%s" "$S1" | cut -c1-12)"
+_s14_try void lease_merge t claude
+_s14_try app2 lease_approve task:t claude
+_ledger_update t approval_snapshot="$S1" >/dev/null 2>&1
+_s14_try forged lease_merge t claude
+_s14_try app3 lease_approve task:t claude
+_s14_try merge lease_merge t claude
+')
+_S14_S1=$(printf '%s\n' "$O" | sed -n 's/^snaps-differ=yes:s1=//p')
+_S14_FAIL="${_S14_FAIL}$(_self_expect cycle "$O" '^t:go=0:review$' '^app1:rc=0:' '^t:fix=0:review$' '^snaps-differ=yes:' \
+  "^void:rc=42:.*${_S14_S1:-no-s1}" '^app2:rc=0:' "^forged:rc=42:.*${_S14_S1:-no-s1}" '^app3:rc=0:' '^merge:rc=0:')"
+
+# late: protected only from cycle 2 — an approval next to the same pin, no re-pin
+_s14_repo late claude codex
+printf '#!/bin/sh\nN=$(cat "%s" 2>/dev/null || echo 0); N=$((N + 1)); echo "$N" > "%s"\necho "run $N" >> feature.txt\nif [ "$N" -ge 2 ]; then echo "# notes" > AGENTS.md; fi\necho "Status: DONE"\n' \
+  "$_S14/late.count" "$_S14/late.count" | _s14_builder late
+O=$(_s14_lead late claude '
+_s14_go t
+_s14_try pin lease_pin_reviewer t antigravity
+echo "status1=$(lease_status | grep "^t ")"
+echo "prot1=$(_ledger_get t protected)"
+_s14_fix t
+echo "prot2=$(_ledger_get t protected):paths=$(_ledger_get t protected_paths)"
+echo "status2=$(lease_status | grep "^t ")"
+_s14_try bare lease_merge t antigravity
+_s14_try repin lease_pin_reviewer t claude
+_s14_try app lease_approve task:t claude
+echo "status3=$(lease_status | grep "^t ")"
+_s14_try merge lease_merge t antigravity
+echo "reviewer=$(_ledger_get t reviewer)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect late "$O" '^t:go=0:review$' '^prot1=no$' '^status1=t .* no +- ' '^t:fix=0:review$' '^prot2=yes:paths=AGENTS\.md$' \
+  '^status2=t .* yes +needed ' '^bare:rc=42:.*AGENTS\.md' '^repin:rc=1:.*already pinned' '^app:rc=0:' '^status3=t .* yes +lead:claude/test ' '^merge:rc=0:' '^reviewer=antigravity$')"
+
+# origin: where an approval was recorded, under either lead's markers, a terminal, a worker
+_s14_repo origin codex claude
+printf '#!/bin/sh\necho "# x" > AGENTS.md\necho "Status: DONE"\n' | _s14_builder origin
+cat > "$_S14/origin-tty.sh" <<'S14_TTY_EOF'
+# probe step (SELF-14): lease_approve from a terminal, no markers, no seam
+source "$1/invoke-external.sh" 2>/dev/null || { echo "tty:load-failed"; exit 0; }
+R=0; lease_approve task:t user >/dev/null 2>&1 || R=$?
+echo "tty:rc=$R:via=$(_ledger_get t approval_via):host=$(_ledger_get t approval_host):stdin=$(if [ -t 0 ]; then echo tty; else echo none; fi)"
+S14_TTY_EOF
+O=$(_s14_lead origin codex '
+_s14_go t
+_s14_try pin lease_pin_reviewer t codex
+(unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; export CODEX_THREAD_ID=probe-thread; _s14_try own lease_approve task:t user)
+echo "own=$(_ledger_get t approval_via):host=$(_ledger_get t approval_host):lead=$(_ledger_get t approval_lead_cli)"
+(unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; export CLAUDECODE=1; _s14_try other lease_approve task:t user)
+echo "other=$(_ledger_get t approval_via):host=$(_ledger_get t approval_host):lead=$(_ledger_get t approval_lead_cli)"
+(unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; export CLAUDECODE=1; _s14_try othermerge lease_merge t codex)
+(unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; export CLAUDECODE=1; _s14_try otherlead lease_approve task:t codex)
+(unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; _s14_try nonelead lease_approve task:t codex)
+(unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; python3 -c "$_S14_PTY" /bin/bash "$_S14/origin-tty.sh" "$_SELF_DIR") || true
+cp ops/leases.toml "$_S14/origin-ledger.before"
+(export TRIFORGE_LEASE_WORKER=builder; _s14_try marker lease_approve task:t user)
+W=$(_ledger_get t worktree)
+(cd "$W" && _s14_try inroot lease_approve task:t user)
+echo "ledger=$(if cmp -s ops/leases.toml "$_S14/origin-ledger.before"; then echo unchanged; else echo CHANGED; fi)"
+_s14_try worker lease_approve task:t antigravity
+_s14_try merge lease_merge t codex
+echo "attr=$(lease_attribution t 2>/dev/null)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect origin "$O" '^t:go=0:review$' '^pin:rc=0:' '^own:rc=0:' '^own=lead-session:host=codex:lead=codex$' \
+  '^other:rc=0:' '^other=lead-session:host=claude:lead=codex$' '^othermerge:rc=45:.*at-setup lead' '^otherlead:rc=1:.*own session.*host=claude' '^nonelead:rc=1:.*via=none' '^tty:rc=0:via=tty:host=none:stdin=tty$' \
+  '^marker:rc=45:.*TRIFORGE_LEASE_WORKER' '^inroot:rc=45:.*inside the lease root' '^ledger=unchanged$' '^worker:rc=1:.*(lead|user)' '^merge:rc=0:' \
+  '^attr=.*approval user:user via=tty')"
+
+# approver: user is an approver, not a CLI
+_s14_repo approver claude codex
+printf '#!/bin/sh\necho "{}" > .mcp.json\necho "Status: DONE"\n' | _s14_builder approver
+O=$(_s14_lead approver claude '
+for A in user codex lead codex-reviewer ""; do R=0; _approver_ok "$A" || R=$?; echo "ok[$A]=$R"; done
+R=0; _is_known_cli user || R=$?; echo "known[user]=$R"
+_s14_go t
+_s14_try pin lease_pin_reviewer t user
+echo "class=$(_ledger_get t reviewer_class)"
+_s14_try app lease_approve task:t user
+_s14_try merge lease_merge t user
+echo "attr=$(lease_attribution t 2>/dev/null)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect approver "$O" '^ok\[user\]=0$' '^ok\[codex\]=0$' '^ok\[lead\]=1$' '^ok\[codex-reviewer\]=1$' '^ok\[\]=1$' '^known\[user\]=1$' \
+  '^t:go=0:review$' '^pin:rc=0:' '^class=user$' '^app:rc=0:' '^merge:rc=0:' '^attr=.*reviewer user \(user\)')"
+
+# promote: require_user_approval = true; a lead-class approval refused under both leads; the user's promotes
+_s14_repo promote claude codex '\n[promotion]\nrequire_user_approval = true\n'
+printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder promote
+O=$(_s14_lead promote claude '
+_s14_go t
+_s14_try pin lease_pin_reviewer t claude
+_s14_try unneeded lease_approve task:t claude
+_s14_try merge lease_merge t claude
+echo "attr=$(lease_attribution t 2>/dev/null)"
+_s14_try blocked lease_promote main
+_s14_try leadapp lease_approve promotion:sprint/s14 claude
+_s14_try userapp lease_approve promotion:sprint/s14 user
+echo "scope=$(_ledger_get @baseline promotion_scope):via=$(_ledger_get @baseline promotion_via)"
+_s14_try promote lease_promote main
+echo "main=$(git rev-parse main | cut -c1-12):sprint=$(git rev-parse sprint/s14 | cut -c1-12)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect promote "$O" '^t:go=0:review$' '^unneeded:rc=0:' '^merge:rc=0:' '^attr=.*approval lead:claude via=test' '^blocked:rc=42:.*lease_approve promotion:sprint/s14 user' \
+  '^leadapp:rc=1:.*user' '^userapp:rc=0:' '^scope=promotion:sprint/s14:via=test$' '^promote:rc=0:.*approved by the user.*via=test.*PROMOTED')"
+printf '%s\n' "$O" | grep -q '^blocked:rc=42:.*by hand' && _S14_FAIL="${_S14_FAIL} promote(blocked-still-says-by-hand)"
+[ "$(printf '%s\n' "$O" | sed -n 's/^main=\([0-9a-f]*\):sprint=\([0-9a-f]*\)$/\1=\2/p' | awk -F= '$1 == $2 && $1 != "" { print "same" }')" = same ] || _S14_FAIL="${_S14_FAIL} promote(main-not-at-sprint)"
+_s14_repo promotecodex codex claude '\n[promotion]\nrequire_user_approval = true\n'
+( cd "$_S14/promotecodex" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && echo s > s.txt && git add s.txt && git commit -qm s ) >/dev/null 2>&1
+O=$(_s14_lead promotecodex codex '
+_s14_try leadapp lease_approve promotion:sprint/s14 codex
+_s14_try userapp lease_approve promotion:sprint/s14 user
+echo "baseline=$(if [ -n "$(_ledger_get @baseline config 2>/dev/null)" ]; then echo recorded; else echo none; fi)"
+_s14_try promote lease_promote main
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect promotecodex "$O" '^leadapp:rc=1:.*user' '^userapp:rc=0:' '^baseline=recorded$' '^promote:rc=0:.*PROMOTED')"
+
+# voidmerge: a later merge voids a promotion approval
+_s14_repo voidmerge claude codex '\n[promotion]\nrequire_user_approval = true\n'
+printf '#!/bin/sh\necho x > "feature-$(basename "$PWD").txt"\necho "Status: DONE"\n' | _s14_builder voidmerge
+O=$(_s14_lead voidmerge claude '
+_s14_go t1
+_s14_go t2
+lease_pin_reviewer t1 claude >/dev/null 2>&1; lease_pin_reviewer t2 claude >/dev/null 2>&1
+_s14_try merge1 lease_merge t1 claude
+_s14_try app lease_approve promotion:sprint/s14 user
+_s14_try merge2 lease_merge t2 claude
+_s14_try promote lease_promote main
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect voidmerge "$O" '^merge1:rc=0:' '^app:rc=0:' '^merge2:rc=0:' '^promote:rc=42:.*void.*lease_merge t2')"
+
+# voiddef: a default-branch move (accepted by the user) voids a promotion approval
+_s14_repo voiddef claude codex '\n[promotion]\nrequire_user_approval = true\n'
+printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder voiddef
+O=$(_s14_lead voiddef claude '
+_s14_go t
+lease_pin_reviewer t claude >/dev/null 2>&1
+_s14_try merge lease_merge t claude
+_s14_try app lease_approve promotion:sprint/s14 user
+C=$(git commit-tree -p main -m "user commit on main" "main^{tree}") && git update-ref refs/heads/main "$C"
+_s14_try moved lease_promote main
+_s14_try rebaseline lease_rebaseline
+_s14_try promote lease_promote main
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect voiddef "$O" '^merge:rc=0:' '^app:rc=0:' '^moved:rc=44:' '^rebaseline:rc=0:' '^promote:rc=42:.*void.*main moved')"
+
+# handover: a lead-class pin from before a forced handover needs the user's approval
+_s14_repo handover claude codex
+printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder handover
+O=$(_s14_lead handover claude '
+_s14_go t
+_s14_try pin lease_pin_reviewer t claude
+echo "class=$(_ledger_get t reviewer_class)"
+export TRIFORGE_TEST_LEAD=codex
+_s14_try force roster_write_lead codex --force
+echo "row=$(_ledger_get t handover_from):to=$(_ledger_get t handover_to):at=$(if [ -n "$(_ledger_get t handover_at)" ]; then echo set; else echo unset; fi)"
+_s14_try bare lease_merge t claude
+_s14_try leadapp lease_approve task:t codex
+_s14_try userapp lease_approve task:t user
+_s14_try merge lease_merge t claude
+echo "attr=$(lease_attribution t 2>/dev/null)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect handover "$O" '^t:go=0:review$' '^pin:rc=0:' '^class=lead$' '^force:rc=0:' '^row=claude:to=codex:at=set$' \
+  '^bare:rc=42:.*handover.*lease_approve task:t user' '^leadapp:rc=1:.*routes to the user' '^userapp:rc=0:' '^merge:rc=0:' \
+  '^attr=.*builder codex.*reviewer claude \(lead\).*lead claude.*approval user:user via=test')"
+
+# handback: claude -> codex -> claude; the pinned claude is the lead again, but
+# the pin predates both handovers, so only the handover stamp can catch it
+_s14_repo handback claude codex
+printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder handback
+O=$(_s14_lead handback claude '
+_s14_go t
+_s14_try pin lease_pin_reviewer t claude
+export TRIFORGE_TEST_LEAD=codex
+_s14_try away roster_write_lead codex --force
+export TRIFORGE_TEST_LEAD=claude
+_s14_try back roster_write_lead claude --force
+echo "lead=$(resolve_lead | cut -f1):from=$(_ledger_get t handover_from)"
+_s14_try bare lease_merge t claude
+_s14_try leadapp lease_approve task:t claude
+_s14_try leadmerge lease_merge t claude
+_s14_try userapp lease_approve task:t user
+_s14_try merge lease_merge t claude
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect handback "$O" '^t:go=0:review$' '^pin:rc=0:' '^away:rc=0:' '^back:rc=0:' '^lead=claude:from=codex$' \
+  '^bare:rc=42:.*forced handover from codex came after the pin.*lease_approve task:t user' '^leadapp:rc=0:' '^leadmerge:rc=42:.*does not count here' \
+  '^userapp:rc=0:' '^merge:rc=0:')"
+
+# legacy: a 3.3.x-shaped row in review merges under the new checks
+_s14_repo legacy claude codex
+printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder legacy
+O=$(_s14_lead legacy claude '
+_s14_go t
+_s14_try pin lease_pin_reviewer t antigravity
+_ledger_update t lead_cli= lead_via= reviewer_class= protected= protected_paths= pin_handover_at= >/dev/null 2>&1
+echo "blank=$(_ledger_get t lead_cli)$(_ledger_get t reviewer_class)$(_ledger_get t protected)"
+echo "status=$(lease_status | grep "^t ")"
+_s14_try merge lease_merge t antigravity
+echo "attr=$(lease_attribution t 2>/dev/null)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect legacy "$O" '^t:go=0:review$' '^blank=$' '^status=t +codex .* claude ' '^merge:rc=0:' \
+  '^attr=.*reviewer antigravity \(worker\).*lead claude.*approval none')"
+
+_S14_CAP="ledger approvals: lead_cli + reviewer class per row; a protected change (base to snapshot) merges only with a lead or user merge approval bound to the snapshot, the lead's own CLI's build routed to the user; a protected or require_user_approval promotion needs the user's approval bound to the tree, voided by a later merge or a default-branch move; every approval records its origin (KTD2-KTD4, R5, R6, R32, R33)"
+if [ -z "$_S14_FAIL" ]; then
+  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there or with no origin refused), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude" "static"
+else
+  _S14_WHO=$(printf '%s' "$_S14_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
+  row "SELF-14" "claude" "$_S14_CAP" "FAIL" "mismatch in ${_S14_WHO% }:$(printf '%s' "$_S14_FAIL" | cut -c1-900)" "static"
+fi
+rm -rf "$_S14"
+
 # SELF-15 (KTD9 — R21, R34): the worker marker. _adapter_env puts
 # TRIFORGE_LEASE_WORKER into every lease worker's environment; the hook
 # handlers do nothing under it, the lead-owned helpers refuse under it or from
@@ -1811,6 +2189,8 @@ _s15_go t
 R=0; lease_collect t >/dev/null 2>&1 || R=$?; echo "collect=$R state=$(_ledger_get t state)"
 echo "snapshot=$(git diff --name-only "$(_ledger_get t base_sha)" "$(_ledger_get t snapshot_sha)" | tr "\n" " ")"
 lease_pin_reviewer t codex >/dev/null 2>&1
+R=0; lease_merge t codex >/dev/null 2>&1 || R=$?; echo "unapproved=$R"
+lease_approve task:t user >/dev/null 2>&1
 R=0; lease_merge t codex >/dev/null 2>&1 || R=$?; echo "merge=$R"
 echo "merged=$(git diff-tree --no-commit-id --name-only -r HEAD | tr "\n" " ")"
 R=0; E=$(lease_promote main 2>&1 >/dev/null) || R=$?
@@ -1821,7 +2201,7 @@ echo "promote=$R"; printf "%s\n" "$E" | grep "_protected)" | sed "s/^ */hit=/"
   for _s15_s in $SHIPPED_SKILLS; do _S15_PWANT="${_S15_PWANT} .agents/skills/${_s15_s}"; done
   _S15_PWANT=$(printf '%s\n' $_S15_PWANT | sort | tr '\n' ' ')
   [ "$(printf '%s\n' $_S15_PROV | sort | tr '\n' ' ')" = "$_S15_PWANT" ] || _S15_FAIL="$_S15_FAIL squash-${_s15_ign}(provisioned=[$(printf '%s' "$_S15_PROV" | cut -c1-120)])"
-  _S15_FAIL="${_S15_FAIL}$(_self_expect "squash-${_s15_ign}" "$_S15_SQ" '^create=0$' '^collect=0 state=review$' "^snapshot=${_S15_WANT} \$" '^merge=0$' \
+  _S15_FAIL="${_S15_FAIL}$(_self_expect "squash-${_s15_ign}" "$_S15_SQ" '^create=0$' '^collect=0 state=review$' "^snapshot=${_S15_WANT} \$" '^unapproved=42$' '^merge=0$' \
     "^merged=${_S15_WANT} \$" '^promote=42$' '^hit=\.agents/skills/my-skill/SKILL\.md  \(project_protected\)$' '^hit=\.claude/commands/cli-watch\.md  \(project_protected\)$')"
 done
 unset _s15_ign _s15_s
@@ -1896,7 +2276,7 @@ unset _s15_v _s15_run _s15_r
 
 _S15_CAP="worker marker: hooks inert, lead-only helpers refuse (rc 45) under the marker or inside a lease root, squash excludes exactly the provisioned paths (KTD9/R21/R34)"
 if [ -z "$_S15_FAIL" ]; then
-  row "SELF-15" "claude" "$_S15_CAP" "PASS" "hooks: session-start, context-monitor, tool-failure-monitor, pre-compact under TRIFORGE_LEASE_WORKER=builder and =persona -> rc 0, no stdout/stderr, nothing written in project or HOME (controls without the marker: context-monitor.local.md and ops/STATE.md written; negative control: copies without the marker block flagged on all four); refuse: lease_create/dispatch/redispatch/collect/pin_reviewer/merge/promote/requeue/reclaim/rebaseline/heartbeat_check/stop, roster_write_role/_member, _ledger_update -> 45 with one stderr line each (persona too), ledger + roster byte-identical, lease_status answers; lease_create from the lease root and from a worktree with the marker unset -> 45 naming the root; a builder sourcing the library in its lease -> 45 under the marker _adapter_env gave it (builder) and 45 by cwd with it unset, no row, nothing carved (negative control: _lead_only a no-op -> lease_create carves); squash, .agents/ gitignored and not: provisioned = stamp + ${SHIPPED_COUNT} shipped skills (never my-skill), snapshot = merged commit = ${_S15_WANT}, lease_promote 42 naming my-skill and cli-watch.md; legacy row without provisioned -> collect 0, .agents/ left out whole; none: shipped skills tracked at the current digest -> provisioned = none, the edit to a tracked shipped copy is in the snapshot; codexhook: session start replaces an unchanged 3.x .codex/hooks.json once (notice, then silent), leaves an edited copy, and writes nothing through a .codex symlinked into HOME/.codex (3.x copy kept, WARNING notice)" "static"
+  row "SELF-15" "claude" "$_S15_CAP" "PASS" "hooks: session-start, context-monitor, tool-failure-monitor, pre-compact under TRIFORGE_LEASE_WORKER=builder and =persona -> rc 0, no stdout/stderr, nothing written in project or HOME (controls without the marker: context-monitor.local.md and ops/STATE.md written; negative control: copies without the marker block flagged on all four); refuse: lease_create/dispatch/redispatch/collect/pin_reviewer/merge/promote/requeue/reclaim/rebaseline/heartbeat_check/stop, roster_write_role/_member, _ledger_update -> 45 with one stderr line each (persona too), ledger + roster byte-identical, lease_status answers; lease_create from the lease root and from a worktree with the marker unset -> 45 naming the root; a builder sourcing the library in its lease -> 45 under the marker _adapter_env gave it (builder) and 45 by cwd with it unset, no row, nothing carved (negative control: _lead_only a no-op -> lease_create carves); squash, .agents/ gitignored and not: provisioned = stamp + ${SHIPPED_COUNT} shipped skills (never my-skill), snapshot = merged commit = ${_S15_WANT} (lease_merge 42 until a merge approval: the snapshot is protected), lease_promote 42 naming my-skill and cli-watch.md; legacy row without provisioned -> collect 0, .agents/ left out whole; none: shipped skills tracked at the current digest -> provisioned = none, the edit to a tracked shipped copy is in the snapshot; codexhook: session start replaces an unchanged 3.x .codex/hooks.json once (notice, then silent), leaves an edited copy, and writes nothing through a .codex symlinked into HOME/.codex (3.x copy kept, WARNING notice)" "static"
 else
   row "SELF-15" "claude" "$_S15_CAP" "FAIL" "mismatch:$(printf '%s' "$_S15_FAIL" | cut -c1-700)" "static"
 fi

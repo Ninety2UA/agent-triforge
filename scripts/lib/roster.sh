@@ -499,6 +499,25 @@ lead_field() {
   cli_field "${OUT%%"$TAB"*}" "$@"
 }
 
+# lead_is <cli> — 0 when <cli> is this checkout's lead, 1 when it is not or the
+# lead can't be resolved, so a caller asking "is this review the lead's?" fails
+# closed. The lease helpers' one comparison with the lead's CLI (U10, KTD2: a
+# lead-class pin or approval counts only while its CLI is the current lead),
+# kept here with the other lead facts (KTD1).
+lead_is() {
+  local OUT TAB
+  TAB=$(printf '\t')
+  OUT=$(resolve_lead 2>/dev/null) || return 1
+  if [ -n "${1:-}" ] && [ "${OUT%%"$TAB"*}" = "$1" ]; then
+    return 0
+  fi
+  return 1
+}
+
+# The lead of a ledger row written before 4.0, which recorded none: 3.3.x had
+# only the Claude Code lead, so such a row reads as claude (U10).
+_LEAD_LEGACY_CLI=claude
+
 # lead_host_detect — the lead CLI this shell runs under, from the host markers
 # each lead puts in its tool shell (U29: CC-11, CDX-15): claude for CLAUDECODE
 # or CLAUDE_CODE_ENTRYPOINT (Claude Code's hooks see both as well), codex for
@@ -791,7 +810,8 @@ print(', '.join(t + ' (' + s + ')' for t, s in rows) + '\t' + str(sum(1 for t, s
 # at-setup, and a lead-owned helper refused under the other CLI points here. A
 # switch to another CLI refuses while the ledger holds an open lease (every
 # state but merged and failed), naming each. --force hands them over: it runs
-# only from the new lead or a terminal, writes the table, then runs U13's
+# only from the new lead or a terminal, stamps handover_from and handover_at on
+# every open row (_lease_mark_handover, U10), writes the table, then runs U13's
 # lead-exit sweep (lease_heartbeat_check --lead-exit) as the new lead, which
 # adopts each live builder and collects each finished one with reason=lead-exit
 # and requeue_count untouched; leases that are not building carry over as they
@@ -873,6 +893,10 @@ roster_write_lead() {
           return 1
           ;;
       esac
+      # Every open row records the handover before [lead] changes (U10, KTD2):
+      # a lead-class pin made before it then needs the user's merge approval,
+      # with no re-pin. A stamp that can't be written stops the switch.
+      _lease_mark_handover "${CUR_CLI:-unknown}" "$CLI" || return 1
     fi
   fi
   WL_ROSTER="$ROSTER" WL_CLI="$CLI" WL_MODEL="$MODEL" WL_EFFORT="$EFFORT" python3 -c "
@@ -975,9 +999,12 @@ sys.stderr.write(who + ': [lead] cli=' + cli + ' model=' + (model or '<host defa
   fi
   if [ "$CLI" = "$CUR_CLI" ]; then
     echo "roster_write_lead: --force: the lead stays ${CLI}, nothing to hand over" >&2
+    return 0
   elif [ -z "$LIST" ]; then
     echo "roster_write_lead: --force: no open lease to hand over" >&2
-  elif [ "$NB" -eq 0 ]; then
+    return 0
+  fi
+  if [ "$NB" -eq 0 ]; then
     echo "roster_write_lead: --force: no lease is building; the open ones carry over to the ${CLI} lead as they are: ${LIST}" >&2
   else
     echo "roster_write_lead: --force: handing ${NB} building lease(s) over to the ${CLI} lead (lease_heartbeat_check --lead-exit); the open ones: ${LIST}" >&2
