@@ -37,7 +37,9 @@ set +e
 Everything below calls functions from that file: `ensure_core_trio_live`,
 `roster_enroll_member`, `roster_member_default`, `roster_member_auth`,
 `roster_write_member`, `roster_member_status`, `roster_role_entry`,
-`roster_write_role`, `_roster_binary`, `_roster_install_cmd`.
+`roster_write_role`, and from the CLI registry `_registry_binary` (the binary
+to look up on PATH — cursor's resolved absolute path, else the plain name) and
+`cli_install_fix` (the install-then-login line).
 
 ## Step 1 — Core trio (required; loud until live)
 
@@ -52,7 +54,7 @@ ensure_core_trio_live && echo "CORE-TRIO: live" || echo "CORE-TRIO: UNRESOLVED"
 - If it prints `UNRESOLVED`: `ensure_core_trio_live` already named exactly which
   member failed and its install/login fix on stderr. **Setup stays UNRESOLVED
   (loud) until the user installs/logs in that member** (AE8). Print the exact
-  fix (or `_roster_install_cmd <cli>` for the install line), tell the user setup
+  fix (or `cli_install_fix <cli>` for the install-then-login line), tell the user setup
   cannot complete until the trio is live, and still print the closing table so
   they can see the whole picture. Do NOT run any installer yourself — only the
   user runs installers.
@@ -339,7 +341,7 @@ else
   printf '%-12s  %-10s  %-8s  %-24s\n' CLI INSTALLED AUTH ENROLLED-MODEL
 fi
 for cli in claude antigravity codex opencode kimi cursor; do
-  bin=$(_roster_binary "$cli")
+  bin=$(_registry_binary "$cli")
   if command -v "$bin" >/dev/null 2>&1; then inst=yes; else inst=no; fi
   st=$(roster_member_status "$cli")
   if [ "$ROSTER_OK" = yes ]; then role=$(ROLES_CLI=$cli _roles_for); else role=""; fi

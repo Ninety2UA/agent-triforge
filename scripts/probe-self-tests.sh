@@ -85,9 +85,29 @@ _S3_FAIL=$( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null; F=""
   KIMI_TOKEN=planted         _adapter_env codex    env 2>/dev/null | grep -q '^KIMI_TOKEN='         && F="${F} codex-saw-KIMI"
   CURSOR_API_KEY=planted     _adapter_env codex    env 2>/dev/null | grep -q '^CURSOR_API_KEY='     && F="${F} codex-saw-CURSOR"
   OPENROUTER_API_KEY=planted _adapter_env opencode env 2>/dev/null | grep -q '^OPENROUTER_API_KEY=' || F="${F} opencode-missing-OPENROUTER(positive-control)"
+  KIMI_API_KEY=planted       _adapter_env kimi     env 2>/dev/null | grep -q '^KIMI_API_KEY='       || F="${F} kimi-missing-KIMI_API_KEY(positive-control)"
   printf '%s' "$F" )
+# The key lists are read line-wise, never glob-expanded: under bash an unquoted
+# `for _K in $(...)` pathname-expands each word, so from a cwd holding files
+# named KIMI_* the kimi key became those names and one reached the eval in
+# _adapter_env_forward (lease_dispatch cd's into the builder's worktree before
+# the kimi call). Planted cwd, under /bin/bash: a file named
+# `KIMI_+x}$(touch PWNED_BY_FILENAME)${HOME` and a `KIMI_notes.md`. Expected:
+# KIMI_API_KEY forwarded, no PWNED_BY_FILENAME, no "bad substitution".
+_S3_CWD="${WORK}/self03-cwd"
+mkdir -p "$_S3_CWD"
+: > "$_S3_CWD"'/KIMI_+x}$(touch PWNED_BY_FILENAME)${HOME'
+: > "$_S3_CWD/KIMI_notes.md"
+_S3_GLOB=$( cd "$_S3_CWD" && /bin/bash -c 'source "$1/invoke-external.sh" 2>/dev/null; F=""
+  OUT=$(KIMI_API_KEY=secret _adapter_env kimi env 2>&1) || F="${F} planted-cwd-rc-nonzero"
+  printf "%s\n" "$OUT" | grep -q "^KIMI_API_KEY=secret$" || F="${F} planted-cwd-dropped-KIMI_API_KEY"
+  printf "%s\n" "$OUT" | grep -q "bad substitution" && F="${F} planted-cwd-bad-substitution"
+  [ -e PWNED_BY_FILENAME ] && F="${F} planted-cwd-filename-reached-eval"
+  printf "%s" "$F"' _ "$_SELF_DIR" )
+_S3_FAIL="${_S3_FAIL}${_S3_GLOB}"
+rm -rf "$_S3_CWD"
 if [ -z "$_S3_FAIL" ]; then
-  row "SELF-03" "claude" "_adapter_env strips cross-adapter credentials (R35/KTD-14)" "PASS" "codex env carries no OPENROUTER/KIMI/CURSOR key; opencode carries its own (positive control held)" "static"
+  row "SELF-03" "claude" "_adapter_env strips cross-adapter credentials (R35/KTD-14)" "PASS" "codex env carries no OPENROUTER/KIMI/CURSOR key; opencode and kimi carry their own (positive controls held); /bin/bash from a cwd holding KIMI_+x}\$(touch PWNED_BY_FILENAME)\${HOME and KIMI_notes.md: KIMI_API_KEY forwarded, no file created, no bad substitution (keys read line-wise, never glob-expanded)" "static"
 else
   row "SELF-03" "claude" "_adapter_env strips cross-adapter credentials (R35/KTD-14)" "FAIL" "env-allowlist leak:${_S3_FAIL}" "static"
 fi
@@ -385,6 +405,11 @@ fi
 #          unfixed project, still with zero "session-start:" lines
 #   tip    no ./AGENTS.md -> one `Tip:` line with the cp line for the pointer
 #          block (templates/AGENTS.md), every run; none once ./AGENTS.md exists
+#   degraded CLAUDE_PLUGIN_ROOT names a Triforge root (plugin.json named
+#          agent-triforge + scripts/invoke-external.sh) whose loader fails:
+#          `return 1` after a JSON-shaped stdout line, or a bare `exit 1` ->
+#          rc 0, the helper WARNING naming the loader and its rc, the
+#          orientation still printed, no line starting with `{`
 _S8="${WORK}/self08"
 mkdir -p "$_S8/proj" "$_S8/bin" "$_S8/home"
 cat > "$_S8/bin/agy" <<'EOF'
@@ -580,13 +605,37 @@ printf '\n@proj/AGENTS.md\n' >> "$_S8A/above/mid/CLAUDE.md"
 _s8_run chain-import "$_S8P" '{"version": "2.0.300"}'
 _s8_has 'is not loaded under a Claude lead' && _S8_FAIL="$_S8_FAIL parent-notice-despite-import-in-chain"
 _s8_has "^WARNING: Claude Code 2\.0\.300 is below Triforge's floor 2\.1\.277" || _S8_FAIL="$_S8_FAIL no-floor-warning-at-2.0.300"
-_S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines) and prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40)"
+# degraded helper load: a Triforge-shaped root whose loader fails. The hook
+# sources it once in a subshell; without the `loaded` marker it must go on in
+# its own shell with SS_HELPER empty — rc 0, the WARNING, the orientation. The
+# `return` variant prints a JSON-shaped line to stdout first: the source's
+# stdout is captured with its stderr, so no hook stdout line starts with `{`.
+_S8_BAD="$_S8/badroot"
+mkdir -p "$_S8_BAD/.claude-plugin" "$_S8_BAD/scripts" "$_S8/proj-degraded"
+printf '{"name": "agent-triforge", "version": "0.0.0-probe-stub"}\n' > "$_S8_BAD/.claude-plugin/plugin.json"
+( cd "$_S8/proj-degraded" && git init -q 2>/dev/null ) || true
+_s8_start_root() { # _s8_start_root <project> <plugin root> — session start with CLAUDE_PLUGIN_ROOT at that root (stub agy + claude on PATH, throwaway HOME)
+  ( cd "$1" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$2" PATH="$_S8/bin:$PATH" S8_CLAUDE_VERSION="2.1.277" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 )
+}
+for _S8_LOADER in return exit; do
+  if [ "$_S8_LOADER" = return ]; then
+    printf '#!/usr/bin/env bash\n# probe stub (SELF-08): a loader that prints a JSON-shaped line, then fails to load\necho %s\necho "invoke-external.sh: ERROR probe stub refused to load" >&2\nreturn 1\n' "'{\"json\":\"looks structured\"}'" > "$_S8_BAD/scripts/invoke-external.sh"
+  else
+    printf '#!/usr/bin/env bash\n# probe stub (SELF-08): a loader that exits instead of returning\nexit 1\n' > "$_S8_BAD/scripts/invoke-external.sh"
+  fi
+  _O=$(_s8_start_root "$_S8/proj-degraded" "$_S8_BAD") || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-rc-nonzero"
+  _s8_sane "degraded-${_S8_LOADER}" "$_O"
+  printf '%s\n' "$_O" | grep -Fq "WARNING: the Triforge helper did not load (${_S8_BAD}/scripts/invoke-external.sh exited 1: " || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-no-helper-notice"
+  _s8_has '^Multi-agent framework ready\.$' || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-orientation-missing"
+  _s8_has '^Commands: ' || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-commands-line-missing"
+done
+_S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines), prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40), and survives a failing helper loader"
 if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
-  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; pointer-block tip without ./AGENTS.md, none with it; every run rc 0, no crash, no line starting with {" "static"
+  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and Commands line still printed; every run rc 0, no crash, no line starting with {" "static"
 else
   row "SELF-08" "claude" "$_S8_CAP" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160); mismatch:${_S8_FAIL:- none}" "static"
 fi
-rm -rf "$_S8/proj" "$_S8/home" "$_S8A" "$_S8/skeleton.md" "$_S8/template.md"   # keep $_S8/bin (the stub agy + claude) for SELF-08b; removed there
+rm -rf "$_S8/proj" "$_S8/proj-degraded" "$_S8_BAD" "$_S8/home" "$_S8A" "$_S8/skeleton.md" "$_S8/template.md"   # keep $_S8/bin (the stub agy + claude) for SELF-08b; removed there
 
 # SELF-08b (KTD12 / R31 / CWE-59): the skills refresh touches only what it can
 # prove it wrote. Session start (CLAUDE_PLUGIN_ROOT = this checkout) on:
@@ -889,7 +938,11 @@ rm -rf "$_S10" "${WORK}"/s10-*
 #                pointer -> rc 1 naming at-setup; pointer inside the project ->
 #                rc 3; pointer to a non-root -> rc 3; tracked pointer -> rc 3;
 #                untracked pointer to the checkout -> prints it; a linked
-#                worktree of the project reads the main checkout's pointer
+#                worktree of the project reads the main checkout's pointer;
+#                a root planted at <project>/.agents is never resolved by a
+#                project-tier copy (pointer wins, else rc 1); a pointer tracked
+#                under another letter case -> rc 3 (rc 1 on a case-sensitive
+#                filesystem, never 0); a symlinked .agents -> rc 3
 #   (d) bare     only invoke-external.sh copied into a bare directory and
 #                sourced from the project's cwd -> nonzero naming at-setup and
 #                no root (a loader that fell back to the working directory's
@@ -1026,6 +1079,37 @@ _s11_loc pointer "$_S11/proj" sh "$_S11_PLOC" 0 "$_S11_ROOT"
 mkdir -p "$_S11/wt2/.agents/skills/at-probe/scripts"
 [ -f "$_S11_LOCATOR" ] && cp "$_S11_LOCATOR" "$_S11/wt2/.agents/skills/at-probe/scripts/locate-triforge.sh" || true
 _s11_loc worktree "$_S11/wt2" sh "$_S11/wt2/.agents/skills/at-probe/scripts/locate-triforge.sh" 0 "$_S11_ROOT"
+# planted root: a project-tier copy never resolves a root the project plants at
+# <project>/.agents (step 2 is skipped inside the project) — with the untracked
+# pointer still present the pointer wins; without it the locator fails closed
+mkdir -p "$_S11/proj/.agents/.claude-plugin" "$_S11/proj/.agents/scripts"
+printf '{"name": "agent-triforge"}\n' > "$_S11/proj/.agents/.claude-plugin/plugin.json"
+: > "$_S11/proj/.agents/scripts/invoke-external.sh"
+_s11_loc planted-pointer "$_S11/proj" sh "$_S11_PLOC" 0 "$_S11_ROOT"
+rm -f "$_S11_PTR"
+_s11_loc planted "$_S11/proj" sh "$_S11_PLOC" 1 "at-setup"
+rm -rf "$_S11/proj/.agents/.claude-plugin" "$_S11/proj/.agents/scripts"
+# icase: a pointer tracked under another letter case — a case-insensitive
+# filesystem serves it under the lowercase name, so it must be refused (rc 3);
+# a case-sensitive filesystem has no lowercase file at all (rc 1); never rc 0
+printf '%s\n' "$REPO_ROOT" > "$_S11/proj/.agents/TRIFORGE-PLUGIN-ROOT.LOCAL"
+( cd "$_S11/proj" && export HOME="$_S11/home" GIT_CONFIG_NOSYSTEM=1 && git add -f .agents/TRIFORGE-PLUGIN-ROOT.LOCAL && git commit -qm icase ) >/dev/null 2>&1 || _S11_FAIL="$_S11_FAIL c:icase(fixture-git)"
+if [ -e "$_S11_PTR" ]; then
+  _s11_loc icase "$_S11/proj" sh "$_S11_PLOC" 3 "tracked"
+else
+  _s11_loc icase-cs "$_S11/proj" sh "$_S11_PLOC" 1 "at-setup"
+fi
+( cd "$_S11/proj" && export HOME="$_S11/home" GIT_CONFIG_NOSYSTEM=1 && git rm -q --cached .agents/TRIFORGE-PLUGIN-ROOT.LOCAL && git commit -qm unicase ) >/dev/null 2>&1 || _S11_FAIL="$_S11_FAIL c:icase(fixture-git-2)"
+rm -f "$_S11/proj/.agents/TRIFORGE-PLUGIN-ROOT.LOCAL"
+# symlinked .agents: a pointer reached through a symlinked .agents is refused,
+# whatever it points at (a bare copy of the locator, outside any plugin tree)
+_S11_SL="$_S11/proj-sl"
+mkdir -p "$_S11_SL/vendor/x" "$_S11/tmp/loc"
+printf '%s\n' "$REPO_ROOT" > "$_S11_SL/vendor/x/triforge-plugin-root.local"
+ln -s vendor/x "$_S11_SL/.agents"
+( cd "$_S11_SL" && export HOME="$_S11/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" && git add -f vendor .agents && git commit -qm symlink ) >/dev/null 2>&1 || _S11_FAIL="$_S11_FAIL c:symlink(fixture-git)"
+[ -f "$_S11_LOCATOR" ] && cp "$_S11_LOCATOR" "$_S11/tmp/loc/locate-triforge.sh" || true
+_s11_loc symlink "$_S11_SL" sh "$_S11/tmp/loc/locate-triforge.sh" 3 "symlink"
 # (d)
 cp "$_S11_LOADER" "$_S11/bare/invoke-external.sh"
 _S11_D_RC=0
@@ -1042,7 +1126,7 @@ _S11_E_PWD=$(grep -c 'pwd)/scripts' "$_S11_LOADER" || true)
 [ "$_S11_E_PWD" = 0 ] || _S11_FAIL="$_S11_FAIL e(pwd-fallback=$_S11_E_PWD)"
 _S11_CAP="plugin root without CLAUDE_PLUGIN_ROOT: loader + lanes resolve the plugin, never a project's scripts/ or skills/; skill locator order and pointer refusals; bare loader fails closed naming at-setup (KTD6/R16/R42)"
 if [ -z "$_S11_FAIL" ]; then
-  row "SELF-11" "claude" "$_S11_CAP" "PASS" "CLAUDE_PLUGIN_ROOT unset: loader root = this checkout; against argv-recording stubs codex passed --output-schema <root>/codex-agents/review-verdict.schema.json + a ${#_S11_CX_PRE}-char instructions prefix, kimi --agent-file <root>/kimi-agents/reviewer.md, cursor the reviewer brief prefixed onto the prompt (no empty brief); from a user project with its own scripts/invoke-external.sh + skills/user-skill: root = checkout, the project's loader never sourced, _lease_plugin_root = checkout, worktree provisioned with exactly the shipped skills (${_S11_GOT% }); locator: own location resolves under sh/bash/zsh, no pointer -> rc 1 naming at-setup, pointer inside the project / to a non-root / tracked -> rc 3, untracked pointer to the checkout -> resolves, linked worktree reads the main checkout's pointer; bare-dir loader copy sourced from the project -> rc ${_S11_D_RC} naming at-setup; scripts/lib/*.sh: 0 CLAUDE_PLUGIN_ROOT reads, loader: no pwd)/scripts fallback" "static"
+  row "SELF-11" "claude" "$_S11_CAP" "PASS" "CLAUDE_PLUGIN_ROOT unset: loader root = this checkout; against argv-recording stubs codex passed --output-schema <root>/codex-agents/review-verdict.schema.json + a ${#_S11_CX_PRE}-char instructions prefix, kimi --agent-file <root>/kimi-agents/reviewer.md, cursor the reviewer brief prefixed onto the prompt (no empty brief); from a user project with its own scripts/invoke-external.sh + skills/user-skill: root = checkout, the project's loader never sourced, _lease_plugin_root = checkout, worktree provisioned with exactly the shipped skills (${_S11_GOT% }); locator: own location resolves under sh/bash/zsh, no pointer -> rc 1 naming at-setup, pointer inside the project / to a non-root / tracked -> rc 3, untracked pointer to the checkout -> resolves, linked worktree reads the main checkout's pointer, a root planted at <project>/.agents is ignored by a project-tier copy (pointer wins, else rc 1), pointer tracked under another letter case / behind a symlinked .agents -> rc 3; bare-dir loader copy sourced from the project -> rc ${_S11_D_RC} naming at-setup; scripts/lib/*.sh: 0 CLAUDE_PLUGIN_ROOT reads, loader: no pwd)/scripts fallback" "static"
 else
   row "SELF-11" "claude" "$_S11_CAP" "FAIL" "mismatch:$(printf '%s' "$_S11_FAIL" | cut -c1-700)" "static"
 fi

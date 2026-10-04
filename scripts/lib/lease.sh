@@ -1170,9 +1170,19 @@ print(" || ".join(log[-20:]))
 # commands do a plain `source`, which ignores the bash shebang), and on macOS
 # that is zsh, where ${!V} raises "bad substitution" and would kill every lease
 # dispatch. Every NAME is a registry literal (scripts/validate-versions.sh
-# check 3 keeps them to [A-Z_][A-Z0-9_]*), so the eval never sees anything else.
+# check 3 keeps them to [A-Z_][A-Z0-9_]*), and the guard below is the eval's
+# own gate: a name that is not a variable name is dropped with a notice and
+# rc 0 (the caller runs under set -e), so nothing a shell expansion or a
+# registry edit produces can reach the eval. The letters are spelled out
+# because bash collates a [A-Z] range by locale (de_DE.UTF-8 lets É through).
 _adapter_env_forward() {
   local _SET="" _VAL=""
+  case "$1" in
+    "" | [0123456789]* | *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_]*)
+      echo "_adapter_env: not a variable name, not forwarded: '${1}'" >&2
+      return 0
+      ;;
+  esac
   eval "_SET=\${${1}+x}"
   if [ -n "$_SET" ]; then
     eval "_VAL=\${${1}}"
@@ -1185,11 +1195,18 @@ _adapter_env() {
   local -a PAIRS=()
   local _K _KEYS _kv_b64
   # Base allowlist — each registry key forwarded when set (_adapter_env_forward).
-  # The loop runs over a command substitution because zsh splits $(...) into
-  # words but never an unquoted parameter.
-  for _K in $(printf '%s' "$TRIFORGE_ENV_BASE"); do
+  # Both key lists are read one name per line from a here-doc, never with
+  # `for _K in $LIST` or `$(printf '%s' "$LIST")`: bash pathname-expands every
+  # word of an unquoted expansion, so from a lease worktree (lease_dispatch cd's
+  # into it) a key such as KIMI_* became the matching file names — builder-
+  # chosen text that reached the eval in _adapter_env_forward. A here-doc keeps
+  # the loop in this shell, where it can append to PAIRS (a pipeline could not).
+  while IFS= read -r _K; do
+    [ -n "$_K" ] || continue
     _adapter_env_forward "$_K"
-  done
+  done <<BASEKEYS
+$(printf '%s' "$TRIFORGE_ENV_BASE" | tr ' ' '\n')
+BASEKEYS
   PAIRS+=("NO_COLOR=1")   # captured output is parsed, never rendered (U5)
   # No-push backstop (CS1): git honors GIT_CONFIG_COUNT/KEY_n/VALUE_n as
   # per-process config, so every git in the builder's process tree sees (a)
@@ -1218,7 +1235,8 @@ _adapter_env() {
   else
     _KEYS=$(cli_field "$CLI" env_keys 2>/dev/null) || _KEYS=""
   fi
-  for _K in $(printf '%s' "$_KEYS"); do
+  while IFS= read -r _K; do
+    [ -n "$_K" ] || continue
     case "$_K" in
       *\*)
         while IFS= read -r _kv_b64; do
@@ -1237,7 +1255,9 @@ PREFIXENV
         _adapter_env_forward "$_K"
         ;;
     esac
-  done
+  done <<ENVKEYS
+$(printf '%s' "$_KEYS" | tr ' ' '\n')
+ENVKEYS
   case "$CLI" in
     opencode)
       # D-033 defense-in-depth: the shipped deny set rides as OPENCODE_PERMISSION

@@ -15,7 +15,7 @@ Precedence: the user's own instructions, then this file, then a skill's defaults
 ```bash
 claude plugin validate --strict .claude-plugin/plugin.json
 claude plugin validate --strict .claude-plugin/marketplace.json
-bash scripts/validate-skills.sh            # 26 conformance checks + the KTD1/KTD6 gates; --strict turns warnings into errors
+bash scripts/validate-skills.sh            # 26 conformance checks + the KTD1/KTD6 gates over skills/ (name .claude/skills to cover a repo-local skill); --strict turns warnings into errors
 bash scripts/validate-skills.sh --self-test   # its fixtures, scripts/fixtures/validate-skills/
 bash scripts/validate-versions.sh          # lockstep, ladder, drift, stale pins, counts, AGENTS.md budget, inventory
 bash scripts/probe-capabilities.sh --self-only   # the SELF gate: static rows only, ~90 s, exit 3 on any SELF FAIL

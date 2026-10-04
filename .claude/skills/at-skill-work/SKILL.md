@@ -5,7 +5,7 @@ description: "Use when writing or changing a Triforge skill (SKILL.md, reference
 
 # Skill Work
 
-**Goal:** a skill that every enrolled CLI can load and act on — Claude Code, Codex, Antigravity, OpenCode, Kimi or Cursor — from the plugin tree or from an `.agents/skills/` copy. **Done when** `bash ./scripts/validate-skills.sh --strict` passes for the whole tree and `bash ./scripts/validate-skills.sh --self-test` still reports every fixture OK. **Safe failure:** a rule you cannot meet stays a warning in the default mode; never silence it by widening the validator — change the skill, or raise the rule in review.
+**Goal:** a skill that every enrolled CLI can load and act on — Claude Code, Codex, Antigravity, OpenCode, Kimi or Cursor — from the plugin tree or from an `.agents/skills/` copy. **Done when** `bash ./scripts/validate-skills.sh --strict` passes for the shipped skills (its default scope is `./skills/`; a skill under `./.claude/skills/` is validated only when you name that directory: `bash ./scripts/validate-skills.sh --strict ./.claude/skills`) and `bash ./scripts/validate-skills.sh --self-test` still reports every fixture OK. **Safe failure:** a rule you cannot meet stays a warning in the default mode; never silence it by widening the validator — change the skill, or raise the rule in review.
 
 ## What a skill says (R17)
 
@@ -37,4 +37,4 @@ Prose carries what a model cannot infer: the goal, the done condition, the safe 
 
 ## Output
 
-- The changed skill, the `bash ./scripts/validate-skills.sh --strict` lines it produces (none, when done), and a `--self-test` run that still reports every case OK.
+- The changed skill, the `bash ./scripts/validate-skills.sh --strict` lines it produces (none, when done — with `./.claude/skills` named when the skill lives there), and a `--self-test` run that still reports every case OK.

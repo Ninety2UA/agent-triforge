@@ -266,14 +266,19 @@ _lane_run() { # _lane_run <seconds> <cmd...>
   local SECS=$1; shift
   local -a E=()
   local K
-  for K in $REG_ENV_BASE; do
+  # One key per line from a here-doc, as _adapter_env reads its lists: the
+  # words of an unquoted `for K in $REG_ENV_BASE` would be pathname-expanded.
+  while IFS= read -r K; do
+    [ -n "$K" ] || continue
     case "$K" in
       HOME)   E+=("HOME=${HOME:-}") ;;
       PATH)   E+=("PATH=$PATH") ;;
       TMPDIR) E+=("TMPDIR=${TMPDIR:-/tmp}") ;;
       *)      if [ -n "${!K+x}" ]; then E+=("${K}=${!K}"); fi ;;
     esac
-  done
+  done <<BASEKEYS
+$(printf '%s' "$REG_ENV_BASE" | tr ' ' '\n')
+BASEKEYS
   E+=(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null "NO_COLOR=1")
   "$TIMEOUT_BIN" "${SECS}s" env -i "${E[@]}" "$@"
 }

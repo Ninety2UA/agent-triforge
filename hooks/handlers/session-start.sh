@@ -972,14 +972,16 @@ exit 0
 # KTD7) for the optional members, their binaries and shipped models, and the
 # roster helpers for enrollment, instead of carrying copies. Degraded, never
 # fatal: a loader that `exit`s rather than `return`s, or trips set -u, ends only
-# that subshell. Its stderr lands in a private temp dir beside the `loaded`
+# that subshell. Its stdout and stderr land in one file in a private temp dir
+# (the source's stdout is never the hook's: a loader that prints a JSON-shaped
+# line before failing must not start a stdout line with `{`) beside the `loaded`
 # marker the subshell writes once the source succeeded (plain files, no extra
 # fd: a descriptor would be inherited by every child, and a probe the watchdog
 # in _ss_bounded leaves behind must not hold the hook's stdout). No marker: the
 # helper did not load, so _ss_run runs below in this shell with SS_HELPER empty
 # — optional-CLI detection, enrollment and the roster pin check are skipped and
 # one standing WARNING line (no "session-start:" prefix — it repeats until
-# fixed) names the cause (the loader's first stderr line, or mktemp's when no
+# fixed) names the cause (the loader's first output line, or mktemp's when no
 # temp dir could be made under TMPDIR or, failing that, under the hook's own
 # .claude/ runtime dir). Marker: the helper loaded and _ss_run ran; a nonzero
 # status is a crash inside _ss_run, re-raised here so the EXIT trap reports it
@@ -994,7 +996,7 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/invok
     set +e
     ( set -e
       # shellcheck source=/dev/null
-      source "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh" 2>"${SS_HELPER_TMP}/err" || exit $?
+      source "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh" >"${SS_HELPER_TMP}/err" 2>&1 || exit $?
       : > "${SS_HELPER_TMP}/loaded"
       SS_HELPER="yes"
       _ss_run )

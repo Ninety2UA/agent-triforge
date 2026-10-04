@@ -106,8 +106,13 @@ if _triforge_is_plugin_root "${CLAUDE_PLUGIN_ROOT:-}"; then
 elif [ -n "$_TRIFORGE_SELF_DIR" ] && _triforge_is_plugin_root "${_TRIFORGE_SELF_DIR}/.."; then
   _TRIFORGE_PLUGIN_ROOT="$(cd "${_TRIFORGE_SELF_DIR}/.." && pwd)"
 else
-  echo "invoke-external.sh: ERROR no Triforge plugin root — CLAUDE_PLUGIN_ROOT is ${CLAUDE_PLUGIN_ROOT:+set to '${CLAUDE_PLUGIN_ROOT}' but not a Triforge root}${CLAUDE_PLUGIN_ROOT:-unset} and this loader (${_TRIFORGE_SELF_DIR:-<unknown dir>}) is not inside a Triforge plugin tree (.claude-plugin/plugin.json named agent-triforge plus scripts/invoke-external.sh). Source the installed plugin's scripts/invoke-external.sh, or run the Triforge setup skill (\`/setup\` today, \`at-setup\` from 4.0)." >&2
-  unset _TRIFORGE_SELF_DIR _TRIFORGE_PLUGIN_ROOT
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+    _TRIFORGE_ROOT_STATE="set to '${CLAUDE_PLUGIN_ROOT}' but not a Triforge root"
+  else
+    _TRIFORGE_ROOT_STATE="unset"
+  fi
+  echo "invoke-external.sh: ERROR no Triforge plugin root — CLAUDE_PLUGIN_ROOT is ${_TRIFORGE_ROOT_STATE} and this loader (${_TRIFORGE_SELF_DIR:-<unknown dir>}) is not inside a Triforge plugin tree (.claude-plugin/plugin.json named agent-triforge plus scripts/invoke-external.sh). Source the installed plugin's scripts/invoke-external.sh, or run the Triforge setup skill (\`/setup\` today, \`at-setup\` from 4.0)." >&2
+  unset _TRIFORGE_SELF_DIR _TRIFORGE_PLUGIN_ROOT _TRIFORGE_ROOT_STATE
   return 2 2>/dev/null || exit 2
 fi
 unset _TRIFORGE_SELF_DIR
