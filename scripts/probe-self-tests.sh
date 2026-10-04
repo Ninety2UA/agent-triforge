@@ -2267,6 +2267,14 @@ rm -rf "$_S18"
 #   expire  a held builder (with a child) past heartbeat_deadline ->
 #           lease_heartbeat_check: EXPIRED, leader and child gone, requeued,
 #           worktree pruned
+#   endrun  a builder that backgrounds sleep 600 and exits 0: once <out>.rc
+#           appears it holds 0 with class none, the child is gone and nothing
+#           but the exiting leader is left in the group (_LEASE_OWN_GROUP_PY),
+#           the group empty once the leader exits; lease_wait -> "x review"
+#   lanetimeout a builder that waits on a backgrounded sleep 600 past a 1 s
+#           lease timeout: <out>.rc holds 124 with class timeout 1-8 s after
+#           the dispatch, the child and the group as in endrun; lease_wait ->
+#           "t requeued"
 #   leadexit lease_heartbeat_check --lead-exit with the dispatching lead alive:
 #           the held builder adopted (building, reason=lead-exit, lead_exit_at
 #           set, requeue_count 0), the finished one collected (review, the same)
@@ -2303,6 +2311,9 @@ _s19_lead() {
       ST=$(ps -o stat= -p "${1:-0}" 2>/dev/null | tr -d " ") || ST=""
       if [ -n "$ST" ] && [ "${ST#Z}" = "$ST" ]; then echo alive; else echo gone; fi
     }
+    _s19_group() { # _s19_group <pgid> <pid> — how many processes run in the group besides pid (zombies don't count)
+      ps -A -o pid=,pgid=,stat= 2>/dev/null | awk -v g="${1:-0}" -v x="${2:-0}" '$2 == g && $1 != x && $3 !~ /^Z/ { n++ } END { print n + 0 }'
+    }
     eval "$2"
   } ) 2>&1 || true
 }
@@ -2331,6 +2342,17 @@ ${ROW}
 S19_REAP_EOF
   _lease_kill_builder "$P" "$G" "$S"
 done' >/dev/null 2>&1
+}
+# _s19_unreaped <case> — kill the case's recorded child (<case>.child) while it
+# still runs in the builder's group (<case>.pgid): what a failed exit sweep
+# leaves behind once the leader is gone, where _s19_reap no longer reaches
+_s19_unreaped() {
+  local C G
+  C=$(cat "$_S19/$1.child" 2>/dev/null || true)
+  G=$(cat "$_S19/$1.pgid" 2>/dev/null || true)
+  if [ -n "$C" ] && [ -n "$G" ] && [ "$(ps -o pgid= -p "$C" 2>/dev/null | tr -d ' ' || true)" = "$G" ]; then
+    kill -KILL "$C" 2>/dev/null || true
+  fi
 }
 
 # wait
@@ -2633,6 +2655,56 @@ echo "expire:rc=$R:state=$(_ledger_get e state):leader=$(_lease_proc_state "$P" 
 _S19_FAIL="${_S19_FAIL}$(_self_expect expire "$O" '^expire:rc=0:state=requeued:leader=gone:child=gone:worktree=pruned:expired=1$')"
 _s19_reap expire
 
+# endrun: the builder's own group is swept before its exit record appears
+_s19_repo endrun
+printf '#!/bin/sh\nsleep 600 &\necho $! > "%s"\necho "Status: DONE"\nexit 0\n' "$_S19/endrun.child" > "$_S19/endrun-bg.sh"
+chmod +x "$_S19/endrun-bg.sh"
+O=$(_s19_lead endrun '
+export TRIFORGE_TEST_BUILDER="$_S19/endrun-bg.sh"
+lease_create x builder >/dev/null 2>&1; lease_dispatch x "probe task" 60 >/dev/null 2>&1
+ROW=$(_ledger_get_row x pid pgid output_file)
+{ IFS= read -r P || true; IFS= read -r G || true; IFS= read -r OX || true; } <<S19_ENDRUN_EOF
+${ROW}
+S19_ENDRUN_EOF
+echo "$G" > "$_S19/endrun.pgid"
+N=0; while [ ! -f "${OX}.rc" ] && [ "$N" -lt 200 ]; do sleep 0.05; N=$((N + 1)); done
+LEFT=$(_s19_group "$G" "$P"); C=$(cat "$_S19/endrun.child" 2>/dev/null || true)
+echo "record:rc=$(cat "${OX}.rc" 2>/dev/null || true):class=$(cat "${OX}.class" 2>/dev/null || true):child=$(if [ -n "$C" ]; then _s19_alive "$C"; else echo unrecorded; fi):left=$LEFT"
+N=0; while [ "$(_s19_alive "$P")" = alive ] && [ "$N" -lt 40 ]; do sleep 0.05; N=$((N + 1)); done
+echo "after:group=$(_s19_group "$G" 0)"
+R=0; OUT=$(lease_wait --budget 10 x 2>/dev/null) || R=$?
+echo "collect:rc=$R:out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+')
+_S19_FAIL="${_S19_FAIL}$(_self_expect endrun "$O" '^record:rc=0:class=none:child=gone:left=0$' '^after:group=0$' '^collect:rc=0:out=\[x review\]$')"
+_s19_unreaped endrun
+_s19_reap endrun
+
+# lanetimeout: the lane's own timeout fires on a builder that outlives it
+_s19_repo lanetimeout
+printf '#!/bin/sh\nsleep 600 &\necho $! > "%s"\nwait\necho "Status: DONE"\n' "$_S19/lanetimeout.child" > "$_S19/lanetimeout-wait.sh"
+chmod +x "$_S19/lanetimeout-wait.sh"
+O=$(_s19_lead lanetimeout '
+export TRIFORGE_TEST_BUILDER="$_S19/lanetimeout-wait.sh"
+lease_create t builder >/dev/null 2>&1
+T=$(_s19_t0); lease_dispatch t "probe task" 1 >/dev/null 2>&1
+ROW=$(_ledger_get_row t pid pgid output_file)
+{ IFS= read -r P || true; IFS= read -r G || true; IFS= read -r OT || true; } <<S19_LANETIMEOUT_EOF
+${ROW}
+S19_LANETIMEOUT_EOF
+echo "$G" > "$_S19/lanetimeout.pgid"
+N=0; while [ ! -f "${OT}.rc" ] && [ "$N" -lt 300 ]; do sleep 0.05; N=$((N + 1)); done
+LEFT=$(_s19_group "$G" "$P"); C=$(cat "$_S19/lanetimeout.child" 2>/dev/null || true)
+echo "record:rc=$(cat "${OT}.rc" 2>/dev/null || true):class=$(cat "${OT}.class" 2>/dev/null || true):child=$(if [ -n "$C" ]; then _s19_alive "$C"; else echo unrecorded; fi):left=$LEFT:secs=$(_s19_dt "$T")"
+N=0; while [ "$(_s19_alive "$P")" = alive ] && [ "$N" -lt 40 ]; do sleep 0.05; N=$((N + 1)); done
+echo "after:group=$(_s19_group "$G" 0)"
+R=0; OUT=$(lease_wait --budget 10 t 2>/dev/null) || R=$?
+echo "collect:rc=$R:state=$(_ledger_get t state):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+')
+_S19_FAIL="${_S19_FAIL}$(_self_expect lanetimeout "$O" '^record:rc=124:class=timeout:child=gone:left=0:secs=' '^after:group=0$' '^collect:rc=0:state=requeued:out=\[t requeued\]$')"
+_s19_secs lanetimeout "$O" record 1 8
+_s19_unreaped lanetimeout
+_s19_reap lanetimeout
+
 # leadexit: the forced handover with the dispatching lead still alive
 _s19_repo leadexit
 _s19_held leadexit
@@ -2736,9 +2808,9 @@ else
   _S19_ZSH="zsh: not installed, case skipped"
 fi
 
-_S19_CAP="detached builders + lease_wait + lease_stop + lead-exit reconcile: pid == pgid with a start time read in one locale and zone, lease_wait returns on a finish / at the budget (rc 75) within wait_budget_s / degraded (rc 80), ledger errors and ledger tampering, a killed lead's builders survive and are collected with requeue_count 0 and reason=lead-exit, a reused pid is never taken for the builder or signalled, a .git/config change during the wait escalates (KTD10, R36/R38)"
+_S19_CAP="detached builders + lease_wait + lease_stop + lead-exit reconcile: pid == pgid with a start time read in one locale and zone, lease_wait returns on a finish / at the budget (rc 75) within wait_budget_s / degraded (rc 80), ledger errors and ledger tampering, a killed lead's builders survive and are collected with requeue_count 0 and reason=lead-exit, a reused pid is never taken for the builder or signalled, a .git/config change during the wait escalates, nothing of a builder runs once its exit record appears (a backgrounded child, a lane timeout: rc 124, class timeout) (KTD10, R36/R38)"
 if [ -z "$_S19_FAIL" ]; then
-  row "SELF-19" "claude" "$_S19_CAP" "PASS" "row pid==pgid + start time + lead + lease root recorded; finish -> rc 0 'q review'; held -> --budget 3 rc 75 'still building: g' in 1.5-3 s, TRIFORGE_LEAD_WAIT_BUDGET_S=4 caps --budget 60 below 4 s; marker 45, usage 64; released -> rc 0 'g review'; no / unparseable ledger -> rc 1 LEDGER ERROR; kill: lead group SIGKILLed mid-wait, both builders alive as recorded, heartbeat a adopts (reason=lead-exit), released both exit 0, heartbeat collects both: review, requeue_count 0, reason=lead-exit; reuse: rows given a stranger's pid + pgid (start time differs, deadline past) -> heartbeat and lease_wait orphan + requeue, stranger never signalled; legacy: a finished row given a stranger's pid with no start time or pgid -> lease_collect 0, review, stranger never signalled; gitcfg: core.fsmonitor planted mid-wait -> rc 44 naming .git/config, restored, escalated, never ran; deadline = timeout + 30 s slack; locale: dispatched under TZ=Asia/Tokyo LC_ALL=${_S19_LOC} -> pinned UTC start, alive under TZ=UTC and America/New_York, lease_wait keeps it building (75), an old local-form row alive in its own zone; unver: rc 80 within 3 s naming u once (mixed with a finisher: rc 0), heartbeat 80; ledgertamper: ledger corrupted mid-wait -> 44, restored, escalated, stdout names it; ledgertamper-entry: corrupted before the call -> the same; stop: lease_stop kills the builder group (child too), state untouched, 45/64/1, a stranger with the pid never signalled, no start time -> 1; relaunch: launch record written, removed once recorded, a stale one stopped by the next lease_dispatch; expire: held builder past its deadline -> group killed, requeued, worktree pruned; leadexit: --lead-exit with the lead alive adopts the live builder and collects the finished one, reason=lead-exit, requeue_count 0; multi: two named -> 'q review|still building: g', none named watches all; budget: past the action limit the collect is deferred, the next call takes it; rootnote: escaped, no export line, not printed when the check fails; ${_S19_ZSH}" "static"
+  row "SELF-19" "claude" "$_S19_CAP" "PASS" "row pid==pgid + start time + lead + lease root recorded; finish -> rc 0 'q review'; held -> --budget 3 rc 75 'still building: g' in 1.5-3 s, TRIFORGE_LEAD_WAIT_BUDGET_S=4 caps --budget 60 below 4 s; marker 45, usage 64; released -> rc 0 'g review'; no / unparseable ledger -> rc 1 LEDGER ERROR; kill: lead group SIGKILLed mid-wait, both builders alive as recorded, heartbeat a adopts (reason=lead-exit), released both exit 0, heartbeat collects both: review, requeue_count 0, reason=lead-exit; reuse: rows given a stranger's pid + pgid (start time differs, deadline past) -> heartbeat and lease_wait orphan + requeue, stranger never signalled; legacy: a finished row given a stranger's pid with no start time or pgid -> lease_collect 0, review, stranger never signalled; gitcfg: core.fsmonitor planted mid-wait -> rc 44 naming .git/config, restored, escalated, never ran; deadline = timeout + 30 s slack; locale: dispatched under TZ=Asia/Tokyo LC_ALL=${_S19_LOC} -> pinned UTC start, alive under TZ=UTC and America/New_York, lease_wait keeps it building (75), an old local-form row alive in its own zone; unver: rc 80 within 3 s naming u once (mixed with a finisher: rc 0), heartbeat 80; ledgertamper: ledger corrupted mid-wait -> 44, restored, escalated, stdout names it; ledgertamper-entry: corrupted before the call -> the same; stop: lease_stop kills the builder group (child too), state untouched, 45/64/1, a stranger with the pid never signalled, no start time -> 1; relaunch: launch record written, removed once recorded, a stale one stopped by the next lease_dispatch; expire: held builder past its deadline -> group killed, requeued, worktree pruned; endrun: a builder that backgrounds a child and exits 0 -> <out>.rc 0 / class none with the child gone and nothing but the exiting leader in its group, group empty after, review; lanetimeout: a 1 s lease timeout on a builder waiting on a child -> <out>.rc 124 / class timeout in 1-8 s, child gone, group empty, requeued; leadexit: --lead-exit with the lead alive adopts the live builder and collects the finished one, reason=lead-exit, requeue_count 0; multi: two named -> 'q review|still building: g', none named watches all; budget: past the action limit the collect is deferred, the next call takes it; rootnote: escaped, no export line, not printed when the check fails; ${_S19_ZSH}" "static"
 else
   _S19_WHO=$(printf '%s' "$_S19_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
   row "SELF-19" "claude" "$_S19_CAP" "FAIL" "mismatch in ${_S19_WHO% }:$(printf '%s' "$_S19_FAIL" | cut -c1-600)" "static"
