@@ -3710,7 +3710,11 @@ rm -rf "$_S19"
 #             name. TRIFORGE_CLAUDE_SANDBOX=off: the sandbox off, the deny
 #             rules kept
 #   env       _adapter_env claude adds CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
-#             and DISABLE_AUTOUPDATER=1; codex gets neither
+#             and DISABLE_AUTOUPDATER=1; codex gets neither; the SELF seam's
+#             TRIFORGE_TEST_BUILDER / TRIFORGE_TEST_LEAD never reach a worker
+#             (U9's host gate reads them); the codex lane pins its tool shell's
+#             env policy (inherit all, no default excludes, no exclude,
+#             include_only or set lists — CDX-19)
 #   builder   _lease_builder_run's claude arm against the stub, in a session of
 #             its own: the result text in <out> (its Status line parses), the
 #             envelope in <out>.raw, subtype, is_error and session_id in
@@ -3840,8 +3844,11 @@ _S20_FAIL="${_S20_FAIL}$(_self_expect argv "$O" '^full:ok$' '^bare:ok$' '^badsid
 O=$( source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
   printf 'claude:%s\n' "$(_adapter_env claude env 2>/dev/null | grep -cE '^(CLAUDE_CODE_DISABLE_BACKGROUND_TASKS|DISABLE_AUTOUPDATER)=1$' || true)"
   printf 'codex:%s\n' "$(_adapter_env codex env 2>/dev/null | grep -cE '^(CLAUDE_CODE_DISABLE_BACKGROUND_TASKS|DISABLE_AUTOUPDATER)=' || true)"
+  printf 'seam:%s\n' "$(TRIFORGE_TEST_BUILDER=/x TRIFORGE_TEST_LEAD=codex _adapter_env claude env 2>/dev/null | grep -c '^TRIFORGE_TEST_' || true)"
+  _lease_lane_argv codex "" "" "" "" "" "$_S20/wtb" 60 \
+    && printf 'cdxpolicy:%s\n' "$(printf '%s\n' "${_LEASE_LANE_ARGV[@]}" | grep -cxE 'shell_environment_policy\.(inherit="all"|ignore_default_excludes=true|exclude=\[\]|include_only=\[\]|set=\{\})' || true)"
 ) 2>&1 || true
-_S20_FAIL="${_S20_FAIL}$(_self_expect env "$O" '^claude:2$' '^codex:0$')"
+_S20_FAIL="${_S20_FAIL}$(_self_expect env "$O" '^claude:2$' '^codex:0$' '^seam:0$' '^cdxpolicy:5$')"
 
 # builder: the real claude arm against the stub, the builder process in a
 # session of its own (its exit sweep reaches only its own group)
@@ -3944,7 +3951,7 @@ _S20_FAIL="${_S20_FAIL}$(_self_expect dispatch "$O" '^clead:rc=40:stub=idle:out=
 
 _S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON envelope (subtype, is_error, session_id), explicit tool sets, --max-turns, session resume, the sandbox settings, the claude env arm, .claude/skills provisioning that adds names only, max-turns routed as report missing, dispatch_role running claude -p under a codex lead (KTD16, R2/R3)"
 if [ -z "$_S20_FAIL" ]; then
-  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only; builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools)" "static"
+  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools)" "static"
 else
   _S20_WHO=$(printf '%s' "$_S20_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
   row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in ${_S20_WHO% }:$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"

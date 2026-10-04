@@ -522,7 +522,12 @@ _claude_session_ok() {
 #                temp-dir write allowance: lease worktrees live under TMPDIR,
 #                so without them a builder could cross into sibling worktrees
 #                or the lease root (R35: writes restricted to the lease
-#                worktree); -m and model_reasoning_effort only when set
+#                worktree); the tool shell's env policy pinned to pass on
+#                everything codex was started with (the env -i allowlist is
+#                the filter), so neither the user's config.toml nor a default
+#                that drops *KEY* names can strip the worker marker or the
+#                no-push GIT_CONFIG_KEY_n (CDX-19); -m and
+#                model_reasoning_effort only when set
 #   antigravity  always the model pin (AE2: agy's own default is a Medium
 #                variant), --add-dir the worktree, --print-timeout, the JSON
 #                envelope (KTD2, D-032), -p
@@ -551,7 +556,10 @@ _lease_lane_argv() {
     codex)
       _LEASE_LANE_ARGV=(codex exec -s workspace-write -c 'approval_policy="never"'
                         -c 'sandbox_workspace_write.exclude_tmpdir_env_var=true'
-                        -c 'sandbox_workspace_write.exclude_slash_tmp=true')
+                        -c 'sandbox_workspace_write.exclude_slash_tmp=true'
+                        -c 'shell_environment_policy.inherit="all"' -c 'shell_environment_policy.ignore_default_excludes=true'
+                        -c 'shell_environment_policy.exclude=[]' -c 'shell_environment_policy.include_only=[]'
+                        -c 'shell_environment_policy.set={}')
       if [ -n "$MODEL" ]; then _LEASE_LANE_ARGV+=(-m "$MODEL"); fi
       if [ -n "$EFFORT" ]; then _LEASE_LANE_ARGV+=(-c "model_reasoning_effort=\"${EFFORT}\""); fi
       ;;
