@@ -4,7 +4,8 @@
 # adapter env allowlist and its no-push backstop, the R35 boundary note, the
 # Status-line parser seam, lease-lane skill discovery per CLI, the
 # TRIFORGE_TEST_BUILDER lifecycle, session-start idempotence plus its upgrade
-# notices (R40), and the skills refresh's destructive paths).
+# notices (R40), the skills refresh's destructive paths, and the worker
+# marker).
 #
 # NOT a standalone script: sourced by scripts/probe-capabilities.sh after the
 # per-CLI sections, inside the same shell, so it uses the harness's helpers
@@ -27,6 +28,12 @@ fi
 # and is gated on each CLI's live gate.
 _SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SELF_ONLY=${SELF_ONLY:-0}
+
+# The rows play the lead in throwaway repos under WORK. Run by a lease builder
+# testing a framework change, the worker marker it inherited would make every
+# lead helper they call refuse (KTD9), so it is dropped here; SELF-15 sets it
+# where a case needs it, and _lane_run sets it for the live lease-lane rows.
+unset TRIFORGE_LEASE_WORKER
 
 # Stub core-trio binaries for the rows that walk the roster (resolve_role
 # needs the builder's binary on PATH) but never run a real CLI — the fake
@@ -1213,6 +1220,414 @@ else
   row "SELF-11" "claude" "$_S11_CAP" "FAIL" "mismatch:$(printf '%s' "$_S11_FAIL" | cut -c1-700)" "static"
 fi
 rm -rf "$_S11"
+
+# SELF-15 (KTD9 — R21, R34): the worker marker. _adapter_env puts
+# TRIFORGE_LEASE_WORKER into every lease worker's environment; the hook
+# handlers do nothing under it, the lead-owned helpers refuse under it or from
+# inside a lease root, and a lease squash leaves out exactly the paths
+# provisioning wrote. Each case gets its own throwaway repo and lease root
+# under a throwaway HOME (each hook run its own HOME):
+#   hooks    each of the four handlers, with the marker set to builder and to
+#            persona, in a project holding ops/TASKS.md and no .claude/ (stub
+#            agy/claude/codex first on PATH, CLAUDE_PLUGIN_ROOT = this
+#            checkout): rc 0, no stdout, no stderr, nothing written in the
+#            project or HOME (paths, sizes and mtimes compared). Controls:
+#            without the marker, context-monitor writes
+#            .claude/context-monitor.local.md and pre-compact ops/STATE.md.
+#   refuse   with the marker set, every lead-owned helper (the lease_* entry
+#            points, roster_write_role/_member, _ledger_update) returns 45
+#            with one stderr line, and the ledger and roster stay
+#            byte-identical; lease_status still answers. With the marker unset,
+#            lease_create from the lease root and from a lease worktree returns
+#            45 naming the root. A fake builder that sources the library inside
+#            its lease and calls lease_create is refused (45) by the marker
+#            _adapter_env gave it, and with the marker unset by its cwd.
+#   squash   a project tracking .agents/skills/my-skill/ and
+#            .claude/commands/cli-watch.md, once with .agents/ gitignored (as
+#            this repo does) and once without: `provisioned` lists the stamp
+#            and every shipped portable skill, never my-skill; the builder
+#            edits feature.txt, my-skill and cli-watch.md; the snapshot and the
+#            merged commit carry exactly those three; lease_promote blocks (42)
+#            naming my-skill and cli-watch.md.
+#   legacy   a lease row without `provisioned` (created before 4.0) keeps the
+#            old rule — all of .agents/ left out — and collects in the
+#            gitignored project, where the old exclude pathspec made `git add`
+#            fail and every collect escalate.
+#   codexhook session start (marker unset) replaces a .codex/hooks.json still
+#            byte-equal to the 3.x template with the 4.0 one — one notice, none
+#            on the next run — and leaves an edited copy alone.
+# Negative controls: the hook case against copies of the handlers with the
+# marker block removed must flag every handler, and the refusal case with
+# _lead_only made a no-op must flag lease_create.
+# SELF-15b / SELF-15c are the live halves (KTD9 test list): a real claude -p
+# worker with this checkout's plugin loaded (--plugin-dir) and a real codex
+# exec worker with the shipped .codex/hooks.json and
+# --dangerously-bypass-hook-trust (the trusted-hook stand-in), each run the way
+# _lane_run mirrors a lease, leave no ops/, .codex/, .claude/*.local.md or
+# .claude/codex-changelog.* in the worktree or the squash. Each has a control
+# that must show the residue the guard prevents (claude: the same run without
+# the marker writes .claude/*.local.md and .codex/; codex: the 3.x hook writes
+# ops/CHANGELOG.md), so
+# a hook that never loaded can't pass. Gated on CC-02 / CDX-03; SKIPPED under
+# --self-only.
+_S15="${WORK}/self15"
+_S15_FAIL=""
+_S15_HOOKS="${_SELF_DIR}/../hooks/handlers"
+rm -rf "$_S15"
+mkdir -p "$_S15"
+# The 3.x templates/.codex/hooks.json, verbatim: it appended to ops/CHANGELOG.md
+# and wrote .claude/codex-changelog.* from every Codex session (codexhook, SELF-15c).
+cat > "$_S15/codex-hooks-3x.json" <<'S15_CDX3_EOF'
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -f .claude/codex-changelog.$PPID ] || { mkdir -p .claude ops; printf \"%s | codex | tool activity in session\\n\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >> ops/CHANGELOG.md && touch .claude/codex-changelog.$PPID; }'"
+          }
+        ]
+      }
+    ]
+  }
+}
+S15_CDX3_EOF
+
+_s15_listing() { # _s15_listing <dir...> — every path below the dirs with size and mtime, sorted
+  python3 - "$@" <<'S15_LIST_PY'
+import os, sys
+out = []
+for top in sys.argv[1:]:
+    for root, dirs, files in os.walk(top):
+        for n in dirs + files:
+            p = os.path.join(root, n)
+            try:
+                st = os.lstat(p)
+                out.append(p + " " + str(st.st_size) + " " + str(st.st_mtime_ns))
+            except OSError:
+                out.append(p + " gone")
+print("\n".join(sorted(out)))
+S15_LIST_PY
+}
+
+# _s15_hooks <handlers-dir> <label> <marker values...> — each handler under each
+# value in a fresh project + HOME; prints <handler>/<value>:ok, or what it did.
+_s15_hooks() {
+  local HD=$1 L=$2 H V C IN RC B A W
+  shift 2
+  for H in session-start context-monitor tool-failure-monitor pre-compact; do
+    for V in "$@"; do
+      C="$_S15/$L/$H-$V"
+      mkdir -p "$C/proj/ops" "$C/home"
+      printf '# Tasks\n- [ ] probe task\n' > "$C/proj/ops/TASKS.md"
+      case "$H" in
+        session-start) IN='{"hook_event_name":"SessionStart","source":"startup"}' ;;
+        pre-compact)   IN='{"hook_event_name":"PreCompact","trigger":"auto"}' ;;
+        *)             IN='{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_response":{"is_error":true,"error":"probe"}}' ;;
+      esac
+      B=$(_s15_listing "$C/proj" "$C/home")
+      RC=0
+      ( cd "$C/proj" && printf '%s' "$IN" | env HOME="$C/home" PATH="${_SELF_STUBS}:$PATH" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" TRIFORGE_LEASE_WORKER="$V" \
+          /bin/bash "$HD/$H.sh" > "$C/out" 2> "$C/err" ) || RC=$?
+      A=$(_s15_listing "$C/proj" "$C/home")
+      W=""
+      if [ "$A" != "$B" ]; then
+        W=$(printf '%s\n' "$A" | grep -vxF -- "$B" | head -1 | cut -d' ' -f1 || true)
+        W=${W#"$C"/}
+        [ -n "$W" ] || W="a-path-removed"
+      fi
+      if [ "$RC" -eq 0 ] && [ ! -s "$C/out" ] && [ ! -s "$C/err" ] && [ -z "$W" ]; then
+        echo "$H/$V:ok"
+      else
+        echo "$H/$V:rc=${RC},stdout=$(wc -c < "$C/out" | tr -d ' ')B,stderr=$(wc -c < "$C/err" | tr -d ' ')B,wrote=${W:-nothing}"
+      fi
+    done
+  done
+}
+
+# hooks: the real handlers under both marker values, then the two controls
+_S15_H=$(_s15_hooks "$_S15_HOOKS" hooks builder persona)
+_S15_BAD=$(printf '%s\n' "$_S15_H" | grep -v ':ok$' | tr '\n' ' ' || true)
+[ -z "$_S15_BAD" ] || _S15_FAIL="$_S15_FAIL hooks(${_S15_BAD% })"
+mkdir -p "$_S15/ctl/proj/ops" "$_S15/ctl/home"
+printf '# Tasks\n- [ ] probe task\n' > "$_S15/ctl/proj/ops/TASKS.md"
+( cd "$_S15/ctl/proj" && printf '%s' '{"tool_name":"Bash"}' | env -u TRIFORGE_LEASE_WORKER HOME="$_S15/ctl/home" /bin/bash "$_S15_HOOKS/context-monitor.sh" >/dev/null 2>&1 ) || true
+( cd "$_S15/ctl/proj" && printf '%s' '{}' | env -u TRIFORGE_LEASE_WORKER HOME="$_S15/ctl/home" /bin/bash "$_S15_HOOKS/pre-compact.sh" >/dev/null 2>&1 ) || true
+[ -f "$_S15/ctl/proj/.claude/context-monitor.local.md" ] || _S15_FAIL="$_S15_FAIL hooks-control(context-monitor-wrote-nothing-without-the-marker)"
+[ -f "$_S15/ctl/proj/ops/STATE.md" ] || _S15_FAIL="$_S15_FAIL hooks-control(pre-compact-wrote-nothing-without-the-marker)"
+# negative control: the same case against copies without the marker block
+mkdir -p "$_S15/neg-handlers"
+for _s15_h in session-start context-monitor tool-failure-monitor pre-compact; do
+  python3 - "$_S15_HOOKS/${_s15_h}.sh" "$_S15/neg-handlers/${_s15_h}.sh" <<'S15_STRIP_PY'
+import re, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+out, n = re.subn(r'\nif \[ -n "\$\{TRIFORGE_LEASE_WORKER:-\}" \]; then\n.*?\nfi\n', "\n", src, count=1, flags=re.S)
+open(sys.argv[2], "w", encoding="utf-8").write(out if n == 1 else "")
+S15_STRIP_PY
+done
+unset _s15_h
+_S15_NEG=$(_s15_hooks "$_S15/neg-handlers" neg builder)
+_S15_NEG_MISSED=$(printf '%s\n' "$_S15_NEG" | grep ':ok$' | cut -d/ -f1 | tr '\n' ' ' || true)
+[ -z "$_S15_NEG_MISSED" ] || _S15_FAIL="$_S15_FAIL hooks-negative-control(not-flagged:${_S15_NEG_MISSED% })"
+
+# _s15_repo <dir> <ignore-agents:yes|no> — main + checked-out sprint/s15, tracking
+# .agents/skills/my-skill/SKILL.md and .claude/commands/cli-watch.md
+_s15_repo() {
+  ( mkdir -p "$1" && cd "$1" && export HOME="$_S15/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
+      && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
+      && mkdir -p ops .agents/skills/my-skill .claude/commands \
+      && printf '[roles.builder]\ncli = "claude"\n' > ops/roster.toml \
+      && printf 'my skill\n' > .agents/skills/my-skill/SKILL.md && printf 'cli watch\n' > .claude/commands/cli-watch.md \
+      && { [ "$2" = no ] || printf '/.agents/\n' > .gitignore; } && echo r > README.md \
+      && git add -A && git add -f .agents/skills/my-skill/SKILL.md && git commit -qm init \
+      && git checkout -q -b sprint/s15 ) >/dev/null 2>&1
+}
+# _s15_lead <repo> <fake builder> <script> — lead-side steps from <repo> with the
+# library sourced, the case's HOME and lease root exported (as _s18_lead does)
+_s15_lead() {
+  ( cd "$1" && export HOME="$_S15/home" TRIFORGE_LEASE_ROOT="$1.leases" PATH="${_SELF_STUBS}:$PATH" TRIFORGE_TEST_BUILDER="$2" GIT_CONFIG_NOSYSTEM=1 \
+      && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && {
+    _s15_go() { # _s15_go <task> — dispatch an existing lease and wait for its exit record
+      local N=0 OUT
+      lease_dispatch "$1" "probe task" 60 >/dev/null 2>&1 || { echo "dispatch-failed"; return 1; }
+      OUT=$(_ledger_get "$1" output_file 2>/dev/null)
+      while [ ! -f "${OUT}.rc" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
+    }
+    _s15_snapnames() { # _s15_snapnames <task> — the paths the lead's snapshot of <task> would carry now
+      local ROW W A B P T
+      ROW=$(_ledger_get_row "$1" worktree admin_dir base_sha provisioned) || return 1
+      { IFS= read -r W || true; IFS= read -r A || true; IFS= read -r B || true; IFS= read -r P || true; } <<S15_ROW_EOF
+${ROW}
+S15_ROW_EOF
+      T=$(_lease_tree_of_worktree "$W" "$A" "$B" "$P") || return 1
+      git diff --name-only "$B" "$T" | tr '\n' ' '
+    }
+    eval "$3"
+  } ) 2>&1 || true   # the caller reads the output; a case that stops early shows as missing lines
+}
+mkdir -p "$_S15/home"
+
+# refuse
+_s15_repo "$_S15/rf" no
+cat > "$_S15/fb-nested.sh" <<EOF
+#!/bin/bash
+# probe builder (SELF-15): runs lead machinery from inside its lease
+source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null || { echo "nested-load-failed"; echo "Status: DONE"; exit 0; }
+R=0; E=\$(lease_create nested builder 2>&1 >/dev/null) || R=\$?
+echo "nested-marker=\${TRIFORGE_LEASE_WORKER:-unset} rc=\$R lines=\$(printf '%s\n' "\$E" | grep -c . || true)"
+R=0; E=\$(unset TRIFORGE_LEASE_WORKER; lease_create nested2 builder 2>&1 >/dev/null) || R=\$?
+echo "nested-unset rc=\$R root=\$(printf '%s' "\$E" | grep -c 'inside the lease root' || true)"
+echo "Status: DONE"
+EOF
+chmod +x "$_S15/fb-nested.sh"
+_S15_RF=$(_s15_lead "$_S15/rf" "$_S15/fb-nested.sh" '
+lease_create r1 builder >/dev/null 2>&1; echo "create-r1=$?"
+WT=$(_ledger_get r1 worktree)
+L0=$(python3 -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest())" ops/leases.toml)
+R0=$(python3 -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest())" ops/roster.toml)
+_s15_refuse() { # _s15_refuse <value> <helper> [args...] — "<helper>:rc=<n>:lines=<n>:named=<0|1>"
+  local V=$1 H=$2 R=0 E
+  shift 2
+  E=$(export TRIFORGE_LEASE_WORKER="$V"; "$H" "$@" 2>&1 >/dev/null) || R=$?
+  echo "$H:rc=$R:lines=$(printf "%s\n" "$E" | grep -c . || true):named=$(printf "%s" "$E" | grep -c "REFUSED .*TRIFORGE_LEASE_WORKER=$V" || true)"
+}
+_s15_refuse builder lease_create r2 builder
+_s15_refuse builder lease_dispatch r1 "probe" 5
+_s15_refuse builder lease_redispatch r1 "probe" 5
+_s15_refuse builder lease_collect r1
+_s15_refuse builder lease_pin_reviewer r1 codex
+_s15_refuse builder lease_merge r1 codex
+_s15_refuse builder lease_promote main
+_s15_refuse builder lease_requeue r1
+_s15_refuse builder lease_reclaim r1
+_s15_refuse builder lease_rebaseline
+_s15_refuse builder lease_heartbeat_check
+_s15_refuse builder roster_write_role builder codex "" high
+_s15_refuse builder roster_write_member kimi false ""
+_s15_refuse builder _ledger_update r1 state=merged
+_s15_refuse persona lease_merge r1 codex
+R=0; (export TRIFORGE_LEASE_WORKER=builder; lease_status >/dev/null 2>&1) || R=$?; echo "status-under-marker:rc=$R"
+L1=$(python3 -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest())" ops/leases.toml)
+R1=$(python3 -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest())" ops/roster.toml)
+[ "$L0" = "$L1" ] && echo "ledger:unchanged" || echo "ledger:CHANGED"
+[ "$R0" = "$R1" ] && echo "roster:unchanged" || echo "roster:CHANGED"
+[ -e "$TRIFORGE_LEASE_ROOT/r2" ] && echo "r2:carved" || echo "r2:absent"
+for D in "$TRIFORGE_LEASE_ROOT" "$WT"; do
+  R=0; E=$(cd "$D" && lease_create r3 builder 2>&1 >/dev/null) || R=$?
+  echo "from-root:rc=$R:named=$(printf "%s" "$E" | grep -c "inside the lease root" || true)"
+done
+_s15_go r1
+OUT=$(_ledger_get r1 output_file)
+grep "^nested-" "$OUT"
+_ledger_get nested state >/dev/null 2>&1 && echo "nested:row" || echo "nested:no-row"
+[ -e "$TRIFORGE_LEASE_ROOT/nested" ] && echo "nested:carved" || echo "nested:absent"
+')
+_s15_expect_rf() { # pattern must appear in the refuse output
+  printf '%s\n' "$_S15_RF" | grep -qE -- "$1" || _S15_FAIL="$_S15_FAIL refuse(no:$1)"
+}
+_s15_expect_rf '^create-r1=0$'
+for _s15_h in lease_create lease_dispatch lease_redispatch lease_collect lease_pin_reviewer lease_merge lease_promote lease_requeue lease_reclaim lease_rebaseline lease_heartbeat_check roster_write_role roster_write_member _ledger_update; do
+  _s15_expect_rf "^${_s15_h}:rc=45:lines=1:named=1$"
+done
+unset _s15_h
+[ "$(printf '%s\n' "$_S15_RF" | grep -c '^lease_merge:rc=45:lines=1:named=1$' || true)" -eq 2 ] || _S15_FAIL="$_S15_FAIL refuse(persona-not-refused)"
+_s15_expect_rf '^status-under-marker:rc=0$'
+_s15_expect_rf '^ledger:unchanged$'
+_s15_expect_rf '^roster:unchanged$'
+_s15_expect_rf '^r2:absent$'
+[ "$(printf '%s\n' "$_S15_RF" | grep -c '^from-root:rc=45:named=1$' || true)" -eq 2 ] || _S15_FAIL="$_S15_FAIL refuse(from-lease-root-or-worktree-not-refused)"
+_s15_expect_rf '^nested-marker=builder rc=45 lines=1$'
+_s15_expect_rf '^nested-unset rc=45 root=1$'
+_s15_expect_rf '^nested:no-row$'
+_s15_expect_rf '^nested:absent$'
+# negative control: with _lead_only a no-op, the same marker call carves a lease
+_S15_RNEG=$(_s15_lead "$_S15/rf" "$_S15/fb-nested.sh" '_lead_only() { return 0; }; R=0; (export TRIFORGE_LEASE_WORKER=builder; lease_create rneg builder >/dev/null 2>&1) || R=$?; echo "rneg:rc=$R"')
+printf '%s\n' "$_S15_RNEG" | grep -qx 'rneg:rc=0' || _S15_FAIL="$_S15_FAIL refuse-negative-control(guard-off-still-refused:$(printf '%s' "$_S15_RNEG" | tr '\n' ' ' | cut -c1-80))"
+
+# squash: provisioned copies stay out; tracked .agents/ and .claude/ edits merge and are protected
+printf '#!/bin/sh\necho feature > feature.txt\necho edited >> .agents/skills/my-skill/SKILL.md\necho edited >> .claude/commands/cli-watch.md\necho "Status: DONE"\n' > "$_S15/fb-edit.sh"
+chmod +x "$_S15/fb-edit.sh"
+_S15_WANT=".agents/skills/my-skill/SKILL.md .claude/commands/cli-watch.md feature.txt"
+for _s15_ign in yes no; do
+  _s15_repo "$_S15/sq-$_s15_ign" "$_s15_ign"
+  _S15_SQ=$(_s15_lead "$_S15/sq-$_s15_ign" "$_S15/fb-edit.sh" '
+lease_create t builder >/dev/null 2>&1; echo "create=$?"
+echo "provisioned=$(_ledger_get t provisioned)"
+_s15_go t
+R=0; lease_collect t >/dev/null 2>&1 || R=$?; echo "collect=$R state=$(_ledger_get t state)"
+echo "snapshot=$(git diff --name-only "$(_ledger_get t base_sha)" "$(_ledger_get t snapshot_sha)" | tr "\n" " ")"
+lease_pin_reviewer t codex >/dev/null 2>&1
+R=0; lease_merge t codex >/dev/null 2>&1 || R=$?; echo "merge=$R"
+echo "merged=$(git diff-tree --no-commit-id --name-only -r HEAD | tr "\n" " ")"
+R=0; E=$(lease_promote main 2>&1 >/dev/null) || R=$?
+echo "promote=$R"; printf "%s\n" "$E" | grep "_protected)" | sed "s/^ */hit=/"
+')
+  _S15_PROV=$(printf '%s\n' "$_S15_SQ" | sed -n 's/^provisioned=//p')
+  _S15_PWANT=".agents/skills/.triforge-plugin-version"
+  for _s15_s in $SHIPPED_SKILLS; do _S15_PWANT="${_S15_PWANT} .agents/skills/${_s15_s}"; done
+  _S15_PWANT=$(printf '%s\n' $_S15_PWANT | sort | tr '\n' ' ')
+  [ "$(printf '%s\n' $_S15_PROV | sort | tr '\n' ' ')" = "$_S15_PWANT" ] || _S15_FAIL="$_S15_FAIL squash-${_s15_ign}(provisioned=[$(printf '%s' "$_S15_PROV" | cut -c1-120)])"
+  for _s15_p in '^create=0$' '^collect=0 state=review$' "^snapshot=${_S15_WANT} \$" '^merge=0$' "^merged=${_S15_WANT} \$" '^promote=42$' \
+                '^hit=\.agents/skills/my-skill/SKILL\.md  \(project_protected\)$' '^hit=\.claude/commands/cli-watch\.md  \(project_protected\)$'; do
+    printf '%s\n' "$_S15_SQ" | grep -qE -- "$_s15_p" || _S15_FAIL="$_S15_FAIL squash-${_s15_ign}(no:${_s15_p})"
+  done
+done
+unset _s15_ign _s15_s _s15_p
+
+# legacy: a row without `provisioned` keeps the whole-.agents/ rule and collects
+_s15_repo "$_S15/lg" yes
+_S15_LG=$(_s15_lead "$_S15/lg" "$_S15/fb-edit.sh" '
+lease_create t builder >/dev/null 2>&1; echo "create=$?"
+_ledger_update t provisioned= >/dev/null 2>&1
+_s15_go t
+R=0; lease_collect t >/dev/null 2>&1 || R=$?; echo "collect=$R state=$(_ledger_get t state)"
+echo "snapshot=$(git diff --name-only "$(_ledger_get t base_sha)" "$(_ledger_get t snapshot_sha)" | tr "\n" " ")"
+')
+for _s15_p in '^create=0$' '^collect=0 state=review$' '^snapshot=\.claude/commands/cli-watch\.md feature\.txt $'; do
+  printf '%s\n' "$_S15_LG" | grep -qE -- "$_s15_p" || _S15_FAIL="$_S15_FAIL legacy(no:${_s15_p})"
+done
+unset _s15_p
+
+# codexhook: session start replaces an unchanged 3.x .codex/hooks.json once and
+# keeps an edited one (KTD9: the shipped hook no longer writes ops/)
+for _s15_v in same edited; do
+  mkdir -p "$_S15/cx-$_s15_v/proj/.codex" "$_S15/cx-$_s15_v/home"
+  cp "$_S15/codex-hooks-3x.json" "$_S15/cx-$_s15_v/proj/.codex/hooks.json"
+  [ "$_s15_v" = same ] || printf '\n' >> "$_S15/cx-$_s15_v/proj/.codex/hooks.json"
+  for _s15_run in 1 2; do
+    _S15_CX=$( cd "$_S15/cx-$_s15_v/proj" && env -u TRIFORGE_LEASE_WORKER HOME="$_S15/cx-$_s15_v/home" PATH="${_SELF_STUBS}:$PATH" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
+                 /bin/bash "$_S15_HOOKS/session-start.sh" < /dev/null 2>/dev/null || true )
+    _S15_CXN=$(printf '%s\n' "$_S15_CX" | grep -c '^session-start: replaced \.codex/hooks\.json' || true)
+    case "$_s15_v/$_s15_run" in
+      same/1)   { [ "$_S15_CXN" -eq 1 ] && cmp -s "$_S15/cx-same/proj/.codex/hooks.json" "$REPO_ROOT/templates/.codex/hooks.json"; } \
+                  || _S15_FAIL="$_S15_FAIL codexhook(unchanged-3.x-copy-not-replaced-once:notices=${_S15_CXN})" ;;
+      same/2)   [ "$_S15_CXN" -eq 0 ] || _S15_FAIL="$_S15_FAIL codexhook(notice-repeated-on-second-run)" ;;
+      edited/*) { [ "$_S15_CXN" -eq 0 ] && grep -q 'ops/CHANGELOG.md' "$_S15/cx-edited/proj/.codex/hooks.json"; } \
+                  || _S15_FAIL="$_S15_FAIL codexhook(edited-copy-touched-run${_s15_run})" ;;
+    esac
+  done
+done
+unset _s15_v _s15_run
+
+_S15_CAP="worker marker: hooks inert, lead-only helpers refuse (rc 45) under the marker or inside a lease root, squash excludes exactly the provisioned paths (KTD9/R21/R34)"
+if [ -z "$_S15_FAIL" ]; then
+  row "SELF-15" "claude" "$_S15_CAP" "PASS" "hooks: session-start, context-monitor, tool-failure-monitor, pre-compact under TRIFORGE_LEASE_WORKER=builder and =persona -> rc 0, no stdout/stderr, nothing written in project or HOME (controls without the marker: context-monitor.local.md and ops/STATE.md written; negative control: copies without the marker block flagged on all four); refuse: lease_create/dispatch/redispatch/collect/pin_reviewer/merge/promote/requeue/reclaim/rebaseline/heartbeat_check, roster_write_role/_member, _ledger_update -> 45 with one stderr line each (persona too), ledger + roster byte-identical, lease_status answers; lease_create from the lease root and from a worktree with the marker unset -> 45 naming the root; a builder sourcing the library in its lease -> 45 under the marker _adapter_env gave it (builder) and 45 by cwd with it unset, no row, nothing carved (negative control: _lead_only a no-op -> lease_create carves); squash, .agents/ gitignored and not: provisioned = stamp + ${SHIPPED_COUNT} shipped skills (never my-skill), snapshot = merged commit = ${_S15_WANT}, lease_promote 42 naming my-skill and cli-watch.md; legacy row without provisioned -> collect 0, .agents/ left out whole; codexhook: session start replaces an unchanged 3.x .codex/hooks.json once (notice, then silent), leaves an edited copy" "static"
+else
+  row "SELF-15" "claude" "$_S15_CAP" "FAIL" "mismatch:$(printf '%s' "$_S15_FAIL" | cut -c1-700)" "static"
+fi
+
+# SELF-15b / SELF-15c — the live halves (see the SELF-15 comment)
+_S15_LCAP="live worker leaves no bootstrap residue in its worktree or squash (KTD9)"
+_s15_residue() { # _s15_residue <worktree> — new or changed bootstrap paths there (ops/, .codex/, .claude/*.local.md, .claude/codex-changelog.*)
+  git -C "$1" status --porcelain --untracked-files=all --ignored 2>/dev/null | cut -c4- \
+    | grep -E '^(ops/|\.codex/|\.claude/[^/]*\.local\.md$|\.claude/codex-changelog\.)' | tr '\n' ' ' || true
+}
+_S15_LPROMPT="Create a file named feature.txt in the current directory containing the single word ok. Then reply with exactly one line: Status: DONE"
+if [ "$SELF_ONLY" = 1 ]; then
+  row "SELF-15b" "claude" "$_S15_LCAP: claude -p" "SKIPPED" "--self-only: live rows are not part of the SELF gate (run the full probe)" "live"
+  row "SELF-15c" "codex" "$_S15_LCAP: codex exec" "SKIPPED" "--self-only: live rows are not part of the SELF gate (run the full probe)" "live"
+else
+  # stub agy only, so the control run's session start never installs the real agy pack
+  mkdir -p "$_S15/live-stubs"
+  printf '#!/bin/sh\n# probe stub (SELF-15b): answers the session-start hook without touching the real agy install\necho "0.0.0-probe-stub"\nexit 0\n' > "$_S15/live-stubs/agy"
+  chmod +x "$_S15/live-stubs/agy"
+  if ! command -v claude >/dev/null 2>&1; then
+    row "SELF-15b" "claude" "$_S15_LCAP: claude -p" "UNAVAILABLE" "claude not on PATH" "live"
+  elif [ "$CC_LIVE" != 1 ]; then
+    row "SELF-15b" "claude" "$_S15_LCAP: claude -p" "$(_skip_reason)" "gated on CC-02" "live"
+  else
+    _s15_repo "$_S15/lcc" no
+    _s15_lead "$_S15/lcc" "" 'lease_create m builder >/dev/null 2>&1; lease_create c builder >/dev/null 2>&1' >/dev/null
+    _S15_W="$_S15/lcc.leases/m"; _S15_WC="$_S15/lcc.leases/c"
+    ( cd "$_S15_W" && PATH="$_S15/live-stubs:$PATH" _lane_run 300 claude -p --plugin-dir "$REPO_ROOT" --model sonnet --permission-mode acceptEdits --output-format text "$_S15_LPROMPT" > "$_S15/lcc-m.txt" 2>&1 ) || true
+    ( cd "$_S15_WC" && PATH="$_S15/live-stubs:$PATH" _lane_run 300 env -u TRIFORGE_LEASE_WORKER claude -p --plugin-dir "$REPO_ROOT" --model sonnet --permission-mode acceptEdits --output-format text "$_S15_LPROMPT" > "$_S15/lcc-c.txt" 2>&1 ) || true
+    _S15_RES=$(_s15_residue "$_S15_W"); _S15_RESC=$(_s15_residue "$_S15_WC")
+    _S15_SQ=$(_s15_lead "$_S15/lcc" "" '_s15_snapnames m')
+    if [ ! -f "$_S15_W/feature.txt" ]; then
+      row "SELF-15b" "claude" "$_S15_LCAP: claude -p" "FAIL" "the worker wrote no feature.txt, so no tool hook ran: $(_evidence "$_S15/lcc-m.txt")" "live"
+    elif [ -z "$_S15_RESC" ]; then
+      row "SELF-15b" "claude" "$_S15_LCAP: claude -p" "FAIL" "control without the marker left no residue either — the plugin hooks did not load under --plugin-dir in env -i, so the marker run proves nothing; $(_evidence "$_S15/lcc-c.txt")" "live"
+    elif [ -n "$_S15_RES" ] || [ "${_S15_SQ% }" != "feature.txt" ]; then
+      row "SELF-15b" "claude" "$_S15_LCAP: claude -p" "FAIL" "marker run left residue: ${_S15_RES:-none}; squash: ${_S15_SQ:-<empty>}; control residue: ${_S15_RESC}" "live"
+    else
+      row "SELF-15b" "claude" "$_S15_LCAP: claude -p" "PASS" "claude -p --plugin-dir <this checkout> --model sonnet under _lane_run (marker builder) in a lease worktree: feature.txt written, no ops/.codex/.claude/*.local.md, squash = feature.txt; control without the marker left: ${_S15_RESC% }" "live"
+    fi
+  fi
+  if ! command -v codex >/dev/null 2>&1; then
+    row "SELF-15c" "codex" "$_S15_LCAP: codex exec" "UNAVAILABLE" "codex not on PATH" "live"
+  elif [ "$CDX_LIVE" != 1 ]; then
+    row "SELF-15c" "codex" "$_S15_LCAP: codex exec" "$(_skip_reason)" "gated on CDX-03" "live"
+  else
+    _s15_repo "$_S15/lcx" no
+    _s15_repo "$_S15/lcx3" no
+    ( cd "$_S15/lcx" && mkdir -p .codex && cp "$REPO_ROOT/templates/.codex/hooks.json" .codex/hooks.json && git add .codex && git commit -qm "codex hook (4.0 template)" ) >/dev/null 2>&1
+    mkdir -p "$_S15/lcx3/.codex" && cp "$_S15/codex-hooks-3x.json" "$_S15/lcx3/.codex/hooks.json"
+    ( cd "$_S15/lcx3" && git add .codex && git commit -qm "codex hook (3.x template)" ) >/dev/null 2>&1
+    _s15_lead "$_S15/lcx" "" 'lease_create m builder >/dev/null 2>&1' >/dev/null
+    _s15_lead "$_S15/lcx3" "" 'lease_create c builder >/dev/null 2>&1' >/dev/null
+    _S15_W="$_S15/lcx.leases/m"; _S15_WC="$_S15/lcx3.leases/c"
+    for _s15_w in "$_S15_W" "$_S15_WC"; do
+      ( cd "$_s15_w" && _lane_run 300 codex exec --skip-git-repo-check -s workspace-write -c 'approval_policy="never"' \
+          -c 'sandbox_workspace_write.exclude_tmpdir_env_var=true' -c 'sandbox_workspace_write.exclude_slash_tmp=true' \
+          --dangerously-bypass-hook-trust -m "$CDX_MODEL" -c 'model_reasoning_effort="low"' "$_S15_LPROMPT" < /dev/null > "${_s15_w}.txt" 2>&1 ) || true
+    done
+    unset _s15_w
+    _S15_RES=$(_s15_residue "$_S15_W"); _S15_RESC=$(_s15_residue "$_S15_WC")
+    _S15_SQ=$(_s15_lead "$_S15/lcx" "" '_s15_snapnames m')
+    if [ ! -f "$_S15_W/feature.txt" ]; then
+      row "SELF-15c" "codex" "$_S15_LCAP: codex exec" "FAIL" "the worker wrote no feature.txt, so no tool hook ran: $(_evidence "${_S15_W}.txt")" "live"
+    elif [ -z "$_S15_RESC" ]; then
+      row "SELF-15c" "codex" "$_S15_LCAP: codex exec" "FAIL" "control (3.x hook) left no residue either — project hooks did not fire with --dangerously-bypass-hook-trust in env -i, so the 4.0 run proves nothing; $(_evidence "${_S15_WC}.txt")" "live"
+    elif [ -n "$_S15_RES" ] || [ "${_S15_SQ% }" != "feature.txt" ]; then
+      row "SELF-15c" "codex" "$_S15_LCAP: codex exec" "FAIL" "4.0 hook run left residue: ${_S15_RES:-none}; squash: ${_S15_SQ:-<empty>}; control residue: ${_S15_RESC}" "live"
+    else
+      row "SELF-15c" "codex" "$_S15_LCAP: codex exec" "PASS" "codex exec -s workspace-write --dangerously-bypass-hook-trust -m $CDX_MODEL under _lane_run (marker builder) in a lease worktree with the shipped .codex/hooks.json: feature.txt written, no ops/.codex-changelog residue, squash = feature.txt; control with the 3.x hook left: ${_S15_RESC% }" "live"
+    fi
+  fi
+fi
+rm -rf "$_S15"
 
 # SELF-18 (KTD18/KTD19 — R46, R47, R49): a builder can't make the lead's git
 # run its commands, forge the ledger, or smuggle commits or ops/ edits into a

@@ -17,6 +17,14 @@
 #   Audited 2026-09-11: this handler writes ops/STATE.md and prints nothing to
 #   stdout.
 
+# Worker marker (KTD9, R34): in a lease worker or persona (TRIFORGE_LEASE_WORKER
+# set by _adapter_env) this hook does nothing and prints nothing — a worker's
+# CLI may load the plugin's hooks, and they must not write state into its
+# worktree.
+if [ -n "${TRIFORGE_LEASE_WORKER:-}" ]; then
+  exit 0
+fi
+
 set -euo pipefail
 
 _pc_on_exit() {

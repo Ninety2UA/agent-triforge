@@ -522,6 +522,7 @@ print(str(entry['cli']) + '\t' + str(entry['model']) + '\t' + str(entry['effort'
 # if the result would not terminate at a core member. Model may be empty
 # (builder's shell lane runs the host default Claude model by design).
 roster_write_role() {
+  _lead_only roster_write_role || return $?   # workers never write the roster (KTD9, lease.sh)
   local ROLE=${1:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
   local CLI=${2:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
   local MODEL=${3-}
@@ -790,6 +791,7 @@ print('true' if v is True else ('false' if v is False else v))
 # core-trio member (mirrors resolve_role's load-time rule so the roster stays
 # resolvable). enrolled-tag defaults to today's date.
 roster_write_member() {
+  _lead_only roster_write_member || return $?   # workers never write the roster (KTD9, lease.sh)
   local CLI=${1:?usage: roster_write_member <cli> <true|false> <model> [enrolled-tag]}
   local ENABLED=${2:?usage: roster_write_member <cli> <true|false> <model> [enrolled-tag]}
   local MODEL=${3-}

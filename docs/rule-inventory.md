@@ -239,7 +239,7 @@ Written 2026-10-01 for plan unit U3 (R11, KTD17). One row per normative sentence
 | 213 | L36 | Stay within your assigned scope (a builder's scope is its worktree); propose cross-scope changes in MEMORY.md first | templates/ops/AGENTS.md | |
 | 214 | L37 | Never modify CONTRACTS.md directly — propose in MEMORY.md; all code conforms to CONTRACTS.md types | AGENTS.md §Do not touch; templates/ops/AGENTS.md | |
 | 215 | L38 | A conflict with another agent's work is logged in TASKS.md | templates/ops/AGENTS.md | |
-| 216 | L39 | Attribution is mandatory on every change | templates/ops/AGENTS.md; enforced (Codex only): `templates/.codex/hooks.json` PostToolUse CHANGELOG attribution | |
+| 216 | L39 | Attribution is mandatory on every change | templates/ops/AGENTS.md; enforced: `scripts/lib/lease.sh` `lease_merge` (the ledger records builder, reviewer and merge commit; `ops/CHANGELOG.md` rows come from it) | The Codex PostToolUse hook that wrote ops/CHANGELOG.md was retired in U11 (workers write no `ops/`) |
 | 217 | L40 | Never create or touch `ops/.sprint-complete`; the lead creates it at wrap after the verification checklist | AGENTS.md §Done when; templates/ops/AGENTS.md | |
 | 218 | L42–47 | Project-specific rules section with examples | templates/ops/AGENTS.md | Kept |
 

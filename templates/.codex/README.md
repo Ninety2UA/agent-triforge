@@ -7,7 +7,7 @@ Bootstrapped at session start, copy-if-absent so your edits survive:
 | `triforge-agents.toml` | The three Triforge Codex roles (`logic_reviewer`, `test_writer`, `debugger`) — a Triforge-internal file that `scripts/invoke-external.sh` parses and replays as `codex exec` flags. **Deployed under this name, not `.codex/agents/`**: Codex ≥ 0.147 sweeps `.codex/agents/*.toml` as standalone role files and prints `Ignoring malformed agent role definition` for a multi-agent file (D-026). A pre-3.3.0 `.codex/agents/agents.toml` is moved here once by `session-start.sh`. |
 | `AGENTS.md` | Codex custom instructions for this project. |
 | `config.toml` | Disables Codex's auto-memory pipeline (see its inline comments). |
-| `hooks.json` | `PostToolUse` hook appending one `codex` attribution line per session to `ops/CHANGELOG.md`. |
+| `hooks.json` | Ships with no hooks since 4.0. The 3.x `PostToolUse` hook appended a `codex` attribution line to `ops/CHANGELOG.md` from every session, lease workers included; attribution now comes from the lease ledger (KTD9). Session start replaces an unchanged 3.x copy once; add your own hooks here. |
 
 ## Project trust (D-026) — the durable path, and the automation path
 
@@ -28,15 +28,15 @@ the root checkout's trust.
   Whether a parent-directory entry covers subdirectories is unverified — add the exact path.
 - **Automation path (what the helper does today):** `invoke_codex` passes
   `--dangerously-bypass-hook-trust` whenever the project ships `.codex/hooks.json` and
-  `codex features list` reports `hooks` enabled, so the CHANGELOG hook fires under `exec`
+  `codex features list` reports `hooks` enabled, so project hooks fire under `exec`
   in an untrusted checkout (probe CDX-04 PASS on 0.154.0). The flag covers hooks only —
   `config.toml` and `AGENTS.md` still need the trust entry; the role instructions in
   `triforge-agents.toml` ride as a prompt prefix regardless of trust.
 
 Hook firing under `exec` was verified 2026-07-17 (codex 0.144.4) and re-verified 2026-09-11
 (0.154.0); see `ops/decisions/2026-07-18-codex-hooks-under-exec.md` and the newest
-`ops/research/*-probe-record.md` (row CDX-04). To disable the hook: delete the project's
-`.codex/hooks.json` (the helper then omits the bypass flag automatically).
+`ops/research/*-probe-record.md` (row CDX-04). Deleting the project's `.codex/hooks.json` makes the helper
+omit the bypass flag automatically.
 
 ## `--full-auto` is gone
 

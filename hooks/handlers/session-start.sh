@@ -26,6 +26,14 @@
 # Bash 3.2 compatible (macOS /bin/bash): no associative arrays, no mapfile, no
 #   "${arr[@]}" expansion of a possibly-empty array under set -u.
 
+# Worker marker (KTD9, R34): in a lease worker or persona (TRIFORGE_LEASE_WORKER
+# set by _adapter_env) this hook does nothing and prints nothing — a worker's
+# CLI may load the plugin's hooks, and they must not write state into its
+# worktree.
+if [ -n "${TRIFORGE_LEASE_WORKER:-}" ]; then
+  exit 0
+fi
+
 set -euo pipefail
 
 _ss_on_exit() {
@@ -275,12 +283,12 @@ _bootstrap_copy() {
 # (KTD5 — deployed OUTSIDE .codex/agents/, which Codex ≥ 0.147 sweeps as
 # per-agent role files and warns "Ignoring malformed agent role definition" on);
 # config.toml disables Codex's auto-memory
-# pipeline (conflict with ops/MEMORY.md); hooks.json enforces CHANGELOG
-# attribution under `codex exec` (probe CDX-04 PASS on 0.154.0 with
-# --dangerously-bypass-hook-trust, which invoke-external.sh passes when this
-# file is present). See templates/.codex/README.md and
-# ops/decisions/2026-07-18-codex-hooks-under-exec.md.
+# pipeline (conflict with ops/MEMORY.md); hooks.json ships with no hooks since
+# 4.0 (KTD9: the 3.x CHANGELOG attribution hook wrote ops/ from every Codex
+# session, lease workers included; attribution now comes from the ledger). See
+# templates/.codex/README.md and ops/decisions/2026-07-18-codex-hooks-under-exec.md.
 CODEX_MOVE_NOTICE=""
+CODEX_HOOK_NOTICE=""
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   # One-time migration (KTD5): v3.2.0 deployed .codex/agents/agents.toml. Move it
   # to the new name once — a user-modified file is moved, never deleted or
@@ -300,6 +308,19 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   fi
   _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml"     ".codex/triforge-agents.toml"
   _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.codex/config.toml" ".codex/config.toml"
+  # One-time migration (KTD9): a .codex/hooks.json still byte-equal to the one
+  # 3.x template (sha256 below) is Triforge's own copy of the attribution hook
+  # that appended to ops/CHANGELOG.md and wrote .claude/codex-changelog.* from
+  # every Codex session, inside lease worktrees too: replaced once by the 4.0
+  # template. An edited copy is the user's and is left alone.
+  if [ -f ".codex/hooks.json" ] && [ ! -L ".codex/hooks.json" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json" ] \
+     && [ "$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' .codex/hooks.json 2>/dev/null || true)" = "9aece38547f04f98c9cd158538cb31e654c1fa3767de414afbab1bd50b8f140c" ]; then
+    if cp "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json" ".codex/hooks.json" 2>/dev/null; then
+      CODEX_HOOK_NOTICE="session-start: replaced .codex/hooks.json — the unchanged 3.x copy appended a line to ops/CHANGELOG.md from every Codex session, lease workers included; attribution now comes from the lease ledger."
+    else
+      CODEX_HOOK_NOTICE="session-start: WARNING could not replace the 3.x .codex/hooks.json, which writes ops/CHANGELOG.md from every Codex session — copy templates/.codex/hooks.json over it by hand."
+    fi
+  fi
   _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json"  ".codex/hooks.json"
 fi
 
@@ -913,6 +934,9 @@ if [ -n "$AGY_PACK_NOTICE" ]; then
 fi
 if [ -n "$CODEX_MOVE_NOTICE" ]; then
   MSG="$MSG\n${CODEX_MOVE_NOTICE}"
+fi
+if [ -n "$CODEX_HOOK_NOTICE" ]; then
+  MSG="$MSG\n${CODEX_HOOK_NOTICE}"
 fi
 
 # Upgrade notices (R40): standing states, repeated every session until fixed.
