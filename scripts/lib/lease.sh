@@ -2379,7 +2379,7 @@ _lease_reviewer_class() {
 # relaying it) or the SELF seam (via=test). Under another CLI's markers, or
 # with nothing to say where it ran (via=none), a record claiming the lead's
 # review contradicts itself, so lease_approve refuses it and lease_merge does
-# not count it. A user-class approval is recorded from anywhere, with its origin.
+# not count it. A user-class approval is recorded from any stated origin.
 _lease_lead_origin_ok() {
   case "${1:-}" in
     tty|test) return 0 ;;
@@ -2410,8 +2410,9 @@ _lease_lead_origin_ok() {
 # Every record carries its origin (_lead_origin):
 # via=lead-session with the host CLI when lead host markers are present,
 # via=tty from a terminal, via=test under the SELF seam, plus the lead's CLI
-# and the time. Exempt from the lead host check (R38): run under the other
-# lead's markers it records that origin instead of refusing; the worker marker
+# and the time; a shell with none of these (via=none) is refused, since the
+# record could not say where it came from. Exempt from the lead host check
+# (R38): run under the other lead's markers it records that origin instead of refusing; the worker marker
 # and the lease root still refuse (KTD9, rc 45). It runs no integrity check:
 # lease_merge and lease_promote run theirs, and check the record against the
 # state they act on. Audit, not prevention: any shell with the helper can
@@ -2443,6 +2444,10 @@ lease_approve() {
     return 1
   fi
   _lead_origin
+  if [ "$_LEAD_VIA" = none ]; then
+    echo "lease_approve: REFUSED — via=none: no lead host markers (CLAUDECODE or CLAUDE_CODE_ENTRYPOINT, CODEX_THREAD_ID or CODEX_CI) and no terminal on stdin, so the record could not say where it was given; an approval needs a stated origin. Run it from a lead's tool shell or a terminal (KTD4)" >&2
+    return 1
+  fi
   if [ "$CLASS" = lead ] && ! _lease_lead_origin_ok "$_LEAD_VIA" "$_LEAD_HOST" "$WHO"; then
     echo "lease_approve: REFUSED — a ${WHO} (lead) approval comes from the ${WHO} lead's own session or a terminal; this shell runs with via=${_LEAD_VIA} host=${_LEAD_HOST}. Record the user's approval instead, on the user's say-so: lease_approve ${SCOPE} user (KTD2)" >&2
     return 1

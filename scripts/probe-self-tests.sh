@@ -1564,8 +1564,9 @@ rm -rf "$_S13"
 #   origin   [lead] codex, a claude-built protected task: lease_approve user
 #            under Codex's markers -> via=lead-session host=codex; under
 #            Claude Code's (the other lead's) -> recorded, host=claude
-#            lead=codex, while a codex (lead) approval from there or from a
-#            shell with no origin is refused; from a pty -> via=tty; under the worker marker or
+#            lead=codex, while a codex (lead) approval from there is refused;
+#            with no markers, no terminal and no seam (via=none) any approval
+#            is refused; from a pty -> via=tty; under the worker marker or
 #            from the lease worktree -> 45, nothing written; a worker CLI ->
 #            refused; the tty record merges
 #   approver _approver_ok: user and a CLI 0, "lead", a fabricated label and
@@ -1758,6 +1759,7 @@ echo "other=$(_ledger_get t approval_via):host=$(_ledger_get t approval_host):le
 (unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; export CLAUDECODE=1; _s14_try othermerge lease_merge t codex)
 (unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; export CLAUDECODE=1; _s14_try otherlead lease_approve task:t codex)
 (unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; _s14_try nonelead lease_approve task:t codex)
+(unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; _s14_try noneuser lease_approve task:t user)
 (unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; python3 -c "$_S14_PTY" /bin/bash "$_S14/origin-tty.sh" "$_SELF_DIR") || true
 cp ops/leases.toml "$_S14/origin-ledger.before"
 (export TRIFORGE_LEASE_WORKER=builder; _s14_try marker lease_approve task:t user)
@@ -1769,7 +1771,7 @@ _s14_try merge lease_merge t codex
 echo "attr=$(lease_attribution t 2>/dev/null)"
 ')
 _S14_FAIL="${_S14_FAIL}$(_self_expect origin "$O" '^t:go=0:review$' '^pin:rc=0:' '^own:rc=0:' '^own=lead-session:host=codex:lead=codex$' \
-  '^other:rc=0:' '^other=lead-session:host=claude:lead=codex$' '^othermerge:rc=45:.*at-setup lead' '^otherlead:rc=1:.*own session.*host=claude' '^nonelead:rc=1:.*via=none' '^tty:rc=0:via=tty:host=none:stdin=tty$' \
+  '^other:rc=0:' '^other=lead-session:host=claude:lead=codex$' '^othermerge:rc=45:.*at-setup lead' '^otherlead:rc=1:.*own session.*host=claude' '^nonelead:rc=1:.*via=none' '^noneuser:rc=1:.*via=none.*stated origin' '^tty:rc=0:via=tty:host=none:stdin=tty$' \
   '^marker:rc=45:.*TRIFORGE_LEASE_WORKER' '^inroot:rc=45:.*inside the lease root' '^ledger=unchanged$' '^worker:rc=1:.*(lead|user)' '^merge:rc=0:' \
   '^attr=.*approval user:user via=tty')"
 
@@ -1907,7 +1909,7 @@ _S14_FAIL="${_S14_FAIL}$(_self_expect legacy "$O" '^t:go=0:review$' '^blank=$' '
 
 _S14_CAP="ledger approvals: lead_cli + reviewer class per row; a protected change (base to snapshot) merges only with a lead or user merge approval bound to the snapshot, the lead's own CLI's build routed to the user; a protected or require_user_approval promotion needs the user's approval bound to the tree, voided by a later merge or a default-branch move; every approval records its origin (KTD2-KTD4, R5, R6, R32, R33)"
 if [ -z "$_S14_FAIL" ]; then
-  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there or with no origin refused), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude" "static"
+  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude" "static"
 else
   _S14_WHO=$(printf '%s' "$_S14_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
   row "SELF-14" "claude" "$_S14_CAP" "FAIL" "mismatch in ${_S14_WHO% }:$(printf '%s' "$_S14_FAIL" | cut -c1-900)" "static"
