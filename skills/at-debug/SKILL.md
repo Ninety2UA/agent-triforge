@@ -23,7 +23,7 @@ Invoked with the bug description or error message; when absent, ask the user for
 ## Facts a model cannot derive
 
 - **Step 1** spawns a sub-agent with the `bug-reproduction-validator` persona on the report; it attempts a reproduction, writes a failing test if reproducible, identifies the root cause and classifies the bug CONFIRMED, INTERMITTENT, NOT_REPRODUCIBLE or ALREADY_FIXED. Host spawn mechanics: [references/claude.md](references/claude.md), [references/codex.md](references/codex.md).
-- **Step 2**, for a confirmed bug, follows the `systematic-debugging` skill — error classification, an assumption ledger, bisection, five whys, a contradiction check: [references/diagnosis.md](references/diagnosis.md).
+- **Step 2**, for a confirmed bug, diagnoses before any fix — error classification, an assumption ledger, bisection, five whys, a contradiction check: [references/diagnosis.md](references/diagnosis.md).
 - **Steps 3–4** fix the root cause, run the Step 1 test and the full suite, sweep for the same anti-pattern elsewhere (new `ops/TASKS.md` rows for each instance), and document: [references/fix-and-document.md](references/fix-and-document.md). The `ops/solutions/` entry is owed when the bug took more than 30 minutes or was non-obvious.
 
 ## Output

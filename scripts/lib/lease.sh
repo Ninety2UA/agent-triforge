@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# scripts/lib/lease.sh — the lease lifecycle (KTD-4): ledger, per-adapter env allowlist (+ no-push backstop), lease_create/dispatch/collect/merge/promote, the typed-report parser (KTD11)
+# scripts/lib/lease.sh — the lease lifecycle (KTD-4): ledger, per-adapter env allowlist (+ no-push backstop, worker marker), lease_create/dispatch/collect/merge/promote, the typed-report parser (KTD11); detached builders, lease_wait, lease_stop and the lead-exit reconcile (KTD10) live in scripts/lib/lease-wait.sh
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
-# same shell, after scripts/lib/common.sh. Every function keeps the name and
-# contract it had when this code lived in invoke-external.sh; the split (review
-# finding #15 on the v3.3.0 branch) is by lane, not by behavior.
+# same shell, after scripts/lib/common.sh and scripts/lib/lease-wait.sh (whose
+# launcher, builder body and group kill lease_dispatch and lease_collect call,
+# at call time). Every function keeps the name and contract it had when this
+# code lived in invoke-external.sh; the split (review finding #15 on the
+# v3.3.0 branch) is by lane, not by behavior.
 if [ -z "${_TRIFORGE_SCRIPTS_DIR:-}" ]; then
   echo "scripts/lib/lease.sh: not standalone — source scripts/invoke-external.sh" >&2
   return 2 2>/dev/null || exit 2
@@ -51,6 +53,10 @@ fi
 # the lead's own recorded snapshot of each lease (KTD19). Other git callers —
 # the harness's own git, ad-hoc git the lead model runs, other builders — are
 # covered only by that detection. All of it is detection, not prevention.
+
+# Worker marker (KTD9, R34): _RC_LEAD_ONLY, _lead_only and _lease_root_above
+# live in scripts/lib/common.sh (roster.sh calls _lead_only too, and loads
+# before this file); _adapter_env below sets the marker.
 
 # ---------------------------------------------------------------------------
 # Lead context and hardened lead-side git (KTD18)
@@ -134,11 +140,13 @@ for p in (repo, os.path.realpath(gitdir), os.path.realpath(common), os.path.real
 # commit would carry the wrong identity. Captured before any builder runs, so a
 # later worker edit to ~/.gitconfig never reaches the lead's git (and the
 # integrity check reports it); the capture itself is a digested, restorable
-# integrity surface (lead_gitconfig).
+# integrity surface (lead_gitconfig). Its first line starts with
+# _LEAD_GITCONFIG_SIGNATURE (scripts/lib/common.sh), which is how
+# _lease_root_above recognizes a lease root (KTD9): keep it.
 _lead_gitconfig_capture() {
   local DEST=$1 TMP="${1}.tmp.$$" SCOPE K V LIST
   mkdir -p "$(dirname "$DEST")" || return 1
-  printf '# Triforge trusted git config (KTD18) — captured from your system/global git config on\n# first use. The lead-side git calls in scripts/lib/lease.sh read ONLY this file as global\n# config. The integrity check digests it: to re-capture, delete it and run lease_rebaseline.\n' > "$TMP" || return 1
+  printf '%s (KTD18) — captured from your system/global git config on\n# first use. The lead-side git calls in scripts/lib/lease.sh read ONLY this file as global\n# config. The integrity check digests it: to re-capture, delete it and run lease_rebaseline.\n' "$_LEAD_GITCONFIG_SIGNATURE" > "$TMP" || return 1
   for SCOPE in --system --global; do
     LIST=$(env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT -u GIT_DIR -u GIT_WORK_TREE \
              git -C "$_LEASE_REPO" config "$SCOPE" --includes --null --get-regexp '^(user\.(name|email)|core\.(excludesfile|autocrlf|eol)|init\.defaultbranch|safe\.directory|filter\.lfs\..*)$' 2>/dev/null \
@@ -269,8 +277,10 @@ _lease_valid_task_id() {
 # tomllib (read-only stdlib), apply updates, re-serialize with a small flat
 # emitter (values stay flat strings/ints so the round trip is trivial),
 # round-trip-verify the tmp file, then atomic tmp+mv. `updated` is stamped
-# on every call. Int keys: pid, created, updated, heartbeat_deadline,
-# requeue_count, review_cycle.
+# on every call. Int keys: pid, pgid, lead_pid, created, updated,
+# heartbeat_deadline, requeue_count, review_cycle, report_missing_count.
+# Refuses in a worker context (_lead_only, KTD9) — the backstop behind the
+# lease_* entry points' own refusal.
 #
 # The reserved id @baseline (never a valid task id) writes the [baseline]
 # table instead of a lease row: the lead's last verified git state (KTD18) —
@@ -289,8 +299,11 @@ _lease_valid_task_id() {
 # by a symlink counts as changed, and os.replace puts a regular file back over
 # the link itself. This is the ONE place that rule is decided, always under the
 # ledger lock: _lead_integrity_check and lease_rebaseline start with a no-op
-# `_ledger_update @baseline` (it only stamps `updated`) to run it.
+# `_ledger_update @baseline` to run it, which writes nothing while the ledger
+# and its copy match the recorded digest and a [baseline] exists (otherwise it
+# writes, stamping `updated`, and so restores, alerts or re-anchors).
 _ledger_update() {
+  _lead_only _ledger_update || return $?
   local TASK_ID=$1
   shift
   local LEDGER LOCK RC=0 TRIES=0
@@ -374,6 +387,14 @@ data = {}
 if os.path.isfile(source):
     with open(source, 'rb') as f:
         data = tomllib.load(f)
+# The integrity check's no-op @baseline call on a ledger that matches the lead's
+# last write and its copy, with a [baseline] in place: nothing to restore or
+# record, so nothing is rewritten (a write would only stamp [baseline].updated,
+# which nothing reads). Loaded first, so a ledger that no longer parses still
+# fails closed; any alert, update or missing anchor still writes.
+if (task == '@baseline' and len(sys.argv) == 1 and not alert and recorded and isinstance(data.get('baseline'), dict)
+        and os.path.isfile(copy_file) and _sha(copy_file) == recorded):
+    sys.exit(0)
 leases = data.get('lease', {})
 leases = leases if isinstance(leases, dict) else {}
 baseline = data.get('baseline', {})
@@ -384,7 +405,7 @@ if task == '@baseline':
     row = baseline
 else:
     row = dict(leases.get(task, {})) if isinstance(leases.get(task, {}), dict) else {}
-INT_KEYS = ('pid', 'created', 'updated', 'heartbeat_deadline', 'requeue_count', 'review_cycle', 'report_missing_count')
+INT_KEYS = ('pid', 'pgid', 'lead_pid', 'created', 'updated', 'heartbeat_deadline', 'requeue_count', 'review_cycle', 'report_missing_count')
 for arg in sys.argv[1:]:
     k, sep, v = arg.partition('=')
     if not sep or not k:
@@ -541,20 +562,21 @@ print('\n'.join(vals))
 #                             ledger's copy and digest (ledger.copy,
 #                             ledger.sha256), which only _ledger_update writes
 # _lead_integrity_check runs at lease_create, lease_dispatch, lease_pin_reviewer,
-# lease_collect, lease_merge, lease_promote, lease_requeue and
-# lease_heartbeat_check. A change the lead did not make restores what can be
-# restored (.git/config, .git/hooks, the trusted git config) — only from a
-# lead copy whose digest still equals the baseline, and only after saving the
-# changed version as <lease root>/lead/<name>.changed-<UTC time> (it may have
-# been the lead's or the user's: git remote add, pre-commit install) —
-# escalates, names the changed surface, and returns _RC_LEASE_INTEGRITY (44).
-# The ledger is not compared here: the check first runs _ledger_update's own
-# rule under the ledger lock (a no-op @baseline write that restores a changed
-# ledger from its copy and sets [baseline].ledger_alert), then reports the
-# alert. .git/info, the global git config and the lead checkout's .git are
-# detect-only. A repo-wide change
-# escalates every building/review lease (any of their builders could have made
-# it); a per-lease change escalates that lease. lease_rebaseline accepts a
+# lease_collect, lease_merge, lease_promote, lease_requeue,
+# lease_heartbeat_check and lease_wait (on entry, every 15 s while it waits,
+# before it acts on a row, and on return). A change the lead did not make
+# restores what can be restored (.git/config, .git/hooks, the trusted git
+# config) — only from a lead copy whose digest still equals the baseline, and
+# only after saving the changed version as <lease root>/lead/<name>.changed-<UTC
+# time> (it may have been the lead's or the user's: git remote add, pre-commit
+# install) — escalates, names the changed surface, and returns
+# _RC_LEASE_INTEGRITY (44). The ledger is not compared here: the check first
+# runs _ledger_update's own rule under the ledger lock (a no-op @baseline write
+# that restores a changed ledger from its copy and sets [baseline].ledger_alert),
+# then reports the alert. .git/info, the global git config and the lead
+# checkout's .git are detect-only. A repo-wide change escalates every
+# building/review lease (any of their builders could have made it); a
+# per-lease change escalates that lease. lease_rebaseline accepts a
 # change the lead or user made to any surface but the ledger (a ledger change
 # is never accepted; its alert waits for the next check), resumes the named
 # leases the check escalated, and records each acceptance in [baseline]
@@ -1063,6 +1085,7 @@ INTEGRATION_ROW_EOF
 # reads a worktree or admin dir from it, and [baseline].ledger_alert stays set
 # (reported here as NOT accepted) for the next _lead_integrity_check to escalate.
 lease_rebaseline() {
+  _lead_only lease_rebaseline || return $?
   local LEDGER OUT KIND A B C D TAB T PREV CUR NEW_IB="" IB_DESC HEAD_SHA="" IB="" ISHA="" ROW LU_ERR LU_RC=0 ACCEPTED="" RESUMED="" VIA LINE LOG
   TAB=$(printf '\t')
   _lease_ctx || return 1
@@ -1150,18 +1173,20 @@ print(" || ".join(log[-20:]))
 # identity, not a secret: Claude Code resolves its keychain account from it, so
 # without it `claude -p` under env -i answers "Not logged in" on every macOS
 # host — live bisect 2026-09-11, LOGNAME alone does not help) + NO_COLOR=1 +
-# the GIT_CONFIG_* no-push backstop (CS1), plus ONLY the invoked CLI's own
+# the worker marker TRIFORGE_LEASE_WORKER (KTD9) + the GIT_CONFIG_* no-push
+# backstop (CS1), plus ONLY the invoked CLI's own
 # credential variables: its registry entry's env_keys (opencode:
 # OPENROUTER_API_KEY; kimi: KIMI_*; cursor: CURSOR_API_KEY). claude, codex,
 # and antigravity list none — they authenticate via HOME-based stores and get
 # nothing extra — no cross-provider leakage; a CLI the registry does not know
 # gets the base allowlist alone. env -i execs external commands only; shell
-# functions cannot cross it, which is why lease_dispatch composes direct CLI
-# commands instead of calling the invoke_* helpers (see there). Mirrored by
+# functions cannot cross it, which is why the lease lane composes direct CLI
+# commands (_lease_lane_argv, scripts/lib/lease-wait.sh) instead of calling the
+# invoke_* helpers. Mirrored by
 # _lane_run in scripts/probe-capabilities.sh, which reads the same base list.
 # The env_keys are one registry read here unless lease_dispatch, which already
 # read them together with the model, hands them over in _ADAPTER_ENV_KEYS (set
-# inside its dispatch subshell only, so the lead's shell never carries it).
+# inside the detached builder process only, so the lead's shell never carries it).
 #
 # _adapter_env_forward <NAME> — append NAME=value to the caller's PAIRS when the
 # variable is set (set-and-empty included): the one rule for the base allowlist
@@ -1208,6 +1233,15 @@ _adapter_env() {
 $(printf '%s' "$TRIFORGE_ENV_BASE" | tr ' ' '\n')
 BASEKEYS
   PAIRS+=("NO_COLOR=1")   # captured output is parsed, never rendered (U5)
+  # Worker marker (KTD9): hook handlers exit at once and lead-owned helpers
+  # refuse (_lead_only) anywhere in the worker's process tree. Two values:
+  # builder (every lease build) and persona: U25's dispatch_persona will set
+  # _ADAPTER_WORKER=persona inside its dispatch subshell, the way
+  # lease_dispatch hands over _ADAPTER_ENV_KEYS.
+  case "${_ADAPTER_WORKER:-builder}" in
+    persona) PAIRS+=("TRIFORGE_LEASE_WORKER=persona") ;;
+    *)       PAIRS+=("TRIFORGE_LEASE_WORKER=builder") ;;
+  esac
   # No-push backstop (CS1): git honors GIT_CONFIG_COUNT/KEY_n/VALUE_n as
   # per-process config, so every git in the builder's process tree sees (a)
   # core.hooksPath -> the shipped pre-push hook that refuses, and (b)
@@ -1319,6 +1353,68 @@ _lease_provision_skills() {
   return 0
 }
 
+# _lease_provision <worktree> — provision a worktree _lease_carve just made
+# (it reads _CARVE_ADMIN) and append provisioned=<the paths that wrote> to
+# _CARVE_FIELDS, the lease row's `provisioned` field (KTD9). rc 1 when the
+# list can't be read: a row without it would fall back to excluding all of
+# .agents/.
+_lease_provision() {
+  local WT=$1 LIST
+  _lease_provision_skills "$WT"
+  LIST=$(_lease_provisioned "$WT" "$_CARVE_ADMIN" .agents/skills) || {
+    echo "lease: ERROR could not list the paths provisioning wrote into ${WT}, so the snapshot could not exclude exactly those (KTD9)" >&2
+    return 1
+  }
+  _CARVE_FIELDS+=("provisioned=${LIST}")
+}
+
+# _lease_provisioned <worktree> <admin> <dir...> — print, space-separated, the
+# paths provisioning wrote into a freshly carved worktree, or "none" (KTD9):
+# each entry directly inside a provisioning <dir> (for .agents/skills, a
+# skill directory or the digest stamp) under which git status sees a new,
+# ignored, modified or deleted path. Run right after the carve and the
+# provisioning, so every change it sees is provisioning's. The snapshot
+# excludes exactly these; any other edit, under .agents/, .claude/ or .codex/
+# included, merges and meets the protected-path check. An entry name outside
+# [A-Za-z0-9._-] is not recorded (skills-sync.py writes none), so it stays in
+# the snapshot where the lead sees it — the list errs toward merging.
+_lease_provisioned() {
+  local W=$1 A=$2 TMP RC=0
+  shift 2
+  TMP=$(mktemp "${TMPDIR:-/tmp}/triforge-provisioned.XXXXXX") || return 1
+  # Into a file, so git's own exit status is checked (a pipeline would report
+  # only python's, and a failed status would read as "nothing provisioned").
+  _lgw "$W" "$A" status --porcelain=v1 -z --untracked-files=all --ignored=traditional -- "$@" > "$TMP" 2>/dev/null || RC=1
+  if [ "$RC" -eq 0 ]; then
+    python3 -c '
+import re, sys
+dirs = [d.rstrip("/") for d in sys.argv[1:]]
+fields = sys.stdin.buffer.read().decode("utf-8", "surrogateescape").split("\0")
+paths, i = [], 0
+while i < len(fields):
+    f = fields[i]
+    i += 1
+    if len(f) < 4:
+        continue
+    paths.append(f[3:])
+    if f[0] in "RC":        # a rename or copy: the next field is its source
+        if i < len(fields):
+            paths.append(fields[i])
+        i += 1
+found = set()
+for p in paths:
+    for d in dirs:
+        if p.startswith(d + "/"):
+            entry = p[len(d) + 1:].split("/", 1)[0]
+            if entry not in ("", ".", "..") and re.match(r"^[A-Za-z0-9._-]+$", entry):
+                found.add(d + "/" + entry)
+print(" ".join(sorted(found)) or "none")
+' "$@" < "$TMP" || RC=1
+  fi
+  rm -f "$TMP"
+  return "$RC"
+}
+
 # ---------------------------------------------------------------------------
 # Worktree carve, collect snapshot and snapshot-only merge (KTD3, KTD18, KTD19)
 # ---------------------------------------------------------------------------
@@ -1330,10 +1426,11 @@ _lease_provision_skills() {
 # _CARVE_POINTER / _CARVE_ADMIN_DIGEST (the per-lease integrity baseline), and
 # _CARVE_FIELDS: the key=value list every (re)carved lease row starts from
 # (those four, the branch it was carved on — empty on the default branch, which
-# is never an integration branch — and the cleared snapshot/integrity fields),
-# passed as "${_CARVE_FIELDS[@]}" by lease_create and lease_requeue. Set only on
-# success, and then never empty, so the expansion is safe under bash 3.2
-# `set -u` and in zsh.
+# is never an integration branch — the lease root it was carved under, and the
+# cleared snapshot/integrity fields; _lease_provision then appends
+# `provisioned`), passed as "${_CARVE_FIELDS[@]}" by lease_create and
+# lease_requeue. Set only on success, and then never empty, so the expansion
+# is safe under bash 3.2 `set -u` and in zsh.
 _lease_carve() {
   local T=$1 WT=$2 D CUR
   _CARVE_BASE=""; _CARVE_ADMIN=""; _CARVE_POINTER=""; _CARVE_ADMIN_DIGEST=""; _CARVE_FIELDS=()
@@ -1354,18 +1451,44 @@ _lease_carve() {
   CUR=$(_lease_current_branch)
   if [ -n "$CUR" ] && [ "$CUR" = "$(_lease_default_branch)" ]; then CUR=""; fi
   _CARVE_FIELDS=(base_sha="$_CARVE_BASE" admin_dir="$_CARVE_ADMIN" pointer_digest="$_CARVE_POINTER" admin_digest="$_CARVE_ADMIN_DIGEST"
-                 integration_branch="$CUR" snapshot_sha= snapshot_tree= builder_commits= integrity_prev_state=)
+                 integration_branch="$CUR" lease_root="$_LEASE_ROOT" snapshot_sha= snapshot_tree= builder_commits= integrity_prev_state=)
 }
 
-# _lease_tree_of_worktree <worktree> <admin> <start-commit> — print the tree
-# the worktree holds now, built in a throwaway index seeded from <start-commit>
-# (the snapshot's own rule: every change, .agents/ excluded — provisioned
-# skills never merge). The worktree's own index and HEAD are not touched.
+# _lease_tree_of_worktree <worktree> <admin> <start-commit> [<provisioned>] —
+# print the tree the worktree holds now, built in a throwaway index seeded
+# from <start-commit>: every change, except the paths provisioning wrote
+# (<provisioned>, the lease row's list from _lease_provisioned), which keep
+# their <start-commit> content — provisioned copies never merge (KTD9).
+# "none" excludes nothing; an empty list is a lease created before 4.0, which
+# recorded none, and keeps the old rule: all of .agents/ excluded. The
+# excluded paths are put back with `reset` after `add -A`, not left out with
+# an exclude pathspec: `add` exits 1 when an excluded path is gitignored (a
+# project that ignores .agents/, this one included), which failed every
+# collect there. The worktree's own index and HEAD are not touched.
 _lease_tree_of_worktree() {
-  local W=$1 A=$2 START=$3 IDXD TREE RC=0
+  local W=$1 A=$2 START=$3 PROV=${4:-} IDXD TREE RC=0 P NKEEP=1
+  local -a KEEP=(":(literal).agents")
+  case "$PROV" in
+    "") ;;
+    none) NKEEP=0 ;;
+    *)
+      KEEP=()
+      NKEEP=0
+      while IFS= read -r P; do
+        [ -n "$P" ] || continue
+        KEEP+=(":(literal)${P}")
+        NKEEP=$((NKEEP + 1))
+      done <<PROVISIONED_EOF
+$(printf '%s' "$PROV" | tr ' ' '\n')
+PROVISIONED_EOF
+      ;;
+  esac
   IDXD=$(mktemp -d "${TMPDIR:-/tmp}/triforge-snap.XXXXXX") || return 1
   _LEAD_GIT_INDEX="${IDXD}/index"
-  { _lgw "$W" "$A" read-tree "$START" && _lgw "$W" "$A" add -A -- . ':(exclude).agents' >/dev/null && TREE=$(_lgw "$W" "$A" write-tree); } || RC=1
+  # KEEP is expanded only when NKEEP > 0 (never empty there: bash 3.2, set -u).
+  { _lgw "$W" "$A" read-tree "$START" && _lgw "$W" "$A" add -A -- . >/dev/null \
+      && { [ "$NKEEP" -eq 0 ] || _lgw "$W" "$A" reset -q "$START" -- "${KEEP[@]}" >/dev/null; } \
+      && TREE=$(_lgw "$W" "$A" write-tree); } || RC=1
   _LEAD_GIT_INDEX=""
   rm -rf "$IDXD"
   [ "$RC" -eq 0 ] || return 1
@@ -1380,10 +1503,11 @@ _lease_tree_of_worktree() {
 # itself (against the contract) are kept under the snapshot, recorded in
 # builder_commits, and make lease_merge refuse (KTD19).
 _lease_snapshot() {
-  local T=$1 ROW WT ADMIN BASE BRANCH PREV BUILDER TIP BC="" C TREE PARENT SNAP
-  ROW=$(_ledger_get_row "$T" worktree admin_dir base_sha branch snapshot_sha builder_cli) || ROW=""
+  local T=$1 ROW WT ADMIN BASE BRANCH PREV BUILDER PROV TIP BC="" C TREE PARENT SNAP
+  ROW=$(_ledger_get_row "$T" worktree admin_dir base_sha branch snapshot_sha builder_cli provisioned) || ROW=""
   { IFS= read -r WT || true; IFS= read -r ADMIN || true; IFS= read -r BASE || true
-    IFS= read -r BRANCH || true; IFS= read -r PREV || true; IFS= read -r BUILDER || true; } <<SNAP_ROW_EOF
+    IFS= read -r BRANCH || true; IFS= read -r PREV || true; IFS= read -r BUILDER || true
+    IFS= read -r PROV || true; } <<SNAP_ROW_EOF
 ${ROW}
 SNAP_ROW_EOF
   if [ ! -d "$WT" ]; then
@@ -1405,7 +1529,7 @@ SNAP_ROW_EOF
   for C in $(_lgr rev-list "$TIP" "^${BASE}" 2>/dev/null); do
     [ "$C" = "$PREV" ] || BC="${BC:+${BC} }${C}"
   done
-  TREE=$(_lease_tree_of_worktree "$WT" "$ADMIN" "$TIP") || { echo "lease_collect: ERROR could not build the snapshot tree for ${T}" >&2; return 1; }
+  TREE=$(_lease_tree_of_worktree "$WT" "$ADMIN" "$TIP" "$PROV") || { echo "lease_collect: ERROR could not build the snapshot tree for ${T}" >&2; return 1; }
   PARENT=$BASE
   [ -z "$BC" ] || PARENT=$TIP
   SNAP=$(_lgw "$WT" "$ADMIN" commit-tree "$TREE" -p "$PARENT" -m "lease(${T}): builder output snapshot (${BUILDER:-unknown}), taken by the lead at collect") || {
@@ -1424,10 +1548,11 @@ SNAP_ROW_EOF
 # not touch the lead-owned ops/. Prints the refusal (naming the commit, the
 # moved ref or the files) and returns 1 on any mismatch.
 _lease_verify_snapshot() {
-  local T=$1 ROW WT ADMIN BASE BRANCH SNAP STREE TIP PARENT NOW LOG OPS
-  ROW=$(_ledger_get_row "$T" worktree admin_dir base_sha branch snapshot_sha snapshot_tree) || ROW=""
+  local T=$1 ROW WT ADMIN BASE BRANCH SNAP STREE PROV TIP PARENT NOW LOG OPS
+  ROW=$(_ledger_get_row "$T" worktree admin_dir base_sha branch snapshot_sha snapshot_tree provisioned) || ROW=""
   { IFS= read -r WT || true; IFS= read -r ADMIN || true; IFS= read -r BASE || true
-    IFS= read -r BRANCH || true; IFS= read -r SNAP || true; IFS= read -r STREE || true; } <<VERIFY_ROW_EOF
+    IFS= read -r BRANCH || true; IFS= read -r SNAP || true; IFS= read -r STREE || true
+    IFS= read -r PROV || true; } <<VERIFY_ROW_EOF
 ${ROW}
 VERIFY_ROW_EOF
   TIP=$(_lgr rev-parse --verify --quiet "refs/heads/${BRANCH}^{commit}" 2>/dev/null || true)
@@ -1445,7 +1570,7 @@ VERIFY_ROW_EOF
     echo "lease_merge: ERROR worktree missing: ${WT}" >&2
     return 1
   fi
-  NOW=$(_lease_tree_of_worktree "$WT" "$ADMIN" "$SNAP") || { echo "lease_merge: REFUSED — could not read ${T}'s worktree to compare it with the snapshot" >&2; return 1; }
+  NOW=$(_lease_tree_of_worktree "$WT" "$ADMIN" "$SNAP" "$PROV") || { echo "lease_merge: REFUSED — could not read ${T}'s worktree to compare it with the snapshot" >&2; return 1; }
   if [ "$NOW" != "$STREE" ]; then
     echo "lease_merge: REFUSED — ${T}'s worktree changed after collect and no longer matches the recorded snapshot (tree ${STREE:0:12}, now ${NOW:0:12}). Something wrote it after the review target was fixed; re-collect via lease_redispatch (KTD19)." >&2
     return 1
@@ -1473,9 +1598,11 @@ print(" ".join(bad[:10]) + (" ..." if len(bad) > 10 else ""))
 }
 
 # lease_create <task_id> <role> — resolve the builder from the roster
-# (resolve_role), carve the worktree + lease branch, provision skills, write
-# the leased row. Echoes task_id on success so callers can chain.
+# (resolve_role), carve the worktree + lease branch, provision skills (the
+# paths that wrote are recorded as `provisioned`, KTD9), write the leased
+# row. Echoes task_id on success so callers can chain.
 lease_create() {
+  _lead_only lease_create || return $?
   local TASK_ID=${1:?usage: lease_create <task_id> <role>}
   local ROLE=${2:?usage: lease_create <task_id> <role>}
   if ! _lease_valid_task_id "$TASK_ID"; then
@@ -1509,7 +1636,7 @@ CREATE_ROW_EOF
     return 1
   fi
   _lease_carve "$TASK_ID" "$WT" || return 1
-  _lease_provision_skills "$WT"
+  _lease_provision "$WT" || return 1
   NOW=$(date +%s)
   _ledger_update "$TASK_ID" \
     task_id="$TASK_ID" role="$ROLE" \
@@ -1566,26 +1693,34 @@ _lease_extract_stream() {
 # lead-provided task prompt (which carries the task row text and any
 # CONTRACTS.md slice — the builder never reads canonical ops/).
 #
-# The builder launches in the BACKGROUND with cwd = the worktree (subshell
-# cd), under _adapter_env's per-CLI allowlist (KTD-14). The invoke_* helpers
-# are shell functions and cannot cross env -i, so each lane composes the
-# adapter's command core directly: codex = exec + workspace-write + approval
-# never + stdin guard (codex's own sandbox then scopes writes to the
-# worktree cwd); antigravity = model pin + --add-dir + --print-timeout;
-# claude = -p --permission-mode acceptEdits (cwd IS the worktree, no
-# --add-dir needed). Exit code and KTD-9 class land in <out>.rc /
-# <out>.class for the single-writer lead to collect — the builder process
-# never touches the ledger.
+# The builder runs DETACHED (KTD10, scripts/lib/lease-wait.sh): _LEASE_LAUNCH_PY
+# starts it in its own session and process group, and _lease_builder_run runs
+# the lane command (_lease_lane_argv) from the worktree under _adapter_env's
+# per-CLI allowlist (KTD-14), so the worker marker and the no-push backstop
+# reach it as before. Exit code and KTD-9 class land in <out>.rc / <out>.class,
+# the builder process's own diagnostics in <out>.log, for the single-writer
+# lead to collect — the builder process never touches the ledger. The row
+# records state=building, pid, pgid, pid_started, lead_pid, lead_started,
+# output_file and heartbeat_deadline (the timeout plus _LEASE_DEADLINE_SLACK_S);
+# lease_wait waits on it. A launch record (<out>.launch) left by a dispatch
+# interrupted between the launch and that ledger write names a builder that may
+# still run in the worktree: it is stopped before the next launch. Variables the
+# lanes read from the environment (a CLI's credential keys, OPENCODE_PERMISSION)
+# must be exported: the builder process inherits the lead's environment, not
+# its shell.
 #
 # Test seam: TRIFORGE_TEST_BUILDER=<script path> replaces the real adapter
 # for lifecycle determinism — the script runs with the worktree as cwd and
 # the full prompt as its first argument, still under the recorded CLI's env
 # allowlist and timeout so the confinement/heartbeat paths stay honest.
 lease_dispatch() {
+  _lead_only lease_dispatch || return $?
   local TASK_ID=${1:?usage: lease_dispatch <task_id> <prompt> [timeout]}
   local PROMPT=${2:?usage: lease_dispatch <task_id> <prompt> [timeout]}
   local TIMEOUT=${3:-600}
-  local STATE CLI MODEL EFFORT ROLE WT OUT TOBIN NOW DEADLINE PID PID_START
+  local STATE CLI MODEL EFFORT ROLE WT OUT TOBIN NOW DEADLINE PID="" PGID="" PID_START="" LAUNCH="" BASH_BIN=/bin/bash
+  local TAB
+  TAB=$(printf '\t')
   _lease_ctx || return 1
   _lead_integrity_check lease_dispatch || return $?
   STATE=$(_ledger_get "$TASK_ID" state) || { echo "lease_dispatch: ERROR no lease row for task '${TASK_ID}' — run lease_create first" >&2; return 1; }
@@ -1646,7 +1781,18 @@ ${BRIEF_BODY}
 ## Task
 ${PROMPT}"
 
-  rm -f "$OUT" "${OUT}.rc" "${OUT}.class"
+  # A launch record here is a dispatch interrupted after the launcher released
+  # its builder but before the row reached building (a tool call cut off, a
+  # killed lead): that builder may still run in this worktree, so it is stopped
+  # first, through the fingerprinted group kill (a pid that now answers as
+  # another process is never signalled), and a second one never joins it.
+  if _lease_launch_read "$OUT"; then
+    if ! _lease_stop_one lease_dispatch "$TASK_ID" "$_LL_PID" "$_LL_PGID" "$_LL_START" "builder an interrupted lease_dispatch started" quiet; then
+      echo "lease_dispatch: ERROR a builder from an earlier, interrupted dispatch of ${TASK_ID} may still run in ${WT} (see above) — not launching another; stop it by hand, remove ${OUT}.launch, and dispatch again" >&2
+      return 1
+    fi
+  fi
+  rm -f "$OUT" "${OUT}.rc" "${OUT}.class" "${OUT}.log" "${OUT}.launch"
 
   # Lane-specific composition that must happen LEAD-SIDE, before env -i: the
   # Kimi builder definition's absolute plugin path (D-024), the Cursor binary and
@@ -1655,7 +1801,7 @@ ${PROMPT}"
   # model (agy — AE2 — and the optional three) fall back from an empty MODEL to
   # the CLI's shipped default, while claude and codex pass a model only when the
   # roster set one and keep MODEL as is; the env_keys reach _adapter_env through
-  # _ADAPTER_ENV_KEYS inside the dispatch subshell, so it does not read them
+  # _ADAPTER_ENV_KEYS inside the builder process, so it does not read them
   # again. The ledger records the id that was actually dispatched
   # (dispatched_model) beside the roster values (builder_model / builder_effort).
   local KIMI_AGENT_FILE="" CBIN="" DISPATCH_MODEL="$MODEL" REG_ROW="" REG_ENV_KEYS=""
@@ -1678,166 +1824,35 @@ ${PROMPT}"
   esac
   _ledger_update "$TASK_ID" dispatched_model="$DISPATCH_MODEL" || return 1
 
-  (
-    cd "$WT" || exit 97
-    _ADAPTER_ENV_KEYS=$REG_ENV_KEYS   # the registry read above; _adapter_env reads none
-    RC=0
-    CLASS_SET=0
-    if [ -n "${TRIFORGE_TEST_BUILDER:-}" ]; then
-      # Test seam (see function comment): deterministic fake builder.
-      _adapter_env "$CLI" "$TOBIN" "${TIMEOUT}s" "$TRIFORGE_TEST_BUILDER" "$FULL_PROMPT" > "$OUT" 2>&1 || RC=$?
-    else
-      case "$CLI" in
-        claude)
-          local -a CMD=(claude -p --permission-mode acceptEdits)
-          [ -n "$MODEL" ] && CMD+=(--model "$MODEL")
-          _adapter_env claude "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
-          ;;
-        codex)
-          # Mirrors invoke_codex's retry-safe core (sandbox, approval, model
-          # pin, stdin guard) — see the env -i note in the function comment.
-          # The two sandbox_workspace_write excludes drop codex's default
-          # temp-dir write allowance: lease worktrees live under TMPDIR, so
-          # without them a builder could cross into sibling worktrees or the
-          # lease root (R35: writes restricted to the lease worktree).
-          local -a CMD=(codex exec -s workspace-write -c 'approval_policy="never"'
-                        -c 'sandbox_workspace_write.exclude_tmpdir_env_var=true'
-                        -c 'sandbox_workspace_write.exclude_slash_tmp=true')
-          [ -n "$MODEL" ] && CMD+=(-m "$MODEL")
-          [ -n "$EFFORT" ] && CMD+=(-c "model_reasoning_effort=\"${EFFORT}\"")
-          _adapter_env codex "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
-          ;;
-        antigravity)
-          # JSON envelope (KTD2, D-032): exit 0 is not a completion signal on
-          # agy >= 1.1.20 — parse status/response/denied_actions instead. The
-          # prose lands in $OUT (what lease_collect prints), the streams in
-          # $OUT.raw / $OUT.err, the verdict in $OUT.status / $OUT.denied.
-          _adapter_env antigravity "$TOBIN" "${TIMEOUT}s" agy --model "$DISPATCH_MODEL" --add-dir "$WT" --print-timeout "${TIMEOUT}s" --output-format json -p "$FULL_PROMPT" < /dev/null > "${OUT}.raw" 2> "${OUT}.err" || RC=$?
-          if [ "$RC" -eq 0 ]; then
-            AGY_PRC=0
-            _agy_parse_envelope "${OUT}.raw" "$OUT" || AGY_PRC=$?
-            case "$AGY_PRC" in
-              0|12) : ;;
-              10) RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1
-                  echo "lease_dispatch: agy builder returned an empty response with denied actions: $(paste -sd, "${OUT}.denied" 2>/dev/null) — add the matching permissions.allow rule to ~/.gemini/antigravity-cli/settings.json (user tier)" >> "$OUT" ;;
-              *)  RC=1; INVOKE_FAILURE_CLASS="retryable"; CLASS_SET=1
-                  echo "lease_dispatch: agy builder returned an empty response (status=$(cat "${OUT}.status" 2>/dev/null)) — treated as failure, not review-ready" >> "$OUT" ;;
-            esac
-          else
-            cat "${OUT}.err" "${OUT}.raw" > "$OUT" 2>/dev/null || true
-          fi
-          ;;
-        opencode)
-          # R35-confined optional-tier builder (U11): raw `opencode run` with
-          # cwd = the worktree (the enclosing subshell cd'd there), under
-          # _adapter_env opencode — which allowlists ONLY OPENROUTER_API_KEY
-          # (KTD-14), so no cross-provider credential leak. No --auto (OC-06:
-          # denies do not survive it) and no invoke_opencode (a shell function
-          # cannot cross env -i); the confinement contract rides in FULL_PROMPT
-          # like every other lane. Shipped default (DISPATCH_MODEL, from the
-          # registry when the roster carries no pin) is the OpenRouter GLM, so a
-          # live build AUTH-FAILs until the provider is connected — that failure
-          # is deterministic and the lead sees it via <out>.class (no requeue).
-          # Effort -> --variant (OC-05 best-effort), guarded on a non-empty effort
-          # exactly like the codex case guards model_reasoning_effort. The lease
-          # path has no retry, so a provider that rejects the variant surfaces as a
-          # KTD-9-classified failure the lead requeues — same as any other lane.
-          # OpenCode V2 guard (D-049): V2 ignores OPENCODE_PERMISSION and runs
-          # a shared background service outside env -i, so a V2 binary (or one
-          # whose version can't be read — fail-closed) never dispatches — deterministic refusal naming the V1 pin, recorded in
-          # <out>.class like the agy denied-actions arm (no requeue).
-          if ! _opencode_v2_check opencode; then
-            _opencode_v2_refusal lease_dispatch > "$OUT"
-            RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1
-          else
-            local -a CMD=(opencode run --format json -m "$DISPATCH_MODEL")
-            [ -n "$EFFORT" ] && CMD+=(--variant "$EFFORT")
-            _adapter_env opencode "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
-          fi
-          ;;
-        kimi)
-          # R35-confined optional-tier builder (U12): raw `kimi -p` with cwd =
-          # the worktree (the enclosing subshell cd'd there), under _adapter_env
-          # kimi — which allowlists ONLY KIMI_* (KTD-14), so no cross-provider
-          # credential leak. Telemetry off (R25) via the inner `env`. --skills-dir
-          # .agents/skills when present (KIMI-04). Kimi has no per-tool sandbox
-          # flag and -p uses the auto policy, so confinement is the worktree + env
-          # allowlist; the role brief rides in FULL_PROMPT (injection — KIMI-03
-          # has no --agent, so no invoke_kimi either: a shell function cannot
-          # cross env -i). Shipped default (DISPATCH_MODEL, from the registry
-          # when the roster carries no pin) is kimi-code/k3 (the OAuth-managed
-          # alias, D-024), so a live build AUTH-FAILs until kimi is signed in —
-          # that failure is deterministic and the lead sees it via <out>.class
-          # (no requeue). The builder definition rides as --agent-file with the
-          # ABSOLUTE plugin path composed by the lead shell (KIMI_AGENT_FILE,
-          # below) so it survives env -i; no --skills-dir (it would replace
-          # Kimi's native .agents/skills discovery — KIMI-04).
-          # -p LAST (commander.js consumes the next token as -p's value; see the
-          # invoke_kimi note) — prompt right after -p.
-          local -a CMD=(kimi --output-format stream-json -m "$DISPATCH_MODEL")
-          [ -n "$KIMI_AGENT_FILE" ] && CMD+=(--agent-file "$KIMI_AGENT_FILE")
-          _adapter_env kimi "$TOBIN" "${TIMEOUT}s" env KIMI_DISABLE_TELEMETRY=1 "${CMD[@]}" -p "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
-          ;;
-        cursor)
-          # R35-confined optional-tier builder (U13): raw `cursor-agent -p` with
-          # cwd = the worktree (the enclosing subshell cd'd there), under
-          # _adapter_env cursor — which allowlists ONLY CURSOR_API_KEY (KTD-14),
-          # so no cross-provider credential leak. --trust bypasses the
-          # workspace-trust prompt (mandatory headless, CUR-04); --force applies
-          # edits without confirmation (builder role, inside the worktree). Model
-          # pinned to the suffixed id composed by _cursor_model_for_effort from
-          # the roster model + effort (D-025; default cursor-grok-4.6-xhigh),
-          # NEVER Auto (ledger attribution needs a named model). Binary resolved
-          # lead-side by _cursor_bin (CBIN — cursor-agent first, verified `agent`
-          # fallback) and exec'd by absolute path inside env -i. Confinement is
-          # the worktree + env allowlist, NOT --sandbox (CUR-07: --sandbox
-          # enabled did not confine — an absolute-path write escaped). -p is a
-          # BOOLEAN flag (unlike kimi's -p); the prompt is the TRAILING
-          # POSITIONAL (verified live 2026-07-18), so it comes LAST. No
-          # invoke_cursor (a shell function cannot cross env -i; the role brief
-          # rides in FULL_PROMPT via injection — cursor has no headless --agent
-          # selector). A live build AUTH-FAILs until cursor-agent is logged in —
-          # that failure is deterministic and the lead sees it via <out>.class.
-          local -a CMD=("$CBIN" -p --output-format stream-json --model "$DISPATCH_MODEL" --trust --force)
-          _adapter_env cursor "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
-          ;;
-        *)
-          echo "lease_dispatch: ERROR builder CLI '${CLI}' has no dispatch arm here — not integrated. Registered CLIs: $(_known_clis '<registry unreadable>')." > "$OUT"
-          RC=95
-          ;;
-      esac
-    fi
-    # Only a nonzero exit has a failure class (matches invoke_antigravity /
-    # invoke_codex): a clean run is class=none, so lease_collect never reads a
-    # spurious 'retryable' off a builder that actually succeeded.
-    if [ "$RC" -eq 0 ]; then
-      INVOKE_FAILURE_CLASS="none"
-      # The opencode / kimi / cursor lanes answer as a JSON event stream; the
-      # typed `Status:` report (KTD11) lives inside it as escaped text, so a
-      # line-anchored parser can never see it. Extract the prose into $OUT
-      # (raw stream kept in ${OUT}.raw); an extraction miss leaves $OUT as is.
-      _lease_extract_stream "$CLI" "$OUT"
-    elif [ "${CLASS_SET:-0}" -ne 1 ]; then
-      _classify_invoke_failure "$RC" "$OUT"
-    fi
-    printf '%s\n' "$RC" > "${OUT}.rc"
-    printf '%s\n' "${INVOKE_FAILURE_CLASS:-none}" > "${OUT}.class"
-    exit "$RC"
-  ) &
-  PID=$!
-  # The recorded pid's start time (ps lstart, runs of spaces squeezed), so
-  # lease_collect and lease_heartbeat_check can tell this dispatch subshell
-  # from a later process the OS gave the same pid. When the subshell already
-  # exited before ps ran, a marker no lstart can equal is recorded, so neither
-  # ever signals that pid (an EMPTY value is a pre-3.3.3 row, which keeps the
-  # plain liveness test). A string, not an int key.
-  PID_START=$(ps -o lstart= -p "$PID" 2>/dev/null | tr -s ' ' || true)
-  if [ -z "$PID_START" ]; then PID_START="exited-before-record"; fi
+  # Detached launch (KTD10): the builder process is a fresh bash that sources
+  # this loader and runs _lease_builder_run with the composition above, in its
+  # own session and process group, released only once its pgid and start time
+  # are read. TRIFORGE_TEST_BUILDER rides as an argument, so a shell variable
+  # that was never exported still reaches it.
+  if [ ! -x "$BASH_BIN" ]; then BASH_BIN=$(command -v bash 2>/dev/null || printf 'bash'); fi
+  LAUNCH=$(python3 -c "$_LEASE_LAUNCH_PY" "${OUT}.log" "$BASH_BIN" -c "$_LEASE_BUILDER_SH" triforge-lease-builder \
+             "${_TRIFORGE_SCRIPTS_DIR}/invoke-external.sh" "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$KIMI_AGENT_FILE" \
+             "$CBIN" "$TOBIN" "$TIMEOUT" "$OUT" "$WT" "$REG_ENV_KEYS" "${TRIFORGE_TEST_BUILDER:-}" "$FULL_PROMPT") || LAUNCH=""
+  { IFS="$TAB" read -r PID PGID PID_START || true; } <<LAUNCH_EOF
+${LAUNCH}
+LAUNCH_EOF
+  case "${PID}:${PGID}" in
+    *[!0-9:]*|:*|*:) echo "lease_dispatch: ERROR could not start the builder for ${TASK_ID} in its own session (see above); the lease stays leased" >&2; return 1 ;;
+  esac
+  # The lead process this dispatch belongs to: when it is gone at the next
+  # reconcile, the lease went through a lead exit (_lease_sweep_one).
+  _lease_lead_proc
 
   NOW=$(date +%s)
-  DEADLINE=$((NOW + TIMEOUT))
-  _ledger_update "$TASK_ID" state=building pid="$PID" pid_started="$PID_START" output_file="$OUT" heartbeat_deadline="$DEADLINE" || return 1
-  echo "lease_dispatch: task=${TASK_ID} builder=${CLI} pid=${PID} timeout=${TIMEOUT}s output=${OUT}" >&2
+  DEADLINE=$((NOW + TIMEOUT + _LEASE_DEADLINE_SLACK_S))
+  if ! _ledger_update "$TASK_ID" state=building pid="$PID" pgid="$PGID" pid_started="$PID_START" lead_pid="$_LEAD_PID" lead_started="$_LEAD_STARTED" \
+         output_file="$OUT" heartbeat_deadline="$DEADLINE"; then
+    _lease_kill_builder "$PID" "$PGID" "$PID_START"   # unrecorded, so never left running
+    return 1
+  fi
+  # Recorded: the launch record has done its job (lease_stop reads the row).
+  rm -f "${OUT}.launch"
+  echo "lease_dispatch: task=${TASK_ID} builder=${CLI} pid=${PID} pgid=${PGID} (detached) timeout=${TIMEOUT}s output=${OUT}" >&2
 }
 
 # lease_redispatch <task_id> <prompt-with-findings> [timeout] — the review ->
@@ -1850,6 +1865,7 @@ ${PROMPT}"
 # the "Maximum 3 review cycles per task" cap. Builder, worktree, and roster
 # entry are unchanged; the reviewer's findings ride in <prompt-with-findings>.
 lease_redispatch() {
+  _lead_only lease_redispatch || return $?
   local TASK_ID=${1:?usage: lease_redispatch <task_id> <prompt-with-findings> [timeout]}
   local PROMPT=${2:?usage: lease_redispatch <task_id> <prompt-with-findings> [timeout]}
   local TIMEOUT=${3:-600}
@@ -1881,125 +1897,6 @@ lease_redispatch() {
   lease_dispatch "$TASK_ID" "$PROMPT" "$TIMEOUT"
 }
 
-# lease_heartbeat_check [task_id] — sweep building leases (or just one). The
-# integrity check runs first (KTD18): a change is escalated and returns 44.
-# Builder alive = the recorded pid answers kill -0 OR the output file was
-# modified within the grace window (TRIFORGE_HEARTBEAT_GRACE, default 60s —
-# covers a dead wrapper whose work just flushed). A dead pid that left
-# <out>.rc is NOT an orphan — the builder finished; run lease_collect. Dead
-# and stale, or alive past heartbeat_deadline (hung), goes state=orphaned
-# and straight into lease_reclaim's safe prune (KTD-9 timeout class).
-lease_heartbeat_check() {
-  local ONLY=${1:-}
-  local LEDGER GRACE NOW TASKS TASK
-  _lease_ctx || return 1
-  LEDGER=$_LEASE_LEDGER
-  if [ ! -f "$LEDGER" ]; then
-    echo "lease_heartbeat_check: no lease ledger at ${LEDGER} — nothing to sweep" >&2
-    return 0
-  fi
-  _lead_integrity_check lease_heartbeat_check || return $?
-  GRACE=${TRIFORGE_HEARTBEAT_GRACE:-60}
-  NOW=$(date +%s)
-  TASKS=$(LEDGER_FILE="$LEDGER" python3 -c "
-import os, sys
-try:
-    import tomllib
-except ImportError:
-    try:
-        import tomli as tomllib
-    except ImportError:
-        sys.exit(0)
-with open(os.environ['LEDGER_FILE'], 'rb') as f:
-    data = tomllib.load(f)
-for t, r in sorted(data.get('lease', {}).items()):
-    if isinstance(r, dict) and r.get('state') == 'building':
-        print(t)
-")
-  local SWEPT=0 ORPHANED=0 UNVERIFIED=0
-  # $TASKS is NEWLINE-separated. Iterate with read, NOT `for TASK in $TASKS`:
-  # under zsh (the caller's shell on macOS) an unquoted $TASKS is not
-  # word-split, so `for` would run once on the whole "taskA\ntaskB" blob and
-  # corrupt the sweep for 2+ concurrent leases — the parallel-wave case. The
-  # heredoc (not a `printf | while` pipe) keeps the loop in THIS shell so the
-  # SWEPT/ORPHANED counters persist.
-  while IFS= read -r TASK; do
-    [ -z "$TASK" ] && continue
-    if [ -n "$ONLY" ] && [ "$TASK" != "$ONLY" ]; then
-      continue
-    fi
-    SWEPT=$((SWEPT + 1))
-    local PID OUT DEADLINE ALIVE FRESH AGE
-    PID=$(_ledger_get "$TASK" pid)
-    OUT=$(_ledger_get "$TASK" output_file)
-    if [ -z "$PID" ] || [ -z "$OUT" ]; then
-      # Could not verify: a building row with no pid/output to judge liveness
-      # by (ledger written by an older version, or a crash between dispatch
-      # and its ledger update). Report it, leave it alone — never guess.
-      echo "lease_heartbeat_check: ${TASK} building but pid/output_file missing from the ledger — cannot verify liveness (degraded); inspect and reclaim by hand" >&2
-      UNVERIFIED=$((UNVERIFIED + 1))
-      continue
-    fi
-    DEADLINE=$(_ledger_get "$TASK" heartbeat_deadline)
-    ALIVE=0
-    [ -n "$PID" ] && [ "$PID" -gt 0 ] 2>/dev/null && kill -0 "$PID" 2>/dev/null && ALIVE=1
-    # A live pid whose start time differs from the one lease_dispatch recorded
-    # is a process the OS reused the pid for, not the builder: treat the
-    # builder as gone, and never signal it. A 3.3.3 row whose subshell had
-    # exited before its start time was read carries the marker
-    # "exited-before-record", which no lstart equals. Rows from before 3.3.3
-    # carry no pid_started and keep the plain liveness test.
-    if [ "$ALIVE" -eq 1 ]; then
-      local PID_STARTED PID_NOW
-      PID_STARTED=$(_ledger_get "$TASK" pid_started 2>/dev/null || true)
-      if [ -n "$PID_STARTED" ]; then
-        PID_NOW=$(ps -o lstart= -p "$PID" 2>/dev/null | tr -s ' ' || true)
-        if [ "$PID_NOW" != "$PID_STARTED" ]; then ALIVE=0; fi
-      fi
-    fi
-    if [ "$ALIVE" -eq 1 ]; then
-      if [ "$NOW" -le "${DEADLINE:-0}" ]; then
-        echo "lease_heartbeat_check: ${TASK} building (pid ${PID} alive, deadline in $((DEADLINE - NOW))s)" >&2
-        continue
-      fi
-      # Hung past its window: still breathing but the lease is expired —
-      # kill, then orphan (the launcher's own timeout should have fired;
-      # this is the belt to that suspender).
-      echo "lease_heartbeat_check: ${TASK} EXPIRED — pid ${PID} alive past heartbeat_deadline; killing the builder process tree and orphaning" >&2
-      _kill_tree "$PID" TERM
-      sleep 1
-      _kill_tree "$PID" KILL
-    else
-      if [ -n "$OUT" ] && [ -f "${OUT}.rc" ]; then
-        echo "lease_heartbeat_check: ${TASK} builder exited (rc=$(cat "${OUT}.rc" 2>/dev/null || true)) — run: lease_collect ${TASK}" >&2
-        continue
-      fi
-      FRESH=0
-      AGE=999999
-      if [ -n "$OUT" ] && [ -f "$OUT" ]; then
-        AGE=$(OUT_FILE="$OUT" python3 -c "
-import os, time
-print(int(time.time() - os.path.getmtime(os.environ['OUT_FILE'])))
-" 2>/dev/null || echo 999999)
-        [ "$AGE" -lt "$GRACE" ] 2>/dev/null && FRESH=1
-      fi
-      if [ "$FRESH" -eq 1 ]; then
-        echo "lease_heartbeat_check: ${TASK} pid ${PID} gone but output active ${AGE}s ago (grace ${GRACE}s) — leaving as building" >&2
-        continue
-      fi
-      echo "lease_heartbeat_check: ${TASK} ORPHANED — pid ${PID} dead, no exit record, output stale; reclaiming" >&2
-    fi
-    ORPHANED=$((ORPHANED + 1))
-    _ledger_update "$TASK" state=orphaned || return 1
-    lease_reclaim "$TASK" || true
-  done <<HEARTBEAT_TASKS
-$TASKS
-HEARTBEAT_TASKS
-  echo "lease_heartbeat_check: swept ${SWEPT} building lease(s), orphaned ${ORPHANED}, unverifiable ${UNVERIFIED}" >&2
-  [ "$UNVERIFIED" -gt 0 ] && return "$_RC_DEGRADED"
-  return 0
-}
-
 # Refusal helper for lease_reclaim: loud, escalates the row, deletes NOTHING.
 # Returns 0 so callers can '\; return 1' without tripping errexit.
 _lease_refuse_prune() {
@@ -2025,6 +1922,7 @@ _lease_refuse_prune() {
 #   orphaned + requeue_count 1+ -> escalated  (KTD-9: requeue once, loudly)
 #   merged / anything else      -> state kept (prune only)
 lease_reclaim() {
+  _lead_only lease_reclaim || return $?
   local TASK_ID=${1:?usage: lease_reclaim <task_id>}
   local ROOT WT_STORED WT_CANON STATE RQ
   _lease_ctx || return 1
@@ -2084,6 +1982,7 @@ lease_reclaim() {
 # previous_builder via resolve_role's RESOLVE_ROLE_EXCLUDE hook, carves a
 # fresh worktree, and re-leases. requeue_count >= 1 escalates instead.
 lease_requeue() {
+  _lead_only lease_requeue || return $?
   local TASK_ID=${1:?usage: lease_requeue <task_id>}
   local STATE RQ PREV ROLE OUT WT RESOLVED CLI MODEL EFFORT
   _lease_ctx || return 1
@@ -2116,7 +2015,7 @@ lease_requeue() {
     return 1
   fi
   _lease_carve "$TASK_ID" "$WT" || return 1
-  _lease_provision_skills "$WT"
+  _lease_provision "$WT" || return 1
   _ledger_update "$TASK_ID" \
     state=leased builder_cli="$CLI" builder_model="$MODEL" builder_effort="$EFFORT" \
     previous_builder="$PREV" requeue_count=1 pid=0 heartbeat_deadline=0 reason="" \
@@ -2187,8 +2086,9 @@ _lease_copy_discoveries() {
 #                                        sibling: mark orphaned -> reclaim ->
 #                                        requeue) or escalates after one repeat
 lease_collect() {
+  _lead_only lease_collect || return $?
   local TASK_ID=${1:?usage: lease_collect <task_id>}
-  local STATE PID="" OUT="" PID_STARTED="" PID_NOW ROW RC CLASS
+  local STATE PID="" OUT="" PID_STARTED="" PGID="" ROW RC CLASS
   _lease_ctx || return 1
   # Before anything reads the row or touches the worktree: a builder that
   # planted git config, hooks, a pointer redirect or a ledger edit is caught
@@ -2199,13 +2099,13 @@ lease_collect() {
     echo "lease_collect: ERROR task ${TASK_ID} is in state '${STATE}' (want building)" >&2
     return 1
   fi
-  ROW=$(_ledger_get_row "$TASK_ID" pid output_file pid_started) || ROW=""
-  { IFS= read -r PID || true; IFS= read -r OUT || true; IFS= read -r PID_STARTED || true; } <<COLLECT_ROW_EOF
+  ROW=$(_ledger_get_row "$TASK_ID" pid output_file pid_started pgid) || ROW=""
+  { IFS= read -r PID || true; IFS= read -r OUT || true; IFS= read -r PID_STARTED || true; IFS= read -r PGID || true; } <<COLLECT_ROW_EOF
 ${ROW}
 COLLECT_ROW_EOF
   if [ ! -f "${OUT}.rc" ]; then
-    if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-      echo "lease_collect: task ${TASK_ID} still running (pid ${PID}) — wait, or lease_heartbeat_check to enforce the deadline" >&2
+    if [ "$(_lease_proc_state "$PID" "$PID_STARTED" "$PGID")" = alive ]; then
+      echo "lease_collect: task ${TASK_ID} still running (pid ${PID}) — lease_wait ${TASK_ID}, which also enforces the deadline" >&2
       return 1
     fi
     echo "lease_collect: task ${TASK_ID} builder died without an exit record — silent death, taking the orphan path" >&2
@@ -2222,24 +2122,22 @@ COLLECT_ROW_EOF
     _ledger_update "$TASK_ID" report_status="$REPORT" || return 1
     case "$REPORT" in
       DONE|DONE_WITH_CONCERNS)
-        # The builder is finished: sweep anything it left running, then take
-        # the lead's snapshot, which the review, the merge and any approval
-        # bind to (KTD3). Best-effort until U13 detaches builders into their
-        # own process group: the sweep is the recorded pid's tree, and by now
-        # (.rc exists) the dispatch subshell behind that pid has exited, so a
-        # live pid may be one the OS reused for an unrelated process. It is
-        # signalled only while it still has the start time lease_dispatch
-        # recorded (pid_started); a reused pid is never killed.
-        if [ -n "$PID" ] && [ "$PID" -gt 0 ] 2>/dev/null && kill -0 "$PID" 2>/dev/null; then
-          PID_NOW=$(ps -o lstart= -p "$PID" 2>/dev/null | tr -s ' ' || true)
-          if [ -n "$PID_STARTED" ] && [ "$PID_NOW" = "$PID_STARTED" ]; then
-            _kill_tree "$PID" TERM
-          fi
+        # The builder is finished, then the lead takes its snapshot, which the
+        # review, the merge and any approval bind to (KTD3). The detached
+        # builder process swept its own process group before it wrote the
+        # exit record (KTD10); a leader still finishing its exit is sent TERM
+        # here, and only while it still answers with the recorded start time
+        # and group: a reused pid is never signalled. A row with no recorded
+        # start time (from before 3.3.3) is never signalled here: its pid can
+        # only be tested for liveness, and by now it may be anyone's. A row
+        # from before KTD10 (no pgid) gets the old sweep of the pid's own tree,
+        # under the same start-time test.
+        if [ -n "$PID_STARTED" ]; then
+          _lease_kill_builder "$PID" "$PGID" "$PID_STARTED" term
         fi
         # Once more, right before the snapshot's `add -A` runs the clean
-        # filters: a builder process still alive between the check above and
-        # here (a daemonized child the sweep does not reach until U13) could
-        # have planted config in that window.
+        # filters: a builder process that left its process group (its own
+        # setsid) and is still alive could have planted config in that window.
         _lead_integrity_check lease_collect || return $?
         if ! _lease_snapshot "$TASK_ID"; then
           _ledger_update "$TASK_ID" state=escalated reason="collect snapshot failed (see stderr)" || true
@@ -2313,6 +2211,7 @@ COLLECT_ROW_EOF
 # pinning a DIFFERENT one is refused. Refuses reviewer == builder_cli (AE3).
 # Call it after lease_collect (state=review), before reviewing.
 lease_pin_reviewer() {
+  _lead_only lease_pin_reviewer || return $?
   local TASK_ID=${1:?usage: lease_pin_reviewer <task_id> <reviewer>}
   local REVIEWER=${2:?usage: lease_pin_reviewer <task_id> <reviewer>}
   local BUILDER PINNED
@@ -2353,6 +2252,7 @@ lease_pin_reviewer() {
 # the merge commit. Squash conflicts leave a dirty index: reset --merge, state
 # stays review, the lead resolves manually.
 lease_merge() {
+  _lead_only lease_merge || return $?
   local TASK_ID=${1:?usage: lease_merge <task_id> <reviewer-identity>}
   local REVIEWER=${2:-}
   local STATE BUILDER WT BRANCH SHA PINNED SNAP
@@ -2481,8 +2381,8 @@ _RC_LEASE_ESCALATED=43
 # stays `building`, never review-ready), and lease_heartbeat_check when a row
 # lacks the pid/output it needs to judge liveness. Deliberately outside the
 # resolve_role roster errors (2–6), the invoke_* / timeout codes (1, 124–127),
-# and the gate codes (40–44, 96; 44 = _RC_LEASE_INTEGRITY, defined with the
-# integrity check).
+# and the gate codes (40–45, 96; 44 = _RC_LEASE_INTEGRITY, defined with the
+# integrity check; 45 = _RC_LEAD_ONLY, defined in scripts/lib/common.sh).
 _RC_DEGRADED=80
 
 # _lease_is_framework_checkout <repo> <default-branch> — 0 when <repo> is the
@@ -2553,6 +2453,7 @@ sys.exit(0 if isinstance(data, dict) and data.get("name") == "agent-triforge" el
 # Atomic where it matters: the default branch is never touched unless the gate
 # passes — the block path leaves the tree exactly as it found it.
 lease_promote() {
+  _lead_only lease_promote || return $?
   local REPO DEFAULT_BRANCH CURRENT_BRANCH INTEGRATION_BRANCH
   _lease_ctx || { echo "lease_promote: ERROR not inside a git repository" >&2; return 1; }
   REPO=$_LEASE_REPO

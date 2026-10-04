@@ -1,0 +1,28 @@
+{
+  "name": "agent-triforge",
+  "description": "Agent Triforge's portable skills for Devin: codebase mapping, plan writing, shadow-path tracing, wave orchestration, review synthesis, iterative refinement, verification before completion, knowledge compounding, session continuity and scope cutting. The at-* lead workflows ship only with the Claude Code and Codex plugin.",
+  "author": {
+    "name": "Ninety2UA",
+    "url": "https://github.com/Ninety2UA"
+  },
+  "repository": "https://github.com/Ninety2UA/agent-triforge",
+  "license": "MIT",
+  "keywords": [
+    "agent-triforge",
+    "skills",
+    "wave-orchestration",
+    "review-synthesis"
+  ],
+  "skills": [
+    "codebase-mapping",
+    "iterative-refinement",
+    "knowledge-compounding",
+    "review-synthesis",
+    "scope-cutting",
+    "session-continuity",
+    "shadow-path-tracing",
+    "verification-before-completion",
+    "wave-orchestration",
+    "writing-plans"
+  ]
+}

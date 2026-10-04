@@ -51,7 +51,8 @@
 #      not copy: hooks/handlers/session-start.sh carries no SHIPPED / ROLE_CLI
 #      literal and references _TRIFORGE_CLIS_PY; _adapter_env in
 #      scripts/lib/lease.sh reads TRIFORGE_ENV_BASE + cli_field and names no
-#      base or credential key in code; lease.sh code names no shipped model;
+#      base or credential key in code; lease.sh and lease-wait.sh code name no
+#      shipped model;
 #      each lane's `${<model_env>:-…}` default in scripts/lib/*.sh equals the
 #      registry model; _lane_run in scripts/probe-capabilities.sh reads
 #      REG_ENV_BASE and the harness's CDX_MODEL pin equals the codex model.
@@ -129,6 +130,22 @@
 #      the names the session-start banner (hooks/handlers/session-start.sh)
 #      and skills/at-status/references/status-template.md enumerate equal the
 #      set of skills/at-*/ directories (the diff is printed).
+#  10. Other-harness skill manifests (R22) — skills/.devin-plugin/plugin.json
+#      (Devin; plugin root skills/, installed as <repo>#skills) and the root
+#      package.json "pi" key (Pi) each list exactly the portable skill
+#      directories, one explicit path per skill, spelled exactly as the
+#      directory: an at-* entry in any case, a missing portable skill, a path
+#      that is not a portable skill directory (a case alias such as AT-BUILD,
+#      which a case-insensitive disk resolves, included), a glob or !/+/-
+#      pattern, and a duplicate all fail. Each manifest carries only
+#      metadata and its skill list — no version (check 1 covers the release
+#      manifests), and nothing a harness would run or obey (Devin's plugin
+#      dependencies and MCP servers, npm scripts and dependencies, Pi
+#      extensions, prompts or themes). Its name equals .claude-plugin's. No
+#      root .devin-plugin/ may exist, and skills/ carries none of the names
+#      Devin loads from a plugin root besides skills (AGENTS.md, rules/,
+#      agents/, hooks.json, hooks/, .mcp.json, …): from the repo root Devin
+#      would also load this AGENTS.md as an always-on rule and run hooks/.
 #
 # Exit codes: 0 every check passed; 1 at least one check failed; 2 bad flag.
 set -euo pipefail
@@ -247,7 +264,7 @@ fi
 # --- 3. registry drift (KTD7) ------------------------------------------------
 DRIFT_RC=0
 VV_REGISTRY="scripts/lib/registry.sh" VV_SRC="scripts/lib/roster.sh" VV_ROSTER="templates/ops/roster.toml" \
-VV_HOOK="hooks/handlers/session-start.sh" VV_LEASE="scripts/lib/lease.sh" VV_PROBE="scripts/probe-capabilities.sh" \
+VV_HOOK="hooks/handlers/session-start.sh" VV_LEASE="scripts/lib/lease.sh" VV_LEASE_WAIT="scripts/lib/lease-wait.sh" VV_PROBE="scripts/probe-capabilities.sh" \
 VV_LOADER="scripts/invoke-external.sh" VV_LOCATOR="scripts/skill-locator/locate-triforge.sh" \
 VV_LIBDIR="scripts/lib" python3 - <<'PYEOF' || DRIFT_RC=$?
 import ast
@@ -548,13 +565,20 @@ if lease is not None and clis is not None:
                 if re.search(r"\b" + re.escape(k), ln):
                     fails.append(lease_path + ":" + str(base_line + i) + ": _adapter_env names credential key " + k + " in code — keys come from the registry env_keys")
                     lease_fail = True
-    for n, ln in code_lines(lease):
-        for cli, model in models.items():
-            if model and model in ln:
-                fails.append(lease_path + ":" + str(n) + ": shipped " + cli + " model " + repr(model) + " spelled out in code — read it with cli_field " + cli + " model")
-                lease_fail = True
+    # the lease subsystem spans lease.sh and lease-wait.sh (the lane composer
+    # _lease_lane_argv lives in the second): neither spells a shipped model
+    wait_path = os.environ["VV_LEASE_WAIT"]
+    for scan_path, scan in ((lease_path, lease), (wait_path, read(wait_path))):
+        if scan is None:
+            lease_fail = True
+            continue
+        for n, ln in code_lines(scan):
+            for cli, model in models.items():
+                if model and model in ln:
+                    fails.append(scan_path + ":" + str(n) + ": shipped " + cli + " model " + repr(model) + " spelled out in code — read it with cli_field " + cli + " model")
+                    lease_fail = True
     if not lease_fail:
-        oks.append(lease_path + " _adapter_env reads TRIFORGE_ENV_BASE + env_keys; no model literal in code")
+        oks.append(lease_path + " _adapter_env reads TRIFORGE_ENV_BASE + env_keys; no model literal in " + lease_path + " or " + wait_path + " code")
 
 # --- the lanes: ${<model_env>:-default} equals the registry model -------------
 if clis is not None:
@@ -1063,6 +1087,118 @@ for line in fails:
 sys.exit(1 if fails else 0)
 PYEOF
 if [ "$LEADWF_RC" -ne 0 ]; then
+  FAILED_CHECKS=$((FAILED_CHECKS + 1))
+fi
+
+# --- 10. other-harness skill manifests (R22) ---------------------------------
+MANIFESTS_RC=0
+python3 - <<'PYEOF' || MANIFESTS_RC=$?
+import json
+import os
+import re
+import sys
+
+DEVIN = "skills/.devin-plugin/plugin.json"
+PI = "package.json"
+fails = []
+
+portable = sorted(d for d in os.listdir("skills")
+                  if not d.casefold().startswith(("at-", ".", "_")) and os.path.isfile(os.path.join("skills", d, "SKILL.md")))
+
+
+def load(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        fails.append(path + ": unreadable (" + str(exc) + ")")
+        return None
+    if not isinstance(data, dict):
+        fails.append(path + ": not a JSON object")
+        return None
+    return data
+
+
+def only_keys(where, data, allowed):
+    extra = sorted(set(data) - set(allowed))
+    if extra:
+        fails.append(where + ": carries " + ", ".join(extra) + " — only " + ", ".join(allowed) + " belong here")
+
+
+def check_list(where, entries, prefix):
+    """entries must name each portable skill directory exactly once, as <prefix><name>, and nothing else.
+
+    Names compare exactly with the directory listing, never through the disk: on
+    a case-insensitive volume skills/AT-BUILD/SKILL.md opens skills/at-build/."""
+    if not isinstance(entries, list) or not all(isinstance(e, str) for e in entries):
+        fails.append(where + ": must be a list of paths, one per portable skill directory")
+        return
+    names = []
+    for e in entries:
+        if re.search(r"[*?\[\]{}]", e) or e[:1] in ("!", "+", "-"):
+            fails.append(where + ": '" + e + "' is a pattern — list each portable skill directory explicitly, so no glob can reach an at-* workflow")
+            continue
+        norm = e[2:] if e.startswith("./") else e
+        norm = norm.rstrip("/")
+        name = norm[len(prefix):] if norm.startswith(prefix) else ""
+        if not name or "/" in name:
+            fails.append(where + ": '" + e + "' is not " + prefix + "<skill> (one skill directory directly under skills/)")
+        elif name.casefold().startswith("at-"):
+            fails.append(where + ": '" + e + "' is a lead workflow — at-* workflows reach a lead only from its plugin install (KTD12)")
+        elif name not in portable:
+            alias = [p for p in portable if p.casefold() == name.casefold()]
+            if alias:
+                fails.append(where + ": '" + e + "' is not spelled as the skill directory " + alias[0] + " — list the exact name")
+            else:
+                fails.append(where + ": '" + e + "' is not a portable skill directory (one of: " + ", ".join(portable) + ")")
+        else:
+            names.append(name)
+    dup = sorted(set(n for n in names if names.count(n) > 1))
+    missing = sorted(set(portable) - set(names))
+    if dup:
+        fails.append(where + ": lists " + ", ".join(dup) + " more than once")
+    if missing:
+        fails.append(where + ": misses the portable skill(s) " + ", ".join(missing))
+
+
+meta = ("name", "description", "author", "homepage", "repository", "license", "keywords")
+claude = load(".claude-plugin/plugin.json") or {}
+
+devin = load(DEVIN)
+if devin is not None:
+    only_keys(DEVIN, devin, meta + ("skills",))
+    check_list(DEVIN + " skills", devin.get("skills"), "")
+    if devin.get("name") != claude.get("name"):
+        fails.append(DEVIN + ": name " + repr(devin.get("name")) + " differs from .claude-plugin/plugin.json's " + repr(claude.get("name")))
+
+pi = load(PI)
+if pi is not None:
+    only_keys(PI, pi, meta + ("private", "pi"))
+    pi_key = pi.get("pi")
+    if not isinstance(pi_key, dict):
+        fails.append(PI + ": no \"pi\" object (Pi's package manifest key)")
+    else:
+        only_keys(PI + " pi", pi_key, ("skills",))
+        check_list(PI + " pi.skills", pi_key.get("skills"), "skills/")
+    if pi.get("name") != claude.get("name"):
+        fails.append(PI + ": name " + repr(pi.get("name")) + " differs from .claude-plugin/plugin.json's " + repr(claude.get("name")))
+
+if os.path.lexists(".devin-plugin"):
+    fails.append(".devin-plugin/ exists at the repo root — it outranks .claude-plugin/ for a Devin install of the root, which also loads this AGENTS.md as an always-on rule and runs hooks/; the Devin manifest is " + DEVIN)
+ROOT_LOADED = ("agents.md", "agents.local.md", "agent.md", ".windsurfrules", "rules", "agents",
+               "hooks.json", "hooks", ".mcp.json", "mcp.json")
+stray = sorted(e for e in os.listdir("skills") if e.casefold() in ROOT_LOADED)
+if stray:
+    fails.append("skills/ (the Devin plugin root) carries " + ", ".join(stray) + " — Devin loads that name from a plugin root as rules, subagents, hooks or MCP servers")
+
+for line in fails:
+    print("FAIL: skill manifests: " + line)
+if fails:
+    sys.exit(1)
+print("ok:   skill manifests: " + DEVIN + " (Devin) and " + PI + " pi.skills (Pi) list exactly the " + str(len(portable))
+      + " portable skill directories, no at-* workflow, metadata and skills only; no root .devin-plugin/, nothing else Devin loads under skills/")
+PYEOF
+if [ "$MANIFESTS_RC" -ne 0 ]; then
   FAILED_CHECKS=$((FAILED_CHECKS + 1))
 fi
 

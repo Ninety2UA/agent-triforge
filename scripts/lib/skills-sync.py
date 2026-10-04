@@ -33,7 +33,9 @@ Lead workflows (KTD12, R16): a shipped skills/at-* directory is a lead workflow
 that reaches a lead only from its plugin install. It is never copied into
 .agents/skills or a worktree, never listed in the stamp, and an at-* directory
 already present there is never replaced or retired, whatever a stamp says —
-for refresh purposes the at- prefix means "not Triforge-shipped".
+for refresh purposes the at- prefix means "not Triforge-shipped". A dot entry
+under skills/ (skills/.devin-plugin/, the Devin manifest) is packaging, not a
+skill: never copied, digested or reported.
 
 Usage:
     skills-sync.py sync --plugin-root <dir> --project <dir> [--prefix <text>]
@@ -223,6 +225,8 @@ def sync(plugin_root, project, prefix):
             shutil.rmtree(os.path.join(dest, leftover), ignore_errors=True)
     for name in sorted(os.listdir(src_root)):
         src = os.path.join(src_root, name)
+        if name.startswith("."):
+            continue    # packaging, not a skill: skills/.devin-plugin/ is the Devin manifest
         if lead_workflow(name) or not os.path.isdir(src) or os.path.islink(src):
             continue    # a lead workflow (at-*) stays in the plugin install
         if not NAME_RE.match(name):
@@ -332,7 +336,7 @@ def table(repo, tag_glob):
             if len(parts) < 3 or kind != b"blob":
                 continue
             name, rel = parts[1], "/".join(parts[2:])
-            if rel.rsplit("/", 1)[-1] in IGNORED_FILES or lead_workflow(name):
+            if rel.rsplit("/", 1)[-1] in IGNORED_FILES or lead_workflow(name) or name.startswith("."):
                 continue
             blob = subprocess.run(["git", "-C", repo, "cat-file", "blob", sha.decode()], check=True,
                                   capture_output=True).stdout

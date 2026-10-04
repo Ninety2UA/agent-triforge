@@ -7,7 +7,7 @@
 # every cycle and the record is rewritten idempotently.
 #
 # Usage:
-#   bash scripts/probe-capabilities.sh [--record <path>] [--skip-live | --self-only]
+#   bash scripts/probe-capabilities.sh [--record <path>] [--skip-live | --self-only | --only <ID>[,<ID>...]]
 #
 #   --record <path>  Write the record somewhere else. Default:
 #                    ops/research/<YYYY-MM>-probe-record.md under the repo
@@ -24,6 +24,13 @@
 #                    never to ops/research/: a --record whose basename is a
 #                    dated probe-record name is refused, so the committed
 #                    record can't be overwritten by a gate run.
+#   --only <IDs>     Run the preflight and fixture plus only the named rows of
+#                    the lead capability and survival section (comma-separated;
+#                    ONLY_ROWS below lists them) — no other per-CLI row, no
+#                    SELF row. Live rows still need their CLI's live gate
+#                    (combine with --skip-live to record them SKIPPED). The
+#                    record goes to a scratch path under ${TMPDIR}, exactly as
+#                    under --self-only (a dated --record name is refused).
 #
 # Exit codes:
 #   0  harness completed — probe FAIL/UNAVAILABLE/AUTH-FAIL results are data,
@@ -62,26 +69,57 @@ RECORD="$REPO_ROOT/ops/research/$(date -u +%Y-%m)-probe-record.md"
 RECORD_SET=0
 SKIP_LIVE=0
 SELF_ONLY=0
+ONLY=""
+# The rows --only can select: the lead capability and survival section (U29).
+# A row added to that section joins this list.
+ONLY_ROWS="CC-09 CC-10 CC-11 CC-12 CC-13 CC-14 CC-14b CDX-12 CDX-13 CDX-14 CDX-15 CDX-15b CDX-16 CDX-17 CDX-18 AGY-17 OC-09 KIMI-10 CUR-13"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --record) RECORD=${2:?--record needs a path}; RECORD_SET=1; shift 2 ;;
     --skip-live) SKIP_LIVE=1; shift ;;
     --self-only) SELF_ONLY=1; SKIP_LIVE=1; shift ;;
+    --only) ONLY=${2:?--only needs a row ID list}; shift 2 ;;
     *) echo "probe-capabilities: unknown argument: $1" >&2; exit 1 ;;
   esac
 done
 
-# --self-only never writes a dated probe record (KTD15): the gate runs on every
-# PR, and the committed record is the watch cycle's full-run evidence.
-if [ "$SELF_ONLY" = 1 ]; then
+if [ -n "$ONLY" ]; then
+  if [ "$SELF_ONLY" = 1 ]; then
+    echo "probe-capabilities: --only and --self-only exclude each other" >&2
+    exit 1
+  fi
+  while IFS= read -r _ONLY_ID; do
+    [ -n "$_ONLY_ID" ] || continue
+    case " $ONLY_ROWS " in
+      *" $_ONLY_ID "*) : ;;
+      *) echo "probe-capabilities: --only: $_ONLY_ID is not a selectable row (selectable: $ONLY_ROWS)" >&2; exit 1 ;;
+    esac
+  done <<ONLYIDS
+$(printf '%s' "$ONLY" | tr ',' '\n')
+ONLYIDS
+fi
+# _want <ID> — true when the row runs: always, unless --only names other rows.
+_want() {
+  [ -z "$ONLY" ] && return 0
+  case ",$ONLY," in
+    *",$1,"*) return 0 ;;
+  esac
+  return 1
+}
+
+# --self-only and --only never write a dated probe record (KTD15): the gate
+# runs on every PR, and the committed record is the watch cycle's full-run
+# evidence.
+if [ "$SELF_ONLY" = 1 ] || [ -n "$ONLY" ]; then
+  if [ "$SELF_ONLY" = 1 ]; then _PART_MODE="self-only"; else _PART_MODE="only"; fi
   if [ "$RECORD_SET" = 0 ]; then
     RECORD="${TMPDIR:-/tmp}"
-    RECORD="${RECORD%/}/triforge-self-only-$(date -u +%Y%m%dT%H%M%S)-$$.md"
+    RECORD="${RECORD%/}/triforge-${_PART_MODE}-$(date -u +%Y%m%dT%H%M%S)-$$.md"
   else
     case "$(basename "$RECORD")" in
       [0-9][0-9][0-9][0-9]-[0-9][0-9]-probe-record.md)
-        echo "probe-capabilities: --self-only refuses --record $RECORD — a dated probe-record name is the committed full-run record; pass a scratch path or omit --record" >&2
+        echo "probe-capabilities: --${_PART_MODE} refuses --record $RECORD — a dated probe-record name is the committed full-run record; pass a scratch path or omit --record" >&2
         exit 1 ;;
     esac
   fi
@@ -261,6 +299,11 @@ _probe_run() { # _probe_run <seconds> <cmd...>
   "$TIMEOUT_BIN" "${SECS}s" env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null "$@"
 }
 
+# The NAME=value pairs _lane_run sets beyond the base keys: the git isolation,
+# NO_COLOR, and the worker marker as _adapter_env sets it for a lease build
+# (KTD9). U29_BOUNDARY takes its names from the same list.
+LANE_FIXED=(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null NO_COLOR=1 TRIFORGE_LEASE_WORKER=builder)
+
 # The lease lane's env -i boundary — the _adapter_env base allowlist in
 # scripts/lib/lease.sh, read from the same registry list (REG_ENV_BASE =
 # TRIFORGE_ENV_BASE: HOME PATH TMPDIR TERM LANG COLORTERM USER, + NO_COLOR=1)
@@ -268,7 +311,7 @@ _probe_run() { # _probe_run <seconds> <cmd...>
 # CC-08. The two read one list, so a probe can never run under a wider or
 # narrower env than the real lease (USER is what lets `claude -p` find its
 # keychain account); as before, HOME / PATH / TMPDIR are always passed (with
-# their fallbacks) and the other keys only when set.
+# their fallbacks) and the other keys only when set, then LANE_FIXED.
 _lane_run() { # _lane_run <seconds> <cmd...>
   local SECS=$1; shift
   local -a E=()
@@ -286,7 +329,7 @@ _lane_run() { # _lane_run <seconds> <cmd...>
   done <<BASEKEYS
 $(printf '%s' "$REG_ENV_BASE" | tr ' ' '\n')
 BASEKEYS
-  E+=(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null "NO_COLOR=1")
+  E+=("${LANE_FIXED[@]}")
   "$TIMEOUT_BIN" "${SECS}s" env -i "${E[@]}" "$@"
 }
 
@@ -416,7 +459,7 @@ _names_missing() {
 # Probes
 # --------------------------------------------------------------------------
 
-echo "probe-capabilities: run $RUN_TS (skip_live=$SKIP_LIVE self_only=$SELF_ONLY)" >&2
+echo "probe-capabilities: run $RUN_TS (skip_live=$SKIP_LIVE self_only=$SELF_ONLY${ONLY:+ only=$ONLY})" >&2
 echo "probe-capabilities: fixture=$FIX" >&2
 
 # Per-CLI live gate: set to 0 when the CLI's READY probe fails so remaining
@@ -440,9 +483,10 @@ CC_VER=""
 LIST12_PROMPT="From the skills available to you, list which of these names are present: tf-agents-skill, ${SHIPPED_SKILLS// /, }. Output only the present names, one per line, nothing else. Do not invoke any skill or tool."
 
 # The per-CLI sections (Antigravity through Routines) are the probe proper;
-# --self-only skips all of them and runs the SELF rows alone (KTD15). The
-# block is not re-indented, so its diff stays reviewable.
-if [ "$SELF_ONLY" != 1 ]; then
+# --self-only skips all of them and runs the SELF rows alone (KTD15), and
+# --only skips them for the named lead-capability rows. The block is not
+# re-indented, so its diff stays reviewable.
+if [ "$SELF_ONLY" != 1 ] && [ -z "$ONLY" ]; then
 
 # ---------------------------------------------------------------- Antigravity
 if command -v agy >/dev/null 2>&1; then
@@ -1615,13 +1659,940 @@ row "RTN-01" "claude" "Scheduled Routine env: checkout, push/PR, binaries, non-i
 
 fi  # end of the per-CLI sections skipped by --self-only
 
+# ------------------------------------------- Lead capability + survival (U29)
+# The facts U9 (lead resolution) and U13 (detached leases, lead exit) design
+# against (R36, R44; KTD1, KTD10). Each row records PASS, FAIL or UNAVAILABLE
+# with evidence, keeps its ID on a host without the CLI, and records SKIPPED
+# under --skip-live like its siblings; --only runs any subset of them.
+#   CC-09 / CDX-12   a builder started by the lease lane's own launcher
+#                    (_LEASE_LAUNCH_PY, read through the loader: its own
+#                    session and process group, KTD10) survives the end of the
+#                    lead's tool call and the end of a `claude -p` / `codex
+#                    exec` lead run; an in-shell `&` job rides along as the
+#                    control
+#   CC-10 / CDX-13   the same builder survives the lead's terminal closing: the
+#                    lead runs in a pty whose master is closed mid-turn
+#                    (SIGHUP). This is the headless stand-in for a closed TUI,
+#                    which cannot be driven without accepting a trust dialog (a
+#                    user-tier write, R18)
+#   CC-11 / CDX-15   host markers: the names a lead adds to its tool shell's
+#                    environment. The lead starts under the lease boundary's
+#                    base allowlist without the worker marker, so every extra
+#                    name came from the CLI or the user's own CLI config.
+#                    CDX-15b, the danger-full-access sub-case, is never
+#                    launched here (R50)
+#   CDX-14           TMPDIR in a Codex lead's tool shell equals the caller's,
+#                    across two tool calls (both dumps required: a missing one
+#                    is a FAIL)
+#   CC-12 / CDX-16   plugin hooks fire, or don't, in an env -i worker: a scratch
+#                    plugin whose hooks write marker files (claude: --plugin-dir;
+#                    codex: a scratch CODEX_HOME with the plugin installed,
+#                    where SessionStart and UserPromptSubmit fire before the
+#                    first model request, so no login is needed). The user's own
+#                    config is never touched. CDX-16 PASS needs the bypass run to
+#                    fire a hook and the untrusted lane run to fire none; hooks
+#                    firing untrusted are a FAIL that says "fires without trust"
+#   CC-13 / CDX-17 / AGY-17 / OC-09 / KIMI-10 / CUR-13
+#                    a variable set at the lease boundary is visible inside each
+#                    worker CLI's tool shell, run with the lane's own argv
+#                    (_lease_lane_argv): a probe variable, and the worker marker
+#                    TRIFORGE_LEASE_WORKER=builder that _lane_run sets as
+#                    _adapter_env does (U11); PASS needs both
+#   CC-14 / CC-14b   `claude -p` loads the root AGENTS.md when no CLAUDE.md
+#                    exists (D-038's open question); 14b: a CLAUDE.md beside it
+#                    suppresses it, as documented
+#   CDX-18           `codex plugin marketplace add` + `codex plugin add` lists
+#                    the at-* skills from the .claude-plugin/ fallback (D-048's
+#                    open watch): scratch CODEX_HOME, the app-server's
+#                    skills/list, no model call. A FAIL stops Phase 3 until a
+#                    fallback is designed
+# Scratch state lives under $FIX (codex's workspace-write sandbox writes only
+# there) and $WORK; both go with the EXIT trap. Builders and the mid-turn
+# waiter stop on their own once <dir>/release exists or <dir> is gone.
+U29_CDX_FLAGS=()   # the codex lane's flags after `codex`, filled below when a row needs them (SELF-15c reads them too)
+U29_ARGV_CLAUDE=(); U29_ARGV_AGY=(); U29_ARGV_OC=(); U29_ARGV_KIMI=(); U29_ARGV_CUR=()   # the other lanes' argv up to the prompt
+if [ "$SELF_ONLY" != 1 ]; then
+
+U29_VAL="triforge-probe-$$"   # the probe variable's value (worker marker stand-in)
+# What the rows take from the lease lane itself, read once through the loader
+# like REG_ENV_BASE and only when a row that uses it runs: the real detached
+# launcher (_LEASE_LAUNCH_PY, written to U29_LAUNCH for the survival kit of
+# CC-09/10/11 and CDX-12/13/14/15) and each lane's argv from the composer the
+# lease lane runs (_lease_lane_argv, one "<kind> US <cli> US <word>" line per
+# word): codex's flags after `codex` (U29_CDX_FLAGS, for CDX-16, CDX-17 and
+# SELF-15c, which add their own model), and the claude, agy, opencode, kimi and
+# cursor argv up to the prompt (U29_ARGV_*, for CC-13, AGY-17, OC-09, KIMI-10
+# and CUR-13), composed with the model the CLI's own section picked when it
+# ran, else the registry default; plus the OpenCode deny set and V2 guard the
+# lease lane applies. No row spells out a lane's flags itself.
+U29_REG=""
+U29_LAUNCH="$WORK/u29-launch.py"
+if _want CUR-13 && [ -z "$CUR_BIN" ]; then CUR_BIN=$(_cursor_bin_probe 2>/dev/null || true); fi
+if _want CC-09 || _want CC-10 || _want CC-11 || _want CC-12 || _want CC-13 || _want CDX-12 || _want CDX-13 || _want CDX-14 || _want CDX-15 \
+   || _want CDX-16 || _want CDX-17 || _want AGY-17 || _want OC-09 || _want KIMI-10 || _want CUR-13; then
+  U29_REG=$(
+    source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 0
+    printf '%s' "$_LEASE_LAUNCH_PY" > "$U29_LAUNCH"
+    _u29_argv() { # _u29_argv <kind> <cli> <_lease_lane_argv arguments after the cli> — one line per word
+      local KIND=$1 CLI=$2 W
+      shift 2
+      _lease_lane_argv "$CLI" "$@" || return 0
+      for W in "${_LEASE_LANE_ARGV[@]}"; do printf '%s\037%s\037%s\n' "$KIND" "$CLI" "$W"; done
+    }
+    _u29_argv argv codex "" "" "" "" "" "$FIX" 240
+    _u29_argv argv claude sonnet "" "" "" "" "$FIX" 240
+    if _want AGY-17 || _want OC-09 || _want KIMI-10 || _want CUR-13; then
+      U29_KAF=""
+      if [ -f "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md" ]; then U29_KAF="${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md"; fi
+      _u29_argv argv antigravity "" "" "${AGY_MODEL_ARG:-$(cli_field antigravity model 2>/dev/null || true)}" "" "" "$FIX" 240
+      _u29_argv argv opencode "" "" "${OC_GLM:-$(cli_field opencode model 2>/dev/null || true)}" "" "" "$FIX" 240
+      _u29_argv argv kimi "" "" "$(cli_field kimi model 2>/dev/null || true)" "$U29_KAF" "" "$FIX" 240
+      _u29_argv argv cursor "" "" "${CUR_GROK:-$(cli_field cursor model 2>/dev/null || true)}" "" "$CUR_BIN" "$FIX" 240
+      printf 'ocperm\t%s\n' "${_OPENCODE_PERMISSION_DEFAULT:-}"
+      if command -v opencode >/dev/null 2>&1; then
+        if _opencode_v2_check opencode; then printf 'ocv2\tv1\n'; else printf 'ocv2\t%s %s\n' "${_OPENCODE_CHECK:-}" "${_OPENCODE_VERSION:-}"; fi
+      fi
+    fi
+  )
+  # Unit-separated, so an empty word keeps its place.
+  U29_CDX_SEEN=0
+  while IFS=$'\037' read -r U29_K U29_T U29_V; do
+    [ "$U29_K" = argv ] || continue
+    case "$U29_T" in
+      codex)       if [ "$U29_CDX_SEEN" = 1 ]; then U29_CDX_FLAGS+=("$U29_V"); fi; U29_CDX_SEEN=1 ;;   # every word after `codex`
+      claude)      U29_ARGV_CLAUDE+=("$U29_V") ;;
+      antigravity) U29_ARGV_AGY+=("$U29_V") ;;
+      opencode)    U29_ARGV_OC+=("$U29_V") ;;
+      kimi)        U29_ARGV_KIMI+=("$U29_V") ;;
+      cursor)      U29_ARGV_CUR+=("$U29_V") ;;
+    esac
+  done <<U29_REG_EOF
+$U29_REG
+U29_REG_EOF
+fi
+_u29_reg() { printf '%s\n' "$U29_REG" | awk -F'\t' -v k="$1" '$1 == k { print $2; exit }'; }
+# _u29_argv_note <argv...> — the words after the binary, the fixture path shown
+# as <fixture>: the lane flags a row ran, for its evidence.
+_u29_argv_note() { shift; printf '%s ' "$@" | sed "s|${FIX}|<fixture>|g; s/ \$//"; }
+
+# _u29_rows <cli> <outcome> <evidence> <method> <ID:capability>... — the same
+# outcome and evidence for each named row that runs.
+_u29_rows() {
+  local CLI=$1 OUTC=$2 EV=$3 METHOD=$4 R
+  shift 4
+  for R in "$@"; do
+    if _want "${R%%:*}"; then row "${R%%:*}" "$CLI" "${R#*:}" "$OUTC" "$EV" "$METHOD"; fi
+  done
+}
+
+# _u29_lead <seconds> <cmd...> — a lead session: the lease boundary's base
+# allowlist without the worker marker (_lane_run carries it since U11).
+_u29_lead() {
+  local SECS=$1
+  shift
+  _lane_run "$SECS" env -u TRIFORGE_LEASE_WORKER "$@"
+}
+
+# Names the boundary itself sets (the base keys, _lane_run's LANE_FIXED, the
+# probe variable, the shell's own); anything else in a tool shell's env was added.
+U29_BOUNDARY=$REG_ENV_BASE
+for U29_X in "${LANE_FIXED[@]}"; do U29_BOUNDARY="$U29_BOUNDARY ${U29_X%%=*}"; done
+U29_BOUNDARY="$U29_BOUNDARY TRIFORGE_PROBE_WORKER PWD OLDPWD SHLVL _"
+# _u29_envval <dump> <NAME> — NAME's value in an `env` dump (empty when absent).
+_u29_envval() { grep "^${2}=" "$1" 2>/dev/null | head -1 | sed "s/^${2}=//"; }
+# _u29_tmpdir <dump> — U29_TMP: the dump's TMPDIR; U29_TD: unchanged when it
+# equals the caller's, else changed.
+_u29_tmpdir() {
+  U29_TMP=$(_u29_envval "$1" TMPDIR)
+  U29_TD=changed
+  if [ "$U29_TMP" = "${TMPDIR:-/tmp}" ]; then U29_TD=unchanged; fi
+}
+# _u29_markers <dump> — the host-marker-shaped names an env dump carries beyond
+# the boundary (values only for the listed marker names: dumps can hold
+# credentials), plus a count of every other added name (user profile, settings
+# env, plugin SessionStart exports).
+_u29_markers() {
+  U29_IN="$1" U29_BASE="$U29_BOUNDARY" python3 - <<'PYEOF' 2>/dev/null | _scrub
+import os, re
+base = set(os.environ['U29_BASE'].split())
+shown = {'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'AI_AGENT', 'CODEX_CI', 'CODEX_SANDBOX',
+         'CODEX_SANDBOX_NETWORK_DISABLED', 'ANTIGRAVITY_AGENT', 'CURSOR_AGENT', 'CURSOR_INVOKED_AS',
+         'OPENCODE', 'AGENT'}
+marker = re.compile(r'^(CLAUDE|CODEX|AI_AGENT$|ANTIGRAVITY|GEMINI|CURSOR|__CURSOR|OPENCODE|AGENT$|KIMI)')
+env = {}
+for line in open(os.environ['U29_IN'], encoding='utf-8', errors='replace'):
+    m = re.match(r'([A-Za-z_][A-Za-z0-9_]*)=(.*)', line.rstrip('\n'))
+    if m:
+        env.setdefault(m.group(1), m.group(2))
+added = sorted(n for n in env if n not in base)
+marks = [n + '=' + env[n][:40] if n in shown else n for n in added if marker.match(n)]
+other = [n for n in added if not marker.match(n)]
+print('host markers: ' + (' '.join(marks) or 'none') + '; other added names: ' + str(len(other)))
+PYEOF
+}
+
+# Survival kit: builder.sh heartbeats once a second; launch.sh dumps the env,
+# starts one builder through the lease lane's launcher (launch.py, a copy of
+# U29_LAUNCH: its release handshake is harmless to a builder that never reads
+# the fd) and one as an in-shell `&` job; check.sh (a later tool call) dumps
+# the env again and records which builder still beats; wait.sh holds the lead
+# mid-turn for the pty rows.
+_u29_kit() { # _u29_kit <dir>
+  rm -rf "$1"
+  mkdir -p "$1"
+  cp "$U29_LAUNCH" "$1/launch.py" 2>/dev/null || true
+  cat > "$1/builder.sh" <<'EOF'
+#!/bin/sh
+D=$1; T=$2
+echo $$ > "$D/$T.pid"
+i=0
+while [ ! -f "$D/release" ] && [ "$i" -lt 300 ] && [ -d "$D" ]; do
+  echo "$i" >> "$D/$T.hb"; i=$((i + 1)); sleep 1
+done
+if [ -d "$D" ]; then echo DONE > "$D/$T.done"; fi
+EOF
+  cat > "$1/launch.sh" <<'EOF'
+#!/bin/sh
+D=$(cd "$(dirname "$0")" && pwd)
+env > "$D/env-1.txt"
+python3 "$D/launch.py" "$D/detached.log" /bin/sh "$D/builder.sh" "$D" detached > /dev/null 2> "$D/launch.err"
+/bin/sh "$D/builder.sh" "$D" control < /dev/null > /dev/null 2>&1 &
+echo LAUNCHED
+EOF
+  cat > "$1/check.sh" <<'EOF'
+#!/bin/sh
+D=$(cd "$(dirname "$0")" && pwd)
+env > "$D/env-2.txt"
+n() { if [ -f "$1" ]; then wc -l < "$1" | tr -d ' '; else echo 0; fi; }
+a1=$(n "$D/detached.hb"); a2=$(n "$D/control.hb")
+sleep 3
+b1=$(n "$D/detached.hb"); b2=$(n "$D/control.hb")
+r1=dead; if [ "$b1" -gt "$a1" ]; then r1=alive; fi
+r2=dead; if [ "$b2" -gt "$a2" ]; then r2=alive; fi
+echo "detached=$r1 control=$r2" > "$D/after-tool.txt"
+cat "$D/after-tool.txt"
+EOF
+  cat > "$1/wait.sh" <<'EOF'
+#!/bin/sh
+D=$(cd "$(dirname "$0")" && pwd)
+touch "$D/midturn"
+i=0
+while [ ! -f "$D/release" ] && [ "$i" -lt 120 ] && [ -d "$D" ]; do i=$((i + 1)); sleep 1; done
+echo WAITED
+EOF
+}
+_u29_hb() { if [ -f "$1" ]; then wc -l < "$1" | tr -d ' '; else echo 0; fi; }
+# _u29_survival <dir> — after the lead exited: which builder still beats (3 s
+# sample), then release them and wait up to 10 s for the detached one to
+# finish. Sets U29_SV (evidence) and U29_SV_OK (1 when the detached builder
+# lived past the lead and finished on release).
+_u29_survival() {
+  local D=$1 A1 A2 B1 B2 TD=not-checked TC=not-checked ED=dead EC=dead DONE=no i=0
+  if [ -f "$D/after-tool.txt" ]; then
+    TD=$(sed -nE 's/.*detached=([a-z]+).*/\1/p' "$D/after-tool.txt")
+    TC=$(sed -nE 's/.*control=([a-z]+).*/\1/p' "$D/after-tool.txt")
+  fi
+  A1=$(_u29_hb "$D/detached.hb"); A2=$(_u29_hb "$D/control.hb")
+  sleep 3
+  B1=$(_u29_hb "$D/detached.hb"); B2=$(_u29_hb "$D/control.hb")
+  if [ "$B1" -gt "$A1" ]; then ED=alive; fi
+  if [ "$B2" -gt "$A2" ]; then EC=alive; fi
+  touch "$D/release"
+  while [ "$i" -lt 10 ] && [ ! -f "$D/detached.done" ]; do sleep 1; i=$((i + 1)); done
+  if [ -f "$D/detached.done" ]; then DONE=yes; fi
+  U29_SV_OK=0
+  if [ "$ED" = alive ] && [ "$DONE" = yes ] && [ "$TD" != dead ]; then U29_SV_OK=1; fi
+  U29_SV="detached builder: after the tool call=${TD:-?}, after the lead exited=${ED}, finished on release=${DONE}; control (in-shell & job): after the tool call=${TC:-?}, after the lead exited=${EC}"
+}
+
+# The pty driver for CC-10 / CDX-13: forks the lead into a new session on a
+# pty, drains its output to <log>, closes the master one second after <trigger>
+# appears (the kernel hangs up the session: SIGHUP), then waits up to 20 s for
+# the lead to exit and kills its group if it does not. Its own budget keeps it
+# inside the outer timeout, so the lead is never orphaned.
+U29_PTY="$WORK/u29-pty.py"
+cat > "$U29_PTY" <<'PYEOF'
+import os, pty, select, sys, time
+log, trigger, budget = sys.argv[1], sys.argv[2], float(sys.argv[3])
+cmd = sys.argv[sys.argv.index('--') + 1:]
+pid, fd = pty.fork()
+if pid == 0:
+    try:
+        os.execvp(cmd[0], cmd)
+    finally:
+        os._exit(127)
+out = open(log, 'wb')
+t_end = time.time() + budget
+state, status = 'deadline', None
+while time.time() < t_end:
+    r, _, _ = select.select([fd], [], [], 0.5)
+    if r:
+        try:
+            data = os.read(fd, 65536)
+        except OSError:
+            data = b''
+        if data:
+            out.write(data)
+            out.flush()
+    if os.path.exists(trigger):
+        time.sleep(1)
+        state = 'hungup'
+        break
+    wp, st = os.waitpid(pid, os.WNOHANG)
+    if wp:
+        state, status = 'exited-before-hangup', st
+        break
+if state != 'exited-before-hangup':
+    os.close(fd)
+    t2 = time.time() + 20
+    while time.time() < t2:
+        wp, st = os.waitpid(pid, os.WNOHANG)
+        if wp:
+            status = st
+            break
+        time.sleep(0.2)
+lead = 'still-running-20s-after-hangup(killed)'
+if status is None:
+    try:
+        os.killpg(pid, 9)
+    except OSError:
+        pass
+    os.waitpid(pid, 0)
+elif os.WIFSIGNALED(status):
+    lead = 'signal-%d' % os.WTERMSIG(status)
+else:
+    lead = 'exit-%d' % os.WEXITSTATUS(status)
+print('state=%s lead=%s' % (state, lead))
+PYEOF
+
+# _u29_pty_row <id> <cli> <capability> <dir> <out> — record a pty-hangup row
+# from the driver's state line and the builders' survival.
+_u29_pty_row() {
+  local ID=$1 CLI=$2 CAP=$3 D=$4 O=$5 ST
+  ST=$(grep -E '^state=' "$O" 2>/dev/null | tail -1)
+  case "$ST" in
+    state=hungup*)
+      if [ ! -f "$D/detached.pid" ]; then
+        touch "$D/release"
+        row "$ID" "$CLI" "$CAP" "FAIL" "the pty was closed but no builder had been launched (${ST}): $(_evidence "$O.log")" "pty-hangup"
+      else
+        _u29_survival "$D"
+        if [ "$U29_SV_OK" = 1 ]; then
+          row "$ID" "$CLI" "$CAP" "PASS" "${U29_SV}; lead after the hangup: ${ST#*lead=}; the interactive TUI itself was not driven (its trust dialog is a user-tier write, R18) — this pty run is its stand-in" "pty-hangup"
+        else
+          row "$ID" "$CLI" "$CAP" "FAIL" "${U29_SV}; lead after the hangup: ${ST#*lead=} — a closed terminal kills a detached builder; KTD10's fallback (coordinate.sh holds the processes) applies" "pty-hangup"
+        fi
+      fi
+      ;;
+    *)
+      touch "$D/release"
+      if _auth_shaped "$O.log"; then
+        row "$ID" "$CLI" "$CAP" "AUTH-FAIL" "$(_evidence "$O.log")" "pty-hangup"
+      else
+        row "$ID" "$CLI" "$CAP" "FAIL" "the lead never reached mid-turn, so no hangup was sent (${ST:-no driver state line}): $(_evidence "$O.log")" "pty-hangup"
+      fi
+      ;;
+  esac
+}
+
+# _u29_dumper <dir> — envdump.sh <tag> writes the tool shell's env to
+# <dir>/env-<tag>.txt.
+_u29_dumper() {
+  mkdir -p "$1"
+  printf '#!/bin/sh\nenv > "%s/env-$1.txt"\necho DUMPED\n' "$1" > "$1/envdump.sh"
+}
+_u29_dump_prompt() { # _u29_dump_prompt <dir> <tag>
+  printf 'Run this exact shell command with your shell tool, then reply with only: OK\nsh %s/envdump.sh %s' "$1" "$2"
+}
+
+# _u29_marker_verdict <id> <cli> <capability> <dump> <out> [<note>] — PASS when
+# the probe variable and the worker marker (TRIFORGE_LEASE_WORKER=builder, as
+# _lane_run and _adapter_env set it) both reached the worker's tool shell.
+_u29_marker_verdict() {
+  local ID=$1 CLI=$2 CAP=$3 DUMP=$4 O=$5 NOTE=${6:-} V LW
+  if [ -f "$DUMP" ]; then
+    V=$(_u29_envval "$DUMP" TRIFORGE_PROBE_WORKER)
+    LW=$(_u29_envval "$DUMP" TRIFORGE_LEASE_WORKER)
+    _u29_tmpdir "$DUMP"
+    if [ "$V" = "$U29_VAL" ] && [ "$LW" = builder ]; then
+      row "$ID" "$CLI" "$CAP" "PASS" "probe variable and TRIFORGE_LEASE_WORKER=builder visible in the tool shell; TMPDIR ${U29_TD}; $(_u29_markers "$DUMP")${NOTE:+; $NOTE}" "live"
+    elif [ "$V" = "$U29_VAL" ]; then
+      row "$ID" "$CLI" "$CAP" "FAIL" "probe variable visible, but TRIFORGE_LEASE_WORKER=${LW:-<unset>} (want builder): the worker marker did not reach the tool shell; $(_u29_markers "$DUMP")${NOTE:+; $NOTE}" "live"
+    else
+      row "$ID" "$CLI" "$CAP" "FAIL" "probe variable NOT visible (got '${V}') — stripped between the boundary and the tool shell; TRIFORGE_LEASE_WORKER=${LW:-<unset>}; $(_u29_markers "$DUMP")${NOTE:+; $NOTE}" "live"
+    fi
+  elif _quota_shaped "$O"; then
+    row "$ID" "$CLI" "$CAP" "QUOTA-FAIL" "$(_evidence "$O")" "live"
+  elif _auth_shaped "$O"; then
+    row "$ID" "$CLI" "$CAP" "AUTH-FAIL" "$(_evidence "$O")" "live"
+  else
+    row "$ID" "$CLI" "$CAP" "FAIL" "the worker's tool shell never ran the dump command${NOTE:+ ($NOTE)}: $(_evidence "$O")" "live"
+  fi
+}
+
+# _u29_plugin <dir> <markdir> — a scratch plugin (Claude Code and Codex read the
+# same .claude-plugin/ layout, D-048) whose hooks write <markdir>/hook-<event>
+# with what the hook process sees.
+_u29_plugin() {
+  mkdir -p "$1/.claude-plugin" "$1/hooks" "$2"
+  printf '{"name": "tf-probe-hooks", "version": "0.0.1", "description": "Triforge probe: marker-writing hooks"}\n' > "$1/.claude-plugin/plugin.json"
+  cat > "$1/hooks/mark.sh" <<EOF
+#!/bin/sh
+PR=unset
+if [ -n "\${CLAUDE_PLUGIN_ROOT:-}" ]; then PR=set; fi
+printf 'probe_var=%s lease_worker=%s plugin_root=%s\n' "\${TRIFORGE_PROBE_WORKER:-<unset>}" "\${TRIFORGE_LEASE_WORKER:-<unset>}" "\$PR" > "$2/hook-\$1"
+EOF
+  cat > "$1/hooks/hooks.json" <<'EOF'
+{"hooks": {
+  "SessionStart":     [{"hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/mark.sh\" SessionStart"}]}],
+  "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/mark.sh\" UserPromptSubmit"}]}],
+  "PreToolUse":       [{"matcher": "*", "hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/mark.sh\" PreToolUse"}]}],
+  "Stop":             [{"hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/mark.sh\" Stop"}]}]
+}}
+EOF
+}
+# _u29_hooks_seen <markdir> — sets U29_FIRED (count) and U29_HOOKS (evidence).
+_u29_hooks_seen() {
+  local E FIRED="" NOT="" SEEN=""
+  U29_FIRED=0
+  for E in SessionStart UserPromptSubmit PreToolUse Stop; do
+    if [ -f "$1/hook-$E" ]; then
+      FIRED="$FIRED $E"; U29_FIRED=$((U29_FIRED + 1))
+      [ -n "$SEEN" ] || SEEN=$(head -1 "$1/hook-$E")
+    else
+      NOT="$NOT $E"
+    fi
+  done
+  case "$SEEN" in
+    "probe_var=$U29_VAL "*) SEEN="probe variable visible to the hooks; ${SEEN#* }" ;;
+    "") : ;;
+    *) SEEN="probe variable NOT visible to the hooks; ${SEEN#* }" ;;
+  esac
+  U29_HOOKS="fired:${FIRED:- none}${NOT:+; not fired:${NOT}}${SEEN:+; ${SEEN}}"
+}
+
+# _u29_claude_json <file> — "<num_turns><TAB><result>" from claude -p
+# --output-format json output (empty when it does not parse).
+_u29_claude_json() {
+  U29_IN="$1" python3 - <<'PYEOF' 2>/dev/null
+import json, os
+src = open(os.environ['U29_IN'], encoding='utf-8', errors='replace').read()
+obj, _end = json.JSONDecoder().raw_decode(src[src.find('{'):])
+print(str(obj.get('num_turns')) + '\t' + ' '.join(str(obj.get('result', '')).split()))
+PYEOF
+}
+
+# ------- Claude Code: CC-09 CC-10 CC-11 CC-12 CC-13 CC-14 CC-14b
+U29_CC09="Detached builder survives a \`claude -p\` lead's end of turn (KTD10 launch: python3, own session; checked after the tool call and after the lead exits)"
+U29_CC10="Detached builder survives the lead's terminal closing (\`claude -p\` mid-turn in a pty, master closed: SIGHUP — headless stand-in for a closed TUI)"
+U29_CC11="Host markers a \`claude -p\` lead adds to its tool shell's env (lead_host_detect input, U9)"
+U29_CC12="Plugin hooks fire in an env -i \`claude -p\` worker (scratch --plugin-dir plugin, marker-writing hooks)"
+U29_CC13="Worker marker visible in an env -i \`claude -p\` worker's tool shell (probe variable at the lease boundary)"
+U29_CC14="\`claude -p\` loads the root AGENTS.md when no CLAUDE.md exists (D-038 open question)"
+U29_CC14B="Control: a CLAUDE.md beside AGENTS.md suppresses it under \`claude -p\` (D-038 constraint 1, negative)"
+if command -v claude >/dev/null 2>&1; then
+  if _want CC-09 || _want CC-11; then
+    if [ "$CC_LIVE" = 1 ]; then
+      D="$FIX/.u29-cc-lead"; O="$WORK/u29-cc-lead.txt"
+      _u29_kit "$D"
+      U29_T0=$(date +%s)
+      (cd "$FIX" && _u29_lead 240 claude -p --model sonnet --output-format text --allowedTools "Bash(sh $D/launch.sh)" "Bash(sh $D/check.sh)" -- "Run these two shell commands as two separate Bash tool calls, one after the other, exactly as written. Then reply with only: OK
+1. sh $D/launch.sh
+2. sh $D/check.sh" < /dev/null > "$O" 2>&1)
+      U29_RC=$?
+      U29_LEAD="lead rc=${U29_RC} after $(( $(date +%s) - U29_T0 ))s"
+      if [ ! -f "$D/detached.pid" ]; then
+        if _auth_shaped "$O"; then U29_OUTC=AUTH-FAIL; else U29_OUTC=FAIL; fi
+        if _want CC-09; then row "CC-09" "claude" "$U29_CC09" "$U29_OUTC" "the lead never ran the launch command (${U29_LEAD}): $(_evidence "$O")" "live"; fi
+        if _want CC-11; then row "CC-11" "claude" "$U29_CC11" "$U29_OUTC" "no tool-shell env dump — the lead never ran the launch command (${U29_LEAD}): $(_evidence "$O")" "live"; fi
+      else
+        _u29_survival "$D"
+        if _want CC-09; then
+          if [ "$U29_SV_OK" = 1 ]; then
+            row "CC-09" "claude" "$U29_CC09" "PASS" "${U29_SV}; ${U29_LEAD}" "live"
+          else
+            row "CC-09" "claude" "$U29_CC09" "FAIL" "${U29_SV}; ${U29_LEAD} — KTD10's fallback (coordinate.sh holds the processes) applies" "live"
+          fi
+        fi
+        if _want CC-11; then
+          U29_MK=$(_u29_markers "$D/env-1.txt")
+          _u29_tmpdir "$D/env-1.txt"
+          case "$U29_MK" in
+            *CLAUDE*) row "CC-11" "claude" "$U29_CC11" "PASS" "${U29_MK}; TMPDIR ${U29_TD} (lead started under the base allowlist, no worker marker; a claude -p worker carries the same names — see CC-13)" "live" ;;
+            *) row "CC-11" "claude" "$U29_CC11" "FAIL" "no CLAUDE* name added to the tool shell: ${U29_MK}" "live" ;;
+          esac
+        fi
+      fi
+      rm -rf "$D"
+    else
+      _u29_rows claude "$(_skip_reason)" "live probes disabled" live "CC-09:$U29_CC09" "CC-11:$U29_CC11"
+    fi
+  fi
+
+  if _want CC-10; then
+    if [ "$CC_LIVE" = 1 ]; then
+      D="$FIX/.u29-cc-pty"; O="$WORK/u29-cc-pty.txt"
+      _u29_kit "$D"
+      (cd "$FIX" && _u29_lead 300 python3 "$U29_PTY" "$O.log" "$D/midturn" 240 -- claude -p --model sonnet --allowedTools "Bash(sh $D/launch.sh)" "Bash(sh $D/wait.sh)" -- "Run these two shell commands as two separate Bash tool calls, one after the other, exactly as written. Wait for the second one to finish. Then reply with only: OK
+1. sh $D/launch.sh
+2. sh $D/wait.sh" > "$O" 2>&1)
+      _u29_pty_row "CC-10" "claude" "$U29_CC10" "$D" "$O"
+      rm -rf "$D"
+    else
+      row "CC-10" "claude" "$U29_CC10" "$(_skip_reason)" "live probes disabled" "pty-hangup"
+    fi
+  fi
+
+  if _want CC-12 || _want CC-13; then
+    if [ "$CC_LIVE" = 1 ]; then
+      D="$FIX/.u29-cc-worker"; O="$WORK/u29-cc-worker.txt"; HM="$WORK/u29-cc-hookmarks"; P="$WORK/u29-cc-plugin"
+      _u29_dumper "$D"
+      _u29_plugin "$P" "$HM"
+      # The claude lane's argv (_lease_lane_argv claude, --model sonnet) plus
+      # the scratch plugin; the --allowedTools entry lets this one dump command
+      # run headless (U12 hardens the lane's own tool list).
+      if [ "${#U29_ARGV_CLAUDE[@]}" -eq 0 ]; then
+        echo "could not read the claude lane argv (_lease_lane_argv claude) through scripts/invoke-external.sh" > "$O"
+      else
+        (cd "$FIX" && _lane_run 240 env "TRIFORGE_PROBE_WORKER=$U29_VAL" "${U29_ARGV_CLAUDE[@]}" --plugin-dir "$P" --output-format text --allowedTools "Bash(sh $D/envdump.sh worker)" -- "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
+      fi
+      if _want CC-12; then
+        _u29_hooks_seen "$HM"
+        if [ "$U29_FIRED" -gt 0 ]; then
+          row "CC-12" "claude" "$U29_CC12" "PASS" "${U29_HOOKS} (--plugin-dir stands in for an installed plugin; installed plugins are read from HOME, which the boundary keeps)" "marker-file"
+        elif _auth_shaped "$O"; then
+          row "CC-12" "claude" "$U29_CC12" "AUTH-FAIL" "$(_evidence "$O")" "marker-file"
+        else
+          row "CC-12" "claude" "$U29_CC12" "FAIL" "${U29_HOOKS}; $(_evidence "$O")" "marker-file"
+        fi
+      fi
+      if _want CC-13; then
+        _u29_marker_verdict "CC-13" "claude" "$U29_CC13" "$D/env-worker.txt" "$O" "lane argv: $(_u29_argv_note "${U29_ARGV_CLAUDE[@]:-claude}") + --allowedTools for the dump command"
+      fi
+      rm -rf "$D" "$HM" "$P"
+    else
+      if _want CC-12; then row "CC-12" "claude" "$U29_CC12" "$(_skip_reason)" "live probes disabled" "marker-file"; fi
+      if _want CC-13; then row "CC-13" "claude" "$U29_CC13" "$(_skip_reason)" "live probes disabled" "live"; fi
+    fi
+  fi
+
+  if _want CC-14 || _want CC-14b; then
+    if [ "$CC_LIVE" = 1 ]; then
+      A="$WORK/u29-agentsmd"; O="$WORK/u29-cc-agentsmd.txt"
+      mkdir -p "$A"
+      (cd "$A" && git init -q) >/dev/null 2>&1
+      # Claude reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or
+      # CLAUDE.local.md exists in the working directory or above it (D-038).
+      U29_ABOVE=""
+      U29_P=$(cd "$A" && pwd -P)
+      while [ -n "$U29_P" ]; do
+        for U29_F in CLAUDE.md .claude/CLAUDE.md CLAUDE.local.md; do
+          if [ -z "$U29_ABOVE" ] && [ -e "$U29_P/$U29_F" ]; then U29_ABOVE="$U29_P/$U29_F"; fi
+        done
+        [ "$U29_P" = "/" ] && break
+        U29_P=$(dirname "$U29_P")
+      done
+      U29_USERMD=no
+      if [ -f "${HOME:-}/.claude/CLAUDE.md" ]; then U29_USERMD=yes; fi
+      U29_MARK="TRIFORGE-MARKER-AGENTSMD-$$"
+      printf '# Probe instructions\n\nAlways remember this marker line: %s\n' "$U29_MARK" > "$A/AGENTS.md"
+      U29_PROMPT="Your project instructions may contain marker lines of the form TRIFORGE-MARKER-<WORD>-<digits>. Print every such marker you can see in your instructions verbatim, one per line, and nothing else. Do not run any tool and do not read any file. If you see none, print exactly: NONE"
+      if [ -n "$U29_ABOVE" ]; then
+        _u29_rows claude INFO "${U29_ABOVE} sits above the scratch project and suppresses AGENTS.md by design, so the row cannot discriminate on this host" live "CC-14:$U29_CC14" "CC-14b:$U29_CC14B"
+      else
+        if _want CC-14; then
+          (cd "$A" && _probe_run 240 claude -p --model sonnet --output-format json --tools "" -- "$U29_PROMPT" < /dev/null > "$O" 2> "$O.err") || true
+          U29_J=$(_u29_claude_json "$O")
+          U29_ANS=$(printf '%s' "$U29_J" | cut -f2-)
+          if printf '%s' "$U29_ANS" | grep -qF "$U29_MARK"; then
+            row "CC-14" "claude" "$U29_CC14" "PASS" "marker visible with every tool disabled (--tools \"\"; num_turns=$(printf '%s' "$U29_J" | cut -f1)); no CLAUDE.md in the project or above; user-tier ~/.claude/CLAUDE.md present: ${U29_USERMD}" "live"
+          elif [ -z "$U29_J" ] && { _auth_shaped "$O" || _auth_shaped "$O.err"; }; then
+            row "CC-14" "claude" "$U29_CC14" "AUTH-FAIL" "$(_evidence "$O.err") $(_evidence "$O")" "live"
+          else
+            row "CC-14" "claude" "$U29_CC14" "FAIL" "marker not visible — Triforge's AGENTS.md does not reach claude -p (D-038); answer: ${U29_ANS:-<none>}; $(_evidence "$O.err")" "live"
+          fi
+        fi
+        if _want CC-14b; then
+          printf '# Probe CLAUDE.md\n\nNothing to remember here.\n' > "$A/CLAUDE.md"
+          (cd "$A" && _probe_run 240 claude -p --model sonnet --output-format json --tools "" -- "$U29_PROMPT" < /dev/null > "$O.b" 2> "$O.b.err") || true
+          U29_J=$(_u29_claude_json "$O.b")
+          U29_ANS=$(printf '%s' "$U29_J" | cut -f2-)
+          if printf '%s' "$U29_ANS" | grep -qF "$U29_MARK"; then
+            row "CC-14b" "claude" "$U29_CC14B" "FAIL" "a CLAUDE.md beside AGENTS.md did NOT suppress it — re-read D-038 constraint 1 and the R40 notice; answer: ${U29_ANS}" "negative"
+          elif [ -n "$U29_J" ]; then
+            row "CC-14b" "claude" "$U29_CC14B" "PASS" "marker suppressed by the CLAUDE.md beside it (answer: ${U29_ANS:-<empty>})" "negative"
+          elif _auth_shaped "$O.b" || _auth_shaped "$O.b.err"; then
+            row "CC-14b" "claude" "$U29_CC14B" "AUTH-FAIL" "$(_evidence "$O.b.err") $(_evidence "$O.b")" "negative"
+          else
+            row "CC-14b" "claude" "$U29_CC14B" "FAIL" "no parsable answer: $(_evidence "$O.b.err") $(_evidence "$O.b")" "negative"
+          fi
+        fi
+      fi
+      rm -rf "$A"
+    else
+      if _want CC-14; then row "CC-14" "claude" "$U29_CC14" "$(_skip_reason)" "live probes disabled" "live"; fi
+      if _want CC-14b; then row "CC-14b" "claude" "$U29_CC14B" "$(_skip_reason)" "live probes disabled" "negative"; fi
+    fi
+  fi
+else
+  _u29_rows claude UNAVAILABLE "claude not on PATH" direct "CC-09:$U29_CC09" "CC-10:$U29_CC10" "CC-11:$U29_CC11" "CC-12:$U29_CC12" "CC-13:$U29_CC13" "CC-14:$U29_CC14" "CC-14b:$U29_CC14B"
+fi
+
+# ------- Codex: CDX-12 CDX-13 CDX-14 CDX-15 CDX-15b CDX-16 CDX-17 CDX-18
+U29_CDX12="Detached builder survives the end of an \`exec_command\` call and of the \`codex exec\` lead run (KTD10 launch; -s workspace-write)"
+U29_CDX13="Detached builder survives the lead's terminal closing (\`codex exec\` mid-turn in a pty, master closed: SIGHUP — headless stand-in for a closed TUI)"
+U29_CDX14="TMPDIR in a Codex lead's tool shell equals the caller's (two tool calls)"
+U29_CDX15="Host markers a \`codex exec\` lead adds to its tool shell's env (-s workspace-write; lead_host_detect input, U9)"
+U29_CDX15B="Host markers under a \`-s danger-full-access\` Codex lead (the registry's lead profile, D-047)"
+U29_CDX16="Plugin hooks fire in an env -i \`codex exec\` worker (scratch CODEX_HOME plugin; trust-gated: with and without --dangerously-bypass-hook-trust)"
+U29_CDX17="Worker marker visible in an env -i \`codex exec\` worker's tool shell (lane flags; probe variable at the lease boundary)"
+U29_CDX18="\`codex plugin marketplace add\` + \`codex plugin add\` lists the at-* skills from the .claude-plugin/ fallback (D-048; scratch CODEX_HOME)"
+if command -v codex >/dev/null 2>&1; then
+  if _want CDX-12 || _want CDX-14 || _want CDX-15; then
+    if [ "$CDX_LIVE" = 1 ]; then
+      D="$FIX/.u29-cdx-lead"; O="$WORK/u29-cdx-lead.txt"; LAST="$WORK/u29-cdx-lead-last.txt"
+      _u29_kit "$D"
+      U29_T0=$(date +%s)
+      (cd "$FIX" && _u29_lead 300 codex exec -C "$FIX" -s workspace-write -c 'approval_policy="never"' -m "$CDX_MODEL" -c 'model_reasoning_effort="low"' -o "$LAST" "Run these two shell commands as two separate tool calls, one after the other, exactly as written. Then reply with only: OK
+1. sh $D/launch.sh
+2. sh $D/check.sh" < /dev/null > "$O" 2>&1)
+      U29_RC=$?
+      U29_LEAD="lead rc=${U29_RC} after $(( $(date +%s) - U29_T0 ))s; -s workspace-write (danger-full-access, the registry's lead profile, needs a human-launched lead — R50)"
+      if [ ! -f "$D/detached.pid" ]; then
+        if _auth_shaped "$O"; then U29_OUTC=AUTH-FAIL; else U29_OUTC=FAIL; fi
+        _u29_rows codex "$U29_OUTC" "the lead never ran the launch command (${U29_LEAD}): $(_evidence "$O")" live "CDX-12:$U29_CDX12" "CDX-14:$U29_CDX14" "CDX-15:$U29_CDX15"
+      else
+        _u29_survival "$D"
+        if _want CDX-12; then
+          if [ "$U29_SV_OK" = 1 ]; then
+            row "CDX-12" "codex" "$U29_CDX12" "PASS" "${U29_SV}; ${U29_LEAD}" "live"
+          else
+            row "CDX-12" "codex" "$U29_CDX12" "FAIL" "${U29_SV}; ${U29_LEAD} — KTD10's fallback (coordinate.sh holds the processes) applies" "live"
+          fi
+        fi
+        if _want CDX-14; then
+          # Both tool calls' dumps are the two measurements: a missing one is
+          # a FAIL, as a launch command the lead never ran is for the siblings.
+          U29_T1="<not dumped: the first tool call did not run>"
+          U29_T2="<not dumped: the second tool call did not run>"
+          U29_OK=1
+          if [ -f "$D/env-1.txt" ]; then
+            _u29_tmpdir "$D/env-1.txt"
+            U29_T1=${U29_TMP:-<unset>}
+            [ "$U29_TD" = unchanged ] || U29_OK=0
+          else
+            U29_OK=0
+          fi
+          if [ -f "$D/env-2.txt" ]; then
+            _u29_tmpdir "$D/env-2.txt"
+            U29_T2=${U29_TMP:-<unset>}
+            [ "$U29_TD" = unchanged ] || U29_OK=0
+          else
+            U29_OK=0
+          fi
+          if [ "$U29_OK" = 1 ]; then
+            row "CDX-14" "codex" "$U29_CDX14" "PASS" "caller TMPDIR=${TMPDIR:-/tmp}; tool call 1: ${U29_T1}; tool call 2: ${U29_T2}; -s workspace-write" "live"
+          elif [ ! -f "$D/env-1.txt" ] || [ ! -f "$D/env-2.txt" ]; then
+            row "CDX-14" "codex" "$U29_CDX14" "FAIL" "caller TMPDIR=${TMPDIR:-/tmp}; tool call 1: ${U29_T1}; tool call 2: ${U29_T2} — the row needs both tool calls' environment dumps (${U29_LEAD}): $(_evidence "$O")" "live"
+          else
+            row "CDX-14" "codex" "$U29_CDX14" "FAIL" "caller TMPDIR=${TMPDIR:-/tmp}; tool call 1: ${U29_T1:-<unset>}; tool call 2: ${U29_T2:-<unset>} — paths and caches keyed on TMPDIR differ between the lead's shell and its caller" "live"
+          fi
+        fi
+        if _want CDX-15; then
+          U29_MK=$(_u29_markers "$D/env-1.txt")
+          case "$U29_MK" in
+            *CODEX*) row "CDX-15" "codex" "$U29_CDX15" "PASS" "${U29_MK} (lead started under the base allowlist, no worker marker; CODEX_SANDBOX* are sandbox-mode names; a codex exec worker carries the same CODEX_* names — see CDX-17)" "live" ;;
+            *) row "CDX-15" "codex" "$U29_CDX15" "FAIL" "no CODEX* name added to the tool shell: ${U29_MK}" "live" ;;
+          esac
+        fi
+      fi
+      rm -rf "$D"
+    else
+      _u29_rows codex "$(_skip_reason)" "live probes disabled" live "CDX-12:$U29_CDX12" "CDX-14:$U29_CDX14" "CDX-15:$U29_CDX15"
+    fi
+  fi
+
+  if _want CDX-15b; then
+    row "CDX-15b" "codex" "$U29_CDX15B" "UNAVAILABLE" "requires a human-launched danger-full-access lead (R50); CDX-15 records the workspace-write names, and which of them a danger-full-access session keeps is unverified" "deferred"
+  fi
+
+  if _want CDX-13; then
+    if [ "$CDX_LIVE" = 1 ]; then
+      D="$FIX/.u29-cdx-pty"; O="$WORK/u29-cdx-pty.txt"
+      _u29_kit "$D"
+      (cd "$FIX" && _u29_lead 300 python3 "$U29_PTY" "$O.log" "$D/midturn" 240 -- codex exec -C "$FIX" -s workspace-write -c 'approval_policy="never"' -m "$CDX_MODEL" -c 'model_reasoning_effort="low"' "Run these two shell commands as two separate tool calls, one after the other, exactly as written. Wait for the second one to finish. Then reply with only: OK
+1. sh $D/launch.sh
+2. sh $D/wait.sh" > "$O" 2>&1)
+      _u29_pty_row "CDX-13" "codex" "$U29_CDX13" "$D" "$O"
+      rm -rf "$D"
+    else
+      row "CDX-13" "codex" "$U29_CDX13" "$(_skip_reason)" "live probes disabled" "pty-hangup"
+    fi
+  fi
+
+  if _want CDX-16; then
+    if [ "$CDX_LIVE" = 1 ]; then
+      CH="$WORK/u29-cdx-home-hooks"; MK="$WORK/u29-cdx-mkt"; HM="$FIX/.u29-cdx-hookmarks"; O="$WORK/u29-cdx-hooks.txt"
+      mkdir -p "$CH" "$MK/.claude-plugin"
+      printf '{"name": "tf-probe", "owner": {"name": "triforge-probe"}, "plugins": [{"name": "tf-probe-hooks", "source": "./plugin", "description": "Triforge probe hooks"}]}\n' > "$MK/.claude-plugin/marketplace.json"
+      _u29_plugin "$MK/plugin" "$HM"
+      if [ "${#U29_CDX_FLAGS[@]}" -eq 0 ]; then
+        row "CDX-16" "codex" "$U29_CDX16" "FAIL" "could not read the codex lane flags (_lease_lane_argv codex) through scripts/invoke-external.sh" "marker-file"
+      elif (cd "$WORK" && _rwt 60 env CODEX_HOME="$CH" codex plugin marketplace add "$MK" && _rwt 120 env CODEX_HOME="$CH" codex plugin add tf-probe-hooks@tf-probe) > "$O.install" 2>&1; then
+        # The lane's flags; the scratch home has no login, so each run ends at
+        # the first model request (401).
+        (cd "$FIX" && _lane_run 120 env CODEX_HOME="$CH" "TRIFORGE_PROBE_WORKER=$U29_VAL" codex "${U29_CDX_FLAGS[@]}" --skip-git-repo-check -m "$CDX_MODEL" --dangerously-bypass-hook-trust "Respond with only: READY" < /dev/null > "$O" 2>&1) || true
+        _u29_hooks_seen "$HM"
+        U29_N1=$U29_FIRED; U29_E1=$U29_HOOKS
+        rm -f "$HM"/hook-*
+        (cd "$FIX" && _lane_run 120 env CODEX_HOME="$CH" "TRIFORGE_PROBE_WORKER=$U29_VAL" codex "${U29_CDX_FLAGS[@]}" --skip-git-repo-check -m "$CDX_MODEL" "Respond with only: READY" < /dev/null > "$O.2" 2>&1) || true
+        _u29_hooks_seen "$HM"
+        # PASS needs both controls: the bypass run fires a hook (positive) and
+        # the lane-flags run, untrusted, fires none (negative). Hooks firing
+        # without trust are a FAIL that says so: the gate the row names did
+        # not hold.
+        if [ "$U29_N1" -gt 0 ] && [ "$U29_FIRED" -eq 0 ]; then
+          row "CDX-16" "codex" "$U29_CDX16" "PASS" "with --dangerously-bypass-hook-trust: ${U29_E1}; lane flags alone (untrusted plugin hooks): ${U29_HOOKS} — plugin hooks are trust-gated, and the trust lives in the user's CODEX_HOME, which a lane worker reads through HOME; the scratch home has no login, so PreToolUse/Stop cannot fire there" "marker-file"
+        elif [ "$U29_FIRED" -gt 0 ]; then
+          row "CDX-16" "codex" "$U29_CDX16" "FAIL" "fires without trust: lane flags alone, untrusted plugin hooks: ${U29_HOOKS}; with --dangerously-bypass-hook-trust: ${U29_E1} — the trust gate did not hold, so a lane worker runs installed plugins' hooks and the worker-marker early exit (U11) is the only guard" "marker-file"
+        elif _auth_shaped "$O"; then
+          row "CDX-16" "codex" "$U29_CDX16" "UNAVAILABLE" "no hook fired before the scratch home's missing login stopped the run; a live check needs the plugin in the user's CODEX_HOME (user-tier, R18): $(_evidence "$O")" "marker-file"
+        else
+          row "CDX-16" "codex" "$U29_CDX16" "FAIL" "no plugin hook fired even with --dangerously-bypass-hook-trust: $(_evidence "$O")" "marker-file"
+        fi
+      else
+        row "CDX-16" "codex" "$U29_CDX16" "FAIL" "could not install the scratch plugin into a scratch CODEX_HOME: $(_evidence "$O.install")" "marker-file"
+      fi
+      rm -rf "$CH" "$MK" "$HM"
+    else
+      row "CDX-16" "codex" "$U29_CDX16" "$(_skip_reason)" "live probes disabled" "marker-file"
+    fi
+  fi
+
+  if _want CDX-17; then
+    if [ "$CDX_LIVE" = 1 ]; then
+      D="$FIX/.u29-cdx-worker"; O="$WORK/u29-cdx-worker.txt"
+      if [ "${#U29_CDX_FLAGS[@]}" -eq 0 ]; then
+        row "CDX-17" "codex" "$U29_CDX17" "FAIL" "could not read the codex lane flags (_lease_lane_argv codex) through scripts/invoke-external.sh" "live"
+      else
+        _u29_dumper "$D"
+        (cd "$FIX" && _lane_run 300 env "TRIFORGE_PROBE_WORKER=$U29_VAL" codex "${U29_CDX_FLAGS[@]}" --skip-git-repo-check -m "$CDX_MODEL" -c 'model_reasoning_effort="low"' "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
+        _u29_marker_verdict "CDX-17" "codex" "$U29_CDX17" "$D/env-worker.txt" "$O" "lane flags (_lease_lane_argv codex): -s workspace-write with TMPDIR and /tmp excluded"
+        rm -rf "$D"
+      fi
+    else
+      row "CDX-17" "codex" "$U29_CDX17" "$(_skip_reason)" "live probes disabled" "live"
+    fi
+  fi
+
+  # CDX-18 needs no login and no model: the app-server's skills/list and
+  # hooks/list answer from the scratch CODEX_HOME, and `codex debug
+  # prompt-input` renders the model-visible skill list.
+  if _want CDX-18; then
+    CH="$WORK/u29-cdx-home-d048"; E18="$WORK/u29-cdx18-empty"; O="$WORK/u29-cdx18.txt"
+    mkdir -p "$CH" "$E18"
+    U29_PLUGIN=$(U29_IN="$REPO_ROOT/.claude-plugin/plugin.json" python3 -c 'import json, os; print(json.load(open(os.environ["U29_IN"]))["name"])' 2>/dev/null)
+    U29_MANIFEST=".claude-plugin/plugin.json (no .codex-plugin/)"
+    if [ -e "$REPO_ROOT/.codex-plugin/plugin.json" ]; then U29_MANIFEST=".codex-plugin/plugin.json present — Codex reads it before the .claude-plugin/ fallback"; fi
+    U29_MKT=""
+    if (cd "$E18" && _rwt 60 env CODEX_HOME="$CH" codex plugin marketplace add "$REPO_ROOT" --json) > "$O.mkt" 2>&1; then
+      U29_MKT=$(U29_IN="$O.mkt" python3 -c 'import json, os; s = open(os.environ["U29_IN"]).read(); print(json.loads(s[s.find("{"):])["marketplaceName"])' 2>/dev/null)
+    fi
+    if [ -z "$U29_MKT" ] || [ -z "$U29_PLUGIN" ]; then
+      row "CDX-18" "codex" "$U29_CDX18" "FAIL" "codex plugin marketplace add $REPO_ROOT did not register a marketplace (plugin name: ${U29_PLUGIN:-unreadable}): $(_evidence "$O.mkt") — Phase 3 stops until a fallback is designed" "static"
+    elif ! (cd "$E18" && _rwt 120 env CODEX_HOME="$CH" codex plugin add "${U29_PLUGIN}@${U29_MKT}" --json) > "$O.add" 2>&1; then
+      row "CDX-18" "codex" "$U29_CDX18" "FAIL" "codex plugin add ${U29_PLUGIN}@${U29_MKT} failed: $(_evidence "$O.add") — Phase 3 stops until a fallback is designed" "static"
+    else
+      cat > "$WORK/u29-appsrv.py" <<'PYEOF'
+import json, os, select, subprocess, sys, time
+cwd = sys.argv[1]
+p = subprocess.Popen(['codex', 'app-server'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                     stderr=subprocess.DEVNULL, cwd=cwd)
+got = {}
+try:
+    for msg in ({'id': 1, 'method': 'initialize', 'params': {'clientInfo': {'name': 'triforge-probe', 'version': '0'}}},
+                {'method': 'initialized'},
+                {'id': 2, 'method': 'skills/list', 'params': {'cwds': [cwd], 'forceReload': True}},
+                {'id': 3, 'method': 'hooks/list', 'params': {'cwds': [cwd]}}):
+        p.stdin.write((json.dumps(msg) + '\n').encode())
+    p.stdin.flush()
+    deadline = time.time() + float(sys.argv[2])
+    while len(got) < 3 and time.time() < deadline:
+        r, _, _ = select.select([p.stdout], [], [], 1)
+        if not r:
+            continue
+        line = p.stdout.readline()
+        if not line:
+            break
+        try:
+            o = json.loads(line)
+        except Exception:
+            continue
+        if o.get('id') in (1, 2, 3):
+            got[o['id']] = o
+finally:
+    p.kill()
+print(json.dumps({str(k): v for k, v in got.items()}))
+PYEOF
+      (cd "$E18" && _rwt 60 env CODEX_HOME="$CH" python3 "$WORK/u29-appsrv.py" "$E18" 45) > "$O.app" 2> "$O.app.err" || true
+      (cd "$E18" && _rwt 60 env CODEX_HOME="$CH" codex debug prompt-input) > "$O.prompt" 2>/dev/null || true
+      U29_V=$(U29_APP="$O.app" U29_PROMPT="$O.prompt" U29_PID="${U29_PLUGIN}@${U29_MKT}" U29_NAME="$U29_PLUGIN" U29_WANT="$SHIPPED_LEAD_WORKFLOWS" python3 - <<'PYEOF' 2>/dev/null
+import json, os, re
+pid, name = os.environ['U29_PID'], os.environ['U29_NAME']
+want = os.environ['U29_WANT'].split()
+try:
+    app = json.load(open(os.environ['U29_APP']))
+except Exception:
+    app = {}
+skills = None
+if 'result' in app.get('2', {}):
+    skills = set()
+    for ent in app['2']['result'].get('data', []):
+        for s in ent.get('skills', []):
+            if s.get('pluginId') == pid and s.get('enabled'):
+                skills.add(s.get('name', '').split(':')[-1])
+hooks = []
+for ent in app.get('3', {}).get('result', {}).get('data', []):
+    hooks += [h for h in ent.get('hooks', []) if h.get('pluginId') == pid]
+visible = []
+try:
+    for item in json.load(open(os.environ['U29_PROMPT'])):
+        for c in item.get('content', []) or []:
+            if isinstance(c, dict):
+                visible += re.findall(r'^- ' + re.escape(name) + r':(at-[a-z0-9-]+):', c.get('text', ''), re.M)
+except Exception:
+    visible = None
+if skills is None:
+    print('ERR\tskills/list unanswered (app-server keys: ' + ','.join(sorted(app)) + ')')
+else:
+    missing = [w for w in want if w not in skills]
+    miss_s = ' '.join(missing) or '-'
+    events = sorted(set(h.get('eventName', '?') for h in hooks))
+    trust = sorted(set(str(h.get('trustStatus')) for h in hooks))
+    vis = 'unreadable' if visible is None else str(len(set(visible))) + ' (' + ' '.join(sorted(set(visible))) + ')'
+    print(('MISSING' if missing else 'OK') + '\t' + str(len(want) - len(missing)) + '/' + str(len(want))
+          + '\t' + miss_s + '\t' + str(len(hooks)) + ' (' + ' '.join(events) + '; trustStatus=' + ','.join(trust or ['-']) + ')'
+          + '\t' + vis)
+PYEOF
+)
+      IFS="$(printf '\t')" read -r U29_ST U29_N U29_MISS U29_HK U29_VIS <<EOF
+$U29_V
+EOF
+      case "$U29_ST" in
+        OK)
+          row "CDX-18" "codex" "$U29_CDX18" "PASS" "app-server skills/list: ${U29_N} at-* skills listed under ${U29_PLUGIN}@${U29_MKT}, enabled; manifest: ${U29_MANIFEST}; hooks/list: ${U29_HK} plugin hooks; model-visible at-* (debug prompt-input): ${U29_VIS} — the disable-model-invocation skills stay registered but out of the model's list" "static" ;;
+        MISSING)
+          row "CDX-18" "codex" "$U29_CDX18" "FAIL" "app-server skills/list: ${U29_N} at-* skills under ${U29_PLUGIN}@${U29_MKT}; missing: ${U29_MISS}; manifest: ${U29_MANIFEST} — Phase 3 stops until a fallback (e.g. a schema-less .codex-plugin/plugin.json) is designed" "static" ;;
+        *)
+          row "CDX-18" "codex" "$U29_CDX18" "FAIL" "the skill list could not be read (${U29_N:-no app-server answer}; stderr: $(_evidence "$O.app.err")); the plugin installed (${U29_PLUGIN}@${U29_MKT}) — judge before treating this as the Phase 3 stop" "static" ;;
+      esac
+    fi
+    rm -rf "$CH" "$E18"
+  fi
+else
+  _u29_rows codex UNAVAILABLE "codex not on PATH" direct "CDX-12:$U29_CDX12" "CDX-13:$U29_CDX13" "CDX-14:$U29_CDX14" "CDX-15:$U29_CDX15" "CDX-15b:$U29_CDX15B" "CDX-16:$U29_CDX16" "CDX-17:$U29_CDX17" "CDX-18:$U29_CDX18"
+fi
+
+# ------- Worker marker in the other lanes: AGY-17 OC-09 KIMI-10 CUR-13
+# Each runs the lane's own argv (_lease_lane_argv in scripts/lib/lease-wait.sh,
+# read through the loader into U29_ARGV_*) under _lane_run plus the probe
+# variable.
+U29_AGY17="Worker marker visible in an env -i agy worker's tool shell (probe variable at the lease boundary)"
+U29_OC09="Worker marker visible in an env -i opencode worker's tool shell (probe variable at the lease boundary)"
+U29_KIMI10="Worker marker visible in an env -i kimi worker's tool shell (probe variable at the lease boundary)"
+U29_CUR13="Worker marker visible in an env -i cursor worker's tool shell (probe variable at the lease boundary)"
+if _want AGY-17; then
+  if ! command -v agy >/dev/null 2>&1; then
+    row "AGY-17" "agy" "$U29_AGY17" "UNAVAILABLE" "agy not on PATH" "direct"
+  elif [ "$AGY_LIVE" != 1 ]; then
+    row "AGY-17" "agy" "$U29_AGY17" "$(_skip_reason)" "gated on AGY-04" "live"
+  else
+    D="$FIX/.u29-agy-worker"; O="$WORK/u29-agy-worker.txt"
+    if [ "${#U29_ARGV_AGY[@]}" -eq 0 ]; then
+      row "AGY-17" "agy" "$U29_AGY17" "FAIL" "could not read the agy lane argv (_lease_lane_argv antigravity) through scripts/invoke-external.sh" "live"
+    else
+      _u29_dumper "$D"
+      (cd "$FIX" && _lane_run 300 env "TRIFORGE_PROBE_WORKER=$U29_VAL" "${U29_ARGV_AGY[@]}" "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
+      U29_NOTE="lane argv: $(_u29_argv_note "${U29_ARGV_AGY[@]}") (no skip flag)"
+      if [ ! -f "$D/env-worker.txt" ]; then
+        # Headless agy auto-denies a shell call no user-tier allow rule covers;
+        # the rerun (the skip flag ahead of the argv's closing -p) asks whether
+        # the variable reaches its tool shell at all.
+        U29_DEN=$(_agy_envelope "$O" | sed -nE 's/.* denied=([^ ]*) .*/\1/p')
+        (cd "$FIX" && _lane_run 300 env "TRIFORGE_PROBE_WORKER=$U29_VAL" "${U29_ARGV_AGY[@]:0:$((${#U29_ARGV_AGY[@]} - 1))}" --dangerously-skip-permissions -p "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O.2" 2>&1) || true
+        U29_NOTE="lane argv: the shell call was auto-denied (denied_actions=${U29_DEN:-none parsed}), so a lane worker has no tool shell without a user-tier allow rule; rerun with --dangerously-skip-permissions"
+        O="$O.2"
+      fi
+      _u29_marker_verdict "AGY-17" "agy" "$U29_AGY17" "$D/env-worker.txt" "$O" "$U29_NOTE"
+      rm -rf "$D"
+    fi
+  fi
+fi
+if _want OC-09; then
+  if ! command -v opencode >/dev/null 2>&1; then
+    row "OC-09" "opencode" "$U29_OC09" "UNAVAILABLE" "opencode not on PATH" "direct"
+  elif [ "$(_u29_reg ocv2)" != v1 ]; then
+    row "OC-09" "opencode" "$U29_OC09" "UNAVAILABLE" "the lease lane refuses this OpenCode ($(_u29_reg ocv2); D-049 guard), so no opencode worker runs" "direct"
+  elif [ "$OC_LIVE" != 1 ]; then
+    row "OC-09" "opencode" "$U29_OC09" "$(_skip_reason)" "gated on OC-03" "live"
+  else
+    D="$FIX/.u29-oc-worker"; O="$WORK/u29-oc-worker.txt"
+    if [ "${#U29_ARGV_OC[@]}" -eq 0 ]; then
+      row "OC-09" "opencode" "$U29_OC09" "FAIL" "could not read the opencode lane argv (_lease_lane_argv opencode) through scripts/invoke-external.sh" "live"
+    else
+      _u29_dumper "$D"
+      U29_OCPERM=$(_u29_reg ocperm)
+      (cd "$FIX" && _lane_run 240 env "TRIFORGE_PROBE_WORKER=$U29_VAL" ${OPENROUTER_API_KEY+"OPENROUTER_API_KEY=$OPENROUTER_API_KEY"} ${U29_OCPERM:+"OPENCODE_PERMISSION=$U29_OCPERM"} "${U29_ARGV_OC[@]}" "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
+      _u29_marker_verdict "OC-09" "opencode" "$U29_OC09" "$D/env-worker.txt" "$O" "lane argv: $(_u29_argv_note "${U29_ARGV_OC[@]}"), the shipped OPENCODE_PERMISSION deny set"
+      rm -rf "$D"
+    fi
+  fi
+fi
+if _want KIMI-10; then
+  if ! command -v kimi >/dev/null 2>&1; then
+    row "KIMI-10" "kimi" "$U29_KIMI10" "UNAVAILABLE" "kimi not on PATH" "direct"
+  elif [ "$KIMI_LIVE" != 1 ]; then
+    row "KIMI-10" "kimi" "$U29_KIMI10" "$(_skip_reason)" "gated on KIMI-05" "live"
+  else
+    D="$FIX/.u29-kimi-worker"; O="$WORK/u29-kimi-worker.txt"
+    if [ "${#U29_ARGV_KIMI[@]}" -eq 0 ]; then
+      row "KIMI-10" "kimi" "$U29_KIMI10" "FAIL" "could not read the kimi lane argv (_lease_lane_argv kimi) through scripts/invoke-external.sh" "live"
+    else
+      _u29_dumper "$D"
+      (cd "$FIX" && _lane_run 240 env "TRIFORGE_PROBE_WORKER=$U29_VAL" "${U29_ARGV_KIMI[@]}" "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
+      _u29_marker_verdict "KIMI-10" "kimi" "$U29_KIMI10" "$D/env-worker.txt" "$O" "lane argv: $(_u29_argv_note "${U29_ARGV_KIMI[@]}" | sed "s|${REPO_ROOT}|<plugin root>|g")"
+      rm -rf "$D"
+    fi
+  fi
+fi
+if _want CUR-13; then
+  if [ -z "$CUR_BIN" ]; then
+    row "CUR-13" "cursor" "$U29_CUR13" "UNAVAILABLE" "no Cursor binary on PATH (cursor-agent, or an agent whose --version is Cursor-formatted)" "direct"
+  elif [ "$CUR_LIVE" != 1 ]; then
+    row "CUR-13" "cursor" "$U29_CUR13" "$(_skip_reason)" "gated on CUR-04" "live"
+  elif [ "${#U29_ARGV_CUR[@]}" -eq 0 ]; then
+    row "CUR-13" "cursor" "$U29_CUR13" "FAIL" "could not read the cursor lane argv (_lease_lane_argv cursor) through scripts/invoke-external.sh" "live"
+  else
+    D="$FIX/.u29-cur-worker"; O="$WORK/u29-cur-worker.txt"
+    _u29_dumper "$D"
+    (cd "$FIX" && _lane_run 240 env "TRIFORGE_PROBE_WORKER=$U29_VAL" ${CURSOR_API_KEY+"CURSOR_API_KEY=$CURSOR_API_KEY"} "${U29_ARGV_CUR[@]}" "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
+    _u29_marker_verdict "CUR-13" "cursor" "$U29_CUR13" "$D/env-worker.txt" "$O" "lane argv: $(basename "$CUR_BIN") $(_u29_argv_note "${U29_ARGV_CUR[@]}")"
+    rm -rf "$D"
+  fi
+fi
+
+fi  # end of the lead capability and survival section skipped by --self-only
+
 # --------------------------------------------------------- Self-verification
 # Framework SCRIPT invariants (SELF-01..SELF-10, SELF-18) live in
 # scripts/probe-self-tests.sh, sourced here inside the same shell so they see every helper and
 # gate above. They are static (no external CLI, no network) except SELF-06,
 # which reproduces the lease lane per CLI and is gated on each CLI's live gate.
-# shellcheck source=probe-self-tests.sh
-source "${REPO_ROOT}/scripts/probe-self-tests.sh"
+# --only runs none of them.
+if [ -z "$ONLY" ]; then
+  # shellcheck source=probe-self-tests.sh
+  source "${REPO_ROOT}/scripts/probe-self-tests.sh"
+fi
 
 # --------------------------------------------------------------------------
 # Escape check
@@ -1666,7 +2637,7 @@ COUNTER_MISMATCH=0
   echo
   echo "**Generated:** $RUN_TS by \`scripts/probe-capabilities.sh\` (rerunnable; \`/cli-watch\` re-runs it each cycle)"
   echo "**Host:** $(uname -s) $(uname -r); timeout via \`$TIMEOUT_NAME\`"
-  echo "**Mode:** $(if [ "$SELF_ONLY" = "1" ]; then echo "self-only (SELF rows only — the KTD15 gate; scratch record, not committed)"; elif [ "$SKIP_LIVE" = "1" ]; then echo "skip-live (no model calls)"; else echo "full (live probes)"; fi)"
+  echo "**Mode:** $(if [ "$SELF_ONLY" = "1" ]; then echo "self-only (SELF rows only — the KTD15 gate; scratch record, not committed)"; elif [ -n "$ONLY" ]; then echo "only ${ONLY}$( [ "$SKIP_LIVE" = "1" ] && echo ", skip-live") (named lead-capability rows only; scratch record, not committed)"; elif [ "$SKIP_LIVE" = "1" ]; then echo "skip-live (no model calls)"; else echo "full (live probes)"; fi)"
   echo
   echo "Outcome vocabulary: **PASS** capability demonstrated · **FAIL** capability absent or not demonstrated (consuming units take their documented fallback) · **UNAVAILABLE** CLI not installed · **AUTH-FAIL** CLI present but not authenticated on this machine · **QUOTA-FAIL** CLI authenticated but the provider's usage quota is exhausted this cycle (dependent rows gate on it, not on a login) · **SKIPPED / SKIPPED-GATED** not run (\`--skip-live\` or gated on a failed READY probe) · **PENDING-U15** resolved by a later unit, with the absorbing design noted · **PENDING-AUTH** a live row that needs a login this sprint never performs (R18), with the exact command to run afterwards · **INFO** an honest boundary note, not a pass/fail (e.g. a by-design non-confinement recorded so the record does not overclaim)."
   echo
@@ -1703,7 +2674,7 @@ COUNTER_MISMATCH=0
   echo "- **AGY-15** → the \`--output-format json\` envelope (status, response, denied_actions) that \`invoke_antigravity\` parses instead of trusting exit 0 (KTD2, D-032)."
   echo "- **CDX-02** → \`codex features list\` replaces version-string detection."
   echo "- **CDX-03/CDX-05/CDX-06/CDX-07/CDX-08** → the \`gpt-6-astra\` pin (D-021): READY, \`--output-schema\` verdicts, max/ultra acceptance (commented opt-ins only where accepted), and the read-only reviewer sandbox on Astra (the ADR open watch)."
-  echo "- **CDX-04** → hooks under \`codex exec\` with \`--dangerously-bypass-hook-trust\` in an untrusted fixture (\`templates/.codex/hooks.json\` ships on the strength of this row)."
+  echo "- **CDX-04** → hooks under \`codex exec\` with \`--dangerously-bypass-hook-trust\` in an untrusted fixture, the probe's stand-in for a trusted hook (CDX-16 and SELF-15c pass the flag for the same reason). \`invoke_codex\` no longer passes it, and the shipped \`templates/.codex/hooks.json\` holds no hooks, so project and plugin hooks go through Codex's own trust under \`exec\`."
   echo "- **CDX-09/CDX-09b** → \`\$<skill>\` expansion under \`exec\` from the fixture and from a linked worktree under TMPDIR — the lease lane's shape (linked worktrees inherit root trust, D-026)."
   echo "- **CDX-10** → the project trust gate: AGENTS.md marker visibility with/without a \`[projects.\"<abs>\"]\` trust entry; INFO when no entry exists (R18: the sprint writes no user-tier setting; at-setup reports trust without writing it)."
   echo "- **CDX-11/CDX-11b** → \`.codex/triforge-agents.toml\` is the deployed name (D-026/KTD5): no \"malformed agent role\" sweep warning; 11b is the control that the old \`.codex/agents/agents.toml\` location still triggers it."
@@ -1720,8 +2691,16 @@ COUNTER_MISMATCH=0
   echo "- **CC-05** → monitors parity not demonstrated ⇒ context-monitor.sh and tool-failure-monitor.sh stay, with this row as the recorded reason."
   echo "- **CC-06** → \`claude plugin validate --strict\` release gate baseline — \`.claude-plugin/plugin.json\` and \`.claude-plugin/marketplace.json\` validated separately, PASS only when both pass (D-039)."
   echo "- **CC-07/CC-07b** → \`.claude/skills/\` expands via \`/<skill>\`; \`.agents/skills/\` is not a Claude path (the plugin path carries the shipped skills — KTD13 discovery matrix)."
+  echo "- **CC-09/CDX-12** → KTD10's detached launch (U13): a builder started through python3 in its own session outlives the lead's tool call and the end of a \`claude -p\` / \`codex exec\` lead run; the in-shell \`&\` control shows what an undetached job does. A FAIL means \`coordinate.sh\` holds the processes (the KTD10 fallback)."
+  echo "- **CC-10/CDX-13** → the same builder survives a terminal hangup of the lead (pty closed mid-turn), the headless stand-in for a closed TUI (U13's lead-exit path)."
+  echo "- **CC-11/CDX-15/CDX-15b** → the host markers \`lead_host_detect\` reads (U9): the names each lead adds to its tool shell. Workers of the same CLI carry the same names (CC-13/CDX-17 evidence), so only the worker marker tells a worker from a lead. CDX-15b (danger-full-access) needs a human-launched lead (R50)."
+  echo "- **CDX-14** → TMPDIR under a Codex lead: lease paths and per-session caches keyed on it resolve the same in the lead's tool shell as in its caller."
+  echo "- **CC-12/CDX-16** → plugin hooks fire in env -i workers, so the shipped hook handlers must exit early under the worker marker (U11, KTD9); Codex plugin hooks are trust-gated (CDX-16 PASS: the bypass run fires a hook and the untrusted lane run fires none; a FAIL that says \"fires without trust\" means the worker-marker exit is the only guard)."
+  echo "- **CC-13/CDX-17/AGY-17/OC-09/KIMI-10/CUR-13** → a variable set at the lease boundary reaches each worker CLI's tool shell, which is where U11's worker marker has to be seen (KTD9)."
+  echo "- **CC-14/CC-14b** → D-038: \`claude -p\` loads the root AGENTS.md when no CLAUDE.md exists, and a CLAUDE.md beside it suppresses it (the R40 upgrade notice)."
+  echo "- **CDX-18** → D-048: one plugin tree serves Codex through the \`.claude-plugin/\` fallback (R20). A FAIL stops Phase 3 until a fallback, such as a schema-less \`.codex-plugin/plugin.json\`, is designed."
   echo "- **RTN-01** → headless watch delivery mode; runtime preflight absorbs all three outcomes."
-  echo "- **SELF-01..SELF-04** → roster chain rejection, coordinate.sh composition, adapter env allowlist, the R35 boundary. **SELF-05** → the Status-line parser seam (KTD11: DONE / MISSING / BLOCKED). **SELF-06** → lease-lane skill discovery per CLI under the env -i boundary (KTD7/R9; PASS = the probe skill is listed, shipped coverage in the evidence). **SELF-07** → the TRIFORGE_TEST_BUILDER lifecycle: DONE → review, report missing → never review-ready, BLOCKED → escalated (KTD11). **SELF-08** → session-start idempotence (KTD7/KTD8) and the upgrade notices: the 2.1.277 floor, a stale 3.x template copy, a CLAUDE.md above the project (R40). **SELF-08b** → the digest-stamped skills refresh: only Triforge's own unchanged copies are replaced or retired, in session start and lease provisioning alike (KTD12/R31). **SELF-09** → the no-push backstop (CS1). **SELF-10** → the protected-path lists in \`scripts/lib/registry.sh\` and the fail-closed scan in \`lease_promote\` (KTD8/R30). **SELF-18** → lead-side git hardening (\`_lead_git\`), integrity detection with restore and escalation, and snapshot-only merges (KTD18/KTD19, R46/R47/R49). Under \`--self-only\` these rows are the whole run and any SELF FAIL exits 3 (KTD15)."
+  echo "- **SELF-01..SELF-04** → roster chain rejection, coordinate.sh composition, adapter env allowlist, the R35 boundary. **SELF-05** → the Status-line parser seam (KTD11: DONE / MISSING / BLOCKED). **SELF-06** → lease-lane skill discovery per CLI under the env -i boundary (KTD7/R9; PASS = the probe skill is listed, shipped coverage in the evidence). **SELF-07** → the TRIFORGE_TEST_BUILDER lifecycle: DONE → review, report missing → never review-ready, BLOCKED → escalated (KTD11). **SELF-08** → session-start idempotence (KTD7/KTD8) and the upgrade notices: the 2.1.277 floor, a stale 3.x template copy, a CLAUDE.md above the project (R40). **SELF-08b** → the digest-stamped skills refresh: only Triforge's own unchanged copies are replaced or retired, in session start and lease provisioning alike (KTD12/R31). **SELF-09** → the no-push backstop (CS1). **SELF-10** → the protected-path lists in \`scripts/lib/registry.sh\` and the fail-closed scan in \`lease_promote\` (KTD8/R30). **SELF-18** → lead-side git hardening (\`_lead_git\`), integrity detection with restore and escalation, and snapshot-only merges (KTD18/KTD19, R46/R47/R49). **SELF-19** → detached builders (pid == pgid, a start-time fingerprint), \`lease_wait\` within the lead's \`wait_budget_s\`, and the lead-exit reconcile (KTD10, R36/R38). Under \`--self-only\` these rows are the whole run and any SELF FAIL exits 3 (KTD15)."
   echo
   echo "## Appendix A: codex features list"
   echo
@@ -1774,7 +2753,7 @@ if [ "$SELF_ONLY" = "1" ]; then
   # Every expected row must be present: a `return` or an early exit in the
   # sourced self-tests would otherwise drop the rows after it and still pass.
   # A new SELF row joins this list in the commit that adds it.
-  SELF_EXPECTED="SELF-01 SELF-02 SELF-03 SELF-04 SELF-05 SELF-06a SELF-06b SELF-06c SELF-06d SELF-06e SELF-06f SELF-07 SELF-08 SELF-08b SELF-09 SELF-10 SELF-11 SELF-18"
+  SELF_EXPECTED="SELF-01 SELF-02 SELF-03 SELF-04 SELF-05 SELF-06a SELF-06b SELF-06c SELF-06d SELF-06e SELF-06f SELF-07 SELF-08 SELF-08b SELF-09 SELF-10 SELF-11 SELF-15 SELF-15b SELF-15c SELF-18 SELF-19"
   SELF_MISSING=""
   for SELF_ID in $SELF_EXPECTED; do
     if ! cut -f1 "$ROWS" | grep -qx "$SELF_ID"; then SELF_MISSING="${SELF_MISSING}${SELF_MISSING:+ }${SELF_ID}"; fi

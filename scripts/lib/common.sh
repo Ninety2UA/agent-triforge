@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/common.sh — shared helpers: the host-marker scrub, the fail-closed timeout wrapper, output scrubbing, the KTD-9 failure classifier, and the agy/codex listing + feature-detection helpers
+# scripts/lib/common.sh — shared helpers: the host-marker scrub, the fail-closed timeout wrapper, output scrubbing, the KTD-9 failure classifier, the worker-marker guard (_lead_only), and the agy/codex listing + feature-detection helpers
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh. Every function keeps the name and
@@ -116,6 +116,69 @@ _classify_invoke_failure() {
   else
     INVOKE_FAILURE_CLASS="retryable"
   fi
+}
+
+# ---------------------------------------------------------------------------
+# Worker marker (KTD9, R34) — lead-owned helpers refuse inside a worker
+# ---------------------------------------------------------------------------
+#
+# _adapter_env (scripts/lib/lease.sh) puts TRIFORGE_LEASE_WORKER into every
+# lease worker's environment: `builder` for a lease build, `persona` for a
+# persona dispatch (U25's dispatch_persona will set _ADAPTER_WORKER=persona).
+# Any non-empty value counts as the marker. The hook handlers exit at once
+# under it, and every helper that carves, dispatches, collects, merges,
+# promotes or writes the ledger or the roster (lease.sh, roster.sh) starts with
+# _lead_only, which refuses under the marker or when the current directory is
+# inside a lease root. It lives here, loaded before both. It guards against
+# accidents (a worker that sources this library and runs lease_create in its
+# worktree); it is not a security boundary. A worker that unsets the variable
+# and leaves its worktree passes it, and what it then writes is caught only
+# after the fact, by the integrity check and the snapshot-only merge.
+_RC_LEAD_ONLY=45
+
+# The first line of every lease root's lead/gitconfig: lease.sh's
+# _lead_gitconfig_capture writes it, _lease_root_above recognizes a lease root
+# by it. Keep the bytes.
+_LEAD_GITCONFIG_SIGNATURE='# Triforge trusted git config'
+
+# _lead_only <helper> — 0 in a lead context; otherwise one stderr line naming
+# the reason and rc _RC_LEAD_ONLY.
+_lead_only() {
+  local ROOT
+  if [ -n "${TRIFORGE_LEASE_WORKER:-}" ]; then
+    echo "${1}: REFUSED — a lead-only helper, called from a lease worker (TRIFORGE_LEASE_WORKER=${TRIFORGE_LEASE_WORKER}); a worker reports back in its final report and the lead runs the lease and roster helpers (KTD9, rc ${_RC_LEAD_ONLY})" >&2
+    return "$_RC_LEAD_ONLY"
+  fi
+  if ROOT=$(_lease_root_above); then
+    echo "${1}: REFUSED — a lead-only helper, called from inside the lease root ${ROOT} (a lease worktree); run it from the lead's checkout (KTD9, rc ${_RC_LEAD_ONLY})" >&2
+    return "$_RC_LEAD_ONLY"
+  fi
+  return 0
+}
+
+# _lease_root_above — print the lease root the current directory is inside,
+# rc 1 when it is in none: the nearest ancestor (physical path) holding
+# lead/gitconfig whose first line starts with _LEAD_GITCONFIG_SIGNATURE. Found
+# by that file, not by the root's path, so it holds whatever TMPDIR or
+# TRIFORGE_LEASE_ROOT say now; and without git, which from a lease worktree
+# answers for the worktree, not the lead. The pattern is quoted, so it matches
+# literally under bash and zsh (where an unquoted # is a glob operator).
+_lease_root_above() {
+  local D H
+  D=$(pwd -P 2>/dev/null) || return 1
+  while :; do
+    H=""
+    if [ -f "${D}/lead/gitconfig" ]; then
+      IFS= read -r H 2>/dev/null < "${D}/lead/gitconfig" || true
+    fi
+    case "$H" in
+      "${_LEAD_GITCONFIG_SIGNATURE}"*) printf '%s\n' "${D:-/}"; return 0 ;;
+    esac
+    if [ -z "$D" ] || [ "$D" = "/" ]; then
+      return 1
+    fi
+    D=${D%/*}
+  done
 }
 
 # Raw `agy agents` listing (native agents come from installed agy plugins

@@ -1,0 +1,25 @@
+{
+  "name": "agent-triforge",
+  "private": true,
+  "description": "Agent Triforge's portable skills for Pi: codebase mapping, plan writing, shadow-path tracing, wave orchestration, review synthesis, iterative refinement, verification before completion, knowledge compounding, session continuity and scope cutting. The at-* lead workflows ship only with the Claude Code and Codex plugin.",
+  "author": {
+    "name": "Ninety2UA",
+    "url": "https://github.com/Ninety2UA"
+  },
+  "repository": "https://github.com/Ninety2UA/agent-triforge",
+  "license": "MIT",
+  "pi": {
+    "skills": [
+      "./skills/codebase-mapping",
+      "./skills/iterative-refinement",
+      "./skills/knowledge-compounding",
+      "./skills/review-synthesis",
+      "./skills/scope-cutting",
+      "./skills/session-continuity",
+      "./skills/shadow-path-tracing",
+      "./skills/verification-before-completion",
+      "./skills/wave-orchestration",
+      "./skills/writing-plans"
+    ]
+  }
+}

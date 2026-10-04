@@ -32,7 +32,7 @@ A production-grade framework that turns Claude Code into a **lead agent** orches
 
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** is the lead — it plans, resolves the roster, dispatches builders, and merges reviewed work (ladder: Fable 5.1 → Opus 5.5 → Sonnet 5)
 - **Core trio (required):** Claude · **[Antigravity](https://antigravity.google/cli)** (`agy`, Gemini 3.8 Flash (High) by default, 1M context) · **[Codex](https://github.com/openai/codex)** (`gpt-6-astra`, sandboxed)
-- **Optional tier (auto-detected):** **OpenCode** (OpenRouter `glm-5.3`) · **Kimi Code** (`kimi-code/k3`) · **Cursor** (Grok 4.6) — enrolled through [`at-setup`](skills/at-setup/SKILL.md), gracefully absent when not
+- **Optional tier (auto-detected):** **OpenCode** (OpenRouter `glm-5.3`) · **Kimi Code** (`kimi-code/k3`) · **Cursor** (Grok 4.6), enrolled through [`at-setup`](skills/at-setup/SKILL.md) and skipped cleanly when not enrolled
 - **19 Claude specialized agents** provide deep expertise in [security](agents/security-sentinel.md), [performance](agents/performance-oracle.md), [architecture](agents/architecture-strategist.md), and more
 
 Every non-lead build runs under a **per-task lease in an isolated git worktree** and merges only after **cross-review by a pinned non-author reviewer** — safety is isolation + cross-review, not write-restriction. Work is tracked in shared markdown files. Reviews run in parallel. Knowledge compounds across sessions.
@@ -131,15 +131,17 @@ claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge
 claude plugin install agent-triforge@agent-triforge
 ```
 
-All agents, skills (the 10 portable skills and the 17 lead workflows) and hooks register automatically. Your project's `ops/` directory is bootstrapped on first session.
+All agents, skills (the 10 portable skills and the 17 lead workflows) and hooks register automatically, and the first session in a project bootstraps its `ops/` directory.
 
 ### Automatic project bootstrapping
 
-On first session in a new project, the `session-start.sh` hook:
+On the first session in a new project, the `session-start.sh` hook:
 - Creates `ops/solutions/`, `ops/decisions/`, `ops/archive/`
 - Copies skeleton `MEMORY.md`, `CHANGELOG.md`, `AGENTS.md`, and `GOALS.md` from plugin templates into `ops/`
-- Your project's own instruction file is a root `AGENTS.md`; add Triforge's marked pointer block from [`templates/AGENTS.md`](templates/AGENTS.md) to it yourself — session start prints the copy line when the project has none and never writes into an existing one (the plugin ships no CLAUDE.md — a `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` in or above the project stops Claude Code from reading `AGENTS.md`)
 - Creates `.claude/` directory for session state files
+- Prints a `cp` command for Triforge's pointer block when the project has no root `AGENTS.md`
+
+Your project's own instruction file is its root `AGENTS.md`. Add the marked pointer block from [`templates/AGENTS.md`](templates/AGENTS.md) to it yourself; session start never writes into an existing `AGENTS.md`. The plugin ships no `CLAUDE.md`, because a `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` in or above the project stops Claude Code from reading `AGENTS.md`.
 
 ---
 
@@ -178,8 +180,10 @@ The plugin provides agents, skills and hooks. Your project gets an `ops/` direct
 ```
 agent-triforge/                     (plugin — installed automatically)
 ├── .claude-plugin/plugin.json        Plugin manifest
+├── package.json                      Pi package manifest: the portable skills only
 ├── agents/                           19 specialized agent definitions
 ├── skills/                           27 skills in one tree
+│   ├── .devin-plugin/plugin.json       Devin plugin manifest (plugin root skills/): the portable skills only
 │   ├── <name>/SKILL.md                 10 portable skills, copied to .agents/skills/ and lease worktrees
 │   │   └── references/                 where a skill is split (wave-orchestration, verification-before-completion)
 │   └── at-<name>/                      17 lead workflows (/at-<name> in Claude Code, $at-<name> in a Codex prompt); never copied
@@ -235,7 +239,7 @@ All agents coordinate through markdown files in [`ops/`](ops/). This is the sour
 
 ## Sprint Pipeline (`at-ship`)
 
-Every goal flows through a structured pipeline. Run [`at-ship`](skills/at-ship/SKILL.md) (`/at-ship <goal>` under a Claude Code lead, `$at-ship <goal>` in a Codex prompt) for fully autonomous execution, or invoke each phase's lead workflow individually.
+Every goal goes through the phases below. Run [`at-ship`](skills/at-ship/SKILL.md) (`/at-ship <goal>` under a Claude Code lead, `$at-ship <goal>` in a Codex prompt) to run them all autonomously, or run each phase's lead workflow yourself.
 
 <p align="center">
   <img src="docs/images/sprint-lifecycle.svg" alt="Sprint pipeline — Plan, Build, Review, Test, Ship stages with agents" width="80%">
@@ -356,7 +360,7 @@ Each reviewer has a "Do Not Flag" list to reduce noise — readability-aiding re
 
 ## Test Pipeline (`at-test`)
 
-Identifies untested code paths with [`test-gap-analyzer`](agents/test-gap-analyzer.md), then writes and runs tests via [Codex CLI](https://github.com/openai/codex), failing test first, in a sandboxed environment.
+[`test-gap-analyzer`](agents/test-gap-analyzer.md) finds the untested code paths, then [Codex CLI](https://github.com/openai/codex) writes and runs the tests in its sandbox, starting each one with a failing test.
 
 <p align="center">
   <img src="docs/images/testing-flow.svg" alt="Test pipeline — gap analysis, Codex TDD, fix cycle" width="80%">
@@ -366,7 +370,7 @@ Identifies untested code paths with [`test-gap-analyzer`](agents/test-gap-analyz
 
 ## Debugging (`at-debug`)
 
-Structured debugging: reproduce the bug first, perform root cause analysis, then fix with evidence. A **circuit breaker** enforces a 3-attempt ceiling per issue — if the same error recurs after 3 consecutive fix attempts, the agent stops and produces an escalation report instead of looping.
+[`at-debug`](skills/at-debug/SKILL.md) reproduces the bug first, finds the root cause with evidence, and only then fixes it. A **circuit breaker** caps each issue at 3 attempts: if the same error comes back after 3 consecutive fixes, the agent stops looping and writes an escalation report.
 
 <p align="center">
   <img src="docs/images/debug-flow.svg" alt="Debugging — reproduce, diagnose, fix" width="80%">
@@ -376,7 +380,7 @@ Structured debugging: reproduce the bug first, perform root cause analysis, then
 
 ## Quality Gates
 
-Five non-negotiable checkpoints enforced at every stage:
+Six checkpoints, enforced at every stage:
 
 <p align="center">
   <img src="docs/images/quality-gates.svg" alt="Five quality gates — plan validated, failing test first, root cause first, evidence first, review first" width="80%">
@@ -395,9 +399,19 @@ Five non-negotiable checkpoints enforced at every stage:
 
 ## Getting started
 
+From nothing to a first sprint in five steps:
+
+1. Install the core trio (Claude Code, Antigravity `agy` and Codex) and log in to each. The version floors and READY probes are under [Prerequisites](#prerequisites).
+2. Install the plugin: `claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge`, then `claude plugin install agent-triforge@agent-triforge` ([Installation](#installation)).
+3. Start `claude` in your project. The first session bootstraps `ops/`. Add Triforge's pointer block from `templates/AGENTS.md` to the project's root `AGENTS.md`; if the project has none, session start prints the `cp` command that copies it in.
+4. Run `/at-setup`. It checks the core trio, offers each optional CLI, and lets you keep or change the role assignments in `ops/roster.toml`.
+5. Run `/at-ship <goal>` for an autonomous sprint, or run the phases one at a time ([Typical session flow](#typical-session-flow)).
+
+If you are upgrading from 3.x, the slash commands are now `at-` workflows (`/ship` is `/at-ship`); see [Upgrading from 3.x](#upgrading-from-3x).
+
 ### Prerequisites
 
-**Run [`at-setup`](skills/at-setup/SKILL.md) first** (`/at-setup` under a Claude Code lead, `$at-setup` in a Codex prompt) — the guided path from a fresh install to a working roster. It gates the core trio live, walks each optional CLI (enroll with a chosen model, or decline cleanly), then offers role assignment: accept the shipped defaults (recommended) or customize any role's CLI · model · effort. Idempotent and re-runnable; the probes below are exactly what `at-setup` automates.
+[`at-setup`](skills/at-setup/SKILL.md) is the guided path from a fresh install to a working roster (`/at-setup` under a Claude Code lead, `$at-setup` in a Codex prompt). It checks that the core trio is live, walks you through each optional CLI (enroll it with a model you choose, or decline it), then offers role assignment: keep the shipped defaults (recommended) or change any role's CLI, model and effort. It is idempotent, so you can re-run it any time. The commands below are the probes it automates; run them yourself to check a CLI before you install the plugin.
 
 **Core trio (required):**
 
@@ -417,7 +431,7 @@ codex exec "Respond with only: READY"
 python3 --version
 ```
 
-**Optional tier** — enroll via `at-setup` to use them as builders/reviewers; each is skipped cleanly in every roster fallback chain when absent:
+**Optional tier.** Enroll these through `at-setup` to use them as builders or reviewers. An absent one is skipped cleanly in every roster fallback chain:
 
 ```bash
 # OpenCode ≥ 1.18.20 — needs the OpenRouter provider connected (OPENROUTER_API_KEY or `opencode auth login`)
@@ -465,15 +479,34 @@ claude plugin install agent-triforge@agent-triforge
 claude plugin install agent-triforge@agent-triforge --scope project
 ```
 
-That's it. No manual configuration needed — hooks, env vars, agents and skills (portable skills and lead workflows alike) are all registered automatically by the plugin system.
+The plugin system registers the hooks, env vars, agents and skills (the portable skills and the lead workflows) automatically. Nothing needs configuring by hand.
 
-On first session, the plugin bootstraps your project's `ops/` directory. Add the pointer block from `templates/AGENTS.md` to your project's root `AGENTS.md` (Triforge ships no CLAUDE.md); session start prints the copy line when the project has none.
+The first session in a project bootstraps its `ops/` directory. Then add the pointer block from [`templates/AGENTS.md`](templates/AGENTS.md) to the project's root `AGENTS.md` (Triforge ships no `CLAUDE.md`). If the project has no `AGENTS.md` yet, session start prints the `cp` command that copies the block in. Finish with `/at-setup` ([Prerequisites](#prerequisites)).
+
+#### Portable skills in Devin and Pi
+
+Devin CLI and Pi can install the 10 portable skills straight from this repository. They get the skills only: no lead workflow (`at-*`), hook or agent. One of them, `wave-orchestration`, calls Triforge's lease helpers, which come only with the Triforge plugin. Without the plugin its wave rules still work as a manual method, but no lease, pinned review or integrity check runs. Installing the skills does not enroll the CLI, because `ops/roster.toml` assigns roles only to the CLIs in [the builder pool](#the-builder-pool).
+
+| Harness | Install | Manifest | Invoke |
+|---|---|---|---|
+| Devin CLI | `devin plugins install Ninety2UA/agent-triforge#skills` (from a clone: `devin plugins install --local ./agent-triforge/skills`) | [`skills/.devin-plugin/plugin.json`](skills/.devin-plugin/plugin.json), plugin root `skills/` | `/agent-triforge:<name>` |
+| Pi | `pi install git:github.com/Ninety2UA/agent-triforge` (`-l` writes the project's `.pi/settings.json` instead of `~/.pi/agent/settings.json`) | [`package.json`](package.json), the `pi.skills` list | `/skill:<name>` |
+
+Run `devin auth login` before any `devin plugins` command. Install the Devin plugin from `#skills`, not from the repository root: at the root, Devin falls back to `.claude-plugin/plugin.json` and also loads the 17 lead workflows, this repository's `AGENTS.md` as an always-on rule, and the Claude Code hooks.
 
 ### Update
 
 ```bash
 claude plugin update agent-triforge
 ```
+
+### Upgrading from 3.x
+
+- Each 3.x slash command is now a lead workflow with an `at-` prefix: `/setup` became `/at-setup`, `/ship` became `/at-ship`, and so on for the whole set (`$at-setup`, `$at-ship` in a Codex prompt). The plugin no longer ships a `commands/` directory. The [Lead workflows reference](#lead-workflows-reference) lists every workflow.
+- Triforge 4 ships no `CLAUDE.md`. The project's instruction file is its root `AGENTS.md`, which Claude Code reads from 2.1.277, and only while no `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` sits in the project or above it. If your project kept a `CLAUDE.md` from the 3.x template, add an import line to it (`@AGENTS.md` in a root `CLAUDE.md`, `@../AGENTS.md` in `.claude/CLAUDE.md`), or replace its Triforge content with the pointer block from [`templates/AGENTS.md`](templates/AGENTS.md). Session start prints a warning naming the exact line on every session until you do; it never edits the file.
+- The `test-driven-development` and `systematic-debugging` skills are gone. Their rules now sit inline in `at-test`, `at-quick`, `at-debug` and the Codex `test_writer` and `debugger` agents.
+- If your project's `.codex/hooks.json` is still the unchanged 3.x copy, the first 4.0 session replaces it with the empty 4.0 template and prints a notice naming the file. The 3.x hook appended a line to `ops/CHANGELOG.md` from every Codex session, lease workers included; attribution now comes from the lease ledger. Session start leaves a copy you edited alone ([decision record](ops/decisions/2026-10-04-codex-hook-trust-bypass-retired.md)).
+- On resume, `lease_heartbeat_check` now collects the builders that finished while no lead was watching and adopts the ones still running; builders run detached in 4.0 and outlive the lead's turn. In 3.x it printed `run: lease_collect <task>` and left the collect to you.
 
 ### Development (for contributors)
 
@@ -482,9 +515,11 @@ git clone https://github.com/Ninety2UA/agent-triforge.git
 claude --plugin-dir ./agent-triforge
 ```
 
-Releases are cut by CI: when a version bump lands on `main`, [`release.yml`](.github/workflows/release.yml) tags `v<version>` and publishes the GitHub release with this README's matching "Recent changes" entry as the notes (`bash scripts/release-notes.sh --body` previews it; the short checklist is in [`AGENTS.md`](AGENTS.md) "Release", the full one in [`docs/agent-triforge.md`](docs/agent-triforge.md) "Release checklist").
+CI cuts the releases. When a version bump lands on `main`, [`release.yml`](.github/workflows/release.yml) tags `v<version>` and publishes the GitHub release, using this README's matching "Recent changes" entry as the notes; `bash scripts/release-notes.sh --body` previews them. The short checklist is under "Release" in [`AGENTS.md`](AGENTS.md), the full one under "Release checklist" in [`docs/agent-triforge.md`](docs/agent-triforge.md).
 
 ### Verify installation
+
+Start Claude Code in a project. The session-start banner lists the lead workflows, and `/at-status` prints the sprint report:
 
 ```bash
 claude
@@ -498,7 +533,7 @@ claude
 
 ### Typical session flow
 
-**Supervised (human in the loop):**
+**Supervised (human in the loop).** You run each phase and check its output before the next:
 
 ```bash
 claude
@@ -510,7 +545,7 @@ claude
 > /at-wrap                               # Phase 6: compound knowledge, write STATE.md
 ```
 
-**Autonomous (fire and forget):**
+**Autonomous (fire and forget).** One command runs every phase:
 
 ```bash
 # Inside Claude — single session, won't stop until done
@@ -521,17 +556,17 @@ claude
 ./scripts/coordinate.sh "add user authentication" --max 5 --team
 ```
 
-The same workflows run from a Codex prompt as `$at-<name>` (`codex exec '$at-ship add user authentication'` — single quotes, so the shell leaves `$at-ship` alone).
+In a Codex prompt the same workflows are `$at-<name>`. From a shell, wrap the prompt in single quotes so the shell leaves `$at-ship` alone: `codex exec '$at-ship add user authentication'`.
 
 ---
 
 ## Lead workflows reference
 
-The 17 lead workflows are skills under [`skills/at-*/`](skills/) that only the lead runs: `/at-<name>` under a Claude Code lead, `$at-<name>` inside a Codex prompt. They stay with the lead's plugin install and are never copied into `.agents/skills/` or a lease worktree (KTD12). Each `SKILL.md` states the workflow's goal, done condition and safe failure direction; the detail sits in its `references/`.
+The 17 lead workflows are skills under [`skills/at-*/`](skills/) that only the lead runs. Type `/at-<name>` under a Claude Code lead or `$at-<name>` inside a Codex prompt. They stay in the lead's plugin install and are never copied into `.agents/skills/` or a lease worktree (KTD12). Each `SKILL.md` states the workflow's goal, its done condition and the direction it fails safe; the detail is in its `references/` folder. In 3.x these were slash commands without the prefix (`/ship`, `/setup`); see [Upgrading from 3.x](#upgrading-from-3x).
 
 | Lead workflow | Claude Code · Codex | Arguments | What it does |
 |---|---|---|---|
-| [**`at-ship`**](skills/at-ship/SKILL.md) | `/at-ship` · `$at-ship` | `<goal> [--convergence fast\|standard\|deep] [--team]` | Fully autonomous sprint: analyze, plan, build, review, test, wrap; prints the completion line at start and creates `ops/.sprint-complete` last. `fast` = P1 only, `deep` = P1 + P2 + P3 below 3; `--team` for 5+ or interdependent tasks. |
+| [**`at-ship`**](skills/at-ship/SKILL.md) | `/at-ship` · `$at-ship` | `<goal> [--convergence fast\|standard\|deep] [--team]` | Fully autonomous sprint: analyze, plan, build, review, test, wrap; prints a copyable completion line (the `/goal` gate under Claude Code) at the start and creates `ops/.sprint-complete` last. `fast` = P1 only, `deep` = P1 + P2 + P3 below 3; `--team` for 5+ or interdependent tasks. |
 | [**`at-coordinate`**](skills/at-coordinate/SKILL.md) | `/at-coordinate` · `$at-coordinate` | `<goal>` | The plain Phase 0–6 sprint cycle that [`scripts/coordinate.sh`](scripts/coordinate.sh) drives across fresh sessions; same pipeline as `at-ship` without convergence or team flags. |
 | [**`at-plan`**](skills/at-plan/SKILL.md) | `/at-plan` · `$at-plan` | `[goal]` | Phases 0 → 1.5: codebase analysis, knowledge search, shadow paths, waves, the three-assumption ambiguity check, [`plan-checker`](agents/plan-checker.md) validation. Writes `ops/TASKS.md` with its `Ceremony:` line. |
 | [**`at-build`**](skills/at-build/SKILL.md) | `/at-build` · `$at-build` | `[--team] [--wave N]` | Phase 2: [wave orchestration](skills/wave-orchestration/SKILL.md) over leased builder-pool tasks, cross-review by a pinned reviewer, one squash commit per task, `integration-verifier` per wave, the `[promotion]` gate. |
@@ -568,7 +603,7 @@ Two **repo-local** commands keep the framework current instead of hand-running a
 
 ## Skills reference
 
-The plugin ships 27 skills in one `skills/` tree: the 10 portable skills below, which any agent can consume, and the 17 lead workflows listed [above](#lead-workflows-reference), which only the lead runs. Portable skills are embedded in the native Antigravity/Codex agent definitions (`antigravity-agents/agents/`, `codex-agents/`) at install time; prompt-prefix injection of the agent body kicks in automatically when a CLI doesn't surface native agent definitions.
+The plugin ships 27 skills in one `skills/` tree: the 10 portable skills below, which any agent can use (`wave-orchestration` also needs the plugin's lease helpers), and the 17 lead workflows [listed above](#lead-workflows-reference), which only the lead runs. The portable skills are embedded in the native Antigravity and Codex agent definitions (`antigravity-agents/agents/`, `codex-agents/`) at install time. When a CLI doesn't surface native agent definitions, the helper injects the agent body as a prompt prefix instead.
 
 | Skill | Primary consumer | What it teaches the agent |
 |---|---|---|
@@ -585,7 +620,7 @@ The plugin ships 27 skills in one `skills/` tree: the 10 portable skills below, 
 
 ### Portable skills across the six CLIs
 
-`session-start.sh` copies the 10 portable skills from the plugin's `skills/` into `.agents/skills/` — the agentskills.io path — and refreshes that copy whenever the plugin version changes (stamp `.agents/skills/.triforge-plugin-version`, with a content digest per directory Triforge wrote: only Triforge's own unchanged copies are replaced or retired — an edited copy, or your own directory under a shipped name, is kept with a notice; customizations are safest in a differently named directory). Fixture evidence from the 2026-09-11 watch cycle ([`ops/research/2026-09-11-cli-updates.md`](ops/research/2026-09-11-cli-updates.md) §3.1) shows which path each CLI actually reads:
+`session-start.sh` copies the 10 portable skills from the plugin's `skills/` into `.agents/skills/`, the agentskills.io path, and refreshes the copy whenever the plugin version changes. The stamp `.agents/skills/.triforge-plugin-version` records a content digest for each directory Triforge wrote, and only Triforge's own unchanged copies are replaced or retired. An edited copy, or your own directory under a shipped name, is kept with a notice; customizations are safest in a directory with a different name. Fixture evidence from the 2026-09-11 watch cycle ([`ops/research/2026-09-11-cli-updates.md`](ops/research/2026-09-11-cli-updates.md) §3.1) shows which path each CLI reads:
 
 | Path | Claude Code | agy | Codex | OpenCode | Cursor | Kimi (docs) |
 |---|---|---|---|---|---|---|
@@ -596,7 +631,11 @@ The plugin ships 27 skills in one `skills/` tree: the 10 portable skills below, 
 | `.cursor/skills/` | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
 | `.kimi-code/skills/` | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
 
-Claude Code is the one CLI that does not read `.agents/skills/` — it reads the plugin's skills directly. Each harness invokes a skill in its own form: Claude `/name` · agy `agy --add-dir "$PWD" -p "/name"` (headless expansion; `agy -p "/skills"` lists them without a model call) · Codex `$name` · OpenCode `/name` through its native `skill` tool (commands via `opencode run --command <name>` from `.opencode/command/`) · Cursor `/name` in `-p` · Kimi `/skill:name` (live verification pending `kimi login`). The 17 lead workflows (`skills/at-*/`) are not in this copy: they reach a lead only from its plugin install (KTD12), invoked as `/at-<name>` under Claude Code or `$at-<name>` in a Codex prompt. They are skills rather than slash commands because slash commands are per-harness, not portable — Codex custom prompts are deprecated and not expanded under `codex exec`. Agent definitions are never deployed into `.agents/agents/`: agy and Kimi both scan it with incompatible tool vocabularies, so agy stays on `agy plugin install` and Kimi loads its definitions through `--agent-file`.
+Claude Code is the one CLI that does not read `.agents/skills/`; it reads the plugin's skills directly. Two harnesses outside the six, Devin (`devin skills paths`) and Pi (per its skills docs), read `.agents/skills/` too, so inside a Triforge project they see this copy. Elsewhere they install the skills [from their own manifests](#portable-skills-in-devin-and-pi).
+
+Each harness invokes a skill in its own form: Claude `/name` · agy `agy --add-dir "$PWD" -p "/name"` (headless expansion; `agy -p "/skills"` lists them without a model call) · Codex `$name` · OpenCode `/name` through its native `skill` tool (commands via `opencode run --command <name>` from `.opencode/command/`) · Cursor `/name` in `-p` · Kimi `/skill:name` (live verification pending `kimi login`).
+
+The 17 lead workflows (`skills/at-*/`) are not in this copy. A lead gets them only from its plugin install (KTD12) and runs them as `/at-<name>` under Claude Code or `$at-<name>` in a Codex prompt. They are skills rather than slash commands because slash commands are per-harness: Codex custom prompts are deprecated and not expanded under `codex exec`. Agent definitions are never deployed into `.agents/agents/`, because agy and Kimi both scan it with incompatible tool vocabularies; agy stays on `agy plugin install`, and Kimi loads its definitions through `--agent-file`.
 
 ---
 
@@ -642,7 +681,7 @@ Claude Code is the one CLI that does not read `.agents/skills/` — it reads the
 
 ## Context Recovery
 
-Three defense mechanisms prevent long sprints from dying to context limits:
+Seven safeguards keep long sprints from dying to context limits:
 
 <p align="center">
   <img src="docs/images/context-recovery.svg" alt="Context recovery — inner loop, outer loop, analysis paralysis detection" width="80%">
@@ -721,13 +760,13 @@ Multi-model coordination, portable skill injection into external agents, agent t
 <details>
 <summary><strong>Can I use this with an existing project?</strong></summary>
 
-Yes. Use Option 2 or Option 3 from <a href="#installation">Installation</a> to copy just the components you need. The framework is additive — it doesn't modify your existing code.
+Yes. Install the plugin as described under <a href="#installation">Installation</a> and start a session in the project. The framework is additive: it adds <code>ops/</code> and doesn't modify your existing code.
 </details>
 
 <details>
 <summary><strong>Do I need all the CLIs?</strong></summary>
 
-The <strong>core trio</strong> (Claude, Antigravity, Codex) is the supported baseline — run <a href="skills/at-setup/SKILL.md"><code>at-setup</code></a> to get them live. The <strong>optional tier</strong> (OpenCode, Kimi, Cursor) is genuinely optional: enroll any subset via <code>at-setup</code>, and an absent one is skipped cleanly in every roster fallback chain. Claude alone still runs the pipeline (degraded — you lose the multi-model review/test/analysis benefits).
+The <strong>core trio</strong> (Claude, Antigravity, Codex) is the supported baseline; run <a href="skills/at-setup/SKILL.md"><code>at-setup</code></a> to get them live. The <strong>optional tier</strong> (OpenCode, Kimi, Cursor) is optional: enroll any subset through <code>at-setup</code>, and an absent one is skipped cleanly in every roster fallback chain. Claude alone can still run the pipeline in a degraded mode, without the multi-model review, test and analysis lanes.
 </details>
 
 <details>
@@ -763,7 +802,7 @@ Two layers. <strong>Inside</strong> a session, the <code>ops/.sprint-complete</c
 <details>
 <summary><strong>What is knowledge compounding?</strong></summary>
 
-After solving a non-trivial problem, <a href="skills/at-compound/SKILL.md"><code>at-compound</code></a> saves it as a structured document in <a href="ops/solutions/"><code>ops/solutions/</code></a>. Future <a href="skills/at-plan/SKILL.md"><code>at-plan</code></a> and <a href="skills/at-deep-research/SKILL.md"><code>at-deep-research</code></a> runs automatically search this directory before starting new work — so every sprint gets smarter.
+After solving a non-trivial problem, <a href="skills/at-compound/SKILL.md"><code>at-compound</code></a> saves it as a structured document in <a href="ops/solutions/"><code>ops/solutions/</code></a>. Later <a href="skills/at-plan/SKILL.md"><code>at-plan</code></a> and <a href="skills/at-deep-research/SKILL.md"><code>at-deep-research</code></a> runs search this directory before they start new work.
 </details>
 
 ---

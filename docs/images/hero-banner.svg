@@ -50,11 +50,11 @@
     </g>
     <g transform="translate(202,0)">
       <rect width="94" height="30" rx="15" fill="#1a1a2a" stroke="#ff8c42" stroke-opacity="0.4" stroke-width="1.5"/>
-      <text x="47" y="20" text-anchor="middle"><tspan fill="#ffd700" font-weight="700">13</tspan><tspan fill="#a0a0b8"> Skills</tspan></text>
+      <text x="47" y="20" text-anchor="middle"><tspan fill="#ffd700" font-weight="700">27</tspan><tspan fill="#a0a0b8"> Skills</tspan></text>
     </g>
     <g transform="translate(308,0)">
       <rect width="122" height="30" rx="15" fill="#1a1a2a" stroke="#ff8c42" stroke-opacity="0.4" stroke-width="1.5"/>
-      <text x="61" y="20" text-anchor="middle"><tspan fill="#ffd700" font-weight="700">19</tspan><tspan fill="#a0a0b8"> Commands</tspan></text>
+      <text x="61" y="20" text-anchor="middle"><tspan fill="#ffd700" font-weight="700">17</tspan><tspan fill="#a0a0b8"> Workflows</tspan></text>
     </g>
     <g transform="translate(442,0)">
       <rect width="86" height="30" rx="15" fill="#1a1a2a" stroke="#ff8c42" stroke-opacity="0.4" stroke-width="1.5"/>
@@ -79,7 +79,7 @@
     <!-- content -->
     <g font-family="'SF Mono','JetBrains Mono',monospace" font-size="13.5">
       <text x="18" y="66"><tspan fill="#6a6a82">$</tspan><tspan fill="#ff8c42"> claude</tspan></text>
-      <text x="18" y="91"><tspan fill="#ffd700">&gt;</tspan><tspan fill="#e8e8f0"> /ship add auth module</tspan></text>
+      <text x="18" y="91"><tspan fill="#ffd700">&gt;</tspan><tspan fill="#e8e8f0"> /at-ship add auth module</tspan></text>
       <text x="18" y="116" fill="#a0a0b8">  Roster resolved: <tspan fill="#ffd700">6</tspan> CLIs</text>
       <text x="18" y="141" fill="#a0a0b8">  Wave: <tspan fill="#4a9eff">3</tspan> builders leased (worktrees)</text>
       <text x="18" y="166" fill="#a0a0b8">  Cross-review &#8594; integration branch</text>

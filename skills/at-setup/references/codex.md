@@ -38,5 +38,5 @@ echo "CODEX-TRUST: ${CODEX_TRUST:-unknown}"
   trust_level = "trusted"
   ```
 
-  Explain what stays covered without it: `invoke_codex` passes `--dangerously-bypass-hook-trust` so the CHANGELOG hook still fires (CDX-04), and the role instructions ride as a prompt prefix; `.codex/config.toml` (memories off) is skipped until the entry exists, while the root `AGENTS.md` still loads (only an explicit `untrusted` blocks it, D-045).
+  Explain what stays covered without it: the role instructions ride as a prompt prefix, and the root `AGENTS.md` still loads (only an explicit `untrusted` blocks it, D-045). `.codex/config.toml` (memories off) and `.codex/hooks.json` are skipped until the entry exists: `invoke_codex` never passes `--dangerously-bypass-hook-trust`, so project hooks go through Codex's own trust under `exec`.
 - `no-user-config` / `unreadable` / `unknown`: report as is; setup continues.

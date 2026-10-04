@@ -23,7 +23,7 @@ Read, in order: `ops/STATE.md` (where you left off — phase, progress, next act
 
 - Baseline: when `git rev-parse HEAD` differs from `state_head`, or `verification_baseline.commit` differs from HEAD, or the baseline is missing, re-run `verification_command` and record the fresh result before continuing. A baseline from another commit proves nothing about this one.
 - Uncommitted changes (`git status`); the phase active at pause; remaining tasks by status (active, in progress, blocked, review); review files present (`ops/REVIEW_ANTIGRAVITY.md`, `ops/REVIEW_CODEX.md`, `ops/TEST_RESULTS.md`).
-- Leases: when `ops/leases.toml` exists, `lease_heartbeat_check` reclaims orphans (rc 44 means a git-integrity change the lead did not make — inspect it, then `lease_rebaseline`); open leases are requeued or finished; merged leases are already on the integration branch and are never redone. See [references/lease-resume.md](references/lease-resume.md).
+- Leases: when `ops/leases.toml` exists, `lease_heartbeat_check` reclaims orphans (rc 44 means a git-integrity change the lead did not make — inspect it, then `lease_rebaseline`); open leases are requeued or finished, `building` ones waited on with `lease_wait` as the harness reference says ([references/claude.md](references/claude.md), [references/codex.md](references/codex.md)); merged leases are already on the integration branch and are never redone. See [references/lease-resume.md](references/lease-resume.md).
 
 ## Step 3: Report to the user
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/codex.sh — the Codex lane: invoke_codex (triforge-agents.toml replay, --output-schema, hooks-under-exec)
+# scripts/lib/codex.sh — the Codex lane: invoke_codex (triforge-agents.toml replay, --output-schema)
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh. Every function keeps the name and
@@ -116,20 +116,8 @@ invoke_codex() {
   else
     CMD+=(-c "approval_policy=\"never\"")
   fi
-
-  # Hooks trust (probe CDX-04, ADR 2026-07-18-codex-hooks-under-exec): hooks
-  # fire under `codex exec` when (a) the project ships .codex/hooks.json and
-  # (b) --dangerously-bypass-hook-trust is passed — codex does not persist
-  # project trust for arbitrary dirs, and the flag is the documented
-  # automation path (0.131.0+). Triforge ships and vets these hooks itself
-  # (trusted-pipeline posture, same rationale as approval_policy="never" —
-  # see the Security model in docs/agent-triforge.md), so bypassing the
-  # interactive trust prompt does not widen what the pipeline already accepts.
-  local HOOKS_MODE="off"
-  if [ -f ".codex/hooks.json" ] && _codex_feature_enabled hooks; then
-    CMD+=(--dangerously-bypass-hook-trust)
-    HOOKS_MODE="on"
-  fi
+  # No --dangerously-bypass-hook-trust: project and plugin hooks go through
+  # Codex's own trust under exec (the shipped .codex/hooks.json has none).
 
   # Structured output (probe CDX-05): when the agent's agents.toml entry
   # carries the Triforge-level `output_schema` key, resolve the schema file at
@@ -159,8 +147,8 @@ invoke_codex() {
     fi
   fi
 
-  # BASE_CMD carries everything retry-safe (model pin, sandbox, approval,
-  # hooks). Schema flags are first-attempt only: a schema-caused rejection
+  # BASE_CMD carries everything retry-safe (model pin, sandbox, approval).
+  # Schema flags are first-attempt only: a schema-caused rejection
   # (e.g. 400 invalid_json_schema) would fail identically on retry, so the
   # retry drops agent augmentation — instructions prefix AND schema —
   # mirroring invoke_antigravity's retry-with-raw-prompt.
@@ -178,7 +166,7 @@ invoke_codex() {
 ${PROMPT}"
   fi
 
-  echo "invoke_codex: agent=${AGENT_NAME} model=${AGENT_MODEL:-session-default} effort=${AGENT_EFFORT:-session-default} sandbox=${AGENT_SANDBOX:-session-default} approval=${AGENT_APPROVAL:-session-default} hooks=${HOOKS_MODE} schema=${SCHEMA_PATH:-none} agents-toml=${AGENT_TOML:-none}" >&2
+  echo "invoke_codex: agent=${AGENT_NAME} model=${AGENT_MODEL:-session-default} effort=${AGENT_EFFORT:-session-default} sandbox=${AGENT_SANDBOX:-session-default} approval=${AGENT_APPROVAL:-session-default} schema=${SCHEMA_PATH:-none} agents-toml=${AGENT_TOML:-none}" >&2
 
   # `< /dev/null` is mandatory: codex exec reads piped stdin ("Reading
   # additional input from stdin...") and hangs waiting for EOF whenever the
@@ -224,14 +212,13 @@ ${PROMPT}"
     esac
   fi
 
-  # Codex prints two advisory lines into the captured stream that would
+  # Codex prints an advisory line into the captured stream that would
   # otherwise be promoted verbatim into ops/REVIEW_CODEX.md (the at-review
-  # consumer): the --dangerously-bypass-hook-trust warning and, when a stale
-  # .codex/agents/agents.toml is still present, "Ignoring malformed agent role
-  # definition". Strip them from OUTPUT_FILE; the raw stream is not otherwise
-  # altered.
+  # consumer) when a stale .codex/agents/agents.toml is still present:
+  # "Ignoring malformed agent role definition". Strip it from OUTPUT_FILE; the
+  # raw stream is not otherwise altered.
   if [ -f "$OUTPUT_FILE" ]; then
-    grep -vE '^(warning|WARN|WARNING):? .*bypass-hook-trust|Ignoring malformed agent role definition' "$OUTPUT_FILE" > "${OUTPUT_FILE}.clean" 2>/dev/null || true
+    grep -v 'Ignoring malformed agent role definition' "$OUTPUT_FILE" > "${OUTPUT_FILE}.clean" 2>/dev/null || true
     mv "${OUTPUT_FILE}.clean" "$OUTPUT_FILE" 2>/dev/null || true
   fi
 

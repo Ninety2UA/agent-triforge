@@ -19,6 +19,16 @@
 #   (Claude Code ≥ 2.1.246 rejects hook stdout that parses as JSON — D-031c).
 #   Audited 2026-09-11: the only stdout lines start "WARN:".
 
+# Worker marker (KTD9, R34): in a lease worker or persona (TRIFORGE_LEASE_WORKER
+# set by _adapter_env) this hook does nothing and prints nothing — a worker's
+# CLI may load the plugin's hooks, and they must not write state into its
+# worktree. The input is still read, so a large PostToolUse payload never
+# meets a closed pipe.
+if [ -n "${TRIFORGE_LEASE_WORKER:-}" ]; then
+  [ -t 0 ] || cat > /dev/null 2>&1 || true
+  exit 0
+fi
+
 set -euo pipefail
 
 _tf_on_exit() {
