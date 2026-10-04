@@ -1,6 +1,6 @@
 # Phase 3: the core lanes (always launched, in the background)
 
-Read `ops/TASKS.md` to determine the review scope (tasks marked `[R]`). `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it).
+Read `ops/TASKS.md` to determine the review scope (tasks marked `[R]`), then write the review package (the trust rules list its parts) to a file and set `REVIEW_PACKAGE` to its path: the read-class personas take that file as their scope. `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it).
 
 ## Contents
 
@@ -53,14 +53,17 @@ CODEX_PID=$!
 # security-sentinel is in the never-downgrade trio and runs as top-tier Claude
 # whichever CLI leads, or its call fails naming the fix. Outputs land outside
 # ops/ first and are promoted (scrubbed) once every persona has finished.
-SPEC_SCOPE="Review scope: tasks marked [R] in ops/TASKS.md: the collect-snapshot diff, the task rows, the ops/CONTRACTS.md slice and the acceptance criteria."
+# A read-class persona's scope is an input file: REVIEW_PACKAGE is the review
+# package written before this block (trust rules: the collect-snapshot diff,
+# the task rows, the ops/CONTRACTS.md slice, the acceptance criteria).
+: "${REVIEW_PACKAGE:?write the review package to a file and set REVIEW_PACKAGE to its path first}"
 SPEC_DIR="${TMPDIR:-/tmp}/review_personas_$$_$(date +%s)"; mkdir -p "$SPEC_DIR"
 SPEC_PIDS=""
-dispatch_persona security-sentinel "$SPEC_SCOPE" "$SPEC_DIR/SECURITY_SENTINEL.md" & SPEC_PIDS="$SPEC_PIDS $!"
-dispatch_persona performance-oracle "$SPEC_SCOPE" "$SPEC_DIR/PERFORMANCE_ORACLE.md" & SPEC_PIDS="$SPEC_PIDS $!"
-dispatch_persona code-simplicity-reviewer "$SPEC_SCOPE" "$SPEC_DIR/CODE_SIMPLICITY_REVIEWER.md" & SPEC_PIDS="$SPEC_PIDS $!"
-dispatch_persona convention-enforcer "$SPEC_SCOPE" "$SPEC_DIR/CONVENTION_ENFORCER.md" & SPEC_PIDS="$SPEC_PIDS $!"
-dispatch_persona architecture-strategist "$SPEC_SCOPE" "$SPEC_DIR/ARCHITECTURE_STRATEGIST.md" & SPEC_PIDS="$SPEC_PIDS $!"
+dispatch_persona security-sentinel "$REVIEW_PACKAGE" "$SPEC_DIR/SECURITY_SENTINEL.md" & SPEC_PIDS="$SPEC_PIDS $!"
+dispatch_persona performance-oracle "$REVIEW_PACKAGE" "$SPEC_DIR/PERFORMANCE_ORACLE.md" & SPEC_PIDS="$SPEC_PIDS $!"
+dispatch_persona code-simplicity-reviewer "$REVIEW_PACKAGE" "$SPEC_DIR/CODE_SIMPLICITY_REVIEWER.md" & SPEC_PIDS="$SPEC_PIDS $!"
+dispatch_persona convention-enforcer "$REVIEW_PACKAGE" "$SPEC_DIR/CONVENTION_ENFORCER.md" & SPEC_PIDS="$SPEC_PIDS $!"
+dispatch_persona architecture-strategist "$REVIEW_PACKAGE" "$SPEC_DIR/ARCHITECTURE_STRATEGIST.md" & SPEC_PIDS="$SPEC_PIDS $!"
 
 # Wait per-PID so a silent failure (which would leave REVIEW_*.md empty and look
 # like "no findings") fails fast. rc 40 = resolved to the claude lane, handled
@@ -131,4 +134,4 @@ fi
 
 ## rc 40
 
-If `AGY_RC` or `CODEX_RC` was 40, that role resolved to the claude lane (its default CLI is absent, or the roster pins `cli = "claude"`) under a lead whose sub-agents enforce their tools; under any other lead `dispatch_role` runs `claude -p` itself and returns its exit code. For the analyst lane run `dispatch_persona architecture-strategist` against the `[R]` scope and promote its output (scrubbed) into `ops/REVIEW_ANTIGRAVITY.md`; for the reviewer lane run a logic + security review as a sub-agent writing `ops/REVIEW_CODEX.md`, so `findings-synthesizer` sees both alongside the other lanes. The harness notes carry how that sub-agent is spawned.
+If `AGY_RC` or `CODEX_RC` was 40, that role resolved to the claude lane (its default CLI is absent, or the roster pins `cli = "claude"`) under a lead whose sub-agents enforce their tools; under any other lead `dispatch_role` runs `claude -p` itself and returns its exit code. For the analyst lane run `dispatch_persona architecture-strategist "$REVIEW_PACKAGE" <out>` and promote `<out>` (scrubbed) into `ops/REVIEW_ANTIGRAVITY.md`; for the reviewer lane run a logic + security review as a sub-agent writing `ops/REVIEW_CODEX.md`, so `findings-synthesizer` sees both alongside the other lanes. The harness notes carry how that sub-agent is spawned.

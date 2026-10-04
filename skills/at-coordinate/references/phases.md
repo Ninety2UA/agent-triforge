@@ -39,7 +39,7 @@ Read the updated `ops/` files after completion.
 
 ## Pre-plan: institutional knowledge
 
-Run `dispatch_persona learnings-researcher` to search `ops/solutions/` and `ops/decisions/`.
+Write a brief file naming the goal, then run `dispatch_persona learnings-researcher <brief file> <out>` to search `ops/solutions/` and `ops/decisions/`.
 
 ## Phase 1: planning
 
@@ -51,15 +51,15 @@ Before proceeding to build, list every critical assumption in your plan. If any 
 
 ## Phase 1.5: plan validation
 
-Run `dispatch_persona plan-checker` on `ops/TASKS.md`. Iterate until APPROVED (max 3 rounds).
+Run `dispatch_persona plan-checker ops/TASKS.md <out>` and read the verdict from `<out>`. Iterate until APPROVED (max 3 rounds).
 
 ## Phase 2: build
 
-Use wave orchestration (the `wave-orchestration` skill: every task leased from `ops/roster.toml`, merged only after a pinned non-author review, one commit per task on the integration branch). Sub-agent mode for fewer than 5 tasks, agent-team mode for 5 or more. Run the `integration-verifier` persona between waves. Apply risk scoring (halt at risk above 20 % or 50+ file changes).
+Use wave orchestration (the `wave-orchestration` skill: every task leased from `ops/roster.toml`, merged only after a pinned non-author review, one commit per task on the integration branch). Sub-agent mode for fewer than 5 tasks, agent-team mode for 5 or more. Run the `integration-verifier` persona between waves (`--at ref:<integration branch>`). Apply risk scoring (halt at risk above 20 % or 50+ file changes).
 
 ## Phase 3: parallel review
 
-Launch Antigravity + Codex (in the background) + the review personas (`dispatch_persona`, in the background) simultaneously:
+Launch Antigravity + Codex (in the background) + the review personas simultaneously (`dispatch_persona <persona> <review package file> <out>`, in the background):
 
 - `security-sentinel`
 - `performance-oracle`
@@ -69,11 +69,11 @@ Launch Antigravity + Codex (in the background) + the review personas (`dispatch_
 
 ## Phase 4: process reviews
 
-Run `dispatch_persona findings-synthesizer`. Apply the `iterative-refinement` skill. Fix P1 + P2. Loop if needed (max 3 cycles).
+Run `dispatch_persona findings-synthesizer <brief file> <out>`, the brief naming the cycle. Apply the `iterative-refinement` skill. Fix P1 + P2. Loop if needed (max 3 cycles).
 
 ## Phase 5: test
 
-Run `dispatch_persona test-gap-analyzer`. Dispatch Codex to write tests, failing test first. Fix failures until green (max 3 cycles).
+Run `dispatch_persona test-gap-analyzer <brief file> <out>` (default `--at ref:HEAD`). Dispatch Codex to write tests, failing test first. Fix failures until green (max 3 cycles).
 
 ## Phase 6: wrap up
 

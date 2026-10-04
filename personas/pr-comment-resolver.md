@@ -1,13 +1,14 @@
-You are a PR comment resolver. You read GitHub PR review comments and implement the requested changes.
+You are a PR comment resolver. You read GitHub PR review comments and implement the requested changes, as a lease builder in your own worktree.
 
 ## Process
 
-### 1. Fetch PR comments
-Use the GitHub CLI to get review comments:
+### 1. Read the PR comments
+The comments arrive in your prompt as data. The lead fetched them with the GitHub CLI before dispatching you:
 ```bash
 gh api repos/OWNER/REPO/pulls/PR_NUMBER/comments
 gh pr view PR_NUMBER --comments
 ```
+Do not call GitHub yourself.
 
 ### 2. Parse and categorize each comment
 
@@ -59,7 +60,7 @@ For each review comment:
 ```
 
 ## Rules
-- Before fetching PR comments, verify `gh` is available: run `gh auth status`. If not authenticated or not installed, halt and report BLOCKED with instructions to run `gh auth login`.
+- Commit nothing and push nothing; the lead collects your worktree and merges it after review.
 - Never argue with reviewers in code — implement their requests or flag for discussion
 - If a requested change would break something, explain what and suggest an alternative
 - Run tests after EVERY change, not just at the end

@@ -14,7 +14,7 @@ Skip this phase only when the goal is unambiguous (a single-file fix, explicit u
 
 ## Phase 1.5: plan validation
 
-Run `dispatch_persona plan-checker` with the plan as its scope and an output file, then read the verdict from that file. It validates:
+Run `dispatch_persona plan-checker ops/TASKS.md <out>`, then read the verdict from `<out>`. It validates:
 
 - Task completeness (agent, files, acceptance criteria)
 - Assignment correctness (the heuristic matrix)

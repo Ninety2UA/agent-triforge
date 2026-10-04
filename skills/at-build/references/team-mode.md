@@ -53,4 +53,4 @@
 
    `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it); a teammate working elsewhere uses that same path, never one relative to its working directory.
 6. Quality gates: tests and lint must pass, and a pinned non-author reviewer must approve, before a task merges (self-review refused, AE3).
-7. The `integration-verifier` persona runs between waves against the integration branch; the lead promotes to the main branch honoring the `[promotion]` gate.
+7. The `integration-verifier` persona runs between waves against the integration branch (`--at ref:<integration branch>`); the lead promotes to the main branch honoring the `[promotion]` gate.

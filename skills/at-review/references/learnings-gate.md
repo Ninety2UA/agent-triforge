@@ -31,4 +31,4 @@ else
 fi
 ```
 
-**Run `dispatch_persona learnings-researcher` only when the list is non-empty**, with the matched entries and the changed paths as its scope ("Known-issue check for the review of <changed paths>: read these ops/solutions/ entries — <list> — and report which past fixes or gotchas the diff must not undo") and an output file outside `ops/REVIEW_*` (it is context, not a review lane). That file goes to `findings-synthesizer` as **known-issue context** alongside the `ops/REVIEW_*.md` lanes. When the gate prints "skipped", do not dispatch it.
+**Run the `learnings-researcher` persona only when the list is non-empty.** Write its brief to a file ("Known-issue check for the review of <changed paths>: read these ops/solutions/ entries — <list> — and report which past fixes or gotchas the diff must not undo"), then run `dispatch_persona learnings-researcher <brief file> <out>` with `<out>` outside `ops/REVIEW_*` (it is context, not a review lane). That file goes to `findings-synthesizer` as **known-issue context** alongside the `ops/REVIEW_*.md` lanes. When the gate prints "skipped", do not dispatch it.

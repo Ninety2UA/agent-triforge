@@ -10,7 +10,9 @@
 #                      read        Read, Grep, Glob
 #                      read-web    read + WebFetch, WebSearch (Claude only)
 #                      exec        Bash and no edit tools, in a disposable
-#                                  worktree at the lease's collect snapshot
+#                                  worktree at the --at target: a lease's
+#                                  collect snapshot or a git ref (ref:HEAD
+#                                  by default)
 #                      lease       never run as a persona: the work goes
 #                                  through a lease (it edits code)
 #                      agent-team  Claude's agent_teams capability only, through

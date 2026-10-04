@@ -1,6 +1,6 @@
 # Dispatch brief for the pr-comment-resolver
 
-This is the body of the lease prompt; the lead appends the PR reference and the comments it fetched. It is the `pr-comment-resolver` persona's working contract (the builder's model comes from the roster, its confinement from the lease).
+In the lease prompt this brief follows the `pr-comment-resolver` persona's text (`persona_prompt pr-comment-resolver`), and the lead appends the PR reference and the comments it fetched. It is the persona's working contract (the builder's model comes from the roster, its confinement from the lease).
 
 ## Input
 

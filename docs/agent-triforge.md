@@ -300,7 +300,7 @@ Antigravity CLI ships its own plugin system (`agy plugin {install,uninstall,list
 
 ## Personas
 
-The 19 personas live in `personas/`: one prompt file each, with no frontmatter, and one manifest, `personas/manifest.toml`. A skill names a persona, and `dispatch_persona <persona> <scope> <out>` runs it with the tool class, model tier and turn budget from its manifest entry, under either lead. `pr-comment-resolver` and `team-lead` are the exceptions. The first edits code, so its work runs as a lease; the second runs only as a Claude agent-team teammate.
+The 19 personas live in `personas/`: one prompt file each, with no frontmatter, and one manifest, `personas/manifest.toml`. A skill names a persona, and `dispatch_persona <persona> <input> <out> [--at task:<id>|ref:<git-ref>]` runs it with the tool class, model tier and turn budget from its manifest entry, under either lead. `<input>` is always a file: a brief the skill writes, the collect-snapshot diff or a bug report. `<out>` is the report file the call writes. An `exec` persona runs in a disposable worktree at the `--at` target, `ref:HEAD` by default. `pr-comment-resolver` and `team-lead` are the exceptions. The first edits code, so its work runs as a lease; the second runs only as a Claude agent-team teammate.
 
 ### Core workflow personas
 
@@ -336,15 +336,19 @@ These personas run alongside Antigravity and Codex to add review depth:
 ### Persona invocation examples
 
 ```bash
-# Plan validation, Phase 1.5: reads TASKS.md, ARCHITECTURE.md, CONTRACTS.md;
-# the report says APPROVED or NEEDS_REVISION with specific issues
-dispatch_persona plan-checker "Validate ops/TASKS.md" "$TMPDIR/plan-check.md"
+# Plan validation, Phase 1.5: the input is the file to check; the report says
+# APPROVED or NEEDS_REVISION with specific issues
+dispatch_persona plan-checker ops/TASKS.md "$TMPDIR/plan-check.md"
 
-# Security review, Phase 3, in the background next to the Antigravity and Codex lanes
-dispatch_persona security-sentinel "Review the [R] tasks in ops/TASKS.md" "$TMPDIR/review-security.md" &
+# Security review, Phase 3, in the background next to the Antigravity and Codex
+# lanes: the input is the review package (diff, task rows, contracts slice)
+dispatch_persona security-sentinel "$TMPDIR/review-package.md" "$TMPDIR/review-security.md" &
 
-# Bug investigation before a fix: reproduces the bug and names the root cause
-dispatch_persona bug-reproduction-validator "<bug report>" "$TMPDIR/repro.md"
+# Knowledge search before planning: the input is a brief file the lead wrote
+dispatch_persona learnings-researcher "$TMPDIR/learnings-brief.md" "$TMPDIR/learnings.md"
+
+# Between waves: an exec persona, run in a disposable worktree at the integration branch
+dispatch_persona integration-verifier "$TMPDIR/verify-brief.md" "$TMPDIR/verify.md" --at "ref:$INTEGRATION_BRANCH"
 ```
 
 ---
@@ -838,7 +842,7 @@ invoke_codex "logic_reviewer" \
 CODEX_PID=$!
 
 # === Specialist personas (same round, in the background) ===
-# dispatch_persona <persona> <scope> <out> & for each persona the flags select:
+# dispatch_persona <persona> <input-file> <out> & for each persona the flags select:
 # - security-sentinel → deep OWASP analysis
 # - performance-oracle → algorithmic complexity, N+1, scalability
 # - code-simplicity-reviewer → over-engineering, YAGNI
@@ -1317,7 +1321,7 @@ These sections moved here from `.claude/CLAUDE.md` on 2026-10-01, when the root 
 ### Persona manifest and agent formats
 
 Persona files carry no frontmatter. Each persona's entry in `personas/manifest.toml` has four fields:
-- `class`: the tool class `dispatch_persona` enforces. `read` is Read, Grep and Glob; `read-web` adds WebFetch and WebSearch and runs on Claude only; `exec` is Bash with no edit tools, in a disposable worktree at the lease's collect snapshot; `lease` means the work goes through a lease instead (`pr-comment-resolver`); `agent-team` is the Claude agent-team spawn (`team-lead`), whose tools are not enforced.
+- `class`: the tool class `dispatch_persona` enforces. `read` is Read, Grep and Glob; `read-web` adds WebFetch and WebSearch and runs on Claude only; `exec` is Bash with no edit tools, in a disposable worktree at the `--at` target (a lease's collect snapshot, or a git ref, `ref:HEAD` by default); `lease` means the work goes through a lease instead (`pr-comment-resolver`); `agent-team` is the Claude agent-team spawn (`team-lead`), whose tools are not enforced.
 - `tier`: the starting rung on the model ladder (`top`, `opus-xhigh`, `opus-high`, `sonnet-high`). The rungs are defined once, in `TRIFORGE_MODEL_LADDER`.
 - `never_downgrade`: true for exactly the trio the ladder names; those three run at `top` on Claude whichever CLI leads.
 - `max_turns`: the turn budget.

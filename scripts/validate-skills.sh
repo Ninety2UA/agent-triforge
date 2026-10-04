@@ -125,18 +125,20 @@
 #        (bash/sh/source/exec/env + path, $(path), . path) carries the
 #        skill-directory anchor $SKILL_DIR/ or ${SKILL_DIR}/: a cwd-relative
 #        call runs a project's own scripts/locate-triforge.sh (CWE-427)   (new)
-#   KTD21 the persona home (R14): every personas/*.md has a [personas.<name>]
-#        entry in personas/manifest.toml and every entry a file; each entry
-#        carries exactly class (read, read-web, exec, lease, agent-team), tier
+#   KTD21 the persona home (R14): every personas/*.md (a kebab-case name that
+#        is not a tool class) has a [personas.<name>] entry in
+#        personas/manifest.toml and every entry a file; each entry carries
+#        exactly class (read, read-web, exec, lease, agent-team), tier
 #        (top, opus-xhigh, opus-high, sonnet-high), never_downgrade (boolean;
 #        true needs tier top) and max_turns (positive integer); the
 #        never_downgrade set equals the personas TRIFORGE_MODEL_LADDER in
 #        scripts/lib/registry.sh names after "Never downgrade" (a skip: line
 #        when the literal has no such list). Every persona a skill names in
 #        SKILL.md, references/ or scripts/ — `dispatch_persona <name>`,
-#        `persona_prompt <name>` or "the `<name>` persona" — exists, and no
-#        skill spells out a personas/ path. Outside fixture mode a missing
-#        persona home fails                                             (new)
+#        `persona_prompt <name>` or "the `<name>` persona" (a tool class in
+#        that phrase is not a name) — exists, and no skill spells out a
+#        personas/ path. Outside fixture mode a missing persona home
+#        fails                                                          (new)
 #   SREF `skills-ref validate <skill>` runs when the binary is on PATH (its
 #        verdict on disable-model-invocation / argument-hint is pending until
 #        then); otherwise a skip: line
@@ -968,8 +970,11 @@ def persona_refs(dirs):
             if not os.path.isfile(path):
                 continue
             for i, line in enumerate(read_text(path).split("\n")):
-                for rx in (PERSONA_CALL, PERSONA_PROSE):
-                    for m in rx.finditer(line):
+                for m in PERSONA_CALL.finditer(line):
+                    names.append((path, i + 1, m.group(1)))
+                for m in PERSONA_PROSE.finditer(line):
+                    # "a `read-web` persona" names a tool class, not a persona.
+                    if m.group(1) not in PERSONA_CLASSES:
                         names.append((path, i + 1, m.group(1)))
                 for m in PERSONA_PATH.finditer(line):
                     paths.append((path, i + 1, m.group(0)))
@@ -1022,6 +1027,8 @@ def check_personas(root, dirs):
                 new(path, "C26", "line " + str(i + 1) + ": " + hit + " (personas take no interpolation)")
         if not KEBAB_STRICT.match(os.path.basename(path)[:-3]):
             new(path, "KTD21", "persona file name is not kebab-case")
+        elif os.path.basename(path)[:-3] in PERSONA_CLASSES:
+            new(path, "KTD21", "persona named after a tool class (" + ", ".join(PERSONA_CLASSES) + ")")
 
     # KTD21 — one manifest entry per persona file, every field valid.
     entries = {}

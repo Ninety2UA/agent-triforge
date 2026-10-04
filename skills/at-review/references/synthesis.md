@@ -2,7 +2,7 @@
 
 Wait for all reviewers to complete first.
 
-1. Run `dispatch_persona findings-synthesizer` with the cycle number and, when the gate dispatched it, the `learnings-researcher` output file in its scope, and an output file outside `ops/REVIEW_*`; that file is the synthesized report. The synthesizer is in the never-downgrade trio and runs as top-tier Claude whichever CLI leads.
+1. Write a brief file naming the cycle number and, when the gate dispatched it, the `learnings-researcher` output file, then run `dispatch_persona findings-synthesizer <brief file> <out>` with `<out>` outside `ops/REVIEW_*`; `<out>` is the synthesized report. The synthesizer is in the never-downgrade trio and runs as top-tier Claude whichever CLI leads.
 2. It reads ALL `ops/REVIEW_*.md` lanes (Antigravity + Codex + any optional-tier `REVIEW_OPENCODE`/`KIMI`/`CURSOR.md` + each specialist persona's `ops/REVIEW_<PERSONA>.md`), and the `learnings-researcher` output as known-issue context when there is one.
 3. It produces the synthesized report with confidence tiering (HIGH/MEDIUM/LOW) and priority (P1/P2/P3). A `[LOW]` confidence finding is never P1.
 4. Apply the `iterative-refinement` skill:

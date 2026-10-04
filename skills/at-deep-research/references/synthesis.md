@@ -1,6 +1,6 @@
 # Synthesize
 
-Run `dispatch_persona research-synthesizer` with ALL five outputs named in its scope (the four lens files and `ops/RESEARCH_ANTIGRAVITY.md`) and an output file:
+Write a brief file that names ALL five outputs (the four lens files and `ops/RESEARCH_ANTIGRAVITY.md`) and asks the following, then run `dispatch_persona research-synthesizer <brief file> <out>`:
 
 "Merge these research findings into a unified analysis for: the topic"
 
