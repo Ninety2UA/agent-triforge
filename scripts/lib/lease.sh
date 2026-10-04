@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/lease.sh — the lease lifecycle (KTD-4): ledger, per-adapter env allowlist (+ no-push backstop, worker marker), lease_create/dispatch/collect/merge/promote, the typed-report parser (KTD11)
+# scripts/lib/lease.sh — the lease lifecycle (KTD-4): ledger, per-adapter env allowlist (+ no-push backstop, worker marker), lease_create/dispatch/collect/merge/promote, detached builders + lease_wait + the lead-exit reconcile (KTD10), the typed-report parser (KTD11)
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh. Every function keeps the name and
@@ -326,8 +326,9 @@ _lease_valid_task_id() {
 # tomllib (read-only stdlib), apply updates, re-serialize with a small flat
 # emitter (values stay flat strings/ints so the round trip is trivial),
 # round-trip-verify the tmp file, then atomic tmp+mv. `updated` is stamped
-# on every call. Int keys: pid, created, updated, heartbeat_deadline,
-# requeue_count, review_cycle. Refuses in a worker context (_lead_only, KTD9)
+# on every call. Int keys: pid, pgid, lead_pid, created, updated,
+# heartbeat_deadline, requeue_count, review_cycle, report_missing_count.
+# Refuses in a worker context (_lead_only, KTD9)
 # — the backstop behind the lease_* entry points' own refusal.
 #
 # The reserved id @baseline (never a valid task id) writes the [baseline]
@@ -443,7 +444,7 @@ if task == '@baseline':
     row = baseline
 else:
     row = dict(leases.get(task, {})) if isinstance(leases.get(task, {}), dict) else {}
-INT_KEYS = ('pid', 'created', 'updated', 'heartbeat_deadline', 'requeue_count', 'review_cycle', 'report_missing_count')
+INT_KEYS = ('pid', 'pgid', 'lead_pid', 'created', 'updated', 'heartbeat_deadline', 'requeue_count', 'review_cycle', 'report_missing_count')
 for arg in sys.argv[1:]:
     k, sep, v = arg.partition('=')
     if not sep or not k:
@@ -600,9 +601,10 @@ print('\n'.join(vals))
 #                             ledger's copy and digest (ledger.copy,
 #                             ledger.sha256), which only _ledger_update writes
 # _lead_integrity_check runs at lease_create, lease_dispatch, lease_pin_reviewer,
-# lease_collect, lease_merge, lease_promote, lease_requeue and
-# lease_heartbeat_check. A change the lead did not make restores what can be
-# restored (.git/config, .git/hooks, the trusted git config) — only from a
+# lease_collect, lease_merge, lease_promote, lease_requeue,
+# lease_heartbeat_check and lease_wait (on entry, every 15 s while it waits,
+# before it acts on a row, and on return). A change the lead did not make
+# restores what can be restored (.git/config, .git/hooks, the trusted git config) — only from a
 # lead copy whose digest still equals the baseline, and only after saving the
 # changed version as <lease root>/lead/<name>.changed-<UTC time> (it may have
 # been the lead's or the user's: git remote add, pre-commit install) —
@@ -1222,7 +1224,7 @@ print(" || ".join(log[-20:]))
 # _lane_run in scripts/probe-capabilities.sh, which reads the same base list.
 # The env_keys are one registry read here unless lease_dispatch, which already
 # read them together with the model, hands them over in _ADAPTER_ENV_KEYS (set
-# inside its dispatch subshell only, so the lead's shell never carries it).
+# inside the detached builder process only, so the lead's shell never carries it).
 #
 # _adapter_env_forward <NAME> — append NAME=value to the caller's PAIRS when the
 # variable is set (set-and-empty included): the one rule for the base allowlist
@@ -1461,7 +1463,8 @@ print(" ".join(sorted(found)) or "none")
 # _CARVE_POINTER / _CARVE_ADMIN_DIGEST (the per-lease integrity baseline), and
 # _CARVE_FIELDS: the key=value list every (re)carved lease row starts from
 # (those four, the branch it was carved on — empty on the default branch, which
-# is never an integration branch — and the cleared snapshot/integrity fields),
+# is never an integration branch — the lease root it was carved under, and the
+# cleared snapshot/integrity fields),
 # passed as "${_CARVE_FIELDS[@]}" by lease_create and lease_requeue. Set only on
 # success, and then never empty, so the expansion is safe under bash 3.2
 # `set -u` and in zsh.
@@ -1485,7 +1488,7 @@ _lease_carve() {
   CUR=$(_lease_current_branch)
   if [ -n "$CUR" ] && [ "$CUR" = "$(_lease_default_branch)" ]; then CUR=""; fi
   _CARVE_FIELDS=(base_sha="$_CARVE_BASE" admin_dir="$_CARVE_ADMIN" pointer_digest="$_CARVE_POINTER" admin_digest="$_CARVE_ADMIN_DIGEST"
-                 integration_branch="$CUR" snapshot_sha= snapshot_tree= builder_commits= integrity_prev_state=)
+                 integration_branch="$CUR" lease_root="$_LEASE_ROOT" snapshot_sha= snapshot_tree= builder_commits= integrity_prev_state=)
 }
 
 # _lease_tree_of_worktree <worktree> <admin> <start-commit> [<provisioned>] —
@@ -1720,6 +1723,353 @@ _lease_extract_stream() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# Detached builders, lease_wait and the lead-exit reconcile (KTD10, R36, R38)
+# ---------------------------------------------------------------------------
+#
+# A builder outlives the lead's turn. lease_dispatch starts it through
+# _LEASE_LAUNCH_PY in its own session and process group (pid == pgid), stdin
+# from /dev/null, stdout and stderr to <out>.log, so neither the end of the
+# lead's tool call nor a closed terminal reaches it (U29: CC-09, CC-10, CDX-12,
+# CDX-13 PASS on the reference host, so coordinate.sh holds no processes). The
+# started process is a fresh /bin/bash that sources the loader and runs
+# _lease_builder_run: the lane command under _adapter_env, the sweep of its own
+# process group, then the exit record. The ledger row records pid, pgid and
+# pid_started (the leader's ps start time, whitespace-collapsed), so a pid the
+# OS later gave to another process is never taken for the builder and never
+# signalled; and lead_pid / lead_started, the lead process that dispatched it
+# (_lease_lead_proc). The lead waits with lease_wait, the one waiting
+# primitive; lease_heartbeat_check is the resume sweep. Both reconcile each
+# building lease through _lease_sweep_one: a live builder keeps building; a
+# finished one is collected; a dead one without an exit record takes the
+# orphan path. When the recorded lead process is gone (it exited, was killed,
+# or a forced handover says so), a live builder is adopted by the current lead
+# and a finished one is collected normally, both with reason=lead-exit and
+# lead_exit_at, and requeue_count untouched (R38).
+
+# lease_wait's rc when its budget ran out with a watched lease still building
+# (EX_TEMPFAIL: call it again).
+_RC_WAIT_BUILDING=75
+
+# _LEASE_LAUNCH_PY <log> <argv...> — start argv in a new session with stdin
+# /dev/null and stdout/stderr appended to <log>, and print
+# "<pid>\t<pgid>\t<start time>". The child holds at a pipe (fd _TRIFORGE_GO_FD,
+# read by _LEASE_BUILDER_SH) until its pgid and start time are read, so the
+# recorded fingerprint is the live process's own even for a builder that
+# finishes at once; when the launcher fails or dies first, the pipe closes
+# unreleased and the child exits without running anything.
+_LEASE_LAUNCH_PY='
+import os, subprocess, sys
+log, argv = sys.argv[1], sys.argv[2:]
+r, w = os.pipe()
+env = dict(os.environ, _TRIFORGE_GO_FD=str(r))
+try:
+    with open(log, "ab") as out:
+        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
+                             start_new_session=True, close_fds=True, pass_fds=(r,), env=env)
+except OSError as e:
+    sys.stderr.write("lease_dispatch: could not start the builder: " + str(e) + "\n")
+    sys.exit(1)
+os.close(r)
+try:
+    info = subprocess.run(["ps", "-o", "pgid=,lstart=", "-p", str(p.pid)], capture_output=True, text=True).stdout.split()
+except OSError:
+    info = []
+if len(info) < 2 or info[0] != str(p.pid):
+    os.close(w)
+    sys.stderr.write("lease_dispatch: the builder process " + str(p.pid) + " is not a session leader with a readable start time (ps: " + " ".join(info) + "); it was not released\n")
+    sys.exit(1)
+os.write(w, b"go\n")
+os.close(w)
+print(str(p.pid) + "\t" + info[0] + "\t" + " ".join(info[1:]))
+'
+
+# _LEASE_BUILDER_SH — the script the launched /bin/bash runs (bash -c, $0 a
+# label, $1 the loader, then _lease_builder_run's arguments): wait for the
+# launcher's release, source the loader, run the builder.
+_LEASE_BUILDER_SH='case "${_TRIFORGE_GO_FD:-}" in ""|*[!0-9]*) exit 1 ;; esac
+_GO=""
+IFS= read -r _GO <&"$_TRIFORGE_GO_FD" || true
+eval "exec ${_TRIFORGE_GO_FD}<&-"
+unset _TRIFORGE_GO_FD
+if [ "$_GO" != go ]; then exit 1; fi
+. "$1" || exit 97
+shift
+_lease_builder_run "$@"'
+
+# _LEASE_OWN_GROUP_PY — run by _lease_builder_run once the lane command
+# returned: TERM, then KILL, every other process left in its process group (a
+# server the builder started, a child timeout --foreground does not time out),
+# so nothing of the builder still runs when the exit record appears. Only when
+# its parent is the group leader (the launched builder process); anywhere else
+# it does nothing.
+_LEASE_OWN_GROUP_PY='
+import os, signal, subprocess, time
+me = os.getppid()
+grp = os.getpgid(0)
+def members():
+    try:
+        p = subprocess.Popen(["ps", "-A", "-o", "pid=,pgid="], stdout=subprocess.PIPE, text=True)
+        out = p.communicate()[0]
+    except OSError:
+        return []
+    skip = {me, os.getpid(), p.pid}
+    return [int(f[0]) for f in (l.split() for l in out.splitlines())
+            if len(f) == 2 and f[1] == str(grp) and f[0].isdigit() and int(f[0]) not in skip]
+if grp == me:
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        left = members()
+        if not left:
+            break
+        for pid in left:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+        end = time.time() + 2
+        while time.time() < end and members():
+            time.sleep(0.1)
+'
+
+# _lease_proc_state <pid> <recorded start> [recorded pgid] — "alive" when the
+# pid runs (not a zombie) with the recorded start time (whitespace-collapsed,
+# as ps -o lstart= prints it) and, when one is given, the recorded process
+# group; "reused" when the pid runs as a different process; "gone" otherwise.
+# An empty recorded start (a row from before 3.3.3) is the plain liveness test;
+# the 3.3.3 marker "exited-before-record" never matches.
+_lease_proc_state() {
+  local P=${1:-} S=${2:-} G=${3:-} INFO="" ST="" NG="" NS="" TAB
+  TAB=$(printf '\t')
+  case "$P" in ''|0|*[!0-9]*) printf 'gone\n'; return 0 ;; esac
+  INFO=$(ps -o stat=,pgid=,lstart= -p "$P" 2>/dev/null | awk 'NF >= 3 { s = $1; g = $2; $1 = ""; $2 = ""; sub(/^ +/, ""); print s "\t" g "\t" $0; exit }') || INFO=""
+  if [ -z "$INFO" ]; then printf 'gone\n'; return 0; fi
+  { IFS="$TAB" read -r ST NG NS || true; } <<PROC_STATE_EOF
+${INFO}
+PROC_STATE_EOF
+  case "$ST" in Z*) printf 'gone\n'; return 0 ;; esac
+  S=$(printf '%s\n' "$S" | awk '{ $1 = $1; print }')
+  if [ -n "$S" ] && [ "$S" != "$NS" ]; then printf 'reused\n'; return 0; fi
+  if [ -n "$G" ] && [ "$G" != "$NG" ]; then printf 'reused\n'; return 0; fi
+  printf 'alive\n'
+}
+
+# _lease_lead_proc — "<pid>\t<start time>" of the lead process, the one whose
+# exit the lead-exit reconcile detects: TRIFORGE_LEAD_PID when set (a test, or a
+# harness that knows its lead), else the parent of the current process group's
+# leader. A lead's shell tool starts each call as a group leader whose parent is
+# the lead CLI (Claude Code on the reference host; U14 verifies the Codex lead);
+# a by-hand terminal session resolves to the terminal's shell. rc 1 when the
+# start time can't be read.
+_lease_lead_proc() {
+  python3 -c '
+import os, subprocess, sys
+def ps(field, pid):
+    try:
+        return subprocess.run(["ps", "-o", field + "=", "-p", str(pid)], capture_output=True, text=True).stdout.split()
+    except OSError:
+        return []
+pid = os.environ.get("TRIFORGE_LEAD_PID", "")
+if not pid.isdigit() or int(pid) <= 0:
+    up = ps("ppid", os.getpgid(0))
+    pid = up[0] if up and up[0].isdigit() else str(os.getppid())
+start = " ".join(ps("lstart", pid))
+if not start:
+    sys.exit(1)
+print(pid + "\t" + start)
+'
+}
+
+# _lease_kill_builder <pid> <pgid> <recorded start> [term] — TERM a builder's
+# process group, then KILL it a second later ("term": TERM only), and only
+# while its leader still answers as the recorded process (_lease_proc_state
+# alive): a reused pid is never signalled. The KILL goes out unless the pid
+# answers as another process by then (the members left keep the group id
+# reserved). A row from before KTD10 (no pgid: an undetached subshell) keeps
+# the old rule, the pid's own process tree.
+_lease_kill_builder() {
+  local P=$1 G=${2:-} S=${3:-} MODE=${4:-}
+  case "$G" in ''|0|*[!0-9]*) G="" ;; esac
+  if [ "$(_lease_proc_state "$P" "$S" "$G")" != alive ]; then return 0; fi
+  if [ -z "$G" ]; then
+    _kill_tree "$P" TERM
+    if [ "$MODE" != term ]; then sleep 1; _kill_tree "$P" KILL; fi
+    return 0
+  fi
+  kill -TERM -- "-${G}" 2>/dev/null || true
+  if [ "$MODE" = term ]; then return 0; fi
+  sleep 1
+  if [ "$(_lease_proc_state "$P" "$S" "$G")" = reused ]; then return 0; fi
+  kill -KILL -- "-${G}" 2>/dev/null || true
+  return 0
+}
+
+# _lease_builder_run <cli> <model> <effort> <dispatch-model> <kimi-agent-file>
+#   <cursor-bin> <timeout-bin> <timeout-s> <out> <worktree> <env-keys>
+#   <test-builder> <prompt>
+# The detached builder's body: from the worktree, the lane command for <cli>
+# under _adapter_env (or the TRIFORGE_TEST_BUILDER script <test-builder>),
+# output in <out>; then the sweep of its own process group
+# (_LEASE_OWN_GROUP_PY) and the exit record: <out>.class, then <out>.rc, the
+# file the lead waits for. It runs only in the process _LEASE_LAUNCH_PY
+# started, never in the lead's shell, and never writes the ledger (KTD-4).
+# The invoke_* helpers are shell functions and can't cross env -i, so each
+# lane composes the adapter's command core directly (see lease_dispatch).
+_lease_builder_run() {
+  local CLI=$1 MODEL=$2 EFFORT=$3 DISPATCH_MODEL=$4 KIMI_AGENT_FILE=$5 CBIN=$6 TOBIN=$7 TIMEOUT=$8 OUT=$9
+  local WT=${10} TEST_BUILDER=${12} FULL_PROMPT=${13} RC=0 CLASS_SET=0 AGY_PRC=0
+  local -a TO CMD
+  _ADAPTER_ENV_KEYS=${11}   # the registry read lease_dispatch did; _adapter_env reads none
+  cd "$WT" || return 97
+  # --foreground keeps the builder's whole tree in this process group (GNU
+  # timeout otherwise moves into a group of its own), so the lead's kill of the
+  # group and the sweep below reach every process it started; the children
+  # timeout itself leaves running at expiry are the sweep's.
+  TO=("$TOBIN" --foreground "${TIMEOUT}s")
+  if [ -n "$TEST_BUILDER" ]; then
+    # Test seam (see lease_dispatch): deterministic fake builder.
+    _adapter_env "$CLI" "${TO[@]}" "$TEST_BUILDER" "$FULL_PROMPT" > "$OUT" 2>&1 || RC=$?
+  else
+    case "$CLI" in
+      claude)
+        CMD=(claude -p --permission-mode acceptEdits)
+        if [ -n "$MODEL" ]; then CMD+=(--model "$MODEL"); fi
+        _adapter_env claude "${TO[@]}" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+        ;;
+      codex)
+        # Mirrors invoke_codex's retry-safe core (sandbox, approval, model
+        # pin, stdin guard) — see the env -i note in the function comment.
+        # The two sandbox_workspace_write excludes drop codex's default
+        # temp-dir write allowance: lease worktrees live under TMPDIR, so
+        # without them a builder could cross into sibling worktrees or the
+        # lease root (R35: writes restricted to the lease worktree).
+        CMD=(codex exec -s workspace-write -c 'approval_policy="never"'
+             -c 'sandbox_workspace_write.exclude_tmpdir_env_var=true'
+             -c 'sandbox_workspace_write.exclude_slash_tmp=true')
+        if [ -n "$MODEL" ]; then CMD+=(-m "$MODEL"); fi
+        if [ -n "$EFFORT" ]; then CMD+=(-c "model_reasoning_effort=\"${EFFORT}\""); fi
+        _adapter_env codex "${TO[@]}" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+        ;;
+      antigravity)
+        # JSON envelope (KTD2, D-032): exit 0 is not a completion signal on
+        # agy >= 1.1.20 — parse status/response/denied_actions instead. The
+        # prose lands in $OUT (what lease_collect prints), the streams in
+        # $OUT.raw / $OUT.err, the verdict in $OUT.status / $OUT.denied.
+        _adapter_env antigravity "${TO[@]}" agy --model "$DISPATCH_MODEL" --add-dir "$WT" --print-timeout "${TIMEOUT}s" --output-format json -p "$FULL_PROMPT" < /dev/null > "${OUT}.raw" 2> "${OUT}.err" || RC=$?
+        if [ "$RC" -eq 0 ]; then
+          _agy_parse_envelope "${OUT}.raw" "$OUT" || AGY_PRC=$?
+          case "$AGY_PRC" in
+            0|12) : ;;
+            10) RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1
+                echo "lease_dispatch: agy builder returned an empty response with denied actions: $(paste -sd, "${OUT}.denied" 2>/dev/null) — add the matching permissions.allow rule to ~/.gemini/antigravity-cli/settings.json (user tier)" >> "$OUT" ;;
+            *)  RC=1; INVOKE_FAILURE_CLASS="retryable"; CLASS_SET=1
+                echo "lease_dispatch: agy builder returned an empty response (status=$(cat "${OUT}.status" 2>/dev/null)) — treated as failure, not review-ready" >> "$OUT" ;;
+          esac
+        else
+          cat "${OUT}.err" "${OUT}.raw" > "$OUT" 2>/dev/null || true
+        fi
+        ;;
+      opencode)
+        # R35-confined optional-tier builder (U11): raw `opencode run` with
+        # cwd = the worktree, under _adapter_env opencode — which allowlists
+        # ONLY OPENROUTER_API_KEY (KTD-14), so no cross-provider credential
+        # leak. No --auto (OC-06: denies do not survive it) and no
+        # invoke_opencode (a shell function cannot cross env -i); the
+        # confinement contract rides in FULL_PROMPT like every other lane.
+        # Shipped default (DISPATCH_MODEL, from the registry when the roster
+        # carries no pin) is the OpenRouter GLM, so a live build AUTH-FAILs
+        # until the provider is connected — that failure is deterministic and
+        # the lead sees it via <out>.class (no requeue). Effort -> --variant
+        # (OC-05 best-effort), guarded on a non-empty effort exactly like the
+        # codex case guards model_reasoning_effort. The lease path has no
+        # retry, so a provider that rejects the variant surfaces as a
+        # KTD-9-classified failure the lead requeues — same as any other lane.
+        # OpenCode V2 guard (D-049): V2 ignores OPENCODE_PERMISSION and runs
+        # a shared background service outside env -i, so a V2 binary (or one
+        # whose version can't be read — fail-closed) never dispatches —
+        # deterministic refusal naming the V1 pin, recorded in <out>.class
+        # like the agy denied-actions arm (no requeue).
+        if ! _opencode_v2_check opencode; then
+          _opencode_v2_refusal lease_dispatch > "$OUT"
+          RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1
+        else
+          CMD=(opencode run --format json -m "$DISPATCH_MODEL")
+          if [ -n "$EFFORT" ]; then CMD+=(--variant "$EFFORT"); fi
+          _adapter_env opencode "${TO[@]}" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+        fi
+        ;;
+      kimi)
+        # R35-confined optional-tier builder (U12): raw `kimi -p` with cwd =
+        # the worktree, under _adapter_env kimi — which allowlists ONLY KIMI_*
+        # (KTD-14), so no cross-provider credential leak. Telemetry off (R25)
+        # via the inner `env`. Kimi has no per-tool sandbox flag and -p uses
+        # the auto policy, so confinement is the worktree + env allowlist; the
+        # role brief rides in FULL_PROMPT (injection — KIMI-03 has no --agent,
+        # so no invoke_kimi either: a shell function cannot cross env -i).
+        # Shipped default (DISPATCH_MODEL, from the registry when the roster
+        # carries no pin) is kimi-code/k3 (the OAuth-managed alias, D-024), so
+        # a live build AUTH-FAILs until kimi is signed in — that failure is
+        # deterministic and the lead sees it via <out>.class (no requeue). The
+        # builder definition rides as --agent-file with the ABSOLUTE plugin
+        # path composed by the lead shell (KIMI_AGENT_FILE) so it survives
+        # env -i; no --skills-dir (it would replace Kimi's native
+        # .agents/skills discovery — KIMI-04). -p LAST (commander.js consumes
+        # the next token as -p's value; see the invoke_kimi note) — prompt
+        # right after -p.
+        CMD=(kimi --output-format stream-json -m "$DISPATCH_MODEL")
+        if [ -n "$KIMI_AGENT_FILE" ]; then CMD+=(--agent-file "$KIMI_AGENT_FILE"); fi
+        _adapter_env kimi "${TO[@]}" env KIMI_DISABLE_TELEMETRY=1 "${CMD[@]}" -p "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+        ;;
+      cursor)
+        # R35-confined optional-tier builder (U13): raw `cursor-agent -p` with
+        # cwd = the worktree, under _adapter_env cursor — which allowlists ONLY
+        # CURSOR_API_KEY (KTD-14), so no cross-provider credential leak.
+        # --trust bypasses the workspace-trust prompt (mandatory headless,
+        # CUR-04); --force applies edits without confirmation (builder role,
+        # inside the worktree). Model pinned to the suffixed id composed by
+        # _cursor_model_for_effort from the roster model + effort (D-025;
+        # default cursor-grok-4.6-xhigh), NEVER Auto (ledger attribution needs
+        # a named model). Binary resolved lead-side by _cursor_bin (CBIN —
+        # cursor-agent first, verified `agent` fallback) and exec'd by
+        # absolute path inside env -i. Confinement is the worktree + env
+        # allowlist, NOT --sandbox (CUR-07: --sandbox enabled did not confine
+        # — an absolute-path write escaped). -p is a BOOLEAN flag (unlike
+        # kimi's -p); the prompt is the TRAILING POSITIONAL (verified live
+        # 2026-07-18), so it comes LAST. No invoke_cursor (a shell function
+        # cannot cross env -i; the role brief rides in FULL_PROMPT via
+        # injection — cursor has no headless --agent selector). A live build
+        # AUTH-FAILs until cursor-agent is logged in — that failure is
+        # deterministic and the lead sees it via <out>.class.
+        CMD=("$CBIN" -p --output-format stream-json --model "$DISPATCH_MODEL" --trust --force)
+        _adapter_env cursor "${TO[@]}" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+        ;;
+      *)
+        echo "lease_dispatch: ERROR builder CLI '${CLI}' has no dispatch arm here — not integrated. Registered CLIs: $(_known_clis '<registry unreadable>')." > "$OUT"
+        RC=95
+        ;;
+    esac
+  fi
+  python3 -c "$_LEASE_OWN_GROUP_PY" 2>/dev/null || true
+  # Only a nonzero exit has a failure class (matches invoke_antigravity /
+  # invoke_codex): a clean run is class=none, so lease_collect never reads a
+  # spurious 'retryable' off a builder that actually succeeded.
+  if [ "$RC" -eq 0 ]; then
+    INVOKE_FAILURE_CLASS="none"
+    # The opencode / kimi / cursor lanes answer as a JSON event stream; the
+    # typed `Status:` report (KTD11) lives inside it as escaped text, so a
+    # line-anchored parser can never see it. Extract the prose into $OUT
+    # (raw stream kept in ${OUT}.raw); an extraction miss leaves $OUT as is.
+    _lease_extract_stream "$CLI" "$OUT"
+  elif [ "$CLASS_SET" -ne 1 ]; then
+    _classify_invoke_failure "$RC" "$OUT"
+  fi
+  # The class first, then the rc file the lead waits for (whole, via rename),
+  # so a lead that sees <out>.rc also sees the class.
+  printf '%s\n' "${INVOKE_FAILURE_CLASS:-none}" > "${OUT}.class"
+  printf '%s\n' "$RC" > "${OUT}.rc.tmp"
+  mv -f "${OUT}.rc.tmp" "${OUT}.rc"
+  return "$RC"
+}
+
 # lease_dispatch <task_id> <prompt> [timeout-seconds]
 #
 # Composes the FULL dispatch prompt: injected context header (KTD-3 — the
@@ -1727,16 +2077,22 @@ _lease_extract_stream() {
 # lead-provided task prompt (which carries the task row text and any
 # CONTRACTS.md slice — the builder never reads canonical ops/).
 #
-# The builder launches in the BACKGROUND with cwd = the worktree (subshell
-# cd), under _adapter_env's per-CLI allowlist (KTD-14). The invoke_* helpers
-# are shell functions and cannot cross env -i, so each lane composes the
-# adapter's command core directly: codex = exec + workspace-write + approval
-# never + stdin guard (codex's own sandbox then scopes writes to the
-# worktree cwd); antigravity = model pin + --add-dir + --print-timeout;
-# claude = -p --permission-mode acceptEdits (cwd IS the worktree, no
-# --add-dir needed). Exit code and KTD-9 class land in <out>.rc /
-# <out>.class for the single-writer lead to collect — the builder process
-# never touches the ledger.
+# The builder runs DETACHED (KTD10): _LEASE_LAUNCH_PY starts it in its own
+# session and process group, and _lease_builder_run runs the lane command from
+# the worktree under _adapter_env's per-CLI allowlist (KTD-14), so the worker
+# marker and the no-push backstop reach it as before. The invoke_* helpers are
+# shell functions and cannot cross env -i, so each lane composes the adapter's
+# command core directly: codex = exec + workspace-write + approval never +
+# stdin guard (codex's own sandbox then scopes writes to the worktree cwd);
+# antigravity = model pin + --add-dir + --print-timeout; claude = -p
+# --permission-mode acceptEdits (cwd IS the worktree, no --add-dir needed).
+# Exit code and KTD-9 class land in <out>.rc / <out>.class, the builder
+# process's own diagnostics in <out>.log, for the single-writer lead to
+# collect — the builder process never touches the ledger. The row records
+# state=building, pid, pgid, pid_started, lead_pid, lead_started, output_file
+# and heartbeat_deadline; lease_wait waits on it. Variables the lanes read from
+# the environment (a CLI's credential keys, OPENCODE_PERMISSION) must be
+# exported: the builder process inherits the lead's environment, not its shell.
 #
 # Test seam: TRIFORGE_TEST_BUILDER=<script path> replaces the real adapter
 # for lifecycle determinism — the script runs with the worktree as cwd and
@@ -1747,7 +2103,9 @@ lease_dispatch() {
   local TASK_ID=${1:?usage: lease_dispatch <task_id> <prompt> [timeout]}
   local PROMPT=${2:?usage: lease_dispatch <task_id> <prompt> [timeout]}
   local TIMEOUT=${3:-600}
-  local STATE CLI MODEL EFFORT ROLE WT OUT TOBIN NOW DEADLINE PID PID_START
+  local STATE CLI MODEL EFFORT ROLE WT OUT TOBIN NOW DEADLINE PID="" PGID="" PID_START="" LAUNCH="" BASH_BIN=/bin/bash
+  local LEAD_P="" LEAD_PID="" LEAD_START="" TAB
+  TAB=$(printf '\t')
   _lease_ctx || return 1
   _lead_integrity_check lease_dispatch || return $?
   STATE=$(_ledger_get "$TASK_ID" state) || { echo "lease_dispatch: ERROR no lease row for task '${TASK_ID}' — run lease_create first" >&2; return 1; }
@@ -1808,7 +2166,7 @@ ${BRIEF_BODY}
 ## Task
 ${PROMPT}"
 
-  rm -f "$OUT" "${OUT}.rc" "${OUT}.class"
+  rm -f "$OUT" "${OUT}.rc" "${OUT}.class" "${OUT}.log"
 
   # Lane-specific composition that must happen LEAD-SIDE, before env -i: the
   # Kimi builder definition's absolute plugin path (D-024), the Cursor binary and
@@ -1817,7 +2175,7 @@ ${PROMPT}"
   # model (agy — AE2 — and the optional three) fall back from an empty MODEL to
   # the CLI's shipped default, while claude and codex pass a model only when the
   # roster set one and keep MODEL as is; the env_keys reach _adapter_env through
-  # _ADAPTER_ENV_KEYS inside the dispatch subshell, so it does not read them
+  # _ADAPTER_ENV_KEYS inside the builder process, so it does not read them
   # again. The ledger records the id that was actually dispatched
   # (dispatched_model) beside the roster values (builder_model / builder_effort).
   local KIMI_AGENT_FILE="" CBIN="" DISPATCH_MODEL="$MODEL" REG_ROW="" REG_ENV_KEYS=""
@@ -1840,166 +2198,37 @@ ${PROMPT}"
   esac
   _ledger_update "$TASK_ID" dispatched_model="$DISPATCH_MODEL" || return 1
 
-  (
-    cd "$WT" || exit 97
-    _ADAPTER_ENV_KEYS=$REG_ENV_KEYS   # the registry read above; _adapter_env reads none
-    RC=0
-    CLASS_SET=0
-    if [ -n "${TRIFORGE_TEST_BUILDER:-}" ]; then
-      # Test seam (see function comment): deterministic fake builder.
-      _adapter_env "$CLI" "$TOBIN" "${TIMEOUT}s" "$TRIFORGE_TEST_BUILDER" "$FULL_PROMPT" > "$OUT" 2>&1 || RC=$?
-    else
-      case "$CLI" in
-        claude)
-          local -a CMD=(claude -p --permission-mode acceptEdits)
-          [ -n "$MODEL" ] && CMD+=(--model "$MODEL")
-          _adapter_env claude "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
-          ;;
-        codex)
-          # Mirrors invoke_codex's retry-safe core (sandbox, approval, model
-          # pin, stdin guard) — see the env -i note in the function comment.
-          # The two sandbox_workspace_write excludes drop codex's default
-          # temp-dir write allowance: lease worktrees live under TMPDIR, so
-          # without them a builder could cross into sibling worktrees or the
-          # lease root (R35: writes restricted to the lease worktree).
-          local -a CMD=(codex exec -s workspace-write -c 'approval_policy="never"'
-                        -c 'sandbox_workspace_write.exclude_tmpdir_env_var=true'
-                        -c 'sandbox_workspace_write.exclude_slash_tmp=true')
-          [ -n "$MODEL" ] && CMD+=(-m "$MODEL")
-          [ -n "$EFFORT" ] && CMD+=(-c "model_reasoning_effort=\"${EFFORT}\"")
-          _adapter_env codex "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
-          ;;
-        antigravity)
-          # JSON envelope (KTD2, D-032): exit 0 is not a completion signal on
-          # agy >= 1.1.20 — parse status/response/denied_actions instead. The
-          # prose lands in $OUT (what lease_collect prints), the streams in
-          # $OUT.raw / $OUT.err, the verdict in $OUT.status / $OUT.denied.
-          _adapter_env antigravity "$TOBIN" "${TIMEOUT}s" agy --model "$DISPATCH_MODEL" --add-dir "$WT" --print-timeout "${TIMEOUT}s" --output-format json -p "$FULL_PROMPT" < /dev/null > "${OUT}.raw" 2> "${OUT}.err" || RC=$?
-          if [ "$RC" -eq 0 ]; then
-            AGY_PRC=0
-            _agy_parse_envelope "${OUT}.raw" "$OUT" || AGY_PRC=$?
-            case "$AGY_PRC" in
-              0|12) : ;;
-              10) RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1
-                  echo "lease_dispatch: agy builder returned an empty response with denied actions: $(paste -sd, "${OUT}.denied" 2>/dev/null) — add the matching permissions.allow rule to ~/.gemini/antigravity-cli/settings.json (user tier)" >> "$OUT" ;;
-              *)  RC=1; INVOKE_FAILURE_CLASS="retryable"; CLASS_SET=1
-                  echo "lease_dispatch: agy builder returned an empty response (status=$(cat "${OUT}.status" 2>/dev/null)) — treated as failure, not review-ready" >> "$OUT" ;;
-            esac
-          else
-            cat "${OUT}.err" "${OUT}.raw" > "$OUT" 2>/dev/null || true
-          fi
-          ;;
-        opencode)
-          # R35-confined optional-tier builder (U11): raw `opencode run` with
-          # cwd = the worktree (the enclosing subshell cd'd there), under
-          # _adapter_env opencode — which allowlists ONLY OPENROUTER_API_KEY
-          # (KTD-14), so no cross-provider credential leak. No --auto (OC-06:
-          # denies do not survive it) and no invoke_opencode (a shell function
-          # cannot cross env -i); the confinement contract rides in FULL_PROMPT
-          # like every other lane. Shipped default (DISPATCH_MODEL, from the
-          # registry when the roster carries no pin) is the OpenRouter GLM, so a
-          # live build AUTH-FAILs until the provider is connected — that failure
-          # is deterministic and the lead sees it via <out>.class (no requeue).
-          # Effort -> --variant (OC-05 best-effort), guarded on a non-empty effort
-          # exactly like the codex case guards model_reasoning_effort. The lease
-          # path has no retry, so a provider that rejects the variant surfaces as a
-          # KTD-9-classified failure the lead requeues — same as any other lane.
-          # OpenCode V2 guard (D-049): V2 ignores OPENCODE_PERMISSION and runs
-          # a shared background service outside env -i, so a V2 binary (or one
-          # whose version can't be read — fail-closed) never dispatches — deterministic refusal naming the V1 pin, recorded in
-          # <out>.class like the agy denied-actions arm (no requeue).
-          if ! _opencode_v2_check opencode; then
-            _opencode_v2_refusal lease_dispatch > "$OUT"
-            RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1
-          else
-            local -a CMD=(opencode run --format json -m "$DISPATCH_MODEL")
-            [ -n "$EFFORT" ] && CMD+=(--variant "$EFFORT")
-            _adapter_env opencode "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
-          fi
-          ;;
-        kimi)
-          # R35-confined optional-tier builder (U12): raw `kimi -p` with cwd =
-          # the worktree (the enclosing subshell cd'd there), under _adapter_env
-          # kimi — which allowlists ONLY KIMI_* (KTD-14), so no cross-provider
-          # credential leak. Telemetry off (R25) via the inner `env`. --skills-dir
-          # .agents/skills when present (KIMI-04). Kimi has no per-tool sandbox
-          # flag and -p uses the auto policy, so confinement is the worktree + env
-          # allowlist; the role brief rides in FULL_PROMPT (injection — KIMI-03
-          # has no --agent, so no invoke_kimi either: a shell function cannot
-          # cross env -i). Shipped default (DISPATCH_MODEL, from the registry
-          # when the roster carries no pin) is kimi-code/k3 (the OAuth-managed
-          # alias, D-024), so a live build AUTH-FAILs until kimi is signed in —
-          # that failure is deterministic and the lead sees it via <out>.class
-          # (no requeue). The builder definition rides as --agent-file with the
-          # ABSOLUTE plugin path composed by the lead shell (KIMI_AGENT_FILE,
-          # below) so it survives env -i; no --skills-dir (it would replace
-          # Kimi's native .agents/skills discovery — KIMI-04).
-          # -p LAST (commander.js consumes the next token as -p's value; see the
-          # invoke_kimi note) — prompt right after -p.
-          local -a CMD=(kimi --output-format stream-json -m "$DISPATCH_MODEL")
-          [ -n "$KIMI_AGENT_FILE" ] && CMD+=(--agent-file "$KIMI_AGENT_FILE")
-          _adapter_env kimi "$TOBIN" "${TIMEOUT}s" env KIMI_DISABLE_TELEMETRY=1 "${CMD[@]}" -p "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
-          ;;
-        cursor)
-          # R35-confined optional-tier builder (U13): raw `cursor-agent -p` with
-          # cwd = the worktree (the enclosing subshell cd'd there), under
-          # _adapter_env cursor — which allowlists ONLY CURSOR_API_KEY (KTD-14),
-          # so no cross-provider credential leak. --trust bypasses the
-          # workspace-trust prompt (mandatory headless, CUR-04); --force applies
-          # edits without confirmation (builder role, inside the worktree). Model
-          # pinned to the suffixed id composed by _cursor_model_for_effort from
-          # the roster model + effort (D-025; default cursor-grok-4.6-xhigh),
-          # NEVER Auto (ledger attribution needs a named model). Binary resolved
-          # lead-side by _cursor_bin (CBIN — cursor-agent first, verified `agent`
-          # fallback) and exec'd by absolute path inside env -i. Confinement is
-          # the worktree + env allowlist, NOT --sandbox (CUR-07: --sandbox
-          # enabled did not confine — an absolute-path write escaped). -p is a
-          # BOOLEAN flag (unlike kimi's -p); the prompt is the TRAILING
-          # POSITIONAL (verified live 2026-07-18), so it comes LAST. No
-          # invoke_cursor (a shell function cannot cross env -i; the role brief
-          # rides in FULL_PROMPT via injection — cursor has no headless --agent
-          # selector). A live build AUTH-FAILs until cursor-agent is logged in —
-          # that failure is deterministic and the lead sees it via <out>.class.
-          local -a CMD=("$CBIN" -p --output-format stream-json --model "$DISPATCH_MODEL" --trust --force)
-          _adapter_env cursor "$TOBIN" "${TIMEOUT}s" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
-          ;;
-        *)
-          echo "lease_dispatch: ERROR builder CLI '${CLI}' has no dispatch arm here — not integrated. Registered CLIs: $(_known_clis '<registry unreadable>')." > "$OUT"
-          RC=95
-          ;;
-      esac
-    fi
-    # Only a nonzero exit has a failure class (matches invoke_antigravity /
-    # invoke_codex): a clean run is class=none, so lease_collect never reads a
-    # spurious 'retryable' off a builder that actually succeeded.
-    if [ "$RC" -eq 0 ]; then
-      INVOKE_FAILURE_CLASS="none"
-      # The opencode / kimi / cursor lanes answer as a JSON event stream; the
-      # typed `Status:` report (KTD11) lives inside it as escaped text, so a
-      # line-anchored parser can never see it. Extract the prose into $OUT
-      # (raw stream kept in ${OUT}.raw); an extraction miss leaves $OUT as is.
-      _lease_extract_stream "$CLI" "$OUT"
-    elif [ "${CLASS_SET:-0}" -ne 1 ]; then
-      _classify_invoke_failure "$RC" "$OUT"
-    fi
-    printf '%s\n' "$RC" > "${OUT}.rc"
-    printf '%s\n' "${INVOKE_FAILURE_CLASS:-none}" > "${OUT}.class"
-    exit "$RC"
-  ) &
-  PID=$!
-  # The recorded pid's start time (ps lstart, runs of spaces squeezed), so
-  # lease_collect and lease_heartbeat_check can tell this dispatch subshell
-  # from a later process the OS gave the same pid. When the subshell already
-  # exited before ps ran, a marker no lstart can equal is recorded, so neither
-  # ever signals that pid (an EMPTY value is a pre-3.3.3 row, which keeps the
-  # plain liveness test). A string, not an int key.
-  PID_START=$(ps -o lstart= -p "$PID" 2>/dev/null | tr -s ' ' || true)
-  if [ -z "$PID_START" ]; then PID_START="exited-before-record"; fi
+  # Detached launch (KTD10): the builder process is a fresh bash that sources
+  # this loader and runs _lease_builder_run with the composition above, in its
+  # own session and process group, released only once its pgid and start time
+  # are read. TRIFORGE_TEST_BUILDER rides as an argument, so a shell variable
+  # that was never exported still reaches it.
+  if [ ! -x "$BASH_BIN" ]; then BASH_BIN=$(command -v bash 2>/dev/null || printf 'bash'); fi
+  LAUNCH=$(python3 -c "$_LEASE_LAUNCH_PY" "${OUT}.log" "$BASH_BIN" -c "$_LEASE_BUILDER_SH" triforge-lease-builder \
+             "${_TRIFORGE_SCRIPTS_DIR}/invoke-external.sh" "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$KIMI_AGENT_FILE" \
+             "$CBIN" "$TOBIN" "$TIMEOUT" "$OUT" "$WT" "$REG_ENV_KEYS" "${TRIFORGE_TEST_BUILDER:-}" "$FULL_PROMPT") || LAUNCH=""
+  { IFS="$TAB" read -r PID PGID PID_START || true; } <<LAUNCH_EOF
+${LAUNCH}
+LAUNCH_EOF
+  case "${PID}:${PGID}" in
+    *[!0-9:]*|:*|*:) echo "lease_dispatch: ERROR could not start the builder for ${TASK_ID} in its own session (see above); the lease stays leased" >&2; return 1 ;;
+  esac
+  # The lead process this dispatch belongs to: when it is gone at the next
+  # reconcile, the lease went through a lead exit (_lease_sweep_one).
+  LEAD_P=$(_lease_lead_proc 2>/dev/null) || LEAD_P=""
+  { IFS="$TAB" read -r LEAD_PID LEAD_START || true; } <<LEAD_PROC_EOF
+${LEAD_P}
+LEAD_PROC_EOF
+  case "$LEAD_PID" in ''|*[!0-9]*) LEAD_PID=0; LEAD_START="" ;; esac
 
   NOW=$(date +%s)
   DEADLINE=$((NOW + TIMEOUT))
-  _ledger_update "$TASK_ID" state=building pid="$PID" pid_started="$PID_START" output_file="$OUT" heartbeat_deadline="$DEADLINE" || return 1
-  echo "lease_dispatch: task=${TASK_ID} builder=${CLI} pid=${PID} timeout=${TIMEOUT}s output=${OUT}" >&2
+  if ! _ledger_update "$TASK_ID" state=building pid="$PID" pgid="$PGID" pid_started="$PID_START" lead_pid="$LEAD_PID" lead_started="$LEAD_START" \
+         output_file="$OUT" heartbeat_deadline="$DEADLINE"; then
+    kill -TERM -- "-${PGID}" 2>/dev/null || true   # unrecorded, so never left running
+    return 1
+  fi
+  echo "lease_dispatch: task=${TASK_ID} builder=${CLI} pid=${PID} pgid=${PGID} (detached) timeout=${TIMEOUT}s output=${OUT}" >&2
 }
 
 # lease_redispatch <task_id> <prompt-with-findings> [timeout] — the review ->
@@ -2044,27 +2273,206 @@ lease_redispatch() {
   lease_dispatch "$TASK_ID" "$PROMPT" "$TIMEOUT"
 }
 
-# lease_heartbeat_check [task_id] — sweep building leases (or just one). The
-# integrity check runs first (KTD18): a change is escalated and returns 44.
-# Builder alive = the recorded pid answers kill -0 OR the output file was
-# modified within the grace window (TRIFORGE_HEARTBEAT_GRACE, default 60s —
-# covers a dead wrapper whose work just flushed). A dead pid that left
-# <out>.rc is NOT an orphan — the builder finished; run lease_collect. Dead
-# and stale, or alive past heartbeat_deadline (hung), goes state=orphaned
-# and straight into lease_reclaim's safe prune (KTD-9 timeout class).
+# _lease_sweep_one <op> <task> <lead-exit 0|1> <quiet 0|1> <verify 0|1> — one
+# building lease's reconcile, shared by lease_wait and lease_heartbeat_check
+# (KTD10). Builder alive = its pid answers as the recorded process
+# (_lease_proc_state: pid, pgid and start time). Then:
+#   alive, before heartbeat_deadline  keeps building; when the lead that
+#                                     dispatched it is gone, the current lead
+#                                     adopts it (lead_pid / lead_started),
+#                                     reason=lead-exit + lead_exit_at
+#   alive past heartbeat_deadline     hung: its process group is killed, then
+#                                     the orphan path
+#   not alive, <out>.rc present       finished: lease_collect (normal routing:
+#                                     review, report-missing, escalated,
+#                                     failed, orphan); when its lead is gone,
+#                                     reason=lead-exit + lead_exit_at first —
+#                                     requeue_count is never touched here
+#   not alive, no exit record         output written within the grace window
+#                                     (TRIFORGE_HEARTBEAT_GRACE, default 60 s)
+#                                     keeps building; otherwise orphaned and
+#                                     straight into lease_reclaim (KTD-9)
+# "Its lead is gone" = the recorded lead_pid no longer answers as the recorded
+# process, or <lead-exit> is 1 (a forced handover, U9). <quiet> drops the
+# still-building notes (lease_wait polls). <verify> runs the integrity check
+# before acting on the row (adopt, kill, orphan) and then sweeps it again from
+# the verified ledger (KTD18); lease_collect runs its own. Sets _LS_RESULT:
+# building | collected | orphaned | unverified | left (no longer building).
+# Returns 0, or the rc of an integrity check / ledger write that failed.
+_lease_sweep_one() {
+  local OP=$1 TASK=$2 FORCE=${3:-0} QUIET=${4:-0} VERIFY=${5:-0}
+  local ROW="" ST="" PID="" PGID="" STARTED="" OUT="" DEADLINE="" LPID="" LSTARTED="" B ACTION LEAD_GONE=0
+  local NOW AGE=999999 GRACE RC=0 CUR="" CUR_PID="" CUR_START="" STAMP TAB
+  TAB=$(printf '\t')
+  _LS_RESULT=""
+  GRACE=${TRIFORGE_HEARTBEAT_GRACE:-60}
+  case "$GRACE" in ''|*[!0-9]*) GRACE=60 ;; esac
+  ROW=$(_ledger_get_row "$TASK" state pid pgid pid_started output_file heartbeat_deadline lead_pid lead_started) || ROW=""
+  { IFS= read -r ST || true; IFS= read -r PID || true; IFS= read -r PGID || true; IFS= read -r STARTED || true
+    IFS= read -r OUT || true; IFS= read -r DEADLINE || true; IFS= read -r LPID || true; IFS= read -r LSTARTED || true; } <<SWEEP_ROW_EOF
+${ROW}
+SWEEP_ROW_EOF
+  if [ -n "$ROW" ] && [ "$ST" != building ]; then
+    _LS_RESULT=left
+    return 0
+  fi
+  if [ -z "$PID" ] || [ -z "$OUT" ]; then
+    # Could not verify: a building row with no pid/output to judge liveness
+    # by (ledger written by an older version, or a crash between dispatch
+    # and its ledger update). Report it, leave it alone — never guess.
+    echo "${OP}: ${TASK} building but pid/output_file missing from the ledger — cannot verify liveness (degraded); inspect and reclaim by hand" >&2
+    _LS_RESULT=unverified
+    return 0
+  fi
+  case "$DEADLINE" in ''|*[!0-9]*) DEADLINE=0 ;; esac
+  B=$(_lease_proc_state "$PID" "$STARTED" "$PGID")
+  if [ "$FORCE" = 1 ]; then
+    LEAD_GONE=1
+  else
+    case "$LPID" in
+      ''|0|*[!0-9]*) ;;
+      *) if [ "$(_lease_proc_state "$LPID" "$LSTARTED")" != alive ]; then LEAD_GONE=1; fi ;;
+    esac
+  fi
+  NOW=$(date +%s)
+  if [ "$B" = alive ]; then
+    if [ "$NOW" -gt "$DEADLINE" ]; then ACTION=expire
+    elif [ "$LEAD_GONE" -eq 1 ]; then ACTION=adopt
+    else ACTION=wait; fi
+  elif [ -f "${OUT}.rc" ]; then
+    ACTION=collect
+  else
+    if [ -f "$OUT" ]; then
+      AGE=$(OUT_FILE="$OUT" python3 -c "
+import os, time
+print(max(0, int(time.time() - os.path.getmtime(os.environ['OUT_FILE']))))
+" 2>/dev/null || echo 999999)
+      case "$AGE" in ''|*[!0-9]*) AGE=999999 ;; esac
+    fi
+    if [ "$AGE" -lt "$GRACE" ]; then ACTION=grace; else ACTION=orphan; fi
+  fi
+  case "$ACTION" in
+    adopt|expire|orphan)
+      if [ "$VERIFY" = 1 ]; then
+        _lead_integrity_check "$OP" || return $?
+        _lease_sweep_one "$OP" "$TASK" "$FORCE" "$QUIET" 0
+        return $?
+      fi
+      ;;
+  esac
+  STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  case "$ACTION" in
+    wait)
+      if [ "$QUIET" != 1 ]; then
+        echo "${OP}: ${TASK} building (pid ${PID} alive, deadline in $((DEADLINE - NOW))s)" >&2
+      fi
+      _LS_RESULT=building
+      return 0
+      ;;
+    grace)
+      if [ "$QUIET" != 1 ]; then
+        echo "${OP}: ${TASK} pid ${PID} gone but output active ${AGE}s ago (grace ${GRACE}s) — leaving as building" >&2
+      fi
+      _LS_RESULT=building
+      return 0
+      ;;
+    adopt)
+      CUR=$(_lease_lead_proc 2>/dev/null) || CUR=""
+      { IFS="$TAB" read -r CUR_PID CUR_START || true; } <<SWEEP_LEAD_EOF
+${CUR}
+SWEEP_LEAD_EOF
+      case "$CUR_PID" in ''|*[!0-9]*) CUR_PID=0; CUR_START="" ;; esac
+      _ledger_update "$TASK" lead_pid="$CUR_PID" lead_started="$CUR_START" reason=lead-exit lead_exit_at="$STAMP" >/dev/null || return $?
+      echo "${OP}: ${TASK} building — the builder outlived the lead that dispatched it (pid ${PID} alive); adopted by this lead, reason=lead-exit, requeue budget untouched" >&2
+      _LS_RESULT=building
+      return 0
+      ;;
+    collect)
+      if [ "$LEAD_GONE" -eq 1 ]; then
+        _ledger_update "$TASK" reason=lead-exit lead_exit_at="$STAMP" >/dev/null || return $?
+        echo "${OP}: ${TASK} builder finished (rc=$(cat "${OUT}.rc" 2>/dev/null || true)) while the lead that dispatched it was gone — collecting it, reason=lead-exit, requeue budget untouched" >&2
+      else
+        echo "${OP}: ${TASK} builder exited (rc=$(cat "${OUT}.rc" 2>/dev/null || true)) — collecting" >&2
+      fi
+      lease_collect "$TASK" >&2 || RC=$?
+      if [ "$RC" -eq "$_RC_LEASE_INTEGRITY" ]; then return "$RC"; fi
+      _LS_RESULT=collected
+      return 0
+      ;;
+    expire)
+      # Hung past its window: still breathing but the lease is expired — kill
+      # its process group, then orphan (the launcher's own timeout should have
+      # fired; this is the belt to that suspender).
+      echo "${OP}: ${TASK} EXPIRED — pid ${PID} alive past heartbeat_deadline; killing the builder's process group and orphaning" >&2
+      _lease_kill_builder "$PID" "$PGID" "$STARTED"
+      ;;
+    orphan)
+      echo "${OP}: ${TASK} ORPHANED — pid ${PID} dead (or now another process), no exit record, output stale; reclaiming" >&2
+      ;;
+  esac
+  _ledger_update "$TASK" state=orphaned || return $?
+  lease_reclaim "$TASK" || true
+  _LS_RESULT=orphaned
+  return 0
+}
+
+# _lease_root_notice <op> — one stderr note per open lease recorded under a
+# lease root other than the one this shell resolves (TMPDIR or
+# TRIFORGE_LEASE_ROOT changed since lease_create), naming the export that
+# reaches it again. The recorded root is a hint, never a source: the lease root
+# holds the lead's integrity anchors, so it is not taken from the ledger.
+_lease_root_notice() {
+  LR_LEDGER="$_LEASE_LEDGER" LR_ROOT="$_LEASE_ROOT" LR_OP="$1" python3 -c '
+import os, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.exit(0)
+try:
+    with open(os.environ["LR_LEDGER"], "rb") as f:
+        leases = tomllib.load(f).get("lease", {})
+except Exception:
+    sys.exit(0)
+for t, r in sorted(leases.items() if isinstance(leases, dict) else []):
+    if not isinstance(r, dict) or r.get("state") not in ("leased", "building", "review"):
+        continue
+    root = str(r.get("lease_root", ""))
+    if root and os.path.realpath(root) != os.environ["LR_ROOT"]:
+        sys.stderr.write(os.environ["LR_OP"] + ": NOTE lease " + str(t) + " was created under the lease root " + root
+                         + ", but this shell resolves " + os.environ["LR_ROOT"] + " (TMPDIR or TRIFORGE_LEASE_ROOT changed): export TRIFORGE_LEASE_ROOT=" + root + " to reach it\n")
+' || true
+}
+
+# lease_heartbeat_check [--lead-exit] [task_id] — the resume sweep: every
+# building lease (or just one) through _lease_sweep_one, after the integrity
+# check (KTD18: a change is escalated and returns 44). A live builder keeps
+# building; a finished one is collected (lease_collect's stdout goes to stderr
+# here); a dead one with no exit record is orphaned and reclaimed (KTD-9); a
+# lease whose dispatching lead is gone is adopted or collected with
+# reason=lead-exit and its requeue budget untouched. --lead-exit treats every
+# swept lease's lead as gone: the forced handover (U9) calls it. rc 0;
+# _RC_DEGRADED when a row could not be verified; a collect's 44 passes through.
 lease_heartbeat_check() {
   _lead_only lease_heartbeat_check || return $?
-  local ONLY=${1:-}
-  local LEDGER GRACE NOW TASKS TASK
+  local ONLY="" FORCE=0 LEDGER TASKS TASK SWEPT=0 COLLECTED=0 ORPHANED=0 UNVERIFIED=0 RC=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --lead-exit) FORCE=1 ;;
+      *) ONLY=$1 ;;
+    esac
+    shift
+  done
   _lease_ctx || return 1
   LEDGER=$_LEASE_LEDGER
   if [ ! -f "$LEDGER" ]; then
     echo "lease_heartbeat_check: no lease ledger at ${LEDGER} — nothing to sweep" >&2
     return 0
   fi
+  _lease_root_notice lease_heartbeat_check
   _lead_integrity_check lease_heartbeat_check || return $?
-  GRACE=${TRIFORGE_HEARTBEAT_GRACE:-60}
-  NOW=$(date +%s)
   TASKS=$(LEDGER_FILE="$LEDGER" python3 -c "
 import os, sys
 try:
@@ -2080,88 +2488,269 @@ for t, r in sorted(data.get('lease', {}).items()):
     if isinstance(r, dict) and r.get('state') == 'building':
         print(t)
 ")
-  local SWEPT=0 ORPHANED=0 UNVERIFIED=0
   # $TASKS is NEWLINE-separated. Iterate with read, NOT `for TASK in $TASKS`:
   # under zsh (the caller's shell on macOS) an unquoted $TASKS is not
   # word-split, so `for` would run once on the whole "taskA\ntaskB" blob and
   # corrupt the sweep for 2+ concurrent leases — the parallel-wave case. The
   # heredoc (not a `printf | while` pipe) keeps the loop in THIS shell so the
-  # SWEPT/ORPHANED counters persist.
+  # counters persist; each sweep reads /dev/null, never the task list.
   while IFS= read -r TASK; do
-    [ -z "$TASK" ] && continue
-    if [ -n "$ONLY" ] && [ "$TASK" != "$ONLY" ]; then
-      continue
-    fi
+    if [ -z "$TASK" ]; then continue; fi
+    if [ -n "$ONLY" ] && [ "$TASK" != "$ONLY" ]; then continue; fi
     SWEPT=$((SWEPT + 1))
-    local PID OUT DEADLINE ALIVE FRESH AGE
-    PID=$(_ledger_get "$TASK" pid)
-    OUT=$(_ledger_get "$TASK" output_file)
-    if [ -z "$PID" ] || [ -z "$OUT" ]; then
-      # Could not verify: a building row with no pid/output to judge liveness
-      # by (ledger written by an older version, or a crash between dispatch
-      # and its ledger update). Report it, leave it alone — never guess.
-      echo "lease_heartbeat_check: ${TASK} building but pid/output_file missing from the ledger — cannot verify liveness (degraded); inspect and reclaim by hand" >&2
-      UNVERIFIED=$((UNVERIFIED + 1))
-      continue
-    fi
-    DEADLINE=$(_ledger_get "$TASK" heartbeat_deadline)
-    ALIVE=0
-    [ -n "$PID" ] && [ "$PID" -gt 0 ] 2>/dev/null && kill -0 "$PID" 2>/dev/null && ALIVE=1
-    # A live pid whose start time differs from the one lease_dispatch recorded
-    # is a process the OS reused the pid for, not the builder: treat the
-    # builder as gone, and never signal it. A 3.3.3 row whose subshell had
-    # exited before its start time was read carries the marker
-    # "exited-before-record", which no lstart equals. Rows from before 3.3.3
-    # carry no pid_started and keep the plain liveness test.
-    if [ "$ALIVE" -eq 1 ]; then
-      local PID_STARTED PID_NOW
-      PID_STARTED=$(_ledger_get "$TASK" pid_started 2>/dev/null || true)
-      if [ -n "$PID_STARTED" ]; then
-        PID_NOW=$(ps -o lstart= -p "$PID" 2>/dev/null | tr -s ' ' || true)
-        if [ "$PID_NOW" != "$PID_STARTED" ]; then ALIVE=0; fi
-      fi
-    fi
-    if [ "$ALIVE" -eq 1 ]; then
-      if [ "$NOW" -le "${DEADLINE:-0}" ]; then
-        echo "lease_heartbeat_check: ${TASK} building (pid ${PID} alive, deadline in $((DEADLINE - NOW))s)" >&2
-        continue
-      fi
-      # Hung past its window: still breathing but the lease is expired —
-      # kill, then orphan (the launcher's own timeout should have fired;
-      # this is the belt to that suspender).
-      echo "lease_heartbeat_check: ${TASK} EXPIRED — pid ${PID} alive past heartbeat_deadline; killing the builder process tree and orphaning" >&2
-      _kill_tree "$PID" TERM
-      sleep 1
-      _kill_tree "$PID" KILL
-    else
-      if [ -n "$OUT" ] && [ -f "${OUT}.rc" ]; then
-        echo "lease_heartbeat_check: ${TASK} builder exited (rc=$(cat "${OUT}.rc" 2>/dev/null || true)) — run: lease_collect ${TASK}" >&2
-        continue
-      fi
-      FRESH=0
-      AGE=999999
-      if [ -n "$OUT" ] && [ -f "$OUT" ]; then
-        AGE=$(OUT_FILE="$OUT" python3 -c "
-import os, time
-print(int(time.time() - os.path.getmtime(os.environ['OUT_FILE'])))
-" 2>/dev/null || echo 999999)
-        [ "$AGE" -lt "$GRACE" ] 2>/dev/null && FRESH=1
-      fi
-      if [ "$FRESH" -eq 1 ]; then
-        echo "lease_heartbeat_check: ${TASK} pid ${PID} gone but output active ${AGE}s ago (grace ${GRACE}s) — leaving as building" >&2
-        continue
-      fi
-      echo "lease_heartbeat_check: ${TASK} ORPHANED — pid ${PID} dead, no exit record, output stale; reclaiming" >&2
-    fi
-    ORPHANED=$((ORPHANED + 1))
-    _ledger_update "$TASK" state=orphaned || return 1
-    lease_reclaim "$TASK" || true
+    RC=0
+    _lease_sweep_one lease_heartbeat_check "$TASK" "$FORCE" 0 0 < /dev/null || RC=$?
+    if [ "$RC" -ne 0 ]; then return "$RC"; fi
+    case "$_LS_RESULT" in
+      collected)  COLLECTED=$((COLLECTED + 1)) ;;
+      orphaned)   ORPHANED=$((ORPHANED + 1)) ;;
+      unverified) UNVERIFIED=$((UNVERIFIED + 1)) ;;
+    esac
   done <<HEARTBEAT_TASKS
 $TASKS
 HEARTBEAT_TASKS
-  echo "lease_heartbeat_check: swept ${SWEPT} building lease(s), orphaned ${ORPHANED}, unverifiable ${UNVERIFIED}" >&2
-  [ "$UNVERIFIED" -gt 0 ] && return "$_RC_DEGRADED"
+  echo "lease_heartbeat_check: swept ${SWEPT} building lease(s), collected ${COLLECTED}, orphaned ${ORPHANED}, unverifiable ${UNVERIFIED}" >&2
+  if [ "$UNVERIFIED" -gt 0 ]; then return "$_RC_DEGRADED"; fi
   return 0
+}
+
+# _lease_lead_host — the CLI leading this session, for its registry
+# lead.wait_budget_s, from the host markers U29 recorded: CODEX_THREAD_ID or
+# CODEX_CI in a Codex lead's tool shell (CDX-15), else claude (CLAUDECODE=1
+# under Claude Code, CC-11, and the default with no markers). U9's lead
+# resolution replaces it.
+_lease_lead_host() {
+  if [ -n "${CODEX_THREAD_ID:-}" ] || [ -n "${CODEX_CI:-}" ]; then
+    printf 'codex\n'
+  else
+    printf 'claude\n'
+  fi
+}
+
+# _lease_ledger_check — rc 0 when the ledger exists and parses; else rc 1 and
+# the problem on stdout.
+_lease_ledger_check() {
+  if [ ! -f "$_LEASE_LEDGER" ]; then
+    printf 'no lease ledger at %s (no lease was created from this checkout)\n' "$_LEASE_LEDGER"
+    return 1
+  fi
+  LC_LEDGER="$_LEASE_LEDGER" python3 -c '
+import os, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        print("no TOML parser available (use Python 3.11+, or pip install tomli)")
+        sys.exit(1)
+try:
+    with open(os.environ["LC_LEDGER"], "rb") as f:
+        data = tomllib.load(f)
+except Exception as e:
+    print(os.environ["LC_LEDGER"] + " does not parse: " + " ".join(str(e).split()))
+    sys.exit(1)
+if not isinstance(data.get("lease", {}), dict):
+    print(os.environ["LC_LEDGER"] + " has a lease key that is not a table of leases")
+    sys.exit(1)
+'
+}
+
+# _LEASE_WAIT_PY — lease_wait's ledger read: "<task>\t<state>" for each task in
+# LW_NAMES (space-separated; "@missing" for one with no row), or for every
+# building lease when LW_NAMES is empty, then "@now\t<epoch ms>".
+_LEASE_WAIT_PY='
+import os, time
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
+with open(os.environ["LW_LEDGER"], "rb") as f:
+    leases = tomllib.load(f).get("lease", {})
+leases = leases if isinstance(leases, dict) else {}
+names = os.environ.get("LW_NAMES", "").split()
+if not names:
+    names = sorted(t for t, r in leases.items() if isinstance(r, dict) and r.get("state") == "building")
+for t in names:
+    r = leases.get(t)
+    st = " ".join(str(r.get("state", "")).split()) if isinstance(r, dict) else "@missing"
+    print(t + "\t" + st)
+print("@now\t" + str(int(time.time() * 1000)))
+'
+
+# _lease_wait_parse <read> — split a _LEASE_WAIT_PY answer into _LW_NOW (epoch
+# ms), _LW_STILL (the building tasks, space-separated), _LW_LEFT ("<task>
+# <state>" lines of the others) and _LW_MISSING.
+_lease_wait_parse() {
+  local T S TAB
+  TAB=$(printf '\t')
+  _LW_NOW=0; _LW_STILL=""; _LW_LEFT=""; _LW_MISSING=""
+  while IFS="$TAB" read -r T S; do
+    case "$T" in
+      "") ;;
+      @now) _LW_NOW=$S ;;
+      *)
+        case "$S" in
+          building) _LW_STILL="${_LW_STILL}${_LW_STILL:+ }${T}" ;;
+          @missing) _LW_MISSING="${_LW_MISSING}${_LW_MISSING:+ }${T}" ;;
+          *) _LW_LEFT="${_LW_LEFT}${T} ${S}
+" ;;
+        esac
+        ;;
+    esac
+  done <<LW_PARSE_EOF
+${1}
+LW_PARSE_EOF
+  case "$_LW_NOW" in ''|*[!0-9]*) _LW_NOW=0 ;; esac
+}
+
+# lease_wait [task_id...] [--budget <seconds>] — the lead's one waiting
+# primitive (KTD10, R36). Blocks until at least one of the named leases (none
+# named: every lease building at the call) leaves `building`, or the budget
+# runs out. While it waits it reconciles each watched lease once a second
+# through _lease_sweep_one (a finished builder is collected, a hung one killed
+# and orphaned, one whose lead is gone adopted or collected with
+# reason=lead-exit) and runs the integrity check every 15 s; it never polls
+# faster. The budget never exceeds the lead's lead.wait_budget_s from the CLI
+# registry (claude 600, codex 900; the lead from _lease_lead_host until U9
+# lands; TRIFORGE_LEAD_WAIT_BUDGET_S may only lower it): the default and the
+# cap are that value minus a quarter of it, at most 15 s, so the call returns
+# inside the lead's shell-tool limit. The budget counts from the call's start,
+# and the polling stops a second before it, so the closing integrity check
+# fits inside it too. Under a Claude
+# lead, pass the Bash tool timeout explicitly: wait_budget_s x 1000 ms.
+# stdout: "<task> <state>" for each watched lease that left building, then
+# "still building: <task>..." when any still is, or "no lease building".
+# rc 0: a lease left building, or none was building; _RC_WAIT_BUILDING (75):
+# the budget ran out, everything watched still building; 44: the integrity
+# check found a change (restored and escalated, as in every lease helper);
+# 1: ledger error (missing, unparseable) or an unknown task; 64: usage;
+# 45: run by a worker or from inside the lease root. Loop it in bounded slices
+# until it prints no "still building:" line.
+lease_wait() {
+  _lead_only lease_wait || return $?
+  local BUDGET="" NAMES="" ERR WAIT_CLI CAP HEAD EFF READ WATCH START_MS STOP_MS CHECK_MS REM T RC=0
+  # The budget counts from the call's start, so the checks before the wait
+  # are inside it too.
+  START_MS=$(python3 -c 'import time; print(int(time.time() * 1000))')
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --budget)
+        if [ "$#" -lt 2 ]; then echo "lease_wait: usage: lease_wait [task_id...] [--budget <seconds>]" >&2; return 64; fi
+        BUDGET=$2
+        shift 2
+        ;;
+      --budget=*) BUDGET=${1#--budget=}; shift ;;
+      *)
+        if ! _lease_valid_task_id "$1"; then
+          echo "lease_wait: usage: lease_wait [task_id...] [--budget <seconds>] ('${1}' is not a task id)" >&2
+          return 64
+        fi
+        NAMES="${NAMES}${NAMES:+ }$1"
+        shift
+        ;;
+    esac
+  done
+  case "$BUDGET" in
+    "") ;;
+    *[!0-9]*|0*) echo "lease_wait: usage: --budget takes a whole number of seconds above 0, got '${BUDGET}'" >&2; return 64 ;;
+  esac
+  _lease_ctx || return 1
+  # A missing or unparseable ledger is a ledger error — unless the lead wrote
+  # one here before (its copy and digest exist): then it is a change the
+  # integrity check restores from the lead's copy and escalates (KTD18).
+  if ! ERR=$(_lease_ledger_check); then
+    if [ -e "${_LEASE_STATE}/ledger.copy" ] || [ -e "${_LEASE_STATE}/ledger.sha256" ]; then
+      _lead_integrity_check lease_wait || return $?
+      ERR=$(_lease_ledger_check) || { echo "lease_wait: LEDGER ERROR — ${ERR}" >&2; return 1; }
+    else
+      echo "lease_wait: LEDGER ERROR — ${ERR}; nothing to wait on" >&2
+      return 1
+    fi
+  fi
+  _lease_root_notice lease_wait
+  _lead_integrity_check lease_wait || return $?
+  WAIT_CLI=$(_lease_lead_host)
+  CAP=$(cli_field "$WAIT_CLI" lead.wait_budget_s 2>/dev/null) || CAP=""
+  case "$CAP" in ''|*[!0-9]*|0*) CAP=600 ;; esac
+  case "${TRIFORGE_LEAD_WAIT_BUDGET_S:-}" in
+    ''|*[!0-9]*|0*) ;;
+    *) if [ "$TRIFORGE_LEAD_WAIT_BUDGET_S" -lt "$CAP" ]; then CAP=$TRIFORGE_LEAD_WAIT_BUDGET_S; fi ;;
+  esac
+  HEAD=$((CAP / 4))
+  if [ "$HEAD" -gt 15 ]; then HEAD=15; fi
+  if [ "$HEAD" -lt 1 ]; then HEAD=1; fi
+  EFF=$((CAP - HEAD))
+  if [ "$EFF" -lt 1 ]; then EFF=1; fi
+  if [ -z "$BUDGET" ]; then
+    BUDGET=$EFF
+  elif [ "$BUDGET" -gt "$EFF" ]; then
+    echo "lease_wait: budget capped at ${EFF}s (${WAIT_CLI} lead: wait_budget_s ${CAP}s, the wait returns ${HEAD}s inside it)" >&2
+    BUDGET=$EFF
+  fi
+  READ=$(_lease_wait_read "$NAMES") || READ=""
+  if [ -z "$READ" ]; then echo "lease_wait: LEDGER ERROR — ${_LEASE_LEDGER} could not be read" >&2; return 1; fi
+  _lease_wait_parse "$READ"
+  if [ -n "$_LW_MISSING" ]; then
+    echo "lease_wait: ERROR no lease row for: ${_LW_MISSING}" >&2
+    return 1
+  fi
+  if [ -n "$_LW_LEFT" ] || [ -z "$_LW_STILL" ]; then
+    # Nothing to wait for: a named lease already left building, or none builds.
+    if [ -n "$_LW_LEFT" ]; then printf '%s' "$_LW_LEFT"; fi
+    if [ -n "$_LW_STILL" ]; then printf 'still building: %s\n' "$_LW_STILL"; fi
+    if [ -z "$_LW_LEFT" ] && [ -z "$_LW_STILL" ]; then printf 'no lease building\n'; fi
+    return 0
+  fi
+  WATCH=$_LW_STILL
+  # Polling stops short of the budget (a second; half of a 1 s budget), the
+  # room the closing integrity check needs.
+  STOP_MS=$((START_MS + BUDGET * 1000 - 500))
+  if [ "$BUDGET" -ge 2 ]; then STOP_MS=$((STOP_MS - 500)); fi
+  CHECK_MS=$((START_MS + 15000))
+  while :; do
+    while IFS= read -r T; do
+      if [ -z "$T" ]; then continue; fi
+      _lease_sweep_one lease_wait "$T" 0 1 1 < /dev/null || RC=$?
+      if [ "$RC" -ne 0 ]; then break; fi
+    done <<LEASE_WAIT_EOF
+$(printf '%s\n' "$WATCH" | tr ' ' '\n')
+LEASE_WAIT_EOF
+    if [ "$RC" -ne 0 ]; then break; fi
+    READ=$(_lease_wait_read "$WATCH") || READ=""
+    if [ -z "$READ" ]; then
+      # The ledger stopped parsing mid-wait: the integrity check restores it
+      # from the lead's copy (and escalates), or there is nothing left to trust.
+      _lead_integrity_check lease_wait || return $?
+      echo "lease_wait: LEDGER ERROR — ${_LEASE_LEDGER} could not be read" >&2
+      return 1
+    fi
+    _lease_wait_parse "$READ"
+    if [ -n "$_LW_LEFT" ] || [ -z "$_LW_STILL" ] || [ "$_LW_NOW" -ge "$STOP_MS" ]; then break; fi
+    if [ "$_LW_NOW" -ge "$CHECK_MS" ]; then
+      _lead_integrity_check lease_wait || { RC=$?; break; }
+      CHECK_MS=$((_LW_NOW + 15000))
+    fi
+    REM=$((STOP_MS - _LW_NOW))
+    if [ "$REM" -ge 1000 ]; then sleep 1; else sleep "$(printf '0.%03d' "$REM")"; fi
+  done
+  # Every return runs the integrity check (KTD10): a builder that changed git
+  # state or the ledger while the lead waited is restored and escalated here,
+  # and the states printed below are read from the verified ledger.
+  if [ "$RC" -eq 0 ]; then _lead_integrity_check lease_wait || RC=$?; fi
+  READ=$(_lease_wait_read "$WATCH") || READ=""
+  _lease_wait_parse "$READ"
+  if [ -n "$_LW_LEFT" ]; then printf '%s' "$_LW_LEFT"; fi
+  if [ -n "$_LW_STILL" ]; then printf 'still building: %s\n' "$_LW_STILL"; fi
+  if [ "$RC" -ne 0 ]; then return "$RC"; fi
+  if [ -n "$_LW_LEFT" ] || [ -z "$_LW_STILL" ]; then return 0; fi
+  echo "lease_wait: the ${BUDGET}s budget ran out; still building: ${_LW_STILL} — call lease_wait again" >&2
+  return "$_RC_WAIT_BUILDING"
+}
+
+# _lease_wait_read "<task ...>" — _LEASE_WAIT_PY over the ledger.
+_lease_wait_read() {
+  LW_LEDGER="$_LEASE_LEDGER" LW_NAMES="${1:-}" python3 -c "$_LEASE_WAIT_PY" 2>/dev/null
 }
 
 # Refusal helper for lease_reclaim: loud, escalates the row, deletes NOTHING.
@@ -2355,7 +2944,7 @@ _lease_copy_discoveries() {
 lease_collect() {
   _lead_only lease_collect || return $?
   local TASK_ID=${1:?usage: lease_collect <task_id>}
-  local STATE PID="" OUT="" PID_STARTED="" PID_NOW ROW RC CLASS
+  local STATE PID="" OUT="" PID_STARTED="" PGID="" ROW RC CLASS
   _lease_ctx || return 1
   # Before anything reads the row or touches the worktree: a builder that
   # planted git config, hooks, a pointer redirect or a ledger edit is caught
@@ -2366,13 +2955,13 @@ lease_collect() {
     echo "lease_collect: ERROR task ${TASK_ID} is in state '${STATE}' (want building)" >&2
     return 1
   fi
-  ROW=$(_ledger_get_row "$TASK_ID" pid output_file pid_started) || ROW=""
-  { IFS= read -r PID || true; IFS= read -r OUT || true; IFS= read -r PID_STARTED || true; } <<COLLECT_ROW_EOF
+  ROW=$(_ledger_get_row "$TASK_ID" pid output_file pid_started pgid) || ROW=""
+  { IFS= read -r PID || true; IFS= read -r OUT || true; IFS= read -r PID_STARTED || true; IFS= read -r PGID || true; } <<COLLECT_ROW_EOF
 ${ROW}
 COLLECT_ROW_EOF
   if [ ! -f "${OUT}.rc" ]; then
-    if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-      echo "lease_collect: task ${TASK_ID} still running (pid ${PID}) — wait, or lease_heartbeat_check to enforce the deadline" >&2
+    if [ "$(_lease_proc_state "$PID" "$PID_STARTED" "$PGID")" = alive ]; then
+      echo "lease_collect: task ${TASK_ID} still running (pid ${PID}) — lease_wait ${TASK_ID}, which also enforces the deadline" >&2
       return 1
     fi
     echo "lease_collect: task ${TASK_ID} builder died without an exit record — silent death, taking the orphan path" >&2
@@ -2389,24 +2978,17 @@ COLLECT_ROW_EOF
     _ledger_update "$TASK_ID" report_status="$REPORT" || return 1
     case "$REPORT" in
       DONE|DONE_WITH_CONCERNS)
-        # The builder is finished: sweep anything it left running, then take
-        # the lead's snapshot, which the review, the merge and any approval
-        # bind to (KTD3). Best-effort until U13 detaches builders into their
-        # own process group: the sweep is the recorded pid's tree, and by now
-        # (.rc exists) the dispatch subshell behind that pid has exited, so a
-        # live pid may be one the OS reused for an unrelated process. It is
-        # signalled only while it still has the start time lease_dispatch
-        # recorded (pid_started); a reused pid is never killed.
-        if [ -n "$PID" ] && [ "$PID" -gt 0 ] 2>/dev/null && kill -0 "$PID" 2>/dev/null; then
-          PID_NOW=$(ps -o lstart= -p "$PID" 2>/dev/null | tr -s ' ' || true)
-          if [ -n "$PID_STARTED" ] && [ "$PID_NOW" = "$PID_STARTED" ]; then
-            _kill_tree "$PID" TERM
-          fi
-        fi
+        # The builder is finished, then the lead takes its snapshot, which the
+        # review, the merge and any approval bind to (KTD3). The detached
+        # builder process swept its own process group before it wrote the
+        # exit record (KTD10); a leader still finishing its exit is sent TERM
+        # here, and only while it still answers with the recorded start time
+        # and group: a reused pid is never signalled. A row from before KTD10
+        # gets the old sweep of the pid's own tree, under the same test.
+        _lease_kill_builder "$PID" "$PGID" "$PID_STARTED" term
         # Once more, right before the snapshot's `add -A` runs the clean
-        # filters: a builder process still alive between the check above and
-        # here (a daemonized child the sweep does not reach until U13) could
-        # have planted config in that window.
+        # filters: a builder process that left its process group (its own
+        # setsid) and is still alive could have planted config in that window.
         _lead_integrity_check lease_collect || return $?
         if ! _lease_snapshot "$TASK_ID"; then
           _ledger_update "$TASK_ID" state=escalated reason="collect snapshot failed (see stderr)" || true

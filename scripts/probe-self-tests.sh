@@ -4,8 +4,8 @@
 # adapter env allowlist and its no-push backstop, the R35 boundary note, the
 # Status-line parser seam, lease-lane skill discovery per CLI, the
 # TRIFORGE_TEST_BUILDER lifecycle, session-start idempotence plus its upgrade
-# notices (R40), the skills refresh's destructive paths, and the worker
-# marker).
+# notices (R40), the skills refresh's destructive paths, the worker marker,
+# lead-side git hardening, and detached leases with lease_wait).
 #
 # NOT a standalone script: sourced by scripts/probe-capabilities.sh after the
 # per-CLI sections, inside the same shell, so it uses the harness's helpers
@@ -2181,3 +2181,220 @@ else
   row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "FAIL" "mismatch in ${_S18_WHO% }:$(printf '%s' "$_S18_FAIL" | cut -c1-500)" "static"
 fi
 rm -rf "$_S18"
+
+# SELF-19 (KTD10 — R36, R38): detached builders, lease_wait and the lead-exit
+# reconcile, with TRIFORGE_TEST_BUILDER fake builders in throwaway repos under
+# the SELF-18 conventions (throwaway HOME, GIT_CONFIG_NOSYSTEM, the stub trio
+# on PATH, a lease root per case). A held builder waits for its case's release
+# file (60 s at most); every case's builder groups are killed on the way out
+# (_s19_reap, never a pid that answers as another process).
+#   wait    lease_dispatch records pid == pgid, a start time, the lead process
+#           and the lease root; lease_wait --budget 30 returns rc 0 in under
+#           10 s when a 1 s builder finishes, printing "q review"; on a held
+#           builder --budget 3 returns rc 75 "still building: g" in 1.5-3 s,
+#           and TRIFORGE_LEAD_WAIT_BUDGET_S=4 caps --budget 60 below 4 s; under
+#           the worker marker 45; --budget x 64; released, rc 0 "g review"
+#   ledger  no ledger -> rc 1 "LEDGER ERROR"; one that doesn't parse -> rc 1
+#           "LEDGER ERROR ... does not parse"
+#   kill    a lead process in its own process group (TRIFORGE_LEAD_PID=$$)
+#           dispatches two held builders and is killed (SIGKILL to the group)
+#           inside lease_wait: both builders still answer as the recorded
+#           processes; a fresh lead's lease_heartbeat_check a keeps a building
+#           and adopts it (reason=lead-exit); released, both exit 0, and
+#           lease_heartbeat_check collects both: review, requeue_count 0,
+#           reason=lead-exit
+#   reuse   two held builders' groups are killed (no exit record) and both rows
+#           get the pid and pgid of a stranger started a second later (only the
+#           start time differs), deadline long past: lease_heartbeat_check
+#           orphans r1 and lease_wait r2 (both requeued), and the stranger is
+#           never signalled
+#   gitcfg  a builder sets core.fsmonitor in .git/config 2 s into lease_wait
+#           --budget 5 -> rc 44 naming .git/config, the setting restored, the
+#           lease escalated, the fsmonitor command never run
+_S19="${WORK}/self19"
+_S19_FAIL=""
+mkdir -p "$_S19/home"
+_s19_repo() { # _s19_repo <case>
+  ( mkdir -p "$_S19/$1" && cd "$_S19/$1" && export HOME="$_S19/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
+      && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
+      && mkdir ops && printf '[roles.builder]\ncli = "claude"\n' > ops/roster.toml && echo r > README.md \
+      && git add -A && git commit -qm init && git checkout -q -b sprint/s19 ) >/dev/null 2>&1
+}
+# _s19_lead <case> <script> — lead-side steps from the case's repo with the
+# library sourced (as _s18_lead does), no Codex host markers (the wait budget is
+# claude's) and no lead pid override.
+_s19_lead() {
+  ( cd "$_S19/$1" && export HOME="$_S19/home" TRIFORGE_LEASE_ROOT="$_S19/$1.leases" PATH="${_SELF_STUBS}:$PATH" GIT_CONFIG_NOSYSTEM=1 \
+      && unset CODEX_THREAD_ID CODEX_CI TRIFORGE_LEAD_PID TRIFORGE_LEAD_WAIT_BUDGET_S TRIFORGE_HEARTBEAT_GRACE \
+      && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && {
+    _s19_t0() { python3 -c 'import time; print(time.time())'; }
+    _s19_dt() { python3 -c 'import sys, time; print("%.1f" % (time.time() - float(sys.argv[1])))' "$1"; }
+    eval "$2"
+  } ) 2>&1 || true
+}
+_s19_expect() { # _s19_expect <case> <output> <pattern...> — every pattern (ERE) must appear
+  local C=$1 O=$2 P
+  shift 2
+  for P in "$@"; do
+    printf '%s\n' "$O" | grep -qE -- "$P" || _S19_FAIL="${_S19_FAIL} ${C}(no:${P})"
+  done
+}
+_s19_secs() { # _s19_secs <case> <output> <label> <min> <max> — the label's secs= within [min, max]
+  local S
+  S=$(printf '%s\n' "$2" | grep -E "^${3}:" | sed -nE 's/.*:secs=([0-9.]+).*/\1/p' | head -1)
+  if [ -z "$S" ] || ! awk -v s="$S" -v lo="$4" -v hi="$5" 'BEGIN { exit !(s >= lo && s <= hi) }'; then
+    _S19_FAIL="${_S19_FAIL} ${1}(${3}-secs=${S:-none}-want-${4}..${5})"
+  fi
+}
+# _s19_held <case> [sh lines] — a builder that runs the lines, then holds until
+# <case>.release exists (60 s at most) and reports DONE
+_s19_held() {
+  { printf '#!/bin/sh\n'; [ -z "${2:-}" ] || printf '%s\n' "$2"
+    printf 'N=0; while [ ! -f "%s" ] && [ "$N" -lt 600 ]; do sleep 0.1; N=$((N + 1)); done\necho "Status: DONE"\n' "$_S19/$1.release"
+  } > "$_S19/$1-held.sh"
+  chmod +x "$_S19/$1-held.sh"
+}
+_s19_reap() { # _s19_reap <case> — release the case's builders, kill any group still answering as recorded
+  : > "$_S19/$1.release"
+  _s19_lead "$1" '
+for T in $(python3 -c "import tomllib; print(\" \".join(tomllib.load(open(\"ops/leases.toml\", \"rb\")).get(\"lease\", {})))" 2>/dev/null); do
+  ROW=$(_ledger_get_row "$T" pid pgid pid_started) || continue
+  { IFS= read -r P || true; IFS= read -r G || true; IFS= read -r S || true; } <<S19_REAP_EOF
+${ROW}
+S19_REAP_EOF
+  _lease_kill_builder "$P" "$G" "$S"
+done' >/dev/null 2>&1
+}
+
+# wait
+_s19_repo wait
+printf '#!/bin/sh\nsleep 1\necho "Status: DONE"\n' > "$_S19/wait-quick.sh"
+chmod +x "$_S19/wait-quick.sh"
+_s19_held wait
+O=$(_s19_lead wait '
+export TRIFORGE_TEST_BUILDER="$_S19/wait-quick.sh"
+lease_create q builder >/dev/null 2>&1; lease_dispatch q "probe task" 60 >/dev/null 2>&1
+ROW=$(_ledger_get_row q pid pgid pid_started lead_pid lease_root)
+{ IFS= read -r P || true; IFS= read -r G || true; IFS= read -r S || true; IFS= read -r L || true; IFS= read -r LR || true; } <<S19_ROW_EOF
+${ROW}
+S19_ROW_EOF
+echo "row:pidpgid=$([ -n "$P" ] && [ "$P" = "$G" ] && echo same || echo diff):start=$([ -n "$S" ] && echo yes || echo no):lead=$([ "${L:-0}" -gt 0 ] 2>/dev/null && echo yes || echo no):root=$([ "$LR" = "$_LEASE_ROOT" ] && echo yes || echo no)"
+T=$(_s19_t0); R=0; OUT=$(lease_wait --budget 30 q 2>/dev/null) || R=$?
+echo "finish:rc=$R:secs=$(_s19_dt "$T"):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+export TRIFORGE_TEST_BUILDER="$_S19/wait-held.sh"
+lease_create g builder >/dev/null 2>&1; lease_dispatch g "probe task" 60 >/dev/null 2>&1
+T=$(_s19_t0); R=0; OUT=$(lease_wait --budget 3 g 2>/dev/null) || R=$?
+echo "expiry:rc=$R:secs=$(_s19_dt "$T"):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+T=$(_s19_t0); R=0; OUT=$(TRIFORGE_LEAD_WAIT_BUDGET_S=4 lease_wait --budget 60 g 2>/dev/null) || R=$?
+echo "cap:rc=$R:secs=$(_s19_dt "$T"):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+R=0; (export TRIFORGE_LEASE_WORKER=builder; lease_wait g) >/dev/null 2>&1 || R=$?; echo "marker:rc=$R"
+R=0; lease_wait --budget x g >/dev/null 2>&1 || R=$?; echo "usage:rc=$R"
+: > "$_S19/wait.release"
+R=0; OUT=$(lease_wait --budget 30 g 2>/dev/null) || R=$?
+echo "released:rc=$R:out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+')
+_s19_expect wait "$O" '^row:pidpgid=same:start=yes:lead=yes:root=yes$' '^finish:rc=0:.*:out=\[q review\]$' \
+  '^expiry:rc=75:.*:out=\[still building: g\]$' '^cap:rc=75:.*:out=\[still building: g\]$' '^marker:rc=45$' '^usage:rc=64$' \
+  '^released:rc=0:out=\[g review\]$'
+_s19_secs wait "$O" finish 0 10
+_s19_secs wait "$O" expiry 1.5 3.0
+_s19_secs wait "$O" cap 0 3.9
+_s19_reap wait
+
+# ledger
+_s19_repo ledger
+O=$(_s19_lead ledger '
+R=0; E=$(lease_wait 2>&1 >/dev/null) || R=$?; echo "missing:rc=$R:named=$(printf "%s" "$E" | grep -c "LEDGER ERROR" || true)"
+printf "[lease.x]\nstate = \n" > ops/leases.toml
+R=0; E=$(lease_wait 2>&1 >/dev/null) || R=$?; echo "malformed:rc=$R:named=$(printf "%s" "$E" | grep -c "LEDGER ERROR.*does not parse" || true)"
+')
+_s19_expect ledger "$O" '^missing:rc=1:named=1$' '^malformed:rc=1:named=1$'
+
+# kill
+_s19_repo kill
+_s19_held kill
+cat > "$_S19/kill-lead.sh" <<'EOF'
+#!/bin/bash
+# probe lead (SELF-19): dispatches two held builders, then waits on them until it is killed
+cd "$1" || exit 1
+export HOME="$2" TRIFORGE_LEASE_ROOT="$1.leases" PATH="$3:$PATH" GIT_CONFIG_NOSYSTEM=1 TRIFORGE_TEST_BUILDER="$4" TRIFORGE_LEAD_PID=$$
+unset CODEX_THREAD_ID CODEX_CI TRIFORGE_LEAD_WAIT_BUDGET_S
+. "$5/invoke-external.sh" >/dev/null 2>&1 || exit 1
+for T in a b; do
+  lease_create "$T" builder >/dev/null 2>&1 && lease_dispatch "$T" "probe task" 120 >/dev/null 2>&1 || exit 1
+done
+: > "$1.ready"
+lease_wait --budget 100 a b > "$1.wait-out" 2>&1
+: > "$1.waited"
+EOF
+_S19_LEAD=$(python3 -c 'import subprocess, sys; p = subprocess.Popen(sys.argv[1:], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); print(p.pid)' \
+  /bin/bash "$_S19/kill-lead.sh" "$_S19/kill" "$_S19/home" "$_SELF_STUBS" "$_S19/kill-held.sh" "$_SELF_DIR" 2>/dev/null) || _S19_LEAD=""
+_S19_N=0
+while [ ! -f "$_S19/kill.ready" ] && [ "$_S19_N" -lt 300 ]; do sleep 0.1; _S19_N=$((_S19_N + 1)); done
+sleep 1.5   # the lead is inside lease_wait now
+if [ -n "$_S19_LEAD" ]; then kill -KILL -- "-${_S19_LEAD}" 2>/dev/null || true; fi
+sleep 0.5
+O=$(_s19_lead kill '
+echo "lead-group=$(if [ -n "$_S19_LEAD" ] && kill -0 -- "-$_S19_LEAD" 2>/dev/null; then echo alive; else echo gone; fi):ready=$([ -f "$_S19/kill.ready" ] && echo yes || echo no):waited=$([ -f "$_S19/kill.waited" ] && echo yes || echo no)"
+for T in a b; do echo "$T-proc=$(_lease_proc_state "$(_ledger_get "$T" pid)" "$(_ledger_get "$T" pid_started)" "$(_ledger_get "$T" pgid)")"; done
+echo "dispatching-lead=$(_lease_proc_state "$(_ledger_get a lead_pid)" "$(_ledger_get a lead_started)")"
+R=0; lease_heartbeat_check a 2>"$HOME/kill-hb1.err" || R=$?
+echo "hb1:rc=$R:a=$(_ledger_get a state)/$(_ledger_get a reason):b=$(_ledger_get b state)/$(_ledger_get b reason):adopted=$(grep -c "adopted by this lead" "$HOME/kill-hb1.err" || true)"
+OA=$(_ledger_get a output_file); OB=$(_ledger_get b output_file)
+: > "$_S19/kill.release"
+N=0; while { [ ! -f "${OA}.rc" ] || [ ! -f "${OB}.rc" ]; } && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
+echo "exit-records=$(cat "${OA}.rc" 2>/dev/null)/$(cat "${OB}.rc" 2>/dev/null)"
+R=0; lease_heartbeat_check 2>"$HOME/kill-hb2.err" || R=$?
+echo "hb2:rc=$R:lead-exit-notes=$(grep -c "while the lead that dispatched it was gone" "$HOME/kill-hb2.err" || true)"
+for T in a b; do echo "final-$T=$(_ledger_get "$T" state):rq=$(_ledger_get "$T" requeue_count):reason=$(_ledger_get "$T" reason)"; done
+')
+_s19_expect kill "$O" '^lead-group=gone:ready=yes:waited=no$' '^a-proc=alive$' '^b-proc=alive$' '^dispatching-lead=gone$' \
+  '^hb1:rc=0:a=building/lead-exit:b=building/:adopted=1$' '^exit-records=0/0$' '^hb2:rc=0:lead-exit-notes=1$' \
+  '^final-a=review:rq=0:reason=lead-exit$' '^final-b=review:rq=0:reason=lead-exit$'
+_s19_reap kill
+
+# reuse
+_s19_repo reuse
+_s19_held reuse
+O=$(_s19_lead reuse '
+export TRIFORGE_TEST_BUILDER="$_S19/reuse-held.sh" TRIFORGE_HEARTBEAT_GRACE=0
+for T in r1 r2; do lease_create "$T" builder >/dev/null 2>&1; lease_dispatch "$T" "probe task" 60 >/dev/null 2>&1; done
+for T in r1 r2; do kill -KILL -- "-$(_ledger_get "$T" pgid)" 2>/dev/null || true; done
+sleep 1.2
+S=$(python3 -c "import subprocess; p = subprocess.Popen([\"sleep\", \"60\"], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); print(p.pid)")
+echo "$S" > "$_S19/reuse.stranger"
+for T in r1 r2; do _ledger_update "$T" pid="$S" pgid="$S" heartbeat_deadline=1 >/dev/null 2>&1; done
+echo "proc=$(_lease_proc_state "$S" "$(_ledger_get r1 pid_started)" "$S")"
+R=0; lease_heartbeat_check r1 2>"$HOME/reuse-hb.err" || R=$?
+echo "hb:rc=$R:r1=$(_ledger_get r1 state):orphaned=$(grep -c "ORPHANED" "$HOME/reuse-hb.err" || true):expired=$(grep -c "EXPIRED" "$HOME/reuse-hb.err" || true)"
+R=0; OUT=$(lease_wait --budget 10 r2 2>/dev/null) || R=$?
+echo "wait:rc=$R:r2=$(_ledger_get r2 state):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+echo "stranger=$(if kill -0 "$S" 2>/dev/null; then echo alive; else echo dead; fi)"
+')
+_s19_expect reuse "$O" '^proc=reused$' '^hb:rc=0:r1=requeued:orphaned=1:expired=0$' '^wait:rc=0:r2=requeued:out=\[r2 requeued\]$' '^stranger=alive$'
+if [ -s "$_S19/reuse.stranger" ]; then kill "$(cat "$_S19/reuse.stranger")" 2>/dev/null || true; fi
+_s19_reap reuse
+
+# gitcfg
+_s19_repo gitcfg
+printf '#!/bin/sh\ntouch "%s/gitcfg.MARKER"\nexit 0\n' "$_S19" > "$_S19/gitcfg-mark.sh"
+chmod +x "$_S19/gitcfg-mark.sh"
+_s19_held gitcfg "sleep 2; git config core.fsmonitor \"$_S19/gitcfg-mark.sh\""
+O=$(_s19_lead gitcfg '
+export TRIFORGE_TEST_BUILDER="$_S19/gitcfg-held.sh"
+lease_create c builder >/dev/null 2>&1; lease_dispatch c "probe task" 60 >/dev/null 2>&1
+R=0; OUT=$(lease_wait --budget 5 c 2>"$HOME/gitcfg.err") || R=$?
+echo "gitcfg:rc=$R:state=$(_ledger_get c state):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+echo "named=$(grep -c "\.git/config changed" "$HOME/gitcfg.err" || true):left=$(grep -c fsmonitor .git/config || true)"
+')
+_s19_expect gitcfg "$O" '^gitcfg:rc=44:state=escalated:out=\[c escalated\]$' '^named=[1-9]' ':left=0$'
+[ ! -e "$_S19/gitcfg.MARKER" ] || _S19_FAIL="$_S19_FAIL gitcfg(marker-ran)"
+_s19_reap gitcfg
+
+if [ -z "$_S19_FAIL" ]; then
+  row "SELF-19" "claude" "detached builders + lease_wait + lead-exit reconcile: pid == pgid with a start time, lease_wait returns on a finish / at the budget (rc 75) within wait_budget_s, ledger errors, a killed lead's builders survive and are collected with requeue_count 0 and reason=lead-exit, a reused pid is never taken for the builder, a .git/config change during the wait escalates (KTD10, R36/R38)" "PASS" "row pid==pgid + start time + lead + lease root recorded; finish -> rc 0 'q review'; held -> --budget 3 rc 75 'still building: g' in 1.5-3 s, TRIFORGE_LEAD_WAIT_BUDGET_S=4 caps --budget 60 below 4 s; marker 45, usage 64; released -> rc 0 'g review'; no / unparseable ledger -> rc 1 LEDGER ERROR; kill: lead group SIGKILLed mid-wait, both builders alive as recorded, heartbeat a adopts (reason=lead-exit), released both exit 0, heartbeat collects both: review, requeue_count 0, reason=lead-exit; reuse: rows given a stranger's pid + pgid (start time differs, deadline past) -> heartbeat and lease_wait orphan + requeue, stranger never signalled; gitcfg: core.fsmonitor planted mid-wait -> rc 44 naming .git/config, restored, escalated, never ran" "static"
+else
+  _S19_WHO=$(printf '%s' "$_S19_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
+  row "SELF-19" "claude" "detached builders + lease_wait + lead-exit reconcile: pid == pgid with a start time, lease_wait returns on a finish / at the budget (rc 75) within wait_budget_s, ledger errors, a killed lead's builders survive and are collected with requeue_count 0 and reason=lead-exit, a reused pid is never taken for the builder, a .git/config change during the wait escalates (KTD10, R36/R38)" "FAIL" "mismatch in ${_S19_WHO% }:$(printf '%s' "$_S19_FAIL" | cut -c1-600)" "static"
+fi
+rm -rf "$_S19"
