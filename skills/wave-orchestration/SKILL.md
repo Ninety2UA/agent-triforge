@@ -9,7 +9,7 @@ metadata:
 
 # Wave Orchestration
 
-Run a validated plan as dependency-grouped waves: tasks in a wave build in parallel under per-task leases, every task merges only after a pinned non-author review, and integration verification runs between waves. The lead drives the lease lifecycle from `$ROOT/scripts/invoke-external.sh`; `ROOT` is the plugin root — `${CLAUDE_PLUGIN_ROOT:-$ROOT}` under Claude Code, else the path the `at-` skill's locator printed.
+Run a validated plan as dependency-grouped waves: tasks in a wave build in parallel under per-task leases, every task merges only after a pinned non-author review, and integration verification runs between waves. The lease lifecycle runs on the Triforge plugin's helpers in `$ROOT/scripts/invoke-external.sh` (`ROOT`: `${CLAUDE_PLUGIN_ROOT:-$ROOT}` under Claude Code, else the path the `at-` skill's locator printed). Without the Triforge plugin, apply the wave rules and Steps 1–4 by hand and report that no lease, pinned review or integrity check ran.
 
 **Done when** every task is merged (one squash commit per task on the sprint integration branch) or ledgered as blocked, the last wave's integration verification passed, and the integration branch is promoted or its promotion recorded as blocked (rc 42).
 
@@ -42,7 +42,7 @@ After the last wave: full test suite, build from a clean state, lint, every `ops
 
 ## Builder-pool wave protocol
 
-Every implementation task — INCLUDING lead-authored ones — is built under a per-task lease and merges only after cross-review by a pinned non-author reviewer. Any roster member is an eligible builder; safety is leases in their own worktrees, the lead-owned ledger `ops/leases.toml` and cross-review before merge (AE3, KTD-10), not write-restriction. The worktree is not a sandbox: the lead merges only its collect snapshot (KTD19) and detects changes to git state and the ledger (rc 44); a builder's write elsewhere in the main checkout goes undetected.
+Every implementation task, lead-authored ones INCLUDED, is built under a per-task lease. Any roster member is an eligible builder; safety is leases in their own worktrees, the lead-owned ledger `ops/leases.toml` and cross-review before merge (AE3, KTD-10), not write-restriction. The worktree is not a sandbox: the lead merges only its collect snapshot (KTD19) and detects changes to git state and the ledger (rc 44); a builder's write elsewhere in the main checkout goes undetected.
 
 Non-derivable facts:
 
@@ -52,7 +52,7 @@ Non-derivable facts:
 - Every lease call first compares the git state with the lead's baseline; a change the lead did not make returns 44, and `lease_rebaseline` accepts only a change you have read.
 - `ops/CHANGELOG.md` rows: builder + reviewer + merge commit from the ledger (`lease_status`).
 
-References: [builder-pool-protocol.md](references/builder-pool-protocol.md) (per-task loop, promotion gate, protected-path override, attribution, merge order, rationalizations) · [failure-handling.md](references/failure-handling.md) (report-missing, same-error kill, reflection, risk scoring) · [integrity-escalations.md](references/integrity-escalations.md) (rc 44) · [model-routing.md](references/model-routing.md) (ladder pointer, never-downgrade trio, Fable override) · [claude.md](references/claude.md) (Claude Code forms) · [example.md](references/example.md) (a four-wave plan).
+References: [builder-pool-protocol.md](references/builder-pool-protocol.md) (per-task loop, promotion gate, protected-path override, attribution, merge order, rationalizations) · [failure-handling.md](references/failure-handling.md) (report-missing, same-error kill, reflection, risk scoring) · [integrity-escalations.md](references/integrity-escalations.md) (rc 44) · [model-routing.md](references/model-routing.md) (ladder pointer, never-downgrade trio, Fable override) · [claude.md](references/claude.md) (Claude Code forms, the `lease_wait` call) · [example.md](references/example.md) (a four-wave plan).
 
 ## Rulings, not stalls
 
@@ -79,9 +79,7 @@ Stop and re-read the protocol when you are about to merge a task you built or on
 
 ## Wave execution modes
 
-### Subagent mode (default, < 5 tasks per wave)
-
-Each task runs as an independent parallel executor in its own lease, reviewed and merged in wave order in the same session. The Claude Code forms for 5+ tasks or cross-dependent builds (dynamic workflows, team mode) are in [references/claude.md](references/claude.md), under the same lease and cross-review contract.
+The default is sub-agent mode (< 5 tasks per wave): each task runs as a parallel executor in its own lease, reviewed and merged in wave order in the same session. The Claude Code forms for 5+ tasks or cross-dependent builds (dynamic workflows, team mode) are in [references/claude.md](references/claude.md), under the same lease and cross-review contract.
 
 ## Output
 

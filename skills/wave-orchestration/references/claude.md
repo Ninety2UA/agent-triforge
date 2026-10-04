@@ -6,6 +6,10 @@ The Claude Code-specific ways of running the wave. The lease and cross-review co
 
 Under Claude Code a sub-agent is spawned with the Agent tool. The spawn-time Fable override (model-routing reference) is the Agent tool's `model` parameter set to `fable` for team-lead and the never-downgrade trio (security-sentinel, plan-checker, findings-synthesizer) when the newest `ops/research/*-probe-record.md` (`latest_probe_record` in `$ROOT/scripts/invoke-external.sh`), row CC-02, shows Fable PASS on the host.
 
+## Waiting on builders
+
+Run each `lease_wait` as one Bash tool call with `timeout: 600000` (the registry's `wait_budget_s`, 600 s × 1000), never `run_in_background`: its own budget defaults to 585 s, so it returns inside that limit. Where the timeout cannot be raised, pass `--budget <s>` below the tool's limit. rc 75 means the budget ran out with builders still running: call it again. rc 80 means a building row could not be verified: stop the loop and read the message. rc 44 is an integrity escalation (the integrity-escalations reference). A `claude -p` lead that ends its turn leaves its builders running; the next session's `lease_heartbeat_check` picks them up.
+
 ## Wave execution modes beyond the default
 
 The default sub-agent mode (< 5 tasks per wave) is in the core skill. The two forms below are Claude Code-only.

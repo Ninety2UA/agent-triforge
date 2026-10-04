@@ -14,7 +14,7 @@ What the lead does when a lease comes back without a report, when the same error
 Track error recurrence per executor:
 1. When an executor hits an error, fingerprint it (core error message, stripped of line numbers and timestamps)
 2. If the same fingerprint appears **3+ times** across retries of the same task:
-   - **Kill** the executor immediately
+   - **Kill** the executor immediately (a lease builder still running: `lease_stop <task_id>`)
    - **Reassign** the task to a fresh executor with context: "Previous executor failed 3+ times on this error: [error fingerprint]. Do NOT repeat the same approach. Try a fundamentally different strategy."
 3. Log killed executors in the wave execution summary
 
@@ -42,5 +42,5 @@ Track risk accumulation per executor:
 - Revert of own changes: +15%
 - Each file modified beyond task scope: +20%
 - Each multi-file change: +5%
-- Halt executor when risk > 20% or file changes > 50
+- Halt executor when risk > 20% or file changes > 50 (`lease_stop <task_id>` for a lease builder)
 - Escalate to lead for manual review
