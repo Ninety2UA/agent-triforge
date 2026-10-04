@@ -270,6 +270,7 @@ _bootstrap_copy() {
   local src="$1" dest="$2"
   [ -f "$src" ] || return 0
   [ -e "$dest" ] && return 0        # preserve an existing user file/dir
+  [ -L "$dest" ] && return 0        # and a dangling symlink, which cp would follow out of the project
   if ! mkdir -p "$(dirname "$dest")" 2>/dev/null; then
     echo "session-start: WARNING could not create $(dirname "$dest") — skipping bootstrap of ${dest} (session continues)" >&2
     return 0
@@ -290,6 +291,20 @@ _ss_is_3x_codex_hooks() {
   [ "$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1" 2>/dev/null || true)" = "$SS_3X_CODEX_HOOKS_SHA256" ]
 }
 
+# _ss_dir_in_project <dir> — 0 when <dir> (a direct child of the project root,
+# the cwd) is absent, or a real directory, not a symlink, whose physical path
+# is inside the project. A .codex linked elsewhere (to ~/.codex, say) holds
+# another tier's files, which Triforge never writes.
+_ss_dir_in_project() {
+  local ROOT D
+  if [ -L "$1" ]; then return 1; fi
+  if [ ! -e "$1" ]; then return 0; fi
+  ROOT=$(pwd -P 2>/dev/null) || return 1
+  D=$(cd "$1" 2>/dev/null && pwd -P 2>/dev/null) || return 1
+  case "$D" in "${ROOT}/"*) return 0 ;; esac
+  return 1
+}
+
 # Bootstrap Codex project files (.codex/*), copy-if-absent so user
 # customizations survive: triforge-agents.toml = Triforge's agent declarations
 # (KTD5 — deployed OUTSIDE .codex/agents/, which Codex ≥ 0.147 sweeps as
@@ -301,7 +316,16 @@ _ss_is_3x_codex_hooks() {
 # templates/.codex/README.md and ops/decisions/2026-07-18-codex-hooks-under-exec.md.
 CODEX_MOVE_NOTICE=""
 CODEX_HOOK_NOTICE=""
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && ! _ss_dir_in_project ".codex"; then
+  # A .codex that is a symlink or resolves outside the project: nothing below
+  # writes through it (the move, the bootstrap copies, the 3.x replacement).
+  # Reading the hooks file to name the manual step is fine.
+  if _ss_is_3x_codex_hooks ".codex/hooks.json"; then
+    CODEX_HOOK_NOTICE="session-start: WARNING .codex/hooks.json is the unchanged 3.x copy, which writes ops/CHANGELOG.md from every Codex session, but .codex is a symlink or resolves outside this project, so it was NOT replaced (Triforge never writes outside the project) — if that file is yours to change, copy templates/.codex/hooks.json over it by hand."
+  else
+    CODEX_HOOK_NOTICE="session-start: .codex is a symlink or resolves outside this project, so Triforge's Codex files were not bootstrapped there (it never writes outside the project) — copy codex-agents/agents.toml to .codex/triforge-agents.toml and templates/.codex/config.toml by hand if you want them."
+  fi
+elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   # One-time migration (KTD5): v3.2.0 deployed .codex/agents/agents.toml. Move it
   # to the new name once — a user-modified file is moved, never deleted or
   # overwritten — and drop the now-empty .codex/agents/ only when it IS empty

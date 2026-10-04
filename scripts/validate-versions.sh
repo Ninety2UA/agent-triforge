@@ -133,9 +133,11 @@
 #  10. Other-harness skill manifests (R22) — skills/.devin-plugin/plugin.json
 #      (Devin; plugin root skills/, installed as <repo>#skills) and the root
 #      package.json "pi" key (Pi) each list exactly the portable skill
-#      directories, one explicit path per skill: an at-* entry, a missing
-#      portable skill, a path that is not a skill directory, a glob or
-#      !/+/- pattern, and a duplicate all fail. Each manifest carries only
+#      directories, one explicit path per skill, spelled exactly as the
+#      directory: an at-* entry in any case, a missing portable skill, a path
+#      that is not a portable skill directory (a case alias such as AT-BUILD,
+#      which a case-insensitive disk resolves, included), a glob or !/+/-
+#      pattern, and a duplicate all fail. Each manifest carries only
 #      metadata and its skill list — no version (check 1 covers the release
 #      manifests), and nothing a harness would run or obey (Devin's plugin
 #      dependencies and MCP servers, npm scripts and dependencies, Pi
@@ -1101,7 +1103,7 @@ PI = "package.json"
 fails = []
 
 portable = sorted(d for d in os.listdir("skills")
-                  if not d.startswith(("at-", ".", "_")) and os.path.isfile(os.path.join("skills", d, "SKILL.md")))
+                  if not d.casefold().startswith(("at-", ".", "_")) and os.path.isfile(os.path.join("skills", d, "SKILL.md")))
 
 
 def load(path):
@@ -1124,7 +1126,10 @@ def only_keys(where, data, allowed):
 
 
 def check_list(where, entries, prefix):
-    """entries must name each portable skill directory exactly once, as <prefix><name>."""
+    """entries must name each portable skill directory exactly once, as <prefix><name>, and nothing else.
+
+    Names compare exactly with the directory listing, never through the disk: on
+    a case-insensitive volume skills/AT-BUILD/SKILL.md opens skills/at-build/."""
     if not isinstance(entries, list) or not all(isinstance(e, str) for e in entries):
         fails.append(where + ": must be a list of paths, one per portable skill directory")
         return
@@ -1138,10 +1143,14 @@ def check_list(where, entries, prefix):
         name = norm[len(prefix):] if norm.startswith(prefix) else ""
         if not name or "/" in name:
             fails.append(where + ": '" + e + "' is not " + prefix + "<skill> (one skill directory directly under skills/)")
-        elif name.startswith("at-"):
+        elif name.casefold().startswith("at-"):
             fails.append(where + ": '" + e + "' is a lead workflow — at-* workflows reach a lead only from its plugin install (KTD12)")
-        elif not os.path.isfile(os.path.join("skills", name, "SKILL.md")):
-            fails.append(where + ": '" + e + "' is not a skill directory (no skills/" + name + "/SKILL.md)")
+        elif name not in portable:
+            alias = [p for p in portable if p.casefold() == name.casefold()]
+            if alias:
+                fails.append(where + ": '" + e + "' is not spelled as the skill directory " + alias[0] + " — list the exact name")
+            else:
+                fails.append(where + ": '" + e + "' is not a portable skill directory (one of: " + ", ".join(portable) + ")")
         else:
             names.append(name)
     dup = sorted(set(n for n in names if names.count(n) > 1))

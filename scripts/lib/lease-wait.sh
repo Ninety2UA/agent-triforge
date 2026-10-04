@@ -237,21 +237,48 @@ LEAD_PROC_EOF
   case "$_LEAD_PID" in ''|*[!0-9]*) _LEAD_PID=0; _LEAD_STARTED="" ;; esac
 }
 
+# _lease_signalable <pid> [pgid] — rc 0 when a recorded pid, and the recorded
+# pgid when there is one (empty or 0: none, a row from before KTD10), can be a
+# builder's at all: digits with no leading zero (ps prints none) and above 1.
+# pid 1 is launchd (init), and `kill -- -1` reaches every process the user
+# owns, so a row that says 1 is never signalled, whoever wrote it.
+_lease_signalable() {
+  case "${1:-}" in ''|0*|1|*[!0-9]*) return 1 ;; esac
+  case "${2:-}" in ''|0) return 0 ;; 0*|1|*[!0-9]*) return 1 ;; esac
+  return 0
+}
+
 # _lease_kill_builder <pid> <pgid> <recorded start> [term] — TERM a builder's
 # process group, then KILL it a second later ("term": TERM only), and only
 # while its leader still answers as the recorded process (_lease_proc_state
 # alive): a reused pid is never signalled, and neither is the caller's own
-# process group. The KILL goes out unless the pid answers as another process by
-# then (the members left keep the group id reserved). A row from before KTD10
-# (no pgid: an undetached subshell) keeps the old rule, the pid's own process
-# tree.
+# process group, a pid or pgid _lease_signalable refuses, or a row with no
+# recorded start time (from before 3.3.3: its pid can only be tested for
+# liveness, and by now it may be anyone's); each refusal is one stderr line.
+# The KILL is re-validated first: it goes out while the leader still answers as
+# the recorded process, or, with the leader gone, while members still carry
+# the group id (they keep it reserved); never once the pid answers as another
+# process. A row from before KTD10 (no pgid: an undetached subshell) keeps the
+# old rule, the pid's own process tree, KILLed only while the pid still
+# answers as the recorded process. rc 0 always.
 _lease_kill_builder() {
-  local P=$1 G=${2:-} S=${3:-} MODE=${4:-} OWN=""
-  case "$G" in ''|0|*[!0-9]*) G="" ;; esac
+  local P=${1:-} G=${2:-} S=${3:-} MODE=${4:-} OWN=""
+  case "$P" in ''|0) return 0 ;; esac
+  if ! _lease_signalable "$P" "$G"; then
+    echo "lease: NOT signalling pid ${P} (process group ${G:-none}): 1 is launchd's and no ps prints a leading zero or a non-digit, so no detached builder has it — check the ledger row by hand" >&2
+    return 0
+  fi
+  if [ -z "$S" ]; then
+    echo "lease: NOT signalling pid ${P}: no start time is recorded for it (a row from before 3.3.3), so it can't be told from a reused pid — check \`ps -o pid,pgid,lstart,command -p ${P}\` and stop it by hand" >&2
+    return 0
+  fi
+  if [ "$G" = 0 ]; then G=""; fi
   if [ "$(_lease_proc_state "$P" "$S" "$G")" != alive ]; then return 0; fi
   if [ -z "$G" ]; then
     _kill_tree "$P" TERM
-    if [ "$MODE" != term ]; then sleep 1; _kill_tree "$P" KILL; fi
+    if [ "$MODE" = term ]; then return 0; fi
+    sleep 1
+    if [ "$(_lease_proc_state "$P" "$S" "")" = alive ]; then _kill_tree "$P" KILL; fi
     return 0
   fi
   OWN=$(ps -o pgid= -p "$$" 2>/dev/null | tr -d ' ') || OWN=""
@@ -262,7 +289,11 @@ _lease_kill_builder() {
   kill -TERM -- "-${G}" 2>/dev/null || true
   if [ "$MODE" = term ]; then return 0; fi
   sleep 1
-  if [ "$(_lease_proc_state "$P" "$S" "$G")" = reused ]; then return 0; fi
+  case "$(_lease_proc_state "$P" "$S" "$G")" in
+    alive) ;;
+    reused) return 0 ;;
+    *) if [ -z "$(_lease_group_members "$G")" ]; then return 0; fi ;;
+  esac
   kill -KILL -- "-${G}" 2>/dev/null || true
   return 0
 }
@@ -297,16 +328,21 @@ LAUNCH_READ_EOF
 # never signalled (with the leader gone the group can't be told from a reused
 # one). One stderr line; with quiet, none for a builder that was not running.
 # rc 0 when nothing of it runs; 1 when something may (it still answers, there
-# is no start time to tell it by, or group members are left).
+# is no start time to tell it by, the pid or pgid is one _lease_signalable
+# refuses, or group members are left).
 _lease_stop_one() {
   local OP=$1 TASK=$2 P=$3 G=$4 S=$5 WHAT=$6 QUIET=${7:-} B N=0 LEFT=""
-  case "$G" in ''|0|*[!0-9]*) G="" ;; esac
   case "$P" in
-    ''|0|*[!0-9]*)
+    ''|0)
       if [ -z "$QUIET" ]; then echo "${OP}: ${TASK}: no ${WHAT} pid recorded — nothing to stop" >&2; fi
       return 0
       ;;
   esac
+  if ! _lease_signalable "$P" "$G"; then
+    echo "${OP}: ${TASK}: the ${WHAT}'s recorded pid ${P} / process group ${G:-none} is no detached builder's (1 is launchd's; no ps prints a leading zero or a non-digit): NOT signalled — check the ledger row by hand" >&2
+    return 1
+  fi
+  if [ "$G" = 0 ]; then G=""; fi
   B=$(_lease_proc_state "$P" "$S" "$G")
   if [ -z "$S" ] && [ "$B" != gone ]; then
     echo "${OP}: ${TASK}: pid ${P} runs, but no start time is recorded for the ${WHAT} (a row from before 3.3.3), so it can't be told from a reused pid: NOT signalled — check \`ps -o pid,pgid,lstart,command -p ${P}\` and stop it by hand" >&2
@@ -359,8 +395,9 @@ _lease_stop_one() {
 # line per builder it looked at; stdout: nothing. rc 0: nothing of the builder
 # runs any more (stopped now, or already gone); 1: no lease row or no readable
 # ledger, or something may still run (it answers after the KILL, the row has
-# no start time to check it by, or processes still carry its group id after
-# its leader is gone; the line says which); 45: refused (a worker, or inside
+# no start time to check it by or a pid / pgid no builder has, such as 1, or
+# processes still carry its group id after its leader is gone; the line says
+# which); 45: refused (a worker, or inside
 # the lease root); 64: usage.
 lease_stop() {
   _lead_only lease_stop || return $?
@@ -563,7 +600,8 @@ _lease_builder_run() {
 #                                     dispatched it is gone, the current lead
 #                                     adopts it (lead_pid / lead_started),
 #                                     reason=lead-exit + lead_exit_at
-#   alive past heartbeat_deadline     hung: its process group is killed, then
+#   alive past heartbeat_deadline     hung: its process group is killed (never
+#                                     for a row with no start time), then
 #                                     the orphan path
 #   not alive, <out>.rc present       finished: lease_collect (normal routing:
 #                                     review, report-missing, escalated,
@@ -582,10 +620,13 @@ _lease_builder_run() {
 # unverifiable one); poll (lease_wait: quiet, and runs the integrity check
 # before acting on the row — adopt, kill, orphan — then sweeps it again as
 # polled); polled (quiet, no check: that second sweep, from the verified
-# ledger, KTD18). In poll mode no action (collect, expire, adopt, orphan)
-# starts at or after the epoch ms _LS_ACT_STOP_MS (lease_wait's; 0 or unset:
-# no limit): the row is left building as "deferred". lease_collect runs its
-# own check. <row> is the task's line from _lease_states_read (task, state,
+# ledger, KTD18). In poll and polled mode no action (collect, expire, adopt,
+# orphan) starts at or after the epoch ms _LS_ACT_STOP_MS (lease_wait's; 0 or
+# unset: no limit): the row is left building as "deferred". Polled tests it
+# again because the integrity check before it takes time. lease_collect runs
+# its own check, right as it starts, and is never cut off once started (a
+# killed collect leaves a half-made snapshot). <row> is the task's line from
+# _lease_states_read (task, state,
 # then the fields below); without one (polled) it is read the same way here,
 # so a row deleted since is "left" and a ledger that no longer reads is
 # "unverified". The exit record is tested after the liveness test, never taken
@@ -657,7 +698,7 @@ print(max(0, int(time.time() - os.path.getmtime(os.environ['OUT_FILE']))))
   fi
   case "$ACTION" in
     adopt|expire|orphan|collect)
-      if [ "$MODE" = poll ] && [ "${_LS_ACT_STOP_MS:-0}" -gt 0 ] \
+      if [ "$MODE" != sweep ] && [ "${_LS_ACT_STOP_MS:-0}" -gt 0 ] \
          && [ "$(python3 -c 'import time; print(int(time.time() * 1000))')" -ge "$_LS_ACT_STOP_MS" ]; then
         _LS_RESULT=deferred
         return 0
@@ -712,9 +753,15 @@ print(max(0, int(time.time() - os.path.getmtime(os.environ['OUT_FILE']))))
     expire)
       # Hung past its window: still breathing after its own timeout, kill-after
       # and exit sweep should have ended it — kill its process group, then
-      # orphan (the belt to that suspender).
-      echo "${OP}: ${TASK} EXPIRED — pid ${PID} alive past heartbeat_deadline; killing the builder's process group and orphaning" >&2
-      _lease_kill_builder "$PID" "$PGID" "$STARTED"
+      # orphan (the belt to that suspender). A row with no recorded start time
+      # (from before 3.3.3) only says the pid runs, maybe as another process
+      # by now, so it is orphaned unsignalled, as lease_stop leaves it.
+      if [ -z "$STARTED" ]; then
+        echo "${OP}: ${TASK} EXPIRED — pid ${PID} runs past heartbeat_deadline, but no start time is recorded for the builder (a row from before 3.3.3), so it can't be told from a reused pid: NOT signalled — check \`ps -o pid,pgid,lstart,command -p ${PID}\` and stop it by hand; orphaning" >&2
+      else
+        echo "${OP}: ${TASK} EXPIRED — pid ${PID} alive past heartbeat_deadline; killing the builder's process group and orphaning" >&2
+        _lease_kill_builder "$PID" "$PGID" "$STARTED"
+      fi
       ;;
     orphan)
       echo "${OP}: ${TASK} ORPHANED — pid ${PID} dead (or now another process), no exit record, output stale; reclaiming" >&2
@@ -775,15 +822,17 @@ for t, r in sorted(leases.items() if isinstance(leases, dict) else []):
 }
 
 # lease_heartbeat_check [--lead-exit] [task_id] — the resume sweep: every
-# building lease (or just one) through _lease_sweep_one, after the integrity
-# check (KTD18: a change is escalated and returns 44) and then the lease-root
-# note. A live builder keeps building; a finished one is collected
+# building lease (or just one) through _lease_sweep_one, between two integrity
+# checks, on entry and on return (KTD18: a change is escalated and returns 44),
+# with the lease-root note after the first. A live builder keeps building; a
+# finished one is collected
 # (lease_collect's stdout goes to stderr here); a dead one with no exit record
 # is orphaned and reclaimed (KTD-9); a lease whose dispatching lead is gone is
 # adopted or collected with reason=lead-exit and its requeue budget untouched.
 # --lead-exit treats every swept lease's lead as gone: the forced handover (U9)
-# calls it. rc 0; _RC_DEGRADED when a row could not be verified; a collect's
-# 44 passes through.
+# calls it. rc 0; _RC_DEGRADED when a row could not be verified; 44 from either
+# integrity check, and a collect's 44 passes through; a failed ledger write
+# stops the sweep with its rc.
 lease_heartbeat_check() {
   _lead_only lease_heartbeat_check || return $?
   local ONLY="" LEAD_EXIT=0 LEDGER ROWS ROW TASK SWEPT=0 COLLECTED=0 ORPHANED=0 UNVERIFIED=0 RC=0
@@ -817,9 +866,8 @@ lease_heartbeat_check() {
     case "$TASK" in ""|@now) continue ;; esac
     if [ -n "$ONLY" ] && [ "$TASK" != "$ONLY" ]; then continue; fi
     SWEPT=$((SWEPT + 1))
-    RC=0
     _lease_sweep_one lease_heartbeat_check "$TASK" "$LEAD_EXIT" sweep "$ROW" < /dev/null || RC=$?
-    if [ "$RC" -ne 0 ]; then return "$RC"; fi
+    if [ "$RC" -ne 0 ]; then break; fi
     case "$_LS_RESULT" in
       collected)  COLLECTED=$((COLLECTED + 1)) ;;
       orphaned)   ORPHANED=$((ORPHANED + 1)) ;;
@@ -828,7 +876,12 @@ lease_heartbeat_check() {
   done <<HEARTBEAT_ROWS
 $ROWS
 HEARTBEAT_ROWS
+  # Every return runs the integrity check (KTD10), as lease_wait's does: a
+  # builder that changed git state or the ledger during the sweep is restored
+  # and escalated here.
+  if [ "$RC" -eq 0 ]; then _lead_integrity_check lease_heartbeat_check || RC=$?; fi
   echo "lease_heartbeat_check: swept ${SWEPT} building lease(s), collected ${COLLECTED}, orphaned ${ORPHANED}, unverifiable ${UNVERIFIED}" >&2
+  if [ "$RC" -ne 0 ]; then return "$RC"; fi
   if [ "$UNVERIFIED" -gt 0 ]; then return "$_RC_DEGRADED"; fi
   return 0
 }
@@ -1003,15 +1056,17 @@ ALL_IN_EOF
 # it, at most 15 s, so the call returns inside the lead's shell-tool limit.
 # The budget counts from the call's start, and the polling stops a second
 # before it, so the closing integrity check fits inside it too. No action
-# (collect, expiry, adoption, orphaning) starts once less than that headroom
-# is left before the lead's limit, however many one pass has to take: the
-# pass stops there and the next call takes the rest. Under a Claude lead, pass
-# the Bash tool timeout explicitly: wait_budget_s x 1000 ms.
+# (collect, expiry, adoption, orphaning) starts once the budget is spent,
+# however many one pass has to take: the pass stops there and the next call
+# takes the rest. The default budget leaves that quarter (at most 15 s) before
+# the lead's limit for the last action to finish; a smaller --budget, from a
+# lead whose tool limit is lower, bounds the actions the same way. Under a
+# Claude lead, pass the Bash tool timeout explicitly: wait_budget_s x 1000 ms.
 # stdout: "<task> <state>" for each watched lease that left building, then
 # "still building: <task>..." when any still is, or "no lease building".
 # rc 0: a lease left building, or none was building; _RC_WAIT_BUILDING (75):
-# the budget ran out with everything watched still building, or the lead's
-# limit came within the headroom before an action the last pass still had;
+# the budget ran out with everything watched still building, or before an
+# action the last pass still had;
 # _RC_DEGRADED (80): every lease still building has a row with no pid or
 # output_file, so its liveness can't be verified and waiting can't change
 # that (one stderr line names them; lease_heartbeat_check's rc for such a row
@@ -1020,7 +1075,8 @@ ALL_IN_EOF
 # watched leases' states); 1: ledger error (missing, unparseable) or an
 # unknown task; 64: usage; 45: run by a worker or from inside the lease root.
 # Loop it in bounded slices until it prints no "still building:" line or
-# returns 80.
+# returns 80, each repeat naming only the leases on that line (or none): a
+# named lease that already left building returns at once.
 lease_wait() {
   _lead_only lease_wait || return $?
   local BUDGET="" NAMES="" ERR WAIT_CLI CAP HEADROOM EFF READ WATCH ROW START_MS STOP_MS CHECK_MS REM RC=0
@@ -1098,11 +1154,12 @@ lease_wait() {
   WATCH=$_LW_STILL
   # Polling stops short of the budget (a second; half of a 1 s budget), the
   # room the closing integrity check needs. An action (_lease_sweep_one, poll
-  # mode) starts only while at least HEADROOM is left before the lead's limit
-  # (CAP from the call's start), so one that starts finishes inside it.
+  # mode) starts only inside the budget (BUDGET from the call's start, never
+  # past EFF): with the default budget at least HEADROOM is left before the
+  # lead's limit, so one that starts finishes inside it.
   STOP_MS=$((START_MS + BUDGET * 1000 - 500))
   if [ "$BUDGET" -ge 2 ]; then STOP_MS=$((STOP_MS - 500)); fi
-  _LS_ACT_STOP_MS=$((START_MS + EFF * 1000))
+  _LS_ACT_STOP_MS=$((START_MS + BUDGET * 1000))
   CHECK_MS=$((START_MS + 15000))
   while :; do
     # One pass over the leases still building, from the rows of the last read.
@@ -1157,7 +1214,7 @@ LEASE_WAIT_EOF
     return "$_RC_DEGRADED"
   fi
   if [ "$DEFER" -eq 1 ]; then
-    echo "lease_wait: stopped before an action: less than ${HEADROOM}s was left before the ${WAIT_CLI} lead's ${CAP}s limit; still building: ${_LW_STILL} — call lease_wait again" >&2
+    echo "lease_wait: stopped before an action: the ${BUDGET}s budget was spent; still building: ${_LW_STILL} — call lease_wait again" >&2
   else
     echo "lease_wait: the ${BUDGET}s budget ran out; still building: ${_LW_STILL}${UNVER:+ (liveness not verifiable: ${UNVER})} — call lease_wait again" >&2
   fi

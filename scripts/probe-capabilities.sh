@@ -1682,13 +1682,16 @@ fi  # end of the per-CLI sections skipped by --self-only
 #                    CDX-15b, the danger-full-access sub-case, is never
 #                    launched here (R50)
 #   CDX-14           TMPDIR in a Codex lead's tool shell equals the caller's,
-#                    across two tool calls
+#                    across two tool calls (both dumps required: a missing one
+#                    is a FAIL)
 #   CC-12 / CDX-16   plugin hooks fire, or don't, in an env -i worker: a scratch
 #                    plugin whose hooks write marker files (claude: --plugin-dir;
 #                    codex: a scratch CODEX_HOME with the plugin installed,
 #                    where SessionStart and UserPromptSubmit fire before the
 #                    first model request, so no login is needed). The user's own
-#                    config is never touched
+#                    config is never touched. CDX-16 PASS needs the bypass run to
+#                    fire a hook and the untrusted lane run to fire none; hooks
+#                    firing untrusted are a FAIL that says "fires without trust"
 #   CC-13 / CDX-17 / AGY-17 / OC-09 / KIMI-10 / CUR-13
 #                    a variable set at the lease boundary is visible inside each
 #                    worker CLI's tool shell, run with the lane's own argv
@@ -2268,18 +2271,29 @@ if command -v codex >/dev/null 2>&1; then
           fi
         fi
         if _want CDX-14; then
-          _u29_tmpdir "$D/env-1.txt"
-          U29_T1=$U29_TMP
+          # Both tool calls' dumps are the two measurements: a missing one is
+          # a FAIL, as a launch command the lead never ran is for the siblings.
+          U29_T1="<not dumped: the first tool call did not run>"
           U29_T2="<not dumped: the second tool call did not run>"
           U29_OK=1
-          [ "$U29_TD" = unchanged ] || U29_OK=0
+          if [ -f "$D/env-1.txt" ]; then
+            _u29_tmpdir "$D/env-1.txt"
+            U29_T1=${U29_TMP:-<unset>}
+            [ "$U29_TD" = unchanged ] || U29_OK=0
+          else
+            U29_OK=0
+          fi
           if [ -f "$D/env-2.txt" ]; then
             _u29_tmpdir "$D/env-2.txt"
-            U29_T2=$U29_TMP
+            U29_T2=${U29_TMP:-<unset>}
             [ "$U29_TD" = unchanged ] || U29_OK=0
+          else
+            U29_OK=0
           fi
           if [ "$U29_OK" = 1 ]; then
             row "CDX-14" "codex" "$U29_CDX14" "PASS" "caller TMPDIR=${TMPDIR:-/tmp}; tool call 1: ${U29_T1}; tool call 2: ${U29_T2}; -s workspace-write" "live"
+          elif [ ! -f "$D/env-1.txt" ] || [ ! -f "$D/env-2.txt" ]; then
+            row "CDX-14" "codex" "$U29_CDX14" "FAIL" "caller TMPDIR=${TMPDIR:-/tmp}; tool call 1: ${U29_T1}; tool call 2: ${U29_T2} — the row needs both tool calls' environment dumps (${U29_LEAD}): $(_evidence "$O")" "live"
           else
             row "CDX-14" "codex" "$U29_CDX14" "FAIL" "caller TMPDIR=${TMPDIR:-/tmp}; tool call 1: ${U29_T1:-<unset>}; tool call 2: ${U29_T2:-<unset>} — paths and caches keyed on TMPDIR differ between the lead's shell and its caller" "live"
           fi
@@ -2333,8 +2347,14 @@ if command -v codex >/dev/null 2>&1; then
         rm -f "$HM"/hook-*
         (cd "$FIX" && _lane_run 120 env CODEX_HOME="$CH" "TRIFORGE_PROBE_WORKER=$U29_VAL" codex "${U29_CDX_FLAGS[@]}" --skip-git-repo-check -m "$CDX_MODEL" "Respond with only: READY" < /dev/null > "$O.2" 2>&1) || true
         _u29_hooks_seen "$HM"
-        if [ "$U29_N1" -gt 0 ]; then
+        # PASS needs both controls: the bypass run fires a hook (positive) and
+        # the lane-flags run, untrusted, fires none (negative). Hooks firing
+        # without trust are a FAIL that says so: the gate the row names did
+        # not hold.
+        if [ "$U29_N1" -gt 0 ] && [ "$U29_FIRED" -eq 0 ]; then
           row "CDX-16" "codex" "$U29_CDX16" "PASS" "with --dangerously-bypass-hook-trust: ${U29_E1}; lane flags alone (untrusted plugin hooks): ${U29_HOOKS} — plugin hooks are trust-gated, and the trust lives in the user's CODEX_HOME, which a lane worker reads through HOME; the scratch home has no login, so PreToolUse/Stop cannot fire there" "marker-file"
+        elif [ "$U29_FIRED" -gt 0 ]; then
+          row "CDX-16" "codex" "$U29_CDX16" "FAIL" "fires without trust: lane flags alone, untrusted plugin hooks: ${U29_HOOKS}; with --dangerously-bypass-hook-trust: ${U29_E1} — the trust gate did not hold, so a lane worker runs installed plugins' hooks and the worker-marker early exit (U11) is the only guard" "marker-file"
         elif _auth_shaped "$O"; then
           row "CDX-16" "codex" "$U29_CDX16" "UNAVAILABLE" "no hook fired before the scratch home's missing login stopped the run; a live check needs the plugin in the user's CODEX_HOME (user-tier, R18): $(_evidence "$O")" "marker-file"
         else
@@ -2675,7 +2695,7 @@ COUNTER_MISMATCH=0
   echo "- **CC-10/CDX-13** → the same builder survives a terminal hangup of the lead (pty closed mid-turn), the headless stand-in for a closed TUI (U13's lead-exit path)."
   echo "- **CC-11/CDX-15/CDX-15b** → the host markers \`lead_host_detect\` reads (U9): the names each lead adds to its tool shell. Workers of the same CLI carry the same names (CC-13/CDX-17 evidence), so only the worker marker tells a worker from a lead. CDX-15b (danger-full-access) needs a human-launched lead (R50)."
   echo "- **CDX-14** → TMPDIR under a Codex lead: lease paths and per-session caches keyed on it resolve the same in the lead's tool shell as in its caller."
-  echo "- **CC-12/CDX-16** → plugin hooks fire in env -i workers, so the shipped hook handlers must exit early under the worker marker (U11, KTD9); Codex plugin hooks are trust-gated."
+  echo "- **CC-12/CDX-16** → plugin hooks fire in env -i workers, so the shipped hook handlers must exit early under the worker marker (U11, KTD9); Codex plugin hooks are trust-gated (CDX-16 PASS: the bypass run fires a hook and the untrusted lane run fires none; a FAIL that says \"fires without trust\" means the worker-marker exit is the only guard)."
   echo "- **CC-13/CDX-17/AGY-17/OC-09/KIMI-10/CUR-13** → a variable set at the lease boundary reaches each worker CLI's tool shell, which is where U11's worker marker has to be seen (KTD9)."
   echo "- **CC-14/CC-14b** → D-038: \`claude -p\` loads the root AGENTS.md when no CLAUDE.md exists, and a CLAUDE.md beside it suppresses it (the R40 upgrade notice)."
   echo "- **CDX-18** → D-048: one plugin tree serves Codex through the \`.claude-plugin/\` fallback (R20). A FAIL stops Phase 3 until a fallback, such as a schema-less \`.codex-plugin/plugin.json\`, is designed."

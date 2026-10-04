@@ -1270,7 +1270,11 @@ rm -rf "$_S11"
 #            shipped copy is in it, beside feature.txt.
 #   codexhook session start (marker unset) replaces a .codex/hooks.json still
 #            byte-equal to the 3.x template with the 4.0 one — one notice, none
-#            on the next run — and leaves an edited copy alone.
+#            on the next run — and leaves an edited copy alone; a .codex that
+#            is a symlink into a scratch HOME's .codex holding the 3.x copy is
+#            never written through (the copy byte-identical, nothing
+#            bootstrapped beside it), with the WARNING notice on each run;
+#            every run rc 0, stdout never starting with "{".
 # Negative controls: the hook case against copies of the handlers with the
 # marker block removed must flag every handler, and the refusal case with
 # _lead_only made a no-op must flag lease_create.
@@ -1550,28 +1554,45 @@ _S15_FAIL="${_S15_FAIL}$(_self_expect none "$_S15_PN" '^create=0$' '^provisioned
 
 # codexhook: session start replaces an unchanged 3.x .codex/hooks.json once and
 # keeps an edited one (KTD9: the shipped hook no longer writes ops/)
-for _s15_v in same edited; do
-  mkdir -p "$_S15/cx-$_s15_v/proj/.codex" "$_S15/cx-$_s15_v/home"
-  cp "$_S15/codex-hooks-3x.json" "$_S15/cx-$_s15_v/proj/.codex/hooks.json"
-  [ "$_s15_v" = same ] || printf '\n' >> "$_S15/cx-$_s15_v/proj/.codex/hooks.json"
+for _s15_v in same edited linked; do
+  mkdir -p "$_S15/cx-$_s15_v/proj" "$_S15/cx-$_s15_v/home"
+  if [ "$_s15_v" = linked ]; then
+    # .codex is a symlink into the scratch HOME's .codex (the user tier),
+    # which holds an unchanged 3.x copy: session start writes nothing there
+    mkdir -p "$_S15/cx-linked/home/.codex"
+    cp "$_S15/codex-hooks-3x.json" "$_S15/cx-linked/home/.codex/hooks.json"
+    ln -s "$_S15/cx-linked/home/.codex" "$_S15/cx-linked/proj/.codex"
+  else
+    mkdir -p "$_S15/cx-$_s15_v/proj/.codex"
+    cp "$_S15/codex-hooks-3x.json" "$_S15/cx-$_s15_v/proj/.codex/hooks.json"
+    [ "$_s15_v" = same ] || printf '\n' >> "$_S15/cx-$_s15_v/proj/.codex/hooks.json"
+  fi
   for _s15_run in 1 2; do
-    _S15_CX=$( cd "$_S15/cx-$_s15_v/proj" && env -u TRIFORGE_LEASE_WORKER HOME="$_S15/cx-$_s15_v/home" PATH="${_SELF_STUBS}:$PATH" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
-                 /bin/bash "$_S15_HOOKS/session-start.sh" < /dev/null 2>/dev/null || true )
+    _S15_CX=$( cd "$_S15/cx-$_s15_v/proj" && { _s15_r=0; env -u TRIFORGE_LEASE_WORKER HOME="$_S15/cx-$_s15_v/home" PATH="${_SELF_STUBS}:$PATH" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
+                 /bin/bash "$_S15_HOOKS/session-start.sh" < /dev/null 2>/dev/null || _s15_r=$?; echo "hook-rc=${_s15_r}"; } || true )
     _S15_CXN=$(printf '%s\n' "$_S15_CX" | grep -c '^session-start: replaced \.codex/hooks\.json' || true)
+    case "$_S15_CX" in
+      "{"*) _S15_FAIL="$_S15_FAIL codexhook(${_s15_v}-stdout-starts-with-brace)" ;;
+    esac
+    printf '%s\n' "$_S15_CX" | grep -qx 'hook-rc=0' || _S15_FAIL="$_S15_FAIL codexhook(${_s15_v}-hook-rc-not-0)"
     case "$_s15_v/$_s15_run" in
       same/1)   { [ "$_S15_CXN" -eq 1 ] && cmp -s "$_S15/cx-same/proj/.codex/hooks.json" "$REPO_ROOT/templates/.codex/hooks.json"; } \
                   || _S15_FAIL="$_S15_FAIL codexhook(unchanged-3.x-copy-not-replaced-once:notices=${_S15_CXN})" ;;
       same/2)   [ "$_S15_CXN" -eq 0 ] || _S15_FAIL="$_S15_FAIL codexhook(notice-repeated-on-second-run)" ;;
       edited/*) { [ "$_S15_CXN" -eq 0 ] && grep -q 'ops/CHANGELOG.md' "$_S15/cx-edited/proj/.codex/hooks.json"; } \
                   || _S15_FAIL="$_S15_FAIL codexhook(edited-copy-touched-run${_s15_run})" ;;
+      linked/*) { [ "$_S15_CXN" -eq 0 ] && cmp -s "$_S15/cx-linked/home/.codex/hooks.json" "$_S15/codex-hooks-3x.json" \
+                  && [ "$(ls -A "$_S15/cx-linked/home/.codex" | tr '\n' ' ')" = "hooks.json " ] \
+                  && [ "$(printf '%s\n' "$_S15_CX" | grep -c '^session-start: WARNING \.codex/hooks\.json is the unchanged 3\.x copy.*NOT replaced' || true)" -eq 1 ]; } \
+                  || _S15_FAIL="$_S15_FAIL codexhook(linked-user-tier-written-or-no-notice-run${_s15_run}:$(ls -A "$_S15/cx-linked/home/.codex" | tr '\n' ' '))" ;;
     esac
   done
 done
-unset _s15_v _s15_run
+unset _s15_v _s15_run _s15_r
 
 _S15_CAP="worker marker: hooks inert, lead-only helpers refuse (rc 45) under the marker or inside a lease root, squash excludes exactly the provisioned paths (KTD9/R21/R34)"
 if [ -z "$_S15_FAIL" ]; then
-  row "SELF-15" "claude" "$_S15_CAP" "PASS" "hooks: session-start, context-monitor, tool-failure-monitor, pre-compact under TRIFORGE_LEASE_WORKER=builder and =persona -> rc 0, no stdout/stderr, nothing written in project or HOME (controls without the marker: context-monitor.local.md and ops/STATE.md written; negative control: copies without the marker block flagged on all four); refuse: lease_create/dispatch/redispatch/collect/pin_reviewer/merge/promote/requeue/reclaim/rebaseline/heartbeat_check/stop, roster_write_role/_member, _ledger_update -> 45 with one stderr line each (persona too), ledger + roster byte-identical, lease_status answers; lease_create from the lease root and from a worktree with the marker unset -> 45 naming the root; a builder sourcing the library in its lease -> 45 under the marker _adapter_env gave it (builder) and 45 by cwd with it unset, no row, nothing carved (negative control: _lead_only a no-op -> lease_create carves); squash, .agents/ gitignored and not: provisioned = stamp + ${SHIPPED_COUNT} shipped skills (never my-skill), snapshot = merged commit = ${_S15_WANT}, lease_promote 42 naming my-skill and cli-watch.md; legacy row without provisioned -> collect 0, .agents/ left out whole; none: shipped skills tracked at the current digest -> provisioned = none, the edit to a tracked shipped copy is in the snapshot; codexhook: session start replaces an unchanged 3.x .codex/hooks.json once (notice, then silent), leaves an edited copy" "static"
+  row "SELF-15" "claude" "$_S15_CAP" "PASS" "hooks: session-start, context-monitor, tool-failure-monitor, pre-compact under TRIFORGE_LEASE_WORKER=builder and =persona -> rc 0, no stdout/stderr, nothing written in project or HOME (controls without the marker: context-monitor.local.md and ops/STATE.md written; negative control: copies without the marker block flagged on all four); refuse: lease_create/dispatch/redispatch/collect/pin_reviewer/merge/promote/requeue/reclaim/rebaseline/heartbeat_check/stop, roster_write_role/_member, _ledger_update -> 45 with one stderr line each (persona too), ledger + roster byte-identical, lease_status answers; lease_create from the lease root and from a worktree with the marker unset -> 45 naming the root; a builder sourcing the library in its lease -> 45 under the marker _adapter_env gave it (builder) and 45 by cwd with it unset, no row, nothing carved (negative control: _lead_only a no-op -> lease_create carves); squash, .agents/ gitignored and not: provisioned = stamp + ${SHIPPED_COUNT} shipped skills (never my-skill), snapshot = merged commit = ${_S15_WANT}, lease_promote 42 naming my-skill and cli-watch.md; legacy row without provisioned -> collect 0, .agents/ left out whole; none: shipped skills tracked at the current digest -> provisioned = none, the edit to a tracked shipped copy is in the snapshot; codexhook: session start replaces an unchanged 3.x .codex/hooks.json once (notice, then silent), leaves an edited copy, and writes nothing through a .codex symlinked into HOME/.codex (3.x copy kept, WARNING notice)" "static"
 else
   row "SELF-15" "claude" "$_S15_CAP" "FAIL" "mismatch:$(printf '%s' "$_S15_FAIL" | cut -c1-700)" "static"
 fi
@@ -2235,7 +2256,10 @@ rm -rf "$_S18"
 #           never signalled
 #   legacy  a finished builder's row is given a stranger's pid with no start
 #           time and no pgid (a row from before 3.3.3): lease_collect takes it
-#           to review and never signals the stranger
+#           to review; a building row written as 3.3.x did (the stranger's
+#           pid, no pgid key, no start time) past its deadline:
+#           lease_heartbeat_check expires it "NOT signalled", requeued;
+#           neither signals the stranger
 #   gitcfg  a builder sets core.fsmonitor in .git/config 2 s into lease_wait
 #           --budget 5 -> rc 44 naming .git/config, the setting restored, the
 #           lease escalated, the fsmonitor command never run
@@ -2282,7 +2306,29 @@ rm -rf "$_S18"
 #           named it watches every building lease -> "q2 review|still
 #           building: g"
 #   budget  with the action limit passed, a finished lease's poll sweep is
-#           deferred (still building); the next lease_wait collects it
+#           deferred (still building); the next lease_wait collects it; a real
+#           lease_wait --budget 2 sets the action limit its poll sweeps see
+#           2.0-2.9 s after the call (a recording shim around
+#           _lease_sweep_one), not at the lead's 585 s; a limit that runs out
+#           during the per-action integrity check (a shim) defers the expiry
+#           of a held builder past its deadline: still building, alive
+#   guards  kill and _kill_tree are recording stubs (the pid-1 calls run only
+#           while kill is one, so a broken guard can't signal anything):
+#           _lease_kill_builder handed this shell's own pid, pgid and start
+#           time (it reads alive) signals nothing and prints the refusal;
+#           with _lease_proc_state stubbed alive, pid 1 / pgid 1, pid 1 with
+#           no pgid and pgid 1 are refused (3 lines, nothing signalled), and
+#           _lease_stop_one on pid 1 / pgid 1 -> rc 1, refused; a row with no
+#           start time -> refused ("stop it by hand"), nothing signalled; the
+#           KILL a second after TERM is re-validated: none to the tree of a
+#           pid reused meanwhile, none to a group whose leader and members
+#           are gone (only the TERM recorded)
+#   dispatchfail the ledger write that records the launched builder fails (a
+#           shim refuses state=building): lease_dispatch rc 1, still leased,
+#           the builder from <out>.launch gone
+#   hbcfg   a .git/config change planted during lease_heartbeat_check's sweep
+#           (a shim around _lease_sweep_one, after the row's sweep) -> rc 44
+#           on return naming .git/config, restored, escalated, never ran
 #   rootnote the lease-root note escapes a control character (\x1b) and
 #           prints no export line; after a forged lease_root the integrity
 #           check returns 44 and no note is printed
@@ -2485,9 +2531,13 @@ echo "$S" > "$_S19/legacy.stranger"
 _ledger_update l pid="$S" pgid=0 pid_started= >/dev/null 2>&1
 R=0; lease_collect l >/dev/null 2>&1 || R=$?
 echo "legacy:rc=$R:state=$(_ledger_get l state)"
+lease_create l2 builder >/dev/null 2>&1
+_ledger_update l2 state=building pid="$S" output_file="${_LEASE_ROOT}/l2.out" heartbeat_deadline=1 >/dev/null 2>&1
+R=0; lease_heartbeat_check l2 2>"$HOME/legacy-hb.err" || R=$?
+echo "legacy-expire:rc=$R:state=$(_ledger_get l2 state):unsignalled=$(grep -c "EXPIRED .*NOT signalled" "$HOME/legacy-hb.err" || true)"
 echo "stranger=$(if kill -0 "$S" 2>/dev/null; then echo alive; else echo dead; fi)"
 ')
-_S19_FAIL="${_S19_FAIL}$(_self_expect legacy "$O" '^legacy:rc=0:state=review$' '^stranger=alive$')"
+_S19_FAIL="${_S19_FAIL}$(_self_expect legacy "$O" '^legacy:rc=0:state=review$' '^legacy-expire:rc=0:state=requeued:unsignalled=1$' '^stranger=alive$')"
 if [ -s "$_S19/legacy.stranger" ]; then kill "$(cat "$_S19/legacy.stranger")" 2>/dev/null || true; fi
 _s19_reap legacy
 
@@ -2744,10 +2794,11 @@ echo "all:rc=$R:out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
 _S19_FAIL="${_S19_FAIL}$(_self_expect multi "$O" '^named:rc=0:out=\[q review\|still building: g\]$' '^all:rc=0:out=\[q2 review\|still building: g\]$')"
 _s19_reap multi
 
-# budget: no action starts once the lead's limit is within the headroom
+# budget: no action starts once the call's budget is spent
 _s19_repo budget
 printf '#!/bin/sh\necho "Status: DONE"\n' > "$_S19/budget-done.sh"
 chmod +x "$_S19/budget-done.sh"
+_s19_held budget
 O=$(_s19_lead budget '
 export TRIFORGE_TEST_BUILDER="$_S19/budget-done.sh"
 lease_create d builder >/dev/null 2>&1; lease_dispatch d "probe task" 60 >/dev/null 2>&1
@@ -2760,9 +2811,127 @@ echo "past:result=$_LS_RESULT:state=$(_ledger_get d state)"
 _LS_ACT_STOP_MS=0
 R=0; OUT=$(lease_wait --budget 10 d 2>/dev/null) || R=$?
 echo "next:rc=$R:out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+export TRIFORGE_TEST_BUILDER="$_S19/budget-held.sh"
+lease_create b builder >/dev/null 2>&1; lease_dispatch b "probe task" 60 >/dev/null 2>&1
+eval "_s19_sweep_one() $(declare -f _lease_sweep_one | sed 1d)"
+_lease_sweep_one() {
+  if [ "${4:-}" = poll ]; then echo "${_LS_ACT_STOP_MS:-unset}" >> "$HOME/budget.limits"; fi
+  _s19_sweep_one "$@"
+}
+T=$(python3 -c "import time; print(int(time.time() * 1000))")
+R=0; lease_wait --budget 2 b >/dev/null 2>&1 || R=$?
+L=$(sed -n 1p "$HOME/budget.limits" 2>/dev/null || true)
+echo "limit:rc=$R:secs=$(python3 -c "import sys; print(\"%.3f\" % ((int(sys.argv[1]) - int(sys.argv[2])) / 1000.0))" "$L" "$T" 2>/dev/null || echo none)"
+_ledger_update b heartbeat_deadline=1 >/dev/null 2>&1
+eval "_s19_integrity_check() $(declare -f _lead_integrity_check | sed 1d)"
+_lead_integrity_check() { # the check passes, and the action limit runs out while it does
+  local R=0
+  _s19_integrity_check "$@" || R=$?
+  _LS_ACT_STOP_MS=1
+  return "$R"
+}
+_LS_ACT_STOP_MS=$(( $(python3 -c "import time; print(int(time.time() * 1000))") + 60000 ))
+ROW=$(printf "%s\n" "$(_lease_states_read b)" | sed -n 1p)
+_lease_sweep_one lease_wait b 0 poll "$ROW" < /dev/null
+_LS_ACT_STOP_MS=0
+echo "midcheck:result=$_LS_RESULT:state=$(_ledger_get b state):builder=$(_lease_proc_state "$(_ledger_get b pid)" "$(_ledger_get b pid_started)" "$(_ledger_get b pgid)")"
 ')
-_S19_FAIL="${_S19_FAIL}$(_self_expect budget "$O" '^past:result=deferred:state=building$' '^next:rc=0:out=\[d review\]$')"
+_S19_FAIL="${_S19_FAIL}$(_self_expect budget "$O" '^past:result=deferred:state=building$' '^next:rc=0:out=\[d review\]$' '^limit:rc=75:secs=' \
+  '^midcheck:result=deferred:state=building:builder=alive$')"
+_s19_secs budget "$O" limit 2.0 2.9
 _s19_reap budget
+
+# guards: never the caller's own process group, never pid or pgid 1. kill and
+# _kill_tree are recording stubs, and the pid-1 calls run only while kill is
+# one, so a broken guard can't signal anything
+_s19_repo guards
+O=$(_s19_lead guards '
+: > "$HOME/guards.kills"
+kill() { echo "kill $*" >> "$HOME/guards.kills"; }
+_kill_tree() { echo "tree $*" >> "$HOME/guards.kills"; }
+G=$(ps -o pgid= -p $$ | tr -d " ")
+S="$(_lease_ps -o lstart= -p $$ | awk "{ \$1 = \$1; print }") UTC"
+echo "own-proc=$(_lease_proc_state $$ "$S" "$G")"
+if [ "$(type -t kill)" = function ]; then _lease_kill_builder $$ "$G" "$S" 2>"$HOME/guards-own.err"; fi
+echo "own:signals=$(grep -c . "$HOME/guards.kills" || true):refused=$(grep -c "NOT signalling process group ${G}: it is this shell" "$HOME/guards-own.err" || true)"
+_lease_proc_state() { echo alive; }
+: > "$HOME/guards.kills"
+R=none
+if [ "$(type -t kill)" = function ]; then
+  _lease_kill_builder 1 1 "x UTC" 2>"$HOME/guards-one.err"
+  _lease_kill_builder 1 "" "x UTC" 2>>"$HOME/guards-one.err"
+  _lease_kill_builder 4242 1 "x UTC" 2>>"$HOME/guards-one.err"
+  R=0; _lease_stop_one lease_stop g 1 1 "x UTC" builder 2>"$HOME/guards-stop.err" || R=$?
+fi
+echo "one:signals=$(grep -c . "$HOME/guards.kills" || true):refused=$(grep -c "NOT signalling pid" "$HOME/guards-one.err" || true)"
+echo "stop-one:rc=$R:refused=$(grep -c "NOT signalled" "$HOME/guards-stop.err" || true)"
+sleep() { :; }
+_lease_group_members() { :; }
+_lease_proc_state() { # alive on the first call, then $GUARDS_THEN (a pid that died or was reused during the TERM second)
+  local N
+  N=$(cat "$HOME/guards.n" 2>/dev/null || echo 0); echo $((N + 1)) > "$HOME/guards.n"
+  if [ "$N" -eq 0 ]; then echo alive; else echo "$GUARDS_THEN"; fi
+}
+X=4242; [ "$X" != "$G" ] || X=4243
+: > "$HOME/guards.kills"
+if [ "$(type -t kill)" = function ]; then
+  echo 0 > "$HOME/guards.n"; GUARDS_THEN=alive; _lease_kill_builder "$X" "$X" "" 2>"$HOME/guards-nostart.err"
+fi
+echo "nostart:signals=$(grep -c . "$HOME/guards.kills" || true):refused=$(grep -c "no start time is recorded.*stop it by hand" "$HOME/guards-nostart.err" || true)"
+: > "$HOME/guards.kills"
+if [ "$(type -t kill)" = function ]; then
+  echo 0 > "$HOME/guards.n"; GUARDS_THEN=reused; _lease_kill_builder "$X" "" "x UTC" 2>/dev/null
+fi
+echo "treeretry:[$(tr "\n" "," < "$HOME/guards.kills")]"
+: > "$HOME/guards.kills"
+if [ "$(type -t kill)" = function ]; then
+  echo 0 > "$HOME/guards.n"; GUARDS_THEN=gone; _lease_kill_builder "$X" "$X" "x UTC" 2>/dev/null
+fi
+echo "groupretry:[$(tr "\n" "," < "$HOME/guards.kills" | sed "s/$X/X/g")]"
+')
+_S19_FAIL="${_S19_FAIL}$(_self_expect guards "$O" '^own-proc=alive$' '^own:signals=0:refused=1$' '^one:signals=0:refused=3$' '^stop-one:rc=1:refused=1$' \
+  '^nostart:signals=0:refused=1$' '^treeretry:\[tree [0-9]+ TERM,\]$' '^groupretry:\[kill -TERM -- -X,\]$')"
+
+# dispatchfail: the launched builder is never left running unrecorded
+_s19_repo dispatchfail
+_s19_held dispatchfail
+O=$(_s19_lead dispatchfail '
+export TRIFORGE_TEST_BUILDER="$_S19/dispatchfail-held.sh"
+lease_create f builder >/dev/null 2>&1
+eval "_s19_ledger_update() $(declare -f _ledger_update | sed 1d)"
+_ledger_update() {
+  case " $* " in *" state=building "*) echo "probe: ledger write refused" >&2; return 1 ;; esac
+  _s19_ledger_update "$@"
+}
+R=0; lease_dispatch f "probe task" 60 >/dev/null 2>&1 || R=$?
+_lease_launch_read "${_LEASE_ROOT}/f.out" || true
+N=0; while [ "$(_lease_proc_state "$_LL_PID" "$_LL_START" "$_LL_PGID")" = alive ] && [ "$N" -lt 20 ]; do sleep 0.1; N=$((N + 1)); done
+echo "dispatchfail:rc=$R:state=$(_ledger_get f state):launched=$([ -n "$_LL_PID" ] && echo yes || echo no):builder=$(_lease_proc_state "$_LL_PID" "$_LL_START" "$_LL_PGID")"
+')
+_S19_FAIL="${_S19_FAIL}$(_self_expect dispatchfail "$O" '^dispatchfail:rc=1:state=leased:launched=yes:builder=gone$')"
+_s19_reap dispatchfail
+
+# hbcfg: lease_heartbeat_check runs the integrity check on return too
+_s19_repo hbcfg
+_s19_held hbcfg
+printf '#!/bin/sh\ntouch "%s/hbcfg.MARKER"\nexit 0\n' "$_S19" > "$_S19/hbcfg-mark.sh"
+chmod +x "$_S19/hbcfg-mark.sh"
+O=$(_s19_lead hbcfg '
+export TRIFORGE_TEST_BUILDER="$_S19/hbcfg-held.sh"
+lease_create y builder >/dev/null 2>&1; lease_dispatch y "probe task" 60 >/dev/null 2>&1
+eval "_s19_sweep_one() $(declare -f _lease_sweep_one | sed 1d)"
+_lease_sweep_one() {
+  local R=0
+  _s19_sweep_one "$@" || R=$?
+  git config core.fsmonitor "$_S19/hbcfg-mark.sh"
+  return "$R"
+}
+R=0; lease_heartbeat_check 2>"$HOME/hbcfg.err" || R=$?
+echo "hbcfg:rc=$R:state=$(_ledger_get y state):named=$(grep -c "\.git/config changed" "$HOME/hbcfg.err" || true):left=$(grep -c fsmonitor .git/config || true)"
+')
+_S19_FAIL="${_S19_FAIL}$(_self_expect hbcfg "$O" '^hbcfg:rc=44:state=escalated:named=[1-9][0-9]*:left=0$')"
+[ ! -e "$_S19/hbcfg.MARKER" ] || _S19_FAIL="$_S19_FAIL hbcfg(marker-ran)"
+_s19_reap hbcfg
 
 # rootnote: the lease-root note runs after the integrity check, escaped
 _s19_repo rootnote
@@ -2808,9 +2977,9 @@ else
   _S19_ZSH="zsh: not installed, case skipped"
 fi
 
-_S19_CAP="detached builders + lease_wait + lease_stop + lead-exit reconcile: pid == pgid with a start time read in one locale and zone, lease_wait returns on a finish / at the budget (rc 75) within wait_budget_s / degraded (rc 80), ledger errors and ledger tampering, a killed lead's builders survive and are collected with requeue_count 0 and reason=lead-exit, a reused pid is never taken for the builder or signalled, a .git/config change during the wait escalates, nothing of a builder runs once its exit record appears (a backgrounded child, a lane timeout: rc 124, class timeout) (KTD10, R36/R38)"
+_S19_CAP="detached builders + lease_wait + lease_stop + lead-exit reconcile: pid == pgid with a start time read in one locale and zone, lease_wait returns on a finish / at the budget (rc 75) within wait_budget_s / degraded (rc 80), ledger errors and ledger tampering, a killed lead's builders survive and are collected with requeue_count 0 and reason=lead-exit, a reused pid is never taken for the builder or signalled, nor are the caller's own process group and pid / pgid 1, a .git/config change during the wait or the heartbeat escalates, nothing of a builder runs once its exit record appears (a backgrounded child, a lane timeout: rc 124, class timeout) (KTD10, R36/R38)"
 if [ -z "$_S19_FAIL" ]; then
-  row "SELF-19" "claude" "$_S19_CAP" "PASS" "row pid==pgid + start time + lead + lease root recorded; finish -> rc 0 'q review'; held -> --budget 3 rc 75 'still building: g' in 1.5-3 s, TRIFORGE_LEAD_WAIT_BUDGET_S=4 caps --budget 60 below 4 s; marker 45, usage 64; released -> rc 0 'g review'; no / unparseable ledger -> rc 1 LEDGER ERROR; kill: lead group SIGKILLed mid-wait, both builders alive as recorded, heartbeat a adopts (reason=lead-exit), released both exit 0, heartbeat collects both: review, requeue_count 0, reason=lead-exit; reuse: rows given a stranger's pid + pgid (start time differs, deadline past) -> heartbeat and lease_wait orphan + requeue, stranger never signalled; legacy: a finished row given a stranger's pid with no start time or pgid -> lease_collect 0, review, stranger never signalled; gitcfg: core.fsmonitor planted mid-wait -> rc 44 naming .git/config, restored, escalated, never ran; deadline = timeout + 30 s slack; locale: dispatched under TZ=Asia/Tokyo LC_ALL=${_S19_LOC} -> pinned UTC start, alive under TZ=UTC and America/New_York, lease_wait keeps it building (75), an old local-form row alive in its own zone; unver: rc 80 within 3 s naming u once (mixed with a finisher: rc 0), heartbeat 80; ledgertamper: ledger corrupted mid-wait -> 44, restored, escalated, stdout names it; ledgertamper-entry: corrupted before the call -> the same; stop: lease_stop kills the builder group (child too), state untouched, 45/64/1, a stranger with the pid never signalled, no start time -> 1; relaunch: launch record written, removed once recorded, a stale one stopped by the next lease_dispatch; expire: held builder past its deadline -> group killed, requeued, worktree pruned; endrun: a builder that backgrounds a child and exits 0 -> <out>.rc 0 / class none with the child gone and nothing but the exiting leader in its group, group empty after, review; lanetimeout: a 1 s lease timeout on a builder waiting on a child -> <out>.rc 124 / class timeout in 1-8 s, child gone, group empty, requeued; leadexit: --lead-exit with the lead alive adopts the live builder and collects the finished one, reason=lead-exit, requeue_count 0; multi: two named -> 'q review|still building: g', none named watches all; budget: past the action limit the collect is deferred, the next call takes it; rootnote: escaped, no export line, not printed when the check fails; ${_S19_ZSH}" "static"
+  row "SELF-19" "claude" "$_S19_CAP" "PASS" "row pid==pgid + start time + lead + lease root recorded; finish -> rc 0 'q review'; held -> --budget 3 rc 75 'still building: g' in 1.5-3 s, TRIFORGE_LEAD_WAIT_BUDGET_S=4 caps --budget 60 below 4 s; marker 45, usage 64; released -> rc 0 'g review'; no / unparseable ledger -> rc 1 LEDGER ERROR; kill: lead group SIGKILLed mid-wait, both builders alive as recorded, heartbeat a adopts (reason=lead-exit), released both exit 0, heartbeat collects both: review, requeue_count 0, reason=lead-exit; reuse: rows given a stranger's pid + pgid (start time differs, deadline past) -> heartbeat and lease_wait orphan + requeue, stranger never signalled; legacy: a finished row given a stranger's pid with no start time or pgid -> lease_collect 0, review, and a 3.3.x-shaped building row (no pgid, no start time) past its deadline -> heartbeat expires it unsignalled, requeued; the stranger never signalled; gitcfg: core.fsmonitor planted mid-wait -> rc 44 naming .git/config, restored, escalated, never ran; deadline = timeout + 30 s slack; locale: dispatched under TZ=Asia/Tokyo LC_ALL=${_S19_LOC} -> pinned UTC start, alive under TZ=UTC and America/New_York, lease_wait keeps it building (75), an old local-form row alive in its own zone; unver: rc 80 within 3 s naming u once (mixed with a finisher: rc 0), heartbeat 80; ledgertamper: ledger corrupted mid-wait -> 44, restored, escalated, stdout names it; ledgertamper-entry: corrupted before the call -> the same; stop: lease_stop kills the builder group (child too), state untouched, 45/64/1, a stranger with the pid never signalled, no start time -> 1; relaunch: launch record written, removed once recorded, a stale one stopped by the next lease_dispatch; expire: held builder past its deadline -> group killed, requeued, worktree pruned; endrun: a builder that backgrounds a child and exits 0 -> <out>.rc 0 / class none with the child gone and nothing but the exiting leader in its group, group empty after, review; lanetimeout: a 1 s lease timeout on a builder waiting on a child -> <out>.rc 124 / class timeout in 1-8 s, child gone, group empty, requeued; leadexit: --lead-exit with the lead alive adopts the live builder and collects the finished one, reason=lead-exit, requeue_count 0; multi: two named -> 'q review|still building: g', none named watches all; budget: past the action limit the collect is deferred, the next call takes it, and lease_wait --budget 2 sets the limit 2.0-2.9 s after the call, and a limit spent during the per-action integrity check defers the expiry; guards (stubbed kill): this shell's own pid + pgid + start time -> nothing signalled, refused; pid 1 / pgid 1 -> refused, nothing signalled, lease_stop's stop rc 1; no start time -> refused; the KILL retry re-validated (none after a reuse, none to an emptied group); dispatchfail: the recording ledger write refused -> lease_dispatch 1, leased, the launched builder gone; hbcfg: .git/config planted during the heartbeat's sweep -> 44 on return, restored, escalated, never ran; rootnote: escaped, no export line, not printed when the check fails; ${_S19_ZSH}" "static"
 else
   _S19_WHO=$(printf '%s' "$_S19_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
   row "SELF-19" "claude" "$_S19_CAP" "FAIL" "mismatch in ${_S19_WHO% }:$(printf '%s' "$_S19_FAIL" | cut -c1-600)" "static"
