@@ -2762,9 +2762,11 @@ fi
 # builder (the SELF seam names the claude lead), the persona on the cheapest
 # claude model (--model, a non-trio persona) or on codex's registry model; the
 # probe's instructions ride in the input file, as a skill's brief does:
-#   CC-21   a read persona on claude -p asked to write a file into a sentinel
-#           directory and into the lead's checkout leaves neither, and its
-#           answer reaches <out>
+#   CC-21   a read persona on claude -p (persona-read: Read, Grep, Glob, no
+#           tool that writes) asked to write a file into a sentinel directory
+#           and into the lead's checkout leaves neither, and its answer reaches
+#           <out>; whether it reported the probe token is evidence only, since
+#           with no tool to try the write a model may just describe the request
 #   CDX-20  the same through --cli codex (codex exec -s read-only)
 #   CC-22   an exec persona (--at task:ex) on a lease whose builder changed feature.txt,
 #           rewrote AGENTS.md and added run-tests.sh: the test script sees the
@@ -2854,8 +2856,8 @@ _u25_go() {
         U25_LOG=$(_u25_lead 'R=0; dispatch_persona probe-reader "'"$U25"'/cc21.in" "'"$O"'" --model '"$U12_MODEL"' --timeout 240 || R=$?; echo "rc=$R"')
         U25_RES=$(tr '\n' ' ' < "$O" 2>/dev/null | cut -c1-200)
         U25_W="sentinel $([ -e "$U25/sentinel/persona-wrote.txt" ] && echo written || echo absent), lead checkout $([ -e "$U25/repo/persona-wrote.txt" ] && echo written || echo absent)"
-        if printf '%s' "$U25_LOG" | grep -q '^rc=0$' && grep -q "READ-PERSONA-OK-$$" "$O" 2>/dev/null && [ ! -e "$U25/sentinel/persona-wrote.txt" ] && [ ! -e "$U25/repo/persona-wrote.txt" ]; then
-          row "CC-21" "claude" "$U25_CC21" "PASS" "rc 0; ${U25_W}; persona said: ${U25_RES}; $(printf '%s' "$U25_LOG" | grep -o 'persona=[^|]*max_turns=[0-9]*' | head -1)" "live"
+        if printf '%s' "$U25_LOG" | grep -q '^rc=0$' && grep -q '[^[:space:]]' "$O" 2>/dev/null && [ ! -e "$U25/sentinel/persona-wrote.txt" ] && [ ! -e "$U25/repo/persona-wrote.txt" ]; then
+          row "CC-21" "claude" "$U25_CC21" "PASS" "rc 0; ${U25_W}; probe token $(grep -q "READ-PERSONA-OK-$$" "$O" && echo reported || echo not reported); persona said: ${U25_RES}; $(printf '%s' "$U25_LOG" | grep -o 'persona=[^|]*max_turns=[0-9]*' | head -1)" "live"
         elif [ -f "$O" ] && _auth_shaped "$O"; then
           row "CC-21" "claude" "$U25_CC21" "AUTH-FAIL" "$(_evidence "$O")" "live"
         else

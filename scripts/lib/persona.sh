@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/persona.sh — the persona lane (KTD5, KTD20, KTD21, KTD22): dispatch_persona runs a persona from the persona home (personas/<name>.md, personas/manifest.toml) as a script-dispatched worker under _adapter_env, its tool class enforced on the command line, from a working directory the lead controls; persona_prompt prints a persona's body by name; persona_resolve prints what a dispatch would run
+# scripts/lib/persona.sh — the persona lane (KTD5, KTD20, KTD21, KTD22): dispatch_persona runs a persona from the persona home (personas/<name>.md, personas/manifest.toml) as a script-dispatched worker under _adapter_env, its tool class enforced on the command line, from a working directory the lead controls; persona_prompt prints a persona's body by name; persona_snapshot_diff writes a lease's collect-snapshot diff for a review input; persona_resolve prints what a dispatch would run
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/lease-wait.sh and before scripts/lib/lease.sh.
@@ -52,7 +52,8 @@ fi
 #               the forms below
 #   task:<id>   the lease's collect-snapshot diff (base_sha..snapshot_sha, the
 #               snapshot checked against snapshot_tree, the ledger verified
-#               first: rc 44), written by the lead. For an exec persona it is
+#               first: rc 44), written by the lead — what persona_snapshot_diff
+#               writes to a file for a skill that adds its own brief. For an exec persona it is
 #               also --at task:<id> (a different --at is 64)
 #   <id>        exec only: the same as task:<id>
 # Every change a diff in the input makes to an instruction or config file (the
@@ -395,6 +396,45 @@ PERSONA_LEASE_EOF
   fi
 }
 
+# _persona_diff <from> <to> <file> — the diff a review reads, through the
+# lead's hardened git (_lgr): no external diff driver, no textconv filter,
+# submodules shown. rc 1, <file> removed, when git fails.
+_persona_diff() {
+  if ! _lgr diff --no-ext-diff --no-textconv --ignore-submodules=none "$1" "$2" > "$3" 2>/dev/null; then
+    rm -f "$3"
+    return 1
+  fi
+}
+
+# persona_snapshot_diff <task|task:id> <file> — write the lease's
+# collect-snapshot diff (base_sha..snapshot_sha) to <file>: the input a review
+# skill hands dispatch_persona, so the reviewer reads the snapshot the lead
+# recorded at collect and never the lease branch tip, which a builder can move
+# (KTD19, R48). Lead-only (_lead_only, rc 45); the integrity check first (44);
+# rc 64 for usage, a <file> that is a directory or in a directory that does not
+# exist, no such lease, no snapshot yet or a lease being built again (leased or
+# building); 44 when the snapshot is not its recorded tree; 1 when git fails.
+persona_snapshot_diff() {
+  _lead_only persona_snapshot_diff || return $?
+  local T=${1:-} F=${2:-} D
+  if [ $# -ne 2 ] || [ -z "$T" ] || [ -z "$F" ]; then
+    echo "persona_snapshot_diff: usage: persona_snapshot_diff <task_id|task:id> <file>" >&2
+    return 64
+  fi
+  T=${T#task:}
+  D=$(dirname "$F")
+  if [ -d "$F" ] || [ ! -d "$D" ]; then
+    echo "persona_snapshot_diff: ${F} must name a file in an existing directory" >&2
+    return 64
+  fi
+  _persona_lease persona_snapshot_diff "$T" || return $?
+  if ! _persona_diff "$_PL_BASE" "$_PL_SNAP" "$F"; then
+    echo "persona_snapshot_diff: ERROR git diff ${_PL_BASE:0:12}..${_PL_SNAP:0:12} failed for lease ${T}" >&2
+    return 1
+  fi
+  echo "persona_snapshot_diff: lease ${T}'s collect snapshot ${_PL_SNAP:0:12} against its base ${_PL_BASE:0:12} -> ${F}" >&2
+}
+
 # _persona_instr_paths <rev> <rev> — the paths on the registry's project
 # protected list (the instruction and config files) that differ between the
 # two revisions, one per line; rc 1 when the diff or the classifier fails
@@ -657,7 +697,7 @@ _persona_read() {
   if [ -n "$T" ]; then
     INPUT="${SCR}/input/lease-${T}.diff"
     WHAT="the diff of lease ${T}'s collect snapshot ${_PL_SNAP:0:12} against its base ${_PL_BASE:0:12}, written by the lead"
-    if ! mkdir -p "$CWD" "${SCR}/input" || ! _lgr diff --no-ext-diff --no-textconv --ignore-submodules=none "$_PL_BASE" "$_PL_SNAP" > "$INPUT" 2>/dev/null; then
+    if ! mkdir -p "$CWD" "${SCR}/input" || ! _persona_diff "$_PL_BASE" "$_PL_SNAP" "$INPUT"; then
       echo "dispatch_persona: ERROR could not write lease ${T}'s snapshot diff; nothing ran (fail closed)" >&2
       rm -rf "$SCR"
       return 1
@@ -772,7 +812,7 @@ _persona_exec() {
   if [ -n "$T" ]; then
     INPUT="${SIDE}/input/lease-${T}.diff"
     WHAT="the diff of lease ${T}'s collect snapshot ${_PT_COMMIT:0:12} against its base ${_PT_FROM:0:12}, written by the lead"
-    if ! mkdir -p "${SIDE}/input" || ! _lgr diff --no-ext-diff --no-textconv --ignore-submodules=none "$_PT_FROM" "$_PT_COMMIT" > "$INPUT" 2>/dev/null; then
+    if ! mkdir -p "${SIDE}/input" || ! _persona_diff "$_PT_FROM" "$_PT_COMMIT" "$INPUT"; then
       echo "dispatch_persona: ERROR could not write lease ${T}'s snapshot diff; nothing ran (fail closed)" >&2
       rm -rf "$SIDE"
       return 1

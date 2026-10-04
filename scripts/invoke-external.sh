@@ -31,8 +31,8 @@
 #                       roster_write_lead (KTD1)
 #   lib/lease-wait.sh   detached builders (launcher, lane argv, builder body),
 #                       lease_stop, lease_heartbeat_check, lease_wait (KTD10)
-#   lib/persona.sh      the persona lane: dispatch_persona, persona_resolve
-#                       (KTD5, KTD20, KTD21)
+#   lib/persona.sh      the persona lane: dispatch_persona, persona_prompt,
+#                       persona_snapshot_diff, persona_resolve (KTD5, KTD20, KTD21)
 #   lib/lease.sh        the lease lifecycle + _adapter_env + the typed-report parser
 # Function names and contracts are unchanged by the split; commands keep
 # sourcing this file only.

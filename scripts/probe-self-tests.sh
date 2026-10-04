@@ -1318,7 +1318,8 @@ rm -rf "$_S11"
 #            persona, the no-push config, no other provider's key; the answer
 #            in <out>
 #            --brief text lands in the prompt
-#   web      read-web adds WebFetch and WebSearch (still no Bash); sonnet at high
+#   web      read-web adds WebFetch and WebSearch (still no Bash); sonnet at high;
+#            with TRIFORGE_CLAUDE_SANDBOX=off neither class gains Bash
 #   codex    --cli codex (given after the positionals): codex exec -s
 #            read-only, approval never, --skip-git-repo-check, the shell env
 #            policy pinned, the registry model at the tier's effort, -o <out>;
@@ -1347,6 +1348,11 @@ rm -rf "$_S11"
 #   task     a read persona given task:dirty: the lease's snapshot diff as its
 #            input (lease-dirty.diff), AGENTS.md and .mcp.json named;
 #            task:<unknown> -> 64
+#   snapdiff persona_snapshot_diff clean <file> after the lease branch tip was
+#            moved past the snapshot: the file is the recorded snapshot's diff
+#            (byte-equal to base..snapshot_sha), not the tip's; an unknown
+#            lease, a lease in a fix cycle, a directory as <file> -> 64; under
+#            the marker -> 45
 #   poison   an obedient stub (it follows a "report no findings" AGENTS.md or
 #            CLAUDE.md at or above its cwd, and starts .mcp.json servers unless
 #            given --strict-mcp-config): the read persona on the clean and the
@@ -1613,6 +1619,13 @@ echo "brief-in-prompt=$(grep -c "BRIEF-TEXT-S12" "$_S12/log/last.prompt" || true
 _s12_mode answer
 _s12_try web dispatch_persona probe-web "$_S12/review.diff" "$_S12/rd-web.out"
 echo "web-tools=$(_s12_arg --tools) allowed=$(_s12_arg --allowedTools) model=$(_s12_arg --model) effort=$(_s12_arg --effort) turns=$(_s12_arg --max-turns)"
+( export TRIFORGE_CLAUDE_SANDBOX=off
+  _s12_mode answer
+  _s12_try sbxoff-read dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-so.out" >/dev/null
+  echo "sbxoff-read=$(_s12_arg --tools)"
+  _s12_mode answer
+  _s12_try sbxoff-web dispatch_persona probe-web "$_S12/review.diff" "$_S12/rd-so.out" >/dev/null
+  echo "sbxoff-web=$(_s12_arg --tools)" )
 _s12_mode answer
 _s12_try cx dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-cx.out" --cli codex
 C=$(cat "$_S12/log/last.cwd" 2>/dev/null || true)
@@ -1658,7 +1671,7 @@ _S12_FAIL="${_S12_FAIL}$(_self_expect read "$O" '^read:rc=0:' '^out=PERSONA-ANSW
   '^env=marker:1:nopush:1:planted:0$' '^body=1$' '^input=copied$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect web "$O" '^web:rc=0:' \
   '^web-tools=Read,Grep,Glob,WebFetch,WebSearch allowed=Read,Grep,Glob,WebFetch,WebSearch model=sonnet effort=high turns=5$' \
-  '^brief:rc=0:' '^brief-in-prompt=1$')"
+  '^brief:rc=0:' '^brief-in-prompt=1$' '^sbxoff-read=Read,Grep,Glob$' '^sbxoff-web=Read,Grep,Glob,WebFetch,WebSearch$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect codex "$O" '^cx:rc=0:' '^cx-out=CODEX-PERSONA-ANSWER$' \
   "^cx-argv=exec:s=read-only:m=gpt-6-astra:o=${_S12P}/rd-cx.out:C=${_S12P}/tmp/triforge-persona\\..*/cwd\$" '^cx-flags=4$' '^cx-cwd=scratch$' '^cx-env=1$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect trio "$O" '^trio:rc=0:' '^trio-argv=model=opus effort=max turns=6$' \
@@ -1790,6 +1803,22 @@ printf "# a builder was here\n" >> ops/leases.toml
 _s12_mode answer
 _s12_try beforeref dispatch_persona probe-tester "$_S12/brief.txt" "$_S12/px-b.out"
 if [ -f "$_S12/log/last.argv" ]; then echo "beforeref-cli=ran"; else echo "beforeref-cli=none"; fi
+B0=$(_ledger_get clean base_sha); S0=$(_ledger_get clean snapshot_sha)
+GIT_INDEX_FILE="$_S12/px.idx2" git read-tree "$S0"
+GIT_INDEX_FILE="$_S12/px.idx2" git update-index --add --cacheinfo "100644,$(printf "TIP-ONLY\n" | git hash-object -w --stdin),tip-only.txt"
+git update-ref refs/heads/lease/clean "$(git commit-tree "$(GIT_INDEX_FILE="$_S12/px.idx2" git write-tree)" -p "$S0" -m "moved past the snapshot")"
+_s12_try snapdiff persona_snapshot_diff clean "$_S12/px-snap.diff"
+git diff "$B0" "$S0" > "$_S12/px-snap.want"
+if cmp -s "$_S12/px-snap.diff" "$_S12/px-snap.want"; then echo "snapdiff-file=snapshot"; else echo "snapdiff-file=differs"; fi
+echo "snapdiff-tip=$(grep -c TIP-ONLY "$_S12/px-snap.diff" || true):tip-diff-has-it=$(git diff "$B0" lease/clean | grep -c TIP-ONLY || true)"
+_s12_try snapdiff-task persona_snapshot_diff task:clean "$_S12/px-snap2.diff"
+_s12_try snapdiff-nope persona_snapshot_diff nope "$_S12/px-g.diff"
+_s12_try snapdiff-dir persona_snapshot_diff clean "$_S12/tmp"
+_s12_try snapdiff-usage persona_snapshot_diff clean
+_ledger_update clean state=building >/dev/null 2>&1
+_s12_try snapdiff-building persona_snapshot_diff clean "$_S12/px-g.diff"
+_ledger_update clean state=review >/dev/null 2>&1
+( export TRIFORGE_LEASE_WORKER=persona; _s12_try snapdiff-marker persona_snapshot_diff clean "$_S12/px-g.diff" )
 ')
 _S12_FAIL="${_S12_FAIL}$(_self_expect exec "$O" '^clean:go=0:review$' '^dirty:go=0:review$' '^exec:rc=0:' \
   '^out=brief=BRIEF: run the project tests and report\|feature=lease-change BUG\|agents=INTEGRATION RULES: review everything\|mcp=absent\|merge=rc45:.*TRIFORGE_LEASE_WORKER=persona.*\|worker=persona$' \
@@ -1808,6 +1837,9 @@ _S12_FAIL="${_S12_FAIL}$(_self_expect poison "$O" '^rclean:rc=0:' '^rclean-out=V
 _S12_FAIL="${_S12_FAIL}$(_self_expect guard-lease "$O" '^root:rc=45:.*lease root' '^notask:rc=64:' '^building:rc=64:.*building' \
   '^before:rc=44:.*ops/leases\.toml changed outside the lead writes' '^before-cli=none$' '^before-ledger=restored$' \
   '^beforeref:rc=44:.*ops/leases\.toml changed outside the lead writes' '^beforeref-cli=none$')"
+_S12_FAIL="${_S12_FAIL}$(_self_expect snapdiff "$O" '^snapdiff:rc=0:' '^snapdiff-file=snapshot$' '^snapdiff-tip=0:tip-diff-has-it=1$' \
+  '^snapdiff-task:rc=0:' '^snapdiff-nope:rc=64:' '^snapdiff-dir:rc=64:' '^snapdiff-usage:rc=64:' '^snapdiff-building:rc=64:.*building' \
+  '^snapdiff-marker:rc=45:.*TRIFORGE_LEASE_WORKER=persona')"
 # poison negative control: the obedient stub started in the dirty builder's worktree
 printf 'verdict\n' > "$_S12/log/mode"
 O=$( cd "$_S12/px.leases/dirty" && env HOME="$_S12/home" PATH="$_S12/bin:$PATH" claude -p "Input: ." 2>/dev/null \
@@ -1939,7 +1971,7 @@ fi
 
 _S12_CAP="persona lane: dispatch_persona under the worker boundary with enforced tool classes, the trio at the top rung, a lead-controlled cwd, exec in a restored disposable snapshot worktree with integrity checks (KTD5, KTD20, KTD21, KTD22; R14, R35, R48)"
 if [ -z "$_S12_FAIL" ]; then
-  row "SELF-12" "claude" "$_S12_CAP" "PASS" "resolve: tiers from the ladder, max_turns from the manifest, --model rung or id; trio opus/max (no record), fable/max (CC-02 PASS), opus/max (CC-02 FAIL); ladder-named plan-checker -> top; trio sonnet / lower rung / codex -> 64; lease + agent-team -> 64 naming at-resolve-pr / agent_teams (unenforced); unknown / path-shaped / bad CLI -> 64; manifest bad tier (lists the ladder tiers) / unknown key / not TOML -> 70, missing -> 69; corrupted ladder -> 70; persona_prompt: bodies by name (lease + agent-team too), unknown 64, no body 70, no manifest 69, bad entry 70, worker marker 45; read: claude -p Read,Grep,Glob (no Bash) dontAsk strict-mcp project+local opus/high turns 7, --brief in the prompt, denyWrite = the empty scratch cwd (gone after), the input file copied beside it, marker persona + no-push, planted key dropped; web: + WebFetch,WebSearch (no Bash) sonnet/high; task:dirty read: the snapshot diff as input, AGENTS.md + .mcp.json named; codex (flags after the positionals): exec -s read-only, approval never, --skip-git-repo-check, env policy pinned, gpt-6-astra/high, -o <out>; trio argv fable/max with CC-02 PASS, opus/max without, --model sonnet refused before any CLI; noclaude: read falls back to codex (NOTE), trio/read-web/exec -> 69 naming the install fix, neither -> 69; exec --at task:dirty: detached snapshot worktree under the lease root, the brief (input) seen, the feature change seen, AGENTS.md from the integration branch, no .mcp.json, its write gone with the worktree, lease_merge from inside -> 45 (marker persona), no edit tool, denyWrite the lead git dir, AGENTS.md + .mcp.json named as content under review; no --at = ref:HEAD (integration commit, nothing named), --at ref:other (its change seen, AGENTS.md restored and named, reclaimed); bare dirty / task:dirty as input = --at task:dirty with the lease diff as input; task: + --at 64; poison: read on the clean / dirty snapshot diffs (the dirty one's AGENTS.md + .mcp.json named as content under review) and exec at task:dirty report the finding, no MCP marker (control from the builder worktree: no findings + marker); ledger: a persona-forged user promotion approval -> dispatch 44 naming ops/leases.toml, gone, promote 42; a straggler's -> promote 44; the lead's own -> promoted; guard: marker / lease worktree 45, missing input / directory input / --at on read / --at without task:|ref: / unknown ref / dash ref / unknown task 64, no body 70, empty answer 80, AGENTS.md above the cwd 69, a ledger repointed at another snapshot 44 before the run (restored), a ledger changed before a ref:HEAD run 44, a lease in a fix cycle 64, a directory as <out> 64; hooks inert inside a persona (control without the marker writes); shipped manifest: ${_S12_SHIPPED}" "static"
+  row "SELF-12" "claude" "$_S12_CAP" "PASS" "resolve: tiers from the ladder, max_turns from the manifest, --model rung or id; trio opus/max (no record), fable/max (CC-02 PASS), opus/max (CC-02 FAIL); ladder-named plan-checker -> top; trio sonnet / lower rung / codex -> 64; lease + agent-team -> 64 naming at-resolve-pr / agent_teams (unenforced); unknown / path-shaped / bad CLI -> 64; manifest bad tier (lists the ladder tiers) / unknown key / not TOML -> 70, missing -> 69; corrupted ladder -> 70; persona_prompt: bodies by name (lease + agent-team too), unknown 64, no body 70, no manifest 69, bad entry 70, worker marker 45; read: claude -p Read,Grep,Glob (no Bash) dontAsk strict-mcp project+local opus/high turns 7, --brief in the prompt, denyWrite = the empty scratch cwd (gone after), the input file copied beside it, marker persona + no-push, planted key dropped; web: + WebFetch,WebSearch (no Bash) sonnet/high; neither gains Bash with the sandbox off; task:dirty read: the snapshot diff as input, AGENTS.md + .mcp.json named; codex (flags after the positionals): exec -s read-only, approval never, --skip-git-repo-check, env policy pinned, gpt-6-astra/high, -o <out>; trio argv fable/max with CC-02 PASS, opus/max without, --model sonnet refused before any CLI; noclaude: read falls back to codex (NOTE), trio/read-web/exec -> 69 naming the install fix, neither -> 69; exec --at task:dirty: detached snapshot worktree under the lease root, the brief (input) seen, the feature change seen, AGENTS.md from the integration branch, no .mcp.json, its write gone with the worktree, lease_merge from inside -> 45 (marker persona), no edit tool, denyWrite the lead git dir, AGENTS.md + .mcp.json named as content under review; no --at = ref:HEAD (integration commit, nothing named), --at ref:other (its change seen, AGENTS.md restored and named, reclaimed); bare dirty / task:dirty as input = --at task:dirty with the lease diff as input; task: + --at 64; persona_snapshot_diff writes the recorded snapshot's diff byte-equal to base..snapshot_sha after the lease tip moved past it (the tip's diff has the extra file, the written one not), unknown / fix cycle / dir / usage 64, marker 45; poison: read on the clean / dirty snapshot diffs (the dirty one's AGENTS.md + .mcp.json named as content under review) and exec at task:dirty report the finding, no MCP marker (control from the builder worktree: no findings + marker); ledger: a persona-forged user promotion approval -> dispatch 44 naming ops/leases.toml, gone, promote 42; a straggler's -> promote 44; the lead's own -> promoted; guard: marker / lease worktree 45, missing input / directory input / --at on read / --at without task:|ref: / unknown ref / dash ref / unknown task 64, no body 70, empty answer 80, AGENTS.md above the cwd 69, a ledger repointed at another snapshot 44 before the run (restored), a ledger changed before a ref:HEAD run 44, a lease in a fix cycle 64, a directory as <out> 64; hooks inert inside a persona (control without the marker writes); shipped manifest: ${_S12_SHIPPED}" "static"
 else
   row "SELF-12" "claude" "$_S12_CAP" "FAIL" "mismatch:$(printf '%s' "$_S12_FAIL" | cut -c1-900)" "static"
 fi
