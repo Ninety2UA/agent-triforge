@@ -419,7 +419,7 @@ print('install ' + e['name'] + ' (' + e['install'] + ')' + (', then ' + e['login
 _registry_binary() {
   local CLI=${1:?usage: _registry_binary <cli>} BIN=${2:-} RESOLVER=${3:-} ROW="" OUT=""
   if [ $# -lt 3 ]; then
-    ROW=$(cli_field "$CLI" binary resolver) || return 2
+    ROW=$(cli_field "$CLI" binary resolver 2>/dev/null) || return 2
     BIN=${ROW%%$'\t'*}
     RESOLVER=${ROW#*$'\t'}
   fi

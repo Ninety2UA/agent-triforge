@@ -62,7 +62,11 @@ is_triforge_root() { # is_triforge_root <dir>
   return 1
 }
 phys() { # phys <dir> — physical (symlink-free) path of an existing directory
-  (cd "$1" 2>/dev/null && pwd -P)
+  # The external pwd, not the builtin: sh and bash keep the letter case the
+  # caller typed, so on a case-insensitive filesystem a path spelled
+  # differently would miss the string comparisons below; getcwd returns the
+  # on-disk spelling, the same one git prints for the toplevel.
+  (cd "$1" 2>/dev/null && env pwd -P)
 }
 refuse() { # refuse <pointer-file> <reason>
   echo "locate-triforge: ERROR plugin-root pointer $1 refused: $2 — remove or fix it, then $SETUP_HINT" >&2
@@ -108,15 +112,22 @@ inside_project() { # inside_project <dir> — strictly below TOP or MAIN (never 
 }
 
 # 2. this copy's own location: <plugin>/skills/<skill>/scripts/locate-triforge.sh
-#    — skipped for a copy inside the project (a project-tier copy under
-#    <project>/.agents/skills/ must not let the project plant its own root)
+#    — skipped for a copy inside the project and for a copy whose would-be root
+#    is a hidden directory (<anything>/.agents, .claude, .codex, ...): a
+#    project-tier copy under <project>/.agents/skills/ must not let the project
+#    plant its own root, whatever the working directory is
 SELF_DIR=$(phys "$(dirname "$0")") || SELF_DIR=""
 if [ -n "$SELF_DIR" ]; then
   OWN_ROOT=$(dirname "$(dirname "$(dirname "$SELF_DIR")")")
-  if ! inside_project "$OWN_ROOT" && is_triforge_root "$OWN_ROOT"; then
-    phys "$OWN_ROOT"
-    exit 0
-  fi
+  case "${OWN_ROOT##*/}" in
+    .*) ;;
+    *)
+      if ! inside_project "$OWN_ROOT" && is_triforge_root "$OWN_ROOT"; then
+        phys "$OWN_ROOT"
+        exit 0
+      fi
+      ;;
+  esac
 fi
 
 # 3. the pointer file of the project (then, in a linked worktree, of the main

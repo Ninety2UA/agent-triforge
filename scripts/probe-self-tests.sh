@@ -629,7 +629,13 @@ for _S8_LOADER in return exit; do
   _s8_has '^Multi-agent framework ready\.$' || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-orientation-missing"
   _s8_has '^Commands: ' || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-commands-line-missing"
 done
-_S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines), prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40), and survives a failing helper loader"
+# no loader at all: CLAUDE_PLUGIN_ROOT unset (the hook run outside the plugin
+# host) — the same standing WARNING names the unset variable, rc 0, orientation
+_O=$( cd "$_S8/proj-degraded" && env -u CLAUDE_PLUGIN_ROOT HOME="$_S8/home" PATH="$_S8/bin:$PATH" S8_CLAUDE_VERSION="2.1.277" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ) || _S8_FAIL="$_S8_FAIL unset-root-rc-nonzero"
+_s8_sane "unset-root" "$_O"
+printf '%s\n' "$_O" | grep -Fq "WARNING: the Triforge helper did not load (CLAUDE_PLUGIN_ROOT is unset)" || _S8_FAIL="$_S8_FAIL unset-root-no-helper-notice"
+_s8_has '^Multi-agent framework ready\.$' || _S8_FAIL="$_S8_FAIL unset-root-orientation-missing"
+_S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines), prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40), and survives a failing or absent helper loader"
 if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
   row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and Commands line still printed; every run rc 0, no crash, no line starting with {" "static"
 else
@@ -1110,6 +1116,30 @@ ln -s vendor/x "$_S11_SL/.agents"
 ( cd "$_S11_SL" && export HOME="$_S11/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" && git add -f vendor .agents && git commit -qm symlink ) >/dev/null 2>&1 || _S11_FAIL="$_S11_FAIL c:symlink(fixture-git)"
 [ -f "$_S11_LOCATOR" ] && cp "$_S11_LOCATOR" "$_S11/tmp/loc/locate-triforge.sh" || true
 _s11_loc symlink "$_S11_SL" sh "$_S11/tmp/loc/locate-triforge.sh" 3 "symlink"
+# planted root, other spellings and working directories: the project-tier copy
+# invoked through a case-variant path, a pointer naming a case variant of
+# <project>/.agents (both only where the filesystem folds case), and the copy
+# run from a working directory outside its project — never the planted path
+mkdir -p "$_S11/proj/.agents/.claude-plugin" "$_S11/proj/.agents/scripts"
+printf '{"name": "agent-triforge"}\n' > "$_S11/proj/.agents/.claude-plugin/plugin.json"
+: > "$_S11/proj/.agents/scripts/invoke-external.sh"
+_S11_UP="$(dirname "$_S11_PLOC" | sed 's#/\.agents/skills/at-probe/scripts$##')"   # = $_S11/proj
+_S11_UPV="$(dirname "$_S11_UP")/$(basename "$_S11_UP" | tr '[:lower:]' '[:upper:]')"  # PROJ
+if [ "$_S11_UPV" != "$_S11_UP" ] && [ -d "$_S11_UPV" ]; then   # case-insensitive filesystem
+  for _sh in sh bash zsh; do
+    command -v "$_sh" >/dev/null 2>&1 || continue
+    _s11_loc "variant-path-$_sh" "$_S11/proj" "$_sh" "$_S11_UPV/.agents/skills/at-probe/scripts/locate-triforge.sh" 1 "at-setup"
+  done
+  printf '%s\n' "$_S11_UPV/.agents" > "$_S11_PTR"
+  for _sh in sh bash zsh; do
+    command -v "$_sh" >/dev/null 2>&1 || continue
+    _s11_loc "variant-pointer-$_sh" "$_S11/proj" "$_sh" "$_S11_PLOC" 3 "inside the project"
+  done
+  rm -f "$_S11_PTR"
+  unset _sh
+fi
+_s11_loc outside-cwd "$_S11/cwd" sh "$_S11_PLOC" 1 "at-setup"
+rm -rf "$_S11/proj/.agents/.claude-plugin" "$_S11/proj/.agents/scripts"
 # (d)
 cp "$_S11_LOADER" "$_S11/bare/invoke-external.sh"
 _S11_D_RC=0

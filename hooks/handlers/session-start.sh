@@ -404,8 +404,9 @@ fi
 # _cursor_bin, since the binary that answered may be an `agent`, not the name).
 # [ -t 0 ] at hook time is best-effort — hooks often run with stdin piped —
 # documented as such; the enrollment branch treats "no" as headless and enrolls
-# shipped defaults silently. With no helper loaded nothing is detected
-# (SS_HELPER_NOTICE says so).
+# shipped defaults silently. With no helper loaded nothing is detected, and
+# SS_HELPER_NOTICE says so — whether the loader failed or CLAUDE_PLUGIN_ROOT
+# named no loader at all (unset, or a root without scripts/invoke-external.sh).
 ROSTER_DETECTED=".claude/roster-detected.local.md"
 OPTIONAL_DETECTED_COUNT=0
 DETECTED_OPTIONAL=()
@@ -1012,5 +1013,10 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/invok
     SS_HELPER_ERR=$(printf '%s' "$SS_HELPER_TMP" | head -1 | cut -c1-160)
   fi
   SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh exited ${SS_HELPER_RC}: ${SS_HELPER_ERR}) — optional-CLI detection, enrollment and the roster pin check were skipped this session. Reinstall the plugin: claude plugin install agent-triforge@agent-triforge"
+else
+  # No loader to source: the plugin host did not export CLAUDE_PLUGIN_ROOT, or
+  # it names a tree without scripts/invoke-external.sh. Same standing WARNING,
+  # same degraded run (the orientation then reports 0 optional members).
+  SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (CLAUDE_PLUGIN_ROOT is ${CLAUDE_PLUGIN_ROOT:+set to '${CLAUDE_PLUGIN_ROOT}' but has no scripts/invoke-external.sh}${CLAUDE_PLUGIN_ROOT:-unset}) — optional-CLI detection, enrollment and the roster pin check were skipped this session. Run this hook through the installed plugin: claude plugin install agent-triforge@agent-triforge"
 fi
 _ss_run

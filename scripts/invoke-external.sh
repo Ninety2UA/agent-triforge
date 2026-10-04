@@ -102,7 +102,9 @@ elif [ -n "${ZSH_VERSION:-}" ]; then
 fi
 _TRIFORGE_PLUGIN_ROOT=""
 if _triforge_is_plugin_root "${CLAUDE_PLUGIN_ROOT:-}"; then
-  _TRIFORGE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT%/}"
+  # absolute, like the own-location branch below: a relative CLAUDE_PLUGIN_ROOT
+  # would otherwise hand builders a relative core.hooksPath (_adapter_env)
+  _TRIFORGE_PLUGIN_ROOT="$(cd "${CLAUDE_PLUGIN_ROOT}" && pwd)"
 elif [ -n "$_TRIFORGE_SELF_DIR" ] && _triforge_is_plugin_root "${_TRIFORGE_SELF_DIR}/.."; then
   _TRIFORGE_PLUGIN_ROOT="$(cd "${_TRIFORGE_SELF_DIR}/.." && pwd)"
 else
