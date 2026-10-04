@@ -9,6 +9,10 @@
 # Usage, from a skill script:
 #   ROOT=$("$(dirname "$0")/locate-triforge.sh") || exit $?
 #   . "$ROOT/scripts/invoke-external.sh"
+# Usage, from skill text (SKILL.md or a reference) — anchored to the skill's
+# own directory, so a project's scripts/locate-triforge.sh is never the one run
+# (validate-skills.sh KTD6 rejects a cwd-relative call):
+#   ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
 # stdout: the plugin root (physical path), one line, rc 0.
 # stderr: one line saying what was tried and naming the setup skill;
 #   rc 1  no root found (no candidate passed the test, no pointer file)

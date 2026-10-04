@@ -18,7 +18,7 @@ Launch ALL five lenses in a SINGLE message for maximum parallelism, then wait fo
 
 ```bash
 set -euo pipefail
-ROOT=$(bash scripts/locate-triforge.sh) || exit $?
+ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?
 source "$ROOT/scripts/invoke-external.sh"
 
 AGY_OUT="${TMPDIR:-/tmp}/antigravity_research_$$_$(date +%s).txt"

@@ -20,11 +20,11 @@ Invoked with one optional CLI name (`opencode`, `kimi` or `cursor`) to walk only
 
 ## Reach the helpers
 
-Paths are relative to this skill's directory.
+`$SKILL_DIR` is the directory this SKILL.md was loaded from — the harness shows that path when it loads the skill (the plugin install under Claude Code, the skill's path under Codex) — and every path in this skill is relative to it, never to the project; never run a project's own `scripts/locate-triforge.sh`.
 
 ```bash
 set -uo pipefail
-ROOT=$(bash scripts/locate-triforge.sh) || exit $?; source "$ROOT/scripts/invoke-external.sh"
+ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
 set +e   # sourcing folds the helper's errexit into this shell; the enrollment helpers return nonzero as control flow, so turn it back off
 ```
 

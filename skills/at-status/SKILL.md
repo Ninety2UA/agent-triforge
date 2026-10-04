@@ -20,7 +20,7 @@ Invoked with no arguments.
 - `ops/MEMORY.md` — recent decisions, for the blockers and context.
 - `git status` — uncommitted changes.
 - `ops/REVIEW_ANTIGRAVITY.md`, `ops/REVIEW_CODEX.md`, `ops/TEST_RESULTS.md` — a file that exists is a review the lead has not archived. It counts as processed when `ops/TASKS.md` carries a `## Review dispositions — Cycle N` block for its cycle; the wrap moves processed files to `ops/archive/<date>/`.
-- `ops/leases.toml`, when it exists — open leases. `lease_status` prints them once the helper is sourced: `ROOT=$(bash scripts/locate-triforge.sh) || exit $?; source "$ROOT/scripts/invoke-external.sh"`. The locator fails closed naming `at-setup`; in that case read the ledger file directly.
+- `ops/leases.toml`, when it exists — open leases. `lease_status` prints them once the helper is sourced: `ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"`. The locator fails closed naming `at-setup`; in that case read the ledger file directly. `$SKILL_DIR` is the directory this SKILL.md was loaded from — the harness shows that path when it loads the skill (the plugin install under Claude Code, the skill's path under Codex) — and every path in this skill is relative to it, never to the project; never run a project's own `scripts/locate-triforge.sh`.
 
 Phases are 0 codebase analysis, 1 plan (1a pre-plan research, 1b planning, 1.1 ambiguity resolution, 1.5 plan validation), 2 build, 3 parallel review, 4 process reviews, 5 test, 6 wrap. Completion is the `ops/.sprint-complete` sentinel, created only by the lead after the verification checklist passes.
 

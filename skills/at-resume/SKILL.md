@@ -13,7 +13,7 @@ metadata:
 
 Invoked with no arguments. The user's instructions outrank the saved plan: a user who says what to do next overrides "Next actions".
 
-This is the `session-continuity` skill's resume protocol (full text: `$ROOT/skills/session-continuity/SKILL.md`). The helper and the sibling skills are reached through `ROOT=$(bash scripts/locate-triforge.sh) || exit $?; source "$ROOT/scripts/invoke-external.sh"`; the locator fails closed naming `at-setup`.
+This is the `session-continuity` skill's resume protocol (full text: `$ROOT/skills/session-continuity/SKILL.md`). The helper and the sibling skills are reached through `ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"`; the locator fails closed naming `at-setup`. `$SKILL_DIR` is the directory this SKILL.md was loaded from — the harness shows that path when it loads the skill (the plugin install under Claude Code, the skill's path under Codex) — and every path in this skill is relative to it, never to the project; never run a project's own `scripts/locate-triforge.sh`.
 
 ## Step 1: Load state
 

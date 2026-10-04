@@ -1,6 +1,6 @@
 # Phase 3: the core lanes (always launched, in the background)
 
-Read `ops/TASKS.md` to determine the review scope (tasks marked `[R]`). The locator path is relative to this skill's directory.
+Read `ops/TASKS.md` to determine the review scope (tasks marked `[R]`). `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it).
 
 ## Contents
 
@@ -11,7 +11,7 @@ Read `ops/TASKS.md` to determine the review scope (tasks marked `[R]`). The loca
 
 ```bash
 set -euo pipefail
-ROOT=$(bash scripts/locate-triforge.sh) || exit $?; source "$ROOT/scripts/invoke-external.sh"
+ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
 
 # Fresh-cycle guard (prevents stale findings surviving a fix cycle). A reviewer
 # that returns findings as stdout (headless permission auto-deny) is promoted

@@ -8,7 +8,7 @@
 
    ```bash
    set -euo pipefail
-   ROOT=$(bash scripts/locate-triforge.sh) || exit $?; source "$ROOT/scripts/invoke-external.sh"
+   ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
 
    AGY_OUT="${TMPDIR:-/tmp}/antigravity_build_$$_$(date +%s).txt"
    CODEX_OUT="${TMPDIR:-/tmp}/codex_build_$$_$(date +%s).txt"
@@ -51,6 +51,6 @@
    fi
    ```
 
-   The locator path is relative to this skill's directory; a teammate working elsewhere prefixes it.
+   `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it); a teammate working elsewhere uses that same path, never one relative to its working directory.
 6. Quality gates: tests and lint must pass, and a pinned non-author reviewer must approve, before a task merges (self-review refused, AE3).
 7. `integration-verifier` runs between waves against the integration branch; the lead promotes to the main branch honoring the `[promotion]` gate.

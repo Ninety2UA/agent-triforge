@@ -4,7 +4,7 @@ The tester is resolved from `ops/roster.toml` via `dispatch_role tester` — the
 
 ```bash
 set -euo pipefail
-ROOT=$(bash scripts/locate-triforge.sh) || exit $?
+ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?
 source "$ROOT/scripts/invoke-external.sh"
 
 # TDD test writing via the tester role (15 min timeout for TDD cycles). If scope

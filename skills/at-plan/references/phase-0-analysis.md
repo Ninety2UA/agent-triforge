@@ -4,7 +4,7 @@ Skip Phase 0 when the codebase is unchanged since the last sprint, when the sess
 
 ```bash
 set -euo pipefail
-ROOT=$(bash scripts/locate-triforge.sh) || exit $?
+ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?
 source "$ROOT/scripts/invoke-external.sh"
 
 # Full codebase analysis (uses the codebase-analyst agent definition)

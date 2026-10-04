@@ -20,10 +20,10 @@ Invoked with `--full` (every lane plus `security-sentinel`, `performance-oracle`
 
 ## Preflight
 
-Paths are relative to this skill's directory. Core-trio liveness is gated here, never at session start (fast `--version` checks, cached per session; on failure it names the member and its fix):
+`$SKILL_DIR` is the directory this SKILL.md was loaded from — the harness shows that path when it loads the skill (the plugin install under Claude Code, the skill's path under Codex) — and every path in this skill is relative to it, never to the project; never run a project's own `scripts/locate-triforge.sh`. Core-trio liveness is gated here, never at session start (fast `--version` checks, cached per session; on failure it names the member and its fix):
 
 ```bash
-ROOT=$(bash scripts/locate-triforge.sh) || exit $?; source "$ROOT/scripts/invoke-external.sh"
+ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
 ensure_core_trio_live || exit 1
 ```
 

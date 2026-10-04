@@ -828,6 +828,7 @@ rm -rf "$_S9"
 #     nested     sub/AGENTS.md                                 -> 42 naming it
 #     override   AGENTS.override.md                            -> 42 naming it
 #     mcp        .mcp.json                                     -> 42 naming it
+#     commands   commands/x.md (4.0 ships none; the host auto-loads it) -> 42 naming it
 #     case       Hooks/handlers/x.sh (case variant)            -> 42 naming it
 #     symclaude  symlink .claude -> docs (bare protected name) -> 42 naming .claude
 #     symhooks   symlink hooks -> docs (bare protected name)   -> 42 naming hooks
@@ -916,6 +917,7 @@ _S10_RES=$(
   _s10_case "$_S10/fw" nested  'mkdir -p sub && echo x > sub/AGENTS.md'
   _s10_case "$_S10/fw" override 'echo x > AGENTS.override.md'
   _s10_case "$_S10/fw" mcp     'echo "{}" > .mcp.json'
+  _s10_case "$_S10/fw" commands 'mkdir -p commands && echo x > commands/x.md'
   _s10_case "$_S10/fw" case    'mkdir -p Hooks/handlers && echo x > Hooks/handlers/x.sh'
   _s10_case "$_S10/fw" symclaude 'ln -s docs .claude'
   _s10_case "$_S10/fw" symhooks  'ln -s docs hooks'
@@ -941,6 +943,7 @@ _s10_expect rename 42 'scripts/lease-git-hooks/pre-push'
 _s10_expect nested 42 'sub/AGENTS.md'
 _s10_expect override 42 'AGENTS.override.md'
 _s10_expect mcp 42 '.mcp.json'
+_s10_expect commands 42 'commands/x.md'
 _s10_expect case 42 'Hooks/handlers/x.sh'
 _s10_expect symclaude 42 ' .claude  (project_protected)'
 _s10_expect symhooks 42 ' hooks  (framework_protected)'
@@ -956,7 +959,7 @@ _s10_expect submodule 42 ' .claude  (project_protected)'
 _s10_expect submodule 42 ' .gitmodules  (project_protected)'
 _s10_expect corrupt 42 'classifier failed'
 if [ -z "$_S10_FAIL" ]; then
-  row "SELF-10" "claude" "protected paths: AGENTS.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "PASS" "every path on the AGENTS.md protected line classifies as protected (planted path caught); classifier flags bare .agents (project) + skills (framework), not .clauder/claudeish; fw fixture: roster.sh / git mv pre-push / sub/AGENTS.md / AGENTS.override.md / .mcp.json / Hooks/handlers/x.sh / symlinks .claude + hooks -> rc 42 naming the path; manifest renamed / deleted / unparseable -> still the Triforge checkout (roster.sh -> 42); docs-only -> promoted; user fixture: scripts/lib/util.sh -> promoted, ops/roster.toml / symlink .cursor / opencode.json -> 42, a nested repo at .claude + .gitmodules ignore=all -> 42 naming .claude and .gitmodules (--ignore-submodules=none); corrupted registry literal -> 42 naming the classifier error; per-case lease root + throwaway HOME" "static"
+  row "SELF-10" "claude" "protected paths: AGENTS.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "PASS" "every path on the AGENTS.md protected line classifies as protected (planted path caught); classifier flags bare .agents (project) + skills (framework), not .clauder/claudeish; fw fixture: roster.sh / git mv pre-push / sub/AGENTS.md / AGENTS.override.md / .mcp.json / commands/x.md / Hooks/handlers/x.sh / symlinks .claude + hooks -> rc 42 naming the path; manifest renamed / deleted / unparseable -> still the Triforge checkout (roster.sh -> 42); docs-only -> promoted; user fixture: scripts/lib/util.sh -> promoted, ops/roster.toml / symlink .cursor / opencode.json -> 42, a nested repo at .claude + .gitmodules ignore=all -> 42 naming .claude and .gitmodules (--ignore-submodules=none); corrupted registry literal -> 42 naming the classifier error; per-case lease root + throwaway HOME" "static"
 else
   row "SELF-10" "claude" "protected paths: AGENTS.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "FAIL" "mismatch:$(printf '%s' "$_S10_FAIL" | cut -c1-600)" "static"
 fi

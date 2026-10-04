@@ -23,7 +23,7 @@ This order must hold: knowledge compounding → shared files → rulings → def
 - **Ceremony (S16):** when `ops/TASKS.md` opens with `Ceremony: high-ceremony`, the session summary cites the plan-checker pass, the `--full` review and the integration-verifier result by name; a missing one is recorded as a gap in `ops/STATE.md`, never papered over.
 - **Archive, checklist, continuity:** which files move to `ops/archive/<today>/`, the verification checklist (`verification-before-completion`), what `ops/STATE.md` carries (`session-continuity`), the summary contents and the marker command: [archive, verify, state](references/archive-verify-state.md).
 - **Git trailers** on this sprint's commits (`Constraint`, `Rejected`, `Confidence`, `Scope-risk`, `Not-tested`) and when each is required: [commit trailers](references/commit-trailers.md).
-- `ops/.sprint-complete` is gitignored and never committed; outer tooling (`$ROOT/scripts/coordinate.sh`, where `ROOT=$(bash scripts/locate-triforge.sh)` relative to this skill's directory) detects sprint completion solely by its existence.
+- `ops/.sprint-complete` is gitignored and never committed; outer tooling (`$ROOT/scripts/coordinate.sh`, where `ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh")`) detects sprint completion solely by its existence. `$SKILL_DIR` is the directory this SKILL.md was loaded from — the harness shows that path when it loads the skill (the plugin install under Claude Code, the skill's path under Codex) — and every path in this skill is relative to it, never to the project; never run a project's own `scripts/locate-triforge.sh`.
 
 ## Output
 

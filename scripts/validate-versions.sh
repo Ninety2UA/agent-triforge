@@ -108,7 +108,27 @@
 #        "## <source>" heading must equal that source's <n> (rows above the
 #        first "## " heading, or under an undeclared one, fail) — a row can
 #        only disappear together with an edit to the declared totals.
+#      - Cited paths: every path a destination cell names must exist in the
+#        tree — a backticked token, or a bare word carrying a "/" or a file
+#        suffix (.md .sh .py .json .toml .yml .txt .html .js .css .local) or
+#        a leading dot — after dropping a trailing "§section", "#anchor" or
+#        ":line" and the surrounding punctuation; a {a,b} brace expands and a
+#        * glob must match at least one file. Skipped: a quoted phrase ("…"),
+#        a "§section" name, a token with $ < > = or a URL, and a destination
+#        that reads "dropped: …" (model can infer / stale) — prose, not paths.
 #      Prints a "skip:" line while the file is absent.
+#   8. Retired commands/ (U23) — the plugin checkout ships no commands/*.md
+#      (the 17 lead workflows are skills/at-*/), while "commands/" stays on
+#      FRAMEWORK_PROTECTED in scripts/lib/registry.sh: the plugin host
+#      auto-loads a plugin-root commands/ directory, so a lease that re-created
+#      a command would otherwise skip the promotion gate (rc 42).
+#   9. Lead-workflow surfaces — the at- prefix is spelled identically at its
+#      four code sites (LEAD_PREFIX in scripts/lib/skills-sync.py, the `at-*)`
+#      arm in scripts/probe-capabilities.sh, startswith("at-") in
+#      scripts/validate-skills.sh, the skills/at-* count in this script), and
+#      the names the session-start banner (hooks/handlers/session-start.sh)
+#      and skills/at-status/references/status-template.md enumerate equal the
+#      set of skills/at-*/ directories (the diff is printed).
 #
 # Exit codes: 0 every check passed; 1 at least one check failed; 2 bad flag.
 set -euo pipefail
@@ -769,6 +789,7 @@ INVENTORY_MD='docs/rule-inventory.md'
 if [ -f "$INVENTORY_MD" ]; then
   INVENTORY_RC=0
   VV_INVENTORY="$INVENTORY_MD" python3 - <<'PYEOF' || INVENTORY_RC=$?
+import glob
 import html
 import os
 import re
@@ -791,6 +812,40 @@ PLACEHOLDERS = {"tbd", "tba", "todo", "tobedetermined", "tobedecided", "unknown"
 TOTALS = re.compile(r"^\*\*Totals\.\*\*")
 TOTALS_COUNT = re.compile(r"^\*\*Totals\.\*\*\s+(\d+)\s+rows:")
 TOTALS_SOURCE = re.compile(r"\s*`([^`]+)`\s+(\d+)\s*")
+# Cited paths (see the header): what a destination cell names must exist.
+QUOTED = re.compile(r'"[^"]*"')               # a quoted phrase is prose
+BACKTICKED = re.compile(r"`([^`]+)`")
+SECTION = re.compile(r"§[^;,]*")               # "§Invocation via invoke-external.sh" is a heading, not a file
+PATH_SUFFIX = re.compile(r"\.(?:md|sh|py|json|toml|ya?ml|txt|html|js|css|local)$")
+BRACE = re.compile(r"^(.*)\{([^}]*)\}(.*)$")
+
+
+def cited_paths(cell):
+    """Path tokens a destination cell names: backticked, or bare with a '/', a
+    file suffix or a leading dot. Quoted phrases, §section names and tokens
+    with shell or markup characters are not paths."""
+    text = QUOTED.sub(" ", cell)
+    toks = BACKTICKED.findall(text)
+    toks.extend(re.split(r"[\s;,()]+", SECTION.sub(" ", BACKTICKED.sub(" ", text))))
+    out = []
+    for t in toks:
+        t = re.sub(r"[§#:].*$", "", t.strip().strip("()[]").rstrip(".,;:"))
+        if not t or re.search(r"\s", t) or any(ch in t for ch in "$<>=") or "://" in t:
+            continue
+        if "/" in t or PATH_SUFFIX.search(t) or (t.startswith(".") and len(t) > 1 and t[1].isalpha()):
+            out.append(t)
+    return out
+
+
+def path_exists(p):
+    m = BRACE.match(p)
+    for cand in ([m.group(1) + x + m.group(3) for x in m.group(2).split(",")] if m else [p]):
+        if any(ch in cand for ch in "*?["):
+            if not glob.glob(cand):
+                return False
+        elif not os.path.exists(cand):
+            return False
+    return True
 
 
 def cells(row):
@@ -817,6 +872,7 @@ def source_name(name):
 fails = []
 tables = 0
 rows = 0
+cited = set()       # distinct destination paths checked for existence
 source = None       # text of the nearest "## " heading above
 by_source = {}      # heading text -> data rows under it
 i = 0
@@ -850,6 +906,12 @@ while i < len(lines):
                 fails.append(path + ":" + str(i + 1) + ": row has no destination — " + lines[i].strip())
             elif normalized(shown) in PLACEHOLDERS and not TBD.search(shown):
                 fails.append(path + ":" + str(i + 1) + ": destination is a placeholder (" + shown + ") — " + lines[i].strip())
+            elif not normalized(shown).startswith("dropped"):
+                for tok in cited_paths(shown):
+                    cited.add(tok)
+                    if not path_exists(tok):
+                        fails.append(path + ":" + str(i + 1) + ": destination cites a path that does not exist in the tree: "
+                                     + tok + " — " + shown[:120])
         i += 1
 
 if tables == 0:
@@ -897,13 +959,111 @@ for line in fails:
     print("FAIL: rule inventory: " + line)
 if fails:
     sys.exit(1)
-print("ok:   rule inventory: " + path + " — " + str(rows) + " rows in " + str(tables) + " table(s), matching the declared Totals for each of " + str(len(declared)) + " sources; every row has a destination, no TBD cell")
+print("ok:   rule inventory: " + path + " — " + str(rows) + " rows in " + str(tables) + " table(s), matching the declared Totals for each of " + str(len(declared))
+      + " sources; every row has a destination, no TBD cell, every cited destination path exists (" + str(len(cited)) + " distinct)")
 PYEOF
   if [ "$INVENTORY_RC" -ne 0 ]; then
     FAILED_CHECKS=$((FAILED_CHECKS + 1))
   fi
 else
   echo "skip: rule-inventory completeness (no $INVENTORY_MD yet)"
+fi
+
+# --- 8. retired commands/ (U23) ----------------------------------------------
+# The 17 lead workflows are skills/at-*/; nothing ships under commands/. The
+# directory stays on FRAMEWORK_PROTECTED because the plugin host auto-loads a
+# plugin-root commands/, so a lease re-creating commands/*.md must hit the gate.
+COMMANDS_MD=$(ls commands/*.md 2>/dev/null | grep -c . || true)
+if [ "$COMMANDS_MD" -ne 0 ]; then
+  ls commands/*.md
+  fail "commands/: $COMMANDS_MD commands/*.md in the plugin checkout — 4.0 ships none (the lead workflows are skills/at-*/); the plugin host auto-loads commands/, so each stray file is a live command (see the paths above)"
+elif ! grep -qE '^[[:space:]]*"[^"]*",?[[:space:]]*.*"commands/",' scripts/lib/registry.sh && ! grep -qE '^[[:space:]]*"commands/",' scripts/lib/registry.sh; then
+  fail "commands/: \"commands/\" is not on FRAMEWORK_PROTECTED in scripts/lib/registry.sh — the directory ships empty but the plugin host auto-loads it, so a lease that re-creates commands/*.md must hit the promotion gate (rc 42)"
+else
+  ok "commands/: no commands/*.md in the plugin checkout (4.0 ships none); \"commands/\" stays on FRAMEWORK_PROTECTED (the plugin host auto-loads the directory)"
+fi
+
+# --- 9. lead-workflow surfaces (the at- prefix and the enumerated names) ------
+LEADWF_RC=0
+VV_SYNC="scripts/lib/skills-sync.py" VV_PROBE="scripts/probe-capabilities.sh" VV_VSKILLS="scripts/validate-skills.sh" \
+VV_SELF="scripts/validate-versions.sh" VV_HOOK="hooks/handlers/session-start.sh" \
+VV_STATUS="skills/at-status/references/status-template.md" python3 - <<'PYEOF' || LEADWF_RC=$?
+import os
+import re
+import sys
+
+fails = []
+oks = []
+
+
+def read(p):
+    try:
+        with open(p, encoding="utf-8") as fh:
+            return fh.read()
+    except OSError as exc:
+        fails.append(p + " unreadable: " + str(exc))
+        return ""
+
+
+# (a) the prefix literal, one per site; every site must be present and agree.
+SITES = (
+    ("VV_SYNC", re.compile(r'^LEAD_PREFIX = "([a-z0-9-]+)"', re.M), 'LEAD_PREFIX = "at-"'),
+    ("VV_PROBE", re.compile(r"^\s*([a-z0-9-]+)\*\)\s+SHIPPED_LEAD_WORKFLOWS=", re.M), "the `at-*) SHIPPED_LEAD_WORKFLOWS=…` case arm"),
+    ("VV_VSKILLS", re.compile(r'startswith\("([a-z0-9-]+)"\)\]', re.M), 'startswith("at-")'),
+    ("VV_SELF", re.compile(r"ls skills/([a-z0-9-]+)\*/SKILL\.md", re.M), "ls skills/at-*/SKILL.md"),
+)
+found = []
+for var, rx, what in SITES:
+    p = os.environ[var]
+    m = rx.search(read(p))
+    if m:
+        found.append((p, m.group(1)))
+    else:
+        fails.append(p + ": lead-workflow prefix site missing (" + what + ")")
+prefixes = set(v for _, v in found)
+if len(prefixes) > 1:
+    fails.append("lead-workflow prefix differs across sites: " + ", ".join(p + "=" + repr(v) for p, v in found))
+elif found and prefixes != {"at-"}:
+    fails.append("lead-workflow prefix is " + repr(found[0][1]) + " at every site, expected 'at-' (skills/at-*/)")
+elif len(found) == len(SITES):
+    oks.append("lead-workflow prefix 'at-' spelled identically at " + str(len(SITES)) + " sites (skills-sync.py LEAD_PREFIX, probe case arm, validate-skills startswith, validate-versions count)")
+
+# (b) the hand-listed names equal the skills/at-*/ directories.
+shipped = sorted(d for d in os.listdir("skills") if d.startswith("at-") and os.path.isfile(os.path.join("skills", d, "SKILL.md")))
+NAME = re.compile(r"(?<![\w-])at-[a-z0-9]+(?:-[a-z0-9]+)*(?![\w-])")
+
+
+def compare(where, label, names):
+    missing = sorted(set(shipped) - set(names))
+    extra = sorted(set(names) - set(shipped))
+    if missing or extra:
+        fails.append(where + ": " + label + " differ from skills/at-*/" + (" — missing " + ", ".join(missing) if missing else "")
+                     + (" — extra " + ", ".join(extra) if extra else ""))
+    else:
+        oks.append(where + " " + label + " enumerate exactly the " + str(len(shipped)) + " skills/at-*/ names")
+
+
+hook_path = os.environ["VV_HOOK"]
+banner = [ln for ln in read(hook_path).split("\n") if ln.lstrip().startswith("echo 'Lead workflows")]
+if len(banner) != 1:
+    fails.append(hook_path + ": expected exactly one \"echo 'Lead workflows …'\" banner line, found " + str(len(banner)))
+else:
+    compare(hook_path, "banner names", NAME.findall(banner[0].split("):", 1)[-1]))
+status_path = os.environ["VV_STATUS"]
+listed = re.findall(r"^- /(at-[a-z0-9]+(?:-[a-z0-9]+)*)\b", read(status_path), re.M)
+if not listed:
+    fails.append(status_path + ": no '- /at-<name>' lines (the Available commands block)")
+else:
+    compare(status_path, "Available commands", listed)
+
+for line in oks:
+    print("ok:   lead workflows: " + line)
+for line in fails:
+    print("FAIL: lead workflows: " + line)
+sys.exit(1 if fails else 0)
+PYEOF
+if [ "$LEADWF_RC" -ne 0 ]; then
+  FAILED_CHECKS=$((FAILED_CHECKS + 1))
 fi
 
 # --- summary -----------------------------------------------------------------

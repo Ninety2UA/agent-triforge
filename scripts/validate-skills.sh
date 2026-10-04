@@ -119,7 +119,11 @@
 #        lane arms (`codex)` under a `case "$CLI"`) are not touched   (new)
 #   KTD6 every skills/at-*/scripts/ holds every file of the shared locator
 #        source byte-identical — scripts/skill-locator/ (U5), or the plan's
-#        skills/_shared-locator/; a missing source prints a skip: line (new)
+#        skills/_shared-locator/; a missing source prints a skip: line. Every
+#        locate-triforge.sh call in an at- skill's SKILL.md or references/*.md
+#        (bash/sh/source/exec/env + path, $(path), . path) carries the
+#        skill-directory anchor $SKILL_DIR/ or ${SKILL_DIR}/: a cwd-relative
+#        call runs a project's own scripts/locate-triforge.sh (CWE-427)   (new)
 #   SREF `skills-ref validate <skill>` runs when the binary is on PATH (its
 #        verdict on disable-model-invocation / argument-hint is pending until
 #        then); otherwise a skip: line
@@ -985,11 +989,38 @@ def check_lead_branches(root):
 
 
 LOCATOR_SOURCES = ("scripts/skill-locator", "skills/_shared-locator")  # U5 ships the first; the plan's name is accepted too
+# A locator call in skill text: an interpreter, a $( substitution or a POSIX
+# `. ` source, then the path (an opening quote allowed) ending in the locator.
+LOCATOR_CALL = re.compile(r"(?:\b(?:bash|sh|zsh|source|exec|env)\s+|\$\(\s*|(?<!\S)\.\s+)(?P<path>[\"']?[^\s\"'`;)]*locate-triforge\.sh)")
+LOCATOR_ANCHOR = re.compile(r"\$\{?SKILL_DIR\}?/")
+
+
+def check_locator_calls(skill_dir):
+    """KTD6: every locate-triforge.sh call in SKILL.md or references/*.md is
+    anchored to the skill directory. To a shell a bare scripts/… path is
+    relative to the lead's working directory — the project — so a project
+    shipping its own scripts/locate-triforge.sh would get it executed."""
+    files = [os.path.join(skill_dir, "SKILL.md")]
+    refs_dir = os.path.join(skill_dir, "references")
+    if os.path.isdir(refs_dir):
+        for sub, dirs, names in os.walk(refs_dir):
+            files.extend(os.path.join(sub, f) for f in sorted(names) if f.endswith(".md") and not f.startswith("."))
+    for path in files:
+        for i, line in enumerate(read_text(path).split("\n")):
+            for m in LOCATOR_CALL.finditer(line):
+                call = m.group("path").lstrip("\"'")
+                if not LOCATOR_ANCHOR.search(call):
+                    new(path, "KTD6", "line " + str(i + 1) + ": cwd-relative locator call `" + call
+                        + "` — to a shell that path is the project's, not the skill's; write "
+                        + "ROOT=$(bash \"$SKILL_DIR/scripts/locate-triforge.sh\") || exit $?")
 
 
 def check_locators(root, skills_dir, dirs):
-    """KTD6: every skills/at-*/scripts/ carries the shared locator byte-identical."""
+    """KTD6: every skills/at-*/scripts/ carries the shared locator byte-identical,
+    and every call to it in skill text is anchored to the skill directory."""
     at_skills = [d for d in dirs if os.path.basename(d).startswith("at-")]
+    for d in at_skills:
+        check_locator_calls(d)
     source_rel = next((s for s in LOCATOR_SOURCES if os.path.isdir(os.path.join(root, s))), None)
     if source_rel is None:
         SKIPS.append("[KTD6] locator source not present (" + " or ".join(s + "/" for s in LOCATOR_SOURCES)

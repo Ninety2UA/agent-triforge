@@ -4,11 +4,11 @@ Follow `docs/agent-triforge.md` (under the plugin root) through ALL phases.
 
 ## Phase 0: codebase analysis
 
-Dispatch Antigravity with the `codebase-analyst` agent definition (skip if unnecessary). The locator path is relative to this skill's directory:
+Dispatch Antigravity with the `codebase-analyst` agent definition (skip if unnecessary). `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it):
 
 ```bash
 set -euo pipefail
-ROOT=$(bash scripts/locate-triforge.sh) || exit $?; source "$ROOT/scripts/invoke-external.sh"
+ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
 
 # Full codebase analysis (uses codebase-analyst agent definition)
 AGY_OUT="${TMPDIR:-/tmp}/antigravity_phase0_$$_$(date +%s).txt"
