@@ -1,6 +1,6 @@
 ---
-saved: 2026-10-04T12:00:00Z
-phase: 1a-review (merge leaf) + 1b-U23-building (overlapped)
+saved: 2026-10-04T12:50:00Z
+phase: 1a-PR-open + 1b-review (overlapped)
 wave: 0
 tasks:
   total: 29
@@ -30,7 +30,7 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 | PR | Units | Status |
 |---|---|---|
 | 0 | U21 validator prep + ladder source; U3 AGENTS.md + rule inventory; U22 session-start floor/stale-template; U4 removal test + pruning | **merged** — PR #13 squash b647f3b on release/4.0 (2026-10-03); review run 20261001-225426-98b630ed + final cross-review PASS |
-| 1a | U5 plugin-root resolver + locator; U26 CLI registry; U6 skill conformance validator | built on `feat/v4-phase-1a` @ 47d319e (U5 bf3a454, U6 5a7f5d0, U26 2d2aa41, fixtures protected d1f9192, validator simplify 2bfcbe5, hot-path simplify eb9a2a4, locator C17 47d319e). ce-code-review run `20261003-230605-bed69c8a` (`/tmp/compound-engineering-501/ce-code-review/20261003-230605-bed69c8a`): 6 structured returns + agent-native collected, 11 candidates, Codex peer ran but produced no usable output (idle-reaped; recorded, no retry); merge leaf → validator → report leaf next, then fix wave → PR → gates → final-diff Opus review → 5/5 merge |
+| 1a | U5 plugin-root resolver + locator; U26 CLI registry; U6 skill conformance validator | **PR #14 open** (https://github.com/Ninety2UA/agent-triforge/pull/14, head 0cc6869 → release/4.0): review run `20261003-230605-bed69c8a` verdict "Ready with fixes", all 6 confirmed findings + the agent-native gap applied in 0cc6869 (SELF gate 18 rows none FAIL); babysit armed (invocation 175d00a1…), final-diff Opus reviewer `final1a` running; merge on gates green + 5/5 |
 | 1b | U7 commands → at- skills; U24 split oversized skills; U23 remove commands/ | worktree `/Users/dbenger/projects/.mafw-wt-phase-1b`, branch `feat/v4-phase-1b` rebased onto 1a@47d319e: **U7 committed e66f07d** (17 at- skills), **U24 committed d733156** (routers + references, 120-char descriptions, at-* excluded from skills-sync + SELF-08b audit). **U23 in flight** as two workers (u23-code: commands/ removal, strict-by-default with a `--warn` escape, count vocabulary "27 skills"/"10 portable skills"/"17 lead workflows", SHIPPED_SKILLS at-* exclusion, hook banner, manifests, templates, AGENTS.md row, rule-inventory pointers, locator hint + 17 re-copies; u23-docs: README, docs/agent-triforge.md, docs/index.html). After both: lead commits, full gate, simplify, review, `git rebase --onto release/4.0 47d319e feat/v4-phase-1b` once 1a merges, PR → release/4.0 |
 | 2a | U29 capability/survival probe rows; U13 detached leases + lease_wait + lead exit; U11 worker marker | pending |
 | 2b | U9 [lead] table + resolution; U12 claude -p lane; U10 ledger lead CLI / reviewer class / approvals | pending |
