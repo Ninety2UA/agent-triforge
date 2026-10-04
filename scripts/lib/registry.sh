@@ -135,7 +135,7 @@ for item in raw.split(b'\0'):
 # when any other shipped file carries the phrase, a colon, and the rung list
 # again. The `opus` rung names Opus 5.5 with its Claude Code floor (D-037).
 # Callers print the text with triforge_ladder.
-TRIFORGE_MODEL_LADDER='Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (Opus 5.5, Claude Code ≥ 2.1.280) + `xhigh` → `opus`+`high` → `sonnet` (Sonnet 5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.'
+TRIFORGE_MODEL_LADDER='Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (Opus 5.5, Claude Code ≥ 2.1.280) + `xhigh` → `opus`+`high` → `sonnet` (Sonnet 5.5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.'
 
 # triforge_ladder — print the ladder text (one line, newline-terminated).
 triforge_ladder() {

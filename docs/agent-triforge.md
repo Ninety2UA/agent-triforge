@@ -1319,7 +1319,7 @@ These sections moved here from `.claude/CLAUDE.md` on 2026-10-01, when the root 
 Agent definitions in `agents/*.md` support these YAML frontmatter fields (verified against the official docs 2026-09-11):
 - `name`, `description` (required) — identity and when-to-use trigger
 - `model` — `fable`, `opus`, `sonnet`, `haiku`, a full model ID, or `inherit`. Shipped Triforge agents floor at `opus`; the lead applies the spawn-time `fable` override (see the ladder above)
-- `effort` — `low`, `medium`, `high`, `xhigh`, `max` (`max` supported on Fable 5.1, Opus 5.5, and Sonnet 5); honored on pinned-default models only from Claude Code 2.1.267 — hence the floor
+- `effort` — `low`, `medium`, `high`, `xhigh`, `max` (`max` supported on Fable 5.1, Opus 5.5, and Sonnet 5.5); honored on pinned-default models only from Claude Code 2.1.267 — hence the floor
 - `tools` — allowlist of tools (Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, etc.); `disallowedTools` is the deny-side counterpart
 - `maxTurns` — maximum agentic turns before the agent stops
 - `initialPrompt` — new: auto-submitted first turn when the agent runs as the main session via `--agent`

@@ -62,7 +62,9 @@
 #      sourced) — and the two function bodies must be identical apart from the
 #      function name.
 #   4. Scoped stale-pin sweep (KTD12) — patterns gpt-5.6-sol, grok-4.5,
-#      glm-5.2, kimi-k3, "Fable 5 →", "Opus 4.8", 2026-07-probe-record, and
+#      glm-5.2, kimi-k3, "Fable 5 →", "Opus 4.8", the pre-5.5 Sonnet rung
+#      ("Opus 5.5 → Sonnet 5" not followed by ".", "Sonnet 5)", the &nbsp; form),
+#      2026-07-probe-record, and
 #      "Gemini 3.1 Pro (High)" ONLY on lines that also say "default" (so the
 #      documented opt-in survives). Excluded: ops/research/, ops/decisions/,
 #      docs/plans/, docs/brainstorms/, ops/solutions/, docs/images/, .git/,
@@ -659,6 +661,10 @@ else
         -e 'kimi-k3' \
         -e 'Fable 5 →' \
         -e 'Opus 4\.8' \
+        -e 'Opus 5\.5 → Sonnet 5[^.]' \
+        -e 'Opus 5\.5 → Sonnet 5$' \
+        -e 'Sonnet 5)' \
+        -e 'Sonnet&nbsp;5[^.]' \
         -e '2026-07-probe-record' \
         . || true
       grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" 'Gemini 3\.1 Pro (High)' . | grep -i 'default' || true
