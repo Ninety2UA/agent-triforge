@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/common.sh — shared helpers: the host-marker scrub, the fail-closed timeout wrapper, output scrubbing, the KTD-9 failure classifier, the worker-marker guard (_lead_only), and the agy/codex listing + feature-detection helpers
+# scripts/lib/common.sh — shared helpers: the host-marker scrub, the fail-closed timeout wrapper, output scrubbing, the KTD-9 failure classifier, the lead-only guard (_lead_only: worker marker, lease root, lead host), and the agy/codex listing + feature-detection helpers
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh. Every function keeps the name and
@@ -128,11 +128,13 @@ _classify_invoke_failure() {
 # Any non-empty value counts as the marker. The hook handlers exit at once
 # under it, and every helper that carves, dispatches, collects, merges,
 # promotes or writes the ledger or the roster (lease.sh, roster.sh) starts with
-# _lead_only, which refuses under the marker or when the current directory is
-# inside a lease root. It lives here, loaded before both. It guards against
-# accidents (a worker that sources this library and runs lease_create in its
-# worktree); it is not a security boundary. A worker that unsets the variable
-# and leaves its worktree passes it, and what it then writes is caught only
+# _lead_only, which refuses under the marker, when the current directory is
+# inside a lease root, and (R38) when this shell is not the lead's: the lead
+# host check, _lead_host_gate in roster.sh. It lives here, loaded before both.
+# It guards against accidents (a worker that sources this library and runs
+# lease_create in its worktree; a session of the CLI that is not the lead); it
+# is not a security boundary. A worker that unsets the variable and leaves its
+# worktree passes the first two checks, and what it then writes is caught only
 # after the fact, by the integrity check and the snapshot-only merge.
 _RC_LEAD_ONLY=45
 
@@ -141,8 +143,15 @@ _RC_LEAD_ONLY=45
 # by it. Keep the bytes.
 _LEAD_GITCONFIG_SIGNATURE='# Triforge trusted git config'
 
-# _lead_only <helper> — 0 in a lead context; otherwise one stderr line naming
-# the reason and rc _RC_LEAD_ONLY.
+# _lead_only <helper> [--any-host] — 0 in a lead context; otherwise one stderr
+# line naming the reason and rc _RC_LEAD_ONLY. In order: the worker marker, the
+# lease root, then the lead host check (_lead_host_gate, roster.sh): this shell
+# runs under [lead].cli, or a person runs it from a terminal, or the SELF
+# harness names the lead. --any-host skips only that last check: the lead
+# switch (roster_write_lead) runs from either lead CLI, and U10's approval
+# helper records where it ran (_lead_origin) instead of refusing. The marker
+# and the lease root come first, so neither host markers nor the SELF seam
+# (TRIFORGE_TEST_BUILDER + TRIFORGE_TEST_LEAD) ever let a worker through.
 _lead_only() {
   local ROOT
   if [ -n "${TRIFORGE_LEASE_WORKER:-}" ]; then
@@ -153,7 +162,10 @@ _lead_only() {
     echo "${1}: REFUSED — a lead-only helper, called from inside the lease root ${ROOT} (a lease worktree); run it from the lead's checkout (KTD9, rc ${_RC_LEAD_ONLY})" >&2
     return "$_RC_LEAD_ONLY"
   fi
-  return 0
+  if [ "${2:-}" = --any-host ]; then
+    return 0
+  fi
+  _lead_host_gate "$1"
 }
 
 # _lease_root_above — print the lease root the current directory is inside,

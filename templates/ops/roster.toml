@@ -84,6 +84,20 @@ model = "Gemini 3.8 Flash (High)"   # (High) suffix = agy effort control (see he
 effort = "high"
 fallbacks = ["claude"]
 
+# --- Lead --------------------------------------------------------------------
+# [lead] names the CLI that leads this checkout. The lead plans the work, runs
+# the leases, reviews and merges. Claude Code or Codex can lead; with no [lead]
+# table, Claude Code leads. The lease and roster helpers refuse to run under
+# the other CLI. Switch from either CLI with `at-setup lead` (its writer is
+# roster_write_lead). The switch refuses while leases are open; --force hands
+# them to the new lead without spending a requeue.
+#
+# To make Codex the lead, uncomment:
+# [lead]
+# cli = "codex"          # claude | codex
+# model = "gpt-6-astra"  # left out: the CLI's shipped pin (claude: your session's model)
+# effort = "xhigh"       # left out: xhigh for codex, your session's setting for claude
+
 # --- Optional members --------------------------------------------------------
 # Optional members (opencode, kimi, cursor) are enrolled on first detection —
 # the session-start enrollment trigger or at-setup writes their entries. They

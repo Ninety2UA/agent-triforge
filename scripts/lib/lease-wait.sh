@@ -886,19 +886,6 @@ HEARTBEAT_ROWS
   return 0
 }
 
-# _lease_lead_host — the CLI leading this session, for its registry
-# lead.wait_budget_s, from the host markers U29 recorded: CODEX_THREAD_ID or
-# CODEX_CI in a Codex lead's tool shell (CDX-15), else claude (CLAUDECODE=1
-# under Claude Code, CC-11, and the default with no markers). U9's lead
-# resolution replaces it.
-_lease_lead_host() {
-  if [ -n "${CODEX_THREAD_ID:-}" ] || [ -n "${CODEX_CI:-}" ]; then
-    printf 'codex\n'
-  else
-    printf 'claude\n'
-  fi
-}
-
 # _lease_ledger_check — rc 0 when the ledger exists and parses; else rc 1 and
 # the problem on stdout.
 _lease_ledger_check() {
@@ -1051,8 +1038,9 @@ ALL_IN_EOF
 # faster. Each poll reads the ledger once (_lease_states_read): the states it
 # returns on and the rows the next pass sweeps. The budget never exceeds the
 # lead's lead.wait_budget_s from the CLI registry (claude 600, codex 900; the
-# lead from _lease_lead_host until U9 lands; TRIFORGE_LEAD_WAIT_BUDGET_S may
-# only lower it): the default and the cap are that value minus a quarter of
+# lead is [lead] in the roster, read through lead_field, and _lead_only has
+# already checked this shell runs it; TRIFORGE_LEAD_WAIT_BUDGET_S may only
+# lower it): the default and the cap are that value minus a quarter of
 # it, at most 15 s, so the call returns inside the lead's shell-tool limit.
 # The budget counts from the call's start, and the polling stops a second
 # before it, so the closing integrity check fits inside it too. No action
@@ -1079,7 +1067,7 @@ ALL_IN_EOF
 # named lease that already left building returns at once.
 lease_wait() {
   _lead_only lease_wait || return $?
-  local BUDGET="" NAMES="" ERR WAIT_CLI CAP HEADROOM EFF READ WATCH ROW START_MS STOP_MS CHECK_MS REM RC=0
+  local BUDGET="" NAMES="" ERR WAIT_LEAD LF TAB CAP HEADROOM EFF READ WATCH ROW START_MS STOP_MS CHECK_MS REM RC=0
   local T UNVER="" DEFER=0
   # The budget counts from the call's start, so the checks before the wait
   # are inside it too.
@@ -1121,8 +1109,15 @@ lease_wait() {
   fi
   _lead_integrity_check lease_wait || { RC=$?; _lease_wait_close "$NAMES"; return "$RC"; }
   _lease_root_notice lease_wait
-  WAIT_CLI=$(_lease_lead_host)
-  CAP=$(cli_field "$WAIT_CLI" lead.wait_budget_s 2>/dev/null) || CAP=""
+  # The lead's shell-tool limit is a registry field of the lead (KTD1: read the
+  # field, never the lead's name); one that can't be read keeps the shorter
+  # limit, Claude's 600 s.
+  TAB=$(printf '\t')
+  LF=$(lead_field name lead.wait_budget_s 2>/dev/null) || LF=""
+  case "$LF" in
+    *"$TAB"*) WAIT_LEAD=${LF%%"$TAB"*}; CAP=${LF#*"$TAB"} ;;
+    *) WAIT_LEAD="the"; CAP="" ;;
+  esac
   case "$CAP" in ''|*[!0-9]*|0*) CAP=600 ;; esac
   case "${TRIFORGE_LEAD_WAIT_BUDGET_S:-}" in
     ''|*[!0-9]*|0*) ;;
@@ -1136,7 +1131,7 @@ lease_wait() {
   if [ -z "$BUDGET" ]; then
     BUDGET=$EFF
   elif [ "$BUDGET" -gt "$EFF" ]; then
-    echo "lease_wait: budget capped at ${EFF}s (${WAIT_CLI} lead: wait_budget_s ${CAP}s, the wait returns ${HEADROOM}s inside it)" >&2
+    echo "lease_wait: budget capped at ${EFF}s (${WAIT_LEAD} lead: wait_budget_s ${CAP}s, the wait returns ${HEADROOM}s inside it)" >&2
     BUDGET=$EFF
   fi
   READ=$(_lease_states_read "$NAMES" 2>/dev/null) || READ=""

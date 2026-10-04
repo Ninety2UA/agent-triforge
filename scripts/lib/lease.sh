@@ -1600,7 +1600,8 @@ print(" ".join(bad[:10]) + (" ..." if len(bad) > 10 else ""))
 # lease_create <task_id> <role> — resolve the builder from the roster
 # (resolve_role), carve the worktree + lease branch, provision skills (the
 # paths that wrote are recorded as `provisioned`, KTD9), write the leased
-# row. Echoes task_id on success so callers can chain.
+# row, with lead_via: where the lead ran it (lead-session, tty or test, from
+# _lead_only's host check). Echoes task_id on success so callers can chain.
 lease_create() {
   _lead_only lease_create || return $?
   local TASK_ID=${1:?usage: lease_create <task_id> <role>}
@@ -1644,7 +1645,7 @@ CREATE_ROW_EOF
     state=leased worktree="$WT" branch="lease/${TASK_ID}" \
     pid=0 output_file="" created="$NOW" heartbeat_deadline=0 \
     requeue_count=0 review_cycle=0 pinned_reviewer="" previous_builder="" reviewer="" merge_commit="" reason="" \
-    "${_CARVE_FIELDS[@]}" \
+    lead_via="${_LEAD_VIA:-}" "${_CARVE_FIELDS[@]}" \
     || return 1
   # First lease in this checkout: the lead's verified state becomes the
   # integrity baseline before any builder runs. With no integration branch
@@ -1897,6 +1898,32 @@ lease_redispatch() {
   lease_dispatch "$TASK_ID" "$PROMPT" "$TIMEOUT"
 }
 
+# _lease_recorded_root <task_id> — print the row's recorded lease_root when it
+# differs from this shell's lease root and is still a lease root: an absolute,
+# canonical path (no traversal, no symlink component, not /) whose
+# lead/gitconfig starts with _LEAD_GITCONFIG_SIGNATURE. rc 1 otherwise (no
+# record, the same root, or not a lease root), and lease_reclaim keeps its own.
+_lease_recorded_root() {
+  local REC H=""
+  REC=$(_ledger_get "$1" lease_root 2>/dev/null) || return 1
+  case "$REC" in
+    ""|/) return 1 ;;
+    /*) ;;
+    *) return 1 ;;
+  esac
+  case "${REC}/" in *"/../"*|*"/./"*) return 1 ;; esac
+  if [ "$REC" = "$_LEASE_ROOT" ] || [ "$(_lease_realpath "$REC")" != "$REC" ]; then
+    return 1
+  fi
+  if [ -f "${REC}/lead/gitconfig" ]; then
+    IFS= read -r H 2>/dev/null < "${REC}/lead/gitconfig" || true
+  fi
+  case "$H" in
+    "${_LEAD_GITCONFIG_SIGNATURE}"*) printf '%s\n' "$REC" ;;
+    *) return 1 ;;
+  esac
+}
+
 # Refusal helper for lease_reclaim: loud, escalates the row, deletes NOTHING.
 # Returns 0 so callers can '\; return 1' without tripping errexit.
 _lease_refuse_prune() {
@@ -1915,6 +1942,11 @@ _lease_refuse_prune() {
 #      canonical-vs-stored difference means a symlink or tampering
 #   3. REQUIRE the canonical path sits strictly beneath the canonical root
 #   4. REQUIRE git worktree list --porcelain knows the path
+# The root is this shell's lease root, or the row's recorded lease_root when
+# that differs and still holds a lease root's lead/gitconfig: a lease created
+# under one lead is reclaimed under the other, whose shell may resolve another
+# TMPDIR (_lease_recorded_root). Step 4 still has to pass, so a forged
+# lease_root reaches only a worktree git already lists.
 # ANY mismatch: nothing is deleted, state=escalated with reason "lease
 # identity mismatch", nonzero return. A clean pass prunes worktree + branch,
 # then transitions per the current state:
@@ -1924,11 +1956,15 @@ _lease_refuse_prune() {
 lease_reclaim() {
   _lead_only lease_reclaim || return $?
   local TASK_ID=${1:?usage: lease_reclaim <task_id>}
-  local ROOT WT_STORED WT_CANON STATE RQ
+  local ROOT REC WT_STORED WT_CANON STATE RQ
   _lease_ctx || return 1
   ROOT=$_LEASE_ROOT
   WT_STORED=$(_ledger_get "$TASK_ID" worktree) || { echo "lease_reclaim: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
   STATE=$(_ledger_get "$TASK_ID" state)
+  if REC=$(_lease_recorded_root "$TASK_ID"); then
+    echo "lease_reclaim: NOTE ${TASK_ID} was created under the lease root $(printf '%s' "$REC" | LC_ALL=C tr -d '\000-\037\177') (this shell resolves ${ROOT}); checking it against the recorded root" >&2
+    ROOT=$REC
+  fi
 
   if [ -z "$WT_STORED" ]; then
     _lease_refuse_prune "$TASK_ID" "$WT_STORED" "empty worktree path"; return 1
