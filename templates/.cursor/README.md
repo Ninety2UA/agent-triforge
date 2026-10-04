@@ -49,7 +49,7 @@ passes through untouched. The documented bracket form `grok-4.6[effort=xhigh]`
 was **rejected** headless on build 2026.09.10 (`Cannot use this model`, probe
 CUR-10) — an open watch; Triforge never emits it. Override with `CURSOR_MODEL`
 (roster) — the leading alternative is `composer-2.5` (Composer 2.5).
-`cursor-agent --list-models` feeds the `/setup` enrollment options and
+`cursor-agent --list-models` feeds the `at-setup` enrollment options and
 validates the pinned default.
 
 ## Reviewer read-only is `--mode plan` — NOT `--sandbox` (CUR-07 / CUR-08)

@@ -131,12 +131,19 @@ _rwt() { # _rwt <seconds> <cmd...>
 RUN_TS=$(date -u '+%Y-%m-%d %H:%M UTC')
 RUN_DATE=$(date -u '+%Y-%m-%d')
 
-# Shipped skills: every skills/<name>/SKILL.md in the plugin checkout. The
-# discovery rows (AGY-14, SELF-06) require ALL of these names to surface.
+# Shipped portable skills: every skills/<name>/SKILL.md in the plugin checkout
+# except the at-* lead workflows, which no lane copies into .agents/skills/ or
+# a worktree (KTD12). The discovery rows (AGY-14, SELF-06) and the provisioning
+# rows (SELF-08b, SELF-11) require exactly these names.
 SHIPPED_SKILLS=""
+SHIPPED_LEAD_WORKFLOWS=""
 for d in "$REPO_ROOT"/skills/*/; do
   [ -f "${d}SKILL.md" ] || continue
-  SHIPPED_SKILLS="$SHIPPED_SKILLS $(basename "$d")"
+  name=$(basename "$d")
+  case "$name" in
+    at-*) SHIPPED_LEAD_WORKFLOWS="$SHIPPED_LEAD_WORKFLOWS $name" ;;   # lead workflows: never delivered (KTD12)
+    *)    SHIPPED_SKILLS="$SHIPPED_SKILLS $name" ;;
+  esac
 done
 SHIPPED_SKILLS=${SHIPPED_SKILLS# }
 _count_words() { printf '%s\n' "$#"; }
@@ -1698,7 +1705,7 @@ COUNTER_MISMATCH=0
   echo "- **CDX-03/CDX-05/CDX-06/CDX-07/CDX-08** → the \`gpt-6-astra\` pin (D-021): READY, \`--output-schema\` verdicts, max/ultra acceptance (commented opt-ins only where accepted), and the read-only reviewer sandbox on Astra (the ADR open watch)."
   echo "- **CDX-04** → hooks under \`codex exec\` with \`--dangerously-bypass-hook-trust\` in an untrusted fixture (\`templates/.codex/hooks.json\` ships on the strength of this row)."
   echo "- **CDX-09/CDX-09b** → \`\$<skill>\` expansion under \`exec\` from the fixture and from a linked worktree under TMPDIR — the lease lane's shape (linked worktrees inherit root trust, D-026)."
-  echo "- **CDX-10** → the project trust gate: AGENTS.md marker visibility with/without a \`[projects.\"<abs>\"]\` trust entry; INFO when no entry exists (R18: the sprint writes no user-tier setting; \`/setup\` reports trust without writing it)."
+  echo "- **CDX-10** → the project trust gate: AGENTS.md marker visibility with/without a \`[projects.\"<abs>\"]\` trust entry; INFO when no entry exists (R18: the sprint writes no user-tier setting; at-setup reports trust without writing it)."
   echo "- **CDX-11/CDX-11b** → \`.codex/triforge-agents.toml\` is the deployed name (D-026/KTD5): no \"malformed agent role\" sweep warning; 11b is the control that the old \`.codex/agents/agents.toml\` location still triggers it."
   echo "- **OC-02/OC-04** → the \`glm-5.3\` default (D-023) + enrollment-time validation against the live list."
   echo "- **OC-05** → roster effort maps to \`--variant\` for the OpenCode adapter."

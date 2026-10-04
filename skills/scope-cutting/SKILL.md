@@ -1,8 +1,8 @@
 ---
 name: scope-cutting
-description: "Priority-ordered scope reduction: classify every task by value type, cut speculative work first and unblocking work never, and move cuts to a backlog with a reason. Use when a sprint has more than 15 tasks, when review cycle 3 still has P2 issues, when the context window is near its limit, or when the user asks for faster delivery. Not for choosing which review findings to fix; that is iterative-refinement."
+description: "Use when a sprint exceeds 15 tasks, cycle 3 still has P2 findings, or the user wants faster delivery: cut by value type."
 metadata:
-  triforge-consumer: "Claude (lead)"
+  triforge-consumer: "the lead"
   triforge-phase: "1.5 (plan validation); mid-sprint"
   version: "3.3.0"
 ---

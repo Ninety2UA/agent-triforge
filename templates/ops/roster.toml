@@ -21,8 +21,8 @@
 # each chain must terminate at a core-trio member (claude, antigravity,
 # codex), and the core trio cannot be disabled.
 #
-# Guided editing: /setup walks member enrollment AND role assignment (accept
-# the shipped defaults or customize per role) — `/setup roles` jumps straight
+# Guided editing: at-setup walks member enrollment AND role assignment (accept
+# the shipped defaults or customize per role) — `at-setup roles` jumps straight
 # to the role step. Guided role writes go through roster_write_role, which
 # enforces the load rules above before every write; hand-editing this file
 # stays valid too.
@@ -82,7 +82,7 @@ fallbacks = ["claude"]
 
 # --- Optional members --------------------------------------------------------
 # Optional members (opencode, kimi, cursor) are enrolled on first detection —
-# the session-start enrollment trigger or /setup writes their entries. They
+# the session-start enrollment trigger or at-setup writes their entries. They
 # must NOT appear as live entries in this shipped template: an existing
 # [members.<cli>] entry is exactly what suppresses the enrollment ask, and a
 # decline persists as `enabled = false` (disabled = absent everywhere — the

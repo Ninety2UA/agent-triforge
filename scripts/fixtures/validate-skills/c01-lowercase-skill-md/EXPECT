@@ -1,3 +1,3 @@
 check: C01
-default: warn
+under-warn: warning
 message: no SKILL.md

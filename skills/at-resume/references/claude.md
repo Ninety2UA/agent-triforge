@@ -1,0 +1,6 @@
+# Under Claude Code
+
+- Invocation: `/at-resume`. The session-start hook prints "Previous session state found (ops/STATE.md)" with the resume hint, and, with an active ledger, "run lease_heartbeat_check (or the resume skill) to reclaim orphans".
+- Sub-agents for a resumed phase: the Agent tool, naming the task's persona, with `model` and effort pinned on every spawn. The never-downgrade trio (security-sentinel, plan-checker, findings-synthesizer) and team-lead run as `fable` at `max` when the newest `ops/research/*-probe-record.md` row CC-02 shows Fable PASS on this host, else `opus` at `max`; the other personas follow the downgrade ladder (`triforge_ladder` prints the one definition). Wait for each sub-agent before merging; one spawn round, no spawn-of-spawn.
+- Completion gate when the resumed sprint runs to its end: the `/goal` line on the sprint's Definition of Done remains the Claude-lead gate; `ops/.sprint-complete` is the authoritative signal and is created only after the verification checklist passes.
+- A resume after context compaction finds the pre-compaction hook's reduced checkpoint in `ops/STATE.md` (phase and task counts, no verification baseline): treat the baseline as "not verified" and re-run `verification_command`.

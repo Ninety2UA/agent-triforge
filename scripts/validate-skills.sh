@@ -4,32 +4,35 @@
 # the KTD1 lead-name-branch gate; KTD15 — structural assertions only).
 #
 # Usage:
-#   bash scripts/validate-skills.sh [--strict] [skills-dir]
-#   bash scripts/validate-skills.sh [--strict] --fixture <dir>
+#   bash scripts/validate-skills.sh [--warn] [skills-dir]
+#   bash scripts/validate-skills.sh [--warn] --fixture <dir>
 #   bash scripts/validate-skills.sh --self-test
 #
 #   skills-dir   Directory holding <name>/SKILL.md entries. Defaults to the
 #                repo's skills/. A positional override validates that tree's
 #                skills only (the per-at-skill locator check needs the shipped
 #                tree and prints a skip: line).
-#   --strict     Every warning is an error. Today's default keeps the new rules
-#                (C1, C3, C8–C18, C20–C24, C26, KTD1, KTD6 and the new parts of
-#                C4, C9, C14, C21) as warnings; U23 flips the default.
+#   --warn       The relaxed run: the newer rules (C1, C3, C8–C18, C20–C24,
+#                C26, KTD1, KTD6 and the newer parts of C4, C9, C14, C21) print
+#                as warnings and do not fail the run. Without it every finding
+#                is an error — the default since U23. --strict is accepted and
+#                changes nothing.
 #   --fixture    Treat <dir> as a scratch repo root: skills at <dir>/skills,
-#                shell files at <dir>/scripts and <dir>/hooks, command and
-#                agent files at <dir>/commands and <dir>/agents. Zero skills is
-#                allowed there (a fixture may hold only shell files).
+#                shell files at <dir>/scripts and <dir>/hooks, agent files at
+#                <dir>/agents. Zero skills is allowed there (a fixture may hold
+#                only shell files).
 #   --self-test  Run every fixture under scripts/fixtures/validate-skills/
-#                (each holds an EXPECT file: check, default mode, message
-#                substring) in both modes and assert the outcome, plus two
-#                computed cases (the C10 description-set budget and the C15
-#                token guard). The cases run in-process; the conforming
-#                fixture's strict run also goes through this wrapper, so the
-#                flag parsing and the exit code are exercised end to end.
-#                Exit 0 when every fixture behaves as named.
+#                (each holds an EXPECT file: check, the rule's severity under
+#                --warn, message substring) in both modes — default and --warn —
+#                and assert the outcome, plus two computed cases (the C10
+#                description-set budget and the C15 token guard). The cases run
+#                in-process; the conforming fixture's runs also go through this
+#                wrapper (no flag, --warn and the --strict no-op), so the flag
+#                parsing and the exit code are exercised end to end. Exit 0
+#                when every fixture behaves as named.
 #
 # The checks (ids follow ops/research/2026-09-27-repo-mining.md §3; "new" means
-# WARN by default and FAIL under --strict; the rest FAIL in both modes):
+# a warning under --warn and an error otherwise; the rest FAIL in both modes):
 #   C1   exactly one SKILL.md (uppercase) per skill directory          (new)
 #   C2   frontmatter opens and closes with ---, top level is a mapping, no
 #        duplicate keys, every line parseable
@@ -103,8 +106,8 @@
 #        mcp, cli; icon paths exist; policy.allow_implicit_invocation: false
 #        ⇔ SKILL.md disable-model-invocation: true                     (new)
 #   C25  --self-test: one fixture per rule under scripts/fixtures/validate-skills/
-#   C26  C3 and C17 over commands/*.md ($N never; $ARGUMENTS allowed) and
-#        agents/*.md ($ARGUMENTS and $N)                               (new)
+#   C26  C3 and C17 over agents/*.md ($ARGUMENTS and $N: an agent takes no
+#        interpolation)                                                 (new)
 #   KTD1 lead-name-branch gate over scripts/**/*.sh, scripts/lease-git-hooks/*,
 #        hooks/**/*.sh and skills/*/scripts/* — except scripts/lib/registry.sh,
 #        scripts/lib/roster.sh, this file and scripts/fixtures/. A lead token
@@ -116,7 +119,11 @@
 #        lane arms (`codex)` under a `case "$CLI"`) are not touched   (new)
 #   KTD6 every skills/at-*/scripts/ holds every file of the shared locator
 #        source byte-identical — scripts/skill-locator/ (U5), or the plan's
-#        skills/_shared-locator/; a missing source prints a skip: line (new)
+#        skills/_shared-locator/; a missing source prints a skip: line. Every
+#        locate-triforge.sh call in an at- skill's SKILL.md or references/*.md
+#        (bash/sh/source/exec/env + path, $(path), . path) carries the
+#        skill-directory anchor $SKILL_DIR/ or ${SKILL_DIR}/: a cwd-relative
+#        call runs a project's own scripts/locate-triforge.sh (CWE-427)   (new)
 #   SREF `skills-ref validate <skill>` runs when the binary is on PATH (its
 #        verdict on disable-model-invocation / argument-hint is pending until
 #        then); otherwise a skip: line
@@ -125,8 +132,8 @@
 # reason" per warning, "file: note: [ID] reason" per advisory note, "skip:"
 # lines for checks that could not run, then the summary:
 #   validate-skills: N skills OK
-#   validate-skills: N skills OK (W warnings; --strict makes them errors)
-#   validate-skills: N skills OK (strict)
+#   validate-skills: N skills OK (--warn)
+#   validate-skills: N skills OK (--warn: W warning(s) the default run fails on)
 #   validate-skills: FAIL (V violation(s) in K of N skills[ and M other file(s)])
 # Exit codes: 0 pass; 1 at least one violation; 2 usage error / no SKILL.md
 # found outside fixture mode.
@@ -134,14 +141,15 @@ set -euo pipefail
 ORIG_PWD="$PWD"
 cd "$(dirname "$0")/.."
 
-STRICT=0
+STRICT=1
 FIXTURE=""
 SELF_TEST=0
 SKILLS_DIR=""
 usage() { sed -n '2,/^set -euo pipefail/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --strict)    STRICT=1 ;;
+    --strict)    STRICT=1 ;;   # the default since U23; kept so older call sites still parse
+    --warn)      STRICT=0 ;;
     --self-test) SELF_TEST=1 ;;
     --fixture)
       shift
@@ -151,7 +159,7 @@ while [ $# -gt 0 ]; do
       ;;
     -h|--help) usage; exit 0 ;;
     -*)
-      echo "validate-skills: unknown flag '$1' (accepted: --strict --fixture <dir> --self-test)" >&2
+      echo "validate-skills: unknown flag '$1' (accepted: --warn --strict --fixture <dir> --self-test)" >&2
       exit 2 ;;
     *) SKILLS_DIR="$1" ;;
   esac
@@ -218,7 +226,7 @@ NOTE_LINES = 500
 NOTE_CHARS = 20000  # ≈ 5,000 tokens
 # Shrink-only allowlist for C15: a listed skill may stay over 8,000 bytes while
 # it is at or under its recorded ceiling (the size when the cap landed).
-OVER_BUDGET = {"wave-orchestration": 27410, "verification-before-completion": 9691}
+OVER_BUDGET = {}
 ALLOWED_ENTRIES = ("SKILL.md", "references", "scripts", "assets", "agents")
 HARNESS_NAMES = ("claude", "claude-code", "codex", "antigravity", "agy", "opencode", "kimi", "cursor", "grok", "devin")
 CLAUDE_TOOLS = ("Read", "Edit", "MultiEdit", "Write", "Bash", "Grep", "Glob", "WebFetch", "WebSearch",
@@ -399,7 +407,7 @@ def parse_frontmatter(lines, errs, info):
 
 
 def strict_yaml_issues(fm):
-    """C3 over raw frontmatter lines (skills, commands and agents alike)."""
+    """C3 over raw frontmatter lines (skills and agents alike)."""
     issues = []
     i = 0
     while i < len(fm):
@@ -846,7 +854,7 @@ def check_skill(skill_dir, sibling_names):
                         continue
                     if before.rstrip().endswith("`"):
                         continue
-                    new(path, "C23", "line " + str(idx + 1) + ": scripts/" + f + " invoked without its interpreter (write `bash scripts/" + f + "`)")
+                    new(path, "C23", "line " + str(idx + 1) + ": scripts/" + f + " invoked without its interpreter (write `bash \"$SKILL_DIR/scripts/" + f + "\"`)")
 
     # C24 — agents/openai.yaml and the parity with disable-model-invocation.
     oy = os.path.join(skill_dir, "agents", "openai.yaml")
@@ -924,21 +932,19 @@ def skill_dirs(skills_dir):
 
 
 # --- cross-file checks ---------------------------------------------------------
-def check_commands_and_agents(root):
-    """C26: C3 and C17 over commands/*.md and agents/*.md."""
-    for sub, forms in (("commands", ("positional",)), ("agents", ("arguments", "positional"))):
-        for path in sorted(glob.glob(os.path.join(root, sub, "*.md"))):
-            text = read_text(path)
-            # Only the raw frontmatter lines are wanted here; the C2 structure
-            # messages are a skill rule and are dropped.
-            info = {}
-            parse_frontmatter(text.split("\n"), [], info)
-            for e in strict_yaml_issues(info.get("fm", [])):
-                new(path, "C26", "frontmatter: " + e)
-            for i, line in enumerate(text.split("\n")):
-                for hit in interpolation_hits(line, forms):
-                    new(path, "C26", "line " + str(i + 1) + ": " + hit
-                        + (" (commands may use $ARGUMENTS, never $N)" if sub == "commands" else " (agents take no interpolation)"))
+def check_agents(root):
+    """C26: C3 and C17 over agents/*.md."""
+    for path in sorted(glob.glob(os.path.join(root, "agents", "*.md"))):
+        text = read_text(path)
+        # Only the raw frontmatter lines are wanted here; the C2 structure
+        # messages are a skill rule and are dropped.
+        info = {}
+        parse_frontmatter(text.split("\n"), [], info)
+        for e in strict_yaml_issues(info.get("fm", [])):
+            new(path, "C26", "frontmatter: " + e)
+        for i, line in enumerate(text.split("\n")):
+            for hit in interpolation_hits(line, ("arguments", "positional")):
+                new(path, "C26", "line " + str(i + 1) + ": " + hit + " (agents take no interpolation)")
 
 
 def check_lead_branches(root):
@@ -983,11 +989,38 @@ def check_lead_branches(root):
 
 
 LOCATOR_SOURCES = ("scripts/skill-locator", "skills/_shared-locator")  # U5 ships the first; the plan's name is accepted too
+# A locator call in skill text: an interpreter, a $( substitution or a POSIX
+# `. ` source, then the path (an opening quote allowed) ending in the locator.
+LOCATOR_CALL = re.compile(r"(?:\b(?:bash|sh|zsh|source|exec|env)\s+|\$\(\s*|(?<!\S)\.\s+)(?P<path>[\"']?[^\s\"'`;)]*locate-triforge\.sh)")
+LOCATOR_ANCHOR = re.compile(r"\$\{?SKILL_DIR\}?/")
+
+
+def check_locator_calls(skill_dir):
+    """KTD6: every locate-triforge.sh call in SKILL.md or references/*.md is
+    anchored to the skill directory. To a shell a bare scripts/… path is
+    relative to the lead's working directory — the project — so a project
+    shipping its own scripts/locate-triforge.sh would get it executed."""
+    files = [os.path.join(skill_dir, "SKILL.md")]
+    refs_dir = os.path.join(skill_dir, "references")
+    if os.path.isdir(refs_dir):
+        for sub, dirs, names in os.walk(refs_dir):
+            files.extend(os.path.join(sub, f) for f in sorted(names) if f.endswith(".md") and not f.startswith("."))
+    for path in files:
+        for i, line in enumerate(read_text(path).split("\n")):
+            for m in LOCATOR_CALL.finditer(line):
+                call = m.group("path").lstrip("\"'")
+                if not LOCATOR_ANCHOR.search(call):
+                    new(path, "KTD6", "line " + str(i + 1) + ": cwd-relative locator call `" + call
+                        + "` — to a shell that path is the project's, not the skill's; write "
+                        + "ROOT=$(bash \"$SKILL_DIR/scripts/locate-triforge.sh\") || exit $?")
 
 
 def check_locators(root, skills_dir, dirs):
-    """KTD6: every skills/at-*/scripts/ carries the shared locator byte-identical."""
+    """KTD6: every skills/at-*/scripts/ carries the shared locator byte-identical,
+    and every call to it in skill text is anchored to the skill directory."""
     at_skills = [d for d in dirs if os.path.basename(d).startswith("at-")]
+    for d in at_skills:
+        check_locator_calls(d)
     source_rel = next((s for s in LOCATOR_SOURCES if os.path.isdir(os.path.join(root, s))), None)
     if source_rel is None:
         SKIPS.append("[KTD6] locator source not present (" + " or ".join(s + "/" for s in LOCATOR_SOURCES)
@@ -1070,7 +1103,7 @@ def main():
         check_locators(ROOT, skills_dir, dirs)
     else:
         SKIPS.append("[KTD6] locator parity applies to the shipped skills/ tree; skipped for " + rel(skills_dir))
-    check_commands_and_agents(ROOT)
+    check_agents(ROOT)
     check_lead_branches(ROOT)
     if not FIXTURE:
         run_skills_ref(dirs)
@@ -1095,22 +1128,22 @@ def main():
         other = set(f[1] for f in errors if not owner(f[1]))
         tail = " and " + str(len(other)) + " other file(s)" if other else ""
         print("validate-skills: FAIL (" + str(len(errors)) + " violation(s) in " + str(len(failing_skills))
-              + " of " + str(len(dirs)) + " skills" + tail + ")" + (" (strict)" if STRICT else
-              (" (" + str(len(warnings)) + " warnings; --strict makes them errors)" if warnings else "")))
+              + " of " + str(len(dirs)) + " skills" + tail + ")" + ("" if STRICT else
+              (" (--warn: " + str(len(warnings)) + " warning(s) the default run fails on)" if warnings else " (--warn)")))
         sys.exit(1)
     if STRICT:
-        print("validate-skills: " + str(len(dirs)) + " skills OK (strict)")
-    elif warnings:
-        print("validate-skills: " + str(len(dirs)) + " skills OK (" + str(len(warnings)) + " warnings; --strict makes them errors)")
-    else:
         print("validate-skills: " + str(len(dirs)) + " skills OK")
+    elif warnings:
+        print("validate-skills: " + str(len(dirs)) + " skills OK (--warn: " + str(len(warnings)) + " warning(s) the default run fails on)")
+    else:
+        print("validate-skills: " + str(len(dirs)) + " skills OK (--warn)")
 
 
 # --- self-test (C25) -----------------------------------------------------------
 FINDING_LINE = re.compile(r"^(?P<path>.+?): (?:(?P<sev>warning|note): )?\[(?P<id>[A-Z0-9]+)\] (?P<msg>.*)$")
 
 
-SMOKE_FIXTURE = "conforming"  # its strict run goes through the bash wrapper
+SMOKE_FIXTURE = "conforming"  # its runs go through the bash wrapper (no flag, --warn, --strict)
 
 
 def parse_findings(stdout):
@@ -1130,11 +1163,12 @@ def run_validator(strict, fixture):
     return rc, out + errout, parse_findings(out)
 
 
-def run_wrapper(strict, fixture):
+def run_wrapper(strict, fixture, flag=None):
     """The same case through the bash wrapper (flag parsing, the env hand-off
-    and the exit code exercised end to end); run_validator's shape."""
-    args = (["--strict"] if strict else []) + ["--fixture", fixture]
-    run = subprocess.run([BASH, SCRIPT] + args, capture_output=True, text=True)
+    and the exit code exercised end to end); run_validator's shape. The default
+    run passes no flag (strict is the default); `flag` forces one."""
+    args = [flag] if flag else ([] if strict else ["--warn"])
+    run = subprocess.run([BASH, SCRIPT] + args + ["--fixture", fixture], capture_output=True, text=True)
     return run.returncode, run.stdout + run.stderr, parse_findings(run.stdout)
 
 
@@ -1142,40 +1176,42 @@ def ids(findings, sev):
     return sorted(set(f[1] for f in findings if f[0] == sev))
 
 
-def assess(name, expect, strict_run, default_run):
-    """Return a list of problems for one fixture."""
+def assess(name, expect, default_run, warn_run):
+    """Return a list of problems for one fixture. EXPECT's `under-warn` names
+    the rule's severity under --warn: `warning` (a newer rule, an error in the
+    default run) or `error` (fails in both modes)."""
     problems = []
-    check, mode, message = expect.get("check", ""), expect.get("default", "warn"), expect.get("message", "")
-    rc_s, out_s, f_s = strict_run
+    check, under_warn, message = expect.get("check", ""), expect.get("under-warn", "warning"), expect.get("message", "")
     rc_d, out_d, f_d = default_run
+    rc_w, out_w, f_w = warn_run
     if check == "none":
-        if rc_s != 0 or ids(f_s, "error") or ids(f_s, "warning"):
-            problems.append("strict: expected a clean pass, rc=" + str(rc_s) + " findings=" + str(ids(f_s, "error") + ids(f_s, "warning")))
         if rc_d != 0 or ids(f_d, "error") or ids(f_d, "warning"):
-            problems.append("default: expected a clean pass, rc=" + str(rc_d))
+            problems.append("default: expected a clean pass, rc=" + str(rc_d) + " findings=" + str(ids(f_d, "error") + ids(f_d, "warning")))
+        if rc_w != 0 or ids(f_w, "error") or ids(f_w, "warning"):
+            problems.append("--warn: expected a clean pass, rc=" + str(rc_w))
         return problems
-    if rc_s != 1:
-        problems.append("strict: expected rc 1, got " + str(rc_s))
-    if ids(f_s, "error") != [check]:
-        problems.append("strict: expected exactly [" + check + "] as errors, got " + str(ids(f_s, "error")))
-    if ids(f_s, "warning"):
-        problems.append("strict: unexpected warnings " + str(ids(f_s, "warning")))
-    if message and not any(message in f[2] for f in f_s if f[1] == check):
-        problems.append("strict: no [" + check + "] message containing '" + message + "'")
-    if mode == "warn":
-        if rc_d != 0:
-            problems.append("default: expected rc 0 (warn only), got " + str(rc_d))
-        if ids(f_d, "warning") != [check]:
-            problems.append("default: expected exactly [" + check + "] as a warning, got " + str(ids(f_d, "warning")))
-        if ids(f_d, "error"):
-            problems.append("default: unexpected errors " + str(ids(f_d, "error")))
+    if rc_d != 1:
+        problems.append("default: expected rc 1, got " + str(rc_d))
+    if ids(f_d, "error") != [check]:
+        problems.append("default: expected exactly [" + check + "] as errors, got " + str(ids(f_d, "error")))
+    if ids(f_d, "warning"):
+        problems.append("default: unexpected warnings " + str(ids(f_d, "warning")))
+    if message and not any(message in f[2] for f in f_d if f[1] == check):
+        problems.append("default: no [" + check + "] message containing '" + message + "'")
+    if under_warn == "warning":
+        if rc_w != 0:
+            problems.append("--warn: expected rc 0 (warning only), got " + str(rc_w))
+        if ids(f_w, "warning") != [check]:
+            problems.append("--warn: expected exactly [" + check + "] as a warning, got " + str(ids(f_w, "warning")))
+        if ids(f_w, "error"):
+            problems.append("--warn: unexpected errors " + str(ids(f_w, "error")))
     else:
-        if rc_d != 1:
-            problems.append("default: expected rc 1 (existing rule fails in both modes), got " + str(rc_d))
-        if ids(f_d, "error") != [check]:
-            problems.append("default: expected exactly [" + check + "] as an error, got " + str(ids(f_d, "error")))
-        if ids(f_d, "warning"):
-            problems.append("default: unexpected warnings " + str(ids(f_d, "warning")))
+        if rc_w != 1:
+            problems.append("--warn: expected rc 1 (the rule fails in both modes), got " + str(rc_w))
+        if ids(f_w, "error") != [check]:
+            problems.append("--warn: expected exactly [" + check + "] as an error, got " + str(ids(f_w, "error")))
+        if ids(f_w, "warning"):
+            problems.append("--warn: unexpected warnings " + str(ids(f_w, "warning")))
     return problems
 
 
@@ -1202,19 +1238,27 @@ def self_test():
                 k, v = line.split(":", 1)
                 expect[k.strip()] = v.strip()
         count += 1
-        strict_run = (run_wrapper if entry == SMOKE_FIXTURE else run_validator)(True, path)
-        default_run = run_validator(False, path)
-        problems = assess(entry, expect, strict_run, default_run)
+        runner = run_wrapper if entry == SMOKE_FIXTURE else run_validator
+        default_run = runner(True, path)
+        warn_run = runner(False, path)
+        problems = assess(entry, expect, default_run, warn_run)
+        if entry == SMOKE_FIXTURE:
+            # --strict is the accepted no-op: same exit code and findings as no flag.
+            strict_run = run_wrapper(True, path, "--strict")
+            if strict_run[0] != default_run[0] or strict_run[2] != default_run[2]:
+                problems.append("--strict: expected the default run's outcome (rc " + str(default_run[0]) + "), got rc " + str(strict_run[0]))
         check = expect.get("check", "")
         if check == "none":
-            outcome = "passes --strict (rc " + str(strict_run[0]) + ") and default (rc " + str(default_run[0]) + ")"
+            outcome = "passes the default run (rc " + str(default_run[0]) + ") and --warn (rc " + str(warn_run[0]) + ")"
+            if entry == SMOKE_FIXTURE:
+                outcome += "; --strict is a no-op"
         else:
-            outcome = ("[" + check + "] strict rc " + str(strict_run[0]) + " error; default rc " + str(default_run[0])
-                       + " " + ("warning" if expect.get("default", "warn") == "warn" else "error"))
+            outcome = ("[" + check + "] default rc " + str(default_run[0]) + " error; --warn rc " + str(warn_run[0])
+                       + " " + expect.get("under-warn", "warning"))
         if problems:
             failures += 1
             print("self-test: FAIL " + entry + ": " + "; ".join(problems))
-            for label, run in (("strict", strict_run), ("default", default_run)):
+            for label, run in (("default", default_run), ("--warn", warn_run)):
                 for line in run[1].strip().split("\n"):
                     print("    " + label + "> " + line)
         else:
@@ -1229,18 +1273,18 @@ def self_test():
         assert len(desc) == 290, len(desc)
         for n in range(14):
             write_skill(tmp, "budget-skill-" + "%02d" % n, desc)
-        strict_run = run_validator(True, tmp)
-        default_run = run_validator(False, tmp)
+        default_run = run_validator(True, tmp)
+        warn_run = run_validator(False, tmp)
         problems = []
-        if default_run[0] != 0 or ids(default_run[2], "warning") != ["C10"] or not any("combined" in f[2] for f in default_run[2]):
-            problems.append("default: expected rc 0 with one [C10] 'combined' warning, got rc " + str(default_run[0]) + " " + str(ids(default_run[2], "warning")))
-        if strict_run[0] != 1 or ids(strict_run[2], "error") != ["C10"]:
-            problems.append("strict: expected rc 1 with [C10], got rc " + str(strict_run[0]) + " " + str(ids(strict_run[2], "error")))
+        if warn_run[0] != 0 or ids(warn_run[2], "warning") != ["C10"] or not any("combined" in f[2] for f in warn_run[2]):
+            problems.append("--warn: expected rc 0 with one [C10] 'combined' warning, got rc " + str(warn_run[0]) + " " + str(ids(warn_run[2], "warning")))
+        if default_run[0] != 1 or ids(default_run[2], "error") != ["C10"]:
+            problems.append("default: expected rc 1 with [C10], got rc " + str(default_run[0]) + " " + str(ids(default_run[2], "error")))
         if problems:
             failures += 1
             print("self-test: FAIL computed-c10-set-budget: " + "; ".join(problems))
         else:
-            print("self-test: ok   computed-c10-set-budget: 14 × 290 chars = 4060 > 4000 → [C10] strict rc 1 error; default rc 0 warning")
+            print("self-test: ok   computed-c10-set-budget: 14 × 290 chars = 4060 > 4000 → [C10] default rc 1 error; --warn rc 0 warning")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1254,10 +1298,10 @@ def self_test():
         notes = [f for f in run[2] if f[0] == "note" and f[1] == "C15" and "5,000 tokens" in f[2]]
         if run[0] != 0 or not notes or ids(run[2], "warning") != ["C15"]:
             failures += 1
-            print("self-test: FAIL computed-c15-token-guard: expected rc 0, a [C15] bytes warning and a '≈ 5,000 tokens' note; got rc "
+            print("self-test: FAIL computed-c15-token-guard: expected --warn rc 0, a [C15] bytes warning and a '≈ 5,000 tokens' note; got rc "
                   + str(run[0]) + " warnings=" + str(ids(run[2], "warning")) + " notes=" + str(len(notes)))
         else:
-            print("self-test: ok   computed-c15-token-guard: 21,000 chars → [C15] bytes warning + '≈ 5,000 tokens' note (rc 0)")
+            print("self-test: ok   computed-c15-token-guard: 21,000 chars → [C15] bytes warning + '≈ 5,000 tokens' note (--warn rc 0)")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -51,10 +51,10 @@ jobs:
       - name: validate-versions
         run: /bin/bash scripts/validate-versions.sh
 
-      - name: validate-skills
+      - name: validate-skills # warnings are errors by default (U23); --warn is the relaxed run
         run: /bin/bash scripts/validate-skills.sh
 
-      - name: validate-skills self-test # every fixture under scripts/fixtures/validate-skills/, both modes
+      - name: validate-skills self-test # every fixture under scripts/fixtures/validate-skills/, both modes (default and --warn)
         run: /bin/bash scripts/validate-skills.sh --self-test
 
       - name: SELF gate

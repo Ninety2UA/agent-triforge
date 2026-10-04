@@ -24,7 +24,7 @@ the root checkout's trust.
   [projects."/absolute/path/to/your/project"]
   trust_level = "trusted"
   ```
-  `/setup` detects the exact-path entry and prints the block to add when it is missing.
+  `at-setup` detects the exact-path entry and prints the block to add when it is missing.
   Whether a parent-directory entry covers subdirectories is unverified — add the exact path.
 - **Automation path (what the helper does today):** `invoke_codex` passes
   `--dangerously-bypass-hook-trust` whenever the project ships `.codex/hooks.json` and

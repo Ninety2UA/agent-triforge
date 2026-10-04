@@ -1398,7 +1398,7 @@ body::after {
       <li><a href="#skills">Skills</a></li>
       <li><a href="#review">Review</a></li>
       <li><a href="#install">Install</a></li>
-      <li><a href="#commands">Commands</a></li>
+      <li><a href="#workflows">Workflows</a></li>
       <li><a href="#faq">FAQ</a></li>
     </ul>
     <a href="#install" class="nav__cta">Get Started</a>
@@ -1419,7 +1419,7 @@ body::after {
     <a href="#recovery">Context Recovery</a>
     <a href="#install">Install</a>
     <a href="#compatibility">Compatibility</a>
-    <a href="#commands">Commands</a>
+    <a href="#workflows">Workflows</a>
     <a href="#faq">FAQ</a>
   </div>
 </nav>
@@ -1442,12 +1442,12 @@ body::after {
             <span class="hero__stat-label">Agents</span>
           </div>
           <div class="hero__stat">
-            <span class="hero__stat-num" data-target="10">0</span>
+            <span class="hero__stat-num" data-target="27">0</span>
             <span class="hero__stat-label">Skills</span>
           </div>
           <div class="hero__stat">
             <span class="hero__stat-num" data-target="17">0</span>
-            <span class="hero__stat-label">Commands</span>
+            <span class="hero__stat-label">Lead workflows</span>
           </div>
           <div class="hero__stat">
             <span class="hero__stat-num" data-target="4">0</span>
@@ -1497,7 +1497,7 @@ body::after {
           <div class="term__row term__row--prompt term__row--ship" data-row="r1">
             <span class="term__prompt">&gt;</span>
             <span class="term__text">
-              <span class="term__flag" data-type="/ship"></span>
+              <span class="term__flag" data-type="/at-ship"></span>
               <span class="term__str" data-type="add user authentication with JWT"></span>
             </span>
             <button class="term__copy" id="term-copy" aria-label="Copy command" title="Copy command">
@@ -1667,12 +1667,12 @@ body::after {
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Watch cycle shipped as plugin commands (v3.1 history) — 19 commands, 13 skills</span></div>
         <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
-        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Repo-local maintainer tooling in <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">.claude/commands/</code> — 17 commands, 10 skills ship</span></div>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Repo-local maintainer tooling in <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">.claude/commands/</code>; the plugin ships 27 skills: 10 portable skills + 17 lead workflows (<code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">at-*</code>)</span></div>
       </div>
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Role assignment — hand-edit ops/roster.toml</span></div>
         <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
-        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new"><code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">/setup</code> role step — keep · customize · restore, validated writes</span></div>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new"><code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">at-setup</code> role step — keep · customize · restore, validated writes</span></div>
       </div>
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Roster model advisory on the Codex review/test lane</span></div>
@@ -1702,7 +1702,7 @@ body::after {
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Manual prerequisite probing of each CLI</span></div>
         <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
-        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__new"><code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">/setup</code> onboarding + monthly CLI/repo watch cycles</span></div>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__new"><code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">at-setup</code> onboarding + monthly CLI/repo watch cycles</span></div>
       </div>
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Codex gpt-5.4, free-text review output</span></div>
@@ -1732,8 +1732,8 @@ body::after {
         <div class="stat-pill__text"><h4>Agents</h4><p>Opus/Fable, max effort</p></div>
       </div>
       <div class="stat-pill">
-        <div class="stat-pill__num">12</div>
-        <div class="stat-pill__text"><h4>Skills</h4><p>Portable workflows</p></div>
+        <div class="stat-pill__num">27</div>
+        <div class="stat-pill__text"><h4>Skills</h4><p>10 portable + 17 lead workflows</p></div>
       </div>
       <div class="stat-pill">
         <div class="stat-pill__num">7</div>
@@ -1762,7 +1762,7 @@ body::after {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
         </div>
         <h3>Portable Skills</h3>
-        <p>Model-agnostic workflow modules injected into any agent — wave orchestration, shadow-path tracing, knowledge compounding.</p>
+        <p>Model-agnostic workflow modules injected into any agent — wave orchestration, shadow-path tracing, knowledge compounding. The 17 lead workflows (<code>at-*</code>) live in the same tree and stay with the lead.</p>
       </div>
       <div class="feat-card glow-card">
         <div class="feat-card__icon feat-card__icon--ember">
@@ -1915,7 +1915,7 @@ body::after {
         </div>
         <p class="roster-card__role">Eligible builder and reviewer once enrolled — skipped cleanly in every fallback chain when absent.</p>
         <div class="roster-card__meta">
-          <span class="roster-card__chip">enroll via <b>/setup</b></span>
+          <span class="roster-card__chip">enroll via <b>at-setup</b></span>
           <span class="roster-card__chip">glm-5.3 (OpenRouter)</span>
         </div>
       </div>
@@ -1931,7 +1931,7 @@ body::after {
         </div>
         <p class="roster-card__role">Eligible builder once enrolled — a decline persists as a flag flip, nothing else to restore.</p>
         <div class="roster-card__meta">
-          <span class="roster-card__chip">enroll via <b>/setup</b></span>
+          <span class="roster-card__chip">enroll via <b>at-setup</b></span>
           <span class="roster-card__chip">kimi-code/k3</span>
         </div>
       </div>
@@ -1947,7 +1947,7 @@ body::after {
         </div>
         <p class="roster-card__role">Eligible builder once enrolled — the model is pinned explicitly, never the Auto router.</p>
         <div class="roster-card__meta">
-          <span class="roster-card__chip">enroll via <b>/setup</b></span>
+          <span class="roster-card__chip">enroll via <b>at-setup</b></span>
           <span class="roster-card__chip">cursor-grok-4.6-xhigh (pinned)</span>
         </div>
       </div>
@@ -1961,7 +1961,7 @@ body::after {
     <div class="section__header reveal">
       <span class="section__label">Sprint Pipeline</span>
       <h2 class="section__title">From Goal to Ship in 7 Phases</h2>
-      <p class="section__desc">Run <code>/ship</code> for fully autonomous execution, or invoke each phase individually with dedicated commands.</p>
+      <p class="section__desc">Run <code>at-ship</code> (<code>/at-ship</code> under a Claude Code lead, <code>$at-ship</code> in a Codex prompt) for fully autonomous execution, or invoke each phase's lead workflow individually.</p>
     </div>
     <div class="table-wrap reveal">
       <div class="pipeline">
@@ -1969,55 +1969,55 @@ body::after {
           <div class="pipeline__cell pipeline__num">Phase</div>
           <div class="pipeline__cell">What Happens</div>
           <div class="pipeline__cell">Agent(s)</div>
-          <div class="pipeline__cell">Command</div>
+          <div class="pipeline__cell">Lead workflow</div>
         </div>
         <div class="pipeline__phase">
           <div class="pipeline__cell pipeline__num">0</div>
           <div class="pipeline__cell pipeline__name">Codebase Analysis</div>
           <div class="pipeline__cell">Antigravity CLI</div>
-          <div class="pipeline__cell pipeline__cmd">/plan</div>
+          <div class="pipeline__cell pipeline__cmd">at-plan</div>
         </div>
         <div class="pipeline__phase">
           <div class="pipeline__cell pipeline__num">1</div>
           <div class="pipeline__cell pipeline__name">Planning</div>
           <div class="pipeline__cell">Claude + writing-plans skill</div>
-          <div class="pipeline__cell pipeline__cmd">/plan</div>
+          <div class="pipeline__cell pipeline__cmd">at-plan</div>
         </div>
         <div class="pipeline__phase">
           <div class="pipeline__cell pipeline__num">1.1</div>
           <div class="pipeline__cell pipeline__name">Ambiguity Resolution</div>
           <div class="pipeline__cell">Claude (user confirmation)</div>
-          <div class="pipeline__cell pipeline__cmd">/plan, /ship</div>
+          <div class="pipeline__cell pipeline__cmd">at-plan, at-ship</div>
         </div>
         <div class="pipeline__phase">
           <div class="pipeline__cell pipeline__num">1.5</div>
           <div class="pipeline__cell pipeline__name">Plan Validation</div>
           <div class="pipeline__cell">plan-checker agent</div>
-          <div class="pipeline__cell pipeline__cmd">/plan</div>
+          <div class="pipeline__cell pipeline__cmd">at-plan</div>
         </div>
         <div class="pipeline__phase">
           <div class="pipeline__cell pipeline__num">2</div>
           <div class="pipeline__cell pipeline__name">Build (Wave Orchestration)</div>
           <div class="pipeline__cell">Claude subagents / team-lead</div>
-          <div class="pipeline__cell pipeline__cmd">/build</div>
+          <div class="pipeline__cell pipeline__cmd">at-build</div>
         </div>
         <div class="pipeline__phase">
           <div class="pipeline__cell pipeline__num">3-4</div>
           <div class="pipeline__cell pipeline__name">Parallel Review + Synthesis</div>
           <div class="pipeline__cell">Antigravity + Codex + 5 agents</div>
-          <div class="pipeline__cell pipeline__cmd">/review</div>
+          <div class="pipeline__cell pipeline__cmd">at-review</div>
         </div>
         <div class="pipeline__phase">
           <div class="pipeline__cell pipeline__num">5</div>
           <div class="pipeline__cell pipeline__name">TDD Testing</div>
           <div class="pipeline__cell">Codex CLI + test-gap-analyzer</div>
-          <div class="pipeline__cell pipeline__cmd">/test</div>
+          <div class="pipeline__cell pipeline__cmd">at-test</div>
         </div>
         <div class="pipeline__phase">
           <div class="pipeline__cell pipeline__num">6</div>
           <div class="pipeline__cell pipeline__name">Ship (Knowledge Compound)</div>
           <div class="pipeline__cell">Claude + knowledge-compounding</div>
-          <div class="pipeline__cell pipeline__cmd">/wrap</div>
+          <div class="pipeline__cell pipeline__cmd">at-wrap</div>
         </div>
       </div>
     </div>
@@ -2071,8 +2071,8 @@ body::after {
   <div class="container">
     <div class="section__header reveal">
       <span class="section__label">Portable Skills</span>
-      <h2 class="section__title">10 Model-Agnostic Workflow Modules</h2>
-      <p class="section__desc">Skills are markdown files that any agent can consume. Injected into Antigravity or Codex agent definitions, with prompt-prefix fallback via <code>$(cat skills/SKILL.md)</code>.</p>
+      <h2 class="section__title">10 Portable Skills, Model-Agnostic</h2>
+      <p class="section__desc">The plugin ships 27 skills in one tree. The 10 portable skills below are markdown files that any agent can consume — injected into Antigravity or Codex agent definitions, with prompt-prefix fallback via <code>$(cat skills/SKILL.md)</code>, and copied to <code>.agents/skills/</code> for the other CLIs. The 17 lead workflows (<code>at-*</code>) are listed under <a href="#workflows">Lead Workflows</a>; they stay with the lead and are never copied.</p>
     </div>
     <div class="table-wrap reveal">
       <table class="skills-table reveal">
@@ -2145,12 +2145,12 @@ body::after {
       <div class="gate">
         <div class="gate__num">2</div>
         <h4>Failing test before implementation</h4>
-        <p>No production code without a failing test <code>/test</code></p>
+        <p>No production code without a failing test <code>at-test</code></p>
       </div>
       <div class="gate">
         <div class="gate__num">3</div>
         <h4>Root cause before fixes</h4>
-        <p>No fix without diagnosis <code>/debug</code></p>
+        <p>No fix without diagnosis <code>at-debug</code></p>
       </div>
       <div class="gate">
         <div class="gate__num">4</div>
@@ -2165,7 +2165,7 @@ body::after {
       <div class="gate">
         <div class="gate__num">6</div>
         <h4>Circuit breaker on debugging</h4>
-        <p>3-attempt ceiling per issue, then escalation report <code>/debug</code></p>
+        <p>3-attempt ceiling per issue, then escalation report <code>at-debug</code></p>
       </div>
     </div>
   </div>
@@ -2232,7 +2232,7 @@ body::after {
     <div class="section__header reveal">
       <span class="section__label">Get Started</span>
       <h2 class="section__title">Install in One Command</h2>
-      <p class="section__desc">Hooks, agents, skills, and commands register automatically. No manual configuration needed.</p>
+      <p class="section__desc">Hooks, agents and skills — portable skills and lead workflows — register automatically. No manual configuration needed.</p>
     </div>
     <div class="install-grid reveal-stagger">
       <div class="install-step">
@@ -2260,13 +2260,13 @@ body::after {
               <div class="code-block__dot" style="background:#28c840"></div>
             </div>
             <div class="code-block__title">claude</div>
-            <button class="code-block__copy" data-copy="/ship add user authentication with JWT">Copy</button>
+            <button class="code-block__copy" data-copy="/at-ship add user authentication with JWT">Copy</button>
           </div>
-          <div class="code-block__body"><span class="kw">/ship</span> <span class="str">add user authentication with JWT</span></div>
+          <div class="code-block__body"><span class="kw">/at-ship</span> <span class="str">add user authentication with JWT</span></div>
         </div>
       </div>
       <div class="install-step">
-        <div class="install-step__label">Prerequisites — run /setup (core trio + optional tier)</div>
+        <div class="install-step__label">Prerequisites — run at-setup (core trio + optional tier)</div>
         <div class="code-block">
           <div class="code-block__header">
             <div class="code-block__dots">
@@ -2277,9 +2277,9 @@ body::after {
             <div class="code-block__title">bash</div>
           </div>
           <div class="code-block__body"><span class="cmt"># Guided onboarding — gates the core trio, enrolls the optional CLIs</span>
-<span class="kw">/setup</span>
+<span class="kw">/at-setup</span>          <span class="cmt"># in Claude Code; $at-setup in a Codex prompt</span>
 
-<span class="cmt"># Core trio (what /setup automates)</span>
+<span class="cmt"># Core trio (what at-setup automates)</span>
 <span class="kw">claude</span> --version
 <span class="kw">agy</span> --model <span class="str">"Gemini 3.8 Flash (High)"</span> -p <span class="str">"Respond with only: READY"</span>
 <span class="kw">codex</span> exec <span class="str">"Respond with only: READY"</span>
@@ -2313,7 +2313,7 @@ body::after {
     <div class="section__header reveal">
       <span class="section__label">Compatibility</span>
       <h2 class="section__title">Version Floors</h2>
-      <p class="section__desc"><code>/setup</code> gates the core trio live before any sprint runs. The optional tier enrolls the same way and is skipped cleanly in every fallback chain when absent.</p>
+      <p class="section__desc"><code>at-setup</code> gates the core trio live before any sprint runs. The optional tier enrolls the same way and is skipped cleanly in every fallback chain when absent.</p>
     </div>
     <div class="table-wrap reveal">
       <table class="cmd-table reveal">
@@ -2328,38 +2328,39 @@ body::after {
         </tbody>
       </table>
     </div>
-    <p class="diagram-caption reveal" style="max-width:760px;">Python&nbsp;3 is required for the hook handlers. Every CLI answers a headless READY probe — <code style="font-family:var(--font-mono);font-size:12px;color:var(--steel-light);background:rgba(74,158,255,0.08);padding:1px 6px;border-radius:4px;">/setup</code> runs them for you and writes the result to <code style="font-family:var(--font-mono);font-size:12px;color:var(--steel-light);background:rgba(74,158,255,0.08);padding:1px 6px;border-radius:4px;">ops/roster.toml</code>.</p>
+    <p class="diagram-caption reveal" style="max-width:760px;">Python&nbsp;3 is required for the hook handlers. Every CLI answers a headless READY probe — <code style="font-family:var(--font-mono);font-size:12px;color:var(--steel-light);background:rgba(74,158,255,0.08);padding:1px 6px;border-radius:4px;">at-setup</code> runs them for you and writes the result to <code style="font-family:var(--font-mono);font-size:12px;color:var(--steel-light);background:rgba(74,158,255,0.08);padding:1px 6px;border-radius:4px;">ops/roster.toml</code>.</p>
   </div>
 </section>
 
-<!-- ═══ Commands ═══ -->
-<section class="section section--alt" id="commands">
+<!-- ═══ Lead Workflows ═══ -->
+<section class="section section--alt" id="workflows">
   <div class="container">
     <div class="section__header reveal">
-      <span class="section__label">Commands Reference</span>
-      <h2 class="section__title">17 Slash Commands</h2>
+      <span class="section__label">Lead Workflows Reference</span>
+      <h2 class="section__title">17 Lead Workflows</h2>
+      <p class="section__desc">Skills under <code>skills/at-*/</code> that only the lead runs: <code>/at-&lt;name&gt;</code> under a Claude Code lead, <code>$at-&lt;name&gt;</code> in a Codex prompt (<code>codex exec '$at-ship &lt;goal&gt;'</code>). They stay with the lead's plugin install and are never copied to <code>.agents/skills/</code> or a lease worktree.</p>
     </div>
     <div class="table-wrap reveal">
       <table class="cmd-table reveal">
-        <thead><tr><th>Command</th><th>What It Does</th></tr></thead>
+        <thead><tr><th>Lead workflow</th><th>What It Does</th></tr></thead>
         <tbody>
-          <tr><td><code>/ship &lt;goal&gt;</code> <span class="cmd-badge cmd-badge--full">full</span></td><td>Fully autonomous end-to-end sprint, gated to completion by <code>/goal</code> + sentinel</td></tr>
-          <tr><td><code>/coordinate &lt;goal&gt;</code> <span class="cmd-badge cmd-badge--full">full</span></td><td>Full lifecycle with context-exhaustion recovery</td></tr>
-          <tr><td><code>/plan &lt;goal&gt;</code> <span class="cmd-badge cmd-badge--phase">phase</span></td><td>Analyze codebase, plan with shadow paths, validate</td></tr>
-          <tr><td><code>/build</code> <span class="cmd-badge cmd-badge--phase">phase</span></td><td>Wave orchestration build. <code>--team</code> for agent team mode</td></tr>
-          <tr><td><code>/review</code> <span class="cmd-badge cmd-badge--phase">phase</span></td><td>Parallel review + synthesis. <code>--full</code> for all 7 reviewers</td></tr>
-          <tr><td><code>/test</code> <span class="cmd-badge cmd-badge--phase">phase</span></td><td>Gap analysis + Codex TDD. <code>--gaps-only</code> to just identify gaps</td></tr>
-          <tr><td><code>/wrap</code> <span class="cmd-badge cmd-badge--phase">phase</span></td><td>Compound knowledge, archive reviews, write STATE.md, git trailers</td></tr>
-          <tr><td><code>/quick &lt;change&gt;</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Changes touching &lt; 3 files. Skips heavy machinery</td></tr>
-          <tr><td><code>/debug &lt;bug&gt;</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Structured debugging: reproduce, diagnose, fix</td></tr>
-          <tr><td><code>/deep-research &lt;topic&gt;</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>5 parallel research agents + research-synthesizer</td></tr>
-          <tr><td><code>/status</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Sprint overview: phase, tasks, blockers</td></tr>
-          <tr><td><code>/pause</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Quick checkpoint to STATE.md</td></tr>
-          <tr><td><code>/resume</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Continue from STATE.md checkpoint</td></tr>
-          <tr><td><code>/compound</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Document a solved problem or decision</td></tr>
-          <tr><td><code>/analyze &lt;url&gt;</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Deep compatibility analysis of an external repo</td></tr>
-          <tr><td><code>/resolve-pr &lt;#&gt;</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Read GitHub PR comments and implement changes</td></tr>
-          <tr><td><code>/setup</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Guided roster onboarding — gate the core trio, enroll/decline each optional CLI</td></tr>
+          <tr><td><code>at-ship &lt;goal&gt; [--convergence fast|standard|deep] [--team]</code> <span class="cmd-badge cmd-badge--full">full</span></td><td>Fully autonomous sprint: analyze, plan, build, review, test, wrap; <code>ops/.sprint-complete</code> created last</td></tr>
+          <tr><td><code>at-coordinate &lt;goal&gt;</code> <span class="cmd-badge cmd-badge--full">full</span></td><td>The plain Phase 0–6 cycle <code>coordinate.sh</code> drives across fresh sessions; no convergence or team flags</td></tr>
+          <tr><td><code>at-plan [goal]</code> <span class="cmd-badge cmd-badge--phase">phase</span></td><td>Phases 0 → 1.5: analyze codebase, plan with shadow paths and waves, ambiguity check, plan-checker validation</td></tr>
+          <tr><td><code>at-build [--team] [--wave N]</code> <span class="cmd-badge cmd-badge--phase">phase</span></td><td>Phase 2: leased builder-pool waves, cross-review, one squash commit per task, promotion gate</td></tr>
+          <tr><td><code>at-review [--full] [--security] [--perf] [--simple] [--conventions]</code> <span class="cmd-badge cmd-badge--phase">phase</span></td><td>Phases 3–4: parallel roster lanes + specialists, synthesis, fix cycle, review dispositions</td></tr>
+          <tr><td><code>at-test [--gaps-only] [scope]</code> <span class="cmd-badge cmd-badge--phase">phase</span></td><td>Phase 5: gap analysis, roster tester writes the failing test first, fix cycle to green</td></tr>
+          <tr><td><code>at-wrap</code> <span class="cmd-badge cmd-badge--phase">phase</span></td><td>Phase 6: compound knowledge, archive reviews, write STATE.md, completion marker last</td></tr>
+          <tr><td><code>at-quick [change]</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Changes touching &lt; 3 files, no shared interface or protected path: TDD, self-review, no swarm</td></tr>
+          <tr><td><code>at-debug [bug or error]</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Reproduce, root-cause with evidence, fix, document; 3-attempt circuit breaker</td></tr>
+          <tr><td><code>at-deep-research [topic]</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Five parallel research lenses + research-synthesizer, sourced endpoints</td></tr>
+          <tr><td><code>at-status</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Sprint overview: phase, tasks, blockers, pending reviews, uncommitted changes. Writes nothing</td></tr>
+          <tr><td><code>at-pause</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Checkpoint to STATE.md, and nothing else</td></tr>
+          <tr><td><code>at-resume</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Restore STATE.md, re-prove the baseline, continue the phase</td></tr>
+          <tr><td><code>at-compound [solution|decision] &lt;description&gt;</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Record a solved problem or decision in <code>ops/solutions/</code> or <code>ops/decisions/</code></td></tr>
+          <tr><td><code>at-analyze [url or path]</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Read-only judgment of an external repo for adoptable patterns</td></tr>
+          <tr><td><code>at-resolve-pr &lt;PR# or URL&gt;</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Work through GitHub PR review comments: implement, answer or defer, tests run</td></tr>
+          <tr><td><code>at-setup [opencode|kimi|cursor|roles]</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Guided roster onboarding — gate the core trio, enroll/decline each optional CLI, assign roles</td></tr>
         </tbody>
       </table>
     </div>
@@ -2380,7 +2381,7 @@ body::after {
       </div>
       <div class="faq__item">
         <button class="faq__question">Do I need all the CLIs?<svg class="faq__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
-        <div class="faq__answer"><div class="faq__answer-inner">The <strong>core trio</strong> (Claude, Antigravity, Codex) is the supported baseline — run <code>/setup</code> to get them live. The <strong>optional tier</strong> (OpenCode, Kimi, Cursor) is genuinely optional: enroll any subset via <code>/setup</code>, and an absent one is skipped cleanly in every roster fallback chain. Claude alone still runs the pipeline (degraded — you lose the multi-model review/test/analysis benefits).</div></div>
+        <div class="faq__answer"><div class="faq__answer-inner">The <strong>core trio</strong> (Claude, Antigravity, Codex) is the supported baseline — run <code>at-setup</code> to get them live. The <strong>optional tier</strong> (OpenCode, Kimi, Cursor) is genuinely optional: enroll any subset via <code>at-setup</code>, and an absent one is skipped cleanly in every roster fallback chain. Claude alone still runs the pipeline (degraded — you lose the multi-model review/test/analysis benefits).</div></div>
       </div>
       <div class="faq__item">
         <button class="faq__question">How do agents differ from skills?<svg class="faq__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
@@ -2392,7 +2393,7 @@ body::after {
       </div>
       <div class="faq__item">
         <button class="faq__question">Do small bug fixes need the full pipeline?<svg class="faq__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
-        <div class="faq__answer"><div class="faq__answer-inner">No. Use <code>/quick</code> for changes touching fewer than 3 files. It skips Phase 0, plan validation, and the full review swarm.</div></div>
+        <div class="faq__answer"><div class="faq__answer-inner">No. Use <code>at-quick</code> for changes touching fewer than 3 files. It skips Phase 0, plan validation, and the full review swarm.</div></div>
       </div>
       <div class="faq__item">
         <button class="faq__question">How does context exhaustion recovery work?<svg class="faq__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
@@ -2400,7 +2401,7 @@ body::after {
       </div>
       <div class="faq__item">
         <button class="faq__question">What is knowledge compounding?<svg class="faq__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
-        <div class="faq__answer"><div class="faq__answer-inner">After solving a non-trivial problem, <code>/compound</code> saves it to <code>ops/solutions/</code>. Future <code>/plan</code> commands automatically search this directory before starting new work — so every sprint gets smarter. Each sprint should make the next sprint easier.</div></div>
+        <div class="faq__answer"><div class="faq__answer-inner">After solving a non-trivial problem, <code>at-compound</code> saves it to <code>ops/solutions/</code>. Future <code>at-plan</code> runs automatically search this directory before starting new work — so every sprint gets smarter. Each sprint should make the next sprint easier.</div></div>
       </div>
     </div>
   </div>
@@ -2682,7 +2683,7 @@ document.querySelectorAll('[data-target]').forEach(el => counterObserver.observe
     if (prefersReduced) {
       term.querySelectorAll('.term__row, .term__phase, .term__sys, .term__rule').forEach(r => r.classList.add('is-shown'));
       typeTargets[0].textContent = 'claude';
-      typeTargets[1].textContent = '/ship';
+      typeTargets[1].textContent = '/at-ship';
       typeTargets[2].textContent = 'add user authentication with JWT';
       phases.forEach((p, i) => {
         p.dataset.state = 'done';
@@ -2710,7 +2711,7 @@ document.querySelectorAll('[data-target]').forEach(el => counterObserver.observe
 
     promptRows[1].classList.add('is-shown');
     await sleep(120, myToken);
-    await typeInto(typeTargets[1], '/ship', 42, myToken);
+    await typeInto(typeTargets[1], '/at-ship', 42, myToken);
     if (myToken !== token) return;
     await sleep(80, myToken);
     await typeInto(typeTargets[2], 'add user authentication with JWT', 24, myToken);
@@ -2778,7 +2779,7 @@ document.querySelectorAll('[data-target]').forEach(el => counterObserver.observe
   copyBtn?.addEventListener('click', async e => {
     e.stopPropagation();
     try {
-      await navigator.clipboard.writeText('/ship add user authentication with JWT');
+      await navigator.clipboard.writeText('/at-ship add user authentication with JWT');
       const label = copyBtn.querySelector('.term__copy-label');
       const orig = label ? label.textContent : '';
       copyBtn.classList.add('is-copied');

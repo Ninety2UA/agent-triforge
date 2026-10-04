@@ -1,3 +1,3 @@
 check: C09
-default: warn
+under-warn: warning
 message: must start within the first 150

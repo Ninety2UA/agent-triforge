@@ -10,17 +10,17 @@
   <a href="#what-is-this">Overview</a> ·
   <a href="#recent-changes">Recent changes</a> ·
   <a href="#project-structure">Structure</a> ·
-  <a href="#sprint-pipeline-ship">Pipeline</a> ·
-  <a href="#planning-pipeline-plan">Plan</a> ·
-  <a href="#deep-research-deep-research">Research</a> ·
-  <a href="#wave-orchestration-build">Build</a> ·
-  <a href="#review-swarm-review">Review</a> ·
-  <a href="#test-pipeline-test">Test</a> ·
-  <a href="#debugging-debug">Debug</a> ·
+  <a href="#sprint-pipeline-at-ship">Pipeline</a> ·
+  <a href="#planning-pipeline-at-plan">Plan</a> ·
+  <a href="#deep-research-at-deep-research">Research</a> ·
+  <a href="#wave-orchestration-at-build">Build</a> ·
+  <a href="#review-swarm-at-review">Review</a> ·
+  <a href="#test-pipeline-at-test">Test</a> ·
+  <a href="#debugging-at-debug">Debug</a> ·
   <a href="#quality-gates">Gates</a> ·
   <a href="#context-recovery">Context</a> ·
   <a href="#getting-started">Quick Start</a> ·
-  <a href="#commands-reference">Commands</a> ·
+  <a href="#lead-workflows-reference">Workflows</a> ·
   <a href="#faq">FAQ</a>
 </p>
 
@@ -32,7 +32,7 @@ A production-grade framework that turns Claude Code into a **lead agent** orches
 
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** is the lead — it plans, resolves the roster, dispatches builders, and merges reviewed work (ladder: Fable 5.1 → Opus 5.5 → Sonnet 5)
 - **Core trio (required):** Claude · **[Antigravity](https://antigravity.google/cli)** (`agy`, Gemini 3.8 Flash (High) by default, 1M context) · **[Codex](https://github.com/openai/codex)** (`gpt-6-astra`, sandboxed)
-- **Optional tier (auto-detected):** **OpenCode** (OpenRouter `glm-5.3`) · **Kimi Code** (`kimi-code/k3`) · **Cursor** (Grok 4.6) — enrolled through [`/setup`](commands/setup.md), gracefully absent when not
+- **Optional tier (auto-detected):** **OpenCode** (OpenRouter `glm-5.3`) · **Kimi Code** (`kimi-code/k3`) · **Cursor** (Grok 4.6) — enrolled through [`at-setup`](skills/at-setup/SKILL.md), gracefully absent when not
 - **19 Claude specialized agents** provide deep expertise in [security](agents/security-sentinel.md), [performance](agents/performance-oracle.md), [architecture](agents/architecture-strategist.md), and more
 
 Every non-lead build runs under a **per-task lease in an isolated git worktree** and merges only after **cross-review by a pinned non-author reviewer** — safety is isolation + cross-review, not write-restriction. Work is tracked in shared markdown files. Reviews run in parallel. Knowledge compounds across sessions.
@@ -131,7 +131,7 @@ claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge
 claude plugin install agent-triforge@agent-triforge
 ```
 
-All agents, skills, commands, and hooks register automatically. Your project's `ops/` directory is bootstrapped on first session.
+All agents, skills (the 10 portable skills and the 17 lead workflows) and hooks register automatically. Your project's `ops/` directory is bootstrapped on first session.
 
 ### Automatic project bootstrapping
 
@@ -151,7 +151,7 @@ The heart of v3.0.0. A wave reads [`ops/roster.toml`](templates/ops/roster.toml)
   <img src="docs/images/builder-pool.svg" alt="Builder-pool wave — roster resolves each task to a builder CLI in an isolated worktree lease, cross-reviewed by a pinned non-author reviewer, squash-merged onto a sprint integration branch, then promoted to main through a gated check" width="100%">
 </p>
 
-**The roster decides who does what.** Five roles — builder, reviewer, tester, analyst, documenter — each map to a CLI + model + effort with an ordered fallback chain that must terminate at a core-trio member. Optional members carry an `enabled` flag and are absent everywhere when off. Model choice is yours per role: the shipped defaults pin the newest Gemini model at its highest thinking level for `agy` — `"Gemini 3.8 Flash (High)"` today, Pro or Flash, whichever is newest (D-022) — and `cursor-grok-4.6-xhigh` for Cursor (effort rides in the model-id suffix), and a role's `model` entry selects any other variant when you explicitly want it. Since v3.1.0 you don't have to hand-edit the file: `/setup`'s role step walks keep-current / customize / restore-shipped-defaults with validated writes.
+**The roster decides who does what.** Five roles — builder, reviewer, tester, analyst, documenter — each map to a CLI + model + effort with an ordered fallback chain that must terminate at a core-trio member. Optional members carry an `enabled` flag and are absent everywhere when off. Model choice is yours per role: the shipped defaults pin the newest Gemini model at its highest thinking level for `agy` — `"Gemini 3.8 Flash (High)"` today, Pro or Flash, whichever is newest (D-022) — and `cursor-grok-4.6-xhigh` for Cursor (effort rides in the model-id suffix), and a role's `model` entry selects any other variant when you explicitly want it. Since v3.1.0 you don't have to hand-edit the file: `at-setup`'s role step walks keep-current / customize / restore-shipped-defaults with validated writes.
 
 Prefer the Pro line? Set a role's `model` to `"Gemini 3.1 Pro (High)"` (or `(Low)` — 3.1 Pro has no Medium tier) in `ops/roster.toml`; it stays the documented one-line opt-in. The July 2026 plan's never-Flash rule (AE2) is superseded by D-022 — anyone working from that plan should read the September ADR (`ops/decisions/2026-09-11-cli-deprecation-watch.md`).
 
@@ -173,14 +173,20 @@ Safety comes from three mechanisms working together, not from restricting who ma
 
 ## Project structure
 
-The plugin provides agents, skills, commands, and hooks. Your project gets an `ops/` directory for state:
+The plugin provides agents, skills and hooks. Your project gets an `ops/` directory for state:
 
 ```
 agent-triforge/                     (plugin — installed automatically)
 ├── .claude-plugin/plugin.json        Plugin manifest
 ├── agents/                           19 specialized agent definitions
-├── skills/                           10 portable workflow modules
-├── commands/                         17 slash commands
+├── skills/                           27 skills in one tree
+│   ├── <name>/SKILL.md                 10 portable skills, copied to .agents/skills/ and lease worktrees
+│   │   └── references/                 where a skill is split (wave-orchestration, verification-before-completion)
+│   └── at-<name>/                      17 lead workflows (/at-<name> in Claude Code, $at-<name> in a Codex prompt); never copied
+│       ├── SKILL.md                      the router: goal, done condition, safe failure, invocation
+│       ├── references/                   the detail the router points to
+│       ├── scripts/locate-triforge.sh    finds the plugin root from either lead
+│       └── agents/openai.yaml            Codex skill metadata
 ├── hooks/
 │   ├── hooks.json                    Hook registration
 │   └── handlers/                     4 lifecycle hook scripts
@@ -222,34 +228,34 @@ All agents coordinate through markdown files in [`ops/`](ops/). This is the sour
 | [`MEMORY.md`](ops/MEMORY.md) | Architectural decisions, patterns, interface proposals | All agents append |
 | [`CHANGELOG.md`](ops/CHANGELOG.md) | Audit trail with `[agent-name]` attribution | All agents append |
 | [`STATE.md`](ops/STATE.md) | Session continuity — current phase, progress, next actions | Claude writes on pause/wrap |
-| [`solutions/`](ops/solutions/) | Documented solved problems for institutional knowledge | Claude writes via [`/compound`](commands/compound.md) |
-| [`decisions/`](ops/decisions/) | Architecture decision records (ADRs) | Claude writes via [`/compound`](commands/compound.md) |
+| [`solutions/`](ops/solutions/) | Documented solved problems for institutional knowledge | The lead writes via [`at-compound`](skills/at-compound/SKILL.md) |
+| [`decisions/`](ops/decisions/) | Architecture decision records (ADRs) | The lead writes via [`at-compound`](skills/at-compound/SKILL.md) |
 
 ---
 
-## Sprint Pipeline (`/ship`)
+## Sprint Pipeline (`at-ship`)
 
-Every goal flows through a structured pipeline. Run [`/ship`](commands/ship.md) for fully autonomous execution, or invoke each phase individually.
+Every goal flows through a structured pipeline. Run [`at-ship`](skills/at-ship/SKILL.md) (`/at-ship <goal>` under a Claude Code lead, `$at-ship <goal>` in a Codex prompt) for fully autonomous execution, or invoke each phase's lead workflow individually.
 
 <p align="center">
   <img src="docs/images/sprint-lifecycle.svg" alt="Sprint pipeline — Plan, Build, Review, Test, Ship stages with agents" width="80%">
 </p>
 
-| Phase | What happens | Agent(s) | Command |
+| Phase | What happens | Agent(s) | Lead workflow |
 |:---|:---|:---|:---|
-| **0 — Analyze** | Full-repo scan: architecture, patterns, contracts, debt | Antigravity CLI + [`codebase-mapping`](skills/codebase-mapping/SKILL.md) | [`/plan`](commands/plan.md) |
-| **Pre-Plan** | Search institutional knowledge for relevant past solutions | [`learnings-researcher`](agents/learnings-researcher.md) | [`/plan`](commands/plan.md) |
-| **1 — Plan** | Decompose goal into tasks with shadow paths and error maps | Claude + [`writing-plans`](skills/writing-plans/SKILL.md) | [`/plan`](commands/plan.md) |
-| **1.5 — Validate** | Validate assignments, dependencies, scope, shadow paths | [`plan-checker`](agents/plan-checker.md) | [`/plan`](commands/plan.md) |
-| **1.1 — Ambiguity** | Surface top 3 unverified assumptions, ask user to confirm/correct | Claude | [`/plan`](commands/plan.md), [`/ship`](commands/ship.md) |
-| **2 — Build** | Wave orchestration with integration verification between waves | Claude subagents or [`team-lead`](agents/team-lead.md) | [`/build`](commands/build.md) |
-| **3–4 — Review** | Up to 7 parallel reviewers, synthesized with confidence tiering | Antigravity + Codex + [review agents](#review-specialists-6) | [`/review`](commands/review.md) |
-| **5 — Test** | TDD test writing, gap analysis, fix cycle until green | Codex CLI ([`test_writer`](codex-agents/agents.toml)) | [`/test`](commands/test.md) |
-| **6 — Ship** | Document solutions, archive reviews, write STATE.md | Claude + [`knowledge-compounding`](skills/knowledge-compounding/SKILL.md) | [`/wrap`](commands/wrap.md) |
+| **0 — Analyze** | Full-repo scan: architecture, patterns, contracts, debt | Antigravity CLI + [`codebase-mapping`](skills/codebase-mapping/SKILL.md) | [`at-plan`](skills/at-plan/SKILL.md) |
+| **Pre-Plan** | Search institutional knowledge for relevant past solutions | [`learnings-researcher`](agents/learnings-researcher.md) | [`at-plan`](skills/at-plan/SKILL.md) |
+| **1 — Plan** | Decompose goal into tasks with shadow paths and error maps | Claude + [`writing-plans`](skills/writing-plans/SKILL.md) | [`at-plan`](skills/at-plan/SKILL.md) |
+| **1.5 — Validate** | Validate assignments, dependencies, scope, shadow paths | [`plan-checker`](agents/plan-checker.md) | [`at-plan`](skills/at-plan/SKILL.md) |
+| **1.1 — Ambiguity** | Surface top 3 unverified assumptions, ask user to confirm/correct | Claude | [`at-plan`](skills/at-plan/SKILL.md), [`at-ship`](skills/at-ship/SKILL.md) |
+| **2 — Build** | Wave orchestration with integration verification between waves | Claude subagents or [`team-lead`](agents/team-lead.md) | [`at-build`](skills/at-build/SKILL.md) |
+| **3–4 — Review** | Up to 7 parallel reviewers, synthesized with confidence tiering | Antigravity + Codex + [review agents](#review-specialists-6) | [`at-review`](skills/at-review/SKILL.md) |
+| **5 — Test** | TDD test writing, gap analysis, fix cycle until green | Codex CLI ([`test_writer`](codex-agents/agents.toml)) | [`at-test`](skills/at-test/SKILL.md) |
+| **6 — Ship** | Document solutions, archive reviews, write STATE.md | Claude + [`knowledge-compounding`](skills/knowledge-compounding/SKILL.md) | [`at-wrap`](skills/at-wrap/SKILL.md) |
 
 ---
 
-## Planning Pipeline (`/plan`)
+## Planning Pipeline (`at-plan`)
 
 Analyzes the full codebase with Antigravity's 1M-token context, searches institutional knowledge, decomposes the goal with shadow paths and error maps, then validates via [`plan-checker`](agents/plan-checker.md).
 
@@ -259,7 +265,7 @@ Analyzes the full codebase with Antigravity's 1M-token context, searches institu
 
 ---
 
-## Deep Research (`/deep-research`)
+## Deep Research (`at-deep-research`)
 
 Spawns 5 research agents in parallel before planning, then synthesizes findings into a unified research brief.
 
@@ -269,7 +275,7 @@ Spawns 5 research agents in parallel before planning, then synthesizes findings 
 
 ---
 
-## Wave Orchestration (`/build`)
+## Wave Orchestration (`at-build`)
 
 Groups plan tasks by dependency into waves. Independent tasks within each wave run in parallel; an [`integration-verifier`](agents/integration-verifier.md) validates between waves.
 
@@ -324,7 +330,7 @@ Roles come from `ops/roster.toml` (`resolve_role <role>`); the defaults below ar
 
 ---
 
-## Review Swarm (`/review`)
+## Review Swarm (`at-review`)
 
 Up to 7 reviewers analyze the same code simultaneously through different lenses (2 external CLIs + 5 Claude specialized agents with `--full`), then a [`findings-synthesizer`](agents/findings-synthesizer.md) merges, deduplicates, and priority-ranks all findings.
 
@@ -348,7 +354,7 @@ Each reviewer has a "Do Not Flag" list to reduce noise — readability-aiding re
 
 ---
 
-## Test Pipeline (`/test`)
+## Test Pipeline (`at-test`)
 
 Identifies untested code paths with [`test-gap-analyzer`](agents/test-gap-analyzer.md), then writes and runs tests via [Codex CLI](https://github.com/openai/codex), failing test first, in a sandboxed environment.
 
@@ -358,7 +364,7 @@ Identifies untested code paths with [`test-gap-analyzer`](agents/test-gap-analyz
 
 ---
 
-## Debugging (`/debug`)
+## Debugging (`at-debug`)
 
 Structured debugging: reproduce the bug first, perform root cause analysis, then fix with evidence. A **circuit breaker** enforces a 3-attempt ceiling per issue — if the same error recurs after 3 consecutive fix attempts, the agent stops and produces an escalation report instead of looping.
 
@@ -379,11 +385,11 @@ Five non-negotiable checkpoints enforced at every stage:
 | Gate | Enforced by | Rule |
 |---|---|---|
 | **1 — Plan validated** | [`plan-checker`](agents/plan-checker.md) agent | No build without validated plan (max 3 iterations) |
-| **2 — Failing test first** | [`/test`](commands/test.md) workflow, Codex [`test_writer`](codex-agents/agents.toml) | No production code without a failing test |
-| **3 — Root cause first** | [`/debug`](commands/debug.md) workflow, Codex [`debugger`](codex-agents/agents.toml) | No fix without diagnosis |
+| **2 — Failing test first** | [`at-test`](skills/at-test/SKILL.md) workflow, Codex [`test_writer`](codex-agents/agents.toml) | No production code without a failing test |
+| **3 — Root cause first** | [`at-debug`](skills/at-debug/SKILL.md) workflow, Codex [`debugger`](codex-agents/agents.toml) | No fix without diagnosis |
 | **4 — Evidence first** | [`verification-before-completion`](skills/verification-before-completion/SKILL.md) skill | No "done" without proof |
 | **5 — Review first** | [`review-synthesis`](skills/review-synthesis/SKILL.md) skill | No merge without code review (max 3 cycles) |
-| **6 — Circuit breaker** | [`/debug`](commands/debug.md) workflow, Codex [`debugger`](codex-agents/agents.toml) | 3-attempt ceiling per issue, then escalation report |
+| **6 — Circuit breaker** | [`at-debug`](skills/at-debug/SKILL.md) workflow, Codex [`debugger`](codex-agents/agents.toml) | 3-attempt ceiling per issue, then escalation report |
 
 ---
 
@@ -391,7 +397,7 @@ Five non-negotiable checkpoints enforced at every stage:
 
 ### Prerequisites
 
-**Run [`/setup`](commands/setup.md) first** — the guided path from a fresh install to a working roster. It gates the core trio live, walks each optional CLI (enroll with a chosen model, or decline cleanly), then offers role assignment: accept the shipped defaults (recommended) or customize any role's CLI · model · effort. Idempotent and re-runnable; the probes below are exactly what `/setup` automates.
+**Run [`at-setup`](skills/at-setup/SKILL.md) first** (`/at-setup` under a Claude Code lead, `$at-setup` in a Codex prompt) — the guided path from a fresh install to a working roster. It gates the core trio live, walks each optional CLI (enroll with a chosen model, or decline cleanly), then offers role assignment: accept the shipped defaults (recommended) or customize any role's CLI · model · effort. Idempotent and re-runnable; the probes below are exactly what `at-setup` automates.
 
 **Core trio (required):**
 
@@ -411,7 +417,7 @@ codex exec "Respond with only: READY"
 python3 --version
 ```
 
-**Optional tier** — enroll via `/setup` to use them as builders/reviewers; each is skipped cleanly in every roster fallback chain when absent:
+**Optional tier** — enroll via `at-setup` to use them as builders/reviewers; each is skipped cleanly in every roster fallback chain when absent:
 
 ```bash
 # OpenCode ≥ 1.18.20 — needs the OpenRouter provider connected (OPENROUTER_API_KEY or `opencode auth login`)
@@ -427,7 +433,7 @@ cursor-agent -p --trust --model cursor-grok-4.6-xhigh "Respond with only: READY"
 
 ### Compatibility
 
-Re-baselined from the newest capability probe record — currently [`ops/research/2026-09-probe-record.md`](ops/research/2026-09-probe-record.md) (2026-09-11); "the current record" always means the newest `ops/research/*-probe-record.md`. Core trio required; optional tier enrolled via `/setup`. Supersedes the July 2026 baseline (D-034).
+Re-baselined from the newest capability probe record — currently [`ops/research/2026-09-probe-record.md`](ops/research/2026-09-probe-record.md) (2026-09-11); "the current record" always means the newest `ops/research/*-probe-record.md`. Core trio required; optional tier enrolled via `at-setup`. Supersedes the July 2026 baseline (D-034).
 
 | CLI | Tier | Floor (KTD-13) | Tested | READY probe |
 |---|---|---|---|---|
@@ -442,7 +448,7 @@ Why these floors: Claude Code 2.1.277 is the first build that reads a root `AGEN
 
 ### Data egress and credentials
 
-Each dispatched CLI sends its task prompt and the code context it is handed to that CLI's model provider. Under the shipped defaults, your code + task context reaches **Anthropic** (Claude), **Google** (Antigravity → Gemini 3.8 Flash), and **OpenAI** (Codex) for the core trio; and, for any optional member you enroll, **Zhipu / Z.ai** (GLM, routed through the **OpenRouter** intermediary — which also sees the traffic), **Moonshot** (Kimi), and **xAI** (Grok, via Cursor). `ops/roster.toml` is the control surface: disable a member (`enabled = false`) or drop a provider's model from every role to remove that provider from the egress set (the core trio always stays). Credentials never live in the repo — each adapter reads its own from the OS / vendor store (CLI logins, `OPENROUTER_API_KEY`, `CURSOR_API_KEY`, `kimi login` OAuth-or-API-key), scoped per-adapter by the lease env allowlist; captured output is scrubbed before it lands in `ops/`, and rotation follows each vendor's own token flow (revoke + re-login/re-key, then re-run `/setup`).
+Each dispatched CLI sends its task prompt and the code context it is handed to that CLI's model provider. Under the shipped defaults, your code + task context reaches **Anthropic** (Claude), **Google** (Antigravity → Gemini 3.8 Flash), and **OpenAI** (Codex) for the core trio; and, for any optional member you enroll, **Zhipu / Z.ai** (GLM, routed through the **OpenRouter** intermediary — which also sees the traffic), **Moonshot** (Kimi), and **xAI** (Grok, via Cursor). `ops/roster.toml` is the control surface: disable a member (`enabled = false`) or drop a provider's model from every role to remove that provider from the egress set (the core trio always stays). Credentials never live in the repo — each adapter reads its own from the OS / vendor store (CLI logins, `OPENROUTER_API_KEY`, `CURSOR_API_KEY`, `kimi login` OAuth-or-API-key), scoped per-adapter by the lease env allowlist; captured output is scrubbed before it lands in `ops/`, and rotation follows each vendor's own token flow (revoke + re-login/re-key, then re-run `at-setup`).
 
 ### Installation
 
@@ -459,7 +465,7 @@ claude plugin install agent-triforge@agent-triforge
 claude plugin install agent-triforge@agent-triforge --scope project
 ```
 
-That's it. No manual configuration needed — hooks, env vars, agents, skills, and commands are all registered automatically by the plugin system.
+That's it. No manual configuration needed — hooks, env vars, agents and skills (portable skills and lead workflows alike) are all registered automatically by the plugin system.
 
 On first session, the plugin bootstraps your project's `ops/` directory. Add the pointer block from `templates/AGENTS.md` to your project's root `AGENTS.md` (Triforge ships no CLAUDE.md); session start prints the copy line when the project has none.
 
@@ -485,9 +491,9 @@ claude
 
 # You should see:
 # "Multi-agent framework ready."
-# "Commands: /ship /plan /build /review /test /debug /quick ..."
+# "Lead workflows (/at-<name> here, $at-<name> in a Codex prompt): at-setup at-ship at-plan ..."
 
-/status
+/at-status
 ```
 
 ### Typical session flow
@@ -496,12 +502,12 @@ claude
 
 ```bash
 claude
-> /plan add user authentication         # Phase 0-1.5: analyze, research, plan, validate
-> /build                                 # Phase 2: wave orchestration
-> /review                                # Phase 3-4: parallel review + synthesis
-> /test                                  # Phase 5: Codex TDD
-> /compound JWT session handling         # Document solution for future sprints
-> /wrap                                  # Phase 6: compound knowledge, write STATE.md
+> /at-plan add user authentication      # Phase 0-1.5: analyze, research, plan, validate
+> /at-build                              # Phase 2: wave orchestration
+> /at-review                             # Phase 3-4: parallel review + synthesis
+> /at-test                               # Phase 5: Codex TDD
+> /at-compound JWT session handling      # Document solution for future sprints
+> /at-wrap                               # Phase 6: compound knowledge, write STATE.md
 ```
 
 **Autonomous (fire and forget):**
@@ -509,52 +515,39 @@ claude
 ```bash
 # Inside Claude — single session, won't stop until done
 claude
-> /ship add user authentication with JWT refresh tokens
+> /at-ship add user authentication with JWT refresh tokens
 
 # From terminal — with context-exhaustion recovery
 ./scripts/coordinate.sh "add user authentication" --max 5 --team
 ```
 
+The same workflows run from a Codex prompt as `$at-<name>` (`codex exec '$at-ship add user authentication'` — single quotes, so the shell leaves `$at-ship` alone).
+
 ---
 
-## Commands reference
+## Lead workflows reference
 
-### Full pipeline
+The 17 lead workflows are skills under [`skills/at-*/`](skills/) that only the lead runs: `/at-<name>` under a Claude Code lead, `$at-<name>` inside a Codex prompt. They stay with the lead's plugin install and are never copied into `.agents/skills/` or a lease worktree (KTD12). Each `SKILL.md` states the workflow's goal, done condition and safe failure direction; the detail sits in its `references/`.
 
-| Command | What it does |
-|---|---|
-| [**`/ship <goal>`**](commands/ship.md) | Fully autonomous end-to-end sprint with inner loop guard. Won't stop until done. |
-| [**`/coordinate <goal>`**](commands/coordinate.md) | Same phases with exit guard — alternative entry point for the full lifecycle. |
-
-### Phase-specific
-
-| Command | Phase | What it does |
-|---|---|---|
-| [**`/plan <goal>`**](commands/plan.md) | 0 → 1.5 | Analyze codebase, plan with shadow paths, validate via [`plan-checker`](agents/plan-checker.md) |
-| [**`/build`**](commands/build.md) | 2 | [Wave orchestration](skills/wave-orchestration/SKILL.md) build. `--team` for [agent team](agents/team-lead.md) mode. |
-| [**`/review`**](commands/review.md) | 3 → 4 | Parallel review + [synthesis](agents/findings-synthesizer.md). `--full` for all 7 reviewers. |
-| [**`/test`**](commands/test.md) | 5 | [Gap analysis](agents/test-gap-analyzer.md) + [Codex](https://github.com/openai/codex) TDD. `--gaps-only` to just identify gaps. |
-| [**`/wrap`**](commands/wrap.md) | 6 | [Compound knowledge](skills/knowledge-compounding/SKILL.md), archive reviews, write [`STATE.md`](ops/STATE.md). |
-
-### Lightweight workflows
-
-| Command | What it does |
-|---|---|
-| [**`/quick <change>`**](commands/quick.md) | For changes touching < 3 files. Skips heavy machinery. |
-| [**`/debug <bug>`**](commands/debug.md) | Structured debugging: reproduce, diagnose, fix with root cause analysis. |
-
-### Research and operations
-
-| Command | What it does |
-|---|---|
-| [**`/setup`**](commands/setup.md) | Guided roster onboarding — gate the core trio live, enroll/decline each optional CLI with a chosen model, then accept the shipped role defaults or customize each role's CLI · model · effort (`/setup roles` jumps to that step). Idempotent; re-run any time. |
-| [**`/deep-research <topic>`**](commands/deep-research.md) | Launch 5 parallel research agents + [`research-synthesizer`](agents/research-synthesizer.md). |
-| [**`/analyze <url>`**](commands/analyze.md) | Deep compatibility analysis of an external repo. |
-| [**`/status`**](commands/status.md) | Sprint overview: phase, tasks, blockers, available commands. |
-| [**`/pause`**](commands/pause.md) | Quick checkpoint to [`STATE.md`](ops/STATE.md). |
-| [**`/resume`**](commands/resume.md) | Continue from [`STATE.md`](ops/STATE.md) checkpoint. |
-| [**`/compound`**](commands/compound.md) | Document a solved problem to [`ops/solutions/`](ops/solutions/) or decision to [`ops/decisions/`](ops/decisions/). |
-| [**`/resolve-pr <PR#>`**](commands/resolve-pr.md) | Read GitHub PR comments and implement requested changes via [`pr-comment-resolver`](agents/pr-comment-resolver.md). |
+| Lead workflow | Claude Code · Codex | Arguments | What it does |
+|---|---|---|---|
+| [**`at-ship`**](skills/at-ship/SKILL.md) | `/at-ship` · `$at-ship` | `<goal> [--convergence fast\|standard\|deep] [--team]` | Fully autonomous sprint: analyze, plan, build, review, test, wrap; prints the completion line at start and creates `ops/.sprint-complete` last. `fast` = P1 only, `deep` = P1 + P2 + P3 below 3; `--team` for 5+ or interdependent tasks. |
+| [**`at-coordinate`**](skills/at-coordinate/SKILL.md) | `/at-coordinate` · `$at-coordinate` | `<goal>` | The plain Phase 0–6 sprint cycle that [`scripts/coordinate.sh`](scripts/coordinate.sh) drives across fresh sessions; same pipeline as `at-ship` without convergence or team flags. |
+| [**`at-plan`**](skills/at-plan/SKILL.md) | `/at-plan` · `$at-plan` | `[goal]` | Phases 0 → 1.5: codebase analysis, knowledge search, shadow paths, waves, the three-assumption ambiguity check, [`plan-checker`](agents/plan-checker.md) validation. Writes `ops/TASKS.md` with its `Ceremony:` line. |
+| [**`at-build`**](skills/at-build/SKILL.md) | `/at-build` · `$at-build` | `[--team] [--wave N]` | Phase 2: [wave orchestration](skills/wave-orchestration/SKILL.md) over leased builder-pool tasks, cross-review by a pinned reviewer, one squash commit per task, `integration-verifier` per wave, the `[promotion]` gate. |
+| [**`at-review`**](skills/at-review/SKILL.md) | `/at-review` · `$at-review` | `[--full] [--security] [--perf] [--simple] [--conventions]` | Phases 3–4: parallel roster lanes plus the selected specialists, [synthesis](agents/findings-synthesizer.md), P1/P2 fixes, `## Review dispositions — Cycle N` in `ops/TASKS.md`; escalates after 3 cycles. |
+| [**`at-test`**](skills/at-test/SKILL.md) | `/at-test` · `$at-test` | `[--gaps-only] [scope]` | Phase 5: [gap analysis](agents/test-gap-analyzer.md), tests from the roster tester with the failing run first, fix cycle to green in `ops/TEST_RESULTS.md`. `--gaps-only` stops after the report. |
+| [**`at-wrap`**](skills/at-wrap/SKILL.md) | `/at-wrap` · `$at-wrap` | — | Phase 6: [compound knowledge](skills/knowledge-compounding/SKILL.md), update the `ops/` files, archive review files to `ops/archive/<today>/`, write [`STATE.md`](ops/STATE.md), print the sprint summary with its rulings, create the completion marker last. |
+| [**`at-quick`**](skills/at-quick/SKILL.md) | `/at-quick` · `$at-quick` | `[change description]` | A change touching fewer than 3 files with no shared interface or protected path: TDD, self-review, no swarm; hands off to `at-review --security` / `--perf` when a lens needs it. |
+| [**`at-debug`**](skills/at-debug/SKILL.md) | `/at-debug` · `$at-debug` | `[bug description or error message]` | Reproduce, root-cause with evidence, fix, find sibling instances, record in `ops/MEMORY.md` and `ops/CHANGELOG.md`; 3-attempt circuit breaker, then an escalation report. |
+| [**`at-setup`**](skills/at-setup/SKILL.md) | `/at-setup` · `$at-setup` | `[opencode\|kimi\|cursor\|roles]` | Guided roster onboarding: core trio live, Codex trust detected, each optional CLI enrolled or declined, roles kept, customized or restored; closes with the status table and a verdict. Idempotent. |
+| [**`at-deep-research`**](skills/at-deep-research/SKILL.md) | `/at-deep-research` · `$at-deep-research` | `[topic or goal]` | Five parallel research lenses plus [`research-synthesizer`](agents/research-synthesizer.md), every endpoint a recorded primary source; writes `ops/RESEARCH_ANTIGRAVITY.md` and hands off to `at-plan`. |
+| [**`at-analyze`**](skills/at-analyze/SKILL.md) | `/at-analyze` · `$at-analyze` | `[github-url or local-path]` | Read-only judgment of an external repo or resource: extractable patterns, prompt-engineering insights, verdict matrix, ranked recommendations. Nothing written. |
+| [**`at-status`**](skills/at-status/SKILL.md) | `/at-status` · `$at-status` | — | One report from `ops/`, git and the review files: phase, task counts, blockers, recent activity, pending reviews, uncommitted changes, available workflows. Writes nothing. |
+| [**`at-pause`**](skills/at-pause/SKILL.md) | `/at-pause` · `$at-pause` | — | Write the [`STATE.md`](ops/STATE.md) checkpoint a later session resumes from, and nothing else. |
+| [**`at-resume`**](skills/at-resume/SKILL.md) | `/at-resume` · `$at-resume` | — | Restore [`STATE.md`](ops/STATE.md), re-prove the baseline when HEAD moved, summarize, continue the recorded phase. |
+| [**`at-compound`**](skills/at-compound/SKILL.md) | `/at-compound` · `$at-compound` | `[solution \| decision] <description>` | Record a solved problem in [`ops/solutions/`](ops/solutions/) or a decision in [`ops/decisions/`](ops/decisions/) when it clears the counterfactual bar; otherwise one line saying why nothing was written. |
+| [**`at-resolve-pr`**](skills/at-resolve-pr/SKILL.md) | `/at-resolve-pr` · `$at-resolve-pr` | `<PR number or URL>` | Work through GitHub PR review comments via [`pr-comment-resolver`](agents/pr-comment-resolver.md): implement, answer or defer each, run the tests, update `ops/CHANGELOG.md`. |
 
 ### Keeping the framework current (`/cli-watch`, `/repo-watch` — maintainers)
 
@@ -575,7 +568,7 @@ Two **repo-local** commands keep the framework current instead of hand-running a
 
 ## Skills reference
 
-10 portable, model-agnostic workflow modules that any agent can consume. Skills embedded in native Antigravity/Codex agent definitions (`antigravity-agents/agents/`, `codex-agents/`) at install time; prompt-prefix injection of the agent body kicks in automatically when a CLI doesn't surface native agent definitions.
+The plugin ships 27 skills in one `skills/` tree: the 10 portable skills below, which any agent can consume, and the 17 lead workflows listed [above](#lead-workflows-reference), which only the lead runs. Portable skills are embedded in the native Antigravity/Codex agent definitions (`antigravity-agents/agents/`, `codex-agents/`) at install time; prompt-prefix injection of the agent body kicks in automatically when a CLI doesn't surface native agent definitions.
 
 | Skill | Primary consumer | What it teaches the agent |
 |---|---|---|
@@ -592,7 +585,7 @@ Two **repo-local** commands keep the framework current instead of hand-running a
 
 ### Portable skills across the six CLIs
 
-`session-start.sh` copies the plugin's `skills/` into `.agents/skills/` — the agentskills.io path — and refreshes that copy whenever the plugin version changes (stamp `.agents/skills/.triforge-plugin-version`, with a content digest per directory Triforge wrote: only Triforge's own unchanged copies are replaced or retired — an edited copy, or your own directory under a shipped name, is kept with a notice; customizations are safest in a differently named directory). Fixture evidence from the 2026-09-11 watch cycle ([`ops/research/2026-09-11-cli-updates.md`](ops/research/2026-09-11-cli-updates.md) §3.1) shows which path each CLI actually reads:
+`session-start.sh` copies the 10 portable skills from the plugin's `skills/` into `.agents/skills/` — the agentskills.io path — and refreshes that copy whenever the plugin version changes (stamp `.agents/skills/.triforge-plugin-version`, with a content digest per directory Triforge wrote: only Triforge's own unchanged copies are replaced or retired — an edited copy, or your own directory under a shipped name, is kept with a notice; customizations are safest in a differently named directory). Fixture evidence from the 2026-09-11 watch cycle ([`ops/research/2026-09-11-cli-updates.md`](ops/research/2026-09-11-cli-updates.md) §3.1) shows which path each CLI actually reads:
 
 | Path | Claude Code | agy | Codex | OpenCode | Cursor | Kimi (docs) |
 |---|---|---|---|---|---|---|
@@ -603,7 +596,7 @@ Two **repo-local** commands keep the framework current instead of hand-running a
 | `.cursor/skills/` | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
 | `.kimi-code/skills/` | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
 
-Claude Code is the one CLI that does not read `.agents/skills/` — it reads the plugin's skills directly. Each harness invokes a skill in its own form: Claude `/name` · agy `agy --add-dir "$PWD" -p "/name"` (headless expansion; `agy -p "/skills"` lists them without a model call) · Codex `$name` · OpenCode `/name` through its native `skill` tool (commands via `opencode run --command <name>` from `.opencode/command/`) · Cursor `/name` in `-p` · Kimi `/skill:name` (live verification pending `kimi login`). Slash commands are per-harness, not portable — Codex custom prompts are deprecated and not expanded under `codex exec` — so Triforge's commands stay lead-only. Agent definitions are never deployed into `.agents/agents/`: agy and Kimi both scan it with incompatible tool vocabularies, so agy stays on `agy plugin install` and Kimi loads its definitions through `--agent-file`.
+Claude Code is the one CLI that does not read `.agents/skills/` — it reads the plugin's skills directly. Each harness invokes a skill in its own form: Claude `/name` · agy `agy --add-dir "$PWD" -p "/name"` (headless expansion; `agy -p "/skills"` lists them without a model call) · Codex `$name` · OpenCode `/name` through its native `skill` tool (commands via `opencode run --command <name>` from `.opencode/command/`) · Cursor `/name` in `-p` · Kimi `/skill:name` (live verification pending `kimi login`). The 17 lead workflows (`skills/at-*/`) are not in this copy: they reach a lead only from its plugin install (KTD12), invoked as `/at-<name>` under Claude Code or `$at-<name>` in a Codex prompt. They are skills rather than slash commands because slash commands are per-harness, not portable — Codex custom prompts are deprecated and not expanded under `codex exec`. Agent definitions are never deployed into `.agents/agents/`: agy and Kimi both scan it with incompatible tool vocabularies, so agy stays on `agy plugin install` and Kimi loads its definitions through `--agent-file`.
 
 ---
 
@@ -657,7 +650,7 @@ Three defense mechanisms prevent long sprints from dying to context limits:
 
 | Layer | Mechanism | Guards against |
 |---|---|---|
-| **Completion gating** | The `ops/.sprint-complete` sentinel, created only after verification passes, is the authoritative signal; the native `/goal` checklist is a best-effort assist — [`coordinate.sh`](scripts/coordinate.sh) leads every session prompt with it and `/ship` / `/coordinate` print a copyable `/goal` line, but headless gating is flaky (probe CC-03 1 of 3, D-030) | Claude declaring victory early |
+| **Completion gating** | The `ops/.sprint-complete` sentinel, created only after verification passes, is the authoritative signal; the native `/goal` checklist is a best-effort assist — [`coordinate.sh`](scripts/coordinate.sh) leads every session prompt with it and `at-ship` / `at-coordinate` print a copyable `/goal` line, but headless gating is flaky (probe CC-03 1 of 3, D-030) | Claude declaring victory early |
 | **Outer loop** | [`scripts/coordinate.sh`](scripts/coordinate.sh) — spawns fresh sessions with clean context, detects completion via the `ops/.sprint-complete` sentinel, notifies on completion | Context window filling up |
 | **PreCompact** | [`pre-compact.sh`](hooks/handlers/pre-compact.sh) — auto-checkpoints `STATE.md` before context compaction | State loss during mid-sprint compaction |
 | **Analysis paralysis** | [`context-monitor.sh`](hooks/handlers/context-monitor.sh) — warns at 8+ consecutive reads without writes | Reading without producing |
@@ -679,7 +672,7 @@ NOTIFY_WEBHOOK_URL="https://hooks.slack.com/..." ./scripts/coordinate.sh "Build 
 - Any roster member is an eligible builder — the single-writer rule is retired. Safety is per-task leases + worktree isolation + mandatory cross-review by a pinned non-author reviewer, not write-restriction; no agent self-merges, and the lead promotes to the main branch only after the wave's integration check
 - Parallel reviews are safe because reviewers write to separate `ops/REVIEW_*.md` files
 - Maximum 3 review cycles per task before escalating to user
-- Phase 0 can be skipped for small bug fixes, same-session continuations, or unchanged codebases (use [`/quick`](commands/quick.md))
+- Phase 0 can be skipped for small bug fixes, same-session continuations, or unchanged codebases (use [`at-quick`](skills/at-quick/SKILL.md))
 - Completion requires creating the `ops/.sprint-complete` runtime marker only after the [verification checklist](skills/verification-before-completion/SKILL.md) passes
 
 ---
@@ -716,7 +709,7 @@ Multi-model coordination, portable skill injection into external agents, agent t
 
 | Situation | What to do instead |
 |---|---|
-| Trivial task (< 30 minutes) | Just use Claude Code directly, or [`/quick`](commands/quick.md) |
+| Trivial task (< 30 minutes) | Just use Claude Code directly, or [`at-quick`](skills/at-quick/SKILL.md) |
 | Pure exploration / brainstorming | Single agent conversation |
 | Tight deadline, no tests needed | Claude Code solo, skip review + test |
 | Non-code deliverables | [Antigravity CLI](https://antigravity.google/cli) solo with its large context |
@@ -734,7 +727,7 @@ Yes. Use Option 2 or Option 3 from <a href="#installation">Installation</a> to c
 <details>
 <summary><strong>Do I need all the CLIs?</strong></summary>
 
-The <strong>core trio</strong> (Claude, Antigravity, Codex) is the supported baseline — run <a href="commands/setup.md"><code>/setup</code></a> to get them live. The <strong>optional tier</strong> (OpenCode, Kimi, Cursor) is genuinely optional: enroll any subset via <code>/setup</code>, and an absent one is skipped cleanly in every roster fallback chain. Claude alone still runs the pipeline (degraded — you lose the multi-model review/test/analysis benefits).
+The <strong>core trio</strong> (Claude, Antigravity, Codex) is the supported baseline — run <a href="skills/at-setup/SKILL.md"><code>at-setup</code></a> to get them live. The <strong>optional tier</strong> (OpenCode, Kimi, Cursor) is genuinely optional: enroll any subset via <code>at-setup</code>, and an absent one is skipped cleanly in every roster fallback chain. Claude alone still runs the pipeline (degraded — you lose the multi-model review/test/analysis benefits).
 </details>
 
 <details>
@@ -758,19 +751,19 @@ No. Skills activate contextually. If you never cut scope, the <a href="skills/sc
 <details>
 <summary><strong>Do small bug fixes need the full pipeline?</strong></summary>
 
-No. Use <a href="commands/quick.md"><code>/quick</code></a> for changes touching fewer than 3 files. It skips Phase 0, plan validation, and the full review swarm.
+No. Use <a href="skills/at-quick/SKILL.md"><code>at-quick</code></a> for changes touching fewer than 3 files. It skips Phase 0, plan validation, and the full review swarm.
 </details>
 
 <details>
 <summary><strong>How does context exhaustion recovery work?</strong></summary>
 
-Two layers. <strong>Inside</strong> a session, the <code>ops/.sprint-complete</code> sentinel is the authoritative completion signal — created only after the verification checklist passes. Claude Code's native <code>/goal</code> checklist is a best-effort assist on top: <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> leads every composed prompt with a <code>/goal</code> line, and <code>/ship</code>/<code>/coordinate</code> print a copyable one for interactive runs, but headless gating is model-behavior-dependent (probe CC-03 passed 1 of 3 runs in the 2026-09 cycle, D-030), so nothing relies on it. <strong>Outside</strong> a session, <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> spawns fresh Claude processes with clean context windows, detecting completion via the sentinel; state persists via git and <code>ops/STATE.md</code>. A PreCompact hook auto-checkpoints STATE.md before context compaction.
+Two layers. <strong>Inside</strong> a session, the <code>ops/.sprint-complete</code> sentinel is the authoritative completion signal — created only after the verification checklist passes. Claude Code's native <code>/goal</code> checklist is a best-effort assist on top: <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> leads every composed prompt with a <code>/goal</code> line, and <code>at-ship</code>/<code>at-coordinate</code> print a copyable one for interactive runs, but headless gating is model-behavior-dependent (probe CC-03 passed 1 of 3 runs in the 2026-09 cycle, D-030), so nothing relies on it. <strong>Outside</strong> a session, <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> spawns fresh Claude processes with clean context windows, detecting completion via the sentinel; state persists via git and <code>ops/STATE.md</code>. A PreCompact hook auto-checkpoints STATE.md before context compaction.
 </details>
 
 <details>
 <summary><strong>What is knowledge compounding?</strong></summary>
 
-After solving a non-trivial problem, <a href="commands/compound.md"><code>/compound</code></a> saves it as a structured document in <a href="ops/solutions/"><code>ops/solutions/</code></a>. Future <a href="commands/plan.md"><code>/plan</code></a> and <a href="commands/deep-research.md"><code>/deep-research</code></a> commands automatically search this directory before starting new work — so every sprint gets smarter.
+After solving a non-trivial problem, <a href="skills/at-compound/SKILL.md"><code>at-compound</code></a> saves it as a structured document in <a href="ops/solutions/"><code>ops/solutions/</code></a>. Future <a href="skills/at-plan/SKILL.md"><code>at-plan</code></a> and <a href="skills/at-deep-research/SKILL.md"><code>at-deep-research</code></a> runs automatically search this directory before starting new work — so every sprint gets smarter.
 </details>
 
 ---

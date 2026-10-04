@@ -1,3 +1,3 @@
 check: C18
-default: warn
+under-warn: warning
 message: harness-private tool name

@@ -11,11 +11,11 @@ metadata:
 
 # Conforming Fixture
 
-The smallest skill that passes every rule. Details live in [the reference](references/details.md); the locator runs as `bash scripts/locate-triforge.sh`.
+The smallest skill that passes every rule. Details live in [the reference](references/details.md); the locator runs as `bash "$SKILL_DIR/scripts/locate-triforge.sh"`.
 
 ## Step 1: Locate
 
-Run `bash scripts/locate-triforge.sh` and read the printed root.
+Run `bash "$SKILL_DIR/scripts/locate-triforge.sh"` and read the printed root.
 
 ## Step 2: Report
 

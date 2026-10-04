@@ -1,3 +1,3 @@
 check: C20
-default: warn
+under-warn: warning
 message: unexpected entry 'README.md'

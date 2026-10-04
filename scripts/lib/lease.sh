@@ -2694,7 +2694,7 @@ print('true' if v is True else 'false')
 }
 
 # lease_status — human table of the ledger (task, builder, state, age) for
-# /status and resume orientation. Tolerant: reports a missing or unparseable
+# at-status and at-resume orientation. Tolerant: reports a missing or unparseable
 # ledger instead of failing.
 lease_status() {
   local LEDGER

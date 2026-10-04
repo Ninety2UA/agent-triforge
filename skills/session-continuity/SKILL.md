@@ -1,8 +1,8 @@
 ---
 name: session-continuity
-description: "Pause, resume, and wrap protocol built on an ops/STATE.md snapshot whose YAML frontmatter records the verification baseline and the commit it describes. Use when the context window is filling and work remains, when starting a session on existing work, or when ending a sprint cleanly. Not for recording decisions or solutions; that is knowledge-compounding."
+description: "Use when pausing with work left, resuming existing work, or wrapping a sprint: the ops/STATE.md snapshot protocol."
 metadata:
-  triforge-consumer: "Claude (lead)"
+  triforge-consumer: "the lead"
   triforge-phase: "session boundaries (pause, resume, wrap)"
   version: "3.3.0"
 ---

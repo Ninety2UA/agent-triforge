@@ -1,0 +1,6 @@
+interface:
+  display_name: "Compound knowledge"
+  short_description: "Record a solved problem or decision under ops/, bar permitting."
+  default_prompt: "Run $at-compound with the solution or decision to document; write nothing when the counterfactual bar is not met."
+policy:
+  allow_implicit_invocation: false

@@ -627,7 +627,7 @@ for _S8_LOADER in return exit; do
   _s8_sane "degraded-${_S8_LOADER}" "$_O"
   printf '%s\n' "$_O" | grep -Fq "WARNING: the Triforge helper did not load (${_S8_BAD}/scripts/invoke-external.sh exited 1: " || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-no-helper-notice"
   _s8_has '^Multi-agent framework ready\.$' || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-orientation-missing"
-  _s8_has '^Commands: ' || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-commands-line-missing"
+  _s8_has '^Lead workflows (' || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-lead-workflows-line-missing"
 done
 # no loader at all: CLAUDE_PLUGIN_ROOT unset (the hook run outside the plugin
 # host) — the same standing WARNING names the unset variable, rc 0, orientation
@@ -637,7 +637,7 @@ printf '%s\n' "$_O" | grep -Fq "WARNING: the Triforge helper did not load (CLAUD
 _s8_has '^Multi-agent framework ready\.$' || _S8_FAIL="$_S8_FAIL unset-root-orientation-missing"
 _S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines), prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40), and survives a failing or absent helper loader"
 if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
-  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and Commands line still printed; every run rc 0, no crash, no line starting with {" "static"
+  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; every run rc 0, no crash, no line starting with {" "static"
 else
   row "SELF-08" "claude" "$_S8_CAP" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160); mismatch:${_S8_FAIL:- none}" "static"
 fi
@@ -657,11 +657,21 @@ rm -rf "$_S8/proj" "$_S8/proj-degraded" "$_S8_BAD" "$_S8/home" "$_S8A" "$_S8/ske
 # and _lease_provision_skills on a worktree-shaped directory carrying a user
 # directory in a shipped slot (kept) and on one whose .agents/skills is a
 # committed symlink to an outside directory (target untouched).
+# Delivered-copy audit (KTD12 / R16): the refresh into a clean project yields
+# exactly the portable set — no at-* lead workflow — the stamp names exactly
+# those, and the copy passes `validate-skills.sh` (strict by default); a user directory
+# under a non-shipped name and a user at-foo directory survive the same refresh
+# untouched and unclaimed, and a stamp entry for at-foo never gets it retired.
 _S8B="${WORK}/self08b"
 _S8B_SYNC="${REPO_ROOT}/scripts/lib/skills-sync.py"
 _S8B_TABLE="${REPO_ROOT}/scripts/lib/skill-digests.txt"
 _S8B_FAIL=""
-set -- $SHIPPED_SKILLS
+# SHIPPED_SKILLS is the portable set and SHIPPED_LEAD_WORKFLOWS the at-* lead
+# workflows (one discovery walk in the harness); this row asserts that the
+# refresh never copies the latter (KTD12). Every count in this row is against
+# the portable set (SHIPPED_COUNT).
+_S8B_PORTABLE=$SHIPPED_SKILLS; _S8B_AT=${SHIPPED_LEAD_WORKFLOWS# }
+set -- $_S8B_PORTABLE
 _S8B_USER=$1; _S8B_EDIT=$2
 # A pristine released copy that differs from the shipped one, rebuilt from its
 # release tag, so the refresh has to prove ownership through the released-
@@ -672,7 +682,7 @@ _S8B_PRISTINE=""; _S8B_PRISTINE_SRC=""; _S8B_PATH=""
 mkdir -p "$_S8B/released"
 while IFS="$(printf '\t')" read -r _n _d _tags; do
   case "$_n" in ''|'#'*) continue ;; esac
-  case " $SHIPPED_SKILLS " in *" $_n "*) : ;; *) continue ;; esac
+  case " $_S8B_PORTABLE " in *" $_n "*) : ;; *) continue ;; esac
   [ "$_n" = "$_S8B_USER" ] || [ "$_n" = "$_S8B_EDIT" ] && continue
   [ "$_d" = "$(python3 "$_S8B_SYNC" digest "${REPO_ROOT}/skills/${_n}")" ] && continue
   _tag=${_tags##*,}
@@ -682,7 +692,7 @@ while IFS="$(printf '\t')" read -r _n _d _tags; do
   fi
 done < "$_S8B_TABLE"
 if [ -z "$_S8B_PRISTINE" ]; then
-  for s in $SHIPPED_SKILLS; do
+  for s in $_S8B_PORTABLE; do
     [ "$s" = "$_S8B_USER" ] || [ "$s" = "$_S8B_EDIT" ] && continue
     if grep -q "^${s}	$(python3 "$_S8B_SYNC" digest "${REPO_ROOT}/skills/${s}")	" "$_S8B_TABLE" 2>/dev/null; then
       _S8B_PRISTINE=$s; _S8B_PRISTINE_SRC="${REPO_ROOT}/skills/${s}"; _S8B_PATH="shipped copy equal to a released one (no tags: table path not exercised)"; break
@@ -710,15 +720,18 @@ else
   grep -q '^format=2$' "$L/.triforge-plugin-version" && grep -q "^digest ${_S8B_PRISTINE} " "$L/.triforge-plugin-version" || _S8B_FAIL="$_S8B_FAIL legacy-stamp-not-migrated"
   grep -q "^digest ${_S8B_EDIT} " "$L/.triforge-plugin-version" && _S8B_FAIL="$_S8B_FAIL legacy-stamp-claims-edited-copy"
 fi
-# owned: retire an unchanged no-longer-shipped copy; a forged entry can't claim a user dir
-O="$_S8B/owned/.agents/skills"; mkdir -p "$O/old-fake-skill" "$O/$_S8B_USER"
-echo "old" > "$O/old-fake-skill/SKILL.md"; echo "mine" > "$O/$_S8B_USER/SKILL.md"; echo "marker" > "$O/$_S8B_USER/USER-MARKER.txt"
-printf 'version=0.0.1-probe\nformat=2\nskills=old-fake-skill,%s\ndigest old-fake-skill %s\ndigest %s %s\n' "$_S8B_USER" "$(python3 "$_S8B_SYNC" digest "$O/old-fake-skill")" "$_S8B_USER" "$(printf 'forged' | shasum -a 256 | cut -d' ' -f1)" > "$O/.triforge-plugin-version"
+# owned: retire an unchanged no-longer-shipped copy; a forged entry can't claim a user dir;
+# a stamp entry for at-foo with its TRUE digest still never retires it (at- is never Triforge's to retire)
+O="$_S8B/owned/.agents/skills"; mkdir -p "$O/old-fake-skill" "$O/$_S8B_USER" "$O/at-foo"
+echo "old" > "$O/old-fake-skill/SKILL.md"; echo "mine" > "$O/$_S8B_USER/SKILL.md"; echo "marker" > "$O/$_S8B_USER/USER-MARKER.txt"; echo "marker" > "$O/at-foo/USER-MARKER.txt"
+printf 'version=0.0.1-probe\nformat=2\nskills=old-fake-skill,%s,at-foo\ndigest old-fake-skill %s\ndigest %s %s\ndigest at-foo %s\n' "$_S8B_USER" "$(python3 "$_S8B_SYNC" digest "$O/old-fake-skill")" "$_S8B_USER" "$(printf 'forged' | shasum -a 256 | cut -d' ' -f1)" "$(python3 "$_S8B_SYNC" digest "$O/at-foo")" > "$O/.triforge-plugin-version"
 _O=$(_s8b_start "$_S8B/owned")
 [ ! -e "$O/old-fake-skill" ] || _S8B_FAIL="$_S8B_FAIL owned-retired-dir-still-present"
 printf '%s\n' "$_O" | grep -q 'retired no-longer-shipped: old-fake-skill' || _S8B_FAIL="$_S8B_FAIL owned-no-retired-notice"
 [ -f "$O/$_S8B_USER/USER-MARKER.txt" ] || _S8B_FAIL="$_S8B_FAIL forged-stamp-deleted-user-dir"
 printf '%s\n' "$_O" | grep 'user-owned' | grep -q "$_S8B_USER" || _S8B_FAIL="$_S8B_FAIL owned-no-notice-for-user-dir"
+[ -f "$O/at-foo/USER-MARKER.txt" ] || _S8B_FAIL="$_S8B_FAIL owned-retired-at-foo"
+grep -q 'at-foo' "$O/.triforge-plugin-version" && _S8B_FAIL="$_S8B_FAIL owned-stamp-still-lists-at-foo"
 # first: no stamp — empty slots only
 F="$_S8B/first/.agents/skills"; mkdir -p "$F/$_S8B_USER"; echo "marker" > "$F/$_S8B_USER/USER-MARKER.txt"
 _O=$(_s8b_start "$_S8B/first")
@@ -738,11 +751,40 @@ ln -s "$_S8B/outside" "$_S8B/wt2/.agents/skills"
 ( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null; _lease_provision_skills "$_S8B/wt1"; _lease_provision_skills "$_S8B/wt2" ) > "$_S8B/prov.out" 2>&1 || true
 [ -f "$_S8B/wt1/.agents/skills/$_S8B_USER/USER-MARKER.txt" ] && [ ! -f "$_S8B/wt1/.agents/skills/$_S8B_USER/SKILL.md" ] || _S8B_FAIL="$_S8B_FAIL provisioning-wrote-into-user-slot"
 [ "$(_s8b_count "$_S8B/wt1/.agents/skills")" -eq "$SHIPPED_COUNT" ] || _S8B_FAIL="$_S8B_FAIL provisioning-count($(_s8b_count "$_S8B/wt1/.agents/skills"))"
+for _n in $_S8B_AT; do [ ! -e "$_S8B/wt1/.agents/skills/$_n" ] || _S8B_FAIL="$_S8B_FAIL provisioning-copied-$_n"; done
 [ "$(ls -A "$_S8B/outside" | tr '\n' ' ')" = "USER-MARKER.txt " ] || _S8B_FAIL="$_S8B_FAIL provisioning-wrote-through-symlink"
+# audit (clean): exactly the portable set, the stamp names exactly those, and the copy is strict-valid
+C="$_S8B/clean/.agents/skills"; mkdir -p "$_S8B/clean"; ( cd "$_S8B/clean" && git init -q ) >/dev/null 2>&1
+_O=$(_s8b_start "$_S8B/clean")
+[ "$(_s8b_count "$C")" -eq "$SHIPPED_COUNT" ] || _S8B_FAIL="$_S8B_FAIL audit-count($(_s8b_count "$C"))"
+for _n in $_S8B_PORTABLE; do [ -f "$C/$_n/SKILL.md" ] || _S8B_FAIL="$_S8B_FAIL audit-missing-$_n"; done
+for _n in $_S8B_AT; do [ ! -e "$C/$_n" ] || _S8B_FAIL="$_S8B_FAIL audit-copied-$_n"; done
+_S8B_STAMPED=$(grep '^skills=' "$C/.triforge-plugin-version" 2>/dev/null | cut -d= -f2 | tr ',' ' ')
+# shellcheck disable=SC2086
+[ "$(_count_words $_S8B_STAMPED)" -eq "$SHIPPED_COUNT" ] || _S8B_FAIL="$_S8B_FAIL audit-stamp-count($(_count_words $_S8B_STAMPED))"
+for _n in $_S8B_STAMPED; do
+  case " $_S8B_PORTABLE " in
+    *" $_n "*) grep -q "^digest $_n " "$C/.triforge-plugin-version" || _S8B_FAIL="$_S8B_FAIL audit-stamp-no-digest-$_n" ;;
+    *) _S8B_FAIL="$_S8B_FAIL audit-stamp-lists-$_n" ;;
+  esac
+done
+grep -q '^digest at-' "$C/.triforge-plugin-version" && _S8B_FAIL="$_S8B_FAIL audit-stamp-digests-an-at-skill"
+# The default run is the strict one (U23): every finding is an error.
+_S8B_VAL=$(bash "$REPO_ROOT/scripts/validate-skills.sh" "$C" 2>&1) || _S8B_FAIL="$_S8B_FAIL audit-copy-fails-strict($(printf '%s\n' "$_S8B_VAL" | grep -v '^skip:' | head -1 | _scrub | cut -c1-120))"
+printf '%s\n' "$_S8B_VAL" | grep -q "^validate-skills: ${SHIPPED_COUNT} skills OK\$" || _S8B_FAIL="$_S8B_FAIL audit-copy-summary($(printf '%s\n' "$_S8B_VAL" | tail -1 | _scrub | cut -c1-80))"
+# audit (users): a non-shipped user directory and a user at-foo directory beside the copy, both untouched and unclaimed
+U="$_S8B/users/.agents/skills"; mkdir -p "$U/my-notes" "$U/at-foo"
+echo "marker" > "$U/my-notes/USER-MARKER.txt"; echo "marker" > "$U/at-foo/USER-MARKER.txt"
+( cd "$_S8B/users" && git init -q ) >/dev/null 2>&1
+_O=$(_s8b_start "$_S8B/users")
+[ "$(_s8b_count "$U")" -eq $((SHIPPED_COUNT + 2)) ] || _S8B_FAIL="$_S8B_FAIL users-count($(_s8b_count "$U"))"
+[ "$(ls -A "$U/my-notes" | tr '\n' ' ')" = "USER-MARKER.txt " ] || _S8B_FAIL="$_S8B_FAIL users-dir-touched"
+[ "$(ls -A "$U/at-foo" | tr '\n' ' ')" = "USER-MARKER.txt " ] || _S8B_FAIL="$_S8B_FAIL users-at-foo-touched"
+grep -q 'my-notes\|at-foo' "$U/.triforge-plugin-version" && _S8B_FAIL="$_S8B_FAIL users-stamp-claims-user-dir"
 if [ -z "$_S8B_FAIL" ]; then
-  row "SELF-08b" "claude" "skills refresh by content digest: user dirs survive refresh, forged stamps and lease provisioning; legacy stamp migrates; unchanged retired copy removed; symlinks untouched (KTD12, R31, CWE-59)" "PASS" "legacy stamp: pristine ${_S8B_PRISTINE} (${_S8B_PATH}) refreshed, edited ${_S8B_EDIT} kept + notice, stamp -> format 2 with digests; digest stamp: old-fake-skill retired, forged entry left ${_S8B_USER} intact; no stamp: empty slots only; symlinked .agents / .agents/skills targets untouched (session start + _lease_provision_skills)" "static"
+  row "SELF-08b" "claude" "skills refresh by content digest: user dirs survive refresh, forged stamps and lease provisioning; legacy stamp migrates; unchanged retired copy removed; symlinks untouched; delivered copy is exactly the portable set, no at-* lead workflow, strict-valid (KTD12, R16, R31, CWE-59)" "PASS" "legacy stamp: pristine ${_S8B_PRISTINE} (${_S8B_PATH}) refreshed, edited ${_S8B_EDIT} kept + notice, stamp -> format 2 with digests; digest stamp: old-fake-skill retired, forged entry left ${_S8B_USER} intact, stamp-listed at-foo not retired; no stamp: empty slots only; symlinked .agents / .agents/skills targets untouched (session start + _lease_provision_skills); delivered copy: ${SHIPPED_COUNT} portable skills, none of ${_S8B_AT:-no at-* shipped} copied, stamp names exactly those, validate-skills OK on the copy (strict default); my-notes + at-foo user dirs untouched and unclaimed" "static"
 else
-  row "SELF-08b" "claude" "skills refresh by content digest: user dirs survive refresh, forged stamps and lease provisioning; legacy stamp migrates; unchanged retired copy removed; symlinks untouched (KTD12, R31, CWE-59)" "FAIL" "mismatch:${_S8B_FAIL}" "static"
+  row "SELF-08b" "claude" "skills refresh by content digest: user dirs survive refresh, forged stamps and lease provisioning; legacy stamp migrates; unchanged retired copy removed; symlinks untouched; delivered copy is exactly the portable set, no at-* lead workflow, strict-valid (KTD12, R16, R31, CWE-59)" "FAIL" "mismatch:${_S8B_FAIL}" "static"
 fi
 rm -rf "$_S8B" "$_S8"
 
@@ -786,6 +828,7 @@ rm -rf "$_S9"
 #     nested     sub/AGENTS.md                                 -> 42 naming it
 #     override   AGENTS.override.md                            -> 42 naming it
 #     mcp        .mcp.json                                     -> 42 naming it
+#     commands   commands/x.md (4.0 ships none; the host auto-loads it) -> 42 naming it
 #     case       Hooks/handlers/x.sh (case variant)            -> 42 naming it
 #     symclaude  symlink .claude -> docs (bare protected name) -> 42 naming .claude
 #     symhooks   symlink hooks -> docs (bare protected name)   -> 42 naming hooks
@@ -874,6 +917,7 @@ _S10_RES=$(
   _s10_case "$_S10/fw" nested  'mkdir -p sub && echo x > sub/AGENTS.md'
   _s10_case "$_S10/fw" override 'echo x > AGENTS.override.md'
   _s10_case "$_S10/fw" mcp     'echo "{}" > .mcp.json'
+  _s10_case "$_S10/fw" commands 'mkdir -p commands && echo x > commands/x.md'
   _s10_case "$_S10/fw" case    'mkdir -p Hooks/handlers && echo x > Hooks/handlers/x.sh'
   _s10_case "$_S10/fw" symclaude 'ln -s docs .claude'
   _s10_case "$_S10/fw" symhooks  'ln -s docs hooks'
@@ -899,6 +943,7 @@ _s10_expect rename 42 'scripts/lease-git-hooks/pre-push'
 _s10_expect nested 42 'sub/AGENTS.md'
 _s10_expect override 42 'AGENTS.override.md'
 _s10_expect mcp 42 '.mcp.json'
+_s10_expect commands 42 'commands/x.md'
 _s10_expect case 42 'Hooks/handlers/x.sh'
 _s10_expect symclaude 42 ' .claude  (project_protected)'
 _s10_expect symhooks 42 ' hooks  (framework_protected)'
@@ -914,7 +959,7 @@ _s10_expect submodule 42 ' .claude  (project_protected)'
 _s10_expect submodule 42 ' .gitmodules  (project_protected)'
 _s10_expect corrupt 42 'classifier failed'
 if [ -z "$_S10_FAIL" ]; then
-  row "SELF-10" "claude" "protected paths: AGENTS.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "PASS" "every path on the AGENTS.md protected line classifies as protected (planted path caught); classifier flags bare .agents (project) + skills (framework), not .clauder/claudeish; fw fixture: roster.sh / git mv pre-push / sub/AGENTS.md / AGENTS.override.md / .mcp.json / Hooks/handlers/x.sh / symlinks .claude + hooks -> rc 42 naming the path; manifest renamed / deleted / unparseable -> still the Triforge checkout (roster.sh -> 42); docs-only -> promoted; user fixture: scripts/lib/util.sh -> promoted, ops/roster.toml / symlink .cursor / opencode.json -> 42, a nested repo at .claude + .gitmodules ignore=all -> 42 naming .claude and .gitmodules (--ignore-submodules=none); corrupted registry literal -> 42 naming the classifier error; per-case lease root + throwaway HOME" "static"
+  row "SELF-10" "claude" "protected paths: AGENTS.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "PASS" "every path on the AGENTS.md protected line classifies as protected (planted path caught); classifier flags bare .agents (project) + skills (framework), not .clauder/claudeish; fw fixture: roster.sh / git mv pre-push / sub/AGENTS.md / AGENTS.override.md / .mcp.json / commands/x.md / Hooks/handlers/x.sh / symlinks .claude + hooks -> rc 42 naming the path; manifest renamed / deleted / unparseable -> still the Triforge checkout (roster.sh -> 42); docs-only -> promoted; user fixture: scripts/lib/util.sh -> promoted, ops/roster.toml / symlink .cursor / opencode.json -> 42, a nested repo at .claude + .gitmodules ignore=all -> 42 naming .claude and .gitmodules (--ignore-submodules=none); corrupted registry literal -> 42 naming the classifier error; per-case lease root + throwaway HOME" "static"
 else
   row "SELF-10" "claude" "protected paths: AGENTS.md list ⊆ registry; lease_promote blocks rename/case/any-depth/bare-name hits, fails closed, spares user code (KTD8/R30)" "FAIL" "mismatch:$(printf '%s' "$_S10_FAIL" | cut -c1-600)" "static"
 fi
@@ -1139,6 +1184,13 @@ if [ "$_S11_UPV" != "$_S11_UP" ] && [ -d "$_S11_UPV" ]; then   # case-insensitiv
   unset _sh
 fi
 _s11_loc outside-cwd "$_S11/cwd" sh "$_S11_PLOC" 1 "at-setup"
+# positive control: a plugin root in a dot-named directory that is not a CLI
+# configuration directory (a clone into ~/.triforge, say) still resolves
+mkdir -p "$_S11/.dotplug/.claude-plugin" "$_S11/.dotplug/scripts" "$_S11/.dotplug/skills/at-probe/scripts"
+printf '{"name": "agent-triforge"}\n' > "$_S11/.dotplug/.claude-plugin/plugin.json"
+: > "$_S11/.dotplug/scripts/invoke-external.sh"
+[ -f "$_S11_LOCATOR" ] && cp "$_S11_LOCATOR" "$_S11/.dotplug/skills/at-probe/scripts/locate-triforge.sh" || true
+_s11_loc dotplug "$_S11/cwd" sh "$_S11/.dotplug/skills/at-probe/scripts/locate-triforge.sh" 0 ".dotplug"
 rm -rf "$_S11/proj/.agents/.claude-plugin" "$_S11/proj/.agents/scripts"
 # (d)
 cp "$_S11_LOADER" "$_S11/bare/invoke-external.sh"
@@ -1156,7 +1208,7 @@ _S11_E_PWD=$(grep -c 'pwd)/scripts' "$_S11_LOADER" || true)
 [ "$_S11_E_PWD" = 0 ] || _S11_FAIL="$_S11_FAIL e(pwd-fallback=$_S11_E_PWD)"
 _S11_CAP="plugin root without CLAUDE_PLUGIN_ROOT: loader + lanes resolve the plugin, never a project's scripts/ or skills/; skill locator order and pointer refusals; bare loader fails closed naming at-setup (KTD6/R16/R42)"
 if [ -z "$_S11_FAIL" ]; then
-  row "SELF-11" "claude" "$_S11_CAP" "PASS" "CLAUDE_PLUGIN_ROOT unset: loader root = this checkout; against argv-recording stubs codex passed --output-schema <root>/codex-agents/review-verdict.schema.json + a ${#_S11_CX_PRE}-char instructions prefix, kimi --agent-file <root>/kimi-agents/reviewer.md, cursor the reviewer brief prefixed onto the prompt (no empty brief); from a user project with its own scripts/invoke-external.sh + skills/user-skill: root = checkout, the project's loader never sourced, _lease_plugin_root = checkout, worktree provisioned with exactly the shipped skills (${_S11_GOT% }); locator: own location resolves under sh/bash/zsh, no pointer -> rc 1 naming at-setup, pointer inside the project / to a non-root / tracked -> rc 3, untracked pointer to the checkout -> resolves, linked worktree reads the main checkout's pointer, a root planted at <project>/.agents is ignored by a project-tier copy (pointer wins, else rc 1), pointer tracked under another letter case / behind a symlinked .agents -> rc 3; bare-dir loader copy sourced from the project -> rc ${_S11_D_RC} naming at-setup; scripts/lib/*.sh: 0 CLAUDE_PLUGIN_ROOT reads, loader: no pwd)/scripts fallback" "static"
+  row "SELF-11" "claude" "$_S11_CAP" "PASS" "CLAUDE_PLUGIN_ROOT unset: loader root = this checkout; against argv-recording stubs codex passed --output-schema <root>/codex-agents/review-verdict.schema.json + a ${#_S11_CX_PRE}-char instructions prefix, kimi --agent-file <root>/kimi-agents/reviewer.md, cursor the reviewer brief prefixed onto the prompt (no empty brief); from a user project with its own scripts/invoke-external.sh + skills/user-skill: root = checkout, the project's loader never sourced, _lease_plugin_root = checkout, worktree provisioned with exactly the portable skills (${_S11_GOT% }); locator: own location resolves under sh/bash/zsh, no pointer -> rc 1 naming at-setup, pointer inside the project / to a non-root / tracked -> rc 3, untracked pointer to the checkout -> resolves, linked worktree reads the main checkout's pointer, a root planted at <project>/.agents is ignored by a project-tier copy (pointer wins, else rc 1), pointer tracked under another letter case / behind a symlinked .agents -> rc 3, a plugin root in a non-config dot directory still resolves; bare-dir loader copy sourced from the project -> rc ${_S11_D_RC} naming at-setup; scripts/lib/*.sh: 0 CLAUDE_PLUGIN_ROOT reads, loader: no pwd)/scripts fallback" "static"
 else
   row "SELF-11" "claude" "$_S11_CAP" "FAIL" "mismatch:$(printf '%s' "$_S11_FAIL" | cut -c1-700)" "static"
 fi

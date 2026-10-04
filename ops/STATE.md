@@ -57,13 +57,8 @@ Update this table and the frontmatter at every PR boundary; the plan is `docs/pl
 
 | Work | Model | Effort |
 |---|---|---|
-| Lead (orchestration, from Phase 2 on; user-approved 2026-10-04) | Fable 5.1 | medium — the user sets it on the session; the lead cannot change its own |
-| Builders, pattern-following units (U8 personas, U29 probe rows, U18 manifests, U16/U17 adapters, docs) — from Phase 2 on | Opus 5.5 | high |
-| Builders, delicate shell/security units (U13, U10, U12 lease/ledger/lanes; U14 Codex-lead bootstrap) and review fix waves touching lease.sh / the locator / the hook | Fable 5.1 | high |
-| Phases H, 0, 1a, 1b builds (done or in flight) | Fable 5.1 | high |
-| Reviews: correctness, security, validator, final-diff | Opus 5.5 | high |
-| Reviews: standards, testing, maintainability, agent-native | Sonnet 5 | (mid-tier) |
-| Simplify pass (three Sonnet reviewers) | Sonnet 5 | only for code-heavy diffs; skipped for prose-heavy (skills, docs, personas) |
+| Every build phase, Phase H included | Fable 5.1 | high |
+| Reviews | Opus 5.5 | high |
 | Audit edits (U3/U4) | Opus 5.5 | medium |
 | Watch cycles and research | Opus 5.5 | high |
 

@@ -29,6 +29,12 @@ every existing entry must be a plain directory directly inside .agents/skills.
 Copies preserve symlinks as links (never followed). The stamp is written last,
 tmp + rename, and only when every copy succeeded.
 
+Lead workflows (KTD12, R16): a shipped skills/at-* directory is a lead workflow
+that reaches a lead only from its plugin install. It is never copied into
+.agents/skills or a worktree, never listed in the stamp, and an at-* directory
+already present there is never replaced or retired, whatever a stamp says —
+for refresh purposes the at- prefix means "not Triforge-shipped".
+
 Usage:
     skills-sync.py sync --plugin-root <dir> --project <dir> [--prefix <text>]
     skills-sync.py digest <dir>
@@ -52,6 +58,11 @@ STAMP_FORMAT = "2"
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 IGNORED_FILES = (".DS_Store",)
 TMP_PREFIX = ".triforge-tmp-"   # copies in flight; never a valid skill name (NAME_RE), cleaned up on the next run
+LEAD_PREFIX = "at-"              # lead workflows: never copied, never owned, never retired (KTD12)
+
+
+def lead_workflow(name):
+    return name.startswith(LEAD_PREFIX)
 
 
 def _entry_line(kind, rel, value):
@@ -197,7 +208,7 @@ def sync(plugin_root, project, prefix):
         return out
 
     def owned(name, digest):
-        if stamp is None:
+        if stamp is None or lead_workflow(name):
             return False
         if stamp["format"] == STAMP_FORMAT:
             return stamp["digests"].get(name) == digest
@@ -212,8 +223,8 @@ def sync(plugin_root, project, prefix):
             shutil.rmtree(os.path.join(dest, leftover), ignore_errors=True)
     for name in sorted(os.listdir(src_root)):
         src = os.path.join(src_root, name)
-        if not os.path.isdir(src) or os.path.islink(src):
-            continue
+        if lead_workflow(name) or not os.path.isdir(src) or os.path.islink(src):
+            continue    # a lead workflow (at-*) stays in the plugin install
         if not NAME_RE.match(name):
             skipped.append(name + "(invalid-name)")
             continue
@@ -262,8 +273,8 @@ def sync(plugin_root, project, prefix):
         previous = sorted(set(stamp["skills"]) | set(stamp["digests"]))
     retired_kept = []
     for name in previous:
-        if name in shipped or not NAME_RE.match(name):
-            continue
+        if name in shipped or not NAME_RE.match(name) or lead_workflow(name):
+            continue    # an at-* entry in a stamp never makes an at-* directory Triforge's to retire
         target = os.path.join(dest, name)
         if not os.path.lexists(target):
             continue
@@ -287,7 +298,7 @@ def sync(plugin_root, project, prefix):
             with open(tmp, "w", encoding="utf-8") as fh:
                 fh.write("\n".join(body) + "\n")
             os.replace(tmp, stamp_path)
-            note(".agents/skills refreshed to " + (version or "?") + " (Triforge replaces only its own unchanged copies, identified by content digest; keep customizations in a differently named directory)"
+            note(".agents/skills refreshed to " + (version or "?") + " (Triforge replaces only its own unchanged copies, identified by content digest; keep customizations in a differently named directory; lead workflows (at-*) are not copied)"
                  + ("; retired no-longer-shipped: " + " ".join(retired) if retired else "") + ".")
         except OSError:
             try:
@@ -321,7 +332,7 @@ def table(repo, tag_glob):
             if len(parts) < 3 or kind != b"blob":
                 continue
             name, rel = parts[1], "/".join(parts[2:])
-            if rel.rsplit("/", 1)[-1] in IGNORED_FILES:
+            if rel.rsplit("/", 1)[-1] in IGNORED_FILES or lead_workflow(name):
                 continue
             blob = subprocess.run(["git", "-C", repo, "cat-file", "blob", sha.decode()], check=True,
                                   capture_output=True).stdout

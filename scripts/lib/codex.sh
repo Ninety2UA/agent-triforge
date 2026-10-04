@@ -225,7 +225,7 @@ ${PROMPT}"
   fi
 
   # Codex prints two advisory lines into the captured stream that would
-  # otherwise be promoted verbatim into ops/REVIEW_CODEX.md (commands/review.md
+  # otherwise be promoted verbatim into ops/REVIEW_CODEX.md (the at-review
   # consumer): the --dangerously-bypass-hook-trust warning and, when a stale
   # .codex/agents/agents.toml is still present, "Ignoring malformed agent role
   # definition". Strip them from OUTPUT_FILE; the raw stream is not otherwise

@@ -1,8 +1,8 @@
 ---
 name: knowledge-compounding
-description: "Counterfactual-gated capture of solved problems and decisions into ops/solutions/ and ops/decisions/. Use when a task completes and a future agent without a note would plausibly repeat the mistake or re-derive the decision, or when a wrap-up must confirm nothing that cleared that bar was skipped. Not for trivial fixes whose reasoning is recoverable from the diff; those produce no note, and this skill says why."
+description: "Use when a task completes and a future agent without a note would repeat the mistake or re-derive the decision."
 metadata:
-  triforge-consumer: "Claude (lead)"
+  triforge-consumer: "the lead"
   triforge-phase: "task completion (lease_collect); 6 (wrap-up)"
   version: "3.3.0"
 ---

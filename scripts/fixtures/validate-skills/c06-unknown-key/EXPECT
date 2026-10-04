@@ -1,3 +1,3 @@
 check: C06
-default: fail
+under-warn: error
 message: unexpected top-level frontmatter key 'allowed-tools'

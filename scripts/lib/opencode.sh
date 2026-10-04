@@ -63,7 +63,7 @@ _OPENCODE_PERMISSION_DEFAULT='{"bash":{"*":"allow","rm -rf*":"deny","rm -fr*":"d
 # would be silently dropped, and it defaults to a shared per-user background
 # service that ignores the caller's env -i environment. Until the V2 port lands
 # (deferred — its own sprint), every OpenCode entry point refuses a V2 binary:
-# invoke_opencode, the lease opencode) arm (scripts/lib/lease.sh), and /setup's
+# invoke_opencode, the lease opencode) arm (scripts/lib/lease.sh), and at-setup's
 # enrollment preflight (roster_enroll_member). The fix is the V1 pin below —
 # never the npm package `opencode2`, a third-party decoy.
 _OPENCODE_V1_PIN='npm i -g opencode-ai@1'

@@ -1,0 +1,3 @@
+check: C26
+under-warn: warning
+message: no interpolation

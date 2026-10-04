@@ -1,0 +1,15 @@
+# Integrity escalations (rc 44)
+
+Read this when any lease call returns 44. It is detection, not prevention (KTD18): the lease functions compare the git state with the baseline the lead recorded and refuse to act on a change the lead did not make.
+
+## What a 44 compares, restores and escalates
+
+A builder without an OS sandbox can write anything the user can. Before they act, the lease functions compare the git state with the lead's recorded baseline (KTD18): `.git/config`, `.git/config.worktree`, `.git/hooks/`, `.git/info/`, the global git config, the lead's trusted git config, the lead checkout's `.git`, `ops/leases.toml`, the default branch, and each open lease's `.git` pointer and admin files. Any change not made through the lease functions counts, including your own `git config`, `git remote add` or hook installer. The call restores `.git/config`, `.git/config.worktree`, `.git/hooks/` and the trusted git config where it can (only from a lead copy that still matches, after saving the changed version as `<lease root>/lead/<name>.changed-<UTC time>`) and the ledger from its lead copy (no saved version), escalates every lease in `building` or `review` (or the one lease whose files changed), names the surface, and returns 44 with nothing merged or promoted. `lease_create`, `lease_merge` and `lease_promote` also return 44 when the checkout is on a branch other than the recorded integration branch (on the default branch or a detached HEAD, `lease_merge` and `lease_promote` refuse with rc 1 first), and merge and promotion return 44 when that branch gained commits since the lead's last merge.
+
+A 44 is not one of the four hard stops; resolve it with a ruling:
+- Read what changed and which builders were running. A 44 saying the check could not run names no change: fix the cause it prints and rerun.
+- If the change is yours or the user's (your commit on the integration branch, `git remote add`, a hook installer, pulling `main`, a promotion done by hand after an approved rc 42): if the 44 restored that surface, copy the saved `.changed-` version back first; then run `lease_rebaseline [task...]` naming the leases the 44 escalated (the message prints the command). It accepts every surface that differs, so never run it to get past a change you haven't looked at, and it never accepts a ledger edit. An edit to `~/.gitconfig` is accepted too, but the lead's git keeps the identity it captured at first use: to pick the edit up, delete `<lease root>/lead/gitconfig`, then rebaseline.
+- If a builder made it, or you can't rule that out: stop its process first (the `pid` is in the lease row; nothing sweeps an escalated lease), `lease_reclaim` the lease, and rule on reassigning the task. Say what you found in the ruling.
+- Commit your own `ops/` edits after the wave's last merge, or run `lease_rebaseline` right after committing them; stage them by path, never with `git add -A`, which could sweep in a file a builder wrote.
+
+Triforge's own git calls ignore settings a worker could have written; the harness's git and any git you run do not, so a planted hook runs on your next plain `git commit` before any check sees it.

@@ -1,8 +1,8 @@
 ---
 name: verification-before-completion
-description: "Evidence-gated completion checklist with an Iron Law, a gate function, and a claim-to-evidence table. Use when about to claim a task, wave, or sprint is done, before moving a task to Done in ops/TASKS.md, before writing the ops/.sprint-complete marker, or before reporting Status: DONE from a lease. Also use for documenter, analyst, and research work that has no test command. Not for planning the work; that is writing-plans."
+description: "Use before claiming a task, wave or sprint done, or reporting Status: DONE — fresh evidence for every claim."
 metadata:
-  triforge-consumer: "All"
+  triforge-consumer: "every role"
   triforge-phase: "every task completion; 6 (wrap-up)"
   version: "3.3.0"
 ---
@@ -15,31 +15,21 @@ metadata:
 
 "Fresh" means produced by a command or observation you ran after the last change, in this session, and read in full. A claim is any statement that work is done, tests pass, a bug is fixed, a migration applied, or a document matches the code. Memory of an earlier run, a builder's self-report, and a diff that looks right are not evidence.
 
+**Done when** every claim you are about to make has a gate record (the claim, the command or observation, its quoted result, the commit or file state it ran against) and the completion signal for your scope has been given — or the gap is reported and the task left open.
+
+**Safe failure direction:** when a step of the gate cannot be completed, the claim is not made. Report what the evidence does show ("not verified: no command reproduces the bug on this host") and stop there; a task stays open rather than closing on a guess.
+
 ## The gate function
 
 Run this before every claim, in order. Do not skip a step because the answer feels obvious.
 
 1. **Identify the claim.** Write the exact sentence you are about to state ("the full suite passes", "the migration is applied", "the docs match the flags").
-2. **Name the proof.** Name the command or observation whose result would prove that sentence, and what a failing result would look like.
+2. **Name the proof.** Name the command or observation whose result would prove that sentence, and what a failing result would look like. [references/claim-evidence.md](references/claim-evidence.md) lists, per kind of claim, what counts and what is commonly offered instead.
 3. **Run it.** Execute the command now, after the last change, against the tree you are about to hand over.
 4. **Read the result.** Read the whole output: exit code, totals, skipped items, warnings. A green summary line above a red section is a failure.
 5. **State the claim with the evidence quoted.** Only now state the claim, and quote the command and the output lines that prove it. If the result does not prove the claim, say what it does show and stop there.
 
-If any step cannot be completed, the claim is not made. Report the gap instead ("not verified: no command reproduces the bug on this host").
-
-## Claim, evidence, and what is not enough
-
-| Claim | Requires | Not sufficient |
-|---|---|---|
-| Tests pass | The full suite run after the last change, with the exit code and totals quoted | Running only the new tests; a run from before the last edit; a builder's "all green" line |
-| Bug fixed | Red-green-revert: the reproduction fails on the old code, passes on the fix, and fails again when the fix is reverted | The symptom not appearing once; a fix that should cover it |
-| Regression test works | Red-green-revert, with the test's failure message naming the behavior it guards | A test that passed the first time it ran |
-| Feature works | The feature exercised end to end through its real entry point, with the observed output quoted | Unit tests alone; reading the code; a screenshot from an earlier build |
-| Migration applied | The schema or data queried after the migration and the result quoted; the rollback tried on a scratch copy | The migration file existing; the migration command exiting 0 |
-| Docs match code | Every documented command or flag executed as written, and every documented name grepped in the source, with hits quoted | Rereading the docs for style; the docs and code changing in the same commit |
-| Refactor preserves behavior | The pre-refactor tests (or characterization tests) unchanged and green, and the VCS diff shows only intended changes | "The logic is equivalent"; new tests written alongside the refactor |
-| Builder completed | The VCS diff read by the lead shows the change, and the builder's final Status line parsed | The builder's prose report; a clean exit code |
-| Lint clean | The linter run on the changed files with zero findings quoted | The editor showing no warnings |
+If any step cannot be completed, the claim is not made. Report the gap instead.
 
 ## When there is no test command
 
@@ -66,62 +56,15 @@ Stop and run the gate function when you notice any of these:
 - You are marking a task Done because the diff is small.
 - The evidence lives in your memory of an earlier session.
 
-## Common rationalizations
-
-| Excuse | Reality |
-|---|---|
-| "It worked before the refactor" | The refactor is the change under test. Only a run after it proves anything. |
-| "Tests are slow" | A slow run is shorter than the fix cycle a false Done triggers. Run the suite, or state that it was not run. |
-| "The diff is obvious" | Obvious diffs ship typos, wrong paths, and inverted conditions. The gate takes one command. |
-| "The builder said all tests pass" | A self-report is a claim, not evidence. Read the diff and quote a run you performed. |
-| "I ran it a minute ago" | If an edit happened since, the run is stale. Run it again. |
-| "There is no test command for this" | There is always a smoke run, a grep, a parser, or a manual reproduction. Pick one and record it. |
-| "CI will catch it" | CI is a second gate, not a replacement for the first. A red CI after a Done still costs a full cycle. |
-| "It is only documentation" | Documentation that names a wrong flag breaks the next agent that follows it. Execute what it documents. |
-| "The linter passed, so the code is right" | Lint proves style, not behavior. Each claim needs its own proof. |
-| "I will verify after I mark it Done" | Done is the claim. Verification comes before the claim by definition. |
-
-## Requirements met
-
-Before marking ANY task as done, verify:
-
-### Code quality
-- [ ] Code compiles/transpiles without errors
-- [ ] No new linter warnings introduced
-- [ ] No commented-out code left behind
-- [ ] No debug logging (console.log, print, debugger) left in production code
-- [ ] No hardcoded secrets, API keys, or credentials
-
-### Tests
-- [ ] All existing tests pass (run full suite, not just new tests)
-- [ ] New code has corresponding tests
-- [ ] Tests actually test behavior (not just line coverage)
-- [ ] Edge cases covered (empty inputs, boundaries, error conditions)
-
-### Contracts
-- [ ] Output conforms to interfaces defined in CONTRACTS.md
-- [ ] If new interfaces were introduced, they are documented
-- [ ] If existing interfaces were modified, change was proposed in MEMORY.md first
-
-### Integration
-- [ ] Changes work with the rest of the system (not just in isolation)
-- [ ] No N+1 queries or obvious performance regressions
-- [ ] Error handling covers failure modes (timeouts, missing data, auth failures)
-
-### Documentation
-- [ ] CHANGELOG.md updated with changes and attribution
-- [ ] MEMORY.md updated with any new decisions, patterns, or gotchas
-- [ ] TASKS.md updated (task moved to "Done" with result summary)
+When one of these is accompanied by a reason why the gate does not apply this time, [references/rationalizations.md](references/rationalizations.md) has the answer to it.
 
 ## Output
 
 Produce, in this order:
 - The gate record for each claim: the claim, the command or observation, its quoted result, and the commit or file state it ran against
-- The "Requirements met" checklist with pass/fail status for each item
+- The "Requirements met" checklist ([references/requirements-checklist.md](references/requirements-checklist.md)) with pass/fail status for each item
 - The completion signal for your scope (below) when every claim is proven and every item passes
 - Otherwise, the blocker documented in TASKS.md and the task left open
-
-Skills are invoked in each CLI's own form (`/name` in Claude Code, Antigravity, and Cursor; `$name` in Codex; the skill tool in OpenCode; `/skill:name` in Kimi). The evidence rules are the same in every harness.
 
 ## Completion signal
 
@@ -134,7 +77,7 @@ Only after ALL checks pass:
   touch ops/.sprint-complete
   ```
 
-  Outer tooling (`scripts/coordinate.sh`) detects sprint completion solely by this gitignored file's existence.
+  Outer tooling (`$ROOT/scripts/coordinate.sh`, where `ROOT` is the Triforge plugin root) detects sprint completion solely by this gitignored file's existence.
 
 The signal means: "I have verified that all work is complete and all checks pass." It is not a summary; it is a commitment.
 

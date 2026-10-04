@@ -45,8 +45,8 @@ OpenCode discovers skills from `.agents/skills/` (Triforge's provisioned copy),
 `.opencode/skill(s)/`, and `.claude/skills/`; `/<name>` in a prompt triggers the
 native `skill` tool (probe OC-07). Commands live in `.opencode/command/*.md`
 (the plural `commands/` also loads) and run headless with
-`opencode run --command <name>`. Triforge's slash commands are lead-only, so
-none is ported here.
+`opencode run --command <name>`. Triforge's lead workflows (the `at-*` skills)
+run only on the lead, so none is ported here.
 
 To customize: edit `opencode.json` (models, providers, permissions) — it is
 copied to `.opencode/opencode.json` at session start only if absent, so your

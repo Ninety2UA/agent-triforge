@@ -1,0 +1,6 @@
+interface:
+  display_name: "Triforge Ship"
+  short_description: "Autonomous Phase 0-6 sprint for one scoped goal."
+  default_prompt: "Run $at-ship with the goal I give you and report the sprint."
+policy:
+  allow_implicit_invocation: false

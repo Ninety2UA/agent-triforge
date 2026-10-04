@@ -5,7 +5,7 @@ description: "Use when a fixture carries a locator that drifted from the shared 
 
 # at-drift
 
-Run `bash scripts/locate-triforge.sh`.
+Run `bash "$SKILL_DIR/scripts/locate-triforge.sh"`.
 
 ## Output
 

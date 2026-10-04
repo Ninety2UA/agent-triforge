@@ -44,7 +44,10 @@ FRAMEWORK_PROTECTED = (
     # the probe harness and the release gates
     "scripts/probe-capabilities.sh", "scripts/probe-self-tests.sh",
     "scripts/validate-skills.sh", "scripts/validate-versions.sh", "scripts/release-notes.sh",
-    # lifecycle hooks, the lead-facing workflows and the persona home
+    # lifecycle hooks, the lead-facing workflows and the persona home. commands/
+    # ships empty since 4.0 (the workflows are skills/at-*/) but stays gated: the
+    # plugin host auto-loads a plugin-root commands/ directory, so a lease that
+    # re-creates commands/*.md must hit the gate (validate-versions.sh check 8)
     "hooks/", "skills/", "commands/", "personas/",
     # shipped agent configs, one directory per CLI
     "agents/", "antigravity-agents/", "codex-agents/", "opencode-agents/", "kimi-agents/", "cursor-agents/",

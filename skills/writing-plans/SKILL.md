@@ -1,15 +1,15 @@
 ---
 name: writing-plans
-description: "Goal decomposition into right-sized, lease-ready tasks with Accept and Fails-when criteria, shadow paths, error maps, and interface context. Use when turning a goal into ops/TASKS.md, when a plan-checker verdict asks for task fields to be fixed, or when a task must be split because a builder would face a decision the lead should weigh. Not for validating a finished plan; that is the plan-checker's job."
+description: "Use when turning a goal into ops/TASKS.md, or a plan-checker verdict asks for task fields fixed: lease-ready tasks."
 metadata:
-  triforge-consumer: "Claude (lead)"
+  triforge-consumer: "the lead"
   triforge-phase: "1b (planning)"
   version: "3.3.0"
 ---
 
 # Writing Plans
 
-Plans are not wishlists. A plan is a contract that, if followed, produces the feature.
+Plans are not wishlists. A plan is a contract that, if followed, produces the feature. Validating a finished plan belongs to the plan-checker persona, not to this skill.
 
 ## Before writing ops/TASKS.md: the incomplete-plan guard
 
@@ -61,8 +61,8 @@ Format:
 
 Field rules:
 
-- **Accept:** observable, and runnable wherever a command exists (`bash scripts/validate-skills.sh` exits 0 with ten skills listed; the endpoint returns 201 with the user object). For documenter and analyst tasks, name the artifact and the sections it must contain.
-- **Fails when:** the concrete signal that proves the Accept is not met (`exit code nonzero or fewer than ten skills listed`; `any 5xx on the happy path`). It is the falsifying direction of Accept, not a restatement. Placeholders such as `TBD`, `N/A`, `none`, `unknown`, or `?` are rejected by the plan-checker.
+- **Accept:** observable, and runnable wherever a command exists (`npm test` exits 0 with the suite's totals quoted; the endpoint returns 201 with the user object). For documenter and analyst tasks, name the artifact and the sections it must contain.
+- **Fails when:** the concrete signal that proves the Accept is not met (`exit code nonzero or any failing test`; `any 5xx on the happy path`). It is the falsifying direction of Accept, not a restatement. Placeholders such as `TBD`, `N/A`, `none`, `unknown`, or `?` are rejected by the plan-checker.
 - **Precondition:** a read-only check the lead runs before dispatch (`ops/CONTRACTS.md` defines `User`; branch `feat/x` exists; the fixture directory is empty). Omit only when the task has no prerequisite state beyond `Depends:`.
 - **Reversibility:** `reversible` (a VCS revert undoes it), `checkpointed` (undoable only from a checkpoint taken first: a backup, a tagged commit, a scratch copy; name the checkpoint in `Precondition:`), or `one-way` (cannot be undone: data deletion, schema drop, external publish, a push to a shared branch). A `one-way` task is a hard stop in wave execution; it needs a user checkpoint in the plan, and the plan-checker flags one without it.
 
