@@ -28,7 +28,8 @@
 #   2. This copy's own location: <skill>/scripts/locate-triforge.sh, so the
 #      directory two levels above <skill> — the plugin root when the skill lives
 #      at <plugin>/skills/<skill>/. The step is skipped when that directory lies
-#      strictly inside <project>: a copy under <project>/.agents/skills/ would
+#      strictly inside <project> or is a CLI configuration directory (.agents,
+#      .claude, .codex, ...): a copy under <project>/.agents/skills/ would
 #      otherwise let the project plant a passing root at <project>/.agents, so
 #      a project-tier copy resolves only through the pointer (step 3). The
 #      Triforge checkout itself (that directory == <project>) still resolves.
@@ -117,14 +118,16 @@ inside_project() { # inside_project <dir> — strictly below TOP or MAIN (never 
 
 # 2. this copy's own location: <plugin>/skills/<skill>/scripts/locate-triforge.sh
 #    — skipped for a copy inside the project and for a copy whose would-be root
-#    is a hidden directory (<anything>/.agents, .claude, .codex, ...): a
-#    project-tier copy under <project>/.agents/skills/ must not let the project
-#    plant its own root, whatever the working directory is
+#    is a CLI configuration directory, where project-tier skill copies live
+#    (<anything>/.agents, .claude, .codex, .cursor, .opencode, .kimi-code,
+#    .gemini, .antigravity): such a copy must not let the project plant its own
+#    root, whatever the working directory is. Other dot-named directories (a
+#    plugin cloned into ~/.triforge, say) still resolve.
 SELF_DIR=$(phys "$(dirname "$0")") || SELF_DIR=""
 if [ -n "$SELF_DIR" ]; then
   OWN_ROOT=$(dirname "$(dirname "$(dirname "$SELF_DIR")")")
   case "${OWN_ROOT##*/}" in
-    .*) ;;
+    .agents|.claude|.codex|.cursor|.opencode|.kimi-code|.gemini|.antigravity) ;;
     *)
       if ! inside_project "$OWN_ROOT" && is_triforge_root "$OWN_ROOT"; then
         phys "$OWN_ROOT"

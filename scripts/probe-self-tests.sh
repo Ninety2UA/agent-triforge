@@ -627,7 +627,7 @@ for _S8_LOADER in return exit; do
   _s8_sane "degraded-${_S8_LOADER}" "$_O"
   printf '%s\n' "$_O" | grep -Fq "WARNING: the Triforge helper did not load (${_S8_BAD}/scripts/invoke-external.sh exited 1: " || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-no-helper-notice"
   _s8_has '^Multi-agent framework ready\.$' || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-orientation-missing"
-  _s8_has '^Commands: ' || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-commands-line-missing"
+  _s8_has '^Lead workflows (' || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-lead-workflows-line-missing"
 done
 # no loader at all: CLAUDE_PLUGIN_ROOT unset (the hook run outside the plugin
 # host) — the same standing WARNING names the unset variable, rc 0, orientation
@@ -637,7 +637,7 @@ printf '%s\n' "$_O" | grep -Fq "WARNING: the Triforge helper did not load (CLAUD
 _s8_has '^Multi-agent framework ready\.$' || _S8_FAIL="$_S8_FAIL unset-root-orientation-missing"
 _S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines), prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40), and survives a failing or absent helper loader"
 if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
-  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and Commands line still printed; every run rc 0, no crash, no line starting with {" "static"
+  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; every run rc 0, no crash, no line starting with {" "static"
 else
   row "SELF-08" "claude" "$_S8_CAP" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160); mismatch:${_S8_FAIL:- none}" "static"
 fi
@@ -1184,6 +1184,13 @@ if [ "$_S11_UPV" != "$_S11_UP" ] && [ -d "$_S11_UPV" ]; then   # case-insensitiv
   unset _sh
 fi
 _s11_loc outside-cwd "$_S11/cwd" sh "$_S11_PLOC" 1 "at-setup"
+# positive control: a plugin root in a dot-named directory that is not a CLI
+# configuration directory (a clone into ~/.triforge, say) still resolves
+mkdir -p "$_S11/.dotplug/.claude-plugin" "$_S11/.dotplug/scripts" "$_S11/.dotplug/skills/at-probe/scripts"
+printf '{"name": "agent-triforge"}\n' > "$_S11/.dotplug/.claude-plugin/plugin.json"
+: > "$_S11/.dotplug/scripts/invoke-external.sh"
+[ -f "$_S11_LOCATOR" ] && cp "$_S11_LOCATOR" "$_S11/.dotplug/skills/at-probe/scripts/locate-triforge.sh" || true
+_s11_loc dotplug "$_S11/cwd" sh "$_S11/.dotplug/skills/at-probe/scripts/locate-triforge.sh" 0 ".dotplug"
 rm -rf "$_S11/proj/.agents/.claude-plugin" "$_S11/proj/.agents/scripts"
 # (d)
 cp "$_S11_LOADER" "$_S11/bare/invoke-external.sh"
@@ -1201,7 +1208,7 @@ _S11_E_PWD=$(grep -c 'pwd)/scripts' "$_S11_LOADER" || true)
 [ "$_S11_E_PWD" = 0 ] || _S11_FAIL="$_S11_FAIL e(pwd-fallback=$_S11_E_PWD)"
 _S11_CAP="plugin root without CLAUDE_PLUGIN_ROOT: loader + lanes resolve the plugin, never a project's scripts/ or skills/; skill locator order and pointer refusals; bare loader fails closed naming at-setup (KTD6/R16/R42)"
 if [ -z "$_S11_FAIL" ]; then
-  row "SELF-11" "claude" "$_S11_CAP" "PASS" "CLAUDE_PLUGIN_ROOT unset: loader root = this checkout; against argv-recording stubs codex passed --output-schema <root>/codex-agents/review-verdict.schema.json + a ${#_S11_CX_PRE}-char instructions prefix, kimi --agent-file <root>/kimi-agents/reviewer.md, cursor the reviewer brief prefixed onto the prompt (no empty brief); from a user project with its own scripts/invoke-external.sh + skills/user-skill: root = checkout, the project's loader never sourced, _lease_plugin_root = checkout, worktree provisioned with exactly the portable skills (${_S11_GOT% }); locator: own location resolves under sh/bash/zsh, no pointer -> rc 1 naming at-setup, pointer inside the project / to a non-root / tracked -> rc 3, untracked pointer to the checkout -> resolves, linked worktree reads the main checkout's pointer, a root planted at <project>/.agents is ignored by a project-tier copy (pointer wins, else rc 1), pointer tracked under another letter case / behind a symlinked .agents -> rc 3; bare-dir loader copy sourced from the project -> rc ${_S11_D_RC} naming at-setup; scripts/lib/*.sh: 0 CLAUDE_PLUGIN_ROOT reads, loader: no pwd)/scripts fallback" "static"
+  row "SELF-11" "claude" "$_S11_CAP" "PASS" "CLAUDE_PLUGIN_ROOT unset: loader root = this checkout; against argv-recording stubs codex passed --output-schema <root>/codex-agents/review-verdict.schema.json + a ${#_S11_CX_PRE}-char instructions prefix, kimi --agent-file <root>/kimi-agents/reviewer.md, cursor the reviewer brief prefixed onto the prompt (no empty brief); from a user project with its own scripts/invoke-external.sh + skills/user-skill: root = checkout, the project's loader never sourced, _lease_plugin_root = checkout, worktree provisioned with exactly the portable skills (${_S11_GOT% }); locator: own location resolves under sh/bash/zsh, no pointer -> rc 1 naming at-setup, pointer inside the project / to a non-root / tracked -> rc 3, untracked pointer to the checkout -> resolves, linked worktree reads the main checkout's pointer, a root planted at <project>/.agents is ignored by a project-tier copy (pointer wins, else rc 1), pointer tracked under another letter case / behind a symlinked .agents -> rc 3, a plugin root in a non-config dot directory still resolves; bare-dir loader copy sourced from the project -> rc ${_S11_D_RC} naming at-setup; scripts/lib/*.sh: 0 CLAUDE_PLUGIN_ROOT reads, loader: no pwd)/scripts fallback" "static"
 else
   row "SELF-11" "claude" "$_S11_CAP" "FAIL" "mismatch:$(printf '%s' "$_S11_FAIL" | cut -c1-700)" "static"
 fi

@@ -1017,6 +1017,11 @@ else
   # No loader to source: the plugin host did not export CLAUDE_PLUGIN_ROOT, or
   # it names a tree without scripts/invoke-external.sh. Same standing WARNING,
   # same degraded run (the orientation then reports 0 optional members).
-  SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (CLAUDE_PLUGIN_ROOT is ${CLAUDE_PLUGIN_ROOT:+set to '${CLAUDE_PLUGIN_ROOT}' but has no scripts/invoke-external.sh}${CLAUDE_PLUGIN_ROOT:-unset}) — optional-CLI detection, enrollment and the roster pin check were skipped this session. Run this hook through the installed plugin: claude plugin install agent-triforge@agent-triforge"
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+    SS_ROOT_STATE="set to '${CLAUDE_PLUGIN_ROOT}' but has no scripts/invoke-external.sh"
+  else
+    SS_ROOT_STATE="unset"
+  fi
+  SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (CLAUDE_PLUGIN_ROOT is ${SS_ROOT_STATE}) — optional-CLI detection, enrollment and the roster pin check were skipped this session. Run this hook through the installed plugin: claude plugin install agent-triforge@agent-triforge"
 fi
 _ss_run
