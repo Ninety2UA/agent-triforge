@@ -18,7 +18,7 @@ claude plugin validate --strict .claude-plugin/marketplace.json
 bash scripts/validate-skills.sh            # 26 conformance checks + the KTD1/KTD6 gates over skills/ (name .claude/skills to cover a repo-local skill); warnings fail (--warn relaxes them)
 bash scripts/validate-skills.sh --self-test   # its fixtures, scripts/fixtures/validate-skills/
 bash scripts/validate-versions.sh          # lockstep, ladder, drift, stale pins, counts, AGENTS.md budget, inventory + its cited paths, commands/ empty, at- surfaces, skill manifests
-bash scripts/probe-capabilities.sh --self-only   # the SELF gate: static rows only, ~90 s, exit 3 on any SELF FAIL
+bash scripts/probe-capabilities.sh --self-only   # the SELF gate: static rows only, ~3 min, exit 3 on any SELF FAIL
 for f in scripts/*.sh scripts/lib/*.sh hooks/handlers/*.sh; do /bin/bash -n "$f" || echo "SYNTAX $f"; done
 ```
 

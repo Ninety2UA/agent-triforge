@@ -51,7 +51,8 @@
 #      not copy: hooks/handlers/session-start.sh carries no SHIPPED / ROLE_CLI
 #      literal and references _TRIFORGE_CLIS_PY; _adapter_env in
 #      scripts/lib/lease.sh reads TRIFORGE_ENV_BASE + cli_field and names no
-#      base or credential key in code; lease.sh code names no shipped model;
+#      base or credential key in code; lease.sh and lease-wait.sh code name no
+#      shipped model;
 #      each lane's `${<model_env>:-…}` default in scripts/lib/*.sh equals the
 #      registry model; _lane_run in scripts/probe-capabilities.sh reads
 #      REG_ENV_BASE and the harness's CDX_MODEL pin equals the codex model.
@@ -261,7 +262,7 @@ fi
 # --- 3. registry drift (KTD7) ------------------------------------------------
 DRIFT_RC=0
 VV_REGISTRY="scripts/lib/registry.sh" VV_SRC="scripts/lib/roster.sh" VV_ROSTER="templates/ops/roster.toml" \
-VV_HOOK="hooks/handlers/session-start.sh" VV_LEASE="scripts/lib/lease.sh" VV_PROBE="scripts/probe-capabilities.sh" \
+VV_HOOK="hooks/handlers/session-start.sh" VV_LEASE="scripts/lib/lease.sh" VV_LEASE_WAIT="scripts/lib/lease-wait.sh" VV_PROBE="scripts/probe-capabilities.sh" \
 VV_LOADER="scripts/invoke-external.sh" VV_LOCATOR="scripts/skill-locator/locate-triforge.sh" \
 VV_LIBDIR="scripts/lib" python3 - <<'PYEOF' || DRIFT_RC=$?
 import ast
@@ -562,13 +563,20 @@ if lease is not None and clis is not None:
                 if re.search(r"\b" + re.escape(k), ln):
                     fails.append(lease_path + ":" + str(base_line + i) + ": _adapter_env names credential key " + k + " in code — keys come from the registry env_keys")
                     lease_fail = True
-    for n, ln in code_lines(lease):
-        for cli, model in models.items():
-            if model and model in ln:
-                fails.append(lease_path + ":" + str(n) + ": shipped " + cli + " model " + repr(model) + " spelled out in code — read it with cli_field " + cli + " model")
-                lease_fail = True
+    # the lease subsystem spans lease.sh and lease-wait.sh (the lane composer
+    # _lease_lane_argv lives in the second): neither spells a shipped model
+    wait_path = os.environ["VV_LEASE_WAIT"]
+    for scan_path, scan in ((lease_path, lease), (wait_path, read(wait_path))):
+        if scan is None:
+            lease_fail = True
+            continue
+        for n, ln in code_lines(scan):
+            for cli, model in models.items():
+                if model and model in ln:
+                    fails.append(scan_path + ":" + str(n) + ": shipped " + cli + " model " + repr(model) + " spelled out in code — read it with cli_field " + cli + " model")
+                    lease_fail = True
     if not lease_fail:
-        oks.append(lease_path + " _adapter_env reads TRIFORGE_ENV_BASE + env_keys; no model literal in code")
+        oks.append(lease_path + " _adapter_env reads TRIFORGE_ENV_BASE + env_keys; no model literal in " + lease_path + " or " + wait_path + " code")
 
 # --- the lanes: ${<model_env>:-default} equals the registry model -------------
 if clis is not None:

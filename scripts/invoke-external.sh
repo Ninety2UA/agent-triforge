@@ -26,6 +26,8 @@
 #   lib/kimi.sh         invoke_kimi
 #   lib/cursor.sh       _cursor_bin, _cursor_model_for_effort, invoke_cursor
 #   lib/roster.sh       resolve_role, dispatch_role, roster_* (DEFAULTS live here)
+#   lib/lease-wait.sh   detached builders (launcher, lane argv, builder body),
+#                       lease_stop, lease_heartbeat_check, lease_wait (KTD10)
 #   lib/lease.sh        the lease lifecycle + _adapter_env + the typed-report parser
 # Function names and contracts are unchanged by the split; commands keep
 # sourcing this file only.
@@ -62,10 +64,12 @@
 # explicit allowlist, so those markers are already absent there; it adds the
 # same NO_COLOR=1.
 #
-# Codex feature detection: capability decisions for the Codex lane (hooks,
-# structured output) come from `codex features list` at runtime — cached once
-# per session by _codex_feature_enabled — never from version-string reasoning
-# (probe CDX-02, 2026-07-17).
+# Codex feature detection: capability decisions for the Codex lane (structured
+# output) come from `codex features list` at runtime — cached once per session
+# by _codex_feature_enabled — never from version-string reasoning (probe
+# CDX-02, 2026-07-17). Hooks are not a lane decision: invoke_codex passes no
+# --dangerously-bypass-hook-trust, so project and plugin hooks go through
+# Codex's own trust under exec.
 #
 # Timeout enforcement is fail-closed: when neither `timeout` nor `gtimeout`
 # is on PATH, the helpers refuse to run at all rather than silently running
@@ -124,7 +128,7 @@ triforge_plugin_root() { printf '%s\n' "$_TRIFORGE_PLUGIN_ROOT"; }
 
 # Load the lanes (fail-closed: a missing lib is a broken install, never a
 # silently narrower helper).
-for _triforge_lib in common registry antigravity codex opencode kimi cursor roster lease; do
+for _triforge_lib in common registry antigravity codex opencode kimi cursor roster lease-wait lease; do
   if [ ! -f "${_TRIFORGE_SCRIPTS_DIR}/lib/${_triforge_lib}.sh" ]; then
     echo "invoke-external.sh: ERROR missing ${_TRIFORGE_SCRIPTS_DIR}/lib/${_triforge_lib}.sh — the plugin install is incomplete (reinstall: claude plugin install agent-triforge@agent-triforge)" >&2
     return 2 2>/dev/null || exit 2

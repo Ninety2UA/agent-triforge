@@ -1691,9 +1691,10 @@ fi  # end of the per-CLI sections skipped by --self-only
 #                    config is never touched
 #   CC-13 / CDX-17 / AGY-17 / OC-09 / KIMI-10 / CUR-13
 #                    a variable set at the lease boundary is visible inside each
-#                    worker CLI's tool shell. A probe variable, so the rows do
-#                    not depend on U11's TRIFORGE_LEASE_WORKER; its value is
-#                    reported when _lane_run carries it
+#                    worker CLI's tool shell, run with the lane's own argv
+#                    (_lease_lane_argv): a probe variable, and the worker marker
+#                    TRIFORGE_LEASE_WORKER=builder that _lane_run sets as
+#                    _adapter_env does (U11); PASS needs both
 #   CC-14 / CC-14b   `claude -p` loads the root AGENTS.md when no CLAUDE.md
 #                    exists (D-038's open question); 14b: a CLAUDE.md beside it
 #                    suppresses it, as documented
@@ -1705,42 +1706,71 @@ fi  # end of the per-CLI sections skipped by --self-only
 # Scratch state lives under $FIX (codex's workspace-write sandbox writes only
 # there) and $WORK; both go with the EXIT trap. Builders and the mid-turn
 # waiter stop on their own once <dir>/release exists or <dir> is gone.
-U29_CDX_FLAGS=()   # the codex lane's flags, filled below when a row needs them (SELF-15c reads them too)
+U29_CDX_FLAGS=()   # the codex lane's flags after `codex`, filled below when a row needs them (SELF-15c reads them too)
+U29_ARGV_CLAUDE=(); U29_ARGV_AGY=(); U29_ARGV_OC=(); U29_ARGV_KIMI=(); U29_ARGV_CUR=()   # the other lanes' argv up to the prompt
 if [ "$SELF_ONLY" != 1 ]; then
 
 U29_VAL="triforge-probe-$$"   # the probe variable's value (worker marker stand-in)
 # What the rows take from the lease lane itself, read once through the loader
 # like REG_ENV_BASE and only when a row that uses it runs: the real detached
 # launcher (_LEASE_LAUNCH_PY, written to U29_LAUNCH for the survival kit of
-# CC-09/10/11 and CDX-12/13/14/15) and the codex lane's flags
-# (_lease_codex_lane_flags, one cdxflag line per word, collected into
-# U29_CDX_FLAGS for CDX-16, CDX-17 and SELF-15c); for the worker-marker rows of
-# the other lanes also the registry defaults (a per-CLI section's own pick wins
-# when it ran), and the OpenCode deny set and V2 guard the lease lane applies.
+# CC-09/10/11 and CDX-12/13/14/15) and each lane's argv from the composer the
+# lease lane runs (_lease_lane_argv, one "<kind> US <cli> US <word>" line per
+# word): codex's flags after `codex` (U29_CDX_FLAGS, for CDX-16, CDX-17 and
+# SELF-15c, which add their own model), and the claude, agy, opencode, kimi and
+# cursor argv up to the prompt (U29_ARGV_*, for CC-13, AGY-17, OC-09, KIMI-10
+# and CUR-13), composed with the model the CLI's own section picked when it
+# ran, else the registry default; plus the OpenCode deny set and V2 guard the
+# lease lane applies. No row spells out a lane's flags itself.
 U29_REG=""
 U29_LAUNCH="$WORK/u29-launch.py"
-if _want CC-09 || _want CC-10 || _want CC-11 || _want CDX-12 || _want CDX-13 || _want CDX-14 || _want CDX-15 \
+if _want CUR-13 && [ -z "$CUR_BIN" ]; then CUR_BIN=$(_cursor_bin_probe 2>/dev/null || true); fi
+if _want CC-09 || _want CC-10 || _want CC-11 || _want CC-12 || _want CC-13 || _want CDX-12 || _want CDX-13 || _want CDX-14 || _want CDX-15 \
    || _want CDX-16 || _want CDX-17 || _want AGY-17 || _want OC-09 || _want KIMI-10 || _want CUR-13; then
   U29_REG=$(
     source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 0
     printf '%s' "$_LEASE_LAUNCH_PY" > "$U29_LAUNCH"
-    _lease_codex_lane_flags
-    printf 'cdxflag\t%s\n' "${_LEASE_CODEX_FLAGS[@]}"
+    _u29_argv() { # _u29_argv <kind> <cli> <_lease_lane_argv arguments after the cli> — one line per word
+      local KIND=$1 CLI=$2 W
+      shift 2
+      _lease_lane_argv "$CLI" "$@" || return 0
+      for W in "${_LEASE_LANE_ARGV[@]}"; do printf '%s\037%s\037%s\n' "$KIND" "$CLI" "$W"; done
+    }
+    _u29_argv argv codex "" "" "" "" "" "$FIX" 240
+    _u29_argv argv claude sonnet "" "" "" "" "$FIX" 240
     if _want AGY-17 || _want OC-09 || _want KIMI-10 || _want CUR-13; then
-      cli_table all model 2>/dev/null
+      U29_KAF=""
+      if [ -f "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md" ]; then U29_KAF="${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md"; fi
+      _u29_argv argv antigravity "" "" "${AGY_MODEL_ARG:-$(cli_field antigravity model 2>/dev/null || true)}" "" "" "$FIX" 240
+      _u29_argv argv opencode "" "" "${OC_GLM:-$(cli_field opencode model 2>/dev/null || true)}" "" "" "$FIX" 240
+      _u29_argv argv kimi "" "" "$(cli_field kimi model 2>/dev/null || true)" "$U29_KAF" "" "$FIX" 240
+      _u29_argv argv cursor "" "" "${CUR_GROK:-$(cli_field cursor model 2>/dev/null || true)}" "" "$CUR_BIN" "$FIX" 240
       printf 'ocperm\t%s\n' "${_OPENCODE_PERMISSION_DEFAULT:-}"
       if command -v opencode >/dev/null 2>&1; then
         if _opencode_v2_check opencode; then printf 'ocv2\tv1\n'; else printf 'ocv2\t%s %s\n' "${_OPENCODE_CHECK:-}" "${_OPENCODE_VERSION:-}"; fi
       fi
     fi
   )
-  while IFS="$(printf '\t')" read -r U29_K U29_V; do
-    if [ "$U29_K" = cdxflag ]; then U29_CDX_FLAGS+=("$U29_V"); fi
+  # Unit-separated, so an empty word keeps its place.
+  U29_CDX_SEEN=0
+  while IFS=$'\037' read -r U29_K U29_T U29_V; do
+    [ "$U29_K" = argv ] || continue
+    case "$U29_T" in
+      codex)       if [ "$U29_CDX_SEEN" = 1 ]; then U29_CDX_FLAGS+=("$U29_V"); fi; U29_CDX_SEEN=1 ;;   # every word after `codex`
+      claude)      U29_ARGV_CLAUDE+=("$U29_V") ;;
+      antigravity) U29_ARGV_AGY+=("$U29_V") ;;
+      opencode)    U29_ARGV_OC+=("$U29_V") ;;
+      kimi)        U29_ARGV_KIMI+=("$U29_V") ;;
+      cursor)      U29_ARGV_CUR+=("$U29_V") ;;
+    esac
   done <<U29_REG_EOF
 $U29_REG
 U29_REG_EOF
 fi
 _u29_reg() { printf '%s\n' "$U29_REG" | awk -F'\t' -v k="$1" '$1 == k { print $2; exit }'; }
+# _u29_argv_note <argv...> — the words after the binary, the fixture path shown
+# as <fixture>: the lane flags a row ran, for its evidence.
+_u29_argv_note() { shift; printf '%s ' "$@" | sed "s|${FIX}|<fixture>|g; s/ \$//"; }
 
 # _u29_rows <cli> <outcome> <evidence> <method> <ID:capability>... — the same
 # outcome and evidence for each named row that runs.
@@ -1973,15 +2003,18 @@ _u29_dump_prompt() { # _u29_dump_prompt <dir> <tag>
 }
 
 # _u29_marker_verdict <id> <cli> <capability> <dump> <out> [<note>] — PASS when
-# the probe variable reached the worker's tool shell.
+# the probe variable and the worker marker (TRIFORGE_LEASE_WORKER=builder, as
+# _lane_run and _adapter_env set it) both reached the worker's tool shell.
 _u29_marker_verdict() {
   local ID=$1 CLI=$2 CAP=$3 DUMP=$4 O=$5 NOTE=${6:-} V LW
   if [ -f "$DUMP" ]; then
     V=$(_u29_envval "$DUMP" TRIFORGE_PROBE_WORKER)
     LW=$(_u29_envval "$DUMP" TRIFORGE_LEASE_WORKER)
     _u29_tmpdir "$DUMP"
-    if [ "$V" = "$U29_VAL" ]; then
-      row "$ID" "$CLI" "$CAP" "PASS" "probe variable visible in the tool shell; TRIFORGE_LEASE_WORKER=${LW:-<unset>}; TMPDIR ${U29_TD}; $(_u29_markers "$DUMP")${NOTE:+; $NOTE}" "live"
+    if [ "$V" = "$U29_VAL" ] && [ "$LW" = builder ]; then
+      row "$ID" "$CLI" "$CAP" "PASS" "probe variable and TRIFORGE_LEASE_WORKER=builder visible in the tool shell; TMPDIR ${U29_TD}; $(_u29_markers "$DUMP")${NOTE:+; $NOTE}" "live"
+    elif [ "$V" = "$U29_VAL" ]; then
+      row "$ID" "$CLI" "$CAP" "FAIL" "probe variable visible, but TRIFORGE_LEASE_WORKER=${LW:-<unset>} (want builder): the worker marker did not reach the tool shell; $(_u29_markers "$DUMP")${NOTE:+; $NOTE}" "live"
     else
       row "$ID" "$CLI" "$CAP" "FAIL" "probe variable NOT visible (got '${V}') — stripped between the boundary and the tool shell; TRIFORGE_LEASE_WORKER=${LW:-<unset>}; $(_u29_markers "$DUMP")${NOTE:+; $NOTE}" "live"
     fi
@@ -2112,10 +2145,14 @@ if command -v claude >/dev/null 2>&1; then
       D="$FIX/.u29-cc-worker"; O="$WORK/u29-cc-worker.txt"; HM="$WORK/u29-cc-hookmarks"; P="$WORK/u29-cc-plugin"
       _u29_dumper "$D"
       _u29_plugin "$P" "$HM"
-      # The claude lane runs `claude -p --permission-mode acceptEdits`; the
-      # --allowedTools entry lets this one dump command run headless (U12
-      # hardens the lane's own tool list).
-      (cd "$FIX" && _lane_run 240 env "TRIFORGE_PROBE_WORKER=$U29_VAL" claude -p --model sonnet --permission-mode acceptEdits --plugin-dir "$P" --output-format text --allowedTools "Bash(sh $D/envdump.sh worker)" -- "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
+      # The claude lane's argv (_lease_lane_argv claude, --model sonnet) plus
+      # the scratch plugin; the --allowedTools entry lets this one dump command
+      # run headless (U12 hardens the lane's own tool list).
+      if [ "${#U29_ARGV_CLAUDE[@]}" -eq 0 ]; then
+        echo "could not read the claude lane argv (_lease_lane_argv claude) through scripts/invoke-external.sh" > "$O"
+      else
+        (cd "$FIX" && _lane_run 240 env "TRIFORGE_PROBE_WORKER=$U29_VAL" "${U29_ARGV_CLAUDE[@]}" --plugin-dir "$P" --output-format text --allowedTools "Bash(sh $D/envdump.sh worker)" -- "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
+      fi
       if _want CC-12; then
         _u29_hooks_seen "$HM"
         if [ "$U29_FIRED" -gt 0 ]; then
@@ -2127,7 +2164,7 @@ if command -v claude >/dev/null 2>&1; then
         fi
       fi
       if _want CC-13; then
-        _u29_marker_verdict "CC-13" "claude" "$U29_CC13" "$D/env-worker.txt" "$O" "claude -p --permission-mode acceptEdits + --allowedTools for the dump command"
+        _u29_marker_verdict "CC-13" "claude" "$U29_CC13" "$D/env-worker.txt" "$O" "lane argv: $(_u29_argv_note "${U29_ARGV_CLAUDE[@]:-claude}") + --allowedTools for the dump command"
       fi
       rm -rf "$D" "$HM" "$P"
     else
@@ -2286,7 +2323,7 @@ if command -v codex >/dev/null 2>&1; then
       printf '{"name": "tf-probe", "owner": {"name": "triforge-probe"}, "plugins": [{"name": "tf-probe-hooks", "source": "./plugin", "description": "Triforge probe hooks"}]}\n' > "$MK/.claude-plugin/marketplace.json"
       _u29_plugin "$MK/plugin" "$HM"
       if [ "${#U29_CDX_FLAGS[@]}" -eq 0 ]; then
-        row "CDX-16" "codex" "$U29_CDX16" "FAIL" "could not read the codex lane flags (_lease_codex_lane_flags) through scripts/invoke-external.sh" "marker-file"
+        row "CDX-16" "codex" "$U29_CDX16" "FAIL" "could not read the codex lane flags (_lease_lane_argv codex) through scripts/invoke-external.sh" "marker-file"
       elif (cd "$WORK" && _rwt 60 env CODEX_HOME="$CH" codex plugin marketplace add "$MK" && _rwt 120 env CODEX_HOME="$CH" codex plugin add tf-probe-hooks@tf-probe) > "$O.install" 2>&1; then
         # The lane's flags; the scratch home has no login, so each run ends at
         # the first model request (401).
@@ -2316,11 +2353,11 @@ if command -v codex >/dev/null 2>&1; then
     if [ "$CDX_LIVE" = 1 ]; then
       D="$FIX/.u29-cdx-worker"; O="$WORK/u29-cdx-worker.txt"
       if [ "${#U29_CDX_FLAGS[@]}" -eq 0 ]; then
-        row "CDX-17" "codex" "$U29_CDX17" "FAIL" "could not read the codex lane flags (_lease_codex_lane_flags) through scripts/invoke-external.sh" "live"
+        row "CDX-17" "codex" "$U29_CDX17" "FAIL" "could not read the codex lane flags (_lease_lane_argv codex) through scripts/invoke-external.sh" "live"
       else
         _u29_dumper "$D"
         (cd "$FIX" && _lane_run 300 env "TRIFORGE_PROBE_WORKER=$U29_VAL" codex "${U29_CDX_FLAGS[@]}" --skip-git-repo-check -m "$CDX_MODEL" -c 'model_reasoning_effort="low"' "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
-        _u29_marker_verdict "CDX-17" "codex" "$U29_CDX17" "$D/env-worker.txt" "$O" "lane flags (_lease_codex_lane_flags): -s workspace-write with TMPDIR and /tmp excluded"
+        _u29_marker_verdict "CDX-17" "codex" "$U29_CDX17" "$D/env-worker.txt" "$O" "lane flags (_lease_lane_argv codex): -s workspace-write with TMPDIR and /tmp excluded"
         rm -rf "$D"
       fi
     else
@@ -2437,8 +2474,9 @@ else
 fi
 
 # ------- Worker marker in the other lanes: AGY-17 OC-09 KIMI-10 CUR-13
-# Each runs the lease arm's own flags (scripts/lib/lease.sh lease_dispatch)
-# under _lane_run plus the probe variable.
+# Each runs the lane's own argv (_lease_lane_argv in scripts/lib/lease-wait.sh,
+# read through the loader into U29_ARGV_*) under _lane_run plus the probe
+# variable.
 U29_AGY17="Worker marker visible in an env -i agy worker's tool shell (probe variable at the lease boundary)"
 U29_OC09="Worker marker visible in an env -i opencode worker's tool shell (probe variable at the lease boundary)"
 U29_KIMI10="Worker marker visible in an env -i kimi worker's tool shell (probe variable at the lease boundary)"
@@ -2450,20 +2488,24 @@ if _want AGY-17; then
     row "AGY-17" "agy" "$U29_AGY17" "$(_skip_reason)" "gated on AGY-04" "live"
   else
     D="$FIX/.u29-agy-worker"; O="$WORK/u29-agy-worker.txt"
-    _u29_dumper "$D"
-    U29_M=${AGY_MODEL_ARG:-$(_u29_reg antigravity)}
-    (cd "$FIX" && _lane_run 300 env "TRIFORGE_PROBE_WORKER=$U29_VAL" agy --model "$U29_M" --add-dir "$FIX" --print-timeout 240s --output-format json -p "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
-    U29_NOTE="lane flags (--model --add-dir --output-format json, no skip flag)"
-    if [ ! -f "$D/env-worker.txt" ]; then
-      # Headless agy auto-denies a shell call no user-tier allow rule covers;
-      # the rerun asks whether the variable reaches its tool shell at all.
-      U29_DEN=$(_agy_envelope "$O" | sed -nE 's/.* denied=([^ ]*) .*/\1/p')
-      (cd "$FIX" && _lane_run 300 env "TRIFORGE_PROBE_WORKER=$U29_VAL" agy --model "$U29_M" --add-dir "$FIX" --print-timeout 240s --output-format json --dangerously-skip-permissions -p "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O.2" 2>&1) || true
-      U29_NOTE="lane flags: the shell call was auto-denied (denied_actions=${U29_DEN:-none parsed}), so a lane worker has no tool shell without a user-tier allow rule; rerun with --dangerously-skip-permissions"
-      O="$O.2"
+    if [ "${#U29_ARGV_AGY[@]}" -eq 0 ]; then
+      row "AGY-17" "agy" "$U29_AGY17" "FAIL" "could not read the agy lane argv (_lease_lane_argv antigravity) through scripts/invoke-external.sh" "live"
+    else
+      _u29_dumper "$D"
+      (cd "$FIX" && _lane_run 300 env "TRIFORGE_PROBE_WORKER=$U29_VAL" "${U29_ARGV_AGY[@]}" "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
+      U29_NOTE="lane argv: $(_u29_argv_note "${U29_ARGV_AGY[@]}") (no skip flag)"
+      if [ ! -f "$D/env-worker.txt" ]; then
+        # Headless agy auto-denies a shell call no user-tier allow rule covers;
+        # the rerun (the skip flag ahead of the argv's closing -p) asks whether
+        # the variable reaches its tool shell at all.
+        U29_DEN=$(_agy_envelope "$O" | sed -nE 's/.* denied=([^ ]*) .*/\1/p')
+        (cd "$FIX" && _lane_run 300 env "TRIFORGE_PROBE_WORKER=$U29_VAL" "${U29_ARGV_AGY[@]:0:$((${#U29_ARGV_AGY[@]} - 1))}" --dangerously-skip-permissions -p "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O.2" 2>&1) || true
+        U29_NOTE="lane argv: the shell call was auto-denied (denied_actions=${U29_DEN:-none parsed}), so a lane worker has no tool shell without a user-tier allow rule; rerun with --dangerously-skip-permissions"
+        O="$O.2"
+      fi
+      _u29_marker_verdict "AGY-17" "agy" "$U29_AGY17" "$D/env-worker.txt" "$O" "$U29_NOTE"
+      rm -rf "$D"
     fi
-    _u29_marker_verdict "AGY-17" "agy" "$U29_AGY17" "$D/env-worker.txt" "$O" "$U29_NOTE"
-    rm -rf "$D"
   fi
 fi
 if _want OC-09; then
@@ -2475,11 +2517,15 @@ if _want OC-09; then
     row "OC-09" "opencode" "$U29_OC09" "$(_skip_reason)" "gated on OC-03" "live"
   else
     D="$FIX/.u29-oc-worker"; O="$WORK/u29-oc-worker.txt"
-    _u29_dumper "$D"
-    U29_OCPERM=$(_u29_reg ocperm)
-    (cd "$FIX" && _lane_run 240 env "TRIFORGE_PROBE_WORKER=$U29_VAL" ${OPENROUTER_API_KEY+"OPENROUTER_API_KEY=$OPENROUTER_API_KEY"} ${U29_OCPERM:+"OPENCODE_PERMISSION=$U29_OCPERM"} opencode run --format json -m "${OC_GLM:-$(_u29_reg opencode)}" "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
-    _u29_marker_verdict "OC-09" "opencode" "$U29_OC09" "$D/env-worker.txt" "$O" "lane flags (run --format json -m, the shipped OPENCODE_PERMISSION deny set)"
-    rm -rf "$D"
+    if [ "${#U29_ARGV_OC[@]}" -eq 0 ]; then
+      row "OC-09" "opencode" "$U29_OC09" "FAIL" "could not read the opencode lane argv (_lease_lane_argv opencode) through scripts/invoke-external.sh" "live"
+    else
+      _u29_dumper "$D"
+      U29_OCPERM=$(_u29_reg ocperm)
+      (cd "$FIX" && _lane_run 240 env "TRIFORGE_PROBE_WORKER=$U29_VAL" ${OPENROUTER_API_KEY+"OPENROUTER_API_KEY=$OPENROUTER_API_KEY"} ${U29_OCPERM:+"OPENCODE_PERMISSION=$U29_OCPERM"} "${U29_ARGV_OC[@]}" "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
+      _u29_marker_verdict "OC-09" "opencode" "$U29_OC09" "$D/env-worker.txt" "$O" "lane argv: $(_u29_argv_note "${U29_ARGV_OC[@]}"), the shipped OPENCODE_PERMISSION deny set"
+      rm -rf "$D"
+    fi
   fi
 fi
 if _want KIMI-10; then
@@ -2489,23 +2535,28 @@ if _want KIMI-10; then
     row "KIMI-10" "kimi" "$U29_KIMI10" "$(_skip_reason)" "gated on KIMI-05" "live"
   else
     D="$FIX/.u29-kimi-worker"; O="$WORK/u29-kimi-worker.txt"
-    _u29_dumper "$D"
-    (cd "$FIX" && _lane_run 240 env "TRIFORGE_PROBE_WORKER=$U29_VAL" KIMI_DISABLE_TELEMETRY=1 kimi --output-format stream-json -m "$(_u29_reg kimi)" -p "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
-    _u29_marker_verdict "KIMI-10" "kimi" "$U29_KIMI10" "$D/env-worker.txt" "$O" "lane flags (--output-format stream-json -m, telemetry off)"
-    rm -rf "$D"
+    if [ "${#U29_ARGV_KIMI[@]}" -eq 0 ]; then
+      row "KIMI-10" "kimi" "$U29_KIMI10" "FAIL" "could not read the kimi lane argv (_lease_lane_argv kimi) through scripts/invoke-external.sh" "live"
+    else
+      _u29_dumper "$D"
+      (cd "$FIX" && _lane_run 240 env "TRIFORGE_PROBE_WORKER=$U29_VAL" "${U29_ARGV_KIMI[@]}" "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
+      _u29_marker_verdict "KIMI-10" "kimi" "$U29_KIMI10" "$D/env-worker.txt" "$O" "lane argv: $(_u29_argv_note "${U29_ARGV_KIMI[@]}" | sed "s|${REPO_ROOT}|<plugin root>|g")"
+      rm -rf "$D"
+    fi
   fi
 fi
 if _want CUR-13; then
-  [ -n "$CUR_BIN" ] || CUR_BIN=$(_cursor_bin_probe 2>/dev/null || true)
   if [ -z "$CUR_BIN" ]; then
     row "CUR-13" "cursor" "$U29_CUR13" "UNAVAILABLE" "no Cursor binary on PATH (cursor-agent, or an agent whose --version is Cursor-formatted)" "direct"
   elif [ "$CUR_LIVE" != 1 ]; then
     row "CUR-13" "cursor" "$U29_CUR13" "$(_skip_reason)" "gated on CUR-04" "live"
+  elif [ "${#U29_ARGV_CUR[@]}" -eq 0 ]; then
+    row "CUR-13" "cursor" "$U29_CUR13" "FAIL" "could not read the cursor lane argv (_lease_lane_argv cursor) through scripts/invoke-external.sh" "live"
   else
     D="$FIX/.u29-cur-worker"; O="$WORK/u29-cur-worker.txt"
     _u29_dumper "$D"
-    (cd "$FIX" && _lane_run 240 env "TRIFORGE_PROBE_WORKER=$U29_VAL" ${CURSOR_API_KEY+"CURSOR_API_KEY=$CURSOR_API_KEY"} "$CUR_BIN" -p --output-format stream-json --model "${CUR_GROK:-$(_u29_reg cursor)}" --trust --force "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
-    _u29_marker_verdict "CUR-13" "cursor" "$U29_CUR13" "$D/env-worker.txt" "$O" "lane flags (-p --output-format stream-json --model --trust --force)"
+    (cd "$FIX" && _lane_run 240 env "TRIFORGE_PROBE_WORKER=$U29_VAL" ${CURSOR_API_KEY+"CURSOR_API_KEY=$CURSOR_API_KEY"} "${U29_ARGV_CUR[@]}" "$(_u29_dump_prompt "$D" worker)" < /dev/null > "$O" 2>&1) || true
+    _u29_marker_verdict "CUR-13" "cursor" "$U29_CUR13" "$D/env-worker.txt" "$O" "lane argv: $(basename "$CUR_BIN") $(_u29_argv_note "${U29_ARGV_CUR[@]}")"
     rm -rf "$D"
   fi
 fi
@@ -2603,7 +2654,7 @@ COUNTER_MISMATCH=0
   echo "- **AGY-15** → the \`--output-format json\` envelope (status, response, denied_actions) that \`invoke_antigravity\` parses instead of trusting exit 0 (KTD2, D-032)."
   echo "- **CDX-02** → \`codex features list\` replaces version-string detection."
   echo "- **CDX-03/CDX-05/CDX-06/CDX-07/CDX-08** → the \`gpt-6-astra\` pin (D-021): READY, \`--output-schema\` verdicts, max/ultra acceptance (commented opt-ins only where accepted), and the read-only reviewer sandbox on Astra (the ADR open watch)."
-  echo "- **CDX-04** → hooks under \`codex exec\` with \`--dangerously-bypass-hook-trust\` in an untrusted fixture (\`templates/.codex/hooks.json\` ships on the strength of this row)."
+  echo "- **CDX-04** → hooks under \`codex exec\` with \`--dangerously-bypass-hook-trust\` in an untrusted fixture, the probe's stand-in for a trusted hook (CDX-16 and SELF-15c pass the flag for the same reason). \`invoke_codex\` no longer passes it, and the shipped \`templates/.codex/hooks.json\` holds no hooks, so project and plugin hooks go through Codex's own trust under \`exec\`."
   echo "- **CDX-09/CDX-09b** → \`\$<skill>\` expansion under \`exec\` from the fixture and from a linked worktree under TMPDIR — the lease lane's shape (linked worktrees inherit root trust, D-026)."
   echo "- **CDX-10** → the project trust gate: AGENTS.md marker visibility with/without a \`[projects.\"<abs>\"]\` trust entry; INFO when no entry exists (R18: the sprint writes no user-tier setting; at-setup reports trust without writing it)."
   echo "- **CDX-11/CDX-11b** → \`.codex/triforge-agents.toml\` is the deployed name (D-026/KTD5): no \"malformed agent role\" sweep warning; 11b is the control that the old \`.codex/agents/agents.toml\` location still triggers it."
