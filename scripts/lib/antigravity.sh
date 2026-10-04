@@ -24,7 +24,7 @@ fi
 #               silently ignores unknown names), so this lane engages only
 #               once agy starts listing them — injection is the operative
 #               mode until then (probe rows AGY-12/AGY-13 track it).
-#   injection — ${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents/<name>.md
+#   injection — ${_TRIFORGE_PLUGIN_ROOT}/antigravity-agents/agents/<name>.md
 #               exists (agents/ subdir: antigravity-agents/ is a valid agy
 #               plugin); its body (after frontmatter) is prefixed onto the
 #               prompt.
@@ -86,10 +86,10 @@ invoke_antigravity() {
   if [ "$LISTED" -eq 1 ]; then
     FULL_PROMPT="$PROMPT"
     MODE="native"
-  elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents/${AGENT_NAME}.md" ]; then
-    [ "$AGY_MODE_WANT" = "native" ] && echo "invoke_antigravity: WARNING TRIFORGE_AGY_MODE=native but \`agy agents\` does not list '${AGENT_NAME}' — falling back to injection (reinstall the pack: agy plugin install \${CLAUDE_PLUGIN_ROOT}/antigravity-agents)" >&2
+  elif [ -f "${_TRIFORGE_PLUGIN_ROOT}/antigravity-agents/agents/${AGENT_NAME}.md" ]; then
+    [ "$AGY_MODE_WANT" = "native" ] && echo "invoke_antigravity: WARNING TRIFORGE_AGY_MODE=native but \`agy agents\` does not list '${AGENT_NAME}' — falling back to injection (reinstall the pack: agy plugin install ${_TRIFORGE_PLUGIN_ROOT}/antigravity-agents)" >&2
     local BODY
-    BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents/${AGENT_NAME}.md")
+    BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "${_TRIFORGE_PLUGIN_ROOT}/antigravity-agents/agents/${AGENT_NAME}.md")
     FULL_PROMPT="${BODY}
 
 ${PROMPT}"

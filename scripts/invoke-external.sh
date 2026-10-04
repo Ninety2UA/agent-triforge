@@ -7,7 +7,11 @@
 # CLI's hosted service on 2026-06-18; Antigravity CLI (binary: agy) is the
 # successor and Triforge targets its headless mode (`agy -p`).
 #
-# Usage: source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
+# Usage: source <plugin root>/scripts/invoke-external.sh
+#   Under a Claude Code lead that is `source "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh"`;
+#   any other lead sources it by the path scripts/skill-locator/locate-triforge.sh
+#   prints. The loader resolves the plugin root itself (KTD6, below) and the
+#   lanes read it as ${_TRIFORGE_PLUGIN_ROOT} — never CLAUDE_PLUGIN_ROOT.
 #
 # Layout: this file is the loader. The lanes live in scripts/lib/ and are
 # sourced below, in this order, into the same shell:
@@ -31,6 +35,7 @@
 #   resolve_role         <role>   — roster lookup: prints cli<TAB>model<TAB>effort
 #   ensure_core_trio_live         — lazy liveness gate for build/review paths
 #   latest_probe_record           — path of the newest ops/research/*-probe-record.md
+#   triforge_plugin_root          — prints the resolved plugin root (${_TRIFORGE_PLUGIN_ROOT})
 #
 # Failure taxonomy (KTD-9): both helpers classify failures instead of
 # blindly retrying, and expose the class via INVOKE_FAILURE_CLASS:
@@ -67,18 +72,54 @@
 
 set -euo pipefail
 
-# Directory of this file, resolved for both shells that `source` it (bash via
-# BASH_SOURCE, zsh via its prompt-expansion %x — evaluated through eval so
-# bash never parses the zsh form). CLAUDE_PLUGIN_ROOT wins when set.
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/scripts" ]; then
-  _TRIFORGE_SCRIPTS_DIR="${CLAUDE_PLUGIN_ROOT}/scripts"
-elif [ -n "${BASH_SOURCE:-}" ]; then
-  _TRIFORGE_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Plugin root (KTD6 / R42) — resolved ONCE, here, for every lane. The lanes read
+# ${_TRIFORGE_PLUGIN_ROOT} (or call triforge_plugin_root), never
+# CLAUDE_PLUGIN_ROOT, so the same code runs under a Claude Code lead (which
+# exports that variable) and under any lead that does not. Order:
+#   1. CLAUDE_PLUGIN_ROOT, when it passes the Triforge-root test;
+#   2. the directory above this loader's own scripts/ (bash via BASH_SOURCE, zsh
+#      via its prompt-expansion %x — evaluated through eval so bash never
+#      parses the zsh form), when IT passes the test;
+#   3. otherwise fail closed. There is deliberately no fallback to the working
+#      directory's scripts/: a user project with its own
+#      scripts/invoke-external.sh or skills/ must never be sourced or
+#      provisioned from by accident (SELF-11 checks both).
+# Triforge-root test: <dir>/.claude-plugin/plugin.json names "agent-triforge"
+# AND <dir>/scripts/invoke-external.sh exists — the same test the skill locator
+# (scripts/skill-locator/locate-triforge.sh) and _lease_plugin_root apply.
+_triforge_is_plugin_root() { # _triforge_is_plugin_root <dir>
+  if [ -n "${1:-}" ] && [ -f "$1/scripts/invoke-external.sh" ] && [ -f "$1/.claude-plugin/plugin.json" ] \
+     && grep -Eq '"name"[[:space:]]*:[[:space:]]*"agent-triforge"' "$1/.claude-plugin/plugin.json" 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+_TRIFORGE_SELF_DIR=""
+if [ -n "${BASH_SOURCE:-}" ]; then
+  _TRIFORGE_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 elif [ -n "${ZSH_VERSION:-}" ]; then
-  _TRIFORGE_SCRIPTS_DIR="$(cd "$(dirname "$(eval 'echo "${(%):-%x}"')")" && pwd)"
-else
-  _TRIFORGE_SCRIPTS_DIR="$(pwd)/scripts"
+  _TRIFORGE_SELF_DIR="$(cd "$(dirname "$(eval 'echo "${(%):-%x}"')")" && pwd)"
 fi
+_TRIFORGE_PLUGIN_ROOT=""
+if _triforge_is_plugin_root "${CLAUDE_PLUGIN_ROOT:-}"; then
+  # absolute, like the own-location branch below: a relative CLAUDE_PLUGIN_ROOT
+  # would otherwise hand builders a relative core.hooksPath (_adapter_env)
+  _TRIFORGE_PLUGIN_ROOT="$(cd "${CLAUDE_PLUGIN_ROOT}" && pwd)"
+elif [ -n "$_TRIFORGE_SELF_DIR" ] && _triforge_is_plugin_root "${_TRIFORGE_SELF_DIR}/.."; then
+  _TRIFORGE_PLUGIN_ROOT="$(cd "${_TRIFORGE_SELF_DIR}/.." && pwd)"
+else
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+    _TRIFORGE_ROOT_STATE="set to '${CLAUDE_PLUGIN_ROOT}' but not a Triforge root"
+  else
+    _TRIFORGE_ROOT_STATE="unset"
+  fi
+  echo "invoke-external.sh: ERROR no Triforge plugin root — CLAUDE_PLUGIN_ROOT is ${_TRIFORGE_ROOT_STATE} and this loader (${_TRIFORGE_SELF_DIR:-<unknown dir>}) is not inside a Triforge plugin tree (.claude-plugin/plugin.json named agent-triforge plus scripts/invoke-external.sh). Source the installed plugin's scripts/invoke-external.sh, or run the Triforge setup skill (\`/setup\` today, \`at-setup\` from 4.0)." >&2
+  unset _TRIFORGE_SELF_DIR _TRIFORGE_PLUGIN_ROOT _TRIFORGE_ROOT_STATE
+  return 2 2>/dev/null || exit 2
+fi
+unset _TRIFORGE_SELF_DIR
+_TRIFORGE_SCRIPTS_DIR="${_TRIFORGE_PLUGIN_ROOT}/scripts"
+triforge_plugin_root() { printf '%s\n' "$_TRIFORGE_PLUGIN_ROOT"; }
 
 # Load the lanes (fail-closed: a missing lib is a broken install, never a
 # silently narrower helper).

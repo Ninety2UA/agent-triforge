@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/roster.sh — roster resolution (KTD-2) and enrollment (R37/R39): resolve_role, dispatch_role, ensure_core_trio_live, latest_probe_record, roster_* helpers. scripts/validate-versions.sh parses the DEFAULTS / CLI_DEFAULT_MODEL literals here
+# scripts/lib/roster.sh — roster resolution (KTD-2) and enrollment (R37/R39): resolve_role, dispatch_role, ensure_core_trio_live, latest_probe_record, roster_* helpers. The role table is the DEFAULTS literal here (_ROLE_DEFAULTS_PY, parsed by scripts/validate-versions.sh check 3); every per-CLI value — binary, model, tier, install hint — comes from the CLI registry in scripts/lib/registry.sh (KTD7)
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh. Every function keeps the name and
@@ -13,6 +13,25 @@ fi
 # ---------------------------------------------------------------------------
 # Roster resolution (KTD-2) — ops/roster.toml decides who does what
 # ---------------------------------------------------------------------------
+
+# The role table — the ONE copy of the shipped role defaults, spliced into
+# resolve_role and roster_role_entry (python source, like _TRIFORGE_CLIS_PY in
+# scripts/lib/registry.sh, which supplies everything per-CLI). Mirrors
+# templates/ops/roster.toml; scripts/validate-versions.sh check 3 parses this
+# literal, requires each role's model to equal its CLI's registry model, and
+# diffs the template against it. builder model "" means: the shell claude -p
+# lease lane runs the host default Claude model (no --model pin); the
+# Fable/downgrade ladder is an Agent-tool subagent concern, not this lane.
+# Single-quoted shell literal: python strings inside use double quotes only.
+_ROLE_DEFAULTS_PY='
+DEFAULTS = {
+    "builder":    {"cli": "claude",      "model": "",                        "effort": "max",   "fallbacks": ["codex", "antigravity"]},
+    "reviewer":   {"cli": "codex",       "model": "gpt-6-astra",             "effort": "xhigh", "fallbacks": ["antigravity", "claude"]},
+    "tester":     {"cli": "codex",       "model": "gpt-6-astra",             "effort": "xhigh", "fallbacks": ["claude"]},
+    "analyst":    {"cli": "antigravity", "model": "Gemini 3.8 Flash (High)", "effort": "high",  "fallbacks": ["claude"]},
+    "documenter": {"cli": "antigravity", "model": "Gemini 3.8 Flash (High)", "effort": "high",  "fallbacks": ["claude"]},
+}
+'
 
 # resolve_role <role> — map a task-type role (builder | reviewer | tester |
 # analyst | documenter) to the member that should handle it right now.
@@ -69,6 +88,8 @@ resolve_role() {
   RESOLVE_ROLE_EXCLUDE="$RR_EXCLUDE" ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
 import os, re, shutil, sys
 ${_CURSOR_ID_PY}
+${_TRIFORGE_CLIS_PY}
+${_ROLE_DEFAULTS_PY}
 try:
     import tomllib
 except ImportError:
@@ -78,50 +99,21 @@ except ImportError:
         sys.stderr.write('resolve_role: ERROR no TOML parser available. Fix: use Python 3.11+ (tomllib) or run: pip install tomli\n')
         sys.exit(3)
 
-# Built-in defaults — the single source of truth in this function; mirrors
-# templates/ops/roster.toml (keep the two in sync). builder model '' means: the
-# shell claude -p lease lane runs the host default Claude model (no --model pin);
-# the Fable/downgrade ladder is an Agent-tool subagent concern, not this lane.
-DEFAULTS = {
-    'builder':    {'cli': 'claude',      'model': '',                      'effort': 'max',   'fallbacks': ['codex', 'antigravity']},
-    'reviewer':   {'cli': 'codex',       'model': 'gpt-6-astra',           'effort': 'xhigh', 'fallbacks': ['antigravity', 'claude']},
-    'tester':     {'cli': 'codex',       'model': 'gpt-6-astra',           'effort': 'xhigh', 'fallbacks': ['claude']},
-    'analyst':    {'cli': 'antigravity', 'model': 'Gemini 3.8 Flash (High)', 'effort': 'high',  'fallbacks': ['claude']},
-    'documenter': {'cli': 'antigravity', 'model': 'Gemini 3.8 Flash (High)', 'effort': 'high',  'fallbacks': ['claude']},
-}
-CORE_TRIO = ('claude', 'antigravity', 'codex')
-# cli name -> binary looked up on PATH
-BINARY = {'claude': 'claude', 'antigravity': 'agy', 'codex': 'codex',
-          'opencode': 'opencode', 'kimi': 'kimi',
-          # cursor: cursor-agent first; _cursor_bin (KTD3 / D-025) exports the
-          # verified fallback path (an agent binary whose --version matches the
-          # Cursor YYYY.MM.DD-<hex> format) as TRIFORGE_CURSOR_BIN for this map.
-          'cursor': os.environ.get('TRIFORGE_CURSOR_BIN') or 'cursor-agent'}
-# Shipped per-CLI default model, used when a member is reached via fallback
-# or chosen as an overridden primary with no explicit role model. Policy
-# (D-022, user-directed 2026-09-11): agy pins the NEWEST Gemini model at its
-# highest thinking level, Pro or Flash — currently Gemini 3.8 Flash (High)
-# (AGY-05 PASS 2026-09-11; Gemini 3.1 Pro (High) stays a documented roster
-# opt-in); codex gpt-6-astra (D-021, CDX-03); opencode glm-5.3 (D-023);
-# kimi kimi-code/k3 (D-024, the OAuth-managed alias); cursor
-# cursor-grok-4.6-xhigh (D-025 — effort rides in the model-id suffix, never
-# the Auto router). Keep in sync with roster_member_default and
-# templates/ops/roster.toml; scripts/validate-versions.sh diffs the copies.
-# A [members.<cli>].model entry overrides the shipped default.
-CLI_DEFAULT_MODEL = {
-    'claude': '',
-    'antigravity': 'Gemini 3.8 Flash (High)',
-    'codex': 'gpt-6-astra',
-    'opencode': 'openrouter/z-ai/glm-5.3',
-    'kimi': 'kimi-code/k3',
-    'cursor': 'cursor-grok-4.6-xhigh',
-}
-# G12-style install/login guidance (R21), matching the invoke_* wording.
-INSTALL_FIX = {
-    'claude': 'install Claude Code (npm install -g @anthropic-ai/claude-code), then run claude once and /login',
-    'antigravity': 'install it (curl -fsSL https://antigravity.google/cli/install.sh | bash), then run agy interactively once to complete login',
-    'codex': 'install it (npm install -g @openai/codex or brew install codex), then run codex login',
-}
+# DEFAULTS (the role table, _ROLE_DEFAULTS_PY above) and CLIS (the CLI
+# registry, scripts/lib/registry.sh) are the two spliced literals; everything
+# per-CLI below is derived from CLIS, never written out here.
+CORE_TRIO = tuple(c for c, e in CLIS.items() if e['tier'] == 'core')
+# cli name -> binary looked up on PATH. A registry binary_env (cursor:
+# TRIFORGE_CURSOR_BIN, which _cursor_bin exports after accepting an agent
+# binary whose --version matches the Cursor YYYY.MM.DD-<hex> format — KTD3 /
+# D-025) replaces the plain name when set.
+BINARY = {c: (os.environ.get(e['binary_env']) if e['binary_env'] else None) or e['binary'] for c, e in CLIS.items()}
+# Shipped per-CLI default model (the registry's model field), used when a
+# member is reached via fallback or chosen as an overridden primary with no
+# explicit role model. A [members.<cli>].model entry overrides it.
+CLI_DEFAULT_MODEL = {c: e['model'] for c, e in CLIS.items()}
+# G12-style install/login guidance (R21) — the same line cli_install_fix prints.
+INSTALL_FIX = {c: 'install ' + e['name'] + ' (' + e['install'] + ')' + (', then ' + e['login'] if e['login'] else '') for c, e in CLIS.items()}
 
 path = os.environ.get('ROSTER_FILE', 'ops/roster.toml')
 roster = {}
@@ -172,7 +164,7 @@ for name, dflt in DEFAULTS.items():
         if cli not in BINARY:
             reject('role ' + repr(name) + ' names unknown CLI ' + repr(cli) + ' (known: ' + ', '.join(BINARY) + ')')
     if chain[-1] not in CORE_TRIO:
-        reject('role ' + repr(name) + ' fallback chain ' + repr(chain) + ' does not terminate at a core-trio member (claude, antigravity, codex) — a chain resolving entirely to optional members cannot ship')
+        reject('role ' + repr(name) + ' fallback chain ' + repr(chain) + ' does not terminate at a core-trio member (' + ', '.join(CORE_TRIO) + ') — a chain resolving entirely to optional members cannot ship')
     merged[name] = entry
 
 # --- Resolution walk -------------------------------------------------------
@@ -272,6 +264,13 @@ dispatch_role() {
   MODEL=$(printf '%s\n' "$RESOLVED" | cut -f2)
   EFFORT=$(printf '%s\n' "$RESOLVED" | cut -f3)
   echo "dispatch_role: role=${ROLE} -> cli=${CLI} model=${MODEL:-<default>} effort=${EFFORT} agent=${AGENT_NAME}" >&2
+  # The registry's lane field decides the subagent path (claude today): review/
+  # test work on a "subagent" lane runs as a native Agent-tool subagent, not a
+  # shell helper — signal the caller to spawn one (see function comment).
+  if [ "$(cli_field "$CLI" lane 2>/dev/null || true)" = "subagent" ]; then
+    printf 'DISPATCH_ROLE_CLAUDE %s %s\n' "$AGENT_NAME" "$OUTPUT_FILE"
+    return "$_RC_DISPATCH_ROLE_CLAUDE"
+  fi
   case "$CLI" in
     antigravity)
       AGY_MODEL="$MODEL" invoke_antigravity "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT"
@@ -294,14 +293,8 @@ dispatch_role() {
     cursor)
       CURSOR_MODEL="$MODEL" invoke_cursor "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
       ;;
-    claude)
-      # Review/test on the claude lane runs as a native Agent-tool subagent, not
-      # a shell helper — signal the caller to spawn one (see function comment).
-      printf 'DISPATCH_ROLE_CLAUDE %s %s\n' "$AGENT_NAME" "$OUTPUT_FILE"
-      return "$_RC_DISPATCH_ROLE_CLAUDE"
-      ;;
     *)
-      echo "dispatch_role: ERROR role '${ROLE}' resolved to unknown cli '${CLI}' — not integrated. Known lanes: claude, codex, antigravity, opencode, kimi, cursor." >&2
+      echo "dispatch_role: ERROR role '${ROLE}' resolved to cli '${CLI}', which has no shell dispatch arm here — not integrated. Registered CLIs: $(_known_clis '<registry unreadable>')." >&2
       return 1
       ;;
   esac
@@ -323,27 +316,32 @@ _TRIO_LIVE_CACHE="${TMPDIR:-/tmp}/triforge_trio_live_$$"
 ensure_core_trio_live() {
   [ -f "$_TRIO_LIVE_CACHE" ] && return 0
   local FAILED=0
-  local PAIR NAME BIN FIX
-  for PAIR in "claude:claude" "antigravity:agy" "codex:codex"; do
-    NAME=${PAIR%%:*}
-    BIN=${PAIR##*:}
-    case "$NAME" in
-      claude)      FIX="install Claude Code (npm install -g @anthropic-ai/claude-code), then run \`claude\` once and /login" ;;
-      antigravity) FIX="install it (curl -fsSL https://antigravity.google/cli/install.sh | bash), then run \`agy\` interactively once to complete login" ;;
-      codex)       FIX="install it (npm install -g @openai/codex or brew install codex), then run \`codex login\`" ;;
-    esac
+  local ROWS CORE="" NAME BIN FIX
+  # The core set and each member's binary come from the CLI registry
+  # (scripts/lib/registry.sh) in one read — cli_table, one line per member —
+  # and the install fix is composed only when a member fails, so the happy path
+  # costs one lookup for the whole trio. The rows arrive on fd 3 so the probed
+  # commands keep the caller's stdin.
+  ROWS=$(cli_table core binary) || return 1
+  while IFS=$'\t' read -r -u 3 NAME BIN; do
+    [ -n "$NAME" ] || continue
+    CORE="${CORE:+${CORE} }${NAME}"
     if ! command -v "$BIN" >/dev/null 2>&1; then
+      FIX=$(cli_install_fix "$NAME" 2>/dev/null || true)
       echo "ensure_core_trio_live: ERROR core member ${NAME} — \`${BIN}\` not found on PATH. Fix: ${FIX}. No retry (deterministic)." >&2
       FAILED=1
     elif ! _run_with_timeout 15 "$BIN" --version >/dev/null; then
       # stderr stays visible so the fail-closed timeout-tool message (or the
       # CLI's own complaint) names the real cause, not a generic wrapper line.
+      FIX=$(cli_install_fix "$NAME" 2>/dev/null || true)
       echo "ensure_core_trio_live: ERROR core member ${NAME} — \`${BIN} --version\` failed its 15s liveness check (broken install or hung binary). Fix: ${FIX}. No retry (deterministic)." >&2
       FAILED=1
     fi
-  done
+  done 3<<TRIO_ROWS_EOF
+${ROWS}
+TRIO_ROWS_EOF
   if [ "$FAILED" -ne 0 ]; then
-    echo "ensure_core_trio_live: the core trio (claude, antigravity/agy, codex) must be live before /build or /review can dispatch — see fixes above." >&2
+    echo "ensure_core_trio_live: the core trio (${CORE// /, }) must be live before /build or /review can dispatch — see fixes above." >&2
     return 1
   fi
   : > "$_TRIO_LIVE_CACHE"
@@ -372,55 +370,31 @@ ensure_core_trio_live() {
 # tmp+mv with a tomllib round-trip verify, so it preserves the rest of the file
 # — role tables, comments, promotion gate — byte-for-byte.
 #
-# Shipped optional defaults (KTD-8, session-settled; MUST match CLI_DEFAULT_MODEL
-# in resolve_role): opencode -> openrouter/z-ai/glm-5.3 ; kimi -> kimi-code/k3 ;
-# cursor -> cursor-grok-4.6-xhigh (explicit suffixed pin — effort rides in the
-# suffix — NEVER the Auto router). The core trio (claude/antigravity/codex) is
-# required, never enrolled.
+# Shipped optional defaults (KTD-8, session-settled) are the registry's model
+# field (scripts/lib/registry.sh): opencode -> openrouter/z-ai/glm-5.3 ; kimi
+# -> kimi-code/k3 ; cursor -> cursor-grok-4.6-xhigh (explicit suffixed pin —
+# effort rides in the suffix — NEVER the Auto router). The core trio (tier
+# "core" in the registry) is required, never enrolled. The binary per member
+# is _registry_binary (cursor through _cursor_bin), and the official install
+# command — PRINTED by setup for the user to run, never executed by Triforge —
+# is the registry's install field (the surface /cli-watch re-checks each cycle).
 
-# cli name -> binary looked up on PATH (mirrors resolve_role's BINARY map).
-_roster_binary() {
-  case "${1:-}" in
-    claude)      echo "claude" ;;
-    antigravity) echo "agy" ;;
-    codex)       echo "codex" ;;
-    opencode)    echo "opencode" ;;
-    kimi)        echo "kimi" ;;
-    cursor)      _cursor_bin 2>/dev/null || echo "cursor-agent" ;;
-    *) return 2 ;;
-  esac
-}
-
-# Pinned install matrix — OFFICIAL installers only, last verified 2026-07-18.
-# /setup PRINTS these for the user to run themselves; Triforge NEVER executes an
-# installer. The optional-three URLs are the surface /cli-watch (U14) re-checks
-# each cycle — keep the two in sync when an upstream installer URL moves.
-_roster_install_cmd() {
-  case "${1:-}" in
-    opencode)    echo "curl -fsSL https://opencode.ai/install | bash" ;;
-    kimi)        echo "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash" ;;
-    cursor)      echo "curl https://cursor.com/install -fsS | bash" ;;
-    claude)      echo "npm install -g @anthropic-ai/claude-code" ;;
-    antigravity) echo "curl -fsSL https://antigravity.google/cli/install.sh | bash" ;;
-    codex)       echo "npm install -g @openai/codex   (or: brew install codex)" ;;
-    *) return 2 ;;
-  esac
-}
-
-# roster_member_default <cli> — print the shipped default model (D-020..D-025).
-# Mirrors CLI_DEFAULT_MODEL in resolve_role; claude is intentionally empty (the
-# shell claude -p lane runs the host default model; the Fable/ladder override is
-# an Agent-tool subagent concern, not this lane).
+# roster_member_default <cli> — print the shipped default model (D-020..D-025):
+# the registry's model field; claude is intentionally empty (the shell claude
+# -p lane runs the host default model; the Fable/ladder override is an
+# Agent-tool subagent concern, not this lane). rc 2 for an unknown cli.
 roster_member_default() {
-  case "${1:?usage: roster_member_default <cli>}" in
-    claude)      echo "" ;;
-    antigravity) echo "Gemini 3.8 Flash (High)" ;;
-    codex)       echo "gpt-6-astra" ;;
-    opencode)    echo "openrouter/z-ai/glm-5.3" ;;
-    kimi)        echo "kimi-code/k3" ;;
-    cursor)      echo "cursor-grok-4.6-xhigh" ;;
-    *) echo "roster_member_default: ERROR unknown cli '${1}'" >&2; return 2 ;;
-  esac
+  local CLI=${1:?usage: roster_member_default <cli>} MODEL=""
+  if ! MODEL=$(cli_field "$CLI" model 2>/dev/null); then
+    echo "roster_member_default: ERROR unknown cli '${CLI}'" >&2
+    return 2
+  fi
+  printf '%s\n' "$MODEL"
+}
+
+# _roster_is_core <cli> — 0 when the registry lists the CLI as tier "core".
+_roster_is_core() {
+  [ "$(cli_field "${1:-}" tier 2>/dev/null || true)" = "core" ]
 }
 
 # latest_probe_record — print the path of the NEWEST ops/research/*-probe-record.md
@@ -456,6 +430,8 @@ roster_role_entry() {
   RE_ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
 import os, sys, re
 ${_CURSOR_ID_PY}
+${_TRIFORGE_CLIS_PY}
+${_ROLE_DEFAULTS_PY}
 try:
     import tomllib
 except ImportError:
@@ -465,22 +441,9 @@ except ImportError:
         sys.stderr.write('roster_role_entry: ERROR no TOML parser available. Fix: use Python 3.11+ (tomllib) or run: pip install tomli\n')
         sys.exit(3)
 
-# Mirrors DEFAULTS and CLI_DEFAULT_MODEL in resolve_role (keep in sync).
-DEFAULTS = {
-    'builder':    {'cli': 'claude',      'model': '',                      'effort': 'max',   'fallbacks': ['codex', 'antigravity']},
-    'reviewer':   {'cli': 'codex',       'model': 'gpt-6-astra',           'effort': 'xhigh', 'fallbacks': ['antigravity', 'claude']},
-    'tester':     {'cli': 'codex',       'model': 'gpt-6-astra',           'effort': 'xhigh', 'fallbacks': ['claude']},
-    'analyst':    {'cli': 'antigravity', 'model': 'Gemini 3.8 Flash (High)', 'effort': 'high',  'fallbacks': ['claude']},
-    'documenter': {'cli': 'antigravity', 'model': 'Gemini 3.8 Flash (High)', 'effort': 'high',  'fallbacks': ['claude']},
-}
-CLI_DEFAULT_MODEL = {
-    'claude': '',
-    'antigravity': 'Gemini 3.8 Flash (High)',
-    'codex': 'gpt-6-astra',
-    'opencode': 'openrouter/z-ai/glm-5.3',
-    'kimi': 'kimi-code/k3',
-    'cursor': 'cursor-grok-4.6-xhigh',
-}
+# DEFAULTS is the spliced role table (_ROLE_DEFAULTS_PY); the per-CLI default
+# model is the registry's model field — the same two sources resolve_role reads.
+CLI_DEFAULT_MODEL = {c: e['model'] for c, e in CLIS.items()}
 role = os.environ['RE_ROLE']
 if role not in DEFAULTS:
     sys.stderr.write('roster_role_entry: ERROR unknown role ' + repr(role) + ' (valid: ' + ', '.join(DEFAULTS) + ')\n')
@@ -575,6 +538,7 @@ roster_write_role() {
   ROSTER_FILE="ops/roster.toml" WR_ROLE="$ROLE" WR_CLI="$CLI" WR_MODEL="$MODEL" WR_EFFORT="$EFFORT" WR_FALLBACKS="$FALLBACKS" WR_CUR_CLI="$CUR_CLI" WR_CUR_FB="$CUR_FB" python3 -c "
 import json, os, re, sys
 ${_CURSOR_ID_PY}
+${_TRIFORGE_CLIS_PY}
 try:
     import tomllib
 except ImportError:
@@ -584,11 +548,12 @@ except ImportError:
         sys.stderr.write('roster_write_role: ERROR no TOML parser available. Fix: use Python 3.11+ (tomllib) or run: pip install tomli\n')
         sys.exit(3)
 
-# Mirrors CORE_TRIO/KNOWN in resolve_role (keep in sync). Role names are
-# validated by the roster_role_entry call in the shell wrapper; the current
-# merged chain arrives via WR_CUR_* so no role-defaults copy lives here.
-CORE_TRIO = ('claude', 'antigravity', 'codex')
-KNOWN = ('claude', 'antigravity', 'codex', 'opencode', 'kimi', 'cursor')
+# The known CLIs and the core set come from the spliced registry (CLIS), the
+# same source resolve_role validates against. Role names are validated by the
+# roster_role_entry call in the shell wrapper; the current merged chain arrives
+# via WR_CUR_* so no role-defaults copy lives here.
+CORE_TRIO = tuple(c for c, e in CLIS.items() if e['tier'] == 'core')
+KNOWN = tuple(CLIS)
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
 
 path = os.environ['ROSTER_FILE']
@@ -632,7 +597,7 @@ for x in fallbacks:
         sys.exit(2)
 chain = [cli] + fallbacks
 if chain[-1] not in CORE_TRIO:
-    sys.stderr.write('roster_write_role: ERROR chain ' + repr(chain) + ' does not terminate at a core-trio member (claude, antigravity, codex) — a chain resolving entirely to optional members cannot ship\n')
+    sys.stderr.write('roster_write_role: ERROR chain ' + repr(chain) + ' does not terminate at a core-trio member (' + ', '.join(CORE_TRIO) + ') — a chain resolving entirely to optional members cannot ship\n')
     sys.exit(2)
 
 # agy's effort control IS the (Low)/(Medium)/(High) model-variant suffix (see
@@ -832,6 +797,7 @@ roster_write_member() {
   mkdir -p ops
   ROSTER_FILE="ops/roster.toml" RW_CLI="$CLI" RW_ENABLED="$ENABLED" RW_MODEL="$MODEL" RW_TAG="$TAG" python3 -c "
 import json, os, re, sys
+${_TRIFORGE_CLIS_PY}
 try:
     import tomllib
 except ImportError:
@@ -847,8 +813,9 @@ enabled = os.environ['RW_ENABLED']
 model = os.environ['RW_MODEL']
 tag = os.environ['RW_TAG']
 
-CORE = ('claude', 'antigravity', 'codex')
-KNOWN = ('claude', 'antigravity', 'codex', 'opencode', 'kimi', 'cursor')
+# Known CLIs and the core set from the spliced registry (CLIS).
+CORE = tuple(c for c, e in CLIS.items() if e['tier'] == 'core')
+KNOWN = tuple(CLIS)
 if cli not in KNOWN:
     sys.stderr.write('roster_write_member: ERROR unknown CLI ' + repr(cli) + ' (known: ' + ', '.join(KNOWN) + ')\n')
     sys.exit(2)
@@ -955,6 +922,13 @@ roster_member_auth() {
     esac
   fi
   local LINE="" RC=0 OUT=""
+  # A core member's readiness is ensure_core_trio_live's job (registry tier).
+  if _roster_is_core "$CLI"; then
+    LINE="unknown: core member (readiness via ensure_core_trio_live)"
+    printf '%s\n' "$LINE" > "$CACHE" 2>/dev/null || true
+    printf '%s\n' "$LINE"
+    return 2
+  fi
   case "$CLI" in
     cursor)
       local CBIN_AUTH=""
@@ -987,9 +961,6 @@ roster_member_auth() {
         LINE="ok"   # inconclusive (no READY, no auth-shaped error) — do not block on an ambiguous probe
       fi
       ;;
-    claude|antigravity|codex)
-      LINE="unknown: core member (readiness via ensure_core_trio_live)"; RC=2
-      ;;
     *)
       LINE="unknown: cli '${CLI}'"; RC=2
       ;;
@@ -1014,13 +985,11 @@ roster_member_auth() {
 # intent, not a live login.
 roster_member_status() {
   local CLI=${1:?usage: roster_member_status <cli>}
-  local BIN; BIN=$(_roster_binary "$CLI") || { echo "unknown-cli"; return 2; }
-  case "$CLI" in
-    claude|antigravity|codex)
-      if command -v "$BIN" >/dev/null 2>&1; then echo "core"; else echo "not-installed"; fi
-      return 0
-      ;;
-  esac
+  local BIN; BIN=$(_registry_binary "$CLI") || { echo "unknown-cli"; return 2; }
+  if _roster_is_core "$CLI"; then
+    if command -v "$BIN" >/dev/null 2>&1; then echo "core"; else echo "not-installed"; fi
+    return 0
+  fi
   if ! command -v "$BIN" >/dev/null 2>&1; then echo "not-installed"; return 0; fi
   if [ "$CLI" = opencode ] && ! _opencode_v2_check "$BIN"; then
     if [ "$_OPENCODE_CHECK" = unreadable ]; then
@@ -1060,13 +1029,11 @@ roster_enroll_member() {
   local CLI=${1:?usage: roster_enroll_member <cli> <interactive|headless>}
   local MODE=${2:?usage: roster_enroll_member <cli> <interactive|headless>}
   local BIN DEFAULT
-  BIN=$(_roster_binary "$CLI") || { echo "roster_enroll_member: unknown cli '${CLI}'" >&2; return 2; }
-  case "$CLI" in
-    claude|antigravity|codex)
-      echo "roster_enroll_member: '${CLI}' is core-trio (required, never enrolled) — nothing to do" >&2
-      return 2
-      ;;
-  esac
+  BIN=$(_registry_binary "$CLI") || { echo "roster_enroll_member: unknown cli '${CLI}'" >&2; return 2; }
+  if _roster_is_core "$CLI"; then
+    echo "roster_enroll_member: '${CLI}' is core-trio (required, never enrolled) — nothing to do" >&2
+    return 2
+  fi
   case "$MODE" in
     interactive|headless) : ;;
     *) echo "roster_enroll_member: ERROR mode must be interactive|headless, got '${MODE}'" >&2; return 2 ;;
@@ -1099,7 +1066,7 @@ roster_enroll_member() {
   # it) and return the not-installed code so the caller shows "not installed".
   if ! command -v "$BIN" >/dev/null 2>&1; then
     echo "not-installed: ${CLI} (binary '${BIN}' absent). Install it yourself — Triforge never runs installers for you:"
-    echo "    $(_roster_install_cmd "$CLI")"
+    echo "    $(cli_field "$CLI" install)"
     return 10
   fi
 

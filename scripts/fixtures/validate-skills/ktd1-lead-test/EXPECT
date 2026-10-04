@@ -1,0 +1,3 @@
+check: KTD1
+default: warn
+message: comparison of the lead's CLI value

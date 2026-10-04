@@ -1,0 +1,3 @@
+check: C15
+default: warn
+message: max 8000

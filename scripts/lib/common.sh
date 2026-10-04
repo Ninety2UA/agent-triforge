@@ -73,14 +73,17 @@ _kill_tree() {
   kill -"$SIG" "$ROOT" 2>/dev/null || true
 }
 
-# The six integrated adapter identities. A valid reviewer/builder identity is
-# exactly one of these — canonicalizing against this set (rather than accepting
-# any free-form label) is what closes fabricated reviewer names like
-# "codex-reviewer", which would otherwise pass lease_merge's plain != builder
-# string compare (AE3) while no real review ran.
-_KNOWN_CLIS="claude antigravity codex opencode kimi cursor"
+# The registered adapter identities (_known_clis — scripts/lib/registry.sh,
+# sourced after this file, reads them from the CLI registry on first use and
+# caches them in _KNOWN_CLIS; called here, not in a $(...), so the cache lands in
+# this shell). A valid reviewer/builder identity is exactly one of these —
+# canonicalizing against the registry (rather than accepting any free-form
+# label) is what closes fabricated reviewer names like "codex-reviewer", which
+# would otherwise pass lease_merge's plain != builder string compare (AE3) while
+# no real review ran. An empty list (python3 missing) fails every identity closed.
 _is_known_cli() {
-  case " ${_KNOWN_CLIS} " in *" ${1:-} "*) return 0 ;; *) return 1 ;; esac
+  _known_clis >/dev/null
+  case " ${_KNOWN_CLIS:-} " in *" ${1:-} "*) return 0 ;; *) return 1 ;; esac
 }
 
 # Classify a failed external-CLI invocation (KTD-9). Shared so future per-CLI
@@ -133,8 +136,8 @@ _agy_agents_listing() {
 # header is dropped).
 _list_antigravity_agents() {
   {
-    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents" ]; then
-      for f in "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents"/*.md; do
+    if [ -d "${_TRIFORGE_PLUGIN_ROOT}/antigravity-agents/agents" ]; then
+      for f in "${_TRIFORGE_PLUGIN_ROOT}/antigravity-agents/agents"/*.md; do
         [ -f "$f" ] && basename "$f" .md
       done 2>/dev/null
     fi

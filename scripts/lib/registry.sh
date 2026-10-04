@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/registry.sh — data the other lanes read from one place (KTD7). In 3.3.3: the two protected-path lists and their match rule (KTD8), and the model ladder (KTD22)
+# scripts/lib/registry.sh — data the other lanes read from one place (KTD7): the CLI registry (one literal per CLI — tier, binary, model, install hint, env allowlist keys, lane, egress, the KTD1 lead fields; R25/R41), the two protected-path lists and their match rule (KTD8), and the model ladder (KTD22)
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh and before scripts/lib/lease.sh.
@@ -38,8 +38,9 @@ fi
 # list in the commit that creates it.
 _PROTECTED_PY='
 FRAMEWORK_PROTECTED = (
-    # enforcement code: the helper, its lanes, the no-push hook, the outer loop
-    "scripts/lib/", "scripts/lease-git-hooks/", "scripts/invoke-external.sh", "scripts/coordinate.sh",
+    # enforcement code: the helper, its lanes, the no-push hook, the outer loop,
+    # the skill locator every at- skill carries a copy of (KTD6)
+    "scripts/lib/", "scripts/lease-git-hooks/", "scripts/skill-locator/", "scripts/fixtures/", "scripts/invoke-external.sh", "scripts/coordinate.sh",
     # the probe harness and the release gates
     "scripts/probe-capabilities.sh", "scripts/probe-self-tests.sh",
     "scripts/validate-skills.sh", "scripts/validate-versions.sh", "scripts/release-notes.sh",
@@ -131,4 +132,317 @@ TRIFORGE_MODEL_LADDER='Downgrade ladder for narrow runtime tasks: `fable`+`max` 
 # triforge_ladder — print the ladder text (one line, newline-terminated).
 triforge_ladder() {
   printf '%s\n' "$TRIFORGE_MODEL_LADDER"
+}
+
+# ---------------------------------------------------------------------------
+# CLI registry (KTD7, R25, R41)
+# ---------------------------------------------------------------------------
+#
+# ONE literal per CLI. Adding a CLI is one entry here plus its lane file, probe
+# rows, setup entry and egress line (R25); nothing else carries a copy:
+# scripts/lib/roster.sh (resolution, enrollment, the core-trio set, install
+# hints), scripts/lib/lease.sh (_adapter_env, dispatch defaults),
+# scripts/lib/common.sh (_is_known_cli), hooks/handlers/session-start.sh (the
+# optional-CLI detection and the roster-pin notice), scripts/validate-versions.sh
+# (check 3 — the drift check parses this literal and compares every remaining
+# copy with it) and scripts/probe-capabilities.sh (_lane_run, the live gates)
+# all read it. Python source, like _PROTECTED_PY and _CURSOR_ID_PY: spliced
+# into the python that resolves roles and writes the roster, and read by the
+# shell accessors below through python3. Single-quoted: strings inside use
+# double quotes only, never a '; a value containing " escapes it as \" (the
+# codex launch line). The validator parses it with ast.literal_eval, so it
+# must stay a pure literal — comments are fine, expressions are not.
+#
+# Fields — every entry carries all of them (check 3 enforces the shape):
+#   name        display name for messages ("Antigravity CLI")
+#   tier        "core" (required, never disabled, every fallback chain ends at
+#               one) | "optional" (enrolled via setup; skipped clean when absent)
+#   binary      the executable looked up on PATH
+#   binary_env  variable that, when set, replaces `binary` with a resolved
+#               absolute path ("" = none): cursor's TRIFORGE_CURSOR_BIN, which
+#               _cursor_bin exports after accepting an `agent` whose --version
+#               matches version_re
+#   resolver    shell function that resolves the binary ("" = plain `binary`);
+#               _registry_binary calls it when it is defined
+#   version_re  the --version shape an alternate binary name must match ("")
+#   model       shipped default model; "" for claude (the shell lane runs the
+#               host default, the ladder is an Agent-tool concern — see
+#               TRIFORGE_MODEL_LADDER)
+#   model_env   the override variable the CLI's dispatch lane honors ("" for
+#               claude: the ladder, never the roster, picks its model)
+#   install     the official install command — PRINTED for the user, never run
+#               (R18/R21); `login` is the step printed after it ("" when none)
+#   env_keys    variables _adapter_env forwards into a lease besides the base
+#               allowlist TRIFORGE_ENV_BASE: EXACT names only; the one
+#               documented wildcard is kimi's "KIMI_*" (check 3 fails any other)
+#   lane        how a role dispatch reaches the CLI: "shell" (its invoke_*
+#               helper, or a command composed under env -i in lease_dispatch)
+#               | "subagent" (a native Agent-tool subagent — review and test
+#               work on the claude lane; dispatch_role returns 40)
+#   egress      the model provider that receives the prompt and the code (R36)
+#   lead        the KTD1 static lead fields, or {} for a CLI that cannot lead
+#               (Key Decision: Claude Code or Codex only). launch_argv is the
+#               launch line setup prints and the human types; wait_budget_s the
+#               longest single wait the lead's shell tool allows; the two
+#               tool_vocab_* lists are the lead's own read and action tool
+#               names (what a paralysis monitor classifies); goal_gate the
+#               completion-gate command ("" = none, the ops/.sprint-complete
+#               sentinel alone); ask_user the question tool ("" = none);
+#               plugin_root_env the variable the host exports for the plugin
+#               root ("" = none — the skill locator finds it). hooks_trusted
+#               is runtime (detected per session), not registry data.
+_TRIFORGE_CLIS_PY='
+CLIS = {
+    "claude": {
+        "name": "Claude Code",
+        "tier": "core",
+        "binary": "claude",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "",
+        "model_env": "",
+        "install": "npm install -g @anthropic-ai/claude-code",
+        "login": "run `claude` once and /login",
+        "env_keys": [],
+        "lane": "subagent",
+        "egress": "Anthropic",
+        "lead": {
+            "launch_argv": "claude",
+            "wait_budget_s": 600,
+            "tool_vocab_read": "Read Grep Glob WebFetch",
+            "tool_vocab_action": "Edit Write Bash",
+            "goal_gate": "/goal",
+            "ask_user": "AskUserQuestion",
+            "native_subagents_enforced_tools": True,
+            "agent_teams": True,
+            "plugin_root_env": "CLAUDE_PLUGIN_ROOT",
+        },
+    },
+    "antigravity": {
+        "name": "Antigravity CLI",
+        "tier": "core",
+        "binary": "agy",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "Gemini 3.8 Flash (High)",
+        "model_env": "AGY_MODEL",
+        "install": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+        "login": "run `agy` interactively once to complete login",
+        "env_keys": [],
+        "lane": "shell",
+        "egress": "Google",
+        "lead": {},
+    },
+    "codex": {
+        "name": "Codex CLI",
+        "tier": "core",
+        "binary": "codex",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "gpt-6-astra",
+        "model_env": "CODEX_MODEL",
+        "install": "npm install -g @openai/codex (or brew install codex)",
+        "login": "run `codex login`",
+        "env_keys": [],
+        "lane": "shell",
+        "egress": "OpenAI",
+        "lead": {   # D-047 profile; tool names — verified: U14
+            "launch_argv": "codex exec -s danger-full-access -c approval_policy=\"never\" -c background_terminal_max_timeout=900000",
+            "wait_budget_s": 900,
+            "tool_vocab_read": "read_file exec_command(read)",
+            "tool_vocab_action": "exec_command apply_patch",
+            "goal_gate": "",
+            "ask_user": "",
+            "native_subagents_enforced_tools": False,
+            "agent_teams": False,
+            "plugin_root_env": "",
+        },
+    },
+    "opencode": {
+        "name": "OpenCode",
+        "tier": "optional",
+        "binary": "opencode",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "openrouter/z-ai/glm-5.3",
+        "model_env": "OPENCODE_MODEL",
+        "install": "curl -fsSL https://opencode.ai/install | bash",
+        "login": "set OPENROUTER_API_KEY, or run `opencode auth login` and connect the openrouter provider",
+        "env_keys": ["OPENROUTER_API_KEY"],
+        "lane": "shell",
+        "egress": "Zhipu / Z.ai, through OpenRouter (which also sees the traffic)",
+        "lead": {},
+    },
+    "kimi": {
+        "name": "Kimi Code",
+        "tier": "optional",
+        "binary": "kimi",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "kimi-code/k3",
+        "model_env": "KIMI_MODEL",
+        "install": "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
+        "login": "run `kimi login`",
+        "env_keys": ["KIMI_*"],
+        "lane": "shell",
+        "egress": "Moonshot",
+        "lead": {},
+    },
+    "cursor": {
+        "name": "Cursor CLI",
+        "tier": "optional",
+        "binary": "cursor-agent",
+        "binary_env": "TRIFORGE_CURSOR_BIN",
+        "resolver": "_cursor_bin",
+        "version_re": "^[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[0-9a-f]+",
+        "model": "cursor-grok-4.6-xhigh",
+        "model_env": "CURSOR_MODEL",
+        "install": "curl https://cursor.com/install -fsS | bash",
+        "login": "run `cursor-agent login`",
+        "env_keys": ["CURSOR_API_KEY"],
+        "lane": "shell",
+        "egress": "xAI (Grok, via Cursor)",
+        "lead": {},
+    },
+}
+'
+
+# The base env allowlist every lease builder gets (KTD-14) — identity and
+# terminal, no credentials: USER is what lets `claude -p` find its keychain
+# account under env -i. _adapter_env (scripts/lib/lease.sh) and its mirror
+# _lane_run (scripts/probe-capabilities.sh) both read this list; a CLI's own
+# credential variables are its env_keys entry above.
+TRIFORGE_ENV_BASE="HOME PATH TMPDIR TERM LANG COLORTERM USER"
+
+# cli_list [core|optional|all] — the registered CLI names, registry order,
+# space-separated on one line (default: all).
+cli_list() {
+  CL_TIER="${1:-all}" python3 -c "
+import os
+${_TRIFORGE_CLIS_PY}
+t = os.environ['CL_TIER']
+print(' '.join(c for c, e in CLIS.items() if t == 'all' or e['tier'] == t))
+"
+}
+
+# _CLI_FIELD_PY — the lookup the two accessors below share, spliced into their
+# python like _TRIFORGE_CLIS_PY (single-quoted: double quotes only inside).
+# cli_value(who, cli, entry, field) walks a dotted field name into the entry and
+# formats the value — a list space-joined, a boolean as true|false, a table as
+# its key names (an empty table formats as nothing) — or exits 2 with
+# "<who>: <cli> has no field '<field>'", so a typo never reads as "".
+_CLI_FIELD_PY='
+def cli_value(who, cli, entry, field):
+    v = entry
+    for k in field.split("."):
+        if not isinstance(v, dict) or k not in v:
+            sys.stderr.write(who + ": " + cli + " has no field " + repr(field) + "\n")
+            sys.exit(2)
+        v = v[k]
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (list, tuple)):
+        return " ".join(str(x) for x in v)
+    if isinstance(v, dict):
+        return " ".join(v)
+    return str(v)
+'
+
+# cli_field <cli> <field>[.<subfield>]... — print the registry values of one
+# CLI, tab-separated on one line (one field: the value alone; cli_field codex
+# lead -> the KTD1 field names). rc 2 with a message for an unknown CLI or
+# field. Two fields in one call is one python3 fork instead of two
+# (_registry_binary, lease_dispatch); the fields ride in as the argument list.
+cli_field() {
+  CF_ARGS="$*" CF_CLI="${1:?usage: cli_field <cli> <field>[.<subfield>]}" CF_FIELD="${2:?usage: cli_field <cli> <field>[.<subfield>]}" python3 -c "
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_CLI_FIELD_PY}
+cli = os.environ['CF_CLI']
+if cli not in CLIS:
+    sys.stderr.write('cli_field: unknown cli ' + repr(cli) + ' (registered: ' + ' '.join(CLIS) + ')\n')
+    sys.exit(2)
+fields = [os.environ['CF_FIELD']] + os.environ['CF_ARGS'].split()[2:]
+print('\t'.join(cli_value('cli_field', cli, CLIS[cli], f) for f in fields))
+"
+}
+
+# cli_table <core|optional|all> <field>[.<subfield>]... — one line per registered
+# CLI of that tier, registry order: the name, then each field, tab-separated and
+# formatted as cli_field prints them. One python3 fork where a cli_list +
+# cli_field loop forks once per lookup (ensure_core_trio_live, the session-start
+# detection loop). rc 2 with a message for an unknown tier or field.
+cli_table() {
+  CT_ARGS="$*" CT_TIER="${1:?usage: cli_table <core|optional|all> <field>[.<subfield>]...}" CT_FIELD="${2:?usage: cli_table <core|optional|all> <field>[.<subfield>]...}" python3 -c "
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_CLI_FIELD_PY}
+t = os.environ['CT_TIER']
+if t not in ('core', 'optional', 'all'):
+    sys.stderr.write('cli_table: unknown tier ' + repr(t) + ' (core|optional|all)\n')
+    sys.exit(2)
+fields = [os.environ['CT_FIELD']] + os.environ['CT_ARGS'].split()[2:]
+for cli, e in CLIS.items():
+    if t == 'all' or e['tier'] == t:
+        print('\t'.join([cli] + [cli_value('cli_table', cli, e, f) for f in fields]))
+"
+}
+
+# cli_install_fix <cli> — the one-line install-then-login fix the helpers print
+# on a deterministic failure (R21 wording): "install <name> (<install>), then
+# <login>". resolve_role composes the same line in python for its
+# chain-exhausted error.
+cli_install_fix() {
+  CF_CLI="${1:?usage: cli_install_fix <cli>}" python3 -c "
+import os, sys
+${_TRIFORGE_CLIS_PY}
+cli = os.environ['CF_CLI']
+if cli not in CLIS:
+    sys.stderr.write('cli_install_fix: unknown cli ' + repr(cli) + '\n')
+    sys.exit(2)
+e = CLIS[cli]
+print('install ' + e['name'] + ' (' + e['install'] + ')' + (', then ' + e['login'] if e['login'] else ''))
+"
+}
+
+# _registry_binary <cli> [<binary> <resolver>] — the binary to look up on PATH:
+# the entry's resolver's answer when the registry names one and the function is
+# defined (cursor: _cursor_bin, which prints the verified absolute path), else
+# the plain `binary` name. The two fields are one registry read (cli_field)
+# unless the caller hands them over from a cli_table row (the session-start
+# detection loop: one read for the whole tier). rc 2 for an unknown CLI.
+_registry_binary() {
+  local CLI=${1:?usage: _registry_binary <cli>} BIN=${2:-} RESOLVER=${3:-} ROW="" OUT=""
+  if [ $# -lt 3 ]; then
+    ROW=$(cli_field "$CLI" binary resolver 2>/dev/null) || return 2
+    BIN=${ROW%%$'\t'*}
+    RESOLVER=${ROW#*$'\t'}
+  fi
+  if [ -n "$RESOLVER" ] && command -v "$RESOLVER" >/dev/null 2>&1 && OUT=$("$RESOLVER" 2>/dev/null) && [ -n "$OUT" ]; then
+    printf '%s\n' "$OUT"
+    return 0
+  fi
+  printf '%s\n' "$BIN"
+}
+
+# _known_clis [<text when unreadable>] — the registered CLI names as one
+# space-separated line (cli_list all), for the identity checks (_is_known_cli
+# in common.sh) and the "one of: …" error messages in lease.sh and roster.sh.
+# Read on first use and cached in _KNOWN_CLIS, so loading the helper forks no
+# python; empty (every identity check fails closed) only when python3 is
+# missing, which resolve_role refuses on anyway — the optional argument is
+# printed in place of that empty list.
+_KNOWN_CLIS=""
+_KNOWN_CLIS_READ=""
+_known_clis() {
+  if [ -z "$_KNOWN_CLIS_READ" ]; then
+    _KNOWN_CLIS=$(cli_list all 2>/dev/null) || _KNOWN_CLIS=""
+    _KNOWN_CLIS_READ=1
+  fi
+  printf '%s\n' "${_KNOWN_CLIS:-${1:-}}"
 }

@@ -274,7 +274,7 @@ invoke_opencode() {
   # the READY plumbing probe and lease_dispatch's direct builder command).
   local BASE=(env "OPENCODE_PERMISSION=${OC_PERM}" opencode run --format json -m "$MODEL")
   local CMD=("${BASE[@]}")
-  if [ -n "$AGENT_NAME" ] && { [ -f ".opencode/agents/${AGENT_NAME}.md" ] || { [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/opencode-agents/${AGENT_NAME}.md" ]; }; }; then
+  if [ -n "$AGENT_NAME" ] && { [ -f ".opencode/agents/${AGENT_NAME}.md" ] || { [ -f "${_TRIFORGE_PLUGIN_ROOT}/opencode-agents/${AGENT_NAME}.md" ]; }; }; then
     CMD+=(--agent "$AGENT_NAME")
     MODE="agent"
   elif [ -n "$AGENT_NAME" ]; then
@@ -371,8 +371,8 @@ _list_opencode_agents() {
         [ -f "$f" ] && basename "$f" .md
       done 2>/dev/null
     fi
-    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/opencode-agents" ]; then
-      for f in "${CLAUDE_PLUGIN_ROOT}/opencode-agents"/*.md; do
+    if [ -d "${_TRIFORGE_PLUGIN_ROOT}/opencode-agents" ]; then
+      for f in "${_TRIFORGE_PLUGIN_ROOT}/opencode-agents"/*.md; do
         [ -f "$f" ] && basename "$f" .md
       done 2>/dev/null
     fi

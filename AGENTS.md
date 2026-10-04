@@ -15,13 +15,14 @@ Precedence: the user's own instructions, then this file, then a skill's defaults
 ```bash
 claude plugin validate --strict .claude-plugin/plugin.json
 claude plugin validate --strict .claude-plugin/marketplace.json
-bash scripts/validate-skills.sh
+bash scripts/validate-skills.sh            # 26 conformance checks + the KTD1/KTD6 gates over skills/ (name .claude/skills to cover a repo-local skill); --strict turns warnings into errors
+bash scripts/validate-skills.sh --self-test   # its fixtures, scripts/fixtures/validate-skills/
 bash scripts/validate-versions.sh          # lockstep, ladder, drift, stale pins, counts, AGENTS.md budget, inventory
 bash scripts/probe-capabilities.sh --self-only   # the SELF gate: static rows only, ~90 s, exit 3 on any SELF FAIL
 for f in scripts/*.sh scripts/lib/*.sh hooks/handlers/*.sh; do /bin/bash -n "$f" || echo "SYNTAX $f"; done
 ```
 
-`.github/workflows/gates.yml` runs the last four on a macOS runner for pull requests to `main` and `release/4.0`; the two manifest validations need Claude Code and stay a local gate. A release also needs the steps under "Release".
+`.github/workflows/gates.yml` runs the last five on a macOS runner for pull requests to `main` and `release/4.0`; the two manifest validations need Claude Code and stay a local gate. A release also needs the steps under "Release".
 
 ## Expensive operations
 
@@ -31,7 +32,7 @@ for f in scripts/*.sh scripts/lib/*.sh hooks/handlers/*.sh; do /bin/bash -n "$f"
 
 ## Do not touch
 
-- **Protected paths** force the promotion gate on and require the lead or the user as the cross-reviewer — never an external-CLI-only review. The code lists live in `scripts/lib/registry.sh` (`FRAMEWORK_PROTECTED` applies in this checkout only, `PROJECT_PROTECTED` in every project), and SELF-10 checks every path named on this line against them. Framework control plane: `scripts/invoke-external.sh` and all of `scripts/lib/` (the lanes, `scripts/lib/skills-sync.py`, `scripts/lib/skill-digests.txt`), `scripts/lease-git-hooks/*`, `scripts/coordinate.sh`, `scripts/probe-capabilities.sh`, `scripts/probe-self-tests.sh`, `scripts/validate-skills.sh`, `scripts/validate-versions.sh`, `scripts/release-notes.sh`, all of `hooks/` (`hooks/hooks.json` and the handlers), `skills/`, `commands/`, `personas/` (the 4.0 persona home), the shipped agent configs (`agents/`, `antigravity-agents/`, `codex-agents/`, `opencode-agents/`, `kimi-agents/`, `cursor-agents/`), `.claude-plugin/`, `settings.json`, `templates/`, `.github/` and every `.gitattributes`. Every project: `ops/roster.toml` incl. `[promotion]`, `.gitmodules` (it names what `git submodule update` pulls in), each CLI's config and permission tree (`.claude/` incl. `.claude/settings*.json`, `.codex/`, `.agents/`, `.antigravity/`, `.gemini/`, `.opencode/`, `.kimi-code/`, `.cursor/`, plus the root `opencode.json`, `opencode.jsonc` and `.cursorrules`), and every `AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`, `CLAUDE.local.md` and `.mcp.json` at any depth. A directory entry also matches its bare name (a symlink in its place). The scan is case-folded, sees both sides of a rename, and fails closed: a scan error blocks promotion (rc 42)
+- **Protected paths** force the promotion gate on and require the lead or the user as the cross-reviewer — never an external-CLI-only review. The code lists live in `scripts/lib/registry.sh` (`FRAMEWORK_PROTECTED` applies in this checkout only, `PROJECT_PROTECTED` in every project), and SELF-10 checks every path named on this line against them. Framework control plane: `scripts/invoke-external.sh` and all of `scripts/lib/` (the lanes, `scripts/lib/skills-sync.py`, `scripts/lib/skill-digests.txt`), `scripts/lease-git-hooks/*`, `scripts/fixtures/` (the validators' fixtures), `scripts/skill-locator/` (the skill locator source), `scripts/coordinate.sh`, `scripts/probe-capabilities.sh`, `scripts/probe-self-tests.sh`, `scripts/validate-skills.sh`, `scripts/validate-versions.sh`, `scripts/release-notes.sh`, all of `hooks/` (`hooks/hooks.json` and the handlers), `skills/`, `commands/`, `personas/` (the 4.0 persona home), the shipped agent configs (`agents/`, `antigravity-agents/`, `codex-agents/`, `opencode-agents/`, `kimi-agents/`, `cursor-agents/`), `.claude-plugin/`, `settings.json`, `templates/`, `.github/` and every `.gitattributes`. Every project: `ops/roster.toml` incl. `[promotion]`, `.gitmodules` (it names what `git submodule update` pulls in), each CLI's config and permission tree (`.claude/` incl. `.claude/settings*.json`, `.codex/`, `.agents/`, `.antigravity/`, `.gemini/`, `.opencode/`, `.kimi-code/`, `.cursor/`, plus the root `opencode.json`, `opencode.jsonc` and `.cursorrules`), and every `AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`, `CLAUDE.local.md` and `.mcp.json` at any depth. A directory entry also matches its bare name (a symlink in its place). The scan is case-folded, sees both sides of a rename, and fails closed: a scan error blocks promotion (rc 42)
 - `ops/leases.toml` is the lead's ledger: single-writer, lead-owned. Workers under a lease commit nothing, never read the canonical `ops/` tree (context is injected into the dispatch), and cannot push (pre-push hook plus a `no-push://` URL rewrite in the lease git config).
 - User-tier configuration is detected and printed, never written: `~/.codex/config.toml` (including the `[projects."<abs path>"] trust_level = "trusted"` entry), `~/.gemini/antigravity-cli/settings.json` (the only tier agy enforces headless), the user's Claude settings (R18).
 - `ops/CONTRACTS.md` is not edited during review; propose the change in `ops/MEMORY.md` first.
@@ -80,7 +81,7 @@ for f in scripts/*.sh scripts/lib/*.sh hooks/handlers/*.sh; do /bin/bash -n "$f"
 - `skills/wave-orchestration/SKILL.md` — the lease lifecycle (assign, dispatch, collect, pin, merge, verify, promote) and the dispatch contract.
 - `docs/agent-triforge.md` — the design: phases, coordination modes, shared `ops/` files, agent frontmatter fields, the security model in detail, compatibility notes.
 - `README.md` — install, prerequisites, compatibility floors, the six-CLI skills matrix, data egress, release process.
-- `scripts/lib/registry.sh` — protected-path lists and the model ladder; `templates/AGENTS.md` — the pointer block for user projects; `templates/ops/` — the `ops/` skeleton.
+- `scripts/lib/registry.sh` — the CLI registry (one entry per CLI: tier, binary, model, install hint, env allowlist keys, lane, egress, lead fields — adding a CLI starts here), protected-path lists and the model ladder; `templates/AGENTS.md` — the pointer block for user projects; `templates/ops/` — the `ops/` skeleton.
 
 ## Release
 
