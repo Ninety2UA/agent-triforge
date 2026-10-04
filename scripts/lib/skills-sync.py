@@ -232,15 +232,11 @@ def sync(plugin_root, project, prefix):
         # a copy an earlier run did not finish
         if leftover.startswith(TMP_PREFIX) and not os.path.islink(os.path.join(dest, leftover)):
             shutil.rmtree(os.path.join(dest, leftover), ignore_errors=True)
-    for name in sorted(os.listdir(src_root)):
-        src = os.path.join(src_root, name)
-        if name.startswith("."):
-            continue    # packaging, not a skill: skills/.devin-plugin/ is the Devin manifest
-        if lead_workflow(name) or not os.path.isdir(src) or os.path.islink(src):
-            continue    # a lead workflow (at-*) stays in the plugin install
-        if not NAME_RE.match(name):
+    for name, valid in shipped_entries(src_root):
+        if not valid:
             skipped.append(name + "(invalid-name)")
             continue
+        src = os.path.join(src_root, name)
         shipped.append(name)
         target = os.path.join(dest, name)
         if os.path.lexists(target):
@@ -258,28 +254,11 @@ def sync(plugin_root, project, prefix):
             if not owned(name, current):
                 kept.append(name)
                 continue
-        # Copy into a temporary sibling first and rename it into place: a copy
-        # interrupted half-way (the hook's timeout, a crash) would otherwise
-        # leave a partial directory that no recorded digest matches, and the
-        # next refresh would keep it as the user's.
-        tmp_dir = os.path.join(dest, TMP_PREFIX + name + "-" + str(os.getpid()))
         try:
-            if os.path.lexists(tmp_dir):
-                shutil.rmtree(tmp_dir)
-            shutil.copytree(src, tmp_dir, symlinks=True)
-            digest = dir_digest(tmp_dir)
-            if os.path.lexists(target):
-                shutil.rmtree(target)
-            os.rename(tmp_dir, target)
-            written[name] = digest
+            written[name] = copy_into_place(src, dest, name, True)
         except (OSError, shutil.Error):
             failed = True
             skipped.append(name + ("(replace-failed)" if os.path.lexists(target) else "(copy-failed)"))
-            try:
-                if os.path.lexists(tmp_dir):
-                    shutil.rmtree(tmp_dir)
-            except OSError:
-                pass
 
     previous = []
     if stamp:
@@ -328,17 +307,49 @@ def sync(plugin_root, project, prefix):
     return out
 
 
-def portable_names(src_root):
-    """The shipped portable skill names, sorted: every plain directory under
-    skills/ except a dot entry (packaging) and an at-* lead workflow."""
-    names = []
+def shipped_entries(src_root):
+    """The shipped skill directories under skills/, sorted, as (name, valid)
+    pairs: every plain directory except a dot entry (packaging: skills/
+    .devin-plugin/ is the Devin manifest) and an at-* lead workflow, which
+    stays in the plugin install. valid: the name matches NAME_RE, so it is in
+    the portable set."""
+    entries = []
     for name in sorted(os.listdir(src_root)):
         src = os.path.join(src_root, name)
         if name.startswith(".") or lead_workflow(name) or not os.path.isdir(src) or os.path.islink(src):
             continue
-        if NAME_RE.match(name):
-            names.append(name)
-    return names
+        entries.append((name, bool(NAME_RE.match(name))))
+    return entries
+
+
+def copy_into_place(src, dest, name, replace):
+    """Copy src to <dest>/<name> through a temporary sibling renamed into place:
+    a copy interrupted half-way (the hook's timeout, a crash) would otherwise
+    leave a partial directory that no recorded digest matches, and the next
+    refresh would keep it as the user's. replace (sync): digest the copy and
+    remove the directory already at <dest>/<name> first, and return the
+    digest; without it (add) the name must be free, and None is returned. A
+    failure removes the temporary copy and raises (OSError, shutil.Error)."""
+    target = os.path.join(dest, name)
+    tmp_dir = os.path.join(dest, TMP_PREFIX + name + "-" + str(os.getpid()))
+    try:
+        if os.path.lexists(tmp_dir):
+            shutil.rmtree(tmp_dir)
+        shutil.copytree(src, tmp_dir, symlinks=True)
+        digest = None
+        if replace:
+            digest = dir_digest(tmp_dir)
+            if os.path.lexists(target):
+                shutil.rmtree(target)
+        os.rename(tmp_dir, target)
+        return digest
+    except (OSError, shutil.Error):
+        try:
+            if os.path.lexists(tmp_dir):
+                shutil.rmtree(tmp_dir)
+        except OSError:
+            pass
+        raise
 
 
 def add(plugin_root, project, dest_rel, skip, prefix):
@@ -374,25 +385,17 @@ def add(plugin_root, project, dest_rel, skip, prefix):
         note(dest_rel + " resolves outside the project (symlinked ancestor) — left untouched.")
         return out
     added, present, failed = [], [], []
-    for name in portable_names(src_root):
-        target = os.path.join(dest, name)
-        if name in skip or os.path.lexists(target):
+    for name, valid in shipped_entries(src_root):
+        if not valid:
+            continue
+        if name in skip or os.path.lexists(os.path.join(dest, name)):
             present.append(name)
             continue
-        tmp_dir = os.path.join(dest, TMP_PREFIX + name + "-" + str(os.getpid()))
         try:
-            if os.path.lexists(tmp_dir):
-                shutil.rmtree(tmp_dir)
-            shutil.copytree(os.path.join(src_root, name), tmp_dir, symlinks=True)
-            os.rename(tmp_dir, target)
+            copy_into_place(os.path.join(src_root, name), dest, name, False)
             added.append(name)
         except (OSError, shutil.Error):
             failed.append(name)
-            try:
-                if os.path.lexists(tmp_dir):
-                    shutil.rmtree(tmp_dir)
-            except OSError:
-                pass
     if failed:
         note("WARNING " + dest_rel + ": could not add " + " ".join(failed) + ".")
     if present:

@@ -76,6 +76,41 @@ _self_expect() {
   done
 }
 
+# _self_fail_cases <fail> — the case names in a FAIL variable _self_expect
+# filled, each once, in order, space-separated: the FAIL row's "mismatch in".
+_self_fail_cases() {
+  local W
+  W=$(printf '%s' "$1" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
+  printf '%s' "${W% }"
+}
+
+# _self_repo <dir> <home> <branch> <roster, %b escapes> — a lead fixture repo
+# at <dir>: main with the probe identity (HOME=<home>, no system git config),
+# ops/roster.toml and a README in one commit, then <branch> checked out.
+_self_repo() {
+  ( mkdir -p "$1" && cd "$1" && export HOME="$2" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
+      && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
+      && mkdir ops && printf '%b' "$4" > ops/roster.toml && echo r > README.md \
+      && git add -A && git commit -qm init && git checkout -q -b "$3" ) >/dev/null 2>&1
+}
+
+# _self_wait_rc <task> — wait for the builder's exit record (<output_file>.rc)
+# of <task>, 30 s at most. Needs the library sourced.
+_self_wait_rc() {
+  local OUT N=0
+  OUT=$(_ledger_get "$1" output_file 2>/dev/null || true)
+  while [ ! -f "${OUT}.rc" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
+}
+
+# _SELF_PTY — python: run argv with a pty on stdin (a terminal, no
+# controlling one needed)
+_SELF_PTY='import os, subprocess, sys
+m, s = os.openpty()
+r = subprocess.run(sys.argv[1:], stdin=s)
+os.close(s)
+os.close(m)
+sys.exit(r.returncode)'
+
 # SELF-01 (R21): resolve_role REJECTS a fallback chain that resolves entirely to
 # optional members (no core-trio terminus) — the guard between a misconfigured
 # roster and a confusing runtime failure. Expect exit 5 + the terminus message.
@@ -1319,10 +1354,7 @@ _S13_FAIL=""
 rm -rf "$_S13"
 mkdir -p "$_S13/home" "$_S13/tmp" "$_S13/tmpA" "$_S13/tmpB" "$_S13/noparser"
 _s13_repo() { # _s13_repo <case> [roster lines, %b escapes] — a repo on sprint/s13; the lines go above [roles.builder]
-  ( mkdir -p "$_S13/$1" && cd "$_S13/$1" && export HOME="$_S13/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
-      && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
-      && mkdir ops && printf '# probe roster (SELF-13)\n%b\n[roles.builder]\ncli = "claude"\n' "${2:-}" > ops/roster.toml \
-      && echo r > README.md && git add -A && git commit -qm init && git checkout -q -b sprint/s13 ) >/dev/null 2>&1
+  _self_repo "$_S13/$1" "$_S13/home" sprint/s13 "# probe roster (SELF-13)\n${2:-}\n[roles.builder]\ncli = \"claude\"\n"
 }
 # _s13_lead <case> <script> — lead-side steps from the case's repo with the
 # library sourced: no host markers, no SELF seam, stdin from /dev/null, the
@@ -1333,13 +1365,6 @@ _s13_lead() {
       && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER TRIFORGE_LEAD_PID CODEX_HOME \
       && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && eval "$2" ) < /dev/null 2>&1 || true
 }
-# _S13_PTY — python: run argv with a pty on stdin (a terminal, no controlling one needed)
-_S13_PTY='import os, subprocess, sys
-m, s = os.openpty()
-r = subprocess.run(sys.argv[1:], stdin=s)
-os.close(s)
-os.close(m)
-sys.exit(r.returncode)'
 cat > "$_S13/tty-step.sh" <<'S13_TTY_EOF'
 # probe lead step (SELF-13): lease_create <task> with whatever stdin the caller gave
 source "$1/invoke-external.sh" 2>/dev/null || { echo "$3:load-failed"; exit 0; }
@@ -1419,7 +1444,7 @@ _S13_FAIL="${_S13_FAIL}$(_self_expect hostok "$O" '^claudehost:rc=0:via=lead-ses
 
 # tty
 _s13_repo tty
-O=$(_s13_lead tty 'python3 -c "$_S13_PTY" /bin/bash "$_S13/tty-step.sh" "$_SELF_DIR" t tty || true')
+O=$(_s13_lead tty 'python3 -c "$_SELF_PTY" /bin/bash "$_S13/tty-step.sh" "$_SELF_DIR" t tty || true')
 _S13_FAIL="${_S13_FAIL}$(_self_expect tty "$O" '^tty:rc=0:via=tty:stdin=tty$')"
 
 # ambig: both marker families, a terminal on stdin too — still refused
@@ -1433,7 +1458,7 @@ R=0; E=$(lease_create a1 builder 2>&1 >/dev/null) || R=$?; echo "ambig-create:rc
 R=0; E=$(roster_write_lead codex 2>&1 >/dev/null) || R=$?; echo "ambig-writer:rc=$R:named=$(printf "%s" "$E" | grep -c "ambiguous" || true):written=$(grep -c "^cli = .codex" ops/roster.toml || true)"
 R=0; E=$(lease_approve task:a1 user 2>&1 >/dev/null) || R=$?; echo "ambig-approve:rc=$R:named=$(printf "%s" "$E" | grep -c "ambiguous" || true)"
 S13_AMBIG_EOF
-O=$(_s13_lead ambig 'python3 -c "$_S13_PTY" /bin/bash "$_S13/ambig-step.sh" "$_SELF_DIR" || true')
+O=$(_s13_lead ambig 'python3 -c "$_SELF_PTY" /bin/bash "$_S13/ambig-step.sh" "$_SELF_DIR" || true')
 _S13_FAIL="${_S13_FAIL}$(_self_expect ambig "$O" '^ambig:stdin=tty$' '^ambig-create:rc=45:named=1$' '^ambig-writer:rc=45:named=1:written=0$' '^ambig-approve:rc=1:named=1$')"
 
 # ttysweep: from a terminal, the sweeps' nested lead-only helpers pass the host check too
@@ -1460,7 +1485,7 @@ echo "ttysweep-force:rc=$R:lead=$(resolve_lead | cut -f1):state=$(_ledger_get f1
 R=0; lease_heartbeat_check >/dev/null 2>&1 || R=$?
 echo "ttysweep-final:rc=$R:state=$(_ledger_get f1 state)"
 S13_SWEEP_EOF
-O=$(_s13_lead ttysweep 'python3 -c "$_S13_PTY" /bin/bash "$_S13/ttysweep-step.sh" "$_SELF_DIR" "$_S13" || true')
+O=$(_s13_lead ttysweep 'python3 -c "$_SELF_PTY" /bin/bash "$_S13/ttysweep-step.sh" "$_SELF_DIR" "$_S13" || true')
 : > "$_S13/ttysweep.release"
 _S13_FAIL="${_S13_FAIL}$(_self_expect ttysweep "$O" '^ttysweep:stdin=tty$' '^ttysweep-hb:rc=0:state=review:refused=0$' '^ttysweep-wait:rc=0:state=review:refused=0$' \
   '^ttysweep-force:rc=0:lead=codex:state=building:reason=lead-exit:adopted=1:refused=0$' '^ttysweep-final:rc=0:state=review$')"
@@ -1489,7 +1514,7 @@ O=$(_s13_lead worker '
 export CLAUDECODE=1 TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S13/fb.sh" TRIFORGE_LEASE_WORKER=builder
 R=0; E=$(lease_create w1 builder 2>&1 >/dev/null) || R=$?
 echo "marker:rc=$R:worker=$(printf "%s" "$E" | grep -c "TRIFORGE_LEASE_WORKER=builder" || true):carved=$(if [ -d "$TRIFORGE_LEASE_ROOT/w1" ]; then echo yes; else echo no; fi)"
-python3 -c "$_S13_PTY" /bin/bash "$_S13/tty-step.sh" "$_SELF_DIR" w2 markertty || true
+python3 -c "$_SELF_PTY" /bin/bash "$_S13/tty-step.sh" "$_SELF_DIR" w2 markertty || true
 R=0; E=$(roster_write_lead codex 2>&1 >/dev/null) || R=$?
 echo "writer:rc=$R:worker=$(printf "%s" "$E" | grep -c "TRIFORGE_LEASE_WORKER=builder" || true):written=$(grep -c "^cli = .codex" ops/roster.toml || true)"
 ')
@@ -1529,7 +1554,7 @@ echo "wl-none:rc=$R:named=$(printf "%s" "$E" | grep -c "via=none" || true):roste
 R=0; (export CLAUDECODE=1; roster_write_lead codex >/dev/null 2>&1) || R=$?; echo "wl-claude:rc=$R:lead=$(resolve_lead | cut -f1)"
 R=0; (export CODEX_THREAD_ID=probe-thread; roster_write_lead claude >/dev/null 2>&1) || R=$?; echo "wl-codex:rc=$R:lead=$(resolve_lead | cut -f1)"
 R=0; (export TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S13/fb.sh"; roster_write_lead codex >/dev/null 2>&1) || R=$?; echo "wl-seam:rc=$R:lead=$(resolve_lead | cut -f1)"
-python3 -c "$_S13_PTY" /bin/bash "$_S13/wlorigin-tty.sh" "$_SELF_DIR" || true
+python3 -c "$_SELF_PTY" /bin/bash "$_S13/wlorigin-tty.sh" "$_SELF_DIR" || true
 ')
 _S13_FAIL="${_S13_FAIL}$(_self_expect origin "$O" '^wl-none:rc=45:named=1:roster=unchanged$' '^wl-claude:rc=0:lead=codex$' '^wl-codex:rc=0:lead=claude$' \
   '^wl-seam:rc=0:lead=codex$' '^wl-tty:rc=0:lead=claude:stdin=tty$')"
@@ -1560,7 +1585,7 @@ R=0; roster_write_lead codex --force >/dev/null 2>"$_S13/force.err" || R=$?
 echo "force:rc=$R:lead=$(resolve_lead | cut -f1):adopted=$(grep -c "adopted by this lead" "$_S13/force.err" || true)"
 for T in f1 f2; do echo "$T=$(_ledger_get "$T" state):reason=$(_ledger_get "$T" reason):at=$(if [ -n "$(_ledger_get "$T" lead_exit_at)" ]; then echo set; else echo unset; fi):rq=$(_ledger_get "$T" requeue_count)"; done
 : > "$_S13/force.release"
-for T in f1 f2; do OF=$(_ledger_get "$T" output_file); N=0; while [ ! -f "${OF}.rc" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done; done
+for T in f1 f2; do _self_wait_rc "$T"; done
 R=0; lease_heartbeat_check >/dev/null 2>&1 || R=$?
 for T in f1 f2; do echo "final-$T=$(_ledger_get "$T" state):rq=$(_ledger_get "$T" requeue_count)"; done
 echo "hb:rc=$R"
@@ -1644,8 +1669,7 @@ _S13_CAP="[lead] table + lead host check: load validation (exit 5), absent = cla
 if [ -z "$_S13_FAIL" ]; then
   row "SELF-13" "claude" "$_S13_CAP" "PASS" "load: cursor / non-table / unknown key / bad effort -> resolve_lead and resolve_role 5 naming it; absent -> claude (default); claude + model + effort kept; codex alone -> gpt-6-astra xhigh; parser: tomllib and tomli hidden -> resolve_lead and resolve_lead_caps 3 with the parser message, never absent, lease_create 45 naming it; host: [lead] codex under CLAUDECODE -> lease_merge / lease_create / roster_write_role 45, one line naming at-setup lead, CLAUDE_CODE_ENTRYPOINT the same; CODEX_THREAD_ID -> runs, lead_via=lead-session; both families -> ambiguous, 45 naming it; no [lead] under CLAUDECODE -> runs; ambig: both families + a pty -> lease_create and roster_write_lead 45, lease_approve refused, each naming the ambiguity; tty: pty on stdin, no markers -> runs, lead_via=tty; ttysweep: from a pty, no markers -> lease_heartbeat_check collects a finished builder, lease_wait 0 on one, roster_write_lead --force adopts a building lease, no refusal; notty: 45 naming the markers, either seam variable alone 45, both (claude) -> lead_via=test, both naming codex -> 45, a cached host-check pass still records this shell's lead_via; worker: marker beside markers + seam (+ pty) -> 45 by the marker, nothing carved or written; write: cursor 2, bad effort 2, no args 64, codex -> one [lead] block, roles + comments kept, claude replaces it in place, --force with no ledger runs; origin: roster_write_lead with no origin -> 45 naming via=none, roster unchanged; from Claude Code's session, Codex's, the seam and a pty -> written; open: t1 leased -> refused naming t1 and --force, roster byte-identical, same lead new effort runs; force: from the old lead refused before writing, from the new lead both building leases adopted (reason=lead-exit, lead_exit_at, requeue 0), released -> review, requeue 0; reclaim: created under TMPDIR=A as claude, reclaimed under TMPDIR=B as codex -> pruned, no identity mismatch; forged: a planted root in a lead-written row -> prune refused, a hand-edited row -> 44, both worktrees kept; caps: codex 900 s, PostToolUse present, SessionStart absent, one NOTE then none; claude 600 s, every plugin event present, no NOTE" "static"
 else
-  _S13_WHO=$(printf '%s' "$_S13_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
-  row "SELF-13" "claude" "$_S13_CAP" "FAIL" "mismatch in ${_S13_WHO% }:$(printf '%s' "$_S13_FAIL" | cut -c1-900)" "static"
+  row "SELF-13" "claude" "$_S13_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S13_FAIL"):$(printf '%s' "$_S13_FAIL" | cut -c1-900)" "static"
 fi
 rm -rf "$_S13"
 
@@ -1665,8 +1689,9 @@ rm -rf "$_S13"
 #            other CLI's build) -> merges; lease_attribution names builder,
 #            reviewer + class, lead, approval origin and merge commit
 #   agents   a codex build adds .agents/hooks.json and .agents/skills/x/
-#            (the Phase 2a residual): a worker-class pin alone -> 42 naming
-#            both; the lead's approval -> merges, both in the squash
+#            (builder edits under .agents/ meet the merge gate): a
+#            worker-class pin alone -> 42 naming both; the lead's approval ->
+#            merges, both in the squash
 #   cycle    a merge approval given in cycle 1 -> the cycle-2 collect voids it
 #            (42 naming the earlier snapshot); an approval rewritten to
 #            another snapshot -> 42; re-approved -> merges
@@ -1719,10 +1744,7 @@ _S14_FAIL=""
 rm -rf "$_S14"
 mkdir -p "$_S14/home" "$_S14/tmp"
 _s14_repo() { # _s14_repo <case> <lead> <builder> [extra roster lines, %b escapes] — a repo on sprint/s14
-  ( mkdir -p "$_S14/$1" && cd "$_S14/$1" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
-      && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
-      && mkdir ops && printf '# probe roster (SELF-14)\n[lead]\ncli = "%s"\n\n[roles.builder]\ncli = "%s"\n%b' "$2" "$3" "${4:-}" > ops/roster.toml \
-      && echo r > README.md && git add -A && git commit -qm init && git checkout -q -b sprint/s14 ) >/dev/null 2>&1
+  _self_repo "$_S14/$1" "$_S14/home" sprint/s14 "# probe roster (SELF-14)\n[lead]\ncli = \"$2\"\n\n[roles.builder]\ncli = \"$3\"\n${4:-}"
 }
 _s14_builder() { cat > "$_S14/$1.fb"; chmod +x "$_S14/$1.fb"; }   # _s14_builder <case> < script
 # _s14_lead <case> <seam lead> <script> — lead-side steps from the case's repo,
@@ -1735,21 +1757,16 @@ _s14_lead() {
         TMPDIR="$_S14/tmp" S14_CASE="$1" TRIFORGE_TEST_LEAD="$2" TRIFORGE_TEST_BUILDER="$_S14/$1.fb" \
       && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID TRIFORGE_LEASE_WORKER TRIFORGE_LEAD_PID CODEX_HOME \
       && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && {
-    _s14_wait() { # _s14_wait <task> — until the builder's exit record exists (30 s cap)
-      local N=0 OUT
-      OUT=$(_ledger_get "$1" output_file 2>/dev/null || true)
-      while [ ! -f "${OUT}.rc" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
-    }
     _s14_go() {
       local R=0
       { lease_create "$1" builder && lease_dispatch "$1" "probe task" 60; } >/dev/null 2>&1 || R=$?
-      if [ "$R" -eq 0 ]; then _s14_wait "$1"; lease_collect "$1" >/dev/null 2>&1 || R=$?; fi
+      if [ "$R" -eq 0 ]; then _self_wait_rc "$1"; lease_collect "$1" >/dev/null 2>&1 || R=$?; fi
       echo "$1:go=$R:$(_ledger_get "$1" state 2>/dev/null || true)"
     }
     _s14_fix() {
       local R=0
       lease_redispatch "$1" "probe fix" 60 >/dev/null 2>&1 || R=$?
-      if [ "$R" -eq 0 ]; then _s14_wait "$1"; lease_collect "$1" >/dev/null 2>&1 || R=$?; fi
+      if [ "$R" -eq 0 ]; then _self_wait_rc "$1"; lease_collect "$1" >/dev/null 2>&1 || R=$?; fi
       echo "$1:fix=$R:$(_ledger_get "$1" state 2>/dev/null || true)"
     }
     _s14_try() { # "<label>:rc=<n>:<the call's stderr, one line>"
@@ -1761,13 +1778,6 @@ _s14_lead() {
     eval "$3"
   } ) < /dev/null 2>&1 || true
 }
-# _S14_PTY — python: run argv with a pty on stdin (as SELF-13's)
-_S14_PTY='import os, subprocess, sys
-m, s = os.openpty()
-r = subprocess.run(sys.argv[1:], stdin=s)
-os.close(s)
-os.close(m)
-sys.exit(r.returncode)'
 
 # cells: <case> <lead> <builder> <pinned reviewer> <own build: yes|no>
 while read -r _s14_c _s14_l _s14_b _s14_p _s14_own; do
@@ -1803,7 +1813,7 @@ xc codex claude codex no
 S14_CELLS_EOF
 unset _s14_c _s14_l _s14_b _s14_p _s14_own
 
-# agents: the Phase 2a residual — builder edits under .agents/ meet the merge gate
+# agents: builder edits under .agents/ meet the merge gate
 _s14_repo agents claude codex
 printf '#!/bin/sh\nmkdir -p .agents/skills/x && echo "{}" > .agents/hooks.json && printf "x\\n" > .agents/skills/x/SKILL.md\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder agents
 O=$(_s14_lead agents claude '
@@ -1884,7 +1894,7 @@ echo "other=$(_ledger_get t approval_via):host=$(_ledger_get t approval_host):le
 (export TRIFORGE_TEST_LEAD=claude; _s14_try seamother lease_approve task:t codex)
 (unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; _s14_try nonelead lease_approve task:t codex)
 (unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; _s14_try noneuser lease_approve task:t user)
-(unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; python3 -c "$_S14_PTY" /bin/bash "$_S14/origin-tty.sh" "$_SELF_DIR") || true
+(unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; python3 -c "$_SELF_PTY" /bin/bash "$_S14/origin-tty.sh" "$_SELF_DIR") || true
 cp ops/leases.toml "$_S14/origin-ledger.before"
 (export TRIFORGE_LEASE_WORKER=builder; _s14_try marker lease_approve task:t user)
 W=$(_ledger_get t worktree)
@@ -2082,8 +2092,7 @@ _S14_CAP="ledger approvals: lead_cli + reviewer class per row; a protected chang
 if [ -z "$_S14_FAIL" ]; then
   row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused, and from the seam simulating claude; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude; a legacy claude pin after a handover to codex -> 42 needing the user, user merges; a legacy codex (worker) pin after it -> merges, class worker; tmpdirs: an approval from another TMPDIR lands beside the lead's anchors and merges, refused naming export TRIFORGE_LEASE_ROOT when the recorded root is gone" "static"
 else
-  _S14_WHO=$(printf '%s' "$_S14_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
-  row "SELF-14" "claude" "$_S14_CAP" "FAIL" "mismatch in ${_S14_WHO% }:$(printf '%s' "$_S14_FAIL" | cut -c1-900)" "static"
+  row "SELF-14" "claude" "$_S14_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S14_FAIL"):$(printf '%s' "$_S14_FAIL" | cut -c1-900)" "static"
 fi
 rm -rf "$_S14"
 
@@ -3083,8 +3092,7 @@ if [ -z "$_S18_FAIL" ]; then
   row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer/leadcfg -> collect rc 44 naming the surface (config, hooks, ledger and the lead trusted git config restored, gitconfig.changed-* kept; marker never ran); post-checkout planted: next lease_create 44; fsmonitor, filter, post-checkout and pointer once accepted (lease_rebaseline) still never run and collect snapshots (pointer via the recorded admin dir); tampered hooks.copy -> 44, NOT restored; ledger swapped for a symlink -> 44, a regular file again; the lead's own git remote add -> 44 naming the saved copy, put back + rebaselined -> collect 0, origin kept; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; git gc after collect (writes .git/info/refs) -> merges; lead checkout switched to rogue -> merge 44 naming sprint/s18 and rogue, state review, back on sprint/s18 -> merges; lease_create on main records no integration branch, sprint/two cut after it -> lease + merge, no 44; a lead commit on the integration branch -> merge 44 (moved), lease_rebaseline -> merges on top; identity only in an [include]d ~/.gitconfig file -> the merge commit carries it; linked-worktree lead checkout whose .git pointer is rewritten to the lease admin dir -> collect 44 naming it; every git call in lease.sh and lease-wait.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines in lease.sh, none in lease-wait.sh; planted { git / else git / env -u git lines caught)" "static"
 else
   # the failed case names first, so a long pattern list can't cut them off
-  _S18_WHO=$(printf '%s' "$_S18_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
-  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "FAIL" "mismatch in ${_S18_WHO% }:$(printf '%s' "$_S18_FAIL" | cut -c1-500)" "static"
+  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "FAIL" "mismatch in $(_self_fail_cases "$_S18_FAIL"):$(printf '%s' "$_S18_FAIL" | cut -c1-500)" "static"
 fi
 rm -rf "$_S18"
 
@@ -3203,10 +3211,7 @@ _S19="${WORK}/self19"
 _S19_FAIL=""
 mkdir -p "$_S19/home"
 _s19_repo() { # _s19_repo <case> [roster lines above [roles.builder], %b escapes]
-  ( mkdir -p "$_S19/$1" && cd "$_S19/$1" && export HOME="$_S19/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
-      && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
-      && mkdir ops && printf '%b[roles.builder]\ncli = "claude"\n' "${2:-}" > ops/roster.toml && echo r > README.md \
-      && git add -A && git commit -qm init && git checkout -q -b sprint/s19 ) >/dev/null 2>&1
+  _self_repo "$_S19/$1" "$_S19/home" sprint/s19 "${2:-}[roles.builder]\ncli = \"claude\"\n"
 }
 # _s19_lead <case> <script> — lead-side steps from the case's repo with the
 # library sourced (as _s18_lead does), no host markers, the SELF seam naming
@@ -3863,8 +3868,7 @@ _S19_CAP="detached builders + lease_wait + lease_stop + lead-exit reconcile (und
 if [ -z "$_S19_FAIL" ]; then
   row "SELF-19" "claude" "$_S19_CAP" "PASS" "row pid==pgid + start time + lead + lease root recorded; finish -> rc 0 'q review'; held -> --budget 3 rc 75 'still building: g' in 1.5-3 s, TRIFORGE_LEAD_WAIT_BUDGET_S=4 caps --budget 60 below 4 s; marker 45, usage 64; released -> rc 0 'g review'; no / unparseable ledger -> rc 1 LEDGER ERROR; kill: lead group SIGKILLed mid-wait, both builders alive as recorded, heartbeat a adopts (reason=lead-exit), released both exit 0, heartbeat collects both: review, requeue_count 0, reason=lead-exit, --budget 2000 capped at 585 s (Claude Code 600 s); killcodex: the same under [lead] = codex, capped at 885 s (Codex CLI 900 s); reuse: rows given a stranger's pid + pgid (start time differs, deadline past) -> heartbeat and lease_wait orphan + requeue, stranger never signalled; legacy: a finished row given a stranger's pid with no start time or pgid -> lease_collect 0, review, and a 3.3.x-shaped building row (no pgid, no start time) past its deadline -> heartbeat expires it unsignalled, requeued; the stranger never signalled; gitcfg: core.fsmonitor planted mid-wait -> rc 44 naming .git/config, restored, escalated, never ran; deadline = timeout + 30 s slack; locale: dispatched under TZ=Asia/Tokyo LC_ALL=${_S19_LOC} -> pinned UTC start, alive under TZ=UTC and America/New_York, lease_wait keeps it building (75), an old local-form row alive in its own zone; unver: rc 80 within 3 s naming u once (mixed with a finisher: rc 0), heartbeat 80; ledgertamper: ledger corrupted mid-wait -> 44, restored, escalated, stdout names it; ledgertamper-entry: corrupted before the call -> the same; stop: lease_stop kills the builder group (child too), state untouched, 45/64/1, a stranger with the pid never signalled, no start time -> 1; relaunch: launch record written, removed once recorded, a stale one stopped by the next lease_dispatch; expire: held builder past its deadline -> group killed, requeued, worktree pruned; endrun: a builder that backgrounds a child and exits 0 -> <out>.rc 0 / class none with the child gone and nothing but the exiting leader in its group, group empty after, review; lanetimeout: a 1 s lease timeout on a builder waiting on a child -> <out>.rc 124 / class timeout in 1-8 s, child gone, group empty, requeued; leadexit: --lead-exit with the lead alive adopts the live builder and collects the finished one, reason=lead-exit, requeue_count 0; multi: two named -> 'q review|still building: g', none named watches all; budget: past the action limit the collect is deferred, the next call takes it, and lease_wait --budget 2 sets the limit 2.0-2.9 s after the call, and a limit spent during the per-action integrity check defers the expiry; guards (stubbed kill): this shell's own pid + pgid + start time -> nothing signalled, refused; pid 1 / pgid 1 -> refused, nothing signalled, lease_stop's stop rc 1; no start time -> refused; the KILL retry re-validated (none after a reuse, none to an emptied group); dispatchfail: the recording ledger write refused -> lease_dispatch 1, leased, the launched builder gone; hbcfg: .git/config planted during the heartbeat's sweep -> 44 on return, restored, escalated, never ran; rootnote: escaped, no export line, not printed when the check fails; ${_S19_ZSH}" "static"
 else
-  _S19_WHO=$(printf '%s' "$_S19_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
-  row "SELF-19" "claude" "$_S19_CAP" "FAIL" "mismatch in ${_S19_WHO% }:$(printf '%s' "$_S19_FAIL" | cut -c1-600)" "static"
+  row "SELF-19" "claude" "$_S19_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S19_FAIL"):$(printf '%s' "$_S19_FAIL" | cut -c1-600)" "static"
 fi
 rm -rf "$_S19"
 
@@ -3948,10 +3952,7 @@ _s20_rec() { # _s20_rec — the stub's recorded argv, one word per line
   for F in $(seq 1 "$N"); do printf '%s\n' "$(cat "$_S20/tmp/s20-rec.$F")"; done
 }
 _s20_repo() { # _s20_repo <dir> <roster text, %b escapes> — a lead repo on a sprint branch
-  ( mkdir -p "$1" && cd "$1" && export HOME="$_S20/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
-      && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
-      && mkdir ops && printf '%b' "$2" > ops/roster.toml && echo r > README.md \
-      && git add -A && git commit -qm init && git checkout -q -b sprint/s20 ) >/dev/null 2>&1
+  _self_repo "$1" "$_S20/home" sprint/s20 "$2"
 }
 _S20_ENV="HOME=$_S20/home GIT_CONFIG_NOSYSTEM=1 TMPDIR=$_S20/tmp PATH=$_S20/bin:${_SELF_STUBS}:$PATH"
 # shellcheck disable=SC2086
@@ -4101,7 +4102,6 @@ printf '#!/bin/sh\nprintf "%%s\\n" '"'"'{"type":"result","subtype":"error_max_tu
 chmod +x "$_S20/fb-done.sh" "$_S20/fb-maxturns.sh"
 # shellcheck disable=SC2086
 O=$( cd "$_S20/repo" && export $_S20_ENV TRIFORGE_LEASE_ROOT="$_S20/leases" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
-  _s20_wait() { local OUT N=0; OUT=$(_ledger_get "$1" output_file 2>/dev/null); while [ ! -f "${OUT}.rc" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done; }
   export TRIFORGE_TEST_BUILDER="$_S20/fb-done.sh"
   lease_create s20a builder >/dev/null 2>&1 || echo "create-failed"
   WT=$(_ledger_get s20a worktree 2>/dev/null)
@@ -4119,7 +4119,7 @@ O=$( cd "$_S20/repo" && export $_S20_ENV TRIFORGE_LEASE_ROOT="$_S20/leases" && s
   cmp -s "$WT/.claude/skills/watch-cycle/SKILL.md" "${REPO_ROOT}/.claude/skills/watch-cycle/SKILL.md" && echo "watch-cycle:intact" || echo "watch-cycle:changed"
   grep -q '^user copy$' "$WT/.claude/skills/${_S20_COLLIDE}/SKILL.md" 2>/dev/null && echo "collide:intact" || echo "collide:replaced"
   lease_dispatch s20a "probe task" 60 >/dev/null 2>&1 || echo "dispatch-failed"
-  _s20_wait s20a
+  _self_wait_rc s20a
   R=0; lease_collect s20a >/dev/null 2>&1 || R=$?
   echo "a:rc=${R}:state=$(_ledger_get s20a state 2>/dev/null):sid=$(_ledger_get s20a session_id 2>/dev/null):sub=$(_ledger_get s20a result_subtype 2>/dev/null)"
   SNAP=$(_ledger_get s20a snapshot_sha 2>/dev/null)
@@ -4127,13 +4127,13 @@ O=$( cd "$_S20/repo" && export $_S20_ENV TRIFORGE_LEASE_ROOT="$_S20/leases" && s
   git cat-file -e "${SNAP:-none}:.claude/skills/${_S20_OTHER}" 2>/dev/null && echo "snap-prov:merged" || echo "snap-prov:excluded"
   lease_redispatch s20a "findings: fix the probe" 60 >/dev/null 2>&1 || echo "redispatch-failed"
   echo "fix:resumed=$(_ledger_get s20a resumed_session 2>/dev/null)"
-  _s20_wait s20a
+  _self_wait_rc s20a
   R=0; lease_collect s20a >/dev/null 2>&1 || R=$?
   echo "fix:rc=${R}:state=$(_ledger_get s20a state 2>/dev/null)"
   export TRIFORGE_TEST_BUILDER="$_S20/fb-maxturns.sh"
   lease_create s20m builder >/dev/null 2>&1 || echo "create-m-failed"
   lease_dispatch s20m "probe task" 60 >/dev/null 2>&1 || echo "dispatch-m-failed"
-  _s20_wait s20m
+  _self_wait_rc s20m
   R=0; lease_collect s20m >/dev/null 2>&1 || R=$?
   echo "m:rc=${R}:state=$(_ledger_get s20m state 2>/dev/null):sub=$(_ledger_get s20m result_subtype 2>/dev/null):misses=$(_ledger_get s20m report_missing_count 2>/dev/null)"
 ) 2>&1 || true
@@ -4168,7 +4168,6 @@ _S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON
 if [ -z "$_S20_FAIL" ]; then
   row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools)" "static"
 else
-  _S20_WHO=$(printf '%s' "$_S20_FAIL" | grep -oE '(^| )[A-Za-z0-9_.-]+\(' | tr -d ' (' | awk '!s[$0]++' | tr '\n' ' ' || true)
-  row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in ${_S20_WHO% }:$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"
+  row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S20_FAIL"):$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"
 fi
 rm -rf "$_S20"

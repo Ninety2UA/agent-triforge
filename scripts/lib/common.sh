@@ -151,8 +151,8 @@ _classify_invoke_failure() {
 _RC_LEAD_ONLY=45
 
 # The first line of every lease root's lead/gitconfig: lease.sh's
-# _lead_gitconfig_capture writes it, _lease_root_above recognizes a lease root
-# by it. Keep the bytes.
+# _lead_gitconfig_capture writes it, _is_lease_root recognizes a lease root by
+# it. Keep the bytes.
 _LEAD_GITCONFIG_SIGNATURE='# Triforge trusted git config'
 
 # _lead_only <helper> [--any-host] — 0 in a lead context; otherwise one stderr
@@ -183,24 +183,32 @@ _lead_only() {
   _lead_host_gate "$1"
 }
 
+# _is_lease_root <dir> — 0 when <dir>/lead/gitconfig's first line starts with
+# _LEAD_GITCONFIG_SIGNATURE: the signature test behind _lease_root_above and
+# lease.sh's _lease_root_valid. The pattern is quoted, so it matches literally
+# under bash and zsh (where an unquoted # is a glob operator).
+_is_lease_root() {
+  local H=""
+  if [ -f "${1}/lead/gitconfig" ]; then
+    IFS= read -r H 2>/dev/null < "${1}/lead/gitconfig" || true
+  fi
+  case "$H" in "${_LEAD_GITCONFIG_SIGNATURE}"*) return 0 ;; esac
+  return 1
+}
+
 # _lease_root_above — print the lease root the current directory is inside,
-# rc 1 when it is in none: the nearest ancestor (physical path) holding
-# lead/gitconfig whose first line starts with _LEAD_GITCONFIG_SIGNATURE. Found
-# by that file, not by the root's path, so it holds whatever TMPDIR or
-# TRIFORGE_LEASE_ROOT say now; and without git, which from a lease worktree
-# answers for the worktree, not the lead. The pattern is quoted, so it matches
-# literally under bash and zsh (where an unquoted # is a glob operator).
+# rc 1 when it is in none: the nearest ancestor (physical path) that is one
+# (_is_lease_root). Found by that file, not by the root's path, so it holds
+# whatever TMPDIR or TRIFORGE_LEASE_ROOT say now; and without git, which from
+# a lease worktree answers for the worktree, not the lead.
 _lease_root_above() {
-  local D H
+  local D
   D=$(pwd -P 2>/dev/null) || return 1
   while :; do
-    H=""
-    if [ -f "${D}/lead/gitconfig" ]; then
-      IFS= read -r H 2>/dev/null < "${D}/lead/gitconfig" || true
+    if _is_lease_root "$D"; then
+      printf '%s\n' "${D:-/}"
+      return 0
     fi
-    case "$H" in
-      "${_LEAD_GITCONFIG_SIGNATURE}"*) printf '%s\n' "${D:-/}"; return 0 ;;
-    esac
     if [ -z "$D" ] || [ "$D" = "/" ]; then
       return 1
     fi

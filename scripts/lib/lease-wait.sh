@@ -646,7 +646,8 @@ _lease_lane_argv() {
 # AUTH-FAILs; that failure is deterministic, and the lead sees it in
 # <out>.class (no requeue). The claude lane's JSON envelope, the seam's
 # included, is split by _lease_claude_envelope into the result text (<out>)
-# and the record lease_collect reads (<out>.envelope).
+# and the record lease_collect reads (<out>.envelope); with no envelope, the
+# run's stderr is appended to <out>.
 _lease_builder_run() {
   local CLI=$1 MODEL=$2 EFFORT=$3 DISPATCH_MODEL=$4 KIMI_AGENT_FILE=$5 CBIN=$6 TOBIN=$7 TIMEOUT=$8 OUT=$9
   local WT=${10} TEST_BUILDER=${12} FULL_PROMPT=${13} COMMON=${14:-} RESUME=${15:-} RC=0 CLASS_SET=0 AGY_PRC=0 SBX_REFUSED=0
@@ -723,9 +724,7 @@ _lease_builder_run() {
   fi
   case "$CLI" in
     claude)
-      if ! _lease_claude_envelope "$OUT" && [ -s "${OUT}.err" ]; then
-        cat "${OUT}.err" >> "$OUT" 2>/dev/null || true
-      fi
+      _lease_claude_envelope "$OUT" "${OUT}.err" || true
       if [ "$SBX_REFUSED" -eq 1 ]; then
         echo "lease_dispatch: the claude builder refused to start without Claude Code's sandbox (KTD16) — on Linux install bubblewrap and socat; or set TRIFORGE_CLAUDE_SANDBOX=off in the lead's environment, and the claude builder's Bash then runs without OS confinement" >> "$OUT"
       fi

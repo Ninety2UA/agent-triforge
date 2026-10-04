@@ -351,6 +351,18 @@ _lane_run_claude() { # _lane_run_claude <seconds> <cmd...>
   _lane_run "$SECS" env "${LANE_CLAUDE[@]}" "$@"
 }
 
+# _lane_argv_words <kind> <cli> <_lease_lane_argv arguments after the cli> —
+# one "<kind> US <cli> US <word>" line (US: the unit separator, \037) per word
+# of the argv the lease lane composes for <cli>, so an empty word keeps its
+# place; nothing for a CLI with no arm. Run in a subshell that sourced the
+# loader; the U12 rows and the U29 block read its lines with IFS=$'\037'.
+_lane_argv_words() {
+  local KIND=$1 CLI=$2 W
+  shift 2
+  _lease_lane_argv "$CLI" "$@" || return 0
+  for W in "${_LEASE_LANE_ARGV[@]}"; do printf '%s\037%s\037%s\n' "$KIND" "$CLI" "$W"; done
+}
+
 # The claude lane rows (U12, KTD16) run the lane's own argv on the cheapest
 # model: _u12_argv <worktree> [<resume-id>] sets U12_ARGV from the composer the
 # lease lane runs (_lease_lane_argv claude, read through the loader), with the
@@ -358,15 +370,33 @@ _lane_run_claude() { # _lane_run_claude <seconds> <cmd...>
 U12_MODEL="claude-haiku-4-5-20251001"
 U12_ARGV=()
 _u12_argv() {
-  local W
+  local K T W
   U12_ARGV=()
-  while IFS= read -r W; do
-    [ -n "$W" ] && U12_ARGV+=("$W")
+  while IFS=$'\037' read -r K T W; do
+    [ "$K" = argv ] || continue
+    U12_ARGV+=("$W")
   done <<U12_ARGV_EOF
 $( source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 0
-   _lease_lane_argv claude "$U12_MODEL" "" "" "" "" "$1" 240 "$FIX/.git" "${2:-}" || exit 0
-   printf '%s\n' "${_LEASE_LANE_ARGV[@]}" )
+   _lane_argv_words argv claude "$U12_MODEL" "" "" "" "" "$1" 240 "$FIX/.git" "${2:-}" )
 U12_ARGV_EOF
+}
+# _u12_sandbox — "on" or "off": sandbox.enabled in the --settings JSON of
+# U12_ARGV, as the lane composed it (TRIFORGE_CLAUDE_SANDBOX decides it there);
+# empty when U12_ARGV carries none that reads.
+_u12_sandbox() {
+  local P="" W
+  for W in "${U12_ARGV[@]:-}"; do
+    if [ "$P" = --settings ]; then
+      printf '%s' "$W" | python3 -c '
+import json, sys
+s = json.load(sys.stdin).get("sandbox", {})
+v = s.get("enabled") if isinstance(s, dict) else None
+print("on" if v is True else ("off" if v is False else ""))
+' 2>/dev/null || true
+      return 0
+    fi
+    P=$W
+  done
 }
 # _u12_json <file> <field> — one field of a claude -p JSON envelope, flattened
 # to one line (empty when the file holds none); permission_denials prints its
@@ -1834,21 +1864,15 @@ if _want CC-09 || _want CC-10 || _want CC-11 || _want CC-12 || _want CC-13 || _w
   U29_REG=$(
     source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 0
     printf '%s' "$_LEASE_LAUNCH_PY" > "$U29_LAUNCH"
-    _u29_argv() { # _u29_argv <kind> <cli> <_lease_lane_argv arguments after the cli> — one line per word
-      local KIND=$1 CLI=$2 W
-      shift 2
-      _lease_lane_argv "$CLI" "$@" || return 0
-      for W in "${_LEASE_LANE_ARGV[@]}"; do printf '%s\037%s\037%s\n' "$KIND" "$CLI" "$W"; done
-    }
-    _u29_argv argv codex "" "" "" "" "" "$FIX" 240
-    _u29_argv argv claude sonnet "" "" "" "" "$FIX" 240
+    _lane_argv_words argv codex "" "" "" "" "" "$FIX" 240
+    _lane_argv_words argv claude sonnet "" "" "" "" "$FIX" 240
     if _want AGY-17 || _want OC-09 || _want KIMI-10 || _want CUR-13; then
       U29_KAF=""
       if [ -f "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md" ]; then U29_KAF="${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md"; fi
-      _u29_argv argv antigravity "" "" "${AGY_MODEL_ARG:-$(cli_field antigravity model 2>/dev/null || true)}" "" "" "$FIX" 240
-      _u29_argv argv opencode "" "" "${OC_GLM:-$(cli_field opencode model 2>/dev/null || true)}" "" "" "$FIX" 240
-      _u29_argv argv kimi "" "" "$(cli_field kimi model 2>/dev/null || true)" "$U29_KAF" "" "$FIX" 240
-      _u29_argv argv cursor "" "" "${CUR_GROK:-$(cli_field cursor model 2>/dev/null || true)}" "" "$CUR_BIN" "$FIX" 240
+      _lane_argv_words argv antigravity "" "" "${AGY_MODEL_ARG:-$(cli_field antigravity model 2>/dev/null || true)}" "" "" "$FIX" 240
+      _lane_argv_words argv opencode "" "" "${OC_GLM:-$(cli_field opencode model 2>/dev/null || true)}" "" "" "$FIX" 240
+      _lane_argv_words argv kimi "" "" "$(cli_field kimi model 2>/dev/null || true)" "$U29_KAF" "" "$FIX" 240
+      _lane_argv_words argv cursor "" "" "${CUR_GROK:-$(cli_field cursor model 2>/dev/null || true)}" "" "$CUR_BIN" "$FIX" 240
       printf 'ocperm\t%s\n' "${_OPENCODE_PERMISSION_DEFAULT:-}"
       if command -v opencode >/dev/null 2>&1; then
         if _opencode_v2_check opencode; then printf 'ocv2\tv1\n'; else printf 'ocv2\t%s %s\n' "${_OPENCODE_CHECK:-}" "${_OPENCODE_VERSION:-}"; fi
@@ -2411,9 +2435,9 @@ Then run the same command once more with the sandbox disabled (set dangerouslyDi
         if [ -e "$FIX/.git/tf-claude-sbx" ]; then U12_GIT=yes; fi
         rm -f "$SEN/claude-sbx.txt" "$FIX/.git/tf-claude-sbx"
         U12_EV="inside write ${U12_IN}, outside write ${U12_OUT}, lead .git write ${U12_GIT}; worker said: $(printf '%s' "$U12_RES" | cut -c1-200); credential probe: ${U12_CRED:-none present}"
-        case "${TRIFORGE_CLAUDE_SANDBOX:-on}" in
-          off|0|false|no)
-            row "CC-15" "claude" "$U12_CC15" "INFO" "TRIFORGE_CLAUDE_SANDBOX=${TRIFORGE_CLAUDE_SANDBOX} — the lane runs without the sandbox, so a claude builder with Bash has no OS confinement; ${U12_EV}" "live" ;;
+        case "$(_u12_sandbox)" in
+          off)
+            row "CC-15" "claude" "$U12_CC15" "INFO" "TRIFORGE_CLAUDE_SANDBOX=${TRIFORGE_CLAUDE_SANDBOX:-} — the lane runs without the sandbox, so a claude builder with Bash has no OS confinement; ${U12_EV}" "live" ;;
           *)
             if [ "$U12_IN" = yes ] && [ "$U12_OUT" = no ] && [ "$U12_GIT" = no ] \
                && printf '%s' "$U12_RES" | grep -qE 'cred=(blocked|none-present)' && ! printf '%s' "$U12_RES" | grep -q 'cred=listed'; then
