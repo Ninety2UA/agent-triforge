@@ -16,8 +16,9 @@
 # Layout: this file is the loader. The lanes live in scripts/lib/ and are
 # sourced below, in this order, into the same shell:
 #   lib/common.sh       host-marker scrub, timeout wrapper, scrubbing, KTD-9
-#                       failure classifier, the worker-marker guard _lead_only
-#                       (KTD9), agy/codex listing helpers
+#                       failure classifier, the lead-only guard _lead_only
+#                       (KTD9 worker marker, R38 lead host), agy/codex listing
+#                       helpers
 #   lib/registry.sh     shared data: the protected-path lists (KTD8), the model
 #                       ladder TRIFORGE_MODEL_LADDER + triforge_ladder (KTD22)
 #   lib/antigravity.sh  invoke_antigravity + _agy_parse_envelope
@@ -25,7 +26,9 @@
 #   lib/opencode.sh     invoke_opencode + the OPENCODE_PERMISSION deny set
 #   lib/kimi.sh         invoke_kimi
 #   lib/cursor.sh       _cursor_bin, _cursor_model_for_effort, invoke_cursor
-#   lib/roster.sh       resolve_role, dispatch_role, roster_* (DEFAULTS live here)
+#   lib/roster.sh       resolve_role, dispatch_role, roster_* (DEFAULTS live here),
+#                       the lead: resolve_lead, resolve_lead_caps, lead_host_detect,
+#                       roster_write_lead (KTD1)
 #   lib/lease-wait.sh   detached builders (launcher, lane argv, builder body),
 #                       lease_stop, lease_heartbeat_check, lease_wait (KTD10)
 #   lib/lease.sh        the lease lifecycle + _adapter_env + the typed-report parser

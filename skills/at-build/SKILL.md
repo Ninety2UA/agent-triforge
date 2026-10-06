@@ -12,7 +12,7 @@ metadata:
 
 **Goal:** every task in `ops/TASKS.md` built by a roster-assigned builder under its own lease in an isolated worktree, cross-reviewed by a pinned non-author reviewer, merged as one squash commit per task on the sprint integration branch, verified at wave end and promoted to the main branch through the `[promotion]` gate. The builder pool replaces the single-writer rule: safety is leases + worktree isolation + cross-review, not write-restriction.
 
-**Done when** all waves are merged, the full test suite and a build from a clean state pass, `integration-verifier` has passed against the integration branch, the promotion gate is satisfied, and `ops/TASKS.md`, `ops/CHANGELOG.md` (builder + reviewer + merge commit per row, from `lease_status`) and `ops/CONTRACTS.md` reflect the result.
+**Done when** all waves are merged, the full test suite and a build from a clean state pass, `integration-verifier` has passed against the integration branch, the promotion gate is satisfied, and `ops/TASKS.md`, `ops/CHANGELOG.md` (one `lease_attribution` line per merged task) and `ops/CONTRACTS.md` reflect the result.
 
 **Safe failure:** a merge `lease_merge` refuses (self-review, AE3; an unknown reviewer; no pin; the checkout on the default branch) stays unmerged: fix the cause, never bypass it. A failed `integration-verifier` blocks the next wave. Findings re-dispatch the same lease and builder with the same pinned reviewer while the cycle is below 3; the third cycle escalates to the user. Halt a builder at risk above 20 % or more than 50 changed files. Promotion blocks when approval is required or a protected path is touched; the user approves. The user's instructions outrank this skill.
 
@@ -33,10 +33,10 @@ ensure_core_trio_live || exit 1
 - **Mode:** fewer than 5 independent tasks → sub-agent mode (default); 5 or more tasks, cross-dependent work, or `--team` → agent-team mode with `team-lead`; `--wave N` → start from wave N. Sub-agents and teams are spawned through the harness mechanism in [Claude](references/claude.md) or [Codex](references/codex.md).
 - **Per-task lease loop** (`lease_create` → `lease_dispatch` → `lease_wait` in bounded slices, collecting, until nothing builds or it returns rc 80 → `lease_pin_reviewer` → review → `lease_merge`), its refusals, the fix-cycle rule and attribution: [lease lifecycle](references/lease-lifecycle.md).
 - **Wave grouping, risk scoring and between-wave verification** in sub-agent mode: [subagent mode](references/subagent-mode.md). The team-lead flow and a teammate's own review/test dispatch with the promotion guard: [team mode](references/team-mode.md).
-- **Wave end:** `integration-verifier` against the integration branch, then `lease_promote`, which reads `[promotion] require_user_approval` (default false), scans the integration diff and blocks (no merge) when approval is required or a protected path is touched (permission configs, deny rules, `ops/roster.toml`, shipped agent configs). Those diffs need the lead or the user as reviewer, never an external-CLI-only review.
+- **Wave end:** `integration-verifier` against the integration branch, then `lease_promote`, which reads `[promotion] require_user_approval` (default false), scans the integration diff and blocks (no merge) when approval is required or a protected path is touched (permission configs, deny rules, `ops/roster.toml`, shipped agent configs). Those diffs need the lead or the user as reviewer, never an external-CLI-only review: a merge approval per protected task, and the user's promotion approval (`lease_approve`).
 
 ## Output
 
 - One squash commit per approved task on the sprint integration branch, recorded with builder, reviewer and merge commit in the ledger (`lease_status`).
-- `ops/CHANGELOG.md` rows carrying builder + reviewer + merge commit; completed build tasks moved to Done and review tasks to Review in `ops/TASKS.md`; `ops/CONTRACTS.md` updated when new interfaces were introduced.
-- The `integration-verifier` result per wave and the promotion result: promoted, or blocked with the reason and the by-hand step the user must take.
+- `ops/CHANGELOG.md` rows from `lease_attribution` (builder, reviewer and class, lead, approval origin, merge commit); completed build tasks moved to Done and review tasks to Review in `ops/TASKS.md`; `ops/CONTRACTS.md` updated when new interfaces were introduced.
+- The `integration-verifier` result per wave and the promotion result: promoted, or blocked with the reason and the `lease_approve` call the user must make.

@@ -424,9 +424,136 @@ STOP_ROW_EOF
   return "$RC"
 }
 
+# The claude -p lane (KTD16): a builder's turn cap, the explicit tool sets of
+# its two classes, and the credential paths no claude worker reads. The tool
+# sets name built-in tools only (--tools; anything else, the Agent tool and the
+# web tools included, is not offered) and approve without a prompt only what
+# needs approving: edits inside the working directory ride acceptEdits, and an
+# unscoped Edit, Write or Read rule would approve them anywhere.
+_CLAUDE_MAX_TURNS=200
+_CLAUDE_TOOLS_EDIT="Bash,Read,Edit,Write,Glob,Grep,NotebookEdit,Skill"
+_CLAUDE_ALLOW_EDIT="Bash,Skill"
+_CLAUDE_TOOLS_READ="Read,Grep,Glob"
+_CLAUDE_CRED_PATHS="~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.git-credentials ~/.config/gh ~/.config/gcloud ~/.azure ~/.kube ~/.docker/config.json ~/.codex ~/.gemini ~/.kimi-code ~/.local/share/opencode ~/.cursor ~/.grok ~/.devin ~/.config/devin ~/.claude/.credentials.json"
+
+# _claude_sandbox_floor_ok — 0 when the claude worker lane may run here: its
+# sandbox is off (TRIFORGE_CLAUDE_SANDBOX=off: no OS confinement, the
+# disclosed opt-out), or `claude --version` reads at or above
+# TRIFORGE_CLAUDE_SANDBOX_FLOOR (registry.sh), the first build that ignores a
+# repository's sandbox-loosening settings under the lane's --settings. Below
+# it, or when the version can't be read (no timeout tool, a hang past 10 s,
+# no X.Y.Z in the answer), rc 1, and _claude_sandbox_refusal words why. The
+# version is read once per process for the claude on PATH (_CLAUDE_SBX_BIN /
+# _CLAUDE_SBX_VER), bounded like session start's probe.
+_CLAUDE_SBX_BIN=""
+_CLAUDE_SBX_VER=""
+_claude_sandbox_floor_ok() {
+  local BIN TO A B C X Y Z
+  case "${TRIFORGE_CLAUDE_SANDBOX:-on}" in off|0|false|no) return 0 ;; esac
+  BIN=$(command -v claude 2>/dev/null) || BIN=""
+  if [ -z "$BIN" ] || [ "$BIN" != "$_CLAUDE_SBX_BIN" ]; then
+    _CLAUDE_SBX_BIN=$BIN
+    _CLAUDE_SBX_VER=""
+    if [ -n "$BIN" ] && TO=$(_timeout_tool 2>/dev/null); then
+      _CLAUDE_SBX_VER=$("$TO" -k 2s 10s "$BIN" --version < /dev/null 2>/dev/null | head -1 \
+        | LC_ALL=C grep -Eo '[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}' | head -1) || _CLAUDE_SBX_VER=""
+    fi
+  fi
+  case "$_CLAUDE_SBX_VER" in ''|*[!0-9.]*) return 1 ;; esac
+  IFS=. read -r A B C <<SBX_VER_EOF
+$_CLAUDE_SBX_VER
+SBX_VER_EOF
+  IFS=. read -r X Y Z <<SBX_FLOOR_EOF
+$TRIFORGE_CLAUDE_SANDBOX_FLOOR
+SBX_FLOOR_EOF
+  if [ "$((10#$A))" -ne "$((10#$X))" ]; then [ "$((10#$A))" -gt "$((10#$X))" ]; return $?; fi
+  if [ "$((10#$B))" -ne "$((10#$Y))" ]; then [ "$((10#$B))" -gt "$((10#$Y))" ]; return $?; fi
+  [ "$((10#$C))" -ge "$((10#$Z))" ]
+}
+
+# _claude_sandbox_refusal <caller> — the one wording of that refusal: the
+# version read (or that none was), the floor, the upgrade, and the explicit
+# opt-out with what it costs.
+_claude_sandbox_refusal() {
+  local WHAT
+  if [ -n "$_CLAUDE_SBX_VER" ]; then
+    WHAT="Claude Code ${_CLAUDE_SBX_VER} is below ${TRIFORGE_CLAUDE_SANDBOX_FLOOR}"
+  else
+    WHAT="Claude Code's version could not be read (\`claude --version\` failed, timed out, or printed no X.Y.Z), so it can't be confirmed at ${TRIFORGE_CLAUDE_SANDBOX_FLOOR} or later"
+  fi
+  echo "${1:-claude}: ERROR ${WHAT} — the claude worker lane's sandbox needs ${TRIFORGE_CLAUDE_SANDBOX_FLOOR}, the first build that ignores a repository's sandbox-loosening settings (excludedCommands, network.allowedDomains, filesystem.allowWrite) under the lane's --settings; on an older build a repository's .claude/settings.json can run commands outside the sandbox. Fix: update Claude Code (\`claude update\`), or set TRIFORGE_CLAUDE_SANDBOX=off in the lead's environment, and the claude worker's Bash then runs without OS confinement. No retry (deterministic)."
+}
+
+# _claude_lane_argv <edit|read> <model> <effort> <resume-id> <deny-write>... —
+# set _LEASE_LANE_ARGV to a claude -p worker's command line up to the prompt,
+# which the caller appends (KTD16). One JSON envelope (--output-format json:
+# subtype, is_error, session_id; _lease_claude_envelope reads it), project and
+# local settings only (the user's own hooks, plugins and env stay out), no MCP
+# server, and an explicit tool set: edit (a lease builder, a tester, a
+# documenter) adds the edit tools under acceptEdits; read (a reviewer, an
+# analyst) runs dontAsk, so nothing outside the read set runs. --settings
+# carries the confinement, and a --settings file outranks the project's own
+# sandbox settings: Bash runs in Claude Code's sandbox (row CC-15: writes stay
+# in the working directory, no network), fail-closed when the sandbox can't
+# start, with no unsandboxed retry; <deny-write> (the lead's git common dir,
+# which the sandbox otherwise opens to a worktree's git; for the read class
+# the working directory itself) and the credential paths are blocked, the
+# latter also for the Read tool. TRIFORGE_CLAUDE_SANDBOX=off runs Bash without
+# the sandbox, and then a claude worker with Bash has no OS confinement; the
+# read class drops Bash there. --model and --effort ride only when the roster
+# set them (the ladder and the Fable override are the lead's spawn choice,
+# never this lane's); --resume only for a UUID-shaped session id (the fix
+# cycle resumes the builder's session); --max-turns comes last, so the prompt
+# after it is never read as one more tool name.
+_claude_lane_argv() {
+  local CLASS=$1 MODEL=$2 EFFORT=$3 RESUME=$4 SBX=on TOOLS ALLOW MODE SETTINGS
+  shift 4
+  case "${TRIFORGE_CLAUDE_SANDBOX:-on}" in off|0|false|no) SBX=off ;; esac
+  if [ "$CLASS" = edit ]; then
+    TOOLS=$_CLAUDE_TOOLS_EDIT ALLOW=$_CLAUDE_ALLOW_EDIT MODE=acceptEdits
+  else
+    TOOLS=$_CLAUDE_TOOLS_READ ALLOW=$_CLAUDE_TOOLS_READ MODE=dontAsk
+    if [ "$SBX" = on ]; then TOOLS="${TOOLS},Bash" ALLOW="${ALLOW},Bash"; fi
+  fi
+  SETTINGS=$(CL_SBX="$SBX" CL_CRED="$_CLAUDE_CRED_PATHS" python3 -c '
+import json, os, sys
+cred = os.environ["CL_CRED"].split()
+deny = []
+for p in cred:
+    deny += ["Read(" + p + ")", "Read(" + p + "/**)"]
+s = {"permissions": {"deny": deny}}
+if os.environ["CL_SBX"] == "on":
+    s["sandbox"] = {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,
+                    "autoAllowBashIfSandboxed": True,
+                    "filesystem": {"denyRead": cred, "denyWrite": [d for d in sys.argv[1:] if d]}}
+else:
+    s["sandbox"] = {"enabled": False}
+print(json.dumps(s, separators=(",", ":")))
+' "$@") || return 1
+  _LEASE_LANE_ARGV=(claude -p --output-format json --setting-sources project,local --strict-mcp-config
+                    --permission-mode "$MODE" --tools "$TOOLS" --allowedTools "$ALLOW" --settings "$SETTINGS")
+  if [ -n "$MODEL" ]; then _LEASE_LANE_ARGV+=(--model "$MODEL"); fi
+  if [ -n "$EFFORT" ]; then _LEASE_LANE_ARGV+=(--effort "$EFFORT"); fi
+  if _claude_session_ok "$RESUME"; then _LEASE_LANE_ARGV+=(--resume "$RESUME"); fi
+  _LEASE_LANE_ARGV+=(--max-turns "$_CLAUDE_MAX_TURNS")
+  return 0
+}
+
+# _claude_session_ok <id> — 0 when <id> has a Claude Code session id's shape
+# (a UUID). The id comes back in a worker's envelope, so it is checked before
+# it reaches the ledger (lease_collect) or a command line (--resume).
+_claude_session_ok() {
+  case "${1:-}" in
+    *[!0-9a-fA-F-]* | *-*-*-*-*-*) return 1 ;;
+    ????????-????-????-????-????????????) return 0 ;;
+  esac
+  return 1
+}
+
 # _lease_lane_argv <cli> <model> <effort> <dispatch-model> <kimi-agent-file>
-#   <cursor-bin> <worktree> <timeout-s> — set _LEASE_LANE_ARGV to the lane's
-# command line up to the prompt, which the caller appends (agy and kimi end in
+#   <cursor-bin> <worktree> <timeout-s> [<git-common-dir> <resume-id>] — set
+# _LEASE_LANE_ARGV to the lane's command line up to the prompt, which the
+# caller appends (agy and kimi end in
 # -p, whose value it is; the others take it as the trailing positional); rc 1
 # for a CLI with no arm. The one place each lane's argv is composed:
 # _lease_builder_run runs it under _adapter_env, and the probe's worker-marker
@@ -435,14 +562,20 @@ STOP_ROW_EOF
 # own flags. The invoke_* helpers are shell functions and can't cross env -i,
 # so each arm composes the adapter's command core directly, and the role brief
 # rides in the prompt (lease_dispatch) for every lane but kimi.
-#   claude       -p --permission-mode acceptEdits (cwd IS the worktree, so no
-#                --add-dir), --model only when the roster set one
+#   claude       the edit class of _claude_lane_argv (cwd IS the worktree, so
+#                no --add-dir): the lead's <git-common-dir> unwritable, the
+#                session <resume-id> on a fix cycle
 #   codex        exec in the workspace-write sandbox with approval never, plus
 #                two sandbox_workspace_write excludes that drop codex's default
 #                temp-dir write allowance: lease worktrees live under TMPDIR,
 #                so without them a builder could cross into sibling worktrees
 #                or the lease root (R35: writes restricted to the lease
-#                worktree); -m and model_reasoning_effort only when set
+#                worktree); the tool shell's env policy pinned to pass on
+#                everything codex was started with (the env -i allowlist is
+#                the filter), so neither the user's config.toml nor a default
+#                that drops *KEY* names can strip the worker marker or the
+#                no-push GIT_CONFIG_KEY_n (CDX-19); -m and
+#                model_reasoning_effort only when set
 #   antigravity  always the model pin (AE2: agy's own default is a Medium
 #                variant), --add-dir the worktree, --print-timeout, the JSON
 #                envelope (KTD2, D-032), -p
@@ -466,13 +599,15 @@ _lease_lane_argv() {
   local CLI=$1 MODEL=$2 EFFORT=$3 DMODEL=$4 KAF=$5 CBIN=$6 WT=$7 TIMEOUT=$8
   case "$CLI" in
     claude)
-      _LEASE_LANE_ARGV=(claude -p --permission-mode acceptEdits)
-      if [ -n "$MODEL" ]; then _LEASE_LANE_ARGV+=(--model "$MODEL"); fi
+      _claude_lane_argv edit "$MODEL" "$EFFORT" "${10:-}" "${9:-}" || return 1
       ;;
     codex)
       _LEASE_LANE_ARGV=(codex exec -s workspace-write -c 'approval_policy="never"'
                         -c 'sandbox_workspace_write.exclude_tmpdir_env_var=true'
-                        -c 'sandbox_workspace_write.exclude_slash_tmp=true')
+                        -c 'sandbox_workspace_write.exclude_slash_tmp=true'
+                        -c 'shell_environment_policy.inherit="all"' -c 'shell_environment_policy.ignore_default_excludes=true'
+                        -c 'shell_environment_policy.exclude=[]' -c 'shell_environment_policy.include_only=[]'
+                        -c 'shell_environment_policy.set={}')
       if [ -n "$MODEL" ]; then _LEASE_LANE_ARGV+=(-m "$MODEL"); fi
       if [ -n "$EFFORT" ]; then _LEASE_LANE_ARGV+=(-c "model_reasoning_effort=\"${EFFORT}\""); fi
       ;;
@@ -500,7 +635,7 @@ _lease_lane_argv() {
 
 # _lease_builder_run <cli> <model> <effort> <dispatch-model> <kimi-agent-file>
 #   <cursor-bin> <timeout-bin> <timeout-s> <out> <worktree> <env-keys>
-#   <test-builder> <prompt>
+#   <test-builder> <prompt> [<git-common-dir> <resume-id>]
 # The detached builder's body: from the worktree, the lane command for <cli>
 # (_lease_lane_argv) under _adapter_env's per-CLI allowlist (or the
 # TRIFORGE_TEST_BUILDER script <test-builder>), output in <out>; then the sweep
@@ -509,10 +644,13 @@ _lease_lane_argv() {
 # process _LEASE_LAUNCH_PY started, never in the lead's shell, and never writes
 # the ledger (KTD-4). A live build of a lane whose CLI is not signed in
 # AUTH-FAILs; that failure is deterministic, and the lead sees it in
-# <out>.class (no requeue).
+# <out>.class (no requeue). The claude lane's JSON envelope, the seam's
+# included, is split by _lease_claude_envelope into the result text (<out>)
+# and the record lease_collect reads (<out>.envelope); with no envelope, the
+# run's stderr is appended to <out>.
 _lease_builder_run() {
   local CLI=$1 MODEL=$2 EFFORT=$3 DISPATCH_MODEL=$4 KIMI_AGENT_FILE=$5 CBIN=$6 TOBIN=$7 TIMEOUT=$8 OUT=$9
-  local WT=${10} TEST_BUILDER=${12} FULL_PROMPT=${13} RC=0 CLASS_SET=0 AGY_PRC=0
+  local WT=${10} TEST_BUILDER=${12} FULL_PROMPT=${13} COMMON=${14:-} RESUME=${15:-} RC=0 CLASS_SET=0 AGY_PRC=0 SBX_REFUSED=0
   local -a TO
   _ADAPTER_ENV_KEYS=${11}   # the registry read lease_dispatch did; _adapter_env reads none
   cd "$WT" || return 97
@@ -526,7 +664,7 @@ _lease_builder_run() {
   if [ -n "$TEST_BUILDER" ]; then
     # Test seam (see lease_dispatch): deterministic fake builder.
     _adapter_env "$CLI" "${TO[@]}" "$TEST_BUILDER" "$FULL_PROMPT" > "$OUT" 2>&1 || RC=$?
-  elif ! _lease_lane_argv "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$KIMI_AGENT_FILE" "$CBIN" "$WT" "$TIMEOUT"; then
+  elif ! _lease_lane_argv "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$KIMI_AGENT_FILE" "$CBIN" "$WT" "$TIMEOUT" "$COMMON" "$RESUME"; then
     echo "lease_dispatch: ERROR builder CLI '${CLI}' has no dispatch arm here — not integrated. Registered CLIs: $(_known_clis '<registry unreadable>')." > "$OUT"
     RC=95
   else
@@ -565,11 +703,33 @@ _lease_builder_run() {
           _adapter_env opencode "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
         fi
         ;;
+      claude)
+        # The envelope alone on stdout (KTD16); stderr beside it, folded into
+        # $OUT below only when no envelope came back. A Claude Code below the
+        # sandbox floor never starts (deterministic, like the opencode arm).
+        if ! _claude_sandbox_floor_ok; then
+          _claude_sandbox_refusal lease_dispatch > "$OUT"
+          RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1
+        else
+          _adapter_env claude "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2> "${OUT}.err" || RC=$?
+          if [ "$RC" -ne 0 ] && grep -q 'without a working sandbox' "${OUT}.err" "$OUT" 2>/dev/null; then
+            RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1; SBX_REFUSED=1
+          fi
+        fi
+        ;;
       *)
         _adapter_env "$CLI" "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
         ;;
     esac
   fi
+  case "$CLI" in
+    claude)
+      _lease_claude_envelope "$OUT" "${OUT}.err" || true
+      if [ "$SBX_REFUSED" -eq 1 ]; then
+        echo "lease_dispatch: the claude builder refused to start without Claude Code's sandbox (KTD16) — on Linux install bubblewrap and socat; or set TRIFORGE_CLAUDE_SANDBOX=off in the lead's environment, and the claude builder's Bash then runs without OS confinement" >> "$OUT"
+      fi
+      ;;
+  esac
   python3 -c "$_LEASE_OWN_GROUP_PY" 2>/dev/null || true
   # Only a nonzero exit has a failure class (matches invoke_antigravity /
   # invoke_codex): a clean run is class=none, so lease_collect never reads a
@@ -633,7 +793,8 @@ _lease_builder_run() {
 # from <row>: a builder that exits in between has written it by then, and a
 # stale "absent" would orphan a finished builder. Sets _LS_RESULT: building |
 # collected | orphaned | unverified | deferred | left (no longer building).
-# Returns 0, or the rc of an integrity check / ledger write that failed.
+# Returns 0, or the rc of an integrity check / ledger write that failed, or
+# of a collect that failed and left the row building.
 _lease_sweep_one() {
   local OP=$1 TASK=$2 LEAD_EXIT=${3:-0} MODE=${4:-sweep} ROW=${5:-}
   local T="" ST="" PID="" PGID="" STARTED="" OUT="" DEADLINE="" LPID="" LSTARTED="" B ACTION LEAD_GONE=0
@@ -747,6 +908,13 @@ print(max(0, int(time.time() - os.path.getmtime(os.environ['OUT_FILE']))))
       fi
       lease_collect "$TASK" >&2 || RC=$?
       if [ "$RC" -eq "$_RC_LEASE_INTEGRITY" ]; then return "$RC"; fi
+      # A collect that failed and left the row building collected nothing (it
+      # refused, 45, or a ledger write failed): the sweep stops with its rc.
+      # Its routed outcomes all leave building (review, leased on a missing
+      # report, escalated, failed, orphaned).
+      if [ "$RC" -ne 0 ] && [ "$(_ledger_get "$TASK" state 2>/dev/null || true)" = building ]; then
+        return "$RC"
+      fi
       _LS_RESULT=collected
       return 0
       ;;
@@ -831,8 +999,9 @@ for t, r in sorted(leases.items() if isinstance(leases, dict) else []):
 # adopted or collected with reason=lead-exit and its requeue budget untouched.
 # --lead-exit treats every swept lease's lead as gone: the forced handover (U9)
 # calls it. rc 0; _RC_DEGRADED when a row could not be verified; 44 from either
-# integrity check, and a collect's 44 passes through; a failed ledger write
-# stops the sweep with its rc.
+# integrity check, and a collect's 44 passes through; a failed ledger write,
+# or a collect that fails and leaves the row building (a refused one, 45),
+# stops the sweep with its rc and is not counted as collected.
 lease_heartbeat_check() {
   _lead_only lease_heartbeat_check || return $?
   local ONLY="" LEAD_EXIT=0 LEDGER ROWS ROW TASK SWEPT=0 COLLECTED=0 ORPHANED=0 UNVERIFIED=0 RC=0
@@ -860,20 +1029,22 @@ lease_heartbeat_check() {
   # word-split, so `for` would run once on the whole blob and corrupt the
   # sweep for 2+ concurrent leases — the parallel-wave case. The heredoc (not
   # a `printf | while` pipe) keeps the loop in THIS shell so the counters
-  # persist; each sweep reads /dev/null, never the row list.
-  while IFS= read -r ROW; do
+  # persist. It arrives on fd 3, so each sweep keeps the caller's stdin: the
+  # lead-only helpers nested in it (lease_collect, _ledger_update,
+  # lease_reclaim) see the terminal this pass passed the host check on.
+  while IFS= read -r ROW <&3; do
     TASK=${ROW%%"$_LEASE_US"*}
     case "$TASK" in ""|@now) continue ;; esac
     if [ -n "$ONLY" ] && [ "$TASK" != "$ONLY" ]; then continue; fi
     SWEPT=$((SWEPT + 1))
-    _lease_sweep_one lease_heartbeat_check "$TASK" "$LEAD_EXIT" sweep "$ROW" < /dev/null || RC=$?
+    _lease_sweep_one lease_heartbeat_check "$TASK" "$LEAD_EXIT" sweep "$ROW" || RC=$?
     if [ "$RC" -ne 0 ]; then break; fi
     case "$_LS_RESULT" in
       collected)  COLLECTED=$((COLLECTED + 1)) ;;
       orphaned)   ORPHANED=$((ORPHANED + 1)) ;;
       unverified) UNVERIFIED=$((UNVERIFIED + 1)) ;;
     esac
-  done <<HEARTBEAT_ROWS
+  done 3<<HEARTBEAT_ROWS
 $ROWS
 HEARTBEAT_ROWS
   # Every return runs the integrity check (KTD10), as lease_wait's does: a
@@ -884,19 +1055,6 @@ HEARTBEAT_ROWS
   if [ "$RC" -ne 0 ]; then return "$RC"; fi
   if [ "$UNVERIFIED" -gt 0 ]; then return "$_RC_DEGRADED"; fi
   return 0
-}
-
-# _lease_lead_host — the CLI leading this session, for its registry
-# lead.wait_budget_s, from the host markers U29 recorded: CODEX_THREAD_ID or
-# CODEX_CI in a Codex lead's tool shell (CDX-15), else claude (CLAUDECODE=1
-# under Claude Code, CC-11, and the default with no markers). U9's lead
-# resolution replaces it.
-_lease_lead_host() {
-  if [ -n "${CODEX_THREAD_ID:-}" ] || [ -n "${CODEX_CI:-}" ]; then
-    printf 'codex\n'
-  else
-    printf 'claude\n'
-  fi
 }
 
 # _lease_ledger_check — rc 0 when the ledger exists and parses; else rc 1 and
@@ -1051,8 +1209,9 @@ ALL_IN_EOF
 # faster. Each poll reads the ledger once (_lease_states_read): the states it
 # returns on and the rows the next pass sweeps. The budget never exceeds the
 # lead's lead.wait_budget_s from the CLI registry (claude 600, codex 900; the
-# lead from _lease_lead_host until U9 lands; TRIFORGE_LEAD_WAIT_BUDGET_S may
-# only lower it): the default and the cap are that value minus a quarter of
+# lead is [lead] in the roster, read through lead_field, and _lead_only has
+# already checked this shell runs it; TRIFORGE_LEAD_WAIT_BUDGET_S may only
+# lower it): the default and the cap are that value minus a quarter of
 # it, at most 15 s, so the call returns inside the lead's shell-tool limit.
 # The budget counts from the call's start, and the polling stops a second
 # before it, so the closing integrity check fits inside it too. No action
@@ -1073,13 +1232,15 @@ ALL_IN_EOF
 # too); 44: the integrity check found a change, on entry, mid-wait or on return
 # (restored and escalated, as in every lease helper; stdout still gives the
 # watched leases' states); 1: ledger error (missing, unparseable) or an
-# unknown task; 64: usage; 45: run by a worker or from inside the lease root.
+# unknown task; 64: usage; 45: run by a worker or from inside the lease root,
+# or a collect inside the wait refused (any collect that fails and leaves the
+# row building returns its rc).
 # Loop it in bounded slices until it prints no "still building:" line or
 # returns 80, each repeat naming only the leases on that line (or none): a
 # named lease that already left building returns at once.
 lease_wait() {
   _lead_only lease_wait || return $?
-  local BUDGET="" NAMES="" ERR WAIT_CLI CAP HEADROOM EFF READ WATCH ROW START_MS STOP_MS CHECK_MS REM RC=0
+  local BUDGET="" NAMES="" ERR WAIT_LEAD LF TAB CAP HEADROOM EFF READ WATCH ROW START_MS STOP_MS CHECK_MS REM RC=0
   local T UNVER="" DEFER=0
   # The budget counts from the call's start, so the checks before the wait
   # are inside it too.
@@ -1121,8 +1282,15 @@ lease_wait() {
   fi
   _lead_integrity_check lease_wait || { RC=$?; _lease_wait_close "$NAMES"; return "$RC"; }
   _lease_root_notice lease_wait
-  WAIT_CLI=$(_lease_lead_host)
-  CAP=$(cli_field "$WAIT_CLI" lead.wait_budget_s 2>/dev/null) || CAP=""
+  # The lead's shell-tool limit is a registry field of the lead (KTD1: read the
+  # field, never the lead's name); one that can't be read keeps the shorter
+  # limit, Claude's 600 s.
+  TAB=$(printf '\t')
+  LF=$(lead_field name lead.wait_budget_s 2>/dev/null) || LF=""
+  case "$LF" in
+    *"$TAB"*) WAIT_LEAD=${LF%%"$TAB"*}; CAP=${LF#*"$TAB"} ;;
+    *) WAIT_LEAD="the"; CAP="" ;;
+  esac
   case "$CAP" in ''|*[!0-9]*|0*) CAP=600 ;; esac
   case "${TRIFORGE_LEAD_WAIT_BUDGET_S:-}" in
     ''|*[!0-9]*|0*) ;;
@@ -1136,7 +1304,7 @@ lease_wait() {
   if [ -z "$BUDGET" ]; then
     BUDGET=$EFF
   elif [ "$BUDGET" -gt "$EFF" ]; then
-    echo "lease_wait: budget capped at ${EFF}s (${WAIT_CLI} lead: wait_budget_s ${CAP}s, the wait returns ${HEADROOM}s inside it)" >&2
+    echo "lease_wait: budget capped at ${EFF}s (${WAIT_LEAD} lead: wait_budget_s ${CAP}s, the wait returns ${HEADROOM}s inside it)" >&2
     BUDGET=$EFF
   fi
   READ=$(_lease_states_read "$NAMES" 2>/dev/null) || READ=""
@@ -1162,19 +1330,21 @@ lease_wait() {
   _LS_ACT_STOP_MS=$((START_MS + BUDGET * 1000))
   CHECK_MS=$((START_MS + 15000))
   while :; do
-    # One pass over the leases still building, from the rows of the last read.
+    # One pass over the leases still building, from the rows of the last read
+    # (on fd 3, so each sweep keeps the caller's stdin, as in
+    # lease_heartbeat_check).
     _LS_LEAD_KEY=""
     UNVER=""
-    while IFS= read -r ROW; do
+    while IFS= read -r ROW <&3; do
       if [ -z "$ROW" ]; then continue; fi
       T=${ROW%%"$_LEASE_US"*}
-      _lease_sweep_one lease_wait "$T" 0 poll "$ROW" < /dev/null || RC=$?
+      _lease_sweep_one lease_wait "$T" 0 poll "$ROW" || RC=$?
       if [ "$RC" -ne 0 ]; then break; fi
       case "$_LS_RESULT" in
         unverified) UNVER="${UNVER}${UNVER:+ }${T}" ;;
         deferred) DEFER=1; break ;;
       esac
-    done <<LEASE_WAIT_EOF
+    done 3<<LEASE_WAIT_EOF
 ${_LW_ROWS}
 LEASE_WAIT_EOF
     if [ "$RC" -ne 0 ]; then break; fi

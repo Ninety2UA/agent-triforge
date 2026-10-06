@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/common.sh — shared helpers: the host-marker scrub, the fail-closed timeout wrapper, output scrubbing, the KTD-9 failure classifier, the worker-marker guard (_lead_only), and the agy/codex listing + feature-detection helpers
+# scripts/lib/common.sh — shared helpers: the host-marker scrub, the fail-closed timeout wrapper, output scrubbing, the KTD-9 failure classifier, the lead-only guard (_lead_only: worker marker, lease root, lead host), and the agy/codex listing + feature-detection helpers
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh. Every function keeps the name and
@@ -86,6 +86,18 @@ _is_known_cli() {
   case " ${_KNOWN_CLIS:-} " in *" ${1:-} "*) return 0 ;; *) return 1 ;; esac
 }
 
+# _approver_ok <name> — 0 when <name> can stand behind a review or an approval
+# (U10, KTD2): `user`, the person, or a registered CLI (_is_known_cli). `user`
+# is not a CLI and never joins _KNOWN_CLIS, so no builder, roster role or
+# resolve_role can name it; only lease_pin_reviewer, lease_merge and
+# lease_approve accept it, through this check.
+_approver_ok() {
+  case "${1:-}" in
+    user) return 0 ;;
+  esac
+  _is_known_cli "${1:-}"
+}
+
 # Classify a failed external-CLI invocation (KTD-9). Shared so future per-CLI
 # helpers reuse one taxonomy instead of reinventing bare retry-once. Sets:
 #   INVOKE_FAILURE_CLASS    deterministic | timeout | retryable
@@ -128,21 +140,33 @@ _classify_invoke_failure() {
 # Any non-empty value counts as the marker. The hook handlers exit at once
 # under it, and every helper that carves, dispatches, collects, merges,
 # promotes or writes the ledger or the roster (lease.sh, roster.sh) starts with
-# _lead_only, which refuses under the marker or when the current directory is
-# inside a lease root. It lives here, loaded before both. It guards against
-# accidents (a worker that sources this library and runs lease_create in its
-# worktree); it is not a security boundary. A worker that unsets the variable
-# and leaves its worktree passes it, and what it then writes is caught only
+# _lead_only, which refuses under the marker, when the current directory is
+# inside a lease root, and (R38) when this shell is not the lead's: the lead
+# host check, _lead_host_gate in roster.sh. It lives here, loaded before both.
+# It guards against accidents (a worker that sources this library and runs
+# lease_create in its worktree; a session of the CLI that is not the lead); it
+# is not a security boundary. A worker that unsets the variable and leaves its
+# worktree passes the first two checks, and what it then writes is caught only
 # after the fact, by the integrity check and the snapshot-only merge.
 _RC_LEAD_ONLY=45
 
 # The first line of every lease root's lead/gitconfig: lease.sh's
-# _lead_gitconfig_capture writes it, _lease_root_above recognizes a lease root
-# by it. Keep the bytes.
+# _lead_gitconfig_capture writes it, _is_lease_root recognizes a lease root by
+# it. Keep the bytes.
 _LEAD_GITCONFIG_SIGNATURE='# Triforge trusted git config'
 
-# _lead_only <helper> — 0 in a lead context; otherwise one stderr line naming
-# the reason and rc _RC_LEAD_ONLY.
+# _lead_only <helper> [--any-host] — 0 in a lead context; otherwise one stderr
+# line naming the reason and rc _RC_LEAD_ONLY. In order: the worker marker, the
+# lease root, then the lead host check (_lead_host_gate, roster.sh): this shell
+# runs under [lead].cli, or a person runs it from a terminal, or the SELF
+# harness names the lead. --any-host skips only that last check: the lead
+# switch (roster_write_lead) runs from either lead CLI, and the approval
+# helper (lease_approve) records where it ran (_lead_origin); each runs its
+# own origin check instead (_lead_origin_match, roster.sh: no stated origin
+# and ambiguous host markers refused), and both write the ledger through
+# _ledger_write, the ledger writer's own --any-host form. The marker
+# and the lease root come first, so neither host markers nor the SELF seam
+# (TRIFORGE_TEST_BUILDER + TRIFORGE_TEST_LEAD) ever let a worker through.
 _lead_only() {
   local ROOT
   if [ -n "${TRIFORGE_LEASE_WORKER:-}" ]; then
@@ -153,27 +177,38 @@ _lead_only() {
     echo "${1}: REFUSED — a lead-only helper, called from inside the lease root ${ROOT} (a lease worktree); run it from the lead's checkout (KTD9, rc ${_RC_LEAD_ONLY})" >&2
     return "$_RC_LEAD_ONLY"
   fi
-  return 0
+  if [ "${2:-}" = --any-host ]; then
+    return 0
+  fi
+  _lead_host_gate "$1"
+}
+
+# _is_lease_root <dir> — 0 when <dir>/lead/gitconfig's first line starts with
+# _LEAD_GITCONFIG_SIGNATURE: the signature test behind _lease_root_above and
+# lease.sh's _lease_root_valid. The pattern is quoted, so it matches literally
+# under bash and zsh (where an unquoted # is a glob operator).
+_is_lease_root() {
+  local H=""
+  if [ -f "${1}/lead/gitconfig" ]; then
+    IFS= read -r H 2>/dev/null < "${1}/lead/gitconfig" || true
+  fi
+  case "$H" in "${_LEAD_GITCONFIG_SIGNATURE}"*) return 0 ;; esac
+  return 1
 }
 
 # _lease_root_above — print the lease root the current directory is inside,
-# rc 1 when it is in none: the nearest ancestor (physical path) holding
-# lead/gitconfig whose first line starts with _LEAD_GITCONFIG_SIGNATURE. Found
-# by that file, not by the root's path, so it holds whatever TMPDIR or
-# TRIFORGE_LEASE_ROOT say now; and without git, which from a lease worktree
-# answers for the worktree, not the lead. The pattern is quoted, so it matches
-# literally under bash and zsh (where an unquoted # is a glob operator).
+# rc 1 when it is in none: the nearest ancestor (physical path) that is one
+# (_is_lease_root). Found by that file, not by the root's path, so it holds
+# whatever TMPDIR or TRIFORGE_LEASE_ROOT say now; and without git, which from
+# a lease worktree answers for the worktree, not the lead.
 _lease_root_above() {
-  local D H
+  local D
   D=$(pwd -P 2>/dev/null) || return 1
   while :; do
-    H=""
-    if [ -f "${D}/lead/gitconfig" ]; then
-      IFS= read -r H 2>/dev/null < "${D}/lead/gitconfig" || true
+    if _is_lease_root "$D"; then
+      printf '%s\n' "${D:-/}"
+      return 0
     fi
-    case "$H" in
-      "${_LEAD_GITCONFIG_SIGNATURE}"*) printf '%s\n' "${D:-/}"; return 0 ;;
-    esac
     if [ -z "$D" ] || [ "$D" = "/" ]; then
       return 1
     fi

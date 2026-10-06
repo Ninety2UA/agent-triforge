@@ -19,9 +19,10 @@ fi
 # scripts/lib/registry.sh, which supplies everything per-CLI). Mirrors
 # templates/ops/roster.toml; scripts/validate-versions.sh check 3 parses this
 # literal, requires each role's model to equal its CLI's registry model, and
-# diffs the template against it. builder model "" means: the shell claude -p
-# lease lane runs the host default Claude model (no --model pin); the
-# Fable/downgrade ladder is an Agent-tool subagent concern, not this lane.
+# diffs the template against it. builder model "" means: the claude -p lease
+# lane runs Claude Code's own default model (no --model pin; the lane reads no
+# user-tier settings, KTD16); the Fable/downgrade ladder is the lead's
+# spawn-time choice, never this lane's.
 # Single-quoted shell literal: python strings inside use double quotes only.
 _ROLE_DEFAULTS_PY='
 DEFAULTS = {
@@ -36,10 +37,11 @@ DEFAULTS = {
 # resolve_role <role> — map a task-type role (builder | reviewer | tester |
 # analyst | documenter) to the member that should handle it right now.
 # Prints one line on success:   cli<TAB>model<TAB>effort
-# (builder's model field is empty by design: the shell `claude -p` builder lane
-# runs the host's default Claude Code model with no --model pin, so the roster
-# has no model to carry there. The Fable/downgrade ladder is an Agent-tool
-# subagent concern — the Agent tool's `model` parameter — NOT this shell lane.)
+# (builder's model field is empty by design: the `claude -p` builder lane runs
+# Claude Code's own default model with no --model pin, so the roster has no
+# model to carry there. The Fable/downgrade ladder is the lead's spawn-time
+# choice — the Agent tool's `model` parameter under a Claude lead — NOT this
+# shell lane.)
 #
 # Sources of truth, in order: ops/roster.toml when present, overlaid
 # PER-FIELD onto built-in defaults — a role overriding only effort keeps the
@@ -50,6 +52,8 @@ DEFAULTS = {
 #   - each role's chain ([cli] + fallbacks) must terminate at a core-trio
 #     member — a chain resolving entirely to optional members cannot ship
 #   - [members.<core-trio>] enabled=false is rejected (cannot be disabled)
+#   - a [lead] table must name a CLI that can lead, with valid fields (KTD1;
+#     lead_load in _LEAD_PY, below)
 # The resolution walk tries the primary cli, then fallbacks in order; a
 # member is SKIPPED when its binary is absent from PATH or its
 # [members.<cli>] entry says enabled=false (R38: disabled = absent
@@ -90,6 +94,7 @@ import os, re, shutil, sys
 ${_CURSOR_ID_PY}
 ${_TRIFORGE_CLIS_PY}
 ${_ROLE_DEFAULTS_PY}
+${_LEAD_PY}
 try:
     import tomllib
 except ImportError:
@@ -116,15 +121,8 @@ CLI_DEFAULT_MODEL = {c: e['model'] for c, e in CLIS.items()}
 INSTALL_FIX = {c: 'install ' + e['name'] + ' (' + e['install'] + ')' + (', then ' + e['login'] if e['login'] else '') for c, e in CLIS.items()}
 
 path = os.environ.get('ROSTER_FILE', 'ops/roster.toml')
-roster = {}
-if os.path.isfile(path):
-    try:
-        with open(path, 'rb') as f:
-            roster = tomllib.load(f)
-    except tomllib.TOMLDecodeError as exc:
-        # TOMLDecodeError text names the line ('... at line N, column M').
-        sys.stderr.write('resolve_role: ERROR malformed ' + path + ': ' + str(exc) + '\n')
-        sys.exit(4)
+# A malformed roster exits 4, its TOMLDecodeError text naming the line.
+roster = lead_roster(tomllib, path, 'resolve_role')
 
 user_roles = roster.get('roles', {})
 user_roles = user_roles if isinstance(user_roles, dict) else {}
@@ -144,6 +142,8 @@ for name, entry in members.items():
         reject('unknown member ' + repr(name) + ' (known CLIs: ' + ', '.join(BINARY) + ')')
     if name in CORE_TRIO and isinstance(entry, dict) and entry.get('enabled') is False:
         reject('[members.' + name + '] enabled = false — the core trio cannot be disabled')
+# [lead] (KTD1): a lead that cannot load fails every load, like a bad role.
+lead_load(roster, reject)
 
 merged = {}
 for name, dflt in DEFAULTS.items():
@@ -240,14 +240,17 @@ _RC_DISPATCH_ROLE_CLAUDE=40
 # without it, resolve_role only drove the builder lane (lease_create) and the
 # review/test phases hardcoded codex/antigravity.
 #
-# The claude lane is special: review/test work assigned to claude runs as a
-# NATIVE Claude Agent-tool subagent (a subagent has the ops/ context and tool
-# surface the shell CLIs lack), not a shell helper. So for cli=claude this prints
+# The claude lane depends on the lead (R2, KTD16). A lead whose native
+# sub-agents enforce their tool lists (the registry's
+# lead.native_subagents_enforced_tools: Claude Code) runs review/test work
+# assigned to claude as a NATIVE Agent-tool subagent, so this prints
 #   DISPATCH_ROLE_CLAUDE <agent-name> <output-file>
 # to stdout and returns _RC_DISPATCH_ROLE_CLAUDE (40), signalling the calling
-# command to spawn a Claude subagent instead of a background CLI. Every other
-# lane invokes its helper and returns the helper's own exit code
-# (INVOKE_FAILURE_CLASS stays visible for a synchronous, same-shell caller).
+# command to spawn one. Any other lead (Codex) has no such sub-agent, and
+# claude is an ordinary worker there: _dispatch_role_claude runs `claude -p`
+# and writes its output file. Every other lane invokes its helper and returns
+# the helper's own exit code (INVOKE_FAILURE_CLASS stays visible for a
+# synchronous, same-shell caller).
 #
 # Callers MUST invoke this in a context that ignores set -e (e.g.
 # `dispatch_role ... || RC=$?`), exactly like the invoke_* helpers — otherwise a
@@ -265,11 +268,17 @@ dispatch_role() {
   EFFORT=$(printf '%s\n' "$RESOLVED" | cut -f3)
   echo "dispatch_role: role=${ROLE} -> cli=${CLI} model=${MODEL:-<default>} effort=${EFFORT} agent=${AGENT_NAME}" >&2
   # The registry's lane field decides the subagent path (claude today): review/
-  # test work on a "subagent" lane runs as a native Agent-tool subagent, not a
-  # shell helper — signal the caller to spawn one (see function comment).
+  # test work on a "subagent" lane runs as a native Agent-tool subagent when the
+  # lead's sub-agents enforce their tools, else as `claude -p` (see above).
   if [ "$(cli_field "$CLI" lane 2>/dev/null || true)" = "subagent" ]; then
-    printf 'DISPATCH_ROLE_CLAUDE %s %s\n' "$AGENT_NAME" "$OUTPUT_FILE"
-    return "$_RC_DISPATCH_ROLE_CLAUDE"
+    local NATIVE=""
+    NATIVE=$(lead_field lead.native_subagents_enforced_tools) || return $?
+    if [ "$NATIVE" = true ]; then
+      printf 'DISPATCH_ROLE_CLAUDE %s %s\n' "$AGENT_NAME" "$OUTPUT_FILE"
+      return "$_RC_DISPATCH_ROLE_CLAUDE"
+    fi
+    _dispatch_role_claude "$ROLE" "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$MODEL" "$EFFORT"
+    return $?
   fi
   case "$CLI" in
     antigravity)
@@ -298,6 +307,59 @@ dispatch_role() {
       return 1
       ;;
   esac
+}
+
+# _dispatch_role_claude <role> <agent-name> <prompt> <output-file> <timeout>
+#   <model> <effort> — dispatch_role's claude arm under a lead without native,
+# tool-enforcing sub-agents (R2, KTD16): `claude -p` from the caller's
+# directory under _adapter_env (the env allowlist, the worker marker, the
+# no-push config, the claude values), composed by _claude_lane_argv. A
+# reviewer or an analyst gets the read class: read tools, dontAsk, and Bash
+# only inside the sandbox with the working directory unwritable; a tester or a
+# documenter the edit class, the ledger unwritable. Both keep the lead's git
+# common dir unwritable. A Claude Code below TRIFORGE_CLAUDE_SANDBOX_FLOOR, or
+# one whose version can't be read, is refused with the sandbox on
+# (_claude_sandbox_floor_ok: rc 1, deterministic, the reason in <output-file>
+# and on stderr). The envelope's result text lands in <output-file>
+# (the envelope itself beside it, <output-file>.raw and .envelope); a run that
+# returns no envelope leaves the CLI's own output there. Returns the CLI's
+# exit code, with INVOKE_FAILURE_CLASS set as the invoke_* helpers set it.
+_dispatch_role_claude() {
+  local ROLE=$1 AGENT_NAME=$2 PROMPT=$3 OUT=$4 TIMEOUT=$5 MODEL=$6 EFFORT=$7 CLASS=read RC=0 TOBIN
+  local -a DENY=()
+  INVOKE_FAILURE_CLASS="none"
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "dispatch_role: ERROR \`claude\` (Claude Code) not found on PATH — cannot run '${AGENT_NAME}'. Fix: $(cli_install_fix claude 2>/dev/null || true). No retry (deterministic)." >&2
+    INVOKE_FAILURE_CLASS="deterministic"
+    return 127
+  fi
+  TOBIN=$(_timeout_tool) || { INVOKE_FAILURE_CLASS="deterministic"; return "$_RC_NO_TIMEOUT_TOOL"; }
+  if ! _claude_sandbox_floor_ok; then
+    _claude_sandbox_refusal dispatch_role >&2
+    _claude_sandbox_refusal dispatch_role > "$OUT" 2>/dev/null || true
+    INVOKE_FAILURE_CLASS="deterministic"
+    return 1
+  fi
+  case "$ROLE" in tester|documenter) CLASS=edit ;; esac
+  if _lease_ctx 2>/dev/null; then
+    DENY+=("$_LEASE_COMMON")
+    if [ "$CLASS" = edit ]; then DENY+=("$_LEASE_LEDGER"); fi
+  fi
+  if [ "$CLASS" = read ]; then DENY+=("$(pwd -P)"); fi
+  # Expanded only when set: outside a git repository the edit class has none.
+  if [ "${#DENY[@]}" -gt 0 ]; then
+    _claude_lane_argv "$CLASS" "$MODEL" "$EFFORT" "" "${DENY[@]}" || return 1
+  else
+    _claude_lane_argv "$CLASS" "$MODEL" "$EFFORT" "" || return 1
+  fi
+  echo "dispatch_role: claude -p (${CLASS} class) agent=${AGENT_NAME} model=${MODEL:-<default>} effort=${EFFORT:-<default>}" >&2
+  _adapter_env claude "$TOBIN" -k 10s "${TIMEOUT}s" "${_LEASE_LANE_ARGV[@]}" "$PROMPT" < /dev/null > "$OUT" 2> "${OUT}.err" || RC=$?
+  _lease_claude_envelope "$OUT" "${OUT}.err" || true
+  if [ "$RC" -ne 0 ]; then
+    _classify_invoke_failure "$RC" "$OUT"
+    echo "dispatch_role: claude -p agent=${AGENT_NAME} exit=${RC} class=${INVOKE_FAILURE_CLASS} (see ${OUT})" >&2
+  fi
+  return "$RC"
 }
 
 # Cache file for ensure_core_trio_live — bash keeps $$ at the sourcing
@@ -350,6 +412,754 @@ TRIO_ROWS_EOF
 
 
 # ---------------------------------------------------------------------------
+# The lead (KTD1 — R1, R38, R40, R44) — [lead] in ops/roster.toml
+# ---------------------------------------------------------------------------
+#
+# [lead] names the CLI that leads this checkout: cli, model, effort. A CLI can
+# lead when its registry entry carries the KTD1 lead fields
+# (scripts/lib/registry.sh: Claude Code and Codex, the Key Decision), and no
+# [lead] table means claude (R40). Lead behavior is those fields plus the
+# runtime capabilities resolve_lead_caps prints: outside this file and
+# registry.sh, code reads fields (lead_field) and never branches on the lead's
+# name (the KTD1 gate in scripts/validate-skills.sh). The CLI-specific facts
+# left — which host markers each lead sets, how each one runs hooks — are
+# decided here.
+#
+# The table is read from the checkout's roster: ops/roster.toml under the
+# nearest ancestor holding .git (_lead_roster_path), the same directory whose
+# ops/leases.toml the lease helpers use, so a helper run from a subdirectory
+# sees the same lead. The readers exit as resolve_role does: 3 no TOML parser,
+# 4 malformed roster, 5 an invalid [lead] (a CLI that cannot lead, a value that
+# is not a table, an unknown key, an effort outside the enum).
+
+# _LEAD_PY — the python the readers, resolve_role's load validation and the
+# writer splice (single-quoted: double quotes only inside, no apostrophes).
+# lead_load(roster, reject) returns (cli, model, effort, explicit). A [lead]
+# that leaves out model gets its CLI's registry model; one that leaves out
+# effort gets LEAD_DEFAULT_EFFORT (Codex runs at xhigh, D-021; a Claude lead
+# keeps the session default, "").
+_LEAD_PY='
+LEAD_DEFAULT_CLI = "claude"
+LEAD_DEFAULT_EFFORT = {"codex": "xhigh"}
+LEAD_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+LEAD_KEYS = ("cli", "model", "effort")
+
+def lead_capable():
+    return [c for c, e in CLIS.items() if isinstance(e.get("lead"), dict) and e["lead"]]
+
+def lead_toml(who):
+    try:
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib
+        except ImportError:
+            sys.stderr.write(who + ": ERROR no TOML parser available, so ops/roster.toml and its [lead] table cannot be read (a missing parser, not a missing lead capability). Fix: use Python 3.11+ (tomllib) or run: pip install tomli\n")
+            sys.exit(3)
+    return tomllib
+
+def lead_roster(tomllib, path, who):
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        sys.stderr.write(who + ": ERROR malformed " + path + ": " + str(exc) + "\n")
+        sys.exit(4)
+
+def lead_reject(who, path, msg):
+    sys.stderr.write(who + ": ERROR invalid " + path + ": " + msg + "\n")
+    sys.exit(5)
+
+def lead_load(roster, reject):
+    if "lead" not in roster:
+        return LEAD_DEFAULT_CLI, CLIS[LEAD_DEFAULT_CLI]["model"], LEAD_DEFAULT_EFFORT.get(LEAD_DEFAULT_CLI, ""), False
+    t = roster["lead"]
+    if not isinstance(t, dict):
+        reject("[lead] must be a table (cli, model, effort), got a " + type(t).__name__)
+    for k in t:
+        if k not in LEAD_KEYS:
+            reject("[lead] has an unknown key " + repr(k) + " (valid: " + ", ".join(LEAD_KEYS) + ")")
+    cli = t.get("cli", LEAD_DEFAULT_CLI)
+    capable = lead_capable()
+    if not isinstance(cli, str) or cli not in capable:
+        reject("[lead] cli = " + repr(cli) + " cannot lead: the lead is one of " + ", ".join(capable) + " (the CLIs with enforceable headless hooks and permission control)")
+    model = t.get("model", CLIS[cli]["model"])
+    if not isinstance(model, str):
+        reject("[lead] model must be a string, got a " + type(model).__name__)
+    effort = t.get("effort", LEAD_DEFAULT_EFFORT.get(cli, ""))
+    if not isinstance(effort, str) or (effort and effort not in LEAD_EFFORTS):
+        reject("[lead] effort must be one of " + "|".join(LEAD_EFFORTS) + " or empty (the host default), got " + repr(effort))
+    return cli, model, effort, True
+'
+
+# _ROSTER_SPLICE_PY — the text surgery behind the three roster writers
+# (roster_write_lead, roster_write_role, roster_write_member), spliced like
+# _LEAD_PY (single-quoted: double quotes only inside, no apostrophes).
+# splice_table(raw, header_re, block, keep_trailing_comments) replaces the
+# first table whose header line matches header_re (an uncommented header: the
+# scan for where it ends uses the same rule, so a comment never ends a table)
+# with block, up to the next line that starts with [, or appends block after a
+# blank line when there is none. keep_trailing_comments keeps the standalone
+# comment and blank lines that end the old table: they document what follows.
+# write_verified(path, new_raw, verify, who) writes new_raw beside path, loads
+# it with the caller's module-level tomllib and hands it to verify, which
+# raises when it does not hold the intended values; only then does it replace
+# path. On a failure it removes the temporary file and exits 4.
+_ROSTER_SPLICE_PY='
+def splice_table(raw, header_re, block, keep_trailing_comments):
+    lines = raw.splitlines(keepends=True)
+    hdr = re.compile(header_re)
+    top = re.compile(r"^\[")
+    start = None
+    for i, ln in enumerate(lines):
+        if hdr.match(ln):
+            start = i
+            break
+    if start is None:
+        new_raw = raw
+        if new_raw and not new_raw.endswith("\n"):
+            new_raw += "\n"
+        if new_raw and not new_raw.endswith("\n\n"):
+            new_raw += "\n"
+        return new_raw + block
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if top.match(lines[j]):
+            end = j
+            break
+    if keep_trailing_comments:
+        while end > start + 1 and (lines[end - 1].strip() == "" or lines[end - 1].lstrip().startswith("#")):
+            end -= 1
+    prefix = "".join(lines[:start])
+    suffix = "".join(lines[end:])
+    if prefix and not prefix.endswith("\n"):
+        prefix += "\n"
+    new_raw = prefix + block
+    if suffix.strip() and not suffix.startswith("\n"):
+        new_raw += "\n"
+    return new_raw + suffix
+
+def write_verified(path, new_raw, verify, who):
+    tmp = path + ".tmp." + str(os.getpid())
+    with open(tmp, "w") as f:
+        f.write(new_raw)
+    try:
+        with open(tmp, "rb") as f:
+            data = tomllib.load(f)
+        verify(data)
+    except Exception as exc:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        sys.stderr.write(who + ": ERROR serialized roster failed round-trip verify: " + str(exc) + "\n")
+        sys.exit(4)
+    os.replace(tmp, path)
+'
+
+# _lead_roster_path — the checkout's roster: <nearest ancestor holding .git>/
+# ops/roster.toml (physical path, no git run — like _lease_ctx's walk), or the
+# relative ops/roster.toml outside any repository.
+_lead_roster_path() {
+  local D
+  D=$(pwd -P 2>/dev/null) || D=""
+  while [ -n "$D" ]; do
+    if [ -e "${D}/.git" ] || [ -L "${D}/.git" ]; then
+      printf '%s/ops/roster.toml\n' "${D%/}"
+      return 0
+    fi
+    if [ "$D" = "/" ]; then
+      break
+    fi
+    D=${D%/*}
+    if [ -z "$D" ]; then D=/; fi
+  done
+  printf 'ops/roster.toml\n'
+}
+
+# _lead_read <who> <3|4> — resolve_lead's and roster_lead_entry's one read.
+_lead_read() {
+  RL_WHO="$1" RL_COLS="$2" RL_ROSTER="$(_lead_roster_path)" python3 -c "
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_LEAD_PY}
+who, path = os.environ['RL_WHO'], os.environ['RL_ROSTER']
+roster = lead_roster(lead_toml(who), path, who)
+cli, model, effort, explicit = lead_load(roster, lambda msg: lead_reject(who, path, msg))
+cols = [cli, model, effort]
+if os.environ['RL_COLS'] == '4':
+    cols.append('roster' if explicit else 'default')
+print('\t'.join(cols))
+"
+}
+
+# _lead_resolve — set _LEAD_RESOLVED to resolve_lead's line and _LEAD_CLI to
+# its first column, with resolve_lead's rc and stderr. Call it directly, never
+# in $(...): what it keeps would leave with the subshell. A success is kept for
+# this shell under what decides it: the directory, the roster's path and bytes
+# (_lead_roster_sig, read before and after python reads the roster, and kept
+# only when the two agree), PATH and PYTHONPATH (which python and which TOML
+# parser read it). While that key holds, resolve_lead, lead_field, lead_is and
+# the lead host check use the kept line instead of starting python again. A
+# failure is never kept: each call reads the roster again and reports it again.
+_LEAD_RESOLVED=""
+_LEAD_CLI=""
+_LEAD_RESOLVED_KEY=""
+_lead_resolve() {
+  local R S K="" RC=0
+  R=$(_lead_roster_path)
+  S=$(_lead_roster_sig "$R")
+  if [ -n "$S" ]; then K="${PWD}|${R}|${S}|${PATH:-}|${PYTHONPATH:-}"; fi
+  if [ -n "$K" ] && [ "$K" = "$_LEAD_RESOLVED_KEY" ]; then
+    return 0
+  fi
+  _LEAD_RESOLVED_KEY=""
+  _LEAD_RESOLVED=$(_lead_read resolve_lead 3) || RC=$?
+  if [ "$RC" -ne 0 ]; then
+    _LEAD_RESOLVED=""
+    _LEAD_CLI=""
+    return "$RC"
+  fi
+  _LEAD_CLI=${_LEAD_RESOLVED%%$'\t'*}
+  if [ -n "$K" ] && [ "$(_lead_roster_sig "$R")" = "$S" ]; then
+    _LEAD_RESOLVED_KEY=$K
+  fi
+  return 0
+}
+
+# _lead_roster_sig <roster> — the roster's cksum, "absent" when there is no
+# roster, nothing when one exists but can't be read (_lead_resolve then keeps
+# nothing).
+_lead_roster_sig() {
+  if [ -e "$1" ] || [ -L "$1" ]; then
+    cksum 2>/dev/null < "$1" || true
+  else
+    echo absent
+  fi
+}
+
+# resolve_lead — the lead of this checkout: cli<TAB>model<TAB>effort ([lead]
+# overlaid on the defaults; no [lead] prints claude, an empty model and
+# effort). rc 3 / 4 / 5 as described above; nothing on stderr on success.
+resolve_lead() {
+  _lead_resolve || return $?
+  printf '%s\n' "$_LEAD_RESOLVED"
+}
+
+# roster_lead_entry — what the roster configures, for at-setup:
+# cli<TAB>model<TAB>effort<TAB>roster|default (default: no [lead] table, the
+# claude default). Same rc as resolve_lead.
+roster_lead_entry() {
+  _lead_read roster_lead_entry 4
+}
+
+# lead_field <field>... — the lead's registry values, as cli_field prints them
+# for the resolved lead (lead_field lead.wait_budget_s; lead_field name
+# lead.wait_budget_s for both on one line). How code outside this file reads a
+# lead fact without naming the lead (KTD1). rc: resolve_lead's, then
+# cli_field's.
+lead_field() {
+  _lead_resolve || return $?
+  cli_field "$_LEAD_CLI" "$@"
+}
+
+# lead_is <cli> — 0 when <cli> is this checkout's lead, 1 when it is not or the
+# lead can't be resolved, so a caller asking "is this review the lead's?" fails
+# closed. The lease helpers' one comparison with the lead's CLI (U10, KTD2: a
+# lead-class pin or approval counts only while its CLI is the current lead),
+# kept here with the other lead facts (KTD1).
+lead_is() {
+  _lead_resolve 2>/dev/null || return 1
+  if [ -n "${1:-}" ] && [ "$_LEAD_CLI" = "$1" ]; then
+    return 0
+  fi
+  return 1
+}
+
+# The lead of a ledger row written before 4.0, which recorded none: 3.3.x had
+# only the Claude Code lead, so such a row reads as claude (U10).
+_LEAD_LEGACY_CLI=claude
+
+# The host markers each lead CLI puts in its tool shell (U29: CC-11, CDX-15),
+# as the refusal messages name them; _lead_host_read tests these four names.
+_LEAD_HOST_MARKERS='CLAUDECODE or CLAUDE_CODE_ENTRYPOINT for Claude Code, CODEX_THREAD_ID or CODEX_CI for Codex'
+
+# _lead_host_read — set _LEAD_HOST (no subshell) to the lead CLI this shell
+# runs under, from the host markers: claude for CLAUDECODE or
+# CLAUDE_CODE_ENTRYPOINT (Claude Code's hooks see both as well), codex for
+# CODEX_THREAD_ID or CODEX_CI, none for neither, ambiguous for both (one CLI
+# started from inside the other: neither can be told to lead). A worker of the
+# same CLI carries the same names, which is why _lead_only tests the worker
+# marker first.
+_lead_host_read() {
+  local C="" X=""
+  if [ -n "${CLAUDECODE:-}" ] || [ -n "${CLAUDE_CODE_ENTRYPOINT:-}" ]; then C=claude; fi
+  if [ -n "${CODEX_THREAD_ID:-}" ] || [ -n "${CODEX_CI:-}" ]; then X=codex; fi
+  if [ -n "$C" ] && [ -n "$X" ]; then
+    _LEAD_HOST=ambiguous
+  else
+    _LEAD_HOST=${C:-${X:-none}}
+  fi
+}
+
+# lead_host_detect — print _lead_host_read's answer: claude, codex, none or
+# ambiguous.
+lead_host_detect() {
+  local _LEAD_HOST
+  _lead_host_read
+  printf '%s\n' "$_LEAD_HOST"
+}
+
+# _lead_origin — set _LEAD_VIA and _LEAD_HOST for this shell (call it
+# directly, never in $(...)): ambiguous and ambiguous when both marker
+# families are set, before any other source can settle it; lead-session and
+# the host when one family is; tty and none when stdin is a terminal (a person
+# running the helper); test and TRIFORGE_TEST_LEAD when neither but the SELF
+# harness set both TRIFORGE_TEST_BUILDER and TRIFORGE_TEST_LEAD; none and none
+# otherwise. lease_create records _LEAD_VIA in the row (lead_via); U10's
+# approval helper stamps its records with it.
+_lead_origin() {
+  _lead_host_read
+  case "$_LEAD_HOST" in
+    ambiguous) _LEAD_VIA=ambiguous ;;
+    none)
+      if [ -t 0 ]; then
+        _LEAD_VIA=tty
+      elif [ -n "${TRIFORGE_TEST_BUILDER:-}" ] && [ -n "${TRIFORGE_TEST_LEAD:-}" ]; then
+        _LEAD_VIA=test
+        _LEAD_HOST=$TRIFORGE_TEST_LEAD
+      else
+        _LEAD_VIA=none
+      fi
+      ;;
+    *) _LEAD_VIA=lead-session ;;
+  esac
+}
+
+# _lead_origin_match <via> <host> <cli> — whether an origin (_lead_origin's,
+# or one a ledger record carries) can stand for <cli>'s lead: 0 for via=tty (a
+# person at a terminal) or via=lead-session / via=test whose host (the
+# markers' CLI, the seam's simulated lead) is <cli>; 1 for another host; 2 for
+# no origin (via=none or empty); 3 for ambiguous markers. The one origin rule
+# behind the lead host check, roster_write_lead and lease_approve (and the
+# merge gate's reading of a recorded approval); each caller words its own
+# refusal.
+_lead_origin_match() {
+  case "${1:-}" in
+    ambiguous) return 3 ;;
+    tty) return 0 ;;
+    lead-session|test)
+      if [ -n "${3:-}" ] && [ "${2:-}" = "${3:-}" ]; then return 0; fi
+      return 1
+      ;;
+  esac
+  return 2
+}
+
+# _lead_ambiguous_note — the reason every refusal of ambiguous markers gives.
+_lead_ambiguous_note() {
+  printf '%s' "both lead host marker families are set (${_LEAD_HOST_MARKERS}): one CLI was started from inside the other, so which lead this shell runs under is ambiguous, and a terminal or the SELF seam does not settle it; run it from the lead's own tool shell, or unset the other CLI's markers"
+}
+
+# _lead_host_gate <helper> — R38, called by _lead_only (common.sh) after the
+# worker-marker and lease-root checks: 0 when this shell may run a lead-owned
+# helper, else one stderr line and _RC_LEAD_ONLY. It runs under the lead's own
+# host markers, from a terminal (as the user, lead_via=tty), or under the SELF
+# seam when TRIFORGE_TEST_LEAD names the lead (_lead_origin_match). It refuses
+# under the other lead's markers (naming at-setup lead and roster_write_lead
+# <cli>, the writer it runs), under both leads' markers at once, with no
+# markers and no terminal, and when the lead can't be resolved (fail closed,
+# with the resolver's message, read by running resolve_lead once more). A pass
+# is cached in this shell for the same directory, roster bytes and origin
+# (_lead_origin's via and host: the decision's whole input), so the nested
+# calls (every _ledger_update) cost one cksum.
+_lead_host_gate() {
+  local OP=$1 ROSTER SIG="" KEY OUT RC=0 LEAD LNAME HNAME SEAM="" M=0
+  ROSTER=$(_lead_roster_path)
+  if [ -f "$ROSTER" ]; then SIG=$(cksum < "$ROSTER" 2>/dev/null || true); fi
+  _lead_origin
+  KEY="${PWD}|${ROSTER}|${SIG}|${_LEAD_VIA}|${_LEAD_HOST}"
+  if [ -n "${_LEAD_GATE_KEY:-}" ] && [ "$_LEAD_GATE_KEY" = "$KEY" ]; then
+    return 0
+  fi
+  _lead_resolve 2>/dev/null || RC=$?
+  if [ "$RC" -ne 0 ]; then
+    OUT=$(resolve_lead 2>&1) || true   # for its message; RC is the first call's
+    echo "${OP}: REFUSED — the lead could not be resolved (rc ${RC}), so whether this shell may run a lead-owned helper is unknown; fail closed (KTD1, rc ${_RC_LEAD_ONLY}): $(printf '%s' "$OUT" | tail -1)" >&2
+    return "$_RC_LEAD_ONLY"
+  fi
+  LEAD=$_LEAD_CLI
+  _lead_origin_match "$_LEAD_VIA" "$_LEAD_HOST" "$LEAD" || M=$?
+  case "$M" in
+    0) ;;
+    1)
+      LNAME=$(cli_field "$LEAD" name 2>/dev/null) || LNAME=$LEAD
+      HNAME=$(cli_field "$_LEAD_HOST" name 2>/dev/null) || HNAME=$_LEAD_HOST
+      if [ "$_LEAD_VIA" = test ]; then SEAM=" (simulated: TRIFORGE_TEST_LEAD)"; fi
+      echo "${OP}: REFUSED — this checkout's lead is ${LNAME} ([lead] cli = \"${LEAD}\" in ${ROSTER}), but this shell runs under ${HNAME}${SEAM}; run it from the ${LNAME} lead, or make ${HNAME} the lead first with at-setup lead or roster_write_lead ${_LEAD_HOST} (R38, rc ${_RC_LEAD_ONLY})" >&2
+      return "$_RC_LEAD_ONLY"
+      ;;
+    3)
+      echo "${OP}: REFUSED — $(_lead_ambiguous_note) (R38, rc ${_RC_LEAD_ONLY})" >&2
+      return "$_RC_LEAD_ONLY"
+      ;;
+    *)
+      echo "${OP}: REFUSED — no lead host markers (${_LEAD_HOST_MARKERS}) and no terminal on stdin, so nothing says this shell is the ${LEAD} lead; run it from the lead's tool shell or from a terminal (KTD1, R38, rc ${_RC_LEAD_ONLY})" >&2
+      return "$_RC_LEAD_ONLY"
+      ;;
+  esac
+  _LEAD_GATE_KEY=$KEY
+  return 0
+}
+
+# _lead_session_key — a file-name-safe key for the lead session: the lead
+# process and its start time (_lease_lead_proc in lease-wait.sh: the parent of
+# the tool shell's process group leader, so one key spans every tool call of a
+# Claude Code or Codex session) and the checkout; this shell's pid when the
+# lead process can't be read.
+_lead_session_key() {
+  local K
+  _LEAD_PID=0
+  _LEAD_STARTED=""
+  if command -v _lease_lead_proc >/dev/null 2>&1; then _lease_lead_proc; fi
+  if [ "${_LEAD_PID:-0}" -gt 0 ] 2>/dev/null; then
+    K="${_LEAD_PID}-$(printf '%s' "$_LEAD_STARTED" | cksum | cut -d' ' -f1)"
+  else
+    K="sh$$"
+  fi
+  printf '%s-%s\n' "$K" "$(_lead_roster_path | cksum | cut -d' ' -f1)"
+}
+
+# _lead_hooks_detect <cli> — "hooks_trusted.<event><TAB>present|absent<TAB>why"
+# for each event the plugin's hooks/hooks.json declares (one
+# "hooks_trusted<TAB>absent<TAB>why" line when it declares none or can't be
+# read): the runtime half of KTD1. A Claude Code lead runs an enabled plugin's
+# hooks, headless too (CC-12), so a declared event is present. A Codex lead
+# runs hooks only when `codex features list` has hooks on, the user's Codex
+# config trusts the project (read here, never written) and the project's
+# .codex/hooks.json declares the event; otherwise absent, the first unmet
+# condition as the reason. Whether a Codex lead also runs a plugin's hooks is
+# U14's to verify (CDX-16 covers workers).
+_lead_hooks_detect() {
+  local CLI=${1:-} FEAT=0 ROSTER ROOT
+  ROSTER=$(_lead_roster_path)
+  case "$ROSTER" in
+    /*) ROOT=${ROSTER%/ops/roster.toml} ;;
+    *)  ROOT=$(pwd -P 2>/dev/null || pwd) ;;
+  esac
+  if [ "$CLI" = codex ] && _codex_feature_enabled hooks; then FEAT=1; fi
+  LH_CLI="$CLI" LH_FEAT="$FEAT" LH_ROOT="${ROOT:-/}" LH_PLUGIN="${_TRIFORGE_PLUGIN_ROOT:-}/hooks/hooks.json" \
+  LH_CODEX_CFG="${CODEX_HOME:-${HOME:-}/.codex}/config.toml" python3 -c "
+import json, os, sys
+
+def declared(path):
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    hooks = data.get('hooks') if isinstance(data, dict) else None
+    return [e for e, v in hooks.items() if v] if isinstance(hooks, dict) else []
+
+events = declared(os.environ['LH_PLUGIN'])
+if not events:
+    print('hooks_trusted\tabsent\tthe plugin hooks/hooks.json declares no event or could not be read')
+    sys.exit(0)
+cli = os.environ['LH_CLI']
+every, why = '', {}
+if cli == 'claude':
+    pass
+elif cli == 'codex':
+    root = os.path.realpath(os.environ['LH_ROOT'])
+    cfg_path = os.environ['LH_CODEX_CFG']
+    if os.environ['LH_FEAT'] != '1':
+        every = 'hooks is not on in codex features list'
+    else:
+        cfg = {}
+        try:
+            try:
+                import tomllib
+            except ImportError:
+                import tomli as tomllib
+            with open(cfg_path, 'rb') as f:
+                cfg = tomllib.load(f)
+        except (ImportError, OSError, ValueError):
+            cfg = {}
+        projects = cfg.get('projects', {}) if isinstance(cfg, dict) else {}
+        projects = projects if isinstance(projects, dict) else {}
+        if not any(isinstance(v, dict) and v.get('trust_level') == 'trusted' and os.path.realpath(k) == root for k, v in projects.items()):
+            every = 'the project ' + root + ' is not trusted in ' + cfg_path
+        else:
+            local = declared(os.path.join(root, '.codex', 'hooks.json')) or []
+            for e in events:
+                if e not in local:
+                    why[e] = '.codex/hooks.json declares no ' + e + ' hook'
+else:
+    every = 'no hook detection for this lead'
+for e in events:
+    r = every or why.get(e, '')
+    print('hooks_trusted.' + e + '\t' + ('absent' if r else 'present') + '\t' + (r or 'detected'))
+"
+}
+
+# resolve_lead_caps — the lead's capabilities, one "<name><TAB><value>" line
+# each: the registry's KTD1 lead fields as cli_field formats them
+# (launch_argv, wait_budget_s, tool_vocab_read, tool_vocab_action, goal_gate,
+# ask_user, native_subagents_enforced_tools, agent_teams, plugin_root_env),
+# then hooks_trusted.<event> present|absent, detected at runtime
+# (_lead_hooks_detect) and cached for the lead session (_lead_session_key) in
+# TMPDIR. The first read in a session names every capability that is empty,
+# false or absent in one stderr NOTE; later reads in that session stay quiet
+# (R44: reported once, never skipped silently). rc: resolve_lead's (3 no TOML
+# parser, 4, 5); 2 when the registry can't be read.
+resolve_lead_caps() {
+  local LEAD TAB STATIC HOOKS KEY CACHE NEW=0 N V R MISS="" HMISS="" GROUP="" GR="" LNAME
+  TAB=$(printf '\t')
+  _lead_resolve || return $?
+  LEAD=$_LEAD_CLI
+  STATIC=$(RC_LEAD="$LEAD" python3 -c "
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_CLI_FIELD_PY}
+cli = os.environ['RC_LEAD']
+for f in CLIS[cli]['lead']:
+    print(f + '\t' + cli_value('resolve_lead_caps', cli, CLIS[cli], 'lead.' + f))
+") || return 2
+  KEY=$(_lead_session_key)
+  CACHE="${TMPDIR:-/tmp}/triforge_lead_caps_${LEAD}_${KEY}"
+  if [ -f "$CACHE" ]; then
+    HOOKS=$(cat "$CACHE" 2>/dev/null || true)
+  else
+    HOOKS=$(_lead_hooks_detect "$LEAD") || HOOKS=""
+    NEW=1
+    if printf '%s\n' "$HOOKS" > "${CACHE}.tmp.$$" 2>/dev/null; then
+      mv -f "${CACHE}.tmp.$$" "$CACHE" 2>/dev/null || true
+    fi
+  fi
+  printf '%s\n' "$STATIC"
+  # Absent hook events that share a reason (the usual case: one unmet
+  # condition) are named together, the reason once.
+  while IFS="$TAB" read -r N V R; do
+    if [ -z "$N" ]; then continue; fi
+    printf '%s\t%s\n' "$N" "$V"
+    if [ "$V" = present ]; then continue; fi
+    R=${R:-not detected}
+    if [ -n "$GROUP" ] && [ "$R" = "$GR" ]; then
+      GROUP="${GROUP}, ${N}"
+    else
+      if [ -n "$GROUP" ]; then HMISS="${HMISS}${HMISS:+, }${GROUP} (${GR})"; fi
+      GROUP=$N
+      GR=$R
+    fi
+  done <<LEAD_HOOKS_EOF
+${HOOKS}
+LEAD_HOOKS_EOF
+  if [ -n "$GROUP" ]; then HMISS="${HMISS}${HMISS:+, }${GROUP} (${GR})"; fi
+  if [ "$NEW" -eq 0 ]; then
+    return 0
+  fi
+  while IFS="$TAB" read -r N V; do
+    case "$V" in
+      ""|false) if [ -n "$N" ]; then MISS="${MISS}${MISS:+, }${N}"; fi ;;
+    esac
+  done <<LEAD_STATIC_EOF
+${STATIC}
+LEAD_STATIC_EOF
+  MISS="${MISS}${MISS:+${HMISS:+, }}${HMISS}"
+  if [ -n "$MISS" ]; then
+    LNAME=$(cli_field "$LEAD" name 2>/dev/null) || LNAME=$LEAD
+    echo "resolve_lead_caps: NOTE the ${LNAME} lead runs without: ${MISS} — reported once per lead session (R44)" >&2
+  fi
+  return 0
+}
+
+# roster_write_lead <cli> [<model> [<effort>]] [--force]
+# The single writer of [lead] (R1, R38), with roster_write_role's text surgery
+# (_ROSTER_SPLICE_PY): the [lead] block is replaced in place (a trailing
+# comment block kept) or appended, and the result must parse and load to the
+# intended values before an atomic tmp+mv. Model left out: the CLI's registry model;
+# effort left out: the lead default (xhigh for codex, the session default for
+# claude); an explicit "" is written as given.
+#
+# It runs from either lead CLI's session, a terminal or the SELF seam, never
+# from a worker or a lease root (_lead_only --any-host), and never from a
+# shell with no stated origin (via=none) or with both leads' host markers
+# (_lead_origin_match): switching the lead is the user's call in at-setup, and
+# a lead-owned helper refused under the other CLI points here. A
+# switch to another CLI refuses while the ledger holds an open lease (every
+# state but merged and failed), naming each. --force hands them over: it runs
+# only from the new lead or a terminal, stamps handover_from and handover_at on
+# every open row (_lease_mark_handover, U10), writes the table, then runs U13's
+# lead-exit sweep (lease_heartbeat_check --lead-exit) as the new lead, which
+# adopts each live builder and collects each finished one with reason=lead-exit
+# and requeue_count untouched; leases that are not building carry over as they
+# are. The same CLI with a new model or effort is not a switch.
+# rc: 0 written; 1 refused (open leases, a forced handover from elsewhere than
+# the new lead, an unreadable ledger); 2 invalid argument; 3/4 roster
+# unreadable; 45 a worker, a lease root, no stated origin or ambiguous host
+# markers; 64 usage; after a write, the sweep's own rc.
+roster_write_lead() {
+  _lead_only roster_write_lead --any-host || return $?   # never from a worker or a lease root (KTD9)
+  local CLI="" MODEL=__default__ EFFORT=__default__ FORCE=0 N=0 A TAB CAPABLE CUR RC=0 CUR_CLI="" ROSTER LEDGER OPEN="" SUMMARY="" IDS="" LIST="" NB=0 M=0 NL='
+'
+  local TRIFORGE_LEASE_ROOT="${TRIFORGE_LEASE_ROOT:-}"   # _lease_at_ledger_root may set it for the handover
+  local USAGE="roster_write_lead: usage: roster_write_lead <cli> [<model> [<effort>]] [--force]"
+  TAB=$(printf '\t')
+  for A in "$@"; do
+    case "$A" in
+      --force) FORCE=1 ;;
+      *)
+        N=$((N + 1))
+        case "$N" in
+          1) CLI=$A ;;
+          2) MODEL=$A ;;
+          3) EFFORT=$A ;;
+          *) echo "$USAGE" >&2; return 64 ;;
+        esac
+        ;;
+    esac
+  done
+  if [ -z "$CLI" ]; then
+    echo "$USAGE" >&2
+    return 64
+  fi
+  CAPABLE=$(cli_table all lead 2>/dev/null | awk -F'\t' '$2 != "" { printf "%s%s", s, $1; s = " " }') || CAPABLE=""
+  case " ${CAPABLE} " in
+    *" ${CLI} "*) ;;
+    *)
+      echo "roster_write_lead: ERROR '${CLI}' cannot lead — the lead is one of: ${CAPABLE// /, } (the CLIs with enforceable headless hooks and permission control)" >&2
+      return 2
+      ;;
+  esac
+  case "$EFFORT" in
+    __default__|""|low|medium|high|xhigh|max) ;;
+    *)
+      echo "roster_write_lead: ERROR effort must be one of low|medium|high|xhigh|max, or empty for the host default; got '${EFFORT}'" >&2
+      return 2
+      ;;
+  esac
+  # Where this runs (R38): either lead's session, a terminal or the SELF seam
+  # may switch the lead (M 0 or 1); a forced handover with open leases needs
+  # the new lead's (M 0, below).
+  _lead_origin
+  _lead_origin_match "$_LEAD_VIA" "$_LEAD_HOST" "$CLI" || M=$?
+  case "$M" in
+    3)
+      echo "roster_write_lead: REFUSED — $(_lead_ambiguous_note) (R38, rc ${_RC_LEAD_ONLY})" >&2
+      return "$_RC_LEAD_ONLY"
+      ;;
+    2)
+      echo "roster_write_lead: REFUSED — via=none: no lead host markers (${_LEAD_HOST_MARKERS}), no terminal on stdin and no SELF seam, so nothing says a lead or the user is switching the lead; run it from either lead's tool shell or from a terminal (R38, rc ${_RC_LEAD_ONLY})" >&2
+      return "$_RC_LEAD_ONLY"
+      ;;
+  esac
+  CUR=$(roster_lead_entry 2>&1) || RC=$?
+  case "$RC" in
+    0) CUR_CLI=${CUR%%"$TAB"*} ;;
+    5) echo "roster_write_lead: NOTE the current [lead] does not load ($(printf '%s' "$CUR" | tail -1)); this write replaces it" >&2 ;;
+    *) printf '%s\n' "$CUR" >&2; return "$RC" ;;
+  esac
+  ROSTER=$(_lead_roster_path)
+  if [ "$CLI" != "$CUR_CLI" ]; then
+    LEDGER="${ROSTER%roster.toml}leases.toml"
+    if ! OPEN=$(_lease_open_rows "$LEDGER"); then
+      echo "roster_write_lead: REFUSED — the lead can't switch while the lease ledger can't be read (${OPEN}); fail closed (R38)" >&2
+      return 1
+    fi
+    SUMMARY=${OPEN%%"$NL"*}
+    IDS=${OPEN#"$SUMMARY"}
+    IDS=${IDS#"$NL"}
+    LIST=${SUMMARY%%"$TAB"*}
+    NB=${SUMMARY#*"$TAB"}
+    case "$NB" in ''|*[!0-9]*) NB=0 ;; esac
+    if [ -n "$LIST" ] && [ "$FORCE" -eq 0 ]; then
+      echo "roster_write_lead: REFUSED — switching the lead from ${CUR_CLI:-an invalid [lead]} to ${CLI} while leases are open: ${LIST}. Finish or reclaim them first, or hand them over with --force from the ${CLI} lead (R38)" >&2
+      return 1
+    fi
+    if [ -n "$LIST" ] && [ "$M" -ne 0 ]; then
+      echo "roster_write_lead: REFUSED — a forced handover runs from the new lead (${CLI}) or a terminal, so the new lead adopts the building leases; this shell runs under ${_LEAD_HOST} (R38)" >&2
+      return 1
+    fi
+    if [ -n "$LIST" ]; then
+      # Every open row records the handover before [lead] changes (U10, KTD2):
+      # a lead-class pin made before it then needs the user's merge approval,
+      # with no re-pin. A stamp that can't be written stops the switch. The
+      # stamp and the lead-exit sweep below run under the lease root the
+      # ledger was last written under, beside the lead's integrity anchors.
+      _lease_ctx || return 1
+      _lease_at_ledger_root roster_write_lead || return 1
+      _lease_mark_handover "${CUR_CLI:-unknown}" "$CLI" "$IDS" || return 1
+    fi
+  fi
+  WL_ROSTER="$ROSTER" WL_CLI="$CLI" WL_MODEL="$MODEL" WL_EFFORT="$EFFORT" python3 -c "
+import json, os, re, sys
+${_TRIFORGE_CLIS_PY}
+${_LEAD_PY}
+${_ROSTER_SPLICE_PY}
+who = 'roster_write_lead'
+tomllib = lead_toml(who)
+path = os.environ['WL_ROSTER']
+cli = os.environ['WL_CLI']
+model = os.environ['WL_MODEL']
+effort = os.environ['WL_EFFORT']
+# cli and effort were checked above, before any handover stamp.
+if model == '__default__':
+    model = CLIS[cli]['model']
+if effort == '__default__':
+    effort = LEAD_DEFAULT_EFFORT.get(cli, '')
+
+raw = ''
+if os.path.isfile(path):
+    with open(path, 'r') as f:
+        raw = f.read()
+    try:
+        tomllib.loads(raw)
+    except tomllib.TOMLDecodeError as exc:
+        sys.stderr.write(who + ': ERROR malformed ' + path + ': ' + str(exc) + '\n')
+        sys.exit(4)
+
+block = ('[lead]\n'
+         'cli = ' + json.dumps(cli) + '\n'
+         'model = ' + json.dumps(model) + '\n'
+         'effort = ' + json.dumps(effort) + '\n')
+new_raw = splice_table(raw, r'^\[lead\][ \t]*$', block, True)
+
+d = os.path.dirname(path)
+if d:
+    os.makedirs(d, exist_ok=True)
+# The roster must still parse and load to these values: verify the tmp file
+# BEFORE it replaces the live roster.
+def fail(msg):
+    raise ValueError(msg)
+def verify(data):
+    got = lead_load(data, fail)
+    assert got == (cli, model, effort, True), 'the written [lead] loads as ' + repr(got)
+write_verified(path, new_raw, verify, who)
+sys.stderr.write(who + ': [lead] cli=' + cli + ' model=' + (model or '<host default>') + ' effort=' + (effort or '<host default>') + '\n')
+" || return $?
+  if [ "$FORCE" -eq 0 ]; then
+    return 0
+  fi
+  if [ "$CLI" = "$CUR_CLI" ]; then
+    echo "roster_write_lead: --force: the lead stays ${CLI}, nothing to hand over" >&2
+    return 0
+  elif [ -z "$LIST" ]; then
+    echo "roster_write_lead: --force: no open lease to hand over" >&2
+    return 0
+  fi
+  if [ "$NB" -eq 0 ]; then
+    echo "roster_write_lead: --force: no lease is building; the open ones carry over to the ${CLI} lead as they are: ${LIST}" >&2
+  else
+    echo "roster_write_lead: --force: handing ${NB} building lease(s) over to the ${CLI} lead (lease_heartbeat_check --lead-exit); the open ones: ${LIST}" >&2
+    lease_heartbeat_check --lead-exit || return $?
+  fi
+  return 0
+}
+
+
+# ---------------------------------------------------------------------------
 # Enrollment (R37/R39) — onboarding optional roster members
 # ---------------------------------------------------------------------------
 #
@@ -380,9 +1190,9 @@ TRIO_ROWS_EOF
 # is the registry's install field (the surface /cli-watch re-checks each cycle).
 
 # roster_member_default <cli> — print the shipped default model (D-020..D-025):
-# the registry's model field; claude is intentionally empty (the shell claude
-# -p lane runs the host default model; the Fable/ladder override is an
-# Agent-tool subagent concern, not this lane). rc 2 for an unknown cli.
+# the registry's model field; claude is intentionally empty (the claude -p
+# lane runs Claude Code's own default model; the Fable/ladder override is the
+# lead's spawn-time choice, not this lane's). rc 2 for an unknown cli.
 roster_member_default() {
   local CLI=${1:?usage: roster_member_default <cli>} MODEL=""
   if ! MODEL=$(cli_field "$CLI" model 2>/dev/null); then
@@ -520,7 +1330,7 @@ print(str(entry['cli']) + '\t' + str(entry['model']) + '\t' + str(entry['effort'
 # function carries no defaults copy of its own): the new primary is removed
 # (the displaced primary becomes the first fallback) and 'claude' is appended
 # if the result would not terminate at a core member. Model may be empty
-# (builder's shell lane runs the host default Claude model by design).
+# (the claude -p builder lane runs Claude Code's own default model by design).
 roster_write_role() {
   _lead_only roster_write_role || return $?   # workers never write the roster (KTD9, common.sh)
   local ROLE=${1:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
@@ -540,6 +1350,8 @@ roster_write_role() {
 import json, os, re, sys
 ${_CURSOR_ID_PY}
 ${_TRIFORGE_CLIS_PY}
+${_LEAD_PY}
+${_ROSTER_SPLICE_PY}
 try:
     import tomllib
 except ImportError:
@@ -550,12 +1362,12 @@ except ImportError:
         sys.exit(3)
 
 # The known CLIs and the core set come from the spliced registry (CLIS), the
-# same source resolve_role validates against. Role names are validated by the
-# roster_role_entry call in the shell wrapper; the current merged chain arrives
-# via WR_CUR_* so no role-defaults copy lives here.
+# same source resolve_role validates against; the effort enum is _LEAD_PY's
+# (LEAD_EFFORTS), the one roster_write_lead writes against. Role names are
+# validated by the roster_role_entry call in the shell wrapper; the current
+# merged chain arrives via WR_CUR_* so no role-defaults copy lives here.
 CORE_TRIO = tuple(c for c, e in CLIS.items() if e['tier'] == 'core')
 KNOWN = tuple(CLIS)
-EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
 
 path = os.environ['ROSTER_FILE']
 role = os.environ['WR_ROLE']
@@ -567,8 +1379,8 @@ fb_arg = os.environ['WR_FALLBACKS']
 if cli not in KNOWN:
     sys.stderr.write('roster_write_role: ERROR unknown CLI ' + repr(cli) + ' (known: ' + ', '.join(KNOWN) + ')\n')
     sys.exit(2)
-if effort not in EFFORTS:
-    sys.stderr.write('roster_write_role: ERROR effort must be one of ' + '|'.join(EFFORTS) + ', got ' + repr(effort) + '\n')
+if effort not in LEAD_EFFORTS:
+    sys.stderr.write('roster_write_role: ERROR effort must be one of ' + '|'.join(LEAD_EFFORTS) + ', got ' + repr(effort) + '\n')
     sys.exit(2)
 
 raw = ''
@@ -664,67 +1476,21 @@ block = ('[roles.' + role + ']\n'
          'effort = ' + json.dumps(effort) + '\n'
          'fallbacks = ' + json.dumps(fallbacks) + '\n')
 
-lines = raw.splitlines(keepends=True)
-hdr = re.compile(r'^\[roles\.' + re.escape(role) + r'\][ \t]*$')
-top = re.compile(r'^\[')
-start = None
-for i, ln in enumerate(lines):
-    if hdr.match(ln):
-        start = i
-        break
+# Trailing standalone comment/blank lines after the table's last key are
+# documentation for what FOLLOWS (e.g. the optional-members guidance block
+# after [roles.documenter]): they survive the replace.
+new_raw = splice_table(raw, r'^\[roles\.' + re.escape(role) + r'\][ \t]*$', block, True)
 
-if start is not None:
-    end = len(lines)
-    for j in range(start + 1, len(lines)):
-        if top.match(lines[j]):
-            end = j
-            break
-    # Trailing standalone comment/blank lines after the table's last key are
-    # documentation for what FOLLOWS (e.g. the optional-members guidance block
-    # after [roles.documenter]) — walk end back so they survive the replace.
-    while end > start + 1 and (lines[end - 1].strip() == '' or lines[end - 1].lstrip().startswith('#')):
-        end -= 1
-    prefix = ''.join(lines[:start])
-    suffix = ''.join(lines[end:])
-    if prefix and not prefix.endswith('\n'):
-        prefix += '\n'
-    new_raw = prefix + block
-    if suffix.strip():
-        if not suffix.startswith('\n'):
-            new_raw += '\n'
-        new_raw += suffix
-    else:
-        new_raw += suffix
-else:
-    new_raw = raw
-    if new_raw and not new_raw.endswith('\n'):
-        new_raw += '\n'
-    if new_raw and not new_raw.endswith('\n\n'):
-        new_raw += '\n'
-    new_raw += block
-
-tmp = path + '.tmp.' + str(os.getpid())
-with open(tmp, 'w') as f:
-    f.write(new_raw)
 # The roster MUST stay tomllib-parseable AND reflect our values after every
 # write — verify the tmp file BEFORE it replaces the live roster.
-try:
-    with open(tmp, 'rb') as f:
-        data = tomllib.load(f)
+def verify(data):
     r = data.get('roles', {}).get(role, {})
     assert isinstance(r, dict), 'roles.' + role + ' is not a table after write'
     assert r.get('cli') == cli, 'cli mismatch after write'
     assert str(r.get('model', '')) == model, 'model mismatch after write'
     assert r.get('effort') == effort, 'effort mismatch after write'
     assert r.get('fallbacks') == fallbacks, 'fallbacks mismatch after write'
-except Exception as exc:
-    try:
-        os.unlink(tmp)
-    except OSError:
-        pass
-    sys.stderr.write('roster_write_role: ERROR serialized roster failed round-trip verify: ' + str(exc) + '\n')
-    sys.exit(4)
-os.replace(tmp, path)
+write_verified(path, new_raw, verify, 'roster_write_role')
 sys.stderr.write('roster_write_role: [roles.' + role + '] cli=' + cli + ' model=' + (model or '<host default>') + ' effort=' + effort + ' fallbacks=' + ','.join(fallbacks) + '\n')
 "
 }
@@ -800,6 +1566,7 @@ roster_write_member() {
   ROSTER_FILE="ops/roster.toml" RW_CLI="$CLI" RW_ENABLED="$ENABLED" RW_MODEL="$MODEL" RW_TAG="$TAG" python3 -c "
 import json, os, re, sys
 ${_TRIFORGE_CLIS_PY}
+${_ROSTER_SPLICE_PY}
 try:
     import tomllib
 except ImportError:
@@ -837,63 +1604,17 @@ raw = ''
 if os.path.isfile(path):
     with open(path, 'r') as f:
         raw = f.read()
-lines = raw.splitlines(keepends=True)
+# The whole old table goes, its trailing comment lines included.
+new_raw = splice_table(raw, r'^\[members\.' + re.escape(cli) + r'\][ \t]*$', block, False)
 
-# An UNcommented header only: '# [members.x]' must not match (top scan below
-# uses the same rule so a comment never ends a block).
-hdr = re.compile(r'^\[members\.' + re.escape(cli) + r'\][ \t]*$')
-top = re.compile(r'^\[')
-start = None
-for i, ln in enumerate(lines):
-    if hdr.match(ln):
-        start = i
-        break
-
-if start is not None:
-    end = len(lines)
-    for j in range(start + 1, len(lines)):
-        if top.match(lines[j]):
-            end = j
-            break
-    prefix = ''.join(lines[:start])
-    suffix = ''.join(lines[end:])
-    if prefix and not prefix.endswith('\n'):
-        prefix += '\n'
-    new_raw = prefix + block
-    if suffix.strip():
-        if not suffix.startswith('\n'):
-            new_raw += '\n'
-        new_raw += suffix
-    else:
-        new_raw += suffix
-else:
-    new_raw = raw
-    if new_raw and not new_raw.endswith('\n'):
-        new_raw += '\n'
-    if new_raw and not new_raw.endswith('\n\n'):
-        new_raw += '\n'
-    new_raw += block
-
-tmp = path + '.tmp.' + str(os.getpid())
-with open(tmp, 'w') as f:
-    f.write(new_raw)
 # The roster MUST stay tomllib-parseable AND reflect our values after every
 # write — verify the tmp file BEFORE it replaces the live roster.
-try:
-    with open(tmp, 'rb') as f:
-        data = tomllib.load(f)
+def verify(data):
     m = data.get('members', {}).get(cli, {})
     assert isinstance(m, dict), 'members.' + cli + ' is not a table after write'
     assert m.get('enabled') == (enabled == 'true'), 'enabled mismatch after write'
     assert str(m.get('model', '')) == model, 'model mismatch after write'
-except Exception as exc:
-    try:
-        os.unlink(tmp)
-    except OSError:
-        pass
-    sys.stderr.write('roster_write_member: ERROR serialized roster failed round-trip verify: ' + str(exc) + '\n')
-    sys.exit(4)
-os.replace(tmp, path)
+write_verified(path, new_raw, verify, 'roster_write_member')
 sys.stderr.write('roster_write_member: [members.' + cli + '] enabled=' + enabled + ' model=' + (model or '<none>') + ' enrolled=' + tag + '\n')
 "
 }
