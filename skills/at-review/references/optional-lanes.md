@@ -1,10 +1,11 @@
 # Optional reviewer lanes (roster-driven)
 
-The core-trio swarm (Antigravity + Codex) is the shipped default and always runs. In addition, dispatch a reviewer lane for every **enrolled optional member** (`[members.<cli>] enabled = true` in `ops/roster.toml`) AND for any optional CLI named as the **primary `reviewer`** via `[roles.reviewer] cli = "<optional>"`. Each writes `ops/REVIEW_<CLI>.md`; `findings-synthesizer` globs `ops/REVIEW_*.md`, so these lanes are merged automatically when present. Members that are absent or declined are skipped silently (AE1). `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it).
+The core-trio swarm (Antigravity + Codex) is the shipped default and always runs. In addition, dispatch a reviewer lane for every **enrolled optional member** (`[members.<cli>] enabled = true` in `ops/roster.toml`) AND for any optional CLI named as the **primary `reviewer`** via `[roles.reviewer] cli = "<optional>"`. Each writes `ops/REVIEW_<CLI>.md` and is added to the cycle's lane list in `$REVIEW_RUN` (set it to the run directory the dispatch block printed), so synthesis treats a dispatched lane that left no file as a gap. Members that are absent or declined are skipped silently (AE1). `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it).
 
 ```bash
 set -euo pipefail
 ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
+: "${REVIEW_RUN:?set REVIEW_RUN to the run directory the dispatch block printed}"
 
 # Read the reviewer-role primary so a [roles.reviewer] cli="<optional>" override
 # runs that optional CLI as the primary reviewer even if it is not in the
@@ -24,6 +25,7 @@ for OCLI in opencode kimi cursor; do
   fi
   OMODEL=$(_roster_member_field "$OCLI" model 2>/dev/null || true)   # empty -> helper's shipped default
   UP=$(printf '%s' "$OCLI" | tr '[:lower:]' '[:upper:]')
+  printf 'ops/REVIEW_%s.md\n' "$UP" >> "$REVIEW_RUN/lanes"   # dispatched: synthesis expects its file
   OOUT="${TMPDIR:-/tmp}/${OCLI}_review_$$_$(date +%s).txt"
   ORC=0
   case "$OCLI" in

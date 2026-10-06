@@ -128,9 +128,10 @@
 #   KTD21 the persona home (R14): every personas/*.md (a kebab-case name that
 #        is not a tool class) has a [personas.<name>] entry in
 #        personas/manifest.toml and every entry a file; each entry carries
-#        exactly class (read, read-web, exec, lease, agent-team), tier
-#        (top, opus-xhigh, opus-high, sonnet-high), never_downgrade (boolean;
-#        true needs tier top) and max_turns (positive integer); the
+#        exactly class (read, read-web, exec, lease, agent-team), tier (a
+#        rung of TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh, read from
+#        it: "top" for the first, <model>-<effort> for the others; KTD22),
+#        never_downgrade (boolean; true needs tier top) and max_turns (positive integer); the
 #        never_downgrade set equals the personas TRIFORGE_MODEL_LADDER in
 #        scripts/lib/registry.sh names after "Never downgrade" (a skip: line
 #        when the literal has no such list). Every persona a skill names in
@@ -269,12 +270,12 @@ COMPARISON = re.compile(r"(?:\[\[?|\btest\b)\s+(?P<left>.+?)\s+(?P<op>==?|!=|=~)
 LEAD_LITERAL = re.compile(r"""^["']?(?:codex|claude)\*?["']?$""")
 FENCE_OPEN = re.compile(r"^( {0,3})(`{3,}|~{3,})(.*)$")
 PERSONA_CLASSES = ("read", "read-web", "exec", "lease", "agent-team")
-PERSONA_TIERS = ("top", "opus-xhigh", "opus-high", "sonnet-high")  # the ladder's rungs, top first (KTD22)
 PERSONA_FIELDS = ("class", "tier", "never_downgrade", "max_turns")
 PERSONA_CALL = re.compile(r"(?<![\w-])(?:dispatch_persona|persona_prompt)\s+[\"']?([A-Za-z0-9][A-Za-z0-9_.-]*)")
 PERSONA_PROSE = re.compile(r"`([a-z0-9]+(?:-[a-z0-9]+)*)` personas?\b")
 PERSONA_PATH = re.compile(r"(?<![\w.-])personas/[A-Za-z0-9_.-]+\.(?:md|toml)\b")
 LADDER_TRIO = re.compile(r"^TRIFORGE_MODEL_LADDER='[^']*?Never downgrade ([^.']+)\.", re.M)
+LADDER_LITERAL = re.compile(r"^TRIFORGE_MODEL_LADDER='([^']*)'", re.M)
 
 # --- findings ------------------------------------------------------------------
 F = []      # (severity, path, id, message)
@@ -1005,6 +1006,27 @@ def load_manifest(path):
     return personas
 
 
+def ladder_tiers(registry):
+    """The persona tiers, top first, read from TRIFORGE_MODEL_LADDER (KTD22: one
+    source, never restated): rungs split on arrows, each naming its model and
+    effort as its first two backticked words; the first rung is "top", every
+    other is <model>-<effort>, the parse scripts/lib/persona.sh uses. None when
+    the file or the literal is missing or the rungs do not parse."""
+    if not os.path.isfile(registry):
+        return None
+    m = LADDER_LITERAL.search(read_text(registry))
+    if not m:
+        return None
+    rungs = m.group(1).partition(":")[2].partition("Never downgrade")[0].split("\u2192")
+    names = []
+    for i, rung in enumerate(rungs):
+        ticks = re.findall(r"`([^`]+)`", rung)
+        if len(ticks) < 2:
+            return None
+        names.append("top" if i == 0 else ticks[0] + "-" + ticks[1])
+    return tuple(names) if len(names) >= 2 and len(set(names)) == len(names) else None
+
+
 def check_personas(root, dirs):
     """C26 and KTD21 over the persona home: personas/*.md and personas/manifest.toml."""
     home = os.path.join(root, "personas")
@@ -1031,6 +1053,12 @@ def check_personas(root, dirs):
             new(path, "KTD21", "persona named after a tool class (" + ", ".join(PERSONA_CLASSES) + ")")
 
     # KTD21 — one manifest entry per persona file, every field valid.
+    # The tiers are the ladder's rungs (KTD22): this tree's registry, or the
+    # shipped one for a fixture that carries none.
+    tiers = (ladder_tiers(os.path.join(root, "scripts", "lib", "registry.sh"))
+             or ladder_tiers(os.path.join(REPO, "scripts", "lib", "registry.sh")))
+    if not tiers:
+        new(manifest, "KTD21", "TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh does not parse as rungs; no tier can be checked")
     entries = {}
     if os.path.exists(manifest):
         entries = load_manifest(manifest)
@@ -1052,8 +1080,8 @@ def check_personas(root, dirs):
             new(manifest, "KTD21", where + "unexpected key '" + key + "' (allowed: " + ", ".join(PERSONA_FIELDS) + ")")
         if "class" in entry and entry["class"] not in PERSONA_CLASSES:
             new(manifest, "KTD21", where + "class '" + str(entry["class"]) + "' (allowed: " + ", ".join(PERSONA_CLASSES) + ")")
-        if "tier" in entry and entry["tier"] not in PERSONA_TIERS:
-            new(manifest, "KTD21", where + "tier '" + str(entry["tier"]) + "' (allowed, top first: " + ", ".join(PERSONA_TIERS) + ")")
+        if "tier" in entry and tiers and entry["tier"] not in tiers:
+            new(manifest, "KTD21", where + "tier '" + str(entry["tier"]) + "' (the ladder's rungs, top first: " + ", ".join(tiers) + ")")
         if "never_downgrade" in entry and not isinstance(entry["never_downgrade"], bool):
             new(manifest, "KTD21", where + "never_downgrade must be true or false")
         turns = entry.get("max_turns")

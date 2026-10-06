@@ -300,7 +300,7 @@ Antigravity CLI ships its own plugin system (`agy plugin {install,uninstall,list
 
 ## Personas
 
-The 19 personas live in `personas/`: one prompt file each, with no frontmatter, and one manifest, `personas/manifest.toml`. A skill names a persona, and `dispatch_persona <persona> <input> <out> [--at task:<id>|ref:<git-ref>]` runs it with the tool class, model tier and turn budget from its manifest entry, under either lead. `<input>` is always a file: a brief the skill writes, the collect-snapshot diff or a bug report. `<out>` is the report file the call writes. An `exec` persona runs in a disposable worktree at the `--at` target, `ref:HEAD` by default. `pr-comment-resolver` and `team-lead` are the exceptions. The first edits code, so its work runs as a lease; the second runs only as a Claude agent-team teammate.
+The 19 personas live in `personas/`: one prompt file each, with no frontmatter, and one manifest, `personas/manifest.toml`. A skill names a persona, and `dispatch_persona <persona> <input> <out> [--at task:<id>|ref:<git-ref>] [--brief <text>]` runs it with the tool class, model tier and turn budget from its manifest entry, under either lead. `<input>` is the material under review, read as data: a file (the collect-snapshot diff, a scope, a bug report), or `task:<id>`, the lease's recorded snapshot diff as `persona_snapshot_diff` writes it. For an `exec` persona, a bare `<id>` or `task:<id>` input also runs it at that snapshot, the same as `--at task:<id>`. The skill's own instructions go in `--brief`, never in the input. `<out>` is the report file the call writes. An `exec` persona otherwise runs in a disposable worktree at the `--at` target, `ref:HEAD` by default, which holds committed work only. `pr-comment-resolver` and `team-lead` are the exceptions. The first edits code, so its work runs as a lease; the second runs only as a Claude agent-team teammate.
 
 ### Core workflow personas
 
@@ -342,13 +342,17 @@ dispatch_persona plan-checker ops/TASKS.md "$TMPDIR/plan-check.md"
 
 # Security review, Phase 3, in the background next to the Antigravity and Codex
 # lanes: the input is the review package (diff, task rows, contracts slice)
-dispatch_persona security-sentinel "$TMPDIR/review-package.md" "$TMPDIR/review-security.md" &
+dispatch_persona security-sentinel "$TMPDIR/review-package.md" "$TMPDIR/review-security.md" \
+  --brief "Review the change in the input" &
 
-# Knowledge search before planning: the input is a brief file the lead wrote
-dispatch_persona learnings-researcher "$TMPDIR/learnings-brief.md" "$TMPDIR/learnings.md"
+# Knowledge search before planning: the goal is the input, the task the brief
+dispatch_persona learnings-researcher "$TMPDIR/goal.md" "$TMPDIR/learnings.md" \
+  --brief "Search ops/solutions/ and ops/decisions/ for patterns relevant to the goal in the input"
 
-# Between waves: an exec persona, run in a disposable worktree at the integration branch
-dispatch_persona integration-verifier "$TMPDIR/verify-brief.md" "$TMPDIR/verify.md" --at "ref:$INTEGRATION_BRANCH"
+# Between waves: the lead's build, test and lint output is the input; the exec
+# persona inspects the integration branch in a disposable worktree
+dispatch_persona integration-verifier "$TMPDIR/build-test-output.txt" "$TMPDIR/verify.md" \
+  --at "ref:$INTEGRATION_BRANCH" --brief "Judge the captured output; an environment failure is NEEDS_CONTEXT"
 ```
 
 ---
@@ -433,7 +437,7 @@ PID2=$!
 wait $PID1 $PID2
 ```
 
-After Phase 0 completes, read the updated ops/ files. Optionally run the research-synthesizer agent to merge findings if multiple research sources were consulted.
+After Phase 0 completes, read the updated ops/ files. Optionally run the research-synthesizer persona through `dispatch_persona` to merge findings if multiple research sources were consulted.
 
 Skip Phase 0 when:
 - The codebase has not changed since the last sprint
@@ -442,11 +446,11 @@ Skip Phase 0 when:
 
 ## Pre-planning: Search institutional knowledge
 
-Before planning, run the learnings-researcher agent to search ops/solutions/ and ops/decisions/ for relevant past patterns:
+Before planning, run the learnings-researcher persona to search ops/solutions/ and ops/decisions/ for relevant past patterns. The goal goes in the input file, as data; the task goes in `--brief`:
 
 ```
-Spawn learnings-researcher agent with:
-"Search institutional knowledge for patterns relevant to: [goal description]"
+dispatch_persona learnings-researcher <goal file> <out> \
+  --brief "Search institutional knowledge for patterns relevant to the goal in the input"
 ```
 
 This prevents re-investigating known issues and repeating rejected approaches.
@@ -469,7 +473,7 @@ When given a high-level goal:
 
 Before building, validate the plan:
 
-1. Spawn the plan-checker agent
+1. Run the plan-checker persona: `dispatch_persona plan-checker ops/TASKS.md <out>`
 2. The plan-checker reviews TASKS.md against ARCHITECTURE.md, CONTRACTS.md, and MEMORY.md
 3. If issues found: fix and re-submit (max 3 iterations)
 4. Only proceed to Phase 2 when plan-checker returns APPROVED
@@ -688,13 +692,13 @@ The full lifecycle for a goal follows these phases:
 
 ```
 Phase 0:   Codebase analysis (Antigravity with codebase-mapping skill)
-Pre-Plan:  Search institutional knowledge (learnings-researcher agent)
+Pre-Plan:  Search institutional knowledge (learnings-researcher persona)
 Phase 1:   Planning with shadow paths and interface context (writing-plans skill)
-Phase 1.5: Plan validation (plan-checker agent)
+Phase 1.5: Plan validation (plan-checker persona)
 Phase 2:   Build — subagent mode OR agent team mode with wave orchestration
 Phase 3:   Parallel review — Antigravity + Codex + the review personas
-Phase 4:   Process reviews — findings-synthesizer agent, iterative-refinement skill
-Phase 5:   Test — Codex test_writer (failing test first), test-gap-analyzer agent
+Phase 4:   Process reviews — findings-synthesizer persona, iterative-refinement skill
+Phase 5:   Test — Codex test_writer (failing test first), test-gap-analyzer persona
 Phase 6:   Wrap up — knowledge compounding, session continuity, completion sentinel
 ```
 
@@ -709,7 +713,7 @@ Skip Phase 0 when:
 
 ### Pre-planning: Search institutional knowledge
 
-Spawn the learnings-researcher agent to search ops/solutions/ and ops/decisions/ for relevant past patterns. This prevents re-investigating known issues and repeating rejected approaches.
+Run the learnings-researcher persona through `dispatch_persona` to search ops/solutions/ and ops/decisions/ for relevant past patterns. This prevents re-investigating known issues and repeating rejected approaches.
 
 ### Phase 1: Planning with shadow paths
 
@@ -729,7 +733,7 @@ When given a high-level goal, follow the writing-plans skill:
 
 Before building:
 
-1. Spawn the plan-checker agent
+1. Run the plan-checker persona: `dispatch_persona plan-checker ops/TASKS.md <out>`
 2. It reviews TASKS.md against ARCHITECTURE.md, CONTRACTS.md, MEMORY.md
 3. Checks: task completeness, assignment correctness, dependency validity, scope, shadow path coverage
 4. If NEEDS_REVISION: fix issues and re-submit (max 3 iterations)
@@ -777,7 +781,7 @@ Each builder receives (injected into the dispatch prompt — the contract keeps 
 #### Agent team mode (complex builds)
 
 ```
-1. Spawn team-lead agent
+1. Spawn the team-lead persona as an agent-team teammate (Claude only; `persona_prompt team-lead` gives its text)
 2. Team-lead reads plan, groups tasks into waves
 3. Team-lead assigns each task to a builder resolved from ops/roster.toml, dispatched under a lease, and pins a non-author reviewer per task
 4. Builders run confined in worktrees; the team-lead injects context and does all merges on the main tree (KTD-3)
@@ -1098,7 +1102,7 @@ YOU
 │ ├── Group tasks into waves                                     │
 │ └── Write TASKS.md                                             │
 │                                                                │
-│ Phase 1.5: PLAN VALIDATION (plan-checker agent)                │
+│ Phase 1.5: PLAN VALIDATION (plan-checker persona)              │
 │ ├── Validate assignments, dependencies, scope, shadow paths    │
 │ └── Max 3 iterations until APPROVED                            │
 │                                                                │
@@ -1119,13 +1123,13 @@ YOU
 │ Phase 3: PARALLEL REVIEW                                       │
 │ ├── invoke_antigravity "architecture-reviewer" & ── AGY_PID   │
 │ ├── invoke_codex "logic_reviewer" &       ── CODEX_PID        │
-│ ├── Claude: security-sentinel agent ── parallel                │
-│ ├── Claude: performance-oracle agent ── parallel               │
-│ └── Claude: code-simplicity-reviewer ── parallel               │
+│ ├── security-sentinel persona ── parallel                      │
+│ ├── performance-oracle persona ── parallel                     │
+│ └── code-simplicity-reviewer persona ── parallel               │
 │     │                                                          │
 │     ▼ (wait for all)                                           │
 │                                                                │
-│ Phase 4: PROCESS REVIEWS (findings-synthesizer agent)          │
+│ Phase 4: PROCESS REVIEWS (findings-synthesizer persona)        │
 │ ├── Merge + deduplicate all findings                           │
 │ ├── Confidence tiering (HIGH/MEDIUM/LOW)                       │
 │ ├── Priority ranking (P1/P2/P3)                                │
@@ -1185,7 +1189,7 @@ claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge
 claude plugin install agent-triforge@agent-triforge
 ```
 
-The plugin provides agents, skills and hooks automatically. Your project gets an `ops/` directory (bootstrapped on first session):
+The plugin provides personas, skills and hooks automatically. Your project gets an `ops/` directory (bootstrapped on first session):
 
 ```
 agent-triforge/                     (plugin — installed automatically)
@@ -1322,7 +1326,7 @@ These sections moved here from `.claude/CLAUDE.md` on 2026-10-01, when the root 
 
 Persona files carry no frontmatter. Each persona's entry in `personas/manifest.toml` has four fields:
 - `class`: the tool class `dispatch_persona` enforces. `read` is Read, Grep and Glob; `read-web` adds WebFetch and WebSearch and runs on Claude only; `exec` is Bash with no edit tools, in a disposable worktree at the `--at` target (a lease's collect snapshot, or a git ref, `ref:HEAD` by default); `lease` means the work goes through a lease instead (`pr-comment-resolver`); `agent-team` is the Claude agent-team spawn (`team-lead`), whose tools are not enforced.
-- `tier`: the starting rung on the model ladder (`top`, `opus-xhigh`, `opus-high`, `sonnet-high`). The rungs are defined once, in `TRIFORGE_MODEL_LADDER`.
+- `tier`: the persona's starting rung on the model ladder, `top` for its first rung and `<model>-<effort>` for each lower one. The rungs are defined once, in `TRIFORGE_MODEL_LADDER`, and the lane and the validator read their names from it.
 - `never_downgrade`: true for exactly the trio the ladder names; those three run at `top` on Claude whichever CLI leads.
 - `max_turns`: the turn budget.
 

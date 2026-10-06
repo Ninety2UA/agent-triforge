@@ -17,9 +17,10 @@
 #                                  through a lease (it edits code)
 #                      agent-team  Claude's agent_teams capability only, through
 #                                  the Agent tool (tools unenforced)
-#   tier             the starting rung on the model ladder, top first:
-#                    top | opus-xhigh | opus-high | sonnet-high. The rungs are
-#                    defined once, TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh.
+#   tier             the starting rung on the model ladder: "top" for its first
+#                    rung, <model>-<effort> for each lower one. The rungs are
+#                    defined once, TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh,
+#                    and the validator and the lane read the names from there.
 #   never_downgrade  true pins the persona to `top` on Claude whichever CLI
 #                    leads; true for exactly the trio the ladder names.
 #   max_turns        the persona's turn budget.

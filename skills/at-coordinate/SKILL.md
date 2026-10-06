@@ -32,7 +32,7 @@ At sprint start print the copyable completion line from [completion gating](refe
 
 ## Lifecycle
 
-All phases run in order; [phases](references/phases.md) carries each phase's actions and the Phase 0 dispatch with its promotion guard. Every hyphenated checker, reviewer and researcher below except `codebase-analyst` is a persona run through `dispatch_persona <persona> <input-file> <out>` from the helper: its manifest entry sets tools, model tier and turns, so a call pins nothing, and the never-downgrade trio (`plan-checker`, `security-sentinel`, `findings-synthesizer`) runs as top-tier Claude whichever CLI leads. Agent-team mode is the one harness-specific spawn, in the Claude and Codex references.
+All phases run in order; [phases](references/phases.md) carries each phase's actions and the Phase 0 dispatch with its promotion guard. Every hyphenated checker, reviewer and researcher below except `codebase-analyst` is a persona run through `dispatch_persona <persona> <input> <out> --brief <task>` from the helper (the input is data, the task rides in the brief): its manifest entry sets tools, model tier and turns, so a call pins nothing, and the never-downgrade trio (`plan-checker`, `security-sentinel`, `findings-synthesizer`) runs as top-tier Claude whichever CLI leads. Agent-team mode is the one harness-specific spawn, in the Claude and Codex references.
 
 - Phase 0: `codebase-analyst` through Antigravity (skip if unnecessary); read the updated `ops/` files after it completes. Captured output is promoted into `ops/ARCHITECTURE.md` only when non-empty with a SUCCESS status sidecar; a failed run continues without it.
 - Pre-plan: `learnings-researcher` over `ops/solutions/` and `ops/decisions/`.

@@ -1,10 +1,10 @@
 # Phase 3: the core lanes (always launched, in the background)
 
-Read `ops/TASKS.md` to determine the review scope (tasks marked `[R]`), then write the review package (the trust rules list its parts) to a file and set `REVIEW_PACKAGE` to its path: the read-class personas take that file as their scope. `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it).
+Read `ops/TASKS.md` to determine the review scope (tasks marked `[R]`), then write the review package (the trust rules list its parts) to a file and set `REVIEW_PACKAGE` to its path at the top of the block: it is the specialist personas' input, data under review. The block prints a run directory; set `REVIEW_RUN` to it in the optional-lanes, learnings and synthesis blocks, which read the list of lanes this cycle dispatched from it. The block runs the same under bash and zsh, the shell both leads' tools use on macOS. `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it).
 
 ## Contents
 
-- The dispatch block (fresh-cycle guard, roster-driven dispatch, the specialist personas, per-PID waits, promotion of captured output, the structured-verdict fold).
+- The dispatch block (the package check, fresh-cycle guard, the run directory and its lane list, roster-driven dispatch, the specialist personas, the waits, promotion of captured output, the structured-verdict fold).
 - What rc 40 means.
 
 ## The dispatch block
@@ -13,6 +13,12 @@ Read `ops/TASKS.md` to determine the review scope (tasks marked `[R]`), then wri
 set -euo pipefail
 ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
 
+# The review package (trust rules: the collect-snapshot diff, the task rows,
+# the ops/CONTRACTS.md slice, the acceptance criteria) is checked before any
+# lane starts, so a missing one cannot leave lanes running in the background.
+: "${REVIEW_PACKAGE:?write the review package to a file and set REVIEW_PACKAGE to its path first}"
+[ -s "$REVIEW_PACKAGE" ] || { echo "review: REVIEW_PACKAGE ($REVIEW_PACKAGE) is missing or empty" >&2; exit 1; }
+
 # Fresh-cycle guard (prevents stale findings surviving a fix cycle). A reviewer
 # that returns findings as stdout (headless permission auto-deny) is promoted
 # into ops/REVIEW_*.md ONLY when that file is ABSENT (the `[ ! -f ... ]` guards
@@ -20,13 +26,24 @@ ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/s
 # would survive and findings-synthesizer would read it as cycle N's result —
 # a green-while-red review that hides newly-introduced findings. Archive (not
 # delete) so each prior cycle stays auditable under ops/archive/reviews/.
-if ls ops/REVIEW_*.md >/dev/null 2>&1; then
+# find, not a glob: an unmatched glob aborts under zsh.
+if [ "$(find ops -maxdepth 1 -name 'REVIEW_*.md' 2>/dev/null | grep -c . || true)" -gt 0 ]; then
   _REV_ARCH="ops/archive/reviews/$(date +%Y%m%d-%H%M%S)-$$"
-  mkdir -p "$_REV_ARCH" && mv ops/REVIEW_*.md "$_REV_ARCH"/ 2>/dev/null || true
+  mkdir -p "$_REV_ARCH"
+  find ops -maxdepth 1 -name 'REVIEW_*.md' -exec mv {} "$_REV_ARCH"/ \;
 fi
 
-AGY_OUT="${TMPDIR:-/tmp}/antigravity_review_$$_$(date +%s).txt"
-CODEX_OUT="${TMPDIR:-/tmp}/codex_review_$$_$(date +%s).txt"
+# The run directory: the personas' outputs and exit codes, and "lanes", one
+# ops/REVIEW_*.md path per lane this cycle dispatches. Synthesis treats a lane
+# on that list whose file is missing or empty as a gap, never as no findings.
+REVIEW_RUN="${TMPDIR:-/tmp}/triforge-review.$$.$(date +%s)"
+mkdir -p "$REVIEW_RUN"
+printf '%s\n' ops/REVIEW_ANTIGRAVITY.md ops/REVIEW_CODEX.md > "$REVIEW_RUN/lanes"
+: > "$REVIEW_RUN/specialists"
+echo "review: run directory $REVIEW_RUN (set REVIEW_RUN to it in the later blocks)"
+
+AGY_OUT="$REVIEW_RUN/antigravity.txt"
+CODEX_OUT="$REVIEW_RUN/codex.txt"
 
 # Core review swarm, ROSTER-DRIVEN (R19/AE4): the analyst role (shipped default
 # Antigravity, architecture-reviewer) and the reviewer role (shipped default
@@ -51,26 +68,31 @@ CODEX_PID=$!
 # select and delete the rest (--full keeps all five; high-ceremony forces
 # --full). Each persona's manifest entry sets its tools, model tier and turns;
 # security-sentinel is in the never-downgrade trio and runs as top-tier Claude
-# whichever CLI leads, or its call fails naming the fix. Outputs land outside
-# ops/ first and are promoted (scrubbed) once every persona has finished.
-# A read-class persona's scope is an input file: REVIEW_PACKAGE is the review
-# package written before this block (trust rules: the collect-snapshot diff,
-# the task rows, the ops/CONTRACTS.md slice, the acceptance criteria).
-: "${REVIEW_PACKAGE:?write the review package to a file and set REVIEW_PACKAGE to its path first}"
-SPEC_DIR="${TMPDIR:-/tmp}/review_personas_$$_$(date +%s)"; mkdir -p "$SPEC_DIR"
-SPEC_PIDS=""
-dispatch_persona security-sentinel "$REVIEW_PACKAGE" "$SPEC_DIR/SECURITY_SENTINEL.md" & SPEC_PIDS="$SPEC_PIDS $!"
-dispatch_persona performance-oracle "$REVIEW_PACKAGE" "$SPEC_DIR/PERFORMANCE_ORACLE.md" & SPEC_PIDS="$SPEC_PIDS $!"
-dispatch_persona code-simplicity-reviewer "$REVIEW_PACKAGE" "$SPEC_DIR/CODE_SIMPLICITY_REVIEWER.md" & SPEC_PIDS="$SPEC_PIDS $!"
-dispatch_persona convention-enforcer "$REVIEW_PACKAGE" "$SPEC_DIR/CONVENTION_ENFORCER.md" & SPEC_PIDS="$SPEC_PIDS $!"
-dispatch_persona architecture-strategist "$REVIEW_PACKAGE" "$SPEC_DIR/ARCHITECTURE_STRATEGIST.md" & SPEC_PIDS="$SPEC_PIDS $!"
+# whichever CLI leads, or its call fails naming the fix. The input is the
+# package, data under review; the task is the --brief. LANE=<NAME> _spec
+# records the lane, runs the persona in the background and leaves its exit code
+# in <NAME>.rc: exit codes in files, not a PID list, because zsh does not split
+# an unquoted "$PIDS" into words.
+SPEC_BRIEF="Review the change in the input: the [R] tasks' collect-snapshot diff, their task rows, the ops/CONTRACTS.md slice and the acceptance criteria. Report findings in your output format."
+_spec() { # LANE=<NAME> _spec <command...>
+  printf '%s\n' "$LANE" >> "$REVIEW_RUN/specialists"
+  printf 'ops/REVIEW_%s.md\n' "$LANE" >> "$REVIEW_RUN/lanes"
+  ( R=0; "$@" || R=$?; printf '%s\n' "$R" > "$REVIEW_RUN/$LANE.rc" ) &
+}
+LANE=SECURITY_SENTINEL _spec dispatch_persona security-sentinel "$REVIEW_PACKAGE" "$REVIEW_RUN/SECURITY_SENTINEL.md" --brief "$SPEC_BRIEF"
+LANE=PERFORMANCE_ORACLE _spec dispatch_persona performance-oracle "$REVIEW_PACKAGE" "$REVIEW_RUN/PERFORMANCE_ORACLE.md" --brief "$SPEC_BRIEF"
+LANE=CODE_SIMPLICITY_REVIEWER _spec dispatch_persona code-simplicity-reviewer "$REVIEW_PACKAGE" "$REVIEW_RUN/CODE_SIMPLICITY_REVIEWER.md" --brief "$SPEC_BRIEF"
+LANE=CONVENTION_ENFORCER _spec dispatch_persona convention-enforcer "$REVIEW_PACKAGE" "$REVIEW_RUN/CONVENTION_ENFORCER.md" --brief "$SPEC_BRIEF"
+LANE=ARCHITECTURE_STRATEGIST _spec dispatch_persona architecture-strategist "$REVIEW_PACKAGE" "$REVIEW_RUN/ARCHITECTURE_STRATEGIST.md" --brief "$SPEC_BRIEF"
 
-# Wait per-PID so a silent failure (which would leave REVIEW_*.md empty and look
-# like "no findings") fails fast. rc 40 = resolved to the claude lane, handled
-# by a sub-agent below — NOT a failure.
+# Wait for every lane before judging any, so a failure never leaves one running.
+# A silent failure (an empty REVIEW_*.md that looks like "no findings") fails
+# fast. rc 40 = resolved to the claude lane, handled by a sub-agent below —
+# NOT a failure.
 AGY_RC=0; CODEX_RC=0
-wait $AGY_PID || AGY_RC=$?
-wait $CODEX_PID  || CODEX_RC=$?
+wait "$AGY_PID" || AGY_RC=$?
+wait "$CODEX_PID" || CODEX_RC=$?
+wait || true   # the specialist personas: every background job left
 if [ "$AGY_RC" -eq 40 ]; then
   echo "review: analyst role resolved to the claude lane — run the architecture review as a sub-agent (below), not a shell helper" >&2
 elif [ "$AGY_RC" -ne 0 ]; then
@@ -82,16 +104,14 @@ elif [ "$CODEX_RC" -ne 0 ]; then
   echo "review: reviewer (logic) reviewer failed rc=$CODEX_RC — see $CODEX_OUT" >&2; exit 1
 fi
 # A specialist persona that fails or writes nothing fails the review; it never
-# reads as "no findings". Each output becomes its own ops/REVIEW_<PERSONA>.md lane.
-for PID in $SPEC_PIDS; do
-  SPEC_RC=0; wait "$PID" || SPEC_RC=$?
-  [ "$SPEC_RC" -eq 0 ] || { echo "review: a specialist persona failed rc=$SPEC_RC — see $SPEC_DIR" >&2; exit 1; }
-done
-for F in "$SPEC_DIR"/*.md; do
-  [ -e "$F" ] || continue
-  [ -s "$F" ] || { echo "review: specialist output $F is empty" >&2; exit 1; }
-  { echo "<!-- persona output via dispatch_persona -->"; _scrub < "$F"; } > "ops/REVIEW_$(basename "$F")"
-done
+# reads as "no findings". Each output becomes its own ops/REVIEW_<NAME>.md lane.
+while read -r N; do
+  [ -n "$N" ] || continue
+  R=$(cat "$REVIEW_RUN/$N.rc" 2>/dev/null || echo missing)
+  [ "$R" = 0 ] || { echo "review: specialist $N failed rc=$R — see $REVIEW_RUN" >&2; exit 1; }
+  [ -s "$REVIEW_RUN/$N.md" ] || { echo "review: specialist $N wrote nothing — see $REVIEW_RUN" >&2; exit 1; }
+  { echo "<!-- persona output via dispatch_persona -->"; _scrub < "$REVIEW_RUN/$N.md"; } > "ops/REVIEW_$N.md"
+done < "$REVIEW_RUN/specialists"
 
 # Headless resilience: agy (and any optional-CLI primary) auto-denies file
 # writes in -p mode, so a reviewer may return findings as stdout instead of
@@ -134,4 +154,4 @@ fi
 
 ## rc 40
 
-If `AGY_RC` or `CODEX_RC` was 40, that role resolved to the claude lane (its default CLI is absent, or the roster pins `cli = "claude"`) under a lead whose sub-agents enforce their tools; under any other lead `dispatch_role` runs `claude -p` itself and returns its exit code. For the analyst lane run `dispatch_persona architecture-strategist "$REVIEW_PACKAGE" <out>` and promote `<out>` (scrubbed) into `ops/REVIEW_ANTIGRAVITY.md`; for the reviewer lane run a logic + security review as a sub-agent writing `ops/REVIEW_CODEX.md`, so `findings-synthesizer` sees both alongside the other lanes. The harness notes carry how that sub-agent is spawned.
+If `AGY_RC` or `CODEX_RC` was 40, that role resolved to the claude lane (its default CLI is absent, or the roster pins `cli = "claude"`) under a lead whose sub-agents enforce their tools; under any other lead `dispatch_role` runs `claude -p` itself and returns its exit code. For the analyst lane run `dispatch_persona architecture-strategist "$REVIEW_PACKAGE" <out> --brief "<the specialist brief>"` and promote `<out>` (scrubbed) into `ops/REVIEW_ANTIGRAVITY.md`; for the reviewer lane run a logic + security review as a sub-agent writing `ops/REVIEW_CODEX.md`, so `findings-synthesizer` sees both alongside the other lanes. The harness notes carry how that sub-agent is spawned.

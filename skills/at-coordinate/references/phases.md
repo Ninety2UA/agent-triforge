@@ -39,7 +39,7 @@ Read the updated `ops/` files after completion.
 
 ## Pre-plan: institutional knowledge
 
-Write a brief file naming the goal, then run `dispatch_persona learnings-researcher <brief file> <out>` to search `ops/solutions/` and `ops/decisions/`.
+Write the goal to a file and run `dispatch_persona learnings-researcher <goal file> <out> --brief "Search ops/solutions/ and ops/decisions/ for patterns relevant to the goal in the input."` to search `ops/solutions/` and `ops/decisions/`.
 
 ## Phase 1: planning
 
@@ -59,7 +59,7 @@ Use wave orchestration (the `wave-orchestration` skill: every task leased from `
 
 ## Phase 3: parallel review
 
-Launch Antigravity + Codex (in the background) + the review personas simultaneously (`dispatch_persona <persona> <review package file> <out>`, in the background):
+Launch Antigravity + Codex (in the background) + the review personas simultaneously (`dispatch_persona <persona> <review package file> <out> --brief "<the review task>"`, in the background):
 
 - `security-sentinel`
 - `performance-oracle`
@@ -69,11 +69,11 @@ Launch Antigravity + Codex (in the background) + the review personas simultaneou
 
 ## Phase 4: process reviews
 
-Run `dispatch_persona findings-synthesizer <brief file> <out>`, the brief naming the cycle. Apply the `iterative-refinement` skill. Fix P1 + P2. Loop if needed (max 3 cycles).
+Run `findings-synthesizer` the way the `at-review` skill's synthesis does: the expected lanes and their state as its input, the task and the expected lane files in `--brief`; a lane that is missing or empty is a gap and the cycle does not converge on it. Apply the `iterative-refinement` skill. Fix P1 + P2. Loop if needed (max 3 cycles).
 
 ## Phase 5: test
 
-Run `dispatch_persona test-gap-analyzer <brief file> <out>` (default `--at ref:HEAD`). Dispatch Codex to write tests, failing test first. Fix failures until green (max 3 cycles).
+Write the scope (the changed paths) to a file and run `dispatch_persona test-gap-analyzer <scope file> <out> --brief "Find the untested paths in the scope the input names."` at the default `--at ref:HEAD`, which sees committed work only: when the scope has uncommitted changes, stop and ask the user to commit them or name a ref, and never commit for them. Dispatch Codex to write tests, failing test first. Fix failures until green (max 3 cycles).
 
 ## Phase 6: wrap up
 

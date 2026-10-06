@@ -175,7 +175,7 @@ Safety comes from three mechanisms working together, not from restricting who ma
 
 ## Project structure
 
-The plugin provides agents, skills and hooks. Your project gets an `ops/` directory for state:
+The plugin provides personas, skills and hooks. Your project gets an `ops/` directory for state:
 
 ```
 agent-triforge/                     (plugin — installed automatically)
