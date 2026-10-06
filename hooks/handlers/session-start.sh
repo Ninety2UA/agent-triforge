@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Session Start — SessionStart hook
-# Scans for existing state, pending tasks, and available context; bootstraps
-# the project's ops/ + per-CLI files; migrates an upgraded project to the
-# current plugin layout (skills refresh, Antigravity pack reinstall, Codex file
-# move) with one notice per step. Provides orientation for the new session.
+# Scans for existing state, pending tasks, and available context; runs the
+# project bootstrap (triforge_bootstrap, scripts/lib/bootstrap.sh: ops/ +
+# per-CLI files, skills refresh, Antigravity pack reinstall, Codex file moves,
+# the plugin-root pointer) and prints its notices, one per step that acted.
+# Provides orientation for the new session.
 #
 # Hook event: SessionStart
 # Configuration: registered in hooks/hooks.json (plugin)
@@ -20,9 +21,11 @@
 #   Audited 2026-10-01: every stdout line is prose ("Multi-agent framework
 #   ready.", "session-start: …", "Roster …", "WARNING: …", "Tip: …",
 #   "Lead workflows: …");
-#   every external-CLI capture (agy plugin list / agy agents / claude
-#   --version) is consumed here and never echoed — the floor warning prints
-#   only the X.Y.Z digits parsed out of it.
+#   every external-CLI capture (claude --version here; agy plugin list / agy
+#   agents inside triforge_bootstrap) is consumed and never echoed — the floor
+#   warning prints only the X.Y.Z digits parsed out of it — and each line
+#   triforge_bootstrap prints starts with the "session-start: " prefix this hook
+#   passes it, control characters already dropped.
 # Bash 3.2 compatible (macOS /bin/bash): no associative arrays, no mapfile, no
 #   "${arr[@]}" expansion of a possibly-empty array under set -u.
 
@@ -52,10 +55,10 @@ mkdir -p .claude
 rm -f .claude/context-monitor.local.md
 
 # Timeout binary (GNU coreutils `timeout`, or `gtimeout` on macOS). Every
-# external-CLI call in this hook runs under it; when neither exists the agy and
-# `agent` probes below are SKIPPED (fail-closed, mirroring invoke-external.sh —
-# a hung CLI must not stall session start) and the warning is appended to the
-# orientation message.
+# external-CLI call in this hook and in triforge_bootstrap runs under it; when
+# neither exists the agy pack check and the `agent` probes are SKIPPED
+# (fail-closed, mirroring invoke-external.sh — a hung CLI must not stall
+# session start) and the warning is appended to the orientation message.
 TIMEOUT_BIN=""
 command -v timeout >/dev/null 2>&1 && TIMEOUT_BIN="timeout"
 [ -z "$TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && TIMEOUT_BIN="gtimeout"
@@ -64,388 +67,29 @@ if [ -z "$TIMEOUT_BIN" ]; then
   TIMEOUT_MISSING_WARNING="WARNING: neither \`timeout\` nor \`gtimeout\` found on PATH — invoke-external.sh is fail-closed and will refuse to run Antigravity/Codex invocations (this hook also skipped its agy and cursor probes). On macOS, install with: brew install coreutils"
 fi
 
-# _ss_json_version <file> — top-level "version" string of a JSON file, or ""
-# when the file is missing/unreadable. Input travels as a prefixed env var,
-# never interpolated into the python source.
-_ss_json_version() {
-  [ -f "$1" ] || return 0
-  local -a CMD=(python3 -c '
-import json, os
-try:
-    with open(os.environ["SS_JSON_FILE"], "r", encoding="utf-8") as f:
-        print(str(json.load(f).get("version", "")).strip())
-except Exception:
-    pass
-')
-  if [ -n "$TIMEOUT_BIN" ]; then
-    CMD=("$TIMEOUT_BIN" 30s "${CMD[@]}")
-  fi
-  SS_JSON_FILE="$1" "${CMD[@]}" 2>/dev/null || true
-}
-
-# _ss_run — the rest of this hook, from the ops/ bootstrap to the orientation
+# _ss_run — the rest of this hook, from the project bootstrap to the orientation
 # message, as one function: it runs inside the subshell that sources the helper
 # (the block at the end of this file) or, when the helper does not load, in the
 # hook's own shell with SS_HELPER empty. The body is the hook's linear flow and
 # stays at column 0.
 _ss_run() {
 
-# Bootstrap ops/ directory if it doesn't exist
-if [ ! -d "ops" ]; then
-  mkdir -p ops/solutions ops/decisions ops/archive
-  # Copy skeleton files from plugin templates if available
-  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-    for f in MEMORY.md CHANGELOG.md AGENTS.md GOALS.md; do
-      if [ -f "${CLAUDE_PLUGIN_ROOT}/templates/ops/${f}" ] && [ ! -f "ops/${f}" ]; then
-        cp "${CLAUDE_PLUGIN_ROOT}/templates/ops/${f}" "ops/${f}"
-      fi
-    done
-  fi
-fi
-
-# ---------------------------------------------------------------------------
-# Antigravity agent pack — install-over on version change (KTD8, R8).
-# antigravity-agents/ is a valid agy plugin; installing it registers the four
-# external agents (codebase-analyst, architecture-reviewer, targeted-researcher,
-# documentation-writer). `agy plugin list` carries no version field, so the
-# installed version is read from the managed copy agy writes at
-# $HOME/.gemini/config/plugins/agent-triforge/plugin.json and compared with the
-# shipped antigravity-agents/plugin.json; on a mismatch, or when the pack is not
-# installed, `agy plugin install <plugin-root>/antigravity-agents` runs — agy
-# ≥ 1.1.28 replaces the managed directory exactly on reinstall. Acceptance is
-# `importedAt` advancing in $HOME/.gemini/config/import_manifest.json (the
-# imports[] entry named agent-triforge) and `agy agents` listing all four names
-# (AGY-12); when the listing stays short the hook tries `agy plugin uninstall
-# agent-triforge` and installs once more. When the managed plugin.json is
-# unreadable, the version this hook last installed is read from the runtime
-# stamp .claude/agy-pack-version.local.md instead. Every agy call is wrapped in
-# the timeout binary (30 s) and failure-tolerant — nothing here aborts the hook;
-# invoke_antigravity keeps its injection fallback (TRIFORGE_AGY_MODE, KTD10)
-# whatever the outcome. Skipped entirely without a timeout binary (fail-closed).
-AGY_PACK_NOTICE=""
-AGY_PACK_AGENTS="codebase-analyst architecture-reviewer targeted-researcher documentation-writer"
-AGY_PACK_STAMP=".claude/agy-pack-version.local.md"
-
-# _ss_agy_imported_at — importedAt of the agent-triforge entry in agy's import
-# manifest, or "" when absent/unreadable.
-_ss_agy_imported_at() {
-  local MANIFEST="${HOME:-}/.gemini/config/import_manifest.json"
-  [ -f "$MANIFEST" ] || return 0
-  SS_MANIFEST="$MANIFEST" python3 -c '
-import json, os
-try:
-    with open(os.environ["SS_MANIFEST"], "r", encoding="utf-8") as f:
-        data = json.load(f)
-    imports = data.get("imports", []) if isinstance(data, dict) else data
-    for entry in imports:
-        if isinstance(entry, dict) and entry.get("name") == "agent-triforge":
-            print(str(entry.get("importedAt", "")).strip())
-            break
-except Exception:
-    pass
-' 2>/dev/null || true
-}
-
-# _ss_agy_agents_missing — shipped agent names absent from `agy agents` (30 s).
-_ss_agy_agents_missing() {
-  local LISTING NAME MISSING=""
-  LISTING=$("$TIMEOUT_BIN" 30s agy agents 2>/dev/null || true)
-  for NAME in $AGY_PACK_AGENTS; do
-    printf '%s\n' "$LISTING" | grep -q -- "$NAME" || MISSING="${MISSING:+${MISSING} }${NAME}"
-  done
-  printf '%s' "$MISSING"
-}
-
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -n "$TIMEOUT_BIN" ] && command -v agy >/dev/null 2>&1; then
-  SHIPPED_PACK_VERSION=$(_ss_json_version "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/plugin.json")
-  INSTALLED_PACK_VERSION=$(_ss_json_version "${HOME:-}/.gemini/config/plugins/agent-triforge/plugin.json")
-  if [ -z "$INSTALLED_PACK_VERSION" ]; then
-    # Managed copy unreadable or absent: if the pack is installed at all, fall
-    # back to the version this hook last installed (stamp); else "not installed".
-    if "$TIMEOUT_BIN" 30s agy plugin list 2>/dev/null | grep -q "agent-triforge"; then
-      if [ -f "$AGY_PACK_STAMP" ]; then
-        INSTALLED_PACK_VERSION=$(sed -n 's/^version=//p' "$AGY_PACK_STAMP" 2>/dev/null | head -1 || true)
-      fi
-    fi
-  fi
-  if [ -n "$SHIPPED_PACK_VERSION" ] && [ "$INSTALLED_PACK_VERSION" != "$SHIPPED_PACK_VERSION" ]; then
-    IMPORTED_BEFORE=$(_ss_agy_imported_at)
-    AGY_INSTALL_RC=0
-    "$TIMEOUT_BIN" 30s agy plugin install "${CLAUDE_PLUGIN_ROOT}/antigravity-agents" >/dev/null 2>&1 || AGY_INSTALL_RC=$?
-    AGY_MISSING=$(_ss_agy_agents_missing)
-    if [ "$AGY_INSTALL_RC" -ne 0 ] || [ -n "$AGY_MISSING" ]; then
-      # Install-over did not yield a complete listing: uninstall + install once.
-      "$TIMEOUT_BIN" 30s agy plugin uninstall agent-triforge >/dev/null 2>&1 || true
-      AGY_INSTALL_RC=0
-      "$TIMEOUT_BIN" 30s agy plugin install "${CLAUDE_PLUGIN_ROOT}/antigravity-agents" >/dev/null 2>&1 || AGY_INSTALL_RC=$?
-      AGY_MISSING=$(_ss_agy_agents_missing)
-    fi
-    IMPORTED_AFTER=$(_ss_agy_imported_at)
-    if [ "$AGY_INSTALL_RC" -eq 0 ]; then
-      {
-        echo "<!-- runtime state: Antigravity agent pack version last installed by session-start (regenerated on each reinstall) -->"
-        echo "version=${SHIPPED_PACK_VERSION}"
-        echo "installed=$(date +%Y-%m-%d)"
-        echo "importedAt=${IMPORTED_AFTER:-unknown}"
-      } > "${AGY_PACK_STAMP}.tmp.$$" 2>/dev/null && mv -f "${AGY_PACK_STAMP}.tmp.$$" "$AGY_PACK_STAMP" 2>/dev/null || rm -f "${AGY_PACK_STAMP}.tmp.$$" 2>/dev/null || true
-      if [ -z "$AGY_MISSING" ]; then
-        AGY_PACK_NOTICE="session-start: Antigravity agent pack installed ${INSTALLED_PACK_VERSION:-none} -> ${SHIPPED_PACK_VERSION} (importedAt ${IMPORTED_BEFORE:-none} -> ${IMPORTED_AFTER:-unknown}; agy agents lists all four Triforge agents)."
-      else
-        AGY_PACK_NOTICE="session-start: Antigravity agent pack installed ${INSTALLED_PACK_VERSION:-none} -> ${SHIPPED_PACK_VERSION} (importedAt ${IMPORTED_BEFORE:-none} -> ${IMPORTED_AFTER:-unknown}), but agy agents does not list: ${AGY_MISSING} — invoke_antigravity stays in injection mode (TRIFORGE_AGY_MODE)."
-      fi
-    else
-      AGY_PACK_NOTICE="session-start: agy plugin install failed (rc=${AGY_INSTALL_RC}) — invoke_antigravity will use injection mode from the plugin templates."
-    fi
-  fi
-fi
-
-# Deploy Antigravity workspace settings (permission deny rules), copy-if-absent.
-# Project-tier settings are still NOT read headless: the July probe (no
-# project-tier settings.json lifted the `agy -p` auto-deny) stands, and D-032
-# records that settings.json enforcement is user-tier only
-# (~/.gemini/antigravity-cli/settings.json — never touched here; at-setup
-# documents the `read_url(*)` allow rule there). The shipped file documents the
-# deny intent in agy's action syntax (`command(rm -rf)`, `command(git push)`,
-# `command(sudo)`) and covers interactive `agy` use. Hooks (AGY-08): the
-# documented `.agents/hooks.json` named-hook shape (PreInvocation, PostInvocation,
-# PreToolUse, PostToolUse, Stop) fired headless on agy 1.2.0 (lead re-probe
-# 2026-09-11) but NOT on agy 1.2.1 the same evening (harness FAIL with the hooks
-# loaded) — an open watch, not an enforcement path; Triforge ships no agy hook.
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.antigravity/settings.json" ] && [ ! -f ".antigravity/settings.json" ]; then
-  mkdir -p .antigravity
-  cp "${CLAUDE_PLUGIN_ROOT}/templates/.antigravity/settings.json" ".antigravity/settings.json"
-fi
-
-# ---------------------------------------------------------------------------
-# .agents/skills/ refresh (KTD12, R31) — the agy workspace-skills tier AND the
-# cross-CLI agentskills.io path (Codex, OpenCode, Cursor and Kimi all read it).
-# Copies, never symlinks, so loaders that refuse to follow symlinks across
-# mount boundaries still see the skills.
-#
-# The work is done by scripts/lib/skills-sync.py, which _lease_provision_skills
-# also runs for each lease worktree, so both follow one ownership rule:
-# Triforge replaces or retires a directory only when its content digest
-# matches the digest recorded in the stamp .agents/skills/.triforge-plugin-
-# version for that name (a 3.3.0–3.3.2 stamp without digests is migrated
-# against scripts/lib/skill-digests.txt, the digests of every released copy).
-# Anything else is user-owned: kept, with one notice naming it. With no stamp,
-# only empty slots are written. The stamp is safe to commit in a user project
-# (this repo ignores /.agents/); an unchanged plugin version is a no-op with no
-# notice, and the stamp is written last, so an interrupted refresh re-runs on
-# the next session start. A symlinked .agents or .agents/skills, or one that
-# resolves outside the project, is left untouched with one notice.
-SKILLS_NOTICES=""
-SS_SKILLS_SYNC="${CLAUDE_PLUGIN_ROOT:-}/scripts/lib/skills-sync.py"
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/skills" ]; then
-  if [ -f "$SS_SKILLS_SYNC" ]; then
-    # A crash or a timeout must not abort the hook (set -e), but it must not be
-    # silent either: the exit status is kept and reported as a notice below.
-    SS_SYNC_OUT=""
-    SS_SYNC_RC=0
-    if [ -n "$TIMEOUT_BIN" ]; then
-      SS_SYNC_OUT=$("$TIMEOUT_BIN" 60s python3 "$SS_SKILLS_SYNC" sync --plugin-root "$CLAUDE_PLUGIN_ROOT" --project . --prefix "session-start: " 2>/dev/null) || SS_SYNC_RC=$?
-    else
-      SS_SYNC_OUT=$(python3 "$SS_SKILLS_SYNC" sync --plugin-root "$CLAUDE_PLUGIN_ROOT" --project . --prefix "session-start: " 2>/dev/null) || SS_SYNC_RC=$?
-    fi
-    while IFS= read -r SS_LINE; do
-      if [ -n "$SS_LINE" ]; then SKILLS_NOTICES="${SKILLS_NOTICES}\n${SS_LINE}"; fi
-    done <<SS_SYNC_EOF
-${SS_SYNC_OUT}
-SS_SYNC_EOF
-    if [ "$SS_SYNC_RC" -ne 0 ]; then
-      SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: WARNING .agents/skills refresh failed (skills-sync.py exit ${SS_SYNC_RC}; 124 means the 60 s timeout) — skills may be stale; the refresh re-runs next session."
-    fi
-  else
-    SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: WARNING ${SS_SKILLS_SYNC} is missing — .agents/skills not refreshed (reinstall the plugin)."
-  fi
-fi
-
-# _bootstrap_copy <src> <dest> — provision a template file into the project,
-# copy-if-absent so user customizations survive. Creates the parent dir. NEVER
-# aborts the hook on a filesystem error (read-only dir, a path component that is
-# a regular file): the step warns and is skipped so session start still
-# completes and every other bootstrap step still runs (this handler is under
-# `set -euo pipefail`, where a bare `mkdir`/`cp` failure would abort everything).
-_bootstrap_copy() {
-  local src="$1" dest="$2"
-  [ -f "$src" ] || return 0
-  [ -e "$dest" ] && return 0        # preserve an existing user file/dir
-  [ -L "$dest" ] && return 0        # and a dangling symlink, which cp would follow out of the project
-  if ! mkdir -p "$(dirname "$dest")" 2>/dev/null; then
-    echo "session-start: WARNING could not create $(dirname "$dest") — skipping bootstrap of ${dest} (session continues)" >&2
-    return 0
-  fi
-  cp "$src" "$dest" 2>/dev/null || echo "session-start: WARNING could not copy ${dest} — skipping (session continues)" >&2
-  return 0
-}
-
-# _ss_is_3x_codex_hooks <file> — 0 when the file is byte-equal to the one 3.x
-# templates/.codex/hooks.json (sha256 below): Triforge's own copy of the
-# attribution hook that appended to ops/CHANGELOG.md and wrote
-# .claude/codex-changelog.* from every Codex session, inside lease worktrees
-# too. The grep is a cheap gate in front of the hash, which decides.
-SS_3X_CODEX_HOOKS_SHA256="9aece38547f04f98c9cd158538cb31e654c1fa3767de414afbab1bd50b8f140c"
-_ss_is_3x_codex_hooks() {
-  [ -f "$1" ] && [ ! -L "$1" ] || return 1
-  grep -qF 'codex-changelog' "$1" 2>/dev/null || return 1
-  [ "$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1" 2>/dev/null || true)" = "$SS_3X_CODEX_HOOKS_SHA256" ]
-}
-
-# _ss_dir_in_project <dir> — 0 when <dir> (a direct child of the project root,
-# the cwd) is absent, or a real directory, not a symlink, whose physical path
-# is inside the project. A .codex linked elsewhere (to ~/.codex, say) holds
-# another tier's files, which Triforge never writes.
-_ss_dir_in_project() {
-  local ROOT D
-  if [ -L "$1" ]; then return 1; fi
-  if [ ! -e "$1" ]; then return 0; fi
-  ROOT=$(pwd -P 2>/dev/null) || return 1
-  D=$(cd "$1" 2>/dev/null && pwd -P 2>/dev/null) || return 1
-  case "$D" in "${ROOT}/"*) return 0 ;; esac
-  return 1
-}
-
-# Bootstrap Codex project files (.codex/*), copy-if-absent so user
-# customizations survive: triforge-agents.toml = Triforge's agent declarations
-# (KTD5 — deployed OUTSIDE .codex/agents/, which Codex ≥ 0.147 sweeps as
-# per-agent role files and warns "Ignoring malformed agent role definition" on);
-# config.toml disables Codex's auto-memory
-# pipeline (conflict with ops/MEMORY.md); hooks.json ships with no hooks since
-# 4.0 (KTD9: the 3.x CHANGELOG attribution hook wrote ops/ from every Codex
-# session, lease workers included; attribution now comes from the ledger). See
-# templates/.codex/README.md and ops/decisions/2026-07-18-codex-hooks-under-exec.md.
-CODEX_MOVE_NOTICE=""
-CODEX_HOOK_NOTICE=""
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && ! _ss_dir_in_project ".codex"; then
-  # A .codex that is a symlink or resolves outside the project: nothing below
-  # writes through it (the move, the bootstrap copies, the 3.x replacement).
-  # Reading the hooks file to name the manual step is fine.
-  if _ss_is_3x_codex_hooks ".codex/hooks.json"; then
-    CODEX_HOOK_NOTICE="session-start: WARNING .codex/hooks.json is the unchanged 3.x copy, which writes ops/CHANGELOG.md from every Codex session, but .codex is a symlink or resolves outside this project, so it was NOT replaced (Triforge never writes outside the project) — if that file is yours to change, copy templates/.codex/hooks.json over it by hand."
-  else
-    CODEX_HOOK_NOTICE="session-start: .codex is a symlink or resolves outside this project, so Triforge's Codex files were not bootstrapped there (it never writes outside the project) — copy codex-agents/agents.toml to .codex/triforge-agents.toml and templates/.codex/config.toml by hand if you want them."
-  fi
-elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-  # One-time migration (KTD5): v3.2.0 deployed .codex/agents/agents.toml. Move it
-  # to the new name once — a user-modified file is moved, never deleted or
-  # overwritten — and drop the now-empty .codex/agents/ only when it IS empty
-  # (rmdir, never rm -rf). If both files exist the user resolves it by hand.
-  if [ -f ".codex/agents/agents.toml" ]; then
-    if [ ! -e ".codex/triforge-agents.toml" ]; then
-      if mv ".codex/agents/agents.toml" ".codex/triforge-agents.toml" 2>/dev/null; then
-        rmdir ".codex/agents" 2>/dev/null || true
-        CODEX_MOVE_NOTICE="session-start: moved .codex/agents/agents.toml to .codex/triforge-agents.toml (Codex sweeps .codex/agents/*.toml as per-agent role files and warned on it; the file content is unchanged)."
-      else
-        CODEX_MOVE_NOTICE="session-start: WARNING could not move .codex/agents/agents.toml to .codex/triforge-agents.toml — move it by hand (Codex warns on the old location)."
-      fi
-    else
-      CODEX_MOVE_NOTICE="session-start: both .codex/agents/agents.toml and .codex/triforge-agents.toml exist — merge and remove the old file by hand (Codex warns on .codex/agents/*.toml)."
-    fi
-  fi
-  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml"     ".codex/triforge-agents.toml"
-  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.codex/config.toml" ".codex/config.toml"
-  # One-time migration (KTD9): a .codex/hooks.json still byte-equal to the 3.x
-  # template (_ss_is_3x_codex_hooks) is replaced once by the 4.0 template. An
-  # edited copy is the user's and is left alone.
-  if [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json" ] && _ss_is_3x_codex_hooks ".codex/hooks.json"; then
-    if cp "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json" ".codex/hooks.json" 2>/dev/null; then
-      CODEX_HOOK_NOTICE="session-start: replaced .codex/hooks.json — the unchanged 3.x copy appended a line to ops/CHANGELOG.md from every Codex session, lease workers included; attribution now comes from the lease ledger."
-    else
-      CODEX_HOOK_NOTICE="session-start: WARNING could not replace the 3.x .codex/hooks.json, which writes ops/CHANGELOG.md from every Codex session — copy templates/.codex/hooks.json over it by hand."
-    fi
-  fi
-  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json"  ".codex/hooks.json"
-fi
-
-# Bootstrap OpenCode agent definitions (.opencode/agents/) + project config
-# (.opencode/opencode.json), copy-if-absent so user customizations survive.
-# Guarded on `command -v opencode` — the optional-CLI detection below records
-# presence/version; this only provisions the agent-def/config surface when the
-# binary is actually installed. invoke_opencode routes builder/reviewer via
-# `--agent <name>` from .opencode/agents/ (project tier) with the plugin's
-# opencode-agents/ as fallback. Reviewer read-only safety is the agent-def
-# permission map (edit/bash deny) plus the OPENCODE_PERMISSION deny rules
-# injected at dispatch (R7); the adapter stays off --auto (OC-06 — see
-# templates/.opencode/README.md).
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && command -v opencode >/dev/null 2>&1; then
-  if [ -d "${CLAUDE_PLUGIN_ROOT}/opencode-agents" ]; then
-    for f in "${CLAUDE_PLUGIN_ROOT}/opencode-agents"/*.md; do
-      [ -f "$f" ] || continue
-      _bootstrap_copy "$f" ".opencode/agents/$(basename "$f")"
-    done
-  fi
-  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.opencode/opencode.json" ".opencode/opencode.json"
-fi
-
-# Bootstrap Kimi Code project files (.kimi-code/), copy-if-absent so user
-# customizations survive. Guarded on `command -v kimi`. Kimi 0.42.0 reversed
-# KIMI-03 (D-024): `--agent <name>` / `--agent-file <path>` work in `-p`, so
-# roles ride as native agent definitions loaded with --agent-file from the
-# plugin's kimi-agents/ (R6; agent definitions are never deployed into
-# .agents/agents/ — KTD13). `--skills-dir` is no longer passed: .agents/skills/
-# is native and the flag REPLACES auto-discovery. The project
-# .kimi-code/config.toml is NOT read by the CLI (only ~/.kimi-code/config.toml
-# is) — the two files provisioned here are documentation of the intended
-# posture; the real headless confinement is the lease worktree + _adapter_env
-# KIMI_* allowlist + KIMI_DISABLE_TELEMETRY (see templates/.kimi-code/README.md).
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && command -v kimi >/dev/null 2>&1; then
-  for f in AGENTS.md config.toml; do
-    _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.kimi-code/${f}" ".kimi-code/${f}"
-  done
-fi
-
-# The Cursor binary comes from the helper's own resolver, _cursor_bin (KTD3,
-# D-025 — `cursor-agent` first, else the first `agent` on PATH whose --version
-# matches Cursor's `YYYY.MM.DD-<hex>` format under a 15 s cap, fail-closed
-# without a timeout tool): the registry names it as cursor's resolver, so this
-# hook carries no re-implementation. Empty when the helper did not load or
-# nothing resolved.
-CURSOR_BIN=""
+# Bootstrap (KTD11, R37): the ops/ skeleton, the .agents/skills refresh, the
+# Antigravity agent pack, the per-CLI files and the plugin-root pointer are
+# triforge_bootstrap's (scripts/lib/bootstrap.sh), the same helper at-setup,
+# at-build and at-review call, so a project whose hooks never ran (a Codex
+# lead before the user trusts them) is set up the same way. It runs first,
+# so the state checks below see what it wrote, and in this shell: a Cursor
+# binary its _cursor_bin call resolves stays exported (TRIFORGE_CURSOR_BIN),
+# so the detection loop below looks it up instead of probing again. Its
+# notices, one per line on stderr with this hook's "session-start: " prefix,
+# are collected in SS_BOOT_LOG and printed with the migration notices; its
+# rc (0, or 80 when a step degraded) adds nothing the notices do not say.
+# Without the helper nothing is bootstrapped, and SS_HELPER_NOTICE says so.
+SS_BOOT_LOG=""
 if [ -n "$SS_HELPER" ]; then
-  # Run in this shell, not a $(...): the TRIFORGE_CURSOR_BIN export a hit leaves
-  # behind makes the detection loop's resolver call below a lookup, not a probe.
-  if _cursor_bin >/dev/null 2>&1; then CURSOR_BIN="$TRIFORGE_CURSOR_BIN"; fi
-fi
-
-# Bootstrap Cursor CLI project files, copy-if-absent so user customizations
-# survive. Guarded on the resolver above (binary `agent` primary, `cursor-agent`
-# legacy per the 2026.09.10 install script). Cursor still has NO headless
-# --agent selector, so roles ride as prompt-prefix injection from the plugin's
-# cursor-agents/ briefs (invoke_cursor + the lease_dispatch cursor case both
-# inject); the .cursor/agents/ copies are delegation targets + documentation,
-# and .cursor/README.md records the --trust-required / grok-4.6-pinned-never-
-# Auto / CUR-06 headless-hooks-dead / CUR-07 --sandbox-doesn't-confine /
-# CUR-08 --mode-plan-is-read-only facts. Shipped default cursor-grok-4.6-xhigh:
-# effort is a model-id SUFFIX (-low|-medium|-high|-xhigh) composed at dispatch
-# from the roster effort (KTD3), never the bracket form (CUR-10 rejected it).
-# No afterFileEdit attribution hook is shipped (CUR-06 FAIL); builder
-# attribution is lead-side from the lease ledger. Version capture is handled by
-# the optional-CLI detection block below (--version -> .claude/
-# roster-detected.local.md, plus the resolved cursor_bin), since Cursor has no
-# published semver.
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -n "$CURSOR_BIN" ]; then
-  if [ -d "${CLAUDE_PLUGIN_ROOT}/cursor-agents" ]; then
-    for f in "${CLAUDE_PLUGIN_ROOT}/cursor-agents"/*.md; do
-      [ -f "$f" ] || continue
-      case "$(basename "$f")" in README.md) continue ;; esac
-      _bootstrap_copy "$f" ".cursor/agents/$(basename "$f")"
-    done
-  fi
-  if [ -d "${CLAUDE_PLUGIN_ROOT}/templates/.cursor" ]; then
-    for f in "${CLAUDE_PLUGIN_ROOT}/templates/.cursor"/*; do
-      [ -f "$f" ] || continue
-      _bootstrap_copy "$f" ".cursor/$(basename "$f")"
-    done
-  fi
-fi
-
-# Bootstrap ops/roster.toml — existence-guarded, deliberately OUTSIDE the
-# ops-dir bootstrap above so upgraded v2.x projects (which already have ops/)
-# still receive it. A user's existing roster is never overwritten. The watch
-# registry is NOT bootstrapped: /cli-watch + /repo-watch are repo-local
-# maintainer tooling in the agent-triforge checkout, not plugin features.
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/ops/roster.toml" "ops/roster.toml"
+  SS_BOOT_LOG="${SS_HELPER_TMP}/bootstrap"
+  triforge_bootstrap --prefix "session-start: " 2> "$SS_BOOT_LOG" || true
 fi
 
 # Optional-CLI detection (roster tier): presence + version for every optional
@@ -960,16 +604,14 @@ if [ -n "$SS_HELPER_NOTICE" ]; then
   MSG="$MSG\n${SS_HELPER_NOTICE}"
 fi
 
-# Migration notices (one per step that acted this session; silent otherwise).
-MSG="$MSG${SKILLS_NOTICES:-}"
-if [ -n "$AGY_PACK_NOTICE" ]; then
-  MSG="$MSG\n${AGY_PACK_NOTICE}"
-fi
-if [ -n "$CODEX_MOVE_NOTICE" ]; then
-  MSG="$MSG\n${CODEX_MOVE_NOTICE}"
-fi
-if [ -n "$CODEX_HOOK_NOTICE" ]; then
-  MSG="$MSG\n${CODEX_HOOK_NOTICE}"
+# Migration notices: triforge_bootstrap's, in the order it printed them (one
+# per step that acted this session, silent otherwise; a state it left alone on
+# purpose repeats until fixed). Each is one line already; _ss_prose doubles a
+# backslash so printf %b below prints it as written.
+if [ -n "$SS_BOOT_LOG" ] && [ -s "$SS_BOOT_LOG" ]; then
+  while IFS= read -r SS_LINE; do
+    if [ -n "$SS_LINE" ]; then MSG="$MSG\n$(_ss_prose "$SS_LINE")"; fi
+  done < "$SS_BOOT_LOG"
 fi
 
 # Upgrade notices (R40): standing states, repeated every session until fixed.
@@ -1028,16 +670,18 @@ exit 0
 # The helper (scripts/invoke-external.sh) — sourced ONCE, in the subshell that
 # then runs _ss_run, so the hook reads the CLI registry (scripts/lib/registry.sh,
 # KTD7) for the optional members, their binaries and shipped models, and the
-# roster helpers for enrollment, instead of carrying copies. Degraded, never
-# fatal: a loader that `exit`s rather than `return`s, or trips set -u, ends only
-# that subshell. Its stdout and stderr land in one file in a private temp dir
-# (the source's stdout is never the hook's: a loader that prints a JSON-shaped
-# line before failing must not start a stdout line with `{`) beside the `loaded`
-# marker the subshell writes once the source succeeded (plain files, no extra
-# fd: a descriptor would be inherited by every child, and a probe the watchdog
-# in _ss_bounded leaves behind must not hold the hook's stdout). No marker: the
-# helper did not load, so _ss_run runs below in this shell with SS_HELPER empty
-# — optional-CLI detection, enrollment and the roster pin check are skipped and
+# roster helpers for enrollment, and runs triforge_bootstrap, instead of
+# carrying copies. Degraded, never fatal: a loader that `exit`s rather than
+# `return`s, or trips set -u, ends only that subshell. Its stdout and stderr
+# land in one file in a private temp dir (the source's stdout is never the
+# hook's: a loader that prints a JSON-shaped line before failing must not start
+# a stdout line with `{`) beside the `loaded` marker the subshell writes once
+# the source succeeded, and the bootstrap's notices land beside them
+# (SS_BOOT_LOG; plain files, no extra fd: a descriptor would be inherited by
+# every child, and a probe the watchdog in _ss_bounded leaves behind must not
+# hold the hook's stdout). No marker: the helper did not load, so _ss_run runs
+# below in this shell with SS_HELPER empty — the project bootstrap,
+# optional-CLI detection, enrollment and the roster pin check are skipped and
 # one standing WARNING line (no "session-start:" prefix — it repeats until
 # fixed) names the cause (the loader's first output line, or mktemp's when no
 # temp dir could be made under TMPDIR or, failing that, under the hook's own
@@ -1069,7 +713,7 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/invok
   else
     SS_HELPER_ERR=$(printf '%s' "$SS_HELPER_TMP" | head -1 | cut -c1-160)
   fi
-  SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh exited ${SS_HELPER_RC}: ${SS_HELPER_ERR}) — optional-CLI detection, enrollment and the roster pin check were skipped this session. Reinstall the plugin: claude plugin install agent-triforge@agent-triforge"
+  SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh exited ${SS_HELPER_RC}: ${SS_HELPER_ERR}) — the project bootstrap, optional-CLI detection, enrollment and the roster pin check were skipped this session. Reinstall the plugin: claude plugin install agent-triforge@agent-triforge"
 else
   # No loader to source: the plugin host did not export CLAUDE_PLUGIN_ROOT, or
   # it names a tree without scripts/invoke-external.sh. Same standing WARNING,
@@ -1079,6 +723,6 @@ else
   else
     SS_ROOT_STATE="unset"
   fi
-  SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (CLAUDE_PLUGIN_ROOT is ${SS_ROOT_STATE}) — optional-CLI detection, enrollment and the roster pin check were skipped this session. Run this hook through the installed plugin: claude plugin install agent-triforge@agent-triforge"
+  SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (CLAUDE_PLUGIN_ROOT is ${SS_ROOT_STATE}) — the project bootstrap, optional-CLI detection, enrollment and the roster pin check were skipped this session. Run this hook through the installed plugin: claude plugin install agent-triforge@agent-triforge"
 fi
 _ss_run

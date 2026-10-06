@@ -854,6 +854,211 @@ else
 fi
 rm -rf "$_S8B" "$_S8"
 
+# SELF-21 (KTD11 — R37): the project bootstrap is a helper, not only a hook, so
+# a project whose plugin hooks never ran (a Codex lead before the user trusts
+# them) still works. Fresh git projects under a throwaway HOME and TMPDIR,
+# CLAUDE_PLUGIN_ROOT unset, no hook run, stub agy/claude/codex first on PATH
+# (the agy stub answers like SELF-08's, so the pack check settles). The skill
+# blocks are read out of the shipped SKILL.md files, so the row tests the text
+# a lead runs:
+#   setup    at-setup's "Reach the helpers" block under bash, SKILL_DIR = this
+#            checkout's skills/at-setup: rc 0, nothing on stdout; ops/ with its
+#            skeleton and ops/roster.toml, .agents/skills holding the portable
+#            set and its stamp, .codex/triforge-agents.toml; the plugin-root
+#            pointer .agents/triforge-plugin-root.local names this checkout's
+#            physical path, one notice says so, and git neither tracks it nor
+#            lists it (check-ignore: ignored)
+#   again    the same block twice more, under bash and under zsh: rc 0, no
+#            triforge_bootstrap notice, the project (.git included)
+#            byte-identical — paths, modes, sizes, mtimes
+#   build    at-build's Preflight block from this checkout's skills/at-build
+#            (the locator's own-location step) and from a project-tier copy at
+#            .agents/skills/at-build (the locator skips its own location there,
+#            so only the pointer resolves it): rc 0, the loader's root = this
+#            checkout, lease_create defined, no notice. Control: with the
+#            pointer moved aside the project-tier locator fails (rc 1)
+#   hook     session start afterwards (CLAUDE_PLUGIN_ROOT = this checkout):
+#            rc 0 and zero "session-start:" lines — hook and skill share one
+#            bootstrap, so neither redoes the other's work
+#   zsh      the setup block under zsh in a second fresh project: rc 0, the
+#            same ops/, skills copy and pointer
+#   worker   the setup block with TRIFORGE_LEASE_WORKER=builder exits nonzero
+#            with one REFUSED line; triforge_bootstrap itself returns 45 under
+#            the marker and from inside a lease root with it unset; nothing
+#            written in either project
+# Negative control: the setup block with its triforge_bootstrap line removed
+# leaves a fresh project without ops/, so the ops/ check above sees the call.
+_S21="${WORK}/self21"
+_S21_FAIL=""
+_S21_ROOT=$(cd "$REPO_ROOT" && env pwd -P)
+rm -rf "$_S21"
+mkdir -p "$_S21/bin" "$_S21/home" "$_S21/tmp" "$_S21/proj" "$_S21/proj-zsh" "$_S21/proj-w" "$_S21/proj-neg" "$_S21/lr/lead" "$_S21/lr/wt"
+cat > "$_S21/bin/agy" <<'EOF'
+#!/bin/sh
+# probe stub (SELF-21): answers the agy pack check without touching the real agy install
+case "${1:-}" in
+  --version) echo "0.0.0-probe-stub" ;;
+  plugin) case "${2:-}" in list) echo "agent-triforge" ;; *) : ;; esac ;;
+  agents) printf '%s\n' codebase-analyst architecture-reviewer targeted-researcher documentation-writer ;;
+  *) : ;;
+esac
+exit 0
+EOF
+for _stub in claude codex; do
+  printf '#!/bin/sh\n# probe stub (SELF-21): answers --version only\ncase "${1:-}" in --version) echo "2.1.285" ;; esac\nexit 0\n' > "$_S21/bin/$_stub"
+done
+unset _stub
+chmod +x "$_S21/bin/agy" "$_S21/bin/claude" "$_S21/bin/codex"
+for _d in proj proj-zsh proj-w proj-neg lr/wt; do
+  ( cd "$_S21/$_d" && GIT_CONFIG_NOSYSTEM=1 HOME="$_S21/home" git init -q ) >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-$_d"
+done
+unset _d
+# a lease root: lead/gitconfig opening with the signature _lease_root_above
+# recognizes (_LEAD_GITCONFIG_SIGNATURE, scripts/lib/common.sh)
+printf '# Triforge trusted git config\n' > "$_S21/lr/lead/gitconfig"
+_s21_block() { # _s21_block <SKILL.md> <heading> — the first ```bash block under that heading, or rc 1
+  python3 - "$1" "$2" <<'S21_BLOCK_PY'
+import sys
+lines = open(sys.argv[1], encoding="utf-8").read().split("\n")
+if sys.argv[2] not in lines:
+    sys.exit(1)
+out, inside = [], False
+for ln in lines[lines.index(sys.argv[2]) + 1:]:
+    if not inside:
+        if ln.startswith("## "):
+            sys.exit(1)
+        inside = ln.strip() == "```bash"
+        continue
+    if ln.strip() == "```":
+        print("\n".join(out))
+        sys.exit(0)
+    out.append(ln)
+sys.exit(1)
+S21_BLOCK_PY
+}
+_s21_list() { # _s21_list <dir> — every path under it (symlinks not followed) with mode, size, mtime (ns) and link target
+  python3 - "$1" <<'S21_LIST_PY'
+import os, sys
+root = sys.argv[1]
+out = [". %d" % os.lstat(root).st_mtime_ns]
+for d, dirs, files in os.walk(root):
+    for n in dirs + files:
+        p = os.path.join(d, n)
+        st = os.lstat(p)
+        out.append("%s %o %d %d %s" % (os.path.relpath(p, root), st.st_mode, st.st_size, st.st_mtime_ns, os.readlink(p) if os.path.islink(p) else ""))
+print("\n".join(sorted(out)))
+S21_LIST_PY
+}
+_s21_run() { # _s21_run <label> <shell> <project> <skill dir> <script> [VAR=value...] — prints the rc; output in <label>.out / .err
+  local L=$1 SH=$2 P=$3 SD=$4 F=$5 RC=0
+  shift 5
+  ( cd "$P" && env -u CLAUDE_PLUGIN_ROOT -u TRIFORGE_LEASE_WORKER HOME="$_S21/home" PATH="$_S21/bin:$PATH" TMPDIR="$_S21/tmp" \
+      GIT_CONFIG_NOSYSTEM=1 SKILL_DIR="$SD" "$@" "$SH" "$F" < /dev/null > "$_S21/$L.out" 2> "$_S21/$L.err" ) || RC=$?
+  echo "$RC"
+}
+_s21_notices() { grep -c '^triforge_bootstrap: ' "$_S21/$1.err" 2>/dev/null || true; }
+# The three below never fail (set -e): they only fill in a FAIL's evidence.
+_s21_first() { { grep -v '^$' "$1" 2>/dev/null || true; } | head -1 | _scrub | cut -c1-"${2:-120}"; }   # first non-blank line of a file
+_s21_count() { { ls -d "$1"/*/ 2>/dev/null || true; } | wc -l | tr -d ' '; }                          # directories directly in <dir>
+_s21_diff() { # _s21_diff <listing> <baseline> — the first path the listing adds or changes, else "a-path-removed"
+  local D
+  D=$({ printf '%s\n' "$1" | grep -vxF -- "$2" || true; } | head -1 | cut -d' ' -f1)
+  printf '%s' "${D:-a-path-removed}"
+}
+_s21_pointer() { # _s21_pointer <project> — the path the pointer names (its first line that is not blank or a comment)
+  grep -v '^[[:space:]]*#' "$1/.agents/triforge-plugin-root.local" 2>/dev/null | grep -v '^[[:space:]]*$' | head -1 || true
+}
+_s21_git() { ( cd "$1" && shift && GIT_CONFIG_NOSYSTEM=1 HOME="$_S21/home" git "$@" ); }
+_s21_provisioned() { # _s21_provisioned <label> <project> — the setup block's files are there and the pointer is valid and untracked
+  local P=$2 F
+  for F in ops/solutions ops/decisions ops/archive; do [ -d "$P/$F" ] || _S21_FAIL="$_S21_FAIL $1-no-$F"; done
+  for F in ops/MEMORY.md ops/CHANGELOG.md ops/AGENTS.md ops/GOALS.md ops/roster.toml .codex/triforge-agents.toml .agents/skills/.triforge-plugin-version; do
+    [ -f "$P/$F" ] || _S21_FAIL="$_S21_FAIL $1-no-$F"
+  done
+  [ "$(_s21_count "$P/.agents/skills")" -eq "$SHIPPED_COUNT" ] || _S21_FAIL="$_S21_FAIL $1-skills-count($(_s21_count "$P/.agents/skills"))"
+  [ "$(_s21_pointer "$P")" = "$_S21_ROOT" ] || _S21_FAIL="$_S21_FAIL $1-pointer($(_s21_pointer "$P" | cut -c1-80))"
+  if _s21_git "$P" ls-files --error-unmatch -- .agents/triforge-plugin-root.local >/dev/null 2>&1; then _S21_FAIL="$_S21_FAIL $1-pointer-tracked"; fi
+  _s21_git "$P" check-ignore -q -- .agents/triforge-plugin-root.local || _S21_FAIL="$_S21_FAIL $1-pointer-not-ignored"
+  if _s21_git "$P" status --porcelain --untracked-files=all 2>/dev/null | grep -q 'triforge-plugin-root'; then _S21_FAIL="$_S21_FAIL $1-pointer-in-git-status"; fi
+}
+_S21_ZSH=$(command -v zsh 2>/dev/null || true)
+_s21_block "$REPO_ROOT/skills/at-setup/SKILL.md" "## Reach the helpers" > "$_S21/setup.sh" || _S21_FAIL="$_S21_FAIL no-at-setup-block"
+_s21_block "$REPO_ROOT/skills/at-build/SKILL.md" "## Preflight" > "$_S21/build.sh" || _S21_FAIL="$_S21_FAIL no-at-build-block"
+printf '\nprintf "root=%%s\\n" "$(triforge_plugin_root)"\nif command -v lease_create >/dev/null 2>&1; then echo "lease_create=defined"; fi\n' >> "$_S21/build.sh"
+printf 'source "%s/scripts/invoke-external.sh"\nR=0; triforge_bootstrap || R=$?\necho "rc=$R"\n' "$REPO_ROOT" > "$_S21/direct.sh"
+grep -v 'triforge_bootstrap' "$_S21/setup.sh" > "$_S21/setup-neg.sh" || true
+# setup
+_S21_RC=$(_s21_run setup /bin/bash "$_S21/proj" "$REPO_ROOT/skills/at-setup" "$_S21/setup.sh")
+[ "$_S21_RC" = 0 ] || _S21_FAIL="$_S21_FAIL setup-rc=${_S21_RC}($(_s21_first "$_S21/setup.err"))"
+[ ! -s "$_S21/setup.out" ] || _S21_FAIL="$_S21_FAIL setup-printed-to-stdout"
+_s21_provisioned setup "$_S21/proj"
+[ "$(grep -c '^triforge_bootstrap: wrote the plugin-root pointer ' "$_S21/setup.err" || true)" -eq 1 ] || _S21_FAIL="$_S21_FAIL setup-no-pointer-notice"
+grep -q '^triforge_bootstrap: WARNING' "$_S21/setup.err" && _S21_FAIL="$_S21_FAIL setup-warning($({ grep -m1 '^triforge_bootstrap: WARNING' "$_S21/setup.err" || true; } | cut -c1-120))"
+_S21_N1=$(_s21_notices setup)
+# again: bash, then zsh — nothing printed, nothing written
+_S21_L1=$(_s21_list "$_S21/proj")
+for _s21_sh in /bin/bash $_S21_ZSH; do
+  _S21_RC=$(_s21_run again "$_s21_sh" "$_S21/proj" "$REPO_ROOT/skills/at-setup" "$_S21/setup.sh")
+  [ "$_S21_RC" = 0 ] || _S21_FAIL="$_S21_FAIL again-${_s21_sh##*/}-rc=${_S21_RC}"
+  [ "$(_s21_notices again)" -eq 0 ] || _S21_FAIL="$_S21_FAIL again-${_s21_sh##*/}-notices($(_s21_first "$_S21/again.err" 100))"
+  _S21_L2=$(_s21_list "$_S21/proj")
+  [ "$_S21_L2" = "$_S21_L1" ] || _S21_FAIL="$_S21_FAIL again-${_s21_sh##*/}-wrote($(_s21_diff "$_S21_L2" "$_S21_L1"))"
+done
+unset _s21_sh
+# build: from the plugin's skill dir, then from a project-tier copy (pointer only)
+_S21_RC=$(_s21_run build /bin/bash "$_S21/proj" "$REPO_ROOT/skills/at-build" "$_S21/build.sh")
+{ [ "$_S21_RC" = 0 ] && grep -qx "root=$_S21_ROOT" "$_S21/build.out" && grep -qx 'lease_create=defined' "$_S21/build.out" && [ "$(_s21_notices build)" -eq 0 ]; } \
+  || _S21_FAIL="$_S21_FAIL build-plugin-dir(rc=${_S21_RC},$(tr '\n' ' ' < "$_S21/build.out" | cut -c1-120),$(_s21_first "$_S21/build.err"))"
+mkdir -p "$_S21/proj/.agents/skills/at-build"
+cp -R "$REPO_ROOT/skills/at-build/scripts" "$_S21/proj/.agents/skills/at-build/"
+_S21_RC=$(_s21_run build-tier /bin/bash "$_S21/proj" "$_S21/proj/.agents/skills/at-build" "$_S21/build.sh")
+{ [ "$_S21_RC" = 0 ] && grep -qx "root=$_S21_ROOT" "$_S21/build-tier.out" && grep -qx 'lease_create=defined' "$_S21/build-tier.out"; } \
+  || _S21_FAIL="$_S21_FAIL build-project-tier(rc=${_S21_RC},$(tr '\n' ' ' < "$_S21/build-tier.out" | cut -c1-120),$(_s21_first "$_S21/build-tier.err" 160))"
+mv "$_S21/proj/.agents/triforge-plugin-root.local" "$_S21/pointer.aside" 2>/dev/null || true
+_S21_CTL=0
+( cd "$_S21/proj" && env -u CLAUDE_PLUGIN_ROOT HOME="$_S21/home" GIT_CONFIG_NOSYSTEM=1 /bin/sh .agents/skills/at-build/scripts/locate-triforge.sh ) >/dev/null 2>&1 || _S21_CTL=$?
+[ "$_S21_CTL" -eq 1 ] || _S21_FAIL="$_S21_FAIL build-control-without-pointer-rc=${_S21_CTL}"
+mv "$_S21/pointer.aside" "$_S21/proj/.agents/triforge-plugin-root.local" 2>/dev/null || true
+# hook: session start after the skill bootstrapped the project
+_S21_HOOK_RC=0
+_S21_HOOK=$( cd "$_S21/proj" && HOME="$_S21/home" TMPDIR="$_S21/tmp" PATH="$_S21/bin:$PATH" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GIT_CONFIG_NOSYSTEM=1 \
+               /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" < /dev/null 2>&1 ) || _S21_HOOK_RC=$?
+_S21_HOOK_N=$(printf '%s\n' "$_S21_HOOK" | grep -c '^session-start:' || true)
+{ [ "$_S21_HOOK_RC" -eq 0 ] && [ "$_S21_HOOK_N" -eq 0 ] && ! printf '%s\n' "$_S21_HOOK" | grep -q 'hook crashed'; } \
+  || _S21_FAIL="$_S21_FAIL hook-after-setup(rc=${_S21_HOOK_RC},lines=${_S21_HOOK_N}:$({ printf '%s\n' "$_S21_HOOK" | grep -m1 '^session-start:\|hook crashed' || true; } | cut -c1-120))"
+# zsh: a second fresh project bootstrapped from a zsh shell
+if [ -n "$_S21_ZSH" ]; then
+  _S21_RC=$(_s21_run zsh "$_S21_ZSH" "$_S21/proj-zsh" "$REPO_ROOT/skills/at-setup" "$_S21/setup.sh")
+  [ "$_S21_RC" = 0 ] || _S21_FAIL="$_S21_FAIL zsh-rc=${_S21_RC}($(_s21_first "$_S21/zsh.err"))"
+  _s21_provisioned zsh "$_S21/proj-zsh"
+  _S21_ZSH_NOTE="; zsh: a second fresh project set up from the block under zsh gets the same files and pointer"
+else
+  _S21_ZSH_NOTE="; zsh not on PATH: the zsh runs were skipped"
+fi
+# worker: the marker, then a lease root without it — refused, nothing written
+_S21_LW=$(_s21_list "$_S21/proj-w")
+_S21_RC=$(_s21_run worker /bin/bash "$_S21/proj-w" "$REPO_ROOT/skills/at-setup" "$_S21/setup.sh" TRIFORGE_LEASE_WORKER=builder)
+{ [ "$_S21_RC" != 0 ] && [ "$(grep -c '^triforge_bootstrap: REFUSED' "$_S21/worker.err" || true)" -eq 1 ]; } \
+  || _S21_FAIL="$_S21_FAIL worker-setup(rc=${_S21_RC},$(_s21_first "$_S21/worker.err"))"
+_S21_RC=$(_s21_run worker-direct /bin/bash "$_S21/proj-w" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh" TRIFORGE_LEASE_WORKER=builder)
+grep -qx 'rc=45' "$_S21/worker-direct.out" || _S21_FAIL="$_S21_FAIL worker-direct($(tr '\n' ' ' < "$_S21/worker-direct.out" | cut -c1-60))"
+[ "$(_s21_list "$_S21/proj-w")" = "$_S21_LW" ] || _S21_FAIL="$_S21_FAIL worker-wrote($(_s21_diff "$(_s21_list "$_S21/proj-w")" "$_S21_LW"))"
+_S21_LL=$(_s21_list "$_S21/lr")
+_S21_RC=$(_s21_run leaseroot /bin/bash "$_S21/lr/wt" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+{ grep -qx 'rc=45' "$_S21/leaseroot.out" && grep -q "^triforge_bootstrap: REFUSED .*lease root" "$_S21/leaseroot.err"; } \
+  || _S21_FAIL="$_S21_FAIL leaseroot($(tr '\n' ' ' < "$_S21/leaseroot.out" | cut -c1-60)$(_s21_first "$_S21/leaseroot.err" 100))"
+[ "$(_s21_list "$_S21/lr")" = "$_S21_LL" ] || _S21_FAIL="$_S21_FAIL leaseroot-wrote($(_s21_diff "$(_s21_list "$_S21/lr")" "$_S21_LL"))"
+# negative control: without the bootstrap line no ops/ appears
+_S21_RC=$(_s21_run neg /bin/bash "$_S21/proj-neg" "$REPO_ROOT/skills/at-setup" "$_S21/setup-neg.sh")
+[ ! -e "$_S21/proj-neg/ops" ] || _S21_FAIL="$_S21_FAIL negative-control(ops/-without-the-bootstrap-line)"
+_S21_CAP="the project bootstrap runs from the at- skills without any hook: at-setup's block provisions ops/, the skills copy, the per-CLI files and an untracked plugin-root pointer; at-build's preflight then loads the helpers from the pointer; idempotent under bash and zsh; refused under the worker marker and in a lease root (KTD11, R37)"
+if [ -z "$_S21_FAIL" ]; then
+  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; negative control: the block without its triforge_bootstrap line leaves no ops/" "static"
+else
+  row "SELF-21" "claude" "$_S21_CAP" "FAIL" "mismatch:$(printf '%s' "$_S21_FAIL" | cut -c1-900)" "static"
+fi
+rm -rf "$_S21"
+
 # SELF-09 (CS1 / KTD11): the no-push backstop is mechanical. Under the lease
 # env allowlist (_adapter_env) every git in the builder's process tree sees
 # core.hooksPath -> scripts/lease-git-hooks (pre-push refuses) and
