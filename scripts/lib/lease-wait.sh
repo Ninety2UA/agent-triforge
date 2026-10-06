@@ -497,7 +497,11 @@ _claude_sandbox_refusal() {
 # so nothing outside the read set runs; the persona classes (KTD5, dispatch_persona)
 # run dontAsk too: persona-read is Read, Grep and Glob alone, never Bash;
 # persona-read-web adds WebFetch and WebSearch; exec is Bash with the read tools
-# and no edit tool. --settings carries the confinement, and a --settings file
+# and no edit tool. The persona classes add --safe-mode: no CLAUDE.md (nor what
+# it @imports), no .claude/rules at any depth, no skills, hooks or plugins load,
+# while the --settings sandbox, the credential deny rules and auth still hold
+# (measured on Claude Code 2.1.289: probe row CC-24; dispatch_persona refuses a
+# claude without the flag). --settings carries the confinement, and a --settings file
 # outranks the project's own sandbox settings: Bash runs in Claude Code's
 # sandbox (row CC-15: writes stay in the working directory, no network),
 # fail-closed when the sandbox can't start, with no unsandboxed retry;
@@ -513,7 +517,7 @@ _claude_sandbox_refusal() {
 # session id (the fix cycle resumes the builder's session); --max-turns comes
 # last, so the prompt after it is never read as one more tool name.
 _claude_lane_argv() {
-  local CLASS=$1 MODEL=$2 EFFORT=$3 RESUME=$4 SBX=on TOOLS ALLOW MODE SETTINGS
+  local CLASS=$1 MODEL=$2 EFFORT=$3 RESUME=$4 SBX=on TOOLS ALLOW MODE SETTINGS SAFE=0
   shift 4
   case "${TRIFORGE_CLAUDE_SANDBOX:-on}" in off|0|false|no) SBX=off ;; esac
   case "$CLASS" in
@@ -521,17 +525,17 @@ _claude_lane_argv() {
       TOOLS=$_CLAUDE_TOOLS_EDIT ALLOW=$_CLAUDE_ALLOW_EDIT MODE=acceptEdits
       ;;
     exec)
-      TOOLS="${_CLAUDE_TOOLS_READ},Bash" ALLOW="${_CLAUDE_TOOLS_READ},Bash" MODE=dontAsk
+      TOOLS="${_CLAUDE_TOOLS_READ},Bash" ALLOW="${_CLAUDE_TOOLS_READ},Bash" MODE=dontAsk SAFE=1
       ;;
     read)
       TOOLS=$_CLAUDE_TOOLS_READ ALLOW=$_CLAUDE_TOOLS_READ MODE=dontAsk
       if [ "$SBX" = on ]; then TOOLS="${TOOLS},Bash" ALLOW="${ALLOW},Bash"; fi
       ;;
     persona-read)
-      TOOLS=$_CLAUDE_TOOLS_READ ALLOW=$_CLAUDE_TOOLS_READ MODE=dontAsk
+      TOOLS=$_CLAUDE_TOOLS_READ ALLOW=$_CLAUDE_TOOLS_READ MODE=dontAsk SAFE=1
       ;;
     persona-read-web)
-      TOOLS="${_CLAUDE_TOOLS_READ},${_CLAUDE_TOOLS_WEB}" ALLOW="${_CLAUDE_TOOLS_READ},${_CLAUDE_TOOLS_WEB}" MODE=dontAsk
+      TOOLS="${_CLAUDE_TOOLS_READ},${_CLAUDE_TOOLS_WEB}" ALLOW="${_CLAUDE_TOOLS_READ},${_CLAUDE_TOOLS_WEB}" MODE=dontAsk SAFE=1
       ;;
     *)
       return 1
@@ -557,6 +561,7 @@ print(json.dumps(s, separators=(",", ":")))
   if [ -n "$MODEL" ]; then _LEASE_LANE_ARGV+=(--model "$MODEL"); fi
   if [ -n "$EFFORT" ]; then _LEASE_LANE_ARGV+=(--effort "$EFFORT"); fi
   if _claude_session_ok "$RESUME"; then _LEASE_LANE_ARGV+=(--resume "$RESUME"); fi
+  if [ "$SAFE" = 1 ]; then _LEASE_LANE_ARGV+=(--safe-mode); fi
   _LEASE_LANE_ARGV+=(--max-turns "$_CLAUDE_MAX_TURNS")
   return 0
 }

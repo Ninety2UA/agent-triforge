@@ -1260,9 +1260,9 @@ BASEKEYS
   PAIRS+=("NO_COLOR=1")   # captured output is parsed, never rendered (U5)
   # Worker marker (KTD9): hook handlers exit at once and lead-owned helpers
   # refuse (_lead_only) anywhere in the worker's process tree. Two values:
-  # builder (every lease build) and persona: U25's dispatch_persona will set
-  # _ADAPTER_WORKER=persona inside its dispatch subshell, the way
-  # lease_dispatch hands over _ADAPTER_ENV_KEYS.
+  # builder (every lease build) and persona: dispatch_persona
+  # (scripts/lib/persona.sh) sets _ADAPTER_WORKER=persona inside its dispatch
+  # subshell, the way lease_dispatch hands over _ADAPTER_ENV_KEYS.
   case "${_ADAPTER_WORKER:-builder}" in
     persona) PAIRS+=("TRIFORGE_LEASE_WORKER=persona") ;;
     *)       PAIRS+=("TRIFORGE_LEASE_WORKER=builder") ;;
