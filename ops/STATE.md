@@ -1,25 +1,29 @@
 ---
-saved: 2026-10-04T19:40:00Z
-phase: 2b (U9 done; U12 + U10 building)
+saved: 2026-10-06T18:10:00Z
+phase: 2c fixing; 3 integrating
 wave: 0
 tasks:
   total: 29
-  done: 19
+  done: 22
   blocked: 0
 verification_baseline:
   command: "bash scripts/validate-versions.sh; bash scripts/validate-skills.sh; claude plugin validate --strict .claude-plugin/plugin.json; claude plugin validate --strict .claude-plugin/marketplace.json; bash scripts/probe-capabilities.sh --self-only"
-  result: "All PASS on release/4.0 4d4b054 (Phase 2a merged): validate-versions PASS (19 agents / 27 skills, AGENTS.md 16,201 bytes); validate-skills 27 OK, --self-test 32 OK; both manifests --strict; SELF gate 22 rows none FAIL (~3.5 min); gates.yml green on PR #16 (run 37227154541)."
-  commit: 4d4b054
+  result: "All PASS on release/4.0 5ac2e54 (Phase 2b merged): validate-versions PASS (19 agents / 27 skills, AGENTS.md 16,364 bytes); validate-skills 27 OK, --self-test 32 OK; both manifests --strict; SELF gate 25 rows none FAIL, normal and CI-style (~6 min each under load); gates.yml green on PR #18 (run 37507263842)."
+  commit: 5ac2e54
 verification_command: "bash scripts/validate-versions.sh; bash scripts/validate-skills.sh; claude plugin validate --strict .claude-plugin/plugin.json; claude plugin validate --strict .claude-plugin/marketplace.json; bash scripts/probe-capabilities.sh --self-only"
-state_head: 4d4b054
+state_head: 5ac2e54
 ---
 # Session state
-<!-- Saved: 2026-10-04T19:40:00Z -->
+<!-- Saved: 2026-10-06T18:10:00Z -->
 <!-- Type: program handoff — Phase H released as v3.3.3; Phases 0–6 running autonomously on release/4.0 -->
 
 ## Current phase
 
-**Phase 2a is merged** into `release/4.0` (PR #16 → 4d4b054, 2026-10-04): detached builders, `lease_wait` / `lease_stop`, lead-exit recovery, the worker marker, the U29 probe rows, the Devin/Pi manifests. `AGENTS.md` is at 16,201 of 16,384 bytes, so trim before adding. **Phase 2b is in progress** on `feat/v4-phase-2b` (worktree `/Users/dbenger/projects/mafw-wt-phase-2b`): U9 is committed as 1a6cd4e (rebased onto 4d4b054); U12 and U10 are building in their own worktrees (`mafw-wt-2b-u12`, `mafw-wt-2b-u10`, both cut from the pre-rebase U9 commit 316f3fa) and get cherry-picked onto the 2b branch.
+**Phase 2b is merged** into `release/4.0` (PR #18 → 5ac2e54, 2026-10-06): the `[lead]` table and host gate (U9), ledger approvals (U10), the `claude -p` lane with its 2.1.285 sandbox floor (U12), plus a simplify pass. Final-diff review 5/5 MERGE on the re-review; Codex gpt-6-astra xhigh FIX, all four fixed. `AGENTS.md` is at 16,364 of 16,384 bytes, so trim before adding.
+
+**Phase 2c is fixing** on `feat/v4-phase-2c` (worktree `/Users/dbenger/projects/mafw-wt-phase-2c`, head a042a23, built on the pre-squash 2b head 2e9e57a; rebase with `git rebase --onto origin/release/4.0 2e9e57a`). Reviews: Codex FIX (3 P1, 3 P2) and final-diff 3/5 FIX on ab77a46. The fix batch is `scratchpad/fix2c/batch.md` (session scratchpad): u8's skill/docs half is in as a042a23; u25's persona-lane half (L1–L9, in `/Users/dbenger/projects/mafw-wt-2c-u25` on a77b9ea) is building. Residuals: `scratchpad/phase2c-residuals.md`.
+
+**Phase 3 is integrating** on `feat/v4-phase-3` (worktree `/Users/dbenger/projects/mafw-wt-phase-3`, on 96fb70f): the bootstrap half (triforge_bootstrap, SELF-21) is in as d965a3c; the coordinator half (coordinate.sh lead split, monitors, SELF-22, CDX-21/22/23) waits in `/Users/dbenger/projects/mafw-wt-3-coord` for one follow-up (pass the `[lead]` model and effort through registry flag fields). Add `ops/decisions/2026-10-05-gitconfig-capture-at-first-lease.md` (draft in `scratchpad/phase3/`) with it. Residuals: `scratchpad/phase3/residuals.md`.
 
 ## Authorization in force (2026-10-01)
 
@@ -35,9 +39,9 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 | 1a | U5 plugin-root resolver + locator; U26 CLI registry; U6 skill conformance validator | **merged** — PR #14 squash be6962a |
 | 1b | U7 commands → at- skills; U24 split oversized skills; U23 remove commands/ | **merged** — PR #15 squash 3e99675 |
 | 2a | U29 capability/survival probe rows; U13 detached leases + lease_wait + lead exit; U11 worker marker (+ U18 manifests, docs copy pass) | **merged** — PR #16 squash 4d4b054; ce-code-review run 20261004-175229-90f65ad6, final-diff review 5/5, Codex gpt-6-astra xhigh FIX → all applied |
-| 2b | U9 [lead] table + resolution; U12 claude -p lane; U10 ledger lead CLI / reviewer class / approvals | **in progress** — U9 1a6cd4e on `feat/v4-phase-2b`; U12 (`feat/v4-2b-u12`) and U10 (`feat/v4-2b-u10`) building |
-| 2c | U25 dispatch_persona lane; U8 personas home, agents/ removed | pending |
-| 3 | U14 Codex lead: bootstrap, monitors, coordinator | pending |
+| 2b | U9 [lead] table + resolution; U12 claude -p lane; U10 ledger lead CLI / reviewer class / approvals | **merged** — PR #18 squash 5ac2e54; final-diff re-review 5/5, Codex gpt-6-astra xhigh FIX → all applied |
+| 2c | U25 dispatch_persona lane; U8 personas home, agents/ removed | **fixing** — review fixes from Codex FIX + final-diff 3/5; u8 half in, u25 half building |
+| 3 | U14 Codex lead: bootstrap, monitors, coordinator | **integrating** — bootstrap half d965a3c; coordinator half in one follow-up |
 | 4 | U16 Grok Build adapter; U17 Devin CLI adapter (U18 shipped in 2a) | pending |
 | 5 | U15 at-setup lead step + instruction-file detection | pending |
 | 6 | U19 watch-cycle carry-ins; U20 two-lead fixture sprint + 4.0 release | pending |
@@ -47,9 +51,10 @@ Update this table and the frontmatter at every PR boundary; the plan is `docs/pl
 
 ## Next actions
 
-1. Phase 2b: collect u12 and u10; cherry-pick each onto `feat/v4-phase-2b` (expect conflicts in `scripts/probe-self-tests.sh` / `SELF_EXPECTED` and the ledger field lists); full gate in CI style (`env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CODEX_CI -u CODEX_THREAD_ID … --self-only < /dev/null`) plus U12's live rows via `--only`; ce-simplify-code; then the 2b review (final-diff reviewer + Codex gpt-6-astra xhigh), fixes, PR → `release/4.0`, one gates check, squash-merge. The 2b PR's residual list starts from the U9 builder's concerns (roster path from a subdirectory, approximate hook-trust detection, silent enrollment refusal under the non-lead CLI, `at-setup lead` arriving with U15) and the 2a leftovers (orphan path leaves a group member running; SELF-15b/15c live rerun with U20; check-10 fixtures).
-2. Phase 2c (U25 dispatch_persona, U8 personas/), then Phases 3–6 per the table, each started with `/ce-work`.
-3. End of program: full review + ce-code-review over `release/4.0` vs `main`, then the release PR (only the user approves the merge to `main`).
+1. Phase 2c: collect u25's L1–L9, commit it in its worktree and cherry-pick onto `feat/v4-phase-2c`; rebase onto `release/4.0` (`--onto origin/release/4.0 2e9e57a`); full gate both ways plus `--only CC-21,CC-22,CC-23,CDX-20`; a re-review by final2c and Codex of the fixes; ce-simplify-code; PR → `release/4.0` (ce-commit-push-pr, branding:on, babysit:off); one gates check; squash-merge; remove the `mafw-wt-2c-*` worktrees.
+2. Phase 3: collect u14-coord's model/effort follow-up; commit it and cherry-pick onto `feat/v4-phase-3` (one conflict: `SELF_EXPECTED` needs both SELF-21 and SELF-22); add the gitconfig-capture ADR; rebase onto `release/4.0` after 2c (expect probe-self-tests.sh conflicts with 2b's simplify helpers: `_SELF_PTY`, `_self_repo`, `_self_wait_rc`); gate; final-diff review + Codex; simplify; PR; merge.
+3. Phases 4–6 per the table, each started with `/ce-work`. U15 (Phase 5) inherits: hook-trust detection by `hooks.state` trusted_hash, the live `$at-ship` vs `$agent-triforge:at-ship` check (needs a human-logged-in CODEX_HOME), the interactive launch line apart from the headless `launch_argv`, user-tier auth not reaching claude workers, agy builders needing a user-tier allow rule.
+4. End of program: full review + ce-code-review over `release/4.0` vs `main`, then the release PR (only the user approves the merge to `main`).
 
 ## Blockers recorded for the user
 
@@ -89,7 +94,7 @@ Update this table and the frontmatter at every PR boundary; the plan is `docs/pl
 ## Gotchas for the next session
 
 - **Never edit the probe harness while a probe run is in progress** (`pgrep -f probe-capabilities`).
-- The SELF gate takes about 3.5 min (SELF-19 and SELF-13 are the long rows); SELF-18 alone runs ~25 fixture cases. Each SELF-10/SELF-18 case isolates its lease root and HOME; a run should leave nothing under `$TMPDIR/triforge-leases`.
+- The SELF gate takes about 6 min under load (SELF-19 and SELF-13 are the long rows); SELF-18 alone runs ~25 fixture cases. Each SELF-10/SELF-18 case isolates its lease root and HOME; a run should leave nothing under `$TMPDIR/triforge-leases`.
 - `lease_merge`'s commit no longer runs repository hooks and is never GPG-signed; a lead commit on the integration branch between merges, a switched checkout, or a manual promotion needs `lease_rebaseline` before the next lease call (see the wave-orchestration skill, "Integrity escalations (rc 44)").
 - **Headless `claude -p` sessions exit when the model ends its turn to wait on a background job,** killing the job.
 - **Git worktrees don't carry gitignored `.claude/settings.local.json`.** Copy it in for compound-engineering and plugin-dev to load there.
