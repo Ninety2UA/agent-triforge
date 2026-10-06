@@ -31,6 +31,8 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 
 **Review flow from Phase 2b on (user, 2026-10-04):** no PR babysitting. Each phase PR is reviewed by an independent final-diff reviewer plus Codex CLI on `gpt-6-astra` at `xhigh` (read-only), findings fixed and verified, one check that `gates.yml` is green, then the squash-merge. The per-phase ce-code-review is skipped; a full review plus ce-code-review over the whole `release/4.0` diff runs once at the end, before the release PR to `main`. Every phase is still built through `/ce-work`.
 
+**All work runs through `/ce-work` (user, 2026-10-06):** every phase, review-fix batch, simplify pass and the final release run inside a `/ce-work` invocation scoped to that work, following its references (triage, workspace, engine, execution strategy, implementation loop, shipping workflow) as read, never from memory. After a context compaction, re-invoke `/ce-work` for the current scope before continuing; a run started before the compaction does not carry over. Phase 2b had no `/ce-work` run of its own (its units ran under the run that finished 2a); don't repeat that.
+
 ## Program plan (PR by PR on release/4.0; each built with ce-work on Fable 5.1 @ high, reviewed on Opus 5.5 @ high)
 
 | PR | Units | Status |
