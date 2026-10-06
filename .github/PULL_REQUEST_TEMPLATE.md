@@ -36,7 +36,7 @@ versions produced this change.
 
 <!-- The protected-path lists live in scripts/lib/registry.sh. In every project:
 ops/roster.toml (incl. [promotion]); each CLI's config and permission tree (.claude/,
-.codex/, .agents/, .antigravity/, .gemini/, .opencode/, .kimi-code/, .cursor/, plus
+.codex/, .agents/, .antigravity/, .gemini/, .opencode/, .kimi-code/, .cursor/, .grok/, plus
 opencode.json, opencode.jsonc, .cursorrules and .gitmodules at the root); and every AGENTS.md,
 AGENTS.override.md, CLAUDE.md, CLAUDE.local.md and .mcp.json at any depth. In this
 repo (the Triforge checkout) also the framework's control plane: the enforcement,

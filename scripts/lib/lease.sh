@@ -1194,7 +1194,8 @@ print(" || ".join(log[-20:]))
 # the worker marker TRIFORGE_LEASE_WORKER (KTD9) + the GIT_CONFIG_* no-push
 # backstop (CS1), plus ONLY the invoked CLI's own
 # credential variables: its registry entry's env_keys (opencode:
-# OPENROUTER_API_KEY; kimi: KIMI_*; cursor: CURSOR_API_KEY). claude, codex,
+# OPENROUTER_API_KEY; kimi: KIMI_*; cursor: CURSOR_API_KEY; grok: XAI_API_KEY
+# and GROK_HOME, where its cached login lives). claude, codex,
 # and antigravity list none — they authenticate via HOME-based stores and get
 # nothing extra — no cross-provider leakage; a CLI the registry does not know
 # gets the base allowlist alone. Two lanes add fixed values of their own:
@@ -1798,6 +1799,7 @@ _lease_extract_stream() {
     opencode) X=_oc_extract_text ;;
     kimi)     X=_kimi_extract_text ;;
     cursor)   X=_cursor_extract_text ;;
+    grok)     X=_grok_extract_text ;;
     *) return 0 ;;
   esac
   [ -s "$OUT" ] || return 0
@@ -1914,14 +1916,14 @@ DISPATCH_ROW_EOF
   # included: no sub-dispatch, git stays local, and a typed final report whose
   # `Status:` line lease_collect parses (a clean exit without it is "report
   # missing", never review-ready). The lane's builder brief body (opencode /
-  # cursor: opencode-agents|cursor-agents/builder.md, frontmatter stripped) is
+  # cursor / grok: <cli>-agents/builder.md, frontmatter stripped) is
   # prepended here, and Devin's is the lease role's own (devin-agents/<role>.md);
   # Kimi's arrives natively via --agent-file; claude / codex /
   # antigravity carry no separate builder brief (their role instructions are
   # the contract itself). Wording is CLI-neutral on purpose.
   local BRIEF_BODY="" BRIEF_FILE="" BRIEF_TITLE="Builder role brief"
   case "$CLI" in
-    opencode|cursor)
+    opencode|cursor|grok)
       BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/${CLI}-agents/builder.md"
       ;;
     devin)
@@ -1974,7 +1976,7 @@ ${PROMPT}"
   # Kimi builder definition's absolute plugin path (D-024), the Cursor binary and
   # the effort-suffixed Cursor model id (D-025). One registry read serves the
   # whole dispatch — cli_field <cli> model env_keys: the lanes that always pin a
-  # model (agy — AE2 — and the optional three) fall back from an empty MODEL to
+  # model (agy — AE2 — and the optional members) fall back from an empty MODEL to
   # the CLI's shipped default, while claude and codex pass a model only when the
   # roster set one and keep MODEL as is; the env_keys reach _adapter_env through
   # _ADAPTER_ENV_KEYS inside the builder process, so it does not read them
@@ -1984,7 +1986,7 @@ ${PROMPT}"
   REG_ROW=$(cli_field "$CLI" model env_keys 2>/dev/null) || REG_ROW=""
   REG_ENV_KEYS=${REG_ROW#*$'\t'}
   case "$CLI" in
-    antigravity|opencode|kimi|cursor) [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=${REG_ROW%%$'\t'*} ;;
+    antigravity|opencode|kimi|cursor|grok) [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=${REG_ROW%%$'\t'*} ;;
   esac
   case "$CLI" in
     kimi)

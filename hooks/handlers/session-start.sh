@@ -450,7 +450,7 @@ fi
 
 # Optional-CLI detection (roster tier): presence + version for every optional
 # member of the CLI registry (cli_table optional — opencode / kimi / cursor /
-# devin today), written to .claude/roster-detected.local.md (runtime state,
+# devin / grok today), written to .claude/roster-detected.local.md (runtime state,
 # regenerated each session start; .claude/*.local.md is gitignored).
 # Line format: cli|version|detected-date, plus one interactive=yes|no signal
 # line the enrollment unit keys off, plus `<cli>_bin=<resolved path>` for a

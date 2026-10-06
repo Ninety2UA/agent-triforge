@@ -3,7 +3,7 @@
 Wait for all reviewers to complete first.
 
 1. Spawn `findings-synthesizer` as a sub-agent.
-2. It reads ALL `ops/REVIEW_*.md` lanes (Antigravity + Codex + any optional-tier `REVIEW_OPENCODE`/`KIMI`/`CURSOR.md`) plus the specialist sub-agent outputs, and, when the gate spawned it, the `learnings-researcher` output as known-issue context.
+2. It reads ALL `ops/REVIEW_*.md` lanes (Antigravity + Codex + any optional-tier `REVIEW_OPENCODE`/`KIMI`/`CURSOR`/`DEVIN`/`GROK.md`) plus the specialist sub-agent outputs, and, when the gate spawned it, the `learnings-researcher` output as known-issue context.
 3. It produces the synthesized report with confidence tiering (HIGH/MEDIUM/LOW) and priority (P1/P2/P3). A `[LOW]` confidence finding is never P1.
 4. Apply the `iterative-refinement` skill:
    - Fix P1 (critical) immediately.

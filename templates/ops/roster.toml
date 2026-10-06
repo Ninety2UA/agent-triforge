@@ -100,7 +100,7 @@ fallbacks = ["claude"]
 # effort = "xhigh"       # left out: xhigh for codex, your session's setting for claude
 
 # --- Optional members --------------------------------------------------------
-# Optional members (opencode, kimi, cursor, devin) are enrolled on first
+# Optional members (opencode, kimi, cursor, devin, grok) are enrolled on first
 # detection — the session-start enrollment trigger or at-setup writes their
 # entries; devin only through at-setup, because it needs your consent first. They
 # must NOT appear as live entries in this shipped template: an existing
@@ -123,6 +123,7 @@ fallbacks = ["claude"]
 #   consent on record (at-setup asks and writes it; a table without it fails to load).
 #   It reviews and analyzes by default. It builds only after you opt in:
 #   opt_in = ["builder"] (roster_write_member devin true <model> --opt-in builder).
+# [members.grok]   -> enabled = true, model = "grok-4.7"               (effort rides in --effort; `grok login` or XAI_API_KEY)
 
 [promotion]
 # KTD-5 user gate: when true, the lead pauses at wave end for explicit user

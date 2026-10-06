@@ -147,7 +147,8 @@ rm -rf "$_S2_DIR"
 # SELF-03 (R35): the env-allowlist isolation IS enforced — _adapter_env scopes
 # env vars per adapter, so a planted cross-adapter credential is stripped.
 # Assert codex never sees opencode's OPENROUTER_API_KEY / kimi's KIMI_* /
-# cursor's CURSOR_API_KEY, and (positive control) opencode DOES see its own.
+# cursor's CURSOR_API_KEY / grok's XAI_API_KEY, grok never sees opencode's, and
+# (positive controls) opencode, kimi and grok DO see their own.
 # Deterministic, no real CLI: `_adapter_env <cli> env` prints the scoped env.
 # Runs in a subshell that sources the lib so the probe's own env stays clean.
 _S3_FAIL=$( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null; F=""
@@ -156,6 +157,9 @@ _S3_FAIL=$( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null; F=""
   CURSOR_API_KEY=planted     _adapter_env codex    env 2>/dev/null | grep -q '^CURSOR_API_KEY='     && F="${F} codex-saw-CURSOR"
   OPENROUTER_API_KEY=planted _adapter_env opencode env 2>/dev/null | grep -q '^OPENROUTER_API_KEY=' || F="${F} opencode-missing-OPENROUTER(positive-control)"
   KIMI_API_KEY=planted       _adapter_env kimi     env 2>/dev/null | grep -q '^KIMI_API_KEY='       || F="${F} kimi-missing-KIMI_API_KEY(positive-control)"
+  XAI_API_KEY=planted        _adapter_env codex    env 2>/dev/null | grep -q '^XAI_API_KEY='        && F="${F} codex-saw-XAI"
+  XAI_API_KEY=planted        _adapter_env grok     env 2>/dev/null | grep -q '^XAI_API_KEY='        || F="${F} grok-missing-XAI_API_KEY(positive-control)"
+  OPENROUTER_API_KEY=planted _adapter_env grok     env 2>/dev/null | grep -q '^OPENROUTER_API_KEY=' && F="${F} grok-saw-OPENROUTER"
   printf '%s' "$F" )
 # The key lists are read line-wise, never glob-expanded: under bash an unquoted
 # `for _K in $(...)` pathname-expands each word, so from a cwd holding files
@@ -177,7 +181,7 @@ _S3_GLOB=$( cd "$_S3_CWD" && /bin/bash -c 'source "$1/invoke-external.sh" 2>/dev
 _S3_FAIL="${_S3_FAIL}${_S3_GLOB}"
 rm -rf "$_S3_CWD"
 if [ -z "$_S3_FAIL" ]; then
-  row "SELF-03" "claude" "_adapter_env strips cross-adapter credentials (R35/KTD-14)" "PASS" "codex env carries no OPENROUTER/KIMI/CURSOR key; opencode and kimi carry their own (positive controls held); /bin/bash from a cwd holding KIMI_+x}\$(touch PWNED_BY_FILENAME)\${HOME and KIMI_notes.md: KIMI_API_KEY forwarded, no file created, no bad substitution (keys read line-wise, never glob-expanded)" "static"
+  row "SELF-03" "claude" "_adapter_env strips cross-adapter credentials (R35/KTD-14)" "PASS" "codex env carries no OPENROUTER/KIMI/CURSOR/XAI key, grok's no OPENROUTER key; opencode, kimi and grok carry their own (positive controls held); /bin/bash from a cwd holding KIMI_+x}\$(touch PWNED_BY_FILENAME)\${HOME and KIMI_notes.md: KIMI_API_KEY forwarded, no file created, no bad substitution (keys read line-wise, never glob-expanded)" "static"
 else
   row "SELF-03" "claude" "_adapter_env strips cross-adapter credentials (R35/KTD-14)" "FAIL" "env-allowlist leak:${_S3_FAIL}" "static"
 fi
@@ -248,6 +252,8 @@ fi
 # shipped-name coverage rides in the evidence. The claude lane is the
 # exception: .agents/skills/ is not a Claude path, so its row (SELF-06f) checks
 # the .claude/skills/ copy the real provisioner writes for a claude builder.
+# SELF-06g (grok) also runs the real provisioner and the lane's own argv, whose
+# GROK_FOLDER_TRUST=0 is what lets grok load a fresh worktree's project skills.
 _s6_record() { # _s6_record <id> <cli> <capability> <file> <note>
   local ID=$1 CLI=$2 CAP=$3 F=$4 NOTE=$5 MISS N_PRESENT
   MISS=$(_names_missing "$F")
@@ -263,7 +269,7 @@ _S6_WT="$WORK/self06-wt"
 _S6_OK=0
 _S6_CAP="Lease-lane discovery under env -i from a TMPDIR worktree"
 if [ "$SELF_ONLY" = 1 ]; then
-  for r in "SELF-06a:agy" "SELF-06b:codex" "SELF-06c:opencode" "SELF-06d:cursor" "SELF-06e:kimi" "SELF-06f:claude"; do
+  for r in "SELF-06a:agy" "SELF-06b:codex" "SELF-06c:opencode" "SELF-06d:cursor" "SELF-06e:kimi" "SELF-06f:claude" "SELF-06g:grok"; do
     row "${r%%:*}" "${r#*:}" "$_S6_CAP: ${r#*:}" "SKIPPED" "--self-only: live lease-lane rows are not part of the SELF gate (run the full probe)" "live"
   done
   row "SELF-06h" "devin" "$_S6_CAP: devin" "SKIPPED" "--self-only: live lease-lane rows are not part of the SELF gate (run the full probe, or --only SELF-06h)" "live"
@@ -347,8 +353,10 @@ fi
 # claude reads .claude/skills, not .agents/skills (CC-07b): SELF-06f runs the
 # real provisioner into a worktree of its own and the lane's own argv
 # (_self06f_row in scripts/probe-capabilities.sh, which --only SELF-06f runs too).
+# SELF-06g does the same for grok (_self06g_row, the Grok Build section).
 if [ "$SELF_ONLY" != 1 ]; then
   _self06f_row
+  _self06g_row
 fi
 # Devin (R24): SELF-06h runs the real provisioner (.agents/skills) and the
 # lane's read-class argv the same way (_self06h_row in

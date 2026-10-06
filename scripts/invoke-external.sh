@@ -28,6 +28,8 @@
 #   lib/cursor.sh       _cursor_bin, _cursor_model_for_effort, invoke_cursor
 #   lib/devin.sh        invoke_devin, the auth-status reader, the per-run config
 #                       copy, devin_env_reimport (R24)
+#   lib/grok.sh         invoke_grok, _grok_argv (shared with the lease lane),
+#                       the stream extractor and the failure classifier
 #   lib/roster.sh       resolve_role, dispatch_role, roster_* (DEFAULTS live here),
 #                       the lead: resolve_lead, resolve_lead_caps, lead_host_detect,
 #                       roster_write_lead (KTD1)
@@ -133,7 +135,7 @@ triforge_plugin_root() { printf '%s\n' "$_TRIFORGE_PLUGIN_ROOT"; }
 
 # Load the lanes (fail-closed: a missing lib is a broken install, never a
 # silently narrower helper).
-for _triforge_lib in common registry antigravity codex opencode kimi cursor devin roster lease-wait lease; do
+for _triforge_lib in common registry antigravity codex opencode kimi cursor devin grok roster lease-wait lease; do
   if [ ! -f "${_TRIFORGE_SCRIPTS_DIR}/lib/${_triforge_lib}.sh" ]; then
     echo "invoke-external.sh: ERROR missing ${_TRIFORGE_SCRIPTS_DIR}/lib/${_triforge_lib}.sh — the plugin install is incomplete (reinstall: claude plugin install agent-triforge@agent-triforge)" >&2
     return 2 2>/dev/null || exit 2

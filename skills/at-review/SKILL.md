@@ -39,7 +39,7 @@ ensure_core_trio_live || exit 1
 
 ## Output
 
-- `ops/REVIEW_ANTIGRAVITY.md` and `ops/REVIEW_CODEX.md` (the structured verdict appended when the Codex lane emitted one), plus `ops/REVIEW_<OPENCODE|KIMI|CURSOR|DEVIN>.md` for each optional lane that reported DONE; prior cycles under `ops/archive/reviews/<timestamp>-<pid>/`.
+- `ops/REVIEW_ANTIGRAVITY.md` and `ops/REVIEW_CODEX.md` (the structured verdict appended when the Codex lane emitted one), plus `ops/REVIEW_<OPENCODE|KIMI|CURSOR|DEVIN|GROK>.md` for each optional lane that reported DONE; prior cycles under `ops/archive/reviews/<timestamp>-<pid>/`.
 - The learnings-gate line (the matched `ops/solutions/` entries, or "skipped") and, when spawned, the known-issue context handed to `findings-synthesizer`.
 - The synthesized report (confidence tier and priority per finding), the P1 and P2 fixes applied, P3 items logged for later.
 - `## Review dispositions — Cycle N` appended to `ops/TASKS.md`, and the convergence verdict or the escalation after 3 cycles.

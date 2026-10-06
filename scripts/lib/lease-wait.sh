@@ -561,10 +561,11 @@ _claude_session_ok() {
 # for a CLI with no arm. The one place each lane's argv is composed:
 # _lease_builder_run runs it under _adapter_env, and the probe's worker-marker
 # rows (CC-13, AGY-17, OC-09, KIMI-10, CUR-13, and CDX-16, CDX-17 and SELF-15c
-# through the codex flags) read it through the loader, so they run the lane's
-# own flags. The invoke_* helpers are shell functions and can't cross env -i,
-# so each arm composes the adapter's command core directly, and the role brief
-# rides in the prompt (lease_dispatch) for every lane but kimi.
+# through the codex flags; the GRK rows and SELF-06g) read it through the
+# loader, so they run the lane's own flags. The invoke_* helpers are shell
+# functions and can't cross env -i, so each arm composes the adapter's command
+# core directly, and the role brief rides in the prompt (lease_dispatch) for
+# every lane but kimi.
 #   claude       the edit class of _claude_lane_argv (cwd IS the worktree, so
 #                no --add-dir): the lead's <git-common-dir> unwritable, the
 #                session <resume-id> on a fix cycle
@@ -605,6 +606,12 @@ _claude_session_ok() {
 #                (-p fails in an untrusted directory), -p last. SHELL never
 #                crosses env -i, so Devin imports no login-shell exports
 #                (DVN-04)
+#   grok         the edit class of _grok_argv (scripts/lib/grok.sh): the env
+#                prefix that turns grok's Claude Code and Cursor discovery off,
+#                the model pin, --effort when set, streaming-json, dontAsk with
+#                the allow and deny sets, the workspace sandbox, and the
+#                GROK_CONFIG overlay that keeps the tool shell to the
+#                boundary's names; -p last (the prompt is its value)
 _lease_lane_argv() {
   local CLI=$1 MODEL=$2 EFFORT=$3 DMODEL=$4 KAF=$5 CBIN=$6 WT=$7 TIMEOUT=$8
   case "$CLI" in
@@ -645,6 +652,10 @@ _lease_lane_argv() {
         *)           _LEASE_LANE_ARGV=(devin --config "$KAF" --model "$DMODEL" --permission-mode auto) ;;
       esac
       _LEASE_LANE_ARGV+=(--respect-workspace-trust false -p)
+      ;;
+    grok)
+      _grok_argv edit "$DMODEL" "$EFFORT" lease || return 1
+      _LEASE_LANE_ARGV=("${_GROK_ARGV[@]}")
       ;;
     *)
       return 1
@@ -737,6 +748,22 @@ _lease_builder_run() {
           fi
         fi
         ;;
+      grok)
+        # A turn-cap stop exits 1 with max_turns_reached (GRK-07). Like the
+        # claude lane's error_max_turns it is the lane's cap, not a crash: the
+        # work so far stays in the worktree and the run routes as a clean exit
+        # without a report (report missing). Any other failure is classified
+        # here, where grok's own words are read (signed out, quota).
+        _adapter_env grok "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+        if [ "$RC" -ne 0 ]; then
+          _grok_classify "$RC" "$OUT"
+          if [ "$_INVOKE_FAILURE_REASON" = max-turns ]; then
+            RC=0
+          else
+            CLASS_SET=1
+          fi
+        fi
+        ;;
       *)
         _adapter_env "$CLI" "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
         ;;
@@ -756,7 +783,7 @@ _lease_builder_run() {
   # spurious 'retryable' off a builder that actually succeeded.
   if [ "$RC" -eq 0 ]; then
     INVOKE_FAILURE_CLASS="none"
-    # The opencode / kimi / cursor lanes answer as a JSON event stream; the
+    # The opencode / kimi / cursor / grok lanes answer as a JSON event stream; the
     # typed `Status:` report (KTD11) lives inside it as escaped text, so a
     # line-anchored parser can never see it. Extract the prose into $OUT
     # (raw stream kept in ${OUT}.raw); an extraction miss leaves $OUT as is.

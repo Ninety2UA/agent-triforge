@@ -51,7 +51,7 @@ FRAMEWORK_PROTECTED = (
     "hooks/", "skills/", "commands/", "personas/",
     # shipped agent configs, one directory per CLI
     "agents/", "antigravity-agents/", "codex-agents/", "opencode-agents/", "kimi-agents/", "cursor-agents/",
-    "devin-agents/",
+    "devin-agents/", "grok-agents/",
     # manifests, plugin settings, and the templates copied into user projects.
     # Pi reads its skill list from the root package.json; the Devin manifest is
     # skills/.devin-plugin/ (covered by skills/), and a root .devin-plugin/
@@ -68,6 +68,10 @@ PROJECT_PROTECTED = (
     # loads .devin/config.json requiredPlugins with no login, and Pi reads
     # .pi/settings.json packages once the project is trusted)
     ".claude/", ".codex/", ".agents/", ".antigravity/", ".gemini/", ".opencode/", ".kimi-code/", ".cursor/", ".devin/", ".pi/",
+    # grok reads .grok/config.toml (permission rules, MCP servers, plugins),
+    # .grok/hooks/, .grok/skills/, .grok/agents/ and .grok/sandbox.toml, and the
+    # lease lane runs it with folder trust on (GROK_FOLDER_TRUST=0)
+    ".grok/",
     # project-root config files outside those trees: OpenCode reads its permission
     # config from opencode.json / opencode.jsonc, and Cursor still reads the
     # legacy root instruction file .cursorrules
@@ -377,6 +381,25 @@ CLIS = {
         "role_limit": ["reviewer", "analyst"],
         "opt_in_roles": ["builder"],
         "consent": True,
+        "lead": {},
+    },
+    "grok": {
+        "name": "Grok Build",
+        "tier": "optional",
+        "binary": "grok",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "grok-4.7",
+        "model_env": "GROK_MODEL",
+        "install": "curl -fsSL https://x.ai/cli/install.sh | bash",
+        "login": "run `grok login` (`grok login --device-code` on a host without a browser), or set XAI_API_KEY",
+        "env_keys": ["XAI_API_KEY", "GROK_HOME"],
+        "lane": "shell",
+        "egress": "xAI",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
         "lead": {},
     },
 }

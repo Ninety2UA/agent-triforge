@@ -1,7 +1,7 @@
 ---
 name: at-setup
 description: "Use when onboarding or re-checking the roster: core trio live, optional CLIs enrolled or declined, roles assigned."
-argument-hint: "[opencode|kimi|cursor|devin|roles]"
+argument-hint: "[opencode|kimi|cursor|devin|grok|roles]"
 disable-model-invocation: true
 metadata:
   triforge-consumer: "lead"
@@ -16,7 +16,7 @@ metadata:
 
 **Safe failure:** UNRESOLVED stays loud until the trio is live and the roster loads, and the closing table still prints. Nothing here runs an installer or a login, writes user-tier config, or edits `ops/roster.toml` by hand: every member write is `roster_write_member`, every role write `roster_write_role`, and a nonzero write rc means nothing changed, so relay the stderr rule and re-ask. The user's instructions outrank this skill.
 
-Invoked with one optional CLI name (`opencode`, `kimi`, `cursor` or `devin`) to walk only that member (the closing table still prints); with `roles` to jump to role assignment (trio and members assumed set up); when absent, the full walk in order: trio, Codex trust, members, roles, closing table.
+Invoked with one optional CLI name (`opencode`, `kimi`, `cursor`, `devin` or `grok`) to walk only that member (the closing table still prints); with `roles` to jump to role assignment (trio and members assumed set up); when absent, the full walk in order: trio, Codex trust, members, roles, closing table.
 
 ## Reach the helpers
 

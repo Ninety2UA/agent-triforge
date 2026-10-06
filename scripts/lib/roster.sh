@@ -240,11 +240,12 @@ _RC_DISPATCH_ROLE_CLAUDE=40
 # picks the cli+model+effort for the role; this then case-dispatches to the
 # resolved cli's invoke_* helper, threading the resolved model/effort through
 # that helper's override env var (AGY_MODEL / OPENCODE_MODEL / KIMI_MODEL /
-# CURSOR_MODEL / DEVIN_MODEL) so a roster override actually reaches the CLI. This is what
-# makes the optional invoke_opencode/invoke_kimi/invoke_cursor helpers LIVE and
-# lets a [roles.tester] cli="opencode" override run opencode instead of codex —
-# without it, resolve_role only drove the builder lane (lease_create) and the
-# review/test phases hardcoded codex/antigravity.
+# CURSOR_MODEL / DEVIN_MODEL / GROK_MODEL) so a roster override actually reaches
+# the CLI. This is what makes the optional invoke_opencode/invoke_kimi/
+# invoke_cursor/invoke_devin/invoke_grok helpers LIVE and lets a [roles.tester]
+# cli="opencode" override run opencode instead of codex — without it,
+# resolve_role only drove the builder lane (lease_create) and the review/test
+# phases hardcoded codex/antigravity.
 #
 # The claude lane depends on the lead (R2, KTD16). A lead whose native
 # sub-agents enforce their tool lists (the registry's
@@ -312,6 +313,11 @@ dispatch_role() {
       # DEVIN_ROLE picks the permission class (read for reviewer and analyst,
       # edit for an opted-in builder) and the brief a persona name lacks.
       DEVIN_MODEL="$MODEL" DEVIN_ROLE="$ROLE" invoke_devin "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
+      ;;
+    grok)
+      # GROK_ROLE picks the permission class: reviewer and analyst read,
+      # tester and documenter edit (scripts/lib/grok.sh).
+      GROK_MODEL="$MODEL" GROK_ROLE="$ROLE" invoke_grok "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
       ;;
     *)
       echo "dispatch_role: ERROR role '${ROLE}' resolved to cli '${CLI}', which has no shell dispatch arm here — not integrated. Registered CLIs: $(_known_clis '<registry unreadable>')." >&2
@@ -1240,8 +1246,9 @@ sys.stderr.write(who + ': [lead] cli=' + cli + ' model=' + (model or '<host defa
 #
 # Shipped optional defaults (KTD-8, session-settled) are the registry's model
 # field (scripts/lib/registry.sh): opencode -> openrouter/z-ai/glm-5.3 ; kimi
-# -> kimi-code/k3 ; cursor -> cursor-grok-4.6-xhigh (explicit suffixed pin —
-# effort rides in the suffix — NEVER the Auto router). The core trio (tier
+# -> kimi-code/k3 ; grok -> grok-4.7 ; cursor -> cursor-grok-4.6-xhigh
+# (explicit suffixed pin — effort rides in the suffix — NEVER the Auto
+# router). The core trio (tier
 # "core" in the registry) is required, never enrolled. The binary per member
 # is _registry_binary (cursor through _cursor_bin), and the official install
 # command — PRINTED by setup for the user to run, never executed by Triforge —
@@ -1770,6 +1777,11 @@ sys.stderr.write('roster_write_member: [members.' + cli + '] enabled=' + enabled
 #               so login state needs a real headless call. Signed-out fails fast
 #               (no model configured, before any network round-trip) so the cap
 #               is cheap; signed-in answers the trivial READY quickly.
+#   grok     -> XAI_API_KEY set, else a cached login in $GROK_HOME/auth.json
+#               (default ~/.grok). No call: grok has no status command (`grok
+#               models` says "not authenticated" when signed in), and a READY
+#               costs tokens. A lapsed login surfaces on the first dispatch,
+#               which fails at once with "Not signed in" (deterministic).
 roster_member_auth() {
   local CLI=${1:?usage: roster_member_auth <cli>}
   local CACHE="${TMPDIR:-/tmp}/triforge_auth_${CLI}_$$"
@@ -1808,6 +1820,13 @@ roster_member_auth() {
         LINE="ok"
       else
         LINE="auth-failed: set OPENROUTER_API_KEY, or run 'opencode auth login' and connect the openrouter provider (the openrouter/z-ai/glm-5.3 default needs it)"; RC=1
+      fi
+      ;;
+    grok)
+      if [ -n "${XAI_API_KEY:-}" ] || [ -s "${GROK_HOME:-$HOME/.grok}/auth.json" ]; then
+        LINE="ok"
+      else
+        LINE="auth-failed: run 'grok login' ('grok login --device-code' on a host without a browser), or set XAI_API_KEY"; RC=1
       fi
       ;;
     kimi)
