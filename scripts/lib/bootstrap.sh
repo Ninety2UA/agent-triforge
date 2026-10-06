@@ -23,8 +23,11 @@ fi
 # writes nothing and prints nothing.
 #
 # triforge_bootstrap [--prefix <text>]
-#   The project is the current directory, as it always was for the hook; the
-#   plugin is the loader's resolved root (${_TRIFORGE_PLUGIN_ROOT}). Steps:
+#   The project is the anchor _tb_anchor names (the nearest directory from the
+#   working directory up that holds .git, else the working directory), so a
+#   call from <repo>/src sets up <repo>; the caller's working directory is
+#   left as it was. The plugin is the loader's resolved root
+#   (${_TRIFORGE_PLUGIN_ROOT}). Steps:
 #     1. ops/ skeleton (_tb_ops) — only while ops/ does not exist.
 #     2. .agents/skills/ (_tb_skills) — the portable skills, through
 #        scripts/lib/skills-sync.py and its content-digest stamp (KTD12).
@@ -43,20 +46,24 @@ fi
 #      45 refused: the worker marker or a lease root (one stderr line from
 #         _lead_only, nothing written)
 #      64 usage
-#      80 degraded: a step could not finish — a write failed, the skills
-#         refresh failed or timed out, the agy pack install failed, or the
-#         pointer could not be written or sits where the locator refuses it.
-#         The notices say which; the next call retries.
+#      80 degraded: a step could not finish — a write failed, or _tb_write
+#         refused it because a directory on its path is a symlink or a file;
+#         the skills refresh failed or timed out; the agy pack install
+#         failed; or the pointer could not be written, sits where the locator
+#         refuses it, or git could not say whether it is tracked. The notices
+#         say which; the next call retries.
 # Host: `_lead_only triforge_bootstrap --any-host` — the worker marker and the
 # lease root refuse; the lead host check (R38) does not run. The hook (a Claude
 # Code session, whichever CLI the roster names as lead), a Codex lead's tool
 # shell and a person at a terminal all call it, and every write is
-# project-local and copy-if-absent, so no lead-owned state is at stake.
+# project-local and copy-if-absent, so no lead-owned state is at stake. Every
+# file is written through _tb_write, which keeps each write inside the project
+# whatever symlinks the project holds.
 # Bash 3.2 and zsh: no arrays, no globs (zsh aborts the caller on a pattern
 # that matches nothing), no unquoted word splitting, printf for any text that
 # is not this file's own.
 triforge_bootstrap() {
-  local _TB_PREFIX="triforge_bootstrap: " _TB_DEGRADED=0 _TB_ROOT="" _TB_TIMEOUT=""
+  local _TB_PREFIX="triforge_bootstrap: " _TB_DEGRADED=0 _TB_ROOT="" _TB_TIMEOUT="" _TB_ANCHOR=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --prefix)
@@ -80,27 +87,62 @@ triforge_bootstrap() {
   elif command -v gtimeout >/dev/null 2>&1; then
     _TB_TIMEOUT=gtimeout
   fi
-  _tb_ops
-  _tb_skills
-  _tb_agy_pack
-  # Antigravity workspace settings (permission deny rules). Project-tier
-  # settings are NOT read headless (D-032: agy enforces only the user tier,
-  # ~/.gemini/antigravity-cli/settings.json, which Triforge never writes); the
-  # file documents the deny intent in agy's action syntax and covers
-  # interactive `agy` use. Triforge ships no agy hook (AGY-08 is an open watch).
-  _bootstrap_copy "${_TB_ROOT}/templates/.antigravity/settings.json" ".antigravity/settings.json"
-  _tb_codex
-  _tb_optional_clis
-  # ops/roster.toml — its own copy-if-absent step, outside the ops/ skeleton,
-  # so an upgraded project that already has ops/ still receives it; a user's
-  # roster is never overwritten. The watch registry is not bootstrapped:
-  # /cli-watch and /repo-watch are maintainer tooling in the Triforge checkout.
-  _bootstrap_copy "${_TB_ROOT}/templates/ops/roster.toml" "ops/roster.toml"
-  _tb_pointer
-  if [ "$_TB_DEGRADED" -ne 0 ]; then
+  # Every step works in the project anchor (_tb_anchor; Phase 3 review B4),
+  # not wherever the caller's shell stands, and in a subshell, so the caller's
+  # working directory never changes. The Cursor resolver runs first, here in
+  # the caller's shell, so a hit stays exported (TRIFORGE_CURSOR_BIN) for the
+  # caller and for the subshell alike.
+  _TB_ANCHOR=$(_tb_anchor) || _TB_ANCHOR=""
+  if [ -z "$_TB_ANCHOR" ] || [ ! -d "$_TB_ANCHOR" ]; then
+    _tb_note "WARNING the project directory did not resolve, so nothing was bootstrapped (the next run retries)."
     return 80
   fi
-  return 0
+  _cursor_bin >/dev/null 2>&1 || true
+  (
+    if ! cd "$_TB_ANCHOR" 2>/dev/null; then
+      _tb_note "WARNING could not enter the project directory ${_TB_ANCHOR}, so nothing was bootstrapped (the next run retries)."
+      exit 80
+    fi
+    _tb_ops
+    _tb_skills
+    _tb_agy_pack
+    # Antigravity workspace settings (permission deny rules). Project-tier
+    # settings are NOT read headless (D-032: agy enforces only the user tier,
+    # ~/.gemini/antigravity-cli/settings.json, which Triforge never writes); the
+    # file documents the deny intent in agy's action syntax and covers
+    # interactive `agy` use. Triforge ships no agy hook (AGY-08 is an open watch).
+    _bootstrap_copy "${_TB_ROOT}/templates/.antigravity/settings.json" ".antigravity/settings.json"
+    _tb_codex
+    _tb_optional_clis
+    # ops/roster.toml — its own copy-if-absent step, outside the ops/ skeleton,
+    # so an upgraded project that already has ops/ still receives it; a user's
+    # roster is never overwritten. The watch registry is not bootstrapped:
+    # /cli-watch and /repo-watch are maintainer tooling in the Triforge checkout.
+    _bootstrap_copy "${_TB_ROOT}/templates/ops/roster.toml" "ops/roster.toml"
+    _tb_pointer
+    if [ "$_TB_DEGRADED" -ne 0 ]; then
+      exit 80
+    fi
+    exit 0
+  )
+}
+
+# _tb_anchor — the project directory every step works in: the one
+# _lead_roster_path (roster.sh) puts ops/roster.toml under, the nearest
+# directory from the working directory up that holds a .git entry, else the
+# working directory itself. The lease helpers walk the same way (_lease_ctx),
+# so the bootstrap, the roster and the ledger agree on one project wherever
+# the lead's shell stands.
+_tb_anchor() {
+  local R=""
+  R=$(_lead_roster_path) || return 1
+  case "$R" in
+    /*)
+      R=${R%/ops/roster.toml}
+      printf '%s\n' "${R:-/}"
+      ;;
+    *) pwd -P ;;
+  esac
 }
 
 # _tb_note <text> — one notice on stderr: the caller's prefix, then the text
@@ -131,34 +173,159 @@ _tb_files() {
   find "$1" -mindepth 1 -maxdepth 1 -type f -name "*$2" ! -name '.*' 2>/dev/null | LC_ALL=C sort
 }
 
+# _tb_write <mode> <root> <dest> [<source>] — every file bootstrap.sh writes
+# goes through here (Phase 3 review, B1 and B2). <dest> is relative to <root>,
+# or absolute under it. Each directory from <root> down to <dest>'s parent
+# must be a real directory (checked with lstat, so a symlink never passes) or
+# absent, and is then created; a symlink or a file on that path, or a parent
+# whose physical path is not under <root>, refuses the write before anything
+# is created there. The content is <source>'s bytes (with its permission
+# bits, as cp gives them), else stdin. Modes:
+#   new      create <dest> with O_CREAT|O_EXCL|O_NOFOLLOW: anything already
+#            there, a dangling symlink included, is left alone (rc 2)
+#   replace  create a file under an unpredictable name beside <dest> the same
+#            exclusive way, write it, then rename it over <dest>: a symlink at
+#            <dest> is replaced, never written through, and no predictable
+#            temp name exists for anyone to plant a link at
+#   append   append to an existing regular file opened O_APPEND|O_NOFOLLOW
+# rc 0 written · 1 an I/O error · 2 exists (new) · 3 refused: the path leaves
+# <root> · 4 a directory could not be created. On rc 3 and 4 stdout names the
+# directory (relative to <root>); otherwise nothing is printed, and the caller
+# words the notice.
+_TB_WRITE_PY='
+import os, secrets, stat, sys
+mode, root, dest = sys.argv[1], os.path.realpath(sys.argv[2]), sys.argv[3]
+src = sys.argv[4] if len(sys.argv) > 4 else ""
+rel = os.path.relpath(dest, root) if os.path.isabs(dest) else os.path.normpath(dest)
+parts = rel.split(os.sep)
+if rel in ("", ".") or parts[0] == "..":
+    print(rel)
+    sys.exit(3)
+try:
+    cur, seen = root, []
+    for part in parts[:-1]:
+        cur = os.path.join(cur, part)
+        seen.append(part)
+        try:
+            st = os.lstat(cur)
+        except FileNotFoundError:
+            try:
+                os.mkdir(cur, 0o777)
+            except OSError:
+                print(os.sep.join(seen))
+                sys.exit(4)
+            st = os.lstat(cur)
+        if not stat.S_ISDIR(st.st_mode):
+            print(os.sep.join(seen))
+            sys.exit(3)
+    final = os.path.join(root, rel)
+    parent = os.path.realpath(os.path.dirname(final))
+    if parent != root and not parent.startswith(root + os.sep):
+        print(os.path.dirname(rel) or ".")
+        sys.exit(3)
+    perm = 0o666
+    if src:
+        with open(src, "rb") as f:
+            data = f.read()
+        perm = os.stat(src).st_mode & 0o777
+    else:
+        data = sys.stdin.buffer.read()
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    def create(path):
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow, perm)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+        except OSError:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            raise
+    if mode == "new":
+        try:
+            create(final)
+        except FileExistsError:
+            sys.exit(2)
+    elif mode == "replace":
+        tmp = ""
+        for _ in range(8):
+            cand = os.path.join(os.path.dirname(final), ".triforge-tmp-" + secrets.token_hex(8))
+            try:
+                create(cand)
+            except FileExistsError:
+                continue
+            tmp = cand
+            break
+        if not tmp:
+            sys.exit(1)
+        try:
+            os.rename(tmp, final)
+        except OSError:
+            os.unlink(tmp)
+            raise
+    elif mode == "append":
+        fd = os.open(final, os.O_WRONLY | os.O_APPEND | nofollow)
+        with os.fdopen(fd, "ab") as f:
+            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                sys.exit(3)
+            f.write(data)
+    else:
+        sys.exit(64)
+except OSError:
+    sys.exit(1)
+'
+_tb_write() {
+  python3 -c "$_TB_WRITE_PY" "$@" 2>/dev/null
+}
+
+# _tb_write_refused <dest> <directory> — the notice for a write _tb_write
+# refused (rc 3); the run is degraded.
+_tb_write_refused() {
+  _tb_note "WARNING $1 not written: ${2:-a directory on its path} is a symlink or not a directory, so the file would land outside this project, and Triforge writes only inside it (copy it by hand if that place is yours to change)."
+  _TB_DEGRADED=1
+}
+
 # _bootstrap_copy <src> <dest> — provision a template file into the project,
-# copy-if-absent so user customizations survive. Creates the parent dir. Never
-# aborts the caller on a filesystem error (read-only dir, a path component
-# that is a regular file): the step warns, marks the run degraded and is
+# copy-if-absent so user customizations survive, through _tb_write: created
+# exclusively, parent directories made as needed, and refused (with a notice)
+# when a directory on the way is a symlink or a file, so a linked .antigravity
+# or .opencode never receives a copy outside the project. Never aborts the
+# caller on a filesystem error: the step warns, marks the run degraded and is
 # skipped, so every other bootstrap step still runs.
 _bootstrap_copy() {
-  local src="$1" dest="$2"
+  local src="$1" dest="$2" OUT="" RC=0
   [ -f "$src" ] || return 0
   [ -e "$dest" ] && return 0        # preserve an existing user file/dir
-  [ -L "$dest" ] && return 0        # and a dangling symlink, which cp would follow out of the project
-  if ! mkdir -p "$(dirname "$dest")" 2>/dev/null; then
-    _tb_note "WARNING could not create $(dirname "$dest") — skipping bootstrap of ${dest} (session continues)"
-    _TB_DEGRADED=1
-    return 0
-  fi
-  if ! cp "$src" "$dest" 2>/dev/null; then
-    _tb_note "WARNING could not copy ${dest} — skipping (session continues)"
-    _TB_DEGRADED=1
-  fi
+  [ -L "$dest" ] && return 0        # and a dangling symlink, which a copy would follow out of the project
+  OUT=$(_tb_write new . "$dest" "$src" < /dev/null) || RC=$?
+  case "$RC" in
+    0|2) ;;
+    3) _tb_write_refused "$dest" "$OUT" ;;
+    4)
+      _tb_note "WARNING could not create ${OUT:-$(dirname "$dest")} — skipping bootstrap of ${dest} (session continues)"
+      _TB_DEGRADED=1
+      ;;
+    *)
+      _tb_note "WARNING could not copy ${dest} — skipping (session continues)"
+      _TB_DEGRADED=1
+      ;;
+  esac
   return 0
 }
 
 # _tb_ops — step 1: ops/solutions, ops/decisions, ops/archive and the skeleton
 # MEMORY.md, CHANGELOG.md, AGENTS.md and GOALS.md from templates/ops/, only
-# while ops/ does not exist: an existing ops/ is the project's.
+# while ops/ does not exist: an existing ops/ is the project's. An ops that is
+# a dangling symlink or a file is refused; one linked to a directory counts as
+# existing, and ops/roster.toml's own copy refuses to write through it.
 _tb_ops() {
   local F
   [ ! -d ops ] || return 0
+  if [ -L ops ] || [ -e ops ]; then
+    _tb_write_refused "ops/" "ops"
+    return 0
+  fi
   if ! mkdir -p ops/solutions ops/decisions ops/archive 2>/dev/null; then
     _tb_note "WARNING could not create ops/ — the ops skeleton was not bootstrapped (the next run retries)."
     _TB_DEGRADED=1
@@ -284,7 +451,7 @@ _tb_agy_agents_missing() {
 
 # _tb_agy_pack — step 3 (see the block comment above).
 _tb_agy_pack() {
-  local SHIPPED="" INSTALLED="" LISTED="" BEFORE="" AFTER="" RC=0 MISSING="" TMP=""
+  local SHIPPED="" INSTALLED="" LISTED="" BEFORE="" AFTER="" RC=0 MISSING="" OUT=""
   [ -n "$_TB_TIMEOUT" ] || return 0
   command -v agy >/dev/null 2>&1 || return 0
   SHIPPED=$(_tb_json_version "${_TB_ROOT}/antigravity-agents/plugin.json")
@@ -316,18 +483,18 @@ _tb_agy_pack() {
     _TB_DEGRADED=1
     return 0
   fi
-  # Temp file + rename: a bare redirect would follow a symlink planted at the
-  # stamp path. A failed write leaves the old stamp; the next call reinstalls.
-  TMP="${_TB_AGY_STAMP}.tmp.$$"
-  if mkdir -p .claude 2>/dev/null && {
-       printf '%s\n' "<!-- runtime state: Antigravity agent pack version last installed by triforge_bootstrap (regenerated on each reinstall) -->"
-       printf 'version=%s\n' "$SHIPPED"
-       printf 'installed=%s\n' "$(date +%Y-%m-%d)"
-       printf 'importedAt=%s\n' "${AFTER:-unknown}"
-     } > "$TMP" 2>/dev/null; then
-    mv -f "$TMP" "$_TB_AGY_STAMP" 2>/dev/null || rm -f "$TMP" 2>/dev/null || true
-  else
-    rm -f "$TMP" 2>/dev/null || true
+  # _tb_write replace: an exclusive temp file renamed over the stamp, so a
+  # symlink planted at the stamp path, or at any temp name, is never written
+  # through. A failed write leaves the old stamp; the next call reinstalls.
+  RC=0
+  OUT=$({
+    printf '%s\n' "<!-- runtime state: Antigravity agent pack version last installed by triforge_bootstrap (regenerated on each reinstall) -->"
+    printf 'version=%s\n' "$SHIPPED"
+    printf 'installed=%s\n' "$(date +%Y-%m-%d)"
+    printf 'importedAt=%s\n' "${AFTER:-unknown}"
+  } | _tb_write replace . "$_TB_AGY_STAMP") || RC=$?
+  if [ "$RC" -eq 3 ]; then
+    _tb_write_refused "$_TB_AGY_STAMP" "$OUT"
   fi
   if [ -z "$MISSING" ]; then
     _tb_note "Antigravity agent pack installed ${INSTALLED:-none} -> ${SHIPPED} (importedAt ${BEFORE:-none} -> ${AFTER:-unknown}; agy agents lists all four Triforge agents)."
@@ -388,8 +555,12 @@ _tb_codex() {
   # to the new name once — a user-modified file is moved, never deleted or
   # overwritten — and drop the now-empty .codex/agents/ only when it IS empty
   # (rmdir, never rm -rf). If both files exist the user resolves it by hand.
-  if [ -f ".codex/agents/agents.toml" ]; then
-    if [ ! -e ".codex/triforge-agents.toml" ]; then
+  if [ -f ".codex/agents/agents.toml" ] && ! _tb_dir_in_project ".codex/agents"; then
+    # moving the file out of a linked .codex/agents would delete it there
+    _tb_note "WARNING .codex/agents is a symlink or resolves outside this project, so .codex/agents/agents.toml was not moved to .codex/triforge-agents.toml (Triforge writes only inside the project) — move it by hand if that file is yours."
+    _TB_DEGRADED=1
+  elif [ -f ".codex/agents/agents.toml" ]; then
+    if [ ! -e ".codex/triforge-agents.toml" ] && [ ! -L ".codex/triforge-agents.toml" ]; then
       if mv ".codex/agents/agents.toml" ".codex/triforge-agents.toml" 2>/dev/null; then
         rmdir ".codex/agents" 2>/dev/null || true
         _tb_note "moved .codex/agents/agents.toml to .codex/triforge-agents.toml (Codex sweeps .codex/agents/*.toml as per-agent role files and warned on it; the file content is unchanged)."
@@ -407,7 +578,7 @@ _tb_codex() {
   # template (_tb_is_3x_codex_hooks) is replaced once by the 4.0 template. An
   # edited copy is the user's and is left alone.
   if [ -f "${_TB_ROOT}/templates/.codex/hooks.json" ] && _tb_is_3x_codex_hooks ".codex/hooks.json"; then
-    if cp "${_TB_ROOT}/templates/.codex/hooks.json" ".codex/hooks.json" 2>/dev/null; then
+    if _tb_write replace . ".codex/hooks.json" "${_TB_ROOT}/templates/.codex/hooks.json" < /dev/null > /dev/null; then
       _tb_note "replaced .codex/hooks.json — the unchanged 3.x copy appended a line to ops/CHANGELOG.md from every Codex session, lease workers included; attribution now comes from the lease ledger."
     else
       _tb_note "WARNING could not replace the 3.x .codex/hooks.json, which writes ops/CHANGELOG.md from every Codex session — copy templates/.codex/hooks.json over it by hand."
@@ -447,9 +618,9 @@ _tb_codex() {
 #     headless-hooks-dead / CUR-07 --sandbox-doesn't-confine / CUR-08
 #     --mode-plan-is-read-only facts. No afterFileEdit attribution hook is
 #     shipped (CUR-06 FAIL); builder attribution is lead-side from the lease
-#     ledger. _cursor_bin runs in this shell, so a hit stays exported
-#     (TRIFORGE_CURSOR_BIN) for the caller: the hook's detection loop then
-#     looks the binary up instead of probing again.
+#     ledger. triforge_bootstrap already ran _cursor_bin in the caller's
+#     shell, so this call looks up the exported TRIFORGE_CURSOR_BIN, and the
+#     hook's detection loop does too, instead of probing again.
 _tb_optional_clis() {
   local F=""
   if command -v opencode >/dev/null 2>&1; then
@@ -497,19 +668,25 @@ TB_CURSOR_TPL_EOF
 # locator would accept it:
 #   - <top>/.agents is a real directory (not a symlink, not resolving
 #     elsewhere) and the pointer path is absent or a regular file;
-#   - git does not track it under any letter case, and git can say so;
+#   - git does not track it under any letter case, and git can say so: a git
+#     that fails for any reason other than "not a git repository" (a
+#     .git/config it cannot parse, say), or says that beside a .git entry,
+#     writes no pointer;
 #   - the root resolves outside <top> and outside the main checkout of a
 #     linked worktree. When the root IS <top> or the main checkout (the
 #     Triforge checkout as its own project) nothing is written: the locator
 #     finds that root from its own location. A root strictly inside the
-#     project gets one notice, since the locator refuses a pointer there;
+#     project (a vendored copy) is refused with a WARNING and rc 80, since
+#     the locator refuses a pointer there;
 #   - git ignores it. An existing rule counts (a project that ignores
 #     /.agents/, a global excludes file); otherwise .agents/.gitignore gets
 #     one — created holding `*.local`, the documented rule, or, when the user
 #     already has that file, with /triforge-plugin-root.local appended, so a
 #     rule of the user's is never widened — and git check-ignore confirms it
-#     before the pointer is written. The project's root .gitignore and its
-#     instruction files are never edited. Outside git, .agents/.gitignore is
+#     before the pointer is written. A .agents/.gitignore git tracks is
+#     never edited: the pointer is refused and the notice names the line to
+#     add. The project's root .gitignore and its instruction files are never
+#     edited either. Outside git, .agents/.gitignore is
 #     created when absent, so the file stays ignored once the project is.
 # Git runs read-only through _tb_git: inherited GIT_* that would redirect it
 # unset, hooks and fsmonitor off (the KTD18 per-invocation overrides that need
@@ -518,8 +695,25 @@ _TB_POINTER=".agents/triforge-plugin-root.local"
 
 _tb_git() {
   env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT \
-      GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0 \
+      GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0 LC_ALL=C \
       git -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"
+}
+
+# _tb_git_marker_above — 0 when the working directory or one of its parents
+# holds a .git entry: git's own answer "not a git repository" is then not to
+# be trusted (a broken .git, a GIT_CEILING_DIRECTORIES above it).
+_tb_git_marker_above() {
+  local D=""
+  D=$(pwd -P 2>/dev/null) || return 1
+  while :; do
+    if [ -e "${D}/.git" ] || [ -L "${D}/.git" ]; then
+      return 0
+    fi
+    if [ -z "$D" ] || [ "$D" = "/" ]; then
+      return 1
+    fi
+    D=${D%/*}
+  done
 }
 
 # _tb_phys <dir> — physical path of an existing directory, spelled as on disk
@@ -536,23 +730,37 @@ _tb_pointer_refused() {
   _TB_DEGRADED=1
 }
 
-# _tb_ignore_rule <.agents dir> — add the ignore rule to <dir>/.gitignore and
-# print what was done (the pointer notice carries it); rc 1 after a notice
-# when that file is not a regular file or cannot be written. Called in a
-# $(...), so the caller marks the run degraded on rc 1.
+# _tb_ignore_rule <top> <git> — add the ignore rule to <top>/.agents/.gitignore
+# and print what was done (the pointer notice carries it); rc 1 after a notice
+# when that file is not a regular file, cannot be written, or (<git> = yes) is
+# tracked: a tracked .agents/.gitignore is the project's, in a protected tree,
+# and an edit would ride along with the next `git commit -a` (Phase 3 review
+# B5), so the notice names the line to add instead. Called in a $(...), so the
+# caller marks the run degraded on rc 1.
 _tb_ignore_rule() {
-  local GI="$1/.gitignore"
+  local GI="$1/.agents/.gitignore" RC=0
   if [ -L "$GI" ] || { [ -e "$GI" ] && [ ! -f "$GI" ]; }; then
     _tb_pointer_refused ".agents/.gitignore is not a regular file, so git could not be made to ignore the pointer"
     return 1
   fi
+  if [ -n "${2:-}" ]; then
+    _tb_git -C "$1" ls-files --error-unmatch -- ":(icase).agents/.gitignore" >/dev/null 2>&1 || RC=$?
+    if [ "$RC" -eq 0 ]; then
+      _tb_pointer_refused "git tracks .agents/.gitignore, which Triforge does not edit, and nothing there ignores the pointer; add the line /triforge-plugin-root.local to it yourself"
+      return 1
+    fi
+    if [ "$RC" -ne 1 ]; then
+      _tb_pointer_refused "git could not say whether .agents/.gitignore is tracked (git ls-files rc ${RC})"
+      return 1
+    fi
+  fi
   if [ -f "$GI" ]; then
     if { if [ -s "$GI" ] && [ -n "$(tail -c 1 "$GI" 2>/dev/null)" ]; then printf '\n'; fi
-         printf '/triforge-plugin-root.local\n'; } >> "$GI" 2>/dev/null; then
+         printf '/triforge-plugin-root.local\n'; } | _tb_write append "$1" "$GI" > /dev/null; then
       printf '%s' "appended /triforge-plugin-root.local to .agents/.gitignore"
       return 0
     fi
-  elif mkdir -p "$1" 2>/dev/null && printf '*.local\n' > "$GI" 2>/dev/null; then
+  elif printf '*.local\n' | _tb_write new "$1" "$GI" > /dev/null; then
     printf '%s' "created .agents/.gitignore (*.local)"
     return 0
   fi
@@ -561,15 +769,34 @@ _tb_ignore_rule() {
 }
 
 _tb_pointer() {
-  local ROOT="" TOP="" MAIN="" COMMON="" GIT="" PDIR="" PFILE="" CUR="" RC=0 IGNORE="" TMP=""
+  local ROOT="" TOP="" MAIN="" COMMON="" GIT="" GITOUT="" PDIR="" PFILE="" CUR="" RC=0 IGNORE="" OUT=""
   ROOT=$(_tb_phys "$_TB_ROOT") || ROOT=""
   if [ -z "$ROOT" ]; then
     _tb_pointer_refused "the plugin root ${_TB_ROOT} did not resolve to a directory"
     return 0
   fi
-  if command -v git >/dev/null 2>&1 && [ "$(_tb_git rev-parse --is-inside-work-tree 2>/dev/null || true)" = "true" ]; then
-    GIT=yes
-    TOP=$(_tb_git rev-parse --show-toplevel 2>/dev/null) || TOP=""
+  # Inside git, outside git, or unknown (Phase 3 review B3). Only git's own
+  # "not a git repository", with no .git entry here or above, means outside:
+  # any other failure (a .git/config git cannot parse, a dubious-ownership
+  # refusal, no git binary beside a .git) leaves the tracked check undone, so
+  # no pointer is written — a tracked one would otherwise be replaced.
+  if command -v git >/dev/null 2>&1; then
+    GITOUT=$(_tb_git rev-parse --is-inside-work-tree 2>&1) || RC=$?
+    if [ "$RC" -eq 0 ] && [ "$GITOUT" = "true" ]; then
+      GIT=yes
+      TOP=$(_tb_git rev-parse --show-toplevel 2>/dev/null) || TOP=""
+      if [ -z "$TOP" ]; then
+        _tb_pointer_refused "git could not name this repository's top level"
+        return 0
+      fi
+    elif [ "$RC" -eq 0 ] || ! printf '%s\n' "$GITOUT" | grep -q 'not a git repository' || _tb_git_marker_above; then
+      _tb_pointer_refused "git could not say whether this directory is in a repository ($(printf '%s\n' "$GITOUT" | head -1 | cut -c1-120)), so whether git tracks the pointer is unknown"
+      return 0
+    fi
+    RC=0
+  elif _tb_git_marker_above; then
+    _tb_pointer_refused "git could not run (no git on PATH) beside a .git directory, so whether git tracks the pointer is unknown"
+    return 0
   fi
   [ -n "$TOP" ] || TOP=$(pwd -P 2>/dev/null) || TOP=""
   TOP=$(_tb_phys "$TOP") || TOP=""
@@ -589,14 +816,14 @@ _tb_pointer() {
   fi
   case "$ROOT/" in
     "$TOP"/*)
-      _tb_note "no plugin-root pointer written: the plugin root ${ROOT} lies inside this project, where the locator refuses one — a lead that exports no plugin root reaches the at- skills only from a plugin install outside the project."
+      _tb_pointer_refused "the plugin root ${ROOT} lies inside this project, where the locator refuses a pointer"
       return 0
       ;;
   esac
   if [ -n "$MAIN" ]; then
     case "$ROOT/" in
       "$MAIN"/*)
-        _tb_note "no plugin-root pointer written: the plugin root ${ROOT} lies inside this project's main checkout, where the locator refuses one — a lead that exports no plugin root reaches the at- skills only from a plugin install outside the project."
+        _tb_pointer_refused "the plugin root ${ROOT} lies inside this project's main checkout, where the locator refuses a pointer"
         return 0
         ;;
     esac
@@ -639,7 +866,7 @@ _tb_pointer() {
     RC=0
     _tb_git -C "$TOP" check-ignore -q -- "$_TB_POINTER" >/dev/null 2>&1 || RC=$?
     if [ "$RC" -eq 1 ]; then
-      IGNORE=$(_tb_ignore_rule "$PDIR") || { _TB_DEGRADED=1; return 0; }   # a $(...) subshell: its own flag is lost
+      IGNORE=$(_tb_ignore_rule "$TOP" "$GIT") || { _TB_DEGRADED=1; return 0; }   # a $(...) subshell: its own flag is lost
       RC=0
       _tb_git -C "$TOP" check-ignore -q -- "$_TB_POINTER" >/dev/null 2>&1 || RC=$?
       if [ "$RC" -eq 1 ]; then
@@ -652,7 +879,7 @@ _tb_pointer() {
       return 0
     fi
   elif [ ! -e "${PDIR}/.gitignore" ] && [ ! -L "${PDIR}/.gitignore" ]; then
-    IGNORE=$(_tb_ignore_rule "$PDIR") || { _TB_DEGRADED=1; return 0; }
+    IGNORE=$(_tb_ignore_rule "$TOP" "") || { _TB_DEGRADED=1; return 0; }
   fi
   if [ "$CUR" = "$ROOT" ]; then
     if [ -n "$IGNORE" ]; then
@@ -660,15 +887,18 @@ _tb_pointer() {
     fi
     return 0
   fi
-  TMP="${PFILE}.tmp.$$"
-  if mkdir -p "$PDIR" 2>/dev/null && {
-       printf '%s\n' "# Agent Triforge plugin root for this checkout, written by triforge_bootstrap (per user, untracked; rewritten when the plugin moves)."
-       printf '%s\n' "$ROOT"
-     } > "$TMP" 2>/dev/null && mv -f "$TMP" "$PFILE" 2>/dev/null; then
-    _tb_note "wrote the plugin-root pointer ${_TB_POINTER} (${ROOT})${IGNORE:+; ${IGNORE}} — the at- skills read it when no plugin root is exported."
-  else
-    rm -f "$TMP" 2>/dev/null || true
-    _tb_pointer_refused "could not write ${_TB_POINTER}"
-  fi
+  # _tb_write replace: an exclusive temp file beside the pointer, renamed over
+  # it (Phase 3 review B1: the old predictable <pointer>.tmp.<pid> opened with
+  # `>` wrote through a symlink planted at that name).
+  RC=0
+  OUT=$({
+    printf '%s\n' "# Agent Triforge plugin root for this checkout, written by triforge_bootstrap (per user, untracked; rewritten when the plugin moves)."
+    printf '%s\n' "$ROOT"
+  } | _tb_write replace "$TOP" "$PFILE") || RC=$?
+  case "$RC" in
+    0) _tb_note "wrote the plugin-root pointer ${_TB_POINTER} (${ROOT})${IGNORE:+; ${IGNORE}} — the at- skills read it when no plugin root is exported." ;;
+    3) _tb_pointer_refused "${OUT:-.agents} is a symlink or not a directory" ;;
+    *) _tb_pointer_refused "could not write ${_TB_POINTER}" ;;
+  esac
   return 0
 }

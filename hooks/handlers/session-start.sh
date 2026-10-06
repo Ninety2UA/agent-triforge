@@ -48,11 +48,47 @@ _ss_on_exit() {
 }
 trap _ss_on_exit EXIT
 
-# Ensure .claude/ directory exists for project-local state files
-mkdir -p .claude
+# The project anchor (Phase 3 review B4): the nearest directory, from the
+# session's working directory up, holding a .git entry (where
+# _lead_roster_path and the lease helpers put ops/), else the working
+# directory. The hook runs there, as triforge_bootstrap does, so a session
+# opened in a monorepo subdirectory reads and writes the one ops/, roster and
+# runtime state the helpers use. Only the instruction-file notices (R40)
+# look at the directory the session started in, because that is where Claude
+# Code reads CLAUDE.md and AGENTS.md from. Inline, not the helper's
+# _lead_roster_path: it must work when the helper does not load.
+SS_START_DIR=$(pwd -P 2>/dev/null || pwd)
+SS_ANCHOR=$SS_START_DIR
+SS_D=$SS_START_DIR
+while [ -n "$SS_D" ]; do
+  if [ -e "${SS_D}/.git" ] || [ -L "${SS_D}/.git" ]; then
+    SS_ANCHOR=$SS_D
+    break
+  fi
+  if [ "$SS_D" = "/" ]; then
+    break
+  fi
+  SS_D=${SS_D%/*}
+  if [ -z "$SS_D" ]; then SS_D=/; fi
+done
+case "${CLAUDE_PLUGIN_ROOT:-}" in
+  ""|/*) ;;
+  *) CLAUDE_PLUGIN_ROOT="${SS_START_DIR}/${CLAUDE_PLUGIN_ROOT}" ;;   # a relative root names the start directory's child
+esac
+cd "$SS_ANCHOR" 2>/dev/null || SS_ANCHOR=$SS_START_DIR
 
-# Clean stale state files from previous sessions
-rm -f .claude/context-monitor.local.md
+# _ss_claude_dir — 0 when .claude is a real directory of the project (not a
+# symlink, not a file): only then does the hook touch anything under it
+# (Phase 3 review B7). A .claude linked elsewhere holds another place's files.
+_ss_claude_dir() {
+  [ -d .claude ] && [ ! -L .claude ]
+}
+
+# Clean stale state files from previous sessions (the context monitor keeps
+# its state under TMPDIR now; this removes a copy an older version left).
+if _ss_claude_dir; then
+  rm -f .claude/context-monitor.local.md
+fi
 
 # Timeout binary (GNU coreutils `timeout`, or `gtimeout` on macOS). Every
 # external-CLI call in this hook and in triforge_bootstrap runs under it; when
@@ -102,20 +138,20 @@ fi
 # _cursor_bin, since the binary that answered may be an `agent`, not the name).
 # [ -t 0 ] at hook time is best-effort — hooks often run with stdin piped —
 # documented as such; the enrollment branch treats "no" as headless and enrolls
-# shipped defaults silently. With no helper loaded nothing is detected, and
-# SS_HELPER_NOTICE says so — whether the loader failed or CLAUDE_PLUGIN_ROOT
-# named no loader at all (unset, or a root without scripts/invoke-external.sh).
+# shipped defaults silently. With no helper loaded nothing is detected, no
+# file is written, and SS_HELPER_NOTICE says so — whether the loader failed or
+# CLAUDE_PLUGIN_ROOT named no loader at all (unset, or a root without
+# scripts/invoke-external.sh). The content is built here and written once,
+# through the helper's _tb_write (Phase 3 review B7): an exclusive temp file
+# renamed into place, refused when .claude is a symlink or a file, so neither
+# a link planted at a temp name nor a linked .claude can redirect the write.
 ROSTER_DETECTED=".claude/roster-detected.local.md"
+ROSTER_DETECTED_NOTICE=""
 OPTIONAL_DETECTED_COUNT=0
 DETECTED_OPTIONAL=()
 if [ -t 0 ]; then INTERACTIVE_SIGNAL="yes"; else INTERACTIVE_SIGNAL="no"; fi
-# Written to a temp file and moved into place (like the two stamps): a bare
-# redirect would follow a repo-shipped symlink at .claude/roster-detected.local.md.
-ROSTER_DETECTED_TMP="${ROSTER_DETECTED}.tmp.$$"
-{
-  echo "<!-- runtime state: optional roster CLI detection, regenerated each session start -->"
-  echo "interactive=${INTERACTIVE_SIGNAL}"
-} > "$ROSTER_DETECTED_TMP"
+SS_DETECTED="<!-- runtime state: optional roster CLI detection, regenerated each session start -->
+interactive=${INTERACTIVE_SIGNAL}"
 SS_OPTIONAL_ROWS=""
 if [ -n "$SS_HELPER" ]; then
   SS_OPTIONAL_ROWS=$(cli_table optional binary resolver 2>/dev/null || true)
@@ -140,9 +176,11 @@ while IFS=$'\t' read -r -u 3 CLI_NAME CLI_BIN CLI_RESOLVER; do
       [ -z "$CLI_VERSION" ] && CLI_VERSION=$("$CLI_BIN" -V 2>/dev/null | head -1 || true)
     fi
     [ -z "$CLI_VERSION" ] && CLI_VERSION="unknown"
-    echo "${CLI_NAME}|${CLI_VERSION}|$(date +%Y-%m-%d)" >> "$ROSTER_DETECTED_TMP"
+    SS_DETECTED="${SS_DETECTED}
+${CLI_NAME}|${CLI_VERSION}|$(date +%Y-%m-%d)"
     if [ -n "$CLI_RESOLVER" ]; then
-      echo "${CLI_NAME}_bin=${CLI_BIN}" >> "$ROSTER_DETECTED_TMP"
+      SS_DETECTED="${SS_DETECTED}
+${CLI_NAME}_bin=${CLI_BIN}"
     fi
     OPTIONAL_DETECTED_COUNT=$((OPTIONAL_DETECTED_COUNT + 1))
     DETECTED_OPTIONAL+=("$CLI_NAME")
@@ -150,7 +188,15 @@ while IFS=$'\t' read -r -u 3 CLI_NAME CLI_BIN CLI_RESOLVER; do
 done 3<<SS_OPTIONAL_EOF
 ${SS_OPTIONAL_ROWS}
 SS_OPTIONAL_EOF
-mv -f "$ROSTER_DETECTED_TMP" "$ROSTER_DETECTED" 2>/dev/null || rm -f "$ROSTER_DETECTED_TMP" 2>/dev/null || true
+if [ -n "$SS_HELPER" ]; then
+  SS_W_RC=0
+  printf '%s\n' "$SS_DETECTED" | _tb_write replace . "$ROSTER_DETECTED" > /dev/null || SS_W_RC=$?
+  if [ "$SS_W_RC" -eq 3 ]; then
+    # .claude, the file's only directory, is a symlink or a file. A standing
+    # state (it repeats until fixed), so no "session-start:" prefix.
+    ROSTER_DETECTED_NOTICE="WARNING: ${ROSTER_DETECTED} not written: .claude is a symlink or not a directory, so the file would land outside this project, and the hook writes only inside it."
+  fi
+fi
 
 # First-detection enrollment trigger (R37). For each optional CLI detected THIS
 # session with no [members.<cli>] entry yet:
@@ -287,6 +333,9 @@ fi
 # file: each line names the edit and leaves it to the user.
 CLAUDE_FLOOR="2.1.277"
 INSTRUCTION_NOTICES=""
+# These notices are about the directory the session started in (see the
+# anchor at the top); the hook goes back to the anchor after the tip below.
+cd "$SS_START_DIR" 2>/dev/null || true
 # The instruction files Claude Code reads in a directory, and this project's
 # physical path (/tmp and /var are symlinks on macOS).
 SS_INSTRUCTION_FILES="CLAUDE.md .claude/CLAUDE.md CLAUDE.local.md"
@@ -475,6 +524,7 @@ AGENTS_MD_TIP=""
 if [ ! -e "AGENTS.md" ] && [ ! -L "AGENTS.md" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/AGENTS.md" ]; then
   AGENTS_MD_TIP="\nTip: No AGENTS.md in this project. Triforge's pointer block (the short section that tells every agent this project runs the framework) ships as the plugin's templates/AGENTS.md. Copy it: cp \"$(_ss_prose "$CLAUDE_PLUGIN_ROOT")/templates/AGENTS.md\" ./AGENTS.md"
 fi
+cd "$SS_ANCHOR" 2>/dev/null || true   # back to the anchor (see the top): ops/ and the rest live there
 
 # Check for existing state
 HAS_STATE=""
@@ -603,6 +653,9 @@ fi
 if [ -n "$SS_HELPER_NOTICE" ]; then
   MSG="$MSG\n${SS_HELPER_NOTICE}"
 fi
+if [ -n "$ROSTER_DETECTED_NOTICE" ]; then
+  MSG="$MSG\n${ROSTER_DETECTED_NOTICE}"
+fi
 
 # Migration notices: triforge_bootstrap's, in the order it printed them (one
 # per step that acted this session, silent otherwise; a state it left alone on
@@ -693,7 +746,12 @@ SS_HELPER_NOTICE=""
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh" ]; then
   SS_HELPER_RC=0
   SS_HELPER_ERR=""
-  SS_HELPER_TMP=$(mktemp -d "${TMPDIR:-/tmp}/triforge-session-start.XXXXXX" 2>/dev/null || mktemp -d ".claude/triforge-session-start.XXXXXX" 2>&1) || SS_HELPER_RC=$?
+  # The private temp dir: under TMPDIR, else under the project's own .claude
+  # (created here only as a real directory; a linked .claude is never used,
+  # Phase 3 review B7). mktemp -d makes it with a random name, mode 0700.
+  SS_HELPER_TMP=$(mktemp -d "${TMPDIR:-/tmp}/triforge-session-start.XXXXXX" 2>/dev/null \
+                  || { { _ss_claude_dir || { [ ! -e .claude ] && [ ! -L .claude ] && mkdir .claude 2>/dev/null; }; } \
+                       && _ss_claude_dir && mktemp -d ".claude/triforge-session-start.XXXXXX" 2>&1; }) || SS_HELPER_RC=$?
   if [ "$SS_HELPER_RC" -eq 0 ]; then
     set +e
     ( set -e

@@ -1056,6 +1056,44 @@ rm -rf "$_S8B" "$_S8"
 #            with one REFUSED line; triforge_bootstrap itself returns 45 under
 #            the marker and from inside a lease root with it unset; nothing
 #            written in either project
+#   tmplink  (Phase 3 review B1) symlinks planted at the two temp names the
+#            bootstrap used to write through, <pointer>.tmp.<pid> -> the
+#            project's AGENTS.md and <agy stamp>.tmp.<pid> -> a file in HOME,
+#            with the pid read from the shell before it runs the bootstrap:
+#            rc 0, both targets byte-identical, the pointer and the stamp
+#            regular files
+#   dirlink  (B2) .antigravity, .opencode, .kimi-code, .cursor and ops are
+#            symlinks into a throwaway "HOME" (opencode, kimi and cursor-agent
+#            stubs on PATH): rc 80, one WARNING naming each refused write,
+#            nothing created in any target
+#   gitfail  (B3) a tracked pointer naming another path, then a malformed
+#            .git/config: rc 80, a WARNING that git could not answer, the
+#            pointer byte-identical and no .agents/.gitignore written
+#   writer   _tb_write, the one writer, against a symlink at the final path:
+#            new leaves it (rc 2), replace swaps the link for a regular file,
+#            append refuses (rc 1), a file standing where a directory belongs
+#            refuses (rc 3, named); the link's target never changes
+#   subdir   (final3 B4) the setup block run from <repo>/src, then session
+#            start from there: nothing lands under src/, <repo>/ops/ and the
+#            rest are set up as in "setup", the hook's own state goes to
+#            <repo>/.claude, and the hook prints no one-time notice
+#   trackgi  (B5) a committed .agents/.gitignore that does not ignore the
+#            pointer: rc 80, a WARNING naming the line to add, the file
+#            byte-identical and unmodified in git status, no pointer
+#   refuse   (B6) the pointer writer's refusals, each rc 80 with its own
+#            WARNING and nothing written: .agents a symlink inside a git repo
+#            and in a plain directory (the link target stays empty), a
+#            pointer git tracks (byte-identical), and a plugin root vendored
+#            inside the project (no pointer). Each case fails against a copy
+#            of the code with its guard removed
+#   hookrt   (B7) the hook's own runtime file: a symlink planted at the temp
+#            name it used to write through, .claude/roster-detected.local.md
+#            .tmp.<pid> -> a HOME file (the pid is the bash that execs the
+#            hook, read first), and a .claude that is a symlink to a
+#            directory holding a legacy context-monitor.local.md: rc 0, no
+#            crash, both targets byte-identical and nothing added to the
+#            linked directory, a WARNING naming the refused file, and in the
+#            real .claude the runtime file a regular file
 # Negative control: the setup block with its triforge_bootstrap line removed
 # leaves a fresh project without ops/, so the ops/ check above sees the call.
 _S21="${WORK}/self21"
@@ -1218,12 +1256,174 @@ _S21_RC=$(_s21_run leaseroot /bin/bash "$_S21/lr/wt" "$REPO_ROOT/skills/at-setup
 { grep -qx 'rc=45' "$_S21/leaseroot.out" && grep -q "^triforge_bootstrap: REFUSED .*lease root" "$_S21/leaseroot.err"; } \
   || _S21_FAIL="$_S21_FAIL leaseroot($(tr '\n' ' ' < "$_S21/leaseroot.out" | cut -c1-60)$(_s21_first "$_S21/leaseroot.err" 100))"
 [ "$(_s21_list "$_S21/lr")" = "$_S21_LL" ] || _S21_FAIL="$_S21_FAIL leaseroot-wrote($(_s21_diff "$(_s21_list "$_S21/lr")" "$_S21_LL"))"
+# tmplink (B1): the pid is the bash that runs the bootstrap ($$ there), read
+# before it starts; the links are planted, then it is let go
+_s21_until() { # _s21_until <file> — wait up to 10 s for <file> to exist
+  local N=0
+  while [ ! -e "$1" ] && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done
+}
+mkdir -p "$_S21/proj-tmp/.agents" "$_S21/proj-tmp/.claude"
+( cd "$_S21/proj-tmp" && GIT_CONFIG_NOSYSTEM=1 HOME="$_S21/home" git init -q ) >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-tmp"
+printf '# acme agents\n' > "$_S21/proj-tmp/AGENTS.md"
+printf 'user-tier file\n' > "$_S21/home/victim.conf"
+_S21_SUMV=$(cksum "$_S21/proj-tmp/AGENTS.md" "$_S21/home/victim.conf")
+( cd "$_S21/proj-tmp" && env -u CLAUDE_PLUGIN_ROOT -u TRIFORGE_LEASE_WORKER HOME="$_S21/home" PATH="$_S21/bin:$PATH" TMPDIR="$_S21/tmp" GIT_CONFIG_NOSYSTEM=1 \
+    /bin/bash -c 'echo $$ > "$1"; N=0; while [ ! -e "$2" ] && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done; source "$3/scripts/invoke-external.sh"; R=0; triforge_bootstrap || R=$?; echo "rc=$R"' \
+    s21 "$_S21/tmplink.pid" "$_S21/tmplink.go" "$REPO_ROOT" < /dev/null > "$_S21/tmplink.out" 2> "$_S21/tmplink.err" ) &
+_S21_BG=$!
+_s21_until "$_S21/tmplink.pid"
+_S21_PID=$(cat "$_S21/tmplink.pid" 2>/dev/null || true)
+ln -s ../AGENTS.md "$_S21/proj-tmp/.agents/triforge-plugin-root.local.tmp.${_S21_PID}"
+ln -s "$_S21/home/victim.conf" "$_S21/proj-tmp/.claude/agy-pack-version.local.md.tmp.${_S21_PID}"
+: > "$_S21/tmplink.go"
+wait "$_S21_BG" || true
+grep -qx 'rc=0' "$_S21/tmplink.out" || _S21_FAIL="$_S21_FAIL tmplink-rc($(tr '\n' ' ' < "$_S21/tmplink.out" | cut -c1-40)$(_s21_first "$_S21/tmplink.err" 100))"
+[ "$(cksum "$_S21/proj-tmp/AGENTS.md" "$_S21/home/victim.conf")" = "$_S21_SUMV" ] || _S21_FAIL="$_S21_FAIL tmplink-wrote-through-a-planted-temp-symlink"
+{ [ -f "$_S21/proj-tmp/.agents/triforge-plugin-root.local" ] && [ ! -L "$_S21/proj-tmp/.agents/triforge-plugin-root.local" ] && [ "$(_s21_pointer "$_S21/proj-tmp")" = "$_S21_ROOT" ]; } \
+  || _S21_FAIL="$_S21_FAIL tmplink-pointer-not-a-regular-file-naming-the-root"
+{ [ -f "$_S21/proj-tmp/.claude/agy-pack-version.local.md" ] && [ ! -L "$_S21/proj-tmp/.claude/agy-pack-version.local.md" ]; } || _S21_FAIL="$_S21_FAIL tmplink-stamp-not-a-regular-file"
+# dirlink (B2): each per-CLI directory and ops/ is a symlink into a throwaway "HOME"
+mkdir -p "$_S21/bin-cli" "$_S21/fakehome/.gemini/antigravity-cli" "$_S21/fakehome/opencode" "$_S21/fakehome/kimi" "$_S21/fakehome/cursor" "$_S21/fakehome/ops" "$_S21/proj-link"
+for _stub in opencode kimi cursor-agent; do
+  printf '#!/bin/sh\n# probe stub (SELF-21): present on PATH; never run for real\necho "2026.09.10-abcdef"\nexit 0\n' > "$_S21/bin-cli/$_stub"
+  chmod +x "$_S21/bin-cli/$_stub"
+done
+unset _stub
+( cd "$_S21/proj-link" && GIT_CONFIG_NOSYSTEM=1 HOME="$_S21/home" git init -q ) >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-link"
+ln -s "$_S21/fakehome/.gemini/antigravity-cli" "$_S21/proj-link/.antigravity"
+ln -s "$_S21/fakehome/opencode" "$_S21/proj-link/.opencode"
+ln -s "$_S21/fakehome/kimi" "$_S21/proj-link/.kimi-code"
+ln -s "$_S21/fakehome/cursor" "$_S21/proj-link/.cursor"
+ln -s "$_S21/fakehome/ops" "$_S21/proj-link/ops"
+_S21_RC=$(_s21_run dirlink /bin/bash "$_S21/proj-link" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh" PATH="$_S21/bin-cli:$_S21/bin:$PATH" TRIFORGE_CURSOR_BIN="$_S21/bin-cli/cursor-agent")
+grep -qx 'rc=80' "$_S21/dirlink.out" || _S21_FAIL="$_S21_FAIL dirlink-rc($(tr '\n' ' ' < "$_S21/dirlink.out" | cut -c1-40))"
+_S21_LEAK=$(cd "$_S21/fakehome" && find . -type f 2>/dev/null | LC_ALL=C sort | tr '\n' ' ' || true)
+[ -z "$_S21_LEAK" ] || _S21_FAIL="$_S21_FAIL dirlink-wrote-outside(${_S21_LEAK% })"
+for _s21_d in .antigravity/settings.json .opencode/opencode.json .opencode/agents/builder.md .kimi-code/AGENTS.md .cursor/agents/builder.md .cursor/README.md ops/roster.toml; do
+  grep -q "^triforge_bootstrap: WARNING ${_s21_d} not written: " "$_S21/dirlink.err" || _S21_FAIL="$_S21_FAIL dirlink-no-warning-for-${_s21_d}"
+done
+unset _s21_d
+# gitfail (B3): a tracked pointer naming another path, then a .git/config git cannot parse
+mkdir -p "$_S21/proj-git/.agents"
+printf '/elsewhere/agent-triforge\n' > "$_S21/proj-git/.agents/triforge-plugin-root.local"
+( cd "$_S21/proj-git" && export GIT_CONFIG_NOSYSTEM=1 HOME="$_S21/home" && git init -q && git add -f .agents/triforge-plugin-root.local \
+    && git -c user.name=probe -c user.email=probe@triforge.local commit -qm pointer ) >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-git"
+printf '[core\n' >> "$_S21/proj-git/.git/config"
+_S21_SUMP=$(cksum "$_S21/proj-git/.agents/triforge-plugin-root.local")
+_S21_RC=$(_s21_run gitfail /bin/bash "$_S21/proj-git" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+grep -qx 'rc=80' "$_S21/gitfail.out" || _S21_FAIL="$_S21_FAIL gitfail-rc($(tr '\n' ' ' < "$_S21/gitfail.out" | cut -c1-40))"
+grep -q '^triforge_bootstrap: WARNING no plugin-root pointer written: git could not ' "$_S21/gitfail.err" || _S21_FAIL="$_S21_FAIL gitfail-no-warning"
+[ "$(cksum "$_S21/proj-git/.agents/triforge-plugin-root.local")" = "$_S21_SUMP" ] || _S21_FAIL="$_S21_FAIL gitfail-tracked-pointer-rewritten"
+[ ! -e "$_S21/proj-git/.agents/.gitignore" ] || _S21_FAIL="$_S21_FAIL gitfail-wrote-.agents/.gitignore"
+# writer: the primitive itself, against a symlink at the final path
+mkdir -p "$_S21/wr/d"
+printf 'target\n' > "$_S21/wr/target"
+for _s21_m in new rep app; do ln -s ../target "$_S21/wr/d/$_s21_m"; done
+unset _s21_m
+_S21_WR=$( cd "$_S21/wr" && /bin/bash -c 'source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 9
+R=0; echo x | _tb_write new . d/new || R=$?; echo "new=$R"
+R=0; echo x | _tb_write replace . d/rep || R=$?; echo "replace=$R"
+R=0; echo x | _tb_write append . d/app || R=$?; echo "append=$R"
+R=0; echo x | _tb_write new . target/x || R=$?; echo "file-parent=$R"' s21 "$REPO_ROOT" < /dev/null 2>/dev/null || true )
+_S21_FAIL="${_S21_FAIL}$(_self_expect writer "$_S21_WR" '^new=2$' '^replace=0$' '^append=1$' '^target$' '^file-parent=3$')"
+[ "$(cat "$_S21/wr/target")" = target ] || _S21_FAIL="$_S21_FAIL writer-link-target-changed"
+{ [ -L "$_S21/wr/d/new" ] && [ -L "$_S21/wr/d/app" ] && [ -f "$_S21/wr/d/rep" ] && [ ! -L "$_S21/wr/d/rep" ] && [ "$(cat "$_S21/wr/d/rep")" = x ]; } \
+  || _S21_FAIL="$_S21_FAIL writer-final-path-state"
+# subdir (B4): the block and session start from <repo>/src
+mkdir -p "$_S21/proj-sub/src"
+( cd "$_S21/proj-sub" && GIT_CONFIG_NOSYSTEM=1 HOME="$_S21/home" git init -q ) >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-sub"
+_S21_LS=$(_s21_list "$_S21/proj-sub/src")
+_S21_RC=$(_s21_run subdir /bin/bash "$_S21/proj-sub/src" "$REPO_ROOT/skills/at-setup" "$_S21/setup.sh")
+[ "$_S21_RC" = 0 ] || _S21_FAIL="$_S21_FAIL subdir-rc=${_S21_RC}($(_s21_first "$_S21/subdir.err"))"
+[ "$(_s21_list "$_S21/proj-sub/src")" = "$_S21_LS" ] || _S21_FAIL="$_S21_FAIL subdir-wrote-under-src($(_s21_diff "$(_s21_list "$_S21/proj-sub/src")" "$_S21_LS"))"
+_s21_provisioned subdir "$_S21/proj-sub"
+_S21_HOOK_RC=0
+_S21_HOOK=$( cd "$_S21/proj-sub/src" && HOME="$_S21/home" TMPDIR="$_S21/tmp" PATH="$_S21/bin:$PATH" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GIT_CONFIG_NOSYSTEM=1 \
+               /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" < /dev/null 2>&1 ) || _S21_HOOK_RC=$?
+_S21_HOOK_N=$(printf '%s\n' "$_S21_HOOK" | grep -c '^session-start:' || true)
+{ [ "$_S21_HOOK_RC" -eq 0 ] && [ "$_S21_HOOK_N" -eq 0 ] && ! printf '%s\n' "$_S21_HOOK" | grep -q 'hook crashed'; } \
+  || _S21_FAIL="$_S21_FAIL subdir-hook(rc=${_S21_HOOK_RC},lines=${_S21_HOOK_N}:$({ printf '%s\n' "$_S21_HOOK" | grep -m1 '^session-start:\|hook crashed' || true; } | cut -c1-120))"
+[ "$(_s21_list "$_S21/proj-sub/src")" = "$_S21_LS" ] || _S21_FAIL="$_S21_FAIL subdir-hook-wrote-under-src($(_s21_diff "$(_s21_list "$_S21/proj-sub/src")" "$_S21_LS"))"
+[ -f "$_S21/proj-sub/.claude/roster-detected.local.md" ] || _S21_FAIL="$_S21_FAIL subdir-hook-state-not-at-the-anchor"
+# trackgi (B5): a committed .agents/.gitignore that does not ignore the pointer
+mkdir -p "$_S21/proj-gi/.agents"
+printf 'node_modules/\n' > "$_S21/proj-gi/.agents/.gitignore"
+( cd "$_S21/proj-gi" && export GIT_CONFIG_NOSYSTEM=1 HOME="$_S21/home" && git init -q && git add .agents/.gitignore \
+    && git -c user.name=probe -c user.email=probe@triforge.local commit -qm ignore ) >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-gi"
+_S21_SUMG=$(cksum "$_S21/proj-gi/.agents/.gitignore")
+_S21_RC=$(_s21_run trackgi /bin/bash "$_S21/proj-gi" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+grep -qx 'rc=80' "$_S21/trackgi.out" || _S21_FAIL="$_S21_FAIL trackgi-rc($(tr '\n' ' ' < "$_S21/trackgi.out" | cut -c1-40))"
+grep -q '^triforge_bootstrap: WARNING no plugin-root pointer written: git tracks \.agents/\.gitignore.*/triforge-plugin-root\.local' "$_S21/trackgi.err" || _S21_FAIL="$_S21_FAIL trackgi-no-warning"
+[ "$(cksum "$_S21/proj-gi/.agents/.gitignore")" = "$_S21_SUMG" ] || _S21_FAIL="$_S21_FAIL trackgi-tracked-file-edited"
+[ -z "$(_s21_git "$_S21/proj-gi" status --porcelain -- .agents/.gitignore 2>/dev/null)" ] || _S21_FAIL="$_S21_FAIL trackgi-git-status-modified"
+[ ! -e "$_S21/proj-gi/.agents/triforge-plugin-root.local" ] || _S21_FAIL="$_S21_FAIL trackgi-pointer-written"
+# refuse (B6): the pointer writer's own refusals
+_s21_refused() { # _s21_refused <label> <notice ERE> — rc 80 and the WARNING, from <label>.out/.err
+  grep -qx 'rc=80' "$_S21/$1.out" || _S21_FAIL="$_S21_FAIL $1-rc($(tr '\n' ' ' < "$_S21/$1.out" | cut -c1-40))"
+  grep -q "^triforge_bootstrap: WARNING no plugin-root pointer written: $2" "$_S21/$1.err" || _S21_FAIL="$_S21_FAIL $1-no-refusal-notice($({ grep -m1 'plugin-root pointer' "$_S21/$1.err" || true; } | cut -c1-100))"
+}
+mkdir -p "$_S21/proj-lg" "$_S21/proj-lp" "$_S21/lt-git" "$_S21/lt-plain" "$_S21/proj-tp/.agents" "$_S21/proj-in/vendor/agent-triforge"
+( cd "$_S21/proj-lg" && GIT_CONFIG_NOSYSTEM=1 HOME="$_S21/home" git init -q ) >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-lg"
+ln -s "$_S21/lt-git" "$_S21/proj-lg/.agents"
+ln -s "$_S21/lt-plain" "$_S21/proj-lp/.agents"
+for _s21_c in lg lp; do
+  _S21_RC=$(_s21_run "link$_s21_c" /bin/bash "$_S21/proj-$_s21_c" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+  _s21_refused "link$_s21_c" '\.agents is a symlink [(]the locator'
+done
+unset _s21_c
+[ -z "$(ls -A "$_S21/lt-git" "$_S21/lt-plain" 2>/dev/null | grep -v '^/\|^$' || true)" ] || _S21_FAIL="$_S21_FAIL link-wrote-into-the-target($(ls -A "$_S21/lt-git" "$_S21/lt-plain" 2>/dev/null | grep -v '^/\|^$' | tr '\n' ' ' || true))"
+printf '/elsewhere/agent-triforge\n' > "$_S21/proj-tp/.agents/triforge-plugin-root.local"
+( cd "$_S21/proj-tp" && export GIT_CONFIG_NOSYSTEM=1 HOME="$_S21/home" && git init -q && git add -f .agents/triforge-plugin-root.local \
+    && git -c user.name=probe -c user.email=probe@triforge.local commit -qm pointer ) >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-tp"
+_S21_SUMT=$(cksum "$_S21/proj-tp/.agents/triforge-plugin-root.local")
+_S21_RC=$(_s21_run trackptr /bin/bash "$_S21/proj-tp" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+_s21_refused trackptr 'git tracks \.agents/triforge-plugin-root\.local'
+[ "$(cksum "$_S21/proj-tp/.agents/triforge-plugin-root.local")" = "$_S21_SUMT" ] || _S21_FAIL="$_S21_FAIL trackptr-tracked-pointer-rewritten"
+( cd "$_S21/proj-in" && GIT_CONFIG_NOSYSTEM=1 HOME="$_S21/home" git init -q ) >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-in"
+for _s21_d in .claude-plugin scripts skills templates codex-agents antigravity-agents opencode-agents kimi-agents cursor-agents; do
+  [ ! -d "$REPO_ROOT/$_s21_d" ] || cp -R "$REPO_ROOT/$_s21_d" "$_S21/proj-in/vendor/agent-triforge/" 2>/dev/null || _S21_FAIL="$_S21_FAIL vendor-copy-$_s21_d"
+done
+unset _s21_d
+printf 'source "%s/scripts/invoke-external.sh"\nR=0; triforge_bootstrap || R=$?\necho "rc=$R"\n' "$_S21/proj-in/vendor/agent-triforge" > "$_S21/direct-in.sh"
+_S21_RC=$(_s21_run inside /bin/bash "$_S21/proj-in" "$REPO_ROOT/skills/at-setup" "$_S21/direct-in.sh")
+_s21_refused inside 'the plugin root .*/vendor/agent-triforge lies inside this project'
+[ ! -e "$_S21/proj-in/.agents/triforge-plugin-root.local" ] || _S21_FAIL="$_S21_FAIL inside-pointer-written"
+# hookrt (B7): session start's own runtime file under .claude
+mkdir -p "$_S21/proj-ht/.claude" "$_S21/proj-hl" "$_S21/claude-target"
+for _s21_d in proj-ht proj-hl; do
+  ( cd "$_S21/$_s21_d" && GIT_CONFIG_NOSYSTEM=1 HOME="$_S21/home" git init -q ) >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-$_s21_d"
+done
+unset _s21_d
+printf 'user-tier file\n' > "$_S21/home/victim2.conf"
+printf 'legacy monitor state\n' > "$_S21/claude-target/context-monitor.local.md"
+ln -s "$_S21/claude-target" "$_S21/proj-hl/.claude"
+_S21_SUMH=$(cksum "$_S21/home/victim2.conf" "$_S21/claude-target/context-monitor.local.md")
+( cd "$_S21/proj-ht" && env -u TRIFORGE_LEASE_WORKER HOME="$_S21/home" TMPDIR="$_S21/tmp" PATH="$_S21/bin:$PATH" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GIT_CONFIG_NOSYSTEM=1 \
+    /bin/bash -c 'echo $$ > "$1"; N=0; while [ ! -e "$2" ] && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done; exec /bin/bash "$3"' \
+    s21 "$_S21/hookrt.pid" "$_S21/hookrt.go" "$REPO_ROOT/hooks/handlers/session-start.sh" < /dev/null > "$_S21/hookrt.out" 2>&1 ) &
+_S21_BG=$!
+_s21_until "$_S21/hookrt.pid"
+_S21_PID=$(cat "$_S21/hookrt.pid" 2>/dev/null || true)
+ln -s "$_S21/home/victim2.conf" "$_S21/proj-ht/.claude/roster-detected.local.md.tmp.${_S21_PID}"
+: > "$_S21/hookrt.go"
+_S21_HOOK_RC=0
+wait "$_S21_BG" || _S21_HOOK_RC=$?
+[ "$_S21_HOOK_RC" -eq 0 ] && ! grep -q 'hook crashed' "$_S21/hookrt.out" || _S21_FAIL="$_S21_FAIL hookrt-tmp-rc=${_S21_HOOK_RC}($({ grep -m1 'hook crashed' "$_S21/hookrt.out" || true; } | cut -c1-80))"
+{ [ -f "$_S21/proj-ht/.claude/roster-detected.local.md" ] && [ ! -L "$_S21/proj-ht/.claude/roster-detected.local.md" ] && grep -q '^interactive=' "$_S21/proj-ht/.claude/roster-detected.local.md"; } \
+  || _S21_FAIL="$_S21_FAIL hookrt-runtime-file-not-a-regular-file"
+_S21_HOOK_RC=0
+_S21_HOOK=$( cd "$_S21/proj-hl" && env -u TRIFORGE_LEASE_WORKER HOME="$_S21/home" TMPDIR="$_S21/tmp" PATH="$_S21/bin:$PATH" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GIT_CONFIG_NOSYSTEM=1 \
+               /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" < /dev/null 2>&1 ) || _S21_HOOK_RC=$?
+{ [ "$_S21_HOOK_RC" -eq 0 ] && ! printf '%s\n' "$_S21_HOOK" | grep -q 'hook crashed'; } || _S21_FAIL="$_S21_FAIL hookrt-link-rc=${_S21_HOOK_RC}"
+printf '%s\n' "$_S21_HOOK" | grep -q '^WARNING: \.claude/roster-detected\.local\.md not written: \.claude is a symlink' || _S21_FAIL="$_S21_FAIL hookrt-link-no-warning"
+[ "$(cksum "$_S21/home/victim2.conf" "$_S21/claude-target/context-monitor.local.md" 2>/dev/null || true)" = "$_S21_SUMH" ] || _S21_FAIL="$_S21_FAIL hookrt-target-changed"
+[ "$(ls -A "$_S21/claude-target" | tr '\n' ' ')" = "context-monitor.local.md " ] || _S21_FAIL="$_S21_FAIL hookrt-wrote-into-linked-.claude($(ls -A "$_S21/claude-target" | tr '\n' ' '))"
 # negative control: without the bootstrap line no ops/ appears
 _S21_RC=$(_s21_run neg /bin/bash "$_S21/proj-neg" "$REPO_ROOT/skills/at-setup" "$_S21/setup-neg.sh")
 [ ! -e "$_S21/proj-neg/ops" ] || _S21_FAIL="$_S21_FAIL negative-control(ops/-without-the-bootstrap-line)"
 _S21_CAP="the project bootstrap runs from the at- skills without any hook: at-setup's block provisions ops/, the skills copy, the per-CLI files and an untracked plugin-root pointer; at-build's preflight then loads the helpers from the pointer; idempotent under bash and zsh; refused under the worker marker and in a lease root (KTD11, R37)"
 if [ -z "$_S21_FAIL" ]; then
-  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; negative control: the block without its triforge_bootstrap line leaves no ops/" "static"
+  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; B1: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; B2: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; B3: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; B4: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); B5: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; B6: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; B7: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; negative control: the block without its triforge_bootstrap line leaves no ops/" "static"
 else
   row "SELF-21" "claude" "$_S21_CAP" "FAIL" "mismatch:$(printf '%s' "$_S21_FAIL" | cut -c1-900)" "static"
 fi
