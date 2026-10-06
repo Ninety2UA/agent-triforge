@@ -559,15 +559,15 @@ def write_verified(path, new_raw, verify, who):
     os.replace(tmp, path)
 '
 
-# _lead_roster_path — the checkout's roster: <nearest ancestor holding .git>/
-# ops/roster.toml (physical path, no git run — like _lease_ctx's walk), or the
-# relative ops/roster.toml outside any repository.
-_lead_roster_path() {
+# _checkout_top — the checkout this shell stands in: the nearest directory
+# from the physical working directory up that holds a .git entry (no git run —
+# like _lease_ctx's walk), printed; rc 1 outside any repository.
+_checkout_top() {
   local D
   D=$(pwd -P 2>/dev/null) || D=""
   while [ -n "$D" ]; do
     if [ -e "${D}/.git" ] || [ -L "${D}/.git" ]; then
-      printf '%s/ops/roster.toml\n' "${D%/}"
+      printf '%s\n' "$D"
       return 0
     fi
     if [ "$D" = "/" ]; then
@@ -576,18 +576,37 @@ _lead_roster_path() {
     D=${D%/*}
     if [ -z "$D" ]; then D=/; fi
   done
-  printf 'ops/roster.toml\n'
+  return 1
 }
 
-# _lead_read <who> <3|4> — resolve_lead's and roster_lead_entry's one read.
+# _lead_roster_path — the checkout's roster: <_checkout_top>/ops/roster.toml,
+# or the relative ops/roster.toml outside any repository.
+_lead_roster_path() {
+  local TOP
+  if TOP=$(_checkout_top); then
+    printf '%s/ops/roster.toml\n' "${TOP%/}"
+  else
+    printf 'ops/roster.toml\n'
+  fi
+}
+
+# _lead_read <who> <3|4> [<cli>] — the one read behind resolve_lead,
+# roster_lead_entry and lead_resolve_as. With <cli>, the row is <cli> as the
+# lead: rc 5 first when it cannot lead, then the roster's model and effort when
+# it is this checkout's lead, else its own lead defaults.
 _lead_read() {
-  RL_WHO="$1" RL_COLS="$2" RL_ROSTER="$(_lead_roster_path)" python3 -c "
+  RL_WHO="$1" RL_COLS="$2" RL_AS="${3:-}" RL_ROSTER="$(_lead_roster_path)" python3 -c "
 import os, sys
 ${_TRIFORGE_CLIS_PY}
 ${_LEAD_PY}
-who, path = os.environ['RL_WHO'], os.environ['RL_ROSTER']
+who, path, want = os.environ['RL_WHO'], os.environ['RL_ROSTER'], os.environ['RL_AS']
+if want and want not in lead_capable():
+    sys.stderr.write(who + ': ERROR ' + repr(want) + ' cannot lead: the lead is one of ' + ', '.join(lead_capable()) + '\n')
+    sys.exit(5)
 roster = lead_roster(lead_toml(who), path, who)
 cli, model, effort, explicit = lead_load(roster, lambda msg: lead_reject(who, path, msg))
+if want and cli != want:
+    cli, model, effort = want, CLIS[want]['model'], LEAD_DEFAULT_EFFORT.get(want, '')
 cols = [cli, model, effort]
 if os.environ['RL_COLS'] == '4':
     cols.append('roster' if explicit else 'default')
@@ -655,20 +674,7 @@ resolve_lead() {
 # lead; otherwise resolve_lead's rc. coordinate.sh --dry-run --lead composes
 # another lead's launch line with it.
 lead_resolve_as() {
-  RA_CLI="${1:?usage: lead_resolve_as <cli>}" RL_ROSTER="$(_lead_roster_path)" python3 -c "
-import os, sys
-${_TRIFORGE_CLIS_PY}
-${_LEAD_PY}
-who, path, want = 'lead_resolve_as', os.environ['RL_ROSTER'], os.environ['RA_CLI']
-if want not in lead_capable():
-    sys.stderr.write(who + ': ERROR ' + repr(want) + ' cannot lead: the lead is one of ' + ', '.join(lead_capable()) + '\\n')
-    sys.exit(5)
-roster = lead_roster(lead_toml(who), path, who)
-cli, model, effort, explicit = lead_load(roster, lambda msg: lead_reject(who, path, msg))
-if cli != want:
-    model, effort = CLIS[want]['model'], LEAD_DEFAULT_EFFORT.get(want, '')
-print('\\t'.join([want, model, effort]))
-"
+  _lead_read lead_resolve_as 3 "${1:?usage: lead_resolve_as <cli>}"
 }
 
 # roster_lead_entry — what the roster configures, for at-setup:

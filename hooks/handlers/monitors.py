@@ -18,7 +18,7 @@ output line can start with "{" (Claude Code parses such hook stdout as JSON).
 Exit codes: 0 done (a degraded state is a stderr note, never a code); 3 the
 context monitor needs the lead's tool vocabulary (the handler reads it through
 the helper library and calls again with CM_VOCAB_FRESH=1, CM_VOCAB=<name TAB
-read TAB action>); anything else is a crash the handler reports.
+read>); anything else is a crash the handler reports.
 """
 import hashlib
 import json
@@ -38,7 +38,13 @@ def clean(value, limit=300):
 
 
 class Inert(Exception):
-    """The state directory can't be trusted; the hook does nothing this call."""
+    """The state directory path can't be trusted; the hook does nothing this
+    call. base is the trusted per-user directory above it, "" when path is
+    that base itself."""
+
+    def __init__(self, path, base=""):
+        super().__init__(path)
+        self.base = base
 
 
 def checkout_root():
@@ -52,9 +58,10 @@ def checkout_root():
     return here
 
 
-def _private_dir(path):
+def _private_dir(path, base=""):
     """Create path (0700) when missing; refuse a symlink, a non-directory or
-    another user's directory; take group and other bits away."""
+    another user's directory (Inert(path, base)); take group and other bits
+    away."""
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | os.O_NOFOLLOW
     try:
         fd = os.open(path, flags)
@@ -66,35 +73,32 @@ def _private_dir(path):
         try:
             fd = os.open(path, flags)
         except OSError as exc:
-            raise Inert(path) from exc
+            raise Inert(path, base) from exc
     except OSError as exc:
-        raise Inert(path) from exc
+        raise Inert(path, base) from exc
     try:
         st = os.fstat(fd)
         if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
-            raise Inert(path)
+            raise Inert(path, base)
         if st.st_mode & 0o077:
             os.fchmod(fd, 0o700)
             if os.fstat(fd).st_mode & 0o077:
-                raise Inert(path)
+                raise Inert(path, base)
     finally:
         os.close(fd)
     return path
 
 
 def state_dirs(root):
-    """(base, checkout dir) — both checked private; raises Inert naming the one that is not."""
+    """The checkout's state directory — it and the per-user base above it
+    checked private; raises Inert naming the one that is not."""
     base = os.path.join(os.environ.get("TMPDIR") or "/tmp", "triforge-monitors-%d" % os.getuid())
     _private_dir(base)
     name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(root))[:64] or "root"
     digest = hashlib.sha1(root.encode("utf-8", "surrogateescape")).hexdigest()[:12]
     child = os.path.join(base, name + "-" + digest)
-    try:
-        _private_dir(child)
-    except Inert as exc:
-        exc.base = base
-        raise
-    return base, child
+    _private_dir(child, base)
+    return child
 
 
 def read_text(path):
@@ -142,9 +146,8 @@ def inert_note(exc, who, what, session):
     the base is trusted and only the checkout's directory is not)."""
     message = (who + ": NOTE " + str(exc) + " is not a private directory (a symlink, not a directory, "
                "another user's, or its permissions can't be narrowed) — " + what + " is off (R21)")
-    base = getattr(exc, "base", "")
-    if base:
-        note_once(os.path.join(base, os.path.basename(str(exc)) + "." + who + "." + session + ".inert-noted"), message)
+    if exc.base:
+        note_once(os.path.join(exc.base, os.path.basename(str(exc)) + "." + who + "." + session + ".inert-noted"), message)
     else:
         sys.stderr.write(clean(message, 600) + "\n")
 
@@ -333,7 +336,7 @@ def main_context():
     session = session_of(d)
     root = checkout_root()
     try:
-        _base, child = state_dirs(root)
+        child = state_dirs(root)
     except Inert as exc:
         inert_note(exc, "context-monitor", "paralysis detection", session)
         return 0
@@ -355,8 +358,8 @@ def main_context():
         if len(cached) < 2 or cached[0] != key:
             return 3
         vocab = cached[1]
-    fields = (vocab.split("\t") + ["", "", ""])[:3]
-    lead_name, read_vocab = fields[0], fields[1].split()
+    lead_name, read_list = (vocab.split("\t") + ["", ""])[:2]
+    read_vocab = read_list.split()
     if not read_vocab:
         note_once(os.path.join(child, session + ".vocab-noted"),
                   "context-monitor: NOTE the " + (lead_name or "current") + " lead's tool vocabulary is empty or the lead "
@@ -395,7 +398,7 @@ def main_failures():
     d = load_payload()
     session = session_of(d)
     try:
-        _base, child = state_dirs(checkout_root())
+        child = state_dirs(checkout_root())
     except Inert as exc:
         inert_note(exc, "tool-failure-monitor", "failure tracking", session)
         return 0
@@ -418,8 +421,9 @@ def main_failures():
     old = read_text(state_path)
     c = counts(old, ("failure_count", "consecutive_failures"))
     if not failed:
-        if old:
-            write_text(state_path, "---\nfailure_count: %d\nconsecutive_failures: 0\n---\n" % c["failure_count"])
+        new = "---\nfailure_count: %d\nconsecutive_failures: 0\n---\n" % c["failure_count"]
+        if old and old != new:
+            write_text(state_path, new)
         return 0
     total, consecutive = c["failure_count"] + 1, c["consecutive_failures"] + 1
     write_text(state_path, "---\nfailure_count: %d\nconsecutive_failures: %d\n---\n" % (total, consecutive))

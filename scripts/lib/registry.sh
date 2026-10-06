@@ -365,15 +365,22 @@ CLIS = {
 # --dangerously-bypass-approvals-and-sandbox and --yolo; --profile[= ]<name>,
 # since a profile can set any sandbox. It fails closed: any other word that
 # still names danger-full-access, bypassPermissions or one of the dangerous
-# flags counts too. scripts/coordinate.sh splices it to decide when the
-# human's --allow-full-access is needed; scripts/validate-versions.sh runs it
-# on each shipped lead's launch line against lead.full_access. Python source
-# like _TRIFORGE_CLIS_PY: single-quoted, so no apostrophe inside.
+# flags counts too. launch_extra_words(tmpl, value): the words a
+# lead.model_argv or lead.effort_argv template adds for a value ("{}" = the
+# value). scripts/coordinate.sh splices both to decide when the human's
+# --allow-full-access is needed; scripts/validate-versions.sh runs them on each
+# shipped lead's launch line against lead.full_access. Python source like
+# _TRIFORGE_CLIS_PY: single-quoted, so no apostrophe inside.
 _LAUNCH_ACCESS_PY='
+import shlex
+
 LAUNCH_FULL_ACCESS_FLAGS = ("--dangerously-skip-permissions", "--allow-dangerously-skip-permissions",
                             "--dangerously-bypass-approvals-and-sandbox", "--yolo")
 LAUNCH_FULL_ACCESS_NAMES = ("danger-full-access", "bypasspermissions", "dangerously-skip-permissions",
                             "dangerously-bypass-approvals-and-sandbox")
+
+def launch_extra_words(tmpl, value):
+    return [w.replace("{}", value) for w in shlex.split(tmpl)]
 
 def _launch_unquote(v):
     v = str(v).strip()

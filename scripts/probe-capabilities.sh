@@ -2696,6 +2696,9 @@ U29_CDX15B="Host markers under a \`-s danger-full-access\` Codex lead (the regis
 U29_CDX16="Plugin hooks fire in an env -i \`codex exec\` worker (scratch CODEX_HOME plugin; trust-gated: with and without --dangerously-bypass-hook-trust)"
 U29_CDX17="Worker marker visible in an env -i \`codex exec\` worker's tool shell (lane flags; probe variable at the lease boundary)"
 U29_CDX18="\`codex plugin marketplace add\` + \`codex plugin add\` lists the at-* skills from the .claude-plugin/ fallback (D-048; scratch CODEX_HOME)"
+U14_CDX21="PostToolUse payload under a \`codex exec\` lead: the shell tool's name, apply_patch, the tool_response shape, the host markers in a hook process, and the paralysis monitor on the captured reads (project hooks + --dangerously-bypass-hook-trust; -s workspace-write)"
+U14_CDX22="Hook trust for a Codex lead: plugin hooks fire only with hooks.state.<key>.trusted_hash = currentHash in CODEX_HOME's config, project hooks need the project trust entry as well (scratch CODEX_HOME, no login)"
+U14_CDX23="_lease_lead_proc's premise under a \`codex exec\` lead: the parent of the tool call's process-group leader is the codex process (-s workspace-write)"
 if command -v codex >/dev/null 2>&1; then
   if _want CDX-12 || _want CDX-14 || _want CDX-15; then
     if [ "$CDX_LIVE" = 1 ]; then
@@ -2962,9 +2965,6 @@ EOF
   #         workspace-write sandbox, which the row records), and the harness,
   #         outside the sandbox, checks that the parent of the call's
   #         process-group leader is the codex process it launched
-  U14_CDX21="PostToolUse payload under a \`codex exec\` lead: the shell tool's name, apply_patch, the tool_response shape, the host markers in a hook process, and the paralysis monitor on the captured reads (project hooks + --dangerously-bypass-hook-trust; -s workspace-write)"
-  U14_CDX22="Hook trust for a Codex lead: plugin hooks fire only with hooks.state.<key>.trusted_hash = currentHash in CODEX_HOME's config, project hooks need the project trust entry as well (scratch CODEX_HOME, no login)"
-  U14_CDX23="_lease_lead_proc's premise under a \`codex exec\` lead: the parent of the tool call's process-group leader is the codex process (-s workspace-write)"
 
   if _want CDX-21; then
     if [ "$CDX_LIVE" = 1 ]; then
@@ -3110,6 +3110,13 @@ PYEOF
     # trust entries alike: Codex keys a project hook's trust on the path it was
     # given (a /var/... and a /private/var/... spelling are two keys).
     U14_FIXR=$(cd "$FIX" && pwd -P)
+    U14_TAB=$(printf '\t')
+    # _u14_trust <plugin|project> — the hooks/list key and currentHash of that
+    # source's SessionStart hook in the fixture, tab-separated, or nothing.
+    _u14_trust() {
+      (cd "$U14_FIXR" && _rwt 60 env CODEX_HOME="$CH" python3 "$WORK/u14-hooks.py" "$U14_FIXR" 45 2>/dev/null) \
+        | awk -F'\t' -v src="$1" '$1 == src && $2 == "sessionStart" { print $3 "\t" $4; exit }'
+    }
     # _u14_trustrun <label> — one no-login codex exec in the fixture under the
     # scratch home; prints "<label>:<marker files>".
     _u14_trustrun() {
@@ -3118,11 +3125,14 @@ PYEOF
       printf '%s:%s\n' "$1" "$(cd "$HM" && ls 2>/dev/null | tr '\n' ' ')"
     }
     if (cd "$WORK" && _rwt 60 env CODEX_HOME="$CH" codex plugin marketplace add "$MK" && _rwt 120 env CODEX_HOME="$CH" codex plugin add tf-probe-trust@tf-probe) > "$O.install" 2>&1; then
-      U14_PH=$(cd "$U14_FIXR" && _rwt 60 env CODEX_HOME="$CH" python3 "$WORK/u14-hooks.py" "$U14_FIXR" 45 2>/dev/null | awk -F'\t' '$1 == "plugin" && $2 == "sessionStart" { print $3 "\t" $4; exit }')
+      U14_PKEY=""; U14_PHASH=""
+      IFS="$U14_TAB" read -r U14_PKEY U14_PHASH <<U14_PLUGIN_EOF || true
+$(_u14_trust plugin)
+U14_PLUGIN_EOF
       U14_R1=$(_u14_trustrun plugin-untrusted)
       U14_R2="plugin-trusted:<no hooks/list key for the plugin's SessionStart>"
-      if [ -n "$U14_PH" ]; then
-        printf '[hooks.state."%s"]\ntrusted_hash = "%s"\n' "${U14_PH%%	*}" "${U14_PH#*	}" >> "$CH/config.toml"
+      if [ -n "$U14_PKEY" ]; then
+        printf '[hooks.state."%s"]\ntrusted_hash = "%s"\n' "$U14_PKEY" "$U14_PHASH" >> "$CH/config.toml"
         U14_R2=$(_u14_trustrun plugin-trusted)
       fi
       U14_PENV=$(cat "$HM/plugin-SessionStart" 2>/dev/null || true)
@@ -3133,14 +3143,17 @@ PYEOF
       U14_R3=$(_u14_trustrun project-untrusted)
       printf '\n[projects."%s"]\ntrust_level = "trusted"\n' "$U14_FIXR" >> "$CH/config.toml"
       U14_R4=$(_u14_trustrun project-trusted-no-hash)
-      U14_JH=$(cd "$U14_FIXR" && _rwt 60 env CODEX_HOME="$CH" python3 "$WORK/u14-hooks.py" "$U14_FIXR" 45 2>/dev/null | awk -F'\t' '$1 == "project" && $2 == "sessionStart" { print $3 "\t" $4; exit }')
+      U14_JKEY=""; U14_JHASH=""
+      IFS="$U14_TAB" read -r U14_JKEY U14_JHASH <<U14_PROJECT_EOF || true
+$(_u14_trust project)
+U14_PROJECT_EOF
       U14_R5="project-trusted-hash:<no hooks/list key for the project hook>"
-      if [ -n "$U14_JH" ]; then
-        printf '\n[hooks.state."%s"]\ntrusted_hash = "%s"\n' "${U14_JH%%	*}" "${U14_JH#*	}" >> "$CH/config.toml"
+      if [ -n "$U14_JKEY" ]; then
+        printf '\n[hooks.state."%s"]\ntrusted_hash = "%s"\n' "$U14_JKEY" "$U14_JHASH" >> "$CH/config.toml"
         U14_R5=$(_u14_trustrun project-trusted-hash)
       fi
       rm -f "$FIX/.codex/hooks.json"
-      U14_EV="${U14_R1}; ${U14_R2}; ${U14_R3}; ${U14_R4}; ${U14_R5}; plugin hook env: ${U14_PENV:-<not captured>}; plugin key: ${U14_PH%%	*}"
+      U14_EV="${U14_R1}; ${U14_R2}; ${U14_R3}; ${U14_R4}; ${U14_R5}; plugin hook env: ${U14_PENV:-<not captured>}; plugin key: ${U14_PKEY}"
       if [ "$U14_R1" = "plugin-untrusted:" ] && [ "$U14_R2" = "plugin-trusted:plugin-SessionStart " ] \
          && [ "$U14_R3" = "project-untrusted:plugin-SessionStart " ] && [ "$U14_R4" = "project-trusted-no-hash:plugin-SessionStart " ] \
          && [ "$U14_R5" = "project-trusted-hash:plugin-SessionStart project-SessionStart " ]; then
@@ -3205,8 +3218,8 @@ sh $D/report.sh" < /dev/null > "$O" 2>&1) &
     fi
   fi
 else
-  _u29_rows codex UNAVAILABLE "codex not on PATH" direct "CDX-12:$U29_CDX12" "CDX-13:$U29_CDX13" "CDX-14:$U29_CDX14" "CDX-15:$U29_CDX15" "CDX-15b:$U29_CDX15B" "CDX-16:$U29_CDX16" "CDX-17:$U29_CDX17" "CDX-18:$U29_CDX18"
-  _u29_rows codex UNAVAILABLE "codex not on PATH" direct "CDX-21:PostToolUse payload under a codex exec lead" "CDX-22:Hook trust for a Codex lead" "CDX-23:_lease_lead_proc premise under a codex exec lead"
+  _u29_rows codex UNAVAILABLE "codex not on PATH" direct "CDX-12:$U29_CDX12" "CDX-13:$U29_CDX13" "CDX-14:$U29_CDX14" "CDX-15:$U29_CDX15" "CDX-15b:$U29_CDX15B" "CDX-16:$U29_CDX16" "CDX-17:$U29_CDX17" "CDX-18:$U29_CDX18" \
+    "CDX-21:$U14_CDX21" "CDX-22:$U14_CDX22" "CDX-23:$U14_CDX23"
 fi
 
 # ------- Worker marker in the other lanes: AGY-17 OC-09 KIMI-10 CUR-13

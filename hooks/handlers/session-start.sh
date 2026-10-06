@@ -48,10 +48,10 @@ _ss_on_exit() {
 }
 trap _ss_on_exit EXIT
 
-# The project anchor (Phase 3 review B4): the nearest directory, from the
-# session's working directory up, holding a .git entry (where
-# _lead_roster_path and the lease helpers put ops/), else the working
-# directory. The hook runs there, as triforge_bootstrap does, so a session
+# The project anchor: the nearest directory, from the session's working
+# directory up, holding a .git entry (where _lead_roster_path and the lease
+# helpers put ops/), else the working directory. The hook runs there, as
+# triforge_bootstrap does, so a session
 # opened in a monorepo subdirectory reads and writes the one ops/, roster and
 # runtime state the helpers use. Only the instruction-file notices (R40)
 # look at the directory the session started in, because that is where Claude
@@ -78,8 +78,8 @@ esac
 cd "$SS_ANCHOR" 2>/dev/null || SS_ANCHOR=$SS_START_DIR
 
 # _ss_claude_dir — 0 when .claude is a real directory of the project (not a
-# symlink, not a file): only then does the hook touch anything under it
-# (Phase 3 review B7). A .claude linked elsewhere holds another place's files.
+# symlink, not a file): only then does the hook touch anything under it. A
+# .claude linked elsewhere holds another place's files.
 _ss_claude_dir() {
   [ -d .claude ] && [ ! -L .claude ]
 }
@@ -90,11 +90,13 @@ if _ss_claude_dir; then
   rm -f .claude/context-monitor.local.md
 fi
 
-# Timeout binary (GNU coreutils `timeout`, or `gtimeout` on macOS). Every
-# external-CLI call in this hook and in triforge_bootstrap runs under it; when
-# neither exists the agy pack check and the `agent` probes are SKIPPED
-# (fail-closed, mirroring invoke-external.sh — a hung CLI must not stall
-# session start) and the warning is appended to the orientation message.
+# Timeout binary (GNU coreutils `timeout`, or `gtimeout` on macOS). The
+# optional-CLI version probes below run under it when it exists (unbounded
+# without it), and `claude --version` under it or a watchdog (_ss_bounded).
+# triforge_bootstrap and _cursor_bin find their own: without one the agy pack
+# check is skipped and the Cursor `agent` probes refuse (fail-closed, as
+# invoke-external.sh is — a hung CLI must not stall session start), and the
+# warning is appended to the orientation message.
 TIMEOUT_BIN=""
 command -v timeout >/dev/null 2>&1 && TIMEOUT_BIN="timeout"
 [ -z "$TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && TIMEOUT_BIN="gtimeout"
@@ -142,9 +144,9 @@ fi
 # file is written, and SS_HELPER_NOTICE says so — whether the loader failed or
 # CLAUDE_PLUGIN_ROOT named no loader at all (unset, or a root without
 # scripts/invoke-external.sh). The content is built here and written once,
-# through the helper's _tb_write (Phase 3 review B7): an exclusive temp file
-# renamed into place, refused when .claude is a symlink or a file, so neither
-# a link planted at a temp name nor a linked .claude can redirect the write.
+# through the helper's _tb_write: an exclusive temp file renamed into place,
+# refused when .claude is a symlink or a file, so neither a link planted at a
+# temp name nor a linked .claude can redirect the write.
 ROSTER_DETECTED=".claude/roster-detected.local.md"
 ROSTER_DETECTED_NOTICE=""
 OPTIONAL_DETECTED_COUNT=0
@@ -720,6 +722,21 @@ echo 'Lead workflows (/at-<name> here, $at-<name> in a Codex prompt): at-setup a
 exit 0
 }
 
+# _ss_private_tmp — print a private temp dir (mktemp -d: a random name, mode
+# 0700) under TMPDIR, else under the project's own .claude, which is created
+# here only as a real directory (a linked .claude is never used). On failure,
+# a nonzero rc and mktemp's error, if it got that far.
+_ss_private_tmp() {
+  if mktemp -d "${TMPDIR:-/tmp}/triforge-session-start.XXXXXX" 2>/dev/null; then
+    return 0
+  fi
+  if [ ! -e .claude ] && [ ! -L .claude ]; then
+    mkdir .claude 2>/dev/null || return
+  fi
+  _ss_claude_dir || return
+  mktemp -d ".claude/triforge-session-start.XXXXXX" 2>&1
+}
+
 # The helper (scripts/invoke-external.sh) — sourced ONCE, in the subshell that
 # then runs _ss_run, so the hook reads the CLI registry (scripts/lib/registry.sh,
 # KTD7) for the optional members, their binaries and shipped models, and the
@@ -746,12 +763,7 @@ SS_HELPER_NOTICE=""
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh" ]; then
   SS_HELPER_RC=0
   SS_HELPER_ERR=""
-  # The private temp dir: under TMPDIR, else under the project's own .claude
-  # (created here only as a real directory; a linked .claude is never used,
-  # Phase 3 review B7). mktemp -d makes it with a random name, mode 0700.
-  SS_HELPER_TMP=$(mktemp -d "${TMPDIR:-/tmp}/triforge-session-start.XXXXXX" 2>/dev/null \
-                  || { { _ss_claude_dir || { [ ! -e .claude ] && [ ! -L .claude ] && mkdir .claude 2>/dev/null; }; } \
-                       && _ss_claude_dir && mktemp -d ".claude/triforge-session-start.XXXXXX" 2>&1; }) || SS_HELPER_RC=$?
+  SS_HELPER_TMP=$(_ss_private_tmp) || SS_HELPER_RC=$?
   if [ "$SS_HELPER_RC" -eq 0 ]; then
     set +e
     ( set -e

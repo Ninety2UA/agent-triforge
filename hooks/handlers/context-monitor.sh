@@ -8,8 +8,8 @@
 #
 # ON_CRASH: ALLOW — a crash must never block the tool call (R14/G7): this hook
 #   is advisory only; the EXIT trap below turns any unexpected non-zero status
-#   (set -e / set -u, e.g. an unwritable state dir) into a stderr notice +
-#   exit 0, and every explicit exit path is `exit 0`.
+#   (set -e / set -u) into a stderr notice + exit 0, a monitors.py failure
+#   is one stderr notice, and every explicit exit path is `exit 0`.
 # Exit codes: 0 ok · 2 hook deny (never used by Triforge handlers) · 64 usage ·
 #   66 no-input · 69 unavailable · 70 internal · 80 degraded (documented only —
 #   Triforge handlers always return 0).
@@ -20,8 +20,8 @@
 #   NOTE goes to stderr.
 #
 # Tool vocabulary (KTD1, R21): which tool names are reads is the lead's
-# registry data (lead.tool_vocab_read / lead.tool_vocab_action in
-# scripts/lib/registry.sh, read through lead_field), never a list here. A name
+# registry data (lead.tool_vocab_read in scripts/lib/registry.sh, read through
+# lead_field), never a list here. A name
 # in the read list is a read; "<tool>(read)" there makes a call of <tool>
 # whose command only reads (cat, sed -n, rg, git log, ...) a read — how a
 # Codex lead's shell reads count, since its hook payload names exec_command
@@ -70,10 +70,10 @@ printf '%s' "$HOOK_INPUT" | CM_PLUGIN_ROOT="$CM_PLUGIN_ROOT" python3 "${CM_HANDL
 if [ "$RC" -eq 3 ]; then
   # The lead's vocabulary is not cached for this roster and registry: read it
   # through the helper library (lead_field, KTD1), then classify with it.
-  VOCAB=$( (
+  VOCAB=$(
     # shellcheck source=/dev/null
-    source "${CM_PLUGIN_ROOT}/scripts/invoke-external.sh" >/dev/null 2>&1 && lead_field name lead.tool_vocab_read lead.tool_vocab_action 2>/dev/null
-  ) ) || VOCAB=""
+    source "${CM_PLUGIN_ROOT}/scripts/invoke-external.sh" >/dev/null 2>&1 && lead_field name lead.tool_vocab_read 2>/dev/null
+  ) || VOCAB=""
   RC=0
   printf '%s' "$HOOK_INPUT" | CM_PLUGIN_ROOT="$CM_PLUGIN_ROOT" CM_VOCAB_FRESH=1 CM_VOCAB="$VOCAB" python3 "${CM_HANDLERS}/monitors.py" context || RC=$?
 fi

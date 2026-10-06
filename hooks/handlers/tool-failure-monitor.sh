@@ -24,9 +24,8 @@
 #
 # ON_CRASH: ALLOW — a crash must never block the tool call (R14/G7): this hook
 #   is advisory only; the EXIT trap below turns any unexpected non-zero status
-#   (set -e / set -u, e.g. an unwritable state dir) into a stderr notice +
-#   exit 0, and every explicit exit path (the non-failure early return) is
-#   `exit 0`.
+#   (set -e / set -u) into a stderr notice + exit 0, a monitors.py failure is
+#   one stderr notice, and every explicit exit path is `exit 0`.
 # Exit codes: 0 ok · 2 hook deny (never used by Triforge handlers) · 64 usage ·
 #   66 no-input · 69 unavailable · 70 internal · 80 degraded (documented only —
 #   Triforge handlers always return 0).
@@ -55,12 +54,16 @@ _tf_on_exit() {
 }
 trap _tf_on_exit EXIT
 
-HOOK_INPUT=$(cat)
-TF_HANDLERS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# monitors.py reads the payload from the hook's stdin itself. When it fails
+# (no python3, no monitors.py beside this file) whatever it left unread is
+# drained, so the caller never writes into a closed pipe.
+TF_HANDLERS=${BASH_SOURCE[0]%/*}
+if [ "$TF_HANDLERS" = "${BASH_SOURCE[0]}" ]; then TF_HANDLERS=.; fi
 
 RC=0
-printf '%s' "$HOOK_INPUT" | python3 "${TF_HANDLERS}/monitors.py" failures || RC=$?
+python3 "${TF_HANDLERS}/monitors.py" failures || RC=$?
 if [ "$RC" -ne 0 ]; then
+  [ -t 0 ] || cat > /dev/null 2>&1 || true
   echo "tool-failure-monitor: WARNING the monitor failed (rc=${RC}) — advisory only, tool call continues (ON_CRASH: ALLOW)" >&2
 fi
 exit 0

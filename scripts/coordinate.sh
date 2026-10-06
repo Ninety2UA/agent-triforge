@@ -226,7 +226,7 @@ for field in ("model", "effort"):
     if "{}" not in tmpl or "\n" in value:
         notes.append("the " + e["CA_NAME"] + " registry entry has no lead." + field + "_argv, so the [lead] " + field + " " + " ".join(value.split()) + " is not passed (the host default runs)")
         continue
-    extra += [w.replace("{}", value) for w in shlex.split(tmpl)]
+    extra += launch_extra_words(tmpl, value)
 why = launch_full_access(words + extra)
 if e["CA_FULL"] == "true":
     why.append("the registry declares lead.full_access = true")
@@ -306,8 +306,12 @@ except Exception:
 # lead model reads its argument-hint, "<goal description> [--convergence ...]
 # [--team]". So the goal goes first as one double-quoted string (JSON escaping,
 # lines joined) and this script's own flags follow the closing quote: a
-# "--team" or "--convergence" inside the goal stays inside the quotes.
-GOAL_QUOTED=$(CA_GOAL="$GOAL" python3 -c 'import json, os; print(json.dumps(" ".join(os.environ["CA_GOAL"].splitlines()), ensure_ascii=False))')
+# "--team" or "--convergence" inside the goal stays inside the quotes. Only
+# the line of a lead without a goal gate carries it.
+GOAL_QUOTED=""
+if [ -z "$GOAL_GATE" ]; then
+  GOAL_QUOTED=$(CA_GOAL="$GOAL" python3 -c 'import json, os; print(json.dumps(" ".join(os.environ["CA_GOAL"].splitlines()), ensure_ascii=False))')
+fi
 
 CHECKLIST="Sprint complete ONLY when ALL of: (1) every framework phase for the goal is done or explicitly skipped with a stated reason; (2) the verification-before-completion checklist passes with evidence; (3) ops/STATE.md is written for session handoff; (4) temporary review files are archived to ops/archive/; (5) the runtime marker ops/.sprint-complete exists — created LAST, only after conditions 1-4 hold."
 
@@ -319,16 +323,17 @@ CHECKLIST="Sprint complete ONLY when ALL of: (1) every framework phase for the g
 # line invokes the at-ship skill ($<skill> mention form) and the checklist is
 # the standing completion condition, met on the sentinel alone (KTD14).
 compose_prompt() {
-  local LEASE_RESUME LEAD_LINE GATE_RULE
+  local LEASE_RESUME LEAD_LINE GATE_RULE="" WHICH="that checklist"
   LEASE_RESUME=$(lease_resume_paragraph)
   if [ -n "$GOAL_GATE" ]; then
     LEAD_LINE="${GOAL_GATE} ${CHECKLIST}"
-    GATE_RULE="Completion signal: ONLY when the ${GOAL_GATE} checklist above is fully satisfied, create the empty runtime marker ops/.sprint-complete (touch ops/.sprint-complete) as your LAST action."
+    WHICH="the ${GOAL_GATE} checklist above"
   else
     LEAD_LINE="\$at-ship ${GOAL_QUOTED} --convergence ${CONVERGENCE}${USE_TEAM:+ ${USE_TEAM}}"
     GATE_RULE="Completion checklist (this lead has no goal gate; the sentinel alone completes the sprint): ${CHECKLIST}
-Completion signal: ONLY when that checklist is fully satisfied, create the empty runtime marker ops/.sprint-complete (touch ops/.sprint-complete) as your LAST action."
+"
   fi
+  GATE_RULE="${GATE_RULE}Completion signal: ONLY when ${WHICH} is fully satisfied, create the empty runtime marker ${SENTINEL} (touch ${SENTINEL}) as your LAST action."
   PROMPT="${LEAD_LINE}
 
 You are continuing a multi-agent sprint.
@@ -363,9 +368,9 @@ launch_line() {
   printf '%s %s\n' "$LAUNCH_SHOWN" "$(CA_PROMPT="$PROMPT" python3 -c 'import os, shlex; print(shlex.quote(os.environ["CA_PROMPT"]))')"
 }
 
-# launch_notes [prefix] — each note on the model and effort flags, once.
+# launch_notes — each note on the model and effort flags, once.
 launch_notes() {
-  if [ -n "$LAUNCH_NOTES" ]; then printf '%s\n' "$LAUNCH_NOTES" | sed "s/^/${1:-note: }/"; fi
+  if [ -n "$LAUNCH_NOTES" ]; then printf '%s\n' "$LAUNCH_NOTES" | sed 's/^/note: /'; fi
 }
 
 # Dry run: print the launch line and the composed prompt (iteration 1) and
@@ -453,20 +458,17 @@ stop_fix() {
 }
 
 # integrity_gate — the lead-side integrity check before a session (KTD18).
-# Outside a git repository (no .git above: _lead_roster_path stays relative)
-# there are no leases and nothing to compare; inside one, a check that can't
-# run is a stop, like any change. The check runs against the lease root the
-# ledger was last written under (_lease_at_ledger_root, as lease_approve):
-# a shell whose TMPDIR derives another root would otherwise compare the ledger
-# with no anchors at all and adopt whatever it holds. A recorded root that is
-# gone refuses, naming TRIFORGE_LEASE_ROOT.
+# Outside a git repository (no .git above: _checkout_top fails) there are no
+# leases and nothing to compare; inside one, a check that can't run is a stop,
+# like any change. The check runs against the lease root the ledger was last
+# written under (_lease_at_ledger_root, as lease_approve): a shell whose
+# TMPDIR derives another root would otherwise compare the ledger with no
+# anchors at all and adopt whatever it holds. A recorded root that is gone
+# refuses, naming TRIFORGE_LEASE_ROOT.
 integrity_gate() {
   local RC=0
   local TRIFORGE_LEASE_ROOT="${TRIFORGE_LEASE_ROOT:-}"   # _lease_at_ledger_root may set it
-  case "$(_lead_roster_path)" in
-    /*) ;;
-    *) return 0 ;;
-  esac
+  _checkout_top >/dev/null || return 0
   if ! _lease_ctx || ! _lease_at_ledger_root coordinate.sh; then
     echo "coordinate.sh: STOPPED before starting a session — the lease root the ledger was last written under can't be used from this shell (above). Point TRIFORGE_LEASE_ROOT at the lead's lease root and rerun; an unattended session never starts on a ledger it can't check." >&2
     exit 44
@@ -486,8 +488,13 @@ integrity_gate() {
 PROGRESS_FILE="ops/STATE.md"
 ITERATION=0
 DONE=false
-RUN_LOG=$(mktemp "${TMPDIR:-/tmp}/triforge-coordinate.XXXXXX")
-trap 'rm -f "$RUN_LOG"' EXIT
+# The lead's output and the tail the failure classifier reads live in one
+# private directory (mktemp -d: a random name, mode 0700), so neither has a
+# name another user can predict and plant a link at.
+RUN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/triforge-coordinate.XXXXXX")
+trap 'rm -rf "$RUN_DIR"' EXIT
+RUN_LOG="${RUN_DIR}/run.log"
+RUN_TAIL="${RUN_DIR}/tail.log"
 
 echo "=== Multi-Agent Coordinate Loop ==="
 echo "Goal: $GOAL"
@@ -531,9 +538,9 @@ while [ "$ITERATION" -lt "$MAX_ITERATIONS" ] && [ "$DONE" = "false" ]; do
     # A failed run is classified (KTD-9) on its last lines: a deterministic
     # class (not logged in, quota spent, binary missing) repeats on every
     # fresh session, so the loop stops here instead of spending the rest.
-    tail -n 50 "$RUN_LOG" > "${RUN_LOG}.tail" 2>/dev/null || true
-    _classify_invoke_failure "$RUN_RC" "${RUN_LOG}.tail"
-    rm -f "${RUN_LOG}.tail"
+    tail -n 50 "$RUN_LOG" > "$RUN_TAIL" 2>/dev/null || true
+    _classify_invoke_failure "$RUN_RC" "$RUN_TAIL"
+    rm -f "$RUN_TAIL"
     if [ "$INVOKE_FAILURE_CLASS" = "deterministic" ]; then
       echo ""
       echo "=== Stopped at iteration $ITERATION: the ${LEAD_NAME} lead failed (exit ${RUN_RC}, class=${INVOKE_FAILURE_CLASS} reason=${_INVOKE_FAILURE_REASON:-unknown}) ===" >&2

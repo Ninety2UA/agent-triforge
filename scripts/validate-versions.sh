@@ -330,7 +330,7 @@ reg_path = os.environ["VV_REGISTRY"]
 reg = read(reg_path)
 clis = None
 env_base = []
-launch_full_access = None
+launch_full_access = launch_extra_words = None
 if reg is not None:
     m = re.search(r"^_LAUNCH_ACCESS_PY='\n(.*?)\n'$", reg, re.M | re.S)
     if not m:
@@ -341,9 +341,9 @@ if reg is not None:
         try:
             ns = {}
             exec(m.group(1), ns)  # noqa: S102 — this checkout's own registry
-            launch_full_access = ns["launch_full_access"]
+            launch_full_access, launch_extra_words = ns["launch_full_access"], ns["launch_extra_words"]
         except Exception as exc:  # noqa: BLE001 — report, do not crash
-            fails.append(reg_path + ": _LAUNCH_ACCESS_PY does not define launch_full_access: " + str(exc))
+            fails.append(reg_path + ": _LAUNCH_ACCESS_PY does not define launch_full_access and launch_extra_words: " + str(exc))
     m = re.search(r"^_TRIFORGE_CLIS_PY='\n(.*?)\n'$", reg, re.M | re.S)
     if not m:
         fails.append(reg_path + ": _TRIFORGE_CLIS_PY='...' literal not found")
@@ -445,7 +445,7 @@ if clis is not None:
                     words = shlex.split(lead["launch_argv"])
                     for f in ("model_argv", "effort_argv"):
                         if isinstance(lead.get(f), str) and lead[f]:
-                            words += [w.replace("{}", "x") for w in shlex.split(lead[f])]
+                            words += launch_extra_words(lead[f], "x")
                     why = launch_full_access(words)
                 except ValueError as exc:
                     why = None

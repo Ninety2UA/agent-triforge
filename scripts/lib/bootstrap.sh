@@ -3,8 +3,9 @@
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/roster.sh and before scripts/lib/lease-wait.sh.
-# It calls _lead_only (common.sh) and _cursor_bin (cursor.sh), resolved at call
-# time; nothing runs at source time but assignments and function definitions.
+# It calls _lead_only (common.sh), _cursor_bin (cursor.sh), _checkout_top
+# (roster.sh) and _timeout_tool (lease.sh), resolved at call time; nothing runs
+# at source time but assignments and function definitions.
 if [ -z "${_TRIFORGE_SCRIPTS_DIR:-}" ]; then
   echo "scripts/lib/bootstrap.sh: not standalone — source scripts/invoke-external.sh" >&2
   return 2 2>/dev/null || exit 2
@@ -14,13 +15,12 @@ fi
 # triforge_bootstrap (KTD11, R37) — bootstrap is a primitive, the hook a trigger
 # ---------------------------------------------------------------------------
 #
-# Until 4.0 the session-start hook did this work inline, so a project was set
-# up only once a Claude Code session had run the plugin's hooks. A Codex lead
-# runs plugin hooks only after the user trusts them (CDX-16), so the work lives
-# here: hooks/handlers/session-start.sh calls it on every session start, and
-# at-setup, at-build and at-review call it from their preambles. Every step is
-# copy-if-absent or version/digest-gated, so a call on a bootstrapped project
-# writes nothing and prints nothing.
+# A Codex lead runs plugin hooks only after the user trusts them (CDX-16), so
+# the project setup is a helper, not hook code: hooks/handlers/session-start.sh
+# calls it on every session start, and at-setup, at-build and at-review call
+# it from their preambles, so a project is set up whichever of them runs
+# first. Every step is copy-if-absent or version/digest-gated, so a call on a
+# bootstrapped project writes nothing and prints nothing.
 #
 # triforge_bootstrap [--prefix <text>]
 #   The project is the anchor _tb_anchor names (the nearest directory from the
@@ -63,7 +63,7 @@ fi
 # that matches nothing), no unquoted word splitting, printf for any text that
 # is not this file's own.
 triforge_bootstrap() {
-  local _TB_PREFIX="triforge_bootstrap: " _TB_DEGRADED=0 _TB_ROOT="" _TB_TIMEOUT="" _TB_ANCHOR=""
+  local _TB_PREFIX="triforge_bootstrap: " _TB_DEGRADED=0 _TB_ROOT="" _TB_TIMEOUT="" _TB_ANCHOR="" _TB_CURSOR=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --prefix)
@@ -82,22 +82,20 @@ triforge_bootstrap() {
   done
   _lead_only triforge_bootstrap --any-host || return $?
   _TB_ROOT=$_TRIFORGE_PLUGIN_ROOT
-  if command -v timeout >/dev/null 2>&1; then
-    _TB_TIMEOUT=timeout
-  elif command -v gtimeout >/dev/null 2>&1; then
-    _TB_TIMEOUT=gtimeout
-  fi
-  # Every step works in the project anchor (_tb_anchor; Phase 3 review B4),
-  # not wherever the caller's shell stands, and in a subshell, so the caller's
-  # working directory never changes. The Cursor resolver runs first, here in
-  # the caller's shell, so a hit stays exported (TRIFORGE_CURSOR_BIN) for the
-  # caller and for the subshell alike.
+  _TB_TIMEOUT=$(_timeout_tool 2>/dev/null) || _TB_TIMEOUT=""
+  # Every step works in the project anchor (_tb_anchor), not wherever the
+  # caller's shell stands, and in a subshell, so the caller's working
+  # directory never changes. The Cursor resolver runs once, first, here in the
+  # caller's shell, so a hit stays exported (TRIFORGE_CURSOR_BIN) for the
+  # caller, and _TB_CURSOR carries the answer into the subshell.
   _TB_ANCHOR=$(_tb_anchor) || _TB_ANCHOR=""
   if [ -z "$_TB_ANCHOR" ] || [ ! -d "$_TB_ANCHOR" ]; then
     _tb_note "WARNING the project directory did not resolve, so nothing was bootstrapped (the next run retries)."
     return 80
   fi
-  _cursor_bin >/dev/null 2>&1 || true
+  if _cursor_bin >/dev/null 2>&1; then
+    _TB_CURSOR=1
+  fi
   (
     if ! cd "$_TB_ANCHOR" 2>/dev/null; then
       _tb_note "WARNING could not enter the project directory ${_TB_ANCHOR}, so nothing was bootstrapped (the next run retries)."
@@ -127,22 +125,14 @@ triforge_bootstrap() {
   )
 }
 
-# _tb_anchor — the project directory every step works in: the one
-# _lead_roster_path (roster.sh) puts ops/roster.toml under, the nearest
-# directory from the working directory up that holds a .git entry, else the
-# working directory itself. The lease helpers walk the same way (_lease_ctx),
-# so the bootstrap, the roster and the ledger agree on one project wherever
-# the lead's shell stands.
+# _tb_anchor — the project directory every step works in: the checkout
+# _checkout_top (roster.sh) names, the nearest directory from the working
+# directory up that holds a .git entry and the one _lead_roster_path puts
+# ops/roster.toml under, else the working directory itself. The lease helpers
+# walk the same way (_lease_ctx), so the bootstrap, the roster and the ledger
+# agree on one project wherever the lead's shell stands.
 _tb_anchor() {
-  local R=""
-  R=$(_lead_roster_path) || return 1
-  case "$R" in
-    /*)
-      R=${R%/ops/roster.toml}
-      printf '%s\n' "${R:-/}"
-      ;;
-    *) pwd -P ;;
-  esac
+  _checkout_top || pwd -P
 }
 
 # _tb_note <text> — one notice on stderr: the caller's prefix, then the text
@@ -154,7 +144,7 @@ _tb_note() {
 
 # _tb_run <seconds> <command...> — the command under the timeout binary when
 # there is one, else as it is (a step that must not run unbounded checks
-# _TB_TIMEOUT itself, as the agy pack step does).
+# _TB_TIMEOUT itself first, as the agy pack step does).
 _tb_run() {
   local SECS=$1
   shift
@@ -174,7 +164,8 @@ _tb_files() {
 }
 
 # _tb_write <mode> <root> <dest> [<source>] — every file bootstrap.sh writes
-# goes through here (Phase 3 review, B1 and B2). <dest> is relative to <root>,
+# goes through here, and so does session-start.sh's runtime file
+# (.claude/roster-detected.local.md). <dest> is relative to <root>,
 # or absolute under it. Each directory from <root> down to <dest>'s parent
 # must be a real directory (checked with lstat, so a symlink never passes) or
 # absent, and is then created; a symlink or a file on that path, or a parent
@@ -404,19 +395,31 @@ TB_SYNC_EOF
 # caller; the hook's orientation names the missing tool).
 _TB_AGY_STAMP=".claude/agy-pack-version.local.md"
 
-# _tb_json_version <file> — top-level "version" string of a JSON file, or ""
-# when the file is missing/unreadable. The path travels as an environment
-# variable, never interpolated into the python source.
-_tb_json_version() {
-  [ -f "$1" ] || return 0
-  _tb_run 30 env TB_JSON_FILE="$1" python3 -c '
-import json, os
-try:
-    with open(os.environ["TB_JSON_FILE"], "r", encoding="utf-8") as f:
-        print(str(json.load(f).get("version", "")).strip())
-except Exception:
-    pass
-' 2>/dev/null || true
+# The four agents the pack registers; `agy agents` must list each. One per
+# line: zsh does not split an unquoted word, so the list is read line by line.
+_TB_AGY_PACK_AGENTS='codebase-analyst
+architecture-reviewer
+targeted-researcher
+documentation-writer'
+
+# _tb_json_versions <file>... — the top-level "version" string of each JSON
+# file, one line per file in order ("" for a file that is not a regular file
+# or can't be read; a line break inside a value becomes a space). One python3
+# under the 30 s bound; the paths travel as arguments, never interpolated into
+# the python source.
+_tb_json_versions() {
+  _tb_run 30 python3 -c '
+import json, os, sys
+for path in sys.argv[1:]:
+    version = ""
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                version = str(json.load(f).get("version", "")).strip()
+        except Exception:
+            pass
+    print(version.replace("\n", " "))
+' "$@" 2>/dev/null || true
 }
 
 # _tb_agy_imported_at — importedAt of the agent-triforge entry in agy's import
@@ -442,10 +445,12 @@ except Exception:
 # _tb_agy_agents_missing — shipped agent names absent from `agy agents` (30 s).
 _tb_agy_agents_missing() {
   local LISTING="" NAME="" MISSING=""
-  LISTING=$("$_TB_TIMEOUT" 30s agy agents 2>/dev/null || true)
-  for NAME in codebase-analyst architecture-reviewer targeted-researcher documentation-writer; do
+  LISTING=$(_tb_run 30 agy agents 2>/dev/null || true)
+  while IFS= read -r NAME; do
     printf '%s\n' "$LISTING" | grep -q -- "$NAME" || MISSING="${MISSING:+${MISSING} }${NAME}"
-  done
+  done <<TB_AGENTS_EOF
+${_TB_AGY_PACK_AGENTS}
+TB_AGENTS_EOF
   printf '%s' "$MISSING"
 }
 
@@ -454,12 +459,13 @@ _tb_agy_pack() {
   local SHIPPED="" INSTALLED="" LISTED="" BEFORE="" AFTER="" RC=0 MISSING="" OUT=""
   [ -n "$_TB_TIMEOUT" ] || return 0
   command -v agy >/dev/null 2>&1 || return 0
-  SHIPPED=$(_tb_json_version "${_TB_ROOT}/antigravity-agents/plugin.json")
-  INSTALLED=$(_tb_json_version "${HOME:-}/.gemini/config/plugins/agent-triforge/plugin.json")
+  { IFS= read -r SHIPPED; IFS= read -r INSTALLED; } <<TB_VERSIONS_EOF || true
+$(_tb_json_versions "${_TB_ROOT}/antigravity-agents/plugin.json" "${HOME:-}/.gemini/config/plugins/agent-triforge/plugin.json")
+TB_VERSIONS_EOF
   if [ -z "$INSTALLED" ]; then
     # Managed copy unreadable or absent: if the pack is installed at all, fall
     # back to the version last installed here (stamp); else "not installed".
-    LISTED=$("$_TB_TIMEOUT" 30s agy plugin list 2>/dev/null || true)
+    LISTED=$(_tb_run 30 agy plugin list 2>/dev/null || true)
     if printf '%s\n' "$LISTED" | grep -q "agent-triforge" && [ -f "$_TB_AGY_STAMP" ]; then
       INSTALLED=$(sed -n 's/^version=//p' "$_TB_AGY_STAMP" 2>/dev/null | head -1 || true)
     fi
@@ -468,13 +474,13 @@ _tb_agy_pack() {
     return 0
   fi
   BEFORE=$(_tb_agy_imported_at)
-  "$_TB_TIMEOUT" 30s agy plugin install "${_TB_ROOT}/antigravity-agents" >/dev/null 2>&1 || RC=$?
+  _tb_run 30 agy plugin install "${_TB_ROOT}/antigravity-agents" >/dev/null 2>&1 || RC=$?
   MISSING=$(_tb_agy_agents_missing)
   if [ "$RC" -ne 0 ] || [ -n "$MISSING" ]; then
     # Install-over did not yield a complete listing: uninstall + install once.
-    "$_TB_TIMEOUT" 30s agy plugin uninstall agent-triforge >/dev/null 2>&1 || true
+    _tb_run 30 agy plugin uninstall agent-triforge >/dev/null 2>&1 || true
     RC=0
-    "$_TB_TIMEOUT" 30s agy plugin install "${_TB_ROOT}/antigravity-agents" >/dev/null 2>&1 || RC=$?
+    _tb_run 30 agy plugin install "${_TB_ROOT}/antigravity-agents" >/dev/null 2>&1 || RC=$?
     MISSING=$(_tb_agy_agents_missing)
   fi
   AFTER=$(_tb_agy_imported_at)
@@ -551,27 +557,7 @@ _tb_codex() {
     fi
     return 0
   fi
-  # One-time migration (KTD5): v3.2.0 deployed .codex/agents/agents.toml. Move it
-  # to the new name once — a user-modified file is moved, never deleted or
-  # overwritten — and drop the now-empty .codex/agents/ only when it IS empty
-  # (rmdir, never rm -rf). If both files exist the user resolves it by hand.
-  if [ -f ".codex/agents/agents.toml" ] && ! _tb_dir_in_project ".codex/agents"; then
-    # moving the file out of a linked .codex/agents would delete it there
-    _tb_note "WARNING .codex/agents is a symlink or resolves outside this project, so .codex/agents/agents.toml was not moved to .codex/triforge-agents.toml (Triforge writes only inside the project) — move it by hand if that file is yours."
-    _TB_DEGRADED=1
-  elif [ -f ".codex/agents/agents.toml" ]; then
-    if [ ! -e ".codex/triforge-agents.toml" ] && [ ! -L ".codex/triforge-agents.toml" ]; then
-      if mv ".codex/agents/agents.toml" ".codex/triforge-agents.toml" 2>/dev/null; then
-        rmdir ".codex/agents" 2>/dev/null || true
-        _tb_note "moved .codex/agents/agents.toml to .codex/triforge-agents.toml (Codex sweeps .codex/agents/*.toml as per-agent role files and warned on it; the file content is unchanged)."
-      else
-        _tb_note "WARNING could not move .codex/agents/agents.toml to .codex/triforge-agents.toml — move it by hand (Codex warns on the old location)."
-        _TB_DEGRADED=1
-      fi
-    else
-      _tb_note "both .codex/agents/agents.toml and .codex/triforge-agents.toml exist — merge and remove the old file by hand (Codex warns on .codex/agents/*.toml)."
-    fi
-  fi
+  _tb_codex_agents_move
   _bootstrap_copy "${_TB_ROOT}/codex-agents/agents.toml"     ".codex/triforge-agents.toml"
   _bootstrap_copy "${_TB_ROOT}/templates/.codex/config.toml" ".codex/config.toml"
   # One-time migration (KTD9): a .codex/hooks.json still byte-equal to the 3.x
@@ -586,6 +572,33 @@ _tb_codex() {
     fi
   fi
   _bootstrap_copy "${_TB_ROOT}/templates/.codex/hooks.json"  ".codex/hooks.json"
+  return 0
+}
+
+# _tb_codex_agents_move — the one-time migration (KTD5): v3.2.0 deployed
+# .codex/agents/agents.toml. Move it to the new name once — a user-modified
+# file is moved, never deleted or overwritten — and drop the now-empty
+# .codex/agents/ only when it IS empty (rmdir, never rm -rf). If both files
+# exist the user resolves it by hand.
+_tb_codex_agents_move() {
+  [ -f ".codex/agents/agents.toml" ] || return 0
+  if ! _tb_dir_in_project ".codex/agents"; then
+    # moving the file out of a linked .codex/agents would delete it there
+    _tb_note "WARNING .codex/agents is a symlink or resolves outside this project, so .codex/agents/agents.toml was not moved to .codex/triforge-agents.toml (Triforge writes only inside the project) — move it by hand if that file is yours."
+    _TB_DEGRADED=1
+    return 0
+  fi
+  if [ -e ".codex/triforge-agents.toml" ] || [ -L ".codex/triforge-agents.toml" ]; then
+    _tb_note "both .codex/agents/agents.toml and .codex/triforge-agents.toml exist — merge and remove the old file by hand (Codex warns on .codex/agents/*.toml)."
+    return 0
+  fi
+  if mv ".codex/agents/agents.toml" ".codex/triforge-agents.toml" 2>/dev/null; then
+    rmdir ".codex/agents" 2>/dev/null || true
+    _tb_note "moved .codex/agents/agents.toml to .codex/triforge-agents.toml (Codex sweeps .codex/agents/*.toml as per-agent role files and warned on it; the file content is unchanged)."
+  else
+    _tb_note "WARNING could not move .codex/agents/agents.toml to .codex/triforge-agents.toml — move it by hand (Codex warns on the old location)."
+    _TB_DEGRADED=1
+  fi
   return 0
 }
 
@@ -618,9 +631,9 @@ _tb_codex() {
 #     headless-hooks-dead / CUR-07 --sandbox-doesn't-confine / CUR-08
 #     --mode-plan-is-read-only facts. No afterFileEdit attribution hook is
 #     shipped (CUR-06 FAIL); builder attribution is lead-side from the lease
-#     ledger. triforge_bootstrap already ran _cursor_bin in the caller's
-#     shell, so this call looks up the exported TRIFORGE_CURSOR_BIN, and the
-#     hook's detection loop does too, instead of probing again.
+#     ledger. triforge_bootstrap ran _cursor_bin once in the caller's shell
+#     and set _TB_CURSOR from it, so this step probes nothing, and the hook's
+#     detection loop looks up the exported TRIFORGE_CURSOR_BIN.
 _tb_optional_clis() {
   local F=""
   if command -v opencode >/dev/null 2>&1; then
@@ -637,7 +650,7 @@ TB_OC_EOF
       _bootstrap_copy "${_TB_ROOT}/templates/.kimi-code/${F}" ".kimi-code/${F}"
     done
   fi
-  if _cursor_bin >/dev/null 2>&1; then
+  if [ "$_TB_CURSOR" = 1 ]; then
     while IFS= read -r F; do
       [ -n "$F" ] || continue
       case "${F##*/}" in README.md) continue ;; esac
@@ -700,20 +713,10 @@ _tb_git() {
 }
 
 # _tb_git_marker_above — 0 when the working directory or one of its parents
-# holds a .git entry: git's own answer "not a git repository" is then not to
-# be trusted (a broken .git, a GIT_CEILING_DIRECTORIES above it).
+# holds a .git entry (_checkout_top): git's own answer "not a git repository"
+# is then not to be trusted (a broken .git, a GIT_CEILING_DIRECTORIES above it).
 _tb_git_marker_above() {
-  local D=""
-  D=$(pwd -P 2>/dev/null) || return 1
-  while :; do
-    if [ -e "${D}/.git" ] || [ -L "${D}/.git" ]; then
-      return 0
-    fi
-    if [ -z "$D" ] || [ "$D" = "/" ]; then
-      return 1
-    fi
-    D=${D%/*}
-  done
+  _checkout_top >/dev/null
 }
 
 # _tb_phys <dir> — physical path of an existing directory, spelled as on disk
@@ -730,13 +733,26 @@ _tb_pointer_refused() {
   _TB_DEGRADED=1
 }
 
+# _tb_tracked <top> <path> — whether git tracks <path> in <top> under any
+# letter case (a case-insensitive filesystem serves a file under a name git
+# tracks differently): rc 0 tracked, 1 not; any other git answer is a
+# refusal notice naming <path> and that rc, so the caller writes nothing.
+_tb_tracked() {
+  local RC=0
+  _tb_git -C "$1" ls-files --error-unmatch -- ":(icase)$2" >/dev/null 2>&1 || RC=$?
+  if [ "$RC" -gt 1 ]; then
+    _tb_pointer_refused "git could not say whether $2 is tracked (git ls-files rc ${RC})"
+  fi
+  return "$RC"
+}
+
 # _tb_ignore_rule <top> <git> — add the ignore rule to <top>/.agents/.gitignore
 # and print what was done (the pointer notice carries it); rc 1 after a notice
 # when that file is not a regular file, cannot be written, or (<git> = yes) is
-# tracked: a tracked .agents/.gitignore is the project's, in a protected tree,
-# and an edit would ride along with the next `git commit -a` (Phase 3 review
-# B5), so the notice names the line to add instead. Called in a $(...), so the
-# caller marks the run degraded on rc 1.
+# tracked or git can't say: a tracked .agents/.gitignore is the project's, in
+# a protected tree, and an edit would ride along with the next
+# `git commit -a`, so the notice names the line to add instead. Called in a
+# $(...), so the caller marks the run degraded on rc 1.
 _tb_ignore_rule() {
   local GI="$1/.agents/.gitignore" RC=0
   if [ -L "$GI" ] || { [ -e "$GI" ] && [ ! -f "$GI" ]; }; then
@@ -744,13 +760,12 @@ _tb_ignore_rule() {
     return 1
   fi
   if [ -n "${2:-}" ]; then
-    _tb_git -C "$1" ls-files --error-unmatch -- ":(icase).agents/.gitignore" >/dev/null 2>&1 || RC=$?
+    _tb_tracked "$1" .agents/.gitignore || RC=$?
     if [ "$RC" -eq 0 ]; then
       _tb_pointer_refused "git tracks .agents/.gitignore, which Triforge does not edit, and nothing there ignores the pointer; add the line /triforge-plugin-root.local to it yourself"
       return 1
     fi
     if [ "$RC" -ne 1 ]; then
-      _tb_pointer_refused "git could not say whether .agents/.gitignore is tracked (git ls-files rc ${RC})"
       return 1
     fi
   fi
@@ -769,14 +784,14 @@ _tb_ignore_rule() {
 }
 
 _tb_pointer() {
-  local ROOT="" TOP="" MAIN="" COMMON="" GIT="" GITOUT="" PDIR="" PFILE="" CUR="" RC=0 IGNORE="" OUT=""
+  local ROOT="" TOP="" MAIN="" COMMON="" GIT="" GITOUT="" PDIR="" PFILE="" CUR="" LINE="" RC=0 IGNORE="" OUT=""
   ROOT=$(_tb_phys "$_TB_ROOT") || ROOT=""
   if [ -z "$ROOT" ]; then
     _tb_pointer_refused "the plugin root ${_TB_ROOT} did not resolve to a directory"
     return 0
   fi
-  # Inside git, outside git, or unknown (Phase 3 review B3). Only git's own
-  # "not a git repository", with no .git entry here or above, means outside:
+  # Inside git, outside git, or unknown. Only git's own "not a git
+  # repository", with no .git entry here or above, means outside:
   # any other failure (a .git/config git cannot parse, a dubious-ownership
   # refusal, no git binary beside a .git) leaves the tracked check undone, so
   # no pointer is written — a tracked one would otherwise be replaced.
@@ -847,20 +862,28 @@ _tb_pointer() {
     return 0
   fi
   if [ -n "$GIT" ]; then
-    # tracked under any letter case (a case-insensitive filesystem serves the
-    # pointer under a name git tracks differently); a git error is a refusal
-    _tb_git -C "$TOP" ls-files --error-unmatch -- ":(icase)${_TB_POINTER}" >/dev/null 2>&1 || RC=$?
+    _tb_tracked "$TOP" "$_TB_POINTER" || RC=$?
     if [ "$RC" -eq 0 ]; then
       _tb_pointer_refused "git tracks ${_TB_POINTER} (it must stay untracked: git rm --cached it)"
       return 0
     fi
     if [ "$RC" -ne 1 ]; then
-      _tb_pointer_refused "git could not say whether ${_TB_POINTER} is tracked (git ls-files rc ${RC})"
       return 0
     fi
   fi
+  # The path the pointer names now: its first line that is not blank or a
+  # comment, trimmed. An unreadable file names none (silently, in zsh too).
   if [ -f "$PFILE" ]; then
-    CUR=$(grep -v '^[[:space:]]*#' "$PFILE" 2>/dev/null | grep -v '^[[:space:]]*$' | head -1 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//') || CUR=""
+    {
+      while IFS= read -r LINE || [ -n "$LINE" ]; do
+        LINE=${LINE#"${LINE%%[![:space:]]*}"}
+        LINE=${LINE%"${LINE##*[![:space:]]}"}
+        case "$LINE" in
+          ""|"#"*) ;;
+          *) CUR=$LINE; break ;;
+        esac
+      done < "$PFILE"
+    } 2>/dev/null || true
   fi
   if [ -n "$GIT" ]; then
     RC=0
@@ -887,9 +910,9 @@ _tb_pointer() {
     fi
     return 0
   fi
-  # _tb_write replace: an exclusive temp file beside the pointer, renamed over
-  # it (Phase 3 review B1: the old predictable <pointer>.tmp.<pid> opened with
-  # `>` wrote through a symlink planted at that name).
+  # _tb_write replace: an exclusive temp file under an unpredictable name
+  # beside the pointer, renamed over it, so a symlink planted at the pointer
+  # or at any temp name is never written through.
   RC=0
   OUT=$({
     printf '%s\n' "# Agent Triforge plugin root for this checkout, written by triforge_bootstrap (per user, untracked; rewritten when the plugin moves)."
