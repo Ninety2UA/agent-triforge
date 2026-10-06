@@ -143,6 +143,47 @@ triforge_ladder() {
   printf '%s\n' "$TRIFORGE_MODEL_LADDER"
 }
 
+# _LADDER_PY — the one reading of the ladder and the persona manifest rules
+# (KTD21, KTD22): spliced into the persona lane's resolution (_PERSONA_PY in
+# persona.sh) and executed by scripts/validate-skills.sh (KTD21), so a ladder
+# or a manifest entry the validator passes is one every dispatch takes.
+# ladder_parse(text) returns (rungs, trio) or None: the rungs are separated by
+# arrows, each naming its model and its effort as its first two backticked
+# words; the first is the tier "top" and also names its fallback model at the
+# same effort, every other is <model>-<effort>; the trio is the "Never
+# downgrade" sentence. A manifest entry holds PERSONA_KEYS only, a class from
+# PERSONA_CLASSES, and, for a runnable class or wherever it is set, a tier
+# from the rungs and a max_turns persona_turns_ok accepts. Single-quoted:
+# double quotes only inside.
+_LADDER_PY='
+import re
+from collections import namedtuple
+
+Rung = namedtuple("Rung", "name model effort fallback")
+PERSONA_CLASSES = ("read", "read-web", "exec", "lease", "agent-team")
+PERSONA_RUNNABLE = ("read", "read-web", "exec")
+PERSONA_KEYS = ("class", "tier", "never_downgrade", "max_turns")
+PERSONA_MAX_TURNS = 1000
+
+def persona_turns_ok(v):
+    return isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= PERSONA_MAX_TURNS
+
+def ladder_parse(text):
+    body = text.partition(":")[2]
+    rungs_text, sep, never = body.partition("Never downgrade")
+    rungs = []
+    for i, r in enumerate(rungs_text.split("→")):
+        ticks = re.findall(r"`([^`]+)`", r)
+        if len(ticks) < 2 or (i == 0 and (len(ticks) < 4 or ticks[3] != ticks[1])):
+            return None
+        rungs.append(Rung("top" if i == 0 else ticks[0] + "-" + ticks[1], ticks[0], ticks[1], ticks[2] if i == 0 else ""))
+    trio = [n.strip() for n in re.split(r",|\bor\b", never.strip().rstrip(".")) if n.strip()]
+    names = [r.name for r in rungs]
+    if not sep or len(rungs) < 2 or len(set(names)) != len(names) or not trio or not all(re.fullmatch(r"[a-z0-9][a-z0-9-]*", n) for n in trio):
+        return None
+    return rungs, trio
+'
+
 # The first Claude Code build the sandboxed claude worker lane (KTD16) runs
 # on. The lane's --settings turn off the unsandboxed retry, which makes the
 # sandbox admin-required: from 2.1.285 Claude Code then ignores every setting
@@ -414,20 +455,30 @@ for cli, e in CLIS.items():
 "
 }
 
-# cli_install_fix <cli> — the one-line install-then-login fix the helpers print
-# on a deterministic failure (R21 wording): "install <name> (<install>), then
-# <login>". resolve_role composes the same line in python for its
-# chain-exhausted error.
+# _INSTALL_FIX_PY — install_fix(cli), the one-line install-then-login fix the
+# helpers print on a deterministic failure (R21 wording): "install <name>
+# (<install>), then <login>". Spliced after _TRIFORGE_CLIS_PY wherever python
+# composes it: cli_install_fix below, resolve_role's chain-exhausted error
+# (roster.sh) and the persona lane's missing-CLI refusals (_PERSONA_PY in
+# persona.sh). Single-quoted: double quotes only inside.
+_INSTALL_FIX_PY='
+def install_fix(cli):
+    e = CLIS[cli]
+    return "install " + e["name"] + " (" + e["install"] + ")" + (", then " + e["login"] if e["login"] else "")
+'
+
+# cli_install_fix <cli> — print install_fix(<cli>) (_INSTALL_FIX_PY); rc 2 for
+# an unknown CLI.
 cli_install_fix() {
   CF_CLI="${1:?usage: cli_install_fix <cli>}" python3 -c "
 import os, sys
 ${_TRIFORGE_CLIS_PY}
+${_INSTALL_FIX_PY}
 cli = os.environ['CF_CLI']
 if cli not in CLIS:
     sys.stderr.write('cli_install_fix: unknown cli ' + repr(cli) + '\n')
     sys.exit(2)
-e = CLIS[cli]
-print('install ' + e['name'] + ' (' + e['install'] + ')' + (', then ' + e['login'] if e['login'] else ''))
+print(install_fix(cli))
 "
 }
 

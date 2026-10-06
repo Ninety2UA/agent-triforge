@@ -10,23 +10,21 @@ CYCLE="${CYCLE:-1}"   # this review cycle's number
 
 # The input is data: each expected lane and its state, then the known-issue
 # context when the gate dispatched it. The task, the expected lanes included,
-# is the --brief. Relative ops/ paths resolve against the project root.
+# is the --brief. Relative ops/ paths resolve against the project root. The
+# lanes loop also collects the gaps (the group runs in this shell, so GAPS
+# survives it).
 SYN_IN="$REVIEW_RUN/synthesis-input.md"
 GAPS=""
 {
   echo "Expected review lanes this cycle (path: state):"
   while read -r LANE; do
     [ -n "$LANE" ] || continue
-    if [ -s "$LANE" ]; then echo "- $LANE: present"; else echo "- $LANE: MISSING OR EMPTY"; fi
+    if [ -s "$LANE" ]; then echo "- $LANE: present"; else echo "- $LANE: MISSING OR EMPTY"; GAPS="$GAPS $LANE"; fi
   done < "$REVIEW_RUN/lanes"
   if [ -s "$REVIEW_RUN/learnings.md" ]; then
     echo; echo "Known-issue context (learnings-researcher):"; cat "$REVIEW_RUN/learnings.md"
   fi
 } > "$SYN_IN"
-while read -r LANE; do
-  [ -n "$LANE" ] || continue
-  [ -s "$LANE" ] || GAPS="$GAPS $LANE"
-done < "$REVIEW_RUN/lanes"
 LANES=$(grep . "$REVIEW_RUN/lanes" | paste -sd, -)
 
 dispatch_persona findings-synthesizer "$SYN_IN" "$REVIEW_RUN/synthesis.md" --brief "Synthesize review cycle $CYCLE. Read every expected lane file the input lists: $LANES. A lane the input marks MISSING OR EMPTY is a gap, never no findings: list each gap under a ### Gaps heading before the findings, and while any gap exists end the Verdict with Recommendation: FIX_AND_REREVIEW, never PROCEED. Use the known-issue context, when the input carries it, to flag findings that would undo a past fix."

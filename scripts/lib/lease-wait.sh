@@ -486,19 +486,19 @@ _claude_sandbox_refusal() {
   echo "${1:-claude}: ERROR ${WHAT} — the claude worker lane's sandbox needs ${TRIFORGE_CLAUDE_SANDBOX_FLOOR}, the first build that ignores a repository's sandbox-loosening settings (excludedCommands, network.allowedDomains, filesystem.allowWrite) under the lane's --settings; on an older build a repository's .claude/settings.json can run commands outside the sandbox. Fix: update Claude Code (\`claude update\`), or set TRIFORGE_CLAUDE_SANDBOX=off in the lead's environment, and the claude worker's Bash then runs without OS confinement. No retry (deterministic)."
 }
 
-# _claude_lane_argv <edit|read|exec|persona-read|persona-read-web> <model>
-#   <effort> <resume-id> <deny-write>... — set _LEASE_LANE_ARGV to a claude -p
-# worker's command line up to the prompt, which the caller appends (KTD16). One
-# JSON envelope (--output-format json: subtype, is_error, session_id;
-# _lease_claude_envelope reads it), project and local settings only (the
-# user's own hooks, plugins and env stay out), no MCP server, and an explicit
+# _claude_lane_argv <edit|read|persona-read|persona-read-web|persona-exec>
+#   <model> <effort> <resume-id> <deny-write>... — set _LEASE_LANE_ARGV to a
+# claude -p worker's command line up to the prompt, which the caller appends
+# (KTD16). One JSON envelope (--output-format json: subtype, is_error,
+# session_id; _lease_claude_envelope reads it), project and local settings
+# only (the user's own hooks, plugins and env stay out), no MCP server, and an explicit
 # tool set: edit (a lease builder, a tester, a documenter) adds the edit tools
 # under acceptEdits; read (dispatch_role's reviewer or analyst) runs dontAsk,
 # so nothing outside the read set runs; the persona classes (KTD5, dispatch_persona)
 # run dontAsk too: persona-read is Read, Grep and Glob alone, never Bash;
-# persona-read-web adds WebFetch and WebSearch; exec is Bash with the read tools
-# and no edit tool. The persona classes add --safe-mode: no CLAUDE.md (nor what
-# it @imports), no .claude/rules at any depth, no skills, hooks or plugins load,
+# persona-read-web adds WebFetch and WebSearch; persona-exec is Bash with the
+# read tools and no edit tool. The persona classes add --safe-mode: no
+# CLAUDE.md (nor what it @imports), no .claude/rules at any depth, no skills, hooks or plugins load,
 # while the --settings sandbox, the credential deny rules and auth still hold
 # (measured on Claude Code 2.1.289: probe row CC-24; dispatch_persona refuses a
 # claude without the flag). --settings carries the confinement, and a --settings file
@@ -510,37 +510,43 @@ _claude_sandbox_refusal() {
 # credential paths are blocked, the latter also for the Read tool.
 # TRIFORGE_CLAUDE_SANDBOX=off runs Bash without the sandbox, and then a claude
 # worker with Bash has no OS confinement; the read class drops Bash there,
-# while exec keeps it (its working directory is a disposable worktree, and
-# dispatch_persona checks the lead's git state around the run). An unknown
+# while persona-exec keeps it (its working directory is a disposable worktree,
+# and dispatch_persona checks the lead's git state around the run). An unknown
 # class is rc 1. --model and --effort ride only when the caller set them (the
 # roster, or dispatch_persona's ladder rung); --resume only for a UUID-shaped
 # session id (the fix cycle resumes the builder's session); --max-turns comes
-# last, so the prompt after it is never read as one more tool name.
+# last, so the prompt after it is never read as one more tool name. It is
+# _CLAUDE_MAX_TURNS, a builder's cap; a caller narrows it for one call with
+# `local _CLAUDE_MAX_TURNS=<n>` (dispatch_persona: the persona's max_turns).
 _claude_lane_argv() {
-  local CLASS=$1 MODEL=$2 EFFORT=$3 RESUME=$4 SBX=on TOOLS ALLOW MODE SETTINGS SAFE=0
+  local CLASS=$1 MODEL=$2 EFFORT=$3 RESUME=$4 SBX=on TOOLS ALLOW MODE=dontAsk SETTINGS SAFE=0
   shift 4
   case "${TRIFORGE_CLAUDE_SANDBOX:-on}" in off|0|false|no) SBX=off ;; esac
   case "$CLASS" in
     edit)
-      TOOLS=$_CLAUDE_TOOLS_EDIT ALLOW=$_CLAUDE_ALLOW_EDIT MODE=acceptEdits
-      ;;
-    exec)
-      TOOLS="${_CLAUDE_TOOLS_READ},Bash" ALLOW="${_CLAUDE_TOOLS_READ},Bash" MODE=dontAsk SAFE=1
+      TOOLS=$_CLAUDE_TOOLS_EDIT MODE=acceptEdits
       ;;
     read)
-      TOOLS=$_CLAUDE_TOOLS_READ ALLOW=$_CLAUDE_TOOLS_READ MODE=dontAsk
-      if [ "$SBX" = on ]; then TOOLS="${TOOLS},Bash" ALLOW="${ALLOW},Bash"; fi
+      TOOLS=$_CLAUDE_TOOLS_READ
+      if [ "$SBX" = on ]; then TOOLS="${TOOLS},Bash"; fi
       ;;
     persona-read)
-      TOOLS=$_CLAUDE_TOOLS_READ ALLOW=$_CLAUDE_TOOLS_READ MODE=dontAsk SAFE=1
+      TOOLS=$_CLAUDE_TOOLS_READ SAFE=1
       ;;
     persona-read-web)
-      TOOLS="${_CLAUDE_TOOLS_READ},${_CLAUDE_TOOLS_WEB}" ALLOW="${_CLAUDE_TOOLS_READ},${_CLAUDE_TOOLS_WEB}" MODE=dontAsk SAFE=1
+      TOOLS="${_CLAUDE_TOOLS_READ},${_CLAUDE_TOOLS_WEB}" SAFE=1
+      ;;
+    persona-exec)
+      TOOLS="${_CLAUDE_TOOLS_READ},Bash" SAFE=1
       ;;
     *)
       return 1
       ;;
   esac
+  # dontAsk runs only what the tool set names, so every class but edit
+  # approves exactly that set; edit approves Bash and Skill, its edits riding
+  # acceptEdits inside the working directory.
+  if [ "$CLASS" = edit ]; then ALLOW=$_CLAUDE_ALLOW_EDIT; else ALLOW=$TOOLS; fi
   SETTINGS=$(CL_SBX="$SBX" CL_CRED="$_CLAUDE_CRED_PATHS" python3 -c '
 import json, os, sys
 cred = os.environ["CL_CRED"].split()
@@ -577,6 +583,15 @@ _claude_session_ok() {
   return 1
 }
 
+# The codex tool shell's env policy (CDX-19), for every codex worker (the lease
+# lane below, dispatch_persona's codex persona): pass on everything codex was
+# started with — the env -i allowlist is the filter — so neither the user's
+# config.toml nor a default that drops *KEY* names can strip the worker marker
+# or the no-push GIT_CONFIG_KEY_n from a command it runs.
+_CODEX_ENV_POLICY=(-c 'shell_environment_policy.inherit="all"' -c 'shell_environment_policy.ignore_default_excludes=true'
+                   -c 'shell_environment_policy.exclude=[]' -c 'shell_environment_policy.include_only=[]'
+                   -c 'shell_environment_policy.set={}')
+
 # _lease_lane_argv <cli> <model> <effort> <dispatch-model> <kimi-agent-file>
 #   <cursor-bin> <worktree> <timeout-s> [<git-common-dir> <resume-id>] — set
 # _LEASE_LANE_ARGV to the lane's command line up to the prompt, which the
@@ -597,13 +612,8 @@ _claude_session_ok() {
 #                temp-dir write allowance: lease worktrees live under TMPDIR,
 #                so without them a builder could cross into sibling worktrees
 #                or the lease root (R35: writes restricted to the lease
-#                worktree); the tool shell's env policy pinned to pass on
-#                everything codex was started with (the env -i allowlist is
-#                the filter), so neither the user's config.toml nor a default
-#                that drops *KEY* names can strip the worker marker or the
-#                no-push GIT_CONFIG_KEY_n (CDX-19: _CODEX_ENV_POLICY, which
-#                dispatch_persona's codex persona carries too); -m and
-#                model_reasoning_effort only when set
+#                worktree); the tool shell's env policy (_CODEX_ENV_POLICY);
+#                -m and model_reasoning_effort only when set
 #   antigravity  always the model pin (AE2: agy's own default is a Medium
 #                variant), --add-dir the worktree, --print-timeout, the JSON
 #                envelope (KTD2, D-032), -p
@@ -623,12 +633,6 @@ _claude_session_ok() {
 #                --force (edits without confirmation, inside the worktree).
 #                Confinement is the worktree and the env allowlist, not
 #                --sandbox (CUR-07: an absolute-path write escaped it)
-# The codex tool shell's env policy (CDX-19): pass on everything codex was
-# started with — the env -i allowlist is the filter — so the worker marker and
-# the no-push GIT_CONFIG_KEY_n reach every command it runs.
-_CODEX_ENV_POLICY=(-c 'shell_environment_policy.inherit="all"' -c 'shell_environment_policy.ignore_default_excludes=true'
-                   -c 'shell_environment_policy.exclude=[]' -c 'shell_environment_policy.include_only=[]'
-                   -c 'shell_environment_policy.set={}')
 _lease_lane_argv() {
   local CLI=$1 MODEL=$2 EFFORT=$3 DMODEL=$4 KAF=$5 CBIN=$6 WT=$7 TIMEOUT=$8
   case "$CLI" in

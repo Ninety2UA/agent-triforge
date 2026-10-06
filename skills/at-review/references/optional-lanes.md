@@ -26,7 +26,7 @@ for OCLI in opencode kimi cursor; do
   OMODEL=$(_roster_member_field "$OCLI" model 2>/dev/null || true)   # empty -> helper's shipped default
   UP=$(printf '%s' "$OCLI" | tr '[:lower:]' '[:upper:]')
   printf 'ops/REVIEW_%s.md\n' "$UP" >> "$REVIEW_RUN/lanes"   # dispatched: synthesis expects its file
-  OOUT="${TMPDIR:-/tmp}/${OCLI}_review_$$_$(date +%s).txt"
+  OOUT="$REVIEW_RUN/${OCLI}.txt"   # the cycle's own run directory, never a predictable name in TMPDIR
   ORC=0
   case "$OCLI" in
     opencode) OPENCODE_MODEL="${OMODEL:-}" invoke_opencode "reviewer" "$REVIEW_PROMPT" "$OOUT" 600 || ORC=$? ;;

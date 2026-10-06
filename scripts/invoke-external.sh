@@ -41,7 +41,7 @@
 #   invoke_antigravity   <agent-name> <prompt> [output-file] [timeout-seconds]
 #   invoke_codex         <agent-name> <prompt> [output-file] [timeout-seconds]
 #   resolve_role         <role>   — roster lookup: prints cli<TAB>model<TAB>effort
-#   dispatch_persona     [flags] <persona> <scope> <out> — run a persona (persona.sh)
+#   dispatch_persona     <persona> <input> <out> [flags] — run a persona (persona.sh)
 #   ensure_core_trio_live         — lazy liveness gate for build/review paths
 #   latest_probe_record           — path of the newest ops/research/*-probe-record.md
 #   triforge_plugin_root          — prints the resolved plugin root (${_TRIFORGE_PLUGIN_ROOT})

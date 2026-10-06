@@ -709,6 +709,8 @@ actual = {
     "portable skill": int(os.environ["VV_PORTABLE"]),
     "lead workflow": int(os.environ["VV_WORKFLOWS"]),
 }
+# A claim's surface word, lowercased and singular, to the count it checks.
+KIND = {"agent": "persona"}
 readme_history_start = int(os.environ["VV_README_HISTORY_START"] or "0")
 files = [
     "AGENTS.md",
@@ -756,9 +758,7 @@ for path in files:
                     continue
                 if not (mods & SURFACE_MODS) and not SURFACE_LINE.search(line):
                     continue
-                kind = m.group("kind").lower()
-                if kind == "agent":
-                    kind = "persona"
+                kind = KIND.get(m.group("kind").lower(), m.group("kind").lower())
                 if kind == "skill" and "portable" in mods:
                     kind = "portable skill"
                 n = int(m.group("n"))
@@ -779,8 +779,7 @@ if os.path.exists("docs/index.html"):
         html = fh.read()
     for m in HERO.finditer(html):
         kind = m.group("kind").lower().rstrip("s")
-        if kind == "agent":
-            kind = "persona"
+        kind = KIND.get(kind, kind)
         n = int(m.group("n"))
         claims += 1
         if n != actual[kind]:

@@ -935,6 +935,18 @@ BASELINE_EOF
     recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 
+# _lead_baseline_ensure [writer] — record the integrity baseline when the
+# ledger has none yet (no lease ever ran in this checkout), through
+# _lead_baseline_record [writer]; nothing when one is there. Sets
+# _LEAD_BASELINE_NEW to 1 when it recorded one, else 0; rc 1 when recording
+# failed.
+_lead_baseline_ensure() {
+  _LEAD_BASELINE_NEW=0
+  if [ -n "$(_ledger_get @baseline config 2>/dev/null || true)" ]; then return 0; fi
+  _lead_baseline_record "${1:-_ledger_update}" || return 1
+  _LEAD_BASELINE_NEW=1
+}
+
 # _lead_lease_digests <worktree> [admin-dir] — "<pointer-digest>\t<admin-digest>\t<admin-dir>"
 # for a lease worktree (the admin dir is derived from the pointer when not given
 # — only right after the lead itself created the worktree).
@@ -1777,9 +1789,7 @@ CREATE_ROW_EOF
   # a recorded one that differs was refused above. The default branch is never
   # recorded as the integration branch (KTD18): a lease created on it leaves
   # the record empty, and the first lease or merge on the sprint branch fills it.
-  if [ -z "$(_ledger_get @baseline config 2>/dev/null || true)" ]; then
-    _lead_baseline_record || return 1
-  fi
+  _lead_baseline_ensure || return 1
   if [ -n "$CUR" ] && [ -z "$IB" ] && [ "$CUR" != "$(_lease_default_branch)" ]; then
     _ledger_update @baseline integration_branch="$CUR" integration_sha="$_CARVE_BASE" || return 1
   fi
@@ -2729,9 +2739,7 @@ APPROVE_ROW_EOF
       # A checkout with no integrity baseline yet (no lease ever ran): record
       # it now, as lease_create would, or the next check reads the lead's
       # ledger copy as a baseline that went missing.
-      if [ -z "$(_ledger_get @baseline config 2>/dev/null || true)" ]; then
-        _lead_baseline_record _ledger_write >/dev/null || return 1
-      fi
+      _lead_baseline_ensure _ledger_write >/dev/null || return 1
       echo "lease_approve: promotion of ${B} into ${_LEASE_DEF} approved by the user: tree ${TREE:0:12}, ${_LEASE_DEF} at ${_LEASE_DEF_SHA:0:12}, ${_LP_COUNT} protected path(s)${_LP_PATHS:+: ${_LP_PATHS}}; recorded via=${_LEAD_VIA} host=${_LEAD_HOST} lead=${LEADNOW} at ${STAMP}. A later merge or a move of ${_LEASE_DEF} voids it. Audit, not prevention: any shell with the helper can record this, the lead's agent shell included (via=lead-session)." >&2
       ;;
     *)

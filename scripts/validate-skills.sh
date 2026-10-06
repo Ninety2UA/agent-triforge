@@ -129,16 +129,21 @@
 #        is not a tool class) has a [personas.<name>] entry in
 #        personas/manifest.toml and every entry a file; each entry carries
 #        exactly class (read, read-web, exec, lease, agent-team), tier (a
-#        rung of TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh, read from
-#        it: "top" for the first, <model>-<effort> for the others; KTD22),
-#        never_downgrade (boolean; true needs tier top) and max_turns (positive integer); the
-#        never_downgrade set equals the personas TRIFORGE_MODEL_LADDER in
-#        scripts/lib/registry.sh names after "Never downgrade" (a skip: line
-#        when the literal has no such list). Every persona a skill names in
+#        rung of TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh: "top" for
+#        the first, <model>-<effort> for the others; KTD22), never_downgrade
+#        (boolean; true needs tier top) and max_turns (a whole number from 1
+#        to 1000); the never_downgrade set equals the personas the ladder
+#        names after "Never downgrade". The ladder and the entry rules are
+#        registry.sh's _LADDER_PY, the code dispatch_persona resolves with, so
+#        a ladder that does not parse there (its top rung naming no fallback
+#        model at its own effort, no never-downgrade list) fails here too; a
+#        fixture with no ladder of its own takes the shipped tiers and skips
+#        the never-downgrade cross-check. Every persona a skill names in
 #        SKILL.md, references/ or scripts/ — `dispatch_persona <name>`,
-#        `persona_prompt <name>` or "the `<name>` persona" (a tool class in
-#        that phrase is not a name) — exists, and no skill spells out a
-#        personas/ path. Outside fixture mode a missing persona home
+#        `persona_prompt <name>`, `_spec <name>` / `_lens <name>` (the
+#        review and research launchers) or "the `<name>` persona" (a tool
+#        class in that phrase is not a name) — exists, and no skill spells
+#        out a personas/ path. Outside fixture mode a missing persona home
 #        fails                                                          (new)
 #   SREF `skills-ref validate <skill>` runs when the binary is on PATH (its
 #        verdict on disable-model-invocation / argument-hint is pending until
@@ -269,12 +274,37 @@ CASE_LINE = re.compile(r"^\s*case\s+(.+?)\s+in\b")
 COMPARISON = re.compile(r"(?:\[\[?|\btest\b)\s+(?P<left>.+?)\s+(?P<op>==?|!=|=~)\s+(?P<right>.+?)(?:\s+\]\]?|\s*(?:;|&&|\|\||$))")
 LEAD_LITERAL = re.compile(r"""^["']?(?:codex|claude)\*?["']?$""")
 FENCE_OPEN = re.compile(r"^( {0,3})(`{3,}|~{3,})(.*)$")
-PERSONA_CLASSES = ("read", "read-web", "exec", "lease", "agent-team")
-PERSONA_FIELDS = ("class", "tier", "never_downgrade", "max_turns")
-PERSONA_CALL = re.compile(r"(?<![\w-])(?:dispatch_persona|persona_prompt)\s+[\"']?([A-Za-z0-9][A-Za-z0-9_.-]*)")
+
+
+def _ladder_rules():
+    """The registry's _LADDER_PY, executed: ladder_parse and the persona
+    manifest rules dispatch_persona resolves with (KTD21, KTD22), so a ladder
+    or an entry passes here only when every dispatch takes it. Exits 2 when
+    this checkout's scripts/lib/registry.sh has no such literal."""
+    path = os.path.join(REPO, "scripts", "lib", "registry.sh")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        text = ""
+    m = re.search(r"^_LADDER_PY='\n(.*?)\n'$", text, re.M | re.S)
+    if not m:
+        sys.stderr.write("validate-skills: ERROR no _LADDER_PY='...' literal in " + path
+                         + " — the persona manifest rules (KTD21) can't be read\n")
+        sys.exit(2)
+    rules = {}
+    exec(m.group(1), rules)  # noqa: S102 — the checkout's own registry code
+    return rules
+
+
+LADDER_RULES = _ladder_rules()
+PERSONA_CLASSES = LADDER_RULES["PERSONA_CLASSES"]
+PERSONA_FIELDS = LADDER_RULES["PERSONA_KEYS"]
+# A persona call: dispatch_persona or persona_prompt, or the per-persona
+# launcher a skill's background round defines (at-review's _spec, at-deep-research's _lens).
+PERSONA_CALL = re.compile(r"(?<![\w-])(?:dispatch_persona|persona_prompt|_spec|_lens)\s+[\"']?([A-Za-z0-9][A-Za-z0-9_.-]*)")
 PERSONA_PROSE = re.compile(r"`([a-z0-9]+(?:-[a-z0-9]+)*)` personas?\b")
 PERSONA_PATH = re.compile(r"(?<![\w.-])personas/[A-Za-z0-9_.-]+\.(?:md|toml)\b")
-LADDER_TRIO = re.compile(r"^TRIFORGE_MODEL_LADDER='[^']*?Never downgrade ([^.']+)\.", re.M)
 LADDER_LITERAL = re.compile(r"^TRIFORGE_MODEL_LADDER='([^']*)'", re.M)
 
 # --- findings ------------------------------------------------------------------
@@ -957,7 +987,7 @@ def skill_dirs(skills_dir):
 # --- cross-file checks ---------------------------------------------------------
 def persona_refs(dirs):
     """KTD21: every persona a validated skill names — `dispatch_persona <name>`,
-    `persona_prompt <name>` or "the `<name>` persona" — and every persona path it spells out, from
+    `persona_prompt <name>`, a launcher's `_spec <name>` / `_lens <name>` or "the `<name>` persona" — and every persona path it spells out, from
     SKILL.md, references/*.md and scripts/*: ([(path, line, name)], [(path, line, persona path)])."""
     names, paths = [], []
     for d in dirs:
@@ -1006,25 +1036,13 @@ def load_manifest(path):
     return personas
 
 
-def ladder_tiers(registry):
-    """The persona tiers, top first, read from TRIFORGE_MODEL_LADDER (KTD22: one
-    source, never restated): rungs split on arrows, each naming its model and
-    effort as its first two backticked words; the first rung is "top", every
-    other is <model>-<effort>, the parse scripts/lib/persona.sh uses. None when
-    the file or the literal is missing or the rungs do not parse."""
+def ladder_text(registry):
+    """TRIFORGE_MODEL_LADDER's text in <registry>, or None when the file or the
+    literal is missing."""
     if not os.path.isfile(registry):
         return None
     m = LADDER_LITERAL.search(read_text(registry))
-    if not m:
-        return None
-    rungs = m.group(1).partition(":")[2].partition("Never downgrade")[0].split("\u2192")
-    names = []
-    for i, rung in enumerate(rungs):
-        ticks = re.findall(r"`([^`]+)`", rung)
-        if len(ticks) < 2:
-            return None
-        names.append("top" if i == 0 else ticks[0] + "-" + ticks[1])
-    return tuple(names) if len(names) >= 2 and len(set(names)) == len(names) else None
+    return m.group(1) if m else None
 
 
 def check_personas(root, dirs):
@@ -1052,13 +1070,21 @@ def check_personas(root, dirs):
         elif os.path.basename(path)[:-3] in PERSONA_CLASSES:
             new(path, "KTD21", "persona named after a tool class (" + ", ".join(PERSONA_CLASSES) + ")")
 
-    # KTD21 — one manifest entry per persona file, every field valid.
-    # The tiers are the ladder's rungs (KTD22): this tree's registry, or the
-    # shipped one for a fixture that carries none.
-    tiers = (ladder_tiers(os.path.join(root, "scripts", "lib", "registry.sh"))
-             or ladder_tiers(os.path.join(REPO, "scripts", "lib", "registry.sh")))
+    # KTD21 — one manifest entry per persona file, every field valid. The
+    # tiers and the never-downgrade set are this tree's ladder as
+    # dispatch_persona reads it (ladder_parse, KTD22); a fixture with no ladder
+    # of its own takes the shipped one's tiers, never its never-downgrade set.
+    text = ladder_text(os.path.join(root, "scripts", "lib", "registry.sh"))
+    own = text is not None
+    if not own:
+        text = ladder_text(os.path.join(REPO, "scripts", "lib", "registry.sh"))
+    parsed = LADDER_RULES["ladder_parse"](text) if text is not None else None
+    tiers = tuple(r.name for r in parsed[0]) if parsed else None
+    trio = set(parsed[1]) if parsed and own else None
     if not tiers:
-        new(manifest, "KTD21", "TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh does not parse as rungs; no tier can be checked")
+        new(manifest, "KTD21", "TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh does not parse as rungs and a never-downgrade "
+            "list (the top rung naming its fallback model at its own effort), so dispatch_persona refuses every persona; "
+            "no tier can be checked")
     entries = {}
     if os.path.exists(manifest):
         entries = load_manifest(manifest)
@@ -1084,23 +1110,13 @@ def check_personas(root, dirs):
             new(manifest, "KTD21", where + "tier '" + str(entry["tier"]) + "' (the ladder's rungs, top first: " + ", ".join(tiers) + ")")
         if "never_downgrade" in entry and not isinstance(entry["never_downgrade"], bool):
             new(manifest, "KTD21", where + "never_downgrade must be true or false")
-        turns = entry.get("max_turns")
-        if "max_turns" in entry and (isinstance(turns, bool) or not isinstance(turns, int) or turns < 1):
-            new(manifest, "KTD21", where + "max_turns must be a positive integer")
+        if "max_turns" in entry and not LADDER_RULES["persona_turns_ok"](entry["max_turns"]):
+            new(manifest, "KTD21", where + "max_turns must be a whole number from 1 to " + str(LADDER_RULES["PERSONA_MAX_TURNS"]))
         if entry.get("never_downgrade") is True and entry.get("tier") != "top":
             new(manifest, "KTD21", where + 'never_downgrade = true needs tier = "top"')
 
     # KTD21 — the never-downgrade set is the one the ladder names (KTD22).
-    registry = os.path.join(root, "scripts", "lib", "registry.sh")
-    trio = None
-    if os.path.isfile(registry):
-        m = LADDER_TRIO.search(read_text(registry))
-        if m:
-            trio = set(n for n in re.split(r",\s*(?:or\s+)?|\s+or\s+", m.group(1).strip()) if n)
-    if trio is None:
-        if not FIXTURE:
-            SKIPS.append("[KTD21] no 'Never downgrade …' list in TRIFORGE_MODEL_LADDER — the never_downgrade set is not cross-checked")
-    elif entries:
+    if trio is not None and entries:
         pinned = set(n for n, e in entries.items() if isinstance(e, dict) and e.get("never_downgrade") is True)
         for name in sorted(trio - pinned):
             new(manifest, "KTD21", "TRIFORGE_MODEL_LADDER never downgrades " + name + " but [personas." + name

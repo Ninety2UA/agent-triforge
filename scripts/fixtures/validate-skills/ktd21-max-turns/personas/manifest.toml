@@ -1,0 +1,5 @@
+[personas.reviewer]
+class = "read"
+tier = "opus-high"
+never_downgrade = false
+max_turns = 5000
