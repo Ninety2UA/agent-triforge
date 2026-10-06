@@ -68,8 +68,9 @@
 #       the helper library is missing
 #   44  the integrity check found a change before a session (restored,
 #       escalated; inspect, then lease_rebaseline) or could not run
-#   45  this shell may not run the lead-owned integrity check (R38: another
-#       CLI's host markers, or no terminal and no markers)
+#   45  this shell may not run the lead's loop (R38: another CLI's host
+#       markers, or no terminal and no markers, as under nohup, cron or CI),
+#       checked before any session or ledger read
 #   69  the lead's run failed deterministically (not logged in, quota spent,
 #       binary missing): stopped after that iteration, class and fix printed
 #   77  the launch line asks for full access and --allow-full-access was not
@@ -153,14 +154,16 @@ fi
 # for a dry run the --lead CLI (lead_resolve_as: the roster's values when it is
 # this checkout's lead, else that CLI's lead defaults).
 TAB=$(printf '\t')
+# Only stdout is the row; stderr is read (by a second call) only on failure,
+# so a warning printed on success never becomes part of the lead's name.
 if [ -n "$LEAD_OVERRIDE" ]; then
-  if ! LEAD_ROW=$(lead_resolve_as "$LEAD_OVERRIDE" 2>&1); then
-    echo "coordinate.sh: ERROR $(printf '%s' "$LEAD_ROW" | tail -1)" >&2
+  if ! LEAD_ROW=$(lead_resolve_as "$LEAD_OVERRIDE" 2>/dev/null); then
+    echo "coordinate.sh: ERROR $(lead_resolve_as "$LEAD_OVERRIDE" 2>&1 >/dev/null | tail -1)" >&2
     exit 1
   fi
 else
-  if ! LEAD_ROW=$(resolve_lead 2>&1); then
-    echo "coordinate.sh: ERROR the lead could not be resolved from ops/roster.toml: $(printf '%s' "$LEAD_ROW" | tail -1)" >&2
+  if ! LEAD_ROW=$(resolve_lead 2>/dev/null); then
+    echo "coordinate.sh: ERROR the lead could not be resolved from ops/roster.toml: $(resolve_lead 2>&1 >/dev/null | tail -1)" >&2
     exit 1
   fi
 fi
@@ -184,26 +187,34 @@ fi
 # nothing and is named once in a note (LAUNCH_NOTES).
 MODEL_ARGV=$(cli_field "$LEAD" lead.model_argv 2>/dev/null) || MODEL_ARGV=""
 EFFORT_ARGV=$(cli_field "$LEAD" lead.effort_argv 2>/dev/null) || EFFORT_ARGV=""
+# What the registry declares about full access (true|false); unreadable counts
+# as full access below (fail closed).
+FULL_DECL=$(cli_field "$LEAD" lead.full_access 2>/dev/null) || FULL_DECL=""
 
 # The launch argv as words (shell quoting, as the human would type it), the
-# model and effort words after them, and whether the line asks for full
-# access: a sandbox mode of danger-full-access or a bypass-everything flag.
-# One line per word, then the verdict, the extra words as typed, and notes.
+# model and effort words after them, and whether the line runs the lead with
+# full access: the registry's lead.full_access, or any word the registry's
+# launch_full_access reads as full access (_LAUNCH_ACCESS_PY: sandbox modes,
+# permission modes, bypass flags, profiles, in every spelling the two lead
+# CLIs take). Either one asks for the human's --allow-full-access. One line
+# per word, then the verdict, its reasons, the extra words as typed, notes.
 LAUNCH_WORDS=()
 FULL_ACCESS=0
+FULL_WHY=""
 LAUNCH_EXTRA=""
 LAUNCH_NOTES=""
 while IFS= read -r _w; do
   case "$_w" in
     "__full_access__="*) FULL_ACCESS=${_w#__full_access__=} ;;
+    "__why__="*) FULL_WHY="${FULL_WHY}${FULL_WHY:+; }${_w#__why__=}" ;;
     "__extra__="*) LAUNCH_EXTRA=${_w#__extra__=} ;;
     "__note__="*) LAUNCH_NOTES="${LAUNCH_NOTES}${LAUNCH_NOTES:+
 }${_w#__note__=}" ;;
     *) LAUNCH_WORDS+=("$_w") ;;
   esac
 done <<COORD_ARGV_EOF
-$(CA_ARGV="$LAUNCH_ARGV" CA_NAME="$LEAD_NAME" CA_MODEL="$LEAD_MODEL" CA_EFFORT="$LEAD_EFFORT" \
-  CA_MODEL_ARGV="$MODEL_ARGV" CA_EFFORT_ARGV="$EFFORT_ARGV" python3 -c '
+$(CA_ARGV="$LAUNCH_ARGV" CA_NAME="$LEAD_NAME" CA_MODEL="$LEAD_MODEL" CA_EFFORT="$LEAD_EFFORT" CA_FULL="$FULL_DECL" \
+  CA_MODEL_ARGV="$MODEL_ARGV" CA_EFFORT_ARGV="$EFFORT_ARGV" python3 -c "${_LAUNCH_ACCESS_PY}"'
 import os, shlex
 e = os.environ
 words = shlex.split(e["CA_ARGV"])
@@ -216,11 +227,16 @@ for field in ("model", "effort"):
         notes.append("the " + e["CA_NAME"] + " registry entry has no lead." + field + "_argv, so the [lead] " + field + " " + " ".join(value.split()) + " is not passed (the host default runs)")
         continue
     extra += [w.replace("{}", value) for w in shlex.split(tmpl)]
-full = ("danger-full-access", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-skip-permissions", "--yolo")
-hit = any(w in full or w.endswith("=danger-full-access") for w in words + extra)
+why = launch_full_access(words + extra)
+if e["CA_FULL"] == "true":
+    why.append("the registry declares lead.full_access = true")
+elif e["CA_FULL"] != "false":
+    why.append("no lead.full_access declaration could be read (fail closed)")
 for w in words + extra:
     print(w)
-print("__full_access__=" + ("1" if hit else "0"))
+print("__full_access__=" + ("1" if why else "0"))
+for r in why:
+    print("__why__=" + " ".join(r.split()))
 print("__extra__=" + " ".join(shlex.quote(w) for w in extra))
 for n in notes:
     print("__note__=" + n)
@@ -359,7 +375,7 @@ if [ "$DRY_RUN" = "true" ]; then
   echo "launch (${LEAD_NAME}): ${LAUNCH_SHOWN} <the prompt below, as one argument>"
   launch_notes
   if [ "$FULL_ACCESS" = 1 ]; then
-    echo "full access: this launch line runs only with --allow-full-access (R50)"
+    echo "full access: this launch line runs only with --allow-full-access (R50): ${FULL_WHY}"
   fi
   if [ -z "$GOAL_GATE" ]; then
     echo "goal gate: none for ${LEAD_NAME}; the session completes on ${SENTINEL} alone (KTD14)"
@@ -373,7 +389,7 @@ fi
 # what to type and run nothing.
 if [ "$FULL_ACCESS" = 1 ] && [ "$ALLOW_FULL_ACCESS" != "true" ]; then
   compose_prompt 1
-  echo "coordinate.sh: the ${LEAD_NAME} lead's launch line runs with full access (no sandbox, no approval prompts):" >&2
+  echo "coordinate.sh: the ${LEAD_NAME} lead's launch line runs with full access (no sandbox, no approval prompts; ${FULL_WHY}):" >&2
   echo "" >&2
   echo "  ${LAUNCH_SHOWN}" >&2
   echo "" >&2
@@ -393,6 +409,15 @@ if ! command -v "${LAUNCH_WORDS[0]}" >/dev/null 2>&1; then
   exit 1
 fi
 
+# The loop is a lead-owned helper (R38): it runs under the lead's own host
+# markers, from a terminal, or under the SELF seam, and refuses anywhere else
+# (nohup, cron, CI: no terminal and no markers) before it reads or writes the
+# ledger, with the helper's own message and rc 45.
+if ! _lead_only coordinate.sh; then
+  echo "coordinate.sh: STOPPED before starting a session — run the loop from a terminal or from the ${LEAD_NAME} lead's own shell (rc ${_RC_LEAD_ONLY}, above)." >&2
+  exit "$_RC_LEAD_ONLY"
+fi
+
 # --- Notification (optional, env-var-gated) ---
 notify() {
   local title="$1" body="$2"
@@ -408,16 +433,44 @@ notify() {
   fi
 }
 
+# stop_fix <reason> — the fix line for a deterministic stop, by the KTD-9
+# reason: a login for auth (the registry's login hint), a wait for quota (no
+# reinstall helps), the install line for anything else (binary missing).
+stop_fix() {
+  local LOGIN=""
+  case "${1:-}" in
+    auth)
+      LOGIN=$(cli_field "$LEAD" login 2>/dev/null) || LOGIN=""
+      printf 'not logged in: %s\n' "${LOGIN:-log in to ${LEAD_NAME}}"
+      ;;
+    quota)
+      printf 'the %s quota or rate limit is reached; wait for it to reset or switch plans, then rerun\n' "$LEAD_NAME"
+      ;;
+    *)
+      cli_install_fix "$LEAD" 2>/dev/null || printf 'install %s\n' "$LEAD_NAME"
+      ;;
+  esac
+}
+
 # integrity_gate — the lead-side integrity check before a session (KTD18).
 # Outside a git repository (no .git above: _lead_roster_path stays relative)
 # there are no leases and nothing to compare; inside one, a check that can't
-# run is a stop, like any change.
+# run is a stop, like any change. The check runs against the lease root the
+# ledger was last written under (_lease_at_ledger_root, as lease_approve):
+# a shell whose TMPDIR derives another root would otherwise compare the ledger
+# with no anchors at all and adopt whatever it holds. A recorded root that is
+# gone refuses, naming TRIFORGE_LEASE_ROOT.
 integrity_gate() {
   local RC=0
+  local TRIFORGE_LEASE_ROOT="${TRIFORGE_LEASE_ROOT:-}"   # _lease_at_ledger_root may set it
   case "$(_lead_roster_path)" in
     /*) ;;
     *) return 0 ;;
   esac
+  if ! _lease_ctx || ! _lease_at_ledger_root coordinate.sh; then
+    echo "coordinate.sh: STOPPED before starting a session — the lease root the ledger was last written under can't be used from this shell (above). Point TRIFORGE_LEASE_ROOT at the lead's lease root and rerun; an unattended session never starts on a ledger it can't check." >&2
+    exit 44
+  fi
   _lead_integrity_check coordinate.sh || RC=$?
   if [ "$RC" -eq 0 ]; then
     return 0
@@ -484,7 +537,7 @@ while [ "$ITERATION" -lt "$MAX_ITERATIONS" ] && [ "$DONE" = "false" ]; do
     if [ "$INVOKE_FAILURE_CLASS" = "deterministic" ]; then
       echo ""
       echo "=== Stopped at iteration $ITERATION: the ${LEAD_NAME} lead failed (exit ${RUN_RC}, class=${INVOKE_FAILURE_CLASS} reason=${_INVOKE_FAILURE_REASON:-unknown}) ===" >&2
-      echo "Fix: $(cli_install_fix "$LEAD" 2>/dev/null || echo "check the ${LEAD_NAME} login")" >&2
+      echo "Fix: $(stop_fix "${_INVOKE_FAILURE_REASON:-}")" >&2
       notify "Agent Triforge" "Sprint stopped — the lead failed (${_INVOKE_FAILURE_REASON:-deterministic})"
       exit 69
     fi

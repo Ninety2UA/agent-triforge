@@ -12,10 +12,12 @@
 # carries no signal: such a call counts as a success, and the first one in a
 # session says so once on stderr (R44).
 #
-# State lives outside the project, for either lead (R21):
-#   ${TMPDIR}/triforge-monitors-<uid>/<checkout>-<cksum>/<session_id>.failures
-# one file per session (the session_id in the hook payload); see
-# context-monitor.sh, which prunes the directory.
+# State and output live in monitors.py beside this file (the "failures"
+# half): per-session counts under
+#   ${TMPDIR}/triforge-monitors-<uid>/<checkout>-<hash>/<session_id>.failures
+# outside the project (R21), in directories checked private on every call and
+# files written without following a link; every value printed is stripped of
+# control characters.
 #
 # Hook event: PostToolUse
 # Configuration: registered in hooks/hooks.json (plugin)
@@ -30,7 +32,7 @@
 #   Triforge handlers always return 0).
 # Hook stdout must never look like JSON: no stdout line may start with `{`
 #   (Claude Code ≥ 2.1.246 rejects hook stdout that parses as JSON — D-031c).
-#   Audited 2026-10-04: the only stdout lines start "WARN:"; the
+#   Audited 2026-10-06: the only stdout lines start "WARN:"; the
 #   one-per-session NOTE goes to stderr.
 
 # Worker marker (KTD9, R34): in a lease worker or persona (TRIFORGE_LEASE_WORKER
@@ -54,126 +56,11 @@ _tf_on_exit() {
 trap _tf_on_exit EXIT
 
 HOOK_INPUT=$(cat)
+TF_HANDLERS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-# _monitor_root / _monitor_state_dir — kept in step with context-monitor.sh:
-# the checkout (nearest ancestor holding .git, else the working directory) and
-# its state dir under a per-user base of mode 700 (rc 1, hook inert, when the
-# base is not a directory this user owns).
-_monitor_root() {
-  local ROOT D
-  ROOT=$(pwd -P 2>/dev/null) || ROOT=$PWD
-  D=$ROOT
-  while [ -n "$D" ] && [ "$D" != "/" ]; do
-    if [ -e "$D/.git" ]; then
-      ROOT=$D
-      break
-    fi
-    D=${D%/*}
-  done
-  printf '%s\n' "$ROOT"
-}
-_monitor_state_dir() {
-  local BASE D
-  BASE="${TMPDIR:-/tmp}"
-  BASE="${BASE%/}/triforge-monitors-$(id -u)"
-  mkdir -p -m 700 "$BASE" 2>/dev/null || return 1
-  if [ -L "$BASE" ] || [ ! -O "$BASE" ]; then
-    return 1
-  fi
-  D="${BASE}/$(basename "$1")-$(printf '%s' "$1" | cksum | cut -d' ' -f1)"
-  mkdir -p "$D" 2>/dev/null || return 1
-  printf '%s\n' "$D"
-}
-
-if ! STATE_DIR=$(_monitor_state_dir "$(_monitor_root)"); then
-  echo "tool-failure-monitor: NOTE no private state directory under ${TMPDIR:-/tmp} (not owned by this user, or a symlink) — failure tracking is off (R21)" >&2
-  exit 0
+RC=0
+printf '%s' "$HOOK_INPUT" | python3 "${TF_HANDLERS}/monitors.py" failures || RC=$?
+if [ "$RC" -ne 0 ]; then
+  echo "tool-failure-monitor: WARNING the monitor failed (rc=${RC}) — advisory only, tool call continues (ON_CRASH: ALLOW)" >&2
 fi
-
-# Parse the session, tool_name and failure signal from hook input:
-# "<session>|<tool>|<failed 0/1>|<signal yes/no>".
-PARSED=$(printf '%s' "$HOOK_INPUT" | python3 -c "
-import json, re, sys
-try:
-    d = json.load(sys.stdin)
-    if not isinstance(d, dict):
-        d = {}
-except Exception:
-    d = {}
-tool = re.sub(r'[^A-Za-z0-9._:()-]', '_', str(d.get('tool_name') or 'unknown'))[:80]
-sid = re.sub(r'[^A-Za-z0-9._-]', '_', str(d.get('session_id') or ''))[:80] or 'session'
-resp = d.get('tool_response', {})
-is_err, signal = False, 'yes'
-if isinstance(resp, dict):
-    is_err = resp.get('is_error') is True or bool(resp.get('error'))
-elif isinstance(resp, str):
-    m = re.match(r'\\s*Exit code:\\s*(-?[0-9]+)', resp)
-    if m:
-        is_err = int(m.group(1)) != 0
-    else:
-        signal = 'no'
-print(sid + '|' + tool + '|' + ('1' if is_err else '0') + '|' + signal)
-" 2>/dev/null || echo "session|unknown|0|yes")
-
-SESSION=${PARSED%%|*}
-PARSED_REST=${PARSED#*|}
-TOOL_NAME=${PARSED_REST%%|*}
-PARSED_REST=${PARSED_REST#*|}
-FAILED=${PARSED_REST%%|*}
-SIGNAL=${PARSED_REST#*|}
-STATE_FILE="${STATE_DIR}/${SESSION}.failures"
-
-# R44: a payload with no failure signal is said once per session.
-if [ "$SIGNAL" = "no" ] && [ ! -f "${STATE_DIR}/${SESSION}.signal-noted" ]; then
-  : > "${STATE_DIR}/${SESSION}.signal-noted"
-  echo "tool-failure-monitor: NOTE the PostToolUse payload for ${TOOL_NAME} carries no failure signal (plain-text tool_response, no exit code), so its failures are not counted this session (R44)" >&2
-fi
-
-# Non-failure: reset consecutive counter and exit quietly.
-if [ "$FAILED" != "1" ]; then
-  if [ -f "$STATE_FILE" ]; then
-    TEMP_FILE="${STATE_FILE}.tmp.$$"
-    sed 's/^consecutive_failures: .*/consecutive_failures: 0/' "$STATE_FILE" > "$TEMP_FILE"
-    mv "$TEMP_FILE" "$STATE_FILE"
-  fi
-  exit 0
-fi
-
-# Initialize state file if missing
-if [ ! -f "$STATE_FILE" ]; then
-  cat > "$STATE_FILE" << 'EOF'
----
-failure_count: 0
-consecutive_failures: 0
----
-EOF
-fi
-
-# Parse current counts (default to 0 if missing/malformed)
-FAILURE_COUNT=$(sed -n 's/^failure_count: \([0-9]*\).*/\1/p' "$STATE_FILE")
-FAILURE_COUNT="${FAILURE_COUNT:-0}"
-CONSECUTIVE=$(sed -n 's/^consecutive_failures: \([0-9]*\).*/\1/p' "$STATE_FILE")
-CONSECUTIVE="${CONSECUTIVE:-0}"
-
-FAILURE_COUNT=$((FAILURE_COUNT + 1))
-CONSECUTIVE=$((CONSECUTIVE + 1))
-
-# Atomic state update via python to avoid sed-injection risk
-TEMP_FILE="${STATE_FILE}.tmp.$$"
-FAILURE_COUNT="$FAILURE_COUNT" CONSECUTIVE="$CONSECUTIVE" python3 -c "
-import os
-print('---')
-print(f'failure_count: {os.environ[\"FAILURE_COUNT\"]}')
-print(f'consecutive_failures: {os.environ[\"CONSECUTIVE\"]}')
-print('---')
-" > "$TEMP_FILE"
-mv "$TEMP_FILE" "$STATE_FILE"
-
-# Warn at thresholds
-if [ "$CONSECUTIVE" -ge 5 ]; then
-  printf 'WARN:%s consecutive tool failures (latest: %s). Consider investigating before continuing.\n' "$CONSECUTIVE" "$TOOL_NAME"
-elif [ "$FAILURE_COUNT" -ge 10 ]; then
-  printf 'WARN:%s total tool failures this session (latest: %s). Check %s for details.\n' "$FAILURE_COUNT" "$TOOL_NAME" "$STATE_FILE"
-fi
-
 exit 0

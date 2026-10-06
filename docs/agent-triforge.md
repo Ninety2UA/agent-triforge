@@ -942,9 +942,10 @@ The `scripts/coordinate.sh` script spawns fresh lead sessions when context is tr
 - Each session runs the lead's `launch_argv` from the registry, then the `[lead]` model and effort through the lead's `model_argv` and `effort_argv`, then the composed prompt as the last argument. A Codex lead gets `-m gpt-6-astra -c model_reasoning_effort=xhigh` unless `[lead]` sets other values
 - Progress tracked in ops/STATE.md
 - Completion detected via the `ops/.sprint-complete` sentinel (cleared at loop start, checked after each iteration — no output parsing)
-- The lead-side integrity check (KTD18) runs before each session. It restores a change the lead didn't make, escalates the open leases and stops the loop with rc 44, so no unattended session accepts the change
-- A deterministic failure (not logged in, quota spent, binary missing) stops the loop after that session with rc 69
-- A launch line that asks for full access (the Codex lead's `-s danger-full-access`) runs only with `--allow-full-access`. Without it the script prints the line and the three confinement statements, runs nothing and exits 77 (R50)
+- The lead-side integrity check (KTD18) runs before each session, against the lease root the ledger was last written under, even when this shell's TMPDIR points elsewhere. It restores a change the lead didn't make, escalates the open leases and stops the loop with rc 44, so no unattended session accepts the change. A recorded root that no longer exists also stops the loop with rc 44, and the message names `TRIFORGE_LEASE_ROOT`
+- A deterministic failure (not logged in, quota spent, binary missing) stops the loop after that session with rc 69, and the Fix line matches the cause: the CLI's login, a wait for the quota, or the install
+- Run the loop from a terminal or from the lead's own shell. A run under nohup, cron or CI has neither, so the loop stops with rc 45 before it reads the ledger or starts a session
+- A launch line that gives full access runs only with `--allow-full-access`. A line gives full access when the registry declares `lead.full_access = true` (the Codex lead's `-s danger-full-access` line) or when one of its words grants it: a danger-full-access sandbox in any spelling, `--permission-mode bypassPermissions`, a skip-permissions or bypass flag, or a `--profile`. Without the flag the script prints the line and the three confinement statements, runs nothing and exits 77 (R50)
 - Supports flags: `--max N`, `--convergence`, `--team`, `--allow-full-access`, and `--dry-run [--lead claude|codex]`, which prints the launch line and the composed prompt and runs nothing
 
 ```bash
@@ -962,7 +963,7 @@ The `context-monitor.sh` PostToolUse hook detects:
 - **150+ total tool calls** → suggests spawning subagents
 - **200+ total tool calls** → critical warning, strongly suggests saving state and wrapping session
 
-The lead's registry data (`lead.tool_vocab_read`) decides which tool calls count as reads: Read, Grep, Glob and the other read tools under a Claude Code lead; under a Codex lead, whose hooks see its shell tool as `Bash`, a shell command that only reads. The monitors keep per-session counts under `$TMPDIR/triforge-monitors-<uid>/`, outside the project. Under a lead whose vocabulary they can't read, they stay quiet and say so once per session.
+The lead's registry data (`lead.tool_vocab_read`) decides which tool calls count as reads: Read, Grep, Glob and the other read tools under a Claude Code lead; under a Codex lead, whose hooks see its shell tool as `Bash`, a shell command that only reads. The monitors keep per-session counts under `$TMPDIR/triforge-monitors-<uid>/`, outside the project. Both that directory and the checkout's directory inside it must belong to this user and not be a symlink; the monitors take group and other permissions away, and stay quiet with one note when a directory fails the check. Under a lead whose vocabulary they can't read, they stay quiet and say so once per session.
 
 ### WTF-likelihood risk scoring
 
@@ -1215,7 +1216,7 @@ agent-triforge/                     (plugin — installed automatically)
 │       └── agents/openai.yaml            Codex skill metadata
 ├── hooks/
 │   ├── hooks.json                    Hook registration
-│   └── handlers/                     4 lifecycle hook scripts
+│   └── handlers/                     4 lifecycle hook scripts, plus monitors.py (the monitors' state and classifier)
 ├── scripts/
 │   ├── coordinate.sh                 Outer loop for context recovery
 │   └── invoke-external.sh           Unified six-CLI invocation (roster, leases, feature detection)

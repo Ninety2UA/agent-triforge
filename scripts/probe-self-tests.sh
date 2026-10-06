@@ -151,6 +151,34 @@ rm -rf "$_S1_DIR"
 #             quoted goal of the $at-ship line; the real --team lands after it
 #   nofield   a registry copy whose claude lead entry has no effort_argv:
 #             --model passed, no --effort, one note naming the field
+#   fullaccess one copy of the scripts, its claude lead entry rewritten per
+#             case: every launch line that gives full access -> rc 77, nothing
+#             run, though the entry declares full_access = False:
+#             --permission-mode bypassPermissions and =bypassPermissions,
+#             --dangerously-skip-permissions, --allow-dangerously-skip-
+#             permissions, -sdanger-full-access, -s danger-full-access,
+#             -s=danger-full-access, --sandbox=danger-full-access, --sandbox
+#             danger-full-access, -c and --config sandbox_mode="danger-full-
+#             access" (quotes kept in the word, as a shell-quoted
+#             'sandbox_mode="..."' leaves them), -csandbox_mode=…,
+#             --config=sandbox_mode=…, --dangerously-bypass-approvals-and-
+#             sandbox, --yolo, --profile <name> (a profile can set any
+#             sandbox); a plain line declared full_access = True -> rc 77
+#             too; control: acceptEdits, declared False -> the stub runs
+#   ledgerroot a ledger written under TMPDIR=A (no TRIFORGE_LEASE_ROOT), then
+#             tampered (builder_cli rewritten); coordinate.sh under TMPDIR=B
+#             -> rc 44 before any session, the change restored from A's copy
+#             and alerted; with A's lease root gone -> rc 44, refused, naming
+#             TRIFORGE_LEASE_ROOT, nothing run
+#   noshell   the SELF seam unset, no TTY, no host markers (nohup, cron, CI):
+#             with a lease in the ledger and with none -> rc 45 naming the
+#             fix (a terminal or the lead's own shell), never 44, nothing run
+#   quota     the stub prints a usage-limit line and exits 1 -> rc 69 after
+#             one run, reason=quota, a Fix line about the quota with no
+#             install text (auth, below, gets the CLI's login hint)
+#   stderr    every python3 prints a warning on stderr (a wrapper first on
+#             PATH): the lead still resolves (--dry-run and --dry-run --lead
+#             codex print their launch lines, rc 0)
 #   leadwet   --lead without --dry-run -> rc 1, nothing run
 #   noack     [lead] codex, no --allow-full-access -> rc 77, the launch line
 #             and the three R4 statements printed, the stub never run
@@ -177,6 +205,7 @@ printf '%s\n' "$L" >> "$S2_STUB_LOG"
 case "${S2_STUB_MODE:-noop}" in
   done) mkdir -p ops && : > ops/.sprint-complete ;;
   auth) echo "Error: Not logged in - please run /login"; exit 1 ;;
+  quota) echo "Error: you have reached your usage limit for this billing cycle"; exit 1 ;;
 esac
 exit 0
 S2_STUB_EOF
@@ -193,13 +222,20 @@ _s2_repo() { # _s2_repo <case> [roster text, %b escapes] — a repo on sprint/s2
 # _s2_run <case> <stub mode> <seam lead> <coordinate.sh arguments...> — run it
 # from the case's repo, no TTY, no host markers; prints its output, then
 # "rc=<n>" and "runs=<stub invocations>"; the stub log is <case>.stub.
+# S2_TMP sets its TMPDIR; S2_NO_ROOT=1 leaves TRIFORGE_LEASE_ROOT unset, so the
+# lease root is derived from that TMPDIR; S2_NO_SEAM=1 unsets the SELF seam
+# (TRIFORGE_TEST_LEAD, TRIFORGE_TEST_BUILDER), as for a person's nohup run;
+# S2_PATH goes first on PATH.
 _s2_run() {
   local C=$1 M=$2 L=$3 R=0
   shift 3
   : > "$_S2/$C.stub"
-  ( cd "$_S2/$C" && export HOME="$_S2/home" TMPDIR="$_S2/tmp" GIT_CONFIG_NOSYSTEM=1 TRIFORGE_LEASE_ROOT="$_S2/$C.leases" \
+  ( cd "$_S2/$C" && export HOME="$_S2/home" TMPDIR="${S2_TMP:-$_S2/tmp}" GIT_CONFIG_NOSYSTEM=1 TRIFORGE_LEASE_ROOT="$_S2/$C.leases" \
         PATH="$_S2/bin:${_SELF_STUBS}:$PATH" S2_STUB_LOG="$_S2/$C.stub" S2_STUB_MODE="$M" TRIFORGE_TEST_LEAD="$L" \
       && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID NOTIFY_WEBHOOK_URL CLAUDE_PLUGIN_ROOT \
+      && if [ -n "${S2_NO_ROOT:-}" ]; then unset TRIFORGE_LEASE_ROOT; fi \
+      && if [ -n "${S2_NO_SEAM:-}" ]; then unset TRIFORGE_TEST_LEAD TRIFORGE_TEST_BUILDER; fi \
+      && if [ -n "${S2_PATH:-}" ]; then PATH="${S2_PATH}:$PATH"; fi \
       && bash "${S2_COORD:-${_SELF_DIR}/coordinate.sh}" "$@" ) < /dev/null > "$_S2/$C.out" 2>&1 || R=$?
   cat "$_S2/$C.out"
   echo "rc=$R"
@@ -263,6 +299,127 @@ _S2_FAIL="${_S2_FAIL}$(_self_expect nofield "$O" '^launch \(Claude Code\): claud
   '^note: .*Claude Code.* no lead\.effort_argv.*effort high is not passed' '^rc=0$')"
 if [ "$(printf '%s\n' "$O" | grep -c '^note: ' || true)" != 1 ]; then _S2_FAIL="$_S2_FAIL nofield(not-one-note)"; fi
 
+# fullaccess: a second copy, its claude lead's launch_argv and full_access
+# rewritten per case from the pristine registry (the launch line is the
+# Python value: a backslash-quote keeps the quote in the shell word)
+mkdir -p "$_S2/tree2"
+cp -R "${_SELF_DIR}/../.claude-plugin" "$_S2/tree2/" 2>/dev/null || true
+( cd "${_SELF_DIR}/.." && tar cf - --exclude scripts/fixtures scripts ) | ( cd "$_S2/tree2" && tar xf - ) 2>/dev/null || true
+cp "$_S2/tree2/scripts/lib/registry.sh" "$_S2/registry.orig" 2>/dev/null || true
+_s2_launch() { # _s2_launch <launch_argv value> <True|False> — rewrite the copy's claude lead entry
+  cp "$_S2/registry.orig" "$_S2/tree2/scripts/lib/registry.sh"
+  S2_LAUNCH="$1" S2_FULL="$2" python3 - "$_S2/tree2/scripts/lib/registry.sh" <<'S2_LAUNCH_PY' || true
+import json, os, sys
+p = sys.argv[1]
+lines = open(p).read().split("\n")
+start = next(i for i, l in enumerate(lines) if l.strip() == '"claude": {')
+li = next(i for i in range(start, len(lines)) if '"launch_argv":' in lines[i])
+indent = lines[li][:len(lines[li]) - len(lines[li].lstrip())]
+end = next(i for i in range(li, len(lines)) if lines[i].strip().startswith("}"))
+body = [l for l in lines[li + 1:end] if '"full_access":' not in l]
+lines = lines[:li] + [indent + '"launch_argv": ' + json.dumps(os.environ["S2_LAUNCH"]) + ",",
+                      indent + '"full_access": ' + os.environ["S2_FULL"] + ","] + body + lines[end:]
+open(p, "w").write("\n".join(lines))
+S2_LAUNCH_PY
+}
+_s2_repo fullaccess
+_S2_FA=""
+while IFS='|' read -r _s2_l _s2_d _s2_want; do
+  [ -n "$_s2_l" ] || continue
+  _s2_launch "$_s2_l" "$_s2_d"
+  O=$(S2_COORD="$_S2/tree2/scripts/coordinate.sh" _s2_run fullaccess done claude "probe goal" --max 1)
+  if [ "$_s2_want" = refuse ]; then
+    if ! printf '%s\n' "$O" | grep -q '^rc=77$' || ! printf '%s\n' "$O" | grep -q '^runs=0$'; then _S2_FA="${_S2_FA} [${_s2_l}](not-refused:$(printf '%s\n' "$O" | grep -E '^(rc|runs)=' | tr '\n' ','))"; fi
+  else
+    if ! printf '%s\n' "$O" | grep -q '^rc=0$' || ! printf '%s\n' "$O" | grep -q '^runs=1$'; then _S2_FA="${_S2_FA} [${_s2_l}](control-refused:$(printf '%s\n' "$O" | grep -E '^(rc|runs)=' | tr '\n' ','))"; fi
+  fi
+  rm -f "$_S2/fullaccess/ops/.sprint-complete"
+done <<'S2_FA_EOF'
+claude --print --permission-mode bypassPermissions|False|refuse
+claude --print --permission-mode=bypassPermissions|False|refuse
+claude --print --dangerously-skip-permissions|False|refuse
+claude --print --allow-dangerously-skip-permissions|False|refuse
+codex exec -sdanger-full-access|False|refuse
+codex exec -s danger-full-access|False|refuse
+codex exec -s=danger-full-access|False|refuse
+codex exec --sandbox=danger-full-access|False|refuse
+codex exec --sandbox danger-full-access|False|refuse
+codex exec -c sandbox_mode=\"danger-full-access\"|False|refuse
+codex exec --config sandbox_mode=\"danger-full-access\"|False|refuse
+codex exec -csandbox_mode=danger-full-access|False|refuse
+codex exec --config=sandbox_mode=danger-full-access|False|refuse
+codex exec --dangerously-bypass-approvals-and-sandbox|False|refuse
+codex exec --yolo|False|refuse
+codex exec --profile wide|False|refuse
+claude --print|True|refuse
+claude --print --permission-mode acceptEdits|False|run
+S2_FA_EOF
+unset _s2_l _s2_d _s2_want
+[ -z "$_S2_FA" ] || _S2_FAIL="$_S2_FAIL fullaccess(${_S2_FA# })"
+
+# ledgerroot: the integrity gate binds to the lease root the ledger was last
+# written under, not the one this shell's TMPDIR derives
+_s2_repo ledgerroot
+mkdir -p "$_S2/tA" "$_S2/tB"
+printf '#!/bin/sh\necho "Status: DONE"\n' > "$_S2/ledgerroot.fb"
+chmod +x "$_S2/ledgerroot.fb"
+_s2_ledger() { # _s2_ledger <TMPDIR> <cmd...> — the lease library, no TRIFORGE_LEASE_ROOT, the seam
+  local T=$1
+  shift
+  ( cd "$_S2/ledgerroot" && export HOME="$_S2/home" TMPDIR="$T" GIT_CONFIG_NOSYSTEM=1 PATH="${_SELF_STUBS}:$PATH" \
+        TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S2/ledgerroot.fb" \
+      && unset TRIFORGE_LEASE_ROOT CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID CLAUDE_PLUGIN_ROOT \
+      && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && "$@" ) < /dev/null 2>&1
+}
+O=$(_s2_ledger "$_S2/tA" lease_create t builder >/dev/null; echo "made:$(grep -c '^builder_cli = "claude"' "$_S2/ledgerroot/ops/leases.toml" || true)")
+python3 - "$_S2/ledgerroot/ops/leases.toml" <<'S2_TAMPER_PY' || true
+import sys
+p = sys.argv[1]
+s = open(p).read()
+open(p, "w").write(s.replace('builder_cli = "claude"', 'builder_cli = "codex"', 1))
+S2_TAMPER_PY
+O="$O
+$(S2_TMP="$_S2/tB" S2_NO_ROOT=1 _s2_run ledgerroot done claude "probe goal" --max 1)
+restored=$(grep -c '^builder_cli = "claude"' "$_S2/ledgerroot/ops/leases.toml" || true)"
+_S2_FAIL="${_S2_FAIL}$(_self_expect ledgerroot "$O" '^made:1$' 'writing under .*/tA/' 'coordinate\.sh: INTEGRITY' 'STOPPED before starting a session' \
+  '^rc=44$' '^runs=0$' '^restored=1$')"
+rm -rf "$_S2/tA/triforge-leases"
+O=$(S2_TMP="$_S2/tB" S2_NO_ROOT=1 _s2_run ledgerroot done claude "probe goal" --max 1)
+_S2_FAIL="${_S2_FAIL}$(_self_expect ledgerroot-gone "$O" 'REFUSED.*export TRIFORGE_LEASE_ROOT' '^rc=44$' '^runs=0$')"
+
+# noshell: the lead host check runs before anything else (C6); no seam, no TTY
+_s2_repo noshell
+printf '#!/bin/sh\necho "Status: DONE"\n' > "$_S2/noshell.fb"
+chmod +x "$_S2/noshell.fb"
+O=$(S2_NO_SEAM=1 _s2_run noshell done claude "probe goal" --max 1)
+_S2_FAIL="${_S2_FAIL}$(_self_expect noshell-empty "$O" 'REFUSED.*no lead host markers' 'from a terminal' '^rc=45$' '^runs=0$')"
+( cd "$_S2/noshell" && export HOME="$_S2/home" TMPDIR="$_S2/tmp" GIT_CONFIG_NOSYSTEM=1 TRIFORGE_LEASE_ROOT="$_S2/noshell.leases" \
+    PATH="${_SELF_STUBS}:$PATH" TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S2/noshell.fb" \
+  && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID CLAUDE_PLUGIN_ROOT \
+  && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && lease_create t builder ) < /dev/null >/dev/null 2>&1 || true
+O=$(S2_NO_SEAM=1 _s2_run noshell done claude "probe goal" --max 1)
+_S2_FAIL="${_S2_FAIL}$(_self_expect noshell-ledger "$O" 'REFUSED.*no lead host markers' 'from a terminal' '^rc=45$' '^runs=0$')"
+if printf '%s\n' "$O" | grep -q 'INTEGRITY\|^rc=44$'; then _S2_FAIL="$_S2_FAIL noshell(integrity-44)"; fi
+
+# quota: the Fix line follows the failure reason (C7)
+_s2_repo quota
+O=$(_s2_run quota quota claude "probe goal" --max 3)
+_S2_FAIL="${_S2_FAIL}$(_self_expect quota "$O" 'class=deterministic reason=quota' '^Fix: the Claude Code quota or rate limit is reached' '^rc=69$' '^runs=1$')"
+if printf '%s\n' "$O" | grep -q '^Fix: .*\(install\|login\)'; then _S2_FAIL="$_S2_FAIL quota(install-or-login-text)"; fi
+
+# stderr: lead resolution reads only stdout (C8)
+mkdir -p "$_S2/pybin"
+_S2_PY=$(command -v python3 2>/dev/null || echo python3)
+printf '#!/bin/sh\necho "probe warning: something on stderr" >&2\nexec "%s" "$@"\n' "$_S2_PY" > "$_S2/pybin/python3"
+chmod +x "$_S2/pybin/python3"
+_s2_repo stderr
+O=$(S2_PATH="$_S2/pybin" _s2_run stderr noop claude "probe goal" --dry-run)
+O="$O
+$(S2_PATH="$_S2/pybin" _s2_run stderr noop claude "probe goal" --dry-run --lead codex)"
+_S2_FAIL="${_S2_FAIL}$(_self_expect stderr "$O" '^launch \(Claude Code\): claude --print --permission-mode acceptEdits' '^launch \(Codex CLI\): codex exec -s danger-full-access' 'probe warning: something on stderr')"
+if printf '%s\n' "$O" | grep -q 'cannot lead\|^rc=1$'; then _S2_FAIL="$_S2_FAIL stderr(lead-row-polluted)"; fi
+unset _S2_PY
+
 O=$(_s2_run dryclaude done claude "probe goal" --lead codex)
 _S2_FAIL="${_S2_FAIL}$(_self_expect leadwet "$O" 'needs --dry-run' '^rc=1$' '^runs=0$')"
 
@@ -282,7 +439,8 @@ _S2_FAIL="${_S2_FAIL}$(_self_expect ack-argv "$(cat "$_S2/ack.stub")" \
 _s2_repo auth
 O=$(_s2_run auth auth claude "probe goal" --max 3)
 _S2_FAIL="${_S2_FAIL}$(_self_expect auth "$O" 'Stopped at iteration 1: the Claude Code lead failed \(exit 1, class=deterministic reason=auth\)' \
-  '^Fix: install Claude Code' '^rc=69$' '^runs=1$')"
+  '^Fix: not logged in: run `claude` once and /login' '^rc=69$' '^runs=1$')"
+if printf '%s\n' "$O" | grep -q '^Fix: .*install'; then _S2_FAIL="$_S2_FAIL auth(install-text)"; fi
 _S2_FAIL="${_S2_FAIL}$(_self_expect auth-argv "$(cat "$_S2/auth.stub")" '^claude:argc=4\|--print\|--permission-mode\|acceptEdits\|/goal Sprint complete ONLY when')"
 
 _s2_repo integrity
@@ -308,7 +466,7 @@ _S2_FAIL="${_S2_FAIL}$(_self_expect integrity "$O" '^create:rc=0:review$' 'coord
 
 _S2_CAP="coordinate.sh reads the lead's launch_argv, goal_gate, model_argv and effort_argv: /goal + claude --print under Claude Code; the D-047 codex exec line, the [lead] model and effort, a quoted \$at-ship goal and no /goal under Codex; full access only with --allow-full-access (77); the integrity check before each session (44); a deterministic lead failure stops after one run (69); the lease-resume paragraph"
 if [ -z "$_S2_FAIL" ]; then
-  row "SELF-02" "claude" "$_S2_CAP" "PASS" "resume, drycodex (-m gpt-6-astra -c model_reasoning_effort=xhigh), drypin (the roster's gpt-6-luna/high), dryclaude (no model flags), claudepin (--model sonnet --effort high), nomodel (no -m), teamgoal (flags stay in the quoted goal), nofield (one note, no --effort), leadwet, noack (rc 77, nothing run), ack (one stub run, D-047 argv + model + effort), auth (rc 69 after one run), integrity (rc 44, restored, escalated, no run)" "static"
+  row "SELF-02" "claude" "$_S2_CAP" "PASS" "resume, drycodex (-m gpt-6-astra -c model_reasoning_effort=xhigh), drypin (the roster's gpt-6-luna/high), dryclaude (no model flags), claudepin (--model sonnet --effort high), nomodel (no -m), teamgoal (flags stay in the quoted goal), nofield (one note, no --effort), fullaccess (17 full-access spellings and a declared line refused, rc 77; the acceptEdits control runs), ledgerroot (a tampered ledger under another TMPDIR: rc 44, restored; its root gone: refused naming TRIFORGE_LEASE_ROOT), noshell (no seam, no TTY: rc 45, never 44, with and without a ledger), quota (rc 69, a quota Fix line), stderr (a stderr line on every python3 call: the lead still resolves), leadwet, noack (rc 77, nothing run), ack (one stub run, D-047 argv + model + effort), auth (rc 69 after one run, the login hint), integrity (rc 44, restored, escalated, no run)" "static"
 else
   row "SELF-02" "claude" "$_S2_CAP" "FAIL" "mismatch:${_S2_FAIL}" "static"
 fi
@@ -4767,6 +4925,22 @@ rm -rf "$_S20"
 #             call, no count kept
 #   state     no .claude/ and nothing else written in any case's project;
 #             the counts live under <TMPDIR>/triforge-monitors-<uid>/
+#   private   the per-user base made 0777 beforehand -> tightened to 0700, the
+#             count kept; the checkout's state dir replaced by a symlink to
+#             another directory -> inert, one note per session, nothing
+#             written there; a session's state file replaced by a symlink to a
+#             file outside -> that file never written, the state file the
+#             hook's own again
+#   writes    a command that writes counts as an action: sed with a w or W
+#             command, -i or --in-place, uniq with an output operand, xxd -r,
+#             git diff/log --output, > 1 (a file named 1), >| and &> to a
+#             file, rg --pre; the reads stay reads: sed -n 1,5p and /re/p,
+#             uniq <file>, xxd <file>, git diff, >&2, 2>&1, 2>/dev/null
+#   inject    a checkout named "c5<newline>{...}<newline>z": no stdout line of
+#             either monitor starts with "{", the warning still printed
+#   nopython  each handler with no python3 on PATH, and a copy of each handler
+#             without monitors.py beside it: rc 0, no stdout, one stderr
+#             notice, nothing written
 #   failures  [lead] codex: apply_patch "Exit code: 1" five times -> WARN:5
 #             consecutive; Bash with a plain-text response -> not counted, one
 #             NOTE for the session
@@ -4798,7 +4972,7 @@ print(json.dumps({"session_id": os.environ["S22_S"], "turn_id": "probe-turn", "t
                   "hook_event_name": "PostToolUse", "model": "probe", "permission_mode": "bypassPermissions",
                   "tool_name": os.environ["S22_T"], "tool_input": {"command": os.environ["S22_CMD"]},
                   "tool_response": os.environ["S22_RESP"], "tool_use_id": "exec-probe"}))' \
-    | env -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT TMPDIR="$_S22/tmp" HOME="$_S22/home" /bin/bash "$_S22_HOOKS/$H.sh" 2>"$_S22/$C.err" ) || true
+    | env -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT TMPDIR="${S22_TMP:-$_S22/tmp}" HOME="$_S22/home" /bin/bash "$_S22_HOOKS/$H.sh" 2>"$_S22/$C.err" ) || true
   echo "err:$(tr '\n' ' ' < "$_S22/$C.err")"
 }
 _s22_reads() { # _s22_reads <case> <session> — the session's consecutive_reads, or none
@@ -4862,6 +5036,115 @@ done
 [ -n "$(ls "$_S22"/tmp/triforge-monitors-*/reads-*/x1.context 2>/dev/null)" ] || _S22_FAIL="$_S22_FAIL state(no-count-under-TMPDIR)"
 unset _s22_c _s22_w
 
+# private: the per-user base and the checkout's state dir are checked on every
+# call, and the state files are written without following a link
+_s22_proj perm '[lead]\ncli = "codex"\n'
+_s22_mode() { python3 -c 'import os, sys; print(oct(os.lstat(sys.argv[1]).st_mode & 0o777)[2:])' "$1" 2>/dev/null || echo none; }
+mkdir -p "$_S22/t777/triforge-monitors-$(id -u)"
+chmod 777 "$_S22/t777/triforge-monitors-$(id -u)"
+O="$(S22_TMP="$_S22/t777" _s22_hook perm context-monitor p1 Bash 'cat README' probe)
+base777=$(_s22_mode "$_S22/t777/triforge-monitors-$(id -u)"):count=$(ls "$_S22"/t777/triforge-monitors-*/perm-*/p1.context 2>/dev/null | wc -l | tr -d ' ')"
+mkdir -p "$_S22/tsym" "$_S22/elsewhere"
+S22_TMP="$_S22/tsym" _s22_hook perm context-monitor p2 Bash 'cat README' probe >/dev/null
+_S22_CHILD=$(ls -d "$_S22"/tsym/triforge-monitors-*/perm-* 2>/dev/null | head -1)
+if [ -n "$_S22_CHILD" ]; then rm -rf "$_S22_CHILD" && ln -s "$_S22/elsewhere" "$_S22_CHILD"; fi
+O="$O
+symchild1:$(S22_TMP="$_S22/tsym" _s22_hook perm context-monitor p2 Bash 'cat README' probe | tr '\n' ' ')
+symchild2:$(S22_TMP="$_S22/tsym" _s22_hook perm tool-failure-monitor p2 Bash false '' | tr '\n' ' ')
+elsewhere=$(ls -A "$_S22/elsewhere" | wc -l | tr -d ' ')"
+mkdir -p "$_S22/tfile"
+S22_TMP="$_S22/tfile" _s22_hook perm context-monitor p3 Bash 'cat README' probe >/dev/null
+_S22_CHILD=$(ls -d "$_S22"/tfile/triforge-monitors-*/perm-* 2>/dev/null | head -1)
+printf 'keep\n' > "$_S22/outside.txt"
+if [ -n "$_S22_CHILD" ]; then rm -f "$_S22_CHILD/p3.context" && ln -s "$_S22/outside.txt" "$_S22_CHILD/p3.context"; fi
+S22_TMP="$_S22/tfile" _s22_hook perm context-monitor p3 Bash 'cat README' probe >/dev/null
+O="$O
+outside=$(cat "$_S22/outside.txt"):statefile=$(if [ -L "$_S22_CHILD/p3.context" ]; then echo link; elif [ -f "$_S22_CHILD/p3.context" ]; then echo file; else echo none; fi)"
+_S22_FAIL="${_S22_FAIL}$(_self_expect private "$O" '^base777=700:count=1$' '^symchild1:err:context-monitor: NOTE .*not a private directory' '^symchild2:err:tool-failure-monitor: NOTE .*not a private directory' \
+  '^elsewhere=0$' '^outside=keep:statefile=file$')"
+unset _S22_CHILD
+
+# writes: one call per session; 1 = counted as a read, 0 = an action
+_s22_proj rw '[lead]\ncli = "codex"\n'
+O=""
+_S22_N=0
+while IFS='|' read -r _s22_c _s22_w; do
+  [ -n "$_s22_c" ] || continue
+  _S22_N=$((_S22_N + 1))
+  _s22_hook rw context-monitor "w${_S22_N}" Bash "$_s22_c" probe >/dev/null
+  O="$O
+${_s22_w}=$(_s22_reads rw "w${_S22_N}") [${_s22_c}]"
+done <<'S22_RW_EOF'
+sed -n 'w result.txt' README|w
+sed -n 'W result.txt' README|w
+sed -n -e '1p' -e 'w result.txt' README|w
+sed -i s/a/b/ README|w
+sed --in-place s/a/b/ README|w
+sed -i.bak s/a/b/ README|w
+uniq README result.txt|w
+xxd -r dump.hex result.bin|w
+git diff --output=result.txt|w
+git log --output result.txt|w
+echo x > 1|w
+echo x >| out.txt|w
+cat README &> out.txt|w
+cat README >& out.txt|w
+rg --pre cat probe .|w
+sed -n 1,5p README|r
+sed -n '/probe/p' README|r
+uniq README|r
+xxd README|r
+git diff|r
+echo x >&2|r
+cat README 2>&1|r
+ls -la 2>/dev/null|r
+S22_RW_EOF
+_S22_RW_BAD=$(printf '%s\n' "$O" | grep -E '^w=1 |^r=(0|none) |^w=none ' | tr '\n' ';' || true)
+[ -z "$_S22_RW_BAD" ] || _S22_FAIL="$_S22_FAIL writes(${_S22_RW_BAD})"
+unset _s22_c _s22_w _S22_N _S22_RW_BAD
+
+# inject: a checkout whose name carries a newline and a JSON object
+_S22_INJ="$_S22/c5"$'\n''{"x":1}'$'\n''z'
+mkdir -p "$_S22_INJ/ops" && ( cd "$_S22_INJ" && git init -q . ) >/dev/null 2>&1 || true
+printf '[lead]\ncli = "codex"\n' > "$_S22_INJ/ops/roster.toml"
+_s22_inj() { # _s22_inj <handler> <session> <tool> <response json> — stdout of one call
+  ( cd "$_S22_INJ" && printf '{"session_id":"%s","tool_name":"%s","tool_input":{"command":"cat README"},"tool_response":%s}' "$2" "$3" "$4" \
+      | env -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT TMPDIR="$_S22/tinj" HOME="$_S22/home" /bin/bash "$_S22_HOOKS/$1.sh" 2>/dev/null ) || true
+}
+mkdir -p "$_S22/tinj"
+O=""
+for _s22_c in 1 2 3 4 5 6 7 8 9 10; do
+  O="$O
+$(_s22_inj tool-failure-monitor i1 Bash '{"is_error":true}')
+$(_s22_inj tool-failure-monitor i1 Bash '{"ok":1}')"
+done
+for _s22_c in 1 2 3 4 5 6 7 8; do O="$O
+$(_s22_inj context-monitor i2 Bash '"x"')"; done
+_S22_FAIL="${_S22_FAIL}$(_self_expect inject "$O" '^WARN:10 total tool failures this session \(latest: Bash\)\. Check .* for details\.$' '^Context monitor: 8 consecutive read-only')"
+if printf '%s\n' "$O" | grep -q '^{'; then _S22_FAIL="$_S22_FAIL inject(a-stdout-line-starts-with-{)"; fi
+unset _s22_c _S22_INJ
+
+# nopython: the handlers stay inert with a notice when python3 or monitors.py is missing
+mkdir -p "$_S22/minbin" "$_S22/lonely" "$_S22/tnopy"
+for _s22_c in cat dirname; do ln -sf "$(command -v "$_s22_c")" "$_S22/minbin/$_s22_c"; done
+O=""
+for _s22_c in context-monitor tool-failure-monitor; do
+  cp "$_S22_HOOKS/$_s22_c.sh" "$_S22/lonely/$_s22_c.sh"
+  R=0; OUT=$( cd "$_S22/reads" && printf '{"session_id":"n1","tool_name":"Bash","tool_input":{"command":"cat README"}}' \
+    | env -i HOME="$_S22/home" TMPDIR="$_S22/tnopy" PATH="$_S22/minbin" /bin/bash "$_S22_HOOKS/$_s22_c.sh" 2>"$_S22/nopy.err" ) || R=$?
+  O="$O
+nopy-$_s22_c:rc=$R:out=$(printf '%s' "$OUT" | wc -c | tr -d ' '):err=$(grep -c 'WARNING the monitor failed' "$_S22/nopy.err" || true)"
+  R=0; OUT=$( cd "$_S22/reads" && printf '{"session_id":"n2","tool_name":"Bash","tool_input":{"command":"cat README"}}' \
+    | env -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT TMPDIR="$_S22/tnopy" HOME="$_S22/home" /bin/bash "$_S22/lonely/$_s22_c.sh" 2>"$_S22/nopy.err" ) || R=$?
+  O="$O
+nofile-$_s22_c:rc=$R:out=$(printf '%s' "$OUT" | wc -c | tr -d ' '):err=$(grep -c 'WARNING the monitor failed' "$_S22/nopy.err" || true)"
+done
+O="$O
+written=$(find "$_S22/tnopy" -type f 2>/dev/null | wc -l | tr -d ' ')"
+_S22_FAIL="${_S22_FAIL}$(_self_expect nopython "$O" '^nopy-context-monitor:rc=0:out=0:err=1$' '^nopy-tool-failure-monitor:rc=0:out=0:err=1$' \
+  '^nofile-context-monitor:rc=0:out=0:err=1$' '^nofile-tool-failure-monitor:rc=0:out=0:err=1$' '^written=0$')"
+unset _s22_c
+
 # wave: a Codex-led fixture wave to merge
 ( mkdir -p "$_S22/wave" && cd "$_S22/wave" && export HOME="$_S22/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
     && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
@@ -4906,7 +5189,7 @@ _S22_FAIL="${_S22_FAIL}$(_self_expect wave "$O" '^create:rc=0:' '^dispatch:rc=0:
 
 _S22_CAP="A Codex lead in fixtures: the paralysis monitor reads the lead's tool vocabulary (Codex's Bash reads count, Claude Code's Bash does not), an unmapped lead leaves the monitors inert with one note, monitor state outside the project, the failure monitor on Codex payloads, and a Codex-led wave from lease_create to merged (KTD1, KTD14, R21, R44)"
 if [ -z "$_S22_FAIL" ]; then
-  row "SELF-22" "codex" "$_S22_CAP" "PASS" "reads: warning at 8 Bash reads (cat, sed -n, rg|head, git log, ls, grep, wc), apply_patch and echo > file reset; claudebash: 8 Bash reads -> 0, 8 Read -> warning; unmapped: one NOTE, no count; state: projects untouched, counts under TMPDIR; failures: apply_patch Exit code 1 x5 -> WARN, plain-text Bash not counted, one NOTE; wave: create, dispatch, lease_wait -> review, pin codex (lead class), merge 42 on .claude/settings.json, lease_approve task:t codex, merged ${_S22_MC}, attribution lead codex; t2 merged without approval" "static"
+  row "SELF-22" "codex" "$_S22_CAP" "PASS" "reads: warning at 8 Bash reads (cat, sed -n, rg|head, git log, ls, grep, wc), apply_patch and echo > file reset; claudebash: 8 Bash reads -> 0, 8 Read -> warning; unmapped: one NOTE, no count; state: projects untouched, counts under TMPDIR; failures: apply_patch Exit code 1 x5 -> WARN, plain-text Bash not counted, one NOTE; private: a 0777 base tightened to 0700, a symlinked state dir inert with a note and nothing written through it, a symlinked state file replaced, the outside file untouched; writes: 15 writing commands count as actions, 8 reads stay reads; inject: no stdout line starts with { from a checkout named with a newline and JSON; nopython: no python3 or no monitors.py -> rc 0, one notice, nothing written; wave: create, dispatch, lease_wait -> review, pin codex (lead class), merge 42 on .claude/settings.json, lease_approve task:t codex, merged ${_S22_MC}, attribution lead codex; t2 merged without approval" "static"
 else
   row "SELF-22" "codex" "$_S22_CAP" "FAIL" "mismatch:$(printf '%s' "$_S22_FAIL" | cut -c1-900)" "static"
 fi

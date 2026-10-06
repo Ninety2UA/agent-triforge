@@ -974,6 +974,13 @@ _lead_integrity_check() {
   # with no intact copy that no longer parses) leaves the ledger unverified, so
   # it fails closed like a check that can't run.
   LU_ERR=$(_ledger_update @baseline 2>&1 >/dev/null) || LU_RC=$?
+  if [ "$LU_RC" -eq "$_RC_LEAD_ONLY" ]; then
+    # The writer's own lead-only guard refused this shell (a worker, a lease
+    # root, not the lead's shell): a refusal, not a change; it still stops
+    # the caller, with its own rc and message.
+    printf '%s\n' "$LU_ERR" >&2
+    return "$_RC_LEAD_ONLY"
+  fi
   if [ "$LU_RC" -ne 0 ]; then
     echo "${OP}: INTEGRITY CHECK COULD NOT RUN — the ledger could not be verified under its lock; treated as a change (fail closed, KTD18): $(printf '%s' "$LU_ERR" | tail -3 | tr '\n' ' ' | cut -c1-300)" >&2
     return "$_RC_LEASE_INTEGRITY"

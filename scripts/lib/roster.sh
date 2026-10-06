@@ -929,7 +929,7 @@ for e in events:
 
 # resolve_lead_caps — the lead's capabilities, one "<name><TAB><value>" line
 # each: the registry's KTD1 lead fields as cli_field formats them
-# (launch_argv, model_argv, effort_argv, wait_budget_s, tool_vocab_read,
+# (launch_argv, model_argv, effort_argv, full_access, wait_budget_s, tool_vocab_read,
 # tool_vocab_action, goal_gate,
 # ask_user, native_subagents_enforced_tools, agent_teams, plugin_root_env),
 # then hooks_trusted.<event> present|absent, detected at runtime
@@ -984,7 +984,10 @@ LEAD_HOOKS_EOF
   if [ "$NEW" -eq 0 ]; then
     return 0
   fi
+  # full_access is a property of the launch line, not a capability: false is
+  # the safe value and never "missing".
   while IFS="$TAB" read -r N V; do
+    if [ "$N" = full_access ]; then continue; fi
     case "$V" in
       ""|false) if [ -n "$N" ]; then MISS="${MISS}${MISS:+, }${N}"; fi ;;
     esac

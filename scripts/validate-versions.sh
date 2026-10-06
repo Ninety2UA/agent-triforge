@@ -273,6 +273,7 @@ import ast
 import glob
 import os
 import re
+import shlex
 import sys
 
 try:
@@ -319,7 +320,7 @@ FIELDS = {
     "egress": str, "lead": dict,
 }
 LEAD_FIELDS = {
-    "launch_argv": str, "model_argv": str, "effort_argv": str, "wait_budget_s": int, "tool_vocab_read": str, "tool_vocab_action": str,
+    "launch_argv": str, "model_argv": str, "effort_argv": str, "full_access": bool, "wait_budget_s": int, "tool_vocab_read": str, "tool_vocab_action": str,
     "goal_gate": str, "ask_user": str, "native_subagents_enforced_tools": bool, "agent_teams": bool,
     "plugin_root_env": str,
 }
@@ -329,7 +330,20 @@ reg_path = os.environ["VV_REGISTRY"]
 reg = read(reg_path)
 clis = None
 env_base = []
+launch_full_access = None
 if reg is not None:
+    m = re.search(r"^_LAUNCH_ACCESS_PY='\n(.*?)\n'$", reg, re.M | re.S)
+    if not m:
+        fails.append(reg_path + ": _LAUNCH_ACCESS_PY='...' not found — the full-access detector lead.full_access is checked against")
+    elif "'" in m.group(1):
+        fails.append(reg_path + ": _LAUNCH_ACCESS_PY contains a single quote — the shell literal ends there")
+    else:
+        try:
+            ns = {}
+            exec(m.group(1), ns)  # noqa: S102 — this checkout's own registry
+            launch_full_access = ns["launch_full_access"]
+        except Exception as exc:  # noqa: BLE001 — report, do not crash
+            fails.append(reg_path + ": _LAUNCH_ACCESS_PY does not define launch_full_access: " + str(exc))
     m = re.search(r"^_TRIFORGE_CLIS_PY='\n(.*?)\n'$", reg, re.M | re.S)
     if not m:
         fails.append(reg_path + ": _TRIFORGE_CLIS_PY='...' literal not found")
@@ -423,6 +437,22 @@ if clis is not None:
             for f in ("model_argv", "effort_argv"):
                 if isinstance(lead.get(f), str) and lead[f] and "{}" not in lead[f]:
                     fails.append(where + ": lead." + f + " has no {} where the value goes")
+                    shape_ok = False
+            # The declaration and what the shipped launch line does must agree
+            # (coordinate.sh asks for --allow-full-access when either says so).
+            if launch_full_access is not None and isinstance(lead.get("launch_argv"), str) and isinstance(lead.get("full_access"), bool):
+                try:
+                    words = shlex.split(lead["launch_argv"])
+                    for f in ("model_argv", "effort_argv"):
+                        if isinstance(lead.get(f), str) and lead[f]:
+                            words += [w.replace("{}", "x") for w in shlex.split(lead[f])]
+                    why = launch_full_access(words)
+                except ValueError as exc:
+                    why = None
+                    fails.append(where + ": lead.launch_argv does not split into shell words: " + str(exc))
+                if why is not None and bool(why) != lead["full_access"]:
+                    fails.append(where + ": lead.full_access = " + str(lead["full_access"]) + " but its launch line reads as "
+                                 + ("full access (" + "; ".join(why) + ")" if why else "no full access") + " — declare what the line does")
                     shape_ok = False
         if e.get("tier") == "core":
             core.append(cli)
