@@ -140,6 +140,7 @@
 #        fixture with no ladder of its own takes the shipped tiers and skips
 #        the never-downgrade cross-check. Every persona a skill names in
 #        SKILL.md, references/ or scripts/ — `dispatch_persona <name>`,
+#        `persona_spawn <run-dir> <run-name> <name>`,
 #        `persona_prompt <name>`, `_spec <name>` / `_lens <name>` (the
 #        review and research launchers) or "the `<name>` persona" (a tool
 #        class in that phrase is not a name) — exists, and no skill spells
@@ -303,6 +304,8 @@ PERSONA_FIELDS = LADDER_RULES["PERSONA_KEYS"]
 # A persona call: dispatch_persona or persona_prompt, or the per-persona
 # launcher a skill's background round defines (at-review's _spec, at-deep-research's _lens).
 PERSONA_CALL = re.compile(r"(?<![\w-])(?:dispatch_persona|persona_prompt|_spec|_lens)\s+[\"']?([A-Za-z0-9][A-Za-z0-9_.-]*)")
+# persona_spawn <run-dir> <name> <persona> …: the persona is the third word.
+PERSONA_SPAWN = re.compile(r"(?<![\w-])persona_spawn\s+\S+\s+\S+\s+[\"']?([A-Za-z0-9][A-Za-z0-9_.-]*)")
 PERSONA_PROSE = re.compile(r"`([a-z0-9]+(?:-[a-z0-9]+)*)` personas?\b")
 PERSONA_PATH = re.compile(r"(?<![\w.-])personas/[A-Za-z0-9_.-]+\.(?:md|toml)\b")
 LADDER_LITERAL = re.compile(r"^TRIFORGE_MODEL_LADDER='([^']*)'", re.M)
@@ -987,7 +990,7 @@ def skill_dirs(skills_dir):
 # --- cross-file checks ---------------------------------------------------------
 def persona_refs(dirs):
     """KTD21: every persona a validated skill names — `dispatch_persona <name>`,
-    `persona_prompt <name>`, a launcher's `_spec <name>` / `_lens <name>` or "the `<name>` persona" — and every persona path it spells out, from
+    `persona_spawn <run-dir> <run-name> <name>`, `persona_prompt <name>`, a launcher's `_spec <name>` / `_lens <name>` or "the `<name>` persona" — and every persona path it spells out, from
     SKILL.md, references/*.md and scripts/*: ([(path, line, name)], [(path, line, persona path)])."""
     names, paths = [], []
     for d in dirs:
@@ -1001,7 +1004,7 @@ def persona_refs(dirs):
             if not os.path.isfile(path):
                 continue
             for i, line in enumerate(read_text(path).split("\n")):
-                for m in PERSONA_CALL.finditer(line):
+                for m in list(PERSONA_CALL.finditer(line)) + list(PERSONA_SPAWN.finditer(line)):
                     names.append((path, i + 1, m.group(1)))
                 for m in PERSONA_PROSE.finditer(line):
                     # "a `read-web` persona" names a tool class, not a persona.

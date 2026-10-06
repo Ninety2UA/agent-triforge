@@ -14,7 +14,28 @@ Skip this phase only when the goal is unambiguous (a single-file fix, explicit u
 
 ## Phase 1.5: plan validation
 
-Run `dispatch_persona plan-checker ops/TASKS.md <out>`, then read the verdict from `<out>`. It validates:
+The plan-checker runs detached, because a top-tier persona can outlast one host tool call (Claude Code stops one at 600 s, a Codex lead at 900 s). The first block starts it; rerun the second while it returns 75, then read the verdict. Both run the same under bash and zsh.
+
+```bash
+set -euo pipefail
+ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
+PLAN_RUN=$(mktemp -d "${TMPDIR:-/tmp}/triforge-plan.XXXXXX")
+persona_spawn "$PLAN_RUN" plan-checker plan-checker ops/TASKS.md "$PLAN_RUN/verdict.md" \
+  --brief "Validate the plan in the input and end with APPROVED or NEEDS_REVISION."
+echo "plan: plan-checker started; run the wait block next (PLAN_RUN=$PLAN_RUN)"
+```
+
+```bash
+set -euo pipefail
+ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
+: "${PLAN_RUN:?set PLAN_RUN to the run directory the start block printed}"
+persona_wait "$PLAN_RUN" || { rc=$?; [ "$rc" -eq 75 ] && echo "plan: plan-checker still running; rerun this block"; exit "$rc"; }
+R=$(cat "$PLAN_RUN/plan-checker.rc" 2>/dev/null || echo missing)
+[ "$R" = 0 ] && [ -s "$PLAN_RUN/verdict.md" ] || { echo "plan: plan-checker failed rc=$R or wrote nothing — see $PLAN_RUN" >&2; exit 1; }
+cat "$PLAN_RUN/verdict.md"
+```
+
+It validates:
 
 - Task completeness (agent, files, acceptance criteria)
 - Assignment correctness (the heuristic matrix)

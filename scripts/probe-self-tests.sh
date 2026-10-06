@@ -6,7 +6,8 @@
 # TRIFORGE_TEST_BUILDER lifecycle, session-start idempotence plus its upgrade
 # notices (R40), the skills refresh's destructive paths, the [lead] table,
 # ledger approvals, the worker marker, lead-side git hardening, detached
-# leases with lease_wait, and the claude -p lane).
+# leases with lease_wait, the claude -p lane, and the persona-bearing skill
+# blocks under zsh and bash).
 #
 # NOT a standalone script: sourced by scripts/probe-capabilities.sh after the
 # per-CLI sections, inside the same shell, so it uses the harness's helpers
@@ -4973,3 +4974,206 @@ else
   row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S20_FAIL"):$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"
 fi
 rm -rf "$_S20"
+
+# SELF-23 (U8, KTD5, KTD1): the skill blocks that run personas hold under both
+# shells a lead's tool runs them in. Claude Code's Bash tool and the Codex
+# lead's shell tool run zsh on macOS, where an unquoted "$PIDS" is one word
+# and an unmatched glob aborts; the blocks also start every persona detached
+# (persona_spawn) and collect it in a wait block the lead reruns while
+# persona_wait returns 75, because a top-tier persona outlasts one tool call.
+# The at-review dispatch, wait, synthesis and synthesis-wait blocks and the
+# at-deep-research swarm, wait, synthesis and synthesis-wait blocks are taken
+# from this checkout's skills as written and run under /bin/zsh and /bin/bash
+# against a stub library: persona_spawn starts a stub persona detached (2 s
+# when named in S23_SLOW, else at once) and persona_wait returns 75 while one
+# it names has no exit code; dispatch_role, invoke_antigravity and _scrub are
+# stubs too. Review cases: all lanes; no specialists (the lead deleted the
+# _spec lines); a failing specialist and an empty one (the wait block fails
+# naming it); a core lane that wrote nothing (synthesis wait exits 3, NOT
+# converged); the learnings-researcher failing after a partial report (its
+# report is left out, a marker goes in); slow personas (the wait blocks return
+# 75 until done). Research cases: all; a failing lens (named); the analyst
+# failing beside a stale ops/RESEARCH_ANTIGRAVITY.md (archived, never read,
+# marked FAILED); slow personas. Every case: no zsh glob or job error.
+_S23="${WORK}/self-23"
+mkdir -p "$_S23/root/scripts" "$_S23/skill/scripts" "$_S23/blocks"
+printf '#!/bin/sh\necho %s\n' "$_S23/root" > "$_S23/skill/scripts/locate-triforge.sh"
+cat > "$_S23/root/scripts/invoke-external.sh" <<'S23STUB'
+# SELF-23 stub library, sourced by zsh and bash alike; every call is logged to $S23_LOG.
+_s23_in() { case " ${2:-} " in *" $1 "*) return 0 ;; esac; return 1; }
+_s23_log() { printf '%s\n' "$*" >> "$S23_LOG"; }
+persona_spawn() {
+  _s23_log "persona_spawn $*"
+  local D="$1" N="$2" P="$3" IN="$4" OUT="$5" T=0
+  [ -f "$IN" ] || { echo "stub persona_spawn: input $IN is not a file" >&2; return 64; }
+  : > "$D/$N.pid"
+  if _s23_in "$P" "${S23_SLOW:-}"; then T=2; fi
+  ( trap '' HUP
+    sleep "$T"
+    if _s23_in "$P" "${S23_FAIL:-}"; then echo "PARTIAL report from $P" > "$OUT"; echo 3 > "$D/$N.rc"; exit 0; fi
+    if _s23_in "$P" "${S23_EMPTY:-}"; then : > "$OUT"; echo 0 > "$D/$N.rc"; exit 0; fi
+    printf 'REPORT from %s\n' "$P" > "$OUT"; echo 0 > "$D/$N.rc" ) </dev/null >/dev/null 2>&1 &
+  return 0
+}
+persona_wait() {
+  local D="$1" F N MISSING=""
+  _s23_log "persona_wait $*"
+  shift
+  sleep 0.2
+  if [ $# -gt 0 ]; then
+    for N in "$@"; do [ -f "$D/$N.rc" ] || MISSING="$MISSING $N"; done
+  else
+    for F in $(find "$D" -maxdepth 1 -name '*.pid'); do N=$(basename "$F" .pid); [ -f "$D/$N.rc" ] || MISSING="$MISSING $N"; done
+  fi
+  if [ -n "$MISSING" ]; then echo "still running:$MISSING"; return 75; fi
+  return 0
+}
+persona_stop() { _s23_log "persona_stop $*"; }
+dispatch_role() {
+  _s23_log "dispatch_role $1"
+  if _s23_in "$1" "${S23_SILENT:-}"; then return 0; fi
+  printf 'ROLE %s\n' "$1" > "$4"
+}
+invoke_antigravity() {
+  _s23_log "invoke_antigravity $1"
+  if _s23_in analyst "${S23_FAIL:-}"; then return 1; fi
+  printf 'ANALYSIS of the current topic\n' > "$3"; echo SUCCESS > "$3.status"
+}
+_scrub() { cat; }
+S23STUB
+# _s23_x <md> <n> — the n-th ```bash fence of <md>
+_s23_x() {
+  python3 - "$1" "$2" <<'S23PY'
+import sys
+k, n, out, inside = 0, int(sys.argv[2]), [], False
+for l in open(sys.argv[1], encoding="utf-8").read().split("\n"):
+    if not inside and l.strip() == "```bash":
+        inside, k = True, k + 1
+        continue
+    if inside and l.strip() == "```":
+        inside = False
+        continue
+    if inside and k == n:
+        out.append(l)
+print("\n".join(out))
+S23PY
+}
+_S23_R="${REPO_ROOT}/skills/at-review/references"
+_S23_D="${REPO_ROOT}/skills/at-deep-research/references"
+{ _s23_x "$_S23_R/dispatch.md" 1 > "$_S23/blocks/rdispatch.sh" \
+  && _s23_x "$_S23_R/dispatch.md" 2 > "$_S23/blocks/rwait.sh" \
+  && _s23_x "$_S23_R/synthesis.md" 1 > "$_S23/blocks/rsyn.sh" \
+  && _s23_x "$_S23_R/synthesis.md" 2 > "$_S23/blocks/rsynwait.sh" \
+  && _s23_x "$_S23_D/swarm.md" 1 | sed 's#<the topic>#widget caching#' > "$_S23/blocks/dswarm.sh" \
+  && _s23_x "$_S23_D/swarm.md" 2 > "$_S23/blocks/dwait.sh" \
+  && _s23_x "$_S23_D/synthesis.md" 1 > "$_S23/blocks/dsyn.sh" \
+  && _s23_x "$_S23_D/synthesis.md" 2 > "$_S23/blocks/dsynwait.sh"; } 2>/dev/null || true
+grep -v -E '^_spec ' "$_S23/blocks/rdispatch.sh" > "$_S23/blocks/rdispatch-off.sh" || true
+# _s23_blk <shell> <block> <proj> — one block from <proj> (60 s at most); prints its rc
+_s23_blk() {
+  local RC=0
+  ( cd "$3" && exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN" 60} "$1" "$_S23/blocks/$2.sh" ) > "$3/out-$2" 2>&1 < /dev/null || RC=$?
+  cat "$3/out-$2" >> "$3/out-all"
+  echo "$RC"
+}
+# _s23_loop <shell> <block> <proj> — rerun a wait block while it returns 75 (8 times at most); prints the rcs, /-joined
+_s23_loop() {
+  local N=0 RC RCS=""
+  while [ "$N" -lt 8 ]; do
+    RC=$(_s23_blk "$1" "$2" "$3"); RCS="${RCS}${RCS:+/}${RC}"
+    [ "$RC" = 75 ] || break
+    N=$((N + 1)); sleep 1
+  done
+  echo "$RCS"
+}
+_s23_review() { # _s23_review <case> <shell> [VAR=value...]
+  local C=$1 SH=$2 P DB=rdispatch
+  shift 2
+  P="$_S23/r-$C-$(basename "$SH")"; mkdir -p "$P"
+  ( cd "$P" && export HOME="$_S23" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main && git config user.email s23@triforge.local && git config user.name s23 \
+    && mkdir -p src ops/solutions && echo 'def widget(): return 1' > src/widget.py && git add -A && git commit -qm init \
+    && echo 'def widget(): return 2' > src/widget.py && git commit -qam change \
+    && echo 'widget.py must keep returning an int' > ops/solutions/widget.md ) >/dev/null 2>&1 || true
+  printf 'REVIEW PACKAGE\n' > "$P/package.md"
+  [ "$C" = off ] && DB=rdispatch-off
+  ( export S23_LOG="$P/calls" SKILL_DIR="$_S23/skill" TMPDIR="$P" REVIEW_PACKAGE="$P/package.md" "$@"
+    local D W=- Y=- YW=- RUN
+    D=$(_s23_blk "$SH" "$DB" "$P")
+    RUN=$(sed -n 's/^review: run directory \([^ ]*\) .*/\1/p' "$P/out-$DB" | head -1)
+    if [ -n "$RUN" ] && [ "$D" = 0 ]; then
+      export REVIEW_RUN="$RUN"
+      W=$(_s23_loop "$SH" rwait "$P")
+      case "$W" in */0|0) Y=$(_s23_blk "$SH" rsyn "$P"); YW=$(_s23_loop "$SH" rsynwait "$P") ;; esac
+    fi
+    printf '%s:%s:dispatch=%s:wait=%s:syn=%s:synwait=%s:ops=%s:gap=%s:learn=%s:partial=%s:rerun=%s:bad=%s:err=%s\n' "$C" "$(basename "$SH")" "$D" "$W" "$Y" "$YW" \
+      "$(cd "$P/ops" && find . -maxdepth 1 -name 'REVIEW_*.md' | sed 's#^./REVIEW_##; s#\.md$##' | LC_ALL=C sort | paste -sd, -)" \
+      "$(grep -c 'MISSING OR EMPTY' "$RUN/synthesis-input.md" 2>/dev/null || true)" \
+      "$(grep -E -o 'learnings-researcher failed \(rc [0-9a-z]+\)|Known-issue context \(learnings-researcher\)' "$RUN/synthesis-input.md" 2>/dev/null | head -1 | tr ' ()' '_[]')" \
+      "$(grep -c PARTIAL "$RUN/synthesis-input.md" 2>/dev/null || true)" \
+      "$(grep -c 'rerun this block' "$P/out-all" 2>/dev/null || true)" \
+      "$(grep -c -E 'no matches found|job not found|bad pattern|command not found|parameter not set' "$P/out-all" 2>/dev/null || true)" \
+      "$(grep -E -o 'specialist [A-Z_]+ (failed rc=[0-9a-z]+|wrote nothing)|NOT converged, lanes missing or empty: [^ ]+' "$P/out-all" 2>/dev/null | head -1 | tr ' ' '_')"
+  ) 2>&1 || true
+}
+_s23_research() { # _s23_research <case> <shell> [VAR=value...]
+  local C=$1 SH=$2 P
+  shift 2
+  P="$_S23/d-$C-$(basename "$SH")"; mkdir -p "$P/ops"
+  [ "$C" = analystfail ] && printf 'STALE analysis of an older topic\n' > "$P/ops/RESEARCH_ANTIGRAVITY.md"
+  ( export S23_LOG="$P/calls" SKILL_DIR="$_S23/skill" TMPDIR="$P" "$@"
+    local D W=- Y=- YW=- RUN
+    D=$(_s23_blk "$SH" dswarm "$P")
+    RUN=$(sed -n 's/^research: run directory \([^ ]*\) .*/\1/p' "$P/out-dswarm" | head -1)
+    if [ -n "$RUN" ] && [ "$D" = 0 ]; then
+      export RESEARCH_RUN="$RUN"
+      W=$(_s23_loop "$SH" dwait "$P")
+      case "$W" in */0|0) Y=$(_s23_blk "$SH" dsyn "$P"); YW=$(_s23_loop "$SH" dsynwait "$P") ;; esac
+    fi
+    printf '%s:%s:swarm=%s:wait=%s:syn=%s:synwait=%s:failed=%s:analyst=%s:stale=%s:analystmark=%s:ops=%s:rerun=%s:bad=%s\n' "d$C" "$(basename "$SH")" "$D" "$W" "$Y" "$YW" \
+      "$(paste -sd, "$RUN/failed" 2>/dev/null || true)" "$(cat "$RUN/analyst.rc" 2>/dev/null || true)" \
+      "$(grep -c STALE "$RUN/synthesis-input.md" 2>/dev/null || true)" \
+      "$(grep -c 'FAILED: the analyst' "$RUN/synthesis-input.md" 2>/dev/null || true)" \
+      "$(cd "$P/ops" && find . -type f | sed 's#^\./##; s#/[0-9-]*/#/TS/#' | LC_ALL=C sort | paste -sd, -)" \
+      "$(grep -c 'rerun this block' "$P/out-all" 2>/dev/null || true)" \
+      "$(grep -c -E 'no matches found|job not found|bad pattern|command not found|parameter not set' "$P/out-all" 2>/dev/null || true)"
+  ) 2>&1 || true
+}
+_S23_FAIL=""
+_S23_SHELLS="/bin/bash"
+if [ -x /bin/zsh ]; then _S23_SHELLS="/bin/zsh /bin/bash"; fi
+for _S23_SH in $_S23_SHELLS; do
+  _S23_N=$(basename "$_S23_SH")
+  O=$( _s23_review all "$_S23_SH"
+       _s23_review off "$_S23_SH"
+       _s23_review fail "$_S23_SH" S23_FAIL=performance-oracle
+       _s23_review empty "$_S23_SH" S23_EMPTY=convention-enforcer
+       _s23_review missing "$_S23_SH" S23_SILENT=reviewer
+       _s23_review lfail "$_S23_SH" S23_FAIL=learnings-researcher
+       _s23_review slow "$_S23_SH" "S23_SLOW=security-sentinel findings-synthesizer"
+       _s23_research all "$_S23_SH"
+       _s23_research lensfail "$_S23_SH" S23_FAIL=framework-docs-researcher
+       _s23_research analystfail "$_S23_SH" S23_FAIL=analyst
+       _s23_research slow "$_S23_SH" "S23_SLOW=learnings-researcher research-synthesizer" )
+  _S23_ALL='ops=ANTIGRAVITY,ARCHITECTURE_STRATEGIST,CODEX,CODE_SIMPLICITY_REVIEWER,CONVENTION_ENFORCER,PERFORMANCE_ORACLE,SECURITY_SENTINEL'
+  _S23_FAIL="${_S23_FAIL}$(_self_expect "${_S23_N}" "$O" \
+    "^all:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=(75/)*0:${_S23_ALL}:gap=0:learn=Known-issue_context_\[learnings-researcher\]:partial=0:rerun=[0-9]+:bad=0:err=$" \
+    "^off:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=(75/)*0:ops=ANTIGRAVITY,CODEX:gap=0:.*:bad=0:err=$" \
+    "^fail:${_S23_N}:dispatch=0:wait=1:syn=-:synwait=-:.*:bad=0:err=specialist_PERFORMANCE_ORACLE_failed_rc=3$" \
+    "^empty:${_S23_N}:dispatch=0:wait=1:syn=-:synwait=-:.*:bad=0:err=specialist_CONVENTION_ENFORCER_wrote_nothing$" \
+    "^missing:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=3:ops=ANTIGRAVITY,ARCHITECTURE_STRATEGIST,CODE_SIMPLICITY_REVIEWER,CONVENTION_ENFORCER,PERFORMANCE_ORACLE,SECURITY_SENTINEL:gap=1:.*:bad=0:err=NOT_converged,_lanes_missing_or_empty:_ops/REVIEW_CODEX.md$" \
+    "^lfail:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=(75/)*0:${_S23_ALL}:gap=0:learn=learnings-researcher_failed_\[rc_3\]:partial=0:.*:bad=0:err=$" \
+    "^slow:${_S23_N}:dispatch=0:wait=(75/)+0:syn=0:synwait=(75/)+0:${_S23_ALL}:gap=0:.*:rerun=[1-9][0-9]*:bad=0:err=$" \
+    "^dall:${_S23_N}:swarm=0:wait=(75/)*0:syn=0:synwait=(75/)*0:failed=:analyst=0:stale=0:analystmark=0:ops=RESEARCH_ANTIGRAVITY.md:rerun=[0-9]+:bad=0$" \
+    "^dlensfail:${_S23_N}:swarm=0:wait=(75/)*0:syn=0:synwait=(75/)*0:failed=framework-docs-researcher:analyst=0:.*:bad=0$" \
+    "^danalystfail:${_S23_N}:swarm=0:wait=(75/)*0:syn=0:synwait=(75/)*0:failed=:analyst=1:stale=0:analystmark=1:ops=archive/research/TS/RESEARCH_ANTIGRAVITY.md:rerun=[0-9]+:bad=0$" \
+    "^dslow:${_S23_N}:swarm=0:wait=(75/)+0:syn=0:synwait=(75/)+0:failed=:analyst=0:.*:rerun=[1-9][0-9]*:bad=0$")"
+done
+_S23_CAP="persona-bearing skill blocks under zsh and bash: spawn + budgeted wait, zsh-safe fan-in, the lane gap check, the learnings and analyst failure paths (U8, KTD5)"
+if [ ! -x /bin/zsh ]; then
+  row "SELF-23" "claude" "$_S23_CAP" "SKIPPED" "/bin/zsh not installed: the bash half alone is no evidence for the leads' shell" "static"
+elif [ -z "$_S23_FAIL" ]; then
+  row "SELF-23" "claude" "$_S23_CAP" "PASS" "at-review dispatch/wait/synthesis/synthesis-wait and at-deep-research swarm/wait/synthesis/synthesis-wait blocks from this checkout, each under /bin/zsh and /bin/bash with stub lanes (persona_spawn detached, persona_wait 75 while a run has no exit code): all lanes -> 7 ops/REVIEW_*.md, learnings context; no specialists -> the core lanes only; a failing specialist / an empty one -> wait rc 1 naming it; a core lane that wrote nothing -> synthesis wait rc 3 NOT converged naming ops/REVIEW_CODEX.md; learnings-researcher failing after a partial report -> marker in, partial out; slow personas -> wait blocks 75 until done, rerun asked; research: all; a failing lens named; the analyst failing beside a stale ops/RESEARCH_ANTIGRAVITY.md -> archived, never read, marked FAILED; slow -> 75 then 0; no zsh glob, job or unset-parameter error in any block" "static"
+else
+  row "SELF-23" "claude" "$_S23_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S23_FAIL"):$(printf '%s' "$_S23_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S23"

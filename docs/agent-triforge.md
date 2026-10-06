@@ -300,7 +300,9 @@ Antigravity CLI ships its own plugin system (`agy plugin {install,uninstall,list
 
 ## Personas
 
-The 19 personas live in `personas/`: one prompt file each, with no frontmatter, and one manifest, `personas/manifest.toml`. A skill names a persona, and `dispatch_persona <persona> <input> <out> [--at task:<id>|ref:<git-ref>] [--brief <text>]` runs it with the tool class, model tier and turn budget from its manifest entry, under either lead. `<input>` is the material under review, read as data: a file (the collect-snapshot diff, a scope, a bug report), or `task:<id>`, the lease's recorded snapshot diff as `persona_snapshot_diff` writes it. For an `exec` persona, a bare `<id>` or `task:<id>` input also runs it at that snapshot, the same as `--at task:<id>`. The skill's own instructions go in `--brief`, never in the input. `<out>` is the report file the call writes. An `exec` persona otherwise runs in a disposable worktree at the `--at` target, `ref:HEAD` by default, which holds committed work only. `pr-comment-resolver` and `team-lead` are the exceptions. The first edits code, so its work runs as a lease; the second runs only as a Claude agent-team teammate. Every persona runs with Claude Code's `--safe-mode`. The run loads no `CLAUDE.md` or file it imports, no `.claude/rules` file, and no skill, hook or plugin; the sandbox settings, the credential deny rules and the login still apply. `dispatch_persona` refuses a `claude` without the flag (rc 69) and prints the fix, `claude update`. The lane was tested on Claude Code 2.1.289 and 2.1.291. An `exec` persona runs Bash, so it also needs the claude worker's sandbox floor, 2.1.285.
+The 19 personas live in `personas/`: one prompt file each, with no frontmatter, and one manifest, `personas/manifest.toml`. A skill names a persona, and `dispatch_persona <persona> <input> <out> [--at task:<id>|ref:<git-ref>] [--brief <text>]` runs it with the tool class, model tier and turn budget from its manifest entry, under either lead. `<input>` is the material under review, read as data: a file (the collect-snapshot diff, a scope, a bug report), or `task:<id>`, the lease's recorded snapshot diff as `persona_snapshot_diff` writes it. For an `exec` persona, a bare `<id>` or `task:<id>` input also runs it at that snapshot, the same as `--at task:<id>`. The skill's own instructions go in `--brief`, never in the input. `<out>` is the report file the call writes. An `exec` persona otherwise runs in a disposable worktree at the `--at` target, `ref:HEAD` by default, which holds committed work only.
+
+A top-tier persona can run longer than one host tool call allows: Claude Code stops a Bash call at 600 s and a Codex lead's shell tool at 900 s. So the skills start personas detached, `persona_spawn <run-dir> <name> <persona> <input> <out> [flags]`, which runs `dispatch_persona` in its own session and returns at once. A separate block collects them with `persona_wait <run-dir> [<name>…]`: it waits inside the lead's budget and returns 75 while a run is still going, and the lead reruns that block until it returns 0. `persona_stop` stops an abandoned run. `pr-comment-resolver` and `team-lead` are the exceptions. The first edits code, so its work runs as a lease; the second runs only as a Claude agent-team teammate. Every persona runs with Claude Code's `--safe-mode`. The run loads no `CLAUDE.md` or file it imports, no `.claude/rules` file, and no skill, hook or plugin; the sandbox settings, the credential deny rules and the login still apply. `dispatch_persona` refuses a `claude` without the flag (rc 69) and prints the fix, `claude update`. The lane was tested on Claude Code 2.1.289 and 2.1.291. An `exec` persona runs Bash, so it also needs the claude worker's sandbox floor, 2.1.285.
 
 ### Core workflow personas
 
@@ -845,13 +847,14 @@ invoke_codex "logic_reviewer" \
   "${TMPDIR:-/tmp}/codex_review_$$_$(date +%s).txt" 600 &
 CODEX_PID=$!
 
-# === Specialist personas (same round, in the background) ===
-# dispatch_persona <persona> <input-file> <out> & for each persona the flags select:
+# === Specialist personas (same round, detached) ===
+# persona_spawn "$RUN" <LANE> <persona> <input-file> <out> for each persona the flags
+# select, started detached; a wait block reruns persona_wait "$RUN" while it returns 75:
 # - security-sentinel → deep OWASP analysis
 # - performance-oracle → algorithmic complexity, N+1, scalability
 # - code-simplicity-reviewer → over-engineering, YAGNI
 
-# Wait for the external reviewers (and each persona PID the same way)
+# Wait for the external reviewers; the wait block collects the personas
 wait $AGY_PID $CODEX_PID
 ```
 

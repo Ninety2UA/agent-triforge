@@ -4,7 +4,7 @@ The Claude Code-specific ways of running the wave. The lease and cross-review co
 
 ## Personas and the Fable override
 
-Personas run through `dispatch_persona` in the Bash tool, not the Agent tool, and the persona lane applies the spawn-time Fable override (model-routing reference) to top-tier personas itself. The one Agent-tool spawn left is the `team-lead` persona in team mode: its `model` parameter is `fable` when the newest `ops/research/*-probe-record.md` (`latest_probe_record` in `$ROOT/scripts/invoke-external.sh`), row CC-02, shows Fable PASS on the host, otherwise `opus`, at `max` effort.
+Personas start detached through `persona_spawn` (it runs `dispatch_persona`) in the Bash tool, not the Agent tool, and are collected with `persona_wait`, rerun while it returns 75; and the persona lane applies the spawn-time Fable override (model-routing reference) to top-tier personas itself. The one Agent-tool spawn left is the `team-lead` persona in team mode: its `model` parameter is `fable` when the newest `ops/research/*-probe-record.md` (`latest_probe_record` in `$ROOT/scripts/invoke-external.sh`), row CC-02, shows Fable PASS on the host, otherwise `opus`, at `max` effort.
 
 ## Waiting on builders
 
