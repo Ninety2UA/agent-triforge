@@ -19,11 +19,13 @@ state_head: 5ac2e54
 
 ## Current phase
 
-**Phase 2b is merged** into `release/4.0` (PR #18 → 5ac2e54, 2026-10-06): the `[lead]` table and host gate (U9), ledger approvals (U10), the `claude -p` lane with its 2.1.285 sandbox floor (U12), plus a simplify pass. Final-diff review 5/5 MERGE on the re-review; Codex gpt-6-astra xhigh FIX, all four fixed. `AGENTS.md` is at 16,364 of 16,384 bytes, so trim before adding.
+**2026-10-06 night: the user is asleep; Claude is in charge** under the 2026-10-01 grant (merges to `release/4.0` included; nothing merges to `main`; the plan's stop conditions hold). A session cron (every 30 min, :13/:43) checks for stalled workers and nudges them. Every phase runs under its own `/ce-work` invocation (see below).
 
-**Phase 2c is fixing** on `feat/v4-phase-2c` (worktree `/Users/dbenger/projects/mafw-wt-phase-2c`, head a042a23, built on the pre-squash 2b head 2e9e57a; rebase with `git rebase --onto origin/release/4.0 2e9e57a`). Reviews: Codex FIX (3 P1, 3 P2) and final-diff 3/5 FIX on ab77a46. The fix batch is `scratchpad/fix2c/batch.md` (session scratchpad): u8's skill/docs half is in as a042a23; u25's persona-lane half (L1–L9, in `/Users/dbenger/projects/mafw-wt-2c-u25` on a77b9ea) is building. Residuals: `scratchpad/phase2c-residuals.md`.
-
-**Phase 3 is integrating** on `feat/v4-phase-3` (worktree `/Users/dbenger/projects/mafw-wt-phase-3`, on 96fb70f): the bootstrap half (triforge_bootstrap, SELF-21) is in as d965a3c; the coordinator half (coordinate.sh lead split, monitors, SELF-22, CDX-21/22/23) waits in `/Users/dbenger/projects/mafw-wt-3-coord` for one follow-up (pass the `[lead]` model and effort through registry flag fields). Add `ops/decisions/2026-10-05-gitconfig-capture-at-first-lease.md` (draft in `scratchpad/phase3/`) with it. Residuals: `scratchpad/phase3/residuals.md`.
+- **Phase 2b** merged (PR #18, 5ac2e54).
+- **Phase 2c** (`feat/v4-phase-2c`, worktree `mafw-wt-phase-2c`, head 0eda3cd on e907e52): round-3 review fixes in progress. u25 (`mafw-wt-2c-u25`): persona_spawn/persona_wait/persona_stop (detached personas, budgeted waits: foreground persona calls exceed the leads' 600 s / 900 s tool limits), the @import attachment gap (CLAUDE_CODE_DISABLE_ATTACHMENTS), baseline-before-check, the worker-writable `ran` marker, the codex read fallback's credential reach, cleanup reaping, CC-24, the ref check vs the lead's own merges. u8 (`mafw-wt-2c-u8`): every persona-bearing skill block to spawn + wait, deep-research stale analyst report, learnings rc, at-debug scope, persona_snapshot_diff in at-review, SELF-23 (skill blocks under zsh/bash). Batch: session scratchpad `fix2c-r3/batch.md`. This is the third review round: if its review still says FIX, record a blocker for the user and stop the phase.
+- **Phase 3** (`feat/v4-phase-3`, worktree `mafw-wt-phase-3`, head ee6f80e on 4117340): U14 built, two review-fix batches and the simplify pass committed. fix3-mention is replacing every Codex-facing `$at-<name>` with `$agent-triforge:at-<name>` (the user-approved scratch check on 2026-10-06 showed only the namespaced mention attaches a skill under `codex exec` 0.160.0). Then the re-review (final3 + Codex), PR, merge.
+- **Phase 4** (`feat/v4-phase-4`, worktrees `mafw-wt-phase-4`, `mafw-wt-4-grok`, `mafw-wt-4-devin`, on 592688f): started 2026-10-06 in parallel. u16 builds the Grok adapter (U16), u17 the Devin adapter (U17) incl. `~/.local/share/devin` in the claude credential deny list.
+- Residual lists per phase live in the session scratchpad (`phase2c-residuals.md`, `phase3/residuals.md`, `phase4/notes.md`); they go into each PR's "Unapplied review findings".
 
 ## Authorization in force (2026-10-01)
 
@@ -42,9 +44,9 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 | 1b | U7 commands → at- skills; U24 split oversized skills; U23 remove commands/ | **merged** — PR #15 squash 3e99675 |
 | 2a | U29 capability/survival probe rows; U13 detached leases + lease_wait + lead exit; U11 worker marker (+ U18 manifests, docs copy pass) | **merged** — PR #16 squash 4d4b054; ce-code-review run 20261004-175229-90f65ad6, final-diff review 5/5, Codex gpt-6-astra xhigh FIX → all applied |
 | 2b | U9 [lead] table + resolution; U12 claude -p lane; U10 ledger lead CLI / reviewer class / approvals | **merged** — PR #18 squash 5ac2e54; final-diff re-review 5/5, Codex gpt-6-astra xhigh FIX → all applied |
-| 2c | U25 dispatch_persona lane; U8 personas home, agents/ removed | **fixing** — review fixes from Codex FIX + final-diff 3/5; u8 half in, u25 half building |
-| 3 | U14 Codex lead: bootstrap, monitors, coordinator | **integrating** — bootstrap half d965a3c; coordinator half in one follow-up |
-| 4 | U16 Grok Build adapter; U17 Devin CLI adapter (U18 shipped in 2a) | pending |
+| 2c | U25 dispatch_persona lane; U8 personas home, agents/ removed | **fixing, round 3** — Codex round 2 FIX (4 P1), final-diff 4/5 |
+| 3 | U14 Codex lead: bootstrap, monitors, coordinator | **pre-review** — fixes + simplify committed; `$agent-triforge:` mention sweep, then re-review |
+| 4 | U16 Grok Build adapter; U17 Devin CLI adapter (U18 shipped in 2a) | **building** — u16, u17 in parallel |
 | 5 | U15 at-setup lead step + instruction-file detection | pending |
 | 6 | U19 watch-cycle carry-ins; U20 two-lead fixture sprint + 4.0 release | pending |
 | final | release/4.0 → main as v4.0.0 (release.yml publishes) | pending |
