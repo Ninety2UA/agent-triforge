@@ -449,8 +449,8 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
 fi
 
 # Optional-CLI detection (roster tier): presence + version for every optional
-# member of the CLI registry (cli_table optional — opencode / kimi / cursor
-# today), written to .claude/roster-detected.local.md (runtime state,
+# member of the CLI registry (cli_table optional — opencode / kimi / cursor /
+# devin today), written to .claude/roster-detected.local.md (runtime state,
 # regenerated each session start; .claude/*.local.md is gitignored).
 # Line format: cli|version|detected-date, plus one interactive=yes|no signal
 # line the enrollment unit keys off, plus `<cli>_bin=<resolved path>` for a
@@ -512,6 +512,9 @@ mv -f "$ROSTER_DETECTED_TMP" "$ROSTER_DETECTED" 2>/dev/null || rm -f "$ROSTER_DE
 # session with no [members.<cli>] entry yet:
 #   headless (interactive=no) -> silently enroll its shipped default now (a hook
 #     cannot prompt); the lease layer records the resolved model at dispatch.
+#     A consent CLI (devin, R24) is the exception: roster_enroll_member never
+#     enrolls it headless (rc 20), and the interactive notice says it needs the
+#     user's consent.
 #   interactive (=yes)        -> emit an orientation line pointing at /at-setup.
 # All writes go through the single-writer roster writer (roster_write_member) in
 # the helper sourced above — never a hand-rolled write here. Fast: headless
@@ -525,6 +528,9 @@ if [ -n "$SS_HELPER" ] && [ "${#DETECTED_OPTIONAL[@]}" -gt 0 ]; then
     [ "$ENROLL_HAS_RC" -eq 2 ] && continue   # roster unparseable — leave it to resolve_role to surface loudly
     if [ "$INTERACTIVE_SIGNAL" = "no" ]; then
       roster_enroll_member "$CLI_NAME" headless >/dev/null 2>&1 || true
+    elif [ "$(cli_field "$CLI_NAME" consent 2>/dev/null || true)" = true ]; then
+      # A consent CLI (devin, R24) never enrolls headless: say so.
+      ENROLLMENT_NOTICES="${ENROLLMENT_NOTICES}\nNew optional CLI detected: ${CLI_NAME} (unenrolled). It needs your consent before it joins the roster, so it is never enrolled on its own. Run /at-setup to enroll it."
     else
       ENROLL_DEF=$(roster_member_default "$CLI_NAME" 2>/dev/null || true)
       ENROLLMENT_NOTICES="${ENROLLMENT_NOTICES}\nNew optional CLI detected: ${CLI_NAME} (unenrolled). Run /at-setup to enroll, or it enrolls with its shipped default (${ENROLL_DEF}) on first headless use."

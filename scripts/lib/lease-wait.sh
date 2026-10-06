@@ -435,6 +435,9 @@ _CLAUDE_TOOLS_EDIT="Bash,Read,Edit,Write,Glob,Grep,NotebookEdit,Skill"
 _CLAUDE_ALLOW_EDIT="Bash,Skill"
 _CLAUDE_TOOLS_READ="Read,Grep,Glob"
 _CLAUDE_CRED_PATHS="~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.git-credentials ~/.config/gh ~/.config/gcloud ~/.azure ~/.kube ~/.docker/config.json ~/.codex ~/.gemini ~/.kimi-code ~/.local/share/opencode ~/.cursor ~/.grok ~/.devin ~/.config/devin ~/.claude/.credentials.json"
+# Devin CLI 3000.x keeps its token in its XDG data dir, credentials.toml
+# (`devin auth status` names the file; CC-25)
+_CLAUDE_CRED_PATHS="${_CLAUDE_CRED_PATHS} ~/.local/share/devin"
 
 # _claude_sandbox_floor_ok — 0 when the claude worker lane may run here: its
 # sandbox is off (TRIFORGE_CLAUDE_SANDBOX=off: no OS confinement, the
@@ -595,6 +598,13 @@ _claude_session_ok() {
 #                --force (edits without confirmation, inside the worktree).
 #                Confinement is the worktree and the env allowlist, not
 #                --sandbox (CUR-07: an absolute-path write escaped it)
+#   devin        --config <the per-dispatch copy in the lane-file slot>, the
+#                model pin, --permission-mode by the copy's class (dangerous
+#                for .edit.json, an opted-in builder; auto, read-only tools
+#                only, for a reviewer or analyst lease), workspace trust off
+#                (-p fails in an untrusted directory), -p last. SHELL never
+#                crosses env -i, so Devin imports no login-shell exports
+#                (DVN-04)
 _lease_lane_argv() {
   local CLI=$1 MODEL=$2 EFFORT=$3 DMODEL=$4 KAF=$5 CBIN=$6 WT=$7 TIMEOUT=$8
   case "$CLI" in
@@ -625,6 +635,16 @@ _lease_lane_argv() {
       ;;
     cursor)
       _LEASE_LANE_ARGV=("$CBIN" -p --output-format stream-json --model "$DMODEL" --trust --force)
+      ;;
+    devin)
+      # <lane file> is the per-dispatch config copy (lease_dispatch); an
+      # .edit.json copy is the builder class, anything else read-only
+      if [ -z "$KAF" ]; then return 1; fi
+      case "$KAF" in
+        *.edit.json) _LEASE_LANE_ARGV=(devin --config "$KAF" --model "$DMODEL" --permission-mode dangerous) ;;
+        *)           _LEASE_LANE_ARGV=(devin --config "$KAF" --model "$DMODEL" --permission-mode auto) ;;
+      esac
+      _LEASE_LANE_ARGV+=(--respect-workspace-trust false -p)
       ;;
     *)
       return 1

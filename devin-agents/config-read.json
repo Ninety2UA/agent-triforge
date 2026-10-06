@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "shell": {
+    "setup_complete": true
+  },
+  "read_config_from": {
+    "agents_standard": true,
+    "claude": false,
+    "cursor": false,
+    "windsurf": false,
+    "copilot": false,
+    "opencode": false,
+    "zed": false
+  },
+  "subagents_enabled": false,
+  "attribution": false,
+  "auto_update": false,
+  "notify": "never",
+  "show_hints": false,
+  "permissions": {
+    "allow": ["Exec(git diff)", "Exec(git log)", "Exec(git show)", "Exec(git status)"],
+    "deny": ["Write(**)", "Exec(git push)", "Exec(git pull)", "Exec(git fetch)", "Exec(git commit)"],
+    "ask": []
+  }
+}

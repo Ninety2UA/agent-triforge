@@ -16,7 +16,7 @@ fi
 
 REVIEW_PROMPT="Review scope: tasks marked [R] in ops/TASKS.md. Report findings as [SEVERITY] file:line — issue → fix. Write them to ops/REVIEW_<YOUR_CLI>.md if you can; otherwise return them as your response."
 
-for OCLI in opencode kimi cursor; do
+for OCLI in opencode kimi cursor devin; do
   ENABLED=$(_roster_member_field "$OCLI" enabled 2>/dev/null || true)
   # Run when enrolled-enabled OR named as the reviewer-role primary; else skip.
   if [ "$ENABLED" != "true" ] && [ "$OCLI" != "$REVIEWER_PRIMARY" ]; then
@@ -30,6 +30,7 @@ for OCLI in opencode kimi cursor; do
     opencode) OPENCODE_MODEL="${OMODEL:-}" invoke_opencode "reviewer" "$REVIEW_PROMPT" "$OOUT" 600 || ORC=$? ;;
     kimi)     KIMI_MODEL="${OMODEL:-}"     invoke_kimi     "reviewer" "$REVIEW_PROMPT" "$OOUT" 600 || ORC=$? ;;
     cursor)   CURSOR_MODEL="${OMODEL:-}"   invoke_cursor   "reviewer" "$REVIEW_PROMPT" "$OOUT" 600 || ORC=$? ;;
+    devin)    DEVIN_MODEL="${OMODEL:-}" DEVIN_ROLE=reviewer invoke_devin "reviewer" "$REVIEW_PROMPT" "$OOUT" 600 || ORC=$? ;;   # read-only class; rc 80 = no Status line
   esac
   [ "$ORC" -ne 0 ] && echo "review: ${OCLI} reviewer lane exited $ORC (see $OOUT) — optional lane, continuing" >&2
   # Typed completion signal (KTD11): the optional-tier reviewer briefs promise

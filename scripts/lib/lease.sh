@@ -1915,18 +1915,24 @@ DISPATCH_ROW_EOF
   # `Status:` line lease_collect parses (a clean exit without it is "report
   # missing", never review-ready). The lane's builder brief body (opencode /
   # cursor: opencode-agents|cursor-agents/builder.md, frontmatter stripped) is
-  # prepended here; Kimi's arrives natively via --agent-file; claude / codex /
+  # prepended here, and Devin's is the lease role's own (devin-agents/<role>.md);
+  # Kimi's arrives natively via --agent-file; claude / codex /
   # antigravity carry no separate builder brief (their role instructions are
   # the contract itself). Wording is CLI-neutral on purpose.
-  local BRIEF_BODY="" BRIEF_FILE=""
+  local BRIEF_BODY="" BRIEF_FILE="" BRIEF_TITLE="Builder role brief"
   case "$CLI" in
     opencode|cursor)
       BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/${CLI}-agents/builder.md"
-      if [ -f "$BRIEF_FILE" ]; then
-        BRIEF_BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "$BRIEF_FILE")
-      fi
+      ;;
+    devin)
+      # The lease's own role: a reviewer or analyst lease runs read-only (R24)
+      BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/devin-agents/${ROLE}.md"
+      BRIEF_TITLE="Role brief (${ROLE})"
       ;;
   esac
+  if [ -n "$BRIEF_FILE" ] && [ -f "$BRIEF_FILE" ]; then
+    BRIEF_BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "$BRIEF_FILE")
+  fi
   local FULL_PROMPT
   FULL_PROMPT="## Lease dispatch: ${TASK_ID}
 Roster entry: role=${ROLE} cli=${CLI} model=${MODEL:-<host-default>} effort=${EFFORT}
@@ -1945,7 +1951,7 @@ You are working in an isolated worktree at ${WT}. Never modify files outside it.
   Concerns: <list, or None>
   Discoveries for later tasks: <list, or None>
 ${BRIEF_BODY:+
-## Builder role brief
+## ${BRIEF_TITLE}
 ${BRIEF_BODY}
 }
 ## Task
@@ -1990,6 +1996,15 @@ ${PROMPT}"
         echo "lease_dispatch: ERROR no Cursor CLI on PATH (cursor-agent, or an agent whose --version matches YYYY.MM.DD-<hex>) — cannot dispatch ${TASK_ID}" >&2
         return 1
       fi
+      ;;
+    devin)
+      # Devin writes into the config it is handed, so each dispatch gets its
+      # own copy, in the lane-file slot kimi uses for its agent file; the
+      # copy's name carries the permission class _lease_lane_argv reads
+      # (devin.sh: read for a reviewer or analyst lease, edit for a builder).
+      [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=${REG_ROW%%$'\t'*}
+      KIMI_AGENT_FILE="${OUT}.devin.$(_devin_class "$ROLE").json"
+      _devin_config_copy "$(_devin_class "$ROLE")" "$KIMI_AGENT_FILE" || return 1
       ;;
   esac
   # The claude lane resumes the session its last run recorded (KTD16): a fix

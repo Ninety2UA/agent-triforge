@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/registry.sh — data the other lanes read from one place (KTD7): the CLI registry (one literal per CLI — tier, binary, model, install hint, env allowlist keys, lane, egress, the KTD1 lead fields; R25/R41), the two protected-path lists and their match rule (KTD8), and the model ladder (KTD22)
+# scripts/lib/registry.sh — data the other lanes read from one place (KTD7): the CLI registry (one literal per CLI — tier, binary, model, install hint, env allowlist keys, lane, egress, role limits and consent, the KTD1 lead fields; R24/R25/R41), the two protected-path lists and their match rule (KTD8), and the model ladder (KTD22)
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh and before scripts/lib/lease.sh.
@@ -51,6 +51,7 @@ FRAMEWORK_PROTECTED = (
     "hooks/", "skills/", "commands/", "personas/",
     # shipped agent configs, one directory per CLI
     "agents/", "antigravity-agents/", "codex-agents/", "opencode-agents/", "kimi-agents/", "cursor-agents/",
+    "devin-agents/",
     # manifests, plugin settings, and the templates copied into user projects.
     # Pi reads its skill list from the root package.json; the Devin manifest is
     # skills/.devin-plugin/ (covered by skills/), and a root .devin-plugin/
@@ -200,6 +201,18 @@ TRIFORGE_CLAUDE_SANDBOX_FLOOR="2.1.285"
 #               enforced_tools is true — dispatch_role returns 40 — else a
 #               claude -p worker that dispatch_role runs itself, KTD16)
 #   egress      the model provider that receives the prompt and the code (R36)
+#   role_limit  the roles the CLI takes by default; [] = every role. A role
+#               chain naming it for another role fails load validation
+#               (resolve_role rc 5) and roster_write_role refuses it. Never
+#               set on a core CLI: every chain ends at one
+#   opt_in_roles  roles outside role_limit the CLI takes only once the
+#               roster records the opt-in: [members.<cli>] opt_in = [...],
+#               written by roster_write_member --opt-in (devin: builder)
+#   consent     True when enrolling needs the user's recorded consent:
+#               [members.<cli>] consent = "user <UTC> via=<origin>", written
+#               by roster_write_member --consent user. An enabled member, or
+#               a role chain naming the CLI, without one fails load
+#               validation, and headless enrollment never enrolls it (R24)
 #   lead        the KTD1 static lead fields, or {} for a CLI that cannot lead
 #               (Key Decision: Claude Code or Codex only). launch_argv is the
 #               launch line setup prints and the human types; wait_budget_s the
@@ -227,6 +240,9 @@ CLIS = {
         "env_keys": [],
         "lane": "subagent",
         "egress": "Anthropic",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
         "lead": {
             "launch_argv": "claude",
             "wait_budget_s": 600,
@@ -253,6 +269,9 @@ CLIS = {
         "env_keys": [],
         "lane": "shell",
         "egress": "Google",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
         "lead": {},
     },
     "codex": {
@@ -269,6 +288,9 @@ CLIS = {
         "env_keys": [],
         "lane": "shell",
         "egress": "OpenAI",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
         "lead": {   # D-047 profile; tool names — verified: U14
             "launch_argv": "codex exec -s danger-full-access -c approval_policy=\"never\" -c background_terminal_max_timeout=900000",
             "wait_budget_s": 900,
@@ -295,6 +317,9 @@ CLIS = {
         "env_keys": ["OPENROUTER_API_KEY"],
         "lane": "shell",
         "egress": "Zhipu / Z.ai, through OpenRouter (which also sees the traffic)",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
         "lead": {},
     },
     "kimi": {
@@ -311,6 +336,9 @@ CLIS = {
         "env_keys": ["KIMI_*"],
         "lane": "shell",
         "egress": "Moonshot",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
         "lead": {},
     },
     "cursor": {
@@ -327,6 +355,28 @@ CLIS = {
         "env_keys": ["CURSOR_API_KEY"],
         "lane": "shell",
         "egress": "xAI (Grok, via Cursor)",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
+        "lead": {},
+    },
+    "devin": {
+        "name": "Devin CLI",
+        "tier": "optional",
+        "binary": "devin",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "swe-1-6-slow",   # what a Devin Free account resolves; DVN-03
+        "model_env": "DEVIN_MODEL",
+        "install": "brew install --cask devin-cli (or curl -fsSL https://cli.devin.ai/install.sh | bash)",
+        "login": "run `devin auth login`",
+        "env_keys": [],
+        "lane": "shell",
+        "egress": "Cognition (a model outside its SWE family also reaches the provider of that model)",
+        "role_limit": ["reviewer", "analyst"],
+        "opt_in_roles": ["builder"],
+        "consent": True,
         "lead": {},
     },
 }

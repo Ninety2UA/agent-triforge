@@ -68,6 +68,7 @@ Ask which role(s) to change (any subset). For each chosen role, walk three sub-c
    - `"Gemini 3.1 Pro (High)"` is the documented opt-in (`agy models` prints the live catalog).
    - Codex pins `gpt-6-astra`, its frontier model. `gpt-6.1-sol` (the newest workhorse, near-Astra quality at lower cost; it answered on codex 0.160.0 and was refused on 0.155.1), `gpt-6-sol` and `gpt-6-luna` are valid custom pins; Codex's `/model` picker lists the live catalog.
    - Cursor pins `cursor-grok-4.6-xhigh`, never the Auto router, and its effort rides in the model-id suffix (sub-choice 3).
+   - Devin pins `swe-1-6-slow`. It takes the reviewer and analyst roles; the builder role needs its recorded opt-in, and no other role is offered.
    - Claude's model may stay empty. The `claude -p` lane then runs Claude Code's own default model, because it reads no user-tier settings. The Fable/downgrade ladder governs the lead's sub-agent spawns.
    - A claude worker's Bash runs in Claude Code's sandbox (probe row CC-15). It writes only inside its worktree, can't write the lead's `.git` or read the known credential paths, and has no network. With `TRIFORGE_CLAUDE_SANDBOX=off` in the lead's environment it runs without the sandbox, and a Claude builder with Bash then has no OS confinement. The sandbox needs Claude Code 2.1.285 or later, the first build that ignores a repository's settings that loosen it. On an older build the claude worker refuses to start. Update with `claude update`, or set `TRIFORGE_CLAUDE_SANDBOX=off`.
    - A claude worker reads only project and local settings, so Claude Code auth set in the user tier (`apiKeyHelper`, or an `env` block for Bedrock, Vertex or `ANTHROPIC_BASE_URL` in `~/.claude/settings.json`) does not reach it, and the worker fails with AUTH-FAIL. In 3.3.x it read the user tier. Variables exported in the lead's environment don't reach it either, because the lease env allowlist drops them. Sign in with `claude` and `/login` instead; the stored login reaches the worker.
@@ -77,7 +78,7 @@ Ask which role(s) to change (any subset). For each chosen role, walk three sub-c
 roster_write_role <role> <cli> "<model>" <effort>; echo "rc=$?"
 ```
 
-**Check the rc:** nonzero means the write was rejected and nothing changed; the stderr line names the violated rule (unknown CLI, bad effort, chain not terminating at a core member, malformed roster, or a missing TOML parser, rc 3, same fix as the guard above). Relay it and re-ask; never silently move on.
+**Check the rc:** nonzero means the write was rejected and nothing changed; the stderr line names the violated rule (unknown CLI, bad effort, chain not terminating at a core member, Devin in a role it does not take or as builder without its opt-in, malformed roster, or a missing TOML parser, rc 3, same fix as the guard above). Relay it and re-ask; never silently move on.
 
 Fallback chains keep a validated shape automatically: the displaced primary becomes the first fallback and the chain still terminates at a core-trio member. Pass an explicit fifth argument (`"cli1,cli2"`) only when the user asks for a specific chain.
 

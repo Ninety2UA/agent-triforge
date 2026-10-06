@@ -100,8 +100,9 @@ fallbacks = ["claude"]
 # effort = "xhigh"       # left out: xhigh for codex, your session's setting for claude
 
 # --- Optional members --------------------------------------------------------
-# Optional members (opencode, kimi, cursor) are enrolled on first detection —
-# the session-start enrollment trigger or at-setup writes their entries. They
+# Optional members (opencode, kimi, cursor, devin) are enrolled on first
+# detection — the session-start enrollment trigger or at-setup writes their
+# entries; devin only through at-setup, because it needs your consent first. They
 # must NOT appear as live entries in this shipped template: an existing
 # [members.<cli>] entry is exactly what suppresses the enrollment ask, and a
 # decline persists as `enabled = false` (disabled = absent everywhere — the
@@ -117,6 +118,11 @@ fallbacks = ["claude"]
 # Shipped defaults for the other optional members, same shape:
 # [members.kimi]   -> enabled = true, model = "kimi-code/k3"          (the OAuth-managed alias; `kimi login` provisions it)
 # [members.cursor] -> enabled = true, model = "cursor-grok-4.6-xhigh"  (explicit suffixed pin — NEVER the Auto router)
+# [members.devin]  -> enabled = true, model = "swe-1-6-slow", consent = "user <UTC time> via=<origin>"
+#   Devin CLI sends prompts and code to Cognition, so it is enrolled only with your
+#   consent on record (at-setup asks and writes it; a table without it fails to load).
+#   It reviews and analyzes by default. It builds only after you opt in:
+#   opt_in = ["builder"] (roster_write_member devin true <model> --opt-in builder).
 
 [promotion]
 # KTD-5 user gate: when true, the lead pauses at wave end for explicit user

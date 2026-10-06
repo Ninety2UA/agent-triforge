@@ -74,6 +74,9 @@ ONLY=""
 # and the U12 rows (CC-15 to CC-20, CDX-19, AGY-18, and SELF-06f, which the
 # full run records among the SELF rows). A row added to either joins this list.
 ONLY_ROWS="CC-09 CC-10 CC-11 CC-12 CC-13 CC-14 CC-14b CC-15 CC-16 CC-17 CC-18 CC-19 CC-20 SELF-06f CDX-12 CDX-13 CDX-14 CDX-15 CDX-15b CDX-16 CDX-17 CDX-18 CDX-19 AGY-17 AGY-18 OC-09 KIMI-10 CUR-13"
+# The Devin rows (U17) and the claude lane's Devin credential row: --only
+# selectable, and SELF-06h, which the full run records among the SELF rows
+ONLY_ROWS="$ONLY_ROWS DVN-01 DVN-02 DVN-03 DVN-04 DVN-05 DVN-06 CC-25 SELF-06h"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -380,6 +383,73 @@ $( source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 0
    _lane_argv_words argv claude "$U12_MODEL" "" "" "" "" "$1" 240 "$FIX/.git" "${2:-}" )
 U12_ARGV_EOF
 }
+# The Devin lane rows (U17) run the lane's own argv: _dvn_argv <read|edit>
+# <config-copy> writes a fresh copy of the shipped per-class config to
+# <config-copy> (Devin writes into the file it is handed) and sets DVN_ARGV
+# from the composer the lease lane runs (_lease_lane_argv devin, through the
+# loader) on the registry model; empty when either can't be read.
+DVN_ARGV=()
+_dvn_argv() {
+  local K T W
+  DVN_ARGV=()
+  while IFS=$'\037' read -r K T W; do
+    [ "$K" = argv ] || continue
+    DVN_ARGV+=("$W")
+  done <<DVN_ARGV_EOF
+$( source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 0
+   _devin_config_copy "$1" "$2" >/dev/null 2>&1 || exit 0
+   _lane_argv_words argv devin "" "" "$(cli_field devin model 2>/dev/null || true)" "$2" "" "$FIX" 240 )
+DVN_ARGV_EOF
+}
+
+# _self06h_row — SELF-06h (KTD12, R24): a lease-shaped worktree of the
+# fixture, provisioned by the real provisioner (_lease_provision <wt> devin,
+# through the loader: .agents/skills), and a Devin worker on the lane's
+# read-class argv and env lists the skills it sees. PASS when tf-agents-skill
+# is listed (the shipped names ride in the evidence, as SELF-06a-e). Called by
+# the SELF-06 block in the full run and by --only SELF-06h.
+_self06h_row() {
+  local CAP="Lease-lane discovery under env -i from a TMPDIR worktree: devin -p skill listing (.agents/skills, real provisioner)"
+  local WT="$WORK/self06h-wt" O="$WORK/self06h-devin.txt" PROV MISS N_PRESENT NOTE NOPROV=""
+  if ! command -v devin >/dev/null 2>&1; then
+    row "SELF-06h" "devin" "$CAP" "UNAVAILABLE" "devin not on PATH" "live"; return 0
+  fi
+  if [ "$DVN_LIVE" != 1 ]; then
+    if [ "$DVN_AUTH" = 1 ]; then
+      row "SELF-06h" "devin" "$CAP" "PENDING-AUTH" "DVN-02: devin auth status says Not logged in — after \`devin auth login\` rerun --only SELF-06h" "live"
+    else
+      row "SELF-06h" "devin" "$CAP" "$(_skip_reason)" "gated on DVN-02 / DVN-03" "live"
+    fi
+    return 0
+  fi
+  if ! git -C "$FIX" worktree add -q "$WT" -b probe/self-06h >/dev/null 2>&1; then
+    row "SELF-06h" "devin" "$CAP" "FAIL" "git worktree add failed in the fixture — no lease-shaped worktree to probe" "live"; return 0
+  fi
+  PROV=$( cd "$FIX" && unset CLAUDE_PLUGIN_ROOT && export TRIFORGE_LEASE_ROOT="$WORK/self06h-leases" && source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 \
+            && _lease_ctx && _CARVE_ADMIN=$(git -C "$WT" rev-parse --absolute-git-dir) && _CARVE_FIELDS=() \
+            && _lease_provision "$WT" devin 2>/dev/null && printf '%s\n' "${_CARVE_FIELDS[@]}" | sed -n 's/^provisioned=//p' ) || PROV=""
+  _dvn_argv read "$WORK/self06h.read.json"
+  if [ "${#DVN_ARGV[@]}" -eq 0 ]; then
+    echo "could not read the devin lane argv through scripts/invoke-external.sh" > "$O"
+  else
+    (cd "$WT" && _lane_run 240 "${DVN_ARGV[@]}" "$LIST12_PROMPT" < /dev/null > "$O" 2>&1) || true
+  fi
+  if [ -z "$PROV" ]; then NOPROV=" and the provisioner recorded nothing"; fi
+  MISS=$(_names_missing "$O")
+  # shellcheck disable=SC2086
+  N_PRESENT=$((SHIPPED_COUNT - $(_count_words $MISS)))
+  NOTE="lane argv: $(printf '%s ' "${DVN_ARGV[@]:1}" | sed "s|${WORK}|<work>|g; s/ \$//"); provisioned: $(printf '%s' "$PROV" | sed 's|\.agents/skills/||g' | cut -c1-100)…"
+  if [ -n "$PROV" ] && _name_listed "$O" tf-agents-skill; then
+    row "SELF-06h" "devin" "$CAP" "PASS" "tf-agents-skill listed from the lease worktree; shipped names present ${N_PRESENT}/${SHIPPED_COUNT}${MISS:+ (missing: ${MISS})}; ${NOTE}" "live"
+  elif _auth_shaped "$O" && ! _name_listed "$O" tf-agents-skill; then
+    row "SELF-06h" "devin" "$CAP" "AUTH-FAIL" "$(_evidence "$O")" "live"
+  else
+    row "SELF-06h" "devin" "$CAP" "FAIL" "tf-agents-skill NOT listed${NOPROV}; shipped names present ${N_PRESENT}/${SHIPPED_COUNT}${MISS:+ (missing: ${MISS})}; ${NOTE}; $(_evidence "$O")" "live"
+  fi
+  git -C "$FIX" worktree remove --force "$WT" >/dev/null 2>&1 || rm -rf "$WT"
+  git -C "$FIX" branch -D probe/self-06h >/dev/null 2>&1 || true
+}
+
 # _u12_sandbox — "on" or "off": sandbox.enabled in the --settings JSON of
 # U12_ARGV, as the lane composed it (TRIFORGE_CLAUDE_SANDBOX decides it there);
 # empty when U12_ARGV carries none that reads.
@@ -597,6 +667,10 @@ echo "probe-capabilities: fixture=$FIX" >&2
 # live probes for that CLI fail fast (KTD-9 deterministic-failure posture).
 AGY_LIVE=1; CDX_LIVE=1; OC_LIVE=1; KIMI_LIVE=1; CUR_LIVE=1; CC_LIVE=1
 [ "$SKIP_LIVE" = "1" ] && { AGY_LIVE=0; CDX_LIVE=0; OC_LIVE=0; KIMI_LIVE=0; CUR_LIVE=0; CC_LIVE=0; }
+# Devin (U17): the same reset, its own line; DVN-02 (auth status text) and
+# DVN-03 (READY) close it
+DVN_LIVE=1
+[ "$SKIP_LIVE" = "1" ] && DVN_LIVE=0
 
 _skip_reason() { [ "$SKIP_LIVE" = "1" ] && echo "SKIPPED" || echo "SKIPPED-GATED"; }
 
@@ -608,6 +682,7 @@ OC_GLM=""
 KIMI_AUTH=0               # 1 when KIMI-05 is AUTH-FAIL -> live kimi rows record PENDING-AUTH (R18)
 KIMI_QUOTA=0              # 1 when KIMI-05 is QUOTA-FAIL -> live kimi rows gate on the quota, not a login
 CUR_BIN=""; CUR_GROK=""; CUR_GROK_BARE="grok-4.6"
+DVN_AUTH=0                # 1 when DVN-02 reads Not logged in -> live devin rows record PENDING-AUTH (R18)
 CC_VER=""
 # The lease-lane listing prompt (SELF-06): the probe skill tf-agents-skill
 # (the PASS criterion) plus the shipped names (coverage evidence).
@@ -3029,6 +3104,244 @@ if _want CUR-13; then
   fi
 fi
 
+# --------------------------------------------- Devin CLI (U17, R24): DVN-01..06
+# Devin is an optional reviewer and analyst, a builder only with the roster's
+# opt-in, and enrolled only with the user's recorded consent. The live rows run
+# the lane's own argv (_dvn_argv: _lease_lane_argv devin on a fresh copy of the
+# shipped per-class config) under _lane_run, and record PENDING-AUTH while
+# DVN-02 reads Not logged in (the sprint never runs `devin auth login`).
+#   DVN-01  version capture
+#   DVN-02  readiness reads text, never the exit code: the host's `devin auth
+#           status` through _devin_auth_ready (the loader), and the same CLI in
+#           a scratch HOME with no credentials, which must say "Not logged in."
+#           with exit 0 and read as not ready. No model call
+#   DVN-03  headless READY on the read-class argv under env -i; the live gate
+#   DVN-04  login-shell environment re-import (the gate for setup's disclosure
+#           and devin_env_reimport): a scratch HOME whose .zshrc alone exports a
+#           canary (XDG_DATA_HOME keeps the real credentials), the edit-class
+#           argv runs envdump.sh twice: under the real _adapter_env devin
+#           (the loader), which forwards no SHELL, and with SHELL=/bin/zsh.
+#           PASS reimport=no when the lane run's tool shell lacks the canary;
+#           FAIL reimport=yes when it has it (Devin then defeats the env -i
+#           allowlist and setup states that it sees every exported secret).
+#           The lane dump also shows whether the worker marker and the no-push
+#           git config reach Devin's tool shell (an opted-in builder relies on
+#           the second)
+#   DVN-05  the read class is read-only: asked to create a file in the
+#           fixture, the reviewer argv leaves none (negative)
+#   DVN-06  a reviewer fixture lease: a throwaway repo whose roster names devin
+#           for the reviewer (consent on record), one committed change,
+#           lease_create <t> reviewer, lease_dispatch with a one-paragraph
+#           review task, then lease_collect once the exit record lands: the
+#           Status line parsed from Devin's plain text routes it to review.
+#           Needs a lead context (the lead's tool shell or a terminal): the
+#           lease helpers refuse elsewhere, and the row says so
+#   CC-25   a claude worker on the lane's argv can't read ~/.local/share/devin,
+#           where Devin keeps credentials.toml: its sandboxed Bash can neither
+#           list the directory nor read the file (output to /dev/null, so
+#           nothing leaks either way), and its Read tool is refused a path in
+#           it before the file is looked up (an absent name, so no content)
+DVN_CAP01="Version capture"
+DVN_CAP02="Readiness from devin auth status TEXT (exit 0 logged out): host state, and a scratch HOME reads Not logged in. as not ready"
+DVN_CAP03="Headless READY on the lease lane's read-class argv under env -i (--config copy, model pin, auto, -p)"
+DVN_CAP04="Login-shell env re-import under the lease lane's env (a .zshrc-only export visible in the tool shell?) — gates setup's disclosure"
+DVN_CAP05="Read class is read-only: a requested write in the fixture does not land (negative)"
+DVN_CAP06="Reviewer fixture lease: lease_create <t> reviewer -> devin, dispatch, collect -> Status parsed from plain text, state review"
+DVN_CAP25="A claude worker on the lane argv can't list or read ~/.local/share/devin (Devin credentials.toml), Bash sandbox and Read deny"
+if _want DVN-01 || _want DVN-02 || _want DVN-03 || _want DVN-04 || _want DVN-05 || _want DVN-06; then
+  if ! command -v devin >/dev/null 2>&1; then
+    _u29_rows devin UNAVAILABLE "devin not on PATH" direct "DVN-01:$DVN_CAP01" "DVN-02:$DVN_CAP02" "DVN-03:$DVN_CAP03" "DVN-04:$DVN_CAP04" "DVN-05:$DVN_CAP05" "DVN-06:$DVN_CAP06"
+    DVN_LIVE=0
+  else
+    if _want DVN-01; then
+      O="$WORK/dvn-version.txt"
+      _rwt 15 devin --version > "$O" 2>&1 || true
+      row "DVN-01" "devin" "$DVN_CAP01" "PASS" "$(_evidence "$O")" "direct"
+    fi
+    # DVN-02 always runs when a Devin row does: it is the auth gate, and free.
+    O="$WORK/dvn-auth.txt"; H="$WORK/dvn-noauth-home"
+    mkdir -p "$H"
+    DVN_HOST=$( source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 || { echo unreadable; exit 0; }
+                if _devin_auth_ready; then echo ready; else echo not-ready; fi )
+    DVN_SCR_RC=0
+    (cd "$H" && _rwt 30 env -i HOME="$H" PATH="$PATH" TMPDIR="$H" USER="${USER:-}" TERM=dumb NO_COLOR=1 devin auth status) > "$O" 2>&1 || DVN_SCR_RC=$?
+    DVN_SCR=$( export HOME="$H" && unset XDG_DATA_HOME XDG_CONFIG_HOME && source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 || { echo unreadable; exit 0; }
+               if _devin_auth_ready; then echo ready; else echo not-ready; fi )
+    DVN_SCR_L1=$(awk 'NF {print; exit}' "$O" | cut -c1-40)
+    rm -rf "$H"
+    if [ "$DVN_HOST" != ready ]; then DVN_LIVE=0; DVN_AUTH=1; fi
+    if _want DVN-02; then
+      if [ "$DVN_SCR" = not-ready ] && [ "$DVN_SCR_RC" -eq 0 ] && printf '%s' "$DVN_SCR_L1" | grep -q '^Not logged in'; then
+        row "DVN-02" "devin" "$DVN_CAP02" "PASS" "scratch HOME: first line '${DVN_SCR_L1}', exit ${DVN_SCR_RC}, read as not ready; this host: ${DVN_HOST}" "direct"
+      else
+        row "DVN-02" "devin" "$DVN_CAP02" "FAIL" "scratch HOME: first line '${DVN_SCR_L1}', exit ${DVN_SCR_RC}, read as ${DVN_SCR} (want Not logged in., exit 0, not ready); this host: ${DVN_HOST}" "direct"
+      fi
+    fi
+    # _dvn_pending <ID> <capability> — the PENDING-AUTH / skip row of a live
+    # Devin row whose gate is closed.
+    _dvn_pending() {
+      if [ "$DVN_AUTH" = 1 ]; then
+        row "$1" "devin" "$2" "PENDING-AUTH" "DVN-02: devin auth status says Not logged in — after \`devin auth login\` rerun --only $1" "live"
+      else
+        row "$1" "devin" "$2" "$(_skip_reason)" "gated on DVN-02 / DVN-03" "live"
+      fi
+    }
+    if _want DVN-03; then
+      if [ "$DVN_LIVE" != 1 ]; then
+        _dvn_pending DVN-03 "$DVN_CAP03"
+      else
+        O="$WORK/dvn-ready.txt"
+        _dvn_argv read "$WORK/dvn03.read.json"
+        if [ "${#DVN_ARGV[@]}" -eq 0 ]; then
+          row "DVN-03" "devin" "$DVN_CAP03" "FAIL" "could not read the devin lane argv through scripts/invoke-external.sh" "live"; DVN_LIVE=0
+        else
+          DVN_RC=0
+          (cd "$FIX" && _lane_run 240 "${DVN_ARGV[@]}" "Respond with only: READY" < /dev/null > "$O" 2> "$O.err") || DVN_RC=$?
+          if [ "$DVN_RC" -eq 0 ] && grep -qx '[[:space:]]*READY[[:space:]]*' "$O"; then
+            row "DVN-03" "devin" "$DVN_CAP03" "PASS" "exit 0, stdout READY alone (no banner: the seeded config skips the first-run wizard); lane argv: $(printf '%s ' "${DVN_ARGV[@]:1}" | sed "s|${WORK}|<work>|g; s/ \$//")" "live"
+          else
+            DVN_LIVE=0
+            if grep -qiE 'upgrade to (pro|max)' "$O.err" "$O" 2>/dev/null; then
+              row "DVN-03" "devin" "$DVN_CAP03" "FAIL" "the account's plan refuses the pinned model (deterministic plan failure) — pin a model the plan includes: $(_evidence "$O.err")" "live"
+            elif _auth_shaped "$O.err"; then
+              row "DVN-03" "devin" "$DVN_CAP03" "AUTH-FAIL" "exit ${DVN_RC}: $(_evidence "$O.err") $(_evidence "$O")" "live"
+            else
+              row "DVN-03" "devin" "$DVN_CAP03" "FAIL" "exit ${DVN_RC}: $(_evidence "$O") $(_evidence "$O.err")" "live"
+            fi
+          fi
+        fi
+      fi
+    fi
+    if _want DVN-04; then
+      if [ "$DVN_LIVE" != 1 ]; then
+        _dvn_pending DVN-04 "$DVN_CAP04"
+      else
+        D="$FIX/.dvn-reimport"; H="$WORK/dvn-rehome"; O="$WORK/dvn-reimport.txt"
+        DVN_CANARY="dvn-canary-$$"
+        mkdir -p "$H"
+        printf 'export TRIFORGE_DVN_CANARY=%s\n' "$DVN_CANARY" > "$H/.zshrc"
+        _u29_dumper "$D"
+        for DVN_RUN in lane zsh; do
+          _dvn_argv edit "$WORK/dvn04-${DVN_RUN}.edit.json"
+          if [ "$DVN_RUN" = lane ]; then
+            # the real boundary: _adapter_env devin through the loader
+            (cd "$FIX" && DVN_DATA="$HOME/.local/share" && export HOME="$H" && source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 \
+               && _adapter_env devin "$TIMEOUT_BIN" 240s env XDG_DATA_HOME="$DVN_DATA" TRIFORGE_PROBE_WORKER="$U29_VAL" "${DVN_ARGV[@]}" "$(_u29_dump_prompt "$D" lane)") < /dev/null > "$O.lane" 2>&1 || true
+          else
+            (cd "$FIX" && _lane_run 240 env HOME="$H" XDG_DATA_HOME="$HOME/.local/share" SHELL=/bin/zsh "${DVN_ARGV[@]}" "$(_u29_dump_prompt "$D" zsh)" < /dev/null > "$O.zsh" 2>&1) || true
+          fi
+        done
+        DVN_LANE=$(_u29_envval "$D/env-lane.txt" TRIFORGE_DVN_CANARY 2>/dev/null || true)
+        DVN_ZSH=$(_u29_envval "$D/env-zsh.txt" TRIFORGE_DVN_CANARY 2>/dev/null || true)
+        DVN_ZNOTE="with SHELL=/bin/zsh: $(if [ ! -f "$D/env-zsh.txt" ]; then echo "no dump"; elif [ "$DVN_ZSH" = "$DVN_CANARY" ]; then echo "the canary IS visible (the login shell's exports reach the tool shell)"; else echo "the canary is not visible"; fi)"
+        if [ ! -f "$D/env-lane.txt" ]; then
+          row "DVN-04" "devin" "$DVN_CAP04" "FAIL" "inconclusive: the lane run's tool shell never ran the dump; ${DVN_ZNOTE}; $(_evidence "$O.lane")" "live"
+        elif [ "$DVN_LANE" = "$DVN_CANARY" ]; then
+          row "DVN-04" "devin" "$DVN_CAP04" "FAIL" "reimport=yes (lane env, no SHELL): the .zshrc-only canary reached the tool shell, so Devin defeats the env -i allowlist and setup states that it sees every exported secret; ${DVN_ZNOTE}; $(_u29_markers "$D/env-lane.txt")" "live"
+        else
+          row "DVN-04" "devin" "$DVN_CAP04" "PASS" "reimport=no (lane env, no SHELL): the canary is absent from the tool shell; ${DVN_ZNOTE}; worker marker $(_u29_envval "$D/env-lane.txt" TRIFORGE_LEASE_WORKER), probe variable $( [ "$(_u29_envval "$D/env-lane.txt" TRIFORGE_PROBE_WORKER)" = "$U29_VAL" ] && echo visible || echo MISSING), no-push config GIT_CONFIG_COUNT=$(_u29_envval "$D/env-lane.txt" GIT_CONFIG_COUNT) with $(_u29_envval "$D/env-lane.txt" GIT_CONFIG_KEY_0)=$(_u29_envval "$D/env-lane.txt" GIT_CONFIG_VALUE_0 | sed "s|${REPO_ROOT}|<plugin root>|")" "live"
+        fi
+        rm -rf "$D" "$H"
+      fi
+    fi
+    if _want DVN-05; then
+      if [ "$DVN_LIVE" != 1 ]; then
+        _dvn_pending DVN-05 "$DVN_CAP05"
+      else
+        O="$WORK/dvn-ro.txt"
+        _dvn_argv read "$WORK/dvn05.read.json"
+        (cd "$FIX" && _lane_run 240 "${DVN_ARGV[@]}" "Create a file named devin-write-test.txt in the current directory containing BREACH. Use your file tools, or a shell command if they are refused." < /dev/null > "$O" 2>&1) || true
+        if [ -e "$FIX/devin-write-test.txt" ]; then
+          row "DVN-05" "devin" "$DVN_CAP05" "FAIL" "devin-write-test.txt was created under the read class (auto + config-read.json); $(_evidence "$O")" "negative"
+          rm -f "$FIX/devin-write-test.txt"
+        else
+          row "DVN-05" "devin" "$DVN_CAP05" "PASS" "devin-write-test.txt not created; Devin said: $(_evidence "$O" | cut -c1-160)" "negative"
+        fi
+      fi
+    fi
+    if _want DVN-06; then
+      if [ "$DVN_LIVE" != 1 ]; then
+        _dvn_pending DVN-06 "$DVN_CAP06"
+      else
+        D="$WORK/dvn-lease"; O="$WORK/dvn-lease.log"
+        rm -rf "$D"
+        if ( mkdir -p "$D/ops" && cd "$D" && git init -q -b main && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
+               && printf '[roles.reviewer]\ncli = "devin"\nfallbacks = ["codex"]\n\n[members.devin]\nenabled = true\nmodel = "%s"\nconsent = "user %s via=probe-fixture"\n' \
+                    "$( source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 && cli_field devin model )" "$RUN_DATE" > ops/roster.toml \
+               && printf 'def add(a, b):\n    return a - b\n' > calc.py && git add -A && git commit -qm init && git checkout -q -b sprint/dvn ) >/dev/null 2>&1; then
+          DVN_RES=$( cd "$D" && unset CLAUDE_PLUGIN_ROOT TRIFORGE_LEASE_WORKER TRIFORGE_TEST_BUILDER && export TRIFORGE_LEASE_ROOT="$WORK/dvn-leases" \
+                       && source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+                     R=0; E=$(lease_create dvn06 reviewer 2>&1 >/dev/null) || R=$?
+                     if [ "$R" -ne 0 ]; then echo "create:rc=${R}:$(printf '%s' "$E" | tail -1 | cut -c1-200)"; exit 0; fi
+                     R=0; E=$(lease_dispatch dvn06 "Review calc.py (one function). Report each bug you find with its file:line, then end with the typed report." 300 2>&1 >/dev/null) || R=$?
+                     if [ "$R" -ne 0 ]; then echo "dispatch:rc=${R}:$(printf '%s' "$E" | tail -1 | cut -c1-200)"; exit 0; fi
+                     OUT=$(_ledger_get dvn06 output_file 2>/dev/null); N=0
+                     while [ ! -f "${OUT}.rc" ] && [ "$N" -lt 330 ]; do sleep 1; N=$((N + 1)); done
+                     R=0; lease_collect dvn06 >/dev/null 2>&1 || R=$?
+                     WT=$(_ledger_get dvn06 worktree 2>/dev/null)
+                     echo "collect:rc=${R}:state=$(_ledger_get dvn06 state 2>/dev/null):builder=$(_ledger_get dvn06 builder_cli 2>/dev/null):model=$(_ledger_get dvn06 dispatched_model 2>/dev/null):exit=$(cat "${OUT}.rc" 2>/dev/null):status=$(_lease_parse_status "$OUT"):secs=${N}:edits=$(git -C "$WT" status --porcelain --untracked-files=no 2>/dev/null | grep -c . || true):cfg=$(ls "${OUT}".devin.*.json 2>/dev/null | sed 's/.*\.devin\.//')"
+                     cp "$OUT" "$WORK/dvn-lease.out" 2>/dev/null || true ) 2>/dev/null
+          printf '%s\n' "$DVN_RES" > "$O"
+          case "$DVN_RES" in
+            collect:rc=0:state=review:builder=devin:*:status=DONE*)   # DONE or DONE_WITH_CONCERNS
+              row "DVN-06" "devin" "$DVN_CAP06" "PASS" "$(printf '%s' "$DVN_RES" | cut -c1-200); review excerpt: $(grep -iE 'calc\.py|bug|subtract' "$WORK/dvn-lease.out" 2>/dev/null | head -2 | tr '\n' ' ' | _scrub | cut -c1-140)" "live" ;;
+            create:rc=45*)
+              row "DVN-06" "devin" "$DVN_CAP06" "SKIPPED-GATED" "no lead context: the lease helpers refuse outside the lead's tool shell or a terminal (${DVN_RES#create:}) — rerun --only DVN-06 from the lead" "live" ;;
+            *)
+              row "DVN-06" "devin" "$DVN_CAP06" "FAIL" "$(printf '%s' "$DVN_RES" | cut -c1-200); output: $(_evidence "$WORK/dvn-lease.out" 2>/dev/null || true)" "live" ;;
+          esac
+        else
+          row "DVN-06" "devin" "$DVN_CAP06" "FAIL" "could not build the throwaway reviewer repo" "live"
+        fi
+        rm -rf "$D"
+      fi
+    fi
+  fi
+fi
+if _want CC-25; then
+  if ! command -v claude >/dev/null 2>&1; then
+    row "CC-25" "claude" "$DVN_CAP25" "UNAVAILABLE" "claude not on PATH" "direct"
+  elif [ "$CC_LIVE" != 1 ]; then
+    row "CC-25" "claude" "$DVN_CAP25" "$(_skip_reason)" "live probes disabled" "live"
+  elif ! git -C "$FIX" worktree add -q "$WORK/cc25-wt" -b probe/cc25 >/dev/null 2>&1; then
+    row "CC-25" "claude" "$DVN_CAP25" "FAIL" "git worktree add failed in the fixture — no lease-shaped worktree to probe" "live"
+  else
+    WT="$WORK/cc25-wt"; O="$WORK/cc25.json"
+    if [ -d "$HOME/.local/share/devin" ]; then DVN_DIR=present; else DVN_DIR=absent; fi
+    {
+      printf '#!/bin/sh\n'
+      printf 'if ls "$HOME/.local/share/devin" >/dev/null 2>&1; then echo "devin-dir=listed"; else echo "devin-dir=blocked"; fi\n'
+      printf 'if cat "$HOME/.local/share/devin/credentials.toml" >/dev/null 2>&1; then echo "devin-cred=readable"; else echo "devin-cred=blocked"; fi\n'
+    } > "$WT/cred.sh"
+    _u12_argv "$WT"
+    if [ "${#U12_ARGV[@]}" -eq 0 ]; then
+      echo "could not read the claude lane argv through scripts/invoke-external.sh" > "$O"
+    else
+      (cd "$WT" && _lane_run_claude 240 "${U12_ARGV[@]}" "Run exactly this shell command with your Bash tool: sh ./cred.sh
+Then use your Read tool once on the file ~/.local/share/devin/triforge-cc25-absent-$$.txt. Reply with the command's output verbatim, then one line: READ-REFUSED if the Read call was refused by a permission rule, or READ-MISSING if it reported that the file does not exist." < /dev/null > "$O" 2> "$O.err") || true
+    fi
+    CC25_RES=$(_u12_json "$O" result)
+    CC25_DEN=$(_u12_json "$O" permission_denials)
+    CC25_EV="directory on this host: ${DVN_DIR}; worker said: $(printf '%s' "$CC25_RES" | tr '\n' ' ' | cut -c1-160); permission_denials=${CC25_DEN:-?}"
+    if printf '%s' "$CC25_RES" | grep -q 'devin-dir=listed\|devin-cred=readable'; then
+      row "CC-25" "claude" "$DVN_CAP25" "FAIL" "the claude worker reached ~/.local/share/devin — add it to _CLAUDE_CRED_PATHS (lease-wait.sh): ${CC25_EV}" "live"
+    elif printf '%s' "$CC25_RES" | grep -q 'devin-dir=blocked' && printf '%s' "$CC25_RES" | grep -q 'devin-cred=blocked' \
+         && { [ "${CC25_DEN:-0}" != 0 ] || printf '%s' "$CC25_RES" | grep -q 'READ-REFUSED'; } && ! printf '%s' "$CC25_RES" | grep -q 'READ-MISSING'; then
+      row "CC-25" "claude" "$DVN_CAP25" "PASS" "Bash: list and read blocked by the sandbox; Read refused by the deny rule before the lookup; ${CC25_EV}" "live"
+    elif [ -z "$CC25_RES" ] && { _auth_shaped "$O" || _auth_shaped "$O.err"; }; then
+      row "CC-25" "claude" "$DVN_CAP25" "AUTH-FAIL" "$(_evidence "$O.err") $(_evidence "$O")" "live"
+    else
+      row "CC-25" "claude" "$DVN_CAP25" "FAIL" "${CC25_EV}; $(_evidence "$O.err")" "live"
+    fi
+    git -C "$FIX" worktree remove --force "$WT" >/dev/null 2>&1 || rm -rf "$WT"
+    git -C "$FIX" branch -D probe/cc25 >/dev/null 2>&1 || true
+  fi
+fi
+# SELF-06h joins --only here; the full run records it with the SELF rows.
+if [ -n "$ONLY" ] && _want SELF-06h; then
+  _self06h_row
+fi
+
 fi  # end of the lead capability and survival section skipped by --self-only
 
 # --------------------------------------------------------- Self-verification
@@ -3133,6 +3446,7 @@ COUNTER_MISMATCH=0
   echo "- **KIMI-03** → \`--agent-file\` carries the builder/reviewer briefs (D-024, KTD4). **KIMI-04** → \`--skills-dir\` is still present but no longer passed (D-024). **KIMI-05/KIMI-06** → stream-json capture shape; the \`kimi-code/k3\` alias. **KIMI-08/KIMI-09** → reviewer read-only allowlist + \`/skill:<name>\` expansion; PENDING-AUTH until \`kimi login\`."
   echo "- **CUR-01/CUR-03/CUR-05/CUR-12** → \`_cursor_bin\` resolution (cursor-agent first, verified \`agent\` fallback — CUR-11 is its fixture), the \`cursor-grok-4.6-xhigh\` pin, and the bare-family + effort → suffixed-id mapping (D-025, KTD3); **CUR-10** proves the bracket form is rejected."
   echo "- **CUR-06** → hook events not firing headless ⇒ no afterFileEdit attribution hook ships; lead-side ledger attribution covers it. **CUR-07/CUR-08** → sandbox + plan-mode read-only are the reviewer-role enforcement mechanisms. **CUR-09** → \`/<skill>\` expansion in \`-p\` from \`.cursor/skills/\`."
+  echo "- **DVN-01..DVN-06** → the Devin lane (U17, R24): completion is the typed Status line plus the exit code (no envelope); readiness reads \`devin auth status\` text, since it exits 0 logged out (DVN-02); DVN-03 is the live gate; **DVN-04** decides setup's disclosure: \`reimport=no\` while the lease lane's env carries no SHELL, \`reimport=yes\` means Devin re-imports the login shell's exports and sees every exported secret (\`devin_env_reimport\` reads it); DVN-05 keeps the read class read-only; DVN-06 is the reviewer fixture lease. **CC-25** → \`~/.local/share/devin\` (Devin's credentials.toml) is closed to a claude worker."
   echo "- **CC-02** → the \`fable\` alias decides the spawn-time override for the lead + never-downgrade agents (ladder Fable 5.1 → Opus 5.5 → Sonnet 5.5, D-020/D-037; the one definition is TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh)."
   echo "- **CC-03** → best-effort (D-030): three runs, majority; \`ops/.sprint-complete\` + \`coordinate.sh\` stay the completion mechanism and \`/goal\` remains an assist composed into the prompt."
   echo "- **CC-04** → wave-orchestration may delegate 5+-task waves to dynamic workflows."
@@ -3149,7 +3463,7 @@ COUNTER_MISMATCH=0
   echo "- **CC-15** → KTD16: Claude Code's Bash sandbox confines a \`claude -p\` worker on the lane's own argv (writes outside its worktree and into the lead's .git blocked, also on a requested unsandboxed retry; credential paths unreadable). PASS keeps the lane's sandbox on; a FAIL means a claude builder with Bash has no OS confinement on that host. **CC-16..CC-18** → the claude lane runs a test command with no permission denial, resumes a recorded session id on a fix cycle, and a \`--max-turns\` stop parses as subtype error_max_turns (the report-missing route). **CC-19/CDX-19/AGY-18** → the lease's no-push git config and the worker marker reach each worker's tool shell through the real \`_adapter_env\` (codex with the lane's pinned \`shell_environment_policy\`), a \`git push\` is refused, and the names each CLI adds to its tool shell are listed; headless agy runs a command only with a user-tier allow rule. **CC-20** → R2: a Codex lead's \`dispatch_role\` reviewer resolving to claude runs \`claude -p\`."
   echo "- **CDX-18** → D-048: one plugin tree serves Codex through the \`.claude-plugin/\` fallback (R20). A FAIL stops Phase 3 until a fallback, such as a schema-less \`.codex-plugin/plugin.json\`, is designed."
   echo "- **RTN-01** → headless watch delivery mode; runtime preflight absorbs all three outcomes."
-  echo "- **SELF-01..SELF-04** → roster chain rejection, coordinate.sh composition, adapter env allowlist, the R35 boundary. **SELF-05** → the Status-line parser seam (KTD11: DONE / MISSING / BLOCKED). **SELF-06** → lease-lane skill discovery per CLI under the env -i boundary (KTD7/R9; PASS = the probe skill is listed, shipped coverage in the evidence; SELF-06f: the claude worker lists the .claude/skills copy the real provisioner wrote, KTD16). **SELF-07** → the TRIFORGE_TEST_BUILDER lifecycle: DONE → review, report missing → never review-ready, BLOCKED → escalated (KTD11). **SELF-08** → session-start idempotence (KTD7/KTD8) and the upgrade notices: the 2.1.277 floor, a stale 3.x template copy, a CLAUDE.md above the project (R40). **SELF-08b** → the digest-stamped skills refresh: only Triforge's own unchanged copies are replaced or retired, in session start and lease provisioning alike (KTD12/R31). **SELF-09** → the no-push backstop (CS1). **SELF-10** → the protected-path lists in \`scripts/lib/registry.sh\` and the fail-closed scan in \`lease_promote\` (KTD8/R30). **SELF-13** → the \`[lead]\` table (load validation, absent = claude), the lead host check every lead-owned helper runs (the other lead's CLI refused naming at-setup lead, a terminal runs as the user, both leads' markers refused as ambiguous, no TTY and no markers refused outside the SELF seam), \`roster_write_lead\` (from a stated origin only) and its forced handover, reclaim under the other lead, and the lead's capabilities with an absent one reported once (KTD1, R1/R38/R40/R44). **SELF-14** → the ledger's lead CLI and reviewer class, the merge approval a protected snapshot needs (the lead's CLI when it did not build the task, else the user; voided by the next fix cycle), the user's promotion approval bound to the integration tree (voided by a later merge or a default-branch move), the forced-handover rule for a lead-class pin (a pre-4.0 pin classed by its own row's lead), and each approval's recorded origin (KTD2-KTD4, R5/R6/R32/R33). **SELF-18** → lead-side git hardening (\`_lead_git\`), integrity detection with restore and escalation, and snapshot-only merges (KTD18/KTD19, R46/R47/R49). **SELF-19** → detached builders (pid == pgid, a start-time fingerprint), \`lease_wait\` within the lead's \`wait_budget_s\`, and the lead-exit reconcile, the kill case under a claude and a codex lead (KTD10, R36/R38). **SELF-20** → the \`claude -p\` lane (KTD16, R2/R3): its argv and env, the JSON envelope, session resume, max-turns routed as report missing, names-only .claude/skills provisioning, \`dispatch_role\` running \`claude -p\` under a codex lead, and the Claude Code 2.1.285 floor its sandbox needs. Under \`--self-only\` these rows are the whole run and any SELF FAIL exits 3 (KTD15)."
+  echo "- **SELF-01..SELF-04** → roster chain rejection, coordinate.sh composition, adapter env allowlist, the R35 boundary. **SELF-05** → the Status-line parser seam (KTD11: DONE / MISSING / BLOCKED). **SELF-06** → lease-lane skill discovery per CLI under the env -i boundary (KTD7/R9; PASS = the probe skill is listed, shipped coverage in the evidence; SELF-06f: the claude worker lists the .claude/skills copy the real provisioner wrote, KTD16). **SELF-07** → the TRIFORGE_TEST_BUILDER lifecycle: DONE → review, report missing → never review-ready, BLOCKED → escalated (KTD11). **SELF-08** → session-start idempotence (KTD7/KTD8) and the upgrade notices: the 2.1.277 floor, a stale 3.x template copy, a CLAUDE.md above the project (R40). **SELF-08b** → the digest-stamped skills refresh: only Triforge's own unchanged copies are replaced or retired, in session start and lease provisioning alike (KTD12/R31). **SELF-09** → the no-push backstop (CS1). **SELF-10** → the protected-path lists in \`scripts/lib/registry.sh\` and the fail-closed scan in \`lease_promote\` (KTD8/R30). **SELF-13** → the \`[lead]\` table (load validation, absent = claude), the lead host check every lead-owned helper runs (the other lead's CLI refused naming at-setup lead, a terminal runs as the user, both leads' markers refused as ambiguous, no TTY and no markers refused outside the SELF seam), \`roster_write_lead\` (from a stated origin only) and its forced handover, reclaim under the other lead, and the lead's capabilities with an absent one reported once (KTD1, R1/R38/R40/R44). **SELF-14** → the ledger's lead CLI and reviewer class, the merge approval a protected snapshot needs (the lead's CLI when it did not build the task, else the user; voided by the next fix cycle), the user's promotion approval bound to the integration tree (voided by a later merge or a default-branch move), the forced-handover rule for a lead-class pin (a pre-4.0 pin classed by its own row's lead), and each approval's recorded origin (KTD2-KTD4, R5/R6/R32/R33). **SELF-18** → lead-side git hardening (\`_lead_git\`), integrity detection with restore and escalation, and snapshot-only merges (KTD18/KTD19, R46/R47/R49). **SELF-19** → detached builders (pid == pgid, a start-time fingerprint), \`lease_wait\` within the lead's \`wait_budget_s\`, and the lead-exit reconcile, the kill case under a claude and a codex lead (KTD10, R36/R38). **SELF-20** → the \`claude -p\` lane (KTD16, R2/R3): its argv and env, the JSON envelope, session resume, max-turns routed as report missing, names-only .claude/skills provisioning, \`dispatch_role\` running \`claude -p\` under a codex lead, and the Claude Code 2.1.285 floor its sandbox needs. **SELF-06h** → the Devin worker lists the .agents/skills copy the real provisioner wrote, on the lane's read-class argv (R24). **SELF-24** → Devin as an optional member without a live CLI: readiness read from \`devin auth status\` text, the recorded consent and the builder opt-in at load and in the writers, no headless enrollment, the re-import flag setup reads, SHELL and DEVIN_REFUSAL_FALLBACK kept out, the lane argv per class, \`invoke_devin\` on a config copy with the Status line as completion, a reviewer lease to review, and \`~/.local/share/devin\` closed to a claude worker (R24, R25). Under \`--self-only\` these rows are the whole run and any SELF FAIL exits 3 (KTD15)."
   echo
   echo "## Appendix A: codex features list"
   echo
@@ -3203,6 +3517,7 @@ if [ "$SELF_ONLY" = "1" ]; then
   # sourced self-tests would otherwise drop the rows after it and still pass.
   # A new SELF row joins this list in the commit that adds it.
   SELF_EXPECTED="SELF-01 SELF-02 SELF-03 SELF-04 SELF-05 SELF-06a SELF-06b SELF-06c SELF-06d SELF-06e SELF-06f SELF-07 SELF-08 SELF-08b SELF-09 SELF-10 SELF-11 SELF-13 SELF-14 SELF-15 SELF-15b SELF-15c SELF-18 SELF-19 SELF-20"
+  SELF_EXPECTED="$SELF_EXPECTED SELF-06h SELF-24"   # Devin (U17)
   SELF_MISSING=""
   for SELF_ID in $SELF_EXPECTED; do
     if ! cut -f1 "$ROWS" | grep -qx "$SELF_ID"; then SELF_MISSING="${SELF_MISSING}${SELF_MISSING:+ }${SELF_ID}"; fi

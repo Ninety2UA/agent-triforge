@@ -101,7 +101,7 @@ _approver_ok() {
 # Classify a failed external-CLI invocation (KTD-9). Shared so future per-CLI
 # helpers reuse one taxonomy instead of reinventing bare retry-once. Sets:
 #   INVOKE_FAILURE_CLASS    deterministic | timeout | retryable
-#   _INVOKE_FAILURE_REASON  binary-missing | timeout-tool-missing | auth | quota | ""
+#   _INVOKE_FAILURE_REASON  binary-missing | timeout-tool-missing | auth | quota | plan | ""
 # Args: <exit-code> [output-file] — the output file is scanned for
 # auth-shaped patterns when present.
 _classify_invoke_failure() {
@@ -122,6 +122,11 @@ _classify_invoke_failure() {
     # second timeout window; the fix is a refreshed cycle or purchased usage.
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="quota"
+  elif [ -n "$OUT" ] && [ -f "$OUT" ] && grep -qiE 'upgrade to (pro|max|a paid plan)|requires? a (paid|pro) plan|not available on your plan' "$OUT" 2>/dev/null; then
+    # The account's plan does not include the pinned model (Devin Free:
+    # "Upgrade to Pro to access this model"): a retry cannot help.
+    INVOKE_FAILURE_CLASS="deterministic"
+    _INVOKE_FAILURE_REASON="plan"
   elif [ -n "$OUT" ] && [ -f "$OUT" ] && grep -qiE 'not logged in|login required|unauthorized|401|credential|authentication (failed|required|expired)' "$OUT" 2>/dev/null; then
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="auth"

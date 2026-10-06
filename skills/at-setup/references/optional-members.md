@@ -1,6 +1,6 @@
 # Optional members (Step 2, guided ask)
 
-For each optional CLI in order, `opencode`, `kimi`, `cursor` (or just the one named in the invocation; `roles` is not a CLI and routes straight to role assignment), run the preflight, then act on its return code:
+For each optional CLI in order, `opencode`, `kimi`, `cursor`, `devin` (or just the one named in the invocation; `roles` is not a CLI and routes straight to role assignment), run the preflight, then act on its return code:
 
 ```bash
 roster_enroll_member <cli> interactive; echo "rc=$?"
@@ -25,6 +25,19 @@ roster_enroll_member <cli> interactive; echo "rc=$?"
 
   2. If the `auth=` field (or `readiness:` line) reported `auth-failed: <fix>`, surface that fix. The member can still enroll (enrollment records intent), but any dispatch to it will fail at the adapter's auth preflight until the user completes the named login step. `resolve_role` does not skip auth-failed members (only declined or binary-absent ones), so the fix is to complete the login, or to set the member `enabled = false` so every chain falls back past it.
 
+
+## Devin: consent first
+
+Devin's `needs-ask` output has a `consent: required` line, and Devin is never enrolled headless. Before you ask whether to enroll it:
+
+1. Run `devin_env_reimport`. It prints `yes`, `no` or `unknown`.
+2. Tell the user what enrolling Devin means:
+   - Devin sends prompts and code to Cognition. Cognition may train on them unless the account opts out, which paid plans can do. A model outside Cognition's SWE family also sends them on to that model's provider.
+   - Devin can read the credential files in the user's home directory, like every worker.
+   - On `yes` or `unknown`, add that Devin re-imports the login shell's environment and so sees every secret the shell profile exports. On `no`, say that Triforge starts Devin without `$SHELL`, so it imports none of them (probe row DVN-04).
+3. On a yes, record the consent with the write: `roster_write_member devin true "<model>" --consent user`. Without `--consent user` the write is refused. On a no, record the decline as for any member.
+4. Devin reviews and analyzes by default. It builds only after a second yes: `roster_write_member devin true "<model>" --opt-in builder`. Ask this only when the user wants Devin as a builder.
+
 ## Live model lists
 
 Offer the shipped default first (recommended):
@@ -34,6 +47,7 @@ Offer the shipped default first (recommended):
 | opencode | `openrouter/z-ai/glm-5.3` | `opencode models openrouter` | needs the openrouter provider connected (`OPENROUTER_API_KEY` or `opencode auth login`) |
 | kimi | `kimi-code/k3` | (no list flag) | the OAuth-managed alias; `kimi login` provisions it; offer the default |
 | cursor | `cursor-grok-4.6-xhigh` | `cursor-agent --list-models` (or `agent --list-models` when only the new binary name exists) | pin the suffixed Grok id explicitly, never the Auto router; effort rides in the `-low`, `-medium`, `-high`, `-xhigh` suffix. An unrelated `~/.grok/bin/agent` can shadow `agent`, so the helper (`_cursor_bin`) resolves `cursor-agent` first and accepts `agent` only when its `--version` matches `YYYY.MM.DD-<hex>` |
+| devin | `swe-1-6-slow` | `devin models list` | Cognition's own model, and the one a Devin Free account can run: Free answers most other models with "Upgrade to Pro". Devin has no effort flag; some model ids carry it (`swe-2-high`, `swe-2-max`) |
 
 Fetch a list only when the user wants to see options, for example:
 

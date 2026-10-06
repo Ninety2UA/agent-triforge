@@ -28,7 +28,7 @@ if [ "$ROSTER_OK" = yes ]; then
 else
   printf '%-12s  %-10s  %-8s  %-24s\n' CLI INSTALLED AUTH ENROLLED-MODEL
 fi
-for cli in claude antigravity codex opencode kimi cursor; do
+for cli in $(cli_list all); do   # every registered CLI, core trio first
   bin=$(_registry_binary "$cli")
   if command -v "$bin" >/dev/null 2>&1; then inst=yes; else inst=no; fi
   st=$(roster_member_status "$cli")

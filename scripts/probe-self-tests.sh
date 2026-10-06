@@ -266,6 +266,7 @@ if [ "$SELF_ONLY" = 1 ]; then
   for r in "SELF-06a:agy" "SELF-06b:codex" "SELF-06c:opencode" "SELF-06d:cursor" "SELF-06e:kimi" "SELF-06f:claude"; do
     row "${r%%:*}" "${r#*:}" "$_S6_CAP: ${r#*:}" "SKIPPED" "--self-only: live lease-lane rows are not part of the SELF gate (run the full probe)" "live"
   done
+  row "SELF-06h" "devin" "$_S6_CAP: devin" "SKIPPED" "--self-only: live lease-lane rows are not part of the SELF gate (run the full probe, or --only SELF-06h)" "live"
 elif git -C "$FIX" worktree add -q "$_S6_WT" -b probe/self-06 >/dev/null 2>&1; then
   mkdir -p "$_S6_WT/.agents/skills"
   for s in $SHIPPED_SKILLS; do
@@ -348,6 +349,12 @@ fi
 # (_self06f_row in scripts/probe-capabilities.sh, which --only SELF-06f runs too).
 if [ "$SELF_ONLY" != 1 ]; then
   _self06f_row
+fi
+# Devin (R24): SELF-06h runs the real provisioner (.agents/skills) and the
+# lane's read-class argv the same way (_self06h_row in
+# scripts/probe-capabilities.sh, which --only SELF-06h runs too).
+if [ "$SELF_ONLY" != 1 ]; then
+  _self06h_row
 fi
 
 # SELF-07 (KTD11): the TRIFORGE_TEST_BUILDER lifecycle through lease_create /
@@ -4171,3 +4178,225 @@ else
   row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S20_FAIL"):$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"
 fi
 rm -rf "$_S20"
+
+# SELF-24 (R24, R25): Devin CLI as an optional member — no live CLI. A `devin`
+# stub first on PATH answers `auth status` (logged in or out, rc 0 either
+# way, as Devin 3000.x does), records the argv and env of a run, writes into
+# the --config file it is handed (as Devin does: org id, theme, chmod 600) and
+# answers by $DVN_STUB_RUN. Core stubs (_SELF_STUBS) put the trio on PATH.
+#   readiness  `Not logged in.` with rc 0 -> roster_member_auth devin rc 1
+#              (auth-failed, naming devin auth login); `Logged in (via Devin).`
+#              -> ok
+#   consent    [members.devin] enabled without a recorded consent -> every
+#              resolve_role rc 5 naming consent; a role chain naming devin with
+#              no [members.devin] table -> rc 5; with consent -> the reviewer
+#              resolves to devin
+#   opt-in     a builder chain naming devin (primary or fallback) without
+#              [members.devin] opt_in = ["builder"] -> rc 5; with it -> the
+#              builder resolves to devin; a tester chain naming devin -> rc 5
+#              even with the builder opt-in (not an opt-in role)
+#   writers    roster_write_role builder devin without the opt-in -> refused,
+#              roster bytes unchanged; with it -> written. roster_write_member
+#              devin true without --consent -> refused, nothing written; with
+#              --consent user -> consent recorded with its origin (via=test
+#              under the seam); a model change keeps it; --opt-in builder
+#              records opt_in, --opt-in tester is refused; a decline
+#              (enabled=false) drops consent and opt_in
+#   headless   roster_enroll_member devin headless never enrolls (rc 20,
+#              needs consent), unlike the other optional members
+#   reimport   devin_env_reimport reads a probe record's DVN-04 row (the
+#              project's newest when none is named): reimport=yes -> yes,
+#              reimport=no -> no, a record without the row -> unknown
+#   env        _adapter_env devin drops SHELL (Devin re-imports the login
+#              shell's exports only when $SHELL is set: DVN-04) and
+#              DEVIN_REFUSAL_FALLBACK; carries the worker marker
+#   lane       _lease_lane_argv devin: the per-dispatch config copy, the model
+#              pin, --permission-mode dangerous for an .edit.json copy and auto
+#              for a .read.json one, --respect-workspace-trust false, -p last
+#   invoke     invoke_devin reviewer through the stub: a temp copy of
+#              devin-agents/config-read.json (the shipped file unchanged after
+#              the stub wrote its copy), auto mode, the model pin, the reviewer
+#              brief in the prompt, no SHELL or DEVIN_REFUSAL_FALLBACK in its
+#              env, rc 0 on Status: DONE; no Status line -> rc 80; empty
+#              answer -> nonzero; "Not logged in" -> deterministic auth;
+#              "Upgrade to Pro" -> deterministic plan
+#   lease      the TRIFORGE_TEST_BUILDER seam with [roles.reviewer] cli =
+#              devin: lease_create <t> reviewer -> builder_cli devin, the
+#              dispatch writes a .read.json config copy, Status: DONE ->
+#              review (rc 0)
+#   cred       the claude lane's --settings deny ~/.local/share/devin to the
+#              Read tool and the sandbox (where Devin 3000.x keeps
+#              credentials.toml)
+_S24="${WORK}/self24"
+mkdir -p "$_S24/bin" "$_S24/tmp"
+cat > "$_S24/bin/devin" <<'EOF'
+#!/bin/sh
+# SELF-24 devin stub
+if [ "$1" = auth ] && [ "$2" = status ]; then
+  case "${DVN_STUB_AUTH:-in}" in
+    out) printf 'Not logged in.\n  Credentials path: /nowhere/.local/share/devin/credentials.toml\nRun `devin auth login` to authenticate.\n' ;;
+    *)   printf 'Logged in (via Devin).\n\nCredentials:\n  File:              /nowhere/.local/share/devin/credentials.toml\n' ;;
+  esac
+  exit 0
+fi
+if [ "$1" = --version ]; then echo "devin 3000.11.3 (stub)"; exit 0; fi
+L=${DVN_STUB_LOG:-/dev/null}
+: > "$L.argv"
+for a in "$@"; do printf '%s\n' "$a" >> "$L.argv"; done
+env > "$L.env"
+prev=""
+for a in "$@"; do
+  if [ "$prev" = --config ]; then printf '{"devin":{"org_id":"stub"},"theme_mode":"dark"}\n' > "$a"; fi
+  prev=$a
+done
+case "${DVN_STUB_RUN:-done}" in
+  done)  printf 'Reviewed the diff.\n\nStatus: DONE\nFiles changed: none\nTests: none\nConcerns: None\nDiscoveries for later tasks: None\n' ;;
+  none)  printf 'Reviewed the diff, no report line.\n' ;;
+  empty) : ;;
+  auth)  echo "Error: Not logged in. Run devin auth login" >&2; exit 1 ;;
+  plan)  echo "Error: Upgrade to Pro to access this model (https://devin.ai/pricing)" >&2; exit 1 ;;
+esac
+exit 0
+EOF
+chmod +x "$_S24/bin/devin"
+_S24_PATH="${_S24}/bin:${_SELF_STUBS}:${PATH}"
+_S24_FAIL=""
+
+# _s24_roster <dir> <roster, %b escapes> — a throwaway project with ops/roster.toml
+_s24_roster() { rm -rf "$1"; mkdir -p "$1/ops"; printf '%b' "$2" > "$1/ops/roster.toml"; }
+# _s24_resolve <dir> <role> — "rc=<n>:<cli or the error's last words>"
+_s24_resolve() {
+  ( cd "$1" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+    R=0; O=$(resolve_role "$2" 2>&1) || R=$?
+    printf 'rc=%s:%s\n' "$R" "$(printf '%s' "$O" | tr '\n\t' '  ' | cut -c1-300)" )
+}
+_S24_C='consent = "user 2026-10-06T00:00:00Z via=tty"'
+
+# readiness
+for _S24_A in out in; do
+  mkdir -p "$_S24/tmp/auth-$_S24_A"
+  O=$( export PATH="$_S24_PATH" TMPDIR="$_S24/tmp/auth-$_S24_A" DVN_STUB_AUTH="$_S24_A" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+    R=0; L=$(roster_member_auth devin 2>&1) || R=$?
+    printf '%s:rc=%s:%s\n' "$_S24_A" "$R" "$L" )
+  _S24_FAIL="${_S24_FAIL}$(_self_expect "auth-$_S24_A" "$O" "$( [ "$_S24_A" = out ] && echo '^out:rc=1:auth-failed: .*devin auth login' || echo '^in:rc=0:ok$')")"
+done
+
+# consent and opt-in load validation
+_s24_roster "$_S24/r1" '[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\n'
+_S24_FAIL="${_S24_FAIL}$(_self_expect consent-missing "$(_s24_resolve "$_S24/r1" builder)" '^rc=5:.*consent')"
+_s24_roster "$_S24/r2" '[roles.reviewer]\ncli = "devin"\nfallbacks = ["codex"]\n'
+_S24_FAIL="${_S24_FAIL}$(_self_expect chain-unenrolled "$(_s24_resolve "$_S24/r2" reviewer)" '^rc=5:.*consent')"
+_s24_roster "$_S24/r3" "[roles.reviewer]\ncli = \"devin\"\nfallbacks = [\"codex\"]\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+_S24_FAIL="${_S24_FAIL}$(_self_expect consent-ok "$(_s24_resolve "$_S24/r3" reviewer)" '^rc=0:devin swe-1-6-slow')"
+_s24_roster "$_S24/r4" "[roles.builder]\ncli = \"devin\"\nfallbacks = [\"claude\"]\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+_S24_FAIL="${_S24_FAIL}$(_self_expect builder-no-optin "$(_s24_resolve "$_S24/r4" reviewer)" '^rc=5:.*opt')"
+_s24_roster "$_S24/r5" "[roles.builder]\ncli = \"claude\"\nfallbacks = [\"devin\", \"codex\"]\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+_S24_FAIL="${_S24_FAIL}$(_self_expect builder-fallback-no-optin "$(_s24_resolve "$_S24/r5" builder)" '^rc=5:.*opt')"
+_s24_roster "$_S24/r6" "[roles.builder]\ncli = \"devin\"\nfallbacks = [\"claude\"]\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\nopt_in = [\"builder\"]\n"
+_S24_FAIL="${_S24_FAIL}$(_self_expect builder-optin "$(_s24_resolve "$_S24/r6" builder)" '^rc=0:devin swe-1-6-slow')"
+_s24_roster "$_S24/r7" "[roles.tester]\ncli = \"devin\"\nfallbacks = [\"codex\"]\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\nopt_in = [\"builder\"]\n"
+_S24_FAIL="${_S24_FAIL}$(_self_expect tester-never "$(_s24_resolve "$_S24/r7" tester)" '^rc=5:.*tester')"
+
+# writers (the SELF seam is the lead: TRIFORGE_TEST_LEAD + TRIFORGE_TEST_BUILDER)
+_s24_roster "$_S24/w1" "[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+O=$( cd "$_S24/w1" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  B=$(cksum < ops/roster.toml)
+  R=0; roster_write_role builder devin "" max >/dev/null 2>&1 || R=$?
+  echo "role-refused:rc=${R}:same=$([ "$(cksum < ops/roster.toml)" = "$B" ] && echo yes || echo no)"
+  R=0; roster_write_member devin true swe-1-6-slow "" --opt-in builder >/dev/null 2>&1 || R=$?
+  R2=0; roster_write_role builder devin "" max >/dev/null 2>&1 || R2=$?
+  echo "role-optin:rc=${R}/${R2}:cli=$(roster_role_entry builder 2>/dev/null | cut -f1)"
+  R=0; roster_write_member devin true swe-1-6-slow "" --opt-in tester >/dev/null 2>&1 || R=$?
+  echo "optin-tester:rc=${R}" )
+_S24_FAIL="${_S24_FAIL}$(_self_expect writers-role "$O" '^role-refused:rc=[1-9][0-9]*:same=yes$' '^role-optin:rc=0/0:cli=devin$' '^optin-tester:rc=[1-9]')"
+_s24_roster "$_S24/w2" ''
+O=$( cd "$_S24/w2" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  R=0; roster_write_member devin true swe-1-6-slow >/dev/null 2>&1 || R=$?
+  echo "member-no-consent:rc=${R}:table=$(roster_has_member devin && echo yes || echo no)"
+  R=0; roster_write_member devin true swe-1-6-slow "" --consent user >/dev/null 2>&1 || R=$?
+  echo "member-consent:rc=${R}:consent=$(_roster_member_field devin consent 2>/dev/null)"
+  R=0; roster_write_member devin true other-model >/dev/null 2>&1 || R=$?
+  echo "member-keeps:rc=${R}:consent=$(_roster_member_field devin consent 2>/dev/null)"
+  R=0; roster_write_member devin false "" >/dev/null 2>&1 || R=$?
+  echo "member-decline:rc=${R}:consent=[$(_roster_member_field devin consent 2>/dev/null)]:optin=[$(_roster_member_field devin opt_in 2>/dev/null)]" )
+_S24_FAIL="${_S24_FAIL}$(_self_expect writers-member "$O" '^member-no-consent:rc=[1-9][0-9]*:table=no$' '^member-consent:rc=0:consent=user .*via=test' '^member-keeps:rc=0:consent=user .*via=test' '^member-decline:rc=0:consent=\[\]:optin=\[\]$')"
+
+# headless enrollment never records consent
+_s24_roster "$_S24/h1" ''
+O=$( cd "$_S24/h1" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  R=0; roster_enroll_member devin headless >/dev/null 2>&1 || R=$?
+  echo "headless:rc=${R}:table=$(roster_has_member devin && echo yes || echo no)" )
+_S24_FAIL="${_S24_FAIL}$(_self_expect headless "$O" '^headless:rc=20:table=no$')"
+
+# the re-import flag setup reads
+for _S24_R in yes no none; do
+  rm -rf "$_S24/rec-$_S24_R"; mkdir -p "$_S24/rec-$_S24_R/ops/research"
+  ( cd "$_S24/rec-$_S24_R" && git init -q ) >/dev/null 2>&1
+  printf '| ID | CLI | Capability | Outcome | Evidence | Method |\n|---|---|---|---|---|---|\n' > "$_S24/rec-$_S24_R/ops/research/2026-10-probe-record.md"
+  if [ "$_S24_R" != none ]; then
+    printf '| DVN-04 | devin | login-shell env re-import | %s | reimport=%s (lane env) |live|\n' "$( [ "$_S24_R" = yes ] && echo FAIL || echo PASS)" "$_S24_R" >> "$_S24/rec-$_S24_R/ops/research/2026-10-probe-record.md"
+  fi
+  # yes: the project's newest record, found by itself; no and none: named
+  O=$( cd "$_S24/rec-$_S24_R" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+    if [ "$_S24_R" = yes ]; then devin_env_reimport 2>/dev/null; else devin_env_reimport "ops/research/2026-10-probe-record.md" 2>/dev/null; fi )
+  _S24_FAIL="${_S24_FAIL}$(_self_expect "reimport-$_S24_R" "$O" "^$( [ "$_S24_R" = none ] && echo unknown || echo "$_S24_R")\$")"
+done
+
+# env, lane argv, the claude lane's credential deny
+O=$( export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  E=$(SHELL=/bin/zsh DEVIN_REFUSAL_FALLBACK=opus _adapter_env devin env 2>/dev/null)
+  echo "env:shell=$(printf '%s\n' "$E" | grep -c '^SHELL=' || true):fallback=$(printf '%s\n' "$E" | grep -c '^DEVIN_REFUSAL_FALLBACK=' || true):marker=$(printf '%s\n' "$E" | grep -c '^TRIFORGE_LEASE_WORKER=builder$' || true)"
+  _lease_lane_argv devin "" max swe-1-6-slow "$_S24/x.devin.edit.json" "" "$_S24" 600 && echo "lane-edit:${_LEASE_LANE_ARGV[*]}"
+  _lease_lane_argv devin "" high swe-1-6-slow "$_S24/x.devin.read.json" "" "$_S24" 600 && echo "lane-read:${_LEASE_LANE_ARGV[*]}"
+  _claude_lane_argv edit "" "" "" || exit 0
+  W=""; P=""; for A in "${_LEASE_LANE_ARGV[@]}"; do if [ "$P" = --settings ]; then W=$A; fi; P=$A; done
+  printf '%s' "$W" | python3 -c '
+import json, sys
+s = json.load(sys.stdin)
+deny = s.get("permissions", {}).get("deny", [])
+dr = s.get("sandbox", {}).get("filesystem", {}).get("denyRead", [])
+print("cred:read=" + str("Read(~/.local/share/devin/**)" in deny and "Read(~/.local/share/devin)" in deny).lower() + ":sandbox=" + str("~/.local/share/devin" in dr).lower())
+' )
+_S24_FAIL="${_S24_FAIL}$(_self_expect env "$O" '^env:shell=0:fallback=0:marker=1$')"
+_S24_FAIL="${_S24_FAIL}$(_self_expect lane "$O" "^lane-edit:devin --config ${_S24}/x.devin.edit.json --model swe-1-6-slow --permission-mode dangerous --respect-workspace-trust false -p\$" "^lane-read:devin --config ${_S24}/x.devin.read.json --model swe-1-6-slow --permission-mode auto --respect-workspace-trust false -p\$")"
+_S24_FAIL="${_S24_FAIL}$(_self_expect cred "$O" '^cred:read=true:sandbox=true$')"
+
+# invoke_devin through the stub
+_S24_SHIP=$(cksum < "${REPO_ROOT}/devin-agents/config-read.json" 2>/dev/null || echo none)
+_S24_SIG=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2 && NF {print; exit}' "${REPO_ROOT}/devin-agents/reviewer.md" 2>/dev/null || true)
+O=$( cd "$_S24" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" SHELL=/bin/zsh DEVIN_REFUSAL_FALLBACK=opus DVN_STUB_LOG="$_S24/inv" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for M in done none empty auth plan; do
+    R=0; DVN_STUB_RUN=$M invoke_devin reviewer "PROMPT-S24" "$_S24/inv-$M.out" 30 >/dev/null 2>&1 || R=$?
+    echo "inv-$M:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}"
+    if [ "$M" = done ]; then
+      C=$(grep -A1 -x -- '--config' "$_S24/inv.argv" | tail -1)
+      echo "inv-argv:mode=$(grep -A1 -x -- '--permission-mode' "$_S24/inv.argv" | tail -1):model=$(grep -A1 -x -- '--model' "$_S24/inv.argv" | tail -1):trust=$(grep -A1 -x -- '--respect-workspace-trust' "$_S24/inv.argv" | tail -1):p=$(grep -cx -- '-p' "$_S24/inv.argv" || true):cfg-shipped=$( [ "$C" = "${REPO_ROOT}/devin-agents/config-read.json" ] && echo yes || echo no):cfg-left=$( [ -e "$C" ] && echo yes || echo no)"
+      echo "inv-env:shell=$(grep -c '^SHELL=' "$_S24/inv.env" || true):fallback=$(grep -c '^DEVIN_REFUSAL_FALLBACK=' "$_S24/inv.env" || true)"
+      echo "inv-brief:$(grep -qF -- "$_S24_SIG" "$_S24/inv.argv" && echo yes || echo no):task=$(grep -c 'PROMPT-S24' "$_S24/inv.argv" || true):status=$(grep -c '^Status: DONE' "$_S24/inv-done.out" || true)"
+    fi
+  done )
+_S24_FAIL="${_S24_FAIL}$(_self_expect invoke "$O" '^inv-done:rc=0:class=none' '^inv-none:rc=80:' '^inv-empty:rc=[1-9]' '^inv-auth:rc=[1-9][0-9]*:class=deterministic:reason=auth$' '^inv-plan:rc=[1-9][0-9]*:class=deterministic:reason=plan$' '^inv-argv:mode=auto:model=swe-1-6-slow:trust=false:p=1:cfg-shipped=no:cfg-left=no$' '^inv-env:shell=0:fallback=0$' '^inv-brief:yes:task=1:status=1$')"
+_S24_FAIL="${_S24_FAIL}$(_self_expect shipped-config "ship:$(cksum < "${REPO_ROOT}/devin-agents/config-read.json" 2>/dev/null || echo gone)" "^ship:${_S24_SHIP}\$")"
+
+# a reviewer lease through the seam
+mkdir -p "$_S24/lease/ops"
+printf "[roles.reviewer]\ncli = \"devin\"\nfallbacks = [\"codex\"]\n\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n" > "$_S24/lease/ops/roster.toml"
+( cd "$_S24/lease" && export HOME="$_S24" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" && echo r > README.md && git add -A && git commit -qm init && git checkout -q -b sprint/s24 ) >/dev/null 2>&1
+printf '#!/bin/sh\necho "reviewed"\necho "Status: DONE"\n' > "$_S24/fb-done.sh"
+chmod +x "$_S24/fb-done.sh"
+O=$( cd "$_S24/lease" && export HOME="$_S24" GIT_CONFIG_NOSYSTEM=1 PATH="$_S24_PATH" TMPDIR="$_S24/tmp" TRIFORGE_LEASE_ROOT="$_S24/leases" TRIFORGE_TEST_BUILDER="$_S24/fb-done.sh" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  lease_create s24 reviewer >/dev/null 2>&1 || { echo "lease:create-failed"; exit 0; }
+  lease_dispatch s24 "probe review: report only" 60 >/dev/null 2>&1 || { echo "lease:dispatch-failed"; exit 0; }
+  _self_wait_rc s24
+  R=0; lease_collect s24 >/dev/null 2>&1 || R=$?
+  OUT=$(_ledger_get s24 output_file 2>/dev/null)
+  echo "lease:rc=${R}:state=$(_ledger_get s24 state 2>/dev/null):builder=$(_ledger_get s24 builder_cli 2>/dev/null):cfg=$( [ -f "${OUT}.devin.read.json" ] && echo read || echo none)" )
+_S24_FAIL="${_S24_FAIL}$(_self_expect lease "$O" '^lease:rc=0:state=review:builder=devin:cfg=read$')"
+
+_S24_CAP="Devin CLI as an optional member: readiness read from auth-status text, recorded consent and the builder opt-in at load and in the writers, no headless enrollment, the re-import flag setup reads, SHELL and DEVIN_REFUSAL_FALLBACK kept out, the lane argv per class, invoke_devin on a config copy with the Status line as completion, a reviewer lease to review, ~/.local/share/devin closed to a claude worker (R24, R25)"
+if [ -z "$_S24_FAIL" ]; then
+  row "SELF-24" "devin" "$_S24_CAP" "PASS" "auth: Not logged in. rc 0 -> auth-failed, Logged in (via Devin). -> ok; consent: missing -> rc 5, chain with no member table -> rc 5, recorded -> reviewer=devin; opt-in: builder primary or fallback without it -> rc 5, with it -> builder=devin, tester never; writers: role write refused without the opt-in (roster unchanged), member write refused without --consent, consent recorded via=test and kept across a model change, opt-in tester refused, decline drops both; headless enroll rc 20, no table; re-import flag yes/no/unknown from the DVN-04 row; env: no SHELL, no DEVIN_REFUSAL_FALLBACK, worker marker; lane: dangerous for .edit.json, auto for .read.json, -p last; invoke: config copy (shipped file unchanged, copy removed), auto, the pin, reviewer brief, Status: DONE rc 0, no Status rc 80, empty nonzero, auth and plan deterministic; seam reviewer lease -> review with a read config copy; claude lane denies ~/.local/share/devin (Read + sandbox)" "static"
+else
+  row "SELF-24" "devin" "$_S24_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S24_FAIL"):$(printf '%s' "$_S24_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S24"
