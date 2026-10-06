@@ -690,10 +690,10 @@ Seven safeguards keep long sprints from dying to context limits:
 
 | Layer | Mechanism | Guards against |
 |---|---|---|
-| **Completion gating** | The `ops/.sprint-complete` sentinel, created only after verification passes, is the authoritative signal; the native `/goal` checklist is a best-effort assist — [`coordinate.sh`](scripts/coordinate.sh) leads every session prompt with it and `at-ship` / `at-coordinate` print a copyable `/goal` line, but headless gating is flaky (probe CC-03 1 of 3, D-030) | Claude declaring victory early |
-| **Outer loop** | [`scripts/coordinate.sh`](scripts/coordinate.sh) — spawns fresh sessions with clean context, detects completion via the `ops/.sprint-complete` sentinel, notifies on completion | Context window filling up |
+| **Completion gating** | The `ops/.sprint-complete` sentinel, created only after verification passes, is the authoritative signal. Under a Claude Code lead the native `/goal` checklist adds a best-effort gate: [`coordinate.sh`](scripts/coordinate.sh) leads every session prompt with it and `at-ship` / `at-coordinate` print a copyable `/goal` line, but headless gating is flaky (probe CC-03 1 of 3, D-030). A Codex lead has no `/goal`, so its sessions complete on the sentinel alone | The lead declaring victory early |
+| **Outer loop** | [`scripts/coordinate.sh`](scripts/coordinate.sh) starts a fresh lead session per iteration and runs the lead's launch line from the registry with the `[lead]` model and effort. It runs the git integrity check before each session, stops after one session on a login or quota failure, detects completion via the `ops/.sprint-complete` sentinel, and notifies on completion. A Codex lead's launch line runs with full access, so the script runs it only when you pass `--allow-full-access`; without the flag it prints the line and exits 77 | Context window filling up |
 | **PreCompact** | [`pre-compact.sh`](hooks/handlers/pre-compact.sh) — auto-checkpoints `STATE.md` before context compaction | State loss during mid-sprint compaction |
-| **Analysis paralysis** | [`context-monitor.sh`](hooks/handlers/context-monitor.sh) — warns at 8+ consecutive reads without writes | Reading without producing |
+| **Analysis paralysis** | [`context-monitor.sh`](hooks/handlers/context-monitor.sh) warns at 8+ consecutive reads without writes. The lead's tool vocabulary in the registry decides what counts as a read; under a Codex lead, a shell command that only reads (`cat`, `sed -n`, `git log`) counts | Reading without producing |
 | **Tool failure monitor** | [`tool-failure-monitor.sh`](hooks/handlers/tool-failure-monitor.sh) — tracks and warns on accumulated tool failures | Silent failure accumulation |
 | **Subprocess timeouts** | Watchdog pattern on all Antigravity/Codex calls — SIGTERM after timeout, SIGKILL after 5s grace | Hung external agents blocking pipeline |
 | **Risk scoring** | Per-subagent risk accumulation — halt at >20% or 50+ file changes | Runaway subagents |
@@ -704,6 +704,10 @@ Seven safeguards keep long sprints from dying to context limits:
 
 # With completion notification via webhook
 NOTIFY_WEBHOOK_URL="https://hooks.slack.com/..." ./scripts/coordinate.sh "Build auth" --max 5
+
+# Under a Codex lead: preview the launch line and prompt, then run with full access acknowledged
+./scripts/coordinate.sh "Build auth" --dry-run --lead codex
+./scripts/coordinate.sh "Build auth" --max 5 --allow-full-access
 ```
 
 ### Key constraints
@@ -797,7 +801,7 @@ No. Use <a href="skills/at-quick/SKILL.md"><code>at-quick</code></a> for changes
 <details>
 <summary><strong>How does context exhaustion recovery work?</strong></summary>
 
-Two layers. <strong>Inside</strong> a session, the <code>ops/.sprint-complete</code> sentinel is the authoritative completion signal — created only after the verification checklist passes. Claude Code's native <code>/goal</code> checklist is a best-effort assist on top: <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> leads every composed prompt with a <code>/goal</code> line, and <code>at-ship</code>/<code>at-coordinate</code> print a copyable one for interactive runs, but headless gating is model-behavior-dependent (probe CC-03 passed 1 of 3 runs in the 2026-09 cycle, D-030), so nothing relies on it. <strong>Outside</strong> a session, <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> spawns fresh Claude processes with clean context windows, detecting completion via the sentinel; state persists via git and <code>ops/STATE.md</code>. A PreCompact hook auto-checkpoints STATE.md before context compaction.
+Two layers. <strong>Inside</strong> a session, the <code>ops/.sprint-complete</code> sentinel is the authoritative completion signal — created only after the verification checklist passes. Claude Code's native <code>/goal</code> checklist is a best-effort assist on top: <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> leads every composed prompt with a <code>/goal</code> line, and <code>at-ship</code>/<code>at-coordinate</code> print a copyable one for interactive runs, but headless gating is model-behavior-dependent (probe CC-03 passed 1 of 3 runs in the 2026-09 cycle, D-030), so nothing relies on it. <strong>Outside</strong> a session, <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> spawns fresh lead processes with clean context windows, detecting completion via the sentinel; state persists via git and <code>ops/STATE.md</code>. A PreCompact hook auto-checkpoints STATE.md before context compaction.
 </details>
 
 <details>

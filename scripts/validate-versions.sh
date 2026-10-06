@@ -319,7 +319,7 @@ FIELDS = {
     "egress": str, "lead": dict,
 }
 LEAD_FIELDS = {
-    "launch_argv": str, "wait_budget_s": int, "tool_vocab_read": str, "tool_vocab_action": str,
+    "launch_argv": str, "model_argv": str, "effort_argv": str, "wait_budget_s": int, "tool_vocab_read": str, "tool_vocab_action": str,
     "goal_gate": str, "ask_user": str, "native_subagents_enforced_tools": bool, "agent_teams": bool,
     "plugin_root_env": str,
 }
@@ -420,6 +420,10 @@ if clis is not None:
             if not lead.get("launch_argv"):
                 fails.append(where + ": lead.launch_argv is empty")
                 shape_ok = False
+            for f in ("model_argv", "effort_argv"):
+                if isinstance(lead.get(f), str) and lead[f] and "{}" not in lead[f]:
+                    fails.append(where + ": lead." + f + " has no {} where the value goes")
+                    shape_ok = False
         if e.get("tier") == "core":
             core.append(cli)
     if not core:

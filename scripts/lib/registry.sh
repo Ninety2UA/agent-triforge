@@ -201,11 +201,22 @@ TRIFORGE_CLAUDE_SANDBOX_FLOOR="2.1.285"
 #               claude -p worker that dispatch_role runs itself, KTD16)
 #   egress      the model provider that receives the prompt and the code (R36)
 #   lead        the KTD1 static lead fields, or {} for a CLI that cannot lead
-#               (Key Decision: Claude Code or Codex only). launch_argv is the
-#               launch line setup prints and the human types; wait_budget_s the
+#               (Key Decision: Claude Code or Codex only). launch_argv is one
+#               headless lead session, the prompt appended as its last word:
+#               what scripts/coordinate.sh runs, or prints for the human to
+#               type when it asks for full access (R50); model_argv and
+#               effort_argv the flags that pass [lead] model and effort, "{}"
+#               standing for the value (shell words, as launch_argv; an empty
+#               value adds nothing), appended to launch_argv before the
+#               prompt (claude: --model, --effort; codex exec has no effort
+#               flag, so -c model_reasoning_effort=, whose header reports the
+#               value as given); wait_budget_s the
 #               longest single wait the lead's shell tool allows; the two
-#               tool_vocab_* lists are the lead's own read and action tool
-#               names (what a paralysis monitor classifies); goal_gate the
+#               tool_vocab_* lists are the tool names the lead's PostToolUse
+#               hook payload carries, read and action (what the paralysis
+#               monitor classifies; a name in neither counts as an action, and
+#               "<tool>(read)" is a shell tool whose command only reads);
+#               goal_gate the
 #               completion-gate command ("" = none, the ops/.sprint-complete
 #               sentinel alone); ask_user the question tool ("" = none);
 #               plugin_root_env the variable the host exports for the plugin
@@ -228,10 +239,12 @@ CLIS = {
         "lane": "subagent",
         "egress": "Anthropic",
         "lead": {
-            "launch_argv": "claude",
+            "launch_argv": "claude --print --permission-mode acceptEdits",
+            "model_argv": "--model {}",
+            "effort_argv": "--effort {}",
             "wait_budget_s": 600,
-            "tool_vocab_read": "Read Grep Glob WebFetch",
-            "tool_vocab_action": "Edit Write Bash",
+            "tool_vocab_read": "Read Grep Glob LS WebFetch WebSearch TaskList TaskGet NotebookRead",
+            "tool_vocab_action": "Edit Write Bash NotebookEdit Agent Skill",
             "goal_gate": "/goal",
             "ask_user": "AskUserQuestion",
             "native_subagents_enforced_tools": True,
@@ -269,11 +282,13 @@ CLIS = {
         "env_keys": [],
         "lane": "shell",
         "egress": "OpenAI",
-        "lead": {   # D-047 profile; tool names — verified: U14
+        "lead": {   # D-047 profile; the hook payload names exec_command Bash and keeps apply_patch (CDX-21)
             "launch_argv": "codex exec -s danger-full-access -c approval_policy=\"never\" -c background_terminal_max_timeout=900000",
+            "model_argv": "-m {}",
+            "effort_argv": "-c model_reasoning_effort={}",
             "wait_budget_s": 900,
-            "tool_vocab_read": "read_file exec_command(read)",
-            "tool_vocab_action": "exec_command apply_patch",
+            "tool_vocab_read": "Bash(read)",
+            "tool_vocab_action": "Bash apply_patch",
             "goal_gate": "",
             "ask_user": "",
             "native_subagents_enforced_tools": False,

@@ -648,6 +648,29 @@ resolve_lead() {
   printf '%s\n' "$_LEAD_RESOLVED"
 }
 
+# lead_resolve_as <cli> — cli<TAB>model<TAB>effort for <cli> as the lead: the
+# roster's [lead] model and effort when <cli> is this checkout's lead, else
+# <cli>'s own lead defaults (its registry model, LEAD_DEFAULT_EFFORT), the
+# values a [lead] naming only cli would resolve to. rc 5 for a CLI that cannot
+# lead; otherwise resolve_lead's rc. coordinate.sh --dry-run --lead composes
+# another lead's launch line with it.
+lead_resolve_as() {
+  RA_CLI="${1:?usage: lead_resolve_as <cli>}" RL_ROSTER="$(_lead_roster_path)" python3 -c "
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_LEAD_PY}
+who, path, want = 'lead_resolve_as', os.environ['RL_ROSTER'], os.environ['RA_CLI']
+if want not in lead_capable():
+    sys.stderr.write(who + ': ERROR ' + repr(want) + ' cannot lead: the lead is one of ' + ', '.join(lead_capable()) + '\\n')
+    sys.exit(5)
+roster = lead_roster(lead_toml(who), path, who)
+cli, model, effort, explicit = lead_load(roster, lambda msg: lead_reject(who, path, msg))
+if cli != want:
+    model, effort = CLIS[want]['model'], LEAD_DEFAULT_EFFORT.get(want, '')
+print('\\t'.join([want, model, effort]))
+"
+}
+
 # roster_lead_entry — what the roster configures, for at-setup:
 # cli<TAB>model<TAB>effort<TAB>roster|default (default: no [lead] table, the
 # claude default). Same rc as resolve_lead.
@@ -906,7 +929,8 @@ for e in events:
 
 # resolve_lead_caps — the lead's capabilities, one "<name><TAB><value>" line
 # each: the registry's KTD1 lead fields as cli_field formats them
-# (launch_argv, wait_budget_s, tool_vocab_read, tool_vocab_action, goal_gate,
+# (launch_argv, model_argv, effort_argv, wait_budget_s, tool_vocab_read,
+# tool_vocab_action, goal_gate,
 # ask_user, native_subagents_enforced_tools, agent_teams, plugin_root_env),
 # then hooks_trusted.<event> present|absent, detected at runtime
 # (_lead_hooks_detect) and cached for the lead session (_lead_session_key) in
