@@ -136,9 +136,10 @@ rm -rf "$_S1_DIR"
 #   drycodex  --dry-run --lead codex (no [lead] table): the D-047 `codex exec`
 #             launch line plus codex's lead defaults through lead.model_argv
 #             and lead.effort_argv (-m gpt-6-astra -c
-#             model_reasoning_effort=xhigh), the $at-ship leading line with
-#             the goal quoted, no /goal line, the full-access and the
-#             no-goal-gate notes
+#             model_reasoning_effort=xhigh), the $agent-triforge:at-ship
+#             leading line with the goal quoted (Codex attaches a plugin
+#             skill only by its namespaced mention), no /goal line, the
+#             full-access and the no-goal-gate notes
 #   drypin    [lead] codex with model gpt-6-luna, effort high, --dry-run
 #             --lead codex: the roster's values, not the defaults
 #   dryclaude --dry-run --lead claude: the /goal line, the claude --print line
@@ -148,7 +149,8 @@ rm -rf "$_S1_DIR"
 #             --effort high before the prompt
 #   nomodel   [lead] codex with model = "": no -m, the effort still passed
 #   teamgoal  a goal containing --team and --convergence stays inside the
-#             quoted goal of the $at-ship line; the real --team lands after it
+#             quoted goal of the $agent-triforge:at-ship line; the real --team
+#             lands after it
 #   nofield   a registry copy whose claude lead entry has no effort_argv:
 #             --model passed, no --effort, one note naming the field
 #   fullaccess one copy of the scripts, its claude lead entry rewritten per
@@ -188,8 +190,9 @@ rm -rf "$_S1_DIR"
 #   noack     [lead] codex, no --allow-full-access -> rc 77, the launch line
 #             and the three R4 statements printed, the stub never run
 #   ack       the same with --allow-full-access, the stub completing -> rc 0
-#             after one run, argv = the registry launch words + a $at-ship
-#             prompt (a stub: no lead launches with danger-full-access here)
+#             after one run, argv = the registry launch words + a
+#             $agent-triforge:at-ship prompt (a stub: no lead launches with
+#             danger-full-access here)
 #   auth      the claude lead's stub prints "Not logged in" and exits 1,
 #             --max 3 -> rc 69 after one run, class=deterministic reason=auth
 #   integrity a lease built and collected (review; the baseline recorded),
@@ -277,7 +280,7 @@ _s2_repo drycodex
 O=$(_s2_run drycodex noop claude "probe goal" --dry-run --lead codex)
 _S2_FAIL="${_S2_FAIL}$(_self_expect drycodex "$O" \
   '^launch \(Codex CLI\): codex exec -s danger-full-access -c approval_policy="never" -c background_terminal_max_timeout=900000 -m gpt-6-astra -c model_reasoning_effort=xhigh <the prompt' \
-  '^\$at-ship "probe goal" --convergence standard$' '^full access: .*--allow-full-access' '^goal gate: none for Codex CLI' \
+  '^\$agent-triforge:at-ship "probe goal" --convergence standard$' '^full access: .*--allow-full-access' '^goal gate: none for Codex CLI' \
   'Completion checklist \(this lead has no goal gate' '^rc=0$' '^runs=0$')"
 if printf '%s\n' "$O" | grep -q '^/goal'; then _S2_FAIL="$_S2_FAIL drycodex(a-/goal-line)"; fi
 
@@ -289,7 +292,7 @@ _s2_repo dryclaude
 O=$(_s2_run dryclaude noop claude "probe goal" --dry-run --lead claude)
 _S2_FAIL="${_S2_FAIL}$(_self_expect dryclaude "$O" '^launch \(Claude Code\): claude --print --permission-mode acceptEdits <the prompt' \
   '^/goal Sprint complete ONLY when' 'ONLY when the /goal checklist above' '^rc=0$' '^runs=0$')"
-if printf '%s\n' "$O" | grep -q '^\$at-ship\|^full access:\|^launch .*--model\|^launch .*--effort'; then _S2_FAIL="$_S2_FAIL dryclaude(codex-lines-or-model-flags)"; fi
+if printf '%s\n' "$O" | grep -q '^\$[a-z:-]*at-ship\|^full access:\|^launch .*--model\|^launch .*--effort'; then _S2_FAIL="$_S2_FAIL dryclaude(codex-lines-or-model-flags)"; fi
 
 _s2_repo claudepin '[lead]\ncli = "claude"\nmodel = "sonnet"\neffort = "high"\n\n'
 O=$(_s2_run claudepin noop claude "probe goal" --dry-run)
@@ -304,7 +307,7 @@ _s2_repo teamgoal
 O=$(_s2_run teamgoal noop claude "fix --team and --convergence deep parsing" --dry-run --lead codex)
 O="$O
 $(_s2_run teamgoal noop claude "probe goal" --dry-run --lead codex --team)"
-_S2_FAIL="${_S2_FAIL}$(_self_expect teamgoal "$O" '^\$at-ship "fix --team and --convergence deep parsing" --convergence standard$' '^\$at-ship "probe goal" --convergence standard --team$')"
+_S2_FAIL="${_S2_FAIL}$(_self_expect teamgoal "$O" '^\$agent-triforge:at-ship "fix --team and --convergence deep parsing" --convergence standard$' '^\$agent-triforge:at-ship "probe goal" --convergence standard --team$')"
 
 # nofield: a copy of the plugin's scripts whose claude lead entry drops effort_argv
 _s2_tree "$_S2/tree"
@@ -444,14 +447,14 @@ _s2_repo noack '[lead]\ncli = "codex"\n\n'
 O=$(_s2_run noack done codex "probe goal" --max 2)
 _S2_FAIL="${_S2_FAIL}$(_self_expect noack "$O" '^  codex exec -s danger-full-access -c approval_policy="never" -c background_terminal_max_timeout=900000 -m gpt-6-astra -c model_reasoning_effort=xhigh$' \
   "Triforge's scripts plus git-integrity detection" 'limits where a worker starts, not where it writes' 'injection surface for a full-access lead' \
-  "^codex exec -s danger-full-access .* -m gpt-6-astra -c model_reasoning_effort=xhigh '\\\$at-ship \"probe goal\"" 'Nothing ran' '^rc=77$' '^runs=0$')"
+  "^codex exec -s danger-full-access .* -m gpt-6-astra -c model_reasoning_effort=xhigh '\\\$agent-triforge:at-ship \"probe goal\"" 'Nothing ran' '^rc=77$' '^runs=0$')"
 [ ! -f "$_S2/noack/ops/.sprint-complete" ] || _S2_FAIL="$_S2_FAIL noack(sentinel-touched)"
 
 _s2_repo ack '[lead]\ncli = "codex"\n\n'
 O=$(_s2_run ack done codex "probe goal" --max 2 --allow-full-access)
 _S2_FAIL="${_S2_FAIL}$(_self_expect ack "$O" '^Full access: acknowledged' 'injection surface for a full-access lead' 'Sprint complete at iteration 1' '^rc=0$' '^runs=1$')"
 _S2_FAIL="${_S2_FAIL}$(_self_expect ack-argv "$(cat "$_S2/ack.stub")" \
-  '^codex:argc=12\|exec\|-s\|danger-full-access\|-c\|approval_policy=never\|-c\|background_terminal_max_timeout=900000\|-m\|gpt-6-astra\|-c\|model_reasoning_effort=xhigh\|\$at-ship "probe goal" --convergence standard$')"
+  '^codex:argc=12\|exec\|-s\|danger-full-access\|-c\|approval_policy=never\|-c\|background_terminal_max_timeout=900000\|-m\|gpt-6-astra\|-c\|model_reasoning_effort=xhigh\|\$agent-triforge:at-ship "probe goal" --convergence standard$')"
 
 _s2_repo auth
 O=$(_s2_run auth auth claude "probe goal" --max 3)
@@ -478,7 +481,7 @@ state=$( ( cd "$_S2/integrity" && export HOME="$_S2/home" TRIFORGE_LEASE_ROOT="$
 _S2_FAIL="${_S2_FAIL}$(_self_expect integrity "$O" '^create:rc=0:review$' 'coordinate\.sh: INTEGRITY' '\.git/config' 'STOPPED before starting a session' \
   '^rc=44$' '^runs=0$' '^planted=gone$' '^state=escalated$')"
 
-_S2_CAP="coordinate.sh reads the lead's launch_argv, goal_gate, model_argv and effort_argv: /goal + claude --print under Claude Code; the D-047 codex exec line, the [lead] model and effort, a quoted \$at-ship goal and no /goal under Codex; full access only with --allow-full-access (77); the integrity check before each session (44); a deterministic lead failure stops after one run (69); the lease-resume paragraph"
+_S2_CAP="coordinate.sh reads the lead's launch_argv, goal_gate, model_argv and effort_argv: /goal + claude --print under Claude Code; the D-047 codex exec line, the [lead] model and effort, a quoted \$agent-triforge:at-ship goal and no /goal under Codex; full access only with --allow-full-access (77); the integrity check before each session (44); a deterministic lead failure stops after one run (69); the lease-resume paragraph"
 if [ -z "$_S2_FAIL" ]; then
   row "SELF-02" "claude" "$_S2_CAP" "PASS" "resume, drycodex (-m gpt-6-astra -c model_reasoning_effort=xhigh), drypin (the roster's gpt-6-luna/high), dryclaude (no model flags), claudepin (--model sonnet --effort high), nomodel (no -m), teamgoal (flags stay in the quoted goal), nofield (one note, no --effort), fullaccess (17 full-access spellings and a declared line refused, rc 77; the acceptEdits control runs), ledgerroot (a tampered ledger under another TMPDIR: rc 44, restored; its root gone: refused naming TRIFORGE_LEASE_ROOT), noshell (no seam, no TTY: rc 45, never 44, with and without a ledger), quota (rc 69, a quota Fix line), tail (a link planted at <run log>.tail never written through), stderr (a stderr line on every python3 call: the lead still resolves), leadwet, noack (rc 77, nothing run), ack (one stub run, D-047 argv + model + effort), auth (rc 69 after one run, the login hint), integrity (rc 44, restored, escalated, no run)" "static"
 else

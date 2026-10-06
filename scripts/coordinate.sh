@@ -19,8 +19,9 @@
 #                     hard-gates the session natively (probe CC-03; a slash
 #                     command works only as the first line of a headless
 #                     prompt). Empty (Codex): no gate; the prompt leads with
-#                     the at-ship skill in its $<skill> mention form, carries
-#                     the checklist as text, and the session completes on the
+#                     $agent-triforge:at-ship (Codex attaches a plugin skill
+#                     only by its $<plugin>:<skill> mention), carries the
+#                     checklist as text, and the session completes on the
 #                     sentinel alone (R27).
 #
 # Completion contract:
@@ -320,8 +321,9 @@ CHECKLIST="Sprint complete ONLY when ALL of: (1) every framework phase for the g
 # Under a lead with a goal gate the first line is "<goal_gate> <checklist>":
 # a slash command can only be user-typed or the first line of a headless
 # prompt, which is exactly what this is. Under a lead without one the first
-# line invokes the at-ship skill ($<skill> mention form) and the checklist is
-# the standing completion condition, met on the sentinel alone (KTD14).
+# line invokes $agent-triforge:at-ship (the $<plugin>:<skill> mention) and the
+# checklist is the standing completion condition, met on the sentinel alone
+# (KTD14).
 compose_prompt() {
   local LEASE_RESUME LEAD_LINE GATE_RULE="" WHICH="that checklist"
   LEASE_RESUME=$(lease_resume_paragraph)
@@ -329,7 +331,7 @@ compose_prompt() {
     LEAD_LINE="${GOAL_GATE} ${CHECKLIST}"
     WHICH="the ${GOAL_GATE} checklist above"
   else
-    LEAD_LINE="\$at-ship ${GOAL_QUOTED} --convergence ${CONVERGENCE}${USE_TEAM:+ ${USE_TEAM}}"
+    LEAD_LINE="\$agent-triforge:at-ship ${GOAL_QUOTED} --convergence ${CONVERGENCE}${USE_TEAM:+ ${USE_TEAM}}"
     GATE_RULE="Completion checklist (this lead has no goal gate; the sentinel alone completes the sprint): ${CHECKLIST}
 "
   fi

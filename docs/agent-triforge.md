@@ -211,7 +211,7 @@ Session continuity file. Written when pausing or wrapping a session.
 
 ## Portable skill protocol
 
-Skills are model-agnostic markdown files that encode reusable methodologies. The `skills/` tree holds 27 skills: the 10 portable skills below, which ALL agents consume, and the 17 lead workflows (`skills/at-*/`). A lead runs a workflow as `/at-<name>` under Claude Code or `$at-<name>` in a Codex prompt; the workflows reach a lead only from its plugin install and are never copied into `.agents/skills/` or a lease worktree (KTD12). The portable skills:
+Skills are model-agnostic markdown files that encode reusable methodologies. The `skills/` tree holds 27 skills: the 10 portable skills below, which ALL agents consume, and the 17 lead workflows (`skills/at-*/`). A lead runs a workflow as `/at-<name>` under Claude Code or `$agent-triforge:at-<name>` in a Codex prompt; the workflows reach a lead only from its plugin install and are never copied into `.agents/skills/` or a lease worktree (KTD12). The portable skills:
 
 - **Claude Code:** Uses skills natively via the skill system
 - **Antigravity CLI:** Skills embedded in native agent definitions (`antigravity-agents/agents/*.md`). The `invoke-external.sh` helper injects the agent body (skill included) as a prompt prefix by default (`TRIFORGE_AGY_MODE=injection`); `native`/`auto` route through `--agent` when `agy agents` lists the definition.
@@ -931,7 +931,7 @@ Two mechanisms keep a sprint honest and alive:
 #### Completion gating (native /goal + sentinel)
 
 Sprint completion is gated by Claude Code's native `/goal` command (probe CC-03; this replaced the retired `ship-loop.sh` Stop hook and its `<promise>` convention):
-- `scripts/coordinate.sh` reads the lead's `goal_gate`. Under a Claude Code lead each session prompt leads with the `/goal` line carrying the completion checklist, so Claude Code hard-gates headless sessions natively. A Codex lead has no goal gate, so the prompt leads with `$at-ship "<goal>"` and the session completes on the sentinel alone (KTD14). The goal is in double quotes, so a `--team` or `--convergence` inside it stays part of the goal
+- `scripts/coordinate.sh` reads the lead's `goal_gate`. Under a Claude Code lead each session prompt leads with the `/goal` line carrying the completion checklist, so Claude Code hard-gates headless sessions natively. A Codex lead has no goal gate, so the prompt leads with `$agent-triforge:at-ship "<goal>"` and the session completes on the sentinel alone (KTD14). The goal is in double quotes, so a `--team` or `--convergence` inside it stays part of the goal
 - Interactive `at-ship` and `at-coordinate` print a copyable `/goal` line at sprint start (a skill cannot invoke `/goal` itself: under a Claude Code lead it is user-typed or the leading line of a `claude -p` prompt; a Codex lead has no such gate and completes on the sentinel alone, KTD14) and hold the lead to the same checklist
 - The session creates the runtime marker `ops/.sprint-complete` ONLY after the verification checklist passes — the marker is gitignored and is the sole completion signal outer tooling reads
 
@@ -1167,7 +1167,7 @@ YOU: Review summary, check CHANGELOG, approve or request changes
 
 ### Prerequisites
 
-**Run `at-setup`** (`/at-setup` under a Claude Code lead, `$at-setup` in a Codex prompt). It is the one guided path from a fresh install to a working roster: it checks that the core trio is live, walks you through each optional CLI (enroll it with a model you choose, or decline it), then offers role assignment. Keep the shipped defaults (recommended) or change any role's CLI, model and effort; `at-setup roles` jumps straight to that step. It is idempotent, so you can re-run it any time. The probes below are the checks it automates.
+**Run `at-setup`** (`/at-setup` under a Claude Code lead, `$agent-triforge:at-setup` in a Codex prompt). It is the one guided path from a fresh install to a working roster: it checks that the core trio is live, walks you through each optional CLI (enroll it with a model you choose, or decline it), then offers role assignment. Keep the shipped defaults (recommended) or change any role's CLI, model and effort; `at-setup roles` jumps straight to that step. It is idempotent, so you can re-run it any time. The probes below are the checks it automates.
 
 **Core trio (required)** — installed, authenticated, and answering a headless READY probe (floors per KTD-13):
 ```bash

@@ -24,4 +24,4 @@ Invoked with no arguments.
 ## Output
 
 - `ops/STATE.md` — the frontmatter plus the sections `Current phase`, `Active sprint`, `Task status snapshot` (N done, N in progress, N remaining, N blocked), `In-progress work` (what was active, uncommitted files, branch), `Context` (decisions this session, blockers, open questions), `Review cycle state` (cycle N of 3, convergence mode fast | standard | deep, outstanding P1 and P2 counts), `Next actions (when resuming)` (numbered, first thing first), and `Lease snapshot` when a ledger exists — per [references/state-template.md](references/state-template.md).
-- One line to the user: "State saved. Use /at-resume to continue." — `$at-resume` when the lead is Codex.
+- One line to the user: "State saved. Use /at-resume to continue." — `$agent-triforge:at-resume` when the lead is Codex.

@@ -50,4 +50,4 @@ Print these sections in this order. A section with nothing to say says "none"; n
 - /at-status — this overview
 ```
 
-Rendering rule for "Available commands": print the invocation form of the lead's harness — `/at-name` under Claude Code, `$at-name` under Codex — and exactly one form. "Processed" for a review file means `ops/TASKS.md` holds a `## Review dispositions — Cycle N` block for it; archived files (under `ops/archive/<date>/`) are absent, not pending.
+Rendering rule for "Available commands": print the invocation form of the lead's harness — `/at-name` under Claude Code, `$agent-triforge:at-name` under Codex — and exactly one form. "Processed" for a review file means `ops/TASKS.md` holds a `## Review dispositions — Cycle N` block for it; archived files (under `ops/archive/<date>/`) are absent, not pending.

@@ -1,6 +1,6 @@
 interface:
   display_name: "Triforge quick"
   short_description: "Small change under 3 files: TDD, self-review, no swarm."
-  default_prompt: "Run $at-quick for this small change and report the self-review."
+  default_prompt: "Run $agent-triforge:at-quick for this small change and report the self-review."
 policy:
   allow_implicit_invocation: false

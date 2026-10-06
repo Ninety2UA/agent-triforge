@@ -102,9 +102,11 @@
 #        scripts/<file> in the prose carries its interpreter          (new)
 #   C24  agents/openai.yaml, if present: keys ⊆ interface, policy,
 #        dependencies; interface strings quoted; short_description 25–64
-#        chars; default_prompt contains $<name>; dependencies.tools[].type ∈
-#        mcp, cli; icon paths exist; policy.allow_implicit_invocation: false
-#        ⇔ SKILL.md disable-model-invocation: true                     (new)
+#        chars; default_prompt contains $<name> ($agent-triforge:<name> for
+#        an at- skill: at- skills ship in the plugin, and Codex attaches a
+#        plugin skill only by its namespaced mention); dependencies.tools[]
+#        .type ∈ mcp, cli; icon paths exist; policy.allow_implicit_invocation:
+#        false ⇔ SKILL.md disable-model-invocation: true               (new)
 #   C25  --self-test: one fixture per rule under scripts/fixtures/validate-skills/
 #   C26  C3 and C17 over agents/*.md ($ARGUMENTS and $N: an agent takes no
 #        interpolation)                                                 (new)
@@ -203,6 +205,8 @@ EXCEPTION_KEYS = {
 }
 KEBAB_LOOSE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 KEBAB_STRICT = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+# .claude-plugin/plugin.json name: Codex mentions a plugin skill as $<plugin>:<skill> (C24).
+PLUGIN_NAME = "agent-triforge"
 STEP_HEADING = re.compile(r"^## Step (\d+):")
 OUTPUT_HEADING = re.compile(r"^## Output(\s.*)?$")
 ESCAPING_LINK = re.compile(r"\]\((?:\.\./|/)[^)]*\)")
@@ -882,8 +886,13 @@ def check_skill(skill_dir, sibling_names):
             if isinstance(sd, tuple) and not 25 <= len(sd[0]) <= 64:
                 new(oy, "C24", "interface.short_description is " + str(len(sd[0])) + " chars (25–64)")
             dp = iface.get("default_prompt")
-            if isinstance(dp, tuple) and name and ("$" + name) not in dp[0]:
-                new(oy, "C24", "interface.default_prompt does not mention $" + name)
+            if isinstance(dp, tuple) and name:
+                if not name.startswith("at-"):
+                    if ("$" + name) not in dp[0]:
+                        new(oy, "C24", "interface.default_prompt does not mention $" + name)
+                elif ("$" + PLUGIN_NAME + ":" + name) not in dp[0]:
+                    new(oy, "C24", "interface.default_prompt does not mention $" + PLUGIN_NAME + ":" + name
+                        + " (at- skills ship in the plugin, and Codex attaches a plugin skill only by its namespaced mention)")
             for k in ("icon_small", "icon_large"):
                 v = iface.get(k)
                 if isinstance(v, tuple) and v[0] and not os.path.exists(os.path.join(skill_dir, v[0].lstrip("./"))):

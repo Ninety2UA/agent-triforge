@@ -1,6 +1,6 @@
 interface:
   display_name: "Triforge deep research"
   short_description: "Five parallel research lenses plus one synthesis."
-  default_prompt: "Run $at-deep-research on this topic and present the synthesis."
+  default_prompt: "Run $agent-triforge:at-deep-research on this topic and present the synthesis."
 policy:
   allow_implicit_invocation: false

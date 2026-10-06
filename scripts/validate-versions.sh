@@ -131,7 +131,12 @@
 #      scripts/validate-skills.sh, the skills/at-* count in this script), and
 #      the names the session-start banner (hooks/handlers/session-start.sh)
 #      and skills/at-status/references/status-template.md enumerate equal the
-#      set of skills/at-*/ directories (the diff is printed).
+#      set of skills/at-*/ directories (the diff is printed). No shipped
+#      surface (check 4's scope, minus ops/) carries a bare $at- mention,
+#      because Codex attaches a plugin skill only as
+#      $agent-triforge:at-<name> (codex-cli 0.160.0, U14). The check skips
+#      the validate-skills fixture c24-bare-mention/, which carries one on
+#      purpose.
 #  10. Other-harness skill manifests (R22) — skills/.devin-plugin/plugin.json
 #      (Devin; plugin root skills/, installed as <repo>#skills) and the root
 #      package.json "pi" key (Pi) each list exactly the portable skill
@@ -1128,6 +1133,19 @@ sys.exit(1 if fails else 0)
 PYEOF
 if [ "$LEADWF_RC" -ne 0 ]; then
   FAILED_CHECKS=$((FAILED_CHECKS + 1))
+fi
+BARE_MENTIONS=$(
+  grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" -e '\$at-' . 2>/dev/null \
+    | grep -vE '^(\./)?(ops/|scripts/fixtures/validate-skills/c24-bare-mention/)' \
+    | _shipped_surfaces \
+    | sort -t: -k1,1 -k2,2n || true
+)
+if [ -n "$BARE_MENTIONS" ]; then
+  printf '%s\n' "$BARE_MENTIONS"
+  BARE_COUNT=$(printf '%s\n' "$BARE_MENTIONS" | grep -c . || true)
+  fail "lead workflows: $BARE_COUNT bare \$at- mention(s) on shipped surfaces (listed above as file:line:text). Codex attaches a plugin skill only as \$agent-triforge:at-<name>; a bare \$at-<name> attaches nothing."
+else
+  ok "lead workflows: no bare \$at- mention on shipped surfaces (Codex form: \$agent-triforge:at-<name>)"
 fi
 
 # --- 10. other-harness skill manifests (R22) ---------------------------------
