@@ -29,6 +29,9 @@
 #   lib/roster.sh       resolve_role, dispatch_role, roster_* (DEFAULTS live here),
 #                       the lead: resolve_lead, resolve_lead_caps, lead_host_detect,
 #                       roster_write_lead (KTD1)
+#   lib/bootstrap.sh    triforge_bootstrap: the project bootstrap (ops/ skeleton,
+#                       .agents/skills refresh, per-CLI files, agy pack, plugin-root
+#                       pointer) the session-start hook and the at- skills call (KTD11)
 #   lib/lease-wait.sh   detached builders (launcher, lane argv, builder body),
 #                       lease_stop, lease_heartbeat_check, lease_wait (KTD10)
 #   lib/persona.sh      the persona lane: dispatch_persona, persona_prompt,
@@ -51,6 +54,7 @@
 #   ensure_core_trio_live         — lazy liveness gate for build/review paths
 #   latest_probe_record           — path of the newest ops/research/*-probe-record.md
 #   triforge_plugin_root          — prints the resolved plugin root (${_TRIFORGE_PLUGIN_ROOT})
+#   triforge_bootstrap [--prefix <text>] — set up the project (KTD11; scripts/lib/bootstrap.sh)
 #
 # Failure taxonomy (KTD-9): both helpers classify failures instead of
 # blindly retrying, and expose the class via INVOKE_FAILURE_CLASS:
@@ -130,7 +134,7 @@ else
   else
     _TRIFORGE_ROOT_STATE="unset"
   fi
-  echo "invoke-external.sh: ERROR no Triforge plugin root — CLAUDE_PLUGIN_ROOT is ${_TRIFORGE_ROOT_STATE} and this loader (${_TRIFORGE_SELF_DIR:-<unknown dir>}) is not inside a Triforge plugin tree (.claude-plugin/plugin.json named agent-triforge plus scripts/invoke-external.sh). Source the installed plugin's scripts/invoke-external.sh, or run the Triforge setup skill at-setup (\`/at-setup\` under Claude Code, \`\$at-setup\` in a Codex prompt)." >&2
+  echo "invoke-external.sh: ERROR no Triforge plugin root — CLAUDE_PLUGIN_ROOT is ${_TRIFORGE_ROOT_STATE} and this loader (${_TRIFORGE_SELF_DIR:-<unknown dir>}) is not inside a Triforge plugin tree (.claude-plugin/plugin.json named agent-triforge plus scripts/invoke-external.sh). Source the installed plugin's scripts/invoke-external.sh, or run the Triforge setup skill at-setup (\`/at-setup\` under Claude Code, \`\$agent-triforge:at-setup\` in a Codex prompt)." >&2
   unset _TRIFORGE_SELF_DIR _TRIFORGE_PLUGIN_ROOT _TRIFORGE_ROOT_STATE
   return 2 2>/dev/null || exit 2
 fi
@@ -140,7 +144,7 @@ triforge_plugin_root() { printf '%s\n' "$_TRIFORGE_PLUGIN_ROOT"; }
 
 # Load the lanes (fail-closed: a missing lib is a broken install, never a
 # silently narrower helper).
-for _triforge_lib in common registry antigravity codex opencode kimi cursor roster lease-wait persona lease; do
+for _triforge_lib in common registry antigravity codex opencode kimi cursor roster bootstrap lease-wait persona lease; do
   if [ ! -f "${_TRIFORGE_SCRIPTS_DIR}/lib/${_triforge_lib}.sh" ]; then
     echo "invoke-external.sh: ERROR missing ${_TRIFORGE_SCRIPTS_DIR}/lib/${_triforge_lib}.sh — the plugin install is incomplete (reinstall: claude plugin install agent-triforge@agent-triforge)" >&2
     return 2 2>/dev/null || exit 2

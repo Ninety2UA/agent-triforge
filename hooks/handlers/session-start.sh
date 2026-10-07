@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Session Start — SessionStart hook
-# Scans for existing state, pending tasks, and available context; bootstraps
-# the project's ops/ + per-CLI files; migrates an upgraded project to the
-# current plugin layout (skills refresh, Antigravity pack reinstall, Codex file
-# move) with one notice per step. Provides orientation for the new session.
+# Scans for existing state, pending tasks, and available context; runs the
+# project bootstrap (triforge_bootstrap, scripts/lib/bootstrap.sh: ops/ +
+# per-CLI files, skills refresh, Antigravity pack reinstall, Codex file moves,
+# the plugin-root pointer) and prints its notices, one per step that acted.
+# Provides orientation for the new session.
 #
 # Hook event: SessionStart
 # Configuration: registered in hooks/hooks.json (plugin)
@@ -20,9 +21,14 @@
 #   Audited 2026-10-01: every stdout line is prose ("Multi-agent framework
 #   ready.", "session-start: …", "Roster …", "WARNING: …", "Tip: …",
 #   "Lead workflows: …");
-#   every external-CLI capture (agy plugin list / agy agents / claude
-#   --version) is consumed here and never echoed — the floor warning prints
-#   only the X.Y.Z digits parsed out of it.
+#   every external-CLI capture (claude --version here; agy plugin list / agy
+#   agents inside triforge_bootstrap) is consumed and never echoed — the floor
+#   warning prints only the X.Y.Z digits parsed out of it — and each line
+#   triforge_bootstrap prints starts with the "session-start: " prefix this hook
+#   passes it, control characters already dropped. Re-audited 2026-10-07
+#   (Phase 3 round 4, B8): the orientation is printed with printf %s, never %b,
+#   and every value read from disk or the environment (roster pins, paths, the
+#   loader's error) passes _ss_prose and sits behind fixed prose.
 # Bash 3.2 compatible (macOS /bin/bash): no associative arrays, no mapfile, no
 #   "${arr[@]}" expansion of a possibly-empty array under set -u.
 
@@ -45,17 +51,139 @@ _ss_on_exit() {
 }
 trap _ss_on_exit EXIT
 
-# Ensure .claude/ directory exists for project-local state files
-mkdir -p .claude
+# The project anchor: the nearest directory, from the session's working
+# directory up, holding a .git entry (where _lead_roster_path and the lease
+# helpers put ops/), else the working directory. The hook runs there, as
+# triforge_bootstrap does, so a session
+# opened in a monorepo subdirectory reads and writes the one ops/, roster and
+# runtime state the helpers use. Only the instruction-file notices (R40)
+# look at the directory the session started in, because that is where Claude
+# Code reads CLAUDE.md and AGENTS.md from. Inline, not the helper's
+# _lead_roster_path: it must work when the helper does not load.
+SS_START_DIR=$(pwd -P 2>/dev/null || pwd)
+SS_ANCHOR=$SS_START_DIR
+SS_D=$SS_START_DIR
+while [ -n "$SS_D" ]; do
+  if [ -e "${SS_D}/.git" ] || [ -L "${SS_D}/.git" ]; then
+    SS_ANCHOR=$SS_D
+    break
+  fi
+  if [ "$SS_D" = "/" ]; then
+    break
+  fi
+  SS_D=${SS_D%/*}
+  if [ -z "$SS_D" ]; then SS_D=/; fi
+done
+case "${CLAUDE_PLUGIN_ROOT:-}" in
+  ""|/*) ;;
+  *) CLAUDE_PLUGIN_ROOT="${SS_START_DIR}/${CLAUDE_PLUGIN_ROOT}" ;;   # a relative root names the start directory's child
+esac
+cd "$SS_ANCHOR" 2>/dev/null || SS_ANCHOR=$SS_START_DIR
 
-# Clean stale state files from previous sessions
-rm -f .claude/context-monitor.local.md
+# A home directory is not a project (Phase 3 round 3, R1): when the anchor is
+# the home directory or contains it (a session opened in ~, or below a home
+# directory that is itself a repository), the hook writes nothing there. The
+# bootstrap, the runtime file, enrollment and the .claude cleanup are skipped,
+# and one standing WARNING says why: .claude, .codex and the rest of a home
+# directory are each CLI's user-tier config. Inline, like the anchor, and like
+# the bootstrap's _tb_home_anchor compared by filesystem identity (test -ef),
+# never by spelling (Phase 3 round 4, B1): bash's pwd -P keeps the case the
+# shell was handed, so on a case-insensitive volume /users/me is HOME too.
+SS_AT_HOME=""
+SS_HOME_P=""
+if [ -n "${HOME:-}" ]; then
+  SS_HOME_P=$(cd "$HOME" 2>/dev/null && env pwd -P 2>/dev/null || true)
+fi
+SS_D=$SS_HOME_P
+while [ -n "$SS_D" ]; do
+  if [ "$SS_ANCHOR" -ef "$SS_D" ]; then
+    SS_AT_HOME=yes
+    break
+  fi
+  if [ "$SS_D" = "/" ]; then
+    break
+  fi
+  SS_D=${SS_D%/*}
+  if [ -z "$SS_D" ]; then SS_D=/; fi
+done
 
-# Timeout binary (GNU coreutils `timeout`, or `gtimeout` on macOS). Every
-# external-CLI call in this hook runs under it; when neither exists the agy and
-# `agent` probes below are SKIPPED (fail-closed, mirroring invoke-external.sh —
-# a hung CLI must not stall session start) and the warning is appended to the
-# orientation message.
+# _ss_claude_dir — 0 when .claude is a real directory of the project (not a
+# symlink, not a file): only then does the hook touch anything under it. A
+# .claude linked elsewhere holds another place's files.
+_ss_claude_dir() {
+  [ -d .claude ] && [ ! -L .claude ]
+}
+
+# The orientation message is lines joined by real newlines and printed with
+# printf %s, so no escape sequence in it is ever interpreted, and every piece
+# that carries data (a path, a model pin read from the roster, a loader's
+# error, a bootstrap notice) goes through _ss_prose first (Phase 3 round 4,
+# B8): a newline or an escape in a value can't make a line of its own, and no
+# stdout line can start with "{".
+SS_NL='
+'
+# _ss_prose <text> — the text as one line: control characters dropped.
+_ss_prose() {
+  printf '%s' "$1" | LC_ALL=C tr -d '\000-\037\177'
+}
+
+# SS_READ_PY — python: read_regular(path), the bytes of a regular file, opened
+# O_NONBLOCK: a FIFO planted at ops/roster.toml or ops/leases.toml fails at
+# once instead of blocking session start (Phase 3 round 5, G3). The same lines
+# as _READ_REGULAR_PY in scripts/lib/common.sh, inline because this hook also
+# runs without the helper.
+SS_READ_PY='
+def read_regular(p):
+    import os, stat
+    fd = os.open(p, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+    with os.fdopen(fd, "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise OSError("not a regular file: " + p)
+        return f.read()
+'
+
+# _ss_tmp_ok <dir> — 0 when no other user can rename entries in <dir>: it is
+# owned by this user or root, and has no group or other write unless the
+# sticky bit is set — the rule monitors.py, coordinate.sh and the lease root
+# apply (Phase 3 round 4, B5). In a shared directory without the sticky bit a
+# second user could move a private temp dir aside and put one holding links
+# in its place, and the hook's next redirect would follow them.
+_ss_tmp_ok() {
+  [ -d "$1" ] || return 1
+  if [ ! -O "$1" ] && [ -z "$(find -H "$1" -maxdepth 0 -user 0 2>/dev/null)" ]; then
+    return 1
+  fi
+  [ -z "$(find -H "$1" -maxdepth 0 \( -perm -020 -o -perm -002 \) ! -perm -1000 2>/dev/null)" ]
+}
+
+# _ss_claude_private — 0 when the project's .claude can hold the hook's private
+# temp dirs (Phase 3 round 5, G2): a real directory (not a symlink) owned by
+# this user, with no group or other write unless the sticky bit is set, in a
+# project directory that passes _ss_tmp_ok. Then no other user can rename the
+# temp dir, or .claude itself, and plant links for the hook's redirects to
+# follow. The hook still reaches the temp dir by its path afterwards (bash has
+# no openat), so a process of this same user could swap it in between: a
+# same-user residual, like every other path this user's own processes can
+# change.
+_ss_claude_private() {
+  [ -d "${SS_ANCHOR}/.claude" ] && [ ! -L "${SS_ANCHOR}/.claude" ] && [ -O "${SS_ANCHOR}/.claude" ] || return 1
+  [ -z "$(find "${SS_ANCHOR}/.claude" -maxdepth 0 \( -perm -020 -o -perm -002 \) ! -perm -1000 2>/dev/null)" ] || return 1
+  _ss_tmp_ok "$SS_ANCHOR"
+}
+
+# Clean stale state files from previous sessions (the context monitor keeps
+# its state under TMPDIR now; this removes a copy an older version left).
+if [ -z "$SS_AT_HOME" ] && _ss_claude_dir; then
+  rm -f .claude/context-monitor.local.md
+fi
+
+# Timeout binary (GNU coreutils `timeout`, or `gtimeout` on macOS). The
+# optional-CLI version probes below run under it when it exists (unbounded
+# without it), and `claude --version` under it or a watchdog (_ss_bounded).
+# triforge_bootstrap and _cursor_bin find their own: without one the agy pack
+# check is skipped and the Cursor `agent` probes refuse (fail-closed, as
+# invoke-external.sh is — a hung CLI must not stall session start), and the
+# warning is appended to the orientation message.
 TIMEOUT_BIN=""
 command -v timeout >/dev/null 2>&1 && TIMEOUT_BIN="timeout"
 [ -z "$TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && TIMEOUT_BIN="gtimeout"
@@ -64,388 +192,29 @@ if [ -z "$TIMEOUT_BIN" ]; then
   TIMEOUT_MISSING_WARNING="WARNING: neither \`timeout\` nor \`gtimeout\` found on PATH — invoke-external.sh is fail-closed and will refuse to run Antigravity/Codex invocations (this hook also skipped its agy and cursor probes). On macOS, install with: brew install coreutils"
 fi
 
-# _ss_json_version <file> — top-level "version" string of a JSON file, or ""
-# when the file is missing/unreadable. Input travels as a prefixed env var,
-# never interpolated into the python source.
-_ss_json_version() {
-  [ -f "$1" ] || return 0
-  local -a CMD=(python3 -c '
-import json, os
-try:
-    with open(os.environ["SS_JSON_FILE"], "r", encoding="utf-8") as f:
-        print(str(json.load(f).get("version", "")).strip())
-except Exception:
-    pass
-')
-  if [ -n "$TIMEOUT_BIN" ]; then
-    CMD=("$TIMEOUT_BIN" 30s "${CMD[@]}")
-  fi
-  SS_JSON_FILE="$1" "${CMD[@]}" 2>/dev/null || true
-}
-
-# _ss_run — the rest of this hook, from the ops/ bootstrap to the orientation
+# _ss_run — the rest of this hook, from the project bootstrap to the orientation
 # message, as one function: it runs inside the subshell that sources the helper
 # (the block at the end of this file) or, when the helper does not load, in the
 # hook's own shell with SS_HELPER empty. The body is the hook's linear flow and
 # stays at column 0.
 _ss_run() {
 
-# Bootstrap ops/ directory if it doesn't exist
-if [ ! -d "ops" ]; then
-  mkdir -p ops/solutions ops/decisions ops/archive
-  # Copy skeleton files from plugin templates if available
-  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-    for f in MEMORY.md CHANGELOG.md AGENTS.md GOALS.md; do
-      if [ -f "${CLAUDE_PLUGIN_ROOT}/templates/ops/${f}" ] && [ ! -f "ops/${f}" ]; then
-        cp "${CLAUDE_PLUGIN_ROOT}/templates/ops/${f}" "ops/${f}"
-      fi
-    done
-  fi
-fi
-
-# ---------------------------------------------------------------------------
-# Antigravity agent pack — install-over on version change (KTD8, R8).
-# antigravity-agents/ is a valid agy plugin; installing it registers the four
-# external agents (codebase-analyst, architecture-reviewer, targeted-researcher,
-# documentation-writer). `agy plugin list` carries no version field, so the
-# installed version is read from the managed copy agy writes at
-# $HOME/.gemini/config/plugins/agent-triforge/plugin.json and compared with the
-# shipped antigravity-agents/plugin.json; on a mismatch, or when the pack is not
-# installed, `agy plugin install <plugin-root>/antigravity-agents` runs — agy
-# ≥ 1.1.28 replaces the managed directory exactly on reinstall. Acceptance is
-# `importedAt` advancing in $HOME/.gemini/config/import_manifest.json (the
-# imports[] entry named agent-triforge) and `agy agents` listing all four names
-# (AGY-12); when the listing stays short the hook tries `agy plugin uninstall
-# agent-triforge` and installs once more. When the managed plugin.json is
-# unreadable, the version this hook last installed is read from the runtime
-# stamp .claude/agy-pack-version.local.md instead. Every agy call is wrapped in
-# the timeout binary (30 s) and failure-tolerant — nothing here aborts the hook;
-# invoke_antigravity keeps its injection fallback (TRIFORGE_AGY_MODE, KTD10)
-# whatever the outcome. Skipped entirely without a timeout binary (fail-closed).
-AGY_PACK_NOTICE=""
-AGY_PACK_AGENTS="codebase-analyst architecture-reviewer targeted-researcher documentation-writer"
-AGY_PACK_STAMP=".claude/agy-pack-version.local.md"
-
-# _ss_agy_imported_at — importedAt of the agent-triforge entry in agy's import
-# manifest, or "" when absent/unreadable.
-_ss_agy_imported_at() {
-  local MANIFEST="${HOME:-}/.gemini/config/import_manifest.json"
-  [ -f "$MANIFEST" ] || return 0
-  SS_MANIFEST="$MANIFEST" python3 -c '
-import json, os
-try:
-    with open(os.environ["SS_MANIFEST"], "r", encoding="utf-8") as f:
-        data = json.load(f)
-    imports = data.get("imports", []) if isinstance(data, dict) else data
-    for entry in imports:
-        if isinstance(entry, dict) and entry.get("name") == "agent-triforge":
-            print(str(entry.get("importedAt", "")).strip())
-            break
-except Exception:
-    pass
-' 2>/dev/null || true
-}
-
-# _ss_agy_agents_missing — shipped agent names absent from `agy agents` (30 s).
-_ss_agy_agents_missing() {
-  local LISTING NAME MISSING=""
-  LISTING=$("$TIMEOUT_BIN" 30s agy agents 2>/dev/null || true)
-  for NAME in $AGY_PACK_AGENTS; do
-    printf '%s\n' "$LISTING" | grep -q -- "$NAME" || MISSING="${MISSING:+${MISSING} }${NAME}"
-  done
-  printf '%s' "$MISSING"
-}
-
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -n "$TIMEOUT_BIN" ] && command -v agy >/dev/null 2>&1; then
-  SHIPPED_PACK_VERSION=$(_ss_json_version "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/plugin.json")
-  INSTALLED_PACK_VERSION=$(_ss_json_version "${HOME:-}/.gemini/config/plugins/agent-triforge/plugin.json")
-  if [ -z "$INSTALLED_PACK_VERSION" ]; then
-    # Managed copy unreadable or absent: if the pack is installed at all, fall
-    # back to the version this hook last installed (stamp); else "not installed".
-    if "$TIMEOUT_BIN" 30s agy plugin list 2>/dev/null | grep -q "agent-triforge"; then
-      if [ -f "$AGY_PACK_STAMP" ]; then
-        INSTALLED_PACK_VERSION=$(sed -n 's/^version=//p' "$AGY_PACK_STAMP" 2>/dev/null | head -1 || true)
-      fi
-    fi
-  fi
-  if [ -n "$SHIPPED_PACK_VERSION" ] && [ "$INSTALLED_PACK_VERSION" != "$SHIPPED_PACK_VERSION" ]; then
-    IMPORTED_BEFORE=$(_ss_agy_imported_at)
-    AGY_INSTALL_RC=0
-    "$TIMEOUT_BIN" 30s agy plugin install "${CLAUDE_PLUGIN_ROOT}/antigravity-agents" >/dev/null 2>&1 || AGY_INSTALL_RC=$?
-    AGY_MISSING=$(_ss_agy_agents_missing)
-    if [ "$AGY_INSTALL_RC" -ne 0 ] || [ -n "$AGY_MISSING" ]; then
-      # Install-over did not yield a complete listing: uninstall + install once.
-      "$TIMEOUT_BIN" 30s agy plugin uninstall agent-triforge >/dev/null 2>&1 || true
-      AGY_INSTALL_RC=0
-      "$TIMEOUT_BIN" 30s agy plugin install "${CLAUDE_PLUGIN_ROOT}/antigravity-agents" >/dev/null 2>&1 || AGY_INSTALL_RC=$?
-      AGY_MISSING=$(_ss_agy_agents_missing)
-    fi
-    IMPORTED_AFTER=$(_ss_agy_imported_at)
-    if [ "$AGY_INSTALL_RC" -eq 0 ]; then
-      {
-        echo "<!-- runtime state: Antigravity agent pack version last installed by session-start (regenerated on each reinstall) -->"
-        echo "version=${SHIPPED_PACK_VERSION}"
-        echo "installed=$(date +%Y-%m-%d)"
-        echo "importedAt=${IMPORTED_AFTER:-unknown}"
-      } > "${AGY_PACK_STAMP}.tmp.$$" 2>/dev/null && mv -f "${AGY_PACK_STAMP}.tmp.$$" "$AGY_PACK_STAMP" 2>/dev/null || rm -f "${AGY_PACK_STAMP}.tmp.$$" 2>/dev/null || true
-      if [ -z "$AGY_MISSING" ]; then
-        AGY_PACK_NOTICE="session-start: Antigravity agent pack installed ${INSTALLED_PACK_VERSION:-none} -> ${SHIPPED_PACK_VERSION} (importedAt ${IMPORTED_BEFORE:-none} -> ${IMPORTED_AFTER:-unknown}; agy agents lists all four Triforge agents)."
-      else
-        AGY_PACK_NOTICE="session-start: Antigravity agent pack installed ${INSTALLED_PACK_VERSION:-none} -> ${SHIPPED_PACK_VERSION} (importedAt ${IMPORTED_BEFORE:-none} -> ${IMPORTED_AFTER:-unknown}), but agy agents does not list: ${AGY_MISSING} — invoke_antigravity stays in injection mode (TRIFORGE_AGY_MODE)."
-      fi
-    else
-      AGY_PACK_NOTICE="session-start: agy plugin install failed (rc=${AGY_INSTALL_RC}) — invoke_antigravity will use injection mode from the plugin templates."
-    fi
-  fi
-fi
-
-# Deploy Antigravity workspace settings (permission deny rules), copy-if-absent.
-# Project-tier settings are still NOT read headless: the July probe (no
-# project-tier settings.json lifted the `agy -p` auto-deny) stands, and D-032
-# records that settings.json enforcement is user-tier only
-# (~/.gemini/antigravity-cli/settings.json — never touched here; at-setup
-# documents the `read_url(*)` allow rule there). The shipped file documents the
-# deny intent in agy's action syntax (`command(rm -rf)`, `command(git push)`,
-# `command(sudo)`) and covers interactive `agy` use. Hooks (AGY-08): the
-# documented `.agents/hooks.json` named-hook shape (PreInvocation, PostInvocation,
-# PreToolUse, PostToolUse, Stop) fired headless on agy 1.2.0 (lead re-probe
-# 2026-09-11) but NOT on agy 1.2.1 the same evening (harness FAIL with the hooks
-# loaded) — an open watch, not an enforcement path; Triforge ships no agy hook.
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.antigravity/settings.json" ] && [ ! -f ".antigravity/settings.json" ]; then
-  mkdir -p .antigravity
-  cp "${CLAUDE_PLUGIN_ROOT}/templates/.antigravity/settings.json" ".antigravity/settings.json"
-fi
-
-# ---------------------------------------------------------------------------
-# .agents/skills/ refresh (KTD12, R31) — the agy workspace-skills tier AND the
-# cross-CLI agentskills.io path (Codex, OpenCode, Cursor and Kimi all read it).
-# Copies, never symlinks, so loaders that refuse to follow symlinks across
-# mount boundaries still see the skills.
-#
-# The work is done by scripts/lib/skills-sync.py, which _lease_provision_skills
-# also runs for each lease worktree, so both follow one ownership rule:
-# Triforge replaces or retires a directory only when its content digest
-# matches the digest recorded in the stamp .agents/skills/.triforge-plugin-
-# version for that name (a 3.3.0–3.3.2 stamp without digests is migrated
-# against scripts/lib/skill-digests.txt, the digests of every released copy).
-# Anything else is user-owned: kept, with one notice naming it. With no stamp,
-# only empty slots are written. The stamp is safe to commit in a user project
-# (this repo ignores /.agents/); an unchanged plugin version is a no-op with no
-# notice, and the stamp is written last, so an interrupted refresh re-runs on
-# the next session start. A symlinked .agents or .agents/skills, or one that
-# resolves outside the project, is left untouched with one notice.
-SKILLS_NOTICES=""
-SS_SKILLS_SYNC="${CLAUDE_PLUGIN_ROOT:-}/scripts/lib/skills-sync.py"
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/skills" ]; then
-  if [ -f "$SS_SKILLS_SYNC" ]; then
-    # A crash or a timeout must not abort the hook (set -e), but it must not be
-    # silent either: the exit status is kept and reported as a notice below.
-    SS_SYNC_OUT=""
-    SS_SYNC_RC=0
-    if [ -n "$TIMEOUT_BIN" ]; then
-      SS_SYNC_OUT=$("$TIMEOUT_BIN" 60s python3 "$SS_SKILLS_SYNC" sync --plugin-root "$CLAUDE_PLUGIN_ROOT" --project . --prefix "session-start: " 2>/dev/null) || SS_SYNC_RC=$?
-    else
-      SS_SYNC_OUT=$(python3 "$SS_SKILLS_SYNC" sync --plugin-root "$CLAUDE_PLUGIN_ROOT" --project . --prefix "session-start: " 2>/dev/null) || SS_SYNC_RC=$?
-    fi
-    while IFS= read -r SS_LINE; do
-      if [ -n "$SS_LINE" ]; then SKILLS_NOTICES="${SKILLS_NOTICES}\n${SS_LINE}"; fi
-    done <<SS_SYNC_EOF
-${SS_SYNC_OUT}
-SS_SYNC_EOF
-    if [ "$SS_SYNC_RC" -ne 0 ]; then
-      SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: WARNING .agents/skills refresh failed (skills-sync.py exit ${SS_SYNC_RC}; 124 means the 60 s timeout) — skills may be stale; the refresh re-runs next session."
-    fi
-  else
-    SKILLS_NOTICES="${SKILLS_NOTICES}\nsession-start: WARNING ${SS_SKILLS_SYNC} is missing — .agents/skills not refreshed (reinstall the plugin)."
-  fi
-fi
-
-# _bootstrap_copy <src> <dest> — provision a template file into the project,
-# copy-if-absent so user customizations survive. Creates the parent dir. NEVER
-# aborts the hook on a filesystem error (read-only dir, a path component that is
-# a regular file): the step warns and is skipped so session start still
-# completes and every other bootstrap step still runs (this handler is under
-# `set -euo pipefail`, where a bare `mkdir`/`cp` failure would abort everything).
-_bootstrap_copy() {
-  local src="$1" dest="$2"
-  [ -f "$src" ] || return 0
-  [ -e "$dest" ] && return 0        # preserve an existing user file/dir
-  [ -L "$dest" ] && return 0        # and a dangling symlink, which cp would follow out of the project
-  if ! mkdir -p "$(dirname "$dest")" 2>/dev/null; then
-    echo "session-start: WARNING could not create $(dirname "$dest") — skipping bootstrap of ${dest} (session continues)" >&2
-    return 0
-  fi
-  cp "$src" "$dest" 2>/dev/null || echo "session-start: WARNING could not copy ${dest} — skipping (session continues)" >&2
-  return 0
-}
-
-# _ss_is_3x_codex_hooks <file> — 0 when the file is byte-equal to the one 3.x
-# templates/.codex/hooks.json (sha256 below): Triforge's own copy of the
-# attribution hook that appended to ops/CHANGELOG.md and wrote
-# .claude/codex-changelog.* from every Codex session, inside lease worktrees
-# too. The grep is a cheap gate in front of the hash, which decides.
-SS_3X_CODEX_HOOKS_SHA256="9aece38547f04f98c9cd158538cb31e654c1fa3767de414afbab1bd50b8f140c"
-_ss_is_3x_codex_hooks() {
-  [ -f "$1" ] && [ ! -L "$1" ] || return 1
-  grep -qF 'codex-changelog' "$1" 2>/dev/null || return 1
-  [ "$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1" 2>/dev/null || true)" = "$SS_3X_CODEX_HOOKS_SHA256" ]
-}
-
-# _ss_dir_in_project <dir> — 0 when <dir> (a direct child of the project root,
-# the cwd) is absent, or a real directory, not a symlink, whose physical path
-# is inside the project. A .codex linked elsewhere (to ~/.codex, say) holds
-# another tier's files, which Triforge never writes.
-_ss_dir_in_project() {
-  local ROOT D
-  if [ -L "$1" ]; then return 1; fi
-  if [ ! -e "$1" ]; then return 0; fi
-  ROOT=$(pwd -P 2>/dev/null) || return 1
-  D=$(cd "$1" 2>/dev/null && pwd -P 2>/dev/null) || return 1
-  case "$D" in "${ROOT}/"*) return 0 ;; esac
-  return 1
-}
-
-# Bootstrap Codex project files (.codex/*), copy-if-absent so user
-# customizations survive: triforge-agents.toml = Triforge's agent declarations
-# (KTD5 — deployed OUTSIDE .codex/agents/, which Codex ≥ 0.147 sweeps as
-# per-agent role files and warns "Ignoring malformed agent role definition" on);
-# config.toml disables Codex's auto-memory
-# pipeline (conflict with ops/MEMORY.md); hooks.json ships with no hooks since
-# 4.0 (KTD9: the 3.x CHANGELOG attribution hook wrote ops/ from every Codex
-# session, lease workers included; attribution now comes from the ledger). See
-# templates/.codex/README.md and ops/decisions/2026-07-18-codex-hooks-under-exec.md.
-CODEX_MOVE_NOTICE=""
-CODEX_HOOK_NOTICE=""
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && ! _ss_dir_in_project ".codex"; then
-  # A .codex that is a symlink or resolves outside the project: nothing below
-  # writes through it (the move, the bootstrap copies, the 3.x replacement).
-  # Reading the hooks file to name the manual step is fine.
-  if _ss_is_3x_codex_hooks ".codex/hooks.json"; then
-    CODEX_HOOK_NOTICE="session-start: WARNING .codex/hooks.json is the unchanged 3.x copy, which writes ops/CHANGELOG.md from every Codex session, but .codex is a symlink or resolves outside this project, so it was NOT replaced (Triforge never writes outside the project) — if that file is yours to change, copy templates/.codex/hooks.json over it by hand."
-  else
-    CODEX_HOOK_NOTICE="session-start: .codex is a symlink or resolves outside this project, so Triforge's Codex files were not bootstrapped there (it never writes outside the project) — copy codex-agents/agents.toml to .codex/triforge-agents.toml and templates/.codex/config.toml by hand if you want them."
-  fi
-elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-  # One-time migration (KTD5): v3.2.0 deployed .codex/agents/agents.toml. Move it
-  # to the new name once — a user-modified file is moved, never deleted or
-  # overwritten — and drop the now-empty .codex/agents/ only when it IS empty
-  # (rmdir, never rm -rf). If both files exist the user resolves it by hand.
-  if [ -f ".codex/agents/agents.toml" ]; then
-    if [ ! -e ".codex/triforge-agents.toml" ]; then
-      if mv ".codex/agents/agents.toml" ".codex/triforge-agents.toml" 2>/dev/null; then
-        rmdir ".codex/agents" 2>/dev/null || true
-        CODEX_MOVE_NOTICE="session-start: moved .codex/agents/agents.toml to .codex/triforge-agents.toml (Codex sweeps .codex/agents/*.toml as per-agent role files and warned on it; the file content is unchanged)."
-      else
-        CODEX_MOVE_NOTICE="session-start: WARNING could not move .codex/agents/agents.toml to .codex/triforge-agents.toml — move it by hand (Codex warns on the old location)."
-      fi
-    else
-      CODEX_MOVE_NOTICE="session-start: both .codex/agents/agents.toml and .codex/triforge-agents.toml exist — merge and remove the old file by hand (Codex warns on .codex/agents/*.toml)."
-    fi
-  fi
-  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml"     ".codex/triforge-agents.toml"
-  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.codex/config.toml" ".codex/config.toml"
-  # One-time migration (KTD9): a .codex/hooks.json still byte-equal to the 3.x
-  # template (_ss_is_3x_codex_hooks) is replaced once by the 4.0 template. An
-  # edited copy is the user's and is left alone.
-  if [ -f "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json" ] && _ss_is_3x_codex_hooks ".codex/hooks.json"; then
-    if cp "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json" ".codex/hooks.json" 2>/dev/null; then
-      CODEX_HOOK_NOTICE="session-start: replaced .codex/hooks.json — the unchanged 3.x copy appended a line to ops/CHANGELOG.md from every Codex session, lease workers included; attribution now comes from the lease ledger."
-    else
-      CODEX_HOOK_NOTICE="session-start: WARNING could not replace the 3.x .codex/hooks.json, which writes ops/CHANGELOG.md from every Codex session — copy templates/.codex/hooks.json over it by hand."
-    fi
-  fi
-  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.codex/hooks.json"  ".codex/hooks.json"
-fi
-
-# Bootstrap OpenCode agent definitions (.opencode/agents/) + project config
-# (.opencode/opencode.json), copy-if-absent so user customizations survive.
-# Guarded on `command -v opencode` — the optional-CLI detection below records
-# presence/version; this only provisions the agent-def/config surface when the
-# binary is actually installed. invoke_opencode routes builder/reviewer via
-# `--agent <name>` from .opencode/agents/ (project tier) with the plugin's
-# opencode-agents/ as fallback. Reviewer read-only safety is the agent-def
-# permission map (edit/bash deny) plus the OPENCODE_PERMISSION deny rules
-# injected at dispatch (R7); the adapter stays off --auto (OC-06 — see
-# templates/.opencode/README.md).
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && command -v opencode >/dev/null 2>&1; then
-  if [ -d "${CLAUDE_PLUGIN_ROOT}/opencode-agents" ]; then
-    for f in "${CLAUDE_PLUGIN_ROOT}/opencode-agents"/*.md; do
-      [ -f "$f" ] || continue
-      _bootstrap_copy "$f" ".opencode/agents/$(basename "$f")"
-    done
-  fi
-  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.opencode/opencode.json" ".opencode/opencode.json"
-fi
-
-# Bootstrap Kimi Code project files (.kimi-code/), copy-if-absent so user
-# customizations survive. Guarded on `command -v kimi`. Kimi 0.42.0 reversed
-# KIMI-03 (D-024): `--agent <name>` / `--agent-file <path>` work in `-p`, so
-# roles ride as native agent definitions loaded with --agent-file from the
-# plugin's kimi-agents/ (R6; agent definitions are never deployed into
-# .agents/agents/ — KTD13). `--skills-dir` is no longer passed: .agents/skills/
-# is native and the flag REPLACES auto-discovery. The project
-# .kimi-code/config.toml is NOT read by the CLI (only ~/.kimi-code/config.toml
-# is) — the two files provisioned here are documentation of the intended
-# posture; the real headless confinement is the lease worktree + _adapter_env
-# KIMI_* allowlist + KIMI_DISABLE_TELEMETRY (see templates/.kimi-code/README.md).
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && command -v kimi >/dev/null 2>&1; then
-  for f in AGENTS.md config.toml; do
-    _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/.kimi-code/${f}" ".kimi-code/${f}"
-  done
-fi
-
-# The Cursor binary comes from the helper's own resolver, _cursor_bin (KTD3,
-# D-025 — `cursor-agent` first, else the first `agent` on PATH whose --version
-# matches Cursor's `YYYY.MM.DD-<hex>` format under a 15 s cap, fail-closed
-# without a timeout tool): the registry names it as cursor's resolver, so this
-# hook carries no re-implementation. Empty when the helper did not load or
-# nothing resolved.
-CURSOR_BIN=""
-if [ -n "$SS_HELPER" ]; then
-  # Run in this shell, not a $(...): the TRIFORGE_CURSOR_BIN export a hit leaves
-  # behind makes the detection loop's resolver call below a lookup, not a probe.
-  if _cursor_bin >/dev/null 2>&1; then CURSOR_BIN="$TRIFORGE_CURSOR_BIN"; fi
-fi
-
-# Bootstrap Cursor CLI project files, copy-if-absent so user customizations
-# survive. Guarded on the resolver above (binary `agent` primary, `cursor-agent`
-# legacy per the 2026.09.10 install script). Cursor still has NO headless
-# --agent selector, so roles ride as prompt-prefix injection from the plugin's
-# cursor-agents/ briefs (invoke_cursor + the lease_dispatch cursor case both
-# inject); the .cursor/agents/ copies are delegation targets + documentation,
-# and .cursor/README.md records the --trust-required / grok-4.6-pinned-never-
-# Auto / CUR-06 headless-hooks-dead / CUR-07 --sandbox-doesn't-confine /
-# CUR-08 --mode-plan-is-read-only facts. Shipped default cursor-grok-4.6-xhigh:
-# effort is a model-id SUFFIX (-low|-medium|-high|-xhigh) composed at dispatch
-# from the roster effort (KTD3), never the bracket form (CUR-10 rejected it).
-# No afterFileEdit attribution hook is shipped (CUR-06 FAIL); builder
-# attribution is lead-side from the lease ledger. Version capture is handled by
-# the optional-CLI detection block below (--version -> .claude/
-# roster-detected.local.md, plus the resolved cursor_bin), since Cursor has no
-# published semver.
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -n "$CURSOR_BIN" ]; then
-  if [ -d "${CLAUDE_PLUGIN_ROOT}/cursor-agents" ]; then
-    for f in "${CLAUDE_PLUGIN_ROOT}/cursor-agents"/*.md; do
-      [ -f "$f" ] || continue
-      case "$(basename "$f")" in README.md) continue ;; esac
-      _bootstrap_copy "$f" ".cursor/agents/$(basename "$f")"
-    done
-  fi
-  if [ -d "${CLAUDE_PLUGIN_ROOT}/templates/.cursor" ]; then
-    for f in "${CLAUDE_PLUGIN_ROOT}/templates/.cursor"/*; do
-      [ -f "$f" ] || continue
-      _bootstrap_copy "$f" ".cursor/$(basename "$f")"
-    done
-  fi
-fi
-
-# Bootstrap ops/roster.toml — existence-guarded, deliberately OUTSIDE the
-# ops-dir bootstrap above so upgraded v2.x projects (which already have ops/)
-# still receive it. A user's existing roster is never overwritten. The watch
-# registry is NOT bootstrapped: /cli-watch + /repo-watch are repo-local
-# maintainer tooling in the agent-triforge checkout, not plugin features.
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-  _bootstrap_copy "${CLAUDE_PLUGIN_ROOT}/templates/ops/roster.toml" "ops/roster.toml"
+# Bootstrap (KTD11, R37): the ops/ skeleton, the .agents/skills refresh, the
+# Antigravity agent pack, the per-CLI files and the plugin-root pointer are
+# triforge_bootstrap's (scripts/lib/bootstrap.sh), the same helper at-setup,
+# at-build and at-review call, so a project whose hooks never ran (a Codex
+# lead before the user trusts them) is set up the same way. It runs first,
+# so the state checks below see what it wrote, and in this shell: a Cursor
+# binary its _cursor_bin call resolves stays exported (TRIFORGE_CURSOR_BIN),
+# so the detection loop below looks it up instead of probing again. Its
+# notices, one per line on stderr with this hook's "session-start: " prefix,
+# are collected in SS_BOOT_LOG and printed with the migration notices; its
+# rc (0, or 80 when a step degraded) adds nothing the notices do not say.
+# Without the helper nothing is bootstrapped, and SS_HELPER_NOTICE says so.
+SS_BOOT_LOG=""
+if [ -n "$SS_HELPER" ] && [ -z "$SS_AT_HOME" ]; then
+  SS_BOOT_LOG="${SS_HELPER_TMP}/bootstrap"
+  triforge_bootstrap --prefix "session-start: " 2> "$SS_BOOT_LOG" || true
 fi
 
 # Optional-CLI detection (roster tier): presence + version for every optional
@@ -458,20 +227,20 @@ fi
 # _cursor_bin, since the binary that answered may be an `agent`, not the name).
 # [ -t 0 ] at hook time is best-effort — hooks often run with stdin piped —
 # documented as such; the enrollment branch treats "no" as headless and enrolls
-# shipped defaults silently. With no helper loaded nothing is detected, and
-# SS_HELPER_NOTICE says so — whether the loader failed or CLAUDE_PLUGIN_ROOT
-# named no loader at all (unset, or a root without scripts/invoke-external.sh).
+# shipped defaults silently. With no helper loaded nothing is detected, no
+# file is written, and SS_HELPER_NOTICE says so — whether the loader failed or
+# CLAUDE_PLUGIN_ROOT named no loader at all (unset, or a root without
+# scripts/invoke-external.sh). The content is built here and written once,
+# through the helper's _tb_write: an exclusive temp file renamed into place,
+# refused when .claude is a symlink or a file, so neither a link planted at a
+# temp name nor a linked .claude can redirect the write.
 ROSTER_DETECTED=".claude/roster-detected.local.md"
+ROSTER_DETECTED_NOTICE=""
 OPTIONAL_DETECTED_COUNT=0
 DETECTED_OPTIONAL=()
 if [ -t 0 ]; then INTERACTIVE_SIGNAL="yes"; else INTERACTIVE_SIGNAL="no"; fi
-# Written to a temp file and moved into place (like the two stamps): a bare
-# redirect would follow a repo-shipped symlink at .claude/roster-detected.local.md.
-ROSTER_DETECTED_TMP="${ROSTER_DETECTED}.tmp.$$"
-{
-  echo "<!-- runtime state: optional roster CLI detection, regenerated each session start -->"
-  echo "interactive=${INTERACTIVE_SIGNAL}"
-} > "$ROSTER_DETECTED_TMP"
+SS_DETECTED="<!-- runtime state: optional roster CLI detection, regenerated each session start -->
+interactive=${INTERACTIVE_SIGNAL}"
 SS_OPTIONAL_ROWS=""
 if [ -n "$SS_HELPER" ]; then
   SS_OPTIONAL_ROWS=$(cli_table optional binary resolver 2>/dev/null || true)
@@ -496,9 +265,11 @@ while IFS=$'\t' read -r -u 3 CLI_NAME CLI_BIN CLI_RESOLVER; do
       [ -z "$CLI_VERSION" ] && CLI_VERSION=$("$CLI_BIN" -V 2>/dev/null | head -1 || true)
     fi
     [ -z "$CLI_VERSION" ] && CLI_VERSION="unknown"
-    echo "${CLI_NAME}|${CLI_VERSION}|$(date +%Y-%m-%d)" >> "$ROSTER_DETECTED_TMP"
+    SS_DETECTED="${SS_DETECTED}
+${CLI_NAME}|${CLI_VERSION}|$(date +%Y-%m-%d)"
     if [ -n "$CLI_RESOLVER" ]; then
-      echo "${CLI_NAME}_bin=${CLI_BIN}" >> "$ROSTER_DETECTED_TMP"
+      SS_DETECTED="${SS_DETECTED}
+${CLI_NAME}_bin=${CLI_BIN}"
     fi
     OPTIONAL_DETECTED_COUNT=$((OPTIONAL_DETECTED_COUNT + 1))
     DETECTED_OPTIONAL+=("$CLI_NAME")
@@ -506,7 +277,15 @@ while IFS=$'\t' read -r -u 3 CLI_NAME CLI_BIN CLI_RESOLVER; do
 done 3<<SS_OPTIONAL_EOF
 ${SS_OPTIONAL_ROWS}
 SS_OPTIONAL_EOF
-mv -f "$ROSTER_DETECTED_TMP" "$ROSTER_DETECTED" 2>/dev/null || rm -f "$ROSTER_DETECTED_TMP" 2>/dev/null || true
+if [ -n "$SS_HELPER" ] && [ -z "$SS_AT_HOME" ]; then
+  SS_W_RC=0
+  printf '%s\n' "$SS_DETECTED" | _tb_write replace . "$ROSTER_DETECTED" > /dev/null || SS_W_RC=$?
+  if [ "$SS_W_RC" -eq 3 ]; then
+    # .claude, the file's only directory, is a symlink or a file. A standing
+    # state (it repeats until fixed), so no "session-start:" prefix.
+    ROSTER_DETECTED_NOTICE="WARNING: ${ROSTER_DETECTED} not written: .claude is a symlink or not a directory, so the file would land outside this project, and the hook writes only inside it."
+  fi
+fi
 
 # First-detection enrollment trigger (R37). For each optional CLI detected THIS
 # session with no [members.<cli>] entry yet:
@@ -517,17 +296,26 @@ mv -f "$ROSTER_DETECTED_TMP" "$ROSTER_DETECTED" 2>/dev/null || rm -f "$ROSTER_DE
 # the helper sourced above — never a hand-rolled write here. Fast: headless
 # enrollment does no live auth probe; each helper call is tomllib-only.
 ENROLLMENT_NOTICES=""
-if [ -n "$SS_HELPER" ] && [ "${#DETECTED_OPTIONAL[@]}" -gt 0 ]; then
+if [ -n "$SS_HELPER" ] && [ -z "$SS_AT_HOME" ] && [ "${#DETECTED_OPTIONAL[@]}" -gt 0 ]; then
   for CLI_NAME in "${DETECTED_OPTIONAL[@]}"; do
     ENROLL_HAS_RC=0
     roster_has_member "$CLI_NAME" || ENROLL_HAS_RC=$?
     [ "$ENROLL_HAS_RC" -eq 0 ] && continue   # already enrolled or declined — never re-ask (AE6)
     [ "$ENROLL_HAS_RC" -eq 2 ] && continue   # roster unparseable — leave it to resolve_role to surface loudly
     if [ "$INTERACTIVE_SIGNAL" = "no" ]; then
-      roster_enroll_member "$CLI_NAME" headless >/dev/null 2>&1 || true
+      # A refused or failed write (rc 6: ops/ or the roster is a symlink or not
+      # a regular file; rc 45: this shell may not write the roster) gets one
+      # standing line naming the refusal, its first line sanitized (G6); rc 30
+      # is OpenCode V2, which is never enrolled and says so in at-setup.
+      ENROLL_RC=0
+      ENROLL_ERR=$(roster_enroll_member "$CLI_NAME" headless 2>&1 >/dev/null) || ENROLL_RC=$?
+      if [ "$ENROLL_RC" -ne 0 ] && [ "$ENROLL_RC" -ne 30 ]; then
+        ENROLL_ERR=$(printf '%s\n' "$ENROLL_ERR" | grep -v '^[[:space:]]*$' | head -1 | cut -c1-300 || true)
+        ENROLLMENT_NOTICES="${ENROLLMENT_NOTICES}${SS_NL}$(_ss_prose "WARNING: ${CLI_NAME} was detected but not enrolled (rc ${ENROLL_RC}): ${ENROLL_ERR:-no reason given}")"
+      fi
     else
       ENROLL_DEF=$(roster_member_default "$CLI_NAME" 2>/dev/null || true)
-      ENROLLMENT_NOTICES="${ENROLLMENT_NOTICES}\nNew optional CLI detected: ${CLI_NAME} (unenrolled). Run /at-setup to enroll, or it enrolls with its shipped default (${ENROLL_DEF}) on first headless use."
+      ENROLLMENT_NOTICES="${ENROLLMENT_NOTICES}${SS_NL}$(_ss_prose "New optional CLI detected: ${CLI_NAME} (unenrolled). Run /at-setup to enroll, or it enrolls with its shipped default (${ENROLL_DEF}) on first headless use.")"
     fi
   done
 fi
@@ -539,6 +327,7 @@ ENROLLED_COUNT=0
 if [ -f "ops/roster.toml" ]; then
   ENROLLED_COUNT=$(python3 -c "
 import sys
+${SS_READ_PY}
 try:
     import tomllib
 except ImportError:
@@ -547,14 +336,14 @@ except ImportError:
     except ImportError:
         print(0); sys.exit(0)
 try:
-    with open('ops/roster.toml', 'rb') as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular('ops/roster.toml').decode('utf-8'))
     members = data.get('members', {})
     print(sum(1 for v in members.values() if isinstance(v, dict)) if isinstance(members, dict) else 0)
 except Exception:
     print(0)
 " 2>/dev/null || echo 0)
 fi
+case "$ENROLLED_COUNT" in ''|*[!0-9]*) ENROLLED_COUNT=0 ;; esac   # a count, nothing else, reaches the orientation
 
 # Roster pin drift (informational): persisted [members.*].model / [roles.*].model
 # values that differ from the shipped defaults. An upgraded project keeps
@@ -572,7 +361,7 @@ fi
 # the helper.
 ROSTER_DRIFT_NOTICES=""
 if [ -n "$SS_HELPER" ] && [ -f "ops/roster.toml" ]; then
-  ROSTER_DRIFT_NOTICES=$(TRIFORGE_CLIS_PY="${_TRIFORGE_CLIS_PY:-}" TRIFORGE_ROLE_DEFAULTS_PY="${_ROLE_DEFAULTS_PY:-}" python3 -c '
+  ROSTER_DRIFT_NOTICES=$(TRIFORGE_CLIS_PY="${_TRIFORGE_CLIS_PY:-}" TRIFORGE_ROLE_DEFAULTS_PY="${_ROLE_DEFAULTS_PY:-}" python3 -c "$SS_READ_PY"'
 import os, re, sys
 try:
     import tomllib
@@ -592,9 +381,12 @@ def norm(cli, model):
     if cli == "cursor":
         return re.sub(r"-(low|medium|high|xhigh)$", "", model)
     return model
+# a value read from the roster, as one line (B8): a TOML string may hold a
+# newline, and the hook prints every line it gets
+def one(value):
+    return re.sub(r"[\x00-\x1f\x7f]", "", str(value))[:200]
 try:
-    with open("ops/roster.toml", "rb") as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular("ops/roster.toml").decode("utf-8"))
     lines = []
     members = data.get("members", {})
     if isinstance(members, dict):
@@ -604,7 +396,7 @@ try:
                 continue
             model = str(entry.get("model", "") or "")
             if model and norm(name, model) != norm(name, SHIPPED[name]):
-                lines.append("Roster pin differs from the shipped default: members.%s.model=%s (shipped: %s) — run /at-setup to re-enroll, or edit ops/roster.toml" % (name, model, SHIPPED[name]))
+                lines.append("Roster pin differs from the shipped default: members.%s.model=%s (shipped: %s) — run /at-setup to re-enroll, or edit ops/roster.toml" % (one(name), one(model), one(SHIPPED[name])))
     roles = data.get("roles", {})
     if isinstance(roles, dict):
         for name in sorted(roles):
@@ -615,7 +407,7 @@ try:
             model = str(entry.get("model", "") or "")
             shipped = SHIPPED.get(cli)
             if model and shipped is not None and norm(cli, model) != norm(cli, shipped):
-                lines.append("Roster pin differs from the shipped default: roles.%s.model=%s (shipped: %s) — run /at-setup roles to re-default" % (name, model, shipped))
+                lines.append("Roster pin differs from the shipped default: roles.%s.model=%s (shipped: %s) — run /at-setup roles to re-default" % (one(name), one(model), one(shipped)))
     for line in lines:
         print(line)
 except Exception:
@@ -643,6 +435,9 @@ fi
 # file: each line names the edit and leaves it to the user.
 CLAUDE_FLOOR="2.1.277"
 INSTRUCTION_NOTICES=""
+# These notices are about the directory the session started in (see the
+# anchor at the top); the hook goes back to the anchor after the tip below.
+cd "$SS_START_DIR" 2>/dev/null || true
 # The instruction files Claude Code reads in a directory, and this project's
 # physical path (/tmp and /var are symlinks on macOS).
 SS_INSTRUCTION_FILES="CLAUDE.md .claude/CLAUDE.md CLAUDE.local.md"
@@ -662,22 +457,24 @@ SS_XYZ_EOF
   echo $(( 10#$A * 1000000000000 + 10#$B * 1000000 + 10#$C ))
 }
 
-# _ss_bounded <seconds> <command…> — the command's stdout, the command given
-# up on after <seconds>: under the timeout binary when there is one, and on a
-# host without one (stock macOS) under a watchdog — the command runs in the
-# background, a second background subshell kills it when the time is up, and
-# the watchdog is killed as soon as the command returns. The answer travels
-# through a temp file and the watchdog's stdio is /dev/null, so nothing a
-# killed command leaves running holds the caller's command substitution open;
-# each `wait` swallows bash's "Terminated" line.
+# _ss_bounded <seconds> <dir> <command…> — the command's stdout, the command
+# given up on after <seconds>: under the timeout binary when there is one, and
+# on a host without one (stock macOS) under a watchdog — the command runs in
+# the background, a second background subshell kills it when the time is up,
+# and the watchdog is killed as soon as the command returns. The answer
+# travels through a file in <dir>, a private temp dir the caller made
+# (_ss_private_tmp: never one other users can rename entries in, B5, G2) and
+# this removes; the watchdog's stdio is /dev/null, so nothing a killed command
+# leaves running holds the caller's command substitution open; each `wait`
+# swallows bash's "Terminated" line.
 _ss_bounded() {
-  local SECS="$1" OUT CMD_PID DOG_PID
-  shift
+  local SECS="$1" OUT_DIR="$2" OUT CMD_PID DOG_PID
+  shift 2
   if [ -n "$TIMEOUT_BIN" ]; then
     "$TIMEOUT_BIN" "${SECS}s" "$@" 2>/dev/null || true
     return 0
   fi
-  OUT=$(mktemp "${TMPDIR:-/tmp}/triforge-session-start.XXXXXX" 2>/dev/null) || return 0
+  OUT="${OUT_DIR}/out"
   "$@" </dev/null >"$OUT" 2>/dev/null &
   CMD_PID=$!
   ( sleep "$SECS"; kill "$CMD_PID" ) </dev/null >/dev/null 2>&1 &
@@ -686,16 +483,24 @@ _ss_bounded() {
   kill "$DOG_PID" 2>/dev/null || true
   wait "$DOG_PID" 2>/dev/null || true
   cat "$OUT" 2>/dev/null || true
-  rm -f "$OUT"
+  rm -rf "$OUT_DIR"
 }
 
 # Floor. The answer is read with a 10 s bound, timeout binary or not — a hung
 # `claude` must not stall session start. A missing `claude`, one that does not
 # answer in time, or an answer with no X.Y.Z in it warns about nothing.
 if command -v claude >/dev/null 2>&1; then
-  SS_CLAUDE_XYZ=$(_ss_xyz "$(_ss_bounded 10 claude --version | head -1 || true)")
+  SS_CLAUDE_XYZ=""
+  SS_BOUND_DIR=""
+  if [ -n "$TIMEOUT_BIN" ] || SS_BOUND_DIR=$(_ss_private_tmp); then
+    SS_CLAUDE_XYZ=$(_ss_xyz "$(_ss_bounded 10 "$SS_BOUND_DIR" claude --version | head -1 || true)")
+  else
+    # no timeout binary and no private temp dir for the watchdog's answer
+    # (G2): the check is skipped, and the line says why
+    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}$(_ss_prose "WARNING: the Claude Code version check was skipped (${SS_BOUND_DIR}).")"
+  fi
   if [ -n "$SS_CLAUDE_XYZ" ] && [ "$(_ss_xyz_key "$SS_CLAUDE_XYZ")" -lt "$(_ss_xyz_key "$CLAUDE_FLOOR")" ]; then
-    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}\nWARNING: Claude Code ${SS_CLAUDE_XYZ} is below Triforge's floor ${CLAUDE_FLOOR}, the first build that reads AGENTS.md — Triforge's only instruction file, which older builds do not read. Update Claude Code (\`claude update\`)."
+    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}WARNING: Claude Code ${SS_CLAUDE_XYZ} is below Triforge's floor ${CLAUDE_FLOOR}, the first build that reads AGENTS.md — Triforge's only instruction file, which older builds do not read. Update Claude Code (\`claude update\`)."
   fi
 fi
 
@@ -779,29 +584,16 @@ done
 for SS_FILE in CLAUDE.md .claude/CLAUDE.md; do
   if _ss_is_3x_template "$SS_FILE" && ! _ss_imports_agents "$SS_FILE"; then
     _ss_import_line "$SS_FILE" ""
-    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}\nWARNING: ${SS_FILE} is a Triforge 3.x project template (a copy of the retired templates/CLAUDE.md). Triforge 4 ships AGENTS.md only, and Claude Code does not read AGENTS.md while this file exists without importing it. Add the line ${SS_IMPORT} to it, or replace its Triforge content with the pointer block in the plugin's templates/AGENTS.md — session start never edits this file."
+    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}WARNING: ${SS_FILE} is a Triforge 3.x project template (a copy of the retired templates/CLAUDE.md). Triforge 4 ships AGENTS.md only, and Claude Code does not read AGENTS.md while this file exists without importing it. Add the line ${SS_IMPORT} to it, or replace its Triforge content with the pointer block in the plugin's templates/AGENTS.md — session start never edits this file."
   fi
 done
 
 # Above the project: every parent up to /. $HOME/.claude/CLAUDE.md is the
-# user-tier file and is skipped (both paths compared physically). One import
+# user-tier file and is skipped (compared by identity, test -ef). One import
 # of the project's AGENTS.md anywhere in the chain, the project's own files
 # included, loads it, so it silences every line here.
 SS_ABOVE_NOTICES=""
 
-# _ss_prose <path> — the path as it may appear in MSG: control characters
-# dropped and backslashes doubled (MSG is expanded by printf %b, and no stdout
-# line may start with `{` — a newline in a directory name must not make one).
-_ss_prose() {
-  local TEXT
-  TEXT=$(printf '%s' "$1" | LC_ALL=C tr -d '\000-\037\177')
-  printf '%s' "${TEXT//\\/\\\\}"
-}
-
-SS_HOME_REAL=""
-if [ -n "${HOME:-}" ] && [ -d "${HOME}" ]; then
-  SS_HOME_REAL=$(cd "$HOME" 2>/dev/null && pwd -P || true)
-fi
 case "$SS_PROJECT" in
   /*)
     SS_DIR="$SS_PROJECT"
@@ -812,10 +604,11 @@ case "$SS_PROJECT" in
       for SS_NAME in $SS_INSTRUCTION_FILES; do
         SS_FILE="${SS_DIR%/}/${SS_NAME}"
         [ -f "$SS_FILE" ] || continue
-        if [ -n "$SS_HOME_REAL" ] && [ "$SS_FILE" = "${SS_HOME_REAL%/}/.claude/CLAUDE.md" ]; then continue; fi
+        # the user-tier file, by identity (test -ef), whatever the spelling
+        if [ -n "${HOME:-}" ] && [ "$SS_FILE" -ef "${HOME%/}/.claude/CLAUDE.md" ]; then continue; fi
         if _ss_imports_agents "$SS_FILE"; then SS_CHAIN_IMPORTS="yes"; fi
         _ss_import_line "$SS_NAME" "${SS_REL}/"
-        SS_ABOVE_NOTICES="${SS_ABOVE_NOTICES}\nWARNING: AGENTS.md is not loaded under a Claude lead: $(_ss_prose "$SS_FILE") sits above this project, and Claude Code reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working directory or above it. Add the line $(_ss_prose "$SS_IMPORT") to that file (an import path is relative to the file that holds it), or remove the file."
+        SS_ABOVE_NOTICES="${SS_ABOVE_NOTICES}${SS_NL}WARNING: AGENTS.md is not loaded under a Claude lead: $(_ss_prose "$SS_FILE") sits above this project, and Claude Code reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working directory or above it. Add the line $(_ss_prose "$SS_IMPORT") to that file (an import path is relative to the file that holds it), or remove the file."
       done
     done
     ;;
@@ -829,8 +622,9 @@ fi
 # exists; session start does not create it.
 AGENTS_MD_TIP=""
 if [ ! -e "AGENTS.md" ] && [ ! -L "AGENTS.md" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/AGENTS.md" ]; then
-  AGENTS_MD_TIP="\nTip: No AGENTS.md in this project. Triforge's pointer block (the short section that tells every agent this project runs the framework) ships as the plugin's templates/AGENTS.md. Copy it: cp \"$(_ss_prose "$CLAUDE_PLUGIN_ROOT")/templates/AGENTS.md\" ./AGENTS.md"
+  AGENTS_MD_TIP="${SS_NL}Tip: No AGENTS.md in this project. Triforge's pointer block (the short section that tells every agent this project runs the framework) ships as the plugin's templates/AGENTS.md. Copy it: cp \"$(_ss_prose "$CLAUDE_PLUGIN_ROOT")/templates/AGENTS.md\" ./AGENTS.md"
 fi
+cd "$SS_ANCHOR" 2>/dev/null || true   # back to the anchor (see the top): ops/ and the rest live there
 
 # Check for existing state
 HAS_STATE=""
@@ -876,28 +670,38 @@ SOLUTION_COUNT=$(find ops/solutions -name "*.md" 2>/dev/null | wc -l | tr -d ' '
 # Build orientation message
 MSG=""
 
+# Where ops/ is (Phase 3 round 3, R7): a session started below the project
+# root reads ops/ from the root, and the lead's own cwd-relative reads would
+# miss it, so the root is named once.
+if [ "$SS_START_DIR" != "$SS_ANCHOR" ]; then
+  MSG="${MSG}${SS_NL}Project root: $(_ss_prose "$SS_ANCHOR") (ops/ lives there; this session started in $(_ss_prose "$SS_START_DIR"))."
+fi
+if [ -n "$SS_AT_HOME" ]; then
+  MSG="${MSG}${SS_NL}WARNING: this session's project directory, $(_ss_prose "$SS_ANCHOR"), is your home directory or contains it, so Triforge set nothing up and wrote nothing there: the project files would be each CLI's user-tier config. Start the session in a project directory; when your home directory is itself a git repository (a dotfiles repo), run git init in the project first, so the project is its own repository."
+fi
+
 if [ "$HAS_STATE" = "yes" ]; then
-  MSG="$MSG\nPrevious session state found (ops/STATE.md). Use /at-resume to continue."
+  MSG="${MSG}${SS_NL}Previous session state found (ops/STATE.md). Use /at-resume to continue."
 fi
 
 if [ "$HAS_TASKS" = "yes" ]; then
-  MSG="$MSG\nActive sprint found (ops/TASKS.md): $PENDING_COUNT pending, $IN_PROGRESS_COUNT in progress, $BLOCKED_COUNT blocked."
+  MSG="${MSG}${SS_NL}Active sprint found (ops/TASKS.md): $PENDING_COUNT pending, $IN_PROGRESS_COUNT in progress, $BLOCKED_COUNT blocked."
 fi
 
 if [ "$HAS_GOALS" = "yes" ]; then
-  MSG="$MSG\nProject goals found (ops/GOALS.md)."
+  MSG="${MSG}${SS_NL}Project goals found (ops/GOALS.md)."
 fi
 
 if [ "$HAS_AGENTS" = "yes" ]; then
-  MSG="$MSG\nAgent protocol found (ops/AGENTS.md)."
+  MSG="${MSG}${SS_NL}Agent protocol found (ops/AGENTS.md)."
 fi
 
 if [ "$HAS_REVIEWS" = "yes" ]; then
-  MSG="$MSG\nUnprocessed review files found. Consider running /at-review to process them."
+  MSG="${MSG}${SS_NL}Unprocessed review files found. Consider running /at-review to process them."
 fi
 
 if [ "$SOLUTION_COUNT" -gt "0" ]; then
-  MSG="$MSG\nInstitutional knowledge: $SOLUTION_COUNT documented solutions in ops/solutions/."
+  MSG="${MSG}${SS_NL}Institutional knowledge: $SOLUTION_COUNT documented solutions in ops/solutions/."
 fi
 
 # Check for external agent definitions
@@ -946,30 +750,52 @@ if [ "$HAS_ANTIGRAVITY_AGENTS" = "yes" ] || [ "$HAS_CODEX_AGENTS" = "yes" ]; the
   AGENT_PARTS=""
   [ "$HAS_ANTIGRAVITY_AGENTS" = "yes" ] && AGENT_PARTS="${ANTIGRAVITY_AGENT_COUNT} Antigravity"
   [ "$HAS_CODEX_AGENTS" = "yes" ] && AGENT_PARTS="${AGENT_PARTS:+${AGENT_PARTS} + }${CODEX_AGENT_COUNT} Codex"
-  MSG="$MSG\nExternal agent definitions loaded: ${AGENT_PARTS}."
+  MSG="${MSG}${SS_NL}External agent definitions loaded: ${AGENT_PARTS}."
 fi
 
 # Roster orientation (KTD-2): optional members detected this session, and how
 # many carry [members.*] enrollment entries in ops/roster.toml.
-MSG="$MSG\nRoster: core trio + ${OPTIONAL_DETECTED_COUNT} optional member(s) detected (${ENROLLED_COUNT} enrolled)."
+MSG="${MSG}${SS_NL}Roster: core trio + ${OPTIONAL_DETECTED_COUNT} optional member(s) detected (${ENROLLED_COUNT} enrolled)."
 MSG="$MSG${ENROLLMENT_NOTICES:-}"
+# The pin lines carry model values read from the roster (B8): each line is
+# made one line again and keeps its fixed prose start ("Roster pin differs");
+# a line without it (the tail of a value the python split) gets "Roster: ".
 if [ -n "$ROSTER_DRIFT_NOTICES" ]; then
-  MSG="$MSG\n${ROSTER_DRIFT_NOTICES}"
+  while IFS= read -r SS_LINE; do
+    [ -n "$SS_LINE" ] || continue
+    case "$SS_LINE" in
+      "Roster pin differs from the shipped default: "*) ;;
+      *) SS_LINE="Roster: ${SS_LINE}" ;;
+    esac
+    MSG="${MSG}${SS_NL}$(_ss_prose "$SS_LINE")"
+  done <<SS_DRIFT_EOF
+${ROSTER_DRIFT_NOTICES}
+SS_DRIFT_EOF
 fi
 if [ -n "$SS_HELPER_NOTICE" ]; then
-  MSG="$MSG\n${SS_HELPER_NOTICE}"
+  MSG="${MSG}${SS_NL}$(_ss_prose "$SS_HELPER_NOTICE")"
+fi
+if [ -n "$ROSTER_DETECTED_NOTICE" ]; then
+  MSG="${MSG}${SS_NL}${ROSTER_DETECTED_NOTICE}"
 fi
 
-# Migration notices (one per step that acted this session; silent otherwise).
-MSG="$MSG${SKILLS_NOTICES:-}"
-if [ -n "$AGY_PACK_NOTICE" ]; then
-  MSG="$MSG\n${AGY_PACK_NOTICE}"
-fi
-if [ -n "$CODEX_MOVE_NOTICE" ]; then
-  MSG="$MSG\n${CODEX_MOVE_NOTICE}"
-fi
-if [ -n "$CODEX_HOOK_NOTICE" ]; then
-  MSG="$MSG\n${CODEX_HOOK_NOTICE}"
+# Migration notices: triforge_bootstrap's, in the order it printed them (one
+# per step that acted this session, silent otherwise; a state it left alone on
+# purpose repeats until fixed). Every captured line is sanitized on its own
+# (Phase 3 round 3, R5): _ss_prose drops control characters (and the message
+# is printed with %s, which interprets nothing), and a line that does not
+# carry this hook's "session-start: " prefix (a refusal from a lead-only
+# check, or the tail of a message some name split) gets the fixed prose
+# prefix "Bootstrap: ", so no stdout line can start with "{".
+if [ -n "$SS_BOOT_LOG" ] && [ -s "$SS_BOOT_LOG" ]; then
+  while IFS= read -r SS_LINE; do
+    [ -n "$SS_LINE" ] || continue
+    case "$SS_LINE" in
+      "session-start: "*) ;;
+      *) SS_LINE="Bootstrap: ${SS_LINE}" ;;
+    esac
+    MSG="${MSG}${SS_NL}$(_ss_prose "$SS_LINE")"
+  done < "$SS_BOOT_LOG"
 fi
 
 # Upgrade notices (R40): standing states, repeated every session until fixed.
@@ -983,6 +809,7 @@ ACTIVE_LEASES=0
 if [ -f "ops/leases.toml" ]; then
   ACTIVE_LEASES=$(python3 -c "
 import sys
+${SS_READ_PY}
 try:
     import tomllib
 except ImportError:
@@ -992,8 +819,7 @@ except ImportError:
         print(0)
         sys.exit(0)
 try:
-    with open('ops/leases.toml', 'rb') as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular('ops/leases.toml').decode('utf-8'))
     leases = data.get('lease', {})
     active = ('building', 'leased', 'orphaned')
     print(sum(1 for v in (leases.values() if isinstance(leases, dict) else [])
@@ -1003,41 +829,71 @@ except Exception:
 " 2>/dev/null || echo 0)
 fi
 if [ "${ACTIVE_LEASES:-0}" -gt 0 ] 2>/dev/null; then
-  MSG="$MSG\nLease ledger: ${ACTIVE_LEASES} active lease(s) from a previous session — run lease_heartbeat_check (or /at-resume) to reclaim orphans."
+  MSG="${MSG}${SS_NL}Lease ledger: ${ACTIVE_LEASES} active lease(s) from a previous session — run lease_heartbeat_check (or /at-resume) to reclaim orphans."
 fi
 
 if [ "$HAS_TASKS" != "yes" ] && [ "$HAS_STATE" != "yes" ]; then
-  MSG="$MSG\nNo active sprint. Use /at-plan <goal> to start or /at-ship <goal> for full autonomous mode."
+  MSG="${MSG}${SS_NL}No active sprint. Use /at-plan <goal> to start or /at-ship <goal> for full autonomous mode."
 fi
 
 # Append timeout-missing warning if set
 if [ -n "${TIMEOUT_MISSING_WARNING}" ]; then
-  MSG="$MSG\n${TIMEOUT_MISSING_WARNING}"
+  MSG="${MSG}${SS_NL}${TIMEOUT_MISSING_WARNING}"
 fi
 
 # Append the pointer-block tip if set
 MSG="$MSG${AGENTS_MD_TIP:-}"
 
-printf '%b\n' "Multi-agent framework ready.$MSG"
+printf '%s\n' "Multi-agent framework ready.${MSG}"
 echo ""
-echo 'Lead workflows (/at-<name> here, $at-<name> in a Codex prompt): at-setup at-ship at-plan at-build at-review at-test at-debug at-quick at-deep-research at-analyze at-coordinate at-resolve-pr at-status at-pause at-resume at-wrap at-compound'
+echo 'Lead workflows (/at-<name> here, $agent-triforge:at-<name> in a Codex prompt): at-setup at-ship at-plan at-build at-review at-test at-debug at-quick at-deep-research at-analyze at-coordinate at-resolve-pr at-status at-pause at-resume at-wrap at-compound'
 
 exit 0
+}
+
+# _ss_private_tmp — print a private temp dir (mktemp -d: a random name, mode
+# 0700) under TMPDIR when no other user can rename entries in it (_ss_tmp_ok,
+# B5), else under the project's own .claude (at the anchor, wherever the hook
+# stands) when no other user can rename entries there either
+# (_ss_claude_private, G2); .claude is created here, without group or other
+# write, when it is missing. On failure, a nonzero rc and one line saying why (or
+# mktemp's error): the caller skips the step that needed the temp dir and
+# shows that line in its notice.
+_ss_private_tmp() {
+  local T="${TMPDIR:-/tmp}"
+  if _ss_tmp_ok "$T" && mktemp -d "${T}/triforge-session-start.XXXXXX" 2>/dev/null; then
+    return 0
+  fi
+  if [ -n "$SS_AT_HOME" ]; then
+    echo "no private temp dir: TMPDIR ${T} is shared, and a home directory's .claude is never used"
+    return 1   # never under a home directory's .claude (R1)
+  fi
+  if [ ! -e "${SS_ANCHOR}/.claude" ] && [ ! -L "${SS_ANCHOR}/.claude" ]; then
+    # the user's umask, with group and other write taken off it
+    ( umask "$(printf '%04o' $(( 8#$(umask) | 8#022 )))" && mkdir "${SS_ANCHOR}/.claude" ) 2>/dev/null || true
+  fi
+  if ! _ss_claude_private; then
+    echo "no private temp dir: TMPDIR ${T} is shared (another user could rename entries in it), and so is ${SS_ANCHOR}/.claude or the project directory (a symlink, another user's, or group or other writable without the sticky bit)"
+    return 1
+  fi
+  mktemp -d "${SS_ANCHOR}/.claude/triforge-session-start.XXXXXX" 2>&1
 }
 
 # The helper (scripts/invoke-external.sh) — sourced ONCE, in the subshell that
 # then runs _ss_run, so the hook reads the CLI registry (scripts/lib/registry.sh,
 # KTD7) for the optional members, their binaries and shipped models, and the
-# roster helpers for enrollment, instead of carrying copies. Degraded, never
-# fatal: a loader that `exit`s rather than `return`s, or trips set -u, ends only
-# that subshell. Its stdout and stderr land in one file in a private temp dir
-# (the source's stdout is never the hook's: a loader that prints a JSON-shaped
-# line before failing must not start a stdout line with `{`) beside the `loaded`
-# marker the subshell writes once the source succeeded (plain files, no extra
-# fd: a descriptor would be inherited by every child, and a probe the watchdog
-# in _ss_bounded leaves behind must not hold the hook's stdout). No marker: the
-# helper did not load, so _ss_run runs below in this shell with SS_HELPER empty
-# — optional-CLI detection, enrollment and the roster pin check are skipped and
+# roster helpers for enrollment, and runs triforge_bootstrap, instead of
+# carrying copies. Degraded, never fatal: a loader that `exit`s rather than
+# `return`s, or trips set -u, ends only that subshell. Its stdout and stderr
+# land in one file in a private temp dir (the source's stdout is never the
+# hook's: a loader that prints a JSON-shaped line before failing must not start
+# a stdout line with `{`) beside the `loaded` marker the subshell writes once
+# the source succeeded, and the bootstrap's notices land beside them
+# (SS_BOOT_LOG; plain files, no extra fd: a descriptor would be inherited by
+# every child, and a probe the watchdog in _ss_bounded leaves behind must not
+# hold the hook's stdout). No marker: the helper did not load, so _ss_run runs
+# below in this shell with SS_HELPER empty — the project bootstrap,
+# optional-CLI detection, enrollment and the roster pin check are skipped and
 # one standing WARNING line (no "session-start:" prefix — it repeats until
 # fixed) names the cause (the loader's first output line, or mktemp's when no
 # temp dir could be made under TMPDIR or, failing that, under the hook's own
@@ -1049,7 +905,7 @@ SS_HELPER_NOTICE=""
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh" ]; then
   SS_HELPER_RC=0
   SS_HELPER_ERR=""
-  SS_HELPER_TMP=$(mktemp -d "${TMPDIR:-/tmp}/triforge-session-start.XXXXXX" 2>/dev/null || mktemp -d ".claude/triforge-session-start.XXXXXX" 2>&1) || SS_HELPER_RC=$?
+  SS_HELPER_TMP=$(_ss_private_tmp) || SS_HELPER_RC=$?
   if [ "$SS_HELPER_RC" -eq 0 ]; then
     set +e
     ( set -e
@@ -1066,10 +922,13 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/invok
     fi
     SS_HELPER_ERR=$(head -1 "${SS_HELPER_TMP}/err" 2>/dev/null | cut -c1-160 || true)
     rm -rf "$SS_HELPER_TMP"
+    SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh exited ${SS_HELPER_RC}: ${SS_HELPER_ERR}) — the project bootstrap, optional-CLI detection, enrollment and the roster pin check were skipped this session. Reinstall the plugin: claude plugin install agent-triforge@agent-triforge"
   else
-    SS_HELPER_ERR=$(printf '%s' "$SS_HELPER_TMP" | head -1 | cut -c1-160)
+    # No private temp dir for the loader's output (G2): the helper is not
+    # sourced at all, and the notice names the cause and its fix.
+    SS_HELPER_ERR=$(printf '%s' "$SS_HELPER_TMP" | head -1 | cut -c1-400)
+    SS_HELPER_NOTICE="WARNING: the Triforge helper was not loaded (${SS_HELPER_ERR}) — the project bootstrap, optional-CLI detection, enrollment and the roster pin check were skipped this session. Set TMPDIR to a directory only you can write to, or remove group and other write from .claude, then start a new session."
   fi
-  SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh exited ${SS_HELPER_RC}: ${SS_HELPER_ERR}) — optional-CLI detection, enrollment and the roster pin check were skipped this session. Reinstall the plugin: claude plugin install agent-triforge@agent-triforge"
 else
   # No loader to source: the plugin host did not export CLAUDE_PLUGIN_ROOT, or
   # it names a tree without scripts/invoke-external.sh. Same standing WARNING,
@@ -1079,6 +938,6 @@ else
   else
     SS_ROOT_STATE="unset"
   fi
-  SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (CLAUDE_PLUGIN_ROOT is ${SS_ROOT_STATE}) — optional-CLI detection, enrollment and the roster pin check were skipped this session. Run this hook through the installed plugin: claude plugin install agent-triforge@agent-triforge"
+  SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (CLAUDE_PLUGIN_ROOT is ${SS_ROOT_STATE}) — the project bootstrap, optional-CLI detection, enrollment and the roster pin check were skipped this session. Run this hook through the installed plugin: claude plugin install agent-triforge@agent-triforge"
 fi
 _ss_run

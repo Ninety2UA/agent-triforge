@@ -94,7 +94,7 @@ EOF
 # the snapshot rather than breaking the checkpoint (must stay fast).
 if [ -f "ops/leases.toml" ]; then
   LEASE_SNAPSHOT=$(python3 -c "
-import sys
+import os, stat, sys
 try:
     import tomllib
 except ImportError:
@@ -104,8 +104,14 @@ except ImportError:
         print('- ledger present but no TOML parser available')
         sys.exit(0)
 try:
-    with open('ops/leases.toml', 'rb') as f:
-        data = tomllib.load(f)
+    # opened O_NONBLOCK and checked regular: a FIFO planted at the ledger fails
+    # here at once instead of blocking the checkpoint (Phase 3 round 5, G3; the
+    # read_regular of scripts/lib/common.sh, inline: this hook loads no helper)
+    fd = os.open('ops/leases.toml', os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0))
+    with os.fdopen(fd, 'rb') as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise OSError('not a regular file')
+        data = tomllib.loads(f.read().decode('utf-8'))
 except Exception as exc:
     print('- ledger present but unparseable: ' + str(exc))
     sys.exit(0)

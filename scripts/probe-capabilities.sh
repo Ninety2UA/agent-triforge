@@ -72,9 +72,10 @@ SELF_ONLY=0
 ONLY=""
 # The rows --only can select: the lead capability and survival section (U29),
 # the U12 rows (CC-15 to CC-20, CDX-19, AGY-18, and SELF-06f, which the full
-# run records among the SELF rows) and the persona lane rows (U25: CC-21 to
-# CC-24, CDX-20). A row added to any of them joins this list.
-ONLY_ROWS="CC-09 CC-10 CC-11 CC-12 CC-13 CC-14 CC-14b CC-15 CC-16 CC-17 CC-18 CC-19 CC-20 CC-21 CC-22 CC-23 CC-24 CDX-20 SELF-06f CDX-12 CDX-13 CDX-14 CDX-15 CDX-15b CDX-16 CDX-17 CDX-18 CDX-19 AGY-17 AGY-18 OC-09 KIMI-10 CUR-13"
+# run records among the SELF rows), the persona lane rows (U25: CC-21 to
+# CC-24, CDX-20) and the Codex lead rows (U14: CDX-21 to CDX-23). A row added
+# to any of them joins this list.
+ONLY_ROWS="CC-09 CC-10 CC-11 CC-12 CC-13 CC-14 CC-14b CC-15 CC-16 CC-17 CC-18 CC-19 CC-20 CC-21 CC-22 CC-23 CC-24 CDX-20 SELF-06f CDX-12 CDX-13 CDX-14 CDX-15 CDX-15b CDX-16 CDX-17 CDX-18 CDX-19 CDX-21 CDX-22 CDX-23 AGY-17 AGY-18 OC-09 KIMI-10 CUR-13"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -3053,7 +3054,7 @@ if [ -n "$ONLY" ] && _want SELF-06f; then
   _self06f_row
 fi
 
-# ------- Codex: CDX-12 CDX-13 CDX-14 CDX-15 CDX-15b CDX-16 CDX-17 CDX-18
+# ------- Codex: CDX-12 CDX-13 CDX-14 CDX-15 CDX-15b CDX-16 CDX-17 CDX-18, then the Codex lead rows CDX-21 CDX-22 CDX-23 (U14)
 U29_CDX12="Detached builder survives the end of an \`exec_command\` call and of the \`codex exec\` lead run (KTD10 launch; -s workspace-write)"
 U29_CDX13="Detached builder survives the lead's terminal closing (\`codex exec\` mid-turn in a pty, master closed: SIGHUP — headless stand-in for a closed TUI)"
 U29_CDX14="TMPDIR in a Codex lead's tool shell equals the caller's (two tool calls)"
@@ -3062,6 +3063,9 @@ U29_CDX15B="Host markers under a \`-s danger-full-access\` Codex lead (the regis
 U29_CDX16="Plugin hooks fire in an env -i \`codex exec\` worker (scratch CODEX_HOME plugin; trust-gated: with and without --dangerously-bypass-hook-trust)"
 U29_CDX17="Worker marker visible in an env -i \`codex exec\` worker's tool shell (lane flags; probe variable at the lease boundary)"
 U29_CDX18="\`codex plugin marketplace add\` + \`codex plugin add\` lists the at-* skills from the .claude-plugin/ fallback (D-048; scratch CODEX_HOME)"
+U14_CDX21="PostToolUse payload under a \`codex exec\` lead: the shell tool's name, apply_patch, the tool_response shape, the host markers in a hook process, and the paralysis monitor on the captured reads (project hooks + --dangerously-bypass-hook-trust; -s workspace-write)"
+U14_CDX22="Hook trust for a Codex lead: plugin hooks fire only with hooks.state.<key>.trusted_hash = currentHash in CODEX_HOME's config, project hooks need the project trust entry as well (scratch CODEX_HOME, no login)"
+U14_CDX23="_lease_lead_proc's premise under a \`codex exec\` lead: the parent of the tool call's process-group leader is the codex process (-s workspace-write)"
 if command -v codex >/dev/null 2>&1; then
   if _want CDX-12 || _want CDX-14 || _want CDX-15; then
     if [ "$CDX_LIVE" = 1 ]; then
@@ -3304,8 +3308,285 @@ EOF
     fi
     rm -rf "$CH" "$E18"
   fi
+
+  # ------- Codex lead (U14): CDX-21 CDX-22 CDX-23
+  # CDX-21  the PostToolUse payload a Codex lead's hooks receive: a project
+  #         .codex/hooks.json in the fixture dumps each payload and the CODEX*
+  #         / CLAUDE* names in the hook's environment, under
+  #         --dangerously-bypass-hook-trust (the trusted-hook stand-in, as in
+  #         CDX-04) and -s workspace-write. The captured shell read, fed eight
+  #         times to the shipped context-monitor.sh under [lead] codex, must
+  #         raise the paralysis warning (the registry's lead.tool_vocab_* read
+  #         against real payloads); OpenAI tokens only
+  #   CDX-22  hook trust for a lead, no login (the runs end at the first
+  #         model request): a scratch CODEX_HOME with a probe plugin; untrusted
+  #         its hooks don't fire, and with hooks.state."<key>".trusted_hash =
+  #         the currentHash app-server hooks/list reports (written to the
+  #         scratch config only) the trusted hook fires without the bypass
+  #         flag while an untrusted sibling stays silent; a project
+  #         .codex/hooks.json hook fires only with the project trust entry
+  #         and its own trusted_hash. The user's CODEX_HOME is never written
+  #   CDX-23  the premise of _lease_lead_proc (lease-wait.sh) under a Codex
+  #         lead: a `codex exec` tool call records its pid, parent and
+  #         process group through python3 (ps is blocked inside the
+  #         workspace-write sandbox, which the row records), and the harness,
+  #         outside the sandbox, checks that the parent of the call's
+  #         process-group leader is the codex process it launched
+
+  if _want CDX-21; then
+    if [ "$CDX_LIVE" = 1 ]; then
+      D="$FIX/.u14-cdx-payload"; O="$WORK/u14-cdx21.txt"
+      rm -rf "$D"
+      mkdir -p "$D/dump" "$FIX/.codex"
+      printf 'probe line one\nprobe line two\n' > "$D/notes.txt"
+      cat > "$D/dump.sh" <<'EOF'
+#!/bin/sh
+D=$(cd "$(dirname "$0")" && pwd)
+N="$1-$$"
+cat > "$D/dump/$N.json"
+env | grep -E '^(CODEX|CLAUDE)[A-Z0-9_]*=' | sed 's/=.*//' | sort | tr '\n' ' ' > "$D/dump/$N.env"
+exit 0
+EOF
+      cat > "$FIX/.codex/hooks.json" <<EOF
+{"hooks": {
+  "PostToolUse": [{"matcher": ".*", "hooks": [{"type": "command", "command": "sh $D/dump.sh PostToolUse"}]}]
+}}
+EOF
+      (cd "$FIX" && _u29_lead 300 codex exec -C "$FIX" -s workspace-write -c 'approval_policy="never"' -m "$CDX_MODEL" -c 'model_reasoning_effort="low"' --dangerously-bypass-hook-trust "Do these as separate tool calls, in this order, exactly as written. Then reply with only: OK
+1. Run the shell command: cat $D/notes.txt
+2. Run the shell command: sed -n 1p $D/notes.txt
+3. Create the file $D/made.txt containing the word hi with your patch tool (apply_patch), not the shell
+4. Run the shell command: false" < /dev/null > "$O" 2>&1) || true
+      rm -f "$FIX/.codex/hooks.json"
+      U14_V=$(U14_DUMP="$D/dump" python3 - <<'PYEOF' 2>/dev/null
+import glob, json, os, re
+d = os.environ['U14_DUMP']
+shell, patch, fail, keys, env, first = [], [], None, [], set(), ''
+for f in sorted(glob.glob(os.path.join(d, 'PostToolUse-*.json'))):
+    try:
+        p = json.load(open(f))
+    except Exception:
+        continue
+    env.update(open(f[:-5] + '.env').read().split())
+    ti = p.get('tool_input') if isinstance(p.get('tool_input'), dict) else {}
+    cmd = ti.get('command')
+    cmd = ' '.join(cmd) if isinstance(cmd, list) else str(cmd or '')
+    tool = str(p.get('tool_name'))
+    if 'notes.txt' in cmd and ('cat ' in cmd or 'sed ' in cmd):
+        shell.append(tool + '/' + type(p.get('tool_response')).__name__)
+        keys = sorted(p)
+        if not first:
+            first = f
+    elif 'patch' in tool.lower():
+        patch.append(tool)
+        if not os.path.exists(os.path.join(d, 'patch.json')):
+            open(os.path.join(d, 'patch.json'), 'w').write(json.dumps(p))
+    elif cmd.strip() in ('false', "bash -lc false", "/bin/zsh -lc false"):
+        r = p.get('tool_response')
+        fail = type(r).__name__ + ('; exit code shown' if isinstance(r, str) and re.match(r'\s*Exit code:', r) else '; no exit code') + '; ' + repr(r)[:40]
+markers = ' '.join(sorted(n for n in env if n.startswith('CODEX'))) or 'none'
+print('\t'.join([first, ','.join(sorted(set(shell))) or '-', ','.join(sorted(set(patch))) or '-', fail or '-', ' '.join(keys) or '-', markers]))
+PYEOF
+)
+      IFS="$(printf '\t')" read -r U14_FIRST U14_SHELL U14_PATCH U14_FAIL U14_KEYS U14_MK <<EOF
+$U14_V
+EOF
+      if [ -z "$U14_FIRST" ]; then
+        if _auth_shaped "$O"; then U14_OUTC=AUTH-FAIL; else U14_OUTC=FAIL; fi
+        row "CDX-21" "codex" "$U14_CDX21" "$U14_OUTC" "no PostToolUse payload for a shell read was captured (patch: ${U14_PATCH:--}): $(_evidence "$O")" "marker-file"
+      else
+        # The captured read, eight times, through the shipped monitor under [lead] codex.
+        M="$WORK/u14-cdx21-mon"; rm -rf "$M"; mkdir -p "$M/p/ops" "$M/tmp"
+        (cd "$M/p" && git init -q .) >/dev/null 2>&1 || true
+        printf '[lead]\ncli = "codex"\n' > "$M/p/ops/roster.toml"
+        U14_WARN=""
+        for U14_I in 1 2 3 4 5 6 7 8; do
+          U14_WARN=$(cd "$M/p" && env -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT TMPDIR="$M/tmp" /bin/bash "$REPO_ROOT/hooks/handlers/context-monitor.sh" < "$U14_FIRST" 2>/dev/null || true)
+        done
+        U14_RESET="-"
+        if [ -f "$D/dump/patch.json" ]; then
+          (cd "$M/p" && env -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT TMPDIR="$M/tmp" /bin/bash "$REPO_ROOT/hooks/handlers/context-monitor.sh" < "$D/dump/patch.json" > /dev/null 2>&1) || true
+          U14_RESET=$(sed -n 's/^consecutive_reads: //p' "$M"/tmp/triforge-monitors-*/p-*/*.context 2>/dev/null | head -1)
+        fi
+        U14_VOCAB=$( source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 && cli_field codex lead.tool_vocab_read lead.tool_vocab_action ) || U14_VOCAB=""
+        U14_EV="shell reads: ${U14_SHELL} (tool_name/tool_response type); patch: ${U14_PATCH}; a failing shell call (false): ${U14_FAIL}; payload keys: ${U14_KEYS}; CODEX* names in the hook process: ${U14_MK}; registry vocab (read/action): $(printf '%s' "$U14_VOCAB" | tr '\t' '/'); monitor on the captured read x8: $(printf '%s' "$U14_WARN" | head -1 | cut -c1-70); consecutive reads after the captured apply_patch: ${U14_RESET:--}"
+        case "$U14_WARN" in
+          *"8 consecutive read-only operations"*)
+            if [ "$U14_RESET" = 0 ]; then
+              row "CDX-21" "codex" "$U14_CDX21" "PASS" "$U14_EV" "marker-file"
+            else
+              row "CDX-21" "codex" "$U14_CDX21" "FAIL" "$U14_EV — the captured apply_patch did not reset the read run" "marker-file"
+            fi ;;
+          *) row "CDX-21" "codex" "$U14_CDX21" "FAIL" "$U14_EV — the shipped monitor did not count the captured shell read as a read under [lead] codex: the registry's lead.tool_vocab_read does not map the payload's tool name" "marker-file" ;;
+        esac
+        rm -rf "$M"
+      fi
+      rm -rf "$D"
+    else
+      row "CDX-21" "codex" "$U14_CDX21" "$(_skip_reason)" "live probes disabled" "marker-file"
+    fi
+  fi
+
+  if _want CDX-22; then
+    CH="$WORK/u14-cdx-home-trust"; MK="$WORK/u14-cdx-mkt"; HM="$WORK/u14-cdx-trustmarks"; O="$WORK/u14-cdx22.txt"
+    rm -rf "$CH" "$MK" "$HM"
+    mkdir -p "$CH" "$MK/.claude-plugin" "$MK/plugin/.claude-plugin" "$MK/plugin/hooks" "$HM"
+    printf '{"name": "tf-probe", "owner": {"name": "triforge-probe"}, "plugins": [{"name": "tf-probe-trust", "source": "./plugin", "description": "Triforge probe trust hooks"}]}\n' > "$MK/.claude-plugin/marketplace.json"
+    printf '{"name": "tf-probe-trust", "version": "0.0.1", "description": "Triforge probe: hook trust"}\n' > "$MK/plugin/.claude-plugin/plugin.json"
+    cat > "$MK/plugin/hooks/mark.sh" <<EOF
+#!/bin/sh
+env | grep -E '^(CODEX|CLAUDE|PLUGIN)[A-Z0-9_]*=' | sed 's/=.*//' | sort | tr '\n' ' ' > "$HM/plugin-\$1"
+EOF
+    cat > "$MK/plugin/hooks/hooks.json" <<'EOF'
+{"hooks": {
+  "SessionStart":     [{"hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/mark.sh\" SessionStart"}]}],
+  "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/mark.sh\" UserPromptSubmit"}]}]
+}}
+EOF
+    cat > "$WORK/u14-hooks.py" <<'PYEOF'
+import json, select, subprocess, sys, time
+cwd = sys.argv[1]
+p = subprocess.Popen(['codex', 'app-server'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=cwd)
+got = None
+try:
+    for m in ({'id': 1, 'method': 'initialize', 'params': {'clientInfo': {'name': 'triforge-probe', 'version': '0'}}},
+              {'method': 'initialized'}, {'id': 2, 'method': 'hooks/list', 'params': {'cwds': [cwd]}}):
+        p.stdin.write((json.dumps(m) + '\n').encode())
+    p.stdin.flush()
+    deadline = time.time() + float(sys.argv[2])
+    while got is None and time.time() < deadline:
+        r, _, _ = select.select([p.stdout], [], [], 1)
+        if not r:
+            continue
+        line = p.stdout.readline()
+        if not line:
+            break
+        try:
+            o = json.loads(line)
+        except Exception:
+            continue
+        if o.get('id') == 2:
+            got = o
+finally:
+    p.kill()
+for ent in (got or {}).get('result', {}).get('data', []):
+    for h in ent.get('hooks', []):
+        print('\t'.join([str(h.get('source')), str(h.get('eventName')), str(h.get('key')), str(h.get('currentHash')), str(h.get('trustStatus'))]))
+PYEOF
+    # The fixture by its physical path, for every run, hooks/list and the
+    # trust entries alike: Codex keys a project hook's trust on the path it was
+    # given (a /var/... and a /private/var/... spelling are two keys).
+    U14_FIXR=$(cd "$FIX" && pwd -P)
+    U14_TAB=$(printf '\t')
+    # _u14_trust <plugin|project> — the hooks/list key and currentHash of that
+    # source's SessionStart hook in the fixture, tab-separated, or nothing.
+    _u14_trust() {
+      (cd "$U14_FIXR" && _rwt 60 env CODEX_HOME="$CH" python3 "$WORK/u14-hooks.py" "$U14_FIXR" 45 2>/dev/null) \
+        | awk -F'\t' -v src="$1" '$1 == src && $2 == "sessionStart" { print $3 "\t" $4; exit }'
+    }
+    # _u14_trustrun <label> — one no-login codex exec in the fixture under the
+    # scratch home; prints "<label>:<marker files>".
+    _u14_trustrun() {
+      rm -f "$HM"/plugin-* "$HM"/project-*
+      (cd "$U14_FIXR" && _u29_lead 120 env CODEX_HOME="$CH" codex exec -C "$U14_FIXR" -s read-only -c 'approval_policy="never"' --skip-git-repo-check "Respond with only: READY" < /dev/null > "$O.$1" 2>&1) || true
+      printf '%s:%s\n' "$1" "$(cd "$HM" && ls 2>/dev/null | tr '\n' ' ')"
+    }
+    if (cd "$WORK" && _rwt 60 env CODEX_HOME="$CH" codex plugin marketplace add "$MK" && _rwt 120 env CODEX_HOME="$CH" codex plugin add tf-probe-trust@tf-probe) > "$O.install" 2>&1; then
+      U14_PKEY=""; U14_PHASH=""
+      IFS="$U14_TAB" read -r U14_PKEY U14_PHASH <<U14_PLUGIN_EOF || true
+$(_u14_trust plugin)
+U14_PLUGIN_EOF
+      U14_R1=$(_u14_trustrun plugin-untrusted)
+      U14_R2="plugin-trusted:<no hooks/list key for the plugin's SessionStart>"
+      if [ -n "$U14_PKEY" ]; then
+        printf '[hooks.state."%s"]\ntrusted_hash = "%s"\n' "$U14_PKEY" "$U14_PHASH" >> "$CH/config.toml"
+        U14_R2=$(_u14_trustrun plugin-trusted)
+      fi
+      U14_PENV=$(cat "$HM/plugin-SessionStart" 2>/dev/null || true)
+      # Project hooks: the fixture's .codex/hooks.json, first with only the
+      # plugin trusted, then with the project trust entry, then with its own hash.
+      mkdir -p "$FIX/.codex"
+      printf '{"hooks": {"SessionStart": [{"matcher": ".*", "hooks": [{"type": "command", "command": "touch %s/project-SessionStart"}]}]}}\n' "$HM" > "$FIX/.codex/hooks.json"
+      U14_R3=$(_u14_trustrun project-untrusted)
+      printf '\n[projects."%s"]\ntrust_level = "trusted"\n' "$U14_FIXR" >> "$CH/config.toml"
+      U14_R4=$(_u14_trustrun project-trusted-no-hash)
+      U14_JKEY=""; U14_JHASH=""
+      IFS="$U14_TAB" read -r U14_JKEY U14_JHASH <<U14_PROJECT_EOF || true
+$(_u14_trust project)
+U14_PROJECT_EOF
+      U14_R5="project-trusted-hash:<no hooks/list key for the project hook>"
+      if [ -n "$U14_JKEY" ]; then
+        printf '\n[hooks.state."%s"]\ntrusted_hash = "%s"\n' "$U14_JKEY" "$U14_JHASH" >> "$CH/config.toml"
+        U14_R5=$(_u14_trustrun project-trusted-hash)
+      fi
+      rm -f "$FIX/.codex/hooks.json"
+      U14_EV="${U14_R1}; ${U14_R2}; ${U14_R3}; ${U14_R4}; ${U14_R5}; plugin hook env: ${U14_PENV:-<not captured>}; plugin key: ${U14_PKEY}"
+      if [ "$U14_R1" = "plugin-untrusted:" ] && [ "$U14_R2" = "plugin-trusted:plugin-SessionStart " ] \
+         && [ "$U14_R3" = "project-untrusted:plugin-SessionStart " ] && [ "$U14_R4" = "project-trusted-no-hash:plugin-SessionStart " ] \
+         && [ "$U14_R5" = "project-trusted-hash:plugin-SessionStart project-SessionStart " ]; then
+        row "CDX-22" "codex" "$U14_CDX22" "PASS" "$U14_EV — a Codex lead runs Triforge's plugin hooks only after the user trusts each one (hooks.state in the user's CODEX_HOME config, written by Codex's own hook review; setup prints, never writes it); a project hook also needs the project trust entry, and its trust key is the path as given" "marker-file"
+      else
+        row "CDX-22" "codex" "$U14_CDX22" "FAIL" "$U14_EV — the trust rule differs from what hooks_trusted detection assumes; re-read the runs above" "marker-file"
+      fi
+    else
+      row "CDX-22" "codex" "$U14_CDX22" "FAIL" "could not install the scratch plugin into a scratch CODEX_HOME: $(_evidence "$O.install")" "marker-file"
+    fi
+    rm -rf "$CH" "$MK" "$HM"
+  fi
+
+  if _want CDX-23; then
+    if [ "$CDX_LIVE" = 1 ]; then
+      D="$FIX/.u14-cdx-leadproc"; O="$WORK/u14-cdx23.txt"
+      rm -rf "$D"
+      mkdir -p "$D"
+      cat > "$D/report.sh" <<'EOF'
+#!/bin/sh
+D=$(cd "$(dirname "$0")" && pwd)
+PS=blocked
+if ps -o pid= -p $$ > /dev/null 2>&1; then PS=ok; fi
+python3 -c 'import os, sys; print(os.getpid(), os.getppid(), os.getpgid(0), sys.argv[1])' "$PS" > "$D/ids.tmp" && mv "$D/ids.tmp" "$D/ids"
+i=0
+while [ ! -f "$D/release" ] && [ "$i" -lt 90 ] && [ -d "$D" ]; do sleep 1; i=$((i + 1)); done
+echo REPORTED
+EOF
+      (cd "$FIX" && _u29_lead 300 codex exec -C "$FIX" -s workspace-write -c 'approval_policy="never"' -m "$CDX_MODEL" -c 'model_reasoning_effort="low"' "Run this shell command exactly as written and wait for it to finish, then reply with only: OK
+sh $D/report.sh" < /dev/null > "$O" 2>&1) &
+      U14_BG=$!
+      U14_I=0
+      while [ ! -f "$D/ids" ] && [ "$U14_I" -lt 240 ] && kill -0 "$U14_BG" 2>/dev/null; do sleep 1; U14_I=$((U14_I + 1)); done
+      if [ -f "$D/ids" ]; then
+        read -r U14_P U14_PP U14_G U14_PS < "$D/ids"
+        U14_LP=$(ps -o ppid= -p "$U14_G" 2>/dev/null | tr -d ' ')
+        U14_LC=$(ps -o comm= -p "${U14_LP:-0}" 2>/dev/null | sed 's|.*/||')
+        U14_LG=$(ps -o comm= -p "$U14_G" 2>/dev/null | sed 's|.*/||')
+        # Is the leader's parent inside the process tree the harness launched?
+        U14_UP=$U14_LP; U14_IN=no; U14_N=0
+        while [ -n "$U14_UP" ] && [ "$U14_UP" -gt 1 ] 2>/dev/null && [ "$U14_N" -lt 12 ]; do
+          if [ "$U14_UP" = "$U14_BG" ]; then U14_IN=yes; break; fi
+          U14_UP=$(ps -o ppid= -p "$U14_UP" 2>/dev/null | tr -d ' '); U14_N=$((U14_N + 1))
+        done
+        touch "$D/release"
+        wait "$U14_BG" 2>/dev/null || true
+        U14_EV="tool call pid ${U14_P} (parent ${U14_PP}), process group ${U14_G} led by ${U14_LG:-?}; the leader's parent: pid ${U14_LP:-?} (${U14_LC:-?}), inside the launched lead's tree: ${U14_IN}; ps inside the workspace-write sandbox: ${U14_PS} (when blocked, _lease_lead_proc in a sandboxed codex shell reads no start time and keys on this shell; the D-047 lead runs unsandboxed, which needs a human-launched lead to observe, R50)"
+        if [ "${U14_LC:-}" = codex ] && [ "$U14_IN" = yes ]; then
+          row "CDX-23" "codex" "$U14_CDX23" "PASS" "$U14_EV" "live"
+        else
+          row "CDX-23" "codex" "$U14_CDX23" "FAIL" "$U14_EV — the parent of the tool call's group leader is not the codex lead, so lease_wait's lead-exit reconcile keys on the wrong process" "live"
+        fi
+      else
+        touch "$D/release"
+        wait "$U14_BG" 2>/dev/null || true
+        if _auth_shaped "$O"; then U14_OUTC=AUTH-FAIL; else U14_OUTC=FAIL; fi
+        row "CDX-23" "codex" "$U14_CDX23" "$U14_OUTC" "the lead never ran the report command: $(_evidence "$O")" "live"
+      fi
+      rm -rf "$D"
+    else
+      row "CDX-23" "codex" "$U14_CDX23" "$(_skip_reason)" "live probes disabled" "live"
+    fi
+  fi
 else
-  _u29_rows codex UNAVAILABLE "codex not on PATH" direct "CDX-12:$U29_CDX12" "CDX-13:$U29_CDX13" "CDX-14:$U29_CDX14" "CDX-15:$U29_CDX15" "CDX-15b:$U29_CDX15B" "CDX-16:$U29_CDX16" "CDX-17:$U29_CDX17" "CDX-18:$U29_CDX18"
+  _u29_rows codex UNAVAILABLE "codex not on PATH" direct "CDX-12:$U29_CDX12" "CDX-13:$U29_CDX13" "CDX-14:$U29_CDX14" "CDX-15:$U29_CDX15" "CDX-15b:$U29_CDX15B" "CDX-16:$U29_CDX16" "CDX-17:$U29_CDX17" "CDX-18:$U29_CDX18" \
+    "CDX-21:$U14_CDX21" "CDX-22:$U14_CDX22" "CDX-23:$U14_CDX23"
 fi
 
 # ------- Worker marker in the other lanes: AGY-17 OC-09 KIMI-10 CUR-13
@@ -3516,8 +3797,12 @@ COUNTER_MISMATCH=0
   echo "- **CC-15** → KTD16: Claude Code's Bash sandbox confines a \`claude -p\` worker on the lane's own argv (writes outside its worktree and into the lead's .git blocked, also on a requested unsandboxed retry; credential paths unreadable). PASS keeps the lane's sandbox on; a FAIL means a claude builder with Bash has no OS confinement on that host. **CC-16..CC-18** → the claude lane runs a test command with no permission denial, resumes a recorded session id on a fix cycle, and a \`--max-turns\` stop parses as subtype error_max_turns (the report-missing route). **CC-19/CDX-19/AGY-18** → the lease's no-push git config and the worker marker reach each worker's tool shell through the real \`_adapter_env\` (codex with the lane's pinned \`shell_environment_policy\`), a \`git push\` is refused, and the names each CLI adds to its tool shell are listed; headless agy runs a command only with a user-tier allow rule. **CC-20** → R2: a Codex lead's \`dispatch_role\` reviewer resolving to claude runs \`claude -p\`."
   echo "- **CC-21/CDX-20/CC-22/CC-23/CC-24** → KTD5, KTD20: the persona lane (\`dispatch_persona\`) holds on the real CLIs — a read persona on \`claude -p\` or on \`codex exec\` under the read-only permission profile reads the lead's ops/ files by their paths relative to the project root and writes nothing (on codex it also reads no credential path, CDX-20's ~/.ssh canary), an exec persona tests the lease snapshot with the integration branch's AGENTS.md and leaves nothing behind, a builder's AGENTS.md or MCP server changes no reviewer verdict, and \`--safe-mode\` with CLAUDE_CODE_DISABLE_ATTACHMENTS=1 (every persona class) keeps a checkout's CLAUDE.md, its @imports, .claude/rules and an @-mentioned file from loading while the sandbox blocks the write the persona attempted (CC-24: the control without them must load all five). SELF-12 is the static half."
   echo "- **CDX-18** → D-048: one plugin tree serves Codex through the \`.claude-plugin/\` fallback (R20). A FAIL stops Phase 3 until a fallback, such as a schema-less \`.codex-plugin/plugin.json\`, is designed."
+  echo "- **CDX-21** → U14: the tool names a Codex lead's PostToolUse payload carries (the shell tool as \`Bash\`, \`apply_patch\`) are the registry's \`lead.tool_vocab_*\` for codex, so the paralysis monitor counts its shell reads (\`Bash(read)\`); a plain-text tool_response with no exit code is why tool-failure-monitor.sh counts no Codex shell failure and says so once (R44); no CODEX_THREAD_ID or CODEX_CI reaches a hook process, so hooks can't tell a Codex session by markers."
+  echo "- **CDX-22** → U14: hooks_trusted under a Codex lead (KTD1): a plugin hook runs only once its own \`hooks.state.<key>.trusted_hash\` matches, and a project hook needs the \`[projects]\` trust entry too; the monitors stay advisory and setup prints the trust step (R18). Codex exports CLAUDE_PLUGIN_ROOT and PLUGIN_ROOT to plugin hooks."
+  echo "- **CDX-23** → U13/U14: \`_lease_lead_proc\` (the parent of the tool call's process-group leader) is the codex process, so lease_wait's lead-exit reconcile keys on the lead; inside a sandboxed codex shell ps is blocked, and the D-047 lead itself runs unsandboxed."
   echo "- **RTN-01** → headless watch delivery mode; runtime preflight absorbs all three outcomes."
-  echo "- **SELF-01..SELF-04** → roster chain rejection, coordinate.sh composition, adapter env allowlist, the R35 boundary. **SELF-05** → the Status-line parser seam (KTD11: DONE / MISSING / BLOCKED). **SELF-06** → lease-lane skill discovery per CLI under the env -i boundary (KTD7/R9; PASS = the probe skill is listed, shipped coverage in the evidence; SELF-06f: the claude worker lists the .claude/skills copy the real provisioner wrote, KTD16). **SELF-07** → the TRIFORGE_TEST_BUILDER lifecycle: DONE → review, report missing → never review-ready, BLOCKED → escalated (KTD11). **SELF-08** → session-start idempotence (KTD7/KTD8) and the upgrade notices: the 2.1.277 floor, a stale 3.x template copy, a CLAUDE.md above the project (R40). **SELF-08b** → the digest-stamped skills refresh: only Triforge's own unchanged copies are replaced or retired, in session start and lease provisioning alike (KTD12/R31). **SELF-09** → the no-push backstop (CS1). **SELF-10** → the protected-path lists in \`scripts/lib/registry.sh\` and the fail-closed scan in \`lease_promote\` (KTD8/R30). **SELF-13** → the \`[lead]\` table (load validation, absent = claude), the lead host check every lead-owned helper runs (the other lead's CLI refused naming at-setup lead, a terminal runs as the user, both leads' markers refused as ambiguous, no TTY and no markers refused outside the SELF seam), \`roster_write_lead\` (from a stated origin only) and its forced handover, reclaim under the other lead, and the lead's capabilities with an absent one reported once (KTD1, R1/R38/R40/R44). **SELF-14** → the ledger's lead CLI and reviewer class, the merge approval a protected snapshot needs (the lead's CLI when it did not build the task, else the user; voided by the next fix cycle), the user's promotion approval bound to the integration tree (voided by a later merge or a default-branch move), the forced-handover rule for a lead-class pin (a pre-4.0 pin classed by its own row's lead), and each approval's recorded origin (KTD2-KTD4, R5/R6/R32/R33). **SELF-18** → lead-side git hardening (\`_lead_git\`), integrity detection with restore and escalation, and snapshot-only merges (KTD18/KTD19, R46/R47/R49). **SELF-19** → detached builders (pid == pgid, a start-time fingerprint), \`lease_wait\` within the lead's \`wait_budget_s\`, and the lead-exit reconcile, the kill case under a claude and a codex lead (KTD10, R36/R38). **SELF-20** → the \`claude -p\` lane (KTD16, R2/R3): its argv and env, the JSON envelope, session resume, max-turns routed as report missing, names-only .claude/skills provisioning, \`dispatch_role\` running \`claude -p\` under a codex lead, and the Claude Code 2.1.285 floor its sandbox needs. **SELF-23** → the skill blocks that run personas (at-review's dispatch, wait and synthesis blocks, at-deep-research's swarm, wait and synthesis blocks) as written, under /bin/zsh and /bin/bash with stub lanes: personas started detached and collected by a wait block rerun while it returns 75, a missing lane never converging, the learnings and analyst failure paths, and no zsh glob or word-split failure (U8, KTD5). Under \`--self-only\` these rows are the whole run and any SELF FAIL exits 3 (KTD15)."
+  echo "- **SELF-01..SELF-04** → roster chain rejection, coordinate.sh composition (SELF-02, KTD14: the lead's launch_argv and goal_gate, full access only with --allow-full-access, the integrity check before each session, a deterministic lead failure stopping the loop), adapter env allowlist, the R35 boundary. **SELF-05** → the Status-line parser seam (KTD11: DONE / MISSING / BLOCKED). **SELF-06** → lease-lane skill discovery per CLI under the env -i boundary (KTD7/R9; PASS = the probe skill is listed, shipped coverage in the evidence; SELF-06f: the claude worker lists the .claude/skills copy the real provisioner wrote, KTD16). **SELF-07** → the TRIFORGE_TEST_BUILDER lifecycle: DONE → review, report missing → never review-ready, BLOCKED → escalated (KTD11). **SELF-08** → session-start idempotence (KTD7/KTD8) and the upgrade notices: the 2.1.277 floor, a stale 3.x template copy, a CLAUDE.md above the project (R40). **SELF-08b** → the digest-stamped skills refresh: only Triforge's own unchanged copies are replaced or retired, in session start and lease provisioning alike (KTD12/R31). **SELF-09** → the no-push backstop (CS1). **SELF-10** → the protected-path lists in \`scripts/lib/registry.sh\` and the fail-closed scan in \`lease_promote\` (KTD8/R30). **SELF-13** → the \`[lead]\` table (load validation, absent = claude), the lead host check every lead-owned helper runs (the other lead's CLI refused naming at-setup lead, a terminal runs as the user, both leads' markers refused as ambiguous, no TTY and no markers refused outside the SELF seam), \`roster_write_lead\` (from a stated origin only) and its forced handover, reclaim under the other lead, and the lead's capabilities with an absent one reported once (KTD1, R1/R38/R40/R44). **SELF-14** → the ledger's lead CLI and reviewer class, the merge approval a protected snapshot needs (the lead's CLI when it did not build the task, else the user; voided by the next fix cycle), the user's promotion approval bound to the integration tree (voided by a later merge or a default-branch move), the forced-handover rule for a lead-class pin (a pre-4.0 pin classed by its own row's lead), and each approval's recorded origin (KTD2-KTD4, R5/R6/R32/R33). **SELF-18** → lead-side git hardening (\`_lead_git\`), integrity detection with restore and escalation, and snapshot-only merges (KTD18/KTD19, R46/R47/R49). **SELF-19** → detached builders (pid == pgid, a start-time fingerprint), \`lease_wait\` within the lead's \`wait_budget_s\`, and the lead-exit reconcile, the kill case under a claude and a codex lead (KTD10, R36/R38). **SELF-20** → the \`claude -p\` lane (KTD16, R2/R3): its argv and env, the JSON envelope, session resume, max-turns routed as report missing, names-only .claude/skills provisioning, \`dispatch_role\` running \`claude -p\` under a codex lead, and the Claude Code 2.1.285 floor its sandbox needs. **SELF-22** → a Codex lead in fixtures (U14): the monitors read the lead's tool vocabulary and keep their state outside the project, an unmapped lead leaves them inert with one note, and a Codex-led wave reaches merged (KTD1, KTD14, R21, R44). **SELF-23** → the skill blocks that run personas (at-review's dispatch, wait and synthesis blocks, at-deep-research's swarm, wait and synthesis blocks) as written, under /bin/zsh and /bin/bash with stub lanes: personas started detached and collected by a wait block rerun while it returns 75, a missing lane never converging, the learnings and analyst failure paths, and no zsh glob or word-split failure (U8, KTD5). Under \`--self-only\` these rows are the whole run and any SELF FAIL exits 3 (KTD15)."
+  echo "- **SELF-21** → the project bootstrap as a helper (KTD11, R37): at-setup's block, read from its SKILL.md, sets up a fresh project with no hook run — \`ops/\`, the skills copy, the per-CLI files and an untracked plugin-root pointer — and at-build's preflight then loads the helpers through that pointer; a second run under bash or zsh changes nothing, session start afterwards prints no one-time notice, and the worker marker or a lease root refuses it (rc 45)."
   echo
   echo "## Appendix A: codex features list"
   echo
@@ -3570,7 +3855,7 @@ if [ "$SELF_ONLY" = "1" ]; then
   # Every expected row must be present: a `return` or an early exit in the
   # sourced self-tests would otherwise drop the rows after it and still pass.
   # A new SELF row joins this list in the commit that adds it.
-  SELF_EXPECTED="SELF-01 SELF-02 SELF-03 SELF-04 SELF-05 SELF-06a SELF-06b SELF-06c SELF-06d SELF-06e SELF-06f SELF-07 SELF-08 SELF-08b SELF-09 SELF-10 SELF-11 SELF-12 SELF-13 SELF-14 SELF-15 SELF-15b SELF-15c SELF-18 SELF-19 SELF-20 SELF-23"
+  SELF_EXPECTED="SELF-01 SELF-02 SELF-03 SELF-04 SELF-05 SELF-06a SELF-06b SELF-06c SELF-06d SELF-06e SELF-06f SELF-07 SELF-08 SELF-08b SELF-21 SELF-09 SELF-10 SELF-11 SELF-12 SELF-13 SELF-14 SELF-15 SELF-15b SELF-15c SELF-18 SELF-19 SELF-20 SELF-22 SELF-23"
   SELF_MISSING=""
   for SELF_ID in $SELF_EXPECTED; do
     if ! cut -f1 "$ROWS" | grep -qx "$SELF_ID"; then SELF_MISSING="${SELF_MISSING}${SELF_MISSING:+ }${SELF_ID}"; fi

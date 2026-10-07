@@ -1,6 +1,6 @@
 # Codex: project trust (Step 1b, read-only detection, D-026) and invocation
 
-Under a Codex lead this skill is invoked as `$at-setup`; the walk is the same.
+Under a Codex lead this skill is invoked as `$agent-triforge:at-setup`; the walk is the same.
 
 Since Codex 0.147.0, `codex exec` reads project-tier files (`.codex/hooks.json`, `.codex/config.toml`, `.codex/.rules`) only in a **trusted** project; the root `AGENTS.md` is skipped only when trust is explicitly `untrusted` (D-045). Trust lives at the user tier, `~/.codex/config.toml`, which Triforge never writes (R18). Detect the exact-path entry and report it; the user adds it by hand when missing:
 

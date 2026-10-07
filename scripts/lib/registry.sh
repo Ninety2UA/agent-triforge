@@ -243,11 +243,27 @@ TRIFORGE_CLAUDE_SANDBOX_FLOOR="2.1.285"
 #               claude -p worker that dispatch_role runs itself, KTD16)
 #   egress      the model provider that receives the prompt and the code (R36)
 #   lead        the KTD1 static lead fields, or {} for a CLI that cannot lead
-#               (Key Decision: Claude Code or Codex only). launch_argv is the
-#               launch line setup prints and the human types; wait_budget_s the
+#               (Key Decision: Claude Code or Codex only). launch_argv is one
+#               headless lead session, the prompt appended as its last word:
+#               what scripts/coordinate.sh runs, or prints for the human to
+#               type when it asks for full access (R50); model_argv and
+#               effort_argv the flags that pass [lead] model and effort, "{}"
+#               standing for the value (shell words, as launch_argv; an empty
+#               value adds nothing), appended to launch_argv before the
+#               prompt (claude: --model, --effort; codex exec has no effort
+#               flag, so -c model_reasoning_effort=, whose header reports the
+#               value as given); full_access whether launch_argv runs the
+#               lead with full access (no sandbox, no approval prompts):
+#               coordinate.sh asks for the human's --allow-full-access when
+#               this says so or launch_full_access (below) reads it from the
+#               words, and validate-versions fails when the two disagree for a
+#               shipped lead; wait_budget_s the
 #               longest single wait the lead's shell tool allows; the two
-#               tool_vocab_* lists are the lead's own read and action tool
-#               names (what a paralysis monitor classifies); goal_gate the
+#               tool_vocab_* lists are the tool names the lead's PostToolUse
+#               hook payload carries, read and action (what the paralysis
+#               monitor classifies; a name in neither counts as an action, and
+#               "<tool>(read)" is a shell tool whose command only reads);
+#               goal_gate the
 #               completion-gate command ("" = none, the ops/.sprint-complete
 #               sentinel alone); ask_user the question tool ("" = none);
 #               plugin_root_env the variable the host exports for the plugin
@@ -270,10 +286,13 @@ CLIS = {
         "lane": "subagent",
         "egress": "Anthropic",
         "lead": {
-            "launch_argv": "claude",
+            "launch_argv": "claude --print --permission-mode acceptEdits",
+            "full_access": False,
+            "model_argv": "--model {}",
+            "effort_argv": "--effort {}",
             "wait_budget_s": 600,
-            "tool_vocab_read": "Read Grep Glob WebFetch",
-            "tool_vocab_action": "Edit Write Bash",
+            "tool_vocab_read": "Read Grep Glob LS WebFetch WebSearch TaskList TaskGet NotebookRead",
+            "tool_vocab_action": "Edit Write Bash NotebookEdit Agent Skill",
             "goal_gate": "/goal",
             "ask_user": "AskUserQuestion",
             "native_subagents_enforced_tools": True,
@@ -311,11 +330,14 @@ CLIS = {
         "env_keys": [],
         "lane": "shell",
         "egress": "OpenAI",
-        "lead": {   # D-047 profile; tool names — verified: U14
+        "lead": {   # D-047 profile; the hook payload names exec_command Bash and keeps apply_patch (CDX-21)
             "launch_argv": "codex exec -s danger-full-access -c approval_policy=\"never\" -c background_terminal_max_timeout=900000",
+            "full_access": True,
+            "model_argv": "-m {}",
+            "effort_argv": "-c model_reasoning_effort={}",
             "wait_budget_s": 900,
-            "tool_vocab_read": "read_file exec_command(read)",
-            "tool_vocab_action": "exec_command apply_patch",
+            "tool_vocab_read": "Bash(read)",
+            "tool_vocab_action": "Bash apply_patch",
             "goal_gate": "",
             "ask_user": "",
             "native_subagents_enforced_tools": False,
@@ -372,6 +394,95 @@ CLIS = {
         "lead": {},
     },
 }
+'
+
+# _LAUNCH_ACCESS_PY — launch_full_access(words): the words of a launch line (as
+# shlex.split gives them, the [lead] model and effort words included) that run
+# a lead with full access, empty when none does. Read by the forms both lead
+# CLIs take (claude 2.1.289 and codex exec 0.160.0 --help): -s<v>, -s <v>,
+# -s=<v> and --sandbox[= ]<v> naming danger-full-access; -c/--config (also
+# -c<kv>, --config=<kv>) setting sandbox_mode to it, quotes stripped, or
+# setting profile; --permission-mode[= ]bypassPermissions;
+# --dangerously-skip-permissions, --allow-dangerously-skip-permissions,
+# --dangerously-bypass-approvals-and-sandbox and --yolo; --profile[= ]<name>,
+# since a profile can set any sandbox, and -p <name> / -p<name> where the
+# launch line's binary takes -p as its profile flag (LAUNCH_SHORT_PROFILE:
+# codex exec; claude -p is --print). It fails closed: any other word that
+# still names danger-full-access, bypassPermissions or one of the dangerous
+# flags counts too. launch_extra_words(tmpl, value): the words a
+# lead.model_argv or lead.effort_argv template adds for a value ("{}" = the
+# value). scripts/coordinate.sh splices both to decide when the human's
+# --allow-full-access is needed; scripts/validate-versions.sh runs them on each
+# shipped lead's launch line against lead.full_access. Python source like
+# _TRIFORGE_CLIS_PY: single-quoted, so no apostrophe inside.
+_LAUNCH_ACCESS_PY='
+import shlex
+
+LAUNCH_FULL_ACCESS_FLAGS = ("--dangerously-skip-permissions", "--allow-dangerously-skip-permissions",
+                            "--dangerously-bypass-approvals-and-sandbox", "--yolo")
+LAUNCH_FULL_ACCESS_NAMES = ("danger-full-access", "bypasspermissions", "dangerously-skip-permissions",
+                            "dangerously-bypass-approvals-and-sandbox")
+# The binaries whose -p takes a profile name (codex exec 0.160.0: -p,
+# --profile <CONFIG_PROFILE>); for claude -p is --print and takes no value.
+LAUNCH_SHORT_PROFILE = ("codex",)
+
+def _launch_binary(words):
+    for w in words:
+        if w == "env" or ("=" in w and not w.startswith("-")):
+            continue
+        return w.rsplit("/", 1)[-1]
+    return ""
+
+def launch_extra_words(tmpl, value):
+    return [w.replace("{}", value) for w in shlex.split(tmpl)]
+
+def _launch_unquote(v):
+    v = str(v).strip()
+    while len(v) >= 2 and v[0] == v[-1] and v[0] in (chr(34), chr(39)):
+        v = v[1:-1].strip()
+    return v
+
+def launch_full_access(words):
+    why = []
+    words = [str(w) for w in words]
+    short = ("-s", "-c", "-p") if _launch_binary(words) in LAUNCH_SHORT_PROFILE else ("-s", "-c")
+    i, n = 0, len(words)
+    while i < n:
+        w = words[i]
+        key, val, shown = "", None, w
+        if w in LAUNCH_FULL_ACCESS_FLAGS:
+            why.append(w)
+        elif w in ("-s", "--sandbox", "--permission-mode", "-c", "--config", "--profile") or (w == "-p" and "-p" in short):
+            key, val = w, (words[i + 1] if i + 1 < n else "")
+            shown = w + " " + val
+            i += 1
+        elif w.startswith("--") and "=" in w:
+            key, val = w.split("=", 1)
+        elif len(w) > 2 and w[:2] in short and not w.startswith("--"):
+            key, val = w[:2], w[2:]
+            if key in ("-s", "-p") and val.startswith("="):
+                val = val[1:]
+        if key == "-p":
+            key = "--profile"
+        if key in ("-c", "--config") and val is not None:
+            k, _, v = val.partition("=")
+            k = _launch_unquote(k)
+            if k == "sandbox_mode":
+                key, val = "-s", v
+            elif k == "profile":
+                key, val = "--profile", v
+        if key in ("-s", "--sandbox") and _launch_unquote(val).lower() == "danger-full-access":
+            why.append(shown)
+        elif key == "--permission-mode" and _launch_unquote(val).lower() == "bypasspermissions":
+            why.append(shown)
+        elif key == "--profile" and val is not None:
+            why.append(shown + " (a profile can set any sandbox)")
+        i += 1
+    for w in words:
+        low = _launch_unquote(w).lower()
+        if any(name in low for name in LAUNCH_FULL_ACCESS_NAMES) and not any(w in r for r in why):
+            why.append(w)
+    return why
 '
 
 # The base env allowlist every lease builder gets (KTD-14) — identity and

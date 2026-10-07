@@ -20,10 +20,11 @@ Prerequisites: `ops/TASKS.md` with assigned tasks (`at-plan` writes it) and a pa
 
 ## Preflight
 
-`$SKILL_DIR` is the directory this SKILL.md was loaded from — the harness shows that path when it loads the skill (the plugin install under Claude Code, the skill's path under Codex) — and every path in this skill is relative to it, never to the project; never run a project's own `scripts/locate-triforge.sh`. Core-trio liveness is gated here, never at session start (fast non-model `--version` checks, cached per session; on failure it names the failing member and its install or login fix):
+`$SKILL_DIR` is the directory this SKILL.md was loaded from — the harness shows that path when it loads the skill (the plugin install under Claude Code, the skill's path under Codex) — and every path in this skill is relative to it, never to the project; never run a project's own `scripts/locate-triforge.sh`. `triforge_bootstrap` repeats the project setup that session start does (`ops/`, the skills copy, the per-CLI files, the plugin-root pointer), so a project whose hooks never ran still builds. It is idempotent; rc 80 means it finished with warnings on stderr. Core-trio liveness is gated here, never at session start (fast non-model `--version` checks, cached per session; on failure it names the failing member and its install or login fix):
 
 ```bash
 ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
+triforge_bootstrap || [ $? -eq 80 ] || exit 1
 ensure_core_trio_live || exit 1
 ```
 

@@ -134,7 +134,12 @@
 #      scripts/validate-skills.sh, the skills/at-* count in this script), and
 #      the names the session-start banner (hooks/handlers/session-start.sh)
 #      and skills/at-status/references/status-template.md enumerate equal the
-#      set of skills/at-*/ directories (the diff is printed).
+#      set of skills/at-*/ directories (the diff is printed). No shipped
+#      surface (check 4's scope, minus ops/) carries a bare $at- mention,
+#      because Codex attaches a plugin skill only as
+#      $agent-triforge:at-<name> (codex-cli 0.160.0, U14). The check skips
+#      the validate-skills fixture c24-bare-mention/, which carries one on
+#      purpose.
 #  10. Other-harness skill manifests (R22) — skills/.devin-plugin/plugin.json
 #      (Devin; plugin root skills/, installed as <repo>#skills) and the root
 #      package.json "pi" key (Pi) each list exactly the portable skill
@@ -276,6 +281,7 @@ import ast
 import glob
 import os
 import re
+import shlex
 import sys
 
 try:
@@ -322,7 +328,7 @@ FIELDS = {
     "egress": str, "lead": dict,
 }
 LEAD_FIELDS = {
-    "launch_argv": str, "wait_budget_s": int, "tool_vocab_read": str, "tool_vocab_action": str,
+    "launch_argv": str, "model_argv": str, "effort_argv": str, "full_access": bool, "wait_budget_s": int, "tool_vocab_read": str, "tool_vocab_action": str,
     "goal_gate": str, "ask_user": str, "native_subagents_enforced_tools": bool, "agent_teams": bool,
     "plugin_root_env": str,
 }
@@ -332,7 +338,20 @@ reg_path = os.environ["VV_REGISTRY"]
 reg = read(reg_path)
 clis = None
 env_base = []
+launch_full_access = launch_extra_words = None
 if reg is not None:
+    m = re.search(r"^_LAUNCH_ACCESS_PY='\n(.*?)\n'$", reg, re.M | re.S)
+    if not m:
+        fails.append(reg_path + ": _LAUNCH_ACCESS_PY='...' not found — the full-access detector lead.full_access is checked against")
+    elif "'" in m.group(1):
+        fails.append(reg_path + ": _LAUNCH_ACCESS_PY contains a single quote — the shell literal ends there")
+    else:
+        try:
+            ns = {}
+            exec(m.group(1), ns)  # noqa: S102 — this checkout's own registry
+            launch_full_access, launch_extra_words = ns["launch_full_access"], ns["launch_extra_words"]
+        except Exception as exc:  # noqa: BLE001 — report, do not crash
+            fails.append(reg_path + ": _LAUNCH_ACCESS_PY does not define launch_full_access and launch_extra_words: " + str(exc))
     m = re.search(r"^_TRIFORGE_CLIS_PY='\n(.*?)\n'$", reg, re.M | re.S)
     if not m:
         fails.append(reg_path + ": _TRIFORGE_CLIS_PY='...' literal not found")
@@ -423,6 +442,26 @@ if clis is not None:
             if not lead.get("launch_argv"):
                 fails.append(where + ": lead.launch_argv is empty")
                 shape_ok = False
+            for f in ("model_argv", "effort_argv"):
+                if isinstance(lead.get(f), str) and lead[f] and "{}" not in lead[f]:
+                    fails.append(where + ": lead." + f + " has no {} where the value goes")
+                    shape_ok = False
+            # The declaration and what the shipped launch line does must agree
+            # (coordinate.sh asks for --allow-full-access when either says so).
+            if launch_full_access is not None and isinstance(lead.get("launch_argv"), str) and isinstance(lead.get("full_access"), bool):
+                try:
+                    words = shlex.split(lead["launch_argv"])
+                    for f in ("model_argv", "effort_argv"):
+                        if isinstance(lead.get(f), str) and lead[f]:
+                            words += launch_extra_words(lead[f], "x")
+                    why = launch_full_access(words)
+                except ValueError as exc:
+                    why = None
+                    fails.append(where + ": lead.launch_argv does not split into shell words: " + str(exc))
+                if why is not None and bool(why) != lead["full_access"]:
+                    fails.append(where + ": lead.full_access = " + str(lead["full_access"]) + " but its launch line reads as "
+                                 + ("full access (" + "; ".join(why) + ")" if why else "no full access") + " — declare what the line does")
+                    shape_ok = False
         if e.get("tier") == "core":
             core.append(cli)
     if not core:
@@ -1109,6 +1148,19 @@ sys.exit(1 if fails else 0)
 PYEOF
 if [ "$LEADWF_RC" -ne 0 ]; then
   FAILED_CHECKS=$((FAILED_CHECKS + 1))
+fi
+BARE_MENTIONS=$(
+  grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" -e '\$at-' . 2>/dev/null \
+    | grep -vE '^(\./)?(ops/|scripts/fixtures/validate-skills/c24-bare-mention/)' \
+    | _shipped_surfaces \
+    | sort -t: -k1,1 -k2,2n || true
+)
+if [ -n "$BARE_MENTIONS" ]; then
+  printf '%s\n' "$BARE_MENTIONS"
+  BARE_COUNT=$(printf '%s\n' "$BARE_MENTIONS" | grep -c . || true)
+  fail "lead workflows: $BARE_COUNT bare \$at- mention(s) on shipped surfaces (listed above as file:line:text). Codex attaches a plugin skill only as \$agent-triforge:at-<name>; a bare \$at-<name> attaches nothing."
+else
+  ok "lead workflows: no bare \$at- mention on shipped surfaces (Codex form: \$agent-triforge:at-<name>)"
 fi
 
 # --- 10. other-harness skill manifests (R22) ---------------------------------

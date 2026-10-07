@@ -1,6 +1,6 @@
 # Under a Codex lead
 
-- Invoke as `$at-build`. No plugin-root variable is exported, so the locator resolves this skill's own location inside the plugin tree, else the plugin-root pointer that the setup skill's bootstrap writes under `.agents/`.
+- Invoke as `$agent-triforge:at-build`. No plugin-root variable is exported, so the locator resolves this skill's own location inside the plugin tree, else the plugin-root pointer that the setup skill's bootstrap writes under `.agents/`.
 - Personas (`integration-verifier`, `continuous-reviewer`) start detached through `persona_spawn` from the shell tool, not `spawn_agent`; run the wait block in `exec_command`: `persona_wait` returns inside the registry's 900 s `wait_budget_s`, with 75 while personas still run, so you rerun it. One that fails or writes nothing is a failed sub-task.
 - Agent-team mode has no separate runtime (this lead's `agent_teams` capability is unset): the lead itself takes the role of the `team-lead` persona, whose text `persona_prompt team-lead` prints (wave grouping, context injection, every merge on the main tree, KTD-3), and runs the builders as leases with `continuous-reviewer` dispatches for review.
 - `lease_wait` runs in `exec_command`; its budget stays inside the registry's `wait_budget_s` (900 s), which the shipped launch line's `background_terminal_max_timeout=900000` matches. Builders run detached, so they survive the end of the tool call and of the `codex exec` run.

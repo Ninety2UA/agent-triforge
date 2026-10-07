@@ -1,6 +1,6 @@
 # Under Codex
 
-- Invocation: `$at-resume` in the prompt. Codex lists skills by description and never invokes this one implicitly (`agents/openai.yaml` sets `policy.allow_implicit_invocation: false`).
+- Invocation: `$agent-triforge:at-resume` in the prompt. Codex lists skills by description and never invokes this one implicitly (`agents/openai.yaml` sets `policy.allow_implicit_invocation: false`).
 - Personas for a resumed phase start detached through `persona_spawn` from the shell tool, not `spawn_agent`, and a run directory the paused phase printed is collected with `persona_wait` (rerun while it returns 75); the never-downgrade trio runs as top-tier Claude, never as a Codex sub-agent. Any `spawn_agent` the lead makes keeps one spawn round, no spawn-of-spawn — the `[agents]` caps in the Triforge Codex declarations (`max_depth = 2`, `max_threads = 4`) state the intended fan-out; `gpt-6-astra` runs `multi_agent_v2` and ignores `max_depth`, so the one-round rule is the skill's, not the runtime's.
 - Waiting on `building` leases: `lease_wait` runs in `exec_command`; its budget stays inside the registry's `wait_budget_s` (900 s), which the shipped launch line's `background_terminal_max_timeout=900000` matches. Builders run detached, so they survive the end of the tool call and of the `codex exec` run.
 - Completion: a Codex lead has no `/goal` gate — it completes on the `ops/.sprint-complete` sentinel (KTD14), created only after the verification checklist passes.

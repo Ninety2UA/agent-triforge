@@ -439,7 +439,11 @@ TRIO_ROWS_EOF
 # that leaves out model gets its CLI's registry model; one that leaves out
 # effort gets LEAD_DEFAULT_EFFORT (Codex runs at xhigh, D-021; a Claude lead
 # keeps the session default, "").
-_LEAD_PY='
+# lead_roster reads the roster through read_regular (_READ_REGULAR_PY,
+# common.sh): a roster path that is there but not a regular file (a FIFO, a
+# directory, a dangling link) is refused like a malformed roster (rc 4),
+# promptly, never read as "no roster" (Phase 3 round 5, G3).
+_LEAD_PY="${_READ_REGULAR_PY}"'
 LEAD_DEFAULT_CLI = "claude"
 LEAD_DEFAULT_EFFORT = {"codex": "xhigh"}
 LEAD_EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -460,11 +464,15 @@ def lead_toml(who):
     return tomllib
 
 def lead_roster(tomllib, path, who):
-    if not os.path.isfile(path):
+    if not os.path.lexists(path):
         return {}
     try:
-        with open(path, "rb") as f:
-            return tomllib.load(f)
+        raw = read_regular(path)
+    except OSError as exc:
+        sys.stderr.write(who + ": ERROR cannot read " + path + " as a regular file (" + str(exc) + ")\n")
+        sys.exit(4)
+    try:
+        return tomllib.loads(raw.decode("utf-8"))
     except tomllib.TOMLDecodeError as exc:
         sys.stderr.write(who + ": ERROR malformed " + path + ": " + str(exc) + "\n")
         sys.exit(4)
@@ -507,7 +515,15 @@ def lead_load(roster, reject):
 # write_verified(path, new_raw, verify, who) writes new_raw beside path, loads
 # it with the caller's module-level tomllib and hands it to verify, which
 # raises when it does not hold the intended values; only then does it replace
-# path. On a failure it removes the temporary file and exits 4.
+# path. On a failure it removes the temporary file and exits 4. The roster is
+# <project>/ops/roster.toml, and only there (Phase 3 round 4, B7): the project
+# directory is opened, ops/ is opened relative to it without following a link,
+# and the temporary file (created O_EXCL|O_NOFOLLOW under a random name), the
+# read-back and the rename all go through that descriptor, so an ops/ that is
+# a symlink to another directory (another checkout, a home directory) gets no
+# write, nor does one swapped in after the check. ops/ that is a symlink or not
+# a directory, or ops/roster.toml that is a symlink or not a regular file,
+# exits 6 with a refusal naming it.
 _ROSTER_SPLICE_PY='
 def splice_table(raw, header_re, block, keep_trailing_comments):
     lines = raw.splitlines(keepends=True)
@@ -543,21 +559,53 @@ def splice_table(raw, header_re, block, keep_trailing_comments):
     return new_raw + suffix
 
 def write_verified(path, new_raw, verify, who):
-    tmp = path + ".tmp." + str(os.getpid())
-    with open(tmp, "w") as f:
-        f.write(new_raw)
+    import errno, secrets, stat
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    ops_path = os.path.dirname(path) or "."
+    name = os.path.basename(path)
+    def refuse(what):
+        sys.stderr.write(who + ": REFUSED " + what + ", so the roster is not written there (Triforge writes the roster only as a regular file in the real ops/ directory of the project)\n")
+        sys.exit(6)
     try:
-        with open(tmp, "rb") as f:
+        top = os.open(os.path.realpath(os.path.dirname(os.path.abspath(ops_path))), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        ops = os.open(os.path.basename(os.path.abspath(ops_path)), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow, dir_fd=top)
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR, errno.EMLINK):
+            refuse(ops_path + " is a symlink or not a directory")
+        sys.stderr.write(who + ": ERROR could not open " + ops_path + ": " + str(exc) + "\n")
+        sys.exit(4)
+    try:
+        st = os.stat(name, dir_fd=ops, follow_symlinks=False)
+        if not stat.S_ISREG(st.st_mode):
+            refuse(path + " is a symlink or not a regular file")
+    except FileNotFoundError:
+        pass
+    tmp, fd = "", -1
+    for _ in range(8):
+        tmp = "." + name + ".triforge-tmp-" + secrets.token_hex(8)
+        try:
+            fd = os.open(tmp, os.O_RDWR | os.O_CREAT | os.O_EXCL | nofollow, 0o666, dir_fd=ops)
+            break
+        except FileExistsError:
+            continue
+    if fd < 0:
+        sys.stderr.write(who + ": ERROR no free temporary name beside " + path + "\n")
+        sys.exit(4)
+    try:
+        with os.fdopen(fd, "w+b") as f:
+            f.write(new_raw.encode("utf-8"))
+            f.flush()
+            f.seek(0)
             data = tomllib.load(f)
         verify(data)
     except Exception as exc:
         try:
-            os.unlink(tmp)
+            os.unlink(tmp, dir_fd=ops)
         except OSError:
             pass
         sys.stderr.write(who + ": ERROR serialized roster failed round-trip verify: " + str(exc) + "\n")
         sys.exit(4)
-    os.replace(tmp, path)
+    os.rename(tmp, name, src_dir_fd=ops, dst_dir_fd=ops)
 '
 
 # _checkout_top — the checkout this shell stands in: the nearest directory
@@ -591,15 +639,23 @@ _lead_roster_path() {
   fi
 }
 
-# _lead_read <who> <3|4> — resolve_lead's and roster_lead_entry's one read.
+# _lead_read <who> <3|4> [<cli>] — the one read behind resolve_lead,
+# roster_lead_entry and lead_resolve_as. With <cli>, the row is <cli> as the
+# lead: rc 5 first when it cannot lead, then the roster's model and effort when
+# it is this checkout's lead, else its own lead defaults.
 _lead_read() {
-  RL_WHO="$1" RL_COLS="$2" RL_ROSTER="$(_lead_roster_path)" python3 -c "
+  RL_WHO="$1" RL_COLS="$2" RL_AS="${3:-}" RL_ROSTER="$(_lead_roster_path)" python3 -c "
 import os, sys
 ${_TRIFORGE_CLIS_PY}
 ${_LEAD_PY}
-who, path = os.environ['RL_WHO'], os.environ['RL_ROSTER']
+who, path, want = os.environ['RL_WHO'], os.environ['RL_ROSTER'], os.environ['RL_AS']
+if want and want not in lead_capable():
+    sys.stderr.write(who + ': ERROR ' + repr(want) + ' cannot lead: the lead is one of ' + ', '.join(lead_capable()) + '\n')
+    sys.exit(5)
 roster = lead_roster(lead_toml(who), path, who)
 cli, model, effort, explicit = lead_load(roster, lambda msg: lead_reject(who, path, msg))
+if want and cli != want:
+    cli, model, effort = want, CLIS[want]['model'], LEAD_DEFAULT_EFFORT.get(want, '')
 cols = [cli, model, effort]
 if os.environ['RL_COLS'] == '4':
     cols.append('roster' if explicit else 'default')
@@ -643,11 +699,15 @@ _lead_resolve() {
 
 # _lead_roster_sig <roster> — the roster's cksum, "absent" when there is no
 # roster, nothing when one exists but can't be read (_lead_resolve then keeps
-# nothing).
+# nothing, and the reader refuses it). cksum reads only a regular file: a FIFO
+# planted there would block the redirect, and with it every hook and helper
+# that resolves the lead (Phase 3 round 5, G3). bash can't open a file
+# O_NONBLOCK, so a same-user process that swaps the file for a FIFO between
+# the test and the redirect can still stall it: a residual, documented.
 _lead_roster_sig() {
-  if [ -e "$1" ] || [ -L "$1" ]; then
+  if [ -f "$1" ]; then
     cksum 2>/dev/null < "$1" || true
-  else
+  elif [ ! -e "$1" ] && [ ! -L "$1" ]; then
     echo absent
   fi
 }
@@ -658,6 +718,16 @@ _lead_roster_sig() {
 resolve_lead() {
   _lead_resolve || return $?
   printf '%s\n' "$_LEAD_RESOLVED"
+}
+
+# lead_resolve_as <cli> — cli<TAB>model<TAB>effort for <cli> as the lead: the
+# roster's [lead] model and effort when <cli> is this checkout's lead, else
+# <cli>'s own lead defaults (its registry model, LEAD_DEFAULT_EFFORT), the
+# values a [lead] naming only cli would resolve to. rc 5 for a CLI that cannot
+# lead; otherwise resolve_lead's rc. coordinate.sh --dry-run --lead composes
+# another lead's launch line with it.
+lead_resolve_as() {
+  _lead_read lead_resolve_as 3 "${1:?usage: lead_resolve_as <cli>}"
 }
 
 # roster_lead_entry — what the roster configures, for at-setup:
@@ -918,7 +988,8 @@ for e in events:
 
 # resolve_lead_caps — the lead's capabilities, one "<name><TAB><value>" line
 # each: the registry's KTD1 lead fields as cli_field formats them
-# (launch_argv, wait_budget_s, tool_vocab_read, tool_vocab_action, goal_gate,
+# (launch_argv, model_argv, effort_argv, full_access, wait_budget_s, tool_vocab_read,
+# tool_vocab_action, goal_gate,
 # ask_user, native_subagents_enforced_tools, agent_teams, plugin_root_env),
 # then hooks_trusted.<event> present|absent, detected at runtime
 # (_lead_hooks_detect) and cached for the lead session (_lead_session_key) in
@@ -927,7 +998,7 @@ for e in events:
 # (R44: reported once, never skipped silently). rc: resolve_lead's (3 no TOML
 # parser, 4, 5); 2 when the registry can't be read.
 resolve_lead_caps() {
-  local LEAD TAB STATIC HOOKS KEY CACHE NEW=0 N V R MISS="" HMISS="" GROUP="" GR="" LNAME
+  local LEAD TAB STATIC HOOKS KEY CACHE CACHE_TMP="" NEW=0 N V R MISS="" HMISS="" GROUP="" GR="" LNAME
   TAB=$(printf '\t')
   _lead_resolve || return $?
   LEAD=$_LEAD_CLI
@@ -941,13 +1012,23 @@ for f in CLIS[cli]['lead']:
 ") || return 2
   KEY=$(_lead_session_key)
   CACHE="${TMPDIR:-/tmp}/triforge_lead_caps_${LEAD}_${KEY}"
-  if [ -f "$CACHE" ]; then
+  # The cache is read only when it is a regular file of this user (-O; not a
+  # link, so not a FIFO either), and written through a file mktemp creates
+  # exclusively under a random name, then renamed into place (Phase 3 round
+  # 4, B7's class): a name another user planted in a shared TMPDIR is neither
+  # trusted nor written through.
+  if [ -f "$CACHE" ] && [ ! -L "$CACHE" ] && [ -O "$CACHE" ]; then
     HOOKS=$(cat "$CACHE" 2>/dev/null || true)
   else
     HOOKS=$(_lead_hooks_detect "$LEAD") || HOOKS=""
     NEW=1
-    if printf '%s\n' "$HOOKS" > "${CACHE}.tmp.$$" 2>/dev/null; then
-      mv -f "${CACHE}.tmp.$$" "$CACHE" 2>/dev/null || true
+    CACHE_TMP=$(mktemp "${CACHE}.XXXXXXXX" 2>/dev/null) || CACHE_TMP=""
+    if [ -n "$CACHE_TMP" ]; then
+      if printf '%s\n' "$HOOKS" > "$CACHE_TMP" 2>/dev/null; then
+        mv -f "$CACHE_TMP" "$CACHE" 2>/dev/null || rm -f "$CACHE_TMP"
+      else
+        rm -f "$CACHE_TMP"
+      fi
     fi
   fi
   printf '%s\n' "$STATIC"
@@ -972,7 +1053,10 @@ LEAD_HOOKS_EOF
   if [ "$NEW" -eq 0 ]; then
     return 0
   fi
+  # full_access is a property of the launch line, not a capability: false is
+  # the safe value and never "missing".
   while IFS="$TAB" read -r N V; do
+    if [ "$N" = full_access ]; then continue; fi
     case "$V" in
       ""|false) if [ -n "$N" ]; then MISS="${MISS}${MISS:+, }${N}"; fi ;;
     esac
@@ -1124,8 +1208,7 @@ if effort == '__default__':
 
 raw = ''
 if os.path.isfile(path):
-    with open(path, 'r') as f:
-        raw = f.read()
+    raw = read_regular(path, True)
     try:
         tomllib.loads(raw)
     except tomllib.TOMLDecodeError as exc:
@@ -1254,6 +1337,7 @@ import os, sys, re
 ${_CURSOR_ID_PY}
 ${_TRIFORGE_CLIS_PY}
 ${_ROLE_DEFAULTS_PY}
+${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -1275,8 +1359,7 @@ roster = {}
 user = {}
 if os.path.isfile(path):
     try:
-        with open(path, 'rb') as f:
-            roster = tomllib.load(f)
+        roster = tomllib.loads(read_regular(path).decode('utf-8'))
     except tomllib.TOMLDecodeError as exc:
         sys.stderr.write('roster_role_entry: ERROR malformed ' + path + ': ' + str(exc) + '\n')
         sys.exit(4)
@@ -1398,8 +1481,7 @@ if effort not in LEAD_EFFORTS:
 raw = ''
 roster = {}
 if os.path.isfile(path):
-    with open(path, 'r') as f:
-        raw = f.read()
+    raw = read_regular(path, True)
     try:
         roster = tomllib.loads(raw)
     except tomllib.TOMLDecodeError as exc:
@@ -1516,6 +1598,7 @@ roster_has_member() {
   [ -f "ops/roster.toml" ] || return 1
   ROSTER_FILE="ops/roster.toml" RH_CLI="$CLI" python3 -c "
 import os, sys
+${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -1524,8 +1607,7 @@ except ImportError:
     except ImportError:
         sys.exit(2)
 try:
-    with open(os.environ['ROSTER_FILE'], 'rb') as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular(os.environ['ROSTER_FILE']).decode('utf-8'))
 except Exception:
     sys.exit(2)
 m = data.get('members', {})
@@ -1540,6 +1622,7 @@ _roster_member_field() {
   [ -f "ops/roster.toml" ] || return 1
   ROSTER_FILE="ops/roster.toml" RF_CLI="$CLI" RF_FIELD="$FIELD" python3 -c "
 import os, sys
+${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -1548,8 +1631,7 @@ except ImportError:
     except ImportError:
         sys.exit(1)
 try:
-    with open(os.environ['ROSTER_FILE'], 'rb') as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular(os.environ['ROSTER_FILE']).decode('utf-8'))
 except Exception:
     sys.exit(1)
 m = data.get('members', {}).get(os.environ['RF_CLI'], {})
@@ -1579,6 +1661,7 @@ roster_write_member() {
 import json, os, re, sys
 ${_TRIFORGE_CLIS_PY}
 ${_ROSTER_SPLICE_PY}
+${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -1614,8 +1697,7 @@ block = ('[members.' + cli + ']\n'
 
 raw = ''
 if os.path.isfile(path):
-    with open(path, 'r') as f:
-        raw = f.read()
+    raw = read_regular(path, True)
 # The whole old table goes, its trailing comment lines included.
 new_raw = splice_table(raw, r'^\[members\.' + re.escape(cli) + r'\][ \t]*$', block, False)
 

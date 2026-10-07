@@ -1,0 +1,6 @@
+interface:
+  display_name: "Bare mention fixture"
+  short_description: "Names an at- skill without the plugin namespace."
+  default_prompt: "Run $at-bare and report."
+policy:
+  allow_implicit_invocation: false

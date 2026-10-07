@@ -26,9 +26,12 @@ Invoked with one optional CLI name (`opencode`, `kimi` or `cursor`) to walk only
 set -uo pipefail
 ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
 set +e   # sourcing folds the helper's errexit into this shell; the enrollment helpers return nonzero as control flow, so turn it back off
+triforge_bootstrap || [ $? -eq 80 ] || exit 1   # 80: finished with warnings (stderr names them); 45: refused in a worker
 ```
 
-Functions used: `ensure_core_trio_live`, `roster_enroll_member`, `roster_member_default`, `roster_member_auth`, `roster_write_member`, `roster_member_status`, `roster_role_entry`, `roster_write_role`, `resolve_role`, `_registry_binary`, `cli_install_fix`.
+`triforge_bootstrap` sets the project up the way session start does: `ops/`, the `.agents/skills` copy, the per-CLI files, the agy pack, and the untracked pointer `.agents/triforge-plugin-root.local` that the locator falls back to. A Codex-led project works before any plugin hook is trusted, and a second run changes nothing.
+
+Functions used: `triforge_bootstrap`, `ensure_core_trio_live`, `roster_enroll_member`, `roster_member_default`, `roster_member_auth`, `roster_write_member`, `roster_member_status`, `roster_role_entry`, `roster_write_role`, `resolve_role`, `_registry_binary`, `cli_install_fix`.
 
 ## Facts the tree does not tell you
 
@@ -41,6 +44,7 @@ Functions used: `ensure_core_trio_live`, `roster_enroll_member`, `roster_member_
 
 ## Output
 
+- The `triforge_bootstrap:` notices, if any (none on a project that is already set up).
 - `CORE-TRIO: live` or `CORE-TRIO: UNRESOLVED` with the named fix; `CODEX-TRUST: <state>` and, when the entry is missing, the `[projects."<absolute project path>"]` block for the user to add.
 - One `rc=` line per optional member walked, and each enrollment or decline recorded through `roster_write_member`.
 - The role-assignment table (ROLE · CLI · MODEL · EFFORT · FALLBACKS) and any `roster_write_role` rc lines.
