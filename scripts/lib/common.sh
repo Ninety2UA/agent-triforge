@@ -136,7 +136,7 @@ _classify_invoke_failure() {
 #
 # _adapter_env (scripts/lib/lease.sh) puts TRIFORGE_LEASE_WORKER into every
 # lease worker's environment: `builder` for a lease build, `persona` for a
-# persona dispatch (U25's dispatch_persona will set _ADAPTER_WORKER=persona).
+# persona dispatch (dispatch_persona in persona.sh sets _ADAPTER_WORKER=persona).
 # Any non-empty value counts as the marker. The hook handlers exit at once
 # under it, and every helper that carves, dispatches, collects, merges,
 # promotes or writes the ledger or the roster (lease.sh, roster.sh) starts with

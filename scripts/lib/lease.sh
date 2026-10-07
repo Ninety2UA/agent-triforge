@@ -1106,6 +1106,18 @@ BASELINE_EOF
     recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 
+# _lead_baseline_ensure [writer] — record the integrity baseline when the
+# ledger has none yet (no lease ever ran in this checkout), through
+# _lead_baseline_record [writer]; nothing when one is there. Sets
+# _LEAD_BASELINE_NEW to 1 when it recorded one, else 0; rc 1 when recording
+# failed.
+_lead_baseline_ensure() {
+  _LEAD_BASELINE_NEW=0
+  if [ -n "$(_ledger_get @baseline config 2>/dev/null || true)" ]; then return 0; fi
+  _lead_baseline_record "${1:-_ledger_update}" || return 1
+  _LEAD_BASELINE_NEW=1
+}
+
 # _lead_lease_digests <worktree> [admin-dir] — "<pointer-digest>\t<admin-digest>\t<admin-dir>"
 # for a lease worktree (the admin dir is derived from the pointer when not given
 # — only right after the lead itself created the worktree).
@@ -1257,10 +1269,16 @@ LEASE_EOF
 # — print the refusal for a lead checkout that is no longer on the integration
 # branch the lead recorded (KTD18): a builder shares .git and can check out
 # another branch (or detach HEAD) in the lead's checkout, and the next merge,
-# promotion or carve would then build on commits the lead never verified.
+# promotion or carve would then build on commits the lead never verified. On
+# the default branch or a detached HEAD the fix is to check the integration
+# branch out again: lease_rebaseline there would clear it, never record one.
 _lead_branch_switched() {
   local OP=$1 IB=$2 ISHA=$3 CUR=${4:-}
-  echo "${OP}: REFUSED — the lead's integration branch is '${IB}' (at ${ISHA:0:12}) but the checkout is on '${CUR:-<detached HEAD>}' — a builder shares .git and can switch the lead's checkout; if you switched it yourself, run lease_rebaseline (it records the current branch) and rerun (KTD18)." >&2
+  if [ -z "$CUR" ] || [ "$CUR" = "$(_lease_default_branch)" ]; then
+    echo "${OP}: REFUSED — the lead's integration branch is '${IB}' (at ${ISHA:0:12}) but the checkout is on '${CUR:-<detached HEAD>}' — a builder shares .git and can switch the lead's checkout; if you switched it yourself, check '${IB}' out again and rerun (lease_rebaseline here would clear the recorded integration branch, KTD18)." >&2
+  else
+    echo "${OP}: REFUSED — the lead's integration branch is '${IB}' (at ${ISHA:0:12}) but the checkout is on '${CUR}' — a builder shares .git and can switch the lead's checkout; if you switched it yourself, run lease_rebaseline (it records the current branch) and rerun (KTD18)." >&2
+  fi
 }
 
 # _lead_integration_check <op> — lease_merge and lease_promote build on the
@@ -1478,9 +1496,9 @@ BASEKEYS
   PAIRS+=("NO_COLOR=1")   # captured output is parsed, never rendered (U5)
   # Worker marker (KTD9): hook handlers exit at once and lead-owned helpers
   # refuse (_lead_only) anywhere in the worker's process tree. Two values:
-  # builder (every lease build) and persona: U25's dispatch_persona will set
-  # _ADAPTER_WORKER=persona inside its dispatch subshell, the way
-  # lease_dispatch hands over _ADAPTER_ENV_KEYS.
+  # builder (every lease build) and persona: dispatch_persona
+  # (scripts/lib/persona.sh) sets _ADAPTER_WORKER=persona inside its dispatch
+  # subshell, the way lease_dispatch hands over _ADAPTER_ENV_KEYS.
   case "${_ADAPTER_WORKER:-builder}" in
     persona) PAIRS+=("TRIFORGE_LEASE_WORKER=persona") ;;
     *)       PAIRS+=("TRIFORGE_LEASE_WORKER=builder") ;;
@@ -1995,9 +2013,7 @@ CREATE_ROW_EOF
   # a recorded one that differs was refused above. The default branch is never
   # recorded as the integration branch (KTD18): a lease created on it leaves
   # the record empty, and the first lease or merge on the sprint branch fills it.
-  if [ -z "$(_ledger_get @baseline config 2>/dev/null || true)" ]; then
-    _lead_baseline_record || return 1
-  fi
+  _lead_baseline_ensure || return 1
   if [ -n "$CUR" ] && [ -z "$IB" ] && [ "$CUR" != "$(_lease_default_branch)" ]; then
     _ledger_update @baseline integration_branch="$CUR" integration_sha="$_CARVE_BASE" || return 1
   fi
@@ -2982,9 +2998,7 @@ APPROVE_ROW_EOF
       # A checkout with no integrity baseline yet (no lease ever ran): record
       # it now, as lease_create would, or the next check reads the lead's
       # ledger copy as a baseline that went missing.
-      if [ -z "$(_ledger_get @baseline config 2>/dev/null || true)" ]; then
-        _lead_baseline_record _ledger_write >/dev/null || return 1
-      fi
+      _lead_baseline_ensure _ledger_write >/dev/null || return 1
       echo "lease_approve: promotion of ${B} into ${_LEASE_DEF} approved by the user: tree ${TREE:0:12}, ${_LEASE_DEF} at ${_LEASE_DEF_SHA:0:12}, ${_LP_COUNT} protected path(s)${_LP_PATHS:+: ${_LP_PATHS}}; recorded via=${_LEAD_VIA} host=${_LEAD_HOST} lead=${LEADNOW} at ${STAMP}. A later merge or a move of ${_LEASE_DEF} voids it. Audit, not prevention: any shell with the helper can record this, the lead's agent shell included (via=lead-session)." >&2
       ;;
     *)

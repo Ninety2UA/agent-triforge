@@ -354,10 +354,10 @@ $LEASE_RESUME}
 Follow the Agent Triforge framework (docs/agent-triforge.md):
 - Phase 0: Codebase analysis (Antigravity) — skip if STATE.md shows Phase 0 complete
 - Phase 1: Planning — skip if TASKS.md already exists for this goal
-- Phase 1.5: Plan validation — run plan-checker agent
+- Phase 1.5: Plan validation — run the plan-checker persona
 - Phase 2: Build — use wave orchestration for complex builds
-- Phase 3: Parallel review — Antigravity + Codex + Claude subagent reviewers
-- Phase 4: Process reviews — use findings-synthesizer agent
+- Phase 3: Parallel review — Antigravity + Codex + the reviewer personas
+- Phase 4: Process reviews — run the findings-synthesizer persona
 - Phase 5: Test — Codex writes and runs tests
 - Phase 6: Wrap up — compound knowledge, update STATE.md
 

@@ -93,6 +93,7 @@ resolve_role() {
 import os, re, shutil, sys
 ${_CURSOR_ID_PY}
 ${_TRIFORGE_CLIS_PY}
+${_INSTALL_FIX_PY}
 ${_ROLE_DEFAULTS_PY}
 ${_LEAD_PY}
 try:
@@ -117,8 +118,8 @@ BINARY = {c: (os.environ.get(e['binary_env']) if e['binary_env'] else None) or e
 # member is reached via fallback or chosen as an overridden primary with no
 # explicit role model. A [members.<cli>].model entry overrides it.
 CLI_DEFAULT_MODEL = {c: e['model'] for c, e in CLIS.items()}
-# G12-style install/login guidance (R21) — the same line cli_install_fix prints.
-INSTALL_FIX = {c: 'install ' + e['name'] + ' (' + e['install'] + ')' + (', then ' + e['login'] if e['login'] else '') for c, e in CLIS.items()}
+# G12-style install/login guidance (R21): install_fix, the line cli_install_fix prints.
+INSTALL_FIX = {c: install_fix(c) for c in CLIS}
 
 path = os.environ.get('ROSTER_FILE', 'ops/roster.toml')
 # A malformed roster exits 4, its TOMLDecodeError text naming the line.

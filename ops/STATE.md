@@ -1,6 +1,6 @@
 ---
-saved: 2026-10-06T18:10:00Z
-phase: 2c fixing; 3 integrating
+saved: 2026-10-07T06:55:00Z
+phase: 2c, 3 and 4 in a user-approved fourth review-fix round (see Blockers)
 wave: 0
 tasks:
   total: 29
@@ -44,9 +44,9 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 | 1b | U7 commands → at- skills; U24 split oversized skills; U23 remove commands/ | **merged** — PR #15 squash 3e99675 |
 | 2a | U29 capability/survival probe rows; U13 detached leases + lease_wait + lead exit; U11 worker marker (+ U18 manifests, docs copy pass) | **merged** — PR #16 squash 4d4b054; ce-code-review run 20261004-175229-90f65ad6, final-diff review 5/5, Codex gpt-6-astra xhigh FIX → all applied |
 | 2b | U9 [lead] table + resolution; U12 claude -p lane; U10 ledger lead CLI / reviewer class / approvals | **merged** — PR #18 squash 5ac2e54; final-diff re-review 5/5, Codex gpt-6-astra xhigh FIX → all applied |
-| 2c | U25 dispatch_persona lane; U8 personas home, agents/ removed | **fixing, round 3** — Codex round 2 FIX (4 P1), final-diff 4/5 |
-| 3 | U14 Codex lead: bootstrap, monitors, coordinator | **pre-review** — fixes + simplify committed; `$agent-triforge:` mention sweep, then re-review |
-| 4 | U16 Grok Build adapter; U17 Devin CLI adapter (U18 shipped in 2a) | **building** — u16, u17 in parallel |
+| 2c | U25 dispatch_persona lane; U8 personas home, agents/ removed | **stopped at the review cap** — round 3: Codex FIX, final-diff 4/5 FIX (see Blockers) |
+| 3 | U14 Codex lead: bootstrap, monitors, coordinator | **stopped at the review cap** — round 3: Codex FIX, final-diff 5/5 MERGE (see Blockers) |
+| 4 | U16 Grok Build adapter; U17 Devin CLI adapter (U18 shipped in 2a) | **stopped at the review cap** — round 3: Codex FIX (2 P1), final-diff 5/5 MERGE (see Blockers) |
 | 5 | U15 at-setup lead step + instruction-file detection | pending |
 | 6 | U19 watch-cycle carry-ins; U20 two-lead fixture sprint + 4.0 release | pending |
 | final | release/4.0 → main as v4.0.0 (release.yml publishes) | pending |
@@ -57,12 +57,49 @@ Update this table and the frontmatter at every PR boundary; the plan is `docs/pl
 
 1. Phase 2c: collect u25's L1–L9, commit it in its worktree and cherry-pick onto `feat/v4-phase-2c`; rebase onto `release/4.0` (`--onto origin/release/4.0 2e9e57a`); full gate both ways plus `--only CC-21,CC-22,CC-23,CDX-20`; a re-review by final2c and Codex of the fixes; ce-simplify-code; PR → `release/4.0` (ce-commit-push-pr, branding:on, babysit:off); one gates check; squash-merge; remove the `mafw-wt-2c-*` worktrees.
 2. Phase 3: collect u14-coord's model/effort follow-up; commit it and cherry-pick onto `feat/v4-phase-3` (one conflict: `SELF_EXPECTED` needs both SELF-21 and SELF-22); add the gitconfig-capture ADR; rebase onto `release/4.0` after 2c (expect probe-self-tests.sh conflicts with 2b's simplify helpers: `_SELF_PTY`, `_self_repo`, `_self_wait_rc`); gate; final-diff review + Codex; simplify; PR; merge.
-3. Phases 4–6 per the table, each started with `/ce-work`. U15 (Phase 5) inherits: hook-trust detection by `hooks.state` trusted_hash, the live `$at-ship` vs `$agent-triforge:at-ship` check (needs a human-logged-in CODEX_HOME), the interactive launch line apart from the headless `launch_argv`, user-tier auth not reaching claude workers, agy builders needing a user-tier allow rule.
+3. Phases 4–6 per the table, each started with `/ce-work`. U15 (Phase 5) inherits: hook-trust detection by `hooks.state` trusted_hash, the live `$at-ship` vs `$agent-triforge:at-ship` check (needs a human-logged-in CODEX_HOME), the interactive launch line apart from the headless `launch_argv`, user-tier auth not reaching claude workers, agy builders needing a user-tier allow rule. **Devin (user, 2026-10-07):** the user chooses the Devin model. `swe-1-6-slow` stays the shipped default because it works on every account, Devin Free included. When Devin is enrolled, at-setup offers the models `devin models list` prints and writes the choice into the roster's `model` field for Devin's roles. at-setup also tells the user that Devin plugins they or their org installed load in every Devin run, read class included, and prints `devin plugins list` (fix5d). The consent and opt-in writers from U17 already exist (`roster_write_member --consent user --opt-in`).
 4. End of program: full review + ce-code-review over `release/4.0` vs `main`, then the release PR (only the user approves the merge to `main`).
 
 ## Blockers recorded for the user
 
-- (none yet)
+**2026-10-07 ~03:00: Phase 2c and Phase 3 stopped at the 3-review-round cap** (both third Codex gpt-6-astra xhigh reviews say FIX; gates green on both heads: 27 SELF rows, none FAIL). Nothing from either phase is merged; both branches are intact (`feat/v4-phase-2c` 115b9b1, `feat/v4-phase-3` 5b50bbc, both on release/4.0 fa612c9). Full reviews: session scratchpad `codex-2c-r3/review.md`, `codex-3-r3/review.md`; the final-diff reviewers' third-round verdicts are added below when they report. Your call: approve a fourth fix round (recommended scope below), or accept some findings as documented residuals.
+
+Lead's triage and recommendation:
+- **Functional bugs, fix regardless (2c):** at-review's dispatch block launches the two core reviewers twice (dispatch.md:151 repeats :80–89; only the second pair is awaited, the first can overwrite reports); a default review with no persona to wait on fails, because `persona_wait` returns 64 on an empty run dir (dispatch.md:234) — plain `/at-review` breaks. SELF-23 missed both (its stub accepts an empty run dir and it doesn't count launches).
+- **Policy-relevant, recommend fixing:** (3) the HOME refusal is bypassable by path casing on macOS (`pwd -P` vs `env pwd -P`; compare filesystem identity) → user-tier writes possible; (3) deleting `ops/leases.toml` and restarting under another TMPDIR passes the coordinator's integrity check (no session should start when the anchors elsewhere can't be checked); (3) headless enrollment writes through a symlinked `ops/` and its temp file is a plain open (predates 3, reachable through the hook); (3) a roster model value can put a `{`-leading line on hook stdout via `printf '%b'`; (2c) a moved integration branch / switched HEAD before dispatch supplies the "trusted" instruction bundle (validate the recorded integration SHA first).
+- **Same-user race hardening, could be documented instead:** skills-sync parent swap after validation; the `.codex/agents` migration `mv` racing a symlink swap; non-sticky shared TMPDIR races in the hook's and coordinator's temp dirs; a FIFO planted at a monitor state path blocking the hook; persona cleanup leaving descendants of a successful run, and `persona_stop` on an orphaned run returning 0. AGENTS.md "Confinement, stated as it is" already says a worker with a shell can write anything the user can and Triforge detects rather than prevents; these extend that.
+- Phase 4 (Grok, Devin) continues independently; Phases 5–6 wait on 3 and 4.
+
+**2026-10-07 ~08:55: Phase 4 stopped at the 3-review-round cap too.** Branch `feat/v4-phase-4` at 6ec6839 (on 592688f, 14 commits). Its worktree is `mafw-wt-phase-4`, nothing is merged, and the gate is green (29 SELF rows, none FAIL). Round 1 was Codex FIX (3 P1, 5 P2) and final4 3/5. Round 2 was Codex FIX (3 P1, 5 P2) and final4b 4/5. Every round-1 and round-2 finding was fixed, with SELF cases that go red when the fix is removed (final4c: 17 of 19 mutations). Round 3 split, the same way Phase 3 did: final4c **5/5 MERGE**, Codex **FIX**. Reports are in the session scratchpad: `codex-4-r3/review.md`, `final4-r3.md`, and `phase4/notes.md`, which also holds the residuals.
+- **Codex round-3 P1s.**
+  - at-review's new review-package diff (`optional-lanes.md:40`, `_lgr diff`) runs before any integrity check, so a clean filter planted in `.git/config` runs in the lead's shell. final4c rates this P3, because the learnings gate's plain `git diff` already runs the same exposure. Its fix: one `_lead_integrity_check at-review` at the top of at-review.
+  - A grok reviewer still runs user-tier startup code from `~/.grok/config.toml` (hooks, LSP, MCP), which a grok builder's sandbox can write. This is the round-1 P3-4 residual, raised to P1. The fix would refuse or suppress user-tier hooks, LSP and MCP for the read class.
+- **Codex round-3 P2s.**
+  - The 200 KB diff cap drops whole files, with no file inventory.
+  - An optional CLI in a core role (`dispatch.md`) gets no diff. final4c P3-3 found the same.
+  - `_promote_ok` scans Codex's whole transcript, so a quoted `Status: BLOCKED` suppresses a good review.
+  - Devin's retry skips the consent, role and guard re-check.
+- **P3s.**
+  - A wrong `REVIEW_BASE` silently reviews another scope.
+  - Devin retries an interrupted run.
+  - No SELF row gates at-review's promotion rule or the scratch traps; the harnesses exist (final4c).
+  - The diff can exceed Linux's 128 KiB argument limit.
+  - R25's per-CLI case arms.
+- **2026-10-07 ~09:30: the user approved the fourth round** ("continue with your recommendation"). It runs under `/ce-work` with four workers: r4-2c (`mafw-wt-phase-2c`), r4-3 (`mafw-wt-phase-3`), r4-4a (at-review side, `mafw-wt-6-fixa`) and r4-4b (grok/devin side, `mafw-wt-6-fixb`). The batches are in the session scratchpad under `round4/`. Next: round-4 reviews, then merges in the order 2c → 3 → 4.
+- **2026-10-07 ~12:45: round 4 results.**
+
+  | Phase | Independent reviewer | Codex |
+  |---|---|---|
+  | 2c | 3/5 FIX: the supervisor's `os.waitid` is missing on macOS Python ≤3.12, which CI pins | FIX: 1 P1, 4 P2 |
+  | 3 | final3d 5/5 MERGE | FIX: 1 P1, 3 P2 |
+  | 4 | final4d 5/5 MERGE | FIX: 1 P1, 1 P2 |
+
+  Gates are green on 3 and 4 under Python 3.12 and 3.14.
+- **The user then decided (AskUserQuestion: "Fix all, verify, merge").** Fix every round-4 finding in all three phases. Prove each fix with a SELF case that fails on the old head and passes on the new one. Gate under Python 3.12 and 3.14, then run gates.yml, then merge 2c → 3 → 4. There is no further external review round per phase. Codex reviews everything once, in the end-of-program review.
+- **User decision (2026-10-07):** v4.0.0 ships without a fresh full live probe run. The user skipped that release step and marked it complete: Grok's rows would read QUOTA-FAIL (xAI quota) and Kimi's AUTH-FAIL (403). The release notes cite the newest existing record. They name the live rows that ran during 4.0 development under `--only` (DVN-01..07, CC-21..25, CDX-20..23, GRK-02/03/04/06/12, and GRK-05/07..11 plus SELF-06g before the quota ran out) as development evidence. They do not present any of it as a regenerated record.
+- **Gotcha (2c round 4):** the local gate must also run under Python 3.12. gates.yml pins 3.12, and this host's `python3` is 3.14. Put a dir whose `python3` is uv's cpython-3.12.12 first in PATH.
+- **Lead's recommendation:** a fourth round, scoped to the items above. Each is local: at-review's integrity check, review package and core-lane prompt; the grok read class's user-tier surfaces; Devin's retry. The live grok rows still wait on the xAI quota.
+- **Third-round final-diff verdicts (added 03:20):** final2c **4/5 FIX** at 115b9b1 — the one blocking finding is the duplicate core-lane dispatch (dispatch.md:72-90 and :143-160, the same as Codex's 2c #4); every earlier finding fixed; P3: rerunning a synthesis start block while a synthesizer runs orphans it. final3 **5/5 MERGE** at 5b50bbc — all eight Codex round-2 findings and its four P3s fixed; it did not have Codex's round-3 list, so the reviewers disagree on Phase 3 (Codex's round-3 P1s stand until checked). Reports: session scratchpad `final2c-r3.md`, `phase3/final3-r3.md`.
 
 ## Model and effort (user-approved)
 
