@@ -64,22 +64,29 @@ fi
 # shell in its worktree already.
 #
 # What the user tier supplies. Grok starts the user's own hooks
-# (~/.grok/hooks/, the [hooks] of its config layers), LSP servers
-# (~/.grok/lsp.json) and MCP servers in every session, before any permission
-# applies, and grok has no switch that turns a user hook or LSP server off for
-# one project. So the read class shadows the user's MCP servers by name like
-# any other, and refuses where inspect reports a user hook or LSP server, or
-# a config layer sets a command inspect does not list (an auth provider,
-# ui.notifications.hooks) (_grok_lease_config; measured on 1.0.34, each
-# surface alone, from a scratch GROK_HOME): rc 69 through invoke_grok, no
-# lease at lease_create, and rc 94 (nothing runs) at each later dispatch of a
-# reviewer or analyst lease, which runs the check again. What neither inspect
-# nor the TOML layers show (a planted ~/.grok/AGENTS.md, a replaced
-# ~/.grok/bin/grok) is AGENTS.md's same-user residual. at-setup asks
-# grok_read_isolation_check before it offers grok a read role. A user
-# plugin is disabled by name like a Claude Code one. The edit class keeps the
-# user's surfaces, but its sandbox profile (_GROK_EDIT_PROFILE) leaves a
-# builder no way to plant one for a later run (_GROK_HOME_DENY).
+# (~/.grok/hooks/*.json, the [hooks] of its config layers), LSP servers
+# (~/.grok/lsp.json), config-layer commands (an auth provider,
+# ui.notifications.hooks) and MCP servers in every session, before any
+# permission applies, and has no switch that turns a user hook or LSP server
+# off for one project. The user tier belongs to the user, and the untrusted
+# input is the project under review, so a read-class run lets these run, as
+# they do whenever the user runs grok, and names each with its file in one
+# NOTE line on stderr (_grok_lease_config; each surface measured alone on
+# 1.0.34 from a scratch GROK_HOME): on lease_create's stderr, in the builder
+# log at each dispatch of a reviewer or analyst lease (the check runs again
+# there), and on invoke_grok's stderr. The user's MCP servers are still
+# shadowed by name like any other; one in a requirements layer outranks the
+# shadow and is named instead, and MCP tool calls are denied either way. A
+# user plugin is disabled by name like a Claude Code one. A user config layer
+# that does not parse is refused: rc 69 through invoke_grok, no lease at
+# lease_create, rc 94 at a dispatch. A hook another worker plants under
+# ~/.grok runs too (named in the NOTE), as does what neither inspect nor the
+# TOML layers show (a ~/.grok/AGENTS.md, a replaced ~/.grok/bin/grok): that
+# is AGENTS.md's same-user residual, detected rather than prevented. at-setup
+# asks grok_read_isolation_check before it offers grok a read role. The edit
+# class keeps the user's surfaces, but its sandbox profile
+# (_GROK_EDIT_PROFILE) leaves a builder no way to plant one for a later run
+# (_GROK_HOME_DENY).
 #
 # Roles. The registry gives grok builder, reviewer and analyst (role_limit),
 # so a tester or documenter chain naming grok fails at roster load. invoke_grok
@@ -401,25 +408,28 @@ with os.fdopen(fd, "w", encoding="utf-8") as out:
 # server. A project file that declares [plugins], or an MCP server table the
 # shadows can't join (an inline mcp_servers table, a collision), fails that
 # proof. The read class (the default; a reviewer or analyst) first passes
-# _grok_project_guard, and runs no startup code it was not handed: refused
-# when inspect reports a hook or LSP server that is not disabled and comes
-# from anywhere but a plugin these tables disable (~/.grok/hooks/, a
-# config-layer [hooks] table, ~/.grok/lsp.json), a project plugin, or a hook,
-# LSP server or plugin from inside the worktree (what a grok version loads
-# from a place the guard does not know yet); and when a user-tier config
-# layer ($GROK_HOME's config.toml, managed_config.toml and requirements.toml,
-# /etc/grok's two) sets a command inspect does not list (an auth provider,
-# ui.notifications.hooks, [hooks]), declares MCP servers in a requirements
-# layer (it outranks the project file), or does not parse. Grok has no switch
-# that turns a user hook or LSP server off for one project. Fails closed —
-# rc 1, nothing written, the file and the reason on stderr, so the caller
-# dispatches nothing — on any of those, no TOML parser, a .grok or
-# config.toml that is a symlink or not a plain directory and file inside the
-# worktree, and an inspect whose env_overlay layer does not name the
-# GROK_CONFIG overlay's sections (grok reports a malformed overlay "set but
-# ignored"; the inspect runs with the overlay, so the check costs no extra
-# grok process). Grok's own skills, .agents/skills included, are not plugins
-# and stay. The edit class (a builder lease) then writes its sandbox profile
+# _grok_project_guard, and runs no startup code the project supplies:
+# refused when inspect reports a project plugin, or a hook, LSP server or
+# plugin from inside the worktree (what a grok version loads from a place the
+# guard does not know yet). What the user tier starts runs, as in any grok
+# session the user starts, and once the file is written one NOTE line on
+# stderr names each surface with its file: a hook or LSP server inspect
+# reports that is not disabled and comes from anywhere but a plugin these
+# tables disable (~/.grok/hooks/, named by its *.json files; a config-layer
+# [hooks] table; ~/.grok/lsp.json; an unlisted plugin's), and what a user
+# config layer ($GROK_HOME's config.toml, managed_config.toml and
+# requirements.toml, /etc/grok's two) sets that inspect does not list (an
+# auth-provider command, ui.notifications.hooks, [hooks], MCP servers in a
+# requirements layer, which outranks the project file). Fails closed — rc 1,
+# nothing written, the file and the reason on stderr, so the caller
+# dispatches nothing — on any of the project refusals, a read-class config
+# layer that does not parse, no TOML parser, a .grok or config.toml that is
+# a symlink or not a plain directory and file inside the worktree, and an
+# inspect whose env_overlay layer does not name the GROK_CONFIG overlay's
+# sections (grok reports a malformed overlay "set but ignored"; the inspect
+# runs with the overlay, so the check costs no extra grok process). Grok's
+# own skills, .agents/skills included, are not plugins and stay. The edit
+# class (a builder lease) prints no NOTE, then writes its sandbox profile
 # (_grok_sandbox_profile); rc 1 when that fails, the config written.
 # _lease_provision records both files as provisioned, so the snapshot never
 # carries them (KTD9).
@@ -519,13 +529,26 @@ try:
 except Exception:
     pass
 plugins.update(oldp)
-def tier(why, where, what):
-    print("grok: ERROR %s: %s (%s), from outside the project: grok starts it in every session, a reviewer run included, before any permission applies. A grok reviewer or analyst runs no startup code it was not handed, so no read-class grok run starts here (R23). Fix: remove or disable it there, or route the role to another roster member" % (where, why, what))
-    sys.exit(1)
+# What the user tier starts in a read-class session, by file: {file: {kind:
+# [names]}}, named in one NOTE line once the file is written
+found = {}
+def note(where, kind, what=""):
+    names = found.setdefault(where, {}).setdefault(kind, [])
+    if what and what not in names:
+        names.append(what)
+def hook_files(where):
+    # inspect reports a ~/.grok/hooks hook by its directory: name the JSON
+    # files grok loads from it
+    try:
+        js = sorted(n for n in os.listdir(where) if n.endswith(".json")) if where and os.path.isdir(where) else []
+    except OSError:
+        js = []
+    return ", ".join(os.path.join(where, n) for n in js[:10]) + (", and %d more" % (len(js) - 10) if len(js) > 10 else "") if js else where
 if cls == "read":
     # Everything inspect reports that grok starts as a session opens: a hook
-    # or LSP server from the project, the user (~/.grok/hooks, lsp.json, the
-    # config layers) or a plugin the tables below do not disable
+    # or LSP server from the project (refused), from the user (~/.grok/hooks,
+    # lsp.json, the config layers) or a plugin the tables below do not
+    # disable (named in the note)
     for kind, items in (("hook", d["hooks"]), ("LSP server", d["lspServers"]), ("plugin", d["plugins"])):
         for e in items:
             if not isinstance(e, dict) or e.get("disabled") is True:
@@ -536,11 +559,18 @@ if cls == "read":
             if s.get("type") == "project" or e.get("scope") == "project" or inside(where):
                 print("grok: ERROR %s: grok inspect reports a project %s from it (%s). %s" % (where or wt, kind, what, os.environ["GLC_TAIL"]))
                 sys.exit(1)
-            if kind != "plugin" and not (s.get("type") == "plugin" and s.get("plugin_name") in plugins):
-                tier("grok inspect reports %s of type %s" % ("an LSP server" if kind == "LSP server" else "a hook", s.get("type") or "unknown"), where or "grok inspect", what)
+            if kind == "plugin" or (s.get("type") == "plugin" and s.get("plugin_name") in plugins):
+                continue
+            label = "plugin %s " % s["plugin_name"] if s.get("type") == "plugin" and s.get("plugin_name") else ""
+            if kind == "hook":
+                note(hook_files(where) or "grok inspect", label + "hooks", what)
+            else:
+                note(where or "grok inspect", label + "LSP server", what)
     # What inspect does not list: a command a user-tier config layer runs at
     # login or on an event, and MCP servers in a requirements layer, which
-    # outranks the project file the shadows go into
+    # outranks the project file the shadows go into (MCP tool calls stay
+    # denied). A layer that does not parse is refused: nothing shows what it
+    # starts
     gh = os.environ.get("GROK_HOME") or os.path.join(os.path.expanduser("~"), ".grok")
     for path in [os.path.join(gh, n) for n in ("config.toml", "managed_config.toml", "requirements.toml")] + ["/etc/grok/managed_config.toml", "/etc/grok/requirements.toml"]:
         if not os.path.lexists(path):
@@ -548,22 +578,22 @@ if cls == "read":
         try:
             t = tomllib.loads(open(path, encoding="utf-8", errors="replace").read())
         except Exception as e:
-            tier("the file does not parse or read, so nothing proves it starts no command", path, (str(e).splitlines() or ["error"])[0][:80])
+            print("grok: ERROR %s: the file does not parse or read (%s), so nothing shows which commands grok would start from it. A grok reviewer or analyst does not start on a broken grok configuration (R23). Fix: repair the file, or route the role to another roster member" % (path, (str(e).splitlines() or ["error"])[0][:80]))
+            sys.exit(1)
         sect = lambda o, k: o.get(k) if isinstance(o.get(k), dict) else {}
         for k in ("auth", "grok_com_config"):
             if sect(t, k).get("auth_provider_command"):
-                tier("it sets %s.auth_provider_command, an auth command" % k, path, str(sect(t, k)["auth_provider_command"])[:60])
+                note(path, "%s.auth_provider_command" % k)
         for n, v in sect(t, "auth_provider").items():
             if isinstance(v, dict) and v.get("command"):
-                tier("it sets auth_provider.%s.command, a credential command" % n, path, str(v["command"])[:60])
+                note(path, "auth_provider.%s.command" % n)
         if sect(sect(t, "ui"), "notifications").get("hooks"):
-            tier("it sets ui.notifications.hooks, commands run on session events", path, "ui.notifications.hooks")
-        if sect(t, "hooks"):
-            tier("it declares hooks", path, ", ".join(sorted(sect(t, "hooks")))[:60])
+            note(path, "ui.notifications.hooks")
+        for n in sorted(sect(t, "hooks")):
+            note(path, "hooks", str(n)[:80])
         if path.endswith("requirements.toml"):
-            on = sorted(n for n, v in sect(t, "mcp_servers").items() if not (isinstance(v, dict) and v.get("enabled") is False))
-            if on:
-                tier("it declares MCP servers in the requirements layer, which outranks the project file a shadow would go into", path, ", ".join(on)[:60])
+            for n in sorted(n for n, v in sect(t, "mcp_servers").items() if not (isinstance(v, dict) and v.get("enabled") is False)):
+                note(path, "MCP servers in the requirements layer", str(n)[:80])
 # Every MCP server, shadowed by name (enabled = false in the project file):
 # what inspect lists, the ~/.claude.json servers (inspect reports them off,
 # yet a session starts them) and the worktree .mcp.json ones. A server the
@@ -599,6 +629,9 @@ for n in sorted(servers):
 os.makedirs(gdir, exist_ok=True)
 with open(cfg, "w", encoding="utf-8") as f:
     f.write(new)
+if found:
+    print("grok: NOTE this grok reviewer or analyst session runs these user-level grok settings, as every grok session on this machine does: %s. Project-level hooks, LSP servers, plugins and MCP servers stay refused, and MCP tools denied (R23)"
+          % "; ".join("%s (%s)" % (w, "; ".join(k + (": " + ", ".join(v) if v else "") for k, v in found[w].items())) for w in sorted(found)))
 ' >&2 || return 1
   # The edit class runs under its own sandbox profile (_grok_argv edit)
   if [ "$CLASS" = edit ]; then
@@ -610,14 +643,15 @@ with open(cfg, "w", encoding="utf-8") as f:
 # grok_read_isolation_check — whether a grok reviewer or analyst can start on
 # this machine, asked by at-setup before it offers grok a read role: the
 # read-class check (_grok_lease_config <dir> read) run from an empty scratch
-# directory, so only the user tier counts (the hooks, LSP servers and
-# config-layer commands grok would start in every session) and nothing
-# outside that directory, removed afterwards, is written. rc 0 and an OK line
-# on stdout when nothing stops a read-class run; else rc 1 and the refusal on
-# stdout (it names the hook, server or command and its file), also when grok
-# is absent or its inspect fails, since no read-class run would start then
-# either. It runs `grok inspect --json` and reads the config layers; it never
-# writes under GROK_HOME.
+# directory, so only the user tier counts, and nothing outside that
+# directory, removed afterwards, is written. rc 0 and an OK line on stdout
+# when a read-class run can start, after the check's NOTE line when the
+# user's own grok configuration has hooks, LSP servers or config-layer
+# commands that run in every grok session (each named with its file); else
+# rc 1 and the refusal on stdout: a user config layer that does not parse,
+# grok absent, or an inspect that fails, since no read-class run would start
+# then either. It runs `grok inspect --json` and reads the config layers; it
+# never writes under GROK_HOME.
 grok_read_isolation_check() {
   local D OUT="" RC=0
   D=$(mktemp -d "${TMPDIR:-/tmp}/triforge-grok-check.XXXXXX") || {
@@ -630,7 +664,12 @@ grok_read_isolation_check() {
     printf '%s\n' "${OUT:-grok: the read-class check failed to run}"
     return 1
   fi
-  echo "grok: OK — no user hook, LSP server or config-layer command stops a grok reviewer or analyst here"
+  if [ -n "$OUT" ]; then
+    printf '%s\n' "$OUT"
+    echo "grok: OK — a grok reviewer or analyst can start here; the NOTE above names the user-level grok settings it runs"
+    return 0
+  fi
+  echo "grok: OK — a grok reviewer or analyst can start here"
   return 0
 }
 
@@ -694,12 +733,13 @@ _grok_scratch_drop() {
 # inspect's and the run's) are --foreground, so grok stays in the caller's
 # process group, which a terminal interrupt reaches whole. The subshell makes
 # a fresh triforge-grok.XXXXXX directory under TMPDIR, the scratch in it
-# (_grok_scratch_wt <dir> <sha>), then <ready-file>, then runs _GROK_ARGV and
-# <prompt> from the scratch under the lease boundary's env (_adapter_env grok:
-# env -i with the base allowlist, grok's own keys, the worker marker and the
-# no-push config), and removes the directory. No <ready-file> afterwards means
-# grok never ran; the reason is on stderr. The caller's own traps are
-# untouched.
+# (_grok_scratch_wt <dir> <sha>), then <ready-file>, which holds what the
+# provisioning printed (the user-tier NOTE line, or nothing), then runs
+# _GROK_ARGV and <prompt> from the scratch under the lease boundary's env
+# (_adapter_env grok: env -i with the base allowlist, grok's own keys, the
+# worker marker and the no-push config), and removes the directory. No
+# <ready-file> afterwards means grok never ran; the reason is on stderr. The
+# caller's own traps are untouched.
 _grok_run_in() {
   (
     D=""
@@ -713,12 +753,14 @@ _grok_run_in() {
       echo "invoke_grok: ERROR could not make a scratch directory under ${TMPDIR:-/tmp}" >&2
       exit 1
     fi
-    _grok_scratch_wt "$D" "$1" &
+    _grok_scratch_wt "$D" "$1" 2> "${D}/provision.err" &
     C=$!
     R=0
     wait "$C" || R=$?
     C=""
-    if [ "$R" -ne 0 ] || ! : > "$5"; then
+    if [ "$R" -ne 0 ] || ! cat "${D}/provision.err" > "$5"; then
+      cat "${D}/provision.err" >&2 2>/dev/null || true
+      rm -f "$5"
       _grok_scratch_drop "$D"
       exit 1
     fi
@@ -832,8 +874,9 @@ _grok_unisolated() {
 # operations returns its rc, 44, and nothing runs; with no ledger there is
 # nothing to compare and nothing is written). Each run then starts from its
 # own scratch checkout of HEAD (_grok_run_in, _grok_scratch_wt, the project
-# and user-tier checks included; a retry gets a fresh one), removed
-# afterwards, under the lease boundary's env, and the prompt
+# checks included, and the NOTE line naming the user's own grok
+# configuration that runs, passed on to stderr; a retry gets a fresh one),
+# removed afterwards, under the lease boundary's env, and the prompt
 # names the caller's checkout for anything HEAD lacks (uncommitted changes, an
 # untracked ops/). rc 69 (deterministic, reason isolation, nothing
 # dispatched) when the scratch can't be made or provisioned; rc 80 when a
@@ -934,6 +977,9 @@ ${PROMPT}"
     _grok_unisolated "$AGENT_NAME" "$OUTPUT_FILE" "grok's isolation could not be set up (see the lead's stderr)."
     return 69
   fi
+  # The provisioning's NOTE line, when the user's own grok configuration
+  # runs in the session
+  cat "$READY" >&2 2>/dev/null || true
   rm -f "$READY"
 
   # A clean exit is complete only when the stream ended with end_turn: any
@@ -972,6 +1018,7 @@ ${PROMPT}"
       _grok_unisolated "$AGENT_NAME" "$OUTPUT_FILE" "grok's isolation could not be set up for the retry (see the lead's stderr)."
       return 69
     fi
+    cat "$READY" >&2 2>/dev/null || true
     rm -f "$READY"
     if [ "$EXIT_CODE" -eq 0 ]; then
       INVOKE_FAILURE_CLASS="none"

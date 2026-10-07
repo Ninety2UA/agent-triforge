@@ -633,11 +633,11 @@ _claude_session_ok() {
 #                prompt is its value). The read class first runs its whole
 #                provisioning check again (_grok_lease_config <wt> read): a
 #                worktree that holds project hooks, an LSP server, plugins or
-#                MCP servers of its own, or a user tier whose hooks, LSP
-#                servers or config-layer commands grok would start, is a
-#                compose failure, never a run (the refusal names the file),
-#                and the plugin and MCP tables are rebuilt from a fresh
-#                inspect
+#                MCP servers of its own, or a user config layer that does
+#                not parse, is a compose failure, never a run (the refusal
+#                names the file); the plugin and MCP tables are rebuilt from
+#                a fresh inspect, and the NOTE line naming the user's own
+#                grok hooks and settings that run goes to stderr
 _lease_lane_argv() {
   local CLI=$1 MODEL=$2 EFFORT=$3 DMODEL=$4 LANE_ARG=$5 CBIN=$6 WT=$7 TIMEOUT=$8
   case "$CLI" in
@@ -694,16 +694,21 @@ _lease_lane_argv() {
       ;;
     grok)
       # <lane-arg> is the class; an empty or unknown one runs read-only. A
-      # read-class lease never starts where the worktree or the user tier
-      # supplies code grok would start before any permission applies: its
-      # whole provisioning check runs again here, right before the launch
-      # (_grok_lease_config <wt> read: the project guard, the user tier's
-      # hooks, LSP servers and config-layer commands, and the plugin and MCP
-      # tables rebuilt from a fresh inspect), so a hook or server added after
-      # the lease was made never starts in it
-      if [ "$LANE_ARG" != edit ] && ! _LEASE_LANE_ERR=$(_grok_lease_config "$WT" read 2>&1); then
-        _LEASE_LANE_ERR=${_LEASE_LANE_ERR:-"the grok read-class isolation check failed to run"}
-        return 1
+      # read-class lease never starts where the worktree supplies code grok
+      # would start before any permission applies: its whole provisioning
+      # check runs again here, right before the launch (_grok_lease_config
+      # <wt> read: the project guard, the user config layers, and the plugin
+      # and MCP tables rebuilt from a fresh inspect), so a project hook or a
+      # server added after the lease was made never starts in it. The check's
+      # NOTE line, naming what the user's own grok configuration runs in the
+      # session, goes to stderr (the builder log)
+      if [ "$LANE_ARG" != edit ]; then
+        if ! _LEASE_LANE_ERR=$(_grok_lease_config "$WT" read 2>&1); then
+          _LEASE_LANE_ERR=${_LEASE_LANE_ERR:-"the grok read-class isolation check failed to run"}
+          return 1
+        fi
+        if [ -n "$_LEASE_LANE_ERR" ]; then printf '%s\n' "$_LEASE_LANE_ERR" >&2; fi
+        _LEASE_LANE_ERR=""
       fi
       _grok_argv "${LANE_ARG:-read}" "$DMODEL" "$EFFORT" || return 1
       _LEASE_LANE_ARGV=("${_GROK_ARGV[@]}")

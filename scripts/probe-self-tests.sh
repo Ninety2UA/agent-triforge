@@ -4726,7 +4726,9 @@ rm -rf "$_S24"
 # off), fail (exit 1), partial (no plugin list), partial-read (no hook or LSP
 # server list), projecthook (an active hook whose source is the project),
 # userhook and userlsp (an active hook or LSP server from the user's
-# ~/.grok), pluginhook (a hook and an LSP server of the listed user plugin),
+# ~/.grok), orca (two events of the ~/.grok/hooks directory, as grok 1.0.34
+# reports an Orca agent-status hook, plus a disabled Claude Code user hook),
+# pluginhook (a hook and an LSP server of the listed user plugin),
 # strayplugin (a hook of a plugin inspect does not list), sleep (inspect
 # records its pid and sleeps 30 s), lateserver (one more user MCP server).
 # Like grok 1.0.34, inspect lists no MCP server the working directory's
@@ -4784,14 +4786,20 @@ rm -rf "$_S24"
 #              reports the overlay ignored; accepted with no shadow for it: a
 #              project server named like the user's ~/.grok/config.toml one
 #              (the project entry replaces it)
-#   user-tier  _grok_lease_config in the read class, refused with the source
-#              named and nothing written: a user hook or LSP server inspect
-#              reports, a hook of a plugin inspect does not list, and a
-#              GROK_HOME whose config.toml sets auth.auth_provider_command or
-#              ui.notifications.hooks, or whose requirements.toml declares an
-#              MCP server; accepted: the listed user plugin's hook and LSP
-#              server (the plugin disabled, the user server shadowed), and a
-#              user hook in the edit class, which writes the profile
+#   user-tier  _grok_lease_config in the read class, which writes the file
+#              and prints one NOTE line naming each user-tier surface with
+#              its file: a user hook or LSP server inspect reports, a hook of
+#              a plugin inspect does not list, a GROK_HOME whose config.toml
+#              sets auth.auth_provider_command, ui.notifications.hooks or
+#              [hooks], or whose requirements.toml declares an MCP server, and
+#              an Orca-style ~/.grok/hooks/orca-status.json (named by file,
+#              its .bak copy not); a hook and an auth command together share
+#              the one line; refused, nothing written and no note: a
+#              config.toml that does not parse, and a project's .grok/hooks/
+#              beside the Orca hook; accepted with no note: the listed user
+#              plugin's hook and LSP server (the plugin disabled, the user
+#              server shadowed), and a user hook in the edit class, which
+#              writes the profile
 #   profile    _grok_sandbox_profile: [profiles.triforge-edit] extends
 #              workspace and denies exactly the 17 literal GROK_HOME paths
 #              (by the home's real path; config.toml not among them);
@@ -4820,15 +4828,19 @@ rm -rf "$_S24"
 #              made: lease_dispatch's compose refuses it (rc 94), grok never
 #              runs
 #   lease-usertier  reviewer leases made under a clean user tier: one whose
-#              inspect reports a user hook by dispatch time is refused at
-#              the compose (rc 94, the hook named), grok never runs; one
-#              whose inspect lists a new user MCP server by then runs with a
+#              inspect reports a user hook by dispatch time runs (rc 0), the
+#              hook named in a NOTE line in the builder log; one whose
+#              inspect lists a new user MCP server by then runs with a
 #              .grok/config.toml that shadows it, keeps the three shadows
 #              made at provisioning (which inspect no longer lists) and holds
-#              one [plugins] table naming the three plugins
+#              one [plugins] table naming the three plugins; and a reviewer
+#              lease made beside an Orca-style user hook: leased, the hook
+#              file named on lease_create's stderr
 #   readcheck  grok_read_isolation_check: rc 0 and an OK line under a clean
-#              user tier; rc 1 naming the user hook inspect reports; no
-#              scratch directory left and nothing written under HOME
+#              user tier; rc 0, the OK line and a NOTE line naming the user
+#              hook inspect reports; rc 1 naming a user config.toml that does
+#              not parse; no scratch directory left and nothing written under
+#              HOME
 #   fg-read    invoke_grok as a reviewer, with a canary variable and
 #              CLAUDECODE in the caller's environment, in a project never
 #              leased: grok ran from a scratch checkout that held
@@ -4852,9 +4864,12 @@ rm -rf "$_S24"
 #              .git/config: the retry is refused (rc 44, reason integrity),
 #              one run
 #   fg-refused invoke_grok as a reviewer in a project whose .grok/config.toml
-#              declares [plugins], in one that holds .grok/hooks/, with an
-#              empty, cut-off or partial inspect, and with a user hook inspect
-#              reports: rc 69, reason isolation, grok never run, no scratch
+#              declares [plugins], in one that holds .grok/hooks/, and with an
+#              empty, cut-off or partial inspect: rc 69, reason isolation,
+#              grok never run, no scratch left
+#   fg-usertier  invoke_grok as a reviewer beside an Orca-style user hook:
+#              rc 0, Status: DONE, one run in the read-only sandbox, one NOTE
+#              line on the lead's stderr naming the hook file, no scratch
 #              left
 #   trap       TERM to _grok_run_in's subshell while the provisioning inspect
 #              sleeps: the inspect stopped, no scratch directory left
@@ -4893,7 +4908,8 @@ if [ "$1" = inspect ]; then
   case "$IM" in
     projecthook) HK="\"hooks\":[{\"event\":\"session_start\",\"hookType\":\"command\",\"source\":{\"type\":\"project\",\"path\":\"$PWD/.grok/hooks.d\"}}],\"lspServers\":[]," ;;
     userhook)    HK="\"hooks\":[{\"event\":\"session_start\",\"hookType\":\"command\",\"source\":{\"type\":\"user\",\"path\":\"$HOME/.grok/hooks\"}}],\"lspServers\":[]," ;;
-    userlsp)     HK="\"hooks\":[],\"lspServers\":[{\"name\":\"s25-user-lsp\",\"source\":{\"type\":\"user\",\"path\":\"$HOME/.grok/lsp.json\"}}]," ;;
+    orca)        HK="\"hooks\":[{\"event\":\"session_start\",\"hookType\":\"command\",\"source\":{\"type\":\"user\",\"path\":\"$HOME/.grok/hooks\"},\"matcher\":null},{\"event\":\"stop\",\"hookType\":\"command\",\"source\":{\"type\":\"user\",\"path\":\"$HOME/.grok/hooks\"},\"matcher\":null},{\"event\":\"session_start\",\"hookType\":\"command\",\"source\":{\"type\":\"user\",\"path\":\"$HOME/.claude\"},\"vendor\":\"claude\",\"disabled\":true}],\"lspServers\":[]," ;;
+    userlsp)    HK="\"hooks\":[],\"lspServers\":[{\"name\":\"s25-user-lsp\",\"source\":{\"type\":\"user\",\"path\":\"$HOME/.grok/lsp.json\"}}]," ;;
     pluginhook)  HK="\"hooks\":[{\"event\":\"session_start\",\"hookType\":\"command\",${UP}}],\"lspServers\":[{\"name\":\"s25-plugin-lsp\",${UP}}]," ;;
     strayplugin) HK="\"hooks\":[{\"event\":\"session_start\",\"hookType\":\"command\",\"source\":{\"type\":\"plugin\",\"plugin_name\":\"s25-unlisted-plugin\",\"path\":\"$HOME/.grok/plugins/s25-unlisted-plugin\"}}],\"lspServers\":[]," ;;
   esac
@@ -4945,6 +4961,14 @@ printf '{"version": 2, "plugins": {"s25-installed-plugin@mk": [{"scope": "user",
 printf '{"mcpServers": {"s25-json-server": {"command": "true"}}}\n' > "$_S25/home/.claude.json"
 _S25_PATH="${_S25}/bin:${_SELF_STUBS}:${PATH}"
 _S25_FAIL=""
+# An Orca-style agent-status hook in the scratch HOME's ~/.grok/hooks/, with
+# the backup copy beside it that grok does not load (the stub's orca mode
+# reports its events from the directory, as grok 1.0.34's inspect does)
+_s25_orca() {
+  mkdir -p "$_S25/home/.grok/hooks" || return 0
+  printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"true"}]}],"Stop":[{"hooks":[{"type":"command","command":"true"}]}]}}\n' > "$_S25/home/.grok/hooks/orca-status.json"
+  cp "$_S25/home/.grok/hooks/orca-status.json" "$_S25/home/.grok/hooks/orca-status.json.bak"
+}
 
 # class and lane argv (the read class composes in a worktree of its own: it
 # runs the provisioning check again, and $_S25 holds the scratch HOME)
@@ -5147,39 +5171,57 @@ _S25_FAIL="${_S25_FAIL}$(_self_expect inspect "$O" '^inspect-empty-edit:rc=1:wri
   '^inspect-fail-edit:rc=1:written=no:named=1$' '^inspect-partial-edit:rc=1:written=no:named=1$' '^inspect-partial-read-read:rc=1:written=no:named=1$' \
   '^inspect-partial-read-edit:rc=0:written=yes:named=0$')"
 
-# what the user tier supplies: refused in the read class with the source
-# named and nothing written; the listed user plugin's hook and LSP server, and
-# the edit class, accepted
-mkdir -p "$_S25/ut" "$_S25/gh-auth" "$_S25/gh-notify" "$_S25/gh-req"
+# what the user tier supplies: in the read class each surface runs, as it
+# does when the user runs grok, so provisioning writes the file and one
+# NOTE line names each surface with its file; a config layer that does not
+# parse, and a project's own hooks beside a user hook, stay refused with
+# nothing written; the listed user plugin's hook and LSP server pass with no
+# note (the plugin disabled), and the edit class takes a user hook silently
+mkdir -p "$_S25/ut" "$_S25/utp/.grok/hooks" "$_S25/gh-auth" "$_S25/gh-notify" "$_S25/gh-req" "$_S25/gh-hooks" "$_S25/gh-broken"
 printf '[auth]\nauth_provider_command = "/usr/bin/true"\n' > "$_S25/gh-auth/config.toml"
 printf '[[ui.notifications.hooks]]\ncommand = "true"\nevents = ["turn_complete"]\n' > "$_S25/gh-notify/config.toml"
 printf '[mcp_servers.s25-req]\ncommand = "true"\n' > "$_S25/gh-req/requirements.toml"
+printf '[hooks]\nSessionStart = [{ hooks = [{ type = "command", command = "true" }] }]\n' > "$_S25/gh-hooks/config.toml"
+printf '[auth\nauth_provider_command = "/usr/bin/true"\n' > "$_S25/gh-broken/config.toml"
+printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"true"}]}]}}\n' > "$_S25/utp/.grok/hooks/h.json"
 O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
-  for T in "userhook:read:grok inspect reports a hook of type user (session_start)" "userlsp:read:grok inspect reports an LSP server of type user (s25-user-lsp)" \
-           "strayplugin:read:grok inspect reports a hook of type plugin" "auth:read:it sets auth.auth_provider_command" \
-           "notify:read:it sets ui.notifications.hooks" "req:read:it declares MCP servers in the requirements layer"; do
-    M=${T%%:*}; C=${T#*:}; P=${C#*:}; C=${C%%:*}
+  for T in "userhook:ut:/.grok/hooks (hooks: session_start)" "userlsp:ut:/.grok/lsp.json (LSP server: s25-user-lsp)" \
+           "strayplugin:ut:/.grok/plugins/s25-unlisted-plugin (plugin s25-unlisted-plugin hooks: session_start)" \
+           "auth:ut:/gh-auth/config.toml (auth.auth_provider_command)" "notify:ut:/gh-notify/config.toml (ui.notifications.hooks)" \
+           "req:ut:/gh-req/requirements.toml (MCP servers in the requirements layer: s25-req)" "hooks:ut:/gh-hooks/config.toml (hooks: SessionStart)" \
+           "orca:ut:/.grok/hooks/orca-status.json (hooks: session_start, stop)" \
+           "broken:ut:/gh-broken/config.toml: the file does not parse" "projecthooks:utp:/utp/.grok/hooks: project hooks"; do
+    M=${T%%:*}; W=${T#*:}; P=${W#*:}; W="$_S25/${W%%:*}"
     rm -rf "$_S25/ut/.grok"
     case "$M" in
-      (auth|notify|req) export GROK_HOME="$_S25/gh-$M" ;;
-      (*)               printf '%s\n' "$M" > "$_S25/inspect-mode" ;;
+      (auth|notify|req|hooks|broken) export GROK_HOME="$_S25/gh-$M" ;;
+      (orca|projecthooks)            _s25_orca; printf 'orca\n' > "$_S25/inspect-mode" ;;
+      (*)                            printf '%s\n' "$M" > "$_S25/inspect-mode" ;;
     esac
-    R=0; _grok_lease_config "$_S25/ut" "$C" > "$_S25/ut.warn" 2>&1 || R=$?
-    rm -f "$_S25/inspect-mode"; unset GROK_HOME
-    echo "user-${M}-${C}:rc=${R}:written=$( [ -e "$_S25/ut/.grok" ] && echo yes || echo no):named=$(grep -cF -- "$P" "$_S25/ut.warn" || true)"
+    R=0; _grok_lease_config "$W" read > "$_S25/ut.warn" 2>&1 || R=$?
+    rm -f "$_S25/inspect-mode"; unset GROK_HOME; rm -rf "$_S25/home/.grok/hooks"
+    echo "user-${M}-read:rc=${R}:written=$( [ -e "$W/.grok/config.toml" ] && echo yes || echo no):noted=$(grep -c '^grok: NOTE ' "$_S25/ut.warn" || true):named=$(grep -cF -- "$P" "$_S25/ut.warn" || true):bak=$(grep -c 'orca-status\.json\.bak' "$_S25/ut.warn" || true)"
   done
+  # two tiers' surfaces in one run: one NOTE line names both
+  rm -rf "$_S25/ut/.grok"; _s25_orca; printf 'orca\n' > "$_S25/inspect-mode"; export GROK_HOME="$_S25/gh-auth"
+  R=0; _grok_lease_config "$_S25/ut" read > "$_S25/ut.warn" 2>&1 || R=$?
+  rm -f "$_S25/inspect-mode"; unset GROK_HOME; rm -rf "$_S25/home/.grok/hooks"
+  N=$(grep '^grok: NOTE ' "$_S25/ut.warn" || true)
+  echo "user-both-read:rc=${R}:noted=$(grep -c '^grok: NOTE ' "$_S25/ut.warn" || true):orca=$(printf '%s\n' "$N" | grep -cF '/.grok/hooks/orca-status.json (hooks: session_start, stop)' || true):auth=$(printf '%s\n' "$N" | grep -cF '/gh-auth/config.toml (auth.auth_provider_command)' || true)"
   rm -rf "$_S25/ut/.grok"; printf 'pluginhook\n' > "$_S25/inspect-mode"
   R=0; _grok_lease_config "$_S25/ut" read > "$_S25/ut.warn" 2>&1 || R=$?
   rm -f "$_S25/inspect-mode"
   F="$_S25/ut/.grok/config.toml"
-  echo "user-pluginhook-read:rc=${R}:disabled=$(grep -c '^disabled = \[.*"s25-grok-plugin"' "$F" 2>/dev/null || true):usermcp=$(grep -cx '\[mcp_servers\."s25-grok-server"\]' "$F" 2>/dev/null || true):sbx=$( [ -e "$_S25/ut/.grok/sandbox.toml" ] && echo yes || echo no)"
+  echo "user-pluginhook-read:rc=${R}:disabled=$(grep -c '^disabled = \[.*"s25-grok-plugin"' "$F" 2>/dev/null || true):usermcp=$(grep -cx '\[mcp_servers\."s25-grok-server"\]' "$F" 2>/dev/null || true):sbx=$( [ -e "$_S25/ut/.grok/sandbox.toml" ] && echo yes || echo no):noted=$(grep -c '^grok: NOTE ' "$_S25/ut.warn" || true)"
   rm -rf "$_S25/ut/.grok"; printf 'userhook\n' > "$_S25/inspect-mode"
   R=0; _grok_lease_config "$_S25/ut" edit > "$_S25/ut.warn" 2>&1 || R=$?
   rm -f "$_S25/inspect-mode"
-  echo "user-userhook-edit:rc=${R}:cfg=$( [ -e "$_S25/ut/.grok/config.toml" ] && echo yes || echo no):sbx=$( [ -e "$_S25/ut/.grok/sandbox.toml" ] && echo yes || echo no)" )
-_S25_FAIL="${_S25_FAIL}$(_self_expect user-tier "$O" '^user-userhook-read:rc=1:written=no:named=1$' '^user-userlsp-read:rc=1:written=no:named=1$' \
-  '^user-strayplugin-read:rc=1:written=no:named=1$' '^user-auth-read:rc=1:written=no:named=1$' '^user-notify-read:rc=1:written=no:named=1$' \
-  '^user-req-read:rc=1:written=no:named=1$' '^user-pluginhook-read:rc=0:disabled=1:usermcp=1:sbx=no$' '^user-userhook-edit:rc=0:cfg=yes:sbx=yes$')"
+  echo "user-userhook-edit:rc=${R}:cfg=$( [ -e "$_S25/ut/.grok/config.toml" ] && echo yes || echo no):sbx=$( [ -e "$_S25/ut/.grok/sandbox.toml" ] && echo yes || echo no):noted=$(grep -c '^grok: NOTE ' "$_S25/ut.warn" || true)" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect user-tier "$O" '^user-userhook-read:rc=0:written=yes:noted=1:named=1:bak=0$' '^user-userlsp-read:rc=0:written=yes:noted=1:named=1:bak=0$' \
+  '^user-strayplugin-read:rc=0:written=yes:noted=1:named=1:bak=0$' '^user-auth-read:rc=0:written=yes:noted=1:named=1:bak=0$' '^user-notify-read:rc=0:written=yes:noted=1:named=1:bak=0$' \
+  '^user-req-read:rc=0:written=yes:noted=1:named=1:bak=0$' '^user-hooks-read:rc=0:written=yes:noted=1:named=1:bak=0$' '^user-orca-read:rc=0:written=yes:noted=1:named=1:bak=0$' \
+  '^user-broken-read:rc=1:written=no:noted=0:named=1:bak=0$' '^user-projecthooks-read:rc=1:written=no:noted=0:named=1:bak=0$' '^user-both-read:rc=0:noted=1:orca=1:auth=1$' \
+  '^user-pluginhook-read:rc=0:disabled=1:usermcp=1:sbx=no:noted=0$' '^user-userhook-edit:rc=0:cfg=yes:sbx=yes:noted=0$')"
 
 # the edit class's sandbox profile, against the literal GROK_HOME list
 mkdir -p "$_S25/pf" "$_S25/pf2" "$_S25/pf-dup/.grok" "$_S25/pf-link/.grok"
@@ -5272,11 +5314,12 @@ O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25
   rm -f "$_S25/mode"
   cp "$_S25/fg-roster.keep" ops/roster.toml
   echo "fg-recheck-role:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:runs=$(_c . "$L/runs"):named=$(_c 'declines it' "$_S25/fg-rc.out"):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)"
-  rm -f "$L"/wt.*
-  printf 'userhook\n' > "$_S25/inspect-mode"
+  # an Orca-style user hook: the run proceeds, and the lead's stderr names it
+  rm -f "$L"/wt.*; : > "$L/runs"
+  _s25_orca; printf 'orca\n' > "$_S25/inspect-mode"
   R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 user hook" "$_S25/fgu.out" 60 >/dev/null 2> "$_S25/fgu.err" || R=$?
-  rm -f "$_S25/inspect-mode"
-  echo "fg-refused-userhook:rc=${R}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$( [ -f "$L/wt.argv" ] && echo yes || echo no):named=$(_c -F 'grok inspect reports a hook of type user' "$_S25/fgu.err"):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)"
+  rm -f "$_S25/inspect-mode"; rm -rf "$_S25/home/.grok/hooks"
+  echo "fg-usertier-orca:rc=${R}:status=$(_lease_parse_status "$_S25/fgu.out"):runs=$(_c . "$L/runs"):sandbox=$(grep -A1 -x -- --sandbox "$L/wt.argv" 2>/dev/null | tail -1):noted=$(_c '^grok: NOTE ' "$_S25/fgu.err"):named=$(_c -F '/.grok/hooks/orca-status.json (hooks: session_start, stop)' "$_S25/fgu.err"):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)"
   cd "$_S25/fgp" || exit 0
   rm -f "$L"/wt.*
   R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 refused" "$_S25/fg-refused.out" 60 >/dev/null 2> "$_S25/fg-refused.err" || R=$?
@@ -5305,7 +5348,8 @@ _S25_FAIL="${_S25_FAIL}$(_self_expect fg-interrupt "$O" '^fg-interrupt:rc=130:cl
 _S25_FAIL="${_S25_FAIL}$(_self_expect fg-recheck "$O" '^fg-recheck-role:rc=5:class=deterministic:reason=role:runs=1:named=1:left=0$')"
 _S25_FAIL="${_S25_FAIL}$(_self_expect fg-refused "$O" '^fg-refused:rc=69:reason=isolation:ran=no:named=1:left=0$' '^fg-refused-hooks:rc=69:reason=isolation:ran=no:named=1:left=0$' \
   '^fg-refused-inspect-empty:rc=69:reason=isolation:ran=no:left=0$' '^fg-refused-inspect-malformed:rc=69:reason=isolation:ran=no:left=0$' \
-  '^fg-refused-inspect-partial:rc=69:reason=isolation:ran=no:left=0$' '^fg-refused-userhook:rc=69:reason=isolation:ran=no:named=1:left=0$')"
+  '^fg-refused-inspect-partial:rc=69:reason=isolation:ran=no:left=0$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-usertier "$O" '^fg-usertier-orca:rc=0:status=DONE:runs=1:sandbox=read-only:noted=1:named=1:left=0$')"
 _S25_FAIL="${_S25_FAIL}$(_self_expect lease-refused "$O" '^lease-refused:rc=1:row=none:ran=no:named=1$')"
 
 # a read-class lease over a project file grok would start: refused at
@@ -5353,29 +5397,38 @@ O=$( cd "$_S25/du" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25
     rm -f "$_S25/inspect-mode"
     OUT=$(_ledger_get "$K" output_file 2>/dev/null)
     if [ "$K" = s25uh ]; then
-      echo "lease-usertier-userhook:rc=$(cat "${OUT}.rc" 2>/dev/null || true):ran=$( [ -f "$L/$K.argv" ] && echo yes || echo no):named=$(grep -cF '/.grok/hooks: grok inspect reports a hook of type user' "$OUT" 2>/dev/null || true)"
+      echo "lease-usertier-userhook:rc=$(cat "${OUT}.rc" 2>/dev/null || true):ran=$( [ -f "$L/$K.argv" ] && echo yes || echo no):noted=$(grep -c '^grok: NOTE ' "${OUT}.log" 2>/dev/null || true):named=$(grep -cF '/.grok/hooks (hooks: session_start)' "${OUT}.log" 2>/dev/null || true)"
     else
       C="$L/$K.toml"
       echo "lease-usertier-lateserver:rc=$(cat "${OUT}.rc" 2>/dev/null || true):late=$(grep -cxF '[mcp_servers."s25-late-server"]' "$C" 2>/dev/null || true):kept=$(grep -cxE '\[mcp_servers\."s25-(claude|grok|json)-server"\]' "$C" 2>/dev/null || true):plugins=$(grep -cx '\[plugins\]' "$C" 2>/dev/null || true):disabled=$(grep -cE '^disabled = \[.*"s25-claude-plugin", "s25-grok-plugin", "s25-installed-plugin"\]$' "$C" 2>/dev/null || true)"
     fi
-  done )
-_S25_FAIL="${_S25_FAIL}$(_self_expect lease-usertier "$O" '^lease-usertier-userhook:rc=94:ran=no:named=1$' \
-  '^lease-usertier-lateserver:rc=0:late=1:kept=3:plugins=1:disabled=1$')"
+  done
+  # a reviewer lease made where the user has an Orca-style hook: leased, the
+  # hook named on lease_create's stderr
+  _s25_orca; printf 'orca\n' > "$_S25/inspect-mode"
+  R=0; lease_create s25uo reviewer >/dev/null 2> "$_S25/uo.err" || R=$?
+  rm -f "$_S25/inspect-mode"; rm -rf "$_S25/home/.grok/hooks"
+  echo "lease-usertier-create-orca:rc=${R}:row=$(_ledger_get s25uo state 2>/dev/null || echo none):noted=$(grep -c '^grok: NOTE ' "$_S25/uo.err" || true):named=$(grep -cF '/.grok/hooks/orca-status.json (hooks: session_start, stop)' "$_S25/uo.err" || true)" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect lease-usertier "$O" '^lease-usertier-userhook:rc=0:ran=yes:noted=1:named=1$' \
+  '^lease-usertier-lateserver:rc=0:late=1:kept=3:plugins=1:disabled=1$' '^lease-usertier-create-orca:rc=0:row=leased:noted=1:named=1$')"
 
 # grok_read_isolation_check (at-setup's question before a read role): rc 0
-# and an OK line under a clean user tier; rc 1 and the user hook named when
-# inspect reports one; either way nothing left in TMPDIR, nothing written
-# under HOME
+# and an OK line under a clean user tier; rc 0, the OK line and a NOTE line
+# naming the user hook when inspect reports one; rc 1 and the file named when
+# a user config layer does not parse; each time nothing left in TMPDIR,
+# nothing written under HOME
 O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
   _home() { find "$_S25/home" 2>/dev/null | LC_ALL=C sort | cksum; }
-  for M in full userhook; do
+  for T in "full:/.grok/hooks (hooks: session_start)" "userhook:/.grok/hooks (hooks: session_start)" "broken:/gh-broken/config.toml: the file does not parse"; do
+    M=${T%%:*}; P=${T#*:}
     H=$(_home)
-    printf '%s\n' "$M" > "$_S25/inspect-mode"
+    if [ "$M" = broken ]; then export GROK_HOME="$_S25/gh-broken"; else printf '%s\n' "$M" > "$_S25/inspect-mode"; fi
     R=0; grok_read_isolation_check > "$_S25/rc-$M.out" 2>&1 || R=$?
-    rm -f "$_S25/inspect-mode"
-    echo "readcheck-${M}:rc=${R}:ok=$(grep -c '^grok: OK' "$_S25/rc-$M.out" || true):named=$(grep -cF '/.grok/hooks: grok inspect reports a hook of type user' "$_S25/rc-$M.out" || true):left=$(ls -d "$_S25/tmp"/triforge-grok-check.* 2>/dev/null | grep -c . || true):home=$( [ "$(_home)" = "$H" ] && echo same || echo changed)"
+    rm -f "$_S25/inspect-mode"; unset GROK_HOME
+    echo "readcheck-${M}:rc=${R}:ok=$(grep -c '^grok: OK' "$_S25/rc-$M.out" || true):noted=$(grep -c '^grok: NOTE ' "$_S25/rc-$M.out" || true):named=$(grep -cF -- "$P" "$_S25/rc-$M.out" || true):left=$(ls -d "$_S25/tmp"/triforge-grok-check.* 2>/dev/null | grep -c . || true):home=$( [ "$(_home)" = "$H" ] && echo same || echo changed)"
   done )
-_S25_FAIL="${_S25_FAIL}$(_self_expect readcheck "$O" '^readcheck-full:rc=0:ok=1:named=0:left=0:home=same$' '^readcheck-userhook:rc=1:ok=0:named=1:left=0:home=same$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect readcheck "$O" '^readcheck-full:rc=0:ok=1:noted=0:named=0:left=0:home=same$' '^readcheck-userhook:rc=0:ok=1:noted=1:named=1:left=0:home=same$' \
+  '^readcheck-broken:rc=1:ok=0:noted=0:named=1:left=0:home=same$')"
 
 # the lead's integrity check before any checkout (a stub that refuses, and a
 # real baseline mismatch: a filter driver planted in .git/config after the
@@ -5454,9 +5507,9 @@ O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25
   rm -f "$_S25/inspect-mode" )
 _S25_FAIL="${_S25_FAIL}$(_self_expect trap "$O" '^trap:started=yes:before=1:dirs=0:stub=gone$')"
 
-_S25_CAP="Grok Build's lane: the permission class by role (a reviewer or analyst read-only, with Edit, Write and Bash denied over any imported Claude allow rule, and MCP tools denied in every class; grok takes builder, reviewer and analyst, and edits only in a lease), the env prefix and include_only overlay pinned, a report only from an end_turn run, the provisioned .grok/config.toml that disables every plugin and shadows every MCP server, the user's own included (never merged, never without a full inspect, refused when it can't be proven), no read-class run where the project or the user tier supplies code grok would start (checked again, and the tables rebuilt, at every read-class dispatch; asked by at-setup through grok_read_isolation_check), the builder's sandbox profile closing GROK_HOME's code and instruction paths (rewritten before each dispatch), and invoke_grok's read class in a removed scratch checkout under env -i, after the roster and integrity checks before every attempt, with no filter or hook run and a TERM that leaves nothing behind (R23)"
+_S25_CAP="Grok Build's lane: the permission class by role (a reviewer or analyst read-only, with Edit, Write and Bash denied over any imported Claude allow rule, and MCP tools denied in every class; grok takes builder, reviewer and analyst, and edits only in a lease), the env prefix and include_only overlay pinned, a report only from an end_turn run, the provisioned .grok/config.toml that disables every plugin and shadows every MCP server, the user's own included (never merged, never without a full inspect, refused when it can't be proven), no read-class run where the project supplies code grok would start, while the user's own grok hooks and settings run with one NOTE line naming each (checked again, and the tables rebuilt, at every read-class dispatch; asked by at-setup through grok_read_isolation_check), the builder's sandbox profile closing GROK_HOME's code and instruction paths (rewritten before each dispatch), and invoke_grok's read class in a removed scratch checkout under env -i, after the roster and integrity checks before every attempt, with no filter or hook run and a TERM that leaves nothing behind (R23)"
 if [ -z "$_S25_FAIL" ]; then
-  row "SELF-25" "grok" "$_S25_CAP" "PASS" "class: builder/tester/documenter edit, reviewer/analyst/empty read; lane: edit -> triforge-edit + Edit/Write/Bash, MCP denied; read and empty -> read-only, Edit/Write/Bash/MCP denied; env prefix: every GROK_CLAUDE_*/GROK_CURSOR_* switch, GROK_FOLDER_TRUST=0, the overlay's literal include_only; builder lease: .grok/config.toml disables the 3 plugins and shadows the 3 servers (the user's ~/.grok/config.toml one included), inspect with the Claude switches off, config and profile provisioned, a weakened profile written back before the run (all 17 GROK_HOME denies), triforge-edit, builder brief, collect -> review, snapshot without .grok/; reviewer lease (project allows Edit/Write/npm): read-only, the denies, reviewer brief, no profile, review; Status: DONE then max_tokens, no end, or the turn cap -> report missing (rc 80), the stop named; tracked: [permission] and [mcp_servers.team] files take the tables (tomllib-proven); [plugins], inline mcp_servers, a server named like a ~/.claude.json one, a symlinked .grok and an ignored overlay refused, file unchanged and named; a project server named like the user's grok one gets no shadow; user tier (read class): a user hook, a user LSP server, an unlisted plugin's hook, an auth provider command, notification hooks and a requirements-layer MCP server refused, named, nothing written; the listed user plugin's hook and LSP accepted (plugin disabled, user server shadowed); the edit class takes a user hook and writes the profile; profile: one table, extends workspace, exactly the 17 literal denies, config.toml not denied; a same-named user profile and a symlinked file refused, nothing written; surface (read class): .grok/hooks, .grok/lsp.json, .grok/plugins, .claude/plugins, a project MCP server and an inspect-reported project hook refused, named, nothing written; Claude/Cursor hooks, .mcp.json (shadowed), an agent, a skill and a sandbox.toml accepted; edit class takes .grok/hooks; inspect: empty, cut-off, failed and partial refused; roles: tester and documenter on grok rc 5; lease_create refused, no row, grok never run; a read lease over .grok/lsp.json refused, a builder lease made, .grok/hooks added after create refused at compose (rc 94); a reviewer lease made under a clean user tier: a user hook by dispatch time refused at compose (rc 94, named, grok never run), a new user MCP server by then shadowed in the run's config with the provisioning's 3 shadows kept and one [plugins]; grok_read_isolation_check: clean -> rc 0 OK, a user hook -> rc 1 named, no scratch left, HOME unchanged; invoke_grok: reviewer from a scratch checkout with the config, env -i (no canary, no CLAUDECODE), the denies and the checkout note, then removed, no ledger written; tester and an edit agent name rc 69, grok never run; an empty end_turn -> rc 80 no-answer; an interrupted run (exit 130) -> rc 130 interrupted, run once, no retry; a retry after the first run declined grok in the roster -> rc 5 role, run once; a retry after the first run changed .git/config (lease open, fresh rebaseline) -> rc 44 integrity, run once; an unisolable project, project hooks, a user hook or a bad inspect -> rc 69, grok never run; integrity refused (stub, and a smudge filter in .git/config with .git/info/attributes planted after a fresh rebaseline, a lease open) -> rc 44, no checkout, the filter never run; a never-leased project's smudge and process filters never run; TERM to _grok_run_in's subshell during the provisioning inspect -> the inspect stopped, no scratch left" "static"
+  row "SELF-25" "grok" "$_S25_CAP" "PASS" "class: builder/tester/documenter edit, reviewer/analyst/empty read; lane: edit -> triforge-edit + Edit/Write/Bash, MCP denied; read and empty -> read-only, Edit/Write/Bash/MCP denied; env prefix: every GROK_CLAUDE_*/GROK_CURSOR_* switch, GROK_FOLDER_TRUST=0, the overlay's literal include_only; builder lease: .grok/config.toml disables the 3 plugins and shadows the 3 servers (the user's ~/.grok/config.toml one included), inspect with the Claude switches off, config and profile provisioned, a weakened profile written back before the run (all 17 GROK_HOME denies), triforge-edit, builder brief, collect -> review, snapshot without .grok/; reviewer lease (project allows Edit/Write/npm): read-only, the denies, reviewer brief, no profile, review; Status: DONE then max_tokens, no end, or the turn cap -> report missing (rc 80), the stop named; tracked: [permission] and [mcp_servers.team] files take the tables (tomllib-proven); [plugins], inline mcp_servers, a server named like a ~/.claude.json one, a symlinked .grok and an ignored overlay refused, file unchanged and named; a project server named like the user's grok one gets no shadow; user tier (read class): a user hook, a user LSP server, an unlisted plugin's hook, an auth provider command, notification hooks, config-layer [hooks], a requirements-layer MCP server and an Orca-style hook file accepted, each named with its file in one NOTE line (the .bak copy not); an unparsable config.toml and project hooks beside the Orca hook refused, nothing written; the listed user plugin's hook and LSP accepted with no note (plugin disabled, user server shadowed); the edit class takes a user hook with no note and writes the profile; profile: one table, extends workspace, exactly the 17 literal denies, config.toml not denied; a same-named user profile and a symlinked file refused, nothing written; surface (read class): .grok/hooks, .grok/lsp.json, .grok/plugins, .claude/plugins, a project MCP server and an inspect-reported project hook refused, named, nothing written; Claude/Cursor hooks, .mcp.json (shadowed), an agent, a skill and a sandbox.toml accepted; edit class takes .grok/hooks; inspect: empty, cut-off, failed and partial refused; roles: tester and documenter on grok rc 5; lease_create refused, no row, grok never run; a read lease over .grok/lsp.json refused, a builder lease made, .grok/hooks added after create refused at compose (rc 94); a reviewer lease made under a clean user tier: a user hook by dispatch time runs (rc 0, named in the builder log's NOTE), a new user MCP server by then shadowed in the run's config with the provisioning's 3 shadows kept and one [plugins]; a reviewer lease made beside the Orca hook: leased, the file named on stderr; grok_read_isolation_check: clean -> rc 0 OK, a user hook -> rc 0 OK and a NOTE naming it, an unparsable config.toml -> rc 1 named, no scratch left, HOME unchanged; invoke_grok: reviewer from a scratch checkout with the config, env -i (no canary, no CLAUDECODE), the denies and the checkout note, then removed, no ledger written; tester and an edit agent name rc 69, grok never run; an empty end_turn -> rc 80 no-answer; an interrupted run (exit 130) -> rc 130 interrupted, run once, no retry; a retry after the first run declined grok in the roster -> rc 5 role, run once; a retry after the first run changed .git/config (lease open, fresh rebaseline) -> rc 44 integrity, run once; an unisolable project, project hooks or a bad inspect -> rc 69, grok never run; beside an Orca-style user hook -> rc 0, DONE, read-only, one NOTE naming the hook file; integrity refused (stub, and a smudge filter in .git/config with .git/info/attributes planted after a fresh rebaseline, a lease open) -> rc 44, no checkout, the filter never run; a never-leased project's smudge and process filters never run; TERM to _grok_run_in's subshell during the provisioning inspect -> the inspect stopped, no scratch left" "static"
 else
   row "SELF-25" "grok" "$_S25_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S25_FAIL"):$(printf '%s' "$_S25_FAIL" | cut -c1-700)" "static"
 fi

@@ -40,7 +40,7 @@ Devin's `needs-ask` output has a `consent: required` line, and Devin is never en
 
 ## Grok: check the read roles first
 
-An enrolled grok also gets an at-review reviewer lane. Grok starts the user's own hooks, LSP servers and config-layer commands in every session, before any permission applies, so a grok reviewer or analyst refuses to start on a machine that has one. Before you ask whether to enroll grok, run the check below. On rc 1, relay the line it printed; it names what was found and the file it is in. Tell the user that until they remove it, grok's review lane fails with rc 69 at every at-review and grok can't take the reviewer or analyst role, though it can still build.
+An enrolled grok also gets an at-review reviewer lane. Grok runs the user's own hooks, LSP servers and config-layer commands in every session, reviews included, as it does when the user runs grok. Before you ask whether to enroll grok, run the check below. If it prints a NOTE line, pass it on to the user; the line names each of those and the file it comes from. On rc 1, relay the line it printed. A grok config file that doesn't parse, or a failed `grok inspect`, stops grok's review lane with rc 69 at every at-review, and grok can't take the reviewer or analyst role until the user fixes it.
 
 ```bash
 grok_read_isolation_check; echo "rc=$?"

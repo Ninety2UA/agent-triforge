@@ -1405,8 +1405,9 @@ _lease_provision_claude_skills() {
 # .claude/skills too, and for a grok worker the .grok/config.toml that keeps
 # every plugin from loading (_grok_lease_config, in the permission class of
 # <role>: a reviewer or analyst lease, or no role, is also refused where the
-# project or the user tier supplies code grok would start; a builder lease
-# also gets .grok/sandbox.toml, its sandbox profile). rc 1 when the list can't
+# project supplies code grok would start, and its NOTE line on stderr names
+# what the user's own grok configuration runs; a builder lease also gets
+# .grok/sandbox.toml, its sandbox profile). rc 1 when the list can't
 # be read: a row without it would fall back to excluding all of .agents/; and
 # rc 1 when that config or profile can't be written as proven (a grok lease is
 # never made without them).

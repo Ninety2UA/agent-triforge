@@ -3514,9 +3514,11 @@ fi  # end of the lead capability and survival section skipped by --self-only
 #           denies (or its edit argv the MCP ones) that outrank its allow
 #           rules; INFO when only inert discovery remains (~/.claude/skills
 #           grok lists but tags disabled, the settings `env` block, which
-#           include_only keeps out of the tool shell: GRK-09), or when the
-#           read class is refused because this host's own grok configuration
-#           starts a hook or LSP server; PASS when nothing does
+#           include_only keeps out of the tool shell: GRK-09); PASS when
+#           nothing does. The scratch pass's detail quotes the read class's
+#           NOTE line when this host's own grok configuration runs hooks or
+#           settings in every session (they run there, as in the user's own
+#           grok sessions)
 #   GRK-07  --max-turns 1 on a two-command task: the exit code, the
 #           max_turns_reached event, end.stopReason and the classifier's read
 #   GRK-08  a `git push` the deny rule matches is not executed (the stream's
@@ -4104,9 +4106,8 @@ if _want GRK-06; then
       done
       printf '%s' "${M:-ok}" )
     GRK6_DENY=${GRK6_DENY# }
-    # A builder lease: the read class refuses outright where the user tier
-    # supplies a hook or LSP server (the scratch pass below says so), while
-    # the plugins and MCP servers this row measures reach both classes alike
+    # A builder lease: the plugins and MCP servers this row measures reach
+    # both classes alike, and the scratch pass below is the read class
     GRK6_PROV=$(_probe_provision "$GRK6_WT" "$WORK/grk06-leases" grok builder)
     (cd "$GRK6_WT" && _lane_run 90 ${GRK_KEYS[@]+"${GRK_KEYS[@]}"} env "${GRK_ENVW[@]}" grok inspect --json < /dev/null > "$WORK/grk06-inspect.json" 2> "$WORK/grk06-inspect.err") || true
     (cd "$GRK6_WT" && _lane_run 120 ${GRK_KEYS[@]+"${GRK_KEYS[@]}"} env "${GRK_ENVW[@]}" python3 -c "$_GRK_SESSION_PY" "$GRK6_WT" "$WORK/grk06-session.json" < /dev/null > /dev/null 2> "$WORK/grk06-session.err") || true
@@ -4124,7 +4125,7 @@ if _want GRK-06; then
       D=$(mktemp -d "${TMPDIR:-/tmp}/triforge-grok.XXXXXX") || { printf 'no-scratch-dir'; exit 0; }
       if ! _grok_scratch_wt "$D" "$S" 2> "$WORK/grk06-fg.err"; then
         _grok_scratch_drop "$D"
-        if grep -q 'from outside the project' "$WORK/grk06-fg.err" 2>/dev/null; then printf 'user-tier-refused'; else printf 'scratch-refused'; fi
+        printf 'scratch-refused'
         exit 0
       fi
       _grok_argv read "$GRK_MODEL" low || { printf 'argv-unreadable'; _grok_scratch_drop "$D"; exit 0; }
@@ -4139,11 +4140,14 @@ if _want GRK-06; then
       _grok_scratch_drop "$D"
       if [ -e "$D" ] || git -C "$FIX" worktree list --porcelain | grep -qF "$D"; then printf 'left-behind'; else printf 'removed'; fi )
     case "$GRK6_FG" in
-      removed) GRK06F=$(_grk06_verdict "$WORK/grk06-fg-inspect.json" "$WORK/grk06-fg-session.json" "$WORK/grk06-fg-config.toml" "" "$GRK6_DENY") ;;
-      user-tier-refused)
-        # by design: this host's grok configuration starts code in every session
-        GRK06F="INFO refused here as designed, so no read-class session to measure: $(_evidence "$WORK/grk06-fg.err" 2>/dev/null | sed "s|$HOME|~|g")" ;;
-      *)       GRK06F="FAIL invoke_grok's scratch checkout: ${GRK6_FG} $(_evidence "$WORK/grk06-fg.err" 2>/dev/null)" ;;
+      removed)
+        GRK06F=$(_grk06_verdict "$WORK/grk06-fg-inspect.json" "$WORK/grk06-fg-session.json" "$WORK/grk06-fg-config.toml" "" "$GRK6_DENY")
+        # what this host's own grok configuration runs in the session, as the
+        # read class's NOTE line names it
+        if grep -q '^grok: NOTE ' "$WORK/grk06-fg.err" 2>/dev/null; then
+          GRK06F="${GRK06F}; user grok configuration that runs (the read class's NOTE): $(grep '^grok: NOTE ' "$WORK/grk06-fg.err" | head -1 | sed -e 's/^grok: NOTE //' -e "s|$HOME|~|g" | cut -c1-400)"
+        fi ;;
+      *) GRK06F="FAIL invoke_grok's scratch checkout: ${GRK6_FG} $(_evidence "$WORK/grk06-fg.err" 2>/dev/null)" ;;
     esac
     GRK06D="lease worktree: ${GRK06#* }; invoke_grok read class (scratch checkout, then removed): ${GRK06F#* }"
     case "${GRK06%% *}:${GRK06F%% *}" in

@@ -101,20 +101,30 @@ its lease worktree.
 ## What the user's grok configuration supplies
 
 Grok also starts the user's own hooks, LSP servers and MCP servers in every
-session, before any permission applies: hooks in `~/.grok/hooks/` or a
+session, before any permission applies: hooks in `~/.grok/hooks/*.json` or a
 config layer's `[hooks]` table, LSP servers in `~/.grok/lsp.json`, and the
 MCP servers of the user's config. Grok has no switch that turns a user hook or
 LSP server off for one project.
 
-- The provisioned config shadows every user MCP server, as it does the others.
-- A reviewer or analyst does not start where `grok inspect` reports a user
-  hook or LSP server. It also does not start where a user config layer sets an
-  auth-provider command or `ui.notifications.hooks`, or declares an MCP server
-  in a requirements layer, which outranks the project file the shadows go
-  into. The layers are `config.toml`, `managed_config.toml` and
-  `requirements.toml` in `$GROK_HOME`, and the last two in `/etc/grok`. The
-  error names the file. A hook or LSP server that comes from a user plugin
-  passes, since the provisioned config disables the plugin.
+- User-level grok hooks and settings run in a reviewer or analyst session, as
+  they do when the user runs grok. Triforge treats only the project under
+  review as untrusted input. One NOTE line on stderr names each of them with
+  its file: a hook or LSP server that `grok inspect` reports, and an
+  auth-provider command, `ui.notifications.hooks`, a `[hooks]` table or a
+  requirements-layer MCP server in a user config layer. The layers are
+  `config.toml`, `managed_config.toml` and `requirements.toml` in
+  `$GROK_HOME`, and the last two in `/etc/grok`. The line goes to
+  `lease_create`'s stderr, to the builder log at each dispatch, and to
+  `invoke_grok`'s stderr.
+- The provisioned config still shadows every user MCP server, as it does the
+  others. A requirements-layer server outranks the shadow and starts, and the
+  NOTE names it. MCP tool calls are denied in every class.
+- A hook or LSP server that comes from a user plugin stays off, since the
+  provisioned config disables the plugin.
+- A user config layer that doesn't parse is refused, because nothing shows
+  what it would start. The error names the file.
+- Project-level hooks, LSP servers, plugins and MCP servers are still refused
+  in the read class (see above).
 - A builder keeps the user's surfaces, but its sandbox profile stops it from
   planting new ones for a later run. `triforge-edit` is grok's `workspace`
   profile plus a kernel deny, for reads and writes, on `~/.grok/lsp.json`,
@@ -129,17 +139,17 @@ LSP server off for one project.
   transcripts. `lease_dispatch` writes the profile again before every run, and
   row GRK-12 checks it from a scratch `GROK_HOME` without a model call.
 
-A machine whose `~/.grok/hooks/` holds a hook, such as a terminal app's
-agent-status hook, gets no grok reviewer or analyst until the user moves the
-hook out. at-setup checks for one before it offers grok either role. A worker
-on another CLI with no OS sandbox can still write to `~/.grok`. If it plants a
-hook, an LSP server, an auth-provider command, notification hooks or a
-requirements-layer MCP server there, the reviewer refusal catches it; a new
-MCP server is shadowed. The check runs when a reviewer or analyst lease is
-made, again before each of its dispatches, and before each `invoke_grok`
-attempt. Nothing catches a plant that `grok inspect` and the config layers
-don't show, such as a `~/.grok/AGENTS.md` or a replaced `~/.grok/bin/grok`.
-AGENTS.md names that residual for any worker with a shell and no OS sandbox.
+A machine with a terminal app's agent-status hook in `~/.grok/hooks/`, such
+as Orca's `orca-status.json`, runs that hook in grok reviews too, and the
+NOTE names it. The check runs when a reviewer or analyst lease is made, again
+before each of its dispatches, and before each `invoke_grok` attempt.
+at-setup runs the same check before it offers grok either role and shows the
+user the NOTE. A worker on another CLI with no OS sandbox can still write to
+`~/.grok`. A hook it plants there runs in the next grok review and shows up in
+the NOTE; a new MCP server there is shadowed. Nothing names a plant that
+`grok inspect` and the config layers don't show, such as a `~/.grok/AGENTS.md`
+or a replaced `~/.grok/bin/grok`. AGENTS.md names that residual for any worker
+with a shell and no OS sandbox.
 
 ## Files
 
