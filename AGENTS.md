@@ -70,10 +70,10 @@ for f in scripts/*.sh scripts/lib/*.sh hooks/handlers/*.sh; do /bin/bash -n "$f"
 | Action | The helper that refuses to do it |
 |---|---|
 | Installing or logging in to a CLI | `ensure_core_trio_live`, `roster_member_auth` and `roster_enroll_member` print the install or login command (rc 10 when absent) and never run it |
-| Writing user-tier config: the Codex trust entry, the agy allow/deny lists, Claude settings | the setup workflow (`skills/at-setup/SKILL.md`) detects and prints; no Triforge writer touches `HOME` |
+| Writing user-tier config: Codex project and hook trust, the agy allow/deny lists, Claude settings | the setup workflow (`skills/at-setup/SKILL.md`) detects and prints; no Triforge writer touches `HOME` |
 | Launching a lead with `-s danger-full-access` | `coordinate.sh` runs it only with the human's `--allow-full-access`, else prints it (rc 77); nothing else execs one |
-| Consenting to a provider seeing code (enrolling an optional member, opting out of training) | `roster_enroll_member` returns 20 (needs-ask) interactively and leaves the question to the human; a decline persists as `enabled = false` |
-| Editing user-owned instruction files (a project's own `AGENTS.md` or `CLAUDE.md`) | `_bootstrap_copy` copies only where no file exists; the pointer block in `templates/AGENTS.md` is added by the human (session start prints the copy line when a project has no `AGENTS.md`); nothing writes into an existing instruction file |
+| Consenting to a provider seeing code (enrolling an optional member, opting out of training) | `roster_enroll_member` returns 20 (needs-ask); `roster_write_member` refuses Devin without `--consent user` (rc 2) and `member_rules` rejects it at load (rc 5); a decline persists as `enabled = false` |
+| Approving a change to a user-owned instruction file (a project's own `AGENTS.md` or `CLAUDE.md`) | `instruction_add_import`, `instruction_merge_pointer` and `instruction_convert_stale` refuse without `--yes` (rc 20), which at-setup passes only after the user's yes; `_bootstrap_copy` copies only where no file exists; user-tier files are never written (rc 2) |
 | Approving a protected-path or `require_user_approval` promotion, and promoting to the main branch | `lease_promote` refuses (rc 42) without `lease_approve promotion:<branch> user`, bound to the tree; any shell can record it (`via=` says where) |
 
 ## Where the rest lives

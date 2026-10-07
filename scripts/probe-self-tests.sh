@@ -10124,6 +10124,330 @@ _S16_EV="${_S16_EV}B: instruction files in the project, above and the user level
 rm -rf "$_S16B"
 # --- end of SELF-16 section B ---
 # --- SELF-16 section C: at-setup's blocks and the headless primitives (U15) ---
+# C (R7, R8, R9, R24, R43): at-setup's bash blocks as written in this
+# checkout's skills/at-setup/references (the first ```bash block under a named
+# heading), each run in its own /bin/bash and /bin/zsh from a fixture git
+# project holding the shipped roster template. SKILL_DIR is this checkout's
+# skills/at-setup, HOME and TMPDIR are throwaway, and CLAUDE_PLUGIN_ROOT, the
+# SELF seam and the host markers are unset unless a case names a session
+# (CLAUDECODE for Claude Code, CODEX_THREAD_ID for Codex). PATH holds stubs
+# (claude, codex, agy, devin, opencode) and python3, git and timeout, so no
+# real optional CLI answers:
+#   order     a Claude Code session, no [lead]: detect -> host, current and
+#             default claude; check with LEAD_CHOICE=codex -> LEAD-WRITE
+#             last, the full-access note, the launch line and the
+#             confinement text; the role, decline, enroll and Devin consent
+#             blocks rc 0; the lead block rc 0, [lead] cli = "codex", the
+#             interactive launch line and the confinement text. The old
+#             order (the lead block first) -> the role block refused, rc 45,
+#             naming the lead, the role left as it was
+#   headless  a Codex session: detect -> default codex; check -> LEAD-WRITE
+#             first; the primitives in that order, each rc 0, give the
+#             roster "order" wrote (bash), consent stamps and enrolled dates
+#             normalized
+#   sandbox   a Codex lead under CODEX_SANDBOX and
+#             CODEX_SANDBOX_NETWORK_DISABLED, devin and opencode signed out:
+#             the preflight says unverified with the relaunch line, the
+#             enroll and role blocks rc 0, the status table's AUTH
+#             unverified, no auth-failed anywhere, no auth cache file
+#   egress    the egress block prints roster_egress_disclosure's lines, the
+#             same as a direct call
+#   instr     detect lists the project's CLAUDE.md and the visibility per
+#             lead (no pointer block: hidden for both); apply without
+#             INSTR_YES -> rc 20 and the bytes unchanged (import, merge);
+#             INSTR_YES=yes, not --yes -> rc 64; the merge with --yes -> the
+#             template AGENTS.md, Codex visible, Claude Code shadowed by the
+#             CLAUDE.md; the import with --yes -> the line, Claude Code
+#             visible; the commit block names both and commits nothing
+#             until COMMIT_YES=yes, then exactly those two
+#   devin     the consent block prints the re-import answer and devin
+#             plugins list's output; the model block lists the account's
+#             ids and the default; the write block with no consent on record
+#             -> rc 2, nothing written; with DEVIN_CONSENT=user rc 0; a
+#             model change without it rc 0, the model changed, the consent
+#             stamp kept
+_S16C="${_S16}/c"
+_S16C_R="${REPO_ROOT}/skills/at-setup/references"
+_S16C_T=$(printf '\t')
+mkdir -p "$_S16C/home" "$_S16C/bin" "$_S16C/tools" "$_S16C/blocks" "$_S16C/tmp"
+for _s16c_x in python3 git timeout gtimeout; do
+  _s16c_p=$(command -v "$_s16c_x" 2>/dev/null || true)
+  if [ -n "$_s16c_p" ]; then ln -s "$_s16c_p" "$_S16C/tools/$_s16c_x" 2>/dev/null || true; fi
+done
+for _s16c_x in claude agy; do
+  printf '#!/bin/sh\n# probe stub (SELF-16 C): --version only\necho 0.0.0-probe-stub\n' > "$_S16C/bin/$_s16c_x"
+done
+printf '#!/bin/sh\n# probe stub (SELF-16 C): codex with the hooks feature off\ncase "${1:-}" in features) echo "hooks  stable  false" ;; *) echo 0.0.0-probe-stub ;; esac\n' > "$_S16C/bin/codex"
+cat > "$_S16C/bin/devin" <<'S16C_DEVIN_EOF'
+#!/bin/sh
+# probe stub (SELF-16 C): devin signed out; the account's model catalog and the installed plugins
+case "${1:-} ${2:-}" in
+  "auth status") echo "Not logged in." ;;
+  "models list") printf '{"families": [{"family_uid": "swe", "variants": [{"model_uid": "swe-1-6-slow"}, {"model_uid": "swe-2-high"}]}]}\n' ;;
+  "plugins list") printf 'acme-review  1.2.0  org\nlint-pack  0.4.1  user\n' ;;
+  *) echo "3000.11.3-probe-stub" ;;
+esac
+S16C_DEVIN_EOF
+printf '#!/bin/sh\n# probe stub (SELF-16 C): OpenCode V1, no provider signed in\ncase "${1:-}" in --version) echo 1.4.2 ;; auth) echo "0 credentials" ;; esac\nexit 0\n' > "$_S16C/bin/opencode"
+chmod +x "$_S16C/bin/claude" "$_S16C/bin/agy" "$_S16C/bin/codex" "$_S16C/bin/devin" "$_S16C/bin/opencode"
+# _s16c_block <reference> <heading> <name> — the first ```bash block under
+# that exact heading line, before the next "## ", into blocks/<name>.sh; rc 1
+# when there is none
+_s16c_block() {
+  python3 - "$_S16C_R/$1" "$2" > "$_S16C/blocks/$3.sh" <<'S16C_BLOCK_PY'
+import sys
+try:
+    lines = open(sys.argv[1], encoding="utf-8").read().split("\n")
+except OSError:
+    sys.exit(1)
+if sys.argv[2] not in lines:
+    sys.exit(1)
+out, inside = [], False
+for ln in lines[lines.index(sys.argv[2]) + 1:]:
+    if not inside:
+        if ln.startswith("## "):
+            sys.exit(1)
+        inside = ln.strip() == "```bash"
+        continue
+    if ln.strip() == "```":
+        print("\n".join(out))
+        sys.exit(0)
+    out.append(ln)
+sys.exit(1)
+S16C_BLOCK_PY
+}
+_S16C_NOBLOCK=""
+for _s16c_x in "lead.md|## Detect the lead|detect" "lead.md|## Check the choice|check" "lead.md|## Write the lead|lead" \
+  "roles.md|## Customize|role" "optional-members.md|## Preflight each member|pre" "optional-members.md|## Enroll or decline|member" \
+  "optional-members.md|## Devin: consent first|dconsent" "optional-members.md|## Devin: the model|dmodel" \
+  "optional-members.md|## Devin: record the answer|dwrite" "status-table.md|## Egress disclosure|egress" \
+  "status-table.md|## The closing table|table" "instruction-files.md|## Detect the files|idetect" \
+  "instruction-files.md|## Apply one change|iapply" "instruction-files.md|## Offer the commit|commit"; do
+  _s16c_f=${_s16c_x%%|*}
+  _s16c_r=${_s16c_x#*|}
+  _s16c_block "$_s16c_f" "${_s16c_r%|*}" "${_s16c_r##*|}" || _S16C_NOBLOCK="${_S16C_NOBLOCK} ${_s16c_r##*|}"
+done
+if [ -n "$_S16C_NOBLOCK" ]; then _S16_FAIL="${_S16_FAIL} c-blocks(none-for:${_S16C_NOBLOCK# })"; fi
+printf 'source "$S16C_ROOT/scripts/invoke-external.sh"; set +e\nroster_egress_disclosure\n' > "$_S16C/blocks/edirect.sh"
+cat > "$_S16C/blocks/headless.sh" <<'S16C_HEADLESS_EOF'
+source "$S16C_ROOT/scripts/invoke-external.sh"; set +e
+R=""
+roster_write_lead codex; R="$R $?"
+roster_write_role tester claude "" high; R="$R $?"
+roster_write_member kimi false ""; R="$R $?"
+roster_write_member opencode true openrouter/z-ai/glm-5.3; R="$R $?"
+roster_write_member devin true swe-2-high --consent user; R="$R $?"
+echo "rcs:$R"
+S16C_HEADLESS_EOF
+# _s16c_do <label> <shell> <dir> <block> [VAR=value...] — one block in its own
+# shell from <dir> under the environment above (the VAR=value pairs last, so
+# a case can override one): "<label>:exit=<rc>", then each output line as
+# "<label>:<line>"
+_s16c_do() {
+  local L=$1 SH=$2 D=$3 B=$4 RC=0
+  shift 4
+  ( cd "$D" && exec env -u CLAUDE_PLUGIN_ROOT -u TRIFORGE_LEASE_WORKER -u TRIFORGE_TEST_LEAD -u TRIFORGE_TEST_BUILDER \
+      -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CODEX_CI -u CODEX_THREAD_ID -u CODEX_HOME -u CODEX_SANDBOX \
+      -u CODEX_SANDBOX_NETWORK_DISABLED -u TRIFORGE_CURSOR_BIN -u XAI_API_KEY -u OPENROUTER_API_KEY -u GROK_HOME \
+      -u LEAD_CHOICE -u ROLE -u ROLE_CLI -u ROLE_MODEL -u ROLE_EFFORT -u MEMBER -u MEMBER_MODEL -u MEMBER_ENABLED \
+      -u DEVIN_MODEL -u DEVIN_CONSENT -u INSTR_OP -u INSTR_FILE -u INSTR_YES -u COMMIT_YES \
+      HOME="$_S16C/home" PATH="$_S16C/bin:$_S16C/tools:/usr/bin:/bin:/usr/sbin:/sbin" TMPDIR="$_S16C/tmp" \
+      GIT_CONFIG_NOSYSTEM=1 SKILL_DIR="$REPO_ROOT/skills/at-setup" S16C_ROOT="$REPO_ROOT" "$@" \
+      ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+120} "$SH" "$_S16C/blocks/$B.sh" ) < /dev/null > "$_S16C/out" 2>&1 || RC=$?
+  echo "${L}:exit=${RC}"
+  sed "s#^#${L}:#" "$_S16C/out"
+}
+# _s16c_repo <dir> [text appended to the roster, %b escapes] — a git project
+# (probe identity): the shipped roster template, a README, one commit
+_s16c_repo() {
+  mkdir -p "$1/ops" && cp "$REPO_ROOT/templates/ops/roster.toml" "$1/ops/roster.toml" && printf '%b' "${2:-}" >> "$1/ops/roster.toml" \
+    && echo r > "$1/README.md" \
+    && ( cd "$1" && export HOME="$_S16C/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main && git config user.email probe@triforge.local \
+         && git config user.name triforge-probe && git add -A && git commit -qm init ) >/dev/null 2>&1
+}
+_s16c_git() { ( cd "$1" && shift && HOME="$_S16C/home" GIT_CONFIG_NOSYSTEM=1 git "$@" ) 2>/dev/null; }
+# _s16c_roster <dir> — the roster's lead, tester role and three members on one line
+_s16c_roster() {
+  python3 - "$1/ops/roster.toml" <<'S16C_ROSTER_PY' 2>&1 || true
+import sys, tomllib
+d = tomllib.load(open(sys.argv[1], "rb"))
+t = d.get("roles", {}).get("tester", {})
+ms = d.get("members", {})
+def m(c):
+    x = ms.get(c)
+    if not isinstance(x, dict):
+        return "-"
+    return str(x.get("enabled")).lower() + "/" + str(x.get("model", "")) + "/" + str(x.get("consent", "-"))[:4]
+print("lead=" + str(d.get("lead", {}).get("cli", "-")) + ":tester=" + str(t.get("cli")) + "/" + str(t.get("effort"))
+      + ":kimi=" + m("kimi") + ":opencode=" + m("opencode") + ":devin=" + m("devin"))
+S16C_ROSTER_PY
+}
+# _s16c_field <dir> <member> <field> — one [members.<member>] field, "-" when absent
+_s16c_field() {
+  python3 - "$1/ops/roster.toml" "$2" "$3" <<'S16C_FIELD_PY' 2>&1 || true
+import sys, tomllib
+m = tomllib.load(open(sys.argv[1], "rb")).get("members", {}).get(sys.argv[2], {})
+print(m.get(sys.argv[3], "-") if isinstance(m, dict) else "-")
+S16C_FIELD_PY
+}
+# _s16c_same <dir> <dir> — "same:<devin's consent, normalized>" when the two
+# rosters load alike once consent times and enrolled dates are normalized
+# (table order aside), else "differ:<first>|<second>"
+_s16c_same() {
+  python3 - "$1/ops/roster.toml" "$2/ops/roster.toml" <<'S16C_SAME_PY' 2>&1 || true
+import json, re, sys, tomllib
+def norm(p):
+    d = tomllib.load(open(p, "rb"))
+    for m in (d.get("members") or {}).values():
+        if isinstance(m, dict):
+            if "consent" in m:
+                m["consent"] = re.sub(r"^user \S+ ", "user <UTC> ", m["consent"])
+            if "enrolled" in m:
+                m["enrolled"] = "<DATE>"
+    return d
+a, b = norm(sys.argv[1]), norm(sys.argv[2])
+ja, jb = json.dumps(a, sort_keys=True), json.dumps(b, sort_keys=True)
+if ja == jb:
+    print("same:consent=" + str(a.get("members", {}).get("devin", {}).get("consent", "-")))
+else:
+    print("differ:" + ja[-300:] + "|" + jb[-300:])
+S16C_SAME_PY
+}
+_S16C_SHELLS=/bin/bash
+if [ -x /bin/zsh ]; then _S16C_SHELLS="/bin/bash /bin/zsh"; fi
+_S16C_LINE='codex -s danger-full-access -c approval_policy="never" -c background_terminal_max_timeout=900000 -m gpt-6-astra -c model_reasoning_effort=xhigh'
+_S16C_LINE_RE=$(printf '%s' "$_S16C_LINE" | sed 's/[.]/\\./g')
+for _s16c_sh in $_S16C_SHELLS; do
+  N=${_s16c_sh##*/}
+  P="$_S16C/order-$N"
+  Q="$_S16C/old-$N"
+  _s16c_repo "$P" || _S16_FAIL="${_S16_FAIL} c-order-$N(fixture)"
+  _s16c_repo "$Q" || _S16_FAIL="${_S16_FAIL} c-order-$N(fixture)"
+  # order: asked first, written last; then the old order
+  O="$(_s16c_do detect "$_s16c_sh" "$P" detect CLAUDECODE=1)
+$(_s16c_do check "$_s16c_sh" "$P" check CLAUDECODE=1 LEAD_CHOICE=codex)
+$(_s16c_do role "$_s16c_sh" "$P" role CLAUDECODE=1 ROLE=tester ROLE_CLI=claude ROLE_MODEL= ROLE_EFFORT=high)
+$(_s16c_do decline "$_s16c_sh" "$P" member CLAUDECODE=1 MEMBER=kimi MEMBER_ENABLED=false)
+$(_s16c_do enroll "$_s16c_sh" "$P" member CLAUDECODE=1 MEMBER=opencode MEMBER_MODEL=openrouter/z-ai/glm-5.3)
+$(_s16c_do devin "$_s16c_sh" "$P" dwrite CLAUDECODE=1 DEVIN_MODEL=swe-2-high DEVIN_CONSENT=user)
+$(_s16c_do lead "$_s16c_sh" "$P" lead CLAUDECODE=1 LEAD_CHOICE=codex)
+roster:$(_s16c_roster "$P")
+$(_s16c_do oldlead "$_s16c_sh" "$Q" lead CLAUDECODE=1 LEAD_CHOICE=codex)
+$(_s16c_do oldrole "$_s16c_sh" "$Q" role CLAUDECODE=1 ROLE=tester ROLE_CLI=claude ROLE_MODEL= ROLE_EFFORT=high)
+oldroster:$(_s16c_roster "$Q")"
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "c-order-$N" "$O" '^detect:exit=0$' '^detect:LEAD-HOST: claude$' '^detect:LEAD-NOW: claude \(default' \
+    '^detect:LEAD-DEFAULT: claude$' '^detect:LEAD-CAN: claude codex$' \
+    '^check:exit=0$' '^check:LEAD-WRITE: last ' '^check:FULL-ACCESS: ' "^check:  ${_S16C_LINE_RE}\$" \
+    "^check:  - Confinement under either lead is Triforge's scripts plus git-integrity detection\\.\$" \
+    '^role:rc=0$' '^decline:rc=0$' '^enroll:rc=0$' '^devin:rc=0$' \
+    '^lead:rc=0$' '^lead:LEAD: Codex CLI leads this project from its next session' "^lead:  ${_S16C_LINE_RE}\$" \
+    "^lead:  - Confinement under either lead is Triforge's scripts plus git-integrity detection\\.\$" \
+    '^lead:  - A lease worktree limits where a worker starts, not where it writes\.$' \
+    '^lead:  - Recorded approval is audit, not prevention, and worker output is an injection surface for a full-access lead\.$' \
+    '^roster:lead=codex:tester=claude/high:kimi=false//-:opencode=true/openrouter/z-ai/glm-5\.3/-:devin=true/swe-2-high/user$' \
+    '^oldlead:rc=0$' '^oldrole:rc=45$' "^oldrole:roster_write_role: REFUSED — this checkout's lead is Codex CLI " \
+    '^oldroster:lead=codex:tester=codex/xhigh:kimi=-:opencode=-:devin=-$')"
+
+  # sandbox: a Codex lead in a workspace-write session, members signed out
+  P="$_S16C/sandbox-$N"
+  _s16c_repo "$P" '\n[lead]\ncli = "codex"\n' || _S16_FAIL="${_S16_FAIL} c-sandbox-$N(fixture)"
+  mkdir -p "$_S16C/tmp-sb-$N"
+  O=""
+  for _s16c_x in "predevin|pre|MEMBER=devin" "preopencode|pre|MEMBER=opencode" "enroll|member|MEMBER=opencode" \
+    "role|role|ROLE=tester" "table|table|S16C_NONE=1"; do
+    _s16c_r=${_s16c_x#*|}
+    O="${O}$(_s16c_do "${_s16c_x%%|*}" "$_s16c_sh" "$P" "${_s16c_r%%|*}" CODEX_THREAD_ID=t-s16c CODEX_SANDBOX=seatbelt CODEX_SANDBOX_NETWORK_DISABLED=1 \
+      TMPDIR="$_S16C/tmp-sb-$N" MEMBER_MODEL=openrouter/z-ai/glm-5.3 ROLE_CLI=claude ROLE_MODEL= ROLE_EFFORT=high "${_s16c_r#*|}")
+"
+  done
+  O="${O}cache:$(ls "$_S16C/tmp-sb-$N" | grep -c '^triforge_auth_' || true)"
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "c-sandbox-$N" "$O" \
+    '^predevin:needs-ask: devin installed=yes default-model=swe-1-6-slow auth=unverified: relaunch with codex -s danger-full-access .* to check devin \(the check failed inside the Codex CLI sandbox, CODEX_SANDBOX=seatbelt, CODEX_SANDBOX_NETWORK_DISABLED=1, which can block it: not a sign-out\)$' \
+    '^predevin:devin: rc=20$' '^preopencode:needs-ask: opencode installed=yes .* auth=unverified: relaunch with codex ' '^preopencode:opencode: rc=20$' \
+    '^enroll:rc=0$' '^role:rc=0$' '^table:exit=0$' '^table:devin +yes +unverified +- ' '^table:opencode +yes +unverified +openrouter/z-ai/glm-5\.3 ' \
+    '^cache:0$')"
+  if printf '%s\n' "$O" | grep -qE 'auth-failed|^table:[a-z]+ +yes +failed'; then _S16_FAIL="${_S16_FAIL} c-sandbox-$N(a-member-marked-signed-out)"; fi
+
+  # instr: each writer only after an explicit yes, then the commit offer
+  P="$_S16C/instr-$N"
+  _s16c_repo "$P" || _S16_FAIL="${_S16_FAIL} c-instr-$N(fixture)"
+  printf '# acme rules\n' > "$P/CLAUDE.md"
+  _s16c_git "$P" add CLAUDE.md >/dev/null || true
+  _s16c_git "$P" commit -qm claude >/dev/null || true
+  _S16C_SUM=$(cksum < "$P/CLAUDE.md")
+  _S16C_HEAD=$(_s16c_git "$P" rev-parse HEAD || true)
+  O="$(_s16c_do detect "$_s16c_sh" "$P" idetect CLAUDECODE=1)
+$(_s16c_do offer0 "$_s16c_sh" "$P" commit CLAUDECODE=1)
+$(_s16c_do importask "$_s16c_sh" "$P" iapply CLAUDECODE=1 INSTR_OP=import INSTR_FILE=CLAUDE.md)
+$(_s16c_do mergeask "$_s16c_sh" "$P" iapply CLAUDECODE=1 INSTR_OP=merge)
+$(_s16c_do importbad "$_s16c_sh" "$P" iapply CLAUDECODE=1 INSTR_OP=import INSTR_FILE=CLAUDE.md INSTR_YES=yes)
+untouched:$(if [ "$(cksum < "$P/CLAUDE.md")" = "$_S16C_SUM" ] && [ ! -e "$P/AGENTS.md" ]; then echo yes; else echo no; fi)
+$(_s16c_do merge "$_s16c_sh" "$P" iapply CLAUDECODE=1 INSTR_OP=merge INSTR_YES=--yes)
+$(_s16c_do detect2 "$_s16c_sh" "$P" idetect CLAUDECODE=1)
+$(_s16c_do import "$_s16c_sh" "$P" iapply CLAUDECODE=1 INSTR_OP=import INSTR_FILE=CLAUDE.md INSTR_YES=--yes)
+$(_s16c_do detect3 "$_s16c_sh" "$P" idetect CLAUDECODE=1)
+content:import=$(if [ "$(cat "$P/CLAUDE.md")" = "$(printf '# acme rules\n@AGENTS.md')" ]; then echo yes; else echo no; fi):template=$(if cmp -s "$REPO_ROOT/templates/AGENTS.md" "$P/AGENTS.md"; then echo yes; else echo no; fi)
+$(_s16c_do offer "$_s16c_sh" "$P" commit CLAUDECODE=1)
+head:$(if [ "$(_s16c_git "$P" rev-parse HEAD || true)" = "$_S16C_HEAD" ]; then echo unchanged; else echo moved; fi)
+$(_s16c_do commit "$_s16c_sh" "$P" commit CLAUDECODE=1 COMMIT_YES=yes)
+committed:$(_s16c_git "$P" show --name-only --format= HEAD | paste -sd, - || true):$(_s16c_git "$P" status --porcelain | grep -c . || true)"
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "c-instr-$N" "$O" '^detect:exit=0$' \
+    "^detect:FILE: CLAUDE\\.md${_S16C_T}project${_S16C_T}no-import,user-owned${_S16C_T}[^${_S16C_T}]*/instr-${N}/CLAUDE\\.md${_S16C_T}@AGENTS\\.md\$" \
+    "^detect:VISIBLE: claude${_S16C_T}hidden${_S16C_T}no AGENTS\\.md between / and [^ ]*/instr-${N} holds the Triforge pointer block; instruction_merge_pointer adds it\$" \
+    "^detect:VISIBLE: codex${_S16C_T}hidden${_S16C_T}no AGENTS\\.md between " \
+    "^detect2:VISIBLE: claude${_S16C_T}hidden${_S16C_T}shadowed by [^ ]*/instr-${N}/CLAUDE\\.md: " "^detect2:VISIBLE: codex${_S16C_T}visible${_S16C_T}" \
+    "^detect3:FILE: CLAUDE\\.md${_S16C_T}project${_S16C_T}imports,user-owned${_S16C_T}" "^detect3:VISIBLE: claude${_S16C_T}visible${_S16C_T}" \
+    '^offer0:COMMIT: nothing setup wrote is uncommitted$' \
+    '^importask:needs-ask: would add the line @AGENTS\.md to [^ ]*/CLAUDE\.md' '^importask:rc=20$' \
+    '^mergeask:needs-ask: would create [^ ]*/AGENTS\.md ' '^mergeask:rc=20$' '^importbad:rc=64$' '^untouched:yes$' \
+    '^import:rc=0$' '^merge:rc=0$' '^content:import=yes:template=yes$' \
+    '^offer:COMMIT: ' '^offer:  AGENTS\.md$' '^offer:  CLAUDE\.md$' '^head:unchanged$' \
+    '^commit:rc=0$' '^committed:AGENTS\.md,CLAUDE\.md:0$')"
+
+  # devin: consent, the plugins notice, the model choice
+  P="$_S16C/devin-$N"
+  _s16c_repo "$P" || _S16_FAIL="${_S16_FAIL} c-devin-$N(fixture)"
+  O="$(_s16c_do consent "$_s16c_sh" "$P" dconsent CLAUDECODE=1)
+$(_s16c_do model "$_s16c_sh" "$P" dmodel CLAUDECODE=1)
+$(_s16c_do noconsent "$_s16c_sh" "$P" dwrite CLAUDECODE=1 DEVIN_MODEL=swe-2-high)
+after-no:$(_s16c_roster "$P")
+$(_s16c_do yes "$_s16c_sh" "$P" dwrite CLAUDECODE=1 DEVIN_MODEL=swe-1-6-slow DEVIN_CONSENT=user)"
+  _S16C_STAMP=$(_s16c_field "$P" devin consent)
+  O="$O
+$(_s16c_do change "$_s16c_sh" "$P" dwrite CLAUDECODE=1 DEVIN_MODEL=swe-2-high)
+kept:model=$(_s16c_field "$P" devin model):consent=$(if [ "$(_s16c_field "$P" devin consent)" = "$_S16C_STAMP" ]; then echo kept; else echo changed; fi):$(printf '%s' "$_S16C_STAMP" | cut -c1-5)"
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "c-devin-$N" "$O" '^consent:exit=0$' '^consent:DEVIN-ENV-REIMPORT: (yes|no|unknown)$' \
+    '^consent:.*devin plugins list' '^consent:  acme-review  1\.2\.0  org$' '^consent:  lint-pack  0\.4\.1  user$' \
+    '^model:swe-1-6-slow$' '^model:swe-2-high$' '^model:rc=0$' '^model:DEFAULT: swe-1-6-slow$' \
+    '^noconsent:rc=2$' '^noconsent:roster_write_member: REFUSED — enrolling devin needs the user consent on record' '^after-no:.*:devin=-$' \
+    '^yes:rc=0$' '^change:rc=0$' '^kept:model=swe-2-high:consent=kept:user $')"
+
+  # egress: the block prints the disclosure the helper computes
+  P="$_S16C/egress-$N"
+  _s16c_repo "$P" '\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n' || _S16_FAIL="${_S16_FAIL} c-egress-$N(fixture)"
+  O="$(_s16c_do egress "$_s16c_sh" "$P" egress)"
+  _S16C_DIRECT=$(_s16c_do egress "$_s16c_sh" "$P" edirect | grep -v '^egress:exit=' || true)
+  O="$O
+same:$(if [ "$(printf '%s\n' "$O" | grep -v -e '^egress:exit=' -e '^egress:rc=' || true)" = "$_S16C_DIRECT" ]; then echo yes; else echo no; fi)"
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "c-egress-$N" "$O" '^egress:exit=0$' '^egress:rc=0$' \
+    '^egress:egress: Claude Code sends the prompts and code to Anthropic$' '^egress:egress: Antigravity CLI sends the prompts and code to Google$' \
+    '^egress:egress: Codex CLI sends the prompts and code to OpenAI$' '^egress:egress: Grok Build sends the prompts and code to xAI$' \
+    '^egress:home: Grok Build runs as you, so it can read the credential files under [^ ]*/c/home and send them to xAI$' '^same:yes$')"
+done
+
+# headless: a Codex session calls the primitives in the order the check
+# block prints; the roster matches the guided one (bash) once normalized
+P="$_S16C/headless"
+_s16c_repo "$P" || _S16_FAIL="${_S16_FAIL} c-headless(fixture)"
+O="$(_s16c_do detect /bin/bash "$P" detect CODEX_THREAD_ID=t-s16c)
+$(_s16c_do check /bin/bash "$P" check CODEX_THREAD_ID=t-s16c LEAD_CHOICE=codex)
+$(_s16c_do run /bin/bash "$P" headless CODEX_THREAD_ID=t-s16c)
+same:$(_s16c_same "$_S16C/order-bash" "$P")"
+_S16_FAIL="${_S16_FAIL}$(_self_expect c-headless "$O" '^detect:LEAD-NOW: claude \(default' '^detect:LEAD-DEFAULT: codex$' '^check:LEAD-WRITE: first ' \
+  '^run:rcs: 0 0 0 0 0$' '^same:same:consent=user <UTC> via=lead-session$')"
+_S16_EV="${_S16_EV}C: at-setup's blocks as written under ${_S16C_SHELLS}: the lead asked first and written last (the old order rc 45), the headless primitives give the guided roster, unverified in a Codex sandbox with no cache, the egress lines, instruction writers only on --yes and the commit offer, Devin consent, model and plugins; "
+unset N P Q _S16C_SUM _S16C_HEAD _S16C_STAMP _S16C_DIRECT _S16C_NOBLOCK _S16C_LINE _S16C_LINE_RE _s16c_sh _s16c_x _s16c_r _s16c_f _s16c_p
+rm -rf "$_S16C"
 # --- end of SELF-16 section C ---
 _S16_CAP="at-setup: the lead asked first and written last, one roster at the checkout top, the computed egress and HOME credential-read disclosure, Codex trust and hook trust read and never written, the launch lines, sandbox-aware auth, instruction files detected in the project and above with ask-first writers and the AGENTS.md budget, the Devin model choice (U15)"
 for _S16_SEC in A B C; do

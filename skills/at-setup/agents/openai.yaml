@@ -1,6 +1,6 @@
 interface:
   display_name: "Triforge Setup"
-  short_description: "Guided roster onboarding: core trio, members, roles."
+  short_description: "Guided setup: lead, core trio, roles, members, files."
   default_prompt: "Run $agent-triforge:at-setup and walk the roster with me."
 policy:
   allow_implicit_invocation: false
