@@ -25,7 +25,10 @@
 #   agents inside triforge_bootstrap) is consumed and never echoed — the floor
 #   warning prints only the X.Y.Z digits parsed out of it — and each line
 #   triforge_bootstrap prints starts with the "session-start: " prefix this hook
-#   passes it, control characters already dropped.
+#   passes it, control characters already dropped. Re-audited 2026-10-07
+#   (Phase 3 round 4, B8): the orientation is printed with printf %s, never %b,
+#   and every value read from disk or the environment (roster pins, paths, the
+#   loader's error) passes _ss_prose and sits behind fixed prose.
 # Bash 3.2 compatible (macOS /bin/bash): no associative arrays, no mapfile, no
 #   "${arr[@]}" expansion of a possibly-empty array under set -u.
 
@@ -82,27 +85,60 @@ cd "$SS_ANCHOR" 2>/dev/null || SS_ANCHOR=$SS_START_DIR
 # directory that is itself a repository), the hook writes nothing there. The
 # bootstrap, the runtime file, enrollment and the .claude cleanup are skipped,
 # and one standing WARNING says why: .claude, .codex and the rest of a home
-# directory are each CLI's user-tier config. Inline, like the anchor.
+# directory are each CLI's user-tier config. Inline, like the anchor, and like
+# the bootstrap's _tb_home_anchor compared by filesystem identity (test -ef),
+# never by spelling (Phase 3 round 4, B1): bash's pwd -P keeps the case the
+# shell was handed, so on a case-insensitive volume /users/me is HOME too.
 SS_AT_HOME=""
 SS_HOME_P=""
 if [ -n "${HOME:-}" ]; then
   SS_HOME_P=$(cd "$HOME" 2>/dev/null && env pwd -P 2>/dev/null || true)
 fi
-if [ -n "$SS_HOME_P" ]; then
-  if [ "$SS_ANCHOR" = "/" ]; then
+SS_D=$SS_HOME_P
+while [ -n "$SS_D" ]; do
+  if [ "$SS_ANCHOR" -ef "$SS_D" ]; then
     SS_AT_HOME=yes
-  else
-    case "${SS_HOME_P%/}/" in
-      "${SS_ANCHOR%/}"/*) SS_AT_HOME=yes ;;
-    esac
+    break
   fi
-fi
+  if [ "$SS_D" = "/" ]; then
+    break
+  fi
+  SS_D=${SS_D%/*}
+  if [ -z "$SS_D" ]; then SS_D=/; fi
+done
 
 # _ss_claude_dir — 0 when .claude is a real directory of the project (not a
 # symlink, not a file): only then does the hook touch anything under it. A
 # .claude linked elsewhere holds another place's files.
 _ss_claude_dir() {
   [ -d .claude ] && [ ! -L .claude ]
+}
+
+# The orientation message is lines joined by real newlines and printed with
+# printf %s, so no escape sequence in it is ever interpreted, and every piece
+# that carries data (a path, a model pin read from the roster, a loader's
+# error, a bootstrap notice) goes through _ss_prose first (Phase 3 round 4,
+# B8): a newline or an escape in a value can't make a line of its own, and no
+# stdout line can start with "{".
+SS_NL='
+'
+# _ss_prose <text> — the text as one line: control characters dropped.
+_ss_prose() {
+  printf '%s' "$1" | LC_ALL=C tr -d '\000-\037\177'
+}
+
+# _ss_tmp_ok <dir> — 0 when no other user can rename entries in <dir>: it is
+# owned by this user or root, and has no group or other write unless the
+# sticky bit is set — the rule monitors.py, coordinate.sh and the lease root
+# apply (Phase 3 round 4, B5). In a shared directory without the sticky bit a
+# second user could move a private temp dir aside and put one holding links
+# in its place, and the hook's next redirect would follow them.
+_ss_tmp_ok() {
+  [ -d "$1" ] || return 1
+  if [ ! -O "$1" ] && [ -z "$(find -H "$1" -maxdepth 0 -user 0 2>/dev/null)" ]; then
+    return 1
+  fi
+  [ -z "$(find -H "$1" -maxdepth 0 \( -perm -020 -o -perm -002 \) ! -perm -1000 2>/dev/null)" ]
 }
 
 # Clean stale state files from previous sessions (the context monitor keeps
@@ -240,7 +276,7 @@ if [ -n "$SS_HELPER" ] && [ -z "$SS_AT_HOME" ] && [ "${#DETECTED_OPTIONAL[@]}" -
       roster_enroll_member "$CLI_NAME" headless >/dev/null 2>&1 || true
     else
       ENROLL_DEF=$(roster_member_default "$CLI_NAME" 2>/dev/null || true)
-      ENROLLMENT_NOTICES="${ENROLLMENT_NOTICES}\nNew optional CLI detected: ${CLI_NAME} (unenrolled). Run /at-setup to enroll, or it enrolls with its shipped default (${ENROLL_DEF}) on first headless use."
+      ENROLLMENT_NOTICES="${ENROLLMENT_NOTICES}${SS_NL}$(_ss_prose "New optional CLI detected: ${CLI_NAME} (unenrolled). Run /at-setup to enroll, or it enrolls with its shipped default (${ENROLL_DEF}) on first headless use.")"
     fi
   done
 fi
@@ -268,6 +304,7 @@ except Exception:
     print(0)
 " 2>/dev/null || echo 0)
 fi
+case "$ENROLLED_COUNT" in ''|*[!0-9]*) ENROLLED_COUNT=0 ;; esac   # a count, nothing else, reaches the orientation
 
 # Roster pin drift (informational): persisted [members.*].model / [roles.*].model
 # values that differ from the shipped defaults. An upgraded project keeps
@@ -305,6 +342,10 @@ def norm(cli, model):
     if cli == "cursor":
         return re.sub(r"-(low|medium|high|xhigh)$", "", model)
     return model
+# a value read from the roster, as one line (B8): a TOML string may hold a
+# newline, and the hook prints every line it gets
+def one(value):
+    return re.sub(r"[\x00-\x1f\x7f]", "", str(value))[:200]
 try:
     with open("ops/roster.toml", "rb") as f:
         data = tomllib.load(f)
@@ -317,7 +358,7 @@ try:
                 continue
             model = str(entry.get("model", "") or "")
             if model and norm(name, model) != norm(name, SHIPPED[name]):
-                lines.append("Roster pin differs from the shipped default: members.%s.model=%s (shipped: %s) — run /at-setup to re-enroll, or edit ops/roster.toml" % (name, model, SHIPPED[name]))
+                lines.append("Roster pin differs from the shipped default: members.%s.model=%s (shipped: %s) — run /at-setup to re-enroll, or edit ops/roster.toml" % (one(name), one(model), one(SHIPPED[name])))
     roles = data.get("roles", {})
     if isinstance(roles, dict):
         for name in sorted(roles):
@@ -328,7 +369,7 @@ try:
             model = str(entry.get("model", "") or "")
             shipped = SHIPPED.get(cli)
             if model and shipped is not None and norm(cli, model) != norm(cli, shipped):
-                lines.append("Roster pin differs from the shipped default: roles.%s.model=%s (shipped: %s) — run /at-setup roles to re-default" % (name, model, shipped))
+                lines.append("Roster pin differs from the shipped default: roles.%s.model=%s (shipped: %s) — run /at-setup roles to re-default" % (one(name), one(model), one(shipped)))
     for line in lines:
         print(line)
 except Exception:
@@ -387,13 +428,16 @@ SS_XYZ_EOF
 # killed command leaves running holds the caller's command substitution open;
 # each `wait` swallows bash's "Terminated" line.
 _ss_bounded() {
-  local SECS="$1" OUT CMD_PID DOG_PID
+  local SECS="$1" OUT OUT_DIR CMD_PID DOG_PID
   shift
   if [ -n "$TIMEOUT_BIN" ]; then
     "$TIMEOUT_BIN" "${SECS}s" "$@" 2>/dev/null || true
     return 0
   fi
-  OUT=$(mktemp "${TMPDIR:-/tmp}/triforge-session-start.XXXXXX" 2>/dev/null) || return 0
+  # a file in a private temp dir (_ss_private_tmp: never in a TMPDIR other
+  # users can rename entries in, B5)
+  OUT_DIR=$(_ss_private_tmp) || return 0
+  OUT="${OUT_DIR}/out"
   "$@" </dev/null >"$OUT" 2>/dev/null &
   CMD_PID=$!
   ( sleep "$SECS"; kill "$CMD_PID" ) </dev/null >/dev/null 2>&1 &
@@ -402,7 +446,7 @@ _ss_bounded() {
   kill "$DOG_PID" 2>/dev/null || true
   wait "$DOG_PID" 2>/dev/null || true
   cat "$OUT" 2>/dev/null || true
-  rm -f "$OUT"
+  rm -rf "$OUT_DIR"
 }
 
 # Floor. The answer is read with a 10 s bound, timeout binary or not — a hung
@@ -411,7 +455,7 @@ _ss_bounded() {
 if command -v claude >/dev/null 2>&1; then
   SS_CLAUDE_XYZ=$(_ss_xyz "$(_ss_bounded 10 claude --version | head -1 || true)")
   if [ -n "$SS_CLAUDE_XYZ" ] && [ "$(_ss_xyz_key "$SS_CLAUDE_XYZ")" -lt "$(_ss_xyz_key "$CLAUDE_FLOOR")" ]; then
-    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}\nWARNING: Claude Code ${SS_CLAUDE_XYZ} is below Triforge's floor ${CLAUDE_FLOOR}, the first build that reads AGENTS.md — Triforge's only instruction file, which older builds do not read. Update Claude Code (\`claude update\`)."
+    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}WARNING: Claude Code ${SS_CLAUDE_XYZ} is below Triforge's floor ${CLAUDE_FLOOR}, the first build that reads AGENTS.md — Triforge's only instruction file, which older builds do not read. Update Claude Code (\`claude update\`)."
   fi
 fi
 
@@ -495,29 +539,16 @@ done
 for SS_FILE in CLAUDE.md .claude/CLAUDE.md; do
   if _ss_is_3x_template "$SS_FILE" && ! _ss_imports_agents "$SS_FILE"; then
     _ss_import_line "$SS_FILE" ""
-    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}\nWARNING: ${SS_FILE} is a Triforge 3.x project template (a copy of the retired templates/CLAUDE.md). Triforge 4 ships AGENTS.md only, and Claude Code does not read AGENTS.md while this file exists without importing it. Add the line ${SS_IMPORT} to it, or replace its Triforge content with the pointer block in the plugin's templates/AGENTS.md — session start never edits this file."
+    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}WARNING: ${SS_FILE} is a Triforge 3.x project template (a copy of the retired templates/CLAUDE.md). Triforge 4 ships AGENTS.md only, and Claude Code does not read AGENTS.md while this file exists without importing it. Add the line ${SS_IMPORT} to it, or replace its Triforge content with the pointer block in the plugin's templates/AGENTS.md — session start never edits this file."
   fi
 done
 
 # Above the project: every parent up to /. $HOME/.claude/CLAUDE.md is the
-# user-tier file and is skipped (both paths compared physically). One import
+# user-tier file and is skipped (compared by identity, test -ef). One import
 # of the project's AGENTS.md anywhere in the chain, the project's own files
 # included, loads it, so it silences every line here.
 SS_ABOVE_NOTICES=""
 
-# _ss_prose <path> — the path as it may appear in MSG: control characters
-# dropped and backslashes doubled (MSG is expanded by printf %b, and no stdout
-# line may start with `{` — a newline in a directory name must not make one).
-_ss_prose() {
-  local TEXT
-  TEXT=$(printf '%s' "$1" | LC_ALL=C tr -d '\000-\037\177')
-  printf '%s' "${TEXT//\\/\\\\}"
-}
-
-SS_HOME_REAL=""
-if [ -n "${HOME:-}" ] && [ -d "${HOME}" ]; then
-  SS_HOME_REAL=$(cd "$HOME" 2>/dev/null && pwd -P || true)
-fi
 case "$SS_PROJECT" in
   /*)
     SS_DIR="$SS_PROJECT"
@@ -528,10 +559,11 @@ case "$SS_PROJECT" in
       for SS_NAME in $SS_INSTRUCTION_FILES; do
         SS_FILE="${SS_DIR%/}/${SS_NAME}"
         [ -f "$SS_FILE" ] || continue
-        if [ -n "$SS_HOME_REAL" ] && [ "$SS_FILE" = "${SS_HOME_REAL%/}/.claude/CLAUDE.md" ]; then continue; fi
+        # the user-tier file, by identity (test -ef), whatever the spelling
+        if [ -n "${HOME:-}" ] && [ "$SS_FILE" -ef "${HOME%/}/.claude/CLAUDE.md" ]; then continue; fi
         if _ss_imports_agents "$SS_FILE"; then SS_CHAIN_IMPORTS="yes"; fi
         _ss_import_line "$SS_NAME" "${SS_REL}/"
-        SS_ABOVE_NOTICES="${SS_ABOVE_NOTICES}\nWARNING: AGENTS.md is not loaded under a Claude lead: $(_ss_prose "$SS_FILE") sits above this project, and Claude Code reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working directory or above it. Add the line $(_ss_prose "$SS_IMPORT") to that file (an import path is relative to the file that holds it), or remove the file."
+        SS_ABOVE_NOTICES="${SS_ABOVE_NOTICES}${SS_NL}WARNING: AGENTS.md is not loaded under a Claude lead: $(_ss_prose "$SS_FILE") sits above this project, and Claude Code reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working directory or above it. Add the line $(_ss_prose "$SS_IMPORT") to that file (an import path is relative to the file that holds it), or remove the file."
       done
     done
     ;;
@@ -545,7 +577,7 @@ fi
 # exists; session start does not create it.
 AGENTS_MD_TIP=""
 if [ ! -e "AGENTS.md" ] && [ ! -L "AGENTS.md" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/AGENTS.md" ]; then
-  AGENTS_MD_TIP="\nTip: No AGENTS.md in this project. Triforge's pointer block (the short section that tells every agent this project runs the framework) ships as the plugin's templates/AGENTS.md. Copy it: cp \"$(_ss_prose "$CLAUDE_PLUGIN_ROOT")/templates/AGENTS.md\" ./AGENTS.md"
+  AGENTS_MD_TIP="${SS_NL}Tip: No AGENTS.md in this project. Triforge's pointer block (the short section that tells every agent this project runs the framework) ships as the plugin's templates/AGENTS.md. Copy it: cp \"$(_ss_prose "$CLAUDE_PLUGIN_ROOT")/templates/AGENTS.md\" ./AGENTS.md"
 fi
 cd "$SS_ANCHOR" 2>/dev/null || true   # back to the anchor (see the top): ops/ and the rest live there
 
@@ -597,34 +629,34 @@ MSG=""
 # root reads ops/ from the root, and the lead's own cwd-relative reads would
 # miss it, so the root is named once.
 if [ "$SS_START_DIR" != "$SS_ANCHOR" ]; then
-  MSG="$MSG\nProject root: $(_ss_prose "$SS_ANCHOR") (ops/ lives there; this session started in $(_ss_prose "$SS_START_DIR"))."
+  MSG="${MSG}${SS_NL}Project root: $(_ss_prose "$SS_ANCHOR") (ops/ lives there; this session started in $(_ss_prose "$SS_START_DIR"))."
 fi
 if [ -n "$SS_AT_HOME" ]; then
-  MSG="$MSG\nWARNING: this session's project directory, $(_ss_prose "$SS_ANCHOR"), is your home directory or contains it, so Triforge set nothing up and wrote nothing there: the project files would be each CLI's user-tier config. Start the session in a project directory."
+  MSG="${MSG}${SS_NL}WARNING: this session's project directory, $(_ss_prose "$SS_ANCHOR"), is your home directory or contains it, so Triforge set nothing up and wrote nothing there: the project files would be each CLI's user-tier config. Start the session in a project directory; when your home directory is itself a git repository (a dotfiles repo), run git init in the project first, so the project is its own repository."
 fi
 
 if [ "$HAS_STATE" = "yes" ]; then
-  MSG="$MSG\nPrevious session state found (ops/STATE.md). Use /at-resume to continue."
+  MSG="${MSG}${SS_NL}Previous session state found (ops/STATE.md). Use /at-resume to continue."
 fi
 
 if [ "$HAS_TASKS" = "yes" ]; then
-  MSG="$MSG\nActive sprint found (ops/TASKS.md): $PENDING_COUNT pending, $IN_PROGRESS_COUNT in progress, $BLOCKED_COUNT blocked."
+  MSG="${MSG}${SS_NL}Active sprint found (ops/TASKS.md): $PENDING_COUNT pending, $IN_PROGRESS_COUNT in progress, $BLOCKED_COUNT blocked."
 fi
 
 if [ "$HAS_GOALS" = "yes" ]; then
-  MSG="$MSG\nProject goals found (ops/GOALS.md)."
+  MSG="${MSG}${SS_NL}Project goals found (ops/GOALS.md)."
 fi
 
 if [ "$HAS_AGENTS" = "yes" ]; then
-  MSG="$MSG\nAgent protocol found (ops/AGENTS.md)."
+  MSG="${MSG}${SS_NL}Agent protocol found (ops/AGENTS.md)."
 fi
 
 if [ "$HAS_REVIEWS" = "yes" ]; then
-  MSG="$MSG\nUnprocessed review files found. Consider running /at-review to process them."
+  MSG="${MSG}${SS_NL}Unprocessed review files found. Consider running /at-review to process them."
 fi
 
 if [ "$SOLUTION_COUNT" -gt "0" ]; then
-  MSG="$MSG\nInstitutional knowledge: $SOLUTION_COUNT documented solutions in ops/solutions/."
+  MSG="${MSG}${SS_NL}Institutional knowledge: $SOLUTION_COUNT documented solutions in ops/solutions/."
 fi
 
 # Check for external agent definitions
@@ -673,28 +705,40 @@ if [ "$HAS_ANTIGRAVITY_AGENTS" = "yes" ] || [ "$HAS_CODEX_AGENTS" = "yes" ]; the
   AGENT_PARTS=""
   [ "$HAS_ANTIGRAVITY_AGENTS" = "yes" ] && AGENT_PARTS="${ANTIGRAVITY_AGENT_COUNT} Antigravity"
   [ "$HAS_CODEX_AGENTS" = "yes" ] && AGENT_PARTS="${AGENT_PARTS:+${AGENT_PARTS} + }${CODEX_AGENT_COUNT} Codex"
-  MSG="$MSG\nExternal agent definitions loaded: ${AGENT_PARTS}."
+  MSG="${MSG}${SS_NL}External agent definitions loaded: ${AGENT_PARTS}."
 fi
 
 # Roster orientation (KTD-2): optional members detected this session, and how
 # many carry [members.*] enrollment entries in ops/roster.toml.
-MSG="$MSG\nRoster: core trio + ${OPTIONAL_DETECTED_COUNT} optional member(s) detected (${ENROLLED_COUNT} enrolled)."
+MSG="${MSG}${SS_NL}Roster: core trio + ${OPTIONAL_DETECTED_COUNT} optional member(s) detected (${ENROLLED_COUNT} enrolled)."
 MSG="$MSG${ENROLLMENT_NOTICES:-}"
+# The pin lines carry model values read from the roster (B8): each line is
+# made one line again and keeps its fixed prose start ("Roster pin differs");
+# a line without it (the tail of a value the python split) gets "Roster: ".
 if [ -n "$ROSTER_DRIFT_NOTICES" ]; then
-  MSG="$MSG\n${ROSTER_DRIFT_NOTICES}"
+  while IFS= read -r SS_LINE; do
+    [ -n "$SS_LINE" ] || continue
+    case "$SS_LINE" in
+      "Roster pin differs from the shipped default: "*) ;;
+      *) SS_LINE="Roster: ${SS_LINE}" ;;
+    esac
+    MSG="${MSG}${SS_NL}$(_ss_prose "$SS_LINE")"
+  done <<SS_DRIFT_EOF
+${ROSTER_DRIFT_NOTICES}
+SS_DRIFT_EOF
 fi
 if [ -n "$SS_HELPER_NOTICE" ]; then
-  MSG="$MSG\n${SS_HELPER_NOTICE}"
+  MSG="${MSG}${SS_NL}$(_ss_prose "$SS_HELPER_NOTICE")"
 fi
 if [ -n "$ROSTER_DETECTED_NOTICE" ]; then
-  MSG="$MSG\n${ROSTER_DETECTED_NOTICE}"
+  MSG="${MSG}${SS_NL}${ROSTER_DETECTED_NOTICE}"
 fi
 
 # Migration notices: triforge_bootstrap's, in the order it printed them (one
 # per step that acted this session, silent otherwise; a state it left alone on
 # purpose repeats until fixed). Every captured line is sanitized on its own
-# (Phase 3 round 3, R5): _ss_prose drops control characters and doubles a
-# backslash so printf %b below prints it as written, and a line that does not
+# (Phase 3 round 3, R5): _ss_prose drops control characters (and the message
+# is printed with %s, which interprets nothing), and a line that does not
 # carry this hook's "session-start: " prefix (a refusal from a lead-only
 # check, or the tail of a message some name split) gets the fixed prose
 # prefix "Bootstrap: ", so no stdout line can start with "{".
@@ -705,7 +749,7 @@ if [ -n "$SS_BOOT_LOG" ] && [ -s "$SS_BOOT_LOG" ]; then
       "session-start: "*) ;;
       *) SS_LINE="Bootstrap: ${SS_LINE}" ;;
     esac
-    MSG="$MSG\n$(_ss_prose "$SS_LINE")"
+    MSG="${MSG}${SS_NL}$(_ss_prose "$SS_LINE")"
   done < "$SS_BOOT_LOG"
 fi
 
@@ -740,22 +784,22 @@ except Exception:
 " 2>/dev/null || echo 0)
 fi
 if [ "${ACTIVE_LEASES:-0}" -gt 0 ] 2>/dev/null; then
-  MSG="$MSG\nLease ledger: ${ACTIVE_LEASES} active lease(s) from a previous session — run lease_heartbeat_check (or /at-resume) to reclaim orphans."
+  MSG="${MSG}${SS_NL}Lease ledger: ${ACTIVE_LEASES} active lease(s) from a previous session — run lease_heartbeat_check (or /at-resume) to reclaim orphans."
 fi
 
 if [ "$HAS_TASKS" != "yes" ] && [ "$HAS_STATE" != "yes" ]; then
-  MSG="$MSG\nNo active sprint. Use /at-plan <goal> to start or /at-ship <goal> for full autonomous mode."
+  MSG="${MSG}${SS_NL}No active sprint. Use /at-plan <goal> to start or /at-ship <goal> for full autonomous mode."
 fi
 
 # Append timeout-missing warning if set
 if [ -n "${TIMEOUT_MISSING_WARNING}" ]; then
-  MSG="$MSG\n${TIMEOUT_MISSING_WARNING}"
+  MSG="${MSG}${SS_NL}${TIMEOUT_MISSING_WARNING}"
 fi
 
 # Append the pointer-block tip if set
 MSG="$MSG${AGENTS_MD_TIP:-}"
 
-printf '%b\n' "Multi-agent framework ready.$MSG"
+printf '%s\n' "Multi-agent framework ready.${MSG}"
 echo ""
 echo 'Lead workflows (/at-<name> here, $agent-triforge:at-<name> in a Codex prompt): at-setup at-ship at-plan at-build at-review at-test at-debug at-quick at-deep-research at-analyze at-coordinate at-resolve-pr at-status at-pause at-resume at-wrap at-compound'
 
@@ -763,21 +807,25 @@ exit 0
 }
 
 # _ss_private_tmp — print a private temp dir (mktemp -d: a random name, mode
-# 0700) under TMPDIR, else under the project's own .claude, which is created
-# here only as a real directory (a linked .claude is never used). On failure,
-# a nonzero rc and mktemp's error, if it got that far.
+# 0700) under TMPDIR when no other user can rename entries in it (_ss_tmp_ok,
+# B5), else under the project's own .claude (at the anchor, wherever the hook
+# stands), which is created here only as a real directory (a linked .claude is
+# never used). On failure, a nonzero rc and mktemp's error, if it got that far.
 _ss_private_tmp() {
-  if mktemp -d "${TMPDIR:-/tmp}/triforge-session-start.XXXXXX" 2>/dev/null; then
+  local T="${TMPDIR:-/tmp}"
+  if _ss_tmp_ok "$T" && mktemp -d "${T}/triforge-session-start.XXXXXX" 2>/dev/null; then
     return 0
   fi
   if [ -n "$SS_AT_HOME" ]; then
     return 1   # never under a home directory's .claude (R1)
   fi
-  if [ ! -e .claude ] && [ ! -L .claude ]; then
-    mkdir .claude 2>/dev/null || return
+  if [ ! -e "${SS_ANCHOR}/.claude" ] && [ ! -L "${SS_ANCHOR}/.claude" ]; then
+    mkdir "${SS_ANCHOR}/.claude" 2>/dev/null || return
   fi
-  _ss_claude_dir || return
-  mktemp -d ".claude/triforge-session-start.XXXXXX" 2>&1
+  if [ ! -d "${SS_ANCHOR}/.claude" ] || [ -L "${SS_ANCHOR}/.claude" ]; then
+    return 1
+  fi
+  mktemp -d "${SS_ANCHOR}/.claude/triforge-session-start.XXXXXX" 2>&1
 }
 
 # The helper (scripts/invoke-external.sh) — sourced ONCE, in the subshell that

@@ -506,7 +506,15 @@ def lead_load(roster, reject):
 # write_verified(path, new_raw, verify, who) writes new_raw beside path, loads
 # it with the caller's module-level tomllib and hands it to verify, which
 # raises when it does not hold the intended values; only then does it replace
-# path. On a failure it removes the temporary file and exits 4.
+# path. On a failure it removes the temporary file and exits 4. The roster is
+# <project>/ops/roster.toml, and only there (Phase 3 round 4, B7): the project
+# directory is opened, ops/ is opened relative to it without following a link,
+# and the temporary file (created O_EXCL|O_NOFOLLOW under a random name), the
+# read-back and the rename all go through that descriptor, so an ops/ that is
+# a symlink to another directory (another checkout, a home directory) gets no
+# write, nor does one swapped in after the check. ops/ that is a symlink or not
+# a directory, or ops/roster.toml that is a symlink or not a regular file,
+# exits 6 with a refusal naming it.
 _ROSTER_SPLICE_PY='
 def splice_table(raw, header_re, block, keep_trailing_comments):
     lines = raw.splitlines(keepends=True)
@@ -542,21 +550,53 @@ def splice_table(raw, header_re, block, keep_trailing_comments):
     return new_raw + suffix
 
 def write_verified(path, new_raw, verify, who):
-    tmp = path + ".tmp." + str(os.getpid())
-    with open(tmp, "w") as f:
-        f.write(new_raw)
+    import errno, secrets, stat
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    ops_path = os.path.dirname(path) or "."
+    name = os.path.basename(path)
+    def refuse(what):
+        sys.stderr.write(who + ": REFUSED " + what + ", so the roster is not written there (Triforge writes the roster only as a regular file in the real ops/ directory of the project)\n")
+        sys.exit(6)
     try:
-        with open(tmp, "rb") as f:
+        top = os.open(os.path.realpath(os.path.dirname(os.path.abspath(ops_path))), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        ops = os.open(os.path.basename(os.path.abspath(ops_path)), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow, dir_fd=top)
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR, errno.EMLINK):
+            refuse(ops_path + " is a symlink or not a directory")
+        sys.stderr.write(who + ": ERROR could not open " + ops_path + ": " + str(exc) + "\n")
+        sys.exit(4)
+    try:
+        st = os.stat(name, dir_fd=ops, follow_symlinks=False)
+        if not stat.S_ISREG(st.st_mode):
+            refuse(path + " is a symlink or not a regular file")
+    except FileNotFoundError:
+        pass
+    tmp, fd = "", -1
+    for _ in range(8):
+        tmp = "." + name + ".triforge-tmp-" + secrets.token_hex(8)
+        try:
+            fd = os.open(tmp, os.O_RDWR | os.O_CREAT | os.O_EXCL | nofollow, 0o666, dir_fd=ops)
+            break
+        except FileExistsError:
+            continue
+    if fd < 0:
+        sys.stderr.write(who + ": ERROR no free temporary name beside " + path + "\n")
+        sys.exit(4)
+    try:
+        with os.fdopen(fd, "w+b") as f:
+            f.write(new_raw.encode("utf-8"))
+            f.flush()
+            f.seek(0)
             data = tomllib.load(f)
         verify(data)
     except Exception as exc:
         try:
-            os.unlink(tmp)
+            os.unlink(tmp, dir_fd=ops)
         except OSError:
             pass
         sys.stderr.write(who + ": ERROR serialized roster failed round-trip verify: " + str(exc) + "\n")
         sys.exit(4)
-    os.replace(tmp, path)
+    os.rename(tmp, name, src_dir_fd=ops, dst_dir_fd=ops)
 '
 
 # _checkout_top — the checkout this shell stands in: the nearest directory
@@ -945,7 +985,7 @@ for e in events:
 # (R44: reported once, never skipped silently). rc: resolve_lead's (3 no TOML
 # parser, 4, 5); 2 when the registry can't be read.
 resolve_lead_caps() {
-  local LEAD TAB STATIC HOOKS KEY CACHE NEW=0 N V R MISS="" HMISS="" GROUP="" GR="" LNAME
+  local LEAD TAB STATIC HOOKS KEY CACHE CACHE_TMP="" NEW=0 N V R MISS="" HMISS="" GROUP="" GR="" LNAME
   TAB=$(printf '\t')
   _lead_resolve || return $?
   LEAD=$_LEAD_CLI
@@ -959,13 +999,23 @@ for f in CLIS[cli]['lead']:
 ") || return 2
   KEY=$(_lead_session_key)
   CACHE="${TMPDIR:-/tmp}/triforge_lead_caps_${LEAD}_${KEY}"
-  if [ -f "$CACHE" ]; then
+  # The cache is read only when it is a regular file of this user (-O; not a
+  # link, so not a FIFO either), and written through a file mktemp creates
+  # exclusively under a random name, then renamed into place (Phase 3 round
+  # 4, B7's class): a name another user planted in a shared TMPDIR is neither
+  # trusted nor written through.
+  if [ -f "$CACHE" ] && [ ! -L "$CACHE" ] && [ -O "$CACHE" ]; then
     HOOKS=$(cat "$CACHE" 2>/dev/null || true)
   else
     HOOKS=$(_lead_hooks_detect "$LEAD") || HOOKS=""
     NEW=1
-    if printf '%s\n' "$HOOKS" > "${CACHE}.tmp.$$" 2>/dev/null; then
-      mv -f "${CACHE}.tmp.$$" "$CACHE" 2>/dev/null || true
+    CACHE_TMP=$(mktemp "${CACHE}.XXXXXXXX" 2>/dev/null) || CACHE_TMP=""
+    if [ -n "$CACHE_TMP" ]; then
+      if printf '%s\n' "$HOOKS" > "$CACHE_TMP" 2>/dev/null; then
+        mv -f "$CACHE_TMP" "$CACHE" 2>/dev/null || rm -f "$CACHE_TMP"
+      else
+        rm -f "$CACHE_TMP"
+      fi
     fi
   fi
   printf '%s\n' "$STATIC"

@@ -180,6 +180,19 @@ rm -rf "$_S1_DIR"
 #             rewritten to name B's own root -> the same; ledgerlegacy: a
 #             ledger with no stamps whose copy and digest are in this shell's
 #             root (a pre-stamp ledger) -> the session runs
+#   ledgergone (round 4, B4) a lease created under TMPDIR=A, then
+#             ops/leases.toml deleted and .git/config changed; coordinate.sh
+#             under TMPDIR=B -> rc 44 before any session: the lease-root
+#             record in .git moves the check to A, whose copy restores the
+#             ledger and the config; A's lease root removed too -> rc 44,
+#             refused on the evidence (the record and the lease worktree git
+#             still lists), nothing adopted under B; the record removed as
+#             well -> the worktree alone refuses; ledgerfresh: a fresh repo
+#             under B -> the session runs
+#   sharedtmp (round 4, B5) a 0777 TMPDIR without the sticky bit ->
+#             coordinate.sh rc 1 before any session, no run directory made
+#             there, and lease_create refuses to derive a lease root in it;
+#             with the sticky bit -> the session runs
 #   noshell   the SELF seam unset, no TTY, no host markers (nohup, cron, CI):
 #             with a lease in the ledger and with none -> rc 45 naming the
 #             fix (a terminal or the lead's own shell), never 44, nothing run
@@ -458,6 +471,60 @@ _S2_FAIL="${_S2_FAIL}$(_self_expect ledgerlegacy "$O" 'Sprint complete at iterat
 if printf '%s\n' "$O" | grep -q 'REFUSED\|INTEGRITY'; then _S2_FAIL="$_S2_FAIL ledgerlegacy(refused-or-integrity)"; fi
 unset _s2_c _S2_ROOT_B _S2_STATE_A
 
+# ledgergone (round 4, B4): the ledger deleted while the lead's anchors sit
+# under another TMPDIR never lets a session start as on a fresh checkout
+_s2_repo ledgergone
+mkdir -p "$_S2/gA" "$_S2/gB"
+S2_TMP="$_S2/gA" S2_NO_ROOT=1 _s2_lead ledgergone lease_create t builder >/dev/null 2>&1 || true
+_S2_LG="$_S2/ledgergone/ops/leases.toml"
+O="made:$(grep -c '^builder_cli = "claude"' "$_S2_LG" 2>/dev/null || true)"
+rm -f "$_S2_LG"
+git -C "$_S2/ledgergone" config --local probe.planted yes 2>/dev/null || true
+O="$O
+$(S2_TMP="$_S2/gB" S2_NO_ROOT=1 _s2_run ledgergone done claude "probe goal" --max 1)
+ledger=$([ -f "$_S2_LG" ] && echo back || echo gone):planted=$(git -C "$_S2/ledgergone" config --local --get probe.planted 2>/dev/null || echo gone)"
+_S2_FAIL="${_S2_FAIL}$(_self_expect ledgergone "$O" '^made:1$' 'checking under .*/gA/' 'coordinate\.sh: INTEGRITY' 'STOPPED before starting a session' \
+  '^rc=44$' '^runs=0$' '^ledger=back:planted=gone$')"
+# the lead's lease root gone too: the lease-root record and the lease worktree
+# git still lists are the evidence; refused, nothing run, nothing adopted
+rm -rf "$_S2/gA/triforge-leases"
+rm -f "$_S2_LG"
+git -C "$_S2/ledgergone" config --local probe.planted yes 2>/dev/null || true
+O=$(S2_TMP="$_S2/gB" S2_NO_ROOT=1 _s2_run ledgergone done claude "probe goal" --max 1)
+O="$O
+ledger=$([ -f "$_S2_LG" ] && echo back || echo gone):adopted=$(ls "$_S2"/gB/triforge-leases/*/lead/ledger.copy 2>/dev/null | wc -l | tr -d ' ')"
+_S2_FAIL="${_S2_FAIL}$(_self_expect ledgergone-root "$O" 'INTEGRITY .*leases\.toml is missing, but this checkout has lease history' \
+  'the lease-root record .*triforge-lease-root' 'the lease worktree .*[(]lease/t[)]' 'STOPPED before starting a session' \
+  '^rc=44$' '^runs=0$' '^ledger=gone:adopted=0$')"
+# the record removed as well: the lease worktree alone still refuses
+rm -f "$_S2/ledgergone/.git/triforge-lease-root"
+O=$(S2_TMP="$_S2/gB" S2_NO_ROOT=1 _s2_run ledgergone done claude "probe goal" --max 1)
+_S2_FAIL="${_S2_FAIL}$(_self_expect ledgergone-wt "$O" 'the lease worktree .*[(]lease/t[)]' '^rc=44$' '^runs=0$')"
+if printf '%s\n' "$O" | grep -q 'the lease-root record'; then _S2_FAIL="$_S2_FAIL ledgergone-wt(a-record-named-after-removal)"; fi
+# control: a fresh checkout under the same TMPDIR starts its session
+_s2_repo ledgerfresh
+O=$(S2_TMP="$_S2/gB" S2_NO_ROOT=1 _s2_run ledgerfresh done claude "probe goal" --max 1)
+_S2_FAIL="${_S2_FAIL}$(_self_expect ledgerfresh "$O" 'Sprint complete at iteration 1' '^rc=0$' '^runs=1$')"
+unset _S2_LG
+
+# sharedtmp (round 4, B5): a TMPDIR another user could rename entries in
+# (0777, no sticky bit): coordinate.sh refuses before any session and makes
+# no run directory there, and the lease helpers refuse to derive a lease root
+# in it; with the sticky bit the session runs
+_s2_repo sharedtmp
+mkdir -p "$_S2/tshare"
+chmod 0777 "$_S2/tshare"
+O=$(S2_TMP="$_S2/tshare" _s2_run sharedtmp done claude "probe goal" --max 1)
+O="$O
+made=$(find "$_S2/tshare" -name 'triforge-coordinate.*' 2>/dev/null | wc -l | tr -d ' ')
+lease:$(S2_TMP="$_S2/tshare" S2_NO_ROOT=1 _s2_lead sharedtmp lease_create t builder 2>&1 >/dev/null | tr '\n' ' ')
+leases=$(find "$_S2/tshare" -name 'triforge-leases' 2>/dev/null | wc -l | tr -d ' ')"
+_S2_FAIL="${_S2_FAIL}$(_self_expect sharedtmp "$O" 'coordinate\.sh: ERROR TMPDIR .*tshare is not a private place' '^rc=1$' '^runs=0$' '^made=0$' \
+  '^lease:.*lease: ERROR TMPDIR .*tshare lets another user rename entries' '^leases=0$')"
+chmod 1777 "$_S2/tshare"
+O=$(S2_TMP="$_S2/tshare" _s2_run sharedtmp done claude "probe goal" --max 1)
+_S2_FAIL="${_S2_FAIL}$(_self_expect sharedtmp-sticky "$O" 'Sprint complete at iteration 1' '^rc=0$' '^runs=1$')"
+
 # noshell: the lead host check runs before anything else (C6); no seam, no TTY
 _s2_repo noshell
 O=$(S2_NO_SEAM=1 _s2_run noshell done claude "probe goal" --max 1)
@@ -539,7 +606,7 @@ _S2_FAIL="${_S2_FAIL}$(_self_expect integrity "$O" '^create:rc=0:review$' 'coord
 
 _S2_CAP="coordinate.sh reads the lead's launch_argv, goal_gate, model_argv and effort_argv: /goal + claude --print under Claude Code; the D-047 codex exec line, the [lead] model and effort, a quoted \$agent-triforge:at-ship goal and no /goal under Codex; full access only with --allow-full-access (77); the integrity check before each session (44); a deterministic lead failure stops after one run (69); the lease-resume paragraph"
 if [ -z "$_S2_FAIL" ]; then
-  row "SELF-02" "claude" "$_S2_CAP" "PASS" "resume, drycodex (-m gpt-6-astra -c model_reasoning_effort=xhigh), drypin (the roster's gpt-6-luna/high), dryclaude (no model flags), claudepin (--model sonnet --effort high), nomodel (no -m), teamgoal (flags stay in the quoted goal), nofield (one note, no --effort), fullaccess (17 full-access spellings and a declared line refused, rc 77; the acceptEdits control runs), ledgerroot (a tampered ledger under another TMPDIR: rc 44, restored; its root gone: refused naming TRIFORGE_LEASE_ROOT), noshell (no seam, no TTY: rc 45, never 44, with and without a ledger), quota (rc 69, a quota Fix line), tail (a link planted at <run log>.tail never written through), stderr (a stderr line on every python3 call: the lead still resolves), leadwet, noack (rc 77, nothing run), ack (one stub run, D-047 argv + model + effort), auth (rc 69 after one run, the login hint), integrity (rc 44, restored, escalated, no run)" "static"
+  row "SELF-02" "claude" "$_S2_CAP" "PASS" "resume, drycodex (-m gpt-6-astra -c model_reasoning_effort=xhigh), drypin (the roster's gpt-6-luna/high), dryclaude (no model flags), claudepin (--model sonnet --effort high), nomodel (no -m), teamgoal (flags stay in the quoted goal), nofield (one note, no --effort), fullaccess (17 full-access spellings and a declared line refused, rc 77; the acceptEdits control runs), ledgerroot (a tampered ledger under another TMPDIR: rc 44, restored; its root gone: refused naming TRIFORGE_LEASE_ROOT), ledgergone (the ledger deleted under another TMPDIR: rc 44, restored from the root the lease-root record names; that root gone: refused on the record and the lease worktree, then on the worktree alone; a fresh repo runs), sharedtmp (a 0777 non-sticky TMPDIR: rc 1, no run dir, no lease root; sticky: runs), noshell (no seam, no TTY: rc 45, never 44, with and without a ledger), quota (rc 69, a quota Fix line), tail (a link planted at <run log>.tail never written through), stderr (a stderr line on every python3 call: the lead still resolves), leadwet, noack (rc 77, nothing run), ack (one stub run, D-047 argv + model + effort), auth (rc 69 after one run, the login hint), integrity (rc 44, restored, escalated, no run)" "static"
 else
   row "SELF-02" "claude" "$_S2_CAP" "FAIL" "mismatch:${_S2_FAIL}" "static"
 fi
@@ -876,7 +943,12 @@ fi
 #          agent-triforge + scripts/invoke-external.sh) whose loader fails:
 #          `return 1` after a JSON-shaped stdout line, or a bare `exit 1` ->
 #          rc 0, the helper WARNING naming the loader and its rc, the
-#          orientation still printed, no line starting with `{`
+#          orientation still printed, no line starting with `{`; a third
+#          loader's error line holds a literal backslash-n and a JSON object
+#          (round 4, B8): printed as written, on one line
+#   pininject (round 4, B8) roster pins holding a newline, as a literal
+#          backslash-n and as a real one, each before a JSON object: each pin
+#          notice one line with its fixed start, no line starting with `{`
 _S8="${WORK}/self08"
 mkdir -p "$_S8/proj" "$_S8/bin" "$_S8/home"
 cat > "$_S8/bin/agy" <<'EOF'
@@ -1084,9 +1156,13 @@ printf '{"name": "agent-triforge", "version": "0.0.0-probe-stub"}\n' > "$_S8_BAD
 _s8_start_root() { # _s8_start_root <project> <plugin root> — session start with CLAUDE_PLUGIN_ROOT at that root (stub agy + claude on PATH, throwaway HOME)
   ( cd "$1" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$2" PATH="$_S8/bin:$PATH" S8_CLAUDE_VERSION="2.1.277" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 )
 }
-for _S8_LOADER in return exit; do
+for _S8_LOADER in return exit escape; do
   if [ "$_S8_LOADER" = return ]; then
     printf '#!/usr/bin/env bash\n# probe stub (SELF-08): a loader that prints a JSON-shaped line, then fails to load\necho %s\necho "invoke-external.sh: ERROR probe stub refused to load" >&2\nreturn 1\n' "'{\"json\":\"looks structured\"}'" > "$_S8_BAD/scripts/invoke-external.sh"
+  elif [ "$_S8_LOADER" = escape ]; then
+    # round 4, B8: the loader's first line carries a literal backslash-n and a
+    # JSON object; printf %b would have turned it into a line of its own
+    printf '#!/usr/bin/env bash\n# probe stub (SELF-08): a loader whose error line holds an escape sequence\nprintf "%%s\\n" %s >&2\nreturn 1\n' "'oops\\n{\"z\":1}'" > "$_S8_BAD/scripts/invoke-external.sh"
   else
     printf '#!/usr/bin/env bash\n# probe stub (SELF-08): a loader that exits instead of returning\nexit 1\n' > "$_S8_BAD/scripts/invoke-external.sh"
   fi
@@ -1096,6 +1172,17 @@ for _S8_LOADER in return exit; do
   _s8_has '^Multi-agent framework ready\.$' || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-orientation-missing"
   _s8_has '^Lead workflows (' || _S8_FAIL="$_S8_FAIL degraded-${_S8_LOADER}-lead-workflows-line-missing"
 done
+printf '%s\n' "$_O" | grep -Fq 'exited 1: oops\n{"z":1})' || _S8_FAIL="$_S8_FAIL degraded-escape-error-not-printed-as-written"
+# pininject (round 4, B8): roster pins that hold a newline, as a literal
+# backslash-n (a TOML literal string) and as a real one (a basic string's
+# escape), each followed by a JSON object: each pin notice stays one line
+# with its fixed start, and no stdout line starts with "{"
+mkdir -p "$_S8/proj-pin/ops"
+( cd "$_S8/proj-pin" && git init -q 2>/dev/null ) || true
+printf '%s\n' '[roles.builder]' 'cli = "codex"' "model = 'x\\n{\"injected\":true}\\nz'" '' '[roles.reviewer]' 'cli = "codex"' 'model = "y\n{\"real\":1}"' > "$_S8/proj-pin/ops/roster.toml"
+_s8_run pininject "$_S8/proj-pin" "2.1.277"
+_s8_has '^Roster pin differs from the shipped default: roles\.builder\.model=x\\n{"injected":true}\\nz [(]shipped: ' || _S8_FAIL="$_S8_FAIL pininject-literal-not-one-line"
+_s8_has '^Roster pin differs from the shipped default: roles\.reviewer\.model=y{"real":1} [(]shipped: ' || _S8_FAIL="$_S8_FAIL pininject-newline-not-one-line"
 # no loader at all: CLAUDE_PLUGIN_ROOT unset (the hook run outside the plugin
 # host) — the same standing WARNING names the unset variable, rc 0, orientation
 _O=$( cd "$_S8/proj-degraded" && env -u CLAUDE_PLUGIN_ROOT HOME="$_S8/home" PATH="$_S8/bin:$PATH" S8_CLAUDE_VERSION="2.1.277" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ) || _S8_FAIL="$_S8_FAIL unset-root-rc-nonzero"
@@ -1104,11 +1191,11 @@ printf '%s\n' "$_O" | grep -Fq "WARNING: the Triforge helper did not load (CLAUD
 _s8_has '^Multi-agent framework ready\.$' || _S8_FAIL="$_S8_FAIL unset-root-orientation-missing"
 _S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines), prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40), and survives a failing or absent helper loader"
 if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
-  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; every run rc 0, no crash, no line starting with {" "static"
+  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); every run rc 0, no crash, no line starting with {" "static"
 else
   row "SELF-08" "claude" "$_S8_CAP" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160); mismatch:${_S8_FAIL:- none}" "static"
 fi
-rm -rf "$_S8/proj" "$_S8/proj-degraded" "$_S8_BAD" "$_S8/home" "$_S8A" "$_S8/skeleton.md" "$_S8/template.md"   # keep $_S8/bin (the stub agy + claude) for SELF-08b; removed there
+rm -rf "$_S8/proj" "$_S8/proj-degraded" "$_S8/proj-pin" "$_S8_BAD" "$_S8/home" "$_S8A" "$_S8/skeleton.md" "$_S8/template.md"   # keep $_S8/bin (the stub agy + claude) for SELF-08b; removed there
 
 # SELF-08b (KTD12 / R31 / CWE-59): the skills refresh touches only what it can
 # prove it wrote. Session start (CLAUDE_PLUGIN_ROOT = this checkout) on:
@@ -1353,6 +1440,22 @@ rm -rf "$_S8B" "$_S8"
 #   lrname   a lease root named with a newline and a JSON-looking line: the
 #            refusal is one stderr line (rc 45), and no line session start
 #            prints there starts with "{" (R5)
+#   homecase (round 4, B1) the home directory reached by a case-variant
+#            spelling (a symlinked spelling on a case-sensitive volume),
+#            plain and as a git repository: the bootstrap rc 80 and session
+#            start rc 0, one WARNING each naming git init, the directory
+#            byte-identical
+#   syncswap (round 4, B2) skills-sync.py sync and add with .agents (.claude)
+#            swapped for a symlink to an outside directory after the checks,
+#            in-process from a test hook: nothing written outside, the copies
+#            and stamp in the directory that was checked
+#   agentsmove (round 4, B3) .codex/agents swapped for a symlink to a "HOME"
+#            .codex/agents between the migration's check and its move: the
+#            user-tier file untouched, nothing moved in, a WARNING, degraded
+#   opslink  (round 4, B7) ops/ a symlink to an outside directory holding a
+#            valid roster: session start's headless enrollment writes
+#            nothing there, and roster_write_member, roster_write_role and
+#            roster_write_lead each refuse with rc 6, the target unchanged
 # Negative control: the setup block with its triforge_bootstrap line removed
 # leaves a fresh project without ops/, so the ops/ check above sees the call.
 _S21="${WORK}/self21"
@@ -1786,12 +1889,122 @@ _S21_HOOK=$( cd "$_S21_LRN/wt" && env -u TRIFORGE_LEASE_WORKER HOME="$_S21/home"
                /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" < /dev/null 2>/dev/null || true )
 ! printf '%s\n' "$_S21_HOOK" | grep -q '^{' || _S21_FAIL="$_S21_FAIL lrname-hook-stdout-line-starts-with-brace"
 printf '%s\n' "$_S21_HOOK" | grep -q 'REFUSED .*lease root' || _S21_FAIL="$_S21_FAIL lrname-hook-no-refusal-line"
+# homecase (round 4, B1): the home directory reached by another spelling. On a
+# case-insensitive volume (macOS's default) the bootstrap and session start
+# run from the upper-case spelling of a lower-case HOME, where bash's pwd -P
+# keeps the case it was handed; on a case-sensitive one a symlinked spelling
+# stands in. Plain and as a git repository: rc 80 / rc 0, one WARNING each,
+# the directory byte-identical.
+mkdir -p "$_S21/hc1" "$_S21/hc2"
+_s21_git "$_S21/hc2" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-hc2"
+if [ -d "$_S21/HC1" ]; then
+  _S21_HCV="case"
+else
+  _S21_HCV="link"
+  ln -s hc1 "$_S21/hc1-link"; ln -s hc2 "$_S21/hc2-link"
+fi
+for _s21_d in hc1 hc2; do
+  if [ "$_S21_HCV" = case ]; then _S21_HCP="$_S21/$(printf '%s' "$_s21_d" | tr 'a-z' 'A-Z')"; else _S21_HCP="$_S21/${_s21_d}-link"; fi
+  _S21_LH=$(_s21_list "$_S21/$_s21_d")
+  _S21_RC=$(_s21_run "homecase-$_s21_d" /bin/bash "$_S21_HCP" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh" HOME="$_S21/$_s21_d" PATH="$_S21/bin-min:/usr/bin:/bin")
+  grep -qx 'rc=80' "$_S21/homecase-$_s21_d.out" || _S21_FAIL="$_S21_FAIL homecase-$_s21_d-rc($(tr '\n' ' ' < "$_S21/homecase-$_s21_d.out" | cut -c1-40))"
+  [ "$(grep -c '^triforge_bootstrap: WARNING .*home directory.*git init' "$_S21/homecase-$_s21_d.err" || true)" -eq 1 ] || _S21_FAIL="$_S21_FAIL homecase-$_s21_d-no-one-warning($(_s21_first "$_S21/homecase-$_s21_d.err" 100))"
+  [ "$(_s21_list "$_S21/$_s21_d")" = "$_S21_LH" ] || _S21_FAIL="$_S21_FAIL homecase-$_s21_d-wrote($(_s21_diff "$(_s21_list "$_S21/$_s21_d")" "$_S21_LH"))"
+  _S21_HOOK_RC=0
+  _S21_HOOK=$( cd "$_S21_HCP" && env -u TRIFORGE_LEASE_WORKER HOME="$_S21/$_s21_d" TMPDIR="$_S21/tmp" PATH="$_S21/bin-min:/usr/bin:/bin" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GIT_CONFIG_NOSYSTEM=1 \
+                 /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" < /dev/null 2>&1 ) || _S21_HOOK_RC=$?
+  { [ "$_S21_HOOK_RC" -eq 0 ] && ! printf '%s\n' "$_S21_HOOK" | grep -q 'hook crashed\|^session-start:' \
+    && [ "$(printf '%s\n' "$_S21_HOOK" | grep -c '^WARNING: .*home directory.*git init' || true)" -eq 1 ]; } \
+    || _S21_FAIL="$_S21_FAIL homecase-$_s21_d-hook(rc=${_S21_HOOK_RC}:$({ printf '%s\n' "$_S21_HOOK" | grep -m1 'hook crashed\|^session-start:\|home directory' || true; } | cut -c1-100))"
+  [ "$(_s21_list "$_S21/$_s21_d")" = "$_S21_LH" ] || _S21_FAIL="$_S21_FAIL homecase-$_s21_d-hook-wrote($(_s21_diff "$(_s21_list "$_S21/$_s21_d")" "$_S21_LH"))"
+done
+unset _s21_d _S21_HCP
+# syncswap (round 4, B2): skills-sync.py with .agents swapped for a symlink to
+# a directory outside the project after its checks passed. The swap runs
+# in-process, from a hook this test installs over the module's
+# shipped_entries (called after the checks, before the first copy), so the
+# race is deterministic; sync and add both: nothing lands outside, the copies
+# and the stamp land in the directory that was checked (now .agents.moved).
+mkdir -p "$_S21/proj-sw/.agents/skills" "$_S21/sw-out/skills" "$_S21/proj-sa/.claude/skills" "$_S21/sa-out/skills"
+_S21_SW=$(python3 - "$REPO_ROOT/scripts/lib/skills-sync.py" "$REPO_ROOT" "$_S21" <<'S21_SWAP_PY' 2>&1 || true
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("skills_sync", sys.argv[1])
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+plugin, base = sys.argv[2], sys.argv[3]
+orig = m.shipped_entries
+def swap(top, name, outside):
+    def hooked(src_root):
+        os.rename(os.path.join(top, name), os.path.join(top, name + ".moved"))
+        os.symlink(outside, os.path.join(top, name))
+        m.shipped_entries = orig
+        return orig(src_root)
+    m.shipped_entries = hooked
+swap(os.path.join(base, "proj-sw"), ".agents", os.path.join(base, "sw-out"))
+m.sync(plugin, os.path.join(base, "proj-sw"), "")
+swap(os.path.join(base, "proj-sa"), ".claude", os.path.join(base, "sa-out"))
+m.add(plugin, os.path.join(base, "proj-sa"), ".claude/skills", set(), "")
+def count(p):
+    return sum(len(d) + len(f) for _, d, f in os.walk(p))
+print("sync-outside=%d sync-moved-stamp=%s add-outside=%d add-moved=%d" % (
+    count(os.path.join(base, "sw-out")),
+    "yes" if os.path.isfile(os.path.join(base, "proj-sw", ".agents.moved", "skills", ".triforge-plugin-version")) else "no",
+    count(os.path.join(base, "sa-out")), count(os.path.join(base, "proj-sa", ".claude.moved", "skills"))))
+S21_SWAP_PY
+)
+_S21_FAIL="${_S21_FAIL}$(_self_expect syncswap "$_S21_SW" '^sync-outside=1 sync-moved-stamp=yes add-outside=1 add-moved=[1-9][0-9]*$')"
+# agentsmove (round 4, B3): the 3.2.0 .codex/agents/agents.toml migration with
+# .codex/agents swapped for a symlink to a "HOME" .codex/agents between the
+# check and the move. The test redefines _tb_dir_in_project in its own shell
+# (after sourcing) so the swap lands right after the check passes; the
+# user-tier file stays where it is, nothing is moved into the project, and a
+# WARNING names the refusal.
+mkdir -p "$_S21/proj-am/.codex/agents" "$_S21/am-home/.codex/agents"
+_s21_git "$_S21/proj-am" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-am"
+printf '# project agents (3.2.0)\n' > "$_S21/proj-am/.codex/agents/agents.toml"
+printf '# user-tier agents\n' > "$_S21/am-home/.codex/agents/agents.toml"
+_S21_SUMA=$(cksum "$_S21/am-home/.codex/agents/agents.toml")
+_S21_AM=$( cd "$_S21/proj-am" && env -u CLAUDE_PLUGIN_ROOT S21_FAKE="$_S21/am-home/.codex/agents" HOME="$_S21/home" GIT_CONFIG_NOSYSTEM=1 /bin/bash -c '
+source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 9
+_TB_PREFIX="am: "; _TB_DEGRADED=0
+_tb_dir_in_project() {
+  if [ "$1" = ".codex/agents" ] && [ -d .codex/agents ] && [ ! -L .codex/agents ]; then
+    mv .codex/agents .codex/agents.moved && ln -s "$S21_FAKE" .codex/agents
+  fi
+  return 0
+}
+_tb_codex_agents_move
+echo "degraded=$_TB_DEGRADED"' s21 "$REPO_ROOT" < /dev/null 2>&1 || true )
+_S21_AM="$_S21_AM
+home=$([ "$(cksum "$_S21/am-home/.codex/agents/agents.toml" 2>/dev/null || true)" = "$_S21_SUMA" ] && echo intact || echo changed):moved-in=$([ -e "$_S21/proj-am/.codex/triforge-agents.toml" ] && echo yes || echo no)"
+_S21_FAIL="${_S21_FAIL}$(_self_expect agentsmove "$_S21_AM" '^am: WARNING .*agents\.toml was not moved' '^degraded=1$' '^home=intact:moved-in=no$')"
+# opslink (round 4, B7): ops/ a symlink to a directory outside the project that
+# holds a valid roster without [members.opencode], opencode on PATH: session
+# start (headless: stdin is not a terminal) enrolls nothing there, and each
+# roster writer called in that project refuses (rc 6) with the target
+# byte-identical and nothing added beside it
+mkdir -p "$_S21/proj-ol" "$_S21/ol-out"
+_s21_git "$_S21/proj-ol" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-ol"
+printf '[roles.builder]\ncli = "claude"\n' > "$_S21/ol-out/roster.toml"
+ln -s "$_S21/ol-out" "$_S21/proj-ol/ops"
+_S21_SUMO=$(cksum "$_S21/ol-out/roster.toml")
+_S21_HOOK=$( cd "$_S21/proj-ol" && env -u TRIFORGE_LEASE_WORKER HOME="$_S21/home" TMPDIR="$_S21/tmp" PATH="$_S21/bin-cli:$_S21/bin:$PATH" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GIT_CONFIG_NOSYSTEM=1 \
+               TRIFORGE_CURSOR_BIN="$_S21/bin-cli/cursor-agent" /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" < /dev/null 2>&1 || true )
+_S21_OL=$( cd "$_S21/proj-ol" && env -u CLAUDE_PLUGIN_ROOT -u TRIFORGE_LEASE_WORKER HOME="$_S21/home" PATH="$_S21/bin-cli:$_S21/bin:$PATH" GIT_CONFIG_NOSYSTEM=1 /bin/bash -c '
+source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 9
+R=0; roster_write_member opencode true "" 2>/dev/null || R=$?; echo "member=$R"
+R=0; roster_write_role tester claude "" high 2>/dev/null || R=$?; echo "role=$R"
+R=0; roster_write_lead codex 2>/dev/null || R=$?; echo "lead=$R"' s21 "$REPO_ROOT" < /dev/null 2>&1 || true )
+_S21_OL="$_S21_OL
+target=$([ "$(cksum "$_S21/ol-out/roster.toml")" = "$_S21_SUMO" ] && echo intact || echo changed):entries=$(ls -A "$_S21/ol-out" | tr '\n' ' ')
+hook=$(printf '%s\n' "$_S21_HOOK" | grep -c 'hook crashed\|^{' || true)"
+_S21_FAIL="${_S21_FAIL}$(_self_expect opslink "$_S21_OL" '^member=6$' '^role=6$' '^lead=6$' '^target=intact:entries=roster\.toml $' '^hook=0$')"
 # negative control: without the bootstrap line no ops/ appears
 _S21_RC=$(_s21_run neg /bin/bash "$_S21/proj-neg" "$REPO_ROOT/skills/at-setup" "$_S21/setup-neg.sh")
 [ ! -e "$_S21/proj-neg/ops" ] || _S21_FAIL="$_S21_FAIL negative-control(ops/-without-the-bootstrap-line)"
 _S21_CAP="the project bootstrap runs from the at- skills without any hook: at-setup's block provisions ops/, the skills copy, the per-CLI files and an untracked plugin-root pointer; at-build's preflight then loads the helpers from the pointer; idempotent under bash and zsh; refused under the worker marker and in a lease root (KTD11, R37)"
 if [ -z "$_S21_FAIL" ]; then
-  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; round 3: links at the pid-free temp names (.tmp, .new, ~) beside every written file untouched, and no predictable temp name or mv -f in the three writers, both creating temps O_EXCL|O_NOFOLLOW under a random name (R6); a symlinked parent one and two levels down refused, an append to a hard-linked file rc 5 with the shared inode unchanged, a replace over one a new inode (R3, R4); a home directory as the project, plain and as a repository: bootstrap rc 80 and session start rc 0, one WARNING each, the directory byte-identical (R1); skills-sync.py with links at its stamp's old temp names: untouched, the stamp a regular file (R2); a hard-linked .agents/.gitignore: rc 80, the shared inode unchanged (R3); a lease root named with a newline and a {-line: one REFUSED line, no hook stdout line starting with { (R5); a session started in <repo>/src names the project root once, one started at the root does not (R7); negative control: the block without its triforge_bootstrap line leaves no ops/" "static"
+  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; round 3: links at the pid-free temp names (.tmp, .new, ~) beside every written file untouched, and no predictable temp name or mv -f in the three writers, both creating temps O_EXCL|O_NOFOLLOW under a random name (R6); a symlinked parent one and two levels down refused, an append to a hard-linked file rc 5 with the shared inode unchanged, a replace over one a new inode (R3, R4); a home directory as the project, plain and as a repository: bootstrap rc 80 and session start rc 0, one WARNING each, the directory byte-identical (R1); skills-sync.py with links at its stamp's old temp names: untouched, the stamp a regular file (R2); a hard-linked .agents/.gitignore: rc 80, the shared inode unchanged (R3); a lease root named with a newline and a {-line: one REFUSED line, no hook stdout line starting with { (R5); a session started in <repo>/src names the project root once, one started at the root does not (R7); round 4: the home directory by a ${_S21_HCV:-case}-variant spelling, plain and a repository: bootstrap rc 80, session start rc 0, one WARNING each naming git init, nothing written (B1); skills-sync sync and add with the parent swapped for an outside link after the checks: nothing outside (B2); .codex/agents swapped for a HOME link before the move: the user-tier file untouched (B3); ops/ linked outside: enrollment and the three roster writers write nothing there, rc 6 (B7); negative control: the block without its triforge_bootstrap line leaves no ops/" "static"
 else
   row "SELF-21" "claude" "$_S21_CAP" "FAIL" "mismatch:$(printf '%s' "$_S21_FAIL" | cut -c1-900)" "static"
 fi
@@ -5413,7 +5626,7 @@ for _s22_c in context-monitor tool-failure-monitor; do
   R=0; OUT=$( cd "$_S22/reads" && printf '{"session_id":"n1","tool_name":"Bash","tool_input":{"command":"cat README"}}' \
     | env -i HOME="$_S22/home" TMPDIR="$_S22/tnopy" PATH="$_S22/minbin" /bin/bash "$_S22_HOOKS/$_s22_c.sh" 2>"$_S22/nopy.err" ) || R=$?
   O="$O
-nopy-$_s22_c:rc=$R:out=$(printf '%s' "$OUT" | wc -c | tr -d ' '):err=$(grep -c 'WARNING the monitor failed' "$_S22/nopy.err" || true)"
+nopy-$_s22_c:rc=$R:out=$(printf '%s' "$OUT" | wc -c | tr -d ' '):err=$(grep -c 'WARNING python3 is not on PATH' "$_S22/nopy.err" || true)"
   R=0; OUT=$( cd "$_S22/reads" && printf '{"session_id":"n2","tool_name":"Bash","tool_input":{"command":"cat README"}}' \
     | env -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT TMPDIR="$_S22/tnopy" HOME="$_S22/home" /bin/bash "$_S22/lonely/$_s22_c.sh" 2>"$_S22/nopy.err" ) || R=$?
   O="$O
@@ -5423,7 +5636,81 @@ O="$O
 written=$(find "$_S22/tnopy" -type f 2>/dev/null | wc -l | tr -d ' ')"
 _S22_FAIL="${_S22_FAIL}$(_self_expect nopython "$O" '^nopy-context-monitor:rc=0:out=0:err=1$' '^nopy-tool-failure-monitor:rc=0:out=0:err=1$' \
   '^nofile-context-monitor:rc=0:out=0:err=1$' '^nofile-tool-failure-monitor:rc=0:out=0:err=1$' '^written=0$')"
-unset _s22_c
+# nopyonce (round 4, P3-4): with no python3 but the usual tools (sed, head,
+# mkdir) on PATH, each monitor says so once per session: three calls in
+# session n3 and one in n4 -> two notes per monitor, nothing but the marker
+# directories written
+mkdir -p "$_S22/minbin2" "$_S22/tnopy2"
+for _s22_c in cat dirname sed head mkdir; do ln -sf "$(command -v "$_s22_c")" "$_S22/minbin2/$_s22_c"; done
+O=""
+for _s22_c in context-monitor tool-failure-monitor; do
+  : > "$_S22/nopy.err"
+  for _s22_s in n3 n3 n3 n4; do
+    ( cd "$_S22/reads" && printf '{"session_id":"%s","tool_name":"Bash","tool_input":{"command":"cat README"}}' "$_s22_s" \
+      | env -i HOME="$_S22/home" TMPDIR="$_S22/tnopy2" PATH="$_S22/minbin2" /bin/bash "$_S22_HOOKS/$_s22_c.sh" 2>>"$_S22/nopy.err" >/dev/null ) || true
+  done
+  O="$O
+once-$_s22_c:$(grep -c 'WARNING python3 is not on PATH' "$_S22/nopy.err" || true)"
+done
+O="$O
+files=$(find "$_S22/tnopy2" -type f 2>/dev/null | wc -l | tr -d ' ')"
+_S22_FAIL="${_S22_FAIL}$(_self_expect nopyonce "$O" '^once-context-monitor:2$' '^once-tool-failure-monitor:2$' '^files=0$')"
+unset _s22_c _s22_s
+
+# fifo (round 4, B6): a FIFO planted at the context monitor's lead-vocab
+# cache and at a session's state file of each monitor: every call returns
+# within a 20 s bound (nothing ever writes to the FIFO, so an open that
+# blocked would hang), one NOTE names each odd state file, and the files are
+# regular files again afterwards
+_s22_proj fifo '[lead]\ncli = "codex"\n'
+mkdir -p "$_S22/tfifo"
+S22_TMP="$_S22/tfifo" _s22_hook fifo context-monitor f1 Bash 'cat README' probe >/dev/null
+_S22_FD=$(ls -d "$_S22"/tfifo/triforge-monitors-*/fifo-* 2>/dev/null | head -1)
+O="dir:${_S22_FD:+found}"
+if [ -n "$_S22_FD" ]; then
+  rm -f "$_S22_FD/lead-vocab"
+  mkfifo "$_S22_FD/lead-vocab" "$_S22_FD/f2.context" "$_S22_FD/f2.failures"
+  _s22_fifo() { # _s22_fifo <handler> <session> <tool> — one call under a 20 s bound: "<handler>:rc=<n>:err=<stderr on one line>"
+    local R=0
+    ( cd "$_S22/fifo" && printf '{"session_id":"%s","tool_name":"%s","tool_input":{"command":"cat README"},"tool_response":"Exit code: 1"}' "$2" "$3" \
+        | env -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT TMPDIR="$_S22/tfifo" HOME="$_S22/home" "$TIMEOUT_BIN" 20 /bin/bash "$_S22_HOOKS/$1.sh" >/dev/null 2>"$_S22/fifo.err" ) || R=$?
+    echo "$1:rc=$R:err=$(tr '\n' ' ' < "$_S22/fifo.err")"
+  }
+  O="$O
+$(_s22_fifo context-monitor f2 Bash)
+$(_s22_fifo tool-failure-monitor f2 apply_patch)
+regular=$(for _s22_c in lead-vocab f2.context f2.failures; do if [ -f "$_S22_FD/$_s22_c" ] && [ ! -p "$_S22_FD/$_s22_c" ]; then printf 'y'; else printf 'n'; fi; done)"
+fi
+_S22_FAIL="${_S22_FAIL}$(_self_expect fifo "$O" '^dir:found$' \
+  '^context-monitor:rc=0:err=.*NOTE the state file .*lead-vocab is not a regular file' '^context-monitor:rc=0:err=.*f2\.context is not a regular file' \
+  '^tool-failure-monitor:rc=0:err=.*f2\.failures is not a regular file' '^regular=yyy$')"
+unset _S22_FD _s22_c
+
+# sharedss (round 4, B5): session start with a 0777 TMPDIR (no sticky bit). A
+# stub claude, run mid-hook for the floor check, lists what the hook keeps in
+# that TMPDIR at that moment: nothing (its private temp dirs go under the
+# project's .claude instead), the helper still loaded (the Roster line),
+# rc 0, and nothing left behind in either place
+mkdir -p "$_S22/tss" "$_S22/ssbin" "$_S22/ss"
+chmod 0777 "$_S22/tss"
+( cd "$_S22/ss" && git init -q . ) >/dev/null 2>&1 || true
+printf '#!/bin/sh\n# probe stub (SELF-22): the floor check runs it mid-hook; it lists the hook'"'"'s entries in TMPDIR\ncase "${1:-}" in --version) ls -d "$TMPDIR"/triforge-session-start.* > "$S22_SEEN" 2>/dev/null; echo "2.1.285" ;; esac\nexit 0\n' > "$_S22/ssbin/claude"
+printf '#!/bin/sh\n# probe stub (SELF-22): answers the agy pack check\ncase "${1:-}" in plugin) case "${2:-}" in list) echo "agent-triforge" ;; esac ;; agents) printf "%%s\\n" codebase-analyst architecture-reviewer targeted-researcher documentation-writer ;; esac\nexit 0\n' > "$_S22/ssbin/agy"
+chmod +x "$_S22/ssbin/claude" "$_S22/ssbin/agy"
+for _s22_c in python3 git timeout gtimeout; do   # PATH: the stubs, these tools and /usr/bin:/bin, so no real CLI runs
+  _S22_T=$(command -v "$_s22_c" 2>/dev/null || true)
+  [ -z "$_S22_T" ] || ln -sf "$_S22_T" "$_S22/ssbin/$_s22_c"
+done
+unset _s22_c _S22_T
+R=0
+O=$( cd "$_S22/ss" && env -u TRIFORGE_LEASE_WORKER HOME="$_S22/home" TMPDIR="$_S22/tss" PATH="$_S22/ssbin:/usr/bin:/bin" CLAUDE_PLUGIN_ROOT="${_SELF_DIR}/.." \
+       S22_SEEN="$_S22/ss.seen" GIT_CONFIG_NOSYSTEM=1 /bin/bash "$_S22_HOOKS/session-start.sh" < /dev/null 2>&1 ) || R=$?
+O="$O
+rc=$R
+seen=$(if [ -f "$_S22/ss.seen" ]; then grep -c '' "$_S22/ss.seen" || true; else echo missing; fi)
+left=$(find "$_S22/tss" "$_S22/ss/.claude" -maxdepth 1 -name 'triforge-session-start.*' 2>/dev/null | wc -l | tr -d ' ')"
+_S22_FAIL="${_S22_FAIL}$(_self_expect sharedss "$O" '^Roster: core trio' '^rc=0$' '^seen=0$' '^left=0$')"
+if printf '%s\n' "$O" | grep -q 'hook crashed\|^{'; then _S22_FAIL="$_S22_FAIL sharedss(crash-or-brace)"; fi
 
 # wave: a Codex-led fixture wave to merge
 _self_repo "$_S22/wave" "$_S22/home" sprint/s22 '# probe roster (SELF-22)\n[lead]\ncli = "codex"\n\n[roles.builder]\ncli = "claude"\n' || true

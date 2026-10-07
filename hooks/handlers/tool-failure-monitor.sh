@@ -54,11 +54,37 @@ _tf_on_exit() {
 }
 trap _tf_on_exit EXIT
 
+# _tf_nopython <payload> — python3 is a Triforge prerequisite; without it the
+# monitor is off, and says so once per session, not on every call (Phase 3
+# round 4, P3-4). The marker is a directory made by mkdir (atomic, and never
+# a write through a link) in the per-user base monitors.py keeps under
+# TMPDIR, when that base is a real directory of this user; with no readable
+# session id, or no such base, the note prints on every call instead.
+_tf_nopython() {
+  local S="" B="" M=""
+  S=$(printf '%s' "$1" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9._-]\{1,80\}\)".*/\1/p' 2>/dev/null | head -1) || S=""
+  B="${TMPDIR:-/tmp}/triforge-monitors-${UID:-unknown}"
+  if [ -n "$S" ] && { [ -d "$B" ] || mkdir -m 700 "$B" 2>/dev/null; } && [ -d "$B" ] && [ ! -L "$B" ] && [ -O "$B" ]; then
+    M="${B}/tool-failure-monitor.${S}.nopython-noted"
+    if ! mkdir "$M" 2>/dev/null && [ -d "$M" ] && [ ! -L "$M" ]; then
+      return 0
+    fi
+  fi
+  echo "tool-failure-monitor: WARNING python3 is not on PATH, so failure tracking is off (python3 is a Triforge prerequisite; said once per session) — advisory only, tool call continues" >&2
+}
+
 # monitors.py reads the payload from the hook's stdin itself. When it fails
-# (no python3, no monitors.py beside this file) whatever it left unread is
-# drained, so the caller never writes into a closed pipe.
+# (no monitors.py beside this file) whatever it left unread is drained, so
+# the caller never writes into a closed pipe.
 TF_HANDLERS=${BASH_SOURCE[0]%/*}
 if [ "$TF_HANDLERS" = "${BASH_SOURCE[0]}" ]; then TF_HANDLERS=.; fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  TF_IN=""
+  if [ ! -t 0 ]; then TF_IN=$(cat 2>/dev/null) || TF_IN=""; fi
+  _tf_nopython "$TF_IN"
+  exit 0
+fi
 
 RC=0
 python3 "${TF_HANDLERS}/monitors.py" failures || RC=$?

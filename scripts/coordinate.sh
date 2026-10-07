@@ -65,8 +65,9 @@
 # Exit codes:
 #   0   sprint complete (the sentinel exists), the dry run printed, or the
 #       iterations ran out without completion (the closing lines say so)
-#   1   usage error, the lead can't be resolved, its CLI is not on PATH, or
-#       the helper library is missing
+#   1   usage error, the lead can't be resolved, its CLI is not on PATH, the
+#       helper library is missing, or TMPDIR is not private (another user
+#       could rename entries in it), checked before any session
 #   44  the integrity check found a change before a session (restored,
 #       escalated; inspect, then lease_rebaseline) or could not run
 #   45  this shell may not run the lead's loop (R38: another CLI's host
@@ -466,7 +467,10 @@ stop_fix() {
 # written under (_lease_at_ledger_root, as lease_approve): a shell whose
 # TMPDIR derives another root would otherwise compare the ledger with no
 # anchors at all and adopt whatever it holds. A recorded root that is gone
-# refuses, naming TRIFORGE_LEASE_ROOT.
+# refuses, naming TRIFORGE_LEASE_ROOT. With no ledger the root comes from the
+# checkout's lease-root record (in its git dir, outside TMPDIR), and a missing
+# ledger beside lease history (that record, lease worktrees) refuses rather
+# than start a session as on a fresh checkout (Phase 3 round 4, B4).
 integrity_gate() {
   local RC=0
   local TRIFORGE_LEASE_ROOT="${TRIFORGE_LEASE_ROOT:-}"   # _lease_at_ledger_root may set it
@@ -492,8 +496,21 @@ ITERATION=0
 DONE=false
 # The lead's output and the tail the failure classifier reads live in one
 # private directory (mktemp -d: a random name, mode 0700), so neither has a
-# name another user can predict and plant a link at.
-RUN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/triforge-coordinate.XXXXXX")
+# name another user can predict and plant a link at. That holds only in a
+# TMPDIR no other user can rename entries in (Phase 3 round 4, B5): in a
+# shared one without the sticky bit (or another user's), a second user could
+# move the directory aside and put one holding a link at run.log in its place,
+# and the next redirect would truncate the link's target. Such a TMPDIR is
+# refused, as the monitors and the lease root refuse it.
+COORD_TMP="${TMPDIR:-/tmp}"
+if ! python3 -c '
+import os, stat, sys
+st = os.stat(sys.argv[1])
+sys.exit(1 if st.st_uid not in (os.getuid(), 0) or (st.st_mode & 0o022 and not st.st_mode & stat.S_ISVTX) else 0)' "$COORD_TMP" 2>/dev/null; then
+  echo "coordinate.sh: ERROR TMPDIR ${COORD_TMP} is not a private place for the lead's run log (missing, another user's, or group or other writable without the sticky bit, so another user could swap the run directory). Set TMPDIR to a private directory and rerun; nothing ran." >&2
+  exit 1
+fi
+RUN_DIR=$(mktemp -d "${COORD_TMP}/triforge-coordinate.XXXXXX")
 trap 'rm -rf "$RUN_DIR"' EXIT
 RUN_LOG="${RUN_DIR}/run.log"
 RUN_TAIL="${RUN_DIR}/tail.log"

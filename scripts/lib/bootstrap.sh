@@ -108,7 +108,7 @@ triforge_bootstrap() {
   # config of each CLI. Refused when the anchor is the home directory or
   # contains it, also when the home directory is itself a repository.
   if _tb_home_anchor "$_TB_ANCHOR"; then
-    _tb_note "WARNING the project directory ${_TB_ANCHOR} is your home directory or contains it, so nothing was bootstrapped: there the project files would be each CLI's user-tier config, which Triforge never writes. Run it from a project directory."
+    _tb_note "WARNING the project directory ${_TB_ANCHOR} is your home directory or contains it, so nothing was bootstrapped: there the project files would be each CLI's user-tier config, which Triforge never writes. Run it from a project directory; when your home directory is itself a git repository (a dotfiles repo), run git init in the project first, so the project is its own repository."
     return 80
   fi
   if _cursor_bin >/dev/null 2>&1; then
@@ -153,22 +153,30 @@ _tb_anchor() {
   _checkout_top || pwd -P
 }
 
-# _tb_home_anchor <dir> — 0 when <dir> (a physical path) is the home
-# directory or one of its ancestors, so a project rooted there would hold the
-# user's own ~/.codex, ~/.claude and the rest. 1 when it is neither, or when
-# HOME is unset or does not resolve (then there is nothing to protect).
+# _tb_home_anchor <dir> — 0 when <dir> is the home directory or one of its
+# ancestors, so a project rooted there would hold the user's own ~/.codex,
+# ~/.claude and the rest. 1 when it is neither, or when HOME is unset or does
+# not resolve (then there is nothing to protect). Compared by filesystem
+# identity (test -ef: device and inode), never by spelling (Phase 3 round 4,
+# B1): on a case-insensitive volume /users/me and /Users/me are one directory,
+# and bash's pwd -P keeps whatever case the shell was handed, so a string
+# comparison let a case-variant spelling of HOME through.
 _tb_home_anchor() {
-  local H=""
+  local H="" D=""
   [ -n "${HOME:-}" ] || return 1
   H=$(_tb_phys "$HOME") || return 1
   [ -n "$H" ] || return 1
-  if [ "$1" = "/" ]; then
-    return 0
-  fi
-  case "${H%/}/" in
-    "${1%/}"/*) return 0 ;;
-  esac
-  return 1
+  D=$H
+  while :; do
+    if [ "$1" -ef "$D" ]; then
+      return 0
+    fi
+    case "$D" in
+      /|"") return 1 ;;
+    esac
+    D=${D%/*}
+    if [ -z "$D" ]; then D=/; fi
+  done
 }
 
 # _tb_note <text> — one notice on stderr: the caller's prefix, then the text
@@ -223,22 +231,30 @@ _tb_files() {
 #            refused (rc 5) when the file has other hard links: an append
 #            would change the shared inode, so a hard link to a file outside
 #            the project (~/.gitconfig, say) could redirect it (R3)
+#   move     move the regular file <source> (relative to <root>, or absolute
+#            under it) to <dest>, then remove the directory <source> sat in
+#            when that left it empty. Both paths are walked with directory
+#            descriptors as above, nothing is created on either, and the
+#            move itself (a hard link, then an unlink; a rename where the
+#            filesystem has no hard links) and the rmdir run relative to the
+#            last descriptors, so a directory on either path swapped for a
+#            symlink, before or after the check, can't move a file outside
+#            the project (Phase 3 round 4, B3). A <dest> that exists is left
+#            alone (rc 2); a <source> that is not a regular file is refused
+#            (rc 3)
+#   mkdir    create the directory <dest> (and the ones above it) the same
+#            way; one already there is fine, anything else there is refused
+#            (rc 3)
 # rc 0 written · 1 an I/O error (a symlink at <dest> in append mode among
-# them) · 2 exists (new) · 3 refused: a directory on the path is a symlink or
-# not a directory, or the append target is not a regular file · 4 a
-# directory could not be created · 5 refused: hard-linked (append).
+# them) · 2 exists (new, move) · 3 refused: a directory on the path is a
+# symlink or not a directory, or the append or move source is not a regular
+# file · 4 a directory could not be created · 5 refused: hard-linked (append).
 # On rc 3 and 4 stdout names the directory (relative to <root>); otherwise
 # nothing is printed, and the caller words the notice.
 _TB_WRITE_PY='
 import errno, os, secrets, stat, sys
 mode, root, dest = sys.argv[1], os.path.realpath(sys.argv[2]), sys.argv[3]
 src = sys.argv[4] if len(sys.argv) > 4 else ""
-rel = os.path.relpath(dest, root) if os.path.isabs(dest) else os.path.normpath(dest)
-parts = rel.split(os.sep)
-if rel in ("", ".") or parts[0] == "..":
-    print(rel)
-    sys.exit(3)
-name = parts[-1]
 nofollow = getattr(os, "O_NOFOLLOW", 0)
 dirflags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow | getattr(os, "O_CLOEXEC", 0)
 # a symlink opened O_NOFOLLOW fails ELOOP (Linux) or ENOTDIR (macOS, with
@@ -247,30 +263,86 @@ not_a_dir = (errno.ELOOP, errno.ENOTDIR, errno.EMLINK)
 def refuse(code, shown):
     print(shown)
     sys.exit(code)
-try:
-    dfd = os.open(root, dirflags)
+def split(path):
+    rel = os.path.relpath(path, root) if os.path.isabs(path) else os.path.normpath(path)
+    parts = rel.split(os.sep)
+    if rel in ("", ".") or parts[0] == "..":
+        refuse(3, rel)
+    return parts
+# walk(parts, create) — the descriptors of root and of each directory of
+# parts[:-1] below it, each opened O_DIRECTORY|O_NOFOLLOW relative to the one
+# before (created first when absent and create is set); the last one is the
+# directory parts[-1] lives in
+def walk(parts, create):
+    fds = [os.open(root, dirflags)]
     seen = []
     for part in parts[:-1]:
         seen.append(part)
         try:
-            nfd = os.open(part, dirflags, dir_fd=dfd)
+            nfd = os.open(part, dirflags, dir_fd=fds[-1])
         except FileNotFoundError:
+            if not create:
+                raise
             try:
-                os.mkdir(part, 0o777, dir_fd=dfd)
+                os.mkdir(part, 0o777, dir_fd=fds[-1])
             except FileExistsError:
                 pass
             except OSError:
                 refuse(4, os.sep.join(seen))
             try:
-                nfd = os.open(part, dirflags, dir_fd=dfd)
+                nfd = os.open(part, dirflags, dir_fd=fds[-1])
             except OSError:
                 refuse(3, os.sep.join(seen))
         except OSError as exc:
             if exc.errno in not_a_dir:
                 refuse(3, os.sep.join(seen))
             raise
-        os.close(dfd)
-        dfd = nfd
+        fds.append(nfd)
+    return fds
+try:
+    parts = split(dest)
+    name = parts[-1]
+    dfd = walk(parts, mode != "move")[-1]
+    if mode == "move":
+        sparts = split(src)
+        sfds = walk(sparts, False)
+        sname = sparts[-1]
+        if not stat.S_ISREG(os.stat(sname, dir_fd=sfds[-1], follow_symlinks=False).st_mode):
+            refuse(3, os.sep.join(sparts))
+        try:
+            os.stat(name, dir_fd=dfd, follow_symlinks=False)
+            sys.exit(2)
+        except FileNotFoundError:
+            pass
+        try:
+            os.link(sname, name, src_dir_fd=sfds[-1], dst_dir_fd=dfd, follow_symlinks=False)
+            os.unlink(sname, dir_fd=sfds[-1])
+        except FileExistsError:
+            sys.exit(2)
+        except OSError as exc:
+            if exc.errno not in (errno.EPERM, errno.ENOTSUP, getattr(errno, "EOPNOTSUPP", errno.ENOTSUP), errno.EXDEV, errno.EMLINK):
+                raise
+            os.rename(sname, name, src_dir_fd=sfds[-1], dst_dir_fd=dfd)
+        if len(sparts) > 1:
+            try:
+                os.rmdir(sparts[-2], dir_fd=sfds[-2])
+            except OSError:
+                pass   # not empty: the user keeps it
+        sys.exit(0)
+    if mode == "mkdir":
+        try:
+            os.mkdir(name, 0o777, dir_fd=dfd)
+        except FileExistsError:
+            pass
+        except OSError:
+            refuse(4, os.sep.join(parts))
+        try:
+            os.close(os.open(name, dirflags, dir_fd=dfd))
+        except OSError as exc:
+            if exc.errno in not_a_dir:
+                refuse(3, os.sep.join(parts))
+            raise
+        sys.exit(0)
     perm = 0o666
     if src:
         with open(src, "rb") as f:
@@ -312,7 +384,9 @@ try:
             os.unlink(tmp, dir_fd=dfd)
             raise
     elif mode == "append":
-        fd = os.open(name, os.O_WRONLY | os.O_APPEND | nofollow, dir_fd=dfd)   # a symlink there fails: rc 1
+        # a symlink there fails (rc 1); O_NONBLOCK so a FIFO fails at once
+        # instead of blocking for a reader, before the type check below
+        fd = os.open(name, os.O_WRONLY | os.O_APPEND | nofollow | getattr(os, "O_NONBLOCK", 0), dir_fd=dfd)
         with os.fdopen(fd, "ab") as f:
             st = os.fstat(f.fileno())
             if not stat.S_ISREG(st.st_mode):
@@ -368,19 +442,28 @@ _bootstrap_copy() {
 # MEMORY.md, CHANGELOG.md, AGENTS.md and GOALS.md from templates/ops/, only
 # while ops/ does not exist: an existing ops/ is the project's. An ops that is
 # a dangling symlink or a file is refused; one linked to a directory counts as
-# existing, and ops/roster.toml's own copy refuses to write through it.
+# existing, and ops/roster.toml's own copy refuses to write through it. The
+# directories are made by _tb_write (mkdir mode), relative to descriptors, so
+# an ops swapped for a symlink after the check gets nothing created through it.
 _tb_ops() {
-  local F
+  local F OUT="" RC=0
   [ ! -d ops ] || return 0
   if [ -L ops ] || [ -e ops ]; then
     _tb_write_refused "ops/" "ops"
     return 0
   fi
-  if ! mkdir -p ops/solutions ops/decisions ops/archive 2>/dev/null; then
-    _tb_note "WARNING could not create ops/ — the ops skeleton was not bootstrapped (the next run retries)."
-    _TB_DEGRADED=1
-    return 0
-  fi
+  for F in ops/solutions ops/decisions ops/archive; do
+    OUT=$(_tb_write mkdir . "$F" < /dev/null) || RC=$?
+    if [ "$RC" -eq 3 ]; then
+      _tb_write_refused "$F/" "$OUT"
+      return 0
+    fi
+    if [ "$RC" -ne 0 ]; then
+      _tb_note "WARNING could not create ops/ — the ops skeleton was not bootstrapped (the next run retries)."
+      _TB_DEGRADED=1
+      return 0
+    fi
+  done
   for F in MEMORY.md CHANGELOG.md AGENTS.md GOALS.md; do
     _bootstrap_copy "${_TB_ROOT}/templates/ops/${F}" "ops/${F}"
   done
@@ -638,8 +721,12 @@ _tb_codex() {
 # .codex/agents/agents.toml. Move it to the new name once — a user-modified
 # file is moved, never deleted or overwritten — and drop the now-empty
 # .codex/agents/ only when it IS empty (rmdir, never rm -rf). If both files
-# exist the user resolves it by hand.
+# exist the user resolves it by hand. The move is _tb_write's (move mode):
+# relative to directory descriptors opened without following a link, so a
+# .codex/agents swapped for a link to ~/.codex/agents after the checks below
+# can't move a user-tier file (Phase 3 round 4, B3).
 _tb_codex_agents_move() {
+  local RC=0
   [ -f ".codex/agents/agents.toml" ] || return 0
   if ! _tb_dir_in_project ".codex/agents"; then
     # moving the file out of a linked .codex/agents would delete it there
@@ -651,13 +738,18 @@ _tb_codex_agents_move() {
     _tb_note "both .codex/agents/agents.toml and .codex/triforge-agents.toml exist — merge and remove the old file by hand (Codex warns on .codex/agents/*.toml)."
     return 0
   fi
-  if mv ".codex/agents/agents.toml" ".codex/triforge-agents.toml" 2>/dev/null; then
-    rmdir ".codex/agents" 2>/dev/null || true
-    _tb_note "moved .codex/agents/agents.toml to .codex/triforge-agents.toml (Codex sweeps .codex/agents/*.toml as per-agent role files and warned on it; the file content is unchanged)."
-  else
-    _tb_note "WARNING could not move .codex/agents/agents.toml to .codex/triforge-agents.toml — move it by hand (Codex warns on the old location)."
-    _TB_DEGRADED=1
-  fi
+  _tb_write move . ".codex/triforge-agents.toml" ".codex/agents/agents.toml" < /dev/null > /dev/null || RC=$?
+  case "$RC" in
+    0) _tb_note "moved .codex/agents/agents.toml to .codex/triforge-agents.toml (Codex sweeps .codex/agents/*.toml as per-agent role files and warned on it; the file content is unchanged)." ;;
+    3)
+      _tb_note "WARNING .codex/agents/agents.toml was not moved to .codex/triforge-agents.toml: .codex or .codex/agents is a symlink or not a directory, or the file is not a regular file (Triforge writes only inside the project) — move it by hand if that file is yours."
+      _TB_DEGRADED=1
+      ;;
+    *)
+      _tb_note "WARNING could not move .codex/agents/agents.toml to .codex/triforge-agents.toml — move it by hand (Codex warns on the old location)."
+      _TB_DEGRADED=1
+      ;;
+  esac
   return 0
 }
 

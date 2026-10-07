@@ -16,8 +16,10 @@ hook inert with a note (once per session when the base can hold the marker).
 The three directories are opened once, without following a link, and held:
 every later create, read, write, rename, listing and removal goes through those
 descriptors (dir_fd), so a directory renamed or swapped for a symlink after the
-check can't redirect a write. State files are read without following a link,
-and a write goes to an O_EXCL|O_NOFOLLOW temp file renamed into place. Every
+check can't redirect a write. State files are read without following a link
+and opened O_NONBLOCK (a FIFO planted there fails the regular-file check at
+once instead of blocking the hook), and a write goes to an O_EXCL|O_NOFOLLOW
+temp file renamed into place. Every
 value printed is stripped of control characters, so no output line can start
 with "{" (Claude Code parses such hook stdout as JSON).
 
@@ -36,7 +38,11 @@ import sys
 import time
 
 CONTROL = re.compile(r"[\x00-\x1f\x7f]")
-DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+# O_NONBLOCK on every open (Phase 3 round 4, B6): a FIFO planted where a
+# directory or a state file belongs then fails the type check at once, instead
+# of blocking the hook in open() before the check runs.
+NONBLOCK = getattr(os, "O_NONBLOCK", 0)
+DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | NONBLOCK
 
 
 def clean(value, limit=300):
@@ -126,6 +132,22 @@ class StateDir:
     def read(self, name):
         return read_at(self.fd, name)
 
+    def odd(self, name):
+        """Whether name is there but neither a regular file nor a link (a FIFO,
+        a socket, a directory): read() gave "" for it, and the next write
+        replaces it (B6)."""
+        try:
+            mode = os.stat(name, dir_fd=self.fd, follow_symlinks=False).st_mode
+        except OSError:
+            return False
+        return not stat.S_ISREG(mode) and not stat.S_ISLNK(mode)
+
+    def note_odd(self, name, who, session):
+        if self.odd(name):
+            self.note_once(session + "." + name + ".odd-noted",
+                           who + ": NOTE the state file " + os.path.join(self.path, name) + " is not a regular file "
+                           "(a FIFO or a socket, say), so it was read as empty and is replaced (B6)")
+
     def write(self, name, text):
         write_at(self.fd, name, text)
 
@@ -148,16 +170,33 @@ class StateDir:
                 pass
 
 
+def read_regular(name, dir_fd=None, follow=False, limit=65536):
+    """A regular file's bytes (up to limit), read relative to dir_fd (without
+    following a link unless follow); None for anything else. Opened
+    O_NONBLOCK, so a FIFO there returns at once; the flag is cleared before
+    reading."""
+    try:
+        fd = os.open(name, os.O_RDONLY | NONBLOCK | (0 if follow else os.O_NOFOLLOW), dir_fd=dir_fd)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        if NONBLOCK:
+            os.set_blocking(fd, True)
+        with os.fdopen(fd, "rb") as f:
+            fd = -1
+            return f.read(limit)
+    except OSError:
+        return None
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
 def read_at(dir_fd, name):
     """A regular file's text, read relative to dir_fd without following a link; "" otherwise."""
-    try:
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
-    except OSError:
-        return ""
-    with os.fdopen(fd, "r", encoding="utf-8", errors="replace") as f:
-        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
-            return ""
-        return f.read(65536)
+    return (read_regular(name, dir_fd) or b"").decode("utf-8", "replace")
 
 
 def write_at(dir_fd, name, text):
@@ -475,14 +514,12 @@ def main_context():
     plugin_root = os.environ.get("CM_PLUGIN_ROOT", "")
     h = hashlib.sha1()
     for p in (os.path.join(root, "ops", "roster.toml"), os.path.join(plugin_root, "scripts", "lib", "registry.sh")):
-        try:
-            with open(p, "rb") as f:
-                h.update(f.read())
-        except OSError:
-            h.update(b"-")
+        data = read_regular(p, follow=True, limit=1 << 20)
+        h.update(b"-" if data is None else data)
     key = h.hexdigest() + "|" + plugin_root
     if os.environ.get("CM_VOCAB_FRESH") == "1":
         vocab = os.environ.get("CM_VOCAB", "").split("\n")[0]
+        sd.note_odd("lead-vocab", "context-monitor", session)
         sd.write("lead-vocab", key + "\n" + vocab + "\n")
     else:
         cached = sd.read("lead-vocab").split("\n")
@@ -505,6 +542,7 @@ def main_context():
     state = session + ".context"
     old = sd.read(state)
     if not old:
+        sd.note_odd(state, "context-monitor", session)
         sd.prune()
     c = counts(old, ("total_calls", "consecutive_reads", "last_write_at"))
     total = c["total_calls"] + 1
@@ -550,6 +588,8 @@ def main_failures():
                      "(plain-text tool_response, no exit code), so its failures are not counted this session (R44)")
     state = session + ".failures"
     old = sd.read(state)
+    if not old:
+        sd.note_odd(state, "tool-failure-monitor", session)
     c = counts(old, ("failure_count", "consecutive_failures"))
     if not failed:
         new = "---\nfailure_count: %d\nconsecutive_failures: 0\n---\n" % c["failure_count"]

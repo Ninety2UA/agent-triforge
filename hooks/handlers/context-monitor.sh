@@ -62,6 +62,26 @@ trap _cm_on_exit EXIT
 
 # Read hook input from stdin (each lead delivers PostToolUse data as JSON on stdin)
 HOOK_INPUT=$(cat)
+
+# python3 is a Triforge prerequisite; without it the monitor is off, and says
+# so once per session, not on every call (Phase 3 round 4, P3-4). The marker
+# is a directory made by mkdir (atomic, and never a write through a link) in
+# the per-user base monitors.py keeps under TMPDIR, when that base is a real
+# directory of this user; with no readable session id, or no such base, the
+# note prints on every call instead.
+if ! command -v python3 >/dev/null 2>&1; then
+  CM_S=$(printf '%s' "$HOOK_INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9._-]\{1,80\}\)".*/\1/p' 2>/dev/null | head -1) || CM_S=""
+  CM_B="${TMPDIR:-/tmp}/triforge-monitors-${UID:-unknown}"
+  if [ -n "$CM_S" ] && { [ -d "$CM_B" ] || mkdir -m 700 "$CM_B" 2>/dev/null; } && [ -d "$CM_B" ] && [ ! -L "$CM_B" ] && [ -O "$CM_B" ]; then
+    CM_M="${CM_B}/context-monitor.${CM_S}.nopython-noted"
+    if ! mkdir "$CM_M" 2>/dev/null && [ -d "$CM_M" ] && [ ! -L "$CM_M" ]; then
+      exit 0
+    fi
+  fi
+  echo "context-monitor: WARNING python3 is not on PATH, so paralysis detection is off (python3 is a Triforge prerequisite; said once per session) — advisory only, tool call continues" >&2
+  exit 0
+fi
+
 CM_HANDLERS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CM_PLUGIN_ROOT=$(cd "${CM_HANDLERS}/../.." && pwd)
 
