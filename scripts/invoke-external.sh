@@ -37,7 +37,11 @@
 #   lib/bootstrap.sh    triforge_bootstrap: the project bootstrap (ops/ skeleton,
 #                       .agents/skills refresh, per-CLI files, agy pack, plugin-root
 #                       pointer) the session-start hook and the at- skills call (KTD11)
-#   lib/lease-wait.sh   detached builders (launcher, lane argv, builder body),
+#   lib/instructions.sh the user project's instruction files: detection, the
+#                       pointer's visibility per lead, the ask-first writers
+#                       at-setup calls (R9, R39, R40); the hook also sources it
+#                       alone
+#   lib/lease-wait.sh  detached builders (launcher, lane argv, builder body),
 #                       lease_stop, lease_heartbeat_check, lease_wait (KTD10)
 #   lib/persona.sh      the persona lane: dispatch_persona, persona_prompt,
 #                       persona_snapshot_diff, persona_resolve, and
@@ -149,7 +153,7 @@ triforge_plugin_root() { printf '%s\n' "$_TRIFORGE_PLUGIN_ROOT"; }
 
 # Load the lanes (fail-closed: a missing lib is a broken install, never a
 # silently narrower helper).
-for _triforge_lib in common registry antigravity codex opencode kimi cursor devin grok roster bootstrap lease-wait persona lease; do
+for _triforge_lib in common registry antigravity codex opencode kimi cursor devin grok roster bootstrap instructions lease-wait persona lease; do
   if [ ! -f "${_TRIFORGE_SCRIPTS_DIR}/lib/${_triforge_lib}.sh" ]; then
     echo "invoke-external.sh: ERROR missing ${_TRIFORGE_SCRIPTS_DIR}/lib/${_triforge_lib}.sh — the plugin install is incomplete (reinstall: claude plugin install agent-triforge@agent-triforge)" >&2
     return 2 2>/dev/null || exit 2

@@ -328,7 +328,7 @@ WILDCARDS_OK = ("KIMI_*",)
 FIELDS = {
     "name": str, "tier": str, "binary": str, "binary_env": str, "resolver": str, "version_re": str,
     "model": str, "model_env": str, "install": str, "login": str, "env_keys": list, "lane": str,
-    "egress": str, "role_limit": list, "opt_in_roles": list, "consent": bool, "lead": dict,
+    "egress": str, "role_limit": list, "opt_in_roles": list, "consent": bool, "instructions": str, "lead": dict,
 }
 LEAD_FIELDS = {
     "launch_argv": str, "model_argv": str, "effort_argv": str, "full_access": bool, "wait_budget_s": int, "tool_vocab_read": str, "tool_vocab_action": str,
