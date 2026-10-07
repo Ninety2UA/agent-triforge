@@ -2041,31 +2041,66 @@ print(" ".join(bad[:10]) + (" ..." if len(bad) > 10 else ""))
 }
 
 # _lease_verify_objects <op> <from> <to> — re-hash every object <to> brings in
-# that <from> does not reach (KTD18). The object store is as worker-writable as
-# the rest of .git, and git reads an object by its id without hashing it again:
-# a blob or tree file rewritten under its own name after review (gc.auto=0
-# keeps the snapshot's objects loose) would put content no review saw into the
-# squash or the promotion. One rev-list lists the objects (--missing=print
-# names one that is gone), one cat-file --batch reads each back raw, and python
-# hashes "<type> <size>\0<content>" by the repository's object format (sha1 or
-# sha256). 0 when every object matches its id; otherwise the refusal, one line
-# per object (type, id, path) or the error that broke the list off, and
-# _RC_LEASE_INTEGRITY, with the first line in _LVO_WHY. A check that can't run
-# fails closed the same way. Objects <from> already reaches are not re-hashed:
-# git fsck reads every one.
+# that <from> does not reach, and the object at every path <from>..<to>
+# changes, even one <from> reaches (KTD18). The object store is as
+# worker-writable as the rest of .git, and git reads an object by its id
+# without hashing it again: a blob or tree file rewritten under its own name
+# after review (gc.auto=0 keeps the snapshot's objects loose) would put content
+# no review saw into the squash or the promotion. So would a rewritten object
+# <from> already has, once the range points a path at it: a file the snapshot
+# copies, a directory identical to one <from> holds. One rev-list lists the
+# objects (--missing=print names one that is gone), one diff-tree adds the new
+# side of each changed path the list lacks, one cat-file --batch reads each
+# back raw, and python hashes "<type> <size>\0<content>" by the repository's
+# object format (sha1 or sha256). A gitlink (mode 160000) names a commit in
+# another repository, not an object of this one: skipped. 0 when every object
+# matches its id; otherwise the refusal, one line per object (type, id, path)
+# or the error that broke a list off, and _RC_LEASE_INTEGRITY, with the first
+# line in _LVO_WHY. A check that can't run fails closed the same way. The rest
+# of what <from> reaches, the paths the range leaves alone, is not re-hashed:
+# git fsck reads every object.
 _lease_verify_objects() {
-  local OP=$1 FROM=${2:-} TO=${3:-} FMT LIST LERR="" LRC=0 BAD="" PRC=0 NL
+  local OP=$1 FROM=${2:-} TO=${3:-} FMT D LIST LERR="" LRC=0 DERR="" DRC=0 BAD="" PRC=0 NL
   NL='
 '
   _LVO_WHY=""
   FMT=$(_lgr rev-parse --show-object-format 2>/dev/null) || FMT=""
   if [ -z "$FROM" ] || [ -z "$TO" ]; then
     BAD="the objects ${TO:0:12} brings in could not be listed: no commit to list them from"
-  elif ! LIST=$(mktemp "${TMPDIR:-/tmp}/triforge-objects.XXXXXX"); then
-    BAD="the objects ${TO:0:12} brings in could not be listed: no temp file"
+  elif ! D=$(mktemp -d "${TMPDIR:-/tmp}/triforge-objects.XXXXXX"); then
+    BAD="the objects ${TO:0:12} brings in could not be listed: no temp dir"
   else
+    LIST="${D}/objects"
     LERR=$(_lgr rev-list --objects --missing=print "$TO" "^${FROM}" 2>&1 >"$LIST") || LRC=$?
-    # Read back even when the list broke off: a tree that no longer parses is
+    # rev-list leaves out what <from> reaches, but the merge writes such an
+    # object wherever the range points a path at it. The new side of every
+    # changed path joins the list once, as "<id> <path>"; a deleted path has
+    # none. --ignore-submodules=none: the .gitmodules a builder writes can't
+    # hide an entry.
+    DERR=$(_lgr diff-tree -r -t --raw --no-renames --ignore-submodules=none -z "$FROM" "$TO" 2>&1 >"${D}/paths") || DRC=$?
+    if [ "$DRC" -eq 0 ]; then
+      DERR=$(LVO_LIST="$LIST" python3 -c "${_PY_PRELUDE}"'
+import os, sys
+p = os.environ["LVO_LIST"]
+seen = set(line.partition(b" ")[0].lstrip(b"?") for line in open(p, "rb").read().split(b"\n"))
+f = sys.stdin.buffer.read().split(b"\0")
+if f.pop() or len(f) % 2:
+    sys.exit("diff-tree did not end on a whole entry")
+add = []
+for meta, name in zip(f[0::2], f[1::2]):
+    # ":<old mode> <new mode> <old id> <new id> <status>", then the path
+    m = meta.split(b" ")
+    if len(m) != 5 or not m[0].startswith(b":"):
+        sys.exit("diff-tree answered " + meta[:60].decode("utf-8", "replace"))
+    # a gitlink names a commit in another repository: skipped
+    if m[1] == b"160000" or not m[3].strip(b"0") or m[3] in seen:
+        continue
+    seen.add(m[3])
+    add.append(m[3] + b" " + name.replace(b"\n", b"?") + b"\n")
+open(p, "ab").write(b"".join(add))
+' < "${D}/paths" 2>&1) || DRC=$?
+    fi
+    # Read back even when a list broke off: a tree that no longer parses is
     # on it, and the re-hash names it. The python checks every answer against
     # the list, in order, so a short or garbled stream fails closed.
     if [ -s "$LIST" ]; then
@@ -2122,10 +2157,14 @@ if len(bad) > 10:
 sys.exit(1 if bad else 0)
 ') || PRC=$?
     fi
-    rm -f "$LIST"
+    rm -rf "$D"
     if [ "$LRC" -ne 0 ]; then
       BAD="${BAD}${BAD:+${NL}}the objects ${TO:0:12} brings in could not all be listed: $(printf '%s' "$LERR" | tail -2 | tr '\n' ' ' | LC_ALL=C tr -d '\000-\037\177' | cut -c1-200)"
-    elif [ "$PRC" -ne 0 ] && [ -z "$BAD" ]; then
+    fi
+    if [ "$DRC" -ne 0 ]; then
+      BAD="${BAD}${BAD:+${NL}}the paths ${TO:0:12} changes could not all be listed: $(printf '%s' "$DERR" | tail -2 | tr '\n' ' ' | LC_ALL=C tr -d '\000-\037\177' | cut -c1-200)"
+    fi
+    if [ "$PRC" -ne 0 ] && [ -z "$BAD" ]; then
       BAD="the objects ${TO:0:12} brings in could not be read back (rc ${PRC})"
     fi
   fi
@@ -3352,10 +3391,11 @@ HANDOVER_EOF
 # receipt, so a merge with no pin is refused. It squash-merges the lead's collect snapshot
 # (KTD3/KTD19 — recorded by lease_collect; "commit nothing; the lead
 # collects") into the MAIN tree only after the integrity check, the
-# integration-branch check, the snapshot checks (_lease_verify_snapshot:
-# branch = base + that one commit, worktree unchanged since collect, no ops/
-# path), the object re-hash (_lease_verify_objects: every object the snapshot
-# brings in hashes to its id, else the lease escalates, rc 44) and the
+# integration-branch check, the object re-hash (_lease_verify_objects: every
+# object the snapshot brings in, and the one at every path it changes, hashes
+# to its id, else the lease escalates, rc 44), the snapshot checks
+# (_lease_verify_snapshot: branch = base + that one commit, worktree unchanged
+# since collect, no ops/ path) and the
 # approval gate pass (_lease_merge_gate, U10: a protected diff
 # or a stale lead-class pin needs a merge approval for this snapshot, rc 42),
 # records reviewer, its class, the approval and merge_commit, voids a
@@ -3449,15 +3489,18 @@ lease_merge() {
     _lease_snapshot "$TASK_ID" || return 1
     SNAP=$(_ledger_get "$TASK_ID" snapshot_sha)
   fi
-  _lease_verify_snapshot "$TASK_ID" || return 1
-  # The objects the snapshot brings onto the integration branch, re-hashed
-  # before the protected scan and the squash read them (KTD18): a mismatch
-  # escalates the lease, as the integrity check does.
+  # The objects the snapshot brings onto the integration branch, and the one
+  # at each path it changes, re-hashed before the snapshot checks, the
+  # protected scan and the squash read them (KTD18): a mismatch escalates the
+  # lease, as the integrity check does. Ahead of the snapshot checks, so any
+  # swapped object escalates: their read-tree hashes the root tree itself and
+  # would refuse a swapped one as an unreadable worktree (rc 1).
   if ! _lease_verify_objects lease_merge "$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)" "$SNAP"; then
     _ledger_update "$TASK_ID" state=escalated integrity_prev_state="$STATE" reason="integrity (lease_merge): ${_LVO_WHY}" >/dev/null || true
     echo "  escalated: ${TASK_ID}. Nothing was merged: git reads an object by its id without hashing it again, so the squash would have taken content no review saw, and a worker without an OS sandbox can write the lead's .git. Inspect it (git fsck lists every damaged object). The worktree ${WT} still holds the collected files: remove each damaged loose object (.git/objects/<first 2 hex>/<rest>) and write a blob again from there (git -C <that worktree> hash-object -w <path>), then lease_rebaseline ${TASK_ID} puts the lease back in review and lease_merge checks again; otherwise reclaim the lease." >&2
     return "$_RC_LEASE_INTEGRITY"
   fi
+  _lease_verify_snapshot "$TASK_ID" || return 1
   # Who stands behind this merge (U10): the protected check over the lease's
   # full diff, base to the verified snapshot, at every merge, and the merge
   # approval it then needs; a stale lead-class pin needs the user's.
