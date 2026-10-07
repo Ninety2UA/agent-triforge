@@ -28,6 +28,10 @@ fi
 #   call from <repo>/src sets up <repo>; the caller's working directory is
 #   left as it was. The plugin is the loader's resolved root
 #   (${_TRIFORGE_PLUGIN_ROOT}). Steps:
+#     0. A roster 3.x left in a subdirectory: a WARNING naming it, on every
+#        run that starts at or below it (_tb_subroster_walk) and on the run
+#        that creates the ops/ skeleton (_tb_subroster_scan). The file is
+#        never moved or edited, and the warning leaves the rc alone.
 #     1. ops/ skeleton (_tb_ops) — only while ops/ does not exist.
 #     2. .agents/skills/ (_tb_skills) — the portable skills, through
 #        scripts/lib/skills-sync.py and its content-digest stamp (KTD12).
@@ -65,7 +69,7 @@ fi
 # that matches nothing), no unquoted word splitting, printf for any text that
 # is not this file's own.
 triforge_bootstrap() {
-  local _TB_PREFIX="triforge_bootstrap: " _TB_DEGRADED=0 _TB_ROOT="" _TB_TIMEOUT="" _TB_ANCHOR="" _TB_CURSOR=0 _TB_REFUSAL="" _TB_RC=0
+  local _TB_PREFIX="triforge_bootstrap: " _TB_DEGRADED=0 _TB_ROOT="" _TB_TIMEOUT="" _TB_ANCHOR="" _TB_START="" _TB_SUBROSTERS="" _TB_CURSOR=0 _TB_REFUSAL="" _TB_RC=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --prefix)
@@ -97,7 +101,9 @@ triforge_bootstrap() {
   # caller's shell stands, and in a subshell, so the caller's working
   # directory never changes. The Cursor resolver runs once, first, here in the
   # caller's shell, so a hit stays exported (TRIFORGE_CURSOR_BIN) for the
-  # caller, and _TB_CURSOR carries the answer into the subshell.
+  # caller, and _TB_CURSOR carries the answer into the subshell. The caller's
+  # directory (_TB_START) is where _tb_subroster_walk starts.
+  _TB_START=$(pwd -P 2>/dev/null) || _TB_START=""
   _TB_ANCHOR=$(_tb_anchor) || _TB_ANCHOR=""
   if [ -z "$_TB_ANCHOR" ] || [ ! -d "$_TB_ANCHOR" ]; then
     _tb_note "WARNING the project directory did not resolve, so nothing was bootstrapped (the next run retries)."
@@ -119,6 +125,7 @@ triforge_bootstrap() {
       _tb_note "WARNING could not enter the project directory ${_TB_ANCHOR}, so nothing was bootstrapped (the next run retries)."
       exit 80
     fi
+    _tb_subroster_walk
     _tb_ops
     _tb_skills
     _tb_agy_pack
@@ -487,6 +494,8 @@ _bootstrap_copy() {
 # existing, and ops/roster.toml's own copy refuses to write through it. The
 # directories are made by _tb_write (mkdir mode), relative to descriptors, so
 # an ops swapped for a symlink after the check gets nothing created through it.
+# Before it creates the skeleton, _tb_subroster_scan looks below for a roster
+# 3.x left in a subdirectory.
 _tb_ops() {
   local F OUT="" RC=0
   [ ! -d ops ] || return 0
@@ -494,6 +503,7 @@ _tb_ops() {
     _tb_write_refused "ops/" "ops"
     return 0
   fi
+  _tb_subroster_scan
   for F in ops/solutions ops/decisions ops/archive; do
     OUT=$(_tb_write mkdir . "$F" < /dev/null) || RC=$?
     if [ "$RC" -eq 3 ]; then
@@ -509,6 +519,98 @@ _tb_ops() {
   for F in MEMORY.md CHANGELOG.md AGENTS.md GOALS.md; do
     _bootstrap_copy "${_TB_ROOT}/templates/ops/${F}" "ops/${F}"
   done
+  return 0
+}
+
+# A roster 3.x left in a subdirectory (finding #7). 3.x set a project up in
+# the directory the session started in; 4.0 sets it up at the checkout top,
+# where the lease ledger and the [lead] table live, and reads only
+# <top>/ops/roster.toml. A <subdir>/ops/roster.toml from 3.x, with the lead,
+# roles and members chosen there, is then never read again, and a declined
+# CLI has no `enabled = false` on record, so enrollment can ask again. Such a
+# file is never moved, edited or deleted here: it gets a WARNING, repeated
+# until the user moves it, that leaves _TB_DEGRADED alone (a standing state,
+# like session start's 3.x CLAUDE.md warning). A roster counts only as a
+# regular file in a real ops/ directory: a symlinked one may be the top-level
+# roster under another name, and deleting through it would delete that.
+
+# _tb_subroster_note <file> — the WARNING for one subdirectory roster.
+_tb_subroster_note() {
+  _tb_note "WARNING $1 is not read: Triforge 4 reads only ${_TB_ANCHOR}/ops/roster.toml, at the top of this checkout, so the lead, roles and members in that 3.x subdirectory roster (each consent or decline included) do not apply. Move the subdirectory's ops/ files into ${_TB_ANCHOR}/ops/, merging the two rosters, then delete the subdirectory copy (README.md, \"Upgrading from 3.x\"); Triforge never moves or edits it."
+}
+
+# _tb_subroster_walk — every run: each <dir>/ops/roster.toml from the
+# directory the caller started in (_TB_START) up to the checkout top, the top
+# itself left out. The files named are kept in _TB_SUBROSTERS, one per line,
+# so the scan does not name them again.
+_tb_subroster_walk() {
+  local D=$_TB_START
+  while :; do
+    case "$D" in
+      "${_TB_ANCHOR}/"?*) ;;
+      *) return 0 ;;
+    esac
+    if [ -d "${D}/ops" ] && [ ! -L "${D}/ops" ] && [ -f "${D}/ops/roster.toml" ] && [ ! -L "${D}/ops/roster.toml" ]; then
+      _tb_subroster_note "${D}/ops/roster.toml"
+      _TB_SUBROSTERS="${_TB_SUBROSTERS}${D}/ops/roster.toml
+"
+    fi
+    D=${D%/*}
+  done
+}
+
+# _tb_subroster_scan — once, from _tb_ops before it creates the skeleton:
+# the subdirectory rosters below the checkout top that the walk did not name
+# (compared by device and inode). Bounded: the directory holding ops/ at
+# most four levels down, at most 20000 directory entries read, no symlink
+# followed, .git and node_modules skipped, and so is any directory with a
+# .git entry of its own (a nested checkout is its own project). One python3
+# under the 30 s bound, which prints each path with control bytes dropped; a
+# scan that fails or times out names nothing.
+_TB_SUBROSTER_SCAN_PY="${_PY_PRELUDE}"'
+import os, stat, sys
+top, named = sys.argv[1], set()
+for p in sys.argv[2].split("\n"):
+    try:
+        st = os.lstat(p)
+        named.add((st.st_dev, st.st_ino))
+    except OSError:
+        pass
+left, todo = 20000, [(top, 0)]
+while todo and left > 0:
+    path, depth = todo.pop(0)
+    dirs = []
+    try:
+        with os.scandir(path) as it:
+            for e in it:
+                left -= 1
+                if left < 0:
+                    break
+                if e.name not in (".git", "node_modules") and e.is_dir(follow_symlinks=False):
+                    dirs.append(e.path)
+    except OSError:
+        continue
+    for d in sorted(dirs):
+        if os.path.lexists(os.path.join(d, ".git")):
+            continue
+        f = os.path.join(d, "ops", "roster.toml")
+        try:
+            ops, st = os.lstat(os.path.join(d, "ops")), os.lstat(f)
+        except OSError:
+            ops = st = None
+        if ops is not None and stat.S_ISDIR(ops.st_mode) and stat.S_ISREG(st.st_mode) and (st.st_dev, st.st_ino) not in named:
+            sys.stdout.buffer.write(bytes(b for b in os.fsencode(f) if b > 31 and b != 127) + b"\n")
+        if depth < 3:
+            todo.append((d, depth + 1))
+'
+_tb_subroster_scan() {
+  local F=""
+  while IFS= read -r F; do
+    [ -n "$F" ] || continue
+    _tb_subroster_note "$F"
+  done <<TB_SCAN_EOF
+$(_tb_run 30 python3 -c "$_TB_SUBROSTER_SCAN_PY" "$_TB_ANCHOR" "$_TB_SUBROSTERS" 2>/dev/null || true)
+TB_SCAN_EOF
   return 0
 }
 

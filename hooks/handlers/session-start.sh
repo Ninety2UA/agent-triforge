@@ -56,9 +56,11 @@ trap _ss_on_exit EXIT
 # helpers put ops/), else the working directory. The hook runs there, as
 # triforge_bootstrap does, so a session
 # opened in a monorepo subdirectory reads and writes the one ops/, roster and
-# runtime state the helpers use. Only the instruction-file notices (R40)
-# look at the directory the session started in, because that is where Claude
-# Code reads CLAUDE.md and AGENTS.md from. Inline, not the helper's
+# runtime state the helpers use. Only the instruction-file notices (R40) and
+# triforge_bootstrap's warning about a 3.x roster left in a subdirectory look
+# at the directory the session started in: Claude Code reads CLAUDE.md and
+# AGENTS.md from there, and the warning walks up from it (the bootstrap is
+# called from there and anchors itself). Inline, not the helper's
 # _lead_roster_path: it must work when the helper does not load.
 SS_START_DIR=$(pwd -P 2>/dev/null || pwd)
 # The instruction-file library (R9, R40) from this hook's own tree, sourced on
@@ -234,10 +236,15 @@ _ss_run() {
 # are collected in SS_BOOT_LOG and printed with the migration notices; its
 # rc (0, or 80 when a step degraded) adds nothing the notices do not say.
 # Without the helper nothing is bootstrapped, and SS_HELPER_NOTICE says so.
+# It is called from the start directory, so its walk up from there finds a
+# 3.x roster left in a subdirectory; the log is opened here first, at the
+# anchor, which a relative TMPDIR is relative to.
 SS_BOOT_LOG=""
 if [ -n "$SS_HELPER" ] && [ -z "$SS_AT_HOME" ]; then
   SS_BOOT_LOG="${SS_HELPER_TMP}/bootstrap"
-  triforge_bootstrap --prefix "session-start: " 2> "$SS_BOOT_LOG" || true
+  { cd "$SS_START_DIR" 2>/dev/null || true
+    triforge_bootstrap --prefix "session-start: " || true
+    cd "$SS_ANCHOR" 2>/dev/null || true; } 2> "$SS_BOOT_LOG" || true
 fi
 
 # Optional-CLI detection (roster tier): presence + version for every optional

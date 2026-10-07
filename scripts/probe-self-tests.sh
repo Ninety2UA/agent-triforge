@@ -1621,6 +1621,27 @@ rm -rf "$_S8B" "$_S8"
 #            EXDEV -> the copy fallback moves the user's file, nothing
 #            default installed; EIO -> a WARNING, the old file kept, and no
 #            shipped default put at the new name
+#   subroster (fix round 1, finding #7) a roster 3.x left in a subdirectory
+#            of a larger checkout, <top>/sub/ops/roster.toml with a declined
+#            member, which 4.0 never reads, moves or edits: from <top>/sub
+#            with no ops/ at the top, one WARNING naming it and
+#            <top>/ops/roster.toml, the skeleton created; from <top> in a
+#            second copy, the skeleton-creation scan warns once (a roster
+#            four levels down named, five levels down or under node_modules
+#            not); again from <top>/sub (at-setup's block) and session start
+#            there: warned again; from <top>, the bootstrap and session
+#            start: silent (the skeleton exists); the subdirectory rosters
+#            byte-identical after each run, nothing written under sub/.
+#            Silent: a nested checkout's roster, a symlinked roster, a
+#            symlinked ops/, no subdirectory roster; rc 0 with the warning
+#            and without it; under zsh, at-setup's block from <top>/sub of a
+#            third copy warns once (walk and scan in zsh)
+#   agypack  (fix round 1) the agy pack step's other paths, through an agy
+#            stub that logs its argv: `plugin install` failing -> the
+#            install-failed notice, rc 80, no stamp; `agents` one name short,
+#            then complete after the retry -> one `plugin uninstall
+#            agent-triforge`, the success notice, rc 0; still short after it
+#            -> one uninstall, the notice naming documentation-writer, rc 0
 # Negative control: the setup block with its triforge_bootstrap line removed
 # leaves a fresh project without ops/, so the ops/ check above sees the call.
 _S21="${WORK}/self21"
@@ -2201,12 +2222,140 @@ target=$([ "$(cksum "$_S21/ol-out/roster.toml")" = "$_S21_SUMO" ] && echo intact
 hook=$(printf '%s\n' "$_S21_HOOK" | grep -c 'hook crashed\|^{' || true)
 enrollnote=$(printf '%s\n' "$_S21_HOOK" | grep -c '^WARNING: [a-z-]* was detected but not enrolled (rc 6): roster_write_member: REFUSED [^ ]*/proj-ol/ops is a symlink' || true)"
 _S21_FAIL="${_S21_FAIL}$(_self_expect opslink "$_S21_OL" '^member=6$' '^role=6$' '^lead=6$' '^target=intact:entries=roster\.toml $' '^hook=0$' '^enrollnote=[1-9]$')"
+# subroster (fix round 1, finding #7): a roster 3.x left in a subdirectory.
+# Every fixture is a checkout of its own; the bootstrap names physical paths,
+# so the expected ones start at _S21_P and are matched as fixed strings.
+_S21_P=$(cd "$_S21" && env pwd -P)
+_s21_srw() { # _s21_srw <label> <path> — the bootstrap WARNING lines in <label>.err naming <path>
+  { grep '^triforge_bootstrap: WARNING ' "$_S21/$1.err" 2>/dev/null || true; } | grep -cF -- "$2" || true
+}
+_s21_warns() { grep -c '^triforge_bootstrap: WARNING ' "$_S21/$1.err" 2>/dev/null || true; }   # every bootstrap WARNING line in <label>.err
+_S21_SRT='[roles.builder]\ncli = "codex"\n\n[members.opencode]\nenabled = true\nmodel = "openrouter/z-ai/glm-5.3"\n\n[members.kimi]\nenabled = false\n'
+for _s21_d in sr1 sr2 srn srl srx; do
+  mkdir -p "$_S21/proj-$_s21_d/sub"
+  _s21_git "$_S21/proj-$_s21_d" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-$_s21_d"
+done
+for _s21_d in sr1/sub sr2/sub sr2/a/b/c/d sr2/a/b/c/d/e sr2/node_modules/pkg srn/nested; do
+  mkdir -p "$_S21/proj-$_s21_d/ops"
+  printf '%b' "$_S21_SRT" > "$_S21/proj-$_s21_d/ops/roster.toml"
+done
+unset _s21_d
+_s21_git "$_S21/proj-srn/nested" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-srn-nested"
+mkdir -p "$_S21/proj-srl/sub/ops" "$_S21/proj-srl/sub2" "$_S21/srl-out"
+printf '%b' "$_S21_SRT" > "$_S21/srl-out/roster.toml"
+ln -s "$_S21/srl-out/roster.toml" "$_S21/proj-srl/sub/ops/roster.toml"
+ln -s "$_S21/srl-out" "$_S21/proj-srl/sub2/ops"
+_S21_SUMR=$(cksum "$_S21/proj-sr1/sub/ops/roster.toml" "$_S21/proj-sr2/sub/ops/roster.toml" "$_S21/srl-out/roster.toml")
+_S21_LSR=$(_s21_list "$_S21/proj-sr1/sub")
+_S21_SRK=""
+_s21_srk() { # _s21_srk <label> — after each run: the subdirectory rosters byte-identical, else the label is kept
+  if [ "$(cksum "$_S21/proj-sr1/sub/ops/roster.toml" "$_S21/proj-sr2/sub/ops/roster.toml" "$_S21/srl-out/roster.toml" 2>/dev/null || true)" != "$_S21_SUMR" ]; then
+    _S21_SRK="${_S21_SRK}changed-after-$1,"
+  fi
+}
+# (a) from <top>/sub, no ops/ at the top: one WARNING (the scan repeats none)
+_S21_RC=$(_s21_run sr-a /bin/bash "$_S21/proj-sr1/sub" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+_s21_srk a
+_S21_SR="a:$(tr '\n' ' ' < "$_S21/sr-a.out")sub=$(_s21_srw sr-a "$_S21_P/proj-sr1/sub/ops/roster.toml"):top=$(_s21_srw sr-a "$_S21_P/proj-sr1/ops/roster.toml"):readme=$(_s21_srw sr-a 'Upgrading from 3.x'):warnings=$(_s21_warns sr-a):skeleton=$([ -f "$_S21/proj-sr1/ops/roster.toml" ] && [ -f "$_S21/proj-sr1/ops/MEMORY.md" ] && echo yes || echo no)"
+# (b) a second copy from <top>: the scan before the skeleton names each once
+_S21_RC=$(_s21_run sr-b /bin/bash "$_S21/proj-sr2" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+_s21_srk b
+_S21_SR="$_S21_SR
+b:$(tr '\n' ' ' < "$_S21/sr-b.out")sub=$(_s21_srw sr-b "$_S21_P/proj-sr2/sub/ops/roster.toml"):depth4=$(_s21_srw sr-b "$_S21_P/proj-sr2/a/b/c/d/ops/roster.toml"):depth5=$(_s21_srw sr-b "$_S21_P/proj-sr2/a/b/c/d/e/ops/roster.toml"):node_modules=$(_s21_srw sr-b "$_S21_P/proj-sr2/node_modules/"):warnings=$(_s21_warns sr-b):skeleton=$([ -f "$_S21/proj-sr2/ops/roster.toml" ] && echo yes || echo no)"
+# (c) the first copy again, its skeleton there now: at-setup's block from
+# <top>/sub warns again, the bootstrap from <top> does not; session start from
+# <top>/sub names it in its one session-start: line, from <top> prints none
+_S21_RC=$(_s21_run sr-c /bin/bash "$_S21/proj-sr1/sub" "$REPO_ROOT/skills/at-setup" "$_S21/setup.sh")
+_s21_srk c-sub
+_S21_SR="$_S21_SR
+c-sub:rc=${_S21_RC}:sub=$(_s21_srw sr-c "$_S21_P/proj-sr1/sub/ops/roster.toml"):warnings=$(_s21_warns sr-c)"
+_S21_RC=$(_s21_run sr-ctop /bin/bash "$_S21/proj-sr1" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+_s21_srk c-top
+_S21_SR="$_S21_SR
+c-top:$(tr '\n' ' ' < "$_S21/sr-ctop.out")warnings=$(_s21_warns sr-ctop)"
+_S21_HOOK_RC=0
+_S21_HOOK=$( cd "$_S21/proj-sr1/sub" && env -u TRIFORGE_LEASE_WORKER HOME="$_S21/home" TMPDIR="$_S21/tmp" PATH="$_S21/bin:$PATH" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GIT_CONFIG_NOSYSTEM=1 \
+               /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" < /dev/null 2>&1 ) || _S21_HOOK_RC=$?
+_s21_srk hook-sub
+_S21_SR="$_S21_SR
+hook-sub:rc=${_S21_HOOK_RC}:crash=$(printf '%s\n' "$_S21_HOOK" | grep -c 'hook crashed' || true):lines=$(printf '%s\n' "$_S21_HOOK" | grep -c '^session-start:' || true):named=$(printf '%s\n' "$_S21_HOOK" | grep '^session-start: WARNING ' | grep -cF -- "$_S21_P/proj-sr1/sub/ops/roster.toml" || true)"
+_s21_hook_quiet sr-hook-top "$_S21/proj-sr1"
+_s21_srk hook-top
+# (e) silent: a nested checkout's roster (from <top>), a symlinked roster and a
+# symlinked ops/ (from each subdirectory), no subdirectory roster at all
+_S21_RC=$(_s21_run sr-n /bin/bash "$_S21/proj-srn" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+_S21_RC=$(_s21_run sr-l /bin/bash "$_S21/proj-srl/sub" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+_s21_srk link
+_S21_RC=$(_s21_run sr-l2 /bin/bash "$_S21/proj-srl/sub2" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+_s21_srk linked-ops
+_S21_RC=$(_s21_run sr-x /bin/bash "$_S21/proj-srx/sub" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+_S21_SR="$_S21_SR
+e:nested=$(_s21_warns sr-n):links=$(_s21_warns sr-l),$(_s21_warns sr-l2):none=$(_s21_warns sr-x):skeletons=$([ -f "$_S21/proj-srn/ops/roster.toml" ] && [ -f "$_S21/proj-srl/ops/roster.toml" ] && [ -f "$_S21/proj-srx/ops/roster.toml" ] && echo yes || echo no)
+f:$(tr '\n' ' ' < "$_S21/sr-a.out")$(tr '\n' ' ' < "$_S21/sr-x.out")
+d:rosters=${_S21_SRK:-intact}:sub=$(if [ "$(_s21_list "$_S21/proj-sr1/sub")" = "$_S21_LSR" ]; then echo untouched; else _s21_diff "$(_s21_list "$_S21/proj-sr1/sub")" "$_S21_LSR"; fi)"
+_S21_FAIL="${_S21_FAIL}$(_self_expect subroster "$_S21_SR" '^a:rc=0 sub=1:top=1:readme=1:warnings=1:skeleton=yes$' \
+  '^b:rc=0 sub=1:depth4=1:depth5=0:node_modules=0:warnings=2:skeleton=yes$' '^c-sub:rc=0:sub=1:warnings=1$' '^c-top:rc=0 warnings=0$' \
+  '^hook-sub:rc=0:crash=0:lines=1:named=1$' '^e:nested=0:links=0,0:none=0:skeletons=yes$' '^f:rc=0 rc=0 $' '^d:rosters=intact:sub=untouched$')"
+# under zsh: at-setup's block from <top>/sub of a third fresh copy, the walk
+# and the scan both in zsh: one WARNING, the skeleton, the roster unchanged
+if [ -n "$_S21_ZSH" ]; then
+  mkdir -p "$_S21/proj-sr3/sub/ops"
+  _s21_git "$_S21/proj-sr3" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-sr3"
+  printf '%b' "$_S21_SRT" > "$_S21/proj-sr3/sub/ops/roster.toml"
+  _S21_SUMZ=$(cksum < "$_S21/proj-sr3/sub/ops/roster.toml")
+  _S21_RC=$(_s21_run sr-z "$_S21_ZSH" "$_S21/proj-sr3/sub" "$REPO_ROOT/skills/at-setup" "$_S21/setup.sh")
+  _S21_FAIL="${_S21_FAIL}$(_self_expect subroster-zsh "rc=${_S21_RC}:sub=$(_s21_srw sr-z "$_S21_P/proj-sr3/sub/ops/roster.toml"):warnings=$(_s21_warns sr-z):skeleton=$([ -f "$_S21/proj-sr3/ops/roster.toml" ] && echo yes || echo no):roster=$([ "$(cksum < "$_S21/proj-sr3/sub/ops/roster.toml")" = "$_S21_SUMZ" ] && echo intact || echo changed)" \
+    '^rc=0:sub=1:warnings=1:skeleton=yes:roster=intact$')"
+fi
+# agypack (fix round 1): the agy pack step's retry and failure paths. The
+# default agy stubs answer the happy path only; this one logs its argv to
+# S21_AGY_LOG and answers by S21_AGY. The step needs a timeout tool (it is
+# skipped without one, fail-closed), so the cases need one too.
+if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
+  mkdir -p "$_S21/bin-agy"
+  cat > "$_S21/bin-agy/agy" <<'EOF'
+#!/bin/sh
+# probe stub (SELF-21 agypack): logs its argv, then answers by S21_AGY:
+# installfail (plugin install exits 1), retry (agents: one name short on the
+# first call, all four after), short (agents: one name short every time)
+printf '%s\n' "$*" >> "$S21_AGY_LOG"
+case "${1:-}" in
+  plugin) case "${2:-}" in list) echo "agent-triforge" ;; install) [ "$S21_AGY" != installfail ] || exit 1 ;; esac ;;
+  agents)
+    if [ "$S21_AGY" = short ] || { [ "$S21_AGY" = retry ] && [ "$(grep -c '^agents$' "$S21_AGY_LOG")" -le 1 ]; }; then
+      printf '%s\n' codebase-analyst architecture-reviewer targeted-researcher
+    else
+      printf '%s\n' codebase-analyst architecture-reviewer targeted-researcher documentation-writer
+    fi ;;
+esac
+exit 0
+EOF
+  chmod +x "$_S21/bin-agy/agy"
+  _S21_AG=""
+  for _s21_m in installfail retry short; do
+    mkdir -p "$_S21/proj-ag-$_s21_m"
+    _s21_git "$_S21/proj-ag-$_s21_m" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-ag-$_s21_m"
+    : > "$_S21/ag-$_s21_m.log"
+    _S21_RC=$(_s21_run "ag-$_s21_m" /bin/bash "$_S21/proj-ag-$_s21_m" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh" PATH="$_S21/bin-agy:$_S21/bin:$PATH" S21_AGY="$_s21_m" S21_AGY_LOG="$_S21/ag-$_s21_m.log")
+    _S21_AG="$_S21_AG
+${_s21_m}:$(tr '\n' ' ' < "$_S21/ag-$_s21_m.out")install=$(grep -c '^plugin install ' "$_S21/ag-$_s21_m.log" || true):uninstall=$(grep -cx 'plugin uninstall agent-triforge' "$_S21/ag-$_s21_m.log" || true):stamp=$([ -f "$_S21/proj-ag-$_s21_m/.claude/agy-pack-version.local.md" ] && echo yes || echo no)
+${_s21_m}-notices:$({ grep '^triforge_bootstrap: ' "$_S21/ag-$_s21_m.err" || true; } | tr '\n' '|')"
+  done
+  unset _s21_m
+  _S21_FAIL="${_S21_FAIL}$(_self_expect agypack "$_S21_AG" '^installfail:rc=80 install=2:uninstall=1:stamp=no$' \
+    '^installfail-notices:(.*\|)?triforge_bootstrap: agy plugin install failed \(rc=1\) ' \
+    '^retry:rc=0 install=2:uninstall=1:stamp=yes$' '^retry-notices:(.*\|)?triforge_bootstrap: Antigravity agent pack installed none -> [0-9][0-9.]* .*agy agents lists all four Triforge agents' \
+    '^short:rc=0 install=2:uninstall=1:stamp=yes$' '^short-notices:(.*\|)?triforge_bootstrap: Antigravity agent pack installed none -> .*but agy agents does not list: documentation-writer ')"
+  _S21_AG_NOTE="the agy pack step: plugin install failing -> the install-failed notice, rc 80, no stamp; agents one name short, then complete after the retry -> one plugin uninstall agent-triforge, the success notice, rc 0; still short after it -> one uninstall, the notice naming documentation-writer, rc 0"
+else
+  _S21_AG_NOTE="no timeout tool on PATH: the agy pack step does not run, so its cases were skipped"
+fi
 # negative control: without the bootstrap line no ops/ appears
 _S21_RC=$(_s21_run neg /bin/bash "$_S21/proj-neg" "$REPO_ROOT/skills/at-setup" "$_S21/setup-neg.sh")
 [ ! -e "$_S21/proj-neg/ops" ] || _S21_FAIL="$_S21_FAIL negative-control(ops/-without-the-bootstrap-line)"
 _S21_CAP="the project bootstrap runs from the at- skills without any hook: at-setup's block provisions ops/, the skills copy, the per-CLI files and an untracked plugin-root pointer; at-build's preflight then loads the helpers from the pointer; idempotent under bash and zsh; refused under the worker marker and in a lease root (KTD11, R37)"
 if [ -z "$_S21_FAIL" ]; then
-  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; round 3: links at the pid-free temp names (.tmp, .new, ~) beside every written file untouched, and no predictable temp name or mv -f in the three writers, both creating temps O_EXCL|O_NOFOLLOW under a random name (R6); a symlinked parent one and two levels down refused, an append to a hard-linked file rc 5 with the shared inode unchanged, a replace over one a new inode (R3, R4); a home directory as the project, plain and as a repository: bootstrap rc 80 and session start rc 0, one WARNING each, the directory byte-identical (R1); skills-sync.py with links at its stamp's old temp names: untouched, the stamp a regular file (R2); a hard-linked .agents/.gitignore: rc 80, the shared inode unchanged (R3); a lease root named with a newline and a {-line: one REFUSED line, no hook stdout line starting with { (R5); a session started in <repo>/src names the project root once, one started at the root does not (R7); round 4: the home directory by a ${_S21_HCV:-case}-variant spelling, plain and a repository: bootstrap rc 80, session start rc 0, one WARNING each naming git init, nothing written (B1); skills-sync sync and add with the parent swapped for an outside link after the checks: nothing outside (B2); .codex/agents swapped for a HOME link before the move: the user-tier file untouched (B3); ops/ linked outside: enrollment and the three roster writers write nothing there, rc 6 (B7); round 5: the hook names each refused enrollment in a WARNING (G6); the .codex/agents move across filesystems (EXDEV) copies the user's file over, and a move that fails leaves it with no shipped default at the new name (G5); negative control: the block without its triforge_bootstrap line leaves no ops/" "static"
+  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; round 3: links at the pid-free temp names (.tmp, .new, ~) beside every written file untouched, and no predictable temp name or mv -f in the three writers, both creating temps O_EXCL|O_NOFOLLOW under a random name (R6); a symlinked parent one and two levels down refused, an append to a hard-linked file rc 5 with the shared inode unchanged, a replace over one a new inode (R3, R4); a home directory as the project, plain and as a repository: bootstrap rc 80 and session start rc 0, one WARNING each, the directory byte-identical (R1); skills-sync.py with links at its stamp's old temp names: untouched, the stamp a regular file (R2); a hard-linked .agents/.gitignore: rc 80, the shared inode unchanged (R3); a lease root named with a newline and a {-line: one REFUSED line, no hook stdout line starting with { (R5); a session started in <repo>/src names the project root once, one started at the root does not (R7); round 4: the home directory by a ${_S21_HCV:-case}-variant spelling, plain and a repository: bootstrap rc 80, session start rc 0, one WARNING each naming git init, nothing written (B1); skills-sync sync and add with the parent swapped for an outside link after the checks: nothing outside (B2); .codex/agents swapped for a HOME link before the move: the user-tier file untouched (B3); ops/ linked outside: enrollment and the three roster writers write nothing there, rc 6 (B7); round 5: the hook names each refused enrollment in a WARNING (G6); the .codex/agents move across filesystems (EXDEV) copies the user's file over, and a move that fails leaves it with no shipped default at the new name (G5); negative control: the block without its triforge_bootstrap line leaves no ops/; fix round 1 (finding #7): a 3.x roster at <top>/sub/ops/roster.toml, no ops/ at the top: the bootstrap from sub rc 0 with one WARNING naming it, <top>/ops/roster.toml and the README section, the skeleton created; a second copy from <top>: the skeleton-creation scan warns once (four levels down named, five levels down and node_modules not); again from sub, at-setup's block and session start: warned again; from <top>, the bootstrap and session start: silent; the subdirectory rosters byte-identical after each run, nothing under sub/; silent for a nested checkout's roster, a symlinked roster or ops/ and no roster; rc 0 with and without the warning; under zsh too (unless skipped above): the block from sub warns once; ${_S21_AG_NOTE}" "static"
 else
   row "SELF-21" "claude" "$_S21_CAP" "FAIL" "mismatch:$(printf '%s' "$_S21_FAIL" | cut -c1-900)" "static"
 fi
