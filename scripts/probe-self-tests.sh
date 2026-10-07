@@ -4192,8 +4192,9 @@ rm -rf "$_S20"
 # reads the run mode and its log path from $TMPDIR/dvn-run and dvn-log. Core
 # stubs (_SELF_STUBS) put the trio on PATH.
 #   read-config devin-agents/config-read.json allows nothing (no Exec rule:
-#              git diff, log and show take --output=<file>) and denies the
-#              exec tool and Write(**)
+#              git diff, log and show take --output=<file>) and denies every
+#              tool that writes, fetches or calls MCP (a skill's or the
+#              project's allow widens any tool the copy leaves undenied)
 #   readiness  `Not logged in.` with rc 0 -> roster_member_auth devin rc 1
 #              (auth-failed, naming devin auth login); `Logged in (via Devin).`
 #              -> ok
@@ -4368,9 +4369,10 @@ O=$(python3 -c '
 import json, sys
 p = json.load(open(sys.argv[1])).get("permissions", {})
 allow, deny = p.get("allow", []), p.get("deny", [])
-print("read-config:allow=" + str(len(allow)) + ":exec-allow=" + str(sum(1 for a in allow if str(a).lower().startswith("exec"))) + ":deny-exec=" + str("exec" in deny).lower() + ":deny-write=" + str("Write(**)" in deny).lower())
+need = ["exec", "edit", "write", "Write(**)", "notebook_edit", "write_to_process", "webfetch", "web_search", "Fetch(https://*)", "Fetch(http://*)", "browser_preview", "mcp_call_tool", "mcp__*"]
+print("read-config:allow=" + str(len(allow)) + ":exec-allow=" + str(sum(1 for a in allow if str(a).lower().startswith("exec"))) + ":deny-exec=" + str("exec" in deny).lower() + ":deny-write=" + str("Write(**)" in deny).lower() + ":deny-missing=" + ",".join(n for n in need if n not in deny))
 ' "${REPO_ROOT}/devin-agents/config-read.json" 2>&1)
-_S24_FAIL="${_S24_FAIL}$(_self_expect read-config "$O" '^read-config:allow=0:exec-allow=0:deny-exec=true:deny-write=true$')"
+_S24_FAIL="${_S24_FAIL}$(_self_expect read-config "$O" '^read-config:allow=0:exec-allow=0:deny-exec=true:deny-write=true:deny-missing=$')"
 
 # member writes keep the roster loading: a decline of an opted-in builder
 # leaves every role resolvable; an opt-in drop the builder chain needs is refused

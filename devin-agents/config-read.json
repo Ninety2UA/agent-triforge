@@ -19,7 +19,7 @@
   "show_hints": false,
   "permissions": {
     "allow": [],
-    "deny": ["exec", "edit", "Write(**)", "mcp__*", "Exec(git push)", "Exec(git pull)", "Exec(git fetch)", "Exec(git commit)"],
+    "deny": ["exec", "edit", "write", "Write(**)", "notebook_edit", "write_to_process", "webfetch", "web_search", "Fetch(https://*)", "Fetch(http://*)", "browser_preview", "mcp_call_tool", "mcp__*", "Exec(git push)", "Exec(git pull)", "Exec(git fetch)", "Exec(git commit)"],
     "ask": []
   }
 }
