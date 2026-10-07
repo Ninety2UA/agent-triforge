@@ -11,5 +11,6 @@ Wait for all reviewers to complete first.
    - Log P3 (suggestion) for later.
 5. Record the cycle's dispositions: append `## Review dispositions — Cycle N` to `ops/TASKS.md` with one row per finding (`finding → fixed | dismissed-with-reason | deferred`); rows are append-only across cycles, and `deferred` rows are exported by the wrap-up skill.
 6. Convergence check: P1 = 0 AND P2 = 0 → proceed (standard mode).
-7. If not converged, re-trigger the review on changed files only (max 3 cycles).
-8. After 3 cycles without convergence, escalate to the user.
+7. Remove the cycle's review package (`rm -rf "$REVIEW_PKG"`): every sub-agent that read it has finished.
+8. If not converged, re-trigger the review on changed files only (max 3 cycles), with a new package.
+9. After 3 cycles without convergence, escalate to the user.

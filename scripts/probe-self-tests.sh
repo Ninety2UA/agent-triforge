@@ -6,7 +6,8 @@
 # TRIFORGE_TEST_BUILDER lifecycle, session-start idempotence plus its upgrade
 # notices (R40), the skills refresh's destructive paths, the [lead] table,
 # ledger approvals, the worker marker, lead-side git hardening, detached
-# leases with lease_wait, and the claude -p lane).
+# leases with lease_wait, the claude -p lane, and at-review's blocks run
+# verbatim).
 #
 # NOT a standalone script: sourced by scripts/probe-capabilities.sh after the
 # per-CLI sections, inside the same shell, so it uses the harness's helpers
@@ -5178,3 +5179,338 @@ else
   row "SELF-25" "grok" "$_S25_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S25_FAIL"):$(printf '%s' "$_S25_FAIL" | cut -c1-700)" "static"
 fi
 rm -rf "$_S25"
+
+# SELF-26 (R23, R24, KTD18): at-review's blocks, run verbatim against stub
+# CLIs. Each block is extracted from its skill file at run time (SKILL.md's
+# preflight; references/review-package.md, learnings-gate.md, dispatch.md and
+# optional-lanes.md), so a later edit to the skill is what runs here, and each
+# runs under /bin/bash from a fixture repo, as the lead runs it. The stubs
+# (codex, grok, and one script for opencode, kimi, cursor-agent and devin)
+# answer from per-CLI files and record every lane run: its argv, its longest
+# argument, and how many lanes had started when a barrier released it (the
+# barrier holds a run until N lanes have started, 10 s at most, so a serial
+# dispatch shows fewer than N). Every expected value below is a literal.
+#   integrity     an open lease and a fresh lease_rebaseline, then a clean
+#                 filter and an fsmonitor planted in .git/config (the filter
+#                 applied to every file by .git/info/attributes, a tracked file
+#                 changed), with the skill laid out as a Claude Code lead runs
+#                 it and as a Codex lead does (a project-tier copy, the locator
+#                 resolving through the plugin-root pointer): the preflight
+#                 passes; the package block stops with rc 44 naming .git/config
+#                 and leaves no package; the learnings gate, core and optional
+#                 blocks then refuse; no lane ran, and neither the filter nor
+#                 the fsmonitor ran
+#   never-leased  the package block in a project never leased: rc 0, no
+#                 ledger, and the lease root's lead dir holds only the trusted
+#                 git config capture
+#   main          the analyst on cursor, the reviewer on codex, five optional
+#                 members. Package: the untracked file listed by name, the
+#                 header saying untracked files are not diffed. Learnings gate:
+#                 a solutions entry matched through that untracked path. Core:
+#                 both lanes released together; REVIEW_ANTIGRAVITY from cursor;
+#                 REVIEW_CODEX with the codex prose and verdict although its
+#                 transcript quotes Status: BLOCKED (the last-message file is
+#                 the answer); cursor's prompt holds the package. Optional: all
+#                 five released together, each prompt holding the committed and
+#                 uncommitted changes, the [R] row, the untracked name, the
+#                 inventory and the diff markers; REVIEW files for cursor,
+#                 devin and kimi only; opencode (Status: DONE, exit 1) and grok
+#                 (Status: DONE, then max_tokens) reported FAILED
+#   codex-noschema  codex with the output schema switched off (no last-message
+#                 file): REVIEW_CODEX promoted on the exit code, the quoted
+#                 Status: BLOCKED ignored
+#   core-blocked  the analyst on opencode (DONE), the reviewer on devin
+#                 (BLOCKED): REVIEW_ANTIGRAVITY only, the BLOCKED named;
+#                 devin's prompt holds the package
+#   big           40 added files, a diff over the cap: the inventory names all
+#                 40, the inline diff is cut and names full.diff, which holds
+#                 all 40; the package stays within 116000 bytes and the kimi
+#                 lane's longest argument under 120000
+#   base          REVIEW_BASE naming no commit, and a base blob git cannot read
+#                 (git diff rc 128): the package block stops (rc 1) naming the
+#                 base or the git rc and leaves no package, the optional block
+#                 refuses, no lane ran; REVIEW_BASE=main is named in the range
+_S26="${WORK}/self26"
+mkdir -p "$_S26/bin" "$_S26/log" "$_S26/cfg" "$_S26/blocks" "$_S26/started" "$_S26/home/.grok"
+printf '{"key":"s26-stub"}\n' > "$_S26/home/.grok/auth.json"
+_S26_TAB=$(printf '\t')
+_S26_SH=/bin/bash
+if [ ! -x "$_S26_SH" ]; then _S26_SH=$(command -v bash); fi
+for _T in pre:SKILL.md pkg:references/review-package.md learn:references/learnings-gate.md core:references/dispatch.md opt:references/optional-lanes.md; do
+  awk '/^```bash$/{f=1; next} /^```$/{f=0} f' "${REPO_ROOT}/skills/at-review/${_T#*:}" > "$_S26/blocks/${_T%%:*}.sh" 2>/dev/null || true
+done
+cat > "$_S26/bin/s26-record" <<'EOF'
+# The stub recorder (SELF-26), sourced with D and N set: the argv, the
+# longest argument, one line in log/runs, and the barrier
+K=$(ls "$D/log" | grep -c "^$N\.[0-9]*\.argv$")
+printf '%s\n' "$@" > "$D/log/$N.$K.argv"
+L=0
+for A in "$@"; do
+  C=$(printf '%s' "$A" | wc -c | tr -d ' ')
+  if [ "$C" -gt "$L" ]; then L=$C; fi
+done
+echo "$L" > "$D/log/$N.$K.longest"
+echo "$N" >> "$D/log/runs"
+if [ -f "$D/cfg/barrier" ]; then
+  : > "$D/started/$N"
+  I=0
+  while [ "$(ls "$D/started" | wc -l | tr -d ' ')" -lt "$(cat "$D/cfg/barrier")" ] && [ "$I" -lt 100 ]; do sleep 0.1; I=$((I + 1)); done
+  ls "$D/started" | wc -l | tr -d ' ' > "$D/log/$N.$K.seen"
+fi
+EOF
+{ printf '#!/bin/sh\n# SELF-26 lane stub: opencode, kimi, cursor-agent or devin, by its name\nD=%s\n' "'$_S26'"; cat <<'EOF'
+N=$(basename "$0")
+case "$1" in
+  --version|-V)
+    case "$N" in opencode) echo 1.4.0 ;; kimi) echo "kimi 1.0.0" ;; cursor-agent) echo 2026.10.01-abc1234 ;; *) echo "devin 3000.11.3" ;; esac
+    exit 0 ;;
+  status) echo "Logged in as stub"; exit 0 ;;
+  auth) echo "Logged in (via Devin)."; echo openrouter; exit 0 ;;
+esac
+. "$D/bin/s26-record"
+cat "$D/cfg/$N.ans" 2>/dev/null
+exit "$(cat "$D/cfg/$N.rc" 2>/dev/null || echo 0)"
+EOF
+} > "$_S26/bin/opencode"
+for _T in kimi cursor-agent devin; do cp "$_S26/bin/opencode" "$_S26/bin/$_T"; done
+# codex: the transcript (stderr) quotes an earlier report's Status: BLOCKED;
+# the answer (stdout) has no Status line; the -o file gets a JSON verdict
+{ printf '#!/bin/sh\n# SELF-26 codex stub\nD=%s\nN=codex\n' "'$_S26'"; cat <<'EOF'
+case "$1" in
+  --version) echo "codex-cli 0.0.0-s26"; exit 0 ;;
+  features) cat "$D/cfg/codex.features" 2>/dev/null; exit 0 ;;
+esac
+. "$D/bin/s26-record"
+O=""; P=""
+for A in "$@"; do
+  if [ "$P" = -o ]; then O=$A; fi
+  P=$A
+done
+echo "exec: sed -n 1,5p ops/old-review.md" >&2
+echo "Status: BLOCKED" >&2
+echo "(an earlier report, quoted by a tool call)" >&2
+printf 'Reviewed the package.\n[P3] calc.py:3 S26-CODEX-FINDING\n'
+if [ -n "$O" ]; then printf '{"findings":[],"summary":"S26-VERDICT","review_scope":"package"}\n' > "$O"; fi
+exit 0
+EOF
+} > "$_S26/bin/codex"
+{ printf '#!/bin/sh\n# SELF-26 grok stub\nD=%s\nN=grok\n' "'$_S26'"; cat <<'EOF'
+case "$1" in --version|-V) echo "grok 1.0.34"; exit 0 ;; esac
+for A in "$@"; do
+  if [ "$A" = inspect ]; then
+    echo '{"configSources":{"layers":[{"role":"env_overlay","note":"shell_environment_policy toolset"}]},"plugins":[],"mcpServers":[],"hooks":[],"lspServers":[]}'
+    exit 0
+  fi
+done
+. "$D/bin/s26-record"
+cat "$D/cfg/grok.ans" 2>/dev/null
+exit 0
+EOF
+} > "$_S26/bin/grok"
+for _T in ig ic; do printf '#!/bin/sh\ntouch %s/%s-fsmon\n' "$_S26" "$_T" > "$_S26/fsmon-$_T.sh"; done
+chmod +x "$_S26/bin/opencode" "$_S26/bin/kimi" "$_S26/bin/cursor-agent" "$_S26/bin/devin" "$_S26/bin/codex" "$_S26/bin/grok" "$_S26/fsmon-ig.sh" "$_S26/fsmon-ic.sh"
+_S26_PATH="${_S26}/bin:${_SELF_STUBS}:${PATH}"
+_S26_DONE='Reviewed.\nStatus: DONE\nFiles changed: none\nTests: none\nConcerns: None\nDiscoveries for later tasks: None\n'
+_S26_KIMI='[members.kimi]\nenabled = true\nmodel = "kimi-code/k3"\n'
+_S26_MEMBERS='[members.opencode]\nenabled = true\nmodel = "openrouter/z-ai/glm-5.3"\n[members.cursor]\nenabled = true\nmodel = "cursor-grok-4.6-xhigh"\n[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\nconsent = "user 2026-10-07T00:00:00Z via=tty"\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n'
+_S26_ANALYST_CURSOR='[roles.analyst]\ncli = "cursor"\nfallbacks = ["antigravity"]\n\n'
+printf '%b' "$_S26_DONE" > "$_S26/cfg/opencode.ans"; echo 1 > "$_S26/cfg/opencode.rc"
+printf '%b' "$_S26_DONE" > "$_S26/cfg/devin.ans"; echo 0 > "$_S26/cfg/devin.rc"
+printf '%s\n' '{"role":"assistant","content":"Reviewed.\nStatus: DONE\nFiles changed: none"}' > "$_S26/cfg/kimi.ans"
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Reviewed.\nStatus: DONE\nFiles changed: none"}' > "$_S26/cfg/cursor-agent.ans"
+printf '%s\n' '{"type":"text","data":"Reviewed half the diff.\nStatus: DONE\nFiles changed: none\n"}' '{"type":"end","stopReason":"max_tokens","num_turns":1}' > "$_S26/cfg/grok.ans"
+: > "$_S26/cfg/codex.features"
+
+# _s26_fixture <dir> <roster, %b escapes> — main holds calc.py, an
+# ops/TASKS.md with no [R] row and ops/solutions/s26-note.md (which names only
+# the untracked file below); sprint/s26 adds one commit to calc.py.
+# _s26_dirty <dir> adds an uncommitted edit, an uncommitted [R] row and an
+# untracked file.
+_s26_fixture() {
+  ( mkdir -p "$1/ops/solutions" && cd "$1" && export HOME="$_S26/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
+      && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
+      && printf '%b' "$2" > ops/roster.toml && printf 'def add(a, b):\n    return a + b\n' > calc.py \
+      && printf '# Tasks\n' > ops/TASKS.md && printf 'Gotcha: s26-untracked.py must stay pure.\n' > ops/solutions/s26-note.md \
+      && git add -A && git commit -qm init && git checkout -q -b sprint/s26 \
+      && printf '# S26-COMMITTED\n' >> calc.py && git commit -qam sprint ) >/dev/null 2>&1 || true
+}
+_s26_dirty() {
+  ( cd "$1" && printf '# S26-UNCOMMITTED\n' >> calc.py && printf -- '- [R] T1 S26-ROW calc\n' >> ops/TASKS.md \
+      && printf 'x = 1\n' > s26-untracked.py ) >/dev/null 2>&1 || true
+}
+# _s26_run <case> <fixture> <block> <VAR=value>... — run one extracted block
+# under /bin/bash from <fixture>, the stubs first on PATH, its own TMPDIR and
+# lease root per case (a VAR=value given overrides these); stdout and stderr
+# in $_S26/<case>.<block>.out/.err. Prints the block's rc.
+_s26_run() {
+  local C=$1 FX=$2 B=$3 RC=0
+  shift 3
+  mkdir -p "$_S26/tmp-$C"
+  ( cd "$FX" && env PATH="$_S26_PATH" HOME="$_S26/home" TMPDIR="$_S26/tmp-$C" TRIFORGE_LEASE_ROOT="$_S26/leases-$C" \
+      OPENROUTER_API_KEY=s26-stub XAI_API_KEY=s26-stub SKILL_DIR="${REPO_ROOT}/skills/at-review" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" "$@" \
+      "$_S26_SH" "$_S26/blocks/$B.sh" < /dev/null > "$_S26/$C.$B.out" 2> "$_S26/$C.$B.err" ) || RC=$?
+  echo "$RC"
+}
+_s26_pkg() { sed -n 's/^REVIEW_PKG=//p' "$_S26/$1.pkg.out" 2>/dev/null | tail -1 || true; }
+_s26_reset() { rm -rf "$_S26/log" "$_S26/started" "$_S26/cfg/barrier"; mkdir -p "$_S26/log" "$_S26/started"; }
+_s26_runs() { cat "$_S26/log/runs" 2>/dev/null | grep -c . || true; }
+_s26_pkgdirs() { ls -d "$_S26/tmp-$1"/triforge-review.* 2>/dev/null | grep -c . || true; }
+_s26_files() { ls "$1/ops" 2>/dev/null | grep '^REVIEW_' | sed 's/\.md$//' | sort | paste -sd, - || true; }
+# _s26_argv <stub> <text> — the first recorded argv of <stub> holding <text>
+_s26_argv() {
+  local F
+  for F in "$_S26/log/$1".*.argv; do
+    if [ -f "$F" ] && grep -qF -- "$2" "$F" 2>/dev/null; then echo "$F"; return 0; fi
+  done
+  echo "$_S26/log/none"
+}
+# _s26_marks <argv file> — what of the package one recorded prompt holds
+_s26_marks() {
+  echo "begin=$(grep -c -- '----- BEGIN DIFF -----' "$1" 2>/dev/null || true):committed=$(grep -c 'S26-COMMITTED' "$1" 2>/dev/null || true):uncommitted=$(grep -c 'S26-UNCOMMITTED' "$1" 2>/dev/null || true):row=$(grep -c 'S26-ROW' "$1" 2>/dev/null || true):untracked=$(grep -cx "?${_S26_TAB}s26-untracked.py" "$1" 2>/dev/null || true):inventory=$(grep -cx "M${_S26_TAB}calc.py" "$1" 2>/dev/null || true)"
+}
+_S26_FAIL=""
+
+# integrity: an open lease, a fresh rebaseline, then the plant. ig runs the
+# skill as a Claude Code lead does (CLAUDE_PLUGIN_ROOT set); ic as a Codex lead
+# does: no CLAUDE_PLUGIN_ROOT, a project-tier copy of the skill under
+# .agents/skills/, the locator resolving through the plugin-root pointer (its
+# git ls-files reads the index, which queries core.fsmonitor)
+O=""
+for _T in ig ic; do
+  _s26_fixture "$_S26/$_T" "${_S26_ANALYST_CURSOR}${_S26_KIMI}"
+  O="${O}$( cd "$_S26/$_T" && export HOME="$_S26/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S26_PATH" TMPDIR="$_S26/tmp-$_T" TRIFORGE_LEASE_ROOT="$_S26/leases-$_T" \
+         && mkdir -p "$TMPDIR" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "integrity-${_T}:load-failed"; exit 0; }
+    lease_create "s26$_T" builder >/dev/null 2>&1 || echo "integrity-${_T}:create-failed"
+    lease_rebaseline >/dev/null 2>&1 || echo "integrity-${_T}:rebaseline-failed"
+    exit 0 )"
+  _s26_dirty "$_S26/$_T"
+  git -C "$_S26/$_T" config filter.s26.clean "sh -c 'touch $_S26/$_T-filter; cat'" || true
+  git -C "$_S26/$_T" config core.fsmonitor "$_S26/fsmon-$_T.sh" || true
+  printf '* filter=s26\n' >> "$_S26/$_T/.git/info/attributes" || true
+done
+mkdir -p "$_S26/ic/.agents/skills"
+cp -R "${REPO_ROOT}/skills/at-review" "$_S26/ic/.agents/skills/" 2>/dev/null || true
+printf '%s\n' "$REPO_ROOT" > "$_S26/ic/.agents/triforge-plugin-root.local"
+_s26_reset
+for _T in ig ic; do
+  _S26_LEAD="CLAUDE_PLUGIN_ROOT=$REPO_ROOT"
+  if [ "$_T" = ic ]; then _S26_LEAD="CLAUDE_PLUGIN_ROOT="; fi
+  O="${O}
+$( SD="SKILL_DIR=${REPO_ROOT}/skills/at-review"
+   if [ "$_T" = ic ]; then SD="SKILL_DIR=$_S26/ic/.agents/skills/at-review"; fi
+   R1=$(_s26_run "$_T" "$_S26/$_T" pre REVIEW_PKG= "$SD" "$_S26_LEAD"); R2=$(_s26_run "$_T" "$_S26/$_T" pkg REVIEW_PKG= "$SD" "$_S26_LEAD"); P=$(_s26_pkg "$_T")
+   R3=$(_s26_run "$_T" "$_S26/$_T" learn REVIEW_PKG="$P" "$SD" "$_S26_LEAD"); R4=$(_s26_run "$_T" "$_S26/$_T" core REVIEW_PKG="$P" "$SD" "$_S26_LEAD"); R5=$(_s26_run "$_T" "$_S26/$_T" opt REVIEW_PKG="$P" "$SD" "$_S26_LEAD")
+   echo "integrity-${_T}:pre=${R1}:pkg=${R2}:named=$(grep -c '\.git/config changed' "$_S26/$_T.pkg.err" 2>/dev/null || true):stopped=$(grep -c '^review: STOPPED' "$_S26/$_T.pkg.err" 2>/dev/null || true):pkgdir=$(_s26_pkgdirs "$_T"):learn=${R3}:core=${R4}:opt=${R5}:runs=$(_s26_runs):filter=$( [ -e "$_S26/$_T-filter" ] && echo ran || echo no):fsmon=$( [ -e "$_S26/$_T-fsmon" ] && echo ran || echo no)" )"
+done
+_S26_FAIL="${_S26_FAIL}$(_self_expect integrity "$O" '^integrity-ig:pre=0:pkg=44:named=1:stopped=1:pkgdir=0:learn=1:core=1:opt=1:runs=0:filter=no:fsmon=no$' \
+  '^integrity-ic:pre=0:pkg=44:named=1:stopped=1:pkgdir=0:learn=1:core=1:opt=1:runs=0:filter=no:fsmon=no$')"
+
+# never-leased: the check returns 0 and writes nothing
+_s26_fixture "$_S26/nl" ""
+_s26_dirty "$_S26/nl"
+O=$( R=$(_s26_run nl "$_S26/nl" pkg REVIEW_PKG=)
+  echo "never-leased:pkg=${R}:ledger=$( [ -e "$_S26/nl/ops/leases.toml" ] && echo yes || echo none):state=$(ls "$_S26/leases-nl/lead" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect never-leased "$O" '^never-leased:pkg=0:ledger=none:state=gitconfig$')"
+
+# main: the analyst on cursor, the reviewer on codex, five optional members
+_s26_fixture "$_S26/mn" "${_S26_ANALYST_CURSOR}${_S26_KIMI}${_S26_MEMBERS}"
+_s26_dirty "$_S26/mn"
+O=$( _s26_reset
+  R=$(_s26_run mn "$_S26/mn" pre REVIEW_PKG=)
+  R=$(_s26_run mn "$_S26/mn" pkg REVIEW_PKG=); P=$(_s26_pkg mn)
+  echo "main-pkg:rc=${R}:untracked=$(grep -cx "?${_S26_TAB}s26-untracked.py" "$P/package.md" 2>/dev/null || true):said=$(grep -c 'Untracked files are listed by name only and are not in the diff' "$P/package.md" 2>/dev/null || true)"
+  R=$(_s26_run mn "$_S26/mn" learn REVIEW_PKG="$P")
+  echo "main-learn:rc=${R}:spawn=$(grep -c '^learnings-researcher: spawn' "$_S26/mn.learn.out" 2>/dev/null || true):entry=$(grep -cx 'ops/solutions/s26-note.md' "$_S26/mn.learn.out" 2>/dev/null || true)"
+  echo 2 > "$_S26/cfg/barrier"
+  R=$(_s26_run mn "$_S26/mn" core REVIEW_PKG="$P")
+  echo "main-core:rc=${R}:seen=$(cat "$_S26/log/cursor-agent.0.seen" 2>/dev/null || true),$(cat "$_S26/log/codex.0.seen" 2>/dev/null || true):prose=$(grep -c 'S26-CODEX-FINDING' "$_S26/mn/ops/REVIEW_CODEX.md" 2>/dev/null || true):verdict=$(grep -c 'S26-VERDICT' "$_S26/mn/ops/REVIEW_CODEX.md" 2>/dev/null || true)"
+  echo "main-core-prompt:$(_s26_marks "$(_s26_argv cursor-agent REVIEW_ANTIGRAVITY.md)")"
+  _s26_reset
+  echo 5 > "$_S26/cfg/barrier"
+  R=$(_s26_run mn "$_S26/mn" opt REVIEW_PKG="$P")
+  S=""
+  for N in opencode kimi cursor-agent devin grok; do S="${S}${S:+,}$(cat "$_S26/log/$N.0.seen" 2>/dev/null || true)"; done
+  echo "main-opt:rc=${R}:seen=${S}:opencode-failed=$(grep -c '^review: opencode reviewer lane FAILED rc=1 ' "$_S26/mn.opt.err" 2>/dev/null || true):grok-failed=$(grep -c '^review: grok reviewer lane FAILED rc=' "$_S26/mn.opt.err" 2>/dev/null || true)"
+  for N in opencode kimi cursor-agent devin grok; do echo "main-opt-prompt-${N}:$(_s26_marks "$(_s26_argv "$N" 'REVIEW_<YOUR_CLI>.md')")"; done
+  echo "main-files:$(_s26_files "$_S26/mn")"
+  rm -f "$_S26/cfg/barrier" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect main "$O" '^main-pkg:rc=0:untracked=1:said=1$' '^main-learn:rc=0:spawn=1:entry=1$' \
+  '^main-core:rc=0:seen=2,2:prose=1:verdict=1$' '^main-core-prompt:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
+  '^main-opt:rc=0:seen=5,5,5,5,5:opencode-failed=1:grok-failed=1$' \
+  '^main-opt-prompt-opencode:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
+  '^main-opt-prompt-kimi:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
+  '^main-opt-prompt-cursor-agent:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
+  '^main-opt-prompt-devin:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
+  '^main-opt-prompt-grok:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
+  '^main-files:REVIEW_ANTIGRAVITY,REVIEW_CODEX,REVIEW_CURSOR,REVIEW_DEVIN,REVIEW_KIMI$')"
+
+# codex-noschema: no last-message file; codex is judged by its exit code
+printf 'output_schema\tstable\tfalse\n' > "$_S26/cfg/codex.features"
+O=$( _s26_reset
+  R=$(_s26_run mn2 "$_S26/mn" pkg REVIEW_PKG=); P=$(_s26_pkg mn2)
+  R=$(_s26_run mn2 "$_S26/mn" core REVIEW_PKG="$P")
+  echo "codex-noschema:rc=${R}:prose=$(grep -c 'S26-CODEX-FINDING' "$_S26/mn/ops/REVIEW_CODEX.md" 2>/dev/null || true):verdict=$(grep -c 'S26-VERDICT' "$_S26/mn/ops/REVIEW_CODEX.md" 2>/dev/null || true):last=$(ls "$_S26/tmp-mn2"/codex_review_*.last 2>/dev/null | grep -c . || true)" )
+: > "$_S26/cfg/codex.features"
+_S26_FAIL="${_S26_FAIL}$(_self_expect codex-noschema "$O" '^codex-noschema:rc=0:prose=1:verdict=0:last=0$')"
+
+# core-blocked: the analyst on opencode (DONE), the reviewer on devin (BLOCKED)
+_s26_fixture "$_S26/cb" '[roles.analyst]\ncli = "opencode"\nfallbacks = ["claude"]\n\n[roles.reviewer]\ncli = "devin"\nfallbacks = ["codex"]\n\n[members.opencode]\nenabled = true\nmodel = "openrouter/z-ai/glm-5.3"\n[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\nconsent = "user 2026-10-07T00:00:00Z via=tty"\n'
+_s26_dirty "$_S26/cb"
+echo 0 > "$_S26/cfg/opencode.rc"
+printf 'Could not finish.\nStatus: BLOCKED\nFiles changed: none\nTests: none\nConcerns: S26 blocked\nDiscoveries for later tasks: None\n' > "$_S26/cfg/devin.ans"
+O=$( _s26_reset
+  R=$(_s26_run cb "$_S26/cb" pkg REVIEW_PKG=); P=$(_s26_pkg cb)
+  R=$(_s26_run cb "$_S26/cb" core REVIEW_PKG="$P")
+  echo "core-blocked:rc=${R}:files=$(_s26_files "$_S26/cb"):said=$(grep -c 'the devin lane reported Status: BLOCKED — not promoted' "$_S26/cb.core.err" 2>/dev/null || true)"
+  echo "core-blocked-prompt:$(_s26_marks "$(_s26_argv devin REVIEW_CODEX.md)")" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect core-blocked "$O" '^core-blocked:rc=0:files=REVIEW_ANTIGRAVITY:said=1$' \
+  '^core-blocked-prompt:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$')"
+
+# big: 40 added files, a diff over the cap
+_s26_fixture "$_S26/bg" "$_S26_KIMI"
+( cd "$_S26/bg" && export HOME="$_S26/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p big && python3 -c '
+for i in range(1, 41):
+    with open("big/f%02d.py" % i, "w") as f:
+        for j in range(150):
+            f.write("value_%02d_%03d = %d  # S26 filler line past the cap\n" % (i, j, j))
+' && git add big && git commit -qm big ) >/dev/null 2>&1 || true
+O=$( _s26_reset
+  R=$(_s26_run bg "$_S26/bg" pkg REVIEW_PKG=); P=$(_s26_pkg bg)
+  R2=$(_s26_run bg "$_S26/bg" opt REVIEW_PKG="$P")
+  A=$(_s26_argv kimi 'REVIEW_<YOUR_CLI>.md')
+  FD=$(sed -n 's/.*The full diff, every file, is in \(.*full\.diff\): read it there\..*/\1/p' "$A" 2>/dev/null | head -1 || true)
+  PB=$(wc -c < "$P/package.md" 2>/dev/null | tr -d ' ' || true)
+  LG=$(cat "${A%.argv}.longest" 2>/dev/null || true)
+  echo "big:rc=${R}:opt=${R2}:inventory=$(grep -cE "^A${_S26_TAB}big/f[0-9][0-9]\.py$" "$A" 2>/dev/null || true):cut=$(grep -c '^Cut: ' "$A" 2>/dev/null || true):full=$(grep -c '^diff --git a/big/f' "${FD:-$_S26/none}" 2>/dev/null || true):pkg-under=$( [ "${PB:-999999}" -le 116000 ] 2>/dev/null && echo yes || echo no):argv-under=$( [ "${LG:-999999}" -lt 120000 ] 2>/dev/null && [ "${LG:-0}" -gt 0 ] 2>/dev/null && echo yes || echo no)" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect big "$O" '^big:rc=0:opt=0:inventory=40:cut=1:full=40:pkg-under=yes:argv-under=yes$')"
+
+# base: an explicit REVIEW_BASE naming no commit, a valid one, and a failed git diff
+_s26_fixture "$_S26/bs" "$_S26_KIMI"
+_s26_dirty "$_S26/bs"
+O=$( _s26_reset
+  R=$(_s26_run bsa "$_S26/bs" pkg REVIEW_PKG= REVIEW_BASE=s26-no-such-ref); P=$(_s26_pkg bsa)
+  R2=$(_s26_run bsa "$_S26/bs" opt REVIEW_PKG="$P" REVIEW_BASE=s26-no-such-ref)
+  echo "base-invalid:pkg=${R}:named=$(grep -c "REVIEW_BASE='s26-no-such-ref' names no commit" "$_S26/bsa.pkg.err" 2>/dev/null || true):pkgdir=$(_s26_pkgdirs bsa):opt=${R2}:runs=$(_s26_runs)"
+  R=$(_s26_run bsb "$_S26/bs" pkg REVIEW_PKG= REVIEW_BASE=main); P=$(_s26_pkg bsb)
+  echo "base-valid:pkg=${R}:range=$(grep -c 'git diff from REVIEW_BASE main (' "$P/package.md" 2>/dev/null || true)"
+  B=$(git -C "$_S26/bs" rev-parse main:calc.py 2>/dev/null || true)
+  OBJ="$_S26/bs/.git/objects/$(printf '%s' "$B" | cut -c1-2)/$(printf '%s' "$B" | cut -c3-)"
+  chmod 000 "$OBJ" 2>/dev/null || true
+  if [ -r "$OBJ" ]; then
+    echo "base-diff-fail:unreadable-object-readable"
+  else
+    R=$(_s26_run bsc "$_S26/bs" pkg REVIEW_PKG=); P=$(_s26_pkg bsc)
+    R2=$(_s26_run bsc "$_S26/bs" opt REVIEW_PKG="$P")
+    echo "base-diff-fail:pkg=${R}:named=$(grep -c 'failed (git rc 128)' "$_S26/bsc.pkg.err" 2>/dev/null || true):pkgdir=$(_s26_pkgdirs bsc):opt=${R2}:runs=$(_s26_runs)"
+  fi
+  chmod 644 "$OBJ" 2>/dev/null || true )
+_S26_FAIL="${_S26_FAIL}$(_self_expect base "$O" '^base-invalid:pkg=1:named=1:pkgdir=0:opt=1:runs=0$' '^base-valid:pkg=0:range=1$' \
+  '^base-diff-fail:(pkg=1:named=1:pkgdir=0:opt=1:runs=0|unreadable-object-readable)$')"
+
+_S26_CAP="at-review's blocks run verbatim (R23, R24, KTD18): the lead's integrity check before the skill's first git call (a planted filter or fsmonitor never runs; no package, so no lane), one review package per cycle for every lane (the inventory with untracked files by name, the inline diff within the cap, the full diff in a file the prompt names; an invalid REVIEW_BASE or a failed git call stops the review), promotion on the CLI's final answer (an optional lane only on rc 0 and DONE; never BLOCKED in a core role; Codex's quoted tool output ignored), and the lanes in parallel"
+if [ -z "$_S26_FAIL" ]; then
+  row "SELF-26" "claude" "$_S26_CAP" "PASS" "integrity (Claude Code layout, and the Codex layout: project-tier copy, locator through the pointer): lease + rebaseline + clean filter and fsmonitor in .git/config -> preflight 0, package block rc 44 naming .git/config, no package, learnings/core/optional blocks refuse, 0 lane runs, filter and fsmonitor never ran; never leased: rc 0, no ledger, lead dir = gitconfig; main: untracked file listed and the not-diffed note; learnings match through the untracked path; core lanes released together, REVIEW_ANTIGRAVITY (cursor) and REVIEW_CODEX (prose + verdict) though the codex transcript quotes Status: BLOCKED; cursor's core prompt holds the package; optional lanes released together (5/5), each prompt with both changes, the [R] row, the untracked name, the inventory and the diff; REVIEW_CURSOR/DEVIN/KIMI only, opencode (DONE, exit 1) and grok (DONE, max_tokens) FAILED; codex without a last-message file promoted on rc 0; devin BLOCKED as reviewer not promoted, its prompt holds the package; 40-file diff over the cap: inventory 40, cut, full.diff 40, package <= 116000, kimi argv < 120000; REVIEW_BASE naming no commit and git diff rc 128 stop the review (rc 1, no package, no lane); REVIEW_BASE=main named" "static"
+else
+  row "SELF-26" "claude" "$_S26_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S26_FAIL"):$(printf '%s' "$_S26_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S26"

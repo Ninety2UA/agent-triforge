@@ -1,10 +1,10 @@
 # Phase 3: the core lanes (always launched, in the background)
 
-Read `ops/TASKS.md` to determine the review scope (tasks marked `[R]`). `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it).
+Read `ops/TASKS.md` to determine the review scope (tasks marked `[R]`). `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it). Run the block with `REVIEW_PKG` set to the directory the review-package block printed. Both core lanes get the package in their prompt, whatever CLI holds the role. Devin and Grok in a core role run read-class with no shell, the Antigravity reviewer runs no command, and the cost to Codex is the tokens of a diff it would read anyway. Without a package no lane starts.
 
 ## Contents
 
-- The dispatch block (fresh-cycle guard, roster-driven dispatch, per-PID waits, promotion of captured output, the structured-verdict fold).
+- The dispatch block (the package, fresh-cycle guard, roster-driven dispatch, per-PID waits, promotion of captured output, the structured-verdict fold).
 - What rc 40 means.
 
 ## The dispatch block
@@ -12,6 +12,14 @@ Read `ops/TASKS.md` to determine the review scope (tasks marked `[R]`). `$SKILL_
 ```bash
 set -euo pipefail
 ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
+
+# The review package (one per cycle, built after the lead's integrity check):
+# no lane starts without it.
+REVIEW_PKG=${REVIEW_PKG:-}
+if [ -z "$REVIEW_PKG" ] || [ ! -O "$REVIEW_PKG" ] || [ ! -f "$REVIEW_PKG/package.md" ]; then
+  echo "review: no review package (REVIEW_PKG='${REVIEW_PKG}') — run the review-package block first and set REVIEW_PKG to the directory it printed; no lane started" >&2; exit 1
+fi
+RPKG=$(cat "$REVIEW_PKG/package.md")
 
 # Fresh-cycle guard (prevents stale findings surviving a fix cycle). A reviewer
 # that returns findings as stdout (headless permission auto-deny) is promoted
@@ -36,16 +44,29 @@ REVIEWER_CLI=$(resolve_role reviewer 2>/dev/null | cut -f1) || REVIEWER_CLI=""
 # _promote_ok <cli> <out> — whether a lane that exited 0 may become a REVIEW
 # file (a nonzero lane stops the block below before any promotion): never on
 # Status: BLOCKED or NEEDS_CONTEXT, and for a CLI outside the core trio only
-# on DONE or DONE_WITH_CONCERNS (no Status line is "report missing").
+# on DONE or DONE_WITH_CONCERNS (no Status line is "report missing"). It reads
+# the CLI's final answer, never its tool output: <out>.last when the helper
+# wrote one (Codex's last message, a JSON verdict under --output-schema), else
+# <out>, which every other helper fills with the final answer (agy's envelope
+# response, claude's result, the assistant text of a stream, Devin's reply).
+# Codex's <out> is the whole session, tool output included: a Codex lane
+# without a last-message file is judged by its exit code alone, as a core lane
+# with no Status contract.
 _promote_ok() {
-  local PCLI=${1:-} POUT=${2:-} ST
-  ST=$(_lease_parse_status "$POUT" 2>/dev/null || echo MISSING)
+  local PCLI=${1:-} POUT=${2:-} PANS ST
+  PANS=$POUT
+  if [ -s "${POUT}.last" ]; then
+    PANS="${POUT}.last"
+  elif [ "$PCLI" = codex ]; then
+    return 0
+  fi
+  ST=$(_lease_parse_status "$PANS" 2>/dev/null || echo MISSING)
   case "$ST" in
     DONE|DONE_WITH_CONCERNS) return 0 ;;
-    BLOCKED|NEEDS_CONTEXT) echo "review: the ${PCLI:-?} lane reported Status: ${ST} — not promoted; read ${POUT}" >&2; return 1 ;;
+    BLOCKED|NEEDS_CONTEXT) echo "review: the ${PCLI:-?} lane reported Status: ${ST} — not promoted; read ${PANS}" >&2; return 1 ;;
   esac
   if [ "$(cli_field "${PCLI:-none}" tier 2>/dev/null || true)" = core ]; then return 0; fi
-  echo "review: the ${PCLI:-?} lane's output has no final 'Status:' line — report missing, not promoted; read ${POUT}" >&2
+  echo "review: the ${PCLI:-?} lane's answer has no final 'Status:' line — report missing, not promoted; read ${PANS}" >&2
   return 1
 }
 
@@ -56,15 +77,19 @@ _promote_ok() {
 # `[roles.reviewer] cli = "opencode"` actually takes effect here (it was
 # previously ignored for the core lane). dispatch_role returns 40 when a role
 # resolves to the CLAUDE lane (run that reviewer as a sub-agent, below);
-# any other nonzero is a real reviewer failure.
+# any other nonzero is a real reviewer failure. Each prompt carries the package.
 dispatch_role analyst "architecture-reviewer" \
-  "Review scope: tasks marked [R] in ops/TASKS.md. Write findings to ops/REVIEW_ANTIGRAVITY.md if you can; otherwise return them as your response." \
+  "Review scope: tasks marked [R] in ops/TASKS.md; the review package below holds those rows, the changed files and the diff. Write findings to ops/REVIEW_ANTIGRAVITY.md if you can; otherwise return them as your response.
+
+${RPKG}" \
   "$AGY_OUT" 600 &
 AGY_PID=$!
 
 # If scope covers 5+ files, the reviewer CLI may spawn internal subagents.
 dispatch_role reviewer "logic_reviewer" \
-  "Review scope: tasks marked [R] in ops/TASKS.md. If scope covers 5+ files, spawn separate agents for logic review, security audit, and test coverage analysis — merge all findings into ops/REVIEW_CODEX.md. Otherwise review sequentially and write to ops/REVIEW_CODEX.md." \
+  "Review scope: tasks marked [R] in ops/TASKS.md; the review package below holds those rows, the changed files and the diff. If scope covers 5+ files, spawn separate agents for logic review, security audit, and test coverage analysis — merge all findings into ops/REVIEW_CODEX.md. Otherwise review sequentially and write to ops/REVIEW_CODEX.md.
+
+${RPKG}" \
   "$CODEX_OUT" 600 &
 CODEX_PID=$!
 
@@ -127,4 +152,4 @@ fi
 
 ## rc 40
 
-If `AGY_RC` or `CODEX_RC` was 40, that role resolved to the claude lane (its default CLI is absent, or the roster pins `cli = "claude"`) under a lead whose sub-agents enforce their tools; under any other lead `dispatch_role` runs `claude -p` itself and returns its exit code. Run that reviewer as a sub-agent against the `[R]` scope (`architecture-strategist` for the analyst lane; a logic + security review for the reviewer lane), writing findings to `ops/REVIEW_ANTIGRAVITY.md` or `ops/REVIEW_CODEX.md` respectively, so `findings-synthesizer` sees them alongside the other lanes. The harness notes carry how a sub-agent is spawned under each lead.
+If `AGY_RC` or `CODEX_RC` was 40, that role resolved to the claude lane (its default CLI is absent, or the roster pins `cli = "claude"`) under a lead whose sub-agents enforce their tools; under any other lead `dispatch_role` runs `claude -p` itself and returns its exit code. Run that reviewer as a sub-agent against the `[R]` scope, with the review package's path in its prompt (`$REVIEW_PKG/package.md`; `architecture-strategist` for the analyst lane; a logic + security review for the reviewer lane), writing findings to `ops/REVIEW_ANTIGRAVITY.md` or `ops/REVIEW_CODEX.md` respectively, so `findings-synthesizer` sees them alongside the other lanes. The harness notes carry how a sub-agent is spawned under each lead.
