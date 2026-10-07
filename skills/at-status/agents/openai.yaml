@@ -1,6 +1,6 @@
 interface:
   display_name: "Sprint status"
   short_description: "Phase, task counts, blockers and pending reviews in one report."
-  default_prompt: "Run $at-status and report the sprint's phase, task counts, blockers, pending reviews and uncommitted changes."
+  default_prompt: "Run $agent-triforge:at-status and report the sprint's phase, task counts, blockers, pending reviews and uncommitted changes."
 policy:
   allow_implicit_invocation: true

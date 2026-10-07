@@ -117,7 +117,7 @@ If nothing clears the counterfactual bar, write nothing and say so in one line n
 
 ## How compounded knowledge is used
 
-Before planning (Phase 1), the learnings-researcher agent searches `ops/solutions/` and `ops/decisions/` for patterns relevant to the current goal. This prevents:
+Before planning (Phase 1), the learnings-researcher persona searches `ops/solutions/` and `ops/decisions/` for patterns relevant to the current goal. This prevents:
 - Re-investigating known issues
 - Repeating rejected approaches
 - Missing established conventions

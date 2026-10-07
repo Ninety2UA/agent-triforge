@@ -272,7 +272,7 @@ _GROK_PROJECT_REFUSAL="A grok reviewer or analyst runs with folder trust off, so
 # and again at each dispatch through _lease_lane_argv) and invoke_grok's
 # scratch. The edit class keeps them.
 _grok_project_guard() {
-  GPG_DIR="$1" GPG_TAIL="$_GROK_PROJECT_REFUSAL" python3 -c '
+  GPG_DIR="$1" GPG_TAIL="$_GROK_PROJECT_REFUSAL" python3 -c "${_READ_REGULAR_PY}"'
 import os, sys
 try:
     import tomllib
@@ -299,7 +299,7 @@ if os.path.lexists(cfg):
     if tomllib is None:
         refuse(".grok/config.toml", "no TOML parser to check it for MCP servers (Python 3.11+ tomllib, or pip install tomli)")
     try:
-        t = tomllib.loads(open(cfg, encoding="utf-8", errors="replace").read())
+        t = tomllib.loads(read_regular(cfg).decode("utf-8", "replace"))
     except Exception as e:
         refuse(".grok/config.toml", "not valid TOML (%s)" % (str(e).splitlines() or ["parse error"])[0][:120])
     ms = t.get("mcp_servers")
@@ -450,7 +450,7 @@ _grok_lease_config() {
   else
     INSPECT=$(cd "$WT" && "$TOBIN" --foreground -k 10s 30s "${_HOST_SCRUB[@]}" "${_GROK_ENV[@]}" "GROK_CONFIG=${POLICY}" grok inspect --json < /dev/null 2>/dev/null) || IRC=$?
   fi
-  printf '%s' "$INSPECT" | GLC_WT="$WT" GLC_CLASS="$CLASS" GLC_IRC="$IRC" GLC_TAIL="$_GROK_PROJECT_REFUSAL" python3 -c '
+  printf '%s' "$INSPECT" | GLC_WT="$WT" GLC_CLASS="$CLASS" GLC_IRC="$IRC" GLC_TAIL="$_GROK_PROJECT_REFUSAL" python3 -c "${_READ_REGULAR_PY}"'
 import json, os, sys
 try:
     import tomllib
@@ -492,7 +492,7 @@ if os.path.islink(gdir) or (os.path.lexists(gdir) and not os.path.isdir(gdir)) o
     refuse("a symlink, or not a plain directory and file inside the worktree, so it is never written through")
 if tomllib is None:
     refuse("no TOML parser to prove the file valid (Python 3.11+ tomllib, or pip install tomli)")
-text = open(cfg, encoding="utf-8", errors="replace").read() if os.path.lexists(cfg) else ""
+text = read_regular(cfg).decode("utf-8", "replace") if os.path.lexists(cfg) else ""
 # A file this function wrote before (at provisioning, then at each read-class
 # dispatch) ends in its own tables, from the marker line on. They are built
 # again, and every plugin and server they named stays named: an inspect run
@@ -1084,11 +1084,11 @@ ${PROMPT}"
 # the lease lane (through _grok_lease_text), where the typed `Status:` report
 # is parsed from the result.
 _grok_extract_text() {
-  G_RAW="$1" G_OUT="$2" python3 -c '
+  G_RAW="$1" G_OUT="$2" python3 -c "${_READ_REGULAR_PY}"'
 import json, os, sys
 responses, cur, calls, denied = [], [], {}, []
 stop, capped = None, False
-for line in open(os.environ["G_RAW"], encoding="utf-8", errors="replace"):
+for line in read_regular(os.environ["G_RAW"]).decode("utf-8", "replace").split("\n"):
     line = line.strip()
     if not line.startswith("{"):
         continue
@@ -1140,11 +1140,11 @@ with open(os.environ["G_OUT"], "w", encoding="utf-8") as f:
 # turn cap, else end.stopReason (end_turn, max_tokens, refusal, cancelled, ...),
 # error for an error event with no end, none when the stream has neither.
 _grok_stop() {
-  G_RAW="$1" python3 -c '
+  G_RAW="$1" python3 -c "${_READ_REGULAR_PY}"'
 import json, os
 stop, capped, err = None, False, False
 try:
-    lines = open(os.environ["G_RAW"], encoding="utf-8", errors="replace").read().splitlines()
+    lines = read_regular(os.environ["G_RAW"]).decode("utf-8", "replace").splitlines()
 except OSError:
     lines = []
 for line in lines:
@@ -1198,12 +1198,12 @@ _grok_lease_text() {
 _grok_classify() {
   local RC=$1 WHY=""
   shift
-  WHY=$(python3 -c '
+  WHY=$(python3 -c "${_READ_REGULAR_PY}"'
 import json, re, sys
 capped, said = False, []
 for path in sys.argv[1:]:
     try:
-        lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
+        lines = read_regular(path).decode("utf-8", "replace").splitlines()
     except OSError:
         continue
     for line in lines:

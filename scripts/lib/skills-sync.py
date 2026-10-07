@@ -23,11 +23,19 @@ Triforge-owned only when its digest matches a released copy of that skill
 notice, never deleted. Without a stamp, only empty slots are written (a
 directory whose content already equals the shipped copy is adopted as is).
 
-Safety: a symlinked .agents or .agents/skills, or one that resolves outside the
-project, is left untouched; every name must match ^[a-z0-9][a-z0-9-]*$, and
-every existing entry must be a plain directory directly inside .agents/skills.
-Copies preserve symlinks as links (never followed). The stamp is written last,
-tmp + rename, and only when every copy succeeded.
+Safety: a symlinked .agents or .agents/skills is left untouched; every name
+must match ^[a-z0-9][a-z0-9-]*$, and every existing entry must be a plain
+directory directly inside .agents/skills. The project directory, .agents and
+.agents/skills are opened once, each without following a link and relative to
+the one before, and every later read, copy, removal, rename and the stamp go
+through those descriptors (dir_fd): a directory swapped for a symlink after the
+check can't redirect a write out of the project, because the descriptor still
+names the directory that was checked (Phase 3 round 4, B2). Copies preserve
+symlinks as links (never followed). The stamp is written last, and only when
+every copy succeeded, through a temporary file created O_CREAT|O_EXCL|O_NOFOLLOW
+under a random name and renamed over it; a copy in flight lives in a directory
+made under a random name. No temporary name is predictable, so a symlink
+planted at one is never written through.
 
 Lead workflows (KTD12, R16): a shipped skills/at-* directory is a lead workflow
 that reaches a lead only from its plugin install. It is never copied into
@@ -42,8 +50,8 @@ another skills directory of a fresh lease worktree, .claude/skills for a
 claude -p worker. It adds names only: an entry already present (a tracked
 directory such as this repo's .claude/skills/watch-cycle/, or a user's own
 copy) and every name passed in --skip (the names git tracks there) are left
-alone. It never replaces, retires or stamps anything, and keeps the same
-symlink and realpath guards.
+alone. It never replaces, retires or stamps anything, and walks to its
+directory the same way, by descriptors that refuse a symlink.
 
 Usage:
     skills-sync.py sync --plugin-root <dir> --project <dir> [--prefix <text>]
@@ -60,7 +68,8 @@ import hashlib
 import json
 import os
 import re
-import shutil
+import secrets
+import stat
 import subprocess
 import sys
 
@@ -70,6 +79,12 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 IGNORED_FILES = (".DS_Store",)
 TMP_PREFIX = ".triforge-tmp-"   # copies in flight; never a valid skill name (NAME_RE), cleaned up on the next run
 LEAD_PREFIX = "at-"              # lead workflows: never copied, never owned, never retired (KTD12)
+NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+CLOEXEC = getattr(os, "O_CLOEXEC", 0)
+DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | NOFOLLOW | CLOEXEC
+# a symlink opened O_NOFOLLOW fails ELOOP (Linux), ENOTDIR (macOS, with
+# O_DIRECTORY) or EMLINK (FreeBSD); a file opened O_DIRECTORY fails ENOTDIR
+NOT_A_DIR = (errno.ELOOP, errno.ENOTDIR, errno.EMLINK)
 
 
 def lead_workflow(name):
@@ -80,44 +95,86 @@ def _entry_line(kind, rel, value):
     return (kind + "\0" + rel + "\0" + value + "\n").encode("utf-8", "surrogateescape")
 
 
-def _walk_error(err):
-    # A directory that can't be listed would otherwise be skipped silently, and a
-    # tree holding one would still digest as Triforge's own copy: raise, so
-    # safe_digest reports the directory instead of owning it.
-    raise err
+# --- descriptor-relative primitives (Phase 3 round 4, B2) --------------------
+# Every path below is one name relative to a directory descriptor; nothing
+# under the project is reached by a path string, so no directory on the way
+# can be swapped for a symlink between a check and the write it guards.
+
+def open_dir(name, dir_fd):
+    """The directory name in dir_fd, opened without following a link."""
+    return os.open(name, DIR_FLAGS, dir_fd=dir_fd)
 
 
-def dir_digest(path):
-    """sha256 over the sorted (kind, relative path, content hash | link target)
-    entries of a directory tree. Empty directories and .DS_Store don't count,
-    so the digest matches what git would record. Anything that is not a
-    regular file, a symlink or a directory (a FIFO, a socket, a device — which
-    git can't carry, so it is never Triforge's) makes the tree unreadable:
-    opening a FIFO would block the refresh."""
-    entries = []
-    for root, dirs, files in os.walk(path, followlinks=False, onerror=_walk_error):
-        dirs.sort()
-        for d in dirs:
-            full = os.path.join(root, d)
-            if os.path.islink(full):
-                rel = os.path.relpath(full, path).replace(os.sep, "/")
-                entries.append(("L", rel, os.readlink(full)))
-        for f in files:
-            if f in IGNORED_FILES:
+def lstat_at(dir_fd, name):
+    """The lstat of name in dir_fd, or None when nothing is there."""
+    try:
+        return os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+
+
+def _is_dir_following(dir_fd, name):
+    try:
+        return stat.S_ISDIR(os.stat(name, dir_fd=dir_fd).st_mode)
+    except OSError:
+        return False
+
+
+def _digest_entries(dfd, rel, entries):
+    """The entries dir_digest hashes, for the tree open at dfd: what os.walk
+    without following links sees (a link to a directory is listed with the
+    directories, so .DS_Store is skipped only as a file or a link to one)."""
+    for name in os.listdir(dfd):
+        path = rel + "/" + name if rel else name
+        st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+        if stat.S_ISLNK(st.st_mode):
+            if name in IGNORED_FILES and not _is_dir_following(dfd, name):
                 continue
-            full = os.path.join(root, f)
-            rel = os.path.relpath(full, path).replace(os.sep, "/")
-            if os.path.islink(full):
-                entries.append(("L", rel, os.readlink(full)))
-            elif not os.path.isfile(full):
-                raise OSError(errno.EINVAL, "not a regular file", full)
-            else:
-                with open(full, "rb") as fh:
-                    entries.append(("F", rel, hashlib.sha256(fh.read()).hexdigest()))
+            entries.append(("L", path, os.readlink(name, dir_fd=dfd)))
+        elif stat.S_ISDIR(st.st_mode):
+            cfd = open_dir(name, dfd)
+            try:
+                _digest_entries(cfd, path, entries)
+            finally:
+                os.close(cfd)
+        elif name in IGNORED_FILES:
+            continue
+        elif not stat.S_ISREG(st.st_mode):
+            raise OSError(errno.EINVAL, "not a regular file", path)
+        else:
+            # O_NONBLOCK: a FIFO swapped in after the lstat fails the type
+            # check below instead of blocking the refresh
+            fd = os.open(name, os.O_RDONLY | NOFOLLOW | CLOEXEC | getattr(os, "O_NONBLOCK", 0), dir_fd=dfd)
+            with os.fdopen(fd, "rb") as fh:
+                if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                    raise OSError(errno.EINVAL, "not a regular file", path)
+                entries.append(("F", path, hashlib.sha256(fh.read()).hexdigest()))
+
+
+def digest_fd(dfd):
+    """sha256 over the sorted (kind, relative path, content hash | link target)
+    entries of the directory tree open at dfd. Empty directories and .DS_Store
+    don't count, so the digest matches what git would record. Anything that is
+    not a regular file, a symlink or a directory (a FIFO, a socket, a device —
+    which git can't carry, so it is never Triforge's) makes the tree
+    unreadable: opening a FIFO would block the refresh. A directory that can't
+    be listed raises too, so safe_digest reports it instead of owning it."""
+    entries = []
+    _digest_entries(dfd, "", entries)
     h = hashlib.sha256()
     for kind, rel, value in sorted(entries):
         h.update(_entry_line(kind, rel, value))
     return h.hexdigest()
+
+
+def dir_digest(path):
+    """digest_fd of the directory at path (the plugin's own tree, or the
+    `digest` command's argument)."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | CLOEXEC)
+    try:
+        return digest_fd(fd)
+    finally:
+        os.close(fd)
 
 
 def safe_digest(path):
@@ -129,13 +186,96 @@ def safe_digest(path):
         return None
 
 
+def safe_digest_at(dir_fd, name):
+    """safe_digest of the directory name in dir_fd, opened without following a link."""
+    try:
+        fd = open_dir(name, dir_fd)
+    except OSError:
+        return None
+    try:
+        return digest_fd(fd)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def rmtree_at(dir_fd, name):
+    """Remove the directory name in dir_fd and everything in it, descending by
+    descriptors opened without following a link (a link is unlinked, never
+    followed). Raises OSError."""
+    fd = open_dir(name, dir_fd)
+    try:
+        for child in os.listdir(fd):
+            st = os.stat(child, dir_fd=fd, follow_symlinks=False)
+            if stat.S_ISDIR(st.st_mode):
+                rmtree_at(fd, child)
+            else:
+                os.unlink(child, dir_fd=fd)
+    finally:
+        os.close(fd)
+    os.rmdir(name, dir_fd=dir_fd)
+
+
+def copytree_at(src, dfd):
+    """Copy the contents of the plugin directory src into the directory open
+    at dfd: links as links, files and directories with their permission bits
+    and times (as shutil.copytree gives them), every entry created exclusively
+    relative to the descriptor. Raises OSError."""
+    for entry in sorted(os.listdir(src)):
+        s = os.path.join(src, entry)
+        st = os.lstat(s)
+        if stat.S_ISLNK(st.st_mode):
+            os.symlink(os.readlink(s), entry, dir_fd=dfd)
+        elif stat.S_ISDIR(st.st_mode):
+            os.mkdir(entry, 0o700, dir_fd=dfd)
+            cfd = open_dir(entry, dfd)
+            try:
+                copytree_at(s, cfd)
+                os.chmod(cfd, stat.S_IMODE(st.st_mode))
+                os.utime(cfd, ns=(st.st_atime_ns, st.st_mtime_ns))
+            finally:
+                os.close(cfd)
+        else:
+            with open(s, "rb") as fh:
+                data = fh.read()
+            fd = os.open(entry, os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW | CLOEXEC, 0o600, dir_fd=dfd)
+            with os.fdopen(fd, "wb") as out:
+                out.write(data)
+                out.flush()
+                os.chmod(out.fileno(), stat.S_IMODE(st.st_mode))
+                os.utime(out.fileno(), ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
+def read_stamp_at(dir_fd):
+    """read_stamp of the stamp in the directory open at dir_fd: a regular file
+    opened without following a link (O_NONBLOCK, so a FIFO there fails the
+    type check instead of blocking), else None."""
+    try:
+        fd = os.open(STAMP_NAME, os.O_RDONLY | NOFOLLOW | CLOEXEC | getattr(os, "O_NONBLOCK", 0), dir_fd=dir_fd)
+    except OSError:
+        return None
+    with os.fdopen(fd, "rb") as fh:
+        if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+            return None
+        try:
+            text = fh.read().decode("utf-8", "replace")
+        except OSError:
+            return None
+    return parse_stamp(text.splitlines())
+
+
 def read_stamp(path):
-    stamp = {"version": "", "format": "", "skills": [], "digests": {}}
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             lines = fh.read().splitlines()
     except OSError:
         return None
+    return parse_stamp(lines)
+
+
+def parse_stamp(lines):
+    stamp = {"version": "", "format": "", "skills": [], "digests": {}}
     for line in lines:
         if line.startswith("version="):
             stamp["version"] = line[len("version="):].strip()
@@ -173,9 +313,41 @@ def plugin_version(root):
         return ""
 
 
-def plain_dir_inside(path, parent_real):
-    return (not os.path.islink(path)) and os.path.isdir(path) \
-        and os.path.dirname(os.path.realpath(path)) == parent_real
+def is_plain_dir(st):
+    """An lstat result that is a directory (a link never is)."""
+    return st is not None and stat.S_ISDIR(st.st_mode)
+
+
+class Refused(Exception):
+    """A directory on the way can't be used; the message is the notice."""
+
+
+def enter_dir(parent_fd, name, create, shown):
+    """The directory name in parent_fd, opened without following a link and
+    created first when absent and create is set. Refused (with the notice)
+    for a link or a non-directory; None when absent and not created."""
+    st = lstat_at(parent_fd, name)
+    if st is not None and stat.S_ISLNK(st.st_mode):
+        raise Refused(shown + " is a symlink — left untouched (Triforge refreshes only a real directory inside the project; remove the link to let it manage the copy).")
+    if st is not None and not stat.S_ISDIR(st.st_mode):
+        if create or shown != ".agents":   # a file at .agents/skills: the refresh can't make it (a degraded run, as before)
+            raise Refused("WARNING could not create " + shown + " — skills not refreshed (session continues).")
+        raise Refused(shown + " exists and is not a directory — skills not refreshed.")
+    if st is None:
+        if not create:
+            return None
+        try:
+            os.mkdir(name, 0o777, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        except OSError:
+            raise Refused("WARNING could not create " + shown + " — skills not refreshed (session continues).")
+    try:
+        return open_dir(name, parent_fd)
+    except OSError as exc:
+        if exc.errno in NOT_A_DIR:   # swapped for a link or a file after the lstat
+            raise Refused(shown + " is a symlink or not a directory — left untouched.")
+        raise Refused("WARNING could not open " + shown + " — skills not refreshed (session continues).")
 
 
 def sync(plugin_root, project, prefix):
@@ -189,34 +361,41 @@ def sync(plugin_root, project, prefix):
         return out
     version = plugin_version(plugin_root)
     table = read_table(os.path.join(plugin_root, "scripts", "lib", "skill-digests.txt"))
-    agents = os.path.join(project, ".agents")
-    dest = os.path.join(agents, "skills")
-    if os.path.islink(agents) or os.path.islink(dest):
-        note(".agents or .agents/skills is a symlink — left untouched (Triforge refreshes only a real directory inside the project; remove the link to let it manage the copy).")
-        return out
-    if os.path.lexists(agents) and not os.path.isdir(agents):
-        note(".agents exists and is not a directory — skills not refreshed.")
-        return out
-    expected = os.path.join(os.path.realpath(project), ".agents", "skills")
-    if os.path.lexists(dest) and os.path.realpath(dest) != expected:
-        note(".agents/skills resolves outside the project (symlinked ancestor) — left untouched.")
-        return out
-
-    stamp_path = os.path.join(dest, STAMP_NAME)
-    stamp = read_stamp(stamp_path) if os.path.isfile(stamp_path) and not os.path.islink(stamp_path) else None
-    if os.path.isdir(dest) and stamp and version and stamp["version"] == version and stamp["format"] == STAMP_FORMAT:
-        return out    # current: no copies, no notice
-    if os.path.isdir(dest) and not version:
-        return out    # plugin version unreadable: keep what is deployed rather than refresh blind
     try:
-        os.makedirs(dest, exist_ok=True)
+        fds = [os.open(os.path.realpath(project), DIR_FLAGS)]
     except OSError:
-        note("WARNING could not create .agents/skills — skills not refreshed (session continues).")
+        note("WARNING could not open the project directory — skills not refreshed (session continues).")
         return out
-    dest_real = os.path.realpath(dest)
-    if dest_real != expected:
-        note(".agents/skills resolves outside the project (symlinked ancestor) — left untouched.")
-        return out
+    try:
+        agents_fd = enter_dir(fds[0], ".agents", False, ".agents")
+        dest_fd = None
+        if agents_fd is not None:
+            fds.append(agents_fd)
+            dest_fd = enter_dir(agents_fd, "skills", False, ".agents/skills")
+            if dest_fd is not None:
+                fds.append(dest_fd)
+        stamp = read_stamp_at(dest_fd) if dest_fd is not None else None
+        if dest_fd is not None and stamp and version and stamp["version"] == version and stamp["format"] == STAMP_FORMAT:
+            return out    # current: no copies, no notice
+        if dest_fd is not None and not version:
+            return out    # plugin version unreadable: keep what is deployed rather than refresh blind
+        if agents_fd is None:
+            agents_fd = enter_dir(fds[0], ".agents", True, ".agents")
+            fds.append(agents_fd)
+        if dest_fd is None:
+            dest_fd = enter_dir(agents_fd, "skills", True, ".agents/skills")
+            fds.append(dest_fd)
+        _sync_at(dest_fd, src_root, version, table, stamp, note)
+    except Refused as exc:
+        note(str(exc))
+    finally:
+        for fd in fds:
+            os.close(fd)
+    return out
+
+
+def _sync_at(dest_fd, src_root, version, table, stamp, note):
+    """The refresh itself, every step relative to dest_fd (.agents/skills)."""
 
     def owned(name, digest):
         if stamp is None or lead_workflow(name):
@@ -228,22 +407,30 @@ def sync(plugin_root, project, prefix):
     shipped = []
     written = {}
     kept, skipped, retired, failed = [], [], [], False
-    for leftover in os.listdir(dest):
-        # a copy an earlier run did not finish
-        if leftover.startswith(TMP_PREFIX) and not os.path.islink(os.path.join(dest, leftover)):
-            shutil.rmtree(os.path.join(dest, leftover), ignore_errors=True)
+    for leftover in os.listdir(dest_fd):
+        # a copy (a directory) or a stamp (a file) an earlier run did not finish
+        st = lstat_at(dest_fd, leftover) if leftover.startswith(TMP_PREFIX) else None
+        if st is None or stat.S_ISLNK(st.st_mode):
+            continue
+        try:
+            if stat.S_ISDIR(st.st_mode):
+                rmtree_at(dest_fd, leftover)
+            else:
+                os.unlink(leftover, dir_fd=dest_fd)
+        except OSError:
+            pass
     for name, valid in shipped_entries(src_root):
         if not valid:
             skipped.append(name + "(invalid-name)")
             continue
         src = os.path.join(src_root, name)
         shipped.append(name)
-        target = os.path.join(dest, name)
-        if os.path.lexists(target):
-            if not plain_dir_inside(target, dest_real):
+        st = lstat_at(dest_fd, name)
+        if st is not None:
+            if not is_plain_dir(st):
                 skipped.append(name + "(not-a-plain-directory)")
                 continue
-            current, shipped_digest = safe_digest(target), safe_digest(src)
+            current, shipped_digest = safe_digest_at(dest_fd, name), safe_digest(src)
             if current is None or shipped_digest is None:
                 failed = failed or shipped_digest is None
                 skipped.append(name + ("(unreadable)" if current is None else "(unreadable-source)"))
@@ -255,10 +442,10 @@ def sync(plugin_root, project, prefix):
                 kept.append(name)
                 continue
         try:
-            written[name] = copy_into_place(src, dest, name, True)
-        except (OSError, shutil.Error):
+            written[name] = copy_into_place(src, dest_fd, name, True)
+        except OSError:
             failed = True
-            skipped.append(name + ("(replace-failed)" if os.path.lexists(target) else "(copy-failed)"))
+            skipped.append(name + ("(replace-failed)" if lstat_at(dest_fd, name) is not None else "(copy-failed)"))
 
     previous = []
     if stamp:
@@ -267,13 +454,13 @@ def sync(plugin_root, project, prefix):
     for name in previous:
         if name in shipped or not NAME_RE.match(name) or lead_workflow(name):
             continue    # an at-* entry in a stamp never makes an at-* directory Triforge's to retire
-        target = os.path.join(dest, name)
-        if not os.path.lexists(target):
+        st = lstat_at(dest_fd, name)
+        if st is None:
             continue
-        digest = safe_digest(target) if plain_dir_inside(target, dest_real) else None
+        digest = safe_digest_at(dest_fd, name) if is_plain_dir(st) else None
         if digest is not None and owned(name, digest):
             try:
-                shutil.rmtree(target)
+                rmtree_at(dest_fd, name)
                 retired.append(name)
             except OSError:
                 skipped.append(name + "(remove-failed)")
@@ -285,18 +472,11 @@ def sync(plugin_root, project, prefix):
     else:
         body = ["version=" + version, "format=" + STAMP_FORMAT, "skills=" + ",".join(sorted(written))]
         body += ["digest " + n + " " + written[n] for n in sorted(written)]
-        tmp = stamp_path + ".tmp." + str(os.getpid())
         try:
-            with open(tmp, "w", encoding="utf-8") as fh:
-                fh.write("\n".join(body) + "\n")
-            os.replace(tmp, stamp_path)
+            replace_file_at(dest_fd, STAMP_NAME, "\n".join(body) + "\n")
             note(".agents/skills refreshed to " + (version or "?") + " (Triforge replaces only its own unchanged copies, identified by content digest; keep customizations in a differently named directory; lead workflows (at-*) are not copied)"
                  + ("; retired no-longer-shipped: " + " ".join(retired) if retired else "") + ".")
         except OSError:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
             note("WARNING .agents/skills refreshed but the version stamp could not be written — the refresh re-runs next session.")
     if kept:
         note(".agents/skills kept as user-owned (content differs from Triforge's copy, so it was not replaced; the shipped version of each is not installed there): " + " ".join(kept) + ".")
@@ -304,7 +484,6 @@ def sync(plugin_root, project, prefix):
         note(".agents/skills kept as user-owned (no longer shipped, but changed since Triforge wrote it): " + " ".join(retired_kept) + ".")
     if skipped:
         note(".agents/skills entries left untouched (symlink, not a plain directory directly inside .agents/skills, unreadable, or invalid name): " + " ".join(skipped) + ".")
-    return out
 
 
 def shipped_entries(src_root):
@@ -322,31 +501,74 @@ def shipped_entries(src_root):
     return entries
 
 
-def copy_into_place(src, dest, name, replace):
-    """Copy src to <dest>/<name> through a temporary sibling renamed into place:
-    a copy interrupted half-way (the hook's timeout, a crash) would otherwise
-    leave a partial directory that no recorded digest matches, and the next
-    refresh would keep it as the user's. replace (sync): digest the copy and
-    remove the directory already at <dest>/<name> first, and return the
-    digest; without it (add) the name must be free, and None is returned. A
-    failure removes the temporary copy and raises (OSError, shutil.Error)."""
-    target = os.path.join(dest, name)
-    tmp_dir = os.path.join(dest, TMP_PREFIX + name + "-" + str(os.getpid()))
-    try:
-        if os.path.lexists(tmp_dir):
-            shutil.rmtree(tmp_dir)
-        shutil.copytree(src, tmp_dir, symlinks=True)
-        digest = None
-        if replace:
-            digest = dir_digest(tmp_dir)
-            if os.path.lexists(target):
-                shutil.rmtree(target)
-        os.rename(tmp_dir, target)
-        return digest
-    except (OSError, shutil.Error):
+def replace_file_at(dir_fd, name, text):
+    """Write <name> in the directory open at dir_fd through a temporary sibling
+    created O_CREAT|O_EXCL|O_NOFOLLOW under a random name, then renamed over
+    it, both relative to dir_fd: a symlink planted at a temporary name can't
+    exist (the name is unknown in advance, and an existing entry fails the
+    exclusive create), and one at <name> is replaced, never written through.
+    Raises OSError."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW | CLOEXEC
+    for _ in range(8):
+        tmp = TMP_PREFIX + "file-" + secrets.token_hex(8)
         try:
-            if os.path.lexists(tmp_dir):
-                shutil.rmtree(tmp_dir)
+            fd = os.open(tmp, flags, 0o666, dir_fd=dir_fd)
+        except FileExistsError:
+            continue
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            os.rename(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        except OSError:
+            try:
+                os.unlink(tmp, dir_fd=dir_fd)
+            except OSError:
+                pass
+            raise
+        return
+    raise OSError(errno.EEXIST, "no free temporary name")
+
+
+def make_tmp_dir(dir_fd, prefix):
+    """A new directory (0700) under a random name in dir_fd; its name."""
+    for _ in range(8):
+        name = prefix + secrets.token_hex(8)
+        try:
+            os.mkdir(name, 0o700, dir_fd=dir_fd)
+        except FileExistsError:
+            continue
+        return name
+    raise OSError(errno.EEXIST, "no free temporary name")
+
+
+def copy_into_place(src, dest_fd, name, replace):
+    """Copy src to <name> in the directory open at dest_fd through a temporary
+    sibling renamed into place: a copy interrupted half-way (the hook's
+    timeout, a crash) would otherwise leave a partial directory that no
+    recorded digest matches, and the next refresh would keep it as the user's.
+    The sibling is made under a random name, so no link can be planted at it
+    in advance, and every step is relative to dest_fd. replace (sync): digest
+    the copy and remove the directory already at <name> first, and return the
+    digest; without it (add) the name must be free, and None is returned. A
+    failure removes the temporary copy and raises OSError."""
+    tmp = ""
+    try:
+        tmp = make_tmp_dir(dest_fd, TMP_PREFIX + name + "-")
+        tfd = open_dir(tmp, dest_fd)
+        try:
+            copytree_at(src, tfd)
+            os.chmod(tfd, stat.S_IMODE(os.stat(src).st_mode))
+            digest = digest_fd(tfd) if replace else None
+        finally:
+            os.close(tfd)
+        if replace and lstat_at(dest_fd, name) is not None:
+            rmtree_at(dest_fd, name)
+        os.rename(tmp, name, src_dir_fd=dest_fd, dst_dir_fd=dest_fd)
+        return digest
+    except OSError:
+        try:
+            if tmp and lstat_at(dest_fd, tmp) is not None:
+                rmtree_at(dest_fd, tmp)
         except OSError:
             pass
         raise
@@ -363,39 +585,50 @@ def add(plugin_root, project, dest_rel, skip, prefix):
     parts = [p for p in dest_rel.split("/") if p]
     if not os.path.isdir(src_root) or not parts or any(p in (".", "..") for p in parts):
         return out
-    real_project = os.path.realpath(project)
-    path = project
-    for i, p in enumerate(parts):
-        path = os.path.join(path, p)
-        if os.path.islink(path):
-            note(dest_rel + ": " + "/".join(parts[:i + 1]) + " is a symlink — left untouched (skills not added).")
-            return out
-        if os.path.lexists(path) and not os.path.isdir(path):
-            note(dest_rel + ": " + "/".join(parts[:i + 1]) + " exists and is not a directory — skills not added.")
-            return out
-    dest = os.path.join(project, *parts)
-    expected = os.path.join(real_project, *parts)
+    # down from the project directory by descriptors (B2): each component
+    # opened without following a link, created when absent
     try:
-        os.makedirs(dest, exist_ok=True)
+        fds = [os.open(os.path.realpath(project), DIR_FLAGS)]
     except OSError:
-        note("WARNING could not create " + dest_rel + " — skills not added.")
+        note("WARNING could not open the project directory — skills not added to " + dest_rel + ".")
         return out
-    dest_real = os.path.realpath(dest)
-    if dest_real != expected:
-        note(dest_rel + " resolves outside the project (symlinked ancestor) — left untouched.")
-        return out
-    added, present, failed = [], [], []
-    for name, valid in shipped_entries(src_root):
-        if not valid:
-            continue
-        if name in skip or os.path.lexists(os.path.join(dest, name)):
-            present.append(name)
-            continue
-        try:
-            copy_into_place(os.path.join(src_root, name), dest, name, False)
-            added.append(name)
-        except (OSError, shutil.Error):
-            failed.append(name)
+    try:
+        for i, p in enumerate(parts):
+            shown = "/".join(parts[:i + 1])
+            st = lstat_at(fds[-1], p)
+            if st is not None and stat.S_ISLNK(st.st_mode):
+                note(dest_rel + ": " + shown + " is a symlink — left untouched (skills not added).")
+                return out
+            if st is not None and not stat.S_ISDIR(st.st_mode):
+                note(dest_rel + ": " + shown + " exists and is not a directory — skills not added.")
+                return out
+            try:
+                if st is None:
+                    try:
+                        os.mkdir(p, 0o777, dir_fd=fds[-1])
+                    except FileExistsError:
+                        pass
+                fds.append(open_dir(p, fds[-1]))
+            except OSError:
+                # a failed create, or a link or a file swapped in after the check
+                note("WARNING could not create " + dest_rel + " — skills not added.")
+                return out
+        dest_fd = fds[-1]
+        added, present, failed = [], [], []
+        for name, valid in shipped_entries(src_root):
+            if not valid:
+                continue
+            if name in skip or lstat_at(dest_fd, name) is not None:
+                present.append(name)
+                continue
+            try:
+                copy_into_place(os.path.join(src_root, name), dest_fd, name, False)
+                added.append(name)
+            except OSError:
+                failed.append(name)
+    finally:
+        for fd in fds:
+            os.close(fd)
     if failed:
         note("WARNING " + dest_rel + ": could not add " + " ".join(failed) + ".")
     if present:

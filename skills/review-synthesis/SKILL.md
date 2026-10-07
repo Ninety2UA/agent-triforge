@@ -16,7 +16,7 @@ When processing findings from multiple reviewers (Antigravity, Codex, Claude sub
 Read all review outputs:
 - `ops/REVIEW_ANTIGRAVITY.md` (architecture, design, documentation)
 - `ops/REVIEW_CODEX.md` (logic, security, tests)
-- Any subagent review outputs (security-sentinel, performance-oracle, etc.)
+- Any specialist persona outputs (security-sentinel, performance-oracle, etc.)
 
 ## Step 2: Normalize format
 

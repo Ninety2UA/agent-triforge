@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Agent Triforge — A core trio of AI coding CLIs forging production-grade code together. Claude Code orchestrates Antigravity CLI, Codex CLI, and specialized subagents through file-based protocols, portable skills, and parallel review swarms.</strong>
+  <strong>Agent Triforge — A core trio of AI coding CLIs forging production-grade code together. Claude Code orchestrates Antigravity CLI, Codex CLI, and specialist personas through file-based protocols, portable skills, and parallel review swarms.</strong>
 </p>
 
 <p align="center">
@@ -33,13 +33,13 @@ A production-grade framework that turns Claude Code into a **lead agent** orches
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** is the lead — it plans, resolves the roster, dispatches builders, and merges reviewed work (ladder: Fable 5.1 → Opus 5.5 → Sonnet 5.5)
 - **Core trio (required):** Claude · **[Antigravity](https://antigravity.google/cli)** (`agy`, Gemini 3.8 Flash (High) by default, 1M context) · **[Codex](https://github.com/openai/codex)** (`gpt-6-astra`, sandboxed)
 - **Optional tier (auto-detected):** **OpenCode** (OpenRouter `glm-5.3`) · **Kimi Code** (`kimi-code/k3`) · **Cursor** (Grok 4.6) · **Grok Build** (`grok-4.7`; builder, reviewer or analyst), enrolled through [`at-setup`](skills/at-setup/SKILL.md) and skipped cleanly when not enrolled. **Devin** (`swe-1-6-slow`, reviewer or analyst) joins only after you record your consent in `at-setup`
-- **19 Claude specialized agents** provide deep expertise in [security](agents/security-sentinel.md), [performance](agents/performance-oracle.md), [architecture](agents/architecture-strategist.md), and more
+- **19 specialist personas** cover [security](personas/security-sentinel.md), [performance](personas/performance-oracle.md), [architecture](personas/architecture-strategist.md) and more. One manifest sets each persona's tools, model tier and turn budget.
 
 Every non-lead build runs under a **per-task lease in an isolated git worktree** and merges only after **cross-review by a pinned non-author reviewer** — safety is isolation + cross-review, not write-restriction. Work is tracked in shared markdown files. Reviews run in parallel. Knowledge compounds across sessions.
 
 > *Each sprint should make the next sprint easier — not harder.*
 
-The framework achieves this through **institutional knowledge compounding**: every non-trivial problem solved gets documented in [`ops/solutions/`](ops/solutions/), every architectural decision in [`ops/decisions/`](ops/decisions/), and a [`learnings-researcher`](agents/learnings-researcher.md) agent automatically searches these before planning new work.
+The framework achieves this through **institutional knowledge compounding**: every non-trivial problem solved gets documented in [`ops/solutions/`](ops/solutions/), every architectural decision in [`ops/decisions/`](ops/decisions/), and a [`learnings-researcher`](personas/learnings-researcher.md) persona searches these before planning new work.
 
 <p align="center">
   <img src="docs/images/knowledge-loop.svg" alt="Knowledge compounding loop — solve, compound, search, plan, repeat" width="80%">
@@ -135,11 +135,12 @@ All agents, skills (the 10 portable skills and the 17 lead workflows) and hooks 
 
 ### Automatic project bootstrapping
 
-On the first session in a new project, the `session-start.sh` hook:
-- Creates `ops/solutions/`, `ops/decisions/`, `ops/archive/`
-- Copies skeleton `MEMORY.md`, `CHANGELOG.md`, `AGENTS.md`, and `GOALS.md` from plugin templates into `ops/`
-- Creates `.claude/` directory for session state files
-- Prints a `cp` command for Triforge's pointer block when the project has no root `AGENTS.md`
+Triforge sets up a project through one helper, `triforge_bootstrap` (`scripts/lib/bootstrap.sh`). The `session-start.sh` hook runs it at the start of every session, and `at-setup`, `at-build` and `at-review` run it too, so a project led from Codex is set up before you trust the plugin's hooks. Each run only fills in what is missing. It works in the repository's top directory, the nearest one above that holds `.git`, so a run from a subdirectory sets up the repository. It refuses to set up your home directory or any directory that contains it. It:
+- Creates `ops/solutions/`, `ops/decisions/` and `ops/archive/`, copies the skeleton `MEMORY.md`, `CHANGELOG.md`, `AGENTS.md` and `GOALS.md` from the plugin templates into `ops/`, and adds `ops/roster.toml`
+- Copies the 10 portable skills into `.agents/skills/` and each CLI's project files (`.codex/` always; `.opencode/`, `.kimi-code/` and `.cursor/` for the CLIs you have installed)
+- Writes `.agents/triforge-plugin-root.local`, a per-user file naming the plugin's install path, which the `at-` skills read when the lead does not export one. If no ignore rule covers the file, Triforge adds one to `.agents/.gitignore` so git never tracks it. If git tracks `.agents/.gitignore`, Triforge leaves it alone and prints the line to add instead
+
+The hook also keeps its session state in `.claude/` (it writes nothing through a `.claude` that is a symlink) and prints a `cp` command for Triforge's pointer block when the project has no root `AGENTS.md`.
 
 Your project's own instruction file is its root `AGENTS.md`. Add the marked pointer block from [`templates/AGENTS.md`](templates/AGENTS.md) to it yourself; session start never writes into an existing `AGENTS.md`. The plugin ships no `CLAUDE.md`, because a `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` in or above the project stops Claude Code from reading `AGENTS.md`.
 
@@ -175,25 +176,25 @@ Safety comes from three mechanisms working together, not from restricting who ma
 
 ## Project structure
 
-The plugin provides agents, skills and hooks. Your project gets an `ops/` directory for state:
+The plugin provides personas, skills and hooks. Your project gets an `ops/` directory for state:
 
 ```
 agent-triforge/                     (plugin — installed automatically)
 ├── .claude-plugin/plugin.json        Plugin manifest
 ├── package.json                      Pi package manifest: the portable skills only
-├── agents/                           19 specialized agent definitions
+├── personas/                         19 persona prompts plus manifest.toml (tools, model tier, turns)
 ├── skills/                           27 skills in one tree
 │   ├── .devin-plugin/plugin.json       Devin plugin manifest (plugin root skills/): the portable skills only
 │   ├── <name>/SKILL.md                 10 portable skills, copied to .agents/skills/ and lease worktrees
 │   │   └── references/                 where a skill is split (wave-orchestration, verification-before-completion)
-│   └── at-<name>/                      17 lead workflows (/at-<name> in Claude Code, $at-<name> in a Codex prompt); never copied
+│   └── at-<name>/                      17 lead workflows (/at-<name> in Claude Code, $agent-triforge:at-<name> in a Codex prompt); never copied
 │       ├── SKILL.md                      the router: goal, done condition, safe failure, invocation
 │       ├── references/                   the detail the router points to
 │       ├── scripts/locate-triforge.sh    finds the plugin root from either lead
 │       └── agents/openai.yaml            Codex skill metadata
 ├── hooks/
 │   ├── hooks.json                    Hook registration
-│   └── handlers/                     4 lifecycle hook scripts
+│   └── handlers/                     4 lifecycle hook scripts, plus monitors.py (the monitors' state and classifier)
 ├── settings.json                     Default env vars
 ├── AGENTS.md                         The plugin's own instructions: checks, conventions, confinement, human-only actions
 ├── templates/                        Project bootstrapping templates (AGENTS.md pointer block, ops/ skeleton, per-CLI files)
@@ -239,7 +240,7 @@ All agents coordinate through markdown files in [`ops/`](ops/). This is the sour
 
 ## Sprint Pipeline (`at-ship`)
 
-Every goal goes through the phases below. Run [`at-ship`](skills/at-ship/SKILL.md) (`/at-ship <goal>` under a Claude Code lead, `$at-ship <goal>` in a Codex prompt) to run them all autonomously, or run each phase's lead workflow yourself.
+Every goal goes through the phases below. Run [`at-ship`](skills/at-ship/SKILL.md) (`/at-ship <goal>` under a Claude Code lead, `$agent-triforge:at-ship <goal>` in a Codex prompt) to run them all autonomously, or run each phase's lead workflow yourself.
 
 <p align="center">
   <img src="docs/images/sprint-lifecycle.svg" alt="Sprint pipeline — Plan, Build, Review, Test, Ship stages with agents" width="80%">
@@ -248,11 +249,11 @@ Every goal goes through the phases below. Run [`at-ship`](skills/at-ship/SKILL.m
 | Phase | What happens | Agent(s) | Lead workflow |
 |:---|:---|:---|:---|
 | **0 — Analyze** | Full-repo scan: architecture, patterns, contracts, debt | Antigravity CLI + [`codebase-mapping`](skills/codebase-mapping/SKILL.md) | [`at-plan`](skills/at-plan/SKILL.md) |
-| **Pre-Plan** | Search institutional knowledge for relevant past solutions | [`learnings-researcher`](agents/learnings-researcher.md) | [`at-plan`](skills/at-plan/SKILL.md) |
+| **Pre-Plan** | Search institutional knowledge for relevant past solutions | [`learnings-researcher`](personas/learnings-researcher.md) | [`at-plan`](skills/at-plan/SKILL.md) |
 | **1 — Plan** | Decompose goal into tasks with shadow paths and error maps | Claude + [`writing-plans`](skills/writing-plans/SKILL.md) | [`at-plan`](skills/at-plan/SKILL.md) |
-| **1.5 — Validate** | Validate assignments, dependencies, scope, shadow paths | [`plan-checker`](agents/plan-checker.md) | [`at-plan`](skills/at-plan/SKILL.md) |
+| **1.5 — Validate** | Validate assignments, dependencies, scope, shadow paths | [`plan-checker`](personas/plan-checker.md) | [`at-plan`](skills/at-plan/SKILL.md) |
 | **1.1 — Ambiguity** | Surface top 3 unverified assumptions, ask user to confirm/correct | Claude | [`at-plan`](skills/at-plan/SKILL.md), [`at-ship`](skills/at-ship/SKILL.md) |
-| **2 — Build** | Wave orchestration with integration verification between waves | Claude subagents or [`team-lead`](agents/team-lead.md) | [`at-build`](skills/at-build/SKILL.md) |
+| **2 — Build** | Wave orchestration with integration verification between waves | Leased builders, or the [`team-lead`](personas/team-lead.md) persona | [`at-build`](skills/at-build/SKILL.md) |
 | **3–4 — Review** | Up to 7 parallel reviewers, synthesized with confidence tiering | Antigravity + Codex + [review agents](#review-specialists-6) | [`at-review`](skills/at-review/SKILL.md) |
 | **5 — Test** | TDD test writing, gap analysis, fix cycle until green | Codex CLI ([`test_writer`](codex-agents/agents.toml)) | [`at-test`](skills/at-test/SKILL.md) |
 | **6 — Ship** | Document solutions, archive reviews, write STATE.md | Claude + [`knowledge-compounding`](skills/knowledge-compounding/SKILL.md) | [`at-wrap`](skills/at-wrap/SKILL.md) |
@@ -261,7 +262,7 @@ Every goal goes through the phases below. Run [`at-ship`](skills/at-ship/SKILL.m
 
 ## Planning Pipeline (`at-plan`)
 
-Analyzes the full codebase with Antigravity's 1M-token context, searches institutional knowledge, decomposes the goal with shadow paths and error maps, then validates via [`plan-checker`](agents/plan-checker.md).
+Analyzes the full codebase with Antigravity's 1M-token context, searches institutional knowledge, decomposes the goal with shadow paths and error maps, then validates via [`plan-checker`](personas/plan-checker.md).
 
 <p align="center">
   <img src="docs/images/planning-flow.svg" alt="Planning pipeline — Antigravity scan, learnings research, shadow path planning, plan validation" width="80%">
@@ -281,7 +282,7 @@ Spawns 5 research agents in parallel before planning, then synthesizes findings 
 
 ## Wave Orchestration (`at-build`)
 
-Groups plan tasks by dependency into waves. Independent tasks within each wave run in parallel; an [`integration-verifier`](agents/integration-verifier.md) validates between waves.
+Groups plan tasks by dependency into waves. Independent tasks within each wave run in parallel; an [`integration-verifier`](personas/integration-verifier.md) validates between waves.
 
 <p align="center">
   <img src="docs/images/wave-orchestration.svg" alt="Wave orchestration — 3 waves with parallel tasks and integration verification" width="80%">
@@ -295,8 +296,8 @@ Groups plan tasks by dependency into waves. Independent tasks within each wave r
 |---|---|---|
 | **File-based** | Shared markdown in [`ops/`](ops/) | Persistent state across sessions, audit trails |
 | **Direct invocation** | `agy -p` / `codex exec` via bash | Real-time external agent delegation |
-| **Native subagents** | Claude's Agent tool with [`agents/`](agents/) definitions | Parallel focused tasks, review swarms |
-| **Agent teams** | Multi-Claude with shared task lists ([`team-lead`](agents/team-lead.md)) | Complex builds with 5+ interdependent tasks |
+| **Personas** | `dispatch_persona` runs a [`personas/`](personas/) prompt with the tools, model and turn budget its manifest entry sets | Reviews, research, verification |
+| **Agent teams** | Multi-Claude with shared task lists ([`team-lead`](personas/team-lead.md)) | Complex builds with 5+ interdependent tasks |
 
 ### Portable skill injection
 
@@ -336,7 +337,7 @@ Roles come from `ops/roster.toml` (`resolve_role <role>`); the defaults below ar
 
 ## Review Swarm (`at-review`)
 
-Up to 7 reviewers analyze the same code simultaneously through different lenses (2 external CLIs + 5 Claude specialized agents with `--full`), then a [`findings-synthesizer`](agents/findings-synthesizer.md) merges, deduplicates, and priority-ranks all findings.
+Up to 7 reviewers analyze the same code simultaneously through different lenses (2 external CLIs + 5 specialist personas with `--full`), then a [`findings-synthesizer`](personas/findings-synthesizer.md) merges, deduplicates, and priority-ranks all findings.
 
 <p align="center">
   <img src="docs/images/review-swarm.svg" alt="Review swarm — 7 parallel reviewers feeding into findings-synthesizer" width="80%">
@@ -354,13 +355,13 @@ Every finding gets a confidence score to prevent wasting time on phantom issues:
 
 ### Suppressions
 
-Each reviewer has a "Do Not Flag" list to reduce noise — readability-aiding redundancy, documented thresholds, sufficient test assertions, consistency-only style changes, and issues already addressed in the current diff. See individual [agent definitions](agents/) for each reviewer's suppressions list.
+Each reviewer has a "Do Not Flag" list to reduce noise — readability-aiding redundancy, documented thresholds, sufficient test assertions, consistency-only style changes, and issues already addressed in the current diff. Each persona file in [`personas/`](personas/) lists its own suppressions.
 
 ---
 
 ## Test Pipeline (`at-test`)
 
-[`test-gap-analyzer`](agents/test-gap-analyzer.md) finds the untested code paths, then [Codex CLI](https://github.com/openai/codex) writes and runs the tests in its sandbox, starting each one with a failing test.
+[`test-gap-analyzer`](personas/test-gap-analyzer.md) finds the untested code paths, then [Codex CLI](https://github.com/openai/codex) writes and runs the tests in its sandbox, starting each one with a failing test.
 
 <p align="center">
   <img src="docs/images/testing-flow.svg" alt="Test pipeline — gap analysis, Codex TDD, fix cycle" width="80%">
@@ -388,7 +389,7 @@ Six checkpoints, enforced at every stage:
 
 | Gate | Enforced by | Rule |
 |---|---|---|
-| **1 — Plan validated** | [`plan-checker`](agents/plan-checker.md) agent | No build without validated plan (max 3 iterations) |
+| **1 — Plan validated** | [`plan-checker`](personas/plan-checker.md) persona | No build without validated plan (max 3 iterations) |
 | **2 — Failing test first** | [`at-test`](skills/at-test/SKILL.md) workflow, Codex [`test_writer`](codex-agents/agents.toml) | No production code without a failing test |
 | **3 — Root cause first** | [`at-debug`](skills/at-debug/SKILL.md) workflow, Codex [`debugger`](codex-agents/agents.toml) | No fix without diagnosis |
 | **4 — Evidence first** | [`verification-before-completion`](skills/verification-before-completion/SKILL.md) skill | No "done" without proof |
@@ -411,7 +412,7 @@ If you are upgrading from 3.x, the slash commands are now `at-` workflows (`/shi
 
 ### Prerequisites
 
-[`at-setup`](skills/at-setup/SKILL.md) is the guided path from a fresh install to a working roster (`/at-setup` under a Claude Code lead, `$at-setup` in a Codex prompt). It checks that the core trio is live, walks you through each optional CLI (enroll it with a model you choose, or decline it), then offers role assignment: keep the shipped defaults (recommended) or change any role's CLI, model and effort. It is idempotent, so you can re-run it any time. The commands below are the probes it automates; run them yourself to check a CLI before you install the plugin.
+[`at-setup`](skills/at-setup/SKILL.md) is the guided path from a fresh install to a working roster (`/at-setup` under a Claude Code lead, `$agent-triforge:at-setup` in a Codex prompt). It checks that the core trio is live, walks you through each optional CLI (enroll it with a model you choose, or decline it), then offers role assignment: keep the shipped defaults (recommended) or change any role's CLI, model and effort. It is idempotent, so you can re-run it any time. The commands below are the probes it automates; run them yourself to check a CLI before you install the plugin.
 
 **Core trio (required):**
 
@@ -458,7 +459,7 @@ Re-baselined from the newest capability probe record — currently [`ops/researc
 
 | CLI | Tier | Floor (KTD-13) | Tested | READY probe |
 |---|---|---|---|---|
-| Claude Code (`claude`) | core | ≥ 2.1.277 (a claude worker: ≥ 2.1.285) | 2.1.284 | `claude --version` |
+| Claude Code (`claude`) | core | ≥ 2.1.277 (a claude worker: ≥ 2.1.285; a persona: a build with `--safe-mode`) | 2.1.284 | `claude --version` |
 | Antigravity (`agy`) | core | ≥ 1.1.27 | 1.2.1 | `agy --model "Gemini 3.8 Flash (High)" -p "Respond with only: READY"` |
 | Codex (`codex`) | core | ≥ 0.153.0 | 0.154.0 | `codex exec "Respond with only: READY"` |
 | OpenCode (`opencode`) | optional | ≥ 1.18.20 | 1.18.30 | `opencode run --format json -m openrouter/z-ai/glm-5.3 "…"` |
@@ -467,7 +468,7 @@ Re-baselined from the newest capability probe record — currently [`ops/researc
 | Devin CLI (`devin`) | optional | ≥ 3000.10.31 | 3000.11.3 | `devin --model swe-1-6-slow --respect-workspace-trust false -p "…"` |
 | Grok Build (`grok`) | optional | ≥ 1.0.34 | 1.0.34 | `grok --model grok-4.7 -p "…"` |
 
-Why these floors: Claude Code 2.1.277 is the first build that reads a root `AGENTS.md`, Triforge's only instruction file (D-037; it includes the 2.1.267 fix that honors `effort:` frontmatter on pinned-default models); a claude worker needs 2.1.285, the first build that ignores the repository settings that loosen its sandbox, and refuses to start on an older one unless `TRIFORGE_CLAUDE_SANDBOX=off` is set; agy 1.1.27 adds `denied_actions` to the JSON envelope that `invoke_antigravity` reads as its completion signal; Codex 0.153.0 is `gpt-6-astra`'s minimal client, and `gpt-6.1-sol`, which a role can pick, answered on Codex 0.160.0 and was refused on 0.155.1; OpenCode 1.18.20 answers subagent permission asks under `run`; Kimi 0.33.0 is the agent-core-v2 engine with `--agent-file`; Devin 3000.10.31 is the first build where a deny rule wins over an allow rule, which its per-run config relies on (its versions jumped from 2026.x to 3000.x in July 2026); Grok Build 1.0.34 is the build the GRK probe rows passed on (`dontAsk` with deny rules, the workspace sandbox, streaming JSON, and the switches that stop it reading Claude Code's config). The Gemini CLI floor was removed with the Antigravity migration (Google's hosted service stopped serving consumer tiers 2026-06-18); legacy Gemini users pin plugin `v2.4.3`. An absent or declined optional CLI is silently skipped — fallback chains always terminate at a core-trio member, which can't be disabled.
+Why these floors: Claude Code 2.1.277 is the first build that reads a root `AGENTS.md`, Triforge's only instruction file (D-037; it includes the 2.1.267 fix that honors `effort:` frontmatter on pinned-default models); a claude worker needs 2.1.285, the first build that ignores the repository settings that loosen its sandbox, and refuses to start on an older one unless `TRIFORGE_CLAUDE_SANDBOX=off` is set; every persona runs with Claude Code's `--safe-mode`, so `dispatch_persona` refuses a `claude` without the flag (rc 69) and prints the fix, `claude update`; the persona lane was tested on 2.1.289 and 2.1.291, and an exec persona, which runs Bash, also needs the 2.1.285 sandbox floor; agy 1.1.27 adds `denied_actions` to the JSON envelope that `invoke_antigravity` reads as its completion signal; Codex 0.153.0 is `gpt-6-astra`'s minimal client, and `gpt-6.1-sol`, which a role can pick, answered on Codex 0.160.0 and was refused on 0.155.1; OpenCode 1.18.20 answers subagent permission asks under `run`; Kimi 0.33.0 is the agent-core-v2 engine with `--agent-file`; Devin 3000.10.31 is the first build where a deny rule wins over an allow rule, which its per-run config relies on (its versions jumped from 2026.x to 3000.x in July 2026); Grok Build 1.0.34 is the build the GRK probe rows passed on (`dontAsk` with deny rules, the workspace sandbox, streaming JSON, and the switches that stop it reading Claude Code's config). The Gemini CLI floor was removed with the Antigravity migration (Google's hosted service stopped serving consumer tiers 2026-06-18); legacy Gemini users pin plugin `v2.4.3`. An absent or declined optional CLI is silently skipped — fallback chains always terminate at a core-trio member, which can't be disabled.
 
 ### Data egress and credentials
 
@@ -511,11 +512,13 @@ claude plugin update agent-triforge
 
 ### Upgrading from 3.x
 
-- Each 3.x slash command is now a lead workflow with an `at-` prefix: `/setup` became `/at-setup`, `/ship` became `/at-ship`, and so on for the whole set (`$at-setup`, `$at-ship` in a Codex prompt). The plugin no longer ships a `commands/` directory. The [Lead workflows reference](#lead-workflows-reference) lists every workflow.
+- Each 3.x slash command is now a lead workflow with an `at-` prefix: `/setup` became `/at-setup`, `/ship` became `/at-ship`, and so on for the whole set (`$agent-triforge:at-setup`, `$agent-triforge:at-ship` in a Codex prompt). The plugin no longer ships a `commands/` directory. The [Lead workflows reference](#lead-workflows-reference) lists every workflow.
 - Triforge 4 ships no `CLAUDE.md`. The project's instruction file is its root `AGENTS.md`, which Claude Code reads from 2.1.277, and only while no `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` sits in the project or above it. If your project kept a `CLAUDE.md` from the 3.x template, add an import line to it (`@AGENTS.md` in a root `CLAUDE.md`, `@../AGENTS.md` in `.claude/CLAUDE.md`), or replace its Triforge content with the pointer block from [`templates/AGENTS.md`](templates/AGENTS.md). Session start prints a warning naming the exact line on every session until you do; it never edits the file.
 - The `test-driven-development` and `systematic-debugging` skills are gone. Their rules now sit inline in `at-test`, `at-quick`, `at-debug` and the Codex `test_writer` and `debugger` agents.
 - If your project's `.codex/hooks.json` is still the unchanged 3.x copy, the first 4.0 session replaces it with the empty 4.0 template and prints a notice naming the file. The 3.x hook appended a line to `ops/CHANGELOG.md` from every Codex session, lease workers included; attribution now comes from the lease ledger. Session start leaves a copy you edited alone ([decision record](ops/decisions/2026-10-04-codex-hook-trust-bypass-retired.md)).
+- The 19 agents are now personas: prompt files in [`personas/`](personas/) with no frontmatter. Their tools, model tier and turn budget live in [`personas/manifest.toml`](personas/manifest.toml). The plugin ships no `agents/` directory, so Claude Code's agent list no longer shows them. The workflows run them through `dispatch_persona` under either lead. PR comment resolution now runs as a lease and lands as one reviewed commit on the PR branch.
 - On resume, `lease_heartbeat_check` now collects the builders that finished while no lead was watching and adopts the ones still running; builders run detached in 4.0 and outlive the lead's turn. In 3.x it printed `run: lease_collect <task>` and left the collect to you.
+- Triforge now sets up the project in the repository's top directory, the nearest one above that holds `.git`, wherever the session starts. A project that 3.x bootstrapped in a subdirectory of a larger repository keeps its `<subdir>/ops/`, and the first 4.0 session creates a new skeleton at the top. The lease ledger and the `[lead]` table already live in the top-level `ops/`, so move your other `ops/` files there and delete the subdirectory copy.
 
 ### Development (for contributors)
 
@@ -535,7 +538,7 @@ claude
 
 # You should see:
 # "Multi-agent framework ready."
-# "Lead workflows (/at-<name> here, $at-<name> in a Codex prompt): at-setup at-ship at-plan ..."
+# "Lead workflows (/at-<name> here, $agent-triforge:at-<name> in a Codex prompt): at-setup at-ship at-plan ..."
 
 /at-status
 ```
@@ -565,33 +568,33 @@ claude
 ./scripts/coordinate.sh "add user authentication" --max 5 --team
 ```
 
-In a Codex prompt the same workflows are `$at-<name>`. From a shell, wrap the prompt in single quotes so the shell leaves `$at-ship` alone: `codex exec '$at-ship add user authentication'`.
+In a Codex prompt the same workflows are `$agent-triforge:at-<name>`. From a shell, wrap the prompt in single quotes so the shell leaves `$agent-triforge:at-ship` alone: `codex exec '$agent-triforge:at-ship add user authentication'`.
 
 ---
 
 ## Lead workflows reference
 
-The 17 lead workflows are skills under [`skills/at-*/`](skills/) that only the lead runs. Type `/at-<name>` under a Claude Code lead or `$at-<name>` inside a Codex prompt. They stay in the lead's plugin install and are never copied into `.agents/skills/` or a lease worktree (KTD12). Each `SKILL.md` states the workflow's goal, its done condition and the direction it fails safe; the detail is in its `references/` folder. In 3.x these were slash commands without the prefix (`/ship`, `/setup`); see [Upgrading from 3.x](#upgrading-from-3x).
+The 17 lead workflows are skills under [`skills/at-*/`](skills/) that only the lead runs. Type `/at-<name>` under a Claude Code lead or `$agent-triforge:at-<name>` inside a Codex prompt. They stay in the lead's plugin install and are never copied into `.agents/skills/` or a lease worktree (KTD12). Each `SKILL.md` states the workflow's goal, its done condition and the direction it fails safe; the detail is in its `references/` folder. In 3.x these were slash commands without the prefix (`/ship`, `/setup`); see [Upgrading from 3.x](#upgrading-from-3x).
 
 | Lead workflow | Claude Code · Codex | Arguments | What it does |
 |---|---|---|---|
-| [**`at-ship`**](skills/at-ship/SKILL.md) | `/at-ship` · `$at-ship` | `<goal> [--convergence fast\|standard\|deep] [--team]` | Fully autonomous sprint: analyze, plan, build, review, test, wrap; prints a copyable completion line (the `/goal` gate under Claude Code) at the start and creates `ops/.sprint-complete` last. `fast` = P1 only, `deep` = P1 + P2 + P3 below 3; `--team` for 5+ or interdependent tasks. |
-| [**`at-coordinate`**](skills/at-coordinate/SKILL.md) | `/at-coordinate` · `$at-coordinate` | `<goal>` | The plain Phase 0–6 sprint cycle that [`scripts/coordinate.sh`](scripts/coordinate.sh) drives across fresh sessions; same pipeline as `at-ship` without convergence or team flags. |
-| [**`at-plan`**](skills/at-plan/SKILL.md) | `/at-plan` · `$at-plan` | `[goal]` | Phases 0 → 1.5: codebase analysis, knowledge search, shadow paths, waves, the three-assumption ambiguity check, [`plan-checker`](agents/plan-checker.md) validation. Writes `ops/TASKS.md` with its `Ceremony:` line. |
-| [**`at-build`**](skills/at-build/SKILL.md) | `/at-build` · `$at-build` | `[--team] [--wave N]` | Phase 2: [wave orchestration](skills/wave-orchestration/SKILL.md) over leased builder-pool tasks, cross-review by a pinned reviewer, one squash commit per task, `integration-verifier` per wave, the `[promotion]` gate. |
-| [**`at-review`**](skills/at-review/SKILL.md) | `/at-review` · `$at-review` | `[--full] [--security] [--perf] [--simple] [--conventions]` | Phases 3–4: parallel roster lanes plus the selected specialists, [synthesis](agents/findings-synthesizer.md), P1/P2 fixes, `## Review dispositions — Cycle N` in `ops/TASKS.md`; escalates after 3 cycles. |
-| [**`at-test`**](skills/at-test/SKILL.md) | `/at-test` · `$at-test` | `[--gaps-only] [scope]` | Phase 5: [gap analysis](agents/test-gap-analyzer.md), tests from the roster tester with the failing run first, fix cycle to green in `ops/TEST_RESULTS.md`. `--gaps-only` stops after the report. |
-| [**`at-wrap`**](skills/at-wrap/SKILL.md) | `/at-wrap` · `$at-wrap` | — | Phase 6: [compound knowledge](skills/knowledge-compounding/SKILL.md), update the `ops/` files, archive review files to `ops/archive/<today>/`, write [`STATE.md`](ops/STATE.md), print the sprint summary with its rulings, create the completion marker last. |
-| [**`at-quick`**](skills/at-quick/SKILL.md) | `/at-quick` · `$at-quick` | `[change description]` | A change touching fewer than 3 files with no shared interface or protected path: TDD, self-review, no swarm; hands off to `at-review --security` / `--perf` when a lens needs it. |
-| [**`at-debug`**](skills/at-debug/SKILL.md) | `/at-debug` · `$at-debug` | `[bug description or error message]` | Reproduce, root-cause with evidence, fix, find sibling instances, record in `ops/MEMORY.md` and `ops/CHANGELOG.md`; 3-attempt circuit breaker, then an escalation report. |
-| [**`at-setup`**](skills/at-setup/SKILL.md) | `/at-setup` · `$at-setup` | `[opencode\|kimi\|cursor\|grok\|roles]` | Guided roster onboarding: core trio live, Codex trust detected, each optional CLI enrolled or declined, roles kept, customized or restored; closes with the status table and a verdict. Idempotent. |
-| [**`at-deep-research`**](skills/at-deep-research/SKILL.md) | `/at-deep-research` · `$at-deep-research` | `[topic or goal]` | Five parallel research lenses plus [`research-synthesizer`](agents/research-synthesizer.md), every endpoint a recorded primary source; writes `ops/RESEARCH_ANTIGRAVITY.md` and hands off to `at-plan`. |
-| [**`at-analyze`**](skills/at-analyze/SKILL.md) | `/at-analyze` · `$at-analyze` | `[github-url or local-path]` | Read-only judgment of an external repo or resource: extractable patterns, prompt-engineering insights, verdict matrix, ranked recommendations. Nothing written. |
-| [**`at-status`**](skills/at-status/SKILL.md) | `/at-status` · `$at-status` | — | One report from `ops/`, git and the review files: phase, task counts, blockers, recent activity, pending reviews, uncommitted changes, available workflows. Writes nothing. |
-| [**`at-pause`**](skills/at-pause/SKILL.md) | `/at-pause` · `$at-pause` | — | Write the [`STATE.md`](ops/STATE.md) checkpoint a later session resumes from, and nothing else. |
-| [**`at-resume`**](skills/at-resume/SKILL.md) | `/at-resume` · `$at-resume` | — | Restore [`STATE.md`](ops/STATE.md), re-prove the baseline when HEAD moved, summarize, continue the recorded phase. |
-| [**`at-compound`**](skills/at-compound/SKILL.md) | `/at-compound` · `$at-compound` | `[solution \| decision] <description>` | Record a solved problem in [`ops/solutions/`](ops/solutions/) or a decision in [`ops/decisions/`](ops/decisions/) when it clears the counterfactual bar; otherwise one line saying why nothing was written. |
-| [**`at-resolve-pr`**](skills/at-resolve-pr/SKILL.md) | `/at-resolve-pr` · `$at-resolve-pr` | `<PR number or URL>` | Work through GitHub PR review comments via [`pr-comment-resolver`](agents/pr-comment-resolver.md): implement, answer or defer each, run the tests, update `ops/CHANGELOG.md`. |
+| [**`at-ship`**](skills/at-ship/SKILL.md) | `/at-ship` · `$agent-triforge:at-ship` | `<goal> [--convergence fast\|standard\|deep] [--team]` | Fully autonomous sprint: analyze, plan, build, review, test, wrap; prints a copyable completion line (the `/goal` gate under Claude Code) at the start and creates `ops/.sprint-complete` last. `fast` = P1 only, `deep` = P1 + P2 + P3 below 3; `--team` for 5+ or interdependent tasks. |
+| [**`at-coordinate`**](skills/at-coordinate/SKILL.md) | `/at-coordinate` · `$agent-triforge:at-coordinate` | `<goal>` | The plain Phase 0–6 sprint cycle that [`scripts/coordinate.sh`](scripts/coordinate.sh) drives across fresh sessions; same pipeline as `at-ship` without convergence or team flags. |
+| [**`at-plan`**](skills/at-plan/SKILL.md) | `/at-plan` · `$agent-triforge:at-plan` | `[goal]` | Phases 0 → 1.5: codebase analysis, knowledge search, shadow paths, waves, the three-assumption ambiguity check, [`plan-checker`](personas/plan-checker.md) validation. Writes `ops/TASKS.md` with its `Ceremony:` line. |
+| [**`at-build`**](skills/at-build/SKILL.md) | `/at-build` · `$agent-triforge:at-build` | `[--team] [--wave N]` | Phase 2: [wave orchestration](skills/wave-orchestration/SKILL.md) over leased builder-pool tasks, cross-review by a pinned reviewer, one squash commit per task, `integration-verifier` per wave, the `[promotion]` gate. |
+| [**`at-review`**](skills/at-review/SKILL.md) | `/at-review` · `$agent-triforge:at-review` | `[--full] [--security] [--perf] [--simple] [--conventions]` | Phases 3–4: parallel roster lanes plus the selected specialists, [synthesis](personas/findings-synthesizer.md), P1/P2 fixes, `## Review dispositions — Cycle N` in `ops/TASKS.md`; escalates after 3 cycles. |
+| [**`at-test`**](skills/at-test/SKILL.md) | `/at-test` · `$agent-triforge:at-test` | `[--gaps-only] [scope]` | Phase 5: [gap analysis](personas/test-gap-analyzer.md), tests from the roster tester with the failing run first, fix cycle to green in `ops/TEST_RESULTS.md`. `--gaps-only` stops after the report. |
+| [**`at-wrap`**](skills/at-wrap/SKILL.md) | `/at-wrap` · `$agent-triforge:at-wrap` | — | Phase 6: [compound knowledge](skills/knowledge-compounding/SKILL.md), update the `ops/` files, archive review files to `ops/archive/<today>/`, write [`STATE.md`](ops/STATE.md), print the sprint summary with its rulings, create the completion marker last. |
+| [**`at-quick`**](skills/at-quick/SKILL.md) | `/at-quick` · `$agent-triforge:at-quick` | `[change description]` | A change touching fewer than 3 files with no shared interface or protected path: TDD, self-review, no swarm; hands off to `at-review --security` / `--perf` when a lens needs it. |
+| [**`at-debug`**](skills/at-debug/SKILL.md) | `/at-debug` · `$agent-triforge:at-debug` | `[bug description or error message]` | Reproduce, root-cause with evidence, fix, find sibling instances, record in `ops/MEMORY.md` and `ops/CHANGELOG.md`; 3-attempt circuit breaker, then an escalation report. |
+| [**`at-setup`**](skills/at-setup/SKILL.md) | `/at-setup` · `$agent-triforge:at-setup` | `[opencode\|kimi\|cursor\|devin\|grok\|roles]` | Guided roster onboarding: core trio live, Codex trust detected, each optional CLI enrolled or declined, roles kept, customized or restored; closes with the status table and a verdict. Idempotent. |
+| [**`at-deep-research`**](skills/at-deep-research/SKILL.md) | `/at-deep-research` · `$agent-triforge:at-deep-research` | `[topic or goal]` | Five parallel research lenses plus [`research-synthesizer`](personas/research-synthesizer.md), every endpoint a recorded primary source; writes `ops/RESEARCH_ANTIGRAVITY.md` and hands off to `at-plan`. |
+| [**`at-analyze`**](skills/at-analyze/SKILL.md) | `/at-analyze` · `$agent-triforge:at-analyze` | `[github-url or local-path]` | Read-only judgment of an external repo or resource: extractable patterns, prompt-engineering insights, verdict matrix, ranked recommendations. Nothing written. |
+| [**`at-status`**](skills/at-status/SKILL.md) | `/at-status` · `$agent-triforge:at-status` | — | One report from `ops/`, git and the review files: phase, task counts, blockers, recent activity, pending reviews, uncommitted changes, available workflows. Writes nothing. |
+| [**`at-pause`**](skills/at-pause/SKILL.md) | `/at-pause` · `$agent-triforge:at-pause` | — | Write the [`STATE.md`](ops/STATE.md) checkpoint a later session resumes from, and nothing else. |
+| [**`at-resume`**](skills/at-resume/SKILL.md) | `/at-resume` · `$agent-triforge:at-resume` | — | Restore [`STATE.md`](ops/STATE.md), re-prove the baseline when HEAD moved, summarize, continue the recorded phase. |
+| [**`at-compound`**](skills/at-compound/SKILL.md) | `/at-compound` · `$agent-triforge:at-compound` | `[solution \| decision] <description>` | Record a solved problem in [`ops/solutions/`](ops/solutions/) or a decision in [`ops/decisions/`](ops/decisions/) when it clears the counterfactual bar; otherwise one line saying why nothing was written. |
+| [**`at-resolve-pr`**](skills/at-resolve-pr/SKILL.md) | `/at-resolve-pr` · `$agent-triforge:at-resolve-pr` | `<PR number or URL>` | Work through GitHub PR review comments via [`pr-comment-resolver`](personas/pr-comment-resolver.md): implement, answer or defer each, run the tests, update `ops/CHANGELOG.md`. |
 
 ### Keeping the framework current (`/cli-watch`, `/repo-watch` — maintainers)
 
@@ -629,7 +632,7 @@ The plugin ships 27 skills in one `skills/` tree: the 10 portable skills below, 
 
 ### Portable skills across the eight CLIs
 
-`session-start.sh` copies the 10 portable skills from the plugin's `skills/` into `.agents/skills/`, the agentskills.io path, and refreshes the copy whenever the plugin version changes. The stamp `.agents/skills/.triforge-plugin-version` records a content digest for each directory Triforge wrote, and only Triforge's own unchanged copies are replaced or retired. An edited copy, or your own directory under a shipped name, is kept with a notice; customizations are safest in a directory with a different name. Fixture evidence from the 2026-09-11 watch cycle ([`ops/research/2026-09-11-cli-updates.md`](ops/research/2026-09-11-cli-updates.md) §3.1) shows which path each CLI reads:
+The project bootstrap (`triforge_bootstrap`, run at session start and by `at-setup`, `at-build` and `at-review`) copies the 10 portable skills from the plugin's `skills/` into `.agents/skills/`, the agentskills.io path, and refreshes the copy whenever the plugin version changes. The stamp `.agents/skills/.triforge-plugin-version` records a content digest for each directory Triforge wrote, and only Triforge's own unchanged copies are replaced or retired. An edited copy, or your own directory under a shipped name, is kept with a notice; customizations are safest in a directory with a different name. Fixture evidence from the 2026-09-11 watch cycle ([`ops/research/2026-09-11-cli-updates.md`](ops/research/2026-09-11-cli-updates.md) §3.1) shows which path each CLI reads:
 
 | Path | Claude Code | agy | Codex | OpenCode | Cursor | Kimi (docs) |
 |---|---|---|---|---|---|---|
@@ -644,47 +647,47 @@ Claude Code is the one CLI that does not read `.agents/skills/`; it reads the pl
 
 Each harness invokes a skill in its own form: Claude `/name` · agy `agy --add-dir "$PWD" -p "/name"` (headless expansion; `agy -p "/skills"` lists them without a model call) · Codex `$name` · OpenCode `/name` through its native `skill` tool (commands via `opencode run --command <name>` from `.opencode/command/`) · Cursor `/name` in `-p` · Kimi `/skill:name` (live verification pending `kimi login`).
 
-The 17 lead workflows (`skills/at-*/`) are not in this copy. A lead gets them only from its plugin install (KTD12) and runs them as `/at-<name>` under Claude Code or `$at-<name>` in a Codex prompt. They are skills rather than slash commands because slash commands are per-harness: Codex custom prompts are deprecated and not expanded under `codex exec`. Agent definitions are never deployed into `.agents/agents/`, because agy and Kimi both scan it with incompatible tool vocabularies; agy stays on `agy plugin install`, and Kimi loads its definitions through `--agent-file`.
+The 17 lead workflows (`skills/at-*/`) are not in this copy. A lead gets them only from its plugin install (KTD12) and runs them as `/at-<name>` under Claude Code or `$agent-triforge:at-<name>` in a Codex prompt. They are skills rather than slash commands because slash commands are per-harness: Codex custom prompts are deprecated and not expanded under `codex exec`. Agent definitions are never deployed into `.agents/agents/`, because agy and Kimi both scan it with incompatible tool vocabularies; agy stays on `agy plugin install`, and Kimi loads its definitions through `--agent-file`.
 
 ---
 
-## Agents reference
+## Personas reference
 
-19 agents in [`agents/`](agents/) with restricted tools and focused expertise. Each runs in its own context window.
+19 personas in [`personas/`](personas/). A persona is a prompt with no frontmatter. Its entry in [`personas/manifest.toml`](personas/manifest.toml) sets a tool class (`read`, `read-web` or `exec`), a starting model tier and a turn budget, and `dispatch_persona` enforces all three. Each persona runs in its own context. The never-downgrade trio (`plan-checker`, `security-sentinel`, `findings-synthesizer`) always runs as top-tier Claude, whichever CLI leads.
 
 ### Core workflow (7)
 
-| Agent | Phase | What it does |
+| Persona | Phase | What it does |
 |---|---|---|
-| [**`plan-checker`**](agents/plan-checker.md) | 1.5 | Validates task plans for completeness, assignments, dependencies |
-| [**`findings-synthesizer`**](agents/findings-synthesizer.md) | 4 | Merges review outputs with deduplication and confidence tiering |
-| [**`integration-verifier`**](agents/integration-verifier.md) | 2 | Runs build, tests, lint between waves |
-| [**`learnings-researcher`**](agents/learnings-researcher.md) | Pre-1 | Searches [`ops/solutions/`](ops/solutions/) and [`ops/decisions/`](ops/decisions/) for relevant patterns |
-| [**`team-lead`**](agents/team-lead.md) | 2 | Orchestrates agent team workers with file ownership and quality gates |
-| [**`research-synthesizer`**](agents/research-synthesizer.md) | 0 | Merges parallel research outputs into unified analysis |
-| [**`continuous-reviewer`**](agents/continuous-reviewer.md) | 2 | Per-task quality gate during team builds — auto-reviews every completed task |
+| [**`plan-checker`**](personas/plan-checker.md) | 1.5 | Validates task plans for completeness, assignments, dependencies |
+| [**`findings-synthesizer`**](personas/findings-synthesizer.md) | 4 | Merges review outputs with deduplication and confidence tiering |
+| [**`integration-verifier`**](personas/integration-verifier.md) | 2 | Runs build, tests, lint between waves |
+| [**`learnings-researcher`**](personas/learnings-researcher.md) | Pre-1 | Searches [`ops/solutions/`](ops/solutions/) and [`ops/decisions/`](ops/decisions/) for relevant patterns |
+| [**`team-lead`**](personas/team-lead.md) | 2 | Orchestrates agent team workers with file ownership and quality gates |
+| [**`research-synthesizer`**](personas/research-synthesizer.md) | 0 | Merges parallel research outputs into unified analysis |
+| [**`continuous-reviewer`**](personas/continuous-reviewer.md) | 2 | Per-task quality gate during team builds — auto-reviews every completed task |
 
 ### Review specialists (6)
 
-| Agent | Lens | What it catches |
+| Persona | Lens | What it catches |
 |---|---|---|
-| [**`security-sentinel`**](agents/security-sentinel.md) | Security | SQL injection, XSS, auth bypass, data exposure, OWASP |
-| [**`performance-oracle`**](agents/performance-oracle.md) | Performance | O(n²) loops, N+1 queries, memory leaks, scalability |
-| [**`code-simplicity-reviewer`**](agents/code-simplicity-reviewer.md) | Complexity | Over-engineering, YAGNI violations, unnecessary abstraction |
-| [**`convention-enforcer`**](agents/convention-enforcer.md) | Conventions | Naming, file organization, code style consistency |
-| [**`architecture-strategist`**](agents/architecture-strategist.md) | Structure | SOLID principles, coupling/cohesion, module boundaries |
-| [**`test-gap-analyzer`**](agents/test-gap-analyzer.md) | Coverage | Untested code paths, missing edge cases, weak assertions |
+| [**`security-sentinel`**](personas/security-sentinel.md) | Security | SQL injection, XSS, auth bypass, data exposure, OWASP |
+| [**`performance-oracle`**](personas/performance-oracle.md) | Performance | O(n²) loops, N+1 queries, memory leaks, scalability |
+| [**`code-simplicity-reviewer`**](personas/code-simplicity-reviewer.md) | Complexity | Over-engineering, YAGNI violations, unnecessary abstraction |
+| [**`convention-enforcer`**](personas/convention-enforcer.md) | Conventions | Naming, file organization, code style consistency |
+| [**`architecture-strategist`**](personas/architecture-strategist.md) | Structure | SOLID principles, coupling/cohesion, module boundaries |
+| [**`test-gap-analyzer`**](personas/test-gap-analyzer.md) | Coverage | Untested code paths, missing edge cases, weak assertions |
 
 ### Research and verification (6)
 
-| Agent | What it does |
+| Persona | What it does |
 |---|---|
-| [**`best-practices-researcher`**](agents/best-practices-researcher.md) | Industry-wide patterns, anti-patterns, tradeoff analysis |
-| [**`framework-docs-researcher`**](agents/framework-docs-researcher.md) | Current documentation for specific frameworks and libraries |
-| [**`git-history-analyzer`**](agents/git-history-analyzer.md) | Code evolution and architectural decisions via git history |
-| [**`bug-reproduction-validator`**](agents/bug-reproduction-validator.md) | Validates bugs are reproducible before fixes begin |
-| [**`deployment-verifier`**](agents/deployment-verifier.md) | Post-deployment health checks, smoke tests, error monitoring |
-| [**`pr-comment-resolver`**](agents/pr-comment-resolver.md) | Reads GitHub PR review comments and implements changes |
+| [**`best-practices-researcher`**](personas/best-practices-researcher.md) | Industry-wide patterns, anti-patterns, tradeoff analysis |
+| [**`framework-docs-researcher`**](personas/framework-docs-researcher.md) | Current documentation for specific frameworks and libraries |
+| [**`git-history-analyzer`**](personas/git-history-analyzer.md) | Code evolution and architectural decisions via git history |
+| [**`bug-reproduction-validator`**](personas/bug-reproduction-validator.md) | Validates bugs are reproducible before fixes begin |
+| [**`deployment-verifier`**](personas/deployment-verifier.md) | Post-deployment health checks, smoke tests, error monitoring |
+| [**`pr-comment-resolver`**](personas/pr-comment-resolver.md) | Reads GitHub PR review comments and implements changes, as a lease builder |
 
 ---
 
@@ -698,10 +701,10 @@ Seven safeguards keep long sprints from dying to context limits:
 
 | Layer | Mechanism | Guards against |
 |---|---|---|
-| **Completion gating** | The `ops/.sprint-complete` sentinel, created only after verification passes, is the authoritative signal; the native `/goal` checklist is a best-effort assist — [`coordinate.sh`](scripts/coordinate.sh) leads every session prompt with it and `at-ship` / `at-coordinate` print a copyable `/goal` line, but headless gating is flaky (probe CC-03 1 of 3, D-030) | Claude declaring victory early |
-| **Outer loop** | [`scripts/coordinate.sh`](scripts/coordinate.sh) — spawns fresh sessions with clean context, detects completion via the `ops/.sprint-complete` sentinel, notifies on completion | Context window filling up |
+| **Completion gating** | The `ops/.sprint-complete` sentinel, created only after verification passes, is the authoritative signal. Under a Claude Code lead the native `/goal` checklist adds a best-effort gate: [`coordinate.sh`](scripts/coordinate.sh) leads every session prompt with it and `at-ship` / `at-coordinate` print a copyable `/goal` line, but headless gating is flaky (probe CC-03 1 of 3, D-030). A Codex lead has no `/goal`, so its sessions complete on the sentinel alone | The lead declaring victory early |
+| **Outer loop** | [`scripts/coordinate.sh`](scripts/coordinate.sh) starts a fresh lead session per iteration and runs the lead's launch line from the registry with the `[lead]` model and effort. It runs the git integrity check before each session, stops after one session on a login or quota failure, detects completion via the `ops/.sprint-complete` sentinel, and notifies on completion. A Codex lead's launch line runs with full access, so the script runs it only when you pass `--allow-full-access`; without the flag it prints the line and exits 77. Run it from a terminal or from the lead's own shell; under nohup, cron or CI it exits 45 | Context window filling up |
 | **PreCompact** | [`pre-compact.sh`](hooks/handlers/pre-compact.sh) — auto-checkpoints `STATE.md` before context compaction | State loss during mid-sprint compaction |
-| **Analysis paralysis** | [`context-monitor.sh`](hooks/handlers/context-monitor.sh) — warns at 8+ consecutive reads without writes | Reading without producing |
+| **Analysis paralysis** | [`context-monitor.sh`](hooks/handlers/context-monitor.sh) warns at 8+ consecutive reads without writes. The lead's tool vocabulary in the registry decides what counts as a read; under a Codex lead, a shell command that only reads (`cat`, `sed -n`, `git log`) counts | Reading without producing |
 | **Tool failure monitor** | [`tool-failure-monitor.sh`](hooks/handlers/tool-failure-monitor.sh) — tracks and warns on accumulated tool failures | Silent failure accumulation |
 | **Subprocess timeouts** | Watchdog pattern on all Antigravity/Codex calls — SIGTERM after timeout, SIGKILL after 5s grace | Hung external agents blocking pipeline |
 | **Risk scoring** | Per-subagent risk accumulation — halt at >20% or 50+ file changes | Runaway subagents |
@@ -712,6 +715,10 @@ Seven safeguards keep long sprints from dying to context limits:
 
 # With completion notification via webhook
 NOTIFY_WEBHOOK_URL="https://hooks.slack.com/..." ./scripts/coordinate.sh "Build auth" --max 5
+
+# Under a Codex lead: preview the launch line and prompt, then run with full access acknowledged
+./scripts/coordinate.sh "Build auth" --dry-run --lead codex
+./scripts/coordinate.sh "Build auth" --max 5 --allow-full-access
 ```
 
 ### Key constraints
@@ -732,10 +739,10 @@ This framework was informed by analyzing the [Claude Code Blueprint](https://git
 | Dimension | [Claude Code Blueprint](https://github.com/Ninety2UA/claude-code-blueprint) | This framework |
 |---|---|---|
 | **Agent model** | Homogeneous (Claude-only) | Heterogeneous eight-CLI builder pool (core trio + optional OpenCode/Kimi/Cursor/Devin/Grok Build) |
-| **Review agents** | 6 Claude subagents | 7 reviewers (2 external + 5 Claude subagents) |
+| **Review agents** | 6 Claude subagents | 7 reviewers (2 external + 5 specialist personas) |
 | **Codebase analysis** | Claude subagent | [Antigravity CLI](https://antigravity.google/cli) (1M token context) |
 | **Test execution** | Claude subagent | [Codex CLI](https://github.com/openai/codex) (sandboxed execution) |
-| **Coordination** | Native subagents + git | File protocol + bash + subagents + teams |
+| **Coordination** | Native subagents + git | File protocol + bash + personas + teams |
 | **Skills** | Claude-only | Portable across all roster CLIs via [injection](#portable-skill-injection) |
 | **Dependencies** | Zero (markdown only) | Core trio required (Claude + Antigravity + Codex); optional tier adds OpenCode/Kimi/Cursor |
 
@@ -785,15 +792,15 @@ No. Skills activate contextually. If you never cut scope, the <a href="skills/sc
 </details>
 
 <details>
-<summary><strong>How do agents differ from skills?</strong></summary>
+<summary><strong>How do personas differ from skills?</strong></summary>
 
-<strong>Skills</strong> are instructions that guide an agent's behavior — methodology documents. <strong>Agents</strong> are separate subprocesses dispatched via the Agent tool, each with their own context window. Skills can be injected into any agent (including external ones like Antigravity and Codex).
+<strong>Skills</strong> are methodology documents that guide an agent's behavior. <strong>Personas</strong> are separate processes that <code>dispatch_persona</code> starts, each with its own context and only the tools its manifest entry allows. Skills can be injected into any agent (including external ones like Antigravity and Codex).
 </details>
 
 <details>
 <summary><strong>What are Agent Teams?</strong></summary>
 
-<a href="agents/team-lead.md">Agent Teams</a> spawn multiple Claude Code instances that collaborate through a shared task list and messaging. Unlike review swarms (read-only analysis), Agent Teams are peers that divide file ownership and coordinate builds. Enable with <code>CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"</code> in settings.json.
+<a href="personas/team-lead.md">Agent Teams</a> spawn multiple Claude Code instances that collaborate through a shared task list and messaging. Unlike review swarms (read-only analysis), Agent Teams are peers that divide file ownership and coordinate builds. Enable with <code>CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"</code> in settings.json.
 </details>
 
 <details>
@@ -805,7 +812,7 @@ No. Use <a href="skills/at-quick/SKILL.md"><code>at-quick</code></a> for changes
 <details>
 <summary><strong>How does context exhaustion recovery work?</strong></summary>
 
-Two layers. <strong>Inside</strong> a session, the <code>ops/.sprint-complete</code> sentinel is the authoritative completion signal — created only after the verification checklist passes. Claude Code's native <code>/goal</code> checklist is a best-effort assist on top: <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> leads every composed prompt with a <code>/goal</code> line, and <code>at-ship</code>/<code>at-coordinate</code> print a copyable one for interactive runs, but headless gating is model-behavior-dependent (probe CC-03 passed 1 of 3 runs in the 2026-09 cycle, D-030), so nothing relies on it. <strong>Outside</strong> a session, <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> spawns fresh Claude processes with clean context windows, detecting completion via the sentinel; state persists via git and <code>ops/STATE.md</code>. A PreCompact hook auto-checkpoints STATE.md before context compaction.
+Two layers. <strong>Inside</strong> a session, the <code>ops/.sprint-complete</code> sentinel is the authoritative completion signal — created only after the verification checklist passes. Claude Code's native <code>/goal</code> checklist is a best-effort assist on top: <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> leads every composed prompt with a <code>/goal</code> line, and <code>at-ship</code>/<code>at-coordinate</code> print a copyable one for interactive runs, but headless gating is model-behavior-dependent (probe CC-03 passed 1 of 3 runs in the 2026-09 cycle, D-030), so nothing relies on it. <strong>Outside</strong> a session, <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> spawns fresh lead processes with clean context windows, detecting completion via the sentinel; state persists via git and <code>ops/STATE.md</code>. A PreCompact hook auto-checkpoints STATE.md before context compaction.
 </details>
 
 <details>

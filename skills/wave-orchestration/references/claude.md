@@ -2,9 +2,9 @@
 
 The Claude Code-specific ways of running the wave. The lease and cross-review contract in the builder-pool-protocol reference is the same in every form; only the spawning mechanism differs.
 
-## Sub-agents and the Fable override
+## Personas and the Fable override
 
-Under Claude Code a sub-agent is spawned with the Agent tool. The spawn-time Fable override (model-routing reference) is the Agent tool's `model` parameter set to `fable` for team-lead and the never-downgrade trio (security-sentinel, plan-checker, findings-synthesizer) when the newest `ops/research/*-probe-record.md` (`latest_probe_record` in `$ROOT/scripts/invoke-external.sh`), row CC-02, shows Fable PASS on the host.
+Personas start detached through `persona_spawn` (it runs `dispatch_persona`) in the Bash tool, not the Agent tool, and are collected with `persona_wait`, rerun while it returns 75; and the persona lane applies the spawn-time Fable override (model-routing reference) to top-tier personas itself. The one Agent-tool spawn left is the `team-lead` persona in team mode: its `model` parameter is `fable` when the newest `ops/research/*-probe-record.md` (`latest_probe_record` in `$ROOT/scripts/invoke-external.sh`), row CC-02, shows Fable PASS on the host, otherwise `opus`, at `max` effort.
 
 ## Waiting on builders
 

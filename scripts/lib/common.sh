@@ -151,7 +151,7 @@ _classify_invoke_failure() {
 #
 # _adapter_env (scripts/lib/lease.sh) puts TRIFORGE_LEASE_WORKER into every
 # lease worker's environment: `builder` for a lease build, `persona` for a
-# persona dispatch (U25's dispatch_persona will set _ADAPTER_WORKER=persona).
+# persona dispatch (dispatch_persona in persona.sh sets _ADAPTER_WORKER=persona).
 # Any non-empty value counts as the marker. The hook handlers exit at once
 # under it, and every helper that carves, dispatches, collects, merges,
 # promotes or writes the ledger or the roster (lease.sh, roster.sh) starts with
@@ -169,6 +169,24 @@ _RC_LEAD_ONLY=45
 # _lead_gitconfig_capture writes it, _is_lease_root recognizes a lease root by
 # it. Keep the bytes.
 _LEAD_GITCONFIG_SIGNATURE='# Triforge trusted git config'
+
+# _READ_REGULAR_PY — python: read_regular(path[, text]), the bytes (or, with
+# text, the str open(path, "r") reads) of a regular file. Opened O_NONBLOCK,
+# so a FIFO a worker planted at ops/roster.toml or ops/leases.toml fails at
+# once instead of blocking the reader before its type is known; anything but a
+# regular file raises OSError. Every python reader of the roster and the
+# ledger in roster.sh, lease.sh and coordinate.sh reads through it (Phase 3
+# round 5, G3); the hooks, which may run without this library, carry the same
+# few lines.
+_READ_REGULAR_PY='
+def read_regular(p, text=False):
+    import os, stat
+    fd = os.open(p, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+    with os.fdopen(fd, "r" if text else "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise OSError("not a regular file: " + p)
+        return f.read()
+'
 
 # _lead_only <helper> [--any-host] — 0 in a lead context; otherwise one stderr
 # line naming the reason and rc _RC_LEAD_ONLY. In order: the worker marker, the

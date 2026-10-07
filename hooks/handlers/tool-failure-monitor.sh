@@ -5,19 +5,34 @@
 # inspects tool_response for an error signal and only counts failures.
 # Warns at 5 consecutive or 10 total failures per session.
 #
+# The error signal, by payload shape: a tool_response object with is_error
+# true or an error field (Claude Code); a plain-text tool_response that opens
+# with "Exit code: <n>" (Codex's apply_patch), failed when n is not 0. Plain
+# text with no exit code (Codex reports its exec_command calls that way, CDX-21)
+# carries no signal: such a call counts as a success, and the first one in a
+# session says so once on stderr (R44).
+#
+# State and output live in monitors.py beside this file (the "failures"
+# half): per-session counts under
+#   ${TMPDIR}/triforge-monitors-<uid>/<checkout>-<hash>/<session_id>.failures
+# outside the project (R21), in directories checked private on every call and
+# files written without following a link; every value printed is stripped of
+# control characters.
+#
 # Hook event: PostToolUse
 # Configuration: registered in hooks/hooks.json (plugin)
 #
 # ON_CRASH: ALLOW — a crash must never block the tool call (R14/G7): this hook
 #   is advisory only; the EXIT trap below turns any unexpected non-zero status
-#   (set -e / set -u, e.g. an unwritable .claude/) into a stderr notice + exit 0,
-#   and every explicit exit path (the non-failure early return) is `exit 0`.
+#   (set -e / set -u) into a stderr notice + exit 0, a monitors.py failure is
+#   one stderr notice, and every explicit exit path is `exit 0`.
 # Exit codes: 0 ok · 2 hook deny (never used by Triforge handlers) · 64 usage ·
 #   66 no-input · 69 unavailable · 70 internal · 80 degraded (documented only —
 #   Triforge handlers always return 0).
 # Hook stdout must never look like JSON: no stdout line may start with `{`
 #   (Claude Code ≥ 2.1.246 rejects hook stdout that parses as JSON — D-031c).
-#   Audited 2026-09-11: the only stdout lines start "WARN:".
+#   Audited 2026-10-06: the only stdout lines start "WARN:"; the
+#   one-per-session NOTE goes to stderr.
 
 # Worker marker (KTD9, R34): in a lease worker or persona (TRIFORGE_LEASE_WORKER
 # set by _adapter_env) this hook does nothing and prints nothing — a worker's
@@ -39,78 +54,42 @@ _tf_on_exit() {
 }
 trap _tf_on_exit EXIT
 
-HOOK_INPUT=$(cat)
-
-STATE_FILE=".claude/tool-failures.local.md"
-mkdir -p .claude
-
-# Parse tool_name and failure signal from hook input.
-# Claude Code marks failed tool responses with is_error=true or an error field.
-PARSED=$(echo "$HOOK_INPUT" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    tool = d.get('tool_name', 'unknown')
-    resp = d.get('tool_response', {})
-    is_err = False
-    if isinstance(resp, dict):
-        if resp.get('is_error') is True:
-            is_err = True
-        elif resp.get('error'):
-            is_err = True
-    print(f'{tool}|{\"1\" if is_err else \"0\"}')
-except Exception:
-    print('unknown|0')
-" 2>/dev/null || echo "unknown|0")
-
-TOOL_NAME="${PARSED%|*}"
-FAILED="${PARSED#*|}"
-
-# Non-failure: reset consecutive counter and exit quietly.
-if [ "$FAILED" != "1" ]; then
-  if [ -f "$STATE_FILE" ]; then
-    TEMP_FILE="${STATE_FILE}.tmp.$$"
-    sed 's/^consecutive_failures: .*/consecutive_failures: 0/' "$STATE_FILE" > "$TEMP_FILE"
-    mv "$TEMP_FILE" "$STATE_FILE"
+# _tf_nopython <payload> — python3 is a Triforge prerequisite; without it the
+# monitor is off, and says so once per session, not on every call (Phase 3
+# round 4, P3-4). The marker is a directory made by mkdir (atomic, and never
+# a write through a link) in the per-user base monitors.py keeps under
+# TMPDIR, when that base is a real directory of this user; with no readable
+# session id, or no such base, the note prints on every call instead.
+_tf_nopython() {
+  local S="" B="" M=""
+  S=$(printf '%s' "$1" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9._-]\{1,80\}\)".*/\1/p' 2>/dev/null | head -1) || S=""
+  B="${TMPDIR:-/tmp}/triforge-monitors-${UID:-unknown}"
+  if [ -n "$S" ] && { [ -d "$B" ] || mkdir -m 700 "$B" 2>/dev/null; } && [ -d "$B" ] && [ ! -L "$B" ] && [ -O "$B" ]; then
+    M="${B}/tool-failure-monitor.${S}.nopython-noted"
+    if ! mkdir "$M" 2>/dev/null && [ -d "$M" ] && [ ! -L "$M" ]; then
+      return 0
+    fi
   fi
+  echo "tool-failure-monitor: WARNING python3 is not on PATH, so failure tracking is off (python3 is a Triforge prerequisite; said once per session) — advisory only, tool call continues" >&2
+}
+
+# monitors.py reads the payload from the hook's stdin itself. When it fails
+# (no monitors.py beside this file) whatever it left unread is drained, so
+# the caller never writes into a closed pipe.
+TF_HANDLERS=${BASH_SOURCE[0]%/*}
+if [ "$TF_HANDLERS" = "${BASH_SOURCE[0]}" ]; then TF_HANDLERS=.; fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  TF_IN=""
+  if [ ! -t 0 ]; then TF_IN=$(cat 2>/dev/null) || TF_IN=""; fi
+  _tf_nopython "$TF_IN"
   exit 0
 fi
 
-# Initialize state file if missing
-if [ ! -f "$STATE_FILE" ]; then
-  cat > "$STATE_FILE" << 'EOF'
----
-failure_count: 0
-consecutive_failures: 0
----
-EOF
+RC=0
+python3 "${TF_HANDLERS}/monitors.py" failures || RC=$?
+if [ "$RC" -ne 0 ]; then
+  [ -t 0 ] || cat > /dev/null 2>&1 || true
+  echo "tool-failure-monitor: WARNING the monitor failed (rc=${RC}) — advisory only, tool call continues (ON_CRASH: ALLOW)" >&2
 fi
-
-# Parse current counts (default to 0 if missing/malformed)
-FAILURE_COUNT=$(sed -n 's/^failure_count: \([0-9]*\).*/\1/p' "$STATE_FILE")
-FAILURE_COUNT="${FAILURE_COUNT:-0}"
-CONSECUTIVE=$(sed -n 's/^consecutive_failures: \([0-9]*\).*/\1/p' "$STATE_FILE")
-CONSECUTIVE="${CONSECUTIVE:-0}"
-
-FAILURE_COUNT=$((FAILURE_COUNT + 1))
-CONSECUTIVE=$((CONSECUTIVE + 1))
-
-# Atomic state update via python to avoid sed-injection risk
-TEMP_FILE="${STATE_FILE}.tmp.$$"
-FAILURE_COUNT="$FAILURE_COUNT" CONSECUTIVE="$CONSECUTIVE" python3 -c "
-import os
-print('---')
-print(f'failure_count: {os.environ[\"FAILURE_COUNT\"]}')
-print(f'consecutive_failures: {os.environ[\"CONSECUTIVE\"]}')
-print('---')
-" > "$TEMP_FILE"
-mv "$TEMP_FILE" "$STATE_FILE"
-
-# Warn at thresholds
-if [ "$CONSECUTIVE" -ge 5 ]; then
-  printf 'WARN:%s consecutive tool failures (latest: %s). Consider investigating before continuing.\n' "$CONSECUTIVE" "$TOOL_NAME"
-elif [ "$FAILURE_COUNT" -ge 10 ]; then
-  printf 'WARN:%s total tool failures this session (latest: %s). Check .claude/tool-failures.local.md for details.\n' "$FAILURE_COUNT" "$TOOL_NAME"
-fi
-
 exit 0

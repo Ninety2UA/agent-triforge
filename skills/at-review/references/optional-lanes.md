@@ -1,10 +1,11 @@
 # Optional reviewer lanes (roster-driven)
 
-The core-trio swarm (Antigravity + Codex) is the shipped default and always runs. In addition, dispatch a reviewer lane for every **enrolled optional member** (`[members.<cli>] enabled = true` in `ops/roster.toml`) AND for any optional CLI named as the **primary `reviewer`** via `[roles.reviewer] cli = "<optional>"`. Each writes `ops/REVIEW_<CLI>.md`; `findings-synthesizer` globs `ops/REVIEW_*.md`, so these lanes are merged automatically when present. Members that are absent or declined are skipped silently (AE1). The lanes run in parallel, as the core lanes do. Each runs in a background subshell with its own output file and REVIEW file, and the block waits for each one. A lane's output becomes its REVIEW file only when the helper exited 0 and the report's `Status:` line says DONE or DONE_WITH_CONCERNS; a lane that exits nonzero is reported as failed with its exit code and reason, and the other lanes still finish. Every lane's prompt carries the review package (`REVIEW_PKG`, the directory the review-package block printed): each `[R]` task with its fields, the inventory of changed files and the diff, because the read-class reviewers cannot run git and Grok reviews from a copy of HEAD. Without a package no lane starts. If the roster does not load, the block stops before any lane starts, as the core dispatch does. `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it).
+The core-trio swarm (Antigravity + Codex) is the shipped default and always runs. In addition, dispatch a reviewer lane for every **enrolled optional member** (`[members.<cli>] enabled = true` in `ops/roster.toml`) AND for any optional CLI named as the **primary `reviewer`** via `[roles.reviewer] cli = "<optional>"`. Each writes `ops/REVIEW_<CLI>.md` and is added to the cycle's lane list in `$REVIEW_RUN` (set it to the run directory the dispatch block printed), so synthesis treats a dispatched lane that left no file as a gap. Members that are absent or declined are skipped silently (AE1). The lanes run in parallel, as the core lanes do. Each runs in a background subshell with its own output file and REVIEW file, and the block waits for each one. A lane's output becomes its REVIEW file only when the helper exited 0 and the report's `Status:` line says DONE or DONE_WITH_CONCERNS; a lane that exits nonzero is reported as failed with its exit code and reason, and the other lanes still finish. Every lane's prompt carries the review package (`REVIEW_PKG`, the directory the review-package block printed): each `[R]` task with its fields, the inventory of changed files and the diff, because the read-class reviewers cannot run git and Grok reviews from a copy of HEAD. Without a package no lane starts. If the roster does not load, the block stops before any lane starts, as the core dispatch does. `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it).
 
 ```bash
 set -euo pipefail
 ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
+: "${REVIEW_RUN:?set REVIEW_RUN to the run directory the dispatch block printed}"
 
 # The review package (one per cycle, built after the lead's integrity check):
 # no lane starts without it.
@@ -42,10 +43,11 @@ for OCLI in $(cli_list optional); do
   if [ "$ENABLED" != "true" ] && [ "$OCLI" != "$REVIEWER_PRIMARY" ]; then
     continue
   fi
+  UP=$(printf '%s' "$OCLI" | tr '[:lower:]' '[:upper:]')
+  printf 'ops/REVIEW_%s.md\n' "$UP" >> "$REVIEW_RUN/lanes"   # dispatched: synthesis expects its file
   (
     OMODEL=$(_roster_member_field "$OCLI" model 2>/dev/null || true)   # empty -> helper's shipped default
-    UP=$(printf '%s' "$OCLI" | tr '[:lower:]' '[:upper:]')
-    OOUT="${TMPDIR:-/tmp}/${OCLI}_review_$$_$(date +%s).txt"
+    OOUT="$REVIEW_RUN/${OCLI}.txt"   # the cycle's own run directory, never a predictable name in TMPDIR
     ORC=0
     case "$OCLI" in
       opencode) OPENCODE_MODEL="${OMODEL:-}" invoke_opencode "reviewer" "$REVIEW_PROMPT" "$OOUT" 600 || ORC=$? ;;

@@ -1,6 +1,6 @@
 interface:
   display_name: "Conforming fixture"
   short_description: "Passes every validate-skills rule under strict."
-  default_prompt: "Run $at-conforming and report the root."
+  default_prompt: "Run $agent-triforge:at-conforming and report the root."
 policy:
   allow_implicit_invocation: false

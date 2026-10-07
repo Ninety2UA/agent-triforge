@@ -8,7 +8,7 @@ Execute ALL phases in order. Do not skip a phase unless its entry says so, and s
 
 ## Pre-plan: search institutional knowledge
 
-Spawn `learnings-researcher` as a sub-agent to search `ops/solutions/` and `ops/decisions/` for relevant patterns.
+The `learnings-researcher` persona searches `ops/solutions/` and `ops/decisions/` for patterns relevant to the goal. Write the goal to a file, start it with `persona_spawn "$RUN" learnings learnings-researcher <goal file> "$RUN/learnings.md" --brief "Search ops/solutions/ and ops/decisions/ for patterns relevant to the goal in the input."` (`RUN=$(mktemp -d "${TMPDIR:-/tmp}/triforge-plan.XXXXXX")`), and rerun `persona_wait "$RUN"` in a separate block while it returns 75.
 
 ## Phase 0: codebase analysis
 
@@ -53,14 +53,14 @@ Before building, surface the 3 most critical unverified assumptions about the go
 
 ## Phase 1.5: plan validation
 
-Spawn `plan-checker` as a sub-agent. Iterate until APPROVED (max 3 rounds).
+Start it detached in one block, `persona_spawn "$RUN" plan-checker plan-checker ops/TASKS.md "$RUN/verdict.md"` with `RUN=$(mktemp -d "${TMPDIR:-/tmp}/triforge-plan.XXXXXX")`; in the next, rerun `persona_wait "$RUN"` while it returns 75, then read the verdict from `$RUN/verdict.md` once `plan-checker.rc` is 0. Iterate until APPROVED (max 3 rounds).
 
 ## Phase 2: build
 
 - Assign every task from `ops/roster.toml` and build it under a per-task lease in an isolated worktree; merge only after cross-review by a pinned non-author reviewer (the builder-pool wave protocol in the `wave-orchestration` skill). The single-writer rule is retired; safety is leases + worktree isolation + cross-review.
 - Fewer than 5 independent tasks → sub-agent mode with wave orchestration.
-- 5 or more tasks, or interdependent tasks, or `--team` → agent-team mode with `team-lead`.
-- Approved merges land as one commit per task on the sprint integration branch (`lease_merge` refuses the default branch); `integration-verifier` runs against that branch between waves, then the lead promotes to the main branch with `lease_promote`, which honors `[promotion]` and BLOCKS on protected-path diffs (they force the gate on).
+- 5 or more tasks, or interdependent tasks, or `--team` → agent-team mode with the `team-lead` persona.
+- Approved merges land as one commit per task on the sprint integration branch (`lease_merge` refuses the default branch); the `integration-verifier` persona runs against that branch between waves (`--at ref:<integration branch>`), then the lead promotes to the main branch with `lease_promote`, which honors `[promotion]` and BLOCKS on protected-path diffs (they force the gate on).
 - Apply risk scoring (halt at risk above 20 % or 50+ file changes).
 
 ## Phase 3: parallel review
@@ -69,11 +69,11 @@ Launch ALL reviewers simultaneously:
 
 - Antigravity (architecture, design), in the background.
 - Codex (logic, security, tests), in the background.
-- `security-sentinel`, `performance-oracle` and `code-simplicity-reviewer` as sub-agents, launched in the same round.
+- `security-sentinel`, `performance-oracle` and `code-simplicity-reviewer` as personas in the same round, the way the `at-review` skill's dispatch and wait blocks run them: each starts detached (`persona_spawn "$RUN" <LANE> <persona> <review package file> <out> --brief "<the review task>"`) and a wait block, rerun while it returns 75, collects them.
 
 ## Phase 4: process reviews
 
-Spawn `findings-synthesizer` as a sub-agent. Apply the `iterative-refinement` skill:
+Run `findings-synthesizer` the way the `at-review` skill's synthesis does: started detached with the expected lanes and their state as its input and the task and the expected lane files in `--brief`, then a wait block rerun while it returns 75; a lane that is missing or empty is a gap and the cycle does not converge on it. Apply the `iterative-refinement` skill:
 
 - Fix P1 + P2 issues.
 - Check convergence (the mode from the invocation; default `standard`).
@@ -81,7 +81,7 @@ Spawn `findings-synthesizer` as a sub-agent. Apply the `iterative-refinement` sk
 
 ## Phase 5: test
 
-- Spawn `test-gap-analyzer` to identify coverage gaps.
+- Write the scope (the changed paths) to a file, start `persona_spawn "$RUN" test-gap-analyzer test-gap-analyzer <scope file> "$RUN/gaps.md" --brief "Find the untested paths in the scope the input names."` and rerun `persona_wait "$RUN"` in a separate block while it returns 75. It runs at the default `--at ref:HEAD`, which sees committed work only: when the scope has uncommitted changes, stop and ask the user to commit them or name a ref, and never commit for them.
 - Dispatch Codex to write tests, failing test first.
 - Fix failures, re-run until green.
 

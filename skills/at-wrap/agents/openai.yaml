@@ -1,6 +1,6 @@
 interface:
   display_name: "Triforge Wrap"
   short_description: "Phase 6 wrap-up: compound, archive, STATE.md, marker."
-  default_prompt: "Run $at-wrap for this session and print the sprint summary."
+  default_prompt: "Run $agent-triforge:at-wrap for this session and print the sprint summary."
 policy:
   allow_implicit_invocation: false

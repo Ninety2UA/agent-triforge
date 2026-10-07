@@ -26,4 +26,4 @@ Phases are 0 codebase analysis, 1 plan (1a pre-plan research, 1b planning, 1.1 a
 
 ## Output
 
-The overview, in the shape of [references/status-template.md](references/status-template.md): `## Sprint status` with **Goal** and **Phase**, then `### Tasks`, `### Blockers`, `### Recent activity`, `### Pending reviews`, `### Uncommitted changes` and `### Available commands` — the seventeen Triforge workflows, printed in the form the lead's harness uses (`/at-name` under Claude Code, `$at-name` under Codex; one form only). Nothing is written to disk.
+The overview, in the shape of [references/status-template.md](references/status-template.md): `## Sprint status` with **Goal** and **Phase**, then `### Tasks`, `### Blockers`, `### Recent activity`, `### Pending reviews`, `### Uncommitted changes` and `### Available commands` — the seventeen Triforge workflows, printed in the form the lead's harness uses (`/at-name` under Claude Code, `$agent-triforge:at-name` under Codex; one form only). Nothing is written to disk.

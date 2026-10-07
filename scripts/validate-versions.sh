@@ -27,7 +27,7 @@
 #      whatever comes after it, so a restatement that starts at another rung
 #      counts too (matched case-insensitively; whitespace and * _ ` markup may
 #      sit between the phrase and the colon). The instruction files,
-#      agents/team-lead.md and skills/wave-orchestration/SKILL.md point at the
+#      personas/team-lead.md and skills/wave-orchestration/SKILL.md point at the
 #      registry with " — " after the phrase instead. The sweep scope of check 4
 #      applies (history directories, the README ledger and this script are not
 #      shipped surfaces); any second match, or a single match outside the
@@ -76,14 +76,15 @@
 #      ("history" or "was <word>"), and README.md at or below its
 #      "## Recent changes" heading (the release ledger: past entries name the
 #      pins they adopted at the time).
-#   5. Surface counts — agents/*.md and skills/*/SKILL.md, the skills counted
+#   5. Surface counts — personas/*.md and skills/*/SKILL.md, the skills counted
 #      three ways (every skill; the portable set, whose names do not start
 #      with at-; the at-* lead workflows), must match every count claim in
 #      AGENTS.md, templates/AGENTS.md, README.md (above "## Recent changes"),
 #      docs/index.html, docs/agent-triforge.md, .claude-plugin/plugin.json.
 #      The vocabulary: "<N> skills" is every skill, "<N> portable skills" the
 #      portable set, "<N> lead workflows" the at-* set, and "<N> [up to three
-#      words] agents|subagents" the agent count. A claim counts on a line
+#      words] personas" the persona count ("agents|subagents" still counts
+#      against it, so a 3.x-era claim cannot drift). A claim counts on a line
 #      about the shipped inventory (ship/plugin/portable/specialized/surface/
 #      focused/model-agnostic/methodology/lead workflow, or a top-level dir
 #      path); subset phrasings ("+ 5 agents", "all 4 review agents", "5
@@ -123,18 +124,25 @@
 #        a "§section" name, a token with $ < > = or a URL, and a destination
 #        that reads "dropped: …" (model can infer / stale) — prose, not paths.
 #      Prints a "skip:" line while the file is absent.
-#   8. Retired commands/ (U23) — the plugin checkout ships no commands/*.md
-#      (the 17 lead workflows are skills/at-*/), while "commands/" stays on
-#      FRAMEWORK_PROTECTED in scripts/lib/registry.sh: the plugin host
-#      auto-loads a plugin-root commands/ directory, so a lease that re-created
-#      a command would otherwise skip the promotion gate (rc 42).
+#   8. Retired commands/ and agents/ (U23, U8) — the plugin checkout ships no
+#      commands/*.md (the 17 lead workflows are skills/at-*/) and no
+#      agents/*.md (the personas are personas/*.md), while "commands/" and
+#      "agents/" stay on FRAMEWORK_PROTECTED in scripts/lib/registry.sh: the
+#      plugin host auto-loads both plugin-root directories, so a lease that
+#      re-created a command or a subagent would otherwise skip the promotion
+#      gate (rc 42).
 #   9. Lead-workflow surfaces — the at- prefix is spelled identically at its
 #      four code sites (LEAD_PREFIX in scripts/lib/skills-sync.py, the `at-*)`
 #      arm in scripts/probe-capabilities.sh, startswith("at-") in
 #      scripts/validate-skills.sh, the skills/at-* count in this script), and
 #      the names the session-start banner (hooks/handlers/session-start.sh)
 #      and skills/at-status/references/status-template.md enumerate equal the
-#      set of skills/at-*/ directories (the diff is printed).
+#      set of skills/at-*/ directories (the diff is printed). No shipped
+#      surface (check 4's scope, minus ops/) carries a bare $at- mention,
+#      because Codex attaches a plugin skill only as
+#      $agent-triforge:at-<name> (codex-cli 0.160.0, U14). The check skips
+#      the validate-skills fixture c24-bare-mention/, which carries one on
+#      purpose.
 #  10. Other-harness skill manifests (R22) — skills/.devin-plugin/plugin.json
 #      (Devin; plugin root skills/, installed as <repo>#skills) and the root
 #      package.json "pi" key (Pi) each list exactly the portable skill
@@ -276,6 +284,7 @@ import ast
 import glob
 import os
 import re
+import shlex
 import sys
 
 try:
@@ -322,7 +331,7 @@ FIELDS = {
     "egress": str, "role_limit": list, "opt_in_roles": list, "consent": bool, "lead": dict,
 }
 LEAD_FIELDS = {
-    "launch_argv": str, "wait_budget_s": int, "tool_vocab_read": str, "tool_vocab_action": str,
+    "launch_argv": str, "model_argv": str, "effort_argv": str, "full_access": bool, "wait_budget_s": int, "tool_vocab_read": str, "tool_vocab_action": str,
     "goal_gate": str, "ask_user": str, "native_subagents_enforced_tools": bool, "agent_teams": bool,
     "plugin_root_env": str,
 }
@@ -332,7 +341,20 @@ reg_path = os.environ["VV_REGISTRY"]
 reg = read(reg_path)
 clis = None
 env_base = []
+launch_full_access = launch_extra_words = None
 if reg is not None:
+    m = re.search(r"^_LAUNCH_ACCESS_PY='\n(.*?)\n'$", reg, re.M | re.S)
+    if not m:
+        fails.append(reg_path + ": _LAUNCH_ACCESS_PY='...' not found — the full-access detector lead.full_access is checked against")
+    elif "'" in m.group(1):
+        fails.append(reg_path + ": _LAUNCH_ACCESS_PY contains a single quote — the shell literal ends there")
+    else:
+        try:
+            ns = {}
+            exec(m.group(1), ns)  # noqa: S102 — this checkout's own registry
+            launch_full_access, launch_extra_words = ns["launch_full_access"], ns["launch_extra_words"]
+        except Exception as exc:  # noqa: BLE001 — report, do not crash
+            fails.append(reg_path + ": _LAUNCH_ACCESS_PY does not define launch_full_access and launch_extra_words: " + str(exc))
     m = re.search(r"^_TRIFORGE_CLIS_PY='\n(.*?)\n'$", reg, re.M | re.S)
     if not m:
         fails.append(reg_path + ": _TRIFORGE_CLIS_PY='...' literal not found")
@@ -423,6 +445,26 @@ if clis is not None:
             if not lead.get("launch_argv"):
                 fails.append(where + ": lead.launch_argv is empty")
                 shape_ok = False
+            for f in ("model_argv", "effort_argv"):
+                if isinstance(lead.get(f), str) and lead[f] and "{}" not in lead[f]:
+                    fails.append(where + ": lead." + f + " has no {} where the value goes")
+                    shape_ok = False
+            # The declaration and what the shipped launch line does must agree
+            # (coordinate.sh asks for --allow-full-access when either says so).
+            if launch_full_access is not None and isinstance(lead.get("launch_argv"), str) and isinstance(lead.get("full_access"), bool):
+                try:
+                    words = shlex.split(lead["launch_argv"])
+                    for f in ("model_argv", "effort_argv"):
+                        if isinstance(lead.get(f), str) and lead[f]:
+                            words += launch_extra_words(lead[f], "x")
+                    why = launch_full_access(words)
+                except ValueError as exc:
+                    why = None
+                    fails.append(where + ": lead.launch_argv does not split into shell words: " + str(exc))
+                if why is not None and bool(why) != lead["full_access"]:
+                    fails.append(where + ": lead.full_access = " + str(lead["full_access"]) + " but its launch line reads as "
+                                 + ("full access (" + "; ".join(why) + ")" if why else "no full access") + " — declare what the line does")
+                    shape_ok = False
         if e.get("tier") == "core":
             core.append(cli)
     if not core:
@@ -709,28 +751,31 @@ else
 fi
 
 # --- 5. surface counts -------------------------------------------------------
-AGENT_COUNT=$(ls agents/*.md 2>/dev/null | grep -c . || true)
+PERSONA_COUNT=$(ls personas/*.md 2>/dev/null | grep -c . || true)
 SKILL_COUNT=$(ls skills/*/SKILL.md 2>/dev/null | grep -c . || true)
 WORKFLOW_COUNT=$(ls skills/at-*/SKILL.md 2>/dev/null | grep -c . || true)
 PORTABLE_COUNT=$((SKILL_COUNT - WORKFLOW_COUNT))
 if [ "$NO_COUNTS" -eq 1 ]; then
-  echo "skip: surface counts (--no-counts; shipped: $AGENT_COUNT agents, $SKILL_COUNT skills: $PORTABLE_COUNT portable, $WORKFLOW_COUNT lead workflows)"
+  echo "skip: surface counts (--no-counts; shipped: $PERSONA_COUNT personas, $SKILL_COUNT skills: $PORTABLE_COUNT portable, $WORKFLOW_COUNT lead workflows)"
 else
   COUNTS_RC=0
-  VV_AGENTS="$AGENT_COUNT" VV_SKILLS="$SKILL_COUNT" VV_PORTABLE="$PORTABLE_COUNT" VV_WORKFLOWS="$WORKFLOW_COUNT" \
+  VV_PERSONAS="$PERSONA_COUNT" VV_SKILLS="$SKILL_COUNT" VV_PORTABLE="$PORTABLE_COUNT" VV_WORKFLOWS="$WORKFLOW_COUNT" \
   VV_README_HISTORY_START="$README_HISTORY_START" python3 - <<'PYEOF' || COUNTS_RC=$?
 import os
 import re
 import sys
 
 # "N skills" is every skill, "N portable skills" the non-at- set, "N lead
-# workflows" the at-* set (U23 vocabulary); "N agents" the agent files.
+# workflows" the at-* set (U23 vocabulary); "N personas" the persona files
+# (U8), and "N agents" still counts against them.
 actual = {
-    "agent": int(os.environ["VV_AGENTS"]),
+    "persona": int(os.environ["VV_PERSONAS"]),
     "skill": int(os.environ["VV_SKILLS"]),
     "portable skill": int(os.environ["VV_PORTABLE"]),
     "lead workflow": int(os.environ["VV_WORKFLOWS"]),
 }
+# A claim's surface word, lowercased and singular, to the count it checks.
+KIND = {"agent": "persona"}
 readme_history_start = int(os.environ["VV_README_HISTORY_START"] or "0")
 files = [
     "AGENTS.md",
@@ -742,7 +787,7 @@ files = [
 ]
 CLAIM = re.compile(
     r"(?P<pre>(?:\+|\ball|of the|the other|\bother)\s+)?"
-    r"\b(?P<n>\d+)\s+(?P<mods>(?:[A-Za-z-]+\s+){0,3}?)(?P<sub>sub)?(?P<kind>agent|skill|lead workflow)s?\b",
+    r"\b(?P<n>\d+)\s+(?P<mods>(?:[A-Za-z-]+\s+){0,3}?)(?P<sub>sub)?(?P<kind>agent|persona|skill|lead workflow)s?\b",
     re.I,
 )
 SUBSET_WORDS = {
@@ -752,7 +797,7 @@ SUBSET_WORDS = {
 SURFACE_MODS = {"specialized", "portable", "shipped", "focused", "model-agnostic", "methodology"}
 SURFACE_LINE = re.compile(
     r"\bship|plugin|portable|specialized|surface|focused|model-agnostic|methodology"
-    r"|lead workflows?|agents/|skills/|restricted tools",
+    r"|lead workflows?|agents/|personas/|skills/|restricted tools",
     re.I,
 )
 HISTORY = re.compile(r"history|\bwas\b|previously", re.I)
@@ -778,7 +823,7 @@ for path in files:
                     continue
                 if not (mods & SURFACE_MODS) and not SURFACE_LINE.search(line):
                     continue
-                kind = m.group("kind").lower()
+                kind = KIND.get(m.group("kind").lower(), m.group("kind").lower())
                 if kind == "skill" and "portable" in mods:
                     kind = "portable skill"
                 n = int(m.group("n"))
@@ -792,13 +837,14 @@ for path in files:
 # Landing-page hero counters carry the number in a data-target attribute and
 # the surface name in the next span, so the prose CLAIM regex never sees them.
 HERO = re.compile(
-    r'data-target="(?P<n>\d+)">0</span>\s*<span class="hero__stat-label">(?P<kind>Agents|Skills|Portable skills|Lead workflows)</span>'
+    r'data-target="(?P<n>\d+)">0</span>\s*<span class="hero__stat-label">(?P<kind>Personas|Agents|Skills|Portable skills|Lead workflows)</span>'
 )
 if os.path.exists("docs/index.html"):
     with open("docs/index.html", encoding="utf-8") as fh:
         html = fh.read()
     for m in HERO.finditer(html):
         kind = m.group("kind").lower().rstrip("s")
+        kind = KIND.get(kind, kind)
         n = int(m.group("n"))
         claims += 1
         if n != actual[kind]:
@@ -814,7 +860,7 @@ if mismatches:
     sys.exit(1)
 print(
     "ok:   surface counts: " + str(claims) + " claims match shipped "
-    + str(actual["agent"]) + " agents / " + str(actual["skill"]) + " skills ("
+    + str(actual["persona"]) + " personas / " + str(actual["skill"]) + " skills ("
     + str(actual["portable skill"]) + " portable, " + str(actual["lead workflow"]) + " lead workflows)"
 )
 PYEOF
@@ -1025,19 +1071,27 @@ else
   echo "skip: rule-inventory completeness (no $INVENTORY_MD yet)"
 fi
 
-# --- 8. retired commands/ (U23) ----------------------------------------------
-# The 17 lead workflows are skills/at-*/; nothing ships under commands/. The
-# directory stays on FRAMEWORK_PROTECTED because the plugin host auto-loads a
-# plugin-root commands/, so a lease re-creating commands/*.md must hit the gate.
-COMMANDS_MD=$(ls commands/*.md 2>/dev/null | grep -c . || true)
-if [ "$COMMANDS_MD" -ne 0 ]; then
-  ls commands/*.md
-  fail "commands/: $COMMANDS_MD commands/*.md in the plugin checkout — 4.0 ships none (the lead workflows are skills/at-*/); the plugin host auto-loads commands/, so each stray file is a live command (see the paths above)"
-elif ! grep -qE '^[[:space:]]*"[^"]*",?[[:space:]]*.*"commands/",' scripts/lib/registry.sh && ! grep -qE '^[[:space:]]*"commands/",' scripts/lib/registry.sh; then
-  fail "commands/: \"commands/\" is not on FRAMEWORK_PROTECTED in scripts/lib/registry.sh — the directory ships empty but the plugin host auto-loads it, so a lease that re-creates commands/*.md must hit the promotion gate (rc 42)"
-else
-  ok "commands/: no commands/*.md in the plugin checkout (4.0 ships none); \"commands/\" stays on FRAMEWORK_PROTECTED (the plugin host auto-loads the directory)"
-fi
+# --- 8. retired commands/ and agents/ (U23, U8) ------------------------------
+# The 17 lead workflows are skills/at-*/ and the personas personas/*.md; nothing
+# ships under commands/ or agents/. Both stay on FRAMEWORK_PROTECTED because the
+# plugin host auto-loads them from the plugin root, so a lease re-creating
+# commands/*.md (a live command) or agents/*.md (a live subagent with its own
+# tools) must hit the gate.
+for RETIRED in commands agents; do
+  case "$RETIRED" in
+    commands) RETIRED_KIND="command"; RETIRED_NOW="the lead workflows are skills/at-*/" ;;
+    *)        RETIRED_KIND="subagent"; RETIRED_NOW="the personas are personas/*.md" ;;
+  esac
+  RETIRED_MD=$(ls "$RETIRED"/*.md 2>/dev/null | grep -c . || true)
+  if [ "$RETIRED_MD" -ne 0 ]; then
+    ls "$RETIRED"/*.md
+    fail "$RETIRED/: $RETIRED_MD $RETIRED/*.md in the plugin checkout — 4.0 ships none ($RETIRED_NOW); the plugin host auto-loads $RETIRED/, so each stray file is a live $RETIRED_KIND (see the paths above)"
+  elif ! grep -qE "^[[:space:]]*\"[^\"]*\",?[[:space:]]*.*\"$RETIRED/\"," scripts/lib/registry.sh && ! grep -qE "^[[:space:]]*\"$RETIRED/\"," scripts/lib/registry.sh; then
+    fail "$RETIRED/: \"$RETIRED/\" is not on FRAMEWORK_PROTECTED in scripts/lib/registry.sh — the directory ships empty but the plugin host auto-loads it, so a lease that re-creates $RETIRED/*.md must hit the promotion gate (rc 42)"
+  else
+    ok "$RETIRED/: no $RETIRED/*.md in the plugin checkout (4.0 ships none); \"$RETIRED/\" stays on FRAMEWORK_PROTECTED (the plugin host auto-loads the directory)"
+  fi
+done
 
 # --- 9. lead-workflow surfaces (the at- prefix and the enumerated names) ------
 LEADWF_RC=0
@@ -1120,6 +1174,19 @@ sys.exit(1 if fails else 0)
 PYEOF
 if [ "$LEADWF_RC" -ne 0 ]; then
   FAILED_CHECKS=$((FAILED_CHECKS + 1))
+fi
+BARE_MENTIONS=$(
+  grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" -e '\$at-' . 2>/dev/null \
+    | grep -vE '^(\./)?(ops/|scripts/fixtures/validate-skills/c24-bare-mention/)' \
+    | _shipped_surfaces \
+    | sort -t: -k1,1 -k2,2n || true
+)
+if [ -n "$BARE_MENTIONS" ]; then
+  printf '%s\n' "$BARE_MENTIONS"
+  BARE_COUNT=$(printf '%s\n' "$BARE_MENTIONS" | grep -c . || true)
+  fail "lead workflows: $BARE_COUNT bare \$at- mention(s) on shipped surfaces (listed above as file:line:text). Codex attaches a plugin skill only as \$agent-triforge:at-<name>; a bare \$at-<name> attaches nothing."
+else
+  ok "lead workflows: no bare \$at- mention on shipped surfaces (Codex form: \$agent-triforge:at-<name>)"
 fi
 
 # --- 10. other-harness skill manifests (R22) ---------------------------------
@@ -1236,7 +1303,7 @@ fi
 
 # --- summary -----------------------------------------------------------------
 if [ "$FAILED_CHECKS" -eq 0 ]; then
-  echo "validate-versions: PASS — plugin $PLUGIN_V, ladder: one definition ($LADDER_SOURCE), $AGENT_COUNT agents / $SKILL_COUNT skills ($PORTABLE_COUNT portable, $WORKFLOW_COUNT lead workflows)"
+  echo "validate-versions: PASS — plugin $PLUGIN_V, ladder: one definition ($LADDER_SOURCE), $PERSONA_COUNT personas / $SKILL_COUNT skills ($PORTABLE_COUNT portable, $WORKFLOW_COUNT lead workflows)"
   exit 0
 fi
 echo "validate-versions: FAIL — $FAILED_CHECKS check(s) failed (see FAIL: lines above)"

@@ -8,15 +8,37 @@
 #
 # ON_CRASH: ALLOW — a crash must never block the tool call (R14/G7): this hook
 #   is advisory only; the EXIT trap below turns any unexpected non-zero status
-#   (set -e / set -u, e.g. an unwritable .claude/) into a stderr notice + exit 0,
-#   and every explicit exit path is `exit 0`.
+#   (set -e / set -u) into a stderr notice + exit 0, a monitors.py failure
+#   is one stderr notice, and every explicit exit path is `exit 0`.
 # Exit codes: 0 ok · 2 hook deny (never used by Triforge handlers) · 64 usage ·
 #   66 no-input · 69 unavailable · 70 internal · 80 degraded (documented only —
 #   Triforge handlers always return 0).
 # Hook stdout must never look like JSON: no stdout line may start with `{`
 #   (Claude Code ≥ 2.1.246 rejects hook stdout that parses as JSON — D-031c).
-#   Audited 2026-09-11: every stdout line starts "Context monitor:" / "Consider:"
-#   / "Strongly consider:" / "If researching".
+#   Audited 2026-10-06: every stdout line starts "Context monitor:" /
+#   "Consider:" / "Strongly consider:" / "If researching"; the one-per-session
+#   NOTE goes to stderr.
+#
+# Tool vocabulary (KTD1, R21): which tool names are reads is the lead's
+# registry data (lead.tool_vocab_read in scripts/lib/registry.sh, read through
+# lead_field), never a list here. A name
+# in the read list is a read; "<tool>(read)" there makes a call of <tool>
+# whose command only reads (cat, sed -n, rg, git log, ...) a read — how a
+# Codex lead's shell reads count, since its hook payload names exec_command
+# Bash (CDX-21). Any other name is an action, so an unmapped tool never
+# raises a false warning. A lead whose read vocabulary is empty, or a lead
+# that can't be resolved, leaves the hook inert, said once per session on
+# stderr (R21, R44).
+#
+# State, classification and output live in monitors.py beside this file (the
+# "context" half): per-session counts under
+#   ${TMPDIR}/triforge-monitors-<uid>/<checkout>-<hash>/<session_id>.context
+# outside the project, in directories checked private on every call (owned by
+# this user, not a symlink, no group or other bits) and files written without
+# following a link; the lead's vocabulary is cached there (lead-vocab), keyed
+# on the roster and the registry. This handler keeps the hook contract and
+# reads the vocabulary through the helper library when monitors.py asks for it
+# (exit 3).
 
 # Worker marker (KTD9, R34): in a lease worker or persona (TRIFORGE_LEASE_WORKER
 # set by _adapter_env) this hook does nothing and prints nothing — a worker's
@@ -38,77 +60,45 @@ _cm_on_exit() {
 }
 trap _cm_on_exit EXIT
 
-STATE_FILE=".claude/context-monitor.local.md"
-
-# Ensure .claude/ directory exists for project-local state files
-mkdir -p .claude
-
-# Read hook input from stdin (Claude Code delivers PostToolUse data as JSON on stdin)
+# Read hook input from stdin (each lead delivers PostToolUse data as JSON on stdin)
 HOOK_INPUT=$(cat)
-TOOL_NAME=$(echo "$HOOK_INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_name','unknown'))" 2>/dev/null || echo "unknown")
 
-# Initialize state file if it doesn't exist
-if [ ! -f "$STATE_FILE" ]; then
-  cat > "$STATE_FILE" << 'EOF'
----
-total_calls: 0
-consecutive_reads: 0
-last_write_at: 0
----
-EOF
+# python3 is a Triforge prerequisite; without it the monitor is off, and says
+# so once per session, not on every call (Phase 3 round 4, P3-4). The marker
+# is a directory made by mkdir (atomic, and never a write through a link) in
+# the per-user base monitors.py keeps under TMPDIR, when that base is a real
+# directory of this user; with no readable session id, or no such base, the
+# note prints on every call instead.
+if ! command -v python3 >/dev/null 2>&1; then
+  CM_S=$(printf '%s' "$HOOK_INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9._-]\{1,80\}\)".*/\1/p' 2>/dev/null | head -1) || CM_S=""
+  CM_B="${TMPDIR:-/tmp}/triforge-monitors-${UID:-unknown}"
+  if [ -n "$CM_S" ] && { [ -d "$CM_B" ] || mkdir -m 700 "$CM_B" 2>/dev/null; } && [ -d "$CM_B" ] && [ ! -L "$CM_B" ] && [ -O "$CM_B" ]; then
+    CM_M="${CM_B}/context-monitor.${CM_S}.nopython-noted"
+    if ! mkdir "$CM_M" 2>/dev/null && [ -d "$CM_M" ] && [ ! -L "$CM_M" ]; then
+      exit 0
+    fi
+  fi
+  echo "context-monitor: WARNING python3 is not on PATH, so paralysis detection is off (python3 is a Triforge prerequisite; said once per session) — advisory only, tool call continues" >&2
+  exit 0
 fi
 
-# Read current state (POSIX-compatible — PCRE grep is unavailable on BSD/macOS)
-TOTAL=$(sed -n 's/^total_calls: \([0-9]*\).*/\1/p' "$STATE_FILE" 2>/dev/null)
-TOTAL="${TOTAL:-0}"
-READS=$(sed -n 's/^consecutive_reads: \([0-9]*\).*/\1/p' "$STATE_FILE" 2>/dev/null)
-READS="${READS:-0}"
-LAST_WRITE=$(sed -n 's/^last_write_at: \([0-9]*\).*/\1/p' "$STATE_FILE" 2>/dev/null)
-LAST_WRITE="${LAST_WRITE:-0}"
+CM_HANDLERS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+CM_PLUGIN_ROOT=$(cd "${CM_HANDLERS}/../.." && pwd)
 
-# Increment total
-NEW_TOTAL=$((TOTAL + 1))
-
-# Classify tool as read-only or action/write
-case "$TOOL_NAME" in
-  Read|Grep|Glob|LS|WebFetch|WebSearch|TaskList|TaskGet|NotebookRead)
-    NEW_READS=$((READS + 1))
-    ;;
-  Write|Edit|Bash|NotebookEdit|Agent|Skill|TaskCreate|TaskUpdate|SendMessage|CronCreate|CronDelete|TeamCreate|TeamDelete|RemoteTrigger)
-    NEW_READS=0
-    LAST_WRITE=$NEW_TOTAL
-    ;;
-  *)
-    # Unknown tools are treated as actions (reset counter) to avoid false positives
-    NEW_READS=0
-    LAST_WRITE=$NEW_TOTAL
-    ;;
-esac
-
-# Update state file (atomic write via temp file + mv)
-TEMP_FILE="${STATE_FILE}.tmp.$$"
-cat > "$TEMP_FILE" << EOF
----
-total_calls: $NEW_TOTAL
-consecutive_reads: $NEW_READS
-last_write_at: $LAST_WRITE
----
-EOF
-mv "$TEMP_FILE" "$STATE_FILE"
-
-# Analysis paralysis detection: 8+ consecutive read-only ops
-if [ "$NEW_READS" -ge 8 ]; then
-  echo "Context monitor: $NEW_READS consecutive read-only operations without writing code."
-  echo "Consider: Are you stuck? Either write code, report a blocker, or spawn a subagent."
-  echo "If researching intentionally, continue — but be aware of context usage."
+RC=0
+printf '%s' "$HOOK_INPUT" | CM_PLUGIN_ROOT="$CM_PLUGIN_ROOT" python3 "${CM_HANDLERS}/monitors.py" context || RC=$?
+if [ "$RC" -eq 3 ]; then
+  # The lead's vocabulary is not cached for this roster and registry: read it
+  # through the helper library (lead_field, KTD1), then classify with it.
+  VOCAB=$(
+    # shellcheck source=/dev/null
+    source "${CM_PLUGIN_ROOT}/scripts/invoke-external.sh" >/dev/null 2>&1 && lead_field name lead.tool_vocab_read 2>/dev/null
+  ) || VOCAB=""
+  RC=0
+  printf '%s' "$HOOK_INPUT" | CM_PLUGIN_ROOT="$CM_PLUGIN_ROOT" CM_VOCAB_FRESH=1 CM_VOCAB="$VOCAB" python3 "${CM_HANDLERS}/monitors.py" context || RC=$?
 fi
-
-# Context usage warnings
-if [ "$NEW_TOTAL" -ge 200 ]; then
-  echo "Context monitor: CRITICAL — $NEW_TOTAL tool calls. Context window is likely near capacity."
-  echo "Strongly consider: save state (ops/STATE.md), wrap session, spawn subagents for remaining work."
-elif [ "$NEW_TOTAL" -ge 150 ]; then
-  echo "Context monitor: WARNING — $NEW_TOTAL tool calls. Consider spawning subagents for intensive operations."
+if [ "$RC" -ne 0 ]; then
+  echo "context-monitor: WARNING the monitor failed (rc=${RC}) — advisory only, tool call continues (ON_CRASH: ALLOW)" >&2
 fi
 
 # Always exit 0 — this hook is advisory only, never blocks

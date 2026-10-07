@@ -85,7 +85,9 @@ def ps(fields, pid):
 # _LEASE_LAUNCH_PY <log> <argv...> — start argv in a new session with stdin
 # /dev/null and stdout/stderr appended to <log>, write the launch record
 # "<pid>\t<pgid>\t<start time> UTC" to <log minus .log>.launch (tmp, then
-# rename), and print the same line. The child holds at a pipe (fd
+# rename; _TRIFORGE_LAUNCH_RECORD names another path, and _TRIFORGE_LAUNCH_OP
+# the helper its messages name, as persona_spawn does), and print the same
+# line. The child holds at a pipe (fd
 # _TRIFORGE_GO_FD, read by _LEASE_BUILDER_SH) until its fingerprint is read and
 # the record written, so the record is the live process's own even for a
 # builder that finishes at once, and a builder the lead's tool call loses
@@ -97,7 +99,8 @@ def ps(fields, pid):
 _LEASE_LAUNCH_PY="${_LEASE_PS_PY}"'
 import sys
 log, argv = sys.argv[1], sys.argv[2:]
-launch = (log[:-4] if log.endswith(".log") else log) + ".launch"
+launch = os.environ.pop("_TRIFORGE_LAUNCH_RECORD", "") or ((log[:-4] if log.endswith(".log") else log) + ".launch")
+op = os.environ.pop("_TRIFORGE_LAUNCH_OP", "") or "lease_dispatch"
 r, w = os.pipe()
 env = dict(os.environ, _TRIFORGE_GO_FD=str(r))
 try:
@@ -105,13 +108,13 @@ try:
         p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
                              start_new_session=True, close_fds=True, pass_fds=(r,), env=env)
 except OSError as e:
-    sys.stderr.write("lease_dispatch: could not start the builder: " + str(e) + "\n")
+    sys.stderr.write(op + ": could not start the process: " + str(e) + "\n")
     sys.exit(1)
 os.close(r)
 info = ps("pgid=,lstart=", p.pid)
 if len(info) < 2 or info[0] != str(p.pid):
     os.close(w)
-    sys.stderr.write("lease_dispatch: the builder process " + str(p.pid) + " is not a session leader with a readable start time (ps: " + " ".join(info) + "); it was not released\n")
+    sys.stderr.write(op + ": the started process " + str(p.pid) + " is not a session leader with a readable start time (ps: " + " ".join(info) + "); it was not released\n")
     sys.exit(1)
 rec = str(p.pid) + "\t" + info[0] + "\t" + " ".join(info[1:]) + " UTC"
 try:
@@ -120,17 +123,18 @@ try:
     os.replace(launch + ".tmp", launch)
 except OSError as e:
     os.close(w)
-    sys.stderr.write("lease_dispatch: could not write the launch record " + launch + " (" + str(e) + "); the builder was not released\n")
+    sys.stderr.write(op + ": could not write the launch record " + launch + " (" + str(e) + "); the process was not released\n")
     sys.exit(1)
 os.write(w, b"go\n")
 os.close(w)
 print(rec)
 '
 
-# _LEASE_BUILDER_SH — the script the launched /bin/bash runs (bash -c, $0 a
-# label, $1 the loader, then _lease_builder_run's arguments): wait for the
-# launcher's release, source the loader, run the builder.
-_LEASE_BUILDER_SH='case "${_TRIFORGE_GO_FD:-}" in ""|*[!0-9]*) exit 1 ;; esac
+# _LEASE_GO_SH — the start of a script the launched /bin/bash runs (bash -c,
+# $0 a label, $1 the loader): wait for the launcher's release, source the
+# loader, drop $1. _LEASE_BUILDER_SH then runs the builder with the rest;
+# persona_spawn's script (persona.sh) runs a persona.
+_LEASE_GO_SH='case "${_TRIFORGE_GO_FD:-}" in ""|*[!0-9]*) exit 1 ;; esac
 _GO=""
 IFS= read -r _GO <&"$_TRIFORGE_GO_FD" || true
 eval "exec ${_TRIFORGE_GO_FD}<&-"
@@ -138,7 +142,8 @@ unset _TRIFORGE_GO_FD
 if [ "$_GO" != go ]; then exit 1; fi
 . "$1" || exit 97
 shift
-_lease_builder_run "$@"'
+'
+_LEASE_BUILDER_SH="${_LEASE_GO_SH}"'_lease_builder_run "$@"'
 
 # _LEASE_OWN_GROUP_PY — run by _lease_builder_run once the lane command
 # returned: TERM, then KILL, every other process left in its process group (a
@@ -425,15 +430,17 @@ STOP_ROW_EOF
 }
 
 # The claude -p lane (KTD16): a builder's turn cap, the explicit tool sets of
-# its two classes, and the credential paths no claude worker reads. The tool
-# sets name built-in tools only (--tools; anything else, the Agent tool and the
-# web tools included, is not offered) and approve without a prompt only what
-# needs approving: edits inside the working directory ride acceptEdits, and an
-# unscoped Edit, Write or Read rule would approve them anywhere.
+# its classes, and the credential paths no claude worker reads. The tool sets
+# name built-in tools only (--tools; anything else, the Agent tool included, is
+# not offered; the web tools only in the persona-read-web class) and approve without a
+# prompt only what needs approving: edits inside the working directory ride
+# acceptEdits, and an unscoped Edit, Write or Read rule would approve them
+# anywhere.
 _CLAUDE_MAX_TURNS=200
 _CLAUDE_TOOLS_EDIT="Bash,Read,Edit,Write,Glob,Grep,NotebookEdit,Skill"
 _CLAUDE_ALLOW_EDIT="Bash,Skill"
 _CLAUDE_TOOLS_READ="Read,Grep,Glob"
+_CLAUDE_TOOLS_WEB="WebFetch,WebSearch"
 # Devin CLI 3000.x keeps its token in its XDG data dir, credentials.toml
 # (~/.local/share/devin; `devin auth status` names the file; CC-25)
 _CLAUDE_CRED_PATHS="~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.git-credentials ~/.config/gh ~/.config/gcloud ~/.azure ~/.kube ~/.docker/config.json ~/.codex ~/.gemini ~/.kimi-code ~/.local/share/opencode ~/.cursor ~/.grok ~/.devin ~/.config/devin ~/.claude/.credentials.json ~/.local/share/devin"
@@ -486,37 +493,70 @@ _claude_sandbox_refusal() {
   echo "${1:-claude}: ERROR ${WHAT} — the claude worker lane's sandbox needs ${TRIFORGE_CLAUDE_SANDBOX_FLOOR}, the first build that ignores a repository's sandbox-loosening settings (excludedCommands, network.allowedDomains, filesystem.allowWrite) under the lane's --settings; on an older build a repository's .claude/settings.json can run commands outside the sandbox. Fix: update Claude Code (\`claude update\`), or set TRIFORGE_CLAUDE_SANDBOX=off in the lead's environment, and the claude worker's Bash then runs without OS confinement. No retry (deterministic)."
 }
 
-# _claude_lane_argv <edit|read> <model> <effort> <resume-id> <deny-write>... —
-# set _LEASE_LANE_ARGV to a claude -p worker's command line up to the prompt,
-# which the caller appends (KTD16). One JSON envelope (--output-format json:
-# subtype, is_error, session_id; _lease_claude_envelope reads it), project and
-# local settings only (the user's own hooks, plugins and env stay out), no MCP
-# server, and an explicit tool set: edit (a lease builder, a tester, a
-# documenter) adds the edit tools under acceptEdits; read (a reviewer, an
-# analyst) runs dontAsk, so nothing outside the read set runs. --settings
-# carries the confinement, and a --settings file outranks the project's own
-# sandbox settings: Bash runs in Claude Code's sandbox (row CC-15: writes stay
-# in the working directory, no network), fail-closed when the sandbox can't
-# start, with no unsandboxed retry; <deny-write> (the lead's git common dir,
-# which the sandbox otherwise opens to a worktree's git; for the read class
-# the working directory itself) and the credential paths are blocked, the
-# latter also for the Read tool. TRIFORGE_CLAUDE_SANDBOX=off runs Bash without
-# the sandbox, and then a claude worker with Bash has no OS confinement; the
-# read class drops Bash there. --model and --effort ride only when the roster
-# set them (the ladder and the Fable override are the lead's spawn choice,
-# never this lane's); --resume only for a UUID-shaped session id (the fix
-# cycle resumes the builder's session); --max-turns comes last, so the prompt
-# after it is never read as one more tool name.
+# _claude_lane_argv <edit|read|persona-read|persona-read-web|persona-exec>
+#   <model> <effort> <resume-id> <deny-write>... — set _LEASE_LANE_ARGV to a
+# claude -p worker's command line up to the prompt, which the caller appends
+# (KTD16). One JSON envelope (--output-format json: subtype, is_error,
+# session_id; _lease_claude_envelope reads it), project and local settings
+# only (the user's own hooks, plugins and env stay out), no MCP server, and an explicit
+# tool set: edit (a lease builder, a tester, a documenter) adds the edit tools
+# under acceptEdits; read (dispatch_role's reviewer or analyst) runs dontAsk,
+# so nothing outside the read set runs; the persona classes (KTD5, dispatch_persona)
+# run dontAsk too: persona-read is Read, Grep and Glob alone, never Bash;
+# persona-read-web adds WebFetch and WebSearch; persona-exec is Bash with the
+# read tools and no edit tool. The persona classes add --safe-mode: no
+# CLAUDE.md (nor what it @imports), no .claude/rules at any depth, no skills, hooks or plugins load,
+# while the --settings sandbox, the credential deny rules and auth still hold
+# (measured on Claude Code 2.1.289: probe row CC-24; dispatch_persona refuses a
+# claude without the flag). Safe mode leaves an @path mention in the prompt
+# itself attaching that file, so the persona classes also run under
+# `env CLAUDE_CODE_DISABLE_ATTACHMENTS=1`, the first words of their argv
+# (measured on 2.1.291: CC-24's attachment control). --settings carries the confinement, and a --settings file
+# outranks the project's own sandbox settings: Bash runs in Claude Code's
+# sandbox (row CC-15: writes stay in the working directory, no network),
+# fail-closed when the sandbox can't start, with no unsandboxed retry;
+# <deny-write> (the lead's git common dir, which the sandbox otherwise opens to
+# a worktree's git; for the read classes the working directory itself) and the
+# credential paths are blocked, the latter also for the Read tool.
+# TRIFORGE_CLAUDE_SANDBOX=off runs Bash without the sandbox, and then a claude
+# worker with Bash has no OS confinement; the read class drops Bash there,
+# while persona-exec keeps it (its working directory is a disposable worktree,
+# and dispatch_persona checks the lead's git state around the run). An unknown
+# class is rc 1. --model and --effort ride only when the caller set them (the
+# roster, or dispatch_persona's ladder rung); --resume only for a UUID-shaped
+# session id (the fix cycle resumes the builder's session); --max-turns comes
+# last, so the prompt after it is never read as one more tool name. It is
+# _CLAUDE_MAX_TURNS, a builder's cap; a caller narrows it for one call with
+# `local _CLAUDE_MAX_TURNS=<n>` (dispatch_persona: the persona's max_turns).
 _claude_lane_argv() {
-  local CLASS=$1 MODEL=$2 EFFORT=$3 RESUME=$4 SBX=on TOOLS ALLOW MODE SETTINGS
+  local CLASS=$1 MODEL=$2 EFFORT=$3 RESUME=$4 SBX=on TOOLS ALLOW MODE=dontAsk SETTINGS SAFE=0
   shift 4
   case "${TRIFORGE_CLAUDE_SANDBOX:-on}" in off|0|false|no) SBX=off ;; esac
-  if [ "$CLASS" = edit ]; then
-    TOOLS=$_CLAUDE_TOOLS_EDIT ALLOW=$_CLAUDE_ALLOW_EDIT MODE=acceptEdits
-  else
-    TOOLS=$_CLAUDE_TOOLS_READ ALLOW=$_CLAUDE_TOOLS_READ MODE=dontAsk
-    if [ "$SBX" = on ]; then TOOLS="${TOOLS},Bash" ALLOW="${ALLOW},Bash"; fi
-  fi
+  case "$CLASS" in
+    edit)
+      TOOLS=$_CLAUDE_TOOLS_EDIT MODE=acceptEdits
+      ;;
+    read)
+      TOOLS=$_CLAUDE_TOOLS_READ
+      if [ "$SBX" = on ]; then TOOLS="${TOOLS},Bash"; fi
+      ;;
+    persona-read)
+      TOOLS=$_CLAUDE_TOOLS_READ SAFE=1
+      ;;
+    persona-read-web)
+      TOOLS="${_CLAUDE_TOOLS_READ},${_CLAUDE_TOOLS_WEB}" SAFE=1
+      ;;
+    persona-exec)
+      TOOLS="${_CLAUDE_TOOLS_READ},Bash" SAFE=1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  # dontAsk runs only what the tool set names, so every class but edit
+  # approves exactly that set; edit approves Bash and Skill, its edits riding
+  # acceptEdits inside the working directory.
+  if [ "$CLASS" = edit ]; then ALLOW=$_CLAUDE_ALLOW_EDIT; else ALLOW=$TOOLS; fi
   SETTINGS=$(CL_SBX="$SBX" CL_CRED="$_CLAUDE_CRED_PATHS" python3 -c '
 import json, os, sys
 cred = os.environ["CL_CRED"].split()
@@ -534,9 +574,11 @@ print(json.dumps(s, separators=(",", ":")))
 ' "$@") || return 1
   _LEASE_LANE_ARGV=(claude -p --output-format json --setting-sources project,local --strict-mcp-config
                     --permission-mode "$MODE" --tools "$TOOLS" --allowedTools "$ALLOW" --settings "$SETTINGS")
+  if [ "$SAFE" = 1 ]; then _LEASE_LANE_ARGV=(env CLAUDE_CODE_DISABLE_ATTACHMENTS=1 "${_LEASE_LANE_ARGV[@]}"); fi
   if [ -n "$MODEL" ]; then _LEASE_LANE_ARGV+=(--model "$MODEL"); fi
   if [ -n "$EFFORT" ]; then _LEASE_LANE_ARGV+=(--effort "$EFFORT"); fi
   if _claude_session_ok "$RESUME"; then _LEASE_LANE_ARGV+=(--resume "$RESUME"); fi
+  if [ "$SAFE" = 1 ]; then _LEASE_LANE_ARGV+=(--safe-mode); fi
   _LEASE_LANE_ARGV+=(--max-turns "$_CLAUDE_MAX_TURNS")
   return 0
 }
@@ -551,6 +593,15 @@ _claude_session_ok() {
   esac
   return 1
 }
+
+# The codex tool shell's env policy (CDX-19), for every codex worker (the lease
+# lane below, dispatch_persona's codex persona): pass on everything codex was
+# started with — the env -i allowlist is the filter — so neither the user's
+# config.toml nor a default that drops *KEY* names can strip the worker marker
+# or the no-push GIT_CONFIG_KEY_n from a command it runs.
+_CODEX_ENV_POLICY=(-c 'shell_environment_policy.inherit="all"' -c 'shell_environment_policy.ignore_default_excludes=true'
+                   -c 'shell_environment_policy.exclude=[]' -c 'shell_environment_policy.include_only=[]'
+                   -c 'shell_environment_policy.set={}')
 
 # _lease_lane_argv <cli> <model> <effort> <dispatch-model> <lane-arg>
 #   <cursor-bin> <worktree> <timeout-s> [<git-common-dir> <resume-id>] — set
@@ -578,12 +629,8 @@ _claude_session_ok() {
 #                temp-dir write allowance: lease worktrees live under TMPDIR,
 #                so without them a builder could cross into sibling worktrees
 #                or the lease root (R35: writes restricted to the lease
-#                worktree); the tool shell's env policy pinned to pass on
-#                everything codex was started with (the env -i allowlist is
-#                the filter), so neither the user's config.toml nor a default
-#                that drops *KEY* names can strip the worker marker or the
-#                no-push GIT_CONFIG_KEY_n (CDX-19); -m and
-#                model_reasoning_effort only when set; -o <lane-arg> when
+#                worktree); the tool shell's env policy (_CODEX_ENV_POLICY);
+#                -m and model_reasoning_effort only when set; -o <lane-arg> when
 #                lease_dispatch names one (<out>.last): codex's final answer
 #                alone, the file lease_collect reads the report from, since
 #                <out> also holds the tool output
@@ -647,10 +694,7 @@ _lease_lane_argv() {
     codex)
       _LEASE_LANE_ARGV=(codex exec -s workspace-write -c 'approval_policy="never"'
                         -c 'sandbox_workspace_write.exclude_tmpdir_env_var=true'
-                        -c 'sandbox_workspace_write.exclude_slash_tmp=true'
-                        -c 'shell_environment_policy.inherit="all"' -c 'shell_environment_policy.ignore_default_excludes=true'
-                        -c 'shell_environment_policy.exclude=[]' -c 'shell_environment_policy.include_only=[]'
-                        -c 'shell_environment_policy.set={}')
+                        -c 'sandbox_workspace_write.exclude_slash_tmp=true' "${_CODEX_ENV_POLICY[@]}")
       if [ -n "$MODEL" ]; then _LEASE_LANE_ARGV+=(-m "$MODEL"); fi
       if [ -n "$EFFORT" ]; then _LEASE_LANE_ARGV+=(-c "model_reasoning_effort=\"${EFFORT}\""); fi
       if [ -n "$LANE_ARG" ]; then _LEASE_LANE_ARGV+=(-o "$LANE_ARG"); fi
@@ -1335,6 +1379,33 @@ ALL_IN_EOF
   return 0
 }
 
+# _lead_wait_budget — the lead's wait budget, for lease_wait and persona_wait
+# (persona.sh): _WB_LEAD the lead's name ("the" when it can't be read),
+# _WB_CAP its lead.wait_budget_s from the CLI registry (600, Claude's, when
+# that can't be read; TRIFORGE_LEAD_WAIT_BUDGET_S may only lower it),
+# _WB_HEAD a quarter of it, at most 15 s and at least 1, and _WB_EFF the cap
+# minus that headroom: the longest a wait may take and still return inside
+# the lead's shell-tool limit. Call it directly, never in $(...).
+_lead_wait_budget() {
+  local LF TAB
+  TAB=$(printf '\t')
+  LF=$(lead_field name lead.wait_budget_s 2>/dev/null) || LF=""
+  case "$LF" in
+    *"$TAB"*) _WB_LEAD=${LF%%"$TAB"*}; _WB_CAP=${LF#*"$TAB"} ;;
+    *) _WB_LEAD="the"; _WB_CAP="" ;;
+  esac
+  case "$_WB_CAP" in ''|*[!0-9]*|0*) _WB_CAP=600 ;; esac
+  case "${TRIFORGE_LEAD_WAIT_BUDGET_S:-}" in
+    ''|*[!0-9]*|0*) ;;
+    *) if [ "$TRIFORGE_LEAD_WAIT_BUDGET_S" -lt "$_WB_CAP" ]; then _WB_CAP=$TRIFORGE_LEAD_WAIT_BUDGET_S; fi ;;
+  esac
+  _WB_HEAD=$((_WB_CAP / 4))
+  if [ "$_WB_HEAD" -gt 15 ]; then _WB_HEAD=15; fi
+  if [ "$_WB_HEAD" -lt 1 ]; then _WB_HEAD=1; fi
+  _WB_EFF=$((_WB_CAP - _WB_HEAD))
+  if [ "$_WB_EFF" -lt 1 ]; then _WB_EFF=1; fi
+}
+
 # lease_wait [task_id...] [--budget <seconds>] — the lead's one waiting
 # primitive (KTD10, R36). Blocks until at least one of the named leases (none
 # named: every lease building at the call) leaves `building`, or the budget
@@ -1376,7 +1447,7 @@ ALL_IN_EOF
 # named lease that already left building returns at once.
 lease_wait() {
   _lead_only lease_wait || return $?
-  local BUDGET="" NAMES="" ERR WAIT_LEAD LF TAB CAP HEADROOM EFF READ WATCH ROW START_MS STOP_MS CHECK_MS REM RC=0
+  local BUDGET="" NAMES="" ERR WAIT_LEAD CAP HEADROOM EFF READ WATCH ROW START_MS STOP_MS CHECK_MS REM RC=0
   local T UNVER="" DEFER=0
   # The budget counts from the call's start, so the checks before the wait
   # are inside it too.
@@ -1421,22 +1492,8 @@ lease_wait() {
   # The lead's shell-tool limit is a registry field of the lead (KTD1: read the
   # field, never the lead's name); one that can't be read keeps the shorter
   # limit, Claude's 600 s.
-  TAB=$(printf '\t')
-  LF=$(lead_field name lead.wait_budget_s 2>/dev/null) || LF=""
-  case "$LF" in
-    *"$TAB"*) WAIT_LEAD=${LF%%"$TAB"*}; CAP=${LF#*"$TAB"} ;;
-    *) WAIT_LEAD="the"; CAP="" ;;
-  esac
-  case "$CAP" in ''|*[!0-9]*|0*) CAP=600 ;; esac
-  case "${TRIFORGE_LEAD_WAIT_BUDGET_S:-}" in
-    ''|*[!0-9]*|0*) ;;
-    *) if [ "$TRIFORGE_LEAD_WAIT_BUDGET_S" -lt "$CAP" ]; then CAP=$TRIFORGE_LEAD_WAIT_BUDGET_S; fi ;;
-  esac
-  HEADROOM=$((CAP / 4))
-  if [ "$HEADROOM" -gt 15 ]; then HEADROOM=15; fi
-  if [ "$HEADROOM" -lt 1 ]; then HEADROOM=1; fi
-  EFF=$((CAP - HEADROOM))
-  if [ "$EFF" -lt 1 ]; then EFF=1; fi
+  _lead_wait_budget
+  WAIT_LEAD=$_WB_LEAD CAP=$_WB_CAP HEADROOM=$_WB_HEAD EFF=$_WB_EFF
   if [ -z "$BUDGET" ]; then
     BUDGET=$EFF
   elif [ "$BUDGET" -gt "$EFF" ]; then

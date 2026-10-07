@@ -1,6 +1,6 @@
 # Agent-team mode (5 or more tasks, cross-dependent work, or `--team`)
 
-1. Spawn the `team-lead` sub-agent.
+1. Start the `team-lead` persona. Its manifest class is `agent-team`: under a lead whose `agent_teams` capability is set (Claude Code), the harness spawns it as a teammate, the one native spawn left and labeled unenforced (the Claude reference); under any other lead the lead takes the role itself (the Codex reference).
 2. Team-lead reads `ops/TASKS.md` and groups the tasks into waves.
 3. Team-lead assigns each task to a builder resolved from `ops/roster.toml`, dispatched under a lease, and pins a non-author reviewer per task.
 4. Builders run confined in worktrees; the team-lead injects context and does all merges on the main tree (KTD-3).
@@ -53,4 +53,4 @@
 
    `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it); a teammate working elsewhere uses that same path, never one relative to its working directory.
 6. Quality gates: tests and lint must pass, and a pinned non-author reviewer must approve, before a task merges (self-review refused, AE3).
-7. `integration-verifier` runs between waves against the integration branch; the lead promotes to the main branch honoring the `[promotion]` gate.
+7. The `integration-verifier` persona runs between waves against the integration branch, judging the build, test and lint output captured in the lead's checkout (the call is in sub-agent mode); the lead promotes to the main branch honoring the `[promotion]` gate.
