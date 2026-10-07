@@ -1,6 +1,6 @@
 ---
-saved: 2026-10-07T18:00:00Z
-phase: 0–5 merged; Phase 6 (S1 python-path hardening, U19, U20, docs, 4.0.0 bump) next, then the end-of-program review
+saved: 2026-10-07T20:30:00Z
+phase: Phases 0–6 merged on release/4.0 (v4.0.0); the end-of-program review (ce-code-review + Codex, looping until 5/5) is next, then the release PR to main (user approval)
 wave: 0
 tasks:
   total: 29
@@ -53,7 +53,7 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 | 3 | U14 Codex lead: bootstrap, monitors, coordinator | **merged**: PR #20, squash dd0bb14 (2026-10-07). Rounds 1–4 reviewed; round 5 fixed and verified under the user's "fix all, verify, merge" decision; the first CI run exposed a ledger-write race (SELF-18), fixed in 676af5b; gates green on Python 3.14 and 3.12 and in CI |
 | 4 | U16 Grok Build adapter; U17 Devin CLI adapter (U18 shipped in 2a) | **merged**: PR #21, squash f27e550 (2026-10-07). Rounds 1–4 reviewed; round 5 fixed and verified; user-tier grok hooks run with a NOTE (user decision); integration merge with 2c and 3 (214efa8: `_lease_uncarve`, grok readers on `read_regular`); gates green on Python 3.14 and 3.12 and in CI. No further per-phase review (user decision) |
 | 5 | U15 at-setup lead step + instruction-file detection | **merged**: PR #22, squash c2a054d (2026-10-07). Units A (roster helpers), B (instructions.sh) and C (the skill) built by parallel workers; SELF-16 new; gates green on Python 3.14 and 3.12 and in CI. No per-phase review (user decision) |
-| 6 | U19 watch-cycle carry-ins; U20 two-lead fixture sprint + 4.0 release | pending |
+| 6 | U19 watch-cycle carry-ins; U20 two-lead fixture sprint + 4.0 release | **merged**: PR #23, squash 47878ac (2026-10-07). S1 inline-python prelude (SELF-27), watch cycle on the persona lane (SELF-28), two-lead sprint + 3.3.x upgrade fix (SELF-17), agy auto + AGY_ERROR, Cursor 4.7, S2 deleted-anchors alarm with a record-gated vouch (SELF-29), 4.0.0 docs/hero/diagrams/version; gates green on Python 3.14 and 3.12 and in CI. Next: the end-of-program review |
 | final | release/4.0 → main as v4.0.0 (release.yml publishes) | pending |
 
 Update this table and the frontmatter at every PR boundary; the plan is `docs/plans/2026-09-28-1946-feat-lead-choice-v4-plan.md`.
