@@ -82,9 +82,18 @@ fi
 # in a skill's text. A persona that cannot start stops the others: nothing is
 # left running behind a failed block.
 SPEC_BRIEF="Review the change in the input: the [R] tasks' collect-snapshot diff, their task rows, the ops/CONTRACTS.md slice and the acceptance criteria. Report findings in your output format."
+# _stop_all stops every persona this cycle started and sets STOPPED to what
+# happened. persona_stop's own lines stay on stderr, and its rc 80 (a process
+# it could not stop, or ps unreadable) is reported as incomplete cleanup.
+_stop_all() {
+  STOPPED="no persona had started"
+  [ -n "$(find "$REVIEW_RUN" -maxdepth 1 -name '*.pid' 2>/dev/null)" ] || return 0
+  STOPPED="the personas were stopped"
+  persona_stop "$REVIEW_RUN" >/dev/null || STOPPED="the personas could NOT all be stopped (persona_stop rc $?; its lines above name what is left: check ps)"
+}
 _spawn_failed() { # _spawn_failed <what> <rc>
-  persona_stop "$REVIEW_RUN" >/dev/null 2>&1 || true
-  echo "review: could not start $* — the personas already started were stopped" >&2
+  _stop_all
+  echo "review: could not start $* — $STOPPED" >&2
   exit 1
 }
 _spec() { # _spec <persona>
@@ -154,14 +163,14 @@ if [ "$AGY_RC" -eq 40 ]; then
   persona_spawn "$REVIEW_RUN" ANALYST_FALLBACK architecture-strategist "$REVIEW_PACKAGE" "$REVIEW_RUN/ANALYST_FALLBACK.md" --brief "$SPEC_BRIEF" || SRC=$?
   [ "$SRC" -eq 0 ] || _spawn_failed "the analyst's architecture-strategist" "rc=$SRC"
 elif [ "$AGY_RC" -ne 0 ]; then
-  persona_stop "$REVIEW_RUN" >/dev/null 2>&1 || true
-  echo "review: analyst (architecture) reviewer failed rc=$AGY_RC — see $AGY_OUT; the personas were stopped" >&2; exit 1
+  _stop_all
+  echo "review: analyst (architecture) reviewer failed rc=$AGY_RC — see $AGY_OUT; $STOPPED" >&2; exit 1
 fi
 if [ "$CODEX_RC" -eq 40 ]; then
   echo "review: reviewer role resolved to the claude lane — run the logic/security review as a sub-agent (rc 40 below), not a shell helper" >&2
 elif [ "$CODEX_RC" -ne 0 ]; then
-  persona_stop "$REVIEW_RUN" >/dev/null 2>&1 || true
-  echo "review: reviewer (logic) reviewer failed rc=$CODEX_RC — see $CODEX_OUT; the personas were stopped" >&2; exit 1
+  _stop_all
+  echo "review: reviewer (logic) reviewer failed rc=$CODEX_RC — see $CODEX_OUT; $STOPPED" >&2; exit 1
 fi
 
 # Headless resilience: agy (and any optional-CLI primary) auto-denies file

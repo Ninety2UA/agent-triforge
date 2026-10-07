@@ -1051,10 +1051,16 @@ LEASE_EOF
 # — print the refusal for a lead checkout that is no longer on the integration
 # branch the lead recorded (KTD18): a builder shares .git and can check out
 # another branch (or detach HEAD) in the lead's checkout, and the next merge,
-# promotion or carve would then build on commits the lead never verified.
+# promotion or carve would then build on commits the lead never verified. On
+# the default branch or a detached HEAD the fix is to check the integration
+# branch out again: lease_rebaseline there would clear it, never record one.
 _lead_branch_switched() {
   local OP=$1 IB=$2 ISHA=$3 CUR=${4:-}
-  echo "${OP}: REFUSED — the lead's integration branch is '${IB}' (at ${ISHA:0:12}) but the checkout is on '${CUR:-<detached HEAD>}' — a builder shares .git and can switch the lead's checkout; if you switched it yourself, run lease_rebaseline (it records the current branch) and rerun (KTD18)." >&2
+  if [ -z "$CUR" ] || [ "$CUR" = "$(_lease_default_branch)" ]; then
+    echo "${OP}: REFUSED — the lead's integration branch is '${IB}' (at ${ISHA:0:12}) but the checkout is on '${CUR:-<detached HEAD>}' — a builder shares .git and can switch the lead's checkout; if you switched it yourself, check '${IB}' out again and rerun (lease_rebaseline here would clear the recorded integration branch, KTD18)." >&2
+  else
+    echo "${OP}: REFUSED — the lead's integration branch is '${IB}' (at ${ISHA:0:12}) but the checkout is on '${CUR}' — a builder shares .git and can switch the lead's checkout; if you switched it yourself, run lease_rebaseline (it records the current branch) and rerun (KTD18)." >&2
+  fi
 }
 
 # _lead_integration_check <op> — lease_merge and lease_promote build on the

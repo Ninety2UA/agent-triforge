@@ -46,15 +46,21 @@ fi
 # others. git-history-analyzer is an exec persona and runs at the default
 # --at ref:HEAD.
 _lens() { # _lens <persona> <brief>
-  local P B SRC
+  local P B SRC STOPPED
   for P in "$@"; do break; done   # the first argument
   for B in "$@"; do :; done       # the last
   printf '%s\n' "$P" >> "$RESEARCH_RUN/lenses"
   SRC=0
   persona_spawn "$RESEARCH_RUN" "$P" "$P" "$RESEARCH_RUN/topic.md" "$RESEARCH_RUN/$P.md" --brief "$B" || SRC=$?
   if [ "$SRC" -ne 0 ]; then
-    persona_stop "$RESEARCH_RUN" >/dev/null 2>&1 || true
-    echo "research: could not start $P (rc=$SRC) — the lenses already started were stopped" >&2
+    # persona_stop's own lines stay on stderr, and its rc 80 (a process it
+    # could not stop, or ps unreadable) is reported as incomplete cleanup.
+    STOPPED="no other lens had started"
+    if [ -n "$(find "$RESEARCH_RUN" -maxdepth 1 -name '*.pid' 2>/dev/null)" ]; then
+      STOPPED="the lenses already started were stopped"
+      persona_stop "$RESEARCH_RUN" >/dev/null || STOPPED="the lenses already started could NOT all be stopped (persona_stop rc $?; its lines above name what is left: check ps)"
+    fi
+    echo "research: could not start $P (rc=$SRC) — $STOPPED" >&2
     exit 1
   fi
 }
