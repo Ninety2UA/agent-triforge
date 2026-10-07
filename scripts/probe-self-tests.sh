@@ -5218,6 +5218,17 @@ rm -rf "$_S15"
 #   leadcommit (clean) the lead commits on the integration branch -> merge 44 "moved since the lead's last merge"; lease_rebaseline -> merges
 #   include    no identity in the repo, ~/.gitconfig only [include]s the file that sets it -> the merge commit carries that identity (#5)
 #   leadptr    lead checkout is a linked worktree, its .git pointer rewritten to the lease admin dir -> collect 44 names that pointer (#4)
+#   objblob    (clean) after review, the snapshot's new blob rewritten in the object store under its own id (_s18_swap)
+#                                                    -> merge 44 naming the blob, HEAD unmoved, nothing staged, the lease
+#                                                       escalated; the blob written again from the worktree + lease_rebaseline
+#                                                       -> merges the reviewed content
+#   objtree    writes sub/deep.txt; the snapshot's sub/ tree rewritten to point deep.txt at a decoy blob -> merge 44 naming
+#              the tree (a rewritten root tree already fails read-tree's own hash check in _lease_verify_snapshot, rc 1)
+#   objpromote (clean) merged, then the merged blob rewritten -> lease_promote 44 naming it, main unmoved; written again -> promotes
+#   objsha256  objblob in a sha256 repository (skipped, with a note in the evidence, where git can't create one)
+#   objgraph   writes feature.txt + AGENTS.md; a commit-graph naming a decoy tree (the snapshot without AGENTS.md) for the
+#              snapshot (_s18_graph): plain git diff sees the decoy, lease_merge still scans AGENTS.md -> 42, nothing merged
+#              (a git whose own diff reads no tree from the graph is noted in the evidence, not failed)
 # plus a static check that every git call in scripts/lib/lease.sh and
 # scripts/lib/lease-wait.sh goes through _lead_git (review finding #23).
 # _s18_git_scan lexes each file as shell,
@@ -5237,12 +5248,12 @@ rm -rf "$_S15"
 # `env -u GIT_DIR git -C x commit` appended must flag exactly those lines.
 _S18="${WORK}/self18"
 _S18_FAIL=""
-_s18_setup() { # _s18_setup <case>
+_s18_setup() { # _s18_setup <case> [git init option, e.g. --object-format=sha256]
   local C="$_S18/$1"
   mkdir -p "$C/repo" "$C/home"
   printf '#!/bin/sh\ntouch "%s/MARKER"\nexit 0\n' "$C" > "$C/mark.sh"
   chmod +x "$C/mark.sh"
-  ( cd "$C/repo" && export HOME="$C/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
+  ( cd "$C/repo" && export HOME="$C/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main ${2:+"$2"} && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
       && mkdir ops && printf '[roles.builder]\ncli = "claude"\n' > ops/roster.toml && echo r > README.md && git add -A && git commit -qm init \
       && git checkout -q -b sprint/s18 && echo s > s.txt && git add s.txt && git commit -qm sprint ) >/dev/null 2>&1
 }
@@ -5595,6 +5606,113 @@ EOF
 O=$(_s18_lead ledger-gone '_s18_go t; _s18_try create-b lease_create b builder; echo "ledger=$([ -f ops/leases.toml ] && echo yes || echo no)"')
 _s18_expect ledger-gone "$O" 'create-b-rc=44' 'and its digest are gone, but the lead state dir .*/lead holds copies saved for earlier leases' '^ledger=no$'
 
+# objects: git reads an object by its id without hashing it again, and a worker
+# with no OS sandbox can write the lead's .git/objects. Both helpers run in the
+# lead checkout after review, as a worker's later write would.
+# _s18_swap <id> <source id> — <source id>'s loose object file (git's own zlib
+# stream of "<type> <size>\0<content>") written over <id>'s, the name kept.
+_s18_swap() {
+  local O
+  O="$(git rev-parse --git-common-dir)/objects"
+  chmod u+w "$O/${1:0:2}/${1:2}" && cp "$O/${2:0:2}/${2:2}" "$O/${1:0:2}/${1:2}"
+}
+# _s18_graph <commit> <its tree> <other tree> — git writes a commit-graph for
+# <commit>, then <other tree> replaces <its tree> in it as <commit>'s root tree
+# (the trailing checksum recomputed): a sha1 repository's graph only.
+_s18_graph() {
+  echo "$1" | git commit-graph write --stdin-commits >/dev/null 2>&1 || return 1
+  S18_G="$(git rev-parse --git-common-dir)/objects/info/commit-graph" S18_OLD="$2" S18_NEW="$3" python3 -c '
+import hashlib, os
+p = os.environ["S18_G"]
+b = bytearray(open(p, "rb").read())
+old, new = bytes.fromhex(os.environ["S18_OLD"]), bytes.fromhex(os.environ["S18_NEW"])
+i = b.find(old)
+if i < 0 or len(old) != 20 or len(new) != 20:
+    raise SystemExit("no sha1 tree id " + os.environ["S18_OLD"] + " in " + p)
+b[i:i + 20] = new
+os.chmod(p, 0o644)
+open(p, "wb").write(bytes(b[:-20]) + hashlib.sha1(bytes(b[:-20])).digest())
+'
+}
+# objblob, objsha256: the snapshot's new blob swapped after review -> merge 44;
+# the blob written again from the worktree, as the refusal says -> merges
+_S18_OBJBLOB='_s18_go t; _s18_try collect lease_collect t; _s18_try pin lease_pin_reviewer t codex
+B=$(git rev-parse "$(_ledger_get t snapshot_sha):feature.txt"); H=$(git rev-parse HEAD); echo "blob=$B"
+_s18_swap "$B" "$(printf "swapped\n" | git hash-object -w --stdin)"
+_s18_try merge lease_merge t codex
+echo "state=$(_ledger_get t state) prev=$(_ledger_get t integrity_prev_state) moved=$([ "$(git rev-parse HEAD)" = "$H" ] && echo no || echo yes) staged=[$(git diff --cached --name-only)] file=[$(cat feature.txt 2>/dev/null)]"
+echo "reason=$(_ledger_get t reason)"
+rm -f ".git/objects/${B:0:2}/${B:2}"; git -C "$(_ledger_get t worktree)" hash-object -w feature.txt >/dev/null
+_s18_try rebaseline lease_rebaseline t; _s18_try remerge lease_merge t codex; echo "merged=[$(git show HEAD:feature.txt)]"'
+_s18_objblob() { # _s18_objblob <case> <hex digits in an object id> — _S18_OBJBLOB in the case, and its checks
+  local O B
+  _s18_clean "$1"
+  O=$(_s18_lead "$1" "$_S18_OBJBLOB")
+  B=$(printf '%s\n' "$O" | sed -n 's/^blob=//p')
+  [ "${#B}" -eq "$2" ] || _S18_FAIL="$_S18_FAIL ${1}(blob-id:${B:-none})"
+  _s18_expect "$1" "$O" 'collect-rc=0' 'merge-rc=44' "blob ${B:-none} \\(feature\\.txt\\): its content hashes to [0-9a-f]{12}" \
+    '^state=escalated prev=review moved=no staged=\[\] file=\[\]$' '^reason=integrity \(lease_merge\): blob ' 'rebaseline-rc=0' 'remerge-rc=0' '^merged=\[feature\]$'
+}
+_s18_setup objblob
+_s18_objblob objblob 40
+_S18_SHA256="the same in a sha256 repository"
+_s18_setup objsha256 --object-format=sha256
+if [ -d "$_S18/objsha256/repo/.git" ]; then
+  _s18_objblob objsha256 64
+else
+  _S18_SHA256="no sha256 case: this git can't create a sha256 repository"
+fi
+
+# objtree: the snapshot's sub/ tree swapped for one that points deep.txt at a
+# decoy (a swapped root tree already fails read-tree's own hash check, rc 1)
+_s18_setup objtree
+_s18_builder objtree <<'EOF'
+#!/bin/sh
+mkdir -p sub && echo deep > sub/deep.txt
+echo "Status: DONE"
+EOF
+O=$(_s18_lead objtree '_s18_go t; _s18_try collect lease_collect t; _s18_try pin lease_pin_reviewer t codex
+T=$(git rev-parse "$(_ledger_get t snapshot_tree):sub"); echo "tree=$T"; D=$(printf "decoy\n" | git hash-object -w --stdin)
+_s18_swap "$T" "$(git ls-tree "$T" | sed "s/$(git rev-parse "$T:deep.txt")/$D/" | git mktree)"
+_s18_try merge lease_merge t codex; echo "state=$(_ledger_get t state) staged=[$(git diff --cached --name-only)] deep=[$(cat sub/deep.txt 2>/dev/null)]"')
+_S18_T=$(printf '%s\n' "$O" | sed -n 's/^tree=//p')
+_s18_expect objtree "$O" 'collect-rc=0' 'merge-rc=44' "tree ${_S18_T:-none} \\(sub\\): its content hashes to [0-9a-f]{12}" '^state=escalated staged=\[\] deep=\[\]$'
+
+# objpromote: merged clean, then the merged blob swapped -> promote 44; written again -> promotes
+_s18_setup objpromote
+_s18_clean objpromote
+O=$(_s18_lead objpromote '_s18_go t; _s18_try collect lease_collect t; _s18_try pin lease_pin_reviewer t codex; _s18_try merge lease_merge t codex
+B=$(git rev-parse HEAD:feature.txt); M=$(git rev-parse main); echo "blob=$B"
+_s18_swap "$B" "$(printf "swapped\n" | git hash-object -w --stdin)"
+_s18_try promote lease_promote main
+echo "on=$(git symbolic-ref --short HEAD) main-moved=$([ "$(git rev-parse main)" = "$M" ] && echo no || echo yes) file=[$(cat feature.txt 2>/dev/null)]"
+rm -f ".git/objects/${B:0:2}/${B:2}"; printf "feature\n" | git hash-object -w --stdin >/dev/null
+_s18_try repromote lease_promote main; echo "promoted=[$(git show main:feature.txt)] on=$(git symbolic-ref --short HEAD)"')
+_S18_B=$(printf '%s\n' "$O" | sed -n 's/^blob=//p')
+_s18_expect objpromote "$O" 'merge-rc=0' 'promote-rc=44' "blob ${_S18_B:-none} \\(feature\\.txt\\): its content hashes to [0-9a-f]{12}" '^on=sprint/s18 main-moved=no file=\[feature\]$' 'repromote-rc=0' '^promoted=\[feature\] on=main$'
+
+# objgraph: a commit-graph naming a decoy tree for the snapshot. Plain git diff
+# reads the graph (graph-diff names the decoy's one change), the squash reads the
+# commit object: the scans the lead runs must read the same tree as the squash.
+_s18_setup objgraph
+_s18_builder objgraph <<'EOF'
+#!/bin/sh
+echo feature > feature.txt
+echo "# planted" > AGENTS.md
+echo "Status: DONE"
+EOF
+O=$(_s18_lead objgraph '_s18_go t; _s18_try collect lease_collect t; _s18_try pin lease_pin_reviewer t codex
+S=$(_ledger_get t snapshot_sha); T=$(_ledger_get t snapshot_tree)
+_s18_graph "$S" "$T" "$(git ls-tree "$T" | grep -v AGENTS.md | git mktree)" || echo "graph-failed"
+echo "graph-diff=[$(git diff --name-only "$(_ledger_get t base_sha)" "$S" | tr "\n" " ")]"
+_s18_try merge lease_merge t codex; echo "state=$(_ledger_get t state) agents=[$(git show HEAD:AGENTS.md 2>/dev/null)]"')
+_s18_expect objgraph "$O" 'collect-rc=0' 'merge-rc=42' 'touches protected paths.*AGENTS\.md' '^state=review agents=\[\]$'
+printf '%s\n' "$O" | grep -q '^graph-failed$' && _S18_FAIL="$_S18_FAIL objgraph(commit-graph-not-written-or-patched)"
+# a git whose diff takes no tree from the graph has no such attack: noted, not failed
+_S18_GRAPH="a commit-graph naming a decoy tree for the snapshot (plain git diff sees the decoy) -> lease_merge still scans AGENTS.md -> 42"
+printf '%s\n' "$O" | grep -q '^graph-diff=\[feature\.txt \]$' \
+  || _S18_GRAPH="a commit-graph naming a decoy tree for the snapshot -> lease_merge 42 (this git's own diff did not read the graph's tree either)"
+
 # static: every git call in lease.sh and lease-wait.sh goes through _lead_git
 # _s18_git_scan <file> [noallow] — one line per finding: "<line>:<source line>"
 # for a git call outside the allowlist, "allowlist-unused:<entry>", or
@@ -5743,7 +5861,7 @@ _S18_NEG=$(_s18_git_scan "$_S18/lease-planted.sh" | cut -d: -f1 | tr '\n' ' ')
   || _S18_FAIL="$_S18_FAIL scan-negative-control(want-lines:$((_S18_N - 2)),$((_S18_N - 1)),${_S18_N};got:[${_S18_NEG% }])"
 
 if [ -z "$_S18_FAIL" ]; then
-  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer/leadcfg -> collect rc 44 naming the surface (config, hooks, ledger and the lead trusted git config restored, gitconfig.changed-* kept; marker never ran); post-checkout planted: next lease_create 44; fsmonitor, filter, post-checkout and pointer once accepted (lease_rebaseline) still never run and collect snapshots (pointer via the recorded admin dir); tampered hooks.copy -> 44, NOT restored; ledger swapped for a symlink -> 44, a regular file again; the lead's own git remote add -> 44 naming the saved copy, put back + rebaselined -> collect 0, origin kept; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; git gc after collect (writes .git/info/refs) -> merges; lead checkout switched to rogue -> merge 44 naming sprint/s18 and rogue, state review, back on sprint/s18 -> merges; lease_create on main records no integration branch, sprint/two cut after it -> lease + merge, no 44; a lead commit on the integration branch -> merge 44 (moved), lease_rebaseline -> merges on top; identity only in an [include]d ~/.gitconfig file -> the merge commit carries it; linked-worktree lead checkout whose .git pointer is rewritten to the lease admin dir -> collect 44 naming it; every git call in lease.sh and lease-wait.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines in lease.sh, none in lease-wait.sh; planted { git / else git / env -u git lines caught)" "static"
+  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer/leadcfg -> collect rc 44 naming the surface (config, hooks, ledger and the lead trusted git config restored, gitconfig.changed-* kept; marker never ran); post-checkout planted: next lease_create 44; fsmonitor, filter, post-checkout and pointer once accepted (lease_rebaseline) still never run and collect snapshots (pointer via the recorded admin dir); tampered hooks.copy -> 44, NOT restored; ledger swapped for a symlink -> 44, a regular file again; the lead's own git remote add -> 44 naming the saved copy, put back + rebaselined -> collect 0, origin kept; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; git gc after collect (writes .git/info/refs) -> merges; lead checkout switched to rogue -> merge 44 naming sprint/s18 and rogue, state review, back on sprint/s18 -> merges; lease_create on main records no integration branch, sprint/two cut after it -> lease + merge, no 44; a lead commit on the integration branch -> merge 44 (moved), lease_rebaseline -> merges on top; identity only in an [include]d ~/.gitconfig file -> the merge commit carries it; linked-worktree lead checkout whose .git pointer is rewritten to the lease admin dir -> collect 44 naming it; after review the snapshot's new blob rewritten in the object store under its own id -> merge 44 naming it, HEAD unmoved, nothing staged, the lease escalated, the blob written again from the worktree + lease_rebaseline -> merges the reviewed content (${_S18_SHA256}); a subtree rewritten to point at a decoy -> merge 44 naming the tree; a merged blob rewritten -> lease_promote 44, main unmoved, written again -> promotes; ${_S18_GRAPH}; every git call in lease.sh and lease-wait.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines in lease.sh, none in lease-wait.sh; planted { git / else git / env -u git lines caught)" "static"
 else
   # the failed case names first, so a long pattern list can't cut them off
   row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "FAIL" "mismatch in $(_self_fail_cases "$_S18_FAIL"):$(printf '%s' "$_S18_FAIL" | cut -c1-500)" "static"

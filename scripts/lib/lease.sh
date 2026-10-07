@@ -218,18 +218,25 @@ CAPTURE_EOF
 # .git/info, and the trusted capture itself) is digest-checked before these
 # calls run. Inherited GIT_* that
 # would redirect the call are unset; _LEAD_GIT_INDEX, when set, becomes
-# GIT_INDEX_FILE (the temporary index a snapshot is built in).
+# GIT_INDEX_FILE (the temporary index a snapshot is built in). The
+# commit-graph is off (core.commitGraph=false; GIT_TEST_COMMIT_GRAPH, which
+# turns it back on, unset): a worker can write that cache under
+# .git/objects/info, and through it a diff (the protected and ops/ scans, a
+# reviewer's diff) would read another tree for a commit than the squash, which
+# reads the commit object. Off, every call reads the commit objects, which
+# lease_merge and lease_promote re-hash (_lease_verify_objects).
 _lead_git() {
   if [ -z "${_LEAD_CFG:-}" ] || [ ! -f "${_LEAD_CFG}" ]; then
     _lease_ctx || return 1
   fi
   local -a E=(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_OBJECT_DIRECTORY
               -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_CONFIG -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT -u GIT_EXTERNAL_DIFF
+              -u GIT_TEST_COMMIT_GRAPH
               GIT_CONFIG_NOSYSTEM=1 "GIT_CONFIG_GLOBAL=${_LEAD_CFG}" GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat GIT_EDITOR=true GIT_OPTIONAL_LOCKS=0 GIT_NO_REPLACE_OBJECTS=1)
   [ -n "${_LEAD_GIT_INDEX:-}" ] && E+=("GIT_INDEX_FILE=${_LEAD_GIT_INDEX}")
   "${E[@]}" git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.attributesFile=/dev/null \
     -c commit.gpgSign=false -c tag.gpgSign=false -c core.pager=cat -c core.editor=true \
-    -c gc.auto=0 -c maintenance.auto=false "$@"
+    -c gc.auto=0 -c maintenance.auto=false -c core.commitGraph=false "$@"
 }
 
 # _lgr <git args...> — _lead_git on the lead's own checkout, bound by explicit
@@ -697,7 +704,9 @@ print('\n'.join(vals))
 # change the lead or user made to any surface but the ledger (a ledger change
 # is never accepted; its alert waits for the next check), resumes the named
 # leases the check escalated, and records each acceptance in [baseline]
-# (last_rebaseline, rebaseline_log) — an audit trail, not prevention.
+# (last_rebaseline, rebaseline_log) — an audit trail, not prevention. The
+# object store is not digested here: lease_merge and lease_promote re-hash the
+# objects they bring in (_lease_verify_objects), which no rebaseline accepts.
 _RC_LEASE_INTEGRITY=44
 
 # Every surface, the ledger and the record are read through read_regular
@@ -2031,6 +2040,102 @@ print(" ".join(bad[:10]) + (" ..." if len(bad) > 10 else ""))
   fi
 }
 
+# _lease_verify_objects <op> <from> <to> — re-hash every object <to> brings in
+# that <from> does not reach (KTD18). The object store is as worker-writable as
+# the rest of .git, and git reads an object by its id without hashing it again:
+# a blob or tree file rewritten under its own name after review (gc.auto=0
+# keeps the snapshot's objects loose) would put content no review saw into the
+# squash or the promotion. One rev-list lists the objects (--missing=print
+# names one that is gone), one cat-file --batch reads each back raw, and python
+# hashes "<type> <size>\0<content>" by the repository's object format (sha1 or
+# sha256). 0 when every object matches its id; otherwise the refusal, one line
+# per object (type, id, path) or the error that broke the list off, and
+# _RC_LEASE_INTEGRITY, with the first line in _LVO_WHY. A check that can't run
+# fails closed the same way. Objects <from> already reaches are not re-hashed:
+# git fsck reads every one.
+_lease_verify_objects() {
+  local OP=$1 FROM=${2:-} TO=${3:-} FMT LIST LERR="" LRC=0 BAD="" PRC=0 NL
+  NL='
+'
+  _LVO_WHY=""
+  FMT=$(_lgr rev-parse --show-object-format 2>/dev/null) || FMT=""
+  if [ -z "$FROM" ] || [ -z "$TO" ]; then
+    BAD="the objects ${TO:0:12} brings in could not be listed: no commit to list them from"
+  elif ! LIST=$(mktemp "${TMPDIR:-/tmp}/triforge-objects.XXXXXX"); then
+    BAD="the objects ${TO:0:12} brings in could not be listed: no temp file"
+  else
+    LERR=$(_lgr rev-list --objects --missing=print "$TO" "^${FROM}" 2>&1 >"$LIST") || LRC=$?
+    # Read back even when the list broke off: a tree that no longer parses is
+    # on it, and the re-hash names it. The python checks every answer against
+    # the list, in order, so a short or garbled stream fails closed.
+    if [ -s "$LIST" ]; then
+      BAD=$(cut -d ' ' -f 1 < "$LIST" | _lgr cat-file --batch --buffer 2>/dev/null \
+            | LVO_LIST="$LIST" LVO_FORMAT="$FMT" python3 -c "${_PY_PRELUDE}"'
+import hashlib, os, sys
+fmt = os.environ.get("LVO_FORMAT", "")
+if fmt not in ("sha1", "sha256"):
+    print("the object format reads as " + (fmt[:20] or "nothing") + ", neither sha1 nor sha256: nothing was re-hashed")
+    sys.exit(2)
+width = 40 if fmt == "sha1" else 64
+src = sys.stdin.buffer
+def text(b):
+    return "".join(c if c.isprintable() else "?" for c in b.decode("utf-8", "replace"))[:100]
+bad = []
+for line in open(os.environ["LVO_LIST"], "rb").read().split(b"\n"):
+    if not line:
+        continue
+    # "<id>" a commit, "<id> " the root tree, "<id> <path>", "?<id>" missing
+    oid, sp, name = line.partition(b" ")
+    oid = oid.lstrip(b"?")
+    what = text(oid) + ((" (" + (text(name) if name else "the root tree") + ")") if sp else "")
+    if len(oid) != width or oid.strip(b"0123456789abcdef"):
+        bad.append("object " + what + ": not a " + fmt + " object id")
+        break
+    head = src.readline()
+    if head.endswith(b" missing\n"):
+        bad.append("object " + what + ": missing or unreadable")
+        continue
+    f = head[:-1].split(b" ")
+    if not head.endswith(b"\n") or len(f) != 3 or f[0] != oid or not f[2].isdigit():
+        bad.append("object " + what + ": unreadable (cat-file answered " + text(head[:60]) + ")")
+        break
+    typ, left = text(f[1]), int(f[2])
+    h = hashlib.new(fmt, f[1] + b" " + f[2] + b"\0")
+    while left:
+        chunk = src.read(min(left, 1 << 20))
+        if not chunk:
+            break
+        h.update(chunk)
+        left -= len(chunk)
+    if left or src.read(1) != b"\n":
+        bad.append(typ + " " + what + ": unreadable (its content ends early)")
+        break
+    if h.hexdigest() != oid.decode("ascii"):
+        bad.append(typ + " " + what + ": its content hashes to " + h.hexdigest()[:12] + ", not to its id")
+else:
+    if src.read(1):
+        bad.append("cat-file answered more objects than were listed")
+for b in bad[:10]:
+    print(b)
+if len(bad) > 10:
+    print("... and " + str(len(bad) - 10) + " more")
+sys.exit(1 if bad else 0)
+') || PRC=$?
+    fi
+    rm -f "$LIST"
+    if [ "$LRC" -ne 0 ]; then
+      BAD="${BAD}${BAD:+${NL}}the objects ${TO:0:12} brings in could not all be listed: $(printf '%s' "$LERR" | tail -2 | tr '\n' ' ' | LC_ALL=C tr -d '\000-\037\177' | cut -c1-200)"
+    elif [ "$PRC" -ne 0 ] && [ -z "$BAD" ]; then
+      BAD="the objects ${TO:0:12} brings in could not be read back (rc ${PRC})"
+    fi
+  fi
+  [ -n "$BAD" ] || return 0
+  _LVO_WHY=$(printf '%s\n' "$BAD" | head -1)
+  echo "${OP}: INTEGRITY — the objects ${TO:0:12} brings in are not all what their ids name: the object store changed outside the lead's own operations (KTD18; this is detection, not prevention):" >&2
+  printf '%s\n' "$BAD" | sed 's/^/    /' >&2
+  return "$_RC_LEASE_INTEGRITY"
+}
+
 # lease_create <task_id> <role> — resolve the builder from the roster
 # (resolve_role), carve the worktree + lease branch, provision skills (the
 # paths that wrote are recorded as `provisioned`, KTD9), write the leased
@@ -3249,7 +3354,9 @@ HANDOVER_EOF
 # collects") into the MAIN tree only after the integrity check, the
 # integration-branch check, the snapshot checks (_lease_verify_snapshot:
 # branch = base + that one commit, worktree unchanged since collect, no ops/
-# path) and the approval gate pass (_lease_merge_gate, U10: a protected diff
+# path), the object re-hash (_lease_verify_objects: every object the snapshot
+# brings in hashes to its id, else the lease escalates, rc 44) and the
+# approval gate pass (_lease_merge_gate, U10: a protected diff
 # or a stale lead-class pin needs a merge approval for this snapshot, rc 42),
 # records reviewer, its class, the approval and merge_commit, voids a
 # promotion approval on record, prints the CHANGELOG attribution
@@ -3343,6 +3450,14 @@ lease_merge() {
     SNAP=$(_ledger_get "$TASK_ID" snapshot_sha)
   fi
   _lease_verify_snapshot "$TASK_ID" || return 1
+  # The objects the snapshot brings onto the integration branch, re-hashed
+  # before the protected scan and the squash read them (KTD18): a mismatch
+  # escalates the lease, as the integrity check does.
+  if ! _lease_verify_objects lease_merge "$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)" "$SNAP"; then
+    _ledger_update "$TASK_ID" state=escalated integrity_prev_state="$STATE" reason="integrity (lease_merge): ${_LVO_WHY}" >/dev/null || true
+    echo "  escalated: ${TASK_ID}. Nothing was merged: git reads an object by its id without hashing it again, so the squash would have taken content no review saw, and a worker without an OS sandbox can write the lead's .git. Inspect it (git fsck lists every damaged object). The worktree ${WT} still holds the collected files: remove each damaged loose object (.git/objects/<first 2 hex>/<rest>) and write a blob again from there (git -C <that worktree> hash-object -w <path>), then lease_rebaseline ${TASK_ID} puts the lease back in review and lease_merge checks again; otherwise reclaim the lease." >&2
+    return "$_RC_LEASE_INTEGRITY"
+  fi
   # Who stands behind this merge (U10): the protected check over the lease's
   # full diff, base to the verified snapshot, at every merge, and the merge
   # approval it then needs; a stale lead-class pin needs the user's.
@@ -3541,7 +3656,9 @@ sys.exit(0 if isinstance(data, dict) and data.get("name") == "agent-triforge" el
 #       <default>...HEAD — both sides of every rename, NUL-separated so no
 #       path is quoted out of a match, and a submodule entry (a nested repo
 #       the snapshot recorded as a gitlink) listed even when .gitmodules on
-#       the integration branch says `ignore = all`
+#       the integration branch says `ignore = all` — once every object the
+#       integration branch brings in hashes to its id (_lease_verify_objects;
+#       a mismatch refuses with rc 44)
 #   (c) classify them against the registry's protected-path lists (KTD8,
 #       scripts/lib/registry.sh): project_protected always, framework_protected
 #       only in the Triforge checkout (_lease_is_framework_checkout). Case-
@@ -3630,6 +3747,13 @@ print('true' if v is True else 'false')
   if ! _lgr rev-parse --verify --quiet "${DEFAULT_BRANCH}^{commit}" >/dev/null 2>&1; then
     echo "lease_promote: ERROR '${DEFAULT_BRANCH}' is not a valid branch or commit — pass the default branch explicitly: lease_promote <default-branch>." >&2
     return 1
+  fi
+  # The objects the promotion brings into the default branch, re-hashed before
+  # the protected scan reads them and the merge checks them out (KTD18).
+  if ! _lease_verify_objects lease_promote "$(_lgr rev-parse --verify --quiet "${DEFAULT_BRANCH}^{commit}" 2>/dev/null || true)" \
+         "$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)"; then
+    echo "  Nothing was promoted: git reads an object by its id without hashing it again, so '${DEFAULT_BRANCH}' would have taken content no review saw, and a worker without an OS sandbox can write the lead's .git. Inspect it (git fsck lists every damaged object), repair the store, then rerun lease_promote." >&2
+    return "$_RC_LEASE_INTEGRITY"
   fi
   # (c) protected-path scan (KTD8). A hit forces the gate ON regardless of the
   # knob. Fail closed: an unreadable plugin manifest counts as the Triforge
