@@ -616,8 +616,10 @@ _claude_session_ok() {
 #                copy after the run (Devin writes its org id into it)
 #   grok         _grok_argv (scripts/lib/grok.sh) in the class the lane arg
 #                carries (lease_dispatch: _grok_class of the lease role):
-#                edit, the workspace sandbox and the edit tools, for a builder,
-#                tester or documenter lease; read, the read-only sandbox with
+#                edit, the triforge-edit sandbox profile (workspace with the
+#                GROK_HOME denies; lease_dispatch writes it into the worktree
+#                first) and the edit tools, for a builder, tester or
+#                documenter lease; read, the read-only sandbox with
 #                Read and Grep only and Edit, Write and Bash denied, for
 #                anything else. Either way the env prefix that turns grok's
 #                Claude Code and Cursor discovery off, the model pin, --effort

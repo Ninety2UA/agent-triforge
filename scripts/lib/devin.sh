@@ -118,10 +118,12 @@ _DEVIN_READ_XDG=/dev/null/triforge-devin-read
 # command line up to the prompt: for the read class `env XDG_CONFIG_HOME=`
 # _DEVIN_READ_XDG first, then devin with the per-run config copy, the model
 # pin, the class's --permission-mode (_devin_mode), workspace trust off (-p
-# fails in an untrusted directory) and -p last. The edit class keeps the
-# user's XDG_CONFIG_HOME: its tool shell runs the project's own commands,
-# which may read their config there. The one composer: invoke_devin and
-# _lease_lane_argv (scripts/lib/lease-wait.sh) both call it.
+# fails in an untrusted directory) and -p last. The edit class sets no
+# XDG_CONFIG_HOME: both lanes run under _adapter_env devin, whose allowlist
+# never passes the lead's, so Devin and the project's own commands in its
+# tool shell use the default ~/.config (Devin's MCP servers, skills and
+# subagent profiles under ~/.config/devin included). The one composer:
+# invoke_devin and _lease_lane_argv (scripts/lib/lease-wait.sh) both call it.
 _devin_argv() {
   _DEVIN_ARGV=(devin --config "$2" --model "$3" --permission-mode "$(_devin_mode "$1")" --respect-workspace-trust false -p)
   if [ "${1:-}" != edit ]; then
@@ -346,6 +348,43 @@ REIMPORT_RECORDS
   esac
 }
 
+# _devin_gate <role> <class> <output-file> <err-file> — the rules a Devin run
+# passes before anything is sent (R24), against the roster and this directory
+# as they are now: the recorded consent (_member_consent_ok, reason consent)
+# and the role (_member_role_ok, reason role: the builder needs its opt-in on
+# record), each rc 5; then, for the read class, the project's .devin/ and
+# .cognition/ files (_devin_project_guard, rc 1, reason project-config). 0 when
+# all pass; else the refusal on stderr and in <output-file> (a caller that
+# reads only the file sees why) and class deterministic. invoke_devin runs it
+# before every attempt, so a retry never rides the first attempt's checks.
+_devin_gate() {
+  local CRC=0 GUARD=""
+  _INVOKE_FAILURE_REASON="consent"
+  _member_consent_ok devin 2> "$4" || CRC=$?
+  if [ "$CRC" -eq 0 ]; then
+    _INVOKE_FAILURE_REASON="role"
+    _member_role_ok devin "$1" 2> "$4" || CRC=$?
+  fi
+  if [ "$CRC" -ne 0 ]; then
+    cat "$4" >&2
+    cat "$4" > "$3" 2>/dev/null || true
+    INVOKE_FAILURE_CLASS="deterministic"
+    return "$CRC"
+  fi
+  _INVOKE_FAILURE_REASON=""
+  # Devin starts in this directory, so its .devin/ and .cognition/ files must
+  # not widen the read class
+  if [ "$2" = read ] && ! GUARD=$(_devin_project_guard "$PWD"); then
+    GUARD="invoke_devin: ERROR ${GUARD:-the project .devin/ and .cognition/ check failed to run}. No retry (deterministic)."
+    echo "$GUARD" >&2
+    echo "$GUARD" > "$3" 2>/dev/null || true
+    INVOKE_FAILURE_CLASS="deterministic"
+    _INVOKE_FAILURE_REASON="project-config"
+    return 1
+  fi
+  return 0
+}
+
 # invoke_devin <agent-name> <prompt> [output-file] [timeout-seconds] [effort]
 # The role comes from DEVIN_ROLE (dispatch_role sets it), else the agent name.
 # Runs under _adapter_env devin, the lease lane's allowlist. Returns devin's
@@ -354,7 +393,9 @@ REIMPORT_RECORDS
 # the roster records no consent (_member_consent_ok, reason consent) or does
 # not allow devin the role now (_member_role_ok, reason role: the builder
 # without its opt-in), and 1 (deterministic, project-config) when a project
-# file here would widen the read class, all before anything is sent.
+# file here would widen the read class, all before anything is sent and again
+# before the retry (_devin_gate); 129, 130 or 143 (deterministic, reason
+# interrupted, no retry) when a signal stopped the run.
 invoke_devin() {
   local AGENT_NAME=$1
   local PROMPT=$2
@@ -363,27 +404,21 @@ invoke_devin() {
   local EFFORT=${5:-${DEVIN_EFFORT:-}}
   local MODEL="${DEVIN_MODEL:-swe-1-6-slow}"
   local ROLE=${DEVIN_ROLE:-$AGENT_NAME}
-  local ERR="${OUTPUT_FILE}.err" CLASS MODE BRIEF_FILE="" BODY="" FULL_PROMPT CFG="" EXIT_CODE=0 ATTEMPT=1 TOBIN CRC=0 GUARD=""
+  local ERR="${OUTPUT_FILE}.err" CLASS MODE BRIEF_FILE="" BODY="" FULL_PROMPT CFG="" EXIT_CODE=0 ATTEMPT=1 TOBIN CRC=0
 
   INVOKE_FAILURE_CLASS="none"
   _INVOKE_FAILURE_REASON=""
 
-  # The consent and role rules at dispatch (R24): the builder class needs the
-  # opt-in on record now, whoever calls. A refusal goes to stderr and to the
-  # output file, so a caller that reads only the file sees why.
-  _INVOKE_FAILURE_REASON="consent"
-  _member_consent_ok devin 2> "$ERR" || CRC=$?
-  if [ "$CRC" -eq 0 ]; then
-    _INVOKE_FAILURE_REASON="role"
-    _member_role_ok devin "$ROLE" 2> "$ERR" || CRC=$?
-  fi
+  CLASS=$(_devin_class "$ROLE")
+  MODE=$(_devin_mode "$CLASS")
+
+  # The consent, role and project rules at dispatch (R24): the builder class
+  # needs the opt-in on record now, whoever calls, and the read class a
+  # directory whose .devin/ and .cognition/ files do not widen it
+  _devin_gate "$ROLE" "$CLASS" "$OUTPUT_FILE" "$ERR" || CRC=$?
   if [ "$CRC" -ne 0 ]; then
-    cat "$ERR" >&2
-    cat "$ERR" > "$OUTPUT_FILE" 2>/dev/null || true
-    INVOKE_FAILURE_CLASS="deterministic"
     return "$CRC"
   fi
-  _INVOKE_FAILURE_REASON=""
 
   if ! command -v devin >/dev/null 2>&1; then
     echo "invoke_devin: ERROR \`devin\` (Devin CLI) not found on PATH — cannot invoke agent '${AGENT_NAME}'. Fix: $(cli_install_fix devin 2>/dev/null || echo 'install Devin CLI, then run devin auth login'). No retry (deterministic)." >&2
@@ -394,21 +429,6 @@ invoke_devin() {
   fi
   # env -i execs commands only, so the timeout runs as a binary (_timeout_tool)
   TOBIN=$(_timeout_tool) || { INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="timeout-tool-missing"; return "$_RC_NO_TIMEOUT_TOOL"; }
-
-  CLASS=$(_devin_class "$ROLE")
-  MODE=$(_devin_mode "$CLASS")
-
-  # Devin starts in this directory, so its .devin/ and .cognition/ files must
-  # not widen the read class (_devin_project_guard); the refusal also goes to
-  # the output file
-  if [ "$CLASS" = read ] && ! GUARD=$(_devin_project_guard "$PWD"); then
-    GUARD="invoke_devin: ERROR ${GUARD:-the project .devin/ and .cognition/ check failed to run}. No retry (deterministic)."
-    echo "$GUARD" >&2
-    echo "$GUARD" > "$OUTPUT_FILE" 2>/dev/null || true
-    INVOKE_FAILURE_CLASS="deterministic"
-    _INVOKE_FAILURE_REASON="project-config"
-    return 1
-  fi
 
   # The brief: the agent's own (devin-agents/<agent>.md), else the role's —
   # it carries the typed report contract, so a persona name without a Devin
@@ -445,6 +465,18 @@ ${PROMPT}"
     _adapter_env devin "$TOBIN" -k 10s "${TIMEOUT}s" "${_DEVIN_ARGV[@]}" "$FULL_PROMPT" \
       < /dev/null > "$OUTPUT_FILE" 2> "$ERR" || EXIT_CODE=$?
     rm -f "$CFG"
+    # A signal stopped the run (129 HUP, 130 INT, 143 TERM): it is over, and
+    # nothing starts again, the builder class least of all
+    case "$EXIT_CODE" in
+      129|130|143)
+        echo "invoke_devin: agent=${AGENT_NAME:-<none>} interrupted (exit ${EXIT_CODE}). No retry (deterministic)." >&2
+        echo "invoke_devin: interrupted (exit ${EXIT_CODE}) — no answer" > "$OUTPUT_FILE" 2>/dev/null || true
+        rm -f "$ERR"
+        INVOKE_FAILURE_CLASS="deterministic"
+        _INVOKE_FAILURE_REASON="interrupted"
+        return "$EXIT_CODE"
+        ;;
+    esac
     if [ "$EXIT_CODE" -eq 0 ]; then
       if [ ! -s "$OUTPUT_FILE" ] || ! grep -q '[^[:space:]]' "$OUTPUT_FILE" 2>/dev/null; then
         # A clean exit with nothing printed is no completion (as agy's empty
@@ -468,6 +500,12 @@ ${PROMPT}"
     if [ "$INVOKE_FAILURE_CLASS" = retryable ] && [ "$ATTEMPT" -eq 1 ]; then
       echo "invoke_devin: agent=${AGENT_NAME} exit=${EXIT_CODE} (retryable${_INVOKE_FAILURE_REASON:+, ${_INVOKE_FAILURE_REASON}}), retrying once" >&2
       ATTEMPT=2
+      # The rules again, against the roster and this directory as the first
+      # attempt left them
+      _devin_gate "$ROLE" "$CLASS" "$OUTPUT_FILE" "$ERR" || CRC=$?
+      if [ "$CRC" -ne 0 ]; then
+        return "$CRC"
+      fi
       continue
     fi
     case "$_INVOKE_FAILURE_REASON" in

@@ -1405,10 +1405,11 @@ _lease_provision_claude_skills() {
 # .claude/skills too, and for a grok worker the .grok/config.toml that keeps
 # every plugin from loading (_grok_lease_config, in the permission class of
 # <role>: a reviewer or analyst lease, or no role, is also refused where the
-# project supplies code grok would start). rc 1 when the list can't be read: a
-# row without it would fall back to excluding all of .agents/; and rc 1 when
-# that config can't be written as proven (a grok lease is never made without
-# it).
+# project or the user tier supplies code grok would start; a builder lease
+# also gets .grok/sandbox.toml, its sandbox profile). rc 1 when the list can't
+# be read: a row without it would fall back to excluding all of .agents/; and
+# rc 1 when that config or profile can't be written as proven (a grok lease is
+# never made without them).
 _lease_provision() {
   local WT=$1 CLI=${2:-} LIST TRACKED=""
   local -a DIRS=(.agents/skills)
@@ -2047,8 +2048,14 @@ ${PROMPT}"
       ;;
     grok)
       # The lane arg is grok's permission class (edit or read), which
-      # _lease_lane_argv turns into the sandbox and the allowed tools
+      # _lease_lane_argv turns into the sandbox and the allowed tools. The
+      # edit class's sandbox profile is written again first: an earlier run
+      # in this worktree could have rewritten .grok/sandbox.toml
       LANE_ARG=$LCLASS
+      if [ "$LCLASS" = edit ] && ! _grok_sandbox_profile "$WT"; then
+        echo "lease_dispatch: ERROR could not write the grok builder's sandbox profile into ${WT} (see above) — not dispatching ${TASK_ID}" >&2
+        return 1
+      fi
       ;;
   esac
   # The claude lane resumes the session its last run recorded (KTD16): a fix
