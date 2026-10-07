@@ -2126,12 +2126,19 @@ _lease_recorded_root() {
 # this sets it. Nothing moves when TRIFORGE_LEASE_ROOT is already set (the
 # user chose the root), no root is recorded, or it is this shell's. rc 1 with
 # a refusal naming export TRIFORGE_LEASE_ROOT when the recorded root is not
-# one of this checkout's lease roots any more (_lease_root_valid).
+# one of this checkout's lease roots any more (_lease_root_valid), and when
+# the ledger holds the lead's writes (a lease row or a [baseline]; one that
+# can't be read counts) but the root this lands on holds no anchors for it
+# (no ledger digest or copy in its lead state dir): a stamp stripped, or
+# rewritten to name this shell's own root, would otherwise have the writer
+# adopt the ledger as found beside a fresh set of anchors (KTD18). A pre-stamp
+# ledger whose anchors are in this shell's root still passes.
 _lease_at_ledger_root() {
-  local OP=${1:-lease} REC SHOWN
+  local OP=${1:-lease} REC WRITES SHOWN TAB
   if [ -n "${TRIFORGE_LEASE_ROOT:-}" ] || [ ! -f "$_LEASE_LEDGER" ]; then
     return 0
   fi
+  TAB=$(printf '\t')
   REC=$(LR_LEDGER="$_LEASE_LEDGER" python3 -c '
 import os, sys
 try:
@@ -2140,16 +2147,19 @@ except ImportError:
     try:
         import tomli as tomllib
     except ImportError:
+        sys.stdout.write("\t1")
         sys.exit(0)
 try:
     with open(os.environ["LR_LEDGER"], "rb") as f:
         data = tomllib.load(f)
 except Exception:
+    sys.stdout.write("\t" + ("1" if os.path.getsize(os.environ["LR_LEDGER"]) else "0"))
     sys.exit(0)
+rows = data.get("lease")
 b = data.get("baseline")
+writes = (isinstance(rows, dict) and len(rows) > 0) or (isinstance(b, dict) and len(b) > 0)
 root = str(b.get("lease_root", "") or "") if isinstance(b, dict) else ""
 if not root:
-    rows = data.get("lease")
     best = None
     for r in (rows.values() if isinstance(rows, dict) else []):
         if isinstance(r, dict) and r.get("lease_root"):
@@ -2158,19 +2168,24 @@ if not root:
             if best is None or c >= best[0]:
                 best = (c, str(r["lease_root"]))
     root = best[1] if best else ""
-sys.stdout.write(root)
-' 2>/dev/null) || REC=""
-  if [ -z "$REC" ] || [ "$REC" = "$_LEASE_ROOT" ]; then
-    return 0
+sys.stdout.write(root.replace("\t", " ") + "\t" + ("1" if writes else "0"))
+' 2>/dev/null) || REC=$(printf '\t1')
+  WRITES=${REC##*"$TAB"}
+  REC=${REC%"$TAB"*}
+  if [ -n "$REC" ] && [ "$REC" != "$_LEASE_ROOT" ]; then
+    if ! _lease_root_valid "$REC"; then
+      SHOWN=$(printf '%s' "$REC" | LC_ALL=C tr -d '\000-\037\177')
+      echo "${OP}: REFUSED — the ledger was last written under the lease root ${SHOWN}, this shell resolves ${_LEASE_ROOT} (another TMPDIR or TRIFORGE_LEASE_ROOT), and the recorded root is not one of this checkout's lease roots any more (missing, moved or renamed). Written from here, the ledger would read to the lead as a change made outside its writes (KTD18). Point this shell at the lead's lease root and rerun: export TRIFORGE_LEASE_ROOT=<the lead's lease root>" >&2
+      return 1
+    fi
+    TRIFORGE_LEASE_ROOT=$REC
+    _lease_ctx || return 1
+    echo "${OP}: NOTE this shell resolves another lease root; writing under ${REC}, where the ledger was last written" >&2
   fi
-  if ! _lease_root_valid "$REC"; then
-    SHOWN=$(printf '%s' "$REC" | LC_ALL=C tr -d '\000-\037\177')
-    echo "${OP}: REFUSED — the ledger was last written under the lease root ${SHOWN}, this shell resolves ${_LEASE_ROOT} (another TMPDIR or TRIFORGE_LEASE_ROOT), and the recorded root is not one of this checkout's lease roots any more (missing, moved or renamed). Written from here, the ledger would read to the lead as a change made outside its writes (KTD18). Point this shell at the lead's lease root and rerun: export TRIFORGE_LEASE_ROOT=<the lead's lease root>" >&2
+  if [ "$WRITES" != 0 ] && [ ! -e "${_LEASE_STATE}/ledger.sha256" ] && [ ! -e "${_LEASE_STATE}/ledger.copy" ]; then
+    echo "${OP}: REFUSED — ${_LEASE_LEDGER} holds the lead's writes, but the lease root ${_LEASE_ROOT} holds no anchors for it (no ledger digest or copy in ${_LEASE_STATE}), and the ledger names no other root that does (its lease_root stamp is missing or names this shell's own root). Checked from here, the ledger would be adopted as found (KTD18). Point this shell at the lead's lease root and rerun: export TRIFORGE_LEASE_ROOT=<the lead's lease root>. If the lead's state dir is really gone, inspect the ledger, then accept it from the lead's terminal with lease_rebaseline." >&2
     return 1
   fi
-  TRIFORGE_LEASE_ROOT=$REC
-  _lease_ctx || return 1
-  echo "${OP}: NOTE this shell resolves another lease root; writing under ${REC}, where the ledger was last written" >&2
 }
 
 # Refusal helper for lease_reclaim: loud, escalates the row, deletes NOTHING.

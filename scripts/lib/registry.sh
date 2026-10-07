@@ -363,7 +363,9 @@ CLIS = {
 # setting profile; --permission-mode[= ]bypassPermissions;
 # --dangerously-skip-permissions, --allow-dangerously-skip-permissions,
 # --dangerously-bypass-approvals-and-sandbox and --yolo; --profile[= ]<name>,
-# since a profile can set any sandbox. It fails closed: any other word that
+# since a profile can set any sandbox, and -p <name> / -p<name> where the
+# launch line's binary takes -p as its profile flag (LAUNCH_SHORT_PROFILE:
+# codex exec; claude -p is --print). It fails closed: any other word that
 # still names danger-full-access, bypassPermissions or one of the dangerous
 # flags counts too. launch_extra_words(tmpl, value): the words a
 # lead.model_argv or lead.effort_argv template adds for a value ("{}" = the
@@ -378,6 +380,16 @@ LAUNCH_FULL_ACCESS_FLAGS = ("--dangerously-skip-permissions", "--allow-dangerous
                             "--dangerously-bypass-approvals-and-sandbox", "--yolo")
 LAUNCH_FULL_ACCESS_NAMES = ("danger-full-access", "bypasspermissions", "dangerously-skip-permissions",
                             "dangerously-bypass-approvals-and-sandbox")
+# The binaries whose -p takes a profile name (codex exec 0.160.0: -p,
+# --profile <CONFIG_PROFILE>); for claude -p is --print and takes no value.
+LAUNCH_SHORT_PROFILE = ("codex",)
+
+def _launch_binary(words):
+    for w in words:
+        if w == "env" or ("=" in w and not w.startswith("-")):
+            continue
+        return w.rsplit("/", 1)[-1]
+    return ""
 
 def launch_extra_words(tmpl, value):
     return [w.replace("{}", value) for w in shlex.split(tmpl)]
@@ -391,22 +403,25 @@ def _launch_unquote(v):
 def launch_full_access(words):
     why = []
     words = [str(w) for w in words]
+    short = ("-s", "-c", "-p") if _launch_binary(words) in LAUNCH_SHORT_PROFILE else ("-s", "-c")
     i, n = 0, len(words)
     while i < n:
         w = words[i]
         key, val, shown = "", None, w
         if w in LAUNCH_FULL_ACCESS_FLAGS:
             why.append(w)
-        elif w in ("-s", "--sandbox", "--permission-mode", "-c", "--config", "--profile"):
+        elif w in ("-s", "--sandbox", "--permission-mode", "-c", "--config", "--profile") or (w == "-p" and "-p" in short):
             key, val = w, (words[i + 1] if i + 1 < n else "")
             shown = w + " " + val
             i += 1
         elif w.startswith("--") and "=" in w:
             key, val = w.split("=", 1)
-        elif len(w) > 2 and w[:2] in ("-s", "-c") and not w.startswith("--"):
+        elif len(w) > 2 and w[:2] in short and not w.startswith("--"):
             key, val = w[:2], w[2:]
-            if key == "-s" and val.startswith("="):
+            if key in ("-s", "-p") and val.startswith("="):
                 val = val[1:]
+        if key == "-p":
+            key = "--profile"
         if key in ("-c", "--config") and val is not None:
             k, _, v = val.partition("=")
             k = _launch_unquote(k)

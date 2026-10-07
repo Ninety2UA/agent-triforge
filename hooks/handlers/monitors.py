@@ -7,13 +7,19 @@ ON_CRASH: ALLOW trap, exit 0) and call this with the payload on stdin.
 State lives outside the project for either lead (R21):
     ${TMPDIR}/triforge-monitors-<uid>/<checkout name>-<hash>/<session>.context
                                                              <session>.failures
+TMPDIR must be a directory no other user can rename entries in: owned by this
+user or root, and without group or other write unless it has the sticky bit.
 The per-user base and the checkout's directory are checked on every call: each
 must be a real directory (not a symlink) owned by this user; group or other
-permission bits are taken away (0700). One that fails the check leaves the hook
-inert with one note per session. State files are read and written without
-following a link (O_NOFOLLOW), and a write goes to an O_EXCL temp file renamed
-into place. Every value printed is stripped of control characters, so no
-output line can start with "{" (Claude Code parses such hook stdout as JSON).
+permission bits are taken away (0700). Anything that fails a check leaves the
+hook inert with a note (once per session when the base can hold the marker).
+The three directories are opened once, without following a link, and held:
+every later create, read, write, rename, listing and removal goes through those
+descriptors (dir_fd), so a directory renamed or swapped for a symlink after the
+check can't redirect a write. State files are read without following a link,
+and a write goes to an O_EXCL|O_NOFOLLOW temp file renamed into place. Every
+value printed is stripped of control characters, so no output line can start
+with "{" (Claude Code parses such hook stdout as JSON).
 
 Exit codes: 0 done (a degraded state is a stderr note, never a code); 3 the
 context monitor needs the lead's tool vocabulary (the handler reads it through
@@ -30,6 +36,7 @@ import sys
 import time
 
 CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
 
 
 def clean(value, limit=300):
@@ -38,13 +45,15 @@ def clean(value, limit=300):
 
 
 class Inert(Exception):
-    """The state directory path can't be trusted; the hook does nothing this
-    call. base is the trusted per-user directory above it, "" when path is
-    that base itself."""
+    """A state directory can't be trusted; the hook does nothing this call.
+    path names it; base_fd is the trusted per-user directory above it (None
+    when the base or TMPDIR itself failed); shared marks a TMPDIR another user
+    could rename entries in."""
 
-    def __init__(self, path, base=""):
+    def __init__(self, path, base_fd=None, shared=False):
         super().__init__(path)
-        self.base = base
+        self.base_fd = base_fd
+        self.shared = shared
 
 
 def checkout_root():
@@ -58,53 +67,91 @@ def checkout_root():
     return here
 
 
-def _private_dir(path, base=""):
-    """Create path (0700) when missing; refuse a symlink, a non-directory or
-    another user's directory (Inert(path, base)); take group and other bits
-    away."""
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | os.O_NOFOLLOW
+def _open_private(name, dir_fd, path, base_fd=None):
+    """Open the directory name (relative to dir_fd) without following a link,
+    creating it 0700 when missing; refuse a symlink, a non-directory or another
+    user's directory (Inert); take group and other bits away. Returns the fd."""
+    flags = DIR_FLAGS | os.O_NOFOLLOW
     try:
-        fd = os.open(path, flags)
+        fd = os.open(name, flags, dir_fd=dir_fd)
     except FileNotFoundError:
         try:
-            os.mkdir(path, 0o700)
+            os.mkdir(name, 0o700, dir_fd=dir_fd)
         except FileExistsError:
             pass
         try:
-            fd = os.open(path, flags)
+            fd = os.open(name, flags, dir_fd=dir_fd)
         except OSError as exc:
-            raise Inert(path, base) from exc
+            raise Inert(path, base_fd) from exc
     except OSError as exc:
-        raise Inert(path, base) from exc
+        raise Inert(path, base_fd) from exc
     try:
         st = os.fstat(fd)
         if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
-            raise Inert(path, base)
+            raise Inert(path, base_fd)
         if st.st_mode & 0o077:
             os.fchmod(fd, 0o700)
             if os.fstat(fd).st_mode & 0o077:
-                raise Inert(path, base)
-    finally:
+                raise Inert(path, base_fd)
+    except BaseException:
         os.close(fd)
-    return path
+        raise
+    return fd
 
 
-def state_dirs(root):
-    """The checkout's state directory — it and the per-user base above it
-    checked private; raises Inert naming the one that is not."""
-    base = os.path.join(os.environ.get("TMPDIR") or "/tmp", "triforge-monitors-%d" % os.getuid())
-    _private_dir(base)
-    name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(root))[:64] or "root"
-    digest = hashlib.sha1(root.encode("utf-8", "surrogateescape")).hexdigest()[:12]
-    child = os.path.join(base, name + "-" + digest)
-    _private_dir(child, base)
-    return child
+class StateDir:
+    """The checkout's monitor directory and the per-user base above it, held
+    open: every operation below goes through their descriptors."""
+
+    def __init__(self, root):
+        tmp = os.environ.get("TMPDIR") or "/tmp"
+        try:
+            tfd = os.open(tmp, DIR_FLAGS)
+        except OSError as exc:
+            raise Inert(tmp) from exc
+        try:
+            st = os.fstat(tfd)
+            if st.st_uid not in (os.getuid(), 0) or (st.st_mode & 0o022 and not st.st_mode & stat.S_ISVTX):
+                raise Inert(tmp, shared=True)
+            base_name = "triforge-monitors-%d" % os.getuid()
+            self.base_path = os.path.join(tmp, base_name)
+            self.base_fd = _open_private(base_name, tfd, self.base_path)
+        finally:
+            os.close(tfd)
+        name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(root))[:64] or "root"
+        self.child_name = name + "-" + hashlib.sha1(root.encode("utf-8", "surrogateescape")).hexdigest()[:12]
+        self.path = os.path.join(self.base_path, self.child_name)
+        self.fd = _open_private(self.child_name, self.base_fd, self.path, self.base_fd)
+
+    def read(self, name):
+        return read_at(self.fd, name)
+
+    def write(self, name, text):
+        write_at(self.fd, name, text)
+
+    def note_once(self, name, message):
+        note_once_at(self.fd, name, message)
+
+    def prune(self, days=3):
+        """Remove regular files older than days (links and dirs left alone)."""
+        cutoff = time.time() - days * 86400
+        try:
+            names = os.listdir(self.fd)
+        except OSError:
+            return
+        for name in names:
+            try:
+                st = os.stat(name, dir_fd=self.fd, follow_symlinks=False)
+                if stat.S_ISREG(st.st_mode) and st.st_mtime < cutoff:
+                    os.unlink(name, dir_fd=self.fd)
+            except OSError:
+                pass
 
 
-def read_text(path):
-    """A regular file's text, read without following a link; "" otherwise."""
+def read_at(dir_fd, name):
+    """A regular file's text, read relative to dir_fd without following a link; "" otherwise."""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
     except OSError:
         return ""
     with os.fdopen(fd, "r", encoding="utf-8", errors="replace") as f:
@@ -113,60 +160,51 @@ def read_text(path):
         return f.read(65536)
 
 
-def write_text(path, text):
-    """Replace path with text: an O_EXCL|O_NOFOLLOW temp file renamed over it
-    (the rename replaces a link at path, never writes through it)."""
-    tmp = "%s.tmp.%d" % (path, os.getpid())
+def write_at(dir_fd, name, text):
+    """Replace name (relative to dir_fd) with text: an O_EXCL|O_NOFOLLOW temp
+    file renamed over it (the rename replaces a link at name, never writes
+    through it)."""
+    tmp = "%s.tmp.%d" % (name, os.getpid())
     for _ in range(2):
         try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dir_fd)
             break
         except FileExistsError:
-            os.unlink(tmp)
+            os.unlink(tmp, dir_fd=dir_fd)
     else:
         raise OSError("could not create " + tmp)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
-    os.rename(tmp, path)
+    os.rename(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
 
 
-def note_once(marker, message):
-    """Print message on stderr unless marker exists; then create marker."""
-    if os.path.lexists(marker):
-        return
+def note_once_at(dir_fd, name, message):
+    """Print message on stderr unless the marker name exists in dir_fd; then create it."""
     try:
-        write_text(marker, "")
+        os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        return
+    except OSError:
+        pass
+    try:
+        write_at(dir_fd, name, "")
     except OSError:
         pass
     sys.stderr.write(clean(message, 600) + "\n")
 
 
 def inert_note(exc, who, what, session):
-    """The one note for an untrusted state directory (once per session when
-    the base is trusted and only the checkout's directory is not)."""
-    message = (who + ": NOTE " + str(exc) + " is not a private directory (a symlink, not a directory, "
-               "another user's, or its permissions can't be narrowed) — " + what + " is off (R21)")
-    if exc.base:
-        note_once(os.path.join(exc.base, os.path.basename(str(exc)) + "." + who + "." + session + ".inert-noted"), message)
+    """The note for an untrusted state directory (once per session when the
+    per-user base is trusted and holds the marker, else on every call)."""
+    if exc.shared:
+        message = (who + ": NOTE TMPDIR " + str(exc) + " lets another user rename entries in it (group or other write "
+                   "without the sticky bit, or another user's directory) — " + what + " is off (R21)")
+    else:
+        message = (who + ": NOTE " + str(exc) + " is not a private directory (a symlink, not a directory, "
+                   "another user's, or its permissions can't be narrowed) — " + what + " is off (R21)")
+    if exc.base_fd is not None:
+        note_once_at(exc.base_fd, os.path.basename(str(exc)) + "." + who + "." + session + ".inert-noted", message)
     else:
         sys.stderr.write(clean(message, 600) + "\n")
-
-
-def prune(directory, days=3):
-    """Remove regular files older than days in directory (links and dirs left alone)."""
-    cutoff = time.time() - days * 86400
-    try:
-        names = os.listdir(directory)
-    except OSError:
-        return
-    for name in names:
-        p = os.path.join(directory, name)
-        try:
-            st = os.lstat(p)
-            if stat.S_ISREG(st.st_mode) and st.st_mtime < cutoff:
-                os.unlink(p)
-        except OSError:
-            pass
 
 
 def load_payload():
@@ -204,32 +242,81 @@ FILE_REDIRECTS = {">", ">>", ">|", "&>", "&>>"}
 NULL_TARGETS = {"/dev/null", "/dev/stdout", "/dev/stderr"}
 # sed scripts that only print: N p, N,M p, $ p, /re/ p, /re/,/re/ p
 SED_PRINT = re.compile(r"^\s*(?:(?:\d+|\$)(?:\s*,\s*(?:\d+|\$))?|/(?:[^/\\]|\\.)*/(?:\s*,\s*/(?:[^/\\]|\\.)*/)?)?\s*p\s*$")
+# Options read with their arguments: the short letters that take a value
+# (attached, "-k2", or as the next word when the letter ends its cluster) and
+# the long names that take one when no "=" is attached.
+UNIQ_VALUE = ("fsw", ("--skip-fields", "--skip-chars", "--check-chars"))
+SORT_VALUE = ("ktST", ("--key", "--field-separator", "--buffer-size", "--temporary-directory", "--parallel",
+                       "--batch-size", "--random-source", "--files0-from", "--sort"))
+XXD_VALUE = {"-c", "-cols", "-g", "-groupsize", "-l", "-len", "-o", "-offset", "-s", "-seek", "-n", "-name"}
 
 
-def _operands(args):
-    return [a for a in args if not a.startswith("-") or a == "-"]
+def _long_is(a, full, shortest):
+    """Whether the long option a (with or without =value) names full, as GNU
+    getopt accepts any unambiguous prefix of at least shortest characters."""
+    name = a.split("=", 1)[0]
+    return len(name) >= shortest and full.startswith(name)
+
+
+def _walk(args, spec, on_short=None, on_long=None):
+    """The operands of args under spec (value letters, value long names):
+    option values are skipped, attached or not. on_short(letter) and
+    on_long(arg) return False to stop the walk (the command writes); then
+    None is returned."""
+    letters, longs = spec
+    ops, i = [], 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            ops += args[i + 1:]
+            break
+        if a.startswith("--"):
+            if on_long is not None and on_long(a) is False:
+                return None
+            if "=" not in a and any(_long_is(a, full, 4) for full in longs):
+                i += 1
+        elif a.startswith("-") and a != "-":
+            for j, c in enumerate(a[1:]):
+                if on_short is not None and on_short(c) is False:
+                    return None
+                if c in letters:
+                    if j == len(a) - 2:
+                        i += 1
+                    break
+        else:
+            ops.append(a)
+        i += 1
+    return ops
 
 
 def _sed_reads(args):
     scripts, i, rest = [], 0, []
     while i < len(args):
         a = args[i]
-        if a in ("-i", "--in-place") or a.startswith("-i") or a.startswith("--in-place"):
-            return False
-        if a in ("-f", "--file") or a.startswith("--file=") or (a.startswith("-f") and len(a) > 2):
-            return False
-        if a in ("-e", "--expression"):
-            if i + 1 >= len(args):
+        if a.startswith("--"):
+            if _long_is(a, "--in-place", 4) or _long_is(a, "--file", 3) or _long_is(a, "--line-length", 3):
                 return False
-            scripts.append(args[i + 1])
-            i += 2
-            continue
-        if a.startswith("--expression="):
-            scripts.append(a.split("=", 1)[1])
-        elif a.startswith("-e") and len(a) > 2:
-            scripts.append(a[2:])
-        elif a.startswith("-"):
-            pass
+            if _long_is(a, "--expression", 4):
+                if "=" in a:
+                    scripts.append(a.split("=", 1)[1])
+                elif i + 1 < len(args):
+                    scripts.append(args[i + 1])
+                    i += 1
+                else:
+                    return False
+        elif a.startswith("-") and a != "-":
+            for j, c in enumerate(a[1:]):
+                if c in "ifl":
+                    return False   # in place, a script file, a line length: not a plain print
+                if c == "e":
+                    if j < len(a) - 2:
+                        scripts.append(a[j + 2:])
+                    elif i + 1 < len(args):
+                        scripts.append(args[i + 1])
+                        i += 1
+                    else:
+                        return False
+                    break
         else:
             rest.append(a)
         i += 1
@@ -240,29 +327,74 @@ def _sed_reads(args):
     return all(SED_PRINT.match(s) for s in scripts)
 
 
+def _awk_reads(args):
+    """Only -F and -v (attached or not) are read; any other option runs, loads
+    or writes code. The program text must not redirect, pipe or call system."""
+    i, prog = 0, None
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            prog = args[i + 1] if i + 1 < len(args) else None
+            break
+        if a in ("-F", "-v"):
+            i += 2
+            continue
+        if a.startswith("-F") or a.startswith("-v"):
+            i += 1
+            continue
+        if a.startswith("-") and a != "-":
+            return False
+        prog = a
+        break
+    if prog is None:
+        return False
+    return not any(x in prog for x in (">", "|", "system"))
+
+
+def _xxd_reads(args):
+    ops, i = [], 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("-r"):
+            return False   # -r / -revert writes a binary
+        if a in XXD_VALUE:
+            i += 2
+            continue
+        if not (a.startswith("-") and a != "-"):
+            ops.append(a)
+        i += 1
+    return len(ops) <= 1   # a second operand is the output file
+
+
 def _command_reads(name, args):
     if name not in READERS:
         return False
     if name == "sed":
         return _sed_reads(args)
     if name == "uniq":
-        return len(_operands(args)) <= 1
+        ops = _walk(args, UNIQ_VALUE)
+        return ops is not None and len(ops) <= 1   # a second operand is the output file
     if name == "xxd":
-        return not any(a in ("-r", "-revert") for a in args) and len(_operands(args)) <= 1
+        return _xxd_reads(args)
     if name == "sort":
-        return not any(a.startswith("-o") or a.startswith("--output") for a in args)
+        return _walk(args, SORT_VALUE, on_short=lambda c: c != "o",
+                     on_long=lambda a: not (_long_is(a, "--output", 3) or _long_is(a, "--compress-program", 4))) is not None
     if name == "find":
         return not any(a in FIND_WRITES for a in args)
     if name == "awk":
-        return not any(a == "-f" or ">" in a or "|" in a or "system" in a for a in args)
+        return _awk_reads(args)
     if name == "rg":
-        return not any(a == "--pre" or a.startswith("--pre=") for a in args)
+        return not any(_long_is(a, "--pre", 5) for a in args if a.startswith("--"))
+    if name == "ag":
+        return not any(_long_is(a, "--pager", 4) for a in args if a.startswith("--"))
     if name == "fd":
-        return not any(a in ("-x", "--exec", "-X", "--exec-batch") or a.startswith("--exec") for a in args)
+        return not any((a.startswith("--") and (_long_is(a, "--exec", 4) or _long_is(a, "--exec-batch", 7)))
+                       or (a.startswith("-") and not a.startswith("--") and ("x" in a[1:] or "X" in a[1:]))
+                       for a in args)
     if name == "tree":
-        return "-o" not in args
+        return not any(a.startswith("-") and not a.startswith("--") and "o" in a[1:] for a in args)
     if name == "file":
-        return not any(a == "-C" or a == "--compile" for a in args)
+        return not any(a == "--compile" or (a.startswith("-") and not a.startswith("--") and "C" in a[1:]) for a in args)
     if name == "git":
         while len(args) >= 2 and args[0] == "-C":
             args = args[2:]
@@ -336,7 +468,7 @@ def main_context():
     session = session_of(d)
     root = checkout_root()
     try:
-        child = state_dirs(root)
+        sd = StateDir(root)
     except Inert as exc:
         inert_note(exc, "context-monitor", "paralysis detection", session)
         return 0
@@ -349,36 +481,35 @@ def main_context():
         except OSError:
             h.update(b"-")
     key = h.hexdigest() + "|" + plugin_root
-    cache_path = os.path.join(child, "lead-vocab")
     if os.environ.get("CM_VOCAB_FRESH") == "1":
         vocab = os.environ.get("CM_VOCAB", "").split("\n")[0]
-        write_text(cache_path, key + "\n" + vocab + "\n")
+        sd.write("lead-vocab", key + "\n" + vocab + "\n")
     else:
-        cached = read_text(cache_path).split("\n")
+        cached = sd.read("lead-vocab").split("\n")
         if len(cached) < 2 or cached[0] != key:
             return 3
         vocab = cached[1]
     lead_name, read_list = (vocab.split("\t") + ["", ""])[:2]
     read_vocab = read_list.split()
     if not read_vocab:
-        note_once(os.path.join(child, session + ".vocab-noted"),
-                  "context-monitor: NOTE the " + (lead_name or "current") + " lead's tool vocabulary is empty or the lead "
-                  "could not be resolved (lead.tool_vocab_read in scripts/lib/registry.sh) — paralysis detection is off "
-                  "this session (R21, R44)")
+        sd.note_once(session + ".vocab-noted",
+                     "context-monitor: NOTE the " + (lead_name or "current") + " lead's tool vocabulary is empty or the lead "
+                     "could not be resolved (lead.tool_vocab_read in scripts/lib/registry.sh) — paralysis detection is off "
+                     "this session (R21, R44)")
         return 0
     tool = str(d.get("tool_name") or "unknown")
     is_read = tool in read_vocab
     if not is_read and tool + "(read)" in read_vocab:
         ti = d.get("tool_input")
         is_read = isinstance(ti, dict) and reads_only(ti.get("command"))
-    state_path = os.path.join(child, session + ".context")
-    old = read_text(state_path)
+    state = session + ".context"
+    old = sd.read(state)
     if not old:
-        prune(child)
+        sd.prune()
     c = counts(old, ("total_calls", "consecutive_reads", "last_write_at"))
     total = c["total_calls"] + 1
     reads, last_write = (c["consecutive_reads"] + 1, c["last_write_at"]) if is_read else (0, total)
-    write_text(state_path, "---\ntotal_calls: %d\nconsecutive_reads: %d\nlast_write_at: %d\n---\n" % (total, reads, last_write))
+    sd.write(state, "---\ntotal_calls: %d\nconsecutive_reads: %d\nlast_write_at: %d\n---\n" % (total, reads, last_write))
     out = []
     if reads >= 8:
         out += ["Context monitor: %d consecutive read-only operations without writing code." % reads,
@@ -398,7 +529,7 @@ def main_failures():
     d = load_payload()
     session = session_of(d)
     try:
-        child = state_dirs(checkout_root())
+        sd = StateDir(checkout_root())
     except Inert as exc:
         inert_note(exc, "tool-failure-monitor", "failure tracking", session)
         return 0
@@ -414,23 +545,24 @@ def main_failures():
         else:
             signal = False
     if not signal:
-        note_once(os.path.join(child, session + ".signal-noted"),
-                  "tool-failure-monitor: NOTE the PostToolUse payload for " + tool + " carries no failure signal "
-                  "(plain-text tool_response, no exit code), so its failures are not counted this session (R44)")
-    state_path = os.path.join(child, session + ".failures")
-    old = read_text(state_path)
+        sd.note_once(session + ".signal-noted",
+                     "tool-failure-monitor: NOTE the PostToolUse payload for " + tool + " carries no failure signal "
+                     "(plain-text tool_response, no exit code), so its failures are not counted this session (R44)")
+    state = session + ".failures"
+    old = sd.read(state)
     c = counts(old, ("failure_count", "consecutive_failures"))
     if not failed:
         new = "---\nfailure_count: %d\nconsecutive_failures: 0\n---\n" % c["failure_count"]
         if old and old != new:
-            write_text(state_path, new)
+            sd.write(state, new)
         return 0
     total, consecutive = c["failure_count"] + 1, c["consecutive_failures"] + 1
-    write_text(state_path, "---\nfailure_count: %d\nconsecutive_failures: %d\n---\n" % (total, consecutive))
+    sd.write(state, "---\nfailure_count: %d\nconsecutive_failures: %d\n---\n" % (total, consecutive))
     if consecutive >= 5:
         line = "WARN:%d consecutive tool failures (latest: %s). Consider investigating before continuing." % (consecutive, tool)
     elif total >= 10:
-        line = "WARN:%d total tool failures this session (latest: %s). Check %s for details." % (total, tool, state_path)
+        line = "WARN:%d total tool failures this session (latest: %s). Check %s for details." % (total, tool,
+                                                                                               os.path.join(sd.path, state))
     else:
         return 0
     sys.stdout.write(clean(line, 600) + "\n")

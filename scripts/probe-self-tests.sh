@@ -165,13 +165,21 @@ rm -rf "$_S1_DIR"
 #             'sandbox_mode="..."' leaves them), -csandbox_mode=…,
 #             --config=sandbox_mode=…, --dangerously-bypass-approvals-and-
 #             sandbox, --yolo, --profile <name> (a profile can set any
-#             sandbox); a plain line declared full_access = True -> rc 77
-#             too; control: acceptEdits, declared False -> the stub runs
+#             sandbox) and codex's -p <name> / -p<name>; a plain line
+#             declared full_access = True -> rc 77 too; controls: acceptEdits
+#             declared False, and claude's own -p (--print) -> the stub runs
 #   ledgerroot a ledger written under TMPDIR=A (no TRIFORGE_LEASE_ROOT), then
 #             tampered (builder_cli rewritten); coordinate.sh under TMPDIR=B
 #             -> rc 44 before any session, the change restored from A's copy
 #             and alerted; with A's lease root gone -> rc 44, refused, naming
 #             TRIFORGE_LEASE_ROOT, nothing run
+#   ledgerstrip the same ledger with every lease_root stamp stripped and
+#             builder_cli rewritten, coordinate.sh under TMPDIR=B -> rc 44,
+#             refused (B's root holds no anchors, naming TRIFORGE_LEASE_ROOT),
+#             nothing run, nothing adopted under B; ledgerredir: the stamps
+#             rewritten to name B's own root -> the same; ledgerlegacy: a
+#             ledger with no stamps whose copy and digest are in this shell's
+#             root (a pre-stamp ledger) -> the session runs
 #   noshell   the SELF seam unset, no TTY, no host markers (nohup, cron, CI):
 #             with a lease in the ledger and with none -> rc 45 naming the
 #             fix (a terminal or the lead's own shell), never 44, nothing run
@@ -378,6 +386,9 @@ codex exec --yolo|False|refuse
 codex exec --profile wide|False|refuse
 claude --print|True|refuse
 claude --print --permission-mode acceptEdits|False|run
+codex exec -p wide|False|refuse
+codex exec -pwide|False|refuse
+claude -p --permission-mode acceptEdits|False|run
 S2_FA_EOF
 unset _s2_l _s2_d _s2_want
 [ -z "$_S2_FA" ] || _S2_FAIL="$_S2_FAIL fullaccess(${_S2_FA# })"
@@ -401,6 +412,51 @@ _S2_FAIL="${_S2_FAIL}$(_self_expect ledgerroot "$O" '^made:1$' 'writing under .*
 rm -rf "$_S2/tA/triforge-leases"
 O=$(S2_TMP="$_S2/tB" S2_NO_ROOT=1 _s2_run ledgerroot done claude "probe goal" --max 1)
 _S2_FAIL="${_S2_FAIL}$(_self_expect ledgerroot-gone "$O" 'REFUSED.*export TRIFORGE_LEASE_ROOT' '^rc=44$' '^runs=0$')"
+
+# ledgerstrip / ledgerredir / ledgerlegacy: a ledger whose lease_root stamps
+# are gone (or name this shell's own root) is never adopted beside a root
+# that holds no anchors for it; a pre-stamp ledger whose anchors are in this
+# shell's root still runs
+_s2_strip() { # _s2_strip <ledger> <strip|redir:<root>|legacy> — rewrite the ledger as the case needs
+  python3 - "$1" "$2" <<'S2_STRIP_PY' || true
+import re, sys
+p, mode = sys.argv[1], sys.argv[2]
+s = open(p).read()
+if mode == "strip" or mode == "legacy":
+    s = re.sub(r'^lease_root = .*\n', '', s, flags=re.M)
+elif mode.startswith("redir:"):
+    s = re.sub(r'^lease_root = .*$', 'lease_root = "' + mode[6:] + '"', s, flags=re.M)
+if mode != "legacy":
+    s = s.replace('builder_cli = "claude"', 'builder_cli = "codex"', 1)
+open(p, "w").write(s)
+S2_STRIP_PY
+}
+for _s2_c in ledgerstrip ledgerredir ledgerlegacy; do
+  _s2_repo "$_s2_c"
+  mkdir -p "$_S2/$_s2_c.A" "$_S2/$_s2_c.B"
+  S2_TMP="$_S2/$_s2_c.A" S2_NO_ROOT=1 _s2_lead "$_s2_c" lease_create t builder >/dev/null 2>&1 || true
+done
+_s2_strip "$_S2/ledgerstrip/ops/leases.toml" strip
+O=$(S2_TMP="$_S2/ledgerstrip.B" S2_NO_ROOT=1 _s2_run ledgerstrip done claude "probe goal" --max 1)
+O="$O
+tampered=$(grep -c '^builder_cli = "codex"' "$_S2/ledgerstrip/ops/leases.toml" || true):adopted=$(ls "$_S2"/ledgerstrip.B/triforge-leases/*/lead/ledger.copy 2>/dev/null | wc -l | tr -d ' ')"
+_S2_FAIL="${_S2_FAIL}$(_self_expect ledgerstrip "$O" 'REFUSED.*holds no anchors.*export TRIFORGE_LEASE_ROOT' 'STOPPED before starting a session' '^rc=44$' '^runs=0$' '^tampered=1:adopted=0$')"
+_S2_ROOT_B=$(S2_TMP="$_S2/ledgerredir.B" S2_NO_ROOT=1 _s2_lead ledgerredir eval '_lease_ctx && printf "%s\n" "$_LEASE_ROOT"' 2>/dev/null | tail -1)
+_s2_strip "$_S2/ledgerredir/ops/leases.toml" "redir:${_S2_ROOT_B}"
+O=$(S2_TMP="$_S2/ledgerredir.B" S2_NO_ROOT=1 _s2_run ledgerredir done claude "probe goal" --max 1)
+O="$O
+adopted=$(ls "$_S2"/ledgerredir.B/triforge-leases/*/lead/ledger.copy 2>/dev/null | wc -l | tr -d ' ')"
+_S2_FAIL="${_S2_FAIL}$(_self_expect ledgerredir "$O" 'REFUSED.*holds no anchors' '^rc=44$' '^runs=0$' '^adopted=0$')"
+_S2_STATE_A=$(ls -d "$_S2"/ledgerlegacy.A/triforge-leases/*/lead 2>/dev/null | head -1)
+_s2_strip "$_S2/ledgerlegacy/ops/leases.toml" legacy
+if [ -n "$_S2_STATE_A" ]; then
+  cp "$_S2/ledgerlegacy/ops/leases.toml" "$_S2_STATE_A/ledger.copy"
+  python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$_S2/ledgerlegacy/ops/leases.toml" > "$_S2_STATE_A/ledger.sha256"
+fi
+O=$(S2_TMP="$_S2/ledgerlegacy.A" S2_NO_ROOT=1 _s2_run ledgerlegacy done claude "probe goal" --max 1)
+_S2_FAIL="${_S2_FAIL}$(_self_expect ledgerlegacy "$O" 'Sprint complete at iteration 1' '^rc=0$' '^runs=1$')"
+if printf '%s\n' "$O" | grep -q 'REFUSED\|INTEGRITY'; then _S2_FAIL="$_S2_FAIL ledgerlegacy(refused-or-integrity)"; fi
+unset _s2_c _S2_ROOT_B _S2_STATE_A
 
 # noshell: the lead host check runs before anything else (C6); no seam, no TTY
 _s2_repo noshell
@@ -5090,8 +5146,17 @@ rm -rf "$_S20"
 #             git diff/log --output, > 1 (a file named 1), >| and &> to a
 #             file, rg --pre; the reads stay reads: sed -n 1,5p and /re/p,
 #             uniq <file>, xxd <file>, git diff, >&2, 2>&1, 2>/dev/null
+#             Options are read with their arguments: awk -f, sort -o (also
+#             inside a cluster, -ro), tree -o and xxd's output operand are
+#             writes, attached or not; xxd -l 64, uniq -f 1, sort -k2 -t , and
+#             awk -F , -v stay reads
 #   inject    a checkout named "c5<newline>{...}<newline>z": no stdout line of
 #             either monitor starts with "{", the warning still printed
+#   cleanpath a TMPDIR carrying a newline and a JSON object (nothing upstream
+#             sanitizes it): the WARN path stays on one line; negative
+#             control, a copy with clean() a no-op prints the "{" line
+#   shared    a TMPDIR with group/other write and no sticky bit: both monitors
+#             inert with a note, nothing written; with the sticky bit, a count
 #   nopython  each handler with no python3 on PATH, and a copy of each handler
 #             without monitors.py beside it: rc 0, no stdout, one stderr
 #             notice, nothing written
@@ -5244,7 +5309,23 @@ echo x >| out.txt|w
 cat README &> out.txt|w
 cat README >& out.txt|w
 rg --pre cat probe .|w
+awk -f/tmp/mutate.awk README|w
+awk -f /tmp/mutate.awk README|w
+sort -ro/tmp/sorted README|w
+sort -r -o /tmp/sorted README|w
+sort --output=/tmp/sorted README|w
+tree -o/tmp/tree.txt .|w
+tree -ao /tmp/tree.txt .|w
+xxd -l 64 README out.bin|w
 sed -n 1,5p README|r
+xxd -l 64 README|r
+xxd -c 8 -g 2 README|r
+uniq -f 1 README|r
+uniq -s 2 -w 4 README|r
+sort -k2 -t , README|r
+sort -rk2 README|r
+awk -F , -v n=1 '{print n}' README|r
+tree -L 2 .|r
 sed -n '/probe/p' README|r
 uniq README|r
 xxd README|r
@@ -5277,6 +5358,51 @@ $(_s22_inj context-monitor i2 Bash '"x"')"; done
 _S22_FAIL="${_S22_FAIL}$(_self_expect inject "$O" '^WARN:10 total tool failures this session \(latest: Bash\)\. Check .* for details\.$' '^Context monitor: 8 consecutive read-only')"
 if printf '%s\n' "$O" | grep -q '^{'; then _S22_FAIL="$_S22_FAIL inject(a-stdout-line-starts-with-{)"; fi
 unset _s22_c _S22_INJ
+
+# cleanpath: a value nothing upstream sanitizes, the TMPDIR, carries a newline
+# and a JSON object into the printed state path, so only clean() keeps it off
+# a line of its own; the same run against a copy whose clean() is a no-op must
+# print the "{" line (the case can see a missing clean())
+_S22_TINJ="$_S22/t5"$'\n''{"y":2}'$'\n''q'
+mkdir -p "$_S22_TINJ" "$_S22/noclean"
+cp "$_S22_HOOKS/tool-failure-monitor.sh" "$_S22_HOOKS/monitors.py" "$_S22/noclean/"
+python3 - "$_S22/noclean/monitors.py" <<'S22_NOCLEAN_PY' || true
+import sys
+p = sys.argv[1]
+s = open(p).read()
+open(p, "w").write(s.replace("def clean(value, limit=300):\n", "def clean(value, limit=300):\n    return str(value)\n", 1))
+S22_NOCLEAN_PY
+_s22_tinj() { # _s22_tinj <handler path> — stdout of 10 failures with a success between each, TMPDIR = _S22_TINJ
+  local N=0
+  while [ "$N" -lt 10 ]; do
+    N=$((N + 1))
+    ( cd "$_S22/reads" && printf '{"session_id":"t5","tool_name":"Bash","tool_response":{"is_error":true}}' \
+        | env -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT TMPDIR="$_S22_TINJ" HOME="$_S22/home" /bin/bash "$1" 2>/dev/null ) || true
+    ( cd "$_S22/reads" && printf '{"session_id":"t5","tool_name":"Bash","tool_response":{"ok":1}}' \
+        | env -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT TMPDIR="$_S22_TINJ" HOME="$_S22/home" /bin/bash "$1" >/dev/null 2>&1 ) || true
+  done
+}
+O=$(_s22_tinj "$_S22_HOOKS/tool-failure-monitor.sh")
+_S22_FAIL="${_S22_FAIL}$(_self_expect cleanpath "$O" '^WARN:10 total tool failures this session \(latest: Bash\)\. Check .*t5\{"y":2\}q.* for details\.$')"
+if printf '%s\n' "$O" | grep -q '^{'; then _S22_FAIL="$_S22_FAIL cleanpath(a-stdout-line-starts-with-{)"; fi
+rm -rf "$_S22_TINJ" && mkdir -p "$_S22_TINJ"
+O=$(_s22_tinj "$_S22/noclean/tool-failure-monitor.sh")
+if ! printf '%s\n' "$O" | grep -q '^{"y":2}$'; then _S22_FAIL="$_S22_FAIL cleanpath-negative-control(no-{-line-without-clean)"; fi
+unset _S22_TINJ
+
+# shared: a TMPDIR another user could rename the monitors' directory in (group
+# or other write, no sticky bit) leaves both monitors inert with a note and
+# writes nothing; the same directory with the sticky bit works
+mkdir -p "$_S22/tshared"
+chmod 0777 "$_S22/tshared"
+O="shared1:$(S22_TMP="$_S22/tshared" _s22_hook reads context-monitor sh1 Bash 'cat README' probe | tr '\n' ' ')
+shared2:$(S22_TMP="$_S22/tshared" _s22_hook reads tool-failure-monitor sh1 Bash 'false' '' | tr '\n' ' ')
+written=$(find "$_S22/tshared" -type f | wc -l | tr -d ' ')"
+chmod 1777 "$_S22/tshared"
+S22_TMP="$_S22/tshared" _s22_hook reads context-monitor sh2 Bash 'cat README' probe >/dev/null
+O="$O
+sticky=$(ls "$_S22"/tshared/triforge-monitors-*/reads-*/sh2.context 2>/dev/null | wc -l | tr -d ' ')"
+_S22_FAIL="${_S22_FAIL}$(_self_expect shared "$O" '^shared1:err:context-monitor: NOTE .*sticky bit' '^shared2:err:tool-failure-monitor: NOTE .*sticky bit' '^written=0$' '^sticky=1$')"
 
 # nopython: the handlers stay inert with a notice when python3 or monitors.py is missing
 mkdir -p "$_S22/minbin" "$_S22/lonely" "$_S22/tnopy"
