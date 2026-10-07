@@ -1,6 +1,6 @@
 ---
 saved: 2026-10-07T06:55:00Z
-phase: 2c, 3 and 4 stopped at the 3-review cap; awaiting the user's call (see Blockers)
+phase: 2c, 3 and 4 in a user-approved fourth review-fix round (see Blockers)
 wave: 0
 tasks:
   total: 29
@@ -57,7 +57,7 @@ Update this table and the frontmatter at every PR boundary; the plan is `docs/pl
 
 1. Phase 2c: collect u25's L1–L9, commit it in its worktree and cherry-pick onto `feat/v4-phase-2c`; rebase onto `release/4.0` (`--onto origin/release/4.0 2e9e57a`); full gate both ways plus `--only CC-21,CC-22,CC-23,CDX-20`; a re-review by final2c and Codex of the fixes; ce-simplify-code; PR → `release/4.0` (ce-commit-push-pr, branding:on, babysit:off); one gates check; squash-merge; remove the `mafw-wt-2c-*` worktrees.
 2. Phase 3: collect u14-coord's model/effort follow-up; commit it and cherry-pick onto `feat/v4-phase-3` (one conflict: `SELF_EXPECTED` needs both SELF-21 and SELF-22); add the gitconfig-capture ADR; rebase onto `release/4.0` after 2c (expect probe-self-tests.sh conflicts with 2b's simplify helpers: `_SELF_PTY`, `_self_repo`, `_self_wait_rc`); gate; final-diff review + Codex; simplify; PR; merge.
-3. Phases 4–6 per the table, each started with `/ce-work`. U15 (Phase 5) inherits: hook-trust detection by `hooks.state` trusted_hash, the live `$at-ship` vs `$agent-triforge:at-ship` check (needs a human-logged-in CODEX_HOME), the interactive launch line apart from the headless `launch_argv`, user-tier auth not reaching claude workers, agy builders needing a user-tier allow rule.
+3. Phases 4–6 per the table, each started with `/ce-work`. U15 (Phase 5) inherits: hook-trust detection by `hooks.state` trusted_hash, the live `$at-ship` vs `$agent-triforge:at-ship` check (needs a human-logged-in CODEX_HOME), the interactive launch line apart from the headless `launch_argv`, user-tier auth not reaching claude workers, agy builders needing a user-tier allow rule. **Devin (user, 2026-10-07):** the user chooses the Devin model. `swe-1-6-slow` stays the shipped default because it works on every account, Devin Free included. When Devin is enrolled, at-setup offers the models `devin models list` prints and writes the choice into the roster's `model` field for Devin's roles. at-setup also tells the user that Devin plugins they or their org installed load in every Devin run, read class included, and prints `devin plugins list` (fix5d). The consent and opt-in writers from U17 already exist (`roster_write_member --consent user --opt-in`).
 4. End of program: full review + ce-code-review over `release/4.0` vs `main`, then the release PR (only the user approves the merge to `main`).
 
 ## Blockers recorded for the user
@@ -85,6 +85,7 @@ Lead's triage and recommendation:
   - No SELF row gates at-review's promotion rule or the scratch traps; the harnesses exist (final4c).
   - The diff can exceed Linux's 128 KiB argument limit.
   - R25's per-CLI case arms.
+- **2026-10-07 ~09:30: the user approved the fourth round** ("continue with your recommendation"). It runs under `/ce-work` with four workers: r4-2c (`mafw-wt-phase-2c`), r4-3 (`mafw-wt-phase-3`), r4-4a (at-review side, `mafw-wt-6-fixa`) and r4-4b (grok/devin side, `mafw-wt-6-fixb`). The batches are in the session scratchpad under `round4/`. Next: round-4 reviews, then merges in the order 2c → 3 → 4.
 - **Lead's recommendation:** a fourth round, scoped to the items above. Each is local: at-review's integrity check, review package and core-lane prompt; the grok read class's user-tier surfaces; Devin's retry. The live grok rows still wait on the xAI quota.
 - **Third-round final-diff verdicts (added 03:20):** final2c **4/5 FIX** at 115b9b1 — the one blocking finding is the duplicate core-lane dispatch (dispatch.md:72-90 and :143-160, the same as Codex's 2c #4); every earlier finding fixed; P3: rerunning a synthesis start block while a synthesizer runs orphans it. final3 **5/5 MERGE** at 5b50bbc — all eight Codex round-2 findings and its four P3s fixed; it did not have Codex's round-3 list, so the reviewers disagree on Phase 3 (Codex's round-3 P1s stand until checked). Reports: session scratchpad `final2c-r3.md`, `phase3/final3-r3.md`.
 
