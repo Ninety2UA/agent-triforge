@@ -10462,3 +10462,60 @@ else
   row "SELF-16" "claude" "$_S16_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S16_FAIL"):$(printf '%s' "$_S16_FAIL" | cut -c1-700)" "static"
 fi
 rm -rf "$_S16"
+
+# SELF-27 (S1, Phase 6 — R35, KTD18: no inline python helper imports a module planted in its working directory: a builder worktree, the user project, a lead checkout). Cases go between the markers; each appends
+# "<case>(<why>)" to _S27_FAIL on a mismatch (_self_expect does this) and, once
+# they ran, one short note to _S27_EV. Expected values are literals. A row whose
+# cases never ran fails: no note is no evidence.
+_S27="${WORK}/self27"
+_S27_FAIL=""
+_S27_EV=""
+mkdir -p "$_S27"
+# --- SELF-27 cases (worker 6-sec) ---
+# --- end of SELF-27 cases ---
+_S27_CAP="inline python ignores modules planted in the cwd: every inline program starts with the shared prelude, the lease lane parsers run after a builder planted json.py in its worktree, session start in a project with a planted tomllib.py, the ledger readers on a FIFO (S1, Phase 6)"
+if [ -z "$_S27_EV" ]; then _S27_FAIL="${_S27_FAIL} cases(no-case-ran)"; fi
+if [ -z "$_S27_FAIL" ]; then
+  row "SELF-27" "claude" "$_S27_CAP" "PASS" "$(printf '%s' "$_S27_EV" | cut -c1-3000)" "static"
+else
+  row "SELF-27" "claude" "$_S27_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S27_FAIL"):$(printf '%s' "$_S27_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S27"
+
+# SELF-28 (U19 — R27, R28, R29: the watch cycle's research workers run through dispatch_persona's read-web class). Cases go between the markers; each appends
+# "<case>(<why>)" to _S28_FAIL on a mismatch (_self_expect does this) and, once
+# they ran, one short note to _S28_EV. Expected values are literals. A row whose
+# cases never ran fails: no note is no evidence.
+_S28="${WORK}/self28"
+_S28_FAIL=""
+_S28_EV=""
+mkdir -p "$_S28"
+# --- SELF-28 cases (worker 6-watch) ---
+# --- end of SELF-28 cases ---
+_S28_CAP="the watch cycle: research workers through dispatch_persona read-web, a write denied, nothing left under the temp dir, the watch registry covering every registered CLI (U19)"
+if [ -z "$_S28_EV" ]; then _S28_FAIL="${_S28_FAIL} cases(no-case-ran)"; fi
+if [ -z "$_S28_FAIL" ]; then
+  row "SELF-28" "claude" "$_S28_CAP" "PASS" "$(printf '%s' "$_S28_EV" | cut -c1-3000)" "static"
+else
+  row "SELF-28" "claude" "$_S28_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S28_FAIL"):$(printf '%s' "$_S28_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S28"
+
+# SELF-17 (U20 — R45, R40: one two-task fixture sprint under each lead, and the 3.3.2 upgrade fixture). Cases go between the markers; each appends
+# "<case>(<why>)" to _S17_FAIL on a mismatch (_self_expect does this) and, once
+# they ran, one short note to _S17_EV. Expected values are literals. A row whose
+# cases never ran fails: no note is no evidence.
+_S17="${WORK}/self17"
+_S17_FAIL=""
+_S17_EV=""
+mkdir -p "$_S17"
+# --- SELF-17 cases (worker 6-sprint) ---
+# --- end of SELF-17 cases ---
+_S17_CAP="two-lead fixture sprint: the same two-task sprint (one task under scripts/lib/) under a claude and a codex lead through the wrap path to ops/.sprint-complete, ledgers equal apart from the lead identity, the protected task needing a merge and a user promotion approval, a builder setting core.fsmonitor escalated; the 3.3.2 upgrade (U20)"
+if [ -z "$_S17_EV" ]; then _S17_FAIL="${_S17_FAIL} cases(no-case-ran)"; fi
+if [ -z "$_S17_FAIL" ]; then
+  row "SELF-17" "claude" "$_S17_CAP" "PASS" "$(printf '%s' "$_S17_EV" | cut -c1-3000)" "static"
+else
+  row "SELF-17" "claude" "$_S17_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S17_FAIL"):$(printf '%s' "$_S17_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S17"

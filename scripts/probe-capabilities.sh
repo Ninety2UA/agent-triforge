@@ -5329,6 +5329,7 @@ if [ "$SELF_ONLY" = "1" ]; then
   SELF_EXPECTED="$SELF_EXPECTED SELF-25"            # Grok Build's lease lane (U16)
   SELF_EXPECTED="$SELF_EXPECTED SELF-26"            # at-review's blocks run verbatim (U16, U17)
   SELF_EXPECTED="$SELF_EXPECTED SELF-16"            # at-setup's primitives and instruction files (U15)
+  SELF_EXPECTED="$SELF_EXPECTED SELF-27 SELF-28 SELF-17"   # Phase 6: S1 python path, U19 watch cycle, U20 two-lead sprint
   SELF_MISSING=""
   for SELF_ID in $SELF_EXPECTED; do
     if ! cut -f1 "$ROWS" | grep -qx "$SELF_ID"; then SELF_MISSING="${SELF_MISSING}${SELF_MISSING:+ }${SELF_ID}"; fi
