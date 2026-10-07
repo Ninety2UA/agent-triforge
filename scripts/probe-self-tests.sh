@@ -1710,9 +1710,11 @@ rm -rf "$_S8B" "$_S8"
 #            root never prints (R7)
 #   home     a home directory as the project, plain and as a git repository
 #            (HOME = the working directory, PATH the stubs plus python3, git
-#            and the timeout tool): the bootstrap rc 80 with one WARNING, and
+#            and the timeout tool): the bootstrap rc 69 with one WARNING, and
 #            session start rc 0 with one WARNING and no one-time notice; the
-#            directory byte-identical after both (R1)
+#            directory byte-identical after both (R1). at-setup's block stops
+#            there on that rc: nonzero, one SETUP: stopped line on stdout,
+#            nothing written
 #   synctmp  skills-sync.py run directly, its pid read first: links at
 #            <stamp>.tmp.<pid>, .tmp, .new and ~ -> a HOME file stay
 #            untouched, the stamp a regular file, the portable set copied (R2)
@@ -1724,7 +1726,7 @@ rm -rf "$_S8B" "$_S8"
 #            prints there starts with "{" (R5)
 #   homecase (round 4, B1) the home directory reached by a case-variant
 #            spelling (a symlinked spelling on a case-sensitive volume),
-#            plain and as a git repository: the bootstrap rc 80 and session
+#            plain and as a git repository: the bootstrap rc 69 and session
 #            start rc 0, one WARNING each naming git init, the directory
 #            byte-identical
 #   syncswap (round 4, B2) skills-sync.py sync and add with .agents (.claude)
@@ -1741,6 +1743,12 @@ rm -rf "$_S8B" "$_S8"
 #            roster_write_lead each refuse with rc 6, the target unchanged;
 #            the hook names each refused enrollment in one WARNING line
 #            (round 5, G6)
+#   homeops  the three roster writers run in a home directory holding an ops/
+#            with a file in it, in one without ops/, and in a subdirectory of a
+#            home directory that is a git repository: rc 6 each, a REFUSED
+#            line naming the home directory, the ops/ there byte-identical or
+#            still absent; a project under that home directory still writes
+#            its roster (rc 0, its three tables)
 #   agentsxdev (round 5, G5) _tb_codex with the .codex/agents move made to
 #            fail across directories (a test prelude to the shipped python):
 #            EXDEV -> the copy fallback moves the user's file, nothing
@@ -2152,9 +2160,15 @@ _s21_git "$_S21/h2" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-h2
 for _s21_d in h1 h2; do
   _S21_LH=$(_s21_list "$_S21/$_s21_d")
   _S21_RC=$(_s21_run "home-$_s21_d" /bin/bash "$_S21/$_s21_d" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh" HOME="$_S21/$_s21_d" PATH="$_S21/bin-min:/usr/bin:/bin")
-  grep -qx 'rc=80' "$_S21/home-$_s21_d.out" || _S21_FAIL="$_S21_FAIL home-$_s21_d-rc($(tr '\n' ' ' < "$_S21/home-$_s21_d.out" | cut -c1-40))"
+  grep -qx 'rc=69' "$_S21/home-$_s21_d.out" || _S21_FAIL="$_S21_FAIL home-$_s21_d-rc($(tr '\n' ' ' < "$_S21/home-$_s21_d.out" | cut -c1-40))"
   [ "$(grep -c '^triforge_bootstrap: WARNING .*home directory' "$_S21/home-$_s21_d.err" || true)" -eq 1 ] || _S21_FAIL="$_S21_FAIL home-$_s21_d-no-one-warning($(_s21_first "$_S21/home-$_s21_d.err" 100))"
   [ "$(_s21_list "$_S21/$_s21_d")" = "$_S21_LH" ] || _S21_FAIL="$_S21_FAIL home-$_s21_d-wrote($(_s21_diff "$(_s21_list "$_S21/$_s21_d")" "$_S21_LH"))"
+  # at-setup's own block stops there, on that rc, with one line of its own
+  _S21_RC=$(_s21_run "homesetup-$_s21_d" /bin/bash "$_S21/$_s21_d" "$REPO_ROOT/skills/at-setup" "$_S21/setup.sh" HOME="$_S21/$_s21_d" PATH="$_S21/bin-min:/usr/bin:/bin")
+  { [ "$_S21_RC" -ne 0 ] && [ "$(grep -c . "$_S21/homesetup-$_s21_d.out" || true)" -eq 1 ] \
+    && grep -q '^SETUP: stopped: the project directory is your home directory or contains it, .*; start setup in a project directory$' "$_S21/homesetup-$_s21_d.out"; } \
+    || _S21_FAIL="$_S21_FAIL homesetup-$_s21_d(rc=${_S21_RC}:$(_s21_first "$_S21/homesetup-$_s21_d.out" 100))"
+  [ "$(_s21_list "$_S21/$_s21_d")" = "$_S21_LH" ] || _S21_FAIL="$_S21_FAIL homesetup-$_s21_d-wrote($(_s21_diff "$(_s21_list "$_S21/$_s21_d")" "$_S21_LH"))"
   _S21_HOOK_RC=0
   _S21_HOOK=$( cd "$_S21/$_s21_d" && env -u TRIFORGE_LEASE_WORKER HOME="$_S21/$_s21_d" TMPDIR="$_S21/tmp" PATH="$_S21/bin-min:/usr/bin:/bin" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GIT_CONFIG_NOSYSTEM=1 \
                  /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" < /dev/null 2>&1 ) || _S21_HOOK_RC=$?
@@ -2227,7 +2241,7 @@ for _s21_d in hc1 hc2; do
   if [ "$_S21_HCV" = case ]; then _S21_HCP="$_S21/$(printf '%s' "$_s21_d" | tr 'a-z' 'A-Z')"; else _S21_HCP="$_S21/${_s21_d}-link"; fi
   _S21_LH=$(_s21_list "$_S21/$_s21_d")
   _S21_RC=$(_s21_run "homecase-$_s21_d" /bin/bash "$_S21_HCP" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh" HOME="$_S21/$_s21_d" PATH="$_S21/bin-min:/usr/bin:/bin")
-  grep -qx 'rc=80' "$_S21/homecase-$_s21_d.out" || _S21_FAIL="$_S21_FAIL homecase-$_s21_d-rc($(tr '\n' ' ' < "$_S21/homecase-$_s21_d.out" | cut -c1-40))"
+  grep -qx 'rc=69' "$_S21/homecase-$_s21_d.out" || _S21_FAIL="$_S21_FAIL homecase-$_s21_d-rc($(tr '\n' ' ' < "$_S21/homecase-$_s21_d.out" | cut -c1-40))"
   [ "$(grep -c '^triforge_bootstrap: WARNING .*home directory.*git init' "$_S21/homecase-$_s21_d.err" || true)" -eq 1 ] || _S21_FAIL="$_S21_FAIL homecase-$_s21_d-no-one-warning($(_s21_first "$_S21/homecase-$_s21_d.err" 100))"
   [ "$(_s21_list "$_S21/$_s21_d")" = "$_S21_LH" ] || _S21_FAIL="$_S21_FAIL homecase-$_s21_d-wrote($(_s21_diff "$(_s21_list "$_S21/$_s21_d")" "$_S21_LH"))"
   _S21_HOOK_RC=0
@@ -2547,12 +2561,39 @@ EOF
 else
   _S21_AK_NOTE="; agykill: no timeout tool on PATH, skipped"
 fi
+# homeops: no roster is written in HOME or a directory above it, an ops/ there or not:
+# HOME holding an ops/ with a file in it, HOME without one, and HOME a git repository with
+# the writers run from a subdirectory of it. Each writer refuses (rc 6) before it makes a
+# directory: that ops/ byte-identical, or still absent. A project under HOME still writes
+# its own roster (rc 0), the ops/ in HOME untouched
+mkdir -p "$_S21/ho1/ops" "$_S21/ho1/proj" "$_S21/ho2" "$_S21/ho3/sub"
+printf '# my own notes\n[roles.builder]\ncli = "claude"\n' > "$_S21/ho1/ops/roster.toml"
+_s21_git "$_S21/ho1/proj" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-ho1-proj"
+_s21_git "$_S21/ho3" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-ho3"
+_s21_homes() { printf '%s|%s|%s' "$(_s21_list "$_S21/ho1/ops")" "$(ls -A "$_S21/ho2" | tr '\n' ' ')" "$(ls -A "$_S21/ho3" "$_S21/ho3/sub" | tr '\n' ' ')"; }
+_S21_LHO=$(_s21_homes)
+_s21_rw() { # _s21_rw <label> <dir> <HOME> — the three roster writers run in <dir>: "<label>:<writer>=<rc>" each, their stderr in <label>.err
+  ( cd "$2" && env -u CLAUDE_PLUGIN_ROOT -u TRIFORGE_LEASE_WORKER HOME="$3" PATH="$_S21/bin:$PATH" GIT_CONFIG_NOSYSTEM=1 /bin/bash -c '
+source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 9
+R=0; roster_write_member opencode false "" 2>>"$3" || R=$?; echo "$2:member=$R"
+R=0; roster_write_role tester claude "" high 2>>"$3" || R=$?; echo "$2:role=$R"
+R=0; roster_write_lead codex 2>>"$3" || R=$?; echo "$2:lead=$R"' s21 "$REPO_ROOT" "$1" "$_S21/$1.err" < /dev/null 2>&1 || true )
+}
+_S21_HO="$(_s21_rw ho-ops "$_S21/ho1" "$_S21/ho1")
+$(_s21_rw ho-none "$_S21/ho2" "$_S21/ho2")
+$(_s21_rw ho-git "$_S21/ho3/sub" "$_S21/ho3")
+$(_s21_rw ho-proj "$_S21/ho1/proj" "$_S21/ho1")
+homes=$([ "$(_s21_homes)" = "$_S21_LHO" ] && echo intact || echo changed)
+refusals=$(cat "$_S21/ho-ops.err" "$_S21/ho-none.err" "$_S21/ho-git.err" 2>/dev/null | grep -c 'REFUSED [^ ]* is your home directory or a directory above it, so the roster is not written there' || true)
+proj=$(grep -cE '^\[(lead|roles\.tester|members\.opencode)\]$' "$_S21/ho1/proj/ops/roster.toml" 2>/dev/null || true)"
+_S21_FAIL="${_S21_FAIL}$(_self_expect homeops "$_S21_HO" '^ho-ops:member=6$' '^ho-ops:role=6$' '^ho-ops:lead=6$' '^ho-none:member=6$' '^ho-none:role=6$' '^ho-none:lead=6$' \
+  '^ho-git:member=6$' '^ho-git:role=6$' '^ho-git:lead=6$' '^ho-proj:member=0$' '^ho-proj:role=0$' '^ho-proj:lead=0$' '^homes=intact$' '^refusals=9$' '^proj=3$')"
 # negative control: without the bootstrap line no ops/ appears
 _S21_RC=$(_s21_run neg /bin/bash "$_S21/proj-neg" "$REPO_ROOT/skills/at-setup" "$_S21/setup-neg.sh")
 [ ! -e "$_S21/proj-neg/ops" ] || _S21_FAIL="$_S21_FAIL negative-control(ops/-without-the-bootstrap-line)"
 _S21_CAP="the project bootstrap runs from the at- skills without any hook: at-setup's block provisions ops/, the skills copy, the per-CLI files and an untracked plugin-root pointer; at-build's preflight then loads the helpers from the pointer; idempotent under bash and zsh; refused under the worker marker and in a lease root (KTD11, R37)"
 if [ -z "$_S21_FAIL" ]; then
-  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; round 3: links at the pid-free temp names (.tmp, .new, ~) beside every written file untouched, and no predictable temp name or mv -f in the three writers, both creating temps O_EXCL|O_NOFOLLOW under a random name (R6); a symlinked parent one and two levels down refused, an append to a hard-linked file rc 5 with the shared inode unchanged, a replace over one a new inode (R3, R4); a home directory as the project, plain and as a repository: bootstrap rc 80 and session start rc 0, one WARNING each, the directory byte-identical (R1); skills-sync.py with links at its stamp's old temp names: untouched, the stamp a regular file (R2); a hard-linked .agents/.gitignore: rc 80, the shared inode unchanged (R3); a lease root named with a newline and a {-line: one REFUSED line, no hook stdout line starting with { (R5); a session started in <repo>/src names the project root once, one started at the root does not (R7); round 4: the home directory by a ${_S21_HCV:-case}-variant spelling, plain and a repository: bootstrap rc 80, session start rc 0, one WARNING each naming git init, nothing written (B1); skills-sync sync and add with the parent swapped for an outside link after the checks: nothing outside (B2); .codex/agents swapped for a HOME link before the move: the user-tier file untouched (B3); ops/ linked outside: enrollment and the three roster writers write nothing there, rc 6 (B7); round 5: the hook names each refused enrollment in a WARNING (G6); the .codex/agents move across filesystems (EXDEV) copies the user's file over, and a move that fails leaves it with no shipped default at the new name (G5); negative control: the block without its triforge_bootstrap line leaves no ops/; fix round 1 (finding #7): a 3.x roster at <top>/sub/ops/roster.toml, no ops/ at the top: the bootstrap from sub rc 0 with one WARNING naming it, <top>/ops/roster.toml and the README section, the skeleton created; a second copy from <top>: the skeleton-creation scan warns once (four levels down named, five levels down and node_modules not); again from sub, at-setup's block and session start: warned again; from <top>, the bootstrap and session start: silent; the subdirectory rosters byte-identical after each run, nothing under sub/; silent for a nested checkout's roster, a symlinked roster or ops/ and no roster; rc 0 with and without the warning; under zsh too (unless skipped above): the block from sub warns once; ${_S21_AG_NOTE}${_S21_AK_NOTE}" "static"
+  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; round 3: links at the pid-free temp names (.tmp, .new, ~) beside every written file untouched, and no predictable temp name or mv -f in the three writers, both creating temps O_EXCL|O_NOFOLLOW under a random name (R6); a symlinked parent one and two levels down refused, an append to a hard-linked file rc 5 with the shared inode unchanged, a replace over one a new inode (R3, R4); a home directory as the project, plain and as a repository: bootstrap rc 69 and session start rc 0, one WARNING each, the directory byte-identical (R1), and at-setup's block stops there with one SETUP: stopped line, nothing written; skills-sync.py with links at its stamp's old temp names: untouched, the stamp a regular file (R2); a hard-linked .agents/.gitignore: rc 80, the shared inode unchanged (R3); a lease root named with a newline and a {-line: one REFUSED line, no hook stdout line starting with { (R5); a session started in <repo>/src names the project root once, one started at the root does not (R7); round 4: the home directory by a ${_S21_HCV:-case}-variant spelling, plain and a repository: bootstrap rc 69, session start rc 0, one WARNING each naming git init, nothing written (B1); skills-sync sync and add with the parent swapped for an outside link after the checks: nothing outside (B2); .codex/agents swapped for a HOME link before the move: the user-tier file untouched (B3); ops/ linked outside: enrollment and the three roster writers write nothing there, rc 6 (B7); the three roster writers in a home directory with an ops/, one without, and a subdirectory of a home directory that is a repository: rc 6 each, nothing made or changed there, while a project under that home directory still writes its roster; round 5: the hook names each refused enrollment in a WARNING (G6); the .codex/agents move across filesystems (EXDEV) copies the user's file over, and a move that fails leaves it with no shipped default at the new name (G5); negative control: the block without its triforge_bootstrap line leaves no ops/; fix round 1 (finding #7): a 3.x roster at <top>/sub/ops/roster.toml, no ops/ at the top: the bootstrap from sub rc 0 with one WARNING naming it, <top>/ops/roster.toml and the README section, the skeleton created; a second copy from <top>: the skeleton-creation scan warns once (four levels down named, five levels down and node_modules not); again from sub, at-setup's block and session start: warned again; from <top>, the bootstrap and session start: silent; the subdirectory rosters byte-identical after each run, nothing under sub/; silent for a nested checkout's roster, a symlinked roster or ops/ and no roster; rc 0 with and without the warning; under zsh too (unless skipped above): the block from sub warns once; ${_S21_AG_NOTE}${_S21_AK_NOTE}" "static"
 else
   row "SELF-21" "claude" "$_S21_CAP" "FAIL" "mismatch:$(printf '%s' "$_S21_FAIL" | cut -c1-900)" "static"
 fi

@@ -50,8 +50,10 @@ fi
 #      45 refused: the worker marker or a lease root (one stderr line from
 #         _lead_only, nothing written)
 #      64 usage
-#      80 degraded: the project directory is the home directory or contains
-#         it (nothing written); or a step could not finish — a write failed,
+#      69 unavailable: the project directory is the home directory or
+#         contains it, which is no project (one WARNING, nothing written);
+#         the at- skills stop on it, and it is the only reason for 69
+#      80 degraded: a step could not finish — a write failed,
 #         or _tb_write refused it (a symlink or a file on its path, a
 #         hard-linked append target);
 #         the skills refresh failed or timed out; the agy pack install
@@ -115,7 +117,7 @@ triforge_bootstrap() {
   # contains it, also when the home directory is itself a repository.
   if _tb_home_anchor "$_TB_ANCHOR"; then
     _tb_note "WARNING the project directory ${_TB_ANCHOR} is your home directory or contains it, so nothing was bootstrapped: there the project files would be each CLI's user-tier config, which Triforge never writes. Run it from a project directory; when your home directory is itself a git repository (a dotfiles repo), run git init in the project first, so the project is its own repository."
-    return 80
+    return 69
   fi
   if _cursor_bin >/dev/null 2>&1; then
     _TB_CURSOR=1

@@ -32,10 +32,12 @@ Invoked with `lead`, it walks only the lead step; with one optional CLI name (`o
 set -uo pipefail
 ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
 set +e   # sourcing folds the helper's errexit into this shell; the enrollment helpers return nonzero as control flow, so turn it back off
-triforge_bootstrap || [ $? -eq 80 ] || exit 1   # 80: finished with warnings (stderr names them); 45: refused in a worker
+BOOT_RC=0; triforge_bootstrap || BOOT_RC=$?   # 80: finished with warnings (stderr names them); 45: refused in a worker
+if [ "$BOOT_RC" -eq 69 ]; then echo "SETUP: stopped: the project directory is your home directory or contains it, which is no project; start setup in a project directory"; exit 1; fi
+[ "$BOOT_RC" -eq 0 ] || [ "$BOOT_RC" -eq 80 ] || exit 1
 ```
 
-`triforge_bootstrap` sets the project up the way session start does: `ops/`, the `.agents/skills` copy, the per-CLI files, the agy pack, and the untracked pointer `.agents/triforge-plugin-root.local` that the locator falls back to. A Codex-led project works before any plugin hook is trusted, and a second run changes nothing.
+`triforge_bootstrap` sets the project up the way session start does: `ops/`, the `.agents/skills` copy, the per-CLI files, the agy pack, and the untracked pointer `.agents/triforge-plugin-root.local` that the locator falls back to. A Codex-led project works before any plugin hook is trusted, and a second run changes nothing. Its rc 69 means the project directory is the home directory or contains it: the block prints one `SETUP: stopped` line, and the run ends there.
 
 Every block in the references starts with the same locate-and-source line, so each runs on its own in either lead's shell (bash or zsh). A block takes the user's answers as named variables (`LEAD_CHOICE`, `ROLE`, `MEMBER`, `DEVIN_MODEL`, `INSTR_OP`), set at its top. Skills carry no positional tokens (C17).
 
@@ -62,7 +64,7 @@ Each step is also one validated helper call that an agent can make without the d
 
 ## Output
 
-- The `triforge_bootstrap:` notices, if any. A project that is already set up gets none, except the warning naming a 3.x roster left in a subdirectory, which repeats on every run that starts at or below that subdirectory until the file is moved.
+- The `triforge_bootstrap:` notices, if any. A project that is already set up gets none, except the warning naming a 3.x roster left in a subdirectory, which repeats on every run that starts at or below that subdirectory until the file is moved. A run in the home directory ends with the one `SETUP: stopped` line instead.
 - `CORE-TRIO: live` or `CORE-TRIO: UNRESOLVED` with the named fix; `CODEX-TRUST: <state>` and, when absent, the `[projects."<path>"]` block for the user to add.
 - The `LEAD-*` lines, the pointer visibility, the `HOOKS:` lines with any trust step, the launch line and, for a full-access lead, the confinement statements.
 - The role table and any `roster_write_role` rc lines; one `rc=` line per member walked and each enrollment or decline written.
