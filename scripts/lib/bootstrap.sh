@@ -195,12 +195,17 @@ _tb_note() {
 
 # _tb_run <seconds> <command...> — the command under the timeout binary when
 # there is one, else as it is (a step that must not run unbounded checks
-# _TB_TIMEOUT itself first, as the agy pack step does).
+# _TB_TIMEOUT itself first, as the agy pack step does). The timeout binary
+# sends a SIGTERM after <seconds> and, to a command that ignores it, a SIGKILL
+# 5 s later (-k): rc 124, or 137 after the SIGKILL. It sends that SIGKILL to
+# its whole process group, itself included, and bash reports the kill with a
+# "Killed" line on its own stderr: the braces send that line to /dev/null,
+# while fd 3 carries the command's stderr past them to the caller's.
 _tb_run() {
   local SECS=$1
   shift
   if [ -n "${_TB_TIMEOUT:-}" ]; then
-    "$_TB_TIMEOUT" "${SECS}s" "$@"
+    { "$_TB_TIMEOUT" -k 5s "${SECS}s" "$@" 2>&3 3>&-; } 3>&2 2>/dev/null
   else
     "$@"
   fi
@@ -653,7 +658,7 @@ _tb_skills() {
 ${OUT}
 TB_SYNC_EOF
   if [ "$RC" -ne 0 ]; then
-    _tb_note "WARNING .agents/skills refresh failed (skills-sync.py exit ${RC}; 124 means the 60 s timeout) — skills may be stale; the refresh re-runs next session."
+    _tb_note "WARNING .agents/skills refresh failed (skills-sync.py exit ${RC}; 124 means the 60 s timeout, 137 that it ignored the timeout and was killed 5 s later) — skills may be stale; the refresh re-runs next session."
     _TB_DEGRADED=1
   fi
   return 0

@@ -62,7 +62,7 @@ Each step is also one validated helper call that an agent can make without the d
 
 ## Output
 
-- The `triforge_bootstrap:` notices, if any (none on a project that is already set up).
+- The `triforge_bootstrap:` notices, if any. A project that is already set up gets none, except the warning naming a 3.x roster left in a subdirectory, which repeats on every run that starts at or below that subdirectory until the file is moved.
 - `CORE-TRIO: live` or `CORE-TRIO: UNRESOLVED` with the named fix; `CODEX-TRUST: <state>` and, when absent, the `[projects."<path>"]` block for the user to add.
 - The `LEAD-*` lines, the pointer visibility, the `HOOKS:` lines with any trust step, the launch line and, for a full-access lead, the confinement statements.
 - The role table and any `roster_write_role` rc lines; one `rc=` line per member walked and each enrollment or decline written.

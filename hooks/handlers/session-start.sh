@@ -205,6 +205,34 @@ _ss_claude_private() {
   _ss_tmp_ok "$SS_ANCHOR"
 }
 
+# _ss_private_tmp — print a private temp dir (mktemp -d: a random name, mode
+# 0700) under TMPDIR when no other user can rename entries in it (_ss_tmp_ok,
+# B5), else under the project's own .claude (at the anchor, wherever the hook
+# stands) when no other user can rename entries there either
+# (_ss_claude_private, G2); .claude is created here, without group or other
+# write, when it is missing. On failure, a nonzero rc and one line saying why (or
+# mktemp's error): the caller skips the step that needed the temp dir and
+# shows that line in its notice.
+_ss_private_tmp() {
+  local T="${TMPDIR:-/tmp}"
+  if _ss_tmp_ok "$T" && mktemp -d "${T}/triforge-session-start.XXXXXX" 2>/dev/null; then
+    return 0
+  fi
+  if [ -n "$SS_AT_HOME" ]; then
+    echo "no private temp dir: TMPDIR ${T} is shared, and a home directory's .claude is never used"
+    return 1   # never under a home directory's .claude (R1)
+  fi
+  if [ ! -e "${SS_ANCHOR}/.claude" ] && [ ! -L "${SS_ANCHOR}/.claude" ]; then
+    # the user's umask, with group and other write taken off it
+    ( umask "$(printf '%04o' $(( 8#$(umask) | 8#022 )))" && mkdir "${SS_ANCHOR}/.claude" ) 2>/dev/null || true
+  fi
+  if ! _ss_claude_private; then
+    echo "no private temp dir: TMPDIR ${T} is shared (another user could rename entries in it), and so is ${SS_ANCHOR}/.claude or the project directory (a symlink, another user's, or group or other writable without the sticky bit)"
+    return 1
+  fi
+  mktemp -d "${SS_ANCHOR}/.claude/triforge-session-start.XXXXXX" 2>&1
+}
+
 # Clean stale state files from previous sessions (the context monitor keeps
 # its state under TMPDIR now; this removes a copy an older version left).
 if [ -z "$SS_AT_HOME" ] && _ss_claude_dir; then
@@ -212,8 +240,9 @@ if [ -z "$SS_AT_HOME" ] && _ss_claude_dir; then
 fi
 
 # Timeout binary (GNU coreutils `timeout`, or `gtimeout` on macOS). The
-# optional-CLI version probes below run under it when it exists (unbounded
-# without it), and `claude --version` under it or a watchdog (_ss_bounded).
+# optional-CLI version probes and `claude --version` below run under it, or
+# under a watchdog without one (_ss_bounded), so a CLI that never answers is
+# given up on either way.
 # triforge_bootstrap and _cursor_bin find their own: without one the agy pack
 # check is skipped and the Cursor `agent` probes refuse (fail-closed, as
 # invoke-external.sh is — a hung CLI must not stall session start), and the
@@ -225,6 +254,60 @@ TIMEOUT_MISSING_WARNING=""
 if [ -z "$TIMEOUT_BIN" ]; then
   TIMEOUT_MISSING_WARNING="WARNING: neither \`timeout\` nor \`gtimeout\` found on PATH — invoke-external.sh is fail-closed and will refuse to run Antigravity/Codex invocations (this hook also skipped its agy and cursor probes). On macOS, install with: brew install coreutils"
 fi
+
+# _ss_bounded <seconds> <dir> <command…> — the command's stdout, the command
+# given up on after <seconds>: under the timeout binary when there is one, and
+# on a host without one (stock macOS) under a watchdog — the command runs in
+# the background, a second background subshell kills it when the time is up,
+# and the watchdog is killed as soon as the command returns. The answer
+# travels through a file in <dir>, a private temp dir the caller made
+# (_ss_private_tmp: never one other users can rename entries in, B5, G2) and
+# this removes; the watchdog's stdio is /dev/null, so nothing a killed command
+# leaves running holds the caller's command substitution open; each `wait`
+# swallows bash's "Terminated" or "Killed" line. Giving up is a SIGTERM, then
+# a SIGKILL 2 s later if the command is still running (`-k 2s`, or the
+# watchdog's second kill), so the call returns within <seconds> + 2 s even
+# when the command ignores SIGTERM. timeout sends its SIGKILL to its whole
+# process group, itself included; the braces around it swallow the "Killed"
+# line bash prints for that.
+_ss_bounded() {
+  local SECS="$1" OUT_DIR="$2" OUT CMD_PID DOG_PID
+  shift 2
+  if [ -n "$TIMEOUT_BIN" ]; then
+    { "$TIMEOUT_BIN" -k 2s "${SECS}s" "$@"; } 2>/dev/null || true
+    return 0
+  fi
+  OUT="${OUT_DIR}/out"
+  "$@" </dev/null >"$OUT" 2>/dev/null &
+  CMD_PID=$!
+  ( sleep "$SECS"; kill "$CMD_PID" && sleep 2 && kill -9 "$CMD_PID" || true ) </dev/null >/dev/null 2>&1 &
+  DOG_PID=$!
+  wait "$CMD_PID" 2>/dev/null || true
+  kill "$DOG_PID" 2>/dev/null || true
+  wait "$DOG_PID" 2>/dev/null || true
+  cat "$OUT" 2>/dev/null || true
+  rm -rf "$OUT_DIR"
+}
+
+# _ss_cli_version <seconds> <binary> — the first line the binary prints for
+# --version, or for -V when --version prints nothing. Each call goes through
+# _ss_bounded (given up on after <seconds>, killed 2 s later if it ignores
+# SIGTERM); without a timeout binary each call gets a private temp dir of its
+# own, since _ss_bounded removes the one it is given. Nothing when neither
+# call answers; a call with no private temp dir for it is skipped.
+_ss_cli_version() {
+  local SECS="$1" BIN="$2" FLAG DIR V=""
+  for FLAG in --version -V; do
+    DIR=""
+    if [ -n "$TIMEOUT_BIN" ] || DIR=$(_ss_private_tmp); then
+      V=$(_ss_bounded "$SECS" "$DIR" "$BIN" "$FLAG" | head -1 || true)
+    fi
+    if [ -n "$V" ]; then
+      break
+    fi
+  done
+  printf '%s' "$V"
+}
 
 # _ss_run — the rest of this hook, from the project bootstrap to the orientation
 # message, as one function: it runs inside the subshell that sources the helper
@@ -292,23 +375,18 @@ fi
 # (_registry_binary, no further read) and probed with command -v before
 # anything else runs. resolver stays last: it is empty for most CLIs, and
 # IFS=$'\t' folds an empty middle field into the next (consent always prints
-# true or false). The rows arrive on fd 3 so the version probes keep the
-# hook's stdin.
+# true or false). The rows arrive on fd 3, not stdin, so a version probe
+# that reads its stdin can't consume them.
 while IFS=$'\t' read -r -u 3 CLI_NAME CLI_BIN CLI_CONSENT CLI_RESOLVER; do
   [ -n "$CLI_NAME" ] || continue
   CLI_BIN=$(_registry_binary "$CLI_NAME" "$CLI_BIN" "$CLI_RESOLVER" 2>/dev/null || true)
   [ -n "$CLI_BIN" ] || continue
   if command -v "$CLI_BIN" >/dev/null 2>&1; then
-    # Version capture is best-effort: --version first, -V fallback, 10s cap
-    # each; a CLI that answers neither is still recorded as present.
-    CLI_VERSION=""
-    if [ -n "$TIMEOUT_BIN" ]; then
-      CLI_VERSION=$("$TIMEOUT_BIN" 10s "$CLI_BIN" --version 2>/dev/null | head -1 || true)
-      [ -z "$CLI_VERSION" ] && CLI_VERSION=$("$TIMEOUT_BIN" 10s "$CLI_BIN" -V 2>/dev/null | head -1 || true)
-    else
-      CLI_VERSION=$("$CLI_BIN" --version 2>/dev/null | head -1 || true)
-      [ -z "$CLI_VERSION" ] && CLI_VERSION=$("$CLI_BIN" -V 2>/dev/null | head -1 || true)
-    fi
+    # Version capture is best-effort (_ss_cli_version): --version first, -V
+    # fallback, each given up on after 10 s and killed 2 s later if it
+    # ignores SIGTERM, timeout binary or not; a CLI that answers neither is
+    # still recorded as present.
+    CLI_VERSION=$(_ss_cli_version 10 "$CLI_BIN" || true)
     [ -z "$CLI_VERSION" ] && CLI_VERSION="unknown"
     SS_DETECTED="${SS_DETECTED}
 ${CLI_NAME}|${CLI_VERSION}|$(date +%Y-%m-%d)"
@@ -520,40 +598,6 @@ _ss_xyz_key() {
 $1
 SS_XYZ_EOF
   echo $(( 10#$A * 1000000000000 + 10#$B * 1000000 + 10#$C ))
-}
-
-# _ss_bounded <seconds> <dir> <command…> — the command's stdout, the command
-# given up on after <seconds>: under the timeout binary when there is one, and
-# on a host without one (stock macOS) under a watchdog — the command runs in
-# the background, a second background subshell kills it when the time is up,
-# and the watchdog is killed as soon as the command returns. The answer
-# travels through a file in <dir>, a private temp dir the caller made
-# (_ss_private_tmp: never one other users can rename entries in, B5, G2) and
-# this removes; the watchdog's stdio is /dev/null, so nothing a killed command
-# leaves running holds the caller's command substitution open; each `wait`
-# swallows bash's "Terminated" or "Killed" line. Giving up is a SIGTERM, then
-# a SIGKILL 2 s later if the command is still running (`-k 2s`, or the
-# watchdog's second kill), so the call returns within <seconds> + 2 s even
-# when the command ignores SIGTERM. timeout sends its SIGKILL to its whole
-# process group, itself included; the braces around it swallow the "Killed"
-# line bash prints for that.
-_ss_bounded() {
-  local SECS="$1" OUT_DIR="$2" OUT CMD_PID DOG_PID
-  shift 2
-  if [ -n "$TIMEOUT_BIN" ]; then
-    { "$TIMEOUT_BIN" -k 2s "${SECS}s" "$@"; } 2>/dev/null || true
-    return 0
-  fi
-  OUT="${OUT_DIR}/out"
-  "$@" </dev/null >"$OUT" 2>/dev/null &
-  CMD_PID=$!
-  ( sleep "$SECS"; kill "$CMD_PID" && sleep 2 && kill -9 "$CMD_PID" || true ) </dev/null >/dev/null 2>&1 &
-  DOG_PID=$!
-  wait "$CMD_PID" 2>/dev/null || true
-  kill "$DOG_PID" 2>/dev/null || true
-  wait "$DOG_PID" 2>/dev/null || true
-  cat "$OUT" 2>/dev/null || true
-  rm -rf "$OUT_DIR"
 }
 
 # Floor. The answer is read with a 10 s bound (12 s for a `claude` that
@@ -868,34 +912,6 @@ echo ""
 echo 'Lead workflows (/at-<name> here, $agent-triforge:at-<name> in a Codex prompt): at-setup at-ship at-plan at-build at-review at-test at-debug at-quick at-deep-research at-analyze at-coordinate at-resolve-pr at-status at-pause at-resume at-wrap at-compound'
 
 exit 0
-}
-
-# _ss_private_tmp — print a private temp dir (mktemp -d: a random name, mode
-# 0700) under TMPDIR when no other user can rename entries in it (_ss_tmp_ok,
-# B5), else under the project's own .claude (at the anchor, wherever the hook
-# stands) when no other user can rename entries there either
-# (_ss_claude_private, G2); .claude is created here, without group or other
-# write, when it is missing. On failure, a nonzero rc and one line saying why (or
-# mktemp's error): the caller skips the step that needed the temp dir and
-# shows that line in its notice.
-_ss_private_tmp() {
-  local T="${TMPDIR:-/tmp}"
-  if _ss_tmp_ok "$T" && mktemp -d "${T}/triforge-session-start.XXXXXX" 2>/dev/null; then
-    return 0
-  fi
-  if [ -n "$SS_AT_HOME" ]; then
-    echo "no private temp dir: TMPDIR ${T} is shared, and a home directory's .claude is never used"
-    return 1   # never under a home directory's .claude (R1)
-  fi
-  if [ ! -e "${SS_ANCHOR}/.claude" ] && [ ! -L "${SS_ANCHOR}/.claude" ]; then
-    # the user's umask, with group and other write taken off it
-    ( umask "$(printf '%04o' $(( 8#$(umask) | 8#022 )))" && mkdir "${SS_ANCHOR}/.claude" ) 2>/dev/null || true
-  fi
-  if ! _ss_claude_private; then
-    echo "no private temp dir: TMPDIR ${T} is shared (another user could rename entries in it), and so is ${SS_ANCHOR}/.claude or the project directory (a symlink, another user's, or group or other writable without the sticky bit)"
-    return 1
-  fi
-  mktemp -d "${SS_ANCHOR}/.claude/triforge-session-start.XXXXXX" 2>&1
 }
 
 # The helper (scripts/invoke-external.sh) — sourced ONCE, in the subshell that

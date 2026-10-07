@@ -26,11 +26,13 @@
 #                    record can't be overwritten by a gate run.
 #   --only <IDs>     Run the preflight and fixture plus only the named rows of
 #                    the lead capability and survival section (comma-separated;
-#                    ONLY_ROWS below lists them) — no other per-CLI row, no
-#                    SELF row. Live rows still need their CLI's live gate
-#                    (combine with --skip-live to record them SKIPPED). The
-#                    record goes to a scratch path under ${TMPDIR}, exactly as
-#                    under --self-only (a dated --record name is refused).
+#                    ONLY_ROWS below lists them, SELF-06f, SELF-06g and
+#                    SELF-06h among them) — no other per-CLI row and no static
+#                    SELF row (the SELF gate is --self-only). Live rows still
+#                    need their CLI's live gate (combine with --skip-live to
+#                    record them SKIPPED). The record goes to a scratch path
+#                    under ${TMPDIR}, exactly as under --self-only (a dated
+#                    --record name is refused).
 #
 # Exit codes:
 #   0  harness completed — probe FAIL/UNAVAILABLE/AUTH-FAIL results are data,
@@ -169,9 +171,17 @@ command -v git >/dev/null 2>&1 || { echo "probe-capabilities: FATAL — git requ
 REG_ENV_BASE=$( source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 && printf '%s' "${TRIFORGE_ENV_BASE:-}" ) || REG_ENV_BASE=""
 [ -n "$REG_ENV_BASE" ] || { echo "probe-capabilities: FATAL — could not read TRIFORGE_ENV_BASE from scripts/lib/registry.sh through scripts/invoke-external.sh" >&2; exit 1; }
 
+# _rwt <seconds> <cmd...> — the command under the timeout binary: a SIGTERM
+# after <seconds>, then a SIGKILL 10 s later to a CLI that ignores it (rc 124,
+# or 137 after the SIGKILL), the kill-after _run_with_timeout gives the
+# adapters. timeout sends that SIGKILL to its whole process group, itself
+# included, and bash reports the kill with a "Killed" line on its own
+# stderr, which a caller's 2>&1 would put in a row's evidence: the braces
+# send that line to /dev/null, and fd 3 carries the command's stderr past
+# them. _probe_run does the same.
 _rwt() { # _rwt <seconds> <cmd...>
   local SECS=$1; shift
-  "$TIMEOUT_BIN" "${SECS}s" "$@"
+  { "$TIMEOUT_BIN" -k 10s "${SECS}s" "$@" 2>&3 3>&-; } 3>&2 2>/dev/null
 }
 
 RUN_TS=$(date -u '+%Y-%m-%d %H:%M UTC')
@@ -326,9 +336,10 @@ EOF
 # Timeout + credential-isolated environment for live probe invocations.
 # `timeout` execs `env` (a real binary) which execs the CLI — a plain env
 # wrapper around a shell function would fail with "env: _rwt: not found".
+# The kill-after and the braces are _rwt's (see there).
 _probe_run() { # _probe_run <seconds> <cmd...>
   local SECS=$1; shift
-  "$TIMEOUT_BIN" "${SECS}s" env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null "$@"
+  { "$TIMEOUT_BIN" -k 10s "${SECS}s" env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null "$@" 2>&3 3>&-; } 3>&2 2>/dev/null
 }
 
 # The NAME=value pairs _lane_run sets beyond the base keys: the git isolation,
@@ -343,7 +354,11 @@ LANE_FIXED=(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null NO_COLOR=1 T
 # CC-08. The two read one list, so a probe can never run under a wider or
 # narrower env than the real lease (USER is what lets `claude -p` find its
 # keychain account); as before, HOME / PATH / TMPDIR are always passed (with
-# their fallbacks) and the other keys only when set, then LANE_FIXED.
+# their fallbacks) and the other keys only when set, then LANE_FIXED. The
+# timeout flags are the lease lane's own (_lease_builder_run, scripts/lib/
+# lease-wait.sh): --foreground, and -k 10 s (_LEASE_KILL_AFTER_S) for a CLI
+# that ignores SIGTERM. Under --foreground timeout signals only the CLI and
+# exits 137 itself after that SIGKILL, so bash prints no "Killed" line.
 _lane_run() { # _lane_run <seconds> <cmd...>
   local SECS=$1; shift
   local -a E=()
@@ -362,7 +377,7 @@ _lane_run() { # _lane_run <seconds> <cmd...>
 $(printf '%s' "$REG_ENV_BASE" | tr ' ' '\n')
 BASEKEYS
   E+=("${LANE_FIXED[@]}")
-  "$TIMEOUT_BIN" "${SECS}s" env -i "${E[@]}" "$@"
+  "$TIMEOUT_BIN" --foreground -k 10s "${SECS}s" env -i "${E[@]}" "$@"
 }
 
 # The claude lane's own values (_ADAPTER_ENV_CLAUDE in scripts/lib/lease.sh,
@@ -4878,7 +4893,7 @@ if _want GRK-12; then
     if [ -z "$GRK12_SBX" ] || [ ! -f "$K/proj/.grok/sandbox.toml" ]; then
       row "GRK-12" "grok" "$GRK_CAP12" "FAIL" "no profile to measure: edit argv --sandbox '${GRK12_SBX:-<none>}'; $(_evidence "$K/profile.err")" "static"
     else
-      ( cd "$K/proj" && "$TIMEOUT_BIN" 120s env -i HOME="$H" GROK_HOME="$H/.grok" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" TERM=dumb LANG="${LANG:-en_US.UTF-8}" \
+      ( cd "$K/proj" && "$TIMEOUT_BIN" -k 10s 120s env -i HOME="$H" GROK_HOME="$H/.grok" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" TERM=dumb LANG="${LANG:-en_US.UTF-8}" \
           ${USER:+USER="$USER"} ${GRK_ENVW[@]+"${GRK_ENVW[@]}"} GROK_SANDBOX="$GRK12_SBX" GROK_AUTH_PROVIDER_COMMAND="$K/token.sh" python3 -c '
 import json, os, select, subprocess, sys, time
 cwd, out = sys.argv[1], sys.argv[2]

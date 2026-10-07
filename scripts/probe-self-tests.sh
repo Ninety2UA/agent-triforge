@@ -1066,6 +1066,19 @@ fi
 #          and said so, without one) and under the watchdog: back in under 6 s
 #          (1 s + the 2 s SIGKILL grace + slack), the stub gone, nothing on
 #          stderr; a call still running at 10 s is killed and recorded as hung
+#   versiongrace (round 1, wave 2) the optional-CLI version probe, the hook's
+#          own _ss_cli_version text (with _ss_bounded and _ss_private_tmp and
+#          the checks it calls), with a 1 s bound instead of the hook's 10 s,
+#          so a run costs seconds, not 2 x 12 s: an optional CLI that ignores
+#          SIGTERM and never answers is asked --version, then -V, and given
+#          up on in under 9 s (two calls of 1 s + the 2 s SIGKILL grace +
+#          slack), nothing recorded, the stub gone, nothing on stderr, no
+#          temp dir left; one that answers -V only gets that answer recorded.
+#          Under the timeout binary (skipped, and said so, without one) and
+#          under the watchdog, side by side; a case still running at 15 s is
+#          killed and recorded as hung. The watchdog run above also carries
+#          a kimi stub that answers -V only: the hook records that answer in
+#          .claude/roster-detected.local.md
 _S8="${WORK}/self08"
 mkdir -p "$_S8/proj" "$_S8/bin" "$_S8/home"
 cat > "$_S8/bin/agy" <<'EOF'
@@ -1107,10 +1120,12 @@ _s8_run() { # _s8_run <label> <project> <claude --version answer> [HOME] — one
 _s8_has() { printf '%s\n' "$_O" | grep -q -- "$1"; }
 # _s8_start_notimeout <project> — session start with no timeout/gtimeout on PATH and a
 # claude that never answers (sleeps 30 s): the floor probe's own watchdog must bound it.
+# A kimi stub answers -V only, so the optional-CLI probe's fallback runs under the watchdog.
 _s8_start_notimeout() {
   local B="$_S8/bin-notimeout"
   mkdir -p "$B"
   printf '#!/bin/sh\nsleep 30\n' > "$B/claude"; chmod +x "$B/claude"
+  printf '#!/bin/sh\n# probe stub (SELF-08): an optional CLI that answers -V only\ncase "${1:-}" in -V) echo "kimi-probe-stub 1.2.3" ;; esac\nexit 0\n' > "$B/kimi"; chmod +x "$B/kimi"
   ln -sf "$_S8/bin/agy" "$B/agy" 2>/dev/null || true
   ( cd "$1" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$B:/usr/bin:/bin" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 )
 }
@@ -1266,6 +1281,7 @@ _S8_T1=$(( $(date +%s) - _S8_T0 ))
 _s8_sane notimeout "$_O"
 [ "$_S8_T1" -lt 20 ] || _S8_FAIL="$_S8_FAIL notimeout-hung-claude-not-bounded(${_S8_T1}s)"
 _s8_has 'below Triforge' && _S8_FAIL="$_S8_FAIL notimeout-floor-warning-without-an-answer"
+grep -q '^kimi|kimi-probe-stub 1\.2\.3|' "$_S8/proj/.claude/roster-detected.local.md" 2>/dev/null || _S8_FAIL="$_S8_FAIL notimeout-kimi-V-answer-not-recorded"
 # fixed: the parent file now imports the project's AGENTS.md
 printf '\n@proj/AGENTS.md\n' >> "$_S8A/above/mid/CLAUDE.md"
 _s8_run chain-import "$_S8P" '{"version": "2.0.300"}'
@@ -1360,13 +1376,86 @@ else
   _S8_KILL="timeout binary SKIPPED (no timeout or gtimeout on PATH)"
 fi
 _s8_bounded watchdog ""
+# versiongrace (round 1, wave 2): _ss_cli_version as the hook ships it, with
+# what it calls (each function's text, from its `name() {` line to the
+# closing brace at column 0), evaluated in background subshells, one per
+# branch, side by side, under an outer 15 s deadline. Each subshell's TMPDIR
+# is a private dir of its own, empty again afterwards. The stubs log the
+# flag they were asked; the deaf one also its pid.
+_S8_VFN=""
+for _s8_f in _ss_tmp_ok _ss_claude_private _ss_private_tmp _ss_bounded _ss_cli_version; do
+  _S8_T=$(sed -n "/^${_s8_f}() {\$/,/^}\$/p" "$REPO_ROOT/hooks/handlers/session-start.sh")
+  [ -n "$_S8_T" ] || _S8_FAIL="$_S8_FAIL versiongrace-no-${_s8_f}-in-the-hook"
+  _S8_VFN="${_S8_VFN}${_S8_T}
+"
+done
+unset _s8_f _S8_T
+mkdir -p "$_S8/vstub"
+printf '#!/bin/sh\n# probe stub (SELF-08 versiongrace): an optional CLI that ignores SIGTERM and never answers; logs its flag to $S8_VLOG, its pid to $S8_VLOG.pid\necho "$1" >> "$S8_VLOG"\necho $$ >> "$S8_VLOG.pid"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S8/vstub/deaf"
+printf '#!/bin/sh\n# probe stub (SELF-08 versiongrace): an optional CLI that answers -V only; logs its flag to $S8_VLOG\necho "$1" >> "$S8_VLOG"\ncase "${1:-}" in -V) echo "vonly-probe-stub 1.2.3" ;; esac\nexit 0\n' > "$_S8/vstub/vonly"
+chmod +x "$_S8/vstub/deaf" "$_S8/vstub/vonly"
+_s8_vstart() { # _s8_vstart <label> <TIMEOUT_BIN, empty: the watchdog> — both stubs through _ss_cli_version with a 1 s bound, in the background; results in $_S8/vg-<label>
+  local D="$_S8/vg-$1"
+  mkdir -p "$D/tmp"
+  chmod 700 "$D/tmp"
+  ( TIMEOUT_BIN="$2"; SS_AT_HOME=""; SS_ANCHOR="$D"; TMPDIR="$D/tmp"; S8_VLOG="$D/deaf.log"; export TMPDIR S8_VLOG
+    eval "$_S8_VFN"
+    printf 'deaf=[%s]\n' "$(_ss_cli_version 1 "$_S8/vstub/deaf")" > "$D/res"
+    S8_VLOG="$D/vonly.log"
+    printf 'vonly=[%s]\n' "$(_ss_cli_version 1 "$_S8/vstub/vonly")" >> "$D/res"
+    : > "$D/done" ) </dev/null >/dev/null 2>"$D/err" &
+  echo "$!" > "$D/bg"
+}
+_S8_VER=""
+_s8_vcheck() { # _s8_vcheck <label> — wait for the case (to 15 s after _S8_VT0), then check it; its seconds into _S8_VER, mismatches into _S8_FAIL
+  local D="$_S8/vg-$1" N=0 T S
+  while [ ! -f "$D/done" ] && [ "$(( $(date +%s) - _S8_VT0 ))" -lt 15 ]; do sleep 0.1; done
+  T=$(( $(date +%s) - _S8_VT0 ))
+  if [ ! -f "$D/done" ]; then
+    _S8_FAIL="$_S8_FAIL versiongrace-$1-hung(${T}s)"
+    kill -9 "$(cat "$D/bg")" 2>/dev/null || true
+  elif [ "$T" -ge 9 ]; then
+    _S8_FAIL="$_S8_FAIL versiongrace-$1-slow(${T}s)"
+  fi
+  wait "$(cat "$D/bg")" 2>/dev/null || true
+  [ "$(cat "$D/res" 2>/dev/null)" = "deaf=[]
+vonly=[vonly-probe-stub 1.2.3]" ] || _S8_FAIL="$_S8_FAIL versiongrace-$1-answers($(tr '\n' ' ' < "$D/res" 2>/dev/null | cut -c1-80))"
+  [ "$(tr '\n' ' ' < "$D/deaf.log" 2>/dev/null)" = "--version -V " ] || _S8_FAIL="$_S8_FAIL versiongrace-$1-deaf-asked($(tr '\n' ' ' < "$D/deaf.log" 2>/dev/null))"
+  [ "$(tr '\n' ' ' < "$D/vonly.log" 2>/dev/null)" = "--version -V " ] || _S8_FAIL="$_S8_FAIL versiongrace-$1-vonly-asked($(tr '\n' ' ' < "$D/vonly.log" 2>/dev/null))"
+  # gone: a stub killed with its timeout process is reaped by init, so give it a second
+  for S in $(cat "$D/deaf.log.pid" 2>/dev/null); do
+    N=0
+    while kill -0 "$S" 2>/dev/null && [ "$N" -lt 10 ]; do sleep 0.1; N=$((N + 1)); done
+    if kill -0 "$S" 2>/dev/null; then
+      _S8_FAIL="$_S8_FAIL versiongrace-$1-stub-left-running"
+      kill -9 "$S" 2>/dev/null || true
+    fi
+  done
+  if [ -s "$D/err" ]; then _S8_FAIL="$_S8_FAIL versiongrace-$1-stderr($(head -1 "$D/err" | sed 's/^.*line [0-9]*: //' | tr -s ' ' | cut -c1-60))"; fi
+  if [ -n "$(ls -A "$D/tmp" 2>/dev/null)" ]; then _S8_FAIL="$_S8_FAIL versiongrace-$1-temp-dir-left"; fi
+  _S8_VER="${_S8_VER}${_S8_VER:+, }$1 ${T}s"
+}
+case "$_S8_FAIL" in
+  *versiongrace-no-*) ;;   # the hook lacks a function the case runs: recorded above, nothing to run
+  *)
+    _S8_VT0=$(date +%s)
+    if [ -n "$TIMEOUT_BIN" ]; then _s8_vstart "$(basename "$TIMEOUT_BIN")" "$TIMEOUT_BIN"; fi
+    _s8_vstart watchdog ""
+    if [ -n "$TIMEOUT_BIN" ]; then
+      _s8_vcheck "$(basename "$TIMEOUT_BIN")"
+    else
+      _S8_VER="timeout binary SKIPPED (no timeout or gtimeout on PATH)"
+    fi
+    _s8_vcheck watchdog
+    ;;
+esac
 _S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines), prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40), and survives a failing or absent helper loader"
 if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
-  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; every run rc 0, no crash, no line starting with {" "static"
+  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; versiongrace (round 1, wave 2): an optional CLI that ignores SIGTERM and never answers, through the hook's own _ss_cli_version with a 1 s bound, asked --version then -V and given up on within two calls of 1 s + the 2 s SIGKILL grace (${_S8_VER}), nothing recorded, the stub gone, stderr empty, no temp dir left; one that answers -V only gets that answer, and the watchdog run records a kimi stub's -V answer in .claude/roster-detected.local.md; every run rc 0, no crash, no line starting with {" "static"
 else
   row "SELF-08" "claude" "$_S8_CAP" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160); mismatch:${_S8_FAIL:- none}" "static"
 fi
-rm -rf "$_S8/proj" "$_S8/proj-degraded" "$_S8/proj-pin" "$_S8_BAD" "$_S8/home" "$_S8A" "$_S8/skeleton.md" "$_S8/template.md" "$_S8/deaf"   # keep $_S8/bin (the stub agy + claude) for SELF-08b; removed there
+rm -rf "$_S8/proj" "$_S8/proj-degraded" "$_S8/proj-pin" "$_S8_BAD" "$_S8/home" "$_S8A" "$_S8/skeleton.md" "$_S8/template.md" "$_S8/deaf" "$_S8/vstub" "$_S8"/vg-*   # keep $_S8/bin (the stub agy + claude) for SELF-08b; removed there
 
 # SELF-08b (KTD12 / R31 / CWE-59): the skills refresh touches only what it can
 # prove it wrote. Session start (CLAUDE_PLUGIN_ROOT = this checkout) on:
@@ -1656,6 +1745,15 @@ rm -rf "$_S8B" "$_S8"
 #            then complete after the retry -> one `plugin uninstall
 #            agent-triforge`, the success notice, rc 0; still short after it
 #            -> one uninstall, the notice naming documentation-writer, rc 0
+#   agykill  (round 1, wave 2) _tb_run, which runs every agy pack step, the
+#            skills sync and the subdirectory-roster scan, on an agy stub
+#            that ignores SIGTERM on `agy agents`, prints one stderr line and
+#            never answers, with a 1 s bound (the steps use 30 s and 60 s),
+#            under bash and zsh: back within 1 s + the 5 s SIGKILL grace +
+#            slack with rc 137, nothing on stdout but the rc, the stub's own
+#            stderr line passed through and no "Killed" line (bash's report
+#            of the kill), the stub gone; a run still going at 15 s is killed
+#            and recorded as hung. Needs a timeout tool, as the step does
 # Negative control: the setup block with its triforge_bootstrap line removed
 # leaves a fresh project without ops/, so the ops/ check above sees the call.
 _S21="${WORK}/self21"
@@ -2364,12 +2462,75 @@ ${_s21_m}-notices:$({ grep '^triforge_bootstrap: ' "$_S21/ag-$_s21_m.err" || tru
 else
   _S21_AG_NOTE="no timeout tool on PATH: the agy pack step does not run, so its cases were skipped"
 fi
+# agykill (round 1, wave 2): _tb_run on an agy stub that ignores SIGTERM on
+# `agy agents`. _tb_run takes its bound as an argument, so the case calls it
+# with 1 s from a shell that sourced the loader, _TB_TIMEOUT set the way
+# triforge_bootstrap sets it; bash and zsh side by side, in the background,
+# under an outer 15 s deadline. The stub writes its pid and one stderr line.
+if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
+  mkdir -p "$_S21/bin-deaf"
+  cat > "$_S21/bin-deaf/agy" <<'EOF'
+#!/bin/sh
+# probe stub (SELF-21 agykill): `agy agents` writes its pid to $S21_AGY_PID and
+# one line to stderr, ignores SIGTERM and never answers (30 s at most)
+case "${1:-}" in
+  agents)
+    echo $$ > "$S21_AGY_PID"
+    echo "agy-probe-stub: listing" >&2
+    trap "" TERM
+    N=0
+    while [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done ;;
+esac
+exit 0
+EOF
+  chmod +x "$_S21/bin-deaf/agy"
+  printf 'source "%s/scripts/invoke-external.sh"\n_TB_TIMEOUT=$(_timeout_tool 2>/dev/null)\nR=0; _tb_run 1 agy agents || R=$?\necho "rc=$R"\n' "$REPO_ROOT" > "$_S21/agykill.sh"
+  _S21_KL=""
+  _S21_KN=""
+  _S21_KT0=$(date +%s)
+  for _s21_sh in /bin/bash $_S21_ZSH; do
+    _s21_l=$(basename "$_s21_sh")
+    ( cd "$_S21/proj" && env -u CLAUDE_PLUGIN_ROOT -u TRIFORGE_LEASE_WORKER HOME="$_S21/home" PATH="$_S21/bin-deaf:$_S21/bin:$PATH" TMPDIR="$_S21/tmp" \
+        GIT_CONFIG_NOSYSTEM=1 S21_AGY_PID="$_S21/agykill-$_s21_l.pid" "$_s21_sh" "$_S21/agykill.sh" < /dev/null > "$_S21/agykill-$_s21_l.out" 2> "$_S21/agykill-$_s21_l.err"
+      : > "$_S21/agykill-$_s21_l.done" ) &
+    _S21_KL="$_S21_KL $_s21_l:$!"
+  done
+  for _s21_kv in $_S21_KL; do
+    _s21_l=${_s21_kv%%:*}
+    while [ ! -f "$_S21/agykill-$_s21_l.done" ] && [ "$(( $(date +%s) - _S21_KT0 ))" -lt 15 ]; do sleep 0.1; done
+    _S21_KT=$(( $(date +%s) - _S21_KT0 ))
+    if [ ! -f "$_S21/agykill-$_s21_l.done" ]; then
+      _S21_FAIL="$_S21_FAIL agykill-$_s21_l-hung(${_S21_KT}s)"
+      kill -9 "${_s21_kv#*:}" 2>/dev/null || true
+    elif [ "$_S21_KT" -ge 10 ]; then
+      _S21_FAIL="$_S21_FAIL agykill-$_s21_l-slow(${_S21_KT}s)"
+    fi
+    wait "${_s21_kv#*:}" 2>/dev/null || true
+    # gone: a stub killed with its timeout process is reaped by init, so give it a second
+    _s21_s=$(cat "$_S21/agykill-$_s21_l.pid" 2>/dev/null || true)
+    _s21_n=0
+    while [ -n "$_s21_s" ] && kill -0 "$_s21_s" 2>/dev/null && [ "$_s21_n" -lt 10 ]; do sleep 0.1; _s21_n=$((_s21_n + 1)); done
+    if [ -z "$_s21_s" ]; then
+      _S21_FAIL="$_S21_FAIL agykill-$_s21_l-stub-never-ran"
+    elif kill -0 "$_s21_s" 2>/dev/null; then
+      _S21_FAIL="$_S21_FAIL agykill-$_s21_l-stub-left-running"
+      kill -9 "$_s21_s" 2>/dev/null || true
+    fi
+    _S21_FAIL="${_S21_FAIL}$(_self_expect "agykill-$_s21_l" "out=$(tr '\n' ' ' < "$_S21/agykill-$_s21_l.out"):err=$(tr '\n' ' ' < "$_S21/agykill-$_s21_l.err" | cut -c1-200)" \
+      '^out=rc=137 :err=agy-probe-stub: listing $')"
+    _S21_KN="${_S21_KN}${_S21_KN:+, }$_s21_l ${_S21_KT}s"
+  done
+  unset _s21_sh _s21_l _s21_kv _s21_s _s21_n
+  _S21_AK_NOTE="; agykill (round 1, wave 2): _tb_run with a 1 s bound on an agy stub that ignores SIGTERM on agy agents, under each shell (${_S21_KN}; zsh only when on PATH): back within 1 s + the 5 s SIGKILL grace with rc 137, the stub gone, its own stderr line passed through, no Killed line on stdout or stderr"
+else
+  _S21_AK_NOTE="; agykill: no timeout tool on PATH, skipped"
+fi
 # negative control: without the bootstrap line no ops/ appears
 _S21_RC=$(_s21_run neg /bin/bash "$_S21/proj-neg" "$REPO_ROOT/skills/at-setup" "$_S21/setup-neg.sh")
 [ ! -e "$_S21/proj-neg/ops" ] || _S21_FAIL="$_S21_FAIL negative-control(ops/-without-the-bootstrap-line)"
 _S21_CAP="the project bootstrap runs from the at- skills without any hook: at-setup's block provisions ops/, the skills copy, the per-CLI files and an untracked plugin-root pointer; at-build's preflight then loads the helpers from the pointer; idempotent under bash and zsh; refused under the worker marker and in a lease root (KTD11, R37)"
 if [ -z "$_S21_FAIL" ]; then
-  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; round 3: links at the pid-free temp names (.tmp, .new, ~) beside every written file untouched, and no predictable temp name or mv -f in the three writers, both creating temps O_EXCL|O_NOFOLLOW under a random name (R6); a symlinked parent one and two levels down refused, an append to a hard-linked file rc 5 with the shared inode unchanged, a replace over one a new inode (R3, R4); a home directory as the project, plain and as a repository: bootstrap rc 80 and session start rc 0, one WARNING each, the directory byte-identical (R1); skills-sync.py with links at its stamp's old temp names: untouched, the stamp a regular file (R2); a hard-linked .agents/.gitignore: rc 80, the shared inode unchanged (R3); a lease root named with a newline and a {-line: one REFUSED line, no hook stdout line starting with { (R5); a session started in <repo>/src names the project root once, one started at the root does not (R7); round 4: the home directory by a ${_S21_HCV:-case}-variant spelling, plain and a repository: bootstrap rc 80, session start rc 0, one WARNING each naming git init, nothing written (B1); skills-sync sync and add with the parent swapped for an outside link after the checks: nothing outside (B2); .codex/agents swapped for a HOME link before the move: the user-tier file untouched (B3); ops/ linked outside: enrollment and the three roster writers write nothing there, rc 6 (B7); round 5: the hook names each refused enrollment in a WARNING (G6); the .codex/agents move across filesystems (EXDEV) copies the user's file over, and a move that fails leaves it with no shipped default at the new name (G5); negative control: the block without its triforge_bootstrap line leaves no ops/; fix round 1 (finding #7): a 3.x roster at <top>/sub/ops/roster.toml, no ops/ at the top: the bootstrap from sub rc 0 with one WARNING naming it, <top>/ops/roster.toml and the README section, the skeleton created; a second copy from <top>: the skeleton-creation scan warns once (four levels down named, five levels down and node_modules not); again from sub, at-setup's block and session start: warned again; from <top>, the bootstrap and session start: silent; the subdirectory rosters byte-identical after each run, nothing under sub/; silent for a nested checkout's roster, a symlinked roster or ops/ and no roster; rc 0 with and without the warning; under zsh too (unless skipped above): the block from sub warns once; ${_S21_AG_NOTE}" "static"
+  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; round 3: links at the pid-free temp names (.tmp, .new, ~) beside every written file untouched, and no predictable temp name or mv -f in the three writers, both creating temps O_EXCL|O_NOFOLLOW under a random name (R6); a symlinked parent one and two levels down refused, an append to a hard-linked file rc 5 with the shared inode unchanged, a replace over one a new inode (R3, R4); a home directory as the project, plain and as a repository: bootstrap rc 80 and session start rc 0, one WARNING each, the directory byte-identical (R1); skills-sync.py with links at its stamp's old temp names: untouched, the stamp a regular file (R2); a hard-linked .agents/.gitignore: rc 80, the shared inode unchanged (R3); a lease root named with a newline and a {-line: one REFUSED line, no hook stdout line starting with { (R5); a session started in <repo>/src names the project root once, one started at the root does not (R7); round 4: the home directory by a ${_S21_HCV:-case}-variant spelling, plain and a repository: bootstrap rc 80, session start rc 0, one WARNING each naming git init, nothing written (B1); skills-sync sync and add with the parent swapped for an outside link after the checks: nothing outside (B2); .codex/agents swapped for a HOME link before the move: the user-tier file untouched (B3); ops/ linked outside: enrollment and the three roster writers write nothing there, rc 6 (B7); round 5: the hook names each refused enrollment in a WARNING (G6); the .codex/agents move across filesystems (EXDEV) copies the user's file over, and a move that fails leaves it with no shipped default at the new name (G5); negative control: the block without its triforge_bootstrap line leaves no ops/; fix round 1 (finding #7): a 3.x roster at <top>/sub/ops/roster.toml, no ops/ at the top: the bootstrap from sub rc 0 with one WARNING naming it, <top>/ops/roster.toml and the README section, the skeleton created; a second copy from <top>: the skeleton-creation scan warns once (four levels down named, five levels down and node_modules not); again from sub, at-setup's block and session start: warned again; from <top>, the bootstrap and session start: silent; the subdirectory rosters byte-identical after each run, nothing under sub/; silent for a nested checkout's roster, a symlinked roster or ops/ and no roster; rc 0 with and without the warning; under zsh too (unless skipped above): the block from sub warns once; ${_S21_AG_NOTE}${_S21_AK_NOTE}" "static"
 else
   row "SELF-21" "claude" "$_S21_CAP" "FAIL" "mismatch:$(printf '%s' "$_S21_FAIL" | cut -c1-900)" "static"
 fi
@@ -9382,7 +9543,7 @@ if [ -n "$_S22_FD" ]; then
   _s22_fifo() { # _s22_fifo <handler> <session> <tool> — one call under a 20 s bound: "<handler>:rc=<n>:err=<stderr on one line>"
     local R=0
     ( cd "$_S22/fifo" && printf '{"session_id":"%s","tool_name":"%s","tool_input":{"command":"cat README"},"tool_response":"Exit code: 1"}' "$2" "$3" \
-        | env -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT TMPDIR="$_S22/tfifo" HOME="$_S22/home" "$TIMEOUT_BIN" 20 /bin/bash "$_S22_HOOKS/$1.sh" >/dev/null 2>"$_S22/fifo.err" ) || R=$?
+        | env -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT TMPDIR="$_S22/tfifo" HOME="$_S22/home" "$TIMEOUT_BIN" -k 5 20 /bin/bash "$_S22_HOOKS/$1.sh" >/dev/null 2>"$_S22/fifo.err" ) || R=$?
     echo "$1:rc=$R:err=$(tr '\n' ' ' < "$_S22/fifo.err")"
   }
   O="$O
@@ -9449,7 +9610,7 @@ mkfifo "$_S22/fiforoster/ops/roster.toml"
 mkdir -p "$_S22/tfr"
 R=0
 ( cd "$_S22/fiforoster" && printf '{"session_id":"fr1","tool_name":"Bash","tool_input":{"command":"cat README"},"tool_response":"probe"}' \
-    | env -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT TMPDIR="$_S22/tfr" HOME="$_S22/home" "$TIMEOUT_BIN" 20 /bin/bash "$_S22_HOOKS/context-monitor.sh" >/dev/null 2>"$_S22/fr.err" ) || R=$?
+    | env -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT TMPDIR="$_S22/tfr" HOME="$_S22/home" "$TIMEOUT_BIN" -k 5 20 /bin/bash "$_S22_HOOKS/context-monitor.sh" >/dev/null 2>"$_S22/fr.err" ) || R=$?
 O="fiforoster:rc=$R:err=$(tr '\n' ' ' < "$_S22/fr.err")
 roster=$(if [ -p "$_S22/fiforoster/ops/roster.toml" ]; then echo fifo; else echo changed; fi)"
 _S22_FAIL="${_S22_FAIL}$(_self_expect fiforoster "$O" '^fiforoster:rc=0:err=.*context-monitor: NOTE .*paralysis detection is off this session' '^roster=fifo$')"
@@ -9467,7 +9628,7 @@ _s22_fl() { # _s22_fl <label> <helper...> — one lead helper call in the fl fix
   ( cd "$_S22/fl" && env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CODEX_CI -u CODEX_THREAD_ID -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT \
       HOME="$_S22/home" TMPDIR="$_S22/tmp" TRIFORGE_LEASE_ROOT="$_S22/fl.leases" GIT_CONFIG_NOSYSTEM=1 PATH="${_SELF_STUBS}:$PATH" \
       TRIFORGE_TEST_LEAD=codex TRIFORGE_TEST_BUILDER="$_S22/fl-b.sh" \
-      "$TIMEOUT_BIN" 20 /bin/bash -c 'source "$1" >/dev/null 2>&1 || exit 9; shift; "$@"' _ "${_SELF_DIR}/invoke-external.sh" "$@" ) < /dev/null > /dev/null 2> "$_S22/fl.err" || R=$?
+      "$TIMEOUT_BIN" -k 5 20 /bin/bash -c 'source "$1" >/dev/null 2>&1 || exit 9; shift; "$@"' _ "${_SELF_DIR}/invoke-external.sh" "$@" ) < /dev/null > /dev/null 2> "$_S22/fl.err" || R=$?
   echo "$L:rc=$R:$(tr '\n' ' ' < "$_S22/fl.err" | cut -c1-600)"
 }
 O=$(_s22_fl create lease_create t builder)
@@ -9664,7 +9825,7 @@ grep -v -E '^_spec ' "$_S23/blocks/rdispatch.sh" > "$_S23/blocks/rdispatch-off.s
 # _s23_blk <shell> <block> <proj> — one block from <proj> (60 s at most); prints its rc
 _s23_blk() {
   local RC=0
-  ( cd "$3" && exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN" 60} "$1" "$_S23/blocks/$2.sh" ) > "$3/out-$2" 2>&1 < /dev/null || RC=$?
+  ( cd "$3" && exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 60} "$1" "$_S23/blocks/$2.sh" ) > "$3/out-$2" 2>&1 < /dev/null || RC=$?
   cat "$3/out-$2" >> "$3/out-all"
   echo "$RC"
 }
@@ -10193,7 +10354,7 @@ T=$(printf '\t')
 _s16b() { # _s16b <dir> <helper> [args...] — the helper, loader sourced, run in <dir> under the throwaway HOME (S16B_HOME) and CODEX_HOME (S16B_CODEX); stdout + stderr, then "rc=<n>"
   local D=$1 R=0 O
   shift
-  O=$(cd "$D" && HOME="${S16B_HOME:-$_S16B/home}" CODEX_HOME="${S16B_CODEX:-$_S16B/home/.codex}" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" 60} /bin/bash -c 'source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 97; shift; "$@"' _ "$REPO_ROOT" "$@" 2>&1) || R=$?
+  O=$(cd "$D" && HOME="${S16B_HOME:-$_S16B/home}" CODEX_HOME="${S16B_CODEX:-$_S16B/home/.codex}" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 60} /bin/bash -c 'source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 97; shift; "$@"' _ "$REPO_ROOT" "$@" 2>&1) || R=$?
   printf '%s\nrc=%s\n' "$O" "$R"
 }
 _s16b_sum() { # _s16b_sum <file>... — cksum of each, "absent" for a missing one
@@ -11672,7 +11833,7 @@ done
 # _s28_blk <shell> <script> <case dir> — one block from the fixture checkout (90 s at most); prints its rc
 _s28_blk() {
   local RC=0
-  ( cd "$_S28/co" && exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN" 90} "$1" "$2" ) > "$3/out" 2>&1 < /dev/null || RC=$?
+  ( cd "$_S28/co" && exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 90} "$1" "$2" ) > "$3/out" 2>&1 < /dev/null || RC=$?
   cat "$3/out" >> "$3/out-all"
   echo "$RC"
 }
@@ -12392,6 +12553,19 @@ rm -rf "$_S29"
 #                        --perl-regexp: BSD grep has neither
 #   assoc-array          declare, local, typeset or readonly -A (bash 4)
 #   mapfile              mapfile or readarray as a command (bash 4)
+#   timeout-no-kill      a timeout binary run as the command word (after any
+#                        assignments, env, exec or command) with a duration
+#                        and no -k/--kill-after, so a child that ignores the
+#                        SIGTERM is waited on forever (review finding #6):
+#                        timeout or gtimeout, or one expansion of a variable
+#                        whose name holds TIMEOUT or TOBIN ("$TIMEOUT_BIN",
+#                        ${TOBIN}; ${NAME:+…} read as the words it holds).
+#                        -s KILL counts as a kill-after (it can't be
+#                        ignored); a function handed the binary as an
+#                        argument adds the flags itself and is not a
+#                        command-word use; "$@" or an array where the
+#                        duration goes may hold the options and is left
+#                        undecided
 # A file it can't follow is "scan-error:<file>:<why>", which fails the row
 # like a hit; the last line is "files=<n>". There is no allowlist: a line a
 # rule misreads is a matcher to refine. Negative controls: a planted file with
@@ -12401,8 +12575,13 @@ rm -rf "$_S29"
 # shapes pass: `[ … ] && [ … ] || return 1`, `… || true`, `[ … ] || return 1`,
 # `if [ … ] && …; then … fi` last, a bare test last, a python here-document
 # holding `x and y` and the shapes as text, a comment holding `[ -d x ] && y`,
-# the shapes in quoted strings, grep -e -P; and a file whose quote never
-# closes is a scan-error.
+# the shapes in quoted strings, grep -e -P; for timeout-no-kill the literal,
+# "$TIMEOUT_BIN", "${_TB_TIMEOUT}", gtimeout after env, "$TOBIN" -s TERM in
+# a $( ), ${TIMEOUT_BIN:+…} after exec and a path after command are flagged,
+# and -k, --kill-after=5s, -k5s, -s KILL, the binary as a function's
+# argument, the shapes in a comment and in quoted strings, "$@" where the
+# duration goes, command -v timeout and a ${TIMEOUT_BIN:+…} holding -k pass;
+# and a file whose quote never closes is a scan-error.
 _S30="${WORK}/self30"
 _S30_FAIL=""
 mkdir -p "$_S30"
@@ -12414,6 +12593,12 @@ import bisect, os, re, sys
 # characters that end an unquoted word, the operators, the redirections
 ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\[[^]]*\])?\+?=")
 OPTS = re.compile(r"[-+][A-Za-z]+")
+# a word that is one parameter expansion ($NAME, "${NAME}", ${NAME:+…}: the
+# name in group 2 or 3, what follows it in the braces in 4); a word that may
+# hold several ("$@", an array, ${NAME:+…}); the signal a child can't ignore
+EXPAN = re.compile(r'(")?\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)([^A-Za-z0-9_].*)?\})(?(1)")', re.S)
+UNDECIDED = re.compile(r"\$(?:[@*]|\{[@*]|\{[A-Za-z_][A-Za-z0-9_]*(?:\[[@*]\]|:?\+))")
+KILLSIG = ("KILL", "SIGKILL", "9")
 META = " \t\n;&|()<>"
 OPS = (";;&", ";;", ";&", "&&", "||", "|&", ";", "&", "|", "(", ")")
 REDIRS = ("<<<", "<<-", "&>>", "<<", "<>", "<&", ">>", ">&", ">|", "&>", "<", ">")
@@ -12945,6 +13130,84 @@ class Scan(object):
         g = self.grep_flags(words)
         if g and "P" in g[1]:
             self.hits.append((g[0], "grep-P"))
+        self.check_timeout(words)
+
+    def run_index(self, words):
+        # cmd_index, then past each env or exec in front of the command word:
+        # their options (with the word env -u, -P, -S, -C or exec -a takes)
+        # and env's NAME=value words
+        k = self.cmd_index(words)
+        while k < len(words) and words[k].val in ("env", "exec"):
+            arg, k = "uPSC" if words[k].val == "env" else "a", k + 1
+            while k < len(words):
+                v = words[k].val
+                if v == "--":
+                    k += 1
+                    break
+                if arg == "uPSC" and (v == "-" or ASSIGN.match(words[k].raw)):
+                    k += 1
+                elif re.fullmatch(r"-[A-Za-z0-9]+", v):
+                    k += 2 if v[-1] in arg else 1
+                elif arg == "uPSC" and v.startswith("--"):
+                    k += 2 if v in ("--unset", "--chdir", "--split-string") else 1
+                else:
+                    break
+        return k
+
+    def timeout_args(self, words, k):
+        # the words after the timeout binary words[k] runs, or None when it
+        # runs none: timeout or gtimeout (a path to one too), or one
+        # parameter expansion of a variable whose name holds TIMEOUT or
+        # TOBIN; an unquoted ${NAME:+…} stands for the words it holds
+        w = words[k]
+        if w.val.rsplit("/", 1)[-1] in ("timeout", "gtimeout"):
+            return words[k + 1:]
+        m = EXPAN.fullmatch(w.raw)
+        if not m or not re.search("TIMEOUT|TOBIN", m.group(2) or m.group(3)):
+            return None
+        op = m.group(4) or ""
+        if op.startswith("["):
+            return None
+        if m.group(1) is None and op.startswith((":+", "+")):
+            sub, alt = Scan(op[op.index("+") + 1:], w.line, []), []
+            tok = sub.lex()
+            while tok.kind == "W":
+                alt.append(tok)
+                tok = sub.lex()
+            return self.timeout_args(alt + words[k + 1:], 0) if alt else None
+        return words[k + 1:]
+
+    def check_timeout(self, words):
+        # timeout-no-kill: a timeout binary run with a duration, and neither
+        # -k/--kill-after nor a KILL signal (-s, --signal) among its options
+        k = self.run_index(words)
+        rest = self.timeout_args(words, k) if k < len(words) else None
+        if rest is None:
+            return
+        j, kill = 0, False
+        while j < len(rest) and re.match(r"-.", rest[j].val) and "\0" not in rest[j].val:
+            v, j = rest[j].val, j + 1
+            if v == "--":
+                break
+            if v.startswith("--"):
+                name, eq, arg = v[2:].partition("=")
+                if not name or not ("kill-after".startswith(name) or "signal".startswith(name)):
+                    continue
+                if not eq and j < len(rest):
+                    arg, j = rest[j].val, j + 1
+                kill = kill or "kill-after".startswith(name) or arg.upper() in KILLSIG
+                continue
+            for x, ch in enumerate(v[1:]):
+                if ch in "ks":
+                    arg = v[x + 2:]
+                    if not arg and j < len(rest):
+                        arg, j = rest[j].val, j + 1
+                    kill = kill or ch == "k" or arg.upper() in KILLSIG
+                    break
+        if kill or j >= len(rest) or UNDECIDED.search(rest[j].raw):
+            return
+        if "\0" in rest[j].val or re.fullmatch(r"[0-9]*\.?[0-9]+[smhd]?", rest[j].val):
+            self.hits.append((words[k].line, "timeout-no-kill"))
 
     def check_or_echo(self, pipes, ops):
         for k, op in enumerate(ops):
@@ -13060,6 +13323,25 @@ ok_strings() {
   echo "[ -d x ] && y; grep -P a; mapfile x; declare -A y" '[ -d x ] && y'
   printf '%s\n' "$(grep -c x f || true)" "$(pgrep -P 1 || echo none)" "$(grep -e -P -c f || true)"
 }
+timeout 10s make   # want:timeout-no-kill
+"$TIMEOUT_BIN" 10s "$CLI_BIN" --version   # want:timeout-no-kill
+"${_TB_TIMEOUT}" "${SECS}s" "$@"   # want:timeout-no-kill
+env -u X FOO=1 gtimeout --foreground 5 cmd   # want:timeout-no-kill
+V=$("$TOBIN" -s TERM 30s cmd | head -1)   # want:timeout-no-kill
+( exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN" 60} "$1" )   # want:timeout-no-kill
+command /usr/local/bin/gtimeout 0.5 cmd   # want:timeout-no-kill
+ok_timeout() {
+  timeout -k 5s 10s cmd
+  "$TIMEOUT_BIN" --kill-after=5s 10s cmd
+  X=$(gtimeout -k5s 10s cmd)
+  _adapter_env grok "$TIMEOUT_BIN" --foreground 10s cmd
+  echo "timeout 10s cmd" '"$TIMEOUT_BIN" 5 x'   # timeout 10s cmd
+  timeout -s KILL 10s cmd
+  "$TIMEOUT_BIN" "$@"
+  command -v timeout >/dev/null
+  ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 60} cmd
+  { "$TIMEOUT_BIN" -k 2s "${SECS}s" "$@"; } 2>/dev/null || true
+}
 S30_PLANTED
 printf 'ok() {\n  echo %s\n}\n' "'never closed" > "$_S30/broken.sh"
 _S30_NEG=$(_s30_scan "$_S30" "$_S30/planted.sh" "$_S30/broken.sh")
@@ -13068,7 +13350,7 @@ _S30_GOT=$(printf '%s\n' "$_S30_NEG" | sed -n 's/^planted\.sh:\([0-9]*\):\([A-Za
 if [ -z "$_S30_WANT" ] || [ "$_S30_GOT" != "$_S30_WANT" ]; then
   _S30_FAIL="$_S30_FAIL planted(want: $(printf '%s' "$_S30_WANT" | tr '\n' ' '); got: $(printf '%s' "$_S30_GOT" | tr '\n' ' '))"
 fi
-for _s30_r in test-and-last grep-c-or-echo grep-P assoc-array mapfile; do
+for _s30_r in test-and-last grep-c-or-echo grep-P assoc-array mapfile timeout-no-kill; do
   case " $(printf '%s' "$_S30_WANT" | tr '\n' ' ') " in
     *":${_s30_r} "*) ;;
     *) _S30_FAIL="$_S30_FAIL planted(no-${_s30_r}-line)" ;;
@@ -13078,9 +13360,9 @@ case "$_S30_NEG" in
   *"scan-error:broken.sh:"*) ;;
   *) _S30_FAIL="$_S30_FAIL broken(no-scan-error)" ;;
 esac
-_S30_CAP="the shell rules a static scan can decide hold in every shell file Triforge ships (scripts/*.sh, scripts/lib/*.sh, hooks/handlers/*.sh, skills/*/scripts/*.sh): no function ends in a [ ] or [[ ]] && chain with no ||, no grep -c … || echo, no grep -P, no associative array, no mapfile or readarray (AGENTS.md Shell)"
+_S30_CAP="the shell rules a static scan can decide hold in every shell file Triforge ships (scripts/*.sh, scripts/lib/*.sh, hooks/handlers/*.sh, skills/*/scripts/*.sh): no function ends in a [ ] or [[ ]] && chain with no ||, no grep -c … || echo, no grep -P, no associative array, no mapfile or readarray (AGENTS.md Shell), and no timeout binary run as a command without a kill-after (review finding #6)"
 if [ -z "$_S30_HITS" ] && [ -z "$_S30_FAIL" ]; then
-  row "SELF-30" "claude" "$_S30_CAP" "PASS" "${_S30_N} files parsed as bash, comments, quoted text and here-document bodies as text: 0 hits, no scan error; planted: $(printf '%s\n' "$_S30_WANT" | grep -c . || true) shapes flagged on exactly their lines (test-and-last on one line and several, mid-chain, in a { } and a ( ) body, under the function keyword; grep -c || echo in a command substitution, quoted and not; grep -P, -oP, --perl-regexp; declare, local and typeset -A; mapfile, readarray) and none of the compliant ones ([ ] && [ ] || return 1, && … || true, [ ] || return 1, if [ ] && …; then … fi last, a bare test last, a python here-document holding x and y and the shapes, a comment holding [ -d x ] && y, the shapes in quoted strings, grep -e -P); a quote that never closes is a scan-error" "static"
+  row "SELF-30" "claude" "$_S30_CAP" "PASS" "${_S30_N} files parsed as bash, comments, quoted text and here-document bodies as text: 0 hits, no scan error; planted: $(printf '%s\n' "$_S30_WANT" | grep -c . || true) shapes flagged on exactly their lines (test-and-last on one line and several, mid-chain, in a { } and a ( ) body, under the function keyword; grep -c || echo in a command substitution, quoted and not; grep -P, -oP, --perl-regexp; declare, local and typeset -A; mapfile, readarray; timeout-no-kill: timeout, \"\$TIMEOUT_BIN\", \"\${_TB_TIMEOUT}\", gtimeout after env, \"\$TOBIN\" -s TERM in a command substitution, \${TIMEOUT_BIN:+…} after exec, a gtimeout path after command) and none of the compliant ones ([ ] && [ ] || return 1, && … || true, [ ] || return 1, if [ ] && …; then … fi last, a bare test last, a python here-document holding x and y and the shapes, a comment holding [ -d x ] && y, the shapes in quoted strings, grep -e -P; timeout with -k, --kill-after=5s, -k5s or -s KILL, the binary as a function's argument, the timeout shapes in a comment and in quoted strings, \"\$@\" where the duration goes, command -v timeout, \${TIMEOUT_BIN:+…} holding -k); a quote that never closes is a scan-error" "static"
 else
   row "SELF-30" "claude" "$_S30_CAP" "FAIL" "$(printf '%s' "hits: ${_S30_HITS:-none}; negative controls:${_S30_FAIL:- ok}" | cut -c1-1500)" "static"
 fi
