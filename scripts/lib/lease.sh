@@ -1022,12 +1022,19 @@ if not isinstance(base, dict) or not base.get("config"):
     # keys only a 3.3.3 lead writes with a baseline in place: then the table
     # was removed from the ledger (and the digest anchors with it, or the
     # ledger rule would have restored it). That is a change, never a first use.
+    # ledger.copy counts only when it was there before the no-op ledger write
+    # of the caller (LI_LEDGER_ANCHORED=1): that write creates it for a
+    # pre-3.3.3 ledger too. The lease-root record counts as well: only a
+    # baseline record writes it.
     stamped = sorted(t for t, r in leases.items() if isinstance(r, dict)
                      and any(k in r for k in ("pointer_digest", "admin_digest", "admin_dir", "snapshot_sha", "integrity_prev_state")))
-    anchors = [n for n in ("config.copy", "hooks.copy", "ledger.copy") if os.path.lexists(os.path.join(state, n))]
-    if stamped or anchors:
+    anchors = [n for n in ("config.copy", "hooks.copy", "ledger.copy") if os.path.lexists(os.path.join(state, n))
+               and (n != "ledger.copy" or os.environ.get("LI_LEDGER_ANCHORED", "1") == "1")]
+    record = os.path.lexists(os.path.join(gitdir, RECORD_NAME))
+    if stamped or anchors or record:
         why = ("lease row(s) " + ", ".join(stamped[:5]) + " were written with it in place") if stamped \
-              else ("the lead state dir holds " + ", ".join(anchors) + ", saved when that table was recorded")
+              else ("the lead state dir holds " + ", ".join(anchors) + ", saved when that table was recorded") if anchors \
+              else (NAMES["lease_record"] + " exists, written when that table was recorded")
         out.append(("REPO", "baseline_missing", "the [baseline] table of the ledger is missing, but " + why
                     + ": ops/leases.toml was edited outside the lead writes (not restored: no verified copy; compare it with "
                     + os.path.join(state, "ledger.copy") + " and restore it yourself, then lease_rebaseline)"))
@@ -1164,7 +1171,7 @@ _lead_lease_evidence() {
 # ledger to act on in either case. Empty otherwise.
 _lead_integrity_check() {
   local OP=${1:-lease} LEDGER OUT RC=0 KIND A B C D TAB NL LU_ERR LU_RC=0
-  local REPO_DESC="" OPEN="" LEASE_HITS="" ALERT=0 NOBASE=0 SAVED=0 T S ESCALATED=""
+  local REPO_DESC="" OPEN="" LEASE_HITS="" ALERT=0 NOBASE=0 SAVED=0 T S ESCALATED="" LA=0
   TAB=$(printf '\t'); NL='
 '
   _LEAD_INTEGRITY_WHY=""
@@ -1199,7 +1206,11 @@ _lead_integrity_check() {
   # with no [baseline] yet it writes one holding only `updated`, which the check
   # still reads as NOBASELINE. A write that can't run (a held lock, a ledger
   # with no intact copy that no longer parses) leaves the ledger unverified, so
-  # it fails closed like a check that can't run.
+  # it fails closed like a check that can't run. On a pre-3.3.3 ledger (no
+  # ledger anchors yet) that write creates ledger.copy, so whether the anchors
+  # were there before it goes to the check (LI_LEDGER_ANCHORED).
+  if [ -e "${_LEASE_STATE}/ledger.sha256" ] || [ -L "${_LEASE_STATE}/ledger.sha256" ] \
+     || [ -e "${_LEASE_STATE}/ledger.copy" ] || [ -L "${_LEASE_STATE}/ledger.copy" ]; then LA=1; fi
   LU_ERR=$(_ledger_update @baseline 2>&1 >/dev/null) || LU_RC=$?
   if [ "$LU_RC" -eq "$_RC_LEAD_ONLY" ]; then
     # The writer's own lead-only guard refused this shell (a worker, a lease
@@ -1214,7 +1225,7 @@ _lead_integrity_check() {
   fi
   _lease_default_ref
   OUT=$(LI_MODE=check LI_RESTORE=1 LI_COMMON="$_LEASE_COMMON" LI_GITDIR="$_LEASE_GITDIR" LI_STATE="$_LEASE_STATE" LI_REPO="$_LEASE_REPO" LI_LEDGER="$LEDGER" \
-        LI_ROOT="$_LEASE_ROOT" LI_DEF="$_LEASE_DEF" LI_DEF_SHA="$_LEASE_DEF_SHA" python3 -c "$_LEAD_INTEGRITY_PY" 2>&1) || RC=$?
+        LI_ROOT="$_LEASE_ROOT" LI_DEF="$_LEASE_DEF" LI_DEF_SHA="$_LEASE_DEF_SHA" LI_LEDGER_ANCHORED="$LA" python3 -c "$_LEAD_INTEGRITY_PY" 2>&1) || RC=$?
   if [ "$RC" -ne 0 ]; then
     echo "${OP}: INTEGRITY CHECK COULD NOT RUN — treated as a change (fail closed, KTD18): $(printf '%s' "$OUT" | tail -3 | tr '\n' ' ' | cut -c1-300)" >&2
     return "$_RC_LEASE_INTEGRITY"
