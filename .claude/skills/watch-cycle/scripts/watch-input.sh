@@ -66,12 +66,27 @@ trap 'rm -rf "$SCR"' EXIT
 TAB=$(printf '\t')
 CAP=150000
 
+# The lines scripts/lib/common.sh's _PY_PRELUDE runs first in every inline
+# python program (S1): the working directory and every relative entry leave
+# sys.path before anything else is imported, so a tomllib.py in the directory
+# this runs from is never loaded. This script does not load common.sh, so it
+# carries the same lines.
+_PY_PRELUDE='
+import os, sys
+try:
+    _tf_here = os.path.realpath(os.getcwd())
+except OSError:
+    _tf_here = None
+sys.path[:] = [_p for _p in sys.path if os.path.isabs(_p) and os.path.realpath(_p) != _tf_here]
+del _tf_here
+'
+
 # The entry: "<key>: <value>" lines in $SCR/entry, and "<fields><TAB><url>"
 # lines in $SCR/urls, one per distinct URL (fields comma-joined when two share
-# one, as a releases page that is also the changelog).
-WI_REG="$REG" WI_KIND="$KIND" WI_NAME="$NAME" WI_OUT="$SCR" python3 - <<'WATCH_INPUT_PY' || exit $?
+# one, as a releases page that is also the changelog). The heredoc is the
+# program, compiled and run after the prelude.
+WI_REG="$REG" WI_KIND="$KIND" WI_NAME="$NAME" WI_OUT="$SCR" python3 -c "${_PY_PRELUDE}"'exec(compile(sys.stdin.read(), "<stdin>", "exec"))' <<'WATCH_INPUT_PY' || exit $?
 import os, sys
-sys.path = [p for p in sys.path if p not in ("", ".")]   # nothing imported from the working directory
 try:
     import tomllib
 except ImportError:

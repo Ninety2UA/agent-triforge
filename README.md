@@ -915,7 +915,7 @@ Phase 3 lets Codex lead. `triforge_bootstrap` sets up a project from either lead
 
 Phase 4 enrolled Grok Build and Devin as optional members, Devin only with recorded consent (U16, U17), and `at-review` now gives every lane one review package after an integrity check. Phase 5 rebuilt `at-setup` around the lead step, instruction-file detection with writers that ask first, the egress disclosure and Devin's model choice (U15, SELF-16).
 
-Phase 6 stopped inline Python from importing modules out of the working directory, where a builder could plant one (S1, SELF-27). The watch cycle's research workers run through the persona lane (U19, SELF-28). agy routing defaults to `auto` and its `AGY_ERROR` line is parsed (D-042, D-043), and the Cursor probe rows compose Grok 4.7 ids.
+Phase 6 stopped inline Python from importing modules out of the working directory, where a builder could plant one (S1, SELF-27). The watch cycle's research workers run through the persona lane (U19, SELF-28). agy routing defaults to `auto`, its `AGY_ERROR` line sets a failed run's reason and whether it is retried (D-042, D-043), and the Cursor probe rows compose Grok 4.7 ids (SELF-29). A ledger whose digest and copy were both deleted now stops the next lease call with rc 44 instead of being adopted as found (S2, SELF-29).
 
 The probe record was not regenerated for this release. The newest is `ops/research/2026-09-probe-record.md` (2026-09-27); DVN-01 to DVN-07, CC-21 to CC-25, CDX-20 to CDX-23, GRK-02 to GRK-12 and SELF-06g ran live during development under `--only`. README "Upgrading from 3.x" has the command map and the steps back to 3.3.3.
 

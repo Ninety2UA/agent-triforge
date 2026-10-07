@@ -816,7 +816,11 @@ _lease_builder_run() {
         # JSON envelope (KTD2, D-032): exit 0 is not a completion signal on
         # agy >= 1.1.20 — parse status/response/denied_actions instead. The
         # prose lands in $OUT (what lease_collect prints), the streams in
-        # $OUT.raw / $OUT.err, the verdict in $OUT.status / $OUT.denied.
+        # $OUT.raw / $OUT.err, the verdict in $OUT.status / $OUT.denied. A
+        # nonzero exit is classified as invoke_antigravity classifies it
+        # (_agy_failure_class): on exit 3 the AGY_ERROR line's reason goes to
+        # $OUT and its retryable field sets the class lease_collect routes on
+        # (D-043).
         _adapter_env antigravity "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "${OUT}.raw" 2> "${OUT}.err" || RC=$?
         if [ "$RC" -eq 0 ]; then
           _agy_parse_envelope "${OUT}.raw" "$OUT" || AGY_PRC=$?
@@ -829,6 +833,11 @@ _lease_builder_run() {
           esac
         else
           cat "${OUT}.err" "${OUT}.raw" > "$OUT" 2>/dev/null || true
+          _agy_failure_class "$RC" "${OUT}.err" "${OUT}.raw"
+          CLASS_SET=1
+          if [ -n "$_AGY_ERR_REASON" ]; then
+            echo "lease_dispatch: agy builder exited ${RC}: ${_AGY_ERR_REASON} — class ${INVOKE_FAILURE_CLASS}" >> "$OUT"
+          fi
         fi
         ;;
       opencode)

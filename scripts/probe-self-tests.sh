@@ -8285,9 +8285,11 @@ fi
 exit "$(cat "$D/cfg/codex.rc" 2>/dev/null || echo 0)"
 EOF
 } > "$_S26/bin/codex"
-# agy: the JSON envelope in cfg/agy.ans, exit cfg/agy.rc
+# agy: the JSON envelope in cfg/agy.ans, exit cfg/agy.rc; `agy agents`, the
+# listing the default TRIFORGE_AGY_MODE=auto consults, lists nothing and is
+# not a run (so every lane routes by injection, as before the default changed)
 { printf '#!/bin/sh\n# SELF-26 agy stub\nD=%s\nN=agy\n' "'$_S26'"; cat <<'EOF'
-case "$1" in --version|-V) echo "agy 1.2.0"; exit 0 ;; esac
+case "$1" in --version|-V) echo "agy 1.2.0"; exit 0 ;; agents) exit 0 ;; esac
 . "$D/bin/s26-record"
 cat "$D/cfg/agy.ans" 2>/dev/null
 exit "$(cat "$D/cfg/agy.rc" 2>/dev/null || echo 0)"
@@ -11580,3 +11582,243 @@ else
   row "SELF-17" "claude" "$_S17_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S17_FAIL"):$(printf '%s' "$_S17_FAIL" | cut -c1-700)" "static"
 fi
 rm -rf "$_S17"
+
+# SELF-29 (U19, S2 — R27, R28, R29, KTD18: agy's auto default and its AGY_ERROR line, the Cursor probe rows' Grok ids, a ledger whose anchors were both deleted). Cases go between the markers; each appends
+# "<case>(<why>)" to _S29_FAIL on a mismatch (_self_expect does this) and, once
+# they ran, one short note to _S29_EV. Expected values are literals. A row whose
+# cases never ran fails: no note is no evidence.
+_S29="${WORK}/self29"
+_S29_FAIL=""
+_S29_EV=""
+mkdir -p "$_S29"
+# --- SELF-29 cases (worker 6-w2) ---
+# Throwaway HOME, TMPDIR and lease roots under $_S29; a stub agy (and a stub
+# cursor-agent) first on PATH. No live CLI runs.
+#   mode     invoke_antigravity with TRIFORGE_AGY_MODE unset consults
+#            `agy agents` (auto): the agent unlisted -> <out>.mode
+#            "injection (auto)", listed -> "native (auto)" and --agent;
+#            an invalid value -> a warning naming it, then auto; injection ->
+#            "injection", the listing never consulted
+#   agyerr   the stub exits 3 with AGY_ERROR {RESOURCE_EXHAUSTED, 429,
+#            retryable, id x}: retryable true -> class retryable, the
+#            structured reason in _INVOKE_FAILURE_REASON and in the retry line,
+#            two runs; false -> deterministic, the reason in the no-retry line,
+#            one run. Control: exit 3 with no AGY_ERROR line -> the text
+#            classifier's verdict (retryable, no reason), two runs
+#   lease    an antigravity builder lease on the real lane (the stub as agy)
+#            exiting 3 with the same line: <out> names the same reason, and
+#            retryable decides the class lease_collect routes on (false:
+#            deterministic, failed; true: retryable, the requeue path)
+#   cursor   the composition CUR-03, CUR-05, CUR-09 and CUR-12 run
+#            (_cur_grok_pick, taken from scripts/probe-capabilities.sh) on a
+#            stub cursor-agent's --list-models: a 4.7 catalog ->
+#            grok-4.7-xhigh, no cursor- prefix; a 4.6 catalog ->
+#            cursor-grok-4.6-xhigh
+#   anchors  (S2) a builder's lease in review: both ledger anchors deleted and
+#            a user approval bound to the snapshot forged into its row; the
+#            merge of its protected .claude/settings.json -> 44 naming both
+#            anchors and lease_rebaseline, escalated, nothing merged, no
+#            approval recorded
+#   restamp  the same, with [baseline].lease_root also rewritten to name
+#            another lease root (named like this one, holding no digest for
+#            the ledger) -> 44 the same way
+#   fakeroot the same, with the stamp naming a root the attacker made (named
+#            like this one) whose lead/ledger.sha256 equals the forged
+#            ledger's sha256, while the lease-root record in the git dir still
+#            names the real root -> 44 the same way: only the root that record
+#            names can vouch for a ledger with no anchors (SELF-13's reclaim
+#            is the root that does)
+#   rebase   control: the lead deletes both anchors itself -> the merge 44;
+#            lease_rebaseline t -> back to review; the merge -> rc 0
+mkdir -p "$_S29/bin" "$_S29/cfg" "$_S29/home" "$_S29/tmp" "$_S29/proj"
+{ printf '#!/bin/sh\n# SELF-29 agy stub: `agents` prints cfg/agents; a run logs its argv and answers by cfg/mode\nD=%s\n' "'$_S29'"; cat <<'S29_AGY_EOF'
+mkdir -p "$D/log"
+case "${1:-}" in
+  --version) echo "1.2.12"; exit 0 ;;
+  agents) echo agents >> "$D/log/agents"; cat "$D/cfg/agents" 2>/dev/null; exit 0 ;;
+esac
+echo run >> "$D/log/runs"
+printf '%s\n' "$@" > "$D/log/argv"
+case "$(cat "$D/cfg/mode" 2>/dev/null)" in
+  err-true)  echo 'AGY_ERROR: {"status":"RESOURCE_EXHAUSTED","code":429,"retryable":true,"id":"x"}' >&2; exit 3 ;;
+  err-false) echo 'AGY_ERROR: {"status":"RESOURCE_EXHAUSTED","code":429,"retryable":false,"id":"x"}' >&2; exit 3 ;;
+  err-bare)  echo 'model call failed' >&2; exit 3 ;;
+esac
+echo '{"status":"SUCCESS","response":"S29 answer","denied_actions":[]}'
+exit 0
+S29_AGY_EOF
+} > "$_S29/bin/agy"
+{ printf '#!/bin/sh\n# SELF-29 cursor-agent stub: --list-models prints cfg/catalog\nD=%s\n' "'$_S29'"; cat <<'S29_CUR_EOF'
+case "${1:-}" in
+  --version) echo "2026.10.01-s29"; exit 0 ;;
+  --list-models) cat "$D/cfg/catalog"; exit 0 ;;
+esac
+echo "SELF-29 stub: no model turn" >&2
+exit 1
+S29_CUR_EOF
+} > "$_S29/bin/cursor-agent"
+chmod +x "$_S29/bin/agy" "$_S29/bin/cursor-agent"
+# _s29_n <file> [grep args] — the number of matching lines; 0 for a missing file
+_s29_n() {
+  local F=$1
+  shift
+  if [ "$#" -eq 0 ]; then set -- .; fi
+  cat "$F" 2>/dev/null | grep -c "$@" || true
+}
+# _s29_invoke <label> <stub mode> [<TRIFORGE_AGY_MODE>] — invoke_antigravity
+# architecture-reviewer from $_S29/proj (TRIFORGE_AGY_MODE unset without the
+# third argument); one line: rc, the .mode file, the listings asked for,
+# --agent passed, class, reason and the stub's runs. Its stderr is in
+# $_S29/<label>.err
+_s29_invoke() {
+  rm -rf "$_S29/log"
+  mkdir -p "$_S29/log"
+  printf '%s\n' "$2" > "$_S29/cfg/mode"
+  ( cd "$_S29/proj" && export HOME="$_S29/home" TMPDIR="$_S29/tmp" PATH="$_S29/bin:$PATH" && unset TRIFORGE_AGY_MODE AGY_MODEL \
+      && if [ "$#" -ge 3 ]; then export TRIFORGE_AGY_MODE="$3"; fi \
+      && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "$1:load-failed"; exit 0; }
+    R=0; INVOKE_FAILURE_CLASS=""; _INVOKE_FAILURE_REASON=""
+    invoke_antigravity architecture-reviewer "probe S29" "$TMPDIR/$1.out" 60 > /dev/null 2> "$_S29/$1.err" || R=$?
+    echo "$1:rc=${R}:mode=$(cat "$TMPDIR/$1.out.mode" 2>/dev/null):asked=$(_s29_n "$_S29/log/agents"):agent=$(_s29_n "$_S29/log/argv" -x -- --agent):class=${INVOKE_FAILURE_CLASS}:reason=${_INVOKE_FAILURE_REASON}:runs=$(_s29_n "$_S29/log/runs")" ) < /dev/null 2>&1
+}
+
+# mode
+: > "$_S29/cfg/agents"
+O=$(_s29_invoke mode-unlisted ok)
+printf 'architecture-reviewer\n' > "$_S29/cfg/agents"
+O="$O
+$(_s29_invoke mode-listed ok)"
+: > "$_S29/cfg/agents"
+O="$O
+$(_s29_invoke mode-invalid ok bogus)
+invalid-warned=$(_s29_n "$_S29/mode-invalid.err" -F "TRIFORGE_AGY_MODE='bogus' is not injection|native|auto — using auto")
+$(_s29_invoke mode-injection ok injection)"
+_S29_FAIL="${_S29_FAIL}$(_self_expect mode "$O" '^mode-unlisted:rc=0:mode=injection \(auto\):asked=1:agent=0:class=none:' \
+  '^mode-listed:rc=0:mode=native \(auto\):asked=1:agent=1:class=none:' '^mode-invalid:rc=0:mode=injection \(auto\):asked=1:agent=0:' \
+  '^invalid-warned=1$' '^mode-injection:rc=0:mode=injection:asked=0:agent=0:class=none:')"
+_S29_EV="mode: TRIFORGE_AGY_MODE unset -> auto (injection (auto) unlisted, native (auto) with --agent when listed), bogus -> warned, auto; injection never asks. "
+
+# agyerr
+O="$(_s29_invoke agyerr-true err-true)
+true-said=$(_s29_n "$_S29/agyerr-true.err" -F 'exit=3 (agy-error RESOURCE_EXHAUSTED code=429 retryable=true id=x) (retryable), retrying')
+$(_s29_invoke agyerr-false err-false)
+false-said=$(_s29_n "$_S29/agyerr-false.err" -F 'deterministic failure (agy-error RESOURCE_EXHAUSTED code=429 retryable=false id=x). No retry.')
+$(_s29_invoke agyerr-bare err-bare)"
+_S29_FAIL="${_S29_FAIL}$(_self_expect agyerr "$O" \
+  '^agyerr-true:rc=3:.*:class=retryable:reason=agy-error RESOURCE_EXHAUSTED code=429 retryable=true id=x:runs=2$' '^true-said=1$' \
+  '^agyerr-false:rc=3:.*:class=deterministic:reason=agy-error RESOURCE_EXHAUSTED code=429 retryable=false id=x:runs=1$' '^false-said=1$' \
+  '^agyerr-bare:rc=3:.*:class=retryable:reason=:runs=2$')"
+_S29_EV="${_S29_EV}agyerr: exit 3 + AGY_ERROR -> reason agy-error RESOURCE_EXHAUSTED code=429 retryable=<v> id=x; true retried once, false not; no line -> text classifier. "
+
+# lease: the real lane, so no fake builder, and with it no SELF seam; the lead
+# host is named by Claude Code's marker (CLAUDECODE=1), as in SELF-25
+_self_repo "$_S29/lr" "$_S29/home" sprint/s29 '[roles.builder]\ncli = "antigravity"\nfallbacks = ["claude"]\n'
+O=$( cd "$_S29/lr" && export HOME="$_S29/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S29/bin:${_SELF_STUBS}:$PATH" TMPDIR="$_S29/tmp" TRIFORGE_LEASE_ROOT="$_S29/lr.leases" CLAUDECODE=1 \
+       && unset TRIFORGE_TEST_BUILDER TRIFORGE_AGY_MODE && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "lease:load-failed"; exit 0; }
+  for M in false true; do
+    printf 'err-%s\n' "$M" > "$_S29/cfg/mode"
+    K="s29${M}"
+    { lease_create "$K" builder && lease_dispatch "$K" "probe task S29" 60; } >/dev/null 2>&1 || { echo "lease-${M}:go-failed"; continue; }
+    _self_wait_rc "$K"
+    R=0; lease_collect "$K" >/dev/null 2>&1 || R=$?
+    OUT=$(_ledger_get "$K" output_file 2>/dev/null || true)
+    echo "lease-${M}:collect=${R}:class=$(cat "${OUT}.class" 2>/dev/null):state=$(_ledger_get "$K" state 2>/dev/null || true):said=$(_s29_n "$OUT" -F "agy-error RESOURCE_EXHAUSTED code=429 retryable=${M} id=x")"
+  done ) < /dev/null 2>&1
+_S29_FAIL="${_S29_FAIL}$(_self_expect lease "$O" '^lease-false:collect=1:class=deterministic:state=failed:said=1$' \
+  '^lease-true:collect=1:class=retryable:state=requeued:said=1$')"
+_S29_EV="${_S29_EV}lease: the agy lane's <out> names the same reason; false -> deterministic, failed; true -> retryable, requeue path. "
+
+# cursor
+_S29_PICK=$(awk '/^_cur_grok_pick\(\) \{$/ { p = 1 } p { print } p && /^}$/ { exit }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
+printf '%s\n' 'auto - Auto' 'grok-4.7-high - Grok 4.7  High' 'grok-4.7-xhigh - Grok 4.7  Extra High' 'grok-4.7-xhigh-fast - Grok 4.7  Extra High Fast' \
+  'cursor-grok-4.6-xhigh - Grok 4.6 Extra High' 'composer-2.5 - Composer 2.5' > "$_S29/cat47"
+printf '%s\n' 'auto - Auto' 'cursor-grok-4.6-high - Grok 4.6' 'cursor-grok-4.6-xhigh - Grok 4.6 Extra High' 'composer-2.5 - Composer 2.5' > "$_S29/cat46"
+O=""
+for _s29_c in 47 46; do
+  cp "$_S29/cat${_s29_c}" "$_S29/cfg/catalog"
+  O="$O
+cursor-${_s29_c}=$( export PATH="$_S29/bin:$PATH" TMPDIR="$_S29/tmp"; cursor-agent --list-models > "$_S29/list${_s29_c}" 2>/dev/null; eval "$_S29_PICK" 2>/dev/null; _cur_grok_pick "$_S29/list${_s29_c}" 2>/dev/null )"
+done
+unset _s29_c
+_S29_FAIL="${_S29_FAIL}$(_self_expect cursor "$O" '^cursor-47=grok-4\.7 grok-4\.7-xhigh grok-4\.7-xhigh$' '^cursor-46=grok-4\.6 cursor-grok-4\.6-xhigh cursor-grok-4\.6-xhigh$')"
+_S29_EV="${_S29_EV}cursor: _cur_grok_pick on a stub 4.7 catalog -> grok-4.7-xhigh, a 4.6 catalog -> cursor-grok-4.6-xhigh. "
+
+# anchors / rebase
+# _s29_lead <name> <script> — the lead in the fixture $_S29/<name> (its fake
+# builder $_S29/<name>.fb, its lease root $_S29/<name>.leases), library sourced
+_s29_lead() {
+  ( cd "$_S29/$1" && export HOME="$_S29/home" GIT_CONFIG_NOSYSTEM=1 PATH="${_SELF_STUBS}:$PATH" TMPDIR="$_S29/tmp" \
+        TRIFORGE_LEASE_ROOT="$_S29/$1.leases" TRIFORGE_TEST_BUILDER="$_S29/$1.fb" \
+      && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 && eval "$2" ) < /dev/null 2>&1 || true
+}
+# _s29_forge <ledger> <snapshot> — a user merge approval bound to <snapshot>,
+# written into row t as lease_approve would record it
+_s29_forge() {
+  awk -v s="$2" '{ print } $0 == "[lease.\"t\"]" { print "approval_by = \"user\""; print "approval_class = \"user\""; print "approval_snapshot = \"" s "\""
+    print "approval_via = \"tty\""; print "approval_host = \"none\""; print "approval_lead_cli = \"claude\""; print "approval_at = \"2026-10-07T00:00:00Z\"" }' "$1" > "$1.forged" \
+    && mv "$1.forged" "$1"
+}
+# _s29_restamp <ledger> <root> — [baseline].lease_root rewritten to <root>
+_s29_restamp() {
+  awk -v r="$2" '/^\[/ { sec = $0 } sec == "[baseline]" && /^lease_root = / { print "lease_root = \"" r "\""; next } { print }' "$1" > "$1.restamped" \
+    && mv "$1.restamped" "$1"
+}
+# _s29_attack <stamp root|-> [vouch] — the anchors attack in the fixture the
+# caller runs it in: lease t in review, pinned to antigravity, both anchors
+# deleted, a user approval forged, the stamp rewritten to <stamp root> unless
+# "-" and, with vouch, that root given a lead/ledger.sha256 equal to the
+# forged ledger's sha256; then the merge
+_s29_attack() {
+  local S
+  _self_go t
+  _self_try pin lease_pin_reviewer t antigravity
+  S=$(_ledger_get t snapshot_sha)
+  rm -f "$TRIFORGE_LEASE_ROOT/lead/ledger.sha256" "$TRIFORGE_LEASE_ROOT/lead/ledger.copy"
+  _s29_forge ops/leases.toml "$S"
+  if [ "$1" != - ]; then _s29_restamp ops/leases.toml "$1"; fi
+  if [ "${2:-}" = vouch ]; then mkdir -p "$1/lead" && shasum -a 256 < ops/leases.toml | cut -c1-64 > "$1/lead/ledger.sha256"; fi
+  echo "forged=$(grep -c "^approval_snapshot = \"$S\"\$" ops/leases.toml):stamps=$(grep -c "^lease_root = \"$1\"\$" ops/leases.toml):vouch=$(if [ -f "$1/lead/ledger.sha256" ] && [ "$(cat "$1/lead/ledger.sha256")" = "$(shasum -a 256 < ops/leases.toml | cut -c1-64)" ]; then echo forged-sha; else echo none; fi):record=$(if [ "$(grep -v '^#' .git/triforge-lease-root 2>/dev/null | head -1)" = "$(cd "$TRIFORGE_LEASE_ROOT" && pwd -P)" ]; then echo real-root; else echo other; fi)"
+  _self_try merge lease_merge t antigravity
+  echo "state=$(_ledger_get t state):approval=$(_ledger_get t merge_approval):head=$(if git cat-file -e HEAD:.claude/settings.json 2>/dev/null; then echo merged; else echo clean; fi)"
+}
+_self_repo "$_S29/an" "$_S29/home" sprint/s29 '[roles.builder]\ncli = "codex"\n'
+_self_repo "$_S29/rs" "$_S29/home" sprint/s29 '[roles.builder]\ncli = "codex"\n'
+_self_repo "$_S29/fr" "$_S29/home" sprint/s29 '[roles.builder]\ncli = "codex"\n'
+printf '#!/bin/sh\nmkdir -p .claude && echo "{}" > .claude/settings.json\necho "Status: DONE"\n' > "$_S29/an.fb"
+cp "$_S29/an.fb" "$_S29/rs.fb"
+cp "$_S29/an.fb" "$_S29/fr.fb"
+_self_repo "$_S29/rb" "$_S29/home" sprint/s29 '[roles.builder]\ncli = "codex"\n'
+printf '#!/bin/sh\nmkdir -p docs && echo s29 > docs/s29.txt\necho "Status: DONE"\n' > "$_S29/rb.fb"
+chmod +x "$_S29/an.fb" "$_S29/rs.fb" "$_S29/fr.fb" "$_S29/rb.fb"
+mkdir -p "$_S29/other/rs.leases/lead" "$_S29/attacker/fr.leases"
+O=$(_s29_lead an '_s29_attack -')
+_S29_FAIL="${_S29_FAIL}$(_self_expect anchors "$O" '^t:go=0:review$' '^pin:rc=0:' '^forged=1:stamps=0:vouch=none:record=real-root$' \
+  '^merge:rc=44:.*both ledger anchors \([^)]*/lead/ledger\.sha256, [^)]*/lead/ledger\.copy\) are missing' '^merge:rc=44:.*lease_rebaseline' \
+  '^state=escalated:approval=:head=clean$')"
+O=$(_s29_lead rs "_s29_attack '$(cd "$_S29/other/rs.leases" && pwd -P)'")
+_S29_FAIL="${_S29_FAIL}$(_self_expect restamp "$O" '^t:go=0:review$' '^forged=1:stamps=1:vouch=none:record=real-root$' \
+  '^merge:rc=44:.*both ledger anchors .* are missing' '^state=escalated:approval=:head=clean$')"
+O=$(_s29_lead fr "_s29_attack '$(cd "$_S29/attacker/fr.leases" && pwd -P)' vouch")
+_S29_FAIL="${_S29_FAIL}$(_self_expect fakeroot "$O" '^t:go=0:review$' '^forged=1:stamps=1:vouch=forged-sha:record=real-root$' \
+  '^merge:rc=44:.*both ledger anchors .* are missing' '^state=escalated:approval=:head=clean$')"
+O=$(_s29_lead rb '_self_go t
+_self_try pin lease_pin_reviewer t antigravity
+rm -f "$TRIFORGE_LEASE_ROOT/lead/ledger.sha256" "$TRIFORGE_LEASE_ROOT/lead/ledger.copy"
+_self_try merge1 lease_merge t antigravity
+_self_try rebase lease_rebaseline t
+echo "state=$(_ledger_get t state)"
+_self_try merge2 lease_merge t antigravity
+echo "squash=$(git diff-tree --no-commit-id --name-only -r HEAD | tr "\n" " ")"')
+_S29_FAIL="${_S29_FAIL}$(_self_expect rebase "$O" '^t:go=0:review$' '^merge1:rc=44:.*both ledger anchors' '^rebase:rc=0:.*t back to .review.' \
+  '^state=review$' '^merge2:rc=0:' '^squash=docs/s29\.txt $')"
+_S29_EV="${_S29_EV}anchors: both anchors deleted + a forged user approval -> merge 44 naming them, escalated, nothing merged; restamp: the same with the stamp naming another root that holds no digest -> 44; fakeroot: the stamp naming an attacker-made root holding the forged ledger's sha256, the record naming the real root -> 44; rebase: the lead's own deletion -> 44, lease_rebaseline t -> review, merged"
+unset O _S29_PICK
+# --- end of SELF-29 cases ---
+_S29_CAP="agy routing defaults to auto and the AGY_ERROR line on exit 3 sets the failure's reason and retry (invoke_antigravity and the lease lane); the Cursor probe rows compose Grok ids through _cursor_model_for_effort; a ledger whose two anchors were deleted is a change (rc 44), and the lead's lease_rebaseline recovers (U19, S2)"
+if [ -z "$_S29_EV" ]; then _S29_FAIL="${_S29_FAIL} cases(no-case-ran)"; fi
+if [ -z "$_S29_FAIL" ]; then
+  row "SELF-29" "claude" "$_S29_CAP" "PASS" "$(printf '%s' "$_S29_EV" | cut -c1-3000)" "static"
+else
+  row "SELF-29" "claude" "$_S29_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S29_FAIL"):$(printf '%s' "$_S29_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S29"

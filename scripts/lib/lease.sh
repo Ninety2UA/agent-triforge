@@ -342,10 +342,13 @@ _lease_valid_task_id() {
 # Before a write, a ledger that no longer matches the lead's last write was
 # changed by someone else: the write starts from the lead's copy instead
 # (restoring it) and sets [baseline].ledger_alert, which the next
-# _lead_integrity_check escalates. The digest is lstat-aware — a symlink
-# digests as "link:<target>", never through the link — so a ledger replaced
-# by a symlink counts as changed, and os.replace puts a regular file back over
-# the link itself. This is the ONE place that rule is decided, always under the
+# _lead_integrity_check escalates. A ledger with no digest gets the same alert
+# (adopted unverified, nothing to restore from) when the copy is still there,
+# and when both anchors are gone but it holds a recorded [baseline] (S2); only
+# a ledger with no recorded baseline is a first use. The digest is
+# lstat-aware — a symlink digests as "link:<target>", never through the link —
+# so a ledger replaced by a symlink counts as changed, and os.replace puts a
+# regular file back over the link itself. This is the ONE place that rule is decided, always under the
 # ledger lock: _lead_integrity_check and lease_rebaseline start with a no-op
 # `_ledger_update @baseline` to run it, which writes nothing while the ledger
 # and its copy match the recorded digest and a [baseline] exists (otherwise it
@@ -395,7 +398,7 @@ _ledger_write() {
     sleep 0.05
   done
   printf '%s\n' "$$" > "${LOCK}/pid" 2>/dev/null || true
-  LEDGER_FILE="$LEDGER" LEDGER_TASK="$TASK_ID" LEDGER_STATE="$_LEASE_STATE" LEDGER_ROOT="$_LEASE_ROOT" python3 -c "${_READ_REGULAR_PY}
+  LEDGER_FILE="$LEDGER" LEDGER_TASK="$TASK_ID" LEDGER_STATE="$_LEASE_STATE" LEDGER_ROOT="$_LEASE_ROOT" LEDGER_GITDIR="$_LEASE_GITDIR" python3 -c "${_READ_REGULAR_PY}
 import hashlib, json, os, secrets, sys, time
 try:
     import tomllib
@@ -448,6 +451,40 @@ elif not recorded and os.path.isfile(copy_file):
 data = {}
 if os.path.isfile(source):
     data = tomllib.loads(read_regular(source).decode('utf-8'))
+# Neither anchor, on a ledger that holds a recorded [baseline] (config): only a
+# lead that writes both anchors after every write records one (3.3.3 on). When
+# [baseline].lease_root names another lease root (a lead whose shell resolves
+# another TMPDIR, a lease reclaimed under the other lead), that root is also
+# the one the lease-root record in the git dir names (<gitdir>/
+# triforge-lease-root: outside TMPDIR and the ledger, written only by the
+# lead's write_record; a symlink there counts as no record), and its digest
+# equals the ledger as found, the ledger is that lead's last write and is
+# anchored here. The stamp alone never vouches: it is part of the ledger being
+# checked. Otherwise both anchors were deleted (S2): the rule can't run and
+# there is no copy to restore from, so alert, as for the missing digest
+# above, never a silent first use. A ledger with no recorded baseline (a fresh
+# checkout, a ledger from before 3.3.3) is anchored as found.
+if not alert and not recorded and not os.path.isfile(copy_file):
+    _b = data.get('baseline')
+    if isinstance(_b, dict) and _b.get('config'):
+        _other, _rec, _vouch = str(_b.get('lease_root') or ''), '', ''
+        _rec_file = os.path.join(os.environ.get('LEDGER_GITDIR', ''), 'triforge-lease-root')
+        if os.environ.get('LEDGER_GITDIR') and not os.path.islink(_rec_file):
+            try:
+                for _l in read_regular(_rec_file, True).splitlines():
+                    if _l.strip() and not _l.startswith('#'):
+                        _rec = _l.strip()
+                        break
+            except OSError:
+                _rec = ''
+        if (_rec and os.path.isabs(_other) and os.path.realpath(_rec) == os.path.realpath(_other)
+                and os.path.realpath(_rec) != os.path.realpath(os.environ['LEDGER_ROOT'])):
+            try:
+                _vouch = read_regular(os.path.join(_rec, 'lead', 'ledger.sha256'), True).strip()
+            except OSError:
+                _vouch = ''
+        if not _vouch or _vouch != _sha(path):
+            alert = stamp + ' both ledger anchors (' + digest_file + ', ' + copy_file + ') are missing while ops/leases.toml holds a recorded [baseline], and no other lease root of this checkout vouches for it: they were deleted outside the lead writes, and the ledger was adopted UNVERIFIED with no copy to restore from (compare its rows with what the lead did: states, approval_*, merge_approval; restore any change yourself, then lease_rebaseline)'
 # The integrity check's no-op @baseline call on a ledger that matches the lead's
 # last write and its copy, with a [baseline] in place: nothing to restore or
 # record, so nothing is rewritten (a write would only stamp [baseline].updated,
