@@ -776,17 +776,43 @@ _grok_run_in() {
   )
 }
 
-# _grok_run_stop <pid> — TERM a _grok_run_in step and every process under it,
-# children first (pgrep -P), for a signal that reached the subshell alone (a
-# background step ignores INT, and the provisioning's timeout sits below a
-# command substitution); a TERM to timeout passes on to grok. No-op for "".
+# _grok_run_stop <pid> — stop a _grok_run_in step and every process under it,
+# for a signal that reached the subshell alone (a background step ignores
+# INT, and the provisioning's timeout sits below a command substitution):
+# TERM to each, children first (_grok_run_tree; a TERM to timeout passes on
+# to grok), then up to 2 s, polled with kill -0, for all of them to go, then
+# KILL, children first, to each one still there and to what it started since
+# (_kill_tree). One that ignores TERM would otherwise keep running against the
+# scratch directory the trap removes next. A process already gone is skipped.
+# No-op for "".
 _grok_run_stop() {
-  local P
+  local P N=0 LEFT=yes
   if [ -z "${1:-}" ]; then return 0; fi
-  for P in $(pgrep -P "$1" 2>/dev/null || true); do
-    _grok_run_stop "$P"
+  set -- $(_grok_run_tree "$1")
+  for P in "$@"; do
+    kill -TERM "$P" 2>/dev/null || true
   done
-  kill -TERM "$1" 2>/dev/null || true
+  while [ -n "$LEFT" ] && [ "$N" -lt 20 ]; do
+    LEFT=""
+    for P in "$@"; do
+      if kill -0 "$P" 2>/dev/null; then LEFT=$P; break; fi
+    done
+    if [ -n "$LEFT" ]; then sleep 0.1; N=$((N + 1)); fi
+  done
+  for P in "$@"; do
+    if kill -0 "$P" 2>/dev/null; then _kill_tree "$P" KILL; fi
+  done
+  return 0
+}
+
+# _grok_run_tree <pid> — <pid> and every process under it, children first
+# (pgrep -P), one per line.
+_grok_run_tree() {
+  local P
+  for P in $(pgrep -P "$1" 2>/dev/null || true); do
+    _grok_run_tree "$P"
+  done
+  echo "$1"
 }
 
 # _grok_interrupted <agent-name> <output-file> <rc> — 0 when <rc> is the exit

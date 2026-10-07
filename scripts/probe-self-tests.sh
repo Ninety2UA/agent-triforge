@@ -7371,7 +7371,8 @@ rm -rf "$_S24"
 # reports an Orca agent-status hook, plus a disabled Claude Code user hook),
 # pluginhook (a hook and an LSP server of the listed user plugin),
 # strayplugin (a hook of a plugin inspect does not list), sleep (inspect
-# records its pid and sleeps 30 s), lateserver (one more user MCP server).
+# records its pid and sleeps 30 s), noterm (inspect ignores TERM, records its
+# pid and sleeps until it is killed), lateserver (one more user MCP server).
 # Like grok 1.0.34, inspect lists no MCP server the working directory's
 # .grok/config.toml already shadows.
 # Any other run records its argv (prompt included), environment, working
@@ -7515,7 +7516,10 @@ rm -rf "$_S24"
 #              line on the lead's stderr naming the hook file, no scratch
 #              left
 #   trap       TERM to _grok_run_in's subshell while the provisioning inspect
-#              sleeps: the inspect stopped, no scratch directory left
+#              sleeps: the inspect stopped, no scratch directory left; with an
+#              inspect that ignores TERM (the sleeps it starts too): KILLed
+#              once the 2 s grace is out, so nothing outlives the subshell,
+#              which exits 143 with no scratch directory left
 #   fg-integrity  invoke_grok as a reviewer with the lead's integrity check
 #              refusing (a stub returning 44), and in a project with an open
 #              lease and a fresh lease_rebaseline whose .git/config then gains
@@ -7541,6 +7545,7 @@ if [ "$1" = inspect ]; then
     malformed) echo '{"configSources":{"layers":['; exit 0 ;;
     fail)      echo '{}'; exit 1 ;;
     sleep)     echo "$$" > "$D/inspect.pid"; exec sleep 30 ;;
+    noterm)    trap '' TERM; echo "$$" > "$D/inspect.pid"; while :; do sleep 1; done ;;
   esac
   OV='{"role":"env_overlay","path":"$GROK_CONFIG (inline)","note":"sections: shell_environment_policy, toolset"}'
   if [ -z "${GROK_CONFIG:-}" ] || [ -f "$D/overlay-ignored" ]; then
@@ -8147,12 +8152,32 @@ O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25
   while [ "$N" -lt 50 ] && { { [ -n "$SP" ] && kill -0 "$SP" 2>/dev/null; } || ls -d "$_S25/tmp"/triforge-grok.* >/dev/null 2>&1; }; do sleep 0.1; N=$((N + 1)); done
   echo "trap:started=$( [ -n "$SP" ] && echo yes || echo no):before=${B}:dirs=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | grep -c . || true):stub=$( [ -n "$SP" ] && kill -0 "$SP" 2>/dev/null && echo left || echo gone)"
   if [ -n "$SP" ]; then kill -TERM "$SP" 2>/dev/null || true; fi
+  # the same with an inspect that ignores TERM, and so do the sleeps it
+  # starts: gone by the time the subshell exits, at most a second later. The
+  # subshell gets 8 s (the 2 s grace and the KILL, with slack) before it
+  # counts as hung; a stub left alive is killed here, never by the gate's end
+  rm -f "$_S25/inspect.pid"; printf 'noterm\n' > "$_S25/inspect-mode"
+  _grok_run_in "$S" "$TO" 60 "probe trap S25 noterm" "$_S25/trap.ready" > /dev/null 2>&1 &
+  J=$!
+  N=0
+  while [ ! -s "$_S25/inspect.pid" ] && [ "$N" -lt 150 ]; do sleep 0.1; N=$((N + 1)); done
+  SP=$(cat "$_S25/inspect.pid" 2>/dev/null || true)
+  B=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | grep -c . || true)
+  for P in $(pgrep -P "$J" 2>/dev/null || true); do kill -TERM "$P" 2>/dev/null || true; done
+  N=0
+  while [ "$N" -lt 80 ] && kill -0 "$J" 2>/dev/null; do sleep 0.1; N=$((N + 1)); done
+  R=hung
+  if kill -0 "$J" 2>/dev/null; then _kill_tree "$J" KILL; else R=0; wait "$J" 2>/dev/null || R=$?; fi
+  N=0
+  while [ "$N" -lt 10 ] && [ -n "$SP" ] && kill -0 "$SP" 2>/dev/null; do sleep 0.1; N=$((N + 1)); done
+  echo "trap-noterm:started=$( [ -n "$SP" ] && echo yes || echo no):before=${B}:rc=${R}:dirs=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | grep -c . || true):stub=$( [ -n "$SP" ] && kill -0 "$SP" 2>/dev/null && echo left || echo gone)"
+  if [ -n "$SP" ]; then _kill_tree "$SP" KILL; fi
   rm -f "$_S25/inspect-mode" )
-_S25_FAIL="${_S25_FAIL}$(_self_expect trap "$O" '^trap:started=yes:before=1:dirs=0:stub=gone$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect trap "$O" '^trap:started=yes:before=1:dirs=0:stub=gone$' '^trap-noterm:started=yes:before=1:rc=143:dirs=0:stub=gone$')"
 
 _S25_CAP="Grok Build's lane: the permission class by role (a reviewer or analyst read-only, with Edit, Write and Bash denied over any imported Claude allow rule, and MCP tools denied in every class; grok takes builder, reviewer and analyst, and edits only in a lease), the env prefix and include_only overlay pinned, a report only from an end_turn run, the provisioned .grok/config.toml that disables every plugin and shadows every MCP server, the user's own included (never merged, never without a full inspect, refused when it can't be proven), no read-class run where the project supplies code grok would start, while the user's own grok hooks and settings run with one NOTE line naming each (checked again, and the tables rebuilt, at every read-class dispatch; asked by at-setup through grok_read_isolation_check), the builder's sandbox profile closing GROK_HOME's code and instruction paths (rewritten before each dispatch), and invoke_grok's read class in a removed scratch checkout under env -i, after the roster and integrity checks before every attempt, with no filter or hook run and a TERM that leaves nothing behind (R23)"
 if [ -z "$_S25_FAIL" ]; then
-  row "SELF-25" "grok" "$_S25_CAP" "PASS" "class: builder/tester/documenter edit, reviewer/analyst/empty read; lane: edit -> triforge-edit + Edit/Write/Bash, MCP denied; read and empty -> read-only, Edit/Write/Bash/MCP denied; env prefix: every GROK_CLAUDE_*/GROK_CURSOR_* switch, GROK_FOLDER_TRUST=0, the overlay's literal include_only; builder lease: .grok/config.toml disables the 3 plugins and shadows the 3 servers (the user's ~/.grok/config.toml one included), inspect with the Claude switches off, config and profile provisioned, a weakened profile written back before the run (all 17 GROK_HOME denies), triforge-edit, builder brief, collect -> review, snapshot without .grok/; reviewer lease (project allows Edit/Write/npm): read-only, the denies, reviewer brief, no profile, review; Status: DONE then max_tokens, no end, or the turn cap -> report missing (rc 80), the stop named; tracked: [permission] and [mcp_servers.team] files take the tables (tomllib-proven); [plugins], inline mcp_servers, a server named like a ~/.claude.json one, a symlinked .grok and an ignored overlay refused, file unchanged and named; a project server named like the user's grok one gets no shadow; user tier (read class): a user hook, a user LSP server, an unlisted plugin's hook, an auth provider command, notification hooks, config-layer [hooks], a requirements-layer MCP server and an Orca-style hook file accepted, each named with its file in one NOTE line (the .bak copy not); an unparsable config.toml and project hooks beside the Orca hook refused, nothing written; the listed user plugin's hook and LSP accepted with no note (plugin disabled, user server shadowed); the edit class takes a user hook with no note and writes the profile; profile: one table, extends workspace, exactly the 17 literal denies, config.toml not denied; a same-named user profile and a symlinked file refused, nothing written; surface (read class): .grok/hooks, .grok/lsp.json, .grok/plugins, .claude/plugins, a project MCP server and an inspect-reported project hook refused, named, nothing written; Claude/Cursor hooks, .mcp.json (shadowed), an agent, a skill and a sandbox.toml accepted; edit class takes .grok/hooks; inspect: empty, cut-off, failed and partial refused; roles: tester and documenter on grok rc 5; lease_create refused, no row, grok never run; a read lease over .grok/lsp.json refused, a builder lease made, .grok/hooks added after create refused at compose (rc 94); a reviewer lease made under a clean user tier: a user hook by dispatch time runs (rc 0, named in the builder log's NOTE), a new user MCP server by then shadowed in the run's config with the provisioning's 3 shadows kept and one [plugins]; a reviewer lease made beside the Orca hook: leased, the file named on stderr; grok_read_isolation_check: clean -> rc 0 OK, a user hook -> rc 0 OK and a NOTE naming it, an unparsable config.toml -> rc 1 named, no scratch left, HOME unchanged; invoke_grok: reviewer from a scratch checkout with the config, env -i (no canary, no CLAUDECODE), the denies and the checkout note, then removed, no ledger written; tester and an edit agent name rc 69, grok never run; an empty end_turn -> rc 80 no-answer; an interrupted run (exit 130) -> rc 130 interrupted, run once, no retry; a retry after the first run declined grok in the roster -> rc 5 role, run once; a retry after the first run changed .git/config (lease open, fresh rebaseline) -> rc 44 integrity, run once; an unisolable project, project hooks or a bad inspect -> rc 69, grok never run; beside an Orca-style user hook -> rc 0, DONE, read-only, one NOTE naming the hook file; integrity refused (stub, and a smudge filter in .git/config with .git/info/attributes planted after a fresh rebaseline, a lease open) -> rc 44, no checkout, the filter never run; a never-leased project's smudge and process filters never run; TERM to _grok_run_in's subshell during the provisioning inspect -> the inspect stopped, no scratch left" "static"
+  row "SELF-25" "grok" "$_S25_CAP" "PASS" "class: builder/tester/documenter edit, reviewer/analyst/empty read; lane: edit -> triforge-edit + Edit/Write/Bash, MCP denied; read and empty -> read-only, Edit/Write/Bash/MCP denied; env prefix: every GROK_CLAUDE_*/GROK_CURSOR_* switch, GROK_FOLDER_TRUST=0, the overlay's literal include_only; builder lease: .grok/config.toml disables the 3 plugins and shadows the 3 servers (the user's ~/.grok/config.toml one included), inspect with the Claude switches off, config and profile provisioned, a weakened profile written back before the run (all 17 GROK_HOME denies), triforge-edit, builder brief, collect -> review, snapshot without .grok/; reviewer lease (project allows Edit/Write/npm): read-only, the denies, reviewer brief, no profile, review; Status: DONE then max_tokens, no end, or the turn cap -> report missing (rc 80), the stop named; tracked: [permission] and [mcp_servers.team] files take the tables (tomllib-proven); [plugins], inline mcp_servers, a server named like a ~/.claude.json one, a symlinked .grok and an ignored overlay refused, file unchanged and named; a project server named like the user's grok one gets no shadow; user tier (read class): a user hook, a user LSP server, an unlisted plugin's hook, an auth provider command, notification hooks, config-layer [hooks], a requirements-layer MCP server and an Orca-style hook file accepted, each named with its file in one NOTE line (the .bak copy not); an unparsable config.toml and project hooks beside the Orca hook refused, nothing written; the listed user plugin's hook and LSP accepted with no note (plugin disabled, user server shadowed); the edit class takes a user hook with no note and writes the profile; profile: one table, extends workspace, exactly the 17 literal denies, config.toml not denied; a same-named user profile and a symlinked file refused, nothing written; surface (read class): .grok/hooks, .grok/lsp.json, .grok/plugins, .claude/plugins, a project MCP server and an inspect-reported project hook refused, named, nothing written; Claude/Cursor hooks, .mcp.json (shadowed), an agent, a skill and a sandbox.toml accepted; edit class takes .grok/hooks; inspect: empty, cut-off, failed and partial refused; roles: tester and documenter on grok rc 5; lease_create refused, no row, grok never run; a read lease over .grok/lsp.json refused, a builder lease made, .grok/hooks added after create refused at compose (rc 94); a reviewer lease made under a clean user tier: a user hook by dispatch time runs (rc 0, named in the builder log's NOTE), a new user MCP server by then shadowed in the run's config with the provisioning's 3 shadows kept and one [plugins]; a reviewer lease made beside the Orca hook: leased, the file named on stderr; grok_read_isolation_check: clean -> rc 0 OK, a user hook -> rc 0 OK and a NOTE naming it, an unparsable config.toml -> rc 1 named, no scratch left, HOME unchanged; invoke_grok: reviewer from a scratch checkout with the config, env -i (no canary, no CLAUDECODE), the denies and the checkout note, then removed, no ledger written; tester and an edit agent name rc 69, grok never run; an empty end_turn -> rc 80 no-answer; an interrupted run (exit 130) -> rc 130 interrupted, run once, no retry; a retry after the first run declined grok in the roster -> rc 5 role, run once; a retry after the first run changed .git/config (lease open, fresh rebaseline) -> rc 44 integrity, run once; an unisolable project, project hooks or a bad inspect -> rc 69, grok never run; beside an Orca-style user hook -> rc 0, DONE, read-only, one NOTE naming the hook file; integrity refused (stub, and a smudge filter in .git/config with .git/info/attributes planted after a fresh rebaseline, a lease open) -> rc 44, no checkout, the filter never run; a never-leased project's smudge and process filters never run; TERM to _grok_run_in's subshell during the provisioning inspect -> the inspect stopped, no scratch left; the same with an inspect that ignores TERM -> KILLed after the 2 s grace, gone before the subshell exits 143, no scratch left" "static"
 else
   row "SELF-25" "grok" "$_S25_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S25_FAIL"):$(printf '%s' "$_S25_FAIL" | cut -c1-700)" "static"
 fi
@@ -11975,3 +12000,717 @@ else
   row "SELF-29" "claude" "$_S29_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S29_FAIL"):$(printf '%s' "$_S29_FAIL" | cut -c1-700)" "static"
 fi
 rm -rf "$_S29"
+
+# SELF-30 (AGENTS.md Conventions, Shell; review finding #10): the shell rules
+# a static scan can decide hold in every shell file Triforge ships:
+# scripts/*.sh, scripts/lib/*.sh, hooks/handlers/*.sh, skills/*/scripts/*.sh.
+# _s30_scan lexes and parses each file as bash. Comments, quoted text and
+# here-document bodies are text (an unquoted body's $( ) is still parsed);
+# $( ), ` `, <( ) and ${ } are commands wherever they sit. One line per
+# finding, "<file>:<line>:<rule>":
+#   test-and-last(<fn>)  the function's last statement chains a [ ], [[ ]] or
+#                        test with && and has no || after it, on one line or
+#                        several: a false test returns 1, which set -e turns
+#                        into an exit wherever the caller does not test it
+#                        (`[ … ] && [ … ] || return 1` is the house form)
+#   grep-c-or-echo       grep -c (or --count) followed by || echo or
+#                        || printf: no match prints the 0 twice (|| true is
+#                        the house form)
+#   grep-P               grep -P, an option cluster holding P, or
+#                        --perl-regexp: BSD grep has neither
+#   assoc-array          declare, local, typeset or readonly -A (bash 4)
+#   mapfile              mapfile or readarray as a command (bash 4)
+# A file it can't follow is "scan-error:<file>:<why>", which fails the row
+# like a hit; the last line is "files=<n>". There is no allowlist: a line a
+# rule misreads is a matcher to refine. Negative controls: a planted file with
+# each shape on a line marked want:<rule> (one line and several, mid-chain, a
+# { } and a ( ) body, the function keyword, inside $( ) and "$( )", option
+# clusters) is flagged on exactly those lines and no other, so its compliant
+# shapes pass: `[ … ] && [ … ] || return 1`, `… || true`, `[ … ] || return 1`,
+# `if [ … ] && …; then … fi` last, a bare test last, a python here-document
+# holding `x and y` and the shapes as text, a comment holding `[ -d x ] && y`,
+# the shapes in quoted strings, grep -e -P; and a file whose quote never
+# closes is a scan-error.
+_S30="${WORK}/self30"
+_S30_FAIL=""
+mkdir -p "$_S30"
+# _s30_scan <root> <file>... — the scan above, file names relative to <root>
+_s30_scan() {
+  python3 - "$@" 2>&1 <<'S30_SCAN_PY' || echo "scan-error:python-rc=$?"
+import bisect, os, re, sys
+# a word that assigns (NAME=, NAME+=, NAME[i]=), an option cluster, the
+# characters that end an unquoted word, the operators, the redirections
+ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\[[^]]*\])?\+?=")
+OPTS = re.compile(r"[-+][A-Za-z]+")
+META = " \t\n;&|()<>"
+OPS = (";;&", ";;", ";&", "&&", "||", "|&", ";", "&", "|", "(", ")")
+REDIRS = ("<<<", "<<-", "&>>", "<<", "<>", "<&", ">>", ">&", ">|", "&>", "<", ">")
+
+
+class Bad(Exception):
+    pass
+
+
+class Tok(object):
+    # kind: W word, O operator, R redirection, N newline, E end; a word's val
+    # is its text unquoted, "\0" for each expansion, and raw its source text
+    __slots__ = ("kind", "val", "line", "raw", "quoted", "heredoc")
+
+    def __init__(self, kind, val, line, raw="", quoted=False, heredoc=False):
+        self.kind, self.val, self.line, self.raw, self.quoted, self.heredoc = kind, val, line, raw, quoted, heredoc
+
+
+class Scan(object):
+    # a lexer and a recursive-descent parser for the bash these files are
+    # written in, over one text; findings go to hits as (line, rule)
+    def __init__(self, text, line0, hits):
+        self.t, self.i, self.n, self.line0, self.hits = text, 0, len(text), line0, hits
+        self.nl = [m.start() for m in re.finditer("\n", text)]
+        self.pend, self.peeked = [], None
+
+    def line_at(self, p):
+        return self.line0 + bisect.bisect_left(self.nl, p)
+
+    # ---- lexer
+    def skip_blank(self):
+        t, n = self.t, self.n
+        while self.i < n:
+            c = t[self.i]
+            if c == " " or c == "\t":
+                self.i += 1
+            elif c == "\\" and t.startswith("\n", self.i + 1):
+                self.i += 2
+            elif c == "#":
+                e = t.find("\n", self.i)
+                self.i = n if e < 0 else e
+            else:
+                return
+
+    def peek(self):
+        if self.peeked is None:
+            self.peeked = self.lex()
+        return self.peeked
+
+    def take(self):
+        tok = self.peek()
+        self.peeked = None
+        return tok
+
+    def lex(self):
+        self.skip_blank()
+        t, i = self.t, self.i
+        ln = self.line_at(i)
+        if i >= self.n:
+            return Tok("E", "end of text", ln)
+        if t[i] == "\n":
+            self.i = i + 1
+            if self.pend:
+                self.heredocs()
+            return Tok("N", "newline", ln)
+        if t[i] in "<>" and t.startswith("(", i + 1):
+            return self.word()
+        e = self.arith(i) if t.startswith("((", i) else -1
+        if e > 0:
+            self.i = e
+            return Tok("O", "((", ln)
+        for op in REDIRS:
+            if t.startswith(op, i):
+                self.i = i + len(op)
+                return self.redir(op, ln)
+        for op in OPS:
+            if t.startswith(op, i):
+                self.i = i + len(op)
+                return Tok("O", op, ln)
+        w = self.word()
+        if w.raw.isdigit() and t[self.i:self.i + 1] in ("<", ">") and not t.startswith("(", self.i + 1):
+            for op in REDIRS:
+                if t.startswith(op, self.i):
+                    self.i += len(op)
+                    return self.redir(op, ln)
+        return w
+
+    def redir(self, op, ln):
+        if op not in ("<<", "<<-"):
+            return Tok("R", op, ln)
+        while self.t[self.i:self.i + 1] in (" ", "\t"):
+            self.i += 1
+        d = self.word()
+        self.pend.append((d.val, d.quoted, op == "<<-"))
+        return Tok("R", op, ln, heredoc=True)
+
+    def heredocs(self):
+        # the bodies of the here-documents opened on the line just ended: a
+        # quoted one is skipped whole, an unquoted one scanned for $( )
+        pend, self.pend = self.pend, []
+        t, n = self.t, self.n
+        for delim, quoted, strip in pend:
+            start = self.i
+            while True:
+                if self.i >= n:
+                    raise Bad("the here-document %s from line %d never ends" % (delim, self.line_at(start) - 1))
+                e = t.find("\n", self.i)
+                e = n if e < 0 else e
+                if (t[self.i:e].lstrip("\t") if strip else t[self.i:e]) == delim:
+                    end, self.i = self.i, min(e + 1, n)
+                    break
+                self.i = e + 1
+            if not quoted and end > start:
+                Scan(t[start:end], self.line_at(start), self.hits).dq(None)
+
+    def word(self):
+        t, n = self.t, self.n
+        start, out, quoted = self.i, [], False
+        ln = self.line_at(start)
+        while self.i < n:
+            c = t[self.i]
+            if c == "\\":
+                if not t.startswith("\n", self.i + 1):
+                    out.append(t[self.i + 1:self.i + 2])
+                    quoted = True
+                self.i += 2
+            elif c == "'":
+                e = t.find("'", self.i + 1)
+                if e < 0:
+                    raise Bad("a '...' string from line %d never closes" % self.line_at(self.i))
+                out.append(t[self.i + 1:e])
+                quoted, self.i = True, e + 1
+            elif c == "$" and t.startswith("'", self.i + 1):
+                j = self.i + 2
+                while j < n and t[j] != "'":
+                    j += 2 if t[j] == "\\" else 1
+                if j >= n:
+                    raise Bad("a $'...' string from line %d never closes" % self.line_at(self.i))
+                out.append(t[self.i + 2:j])
+                quoted, self.i = True, j + 1
+            elif c == '"' or (c == "$" and t.startswith('"', self.i + 1)):
+                self.i += 1 if c == '"' else 2
+                out.append(self.dq('"'))
+                quoted = True
+            elif (c == "$" or c == "`") and self.expansion(False):
+                out.append("\0")
+            elif c in "<>" and t.startswith("(", self.i + 1):
+                self.i += 2
+                self.sub(")")
+                out.append("\0")
+            elif c in META:
+                break
+            else:
+                out.append(c)
+                self.i += 1
+        if self.i < n and t[self.i] == "(" and ASSIGN.fullmatch(t[start:self.i]):
+            self.array()
+        if self.i == start:
+            raise Bad("no word where one was expected at line %d" % ln)
+        return Tok("W", "".join(out), ln, raw=t[start:self.i], quoted=quoted)
+
+    def array(self):
+        # NAME=( ... ): its elements, over any number of lines
+        t, n = self.t, self.n
+        self.i += 1
+        while True:
+            while self.i < n and t[self.i] in " \t\n":
+                self.i += 1
+            if self.i >= n:
+                raise Bad("an array assignment never closes")
+            if t[self.i] == ")":
+                self.i += 1
+                return
+            if t[self.i] == "#":
+                e = t.find("\n", self.i)
+                self.i = n if e < 0 else e
+            elif t.startswith("\\\n", self.i):
+                self.i += 2
+            else:
+                self.word()
+
+    def dq(self, term):
+        # the text of a "..." string (term '"') or of a here-document body
+        # (term None: to the end), "\0" for each expansion, whose commands
+        # are parsed
+        t, n, out = self.t, self.n, []
+        while self.i < n:
+            c = t[self.i]
+            if c == "\\":
+                out.append(t[self.i + 1:self.i + 2])
+                self.i += 2
+            elif c == term:
+                self.i += 1
+                return "".join(out)
+            elif (c == "$" or c == "`") and self.expansion(True):
+                out.append("\0")
+            else:
+                out.append(c)
+                self.i += 1
+        if term is not None:
+            raise Bad("a \"...\" string never closes")
+        return "".join(out)
+
+    def expansion(self, in_dq):
+        # $(( )), $( ), ${ } or ` ` at self.i, consumed: True; else False
+        t, i = self.t, self.i
+        e = self.arith(i + 1) if t.startswith("$((", i) else -1
+        if e > 0:
+            self.i = e
+        elif t.startswith("$(", i):
+            self.i = i + 2
+            self.sub(")")
+        elif t.startswith("${", i):
+            self.i = i + 2
+            self.param(in_dq)
+        elif t.startswith("`", i):
+            self.backtick(in_dq)
+        else:
+            return False
+        return True
+
+    def arith(self, i):
+        # the end of the (( )) that opens at i, or -1 when its inner group
+        # closes before the outer one (a subshell's subshell, not arithmetic)
+        t, n, depth, j = self.t, self.n, 0, i + 1
+        while j < n:
+            if t[j] == "\\":
+                j += 1
+            elif t[j] == "(":
+                depth += 1
+            elif t[j] == ")":
+                depth -= 1
+                if depth == 0:
+                    return j + 2 if t.startswith(")", j + 1) else -1
+            j += 1
+        raise Bad("the (( at line %d never closes" % self.line_at(i))
+
+    def param(self, in_dq):
+        t, n, depth = self.t, self.n, 0
+        while self.i < n:
+            c = t[self.i]
+            if c == "\\":
+                self.i += 2
+            elif c == "}" and depth == 0:
+                self.i += 1
+                return
+            elif c in "{}":
+                depth += 1 if c == "{" else -1
+                self.i += 1
+            elif c == '"':
+                self.i += 1
+                self.dq('"')
+            elif c == "'" and not in_dq:
+                e = t.find("'", self.i + 1)
+                if e < 0:
+                    raise Bad("a '...' string in a ${ } never closes")
+                self.i = e + 1
+            elif not ((c == "$" or c == "`") and self.expansion(in_dq)):
+                self.i += 1
+        raise Bad("a ${ } expansion never closes")
+
+    def backtick(self, in_dq):
+        t, n, j, out = self.t, self.n, self.i + 1, []
+        esc = "$`\\" + ('"' if in_dq else "")
+        while j < n and t[j] != "`":
+            if t[j] == "\\" and t[j + 1:j + 2] and t[j + 1] in esc:
+                out.append(t[j + 1])
+                j += 2
+            else:
+                out.append(t[j])
+                j += 1
+        if j >= n:
+            raise Bad("a `...` command from line %d never closes" % self.line_at(self.i))
+        Scan("".join(out), self.line_at(self.i + 1), self.hits).program()
+        self.i = j + 1
+
+    def sub(self, close):
+        # a command list up to its closing ")" ($( ), <( ), >( ))
+        if self.peeked is not None:
+            raise Bad("internal: a token was pending at a command substitution")
+        self.parse_list((), (close,))
+        self.expect_op(close)
+
+    # ---- parser
+    def program(self):
+        self.parse_list((), ())
+        tok = self.take()
+        if tok.kind != "E":
+            raise Bad("%r at line %d ends nothing that is open" % (tok.val, tok.line))
+
+    def nlskip(self):
+        while self.peek().kind == "N":
+            self.take()
+
+    def stop(self, tok, stops, ops):
+        return tok.kind == "E" or (tok.kind == "O" and tok.val in ops) or (tok.kind == "W" and tok.raw in stops)
+
+    def parse_list(self, stops, ops):
+        # and-or lists separated by ; & or newlines, up to a reserved word in
+        # stops or an operator in ops (left for the caller)
+        items = []
+        while True:
+            self.nlskip()
+            if self.stop(self.peek(), stops, ops):
+                return items
+            items.append(self.and_or())
+            tok = self.peek()
+            if tok.kind == "O" and tok.val in (";", "&"):
+                self.take()
+            elif tok.kind != "N" and not self.stop(tok, stops, ops):
+                raise Bad("%r after a command at line %d" % (tok.val, tok.line))
+
+    def and_or(self):
+        pipes, ops = [self.pipeline()], []
+        while self.peek().kind == "O" and self.peek().val in ("&&", "||"):
+            ops.append(self.take().val)
+            self.nlskip()
+            pipes.append(self.pipeline())
+        self.check_or_echo(pipes, ops)
+        return pipes, ops
+
+    def pipeline(self):
+        if self.peek().kind == "W" and self.peek().raw == "!":
+            self.take()
+        cmds = [self.command()]
+        while self.peek().kind == "O" and self.peek().val in ("|", "|&"):
+            self.take()
+            self.nlskip()
+            cmds.append(self.command())
+        return cmds
+
+    def command(self):
+        # one command; a compound one is ("group"|"sub", its list, line) or
+        # (kind, line), a simple one ("simple", words, line)
+        tok = self.peek()
+        k = tok.val if tok.kind == "O" else (tok.raw if tok.kind == "W" else None)
+        node = None
+        if tok.kind == "O" and k == "(":
+            self.take()
+            node = ("sub", self.parse_list((), (")",)), tok.line)
+            self.expect_op(")")
+        elif tok.kind == "O" and k == "((":
+            self.take()
+            node = ("arith", tok.line)
+        elif tok.kind == "W" and k == "{":
+            self.take()
+            node = ("group", self.parse_list(("}",), ()), tok.line)
+            self.expect_word("}")
+        elif tok.kind == "W" and k == "if":
+            self.take()
+            while True:
+                self.parse_list(("then",), ())
+                self.expect_word("then")
+                self.parse_list(("elif", "else", "fi"), ())
+                end = self.take()
+                if end.kind == "W" and end.raw == "elif":
+                    continue
+                if end.kind == "W" and end.raw == "else":
+                    self.parse_list(("fi",), ())
+                    self.expect_word("fi")
+                elif not (end.kind == "W" and end.raw == "fi"):
+                    raise Bad("the if at line %d has no fi" % tok.line)
+                break
+            node = ("if", tok.line)
+        elif tok.kind == "W" and k in ("while", "until"):
+            self.take()
+            self.parse_list(("do",), ())
+            self.expect_word("do")
+            self.parse_list(("done",), ())
+            self.expect_word("done")
+            node = ("loop", tok.line)
+        elif tok.kind == "W" and k in ("for", "select"):
+            self.take()
+            var = self.take()
+            if not (var.kind == "W" or (var.kind == "O" and var.val == "((")):
+                raise Bad("the %s at line %d names no variable" % (k, tok.line))
+            self.nlskip()
+            if self.peek().kind == "W" and self.peek().raw == "in":
+                self.take()
+                while self.peek().kind == "W":
+                    self.take()
+            if self.peek().kind == "O" and self.peek().val == ";":
+                self.take()
+            self.nlskip()
+            self.expect_word("do")
+            self.parse_list(("done",), ())
+            self.expect_word("done")
+            node = ("loop", tok.line)
+        elif tok.kind == "W" and k == "case":
+            self.take()
+            if self.take().kind != "W":
+                raise Bad("the case at line %d has no word" % tok.line)
+            self.nlskip()
+            self.expect_word("in")
+            while True:
+                self.nlskip()
+                p = self.take()
+                if p.kind == "W" and p.raw == "esac":
+                    break
+                if p.kind == "O" and p.val == "(":
+                    p = self.take()
+                while True:
+                    if p.kind != "W":
+                        raise Bad("a case pattern was expected at line %d" % p.line)
+                    p = self.take()
+                    if p.kind == "O" and p.val == ")":
+                        break
+                    if not (p.kind == "O" and p.val == "|"):
+                        raise Bad("%r in a case pattern at line %d" % (p.val, p.line))
+                    p = self.take()
+                self.parse_list(("esac",), (";;", ";&", ";;&"))
+                if self.peek().kind == "O":
+                    self.take()
+            node = ("case", tok.line)
+        elif tok.kind == "W" and k == "[[":
+            self.take()
+            while True:
+                p = self.take()
+                if p.kind == "E":
+                    raise Bad("the [[ at line %d never closes" % tok.line)
+                if p.kind == "W" and p.raw == "]]":
+                    break
+            node = ("test", tok.line)
+        elif tok.kind == "W" and k == "function":
+            self.take()
+            name = self.take()
+            if name.kind != "W":
+                raise Bad("the function at line %d has no name" % tok.line)
+            if self.peek().kind == "O" and self.peek().val == "(":
+                self.take()
+                self.expect_op(")")
+            return self.funcdef(name)
+        elif tok.kind in ("W", "R"):
+            return self.simple()
+        else:
+            raise Bad("a command was expected at line %d, not %r" % (tok.line, tok.val))
+        self.redirs()
+        return node
+
+    def simple(self):
+        words = []
+        while True:
+            tok = self.peek()
+            if tok.kind == "W":
+                words.append(self.take())
+                if len(words) == 1 and self.peek().kind == "O" and self.peek().val == "(":
+                    self.take()
+                    self.expect_op(")")
+                    return self.funcdef(tok)
+            elif tok.kind == "R":
+                self.take()
+                if not tok.heredoc and self.take().kind != "W":
+                    raise Bad("the redirection at line %d has no target" % tok.line)
+            else:
+                break
+        self.check_simple(words)
+        return ("simple", words, words[0].line if words else 0)
+
+    def funcdef(self, name):
+        self.nlskip()
+        body = self.command()
+        self.check_func(name, body)
+        return ("func", name.line)
+
+    def redirs(self):
+        while self.peek().kind == "R":
+            tok = self.take()
+            if not tok.heredoc and self.take().kind != "W":
+                raise Bad("the redirection at line %d has no target" % tok.line)
+
+    def expect_op(self, v):
+        tok = self.take()
+        if tok.kind != "O" or tok.val != v:
+            raise Bad("%s was expected at line %d, not %r" % (v, tok.line, tok.val))
+
+    def expect_word(self, v):
+        tok = self.take()
+        if tok.kind != "W" or tok.raw != v:
+            raise Bad("%s was expected at line %d, not %r" % (v, tok.line, tok.val))
+
+    # ---- the rules
+    def cmd_index(self, words):
+        # the index of the command word: past assignments, builtin, command
+        k = 0
+        while k < len(words) and ASSIGN.match(words[k].raw):
+            k += 1
+        while k < len(words) and words[k].val in ("builtin", "command"):
+            k += 1
+            while k < len(words) and OPTS.fullmatch(words[k].raw):
+                k += 1
+        return k
+
+    def grep_flags(self, words):
+        # (line, the flags among c and P) of the first grep in a simple
+        # command, read from its option words up to --; None without one
+        for j, w in enumerate(words):
+            if w.val not in ("grep", "egrep", "fgrep"):
+                continue
+            flags, skip = set(), False
+            for a in words[j + 1:]:
+                r = a.raw
+                if skip:
+                    skip = False
+                elif r == "--":
+                    break
+                elif r in ("--count", "--perl-regexp"):
+                    flags.add("c" if r == "--count" else "P")
+                elif re.fullmatch(r"-[A-Za-z0-9]+", r):
+                    for x, ch in enumerate(r[1:]):
+                        if ch in "ABCDdefm":
+                            skip = x == len(r) - 2
+                            break
+                        if ch in "cP":
+                            flags.add(ch)
+            return w.line, flags
+        return None
+
+    def check_simple(self, words):
+        k = self.cmd_index(words)
+        if k < len(words) and words[k].val in ("mapfile", "readarray"):
+            self.hits.append((words[k].line, "mapfile"))
+        if k < len(words) and words[k].val in ("declare", "local", "typeset", "readonly"):
+            for w in words[k + 1:]:
+                if not OPTS.fullmatch(w.raw):
+                    break
+                if "A" in w.raw:
+                    self.hits.append((w.line, "assoc-array"))
+                    break
+        g = self.grep_flags(words)
+        if g and "P" in g[1]:
+            self.hits.append((g[0], "grep-P"))
+
+    def check_or_echo(self, pipes, ops):
+        for k, op in enumerate(ops):
+            nxt = pipes[k + 1][0]
+            if op != "||" or nxt[0] != "simple":
+                continue
+            j = self.cmd_index(nxt[1])
+            if j >= len(nxt[1]) or nxt[1][j].val not in ("echo", "printf"):
+                continue
+            for c in pipes[k]:
+                g = self.grep_flags(c[1]) if c[0] == "simple" else None
+                if g and "c" in g[1]:
+                    self.hits.append((g[0], "grep-c-or-echo"))
+
+    def is_test(self, pipe):
+        if len(pipe) != 1:
+            return False
+        c = pipe[0]
+        if c[0] == "test":
+            return True
+        if c[0] != "simple":
+            return False
+        k = self.cmd_index(c[1])
+        return k < len(c[1]) and c[1][k].val in ("[", "test")
+
+    def check_func(self, name, body):
+        if body[0] not in ("group", "sub") or not body[1]:
+            return
+        pipes, ops = body[1][-1]
+        for k, op in enumerate(ops):
+            if op == "&&" and "||" not in ops[k + 1:] and self.is_test(pipes[k]):
+                self.hits.append((pipes[k][0][-1], "test-and-last(" + name.val + ")"))
+                return
+
+
+root, out, files = sys.argv[1], [], 0
+for path in sys.argv[2:]:
+    rel = os.path.relpath(path, root)
+    hits = []
+    try:
+        with open(path, encoding="utf-8", errors="surrogateescape") as f:
+            text = f.read()
+        Scan(text, 1, hits).program()
+        files += 1
+    except (OSError, Bad) as e:
+        out.append("scan-error:%s:%s" % (rel, e))
+    except Exception as e:
+        out.append("scan-error:%s:the scanner failed (%s: %s)" % (rel, type(e).__name__, e))
+    out.extend("%s:%d:%s" % (rel, ln, rule) for ln, rule in sorted(set(hits)))
+out.append("files=%d" % files)
+print("\n".join(out))
+S30_SCAN_PY
+}
+_S30_OUT=$(_s30_scan "$REPO_ROOT" "$REPO_ROOT"/scripts/*.sh "$REPO_ROOT"/scripts/lib/*.sh "$REPO_ROOT"/hooks/handlers/*.sh "$REPO_ROOT"/skills/*/scripts/*.sh)
+_S30_HITS=$(printf '%s\n' "$_S30_OUT" | awk '/^files=/ || !NF { next } { printf "%s%s", sep, $0; sep = "; " }')
+_S30_N=$(printf '%s\n' "$_S30_OUT" | sed -n 's/^files=//p')
+# negative controls: the planted shapes, and a quote that never closes
+cat > "$_S30/planted.sh" <<'S30_PLANTED'
+#!/bin/bash
+# a line marked want:<rule> is flagged with <rule>, and no other line is
+bad_one() { [ -d x ] && [ ! -L x ]; }   # want:test-and-last
+bad_multi() {
+  local X=1
+  [[ -n "$X" ]] && echo "$X"   # want:test-and-last
+}
+bad_chain() {
+  true && [ -f y ] &&   # want:test-and-last
+    echo y
+}
+bad_group() {
+  [ -d x ] && {   # want:test-and-last
+    echo x
+  }
+}
+bad_sub() (
+  test -n "$1" && echo "$1"   # want:test-and-last
+)
+function bad_kw {
+  echo a; [ -n "$1" ] && return 0   # want:test-and-last
+}
+N=$(grep -c x f || echo 0)   # want:grep-c-or-echo
+M="$(cat f | grep -Fc "x y" 2>/dev/null || echo "0")"   # want:grep-c-or-echo
+grep -P 'a+' f   # want:grep-P
+L=$(grep -oP '(?<=a)b' f)   # want:grep-P
+grep --perl-regexp x f   # want:grep-P
+declare -A MAP   # want:assoc-array
+bad_local() { local -A M2; echo; }   # want:assoc-array
+typeset -gA M3   # want:assoc-array
+mapfile -t LINES < f   # want:mapfile
+while readarray -t L; do :; done < f   # want:mapfile
+ok_or() { [ -d x ] && [ ! -L x ] || return 1; }
+ok_true() { [ -d x ] && echo x || true; }
+ok_ret() {
+  [ -d x ] || return 1
+}
+ok_if() {
+  if [ -d x ] && [ -f y ]; then echo z; fi
+}
+ok_last_test() {
+  [ -d x ]
+}
+ok_python() {
+  python3 - <<'PY'
+x = [1] and 2
+if x and y: print("[ -d x ] && y", "grep -P", "mapfile", "declare -A")
+PY
+}
+ok_comment() {
+  echo x
+  # [ -d x ] && y
+}
+ok_strings() {
+  echo "[ -d x ] && y; grep -P a; mapfile x; declare -A y" '[ -d x ] && y'
+  printf '%s\n' "$(grep -c x f || true)" "$(pgrep -P 1 || echo none)" "$(grep -e -P -c f || true)"
+}
+S30_PLANTED
+printf 'ok() {\n  echo %s\n}\n' "'never closed" > "$_S30/broken.sh"
+_S30_NEG=$(_s30_scan "$_S30" "$_S30/planted.sh" "$_S30/broken.sh")
+_S30_WANT=$(awk '/# want:[A-Za-z-]+$/ { sub(/.*# want:/, ""); print NR ":" $0 }' "$_S30/planted.sh")
+_S30_GOT=$(printf '%s\n' "$_S30_NEG" | sed -n 's/^planted\.sh:\([0-9]*\):\([A-Za-z-]*\).*/\1:\2/p')
+if [ -z "$_S30_WANT" ] || [ "$_S30_GOT" != "$_S30_WANT" ]; then
+  _S30_FAIL="$_S30_FAIL planted(want: $(printf '%s' "$_S30_WANT" | tr '\n' ' '); got: $(printf '%s' "$_S30_GOT" | tr '\n' ' '))"
+fi
+for _s30_r in test-and-last grep-c-or-echo grep-P assoc-array mapfile; do
+  case " $(printf '%s' "$_S30_WANT" | tr '\n' ' ') " in
+    *":${_s30_r} "*) ;;
+    *) _S30_FAIL="$_S30_FAIL planted(no-${_s30_r}-line)" ;;
+  esac
+done
+case "$_S30_NEG" in
+  *"scan-error:broken.sh:"*) ;;
+  *) _S30_FAIL="$_S30_FAIL broken(no-scan-error)" ;;
+esac
+_S30_CAP="the shell rules a static scan can decide hold in every shell file Triforge ships (scripts/*.sh, scripts/lib/*.sh, hooks/handlers/*.sh, skills/*/scripts/*.sh): no function ends in a [ ] or [[ ]] && chain with no ||, no grep -c … || echo, no grep -P, no associative array, no mapfile or readarray (AGENTS.md Shell)"
+if [ -z "$_S30_HITS" ] && [ -z "$_S30_FAIL" ]; then
+  row "SELF-30" "claude" "$_S30_CAP" "PASS" "${_S30_N} files parsed as bash, comments, quoted text and here-document bodies as text: 0 hits, no scan error; planted: $(printf '%s\n' "$_S30_WANT" | grep -c . || true) shapes flagged on exactly their lines (test-and-last on one line and several, mid-chain, in a { } and a ( ) body, under the function keyword; grep -c || echo in a command substitution, quoted and not; grep -P, -oP, --perl-regexp; declare, local and typeset -A; mapfile, readarray) and none of the compliant ones ([ ] && [ ] || return 1, && … || true, [ ] || return 1, if [ ] && …; then … fi last, a bare test last, a python here-document holding x and y and the shapes, a comment holding [ -d x ] && y, the shapes in quoted strings, grep -e -P); a quote that never closes is a scan-error" "static"
+else
+  row "SELF-30" "claude" "$_S30_CAP" "FAIL" "$(printf '%s' "hits: ${_S30_HITS:-none}; negative controls:${_S30_FAIL:- ok}" | cut -c1-1500)" "static"
+fi
+rm -rf "$_S30"
+unset _S30_OUT _S30_HITS _S30_N _S30_NEG _S30_WANT _S30_GOT _s30_r

@@ -120,7 +120,7 @@ done
 # symlink, not a file): only then does the hook touch anything under it. A
 # .claude linked elsewhere holds another place's files.
 _ss_claude_dir() {
-  [ -d .claude ] && [ ! -L .claude ]
+  [ -d .claude ] && [ ! -L .claude ] || return 1
 }
 
 # The orientation message is lines joined by real newlines and printed with

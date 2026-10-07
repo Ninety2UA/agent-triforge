@@ -5356,6 +5356,7 @@ if [ "$SELF_ONLY" = "1" ]; then
   SELF_EXPECTED="$SELF_EXPECTED SELF-16"            # at-setup's primitives and instruction files (U15)
   SELF_EXPECTED="$SELF_EXPECTED SELF-27 SELF-28 SELF-17"   # Phase 6: S1 python path, U19 watch cycle, U20 two-lead sprint
   SELF_EXPECTED="$SELF_EXPECTED SELF-29"            # Phase 6 wave 2: agy auto + AGY_ERROR, Cursor probe ids, deleted ledger anchors
+  SELF_EXPECTED="$SELF_EXPECTED SELF-30"            # the shell house rules, scanned (review finding #10)
   SELF_MISSING=""
   for SELF_ID in $SELF_EXPECTED; do
     if ! cut -f1 "$ROWS" | grep -qx "$SELF_ID"; then SELF_MISSING="${SELF_MISSING}${SELF_MISSING:+ }${SELF_ID}"; fi
