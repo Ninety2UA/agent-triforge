@@ -1057,6 +1057,11 @@ fi
 #   pininject (round 4, B8) roster pins holding a newline, as a literal
 #          backslash-n and as a real one, each before a JSON object: each pin
 #          notice one line with its fixed start, no line starting with `{`
+#   killgrace (round 1, #6) the hook's own _ss_bounded text with a 1 s bound
+#          on a claude that ignores SIGTERM, under the timeout binary (skipped,
+#          and said so, without one) and under the watchdog: back in under 6 s
+#          (1 s + the 2 s SIGKILL grace + slack), the stub gone, nothing on
+#          stderr; a call still running at 10 s is killed and recorded as hung
 _S8="${WORK}/self08"
 mkdir -p "$_S8/proj" "$_S8/bin" "$_S8/home"
 cat > "$_S8/bin/agy" <<'EOF'
@@ -1297,13 +1302,57 @@ _O=$( cd "$_S8/proj-degraded" && env -u CLAUDE_PLUGIN_ROOT HOME="$_S8/home" PATH
 _s8_sane "unset-root" "$_O"
 printf '%s\n' "$_O" | grep -Fq "WARNING: the Triforge helper did not load (CLAUDE_PLUGIN_ROOT is unset)" || _S8_FAIL="$_S8_FAIL unset-root-no-helper-notice"
 _s8_has '^Multi-agent framework ready\.$' || _S8_FAIL="$_S8_FAIL unset-root-orientation-missing"
+# killgrace (round 1, #6): _ss_bounded as the hook ships it (its text, from
+# `_ss_bounded() {` to the closing brace at column 0), evaluated in a
+# background subshell under an outer 10 s deadline, so a call that never
+# returns cannot hang the gate. The stub writes its pid and prints nothing.
+_S8_BOUNDED=$(sed -n '/^_ss_bounded() {$/,/^}$/p' "$REPO_ROOT/hooks/handlers/session-start.sh")
+[ -n "$_S8_BOUNDED" ] || _S8_FAIL="$_S8_FAIL killgrace-no-_ss_bounded-in-the-hook"
+mkdir -p "$_S8/deaf"
+printf '#!/bin/sh\n# probe stub (SELF-08): a claude that ignores SIGTERM and never answers; writes its pid to $1\necho $$ > "$1"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S8/deaf/claude"
+chmod +x "$_S8/deaf/claude"
+_S8_KILL=""
+_s8_bounded() { # _s8_bounded <label> <TIMEOUT_BIN, empty: the watchdog> — one 1 s bounded call on the stub; its seconds into _S8_KILL, mismatches into _S8_FAIL
+  local D="$_S8/deaf/$1" P S T0 T N=0
+  mkdir -p "$D/out"
+  T0=$(date +%s)
+  ( TIMEOUT_BIN="$2"; eval "$_S8_BOUNDED"; _ss_bounded 1 "$D/out" "$_S8/deaf/claude" "$D/pid" >/dev/null || true; : > "$D/done" ) </dev/null >/dev/null 2>"$D/err" &
+  P=$!
+  while [ ! -f "$D/done" ] && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done
+  T=$(( $(date +%s) - T0 ))
+  if [ ! -f "$D/done" ]; then
+    _S8_FAIL="$_S8_FAIL killgrace-$1-hung(${T}s)"
+    kill -9 "$P" 2>/dev/null || true
+  elif [ "$T" -ge 6 ]; then
+    _S8_FAIL="$_S8_FAIL killgrace-$1-slow(${T}s)"
+  fi
+  wait "$P" 2>/dev/null || true
+  # gone: a stub killed with its timeout process is reaped by init, so give it a second
+  S=$(cat "$D/pid" 2>/dev/null || true)
+  N=0
+  while [ -n "$S" ] && kill -0 "$S" 2>/dev/null && [ "$N" -lt 10 ]; do sleep 0.1; N=$((N + 1)); done
+  if [ -z "$S" ]; then
+    _S8_FAIL="$_S8_FAIL killgrace-$1-stub-never-ran"
+  elif kill -0 "$S" 2>/dev/null; then
+    _S8_FAIL="$_S8_FAIL killgrace-$1-stub-left-running"
+    kill -9 "$S" 2>/dev/null || true
+  fi
+  if [ -s "$D/err" ]; then _S8_FAIL="$_S8_FAIL killgrace-$1-stderr($(head -1 "$D/err" | sed 's/^.*line [0-9]*: //' | tr -s ' ' | cut -c1-60))"; fi
+  _S8_KILL="${_S8_KILL}${_S8_KILL:+, }$1 ${T}s"
+}
+if [ -n "$TIMEOUT_BIN" ]; then
+  _s8_bounded "$(basename "$TIMEOUT_BIN")" "$TIMEOUT_BIN"
+else
+  _S8_KILL="timeout binary SKIPPED (no timeout or gtimeout on PATH)"
+fi
+_s8_bounded watchdog ""
 _S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines), prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40), and survives a failing or absent helper loader"
 if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
-  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); every run rc 0, no crash, no line starting with {" "static"
+  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; every run rc 0, no crash, no line starting with {" "static"
 else
   row "SELF-08" "claude" "$_S8_CAP" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160); mismatch:${_S8_FAIL:- none}" "static"
 fi
-rm -rf "$_S8/proj" "$_S8/proj-degraded" "$_S8/proj-pin" "$_S8_BAD" "$_S8/home" "$_S8A" "$_S8/skeleton.md" "$_S8/template.md"   # keep $_S8/bin (the stub agy + claude) for SELF-08b; removed there
+rm -rf "$_S8/proj" "$_S8/proj-degraded" "$_S8/proj-pin" "$_S8_BAD" "$_S8/home" "$_S8A" "$_S8/skeleton.md" "$_S8/template.md" "$_S8/deaf"   # keep $_S8/bin (the stub agy + claude) for SELF-08b; removed there
 
 # SELF-08b (KTD12 / R31 / CWE-59): the skills refresh touches only what it can
 # prove it wrote. Session start (CLAUDE_PLUGIN_ROOT = this checkout) on:

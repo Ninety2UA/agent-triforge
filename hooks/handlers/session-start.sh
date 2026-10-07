@@ -510,18 +510,23 @@ SS_XYZ_EOF
 # (_ss_private_tmp: never one other users can rename entries in, B5, G2) and
 # this removes; the watchdog's stdio is /dev/null, so nothing a killed command
 # leaves running holds the caller's command substitution open; each `wait`
-# swallows bash's "Terminated" line.
+# swallows bash's "Terminated" or "Killed" line. Giving up is a SIGTERM, then
+# a SIGKILL 2 s later if the command is still running (`-k 2s`, or the
+# watchdog's second kill), so the call returns within <seconds> + 2 s even
+# when the command ignores SIGTERM. timeout sends its SIGKILL to its whole
+# process group, itself included; the braces around it swallow the "Killed"
+# line bash prints for that.
 _ss_bounded() {
   local SECS="$1" OUT_DIR="$2" OUT CMD_PID DOG_PID
   shift 2
   if [ -n "$TIMEOUT_BIN" ]; then
-    "$TIMEOUT_BIN" "${SECS}s" "$@" 2>/dev/null || true
+    { "$TIMEOUT_BIN" -k 2s "${SECS}s" "$@"; } 2>/dev/null || true
     return 0
   fi
   OUT="${OUT_DIR}/out"
   "$@" </dev/null >"$OUT" 2>/dev/null &
   CMD_PID=$!
-  ( sleep "$SECS"; kill "$CMD_PID" ) </dev/null >/dev/null 2>&1 &
+  ( sleep "$SECS"; kill "$CMD_PID" && sleep 2 && kill -9 "$CMD_PID" || true ) </dev/null >/dev/null 2>&1 &
   DOG_PID=$!
   wait "$CMD_PID" 2>/dev/null || true
   kill "$DOG_PID" 2>/dev/null || true
@@ -530,7 +535,8 @@ _ss_bounded() {
   rm -rf "$OUT_DIR"
 }
 
-# Floor. The answer is read with a 10 s bound, timeout binary or not — a hung
+# Floor. The answer is read with a 10 s bound (12 s for a `claude` that
+# ignores SIGTERM: SIGKILL follows 2 s later), timeout binary or not — a hung
 # `claude` must not stall session start. A missing `claude`, one that does not
 # answer in time, or an answer with no X.Y.Z in it warns about nothing.
 if command -v claude >/dev/null 2>&1; then
