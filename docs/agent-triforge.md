@@ -1,25 +1,25 @@
 # Multi-agent coordination framework: hybrid pattern
 
-> Claude Code as lead agent with native subagents, agent teams, and external agent delegation to Antigravity CLI and Codex CLI
+> One lead CLI (Claude Code or Codex) with specialist personas, leased builders and delegation to the other roster CLIs; native subagents and agent teams under a Claude Code lead
 
 ---
 
 ## Overview
 
-This framework establishes Claude Code as the lead agent in a multi-agent system. Before any planning begins, Antigravity CLI performs a Phase 0 codebase analysis -- ingesting the full repository to produce an up-to-date picture of the architecture, patterns, and contracts. Claude Code then plans work, validates the plan, decomposes goals into tasks, and assigns each to a roster member (`ops/roster.toml`). Every implementation task — including the lead's own — is built under a per-task lease in an isolated worktree and merged only after cross-review by a pinned non-author reviewer; the lead orchestrates the pool, injects context, and performs all merges. Review and testing fan out to Antigravity CLI, Codex CLI, and specialized Claude subagents in parallel, never sequentially.
+This framework makes one CLI the lead agent in a multi-agent system: Claude Code or Codex, chosen in `at-setup` and recorded in the `[lead]` table of `ops/roster.toml` (Claude Code when the table is absent). Before any planning begins, Antigravity CLI performs a Phase 0 codebase analysis -- ingesting the full repository to produce an up-to-date picture of the architecture, patterns, and contracts. The lead then plans work, validates the plan, decomposes goals into tasks, and assigns each to a roster member (`ops/roster.toml`). Every implementation task — including the lead's own — is built under a per-task lease in an isolated worktree and merged only after cross-review by a pinned non-author reviewer; the lead orchestrates the pool, injects context, and performs all merges. Review and testing fan out to Antigravity CLI, Codex CLI, and the specialist personas in parallel, never sequentially.
 
-The coordination model is hybrid: file-based shared state (TASKS.md, MEMORY.md, CHANGELOG.md, CONTRACTS.md) provides the persistent context layer, while direct bash invocation provides the real-time orchestration layer. Claude Code owns both.
+The coordination model is hybrid: file-based shared state (TASKS.md, MEMORY.md, CHANGELOG.md, CONTRACTS.md) provides the persistent context layer, while direct bash invocation provides the real-time orchestration layer. The lead owns both.
 
 ### Agents and their roles
 
 | Agent | Invocation | Strengths | Primary domain |
 |---|---|---|---|
-| Claude Code (Fable 5.1 at max; Opus 5.5 at max when the host lacks Fable) | Native (lead agent) | Complex code generation, multi-file refactors, system design, business logic | Feature implementation, API design, database schemas, orchestration |
+| Claude Code (Fable 5.1 at max; Opus 5.5 at max when the host lacks Fable) | Native when it leads; the `claude -p` worker lane under a Codex lead | Complex code generation, multi-file refactors, system design, business logic | Feature implementation, API design, database schemas, orchestration |
 | Claude Code subagents (Opus 5.5 floor; Fable 5.1 via the spawn-time override) | Native Agent tool | Parallel isolated tasks within Claude's domain | Splitting large build tasks into parallel tracks |
 | Claude Code agent teams (Opus 5.5 floor; Fable 5.1 via the spawn-time override) | Native team coordination | Multi-instance collaboration with shared task lists | Complex builds with 5+ interdependent tasks |
 | Specialist personas (19; the never-downgrade trio at the top tier, with the spawn-time Fable override) | `dispatch_persona` with the persona's manifest entry | Focused expertise (security, performance, plan validation, etc.) | Review enhancement, research, verification |
-| Antigravity CLI (`agy`) | `agy -p "..."` via bash, agent definitions in `antigravity-agents/agents/` (an agy plugin in the agy Markdown-agent format; `TRIFORGE_AGY_MODE` selects prompt-prefix injection — the shipped default — or native `--agent`) | Large context window (1M tokens, Gemini 3.8 Flash (High) by default; 3.1 Pro opt-in), whole-repo analysis, different model perspective, per-agent tools allowlists | Codebase analysis (Phase 0), code review, documentation, architecture audits |
-| Codex CLI | `codex exec "..."` via bash, Triforge agent definitions deployed as `.codex/triforge-agents.toml` (replayed as flags by the helper) | Native test runner, subagent parallelism, sandbox execution, per-agent sandbox modes | Testing, infrastructure, deployment, benchmarking, security review |
+| Antigravity CLI (`agy`) | `agy -p "..."` via bash, agent definitions in `antigravity-agents/agents/` (an agy plugin in the agy Markdown-agent format; `TRIFORGE_AGY_MODE` selects native `--agent` when agy lists the agent, which is the shipped `auto` default, or prompt-prefix injection) | Large context window (1M tokens, Gemini 3.8 Flash (High) by default; 3.1 Pro opt-in), whole-repo analysis, different model perspective, per-agent tools allowlists | Codebase analysis (Phase 0), code review, documentation, architecture audits |
+| Codex CLI | Native when it leads; otherwise `codex exec "..."` via bash, Triforge agent definitions deployed as `.codex/triforge-agents.toml` (replayed as flags by the helper) | Native test runner, subagent parallelism, sandbox execution, per-agent sandbox modes | Testing, infrastructure, deployment, benchmarking, security review |
 
 > **Builder pool.** The rows above are the shipped default posture. Under the builder pool, any roster member — the core trio plus enrolled optional members (OpenCode, Kimi, Cursor, Grok Build, and Devin once the roster records its builder opt-in) — is an eligible builder assigned via `ops/roster.toml`; every build runs under a per-task lease in an isolated worktree and merges only after cross-review by a pinned non-author reviewer. The single-writer rule is retired: safety is leases + worktree isolation + cross-review, not write-restriction.
 
@@ -27,11 +27,11 @@ The coordination model is hybrid: file-based shared state (TASKS.md, MEMORY.md, 
 
 1. **File-based layer (persistent):** All agents read and write to shared markdown files in `ops/`. This is the source of truth that persists across sessions, provides audit trails, and enables async coordination.
 
-2. **Direct invocation layer (real-time):** Claude Code calls Antigravity and Codex via bash within a single session. Output is captured, parsed, and acted on immediately.
+2. **Direct invocation layer (real-time):** The lead calls the other CLIs via bash within a single session. Output is captured, parsed, and acted on immediately.
 
 3. **Persona layer (parallel):** The lead runs reviewers, checkers and researchers as personas through `dispatch_persona`. Each one starts in a fresh context with the tool class, model tier and turn budget its entry in `personas/manifest.toml` sets, and writes its report to a file the lead reads.
 
-4. **Agent team layer (collaborative):** For complex builds, Claude Code spawns agent teams where multiple Claude instances coordinate via shared task lists, direct messaging, and file ownership rules. Each teammate gets an independent context window. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"`.
+4. **Agent team layer (collaborative):** For complex builds under a Claude Code lead, Claude Code spawns agent teams where multiple Claude instances coordinate via shared task lists, direct messaging, and file ownership rules. Each teammate gets an independent context window. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"`.
 
 ---
 
@@ -41,25 +41,25 @@ All files live in `ops/` at the repo root. Every agent reads all shared files be
 
 | File | Purpose | Owner |
 |---|---|---|
-| `TASKS.md` | Work queue with status tracking (Active/In Progress/Review/Blocked/Done) | Claude generates and maintains |
+| `TASKS.md` | Work queue with status tracking (Active/In Progress/Review/Blocked/Done) | The lead generates and maintains |
 | `MEMORY.md` | Architectural decisions, patterns, gotchas, interface proposals | All agents append |
 | `CHANGELOG.md` | Audit trail with agent attribution | All agents append |
-| `CONTRACTS.md` | Shared TypeScript interface definitions — treated as immutable unless change proposed via MEMORY.md | Claude modifies, Antigravity discovers |
+| `CONTRACTS.md` | Shared TypeScript interface definitions — treated as immutable unless change proposed via MEMORY.md | The lead modifies, Antigravity discovers |
 | `ARCHITECTURE.md` | System design document | Antigravity writes during Phase 0 |
 | `AGENTS.md` | Master operating protocol read by all agents | Manual |
 | `GOALS.md` | High-level product goals | Manual |
-| `CONVENTIONS.md` | Code style and standards | Antigravity discovers, Claude maintains |
-| `STATE.md` | Session continuity — current phase, progress, next actions | Claude writes on pause/wrap |
-| `REVIEW_ANTIGRAVITY.md` | Antigravity's review output (temporary) | Antigravity writes, Claude reads |
-| `REVIEW_CODEX.md` | Codex's review output (temporary) | Codex writes, Claude reads |
-| `TEST_RESULTS.md` | Test results (temporary) | Codex writes, Claude reads |
-| `solutions/` | Documented solved problems for institutional knowledge | Claude writes via knowledge-compounding skill |
-| `decisions/` | Architecture decision records (ADRs) | Claude writes via knowledge-compounding skill |
-| `archive/` | Archived review + test files by date | Claude moves during Phase 6 |
+| `CONVENTIONS.md` | Code style and standards | Antigravity discovers, the lead maintains |
+| `STATE.md` | Session continuity — current phase, progress, next actions | The lead writes on pause/wrap |
+| `REVIEW_ANTIGRAVITY.md` | Antigravity's review output (temporary) | Antigravity writes, the lead reads |
+| `REVIEW_CODEX.md` | Codex's review output (temporary) | Codex writes, the lead reads |
+| `TEST_RESULTS.md` | Test results (temporary) | Codex writes, the lead reads |
+| `solutions/` | Documented solved problems for institutional knowledge | The lead writes via knowledge-compounding skill |
+| `decisions/` | Architecture decision records (ADRs) | The lead writes via knowledge-compounding skill |
+| `archive/` | Archived review + test files by date | The lead moves during Phase 6 |
 
 ### TASKS.md
 
-The work queue. Claude Code generates and maintains this file.
+The work queue. The lead generates and maintains this file.
 
 ```markdown
 # Sprint: [goal name]
@@ -278,7 +278,7 @@ Skills reach the loader through `scripts/skill-locator/locate-triforge.sh`, a PO
 
 **Project bootstrap (KTD11, R37).** `triforge_bootstrap` (`scripts/lib/bootstrap.sh`) sets up the current directory as a Triforge project: the `ops/` skeleton, the digest-stamped `.agents/skills/` refresh, the per-CLI template copies (with the one-time `.codex/` migrations and their symlink guards), the Antigravity agent pack, `ops/roster.toml`, and the plugin-root pointer. It works in the directory `_lead_roster_path` anchors the roster on: the nearest one holding `.git`, else the working directory. It runs in a subshell, so the caller's working directory does not change. It refuses to run when that directory is the home directory or contains it, even when the home directory is a repository, because the project files there would be each CLI's user-tier config. The session-start hook then writes nothing there either and prints one warning. The check compares the two directories by identity (device and inode), so it also catches a case-variant spelling of the path on a case-insensitive volume. If your home directory is a git repository, run `git init` in the project so the project becomes its own repository. The session-start hook uses the same directory, except for its instruction-file notices, which look at the directory the session started in. A Codex lead runs plugin hooks only after the user trusts them, so the hook is not the only caller: session start calls it, and so do the `at-setup`, `at-build` and `at-review` preambles. Each step copies only what is missing or waits on a version or digest change, so a second run writes and prints nothing. Every file it writes goes through one writer, `_tb_write`. The writer refuses a path where a directory on the way is a symlink or a file, creates new files exclusively, and replaces an existing file by renaming a temporary file with an unpredictable name over it. It walks the directories with directory descriptors and creates, writes and renames relative to the last one, so a directory swapped for a symlink mid-write cannot redirect the write. It also refuses to append to a file that has other hard links. The skills refresh (`scripts/lib/skills-sync.py`) and the one-time move of `.codex/agents/agents.toml` also work relative to directory descriptors. If that move has to cross filesystems, it copies the file and then removes the old one. If it fails, the bootstrap leaves the old file where it is and doesn't install the shipped default in its place. So do the roster writers (`roster_write_member`, `roster_write_role`, `roster_write_lead`, and the hook's headless enrollment, which goes through them). They write `ops/roster.toml` only as a regular file in the project's real `ops/` directory and refuse, with rc 6, an `ops` that links elsewhere. When the hook's headless enrollment is refused, the orientation prints one warning that names the refusal. A link planted in the project therefore cannot redirect a write outside it or into an instruction file. A refused write prints a warning that names the file, and the bootstrap returns 80. Notices go to stderr, one per line, under a prefix the caller picks (the hook passes `session-start: ` and folds them into its orientation). It returns 0; 80 when a step degraded (a write that failed or was refused, a failed or timed-out skills refresh, a failed pack install, or a pointer it could not place, for example when git cannot read the repository); or 45 under the worker marker or inside a lease root. The guard is `_lead_only --any-host`, because the hook, a Codex lead's shell and a terminal all call it. The bootstrap writes the pointer only where the locator would accept it: a real `.agents` directory, an untracked and ignored file, and a plugin root outside the project. The bootstrap never edits a tracked `.agents/.gitignore`; it refuses the pointer, and the notice names the line to add. SELF-21 covers a fresh project with no hook run.
 
-**How `invoke_antigravity` works:** Routing follows `TRIFORGE_AGY_MODE` (`injection` | `native` | `auto`; default `injection` this release — KTD10): `injection` extracts the body of `antigravity-agents/agents/<name>.md` and injects it as a prompt prefix; `native` passes `--agent <name>` and falls back to injection with a warning when `agy agents` does not list it; `auto` goes native only when listed. Every call pins the model (`--model "Gemini 3.8 Flash (High)"` by default — agy's own default is a `(Medium)` variant; `AGY_MODEL`/the roster override it), binds the workspace with `--add-dir "$PWD"`, caps agy's own headless wait with `--print-timeout`, and runs `--output-format json`: the JSON envelope, not the exit code, is the completion signal (since agy 1.1.20/1.1.28 benign tool errors and timeout expiry exit 0). `_agy_parse_envelope` writes the prose `response` to the output file and `status`/`denied_actions`/resolved `mode` to `.status`/`.denied`/`.mode` sidecars; an empty response with denials is a deterministic failure naming the user-tier allow rule (`read_url(*)` for the research lanes), an empty response without denials is `no-output`. Failures are classified (KTD-9) via `INVOKE_FAILURE_CLASS`: `deterministic` fails fast with fix guidance, `timeout` returns to the caller for requeue policy, and only `retryable` failures get one retry with the raw prompt. Each call logs `agent/mode/model` to stderr.
+**How `invoke_antigravity` works:** Routing follows `TRIFORGE_AGY_MODE` (`injection` | `native` | `auto`; default `auto` since 4.0, after AGY-12 and AGY-16 passed in two consecutive probe records — KTD10, D-042): `injection` extracts the body of `antigravity-agents/agents/<name>.md` and injects it as a prompt prefix; `native` passes `--agent <name>` and falls back to injection with a warning when `agy agents` does not list it; `auto` goes native only when listed. Every call pins the model (`--model "Gemini 3.8 Flash (High)"` by default — agy's own default is a `(Medium)` variant; `AGY_MODEL`/the roster override it), binds the workspace with `--add-dir "$PWD"`, caps agy's own headless wait with `--print-timeout`, and runs `--output-format json`: the JSON envelope, not the exit code, is the completion signal (since agy 1.1.20/1.1.28 benign tool errors and timeout expiry exit 0). `_agy_parse_envelope` writes the prose `response` to the output file and `status`/`denied_actions`/resolved `mode` to `.status`/`.denied`/`.mode` sidecars; an empty response with denials is a deterministic failure naming the user-tier allow rule (`read_url(*)` for the research lanes), an empty response without denials is `no-output`. Failures are classified (KTD-9) via `INVOKE_FAILURE_CLASS`: `deterministic` fails fast with fix guidance, `timeout` returns to the caller for requeue policy, and only `retryable` failures get one retry with the raw prompt. When agy exits 3, the `AGY_ERROR: {status, code, retryable, id}` line it prints on stderr supplies the failure's reason (D-043). Each call logs `agent/mode/model` to stderr.
 
 **How `invoke_codex` works:** Codex has no CLI flag to select a subagent — upstream "subagents" only spawn from within a running Codex session. The helper simulates agent selection by extracting the agent's config from the Triforge-internal TOML and passing it as `-m` (model), `-c model_reasoning_effort=` (effort replay — `gpt-6-astra` at `xhigh` on every lane), `-s` (sandbox), `-c approval_policy=` overrides, plus `--output-schema` when the agent declares one (resolved at the plugin tier), with `developer_instructions` injected as prompt prefix. Lookup order: project `.codex/triforge-agents.toml` first, then the plugin's `codex-agents/agents.toml`. The file never lives under `.codex/agents/` — Codex ≥ 0.147 sweeps that directory as standalone role files and warns on a multi-agent file.
 
@@ -289,14 +289,14 @@ Skills reach the loader through `scripts/skill-locator/locate-triforge.sh`, a PO
 
 ### Hard constraint: Antigravity agents do not fan out
 
-Claude (the lead) is the only agent that launches Antigravity agents; no Antigravity agent fans out to other Antigravity agents. If you need parallel Antigravity work, launch multiple top-level `invoke_antigravity` calls from Claude's shell in the background (as `at-review` already does).
+The lead is the only agent that launches Antigravity agents; no Antigravity agent fans out to other Antigravity agents. If you need parallel Antigravity work, launch multiple top-level `invoke_antigravity` calls from the lead's shell in the background (as `at-review` already does).
 
 ### Why portable skills instead of Antigravity's native subsystems
 
 Antigravity CLI ships its own plugin system (`agy plugin {install,uninstall,list,enable,disable}`) and a user-tier skills directory (`~/.gemini/antigravity-cli/skills/`). We use the plugin system only as an agent-definition carrier (`antigravity-agents/` is a valid agy plugin), not as a skills registry:
 
 - **Skills:** Our 10 portable skills in `skills/` are markdown files consumed by all three agents (Claude/Antigravity/Codex) via prompt-prefix injection or native definition embedding, plus the `.agents/skills/` workspace copy for agents that discover workspace skills. Registering them per-CLI would fragment the portability story. The 17 lead workflows in the same tree (`skills/at-*/`) are the lead's alone and stay out of that copy.
-- **Hooks:** Our `hooks/handlers/*.sh` are Claude Code lifecycle hooks (SessionStart, Stop, PostToolUse, etc.) — the Antigravity CLI runs as a subprocess of a Claude Code session, a different layer with different events. Project-tier agy hooks are an open watch, not an enforcement path: they fired under `agy -p` on agy 1.2.0 in the documented `.agents/hooks.json` named-hook shape (lead marker-file re-probe 2026-09-11 — the July "inert headless" reading was a probe-shape error) but not on agy 1.2.1 the same evening (AGY-08 FAIL in the shipped record, both hooks.json files loaded, no handler executed). Triforge ships none either way: its lifecycle logic stays in the Claude Code hooks.
+- **Hooks:** Our `hooks/handlers/*.sh` are the lead's lifecycle hooks (SessionStart, Stop, PostToolUse, etc.; Codex runs them once you trust them) — the Antigravity CLI runs as a subprocess of the lead's session, a different layer with different events. Project-tier agy hooks are an open watch, not an enforcement path: they fired under `agy -p` on agy 1.2.0 in the documented `.agents/hooks.json` named-hook shape (lead marker-file re-probe 2026-09-11 — the July "inert headless" reading was a probe-shape error) but not on agy 1.2.1 the same evening (AGY-08 FAIL in the shipped record, both hooks.json files loaded, no handler executed). Triforge ships none either way: its lifecycle logic stays in the Claude Code hooks.
 
 ---
 
@@ -402,9 +402,9 @@ The master operating protocol. All agents read this.
 ### Lead agent protocol (formerly the CLAUDE.md template; the root AGENTS.md and the skills carry it now)
 
 ```markdown
-# Claude Code operating protocol
+# Lead agent operating protocol
 
-You are the lead agent in a multi-agent repository. You have three responsibilities:
+You are the lead agent (Claude Code or Codex) in a multi-agent repository. You have three responsibilities:
 1. Build features (your primary strength)
 2. Coordinate the other agents (Antigravity CLI and Codex CLI)
 3. Manage specialized subagents and agent teams for complex work
@@ -941,7 +941,7 @@ Two mechanisms keep a sprint honest and alive:
 
 #### Completion gating (native /goal + sentinel)
 
-Sprint completion is gated by Claude Code's native `/goal` command (probe CC-03; this replaced the retired `ship-loop.sh` Stop hook and its `<promise>` convention):
+Sprint completion is gated by the `ops/.sprint-complete` sentinel, plus Claude Code's native `/goal` command under a Claude Code lead (probe CC-03; this replaced the retired `ship-loop.sh` Stop hook and its `<promise>` convention):
 - `scripts/coordinate.sh` reads the lead's `goal_gate`. Under a Claude Code lead each session prompt leads with the `/goal` line carrying the completion checklist, so Claude Code hard-gates headless sessions natively. A Codex lead has no goal gate, so the prompt leads with `$agent-triforge:at-ship "<goal>"` and the session completes on the sentinel alone (KTD14). The goal is in double quotes, so a `--team` or `--convergence` inside it stays part of the goal
 - Interactive `at-ship` and `at-coordinate` print a copyable `/goal` line at sprint start (a skill cannot invoke `/goal` itself: under a Claude Code lead it is user-typed or the leading line of a `claude -p` prompt; a Codex lead has no such gate and completes on the sentinel alone, KTD14) and hold the lead to the same checklist
 - The session creates the runtime marker `ops/.sprint-complete` ONLY after the verification checklist passes — the marker is gitignored and is the sole completion signal outer tooling reads
@@ -1036,7 +1036,7 @@ Antigravity, Codex and the review personas never write to the same files during 
                     └──────────┬───────────────┘
                                │
                     ┌──────────▼───────────────┐
-                    │  Claude Code fixes issues │
+                    │  The lead fixes issues    │
                     └──────────────────────────┘
 ```
 
@@ -1046,7 +1046,7 @@ When reviewers disagree:
 
 1. **Both agree on the problem:** Take the more specific recommendation
 2. **Different problems, same code:** Address both
-3. **Contradictory recommendations:** findings-synthesizer flags as CONTRADICTION. Claude decides based on ARCHITECTURE.md and MEMORY.md. Log decision in MEMORY.md
+3. **Contradictory recommendations:** findings-synthesizer flags as CONTRADICTION. The lead decides based on ARCHITECTURE.md and MEMORY.md. Log decision in MEMORY.md
 4. **One approves, one flags:** The flag wins. Address the concern
 
 ---
@@ -1095,7 +1095,7 @@ YOU
  │
  ▼
 ┌───────────────────────────────────────────────────────────────┐
-│ CLAUDE CODE (Lead Agent)                                       │
+│ LEAD AGENT (Claude Code or Codex)                              │
 │                                                                │
 │ Pre-Plan: SEARCH INSTITUTIONAL KNOWLEDGE                       │
 │ └── learnings-researcher searches ops/solutions/, ops/decisions│
@@ -1104,7 +1104,7 @@ YOU
 │ ├── invoke_antigravity "codebase-analyst" "Analyze codebase..."│
 │ ├── Antigravity writes ARCHITECTURE.md, MEMORY.md, CONTRACTS.md│
 │ ├── research-synthesizer merges findings (optional)            │
-│ └── Claude reads updated ops/ files                            │
+│ └── The lead reads updated ops/ files                          │
 │                                                                │
 │ Phase 1: PLAN (writing-plans + shadow-path-tracing skills)     │
 │ ├── Read GOALS.md, ARCHITECTURE.md, CONTRACTS.md, MEMORY.md   │
@@ -1194,13 +1194,21 @@ opencode run --format json -m openrouter/z-ai/glm-5.3 "Respond with only: READY"
 kimi -p "Respond with only: READY"                                                # Kimi Code ≥ 0.33.0 (OAuth device-code or API key)
 cursor-agent -p --trust --model cursor-grok-4.6-xhigh "Respond with only: READY"  # Cursor (date-versioned; pin the suffixed Grok id, never the Auto router; `agent` when only the new name exists)
 grok --model grok-4.7 --output-format json -p "Respond with only: READY"          # Grok Build ≥ 1.0.34 (`grok login`, or XAI_API_KEY)
+devin --model swe-1-6-slow --respect-workspace-trust false -p "Respond with only: READY"  # Devin CLI ≥ 3000.10.31 (`devin auth login`; at-setup asks for consent first)
 ```
 
 ### Plugin installation
 
+Install the plugin into the CLI that leads. Codex reads the same `.claude-plugin/` manifests (D-048).
+
 ```bash
+# Claude Code leads
 claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge
 claude plugin install agent-triforge@agent-triforge
+
+# Codex leads
+codex plugin marketplace add Ninety2UA/agent-triforge
+codex plugin add agent-triforge@agent-triforge
 ```
 
 The plugin provides personas, skills and hooks automatically. Your project gets an `ops/` directory (bootstrapped on the first session, or by `at-setup`):
@@ -1277,7 +1285,7 @@ Hook registration uses a double-quoted `"${CLAUDE_PLUGIN_ROOT}"` for plugin-rela
 
 The framework tracks its own dependencies instead of drifting. The two watch commands are **repo-local maintainer tooling**: they live in `.claude/commands/` of the agent-triforge checkout (the plugin ships no commands directory; its lead workflows are the `skills/at-*/` skills), read `ops/watch-registry.toml` (a seeded, editable list of watch targets, tracked in this repo), and share the repo-local `.claude/skills/watch-cycle/SKILL.md` methodology (primary-source research → per-target changelog → gap table vs current Triforge → adopt/defer ADR):
 
-- **`/cli-watch`** — checks the six CLIs against primary sources, writes a gap report + adopt/defer ADR to `ops/research/` and `ops/decisions/`, and re-runs `scripts/probe-capabilities.sh`.
+- **`/cli-watch`** — checks the eight CLIs against primary sources, writes a gap report + adopt/defer ADR to `ops/research/` and `ops/decisions/`, and re-runs `scripts/probe-capabilities.sh`.
 - **`/repo-watch`** — mines external reference repos for adoptable patterns and produces prioritized recommendations (recommends only; never implements).
 
 Run either from a clone of this repo — manually, or scheduled monthly as a Claude Code cloud Routine. Fetched pages are treated as untrusted evidence, never as instructions; a dead or renamed registry entry is flagged in the report, never silently dropped.
@@ -1358,7 +1366,7 @@ Antigravity and Codex agent files use their CLIs' own conventions: Antigravity (
 - **Antigravity permission guardrails** — `antigravity-agents/permissions.json` documents the three denies in agy's action syntax — `command(rm -rf)`, `command(git push)`, `command(sudo)` — and `templates/.antigravity/settings.json` ships them as a mergeable `permissions` block (deny intent). Project-tier settings.json is **not read headless** (`.gemini/`, `.agents/`, `.antigravity/` — probed 2026-07-17, re-confirmed 2026-09-11); the only tier agy enforces headless is the user tier `~/.gemini/antigravity-cli/settings.json`, which Triforge never writes (R18). Project-tier hooks **fired on agy 1.2.0** (lead marker-file re-probe 2026-09-11 05:03, documented `.agents/hooks.json` named-hook shape, `--add-dir` bound — the July "inert headless" reading was a probe-shape error), but the harness re-run the same evening on **agy 1.2.1** recorded AGY-08 **FAIL** with both hooks.json files loaded (`agy -p /hooks` lists them; no handler executes) — treat headless agy hooks as an open watch, not an enforcement path; Triforge ships no agy hooks and relies on none (AGY-08). The per-agent `tools` allowlist + `commandExecutionPolicy` in `antigravity-agents/agents/*.md` is the primary guardrail in every mode (`architecture-reviewer` and `documentation-writer` carry `commandExecutionPolicy: "off"` and omit `run_command` — the omission is the denial). In injection mode (`TRIFORGE_AGY_MODE=injection`, the shipped default — KTD10) agy's headless permission auto-deny still applies and denials surface in the JSON envelope; in native mode (`native`, or `auto` when `agy agents` lists the name) the two `commandExecutionPolicy: auto` agents run `run_command` live and their enforced boundary is the user-tier deny list — which `at-setup` documents and only the user writes.
 - **Antigravity headless completion signal (D-032/KTD2)** — `invoke_antigravity` runs `--output-format json` and reads the envelope instead of the exit code (since agy 1.1.20/1.1.28 benign tool errors and `--print-timeout` expiry exit 0, and a denied tool leaves `status: SUCCESS` with an empty `response`). `_agy_parse_envelope` writes the prose `response` to the output file and the `status`, `denied_actions`, and resolved `mode` to the `<out>.status`, `<out>.denied`, `<out>.mode` sidecars (background call sites cannot read a shell variable). An empty `response` with `denied_actions` is a deterministic failure whose message names the user-tier allow rule the run needs — `permissions.allow: ["read_url(*)"]` in `~/.gemini/antigravity-cli/settings.json` for the research lanes (a broad grant; human-written, never by Triforge). A non-empty response with denials still succeeds; the promoted `ops/` file gets an HTML-comment header listing them and the mode. Write denials against `ops/` are never fatal (`at-review` and `at-deep-research` promote captured output).
 - **Codex `[agents]` caps** (`max_depth = 2`, `max_threads = 4`, `default_subagent_model`/`default_subagent_reasoning_effort`) are Triforge-internal declarations of the intended fan-out (one spawn round, no spawn-of-spawn, every spawn pinned to the shipped model + effort); nothing replays them as `-c` overrides yet (deferred). `max_depth` is honored only by the V1 multi-agent runtime — `gpt-6-astra` runs `multi_agent_v2` by catalog and ignores it — and `job_max_runtime_seconds` is a no-op on current Codex (D-026).
-- **Codex auto-memory disabled by default** — Triforge ships `templates/.codex/config.toml` with `[memories] use_memories = false` to prevent Codex's v0.129.0 pipeline from writing `~/.codex/memories/{MEMORY.md, skills/, ...}` in parallel with Triforge's `ops/MEMORY.md` and `ops/solutions/`. Users who want Codex memories can remove the block or override in `~/.codex/config.toml`. The project `.codex/config.toml` applies only in a **trusted** project: Codex ≥ 0.147 skips project-tier `config.toml`/`hooks.json`/`.rules` under `exec` when trust is unset (unset means untrusted for those files, and `exec` never prompts). Project `AGENTS.md` is different (D-045): since 0.150 it is skipped only when trust is explicitly `untrusted`, so an unset project still loads the root `AGENTS.md`. The durable path is a user-tier entry `[projects."<abs path>"] trust_level = "trusted"` in `~/.codex/config.toml`, which `at-setup` detects and prints but never writes (R18); linked worktrees inherit the root checkout's trust.
+- **Codex auto-memory disabled by default** — Triforge ships `templates/.codex/config.toml` with `[memories] use_memories = false` to prevent Codex's v0.129.0 pipeline from writing `~/.codex/memories/{MEMORY.md, skills/, ...}` in parallel with Triforge's `ops/MEMORY.md` and `ops/solutions/`. Users who want Codex memories can remove the block or override in `~/.codex/config.toml`. The project `.codex/config.toml` applies only in a **trusted** project: Codex ≥ 0.147 skips project-tier `config.toml`/`hooks.json`/`.rules` under `exec` when trust is unset (unset means untrusted for those files, and `exec` never prompts). Project `AGENTS.md` is different (D-045): since 0.150 it is skipped only when trust is explicitly `untrusted`, so an unset project still loads the root `AGENTS.md`. The durable path is a user-tier entry `[projects."<abs path>"] trust_level = "trusted"` in `~/.codex/config.toml`, which `at-setup` detects and prints but never writes (R18). `codex_trust_status` looks the entry up for the path as given and then for its physical path (realpath), because Codex treats two spellings of one directory as two keys (CDX-22).
 - **Antigravity skills interop** — `triforge_bootstrap` (`scripts/lib/bootstrap.sh`, run by `hooks/handlers/session-start.sh` and the `at-setup`, `at-build` and `at-review` preambles) copies `skills/` to `.agents/skills/` (the Antigravity workspace-skills tier and the cross-CLI agentskills.io path, read by agy, Codex, OpenCode, Cursor, and Kimi — not Claude Code) so those CLIs pick up Triforge's portable skills without per-prompt `$(cat ...)` injection. The copy is refreshed on plugin version change under a stamp (`.agents/skills/.triforge-plugin-version`, written last, safe to commit) that records a content digest per directory Triforge wrote: a shipped-name directory is replaced or retired only while its digest still matches (a 3.3.0–3.3.2 stamp without digests is migrated against `scripts/lib/skill-digests.txt`, the released copies); an edited copy, or a user directory under a shipped name, is kept with a notice, and a differently named directory is never touched (KTD12, `scripts/lib/skills-sync.py` — the same rule provisions lease worktrees). Project-tier agy hooks: fired on agy 1.2.0, FAIL again on 1.2.1 the same day (AGY-08 — open watch); Triforge ships none; the retired Gemini hooks example was removed with the Gemini lane.
 
 ### Compatibility notes and known-fails
@@ -1376,7 +1384,7 @@ Floors per KTD-13; the compatibility table itself is in the README.
 
 **Known-fails / partial support:**
 - Codex hooks **fire under `codex exec`** (probe CDX-04 PASS on 0.154.0, re-verified 2026-09-11: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`) given the nested `hooks.json` shape, a project-tier `.codex/hooks.json` and hook trust; the probe passes `--dangerously-bypass-hook-trust` to stand in for that trust. `invoke_codex` never passes the flag, so project and plugin hooks go through Codex's own trust under `exec`; the shipped `templates/.codex/hooks.json` has no hooks. Project trust gates every project-tier file: `.codex/hooks.json`, `.codex/config.toml` and `.rules` are skipped under `exec` while trust is unset, and project `AGENTS.md` is skipped only when trust is explicitly `untrusted` (D-045). The durable path is the user-tier `[projects."<abs>"] trust_level = "trusted"` entry (`at-setup` detects it, never writes it). See `ops/decisions/2026-07-18-codex-hooks-under-exec.md` and D-026.
-- Antigravity plugin agents: the pack now ships the agy Markdown-agent format (`mainAgent`/`subagent`/`commandExecutionPolicy`, agy tool names — D-027); whether `agy agents` lists the four Triforge agents is verified by row AGY-12 in the newest record, and injection stays the default routing until AGY-12 and AGY-16 pass for a full cycle (KTD10). Project-tier hooks fired headless on agy 1.2.0 with the documented `.agents/hooks.json` shape but not on 1.2.1 (AGY-08 FAIL in the fresh record — open watch); project-tier permission allow-rules do not apply headless (user tier only) — the `at-review` and `at-deep-research` workflows compensate by promoting captured output into `ops/` when the agent could not write there directly.
+- Antigravity plugin agents: the pack now ships the agy Markdown-agent format (`mainAgent`/`subagent`/`commandExecutionPolicy`, agy tool names — D-027); whether `agy agents` lists the four Triforge agents is verified by row AGY-12 in the newest record. AGY-12 and AGY-16 passed in two consecutive records, so `auto` is the default routing since 4.0 (KTD10, D-042), and a regression in either row reverts it. Project-tier hooks fired headless on agy 1.2.0 with the documented `.agents/hooks.json` shape but not on 1.2.1 (AGY-08 FAIL in the fresh record — open watch); project-tier permission allow-rules do not apply headless (user tier only) — the `at-review` and `at-deep-research` workflows compensate by promoting captured output into `ops/` when the agent could not write there directly.
 
 ### Release checklist
 

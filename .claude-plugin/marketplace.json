@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "Agent Triforge — a core trio of AI coding CLIs forging production-grade code together. This marketplace ships exactly one plugin: agent-triforge (the repository root).",
-    "version": "3.3.3"
+    "version": "4.0.0"
   },
   "plugins": [
     {
       "name": "agent-triforge",
-      "description": "Claude Code leads a six-CLI builder pool (Antigravity, Codex, and the optional OpenCode / Kimi / Cursor tier) through file-based protocols, per-task leases, portable skills, and parallel review swarms.",
+      "description": "Claude Code or Codex leads an eight-CLI builder pool (the core trio plus the optional OpenCode, Kimi, Cursor, Devin and Grok Build) through file-based protocols, per-task leases, portable skills and parallel review swarms.",
       "source": "./",
-      "version": "3.3.3",
+      "version": "4.0.0",
       "category": "productivity",
       "keywords": [
         "multi-agent",
