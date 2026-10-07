@@ -9424,3 +9424,30 @@ else
   row "SELF-23" "claude" "$_S23_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S23_FAIL"):$(printf '%s' "$_S23_FAIL" | cut -c1-700)" "static"
 fi
 rm -rf "$_S23"
+
+# SELF-16 (U15 — R7, R8, R9, R24, R39, R40, R43, R50): at-setup's primitives
+# and instruction-file handling, without a live CLI and with a throwaway HOME.
+# Each section adds its cases, appends a short "<section>: <what held>" note to
+# _S16_EV, and appends "<case>(<why>)" to _S16_FAIL on a mismatch. Expected
+# values are literals. A section that ran no case leaves no note, and the row
+# fails on that: an empty section is no evidence.
+_S16="${WORK}/self16"
+_S16_FAIL=""
+_S16_EV=""
+mkdir -p "$_S16"
+# --- SELF-16 section A: roster and registry helpers (U15) ---
+# --- end of SELF-16 section A ---
+# --- SELF-16 section B: instruction files (U15) ---
+# --- end of SELF-16 section B ---
+# --- SELF-16 section C: at-setup's blocks and the headless primitives (U15) ---
+# --- end of SELF-16 section C ---
+_S16_CAP="at-setup: the lead asked first and written last, one roster at the checkout top, the computed egress and HOME credential-read disclosure, Codex trust and hook trust read and never written, the launch lines, sandbox-aware auth, instruction files detected in the project and above with ask-first writers and the AGENTS.md budget, the Devin model choice (U15)"
+for _S16_SEC in A B C; do
+  case "$_S16_EV" in *"${_S16_SEC}:"*) ;; *) _S16_FAIL="${_S16_FAIL} section-${_S16_SEC}(no-case-ran)" ;; esac
+done
+if [ -z "$_S16_FAIL" ]; then
+  row "SELF-16" "claude" "$_S16_CAP" "PASS" "$(printf '%s' "$_S16_EV" | cut -c1-3000)" "static"
+else
+  row "SELF-16" "claude" "$_S16_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S16_FAIL"):$(printf '%s' "$_S16_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S16"
