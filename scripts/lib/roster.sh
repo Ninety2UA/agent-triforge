@@ -95,7 +95,7 @@ resolve_role() {
     RR_EXCLUDE="${RR_EXCLUDE:+${RR_EXCLUDE},}opencode"
     echo "resolve_role: WARNING opencode skipped in every role's chain — version ${_OPENCODE_VERSION:-unreadable} is unsupported or unconfirmed (D-049); pin V1 with: ${_OPENCODE_V1_PIN}" >&2
   fi
-  RESOLVE_ROLE_EXCLUDE="$RR_EXCLUDE" ROLE="$ROLE" ROSTER_FILE="$RR_ROSTER" python3 -c "
+  RESOLVE_ROLE_EXCLUDE="$RR_EXCLUDE" ROLE="$ROLE" ROSTER_FILE="$RR_ROSTER" python3 -c "${_PY_PRELUDE}
 import os, re, shutil, sys
 ${_CURSOR_ID_PY}
 ${_TRIFORGE_CLIS_PY}
@@ -724,7 +724,7 @@ _lead_roster_path() {
 # lead: rc 5 first when it cannot lead, then the roster's model and effort when
 # it is this checkout's lead, else its own lead defaults.
 _lead_read() {
-  RL_WHO="$1" RL_COLS="$2" RL_AS="${3:-}" RL_ROSTER="$(_lead_roster_path)" python3 -c "
+  RL_WHO="$1" RL_COLS="$2" RL_AS="${3:-}" RL_ROSTER="$(_lead_roster_path)" python3 -c "${_PY_PRELUDE}
 import os, sys
 ${_TRIFORGE_CLIS_PY}
 ${_LEAD_PY}
@@ -1019,7 +1019,7 @@ _lead_session_key() {
 # can't start, answers with an error or gives no answer in <seconds>. The
 # server is killed on every way out, a SIGTERM from the timeout included.
 # Single-quoted: no apostrophe inside.
-_CODEX_HOOKS_LIST_PY='
+_CODEX_HOOKS_LIST_PY="${_PY_PRELUDE}"'
 import json, select, signal, subprocess, sys, time
 signal.signal(signal.SIGTERM, lambda *a: sys.exit(124))
 cwd, secs = sys.argv[1], float(sys.argv[2])
@@ -1104,9 +1104,8 @@ _lead_hooks_detect() {
     fi
   fi
   LH_CLI="$CLI" LH_FEAT="$FEAT" LH_LIST="$LIST" LH_LRC="$LRC" LH_PLUGIN="${_TRIFORGE_PLUGIN_ROOT:-}" \
-  LH_CODEX_CFG="${CODEX_HOME:-${HOME:-}/.codex}/config.toml" python3 -c "
+  LH_CODEX_CFG="${CODEX_HOME:-${HOME:-}/.codex}/config.toml" python3 -c "${_READ_REGULAR_PY}
 import json, os, sys
-${_READ_REGULAR_PY}
 
 def declared(path):
     try:
@@ -1202,7 +1201,7 @@ resolve_lead_caps() {
   TAB=$(printf '\t')
   _lead_resolve || return $?
   LEAD=$_LEAD_CLI
-  STATIC=$(RC_LEAD="$LEAD" python3 -c "
+  STATIC=$(RC_LEAD="$LEAD" python3 -c "${_PY_PRELUDE}
 import os, sys
 ${_TRIFORGE_CLIS_PY}
 ${_CLI_FIELD_PY}
@@ -1286,7 +1285,7 @@ LEAD_STATIC_EOF
 # note. rc 5 when <cli> has no launch_argv (it cannot lead), 69 when no
 # interactive form of its line is known.
 _lead_launch_compose() {
-  LL_CLI="${1:-}" LL_MODEL="${2:-}" LL_EFFORT="${3:-}" LL_MODE="${4:-headless}" python3 -c "
+  LL_CLI="${1:-}" LL_MODEL="${2:-}" LL_EFFORT="${3:-}" LL_MODE="${4:-headless}" python3 -c "${_PY_PRELUDE}
 import os, shlex, sys
 ${_TRIFORGE_CLIS_PY}
 ${_LAUNCH_ACCESS_PY}
@@ -1501,7 +1500,7 @@ roster_write_lead() {
       _lease_mark_handover "${CUR_CLI:-unknown}" "$CLI" "$IDS" || return 1
     fi
   fi
-  WL_ROSTER="$ROSTER" WL_CLI="$CLI" WL_MODEL="$MODEL" WL_EFFORT="$EFFORT" python3 -c "
+  WL_ROSTER="$ROSTER" WL_CLI="$CLI" WL_MODEL="$MODEL" WL_EFFORT="$EFFORT" python3 -c "${_PY_PRELUDE}
 import json, os, re, sys
 ${_TRIFORGE_CLIS_PY}
 ${_LEAD_PY}
@@ -1648,12 +1647,11 @@ latest_probe_record() {
 # different CLI. Nonzero on unknown role (rc 2) or unparseable roster (rc 4).
 roster_role_entry() {
   local ROLE=${1:?usage: roster_role_entry <role>}
-  RE_ROLE="$ROLE" ROSTER_FILE="$(_lead_roster_path)" python3 -c "
+  RE_ROLE="$ROLE" ROSTER_FILE="$(_lead_roster_path)" python3 -c "${_READ_REGULAR_PY}
 import os, sys, re
 ${_CURSOR_ID_PY}
 ${_TRIFORGE_CLIS_PY}
 ${_ROLE_DEFAULTS_PY}
-${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -1761,7 +1759,7 @@ roster_write_role() {
   CUR=$(roster_role_entry "$ROLE") || return $?
   CUR_CLI=$(printf '%s' "$CUR" | cut -f1)
   CUR_FB=$(printf '%s' "$CUR" | cut -f4)
-  ROSTER_FILE="$ROSTER" WR_ROLE="$ROLE" WR_CLI="$CLI" WR_MODEL="$MODEL" WR_EFFORT="$EFFORT" WR_FALLBACKS="$FALLBACKS" WR_CUR_CLI="$CUR_CLI" WR_CUR_FB="$CUR_FB" python3 -c "
+  ROSTER_FILE="$ROSTER" WR_ROLE="$ROLE" WR_CLI="$CLI" WR_MODEL="$MODEL" WR_EFFORT="$EFFORT" WR_FALLBACKS="$FALLBACKS" WR_CUR_CLI="$CUR_CLI" WR_CUR_FB="$CUR_FB" python3 -c "${_PY_PRELUDE}
 import json, os, re, sys
 ${_CURSOR_ID_PY}
 ${_TRIFORGE_CLIS_PY}
@@ -1913,7 +1911,20 @@ def verify(data):
     assert r.get('effort') == effort, 'effort mismatch after write'
     assert r.get('fallbacks') == fallbacks, 'fallbacks mismatch after write'
 write_verified(path, new_raw, verify, 'roster_write_role')
-sys.stderr.write('roster_write_role: [roles.' + role + '] cli=' + cli + ' model=' + (model or '<host default>') + ' effort=' + effort + ' fallbacks=' + ','.join(fallbacks) + '\n')
+# An empty model is not the host's default: dispatch runs the member's model,
+# else the registry's shipped one (resolve_role); only a CLI whose registry
+# model is empty (claude) runs its own default.
+shown = model
+if not shown:
+    mm = members.get(cli, {}) if isinstance(members, dict) else {}
+    mm = mm if isinstance(mm, dict) else {}
+    if mm.get('model'):
+        shown = '\"\" (dispatch runs the member model ' + str(mm['model']) + ')'
+    elif CLIS[cli]['model']:
+        shown = '\"\" (dispatch runs the shipped default ' + CLIS[cli]['model'] + ')'
+    else:
+        shown = '\"\" (dispatch runs the default model of ' + CLIS[cli]['name'] + ')'
+sys.stderr.write('roster_write_role: [roles.' + role + '] cli=' + cli + ' model=' + shown + ' effort=' + effort + ' fallbacks=' + ','.join(fallbacks) + '\n')
 "
 }
 
@@ -1926,9 +1937,8 @@ roster_has_member() {
   local CLI=${1:?usage: roster_has_member <cli>} ROSTER
   ROSTER=$(_lead_roster_path)
   [ -f "$ROSTER" ] || return 1
-  ROSTER_FILE="$ROSTER" RH_CLI="$CLI" python3 -c "
+  ROSTER_FILE="$ROSTER" RH_CLI="$CLI" python3 -c "${_READ_REGULAR_PY}
 import os, sys
-${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -1951,9 +1961,8 @@ _roster_member_field() {
   local CLI=${1:?} FIELD=${2:?} ROSTER
   ROSTER=$(_lead_roster_path)
   [ -f "$ROSTER" ] || return 1
-  ROSTER_FILE="$ROSTER" RF_CLI="$CLI" RF_FIELD="$FIELD" python3 -c "
+  ROSTER_FILE="$ROSTER" RF_CLI="$CLI" RF_FIELD="$FIELD" python3 -c "${_READ_REGULAR_PY}
 import os, sys
-${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -1984,7 +1993,7 @@ print('true' if v is True else ('false' if v is False else v))
 # is sent. A malformed roster fails closed (rc 4), as at load.
 _member_consent_ok() {
   local CLI=${1:?usage: _member_consent_ok <cli> [roster]}
-  MC_CLI="$CLI" MC_ROSTER="${2:-$(_lead_roster_path)}" python3 -c "
+  MC_CLI="$CLI" MC_ROSTER="${2:-$(_lead_roster_path)}" python3 -c "${_PY_PRELUDE}
 import os, sys
 ${_TRIFORGE_CLIS_PY}
 ${_LEAD_PY}
@@ -2020,7 +2029,7 @@ sys.exit(5)
 # lease_dispatch, dispatch_role and invoke_devin run it before anything is sent.
 _member_role_ok() {
   local CLI=${1:?usage: _member_role_ok <cli> <role> [roster]}
-  MR_CLI="$CLI" MR_ROLE="${2-}" MR_ROSTER="${3:-$(_lead_roster_path)}" python3 -c "
+  MR_CLI="$CLI" MR_ROLE="${2-}" MR_ROSTER="${3:-$(_lead_roster_path)}" python3 -c "${_PY_PRELUDE}
 import os, sys
 ${_TRIFORGE_CLIS_PY}
 ${_ROLE_DEFAULTS_PY}
@@ -2107,7 +2116,7 @@ roster_write_member() {
   local ROSTER
   ROSTER=$(_lead_roster_path)
   mkdir -p "${ROSTER%/*}"
-  ROSTER_FILE="$ROSTER" RW_CLI="$CLI" RW_ENABLED="$ENABLED" RW_MODEL="$MODEL" RW_TAG="$TAG" RW_STAMP="$STAMP" RW_OPTIN="$OPTIN" python3 -c "
+  ROSTER_FILE="$ROSTER" RW_CLI="$CLI" RW_ENABLED="$ENABLED" RW_MODEL="$MODEL" RW_TAG="$TAG" RW_STAMP="$STAMP" RW_OPTIN="$OPTIN" python3 -c "${_PY_PRELUDE}
 import json, os, re, sys
 ${_TRIFORGE_CLIS_PY}
 ${_ROLE_DEFAULTS_PY}
@@ -2498,7 +2507,7 @@ roster_enroll_member() {
 # HOME and send them to its provider. rc 0; 3 no TOML parser; 4 a roster
 # that can't be read or parsed.
 roster_egress_disclosure() {
-  ED_ROSTER="$(_lead_roster_path)" ED_HOME="${HOME:-}" python3 -c "
+  ED_ROSTER="$(_lead_roster_path)" ED_HOME="${HOME:-}" python3 -c "${_PY_PRELUDE}
 import os, sys
 ${_TRIFORGE_CLIS_PY}
 ${_ROLE_DEFAULTS_PY}
@@ -2567,9 +2576,8 @@ codex_trust_status() {
   if [ -z "$DIR" ]; then
     DIR=$(_checkout_top) || DIR=$(pwd -P 2>/dev/null || pwd)
   fi
-  CT_DIR="$DIR" CT_CFG="${CODEX_HOME:-${HOME:-}/.codex}/config.toml" python3 -c "
+  CT_DIR="$DIR" CT_CFG="${CODEX_HOME:-${HOME:-}/.codex}/config.toml" python3 -c "${_READ_REGULAR_PY}
 import json, os, sys
-${_READ_REGULAR_PY}
 given = os.path.abspath(os.environ['CT_DIR'])
 real = os.path.realpath(given)
 cfg = os.environ['CT_CFG']

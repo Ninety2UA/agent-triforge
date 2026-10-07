@@ -91,9 +91,19 @@ EOF
 # Lease snapshot (KTD-4/U9): with an active ledger, a post-compaction resume
 # must reconstruct wave state from ops/leases.toml instead of restarting the
 # wave. Single tolerant python3 pass — a malformed ledger reports itself in
-# the snapshot rather than breaking the checkpoint (must stay fast).
+# the snapshot rather than breaking the checkpoint (must stay fast). It runs
+# from the project root, so it starts with the lines of _PY_PRELUDE
+# (scripts/lib/common.sh), inline as this hook loads no helper: the working
+# directory leaves sys.path before tomllib is imported (SELF-27 compares them).
 if [ -f "ops/leases.toml" ]; then
   LEASE_SNAPSHOT=$(python3 -c "
+import os, sys
+try:
+    _tf_here = os.path.realpath(os.getcwd())
+except OSError:
+    _tf_here = None
+sys.path[:] = [_p for _p in sys.path if os.path.isabs(_p) and os.path.realpath(_p) != _tf_here]
+del _tf_here
 import os, stat, sys
 try:
     import tomllib

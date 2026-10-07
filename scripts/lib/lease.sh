@@ -89,7 +89,7 @@ _lease_ctx() {
     return 0
   fi
   local OUT RC=0
-  OUT=$(LC_ROOT="${TRIFORGE_LEASE_ROOT:-}" LC_TMP="${TMPDIR:-/tmp}" python3 -c '
+  OUT=$(LC_ROOT="${TRIFORGE_LEASE_ROOT:-}" LC_TMP="${TMPDIR:-/tmp}" python3 -c "${_PY_PRELUDE}"'
 import hashlib, os, stat, sys
 # shared(p): another user could rename entries in directory p (owned by
 # someone else than this user or root, or group/other write without the
@@ -192,7 +192,7 @@ _lead_gitconfig_capture() {
   for SCOPE in --system --global; do
     LIST=$(env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT -u GIT_DIR -u GIT_WORK_TREE \
              git -C "$_LEASE_REPO" config "$SCOPE" --includes --null --get-regexp '^(user\.(name|email)|core\.(excludesfile|autocrlf|eol)|init\.defaultbranch|safe\.directory|filter\.lfs\..*)$' 2>/dev/null \
-           | python3 -c '
+           | python3 -c "${_PY_PRELUDE}"'
 import sys
 for item in sys.stdin.buffer.read().split(b"\0"):
     k, _, v = item.decode("utf-8", "replace").partition("\n")
@@ -249,7 +249,7 @@ _lgw() {
 
 # BSD-portable realpath (no readlink -f on stock macOS).
 _lease_realpath() {
-  RP_TARGET="$1" python3 -c "
+  RP_TARGET="$1" python3 -c "${_PY_PRELUDE}
 import os
 print(os.path.realpath(os.environ['RP_TARGET']))
 "
@@ -342,10 +342,13 @@ _lease_valid_task_id() {
 # Before a write, a ledger that no longer matches the lead's last write was
 # changed by someone else: the write starts from the lead's copy instead
 # (restoring it) and sets [baseline].ledger_alert, which the next
-# _lead_integrity_check escalates. The digest is lstat-aware — a symlink
-# digests as "link:<target>", never through the link — so a ledger replaced
-# by a symlink counts as changed, and os.replace puts a regular file back over
-# the link itself. This is the ONE place that rule is decided, always under the
+# _lead_integrity_check escalates. A ledger with no digest gets the same alert
+# (adopted unverified, nothing to restore from) when the copy is still there,
+# and when both anchors are gone but it holds a recorded [baseline] (S2); only
+# a ledger with no recorded baseline is a first use. The digest is
+# lstat-aware — a symlink digests as "link:<target>", never through the link —
+# so a ledger replaced by a symlink counts as changed, and os.replace puts a
+# regular file back over the link itself. This is the ONE place that rule is decided, always under the
 # ledger lock: _lead_integrity_check and lease_rebaseline start with a no-op
 # `_ledger_update @baseline` to run it, which writes nothing while the ledger
 # and its copy match the recorded digest and a [baseline] exists (otherwise it
@@ -395,9 +398,8 @@ _ledger_write() {
     sleep 0.05
   done
   printf '%s\n' "$$" > "${LOCK}/pid" 2>/dev/null || true
-  LEDGER_FILE="$LEDGER" LEDGER_TASK="$TASK_ID" LEDGER_STATE="$_LEASE_STATE" LEDGER_ROOT="$_LEASE_ROOT" python3 -c "
+  LEDGER_FILE="$LEDGER" LEDGER_TASK="$TASK_ID" LEDGER_STATE="$_LEASE_STATE" LEDGER_ROOT="$_LEASE_ROOT" LEDGER_GITDIR="$_LEASE_GITDIR" python3 -c "${_READ_REGULAR_PY}
 import hashlib, json, os, secrets, sys, time
-${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -449,6 +451,40 @@ elif not recorded and os.path.isfile(copy_file):
 data = {}
 if os.path.isfile(source):
     data = tomllib.loads(read_regular(source).decode('utf-8'))
+# Neither anchor, on a ledger that holds a recorded [baseline] (config): only a
+# lead that writes both anchors after every write records one (3.3.3 on). When
+# [baseline].lease_root names another lease root (a lead whose shell resolves
+# another TMPDIR, a lease reclaimed under the other lead), that root is also
+# the one the lease-root record in the git dir names (<gitdir>/
+# triforge-lease-root: outside TMPDIR and the ledger, written only by the
+# lead's write_record; a symlink there counts as no record), and its digest
+# equals the ledger as found, the ledger is that lead's last write and is
+# anchored here. The stamp alone never vouches: it is part of the ledger being
+# checked. Otherwise both anchors were deleted (S2): the rule can't run and
+# there is no copy to restore from, so alert, as for the missing digest
+# above, never a silent first use. A ledger with no recorded baseline (a fresh
+# checkout, a ledger from before 3.3.3) is anchored as found.
+if not alert and not recorded and not os.path.isfile(copy_file):
+    _b = data.get('baseline')
+    if isinstance(_b, dict) and _b.get('config'):
+        _other, _rec, _vouch = str(_b.get('lease_root') or ''), '', ''
+        _rec_file = os.path.join(os.environ.get('LEDGER_GITDIR', ''), 'triforge-lease-root')
+        if os.environ.get('LEDGER_GITDIR') and not os.path.islink(_rec_file):
+            try:
+                for _l in read_regular(_rec_file, True).splitlines():
+                    if _l.strip() and not _l.startswith('#'):
+                        _rec = _l.strip()
+                        break
+            except OSError:
+                _rec = ''
+        if (_rec and os.path.isabs(_other) and os.path.realpath(_rec) == os.path.realpath(_other)
+                and os.path.realpath(_rec) != os.path.realpath(os.environ['LEDGER_ROOT'])):
+            try:
+                _vouch = read_regular(os.path.join(_rec, 'lead', 'ledger.sha256'), True).strip()
+            except OSError:
+                _vouch = ''
+        if not _vouch or _vouch != _sha(path):
+            alert = stamp + ' both ledger anchors (' + digest_file + ', ' + copy_file + ') are missing while ops/leases.toml holds a recorded [baseline], and no other lease root of this checkout vouches for it: they were deleted outside the lead writes, and the ledger was adopted UNVERIFIED with no copy to restore from (compare its rows with what the lead did: states, approval_*, merge_approval; restore any change yourself, then lease_rebaseline)'
 # The integrity check's no-op @baseline call on a ledger that matches the lead's
 # last write and its copy, with a [baseline] in place: nothing to restore or
 # record, so nothing is rewritten (a write would only stamp [baseline].updated,
@@ -568,9 +604,8 @@ _ledger_get() {
   _lease_ctx || return 1
   LEDGER=$_LEASE_LEDGER
   [ -f "$LEDGER" ] || return 1
-  LEDGER_FILE="$LEDGER" LEDGER_TASK="$1" LEDGER_KEY="$2" python3 -c "
+  LEDGER_FILE="$LEDGER" LEDGER_TASK="$1" LEDGER_KEY="$2" python3 -c "${_READ_REGULAR_PY}
 import os, sys
-${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -598,9 +633,8 @@ _ledger_get_row() {
   shift
   _lease_ctx || return 1
   [ -f "$_LEASE_LEDGER" ] || return 1
-  LEDGER_FILE="$_LEASE_LEDGER" LEDGER_TASK="$T" python3 -c "
+  LEDGER_FILE="$_LEASE_LEDGER" LEDGER_TASK="$T" python3 -c "${_READ_REGULAR_PY}
 import os, sys
-${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -1022,12 +1056,19 @@ if not isinstance(base, dict) or not base.get("config"):
     # keys only a 3.3.3 lead writes with a baseline in place: then the table
     # was removed from the ledger (and the digest anchors with it, or the
     # ledger rule would have restored it). That is a change, never a first use.
+    # ledger.copy counts only when it was there before the no-op ledger write
+    # of the caller (LI_LEDGER_ANCHORED=1): that write creates it for a
+    # pre-3.3.3 ledger too. The lease-root record counts as well: only a
+    # baseline record writes it.
     stamped = sorted(t for t, r in leases.items() if isinstance(r, dict)
                      and any(k in r for k in ("pointer_digest", "admin_digest", "admin_dir", "snapshot_sha", "integrity_prev_state")))
-    anchors = [n for n in ("config.copy", "hooks.copy", "ledger.copy") if os.path.lexists(os.path.join(state, n))]
-    if stamped or anchors:
+    anchors = [n for n in ("config.copy", "hooks.copy", "ledger.copy") if os.path.lexists(os.path.join(state, n))
+               and (n != "ledger.copy" or os.environ.get("LI_LEDGER_ANCHORED", "1") == "1")]
+    record = os.path.lexists(os.path.join(gitdir, RECORD_NAME))
+    if stamped or anchors or record:
         why = ("lease row(s) " + ", ".join(stamped[:5]) + " were written with it in place") if stamped \
-              else ("the lead state dir holds " + ", ".join(anchors) + ", saved when that table was recorded")
+              else ("the lead state dir holds " + ", ".join(anchors) + ", saved when that table was recorded") if anchors \
+              else (NAMES["lease_record"] + " exists, written when that table was recorded")
         out.append(("REPO", "baseline_missing", "the [baseline] table of the ledger is missing, but " + why
                     + ": ops/leases.toml was edited outside the lead writes (not restored: no verified copy; compare it with "
                     + os.path.join(state, "ledger.copy") + " and restore it yourself, then lease_rebaseline)"))
@@ -1164,7 +1205,7 @@ _lead_lease_evidence() {
 # ledger to act on in either case. Empty otherwise.
 _lead_integrity_check() {
   local OP=${1:-lease} LEDGER OUT RC=0 KIND A B C D TAB NL LU_ERR LU_RC=0
-  local REPO_DESC="" OPEN="" LEASE_HITS="" ALERT=0 NOBASE=0 SAVED=0 T S ESCALATED=""
+  local REPO_DESC="" OPEN="" LEASE_HITS="" ALERT=0 NOBASE=0 SAVED=0 T S ESCALATED="" LA=0
   TAB=$(printf '\t'); NL='
 '
   _LEAD_INTEGRITY_WHY=""
@@ -1199,7 +1240,11 @@ _lead_integrity_check() {
   # with no [baseline] yet it writes one holding only `updated`, which the check
   # still reads as NOBASELINE. A write that can't run (a held lock, a ledger
   # with no intact copy that no longer parses) leaves the ledger unverified, so
-  # it fails closed like a check that can't run.
+  # it fails closed like a check that can't run. On a pre-3.3.3 ledger (no
+  # ledger anchors yet) that write creates ledger.copy, so whether the anchors
+  # were there before it goes to the check (LI_LEDGER_ANCHORED).
+  if [ -e "${_LEASE_STATE}/ledger.sha256" ] || [ -L "${_LEASE_STATE}/ledger.sha256" ] \
+     || [ -e "${_LEASE_STATE}/ledger.copy" ] || [ -L "${_LEASE_STATE}/ledger.copy" ]; then LA=1; fi
   LU_ERR=$(_ledger_update @baseline 2>&1 >/dev/null) || LU_RC=$?
   if [ "$LU_RC" -eq "$_RC_LEAD_ONLY" ]; then
     # The writer's own lead-only guard refused this shell (a worker, a lease
@@ -1214,7 +1259,7 @@ _lead_integrity_check() {
   fi
   _lease_default_ref
   OUT=$(LI_MODE=check LI_RESTORE=1 LI_COMMON="$_LEASE_COMMON" LI_GITDIR="$_LEASE_GITDIR" LI_STATE="$_LEASE_STATE" LI_REPO="$_LEASE_REPO" LI_LEDGER="$LEDGER" \
-        LI_ROOT="$_LEASE_ROOT" LI_DEF="$_LEASE_DEF" LI_DEF_SHA="$_LEASE_DEF_SHA" python3 -c "$_LEAD_INTEGRITY_PY" 2>&1) || RC=$?
+        LI_ROOT="$_LEASE_ROOT" LI_DEF="$_LEASE_DEF" LI_DEF_SHA="$_LEASE_DEF_SHA" LI_LEDGER_ANCHORED="$LA" python3 -c "$_LEAD_INTEGRITY_PY" 2>&1) || RC=$?
   if [ "$RC" -ne 0 ]; then
     echo "${OP}: INTEGRITY CHECK COULD NOT RUN — treated as a change (fail closed, KTD18): $(printf '%s' "$OUT" | tail -3 | tr '\n' ' ' | cut -c1-300)" >&2
     return "$_RC_LEASE_INTEGRITY"
@@ -1416,7 +1461,7 @@ REBASE_ROW_EOF
   if [ -t 0 ]; then VIA=tty; else VIA=non-tty; fi
   LINE="$(date -u +%Y-%m-%dT%H:%M:%SZ) by ${USER:-unknown} via ${VIA}; accepted: ${ACCEPTED:-none}; resumed: ${RESUMED:-none}"
   LOG=$(_ledger_get @baseline rebaseline_log 2>/dev/null || true)
-  LOG=$(RB_LOG="$LOG" RB_LINE="$LINE" python3 -c '
+  LOG=$(RB_LOG="$LOG" RB_LINE="$LINE" python3 -c "${_PY_PRELUDE}"'
 import os
 log = [e for e in os.environ["RB_LOG"].split(" || ") if e.strip()]
 log.append(os.environ["RB_LINE"])
@@ -1543,7 +1588,7 @@ BASEKEYS
         while IFS= read -r _kv_b64; do
           [ -n "$_kv_b64" ] && PAIRS+=("$(printf '%s' "$_kv_b64" | base64 -d 2>/dev/null)")
         done <<PREFIXENV
-$(TRIFORGE_ENV_PREFIX="${_K%\*}" python3 -c "
+$(TRIFORGE_ENV_PREFIX="${_K%\*}" python3 -c "${_PY_PRELUDE}
 import os, base64, sys
 prefix = os.environ['TRIFORGE_ENV_PREFIX']
 for k, v in os.environ.items():
@@ -1658,7 +1703,7 @@ _lease_provision() {
   _lease_provision_skills "$WT"
   case "$CLI" in
     claude)
-      TRACKED=$(_lgw "$WT" "$_CARVE_ADMIN" ls-files -z -- .claude/skills 2>/dev/null | python3 -c '
+      TRACKED=$(_lgw "$WT" "$_CARVE_ADMIN" ls-files -z -- .claude/skills 2>/dev/null | python3 -c "${_PY_PRELUDE}"'
 import sys
 names = set()
 for p in sys.stdin.buffer.read().decode("utf-8", "surrogateescape").split("\0"):
@@ -1704,7 +1749,7 @@ _lease_provisioned() {
   # only python's, and a failed status would read as "nothing provisioned").
   _lgw "$W" "$A" status --porcelain=v1 -z --untracked-files=all --ignored=traditional -- "$@" > "$TMP" 2>/dev/null || RC=1
   if [ "$RC" -eq 0 ]; then
-    python3 -c '
+    python3 -c "${_PY_PRELUDE}"'
 import re, sys
 dirs = [d.rstrip("/") for d in sys.argv[1:]]
 fields = sys.stdin.buffer.read().decode("utf-8", "surrogateescape").split("\0")
@@ -1974,9 +2019,9 @@ VERIFY_ROW_EOF
     echo "lease_merge: REFUSED — could not diff ${BASE:0:12}..${SNAP:0:12} for the ops/ check; nothing merges on an unreadable diff (KTD19)" >&2
     return 1
   fi
-  OPS=$(python3 -c '
+  OPS=$(python3 -c "${_PY_PRELUDE}"'
 import sys
-bad = [p for p in sys.stdin.buffer.read().decode("utf-8", "replace").split("\0") if p and (p.casefold() == "ops" or p.casefold().startswith("ops/"))]
+bad =[p for p in sys.stdin.buffer.read().decode("utf-8", "replace").split("\0") if p and (p.casefold() == "ops" or p.casefold().startswith("ops/"))]
 print(" ".join(bad[:10]) + (" ..." if len(bad) > 10 else ""))
 ' < "$DIFF_TMP") || { rm -f "$DIFF_TMP"; echo "lease_merge: REFUSED — the ops/ classifier failed; nothing merges on an unclassified diff (KTD19)" >&2; return 1; }
   rm -f "$DIFF_TMP"
@@ -2095,7 +2140,7 @@ _lease_extract_stream() {
 # as it is, with <err> (the run's stderr, when given and not empty) appended,
 # so it holds what the CLI said.
 _lease_claude_envelope() {
-  if [ -s "$1" ] && CE_OUT="$1" python3 -c '
+  if [ -s "$1" ] && CE_OUT="$1" python3 -c "${_PY_PRELUDE}"'
 import json, os, re, shutil, sys
 out = os.environ["CE_OUT"]
 src = open(out, encoding="utf-8", errors="replace").read()
@@ -3183,7 +3228,7 @@ _lease_mark_handover() {
   local FROM=${1:-unknown} TO=${2:-} IDS=${3:-} STAMP T
   _lease_ctx || return 1
   [ -f "$_LEASE_LEDGER" ] || return 0
-  STAMP=$(python3 -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"))') || return 1
+  STAMP=$(python3 -c "${_PY_PRELUDE}"'import datetime; print(datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"))') || return 1
   while IFS= read -r T; do
     [ -n "$T" ] || continue
     _ledger_write "$T" handover_from="$FROM" handover_to="$TO" handover_at="$STAMP" >/dev/null || return 1
@@ -3464,7 +3509,7 @@ _lease_is_framework_checkout() {
 # named agent-triforge OR is non-empty but not valid JSON (fail closed); 1 for
 # an empty input or a manifest with another name.
 _lease_manifest_is_triforge() {
-  python3 -c '
+  python3 -c "${_PY_PRELUDE}"'
 import json, sys
 raw = sys.stdin.read()
 if not raw.strip():
@@ -3553,9 +3598,8 @@ lease_promote() {
   # The roster of the lead checkout, whatever the cwd: a relative path would
   # read no roster from a subdirectory and default the gate to off.
   if [ -e "${_LEASE_REPO}/ops/roster.toml" ] || [ -L "${_LEASE_REPO}/ops/roster.toml" ]; then
-    REQUIRE_APPROVAL=$(ROSTER_FILE="${_LEASE_REPO}/ops/roster.toml" python3 -c "
+    REQUIRE_APPROVAL=$(ROSTER_FILE="${_LEASE_REPO}/ops/roster.toml" python3 -c "${_READ_REGULAR_PY}
 import os, sys
-${_READ_REGULAR_PY}
 # Fail CLOSED: an existing roster that cannot be parsed (no TOML library, or a
 # malformed file) or read as a regular file (a FIFO, a directory, a dangling
 # link) must NOT silently disable the approval gate — that would let
@@ -3666,7 +3710,7 @@ print('true' if v is True else 'false')
 # protected-path set a promotion approval binds to (no path hashes as the
 # empty set).
 _lease_protected_digest() {
-  printf '%s\n' "${1:-}" | python3 -c '
+  printf '%s\n' "${1:-}" | python3 -c "${_PY_PRELUDE}"'
 import hashlib, sys
 paths = sorted(set(l.split("\t", 1)[-1] for l in sys.stdin.read().splitlines() if l.strip()))
 print(hashlib.sha256("\n".join(paths).encode("utf-8", "surrogateescape")).hexdigest())
@@ -3732,9 +3776,8 @@ lease_status() {
     echo "lease_status: no lease ledger (${LEDGER}) — no leases have been created"
     return 0
   fi
-  LEDGER_FILE="$LEDGER" LS_LEGACY_LEAD="$_LEAD_LEGACY_CLI" python3 -c "
+  LEDGER_FILE="$LEDGER" LS_LEGACY_LEAD="$_LEAD_LEGACY_CLI" python3 -c "${_READ_REGULAR_PY}
 import os, sys, time
-${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:

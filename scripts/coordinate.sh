@@ -233,9 +233,8 @@ lease_resume_paragraph() {
   # Two counts: live (mid-flight work to reconstruct) and attention (terminal
   # failed/escalated rows a fresh session must still resolve, not silently drop
   # — they are NOT "live" reclaimable work, so they get their own surface).
-  COUNTS=$(python3 -c "
+  COUNTS=$(python3 -c "${_READ_REGULAR_PY}
 import sys
-${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -275,7 +274,7 @@ except Exception:
 # the line of a lead without a goal gate carries it.
 GOAL_QUOTED=""
 if [ -z "$GOAL_GATE" ]; then
-  GOAL_QUOTED=$(CA_GOAL="$GOAL" python3 -c 'import json, os; print(json.dumps(" ".join(os.environ["CA_GOAL"].splitlines()), ensure_ascii=False))')
+  GOAL_QUOTED=$(CA_GOAL="$GOAL" python3 -c "${_PY_PRELUDE}"'import json, os; print(json.dumps(" ".join(os.environ["CA_GOAL"].splitlines()), ensure_ascii=False))')
 fi
 
 CHECKLIST="Sprint complete ONLY when ALL of: (1) every framework phase for the goal is done or explicitly skipped with a stated reason; (2) the verification-before-completion checklist passes with evidence; (3) ops/STATE.md is written for session handoff; (4) temporary review files are archived to ops/archive/; (5) the runtime marker ops/.sprint-complete exists — created LAST, only after conditions 1-4 hold."
@@ -331,7 +330,7 @@ ${GATE_RULE} NEVER create it early — the outer loop detects completion solely 
 # launch_line — the launch line as typed: the registry's launch_argv, the
 # model and effort words, then the prompt quoted for a POSIX shell.
 launch_line() {
-  printf '%s %s\n' "$LAUNCH_SHOWN" "$(CA_PROMPT="$PROMPT" python3 -c 'import os, shlex; print(shlex.quote(os.environ["CA_PROMPT"]))')"
+  printf '%s %s\n' "$LAUNCH_SHOWN" "$(CA_PROMPT="$PROMPT" python3 -c "${_PY_PRELUDE}"'import os, shlex; print(shlex.quote(os.environ["CA_PROMPT"]))')"
 }
 
 # launch_notes — each note on the model and effort flags, once.
@@ -472,7 +471,7 @@ DONE=false
 # and the next redirect would truncate the link's target. Such a TMPDIR is
 # refused, as the monitors and the lease root refuse it.
 COORD_TMP="${TMPDIR:-/tmp}"
-if ! python3 -c '
+if ! python3 -c "${_PY_PRELUDE}"'
 import os, stat, sys
 st = os.stat(sys.argv[1])
 sys.exit(1 if st.st_uid not in (os.getuid(), 0) or (st.st_mode & 0o022 and not st.st_mode & stat.S_ISVTX) else 0)' "$COORD_TMP" 2>/dev/null; then

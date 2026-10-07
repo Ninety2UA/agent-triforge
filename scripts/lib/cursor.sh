@@ -103,7 +103,7 @@ _cursor_bin() {
       printf '%s\n' "$CAND"; return 0
     fi
   done <<AGENTS
-$(python3 -c "
+$(python3 -c "${_PY_PRELUDE}
 import os
 seen = set()
 for d in os.environ.get('PATH', '').split(os.pathsep):
@@ -164,7 +164,7 @@ _CURSOR_EFFORT_NOTE=""
 _cursor_model_for_effort() {
   local M=${1:-} E=${2:-}
   _CURSOR_EFFORT_NOTE="in model id"
-  CM_MODEL="$M" CM_EFFORT="$E" python3 -c "
+  CM_MODEL="$M" CM_EFFORT="$E" python3 -c "${_PY_PRELUDE}
 import os, sys
 ${_CURSOR_ID_PY}
 m = os.environ['CM_MODEL']; e = os.environ['CM_EFFORT']
@@ -387,7 +387,7 @@ _list_cursor_agents() {
 # builders answer in the same stream shape — the typed `Status:` report
 # (KTD11) is only parseable from the extracted prose.
 _cursor_extract_text() {
-  C_RAW="$1" C_OUT="$2" python3 -c '
+  C_RAW="$1" C_OUT="$2" python3 -c "${_PY_PRELUDE}"'
 import json, os, sys
 raw = open(os.environ["C_RAW"], "r", errors="replace").read()
 

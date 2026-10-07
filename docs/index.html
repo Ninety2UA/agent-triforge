@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Agent Triforge — A Core Trio of AI Coding CLIs Forging Production-Grade Code</title>
-<meta name="description" content="Agent Triforge orchestrates an eight-CLI builder pool — Claude Code, Antigravity CLI, Codex CLI, and an optional tier — through a roster, per-task leases, portable skills, and parallel review swarms.">
+<meta name="description" content="Agent Triforge: Claude Code or Codex leads an eight-CLI builder pool (the core trio of Claude Code, Antigravity CLI and Codex CLI, plus an optional tier) through a roster, per-task leases, portable skills and parallel review swarms.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23ff6b2b'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -175,14 +176,13 @@ a:hover { color: var(--amber); }
   content: ''; width: 6px; height: 6px; border-radius: 50%;
   background: var(--molten); animation: pulse 2s infinite;
 }
-.hero h1 {
-  font-size: clamp(36px, 6vw, 72px); font-weight: 800; line-height: 1.05;
-  letter-spacing: -0.03em; margin-bottom: 16px;
+.hero__banner {
+  position: relative; z-index: 2; margin: 0 0 48px; line-height: 0;
 }
-.hero h1 .gradient-text {
-  background: linear-gradient(135deg, var(--molten), var(--amber), var(--molten-light));
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  background-clip: text;
+.hero__banner img {
+  display: block; width: 100%; height: auto; aspect-ratio: 1280 / 400;
+  border-radius: 16px;
+  box-shadow: 0 24px 70px rgba(0,0,0,0.55), 0 0 60px rgba(255, 107, 43, 0.06);
 }
 .hero__tagline {
   font-size: clamp(16px, 2vw, 20px); color: var(--text-secondary);
@@ -723,7 +723,7 @@ a:hover { color: var(--amber); }
   .stat-pill { padding: 18px 16px; gap: 12px; }
   .stat-pill__num { font-size: 30px; min-width: 40px; }
 }
-@media (min-width: 768px) { .stats-row { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 1000px) { .stats-row { grid-template-columns: repeat(4, 1fr); } }
 
 /* ═══ Feature Cards ═══ */
 .features-grid {
@@ -1104,26 +1104,6 @@ a:hover { color: var(--amber); }
   box-shadow: 0 4px 24px var(--molten-glow);
 }
 
-/* ═══ Shimmer Hero Title ═══ */
-@keyframes shimmer {
-  0% { background-position: -200% center; }
-  100% { background-position: 200% center; }
-}
-.hero h1 .gradient-text {
-  background: linear-gradient(
-    90deg,
-    var(--molten) 0%,
-    var(--amber) 25%,
-    var(--molten-light) 50%,
-    var(--amber) 75%,
-    var(--molten) 100%
-  );
-  background-size: 200% auto;
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: shimmer 4s linear infinite;
-}
-
 /* ═══ Card Mouse Glow ═══ */
 .glow-card {
   position: relative; overflow: hidden;
@@ -1255,7 +1235,6 @@ body::after {
 
 /* ═══ Reduced Motion Override ═══ */
 @media (prefers-reduced-motion: reduce) {
-  .hero h1 .gradient-text { animation: none; }
   .hero__terminal { animation: none; }
   .term__row, .term__phase { opacity: 1; transform: none; }
   .term__spinner, .term__title-dot, .term__caret, .term__cursor { animation: none; }
@@ -1436,13 +1415,13 @@ body::after {
   <div class="hero__canvas" id="hero-canvas"></div>
   <div class="hero__gradient"></div>
   <div class="container">
+    <h1 class="hero__banner">
+      <img src="images/hero-forge.svg" width="1280" height="400" alt="Agent Triforge">
+    </h1>
     <div class="hero__content">
       <div>
-        <div class="hero__badge">v3.3.3 — September Models</div>
-        <h1>
-          <span class="gradient-text">Agent Triforge</span>
-        </h1>
-        <p class="hero__tagline">A core trio of AI coding CLIs forging production-grade code together. Claude Code leads an eight-CLI builder pool (Antigravity CLI, Codex CLI and an optional tier of OpenCode, Kimi, Cursor, Devin and Grok Build) plus 19 specialist personas, coordinated through a roster, per-task leases, portable skills and parallel review swarms.</p>
+        <div class="hero__badge">v4.0.0 · Claude Code or Codex leads</div>
+        <p class="hero__tagline">Claude Code or Codex leads an eight-CLI pool: the core trio (Claude Code, Antigravity CLI, Codex CLI) and an optional tier of OpenCode, Kimi, Cursor, Devin and Grok Build. The pool and 19 specialist personas work through a roster, per-task leases, portable skills and parallel review swarms.</p>
         <div class="hero__stats">
           <div class="hero__stat">
             <span class="hero__stat-num" data-target="19">0</span>
@@ -1493,7 +1472,7 @@ body::after {
           <div class="term__sys" id="term-sys">
             <span class="term__sys-item"><span class="term__sys-icon"></span><span>agent-triforge</span></span>
             <span class="term__sys-item term__sys-branch">main</span>
-            <span class="term__sys-item term__sys-ver">claude v3.3.3</span>
+            <span class="term__sys-item term__sys-ver">claude v4.0.0</span>
           </div>
 
           <div class="term__row term__row--prompt" data-row="r0">
@@ -1644,18 +1623,39 @@ body::after {
   </div>
 </section>
 
-<!-- ═══ What's New in v3.3.0 ═══ -->
+<!-- ═══ What's New in v4.0.0 ═══ -->
 <section class="section section--alt" id="whats-new">
   <div class="container">
     <div class="section__header reveal">
       <span class="section__label">What's New</span>
-      <h2 class="section__title">v3.3.0 — September Models, Trustworthy Signals</h2>
+      <h2 class="section__title">v4.0.0: Claude Code or Codex Leads</h2>
+      <p class="section__desc" style="margin-bottom:24px;">Codex can lead a Triforge project now. You pick the lead in <code>at-setup</code>, and <code>ops/roster.toml</code> records it in a <code>[lead]</code> table; without one, Claude Code leads as before. The 17 slash commands became <code>at-</code> lead workflows (<code>/at-ship</code>, or <code>$agent-triforge:at-ship</code> in a Codex prompt), the 19 agents became personas that <code>dispatch_persona</code> runs under either lead, and one root <code>AGENTS.md</code> replaces the <code>CLAUDE.md</code> files. Grok Build and Devin join the optional tier, lease builders keep running after the lead's turn ends, and <code>at-setup</code> lists which providers receive your code before it writes the lead.</p>
       <p><strong>3.3.3 (2026-10-01):</strong> a safety hotfix before the lead-choice redesign. Promotion scans every control-plane path (renames, case variants and instruction files at any depth included) and blocks when the scan itself fails; the <code>.agents/skills/</code> refresh replaces only Triforge's own unchanged copies, identified by content digest; the lead's git calls ignore settings a builder can plant, a changed <code>.git/config</code>, hook, ref or ledger is restored and escalated, and a lease merges only the snapshot the lead took at collect. A new PR workflow runs the SELF-row gate on macOS.</p>
       <p><strong>3.3.2 (2026-09-28):</strong> the release gate is green again (the four hook commands quote <code>"${CLAUDE_PLUGIN_ROOT}"</code>, and probe CC-06 validates both manifests); OpenCode V2 (or an OpenCode whose version can't be read) is refused with the V1 pin named, because V2 drops the deny set, and role fallback chains skip it; Cursor model ids take the <code>cursor-</code> prefix from the Grok family (<code>grok-4.7-xhigh</code>, <code>cursor-grok-4.6-xhigh</code>); <code>/setup</code> no longer carries a positional token that Claude Code would substitute.</p>
       <p><strong>3.3.1 (2026-09-12):</strong> a lease builder can no longer <code>git push</code> (pre-push hook + <code>no-push://</code> URL rewrite in the lease env); provider quota exhaustion fails fast with a <code>QUOTA-FAIL</code> probe outcome; effort-only roster overrides recompose the agy/Cursor effort suffix; the dispatch helper is a loader over <code>scripts/lib/*.sh</code> and the probe self-tests live in <code>scripts/probe-self-tests.sh</code>.</p>
-      <p class="section__desc">Every lane runs on the September 2026 generation — Fable 5.1 → Opus 5.5 → Sonnet 5.5, Codex <code>gpt-6-astra</code>, Antigravity <code>Gemini 3.8 Flash (High)</code>, GLM 5.3, <code>kimi-code/k3</code>, <code>cursor-grok-4.6-xhigh</code> — and every headless run reports a completion signal the lead parses instead of a bare exit code. Native agent formats for Antigravity and Kimi, a version-stamped <code>.agents/skills/</code> refresh for all six CLIs, and two new release validators. The v3.2.0 watch-cycle move and the v3.0.0 builder-pool foundation are unchanged below.</p>
+      <p><strong>3.3.0 (2026-09-11):</strong> every lane moved to the September 2026 generation (Fable 5.1 → Opus 5.5 → Sonnet 5.5, Codex <code>gpt-6-astra</code>, Antigravity <code>Gemini 3.8 Flash (High)</code>, GLM 5.3, <code>kimi-code/k3</code>, <code>cursor-grok-4.6-xhigh</code>), and every headless run reports a completion signal the lead parses instead of a bare exit code. It also brought native agent formats for Antigravity and Kimi, a version-stamped <code>.agents/skills/</code> refresh and two release validators. The v3.2.0 watch-cycle move and the v3.0.0 builder-pool foundation are listed below.</p>
     </div>
     <div class="whatsnew reveal-stagger">
+      <div class="whatsnew__row">
+        <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Claude Code was the only lead</span></div>
+        <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Claude Code or Codex leads, chosen in <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">at-setup</code> and recorded as <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">[lead]</code> in <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">ops/roster.toml</code></span></div>
+      </div>
+      <div class="whatsnew__row">
+        <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">17 slash commands and 19 Claude Code subagents</span></div>
+        <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new"><code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">at-</code> lead workflows and personas that run the same way under either lead</span></div>
+      </div>
+      <div class="whatsnew__row">
+        <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old"><code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">CLAUDE.md</code> instruction files</span></div>
+        <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">One root <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">AGENTS.md</code> that both leads read (Claude Code ≥ 2.1.277)</span></div>
+      </div>
+      <div class="whatsnew__row">
+        <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Six CLIs: OpenCode, Kimi and Cursor as the optional tier</span></div>
+        <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Eight CLIs: Grok Build builds, reviews or analyzes; Devin reviews and analyzes after you consent</span></div>
+      </div>
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Fable 5 → Opus 4.8 ladder, Codex gpt-5.6-sol, Gemini 3.1 Pro, Grok 4.5 (history)</span></div>
         <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
@@ -1669,7 +1669,7 @@ body::after {
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Copy-once <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">.agents/skills/</code>, injected role briefs</span></div>
         <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
-        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Version-stamped skills refresh for all six CLIs; agy Markdown agents, Kimi <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">--agent-file</code>, Codex <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">.codex/triforge-agents.toml</code></span></div>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Digest-stamped skills refresh for every CLI that reads <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">.agents/skills/</code>; agy Markdown agents, Kimi <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">--agent-file</code>, Codex <code style="font-family:var(--font-mono);font-size:13px;color:var(--steel-light)">.codex/triforge-agents.toml</code></span></div>
       </div>
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Watch cycle shipped as plugin commands (v3.1 history) — 19 commands, 13 skills</span></div>
@@ -1689,7 +1689,7 @@ body::after {
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Single-writer rule — only Claude edits code</span></div>
         <span class="whatsnew__arrow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
-        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Six-CLI builder pool: any roster member builds</span></div>
+        <div class="whatsnew__side whatsnew__side--new"><span class="whatsnew__tag">Now</span><span class="whatsnew__new">Eight-CLI builder pool: any roster member builds (Devin only after an opt-in)</span></div>
       </div>
       <div class="whatsnew__row">
         <div class="whatsnew__side whatsnew__side--old"><span class="whatsnew__tag">Was</span><span class="whatsnew__old">Gemini CLI — hosted service cut 2026-06-18</span></div>
@@ -1726,12 +1726,12 @@ body::after {
     <div class="section__header reveal">
       <span class="section__label">What You Get</span>
       <h2 class="section__title">A Complete Multi-Agent Development System</h2>
-      <p class="section__desc">Claude leads and builds, Antigravity analyzes, Codex tests, and any roster member can take a build. What one sprint solves is written down for the next.</p>
+      <p class="section__desc">Claude Code or Codex leads, Claude builds by default, Antigravity analyzes, Codex tests, and any roster member can take a build. What one sprint solves is written down for the next.</p>
     </div>
     <!-- Stats row -->
     <div class="stats-row reveal-stagger">
       <div class="stat-pill">
-        <div class="stat-pill__num">6</div>
+        <div class="stat-pill__num">8</div>
         <div class="stat-pill__text"><h4>CLIs</h4><p>Core trio + optional tier</p></div>
       </div>
       <div class="stat-pill">
@@ -1755,7 +1755,7 @@ body::after {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         </div>
         <h3>Eight-CLI Builder Pool</h3>
-        <p>Claude Code leads. Antigravity (1M-token analysis), Codex (sandboxed tests) and the optional OpenCode, Kimi, Cursor and Grok Build are all eligible builders; the optional Devin reviews and analyzes, and builds only if you opt in. <code>ops/roster.toml</code> assigns each role, and every build is leased and cross-reviewed.</p>
+        <p>Claude Code or Codex leads. Antigravity (1M-token analysis), Codex (sandboxed tests) and the optional OpenCode, Kimi, Cursor and Grok Build are all eligible builders; the optional Devin reviews and analyzes, and builds only if you opt in. <code>ops/roster.toml</code> assigns each role, and every build is leased and cross-reviewed.</p>
       </div>
       <div class="feat-card glow-card">
         <div class="feat-card__icon feat-card__icon--steel">
@@ -1776,7 +1776,7 @@ body::after {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
         </div>
         <h3>Parallel Review Swarm</h3>
-        <p>Up to 7 reviewers read the same change at once (Antigravity, Codex and 5 Claude specialist agents), and their findings are merged with confidence tiering.</p>
+        <p>Up to 7 reviewers read the same change at once (Antigravity, Codex and 5 specialist personas), and their findings are merged with confidence tiering.</p>
       </div>
       <div class="feat-card glow-card">
         <div class="feat-card__icon feat-card__icon--molten">
@@ -1806,7 +1806,7 @@ body::after {
     </div>
 
     <div class="diagram-frame reveal">
-      <img src="images/builder-pool.svg" alt="Builder-pool flow: the roster assigns a builder, which claims a per-task lease in an isolated git worktree, gets cross-reviewed by a pinned non-author reviewer, then squash-merges onto the sprint integration branch before a gated promote to main." loading="lazy" width="1200" height="620">
+      <img src="images/builder-pool.svg" alt="Builder-pool flow: the roster assigns a builder, which claims a per-task lease in an isolated git worktree, gets cross-reviewed by a pinned non-author reviewer, then squash-merges onto the sprint integration branch before a gated promote to main." loading="lazy" width="1400" height="1230">
     </div>
     <p class="diagram-caption reveal">Every build is leased, isolated in a worktree, cross-reviewed by a pinned non-author, and squash-merged onto the sprint integration branch before a user-gated promote to main.</p>
 
@@ -1839,7 +1839,7 @@ body::after {
     </div>
 
     <div class="diagram-frame reveal" style="margin-top:44px;">
-      <img src="images/lease-lifecycle.svg" alt="Lease lifecycle: a task lease moves through claim, build, review, and merge, then releases; a stale or repeatedly-failing lease is reclaimed and reassigned to a fresh builder." loading="lazy">
+      <img src="images/lease-lifecycle.svg" alt="Lease lifecycle: a task lease moves through claim, build, review, and merge, then releases; a stale or repeatedly-failing lease is reclaimed and reassigned to a fresh builder." loading="lazy" width="1440" height="780">
     </div>
     <p class="diagram-caption reveal">A lease moves claim → build → review → merge → release. A stale lease, or one that hits the same error three times, is reclaimed and reassigned to a fresh builder.</p>
   </div>
@@ -1855,7 +1855,7 @@ body::after {
     </div>
 
     <div class="diagram-frame reveal">
-      <img src="images/roster.svg" alt="Roster map: builder, reviewer, tester, analyst, and documenter roles each resolve to a CLI, model, and effort, with fallback chains that terminate at the core trio of Claude, Antigravity, and Codex." loading="lazy">
+      <img src="images/roster.svg" alt="Roster map: builder, reviewer, tester, analyst, and documenter roles each resolve to a CLI, model, and effort, with fallback chains that terminate at the core trio of Claude, Antigravity, and Codex. The optional tier is OpenCode, Kimi, Cursor, Grok Build and Devin." loading="lazy" width="1420" height="980">
     </div>
     <p class="diagram-caption reveal">Roles are the task types — builder, reviewer, tester, analyst, documenter — so choosing model and effort per task type is this file's native grain.</p>
 
@@ -1869,7 +1869,7 @@ body::after {
           </div>
           <span class="roster-card__tier roster-card__tier--core">Core</span>
         </div>
-        <p class="roster-card__role">Lead agent and default builder — plans, builds, and coordinates every other CLI.</p>
+        <p class="roster-card__role">The default lead and default builder. When it leads, it plans, builds and coordinates every other CLI.</p>
         <div class="roster-card__meta">
           <span class="roster-card__chip"><b>Builder</b> · lead</span>
           <span class="roster-card__chip">Fable 5.1 → Opus 5.5 → Sonnet 5.5</span>
@@ -1903,9 +1903,9 @@ body::after {
           </div>
           <span class="roster-card__tier roster-card__tier--core">Core</span>
         </div>
-        <p class="roster-card__role">Reviewer and tester — structured <code>--output-schema</code> verdicts and sandboxed TDD.</p>
+        <p class="roster-card__role">Reviewer and tester with structured <code>--output-schema</code> verdicts and sandboxed TDD. It can also lead, with the plugin installed in Codex.</p>
         <div class="roster-card__meta">
-          <span class="roster-card__chip"><b>Reviewer</b> · Tester</span>
+          <span class="roster-card__chip"><b>Reviewer</b> · Tester · lead</span>
           <span class="roster-card__chip">gpt-6-astra</span>
           <span class="roster-card__chip">effort: xhigh</span>
         </div>
@@ -2019,13 +2019,13 @@ body::after {
         <div class="pipeline__phase">
           <div class="pipeline__cell pipeline__num">1</div>
           <div class="pipeline__cell pipeline__name">Planning</div>
-          <div class="pipeline__cell">Claude + writing-plans skill</div>
+          <div class="pipeline__cell">Lead + writing-plans skill</div>
           <div class="pipeline__cell pipeline__cmd">at-plan</div>
         </div>
         <div class="pipeline__phase">
           <div class="pipeline__cell pipeline__num">1.1</div>
           <div class="pipeline__cell pipeline__name">Ambiguity Resolution</div>
-          <div class="pipeline__cell">Claude (user confirmation)</div>
+          <div class="pipeline__cell">Lead (user confirmation)</div>
           <div class="pipeline__cell pipeline__cmd">at-plan, at-ship</div>
         </div>
         <div class="pipeline__phase">
@@ -2055,7 +2055,7 @@ body::after {
         <div class="pipeline__phase">
           <div class="pipeline__cell pipeline__num">6</div>
           <div class="pipeline__cell pipeline__name">Ship (Knowledge Compound)</div>
-          <div class="pipeline__cell">Claude + knowledge-compounding</div>
+          <div class="pipeline__cell">Lead + knowledge-compounding</div>
           <div class="pipeline__cell pipeline__cmd">at-wrap</div>
         </div>
       </div>
@@ -2118,15 +2118,15 @@ body::after {
         <thead><tr><th>Skill</th><th>Consumer</th><th>What It Teaches</th></tr></thead>
         <tbody>
           <tr><td><code>codebase-mapping</code></td><td>Antigravity (Phase 0)</td><td>Full-repo analysis: structure, data flow, patterns, debt</td></tr>
-          <tr><td><code>writing-plans</code></td><td>Claude (Phase 1)</td><td>Task decomposition with shadow paths, error maps, interface context</td></tr>
-          <tr><td><code>shadow-path-tracing</code></td><td>Claude (Phase 1)</td><td>Enumerate every failure path alongside the happy path</td></tr>
-          <tr><td><code>wave-orchestration</code></td><td>Claude (Phase 2)</td><td>Dependency-grouped parallel execution with integration checks</td></tr>
-          <tr><td><code>iterative-refinement</code></td><td>Claude (Phase 4)</td><td>Review-fix-review loops with convergence modes (max 3 cycles)</td></tr>
-          <tr><td><code>review-synthesis</code></td><td>Claude (Phase 4)</td><td>Merge multi-reviewer findings with confidence tiering</td></tr>
+          <tr><td><code>writing-plans</code></td><td>Lead (Phase 1)</td><td>Task decomposition with shadow paths, error maps, interface context</td></tr>
+          <tr><td><code>shadow-path-tracing</code></td><td>Lead (Phase 1)</td><td>Enumerate every failure path alongside the happy path</td></tr>
+          <tr><td><code>wave-orchestration</code></td><td>Lead (Phase 2)</td><td>Dependency-grouped parallel execution with integration checks</td></tr>
+          <tr><td><code>iterative-refinement</code></td><td>Lead (Phase 4)</td><td>Review-fix-review loops with convergence modes (max 3 cycles)</td></tr>
+          <tr><td><code>review-synthesis</code></td><td>Lead (Phase 4)</td><td>Merge multi-reviewer findings with confidence tiering</td></tr>
           <tr><td><code>verification-before-completion</code></td><td>All agents</td><td>Evidence-based completion checklist — no "done" without proof</td></tr>
-          <tr><td><code>knowledge-compounding</code></td><td>Claude (Phase 6)</td><td>Document solutions to ops/solutions/ for future sprints</td></tr>
-          <tr><td><code>session-continuity</code></td><td>Claude</td><td>Save and resume via STATE.md across sessions</td></tr>
-          <tr><td><code>scope-cutting</code></td><td>Claude</td><td>Systematically cut scope by unblocking value and risk</td></tr>
+          <tr><td><code>knowledge-compounding</code></td><td>Lead (Phase 6)</td><td>Document solutions to ops/solutions/ for future sprints</td></tr>
+          <tr><td><code>session-continuity</code></td><td>Lead</td><td>Save and resume via STATE.md across sessions</td></tr>
+          <tr><td><code>scope-cutting</code></td><td>Lead</td><td>Systematically cut scope by unblocking value and risk</td></tr>
         </tbody>
       </table>
     </div>
@@ -2139,7 +2139,7 @@ body::after {
     <div class="section__header reveal">
       <span class="section__label">Review Swarm</span>
       <h2 class="section__title">7 Reviewers in Parallel</h2>
-      <p class="section__desc">Two external CLIs and five Claude specialist agents analyze the same code simultaneously through different lenses, then a findings-synthesizer merges everything.</p>
+      <p class="section__desc">Two external CLIs and five specialist personas analyze the same code simultaneously through different lenses, then a findings-synthesizer merges everything.</p>
     </div>
     <div class="features-grid reveal-stagger">
       <div class="feat-card glow-card">
@@ -2271,7 +2271,7 @@ body::after {
     <div class="section__header reveal">
       <span class="section__label">Get Started</span>
       <h2 class="section__title">Install in Three Steps</h2>
-      <p class="section__desc">Hooks, agents and skills (the portable skills and the lead workflows) register automatically, with nothing to configure by hand. The first session in a project creates <code>ops/</code>; if the project has no <code>AGENTS.md</code>, it also prints the command that copies in Triforge's pointer block.</p>
+      <p class="section__desc">Hooks and skills (the portable skills and the lead workflows) register automatically in the lead CLI, with nothing to configure by hand. The first session in a project creates <code>ops/</code>; if the project has no <code>AGENTS.md</code>, it also prints the command that copies in Triforge's pointer block.</p>
     </div>
     <div class="install-grid reveal-stagger">
       <div class="install-step">
@@ -2306,7 +2306,7 @@ body::after {
             <div class="code-block__title">bash</div>
             <button class="code-block__copy" data-copy="claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge &amp;&amp; claude plugin install agent-triforge@agent-triforge">Copy</button>
           </div>
-          <div class="code-block__body"><span class="kw">claude</span> plugin marketplace add <span class="str">https://github.com/Ninety2UA/agent-triforge</span><br><span class="kw">claude</span> plugin install <span class="str">agent-triforge@agent-triforge</span></div>
+          <div class="code-block__body"><span class="kw">claude</span> plugin marketplace add <span class="str">https://github.com/Ninety2UA/agent-triforge</span><br><span class="kw">claude</span> plugin install <span class="str">agent-triforge@agent-triforge</span><br><br><span class="cmt"># Or, when Codex leads</span><br><span class="kw">codex</span> plugin marketplace add <span class="str">Ninety2UA/agent-triforge</span><br><span class="kw">codex</span> plugin add <span class="str">agent-triforge@agent-triforge</span></div>
         </div>
       </div>
       <div class="install-step">
@@ -2351,18 +2351,20 @@ body::after {
     <div class="section__header reveal">
       <span class="section__label">Compatibility</span>
       <h2 class="section__title">Version Floors</h2>
-      <p class="section__desc"><code>at-setup</code> gates the core trio live before any sprint runs. The optional tier enrolls the same way and is skipped cleanly in every fallback chain when absent.</p>
+      <p class="section__desc"><code>at-setup</code> gates the core trio live before any sprint runs. The optional tier enrolls the same way and is skipped cleanly in every fallback chain when absent. Tested versions come from the newest probe record (2026-09-27) and from the rows 4.0 ran live during development.</p>
     </div>
     <div class="table-wrap reveal">
       <table class="cmd-table reveal">
         <thead><tr><th>CLI</th><th>Binary</th><th>Tier</th><th>Minimum</th><th>Notes</th></tr></thead>
         <tbody>
-          <tr><td>Claude Code</td><td><code>claude</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>2.1.277</code></td><td>Tested 2.1.284. Lead + builder; Fable&nbsp;5.1 → Opus&nbsp;5.5 → Sonnet&nbsp;5.5 ladder (2.1.277 first reads a root <code>AGENTS.md</code>; 2.1.267 first honors <code>effort:</code> frontmatter)</td></tr>
-          <tr><td>Antigravity</td><td><code>agy</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>1.1.27</code></td><td>Tested 1.2.1; pins Gemini 3.8 Flash (High) by default — the newest Gemini at its highest thinking level (Gemini 3.1 Pro opt-in via roster)</td></tr>
-          <tr><td>Codex</td><td><code>codex</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>0.153.0</code></td><td>Tested 0.154.0. Reviewer + tester; <code>gpt-6-astra</code> at xhigh, <code>--output-schema</code> structured verdicts</td></tr>
+          <tr><td>Claude Code</td><td><code>claude</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>2.1.277</code></td><td>Tested 2.1.283 (record) and 2.1.289 to 2.1.291 (dev-time rows). Lead or builder; Fable&nbsp;5.1 → Opus&nbsp;5.5 → Sonnet&nbsp;5.5 ladder (2.1.277 first reads a root <code>AGENTS.md</code>; a claude worker needs 2.1.285)</td></tr>
+          <tr><td>Antigravity</td><td><code>agy</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>1.1.27</code></td><td>Tested 1.2.12. Pins Gemini 3.8 Flash (High) by default, the newest Gemini at its highest thinking level (Gemini 3.1 Pro opt-in via roster)</td></tr>
+          <tr><td>Codex</td><td><code>codex</code></td><td><span class="cmd-badge cmd-badge--full" style="margin-left:0">Core</span></td><td><code>0.153.0</code></td><td>Tested 0.155.1 (record) and 0.160.0 (dev-time rows). Lead, or reviewer + tester; <code>gpt-6-astra</code> at xhigh, <code>--output-schema</code> structured verdicts</td></tr>
           <tr><td>OpenCode</td><td><code>opencode</code></td><td><span class="cmd-badge cmd-badge--util" style="margin-left:0">Optional</span></td><td><code>1.18.20</code></td><td>Tested 1.18.30. OpenRouter provider connected (glm-5.3)</td></tr>
           <tr><td>Kimi Code</td><td><code>kimi</code></td><td><span class="cmd-badge cmd-badge--util" style="margin-left:0">Optional</span></td><td><code>0.33.0</code></td><td>Tested 0.42.0 (live rows pending <code>kimi login</code>). OAuth device-code or API key (kimi-code/k3)</td></tr>
           <tr><td>Cursor</td><td><code>cursor-agent</code> · <code>agent</code></td><td><span class="cmd-badge cmd-badge--util" style="margin-left:0">Optional</span></td><td>date-versioned</td><td>Tested 2026.09.10. Pin cursor-grok-4.6-xhigh, never the Auto router</td></tr>
+          <tr><td>Devin CLI</td><td><code>devin</code></td><td><span class="cmd-badge cmd-badge--util" style="margin-left:0">Optional</span></td><td><code>3000.10.31</code></td><td>Tested 3000.11.3 (dev-time rows). Reviewer + analyst (swe-1-6-slow); joins after you consent, builds only after an opt-in</td></tr>
+          <tr><td>Grok Build</td><td><code>grok</code></td><td><span class="cmd-badge cmd-badge--util" style="margin-left:0">Optional</span></td><td><code>1.0.34</code></td><td>Tested 1.0.34 (dev-time rows). Builder, reviewer or analyst (grok-4.7); <code>grok login</code> or XAI_API_KEY</td></tr>
         </tbody>
       </table>
     </div>
@@ -2415,11 +2417,11 @@ body::after {
     <div class="faq__list reveal" style="max-width:800px;margin:0 auto;">
       <div class="faq__item">
         <button class="faq__question">Can I use this with an existing project?<svg class="faq__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
-        <div class="faq__answer"><div class="faq__answer-inner">Yes. The framework installs as a Claude Code plugin, adds files without modifying your existing code, and on the first session bootstraps an <code>ops/</code> directory with AGENTS.md, GOALS.md, MEMORY.md and CHANGELOG.md templates.</div></div>
+        <div class="faq__answer"><div class="faq__answer-inner">Yes. The framework installs as a plugin into the lead CLI (Claude Code or Codex), adds files without modifying your existing code, and on the first session bootstraps an <code>ops/</code> directory with AGENTS.md, GOALS.md, MEMORY.md and CHANGELOG.md templates.</div></div>
       </div>
       <div class="faq__item">
         <button class="faq__question">Do I need all the CLIs?<svg class="faq__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
-        <div class="faq__answer"><div class="faq__answer-inner">The <strong>core trio</strong> (Claude, Antigravity, Codex) is the supported baseline; run <code>at-setup</code> to get them live. The <strong>optional tier</strong> (OpenCode, Kimi, Cursor) is optional: enroll any subset through <code>at-setup</code>, and an absent one is skipped cleanly in every roster fallback chain. Claude alone can still run the pipeline in a degraded mode, without the multi-model review, test and analysis lanes.</div></div>
+        <div class="faq__answer"><div class="faq__answer-inner">The <strong>core trio</strong> (Claude, Antigravity, Codex) is the supported baseline; run <code>at-setup</code> to get them live. The <strong>optional tier</strong> (OpenCode, Kimi, Cursor, Devin, Grok Build) is optional: enroll any subset through <code>at-setup</code>, and an absent one is skipped cleanly in every roster fallback chain. Claude alone can still run the pipeline in a degraded mode, without the multi-model review, test and analysis lanes.</div></div>
       </div>
       <div class="faq__item">
         <button class="faq__question">How do personas differ from skills?<svg class="faq__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
@@ -2435,7 +2437,7 @@ body::after {
       </div>
       <div class="faq__item">
         <button class="faq__question">How does context exhaustion recovery work?<svg class="faq__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
-        <div class="faq__answer"><div class="faq__answer-inner">Two layers. <strong>Inside</strong> a session, the <code>ops/.sprint-complete</code> sentinel is the completion signal, created only after the verification checklist passes; Claude Code's native <code>/goal</code> checklist is a best-effort assist on top. <strong>Outside</strong> a session, <code>coordinate.sh</code> spawns fresh Claude processes with clean context windows and detects completion through that sentinel. A PreCompact hook checkpoints STATE.md before context compaction.</div></div>
+        <div class="faq__answer"><div class="faq__answer-inner">Two layers. <strong>Inside</strong> a session, the <code>ops/.sprint-complete</code> sentinel is the completion signal, created only after the verification checklist passes; under a Claude Code lead, the native <code>/goal</code> checklist is a best-effort assist on top. <strong>Outside</strong> a session, <code>coordinate.sh</code> starts fresh lead sessions with clean context windows and detects completion through that sentinel. A PreCompact hook checkpoints STATE.md before context compaction.</div></div>
       </div>
       <div class="faq__item">
         <button class="faq__question">What is knowledge compounding?<svg class="faq__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>

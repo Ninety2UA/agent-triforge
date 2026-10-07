@@ -113,7 +113,7 @@ _opencode_v2_refusal() {
 # builders answer in the same stream shape — the typed `Status:` report
 # (KTD11) is only parseable from the extracted prose.
 _oc_extract_text() {
-  OC_RAW="$1" OC_OUT="$2" python3 -c '
+  OC_RAW="$1" OC_OUT="$2" python3 -c "${_PY_PRELUDE}"'
 import json, os, sys
 raw = open(os.environ["OC_RAW"], "r", errors="replace").read()
 

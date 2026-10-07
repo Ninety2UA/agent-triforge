@@ -231,6 +231,29 @@ _cursor_bin_probe() {
   return 1
 }
 
+# _cur_grok_pick <catalog> — the Grok ids the CUR rows run, from a
+# `--list-models` catalog file: prints "<family> <mapped> <pick>". family: the
+# newest grok-N.N the catalog names, bare or cursor-prefixed (grok-4.6 when it
+# names none). mapped: the id dispatch composes for that family at xhigh,
+# _cursor_model_for_effort (scripts/lib/cursor.sh; the cursor- prefix comes
+# from the family, so grok-4.7-xhigh but cursor-grok-4.6-xhigh — D-050), with
+# the library sourced in a subshell as everywhere in this harness; "-" when it
+# could not compose. pick: mapped when the catalog lists it, else the bare
+# family. CUR-03 records all three, CUR-05 and CUR-09 run pick, CUR-12 runs
+# mapped, and SELF-29 runs this function on a stub catalog.
+_cur_grok_pick() {
+  local FAM MAPPED PICK RE
+  FAM=$(grep -oiE '(^|-)grok-[0-9]+\.[0-9]+' "$1" 2>/dev/null | sed -E 's/^-//' | sort -V | tail -1)
+  if [ -z "$FAM" ]; then FAM="grok-4.6"; fi
+  MAPPED=$( source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 && _cursor_model_for_effort "$FAM" xhigh 2>/dev/null ) || MAPPED=""
+  PICK=$FAM
+  if [ -n "$MAPPED" ]; then
+    RE=$(printf '%s' "$MAPPED" | sed 's/\./\\./g')
+    if grep -qE "(^|[[:space:]])${RE}([[:space:]]|$)" "$1" 2>/dev/null; then PICK=$MAPPED; fi
+  fi
+  printf '%s %s %s\n' "$FAM" "${MAPPED:--}" "$PICK"
+}
+
 # --------------------------------------------------------------------------
 # Fixture + sentinel
 # --------------------------------------------------------------------------
@@ -799,7 +822,7 @@ CDX_MODEL="gpt-6-astra"   # D-021 / KD2: every Codex row runs on the flagship pi
 OC_GLM=""
 KIMI_AUTH=0               # 1 when KIMI-05 is AUTH-FAIL -> live kimi rows record PENDING-AUTH (R18)
 KIMI_QUOTA=0              # 1 when KIMI-05 is QUOTA-FAIL -> live kimi rows gate on the quota, not a login
-CUR_BIN=""; CUR_GROK=""; CUR_GROK_BARE="grok-4.6"
+CUR_BIN=""; CUR_GROK=""; CUR_GROK_BARE="grok-4.6"; CUR_GROK_MAPPED="-"
 DVN_AUTH=0                # 1 when DVN-02 reads Not logged in -> live devin rows record PENDING-AUTH (R18)
 DVN_GATE=""               # why the READY gate (DVN-03) closed, for the gated rows' evidence
 CC_VER=""
@@ -1089,8 +1112,8 @@ EOF
   # AGY-12 / AGY-13 / AGY-16 — the native lane for the four Triforge plugin
   # agents (D-027 migrated them to agy's Markdown-agent format). Three states:
   # not installed (UNAVAILABLE, host state), installed but not discoverable
-  # (FAIL — invoke_antigravity's injection fallback is the operative mode,
-  # TRIFORGE_AGY_MODE=injection this release), and listed (live round-trip +
+  # (FAIL — invoke_antigravity's default, TRIFORGE_AGY_MODE=auto, then falls
+  # back to injection), and listed (live round-trip +
   # tools-allowlist negative + the AGY-16 native-mode negative). "Installed"
   # is true when `agy plugin list` mentions agent-triforge OR all four names
   # are listed by `agy agents` (a listed agent is proof of install whatever
@@ -1146,7 +1169,8 @@ EOF
     fi
 
     # AGY-16 — native-mode negative (KTD10): the gate, together with AGY-12,
-    # for flipping TRIFORGE_AGY_MODE's default from injection to auto. In
+    # for TRIFORGE_AGY_MODE's default, auto since 4.0 (D-042); a regression in
+    # either reverts it to injection. In
     # native mode the injected body is dropped, so the definition's own
     # tools/prompt must keep a targeted-researcher from destructive shell:
     # instructed to `rm -rf` a sentinel directory and `git push` (the fixture
@@ -1671,24 +1695,22 @@ if [ -n "$CUR_BIN" ]; then
   O="$WORK/cur-models.txt"
   if _rwt 60 "$CUR_BIN" --list-models > "$O" 2>&1 && [ -s "$O" ]; then
     cp "$O" "$APPX/cursor-models.txt"
-    # D-025 / KTD3: the Grok family number is the newest grok-N.N in the
-    # catalog (bare or cursor-prefixed); the shipped pin is the
-    # cursor-<family>-xhigh id when the catalog carries it (effort rides in
-    # the model-id suffix — CUR-12 probes the mapping target), else the bare
-    # family id. Never the Auto router.
-    CUR_GROK_BARE=$(grep -oiE '(^|-)grok-[0-9]+\.[0-9]+' "$O" | sed -E 's/^-//' | sort -V | tail -1)
-    [ -z "$CUR_GROK_BARE" ] && CUR_GROK_BARE="grok-4.6"
-    CUR_GROK_BARE_RE=$(printf '%s' "$CUR_GROK_BARE" | sed 's/\./\\./g')
-    if grep -qE "(^|[[:space:]])cursor-${CUR_GROK_BARE_RE}-xhigh([[:space:]]|$)" "$O"; then
-      CUR_GROK="cursor-${CUR_GROK_BARE}-xhigh"
-    else
-      CUR_GROK="$CUR_GROK_BARE"
-    fi
+    # D-025 / KTD3 / D-050: the Grok family is the newest grok-N.N in the
+    # catalog (bare or cursor-prefixed); the pin is the id dispatch composes
+    # for it at xhigh (effort rides in the model-id suffix — CUR-12 probes
+    # that mapping target) when the catalog carries it, else the bare family
+    # id (_cur_grok_pick). Never the Auto router.
+    read -r CUR_GROK_BARE CUR_GROK_MAPPED CUR_GROK <<CUR03_EOF
+$(_cur_grok_pick "$O")
+CUR03_EOF
     HAS_COMPOSER=$(grep -ciE 'composer' "$O" || true)
-    row "CUR-03" "cursor" "Model list (Grok pin — prefers cursor-<family>-xhigh; Composer alternative present)" "PASS" "grok-pick=$CUR_GROK (family $CUR_GROK_BARE); composer-lines=$HAS_COMPOSER; full list in Appendix B" "direct"
+    row "CUR-03" "cursor" "Model list (Grok pin — the <family> + xhigh id dispatch composes, when listed; Composer alternative present)" "PASS" "grok-pick=$CUR_GROK (family $CUR_GROK_BARE, composed $CUR_GROK_MAPPED); composer-lines=$HAS_COMPOSER; full list in Appendix B" "direct"
   else
-    CUR_GROK="cursor-${CUR_GROK_BARE}-xhigh"
-    row "CUR-03" "cursor" "Model list (Grok pin — prefers cursor-<family>-xhigh; Composer alternative present)" "FAIL" "$(_evidence "$O")" "direct"
+    read -r CUR_GROK_BARE CUR_GROK_MAPPED CUR_GROK <<CUR03_EOF
+$(_cur_grok_pick /dev/null)
+CUR03_EOF
+    if [ "$CUR_GROK_MAPPED" != - ]; then CUR_GROK=$CUR_GROK_MAPPED; fi
+    row "CUR-03" "cursor" "Model list (Grok pin — the <family> + xhigh id dispatch composes, when listed; Composer alternative present)" "FAIL" "$(_evidence "$O")" "direct"
   fi
 
   if [ "$CUR_LIVE" = "1" ]; then
@@ -1781,21 +1803,24 @@ EOF
       row "CUR-10" "cursor" "Bracket effort form rejected (--model \"${CUR_GROK_BARE}[effort=xhigh]\", negative)" "FAIL" "no READY and no error text (rc=$CUR10_RC) — ambiguous: $(_evidence "$O")" "negative"
     fi
 
-    # CUR-12 — the KTD3 mapping target: bare family + xhigh composes
-    # cursor-<family>-xhigh, which must answer READY.
+    # CUR-12 — the KTD3 mapping target: the id dispatch composes from the
+    # bare family + xhigh (_cur_grok_pick: _cursor_model_for_effort), which
+    # must answer READY.
     O="$WORK/cur-mapped.txt"
-    if (cd "$FIX" && _probe_run 240 "$CUR_BIN" --model "cursor-${CUR_GROK_BARE}-xhigh" -p "Respond with only: READY" --output-format text --trust > "$O" 2>&1) && _contains_ci "$O" "READY"; then
-      row "CUR-12" "cursor" "Effort-suffix mapping target READY (--model cursor-${CUR_GROK_BARE}-xhigh from bare ${CUR_GROK_BARE} + xhigh)" "PASS" "$(_evidence "$O")" "live"
+    if [ "$CUR_GROK_MAPPED" = - ]; then
+      row "CUR-12" "cursor" "Effort-suffix mapping target READY (bare ${CUR_GROK_BARE} + xhigh)" "FAIL" "no id composed: _cursor_model_for_effort (scripts/lib/cursor.sh) could not run" "live"
+    elif (cd "$FIX" && _probe_run 240 "$CUR_BIN" --model "$CUR_GROK_MAPPED" -p "Respond with only: READY" --output-format text --trust > "$O" 2>&1) && _contains_ci "$O" "READY"; then
+      row "CUR-12" "cursor" "Effort-suffix mapping target READY (--model ${CUR_GROK_MAPPED} from bare ${CUR_GROK_BARE} + xhigh)" "PASS" "$(_evidence "$O")" "live"
     else
-      row "CUR-12" "cursor" "Effort-suffix mapping target READY (--model cursor-${CUR_GROK_BARE}-xhigh from bare ${CUR_GROK_BARE} + xhigh)" "FAIL" "$(_evidence "$O")" "live"
+      row "CUR-12" "cursor" "Effort-suffix mapping target READY (--model ${CUR_GROK_MAPPED} from bare ${CUR_GROK_BARE} + xhigh)" "FAIL" "$(_evidence "$O")" "live"
     fi
   else
-    for r in "CUR-05:Explicit Grok pin (--model, never Auto)" "CUR-06:Headless hook events fire" "CUR-07:--sandbox enabled confines writes" "CUR-08:--mode plan is read-only" "CUR-09:/<skill> expands in -p from .cursor/skills" "CUR-10:Bracket effort form rejected (negative)" "CUR-12:Effort-suffix mapping target READY (cursor-<family>-xhigh)"; do
+    for r in "CUR-05:Explicit Grok pin (--model, never Auto)" "CUR-06:Headless hook events fire" "CUR-07:--sandbox enabled confines writes" "CUR-08:--mode plan is read-only" "CUR-09:/<skill> expands in -p from .cursor/skills" "CUR-10:Bracket effort form rejected (negative)" "CUR-12:Effort-suffix mapping target READY (the <family> + xhigh id dispatch composes)"; do
       row "${r%%:*}" "cursor" "${r#*:}" "$(_skip_reason)" "gated on CUR-04" "live"
     done
   fi
 else
-  for r in "CUR-01:Version capture" "CUR-02:Auth status" "CUR-03:Model list" "CUR-04:Headless READY" "CUR-05:Explicit Grok pin" "CUR-06:Headless hook events fire" "CUR-07:--sandbox enabled confines writes" "CUR-08:--mode plan is read-only" "CUR-09:/<skill> expands in -p from .cursor/skills" "CUR-10:Bracket effort form rejected (negative)" "CUR-12:Effort-suffix mapping target READY (cursor-<family>-xhigh)"; do
+  for r in "CUR-01:Version capture" "CUR-02:Auth status" "CUR-03:Model list" "CUR-04:Headless READY" "CUR-05:Explicit Grok pin" "CUR-06:Headless hook events fire" "CUR-07:--sandbox enabled confines writes" "CUR-08:--mode plan is read-only" "CUR-09:/<skill> expands in -p from .cursor/skills" "CUR-10:Bracket effort form rejected (negative)" "CUR-12:Effort-suffix mapping target READY (the <family> + xhigh id dispatch composes)"; do
     row "${r%%:*}" "cursor" "${r#*:}" "UNAVAILABLE" "no Cursor binary on PATH (cursor-agent, or an agent whose --version is Cursor-formatted)" "direct"
   done
 fi
@@ -5231,7 +5256,7 @@ COUNTER_MISMATCH=0
   echo "- **AGY-08** → project-tier hooks from \`.agents/hooks.json\` (documented named-hook shape, workspace bound) fired on agy 1.2.0 (lead re-probe 2026-09-11) but not on 1.2.1 (this row) — an open watch, never an enforcement path; guardrails rest on the agent \`tools\` allowlist + prompt rules because AGY-09/AGY-10 stay FAIL."
   echo "- **AGY-09/AGY-10** → deny-survival decides whether \`--dangerously-skip-permissions\` is ever passed by the adapter; the sandbox result feeds the R35 confinement profile."
   echo "- **AGY-11/AGY-11a/AGY-11b/AGY-11c** → effort rides in the (Low|Medium|High) model-name suffix (KTD1): the suffix form is accepted, \`--effort\` is accepted only with a bare slug family and rejected with a display name — the roster contract keeps display names; \`--effort\` is documented, not adopted."
-  echo "- **AGY-12/AGY-13** → native-lane health for the four plugin agents; the rows carry the live evidence (listing, round-trip, tools-allowlist negative) — read the outcome there. **AGY-16** → the native-mode negative that, together with AGY-12, gates flipping the \`TRIFORGE_AGY_MODE\` default from injection to auto (KTD10)."
+  echo "- **AGY-12/AGY-13** → native-lane health for the four plugin agents; the rows carry the live evidence (listing, round-trip, tools-allowlist negative) — read the outcome there. **AGY-16** → the native-mode negative that, together with AGY-12, gates the \`TRIFORGE_AGY_MODE\` default, \`auto\` since 4.0 (KTD10, D-042); a regression in either reverts it to injection."
   echo "- **AGY-14/AGY-14b** → skills expansion in agy's own form: \`/skills\` lists the shipped skills from \`.agents/skills/\` when the workspace is bound, and \`/<skill>\` expands headless (R9, KTD7)."
   echo "- **AGY-15** → the \`--output-format json\` envelope (status, response, denied_actions) that \`invoke_antigravity\` parses instead of trusting exit 0 (KTD2, D-032)."
   echo "- **CDX-02** → \`codex features list\` replaces version-string detection."
@@ -5329,6 +5354,8 @@ if [ "$SELF_ONLY" = "1" ]; then
   SELF_EXPECTED="$SELF_EXPECTED SELF-25"            # Grok Build's lease lane (U16)
   SELF_EXPECTED="$SELF_EXPECTED SELF-26"            # at-review's blocks run verbatim (U16, U17)
   SELF_EXPECTED="$SELF_EXPECTED SELF-16"            # at-setup's primitives and instruction files (U15)
+  SELF_EXPECTED="$SELF_EXPECTED SELF-27 SELF-28 SELF-17"   # Phase 6: S1 python path, U19 watch cycle, U20 two-lead sprint
+  SELF_EXPECTED="$SELF_EXPECTED SELF-29"            # Phase 6 wave 2: agy auto + AGY_ERROR, Cursor probe ids, deleted ledger anchors
   SELF_MISSING=""
   for SELF_ID in $SELF_EXPECTED; do
     if ! cut -f1 "$ROWS" | grep -qx "$SELF_ID"; then SELF_MISSING="${SELF_MISSING}${SELF_MISSING:+ }${SELF_ID}"; fi

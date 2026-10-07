@@ -194,7 +194,7 @@ fi
 # stderr line and exits with the rc to return: 64 a request the manifest or
 # the ladder refuses, 69 a CLI or the manifest missing, 70 a manifest, persona
 # entry or ladder that does not hold.
-_PERSONA_PY='
+_PERSONA_PY="${_PY_PRELUDE}"'
 import os, re, sys
 '"${_TRIFORGE_CLIS_PY}"'
 '"${_INSTALL_FIX_PY}"'
@@ -556,7 +556,7 @@ _persona_restore() {
   local WT=$1 A=$2 COMMIT=$3 HEAD=$4 SIDE=$5
   _lgw "$WT" "$A" ls-tree -r -z --name-only --full-tree "$COMMIT" > "${SIDE}/snap.ls" 2>/dev/null || return 1
   _lgw "$WT" "$A" ls-tree -r -z --name-only --full-tree "$HEAD" > "${SIDE}/head.ls" 2>/dev/null || return 1
-  PR_WT="$WT" PR_SIDE="$SIDE" python3 -c '
+  PR_WT="$WT" PR_SIDE="$SIDE" python3 -c "${_PY_PRELUDE}"'
 import os, shutil, sys
 '"${_PROTECTED_PY}"'
 wt, side = os.environ["PR_WT"], os.environ["PR_SIDE"]
@@ -598,7 +598,7 @@ _persona_reclaim() {
 # sides of each "diff --git", "---"/"+++" and rename line, one per line;
 # nothing for a file that holds no diff.
 _persona_input_instr() {
-  PI_FILE="$1" python3 -c '
+  PI_FILE="$1" python3 -c "${_PY_PRELUDE}"'
 import os, sys
 '"${_PROTECTED_PY}"'
 seen = []
@@ -662,7 +662,7 @@ _persona_safe_mode_ok() {
 _PERSONA_CODEX_PROFILE=()
 _persona_codex_profile() {
   local F
-  F=$(PC_CRED="$_CLAUDE_CRED_PATHS" PC_HOME="${HOME:-}" python3 -c '
+  F=$(PC_CRED="$_CLAUDE_CRED_PATHS" PC_HOME="${HOME:-}" python3 -c "${_PY_PRELUDE}"'
 import json, os
 home, out = os.environ["PC_HOME"].rstrip("/"), []
 for p in os.environ["PC_CRED"].split():

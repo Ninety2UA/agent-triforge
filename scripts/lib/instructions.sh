@@ -64,9 +64,18 @@ elif [ -n "${ZSH_VERSION:-}" ]; then
   _INSTR_ROOT="$(cd "$(dirname "$(eval 'echo "${(%):-%x}"')")/../.." 2>/dev/null && pwd)" || _INSTR_ROOT=""
 fi
 
-# _INSTR_READ_PY — read_regular(path[, text]): the same lines as
-# _READ_REGULAR_PY in scripts/lib/common.sh, used when that is not in scope.
+# _INSTR_READ_PY — the prelude, then read_regular(path[, text]): the same
+# lines as _READ_REGULAR_PY in scripts/lib/common.sh (_PY_PRELUDE, then the
+# reader), used when that is not in scope; SELF-27 compares the two.
 _INSTR_READ_PY='
+import os, sys
+try:
+    _tf_here = os.path.realpath(os.getcwd())
+except OSError:
+    _tf_here = None
+sys.path[:] = [_p for _p in sys.path if os.path.isabs(_p) and os.path.realpath(_p) != _tf_here]
+del _tf_here
+
 def read_regular(p, text=False):
     import os, stat
     fd = os.open(p, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
@@ -89,12 +98,10 @@ def read_regular(p, text=False):
 # template at every v3.* tag (six distinct files, v3.0.0 … v3.3.3): only a
 # byte-identical copy, which holds nothing of the user's, is ever removed.
 _INSTR_PY='
-import sys
-# python3 -c puts the working directory (the user project) first on sys.path;
-# drop it before any import, so a hashlib.py or re.py planted there never runs
-if sys.path and sys.path[0] in ("", "."):
-    del sys.path[0]
-import hashlib, os, re, stat
+# runs after the read_regular lines, whose prelude dropped the working
+# directory (the user project) from sys.path: a hashlib.py or re.py planted
+# there never runs
+import hashlib, os, re, stat, sys
 
 CLAUDE_KINDS = ("CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md")
 AGENTS_KINDS = ("AGENTS.md", "AGENTS.override.md")

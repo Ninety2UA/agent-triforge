@@ -170,15 +170,37 @@ _RC_LEAD_ONLY=45
 # it. Keep the bytes.
 _LEAD_GITCONFIG_SIGNATURE='# Triforge trusted git config'
 
-# _READ_REGULAR_PY — python: read_regular(path[, text]), the bytes (or, with
-# text, the str open(path, "r") reads) of a regular file. Opened O_NONBLOCK,
-# so a FIFO a worker planted at ops/roster.toml or ops/leases.toml fails at
-# once instead of blocking the reader before its type is known; anything but a
-# regular file raises OSError. Every python reader of the roster and the
-# ledger in roster.sh, lease.sh and coordinate.sh reads through it (Phase 3
-# round 5, G3); the hooks, which may run without this library, carry the same
-# few lines.
-_READ_REGULAR_PY='
+# _PY_PRELUDE — python: the first lines of every inline program (python3 -c,
+# python3 -). Under -c and -, sys.path[0] is the working directory, so a module
+# not loaded at startup (json, re, tomllib, subprocess, …) is imported from
+# there first: from a builder's worktree, an exec persona's snapshot, the user
+# project. These lines drop every relative entry and the working directory
+# from sys.path using only os and sys, both loaded at startup, before anything
+# else is imported (Phase 6, S1). -P and PYTHONSAFEPATH need 3.11, and macOS
+# /usr/bin/python3 is 3.9; -I would drop the user site, where tomli lives.
+# A program that splices _READ_REGULAR_PY first has it already. The hooks that
+# run without this library carry the same lines (SS_PY_PRELUDE in
+# session-start.sh, _INSTR_READ_PY in instructions.sh, pre-compact.sh's
+# reader); SELF-27 scans every program for them and compares the copies.
+_PY_PRELUDE='
+import os, sys
+try:
+    _tf_here = os.path.realpath(os.getcwd())
+except OSError:
+    _tf_here = None
+sys.path[:] = [_p for _p in sys.path if os.path.isabs(_p) and os.path.realpath(_p) != _tf_here]
+del _tf_here
+'
+
+# _READ_REGULAR_PY — python: the prelude, then read_regular(path[, text]), the
+# bytes (or, with text, the str open(path, "r") reads) of a regular file.
+# Opened O_NONBLOCK, so a FIFO a worker planted at ops/roster.toml or
+# ops/leases.toml fails at once instead of blocking the reader before its type
+# is known; anything but a regular file raises OSError. Every python reader of
+# the roster and the ledger in roster.sh, lease.sh, lease-wait.sh and
+# coordinate.sh reads through it (Phase 3 round 5, G3); the hooks, which may
+# run without this library, carry the same lines.
+_READ_REGULAR_PY="${_PY_PRELUDE}"'
 def read_regular(p, text=False):
     import os, stat
     fd = os.open(p, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
@@ -345,7 +367,7 @@ _codex_feature_row_present() {
 _extract_codex_agent_config() {
   local AGENT_TOML=$1
   local AGENT_NAME=$2
-  AGENT_TOML="$AGENT_TOML" AGENT_NAME="$AGENT_NAME" python3 -c "
+  AGENT_TOML="$AGENT_TOML" AGENT_NAME="$AGENT_NAME" python3 -c "${_PY_PRELUDE}
 import sys, os, json, base64
 try:
     import tomllib
@@ -381,7 +403,7 @@ _list_codex_agents() {
   local AGENT_TOML=$1
   [ -z "$AGENT_TOML" ] && return
   [ -f "$AGENT_TOML" ] || return
-  AGENT_TOML="$AGENT_TOML" python3 -c "
+  AGENT_TOML="$AGENT_TOML" python3 -c "${_PY_PRELUDE}
 import sys, os
 try:
     import tomllib

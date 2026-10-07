@@ -184,7 +184,9 @@ _devin_config_copy() {
 # allowed-tools, and a skill that asks for a subagent is rejected (DVN rows,
 # devin-agents/README.md).
 _devin_project_guard() {
-  python3 - "$1" <<'DEVIN_GUARD_PY'
+  # the heredoc is the program, run after _PY_PRELUDE (common.sh): invoke_devin
+  # runs this from the project, where python3 - would import its json.py
+  python3 -c "${_PY_PRELUDE}"'exec(compile(sys.stdin.read(), "<stdin>", "exec"))' "$1" <<'DEVIN_GUARD_PY'
 import json, os, stat, sys
 
 CONFIG_FILES = ("config.json", "config.local.json", "mcp_config.json", "mcp_config.local.json")
@@ -343,7 +345,7 @@ devin_model_choices() {
     echo "devin_model_choices: devin models list failed (rc ${RC}); it needs a login (devin auth login) and the network" >&2
     return 69
   fi
-  if ! printf '%s' "$OUT" | python3 -c '
+  if ! printf '%s' "$OUT" | python3 -c "${_PY_PRELUDE}"'
 import json, re, sys
 s = sys.stdin.read()
 try:

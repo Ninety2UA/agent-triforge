@@ -235,7 +235,7 @@ ${PROMPT}"
   # as JSON; valid → pretty-printed to ${OUTPUT_FILE}.verdict.json, invalid →
   # warn and leave the raw output as the source of truth.
   if [ "$EXIT_CODE" -eq 0 ] && [ "$SCHEMA_APPLIED" -eq 1 ]; then
-    if [ -f "${OUTPUT_FILE}.last" ] && VERDICT_IN="${OUTPUT_FILE}.last" VERDICT_OUT="${OUTPUT_FILE}.verdict.json" python3 -c "
+    if [ -f "${OUTPUT_FILE}.last" ] && VERDICT_IN="${OUTPUT_FILE}.last" VERDICT_OUT="${OUTPUT_FILE}.verdict.json" python3 -c "${_PY_PRELUDE}
 import json, os
 with open(os.environ['VERDICT_IN']) as f:
     data = json.load(f)

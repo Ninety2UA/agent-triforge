@@ -8285,9 +8285,11 @@ fi
 exit "$(cat "$D/cfg/codex.rc" 2>/dev/null || echo 0)"
 EOF
 } > "$_S26/bin/codex"
-# agy: the JSON envelope in cfg/agy.ans, exit cfg/agy.rc
+# agy: the JSON envelope in cfg/agy.ans, exit cfg/agy.rc; `agy agents`, the
+# listing the default TRIFORGE_AGY_MODE=auto consults, lists nothing and is
+# not a run (so every lane routes by injection, as before the default changed)
 { printf '#!/bin/sh\n# SELF-26 agy stub\nD=%s\nN=agy\n' "'$_S26'"; cat <<'EOF'
-case "$1" in --version|-V) echo "agy 1.2.0"; exit 0 ;; esac
+case "$1" in --version|-V) echo "agy 1.2.0"; exit 0 ;; agents) exit 0 ;; esac
 . "$D/bin/s26-record"
 cat "$D/cfg/agy.ans" 2>/dev/null
 exit "$(cat "$D/cfg/agy.rc" 2>/dev/null || echo 0)"
@@ -10462,3 +10464,1361 @@ else
   row "SELF-16" "claude" "$_S16_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S16_FAIL"):$(printf '%s' "$_S16_FAIL" | cut -c1-700)" "static"
 fi
 rm -rf "$_S16"
+
+# SELF-27 (S1, Phase 6 — R35, KTD18: no inline python helper imports a module planted in its working directory: a builder worktree, the user project, a lead checkout). Cases go between the markers; each appends
+# "<case>(<why>)" to _S27_FAIL on a mismatch (_self_expect does this) and, once
+# they ran, one short note to _S27_EV. Expected values are literals. A row whose
+# cases never ran fails: no note is no evidence.
+_S27="${WORK}/self27"
+_S27_FAIL=""
+_S27_EV=""
+mkdir -p "$_S27"
+# --- SELF-27 cases (worker 6-sec) ---
+#   static   every python3 -c / python3 - program in scripts/lib/,
+#            hooks/handlers/, scripts/coordinate.sh and the skills' shell
+#            blocks runs the prelude first (_PY_PRELUDE, a variable whose
+#            definition starts with it, or a hook's literal copy; a skill block
+#            that imports nothing beyond os and sys may skip it), and the
+#            copies the hooks carry equal the library's. Negative control: a
+#            lease.sh copy with one program's prelude dropped and planted
+#            programs appended, and a session-start.sh copy whose prelude
+#            differs, are flagged by line and by name
+#   lead     from a lead checkout holding planted modules: resolve_role,
+#            roster_write_role and lease_create import none of them
+#   msg      roster_write_role's line names the model dispatch runs for an
+#            empty one: the member's, the shipped default, Claude Code's own
+#   lease    from a clean lead checkout, a builder plants modules in its
+#            worktree, where the claude lane's envelope parser, the group
+#            sweep and a kimi lane's stream extractor run after it exits: no
+#            marker, both leases reach review
+#   persona  an exec persona at that lease's snapshot (the planted modules in
+#            its worktree): the run supervisor imports none, rc 0
+#   fifo     a builder swaps the ledger for a FIFO while lease_wait polls:
+#            rc 44 within the bound, not a block; the root notice, the state
+#            read and the ledger check on a FIFO each return
+#   hook     session start and pre-compact in a project holding planted
+#            modules (throwaway HOME, stub agy and claude): no marker, and the
+#            member, lease and snapshot counts still print
+# Every planted module appends "<name> <cwd>" to its marker file when imported.
+
+# _s27_scan <root> <list> — the static scan of the files <list> names (one
+# per line, relative to <root>; the first holds _PY_PRELUDE). One line per
+# finding — "<file>:<line>:no-prelude:<text>", "<file>:<line>:unresolved:<why>",
+# "drift:<copy>:<library variable>", "scan-error:…" — then
+# "files=<n> programs=<n> file-runs=<n> copies=<n>".
+_s27_scan() {
+  python3 - "$@" 2>&1 <<'S27_SCAN_PY' || echo "scan-error:python-rc=$?"
+import os, re, sys
+HDOC = re.compile(r"<<(-?)[ \t]*(?:'([^']*)'|\"([^\"]*)\"|(\\?)([A-Za-z_][A-Za-z0-9_]*))")
+PY = re.compile(r"(?<![\w$./-])python3(?![\w.-])")
+OPT = re.compile(r"[ \t]+(?:\\\n[ \t]*)?(-[A-Za-z]*c|-|-[A-Za-z]+|)(?=[ \t\n;|&)<>]|$)")
+NAME = r"[A-Za-z_][A-Za-z0-9_]*"
+VAR = re.compile(r'"?\$\{(' + NAME + r')(?::?-\$\{?(' + NAME + r')\}?)?\}|"?\$(' + NAME + r')')
+out, defs, progs, fileruns = [], {}, [], 0
+
+
+def mask(text, label):
+    # text with every character that is not shell code (comments, quoted and
+    # heredoc text) blanked; newlines, quote marks and $( ) kept (the lexer of
+    # SELF-18's git scan, over the whole text)
+    m, st, pend, i, n = list(text), [["CODE", 0, None]], [], 0, len(text)
+
+    def blank(a, b):
+        for j in range(a, min(b, n)):
+            if m[j] != "\n":
+                m[j] = " "
+    while i < n:
+        c, nx, k = text[i], text[i + 1:i + 2], st[-1][0]
+        if i == 0 or text[i - 1] == "\n":
+            hd = [j for j, f in enumerate(st) if f[0] in ("HDOC", "HDOCQ")]
+            if hd:
+                delim, strip = st[hd[-1]][2]
+                e = text.find("\n", i)
+                e = n if e < 0 else e
+                if (text[i:e].lstrip("\t") if strip else text[i:e]) == delim:
+                    del st[hd[-1]:]
+                    blank(i, e)
+                    i = e
+                    continue
+                if st[-1][0] == "HDOCQ":
+                    blank(i, e)
+                    i = e + 1
+                    continue
+        if k in ("SQ", "ANSI"):
+            if k == "ANSI" and c == "\\":
+                blank(i, i + 2)
+                i += 2
+                continue
+            if c == "'":
+                st.pop()
+            else:
+                blank(i, i + 1)
+            i += 1
+            continue
+        if k in ("DQ", "HDOC", "PARAM", "PARAMQ"):
+            if c == "\\":
+                blank(i, i + 2)
+                i += 2
+                continue
+            if k == "DQ" and c == '"':
+                st.pop()
+            elif k in ("PARAM", "PARAMQ") and c == "}":
+                if st[-1][1]:
+                    st[-1][1] -= 1
+                else:
+                    st.pop()
+            elif k in ("PARAM", "PARAMQ") and c == "{":
+                st[-1][1] += 1
+            elif k in ("PARAM", "PARAMQ") and c == '"':
+                st.append(["DQ", 0, None])
+            elif k == "PARAM" and c == "'":
+                st.append(["SQ", 0, None])
+            elif c == "$" and nx in ("(", "{"):
+                st.append(["SUB" if nx == "(" else ("PARAM" if k == "PARAM" else "PARAMQ"), 0, None])
+                i += 2
+                continue
+            elif c == "`":
+                st.append(["BQ", 0, None])
+            else:
+                blank(i, i + 1)
+            i += 1
+            continue
+        if c == "\\":
+            i += 2
+            continue
+        if c == "#" and (i == 0 or text[i - 1] in " \t\n;|&()"):
+            e = text.find("\n", i)
+            e = n if e < 0 else e
+            blank(i, e)
+            i = e
+            continue
+        if c == "\n" and pend:
+            st.extend([kind, 0, (delim, strip)] for kind, delim, strip in pend)
+            pend = []
+        elif c == "'":
+            st.append(["ANSI" if i and text[i - 1] == "$" else "SQ", 0, None])
+        elif c == '"':
+            st.append(["DQ", 0, None])
+        elif c == "`":
+            if k == "BQ":
+                st.pop()
+            else:
+                st.append(["BQ", 0, None])
+        elif c == "$" and nx in ("(", "{"):
+            st.append(["SUB" if nx == "(" else "PARAM", 0, None])
+            i += 2
+            continue
+        elif c == "(" and k == "SUB":
+            st[-1][1] += 1
+        elif c == ")" and k == "SUB":
+            if st[-1][1]:
+                st[-1][1] -= 1
+            else:
+                st.pop()
+        elif text.startswith("<<<", i):
+            i += 3
+            continue
+        elif text.startswith("<<", i):
+            h = HDOC.match(text, i)
+            if h:
+                quoted = h.group(2) is not None or h.group(3) is not None or h.group(4) == "\\"
+                pend.append(("HDOCQ" if quoted else "HDOC", next(g for g in (h.group(2), h.group(3), h.group(5)) if g is not None), h.group(1) == "-"))
+                i = h.end()
+                continue
+        i += 1
+    for f in st[1:]:
+        out.append("scan-error:" + label + ":" + f[0] + " never closes (the lexer lost the quoting)")
+    return "".join(m)
+
+
+def lineno(text, p):
+    return text.count("\n", 0, p) + 1
+
+
+def segment(text, p):
+    # the first segment of the shell word at p: ("var", names) for "${A}",
+    # "$A", "${A:-$B}"; ("lit", text) for '...' or a "..." run up to its first
+    # $ or backtick; else ("?", text)
+    v = VAR.match(text, p)
+    if v:
+        return "var", [g for g in v.groups() if g]
+    if text.startswith("'", p):
+        e = text.find("'", p + 1)
+        return "lit", text[p + 1:e if e > 0 else len(text)]
+    if text.startswith('"', p):
+        e = re.compile(r'(?<!\\)["$`]').search(text, p + 1)
+        return "lit", text[p + 1:e.start() if e else len(text)]
+    return "?", text[p:p + 60].split("\n")[0]
+
+
+def check(kind, val, prelude, seen=()):
+    # "" when the segment runs the prelude first, else why not
+    if kind == "lit":
+        return "" if val.lstrip("\n").startswith(prelude) else "no-prelude:" + val.strip()[:60].replace("\n", " | ")
+    if kind != "var":
+        return "unresolved:" + val
+    for name in val:
+        if name == "_PY_PRELUDE":
+            continue
+        if name in seen or name not in defs:
+            return "unresolved:" + ("a cycle through " if name in seen else "no definition of ") + name
+        for d in defs[name]:
+            why = check(d[0], d[1], prelude, seen + (name,))
+            if why:
+                return why + " (via " + name + " at " + d[2] + ")"
+    return ""
+
+
+def expand(name, seen=()):
+    # the value of a variable defined once as '...' and "${VAR}" parts, else None
+    if name in seen or len(defs.get(name, ())) != 1:
+        return None
+    raw, p, s = defs[name][0][3], defs[name][0][4], ""
+    while p < len(raw) and raw[p] not in " \t\n;":
+        if raw[p] == "'":
+            e = raw.find("'", p + 1)
+            s, p = s + raw[p + 1:e], e + 1
+            continue
+        v = re.match(r'"\$\{?(' + NAME + r')\}?"', raw[p:])
+        x = expand(v.group(1), seen + (name,)) if v else None
+        if x is None:
+            return None
+        s, p = s + x, p + v.end()
+    return s
+
+
+root, files = sys.argv[1], [f for f in open(sys.argv[2]).read().split("\n") if f]
+texts = {}
+for f in files:
+    raw = open(os.path.join(root, f), encoding="utf-8", errors="surrogateescape").read()
+    if f.endswith(".md"):
+        # only the fenced shell blocks: prose and other fences blanked
+        keep, fence = [], None
+        for ln in raw.split("\n"):
+            s = ln.strip()
+            if s.startswith("```"):
+                fence = (s[3:].strip() in ("bash", "sh", "shell", "zsh")) if fence is None else None
+                keep.append("")
+            else:
+                keep.append(ln if fence else "")
+        raw = "\n".join(keep)
+    texts[f] = (raw, mask(raw, f))
+for f, (raw, mk) in texts.items():
+    for a in re.finditer(r"(?m)^[ \t]*(?:(?:local|readonly|export|declare)[ \t]+(?:-[a-z]+[ \t]+)?)?(" + NAME + r")=(?=['\"])", mk):
+        k, v = segment(raw, a.end())
+        defs.setdefault(a.group(1), []).append((k, v, f + ":" + str(lineno(raw, a.start())), raw, a.end()))
+pd = re.search(r"(?m)^_PY_PRELUDE='([^']*)'", texts[files[0]][0])
+if not pd:
+    out.append("scan-error:no _PY_PRELUDE='...' in " + files[0])
+prelude = pd.group(1).strip("\n") + "\n" if pd else "\0"
+for f, (raw, mk) in texts.items():
+    for hit in PY.finditer(mk):
+        p, where = hit.start(), f + ":" + str(lineno(raw, hit.start()))
+        if re.search(r"(command[ \t]+-v|type|which)[ \t]+$", mk[mk.rfind("\n", 0, p) + 1:p]):
+            continue
+        q, mode = hit.end(), None
+        while True:
+            o = OPT.match(raw, q)
+            if not o or not o.group(1):
+                break
+            q = o.end()
+            if o.group(1) == "-" or o.group(1).endswith("c"):
+                mode = o.group(1)
+                break
+        if mode and mode != "-":
+            a = re.compile(r"[ \t]+").match(raw, q)
+            kind, val = segment(raw, a.end() if a else q)
+        else:
+            rest = raw[q:raw.find("\n", q)]
+            arg = re.match(r"[ \t]+(\"[^\"]*\"|'[^']*'|[^ \t;|&)<>]+)", rest)
+            v = re.match(r'"\$\{?(' + NAME + r')\}?"$', arg.group(1)) if arg else None
+            if mode is None and arg and (re.search(r"\.py[\"']?$", arg.group(1)) or v and any(
+                    re.match(r"\S*\.py[\"']?(\s|$)", d[3][d[4]:d[4] + 300]) for d in defs.get(v.group(1), ()))):
+                fileruns += 1   # python3 <file>: sys.path[0] is the file's directory
+                continue
+            progs.append(where)
+            h = HDOC.search(rest)
+            if not h:
+                out.append(where + ":unresolved:the program comes from a pipe or an argument the scan can't follow")
+                continue
+            body = raw.find("\n", q) + 1
+            if h.group(2) is not None or h.group(3) is not None or h.group(4) == "\\":
+                e = re.compile(r"(?m)^\t*" + re.escape(next(g for g in (h.group(2), h.group(3), h.group(5)) if g is not None)) + r"$").search(raw, body)
+                kind, val = "lit", raw[body:e.start() if e else len(raw)]
+            else:
+                kind, val = segment('"' + raw[body:body + 200], 0)
+            why = check(kind, val, prelude)
+            if why:
+                out.append(where + ":" + why)
+            continue
+        progs.append(where)
+        why = check(kind, val, prelude)
+        if why and f.endswith(".md") and kind == "lit":
+            imps = re.findall(r"(?m)^\s*(?:import\s+([\w., ]+)|from\s+(\w+))", val)
+            if {x.strip().split(".")[0] for a, b in imps for x in (a.split(",") if a else [b])} <= {"os", "sys"}:
+                continue
+        if why:
+            out.append(where + ":" + why)
+copies = 0
+for other, base in (("SS_PY_PRELUDE", "_PY_PRELUDE"), ("SS_READ_PY", "_READ_REGULAR_PY"), ("_INSTR_READ_PY", "_READ_REGULAR_PY")):
+    if other in defs:
+        copies += 1
+        a, b = expand(other), expand(base)
+        if a is None or a != b:
+            out.append("drift:" + other + ":" + base)
+print("\n".join(out + ["files=%d programs=%d file-runs=%d copies=%d" % (len(texts), len(progs), fileruns, copies)]))
+S27_SCAN_PY
+}
+( cd "$REPO_ROOT" && { printf '%s\n' scripts/lib/common.sh; ls scripts/lib/*.sh hooks/handlers/*.sh scripts/coordinate.sh | grep -vx scripts/lib/common.sh; find skills -name '*.md' | LC_ALL=C sort; } ) > "$_S27/files"
+O=$(_s27_scan "$REPO_ROOT" "$_S27/files")
+_S27_N=$(printf '%s\n' "$O" | sed -n 's/^files=[0-9]* programs=\([0-9]*\) .*/\1/p')
+if [ "$(printf '%s\n' "$O" | wc -l | tr -d ' ')" != 1 ] || [ "${_S27_N:-0}" -lt 90 ]; then
+  _S27_FAIL="${_S27_FAIL} static(want-one-summary-line-and-90+-programs;got:$(printf '%s' "$O" | head -8 | tr '\n()' '|[]' | cut -c1-500))"
+fi
+_S27_FAIL="${_S27_FAIL}$(_self_expect static "$O" '^files=[0-9]+ programs=[0-9]+ file-runs=6 copies=3$')"
+# negative control: lease.sh with its first prelude dropped and eight programs
+# appended (five flagged: an SQ program, a heredoc, a pipe, an undefined and a
+# prelude-less variable; three passing: the read_regular splice, the prelude,
+# a python3 <file>); session-start.sh with its prelude copy changed
+mkdir -p "$_S27/neg"
+cp "$REPO_ROOT/scripts/lib/common.sh" "$REPO_ROOT/scripts/lib/lease-wait.sh" "$_S27/neg/"
+_S27_M=$(python3 - "$REPO_ROOT/scripts/lib/lease.sh" "$_S27/neg/lease.sh" "$REPO_ROOT/hooks/handlers/session-start.sh" "$_S27/neg/session-start.sh" <<'S27_NEG_PY'
+import sys
+src = open(sys.argv[1], encoding="utf-8").read()
+cut = "python3 -c \"${_PY_PRELUDE}\"'"
+k = src.find(cut)
+open(sys.argv[2], "w", encoding="utf-8").write(src[:k] + "python3 -c '" + src[k + len(cut):])
+print(src.count("\n", 0, k) + 1 if k >= 0 else 0)
+ss = open(sys.argv[3], encoding="utf-8").read()
+open(sys.argv[4], "w", encoding="utf-8").write(ss.replace("    _tf_here = None\n", "    _tf_here = ''\n", 1))
+S27_NEG_PY
+)
+_S27_L=$(wc -l < "$_S27/neg/lease.sh" | tr -d ' ')
+cat >> "$_S27/neg/lease.sh" <<'S27_PLANT_EOF'
+python3 -c 'import json'
+X=1 python3 - <<'S27P'
+import re
+S27P
+printf x | python3 -
+python3 -c "$_S27_NOPE_PY"
+_S27_BAD_PY='
+import json
+'
+python3 -c "$_S27_BAD_PY" x
+python3 -c "${_READ_REGULAR_PY}"'import json'
+python3 -c "${_PY_PRELUDE}"'import json'
+python3 "$D/tool.py" x
+S27_PLANT_EOF
+printf '%s\n' common.sh lease-wait.sh lease.sh session-start.sh > "$_S27/neg/files"
+O=$(_s27_scan "$_S27/neg" "$_S27/neg/files")
+_S27_GOT=$(printf '%s\n' "$O" | grep '^lease\.sh:' | cut -d: -f2 | tr '\n' ' ')
+_S27_WANT="${_S27_M} $((_S27_L + 1)) $((_S27_L + 2)) $((_S27_L + 5)) $((_S27_L + 6)) $((_S27_L + 10)) "
+[ "$_S27_GOT" = "$_S27_WANT" ] || _S27_FAIL="${_S27_FAIL} static-negative(want-lease.sh-lines:${_S27_WANT% };got:${_S27_GOT% })"
+_S27_FAIL="${_S27_FAIL}$(_self_expect static-negative "$O" '^drift:SS_PY_PRELUDE:_PY_PRELUDE$' '^drift:SS_READ_PY:_READ_REGULAR_PY$' \
+  "^lease\.sh:$((_S27_L + 10)):no-prelude:import json \(via _S27_BAD_PY" "^lease\.sh:$((_S27_L + 6)):unresolved:no definition of _S27_NOPE_PY" \
+  ' copies=2$')"
+[ "$(printf '%s\n' "$O" | grep -c '^session-start\.sh:[0-9]*:no-prelude' || true)" = 4 ] \
+  || _S27_FAIL="${_S27_FAIL} static-negative(want-4-session-start-programs-flagged;got:$(printf '%s\n' "$O" | grep -c '^session-start\.sh:' || true))"
+_S27_EV="${_S27_EV}static: ${_S27_N:-?} programs, every one prelude-first, 6 file runs, 3 copies equal; the planted lease.sh lines and the changed session-start.sh copy flagged; "
+
+# _s27_plant <dir> <marker> <module>... — a module per name that appends
+# "<name> <cwd>" to <marker> when imported
+_s27_plant() {
+  local D=$1 M=$2 N
+  shift 2
+  for N in "$@"; do
+    printf 'import os\nopen("%s", "a").write("%s " + os.getcwd() + "\\n")\n' "$M" "$N" > "$D/$N.py"
+  done
+}
+# _s27_marks <marker> — the module names a marker holds, sorted, or "none"
+_s27_marks() {
+  if [ -s "$1" ]; then cut -d' ' -f1 "$1" | LC_ALL=C sort -u | tr '\n' ',' | sed 's/,$//'; else echo none; fi
+}
+_S27_MODS="json re subprocess shutil tomllib tomli secrets hashlib shlex base64 datetime signal select calendar traceback collections"
+mkdir -p "$_S27/home" "$_S27/bin" "$_S27/tmp" "$_S27/plant-wt"
+# shellcheck disable=SC2086
+_s27_plant "$_S27/plant-wt" "$_S27/mark-wt" $_S27_MODS
+# The stub claude for the persona lane: above the sandbox floor, --safe-mode
+# in its help, a result envelope written without python (it runs in the
+# persona's worktree, among the planted modules). The stub kimi is resolution
+# only (the seam replaces the CLI, not the lane).
+cat > "$_S27/bin/claude" <<'S27_CLAUDE_EOF'
+#!/bin/sh
+case "${1:-}" in
+  --version) echo "2.1.289 (Claude Code)"; exit 0 ;;
+  --help) echo "  --safe-mode   Start with all customizations (CLAUDE.md, ...) disabled"; echo "  --tools <tools...>"; exit 0 ;;
+esac
+printf '%s\n' '{"type": "result", "subtype": "success", "is_error": false, "result": "S27-PERSONA-ANSWER", "session_id": "00000000-0000-4000-8000-000000000027", "num_turns": 1}'
+S27_CLAUDE_EOF
+printf '#!/bin/sh\necho "0.0.0-probe-stub"\n' > "$_S27/bin/kimi"
+# The fake builder: plants the modules in its worktree, then reports — as a
+# kimi stream for "s27-stream", after swapping the lead's ledger for a FIFO
+# for "s27-fifo" (lease_wait polls meanwhile)
+cat > "$_S27/fb.sh" <<S27_FB_EOF
+#!/bin/sh
+# probe builder (SELF-27)
+cp "$_S27/plant-wt/"*.py .
+case "\$1" in
+  *s27-stream*) printf '%s\n' '{"role":"assistant","id":"m1","content":"Done.\\n\\nStatus: DONE\\nFiles changed: json.py\\nTests: none\\nConcerns: None\\nDiscoveries for later tasks: None\\n"}' ;;
+  *s27-fifo*) sleep 2; L="$_S27/ff/ops/leases.toml"; mv "\$L" "\$L.s27"; mkfifo "\$L"; sleep 3; echo "Status: DONE" ;;
+  *) echo "planted"; echo "Status: DONE" ;;
+esac
+S27_FB_EOF
+chmod +x "$_S27/bin/claude" "$_S27/bin/kimi" "$_S27/fb.sh"
+printf 'BRIEF: run the project tests and report\n' > "$_S27/brief.txt"
+# _s27_lead <repo> <script> — lead-side steps from <repo> with the library
+# sourced: the case's HOME, TMPDIR and lease root, the stubs first on PATH, the
+# SELF seam (claude lead, the fake builder), no host markers, stdin /dev/null
+_s27_lead() {
+  ( cd "$1" && export HOME="$_S27/home" TMPDIR="$_S27/tmp" TRIFORGE_LEASE_ROOT="$1.leases" PATH="$_S27/bin:${_SELF_STUBS}:$PATH" \
+        GIT_CONFIG_NOSYSTEM=1 CLAUDE_PLUGIN_ROOT="$REPO_ROOT" TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S27/fb.sh" \
+      && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID TRIFORGE_LEASE_WORKER TRIFORGE_LEAD_PID CODEX_HOME TRIFORGE_CLAUDE_SANDBOX \
+      && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && eval "$2" ) < /dev/null 2>&1 || true
+}
+
+# lead: a lead checkout holding planted modules (untracked)
+_self_repo "$_S27/lp" "$_S27/home" sprint/s27 '[roles.builder]\ncli = "claude"\n'
+# shellcheck disable=SC2086
+_s27_plant "$_S27/lp" "$_S27/mark-lead" $_S27_MODS
+O=$(_s27_lead "$_S27/lp" '
+echo "role=$(resolve_role builder 2>/dev/null | cut -f1)"
+R=0; roster_write_role tester codex "" high >/dev/null 2>&1 || R=$?; echo "write:rc=$R"
+_self_try create lease_create t0 builder
+echo "lead=$(_s27_marks "$_S27/mark-lead")"
+')
+_S27_FAIL="${_S27_FAIL}$(_self_expect lead "$O" '^role=claude$' '^write:rc=0$' '^create:rc=0:' '^lead=none$')"
+
+# msg + lease + persona: a clean lead checkout; the builder plants the modules
+_self_repo "$_S27/lw" "$_S27/home" sprint/s27 '[roles.builder]\ncli = "claude"\n\n[members.codex]\nmodel = "gpt-s27-member"\n'
+O="$O
+$(_s27_lead "$_S27/lw" '
+_self_try w-member roster_write_role tester codex "" high
+_self_try w-shipped roster_write_role reviewer kimi "" high
+_self_try w-own roster_write_role analyst claude "" high
+_self_go t1
+echo "wt1=$(_s27_marks "$_S27/mark-wt")"
+echo "snap=$(git ls-tree --name-only "$(_ledger_get t1 snapshot_sha 2>/dev/null)" 2>/dev/null | grep -cE "^(json|re|subprocess|select|signal)\.py$" || true)"
+rm -f "$_S27/mark-wt"
+R=0; dispatch_persona test-gap-analyzer "$_S27/brief.txt" "$_S27/px.out" --at task:t1 >/dev/null 2>&1 || R=$?
+echo "persona:rc=$R:$(head -1 "$_S27/px.out" 2>/dev/null)"
+echo "px=$(_s27_marks "$_S27/mark-wt")"
+rm -f "$_S27/mark-wt"
+printf "[roles.builder]\ncli = \"kimi\"\nfallbacks = [\"claude\"]\n\n[members.kimi]\nenabled = true\n" > ops/roster.toml
+R=0; { lease_create t3 builder && lease_dispatch t3 "s27-stream probe" 60; } >/dev/null 2>&1 || R=$?
+if [ "$R" -eq 0 ]; then _self_wait_rc t3; lease_collect t3 >/dev/null 2>&1 || R=$?; fi
+echo "t3:go=$R:$(_ledger_get t3 builder_cli 2>/dev/null):$(_ledger_get t3 state 2>/dev/null)"
+echo "wt3=$(_s27_marks "$_S27/mark-wt")"
+')"
+_S27_FAIL="${_S27_FAIL}$(_self_expect msg "$O" \
+  '^w-member:rc=0:roster_write_role: \[roles\.tester\] cli=codex model="" \(dispatch runs the member model gpt-s27-member\) effort=high' \
+  '^w-shipped:rc=0:roster_write_role: \[roles\.reviewer\] cli=kimi model="" \(dispatch runs the shipped default kimi-code/k3\) effort=high' \
+  '^w-own:rc=0:roster_write_role: \[roles\.analyst\] cli=claude model="" \(dispatch runs the default model of Claude Code\) effort=high')"
+_S27_FAIL="${_S27_FAIL}$(_self_expect lease "$O" '^t1:go=0:review$' '^wt1=none$' '^snap=5$' '^t3:go=0:kimi:review$' '^wt3=none$')"
+_S27_FAIL="${_S27_FAIL}$(_self_expect persona "$O" '^persona:rc=0:S27-PERSONA-ANSWER$' '^px=none$')"
+_S27_EV="${_S27_EV}lead: resolve_role, roster_write_role and lease_create from a checkout holding 16 planted modules, none imported; msg: an empty role model named as the member model, the shipped default, Claude Code's own; lease: the claude lane (envelope, group sweep) and a kimi lane (stream extractor) after the builder planted them in its worktree, both review, no marker; persona: an exec persona at that snapshot (5 planted modules in it), rc 0, no marker; "
+
+# fifo: a builder swaps the ledger for a FIFO while lease_wait polls; then the
+# three readers with the FIFO in place, each run bounded
+_self_repo "$_S27/ff" "$_S27/home" sprint/s27 '[roles.builder]\ncli = "claude"\n'
+_s27_bounded() { # _s27_bounded <secs> <script> — the steps in a fresh lead shell from $_S27/ff under the timeout; then "bounded-rc=<n>"
+  local R=0
+  ( cd "$_S27/ff" && export HOME="$_S27/home" TMPDIR="$_S27/tmp" TRIFORGE_LEASE_ROOT="$_S27/ff.leases" PATH="$_S27/bin:${_SELF_STUBS}:$PATH" \
+        GIT_CONFIG_NOSYSTEM=1 TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S27/fb.sh" \
+      && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID TRIFORGE_LEASE_WORKER TRIFORGE_LEAD_PID \
+      && "$TIMEOUT_BIN" -k 5 "$1" /bin/bash -c 'source "$1/invoke-external.sh" >/dev/null 2>&1 && eval "$2"' _ "$_SELF_DIR" "$2" ) < /dev/null 2>&1 || R=$?
+  echo "bounded-rc=$R"
+}
+_s27_fifo_off() { # put the saved ledger back where a FIFO stands (a blocked reader released first)
+  local L="$_S27/ff/ops/leases.toml"
+  if [ -p "$L" ]; then ( exec 3<>"$L" ) 2>/dev/null; rm -f "$L"; fi
+  if [ -f "$L.s27" ] && [ ! -e "$L" ]; then mv "$L.s27" "$L"; fi
+}
+O=$(_s27_bounded 20 'lease_create f1 builder >/dev/null 2>&1 && lease_dispatch f1 "s27-fifo probe" 60 >/dev/null 2>&1; echo "dispatch:rc=$?"')
+O="$O
+$(_s27_bounded 40 'S=$(date +%s); R=0; lease_wait f1 --budget 25 >/dev/null 2>"$TMPDIR/s27-wait.err" || R=$?; echo "wait:rc=$R:secs=$(( $(date +%s) - S )):named=$(grep -c "ops/leases.toml" "$TMPDIR/s27-wait.err" || true)"')"
+_s27_fifo_off
+_s27_lead "$_S27/ff" '_self_wait_rc f1' >/dev/null
+L="$_S27/ff/ops/leases.toml"
+mv "$L" "$L.s27" && mkfifo "$L"
+O="$O
+$(_s27_bounded 20 '_lease_ctx || echo "ctx-failed"; R=0; _lease_root_notice s27 2>/dev/null || R=$?; echo "notice:rc=$R"; R=0; _lease_states_read "" >/dev/null 2>&1 || R=$?; echo "states:rc=$R"; R=0; E=$(_lease_ledger_check) || R=$?; echo "check:rc=$R:$E"')"
+_s27_fifo_off
+_S27_FAIL="${_S27_FAIL}$(_self_expect fifo "$O" '^dispatch:rc=0$' '^wait:rc=44:secs=([0-9]|1[0-9]):named=[1-9]' '^notice:rc=0$' '^states:rc=1$' \
+  '^check:rc=1:no lease ledger at .*ops/leases.toml' '^bounded-rc=0$')"
+[ "$(printf '%s\n' "$O" | grep -c '^bounded-rc=0$' || true)" = 3 ] || _S27_FAIL="${_S27_FAIL} fifo(a-bounded-step-did-not-finish:$(printf '%s\n' "$O" | grep '^bounded-rc=' | tr '\n' ' '))"
+_S27_EV="${_S27_EV}fifo: the ledger swapped for a FIFO mid-wait -> lease_wait 44 within 20 s naming ops/leases.toml; the root notice 0, the state read 1, the ledger check 1 on a FIFO, each at once; "
+
+# hook: session start, then pre-compact, in a project holding planted modules
+mkdir -p "$_S27/hp/ops" "$_S27/hp/.codex" "$_S27/hb"
+cat > "$_S27/hb/agy" <<'S27_AGY_EOF'
+#!/bin/sh
+# probe stub (SELF-27): answers the session-start hook without touching the real agy install
+case "${1:-}" in
+  --version) echo "0.0.0-probe-stub" ;;
+  plugin) case "${2:-}" in list) echo "agent-triforge" ;; *) : ;; esac ;;
+  agents) printf '%s\n' codebase-analyst architecture-reviewer targeted-researcher documentation-writer ;;
+esac
+exit 0
+S27_AGY_EOF
+printf '#!/bin/sh\ncase "${1:-}" in --version) echo "2.1.289 (Claude Code)" ;; esac\nexit 0\n' > "$_S27/hb/claude"
+chmod +x "$_S27/hb/agy" "$_S27/hb/claude"
+( cd "$_S27/hp" && git init -q ) >/dev/null 2>&1
+# shellcheck disable=SC2086
+_s27_plant "$_S27/hp" "$_S27/mark-hook" $_S27_MODS
+printf '[members.codex]\nmodel = "gpt-6-astra"\n' > "$_S27/hp/ops/roster.toml"
+printf '[lease.h1]\nstate = "building"\nbuilder_cli = "claude"\n' > "$_S27/hp/ops/leases.toml"
+printf '# Tasks\n- [ ] one\n- [x] two\n' > "$_S27/hp/ops/TASKS.md"
+printf '[agents.builder]\nmodel = "gpt-6-astra"\n' > "$_S27/hp/.codex/triforge-agents.toml"
+mkdir -p "$_S27/hhome"
+O=$( cd "$_S27/hp" && HOME="$_S27/hhome" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S27/hb:$PATH" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1; echo "ss-rc=$?"
+  HOME="$_S27/hhome" bash "$REPO_ROOT/hooks/handlers/pre-compact.sh" 2>&1; echo "pc-rc=$?"; sed -n '/^## Lease snapshot/,$p' ops/STATE.md 2>/dev/null )
+O="$O
+hook=$(_s27_marks "$_S27/mark-hook")"
+_S27_FAIL="${_S27_FAIL}$(_self_expect hook "$O" '^ss-rc=0$' '^pc-rc=0$' '^hook=none$' '^Multi-agent framework ready\.$' \
+  '^Roster: core trio \+ [0-9]+ optional member\(s\) detected \([1-9][0-9]* enrolled\)\.$' '^Lease ledger: 1 active lease\(s\) from a previous session' \
+  '^Counts: building=1$' '^- h1: claude — building$')"
+if printf '%s\n' "$O" | grep -q 'hook crashed'; then _S27_FAIL="${_S27_FAIL} hook(crashed)"; fi
+_S27_EV="${_S27_EV}hook: session start and pre-compact in a project holding 16 planted modules: rc 0, the member count, the active-lease line and the lease snapshot printed, no marker"
+unset O R L _S27_N _S27_M _S27_L _S27_GOT _S27_WANT _S27_MODS
+# --- end of SELF-27 cases ---
+_S27_CAP="inline python ignores modules planted in the cwd: every inline program starts with the shared prelude, the lease lane parsers run after a builder planted json.py in its worktree, session start in a project with a planted tomllib.py, the ledger readers on a FIFO (S1, Phase 6)"
+if [ -z "$_S27_EV" ]; then _S27_FAIL="${_S27_FAIL} cases(no-case-ran)"; fi
+if [ -z "$_S27_FAIL" ]; then
+  row "SELF-27" "claude" "$_S27_CAP" "PASS" "$(printf '%s' "$_S27_EV" | cut -c1-3000)" "static"
+else
+  row "SELF-27" "claude" "$_S27_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S27_FAIL"):$(printf '%s' "$_S27_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S27"
+
+# SELF-28 (U19 — R27, R28, R29: the watch cycle's research workers run through dispatch_persona's read-web class). Cases go between the markers; each appends
+# "<case>(<why>)" to _S28_FAIL on a mismatch (_self_expect does this) and, once
+# they ran, one short note to _S28_EV. Expected values are literals. A row whose
+# cases never ran fails: no note is no evidence.
+_S28="${WORK}/self28"
+_S28_FAIL=""
+_S28_EV=""
+mkdir -p "$_S28"
+# --- SELF-28 cases (worker 6-watch) ---
+# blocks   the swarm and wait blocks under "## Stage 2–3" of
+#          .claude/commands/cli-watch.md and repo-watch.md, taken as written and
+#          run under /bin/bash and /bin/zsh from a fixture checkout (this
+#          checkout's scripts, personas, .claude-plugin and .claude linked in, a
+#          copy of ops/watch-registry.toml), through the real persona lane, with
+#          stub claude, gh and firecrawl first on PATH: one worker per target
+#          started by persona_spawn as the read-web persona the command names
+#          (framework-docs-researcher for CLIs, best-practices-researcher for
+#          repos); its argv the read-web class (--tools and --allowedTools
+#          Read,Grep,Glob,WebFetch,WebSearch, dontAsk, --strict-mcp-config,
+#          --safe-mode, CLAUDE_CODE_DISABLE_ATTACHMENTS=1, the worker marker
+#          persona) and the watch brief; its input the registry entry, the window
+#          and the pages the lead fetched (gh api for GitHub releases, files and
+#          repos, firecrawl for the rest); its report in <run>/<name>.md; a repo
+#          whose gh metadata answers 404 flagged, with no worker; no zsh glob,
+#          job or unset-parameter error
+#   nowrite  in every blocks run the stub persona writes a file in its own
+#          working directory, and tries the checkout (the prompt's project root)
+#          and $TMPDIR only when its --tools names a tool that can write: denied
+#          by the argv the lane gave it; after the wait block no
+#          triforge-persona.* scratch directory is left under TMPDIR (its cwd
+#          file gone with it), nothing is in TMPDIR or the checkout from it, and
+#          the checkout's listing is unchanged. Control: the same stub given an
+#          edit-class --tools writes both. A stub shows the flags the lane hands
+#          the CLI and the cleanup around the run; it cannot show that Claude
+#          Code enforces --tools under dontAsk. CC-21 is the live proof for the
+#          read class, and read-web adds only the two web tools
+#   registry every CLI the registry names (cli_table all binary tier) has a
+#          [cli.<name>] entry in ops/watch-registry.toml with the same binary
+#          and tier; every [cli.*] entry carries name, binary, tier, probe and
+#          https releases/changelog/docs URLs; [meta] counts match the tables
+mkdir -p "$_S28/co/ops" "$_S28/home" "$_S28/bin" "$_S28/log" "$_S28/blocks" "$_S28/tpl"
+for _s28_d in scripts personas .claude-plugin .claude; do ln -s "${REPO_ROOT}/${_s28_d}" "$_S28/co/${_s28_d}"; done
+cp "${REPO_ROOT}/ops/watch-registry.toml" "$_S28/co/ops/watch-registry.toml" 2>/dev/null || true
+cat > "$_S28/tpl/claude" <<'S28_CLAUDE_EOF'
+#!/bin/sh
+# SELF-28 stub claude: --version, and --help naming --safe-mode; otherwise it
+# records argv, environment, prompt and input per worker (named after its
+# input file), writes a file in its working directory, and tries the checkout
+# and $TMPDIR only when its --tools names a tool that can write
+L='@LOG@'
+case "${1:-}" in
+  --version) echo "2.1.291 (Claude Code)"; exit 0 ;;
+  --help) echo "  --safe-mode   Start with all customizations disabled"; echo "  --tools <tools...>"; exit 0 ;;
+esac
+P=""
+for a in "$@"; do P=$a; done
+IN=$(printf '%s\n' "$P" | sed -n 's/^Input: //p' | head -1)
+N=$(basename "${IN:-none}" .input.md)
+printf '%s\n' "$@" > "$L/argv.$N"
+printf '%s' "$P" > "$L/prompt.$N"
+env | LC_ALL=C sort > "$L/env.$N"
+cp "$IN" "$L/input.$N" 2>/dev/null || true
+pwd -P > "$L/cwd.$N"
+echo w > persona-cwd.txt
+ROOT=$(printf '%s\n' "$P" | sed -n "s/^Project root: \(.*\) (the lead's checkout).*/\1/p" | head -1)
+T=$(awk 'p { print; exit } $0 == "--tools" { p = 1 }' "$L/argv.$N")
+case ",$T," in
+  *,Write,* | *,Edit,* | *,MultiEdit,* | *,NotebookEdit,* | *,Bash,*)
+    echo w > "${ROOT:-.}/persona-wrote.txt"; echo w > "${TMPDIR:-/tmp}/persona-wrote.txt"; echo "granted:$T" > "$L/write.$N" ;;
+  *) echo "denied:$T" > "$L/write.$N" ;;
+esac
+python3 -c 'import json, sys; print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": sys.argv[1], "session_id": "00000000-0000-4000-8000-000000000028", "num_turns": 1}))' "REPORT for $N"
+S28_CLAUDE_EOF
+cat > "$_S28/tpl/gh" <<'S28_GH_EOF'
+#!/bin/sh
+# SELF-28 stub gh: logs each call; `gh api <endpoint>` prints one line naming
+# the endpoint, or fails as a 404 for a repo listed in the gh404 file
+L='@LOG@'
+printf '%s\n' "$*" >> "$L/gh.calls"
+EP=""
+for a in "$@"; do case "$a" in repos/*) EP=$a ;; esac; done
+if [ -f "$L/gh404" ]; then
+  while read -r R; do
+    case "$EP" in "repos/$R" | "repos/$R/"* | "repos/$R?"*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;; esac
+  done < "$L/gh404"
+fi
+echo "GH-STUB ${EP}"
+S28_GH_EOF
+cat > "$_S28/tpl/firecrawl" <<'S28_FC_EOF'
+#!/bin/sh
+# SELF-28 stub firecrawl: logs each call and prints one line naming the URL
+L='@LOG@'
+printf '%s\n' "$*" >> "$L/firecrawl.calls"
+U=""
+for a in "$@"; do case "$a" in https://*) U=$a ;; esac; done
+echo "FIRECRAWL-STUB ${U}"
+S28_FC_EOF
+for _s28_b in claude gh firecrawl; do
+  sed "s#@LOG@#${_S28}/log#" "$_S28/tpl/$_s28_b" > "$_S28/bin/$_s28_b"
+  chmod +x "$_S28/bin/$_s28_b"
+done
+# _s28_x <md> <n> — the n-th ```bash fence under the "## Stage 2" heading of <md>
+_s28_x() {
+  python3 - "$1" "$2" <<'S28_X_PY'
+import sys
+k, n, out, fence, cur, under = 0, int(sys.argv[2]), [], False, 0, False
+for l in open(sys.argv[1], encoding="utf-8").read().split("\n"):
+    s = l.strip()
+    if fence:
+        if s == "```":
+            fence = False
+        elif cur == n:
+            out.append(l)
+        continue
+    if s.startswith("```"):
+        fence, cur = True, 0
+        if under and s == "```bash":
+            k += 1
+            cur = k
+        continue
+    if l.startswith("## "):
+        under = l.startswith("## Stage 2")
+print("\n".join(out))
+S28_X_PY
+}
+for _s28_k in cli repo; do
+  _s28_x "${REPO_ROOT}/.claude/commands/${_s28_k}-watch.md" 1 > "$_S28/blocks/${_s28_k}-swarm.sh" 2>/dev/null || true
+  _s28_x "${REPO_ROOT}/.claude/commands/${_s28_k}-watch.md" 2 > "$_S28/blocks/${_s28_k}-wait.sh" 2>/dev/null || true
+done
+# _s28_blk <shell> <script> <case dir> — one block from the fixture checkout (90 s at most); prints its rc
+_s28_blk() {
+  local RC=0
+  ( cd "$_S28/co" && exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN" 90} "$1" "$2" ) > "$3/out" 2>&1 < /dev/null || RC=$?
+  cat "$3/out" >> "$3/out-all"
+  echo "$RC"
+}
+# _s28_arg <file> <flag> — the line after <flag> in a recorded argv
+_s28_arg() { awk -v f="$2" 'p { print; exit } $0 == f { p = 1 }' "$1" 2>/dev/null || true; }
+# _s28_case <shell> <cli|repo> <targets> [<repo gh answers 404 for>] — the
+# swarm block with those targets and window 2026-09-27, then the wait block
+# while it returns 75 (20 times at most), with a throwaway HOME and TMPDIR;
+# prints the case's lines
+_s28_case() {
+  local SH=$1 K=$2 NAMES=$3 G=${4:-} SN P PT S W="" R RUN N I=0 CO0 D DW
+  SN=$(basename "$SH")
+  P="$_S28/$K-$SN"
+  mkdir -p "$P/tmp"
+  PT=$(cd "$P/tmp" && pwd -P)
+  rm -f "$_S28/log/"*
+  if [ -n "$G" ]; then printf '%s\n' "$G" > "$_S28/log/gh404"; fi
+  sed -e "s#<the Stage 1 working set[^>]*>#${NAMES}#" -e 's#<the window start, YYYY-MM-DD>#2026-09-27#' "$_S28/blocks/$K-swarm.sh" > "$P/swarm.sh"
+  CO0=$(ls -la "$_S28/co" "$_S28/co/ops" 2>&1 | cksum)
+  ( export HOME="$_S28/home" PATH="$_S28/bin:$PATH" TMPDIR="$P/tmp" GIT_CONFIG_NOSYSTEM=1 TRIFORGE_LEAD_WAIT_BUDGET_S=3
+    unset CLAUDE_PLUGIN_ROOT TRIFORGE_LEASE_ROOT WATCH_RUN
+    S=$(_s28_blk "$SH" "$P/swarm.sh" "$P")
+    RUN=$(sed -n 's/^[a-z-]*: run directory \([^ ]*\) .*/\1/p' "$P/out-all" | head -1)
+    if [ -n "$RUN" ] && [ "$S" = 0 ]; then
+      export WATCH_RUN="$RUN"
+      while [ "$I" -lt 20 ]; do
+        R=$(_s28_blk "$SH" "$_S28/blocks/$K-wait.sh" "$P"); W="${W}${W:+/}${R}"
+        [ "$R" = 75 ] || break
+        I=$((I + 1)); sleep 1
+      done
+    fi
+    printf '%s:%s:swarm=%s:wait=%s:workers=%s:reports=%s:failed=%s:flagged=%s:bad=%s\n' "$K" "$SN" "$S" "${W:--}" \
+      "$(paste -sd, "$RUN/workers" 2>/dev/null || true)" \
+      "$(for N in $(cat "$RUN/workers" 2>/dev/null); do grep -l "^REPORT for $N\$" "$RUN/$N.md" 2>/dev/null; done | grep -c . || true)" \
+      "$(paste -sd, "$RUN/failed" 2>/dev/null || true)" \
+      "$(cut -f1 "$RUN/flagged" 2>/dev/null | paste -sd, - || true)" \
+      "$(grep -c -E 'no matches found|job not found|bad pattern|command not found|parameter not set|unbound variable|bad substitution' "$P/out-all" 2>/dev/null || true)"
+    for N in $(cat "$RUN/workers" 2>/dev/null); do
+      printf '%s:%s:argv:%s:tools=%s:allowed=%s:mode=%s:safe=%s:strictmcp=%s:attach=%s:worker=%s:%s\n' "$K" "$SN" "$N" \
+        "$(_s28_arg "$_S28/log/argv.$N" --tools)" "$(_s28_arg "$_S28/log/argv.$N" --allowedTools)" \
+        "$(_s28_arg "$_S28/log/argv.$N" --permission-mode)" \
+        "$(if grep -qx -- --safe-mode "$_S28/log/argv.$N" 2>/dev/null; then echo yes; else echo no; fi)" \
+        "$(if grep -qx -- --strict-mcp-config "$_S28/log/argv.$N" 2>/dev/null; then echo yes; else echo no; fi)" \
+        "$(sed -n 's/^CLAUDE_CODE_DISABLE_ATTACHMENTS=//p' "$_S28/log/env.$N" 2>/dev/null)" \
+        "$(sed -n 's/^TRIFORGE_LEASE_WORKER=//p' "$_S28/log/env.$N" 2>/dev/null)" \
+        "$(sed -n 's/^Triforge persona dispatch: persona \([^,]*\), class \([^ ]*\) .*/persona=\1:class=\2/p' "$_S28/log/prompt.$N" 2>/dev/null)"
+      printf '%s:%s:input:%s:%s\n' "$K" "$SN" "$N" \
+        "$(grep -E -o '^(GH-STUB|FIRECRAWL-STUB) [^ ?]*|^Window: [0-9-]*|^(binary|url): [^ ]*' "$_S28/log/input.$N" 2>/dev/null | tr '\n' '|')"
+      printf '%s:%s:brief:%s:%s\n' "$K" "$SN" "$N" "$(grep -c 'PRIMARY SOURCES ONLY' "$_S28/log/prompt.$N" 2>/dev/null || true)"
+      D=$(cat "$_S28/log/cwd.$N" 2>/dev/null || true)
+      DW=other
+      case "$D" in "$PT"/triforge-persona.*/cwd) DW=scratch ;; esac
+      printf '%s:%s:nowrite:%s:write=%s:cwd=%s:cwdgone=%s\n' "$K" "$SN" "$N" "$(cut -d: -f1 "$_S28/log/write.$N" 2>/dev/null)" "$DW" \
+        "$(if [ -n "$D" ] && [ ! -e "$D" ]; then echo yes; else echo no; fi)"
+    done
+    printf '%s:%s:tmp:scratch=%s:tmpfile=%s:cofile=%s:co=%s\n' "$K" "$SN" \
+      "$(find "$P/tmp" -maxdepth 1 -name 'triforge-persona.*' 2>/dev/null | grep -c . || true)" \
+      "$(if [ -e "$P/tmp/persona-wrote.txt" ]; then echo present; else echo absent; fi)" \
+      "$(if [ -e "$_S28/co/persona-wrote.txt" ]; then echo present; else echo absent; fi)" \
+      "$(if [ "$(ls -la "$_S28/co" "$_S28/co/ops" 2>&1 | cksum)" = "$CO0" ]; then echo same; else echo changed; fi)"
+  ) 2>&1 || true
+}
+_S28_SHELLS="/bin/bash"
+if [ -x /bin/zsh ]; then _S28_SHELLS="/bin/bash /bin/zsh"; else _S28_FAIL="${_S28_FAIL} zsh(no /bin/zsh: the bash half alone is no evidence for the leads' shell)"; fi
+for _S28_SH in $_S28_SHELLS; do
+  _S28_N=$(basename "$_S28_SH")
+  O=$(_s28_case "$_S28_SH" cli "claude grok")
+  _S28_ARGV="tools=Read,Grep,Glob,WebFetch,WebSearch:allowed=Read,Grep,Glob,WebFetch,WebSearch:mode=dontAsk:safe=yes:strictmcp=yes:attach=1:worker=persona"
+  _S28_FAIL="${_S28_FAIL}$(_self_expect "cli-${_S28_N}" "$O" \
+    "^cli:${_S28_N}:swarm=0:wait=(75/)*0:workers=claude,grok:reports=2:failed=:flagged=:bad=0$" \
+    "^cli:${_S28_N}:argv:claude:${_S28_ARGV}:persona=framework-docs-researcher:class=read-web$" \
+    "^cli:${_S28_N}:argv:grok:${_S28_ARGV}:persona=framework-docs-researcher:class=read-web$" \
+    "^cli:${_S28_N}:input:claude:Window: 2026-09-27\|binary: claude\|GH-STUB repos/anthropics/claude-code/releases\|GH-STUB repos/anthropics/claude-code/contents/CHANGELOG.md\|FIRECRAWL-STUB https://code.claude.com/docs\|$" \
+    "^cli:${_S28_N}:input:grok:Window: 2026-09-27\|binary: grok\|FIRECRAWL-STUB https://www.npmjs.com/package/@xai-official/grok\|FIRECRAWL-STUB https://x.ai/build/changelog\|FIRECRAWL-STUB https://docs.x.ai/build/overview\|$" \
+    "^cli:${_S28_N}:brief:claude:1$" "^cli:${_S28_N}:brief:grok:1$" \
+    "^cli:${_S28_N}:nowrite:claude:write=denied:cwd=scratch:cwdgone=yes$" "^cli:${_S28_N}:nowrite:grok:write=denied:cwd=scratch:cwdgone=yes$" \
+    "^cli:${_S28_N}:tmp:scratch=0:tmpfile=absent:cofile=absent:co=same$")"
+  O=$(_s28_case "$_S28_SH" repo "superpowers gsd-core" open-gsd/gsd-core)
+  _S28_FAIL="${_S28_FAIL}$(_self_expect "repo-${_S28_N}" "$O" \
+    "^repo:${_S28_N}:swarm=0:wait=(75/)*0:workers=superpowers:reports=1:failed=:flagged=gsd-core:bad=0$" \
+    "^repo:${_S28_N}:argv:superpowers:${_S28_ARGV}:persona=best-practices-researcher:class=read-web$" \
+    "^repo:${_S28_N}:input:superpowers:Window: 2026-09-27\|url: https://github.com/obra/superpowers\|GH-STUB repos/obra/superpowers\|GH-STUB repos/obra/superpowers/readme\|GH-STUB repos/obra/superpowers/releases\|GH-STUB repos/obra/superpowers/commits\|GH-STUB repos/obra/superpowers/contents\|$" \
+    "^repo:${_S28_N}:brief:superpowers:1$" \
+    "^repo:${_S28_N}:nowrite:superpowers:write=denied:cwd=scratch:cwdgone=yes$" \
+    "^repo:${_S28_N}:tmp:scratch=0:tmpfile=absent:cofile=absent:co=same$")"
+done
+# nowrite control: the same stub, given an edit-class tool set, writes both
+mkdir -p "$_S28/ctl/tmp" "$_S28/ctl/root" "$_S28/ctl/cwd"
+printf 'x\n' > "$_S28/ctl/x.input.md"
+rm -f "$_S28/log/"*
+( cd "$_S28/ctl/cwd" && TMPDIR="$_S28/ctl/tmp" "$_S28/bin/claude" -p --tools "Bash,Read,Edit,Write" --permission-mode acceptEdits \
+    "Project root: $_S28/ctl/root (the lead's checkout). Relative paths resolve there.
+Input: $_S28/ctl/x.input.md" ) > /dev/null 2>&1 || true
+O=$(printf 'ctl:write=%s:root=%s:tmp=%s\n' "$(cut -d: -f1 "$_S28/log/write.x" 2>/dev/null)" \
+  "$(if [ -e "$_S28/ctl/root/persona-wrote.txt" ]; then echo present; else echo absent; fi)" \
+  "$(if [ -e "$_S28/ctl/tmp/persona-wrote.txt" ]; then echo present; else echo absent; fi)")
+_S28_FAIL="${_S28_FAIL}$(_self_expect ctl "$O" '^ctl:write=granted:root=present:tmp=present$')"
+# registry: the watch registry against the CLI registry
+O=$( ( cd "$REPO_ROOT" && unset CLAUDE_PLUGIN_ROOT && source scripts/invoke-external.sh > /dev/null 2>&1 && cli_table all binary tier ) 2>/dev/null \
+  | python3 -c '
+import sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        print("reg:toml=missing")
+        sys.exit(0)
+d = tomllib.load(open(sys.argv[1], "rb"))
+cli, repo, meta = d.get("cli", {}), d.get("repo", {}), d.get("meta", {})
+miss, bad, n = [], [], 0
+for line in sys.stdin.read().splitlines():
+    name, binary, tier = (line.split("\t") + ["", "", ""])[:3]
+    n += 1
+    e = cli.get(name)
+    if e is None:
+        miss.append(name)
+    elif e.get("binary") != binary or e.get("tier") != tier:
+        bad.append(name + "(binary/tier)")
+for name, e in sorted(cli.items()):
+    for f in ("name", "binary", "tier", "probe"):
+        if f not in e:
+            bad.append(name + "." + f)
+    for f in ("releases", "changelog", "docs"):
+        if not str(e.get(f, "")).startswith("https://"):
+            bad.append(name + "." + f)
+print("reg:registry=%d:missing=%s" % (n, ",".join(miss)))
+print("reg:mismatch=" + ",".join(bad))
+print("reg:count=%d:meta=%s:repos=%d:rmeta=%s" % (len(cli), meta.get("cli_count"), len(repo), meta.get("repo_count")))
+print("reg:clis=" + ",".join(sorted(cli)))
+' "${REPO_ROOT}/ops/watch-registry.toml" 2>&1)
+_S28_FAIL="${_S28_FAIL}$(_self_expect registry "$O" '^reg:registry=8:missing=$' '^reg:mismatch=$' '^reg:count=11:meta=11:repos=7:rmeta=7$' \
+  '^reg:clis=antigravity,chrome-devtools,claude,codex,cursor,devin,firecrawl,gh,grok,kimi,opencode$')"
+_S28_EV="blocks: cli-watch and repo-watch swarm + wait blocks from this checkout under ${_S28_SHELLS}, real persona lane, stub claude/gh/firecrawl: one worker per target via persona_spawn (claude, grok -> framework-docs-researcher; superpowers -> best-practices-researcher), argv read-web (--tools/--allowedTools Read,Grep,Glob,WebFetch,WebSearch, dontAsk, strict MCP, --safe-mode, attachments off, marker persona) + the watch brief, input = registry entry + window + the lead's gh/firecrawl pages, reports in the run dir, a gh-404 repo flagged with no worker, no zsh error; nowrite: the stub's checkout and TMPDIR writes denied by that argv, its scratch dir gone (cwd file with it), no triforge-persona.* left, checkout listing unchanged (control: edit-class --tools writes both; a stub shows the flags and cleanup, CC-21 is the live proof for the read class); registry: all 8 registry CLIs in ops/watch-registry.toml with the same binary and tier, 11 [cli.*] / 7 [repo.*] matching [meta]"
+# --- end of SELF-28 cases ---
+_S28_CAP="the watch cycle: research workers through dispatch_persona read-web, a write denied, nothing left under the temp dir, the watch registry covering every registered CLI (U19)"
+if [ -z "$_S28_EV" ]; then _S28_FAIL="${_S28_FAIL} cases(no-case-ran)"; fi
+if [ -z "$_S28_FAIL" ]; then
+  row "SELF-28" "claude" "$_S28_CAP" "PASS" "$(printf '%s' "$_S28_EV" | cut -c1-3000)" "static"
+else
+  row "SELF-28" "claude" "$_S28_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S28_FAIL"):$(printf '%s' "$_S28_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S28"
+
+# SELF-17 (U20 — R45, R40: one two-task fixture sprint under each lead, and the 3.3.2 upgrade fixture). Cases go between the markers; each appends
+# "<case>(<why>)" to _S17_FAIL on a mismatch (_self_expect does this) and, once
+# they ran, one short note to _S17_EV. Expected values are literals. A row whose
+# cases never ran fails: no note is no evidence.
+_S17="${WORK}/self17"
+_S17_FAIL=""
+_S17_EV=""
+mkdir -p "$_S17"
+# --- SELF-17 cases (worker 6-sprint) ---
+# Static seams only: the SELF seam names the lead (TRIFORGE_TEST_LEAD) and a
+# fake builder replaces the adapter (TRIFORGE_TEST_BUILDER). The live half of
+# the plan's row, real claude -p and codex exec builders under each lead, is
+# not run here. Throwaway HOME, TMPDIR and lease roots under $_S17:
+#   sprint   under a claude lead, then a codex lead, the same sprint: a repo
+#            carrying a Triforge plugin.json (the framework-protected list
+#            applies), main committed with pinned dates and the roster left
+#            out of it ([lead] = that lead, builder antigravity), so main is
+#            the same commit in both runs. Task a (docs/a.txt) pinned to
+#            claude merges. Task b (scripts/lib/util.sh, protected): the pin
+#            alone -> 42 naming it, the lead's approval -> merges. Task c's
+#            builder sets core.fsmonitor -> collect 44 naming .git/config,
+#            escalated, the setting gone, its command never run; reclaimed.
+#            Promote -> 42 naming lease_approve promotion:sprint/s17 user, the
+#            lead's own promotion approval refused, the user's -> promoted;
+#            then at-wrap's "## Completion" block as written ->
+#            ops/.sprint-complete, the path coordinate.sh polls
+#   ledger   both ledgers with timestamps, pids, paths, lead_via and sha256
+#            digests masked: equal apart from the lead's identity (lead_cli;
+#            the lead behind the merge approval of b and the lead and host on
+#            the approval and promotion records) and the reviewer class;
+#            every commit SHA equal, main at the same commit in both runs
+#   upgrade  a 3.3.2 project: v3.3.2's templates/CLAUDE.md copied exactly, its
+#            template roster (no [lead]), .agents/skills as 3.3.2 left it (its
+#            12 skills and a names-only stamp) plus a user directory, an
+#            edited shipped skill and a v3.1.0 watch-cycle no stamp lists, and
+#            a lease opened by v3.3.2's own lease_create + lease_dispatch.
+#            The 4.0 session start (the real hook, stub CLIs, no optional CLI
+#            on PATH): rc 0, the stale CLAUDE.md and the open lease reported,
+#            test-driven-development and systematic-debugging retired and
+#            nothing else, every other shipped copy refreshed, the roster
+#            still without [lead]. The 4.0 lead: resolve_lead -> claude;
+#            lease_collect records a first baseline (a pre-3.3.3 ledger) ->
+#            review, pinned to codex, merges with only feature.txt;
+#            instruction_convert_stale converts the exact copy; a second
+#            session start flags nothing
+#   upguard  the same 3.3.2 project with the lease-root record in .git, which
+#            only a baseline record writes -> lease_collect 44 naming it: the
+#            first-baseline path is not open to a ledger whose table was removed
+mkdir -p "$_S17/home" "$_S17/tmp" "$_S17/bin" "$_S17/tools" "$_S17/v332" "$_S17/v310"
+_S17R=$(cd "$_S17" && pwd -P)
+_S17_DATE="2026-10-01T12:00:00Z"
+# Session-start stubs (SELF-08's agy) and the tools the hook needs, linked one
+# by one, so no optional CLI installed on this host is on its PATH.
+cat > "$_S17/bin/agy" <<'S17_AGY_EOF'
+#!/bin/sh
+# probe stub (SELF-17): answers the session-start hook without touching the real agy install
+case "${1:-}" in
+  --version) echo "0.0.0-probe-stub" ;;
+  plugin) case "${2:-}" in list) echo "agent-triforge" ;; *) : ;; esac ;;
+  agents) printf '%s\n' codebase-analyst architecture-reviewer targeted-researcher documentation-writer ;;
+esac
+exit 0
+S17_AGY_EOF
+printf '#!/bin/sh\n# probe stub (SELF-17): a Claude Code above the floor\ncase "${1:-}" in --version) echo "2.1.284 (Claude Code)" ;; esac\nexit 0\n' > "$_S17/bin/claude"
+printf '#!/bin/sh\n# probe stub (SELF-17): answers --version; never dispatched\necho "0.0.0-probe-stub"\nexit 0\n' > "$_S17/bin/codex"
+chmod +x "$_S17/bin/agy" "$_S17/bin/claude" "$_S17/bin/codex"
+for _s17_t in python3 git "${TIMEOUT_BIN:-timeout}"; do
+  if command -v "$_s17_t" >/dev/null 2>&1; then ln -sf "$(command -v "$_s17_t")" "$_S17/tools/$(basename "$_s17_t")"; fi
+done
+unset _s17_t
+_S17_PATH="$_S17/bin:$_S17/tools:/usr/bin:/bin:/usr/sbin:/sbin"
+# _s17_out <label> <cmd...> — "<label>:rc=<n>:<stdout + stderr, one line>"
+_s17_out() {
+  local L=$1 R=0 O
+  shift
+  O=$("$@" 2>&1) || R=$?
+  echo "$L:rc=$R:$(printf '%s' "$O" | tr '\n' ' ' | cut -c1-900)"
+}
+# at-wrap's completion block, verbatim: the first ```bash block under "## Completion"
+awk '$0 == "## Completion" { h = 1; next } h && /^## / { exit } h && $0 == "```bash" { b = 1; next } b && $0 == "```" { exit } b' \
+  "$REPO_ROOT/skills/at-wrap/references/archive-verify-state.md" > "$_S17/wrap.sh" 2>/dev/null || true
+[ -s "$_S17/wrap.sh" ] || _S17_FAIL="${_S17_FAIL} wrap(no-completion-block)"
+grep -q '^SENTINEL="ops/\.sprint-complete"$' "$REPO_ROOT/scripts/coordinate.sh" || _S17_FAIL="${_S17_FAIL} wrap(coordinate-polls-another-path)"
+
+# _s17_sprint <lead> — the sprint under that lead in $_S17/<lead>; one line per step
+_s17_sprint() {
+  local L=$1 R="$_S17/$1"
+  ( mkdir -p "$R" && cd "$R" && export HOME="$_S17/home" GIT_CONFIG_NOSYSTEM=1 GIT_AUTHOR_DATE="$_S17_DATE" GIT_COMMITTER_DATE="$_S17_DATE" \
+      && git init -q -b main && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
+      && mkdir -p .claude-plugin scripts/lib && printf '{"name": "agent-triforge", "version": "0.0.0"}\n' > .claude-plugin/plugin.json \
+      && echo lib > scripts/lib/util.sh && echo r > README.md && printf 'ops/leases.toml\nops/.sprint-complete\n' > .gitignore \
+      && git add -A && git commit -qm init && git checkout -q -b sprint/s17 \
+      && mkdir ops && printf '# probe roster (SELF-17)\n[lead]\ncli = "%s"\n\n[roles.builder]\ncli = "antigravity"\n' "$L" > ops/roster.toml ) >/dev/null 2>&1
+  printf '#!/bin/sh\ntouch "%s.MARKER"\nexit 0\n' "$R" > "$R.mark"
+  chmod +x "$R.mark"
+  cat > "$R.fb" <<S17_FB_EOF
+#!/bin/sh
+# SELF-17 fake builder: one change per task, chosen by the worktree's name
+case "\$(basename "\$PWD")" in
+  a) mkdir -p docs && echo feature > docs/a.txt ;;
+  b) echo change >> scripts/lib/util.sh ;;
+  c) git config core.fsmonitor "$R.mark"; echo c > c.txt ;;
+esac
+echo "Status: DONE"
+S17_FB_EOF
+  chmod +x "$R.fb"
+  ( cd "$R" && export HOME="$_S17/home" TRIFORGE_LEASE_ROOT="$R.leases" PATH="${_SELF_STUBS}:$PATH" GIT_CONFIG_NOSYSTEM=1 TMPDIR="$_S17/tmp" \
+        GIT_AUTHOR_DATE="$_S17_DATE" GIT_COMMITTER_DATE="$_S17_DATE" TRIFORGE_TEST_LEAD="$L" TRIFORGE_TEST_BUILDER="$R.fb" \
+      && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID TRIFORGE_LEASE_WORKER TRIFORGE_LEAD_PID CODEX_HOME CLAUDE_PLUGIN_ROOT \
+      && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && {
+    _self_go a
+    _self_try pina lease_pin_reviewer a claude
+    _self_try mergea lease_merge a claude
+    echo "squash-a=$(git diff-tree --no-commit-id --name-only -r HEAD | tr '\n' ' ')"
+    _self_go b
+    echo "prot-b=$(_ledger_get b protected):$(_ledger_get b protected_paths)"
+    _self_try pinb lease_pin_reviewer b codex
+    _self_try bareb lease_merge b codex
+    _self_try appb lease_approve task:b "$L"
+    _self_try mergeb lease_merge b codex
+    echo "squash-b=$(git diff-tree --no-commit-id --name-only -r HEAD | tr '\n' ' ')"
+    { lease_create c builder && lease_dispatch c "probe task" 60; } >/dev/null 2>&1 || echo "c:go-failed"
+    _self_wait_rc c
+    _self_try collectc lease_collect c
+    echo "state-c=$(_ledger_get c state):cfg=$(if grep -q fsmonitor .git/config; then echo planted; else echo restored; fi):marker=$(if [ -e "$R.MARKER" ]; then echo RAN; else echo absent; fi)"
+    _self_try reclaimc lease_reclaim c
+    _self_try blocked lease_promote main
+    _self_try leadprom lease_approve promotion:sprint/s17 "$L"
+    _self_try userprom lease_approve promotion:sprint/s17 user
+    _self_try promote lease_promote main
+    echo "main=$(git rev-parse main):at-sprint=$(if [ "$(git rev-parse main)" = "$(git rev-parse sprint/s17)" ]; then echo yes; else echo no; fi)"
+    _s17_out wrap /bin/bash "$_S17/wrap.sh"
+    echo "complete=$(if [ -f ops/.sprint-complete ]; then echo yes; else echo no; fi)"
+    echo "attr-a=$(lease_attribution a 2>/dev/null)"
+    echo "attr-b=$(lease_attribution b 2>/dev/null)"
+  } ) < /dev/null 2>&1 || true
+}
+# per lead: <lead> <class of the claude pin on a> <class of the codex pin on b>
+while read -r _s17_l _s17_ca _s17_cb; do
+  [ -n "$_s17_l" ] || continue
+  O=$(_s17_sprint "$_s17_l")
+  _S17_FAIL="${_S17_FAIL}$(_self_expect "sprint-$_s17_l" "$O" '^a:go=0:review$' "^pina:rc=0:.*\\(${_s17_ca};" '^mergea:rc=0:' '^squash-a=docs/a\.txt $' \
+    '^b:go=0:review$' '^prot-b=yes:scripts/lib/util\.sh$' "^pinb:rc=0:.*\\(${_s17_cb};" '^bareb:rc=42:.*scripts/lib/util\.sh' \
+    "^appb:rc=0:.*approved by ${_s17_l} \\(lead\\)" '^mergeb:rc=0:' '^squash-b=scripts/lib/util\.sh $' \
+    '^collectc:rc=44:.*\.git/config changed' '^state-c=escalated:cfg=restored:marker=absent$' '^reclaimc:rc=0:' \
+    '^blocked:rc=42:.*lease_approve promotion:sprint/s17 user' '^leadprom:rc=1:.*user' '^userprom:rc=0:' '^promote:rc=0:.*PROMOTED' \
+    '^main=[0-9a-f]{40}:at-sprint=yes$' '^wrap:rc=0:$' '^complete=yes$' \
+    "^attr-a=.*builder antigravity.*reviewer claude \\(${_s17_ca}\\), lead ${_s17_l}, approval none, merge [0-9a-f]{12}$" \
+    "^attr-b=.*builder antigravity.*reviewer codex \\(${_s17_cb}\\), lead ${_s17_l}, approval lead:${_s17_l} via=test .*merge [0-9a-f]{12}$")"
+  _S17_MAINS="${_S17_MAINS:-}$(printf '%s\n' "$O" | sed -n 's/^main=\([0-9a-f]*\):.*/\1/p' | head -1) "
+done <<'S17_LEADS_EOF'
+claude lead worker
+codex worker lead
+S17_LEADS_EOF
+unset _s17_l _s17_ca _s17_cb
+# main, the promoted sprint, is one commit under both leads (pinned dates)
+set -- $_S17_MAINS
+[ "$#" -eq 2 ] && [ "$1" = "$2" ] || _S17_FAIL="${_S17_FAIL} ledger(main-differs:${_S17_MAINS})"
+_S17_MAIN=${1:-none}
+
+# ledger: <section>.<key>: <claude run> | <codex run>, for every value that
+# still differs once the run-specific parts are masked
+_S17_DIFF=$(python3 - "$_S17R/claude/ops/leases.toml" "$_S17R/claude" "$_S17R/codex/ops/leases.toml" "$_S17R/codex" 2>&1 <<'S17_DIFF_PY'
+import json, re, sys
+INTS = ("pid", "pgid", "lead_pid", "created", "updated", "heartbeat_deadline")
+def norm(path, run):
+    rows, sec, digests = {}, "", {}
+    for line in open(path, encoding="utf-8").read().splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            sec = line.strip("[]").replace('lease."', "").rstrip('"')
+            continue
+        k, _, v = line.partition(" = ")
+        v = str(json.loads(v)) if v.startswith('"') else v
+        v = v.replace(run, "<run>")
+        if k in INTS:
+            v = "<n>"
+        elif k == "lead_via":
+            v = "<via>"
+        v = re.sub(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", "<ts>", v)
+        v = re.sub(r"[A-Z][a-z]{2} [A-Z][a-z]{2} +[0-9]+ [0-9:]{8} [0-9]{4}( UTC)?", "<ts>", v)
+        v = re.sub(r"\b[0-9a-f]{64}\b", lambda m: digests.setdefault(m.group(0), "<d%d>" % (len(digests) + 1)), v)
+        rows[(sec, k)] = v
+    return rows
+a, b = norm(sys.argv[1], sys.argv[2]), norm(sys.argv[3], sys.argv[4])
+for key in sorted(set(a) | set(b)):
+    if a.get(key) != b.get(key):
+        print("%s.%s: %s | %s" % (key[0], key[1], a.get(key, "<absent>"), b.get(key, "<absent>")))
+S17_DIFF_PY
+) || _S17_FAIL="${_S17_FAIL} ledger(diff-failed)"
+_S17_DIFF_WANT='a.lead_cli: claude | codex
+a.reviewer_class: lead | worker
+b.approval_by: claude | codex
+b.approval_host: claude | codex
+b.approval_lead_cli: claude | codex
+b.lead_cli: claude | codex
+b.merge_approval: lead:claude via=test host=claude lead=claude at=<ts> | lead:codex via=test host=codex lead=codex at=<ts>
+b.reviewer_class: worker | lead
+baseline.promotion_host: claude | codex
+baseline.promotion_lead_cli: claude | codex
+c.lead_cli: claude | codex'
+[ "$_S17_DIFF" = "$_S17_DIFF_WANT" ] || _S17_FAIL="${_S17_FAIL} ledger(diff:$(printf '%s' "$_S17_DIFF" | tr '\n' ';' | cut -c1-900))"
+
+# upgrade / upguard: v3.3.2's own scripts open the lease
+if git -C "$REPO_ROOT" archive v3.3.2 scripts skills .claude-plugin 2>/dev/null | tar -xf - -C "$_S17/v332" 2>/dev/null \
+   && git -C "$REPO_ROOT" archive v3.1.0 skills/watch-cycle 2>/dev/null | tar -xf - -C "$_S17/v310" 2>/dev/null \
+   && git -C "$REPO_ROOT" show v3.3.2:templates/CLAUDE.md > "$_S17/v332-CLAUDE.md" 2>/dev/null \
+   && git -C "$REPO_ROOT" show v3.3.2:templates/ops/roster.toml > "$_S17/v332-roster.toml" 2>/dev/null \
+   && [ -f "$_S17/v332/scripts/invoke-external.sh" ] && [ -f "$_S17/v310/skills/watch-cycle/SKILL.md" ]; then
+  printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' > "$_S17/up.fb"
+  chmod +x "$_S17/up.fb"
+  _S17_V332_SKILLS=""
+  for _s17_d in "$_S17/v332/skills"/*/; do _S17_V332_SKILLS="${_S17_V332_SKILLS:+${_S17_V332_SKILLS},}$(basename "$_s17_d")"; done
+  unset _s17_d
+  # _s17_up <name> — the 3.3.2 project $_S17/<name>; prints v3.3.2's lease steps
+  _s17_up() {
+    local P="$_S17/$1"
+    ( mkdir -p "$P" && cd "$P" && export HOME="$_S17/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
+        && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
+        && cp "$_S17/v332-CLAUDE.md" CLAUDE.md && echo r > README.md && git add -A && git commit -qm init && git checkout -q -b sprint/up \
+        && mkdir -p ops .agents/skills && cp "$_S17/v332-roster.toml" ops/roster.toml \
+        && cp -R "$_S17/v332/skills/." .agents/skills/ && cp -R "$_S17/v310/skills/watch-cycle" .agents/skills/watch-cycle \
+        && mkdir .agents/skills/my-notes && echo mine > .agents/skills/my-notes/SKILL.md \
+        && echo "USER-EDIT" >> .agents/skills/writing-plans/SKILL.md \
+        && printf 'version=3.3.2\nskills=%s\n' "$_S17_V332_SKILLS" > .agents/skills/.triforge-plugin-version ) >/dev/null 2>&1
+    ( cd "$P" && export HOME="$_S17/home" TRIFORGE_LEASE_ROOT="$P.leases" PATH="$_S17/bin:$PATH" GIT_CONFIG_NOSYSTEM=1 TMPDIR="$_S17/tmp" \
+          CLAUDE_PLUGIN_ROOT="$_S17/v332" TRIFORGE_TEST_BUILDER="$_S17/up.fb" \
+        && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID TRIFORGE_LEASE_WORKER TRIFORGE_TEST_LEAD \
+        && source "$_S17/v332/scripts/invoke-external.sh" >/dev/null 2>&1 && {
+      R=0
+      { lease_create t builder && lease_dispatch t "probe task" 60; } >/dev/null 2>&1 || R=$?
+      _self_wait_rc t
+      echo "v332:go=$R:$(_ledger_get t state):rc=$(cat "$(_ledger_get t output_file).rc" 2>/dev/null)"
+    } ) < /dev/null 2>&1 || true
+  }
+  # _s17_start <project> — the 4.0 session start there (the real hook); its output, then "rc=<n>"
+  _s17_start() {
+    local R=0 O
+    O=$(cd "$1" && HOME="$_S17/home" TMPDIR="$_S17/tmp" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S17_PATH" /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1) || R=$?
+    printf '%s\nrc=%s\n' "$O" "$R"
+  }
+  # _s17_lead4 <name> <script> — the 4.0 lead in that project: the SELF seam
+  # names claude (the lead of a roster without [lead]), library sourced
+  _s17_lead4() {
+    ( cd "$_S17/$1" && export HOME="$_S17/home" TRIFORGE_LEASE_ROOT="$_S17/$1.leases" PATH="$_S17/bin:$PATH" GIT_CONFIG_NOSYSTEM=1 TMPDIR="$_S17/tmp" \
+          TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S17/up.fb" \
+        && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID TRIFORGE_LEASE_WORKER TRIFORGE_LEAD_PID CODEX_HOME CLAUDE_PLUGIN_ROOT \
+        && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && eval "$2" ) < /dev/null 2>&1 || true
+  }
+  _S17_SYNC="${REPO_ROOT}/scripts/lib/skills-sync.py"
+
+  # upgrade
+  O=$(_s17_up up)
+  U="$_S17/up/.agents/skills"
+  O="${O}
+$(_s17_start "$_S17/up")"
+  _S17_STALE=""
+  for _s17_n in $SHIPPED_SKILLS; do
+    [ "$_s17_n" = writing-plans ] && continue
+    [ "$(python3 "$_S17_SYNC" digest "$U/$_s17_n" 2>/dev/null)" = "$(python3 "$_S17_SYNC" digest "${REPO_ROOT}/skills/$_s17_n" 2>/dev/null)" ] || _S17_STALE="$_S17_STALE $_s17_n"
+  done
+  unset _s17_n
+  O="${O}
+retired=$([ -e "$U/test-driven-development" ] && echo kept || echo gone),$([ -e "$U/systematic-debugging" ] && echo kept || echo gone)
+users=$(cat "$U/my-notes/SKILL.md" 2>/dev/null),$(grep -c '^USER-EDIT$' "$U/writing-plans/SKILL.md" 2>/dev/null || true),$([ "$(python3 "$_S17_SYNC" digest "$U/watch-cycle" 2>/dev/null)" = "$(python3 "$_S17_SYNC" digest "$_S17/v310/skills/watch-cycle" 2>/dev/null)" ] && echo intact || echo changed)
+stale=${_S17_STALE# }
+stamp=$(grep -c '^format=2$' "$U/.triforge-plugin-version" 2>/dev/null || true):$(grep -cE 'test-driven-development|systematic-debugging|watch-cycle|my-notes|writing-plans' "$U/.triforge-plugin-version" 2>/dev/null || true)
+roster-lead=$(grep -c '^\[lead\]' "$_S17/up/ops/roster.toml" 2>/dev/null || true)"
+  _S17_FAIL="${_S17_FAIL}$(_self_expect upgrade-start "$O" '^v332:go=0:building:rc=0$' '^rc=0$' \
+    '^WARNING: CLAUDE\.md is a Triforge 3\.x project template' '^Lease ledger: 1 active lease\(s\) from a previous session' \
+    'retired no-longer-shipped: systematic-debugging test-driven-development\.$' 'kept as user-owned \(content differs.*: writing-plans\.$' \
+    '^retired=gone,gone$' '^users=mine,1,intact$' '^stale=$' '^stamp=1:0$' '^roster-lead=0$')"
+  printf '%s\n' "$O" | grep -qE 'hook crashed|^\{' && _S17_FAIL="${_S17_FAIL} upgrade-start(crash-or-brace-line)"
+  O=$(_s17_lead4 up '
+echo "lead=$(resolve_lead 2>/dev/null | cut -f1)"
+_self_try collect lease_collect t
+echo "state=$(_ledger_get t state)"
+_self_try pin lease_pin_reviewer t codex
+_self_try merge lease_merge t codex
+echo "squash=$(git diff-tree --no-commit-id --name-only -r HEAD | tr "\n" " ")"
+echo "attr=$(lease_attribution t 2>/dev/null)"
+_s17_out ask instruction_convert_stale CLAUDE.md
+_s17_out convert instruction_convert_stale CLAUDE.md --yes
+echo "files=$([ -e CLAUDE.md ] && echo claude-md),$(cmp -s "$REPO_ROOT/templates/AGENTS.md" AGENTS.md && echo pointer)"
+')
+  _S17_FAIL="${_S17_FAIL}$(_self_expect upgrade-lead "$O" '^lead=claude$' '^collect:rc=0:.*integrity baseline recorded now \(first use or a pre-3\.3\.3 ledger\)' '^state=review$' \
+    '^pin:rc=0:.*\(worker;' '^merge:rc=0:' '^squash=feature\.txt $' '^attr=.*builder claude.*reviewer codex \(worker\), lead claude, approval none, merge [0-9a-f]{12}$' \
+    '^ask:rc=20:needs-ask: would remove .*/CLAUDE\.md \(an unmodified copy of the Triforge v3\.3\.0-v3\.3\.2 templates/CLAUDE\.md\)' \
+    '^convert:rc=0:.*changed: .*/AGENTS\.md: created .*changed: .*/CLAUDE\.md: removed \(an unmodified copy of the Triforge v3\.3\.0-v3\.3\.2 template\)' '^files=,pointer$')"
+  O=$(_s17_start "$_S17/up")
+  _S17_FAIL="${_S17_FAIL}$(_self_expect upgrade-again "$O" '^rc=0$')"
+  printf '%s\n' "$O" | grep -qE 'Triforge 3\.x project template|^Tip: No AGENTS\.md|^Lease ledger:|^session-start:' && _S17_FAIL="${_S17_FAIL} upgrade-again(still-reports:$(printf '%s\n' "$O" | grep -E 'Triforge 3\.x|^Tip: No AGENTS|^Lease ledger:|^session-start:' | head -1 | cut -c1-120))"
+
+  # upguard
+  O=$(_s17_up upguard)
+  printf '# Agent Triforge lease root of this checkout (KTD18)\n%s\n' "$_S17/upguard.leases" > "$_S17/upguard/.git/triforge-lease-root"
+  O="${O}
+$(_s17_lead4 upguard '_self_try collect lease_collect t; echo "state=$(_ledger_get t state)"')"
+  _S17_FAIL="${_S17_FAIL}$(_self_expect upguard "$O" '^v332:go=0:building:rc=0$' \
+    '^collect:rc=44:.*the \[baseline\] table of the ledger is missing, but the lease-root record \([^)]*triforge-lease-root\) exists' '^state=escalated$')"
+else
+  _S17_FAIL="${_S17_FAIL} upgrade(no-v3.3.2-or-v3.1.0-tag:fetch-tags)"
+fi
+_S17_EV="static seams (TRIFORGE_TEST_LEAD + TRIFORGE_TEST_BUILDER; the live claude -p / codex exec half not run). sprint under claude and under codex: a (docs/) merged, b (scripts/lib/util.sh) 42 on the pin alone then merged on the lead's approval, c's core.fsmonitor -> collect 44, restored, never ran; promote 42 until the user's approval (the lead's refused), then at-wrap's Completion block -> ops/.sprint-complete; ledgers equal once masked apart from lead_cli, the lead on b's approval and the promotion record, and the reviewer class; main $(printf '%s' "$_S17_MAIN" | cut -c1-12) in both. upgrade: a 3.3.2 project (exact v3.3.2 CLAUDE.md, no [lead], names-only stamp, v3.3.2-opened lease) -> 4.0 session start flags the CLAUDE.md and the lease, retires test-driven-development + systematic-debugging only, keeps my-notes, the edited writing-plans and an unstamped v3.1.0 watch-cycle; lead claude; the 3.3.2 lease collects (first baseline), merges with feature.txt only; convert removes the exact copy; upguard: the lease-root record present -> 44"
+# --- end of SELF-17 cases ---
+_S17_CAP="two-lead fixture sprint: the same two-task sprint (one task under scripts/lib/) under a claude and a codex lead through the wrap path to ops/.sprint-complete, ledgers equal apart from the lead identity, the protected task needing a merge and a user promotion approval, a builder setting core.fsmonitor escalated; the 3.3.2 upgrade (U20). Static seams: TRIFORGE_TEST_LEAD + TRIFORGE_TEST_BUILDER; the live half (real claude -p and codex exec builders) is not run"
+if [ -z "$_S17_EV" ]; then _S17_FAIL="${_S17_FAIL} cases(no-case-ran)"; fi
+if [ -z "$_S17_FAIL" ]; then
+  row "SELF-17" "claude" "$_S17_CAP" "PASS" "$(printf '%s' "$_S17_EV" | cut -c1-3000)" "static"
+else
+  row "SELF-17" "claude" "$_S17_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S17_FAIL"):$(printf '%s' "$_S17_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S17"
+
+# SELF-29 (U19, S2 — R27, R28, R29, KTD18: agy's auto default and its AGY_ERROR line, the Cursor probe rows' Grok ids, a ledger whose anchors were both deleted). Cases go between the markers; each appends
+# "<case>(<why>)" to _S29_FAIL on a mismatch (_self_expect does this) and, once
+# they ran, one short note to _S29_EV. Expected values are literals. A row whose
+# cases never ran fails: no note is no evidence.
+_S29="${WORK}/self29"
+_S29_FAIL=""
+_S29_EV=""
+mkdir -p "$_S29"
+# --- SELF-29 cases (worker 6-w2) ---
+# Throwaway HOME, TMPDIR and lease roots under $_S29; a stub agy (and a stub
+# cursor-agent) first on PATH. No live CLI runs.
+#   mode     invoke_antigravity with TRIFORGE_AGY_MODE unset consults
+#            `agy agents` (auto): the agent unlisted -> <out>.mode
+#            "injection (auto)", listed -> "native (auto)" and --agent;
+#            an invalid value -> a warning naming it, then auto; injection ->
+#            "injection", the listing never consulted
+#   agyerr   the stub exits 3 with AGY_ERROR {RESOURCE_EXHAUSTED, 429,
+#            retryable, id x}: retryable true -> class retryable, the
+#            structured reason in _INVOKE_FAILURE_REASON and in the retry line,
+#            two runs; false -> deterministic, the reason in the no-retry line,
+#            one run. Control: exit 3 with no AGY_ERROR line -> the text
+#            classifier's verdict (retryable, no reason), two runs
+#   lease    an antigravity builder lease on the real lane (the stub as agy)
+#            exiting 3 with the same line: <out> names the same reason, and
+#            retryable decides the class lease_collect routes on (false:
+#            deterministic, failed; true: retryable, the requeue path)
+#   cursor   the composition CUR-03, CUR-05, CUR-09 and CUR-12 run
+#            (_cur_grok_pick, taken from scripts/probe-capabilities.sh) on a
+#            stub cursor-agent's --list-models: a 4.7 catalog ->
+#            grok-4.7-xhigh, no cursor- prefix; a 4.6 catalog ->
+#            cursor-grok-4.6-xhigh
+#   anchors  (S2) a builder's lease in review: both ledger anchors deleted and
+#            a user approval bound to the snapshot forged into its row; the
+#            merge of its protected .claude/settings.json -> 44 naming both
+#            anchors and lease_rebaseline, escalated, nothing merged, no
+#            approval recorded
+#   restamp  the same, with [baseline].lease_root also rewritten to name
+#            another lease root (named like this one, holding no digest for
+#            the ledger) -> 44 the same way
+#   fakeroot the same, with the stamp naming a root the attacker made (named
+#            like this one) whose lead/ledger.sha256 equals the forged
+#            ledger's sha256, while the lease-root record in the git dir still
+#            names the real root -> 44 the same way: only the root that record
+#            names can vouch for a ledger with no anchors (SELF-13's reclaim
+#            is the root that does)
+#   rebase   control: the lead deletes both anchors itself -> the merge 44;
+#            lease_rebaseline t -> back to review; the merge -> rc 0
+mkdir -p "$_S29/bin" "$_S29/cfg" "$_S29/home" "$_S29/tmp" "$_S29/proj"
+{ printf '#!/bin/sh\n# SELF-29 agy stub: `agents` prints cfg/agents; a run logs its argv and answers by cfg/mode\nD=%s\n' "'$_S29'"; cat <<'S29_AGY_EOF'
+mkdir -p "$D/log"
+case "${1:-}" in
+  --version) echo "1.2.12"; exit 0 ;;
+  agents) echo agents >> "$D/log/agents"; cat "$D/cfg/agents" 2>/dev/null; exit 0 ;;
+esac
+echo run >> "$D/log/runs"
+printf '%s\n' "$@" > "$D/log/argv"
+case "$(cat "$D/cfg/mode" 2>/dev/null)" in
+  err-true)  echo 'AGY_ERROR: {"status":"RESOURCE_EXHAUSTED","code":429,"retryable":true,"id":"x"}' >&2; exit 3 ;;
+  err-false) echo 'AGY_ERROR: {"status":"RESOURCE_EXHAUSTED","code":429,"retryable":false,"id":"x"}' >&2; exit 3 ;;
+  err-bare)  echo 'model call failed' >&2; exit 3 ;;
+esac
+echo '{"status":"SUCCESS","response":"S29 answer","denied_actions":[]}'
+exit 0
+S29_AGY_EOF
+} > "$_S29/bin/agy"
+{ printf '#!/bin/sh\n# SELF-29 cursor-agent stub: --list-models prints cfg/catalog\nD=%s\n' "'$_S29'"; cat <<'S29_CUR_EOF'
+case "${1:-}" in
+  --version) echo "2026.10.01-s29"; exit 0 ;;
+  --list-models) cat "$D/cfg/catalog"; exit 0 ;;
+esac
+echo "SELF-29 stub: no model turn" >&2
+exit 1
+S29_CUR_EOF
+} > "$_S29/bin/cursor-agent"
+chmod +x "$_S29/bin/agy" "$_S29/bin/cursor-agent"
+# _s29_n <file> [grep args] — the number of matching lines; 0 for a missing file
+_s29_n() {
+  local F=$1
+  shift
+  if [ "$#" -eq 0 ]; then set -- .; fi
+  cat "$F" 2>/dev/null | grep -c "$@" || true
+}
+# _s29_invoke <label> <stub mode> [<TRIFORGE_AGY_MODE>] — invoke_antigravity
+# architecture-reviewer from $_S29/proj (TRIFORGE_AGY_MODE unset without the
+# third argument); one line: rc, the .mode file, the listings asked for,
+# --agent passed, class, reason and the stub's runs. Its stderr is in
+# $_S29/<label>.err
+_s29_invoke() {
+  rm -rf "$_S29/log"
+  mkdir -p "$_S29/log"
+  printf '%s\n' "$2" > "$_S29/cfg/mode"
+  ( cd "$_S29/proj" && export HOME="$_S29/home" TMPDIR="$_S29/tmp" PATH="$_S29/bin:$PATH" && unset TRIFORGE_AGY_MODE AGY_MODEL \
+      && if [ "$#" -ge 3 ]; then export TRIFORGE_AGY_MODE="$3"; fi \
+      && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "$1:load-failed"; exit 0; }
+    R=0; INVOKE_FAILURE_CLASS=""; _INVOKE_FAILURE_REASON=""
+    invoke_antigravity architecture-reviewer "probe S29" "$TMPDIR/$1.out" 60 > /dev/null 2> "$_S29/$1.err" || R=$?
+    echo "$1:rc=${R}:mode=$(cat "$TMPDIR/$1.out.mode" 2>/dev/null):asked=$(_s29_n "$_S29/log/agents"):agent=$(_s29_n "$_S29/log/argv" -x -- --agent):class=${INVOKE_FAILURE_CLASS}:reason=${_INVOKE_FAILURE_REASON}:runs=$(_s29_n "$_S29/log/runs")" ) < /dev/null 2>&1
+}
+
+# mode
+: > "$_S29/cfg/agents"
+O=$(_s29_invoke mode-unlisted ok)
+printf 'architecture-reviewer\n' > "$_S29/cfg/agents"
+O="$O
+$(_s29_invoke mode-listed ok)"
+: > "$_S29/cfg/agents"
+O="$O
+$(_s29_invoke mode-invalid ok bogus)
+invalid-warned=$(_s29_n "$_S29/mode-invalid.err" -F "TRIFORGE_AGY_MODE='bogus' is not injection|native|auto — using auto")
+$(_s29_invoke mode-injection ok injection)"
+_S29_FAIL="${_S29_FAIL}$(_self_expect mode "$O" '^mode-unlisted:rc=0:mode=injection \(auto\):asked=1:agent=0:class=none:' \
+  '^mode-listed:rc=0:mode=native \(auto\):asked=1:agent=1:class=none:' '^mode-invalid:rc=0:mode=injection \(auto\):asked=1:agent=0:' \
+  '^invalid-warned=1$' '^mode-injection:rc=0:mode=injection:asked=0:agent=0:class=none:')"
+_S29_EV="mode: TRIFORGE_AGY_MODE unset -> auto (injection (auto) unlisted, native (auto) with --agent when listed), bogus -> warned, auto; injection never asks. "
+
+# agyerr
+O="$(_s29_invoke agyerr-true err-true)
+true-said=$(_s29_n "$_S29/agyerr-true.err" -F 'exit=3 (agy-error RESOURCE_EXHAUSTED code=429 retryable=true id=x) (retryable), retrying')
+$(_s29_invoke agyerr-false err-false)
+false-said=$(_s29_n "$_S29/agyerr-false.err" -F 'deterministic failure (agy-error RESOURCE_EXHAUSTED code=429 retryable=false id=x). No retry.')
+$(_s29_invoke agyerr-bare err-bare)"
+_S29_FAIL="${_S29_FAIL}$(_self_expect agyerr "$O" \
+  '^agyerr-true:rc=3:.*:class=retryable:reason=agy-error RESOURCE_EXHAUSTED code=429 retryable=true id=x:runs=2$' '^true-said=1$' \
+  '^agyerr-false:rc=3:.*:class=deterministic:reason=agy-error RESOURCE_EXHAUSTED code=429 retryable=false id=x:runs=1$' '^false-said=1$' \
+  '^agyerr-bare:rc=3:.*:class=retryable:reason=:runs=2$')"
+_S29_EV="${_S29_EV}agyerr: exit 3 + AGY_ERROR -> reason agy-error RESOURCE_EXHAUSTED code=429 retryable=<v> id=x; true retried once, false not; no line -> text classifier. "
+
+# lease: the real lane, so no fake builder, and with it no SELF seam; the lead
+# host is named by Claude Code's marker (CLAUDECODE=1), as in SELF-25
+_self_repo "$_S29/lr" "$_S29/home" sprint/s29 '[roles.builder]\ncli = "antigravity"\nfallbacks = ["claude"]\n'
+O=$( cd "$_S29/lr" && export HOME="$_S29/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S29/bin:${_SELF_STUBS}:$PATH" TMPDIR="$_S29/tmp" TRIFORGE_LEASE_ROOT="$_S29/lr.leases" CLAUDECODE=1 \
+       && unset TRIFORGE_TEST_BUILDER TRIFORGE_AGY_MODE && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "lease:load-failed"; exit 0; }
+  for M in false true; do
+    printf 'err-%s\n' "$M" > "$_S29/cfg/mode"
+    K="s29${M}"
+    { lease_create "$K" builder && lease_dispatch "$K" "probe task S29" 60; } >/dev/null 2>&1 || { echo "lease-${M}:go-failed"; continue; }
+    _self_wait_rc "$K"
+    R=0; lease_collect "$K" >/dev/null 2>&1 || R=$?
+    OUT=$(_ledger_get "$K" output_file 2>/dev/null || true)
+    echo "lease-${M}:collect=${R}:class=$(cat "${OUT}.class" 2>/dev/null):state=$(_ledger_get "$K" state 2>/dev/null || true):said=$(_s29_n "$OUT" -F "agy-error RESOURCE_EXHAUSTED code=429 retryable=${M} id=x")"
+  done ) < /dev/null 2>&1
+_S29_FAIL="${_S29_FAIL}$(_self_expect lease "$O" '^lease-false:collect=1:class=deterministic:state=failed:said=1$' \
+  '^lease-true:collect=1:class=retryable:state=requeued:said=1$')"
+_S29_EV="${_S29_EV}lease: the agy lane's <out> names the same reason; false -> deterministic, failed; true -> retryable, requeue path. "
+
+# cursor
+_S29_PICK=$(awk '/^_cur_grok_pick\(\) \{$/ { p = 1 } p { print } p && /^}$/ { exit }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
+printf '%s\n' 'auto - Auto' 'grok-4.7-high - Grok 4.7  High' 'grok-4.7-xhigh - Grok 4.7  Extra High' 'grok-4.7-xhigh-fast - Grok 4.7  Extra High Fast' \
+  'cursor-grok-4.6-xhigh - Grok 4.6 Extra High' 'composer-2.5 - Composer 2.5' > "$_S29/cat47"
+printf '%s\n' 'auto - Auto' 'cursor-grok-4.6-high - Grok 4.6' 'cursor-grok-4.6-xhigh - Grok 4.6 Extra High' 'composer-2.5 - Composer 2.5' > "$_S29/cat46"
+O=""
+for _s29_c in 47 46; do
+  cp "$_S29/cat${_s29_c}" "$_S29/cfg/catalog"
+  O="$O
+cursor-${_s29_c}=$( export PATH="$_S29/bin:$PATH" TMPDIR="$_S29/tmp"; cursor-agent --list-models > "$_S29/list${_s29_c}" 2>/dev/null; eval "$_S29_PICK" 2>/dev/null; _cur_grok_pick "$_S29/list${_s29_c}" 2>/dev/null )"
+done
+unset _s29_c
+_S29_FAIL="${_S29_FAIL}$(_self_expect cursor "$O" '^cursor-47=grok-4\.7 grok-4\.7-xhigh grok-4\.7-xhigh$' '^cursor-46=grok-4\.6 cursor-grok-4\.6-xhigh cursor-grok-4\.6-xhigh$')"
+_S29_EV="${_S29_EV}cursor: _cur_grok_pick on a stub 4.7 catalog -> grok-4.7-xhigh, a 4.6 catalog -> cursor-grok-4.6-xhigh. "
+
+# anchors / rebase
+# _s29_lead <name> <script> — the lead in the fixture $_S29/<name> (its fake
+# builder $_S29/<name>.fb, its lease root $_S29/<name>.leases), library sourced
+_s29_lead() {
+  ( cd "$_S29/$1" && export HOME="$_S29/home" GIT_CONFIG_NOSYSTEM=1 PATH="${_SELF_STUBS}:$PATH" TMPDIR="$_S29/tmp" \
+        TRIFORGE_LEASE_ROOT="$_S29/$1.leases" TRIFORGE_TEST_BUILDER="$_S29/$1.fb" \
+      && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 && eval "$2" ) < /dev/null 2>&1 || true
+}
+# _s29_forge <ledger> <snapshot> — a user merge approval bound to <snapshot>,
+# written into row t as lease_approve would record it
+_s29_forge() {
+  awk -v s="$2" '{ print } $0 == "[lease.\"t\"]" { print "approval_by = \"user\""; print "approval_class = \"user\""; print "approval_snapshot = \"" s "\""
+    print "approval_via = \"tty\""; print "approval_host = \"none\""; print "approval_lead_cli = \"claude\""; print "approval_at = \"2026-10-07T00:00:00Z\"" }' "$1" > "$1.forged" \
+    && mv "$1.forged" "$1"
+}
+# _s29_restamp <ledger> <root> — [baseline].lease_root rewritten to <root>
+_s29_restamp() {
+  awk -v r="$2" '/^\[/ { sec = $0 } sec == "[baseline]" && /^lease_root = / { print "lease_root = \"" r "\""; next } { print }' "$1" > "$1.restamped" \
+    && mv "$1.restamped" "$1"
+}
+# _s29_attack <stamp root|-> [vouch] — the anchors attack in the fixture the
+# caller runs it in: lease t in review, pinned to antigravity, both anchors
+# deleted, a user approval forged, the stamp rewritten to <stamp root> unless
+# "-" and, with vouch, that root given a lead/ledger.sha256 equal to the
+# forged ledger's sha256; then the merge
+_s29_attack() {
+  local S
+  _self_go t
+  _self_try pin lease_pin_reviewer t antigravity
+  S=$(_ledger_get t snapshot_sha)
+  rm -f "$TRIFORGE_LEASE_ROOT/lead/ledger.sha256" "$TRIFORGE_LEASE_ROOT/lead/ledger.copy"
+  _s29_forge ops/leases.toml "$S"
+  if [ "$1" != - ]; then _s29_restamp ops/leases.toml "$1"; fi
+  if [ "${2:-}" = vouch ]; then mkdir -p "$1/lead" && shasum -a 256 < ops/leases.toml | cut -c1-64 > "$1/lead/ledger.sha256"; fi
+  echo "forged=$(grep -c "^approval_snapshot = \"$S\"\$" ops/leases.toml):stamps=$(grep -c "^lease_root = \"$1\"\$" ops/leases.toml):vouch=$(if [ -f "$1/lead/ledger.sha256" ] && [ "$(cat "$1/lead/ledger.sha256")" = "$(shasum -a 256 < ops/leases.toml | cut -c1-64)" ]; then echo forged-sha; else echo none; fi):record=$(if [ "$(grep -v '^#' .git/triforge-lease-root 2>/dev/null | head -1)" = "$(cd "$TRIFORGE_LEASE_ROOT" && pwd -P)" ]; then echo real-root; else echo other; fi)"
+  _self_try merge lease_merge t antigravity
+  echo "state=$(_ledger_get t state):approval=$(_ledger_get t merge_approval):head=$(if git cat-file -e HEAD:.claude/settings.json 2>/dev/null; then echo merged; else echo clean; fi)"
+}
+_self_repo "$_S29/an" "$_S29/home" sprint/s29 '[roles.builder]\ncli = "codex"\n'
+_self_repo "$_S29/rs" "$_S29/home" sprint/s29 '[roles.builder]\ncli = "codex"\n'
+_self_repo "$_S29/fr" "$_S29/home" sprint/s29 '[roles.builder]\ncli = "codex"\n'
+printf '#!/bin/sh\nmkdir -p .claude && echo "{}" > .claude/settings.json\necho "Status: DONE"\n' > "$_S29/an.fb"
+cp "$_S29/an.fb" "$_S29/rs.fb"
+cp "$_S29/an.fb" "$_S29/fr.fb"
+_self_repo "$_S29/rb" "$_S29/home" sprint/s29 '[roles.builder]\ncli = "codex"\n'
+printf '#!/bin/sh\nmkdir -p docs && echo s29 > docs/s29.txt\necho "Status: DONE"\n' > "$_S29/rb.fb"
+chmod +x "$_S29/an.fb" "$_S29/rs.fb" "$_S29/fr.fb" "$_S29/rb.fb"
+mkdir -p "$_S29/other/rs.leases/lead" "$_S29/attacker/fr.leases"
+O=$(_s29_lead an '_s29_attack -')
+_S29_FAIL="${_S29_FAIL}$(_self_expect anchors "$O" '^t:go=0:review$' '^pin:rc=0:' '^forged=1:stamps=0:vouch=none:record=real-root$' \
+  '^merge:rc=44:.*both ledger anchors \([^)]*/lead/ledger\.sha256, [^)]*/lead/ledger\.copy\) are missing' '^merge:rc=44:.*lease_rebaseline' \
+  '^state=escalated:approval=:head=clean$')"
+O=$(_s29_lead rs "_s29_attack '$(cd "$_S29/other/rs.leases" && pwd -P)'")
+_S29_FAIL="${_S29_FAIL}$(_self_expect restamp "$O" '^t:go=0:review$' '^forged=1:stamps=1:vouch=none:record=real-root$' \
+  '^merge:rc=44:.*both ledger anchors .* are missing' '^state=escalated:approval=:head=clean$')"
+O=$(_s29_lead fr "_s29_attack '$(cd "$_S29/attacker/fr.leases" && pwd -P)' vouch")
+_S29_FAIL="${_S29_FAIL}$(_self_expect fakeroot "$O" '^t:go=0:review$' '^forged=1:stamps=1:vouch=forged-sha:record=real-root$' \
+  '^merge:rc=44:.*both ledger anchors .* are missing' '^state=escalated:approval=:head=clean$')"
+O=$(_s29_lead rb '_self_go t
+_self_try pin lease_pin_reviewer t antigravity
+rm -f "$TRIFORGE_LEASE_ROOT/lead/ledger.sha256" "$TRIFORGE_LEASE_ROOT/lead/ledger.copy"
+_self_try merge1 lease_merge t antigravity
+_self_try rebase lease_rebaseline t
+echo "state=$(_ledger_get t state)"
+_self_try merge2 lease_merge t antigravity
+echo "squash=$(git diff-tree --no-commit-id --name-only -r HEAD | tr "\n" " ")"')
+_S29_FAIL="${_S29_FAIL}$(_self_expect rebase "$O" '^t:go=0:review$' '^merge1:rc=44:.*both ledger anchors' '^rebase:rc=0:.*t back to .review.' \
+  '^state=review$' '^merge2:rc=0:' '^squash=docs/s29\.txt $')"
+_S29_EV="${_S29_EV}anchors: both anchors deleted + a forged user approval -> merge 44 naming them, escalated, nothing merged; restamp: the same with the stamp naming another root that holds no digest -> 44; fakeroot: the stamp naming an attacker-made root holding the forged ledger's sha256, the record naming the real root -> 44; rebase: the lead's own deletion -> 44, lease_rebaseline t -> review, merged"
+unset O _S29_PICK
+# --- end of SELF-29 cases ---
+_S29_CAP="agy routing defaults to auto and the AGY_ERROR line on exit 3 sets the failure's reason and retry (invoke_antigravity and the lease lane); the Cursor probe rows compose Grok ids through _cursor_model_for_effort; a ledger whose two anchors were deleted is a change (rc 44), and the lead's lease_rebaseline recovers (U19, S2)"
+if [ -z "$_S29_EV" ]; then _S29_FAIL="${_S29_FAIL} cases(no-case-ran)"; fi
+if [ -z "$_S29_FAIL" ]; then
+  row "SELF-29" "claude" "$_S29_CAP" "PASS" "$(printf '%s' "$_S29_EV" | cut -c1-3000)" "static"
+else
+  row "SELF-29" "claude" "$_S29_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S29_FAIL"):$(printf '%s' "$_S29_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S29"

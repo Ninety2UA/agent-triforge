@@ -70,9 +70,10 @@ _LEASE_US=$'\037'
 # in the dispatching lead's local form, and is compared with the caller's local
 # form, so it still matches in the same locale and zone. _lease_ps is the shell
 # reader; _LEASE_PS_PY defines the same reader, ps(), for the two python ones
-# (the launcher and _lease_lead_proc).
+# (the launcher and _lease_lead_proc), after _PY_PRELUDE (common.sh): every
+# program that splices it splices it first.
 _lease_ps() { LC_ALL=C TZ=UTC0 ps "$@"; }
-_LEASE_PS_PY='
+_LEASE_PS_PY="${_PY_PRELUDE}"'
 import os, subprocess
 def ps(fields, pid):
     try:
@@ -151,7 +152,7 @@ _LEASE_BUILDER_SH="${_LEASE_GO_SH}"'_lease_builder_run "$@"'
 # so nothing of the builder still runs when the exit record appears. Only when
 # its parent is the group leader (the launched builder process); anywhere else
 # it does nothing.
-_LEASE_OWN_GROUP_PY='
+_LEASE_OWN_GROUP_PY="${_PY_PRELUDE}"'
 import os, signal, subprocess, time
 me = os.getppid()
 grp = os.getpgid(0)
@@ -557,7 +558,7 @@ _claude_lane_argv() {
   # approves exactly that set; edit approves Bash and Skill, its edits riding
   # acceptEdits inside the working directory.
   if [ "$CLASS" = edit ]; then ALLOW=$_CLAUDE_ALLOW_EDIT; else ALLOW=$TOOLS; fi
-  SETTINGS=$(CL_SBX="$SBX" CL_CRED="$_CLAUDE_CRED_PATHS" python3 -c '
+  SETTINGS=$(CL_SBX="$SBX" CL_CRED="$_CLAUDE_CRED_PATHS" python3 -c "${_PY_PRELUDE}"'
 import json, os, sys
 cred = os.environ["CL_CRED"].split()
 deny = []
@@ -815,7 +816,11 @@ _lease_builder_run() {
         # JSON envelope (KTD2, D-032): exit 0 is not a completion signal on
         # agy >= 1.1.20 — parse status/response/denied_actions instead. The
         # prose lands in $OUT (what lease_collect prints), the streams in
-        # $OUT.raw / $OUT.err, the verdict in $OUT.status / $OUT.denied.
+        # $OUT.raw / $OUT.err, the verdict in $OUT.status / $OUT.denied. A
+        # nonzero exit is classified as invoke_antigravity classifies it
+        # (_agy_failure_class): on exit 3 the AGY_ERROR line's reason goes to
+        # $OUT and its retryable field sets the class lease_collect routes on
+        # (D-043).
         _adapter_env antigravity "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "${OUT}.raw" 2> "${OUT}.err" || RC=$?
         if [ "$RC" -eq 0 ]; then
           _agy_parse_envelope "${OUT}.raw" "$OUT" || AGY_PRC=$?
@@ -828,6 +833,11 @@ _lease_builder_run() {
           esac
         else
           cat "${OUT}.err" "${OUT}.raw" > "$OUT" 2>/dev/null || true
+          _agy_failure_class "$RC" "${OUT}.err" "${OUT}.raw"
+          CLASS_SET=1
+          if [ -n "$_AGY_ERR_REASON" ]; then
+            echo "lease_dispatch: agy builder exited ${RC}: ${_AGY_ERR_REASON} — class ${INVOKE_FAILURE_CLASS}" >> "$OUT"
+          fi
         fi
         ;;
       opencode)
@@ -1029,7 +1039,7 @@ SWEEP_LINE_EOF
     ACTION=collect
   else
     if [ -f "$OUT" ]; then
-      AGE=$(OUT_FILE="$OUT" python3 -c "
+      AGE=$(OUT_FILE="$OUT" python3 -c "${_PY_PRELUDE}
 import os, time
 print(max(0, int(time.time() - os.path.getmtime(os.environ['OUT_FILE']))))
 " 2>/dev/null || echo 999999)
@@ -1040,7 +1050,7 @@ print(max(0, int(time.time() - os.path.getmtime(os.environ['OUT_FILE']))))
   case "$ACTION" in
     adopt|expire|orphan|collect)
       if [ "$MODE" != sweep ] && [ "${_LS_ACT_STOP_MS:-0}" -gt 0 ] \
-         && [ "$(python3 -c 'import time; print(int(time.time() * 1000))')" -ge "$_LS_ACT_STOP_MS" ]; then
+         && [ "$(python3 -c "${_PY_PRELUDE}"'import time; print(int(time.time() * 1000))')" -ge "$_LS_ACT_STOP_MS" ]; then
         _LS_RESULT=deferred
         return 0
       fi
@@ -1131,7 +1141,7 @@ print(max(0, int(time.time() - os.path.getmtime(os.environ['OUT_FILE']))))
 # that does not print, and for the backslash), so a forged field can't put a
 # line break or a terminal escape into the lead's output.
 _lease_root_notice() {
-  LR_LEDGER="$_LEASE_LEDGER" LR_ROOT="$_LEASE_ROOT" LR_OP="$1" python3 -c '
+  LR_LEDGER="$_LEASE_LEDGER" LR_ROOT="$_LEASE_ROOT" LR_OP="$1" python3 -c "${_READ_REGULAR_PY}"'
 import os, sys
 try:
     import tomllib
@@ -1154,8 +1164,7 @@ def esc(s):
             out.append("\\U%08x" % o)
     return "".join(out)
 try:
-    with open(os.environ["LR_LEDGER"], "rb") as f:
-        leases = tomllib.load(f).get("lease", {})
+    leases = tomllib.loads(read_regular(os.environ["LR_LEDGER"]).decode("utf-8")).get("lease", {})
 except Exception:
     sys.exit(0)
 for t, r in sorted(leases.items() if isinstance(leases, dict) else []):
@@ -1244,7 +1253,7 @@ _lease_ledger_check() {
     printf 'no lease ledger at %s (no lease was created from this checkout)\n' "$_LEASE_LEDGER"
     return 1
   fi
-  LC_LEDGER="$_LEASE_LEDGER" python3 -c '
+  LC_LEDGER="$_LEASE_LEDGER" python3 -c "${_READ_REGULAR_PY}"'
 import os, sys
 try:
     import tomllib
@@ -1255,8 +1264,12 @@ except ImportError:
         print("no TOML parser available (use Python 3.11+, or pip install tomli)")
         sys.exit(1)
 try:
-    with open(os.environ["LC_LEDGER"], "rb") as f:
-        data = tomllib.load(f)
+    raw = read_regular(os.environ["LC_LEDGER"])
+except OSError as e:
+    print(os.environ["LC_LEDGER"] + " cannot be read: " + " ".join(str(e).split()))
+    sys.exit(1)
+try:
+    data = tomllib.loads(raw.decode("utf-8"))
 except Exception as e:
     print(os.environ["LC_LEDGER"] + " does not parse: " + " ".join(str(e).split()))
     sys.exit(1)
@@ -1275,8 +1288,10 @@ if not isinstance(data.get("lease", {}), dict):
 # (\037), which, unlike a tab, keeps an empty field in place under `read`. A
 # row whose fields hold a line break or that separator keeps only its state
 # (the sweep then finds no pid and reports it unverifiable), and a ledger key
-# holding one is not listed as building.
-_LEASE_WAIT_PY='
+# holding one is not listed as building. The ledger is read through
+# read_regular, as _lease_ledger_check and _lease_root_notice read it: a FIFO
+# planted there fails the read at once instead of blocking the lead's wait.
+_LEASE_WAIT_PY="${_READ_REGULAR_PY}"'
 import os, time
 try:
     import tomllib
@@ -1285,8 +1300,7 @@ except ImportError:
 US = "\x1f"
 BAD = ("\n", "\r", US)
 KEYS = ("pid", "pgid", "pid_started", "output_file", "heartbeat_deadline", "lead_pid", "lead_started")
-with open(os.environ["LW_LEDGER"], "rb") as f:
-    leases = tomllib.load(f).get("lease", {})
+leases = tomllib.loads(read_regular(os.environ["LW_LEDGER"]).decode("utf-8")).get("lease", {})
 leases = leases if isinstance(leases, dict) else {}
 names = os.environ.get("LW_NAMES", "").split()
 if not names:
@@ -1451,7 +1465,7 @@ lease_wait() {
   local T UNVER="" DEFER=0
   # The budget counts from the call's start, so the checks before the wait
   # are inside it too.
-  START_MS=$(python3 -c 'import time; print(int(time.time() * 1000))')
+  START_MS=$(python3 -c "${_PY_PRELUDE}"'import time; print(int(time.time() * 1000))')
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --budget)
