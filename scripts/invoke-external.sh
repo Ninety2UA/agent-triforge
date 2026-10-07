@@ -29,7 +29,8 @@
 #   lib/devin.sh        invoke_devin, the auth-status reader, the per-run config
 #                       copy, devin_env_reimport (R24)
 #   lib/grok.sh         invoke_grok, _grok_argv (shared with the lease lane),
-#                       the stream extractor and the failure classifier
+#                       the stream extractor and the failure classifier,
+#                       grok_read_isolation_check (at-setup)
 #   lib/roster.sh       resolve_role, dispatch_role, roster_* (DEFAULTS live here),
 #                       the lead: resolve_lead, resolve_lead_caps, lead_host_detect,
 #                       roster_write_lead (KTD1)

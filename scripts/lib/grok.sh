@@ -68,10 +68,15 @@ fi
 # (~/.grok/lsp.json) and MCP servers in every session, before any permission
 # applies, and grok has no switch that turns a user hook or LSP server off for
 # one project. So the read class shadows the user's MCP servers by name like
-# any other, and refuses (rc 69 through invoke_grok, no lease) where inspect
-# reports a user hook or LSP server, or a config layer sets a command inspect
-# does not list (an auth provider, ui.notifications.hooks) (_grok_lease_config;
-# measured on 1.0.34, each surface alone, from a scratch GROK_HOME). A user
+# any other, and refuses where inspect reports a user hook or LSP server, or
+# a config layer sets a command inspect does not list (an auth provider,
+# ui.notifications.hooks) (_grok_lease_config; measured on 1.0.34, each
+# surface alone, from a scratch GROK_HOME): rc 69 through invoke_grok, no
+# lease at lease_create, and rc 94 (nothing runs) at each later dispatch of a
+# reviewer or analyst lease, which runs the check again. What neither inspect
+# nor the TOML layers show (a planted ~/.grok/AGENTS.md, a replaced
+# ~/.grok/bin/grok) is AGENTS.md's same-user residual. at-setup asks
+# grok_read_isolation_check before it offers grok a read role. A user
 # plugin is disabled by name like a Claude Code one. The edit class keeps the
 # user's surfaces, but its sandbox profile (_GROK_EDIT_PROFILE) leaves a
 # builder no way to plant one for a later run (_GROK_HOME_DENY).
@@ -256,8 +261,9 @@ _GROK_PROJECT_REFUSAL="A grok reviewer or analyst runs with folder trust off, so
 #   .claude/plugins/    grok reads (both are plugin directories to it)
 # Fails closed too on a .grok or .grok/config.toml that is a symlink, a
 # config.toml that does not parse, and no TOML parser. The read class only:
-# _grok_lease_config runs it for a reviewer or analyst lease and invoke_grok's
-# scratch, and _lease_lane_argv again at dispatch. The edit class keeps them.
+# _grok_lease_config runs it for a reviewer or analyst lease (at provisioning,
+# and again at each dispatch through _lease_lane_argv) and invoke_grok's
+# scratch. The edit class keeps them.
 _grok_project_guard() {
   GPG_DIR="$1" GPG_TAIL="$_GROK_PROJECT_REFUSAL" python3 -c '
 import os, sys
@@ -385,6 +391,11 @@ with os.fdopen(fd, "w", encoding="utf-8") as out:
 # lists (for the read class, the hook and LSP server lists too) is refused;
 # the names read from ~/.claude and .mcp.json only add to a good inspect. A
 # project's own .grok/config.toml keeps its lines, and the tables follow them.
+# Run again over a file it wrote (a read-class lease runs it again before
+# every launch: _lease_lane_argv), it builds its tables anew from a fresh
+# inspect and keeps every plugin and server the earlier tables named, since
+# inspect no longer lists a server they shadow; tables that no longer parse
+# are refused.
 # The result is proven with tomllib before it is written: valid TOML,
 # plugins.disabled naming every plugin, enabled = false on every shadowed
 # server. A project file that declares [plugins], or an MCP server table the
@@ -472,6 +483,28 @@ if os.path.islink(gdir) or (os.path.lexists(gdir) and not os.path.isdir(gdir)) o
 if tomllib is None:
     refuse("no TOML parser to prove the file valid (Python 3.11+ tomllib, or pip install tomli)")
 text = open(cfg, encoding="utf-8", errors="replace").read() if os.path.lexists(cfg) else ""
+# A file this function wrote before (at provisioning, then at each read-class
+# dispatch) ends in its own tables, from the marker line on. They are built
+# again, and every plugin and server they named stays named: an inspect run
+# over them no longer lists a server they shadow.
+MARK = "# Agent Triforge: this worktree only, never merged."
+oldp, olds = set(), set()
+at = text.find(MARK)
+while at > 0 and text[at - 1] != "\n":
+    at = text.find(MARK, at + 1)
+if at >= 0:
+    try:
+        old = tomllib.loads(text[at:])
+    except Exception as e:
+        refuse("the tables an earlier provisioning wrote do not parse any more: %s" % (str(e).splitlines() or ["invalid TOML"])[0][:160])
+    op, om = old.get("plugins"), old.get("mcp_servers")
+    if isinstance(op, dict) and isinstance(op.get("disabled"), list):
+        oldp.update(n for n in op["disabled"] if isinstance(n, str) and n)
+    if isinstance(om, dict):
+        olds.update(n for n, v in om.items() if isinstance(v, dict) and v.get("enabled") is False)
+    text = text[:at]
+    if text.endswith("\n\n"):
+        text = text[:-1]
 try:
     own = tomllib.loads(text).get("mcp_servers")
     own = set(own) if isinstance(own, dict) else set()
@@ -485,6 +518,7 @@ try:
     plugins.update(n for n in (str(k).split("@", 1)[0] for k in (json.load(open(os.path.expanduser("~/.claude/plugins/installed_plugins.json"), encoding="utf-8")).get("plugins") or {})) if n)
 except Exception:
     pass
+plugins.update(oldp)
 def tier(why, where, what):
     print("grok: ERROR %s: %s (%s), from outside the project: grok starts it in every session, a reviewer run included, before any permission applies. A grok reviewer or analyst runs no startup code it was not handed, so no read-class grok run starts here (R23). Fix: remove or disable it there, or route the role to another roster member" % (where, why, what))
     sys.exit(1)
@@ -547,7 +581,8 @@ for path in ("~/.claude.json", os.path.join(wt, ".mcp.json")):
         servers.update(str(k) for k in (json.load(open(os.path.expanduser(path), encoding="utf-8")).get("mcpServers") or {}) if str(k))
     except Exception:
         pass
-block = ("# Agent Triforge: this worktree only, never merged. No plugin and no MCP server outside grok loads for the grok worker (GRK-06).\n"
+servers.update(olds)
+block = (MARK + " No plugin and no MCP server outside grok loads for the grok worker (GRK-06).\n"
          "[plugins]\ndisabled = [" + ", ".join(json.dumps(n) for n in sorted(plugins)) + "]\n"
          + "".join("\n[mcp_servers.%s]\ncommand = \"false\"\nenabled = false\n" % json.dumps(n) for n in sorted(servers)))
 new = (text + ("" if text.endswith("\n") else "\n") + "\n" + block) if text else block
@@ -569,6 +604,33 @@ with open(cfg, "w", encoding="utf-8") as f:
   if [ "$CLASS" = edit ]; then
     _grok_sandbox_profile "$WT" || return 1
   fi
+  return 0
+}
+
+# grok_read_isolation_check — whether a grok reviewer or analyst can start on
+# this machine, asked by at-setup before it offers grok a read role: the
+# read-class check (_grok_lease_config <dir> read) run from an empty scratch
+# directory, so only the user tier counts (the hooks, LSP servers and
+# config-layer commands grok would start in every session) and nothing
+# outside that directory, removed afterwards, is written. rc 0 and an OK line
+# on stdout when nothing stops a read-class run; else rc 1 and the refusal on
+# stdout (it names the hook, server or command and its file), also when grok
+# is absent or its inspect fails, since no read-class run would start then
+# either. It runs `grok inspect --json` and reads the config layers; it never
+# writes under GROK_HOME.
+grok_read_isolation_check() {
+  local D OUT="" RC=0
+  D=$(mktemp -d "${TMPDIR:-/tmp}/triforge-grok-check.XXXXXX") || {
+    echo "grok: could not make a scratch directory under ${TMPDIR:-/tmp} to run the check from"
+    return 1
+  }
+  OUT=$(_grok_lease_config "$D" read 2>&1) || RC=$?
+  rm -rf "$D"
+  if [ "$RC" -ne 0 ]; then
+    printf '%s\n' "${OUT:-grok: the read-class check failed to run}"
+    return 1
+  fi
+  echo "grok: OK — no user hook, LSP server or config-layer command stops a grok reviewer or analyst here"
   return 0
 }
 
@@ -1083,7 +1145,7 @@ _grok_lease_text() {
 # _grok_classify <rc> <file>... — set INVOKE_FAILURE_CLASS and
 # _INVOKE_FAILURE_REASON for a failed grok run: a turn-cap stop
 # (max_turns_reached), quota and signed out are deterministic; anything else is
-# _classify_invoke_failure's call (timeout, retryable). Only grok's own words
+# _classify_invoke_failure's call (timeout, interrupted, retryable). Only grok's own words
 # are read — error events and the non-JSON (stderr) lines — never tool output,
 # so a test that prints "401" is not an auth failure.
 _grok_classify() {

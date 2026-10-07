@@ -38,6 +38,14 @@ Devin's `needs-ask` output has a `consent: required` line, and Devin is never en
 3. On a yes, record the consent with the write: `roster_write_member devin true "<model>" --consent user`. Without `--consent user` the write is refused. On a no, record the decline as for any member.
 4. Devin reviews and analyzes by default. It builds only after a second yes: `roster_write_member devin true "<model>" --opt-in builder`. Ask this only when the user wants Devin as a builder.
 
+## Grok: check the read roles first
+
+An enrolled grok also gets an at-review reviewer lane. Grok starts the user's own hooks, LSP servers and config-layer commands in every session, before any permission applies, so a grok reviewer or analyst refuses to start on a machine that has one. Before you ask whether to enroll grok, run the check below. On rc 1, relay the line it printed; it names what was found and the file it is in. Tell the user that until they remove it, grok's review lane fails with rc 69 at every at-review and grok can't take the reviewer or analyst role, though it can still build.
+
+```bash
+grok_read_isolation_check; echo "rc=$?"
+```
+
 ## Live model lists
 
 Offer the shipped default first (recommended):

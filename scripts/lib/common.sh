@@ -106,7 +106,7 @@ _PLAN_LIMIT_RE='upgrade to (pro|max|a paid plan)|requires? a (paid|pro) plan|not
 # Classify a failed external-CLI invocation (KTD-9). Shared so future per-CLI
 # helpers reuse one taxonomy instead of reinventing bare retry-once. Sets:
 #   INVOKE_FAILURE_CLASS    deterministic | timeout | retryable
-#   _INVOKE_FAILURE_REASON  binary-missing | timeout-tool-missing | auth | quota | plan | ""
+#   _INVOKE_FAILURE_REASON  binary-missing | interrupted | timeout-tool-missing | auth | quota | plan | ""
 # Args: <exit-code> [output-file] — the output file is scanned for
 # auth-shaped patterns when present.
 _classify_invoke_failure() {
@@ -119,6 +119,12 @@ _classify_invoke_failure() {
   elif [ "$RC" -eq 127 ]; then
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="binary-missing"
+  elif [ "$RC" -eq 129 ] || [ "$RC" -eq 130 ] || [ "$RC" -eq 143 ]; then
+    # 128 + HUP, INT, TERM: someone stopped the run, and a retry would start
+    # it again behind their back. Every helper's retry and the lease lane's
+    # requeue key off this class, so none of them restarts an interrupted run.
+    INVOKE_FAILURE_CLASS="deterministic"
+    _INVOKE_FAILURE_REASON="interrupted"
   elif [ "$RC" -eq "$_RC_NO_TIMEOUT_TOOL" ] && ! command -v timeout >/dev/null 2>&1 && ! command -v gtimeout >/dev/null 2>&1; then
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="timeout-tool-missing"

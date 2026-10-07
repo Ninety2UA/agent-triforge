@@ -4728,10 +4728,12 @@ rm -rf "$_S24"
 # userhook and userlsp (an active hook or LSP server from the user's
 # ~/.grok), pluginhook (a hook and an LSP server of the listed user plugin),
 # strayplugin (a hook of a plugin inspect does not list), sleep (inspect
-# records its pid and sleeps 30 s).
+# records its pid and sleeps 30 s), lateserver (one more user MCP server).
+# Like grok 1.0.34, inspect lists no MCP server the working directory's
+# .grok/config.toml already shadows.
 # Any other run records its argv (prompt included), environment, working
-# directory, whether a .grok/config.toml sat there, the .grok/sandbox.toml it
-# found and the a.txt it found, writes a file into the working directory when
+# directory, whether a .grok/config.toml sat there, the .grok/config.toml and
+# .grok/sandbox.toml it found and the a.txt it found, writes a file into the working directory when
 # the run is in the triforge-edit sandbox, and answers with a streaming-json
 # stream chosen by the mode file:
 # done (Status: DONE, end_turn), maxtokens, noend and maxturns (Status: DONE,
@@ -4748,9 +4750,10 @@ rm -rf "$_S24"
 #              analyst and an empty role read
 #   lane       _lease_lane_argv grok with edit in the lane-file slot: the
 #              triforge-edit sandbox, the Edit, Write and Bash rules, and the MCP
-#              denies; with read, and with an empty slot: the read-only
-#              sandbox, none of those rules, and Edit, Write, Bash and MCP
-#              denied. Either way the env prefix carries every isolation switch
+#              denies; with read, and with an empty slot (each runs the
+#              provisioning check again, twice over one directory): the
+#              read-only sandbox, none of those rules, and Edit, Write, Bash
+#              and MCP denied. Either way the env prefix carries every isolation switch
 #              (GROK_FOLDER_TRUST=0, each GROK_CLAUDE_* and GROK_CURSOR_*) and
 #              the GROK_CONFIG overlay with exactly today's include_only list
 #   builder    lease_create under a claude lead host, in a project whose
@@ -4816,6 +4819,16 @@ rm -rf "$_S24"
 #              reviewer lease whose worktree gains .grok/hooks/ after it was
 #              made: lease_dispatch's compose refuses it (rc 94), grok never
 #              runs
+#   lease-usertier  reviewer leases made under a clean user tier: one whose
+#              inspect reports a user hook by dispatch time is refused at
+#              the compose (rc 94, the hook named), grok never runs; one
+#              whose inspect lists a new user MCP server by then runs with a
+#              .grok/config.toml that shadows it, keeps the three shadows
+#              made at provisioning (which inspect no longer lists) and holds
+#              one [plugins] table naming the three plugins
+#   readcheck  grok_read_isolation_check: rc 0 and an OK line under a clean
+#              user tier; rc 1 naming the user hook inspect reports; no
+#              scratch directory left and nothing written under HOME
 #   fg-read    invoke_grok as a reviewer, with a canary variable and
 #              CLAUDECODE in the caller's environment, in a project never
 #              leased: grok ran from a scratch checkout that held
@@ -4887,7 +4900,16 @@ if [ "$1" = inspect ]; then
   if [ "$IM" = partial-read ]; then HK=""; fi
   PL="\"plugins\":[{\"name\":\"s25-claude-plugin\",\"scope\":\"user\",\"path\":\"$HOME/.claude/plugins/cache/mk/s25-claude-plugin/1.0.0\",\"enabled\":true},{\"name\":\"s25-grok-plugin\",\"scope\":\"user\",\"path\":\"$HOME/.grok/plugins/s25-grok-plugin\",\"enabled\":true}],"
   if [ "$IM" = partial ]; then PL=""; fi
-  printf '{"configSources":{"layers":[%s]},%s%s"mcpServers":[{"name":"s25-claude-server","transport":"stdio","source":{"type":"claudeJson","path":"%s/.claude.json"}},{"name":"s25-grok-server","transport":"stdio","source":{"type":"user","path":"%s/.grok/config.toml"}}]}\n' "$OV" "$HK" "$PL" "$HOME" "$HOME"
+  # A server the working directory's .grok/config.toml shadows is not
+  # listed, as grok 1.0.34 lists none; lateserver adds one more user server
+  MS=""
+  for S in "s25-claude-server:claudeJson:$HOME/.claude.json" "s25-grok-server:user:$HOME/.grok/config.toml" "s25-late-server:user:$HOME/.grok/config.toml"; do
+    SN=${S%%:*}; ST=${S#*:}; SP=${ST#*:}; ST=${ST%%:*}
+    if [ "$SN" = s25-late-server ] && [ "$IM" != lateserver ]; then continue; fi
+    if grep -qxF "[mcp_servers.\"$SN\"]" .grok/config.toml 2>/dev/null; then continue; fi
+    MS="${MS}${MS:+,}{\"name\":\"$SN\",\"transport\":\"stdio\",\"source\":{\"type\":\"$ST\",\"path\":\"$SP\"}}"
+  done
+  printf '{"configSources":{"layers":[%s]},%s%s"mcpServers":[%s]}\n' "$OV" "$HK" "$PL" "$MS"
   exit 0
 fi
 if [ "$1" = --version ]; then echo "grok 1.0.34 (stub)"; exit 0; fi
@@ -4897,6 +4919,7 @@ env > "$D/log/$W.env"
 pwd -P > "$D/log/$W.pwd"
 if [ -f .grok/config.toml ]; then echo yes; else echo no; fi > "$D/log/$W.cfg"
 if [ -f .grok/sandbox.toml ]; then cp .grok/sandbox.toml "$D/log/$W.sbx"; fi
+if [ -f .grok/config.toml ]; then cp .grok/config.toml "$D/log/$W.toml"; fi
 if [ -f a.txt ]; then cat a.txt > "$D/log/$W.atxt"; fi
 P=""
 for a in "$@"; do
@@ -4923,14 +4946,16 @@ printf '{"mcpServers": {"s25-json-server": {"command": "true"}}}\n' > "$_S25/hom
 _S25_PATH="${_S25}/bin:${_SELF_STUBS}:${PATH}"
 _S25_FAIL=""
 
-# class and lane argv
+# class and lane argv (the read class composes in a worktree of its own: it
+# runs the provisioning check again, and $_S25 holds the scratch HOME)
+mkdir -p "$_S25/lane"
 O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
   C="class:"
   for R in builder tester documenter reviewer analyst ""; do C="${C}$(_grok_class "$R" 2>/dev/null || echo missing),"; done
   echo "$C"
   for S in edit read ""; do
     P=""; SB=""; N=0; PH=pre; EW=" "; DN=" "; OVJ=""; DM=""; EM=""
-    if _lease_lane_argv grok "" high grok-4.7 "$S" "" "$_S25" 600; then
+    if _lease_lane_argv grok "" high grok-4.7 "$S" "" "$_S25/lane" 600; then
       for A in "${_LEASE_LANE_ARGV[@]}"; do
         case "$PH:$A" in
           (pre:env)           PH=env ;;
@@ -5309,6 +5334,49 @@ O=$( cd "$_S25/lh" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25
 _S25_FAIL="${_S25_FAIL}$(_self_expect lease-surface "$O" '^lease-surface-reviewer:rc=1:row=none:ran=no:named=1$' '^lease-surface-builder:rc=0:row=leased$' \
   '^lease-surface-dispatch:rc=94:ran=no:named=1$')"
 
+# a reviewer lease made under a clean user tier, then dispatched: with a user
+# hook inspect reports by then, the compose refuses it (rc 94, the hook
+# named), grok never runs; with a user MCP server added by then, the run's
+# .grok/config.toml shadows it too, keeps the shadows made at provisioning
+# (which inspect no longer lists) and holds one [plugins] table
+_self_repo "$_S25/du" "$_S25/home" sprint/s25du "$_S25_ROSTER"
+O=$( cd "$_S25/du" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/du-leases" \
+       XAI_API_KEY=s25-stub-key CLAUDECODE=1 && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  L="$_S25/log"
+  for T in s25uh:userhook s25ul:lateserver; do
+    K=${T%%:*}
+    rm -f "$_S25/inspect-mode"
+    lease_create "$K" reviewer >/dev/null 2>&1 || { echo "lease-usertier-${T#*:}:create-failed"; continue; }
+    printf '%s\n' "${T#*:}" > "$_S25/inspect-mode"
+    lease_dispatch "$K" "probe review S25 user tier" 60 >/dev/null 2>&1 || { echo "lease-usertier-${T#*:}:dispatch-failed"; continue; }
+    _self_wait_rc "$K"
+    rm -f "$_S25/inspect-mode"
+    OUT=$(_ledger_get "$K" output_file 2>/dev/null)
+    if [ "$K" = s25uh ]; then
+      echo "lease-usertier-userhook:rc=$(cat "${OUT}.rc" 2>/dev/null || true):ran=$( [ -f "$L/$K.argv" ] && echo yes || echo no):named=$(grep -cF '/.grok/hooks: grok inspect reports a hook of type user' "$OUT" 2>/dev/null || true)"
+    else
+      C="$L/$K.toml"
+      echo "lease-usertier-lateserver:rc=$(cat "${OUT}.rc" 2>/dev/null || true):late=$(grep -cxF '[mcp_servers."s25-late-server"]' "$C" 2>/dev/null || true):kept=$(grep -cxE '\[mcp_servers\."s25-(claude|grok|json)-server"\]' "$C" 2>/dev/null || true):plugins=$(grep -cx '\[plugins\]' "$C" 2>/dev/null || true):disabled=$(grep -cE '^disabled = \[.*"s25-claude-plugin", "s25-grok-plugin", "s25-installed-plugin"\]$' "$C" 2>/dev/null || true)"
+    fi
+  done )
+_S25_FAIL="${_S25_FAIL}$(_self_expect lease-usertier "$O" '^lease-usertier-userhook:rc=94:ran=no:named=1$' \
+  '^lease-usertier-lateserver:rc=0:late=1:kept=3:plugins=1:disabled=1$')"
+
+# grok_read_isolation_check (at-setup's question before a read role): rc 0
+# and an OK line under a clean user tier; rc 1 and the user hook named when
+# inspect reports one; either way nothing left in TMPDIR, nothing written
+# under HOME
+O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  _home() { find "$_S25/home" 2>/dev/null | LC_ALL=C sort | cksum; }
+  for M in full userhook; do
+    H=$(_home)
+    printf '%s\n' "$M" > "$_S25/inspect-mode"
+    R=0; grok_read_isolation_check > "$_S25/rc-$M.out" 2>&1 || R=$?
+    rm -f "$_S25/inspect-mode"
+    echo "readcheck-${M}:rc=${R}:ok=$(grep -c '^grok: OK' "$_S25/rc-$M.out" || true):named=$(grep -cF '/.grok/hooks: grok inspect reports a hook of type user' "$_S25/rc-$M.out" || true):left=$(ls -d "$_S25/tmp"/triforge-grok-check.* 2>/dev/null | grep -c . || true):home=$( [ "$(_home)" = "$H" ] && echo same || echo changed)"
+  done )
+_S25_FAIL="${_S25_FAIL}$(_self_expect readcheck "$O" '^readcheck-full:rc=0:ok=1:named=0:left=0:home=same$' '^readcheck-userhook:rc=1:ok=0:named=1:left=0:home=same$')"
+
 # the lead's integrity check before any checkout (a stub that refuses, and a
 # real baseline mismatch: a filter driver planted in .git/config after the
 # first lease), and a scratch checkout that runs no filter in a project never
@@ -5386,9 +5454,9 @@ O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25
   rm -f "$_S25/inspect-mode" )
 _S25_FAIL="${_S25_FAIL}$(_self_expect trap "$O" '^trap:started=yes:before=1:dirs=0:stub=gone$')"
 
-_S25_CAP="Grok Build's lane: the permission class by role (a reviewer or analyst read-only, with Edit, Write and Bash denied over any imported Claude allow rule, and MCP tools denied in every class; grok takes builder, reviewer and analyst, and edits only in a lease), the env prefix and include_only overlay pinned, a report only from an end_turn run, the provisioned .grok/config.toml that disables every plugin and shadows every MCP server, the user's own included (never merged, never without a full inspect, refused when it can't be proven), no read-class run where the project or the user tier supplies code grok would start, the builder's sandbox profile closing GROK_HOME's code and instruction paths (rewritten before each dispatch), and invoke_grok's read class in a removed scratch checkout under env -i, after the roster and integrity checks before every attempt, with no filter or hook run and a TERM that leaves nothing behind (R23)"
+_S25_CAP="Grok Build's lane: the permission class by role (a reviewer or analyst read-only, with Edit, Write and Bash denied over any imported Claude allow rule, and MCP tools denied in every class; grok takes builder, reviewer and analyst, and edits only in a lease), the env prefix and include_only overlay pinned, a report only from an end_turn run, the provisioned .grok/config.toml that disables every plugin and shadows every MCP server, the user's own included (never merged, never without a full inspect, refused when it can't be proven), no read-class run where the project or the user tier supplies code grok would start (checked again, and the tables rebuilt, at every read-class dispatch; asked by at-setup through grok_read_isolation_check), the builder's sandbox profile closing GROK_HOME's code and instruction paths (rewritten before each dispatch), and invoke_grok's read class in a removed scratch checkout under env -i, after the roster and integrity checks before every attempt, with no filter or hook run and a TERM that leaves nothing behind (R23)"
 if [ -z "$_S25_FAIL" ]; then
-  row "SELF-25" "grok" "$_S25_CAP" "PASS" "class: builder/tester/documenter edit, reviewer/analyst/empty read; lane: edit -> triforge-edit + Edit/Write/Bash, MCP denied; read and empty -> read-only, Edit/Write/Bash/MCP denied; env prefix: every GROK_CLAUDE_*/GROK_CURSOR_* switch, GROK_FOLDER_TRUST=0, the overlay's literal include_only; builder lease: .grok/config.toml disables the 3 plugins and shadows the 3 servers (the user's ~/.grok/config.toml one included), inspect with the Claude switches off, config and profile provisioned, a weakened profile written back before the run (all 17 GROK_HOME denies), triforge-edit, builder brief, collect -> review, snapshot without .grok/; reviewer lease (project allows Edit/Write/npm): read-only, the denies, reviewer brief, no profile, review; Status: DONE then max_tokens, no end, or the turn cap -> report missing (rc 80), the stop named; tracked: [permission] and [mcp_servers.team] files take the tables (tomllib-proven); [plugins], inline mcp_servers, a server named like a ~/.claude.json one, a symlinked .grok and an ignored overlay refused, file unchanged and named; a project server named like the user's grok one gets no shadow; user tier (read class): a user hook, a user LSP server, an unlisted plugin's hook, an auth provider command, notification hooks and a requirements-layer MCP server refused, named, nothing written; the listed user plugin's hook and LSP accepted (plugin disabled, user server shadowed); the edit class takes a user hook and writes the profile; profile: one table, extends workspace, exactly the 17 literal denies, config.toml not denied; a same-named user profile and a symlinked file refused, nothing written; surface (read class): .grok/hooks, .grok/lsp.json, .grok/plugins, .claude/plugins, a project MCP server and an inspect-reported project hook refused, named, nothing written; Claude/Cursor hooks, .mcp.json (shadowed), an agent, a skill and a sandbox.toml accepted; edit class takes .grok/hooks; inspect: empty, cut-off, failed and partial refused; roles: tester and documenter on grok rc 5; lease_create refused, no row, grok never run; a read lease over .grok/lsp.json refused, a builder lease made, .grok/hooks added after create refused at compose (rc 94); invoke_grok: reviewer from a scratch checkout with the config, env -i (no canary, no CLAUDECODE), the denies and the checkout note, then removed, no ledger written; tester and an edit agent name rc 69, grok never run; an empty end_turn -> rc 80 no-answer; an interrupted run (exit 130) -> rc 130 interrupted, run once, no retry; a retry after the first run declined grok in the roster -> rc 5 role, run once; a retry after the first run changed .git/config (lease open, fresh rebaseline) -> rc 44 integrity, run once; an unisolable project, project hooks, a user hook or a bad inspect -> rc 69, grok never run; integrity refused (stub, and a smudge filter in .git/config with .git/info/attributes planted after a fresh rebaseline, a lease open) -> rc 44, no checkout, the filter never run; a never-leased project's smudge and process filters never run; TERM to _grok_run_in's subshell during the provisioning inspect -> the inspect stopped, no scratch left" "static"
+  row "SELF-25" "grok" "$_S25_CAP" "PASS" "class: builder/tester/documenter edit, reviewer/analyst/empty read; lane: edit -> triforge-edit + Edit/Write/Bash, MCP denied; read and empty -> read-only, Edit/Write/Bash/MCP denied; env prefix: every GROK_CLAUDE_*/GROK_CURSOR_* switch, GROK_FOLDER_TRUST=0, the overlay's literal include_only; builder lease: .grok/config.toml disables the 3 plugins and shadows the 3 servers (the user's ~/.grok/config.toml one included), inspect with the Claude switches off, config and profile provisioned, a weakened profile written back before the run (all 17 GROK_HOME denies), triforge-edit, builder brief, collect -> review, snapshot without .grok/; reviewer lease (project allows Edit/Write/npm): read-only, the denies, reviewer brief, no profile, review; Status: DONE then max_tokens, no end, or the turn cap -> report missing (rc 80), the stop named; tracked: [permission] and [mcp_servers.team] files take the tables (tomllib-proven); [plugins], inline mcp_servers, a server named like a ~/.claude.json one, a symlinked .grok and an ignored overlay refused, file unchanged and named; a project server named like the user's grok one gets no shadow; user tier (read class): a user hook, a user LSP server, an unlisted plugin's hook, an auth provider command, notification hooks and a requirements-layer MCP server refused, named, nothing written; the listed user plugin's hook and LSP accepted (plugin disabled, user server shadowed); the edit class takes a user hook and writes the profile; profile: one table, extends workspace, exactly the 17 literal denies, config.toml not denied; a same-named user profile and a symlinked file refused, nothing written; surface (read class): .grok/hooks, .grok/lsp.json, .grok/plugins, .claude/plugins, a project MCP server and an inspect-reported project hook refused, named, nothing written; Claude/Cursor hooks, .mcp.json (shadowed), an agent, a skill and a sandbox.toml accepted; edit class takes .grok/hooks; inspect: empty, cut-off, failed and partial refused; roles: tester and documenter on grok rc 5; lease_create refused, no row, grok never run; a read lease over .grok/lsp.json refused, a builder lease made, .grok/hooks added after create refused at compose (rc 94); a reviewer lease made under a clean user tier: a user hook by dispatch time refused at compose (rc 94, named, grok never run), a new user MCP server by then shadowed in the run's config with the provisioning's 3 shadows kept and one [plugins]; grok_read_isolation_check: clean -> rc 0 OK, a user hook -> rc 1 named, no scratch left, HOME unchanged; invoke_grok: reviewer from a scratch checkout with the config, env -i (no canary, no CLAUDECODE), the denies and the checkout note, then removed, no ledger written; tester and an edit agent name rc 69, grok never run; an empty end_turn -> rc 80 no-answer; an interrupted run (exit 130) -> rc 130 interrupted, run once, no retry; a retry after the first run declined grok in the roster -> rc 5 role, run once; a retry after the first run changed .git/config (lease open, fresh rebaseline) -> rc 44 integrity, run once; an unisolable project, project hooks, a user hook or a bad inspect -> rc 69, grok never run; integrity refused (stub, and a smudge filter in .git/config with .git/info/attributes planted after a fresh rebaseline, a lease open) -> rc 44, no checkout, the filter never run; a never-leased project's smudge and process filters never run; TERM to _grok_run_in's subshell during the provisioning inspect -> the inspect stopped, no scratch left" "static"
 else
   row "SELF-25" "grok" "$_S25_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S25_FAIL"):$(printf '%s' "$_S25_FAIL" | cut -c1-700)" "static"
 fi
@@ -5430,9 +5498,29 @@ rm -rf "$_S25"
 #                 inventory and the diff markers; REVIEW files for cursor,
 #                 devin and kimi only; opencode (Status: DONE, exit 1) and grok
 #                 (Status: DONE, then max_tokens) reported FAILED
-#   codex-noschema  codex with the output schema switched off (no last-message
-#                 file): REVIEW_CODEX promoted on the exit code, the quoted
-#                 Status: BLOCKED ignored
+#   codex-noschema  codex with the output schema switched off: the
+#                 last-message file still written (-o on every attempt),
+#                 REVIEW_CODEX promoted, the quoted Status: BLOCKED ignored;
+#                 an answer that ends in Status: BLOCKED not promoted, named;
+#                 with the schema on, a first run that wrote its verdict and
+#                 failed as a retry may fix, then a retry answering BLOCKED:
+#                 two runs, not promoted (the retry's answer, not the stale
+#                 verdict)
+#   core-quote    the analyst on agy, whose answer quotes "Status: BLOCKED" in
+#                 a finding: promoted; one whose last line is Status: BLOCKED:
+#                 not promoted, named
+#   interrupted   invoke_antigravity, invoke_codex, invoke_opencode,
+#                 invoke_kimi and invoke_cursor with their stub exiting 130:
+#                 rc 130, deterministic, reason interrupted, one run each
+#   rows          each [R] task in the package with its indented fields (at
+#                 six and at two spaces), no line of an unmarked task, and the
+#                 header naming ops/TASKS.md and ops/CONTRACTS.md by absolute
+#                 path
+#   codex-lease   a codex builder lease on the real lane, -o <out>.last in its
+#                 argv, a Status line quoted in the transcript after the
+#                 answer: an answer saying DONE -> review, though the quote
+#                 says BLOCKED; an answer with no Status line -> report
+#                 missing (rc 80), though the quote says DONE
 #   core-blocked  the analyst on opencode (DONE), the reviewer on devin
 #                 (BLOCKED): REVIEW_ANTIGRAVITY only, the BLOCKED named;
 #                 devin's prompt holds the package
@@ -5488,26 +5576,44 @@ EOF
 } > "$_S26/bin/opencode"
 for _T in kimi cursor-agent devin; do cp "$_S26/bin/opencode" "$_S26/bin/$_T"; done
 # codex: the transcript (stderr) quotes an earlier report's Status: BLOCKED;
-# the answer (stdout) has no Status line; the -o file gets a JSON verdict
+# the answer (stdout; cfg/codex.ans when set) has no Status line, and the -o
+# file gets it too, or a JSON verdict under --output-schema. cfg/codex.tail
+# goes to stderr after the answer; cfg/codex.fail-first fails the first run
+# (after its -o file is written) as a retry may fix; cfg/codex.rc is the exit
 { printf '#!/bin/sh\n# SELF-26 codex stub\nD=%s\nN=codex\n' "'$_S26'"; cat <<'EOF'
 case "$1" in
   --version) echo "codex-cli 0.0.0-s26"; exit 0 ;;
   features) cat "$D/cfg/codex.features" 2>/dev/null; exit 0 ;;
 esac
 . "$D/bin/s26-record"
-O=""; P=""
+O=""; P=""; SCH=0
 for A in "$@"; do
   if [ "$P" = -o ]; then O=$A; fi
+  if [ "$A" = --output-schema ]; then SCH=1; fi
   P=$A
 done
 echo "exec: sed -n 1,5p ops/old-review.md" >&2
 echo "Status: BLOCKED" >&2
 echo "(an earlier report, quoted by a tool call)" >&2
-printf 'Reviewed the package.\n[P3] calc.py:3 S26-CODEX-FINDING\n'
-if [ -n "$O" ]; then printf '{"findings":[],"summary":"S26-VERDICT","review_scope":"package"}\n' > "$O"; fi
-exit 0
+ANS=$(cat "$D/cfg/codex.ans" 2>/dev/null || printf 'Reviewed the package.\n[P3] calc.py:3 S26-CODEX-FINDING')
+printf '%s\n' "$ANS"
+if [ -n "$O" ] && [ "$SCH" = 1 ]; then printf '{"findings":[],"summary":"S26-VERDICT","review_scope":"package"}\n' > "$O"
+elif [ -n "$O" ]; then printf '%s\n' "$ANS" > "$O"; fi
+if [ -f "$D/cfg/codex.tail" ]; then cat "$D/cfg/codex.tail" >&2; fi
+if [ -f "$D/cfg/codex.fail-first" ] && [ ! -f "$D/log/codex.failed" ]; then
+  : > "$D/log/codex.failed"; echo "Error: connection reset by peer" >&2; exit 1
+fi
+exit "$(cat "$D/cfg/codex.rc" 2>/dev/null || echo 0)"
 EOF
 } > "$_S26/bin/codex"
+# agy: the JSON envelope in cfg/agy.ans, exit cfg/agy.rc
+{ printf '#!/bin/sh\n# SELF-26 agy stub\nD=%s\nN=agy\n' "'$_S26'"; cat <<'EOF'
+case "$1" in --version|-V) echo "agy 1.2.0"; exit 0 ;; esac
+. "$D/bin/s26-record"
+cat "$D/cfg/agy.ans" 2>/dev/null
+exit "$(cat "$D/cfg/agy.rc" 2>/dev/null || echo 0)"
+EOF
+} > "$_S26/bin/agy"
 { printf '#!/bin/sh\n# SELF-26 grok stub\nD=%s\nN=grok\n' "'$_S26'"; cat <<'EOF'
 case "$1" in --version|-V) echo "grok 1.0.34"; exit 0 ;; esac
 for A in "$@"; do
@@ -5522,7 +5628,7 @@ exit 0
 EOF
 } > "$_S26/bin/grok"
 for _T in ig ic; do printf '#!/bin/sh\ntouch %s/%s-fsmon\n' "$_S26" "$_T" > "$_S26/fsmon-$_T.sh"; done
-chmod +x "$_S26/bin/opencode" "$_S26/bin/kimi" "$_S26/bin/cursor-agent" "$_S26/bin/devin" "$_S26/bin/codex" "$_S26/bin/grok" "$_S26/fsmon-ig.sh" "$_S26/fsmon-ic.sh"
+chmod +x "$_S26/bin/opencode" "$_S26/bin/kimi" "$_S26/bin/cursor-agent" "$_S26/bin/devin" "$_S26/bin/codex" "$_S26/bin/agy" "$_S26/bin/grok" "$_S26/fsmon-ig.sh" "$_S26/fsmon-ic.sh"
 _S26_PATH="${_S26}/bin:${_SELF_STUBS}:${PATH}"
 _S26_DONE='Reviewed.\nStatus: DONE\nFiles changed: none\nTests: none\nConcerns: None\nDiscoveries for later tasks: None\n'
 _S26_KIMI='[members.kimi]\nenabled = true\nmodel = "kimi-code/k3"\n'
@@ -5658,14 +5764,110 @@ _S26_FAIL="${_S26_FAIL}$(_self_expect main "$O" '^main-pkg:rc=0:untracked=1:said
   '^main-opt-prompt-grok:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
   '^main-files:REVIEW_ANTIGRAVITY,REVIEW_CODEX,REVIEW_CURSOR,REVIEW_DEVIN,REVIEW_KIMI$')"
 
-# codex-noschema: no last-message file; codex is judged by its exit code
+# codex-noschema: the output schema off, the last-message file still written
+# (its final answer, no Status line); codex-blocked: that answer ends in
+# Status: BLOCKED; codex-retry: the schema on, a first run that wrote its
+# verdict and then failed as a retry may fix, and a retry whose answer ends
+# in Status: BLOCKED
 printf 'output_schema\tstable\tfalse\n' > "$_S26/cfg/codex.features"
 O=$( _s26_reset
   R=$(_s26_run mn2 "$_S26/mn" pkg REVIEW_PKG=); P=$(_s26_pkg mn2)
   R=$(_s26_run mn2 "$_S26/mn" core REVIEW_PKG="$P")
-  echo "codex-noschema:rc=${R}:prose=$(grep -c 'S26-CODEX-FINDING' "$_S26/mn/ops/REVIEW_CODEX.md" 2>/dev/null || true):verdict=$(grep -c 'S26-VERDICT' "$_S26/mn/ops/REVIEW_CODEX.md" 2>/dev/null || true):last=$(ls "$_S26/tmp-mn2"/codex_review_*.last 2>/dev/null | grep -c . || true)" )
+  echo "codex-noschema:rc=${R}:prose=$(grep -c 'S26-CODEX-FINDING' "$_S26/mn/ops/REVIEW_CODEX.md" 2>/dev/null || true):verdict=$(grep -c 'S26-VERDICT' "$_S26/mn/ops/REVIEW_CODEX.md" 2>/dev/null || true):last=$(ls "$_S26/tmp-mn2"/codex_review_*.last 2>/dev/null | grep -c . || true)"
+  printf 'Could not review the package: S26-CODEX-BLOCKED.\nStatus: BLOCKED\n' > "$_S26/cfg/codex.ans"
+  R=$(_s26_run mn3 "$_S26/mn" pkg REVIEW_PKG=); P=$(_s26_pkg mn3)
+  R=$(_s26_run mn3 "$_S26/mn" core REVIEW_PKG="$P")
+  echo "codex-blocked:rc=${R}:files=$(_s26_files "$_S26/mn"):said=$(grep -c 'the codex lane reported Status: BLOCKED — not promoted' "$_S26/mn3.core.err" 2>/dev/null || true)"
+  : > "$_S26/cfg/codex.features"; : > "$_S26/cfg/codex.fail-first"; _s26_reset
+  R=$(_s26_run mn4 "$_S26/mn" pkg REVIEW_PKG=); P=$(_s26_pkg mn4)
+  R=$(_s26_run mn4 "$_S26/mn" core REVIEW_PKG="$P")
+  echo "codex-retry:rc=${R}:runs=$(grep -cx codex "$_S26/log/runs" 2>/dev/null || true):files=$(_s26_files "$_S26/mn"):said=$(grep -c 'the codex lane reported Status: BLOCKED — not promoted' "$_S26/mn4.core.err" 2>/dev/null || true)"
+  rm -f "$_S26/cfg/codex.ans" "$_S26/cfg/codex.fail-first" )
 : > "$_S26/cfg/codex.features"
-_S26_FAIL="${_S26_FAIL}$(_self_expect codex-noschema "$O" '^codex-noschema:rc=0:prose=1:verdict=0:last=0$')"
+_S26_FAIL="${_S26_FAIL}$(_self_expect codex-noschema "$O" '^codex-noschema:rc=0:prose=1:verdict=0:last=1$' \
+  '^codex-blocked:rc=0:files=REVIEW_ANTIGRAVITY:said=1$' '^codex-retry:rc=0:runs=2:files=REVIEW_ANTIGRAVITY:said=1$')"
+
+# core-quote: the analyst on agy (core, no Status contract), whose answer
+# quotes a Status: BLOCKED line in a finding: promoted; core-last: an agy
+# answer whose last line is Status: BLOCKED: not promoted
+_s26_fixture "$_S26/cq" "$_S26_KIMI"
+_s26_dirty "$_S26/cq"
+O=$( _s26_reset
+  R=$(_s26_run cq "$_S26/cq" pkg REVIEW_PKG=); P=$(_s26_pkg cq)
+  printf '%s\n' '{"status":"SUCCESS","response":"Findings:\n- Status: BLOCKED is dropped without a retry hint → add one (S26-AGY-QUOTE)\n- [P3] calc.py:3 naming\nNo other findings.","denied_actions":[]}' > "$_S26/cfg/agy.ans"
+  R=$(_s26_run cq "$_S26/cq" core REVIEW_PKG="$P")
+  echo "core-quote:rc=${R}:agy=$(grep -c 'S26-AGY-QUOTE' "$_S26/cq/ops/REVIEW_ANTIGRAVITY.md" 2>/dev/null || true):said=$(grep -c 'lane reported Status' "$_S26/cq.core.err" 2>/dev/null || true)"
+  rm -f "$_S26/cq/ops/REVIEW_"*.md
+  printf '%s\n' '{"status":"SUCCESS","response":"Could not finish the review (S26-AGY-LAST).\nStatus: BLOCKED","denied_actions":[]}' > "$_S26/cfg/agy.ans"
+  R=$(_s26_run cq2 "$_S26/cq" core REVIEW_PKG="$P")
+  echo "core-last:rc=${R}:files=$(_s26_files "$_S26/cq"):said=$(grep -c 'the antigravity lane reported Status: BLOCKED — not promoted' "$_S26/cq2.core.err" 2>/dev/null || true)"
+  rm -f "$_S26/cfg/agy.ans" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect core-quote "$O" '^core-quote:rc=0:agy=1:said=0$' '^core-last:rc=0:files=REVIEW_CODEX:said=1$')"
+
+# interrupted: each helper that retries (agy, codex, opencode, kimi, cursor)
+# with its stub exiting 130, as a run a SIGINT stopped: rc 130,
+# deterministic, reason interrupted, one run
+O=$( cd "$_S26/cq" && export PATH="$_S26_PATH" HOME="$_S26/home" TMPDIR="$_S26/tmp-int" OPENROUTER_API_KEY=s26-stub \
+       && mkdir -p "$TMPDIR" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "interrupted:load-failed"; exit 0; }
+  for T in agy:invoke_antigravity:architecture-reviewer codex:invoke_codex:logic_reviewer opencode:invoke_opencode:reviewer \
+           kimi:invoke_kimi:reviewer cursor-agent:invoke_cursor:reviewer; do
+    N=${T%%:*}; F=${T#*:}; A=${F#*:}; F=${F%%:*}
+    _s26_reset
+    if [ -f "$_S26/cfg/$N.rc" ]; then mv "$_S26/cfg/$N.rc" "$_S26/cfg/$N.rc.keep"; fi
+    echo 130 > "$_S26/cfg/$N.rc"
+    R=0; INVOKE_FAILURE_CLASS=""; _INVOKE_FAILURE_REASON=""
+    "$F" "$A" "probe S26 interrupted" "$TMPDIR/$N.out" 60 > /dev/null 2>&1 || R=$?
+    echo "interrupted-${N}:rc=${R}:class=${INVOKE_FAILURE_CLASS}:reason=${_INVOKE_FAILURE_REASON}:runs=$(grep -cx "$N" "$_S26/log/runs" 2>/dev/null || true)"
+    rm -f "$_S26/cfg/$N.rc"
+    if [ -f "$_S26/cfg/$N.rc.keep" ]; then mv "$_S26/cfg/$N.rc.keep" "$_S26/cfg/$N.rc"; fi
+  done )
+_S26_FAIL="${_S26_FAIL}$(_self_expect interrupted "$O" '^interrupted-agy:rc=130:class=deterministic:reason=interrupted:runs=1$' \
+  '^interrupted-codex:rc=130:class=deterministic:reason=interrupted:runs=1$' '^interrupted-opencode:rc=130:class=deterministic:reason=interrupted:runs=1$' \
+  '^interrupted-kimi:rc=130:class=deterministic:reason=interrupted:runs=1$' '^interrupted-cursor-agent:rc=130:class=deterministic:reason=interrupted:runs=1$')"
+
+# rows: each [R] task whole in the package (its indented fields, at any
+# indent), no field of an unmarked task, and the header naming ops/TASKS.md
+# and ops/CONTRACTS.md by absolute path
+_s26_fixture "$_S26/rw" "$_S26_KIMI"
+( cd "$_S26/rw" && printf '# Contracts\nS26-CONTRACT\n' > ops/CONTRACTS.md && printf '%s\n' '# Tasks' '- [R] T1: add calc S26-ROW1' '      Role: builder' \
+    '      Accept: S26-ACCEPT1 pytest passes' '      Fails when: S26-FAILS1 any test fails' '' '- [ ] T2: unrelated S26-UNMARKED' '      Accept: S26-ACCEPT2 nothing' \
+    '- [R] T3: second S26-ROW3' '  Accept: S26-ACCEPT3 two-space indent' '- [ ] T4: next S26-NEXT' '      Accept: S26-ACCEPT4 none' > ops/TASKS.md ) || true
+O=$( _s26_reset
+  R=$(_s26_run rw "$_S26/rw" pkg REVIEW_PKG=); P=$(_s26_pkg rw)
+  RWD=$(cd "$_S26/rw" && pwd -P)
+  H=$(sed -n '1,/^## Changed files/p' "$P/package.md" 2>/dev/null || true)
+  _h() { printf '%s\n' "$H" | grep -c "$@" || true; }
+  echo "rows:rc=${R}:t1=$(_h -x -- '- \[R\] T1: add calc S26-ROW1'):accept1=$(_h -x '      Accept: S26-ACCEPT1 pytest passes'):fails1=$(_h -x '      Fails when: S26-FAILS1 any test fails'):role1=$(_h -x '      Role: builder'):accept3=$(_h -x '  Accept: S26-ACCEPT3 two-space indent'):unmarked=$(_h -E 'S26-UNMARKED|S26-ACCEPT2|S26-NEXT|S26-ACCEPT4'):tasks=$(_h -F "of ${RWD}/ops/TASKS.md with its indented fields"):contracts=$(_h -xF "The contracts these tasks rely on: ${RWD}/ops/CONTRACTS.md")" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect rows "$O" '^rows:rc=0:t1=1:accept1=1:fails1=1:role1=1:accept3=1:unmarked=0:tasks=1:contracts=1$')"
+
+# codex-lease: a codex builder lease on the real lane (the stub as codex),
+# whose transcript quotes a Status line after its answer: lease_collect takes
+# the report from the final answer (-o <out>.last) alone. done: the answer
+# says DONE, the quote BLOCKED -> review; missing: no Status in the answer,
+# the quote says DONE -> report missing (rc 80)
+_s26_fixture "$_S26/cl" '[roles.builder]\ncli = "codex"\nfallbacks = ["claude"]\n'
+O=$( cd "$_S26/cl" && export HOME="$_S26/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S26_PATH" TMPDIR="$_S26/tmp-cl" TRIFORGE_LEASE_ROOT="$_S26/leases-cl" CLAUDECODE=1 \
+       && mkdir -p "$TMPDIR" && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "codex-lease:load-failed"; exit 0; }
+  for T in s26cd:done s26cm:missing; do
+    K=${T%%:*}; M=${T#*:}
+    _s26_reset
+    if [ "$M" = done ]; then
+      printf 'Built it.\nStatus: DONE\nFiles changed: none\nTests: none\nConcerns: None\nDiscoveries for later tasks: None\n' > "$_S26/cfg/codex.ans"
+      printf 'exec: cat ops/old-report.md\nStatus: BLOCKED\n' > "$_S26/cfg/codex.tail"
+    else
+      printf 'Built it, and stopped before the report.\n' > "$_S26/cfg/codex.ans"
+      printf 'exec: cat ops/old-report.md\nStatus: DONE\n' > "$_S26/cfg/codex.tail"
+    fi
+    lease_create "$K" builder >/dev/null 2>&1 || { echo "codex-lease-${M}:create-failed"; continue; }
+    lease_dispatch "$K" "probe task S26 codex lease" 60 >/dev/null 2>&1 || { echo "codex-lease-${M}:dispatch-failed"; continue; }
+    _self_wait_rc "$K"
+    RC=0; lease_collect "$K" >/dev/null 2>&1 || RC=$?
+    OUT=$(_ledger_get "$K" output_file 2>/dev/null)
+    A=$(ls "$_S26/log"/codex.*.argv 2>/dev/null | head -1)
+    echo "codex-lease-${M}:collect=${RC}:$(_ledger_get "$K" state 2>/dev/null):report=$(_ledger_get "$K" report_status 2>/dev/null):o=$(grep -A1 -x -- -o "${A:-/none}" 2>/dev/null | tail -1 | grep -cxF "${OUT}.last" || true)"
+  done
+  rm -f "$_S26/cfg/codex.ans" "$_S26/cfg/codex.tail" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect codex-lease "$O" '^codex-lease-done:collect=0:review:report=DONE:o=1$' '^codex-lease-missing:collect=80:leased:report=MISSING:o=1$')"
 
 # core-blocked: the analyst on opencode (DONE), the reviewer on devin (BLOCKED)
 _s26_fixture "$_S26/cb" '[roles.analyst]\ncli = "opencode"\nfallbacks = ["claude"]\n\n[roles.reviewer]\ncli = "devin"\nfallbacks = ["codex"]\n\n[members.opencode]\nenabled = true\nmodel = "openrouter/z-ai/glm-5.3"\n[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\nconsent = "user 2026-10-07T00:00:00Z via=tty"\n'
@@ -5721,9 +5923,9 @@ O=$( _s26_reset
 _S26_FAIL="${_S26_FAIL}$(_self_expect base "$O" '^base-invalid:pkg=1:named=1:pkgdir=0:opt=1:runs=0$' '^base-valid:pkg=0:range=1$' \
   '^base-diff-fail:(pkg=1:named=1:pkgdir=0:opt=1:runs=0|unreadable-object-readable)$')"
 
-_S26_CAP="at-review's blocks run verbatim (R23, R24, KTD18): the lead's integrity check before the skill's first git call (a planted filter or fsmonitor never runs; no package, so no lane), one review package per cycle for every lane (the inventory with untracked files by name, the inline diff within the cap, the full diff in a file the prompt names; an invalid REVIEW_BASE or a failed git call stops the review), promotion on the CLI's final answer (an optional lane only on rc 0 and DONE; never BLOCKED in a core role; Codex's quoted tool output ignored), and the lanes in parallel"
+_S26_CAP="at-review's blocks run verbatim (R23, R24, KTD18): the lead's integrity check before the skill's first git call (a planted filter or fsmonitor never runs; no package, so no lane), one review package per cycle for every lane (each [R] task with its fields, the inventory with untracked files by name, the inline diff within the cap, the full diff in a file the prompt names; an invalid REVIEW_BASE or a failed git call stops the review), promotion on the CLI's final answer (an optional lane only on rc 0 and DONE; never BLOCKED in a core role, read from a core answer's last line; Codex's last-message file on every attempt, its quoted tool output ignored, in the lease lane too), no retry of an interrupted run, and the lanes in parallel"
 if [ -z "$_S26_FAIL" ]; then
-  row "SELF-26" "claude" "$_S26_CAP" "PASS" "integrity (Claude Code layout, and the Codex layout: project-tier copy, locator through the pointer): lease + rebaseline + clean filter and fsmonitor in .git/config -> preflight 0, package block rc 44 naming .git/config, no package, learnings/core/optional blocks refuse, 0 lane runs, filter and fsmonitor never ran; never leased: rc 0, no ledger, lead dir = gitconfig; main: untracked file listed and the not-diffed note; learnings match through the untracked path; core lanes released together, REVIEW_ANTIGRAVITY (cursor) and REVIEW_CODEX (prose + verdict) though the codex transcript quotes Status: BLOCKED; cursor's core prompt holds the package; optional lanes released together (5/5), each prompt with both changes, the [R] row, the untracked name, the inventory and the diff; REVIEW_CURSOR/DEVIN/KIMI only, opencode (DONE, exit 1) and grok (DONE, max_tokens) FAILED; codex without a last-message file promoted on rc 0; devin BLOCKED as reviewer not promoted, its prompt holds the package; 40-file diff over the cap: inventory 40, cut, full.diff 40, package <= 116000, kimi argv < 120000; REVIEW_BASE naming no commit and git diff rc 128 stop the review (rc 1, no package, no lane); REVIEW_BASE=main named" "static"
+  row "SELF-26" "claude" "$_S26_CAP" "PASS" "integrity (Claude Code layout, and the Codex layout: project-tier copy, locator through the pointer): lease + rebaseline + clean filter and fsmonitor in .git/config -> preflight 0, package block rc 44 naming .git/config, no package, learnings/core/optional blocks refuse, 0 lane runs, filter and fsmonitor never ran; never leased: rc 0, no ledger, lead dir = gitconfig; main: untracked file listed and the not-diffed note; learnings match through the untracked path; core lanes released together, REVIEW_ANTIGRAVITY (cursor) and REVIEW_CODEX (prose + verdict) though the codex transcript quotes Status: BLOCKED; cursor's core prompt holds the package; optional lanes released together (5/5), each prompt with both changes, the [R] row, the untracked name, the inventory and the diff; REVIEW_CURSOR/DEVIN/KIMI only, opencode (DONE, exit 1) and grok (DONE, max_tokens) FAILED; codex with the schema off still writes its last-message file and is promoted from it, an answer ending in Status: BLOCKED is not, nor a retry's BLOCKED answer after a first run that wrote a verdict (2 runs); an agy answer quoting Status: BLOCKED in a finding promoted, one ending in it not; agy, codex, opencode, kimi and cursor exiting 130 -> rc 130 interrupted, one run each; the package holds each [R] task with its indented fields, no unmarked task, and names ops/TASKS.md and ops/CONTRACTS.md by absolute path; a codex builder lease runs with -o <out>.last and lease_collect reads its report there (DONE -> review over a quoted BLOCKED, no Status -> rc 80 over a quoted DONE); devin BLOCKED as reviewer not promoted, its prompt holds the package; 40-file diff over the cap: inventory 40, cut, full.diff 40, package <= 116000, kimi argv < 120000; REVIEW_BASE naming no commit and git diff rc 128 stop the review (rc 1, no package, no lane); REVIEW_BASE=main named" "static"
 else
   row "SELF-26" "claude" "$_S26_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S26_FAIL"):$(printf '%s' "$_S26_FAIL" | cut -c1-700)" "static"
 fi

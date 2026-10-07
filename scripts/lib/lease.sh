@@ -2007,7 +2007,7 @@ ${PROMPT}"
       return 1
     fi
   fi
-  rm -f "$OUT" "${OUT}.rc" "${OUT}.class" "${OUT}.log" "${OUT}.launch" "${OUT}.err" "${OUT}.raw" "${OUT}.envelope"
+  rm -f "$OUT" "${OUT}.rc" "${OUT}.class" "${OUT}.log" "${OUT}.launch" "${OUT}.err" "${OUT}.raw" "${OUT}.envelope" "${OUT}.last"
 
   # Lane-specific composition that must happen LEAD-SIDE, before env -i: the
   # Kimi builder definition's absolute plugin path (D-024), the Cursor binary and
@@ -2020,7 +2020,8 @@ ${PROMPT}"
   # again. The ledger records the id that was actually dispatched
   # (dispatched_model) beside the roster values (builder_model / builder_effort).
   # LANE_ARG is the lane's own value, passed by position to _lease_lane_argv:
-  # kimi's agent file, devin's config copy, grok's class.
+  # codex's last-message file, kimi's agent file, devin's config copy, grok's
+  # class.
   local LANE_ARG="" CBIN="" DISPATCH_MODEL="$MODEL" REG_ROW="" REG_ENV_KEYS=""
   REG_ROW=$(cli_field "$CLI" model env_keys 2>/dev/null) || REG_ROW=""
   REG_ENV_KEYS=${REG_ROW#*$'\t'}
@@ -2028,6 +2029,11 @@ ${PROMPT}"
     antigravity|opencode|kimi|cursor|devin|grok) [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=${REG_ROW%%$'\t'*} ;;
   esac
   case "$CLI" in
+    codex)
+      # codex's final answer alone (-o): lease_collect reads the report from
+      # it, never from <out>, which holds the tool output too
+      LANE_ARG="${OUT}.last"
+      ;;
     kimi)
       [ -f "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md" ] && LANE_ARG="${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md"
       ;;
@@ -2048,9 +2054,11 @@ ${PROMPT}"
       ;;
     grok)
       # The lane arg is grok's permission class (edit or read), which
-      # _lease_lane_argv turns into the sandbox and the allowed tools. The
-      # edit class's sandbox profile is written again first: an earlier run
-      # in this worktree could have rewritten .grok/sandbox.toml
+      # _lease_lane_argv turns into the sandbox and the allowed tools; for
+      # the read class it also runs the whole provisioning check again,
+      # right before the launch. The edit class's sandbox profile is written
+      # again here: an earlier run in this worktree could have rewritten
+      # .grok/sandbox.toml
       LANE_ARG=$LCLASS
       if [ "$LCLASS" = edit ] && ! _grok_sandbox_profile "$WT"; then
         echo "lease_dispatch: ERROR could not write the grok builder's sandbox profile into ${WT} (see above) — not dispatching ${TASK_ID}" >&2
@@ -2432,6 +2440,9 @@ _lease_copy_discoveries() {
 #                                        state=review, so use lease_requeue's
 #                                        sibling: mark orphaned -> reclaim ->
 #                                        requeue) or escalates after one repeat
+# The report is the builder's final answer: <out>.last when the lane writes
+# one (codex, whose <out> also holds its tool output: a quoted Status line
+# there is no report), else <out>.
 # The claude lane's envelope (<out>.envelope) is recorded first: result_subtype,
 # result_is_error and session_id (the next dispatch resumes it), and a
 # max-turns stop (subtype error_max_turns, nonzero exit) is routed as a clean
@@ -2490,8 +2501,9 @@ COLLECT_ROW_EOF
     fi
   fi
   if [ "$RC" -eq 0 ] 2>/dev/null; then
-    local REPORT BUILDER
-    REPORT=$(_lease_parse_status "$OUT")
+    local REPORT BUILDER ANS=$OUT
+    if [ -e "${OUT}.last" ]; then ANS="${OUT}.last"; fi
+    REPORT=$(_lease_parse_status "$ANS")
     BUILDER=$(_ledger_get "$TASK_ID" builder_cli 2>/dev/null || true)
     _ledger_update "$TASK_ID" report_status="$REPORT" || return 1
     case "$REPORT" in
@@ -2523,14 +2535,14 @@ COLLECT_ROW_EOF
         if [ "$_LP_STATUS" != no ]; then
           echo "lease_collect: task ${TASK_ID}'s snapshot touches protected paths (${_LP_PATHS}); lease_merge needs a merge approval for it from the lead (when the lead's CLI did not build it) or the user: lease_approve task:${TASK_ID} <lead CLI|user> (U10)" >&2
         fi
-        _lease_copy_discoveries "$TASK_ID" "${BUILDER:-unknown}" "$OUT"
+        _lease_copy_discoveries "$TASK_ID" "${BUILDER:-unknown}" "$ANS"
         echo "lease_collect: task ${TASK_ID} builder exited 0 with Status: ${REPORT} — state=review, output below" >&2
         printf '%s\n' "$OUT"
         return 0
         ;;
       BLOCKED|NEEDS_CONTEXT)
         local WHY
-        WHY=$(grep -iE '^[[:space:]]*[-*]?[[:space:]]*\**Concerns\**:?' "$OUT" 2>/dev/null | tail -1 | cut -c1-200 | _scrub || true)
+        WHY=$(grep -iE '^[[:space:]]*[-*]?[[:space:]]*\**Concerns\**:?' "$ANS" 2>/dev/null | tail -1 | cut -c1-200 | _scrub || true)
         _ledger_update "$TASK_ID" state=escalated reason="builder reported ${REPORT}: ${WHY:-see output}" || return 1
         echo "lease_collect: task ${TASK_ID} builder reported Status: ${REPORT} — ESCALATED, never routed to review (see ${OUT}). Supply the missing context / unblock, then re-lease." >&2
         return 1

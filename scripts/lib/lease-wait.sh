@@ -560,7 +560,8 @@ _claude_session_ok() {
 # for a CLI with no arm, any other nonzero when an arm could not compose its
 # command (the devin arm names the cause in _LEASE_LANE_ERR). <lane-arg> is
 # the lane's own value from
-# lease_dispatch: kimi's agent file, devin's config copy, grok's class. The
+# lease_dispatch: codex's last-message file, kimi's agent file, devin's config
+# copy, grok's class. The
 # one place each lane's argv is composed:
 # _lease_builder_run runs it under _adapter_env, and the probe's worker-marker
 # rows (CC-13, AGY-17, OC-09, KIMI-10, CUR-13, and CDX-16, CDX-17 and SELF-15c
@@ -582,7 +583,10 @@ _claude_session_ok() {
 #                the filter), so neither the user's config.toml nor a default
 #                that drops *KEY* names can strip the worker marker or the
 #                no-push GIT_CONFIG_KEY_n (CDX-19); -m and
-#                model_reasoning_effort only when set
+#                model_reasoning_effort only when set; -o <lane-arg> when
+#                lease_dispatch names one (<out>.last): codex's final answer
+#                alone, the file lease_collect reads the report from, since
+#                <out> also holds the tool output
 #   antigravity  always the model pin (AE2: agy's own default is a Medium
 #                variant), --add-dir the worktree, --print-timeout, the JSON
 #                envelope (KTD2, D-032), -p
@@ -626,10 +630,14 @@ _claude_session_ok() {
 #                when set, streaming-json, dontAsk with the allow and deny sets
 #                (every MCP tool denied), and the GROK_CONFIG overlay that
 #                keeps the tool shell to the boundary's names; -p last (the
-#                prompt is its value). A read-class worktree that holds
-#                project hooks, an LSP server, plugins or MCP servers of its
-#                own is a compose failure, never a run (_grok_project_guard
-#                names the file)
+#                prompt is its value). The read class first runs its whole
+#                provisioning check again (_grok_lease_config <wt> read): a
+#                worktree that holds project hooks, an LSP server, plugins or
+#                MCP servers of its own, or a user tier whose hooks, LSP
+#                servers or config-layer commands grok would start, is a
+#                compose failure, never a run (the refusal names the file),
+#                and the plugin and MCP tables are rebuilt from a fresh
+#                inspect
 _lease_lane_argv() {
   local CLI=$1 MODEL=$2 EFFORT=$3 DMODEL=$4 LANE_ARG=$5 CBIN=$6 WT=$7 TIMEOUT=$8
   case "$CLI" in
@@ -645,6 +653,7 @@ _lease_lane_argv() {
                         -c 'shell_environment_policy.set={}')
       if [ -n "$MODEL" ]; then _LEASE_LANE_ARGV+=(-m "$MODEL"); fi
       if [ -n "$EFFORT" ]; then _LEASE_LANE_ARGV+=(-c "model_reasoning_effort=\"${EFFORT}\""); fi
+      if [ -n "$LANE_ARG" ]; then _LEASE_LANE_ARGV+=(-o "$LANE_ARG"); fi
       ;;
     antigravity)
       _LEASE_LANE_ARGV=(agy --model "$DMODEL" --add-dir "$WT" --print-timeout "${TIMEOUT}s" --output-format json -p)
@@ -684,12 +693,16 @@ _lease_lane_argv() {
       _LEASE_LANE_ARGV=("${_DEVIN_ARGV[@]}")
       ;;
     grok)
-      # <lane-arg> is the class; an empty or unknown one runs read-only, and
-      # a read-class lease never starts where the worktree supplies code grok
-      # would start before any permission applies (checked at provisioning,
-      # and here again at dispatch)
-      if [ "$LANE_ARG" != edit ] && ! _LEASE_LANE_ERR=$(_grok_project_guard "$WT"); then
-        _LEASE_LANE_ERR=${_LEASE_LANE_ERR:-"the worktree's grok project check failed to run"}
+      # <lane-arg> is the class; an empty or unknown one runs read-only. A
+      # read-class lease never starts where the worktree or the user tier
+      # supplies code grok would start before any permission applies: its
+      # whole provisioning check runs again here, right before the launch
+      # (_grok_lease_config <wt> read: the project guard, the user tier's
+      # hooks, LSP servers and config-layer commands, and the plugin and MCP
+      # tables rebuilt from a fresh inspect), so a hook or server added after
+      # the lease was made never starts in it
+      if [ "$LANE_ARG" != edit ] && ! _LEASE_LANE_ERR=$(_grok_lease_config "$WT" read 2>&1); then
+        _LEASE_LANE_ERR=${_LEASE_LANE_ERR:-"the grok read-class isolation check failed to run"}
         return 1
       fi
       _grok_argv "${LANE_ARG:-read}" "$DMODEL" "$EFFORT" || return 1
@@ -823,6 +836,12 @@ _lease_builder_run() {
         # and the copy itself is removed after the run (below)
         echo "lease_dispatch: devin lane: ${_LEASE_LANE_ARGV[*]}" >&2
         _adapter_env devin "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+        ;;
+      codex)
+        # The final answer's file (-o <lane-arg>) starts empty: a run that
+        # writes no answer leaves no report, whatever its tool output quoted
+        if [ -n "$LANE_ARG" ]; then : > "$LANE_ARG" 2>/dev/null || true; fi
+        _adapter_env codex "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
         ;;
       *)
         _adapter_env "$CLI" "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?

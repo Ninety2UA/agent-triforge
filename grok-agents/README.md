@@ -131,9 +131,15 @@ LSP server off for one project.
 
 A machine whose `~/.grok/hooks/` holds a hook, such as a terminal app's
 agent-status hook, gets no grok reviewer or analyst until the user moves the
-hook out. A
-worker on another CLI with no OS sandbox can still write to `~/.grok`, and the
-reviewer refusal catches anything it plants there.
+hook out. at-setup checks for one before it offers grok either role. A worker
+on another CLI with no OS sandbox can still write to `~/.grok`. If it plants a
+hook, an LSP server, an auth-provider command, notification hooks or a
+requirements-layer MCP server there, the reviewer refusal catches it; a new
+MCP server is shadowed. The check runs when a reviewer or analyst lease is
+made, again before each of its dispatches, and before each `invoke_grok`
+attempt. Nothing catches a plant that `grok inspect` and the config layers
+don't show, such as a `~/.grok/AGENTS.md` or a replaced `~/.grok/bin/grok`.
+AGENTS.md names that residual for any worker with a shell and no OS sandbox.
 
 ## Files
 

@@ -38,26 +38,33 @@ CODEX_OUT="${TMPDIR:-/tmp}/codex_review_$$_$(date +%s).txt"
 
 # The CLI each role resolves to, for the promotion check: an optional CLI
 # filling a core role reports through a typed `Status:` line, Codex and agy
-# through their exit code (and agy's envelope).
+# through their exit code and their answer's last line (and agy's envelope).
 ANALYST_CLI=$(resolve_role analyst 2>/dev/null | cut -f1) || ANALYST_CLI=""
 REVIEWER_CLI=$(resolve_role reviewer 2>/dev/null | cut -f1) || REVIEWER_CLI=""
 # _promote_ok <cli> <out> — whether a lane that exited 0 may become a REVIEW
-# file (a nonzero lane stops the block below before any promotion): never on
-# Status: BLOCKED or NEEDS_CONTEXT, and for a CLI outside the core trio only
-# on DONE or DONE_WITH_CONCERNS (no Status line is "report missing"). It reads
+# file (a nonzero lane stops the block below before any promotion). It reads
 # the CLI's final answer, never its tool output: <out>.last when the helper
-# wrote one (Codex's last message, a JSON verdict under --output-schema), else
-# <out>, which every other helper fills with the final answer (agy's envelope
-# response, claude's result, the assistant text of a stream, Devin's reply).
-# Codex's <out> is the whole session, tool output included: a Codex lane
-# without a last-message file is judged by its exit code alone, as a core lane
-# with no Status contract.
+# writes one (invoke_codex does on every attempt: Codex's <out> is the whole
+# session, tool output included), else <out>, which every other helper fills
+# with the final answer (agy's envelope response, claude's result, the
+# assistant text of a stream, Devin's reply). An empty answer is never
+# promoted. A CLI outside the core trio has a Status contract: promoted only
+# on DONE or DONE_WITH_CONCERNS (no Status line is "report missing"). A core
+# CLI has none, so its answer reports a status only in its last non-empty
+# line, and BLOCKED or NEEDS_CONTEXT there stops the promotion; a finding that
+# quotes a Status line further up does not.
 _promote_ok() {
   local PCLI=${1:-} POUT=${2:-} PANS ST
   PANS=$POUT
-  if [ -s "${POUT}.last" ]; then
-    PANS="${POUT}.last"
-  elif [ "$PCLI" = codex ]; then
+  if [ -e "${POUT}.last" ]; then PANS="${POUT}.last"; fi
+  if ! grep -q '[^[:space:]]' "$PANS" 2>/dev/null; then
+    echo "review: the ${PCLI:-?} lane gave no final answer (${PANS} is empty) — not promoted; read ${POUT}" >&2; return 1
+  fi
+  if [ "$(cli_field "${PCLI:-none}" tier 2>/dev/null || true)" = core ]; then
+    ST=$(awk 'NF { l = $0 } END { print l }' "$PANS" | _lease_parse_status /dev/stdin 2>/dev/null || echo MISSING)
+    case "$ST" in
+      BLOCKED|NEEDS_CONTEXT) echo "review: the ${PCLI} lane reported Status: ${ST} — not promoted; read ${PANS}" >&2; return 1 ;;
+    esac
     return 0
   fi
   ST=$(_lease_parse_status "$PANS" 2>/dev/null || echo MISSING)
@@ -65,7 +72,6 @@ _promote_ok() {
     DONE|DONE_WITH_CONCERNS) return 0 ;;
     BLOCKED|NEEDS_CONTEXT) echo "review: the ${PCLI:-?} lane reported Status: ${ST} — not promoted; read ${PANS}" >&2; return 1 ;;
   esac
-  if [ "$(cli_field "${PCLI:-none}" tier 2>/dev/null || true)" = core ]; then return 0; fi
   echo "review: the ${PCLI:-?} lane's answer has no final 'Status:' line — report missing, not promoted; read ${PANS}" >&2
   return 1
 }
@@ -79,7 +85,7 @@ _promote_ok() {
 # resolves to the CLAUDE lane (run that reviewer as a sub-agent, below);
 # any other nonzero is a real reviewer failure. Each prompt carries the package.
 dispatch_role analyst "architecture-reviewer" \
-  "Review scope: tasks marked [R] in ops/TASKS.md; the review package below holds those rows, the changed files and the diff. Write findings to ops/REVIEW_ANTIGRAVITY.md if you can; otherwise return them as your response.
+  "Review scope: tasks marked [R] in ops/TASKS.md; the review package below holds each of those tasks with its fields (Accept:, Fails when: and the rest), the changed files and the diff. Write findings to ops/REVIEW_ANTIGRAVITY.md if you can; otherwise return them as your response.
 
 ${RPKG}" \
   "$AGY_OUT" 600 &
@@ -87,7 +93,7 @@ AGY_PID=$!
 
 # If scope covers 5+ files, the reviewer CLI may spawn internal subagents.
 dispatch_role reviewer "logic_reviewer" \
-  "Review scope: tasks marked [R] in ops/TASKS.md; the review package below holds those rows, the changed files and the diff. If scope covers 5+ files, spawn separate agents for logic review, security audit, and test coverage analysis — merge all findings into ops/REVIEW_CODEX.md. Otherwise review sequentially and write to ops/REVIEW_CODEX.md.
+  "Review scope: tasks marked [R] in ops/TASKS.md; the review package below holds each of those tasks with its fields (Accept:, Fails when: and the rest), the changed files and the diff. If scope covers 5+ files, spawn separate agents for logic review, security audit, and test coverage analysis — merge all findings into ops/REVIEW_CODEX.md. Otherwise review sequentially and write to ops/REVIEW_CODEX.md.
 
 ${RPKG}" \
   "$CODEX_OUT" 600 &
