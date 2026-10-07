@@ -127,6 +127,21 @@ _ss_prose() {
   printf '%s' "$1" | LC_ALL=C tr -d '\000-\037\177'
 }
 
+# SS_READ_PY — python: read_regular(path), the bytes of a regular file, opened
+# O_NONBLOCK: a FIFO planted at ops/roster.toml or ops/leases.toml fails at
+# once instead of blocking session start (Phase 3 round 5, G3). The same lines
+# as _READ_REGULAR_PY in scripts/lib/common.sh, inline because this hook also
+# runs without the helper.
+SS_READ_PY='
+def read_regular(p):
+    import os, stat
+    fd = os.open(p, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+    with os.fdopen(fd, "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise OSError("not a regular file: " + p)
+        return f.read()
+'
+
 # _ss_tmp_ok <dir> — 0 when no other user can rename entries in <dir>: it is
 # owned by this user or root, and has no group or other write unless the
 # sticky bit is set — the rule monitors.py, coordinate.sh and the lease root
@@ -139,6 +154,21 @@ _ss_tmp_ok() {
     return 1
   fi
   [ -z "$(find -H "$1" -maxdepth 0 \( -perm -020 -o -perm -002 \) ! -perm -1000 2>/dev/null)" ]
+}
+
+# _ss_claude_private — 0 when the project's .claude can hold the hook's private
+# temp dirs (Phase 3 round 5, G2): a real directory (not a symlink) owned by
+# this user, with no group or other write unless the sticky bit is set, in a
+# project directory that passes _ss_tmp_ok. Then no other user can rename the
+# temp dir, or .claude itself, and plant links for the hook's redirects to
+# follow. The hook still reaches the temp dir by its path afterwards (bash has
+# no openat), so a process of this same user could swap it in between: a
+# same-user residual, like every other path this user's own processes can
+# change.
+_ss_claude_private() {
+  [ -d "${SS_ANCHOR}/.claude" ] && [ ! -L "${SS_ANCHOR}/.claude" ] && [ -O "${SS_ANCHOR}/.claude" ] || return 1
+  [ -z "$(find "${SS_ANCHOR}/.claude" -maxdepth 0 \( -perm -020 -o -perm -002 \) ! -perm -1000 2>/dev/null)" ] || return 1
+  _ss_tmp_ok "$SS_ANCHOR"
 }
 
 # Clean stale state files from previous sessions (the context monitor keeps
@@ -273,7 +303,16 @@ if [ -n "$SS_HELPER" ] && [ -z "$SS_AT_HOME" ] && [ "${#DETECTED_OPTIONAL[@]}" -
     [ "$ENROLL_HAS_RC" -eq 0 ] && continue   # already enrolled or declined — never re-ask (AE6)
     [ "$ENROLL_HAS_RC" -eq 2 ] && continue   # roster unparseable — leave it to resolve_role to surface loudly
     if [ "$INTERACTIVE_SIGNAL" = "no" ]; then
-      roster_enroll_member "$CLI_NAME" headless >/dev/null 2>&1 || true
+      # A refused or failed write (rc 6: ops/ or the roster is a symlink or not
+      # a regular file; rc 45: this shell may not write the roster) gets one
+      # standing line naming the refusal, its first line sanitized (G6); rc 30
+      # is OpenCode V2, which is never enrolled and says so in at-setup.
+      ENROLL_RC=0
+      ENROLL_ERR=$(roster_enroll_member "$CLI_NAME" headless 2>&1 >/dev/null) || ENROLL_RC=$?
+      if [ "$ENROLL_RC" -ne 0 ] && [ "$ENROLL_RC" -ne 30 ]; then
+        ENROLL_ERR=$(printf '%s\n' "$ENROLL_ERR" | grep -v '^[[:space:]]*$' | head -1 | cut -c1-300 || true)
+        ENROLLMENT_NOTICES="${ENROLLMENT_NOTICES}${SS_NL}$(_ss_prose "WARNING: ${CLI_NAME} was detected but not enrolled (rc ${ENROLL_RC}): ${ENROLL_ERR:-no reason given}")"
+      fi
     else
       ENROLL_DEF=$(roster_member_default "$CLI_NAME" 2>/dev/null || true)
       ENROLLMENT_NOTICES="${ENROLLMENT_NOTICES}${SS_NL}$(_ss_prose "New optional CLI detected: ${CLI_NAME} (unenrolled). Run /at-setup to enroll, or it enrolls with its shipped default (${ENROLL_DEF}) on first headless use.")"
@@ -288,6 +327,7 @@ ENROLLED_COUNT=0
 if [ -f "ops/roster.toml" ]; then
   ENROLLED_COUNT=$(python3 -c "
 import sys
+${SS_READ_PY}
 try:
     import tomllib
 except ImportError:
@@ -296,8 +336,7 @@ except ImportError:
     except ImportError:
         print(0); sys.exit(0)
 try:
-    with open('ops/roster.toml', 'rb') as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular('ops/roster.toml').decode('utf-8'))
     members = data.get('members', {})
     print(sum(1 for v in members.values() if isinstance(v, dict)) if isinstance(members, dict) else 0)
 except Exception:
@@ -322,7 +361,7 @@ case "$ENROLLED_COUNT" in ''|*[!0-9]*) ENROLLED_COUNT=0 ;; esac   # a count, not
 # the helper.
 ROSTER_DRIFT_NOTICES=""
 if [ -n "$SS_HELPER" ] && [ -f "ops/roster.toml" ]; then
-  ROSTER_DRIFT_NOTICES=$(TRIFORGE_CLIS_PY="${_TRIFORGE_CLIS_PY:-}" TRIFORGE_ROLE_DEFAULTS_PY="${_ROLE_DEFAULTS_PY:-}" python3 -c '
+  ROSTER_DRIFT_NOTICES=$(TRIFORGE_CLIS_PY="${_TRIFORGE_CLIS_PY:-}" TRIFORGE_ROLE_DEFAULTS_PY="${_ROLE_DEFAULTS_PY:-}" python3 -c "$SS_READ_PY"'
 import os, re, sys
 try:
     import tomllib
@@ -347,8 +386,7 @@ def norm(cli, model):
 def one(value):
     return re.sub(r"[\x00-\x1f\x7f]", "", str(value))[:200]
 try:
-    with open("ops/roster.toml", "rb") as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular("ops/roster.toml").decode("utf-8"))
     lines = []
     members = data.get("members", {})
     if isinstance(members, dict):
@@ -419,24 +457,23 @@ SS_XYZ_EOF
   echo $(( 10#$A * 1000000000000 + 10#$B * 1000000 + 10#$C ))
 }
 
-# _ss_bounded <seconds> <command…> — the command's stdout, the command given
-# up on after <seconds>: under the timeout binary when there is one, and on a
-# host without one (stock macOS) under a watchdog — the command runs in the
-# background, a second background subshell kills it when the time is up, and
-# the watchdog is killed as soon as the command returns. The answer travels
-# through a temp file and the watchdog's stdio is /dev/null, so nothing a
-# killed command leaves running holds the caller's command substitution open;
-# each `wait` swallows bash's "Terminated" line.
+# _ss_bounded <seconds> <dir> <command…> — the command's stdout, the command
+# given up on after <seconds>: under the timeout binary when there is one, and
+# on a host without one (stock macOS) under a watchdog — the command runs in
+# the background, a second background subshell kills it when the time is up,
+# and the watchdog is killed as soon as the command returns. The answer
+# travels through a file in <dir>, a private temp dir the caller made
+# (_ss_private_tmp: never one other users can rename entries in, B5, G2) and
+# this removes; the watchdog's stdio is /dev/null, so nothing a killed command
+# leaves running holds the caller's command substitution open; each `wait`
+# swallows bash's "Terminated" line.
 _ss_bounded() {
-  local SECS="$1" OUT OUT_DIR CMD_PID DOG_PID
-  shift
+  local SECS="$1" OUT_DIR="$2" OUT CMD_PID DOG_PID
+  shift 2
   if [ -n "$TIMEOUT_BIN" ]; then
     "$TIMEOUT_BIN" "${SECS}s" "$@" 2>/dev/null || true
     return 0
   fi
-  # a file in a private temp dir (_ss_private_tmp: never in a TMPDIR other
-  # users can rename entries in, B5)
-  OUT_DIR=$(_ss_private_tmp) || return 0
   OUT="${OUT_DIR}/out"
   "$@" </dev/null >"$OUT" 2>/dev/null &
   CMD_PID=$!
@@ -453,7 +490,15 @@ _ss_bounded() {
 # `claude` must not stall session start. A missing `claude`, one that does not
 # answer in time, or an answer with no X.Y.Z in it warns about nothing.
 if command -v claude >/dev/null 2>&1; then
-  SS_CLAUDE_XYZ=$(_ss_xyz "$(_ss_bounded 10 claude --version | head -1 || true)")
+  SS_CLAUDE_XYZ=""
+  SS_BOUND_DIR=""
+  if [ -n "$TIMEOUT_BIN" ] || SS_BOUND_DIR=$(_ss_private_tmp); then
+    SS_CLAUDE_XYZ=$(_ss_xyz "$(_ss_bounded 10 "$SS_BOUND_DIR" claude --version | head -1 || true)")
+  else
+    # no timeout binary and no private temp dir for the watchdog's answer
+    # (G2): the check is skipped, and the line says why
+    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}$(_ss_prose "WARNING: the Claude Code version check was skipped (${SS_BOUND_DIR}).")"
+  fi
   if [ -n "$SS_CLAUDE_XYZ" ] && [ "$(_ss_xyz_key "$SS_CLAUDE_XYZ")" -lt "$(_ss_xyz_key "$CLAUDE_FLOOR")" ]; then
     INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}WARNING: Claude Code ${SS_CLAUDE_XYZ} is below Triforge's floor ${CLAUDE_FLOOR}, the first build that reads AGENTS.md — Triforge's only instruction file, which older builds do not read. Update Claude Code (\`claude update\`)."
   fi
@@ -764,6 +809,7 @@ ACTIVE_LEASES=0
 if [ -f "ops/leases.toml" ]; then
   ACTIVE_LEASES=$(python3 -c "
 import sys
+${SS_READ_PY}
 try:
     import tomllib
 except ImportError:
@@ -773,8 +819,7 @@ except ImportError:
         print(0)
         sys.exit(0)
 try:
-    with open('ops/leases.toml', 'rb') as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular('ops/leases.toml').decode('utf-8'))
     leases = data.get('lease', {})
     active = ('building', 'leased', 'orphaned')
     print(sum(1 for v in (leases.values() if isinstance(leases, dict) else [])
@@ -809,20 +854,26 @@ exit 0
 # _ss_private_tmp — print a private temp dir (mktemp -d: a random name, mode
 # 0700) under TMPDIR when no other user can rename entries in it (_ss_tmp_ok,
 # B5), else under the project's own .claude (at the anchor, wherever the hook
-# stands), which is created here only as a real directory (a linked .claude is
-# never used). On failure, a nonzero rc and mktemp's error, if it got that far.
+# stands) when no other user can rename entries there either
+# (_ss_claude_private, G2); .claude is created here, without group or other
+# write, when it is missing. On failure, a nonzero rc and one line saying why (or
+# mktemp's error): the caller skips the step that needed the temp dir and
+# shows that line in its notice.
 _ss_private_tmp() {
   local T="${TMPDIR:-/tmp}"
   if _ss_tmp_ok "$T" && mktemp -d "${T}/triforge-session-start.XXXXXX" 2>/dev/null; then
     return 0
   fi
   if [ -n "$SS_AT_HOME" ]; then
+    echo "no private temp dir: TMPDIR ${T} is shared, and a home directory's .claude is never used"
     return 1   # never under a home directory's .claude (R1)
   fi
   if [ ! -e "${SS_ANCHOR}/.claude" ] && [ ! -L "${SS_ANCHOR}/.claude" ]; then
-    mkdir "${SS_ANCHOR}/.claude" 2>/dev/null || return
+    # the user's umask, with group and other write taken off it
+    ( umask "$(printf '%04o' $(( 8#$(umask) | 8#022 )))" && mkdir "${SS_ANCHOR}/.claude" ) 2>/dev/null || true
   fi
-  if [ ! -d "${SS_ANCHOR}/.claude" ] || [ -L "${SS_ANCHOR}/.claude" ]; then
+  if ! _ss_claude_private; then
+    echo "no private temp dir: TMPDIR ${T} is shared (another user could rename entries in it), and so is ${SS_ANCHOR}/.claude or the project directory (a symlink, another user's, or group or other writable without the sticky bit)"
     return 1
   fi
   mktemp -d "${SS_ANCHOR}/.claude/triforge-session-start.XXXXXX" 2>&1
@@ -871,10 +922,13 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/invok
     fi
     SS_HELPER_ERR=$(head -1 "${SS_HELPER_TMP}/err" 2>/dev/null | cut -c1-160 || true)
     rm -rf "$SS_HELPER_TMP"
+    SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh exited ${SS_HELPER_RC}: ${SS_HELPER_ERR}) — the project bootstrap, optional-CLI detection, enrollment and the roster pin check were skipped this session. Reinstall the plugin: claude plugin install agent-triforge@agent-triforge"
   else
-    SS_HELPER_ERR=$(printf '%s' "$SS_HELPER_TMP" | head -1 | cut -c1-160)
+    # No private temp dir for the loader's output (G2): the helper is not
+    # sourced at all, and the notice names the cause and its fix.
+    SS_HELPER_ERR=$(printf '%s' "$SS_HELPER_TMP" | head -1 | cut -c1-400)
+    SS_HELPER_NOTICE="WARNING: the Triforge helper was not loaded (${SS_HELPER_ERR}) — the project bootstrap, optional-CLI detection, enrollment and the roster pin check were skipped this session. Set TMPDIR to a directory only you can write to, or remove group and other write from .claude, then start a new session."
   fi
-  SS_HELPER_NOTICE="WARNING: the Triforge helper did not load (${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh exited ${SS_HELPER_RC}: ${SS_HELPER_ERR}) — the project bootstrap, optional-CLI detection, enrollment and the roster pin check were skipped this session. Reinstall the plugin: claude plugin install agent-triforge@agent-triforge"
 else
   # No loader to source: the plugin host did not export CLAUDE_PLUGIN_ROOT, or
   # it names a tree without scripts/invoke-external.sh. Same standing WARNING,

@@ -74,7 +74,9 @@ fi
 # .git). Lease root: TRIFORGE_LEASE_ROOT, else
 # ${TMPDIR:-/tmp}/triforge-leases/<repo-basename>-<git-blob-hash-of-root-path>
 # (the same 12 hex chars `git hash-object --stdin` gave before 3.3.3, so open
-# 3.3.x leases keep their root). Every stored worktree path is canonical from
+# 3.3.x leases keep their root); that last name is _LEASE_DERIVED, set with a
+# TRIFORGE_LEASE_ROOT too, since it names this checkout under any TMPDIR
+# (_lead_lease_evidence). Every stored worktree path is canonical from
 # birth, which is what lets lease_reclaim compare stored vs canonical. The
 # root, its lead/ dir and (derived) triforge-leases/ must be this user's
 # directories (group and other write are taken away), and a derived root
@@ -126,19 +128,19 @@ if os.path.isfile(os.path.join(gitdir, "commondir")):
     common = os.path.join(gitdir, open(os.path.join(gitdir, "commondir"), encoding="utf-8").read().strip())
 root = os.environ.get("LC_ROOT", "")
 mine = []
+b = repo.encode("utf-8", "surrogateescape")
+derived = os.path.basename(repo) + "-" + hashlib.sha1(b"blob " + str(len(b)).encode() + b"\0" + b).hexdigest()[:12]
 if not root:
     tmp = os.environ.get("LC_TMP") or "/tmp"
     if shared(tmp):
         print("TMPDIR " + tmp + " lets another user rename entries in it (group or other write without the sticky bit, or another user owns it)")
         sys.exit(3)
-    b = repo.encode("utf-8", "surrogateescape")
-    h = hashlib.sha1(b"blob " + str(len(b)).encode() + b"\0" + b).hexdigest()[:12]
-    root = os.path.join(tmp, "triforge-leases", os.path.basename(repo) + "-" + h)
+    root = os.path.join(tmp, "triforge-leases", derived)
     mine.append(os.path.dirname(root))
 os.makedirs(os.path.join(root, "lead"), exist_ok=True)
 for p in mine + [root, os.path.join(root, "lead")]:
     private(os.path.realpath(p))
-for p in (repo, os.path.realpath(gitdir), os.path.realpath(common), os.path.realpath(root)):
+for p in (repo, os.path.realpath(gitdir), os.path.realpath(common), os.path.realpath(root), derived):
     print(p)
 ' 2>/dev/null) || RC=$?
   if [ "$RC" -eq 3 ]; then
@@ -153,6 +155,7 @@ for p in (repo, os.path.realpath(gitdir), os.path.realpath(common), os.path.real
   _LEASE_GITDIR=$(printf '%s\n' "$OUT" | sed -n 2p)
   _LEASE_COMMON=$(printf '%s\n' "$OUT" | sed -n 3p)
   _LEASE_ROOT=$(printf '%s\n' "$OUT" | sed -n 4p)
+  _LEASE_DERIVED=$(printf '%s\n' "$OUT" | sed -n 5p)
   _LEASE_STATE="${_LEASE_ROOT}/lead"
   _LEASE_LEDGER="${_LEASE_REPO}/ops/leases.toml"
   _LEAD_CFG="${_LEASE_STATE}/gitconfig"
@@ -180,8 +183,11 @@ for p in (repo, os.path.realpath(gitdir), os.path.realpath(common), os.path.real
 # _LEAD_GITCONFIG_SIGNATURE (scripts/lib/common.sh), which is how
 # _is_lease_root recognizes a lease root (KTD9): keep it.
 _lead_gitconfig_capture() {
-  local DEST=$1 TMP="${1}.tmp.$$" SCOPE K V LIST
+  local DEST=$1 TMP SCOPE K V LIST
   mkdir -p "$(dirname "$DEST")" || return 1
+  # an unpredictable temp name beside it (mktemp: created exclusively), never
+  # one a link or FIFO could be planted at (Phase 3 round 5, G3)
+  TMP=$(mktemp "${DEST}.XXXXXX") || return 1
   printf '%s (KTD18) — captured from your system/global git config on\n# first use. The lead-side git calls in scripts/lib/lease.sh read ONLY this file as global\n# config. The integrity check digests it: to re-capture, delete it and run lease_rebaseline.\n' "$_LEAD_GITCONFIG_SIGNATURE" > "$TMP" || return 1
   for SCOPE in --system --global; do
     LIST=$(env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT -u GIT_DIR -u GIT_WORK_TREE \
@@ -390,7 +396,8 @@ _ledger_write() {
   done
   printf '%s\n' "$$" > "${LOCK}/pid" 2>/dev/null || true
   LEDGER_FILE="$LEDGER" LEDGER_TASK="$TASK_ID" LEDGER_STATE="$_LEASE_STATE" LEDGER_ROOT="$_LEASE_ROOT" python3 -c "
-import hashlib, json, os, shutil, sys, time
+import hashlib, json, os, secrets, sys, time
+${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -405,17 +412,26 @@ task = os.environ['LEDGER_TASK']
 state = os.environ['LEDGER_STATE']
 digest_file = os.path.join(state, 'ledger.sha256')
 copy_file = os.path.join(state, 'ledger.copy')
+# Every read here is read_regular's (Phase 3 round 5, G3): a FIFO planted at
+# the ledger, its copy or its digest no longer blocks every lead helper and
+# the coordinator here; it reads as a change (a ledger that is not a regular
+# file has no digest equal to the recorded one), so it is restored from the
+# lead copy and alerted like any other edit made outside the lead writes.
 def _sha(p):
     try:
         if os.path.islink(p):
             return 'link:' + os.readlink(p)
-        with open(p, 'rb') as f:
-            return hashlib.sha256(f.read()).hexdigest()
-    except OSError:
+        return hashlib.sha256(read_regular(p)).hexdigest()
+    except FileNotFoundError:
         return 'absent'
+    except OSError as exc:
+        return 'unreadable:' + type(exc).__name__
 recorded = ''
 if os.path.isfile(digest_file):
-    recorded = open(digest_file).read().strip()
+    try:
+        recorded = read_regular(digest_file, True).strip()
+    except OSError:
+        recorded = 'unreadable'
 source, alert = path, ''
 stamp = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 if recorded and _sha(path) != recorded:
@@ -432,8 +448,7 @@ elif not recorded and os.path.isfile(copy_file):
     alert = stamp + ' the ledger digest ' + digest_file + ' is missing while the lead copy exists: an integrity anchor was deleted, and ops/leases.toml was adopted UNVERIFIED (compare it with ' + copy_file + ')'
 data = {}
 if os.path.isfile(source):
-    with open(source, 'rb') as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular(source).decode('utf-8'))
 # The integrity check's no-op @baseline call on a ledger that matches the lead's
 # last write and its copy, with a [baseline] in place: nothing to restore or
 # record, so nothing is rewritten (a write would only stamp [baseline].updated,
@@ -502,14 +517,28 @@ for t in sorted(leases):
     lines.append('[lease.' + json.dumps(str(t)) + ']')
     emit(r)
 
-tmp = path + '.tmp.' + str(os.getpid())
-with open(tmp, 'w') as f:
-    f.write('\n'.join(lines))
+# write_new <final> <bytes> — a new file beside <final>, under an unpredictable
+# name created O_EXCL|O_NOFOLLOW, for the caller to rename over <final>: a
+# FIFO or a link planted at a predictable temp name beside the ledger, its
+# copy or its digest can neither block this write nor redirect it (Phase 3
+# round 5, G3).
+def write_new(final, data):
+    d, base = os.path.split(final)
+    for _ in range(8):
+        tmp = os.path.join(d, '.' + base + '.triforge-tmp-' + secrets.token_hex(8))
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o666)
+        except FileExistsError:
+            continue
+        with os.fdopen(fd, 'wb') as f:
+            f.write(data)
+        return tmp
+    raise OSError('no free temporary name beside ' + final)
+tmp = write_new(path, '\n'.join(lines).encode('utf-8'))
 # The ledger MUST stay tomllib-parseable after every transition: verify the
 # tmp file round-trips BEFORE it replaces the live ledger.
 try:
-    with open(tmp, 'rb') as f:
-        tomllib.load(f)
+    tomllib.loads(read_regular(tmp).decode('utf-8'))
 except Exception as exc:
     os.unlink(tmp)
     sys.stderr.write('_ledger_update: ERROR serialized ledger failed round-trip parse: ' + str(exc) + '\n')
@@ -517,11 +546,8 @@ except Exception as exc:
 os.replace(tmp, path)
 # The lead's own write is the new baseline for the ledger itself.
 os.makedirs(state, exist_ok=True)
-shutil.copyfile(path, copy_file + '.tmp')
-os.replace(copy_file + '.tmp', copy_file)
-with open(digest_file + '.tmp', 'w') as f:
-    f.write(_sha(path) + '\n')
-os.replace(digest_file + '.tmp', digest_file)
+os.replace(write_new(copy_file, read_regular(path)), copy_file)
+os.replace(write_new(digest_file, (_sha(path) + '\n').encode('utf-8')), digest_file)
 if alert:
     sys.stderr.write('_ledger_update: WARNING ' + alert + '\n')
 " "$@"
@@ -539,6 +565,7 @@ _ledger_get() {
   [ -f "$LEDGER" ] || return 1
   LEDGER_FILE="$LEDGER" LEDGER_TASK="$1" LEDGER_KEY="$2" python3 -c "
 import os, sys
+${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -546,8 +573,7 @@ except ImportError:
         import tomli as tomllib
     except ImportError:
         sys.exit(1)
-with open(os.environ['LEDGER_FILE'], 'rb') as f:
-    data = tomllib.load(f)
+data = tomllib.loads(read_regular(os.environ['LEDGER_FILE']).decode('utf-8'))
 task = os.environ['LEDGER_TASK']
 row = data.get('baseline') if task == '@baseline' else data.get('lease', {}).get(task)
 if not isinstance(row, dict):
@@ -569,6 +595,7 @@ _ledger_get_row() {
   [ -f "$_LEASE_LEDGER" ] || return 1
   LEDGER_FILE="$_LEASE_LEDGER" LEDGER_TASK="$T" python3 -c "
 import os, sys
+${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -576,8 +603,7 @@ except ImportError:
         import tomli as tomllib
     except ImportError:
         sys.exit(1)
-with open(os.environ['LEDGER_FILE'], 'rb') as f:
-    data = tomllib.load(f)
+data = tomllib.loads(read_regular(os.environ['LEDGER_FILE']).decode('utf-8'))
 task = os.environ['LEDGER_TASK']
 row = data.get('baseline') if task == '@baseline' else data.get('lease', {}).get(task)
 if not isinstance(row, dict):
@@ -635,7 +661,10 @@ print('\n'.join(vals))
 # (last_rebaseline, rebaseline_log) — an audit trail, not prevention.
 _RC_LEASE_INTEGRITY=44
 
-_LEAD_INTEGRITY_PY='
+# Every surface, the ledger and the record are read through read_regular
+# (_READ_REGULAR_PY, common.sh), so a FIFO a worker planted on one fails at
+# once (OSError) instead of blocking the check (Phase 3 round 4, B6).
+_LEAD_INTEGRITY_PY="${_READ_REGULAR_PY}"'
 import hashlib, os, secrets, shutil, stat, sys, time
 try:
     import tomllib
@@ -644,16 +673,6 @@ except ImportError:
 
 def _sha(b):
     return hashlib.sha256(b).hexdigest()
-
-# read_regular <path> — the bytes of a regular file. Opened O_NONBLOCK, so a
-# FIFO a worker planted on a surface fails here (OSError) instead of blocking
-# the check before its type is known (Phase 3 round 4, B6).
-def read_regular(p):
-    fd = os.open(p, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
-    with os.fdopen(fd, "rb") as f:
-        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
-            raise OSError("not a regular file: " + p)
-        return f.read()
 
 def file_digest(p):
     try:
@@ -912,27 +931,60 @@ if mode == "record":
         print(k + "=" + v)
     sys.exit(0)
 
+# mode == "recorded": the root the lease-root record names, or nothing
+# (_lease_at_ledger_root, with no ledger to read it from).
+if mode == "recorded":
+    print(read_record(gitdir))
+    sys.exit(0)
+
 # mode == "evidence": no ledger here — print what says this checkout had leases
-# anyway (B4), one line each: the lease-root record, and lease worktrees git
-# still lists for it (a lease/ branch checked out in a directory named like
-# the lease root of this checkout, or the recorded one). Nothing printed: a fresh
-# checkout.
+# anyway (B4), one line each: the lease-root record, and the lease worktrees
+# git still lists for it. A worktree counts by where it lives, never by its
+# HEAD (a builder detaches or switches its own HEAD in normal work; Phase 3
+# round 5, G1): its parent is a lease root of this checkout, matched by full
+# path (Phase 3 round 5, G4: two checkouts may each use a root named
+# "leases"). The roots: the one of this shell (LI_ROOT), the recorded one, and the
+# derived root of this checkout under any TMPDIR (a triforge-leases/LI_DERIVED
+# dir; LI_DERIVED carries a hash of the checkout path, so under every TMPDIR
+# it names this checkout alone). Nothing printed: a fresh checkout.
 if mode == "evidence":
     found = []
     rec_path = os.path.join(gitdir, RECORD_NAME)
+    rec = read_record(gitdir)
     if os.path.lexists(rec_path):
-        rec = read_record(gitdir)
         found.append("the lease-root record " + rec_path + (" (naming " + rec + ")" if rec else ""))
-    names = set(n for n in (os.path.basename(os.environ.get("LI_ROOT", "")), os.path.basename(read_record(gitdir))) if n)
+    roots = set(os.path.realpath(r) for r in (os.environ.get("LI_ROOT", ""), rec) if r)
+    derived = os.environ.get("LI_DERIVED", "")
+    def lease_root_of(wt):
+        for parent in (os.path.dirname(wt), os.path.dirname(os.path.realpath(wt))):
+            if os.path.realpath(parent) in roots:
+                return parent
+            if derived and os.path.basename(parent) == derived and os.path.basename(os.path.dirname(parent)) == "triforge-leases":
+                return parent
+        return ""
     wts = os.path.join(common, "worktrees")
     for n in (sorted(os.listdir(wts)) if os.path.isdir(wts) else []):
         try:
-            head = read_text(os.path.join(wts, n, "HEAD")).strip()
-            wt = os.path.dirname(read_text(os.path.join(wts, n, "gitdir")).strip())
+            g = read_text(os.path.join(wts, n, "gitdir")).strip()
         except OSError:
             continue
-        if head.startswith("ref: refs/heads/lease/") and os.path.basename(os.path.dirname(wt)) in names:
-            found.append("the lease worktree " + wt + " (" + head[len("ref: refs/heads/"):] + ")")
+        # relative to the admin dir when git writes relative worktree paths
+        # (worktree.useRelativePaths)
+        wt = os.path.dirname(os.path.normpath(os.path.join(wts, n, g)))
+        root = lease_root_of(wt) if g else ""
+        if not root:
+            continue
+        try:
+            head = read_text(os.path.join(wts, n, "HEAD")).strip()
+        except OSError:
+            head = ""
+        if head.startswith("ref: refs/heads/"):
+            head = head[len("ref: refs/heads/"):]
+        elif head:
+            head = "HEAD detached at " + head[:12]
+        else:
+            head = "HEAD unreadable"
+        found.append("the lease worktree " + wt + " (" + head + "), under the lease root " + root)
     for line in found[:6]:
         print("".join(c for c in line if c >= " " and c != "\x7f"))
     sys.exit(0)
@@ -954,8 +1006,7 @@ ledger = os.environ["LI_LEDGER"]
 out = []
 data = {}
 if os.path.isfile(ledger):
-    with open(ledger, "rb") as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular(ledger).decode("utf-8"))
 base = data.get("baseline")
 leases = data.get("lease", {})
 leases = leases if isinstance(leases, dict) else {}
@@ -1064,14 +1115,16 @@ _lead_lease_digests() {
 }
 
 # _lead_lease_evidence <op> — 0 when this checkout shows no lease history
-# beyond its ledger: no lease-root record in its git dir and no lease worktree
-# git lists for it (the "evidence" mode of _LEAD_INTEGRITY_PY). 1 otherwise,
+# beyond its ledger: no lease-root record in its git dir and no worktree git
+# lists under one of its lease roots, whatever that worktree's HEAD names (the
+# "evidence" mode of _LEAD_INTEGRITY_PY). 1 otherwise,
 # after the refusal on stderr, which names the evidence, where the lead's
 # anchors are, and the deliberate reset; and 1 when the evidence can't be read
 # (fail closed). Called with no ledger and no anchors in this lease root.
 _lead_lease_evidence() {
   local OP=${1:-lease} EV="" RC=0 SHOWN=""
-  EV=$(LI_MODE=evidence LI_COMMON="$_LEASE_COMMON" LI_GITDIR="$_LEASE_GITDIR" LI_ROOT="$_LEASE_ROOT" python3 -c "$_LEAD_INTEGRITY_PY" 2>/dev/null) || RC=$?
+  EV=$(LI_MODE=evidence LI_COMMON="$_LEASE_COMMON" LI_GITDIR="$_LEASE_GITDIR" LI_ROOT="$_LEASE_ROOT" LI_DERIVED="${_LEASE_DERIVED:-}" \
+       python3 -c "$_LEAD_INTEGRITY_PY" 2>/dev/null) || RC=$?
   if [ "$RC" -ne 0 ]; then
     echo "${OP}: INTEGRITY CHECK COULD NOT RUN — ${_LEASE_LEDGER} is missing and whether this checkout had leases could not be read; treated as a change (fail closed, KTD18)." >&2
     return 1
@@ -1080,19 +1133,24 @@ _lead_lease_evidence() {
   SHOWN=$(printf '%s\n' "$EV" | sed 's/^/    /')
   echo "${OP}: INTEGRITY — ${_LEASE_LEDGER} is missing, but this checkout has lease history, and this shell's lease root ${_LEASE_ROOT} holds no anchors for it (KTD18; detection, not prevention):" >&2
   printf '%s\n' "$SHOWN" >&2
-  echo "  The ledger was deleted, or this shell resolves another lease root than the lead's (another TMPDIR). Nothing was checked, merged or promoted, and no session starts on it. If the lead's lease root still exists, point this shell at it (export TRIFORGE_LEASE_ROOT=<that root>, named in the record) and rerun: its check restores the ledger from the lead's copy and reports the change. If you removed the ledger on purpose, remove that evidence too (the record, and each lease worktree: git worktree remove --force <path>, then git branch -D lease/<task>), then rerun." >&2
+  echo "  The ledger was deleted, or this shell resolves another lease root than the lead's (another TMPDIR). Nothing was checked, merged or promoted, and no session starts on it. If the lead's lease root still exists, point this shell at it (export TRIFORGE_LEASE_ROOT=<that root>, named above) and rerun: its check restores the ledger from the lead's copy and reports the change. If you removed the ledger on purpose, remove that evidence too (the record, and each lease worktree: git worktree remove --force <path>, then git branch -D lease/<task>), then rerun." >&2
   return 1
 }
 
 # _lead_integrity_check <op> — compare the git state with the lead's baseline.
 # 0 when nothing changed (or no ledger exists yet); _RC_LEASE_INTEGRITY after
 # restoring and escalating (see the section comment). Fails closed: a check
-# that can't run is reported as a change.
+# that can't run is reported as a change. With no ledger, _LEAD_INTEGRITY_WHY
+# says which refusal it was (deleted: the ledger and its digest gone beside
+# the lead's copies; evidence: lease history with no anchors in this root),
+# so a caller can name the recovery that works: lease_rebaseline has no
+# ledger to act on in either case. Empty otherwise.
 _lead_integrity_check() {
   local OP=${1:-lease} LEDGER OUT RC=0 KIND A B C D TAB NL LU_ERR LU_RC=0
   local REPO_DESC="" OPEN="" LEASE_HITS="" ALERT=0 NOBASE=0 SAVED=0 T S ESCALATED=""
   TAB=$(printf '\t'); NL='
 '
+  _LEAD_INTEGRITY_WHY=""
   _lease_ctx || return 1
   LEDGER=$_LEASE_LEDGER
   if [ ! -f "$LEDGER" ] && [ ! -f "${_LEASE_STATE}/ledger.sha256" ]; then
@@ -1102,6 +1160,7 @@ _lead_integrity_check() {
     # is a change, not a first use (fail closed, KTD18).
     if [ -e "${_LEASE_STATE}/ledger.copy" ] || [ -e "${_LEASE_STATE}/config.copy" ] || [ -e "${_LEASE_STATE}/hooks.copy" ]; then
       echo "${OP}: INTEGRITY — ${LEDGER} and its digest are gone, but the lead state dir ${_LEASE_STATE} holds copies saved for earlier leases: the ledger was deleted outside the lead's writes (KTD18; detection, not prevention). Nothing was merged or promoted. Inspect; to recover, copy ${_LEASE_STATE}/ledger.copy back to ${LEDGER} and run lease_rebaseline — or, if you removed the ledger on purpose, remove ${_LEASE_STATE} and ${_LEASE_GITDIR}/triforge-lease-root too." >&2
+      _LEAD_INTEGRITY_WHY=deleted
       return "$_RC_LEASE_INTEGRITY"
     fi
     # Nor does this lease root hold anything, but the checkout may still have
@@ -1110,7 +1169,10 @@ _lead_integrity_check() {
     # the lead's anchors sit under another TMPDIR looks like a fresh checkout
     # from here; that evidence says it is not, so this refuses rather than
     # start over (fail closed). A fresh checkout has none of it.
-    _lead_lease_evidence "$OP" || return "$_RC_LEASE_INTEGRITY"
+    if ! _lead_lease_evidence "$OP"; then
+      _LEAD_INTEGRITY_WHY=evidence
+      return "$_RC_LEASE_INTEGRITY"
+    fi
     return 0
   fi
   # The ledger first, before anything reads a value from it, by its one guarded
@@ -2294,7 +2356,7 @@ _lease_at_ledger_root() {
     # copy; a record that names no valid root is left to
     # _lead_integrity_check, which refuses on it.
     if [ -f "${_LEASE_GITDIR}/triforge-lease-root" ] && [ ! -L "${_LEASE_GITDIR}/triforge-lease-root" ]; then
-      REC=$(grep -v '^#' "${_LEASE_GITDIR}/triforge-lease-root" 2>/dev/null | grep -v '^[[:space:]]*$' | head -1 || true)
+      REC=$(LI_MODE=recorded LI_GITDIR="$_LEASE_GITDIR" python3 -c "$_LEAD_INTEGRITY_PY" 2>/dev/null || true)
     fi
     if [ -n "$REC" ] && [ "$REC" != "$_LEASE_ROOT" ] && _lease_root_valid "$REC"; then
       TRIFORGE_LEASE_ROOT=$REC
@@ -2304,7 +2366,7 @@ _lease_at_ledger_root() {
     return 0
   fi
   TAB=$(printf '\t')
-  REC=$(LR_LEDGER="$_LEASE_LEDGER" python3 -c '
+  REC=$(LR_LEDGER="$_LEASE_LEDGER" python3 -c "$_READ_REGULAR_PY"'
 import os, sys
 try:
     import tomllib
@@ -2315,10 +2377,14 @@ except ImportError:
         sys.stdout.write("\t1")
         sys.exit(0)
 try:
-    with open(os.environ["LR_LEDGER"], "rb") as f:
-        data = tomllib.load(f)
+    raw = read_regular(os.environ["LR_LEDGER"])
+except OSError:
+    sys.stdout.write("\t1")
+    sys.exit(0)
+try:
+    data = tomllib.loads(raw.decode("utf-8"))
 except Exception:
-    sys.stdout.write("\t" + ("1" if os.path.getsize(os.environ["LR_LEDGER"]) else "0"))
+    sys.stdout.write("\t" + ("1" if raw else "0"))
     sys.exit(0)
 rows = data.get("lease")
 b = data.get("baseline")
@@ -2955,7 +3021,7 @@ ATTR_ROW_EOF
 # the reason on stdout when it can't be read (the switch then refuses: fail
 # closed).
 _lease_open_rows() {
-  LO_LEDGER="$1" python3 -c '
+  LO_LEDGER="$1" python3 -c "$_READ_REGULAR_PY"'
 import os, sys
 try:
     import tomllib
@@ -2966,11 +3032,10 @@ except ImportError:
         print("no TOML parser to read the lease ledger")
         sys.exit(1)
 p = os.environ["LO_LEDGER"]
-if not os.path.isfile(p):
+if not os.path.lexists(p):
     sys.exit(0)
 try:
-    with open(p, "rb") as f:
-        leases = tomllib.load(f).get("lease", {})
+    leases = tomllib.loads(read_regular(p).decode("utf-8")).get("lease", {})
 except Exception as exc:
     print(p + " does not parse: " + " ".join(str(exc).split()))
     sys.exit(1)
@@ -3367,15 +3432,17 @@ lease_promote() {
   local REQUIRE_APPROVAL="false"
   # The roster of the lead checkout, whatever the cwd: a relative path would
   # read no roster from a subdirectory and default the gate to off.
-  if [ -f "${_LEASE_REPO}/ops/roster.toml" ]; then
+  if [ -e "${_LEASE_REPO}/ops/roster.toml" ] || [ -L "${_LEASE_REPO}/ops/roster.toml" ]; then
     REQUIRE_APPROVAL=$(ROSTER_FILE="${_LEASE_REPO}/ops/roster.toml" python3 -c "
 import os, sys
+${_READ_REGULAR_PY}
 # Fail CLOSED: an existing roster that cannot be parsed (no TOML library, or a
-# malformed file) must NOT silently disable the approval gate — that would let
+# malformed file) or read as a regular file (a FIFO, a directory, a dangling
+# link) must NOT silently disable the approval gate — that would let
 # an unattended promotion land on the default branch despite a maintainer who
 # configured require_user_approval=true. A misconfigured roster requires human
 # approval. Only an ABSENT roster uses the documented false default, and that
-# case never reaches this block (the enclosing -f test guards it).
+# case never reaches this block (the enclosing existence test guards it).
 try:
     import tomllib
 except ImportError:
@@ -3384,8 +3451,7 @@ except ImportError:
     except ImportError:
         print('true'); sys.exit(0)
 try:
-    with open(os.environ['ROSTER_FILE'], 'rb') as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular(os.environ['ROSTER_FILE']).decode('utf-8'))
 except Exception:
     print('true'); sys.exit(0)
 p = data.get('promotion', {})
@@ -3548,6 +3614,7 @@ lease_status() {
   fi
   LEDGER_FILE="$LEDGER" LS_LEGACY_LEAD="$_LEAD_LEGACY_CLI" python3 -c "
 import os, sys, time
+${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -3557,8 +3624,7 @@ except ImportError:
         sys.stderr.write('lease_status: ERROR no TOML parser available\n')
         sys.exit(1)
 try:
-    with open(os.environ['LEDGER_FILE'], 'rb') as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular(os.environ['LEDGER_FILE']).decode('utf-8'))
 except Exception as exc:
     sys.stderr.write('lease_status: ERROR ledger unparseable: ' + str(exc) + '\n')
     sys.exit(1)

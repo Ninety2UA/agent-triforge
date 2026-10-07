@@ -236,19 +236,22 @@ _tb_files() {
 #            when that left it empty. Both paths are walked with directory
 #            descriptors as above, nothing is created on either, and the
 #            move itself (a hard link, then an unlink; a rename where the
-#            filesystem has no hard links) and the rmdir run relative to the
-#            last descriptors, so a directory on either path swapped for a
+#            filesystem has no hard links; across filesystems, an exclusive
+#            copy, fsynced, then an unlink, G5) and the rmdir run relative to
+#            the last descriptors, so a directory on either path swapped for a
 #            symlink, before or after the check, can't move a file outside
 #            the project (Phase 3 round 4, B3). A <dest> that exists is left
 #            alone (rc 2); a <source> that is not a regular file is refused
-#            (rc 3)
+#            (rc 3); a copy whose source could not be removed after it is
+#            rc 6
 #   mkdir    create the directory <dest> (and the ones above it) the same
 #            way; one already there is fine, anything else there is refused
 #            (rc 3)
 # rc 0 written · 1 an I/O error (a symlink at <dest> in append mode among
 # them) · 2 exists (new, move) · 3 refused: a directory on the path is a
 # symlink or not a directory, or the append or move source is not a regular
-# file · 4 a directory could not be created · 5 refused: hard-linked (append).
+# file · 4 a directory could not be created · 5 refused: hard-linked (append)
+# · 6 copied across filesystems, the source not removed (move).
 # On rc 3 and 4 stdout names the directory (relative to <root>); otherwise
 # nothing is printed, and the caller words the notice.
 _TB_WRITE_PY='
@@ -322,7 +325,46 @@ try:
         except OSError as exc:
             if exc.errno not in (errno.EPERM, errno.ENOTSUP, getattr(errno, "EOPNOTSUPP", errno.ENOTSUP), errno.EXDEV, errno.EMLINK):
                 raise
-            os.rename(sname, name, src_dir_fd=sfds[-1], dst_dir_fd=dfd)
+            try:
+                os.rename(sname, name, src_dir_fd=sfds[-1], dst_dir_fd=dfd)
+            except OSError as exc2:
+                if exc2.errno != errno.EXDEV:
+                    raise
+                # Another filesystem (a mount on either path): neither a link
+                # nor a rename crosses it, so copy, as mv does (Phase 3 round
+                # 5, G5). The source opened O_NOFOLLOW and checked regular
+                # again, the copy created O_EXCL|O_NOFOLLOW, both relative to
+                # the descriptors; written, fsynced, then the source unlinked.
+                # An unlink that fails after the copy leaves both (rc 6).
+                rfd = os.open(sname, os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0), dir_fd=sfds[-1])
+                with os.fdopen(rfd, "rb") as r:
+                    st = os.fstat(r.fileno())
+                    if not stat.S_ISREG(st.st_mode):
+                        refuse(3, os.sep.join(sparts))
+                    data = r.read()
+                try:
+                    wfd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow, stat.S_IMODE(st.st_mode), dir_fd=dfd)
+                except FileExistsError:
+                    sys.exit(2)
+                try:
+                    with os.fdopen(wfd, "wb") as w:
+                        w.write(data)
+                        w.flush()
+                        os.fsync(w.fileno())
+                except OSError:
+                    try:
+                        os.unlink(name, dir_fd=dfd)
+                    except OSError:
+                        pass
+                    raise
+                try:
+                    os.fsync(dfd)   # the new name too, before the old one goes
+                except OSError:
+                    pass
+                try:
+                    os.unlink(sname, dir_fd=sfds[-1])
+                except OSError:
+                    sys.exit(6)
         if len(sparts) > 1:
             try:
                 os.rmdir(sparts[-2], dir_fd=sfds[-2])
@@ -699,8 +741,12 @@ _tb_codex() {
     fi
     return 0
   fi
-  _tb_codex_agents_move
-  _bootstrap_copy "${_TB_ROOT}/codex-agents/agents.toml"     ".codex/triforge-agents.toml"
+  # The shipped default goes in only when no 3.2.0 file is left to move there:
+  # after a move that failed, the user's own file is still the old one, and a
+  # default at the new name would take its place (G5).
+  if _tb_codex_agents_move; then
+    _bootstrap_copy "${_TB_ROOT}/codex-agents/agents.toml"     ".codex/triforge-agents.toml"
+  fi
   _bootstrap_copy "${_TB_ROOT}/templates/.codex/config.toml" ".codex/config.toml"
   # One-time migration (KTD9): a .codex/hooks.json still byte-equal to the 3.x
   # template (_tb_is_3x_codex_hooks) is replaced once by the 4.0 template. An
@@ -724,7 +770,10 @@ _tb_codex() {
 # exist the user resolves it by hand. The move is _tb_write's (move mode):
 # relative to directory descriptors opened without following a link, so a
 # .codex/agents swapped for a link to ~/.codex/agents after the checks below
-# can't move a user-tier file (Phase 3 round 4, B3).
+# can't move a user-tier file (Phase 3 round 4, B3). rc 1 when the old file
+# stays where it was and nothing took its content to the new name (a linked
+# .codex/agents, a refused or failed move): the caller then installs no
+# shipped default there (G5). rc 0 otherwise.
 _tb_codex_agents_move() {
   local RC=0
   [ -f ".codex/agents/agents.toml" ] || return 0
@@ -732,7 +781,7 @@ _tb_codex_agents_move() {
     # moving the file out of a linked .codex/agents would delete it there
     _tb_note "WARNING .codex/agents is a symlink or resolves outside this project, so .codex/agents/agents.toml was not moved to .codex/triforge-agents.toml (Triforge writes only inside the project) — move it by hand if that file is yours."
     _TB_DEGRADED=1
-    return 0
+    return 1
   fi
   if [ -e ".codex/triforge-agents.toml" ] || [ -L ".codex/triforge-agents.toml" ]; then
     _tb_note "both .codex/agents/agents.toml and .codex/triforge-agents.toml exist — merge and remove the old file by hand (Codex warns on .codex/agents/*.toml)."
@@ -741,13 +790,19 @@ _tb_codex_agents_move() {
   _tb_write move . ".codex/triforge-agents.toml" ".codex/agents/agents.toml" < /dev/null > /dev/null || RC=$?
   case "$RC" in
     0) _tb_note "moved .codex/agents/agents.toml to .codex/triforge-agents.toml (Codex sweeps .codex/agents/*.toml as per-agent role files and warned on it; the file content is unchanged)." ;;
-    3)
-      _tb_note "WARNING .codex/agents/agents.toml was not moved to .codex/triforge-agents.toml: .codex or .codex/agents is a symlink or not a directory, or the file is not a regular file (Triforge writes only inside the project) — move it by hand if that file is yours."
+    6)
+      _tb_note "WARNING copied .codex/agents/agents.toml to .codex/triforge-agents.toml (another filesystem), but could not remove the old file — remove it by hand (Codex warns on .codex/agents/*.toml)."
       _TB_DEGRADED=1
       ;;
-    *)
-      _tb_note "WARNING could not move .codex/agents/agents.toml to .codex/triforge-agents.toml — move it by hand (Codex warns on the old location)."
+    3)
+      _tb_note "WARNING .codex/agents/agents.toml was not moved to .codex/triforge-agents.toml: .codex or .codex/agents is a symlink or not a directory, or the file is not a regular file (Triforge writes only inside the project), and the shipped default was not put there in its place — move it by hand if that file is yours."
       _TB_DEGRADED=1
+      return 1
+      ;;
+    *)
+      _tb_note "WARNING could not move .codex/agents/agents.toml to .codex/triforge-agents.toml, and did not put the shipped default there in its place — move it by hand (Codex warns on the old location)."
+      _TB_DEGRADED=1
+      return 1
       ;;
   esac
   return 0

@@ -438,7 +438,11 @@ TRIO_ROWS_EOF
 # that leaves out model gets its CLI's registry model; one that leaves out
 # effort gets LEAD_DEFAULT_EFFORT (Codex runs at xhigh, D-021; a Claude lead
 # keeps the session default, "").
-_LEAD_PY='
+# lead_roster reads the roster through read_regular (_READ_REGULAR_PY,
+# common.sh): a roster path that is there but not a regular file (a FIFO, a
+# directory, a dangling link) is refused like a malformed roster (rc 4),
+# promptly, never read as "no roster" (Phase 3 round 5, G3).
+_LEAD_PY="${_READ_REGULAR_PY}"'
 LEAD_DEFAULT_CLI = "claude"
 LEAD_DEFAULT_EFFORT = {"codex": "xhigh"}
 LEAD_EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -459,11 +463,15 @@ def lead_toml(who):
     return tomllib
 
 def lead_roster(tomllib, path, who):
-    if not os.path.isfile(path):
+    if not os.path.lexists(path):
         return {}
     try:
-        with open(path, "rb") as f:
-            return tomllib.load(f)
+        raw = read_regular(path)
+    except OSError as exc:
+        sys.stderr.write(who + ": ERROR cannot read " + path + " as a regular file (" + str(exc) + ")\n")
+        sys.exit(4)
+    try:
+        return tomllib.loads(raw.decode("utf-8"))
     except tomllib.TOMLDecodeError as exc:
         sys.stderr.write(who + ": ERROR malformed " + path + ": " + str(exc) + "\n")
         sys.exit(4)
@@ -690,11 +698,15 @@ _lead_resolve() {
 
 # _lead_roster_sig <roster> — the roster's cksum, "absent" when there is no
 # roster, nothing when one exists but can't be read (_lead_resolve then keeps
-# nothing).
+# nothing, and the reader refuses it). cksum reads only a regular file: a FIFO
+# planted there would block the redirect, and with it every hook and helper
+# that resolves the lead (Phase 3 round 5, G3). bash can't open a file
+# O_NONBLOCK, so a same-user process that swaps the file for a FIFO between
+# the test and the redirect can still stall it: a residual, documented.
 _lead_roster_sig() {
-  if [ -e "$1" ] || [ -L "$1" ]; then
+  if [ -f "$1" ]; then
     cksum 2>/dev/null < "$1" || true
-  else
+  elif [ ! -e "$1" ] && [ ! -L "$1" ]; then
     echo absent
   fi
 }
@@ -1195,8 +1207,7 @@ if effort == '__default__':
 
 raw = ''
 if os.path.isfile(path):
-    with open(path, 'r') as f:
-        raw = f.read()
+    raw = read_regular(path, True)
     try:
         tomllib.loads(raw)
     except tomllib.TOMLDecodeError as exc:
@@ -1325,6 +1336,7 @@ import os, sys, re
 ${_CURSOR_ID_PY}
 ${_TRIFORGE_CLIS_PY}
 ${_ROLE_DEFAULTS_PY}
+${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -1346,8 +1358,7 @@ roster = {}
 user = {}
 if os.path.isfile(path):
     try:
-        with open(path, 'rb') as f:
-            roster = tomllib.load(f)
+        roster = tomllib.loads(read_regular(path).decode('utf-8'))
     except tomllib.TOMLDecodeError as exc:
         sys.stderr.write('roster_role_entry: ERROR malformed ' + path + ': ' + str(exc) + '\n')
         sys.exit(4)
@@ -1469,8 +1480,7 @@ if effort not in LEAD_EFFORTS:
 raw = ''
 roster = {}
 if os.path.isfile(path):
-    with open(path, 'r') as f:
-        raw = f.read()
+    raw = read_regular(path, True)
     try:
         roster = tomllib.loads(raw)
     except tomllib.TOMLDecodeError as exc:
@@ -1587,6 +1597,7 @@ roster_has_member() {
   [ -f "ops/roster.toml" ] || return 1
   ROSTER_FILE="ops/roster.toml" RH_CLI="$CLI" python3 -c "
 import os, sys
+${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -1595,8 +1606,7 @@ except ImportError:
     except ImportError:
         sys.exit(2)
 try:
-    with open(os.environ['ROSTER_FILE'], 'rb') as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular(os.environ['ROSTER_FILE']).decode('utf-8'))
 except Exception:
     sys.exit(2)
 m = data.get('members', {})
@@ -1611,6 +1621,7 @@ _roster_member_field() {
   [ -f "ops/roster.toml" ] || return 1
   ROSTER_FILE="ops/roster.toml" RF_CLI="$CLI" RF_FIELD="$FIELD" python3 -c "
 import os, sys
+${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -1619,8 +1630,7 @@ except ImportError:
     except ImportError:
         sys.exit(1)
 try:
-    with open(os.environ['ROSTER_FILE'], 'rb') as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular(os.environ['ROSTER_FILE']).decode('utf-8'))
 except Exception:
     sys.exit(1)
 m = data.get('members', {}).get(os.environ['RF_CLI'], {})
@@ -1650,6 +1660,7 @@ roster_write_member() {
 import json, os, re, sys
 ${_TRIFORGE_CLIS_PY}
 ${_ROSTER_SPLICE_PY}
+${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -1685,8 +1696,7 @@ block = ('[members.' + cli + ']\n'
 
 raw = ''
 if os.path.isfile(path):
-    with open(path, 'r') as f:
-        raw = f.read()
+    raw = read_regular(path, True)
 # The whole old table goes, its trailing comment lines included.
 new_raw = splice_table(raw, r'^\[members\.' + re.escape(cli) + r'\][ \t]*$', block, False)
 

@@ -189,10 +189,22 @@ rm -rf "$_S1_DIR"
 #             still lists), nothing adopted under B; the record removed as
 #             well -> the worktree alone refuses; ledgerfresh: a fresh repo
 #             under B -> the session runs
+#   ledgerdetach (round 5, G1) the ledger and the record deleted and the
+#             lease worktree's HEAD detached, coordinate.sh under another
+#             TMPDIR -> rc 44 on the worktree (by its lease root, whatever
+#             its HEAD), nothing run, the advice naming the cause; the same
+#             with its gitdir written relative to the admin dir; with
+#             TRIFORGE_LEASE_ROOT at that root -> rc 44, ledger and
+#             .git/config restored
+#   ledgersib (round 5, G4) two checkouts of one repository whose custom
+#             lease roots share the basename "leases": a lease in one is no
+#             evidence against the other, which runs; the first, its ledger,
+#             record and anchors gone, still refuses on its own worktree
 #   sharedtmp (round 4, B5) a 0777 TMPDIR without the sticky bit ->
 #             coordinate.sh rc 1 before any session, no run directory made
-#             there, and lease_create refuses to derive a lease root in it;
-#             with the sticky bit -> the session runs
+#             there (a logging mktemp first on PATH says so; the sticky run
+#             logs one, round 5, G7 D), and lease_create refuses to derive a
+#             lease root in it; with the sticky bit -> the session runs
 #   noshell   the SELF seam unset, no TTY, no host markers (nohup, cron, CI):
 #             with a lease in the ledger and with none -> rc 45 naming the
 #             fix (a terminal or the lead's own shell), never 44, nothing run
@@ -251,12 +263,12 @@ _s2_repo() { # _s2_repo <case> [roster text, %b escapes] — a repo on sprint/s2
 }
 # _s2_lead <case> <cmd...> — <cmd> with the lease library loaded, in the
 # case's repo as the claude lead through the SELF seam (builder done.fb), no
-# TTY and no host markers, TRIFORGE_LEASE_ROOT=$_S2/<case>.leases. S2_TMP and
-# S2_NO_ROOT=1 as for _s2_run below.
+# TTY and no host markers, TRIFORGE_LEASE_ROOT=$_S2/<case>.leases. S2_TMP,
+# S2_ROOT and S2_NO_ROOT=1 as for _s2_run below.
 _s2_lead() {
   local C=$1
   shift
-  ( cd "$_S2/$C" && export HOME="$_S2/home" TMPDIR="${S2_TMP:-$_S2/tmp}" GIT_CONFIG_NOSYSTEM=1 TRIFORGE_LEASE_ROOT="$_S2/$C.leases" \
+  ( cd "$_S2/$C" && export HOME="$_S2/home" TMPDIR="${S2_TMP:-$_S2/tmp}" GIT_CONFIG_NOSYSTEM=1 TRIFORGE_LEASE_ROOT="${S2_ROOT:-$_S2/$C.leases}" \
         PATH="${_SELF_STUBS}:$PATH" TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S2/done.fb" \
       && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID CLAUDE_PLUGIN_ROOT \
       && if [ -n "${S2_NO_ROOT:-}" ]; then unset TRIFORGE_LEASE_ROOT; fi \
@@ -272,15 +284,16 @@ _s2_tree() {
 # _s2_run <case> <stub mode> <seam lead> <coordinate.sh arguments...> — run it
 # from the case's repo, no TTY, no host markers; prints its output, then
 # "rc=<n>" and "runs=<stub invocations>"; the stub log is <case>.stub.
-# S2_TMP sets its TMPDIR; S2_NO_ROOT=1 leaves TRIFORGE_LEASE_ROOT unset, so the
-# lease root is derived from that TMPDIR; S2_NO_SEAM=1 unsets the SELF seam
+# S2_TMP sets its TMPDIR; S2_ROOT sets TRIFORGE_LEASE_ROOT (default
+# $_S2/<case>.leases); S2_NO_ROOT=1 leaves it unset, so the lease root is
+# derived from that TMPDIR; S2_NO_SEAM=1 unsets the SELF seam
 # (TRIFORGE_TEST_LEAD, TRIFORGE_TEST_BUILDER), as for a person's nohup run;
 # S2_PATH goes first on PATH.
 _s2_run() {
   local C=$1 M=$2 L=$3 R=0
   shift 3
   : > "$_S2/$C.stub"
-  ( cd "$_S2/$C" && export HOME="$_S2/home" TMPDIR="${S2_TMP:-$_S2/tmp}" GIT_CONFIG_NOSYSTEM=1 TRIFORGE_LEASE_ROOT="$_S2/$C.leases" \
+  ( cd "$_S2/$C" && export HOME="$_S2/home" TMPDIR="${S2_TMP:-$_S2/tmp}" GIT_CONFIG_NOSYSTEM=1 TRIFORGE_LEASE_ROOT="${S2_ROOT:-$_S2/$C.leases}" \
         PATH="$_S2/bin:${_SELF_STUBS}:$PATH" S2_STUB_LOG="$_S2/$C.stub" S2_STUB_MODE="$M" TRIFORGE_TEST_LEAD="$L" \
       && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID NOTIFY_WEBHOOK_URL CLAUDE_PLUGIN_ROOT \
       && if [ -n "${S2_NO_ROOT:-}" ]; then unset TRIFORGE_LEASE_ROOT; fi \
@@ -507,23 +520,86 @@ O=$(S2_TMP="$_S2/gB" S2_NO_ROOT=1 _s2_run ledgerfresh done claude "probe goal" -
 _S2_FAIL="${_S2_FAIL}$(_self_expect ledgerfresh "$O" 'Sprint complete at iteration 1' '^rc=0$' '^runs=1$')"
 unset _S2_LG
 
+# ledgerdetach (round 5, G1): the ledger and the lease-root record deleted and
+# the lease worktree's HEAD detached (all a worker's own git can do), then the
+# coordinator under another TMPDIR: the worktree still counts, by where it
+# lives, so rc 44 naming it and its lease root, nothing run; pointed at that
+# root (the recovery the refusal names), the check restores the ledger and
+# .git/config from the lead's copies
+_s2_repo ledgerdetach
+mkdir -p "$_S2/dA" "$_S2/dB"
+S2_TMP="$_S2/dA" S2_NO_ROOT=1 _s2_lead ledgerdetach lease_create t builder >/dev/null 2>&1 || true
+_S2_LG="$_S2/ledgerdetach/ops/leases.toml"
+_S2_WT=$(ls -d "$_S2"/dA/triforge-leases/*/t 2>/dev/null | head -1)
+O="made:$(grep -c '^builder_cli = "claude"' "$_S2_LG" 2>/dev/null || true):wt=${_S2_WT:+found}"
+rm -f "$_S2_LG" "$_S2/ledgerdetach/.git/triforge-lease-root"
+if [ -n "$_S2_WT" ]; then git -C "$_S2_WT" checkout -q --detach 2>/dev/null || true; fi
+git -C "$_S2/ledgerdetach" config --local probe.planted yes 2>/dev/null || true
+O="$O
+head=$(head -c 4 "$_S2/ledgerdetach/.git/worktrees/t/HEAD" 2>/dev/null || echo none)
+$(S2_TMP="$_S2/dB" S2_NO_ROOT=1 _s2_run ledgerdetach done claude "probe goal" --max 1)"
+_S2_FAIL="${_S2_FAIL}$(_self_expect ledgerdetach "$O" '^made:1:wt=found$' '^head=[0-9a-f]{4}$' \
+  'INTEGRITY .*leases\.toml is missing, but this checkout has lease history' \
+  'the lease worktree .*/dA/triforge-leases/.*/t [(]HEAD detached at [0-9a-f]{12}[)], under the lease root .*/dA/triforge-leases/' \
+  'lease_rebaseline can.t fix this' '^rc=44$' '^runs=0$')"
+# the worktree's gitdir written relative to its admin dir, as git does with
+# worktree.useRelativePaths: still found
+python3 -c 'import os, sys; a = sys.argv[1]; g = open(os.path.join(a, "gitdir")).read().strip(); open(os.path.join(a, "gitdir"), "w").write(os.path.relpath(g, a) + "\n")' "$_S2/ledgerdetach/.git/worktrees/t" 2>/dev/null || true
+O="rel=$(head -c 3 "$_S2/ledgerdetach/.git/worktrees/t/gitdir" 2>/dev/null || echo none)
+$(S2_TMP="$_S2/dB" S2_NO_ROOT=1 _s2_run ledgerdetach done claude "probe goal" --max 1)"
+_S2_FAIL="${_S2_FAIL}$(_self_expect ledgerdetach-rel "$O" '^rel=\.\./$' 'the lease worktree .*/dA/triforge-leases/.*/t [(]HEAD detached' '^rc=44$' '^runs=0$')"
+O=$(S2_TMP="$_S2/dB" S2_ROOT="${_S2_WT%/t}" _s2_run ledgerdetach done claude "probe goal" --max 1)
+O="$O
+ledger=$([ -f "$_S2_LG" ] && echo back || echo gone):planted=$(git -C "$_S2/ledgerdetach" config --local --get probe.planted 2>/dev/null || echo gone)"
+_S2_FAIL="${_S2_FAIL}$(_self_expect ledgerdetach-recover "$O" 'coordinate\.sh: INTEGRITY' '^rc=44$' '^runs=0$' '^ledger=back:planted=gone$')"
+unset _S2_LG _S2_WT
+
+# ledgersib (round 5, G4): two checkouts of one repository, each with a custom
+# lease root named "leases" (sibmain: $_S2/sibx/main/leases, sibrev, a linked
+# worktree of it: $_S2/sibx/review/leases). A lease in sibmain is no evidence
+# against sibrev, which starts its session; sibmain itself, its ledger, record
+# and anchors gone, still refuses on its own lease worktree (matched by the
+# root's full path)
+_s2_repo sibmain
+git -C "$_S2/sibmain" worktree add -q "$_S2/sibrev" -b sibrev >/dev/null 2>&1 || true
+mkdir -p "$_S2/sibx/main" "$_S2/sibx/review"
+S2_ROOT="$_S2/sibx/main/leases" _s2_lead sibmain lease_create t builder >/dev/null 2>&1 || true
+O="made:$(grep -c '^builder_cli = "claude"' "$_S2/sibmain/ops/leases.toml" 2>/dev/null || true)
+$(S2_ROOT="$_S2/sibx/review/leases" _s2_run sibrev done claude "probe goal" --max 1)"
+_S2_FAIL="${_S2_FAIL}$(_self_expect ledgersib "$O" '^made:1$' 'Sprint complete at iteration 1' '^rc=0$' '^runs=1$')"
+if printf '%s\n' "$O" | grep -q 'INTEGRITY\|REFUSED'; then _S2_FAIL="$_S2_FAIL ledgersib(refused-on-the-sibling-lease)"; fi
+rm -rf "$_S2/sibmain/ops/leases.toml" "$_S2/sibmain/.git/triforge-lease-root" "$_S2/sibx/main/leases/lead"
+O=$(S2_ROOT="$_S2/sibx/main/leases" _s2_run sibmain done claude "probe goal" --max 1)
+_S2_FAIL="${_S2_FAIL}$(_self_expect ledgersib-own "$O" 'the lease worktree .*/sibx/main/leases/t [(]lease/t[)]' '^rc=44$' '^runs=0$')"
+
 # sharedtmp (round 4, B5): a TMPDIR another user could rename entries in
 # (0777, no sticky bit): coordinate.sh refuses before any session and makes
 # no run directory there, and the lease helpers refuse to derive a lease root
-# in it; with the sticky bit the session runs
+# in it; with the sticky bit the session runs. Whether a run directory was
+# made is read from a mktemp wrapper first on PATH that logs each call (round
+# 5, G7 D): coordinate.sh's EXIT trap removes the directory itself, so a look
+# at TMPDIR afterwards could not tell; the sticky run is the control that the
+# log sees one
+mkdir -p "$_S2/mkbin"
+printf '#!/bin/sh\n# probe stub (SELF-02): logs each mktemp call, then runs the real one\nprintf "%%s\\n" "$*" >> %s\nexec %s "$@"\n' "'$_S2/mktemp.log'" "'$(command -v mktemp)'" > "$_S2/mkbin/mktemp"
+chmod +x "$_S2/mkbin/mktemp"
 _s2_repo sharedtmp
 mkdir -p "$_S2/tshare"
 chmod 0777 "$_S2/tshare"
-O=$(S2_TMP="$_S2/tshare" _s2_run sharedtmp done claude "probe goal" --max 1)
+: > "$_S2/mktemp.log"
+O=$(S2_TMP="$_S2/tshare" S2_PATH="$_S2/mkbin" _s2_run sharedtmp done claude "probe goal" --max 1)
 O="$O
-made=$(find "$_S2/tshare" -name 'triforge-coordinate.*' 2>/dev/null | wc -l | tr -d ' ')
+made=$(grep -c 'tshare/triforge-coordinate\.' "$_S2/mktemp.log" || true)
 lease:$(S2_TMP="$_S2/tshare" S2_NO_ROOT=1 _s2_lead sharedtmp lease_create t builder 2>&1 >/dev/null | tr '\n' ' ')
 leases=$(find "$_S2/tshare" -name 'triforge-leases' 2>/dev/null | wc -l | tr -d ' ')"
 _S2_FAIL="${_S2_FAIL}$(_self_expect sharedtmp "$O" 'coordinate\.sh: ERROR TMPDIR .*tshare is not a private place' '^rc=1$' '^runs=0$' '^made=0$' \
   '^lease:.*lease: ERROR TMPDIR .*tshare lets another user rename entries' '^leases=0$')"
 chmod 1777 "$_S2/tshare"
-O=$(S2_TMP="$_S2/tshare" _s2_run sharedtmp done claude "probe goal" --max 1)
-_S2_FAIL="${_S2_FAIL}$(_self_expect sharedtmp-sticky "$O" 'Sprint complete at iteration 1' '^rc=0$' '^runs=1$')"
+: > "$_S2/mktemp.log"
+O=$(S2_TMP="$_S2/tshare" S2_PATH="$_S2/mkbin" _s2_run sharedtmp done claude "probe goal" --max 1)
+O="$O
+made=$(grep -c 'tshare/triforge-coordinate\.' "$_S2/mktemp.log" || true)"
+_S2_FAIL="${_S2_FAIL}$(_self_expect sharedtmp-sticky "$O" 'Sprint complete at iteration 1' '^rc=0$' '^runs=1$' '^made=1$')"
 
 # noshell: the lead host check runs before anything else (C6); no seam, no TTY
 _s2_repo noshell
@@ -606,7 +682,7 @@ _S2_FAIL="${_S2_FAIL}$(_self_expect integrity "$O" '^create:rc=0:review$' 'coord
 
 _S2_CAP="coordinate.sh reads the lead's launch_argv, goal_gate, model_argv and effort_argv: /goal + claude --print under Claude Code; the D-047 codex exec line, the [lead] model and effort, a quoted \$agent-triforge:at-ship goal and no /goal under Codex; full access only with --allow-full-access (77); the integrity check before each session (44); a deterministic lead failure stops after one run (69); the lease-resume paragraph"
 if [ -z "$_S2_FAIL" ]; then
-  row "SELF-02" "claude" "$_S2_CAP" "PASS" "resume, drycodex (-m gpt-6-astra -c model_reasoning_effort=xhigh), drypin (the roster's gpt-6-luna/high), dryclaude (no model flags), claudepin (--model sonnet --effort high), nomodel (no -m), teamgoal (flags stay in the quoted goal), nofield (one note, no --effort), fullaccess (17 full-access spellings and a declared line refused, rc 77; the acceptEdits control runs), ledgerroot (a tampered ledger under another TMPDIR: rc 44, restored; its root gone: refused naming TRIFORGE_LEASE_ROOT), ledgergone (the ledger deleted under another TMPDIR: rc 44, restored from the root the lease-root record names; that root gone: refused on the record and the lease worktree, then on the worktree alone; a fresh repo runs), sharedtmp (a 0777 non-sticky TMPDIR: rc 1, no run dir, no lease root; sticky: runs), noshell (no seam, no TTY: rc 45, never 44, with and without a ledger), quota (rc 69, a quota Fix line), tail (a link planted at <run log>.tail never written through), stderr (a stderr line on every python3 call: the lead still resolves), leadwet, noack (rc 77, nothing run), ack (one stub run, D-047 argv + model + effort), auth (rc 69 after one run, the login hint), integrity (rc 44, restored, escalated, no run)" "static"
+  row "SELF-02" "claude" "$_S2_CAP" "PASS" "resume, drycodex (-m gpt-6-astra -c model_reasoning_effort=xhigh), drypin (the roster's gpt-6-luna/high), dryclaude (no model flags), claudepin (--model sonnet --effort high), nomodel (no -m), teamgoal (flags stay in the quoted goal), nofield (one note, no --effort), fullaccess (17 full-access spellings and a declared line refused, rc 77; the acceptEdits control runs), ledgerroot (a tampered ledger under another TMPDIR: rc 44, restored; its root gone: refused naming TRIFORGE_LEASE_ROOT), ledgergone (the ledger deleted under another TMPDIR: rc 44, restored from the root the lease-root record names; that root gone: refused on the record and the lease worktree, then on the worktree alone; a fresh repo runs), ledgerdetach (ledger and record deleted, the lease worktree detached: rc 44 on the worktree; at its root: restored), ledgersib (sibling checkouts with custom roots both named leases: the fresh one runs, the other refuses on its own worktree), sharedtmp (a 0777 non-sticky TMPDIR: rc 1, no run dir by the mktemp log, no lease root; sticky: runs, one run dir), noshell (no seam, no TTY: rc 45, never 44, with and without a ledger), quota (rc 69, a quota Fix line), tail (a link planted at <run log>.tail never written through), stderr (a stderr line on every python3 call: the lead still resolves), leadwet, noack (rc 77, nothing run), ack (one stub run, D-047 argv + model + effort), auth (rc 69 after one run, the login hint), integrity (rc 44, restored, escalated, no run)" "static"
 else
   row "SELF-02" "claude" "$_S2_CAP" "FAIL" "mismatch:${_S2_FAIL}" "static"
 fi
@@ -1451,11 +1527,19 @@ rm -rf "$_S8B" "$_S8"
 #            and stamp in the directory that was checked
 #   agentsmove (round 4, B3) .codex/agents swapped for a symlink to a "HOME"
 #            .codex/agents between the migration's check and its move: the
-#            user-tier file untouched, nothing moved in, a WARNING, degraded
+#            user-tier file untouched, nothing moved in, a WARNING, degraded,
+#            rc 1 (round 5: so _tb_codex installs no default there)
 #   opslink  (round 4, B7) ops/ a symlink to an outside directory holding a
 #            valid roster: session start's headless enrollment writes
 #            nothing there, and roster_write_member, roster_write_role and
-#            roster_write_lead each refuse with rc 6, the target unchanged
+#            roster_write_lead each refuse with rc 6, the target unchanged;
+#            the hook names each refused enrollment in one WARNING line
+#            (round 5, G6)
+#   agentsxdev (round 5, G5) _tb_codex with the .codex/agents move made to
+#            fail across directories (a test prelude to the shipped python):
+#            EXDEV -> the copy fallback moves the user's file, nothing
+#            default installed; EIO -> a WARNING, the old file kept, and no
+#            shipped default put at the new name
 # Negative control: the setup block with its triforge_bootstrap line removed
 # leaves a fresh project without ops/, so the ops/ check above sees the call.
 _S21="${WORK}/self21"
@@ -1973,11 +2057,47 @@ _tb_dir_in_project() {
   fi
   return 0
 }
-_tb_codex_agents_move
+_tb_codex_agents_move || echo "moverc=$?"
 echo "degraded=$_TB_DEGRADED"' s21 "$REPO_ROOT" < /dev/null 2>&1 || true )
 _S21_AM="$_S21_AM
 home=$([ "$(cksum "$_S21/am-home/.codex/agents/agents.toml" 2>/dev/null || true)" = "$_S21_SUMA" ] && echo intact || echo changed):moved-in=$([ -e "$_S21/proj-am/.codex/triforge-agents.toml" ] && echo yes || echo no)"
-_S21_FAIL="${_S21_FAIL}$(_self_expect agentsmove "$_S21_AM" '^am: WARNING .*agents\.toml was not moved' '^degraded=1$' '^home=intact:moved-in=no$')"
+_S21_FAIL="${_S21_FAIL}$(_self_expect agentsmove "$_S21_AM" '^am: WARNING .*agents\.toml was not moved' '^moverc=1$' '^degraded=1$' '^home=intact:moved-in=no$')"
+# agentsxdev (round 5, G5): the same migration through _tb_codex when the move
+# crosses filesystems. No second volume is needed: the test's own _tb_write
+# runs the shipped _TB_WRITE_PY behind a python prelude of this test that
+# makes every link and rename between two different directories fail with
+# S21_XERR, as across a mount (a rename inside one directory still works).
+# EXDEV: the copy fallback moves the user's file (content kept, the old one
+# gone, no default); EIO, where no fallback applies: a WARNING, the old file
+# kept, and no shipped default put at the new name.
+_S21_XPRE='import errno as _xe, os as _xo
+def _xcross(real):
+    def f(src, dst, *a, **k):
+        if k.get("src_dir_fd") != k.get("dst_dir_fd"):
+            code = getattr(_xe, _xo.environ["S21_XERR"])
+            raise OSError(code, _xo.strerror(code))
+        return real(src, dst, *a, **k)
+    return f
+_xo.link = _xcross(_xo.link)
+_xo.rename = _xcross(_xo.rename)
+'
+_S21_XD=""
+for _s21_x in EXDEV EIO; do
+  mkdir -p "$_S21/proj-xd-$_s21_x/.codex/agents"
+  _s21_git "$_S21/proj-xd-$_s21_x" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-xd-$_s21_x"
+  printf '# my customized agents (3.2.0)\n' > "$_S21/proj-xd-$_s21_x/.codex/agents/agents.toml"
+  _S21_XD="$_S21_XD
+$_s21_x:$( cd "$_S21/proj-xd-$_s21_x" && env -u CLAUDE_PLUGIN_ROOT S21_XERR="$_s21_x" S21_XPRE="$_S21_XPRE" HOME="$_S21/home" GIT_CONFIG_NOSYSTEM=1 /bin/bash -c '
+source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 9
+_TB_PREFIX="xd: "; _TB_DEGRADED=0; _TB_ROOT=$1
+_tb_write() { python3 -c "${S21_XPRE}${_TB_WRITE_PY}" "$@" 2>/dev/null; }
+_tb_codex
+echo "degraded=$_TB_DEGRADED"' s21 "$REPO_ROOT" < /dev/null 2>&1 | tr '\n' '|' || true )
+$_s21_x:new=$(if [ ! -e "$_S21/proj-xd-$_s21_x/.codex/triforge-agents.toml" ]; then echo none; elif grep -q '^# my customized agents' "$_S21/proj-xd-$_s21_x/.codex/triforge-agents.toml"; then echo custom; elif cmp -s "$REPO_ROOT/codex-agents/agents.toml" "$_S21/proj-xd-$_s21_x/.codex/triforge-agents.toml"; then echo default; else echo other; fi):old=$([ -e "$_S21/proj-xd-$_s21_x/.codex/agents/agents.toml" ] && echo kept || echo gone)"
+done
+unset _s21_x
+_S21_FAIL="${_S21_FAIL}$(_self_expect agentsxdev "$_S21_XD" '^EXDEV:.*xd: moved \.codex/agents/agents\.toml to \.codex/triforge-agents\.toml.*\|degraded=0\|' '^EXDEV:new=custom:old=gone$' \
+  '^EIO:.*xd: WARNING could not move \.codex/agents/agents\.toml .*did not put the shipped default there.*\|degraded=1\|' '^EIO:new=none:old=kept$')"
 # opslink (round 4, B7): ops/ a symlink to a directory outside the project that
 # holds a valid roster without [members.opencode], opencode on PATH: session
 # start (headless: stdin is not a terminal) enrolls nothing there, and each
@@ -1997,14 +2117,15 @@ R=0; roster_write_role tester claude "" high 2>/dev/null || R=$?; echo "role=$R"
 R=0; roster_write_lead codex 2>/dev/null || R=$?; echo "lead=$R"' s21 "$REPO_ROOT" < /dev/null 2>&1 || true )
 _S21_OL="$_S21_OL
 target=$([ "$(cksum "$_S21/ol-out/roster.toml")" = "$_S21_SUMO" ] && echo intact || echo changed):entries=$(ls -A "$_S21/ol-out" | tr '\n' ' ')
-hook=$(printf '%s\n' "$_S21_HOOK" | grep -c 'hook crashed\|^{' || true)"
-_S21_FAIL="${_S21_FAIL}$(_self_expect opslink "$_S21_OL" '^member=6$' '^role=6$' '^lead=6$' '^target=intact:entries=roster\.toml $' '^hook=0$')"
+hook=$(printf '%s\n' "$_S21_HOOK" | grep -c 'hook crashed\|^{' || true)
+enrollnote=$(printf '%s\n' "$_S21_HOOK" | grep -c '^WARNING: [a-z-]* was detected but not enrolled (rc 6): roster_write_member: REFUSED ops is a symlink' || true)"
+_S21_FAIL="${_S21_FAIL}$(_self_expect opslink "$_S21_OL" '^member=6$' '^role=6$' '^lead=6$' '^target=intact:entries=roster\.toml $' '^hook=0$' '^enrollnote=[1-9]$')"
 # negative control: without the bootstrap line no ops/ appears
 _S21_RC=$(_s21_run neg /bin/bash "$_S21/proj-neg" "$REPO_ROOT/skills/at-setup" "$_S21/setup-neg.sh")
 [ ! -e "$_S21/proj-neg/ops" ] || _S21_FAIL="$_S21_FAIL negative-control(ops/-without-the-bootstrap-line)"
 _S21_CAP="the project bootstrap runs from the at- skills without any hook: at-setup's block provisions ops/, the skills copy, the per-CLI files and an untracked plugin-root pointer; at-build's preflight then loads the helpers from the pointer; idempotent under bash and zsh; refused under the worker marker and in a lease root (KTD11, R37)"
 if [ -z "$_S21_FAIL" ]; then
-  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; round 3: links at the pid-free temp names (.tmp, .new, ~) beside every written file untouched, and no predictable temp name or mv -f in the three writers, both creating temps O_EXCL|O_NOFOLLOW under a random name (R6); a symlinked parent one and two levels down refused, an append to a hard-linked file rc 5 with the shared inode unchanged, a replace over one a new inode (R3, R4); a home directory as the project, plain and as a repository: bootstrap rc 80 and session start rc 0, one WARNING each, the directory byte-identical (R1); skills-sync.py with links at its stamp's old temp names: untouched, the stamp a regular file (R2); a hard-linked .agents/.gitignore: rc 80, the shared inode unchanged (R3); a lease root named with a newline and a {-line: one REFUSED line, no hook stdout line starting with { (R5); a session started in <repo>/src names the project root once, one started at the root does not (R7); round 4: the home directory by a ${_S21_HCV:-case}-variant spelling, plain and a repository: bootstrap rc 80, session start rc 0, one WARNING each naming git init, nothing written (B1); skills-sync sync and add with the parent swapped for an outside link after the checks: nothing outside (B2); .codex/agents swapped for a HOME link before the move: the user-tier file untouched (B3); ops/ linked outside: enrollment and the three roster writers write nothing there, rc 6 (B7); negative control: the block without its triforge_bootstrap line leaves no ops/" "static"
+  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; round 3: links at the pid-free temp names (.tmp, .new, ~) beside every written file untouched, and no predictable temp name or mv -f in the three writers, both creating temps O_EXCL|O_NOFOLLOW under a random name (R6); a symlinked parent one and two levels down refused, an append to a hard-linked file rc 5 with the shared inode unchanged, a replace over one a new inode (R3, R4); a home directory as the project, plain and as a repository: bootstrap rc 80 and session start rc 0, one WARNING each, the directory byte-identical (R1); skills-sync.py with links at its stamp's old temp names: untouched, the stamp a regular file (R2); a hard-linked .agents/.gitignore: rc 80, the shared inode unchanged (R3); a lease root named with a newline and a {-line: one REFUSED line, no hook stdout line starting with { (R5); a session started in <repo>/src names the project root once, one started at the root does not (R7); round 4: the home directory by a ${_S21_HCV:-case}-variant spelling, plain and a repository: bootstrap rc 80, session start rc 0, one WARNING each naming git init, nothing written (B1); skills-sync sync and add with the parent swapped for an outside link after the checks: nothing outside (B2); .codex/agents swapped for a HOME link before the move: the user-tier file untouched (B3); ops/ linked outside: enrollment and the three roster writers write nothing there, rc 6 (B7); round 5: the hook names each refused enrollment in a WARNING (G6); the .codex/agents move across filesystems (EXDEV) copies the user's file over, and a move that fails leaves it with no shipped default at the new name (G5); negative control: the block without its triforge_bootstrap line leaves no ops/" "static"
 else
   row "SELF-21" "claude" "$_S21_CAP" "FAIL" "mismatch:$(printf '%s' "$_S21_FAIL" | cut -c1-900)" "static"
 fi
@@ -5370,6 +5491,17 @@ rm -rf "$_S20"
 #             control, a copy with clean() a no-op prints the "{" line
 #   shared    a TMPDIR with group/other write and no sticky bit: both monitors
 #             inert with a note, nothing written; with the sticky bit, a count
+#   sharedclaude (round 5, G2) session start with such a TMPDIR and a
+#             group-writable .claude: no temp dir under either, the helper not
+#             loaded, one WARNING naming the cause, rc 0
+#   fiforoster (round 5, G3) a FIFO at ops/roster.toml: the context monitor
+#             returns within 20 s, rc 0, with its NOTE that it is off
+#   fifoledger (round 5, G3) a FIFO and a link planted at the fixed temp
+#             names the ledger writer once used for the lead's digest and
+#             copy: the next lease_create returns rc 0, the link's target
+#             untouched; then the ledger replaced by a FIFO: the next lead
+#             helper returns within 20 s, rc 44, the ledger restored as a
+#             regular file
 #   nopython  each handler with no python3 on PATH, and a copy of each handler
 #             without monitors.py beside it: rc 0, no stdout, one stderr
 #             notice, nothing written
@@ -5694,7 +5826,7 @@ unset _S22_FD _s22_c
 mkdir -p "$_S22/tss" "$_S22/ssbin" "$_S22/ss"
 chmod 0777 "$_S22/tss"
 ( cd "$_S22/ss" && git init -q . ) >/dev/null 2>&1 || true
-printf '#!/bin/sh\n# probe stub (SELF-22): the floor check runs it mid-hook; it lists the hook'"'"'s entries in TMPDIR\ncase "${1:-}" in --version) ls -d "$TMPDIR"/triforge-session-start.* > "$S22_SEEN" 2>/dev/null; echo "2.1.285" ;; esac\nexit 0\n' > "$_S22/ssbin/claude"
+printf '#!/bin/sh\n# probe stub (SELF-22): the floor check runs it mid-hook; it lists the hook'"'"'s entries in TMPDIR (or S22_SEEN_IN)\ncase "${1:-}" in --version) ls -d "${S22_SEEN_IN:-$TMPDIR}"/triforge-session-start.* > "$S22_SEEN" 2>/dev/null; echo "2.1.285" ;; esac\nexit 0\n' > "$_S22/ssbin/claude"
 printf '#!/bin/sh\n# probe stub (SELF-22): answers the agy pack check\ncase "${1:-}" in plugin) case "${2:-}" in list) echo "agent-triforge" ;; esac ;; agents) printf "%%s\\n" codebase-analyst architecture-reviewer targeted-researcher documentation-writer ;; esac\nexit 0\n' > "$_S22/ssbin/agy"
 chmod +x "$_S22/ssbin/claude" "$_S22/ssbin/agy"
 for _s22_c in python3 git timeout gtimeout; do   # PATH: the stubs, these tools and /usr/bin:/bin, so no real CLI runs
@@ -5711,6 +5843,71 @@ seen=$(if [ -f "$_S22/ss.seen" ]; then grep -c '' "$_S22/ss.seen" || true; else 
 left=$(find "$_S22/tss" "$_S22/ss/.claude" -maxdepth 1 -name 'triforge-session-start.*' 2>/dev/null | wc -l | tr -d ' ')"
 _S22_FAIL="${_S22_FAIL}$(_self_expect sharedss "$O" '^Roster: core trio' '^rc=0$' '^seen=0$' '^left=0$')"
 if printf '%s\n' "$O" | grep -q 'hook crashed\|^{'; then _S22_FAIL="$_S22_FAIL sharedss(crash-or-brace)"; fi
+
+# sharedclaude (round 5, G2): the same 0777 TMPDIR, and the project's .claude
+# group-writable (0775, no sticky bit), so another group member could rename
+# entries there too: no temp dir is made under it (the stub claude lists
+# .claude mid-hook), the helper is not loaded, one WARNING names the cause,
+# rc 0, no stdout line starting with "{"
+mkdir -p "$_S22/sc/.claude"
+( cd "$_S22/sc" && git init -q . ) >/dev/null 2>&1 || true
+chmod 0775 "$_S22/sc/.claude"
+R=0
+O=$( cd "$_S22/sc" && env -u TRIFORGE_LEASE_WORKER HOME="$_S22/home" TMPDIR="$_S22/tss" PATH="$_S22/ssbin:/usr/bin:/bin" CLAUDE_PLUGIN_ROOT="${_SELF_DIR}/.." \
+       S22_SEEN="$_S22/sc.seen" S22_SEEN_IN="$_S22/sc/.claude" GIT_CONFIG_NOSYSTEM=1 /bin/bash "$_S22_HOOKS/session-start.sh" < /dev/null 2>&1 ) || R=$?
+O="$O
+rc=$R
+seen=$(if [ -f "$_S22/sc.seen" ]; then grep -c '' "$_S22/sc.seen" || true; else echo missing; fi)
+left=$(find "$_S22/tss" "$_S22/sc/.claude" -maxdepth 1 -name 'triforge-session-start.*' 2>/dev/null | wc -l | tr -d ' ')"
+_S22_FAIL="${_S22_FAIL}$(_self_expect sharedclaude "$O" '^WARNING: the Triforge helper was not loaded \(no private temp dir: .*sc/\.claude' '^rc=0$' '^seen=0$' '^left=0$')"
+if printf '%s\n' "$O" | grep -q 'hook crashed\|^{'; then _S22_FAIL="$_S22_FAIL sharedclaude(crash-or-brace)"; fi
+
+# fiforoster (round 5, G3): a FIFO at ops/roster.toml. Nothing ever writes to
+# it, so a reader that opens it blocking hangs: the context monitor returns
+# within a 20 s bound, rc 0, with its once-per-session NOTE that detection is
+# off (the lead can't be resolved from a roster that is not a regular file),
+# and the FIFO is left as it was
+_s22_proj fiforoster
+mkfifo "$_S22/fiforoster/ops/roster.toml"
+mkdir -p "$_S22/tfr"
+R=0
+( cd "$_S22/fiforoster" && printf '{"session_id":"fr1","tool_name":"Bash","tool_input":{"command":"cat README"},"tool_response":"probe"}' \
+    | env -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT TMPDIR="$_S22/tfr" HOME="$_S22/home" "$TIMEOUT_BIN" 20 /bin/bash "$_S22_HOOKS/context-monitor.sh" >/dev/null 2>"$_S22/fr.err" ) || R=$?
+O="fiforoster:rc=$R:err=$(tr '\n' ' ' < "$_S22/fr.err")
+roster=$(if [ -p "$_S22/fiforoster/ops/roster.toml" ]; then echo fifo; else echo changed; fi)"
+_S22_FAIL="${_S22_FAIL}$(_self_expect fiforoster "$O" '^fiforoster:rc=0:err=.*context-monitor: NOTE .*paralysis detection is off this session' '^roster=fifo$')"
+
+# fifoledger (round 5, G3): an established ledger replaced by a FIFO. The next
+# lead helper (lease_create, lead codex through the SELF seam) returns within
+# a 20 s bound with rc 44: the ledger is restored from the lead copy as a
+# regular file holding the earlier leases, the change reported
+_self_repo "$_S22/fl" "$_S22/home" sprint/s22 '[lead]\ncli = "codex"\n\n[roles.builder]\ncli = "claude"\n' || true
+printf '#!/bin/sh\necho "Status: DONE"\n' > "$_S22/fl-b.sh"
+chmod +x "$_S22/fl-b.sh"
+_s22_fl() { # _s22_fl <label> <helper...> — one lead helper call in the fl fixture under a 20 s bound: "<label>:rc=<n>:<stderr on one line>"
+  local L=$1 R=0
+  shift
+  ( cd "$_S22/fl" && env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CODEX_CI -u CODEX_THREAD_ID -u TRIFORGE_LEASE_WORKER -u CLAUDE_PLUGIN_ROOT \
+      HOME="$_S22/home" TMPDIR="$_S22/tmp" TRIFORGE_LEASE_ROOT="$_S22/fl.leases" GIT_CONFIG_NOSYSTEM=1 PATH="${_SELF_STUBS}:$PATH" \
+      TRIFORGE_TEST_LEAD=codex TRIFORGE_TEST_BUILDER="$_S22/fl-b.sh" \
+      "$TIMEOUT_BIN" 20 /bin/bash -c 'source "$1" >/dev/null 2>&1 || exit 9; shift; "$@"' _ "${_SELF_DIR}/invoke-external.sh" "$@" ) < /dev/null > /dev/null 2> "$_S22/fl.err" || R=$?
+  echo "$L:rc=$R:$(tr '\n' ' ' < "$_S22/fl.err" | cut -c1-600)"
+}
+O=$(_s22_fl create lease_create t builder)
+# first, a FIFO and a link planted at the fixed temp names the ledger writer
+# once used for the lead's digest and copy: the next write neither blocks nor
+# writes through the link
+mkfifo "$_S22/fl.leases/lead/ledger.sha256.tmp"
+printf 'victim\n' > "$_S22/fl-victim"
+ln -s "$_S22/fl-victim" "$_S22/fl.leases/lead/ledger.copy.tmp"
+O="$O
+$(_s22_fl plant lease_create t2 builder)
+victim=$(cat "$_S22/fl-victim")"
+rm -f "$_S22/fl/ops/leases.toml" && mkfifo "$_S22/fl/ops/leases.toml"
+O="$O
+$(_s22_fl fifo lease_create t3 builder)
+ledger=$(if [ -p "$_S22/fl/ops/leases.toml" ]; then echo fifo; elif [ -f "$_S22/fl/ops/leases.toml" ]; then echo "file:t=$(grep -c '^\[lease\."t"\]' "$_S22/fl/ops/leases.toml" || true):t2=$(grep -c '^\[lease\."t2"\]' "$_S22/fl/ops/leases.toml" || true)"; else echo none; fi)"
+_S22_FAIL="${_S22_FAIL}$(_self_expect fifoledger "$O" '^create:rc=0:' '^plant:rc=0:' '^victim=victim$' '^fifo:rc=44:.*INTEGRITY.*changed outside the lead writes' '^ledger=file:t=1:t2=1$')"
 
 # wave: a Codex-led fixture wave to merge
 _self_repo "$_S22/wave" "$_S22/home" sprint/s22 '# probe roster (SELF-22)\n[lead]\ncli = "codex"\n\n[roles.builder]\ncli = "claude"\n' || true
@@ -5753,7 +5950,7 @@ _S22_FAIL="${_S22_FAIL}$(_self_expect wave "$O" '^create:rc=0:' '^dispatch:rc=0:
 
 _S22_CAP="A Codex lead in fixtures: the paralysis monitor reads the lead's tool vocabulary (Codex's Bash reads count, Claude Code's Bash does not), an unmapped lead leaves the monitors inert with one note, monitor state outside the project, the failure monitor on Codex payloads, and a Codex-led wave from lease_create to merged (KTD1, KTD14, R21, R44)"
 if [ -z "$_S22_FAIL" ]; then
-  row "SELF-22" "codex" "$_S22_CAP" "PASS" "reads: warning at 8 Bash reads (cat, sed -n, rg|head, git log, ls, grep, wc), apply_patch and echo > file reset; claudebash: 8 Bash reads -> 0, 8 Read -> warning; unmapped: one NOTE, no count; state: projects untouched, counts under TMPDIR; failures: apply_patch Exit code 1 x5 -> WARN, plain-text Bash not counted, one NOTE; private: a 0777 base tightened to 0700, a symlinked state dir inert with a note and nothing written through it, a symlinked state file replaced, the outside file untouched; writes: 15 writing commands count as actions, 8 reads stay reads; inject: no stdout line starts with { from a checkout named with a newline and JSON; nopython: no python3 or no monitors.py -> rc 0, one notice, nothing written; wave: create, dispatch, lease_wait -> review, pin codex (lead class), merge 42 on .claude/settings.json, lease_approve task:t codex, merged ${_S22_MC}, attribution lead codex; t2 merged without approval" "static"
+  row "SELF-22" "codex" "$_S22_CAP" "PASS" "reads: warning at 8 Bash reads (cat, sed -n, rg|head, git log, ls, grep, wc), apply_patch and echo > file reset; claudebash: 8 Bash reads -> 0, 8 Read -> warning; unmapped: one NOTE, no count; state: projects untouched, counts under TMPDIR; failures: apply_patch Exit code 1 x5 -> WARN, plain-text Bash not counted, one NOTE; private: a 0777 base tightened to 0700, a symlinked state dir inert with a note and nothing written through it, a symlinked state file replaced, the outside file untouched; writes: 15 writing commands count as actions, 8 reads stay reads; inject: no stdout line starts with { from a checkout named with a newline and JSON; nopython: no python3 or no monitors.py -> rc 0, one notice, nothing written; sharedclaude: a shared TMPDIR and a group-writable .claude -> no temp dir in either, one WARNING; fiforoster: a FIFO roster -> the monitor returns, NOTE; fifoledger: a FIFO and a link at the old fixed temp names -> no block, nothing written through; a FIFO ledger -> lease_create rc 44, ledger restored; wave: create, dispatch, lease_wait -> review, pin codex (lead class), merge 42 on .claude/settings.json, lease_approve task:t codex, merged ${_S22_MC}, attribution lead codex; t2 merged without approval" "static"
 else
   row "SELF-22" "codex" "$_S22_CAP" "FAIL" "mismatch:$(printf '%s' "$_S22_FAIL" | cut -c1-900)" "static"
 fi

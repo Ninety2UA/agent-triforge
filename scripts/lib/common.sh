@@ -155,6 +155,24 @@ _RC_LEAD_ONLY=45
 # it. Keep the bytes.
 _LEAD_GITCONFIG_SIGNATURE='# Triforge trusted git config'
 
+# _READ_REGULAR_PY — python: read_regular(path[, text]), the bytes (or, with
+# text, the str open(path, "r") reads) of a regular file. Opened O_NONBLOCK,
+# so a FIFO a worker planted at ops/roster.toml or ops/leases.toml fails at
+# once instead of blocking the reader before its type is known; anything but a
+# regular file raises OSError. Every python reader of the roster and the
+# ledger in roster.sh, lease.sh and coordinate.sh reads through it (Phase 3
+# round 5, G3); the hooks, which may run without this library, carry the same
+# few lines.
+_READ_REGULAR_PY='
+def read_regular(p, text=False):
+    import os, stat
+    fd = os.open(p, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+    with os.fdopen(fd, "r" if text else "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise OSError("not a regular file: " + p)
+        return f.read()
+'
+
 # _lead_only <helper> [--any-host] — 0 in a lead context; otherwise one stderr
 # line naming the reason and rc _RC_LEAD_ONLY. In order: the worker marker, the
 # lease root, then the lead host check (_lead_host_gate, roster.sh): this shell

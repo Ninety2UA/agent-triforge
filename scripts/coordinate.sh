@@ -272,6 +272,7 @@ lease_resume_paragraph() {
   # — they are NOT "live" reclaimable work, so they get their own surface).
   COUNTS=$(python3 -c "
 import sys
+${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -281,8 +282,7 @@ except ImportError:
         print('0 0')
         sys.exit(0)
 try:
-    with open('ops/leases.toml', 'rb') as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular('ops/leases.toml').decode('utf-8'))
     leases = data.get('lease', {})
     rows = [v for v in (leases.values() if isinstance(leases, dict) else []) if isinstance(v, dict)]
     live = ('leased', 'building', 'review', 'orphaned', 'requeued')
@@ -487,7 +487,13 @@ integrity_gate() {
     echo "coordinate.sh: the integrity check is lead-owned and this shell may not run it (rc ${RC}, above); no session started. Run coordinate.sh from a terminal, or from the ${LEAD_NAME} lead's own shell." >&2
     exit "$RC"
   fi
-  echo "coordinate.sh: STOPPED before starting a session — the integrity check returned rc ${RC} (above). Inspect the change; if you or the lead made it, accept it with lease_rebaseline <task...>, then rerun. An unattended session never accepts it." >&2
+  # The advice follows the cause (_LEAD_INTEGRITY_WHY): with the ledger gone
+  # there is nothing for lease_rebaseline to accept until it is back.
+  case "${_LEAD_INTEGRITY_WHY:-}" in
+    evidence) echo "coordinate.sh: STOPPED before starting a session — the ledger is missing, but this checkout has lease history (above). lease_rebaseline can't fix this, because there is no ledger for it to work on. Follow the recovery printed above, then rerun. An unattended session never starts on it." >&2 ;;
+    deleted) echo "coordinate.sh: STOPPED before starting a session — the ledger and its digest were deleted, but the lead's copies are still there (above). Copy the ledger back as shown above, run lease_rebaseline, then rerun. An unattended session never starts on it." >&2 ;;
+    *) echo "coordinate.sh: STOPPED before starting a session — the integrity check returned rc ${RC} (above). Inspect the change; if you or the lead made it, accept it with lease_rebaseline <task...>, then rerun. An unattended session never accepts it." >&2 ;;
+  esac
   exit 44
 }
 
