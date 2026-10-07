@@ -4369,12 +4369,12 @@ O=$( cd "$_S24/w3" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_
   R=0; roster_write_member devin true swe-1-6-slow "" --opt-in none >/dev/null 2>&1 || R=$?
   echo "optin-drop:rc=${R}:same=$([ "$(cksum < ops/roster.toml)" = "$B" ] && echo yes || echo no)"
   R=0; roster_write_member devin false "" >/dev/null 2>&1 || R=$?
-  L="decline:rc=${R}"
+  DCL="decline:rc=${R}"
   for RL in builder reviewer tester analyst documenter; do
     RR=0; C=$(resolve_role "$RL" 2>/dev/null) || RR=$?
-    L="${L}:${RL}=${RR}/$(printf '%s' "$C" | cut -f1)"
+    DCL="${DCL}:${RL}=${RR}/$(printf '%s' "$C" | cut -f1)"
   done
-  echo "$L" )
+  echo "$DCL" )
 _S24_FAIL="${_S24_FAIL}$(_self_expect member-rules "$O" '^optin-drop:rc=2:same=yes$' '^decline:rc=0:builder=0/claude:reviewer=0/codex:tester=0/codex:analyst=0/antigravity:documenter=0/antigravity$')"
 
 # consent at dispatch: invoke_devin on a hand-written table without consent
