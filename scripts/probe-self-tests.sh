@@ -1427,6 +1427,32 @@ rm -rf "$_S11"
 #   timeout  the default --timeout is max_turns x the effort's per-turn
 #            budget, 600 s at least: probe-reader (high, 7) 840 s, the trio at
 #            max (6) 1800 s, probe-web (high, 5) 600 s; --timeout overrides
+#   spawn    (round 3, P0) persona_spawn returns at once with <run>/<name>.pid;
+#            persona_wait under a 3 s budget -> 75 naming the run, 0 with its
+#            .rc once a quick one ends; persona_stop stops the whole tree (the
+#            stub CLI, which timeout keeps in a group of its own, included), and
+#            a stopped or killed run with no .rc -> 80; the worker marker -> 45
+#            for all three; usage and an unknown run -> 64
+#   attach   (r3 #1) every claude persona run carries
+#            CLAUDE_CODE_DISABLE_ATTACHMENTS=1; the trusted bundle writes an
+#            @ mention as (at), with the note that an import target is material
+#   baseline (r3 #2) a ledger whose [baseline].config was dropped, its digest and
+#            copy re-anchored, and .git/config poisoned -> 44 naming the missing
+#            baseline before any run, never a new baseline
+#   ranmark  (r3 #3) a persona that deletes the side dir's run marker and moves
+#            a tag still meets the post-run checks -> 44
+#   termkill (r3 #5) SIGINT to an exec run whose CLI ignores TERM: the CLI is
+#            KILLed after the bounded wait and is already gone when the
+#            worktree is reclaimed (the order, not a deadline: timeout's own
+#            -k would end it 10 s later anyway), nothing of it left
+#   refmove  (r3 #7) a lease_merge by the lead while an exec persona runs -> 0
+#            (the integration branch moved to what the ledger records); a
+#            persona moving the integration branch -> 44 naming HEAD and the
+#            branch, no bare SHA
+#   codexprof (r3 #4) the codex read persona runs under a permission profile
+#            (no -s): default_permissions="triforge_persona", extends
+#            ":read-only", a deny entry for every credential path; a codex
+#            without permission profiles -> 69
 #   shipped  when personas/manifest.toml ships (U8): every entry resolves, a
 #            runnable one with a non-empty body without frontmatter, the
 #            trio at the top rung, lease and agent-team refused with their path,
@@ -1497,7 +1523,17 @@ case "$MODE" in
     git update-ref refs/heads/topic "$(git commit-tree "$(git rev-parse 'HEAD^{tree}')" -p HEAD -m moved)"
     ANS="moved topic" ;;
   gitconfig) git config core.hooksPath /tmp/persona-planted-hooks; ANS="wrote config" ;;
-  sleep) : > "$L/sleeping"; sleep 30; ANS="woke" ;;
+  sleep) echo $$ > "$L/sleeping"; sleep 30; ANS="woke" ;;
+  ignoreterm) trap '' TERM; echo $$ > "$L/sleeping"; sleep 30; ANS="woke" ;;
+  waitgo) : > "$L/sleeping"; while [ ! -f "$L/go" ]; do sleep 0.1; done; ANS="went" ;;
+  rmran)
+    SD=$(dirname "$(dirname "$IN")")
+    rm -f "$SD/ran"
+    git update-ref refs/tags/persona-moved HEAD
+    ANS="removed the run marker" ;;
+  movehead)
+    git update-ref "refs/heads/$ARG" "$(git commit-tree "$(git rev-parse 'HEAD^{tree}')" -p HEAD -m moved-by-persona)"
+    ANS="moved $ARG" ;;
   late)
     ( while [ ! -f "$L/go" ]; do sleep 0.1; done; /bin/sh "$ARG" insert; touch "$L/late.done" ) < /dev/null > /dev/null 2>&1 &
     ANS="a straggler is left" ;;
@@ -1520,6 +1556,10 @@ cat > "$_S12/tpl/codex" <<'S12_CODEX_EOF'
 # environment and prompt and writes its answer to the -o file
 L='@LOG@'
 if [ "${1:-}" = "--version" ]; then echo "codex-cli 0.0.0-probe-stub"; exit 0; fi
+if [ "${1:-}" = sandbox ] && [ "${2:-}" = --help ]; then
+  if [ ! -f "$L/no-profiles" ]; then echo "  -P, --permission-profile <NAME>"; fi
+  exit 0
+fi
 : > "$L/last.argv"; O=""; PREV=""
 for a in "$@"; do printf '%s\n' "$a" >> "$L/last.argv"; if [ "$PREV" = "-o" ]; then O=$a; fi; PREV=$a; P=$a; done
 printf '%s' "$P" > "$L/last.prompt"
@@ -1568,7 +1608,7 @@ _s12_lead() {
       && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID TRIFORGE_LEASE_WORKER TRIFORGE_LEAD_PID CODEX_HOME CODEX_MODEL TRIFORGE_CLAUDE_SANDBOX \
       && source "$2/scripts/invoke-external.sh" 2>/dev/null && {
     _s12_mode() {
-      rm -f "$_S12/log/last."* "$_S12/log/go" "$_S12/log/late.done"
+      rm -f "$_S12/log/last."* "$_S12/log/go" "$_S12/log/late.done" "$_S12/log/sleeping"
       printf '%s\n' "$@" > "$_S12/log/mode"
     }
     _s12_arg() { awk -v f="$1" 'p { print; exit } $0 == f { p = 1 }' "$_S12/log/last.argv" 2>/dev/null || true; }
@@ -1683,6 +1723,7 @@ echo "cx-argv=$(sed -n 1p "$_S12/log/last.argv"):s=$(_s12_arg -s):m=$(_s12_arg -
 echo "cx-flags=$(grep -cxE -- "--skip-git-repo-check|approval_policy=\"never\"|model_reasoning_effort=\"high\"|shell_environment_policy.inherit=\"all\"" "$_S12/log/last.argv")"
 case "$C" in "$_S12P/tmp/triforge-persona."*/cwd) echo "cx-cwd=scratch" ;; *) echo "cx-cwd=other:$C" ;; esac
 echo "cx-env=$(grep -cx TRIFORGE_LEASE_WORKER=persona "$_S12/log/last.env")"
+echo "cx-prof=$(grep -cxF -- "default_permissions=\"triforge_persona\"" "$_S12/log/last.argv" || true):$(grep -cxF -- "permissions.triforge_persona.extends=\":read-only\"" "$_S12/log/last.argv" || true):$(grep -c "^permissions\.triforge_persona\.filesystem={.*\"$HOME/\.ssh\"=\"deny\".*\"$HOME/\.codex\"=\"deny\"" "$_S12/log/last.argv" || true):noS=$(grep -cx -- -s "$_S12/log/last.argv" || true)"
 _s12_mode answer
 _self_try trio dispatch_persona security-sentinel "$_S12/review.diff" "$_S12/rd-trio.out"
 echo "trio-argv=model=$(_s12_arg --model) effort=$(_s12_arg --effort) turns=$(_s12_arg --max-turns)"
@@ -1733,7 +1774,7 @@ _S12_FAIL="${_S12_FAIL}$(_self_expect web "$O" '^web:rc=0:' \
   '^web-tools=Read,Grep,Glob,WebFetch,WebSearch allowed=Read,Grep,Glob,WebFetch,WebSearch model=sonnet effort=high turns=5$' \
   '^brief:rc=0:' '^brief-in-prompt=1$' '^sbxoff-read=Read,Grep,Glob$' '^sbxoff-web=Read,Grep,Glob,WebFetch,WebSearch$' '^web-safe=1$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect codex "$O" '^cx:rc=0:' '^cx-out=CODEX-PERSONA-ANSWER$' \
-  "^cx-argv=exec:s=read-only:m=gpt-6-astra:o=${_S12P}/rd-cx.out:C=${_S12P}/tmp/triforge-persona\\..*/cwd\$" '^cx-flags=4$' '^cx-cwd=scratch$' '^cx-env=1$')"
+  "^cx-argv=exec:s=:m=gpt-6-astra:o=${_S12P}/rd-cx.out:C=${_S12P}/tmp/triforge-persona\\..*/cwd\$" '^cx-flags=4$' '^cx-cwd=scratch$' '^cx-env=1$' '^cx-prof=1:1:1:noS=0$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect trio "$O" '^trio:rc=0:' '^trio-argv=model=opus effort=max turns=6$' \
   '^trio-sonnet:rc=64:.*never-downgrade' '^trio-sonnet-cli=none$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect prompt "$O" '^p-team:rc=0:PERSONA-BODY-team-lead:' '^p-resolver:rc=0:PERSONA-BODY-pr-comment-resolver:' \
@@ -1782,6 +1823,127 @@ echo "hooks-path-after=$(git config --get core.hooksPath || echo unset)"
 _S12_FAIL="${_S12_FAIL}$(_self_expect noledger "$O" '^ledger-before=none$' '^nsok:rc=0:' '^ledger-after=present:baseline=1$' \
   '^moveref:rc=44:.*refs/heads/topic' '^gitcfg:rc=44:.*\.git/config' '^hooks-path-after=unset$')"
 
+# round 3: spawn/wait/stop (P0), attachments (#1), the run marker (#3), TERM
+# then KILL (#5), the codex profile (#4); a repo with no ledger
+cat > "$_S12/tpl/unbase.py" <<'S12_UNBASE_EOF'
+import hashlib, os, shutil, sys
+# drop [baseline].config from the ledger and re-anchor the lead's digest and
+# copy, as a worker without an OS sandbox could
+ledger, state = sys.argv[1], sys.argv[2]
+lines = open(ledger, encoding="utf-8").read().split("\n")
+out, inb = [], False
+for l in lines:
+    if l.startswith("["):
+        inb = l.strip() == "[baseline]"
+    if inb and l.startswith("config = "):
+        continue
+    out.append(l)
+open(ledger, "w", encoding="utf-8").write("\n".join(out))
+shutil.copyfile(ledger, os.path.join(state, "ledger.copy"))
+open(os.path.join(state, "ledger.sha256"), "w").write(hashlib.sha256(open(ledger, "rb").read()).hexdigest() + "\n")
+S12_UNBASE_EOF
+_s12_repo r3
+O=$(_s12_lead r3 "$_S12_KIT" '
+export TRIFORGE_CLAUDE_SANDBOX=off
+_r3w() { local L=$1 R=0 X; shift; X=$("$@" 2>&1) || R=$?; echo "$L:rc=$R:$(printf "%s" "$X" | tr "\n" " " | cut -c1-400)"; }
+_r3s() { local N=0; while [ ! -s "$_S12/log/sleeping" ] && [ "$N" -lt 150 ]; do sleep 0.1; N=$((N + 1)); done; }
+RUN="$_S12/r3runs"
+_s12_mode sleep
+T0=$(date +%s)
+_r3w spawn persona_spawn "$RUN" slow probe-reader "$_S12/review.diff" "$_S12/r3-slow.out"
+echo "spawn-quick=$(( $(date +%s) - T0 < 5 )):pid=$(if [ -s "$RUN/slow.pid" ]; then echo yes; else echo no; fi):rc=$(if [ -f "$RUN/slow.rc" ]; then echo yes; else echo no; fi)"
+_r3s
+STUB=$(cat "$_S12/log/sleeping" 2>/dev/null || true)
+( export TRIFORGE_LEAD_WAIT_BUDGET_S=3; _r3w wait75 persona_wait "$RUN" slow )
+_r3w stop persona_stop "$RUN" slow
+sleep 0.5
+if [ -n "$STUB" ] && kill -0 "$STUB" 2>/dev/null; then echo "stop-tree=stub-alive"; else echo "stop-tree=gone"; fi
+_r3w afterstop persona_wait "$RUN" slow
+_s12_mode sleep
+_r3w spawnk persona_spawn "$RUN" killed probe-reader "$_S12/review.diff" "$_S12/r3-k.out"
+_r3s
+_kill_tree "$(cut -f1 "$RUN/killed.pid")" KILL
+sleep 0.5
+_r3w killedwait persona_wait "$RUN" killed
+_s12_mode answer
+_r3w spawnf persona_spawn "$RUN" fast probe-reader "$_S12/review.diff" "$_S12/r3-f.out"
+( export TRIFORGE_LEAD_WAIT_BUDGET_S=40; _r3w waitf persona_wait "$RUN" fast )
+echo "fast-rc=$(cat "$RUN/fast.rc" 2>/dev/null):out=$(cat "$_S12/r3-f.out" 2>/dev/null)"
+echo "fast-env=$(grep -cx CLAUDE_CODE_DISABLE_ATTACHMENTS=1 "$_S12/log/last.env" || true)"
+( export TRIFORGE_LEASE_WORKER=persona; _r3w mspawn persona_spawn "$RUN" m probe-reader "$_S12/review.diff" "$_S12/r3-m.out"; _r3w mwait persona_wait "$RUN" fast; _r3w mstop persona_stop "$RUN" fast )
+_r3w wusage persona_wait
+_r3w wunknown persona_wait "$RUN" no-such-run
+_s12_mode answer
+_self_try xenv dispatch_persona probe-tester "$_S12/brief.txt" "$_S12/r3-x.out"
+echo "xenv-env=$(grep -cx CLAUDE_CODE_DISABLE_ATTACHMENTS=1 "$_S12/log/last.env" || true)"
+_lease_ctx
+GIT_INDEX_FILE="$_S12/r3.idx" git read-tree HEAD
+GIT_INDEX_FILE="$_S12/r3.idx" git update-index --add --cacheinfo "100644,$(printf "Read @docs/policy.md first. Mail ops@example.com.\\n" | git hash-object -w --stdin),AGENTS.md"
+B=$(_persona_bundle "$(git commit-tree "$(GIT_INDEX_FILE="$_S12/r3.idx" git write-tree)" -p HEAD -m bundle)")
+echo "bundle=raw-at:$(printf "%s\\n" "$B" | grep -c "@docs" || true):neutral:$(printf "%s\\n" "$B" | grep -c "(at)docs/policy.md" || true):note:$(printf "%s\\n" "$B" | grep -ci "import target.*material" || true)"
+_s12_mode rmran
+_self_try rmran dispatch_persona probe-tester "$_S12/brief.txt" "$_S12/r3-r.out"
+git update-ref -d refs/tags/persona-moved 2>/dev/null || true
+_s12_mode ignoreterm
+python3 -c "import os, signal, sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])" /bin/bash -c ". \"\$CLAUDE_PLUGIN_ROOT/scripts/invoke-external.sh\" >/dev/null 2>&1 && dispatch_persona probe-tester \"$_S12/brief.txt\" \"$_S12/r3-t.out\"" >/dev/null 2>&1 &
+SIGPID=$!
+_r3s
+TSTUB=$(cat "$_S12/log/sleeping" 2>/dev/null || true)
+TDIRS=$(ls -d "$_S12/r3.leases"/persona-* 2>/dev/null | wc -l | tr -d " ")
+kill -INT -- "-$SIGPID" 2>/dev/null || true
+N=0; while [ -n "$(ls -d "$_S12/r3.leases"/persona-* 2>/dev/null)" ] && [ "$N" -lt 300 ]; do sleep 0.05; N=$((N + 1)); done
+_r3alive() { case "$(ps -o stat= -p "${1:-0}" 2>/dev/null | tr -d " ")" in ""|Z*) echo gone ;; *) echo alive ;; esac; }
+TAT=$(_r3alive "$TSTUB")
+wait "$SIGPID" 2>/dev/null || true
+echo "termkill=running-dirs:${TDIRS}:at-reclaim:${TAT}:stub:$(_r3alive "$TSTUB"):dirs=$(ls -d "$_S12/r3.leases"/persona-* 2>/dev/null | wc -l | tr -d " ")"
+if [ -n "$TSTUB" ]; then kill -KILL "$TSTUB" 2>/dev/null || true; fi
+')
+_S12_FAIL="${_S12_FAIL}$(_self_expect spawn "$O" '^spawn:rc=0:' '^spawn-quick=1:pid=yes:rc=no$' '^wait75:rc=75:.*still running: slow' \
+  '^stop:rc=0:' '^stop-tree=gone$' '^afterstop:rc=80:.*slow' '^spawnk:rc=0:' '^killedwait:rc=80:.*killed' \
+  '^spawnf:rc=0:' '^waitf:rc=0:.*fast rc=0' '^fast-rc=0:out=PERSONA-ANSWER$' \
+  '^mspawn:rc=45:' '^mwait:rc=45:' '^mstop:rc=45:' '^wusage:rc=64:' '^wunknown:rc=64:.*no-such-run')"
+_S12_FAIL="${_S12_FAIL}$(_self_expect attach "$O" '^fast-env=1$' '^xenv:rc=0:' '^xenv-env=1$' '^bundle=raw-at:0:neutral:1:note:1$')"
+_S12_FAIL="${_S12_FAIL}$(_self_expect ranmark "$O" '^rmran:rc=44:.*refs/tags/persona-moved')"
+_S12_FAIL="${_S12_FAIL}$(_self_expect termkill "$O" '^termkill=running-dirs:1:at-reclaim:gone:stub:gone:dirs=0$')"
+# baseline (#2): a dropped [baseline].config with re-anchored digests and a poisoned .git/config
+_s12_repo bl
+O=$(_s12_lead bl "$_S12_KIT" '
+export TRIFORGE_CLAUDE_SANDBOX=off
+_s12_mode answer
+_self_try blok dispatch_persona probe-tester "$_S12/brief.txt" "$_S12/bl.out"
+python3 "$_S12/tpl/unbase.py" ops/leases.toml "$(cd "$TRIFORGE_LEASE_ROOT" && pwd -P)/lead"
+git config core.hooksPath /tmp/persona-poisoned-hooks
+_s12_mode answer
+_self_try blpoison dispatch_persona probe-tester "$_S12/brief.txt" "$_S12/bl.out"
+if [ -f "$_S12/log/last.argv" ]; then echo "blpoison-cli=ran"; else echo "blpoison-cli=none"; fi
+echo "bl-config=$(_ledger_get @baseline config 2>/dev/null | grep -c . || true)"
+')
+_S12_FAIL="${_S12_FAIL}$(_self_expect baseline "$O" '^blok:rc=0:' '^blpoison:rc=44:.*baseline' '^blpoison-cli=none$' '^bl-config=0$')"
+# refmove (#7): the lead merges while an exec persona runs; a persona moves the integration branch
+_s12_repo lm
+printf '#!/bin/sh\necho merged-feature > feature.txt\necho "Status: DONE"\n' > "$_S12/lm.fb"
+O=$(_s12_lead lm "$_S12_KIT" '
+_self_go m1
+_self_try pin lease_pin_reviewer m1 codex
+_s12_mode waitgo
+( R=0; dispatch_persona probe-tester "$_S12/brief.txt" "$_S12/lm.out" > /dev/null 2> "$_S12/lm.err" || R=$?; echo "$R" > "$_S12/lm.rc" ) &
+BG=$!
+N=0; while [ ! -f "$_S12/log/sleeping" ] && [ "$N" -lt 150 ]; do sleep 0.1; N=$((N + 1)); done
+_self_try merge lease_merge m1 codex
+touch "$_S12/log/go"
+wait "$BG" 2>/dev/null || true
+echo "midmerge=rc:$(cat "$_S12/lm.rc" 2>/dev/null):$(grep -o "refs changed.*" "$_S12/lm.err" | head -1 | cut -c1-120)"
+_s12_mode movehead sprint/s12
+_self_try movehead dispatch_persona probe-tester "$_S12/brief.txt" "$_S12/lm.out"
+')
+_S12_FAIL="${_S12_FAIL}$(_self_expect refmove "$O" '^m1:go=0:review$' '^merge:rc=0:' '^midmerge=rc:0:$' \
+  '^movehead:rc=44:.*refs changed during probe-tester.s run at ref:HEAD: HEAD refs/heads/sprint/s12\. Nothing')"
+# codexprof (#4): a codex without permission profiles is refused
+: > "$_S12/log/no-profiles"
+O=$(_s12_lead rd "$_S12_KIT" '_s12_mode answer; _self_try cxnoprof dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-g.out" --cli codex; if [ -f "$_S12/log/last.argv" ]; then echo "cxnoprof-cli=ran"; else echo "cxnoprof-cli=none"; fi')
+rm -f "$_S12/log/no-profiles"
+_S12_FAIL="${_S12_FAIL}$(_self_expect codexprof "$O" '^cxnoprof:rc=69:.*permission profile' '^cxnoprof-cli=none$')"
+
 # hooks control: the same stub without the marker writes
 mkdir -p "$_S12/hkctl/cwd" "$_S12/hkctl/home"
 printf 'hooks\ncontext-monitor\n' > "$_S12/log/mode"
@@ -1803,7 +1965,7 @@ _self_try exec dispatch_persona probe-tester "$_S12/brief.txt" "$_S12/nc.out"
 ' "$_S12_NOCLAUDE")
   O="${O}
 $(_s12_lead rd "$_S12_KIT" '_self_try none dispatch_persona probe-reader "$_S12/review.diff" "$_S12/nc.out"' "$_S12_NOCLI")"
-  _S12_FAIL="${_S12_FAIL}$(_self_expect noclaude "$O" '^fb:rc=0:.*NOTE.*codex' '^fb-out=CODEX-PERSONA-ANSWER:s=read-only$' \
+  _S12_FAIL="${_S12_FAIL}$(_self_expect noclaude "$O" '^fb:rc=0:.*NOTE.*codex' '^fb-out=CODEX-PERSONA-ANSWER:s=$' \
     '^trio:rc=69:.*install Claude Code \(' '^web:rc=69:.*install Claude Code \(' '^exec:rc=69:.*install Claude Code \(' \
     '^none:rc=69:.*install Claude Code \(.*install Codex CLI \(')"
 fi
@@ -1926,12 +2088,14 @@ _s12_wts() { echo "dirs=$(ls -d "$_S12/px.leases"/persona-* 2>/dev/null | wc -l 
   _self_try classify dispatch_persona probe-tester "$_S12/brief.txt" "$_S12/px-g.out" --at ref:other
   echo "classify-cli=$(if [ -f "$_S12/log/last.argv" ]; then echo ran; else echo none; fi):$(_s12_wts)" )
 _s12_mode sleep
-python3 -c "import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])" /bin/bash -c ". \"\$CLAUDE_PLUGIN_ROOT/scripts/invoke-external.sh\" >/dev/null 2>&1 && dispatch_persona probe-tester \"$_S12/brief.txt\" \"$_S12/px-sig.out\" --at task:dirty" >/dev/null 2>&1 &
+python3 -c "import os, signal, sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])" /bin/bash -c ". \"\$CLAUDE_PLUGIN_ROOT/scripts/invoke-external.sh\" >/dev/null 2>&1 && dispatch_persona probe-tester \"$_S12/brief.txt\" \"$_S12/px-sig.out\" --at task:dirty" >/dev/null 2>&1 &
 SIGPID=$!
 N=0; while [ ! -f "$_S12/log/sleeping" ] && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done
 echo "sig-running=$(if [ -f "$_S12/log/sleeping" ]; then ls -d "$_S12/px.leases"/persona-* 2>/dev/null | wc -l | tr -d " "; else echo never; fi)"
+T0=$(date +%s)
 kill -INT -- "-$SIGPID" 2>/dev/null || true
 wait "$SIGPID" 2>/dev/null || true
+echo "sig-prompt=$(( $(date +%s) - T0 < 20 ))"
 N=0; while [ -n "$(ls -d "$_S12/px.leases"/persona-* 2>/dev/null)" ] && [ "$N" -lt 50 ]; do sleep 0.1; N=$((N + 1)); done
 echo "sig-$(_s12_wts)"
 ')
@@ -1953,7 +2117,7 @@ _S12_FAIL="${_S12_FAIL}$(_self_expect guard-lease "$O" '^root:rc=45:.*lease root
   '^before:rc=44:.*ops/leases\.toml changed outside the lead writes' '^before-cli=none$' '^before-ledger=restored$' \
   '^beforeref:rc=44:.*ops/leases\.toml changed outside the lead writes' '^beforeref-cli=none$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect cleanup "$O" '^digestfail:rc=1:' '^digestfail-dirs=0:git=0$' '^seterr-dirs=0:git=0$' \
-  '^sig-running=1$' '^sig-dirs=0:git=0$')"
+  '^sig-running=1$' '^sig-prompt=1$' '^sig-dirs=0:git=0$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect classify "$O" '^classify:rc=1:.*could not classify the paths' '^classify-cli=none:dirs=0:git=0$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect snapdiff "$O" '^snapdiff:rc=0:' '^snapdiff-file=snapshot$' '^snapdiff-tip=0:tip-diff-has-it=1$' \
   '^snapdiff-task:rc=0:' '^snapdiff-nope:rc=64:' '^snapdiff-dir:rc=64:' '^snapdiff-usage:rc=64:' '^snapdiff-building:rc=64:.*building' \
@@ -2089,7 +2253,7 @@ fi
 
 _S12_CAP="persona lane: dispatch_persona under the worker boundary with enforced tool classes, the trio at the top rung, a lead-controlled cwd, exec in a restored disposable snapshot worktree with integrity checks (KTD5, KTD20, KTD21, KTD22; R14, R35, R48)"
 if [ -z "$_S12_FAIL" ]; then
-  row "SELF-12" "claude" "$_S12_CAP" "PASS" "resolve: tiers from the ladder, max_turns from the manifest, --model rung or id; trio opus/max (no record), fable/max (CC-02 PASS), opus/max (CC-02 FAIL); ladder-named plan-checker -> top; trio sonnet / lower rung / codex -> 64; lease + agent-team -> 64 naming at-resolve-pr / agent_teams (unenforced); unknown / path-shaped / bad CLI -> 64; manifest bad tier (lists the ladder tiers) / unknown key / not TOML -> 70, missing -> 69; corrupted ladder -> 70; persona_prompt: bodies by name (lease + agent-team too), unknown 64, no body 70, no manifest 69, bad entry 70, worker marker 45; read: claude -p Read,Grep,Glob (no Bash) dontAsk strict-mcp project+local opus/high turns 7, --brief in the prompt, denyWrite = the empty scratch cwd (gone after), the input file copied beside it, marker persona + no-push, planted key dropped; web: + WebFetch,WebSearch (no Bash) sonnet/high; neither gains Bash with the sandbox off; task:dirty read: the snapshot diff as input, AGENTS.md + .mcp.json named; codex (flags after the positionals): exec -s read-only, approval never, --skip-git-repo-check, env policy pinned, gpt-6-astra/high, -o <out>; trio argv fable/max with CC-02 PASS, opus/max without, --model sonnet refused before any CLI; noclaude: read falls back to codex (NOTE), trio/read-web/exec -> 69 naming the install fix, neither -> 69; exec --at task:dirty: detached snapshot worktree under the lease root, the brief (input) seen, the feature change seen, AGENTS.md from the integration branch, no .mcp.json, its write gone with the worktree, lease_merge from inside -> 45 (marker persona), no edit tool, denyWrite the lead git dir, AGENTS.md + .mcp.json named as content under review; no --at = ref:HEAD (integration commit, nothing named), --at ref:other (its change seen, AGENTS.md restored and named, reclaimed); bare dirty / task:dirty as input = --at task:dirty with the lease diff as input; task: + --at 64; persona_snapshot_diff writes the recorded snapshot's diff byte-equal to base..snapshot_sha after the lease tip moved past it (the tip's diff has the extra file, the written one not), unknown / fix cycle / dir / usage 64, marker 45; poison: read on the clean / dirty snapshot diffs (the dirty one's AGENTS.md + .mcp.json named as content under review) and exec at task:dirty report the finding, no MCP marker (control from the builder worktree: no findings + marker); ledger: a persona-forged user promotion approval -> dispatch 44 naming ops/leases.toml, gone, promote 42; a straggler's -> promote 44; the lead's own -> promoted; guard: marker / lease worktree 45, missing input / directory input / --at on read / --at without task:|ref: / unknown ref / dash ref / unknown task 64, no body 70, empty answer 80, AGENTS.md above the cwd 69, a ledger repointed at another snapshot 44 before the run (restored), a ledger changed before a ref:HEAD run 44, a lease in a fix cycle 64, a directory as <out> 64, a failing protected-path classifier without pipefail 1 before any run; hooks inert inside a persona (control without the marker writes); shipped manifest: ${_S12_SHIPPED}" "static"
+  row "SELF-12" "claude" "$_S12_CAP" "PASS" "resolve: tiers from the ladder, max_turns from the manifest, --model rung or id; trio opus/max (no record), fable/max (CC-02 PASS), opus/max (CC-02 FAIL); ladder-named plan-checker -> top; trio sonnet / lower rung / codex -> 64; lease + agent-team -> 64 naming at-resolve-pr / agent_teams (unenforced); unknown / path-shaped / bad CLI -> 64; manifest bad tier (lists the ladder tiers) / unknown key / not TOML -> 70, missing -> 69; corrupted ladder -> 70; persona_prompt: bodies by name (lease + agent-team too), unknown 64, no body 70, no manifest 69, bad entry 70, worker marker 45; read: claude -p Read,Grep,Glob (no Bash) dontAsk strict-mcp project+local opus/high turns 7, --brief in the prompt, denyWrite = the empty scratch cwd (gone after), the input file copied beside it, marker persona + no-push, planted key dropped; web: + WebFetch,WebSearch (no Bash) sonnet/high; neither gains Bash with the sandbox off; task:dirty read: the snapshot diff as input, AGENTS.md + .mcp.json named; codex (flags after the positionals): exec under the triforge_persona permission profile (extends :read-only, every credential path denied, no -s), approval never, --skip-git-repo-check, env policy pinned, gpt-6-astra/high, -o <out>; a codex without permission profiles 69; trio argv fable/max with CC-02 PASS, opus/max without, --model sonnet refused before any CLI; noclaude: read falls back to codex (NOTE), trio/read-web/exec -> 69 naming the install fix, neither -> 69; exec --at task:dirty: detached snapshot worktree under the lease root, the brief (input) seen, the feature change seen, AGENTS.md from the integration branch, no .mcp.json, its write gone with the worktree, lease_merge from inside -> 45 (marker persona), no edit tool, denyWrite the lead git dir, AGENTS.md + .mcp.json named as content under review; no --at = ref:HEAD (integration commit, nothing named), --at ref:other (its change seen, AGENTS.md restored and named, reclaimed); bare dirty / task:dirty as input = --at task:dirty with the lease diff as input; task: + --at 64; persona_snapshot_diff writes the recorded snapshot's diff byte-equal to base..snapshot_sha after the lease tip moved past it (the tip's diff has the extra file, the written one not), unknown / fix cycle / dir / usage 64, marker 45; poison: read on the clean / dirty snapshot diffs (the dirty one's AGENTS.md + .mcp.json named as content under review) and exec at task:dirty report the finding, no MCP marker (control from the builder worktree: no findings + marker); ledger: a persona-forged user promotion approval -> dispatch 44 naming ops/leases.toml, gone, promote 42; a straggler's -> promote 44; the lead's own -> promoted; guard: marker / lease worktree 45, missing input / directory input / --at on read / --at without task:|ref: / unknown ref / dash ref / unknown task 64, no body 70, empty answer 80, AGENTS.md above the cwd 69, a ledger repointed at another snapshot 44 before the run (restored), a ledger changed before a ref:HEAD run 44, a lease in a fix cycle 64, a directory as <out> 64, a failing protected-path classifier without pipefail 1 before any run; hooks inert inside a persona (control without the marker writes); round 3: persona_spawn returns at once with <name>.pid, persona_wait 75 under a 3 s budget then 0 with the rc, a stopped or killed run 80, persona_stop ends the whole tree, marker 45 for all three, usage / unknown run 64; every claude run under CLAUDE_CODE_DISABLE_ATTACHMENTS=1 and the trusted bundle's @ written as (at); a dropped [baseline].config with re-anchored digests and a poisoned .git/config 44 before any run; a persona deleting a run marker and moving a tag 44; a TERM-ignoring CLI KILLed before its worktree is reclaimed; a lease_merge mid-run 0, a persona moving the integration branch 44 naming HEAD and the branch; shipped manifest: ${_S12_SHIPPED}" "static"
 else
   row "SELF-12" "claude" "$_S12_CAP" "FAIL" "mismatch:$(printf '%s' "$_S12_FAIL" | cut -c1-900)" "static"
 fi

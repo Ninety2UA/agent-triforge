@@ -32,7 +32,10 @@
 #   lib/lease-wait.sh   detached builders (launcher, lane argv, builder body),
 #                       lease_stop, lease_heartbeat_check, lease_wait (KTD10)
 #   lib/persona.sh      the persona lane: dispatch_persona, persona_prompt,
-#                       persona_snapshot_diff, persona_resolve (KTD5, KTD20, KTD21)
+#                       persona_snapshot_diff, persona_resolve, and
+#                       persona_spawn / persona_wait / persona_stop, a dispatch
+#                       run detached and waited for in budgeted steps (KTD5,
+#                       KTD20, KTD21)
 #   lib/lease.sh        the lease lifecycle + _adapter_env + the typed-report parser
 # Function names and contracts are unchanged by the split; commands keep
 # sourcing this file only.
@@ -42,6 +45,9 @@
 #   invoke_codex         <agent-name> <prompt> [output-file] [timeout-seconds]
 #   resolve_role         <role>   — roster lookup: prints cli<TAB>model<TAB>effort
 #   dispatch_persona     <persona> <input> <out> [flags] — run a persona (persona.sh)
+#   persona_spawn        <run-dir> <name> <persona> <input> <out> [flags] — the same, detached
+#   persona_wait         <run-dir> [<name>...] — wait inside the lead's budget (75: call again)
+#   persona_stop         <run-dir> [<name>...] — stop detached runs (fingerprint-checked)
 #   ensure_core_trio_live         — lazy liveness gate for build/review paths
 #   latest_probe_record           — path of the newest ops/research/*-probe-record.md
 #   triforge_plugin_root          — prints the resolved plugin root (${_TRIFORGE_PLUGIN_ROOT})

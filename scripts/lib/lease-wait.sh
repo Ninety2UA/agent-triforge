@@ -85,7 +85,9 @@ def ps(fields, pid):
 # _LEASE_LAUNCH_PY <log> <argv...> — start argv in a new session with stdin
 # /dev/null and stdout/stderr appended to <log>, write the launch record
 # "<pid>\t<pgid>\t<start time> UTC" to <log minus .log>.launch (tmp, then
-# rename), and print the same line. The child holds at a pipe (fd
+# rename; _TRIFORGE_LAUNCH_RECORD names another path, and _TRIFORGE_LAUNCH_OP
+# the helper its messages name, as persona_spawn does), and print the same
+# line. The child holds at a pipe (fd
 # _TRIFORGE_GO_FD, read by _LEASE_BUILDER_SH) until its fingerprint is read and
 # the record written, so the record is the live process's own even for a
 # builder that finishes at once, and a builder the lead's tool call loses
@@ -97,7 +99,8 @@ def ps(fields, pid):
 _LEASE_LAUNCH_PY="${_LEASE_PS_PY}"'
 import sys
 log, argv = sys.argv[1], sys.argv[2:]
-launch = (log[:-4] if log.endswith(".log") else log) + ".launch"
+launch = os.environ.pop("_TRIFORGE_LAUNCH_RECORD", "") or ((log[:-4] if log.endswith(".log") else log) + ".launch")
+op = os.environ.pop("_TRIFORGE_LAUNCH_OP", "") or "lease_dispatch"
 r, w = os.pipe()
 env = dict(os.environ, _TRIFORGE_GO_FD=str(r))
 try:
@@ -105,13 +108,13 @@ try:
         p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
                              start_new_session=True, close_fds=True, pass_fds=(r,), env=env)
 except OSError as e:
-    sys.stderr.write("lease_dispatch: could not start the builder: " + str(e) + "\n")
+    sys.stderr.write(op + ": could not start the process: " + str(e) + "\n")
     sys.exit(1)
 os.close(r)
 info = ps("pgid=,lstart=", p.pid)
 if len(info) < 2 or info[0] != str(p.pid):
     os.close(w)
-    sys.stderr.write("lease_dispatch: the builder process " + str(p.pid) + " is not a session leader with a readable start time (ps: " + " ".join(info) + "); it was not released\n")
+    sys.stderr.write(op + ": the started process " + str(p.pid) + " is not a session leader with a readable start time (ps: " + " ".join(info) + "); it was not released\n")
     sys.exit(1)
 rec = str(p.pid) + "\t" + info[0] + "\t" + " ".join(info[1:]) + " UTC"
 try:
@@ -120,17 +123,18 @@ try:
     os.replace(launch + ".tmp", launch)
 except OSError as e:
     os.close(w)
-    sys.stderr.write("lease_dispatch: could not write the launch record " + launch + " (" + str(e) + "); the builder was not released\n")
+    sys.stderr.write(op + ": could not write the launch record " + launch + " (" + str(e) + "); the process was not released\n")
     sys.exit(1)
 os.write(w, b"go\n")
 os.close(w)
 print(rec)
 '
 
-# _LEASE_BUILDER_SH — the script the launched /bin/bash runs (bash -c, $0 a
-# label, $1 the loader, then _lease_builder_run's arguments): wait for the
-# launcher's release, source the loader, run the builder.
-_LEASE_BUILDER_SH='case "${_TRIFORGE_GO_FD:-}" in ""|*[!0-9]*) exit 1 ;; esac
+# _LEASE_GO_SH — the start of a script the launched /bin/bash runs (bash -c,
+# $0 a label, $1 the loader): wait for the launcher's release, source the
+# loader, drop $1. _LEASE_BUILDER_SH then runs the builder with the rest;
+# persona_spawn's script (persona.sh) runs a persona.
+_LEASE_GO_SH='case "${_TRIFORGE_GO_FD:-}" in ""|*[!0-9]*) exit 1 ;; esac
 _GO=""
 IFS= read -r _GO <&"$_TRIFORGE_GO_FD" || true
 eval "exec ${_TRIFORGE_GO_FD}<&-"
@@ -138,7 +142,8 @@ unset _TRIFORGE_GO_FD
 if [ "$_GO" != go ]; then exit 1; fi
 . "$1" || exit 97
 shift
-_lease_builder_run "$@"'
+'
+_LEASE_BUILDER_SH="${_LEASE_GO_SH}"'_lease_builder_run "$@"'
 
 # _LEASE_OWN_GROUP_PY — run by _lease_builder_run once the lane command
 # returned: TERM, then KILL, every other process left in its process group (a
@@ -501,7 +506,10 @@ _claude_sandbox_refusal() {
 # CLAUDE.md (nor what it @imports), no .claude/rules at any depth, no skills, hooks or plugins load,
 # while the --settings sandbox, the credential deny rules and auth still hold
 # (measured on Claude Code 2.1.289: probe row CC-24; dispatch_persona refuses a
-# claude without the flag). --settings carries the confinement, and a --settings file
+# claude without the flag). Safe mode leaves an @path mention in the prompt
+# itself attaching that file, so the persona classes also run under
+# `env CLAUDE_CODE_DISABLE_ATTACHMENTS=1`, the first words of their argv
+# (measured on 2.1.291: CC-24's attachment control). --settings carries the confinement, and a --settings file
 # outranks the project's own sandbox settings: Bash runs in Claude Code's
 # sandbox (row CC-15: writes stay in the working directory, no network),
 # fail-closed when the sandbox can't start, with no unsandboxed retry;
@@ -564,6 +572,7 @@ print(json.dumps(s, separators=(",", ":")))
 ' "$@") || return 1
   _LEASE_LANE_ARGV=(claude -p --output-format json --setting-sources project,local --strict-mcp-config
                     --permission-mode "$MODE" --tools "$TOOLS" --allowedTools "$ALLOW" --settings "$SETTINGS")
+  if [ "$SAFE" = 1 ]; then _LEASE_LANE_ARGV=(env CLAUDE_CODE_DISABLE_ATTACHMENTS=1 "${_LEASE_LANE_ARGV[@]}"); fi
   if [ -n "$MODEL" ]; then _LEASE_LANE_ARGV+=(--model "$MODEL"); fi
   if [ -n "$EFFORT" ]; then _LEASE_LANE_ARGV+=(--effort "$EFFORT"); fi
   if _claude_session_ok "$RESUME"; then _LEASE_LANE_ARGV+=(--resume "$RESUME"); fi
@@ -1234,6 +1243,33 @@ ALL_IN_EOF
   return 0
 }
 
+# _lead_wait_budget — the lead's wait budget, for lease_wait and persona_wait
+# (persona.sh): _WB_LEAD the lead's name ("the" when it can't be read),
+# _WB_CAP its lead.wait_budget_s from the CLI registry (600, Claude's, when
+# that can't be read; TRIFORGE_LEAD_WAIT_BUDGET_S may only lower it),
+# _WB_HEAD a quarter of it, at most 15 s and at least 1, and _WB_EFF the cap
+# minus that headroom: the longest a wait may take and still return inside
+# the lead's shell-tool limit. Call it directly, never in $(...).
+_lead_wait_budget() {
+  local LF TAB
+  TAB=$(printf '\t')
+  LF=$(lead_field name lead.wait_budget_s 2>/dev/null) || LF=""
+  case "$LF" in
+    *"$TAB"*) _WB_LEAD=${LF%%"$TAB"*}; _WB_CAP=${LF#*"$TAB"} ;;
+    *) _WB_LEAD="the"; _WB_CAP="" ;;
+  esac
+  case "$_WB_CAP" in ''|*[!0-9]*|0*) _WB_CAP=600 ;; esac
+  case "${TRIFORGE_LEAD_WAIT_BUDGET_S:-}" in
+    ''|*[!0-9]*|0*) ;;
+    *) if [ "$TRIFORGE_LEAD_WAIT_BUDGET_S" -lt "$_WB_CAP" ]; then _WB_CAP=$TRIFORGE_LEAD_WAIT_BUDGET_S; fi ;;
+  esac
+  _WB_HEAD=$((_WB_CAP / 4))
+  if [ "$_WB_HEAD" -gt 15 ]; then _WB_HEAD=15; fi
+  if [ "$_WB_HEAD" -lt 1 ]; then _WB_HEAD=1; fi
+  _WB_EFF=$((_WB_CAP - _WB_HEAD))
+  if [ "$_WB_EFF" -lt 1 ]; then _WB_EFF=1; fi
+}
+
 # lease_wait [task_id...] [--budget <seconds>] — the lead's one waiting
 # primitive (KTD10, R36). Blocks until at least one of the named leases (none
 # named: every lease building at the call) leaves `building`, or the budget
@@ -1275,7 +1311,7 @@ ALL_IN_EOF
 # named lease that already left building returns at once.
 lease_wait() {
   _lead_only lease_wait || return $?
-  local BUDGET="" NAMES="" ERR WAIT_LEAD LF TAB CAP HEADROOM EFF READ WATCH ROW START_MS STOP_MS CHECK_MS REM RC=0
+  local BUDGET="" NAMES="" ERR WAIT_LEAD CAP HEADROOM EFF READ WATCH ROW START_MS STOP_MS CHECK_MS REM RC=0
   local T UNVER="" DEFER=0
   # The budget counts from the call's start, so the checks before the wait
   # are inside it too.
@@ -1320,22 +1356,8 @@ lease_wait() {
   # The lead's shell-tool limit is a registry field of the lead (KTD1: read the
   # field, never the lead's name); one that can't be read keeps the shorter
   # limit, Claude's 600 s.
-  TAB=$(printf '\t')
-  LF=$(lead_field name lead.wait_budget_s 2>/dev/null) || LF=""
-  case "$LF" in
-    *"$TAB"*) WAIT_LEAD=${LF%%"$TAB"*}; CAP=${LF#*"$TAB"} ;;
-    *) WAIT_LEAD="the"; CAP="" ;;
-  esac
-  case "$CAP" in ''|*[!0-9]*|0*) CAP=600 ;; esac
-  case "${TRIFORGE_LEAD_WAIT_BUDGET_S:-}" in
-    ''|*[!0-9]*|0*) ;;
-    *) if [ "$TRIFORGE_LEAD_WAIT_BUDGET_S" -lt "$CAP" ]; then CAP=$TRIFORGE_LEAD_WAIT_BUDGET_S; fi ;;
-  esac
-  HEADROOM=$((CAP / 4))
-  if [ "$HEADROOM" -gt 15 ]; then HEADROOM=15; fi
-  if [ "$HEADROOM" -lt 1 ]; then HEADROOM=1; fi
-  EFF=$((CAP - HEADROOM))
-  if [ "$EFF" -lt 1 ]; then EFF=1; fi
+  _lead_wait_budget
+  WAIT_LEAD=$_WB_LEAD CAP=$_WB_CAP HEADROOM=$_WB_HEAD EFF=$_WB_EFF
   if [ -z "$BUDGET" ]; then
     BUDGET=$EFF
   elif [ "$BUDGET" -gt "$EFF" ]; then
