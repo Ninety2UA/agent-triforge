@@ -1,6 +1,6 @@
 ---
-saved: 2026-10-07T15:30:00Z
-phase: 2c, 3 and 4 merged; Phase 5 (U15 at-setup) next, then 6, then the end-of-program review
+saved: 2026-10-07T18:00:00Z
+phase: 0–5 merged; Phase 6 (S1 python-path hardening, U19, U20, docs, 4.0.0 bump) next, then the end-of-program review
 wave: 0
 tasks:
   total: 29
@@ -52,7 +52,7 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 | 2c | U25 dispatch_persona lane; U8 personas home, agents/ removed | **merged**: PR #19, squash 84d3d37 (2026-10-07). Rounds 1–4 reviewed; round 5 fixed and verified under the user's "fix all, verify, merge" decision; gates green on Python 3.14 and 3.12 and in CI |
 | 3 | U14 Codex lead: bootstrap, monitors, coordinator | **merged**: PR #20, squash dd0bb14 (2026-10-07). Rounds 1–4 reviewed; round 5 fixed and verified under the user's "fix all, verify, merge" decision; the first CI run exposed a ledger-write race (SELF-18), fixed in 676af5b; gates green on Python 3.14 and 3.12 and in CI |
 | 4 | U16 Grok Build adapter; U17 Devin CLI adapter (U18 shipped in 2a) | **merged**: PR #21, squash f27e550 (2026-10-07). Rounds 1–4 reviewed; round 5 fixed and verified; user-tier grok hooks run with a NOTE (user decision); integration merge with 2c and 3 (214efa8: `_lease_uncarve`, grok readers on `read_regular`); gates green on Python 3.14 and 3.12 and in CI. No further per-phase review (user decision) |
-| 5 | U15 at-setup lead step + instruction-file detection | pending |
+| 5 | U15 at-setup lead step + instruction-file detection | **merged**: PR #22, squash c2a054d (2026-10-07). Units A (roster helpers), B (instructions.sh) and C (the skill) built by parallel workers; SELF-16 new; gates green on Python 3.14 and 3.12 and in CI. No per-phase review (user decision) |
 | 6 | U19 watch-cycle carry-ins; U20 two-lead fixture sprint + 4.0 release | pending |
 | final | release/4.0 → main as v4.0.0 (release.yml publishes) | pending |
 

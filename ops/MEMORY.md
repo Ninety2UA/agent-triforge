@@ -40,6 +40,15 @@
       reconcile). Phase 3's non-blocking regular-file reader (read_regular) was not applied there,
       so a FIFO planted at ops/leases.toml could still block lease_wait. Needs its own red/green case.
 
+- Worker discovery (u15-instr, Phase 5, 2026-10-07; extended by the Phase 6 gap analysis), MEASURED mechanism, helper-level exposure from source reading:
+
+      Inline `python3 -c` / `python3 -` programs put the cwd first on sys.path, so a planted
+      json.py / tomllib.py / hashlib.py / re.py / subprocess.py there runs on import (measured with
+      a planted tomllib.py, Python 3.14). Lead-side parsers run from a builder's worktree after it
+      exits (_lease_builder_run cds into $WT; the envelope/extract parsers import json), and
+      session-start runs from the user's project root. Only scripts/lib/instructions.sh drops the cwd.
+      Phase 6 fixes this with one shared prelude for every inline program, proven by a SELF case.
+
 ## Interface proposals
 <!-- No active proposals -->
 
