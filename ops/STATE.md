@@ -62,7 +62,13 @@ Update this table and the frontmatter at every PR boundary; the plan is `docs/pl
 
 ## Blockers recorded for the user
 
-- (none yet)
+**2026-10-07 ~03:00: Phase 2c and Phase 3 stopped at the 3-review-round cap** (both third Codex gpt-6-astra xhigh reviews say FIX; gates green on both heads: 27 SELF rows, none FAIL). Nothing from either phase is merged; both branches are intact (`feat/v4-phase-2c` 115b9b1, `feat/v4-phase-3` 5b50bbc, both on release/4.0 fa612c9). Full reviews: session scratchpad `codex-2c-r3/review.md`, `codex-3-r3/review.md`; the final-diff reviewers' third-round verdicts are added below when they report. Your call: approve a fourth fix round (recommended scope below), or accept some findings as documented residuals.
+
+Lead's triage and recommendation:
+- **Functional bugs, fix regardless (2c):** at-review's dispatch block launches the two core reviewers twice (dispatch.md:151 repeats :80–89; only the second pair is awaited, the first can overwrite reports); a default review with no persona to wait on fails, because `persona_wait` returns 64 on an empty run dir (dispatch.md:234) — plain `/at-review` breaks. SELF-23 missed both (its stub accepts an empty run dir and it doesn't count launches).
+- **Policy-relevant, recommend fixing:** (3) the HOME refusal is bypassable by path casing on macOS (`pwd -P` vs `env pwd -P`; compare filesystem identity) → user-tier writes possible; (3) deleting `ops/leases.toml` and restarting under another TMPDIR passes the coordinator's integrity check (no session should start when the anchors elsewhere can't be checked); (3) headless enrollment writes through a symlinked `ops/` and its temp file is a plain open (predates 3, reachable through the hook); (3) a roster model value can put a `{`-leading line on hook stdout via `printf '%b'`; (2c) a moved integration branch / switched HEAD before dispatch supplies the "trusted" instruction bundle (validate the recorded integration SHA first).
+- **Same-user race hardening, could be documented instead:** skills-sync parent swap after validation; the `.codex/agents` migration `mv` racing a symlink swap; non-sticky shared TMPDIR races in the hook's and coordinator's temp dirs; a FIFO planted at a monitor state path blocking the hook; persona cleanup leaving descendants of a successful run, and `persona_stop` on an orphaned run returning 0. AGENTS.md "Confinement, stated as it is" already says a worker with a shell can write anything the user can and Triforge detects rather than prevents; these extend that.
+- Phase 4 (Grok, Devin) continues independently; Phases 5–6 wait on 3 and 4.
 
 ## Model and effort (user-approved)
 
