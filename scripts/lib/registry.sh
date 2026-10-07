@@ -116,7 +116,7 @@ def protected_match(path, framework):
 # Nonzero, with the python error on stderr, when the classifier itself fails:
 # callers treat that as a hit (fail closed), never as "nothing protected".
 _protected_classify() {
-  PC_FRAMEWORK="${1:-0}" python3 -c "
+  PC_FRAMEWORK="${1:-0}" python3 -c "${_PY_PRELUDE}
 import os, sys
 ${_PROTECTED_PY}
 framework = os.environ['PC_FRAMEWORK'] == '1'
@@ -609,7 +609,7 @@ TRIFORGE_ENV_BASE="HOME PATH TMPDIR TERM LANG COLORTERM USER"
 # cli_list [core|optional|all] — the registered CLI names, registry order,
 # space-separated on one line (default: all).
 cli_list() {
-  CL_TIER="${1:-all}" python3 -c "
+  CL_TIER="${1:-all}" python3 -c "${_PY_PRELUDE}
 import os
 ${_TRIFORGE_CLIS_PY}
 t = os.environ['CL_TIER']
@@ -646,7 +646,7 @@ def cli_value(who, cli, entry, field):
 # field. Two fields in one call is one python3 fork instead of two
 # (_registry_binary, lease_dispatch); the fields ride in as the argument list.
 cli_field() {
-  CF_ARGS="$*" CF_CLI="${1:?usage: cli_field <cli> <field>[.<subfield>]}" CF_FIELD="${2:?usage: cli_field <cli> <field>[.<subfield>]}" python3 -c "
+  CF_ARGS="$*" CF_CLI="${1:?usage: cli_field <cli> <field>[.<subfield>]}" CF_FIELD="${2:?usage: cli_field <cli> <field>[.<subfield>]}" python3 -c "${_PY_PRELUDE}
 import os, sys
 ${_TRIFORGE_CLIS_PY}
 ${_CLI_FIELD_PY}
@@ -665,7 +665,7 @@ print('\t'.join(cli_value('cli_field', cli, CLIS[cli], f) for f in fields))
 # cli_field loop forks once per lookup (ensure_core_trio_live, the session-start
 # detection loop). rc 2 with a message for an unknown tier or field.
 cli_table() {
-  CT_ARGS="$*" CT_TIER="${1:?usage: cli_table <core|optional|all> <field>[.<subfield>]...}" CT_FIELD="${2:?usage: cli_table <core|optional|all> <field>[.<subfield>]...}" python3 -c "
+  CT_ARGS="$*" CT_TIER="${1:?usage: cli_table <core|optional|all> <field>[.<subfield>]...}" CT_FIELD="${2:?usage: cli_table <core|optional|all> <field>[.<subfield>]...}" python3 -c "${_PY_PRELUDE}
 import os, sys
 ${_TRIFORGE_CLIS_PY}
 ${_CLI_FIELD_PY}
@@ -695,7 +695,7 @@ def install_fix(cli):
 # cli_install_fix <cli> — print install_fix(<cli>) (_INSTALL_FIX_PY); rc 2 for
 # an unknown CLI.
 cli_install_fix() {
-  CF_CLI="${1:?usage: cli_install_fix <cli>}" python3 -c "
+  CF_CLI="${1:?usage: cli_install_fix <cli>}" python3 -c "${_PY_PRELUDE}
 import os, sys
 ${_TRIFORGE_CLIS_PY}
 ${_INSTALL_FIX_PY}

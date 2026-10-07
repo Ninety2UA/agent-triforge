@@ -136,16 +136,30 @@ _ss_prose() {
   printf '%s' "$1" | LC_ALL=C tr -d '\000-\037\177'
 }
 
-# SS_READ_PY — python: read_regular(path), the bytes of a regular file, opened
-# O_NONBLOCK: a FIFO planted at ops/roster.toml or ops/leases.toml fails at
-# once instead of blocking session start (Phase 3 round 5, G3). The same lines
-# as _READ_REGULAR_PY in scripts/lib/common.sh, inline because this hook also
-# runs without the helper.
-SS_READ_PY='
-def read_regular(p):
+# SS_PY_PRELUDE — python: the first lines of every program this hook runs.
+# They run from the project root, and python3 -c puts the working directory
+# first on sys.path: these lines drop it (and every relative entry) before
+# anything is imported, so a tomllib.py or json.py planted there never runs
+# (Phase 6, S1). SS_READ_PY — python: the prelude, then read_regular(path[,
+# text]), the bytes of a regular file, opened O_NONBLOCK: a FIFO planted at
+# ops/roster.toml or ops/leases.toml fails at once instead of blocking session
+# start (Phase 3 round 5, G3). The same lines as _PY_PRELUDE and
+# _READ_REGULAR_PY in scripts/lib/common.sh, inline because this hook also
+# runs without the helper; SELF-27 compares the copies.
+SS_PY_PRELUDE='
+import os, sys
+try:
+    _tf_here = os.path.realpath(os.getcwd())
+except OSError:
+    _tf_here = None
+sys.path[:] = [_p for _p in sys.path if os.path.isabs(_p) and os.path.realpath(_p) != _tf_here]
+del _tf_here
+'
+SS_READ_PY="${SS_PY_PRELUDE}"'
+def read_regular(p, text=False):
     import os, stat
     fd = os.open(p, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
-    with os.fdopen(fd, "rb") as f:
+    with os.fdopen(fd, "r" if text else "rb") as f:
         if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
             raise OSError("not a regular file: " + p)
         return f.read()
@@ -354,9 +368,8 @@ fi
 # here and resolve_role raises the loud parse error at first use).
 ENROLLED_COUNT=0
 if [ -f "ops/roster.toml" ]; then
-  ENROLLED_COUNT=$(python3 -c "
+  ENROLLED_COUNT=$(python3 -c "${SS_READ_PY}
 import sys
-${SS_READ_PY}
 try:
     import tomllib
 except ImportError:
@@ -694,7 +707,7 @@ fi
 
 if [ -f ".codex/triforge-agents.toml" ]; then
   # Use tomllib/tomli to count real agent entries; fall back to grep if Python unavailable.
-  CODEX_AGENT_COUNT=$(python3 -c "
+  CODEX_AGENT_COUNT=$(python3 -c "${SS_PY_PRELUDE}
 import sys
 try:
     import tomllib
@@ -779,9 +792,8 @@ MSG="$MSG${INSTRUCTION_NOTICES:-}"
 # lease_heartbeat_check, whose safe-prune path does the reclamation.
 ACTIVE_LEASES=0
 if [ -f "ops/leases.toml" ]; then
-  ACTIVE_LEASES=$(python3 -c "
+  ACTIVE_LEASES=$(python3 -c "${SS_READ_PY}
 import sys
-${SS_READ_PY}
 try:
     import tomllib
 except ImportError:

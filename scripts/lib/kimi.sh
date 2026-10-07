@@ -268,7 +268,7 @@ _list_kimi_agents() {
 # builders answer in the same stream shape — the typed `Status:` report
 # (KTD11) is only parseable from the extracted prose.
 _kimi_extract_text() {
-  K_RAW="$1" K_OUT="$2" python3 -c '
+  K_RAW="$1" K_OUT="$2" python3 -c "${_PY_PRELUDE}"'
 import json, os, sys
 raw = open(os.environ["K_RAW"], "r", errors="replace").read()
 

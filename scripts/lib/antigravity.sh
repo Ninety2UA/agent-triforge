@@ -252,10 +252,13 @@ ${PROMPT}"
 #   13  empty response with a non-SUCCESS status (ERROR/CANCELED/INTERRUPTED/
 #       INVALID/WAITING/RUNNING)
 # python3 reads its inputs from prefixed env vars (repo convention; no jq).
+# The heredoc is the program, compiled and run after _PY_PRELUDE (common.sh):
+# the lease lane parses from the builder's worktree, where python3 - would
+# import a json.py planted there.
 _agy_parse_envelope() {
   local RAW=$1 OUT=$2
   local PRC=0
-  AGY_RAW="$RAW" AGY_OUT="$OUT" python3 - <<'PYAGY' || PRC=$?
+  AGY_RAW="$RAW" AGY_OUT="$OUT" python3 -c "${_PY_PRELUDE}"'exec(compile(sys.stdin.read(), "<stdin>", "exec"))' <<'PYAGY' || PRC=$?
 import json, os, sys
 raw_path = os.environ["AGY_RAW"]; out = os.environ["AGY_OUT"]
 try:

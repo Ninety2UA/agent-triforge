@@ -10472,6 +10472,512 @@ _S27_FAIL=""
 _S27_EV=""
 mkdir -p "$_S27"
 # --- SELF-27 cases (worker 6-sec) ---
+#   static   every python3 -c / python3 - program in scripts/lib/,
+#            hooks/handlers/, scripts/coordinate.sh and the skills' shell
+#            blocks runs the prelude first (_PY_PRELUDE, a variable whose
+#            definition starts with it, or a hook's literal copy; a skill block
+#            that imports nothing beyond os and sys may skip it), and the
+#            copies the hooks carry equal the library's. Negative control: a
+#            lease.sh copy with one program's prelude dropped and planted
+#            programs appended, and a session-start.sh copy whose prelude
+#            differs, are flagged by line and by name
+#   lead     from a lead checkout holding planted modules: resolve_role,
+#            roster_write_role and lease_create import none of them
+#   msg      roster_write_role's line names the model dispatch runs for an
+#            empty one: the member's, the shipped default, Claude Code's own
+#   lease    from a clean lead checkout, a builder plants modules in its
+#            worktree, where the claude lane's envelope parser, the group
+#            sweep and a kimi lane's stream extractor run after it exits: no
+#            marker, both leases reach review
+#   persona  an exec persona at that lease's snapshot (the planted modules in
+#            its worktree): the run supervisor imports none, rc 0
+#   fifo     a builder swaps the ledger for a FIFO while lease_wait polls:
+#            rc 44 within the bound, not a block; the root notice, the state
+#            read and the ledger check on a FIFO each return
+#   hook     session start and pre-compact in a project holding planted
+#            modules (throwaway HOME, stub agy and claude): no marker, and the
+#            member, lease and snapshot counts still print
+# Every planted module appends "<name> <cwd>" to its marker file when imported.
+
+# _s27_scan <root> <list> — the static scan of the files <list> names (one
+# per line, relative to <root>; the first holds _PY_PRELUDE). One line per
+# finding — "<file>:<line>:no-prelude:<text>", "<file>:<line>:unresolved:<why>",
+# "drift:<copy>:<library variable>", "scan-error:…" — then
+# "files=<n> programs=<n> file-runs=<n> copies=<n>".
+_s27_scan() {
+  python3 - "$@" 2>&1 <<'S27_SCAN_PY' || echo "scan-error:python-rc=$?"
+import os, re, sys
+HDOC = re.compile(r"<<(-?)[ \t]*(?:'([^']*)'|\"([^\"]*)\"|(\\?)([A-Za-z_][A-Za-z0-9_]*))")
+PY = re.compile(r"(?<![\w$./-])python3(?![\w.-])")
+OPT = re.compile(r"[ \t]+(?:\\\n[ \t]*)?(-[A-Za-z]*c|-|-[A-Za-z]+|)(?=[ \t\n;|&)<>]|$)")
+NAME = r"[A-Za-z_][A-Za-z0-9_]*"
+VAR = re.compile(r'"?\$\{(' + NAME + r')(?::?-\$\{?(' + NAME + r')\}?)?\}|"?\$(' + NAME + r')')
+out, defs, progs, fileruns = [], {}, [], 0
+
+
+def mask(text, label):
+    # text with every character that is not shell code (comments, quoted and
+    # heredoc text) blanked; newlines, quote marks and $( ) kept (the lexer of
+    # SELF-18's git scan, over the whole text)
+    m, st, pend, i, n = list(text), [["CODE", 0, None]], [], 0, len(text)
+
+    def blank(a, b):
+        for j in range(a, min(b, n)):
+            if m[j] != "\n":
+                m[j] = " "
+    while i < n:
+        c, nx, k = text[i], text[i + 1:i + 2], st[-1][0]
+        if i == 0 or text[i - 1] == "\n":
+            hd = [j for j, f in enumerate(st) if f[0] in ("HDOC", "HDOCQ")]
+            if hd:
+                delim, strip = st[hd[-1]][2]
+                e = text.find("\n", i)
+                e = n if e < 0 else e
+                if (text[i:e].lstrip("\t") if strip else text[i:e]) == delim:
+                    del st[hd[-1]:]
+                    blank(i, e)
+                    i = e
+                    continue
+                if st[-1][0] == "HDOCQ":
+                    blank(i, e)
+                    i = e + 1
+                    continue
+        if k in ("SQ", "ANSI"):
+            if k == "ANSI" and c == "\\":
+                blank(i, i + 2)
+                i += 2
+                continue
+            if c == "'":
+                st.pop()
+            else:
+                blank(i, i + 1)
+            i += 1
+            continue
+        if k in ("DQ", "HDOC", "PARAM", "PARAMQ"):
+            if c == "\\":
+                blank(i, i + 2)
+                i += 2
+                continue
+            if k == "DQ" and c == '"':
+                st.pop()
+            elif k in ("PARAM", "PARAMQ") and c == "}":
+                if st[-1][1]:
+                    st[-1][1] -= 1
+                else:
+                    st.pop()
+            elif k in ("PARAM", "PARAMQ") and c == "{":
+                st[-1][1] += 1
+            elif k in ("PARAM", "PARAMQ") and c == '"':
+                st.append(["DQ", 0, None])
+            elif k == "PARAM" and c == "'":
+                st.append(["SQ", 0, None])
+            elif c == "$" and nx in ("(", "{"):
+                st.append(["SUB" if nx == "(" else ("PARAM" if k == "PARAM" else "PARAMQ"), 0, None])
+                i += 2
+                continue
+            elif c == "`":
+                st.append(["BQ", 0, None])
+            else:
+                blank(i, i + 1)
+            i += 1
+            continue
+        if c == "\\":
+            i += 2
+            continue
+        if c == "#" and (i == 0 or text[i - 1] in " \t\n;|&()"):
+            e = text.find("\n", i)
+            e = n if e < 0 else e
+            blank(i, e)
+            i = e
+            continue
+        if c == "\n" and pend:
+            st.extend([kind, 0, (delim, strip)] for kind, delim, strip in pend)
+            pend = []
+        elif c == "'":
+            st.append(["ANSI" if i and text[i - 1] == "$" else "SQ", 0, None])
+        elif c == '"':
+            st.append(["DQ", 0, None])
+        elif c == "`":
+            if k == "BQ":
+                st.pop()
+            else:
+                st.append(["BQ", 0, None])
+        elif c == "$" and nx in ("(", "{"):
+            st.append(["SUB" if nx == "(" else "PARAM", 0, None])
+            i += 2
+            continue
+        elif c == "(" and k == "SUB":
+            st[-1][1] += 1
+        elif c == ")" and k == "SUB":
+            if st[-1][1]:
+                st[-1][1] -= 1
+            else:
+                st.pop()
+        elif text.startswith("<<<", i):
+            i += 3
+            continue
+        elif text.startswith("<<", i):
+            h = HDOC.match(text, i)
+            if h:
+                quoted = h.group(2) is not None or h.group(3) is not None or h.group(4) == "\\"
+                pend.append(("HDOCQ" if quoted else "HDOC", next(g for g in (h.group(2), h.group(3), h.group(5)) if g is not None), h.group(1) == "-"))
+                i = h.end()
+                continue
+        i += 1
+    for f in st[1:]:
+        out.append("scan-error:" + label + ":" + f[0] + " never closes (the lexer lost the quoting)")
+    return "".join(m)
+
+
+def lineno(text, p):
+    return text.count("\n", 0, p) + 1
+
+
+def segment(text, p):
+    # the first segment of the shell word at p: ("var", names) for "${A}",
+    # "$A", "${A:-$B}"; ("lit", text) for '...' or a "..." run up to its first
+    # $ or backtick; else ("?", text)
+    v = VAR.match(text, p)
+    if v:
+        return "var", [g for g in v.groups() if g]
+    if text.startswith("'", p):
+        e = text.find("'", p + 1)
+        return "lit", text[p + 1:e if e > 0 else len(text)]
+    if text.startswith('"', p):
+        e = re.compile(r'(?<!\\)["$`]').search(text, p + 1)
+        return "lit", text[p + 1:e.start() if e else len(text)]
+    return "?", text[p:p + 60].split("\n")[0]
+
+
+def check(kind, val, prelude, seen=()):
+    # "" when the segment runs the prelude first, else why not
+    if kind == "lit":
+        return "" if val.lstrip("\n").startswith(prelude) else "no-prelude:" + val.strip()[:60].replace("\n", " | ")
+    if kind != "var":
+        return "unresolved:" + val
+    for name in val:
+        if name == "_PY_PRELUDE":
+            continue
+        if name in seen or name not in defs:
+            return "unresolved:" + ("a cycle through " if name in seen else "no definition of ") + name
+        for d in defs[name]:
+            why = check(d[0], d[1], prelude, seen + (name,))
+            if why:
+                return why + " (via " + name + " at " + d[2] + ")"
+    return ""
+
+
+def expand(name, seen=()):
+    # the value of a variable defined once as '...' and "${VAR}" parts, else None
+    if name in seen or len(defs.get(name, ())) != 1:
+        return None
+    raw, p, s = defs[name][0][3], defs[name][0][4], ""
+    while p < len(raw) and raw[p] not in " \t\n;":
+        if raw[p] == "'":
+            e = raw.find("'", p + 1)
+            s, p = s + raw[p + 1:e], e + 1
+            continue
+        v = re.match(r'"\$\{?(' + NAME + r')\}?"', raw[p:])
+        x = expand(v.group(1), seen + (name,)) if v else None
+        if x is None:
+            return None
+        s, p = s + x, p + v.end()
+    return s
+
+
+root, files = sys.argv[1], [f for f in open(sys.argv[2]).read().split("\n") if f]
+texts = {}
+for f in files:
+    raw = open(os.path.join(root, f), encoding="utf-8", errors="surrogateescape").read()
+    if f.endswith(".md"):
+        # only the fenced shell blocks: prose and other fences blanked
+        keep, fence = [], None
+        for ln in raw.split("\n"):
+            s = ln.strip()
+            if s.startswith("```"):
+                fence = (s[3:].strip() in ("bash", "sh", "shell", "zsh")) if fence is None else None
+                keep.append("")
+            else:
+                keep.append(ln if fence else "")
+        raw = "\n".join(keep)
+    texts[f] = (raw, mask(raw, f))
+for f, (raw, mk) in texts.items():
+    for a in re.finditer(r"(?m)^[ \t]*(?:(?:local|readonly|export|declare)[ \t]+(?:-[a-z]+[ \t]+)?)?(" + NAME + r")=(?=['\"])", mk):
+        k, v = segment(raw, a.end())
+        defs.setdefault(a.group(1), []).append((k, v, f + ":" + str(lineno(raw, a.start())), raw, a.end()))
+pd = re.search(r"(?m)^_PY_PRELUDE='([^']*)'", texts[files[0]][0])
+if not pd:
+    out.append("scan-error:no _PY_PRELUDE='...' in " + files[0])
+prelude = pd.group(1).strip("\n") + "\n" if pd else "\0"
+for f, (raw, mk) in texts.items():
+    for hit in PY.finditer(mk):
+        p, where = hit.start(), f + ":" + str(lineno(raw, hit.start()))
+        if re.search(r"(command[ \t]+-v|type|which)[ \t]+$", mk[mk.rfind("\n", 0, p) + 1:p]):
+            continue
+        q, mode = hit.end(), None
+        while True:
+            o = OPT.match(raw, q)
+            if not o or not o.group(1):
+                break
+            q = o.end()
+            if o.group(1) == "-" or o.group(1).endswith("c"):
+                mode = o.group(1)
+                break
+        if mode and mode != "-":
+            a = re.compile(r"[ \t]+").match(raw, q)
+            kind, val = segment(raw, a.end() if a else q)
+        else:
+            rest = raw[q:raw.find("\n", q)]
+            arg = re.match(r"[ \t]+(\"[^\"]*\"|'[^']*'|[^ \t;|&)<>]+)", rest)
+            v = re.match(r'"\$\{?(' + NAME + r')\}?"$', arg.group(1)) if arg else None
+            if mode is None and arg and (re.search(r"\.py[\"']?$", arg.group(1)) or v and any(
+                    re.match(r"\S*\.py[\"']?(\s|$)", d[3][d[4]:d[4] + 300]) for d in defs.get(v.group(1), ()))):
+                fileruns += 1   # python3 <file>: sys.path[0] is the file's directory
+                continue
+            progs.append(where)
+            h = HDOC.search(rest)
+            if not h:
+                out.append(where + ":unresolved:the program comes from a pipe or an argument the scan can't follow")
+                continue
+            body = raw.find("\n", q) + 1
+            if h.group(2) is not None or h.group(3) is not None or h.group(4) == "\\":
+                e = re.compile(r"(?m)^\t*" + re.escape(next(g for g in (h.group(2), h.group(3), h.group(5)) if g is not None)) + r"$").search(raw, body)
+                kind, val = "lit", raw[body:e.start() if e else len(raw)]
+            else:
+                kind, val = segment('"' + raw[body:body + 200], 0)
+            why = check(kind, val, prelude)
+            if why:
+                out.append(where + ":" + why)
+            continue
+        progs.append(where)
+        why = check(kind, val, prelude)
+        if why and f.endswith(".md") and kind == "lit":
+            imps = re.findall(r"(?m)^\s*(?:import\s+([\w., ]+)|from\s+(\w+))", val)
+            if {x.strip().split(".")[0] for a, b in imps for x in (a.split(",") if a else [b])} <= {"os", "sys"}:
+                continue
+        if why:
+            out.append(where + ":" + why)
+copies = 0
+for other, base in (("SS_PY_PRELUDE", "_PY_PRELUDE"), ("SS_READ_PY", "_READ_REGULAR_PY"), ("_INSTR_READ_PY", "_READ_REGULAR_PY")):
+    if other in defs:
+        copies += 1
+        a, b = expand(other), expand(base)
+        if a is None or a != b:
+            out.append("drift:" + other + ":" + base)
+print("\n".join(out + ["files=%d programs=%d file-runs=%d copies=%d" % (len(texts), len(progs), fileruns, copies)]))
+S27_SCAN_PY
+}
+( cd "$REPO_ROOT" && { printf '%s\n' scripts/lib/common.sh; ls scripts/lib/*.sh hooks/handlers/*.sh scripts/coordinate.sh | grep -vx scripts/lib/common.sh; find skills -name '*.md' | LC_ALL=C sort; } ) > "$_S27/files"
+O=$(_s27_scan "$REPO_ROOT" "$_S27/files")
+_S27_N=$(printf '%s\n' "$O" | sed -n 's/^files=[0-9]* programs=\([0-9]*\) .*/\1/p')
+if [ "$(printf '%s\n' "$O" | wc -l | tr -d ' ')" != 1 ] || [ "${_S27_N:-0}" -lt 90 ]; then
+  _S27_FAIL="${_S27_FAIL} static(want-one-summary-line-and-90+-programs;got:$(printf '%s' "$O" | head -8 | tr '\n()' '|[]' | cut -c1-500))"
+fi
+_S27_FAIL="${_S27_FAIL}$(_self_expect static "$O" '^files=[0-9]+ programs=[0-9]+ file-runs=6 copies=3$')"
+# negative control: lease.sh with its first prelude dropped and eight programs
+# appended (five flagged: an SQ program, a heredoc, a pipe, an undefined and a
+# prelude-less variable; three passing: the read_regular splice, the prelude,
+# a python3 <file>); session-start.sh with its prelude copy changed
+mkdir -p "$_S27/neg"
+cp "$REPO_ROOT/scripts/lib/common.sh" "$REPO_ROOT/scripts/lib/lease-wait.sh" "$_S27/neg/"
+_S27_M=$(python3 - "$REPO_ROOT/scripts/lib/lease.sh" "$_S27/neg/lease.sh" "$REPO_ROOT/hooks/handlers/session-start.sh" "$_S27/neg/session-start.sh" <<'S27_NEG_PY'
+import sys
+src = open(sys.argv[1], encoding="utf-8").read()
+cut = "python3 -c \"${_PY_PRELUDE}\"'"
+k = src.find(cut)
+open(sys.argv[2], "w", encoding="utf-8").write(src[:k] + "python3 -c '" + src[k + len(cut):])
+print(src.count("\n", 0, k) + 1 if k >= 0 else 0)
+ss = open(sys.argv[3], encoding="utf-8").read()
+open(sys.argv[4], "w", encoding="utf-8").write(ss.replace("    _tf_here = None\n", "    _tf_here = ''\n", 1))
+S27_NEG_PY
+)
+_S27_L=$(wc -l < "$_S27/neg/lease.sh" | tr -d ' ')
+cat >> "$_S27/neg/lease.sh" <<'S27_PLANT_EOF'
+python3 -c 'import json'
+X=1 python3 - <<'S27P'
+import re
+S27P
+printf x | python3 -
+python3 -c "$_S27_NOPE_PY"
+_S27_BAD_PY='
+import json
+'
+python3 -c "$_S27_BAD_PY" x
+python3 -c "${_READ_REGULAR_PY}"'import json'
+python3 -c "${_PY_PRELUDE}"'import json'
+python3 "$D/tool.py" x
+S27_PLANT_EOF
+printf '%s\n' common.sh lease-wait.sh lease.sh session-start.sh > "$_S27/neg/files"
+O=$(_s27_scan "$_S27/neg" "$_S27/neg/files")
+_S27_GOT=$(printf '%s\n' "$O" | grep '^lease\.sh:' | cut -d: -f2 | tr '\n' ' ')
+_S27_WANT="${_S27_M} $((_S27_L + 1)) $((_S27_L + 2)) $((_S27_L + 5)) $((_S27_L + 6)) $((_S27_L + 10)) "
+[ "$_S27_GOT" = "$_S27_WANT" ] || _S27_FAIL="${_S27_FAIL} static-negative(want-lease.sh-lines:${_S27_WANT% };got:${_S27_GOT% })"
+_S27_FAIL="${_S27_FAIL}$(_self_expect static-negative "$O" '^drift:SS_PY_PRELUDE:_PY_PRELUDE$' '^drift:SS_READ_PY:_READ_REGULAR_PY$' \
+  "^lease\.sh:$((_S27_L + 10)):no-prelude:import json \(via _S27_BAD_PY" "^lease\.sh:$((_S27_L + 6)):unresolved:no definition of _S27_NOPE_PY" \
+  ' copies=2$')"
+[ "$(printf '%s\n' "$O" | grep -c '^session-start\.sh:[0-9]*:no-prelude' || true)" = 4 ] \
+  || _S27_FAIL="${_S27_FAIL} static-negative(want-4-session-start-programs-flagged;got:$(printf '%s\n' "$O" | grep -c '^session-start\.sh:' || true))"
+_S27_EV="${_S27_EV}static: ${_S27_N:-?} programs, every one prelude-first, 6 file runs, 3 copies equal; the planted lease.sh lines and the changed session-start.sh copy flagged; "
+
+# _s27_plant <dir> <marker> <module>... — a module per name that appends
+# "<name> <cwd>" to <marker> when imported
+_s27_plant() {
+  local D=$1 M=$2 N
+  shift 2
+  for N in "$@"; do
+    printf 'import os\nopen("%s", "a").write("%s " + os.getcwd() + "\\n")\n' "$M" "$N" > "$D/$N.py"
+  done
+}
+# _s27_marks <marker> — the module names a marker holds, sorted, or "none"
+_s27_marks() {
+  if [ -s "$1" ]; then cut -d' ' -f1 "$1" | LC_ALL=C sort -u | tr '\n' ',' | sed 's/,$//'; else echo none; fi
+}
+_S27_MODS="json re subprocess shutil tomllib tomli secrets hashlib shlex base64 datetime signal select calendar traceback collections"
+mkdir -p "$_S27/home" "$_S27/bin" "$_S27/tmp" "$_S27/plant-wt"
+# shellcheck disable=SC2086
+_s27_plant "$_S27/plant-wt" "$_S27/mark-wt" $_S27_MODS
+# The stub claude for the persona lane: above the sandbox floor, --safe-mode
+# in its help, a result envelope written without python (it runs in the
+# persona's worktree, among the planted modules). The stub kimi is resolution
+# only (the seam replaces the CLI, not the lane).
+cat > "$_S27/bin/claude" <<'S27_CLAUDE_EOF'
+#!/bin/sh
+case "${1:-}" in
+  --version) echo "2.1.289 (Claude Code)"; exit 0 ;;
+  --help) echo "  --safe-mode   Start with all customizations (CLAUDE.md, ...) disabled"; echo "  --tools <tools...>"; exit 0 ;;
+esac
+printf '%s\n' '{"type": "result", "subtype": "success", "is_error": false, "result": "S27-PERSONA-ANSWER", "session_id": "00000000-0000-4000-8000-000000000027", "num_turns": 1}'
+S27_CLAUDE_EOF
+printf '#!/bin/sh\necho "0.0.0-probe-stub"\n' > "$_S27/bin/kimi"
+# The fake builder: plants the modules in its worktree, then reports — as a
+# kimi stream for "s27-stream", after swapping the lead's ledger for a FIFO
+# for "s27-fifo" (lease_wait polls meanwhile)
+cat > "$_S27/fb.sh" <<S27_FB_EOF
+#!/bin/sh
+# probe builder (SELF-27)
+cp "$_S27/plant-wt/"*.py .
+case "\$1" in
+  *s27-stream*) printf '%s\n' '{"role":"assistant","id":"m1","content":"Done.\\n\\nStatus: DONE\\nFiles changed: json.py\\nTests: none\\nConcerns: None\\nDiscoveries for later tasks: None\\n"}' ;;
+  *s27-fifo*) sleep 2; L="$_S27/ff/ops/leases.toml"; mv "\$L" "\$L.s27"; mkfifo "\$L"; sleep 3; echo "Status: DONE" ;;
+  *) echo "planted"; echo "Status: DONE" ;;
+esac
+S27_FB_EOF
+chmod +x "$_S27/bin/claude" "$_S27/bin/kimi" "$_S27/fb.sh"
+printf 'BRIEF: run the project tests and report\n' > "$_S27/brief.txt"
+# _s27_lead <repo> <script> — lead-side steps from <repo> with the library
+# sourced: the case's HOME, TMPDIR and lease root, the stubs first on PATH, the
+# SELF seam (claude lead, the fake builder), no host markers, stdin /dev/null
+_s27_lead() {
+  ( cd "$1" && export HOME="$_S27/home" TMPDIR="$_S27/tmp" TRIFORGE_LEASE_ROOT="$1.leases" PATH="$_S27/bin:${_SELF_STUBS}:$PATH" \
+        GIT_CONFIG_NOSYSTEM=1 CLAUDE_PLUGIN_ROOT="$REPO_ROOT" TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S27/fb.sh" \
+      && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID TRIFORGE_LEASE_WORKER TRIFORGE_LEAD_PID CODEX_HOME TRIFORGE_CLAUDE_SANDBOX \
+      && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && eval "$2" ) < /dev/null 2>&1 || true
+}
+
+# lead: a lead checkout holding planted modules (untracked)
+_self_repo "$_S27/lp" "$_S27/home" sprint/s27 '[roles.builder]\ncli = "claude"\n'
+# shellcheck disable=SC2086
+_s27_plant "$_S27/lp" "$_S27/mark-lead" $_S27_MODS
+O=$(_s27_lead "$_S27/lp" '
+echo "role=$(resolve_role builder 2>/dev/null | cut -f1)"
+R=0; roster_write_role tester codex "" high >/dev/null 2>&1 || R=$?; echo "write:rc=$R"
+_self_try create lease_create t0 builder
+echo "lead=$(_s27_marks "$_S27/mark-lead")"
+')
+_S27_FAIL="${_S27_FAIL}$(_self_expect lead "$O" '^role=claude$' '^write:rc=0$' '^create:rc=0:' '^lead=none$')"
+
+# msg + lease + persona: a clean lead checkout; the builder plants the modules
+_self_repo "$_S27/lw" "$_S27/home" sprint/s27 '[roles.builder]\ncli = "claude"\n\n[members.codex]\nmodel = "gpt-s27-member"\n'
+O="$O
+$(_s27_lead "$_S27/lw" '
+_self_try w-member roster_write_role tester codex "" high
+_self_try w-shipped roster_write_role reviewer kimi "" high
+_self_try w-own roster_write_role analyst claude "" high
+_self_go t1
+echo "wt1=$(_s27_marks "$_S27/mark-wt")"
+echo "snap=$(git ls-tree --name-only "$(_ledger_get t1 snapshot_sha 2>/dev/null)" 2>/dev/null | grep -cE "^(json|re|subprocess|select|signal)\.py$" || true)"
+rm -f "$_S27/mark-wt"
+R=0; dispatch_persona test-gap-analyzer "$_S27/brief.txt" "$_S27/px.out" --at task:t1 >/dev/null 2>&1 || R=$?
+echo "persona:rc=$R:$(head -1 "$_S27/px.out" 2>/dev/null)"
+echo "px=$(_s27_marks "$_S27/mark-wt")"
+rm -f "$_S27/mark-wt"
+printf "[roles.builder]\ncli = \"kimi\"\nfallbacks = [\"claude\"]\n\n[members.kimi]\nenabled = true\n" > ops/roster.toml
+R=0; { lease_create t3 builder && lease_dispatch t3 "s27-stream probe" 60; } >/dev/null 2>&1 || R=$?
+if [ "$R" -eq 0 ]; then _self_wait_rc t3; lease_collect t3 >/dev/null 2>&1 || R=$?; fi
+echo "t3:go=$R:$(_ledger_get t3 builder_cli 2>/dev/null):$(_ledger_get t3 state 2>/dev/null)"
+echo "wt3=$(_s27_marks "$_S27/mark-wt")"
+')"
+_S27_FAIL="${_S27_FAIL}$(_self_expect msg "$O" \
+  '^w-member:rc=0:roster_write_role: \[roles\.tester\] cli=codex model="" \(dispatch runs the member model gpt-s27-member\) effort=high' \
+  '^w-shipped:rc=0:roster_write_role: \[roles\.reviewer\] cli=kimi model="" \(dispatch runs the shipped default kimi-code/k3\) effort=high' \
+  '^w-own:rc=0:roster_write_role: \[roles\.analyst\] cli=claude model="" \(dispatch runs the default model of Claude Code\) effort=high')"
+_S27_FAIL="${_S27_FAIL}$(_self_expect lease "$O" '^t1:go=0:review$' '^wt1=none$' '^snap=5$' '^t3:go=0:kimi:review$' '^wt3=none$')"
+_S27_FAIL="${_S27_FAIL}$(_self_expect persona "$O" '^persona:rc=0:S27-PERSONA-ANSWER$' '^px=none$')"
+_S27_EV="${_S27_EV}lead: resolve_role, roster_write_role and lease_create from a checkout holding 16 planted modules, none imported; msg: an empty role model named as the member model, the shipped default, Claude Code's own; lease: the claude lane (envelope, group sweep) and a kimi lane (stream extractor) after the builder planted them in its worktree, both review, no marker; persona: an exec persona at that snapshot (5 planted modules in it), rc 0, no marker; "
+
+# fifo: a builder swaps the ledger for a FIFO while lease_wait polls; then the
+# three readers with the FIFO in place, each run bounded
+_self_repo "$_S27/ff" "$_S27/home" sprint/s27 '[roles.builder]\ncli = "claude"\n'
+_s27_bounded() { # _s27_bounded <secs> <script> — the steps in a fresh lead shell from $_S27/ff under the timeout; then "bounded-rc=<n>"
+  local R=0
+  ( cd "$_S27/ff" && export HOME="$_S27/home" TMPDIR="$_S27/tmp" TRIFORGE_LEASE_ROOT="$_S27/ff.leases" PATH="$_S27/bin:${_SELF_STUBS}:$PATH" \
+        GIT_CONFIG_NOSYSTEM=1 TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S27/fb.sh" \
+      && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID TRIFORGE_LEASE_WORKER TRIFORGE_LEAD_PID \
+      && "$TIMEOUT_BIN" -k 5 "$1" /bin/bash -c 'source "$1/invoke-external.sh" >/dev/null 2>&1 && eval "$2"' _ "$_SELF_DIR" "$2" ) < /dev/null 2>&1 || R=$?
+  echo "bounded-rc=$R"
+}
+_s27_fifo_off() { # put the saved ledger back where a FIFO stands (a blocked reader released first)
+  local L="$_S27/ff/ops/leases.toml"
+  if [ -p "$L" ]; then ( exec 3<>"$L" ) 2>/dev/null; rm -f "$L"; fi
+  if [ -f "$L.s27" ] && [ ! -e "$L" ]; then mv "$L.s27" "$L"; fi
+}
+O=$(_s27_bounded 20 'lease_create f1 builder >/dev/null 2>&1 && lease_dispatch f1 "s27-fifo probe" 60 >/dev/null 2>&1; echo "dispatch:rc=$?"')
+O="$O
+$(_s27_bounded 40 'S=$(date +%s); R=0; lease_wait f1 --budget 25 >/dev/null 2>"$TMPDIR/s27-wait.err" || R=$?; echo "wait:rc=$R:secs=$(( $(date +%s) - S )):named=$(grep -c "ops/leases.toml" "$TMPDIR/s27-wait.err" || true)"')"
+_s27_fifo_off
+_s27_lead "$_S27/ff" '_self_wait_rc f1' >/dev/null
+L="$_S27/ff/ops/leases.toml"
+mv "$L" "$L.s27" && mkfifo "$L"
+O="$O
+$(_s27_bounded 20 '_lease_ctx || echo "ctx-failed"; R=0; _lease_root_notice s27 2>/dev/null || R=$?; echo "notice:rc=$R"; R=0; _lease_states_read "" >/dev/null 2>&1 || R=$?; echo "states:rc=$R"; R=0; E=$(_lease_ledger_check) || R=$?; echo "check:rc=$R:$E"')"
+_s27_fifo_off
+_S27_FAIL="${_S27_FAIL}$(_self_expect fifo "$O" '^dispatch:rc=0$' '^wait:rc=44:secs=([0-9]|1[0-9]):named=[1-9]' '^notice:rc=0$' '^states:rc=1$' \
+  '^check:rc=1:no lease ledger at .*ops/leases.toml' '^bounded-rc=0$')"
+[ "$(printf '%s\n' "$O" | grep -c '^bounded-rc=0$' || true)" = 3 ] || _S27_FAIL="${_S27_FAIL} fifo(a-bounded-step-did-not-finish:$(printf '%s\n' "$O" | grep '^bounded-rc=' | tr '\n' ' '))"
+_S27_EV="${_S27_EV}fifo: the ledger swapped for a FIFO mid-wait -> lease_wait 44 within 20 s naming ops/leases.toml; the root notice 0, the state read 1, the ledger check 1 on a FIFO, each at once; "
+
+# hook: session start, then pre-compact, in a project holding planted modules
+mkdir -p "$_S27/hp/ops" "$_S27/hp/.codex" "$_S27/hb"
+cat > "$_S27/hb/agy" <<'S27_AGY_EOF'
+#!/bin/sh
+# probe stub (SELF-27): answers the session-start hook without touching the real agy install
+case "${1:-}" in
+  --version) echo "0.0.0-probe-stub" ;;
+  plugin) case "${2:-}" in list) echo "agent-triforge" ;; *) : ;; esac ;;
+  agents) printf '%s\n' codebase-analyst architecture-reviewer targeted-researcher documentation-writer ;;
+esac
+exit 0
+S27_AGY_EOF
+printf '#!/bin/sh\ncase "${1:-}" in --version) echo "2.1.289 (Claude Code)" ;; esac\nexit 0\n' > "$_S27/hb/claude"
+chmod +x "$_S27/hb/agy" "$_S27/hb/claude"
+( cd "$_S27/hp" && git init -q ) >/dev/null 2>&1
+# shellcheck disable=SC2086
+_s27_plant "$_S27/hp" "$_S27/mark-hook" $_S27_MODS
+printf '[members.codex]\nmodel = "gpt-6-astra"\n' > "$_S27/hp/ops/roster.toml"
+printf '[lease.h1]\nstate = "building"\nbuilder_cli = "claude"\n' > "$_S27/hp/ops/leases.toml"
+printf '# Tasks\n- [ ] one\n- [x] two\n' > "$_S27/hp/ops/TASKS.md"
+printf '[agents.builder]\nmodel = "gpt-6-astra"\n' > "$_S27/hp/.codex/triforge-agents.toml"
+mkdir -p "$_S27/hhome"
+O=$( cd "$_S27/hp" && HOME="$_S27/hhome" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S27/hb:$PATH" bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1; echo "ss-rc=$?"
+  HOME="$_S27/hhome" bash "$REPO_ROOT/hooks/handlers/pre-compact.sh" 2>&1; echo "pc-rc=$?"; sed -n '/^## Lease snapshot/,$p' ops/STATE.md 2>/dev/null )
+O="$O
+hook=$(_s27_marks "$_S27/mark-hook")"
+_S27_FAIL="${_S27_FAIL}$(_self_expect hook "$O" '^ss-rc=0$' '^pc-rc=0$' '^hook=none$' '^Multi-agent framework ready\.$' \
+  '^Roster: core trio \+ [0-9]+ optional member\(s\) detected \([1-9][0-9]* enrolled\)\.$' '^Lease ledger: 1 active lease\(s\) from a previous session' \
+  '^Counts: building=1$' '^- h1: claude — building$')"
+if printf '%s\n' "$O" | grep -q 'hook crashed'; then _S27_FAIL="${_S27_FAIL} hook(crashed)"; fi
+_S27_EV="${_S27_EV}hook: session start and pre-compact in a project holding 16 planted modules: rc 0, the member count, the active-lease line and the lease snapshot printed, no marker"
+unset O R L _S27_N _S27_M _S27_L _S27_GOT _S27_WANT _S27_MODS
 # --- end of SELF-27 cases ---
 _S27_CAP="inline python ignores modules planted in the cwd: every inline program starts with the shared prelude, the lease lane parsers run after a builder planted json.py in its worktree, session start in a project with a planted tomllib.py, the ledger readers on a FIFO (S1, Phase 6)"
 if [ -z "$_S27_EV" ]; then _S27_FAIL="${_S27_FAIL} cases(no-case-ran)"; fi

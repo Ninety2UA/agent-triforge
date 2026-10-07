@@ -254,7 +254,7 @@ _tb_files() {
 # · 6 copied across filesystems, the source not removed (move).
 # On rc 3 and 4 stdout names the directory (relative to <root>); otherwise
 # nothing is printed, and the caller words the notice.
-_TB_WRITE_PY='
+_TB_WRITE_PY="${_PY_PRELUDE}"'
 import errno, os, secrets, stat, sys
 mode, root, dest = sys.argv[1], os.path.realpath(sys.argv[2]), sys.argv[3]
 src = sys.argv[4] if len(sys.argv) > 4 else ""
@@ -592,7 +592,7 @@ documentation-writer'
 # under the 30 s bound; the paths travel as arguments, never interpolated into
 # the python source.
 _tb_json_versions() {
-  _tb_run 30 python3 -c '
+  _tb_run 30 python3 -c "${_PY_PRELUDE}"'
 import json, os, sys
 for path in sys.argv[1:]:
     version = ""
@@ -611,7 +611,7 @@ for path in sys.argv[1:]:
 _tb_agy_imported_at() {
   local MANIFEST="${HOME:-}/.gemini/config/import_manifest.json"
   [ -f "$MANIFEST" ] || return 0
-  env TB_MANIFEST="$MANIFEST" python3 -c '
+  env TB_MANIFEST="$MANIFEST" python3 -c "${_PY_PRELUDE}"'
 import json, os
 try:
     with open(os.environ["TB_MANIFEST"], "r", encoding="utf-8") as f:
@@ -703,7 +703,7 @@ _TB_3X_CODEX_HOOKS_SHA256="9aece38547f04f98c9cd158538cb31e654c1fa3767de414afbab1
 _tb_is_3x_codex_hooks() {
   [ -f "$1" ] && [ ! -L "$1" ] || return 1
   grep -qF 'codex-changelog' "$1" 2>/dev/null || return 1
-  [ "$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1" 2>/dev/null || true)" = "$_TB_3X_CODEX_HOOKS_SHA256" ]
+  [ "$(python3 -c "${_PY_PRELUDE}"'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1" 2>/dev/null || true)" = "$_TB_3X_CODEX_HOOKS_SHA256" ]
 }
 
 # _tb_dir_in_project <dir> — 0 when <dir> (a direct child of the project root,

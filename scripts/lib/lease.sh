@@ -89,7 +89,7 @@ _lease_ctx() {
     return 0
   fi
   local OUT RC=0
-  OUT=$(LC_ROOT="${TRIFORGE_LEASE_ROOT:-}" LC_TMP="${TMPDIR:-/tmp}" python3 -c '
+  OUT=$(LC_ROOT="${TRIFORGE_LEASE_ROOT:-}" LC_TMP="${TMPDIR:-/tmp}" python3 -c "${_PY_PRELUDE}"'
 import hashlib, os, stat, sys
 # shared(p): another user could rename entries in directory p (owned by
 # someone else than this user or root, or group/other write without the
@@ -192,7 +192,7 @@ _lead_gitconfig_capture() {
   for SCOPE in --system --global; do
     LIST=$(env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT -u GIT_DIR -u GIT_WORK_TREE \
              git -C "$_LEASE_REPO" config "$SCOPE" --includes --null --get-regexp '^(user\.(name|email)|core\.(excludesfile|autocrlf|eol)|init\.defaultbranch|safe\.directory|filter\.lfs\..*)$' 2>/dev/null \
-           | python3 -c '
+           | python3 -c "${_PY_PRELUDE}"'
 import sys
 for item in sys.stdin.buffer.read().split(b"\0"):
     k, _, v = item.decode("utf-8", "replace").partition("\n")
@@ -249,7 +249,7 @@ _lgw() {
 
 # BSD-portable realpath (no readlink -f on stock macOS).
 _lease_realpath() {
-  RP_TARGET="$1" python3 -c "
+  RP_TARGET="$1" python3 -c "${_PY_PRELUDE}
 import os
 print(os.path.realpath(os.environ['RP_TARGET']))
 "
@@ -395,9 +395,8 @@ _ledger_write() {
     sleep 0.05
   done
   printf '%s\n' "$$" > "${LOCK}/pid" 2>/dev/null || true
-  LEDGER_FILE="$LEDGER" LEDGER_TASK="$TASK_ID" LEDGER_STATE="$_LEASE_STATE" LEDGER_ROOT="$_LEASE_ROOT" python3 -c "
+  LEDGER_FILE="$LEDGER" LEDGER_TASK="$TASK_ID" LEDGER_STATE="$_LEASE_STATE" LEDGER_ROOT="$_LEASE_ROOT" python3 -c "${_READ_REGULAR_PY}
 import hashlib, json, os, secrets, sys, time
-${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -568,9 +567,8 @@ _ledger_get() {
   _lease_ctx || return 1
   LEDGER=$_LEASE_LEDGER
   [ -f "$LEDGER" ] || return 1
-  LEDGER_FILE="$LEDGER" LEDGER_TASK="$1" LEDGER_KEY="$2" python3 -c "
+  LEDGER_FILE="$LEDGER" LEDGER_TASK="$1" LEDGER_KEY="$2" python3 -c "${_READ_REGULAR_PY}
 import os, sys
-${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -598,9 +596,8 @@ _ledger_get_row() {
   shift
   _lease_ctx || return 1
   [ -f "$_LEASE_LEDGER" ] || return 1
-  LEDGER_FILE="$_LEASE_LEDGER" LEDGER_TASK="$T" python3 -c "
+  LEDGER_FILE="$_LEASE_LEDGER" LEDGER_TASK="$T" python3 -c "${_READ_REGULAR_PY}
 import os, sys
-${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -1416,7 +1413,7 @@ REBASE_ROW_EOF
   if [ -t 0 ]; then VIA=tty; else VIA=non-tty; fi
   LINE="$(date -u +%Y-%m-%dT%H:%M:%SZ) by ${USER:-unknown} via ${VIA}; accepted: ${ACCEPTED:-none}; resumed: ${RESUMED:-none}"
   LOG=$(_ledger_get @baseline rebaseline_log 2>/dev/null || true)
-  LOG=$(RB_LOG="$LOG" RB_LINE="$LINE" python3 -c '
+  LOG=$(RB_LOG="$LOG" RB_LINE="$LINE" python3 -c "${_PY_PRELUDE}"'
 import os
 log = [e for e in os.environ["RB_LOG"].split(" || ") if e.strip()]
 log.append(os.environ["RB_LINE"])
@@ -1543,7 +1540,7 @@ BASEKEYS
         while IFS= read -r _kv_b64; do
           [ -n "$_kv_b64" ] && PAIRS+=("$(printf '%s' "$_kv_b64" | base64 -d 2>/dev/null)")
         done <<PREFIXENV
-$(TRIFORGE_ENV_PREFIX="${_K%\*}" python3 -c "
+$(TRIFORGE_ENV_PREFIX="${_K%\*}" python3 -c "${_PY_PRELUDE}
 import os, base64, sys
 prefix = os.environ['TRIFORGE_ENV_PREFIX']
 for k, v in os.environ.items():
@@ -1658,7 +1655,7 @@ _lease_provision() {
   _lease_provision_skills "$WT"
   case "$CLI" in
     claude)
-      TRACKED=$(_lgw "$WT" "$_CARVE_ADMIN" ls-files -z -- .claude/skills 2>/dev/null | python3 -c '
+      TRACKED=$(_lgw "$WT" "$_CARVE_ADMIN" ls-files -z -- .claude/skills 2>/dev/null | python3 -c "${_PY_PRELUDE}"'
 import sys
 names = set()
 for p in sys.stdin.buffer.read().decode("utf-8", "surrogateescape").split("\0"):
@@ -1704,7 +1701,7 @@ _lease_provisioned() {
   # only python's, and a failed status would read as "nothing provisioned").
   _lgw "$W" "$A" status --porcelain=v1 -z --untracked-files=all --ignored=traditional -- "$@" > "$TMP" 2>/dev/null || RC=1
   if [ "$RC" -eq 0 ]; then
-    python3 -c '
+    python3 -c "${_PY_PRELUDE}"'
 import re, sys
 dirs = [d.rstrip("/") for d in sys.argv[1:]]
 fields = sys.stdin.buffer.read().decode("utf-8", "surrogateescape").split("\0")
@@ -1974,9 +1971,9 @@ VERIFY_ROW_EOF
     echo "lease_merge: REFUSED — could not diff ${BASE:0:12}..${SNAP:0:12} for the ops/ check; nothing merges on an unreadable diff (KTD19)" >&2
     return 1
   fi
-  OPS=$(python3 -c '
+  OPS=$(python3 -c "${_PY_PRELUDE}"'
 import sys
-bad = [p for p in sys.stdin.buffer.read().decode("utf-8", "replace").split("\0") if p and (p.casefold() == "ops" or p.casefold().startswith("ops/"))]
+bad =[p for p in sys.stdin.buffer.read().decode("utf-8", "replace").split("\0") if p and (p.casefold() == "ops" or p.casefold().startswith("ops/"))]
 print(" ".join(bad[:10]) + (" ..." if len(bad) > 10 else ""))
 ' < "$DIFF_TMP") || { rm -f "$DIFF_TMP"; echo "lease_merge: REFUSED — the ops/ classifier failed; nothing merges on an unclassified diff (KTD19)" >&2; return 1; }
   rm -f "$DIFF_TMP"
@@ -2095,7 +2092,7 @@ _lease_extract_stream() {
 # as it is, with <err> (the run's stderr, when given and not empty) appended,
 # so it holds what the CLI said.
 _lease_claude_envelope() {
-  if [ -s "$1" ] && CE_OUT="$1" python3 -c '
+  if [ -s "$1" ] && CE_OUT="$1" python3 -c "${_PY_PRELUDE}"'
 import json, os, re, shutil, sys
 out = os.environ["CE_OUT"]
 src = open(out, encoding="utf-8", errors="replace").read()
@@ -3183,7 +3180,7 @@ _lease_mark_handover() {
   local FROM=${1:-unknown} TO=${2:-} IDS=${3:-} STAMP T
   _lease_ctx || return 1
   [ -f "$_LEASE_LEDGER" ] || return 0
-  STAMP=$(python3 -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"))') || return 1
+  STAMP=$(python3 -c "${_PY_PRELUDE}"'import datetime; print(datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"))') || return 1
   while IFS= read -r T; do
     [ -n "$T" ] || continue
     _ledger_write "$T" handover_from="$FROM" handover_to="$TO" handover_at="$STAMP" >/dev/null || return 1
@@ -3464,7 +3461,7 @@ _lease_is_framework_checkout() {
 # named agent-triforge OR is non-empty but not valid JSON (fail closed); 1 for
 # an empty input or a manifest with another name.
 _lease_manifest_is_triforge() {
-  python3 -c '
+  python3 -c "${_PY_PRELUDE}"'
 import json, sys
 raw = sys.stdin.read()
 if not raw.strip():
@@ -3553,9 +3550,8 @@ lease_promote() {
   # The roster of the lead checkout, whatever the cwd: a relative path would
   # read no roster from a subdirectory and default the gate to off.
   if [ -e "${_LEASE_REPO}/ops/roster.toml" ] || [ -L "${_LEASE_REPO}/ops/roster.toml" ]; then
-    REQUIRE_APPROVAL=$(ROSTER_FILE="${_LEASE_REPO}/ops/roster.toml" python3 -c "
+    REQUIRE_APPROVAL=$(ROSTER_FILE="${_LEASE_REPO}/ops/roster.toml" python3 -c "${_READ_REGULAR_PY}
 import os, sys
-${_READ_REGULAR_PY}
 # Fail CLOSED: an existing roster that cannot be parsed (no TOML library, or a
 # malformed file) or read as a regular file (a FIFO, a directory, a dangling
 # link) must NOT silently disable the approval gate — that would let
@@ -3666,7 +3662,7 @@ print('true' if v is True else 'false')
 # protected-path set a promotion approval binds to (no path hashes as the
 # empty set).
 _lease_protected_digest() {
-  printf '%s\n' "${1:-}" | python3 -c '
+  printf '%s\n' "${1:-}" | python3 -c "${_PY_PRELUDE}"'
 import hashlib, sys
 paths = sorted(set(l.split("\t", 1)[-1] for l in sys.stdin.read().splitlines() if l.strip()))
 print(hashlib.sha256("\n".join(paths).encode("utf-8", "surrogateescape")).hexdigest())
@@ -3732,9 +3728,8 @@ lease_status() {
     echo "lease_status: no lease ledger (${LEDGER}) — no leases have been created"
     return 0
   fi
-  LEDGER_FILE="$LEDGER" LS_LEGACY_LEAD="$_LEAD_LEGACY_CLI" python3 -c "
+  LEDGER_FILE="$LEDGER" LS_LEGACY_LEAD="$_LEAD_LEGACY_CLI" python3 -c "${_READ_REGULAR_PY}
 import os, sys, time
-${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:

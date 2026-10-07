@@ -215,7 +215,7 @@ _grok_class() {
 # `grok inspect` names them in its env_overlay layer (GRK-02;
 # _grok_lease_config refuses when it reports the overlay ignored).
 _grok_shell_policy() {
-  GSP_KEEP="${TRIFORGE_ENV_BASE} ${_GROK_SHELL_KEEP}" python3 -c '
+  GSP_KEEP="${TRIFORGE_ENV_BASE} ${_GROK_SHELL_KEEP}" python3 -c "${_PY_PRELUDE}"'
 import json, os
 keep = os.environ["GSP_KEEP"].split()
 print(json.dumps({"shell_environment_policy": {"inherit": "all", "ignore_default_excludes": True, "exclude": [], "include_only": keep},
@@ -325,7 +325,7 @@ if os.path.lexists(cfg):
 # defining a profile of the same name (grok runs the user's copy of a name
 # both files define).
 _grok_sandbox_profile() {
-  GSP_WT="$1" GSP_NAME="$_GROK_EDIT_PROFILE" GSP_DENY="${_GROK_HOME_DENY[*]}" python3 -c '
+  GSP_WT="$1" GSP_NAME="$_GROK_EDIT_PROFILE" GSP_DENY="${_GROK_HOME_DENY[*]}" python3 -c "${_PY_PRELUDE}"'
 import json, os, sys
 try:
     import tomllib
