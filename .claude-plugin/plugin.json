@@ -1,8 +1,8 @@
 {
   "name": "agent-triforge",
   "displayName": "Agent Triforge",
-  "version": "3.3.3",
-  "description": "Agent Triforge — A core trio of AI coding CLIs forging production-grade code together. Claude Code orchestrates Antigravity CLI, Codex CLI, and 19 specialist personas through file-based protocols, 27 skills (10 portable skills, 17 lead workflows), and parallel review swarms.",
+  "version": "4.0.0",
+  "description": "Agent Triforge: Claude Code or Codex leads an eight-CLI builder pool (the core trio of Claude Code, Antigravity CLI and Codex CLI, plus an optional tier) and 19 specialist personas through file-based protocols, per-task leases, 27 skills (10 portable skills, 17 lead workflows) and parallel review swarms.",
   "author": {
     "name": "Ninety2UA",
     "url": "https://github.com/Ninety2UA"
