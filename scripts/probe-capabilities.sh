@@ -739,6 +739,25 @@ _quota_shaped() { # _quota_shaped <output-file>
   grep -qiE 'usage limit|quota (exceeded|exhausted|reached)|reached your (monthly|daily|usage)|billing cycle|purchase extra usage' "$1" 2>/dev/null
 }
 
+# _negative_verdict <rc> <output-file> <error-ERE> — how the call of a negative
+# row that expects a rejection came out, as one word: timeout for rc 124 or
+# 137 (the timeout binary's SIGTERM, or its SIGKILL after the kill-after):
+# the call was cut off before it showed anything, so it never counts as a
+# rejection; accepted for rc 0 with READY in the output; rejected for any
+# other nonzero rc, or output matching <error-ERE>; else ambiguous. AGY-11c
+# and CUR-10 call it; SELF-29 tests it.
+_negative_verdict() {
+  if [ "$1" -eq 124 ] || [ "$1" -eq 137 ]; then
+    echo timeout
+  elif [ "$1" -eq 0 ] && grep -qi 'READY' "$2" 2>/dev/null; then
+    echo accepted
+  elif [ "$1" -ne 0 ] || grep -qiE -- "$3" "$2" 2>/dev/null; then
+    echo rejected
+  else
+    echo ambiguous
+  fi
+}
+
 # _agy_text <in> <out> — unwrap an agy --output-format json envelope to its
 # `response` text; copies the file through when it is not such an envelope.
 _agy_text() {
@@ -1048,9 +1067,12 @@ EOF
     O="$WORK/agy-11c.txt"
     AGY_11C_RC=0
     (cd "$FIX" && _probe_run 180 agy --model "$AGY_PIN" --effort low -p "Respond with only: READY" > "$O" 2>&1) || AGY_11C_RC=$?
-    if _contains_ci "$O" "READY" && [ "$AGY_11C_RC" -eq 0 ]; then
+    AGY_11C_V=$(_negative_verdict "$AGY_11C_RC" "$O" 'error|invalid|cannot|not (a )?valid|unsupported|reject|conflict')
+    if [ "$AGY_11C_V" = accepted ]; then
       row "AGY-11c" "agy" "Display name + --effort rejected (negative)" "FAIL" "display name + --effort was ACCEPTED (READY) — the KTD1 premise changed; re-read D-022/KTD1 before touching the roster effort mapping" "negative"
-    elif [ "$AGY_11C_RC" -ne 0 ] || grep -qiE 'error|invalid|cannot|not (a )?valid|unsupported|reject|conflict' "$O"; then
+    elif [ "$AGY_11C_V" = timeout ]; then
+      row "AGY-11c" "agy" "Display name + --effort rejected (negative)" "FAIL" "timed out after 180 s (rc=$AGY_11C_RC): the timeout cut the call off, so it showed no rejection; output: $(_evidence "$O")" "negative"
+    elif [ "$AGY_11C_V" = rejected ]; then
       row "AGY-11c" "agy" "Display name + --effort rejected (negative)" "PASS" "rejected (rc=$AGY_11C_RC): $(_evidence "$O")" "negative"
     else
       row "AGY-11c" "agy" "Display name + --effort rejected (negative)" "FAIL" "no READY and no error text (rc=$AGY_11C_RC) — ambiguous: $(_evidence "$O")" "negative"
@@ -1810,9 +1832,12 @@ EOF
     O="$WORK/cur-bracket.txt"
     CUR10_RC=0
     (cd "$FIX" && _probe_run 240 "$CUR_BIN" --model "${CUR_GROK_BARE}[effort=xhigh]" -p "Respond with only: READY" --output-format text --trust > "$O" 2>&1) || CUR10_RC=$?
-    if _contains_ci "$O" "READY" && [ "$CUR10_RC" -eq 0 ]; then
+    CUR10_V=$(_negative_verdict "$CUR10_RC" "$O" 'cannot use this model|invalid|unknown model|not (a )?valid|error')
+    if [ "$CUR10_V" = accepted ]; then
       row "CUR-10" "cursor" "Bracket effort form rejected (--model \"${CUR_GROK_BARE}[effort=xhigh]\", negative)" "FAIL" "bracket form ACCEPTED (READY) — KTD3's suffix mapping is not the only spelling; re-check D-025" "negative"
-    elif grep -qiE 'cannot use this model|invalid|unknown model|not (a )?valid|error' "$O" || [ "$CUR10_RC" -ne 0 ]; then
+    elif [ "$CUR10_V" = timeout ]; then
+      row "CUR-10" "cursor" "Bracket effort form rejected (--model \"${CUR_GROK_BARE}[effort=xhigh]\", negative)" "FAIL" "timed out after 240 s (rc=$CUR10_RC): the timeout cut the call off, so it showed no rejection; output: $(_evidence "$O")" "negative"
+    elif [ "$CUR10_V" = rejected ]; then
       row "CUR-10" "cursor" "Bracket effort form rejected (--model \"${CUR_GROK_BARE}[effort=xhigh]\", negative)" "PASS" "rejected (rc=$CUR10_RC): $(_evidence "$O")" "negative"
     else
       row "CUR-10" "cursor" "Bracket effort form rejected (--model \"${CUR_GROK_BARE}[effort=xhigh]\", negative)" "FAIL" "no READY and no error text (rc=$CUR10_RC) — ambiguous: $(_evidence "$O")" "negative"
@@ -2867,7 +2892,7 @@ print(" ".join(k for k in env if isinstance(k, str)))
 ' 2>/dev/null || true)
     ( cd "$WORK/u12-np-cc/repo" && unset CLAUDE_PLUGIN_ROOT && source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 \
         && _lease_lane_argv claude "$U12_MODEL" "" "" "" "" "$PWD" 240 "$WORK/u12-np-cc/repo/.git" "" \
-        && _adapter_env claude "$TIMEOUT_BIN" 240 "${_LEASE_LANE_ARGV[@]}" "$U12_NOPUSH_PROMPT" ) < /dev/null > "$O" 2>&1 || true
+        && _adapter_env claude "$TIMEOUT_BIN" --foreground -k 10s 240 "${_LEASE_LANE_ARGV[@]}" "$U12_NOPUSH_PROMPT" ) < /dev/null > "$O" 2>&1 || true
     # shellcheck disable=SC2086
     _u12_nopush_verdict "CC-19" "claude" "$U12_CC19" "$WORK/u12-np-cc" "$O" "lane argv (_lease_lane_argv claude, $U12_MODEL), sandbox on; the $(_count_words $U12_USERENV) name(s) of the user tier's settings env stayed out (--setting-sources project,local)" "$U12_USERENV"
     rm -rf "$WORK/u12-np-cc"
@@ -2884,7 +2909,7 @@ if _want CDX-19; then
     O="$WORK/u12-np-cdx.out"
     ( cd "$WORK/u12-np-cdx/repo" && unset CLAUDE_PLUGIN_ROOT && source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 \
         && _lease_lane_argv codex "$CDX_MODEL" low "" "" "" "$PWD" 240 \
-        && _adapter_env codex "$TIMEOUT_BIN" 240 "${_LEASE_LANE_ARGV[@]}" "$U12_NOPUSH_PROMPT" ) < /dev/null > "$O" 2>&1 || true
+        && _adapter_env codex "$TIMEOUT_BIN" --foreground -k 10s 240 "${_LEASE_LANE_ARGV[@]}" "$U12_NOPUSH_PROMPT" ) < /dev/null > "$O" 2>&1 || true
     _u12_nopush_verdict "CDX-19" "codex" "$U12_CDX19" "$WORK/u12-np-cdx" "$O" "lane argv (_lease_lane_argv codex, $CDX_MODEL at low)"
     rm -rf "$WORK/u12-np-cdx"
   fi
@@ -2902,13 +2927,13 @@ if _want AGY-18; then
     [ -n "$U12_AGYM" ] || U12_AGYM=$( source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 && cli_field antigravity model 2>/dev/null )
     ( cd "$WORK/u12-np-agy/repo" && unset CLAUDE_PLUGIN_ROOT && source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 \
         && _lease_lane_argv antigravity "" "" "$U12_AGYM" "" "" "$PWD" 240 \
-        && _adapter_env antigravity "$TIMEOUT_BIN" 260 "${_LEASE_LANE_ARGV[@]}" "$U12_NOPUSH_PROMPT" ) < /dev/null > "$O" 2>&1 || true
+        && _adapter_env antigravity "$TIMEOUT_BIN" --foreground -k 10s 260 "${_LEASE_LANE_ARGV[@]}" "$U12_NOPUSH_PROMPT" ) < /dev/null > "$O" 2>&1 || true
     U12_NOTE="lane argv (_lease_lane_argv antigravity, $U12_AGYM)"
     if [ ! -f "$WORK/u12-np-agy/repo/push-check.out" ] && grep -q '"action":"command"' "$O" 2>/dev/null; then
       U12_NOTE="the lane's own run was auto-denied (denied_actions: command — headless agy runs a command only with a user-tier permissions.allow rule); repeated with --dangerously-skip-permissions, a probe-only flag"
       ( cd "$WORK/u12-np-agy/repo" && unset CLAUDE_PLUGIN_ROOT && source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 \
           && _lease_lane_argv antigravity "" "" "$U12_AGYM" "" "" "$PWD" 240 \
-          && _adapter_env antigravity "$TIMEOUT_BIN" 260 "${_LEASE_LANE_ARGV[@]:0:$((${#_LEASE_LANE_ARGV[@]} - 1))}" --dangerously-skip-permissions -p "$U12_NOPUSH_PROMPT" ) < /dev/null > "$O.2" 2>&1 || true
+          && _adapter_env antigravity "$TIMEOUT_BIN" --foreground -k 10s 260 "${_LEASE_LANE_ARGV[@]:0:$((${#_LEASE_LANE_ARGV[@]} - 1))}" --dangerously-skip-permissions -p "$U12_NOPUSH_PROMPT" ) < /dev/null > "$O.2" 2>&1 || true
       O="$O.2"
     fi
     _u12_nopush_verdict "AGY-18" "agy" "$U12_AGY18" "$WORK/u12-np-agy" "$O" "$U12_NOTE"
@@ -3977,7 +4002,7 @@ if _want DVN-01 || _want DVN-02 || _want DVN-03 || _want DVN-04 || _want DVN-05 
           if [ "$DVN_RUN" = lane ]; then
             # the real boundary: _adapter_env devin through the loader
             (cd "$FIX" && DVN_DATA="$HOME/.local/share" && export HOME="$H" && source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 \
-               && _adapter_env devin "$TIMEOUT_BIN" 240s env XDG_DATA_HOME="$DVN_DATA" TRIFORGE_PROBE_WORKER="$U29_VAL" "${DVN_ARGV[@]}" "$(_u29_dump_prompt "$D" lane)") < /dev/null > "$O.lane" 2>&1 || true
+               && _adapter_env devin "$TIMEOUT_BIN" --foreground -k 10s 240s env XDG_DATA_HOME="$DVN_DATA" TRIFORGE_PROBE_WORKER="$U29_VAL" "${DVN_ARGV[@]}" "$(_u29_dump_prompt "$D" lane)") < /dev/null > "$O.lane" 2>&1 || true
           else
             (cd "$FIX" && _lane_run 240 env HOME="$H" XDG_DATA_HOME="$HOME/.local/share" SHELL=/bin/zsh "${DVN_ARGV[@]}" "$(_u29_dump_prompt "$D" zsh)" < /dev/null > "$O.zsh" 2>&1) || true
           fi
@@ -4822,8 +4847,8 @@ if _want GRK-06; then
         if [ "$W" = grok ]; then break; fi
         N=$((N + 1))
       done
-      ( cd "$D/wt" && _adapter_env grok "$TIMEOUT_BIN" 90s "${_GROK_ARGV[@]:0:$N}" grok inspect --json < /dev/null > "$WORK/grk06-fg-inspect.json" 2> /dev/null ) || true
-      ( cd "$D/wt" && _adapter_env grok "$TIMEOUT_BIN" 120s "${_GROK_ARGV[@]:0:$N}" python3 -c "$_GRK_SESSION_PY" "$D/wt" "$WORK/grk06-fg-session.json" < /dev/null > /dev/null 2>&1 ) || true
+      ( cd "$D/wt" && _adapter_env grok "$TIMEOUT_BIN" --foreground -k 10s 90s "${_GROK_ARGV[@]:0:$N}" grok inspect --json < /dev/null > "$WORK/grk06-fg-inspect.json" 2> /dev/null ) || true
+      ( cd "$D/wt" && _adapter_env grok "$TIMEOUT_BIN" --foreground -k 10s 120s "${_GROK_ARGV[@]:0:$N}" python3 -c "$_GRK_SESSION_PY" "$D/wt" "$WORK/grk06-fg-session.json" < /dev/null > /dev/null 2>&1 ) || true
       cp "$D/wt/.grok/config.toml" "$WORK/grk06-fg-config.toml" 2>/dev/null || true
       _grok_scratch_drop "$D"
       if [ -e "$D" ] || git -C "$FIX" worktree list --porcelain | grep -qF "$D"; then printf 'left-behind'; else printf 'removed'; fi )
@@ -5031,7 +5056,7 @@ if { _want GRK-08 || _want GRK-09; }; then
       GRK_RC=0
       ( cd "$K/repo" && unset CLAUDE_PLUGIN_ROOT && source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 \
           && _grok_sandbox_profile "$PWD" && _lease_lane_argv grok "" low "$GRK_MODEL" edit "" "$PWD" 240 \
-          && _adapter_env grok "$TIMEOUT_BIN" 300 "${_LEASE_LANE_ARGV[@]}" "Run these two shell commands with your shell tool, one at a time, and continue after a failure: first git push origin HEAD then sh ./grk-check.sh — finally reply with the output of grk-check.sh verbatim." ) < /dev/null > "$O" 2>&1 || GRK_RC=$?
+          && _adapter_env grok "$TIMEOUT_BIN" --foreground -k 10s 300 "${_LEASE_LANE_ARGV[@]}" "Run these two shell commands with your shell tool, one at a time, and continue after a failure: first git push origin HEAD then sh ./grk-check.sh — finally reply with the output of grk-check.sh verbatim." ) < /dev/null > "$O" 2>&1 || GRK_RC=$?
       GRK_SUM=$(_grk_summary "$O")
       GRK_REFS=$(git -C "$K/remote.git" for-each-ref 2>/dev/null | wc -l | tr -d ' ')
       if _want GRK-08; then
