@@ -43,7 +43,9 @@ DEFAULTS = {
 # choice — the Agent tool's `model` parameter under a Claude lead — NOT this
 # shell lane.)
 #
-# Sources of truth, in order: ops/roster.toml when present, overlaid
+# Sources of truth, in order: the checkout's ops/roster.toml
+# (_lead_roster_path: the same file from any subdirectory, as for every
+# roster reader and writer here) when present, overlaid
 # PER-FIELD onto built-in defaults — a role overriding only effort keeps the
 # default cli + model; no roster file at all resolves to the shipped
 # builder-pool posture. Load-time validation runs on EVERY load, not just for
@@ -86,13 +88,14 @@ resolve_role() {
   # fallback chain pick the next CLI, instead of failing the role on every
   # task. Only a roster that names opencode can put it in a chain (no shipped
   # default chain does), so a stock roster never pays for the version probe.
-  local RR_EXCLUDE=${RESOLVE_ROLE_EXCLUDE:-}
-  if [ -f ops/roster.toml ] && grep -q 'opencode' ops/roster.toml 2>/dev/null \
+  local RR_EXCLUDE=${RESOLVE_ROLE_EXCLUDE:-} RR_ROSTER
+  RR_ROSTER=$(_lead_roster_path)
+  if [ -f "$RR_ROSTER" ] && grep -q 'opencode' "$RR_ROSTER" 2>/dev/null \
      && command -v opencode >/dev/null 2>&1 && ! _opencode_v2_check opencode; then
     RR_EXCLUDE="${RR_EXCLUDE:+${RR_EXCLUDE},}opencode"
     echo "resolve_role: WARNING opencode skipped in every role's chain — version ${_OPENCODE_VERSION:-unreadable} is unsupported or unconfirmed (D-049); pin V1 with: ${_OPENCODE_V1_PIN}" >&2
   fi
-  RESOLVE_ROLE_EXCLUDE="$RR_EXCLUDE" ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
+  RESOLVE_ROLE_EXCLUDE="$RR_EXCLUDE" ROLE="$ROLE" ROSTER_FILE="$RR_ROSTER" python3 -c "
 import os, re, shutil, sys
 ${_CURSOR_ID_PY}
 ${_TRIFORGE_CLIS_PY}
@@ -198,6 +201,12 @@ for idx, cli in enumerate(chain):
     if idx == 0 and (entry['user_model'] or cli == DEFAULTS[role]['cli']):
         model = entry['model']      # explicit role model, or default primary
     else:
+        model = ''
+    # An empty model (a role written with model = \"\", or reached by fallback)
+    # is the member's model, else the CLI's shipped default: the model chosen at
+    # enrollment flows to every role naming the member. claude's shipped default
+    # is empty, so its lane still runs Claude Code's own default.
+    if not model:
         model = m.get('model', '') or CLI_DEFAULT_MODEL[cli]
     # An effort-only override on a role whose model is the shipped default:
     # agy and Cursor carry effort IN the model id, so the default's suffix
@@ -857,6 +866,23 @@ _lead_host_read() {
   fi
 }
 
+# _lead_sandbox_read — set _LEAD_SANDBOX (no subshell) to the lead CLI whose
+# sandbox this shell runs in, empty for none, and _LEAD_SANDBOX_WHY to the
+# markers that say so. Codex sets CODEX_SANDBOX (seatbelt on macOS) in the
+# tool shell of a sandboxed session, and CODEX_SANDBOX_NETWORK_DISABLED when
+# that sandbox has no network (workspace-write, read-only); a
+# danger-full-access session sets neither. Claude Code's sandbox sets no such
+# marker in its Bash tool.
+_lead_sandbox_read() {
+  _LEAD_SANDBOX=""
+  _LEAD_SANDBOX_WHY=""
+  if [ -n "${CODEX_SANDBOX:-}" ]; then _LEAD_SANDBOX_WHY="CODEX_SANDBOX=${CODEX_SANDBOX}"; fi
+  if [ -n "${CODEX_SANDBOX_NETWORK_DISABLED:-}" ]; then
+    _LEAD_SANDBOX_WHY="${_LEAD_SANDBOX_WHY}${_LEAD_SANDBOX_WHY:+, }CODEX_SANDBOX_NETWORK_DISABLED=${CODEX_SANDBOX_NETWORK_DISABLED}"
+  fi
+  if [ -n "$_LEAD_SANDBOX_WHY" ]; then _LEAD_SANDBOX=codex; fi
+}
+
 # lead_host_detect — print _lead_host_read's answer: claude, codex, none or
 # ambiguous.
 lead_host_detect() {
@@ -985,27 +1011,102 @@ _lead_session_key() {
   printf '%s-%s\n' "$K" "$(_lead_roster_path | cksum | cut -d' ' -f1)"
 }
 
+# _CODEX_HOOKS_LIST_PY — python: argv <dir> <seconds>. Asks `codex app-server`
+# (JSON-RPC over stdio, no login, no model) for hooks/list in <dir>, the call
+# probe CDX-22 reads trust from, and prints the hooks it lists as one JSON
+# array (each with source, pluginId, eventName, key, currentHash and
+# trustStatus); exit 69 with the reason on stdout instead when the server
+# can't start, answers with an error or gives no answer in <seconds>. The
+# server is killed on every way out, a SIGTERM from the timeout included.
+# Single-quoted: no apostrophe inside.
+_CODEX_HOOKS_LIST_PY='
+import json, select, signal, subprocess, sys, time
+signal.signal(signal.SIGTERM, lambda *a: sys.exit(124))
+cwd, secs = sys.argv[1], float(sys.argv[2])
+def fail(why):
+    print(why)
+    sys.exit(69)
+try:
+    p = subprocess.Popen(["codex", "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, cwd=cwd)
+except OSError as exc:
+    fail("codex app-server did not start: " + str(exc))
+got = None
+try:
+    try:
+        for m in ({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "triforge", "version": "0"}}},
+                  {"method": "initialized"}, {"id": 2, "method": "hooks/list", "params": {"cwds": [cwd]}}):
+            p.stdin.write((json.dumps(m) + "\n").encode())
+        p.stdin.flush()
+    except OSError:
+        pass
+    deadline = time.time() + secs
+    while got is None and time.time() < deadline:
+        r, _, _ = select.select([p.stdout], [], [], 0.5)
+        if not r:
+            continue
+        line = p.stdout.readline()
+        if not line:
+            fail("codex app-server exited without a hooks/list answer")
+        try:
+            o = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(o, dict) and o.get("id") == 2:
+            got = o
+finally:
+    try:
+        p.kill()
+        p.wait()
+    except OSError:
+        pass
+if got is None:
+    fail("codex app-server gave no hooks/list answer in " + sys.argv[2] + " s")
+if "error" in got or not isinstance(got.get("result"), dict):
+    fail("codex app-server answered hooks/list with an error: " + json.dumps(got.get("error"))[:200])
+hooks = []
+for ent in got["result"].get("data") or []:
+    if isinstance(ent, dict):
+        hooks += [h for h in ent.get("hooks") or [] if isinstance(h, dict)]
+print(json.dumps(hooks))
+'
+
 # _lead_hooks_detect <cli> — "hooks_trusted.<event><TAB>present|absent<TAB>why"
 # for each event the plugin's hooks/hooks.json declares (one
 # "hooks_trusted<TAB>absent<TAB>why" line when it declares none or can't be
 # read): the runtime half of KTD1. A Claude Code lead runs an enabled plugin's
 # hooks, headless too (CC-12), so a declared event is present. A Codex lead
-# runs hooks only when `codex features list` has hooks on, the user's Codex
-# config trusts the project (read here, never written) and the project's
-# .codex/hooks.json declares the event; otherwise absent, the first unmet
-# condition as the reason. Whether a Codex lead also runs a plugin's hooks is
-# U14's to verify (CDX-16 covers workers).
+# runs a plugin hook only once the user trusted it (CDX-22): hooks.state.<key>
+# .trusted_hash in the Codex config (CODEX_HOME's, read here, never written)
+# equal to the hash Codex computes for the hook now. So an event is present
+# only when `codex features list` has hooks on and `codex app-server`'s
+# hooks/list (_CODEX_HOOKS_LIST_PY, 30 s cap) lists this plugin's hooks for it
+# (pluginId <plugin name>@<marketplace>), each with trustStatus trusted and a
+# config trusted_hash equal to its currentHash. Anything else is absent with
+# the first unmet condition as the reason, fail closed: codex missing, the
+# call failing or timing out, a hook untrusted or modified since it was
+# trusted, a hash the config does not hold. Another plugin's hooks and the
+# project's own .codex/hooks.json do not count: they are not this plugin's
+# monitors.
 _lead_hooks_detect() {
-  local CLI=${1:-} FEAT=0 ROSTER ROOT
+  local CLI=${1:-} FEAT=0 ROSTER ROOT LIST="" LRC=0
   ROSTER=$(_lead_roster_path)
   case "$ROSTER" in
     /*) ROOT=${ROSTER%/ops/roster.toml} ;;
     *)  ROOT=$(pwd -P 2>/dev/null || pwd) ;;
   esac
-  if [ "$CLI" = codex ] && _codex_feature_enabled hooks; then FEAT=1; fi
-  LH_CLI="$CLI" LH_FEAT="$FEAT" LH_ROOT="${ROOT:-/}" LH_PLUGIN="${_TRIFORGE_PLUGIN_ROOT:-}/hooks/hooks.json" \
+  if [ "$CLI" = codex ]; then
+    if ! command -v codex >/dev/null 2>&1; then
+      FEAT=missing
+    elif _codex_feature_enabled hooks; then
+      FEAT=1
+      LIST=$(_run_with_timeout 30 python3 -c "$_CODEX_HOOKS_LIST_PY" "${ROOT:-/}" 20 2>/dev/null) || LRC=$?
+    fi
+  fi
+  LH_CLI="$CLI" LH_FEAT="$FEAT" LH_LIST="$LIST" LH_LRC="$LRC" LH_PLUGIN="${_TRIFORGE_PLUGIN_ROOT:-}" \
   LH_CODEX_CFG="${CODEX_HOME:-${HOME:-}/.codex}/config.toml" python3 -c "
 import json, os, sys
+${_READ_REGULAR_PY}
 
 def declared(path):
     try:
@@ -1016,7 +1117,50 @@ def declared(path):
     hooks = data.get('hooks') if isinstance(data, dict) else None
     return [e for e, v in hooks.items() if v] if isinstance(hooks, dict) else []
 
-events = declared(os.environ['LH_PLUGIN'])
+def codex_why(events, plugin, cfg_path):
+    # {event: reason} for every event that is not trusted, or one reason for all
+    if os.environ['LH_FEAT'] == 'missing':
+        return 'codex is not on PATH, so its hook trust can not be read', {}
+    if os.environ['LH_FEAT'] != '1':
+        return 'hooks is not on in codex features list', {}
+    if os.environ['LH_LRC'] != '0':
+        return 'the codex app-server hooks/list call failed (rc ' + os.environ['LH_LRC'] + ': ' + (' '.join(os.environ['LH_LIST'].split()) or 'no answer')[:200] + '), so hook trust is unknown', {}
+    try:
+        hooks = json.loads(os.environ['LH_LIST'])
+    except ValueError:
+        hooks = None
+    if not isinstance(hooks, list):
+        return 'codex app-server hooks/list printed no hook list, so hook trust is unknown', {}
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        cfg = tomllib.loads(read_regular(cfg_path).decode('utf-8')) if os.path.lexists(cfg_path) else {}
+        state = cfg.get('hooks', {}).get('state', {})
+    except Exception as exc:
+        return cfg_path + ' could not be read (' + ' '.join(str(exc).split())[:120] + '), so no trusted_hash is known', {}
+    if not isinstance(state, dict):
+        return 'hooks.state in ' + cfg_path + ' is not a table, so no trusted_hash is known', {}
+    why = {}
+    mine = [h for h in hooks if isinstance(h, dict) and h.get('source') == 'plugin' and str(h.get('pluginId', '')).split('@', 1)[0] == plugin]
+    for e in events:
+        on = [h for h in mine if h.get('eventName') == e[:1].lower() + e[1:]]
+        if not on:
+            why[e] = 'codex hooks/list lists no ' + plugin + ' ' + e + ' hook (the plugin is not installed or not enabled in this CODEX_HOME)'
+        for h in on:
+            key, now = str(h.get('key')), h.get('currentHash')
+            st = state.get(key)
+            if h.get('trustStatus') != 'trusted':
+                why[e] = 'the ' + plugin + ' ' + e + ' hook ' + key + ' is ' + str(h.get('trustStatus')) + ' (trust it in the Codex hook review, which records hooks.state in ' + cfg_path + ')'
+            elif not now or not isinstance(st, dict) or st.get('trusted_hash') != now:
+                why[e] = 'the ' + plugin + ' ' + e + ' hook ' + key + ' has no hooks.state trusted_hash equal to its current hash in ' + cfg_path
+            else:
+                continue
+            break
+    return '', why
+
+events = declared(os.path.join(os.environ['LH_PLUGIN'], 'hooks', 'hooks.json'))
 if not events:
     print('hooks_trusted\tabsent\tthe plugin hooks/hooks.json declares no event or could not be read')
     sys.exit(0)
@@ -1025,30 +1169,15 @@ every, why = '', {}
 if cli == 'claude':
     pass
 elif cli == 'codex':
-    root = os.path.realpath(os.environ['LH_ROOT'])
-    cfg_path = os.environ['LH_CODEX_CFG']
-    if os.environ['LH_FEAT'] != '1':
-        every = 'hooks is not on in codex features list'
+    try:
+        with open(os.path.join(os.environ['LH_PLUGIN'], '.claude-plugin', 'plugin.json'), encoding='utf-8') as f:
+            plugin = json.load(f).get('name') or ''
+    except (OSError, ValueError, AttributeError):
+        plugin = ''
+    if not plugin:
+        every = 'the plugin name could not be read from .claude-plugin/plugin.json'
     else:
-        cfg = {}
-        try:
-            try:
-                import tomllib
-            except ImportError:
-                import tomli as tomllib
-            with open(cfg_path, 'rb') as f:
-                cfg = tomllib.load(f)
-        except (ImportError, OSError, ValueError):
-            cfg = {}
-        projects = cfg.get('projects', {}) if isinstance(cfg, dict) else {}
-        projects = projects if isinstance(projects, dict) else {}
-        if not any(isinstance(v, dict) and v.get('trust_level') == 'trusted' and os.path.realpath(k) == root for k, v in projects.items()):
-            every = 'the project ' + root + ' is not trusted in ' + cfg_path
-        else:
-            local = declared(os.path.join(root, '.codex', 'hooks.json')) or []
-            for e in events:
-                if e not in local:
-                    why[e] = '.codex/hooks.json declares no ' + e + ' hook'
+        every, why = codex_why(events, plugin, os.environ['LH_CODEX_CFG'])
 else:
     every = 'no hook detection for this lead'
 for e in events:
@@ -1140,6 +1269,118 @@ LEAD_STATIC_EOF
     echo "resolve_lead_caps: NOTE the ${LNAME} lead runs without: ${MISS} — reported once per lead session (R44)" >&2
   fi
   return 0
+}
+
+# _lead_launch_compose <cli> <model> <effort> <headless|interactive> — the one
+# composition of a lead's launch line, read from <cli>'s registry lead fields
+# (scripts/coordinate.sh runs it, lead_launch_line prints it). headless is
+# lead.launch_argv, interactive the same line without the words that make it
+# headless (launch_interactive, scripts/lib/registry.sh); then the words
+# lead.model_argv and lead.effort_argv add for <model> and <effort> ("{}" =
+# the value; an empty value adds nothing, a value with no template is named in
+# a note). Prints one line per word, as the line runs, then
+# __full_access__=0|1 (1 when launch_full_access reads full access in the
+# words, when lead.full_access says so, or when it can't be read: fail
+# closed), one __why__= per reason, __shown__= the line as typed (the
+# registry spelling, then the added words shell-quoted) and one __note__= per
+# note. rc 5 when <cli> has no launch_argv (it cannot lead), 69 when no
+# interactive form of its line is known.
+_lead_launch_compose() {
+  LL_CLI="${1:-}" LL_MODEL="${2:-}" LL_EFFORT="${3:-}" LL_MODE="${4:-headless}" python3 -c "
+import os, shlex, sys
+${_TRIFORGE_CLIS_PY}
+${_LAUNCH_ACCESS_PY}
+e = os.environ
+cli, mode = e['LL_CLI'], e['LL_MODE']
+entry = CLIS.get(cli, {})
+lead = entry.get('lead') if isinstance(entry.get('lead'), dict) else {}
+argv = lead.get('launch_argv') if isinstance(lead.get('launch_argv'), str) else ''
+name = entry.get('name', cli)
+if not argv:
+    sys.stderr.write('lead launch line: ' + repr(cli) + ' has no lead.launch_argv in scripts/lib/registry.sh, so it cannot lead\n')
+    sys.exit(5)
+text = argv if mode != 'interactive' else launch_interactive(argv)
+if text is None:
+    sys.stderr.write('lead launch line: no interactive form of the ' + name + ' launch line is known (LAUNCH_HEADLESS_WORDS, scripts/lib/registry.sh)\n')
+    sys.exit(69)
+words = shlex.split(text)
+extra, notes = [], []
+for field in ('model', 'effort'):
+    value = e['LL_' + field.upper()]
+    tmpl = lead.get(field + '_argv', '')
+    tmpl = tmpl if isinstance(tmpl, str) else ''
+    if not value:
+        continue
+    if '{}' not in tmpl or '\n' in value:
+        notes.append('the ' + name + ' registry entry has no lead.' + field + '_argv, so the [lead] ' + field + ' ' + ' '.join(value.split()) + ' is not passed (the host default runs)')
+        continue
+    extra += launch_extra_words(tmpl, value)
+why = launch_full_access(words + extra)
+if lead.get('full_access') is True:
+    why.append('the registry declares lead.full_access = true')
+elif lead.get('full_access') is not False:
+    why.append('no lead.full_access declaration could be read (fail closed)')
+for w in words + extra:
+    print(w)
+print('__full_access__=' + ('1' if why else '0'))
+for r in why:
+    print('__why__=' + ' '.join(r.split()))
+print('__shown__=' + text + ''.join(' ' + shlex.quote(w) for w in extra))
+for n in notes:
+    print('__note__=' + n)
+"
+}
+
+# lead_launch_line <cli> interactive|headless — the line that starts <cli> as
+# this checkout's lead, with the roster's [lead] model and effort when <cli> is
+# the lead, else its lead defaults (lead_resolve_as). headless is the line
+# scripts/coordinate.sh runs, the prompt appended to it as one more word;
+# interactive is what the human types in a terminal: for Codex, the
+# danger-full-access line of R4 without exec (AGENTS.md: launching a lead with
+# full access is the human's step). stdout: the line. stderr: each note on the
+# model and effort flags, and, when the line runs the lead with full access,
+# one line saying so and why (print confinement_statements beside it). rc:
+# lead_resolve_as's (5 a CLI that cannot lead, 3, 4), 64 usage, 69 no
+# interactive form known.
+lead_launch_line() {
+  local CLI=${1:-} MODE=${2:-} ROW REST MODEL EFFORT OUT LINE SHOWN="" FULL=0 WHY="" TAB
+  case "$MODE" in
+    interactive|headless) ;;
+    *) echo "lead_launch_line: usage: lead_launch_line <cli> interactive|headless" >&2; return 64 ;;
+  esac
+  if [ -z "$CLI" ]; then
+    echo "lead_launch_line: usage: lead_launch_line <cli> interactive|headless" >&2
+    return 64
+  fi
+  TAB=$(printf '\t')
+  ROW=$(lead_resolve_as "$CLI") || return $?
+  REST=${ROW#*"$TAB"}
+  MODEL=${REST%%"$TAB"*}
+  EFFORT=${REST#*"$TAB"}
+  OUT=$(_lead_launch_compose "$CLI" "$MODEL" "$EFFORT" "$MODE") || return $?
+  while IFS= read -r LINE; do
+    case "$LINE" in
+      "__shown__="*) SHOWN=${LINE#__shown__=} ;;
+      "__full_access__="*) FULL=${LINE#__full_access__=} ;;
+      "__why__="*) WHY="${WHY}${WHY:+; }${LINE#__why__=}" ;;
+      "__note__="*) echo "lead_launch_line: note: ${LINE#__note__=}" >&2 ;;
+    esac
+  done <<LEAD_LAUNCH_EOF
+${OUT}
+LEAD_LAUNCH_EOF
+  if [ "$FULL" = 1 ]; then
+    echo "lead_launch_line: this line runs the lead with full access, no sandbox and no approval prompts (${WHY})" >&2
+  fi
+  printf '%s\n' "$SHOWN"
+}
+
+# confinement_statements — the three statements R4 has setup, the root
+# AGENTS.md and scripts/coordinate.sh make beside every full-access launch
+# line, one per line. The one copy: setup and coordinate.sh print it.
+confinement_statements() {
+  echo "  - Confinement under either lead is Triforge's scripts plus git-integrity detection."
+  echo "  - A lease worktree limits where a worker starts, not where it writes."
+  echo "  - Recorded approval is audit, not prevention, and worker output is an injection surface for a full-access lead."
 }
 
 # roster_write_lead <cli> [<model> [<effort>]] [--force]
@@ -1407,7 +1648,7 @@ latest_probe_record() {
 # different CLI. Nonzero on unknown role (rc 2) or unparseable roster (rc 4).
 roster_role_entry() {
   local ROLE=${1:?usage: roster_role_entry <role>}
-  RE_ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
+  RE_ROLE="$ROLE" ROSTER_FILE="$(_lead_roster_path)" python3 -c "
 import os, sys, re
 ${_CURSOR_ID_PY}
 ${_TRIFORGE_CLIS_PY}
@@ -1454,7 +1695,9 @@ for field in ('cli', 'model', 'effort', 'fallbacks'):
 # cli-only override must show the model dispatch would use for that CLI —
 # [members.<cli>].model, else the CLI's shipped default — not the role-default
 # model that belongs to a different CLI.
-if 'model' not in user and str(entry['cli']) != DEFAULTS[role]['cli']:
+# An empty model shows the member model, else the shipped default, as
+# resolve_role dispatches it.
+if ('model' not in user and str(entry['cli']) != DEFAULTS[role]['cli']) or not entry['model']:
     m = roster.get('members', {})
     m = m.get(str(entry['cli']), {}) if isinstance(m, dict) else {}
     m = m if isinstance(m, dict) else {}
@@ -1508,8 +1751,9 @@ roster_write_role() {
   local CLI=${2:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
   local MODEL=${3-}
   local EFFORT=${4:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
-  local FALLBACKS=${5-__derive__}
-  mkdir -p ops
+  local FALLBACKS=${5-__derive__} ROSTER
+  ROSTER=$(_lead_roster_path)
+  mkdir -p "${ROSTER%/*}"
   # Current merged chain from the sibling read surface — also surfaces an
   # unknown role (rc 2) or malformed roster (rc 4) with its precise error
   # before we touch the file.
@@ -1517,7 +1761,7 @@ roster_write_role() {
   CUR=$(roster_role_entry "$ROLE") || return $?
   CUR_CLI=$(printf '%s' "$CUR" | cut -f1)
   CUR_FB=$(printf '%s' "$CUR" | cut -f4)
-  ROSTER_FILE="ops/roster.toml" WR_ROLE="$ROLE" WR_CLI="$CLI" WR_MODEL="$MODEL" WR_EFFORT="$EFFORT" WR_FALLBACKS="$FALLBACKS" WR_CUR_CLI="$CUR_CLI" WR_CUR_FB="$CUR_FB" python3 -c "
+  ROSTER_FILE="$ROSTER" WR_ROLE="$ROLE" WR_CLI="$CLI" WR_MODEL="$MODEL" WR_EFFORT="$EFFORT" WR_FALLBACKS="$FALLBACKS" WR_CUR_CLI="$CUR_CLI" WR_CUR_FB="$CUR_FB" python3 -c "
 import json, os, re, sys
 ${_CURSOR_ID_PY}
 ${_TRIFORGE_CLIS_PY}
@@ -1676,11 +1920,13 @@ sys.stderr.write('roster_write_role: [roles.' + role + '] cli=' + cli + ' model=
 # roster_has_member <cli> — 0 when ops/roster.toml carries a [members.<cli>]
 # table, 1 when it does not (or the file is absent — the writer will create it),
 # 2 when the file exists but is unparseable. Cheap (tomllib only, no live probe)
-# so the session-start trigger stays fast.
+# so the session-start trigger stays fast. Like every reader and writer here,
+# it reads the checkout's roster (_lead_roster_path), from any subdirectory.
 roster_has_member() {
-  local CLI=${1:?usage: roster_has_member <cli>}
-  [ -f "ops/roster.toml" ] || return 1
-  ROSTER_FILE="ops/roster.toml" RH_CLI="$CLI" python3 -c "
+  local CLI=${1:?usage: roster_has_member <cli>} ROSTER
+  ROSTER=$(_lead_roster_path)
+  [ -f "$ROSTER" ] || return 1
+  ROSTER_FILE="$ROSTER" RH_CLI="$CLI" python3 -c "
 import os, sys
 ${_READ_REGULAR_PY}
 try:
@@ -1702,9 +1948,10 @@ sys.exit(0 if isinstance(m, dict) and isinstance(m.get(os.environ['RH_CLI']), di
 # _roster_member_field <cli> <field> — print one field of [members.<cli>]
 # (enabled printed as true|false). Nonzero when the entry is absent/unparseable.
 _roster_member_field() {
-  local CLI=${1:?} FIELD=${2:?}
-  [ -f "ops/roster.toml" ] || return 1
-  ROSTER_FILE="ops/roster.toml" RF_CLI="$CLI" RF_FIELD="$FIELD" python3 -c "
+  local CLI=${1:?} FIELD=${2:?} ROSTER
+  ROSTER=$(_lead_roster_path)
+  [ -f "$ROSTER" ] || return 1
+  ROSTER_FILE="$ROSTER" RF_CLI="$CLI" RF_FIELD="$FIELD" python3 -c "
 import os, sys
 ${_READ_REGULAR_PY}
 try:
@@ -1728,7 +1975,7 @@ print('true' if v is True else ('false' if v is False else v))
 
 # _member_consent_ok <cli> [roster] — the consent rule at dispatch (R24): rc 0
 # when the registry asks no consent for <cli>, or when [members.<cli>] in
-# <roster> (default ops/roster.toml) is enabled with a non-empty consent
+# <roster> (default the checkout's, _lead_roster_path) is enabled with a non-empty consent
 # string; otherwise rc 5 (resolve_role's code for the same rule) with a
 # refusal naming at-setup on stderr. member_rules refuses such a roster at
 # every load; this covers the paths that read the member table without loading
@@ -1737,7 +1984,7 @@ print('true' if v is True else ('false' if v is False else v))
 # is sent. A malformed roster fails closed (rc 4), as at load.
 _member_consent_ok() {
   local CLI=${1:?usage: _member_consent_ok <cli> [roster]}
-  MC_CLI="$CLI" MC_ROSTER="${2:-ops/roster.toml}" python3 -c "
+  MC_CLI="$CLI" MC_ROSTER="${2:-$(_lead_roster_path)}" python3 -c "
 import os, sys
 ${_TRIFORGE_CLIS_PY}
 ${_LEAD_PY}
@@ -1760,7 +2007,7 @@ sys.exit(5)
 }
 
 # _member_role_ok <cli> <role> [roster] — the role rule at dispatch (R24): rc 0
-# when <cli> may take <role> under <roster> (default ops/roster.toml) now: its
+# when <cli> may take <role> under <roster> (default the checkout's) now: its
 # registry role_limit is empty or names the role, or the role is one of its
 # opt_in_roles and an enabled [members.<cli>] records it in opt_in. A name
 # that is not a roster role (a persona) passes: the lane gives it its default
@@ -1773,7 +2020,7 @@ sys.exit(5)
 # lease_dispatch, dispatch_role and invoke_devin run it before anything is sent.
 _member_role_ok() {
   local CLI=${1:?usage: _member_role_ok <cli> <role> [roster]}
-  MR_CLI="$CLI" MR_ROLE="${2-}" MR_ROSTER="${3:-ops/roster.toml}" python3 -c "
+  MR_CLI="$CLI" MR_ROLE="${2-}" MR_ROSTER="${3:-$(_lead_roster_path)}" python3 -c "
 import os, sys
 ${_TRIFORGE_CLIS_PY}
 ${_ROLE_DEFAULTS_PY}
@@ -1857,8 +2104,10 @@ roster_write_member() {
     esac
     STAMP="user $(date -u +%Y-%m-%dT%H:%M:%SZ) via=${_LEAD_VIA}"
   fi
-  mkdir -p ops
-  ROSTER_FILE="ops/roster.toml" RW_CLI="$CLI" RW_ENABLED="$ENABLED" RW_MODEL="$MODEL" RW_TAG="$TAG" RW_STAMP="$STAMP" RW_OPTIN="$OPTIN" python3 -c "
+  local ROSTER
+  ROSTER=$(_lead_roster_path)
+  mkdir -p "${ROSTER%/*}"
+  ROSTER_FILE="$ROSTER" RW_CLI="$CLI" RW_ENABLED="$ENABLED" RW_MODEL="$MODEL" RW_TAG="$TAG" RW_STAMP="$STAMP" RW_OPTIN="$OPTIN" python3 -c "
 import json, os, re, sys
 ${_TRIFORGE_CLIS_PY}
 ${_ROLE_DEFAULTS_PY}
@@ -1976,7 +2225,8 @@ sys.stderr.write('roster_write_member: [members.' + cli + '] enabled=' + enabled
 # roster_member_auth <cli> — readiness (login) check for an OPTIONAL member.
 # Prints 'ok' (return 0) or 'auth-failed: <exact fix>' (return 1). Prints
 # 'unknown: ...' (return 2) for the core trio (their liveness is
-# ensure_core_trio_live's job) or an unknown cli. The result is cached per
+# ensure_core_trio_live's job) or an unknown cli, and 'unverified: ...'
+# (return 80) for a failure inside a lead's sandbox (below). The result is cached per
 # shell ($$ stays the sourcing shell's PID across subshells) so a status table
 # that queries the same cli twice probes only once.
 #   cursor   -> cursor-agent status         (pure auth query, no tokens)
@@ -1992,6 +2242,11 @@ sys.stderr.write('roster_write_member: [members.' + cli + '] enabled=' + enabled
 #               models` says "not authenticated" when signed in), and a READY
 #               costs tokens. A lapsed login surfaces on the first dispatch,
 #               which fails at once with "Not signed in" (deterministic).
+# Inside a lead's sandbox (_lead_sandbox_read: Codex's workspace-write, for
+# one), a failed check proves nothing: the sandbox can block the network or
+# the CLI's own state files. Such a failure prints 'unverified: relaunch with
+# <the lead's interactive line> to check <cli> (...)' and returns 80, and
+# nothing is cached, so the member is never marked logged out for the shell.
 roster_member_auth() {
   local CLI=${1:?usage: roster_member_auth <cli>}
   local CACHE="${TMPDIR:-/tmp}/triforge_auth_${CLI}_$$"
@@ -2064,6 +2319,16 @@ roster_member_auth() {
       LINE="unknown: cli '${CLI}'"; RC=2
       ;;
   esac
+  if [ "$RC" -eq 1 ]; then
+    local _LEAD_SANDBOX _LEAD_SANDBOX_WHY RELAUNCH="" SNAME=""
+    _lead_sandbox_read
+    if [ -n "$_LEAD_SANDBOX" ]; then
+      RELAUNCH=$(lead_launch_line "$_LEAD_SANDBOX" interactive 2>/dev/null) || RELAUNCH=""
+      SNAME=$(cli_field "$_LEAD_SANDBOX" name 2>/dev/null) || SNAME=$_LEAD_SANDBOX
+      printf '%s\n' "unverified: relaunch with ${RELAUNCH:-the lead outside its sandbox} to check ${CLI} (the check failed inside the ${SNAME} sandbox, ${_LEAD_SANDBOX_WHY}, which can block it: not a sign-out)"
+      return "$_RC_DEGRADED"
+    fi
+  fi
   printf '%s\n' "$LINE" > "$CACHE" 2>/dev/null || true
   printf '%s\n' "$LINE"
   return $RC
@@ -2076,6 +2341,8 @@ roster_member_auth() {
 #   declined             [members.<cli>] enabled=false (shown "skipped" in table)
 #   detected-unenrolled  binary present, no entry, readiness ok
 #   auth-failed          binary present, no entry, readiness check failed
+#   unverified           binary present, no entry, the check failed inside a
+#                        lead's sandbox (roster_member_auth rc 80)
 #   unsupported-version(<ver>)  OpenCode V2 binary, or <ver> = unreadable when
 #                        `opencode --version` can't be read (D-049) — enrolled or not;
 #                        every dispatch refuses it, so never shown as enrolled
@@ -2107,7 +2374,13 @@ roster_member_status() {
     if [ "$ENABLED" = "false" ]; then echo "declined"; else echo "enrolled(${MODEL})"; fi
     return 0
   fi
-  if roster_member_auth "$CLI" >/dev/null 2>&1; then echo "detected-unenrolled"; else echo "auth-failed"; fi
+  local ARC=0
+  roster_member_auth "$CLI" >/dev/null 2>&1 || ARC=$?
+  case "$ARC" in
+    0) echo "detected-unenrolled" ;;
+    "$_RC_DEGRADED") echo "unverified" ;;
+    *) echo "auth-failed" ;;
+  esac
   return 0
 }
 
@@ -2209,4 +2482,128 @@ roster_enroll_member() {
   fi
   echo "  decline: roster_write_member ${CLI} false \"\""
   return 20
+}
+
+# roster_egress_disclosure — what leaves this machine (R43), computed from the
+# checkout's roster and the registry's egress field, for setup to print. The
+# members counted: the core trio, every optional member whose
+# [members.<cli>] table does not decline it (enabled = false), and every
+# optional member a role chain names with no table at all (resolve_role
+# dispatches to it once its binary is there). Prints one "egress: " line per
+# provider that receives prompts and code, registry order; members whose
+# egress names the same provider (the text before " (") share its line, the
+# provider named once and each member's own qualifier beside its name (xAI,
+# for Cursor's Grok route and Grok Build). Then one "home: " line per
+# member: it runs as the user, so it can read the credential files under
+# HOME and send them to its provider. rc 0; 3 no TOML parser; 4 a roster
+# that can't be read or parsed.
+roster_egress_disclosure() {
+  ED_ROSTER="$(_lead_roster_path)" ED_HOME="${HOME:-}" python3 -c "
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_ROLE_DEFAULTS_PY}
+${_LEAD_PY}
+who = 'roster_egress_disclosure'
+roster = lead_roster(lead_toml(who), os.environ['ED_ROSTER'], who)
+members = roster.get('members', {})
+members = members if isinstance(members, dict) else {}
+roles = roster.get('roles', {})
+roles = roles if isinstance(roles, dict) else {}
+named = set()
+for role, dflt in DEFAULTS.items():
+    user = roles.get(role, {})
+    user = user if isinstance(user, dict) else {}
+    fbs = user.get('fallbacks', dflt['fallbacks'])
+    named.update([user.get('cli', dflt['cli'])] + (list(fbs) if isinstance(fbs, list) else []))
+
+def counted(cli, e):
+    m = members.get(cli)
+    if e['tier'] == 'core':
+        return True
+    if isinstance(m, dict):
+        return m.get('enabled') is not False
+    return cli in named
+
+def listed(names):
+    return names[0] if len(names) == 1 else ', '.join(names[:-1]) + ' and ' + names[-1]
+
+on = [(c, e) for c, e in CLIS.items() if counted(c, e)]
+groups = []
+for c, e in on:
+    head, sep, rest = e['egress'].partition(' (')
+    qual = rest[:-1] if sep and rest.endswith(')') else ''
+    for g in groups:
+        if g[0] == head:
+            g[1].append((e['name'], qual, e['egress']))
+            break
+    else:
+        groups.append((head, [(e['name'], qual, e['egress'])]))
+for head, ms in groups:
+    if len(ms) == 1:
+        print('egress: ' + ms[0][0] + ' sends the prompts and code to ' + ms[0][2])
+    else:
+        print('egress: ' + listed([n + (' (' + q + ')' if q else '') for n, q, _ in ms]) + ' send the prompts and code to ' + head)
+home = os.environ['ED_HOME'] or 'your home directory'
+for c, e in on:
+    print('home: ' + e['name'] + ' runs as you, so it can read the credential files under ' + home + ' and send them to ' + e['egress'])
+"
+}
+
+# codex_trust_status [<dir>] — whether Codex trusts <dir> (default: this
+# checkout's top, else the working directory) as a project, read from
+# ${CODEX_HOME:-$HOME/.codex}/config.toml through read_regular and never
+# written (R8, R18: the user adds the entry). Codex looks up the path it is
+# given (CDX-22: a /var/... and a /private/var/... spelling are two keys), so
+# the [projects."<key>"] entry for <dir> as given decides, else the one for
+# its physical path. Prints the state on the first line: trusted, untrusted
+# (the entry says so: Codex then also skips the root AGENTS.md, D-045),
+# absent (no entry, or no config) or unknown; then "match: path <p>",
+# "match: realpath <p>" or "match: none" with the reason; then the block the
+# user adds to that file for <dir> as given (absolute). rc 0; 80 with unknown
+# when the config can't be read or parsed, no TOML parser is there, or the
+# entry's trust_level is neither trusted nor untrusted.
+codex_trust_status() {
+  local DIR=${1:-}
+  if [ -z "$DIR" ]; then
+    DIR=$(_checkout_top) || DIR=$(pwd -P 2>/dev/null || pwd)
+  fi
+  CT_DIR="$DIR" CT_CFG="${CODEX_HOME:-${HOME:-}/.codex}/config.toml" python3 -c "
+import json, os, sys
+${_READ_REGULAR_PY}
+given = os.path.abspath(os.environ['CT_DIR'])
+real = os.path.realpath(given)
+cfg = os.environ['CT_CFG']
+
+def out(state, match, rc):
+    print(state)
+    print('match: ' + match)
+    print('[projects.' + json.dumps(given, ensure_ascii=False) + ']')
+    print('trust_level = ' + json.dumps('trusted'))
+    sys.exit(rc)
+
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        out('unknown', 'none (no TOML parser: use Python 3.11+ or pip install tomli)', 80)
+if not os.path.lexists(cfg):
+    out('absent', 'none (no ' + cfg + ')', 0)
+try:
+    data = tomllib.loads(read_regular(cfg).decode('utf-8'))
+except Exception as exc:
+    out('unknown', 'none (' + cfg + ' could not be read: ' + ' '.join(str(exc).split())[:160] + ')', 80)
+projects = data.get('projects', {})
+if not isinstance(projects, dict):
+    out('unknown', 'none ([projects] in ' + cfg + ' is not a table)', 80)
+for kind, key in (('path', given), ('realpath', real)):
+    if key in projects:
+        entry = projects[key]
+        level = entry.get('trust_level') if isinstance(entry, dict) else None
+        if level in ('trusted', 'untrusted'):
+            out(level, kind + ' ' + key, 0)
+        out('unknown', kind + ' ' + key + ' (its trust_level ' + repr(level) + ' is neither trusted nor untrusted)', 80)
+out('absent', 'none (no entry for ' + given + (' or ' + real if real != given else '') + ' in ' + cfg + ')', 0)
+"
 }

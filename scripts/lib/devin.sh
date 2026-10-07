@@ -322,6 +322,49 @@ _devin_auth_ready() {
   printf '%s\n' "$OUT" | awk 'NF {print; exit}' | grep -qE '^[[:space:]]*Logged in'
 }
 
+# devin_model_choices — the model ids this Devin account offers, one per line,
+# in the order `devin models list --format json` lists them (each family's
+# variants, model_uid), each once; an id that is not a plain token (letters,
+# digits, . _ : / -) is skipped, since it lands in the roster and on Devin's
+# command line. What setup offers for [members.devin] model, which
+# roster_write_member devin true <id> records and every Devin role then runs
+# (resolve_role); swe-1-6-slow, the registry model, stays the shipped pin, the
+# one a Free account runs. Read-only, 30 s cap. rc 69, nothing on stdout and
+# the reason on stderr, when devin is not on PATH, the call fails (signed
+# out, no network) or it lists no model.
+devin_model_choices() {
+  local OUT="" RC=0
+  if ! command -v devin >/dev/null 2>&1; then
+    echo "devin_model_choices: devin is not on PATH — $(cli_install_fix devin 2>/dev/null || echo 'install Devin CLI')" >&2
+    return 69
+  fi
+  OUT=$(_run_with_timeout 30 devin models list --format json < /dev/null 2>/dev/null) || RC=$?
+  if [ "$RC" -ne 0 ]; then
+    echo "devin_model_choices: devin models list failed (rc ${RC}); it needs a login (devin auth login) and the network" >&2
+    return 69
+  fi
+  if ! printf '%s' "$OUT" | python3 -c '
+import json, re, sys
+s = sys.stdin.read()
+try:
+    data = json.JSONDecoder().raw_decode(s[s.index("{"):])[0]
+except ValueError:
+    sys.exit(1)
+seen = []
+for fam in (data.get("families") if isinstance(data, dict) else None) or []:
+    for v in (fam.get("variants") if isinstance(fam, dict) else None) or []:
+        uid = v.get("model_uid") if isinstance(v, dict) else None
+        if isinstance(uid, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]*", uid) and uid not in seen:
+            seen.append(uid)
+if not seen:
+    sys.exit(1)
+print("\n".join(seen))
+'; then
+    echo "devin_model_choices: devin models list gave no model id (an empty list, or output that is not its JSON catalog)" >&2
+    return 69
+  fi
+}
+
 # devin_env_reimport [record] — whether a Devin worker sees the login shell's
 # exported variables: yes, no or unknown, from the DVN-04 row's reimport= in
 # <record>, else in the project's newest probe record (latest_probe_record),

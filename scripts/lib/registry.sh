@@ -488,9 +488,14 @@ CLIS = {
 # still names danger-full-access, bypassPermissions or one of the dangerous
 # flags counts too. launch_extra_words(tmpl, value): the words a
 # lead.model_argv or lead.effort_argv template adds for a value ("{}" = the
-# value). scripts/coordinate.sh splices both to decide when the human's
-# --allow-full-access is needed; scripts/validate-versions.sh runs them on each
-# shipped lead's launch line against lead.full_access. Python source like
+# value). launch_interactive(text): a lead.launch_argv without the words that
+# make it headless (LAUNCH_HEADLESS_WORDS), the line a human types to start
+# that lead in a terminal, or None for a binary with no entry there.
+# _lead_launch_compose (scripts/lib/roster.sh, which scripts/coordinate.sh
+# and lead_launch_line call) splices them to compose a lead's launch line and
+# decide when the human's --allow-full-access is needed;
+# scripts/validate-versions.sh runs the first two on each shipped lead's
+# launch line against lead.full_access. Python source like
 # _TRIFORGE_CLIS_PY: single-quoted, so no apostrophe inside.
 _LAUNCH_ACCESS_PY='
 import shlex
@@ -502,6 +507,23 @@ LAUNCH_FULL_ACCESS_NAMES = ("danger-full-access", "bypasspermissions", "dangerou
 # The binaries whose -p takes a profile name (codex exec 0.160.0: -p,
 # --profile <CONFIG_PROFILE>); for claude -p is --print and takes no value.
 LAUNCH_SHORT_PROFILE = ("codex",)
+# The words that make a launch line headless, by the binary that takes them:
+# claude -p / --print (one prompt, then exit), the codex exec subcommand. The
+# rest of the line stays as it is in a terminal: codex 0.160.0 takes -s, -c
+# and -m without exec, claude 2.1.291 --permission-mode, --model and --effort
+# without --print (their --help).
+LAUNCH_HEADLESS_WORDS = {"claude": ("--print", "-p"), "codex": ("exec",)}
+
+def launch_interactive(text):
+    words = shlex.split(text)
+    drop = LAUNCH_HEADLESS_WORDS.get(_launch_binary(words))
+    if drop is None:
+        return None
+    want = [w for w in words if w not in drop]
+    kept = " ".join(t for t in text.split() if t not in drop)
+    # the registry spelling when it still splits into the same words, else
+    # the words requoted
+    return kept if shlex.split(kept) == want else " ".join(shlex.quote(w) for w in want)
 
 def _launch_binary(words):
     for w in words:
