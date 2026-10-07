@@ -534,7 +534,8 @@ def write_new(final, data):
             f.write(data)
         return tmp
     raise OSError('no free temporary name beside ' + final)
-tmp = write_new(path, '\n'.join(lines).encode('utf-8'))
+body = '\n'.join(lines).encode('utf-8')
+tmp = write_new(path, body)
 # The ledger MUST stay tomllib-parseable after every transition: verify the
 # tmp file round-trips BEFORE it replaces the live ledger.
 try:
@@ -544,10 +545,14 @@ except Exception as exc:
     sys.stderr.write('_ledger_update: ERROR serialized ledger failed round-trip parse: ' + str(exc) + '\n')
     sys.exit(4)
 os.replace(tmp, path)
-# The lead's own write is the new baseline for the ledger itself.
+# The lead's own write is the new baseline for the ledger itself. The copy and
+# the digest come from the bytes written, never from a re-read of the path: a
+# builder that deletes or swaps the ledger right after the replace can neither
+# crash this write nor have its change recorded as the lead's (a digest of
+# 'absent' would adopt the deletion at the next check).
 os.makedirs(state, exist_ok=True)
-os.replace(write_new(copy_file, read_regular(path)), copy_file)
-os.replace(write_new(digest_file, (_sha(path) + '\n').encode('utf-8')), digest_file)
+os.replace(write_new(copy_file, body), copy_file)
+os.replace(write_new(digest_file, (hashlib.sha256(body).hexdigest() + '\n').encode('utf-8')), digest_file)
 if alert:
     sys.stderr.write('_ledger_update: WARNING ' + alert + '\n')
 " "$@"

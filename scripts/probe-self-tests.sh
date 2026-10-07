@@ -5173,10 +5173,13 @@ _s18_lead() {
   ( cd "$C/${3:-repo}" && export HOME="$C/home" TRIFORGE_LEASE_ROOT="$C/leases" PATH="${_SELF_STUBS}:$PATH" TRIFORGE_TEST_BUILDER="$C/fb.sh" GIT_CONFIG_NOSYSTEM=1 \
       && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && {
     _s18_go() { # _s18_go <task> — lease_create + lease_dispatch + wait for the exit record
-      local T=$1 N=0 OUT
+      # The output path comes from lease_dispatch's own last line, never from
+      # the ledger: a builder that deletes the ledger may already have run.
+      local T=$1 N=0 OUT DERR
       lease_create "$T" builder >/dev/null 2>&1 || { echo "create-failed"; return 1; }
-      lease_dispatch "$T" "probe task" 60 >/dev/null 2>&1 || { echo "dispatch-failed"; return 1; }
-      OUT=$(_ledger_get "$T" output_file 2>/dev/null)
+      DERR=$(lease_dispatch "$T" "probe task" 60 2>&1 >/dev/null) || { echo "dispatch-failed"; return 1; }
+      OUT=$(printf '%s\n' "$DERR" | sed -n 's/^lease_dispatch: task=.* output=//p' | tail -1)
+      [ -n "$OUT" ] || { echo "dispatch-no-output"; return 1; }
       while [ ! -f "${OUT}.rc" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
     }
     _s18_try() { # _s18_try <label> <cmd...> — "<label>-rc=<n>" then the call's stderr (errexit-safe)
@@ -5197,6 +5200,15 @@ _s18_expect() { # _s18_expect <case> <output> <pattern...> — every pattern (ER
   done
 }
 _s18_builder() { cat > "$_S18/$1/fb.sh"; chmod +x "$_S18/$1/fb.sh"; }
+# _s18_wait <case> — the first line of a builder that tampers with the ledger
+# or its anchors: wait (at most 10 s) for lease_dispatch's state=building write
+# to complete, its digest included. A builder that starts on the building row
+# alone can land between the lead's ledger write and its anchors, so its edit
+# races the lead's own write instead of meeting the next check (a CI runner).
+_s18_wait() {
+  local L="$_S18/$1/repo/ops/leases.toml" D="$_S18/$1/leases/lead/ledger.sha256"
+  printf 'N=0; while { ! grep -q "state = \\"building\\"" "%s" || [ "$(shasum -a 256 < "%s" | cut -c1-64)" != "$(cat "%s")" ]; } 2>/dev/null && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done\n' "$L" "$L" "$D"
+}
 # _s18_clean <case> — a clean builder: writes feature.txt (no git), reports DONE
 _s18_clean() { printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s18_builder "$1"; }
 
@@ -5234,7 +5246,7 @@ _s18_expect hooks "$O" 'collect-rc=44' '\.git/hooks/ changed' 'state=escalated' 
 _s18_setup ledger
 _s18_builder ledger <<EOF
 #!/bin/sh
-N=0; while ! grep -q "state = \"building\"" "$_S18/ledger/repo/ops/leases.toml" 2>/dev/null && [ "\$N" -lt 100 ]; do sleep 0.1; N=\$((N + 1)); done
+$(_s18_wait ledger)
 python3 -c "p = '$_S18/ledger/repo/ops/leases.toml'; s = open(p).read(); open(p, 'w').write(s.replace('pinned_reviewer = \"\"', 'pinned_reviewer = \"codex\"'))"
 echo "Status: DONE"
 EOF
@@ -5391,7 +5403,7 @@ _s18_expect legit-accepted "$O" 'rebaseline-rc=0' 'recollect-rc=0' 'remotes=\[or
 _s18_setup ledgerlink
 _s18_builder ledgerlink <<EOF
 #!/bin/sh
-N=0; while ! grep -q "state = \"building\"" "$_S18/ledgerlink/repo/ops/leases.toml" 2>/dev/null && [ "\$N" -lt 100 ]; do sleep 0.1; N=\$((N + 1)); done
+$(_s18_wait ledgerlink)
 L="$_S18/ledgerlink/repo/ops/leases.toml"
 cp "\$L" ledger-copy.toml && ln -sf "\$PWD/ledger-copy.toml" "\$L"
 echo "Status: DONE"
@@ -5463,16 +5475,17 @@ _s18_expect cfgwt "$O" 'collect-rc=44' '\.git/config\.worktree changed \(removed
 [ ! -e "$_S18/cfgwt/MARKER" ] || _S18_FAIL="$_S18_FAIL cfgwt(marker-ran)"
 
 # anchors: deleting an integrity anchor is a change, never a first use (B2).
-# Each builder first waits for lease_dispatch's own state=building row: that
-# write recreates the ledger anchors, so a builder faster than the dispatch
-# (a CI runner) would have its deletion overwritten before the check runs.
+# Each builder first waits for lease_dispatch's own state=building write to
+# complete (_s18_wait): that write recreates the ledger anchors, so a builder
+# faster than the dispatch (a CI runner) would have its deletion overwritten
+# before the check runs.
 #   sha      the builder deletes <lease root>/lead/ledger.sha256 -> collect 44 names the missing digest
 #   table    it deletes the [baseline] table AND both ledger anchors -> collect 44 names the missing table
 #   ledger   it deletes ops/leases.toml and the digest (copies stay) -> the next lease_create refuses (44)
 _s18_setup sha
 _s18_builder sha <<EOF
 #!/bin/sh
-N=0; while ! grep -q "state = \"building\"" "$_S18/sha/repo/ops/leases.toml" 2>/dev/null && [ "\$N" -lt 100 ]; do sleep 0.1; N=\$((N + 1)); done
+$(_s18_wait sha)
 rm -f "$_S18/sha/leases/lead/ledger.sha256"
 echo "Status: DONE"
 EOF
@@ -5481,7 +5494,7 @@ _s18_expect sha "$O" 'collect-rc=44' 'the ledger digest .*/lead/ledger\.sha256 i
 _s18_setup table
 _s18_builder table <<EOF
 #!/bin/sh
-N=0; while ! grep -q "state = \"building\"" "$_S18/table/repo/ops/leases.toml" 2>/dev/null && [ "\$N" -lt 100 ]; do sleep 0.1; N=\$((N + 1)); done
+$(_s18_wait table)
 python3 -c "
 import re; p = '$_S18/table/repo/ops/leases.toml'; s = open(p).read()
 open(p, 'w').write(re.sub(r'\[baseline\]\n(?:(?!\[)[^\n]*\n)*', '', s))"
@@ -5493,7 +5506,7 @@ _s18_expect table "$O" 'collect-rc=44' 'the \[baseline\] table of the ledger is 
 _s18_setup ledger-gone
 _s18_builder ledger-gone <<EOF
 #!/bin/sh
-N=0; while ! grep -q "state = \"building\"" "$_S18/ledger-gone/repo/ops/leases.toml" 2>/dev/null && [ "\$N" -lt 100 ]; do sleep 0.1; N=\$((N + 1)); done
+$(_s18_wait ledger-gone)
 rm -f "$_S18/ledger-gone/repo/ops/leases.toml" "$_S18/ledger-gone/leases/lead/ledger.sha256"
 echo "Status: DONE"
 EOF
