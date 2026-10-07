@@ -11275,8 +11275,304 @@ _S17_FAIL=""
 _S17_EV=""
 mkdir -p "$_S17"
 # --- SELF-17 cases (worker 6-sprint) ---
+# Static seams only: the SELF seam names the lead (TRIFORGE_TEST_LEAD) and a
+# fake builder replaces the adapter (TRIFORGE_TEST_BUILDER). The live half of
+# the plan's row, real claude -p and codex exec builders under each lead, is
+# not run here. Throwaway HOME, TMPDIR and lease roots under $_S17:
+#   sprint   under a claude lead, then a codex lead, the same sprint: a repo
+#            carrying a Triforge plugin.json (the framework-protected list
+#            applies), main committed with pinned dates and the roster left
+#            out of it ([lead] = that lead, builder antigravity), so main is
+#            the same commit in both runs. Task a (docs/a.txt) pinned to
+#            claude merges. Task b (scripts/lib/util.sh, protected): the pin
+#            alone -> 42 naming it, the lead's approval -> merges. Task c's
+#            builder sets core.fsmonitor -> collect 44 naming .git/config,
+#            escalated, the setting gone, its command never run; reclaimed.
+#            Promote -> 42 naming lease_approve promotion:sprint/s17 user, the
+#            lead's own promotion approval refused, the user's -> promoted;
+#            then at-wrap's "## Completion" block as written ->
+#            ops/.sprint-complete, the path coordinate.sh polls
+#   ledger   both ledgers with timestamps, pids, paths, lead_via and sha256
+#            digests masked: equal apart from the lead's identity (lead_cli;
+#            the lead behind the merge approval of b and the lead and host on
+#            the approval and promotion records) and the reviewer class;
+#            every commit SHA equal, main at the same commit in both runs
+#   upgrade  a 3.3.2 project: v3.3.2's templates/CLAUDE.md copied exactly, its
+#            template roster (no [lead]), .agents/skills as 3.3.2 left it (its
+#            12 skills and a names-only stamp) plus a user directory, an
+#            edited shipped skill and a v3.1.0 watch-cycle no stamp lists, and
+#            a lease opened by v3.3.2's own lease_create + lease_dispatch.
+#            The 4.0 session start (the real hook, stub CLIs, no optional CLI
+#            on PATH): rc 0, the stale CLAUDE.md and the open lease reported,
+#            test-driven-development and systematic-debugging retired and
+#            nothing else, every other shipped copy refreshed, the roster
+#            still without [lead]. The 4.0 lead: resolve_lead -> claude;
+#            lease_collect records a first baseline (a pre-3.3.3 ledger) ->
+#            review, pinned to codex, merges with only feature.txt;
+#            instruction_convert_stale converts the exact copy; a second
+#            session start flags nothing
+#   upguard  the same 3.3.2 project with the lease-root record in .git, which
+#            only a baseline record writes -> lease_collect 44 naming it: the
+#            first-baseline path is not open to a ledger whose table was removed
+mkdir -p "$_S17/home" "$_S17/tmp" "$_S17/bin" "$_S17/tools" "$_S17/v332" "$_S17/v310"
+_S17R=$(cd "$_S17" && pwd -P)
+_S17_DATE="2026-10-01T12:00:00Z"
+# Session-start stubs (SELF-08's agy) and the tools the hook needs, linked one
+# by one, so no optional CLI installed on this host is on its PATH.
+cat > "$_S17/bin/agy" <<'S17_AGY_EOF'
+#!/bin/sh
+# probe stub (SELF-17): answers the session-start hook without touching the real agy install
+case "${1:-}" in
+  --version) echo "0.0.0-probe-stub" ;;
+  plugin) case "${2:-}" in list) echo "agent-triforge" ;; *) : ;; esac ;;
+  agents) printf '%s\n' codebase-analyst architecture-reviewer targeted-researcher documentation-writer ;;
+esac
+exit 0
+S17_AGY_EOF
+printf '#!/bin/sh\n# probe stub (SELF-17): a Claude Code above the floor\ncase "${1:-}" in --version) echo "2.1.284 (Claude Code)" ;; esac\nexit 0\n' > "$_S17/bin/claude"
+printf '#!/bin/sh\n# probe stub (SELF-17): answers --version; never dispatched\necho "0.0.0-probe-stub"\nexit 0\n' > "$_S17/bin/codex"
+chmod +x "$_S17/bin/agy" "$_S17/bin/claude" "$_S17/bin/codex"
+for _s17_t in python3 git "${TIMEOUT_BIN:-timeout}"; do
+  if command -v "$_s17_t" >/dev/null 2>&1; then ln -sf "$(command -v "$_s17_t")" "$_S17/tools/$(basename "$_s17_t")"; fi
+done
+unset _s17_t
+_S17_PATH="$_S17/bin:$_S17/tools:/usr/bin:/bin:/usr/sbin:/sbin"
+# _s17_out <label> <cmd...> — "<label>:rc=<n>:<stdout + stderr, one line>"
+_s17_out() {
+  local L=$1 R=0 O
+  shift
+  O=$("$@" 2>&1) || R=$?
+  echo "$L:rc=$R:$(printf '%s' "$O" | tr '\n' ' ' | cut -c1-900)"
+}
+# at-wrap's completion block, verbatim: the first ```bash block under "## Completion"
+awk '$0 == "## Completion" { h = 1; next } h && /^## / { exit } h && $0 == "```bash" { b = 1; next } b && $0 == "```" { exit } b' \
+  "$REPO_ROOT/skills/at-wrap/references/archive-verify-state.md" > "$_S17/wrap.sh" 2>/dev/null || true
+[ -s "$_S17/wrap.sh" ] || _S17_FAIL="${_S17_FAIL} wrap(no-completion-block)"
+grep -q '^SENTINEL="ops/\.sprint-complete"$' "$REPO_ROOT/scripts/coordinate.sh" || _S17_FAIL="${_S17_FAIL} wrap(coordinate-polls-another-path)"
+
+# _s17_sprint <lead> — the sprint under that lead in $_S17/<lead>; one line per step
+_s17_sprint() {
+  local L=$1 R="$_S17/$1"
+  ( mkdir -p "$R" && cd "$R" && export HOME="$_S17/home" GIT_CONFIG_NOSYSTEM=1 GIT_AUTHOR_DATE="$_S17_DATE" GIT_COMMITTER_DATE="$_S17_DATE" \
+      && git init -q -b main && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
+      && mkdir -p .claude-plugin scripts/lib && printf '{"name": "agent-triforge", "version": "0.0.0"}\n' > .claude-plugin/plugin.json \
+      && echo lib > scripts/lib/util.sh && echo r > README.md && printf 'ops/leases.toml\nops/.sprint-complete\n' > .gitignore \
+      && git add -A && git commit -qm init && git checkout -q -b sprint/s17 \
+      && mkdir ops && printf '# probe roster (SELF-17)\n[lead]\ncli = "%s"\n\n[roles.builder]\ncli = "antigravity"\n' "$L" > ops/roster.toml ) >/dev/null 2>&1
+  printf '#!/bin/sh\ntouch "%s.MARKER"\nexit 0\n' "$R" > "$R.mark"
+  chmod +x "$R.mark"
+  cat > "$R.fb" <<S17_FB_EOF
+#!/bin/sh
+# SELF-17 fake builder: one change per task, chosen by the worktree's name
+case "\$(basename "\$PWD")" in
+  a) mkdir -p docs && echo feature > docs/a.txt ;;
+  b) echo change >> scripts/lib/util.sh ;;
+  c) git config core.fsmonitor "$R.mark"; echo c > c.txt ;;
+esac
+echo "Status: DONE"
+S17_FB_EOF
+  chmod +x "$R.fb"
+  ( cd "$R" && export HOME="$_S17/home" TRIFORGE_LEASE_ROOT="$R.leases" PATH="${_SELF_STUBS}:$PATH" GIT_CONFIG_NOSYSTEM=1 TMPDIR="$_S17/tmp" \
+        GIT_AUTHOR_DATE="$_S17_DATE" GIT_COMMITTER_DATE="$_S17_DATE" TRIFORGE_TEST_LEAD="$L" TRIFORGE_TEST_BUILDER="$R.fb" \
+      && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID TRIFORGE_LEASE_WORKER TRIFORGE_LEAD_PID CODEX_HOME CLAUDE_PLUGIN_ROOT \
+      && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && {
+    _self_go a
+    _self_try pina lease_pin_reviewer a claude
+    _self_try mergea lease_merge a claude
+    echo "squash-a=$(git diff-tree --no-commit-id --name-only -r HEAD | tr '\n' ' ')"
+    _self_go b
+    echo "prot-b=$(_ledger_get b protected):$(_ledger_get b protected_paths)"
+    _self_try pinb lease_pin_reviewer b codex
+    _self_try bareb lease_merge b codex
+    _self_try appb lease_approve task:b "$L"
+    _self_try mergeb lease_merge b codex
+    echo "squash-b=$(git diff-tree --no-commit-id --name-only -r HEAD | tr '\n' ' ')"
+    { lease_create c builder && lease_dispatch c "probe task" 60; } >/dev/null 2>&1 || echo "c:go-failed"
+    _self_wait_rc c
+    _self_try collectc lease_collect c
+    echo "state-c=$(_ledger_get c state):cfg=$(if grep -q fsmonitor .git/config; then echo planted; else echo restored; fi):marker=$(if [ -e "$R.MARKER" ]; then echo RAN; else echo absent; fi)"
+    _self_try reclaimc lease_reclaim c
+    _self_try blocked lease_promote main
+    _self_try leadprom lease_approve promotion:sprint/s17 "$L"
+    _self_try userprom lease_approve promotion:sprint/s17 user
+    _self_try promote lease_promote main
+    echo "main=$(git rev-parse main):at-sprint=$(if [ "$(git rev-parse main)" = "$(git rev-parse sprint/s17)" ]; then echo yes; else echo no; fi)"
+    _s17_out wrap /bin/bash "$_S17/wrap.sh"
+    echo "complete=$(if [ -f ops/.sprint-complete ]; then echo yes; else echo no; fi)"
+    echo "attr-a=$(lease_attribution a 2>/dev/null)"
+    echo "attr-b=$(lease_attribution b 2>/dev/null)"
+  } ) < /dev/null 2>&1 || true
+}
+# per lead: <lead> <class of the claude pin on a> <class of the codex pin on b>
+while read -r _s17_l _s17_ca _s17_cb; do
+  [ -n "$_s17_l" ] || continue
+  O=$(_s17_sprint "$_s17_l")
+  _S17_FAIL="${_S17_FAIL}$(_self_expect "sprint-$_s17_l" "$O" '^a:go=0:review$' "^pina:rc=0:.*\\(${_s17_ca};" '^mergea:rc=0:' '^squash-a=docs/a\.txt $' \
+    '^b:go=0:review$' '^prot-b=yes:scripts/lib/util\.sh$' "^pinb:rc=0:.*\\(${_s17_cb};" '^bareb:rc=42:.*scripts/lib/util\.sh' \
+    "^appb:rc=0:.*approved by ${_s17_l} \\(lead\\)" '^mergeb:rc=0:' '^squash-b=scripts/lib/util\.sh $' \
+    '^collectc:rc=44:.*\.git/config changed' '^state-c=escalated:cfg=restored:marker=absent$' '^reclaimc:rc=0:' \
+    '^blocked:rc=42:.*lease_approve promotion:sprint/s17 user' '^leadprom:rc=1:.*user' '^userprom:rc=0:' '^promote:rc=0:.*PROMOTED' \
+    '^main=[0-9a-f]{40}:at-sprint=yes$' '^wrap:rc=0:$' '^complete=yes$' \
+    "^attr-a=.*builder antigravity.*reviewer claude \\(${_s17_ca}\\), lead ${_s17_l}, approval none, merge [0-9a-f]{12}$" \
+    "^attr-b=.*builder antigravity.*reviewer codex \\(${_s17_cb}\\), lead ${_s17_l}, approval lead:${_s17_l} via=test .*merge [0-9a-f]{12}$")"
+  _S17_MAINS="${_S17_MAINS:-}$(printf '%s\n' "$O" | sed -n 's/^main=\([0-9a-f]*\):.*/\1/p' | head -1) "
+done <<'S17_LEADS_EOF'
+claude lead worker
+codex worker lead
+S17_LEADS_EOF
+unset _s17_l _s17_ca _s17_cb
+# main, the promoted sprint, is one commit under both leads (pinned dates)
+set -- $_S17_MAINS
+[ "$#" -eq 2 ] && [ "$1" = "$2" ] || _S17_FAIL="${_S17_FAIL} ledger(main-differs:${_S17_MAINS})"
+_S17_MAIN=${1:-none}
+
+# ledger: <section>.<key>: <claude run> | <codex run>, for every value that
+# still differs once the run-specific parts are masked
+_S17_DIFF=$(python3 - "$_S17R/claude/ops/leases.toml" "$_S17R/claude" "$_S17R/codex/ops/leases.toml" "$_S17R/codex" 2>&1 <<'S17_DIFF_PY'
+import json, re, sys
+INTS = ("pid", "pgid", "lead_pid", "created", "updated", "heartbeat_deadline")
+def norm(path, run):
+    rows, sec, digests = {}, "", {}
+    for line in open(path, encoding="utf-8").read().splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            sec = line.strip("[]").replace('lease."', "").rstrip('"')
+            continue
+        k, _, v = line.partition(" = ")
+        v = str(json.loads(v)) if v.startswith('"') else v
+        v = v.replace(run, "<run>")
+        if k in INTS:
+            v = "<n>"
+        elif k == "lead_via":
+            v = "<via>"
+        v = re.sub(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", "<ts>", v)
+        v = re.sub(r"[A-Z][a-z]{2} [A-Z][a-z]{2} +[0-9]+ [0-9:]{8} [0-9]{4}( UTC)?", "<ts>", v)
+        v = re.sub(r"\b[0-9a-f]{64}\b", lambda m: digests.setdefault(m.group(0), "<d%d>" % (len(digests) + 1)), v)
+        rows[(sec, k)] = v
+    return rows
+a, b = norm(sys.argv[1], sys.argv[2]), norm(sys.argv[3], sys.argv[4])
+for key in sorted(set(a) | set(b)):
+    if a.get(key) != b.get(key):
+        print("%s.%s: %s | %s" % (key[0], key[1], a.get(key, "<absent>"), b.get(key, "<absent>")))
+S17_DIFF_PY
+) || _S17_FAIL="${_S17_FAIL} ledger(diff-failed)"
+_S17_DIFF_WANT='a.lead_cli: claude | codex
+a.reviewer_class: lead | worker
+b.approval_by: claude | codex
+b.approval_host: claude | codex
+b.approval_lead_cli: claude | codex
+b.lead_cli: claude | codex
+b.merge_approval: lead:claude via=test host=claude lead=claude at=<ts> | lead:codex via=test host=codex lead=codex at=<ts>
+b.reviewer_class: worker | lead
+baseline.promotion_host: claude | codex
+baseline.promotion_lead_cli: claude | codex
+c.lead_cli: claude | codex'
+[ "$_S17_DIFF" = "$_S17_DIFF_WANT" ] || _S17_FAIL="${_S17_FAIL} ledger(diff:$(printf '%s' "$_S17_DIFF" | tr '\n' ';' | cut -c1-900))"
+
+# upgrade / upguard: v3.3.2's own scripts open the lease
+if git -C "$REPO_ROOT" archive v3.3.2 scripts skills .claude-plugin 2>/dev/null | tar -xf - -C "$_S17/v332" 2>/dev/null \
+   && git -C "$REPO_ROOT" archive v3.1.0 skills/watch-cycle 2>/dev/null | tar -xf - -C "$_S17/v310" 2>/dev/null \
+   && git -C "$REPO_ROOT" show v3.3.2:templates/CLAUDE.md > "$_S17/v332-CLAUDE.md" 2>/dev/null \
+   && git -C "$REPO_ROOT" show v3.3.2:templates/ops/roster.toml > "$_S17/v332-roster.toml" 2>/dev/null \
+   && [ -f "$_S17/v332/scripts/invoke-external.sh" ] && [ -f "$_S17/v310/skills/watch-cycle/SKILL.md" ]; then
+  printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' > "$_S17/up.fb"
+  chmod +x "$_S17/up.fb"
+  _S17_V332_SKILLS=""
+  for _s17_d in "$_S17/v332/skills"/*/; do _S17_V332_SKILLS="${_S17_V332_SKILLS:+${_S17_V332_SKILLS},}$(basename "$_s17_d")"; done
+  unset _s17_d
+  # _s17_up <name> — the 3.3.2 project $_S17/<name>; prints v3.3.2's lease steps
+  _s17_up() {
+    local P="$_S17/$1"
+    ( mkdir -p "$P" && cd "$P" && export HOME="$_S17/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
+        && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
+        && cp "$_S17/v332-CLAUDE.md" CLAUDE.md && echo r > README.md && git add -A && git commit -qm init && git checkout -q -b sprint/up \
+        && mkdir -p ops .agents/skills && cp "$_S17/v332-roster.toml" ops/roster.toml \
+        && cp -R "$_S17/v332/skills/." .agents/skills/ && cp -R "$_S17/v310/skills/watch-cycle" .agents/skills/watch-cycle \
+        && mkdir .agents/skills/my-notes && echo mine > .agents/skills/my-notes/SKILL.md \
+        && echo "USER-EDIT" >> .agents/skills/writing-plans/SKILL.md \
+        && printf 'version=3.3.2\nskills=%s\n' "$_S17_V332_SKILLS" > .agents/skills/.triforge-plugin-version ) >/dev/null 2>&1
+    ( cd "$P" && export HOME="$_S17/home" TRIFORGE_LEASE_ROOT="$P.leases" PATH="$_S17/bin:$PATH" GIT_CONFIG_NOSYSTEM=1 TMPDIR="$_S17/tmp" \
+          CLAUDE_PLUGIN_ROOT="$_S17/v332" TRIFORGE_TEST_BUILDER="$_S17/up.fb" \
+        && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID TRIFORGE_LEASE_WORKER TRIFORGE_TEST_LEAD \
+        && source "$_S17/v332/scripts/invoke-external.sh" >/dev/null 2>&1 && {
+      R=0
+      { lease_create t builder && lease_dispatch t "probe task" 60; } >/dev/null 2>&1 || R=$?
+      _self_wait_rc t
+      echo "v332:go=$R:$(_ledger_get t state):rc=$(cat "$(_ledger_get t output_file).rc" 2>/dev/null)"
+    } ) < /dev/null 2>&1 || true
+  }
+  # _s17_start <project> — the 4.0 session start there (the real hook); its output, then "rc=<n>"
+  _s17_start() {
+    local R=0 O
+    O=$(cd "$1" && HOME="$_S17/home" TMPDIR="$_S17/tmp" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S17_PATH" /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1) || R=$?
+    printf '%s\nrc=%s\n' "$O" "$R"
+  }
+  # _s17_lead4 <name> <script> — the 4.0 lead in that project: the SELF seam
+  # names claude (the lead of a roster without [lead]), library sourced
+  _s17_lead4() {
+    ( cd "$_S17/$1" && export HOME="$_S17/home" TRIFORGE_LEASE_ROOT="$_S17/$1.leases" PATH="$_S17/bin:$PATH" GIT_CONFIG_NOSYSTEM=1 TMPDIR="$_S17/tmp" \
+          TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S17/up.fb" \
+        && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID TRIFORGE_LEASE_WORKER TRIFORGE_LEAD_PID CODEX_HOME CLAUDE_PLUGIN_ROOT \
+        && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && eval "$2" ) < /dev/null 2>&1 || true
+  }
+  _S17_SYNC="${REPO_ROOT}/scripts/lib/skills-sync.py"
+
+  # upgrade
+  O=$(_s17_up up)
+  U="$_S17/up/.agents/skills"
+  O="${O}
+$(_s17_start "$_S17/up")"
+  _S17_STALE=""
+  for _s17_n in $SHIPPED_SKILLS; do
+    [ "$_s17_n" = writing-plans ] && continue
+    [ "$(python3 "$_S17_SYNC" digest "$U/$_s17_n" 2>/dev/null)" = "$(python3 "$_S17_SYNC" digest "${REPO_ROOT}/skills/$_s17_n" 2>/dev/null)" ] || _S17_STALE="$_S17_STALE $_s17_n"
+  done
+  unset _s17_n
+  O="${O}
+retired=$([ -e "$U/test-driven-development" ] && echo kept || echo gone),$([ -e "$U/systematic-debugging" ] && echo kept || echo gone)
+users=$(cat "$U/my-notes/SKILL.md" 2>/dev/null),$(grep -c '^USER-EDIT$' "$U/writing-plans/SKILL.md" 2>/dev/null || true),$([ "$(python3 "$_S17_SYNC" digest "$U/watch-cycle" 2>/dev/null)" = "$(python3 "$_S17_SYNC" digest "$_S17/v310/skills/watch-cycle" 2>/dev/null)" ] && echo intact || echo changed)
+stale=${_S17_STALE# }
+stamp=$(grep -c '^format=2$' "$U/.triforge-plugin-version" 2>/dev/null || true):$(grep -cE 'test-driven-development|systematic-debugging|watch-cycle|my-notes|writing-plans' "$U/.triforge-plugin-version" 2>/dev/null || true)
+roster-lead=$(grep -c '^\[lead\]' "$_S17/up/ops/roster.toml" 2>/dev/null || true)"
+  _S17_FAIL="${_S17_FAIL}$(_self_expect upgrade-start "$O" '^v332:go=0:building:rc=0$' '^rc=0$' \
+    '^WARNING: CLAUDE\.md is a Triforge 3\.x project template' '^Lease ledger: 1 active lease\(s\) from a previous session' \
+    'retired no-longer-shipped: systematic-debugging test-driven-development\.$' 'kept as user-owned \(content differs.*: writing-plans\.$' \
+    '^retired=gone,gone$' '^users=mine,1,intact$' '^stale=$' '^stamp=1:0$' '^roster-lead=0$')"
+  printf '%s\n' "$O" | grep -qE 'hook crashed|^\{' && _S17_FAIL="${_S17_FAIL} upgrade-start(crash-or-brace-line)"
+  O=$(_s17_lead4 up '
+echo "lead=$(resolve_lead 2>/dev/null | cut -f1)"
+_self_try collect lease_collect t
+echo "state=$(_ledger_get t state)"
+_self_try pin lease_pin_reviewer t codex
+_self_try merge lease_merge t codex
+echo "squash=$(git diff-tree --no-commit-id --name-only -r HEAD | tr "\n" " ")"
+echo "attr=$(lease_attribution t 2>/dev/null)"
+_s17_out ask instruction_convert_stale CLAUDE.md
+_s17_out convert instruction_convert_stale CLAUDE.md --yes
+echo "files=$([ -e CLAUDE.md ] && echo claude-md),$(cmp -s "$REPO_ROOT/templates/AGENTS.md" AGENTS.md && echo pointer)"
+')
+  _S17_FAIL="${_S17_FAIL}$(_self_expect upgrade-lead "$O" '^lead=claude$' '^collect:rc=0:.*integrity baseline recorded now \(first use or a pre-3\.3\.3 ledger\)' '^state=review$' \
+    '^pin:rc=0:.*\(worker;' '^merge:rc=0:' '^squash=feature\.txt $' '^attr=.*builder claude.*reviewer codex \(worker\), lead claude, approval none, merge [0-9a-f]{12}$' \
+    '^ask:rc=20:needs-ask: would remove .*/CLAUDE\.md \(an unmodified copy of the Triforge v3\.3\.0-v3\.3\.2 templates/CLAUDE\.md\)' \
+    '^convert:rc=0:.*changed: .*/AGENTS\.md: created .*changed: .*/CLAUDE\.md: removed \(an unmodified copy of the Triforge v3\.3\.0-v3\.3\.2 template\)' '^files=,pointer$')"
+  O=$(_s17_start "$_S17/up")
+  _S17_FAIL="${_S17_FAIL}$(_self_expect upgrade-again "$O" '^rc=0$')"
+  printf '%s\n' "$O" | grep -qE 'Triforge 3\.x project template|^Tip: No AGENTS\.md|^Lease ledger:|^session-start:' && _S17_FAIL="${_S17_FAIL} upgrade-again(still-reports:$(printf '%s\n' "$O" | grep -E 'Triforge 3\.x|^Tip: No AGENTS|^Lease ledger:|^session-start:' | head -1 | cut -c1-120))"
+
+  # upguard
+  O=$(_s17_up upguard)
+  printf '# Agent Triforge lease root of this checkout (KTD18)\n%s\n' "$_S17/upguard.leases" > "$_S17/upguard/.git/triforge-lease-root"
+  O="${O}
+$(_s17_lead4 upguard '_self_try collect lease_collect t; echo "state=$(_ledger_get t state)"')"
+  _S17_FAIL="${_S17_FAIL}$(_self_expect upguard "$O" '^v332:go=0:building:rc=0$' \
+    '^collect:rc=44:.*the \[baseline\] table of the ledger is missing, but the lease-root record \([^)]*triforge-lease-root\) exists' '^state=escalated$')"
+else
+  _S17_FAIL="${_S17_FAIL} upgrade(no-v3.3.2-or-v3.1.0-tag:fetch-tags)"
+fi
+_S17_EV="static seams (TRIFORGE_TEST_LEAD + TRIFORGE_TEST_BUILDER; the live claude -p / codex exec half not run). sprint under claude and under codex: a (docs/) merged, b (scripts/lib/util.sh) 42 on the pin alone then merged on the lead's approval, c's core.fsmonitor -> collect 44, restored, never ran; promote 42 until the user's approval (the lead's refused), then at-wrap's Completion block -> ops/.sprint-complete; ledgers equal once masked apart from lead_cli, the lead on b's approval and the promotion record, and the reviewer class; main $(printf '%s' "$_S17_MAIN" | cut -c1-12) in both. upgrade: a 3.3.2 project (exact v3.3.2 CLAUDE.md, no [lead], names-only stamp, v3.3.2-opened lease) -> 4.0 session start flags the CLAUDE.md and the lease, retires test-driven-development + systematic-debugging only, keeps my-notes, the edited writing-plans and an unstamped v3.1.0 watch-cycle; lead claude; the 3.3.2 lease collects (first baseline), merges with feature.txt only; convert removes the exact copy; upguard: the lease-root record present -> 44"
 # --- end of SELF-17 cases ---
-_S17_CAP="two-lead fixture sprint: the same two-task sprint (one task under scripts/lib/) under a claude and a codex lead through the wrap path to ops/.sprint-complete, ledgers equal apart from the lead identity, the protected task needing a merge and a user promotion approval, a builder setting core.fsmonitor escalated; the 3.3.2 upgrade (U20)"
+_S17_CAP="two-lead fixture sprint: the same two-task sprint (one task under scripts/lib/) under a claude and a codex lead through the wrap path to ops/.sprint-complete, ledgers equal apart from the lead identity, the protected task needing a merge and a user promotion approval, a builder setting core.fsmonitor escalated; the 3.3.2 upgrade (U20). Static seams: TRIFORGE_TEST_LEAD + TRIFORGE_TEST_BUILDER; the live half (real claude -p and codex exec builders) is not run"
 if [ -z "$_S17_EV" ]; then _S17_FAIL="${_S17_FAIL} cases(no-case-ran)"; fi
 if [ -z "$_S17_FAIL" ]; then
   row "SELF-17" "claude" "$_S17_CAP" "PASS" "$(printf '%s' "$_S17_EV" | cut -c1-3000)" "static"
