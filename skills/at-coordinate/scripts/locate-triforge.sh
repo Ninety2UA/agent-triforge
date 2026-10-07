@@ -153,8 +153,10 @@ for PROJECT in "$TOP" "$MAIN"; do
   [ -f "$PFILE" ] && ! [ -L "$PFILE" ] || refuse "$PFILE" "not a regular file"
   if command -v git >/dev/null 2>&1 && git -C "$PROJECT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     # tracked under any letter case (a case-insensitive filesystem serves the
-    # pointer under a name git tracks differently); a git error is a refusal
-    if git -C "$PROJECT" ls-files --error-unmatch -- ":(icase)$POINTER_NAME" >/dev/null 2>&1; then
+    # pointer under a name git tracks differently); a git error is a refusal.
+    # Reading the index runs core.fsmonitor, a command a worker can plant in
+    # .git/config, and this runs before any skill's integrity check: off.
+    if git -c core.fsmonitor=false -C "$PROJECT" ls-files --error-unmatch -- ":(icase)$POINTER_NAME" >/dev/null 2>&1; then
       refuse "$PFILE" "the file is tracked by the project's git (it must stay untracked: gitignore .agents/*.local)"
     else
       LS_RC=$?

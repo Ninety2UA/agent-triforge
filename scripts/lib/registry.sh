@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/registry.sh — data the other lanes read from one place (KTD7): the CLI registry (one literal per CLI — tier, binary, model, install hint, env allowlist keys, lane, egress, the KTD1 lead fields; R25/R41), the two protected-path lists and their match rule (KTD8), and the model ladder (KTD22)
+# scripts/lib/registry.sh — data the other lanes read from one place (KTD7): the CLI registry (one literal per CLI — tier, binary, model, install hint, env allowlist keys, lane, egress, role limits and consent, the KTD1 lead fields; R24/R25/R41), the two protected-path lists and their match rule (KTD8), and the model ladder (KTD22)
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh and before scripts/lib/lease.sh.
@@ -52,6 +52,7 @@ FRAMEWORK_PROTECTED = (
     "hooks/", "skills/", "commands/", "agents/", "personas/",
     # shipped agent configs, one directory per CLI
     "antigravity-agents/", "codex-agents/", "opencode-agents/", "kimi-agents/", "cursor-agents/",
+    "devin-agents/", "grok-agents/",
     # manifests, plugin settings, and the templates copied into user projects.
     # Pi reads its skill list from the root package.json; the Devin manifest is
     # skills/.devin-plugin/ (covered by skills/), and a root .devin-plugin/
@@ -65,9 +66,14 @@ PROJECT_PROTECTED = (
     "ops/roster.toml",
     # each CLI project-tier config / permission tree (agy reads .agents/hooks.json
     # and .agents/agents/, so .agents/ is protected whole, skills included; Devin
-    # loads .devin/config.json requiredPlugins with no login, and Pi reads
+    # loads .devin/config.json requiredPlugins with no login and reads the
+    # legacy .cognition/ exactly like .devin/, and Pi reads
     # .pi/settings.json packages once the project is trusted)
-    ".claude/", ".codex/", ".agents/", ".antigravity/", ".gemini/", ".opencode/", ".kimi-code/", ".cursor/", ".devin/", ".pi/",
+    ".claude/", ".codex/", ".agents/", ".antigravity/", ".gemini/", ".opencode/", ".kimi-code/", ".cursor/", ".devin/", ".cognition/", ".pi/",
+    # grok reads .grok/config.toml (permission rules, MCP servers, plugins),
+    # .grok/hooks/, .grok/skills/, .grok/agents/ and .grok/sandbox.toml, and
+    # every grok run turns the folder-trust gate off (GROK_FOLDER_TRUST=0)
+    ".grok/",
     # project-root config files outside those trees: OpenCode reads its permission
     # config from opencode.json / opencode.jsonc, and Cursor still reads the
     # legacy root instruction file .cursorrules
@@ -242,6 +248,18 @@ TRIFORGE_CLAUDE_SANDBOX_FLOOR="2.1.285"
 #               enforced_tools is true — dispatch_role returns 40 — else a
 #               claude -p worker that dispatch_role runs itself, KTD16)
 #   egress      the model provider that receives the prompt and the code (R36)
+#   role_limit  the roles the CLI takes by default; [] = every role. A role
+#               chain naming it for another role fails load validation
+#               (resolve_role rc 5) and roster_write_role refuses it. Never
+#               set on a core CLI: every chain ends at one
+#   opt_in_roles  roles outside role_limit the CLI takes only once the
+#               roster records the opt-in: [members.<cli>] opt_in = [...],
+#               written by roster_write_member --opt-in (devin: builder)
+#   consent     True when enrolling needs the user's recorded consent:
+#               [members.<cli>] consent = "user <UTC> via=<origin>", written
+#               by roster_write_member --consent user. An enabled member, or
+#               a role chain naming the CLI, without one fails load
+#               validation, and headless enrollment never enrolls it (R24)
 #   lead        the KTD1 static lead fields, or {} for a CLI that cannot lead
 #               (Key Decision: Claude Code or Codex only). launch_argv is one
 #               headless lead session, the prompt appended as its last word:
@@ -285,6 +303,9 @@ CLIS = {
         "env_keys": [],
         "lane": "subagent",
         "egress": "Anthropic",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
         "lead": {
             "launch_argv": "claude --print --permission-mode acceptEdits",
             "full_access": False,
@@ -314,6 +335,9 @@ CLIS = {
         "env_keys": [],
         "lane": "shell",
         "egress": "Google",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
         "lead": {},
     },
     "codex": {
@@ -330,6 +354,9 @@ CLIS = {
         "env_keys": [],
         "lane": "shell",
         "egress": "OpenAI",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
         "lead": {   # D-047 profile; the hook payload names exec_command Bash and keeps apply_patch (CDX-21)
             "launch_argv": "codex exec -s danger-full-access -c approval_policy=\"never\" -c background_terminal_max_timeout=900000",
             "full_access": True,
@@ -359,6 +386,9 @@ CLIS = {
         "env_keys": ["OPENROUTER_API_KEY"],
         "lane": "shell",
         "egress": "Zhipu / Z.ai, through OpenRouter (which also sees the traffic)",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
         "lead": {},
     },
     "kimi": {
@@ -375,6 +405,9 @@ CLIS = {
         "env_keys": ["KIMI_*"],
         "lane": "shell",
         "egress": "Moonshot",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
         "lead": {},
     },
     "cursor": {
@@ -391,6 +424,50 @@ CLIS = {
         "env_keys": ["CURSOR_API_KEY"],
         "lane": "shell",
         "egress": "xAI (Grok, via Cursor)",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
+        "lead": {},
+    },
+    "devin": {
+        "name": "Devin CLI",
+        "tier": "optional",
+        "binary": "devin",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "swe-1-6-slow",   # what a Devin Free account resolves; DVN-03
+        "model_env": "DEVIN_MODEL",
+        "install": "brew install --cask devin-cli (or curl -fsSL https://cli.devin.ai/install.sh | bash)",
+        "login": "run `devin auth login`",
+        "env_keys": [],
+        "lane": "shell",
+        "egress": "Cognition (a model outside its SWE family also reaches the provider of that model)",
+        "role_limit": ["reviewer", "analyst"],
+        "opt_in_roles": ["builder"],
+        "consent": True,
+        "lead": {},
+    },
+    "grok": {
+        "name": "Grok Build",
+        "tier": "optional",
+        "binary": "grok",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "grok-4.7",
+        "model_env": "GROK_MODEL",
+        "install": "curl -fsSL https://x.ai/cli/install.sh | bash",
+        "login": "run `grok login` (`grok login --device-code` on a host without a browser), or set XAI_API_KEY",
+        "env_keys": ["XAI_API_KEY", "GROK_HOME"],
+        "lane": "shell",
+        "egress": "xAI",
+        # a builder only in a lease: invoke_grok runs the read class alone,
+        # so a tester or documenter (dispatched outside a lease) never routes
+        # to grok (R23)
+        "role_limit": ["builder", "reviewer", "analyst"],
+        "opt_in_roles": [],
+        "consent": False,
         "lead": {},
     },
 }

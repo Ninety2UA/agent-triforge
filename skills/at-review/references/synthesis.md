@@ -67,7 +67,7 @@ fi
 ```
 
 1. The blocks above run `findings-synthesizer`, in the never-downgrade trio, so it runs as top-tier Claude whichever CLI leads. `$REVIEW_RUN/synthesis.md` is the synthesized report. In the wait block, exit code 75 means rerun it, 1 a failed or empty synthesis, and 3 a report printed for a cycle with gaps. The start block exits 1, starting nothing and changing no file, while a synthesizer it started earlier for the same run is still running.
-2. It reads every expected lane (Antigravity + Codex + any optional-tier `REVIEW_OPENCODE`/`KIMI`/`CURSOR.md` + each specialist persona's `ops/REVIEW_<PERSONA>.md`), and the `learnings-researcher` report as known-issue context when there is one.
+2. It reads every expected lane (Antigravity + Codex + any optional-tier `REVIEW_OPENCODE`/`KIMI`/`CURSOR`/`DEVIN`/`GROK.md` + each specialist persona's `ops/REVIEW_<PERSONA>.md`), and the `learnings-researcher` report as known-issue context when there is one.
 3. It produces the synthesized report with confidence tiering (HIGH/MEDIUM/LOW) and priority (P1/P2/P3). A `[LOW]` confidence finding is never P1.
 4. Apply the `iterative-refinement` skill:
    - Fix P1 (critical) immediately.
@@ -75,5 +75,6 @@ fi
    - Log P3 (suggestion) for later.
 5. Record the cycle's dispositions: append `## Review dispositions — Cycle N` to `ops/TASKS.md` with one row per finding (`finding → fixed | dismissed-with-reason | deferred`); rows are append-only across cycles, and `deferred` rows are exported by the wrap-up skill.
 6. Convergence check: no gap (the wait block exited 0 and the report has no `### Gaps` section) AND P1 = 0 AND P2 = 0 → proceed (standard mode). A gap is re-run, never waived.
-7. If not converged, re-trigger the review on changed files only, and re-run each gap's lane (max 3 cycles).
-8. After 3 cycles without convergence, escalate to the user.
+7. Remove the cycle's review package (`rm -rf "$REVIEW_PKG"`): every lane and persona that read it has finished.
+8. If not converged, re-trigger the review on changed files only, with a new package, and re-run each gap's lane (max 3 cycles).
+9. After 3 cycles without convergence, escalate to the user.

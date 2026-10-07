@@ -1435,7 +1435,8 @@ print(" || ".join(log[-20:]))
 # the worker marker TRIFORGE_LEASE_WORKER (KTD9) + the GIT_CONFIG_* no-push
 # backstop (CS1), plus ONLY the invoked CLI's own
 # credential variables: its registry entry's env_keys (opencode:
-# OPENROUTER_API_KEY; kimi: KIMI_*; cursor: CURSOR_API_KEY). claude, codex,
+# OPENROUTER_API_KEY; kimi: KIMI_*; cursor: CURSOR_API_KEY; grok: XAI_API_KEY
+# and GROK_HOME, where its cached login lives). claude, codex,
 # and antigravity list none — they authenticate via HOME-based stores and get
 # nothing extra — no cross-provider leakage; a CLI the registry does not know
 # gets the base allowlist alone. Two lanes add fixed values of their own:
@@ -1638,12 +1639,19 @@ _lease_provision_claude_skills() {
   return 0
 }
 
-# _lease_provision <worktree> <builder-cli> — provision a worktree _lease_carve
-# just made (it reads _CARVE_ADMIN) and append provisioned=<the paths that
-# wrote> to _CARVE_FIELDS, the lease row's `provisioned` field (KTD9): the
-# portable skills in .agents/skills, and for a claude builder in .claude/skills
-# too. rc 1 when the list can't be read: a row without it would fall back to
-# excluding all of .agents/.
+# _lease_provision <worktree> <builder-cli> [<role>] — provision a worktree
+# _lease_carve just made (it reads _CARVE_ADMIN) and append provisioned=<the
+# paths that wrote> to _CARVE_FIELDS, the lease row's `provisioned` field
+# (KTD9): the portable skills in .agents/skills, for a claude builder in
+# .claude/skills too, and for a grok worker the .grok/config.toml that keeps
+# every plugin from loading (_grok_lease_config, in the permission class of
+# <role>: a reviewer or analyst lease, or no role, is also refused where the
+# project supplies code grok would start, and its NOTE line on stderr names
+# what the user's own grok configuration runs; a builder lease also gets
+# .grok/sandbox.toml, its sandbox profile). rc 1 when the list can't
+# be read: a row without it would fall back to excluding all of .agents/; and
+# rc 1 when that config or profile can't be written as proven (a grok lease is
+# never made without them).
 _lease_provision() {
   local WT=$1 CLI=${2:-} LIST TRACKED=""
   local -a DIRS=(.agents/skills)
@@ -1661,6 +1669,14 @@ print(",".join(sorted(names)))
 ') || TRACKED=""
       _lease_provision_claude_skills "$WT" "$TRACKED"
       DIRS+=(.claude/skills)
+      ;;
+    grok)
+      # Fail closed (R23): no isolating config, no lease, so nothing dispatches
+      if ! _grok_lease_config "$WT" "$(_grok_class "${3:-}")"; then
+        echo "lease: ERROR the grok worktree ${WT} could not be provisioned (see above), so it is not leased. Fix the cause, then lease again" >&2
+        return 1
+      fi
+      DIRS+=(.grok)
       ;;
   esac
   LIST=$(_lease_provisioned "$WT" "$_CARVE_ADMIN" "${DIRS[@]}") || {
@@ -1757,6 +1773,22 @@ _lease_carve() {
                  integration_branch="$CUR" lease_root="$_LEASE_ROOT" snapshot_sha= snapshot_tree= builder_commits= integrity_prev_state=
                  protected= protected_paths=
                  session_id= resumed_session= result_subtype= result_is_error=)
+}
+
+# _lease_uncarve <op> <task_id> <worktree> — undo a _lease_carve whose lease
+# was never recorded (_lease_provision failed): the worktree and its
+# lease/<task> branch go again, through the lead's hardened git, so a refused
+# lease leaves no lease history behind; with no ledger yet, a lease worktree
+# reads as a deleted ledger (_lead_lease_evidence, rc 44). rc 1, naming the
+# commands to run by hand, when git could not remove them.
+_lease_uncarve() {
+  local OP=$1 T=$2 WT=$3
+  if _lgr worktree remove --force "$WT" >/dev/null 2>&1 && _lgr branch -D "lease/${T}" >/dev/null 2>&1; then
+    echo "${OP}: the unleased worktree ${WT} and its branch lease/${T} were removed again" >&2
+    return 0
+  fi
+  echo "${OP}: ERROR could not remove the unleased worktree ${WT} or its branch lease/${T}; remove them before the next lease (git worktree remove --force ${WT}; git branch -D lease/${T})" >&2
+  return 1
 }
 
 # _lease_tree_of_worktree <worktree> <admin> <start-commit> [<provisioned>] —
@@ -1997,7 +2029,10 @@ CREATE_ROW_EOF
   fi
   if _lead_resolve 2>/dev/null; then LEAD=$_LEAD_CLI; fi
   _lease_carve "$TASK_ID" "$WT" || return 1
-  _lease_provision "$WT" "$CLI" || return 1
+  if ! _lease_provision "$WT" "$CLI" "$ROLE"; then
+    _lease_uncarve lease_create "$TASK_ID" "$WT" || true
+    return 1
+  fi
   NOW=$(date +%s)
   # lead_via from this shell's origin, read here: a cached host-check pass
   # does not set it.
@@ -2037,6 +2072,7 @@ _lease_extract_stream() {
     opencode) X=_oc_extract_text ;;
     kimi)     X=_kimi_extract_text ;;
     cursor)   X=_cursor_extract_text ;;
+    grok)     X=_grok_lease_text ;;    # a report only from an end_turn run
     *) return 0 ;;
   esac
   [ -s "$OUT" ] || return 0
@@ -2146,6 +2182,14 @@ DISPATCH_ROW_EOF
     echo "lease_dispatch: ERROR worktree missing: ${WT}" >&2
     return 1
   fi
+  # The consent and role rules at dispatch (R24), against the roster as it is
+  # now, not as it was at lease_create: a consent CLI (devin) whose table
+  # records no consent any more gets nothing sent, and the lease's role must
+  # still be one its CLI may take (a builder lease whose opt-in was since
+  # removed, or a member since declined, never runs). Both rc 5; a CLI with no
+  # consent rule or role limit passes.
+  _member_consent_ok "$CLI" "${_LEASE_REPO}/ops/roster.toml" || return $?
+  _member_role_ok "$CLI" "$ROLE" "${_LEASE_REPO}/ops/roster.toml" || return $?
   OUT="${_LEASE_ROOT}/${TASK_ID}.out"
   TOBIN=$(_timeout_tool) || return $?
 
@@ -2153,19 +2197,40 @@ DISPATCH_ROW_EOF
   # included: no sub-dispatch, git stays local, and a typed final report whose
   # `Status:` line lease_collect parses (a clean exit without it is "report
   # missing", never review-ready). The lane's builder brief body (opencode /
-  # cursor: opencode-agents|cursor-agents/builder.md, frontmatter stripped) is
-  # prepended here; Kimi's arrives natively via --agent-file; claude / codex /
-  # antigravity carry no separate builder brief (their role instructions are
-  # the contract itself). Wording is CLI-neutral on purpose.
-  local BRIEF_BODY="" BRIEF_FILE=""
+  # cursor / grok: <cli>-agents/builder.md, frontmatter stripped) is
+  # prepended here; a grok reviewer or analyst lease gets
+  # grok-agents/reviewer.md, and Devin's is the lease role's own
+  # (devin-agents/<role>.md); Kimi's arrives natively via --agent-file; claude
+  # / codex / antigravity carry no separate builder brief (their role
+  # instructions are the contract itself). Wording is CLI-neutral on purpose.
+  # LCLASS is the permission class of a grok or devin lease (_grok_class,
+  # _devin_class of the lease role), read once: the brief here and the lane
+  # arg below both follow it.
+  local BRIEF_BODY="" BRIEF_FILE="" BRIEF_TITLE="Builder role brief" LCLASS=""
   case "$CLI" in
     opencode|cursor)
       BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/${CLI}-agents/builder.md"
-      if [ -f "$BRIEF_FILE" ]; then
-        BRIEF_BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "$BRIEF_FILE")
+      ;;
+    grok)
+      # The brief follows the class: builder.md for an edit lease,
+      # reviewer.md for a read one (R23)
+      LCLASS=$(_grok_class "$ROLE")
+      BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/grok-agents/builder.md"
+      if [ "$LCLASS" = read ]; then
+        BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/grok-agents/reviewer.md"
+        BRIEF_TITLE="Role brief (${ROLE})"
       fi
       ;;
+    devin)
+      # The brief is the lease role's own (R24)
+      LCLASS=$(_devin_class "$ROLE")
+      BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/devin-agents/${ROLE}.md"
+      BRIEF_TITLE="Role brief (${ROLE})"
+      ;;
   esac
+  if [ -n "$BRIEF_FILE" ] && [ -f "$BRIEF_FILE" ]; then
+    BRIEF_BODY=$(_brief_body "$BRIEF_FILE")
+  fi
   local FULL_PROMPT
   FULL_PROMPT="## Lease dispatch: ${TASK_ID}
 Roster entry: role=${ROLE} cli=${CLI} model=${MODEL:-<host-default>} effort=${EFFORT}
@@ -2184,7 +2249,7 @@ You are working in an isolated worktree at ${WT}. Never modify files outside it.
   Concerns: <list, or None>
   Discoveries for later tasks: <list, or None>
 ${BRIEF_BODY:+
-## Builder role brief
+## ${BRIEF_TITLE}
 ${BRIEF_BODY}
 }
 ## Task
@@ -2201,32 +2266,61 @@ ${PROMPT}"
       return 1
     fi
   fi
-  rm -f "$OUT" "${OUT}.rc" "${OUT}.class" "${OUT}.log" "${OUT}.launch" "${OUT}.err" "${OUT}.raw" "${OUT}.envelope"
+  rm -f "$OUT" "${OUT}.rc" "${OUT}.class" "${OUT}.log" "${OUT}.launch" "${OUT}.err" "${OUT}.raw" "${OUT}.envelope" "${OUT}.last"
 
   # Lane-specific composition that must happen LEAD-SIDE, before env -i: the
   # Kimi builder definition's absolute plugin path (D-024), the Cursor binary and
   # the effort-suffixed Cursor model id (D-025). One registry read serves the
   # whole dispatch — cli_field <cli> model env_keys: the lanes that always pin a
-  # model (agy — AE2 — and the optional three) fall back from an empty MODEL to
+  # model (agy — AE2 — and the optional members) fall back from an empty MODEL to
   # the CLI's shipped default, while claude and codex pass a model only when the
   # roster set one and keep MODEL as is; the env_keys reach _adapter_env through
   # _ADAPTER_ENV_KEYS inside the builder process, so it does not read them
   # again. The ledger records the id that was actually dispatched
   # (dispatched_model) beside the roster values (builder_model / builder_effort).
-  local KIMI_AGENT_FILE="" CBIN="" DISPATCH_MODEL="$MODEL" REG_ROW="" REG_ENV_KEYS=""
+  # LANE_ARG is the lane's own value, passed by position to _lease_lane_argv:
+  # codex's last-message file, kimi's agent file, devin's config copy, grok's
+  # class.
+  local LANE_ARG="" CBIN="" DISPATCH_MODEL="$MODEL" REG_ROW="" REG_ENV_KEYS=""
   REG_ROW=$(cli_field "$CLI" model env_keys 2>/dev/null) || REG_ROW=""
   REG_ENV_KEYS=${REG_ROW#*$'\t'}
   case "$CLI" in
-    antigravity|opencode|kimi|cursor) [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=${REG_ROW%%$'\t'*} ;;
+    antigravity|opencode|kimi|cursor|devin|grok) [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=${REG_ROW%%$'\t'*} ;;
   esac
   case "$CLI" in
+    codex)
+      # codex's final answer alone (-o): lease_collect reads the report from
+      # it, never from <out>, which holds the tool output too
+      LANE_ARG="${OUT}.last"
+      ;;
     kimi)
-      [ -f "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md" ] && KIMI_AGENT_FILE="${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md"
+      [ -f "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md" ] && LANE_ARG="${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md"
       ;;
     cursor)
       DISPATCH_MODEL=$(_cursor_model_for_effort "$DISPATCH_MODEL" "$EFFORT")
       if ! CBIN=$(_cursor_bin); then
         echo "lease_dispatch: ERROR no Cursor CLI on PATH (cursor-agent, or an agent whose --version matches YYYY.MM.DD-<hex>) — cannot dispatch ${TASK_ID}" >&2
+        return 1
+      fi
+      ;;
+    devin)
+      # Devin writes into the config it is handed, so each dispatch gets its
+      # own copy as the lane arg, removed after the run (_lease_builder_run);
+      # the copy's name carries the permission class _lease_lane_argv reads
+      # (devin.sh: read for a reviewer or analyst lease, edit for a builder).
+      LANE_ARG="${OUT}.devin.${LCLASS}.json"
+      _devin_config_copy "$LCLASS" "$LANE_ARG" || return 1
+      ;;
+    grok)
+      # The lane arg is grok's permission class (edit or read), which
+      # _lease_lane_argv turns into the sandbox and the allowed tools; for
+      # the read class it also runs the whole provisioning check again,
+      # right before the launch. The edit class's sandbox profile is written
+      # again here: an earlier run in this worktree could have rewritten
+      # .grok/sandbox.toml
+      LANE_ARG=$LCLASS
+      if [ "$LCLASS" = edit ] && ! _grok_sandbox_profile "$WT"; then
+        echo "lease_dispatch: ERROR could not write the grok builder's sandbox profile into ${WT} (see above) — not dispatching ${TASK_ID}" >&2
         return 1
       fi
       ;;
@@ -2246,7 +2340,7 @@ ${PROMPT}"
   # that was never exported still reaches it.
   if [ ! -x "$BASH_BIN" ]; then BASH_BIN=$(command -v bash 2>/dev/null || printf 'bash'); fi
   LAUNCH=$(python3 -c "$_LEASE_LAUNCH_PY" "${OUT}.log" "$BASH_BIN" -c "$_LEASE_BUILDER_SH" triforge-lease-builder \
-             "${_TRIFORGE_SCRIPTS_DIR}/invoke-external.sh" "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$KIMI_AGENT_FILE" \
+             "${_TRIFORGE_SCRIPTS_DIR}/invoke-external.sh" "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$LANE_ARG" \
              "$CBIN" "$TOBIN" "$TIMEOUT" "$OUT" "$WT" "$REG_ENV_KEYS" "${TRIFORGE_TEST_BUILDER:-}" "$FULL_PROMPT" \
              "$_LEASE_COMMON" "$RESUME") || LAUNCH=""
   { IFS="$TAB" read -r PID PGID PID_START || true; } <<LAUNCH_EOF
@@ -2570,7 +2664,10 @@ lease_requeue() {
     return 1
   fi
   _lease_carve "$TASK_ID" "$WT" || return 1
-  _lease_provision "$WT" "$CLI" || return 1
+  if ! _lease_provision "$WT" "$CLI" "$ROLE"; then
+    _lease_uncarve lease_requeue "$TASK_ID" "$WT" || true
+    return 1
+  fi
   _ledger_update "$TASK_ID" \
     state=leased builder_cli="$CLI" builder_model="$MODEL" builder_effort="$EFFORT" \
     previous_builder="$PREV" requeue_count=1 pid=0 heartbeat_deadline=0 reason="" \
@@ -2640,6 +2737,9 @@ _lease_copy_discoveries() {
 #                                        state=review, so use lease_requeue's
 #                                        sibling: mark orphaned -> reclaim ->
 #                                        requeue) or escalates after one repeat
+# The report is the builder's final answer: <out>.last when the lane writes
+# one (codex, whose <out> also holds its tool output: a quoted Status line
+# there is no report), else <out>.
 # The claude lane's envelope (<out>.envelope) is recorded first: result_subtype,
 # result_is_error and session_id (the next dispatch resumes it), and a
 # max-turns stop (subtype error_max_turns, nonzero exit) is routed as a clean
@@ -2698,8 +2798,9 @@ COLLECT_ROW_EOF
     fi
   fi
   if [ "$RC" -eq 0 ] 2>/dev/null; then
-    local REPORT BUILDER
-    REPORT=$(_lease_parse_status "$OUT")
+    local REPORT BUILDER ANS=$OUT
+    if [ -e "${OUT}.last" ]; then ANS="${OUT}.last"; fi
+    REPORT=$(_lease_parse_status "$ANS")
     BUILDER=$(_ledger_get "$TASK_ID" builder_cli 2>/dev/null || true)
     _ledger_update "$TASK_ID" report_status="$REPORT" || return 1
     case "$REPORT" in
@@ -2731,14 +2832,14 @@ COLLECT_ROW_EOF
         if [ "$_LP_STATUS" != no ]; then
           echo "lease_collect: task ${TASK_ID}'s snapshot touches protected paths (${_LP_PATHS}); lease_merge needs a merge approval for it from the lead (when the lead's CLI did not build it) or the user: lease_approve task:${TASK_ID} <lead CLI|user> (U10)" >&2
         fi
-        _lease_copy_discoveries "$TASK_ID" "${BUILDER:-unknown}" "$OUT"
+        _lease_copy_discoveries "$TASK_ID" "${BUILDER:-unknown}" "$ANS"
         echo "lease_collect: task ${TASK_ID} builder exited 0 with Status: ${REPORT} — state=review, output below" >&2
         printf '%s\n' "$OUT"
         return 0
         ;;
       BLOCKED|NEEDS_CONTEXT)
         local WHY
-        WHY=$(grep -iE '^[[:space:]]*[-*]?[[:space:]]*\**Concerns\**:?' "$OUT" 2>/dev/null | tail -1 | cut -c1-200 | _scrub || true)
+        WHY=$(grep -iE '^[[:space:]]*[-*]?[[:space:]]*\**Concerns\**:?' "$ANS" 2>/dev/null | tail -1 | cut -c1-200 | _scrub || true)
         _ledger_update "$TASK_ID" state=escalated reason="builder reported ${REPORT}: ${WHY:-see output}" || return 1
         echo "lease_collect: task ${TASK_ID} builder reported Status: ${REPORT} — ESCALATED, never routed to review (see ${OUT}). Supply the missing context / unblock, then re-lease." >&2
         return 1

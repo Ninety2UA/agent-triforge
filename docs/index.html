@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Agent Triforge — A Core Trio of AI Coding CLIs Forging Production-Grade Code</title>
-<meta name="description" content="Agent Triforge orchestrates a six-CLI builder pool — Claude Code, Antigravity CLI, Codex CLI, and an optional tier — through a roster, per-task leases, portable skills, and parallel review swarms.">
+<meta name="description" content="Agent Triforge orchestrates an eight-CLI builder pool — Claude Code, Antigravity CLI, Codex CLI, and an optional tier — through a roster, per-task leases, portable skills, and parallel review swarms.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -1274,6 +1274,8 @@ body::after {
   --cli-opencode: #a371f7;
   --cli-kimi: #f778ba;
   --cli-cursor: #56d4dd;
+  --cli-devin: #e3b341;
+  --cli-grok: #c9d1d9;
 }
 
 /* ═══ Embedded diagram frame ═══ */
@@ -1343,7 +1345,7 @@ body::after {
 }
 @media (min-width: 900px) { .flow { grid-template-columns: repeat(5, 1fr); } }
 
-/* ═══ Roster grid (six CLIs, per-CLI accent via --cli) ═══ */
+/* ═══ Roster grid (eight CLIs, per-CLI accent via --cli) ═══ */
 .roster-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
 @media (min-width: 640px) { .roster-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (min-width: 1024px) { .roster-grid { grid-template-columns: repeat(3, 1fr); } }
@@ -1415,7 +1417,7 @@ body::after {
     <a href="#whats-new">What's New</a>
     <a href="#features">Features</a>
     <a href="#builder-pool">Builder Pool</a>
-    <a href="#roster">Six-CLI Roster</a>
+    <a href="#roster">Eight-CLI Roster</a>
     <a href="#pipeline">Pipeline</a>
     <a href="#personas">Personas</a>
     <a href="#skills">Skills</a>
@@ -1440,7 +1442,7 @@ body::after {
         <h1>
           <span class="gradient-text">Agent Triforge</span>
         </h1>
-        <p class="hero__tagline">A core trio of AI coding CLIs forging production-grade code together. Claude Code leads a six-CLI builder pool (Antigravity CLI, Codex CLI and an optional tier of OpenCode, Kimi and Cursor) plus 19 specialist personas, coordinated through a roster, per-task leases, portable skills and parallel review swarms.</p>
+        <p class="hero__tagline">A core trio of AI coding CLIs forging production-grade code together. Claude Code leads an eight-CLI builder pool (Antigravity CLI, Codex CLI and an optional tier of OpenCode, Kimi, Cursor, Devin and Grok Build) plus 19 specialist personas, coordinated through a roster, per-task leases, portable skills and parallel review swarms.</p>
         <div class="hero__stats">
           <div class="hero__stat">
             <span class="hero__stat-num" data-target="19">0</span>
@@ -1752,8 +1754,8 @@ body::after {
         <div class="feat-card__icon feat-card__icon--molten">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         </div>
-        <h3>Six-CLI Builder Pool</h3>
-        <p>Claude Code leads. Antigravity (1M-token analysis), Codex (sandboxed tests) and the optional OpenCode, Kimi and Cursor are all eligible builders. <code>ops/roster.toml</code> assigns each role, and every build is leased and cross-reviewed.</p>
+        <h3>Eight-CLI Builder Pool</h3>
+        <p>Claude Code leads. Antigravity (1M-token analysis), Codex (sandboxed tests) and the optional OpenCode, Kimi, Cursor and Grok Build are all eligible builders; the optional Devin reviews and analyzes, and builds only if you opt in. <code>ops/roster.toml</code> assigns each role, and every build is leased and cross-reviewed.</p>
       </div>
       <div class="feat-card glow-card">
         <div class="feat-card__icon feat-card__icon--steel">
@@ -1799,7 +1801,7 @@ body::after {
   <div class="container">
     <div class="section__header reveal">
       <span class="section__label">Builder Pool</span>
-      <h2 class="section__title">How Six CLIs Build Safely in Parallel</h2>
+      <h2 class="section__title">How Eight CLIs Build Safely in Parallel</h2>
       <p class="section__desc">The single-writer rule is retired. Safety no longer comes from restricting who writes — it comes from leasing every task, isolating it in its own git worktree, and requiring a pinned non-author reviewer to approve before anything merges.</p>
     </div>
 
@@ -1843,12 +1845,12 @@ body::after {
   </div>
 </section>
 
-<!-- ═══ Six-CLI Roster ═══ -->
+<!-- ═══ Eight-CLI Roster ═══ -->
 <section class="section" id="roster">
   <div class="container">
     <div class="section__header reveal">
-      <span class="section__label">Six-CLI Roster</span>
-      <h2 class="section__title">Six CLIs, One Config</h2>
+      <span class="section__label">Eight-CLI Roster</span>
+      <h2 class="section__title">Eight CLIs, One Config</h2>
       <p class="section__desc">A single CLI-neutral file — <code>ops/roster.toml</code> — maps each role to a CLI, model, and effort. Fallback chains degrade gracefully and always terminate at the core trio, which can never be disabled.</p>
     </div>
 
@@ -1954,6 +1956,38 @@ body::after {
         <div class="roster-card__meta">
           <span class="roster-card__chip">enroll via <b>at-setup</b></span>
           <span class="roster-card__chip">cursor-grok-4.6-xhigh (pinned)</span>
+        </div>
+      </div>
+
+      <div class="roster-card" style="--cli: var(--cli-devin);">
+        <div class="roster-card__head">
+          <div class="roster-card__badge">DV</div>
+          <div class="roster-card__names">
+            <div class="roster-card__name">Devin</div>
+            <div class="roster-card__bin">devin</div>
+          </div>
+          <span class="roster-card__tier roster-card__tier--opt">Optional</span>
+        </div>
+        <p class="roster-card__role">Reviewer and analyst once you consent to Cognition seeing the code — a builder only if you opt in.</p>
+        <div class="roster-card__meta">
+          <span class="roster-card__chip">enroll via <b>at-setup</b></span>
+          <span class="roster-card__chip">swe-1-6-slow</span>
+        </div>
+      </div>
+
+      <div class="roster-card" style="--cli: var(--cli-grok);">
+        <div class="roster-card__head">
+          <div class="roster-card__badge">GR</div>
+          <div class="roster-card__names">
+            <div class="roster-card__name">Grok Build</div>
+            <div class="roster-card__bin">grok</div>
+          </div>
+          <span class="roster-card__tier roster-card__tier--opt">Optional</span>
+        </div>
+        <p class="roster-card__role">Eligible builder once enrolled — reviews run read-only, and no Claude Code plugin loads in its lease worktrees.</p>
+        <div class="roster-card__meta">
+          <span class="roster-card__chip">enroll via <b>at-setup</b></span>
+          <span class="roster-card__chip">grok-4.7</span>
         </div>
       </div>
     </div>
@@ -2364,7 +2398,7 @@ body::after {
           <tr><td><code>at-compound [solution|decision] &lt;description&gt;</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Record a solved problem or decision in <code>ops/solutions/</code> or <code>ops/decisions/</code></td></tr>
           <tr><td><code>at-analyze [url or path]</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Read-only judgment of an external repo for adoptable patterns</td></tr>
           <tr><td><code>at-resolve-pr &lt;PR# or URL&gt;</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Work through GitHub PR review comments: implement, answer or defer, tests run</td></tr>
-          <tr><td><code>at-setup [opencode|kimi|cursor|roles]</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Guided roster onboarding: gate the core trio, enroll or decline each optional CLI, assign roles</td></tr>
+          <tr><td><code>at-setup [opencode|kimi|cursor|devin|grok|roles]</code> <span class="cmd-badge cmd-badge--util">util</span></td><td>Guided roster onboarding: gate the core trio, enroll or decline each optional CLI, assign roles</td></tr>
         </tbody>
       </table>
     </div>

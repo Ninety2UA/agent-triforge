@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/common.sh — shared helpers: the host-marker scrub, the fail-closed timeout wrapper, output scrubbing, the KTD-9 failure classifier, the lead-only guard (_lead_only: worker marker, lease root, lead host), and the agy/codex listing + feature-detection helpers
+# scripts/lib/common.sh — shared helpers: the host-marker scrub, the fail-closed timeout wrapper, output scrubbing, the KTD-9 failure classifier, the lead-only guard (_lead_only: worker marker, lease root, lead host), the role-brief helpers (_list_plugin_briefs, _brief_body), and the agy/codex listing + feature-detection helpers
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh. Every function keeps the name and
@@ -98,10 +98,15 @@ _approver_ok() {
   _is_known_cli "${1:-}"
 }
 
+# The account's plan does not include the pinned model (Devin Free: "Upgrade
+# to Pro to access this model"): _classify_invoke_failure's plan branch and
+# invoke_devin's own pre-check (devin.sh) read it with grep -iE.
+_PLAN_LIMIT_RE='upgrade to (pro|max|a paid plan)|requires? a (paid|pro) plan|not available on your plan'
+
 # Classify a failed external-CLI invocation (KTD-9). Shared so future per-CLI
 # helpers reuse one taxonomy instead of reinventing bare retry-once. Sets:
 #   INVOKE_FAILURE_CLASS    deterministic | timeout | retryable
-#   _INVOKE_FAILURE_REASON  binary-missing | timeout-tool-missing | auth | quota | ""
+#   _INVOKE_FAILURE_REASON  binary-missing | interrupted | timeout-tool-missing | auth | quota | plan | ""
 # Args: <exit-code> [output-file] — the output file is scanned for
 # auth-shaped patterns when present.
 _classify_invoke_failure() {
@@ -114,6 +119,12 @@ _classify_invoke_failure() {
   elif [ "$RC" -eq 127 ]; then
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="binary-missing"
+  elif [ "$RC" -eq 129 ] || [ "$RC" -eq 130 ] || [ "$RC" -eq 143 ]; then
+    # 128 + HUP, INT, TERM: someone stopped the run, and a retry would start
+    # it again behind their back. Every helper's retry and the lease lane's
+    # requeue key off this class, so none of them restarts an interrupted run.
+    INVOKE_FAILURE_CLASS="deterministic"
+    _INVOKE_FAILURE_REASON="interrupted"
   elif [ "$RC" -eq "$_RC_NO_TIMEOUT_TOOL" ] && ! command -v timeout >/dev/null 2>&1 && ! command -v gtimeout >/dev/null 2>&1; then
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="timeout-tool-missing"
@@ -122,6 +133,10 @@ _classify_invoke_failure() {
     # second timeout window; the fix is a refreshed cycle or purchased usage.
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="quota"
+  elif [ -n "$OUT" ] && [ -f "$OUT" ] && grep -qiE "$_PLAN_LIMIT_RE" "$OUT" 2>/dev/null; then
+    # The plan does not include the pinned model: a retry cannot help.
+    INVOKE_FAILURE_CLASS="deterministic"
+    _INVOKE_FAILURE_REASON="plan"
   elif [ -n "$OUT" ] && [ -f "$OUT" ] && grep -qiE 'not logged in|login required|unauthorized|401|credential|authentication (failed|required|expired)' "$OUT" 2>/dev/null; then
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="auth"
@@ -232,6 +247,27 @@ _lease_root_above() {
     fi
     D=${D%/*}
   done
+}
+
+# _list_plugin_briefs <dir> — the role briefs in the plugin's <dir>
+# (grok-agents, devin-agents): each *.md basename without .md, README
+# excluded, sorted and unique; nothing when the directory is missing.
+_list_plugin_briefs() {
+  {
+    if [ -d "${_TRIFORGE_PLUGIN_ROOT}/${1}" ]; then
+      for f in "${_TRIFORGE_PLUGIN_ROOT}/${1}"/*.md; do
+        [ -f "$f" ] || continue
+        case "$(basename "$f" .md)" in README) continue ;; esac
+        basename "$f" .md
+      done 2>/dev/null
+    fi
+  } | sort -u
+}
+
+# _brief_body <file> — a role brief without its frontmatter: every line after
+# the second `---` line.
+_brief_body() {
+  awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "$1"
 }
 
 # Raw `agy agents` listing (native agents come from installed agy plugins

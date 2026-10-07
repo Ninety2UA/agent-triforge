@@ -54,6 +54,9 @@ DEFAULTS = {
 #   - [members.<core-trio>] enabled=false is rejected (cannot be disabled)
 #   - a [lead] table must name a CLI that can lead, with valid fields (KTD1;
 #     lead_load in _LEAD_PY, below)
+#   - a consent CLI (devin) needs a recorded consent before it is enabled or
+#     named in a chain, and a role-limited CLI takes another role only through
+#     its recorded opt-in (R24; member_rules in _MEMBER_RULES_PY, below)
 # The resolution walk tries the primary cli, then fallbacks in order; a
 # member is SKIPPED when its binary is absent from PATH or its
 # [members.<cli>] entry says enabled=false (R38: disabled = absent
@@ -96,6 +99,7 @@ ${_TRIFORGE_CLIS_PY}
 ${_INSTALL_FIX_PY}
 ${_ROLE_DEFAULTS_PY}
 ${_LEAD_PY}
+${_MEMBER_RULES_PY}
 try:
     import tomllib
 except ImportError:
@@ -167,6 +171,8 @@ for name, dflt in DEFAULTS.items():
     if chain[-1] not in CORE_TRIO:
         reject('role ' + repr(name) + ' fallback chain ' + repr(chain) + ' does not terminate at a core-trio member (' + ', '.join(CORE_TRIO) + ') — a chain resolving entirely to optional members cannot ship')
     merged[name] = entry
+# Consent and role limits (R24, _MEMBER_RULES_PY): every role's chain, every load.
+member_rules(members, {n: [e['cli']] + list(e['fallbacks']) for n, e in merged.items()}, reject)
 
 # --- Resolution walk -------------------------------------------------------
 role = os.environ.get('ROLE', '')
@@ -235,11 +241,12 @@ _RC_DISPATCH_ROLE_CLAUDE=40
 # picks the cli+model+effort for the role; this then case-dispatches to the
 # resolved cli's invoke_* helper, threading the resolved model/effort through
 # that helper's override env var (AGY_MODEL / OPENCODE_MODEL / KIMI_MODEL /
-# CURSOR_MODEL) so a roster override actually reaches the CLI. This is what
-# makes the optional invoke_opencode/invoke_kimi/invoke_cursor helpers LIVE and
-# lets a [roles.tester] cli="opencode" override run opencode instead of codex —
-# without it, resolve_role only drove the builder lane (lease_create) and the
-# review/test phases hardcoded codex/antigravity.
+# CURSOR_MODEL / DEVIN_MODEL / GROK_MODEL) so a roster override actually reaches
+# the CLI. This is what makes the optional invoke_opencode/invoke_kimi/
+# invoke_cursor/invoke_devin/invoke_grok helpers LIVE and lets a [roles.tester]
+# cli="opencode" override run opencode instead of codex — without it,
+# resolve_role only drove the builder lane (lease_create) and the review/test
+# phases hardcoded codex/antigravity.
 #
 # The claude lane depends on the lead (R2, KTD16). A lead whose native
 # sub-agents enforce their tool lists (the registry's
@@ -268,6 +275,9 @@ dispatch_role() {
   MODEL=$(printf '%s\n' "$RESOLVED" | cut -f2)
   EFFORT=$(printf '%s\n' "$RESOLVED" | cut -f3)
   echo "dispatch_role: role=${ROLE} -> cli=${CLI} model=${MODEL:-<default>} effort=${EFFORT} agent=${AGENT_NAME}" >&2
+  # The role rule at dispatch (R24), the same check lease_dispatch makes: the
+  # resolved member must still be allowed this role (rc 5)
+  _member_role_ok "$CLI" "$ROLE" || return $?
   # The registry's lane field decides the subagent path (claude today): review/
   # test work on a "subagent" lane runs as a native Agent-tool subagent when the
   # lead's sub-agents enforce their tools, else as `claude -p` (see above).
@@ -302,6 +312,15 @@ dispatch_role() {
       ;;
     cursor)
       CURSOR_MODEL="$MODEL" invoke_cursor "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
+      ;;
+    devin)
+      # DEVIN_ROLE picks the permission class (_devin_class, devin.sh) and
+      # the brief a persona name lacks.
+      DEVIN_MODEL="$MODEL" DEVIN_ROLE="$ROLE" invoke_devin "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
+      ;;
+    grok)
+      # GROK_ROLE picks the permission class (_grok_class, grok.sh).
+      GROK_MODEL="$MODEL" GROK_ROLE="$ROLE" invoke_grok "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
       ;;
     *)
       echo "dispatch_role: ERROR role '${ROLE}' resolved to cli '${CLI}', which has no shell dispatch arm here — not integrated. Registered CLIs: $(_known_clis '<registry unreadable>')." >&2
@@ -606,6 +625,58 @@ def write_verified(path, new_raw, verify, who):
         sys.stderr.write(who + ": ERROR serialized roster failed round-trip verify: " + str(exc) + "\n")
         sys.exit(4)
     os.rename(tmp, name, src_dir_fd=ops, dst_dir_fd=ops)
+'
+
+# _MEMBER_RULES_PY — the consent and role-limit rules (R24) the registry's
+# consent, role_limit and opt_in_roles fields declare, spliced into
+# resolve_role (load validation, every load), roster_write_role and
+# roster_write_member (which refuse what a load would), like _LEAD_PY (double
+# quotes only inside, no apostrophes). member_rules(members, chains, reject),
+# with chains a {role: [cli, ...]} map, calls reject when:
+#   - a consent CLI has an enabled [members.<cli>] table without a consent
+#     string, or a chain names it while it has no table at all (never
+#     enrolled, so never consented; a declined table is absent everywhere);
+#   - [members.<cli>].opt_in names a role the CLI does not offer as opt-in;
+#   - a chain names a role-limited CLI for a role outside its role_limit,
+#     unless the role is one of its opt_in_roles and the table opts in. A
+#     disabled member is exempt: resolve_role skips it, so the chain falls
+#     through to its next member (a declined opted-in builder keeps every
+#     role resolvable).
+_MEMBER_RULES_PY='
+def member_rules(members, chains, reject):
+    for cli, e in CLIS.items():
+        m = members.get(cli)
+        if not isinstance(m, dict):
+            continue
+        opted = m.get("opt_in", [])
+        if not isinstance(opted, list) or not all(isinstance(r, str) for r in opted):
+            reject("[members." + cli + "] opt_in must be an array of role names")
+        for r in opted:
+            if r not in e["opt_in_roles"]:
+                reject("[members." + cli + "] opt_in names " + repr(r) + ", which " + cli + " does not offer as an opt-in (" + (", ".join(e["opt_in_roles"]) or "none") + ")")
+        if e["consent"] and m.get("enabled") is not False:
+            c = m.get("consent")
+            if not (isinstance(c, str) and c.strip()):
+                reject("[members." + cli + "] is enabled without a recorded consent: " + e["name"] + " sends prompts and code to " + e["egress"] + ". Ask the user, then record the yes with roster_write_member " + cli + " true <model> --consent user (at-setup asks)")
+    for role, chain in chains.items():
+        for cli in chain:
+            e = CLIS.get(cli)
+            if e is None:
+                continue
+            m = members.get(cli)
+            if e["consent"] and not isinstance(m, dict):
+                reject("role " + repr(role) + " names " + cli + ", which needs the user consent on record first: enroll it with at-setup (roster_write_member " + cli + " true <model> --consent user)")
+            if isinstance(m, dict) and m.get("enabled") is False:
+                continue    # disabled = absent everywhere (R38): resolve_role walks past it
+            lim = e["role_limit"]
+            if not lim or role in lim:
+                continue
+            opted = m.get("opt_in", []) if isinstance(m, dict) else []
+            if role in e["opt_in_roles"]:
+                if role not in opted:
+                    reject("role " + repr(role) + " names " + cli + ", which takes " + ", ".join(lim) + " by default; " + role + " needs the opt-in on record: roster_write_member " + cli + " true <model> --opt-in " + role)
+            else:
+                reject("role " + repr(role) + " names " + cli + ", which takes only " + ", ".join(lim + e["opt_in_roles"]) + (" (" + ", ".join(e["opt_in_roles"]) + " with the opt-in)" if e["opt_in_roles"] else ""))
 '
 
 # _checkout_top — the checkout this shell stands in: the nearest directory
@@ -1277,8 +1348,9 @@ sys.stderr.write(who + ': [lead] cli=' + cli + ' model=' + (model or '<host defa
 #
 # Shipped optional defaults (KTD-8, session-settled) are the registry's model
 # field (scripts/lib/registry.sh): opencode -> openrouter/z-ai/glm-5.3 ; kimi
-# -> kimi-code/k3 ; cursor -> cursor-grok-4.6-xhigh (explicit suffixed pin —
-# effort rides in the suffix — NEVER the Auto router). The core trio (tier
+# -> kimi-code/k3 ; grok -> grok-4.7 ; cursor -> cursor-grok-4.6-xhigh
+# (explicit suffixed pin — effort rides in the suffix — NEVER the Auto
+# router). The core trio (tier
 # "core" in the registry) is required, never enrolled. The binary per member
 # is _registry_binary (cursor through _cursor_bin), and the official install
 # command — PRINTED by setup for the user to run, never executed by Triforge —
@@ -1302,13 +1374,16 @@ _roster_is_core() {
   [ "$(cli_field "${1:-}" tier 2>/dev/null || true)" = "core" ]
 }
 
-# latest_probe_record — print the path of the NEWEST ops/research/*-probe-record.md
-# (KTD9: "the current probe record" is always the newest file; the harness
-# writes a date-stamped record per cycle). rc 1 when none exists. Paths are
-# repo-relative when run from the repo root, absolute otherwise.
+# latest_probe_record [root] — print the path of the NEWEST
+# ops/research/*-probe-record.md under <root>, default the repo the current
+# directory is in (KTD9: "the current probe record" is always the newest file;
+# the harness writes a date-stamped record per cycle). rc 1 when none exists.
+# Paths are relative when run from that root, absolute otherwise.
 latest_probe_record() {
-  local REPO
-  REPO=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  local REPO=${1:-}
+  if [ -z "$REPO" ]; then
+    REPO=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  fi
   local NEWEST
   NEWEST=$(ls -1 "${REPO}/ops/research/"*-probe-record.md 2>/dev/null | sort | tail -1)
   if [ -z "$NEWEST" ]; then
@@ -1414,9 +1489,10 @@ print(str(entry['cli']) + '\t' + str(entry['model']) + '\t' + str(entry['effort'
 # the result parses AND reflects the intended values before an atomic tmp+mv.
 #
 # Validation is a strict SUPERSET of resolve_role's load-time rules, so a
-# written roster always still loads: unknown role/CLI rejected and the chain
-# (cli + fallbacks) must terminate at a core-trio member (both mirrored from
-# resolve_role's load validation), plus writer-only checks resolve_role does
+# written roster always still loads: unknown role/CLI rejected, the chain
+# (cli + fallbacks) must terminate at a core-trio member, and the chain obeys
+# the consent and role-limit rules (member_rules: devin as builder only with
+# its recorded opt-in; all mirrored from resolve_role's load validation), plus writer-only checks resolve_role does
 # not run at load — the effort enum (low|medium|high|xhigh|max) and the agy
 # effort→(High)/(Low) model-suffix normalization below.
 #
@@ -1447,6 +1523,7 @@ ${_CURSOR_ID_PY}
 ${_TRIFORGE_CLIS_PY}
 ${_LEAD_PY}
 ${_ROSTER_SPLICE_PY}
+${_MEMBER_RULES_PY}
 try:
     import tomllib
 except ImportError:
@@ -1506,6 +1583,13 @@ chain = [cli] + fallbacks
 if chain[-1] not in CORE_TRIO:
     sys.stderr.write('roster_write_role: ERROR chain ' + repr(chain) + ' does not terminate at a core-trio member (' + ', '.join(CORE_TRIO) + ') — a chain resolving entirely to optional members cannot ship\n')
     sys.exit(2)
+# Consent and role limits (R24): the load rule for this chain, so the devin
+# builder without its opt-in is refused here, not at the next load.
+def refuse(msg):
+    sys.stderr.write('roster_write_role: ERROR ' + msg + '\n')
+    sys.exit(2)
+members = roster.get('members', {})
+member_rules(members if isinstance(members, dict) else {}, {role: chain}, refuse)
 
 # agy's effort control IS the (Low)/(Medium)/(High) model-variant suffix (see
 # the roster template header): normalize the written pair so it cannot
@@ -1642,7 +1726,86 @@ print('true' if v is True else ('false' if v is False else v))
 "
 }
 
-# roster_write_member <cli> <true|false> <model> [enrolled-tag]
+# _member_consent_ok <cli> [roster] — the consent rule at dispatch (R24): rc 0
+# when the registry asks no consent for <cli>, or when [members.<cli>] in
+# <roster> (default ops/roster.toml) is enabled with a non-empty consent
+# string; otherwise rc 5 (resolve_role's code for the same rule) with a
+# refusal naming at-setup on stderr. member_rules refuses such a roster at
+# every load; this covers the paths that read the member table without loading
+# the roster (at-review's optional lanes) and a lease whose roster changed
+# after lease_create. invoke_devin and lease_dispatch run it before anything
+# is sent. A malformed roster fails closed (rc 4), as at load.
+_member_consent_ok() {
+  local CLI=${1:?usage: _member_consent_ok <cli> [roster]}
+  MC_CLI="$CLI" MC_ROSTER="${2:-ops/roster.toml}" python3 -c "
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_LEAD_PY}
+cli, path = os.environ['MC_CLI'], os.environ['MC_ROSTER']
+e = CLIS.get(cli)
+if e is None or not e['consent']:
+    sys.exit(0)
+members = lead_roster(lead_toml('dispatch'), path, 'dispatch').get('members', {})
+m = members.get(cli) if isinstance(members, dict) else None
+why = 'records no user consent for it'
+if isinstance(m, dict) and m.get('enabled') is False:
+    why = 'declines it ([members.' + cli + '] enabled = false)'
+elif isinstance(m, dict):
+    c = m.get('consent')
+    if isinstance(c, str) and c.strip():
+        sys.exit(0)
+sys.stderr.write('dispatch: REFUSED ' + cli + ' — ' + path + ' ' + why + ', so nothing is sent to ' + e['egress'] + '. Run at-setup to ask the user; on a yes it records the consent (roster_write_member ' + cli + ' true <model> --consent user)\n')
+sys.exit(5)
+"
+}
+
+# _member_role_ok <cli> <role> [roster] — the role rule at dispatch (R24): rc 0
+# when <cli> may take <role> under <roster> (default ops/roster.toml) now: its
+# registry role_limit is empty or names the role, or the role is one of its
+# opt_in_roles and an enabled [members.<cli>] records it in opt_in. A name
+# that is not a roster role (a persona) passes: the lane gives it its default
+# class. A member the roster declines (enabled = false) takes no role. Else
+# rc 5 (resolve_role's code) with a refusal naming the role and at-setup on
+# stderr; a malformed roster fails closed (rc 4). member_rules holds every
+# chain to the same rule at load; this holds a lease whose role was resolved
+# under an earlier roster (the opt-in since removed, the role moved away
+# first so the roster still loads), and a direct invoke_<cli> call.
+# lease_dispatch, dispatch_role and invoke_devin run it before anything is sent.
+_member_role_ok() {
+  local CLI=${1:?usage: _member_role_ok <cli> <role> [roster]}
+  MR_CLI="$CLI" MR_ROLE="${2-}" MR_ROSTER="${3:-ops/roster.toml}" python3 -c "
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_ROLE_DEFAULTS_PY}
+${_LEAD_PY}
+cli, role, path = os.environ['MR_CLI'], os.environ['MR_ROLE'], os.environ['MR_ROSTER']
+e = CLIS.get(cli)
+if e is None:
+    sys.exit(0)
+members = lead_roster(lead_toml('dispatch'), path, 'dispatch').get('members', {})
+m = members.get(cli) if isinstance(members, dict) else None
+m = m if isinstance(m, dict) else {}
+lim = e['role_limit']
+fix = 'give the role to another roster member (at-setup, or roster_write_role ' + role + ' <cli> ...)'
+if m.get('enabled') is False:
+    why = path + ' declines it ([members.' + cli + '] enabled = false)'
+    fix = 'run at-setup to enroll it again, or ' + fix
+elif not lim or role in lim or role not in DEFAULTS:
+    sys.exit(0)
+elif role in e['opt_in_roles']:
+    opted = m.get('opt_in', [])
+    if isinstance(opted, list) and role in opted:
+        sys.exit(0)
+    why = path + ' records no ' + role + ' opt-in for it (' + cli + ' takes ' + ', '.join(lim) + ' by default)'
+    fix = 'run at-setup to ask the user; on a yes it records the opt-in (roster_write_member ' + cli + ' true <model> --opt-in ' + role + '), or ' + fix
+else:
+    why = cli + ' takes only ' + ', '.join(lim + e['opt_in_roles']) + (' (' + ', '.join(e['opt_in_roles']) + ' with the opt-in)' if e['opt_in_roles'] else '')
+sys.stderr.write('dispatch: REFUSED ' + cli + ' for role ' + repr(role) + ' — ' + why + ', so nothing runs. Fix: ' + fix + '\n')
+sys.exit(5)
+"
+}
+
+# roster_write_member <cli> <true|false> <model> [enrolled-tag] [--consent user] [--opt-in <role,...|none>]
 # The SINGLE writer of [members.<cli>] in ops/roster.toml. Text-surgical so it
 # preserves everything else in the file (roles, comments, promotion gate): it
 # replaces an existing [members.<cli>] block in place, or appends a new one,
@@ -1650,17 +1813,57 @@ print('true' if v is True else ('false' if v is False else v))
 # before an atomic tmp+mv. Refuses unknown CLIs and refuses to disable a
 # core-trio member (mirrors resolve_role's load-time rule so the roster stays
 # resolvable). enrolled-tag defaults to today's date.
+# Consent and opt-in (R24), for the CLIs whose registry entry asks for them:
+#   --consent user   the user said yes to the egress (at-setup asked): records
+#                    consent = "user <UTC> via=<origin>", the origin from
+#                    _lead_origin as lease_approve stamps it (via=none and
+#                    ambiguous markers are refused). Enabling a consent CLI
+#                    without one, and with none already on record, is refused
+#                    (rc 2); a rewrite that leaves the flag out keeps the record
+#   --opt-in <roles> records opt_in = [...] (roles from the registry's
+#                    opt_in_roles; none clears it); left out, the table keeps
+#                    what it had
+# A decline (enabled=false) drops both: re-enabling asks again. A write whose
+# table the roster's role chains would reject at load (member_rules) is
+# refused (rc 2), so the roster stays resolvable: dropping the builder opt-in
+# from an enabled devin while a builder chain names it is refused; a decline
+# is not (resolve_role walks past a disabled member).
 roster_write_member() {
   _lead_only roster_write_member || return $?   # workers never write the roster (KTD9, common.sh)
-  local CLI=${1:?usage: roster_write_member <cli> <true|false> <model> [enrolled-tag]}
-  local ENABLED=${2:?usage: roster_write_member <cli> <true|false> <model> [enrolled-tag]}
+  local USAGE="usage: roster_write_member <cli> <true|false> <model> [enrolled-tag] [--consent user] [--opt-in <role,...|none>]"
+  local CLI=${1:?$USAGE}
+  local ENABLED=${2:?$USAGE}
   local MODEL=${3-}
-  local TAG=${4:-$(date +%Y-%m-%d)}
+  local TAG="" CONSENT="" OPTIN="__keep__" STAMP=""
+  shift 3 2>/dev/null || shift $#
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --consent) CONSENT=${2-}; shift 2 2>/dev/null || { echo "roster_write_member: $USAGE" >&2; return 64; } ;;
+      --opt-in)  OPTIN=${2-};   shift 2 2>/dev/null || { echo "roster_write_member: $USAGE" >&2; return 64; } ;;
+      --*)       echo "roster_write_member: unknown option '$1' — $USAGE" >&2; return 64 ;;
+      *)         TAG=$1; shift ;;
+    esac
+  done
+  [ -n "$TAG" ] || TAG=$(date +%Y-%m-%d)
+  if [ -n "$CONSENT" ]; then
+    if [ "$CONSENT" != user ]; then
+      echo "roster_write_member: ERROR --consent takes 'user' (the user said yes; a lead cannot consent for them), got '${CONSENT}'" >&2
+      return 2
+    fi
+    _lead_origin
+    case "$_LEAD_VIA" in
+      ambiguous) echo "roster_write_member: REFUSED — $(_lead_ambiguous_note); a consent records where it was given" >&2; return 2 ;;
+      none|"")   echo "roster_write_member: REFUSED — via=none: no lead host markers and no terminal, so the consent record could not say where it was given. Run it from the lead's tool shell or a terminal" >&2; return 2 ;;
+    esac
+    STAMP="user $(date -u +%Y-%m-%dT%H:%M:%SZ) via=${_LEAD_VIA}"
+  fi
   mkdir -p ops
-  ROSTER_FILE="ops/roster.toml" RW_CLI="$CLI" RW_ENABLED="$ENABLED" RW_MODEL="$MODEL" RW_TAG="$TAG" python3 -c "
+  ROSTER_FILE="ops/roster.toml" RW_CLI="$CLI" RW_ENABLED="$ENABLED" RW_MODEL="$MODEL" RW_TAG="$TAG" RW_STAMP="$STAMP" RW_OPTIN="$OPTIN" python3 -c "
 import json, os, re, sys
 ${_TRIFORGE_CLIS_PY}
+${_ROLE_DEFAULTS_PY}
 ${_ROSTER_SPLICE_PY}
+${_MEMBER_RULES_PY}
 ${_READ_REGULAR_PY}
 try:
     import tomllib
@@ -1676,6 +1879,8 @@ cli = os.environ['RW_CLI']
 enabled = os.environ['RW_ENABLED']
 model = os.environ['RW_MODEL']
 tag = os.environ['RW_TAG']
+stamp = os.environ['RW_STAMP']
+optin_arg = os.environ['RW_OPTIN']
 
 # Known CLIs and the core set from the spliced registry (CLIS).
 CORE = tuple(c for c, e in CLIS.items() if e['tier'] == 'core')
@@ -1689,15 +1894,68 @@ if enabled not in ('true', 'false'):
 if cli in CORE and enabled == 'false':
     sys.stderr.write('roster_write_member: ERROR [members.' + cli + '] enabled=false rejected — the core trio cannot be disabled\n')
     sys.exit(2)
+e = CLIS[cli]
+if stamp and not e['consent']:
+    sys.stderr.write('roster_write_member: ERROR ' + cli + ' takes no consent record (only a registry entry with consent = True does)\n')
+    sys.exit(2)
+
+raw = ''
+old = {}
+data = {}
+if os.path.isfile(path):
+    raw = read_regular(path, True)
+    try:
+        data = tomllib.loads(raw)
+        old = data.get('members', {}).get(cli, {})
+    except tomllib.TOMLDecodeError as exc:
+        sys.stderr.write('roster_write_member: ERROR malformed ' + path + ': ' + str(exc) + '\n')
+        sys.exit(4)
+    old = old if isinstance(old, dict) else {}
+
+consent = ''
+optin = []
+if enabled == 'true':
+    kept = old.get('consent') if old.get('enabled') is not False else None
+    consent = stamp or (kept if isinstance(kept, str) and kept.strip() else '')
+    if e['consent'] and not consent:
+        sys.stderr.write('roster_write_member: REFUSED — enrolling ' + cli + ' needs the user consent on record: ' + e['name'] + ' sends prompts and code to ' + e['egress'] + ', and ' + e['egress'].split(' (', 1)[0] + ' may train on them unless the account opts out. Ask the user; on a yes rerun with --consent user\n')
+        sys.exit(2)
+    if optin_arg == '__keep__':
+        prev = old.get('opt_in', []) if old.get('enabled') is not False else []
+        optin = [r for r in prev if isinstance(r, str)] if isinstance(prev, list) else []
+    elif optin_arg not in ('', 'none'):
+        optin = [r.strip() for r in optin_arg.split(',') if r.strip()]
+    for r in optin:
+        if r not in e['opt_in_roles']:
+            sys.stderr.write('roster_write_member: ERROR ' + cli + ' offers no opt-in for ' + repr(r) + ' (opt-in roles: ' + (', '.join(e['opt_in_roles']) or 'none') + ')\n')
+            sys.exit(2)
+
+# The written roster must still load (member_rules, R24): the new table
+# against every role's merged chain, scoped to this CLI, since this write
+# changes no other member. Refuses, for example, an opt-in dropped from an
+# enabled devin a builder chain still names; a decline always passes (a
+# disabled member is skipped in every chain).
+def refuse(msg):
+    sys.stderr.write('roster_write_member: REFUSED — the roster would not load: ' + msg + '\n')
+    sys.exit(2)
+roles = data.get('roles', {})
+roles = roles if isinstance(roles, dict) else {}
+chains = {}
+for name, dflt in DEFAULTS.items():
+    user = roles.get(name, {})
+    user = user if isinstance(user, dict) else {}
+    head, fbs = user.get('cli', dflt['cli']), user.get('fallbacks', dflt['fallbacks'])
+    chain = [head] + (list(fbs) if isinstance(fbs, list) else [])
+    chains[name] = [x for x in chain if x == cli]
+member_rules({cli: {'enabled': enabled == 'true', 'consent': consent, 'opt_in': optin}}, chains, refuse)
 
 block = ('[members.' + cli + ']\n'
          'enabled = ' + enabled + '\n'
          'model = ' + json.dumps(model) + '\n'
-         'enrolled = ' + json.dumps(tag) + '\n')
+         'enrolled = ' + json.dumps(tag) + '\n'
+         + ('consent = ' + json.dumps(consent) + '\n' if consent else '')
+         + ('opt_in = ' + json.dumps(optin) + '\n' if optin else ''))
 
-raw = ''
-if os.path.isfile(path):
-    raw = read_regular(path, True)
 # The whole old table goes, its trailing comment lines included.
 new_raw = splice_table(raw, r'^\[members\.' + re.escape(cli) + r'\][ \t]*$', block, False)
 
@@ -1708,8 +1966,10 @@ def verify(data):
     assert isinstance(m, dict), 'members.' + cli + ' is not a table after write'
     assert m.get('enabled') == (enabled == 'true'), 'enabled mismatch after write'
     assert str(m.get('model', '')) == model, 'model mismatch after write'
+    assert m.get('consent', '') == consent, 'consent mismatch after write'
+    assert m.get('opt_in', []) == optin, 'opt_in mismatch after write'
 write_verified(path, new_raw, verify, 'roster_write_member')
-sys.stderr.write('roster_write_member: [members.' + cli + '] enabled=' + enabled + ' model=' + (model or '<none>') + ' enrolled=' + tag + '\n')
+sys.stderr.write('roster_write_member: [members.' + cli + '] enabled=' + enabled + ' model=' + (model or '<none>') + ' enrolled=' + tag + (' consent=' + consent if consent else '') + (' opt_in=' + ','.join(optin) if optin else '') + '\n')
 "
 }
 
@@ -1721,11 +1981,17 @@ sys.stderr.write('roster_write_member: [members.' + cli + '] enabled=' + enabled
 # that queries the same cli twice probes only once.
 #   cursor   -> cursor-agent status         (pure auth query, no tokens)
 #   opencode -> OPENROUTER_API_KEY set, else `opencode auth list` names openrouter
+#   devin    -> devin auth status, its first line (it exits 0 logged out)
 #   kimi     -> bounded headless probe. kimi doctor validates CONFIG only and
 #               PASSES when signed out (probe KIMI-02 PASS vs KIMI-05 AUTH-FAIL),
 #               so login state needs a real headless call. Signed-out fails fast
 #               (no model configured, before any network round-trip) so the cap
 #               is cheap; signed-in answers the trivial READY quickly.
+#   grok     -> XAI_API_KEY set, else a cached login in $GROK_HOME/auth.json
+#               (default ~/.grok). No call: grok has no status command (`grok
+#               models` says "not authenticated" when signed in), and a READY
+#               costs tokens. A lapsed login surfaces on the first dispatch,
+#               which fails at once with "Not signed in" (deterministic).
 roster_member_auth() {
   local CLI=${1:?usage: roster_member_auth <cli>}
   local CACHE="${TMPDIR:-/tmp}/triforge_auth_${CLI}_$$"
@@ -1766,6 +2032,13 @@ roster_member_auth() {
         LINE="auth-failed: set OPENROUTER_API_KEY, or run 'opencode auth login' and connect the openrouter provider (the openrouter/z-ai/glm-5.3 default needs it)"; RC=1
       fi
       ;;
+    grok)
+      if [ -n "${XAI_API_KEY:-}" ] || [ -s "${GROK_HOME:-$HOME/.grok}/auth.json" ]; then
+        LINE="ok"
+      else
+        LINE="auth-failed: run 'grok login' ('grok login --device-code' on a host without a browser), or set XAI_API_KEY"; RC=1
+      fi
+      ;;
     kimi)
       local KERR="${TMPDIR:-/tmp}/triforge_kimi_auth_err_$$"
       OUT=$(_run_with_timeout 45 env KIMI_DISABLE_TELEMETRY=1 kimi --output-format stream-json -p "Respond with only: READY" 2>"$KERR") || true
@@ -1776,6 +2049,15 @@ roster_member_auth() {
         LINE="ok"
       else
         LINE="ok"   # inconclusive (no READY, no auth-shaped error) — do not block on an ambiguous probe
+      fi
+      ;;
+    devin)
+      # `devin auth status` exits 0 logged out too ("Not logged in."), so the
+      # first line decides (_devin_auth_ready, devin.sh), never the exit code.
+      if _devin_auth_ready; then
+        LINE="ok"
+      else
+        LINE="auth-failed: run 'devin auth login' to sign in (\`devin auth status\` says Not logged in.)"; RC=1
       fi
       ;;
     *)
@@ -1839,7 +2121,9 @@ roster_member_status() {
 #   10 not-installed binary absent — the OFFICIAL install command is PRINTED
 #                    (never run); at-setup shows the row as "not installed"
 #   20 needs-ask     interactive + installed + unenrolled — the CALLER runs the
-#                    participate?/which-model ask, then roster_write_member
+#                    participate?/which-model ask, then roster_write_member;
+#                    also headless for a consent CLI (devin), which is never
+#                    enrolled without the user's recorded yes
 #   30 unsupported   installed but an unsupported line (OpenCode V2, D-049) —
 #                    the V1 pin is PRINTED; nothing is recorded, never enrolled
 roster_enroll_member() {
@@ -1887,6 +2171,20 @@ roster_enroll_member() {
     return 10
   fi
 
+  # A CLI whose registry entry asks for consent (devin, R24) is never enrolled
+  # headless: a hook cannot ask, and the record must carry the user's yes.
+  # Interactive, the ask adds the consent question to participate/which model.
+  # consent and egress in one registry read (consent prints true|false, egress
+  # never holds a tab).
+  local NEEDS_CONSENT="" EGRESS="" CROW=""
+  CROW=$(cli_field "$CLI" consent egress 2>/dev/null) || CROW=""
+  NEEDS_CONSENT=${CROW%%$'\t'*}
+  EGRESS=${CROW#*$'\t'}
+  if [ "$MODE" = "headless" ] && [ "$NEEDS_CONSENT" = true ]; then
+    echo "needs-consent: ${CLI} installed=yes — enrolling it needs the user's recorded consent (${EGRESS} sees the prompts and code); not enrolled headless. Run at-setup to ask."
+    return 20
+  fi
+
   # Auth/READY check names the exact fix on failure. Skipped in headless mode
   # so the session-start trigger stays fast (no live probe); a failed auth does
   # not block enrollment (which records intent) — the caller surfaces the fix.
@@ -1903,7 +2201,12 @@ roster_enroll_member() {
 
   # interactive: the CALLER (setup.md) runs the ask and writes the answer.
   echo "needs-ask: ${CLI} installed=yes default-model=${DEFAULT} auth=${AUTH}"
-  echo "  enroll : roster_write_member ${CLI} true <model>   (recommended: ${DEFAULT})"
+  if [ "$NEEDS_CONSENT" = true ]; then
+    echo "  consent: required — ${EGRESS} sees the prompts and code; ask the user before enrolling"
+    echo "  enroll : roster_write_member ${CLI} true <model> --consent user   (recommended: ${DEFAULT})"
+  else
+    echo "  enroll : roster_write_member ${CLI} true <model>   (recommended: ${DEFAULT})"
+  fi
   echo "  decline: roster_write_member ${CLI} false \"\""
   return 20
 }

@@ -218,8 +218,8 @@ if [ -n "$SS_HELPER" ] && [ -z "$SS_AT_HOME" ]; then
 fi
 
 # Optional-CLI detection (roster tier): presence + version for every optional
-# member of the CLI registry (cli_table optional — opencode / kimi / cursor
-# today), written to .claude/roster-detected.local.md (runtime state,
+# member of the CLI registry (cli_table optional — opencode / kimi / cursor /
+# devin / grok today), written to .claude/roster-detected.local.md (runtime state,
 # regenerated each session start; .claude/*.local.md is gitignored).
 # Line format: cli|version|detected-date, plus one interactive=yes|no signal
 # line the enrollment unit keys off, plus `<cli>_bin=<resolved path>` for a
@@ -238,18 +238,24 @@ ROSTER_DETECTED=".claude/roster-detected.local.md"
 ROSTER_DETECTED_NOTICE=""
 OPTIONAL_DETECTED_COUNT=0
 DETECTED_OPTIONAL=()
+# The detected CLIs whose registry entry asks for consent (devin, R24),
+# space-padded: " devin ".
+SS_CONSENT_CLIS=" "
 if [ -t 0 ]; then INTERACTIVE_SIGNAL="yes"; else INTERACTIVE_SIGNAL="no"; fi
 SS_DETECTED="<!-- runtime state: optional roster CLI detection, regenerated each session start -->
 interactive=${INTERACTIVE_SIGNAL}"
 SS_OPTIONAL_ROWS=""
 if [ -n "$SS_HELPER" ]; then
-  SS_OPTIONAL_ROWS=$(cli_table optional binary resolver 2>/dev/null || true)
+  SS_OPTIONAL_ROWS=$(cli_table optional binary consent resolver 2>/dev/null || true)
 fi
-# One registry read for the tier (cli_table: name, binary, resolver per line);
-# each member's binary is then resolved from its own row (_registry_binary, no
-# further read) and probed with command -v before anything else runs. The rows
-# arrive on fd 3 so the version probes keep the hook's stdin.
-while IFS=$'\t' read -r -u 3 CLI_NAME CLI_BIN CLI_RESOLVER; do
+# One registry read for the tier (cli_table: name, binary, consent, resolver
+# per line); each member's binary is then resolved from its own row
+# (_registry_binary, no further read) and probed with command -v before
+# anything else runs. resolver stays last: it is empty for most CLIs, and
+# IFS=$'\t' folds an empty middle field into the next (consent always prints
+# true or false). The rows arrive on fd 3 so the version probes keep the
+# hook's stdin.
+while IFS=$'\t' read -r -u 3 CLI_NAME CLI_BIN CLI_CONSENT CLI_RESOLVER; do
   [ -n "$CLI_NAME" ] || continue
   CLI_BIN=$(_registry_binary "$CLI_NAME" "$CLI_BIN" "$CLI_RESOLVER" 2>/dev/null || true)
   [ -n "$CLI_BIN" ] || continue
@@ -273,6 +279,7 @@ ${CLI_NAME}_bin=${CLI_BIN}"
     fi
     OPTIONAL_DETECTED_COUNT=$((OPTIONAL_DETECTED_COUNT + 1))
     DETECTED_OPTIONAL+=("$CLI_NAME")
+    if [ "$CLI_CONSENT" = true ]; then SS_CONSENT_CLIS="${SS_CONSENT_CLIS}${CLI_NAME} "; fi
   fi
 done 3<<SS_OPTIONAL_EOF
 ${SS_OPTIONAL_ROWS}
@@ -291,6 +298,9 @@ fi
 # session with no [members.<cli>] entry yet:
 #   headless (interactive=no) -> silently enroll its shipped default now (a hook
 #     cannot prompt); the lease layer records the resolved model at dispatch.
+#     A consent CLI (devin, R24) is the exception: roster_enroll_member never
+#     enrolls it headless (rc 20), and the interactive notice says it needs the
+#     user's consent.
 #   interactive (=yes)        -> emit an orientation line pointing at /at-setup.
 # All writes go through the single-writer roster writer (roster_write_member) in
 # the helper sourced above — never a hand-rolled write here. Fast: headless
@@ -298,6 +308,13 @@ fi
 ENROLLMENT_NOTICES=""
 if [ -n "$SS_HELPER" ] && [ -z "$SS_AT_HOME" ] && [ "${#DETECTED_OPTIONAL[@]}" -gt 0 ]; then
   for CLI_NAME in "${DETECTED_OPTIONAL[@]}"; do
+    CLI_CONSENT=false
+    case "$SS_CONSENT_CLIS" in *" ${CLI_NAME} "*) CLI_CONSENT=true ;; esac
+    # Headless never enrolls a consent CLI (roster_enroll_member returns 20
+    # and writes nothing), so it is skipped before any roster read.
+    if [ "$INTERACTIVE_SIGNAL" = "no" ] && [ "$CLI_CONSENT" = true ]; then
+      continue
+    fi
     ENROLL_HAS_RC=0
     roster_has_member "$CLI_NAME" || ENROLL_HAS_RC=$?
     [ "$ENROLL_HAS_RC" -eq 0 ] && continue   # already enrolled or declined — never re-ask (AE6)
@@ -313,6 +330,9 @@ if [ -n "$SS_HELPER" ] && [ -z "$SS_AT_HOME" ] && [ "${#DETECTED_OPTIONAL[@]}" -
         ENROLL_ERR=$(printf '%s\n' "$ENROLL_ERR" | grep -v '^[[:space:]]*$' | head -1 | cut -c1-300 || true)
         ENROLLMENT_NOTICES="${ENROLLMENT_NOTICES}${SS_NL}$(_ss_prose "WARNING: ${CLI_NAME} was detected but not enrolled (rc ${ENROLL_RC}): ${ENROLL_ERR:-no reason given}")"
       fi
+    elif [ "$CLI_CONSENT" = true ]; then
+      # A consent CLI (devin, R24) never enrolls headless: say so.
+      ENROLLMENT_NOTICES="${ENROLLMENT_NOTICES}${SS_NL}$(_ss_prose "New optional CLI detected: ${CLI_NAME} (unenrolled). It needs your consent before it joins the roster, so it is never enrolled on its own. Run /at-setup to enroll it.")"
     else
       ENROLL_DEF=$(roster_member_default "$CLI_NAME" 2>/dev/null || true)
       ENROLLMENT_NOTICES="${ENROLLMENT_NOTICES}${SS_NL}$(_ss_prose "New optional CLI detected: ${CLI_NAME} (unenrolled). Run /at-setup to enroll, or it enrolls with its shipped default (${ENROLL_DEF}) on first headless use.")"

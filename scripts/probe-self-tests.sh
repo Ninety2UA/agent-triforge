@@ -6,8 +6,8 @@
 # TRIFORGE_TEST_BUILDER lifecycle, session-start idempotence plus its upgrade
 # notices (R40), the skills refresh's destructive paths, the [lead] table,
 # ledger approvals, the worker marker, lead-side git hardening, detached
-# leases with lease_wait, the claude -p lane, and the persona-bearing skill
-# blocks under zsh and bash).
+# leases with lease_wait, the claude -p lane, the persona-bearing skill
+# blocks under zsh and bash, and at-review's blocks run verbatim).
 #
 # NOT a standalone script: sourced by scripts/probe-capabilities.sh after the
 # per-CLI sections, inside the same shell, so it uses the harness's helpers
@@ -711,7 +711,8 @@ rm -rf "$_S2"
 # SELF-03 (R35): the env-allowlist isolation IS enforced — _adapter_env scopes
 # env vars per adapter, so a planted cross-adapter credential is stripped.
 # Assert codex never sees opencode's OPENROUTER_API_KEY / kimi's KIMI_* /
-# cursor's CURSOR_API_KEY, and (positive control) opencode DOES see its own.
+# cursor's CURSOR_API_KEY / grok's XAI_API_KEY, grok never sees opencode's, and
+# (positive controls) opencode, kimi and grok DO see their own.
 # Deterministic, no real CLI: `_adapter_env <cli> env` prints the scoped env.
 # Runs in a subshell that sources the lib so the probe's own env stays clean.
 _S3_FAIL=$( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null; F=""
@@ -720,6 +721,9 @@ _S3_FAIL=$( source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null; F=""
   CURSOR_API_KEY=planted     _adapter_env codex    env 2>/dev/null | grep -q '^CURSOR_API_KEY='     && F="${F} codex-saw-CURSOR"
   OPENROUTER_API_KEY=planted _adapter_env opencode env 2>/dev/null | grep -q '^OPENROUTER_API_KEY=' || F="${F} opencode-missing-OPENROUTER(positive-control)"
   KIMI_API_KEY=planted       _adapter_env kimi     env 2>/dev/null | grep -q '^KIMI_API_KEY='       || F="${F} kimi-missing-KIMI_API_KEY(positive-control)"
+  XAI_API_KEY=planted        _adapter_env codex    env 2>/dev/null | grep -q '^XAI_API_KEY='        && F="${F} codex-saw-XAI"
+  XAI_API_KEY=planted        _adapter_env grok     env 2>/dev/null | grep -q '^XAI_API_KEY='        || F="${F} grok-missing-XAI_API_KEY(positive-control)"
+  OPENROUTER_API_KEY=planted _adapter_env grok     env 2>/dev/null | grep -q '^OPENROUTER_API_KEY=' && F="${F} grok-saw-OPENROUTER"
   printf '%s' "$F" )
 # The key lists are read line-wise, never glob-expanded: under bash an unquoted
 # `for _K in $(...)` pathname-expands each word, so from a cwd holding files
@@ -741,7 +745,7 @@ _S3_GLOB=$( cd "$_S3_CWD" && /bin/bash -c 'source "$1/invoke-external.sh" 2>/dev
 _S3_FAIL="${_S3_FAIL}${_S3_GLOB}"
 rm -rf "$_S3_CWD"
 if [ -z "$_S3_FAIL" ]; then
-  row "SELF-03" "claude" "_adapter_env strips cross-adapter credentials (R35/KTD-14)" "PASS" "codex env carries no OPENROUTER/KIMI/CURSOR key; opencode and kimi carry their own (positive controls held); /bin/bash from a cwd holding KIMI_+x}\$(touch PWNED_BY_FILENAME)\${HOME and KIMI_notes.md: KIMI_API_KEY forwarded, no file created, no bad substitution (keys read line-wise, never glob-expanded)" "static"
+  row "SELF-03" "claude" "_adapter_env strips cross-adapter credentials (R35/KTD-14)" "PASS" "codex env carries no OPENROUTER/KIMI/CURSOR/XAI key, grok's no OPENROUTER key; opencode, kimi and grok carry their own (positive controls held); /bin/bash from a cwd holding KIMI_+x}\$(touch PWNED_BY_FILENAME)\${HOME and KIMI_notes.md: KIMI_API_KEY forwarded, no file created, no bad substitution (keys read line-wise, never glob-expanded)" "static"
 else
   row "SELF-03" "claude" "_adapter_env strips cross-adapter credentials (R35/KTD-14)" "FAIL" "env-allowlist leak:${_S3_FAIL}" "static"
 fi
@@ -812,6 +816,8 @@ fi
 # shipped-name coverage rides in the evidence. The claude lane is the
 # exception: .agents/skills/ is not a Claude path, so its row (SELF-06f) checks
 # the .claude/skills/ copy the real provisioner writes for a claude builder.
+# SELF-06g (grok) also runs the real provisioner and the lane's own argv, whose
+# GROK_FOLDER_TRUST=0 is what lets grok load a fresh worktree's project skills.
 _s6_record() { # _s6_record <id> <cli> <capability> <file> <note>
   local ID=$1 CLI=$2 CAP=$3 F=$4 NOTE=$5 MISS N_PRESENT
   MISS=$(_names_missing "$F")
@@ -827,9 +833,10 @@ _S6_WT="$WORK/self06-wt"
 _S6_OK=0
 _S6_CAP="Lease-lane discovery under env -i from a TMPDIR worktree"
 if [ "$SELF_ONLY" = 1 ]; then
-  for r in "SELF-06a:agy" "SELF-06b:codex" "SELF-06c:opencode" "SELF-06d:cursor" "SELF-06e:kimi" "SELF-06f:claude"; do
+  for r in "SELF-06a:agy" "SELF-06b:codex" "SELF-06c:opencode" "SELF-06d:cursor" "SELF-06e:kimi" "SELF-06f:claude" "SELF-06g:grok"; do
     row "${r%%:*}" "${r#*:}" "$_S6_CAP: ${r#*:}" "SKIPPED" "--self-only: live lease-lane rows are not part of the SELF gate (run the full probe)" "live"
   done
+  row "SELF-06h" "devin" "$_S6_CAP: devin" "SKIPPED" "--self-only: live lease-lane rows are not part of the SELF gate (run the full probe, or --only SELF-06h)" "live"
 elif git -C "$FIX" worktree add -q "$_S6_WT" -b probe/self-06 >/dev/null 2>&1; then
   mkdir -p "$_S6_WT/.agents/skills"
   for s in $SHIPPED_SKILLS; do
@@ -910,8 +917,13 @@ fi
 # claude reads .claude/skills, not .agents/skills (CC-07b): SELF-06f runs the
 # real provisioner into a worktree of its own and the lane's own argv
 # (_self06f_row in scripts/probe-capabilities.sh, which --only SELF-06f runs too).
+# SELF-06g does the same for grok (_self06g_row, the Grok Build section), and
+# SELF-06h for Devin (R24) on the lane's read-class argv (_self06h_row, which
+# --only SELF-06h runs too).
 if [ "$SELF_ONLY" != 1 ]; then
   _self06f_row
+  _self06g_row
+  _self06h_row
 fi
 
 # SELF-07 (KTD11): the TRIFORGE_TEST_BUILDER lifecycle through lease_create /
@@ -6744,6 +6756,1866 @@ else
 fi
 rm -rf "$_S20"
 
+# SELF-24 (R24, R25): Devin CLI as an optional member — no live CLI. A `devin`
+# stub first on PATH answers `auth status` (logged in or out, rc 0 either
+# way, as Devin 3000.x does), records the argv and env of a run, writes into
+# the --config file it is handed (as Devin does: org id, theme, chmod 600),
+# counts its runs, and answers by $DVN_STUB_RUN (revoke, optout and hooks drop
+# the consent or the builder opt-in from ./ops/roster.toml, or add
+# ./.devin/hooks.json, then fail as a retry may fix; interrupted exits 130).
+# Under env -i (invoke_devin, the lease lane) it reads the run mode and its log
+# path from $TMPDIR/dvn-run and dvn-log. Core stubs (_SELF_STUBS) put the trio
+# on PATH.
+#   read-config devin-agents/config-read.json allows nothing (no Exec rule:
+#              git diff, log and show take --output=<file>) and denies every
+#              tool that writes, fetches or reaches an MCP server (a skill's or
+#              the project's allow widens any tool the copy leaves undenied)
+#   readiness  `Not logged in.` with rc 0 -> roster_member_auth devin rc 1
+#              (auth-failed, naming devin auth login); `Logged in (via Devin).`
+#              -> ok
+#   consent    [members.devin] enabled without a recorded consent -> every
+#              resolve_role rc 5 naming consent; a role chain naming devin with
+#              no [members.devin] table -> rc 5; with consent -> the reviewer
+#              resolves to devin
+#   opt-in     a builder chain naming devin (primary or fallback) without
+#              [members.devin] opt_in = ["builder"] -> rc 5; with it -> the
+#              builder resolves to devin; a tester chain naming devin -> rc 5
+#              even with the builder opt-in (not an opt-in role)
+#   writers    roster_write_role builder devin without the opt-in -> refused,
+#              roster bytes unchanged; with it -> written. roster_write_member
+#              devin true without --consent -> refused, nothing written; with
+#              --consent user -> consent recorded with its origin (via=test
+#              under the seam); a model change keeps it; --opt-in builder
+#              records opt_in, --opt-in tester is refused; a decline
+#              (enabled=false) drops consent and opt_in
+#   member-rules  with a builder chain naming an opted-in devin: dropping the
+#              opt-in (--opt-in none) is refused (rc 2, roster bytes
+#              unchanged); a decline is written and every role still
+#              resolves, the builder falling through to claude
+#   consent-dispatch  a hand-written [members.devin] enabled = true with no
+#              consent: invoke_devin refuses (rc 5, deterministic, naming
+#              at-setup in its output file) and the stub never runs; a lease
+#              created with consent whose roster then loses it: lease_dispatch
+#              refuses (rc 5), the row stays leased, the seam builder never runs
+#   headless   roster_enroll_member devin headless never enrolls (rc 20,
+#              needs consent), unlike the other optional members
+#   reimport   devin_env_reimport reads a probe record's DVN-04 row (the
+#              project's newest when none is named): reimport=yes -> yes,
+#              reimport=no -> no, a record without the row -> unknown
+#   env        _adapter_env devin drops SHELL (Devin re-imports the login
+#              shell's exports only when $SHELL is set: DVN-04) and
+#              DEVIN_REFUSAL_FALLBACK; carries the worker marker
+#   lane       _lease_lane_argv devin: the per-dispatch config copy, the model
+#              pin, --permission-mode dangerous for an .edit.json copy and auto
+#              for a .read.json one, --respect-workspace-trust false, -p last;
+#              the read class only behind `env XDG_CONFIG_HOME=/dev/null/...`
+#              (the user's ~/.config/devin MCP servers stay out, DVN-07)
+#   role-rule  _member_role_ok: devin builder without the opt-in -> rc 5
+#              naming the role and at-setup, with it -> 0; devin tester ->
+#              rc 5 even with it; a reviewer, a persona name and codex as
+#              builder -> 0; a declined member (enabled = false) -> rc 5
+#   invoke     invoke_devin reviewer through the stub, consent on record: a
+#              temp copy of devin-agents/config-read.json (the shipped file
+#              unchanged after the stub wrote its copy), auto mode, the model
+#              pin, the reviewer brief in the prompt, the lease allowlist as
+#              its whole env (no SHELL, no DEVIN_REFUSAL_FALLBACK, not the
+#              TRIFORGE_TEST_SECRET planted in the parent, no name outside
+#              TRIFORGE_ENV_BASE, the marker, the no-push config and the read
+#              class's XDG_CONFIG_HOME under /dev/null), rc 0 on
+#              Status: DONE; no Status line -> rc 80; empty answer ->
+#              nonzero; "Not logged in" -> deterministic auth; "Upgrade to
+#              Pro" -> deterministic plan
+#   retry      a first attempt that fails as a retry may fix after it revoked
+#              the consent (reviewer), dropped the builder opt-in (builder) or
+#              added .devin/hooks.json (reviewer): the retry is refused (rc 5
+#              consent, rc 5 role, rc 1 project-config), the stub run once; a
+#              builder run that exits 130: rc 130, deterministic, reason
+#              interrupted, run once
+#   builder    _lease_builder_run's devin arm against the stub, in a session
+#              of its own: the class read off the recorded argv (the .read
+#              copy, --permission-mode auto) and the builder log's command
+#              line, the copy removed after the run; a missing copy -> rc 94,
+#              deterministic, "devin config copy missing", never "not
+#              integrated"
+#   project-config  a project .devin/config.json allowing Fetch(...):
+#              invoke_devin reviewer refuses (rc 1, deterministic,
+#              project-config, the file named in its output file) and the
+#              stub never runs; the lease lane's read class fails to compose
+#              naming the file, the edit class composes; hooks.v1.json,
+#              mcp_config.local.json, a read_config_from import and a
+#              symlinked config.json each refuse, naming the file; a JSONC
+#              deny-only config.json passes and the run goes ahead; the
+#              builder arm on a worktree whose config.json declares hooks ->
+#              rc 94, deterministic, the cause in its output, the stub never
+#              run, the copy removed
+#   project-surfaces  the rest of what a project can make Devin load: a
+#              requiredPlugins entry, an unknown key in config.json, in its
+#              permissions or in an MCP file, a hooks.json (Hooks.JSON too),
+#              any other JSON file in .devin/, and the legacy .cognition/
+#              directory (an allow, hooks.v1.json, mcp_config.local.json, a
+#              symlinked .cognition) each refuse, naming the file; an
+#              optionalPlugins and forbiddenPlugins config, and non-JSON
+#              entries (skills/, agents/, environment.yaml), pass;
+#              invoke_devin from a project whose .cognition/config.json allows
+#              a fetch refuses (rc 1, project-config) with the stub never run;
+#              the lease lane's read class fails to compose on a
+#              requiredPlugins config
+#   role-dispatch  a builder lease created with the opt-in on record, whose
+#              roster then moves the builder role away and drops the opt-in
+#              (consent kept, so it loads): lease_dispatch refuses (rc 5,
+#              naming the role and at-setup), the row stays leased, the seam
+#              builder never runs; invoke_devin builder without the opt-in
+#              refuses (rc 5, deterministic, reason role) with the stub never
+#              run, and with it runs in dangerous mode without the read
+#              class's XDG_CONFIG_HOME
+#   lease      the TRIFORGE_TEST_BUILDER seam with [roles.reviewer] cli =
+#              devin: lease_create <t> reviewer -> builder_cli devin, the
+#              seam builder sees a .read.json config copy during the run, the
+#              copy is gone after it, Status: DONE -> review (rc 0)
+#   cred       the claude lane's --settings deny ~/.local/share/devin to the
+#              Read tool and the sandbox (where Devin 3000.x keeps
+#              credentials.toml)
+_S24="${WORK}/self24"
+mkdir -p "$_S24/bin" "$_S24/tmp"
+cat > "$_S24/bin/devin" <<'EOF'
+#!/bin/sh
+# SELF-24 devin stub
+if [ "$1" = auth ] && [ "$2" = status ]; then
+  case "${DVN_STUB_AUTH:-in}" in
+    out) printf 'Not logged in.\n  Credentials path: /nowhere/.local/share/devin/credentials.toml\nRun `devin auth login` to authenticate.\n' ;;
+    *)   printf 'Logged in (via Devin).\n\nCredentials:\n  File:              /nowhere/.local/share/devin/credentials.toml\n' ;;
+  esac
+  exit 0
+fi
+if [ "$1" = --version ]; then echo "devin 3000.11.3 (stub)"; exit 0; fi
+# Under env -i (invoke_devin, the lease lane) DVN_STUB_* do not arrive, so
+# the run mode and the log path are also read from files in $TMPDIR
+L=${DVN_STUB_LOG:-$(cat "${TMPDIR:-/tmp}/dvn-log" 2>/dev/null || echo /dev/null)}
+DVN_STUB_RUN=${DVN_STUB_RUN:-$(cat "${TMPDIR:-/tmp}/dvn-run" 2>/dev/null || echo done)}
+: > "$L.argv"
+for a in "$@"; do printf '%s\n' "$a" >> "$L.argv"; done
+env > "$L.env"
+echo run >> "$L.runs"
+prev=""
+for a in "$@"; do
+  if [ "$prev" = --config ]; then printf '{"devin":{"org_id":"stub"},"theme_mode":"dark"}\n' > "$a"; fi
+  prev=$a
+done
+# revoke, optout and hooks change the project in the working directory, then
+# fail as a retry may fix (a dropped connection)
+case "${DVN_STUB_RUN:-done}" in
+  done)  printf 'Reviewed the diff.\n\nStatus: DONE\nFiles changed: none\nTests: none\nConcerns: None\nDiscoveries for later tasks: None\n' ;;
+  none)  printf 'Reviewed the diff, no report line.\n' ;;
+  empty) : ;;
+  auth)  echo "Error: Not logged in. Run devin auth login" >&2; exit 1 ;;
+  plan)  echo "Error: Upgrade to Pro to access this model (https://devin.ai/pricing)" >&2; exit 1 ;;
+  revoke) printf '[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\nopt_in = ["builder"]\n' > ops/roster.toml; echo "Error: connection reset by peer" >&2; exit 1 ;;
+  optout) printf '[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\nconsent = "user 2026-10-06T00:00:00Z via=tty"\n' > ops/roster.toml; echo "Error: connection reset by peer" >&2; exit 1 ;;
+  hooks)  mkdir -p .devin; printf '{ "SessionStart": [ { "hooks": [ { "type": "command", "command": "true" } ] } ] }\n' > .devin/hooks.json; echo "Error: connection reset by peer" >&2; exit 1 ;;
+  interrupted) exit 130 ;;
+esac
+exit 0
+EOF
+chmod +x "$_S24/bin/devin"
+_S24_PATH="${_S24}/bin:${_SELF_STUBS}:${PATH}"
+_S24_FAIL=""
+
+# _s24_roster <dir> <roster, %b escapes> — a throwaway project with ops/roster.toml
+_s24_roster() { rm -rf "$1"; mkdir -p "$1/ops"; printf '%b' "$2" > "$1/ops/roster.toml"; }
+# _s24_resolve <dir> <role> — "rc=<n>:<cli or the error's last words>"
+_s24_resolve() {
+  ( cd "$1" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+    R=0; O=$(resolve_role "$2" 2>&1) || R=$?
+    printf 'rc=%s:%s\n' "$R" "$(printf '%s' "$O" | tr '\n\t' '  ' | cut -c1-300)" )
+}
+_S24_C='consent = "user 2026-10-06T00:00:00Z via=tty"'
+
+# readiness
+for _S24_A in out in; do
+  mkdir -p "$_S24/tmp/auth-$_S24_A"
+  O=$( export PATH="$_S24_PATH" TMPDIR="$_S24/tmp/auth-$_S24_A" DVN_STUB_AUTH="$_S24_A" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+    R=0; L=$(roster_member_auth devin 2>&1) || R=$?
+    printf '%s:rc=%s:%s\n' "$_S24_A" "$R" "$L" )
+  _S24_FAIL="${_S24_FAIL}$(_self_expect "auth-$_S24_A" "$O" "$( [ "$_S24_A" = out ] && echo '^out:rc=1:auth-failed: .*devin auth login' || echo '^in:rc=0:ok$')")"
+done
+
+# consent and opt-in load validation
+_s24_roster "$_S24/r1" '[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\n'
+_S24_FAIL="${_S24_FAIL}$(_self_expect consent-missing "$(_s24_resolve "$_S24/r1" builder)" '^rc=5:.*consent')"
+_s24_roster "$_S24/r2" '[roles.reviewer]\ncli = "devin"\nfallbacks = ["codex"]\n'
+_S24_FAIL="${_S24_FAIL}$(_self_expect chain-unenrolled "$(_s24_resolve "$_S24/r2" reviewer)" '^rc=5:.*consent')"
+_s24_roster "$_S24/r3" "[roles.reviewer]\ncli = \"devin\"\nfallbacks = [\"codex\"]\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+_S24_FAIL="${_S24_FAIL}$(_self_expect consent-ok "$(_s24_resolve "$_S24/r3" reviewer)" '^rc=0:devin swe-1-6-slow')"
+_s24_roster "$_S24/r4" "[roles.builder]\ncli = \"devin\"\nfallbacks = [\"claude\"]\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+_S24_FAIL="${_S24_FAIL}$(_self_expect builder-no-optin "$(_s24_resolve "$_S24/r4" reviewer)" '^rc=5:.*opt')"
+_s24_roster "$_S24/r5" "[roles.builder]\ncli = \"claude\"\nfallbacks = [\"devin\", \"codex\"]\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+_S24_FAIL="${_S24_FAIL}$(_self_expect builder-fallback-no-optin "$(_s24_resolve "$_S24/r5" builder)" '^rc=5:.*opt')"
+_s24_roster "$_S24/r6" "[roles.builder]\ncli = \"devin\"\nfallbacks = [\"claude\"]\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\nopt_in = [\"builder\"]\n"
+_S24_FAIL="${_S24_FAIL}$(_self_expect builder-optin "$(_s24_resolve "$_S24/r6" builder)" '^rc=0:devin swe-1-6-slow')"
+_s24_roster "$_S24/r7" "[roles.tester]\ncli = \"devin\"\nfallbacks = [\"codex\"]\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\nopt_in = [\"builder\"]\n"
+_S24_FAIL="${_S24_FAIL}$(_self_expect tester-never "$(_s24_resolve "$_S24/r7" tester)" '^rc=5:.*tester')"
+
+# writers (the SELF seam is the lead: TRIFORGE_TEST_LEAD + TRIFORGE_TEST_BUILDER)
+_s24_roster "$_S24/w1" "[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+O=$( cd "$_S24/w1" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  B=$(cksum < ops/roster.toml)
+  R=0; roster_write_role builder devin "" max >/dev/null 2>&1 || R=$?
+  echo "role-refused:rc=${R}:same=$([ "$(cksum < ops/roster.toml)" = "$B" ] && echo yes || echo no)"
+  R=0; roster_write_member devin true swe-1-6-slow "" --opt-in builder >/dev/null 2>&1 || R=$?
+  R2=0; roster_write_role builder devin "" max >/dev/null 2>&1 || R2=$?
+  echo "role-optin:rc=${R}/${R2}:cli=$(roster_role_entry builder 2>/dev/null | cut -f1)"
+  R=0; roster_write_member devin true swe-1-6-slow "" --opt-in tester >/dev/null 2>&1 || R=$?
+  echo "optin-tester:rc=${R}" )
+_S24_FAIL="${_S24_FAIL}$(_self_expect writers-role "$O" '^role-refused:rc=[1-9][0-9]*:same=yes$' '^role-optin:rc=0/0:cli=devin$' '^optin-tester:rc=[1-9]')"
+_s24_roster "$_S24/w2" ''
+O=$( cd "$_S24/w2" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  R=0; roster_write_member devin true swe-1-6-slow >/dev/null 2>&1 || R=$?
+  echo "member-no-consent:rc=${R}:table=$(roster_has_member devin && echo yes || echo no)"
+  R=0; roster_write_member devin true swe-1-6-slow "" --consent user >/dev/null 2>&1 || R=$?
+  echo "member-consent:rc=${R}:consent=$(_roster_member_field devin consent 2>/dev/null)"
+  R=0; roster_write_member devin true other-model >/dev/null 2>&1 || R=$?
+  echo "member-keeps:rc=${R}:consent=$(_roster_member_field devin consent 2>/dev/null)"
+  R=0; roster_write_member devin false "" >/dev/null 2>&1 || R=$?
+  echo "member-decline:rc=${R}:consent=[$(_roster_member_field devin consent 2>/dev/null)]:optin=[$(_roster_member_field devin opt_in 2>/dev/null)]" )
+_S24_FAIL="${_S24_FAIL}$(_self_expect writers-member "$O" '^member-no-consent:rc=[1-9][0-9]*:table=no$' '^member-consent:rc=0:consent=user .*via=test' '^member-keeps:rc=0:consent=user .*via=test' '^member-decline:rc=0:consent=\[\]:optin=\[\]$')"
+
+# the read class's shipped config: no allow at all, exec and writes denied
+O=$(python3 -c '
+import json, sys
+p = json.load(open(sys.argv[1])).get("permissions", {})
+allow, deny = p.get("allow", []), p.get("deny", [])
+need = ["exec", "edit", "write", "Write(**)", "notebook_edit", "write_to_process", "webfetch", "web_search", "Fetch(https://*)", "Fetch(http://*)", "browser_preview", "mcp_call_tool", "mcp_read_resource", "mcp_list_tools", "mcp_list_servers", "mcp__*"]
+print("read-config:allow=" + str(len(allow)) + ":exec-allow=" + str(sum(1 for a in allow if str(a).lower().startswith("exec"))) + ":deny-exec=" + str("exec" in deny).lower() + ":deny-write=" + str("Write(**)" in deny).lower() + ":deny-missing=" + ",".join(n for n in need if n not in deny))
+' "${REPO_ROOT}/devin-agents/config-read.json" 2>&1)
+_S24_FAIL="${_S24_FAIL}$(_self_expect read-config "$O" '^read-config:allow=0:exec-allow=0:deny-exec=true:deny-write=true:deny-missing=$')"
+
+# member writes keep the roster loading: a decline of an opted-in builder
+# leaves every role resolvable; an opt-in drop the builder chain needs is refused
+_s24_roster "$_S24/w3" "[roles.builder]\ncli = \"devin\"\nfallbacks = [\"claude\"]\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\nopt_in = [\"builder\"]\n"
+O=$( cd "$_S24/w3" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  B=$(cksum < ops/roster.toml)
+  R=0; roster_write_member devin true swe-1-6-slow "" --opt-in none >/dev/null 2>&1 || R=$?
+  echo "optin-drop:rc=${R}:same=$([ "$(cksum < ops/roster.toml)" = "$B" ] && echo yes || echo no)"
+  R=0; roster_write_member devin false "" >/dev/null 2>&1 || R=$?
+  DCL="decline:rc=${R}"
+  for RL in builder reviewer tester analyst documenter; do
+    RR=0; C=$(resolve_role "$RL" 2>/dev/null) || RR=$?
+    DCL="${DCL}:${RL}=${RR}/$(printf '%s' "$C" | cut -f1)"
+  done
+  echo "$DCL" )
+_S24_FAIL="${_S24_FAIL}$(_self_expect member-rules "$O" '^optin-drop:rc=2:same=yes$' '^decline:rc=0:builder=0/claude:reviewer=0/codex:tester=0/codex:analyst=0/antigravity:documenter=0/antigravity$')"
+
+# the role rule at dispatch, one call each: the roster as it is now decides
+_s24_roster "$_S24/rr" "[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n\n[members.opencode]\nenabled = false\n"
+O=$( cd "$_S24/rr" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  T=rr
+  for RR in devin:builder devin:reviewer devin:security-sentinel devin:tester codex:builder opencode:reviewer optin devin:builder devin:tester; do
+    if [ "$RR" = optin ]; then
+      printf '[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\n%s\nopt_in = ["builder"]\n' "$_S24_C" > ops/roster.toml; T=rr-optin; continue
+    fi
+    R=0; E=$(_member_role_ok "${RR%%:*}" "${RR#*:}" 2>&1) || R=$?
+    echo "${T}-${RR%%:*}-${RR#*:}:rc=${R}:says=$(printf '%s' "$E" | grep -c "role '${RR#*:}'.*at-setup" || true)"
+  done )
+_S24_FAIL="${_S24_FAIL}$(_self_expect role-rule "$O" '^rr-devin-builder:rc=5:says=1$' '^rr-devin-reviewer:rc=0:says=0$' '^rr-devin-security-sentinel:rc=0:says=0$' '^rr-devin-tester:rc=5:says=1$' '^rr-codex-builder:rc=0:says=0$' '^rr-opencode-reviewer:rc=5:says=1$' '^rr-optin-devin-builder:rc=0:says=0$' '^rr-optin-devin-tester:rc=5:says=1$')"
+
+# consent at dispatch: invoke_devin on a hand-written table without consent
+_s24_roster "$_S24/c1" '[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\n'
+printf '%s\n' "$_S24/c1/stub" > "$_S24/tmp/dvn-log"
+O=$( cd "$_S24/c1" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" DVN_STUB_LOG="$_S24/c1/stub" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  R=0; invoke_devin reviewer "PROMPT-S24" "$_S24/c1/out" 30 >/dev/null 2>&1 || R=$?
+  echo "consent-invoke:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$([ -e "$_S24/c1/stub.argv" ] && echo yes || echo no):says=$(grep -c 'at-setup' "$_S24/c1/out" 2>/dev/null || true)" )
+_S24_FAIL="${_S24_FAIL}$(_self_expect consent-invoke "$O" '^consent-invoke:rc=5:class=deterministic:reason=consent:ran=no:says=1$')"
+
+# headless enrollment never records consent
+_s24_roster "$_S24/h1" ''
+O=$( cd "$_S24/h1" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  R=0; roster_enroll_member devin headless >/dev/null 2>&1 || R=$?
+  echo "headless:rc=${R}:table=$(roster_has_member devin && echo yes || echo no)" )
+_S24_FAIL="${_S24_FAIL}$(_self_expect headless "$O" '^headless:rc=20:table=no$')"
+
+# the re-import flag setup reads
+for _S24_R in yes no none; do
+  rm -rf "$_S24/rec-$_S24_R"; mkdir -p "$_S24/rec-$_S24_R/ops/research"
+  ( cd "$_S24/rec-$_S24_R" && git init -q ) >/dev/null 2>&1
+  printf '| ID | CLI | Capability | Outcome | Evidence | Method |\n|---|---|---|---|---|---|\n' > "$_S24/rec-$_S24_R/ops/research/2026-10-probe-record.md"
+  if [ "$_S24_R" != none ]; then
+    printf '| DVN-04 | devin | login-shell env re-import | %s | reimport=%s (lane env) |live|\n' "$( [ "$_S24_R" = yes ] && echo FAIL || echo PASS)" "$_S24_R" >> "$_S24/rec-$_S24_R/ops/research/2026-10-probe-record.md"
+  fi
+  # yes: the project's newest record, found by itself; no and none: named
+  O=$( cd "$_S24/rec-$_S24_R" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+    if [ "$_S24_R" = yes ]; then devin_env_reimport 2>/dev/null; else devin_env_reimport "ops/research/2026-10-probe-record.md" 2>/dev/null; fi )
+  _S24_FAIL="${_S24_FAIL}$(_self_expect "reimport-$_S24_R" "$O" "^$( [ "$_S24_R" = none ] && echo unknown || echo "$_S24_R")\$")"
+done
+
+# env, lane argv, the claude lane's credential deny
+O=$( export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  E=$(SHELL=/bin/zsh DEVIN_REFUSAL_FALLBACK=opus _adapter_env devin env 2>/dev/null)
+  echo "env:shell=$(printf '%s\n' "$E" | grep -c '^SHELL=' || true):fallback=$(printf '%s\n' "$E" | grep -c '^DEVIN_REFUSAL_FALLBACK=' || true):marker=$(printf '%s\n' "$E" | grep -c '^TRIFORGE_LEASE_WORKER=builder$' || true)"
+  : > "$_S24/x.devin.edit.json"; : > "$_S24/x.devin.read.json"
+  _lease_lane_argv devin "" max swe-1-6-slow "$_S24/x.devin.edit.json" "" "$_S24" 600 && echo "lane-edit:${_LEASE_LANE_ARGV[*]}"
+  _lease_lane_argv devin "" high swe-1-6-slow "$_S24/x.devin.read.json" "" "$_S24" 600 && echo "lane-read:${_LEASE_LANE_ARGV[*]}"
+  _claude_lane_argv edit "" "" "" || exit 0
+  W=""; P=""; for A in "${_LEASE_LANE_ARGV[@]}"; do if [ "$P" = --settings ]; then W=$A; fi; P=$A; done
+  printf '%s' "$W" | python3 -c '
+import json, sys
+s = json.load(sys.stdin)
+deny = s.get("permissions", {}).get("deny", [])
+dr = s.get("sandbox", {}).get("filesystem", {}).get("denyRead", [])
+print("cred:read=" + str("Read(~/.local/share/devin/**)" in deny and "Read(~/.local/share/devin)" in deny).lower() + ":sandbox=" + str("~/.local/share/devin" in dr).lower())
+' )
+_S24_FAIL="${_S24_FAIL}$(_self_expect env "$O" '^env:shell=0:fallback=0:marker=1$')"
+_S24_FAIL="${_S24_FAIL}$(_self_expect lane "$O" "^lane-edit:devin --config ${_S24}/x.devin.edit.json --model swe-1-6-slow --permission-mode dangerous --respect-workspace-trust false -p\$" "^lane-read:env XDG_CONFIG_HOME=/dev/null/triforge-devin-read devin --config ${_S24}/x.devin.read.json --model swe-1-6-slow --permission-mode auto --respect-workspace-trust false -p\$")"
+_S24_FAIL="${_S24_FAIL}$(_self_expect cred "$O" '^cred:read=true:sandbox=true$')"
+
+# invoke_devin through the stub
+_S24_SHIP=$(cksum < "${REPO_ROOT}/devin-agents/config-read.json" 2>/dev/null || echo none)
+_S24_SIG=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2 && NF {print; exit}' "${REPO_ROOT}/devin-agents/reviewer.md" 2>/dev/null || true)
+mkdir -p "$_S24/ops"
+printf '[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\n%s\n' "$_S24_C" > "$_S24/ops/roster.toml"
+printf '%s\n' "$_S24/inv" > "$_S24/tmp/dvn-log"
+O=$( cd "$_S24" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" SHELL=/bin/zsh DEVIN_REFUSAL_FALLBACK=opus TRIFORGE_TEST_SECRET=x DVN_STUB_LOG="$_S24/inv" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for M in done none empty auth plan; do
+    printf '%s\n' "$M" > "$_S24/tmp/dvn-run"
+    R=0; DVN_STUB_RUN=$M invoke_devin reviewer "PROMPT-S24" "$_S24/inv-$M.out" 30 >/dev/null 2>&1 || R=$?
+    echo "inv-$M:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}"
+    if [ "$M" = done ]; then
+      C=$(grep -A1 -x -- '--config' "$_S24/inv.argv" | tail -1)
+      echo "inv-argv:mode=$(grep -A1 -x -- '--permission-mode' "$_S24/inv.argv" | tail -1):model=$(grep -A1 -x -- '--model' "$_S24/inv.argv" | tail -1):trust=$(grep -A1 -x -- '--respect-workspace-trust' "$_S24/inv.argv" | tail -1):p=$(grep -cx -- '-p' "$_S24/inv.argv" || true):cfg-shipped=$( [ "$C" = "${REPO_ROOT}/devin-agents/config-read.json" ] && echo yes || echo no):cfg-left=$( [ -e "$C" ] && echo yes || echo no)"
+      echo "inv-env:shell=$(grep -c '^SHELL=' "$_S24/inv.env" || true):fallback=$(grep -c '^DEVIN_REFUSAL_FALLBACK=' "$_S24/inv.env" || true):xdg=$(sed -n 's/^XDG_CONFIG_HOME=//p' "$_S24/inv.env")"
+      # the lease allowlist is the whole env (PWD, SHLVL, OLDPWD and _ are the stub shell's own)
+      echo "inv-allow:secret=$(grep -c '^TRIFORGE_TEST_SECRET=' "$_S24/inv.env" || true):marker=$(grep -c '^TRIFORGE_LEASE_WORKER=' "$_S24/inv.env" || true):extra=$(grep -vE '^(HOME|PATH|TMPDIR|TERM|LANG|COLORTERM|USER|NO_COLOR|TRIFORGE_LEASE_WORKER|GIT_CONFIG_[A-Z0-9_]+|XDG_CONFIG_HOME|PWD|SHLVL|OLDPWD|_)=' "$_S24/inv.env" | cut -d= -f1 | sort -u | tr '\n' ' ')"
+      echo "inv-brief:$(grep -qF -- "$_S24_SIG" "$_S24/inv.argv" && echo yes || echo no):task=$(grep -c 'PROMPT-S24' "$_S24/inv.argv" || true):status=$(grep -c '^Status: DONE' "$_S24/inv-done.out" || true)"
+    fi
+  done )
+rm -f "$_S24/tmp/dvn-run"
+_S24_FAIL="${_S24_FAIL}$(_self_expect invoke "$O" '^inv-done:rc=0:class=none' '^inv-none:rc=80:' '^inv-empty:rc=[1-9]' '^inv-auth:rc=[1-9][0-9]*:class=deterministic:reason=auth$' '^inv-plan:rc=[1-9][0-9]*:class=deterministic:reason=plan$' '^inv-argv:mode=auto:model=swe-1-6-slow:trust=false:p=1:cfg-shipped=no:cfg-left=no$' '^inv-env:shell=0:fallback=0:xdg=/dev/null/triforge-devin-read$' '^inv-allow:secret=0:marker=1:extra=$' '^inv-brief:yes:task=1:status=1$')"
+
+# the retry meets the roster and the directory as the first attempt left
+# them (consent revoked, the builder opt-in dropped, a .devin/hooks.json
+# added), and an interrupted run is never retried
+for _S24_M in revoke optout hooks interrupted; do
+  _s24_roster "$_S24/rt-$_S24_M" "[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\nopt_in = [\"builder\"]\n"
+  ( cd "$_S24/rt-$_S24_M" && git init -q ) >/dev/null 2>&1
+done
+O=$( export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for M in revoke:reviewer optout:builder hooks:reviewer interrupted:builder; do
+    K=${M%%:*}
+    cd "$_S24/rt-$K" || continue
+    printf '%s\n' "$K" > "$_S24/tmp/dvn-run"
+    printf '%s\n' "$_S24/rt-$K/stub" > "$_S24/tmp/dvn-log"
+    R=0; invoke_devin "${M#*:}" "PROMPT-S24" "$_S24/rt-$K/out" 30 >/dev/null 2>&1 || R=$?
+    echo "retry-${K}:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:runs=$(grep -c . "$_S24/rt-$K/stub.runs" 2>/dev/null || true)"
+  done
+  rm -f "$_S24/tmp/dvn-run" )
+_S24_FAIL="${_S24_FAIL}$(_self_expect retry "$O" '^retry-revoke:rc=5:class=deterministic:reason=consent:runs=1$' '^retry-optout:rc=5:class=deterministic:reason=role:runs=1$' \
+  '^retry-hooks:rc=1:class=deterministic:reason=project-config:runs=1$' '^retry-interrupted:rc=130:class=deterministic:reason=interrupted:runs=1$')"
+
+# _lease_builder_run's devin arm through the stub, in a session of its own
+# (its exit sweep reaches only its own group, as SELF-20's builder)
+mkdir -p "$_S24/wtb"
+_s24_builder() { # _s24_builder <lane-arg> <out> — one detached-builder body run
+  ( cd "$_S24/wtb" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && python3 -c 'import os, sys; os.setsid(); os.execv("/bin/bash", ["/bin/bash", "-c", sys.argv[1], "s24-builder"] + sys.argv[2:])' \
+      '. "$1" >/dev/null 2>&1 || exit 97; shift; _lease_builder_run "$@"' "${_SELF_DIR}/invoke-external.sh" \
+      devin "" high swe-1-6-slow "$1" "" "$TIMEOUT_BIN" 30 "$2" "$_S24/wtb" "" "" "PROMPT-S24B" ) > "$2.log" 2>&1 || true
+}
+printf '%s\n' "$_S24/b" > "$_S24/tmp/dvn-log"
+( source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 && _devin_config_copy read "$_S24/b1.out.devin.read.json" ) >/dev/null 2>&1 || true
+_s24_builder "$_S24/b1.out.devin.read.json" "$_S24/b1.out"
+_s24_builder "$_S24/b2.out.devin.read.json" "$_S24/b2.out"
+O="b-run:rc=$(cat "$_S24/b1.out.rc" 2>/dev/null):class=$(cat "$_S24/b1.out.class" 2>/dev/null):mode=$(grep -A1 -x -- '--permission-mode' "$_S24/b.argv" 2>/dev/null | tail -1):cfg=$(grep -A1 -x -- '--config' "$_S24/b.argv" 2>/dev/null | tail -1 | sed -n 's/.*\.devin\.\([a-z]*\)\.json$/\1/p'):left=$([ -e "$_S24/b1.out.devin.read.json" ] && echo yes || echo no):log=$(grep -c 'devin lane: env XDG_CONFIG_HOME=/dev/null/triforge-devin-read devin --config .*\.devin\.read\.json .*--permission-mode auto' "$_S24/b1.out.log" 2>/dev/null || true)
+b-missing:rc=$(cat "$_S24/b2.out.rc" 2>/dev/null):class=$(cat "$_S24/b2.out.class" 2>/dev/null):says=$(grep -c 'devin config copy missing' "$_S24/b2.out" 2>/dev/null || true):notint=$(grep -c 'not integrated' "$_S24/b2.out" 2>/dev/null || true)"
+_S24_FAIL="${_S24_FAIL}$(_self_expect builder "$O" '^b-run:rc=0:class=none:mode=auto:cfg=read:left=no:log=1$' '^b-missing:rc=94:class=deterministic:says=1:notint=0$')"
+_S24_FAIL="${_S24_FAIL}$(_self_expect shipped-config "ship:$(cksum < "${REPO_ROOT}/devin-agents/config-read.json" 2>/dev/null || echo gone)" "^ship:${_S24_SHIP}\$")"
+
+# a project's .devin/ files: Devin merges them over the copy, so a read-class
+# run never starts on one that widens it
+_s24_roster "$_S24/pc" "[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+( cd "$_S24/pc" && git init -q ) >/dev/null 2>&1
+mkdir -p "$_S24/pc/.devin"
+printf '{ "permissions": { "allow": ["Fetch(domain:example.com)"] } }\n' > "$_S24/pc/.devin/config.json"
+printf '%s\n' "$_S24/pc/stub" > "$_S24/tmp/dvn-log"
+O=$( cd "$_S24/pc" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" DVN_STUB_LOG="$_S24/pc/stub" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  R=0; invoke_devin reviewer "PROMPT-S24" "$_S24/pc/out" 30 >/dev/null 2>&1 || R=$?
+  echo "pc-allow:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$([ -e "$_S24/pc/stub.argv" ] && echo yes || echo no):says=$(grep -c '\.devin/config\.json: permissions\.allow' "$_S24/pc/out" 2>/dev/null || true)"
+  : > "$_S24/pc.devin.read.json"; : > "$_S24/pc.devin.edit.json"
+  R=0; _LEASE_LANE_ERR=""; _lease_lane_argv devin "" high swe-1-6-slow "$_S24/pc.devin.read.json" "" "$_S24/pc" 600 || R=$?
+  echo "pc-lane-read:rc=${R}:says=$(printf '%s' "$_LEASE_LANE_ERR" | grep -c '\.devin/config\.json: permissions\.allow' || true)"
+  R=0; _lease_lane_argv devin "" high swe-1-6-slow "$_S24/pc.devin.edit.json" "" "$_S24/pc" 600 || R=$?
+  echo "pc-lane-edit:rc=${R}"
+  for K in hooks mcp imports link jsonc; do
+    rm -rf .devin; mkdir .devin
+    if [ "$K" = hooks ]; then
+      printf '{ "SessionStart": [ { "hooks": [ { "type": "command", "command": "true" } ] } ] }\n' > .devin/hooks.v1.json
+    elif [ "$K" = mcp ]; then
+      printf '{ "mcpServers": { "x": { "command": "true" } } }\n' > .devin/mcp_config.local.json
+    elif [ "$K" = imports ]; then
+      printf '{ "read_config_from": { "claude": true } }\n' > .devin/config.local.json
+    elif [ "$K" = link ]; then
+      printf '{}\n' > "$_S24/pc-target.json"; ln -s "$_S24/pc-target.json" .devin/config.json
+    else
+      printf '// team policy\n{ "permissions": { "deny": ["Exec(sudo)"] } }\n' > .devin/config.json
+    fi
+    R=0; G=$(_devin_project_guard "$PWD") || R=$?
+    echo "pc-${K}:rc=${R}:$(printf '%s' "$G" | sed -n 's|.*/\.devin/\([a-z0-9_.]*\): .*|\1|p')"
+  done
+  R=0; invoke_devin reviewer "PROMPT-S24" "$_S24/pc/out2" 30 >/dev/null 2>&1 || R=$?
+  echo "pc-deny-only:rc=${R}:ran=$([ -e "$_S24/pc/stub.argv" ] && echo yes || echo no)" )
+# the builder arm on a worktree whose config.json declares hooks
+mkdir -p "$_S24/wtb/.devin"
+printf '{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "true" } ] } ] } }\n' > "$_S24/wtb/.devin/config.json"
+printf '%s\n' "$_S24/b3" > "$_S24/tmp/dvn-log"
+( source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 && _devin_config_copy read "$_S24/b3.out.devin.read.json" ) >/dev/null 2>&1 || true
+_s24_builder "$_S24/b3.out.devin.read.json" "$_S24/b3.out"
+rm -rf "$_S24/wtb/.devin"
+O="${O}
+b-project:rc=$(cat "$_S24/b3.out.rc" 2>/dev/null):class=$(cat "$_S24/b3.out.class" 2>/dev/null):says=$(grep -c 'could not compose its command: .*/\.devin/config\.json: it declares hooks' "$_S24/b3.out" 2>/dev/null || true):ran=$([ -e "$_S24/b3.argv" ] && echo yes || echo no):left=$([ -e "$_S24/b3.out.devin.read.json" ] && echo yes || echo no)"
+_S24_FAIL="${_S24_FAIL}$(_self_expect project-config "$O" '^pc-allow:rc=1:class=deterministic:reason=project-config:ran=no:says=1$' '^pc-lane-read:rc=1:says=1$' '^pc-lane-edit:rc=0$' '^pc-hooks:rc=1:hooks\.v1\.json$' '^pc-mcp:rc=1:mcp_config\.local\.json$' '^pc-imports:rc=1:config\.local\.json$' '^pc-link:rc=1:config\.json$' '^pc-jsonc:rc=0:$' '^pc-deny-only:rc=0:ran=yes$' '^b-project:rc=94:class=deterministic:says=1:ran=no:left=no$')"
+
+# the rest of what a project can make Devin load: required plugins, keys the
+# guard does not know, and the legacy .cognition/ directory
+_s24_roster "$_S24/ps" "[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+( cd "$_S24/ps" && git init -q ) >/dev/null 2>&1
+printf '%s\n' "$_S24/ps/stub" > "$_S24/tmp/dvn-log"
+O=$( cd "$_S24/ps" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" DVN_STUB_LOG="$_S24/ps/stub" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  HERE=$(pwd -P)
+  for K in plugins unknown permkey mcpkey hooksjson hookscase otherjson nonjson cog-allow cog-hooks cog-mcp cog-link optforbid; do
+    rm -rf .devin .cognition
+    case "$K" in
+      (plugins)   mkdir .devin; printf '{ "requiredPlugins": ["acme/session-hooks"] }\n' > .devin/config.json ;;
+      (unknown)   mkdir .devin; printf '{ "permissions": { "deny": ["exec"] }, "agent": { "model": "x" } }\n' > .devin/config.json ;;
+      (permkey)   mkdir .devin; printf '{ "permissions": { "deny": ["exec"], "defaultMode": "dangerous" } }\n' > .devin/config.local.json ;;
+      (mcpkey)    mkdir .devin; printf '{ "servers": { "x": { "command": "true" } } }\n' > .devin/mcp_config.json ;;
+      (hooksjson) mkdir .devin; printf '{ "SessionStart": [ { "hooks": [ { "type": "command", "command": "true" } ] } ] }\n' > .devin/hooks.json ;;
+      (hookscase) mkdir .devin; printf '{ "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "true" } ] } ] }\n' > .devin/Hooks.JSON ;;
+      (otherjson) mkdir .devin; printf '{}\n' > .devin/settings.json ;;
+      (nonjson)   mkdir -p .devin/skills/s .devin/agents; printf 'image: x\n' > .devin/environment.yaml; printf -- '---\nname: s\n---\nSay hi.\n' > .devin/skills/s/SKILL.md ;;
+      (cog-allow) mkdir .cognition; printf '{ "permissions": { "allow": ["Fetch(domain:example.com)"] } }\n' > .cognition/config.json ;;
+      (cog-hooks) mkdir .cognition; printf '{ "SessionStart": [ { "hooks": [ { "type": "command", "command": "true" } ] } ] }\n' > .cognition/hooks.v1.json ;;
+      (cog-mcp)   mkdir .cognition; printf '{ "mcpServers": { "x": { "command": "true" } } }\n' > .cognition/mcp_config.local.json ;;
+      (cog-link)  mkdir -p "$_S24/ps-target"; ln -s "$_S24/ps-target" .cognition ;;
+      (optforbid) mkdir .devin; printf '{ "optionalPlugins": ["acme/a"], "forbiddenPlugins": ["*"], "version": 1 }\n' > .devin/config.json ;;
+    esac
+    R=0; G=$(_devin_project_guard "$PWD") || R=$?
+    echo "ps-${K}:rc=${R}:$(printf '%s' "$G" | sed "s|^${HERE}/||" | cut -c1-48)"
+  done
+  rm -rf .devin .cognition; mkdir .cognition
+  printf '{ "permissions": { "allow": ["Fetch(domain:example.com)"] } }\n' > .cognition/config.json
+  R=0; invoke_devin reviewer "PROMPT-S24" "$_S24/ps/out" 30 >/dev/null 2>&1 || R=$?
+  echo "ps-invoke:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$([ -e "$_S24/ps/stub.argv" ] && echo yes || echo no):says=$(grep -c '\.cognition/config\.json: permissions\.allow' "$_S24/ps/out" 2>/dev/null || true)"
+  rm -rf .cognition; mkdir .devin
+  printf '{ "requiredPlugins": ["acme/session-hooks"] }\n' > .devin/config.json
+  : > "$_S24/ps.devin.read.json"
+  R=0; _LEASE_LANE_ERR=""; _lease_lane_argv devin "" high swe-1-6-slow "$_S24/ps.devin.read.json" "" "$_S24/ps" 600 || R=$?
+  echo "ps-lane:rc=${R}:says=$(printf '%s' "$_LEASE_LANE_ERR" | grep -c '\.devin/config\.json: requiredPlugins' || true)" )
+_S24_FAIL="${_S24_FAIL}$(_self_expect project-surfaces "$O" \
+  '^ps-plugins:rc=1:\.devin/config\.json: requiredPlugins \["acme/' \
+  '^ps-unknown:rc=1:\.devin/config\.json: an unknown key "agent"' \
+  '^ps-permkey:rc=1:\.devin/config\.local\.json: permissions has an' \
+  '^ps-mcpkey:rc=1:\.devin/mcp_config\.json: an unknown key "servers' \
+  '^ps-hooksjson:rc=1:\.devin/hooks\.json: it declares hooks' \
+  '^ps-hookscase:rc=1:\.devin/Hooks\.JSON: it declares hooks' \
+  '^ps-otherjson:rc=1:\.devin/settings\.json: a JSON file the guard' \
+  '^ps-nonjson:rc=0:$' \
+  '^ps-cog-allow:rc=1:\.cognition/config\.json: permissions\.allow' \
+  '^ps-cog-hooks:rc=1:\.cognition/hooks\.v1\.json: it declares hooks' \
+  '^ps-cog-mcp:rc=1:\.cognition/mcp_config\.local\.json: it declares' \
+  '^ps-cog-link:rc=1:\.cognition: a symlink' \
+  '^ps-optforbid:rc=0:$' \
+  '^ps-invoke:rc=1:class=deterministic:reason=project-config:ran=no:says=1$' \
+  '^ps-lane:rc=1:says=1$')"
+
+# a reviewer lease through the seam
+_self_repo "$_S24/lease" "$_S24" sprint/s24 "[roles.reviewer]\ncli = \"devin\"\nfallbacks = [\"codex\"]\n\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+# the seam builder records the config copy it finds during the run
+printf '#!/bin/sh\nls %s/leases/s24.out.devin.*.json > %s/seen-cfg 2>/dev/null\necho "reviewed"\necho "Status: DONE"\n' "$_S24" "$_S24" > "$_S24/fb-done.sh"
+chmod +x "$_S24/fb-done.sh"
+O=$( cd "$_S24/lease" && export HOME="$_S24" GIT_CONFIG_NOSYSTEM=1 PATH="$_S24_PATH" TMPDIR="$_S24/tmp" TRIFORGE_LEASE_ROOT="$_S24/leases" TRIFORGE_TEST_BUILDER="$_S24/fb-done.sh" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  lease_create s24 reviewer >/dev/null 2>&1 || { echo "lease:create-failed"; exit 0; }
+  lease_dispatch s24 "probe review: report only" 60 >/dev/null 2>&1 || { echo "lease:dispatch-failed"; exit 0; }
+  _self_wait_rc s24
+  R=0; lease_collect s24 >/dev/null 2>&1 || R=$?
+  OUT=$(_ledger_get s24 output_file 2>/dev/null)
+  echo "lease:rc=${R}:state=$(_ledger_get s24 state 2>/dev/null):builder=$(_ledger_get s24 builder_cli 2>/dev/null):cfg=$(sed -n 's/.*\.devin\.\([a-z]*\)\.json$/\1/p' "$_S24/seen-cfg" 2>/dev/null):left=$(ls "${OUT}".devin.*.json >/dev/null 2>&1 && echo yes || echo no)" )
+_S24_FAIL="${_S24_FAIL}$(_self_expect lease "$O" '^lease:rc=0:state=review:builder=devin:cfg=read:left=no$')"
+
+# consent at dispatch: a lease created with consent on record, whose roster
+# then loses it, is not dispatched
+_self_repo "$_S24/lease2" "$_S24" sprint/s24c "[roles.reviewer]\ncli = \"devin\"\nfallbacks = [\"codex\"]\n\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+printf '#!/bin/sh\n: > %s/fb-mark\necho "Status: DONE"\n' "$_S24" > "$_S24/fb-mark.sh"
+chmod +x "$_S24/fb-mark.sh"
+O=$( cd "$_S24/lease2" && export HOME="$_S24" GIT_CONFIG_NOSYSTEM=1 PATH="$_S24_PATH" TMPDIR="$_S24/tmp" TRIFORGE_LEASE_ROOT="$_S24/leases2" TRIFORGE_TEST_BUILDER="$_S24/fb-mark.sh" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  lease_create s24c reviewer >/dev/null 2>&1 || { echo "consent-lease:create-failed"; exit 0; }
+  printf '[roles.reviewer]\ncli = "devin"\nfallbacks = ["codex"]\n\n[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\n' > ops/roster.toml
+  R=0; lease_dispatch s24c "probe review: report only" 60 >/dev/null 2>&1 || R=$?
+  if [ "$R" -eq 0 ]; then _self_wait_rc s24c; fi
+  echo "consent-lease:rc=${R}:state=$(_ledger_get s24c state 2>/dev/null):ran=$([ -e "$_S24/fb-mark" ] && echo yes || echo no)" )
+_S24_FAIL="${_S24_FAIL}$(_self_expect consent-lease "$O" '^consent-lease:rc=5:state=leased:ran=no$')"
+
+# the role rule at dispatch: a builder lease created with the opt-in on record
+# is not dispatched once the roster moves the builder role away and drops the
+# opt-in (consent kept, so the roster still loads)
+_self_repo "$_S24/lease3" "$_S24" sprint/s24r "[roles.builder]\ncli = \"devin\"\nfallbacks = [\"claude\"]\n\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\nopt_in = [\"builder\"]\n"
+printf '#!/bin/sh\n: > %s/fb-role\necho "Status: DONE"\n' "$_S24" > "$_S24/fb-role.sh"
+chmod +x "$_S24/fb-role.sh"
+O=$( cd "$_S24/lease3" && export HOME="$_S24" GIT_CONFIG_NOSYSTEM=1 PATH="$_S24_PATH" TMPDIR="$_S24/tmp" TRIFORGE_LEASE_ROOT="$_S24/leases3" TRIFORGE_TEST_BUILDER="$_S24/fb-role.sh" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  lease_create s24r builder >/dev/null 2>&1 || { echo "role-lease:create-failed"; exit 0; }
+  B=$(_ledger_get s24r builder_cli 2>/dev/null)
+  printf '[roles.builder]\ncli = "claude"\nfallbacks = ["codex"]\n\n[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\n%s\n' "$_S24_C" > ops/roster.toml
+  RL=0; resolve_role builder >/dev/null 2>&1 || RL=$?
+  R=0; E=$(lease_dispatch s24r "probe build: report only" 60 2>&1 >/dev/null) || R=$?
+  if [ "$R" -eq 0 ]; then _self_wait_rc s24r; fi
+  echo "role-lease:builder=${B}:loads=${RL}:rc=${R}:state=$(_ledger_get s24r state 2>/dev/null):ran=$([ -e "$_S24/fb-role" ] && echo yes || echo no):says=$(printf '%s' "$E" | grep -c "role 'builder'.*at-setup" || true)" )
+# invoke_devin builder: refused without the opt-in, dangerous mode with it
+_s24_roster "$_S24/ri" "[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+printf '%s\n' "$_S24/ri/stub" > "$_S24/tmp/dvn-log"
+O="${O}
+$( cd "$_S24/ri" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" DVN_STUB_LOG="$_S24/ri/stub" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  R=0; invoke_devin builder "PROMPT-S24" "$_S24/ri/out" 30 >/dev/null 2>&1 || R=$?
+  echo "role-invoke:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$([ -e "$_S24/ri/stub.argv" ] && echo yes || echo no):says=$(grep -c "role 'builder'.*at-setup" "$_S24/ri/out" 2>/dev/null || true)"
+  printf '[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\n%s\nopt_in = ["builder"]\n' "$_S24_C" > ops/roster.toml
+  R=0; invoke_devin builder "PROMPT-S24" "$_S24/ri/out2" 30 >/dev/null 2>&1 || R=$?
+  echo "role-invoke-optin:rc=${R}:mode=$(grep -A1 -x -- '--permission-mode' "$_S24/ri/stub.argv" 2>/dev/null | tail -1):xdg=$(sed -n 's/^XDG_CONFIG_HOME=//p' "$_S24/ri/stub.env" 2>/dev/null)" )"
+_S24_FAIL="${_S24_FAIL}$(_self_expect role-dispatch "$O" '^role-lease:builder=devin:loads=0:rc=5:state=leased:ran=no:says=1$' '^role-invoke:rc=5:class=deterministic:reason=role:ran=no:says=1$' '^role-invoke-optin:rc=0:mode=dangerous:xdg=$')"
+
+_S24_CAP="Devin CLI as an optional member: readiness read from auth-status text, a read config with no command allowed, recorded consent and the builder opt-in at load, in the writers and at dispatch, no headless enrollment, the re-import flag setup reads, the lease allowlist on both lanes, the lane argv per class, invoke_devin on a config copy with the Status line as completion, the builder arm's class, copy removal and compose failure, a project's widening .devin/ and .cognition/ files, required plugins and unknown keys refused on both lanes, the role rule at dispatch (a builder lease after its opt-in was dropped, invoke_devin builder), the read class's XDG_CONFIG_HOME, a reviewer lease to review, ~/.local/share/devin closed to a claude worker (R24, R25)"
+if [ -z "$_S24_FAIL" ]; then
+  row "SELF-24" "devin" "$_S24_CAP" "PASS" "auth: Not logged in. rc 0 -> auth-failed, Logged in (via Devin). -> ok; consent: missing -> rc 5, chain with no member table -> rc 5, recorded -> reviewer=devin; opt-in: builder primary or fallback without it -> rc 5, with it -> builder=devin, tester never; writers: role write refused without the opt-in (roster unchanged), member write refused without --consent, consent recorded via=test and kept across a model change, opt-in tester refused, decline drops both; read config: no allow, exec and Write(**) denied; member writes: opt-in drop refused rc 2 (roster unchanged), a decline keeps all five roles resolving (builder -> claude); consent at dispatch: invoke_devin rc 5 with the stub never run, lease_dispatch rc 5 with the row still leased; headless enroll rc 20, no table; re-import flag yes/no/unknown from the DVN-04 row; env: no SHELL, no DEVIN_REFUSAL_FALLBACK, worker marker; lane: dangerous for .edit.json, auto for .read.json, -p last; invoke: config copy (shipped file unchanged, copy removed), auto, the pin, reviewer brief, the allowlist as its whole env (no planted secret), Status: DONE rc 0, no Status rc 80, empty nonzero, auth and plan deterministic; retry: after the first attempt revoked the consent, dropped the builder opt-in or added .devin/hooks.json -> refused (rc 5 consent, rc 5 role, rc 1 project-config), the stub run once; an interrupted run (exit 130) -> rc 130 interrupted, run once; builder arm: read class off the argv and the logged command line, copy removed, a missing copy rc 94 deterministic (not 'not integrated'); project .devin/: a Fetch allow -> invoke_devin rc 1 deterministic project-config naming the file with the stub never run, the lease lane's read class a compose failure naming it, the edit class composing, hooks.v1.json, mcp_config.local.json, a read_config_from import and a symlinked config.json refused, a JSONC deny-only config passing, the builder arm on a hooks config rc 94 deterministic with the stub never run and the copy removed; requiredPlugins, an unknown key (config, permissions, MCP file), hooks.json in any case, any other JSON file and .cognition/ (allow, hooks.v1.json, mcp_config.local.json, symlink) refused naming the file, optional and forbidden plugin lists and non-JSON entries passing, invoke_devin from a .cognition allow rc 1 with the stub never run, the lane's read class a compose failure on requiredPlugins; role rule: devin builder without the opt-in, devin tester and a declined member rc 5 naming the role and at-setup, reviewer, a persona name and codex builder 0; a builder lease whose opt-in was dropped after lease_create -> lease_dispatch rc 5, row leased, seam never run; invoke_devin builder rc 5 reason role without the opt-in, dangerous mode with it; read class behind XDG_CONFIG_HOME=/dev/null/triforge-devin-read (lane argv, invoke env, builder log), edit class without it; seam reviewer lease -> review, a read config copy during the run and none after; claude lane denies ~/.local/share/devin (Read + sandbox)" "static"
+else
+  row "SELF-24" "devin" "$_S24_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S24_FAIL"):$(printf '%s' "$_S24_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S24"
+
+# SELF-25 (R23): Grok Build's lane without a live CLI. A `grok` stub first on
+# PATH answers `inspect --json` with two plugins and two MCP servers, one of
+# them from grok's own config.toml, a Claude Code project hook marked
+# disabled (as grok 1.0.34 lists one under GROK_CLAUDE_HOOKS_ENABLED=0), an
+# empty LSP server list, and a configSources env_overlay layer that names the
+# overlay's sections when GROK_CONFIG is set, else (or with the
+# overlay-ignored flag file) "set but ignored" (the shapes grok 1.0.34 prints;
+# GRK-02 and GRK-06 run the real one), recording the environment it ran in.
+# The inspect-mode file bends that answer: empty (no output), malformed (cut
+# off), fail (exit 1), partial (no plugin list), partial-read (no hook or LSP
+# server list), projecthook (an active hook whose source is the project),
+# userhook and userlsp (an active hook or LSP server from the user's
+# ~/.grok), orca (two events of the ~/.grok/hooks directory, as grok 1.0.34
+# reports an Orca agent-status hook, plus a disabled Claude Code user hook),
+# pluginhook (a hook and an LSP server of the listed user plugin),
+# strayplugin (a hook of a plugin inspect does not list), sleep (inspect
+# records its pid and sleeps 30 s), lateserver (one more user MCP server).
+# Like grok 1.0.34, inspect lists no MCP server the working directory's
+# .grok/config.toml already shadows.
+# Any other run records its argv (prompt included), environment, working
+# directory, whether a .grok/config.toml sat there, the .grok/config.toml and
+# .grok/sandbox.toml it found and the a.txt it found, writes a file into the working directory when
+# the run is in the triforge-edit sandbox, and answers with a streaming-json
+# stream chosen by the mode file:
+# done (Status: DONE, end_turn), maxtokens, noend and maxturns (Status: DONE,
+# then max_tokens, no end event, or max_turns_reached and exit 1), empty
+# (end_turn alone), interrupted (exit 130, as a grok a SIGINT stopped),
+# transient-decline and transient-taint (a failure a retry may fix, exit 1,
+# after writing grok's decline into the roster named in decline-roster, or a
+# key into the git config named in taint-git); each
+# run also adds a line to log/runs. A scratch HOME carries
+# ~/.claude/plugins/installed_plugins.json and ~/.claude.json, naming one more
+# plugin and one more server. Every expected value below is a literal, never
+# read from scripts/lib/grok.sh.
+#   class      _grok_class: builder, tester and documenter edit; reviewer,
+#              analyst and an empty role read
+#   lane       _lease_lane_argv grok with edit in the lane-file slot: the
+#              triforge-edit sandbox, the Edit, Write and Bash rules, and the MCP
+#              denies; with read, and with an empty slot (each runs the
+#              provisioning check again, twice over one directory): the
+#              read-only sandbox, none of those rules, and Edit, Write, Bash
+#              and MCP denied. Either way the env prefix carries every isolation switch
+#              (GROK_FOLDER_TRUST=0, each GROK_CLAUDE_* and GROK_CURSOR_*) and
+#              the GROK_CONFIG overlay with exactly today's include_only list
+#   builder    lease_create under a claude lead host, in a project whose
+#              .claude/settings.json allows Edit, Write and Bash(npm run *):
+#              .grok/config.toml in the worktree disables the three plugins
+#              and shadows the three servers (enabled = false), the one from
+#              the user's ~/.grok/config.toml included, inspect ran with the
+#              Claude discovery switches off, `provisioned` lists the config
+#              and .grok/sandbox.toml; the profile is then weakened in the
+#              worktree, and lease_dispatch on the real lane (the stub)
+#              writes it back: the run finds every literal GROK_HOME deny in
+#              it, the triforge-edit sandbox, the MCP denies and the builder
+#              brief; lease_collect -> review, and the snapshot carries the
+#              stub's file but nothing under .grok/
+#   reviewer   the same for a reviewer lease, but the read-only sandbox, no
+#              edit rule, Edit, Write, Bash and MCP denied, the reviewer brief,
+#              and no sandbox profile
+#   stop       a builder lease whose stream says Status: DONE and then ends
+#              with max_tokens, with no end event, or at the turn cap: report
+#              missing (rc 80, back to leased), the stop named in the output
+#   tracked    _grok_lease_config (edit class) on a project's own
+#              .grok/config.toml: its lines stay first and the tables follow
+#              (a [permission] file, and an [mcp_servers.team] file, which
+#              tomllib proves still valid with the shadows); refused, the file
+#              unchanged and named: one that declares [plugins], an inline
+#              mcp_servers table, a server named like a ~/.claude.json one, a
+#              .grok symlinked out of the worktree, and an inspect that
+#              reports the overlay ignored; accepted with no shadow for it: a
+#              project server named like the user's ~/.grok/config.toml one
+#              (the project entry replaces it)
+#   user-tier  _grok_lease_config in the read class, which writes the file
+#              and prints one NOTE line naming each user-tier surface with
+#              its file: a user hook or LSP server inspect reports, a hook of
+#              a plugin inspect does not list, a GROK_HOME whose config.toml
+#              sets auth.auth_provider_command, ui.notifications.hooks or
+#              [hooks], or whose requirements.toml declares an MCP server, and
+#              an Orca-style ~/.grok/hooks/orca-status.json (named by file,
+#              its .bak copy not); a hook and an auth command together share
+#              the one line; refused, nothing written and no note: a
+#              config.toml that does not parse, and a project's .grok/hooks/
+#              beside the Orca hook; accepted with no note: the listed user
+#              plugin's hook and LSP server (the plugin disabled, the user
+#              server shadowed), and a user hook in the edit class, which
+#              writes the profile
+#   profile    _grok_sandbox_profile: [profiles.triforge-edit] extends
+#              workspace and denies exactly the 17 literal GROK_HOME paths
+#              (by the home's real path; config.toml not among them);
+#              refused, nothing written: a user sandbox.toml that defines the
+#              same profile, and a .grok/sandbox.toml symlinked outside
+#   surface    _grok_lease_config in the read class, refused with the file
+#              named, nothing written and (for a file) grok inspect never run:
+#              .grok/hooks/, .grok/lsp.json, .grok/plugins/, .claude/plugins/,
+#              a .grok/config.toml with an MCP server of its own, and an
+#              active project hook only inspect reports; accepted: a project
+#              with Claude Code and Cursor hooks, a .mcp.json (its server
+#              shadowed though inspect did not list it), an agent, a skill and
+#              a sandbox.toml; and the edit class takes .grok/hooks/ as it is
+#   inspect    no inspect, no file: an empty, cut-off, failed (rc 1) or
+#              partial (no plugin list) inspect refused in the edit class, one
+#              without the hook and LSP lists in the read class (the edit
+#              class takes it), each named and nothing written
+#   roles      [roles.tester] or [roles.documenter] naming grok: resolve_role
+#              rc 5; builder and analyst resolve to grok
+#   lease-refused  lease_create of a grok builder in a project whose
+#              .grok/config.toml declares [plugins]: refused, no ledger row,
+#              grok never run
+#   lease-surface  in a project with a .grok/lsp.json: a reviewer lease
+#              refused (no row, grok never run, its worktree and branch
+#              removed again, so no lease history stops the next lease with
+#              rc 44), a builder lease made; and a
+#              reviewer lease whose worktree gains .grok/hooks/ after it was
+#              made: lease_dispatch's compose refuses it (rc 94), grok never
+#              runs
+#   lease-usertier  reviewer leases made under a clean user tier: one whose
+#              inspect reports a user hook by dispatch time runs (rc 0), the
+#              hook named in a NOTE line in the builder log; one whose
+#              inspect lists a new user MCP server by then runs with a
+#              .grok/config.toml that shadows it, keeps the three shadows
+#              made at provisioning (which inspect no longer lists) and holds
+#              one [plugins] table naming the three plugins; and a reviewer
+#              lease made beside an Orca-style user hook: leased, the hook
+#              file named on lease_create's stderr
+#   readcheck  grok_read_isolation_check: rc 0 and an OK line under a clean
+#              user tier; rc 0, the OK line and a NOTE line naming the user
+#              hook inspect reports; rc 1 naming a user config.toml that does
+#              not parse; no scratch directory left and nothing written under
+#              HOME
+#   fg-read    invoke_grok as a reviewer, with a canary variable and
+#              CLAUDECODE in the caller's environment, in a project never
+#              leased: grok ran from a scratch checkout that held
+#              .grok/config.toml, under env -i (no canary, no CLAUDECODE; the
+#              worker marker, GROK_FOLDER_TRUST=0 and the overlay set), with
+#              the read-class denies and the note naming the caller's
+#              checkout; rc 0, Status: DONE; the checkout is gone afterwards,
+#              git lists no worktree, and no ledger was written
+#   fg-edit    invoke_grok as a tester, and by an agent name that reads as
+#              edit: rc 69, reason edit-outside-lease, lease_dispatch named,
+#              grok never run
+#   fg-empty   an end_turn stream with no answer text: rc 80, class retryable,
+#              reason no-answer, the output says so; the checkout is gone
+#   fg-interrupt  a run that exits 130 (a grok a SIGINT stopped): rc 130,
+#              class deterministic, reason interrupted, one run (no retry),
+#              no scratch left
+#   fg-recheck a first run that fails as a retry may fix, after it wrote
+#              grok's decline into the roster: the retry is refused (rc 5,
+#              reason role), one run; in a project with an open lease and a
+#              fresh rebaseline, a first run that changed the lead's
+#              .git/config: the retry is refused (rc 44, reason integrity),
+#              one run
+#   fg-refused invoke_grok as a reviewer in a project whose .grok/config.toml
+#              declares [plugins], in one that holds .grok/hooks/, and with an
+#              empty, cut-off or partial inspect: rc 69, reason isolation,
+#              grok never run, no scratch left
+#   fg-usertier  invoke_grok as a reviewer beside an Orca-style user hook:
+#              rc 0, Status: DONE, one run in the read-only sandbox, one NOTE
+#              line on the lead's stderr naming the hook file, no scratch
+#              left
+#   trap       TERM to _grok_run_in's subshell while the provisioning inspect
+#              sleeps: the inspect stopped, no scratch directory left
+#   fg-integrity  invoke_grok as a reviewer with the lead's integrity check
+#              refusing (a stub returning 44), and in a project with an open
+#              lease and a fresh lease_rebaseline whose .git/config then gains
+#              a smudge filter that .git/info/attributes applies to every
+#              file: rc 44, reason integrity, grok never run, no scratch made,
+#              the filter never run
+#   fg-filter  invoke_grok as a reviewer in a project never leased whose
+#              .git/config defines a smudge and a process filter its
+#              .gitattributes names: neither runs, grok reads a.txt as
+#              committed, and no ledger is written
+_S25="${WORK}/self25"
+mkdir -p "$_S25/bin" "$_S25/tmp" "$_S25/log" "$_S25/home/.claude/plugins" "$_S25/outside"
+cat > "$_S25/bin/grok" <<'EOF'
+#!/bin/sh
+# SELF-25 grok stub
+D=$(cd "$(dirname "$0")/.." && pwd)
+W=$(basename "$PWD")
+if [ "$1" = inspect ]; then
+  env > "$D/log/$W.inspect-env"
+  IM=$(cat "$D/inspect-mode" 2>/dev/null || echo full)
+  case "$IM" in
+    empty)     exit 0 ;;
+    malformed) echo '{"configSources":{"layers":['; exit 0 ;;
+    fail)      echo '{}'; exit 1 ;;
+    sleep)     echo "$$" > "$D/inspect.pid"; exec sleep 30 ;;
+  esac
+  OV='{"role":"env_overlay","path":"$GROK_CONFIG (inline)","note":"sections: shell_environment_policy, toolset"}'
+  if [ -z "${GROK_CONFIG:-}" ] || [ -f "$D/overlay-ignored" ]; then
+    OV='{"role":"env_overlay","path":"$GROK_CONFIG / $GROK_CONFIG_PATH","note":"set but ignored (empty, malformed, or unreadable)"}'
+  fi
+  HK="\"hooks\":[{\"event\":\"session_start\",\"hookType\":\"command\",\"source\":{\"type\":\"project\",\"path\":\"$PWD/.claude\"},\"vendor\":\"claude\",\"disabled\":true}],\"lspServers\":[],"
+  UP="\"source\":{\"type\":\"plugin\",\"plugin_name\":\"s25-grok-plugin\",\"path\":\"$HOME/.grok/plugins/s25-grok-plugin\"}"
+  case "$IM" in
+    projecthook) HK="\"hooks\":[{\"event\":\"session_start\",\"hookType\":\"command\",\"source\":{\"type\":\"project\",\"path\":\"$PWD/.grok/hooks.d\"}}],\"lspServers\":[]," ;;
+    userhook)    HK="\"hooks\":[{\"event\":\"session_start\",\"hookType\":\"command\",\"source\":{\"type\":\"user\",\"path\":\"$HOME/.grok/hooks\"}}],\"lspServers\":[]," ;;
+    orca)        HK="\"hooks\":[{\"event\":\"session_start\",\"hookType\":\"command\",\"source\":{\"type\":\"user\",\"path\":\"$HOME/.grok/hooks\"},\"matcher\":null},{\"event\":\"stop\",\"hookType\":\"command\",\"source\":{\"type\":\"user\",\"path\":\"$HOME/.grok/hooks\"},\"matcher\":null},{\"event\":\"session_start\",\"hookType\":\"command\",\"source\":{\"type\":\"user\",\"path\":\"$HOME/.claude\"},\"vendor\":\"claude\",\"disabled\":true}],\"lspServers\":[]," ;;
+    userlsp)    HK="\"hooks\":[],\"lspServers\":[{\"name\":\"s25-user-lsp\",\"source\":{\"type\":\"user\",\"path\":\"$HOME/.grok/lsp.json\"}}]," ;;
+    pluginhook)  HK="\"hooks\":[{\"event\":\"session_start\",\"hookType\":\"command\",${UP}}],\"lspServers\":[{\"name\":\"s25-plugin-lsp\",${UP}}]," ;;
+    strayplugin) HK="\"hooks\":[{\"event\":\"session_start\",\"hookType\":\"command\",\"source\":{\"type\":\"plugin\",\"plugin_name\":\"s25-unlisted-plugin\",\"path\":\"$HOME/.grok/plugins/s25-unlisted-plugin\"}}],\"lspServers\":[]," ;;
+  esac
+  if [ "$IM" = partial-read ]; then HK=""; fi
+  PL="\"plugins\":[{\"name\":\"s25-claude-plugin\",\"scope\":\"user\",\"path\":\"$HOME/.claude/plugins/cache/mk/s25-claude-plugin/1.0.0\",\"enabled\":true},{\"name\":\"s25-grok-plugin\",\"scope\":\"user\",\"path\":\"$HOME/.grok/plugins/s25-grok-plugin\",\"enabled\":true}],"
+  if [ "$IM" = partial ]; then PL=""; fi
+  # A server the working directory's .grok/config.toml shadows is not
+  # listed, as grok 1.0.34 lists none; lateserver adds one more user server
+  MS=""
+  for S in "s25-claude-server:claudeJson:$HOME/.claude.json" "s25-grok-server:user:$HOME/.grok/config.toml" "s25-late-server:user:$HOME/.grok/config.toml"; do
+    SN=${S%%:*}; ST=${S#*:}; SP=${ST#*:}; ST=${ST%%:*}
+    if [ "$SN" = s25-late-server ] && [ "$IM" != lateserver ]; then continue; fi
+    if grep -qxF "[mcp_servers.\"$SN\"]" .grok/config.toml 2>/dev/null; then continue; fi
+    MS="${MS}${MS:+,}{\"name\":\"$SN\",\"transport\":\"stdio\",\"source\":{\"type\":\"$ST\",\"path\":\"$SP\"}}"
+  done
+  printf '{"configSources":{"layers":[%s]},%s%s"mcpServers":[%s]}\n' "$OV" "$HK" "$PL" "$MS"
+  exit 0
+fi
+if [ "$1" = --version ]; then echo "grok 1.0.34 (stub)"; exit 0; fi
+echo run >> "$D/log/runs"
+: > "$D/log/$W.argv"
+env > "$D/log/$W.env"
+pwd -P > "$D/log/$W.pwd"
+if [ -f .grok/config.toml ]; then echo yes; else echo no; fi > "$D/log/$W.cfg"
+if [ -f .grok/sandbox.toml ]; then cp .grok/sandbox.toml "$D/log/$W.sbx"; fi
+if [ -f .grok/config.toml ]; then cp .grok/config.toml "$D/log/$W.toml"; fi
+if [ -f a.txt ]; then cat a.txt > "$D/log/$W.atxt"; fi
+P=""
+for a in "$@"; do
+  printf '%s\n' "$a" >> "$D/log/$W.argv"
+  if [ "$P" = --sandbox ] && [ "$a" = triforge-edit ]; then echo built > s25-built.txt; fi
+  P=$a
+done
+T='{"type":"text","data":"Done.\nStatus: DONE\nFiles changed: s25-built.txt\nTests: none\nConcerns: None\nDiscoveries for later tasks: None\n"}'
+case "$(cat "$D/mode" 2>/dev/null || echo done)" in
+  maxtokens) printf '%s\n' "$T" '{"type":"usage"}' '{"type":"end","stopReason":"max_tokens","num_turns":1}' ;;
+  noend)     printf '%s\n' "$T" '{"type":"usage"}' ;;
+  maxturns)  printf '%s\n' "$T" '{"type":"usage"}' '{"type":"max_turns_reached"}' '{"type":"end","stopReason":"cancelled","num_turns":1}'; echo "Error: max turns reached" >&2; exit 1 ;;
+  empty)     printf '%s\n' '{"type":"end","stopReason":"end_turn","num_turns":1}' ;;
+  interrupted) exit 130 ;;
+  transient-decline) printf '[members.grok]\nenabled = false\n' > "$(cat "$D/decline-roster")"; echo "Error: connection reset by peer" >&2; exit 1 ;;
+  transient-taint)   git --git-dir="$(cat "$D/taint-git")" config s25.taint yes; echo "Error: connection reset by peer" >&2; exit 1 ;;
+  *)         printf '%s\n' "$T" '{"type":"usage"}' '{"type":"end","stopReason":"end_turn","num_turns":1}' ;;
+esac
+exit 0
+EOF
+chmod +x "$_S25/bin/grok"
+printf '{"version": 2, "plugins": {"s25-installed-plugin@mk": [{"scope": "user", "installPath": "/nowhere"}]}}\n' > "$_S25/home/.claude/plugins/installed_plugins.json"
+printf '{"mcpServers": {"s25-json-server": {"command": "true"}}}\n' > "$_S25/home/.claude.json"
+_S25_PATH="${_S25}/bin:${_SELF_STUBS}:${PATH}"
+_S25_FAIL=""
+# An Orca-style agent-status hook in the scratch HOME's ~/.grok/hooks/, with
+# the backup copy beside it that grok does not load (the stub's orca mode
+# reports its events from the directory, as grok 1.0.34's inspect does)
+_s25_orca() {
+  mkdir -p "$_S25/home/.grok/hooks" || return 0
+  printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"true"}]}],"Stop":[{"hooks":[{"type":"command","command":"true"}]}]}}\n' > "$_S25/home/.grok/hooks/orca-status.json"
+  cp "$_S25/home/.grok/hooks/orca-status.json" "$_S25/home/.grok/hooks/orca-status.json.bak"
+}
+
+# class and lane argv (the read class composes in a worktree of its own: it
+# runs the provisioning check again, and $_S25 holds the scratch HOME)
+mkdir -p "$_S25/lane"
+O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  C="class:"
+  for R in builder tester documenter reviewer analyst ""; do C="${C}$(_grok_class "$R" 2>/dev/null || echo missing),"; done
+  echo "$C"
+  for S in edit read ""; do
+    P=""; SB=""; N=0; PH=pre; EW=" "; DN=" "; OVJ=""; DM=""; EM=""
+    if _lease_lane_argv grok "" high grok-4.7 "$S" "" "$_S25/lane" 600; then
+      for A in "${_LEASE_LANE_ARGV[@]}"; do
+        case "$PH:$A" in
+          (pre:env)           PH=env ;;
+          (env:grok)          PH=cmd ;;
+          (env:GROK_CONFIG=*) OVJ=${A#GROK_CONFIG=} ;;
+          (env:*)             EW="${EW}${A} " ;;
+        esac
+        if [ "$P" = --sandbox ]; then SB=$A; fi
+        if [ "$P" = --allow ] && { [ "$A" = Edit ] || [ "$A" = Write ] || [ "$A" = Bash ]; }; then N=$((N + 1)); fi
+        if [ "$P" = --deny ]; then DN="${DN}${A} "; fi
+        P=$A
+      done
+    fi
+    for E in Edit Write Bash 'MCPTool(*)' 'mcp__*'; do
+      case "$DN" in (*" $E "*) DM="${DM}+${E}" ;; esac
+    done
+    for E in GROK_DISABLE_AUTOUPDATER=1 GROK_TELEMETRY_ENABLED=0 GROK_MEMORY=0 GROK_FOLDER_TRUST=0 \
+             GROK_CLAUDE_SKILLS_ENABLED=0 GROK_CLAUDE_RULES_ENABLED=0 GROK_CLAUDE_AGENTS_ENABLED=0 GROK_CLAUDE_MCPS_ENABLED=0 GROK_CLAUDE_HOOKS_ENABLED=0 \
+             GROK_CURSOR_SKILLS_ENABLED=0 GROK_CURSOR_RULES_ENABLED=0 GROK_CURSOR_AGENTS_ENABLED=0 GROK_CURSOR_MCPS_ENABLED=0 GROK_CURSOR_HOOKS_ENABLED=0; do
+      case "$EW" in (*" $E "*) ;; (*) EM="${EM}${E}," ;; esac
+    done
+    # The overlay, against today's literal values (the boundary's base names,
+    # NO_COLOR, the worker marker and the no-push GIT_CONFIG_*)
+    OV=$(printf '%s' "$OVJ" | python3 -c '
+import json, sys
+try:
+    o = json.loads(sys.stdin.read())
+except ValueError:
+    print("absent")
+    raise SystemExit
+p, bad = o.get("shell_environment_policy") or {}, []
+if set(p.get("include_only") or []) != {"HOME", "PATH", "TMPDIR", "TERM", "LANG", "COLORTERM", "USER", "NO_COLOR", "TRIFORGE_LEASE_WORKER", "GIT_CONFIG_*"}:
+    bad.append("include_only")
+if p.get("inherit") != "all" or p.get("ignore_default_excludes") is not True or p.get("exclude") != []:
+    bad.append("policy")
+if ((o.get("toolset") or {}).get("bash") or {}).get("login_shell_capture") is not False:
+    bad.append("login_shell_capture")
+print("/".join(bad) or "ok")
+' 2>/dev/null || echo unreadable)
+    echo "lane-${S:-empty}:sandbox=${SB}:write=${N}:deny=${DM}:envmiss=${EM:-none}:overlay=${OV}:last=${P}"
+  done )
+_S25_FAIL="${_S25_FAIL}$(_self_expect class "$O" '^class:edit,edit,edit,read,read,read,$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect lane "$O" '^lane-edit:sandbox=triforge-edit:write=3:deny=[+]MCPTool[(][*][)][+]mcp__[*]:envmiss=none:overlay=ok:last=-p$' \
+  '^lane-read:sandbox=read-only:write=0:deny=[+]Edit[+]Write[+]Bash[+]MCPTool[(][*][)][+]mcp__[*]:envmiss=none:overlay=ok:last=-p$' \
+  '^lane-empty:sandbox=read-only:write=0:deny=[+]Edit[+]Write[+]Bash[+]MCPTool[(][*][)][+]mcp__[*]:envmiss=none:overlay=ok:last=-p$')"
+
+# a builder and a reviewer lease on the real lane, the stub as grok, in a
+# project whose Claude Code settings allow Edit, Write and an npm script
+_S25_ROSTER='[roles.builder]\ncli = "grok"\nfallbacks = ["claude"]\n\n[roles.reviewer]\ncli = "grok"\nfallbacks = ["codex"]\n\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n'
+_self_repo "$_S25/repo" "$_S25/home" sprint/s25 "$_S25_ROSTER"
+( cd "$_S25/repo" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p .claude \
+    && printf '{"permissions": {"allow": ["Edit", "Write", "Bash(npm run *)"]}}\n' > .claude/settings.json \
+    && git add .claude/settings.json && git commit -qm settings ) >/dev/null 2>&1 || true
+_S25_SIGB=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2 && NF {print; exit}' "${REPO_ROOT}/grok-agents/builder.md" 2>/dev/null || true)
+_S25_SIGR=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2 && NF {print; exit}' "${REPO_ROOT}/grok-agents/reviewer.md" 2>/dev/null || true)
+O=$( cd "$_S25/repo" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/leases" XAI_API_KEY=s25-stub-key CLAUDECODE=1 \
+       && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  _S25_HOMER=$(cd "$_S25/home" && pwd -P)
+  for T in s25b:builder s25r:reviewer; do
+    K=${T%%:*}
+    lease_create "$K" "${T#*:}" >/dev/null 2>&1 || { echo "${K}:create-failed"; continue; }
+    WT=$(_ledger_get "$K" worktree 2>/dev/null)
+    F="$WT/.grok/config.toml"
+    CFG="$(grep -cE '^disabled = \[.*"s25-claude-plugin", "s25-grok-plugin", "s25-installed-plugin"\]$' "$F" 2>/dev/null || true)/$(grep -cE '^\[mcp_servers\."s25-(claude|json)-server"\]$' "$F" 2>/dev/null || true)/$(grep -cx '\[mcp_servers\."s25-grok-server"\]' "$F" 2>/dev/null || true)"
+    INS=$(grep -cE '^GROK_CLAUDE_(SKILLS|MCPS)_ENABLED=0$' "$_S25/log/${K}.inspect-env" 2>/dev/null || true)
+    PROV=no
+    if printf ' %s ' "$(_ledger_get "$K" provisioned 2>/dev/null)" | grep -qF ' .grok/config.toml '; then PROV=yes; fi
+    if printf ' %s ' "$(_ledger_get "$K" provisioned 2>/dev/null)" | grep -qF ' .grok/sandbox.toml '; then PROV="${PROV}+sbx"; fi
+    # an earlier run's rewrite of the profile; lease_dispatch writes it back
+    if [ -f "$WT/.grok/sandbox.toml" ]; then printf '[profiles.triforge-edit]\nextends = "workspace"\n' > "$WT/.grok/sandbox.toml"; fi
+    rm -f "$_S25/log/${K}.sbx"
+    lease_dispatch "$K" "probe task S25" 60 >/dev/null 2>&1 || { echo "${K}:dispatch-failed"; continue; }
+    _self_wait_rc "$K"
+    RC=0; lease_collect "$K" >/dev/null 2>&1 || RC=$?
+    L="$_S25/log/${K}.argv"
+    SB=$(grep -A1 -x -- --sandbox "$L" 2>/dev/null | tail -1)
+    N=$(grep -A1 -x -- --allow "$L" 2>/dev/null | grep -cxE 'Edit|Write|Bash' || true)
+    DW=$(grep -A1 -x -- --deny "$L" 2>/dev/null | grep -xE 'Edit|Write|Bash|MCPTool\(\*\)|mcp__\*' | tr '\n' '+' || true)
+    BR=none
+    if [ -n "$_S25_SIGB" ] && grep -qF -- "$_S25_SIGB" "$L" 2>/dev/null; then BR=builder; fi
+    if [ -n "$_S25_SIGR" ] && grep -qF -- "$_S25_SIGR" "$L" 2>/dev/null; then BR=reviewer; fi
+    TREE=$(git ls-tree -r --name-only "$(_ledger_get "$K" snapshot_sha 2>/dev/null)" 2>/dev/null || true)
+    # the profile the run found: each literal GROK_HOME deny, by the home's real path
+    HD=0
+    for E in lsp.json AGENTS.md disabled-hooks plugins installed-plugins marketplace-cache skills agents personas commands workflows rules bin downloads vendor bundled memory; do
+      if grep -qF "\"${_S25_HOMER}/.grok/${E}\"" "$_S25/log/${K}.sbx" 2>/dev/null; then HD=$((HD + 1)); fi
+    done
+    echo "${K}:cfg=${CFG}:inspect=${INS}:prov=${PROV}:sbx=${HD}:sandbox=${SB}:write=${N}:deny=${DW}:brief=${BR}:collect=${RC}:$(_ledger_get "$K" state 2>/dev/null):snap-built=$(printf '%s\n' "$TREE" | grep -cx 's25-built.txt' || true):snap-cfg=$(printf '%s\n' "$TREE" | grep -c '^\.grok/' || true)"
+  done
+  # A Status line before the run ended is never a report: max_tokens, no end
+  # event, a turn-cap stop
+  for T in s25m:maxtokens:max_tokens s25n:noend:none s25t:maxturns:max-turns; do
+    K=${T%%:*}; M=${T#*:}; M=${M%%:*}
+    printf '%s\n' "$M" > "$_S25/mode"
+    lease_create "$K" builder >/dev/null 2>&1 || { echo "${K}:create-failed"; continue; }
+    lease_dispatch "$K" "probe task S25 stop" 60 >/dev/null 2>&1 || { echo "${K}:dispatch-failed"; continue; }
+    _self_wait_rc "$K"
+    RC=0; lease_collect "$K" >/dev/null 2>&1 || RC=$?
+    OUT=$(_ledger_get "$K" output_file 2>/dev/null)
+    echo "${K}:collect=${RC}:$(_ledger_get "$K" state 2>/dev/null):report=$(_ledger_get "$K" report_status 2>/dev/null):named=$(grep -c "ended with ${T##*:}, not end_turn" "$OUT" 2>/dev/null || true)"
+  done
+  rm -f "$_S25/mode" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect builder "$O" '^s25b:cfg=1/2/1:inspect=2:prov=yes[+]sbx:sbx=17:sandbox=triforge-edit:write=3:deny=MCPTool[(][*][)][+]mcp__[*][+]:brief=builder:collect=0:review:snap-built=1:snap-cfg=0$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect reviewer "$O" '^s25r:cfg=1/2/1:inspect=2:prov=yes:sbx=0:sandbox=read-only:write=0:deny=Edit[+]Write[+]Bash[+]MCPTool[(][*][)][+]mcp__[*][+]:brief=reviewer:collect=0:review:snap-built=0:snap-cfg=0$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect stop "$O" '^s25m:collect=80:leased:report=MISSING:named=1$' '^s25n:collect=80:leased:report=MISSING:named=1$' '^s25t:collect=80:leased:report=MISSING:named=1$')"
+
+# a project's own .grok/config.toml, a symlinked .grok, and an inspect that
+# reports the overlay ignored
+mkdir -p "$_S25/t1/.grok" "$_S25/t2/.grok" "$_S25/t3/.grok" "$_S25/t3i/.grok" "$_S25/t3n/.grok" "$_S25/t4" "$_S25/t5" "$_S25/t6/.grok"
+printf '[permission]\ndeny = ["Bash(curl *)"]\n' > "$_S25/t1/.grok/config.toml"
+printf '[plugins]\nenabled = ["team-tools"]\n' > "$_S25/t2/.grok/config.toml"
+printf '[mcp_servers.team]\ncommand = "team-mcp"\n' > "$_S25/t3/.grok/config.toml"
+printf 'mcp_servers = { team = { command = "team-mcp" } }\n' > "$_S25/t3i/.grok/config.toml"
+printf '[mcp_servers.s25-json-server]\ncommand = "team-mcp"\n' > "$_S25/t3n/.grok/config.toml"
+printf '[mcp_servers.s25-grok-server]\ncommand = "team-mcp"\n' > "$_S25/t6/.grok/config.toml"
+ln -s "$_S25/outside" "$_S25/t4/.grok"
+for _T in t2 t3i t3n; do cksum < "$_S25/$_T/.grok/config.toml" > "$_S25/$_T.sum"; done
+O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for T in t1 t2 t3 t3i t3n t4 t5 t6; do
+    if [ "$T" = t5 ]; then : > "$_S25/overlay-ignored"; fi
+    R=0
+    if declare -F _grok_lease_config >/dev/null 2>&1; then _grok_lease_config "$_S25/$T" edit > "$_S25/$T.warn" 2>&1 || R=$?; else : > "$_S25/$T.warn"; fi
+    echo "$R" > "$_S25/$T.rc"
+    rm -f "$_S25/overlay-ignored"
+  done
+  C="$_S25/t1/.grok/config.toml"
+  echo "t1:rc=$(cat "$_S25/t1.rc"):head=$(head -2 "$C" | tr '\n' '|'):plugins=$(grep -cx '\[plugins\]' "$C" || true):shadow=$(grep -c '^\[mcp_servers\."' "$C" || true)"
+  C="$_S25/t3/.grok/config.toml"
+  echo "t3:rc=$(cat "$_S25/t3.rc"):team=$(grep -cx '\[mcp_servers.team\]' "$C" || true):plugins=$(grep -cx '\[plugins\]' "$C" || true):shadow=$(grep -c '^\[mcp_servers\."' "$C" || true)"
+  for T in t2 t3i t3n; do
+    echo "${T}:rc=$(cat "$_S25/$T.rc"):same=$( [ "$(cksum < "$_S25/$T/.grok/config.toml")" = "$(cat "$_S25/$T.sum")" ] && echo yes || echo no):named=$(grep -c "ERROR $_S25/$T/.grok/config.toml: the project file cannot take the tables" "$_S25/$T.warn" || true)"
+  done
+  echo "t4:rc=$(cat "$_S25/t4.rc"):outside=$(ls -A "$_S25/outside" | grep -c . || true):named=$(grep -c 'config.toml: a symlink' "$_S25/t4.warn" || true)"
+  echo "t5:rc=$(cat "$_S25/t5.rc"):written=$( [ -e "$_S25/t5/.grok" ] && echo yes || echo no):named=$(grep -c 'reports the GROK_CONFIG overlay as "set but ignored' "$_S25/t5.warn" || true)"
+  C="$_S25/t6/.grok/config.toml"
+  echo "t6:rc=$(cat "$_S25/t6.rc"):own=$(grep -cx '\[mcp_servers.s25-grok-server\]' "$C" || true):shadow=$(grep -c '^\[mcp_servers\."' "$C" || true):grok-shadow=$(grep -cx '\[mcp_servers\."s25-grok-server"\]' "$C" || true)" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect tracked "$O" '^t1:rc=0:head=\[permission\][|]deny = \["Bash\(curl \*\)"\][|]:plugins=1:shadow=3$' '^t3:rc=0:team=1:plugins=1:shadow=3$' \
+  '^t2:rc=1:same=yes:named=1$' '^t3i:rc=1:same=yes:named=1$' '^t3n:rc=1:same=yes:named=1$' '^t4:rc=1:outside=0:named=1$' '^t5:rc=1:written=no:named=1$' \
+  '^t6:rc=0:own=1:shadow=2:grok-shadow=0$')"
+
+# what a project supplies, in the read class (refused) and the edit class
+for _T in g-hooks e-hooks g-lsp g-plug c-plug g-mcp i-hook ok-read; do mkdir -p "$_S25/sf/$_T/.grok"; done
+mkdir -p "$_S25/sf/g-hooks/.grok/hooks" "$_S25/sf/e-hooks/.grok/hooks" "$_S25/sf/g-plug/.grok/plugins/p" "$_S25/sf/c-plug/.claude/plugins/p" \
+  "$_S25/sf/ok-read/.claude" "$_S25/sf/ok-read/.cursor" "$_S25/sf/ok-read/.grok/agents" "$_S25/sf/ok-read/.grok/skills/s"
+printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"true"}]}]}}\n' > "$_S25/sf/g-hooks/.grok/hooks/h.json"
+cp "$_S25/sf/g-hooks/.grok/hooks/h.json" "$_S25/sf/e-hooks/.grok/hooks/h.json"
+printf '{"s25-lsp":{"command":"true","extensionToLanguage":{".py":"python"}}}\n' > "$_S25/sf/g-lsp/.grok/lsp.json"
+printf '{"name":"p","version":"1.0.0"}\n' > "$_S25/sf/g-plug/.grok/plugins/p/plugin.json"
+printf '{"name":"p","version":"1.0.0"}\n' > "$_S25/sf/c-plug/.claude/plugins/p/plugin.json"
+printf '[mcp_servers.team]\ncommand = "team-mcp"\n' > "$_S25/sf/g-mcp/.grok/config.toml"
+printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"true"}]}]}}\n' > "$_S25/sf/ok-read/.claude/settings.json"
+printf '{"version":1,"hooks":{"sessionStart":[{"command":"true"}]}}\n' > "$_S25/sf/ok-read/.cursor/hooks.json"
+printf '{"mcpServers":{"s25-mcpjson":{"command":"true"}}}\n' > "$_S25/sf/ok-read/.mcp.json"
+printf -- '---\nname: s25-agent\ndescription: probe\n---\nprobe\n' > "$_S25/sf/ok-read/.grok/agents/a.md"
+printf -- '---\nname: s\ndescription: probe\n---\nprobe\n' > "$_S25/sf/ok-read/.grok/skills/s/SKILL.md"
+printf '[profiles.read-only]\nextends = "workspace"\n' > "$_S25/sf/ok-read/.grok/sandbox.toml"
+O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  _sum() { { cksum < "$1"; } 2>/dev/null || echo none; }
+  for T in "g-hooks:.grok/hooks: project hooks" "g-lsp:.grok/lsp.json: a project LSP server" "g-plug:.grok/plugins: project plugins" \
+           "c-plug:.claude/plugins: project plugins" "g-mcp:.grok/config.toml: it declares MCP servers of its own" "i-hook:grok inspect reports a project hook"; do
+    N=${T%%:*}; W="$_S25/sf/$N"
+    S=$(_sum "$W/.grok/config.toml")
+    if [ "$N" = i-hook ]; then printf 'projecthook\n' > "$_S25/inspect-mode"; fi
+    R=0; _grok_lease_config "$W" read > "$_S25/sf/$N.warn" 2>&1 || R=$?
+    rm -f "$_S25/inspect-mode"
+    echo "surface-${N}:rc=${R}:same=$( [ "$(_sum "$W/.grok/config.toml")" = "$S" ] && echo yes || echo no):named=$(grep -cF -- "${T#*:}" "$_S25/sf/$N.warn" || true):inspected=$( [ -f "$_S25/log/$N.inspect-env" ] && echo yes || echo no)"
+  done
+  R=0; _grok_lease_config "$_S25/sf/ok-read" read > "$_S25/sf/ok-read.warn" 2>&1 || R=$?
+  echo "surface-ok-read:rc=${R}:mcpjson=$(grep -cx '\[mcp_servers\."s25-mcpjson"\]' "$_S25/sf/ok-read/.grok/config.toml" 2>/dev/null || true):inspected=$( [ -f "$_S25/log/ok-read.inspect-env" ] && echo yes || echo no)"
+  R=0; _grok_lease_config "$_S25/sf/e-hooks" edit > "$_S25/sf/e-hooks.warn" 2>&1 || R=$?
+  echo "surface-e-hooks:rc=${R}:cfg=$(grep -cx '\[plugins\]' "$_S25/sf/e-hooks/.grok/config.toml" 2>/dev/null || true)" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect surface "$O" '^surface-g-hooks:rc=1:same=yes:named=1:inspected=no$' '^surface-g-lsp:rc=1:same=yes:named=1:inspected=no$' \
+  '^surface-g-plug:rc=1:same=yes:named=1:inspected=no$' '^surface-c-plug:rc=1:same=yes:named=1:inspected=no$' '^surface-g-mcp:rc=1:same=yes:named=1:inspected=no$' \
+  '^surface-i-hook:rc=1:same=yes:named=1:inspected=yes$' '^surface-ok-read:rc=0:mcpjson=1:inspected=yes$' '^surface-e-hooks:rc=0:cfg=1$')"
+
+# no inspect evidence, no provisioning: the inspect-mode file bends the stub
+mkdir -p "$_S25/ig"
+O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for T in "empty:edit:gave no output" "malformed:edit:output that is not a JSON object" "fail:edit:failed or timed out (rc 1)" \
+           "partial:edit:lacks plugins, so" "partial-read:read:lacks hooks, lspServers, so" "partial-read:edit:lacks"; do
+    M=${T%%:*}; C=${T#*:}; P=${C#*:}; C=${C%%:*}
+    rm -rf "$_S25/ig/.grok"
+    printf '%s\n' "$M" > "$_S25/inspect-mode"
+    R=0; _grok_lease_config "$_S25/ig" "$C" > "$_S25/ig.warn" 2>&1 || R=$?
+    rm -f "$_S25/inspect-mode"
+    echo "inspect-${M}-${C}:rc=${R}:written=$( [ -e "$_S25/ig/.grok/config.toml" ] && echo yes || echo no):named=$(grep -cF -- "$P" "$_S25/ig.warn" || true)"
+  done )
+_S25_FAIL="${_S25_FAIL}$(_self_expect inspect "$O" '^inspect-empty-edit:rc=1:written=no:named=1$' '^inspect-malformed-edit:rc=1:written=no:named=1$' \
+  '^inspect-fail-edit:rc=1:written=no:named=1$' '^inspect-partial-edit:rc=1:written=no:named=1$' '^inspect-partial-read-read:rc=1:written=no:named=1$' \
+  '^inspect-partial-read-edit:rc=0:written=yes:named=0$')"
+
+# what the user tier supplies: in the read class each surface runs, as it
+# does when the user runs grok, so provisioning writes the file and one
+# NOTE line names each surface with its file; a config layer that does not
+# parse, and a project's own hooks beside a user hook, stay refused with
+# nothing written; the listed user plugin's hook and LSP server pass with no
+# note (the plugin disabled), and the edit class takes a user hook silently
+mkdir -p "$_S25/ut" "$_S25/utp/.grok/hooks" "$_S25/gh-auth" "$_S25/gh-notify" "$_S25/gh-req" "$_S25/gh-hooks" "$_S25/gh-broken"
+printf '[auth]\nauth_provider_command = "/usr/bin/true"\n' > "$_S25/gh-auth/config.toml"
+printf '[[ui.notifications.hooks]]\ncommand = "true"\nevents = ["turn_complete"]\n' > "$_S25/gh-notify/config.toml"
+printf '[mcp_servers.s25-req]\ncommand = "true"\n' > "$_S25/gh-req/requirements.toml"
+printf '[hooks]\nSessionStart = [{ hooks = [{ type = "command", command = "true" }] }]\n' > "$_S25/gh-hooks/config.toml"
+printf '[auth\nauth_provider_command = "/usr/bin/true"\n' > "$_S25/gh-broken/config.toml"
+printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"true"}]}]}}\n' > "$_S25/utp/.grok/hooks/h.json"
+O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for T in "userhook:ut:/.grok/hooks (hooks: session_start)" "userlsp:ut:/.grok/lsp.json (LSP server: s25-user-lsp)" \
+           "strayplugin:ut:/.grok/plugins/s25-unlisted-plugin (plugin s25-unlisted-plugin hooks: session_start)" \
+           "auth:ut:/gh-auth/config.toml (auth.auth_provider_command)" "notify:ut:/gh-notify/config.toml (ui.notifications.hooks)" \
+           "req:ut:/gh-req/requirements.toml (MCP servers in the requirements layer: s25-req)" "hooks:ut:/gh-hooks/config.toml (hooks: SessionStart)" \
+           "orca:ut:/.grok/hooks/orca-status.json (hooks: session_start, stop)" \
+           "broken:ut:/gh-broken/config.toml: the file does not parse" "projecthooks:utp:/utp/.grok/hooks: project hooks"; do
+    M=${T%%:*}; W=${T#*:}; P=${W#*:}; W="$_S25/${W%%:*}"
+    rm -rf "$_S25/ut/.grok"
+    case "$M" in
+      (auth|notify|req|hooks|broken) export GROK_HOME="$_S25/gh-$M" ;;
+      (orca|projecthooks)            _s25_orca; printf 'orca\n' > "$_S25/inspect-mode" ;;
+      (*)                            printf '%s\n' "$M" > "$_S25/inspect-mode" ;;
+    esac
+    R=0; _grok_lease_config "$W" read > "$_S25/ut.warn" 2>&1 || R=$?
+    rm -f "$_S25/inspect-mode"; unset GROK_HOME; rm -rf "$_S25/home/.grok/hooks"
+    echo "user-${M}-read:rc=${R}:written=$( [ -e "$W/.grok/config.toml" ] && echo yes || echo no):noted=$(grep -c '^grok: NOTE ' "$_S25/ut.warn" || true):named=$(grep -cF -- "$P" "$_S25/ut.warn" || true):bak=$(grep -c 'orca-status\.json\.bak' "$_S25/ut.warn" || true)"
+  done
+  # two tiers' surfaces in one run: one NOTE line names both
+  rm -rf "$_S25/ut/.grok"; _s25_orca; printf 'orca\n' > "$_S25/inspect-mode"; export GROK_HOME="$_S25/gh-auth"
+  R=0; _grok_lease_config "$_S25/ut" read > "$_S25/ut.warn" 2>&1 || R=$?
+  rm -f "$_S25/inspect-mode"; unset GROK_HOME; rm -rf "$_S25/home/.grok/hooks"
+  N=$(grep '^grok: NOTE ' "$_S25/ut.warn" || true)
+  echo "user-both-read:rc=${R}:noted=$(grep -c '^grok: NOTE ' "$_S25/ut.warn" || true):orca=$(printf '%s\n' "$N" | grep -cF '/.grok/hooks/orca-status.json (hooks: session_start, stop)' || true):auth=$(printf '%s\n' "$N" | grep -cF '/gh-auth/config.toml (auth.auth_provider_command)' || true)"
+  rm -rf "$_S25/ut/.grok"; printf 'pluginhook\n' > "$_S25/inspect-mode"
+  R=0; _grok_lease_config "$_S25/ut" read > "$_S25/ut.warn" 2>&1 || R=$?
+  rm -f "$_S25/inspect-mode"
+  F="$_S25/ut/.grok/config.toml"
+  echo "user-pluginhook-read:rc=${R}:disabled=$(grep -c '^disabled = \[.*"s25-grok-plugin"' "$F" 2>/dev/null || true):usermcp=$(grep -cx '\[mcp_servers\."s25-grok-server"\]' "$F" 2>/dev/null || true):sbx=$( [ -e "$_S25/ut/.grok/sandbox.toml" ] && echo yes || echo no):noted=$(grep -c '^grok: NOTE ' "$_S25/ut.warn" || true)"
+  rm -rf "$_S25/ut/.grok"; printf 'userhook\n' > "$_S25/inspect-mode"
+  R=0; _grok_lease_config "$_S25/ut" edit > "$_S25/ut.warn" 2>&1 || R=$?
+  rm -f "$_S25/inspect-mode"
+  echo "user-userhook-edit:rc=${R}:cfg=$( [ -e "$_S25/ut/.grok/config.toml" ] && echo yes || echo no):sbx=$( [ -e "$_S25/ut/.grok/sandbox.toml" ] && echo yes || echo no):noted=$(grep -c '^grok: NOTE ' "$_S25/ut.warn" || true)" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect user-tier "$O" '^user-userhook-read:rc=0:written=yes:noted=1:named=1:bak=0$' '^user-userlsp-read:rc=0:written=yes:noted=1:named=1:bak=0$' \
+  '^user-strayplugin-read:rc=0:written=yes:noted=1:named=1:bak=0$' '^user-auth-read:rc=0:written=yes:noted=1:named=1:bak=0$' '^user-notify-read:rc=0:written=yes:noted=1:named=1:bak=0$' \
+  '^user-req-read:rc=0:written=yes:noted=1:named=1:bak=0$' '^user-hooks-read:rc=0:written=yes:noted=1:named=1:bak=0$' '^user-orca-read:rc=0:written=yes:noted=1:named=1:bak=0$' \
+  '^user-broken-read:rc=1:written=no:noted=0:named=1:bak=0$' '^user-projecthooks-read:rc=1:written=no:noted=0:named=1:bak=0$' '^user-both-read:rc=0:noted=1:orca=1:auth=1$' \
+  '^user-pluginhook-read:rc=0:disabled=1:usermcp=1:sbx=no:noted=0$' '^user-userhook-edit:rc=0:cfg=yes:sbx=yes:noted=0$')"
+
+# the edit class's sandbox profile, against the literal GROK_HOME list
+mkdir -p "$_S25/pf" "$_S25/pf2" "$_S25/pf-dup/.grok" "$_S25/pf-link/.grok"
+printf '[profiles.triforge-edit]\nextends = "devbox"\n' > "$_S25/pf-dup/.grok/sandbox.toml"
+ln -s "$_S25/outside/s25-sbx.toml" "$_S25/pf-link/.grok/sandbox.toml"
+O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  R=0; _grok_sandbox_profile "$_S25/pf" > "$_S25/pf.warn" 2>&1 || R=$?
+  echo "profile-file:rc=${R}:$(S25_F="$_S25/pf/.grok/sandbox.toml" S25_H="$(cd "$_S25/home" && pwd -P)/.grok" python3 -c '
+import os
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
+p = tomllib.loads(open(os.environ["S25_F"]).read()).get("profiles", {})
+e = p.get("triforge-edit", {})
+want = {os.path.join(os.environ["S25_H"], n) for n in "lsp.json AGENTS.md disabled-hooks plugins installed-plugins marketplace-cache skills agents personas commands workflows rules bin downloads vendor bundled memory".split()}
+d = e.get("deny") or []
+print("profiles=%d:extends=%s:deny=%d:exact=%s:config=%d" % (len(p), e.get("extends"), len(d), "yes" if set(d) == want else "no", sum(1 for x in d if x.endswith("config.toml"))))
+' 2>&1 | tr '\n' ' ')"
+  export GROK_HOME="$_S25/pf-dup/.grok"
+  R=0; _grok_sandbox_profile "$_S25/pf2" > "$_S25/pf2.warn" 2>&1 || R=$?
+  unset GROK_HOME
+  echo "profile-dup:rc=${R}:written=$( [ -e "$_S25/pf2/.grok" ] && echo yes || echo no):named=$(grep -cF 'defines [profiles.triforge-edit]' "$_S25/pf2.warn" || true)"
+  R=0; _grok_sandbox_profile "$_S25/pf-link" > "$_S25/pfl.warn" 2>&1 || R=$?
+  echo "profile-link:rc=${R}:outside=$( [ -e "$_S25/outside/s25-sbx.toml" ] && echo yes || echo no):named=$(grep -cF 'sandbox.toml: a symlink' "$_S25/pfl.warn" || true)" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect profile "$O" '^profile-file:rc=0:profiles=1:extends=workspace:deny=17:exact=yes:config=0 $' '^profile-dup:rc=1:written=no:named=1$' '^profile-link:rc=1:outside=no:named=1$')"
+
+# grok's roles: builder, reviewer and analyst; a tester or documenter chain
+# naming grok fails at roster load
+_self_repo "$_S25/rl" "$_S25/home" sprint/s25rl '[roles.builder]\ncli = "grok"\nfallbacks = ["claude"]\n\n[roles.analyst]\ncli = "grok"\nfallbacks = ["codex"]\n\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n'
+O=$( cd "$_S25/rl" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25_PATH" TMPDIR="$_S25/tmp" XAI_API_KEY=s25-stub-key \
+       && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for R in builder analyst; do echo "roles-${R}:$(resolve_role "$R" 2>/dev/null | cut -f1)"; done
+  for R in tester documenter; do
+    printf '[roles.%s]\ncli = "grok"\nfallbacks = ["codex"]\n\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n' "$R" > ops/roster.toml
+    RC=0; resolve_role "$R" > /dev/null 2> "$_S25/rl.err" || RC=$?
+    echo "roles-${R}:rc=${RC}:named=$(grep -c "names grok, which takes only builder, reviewer, analyst" "$_S25/rl.err" || true)"
+  done )
+_S25_FAIL="${_S25_FAIL}$(_self_expect roles "$O" '^roles-builder:grok$' '^roles-analyst:grok$' '^roles-tester:rc=5:named=1$' '^roles-documenter:rc=5:named=1$')"
+
+# invoke_grok outside a lease, from a project whose Claude Code settings allow
+# Edit, Write and an npm script; and a project whose own .grok/config.toml
+# declares [plugins], for invoke_grok and for a lease
+_self_repo "$_S25/fg" "$_S25/home" sprint/s25fg "$_S25_ROSTER"
+( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p .claude \
+    && printf '{"permissions": {"allow": ["Edit", "Write", "Bash(npm run *)"]}}\n' > .claude/settings.json \
+    && git add .claude/settings.json && git commit -qm settings ) >/dev/null 2>&1 || true
+_self_repo "$_S25/fgp" "$_S25/home" sprint/s25fgp "$_S25_ROSTER"
+( cd "$_S25/fgp" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p .grok \
+    && printf '[plugins]\nenabled = ["team-tools"]\n' > .grok/config.toml \
+    && git add .grok/config.toml && git commit -qm grok-config ) >/dev/null 2>&1 || true
+_self_repo "$_S25/fgh" "$_S25/home" sprint/s25fgh "$_S25_ROSTER"
+( cd "$_S25/fgh" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p .grok/hooks \
+    && printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"true"}]}]}}\n' > .grok/hooks/h.json \
+    && git add .grok/hooks/h.json && git commit -qm grok-hooks ) >/dev/null 2>&1 || true
+O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/fg-leases" \
+       XAI_API_KEY=s25-stub-key CLAUDECODE=1 S25_CANARY=leak && unset TRIFORGE_TEST_BUILDER \
+       && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  L="$_S25/log"
+  _c() { grep -c "$@" 2>/dev/null || true; }
+  _dw() { { grep -A1 -x -- --deny "$1" 2>/dev/null | grep -xE 'Edit|Write|Bash|MCPTool\(\*\)|mcp__\*' | tr '\n' '+'; } || true; }
+  rm -f "$L"/wt.*
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25" "$_S25/fg-read.out" 60 >/dev/null 2>&1 || R=$?
+  P=$(cat "$L/wt.pwd" 2>/dev/null || true)
+  case "$P" in (*/triforge-grok.*/wt) PW=scratch ;; ("") PW=none ;; (*) PW=other ;; esac
+  E="$L/wt.env"
+  echo "fg-read:rc=${R}:status=$(_lease_parse_status "$_S25/fg-read.out"):dir=${PW}:cfg=$(cat "$L/wt.cfg" 2>/dev/null || true):canary=$(_c '^S25_CANARY=' "$E"):cc=$(_c '^CLAUDECODE=' "$E"):marker=$(_c -x 'TRIFORGE_LEASE_WORKER=builder' "$E"):trust=$(_c -x 'GROK_FOLDER_TRUST=0' "$E"):overlay=$(_c '^GROK_CONFIG={' "$E"):sandbox=$(grep -A1 -x -- --sandbox "$L/wt.argv" 2>/dev/null | tail -1):deny=$(_dw "$L/wt.argv"):note=$(_c "The lead's checkout, with its uncommitted changes and ops/, is " "$L/wt.argv"):gone=$( [ -n "$P" ] && [ ! -e "$P" ] && echo yes || echo no):listed=$(git worktree list --porcelain 2>/dev/null | _c 'triforge-grok\.'):ledger=$( [ -e ops/leases.toml ] && echo yes || echo none)"
+  rm -f "$L"/fg.* "$L"/wt.*
+  R=0; GROK_ROLE=tester invoke_grok test_writer "probe tests S25" "$_S25/fg-edit.out" 60 >/dev/null 2> "$_S25/fg-edit.err" || R=$?
+  W=${_INVOKE_FAILURE_REASON:-}
+  R2=0; invoke_grok test_writer "probe tests S25 by agent name" "$_S25/fg-edit2.out" 60 >/dev/null 2>&1 || R2=$?
+  echo "fg-edit:rc=${R}:reason=${W}:named=$(_c -F 'lease_create <task> builder, then lease_dispatch' "$_S25/fg-edit.err"):byname=${R2}:ran=$(ls "$L" | _c -xE '(fg|wt)\.argv')"
+  rm -f "$L"/wt.*
+  printf 'empty\n' > "$_S25/mode"
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 empty" "$_S25/fg-empty.out" 60 >/dev/null 2>&1 || R=$?
+  rm -f "$_S25/mode"
+  P=$(cat "$L/wt.pwd" 2>/dev/null || true)
+  echo "fg-empty:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:said=$(_c 'no answer text' "$_S25/fg-empty.out"):gone=$( [ -n "$P" ] && [ ! -e "$P" ] && echo yes || echo no)"
+  rm -f "$L"/wt.*; : > "$L/runs"
+  printf 'interrupted\n' > "$_S25/mode"
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 interrupted" "$_S25/fg-int.out" 60 >/dev/null 2>&1 || R=$?
+  rm -f "$_S25/mode"
+  echo "fg-interrupt:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:runs=$(_c . "$L/runs"):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)"
+  # the retry meets the roster as the first run left it: grok declined
+  rm -f "$L"/wt.*; : > "$L/runs"
+  cp ops/roster.toml "$_S25/fg-roster.keep"
+  printf '%s\n' "$PWD/ops/roster.toml" > "$_S25/decline-roster"
+  printf 'transient-decline\n' > "$_S25/mode"
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 recheck" "$_S25/fg-rc.out" 60 >/dev/null 2>&1 || R=$?
+  rm -f "$_S25/mode"
+  cp "$_S25/fg-roster.keep" ops/roster.toml
+  echo "fg-recheck-role:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:runs=$(_c . "$L/runs"):named=$(_c 'declines it' "$_S25/fg-rc.out"):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)"
+  # an Orca-style user hook: the run proceeds, and the lead's stderr names it
+  rm -f "$L"/wt.*; : > "$L/runs"
+  _s25_orca; printf 'orca\n' > "$_S25/inspect-mode"
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 user hook" "$_S25/fgu.out" 60 >/dev/null 2> "$_S25/fgu.err" || R=$?
+  rm -f "$_S25/inspect-mode"; rm -rf "$_S25/home/.grok/hooks"
+  echo "fg-usertier-orca:rc=${R}:status=$(_lease_parse_status "$_S25/fgu.out"):runs=$(_c . "$L/runs"):sandbox=$(grep -A1 -x -- --sandbox "$L/wt.argv" 2>/dev/null | tail -1):noted=$(_c '^grok: NOTE ' "$_S25/fgu.err"):named=$(_c -F '/.grok/hooks/orca-status.json (hooks: session_start, stop)' "$_S25/fgu.err"):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)"
+  cd "$_S25/fgp" || exit 0
+  rm -f "$L"/wt.*
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 refused" "$_S25/fg-refused.out" 60 >/dev/null 2> "$_S25/fg-refused.err" || R=$?
+  echo "fg-refused:rc=${R}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$( [ -f "$L/wt.argv" ] && echo yes || echo no):named=$(_c 'config.toml: the project file cannot take the tables' "$_S25/fg-refused.err"):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)"
+  cd "$_S25/fgh" || exit 0
+  rm -f "$L"/wt.*
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 hooks" "$_S25/fgh.out" 60 >/dev/null 2> "$_S25/fgh.err" || R=$?
+  echo "fg-refused-hooks:rc=${R}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$( [ -f "$L/wt.argv" ] && echo yes || echo no):named=$(_c -F '/.grok/hooks: project hooks' "$_S25/fgh.err"):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)"
+  cd "$_S25/fg" || exit 0
+  for M in empty malformed partial; do
+    rm -f "$L"/wt.*
+    printf '%s\n' "$M" > "$_S25/inspect-mode"
+    R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 inspect" "$_S25/fgi.out" 60 >/dev/null 2>&1 || R=$?
+    rm -f "$_S25/inspect-mode"
+    echo "fg-refused-inspect-${M}:rc=${R}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$( [ -f "$L/wt.argv" ] && echo yes || echo no):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)"
+  done
+  cd "$_S25/fgp" || exit 0
+  export TRIFORGE_LEASE_ROOT="$_S25/lp-leases"
+  rm -f "$L"/s25p.*
+  R=0; lease_create s25p builder >/dev/null 2> "$_S25/lp.err" || R=$?
+  echo "lease-refused:rc=${R}:row=$(_ledger_get s25p state 2>/dev/null || echo none):ran=$( [ -f "$L/s25p.argv" ] && echo yes || echo no):named=$(_c 'config.toml: the project file cannot take the tables' "$_S25/lp.err")" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-read "$O" '^fg-read:rc=0:status=DONE:dir=scratch:cfg=yes:canary=0:cc=0:marker=1:trust=1:overlay=1:sandbox=read-only:deny=Edit[+]Write[+]Bash[+]MCPTool[(][*][)][+]mcp__[*][+]:note=1:gone=yes:listed=0:ledger=none$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-edit "$O" '^fg-edit:rc=69:reason=edit-outside-lease:named=1:byname=69:ran=0$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-empty "$O" '^fg-empty:rc=80:class=retryable:reason=no-answer:said=1:gone=yes$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-interrupt "$O" '^fg-interrupt:rc=130:class=deterministic:reason=interrupted:runs=1:left=0$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-recheck "$O" '^fg-recheck-role:rc=5:class=deterministic:reason=role:runs=1:named=1:left=0$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-refused "$O" '^fg-refused:rc=69:reason=isolation:ran=no:named=1:left=0$' '^fg-refused-hooks:rc=69:reason=isolation:ran=no:named=1:left=0$' \
+  '^fg-refused-inspect-empty:rc=69:reason=isolation:ran=no:left=0$' '^fg-refused-inspect-malformed:rc=69:reason=isolation:ran=no:left=0$' \
+  '^fg-refused-inspect-partial:rc=69:reason=isolation:ran=no:left=0$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-usertier "$O" '^fg-usertier-orca:rc=0:status=DONE:runs=1:sandbox=read-only:noted=1:named=1:left=0$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect lease-refused "$O" '^lease-refused:rc=1:row=none:ran=no:named=1$')"
+
+# a read-class lease over a project file grok would start: refused at
+# lease_create, and at lease_dispatch's compose when the file appears later
+_self_repo "$_S25/lh" "$_S25/home" sprint/s25lh "$_S25_ROSTER"
+( cd "$_S25/lh" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p .grok \
+    && printf '{"s25-lsp":{"command":"true","extensionToLanguage":{".py":"python"}}}\n' > .grok/lsp.json \
+    && git add .grok/lsp.json && git commit -qm grok-lsp ) >/dev/null 2>&1 || true
+_self_repo "$_S25/dg" "$_S25/home" sprint/s25dg "$_S25_ROSTER"
+O=$( cd "$_S25/lh" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/lh-leases" \
+       XAI_API_KEY=s25-stub-key CLAUDECODE=1 && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  L="$_S25/log"
+  R=0; lease_create s25lr reviewer >/dev/null 2> "$_S25/lr.err" || R=$?
+  echo "lease-surface-reviewer:rc=${R}:row=$(_ledger_get s25lr state 2>/dev/null || echo none):ran=$( [ -f "$L/s25lr.argv" ] && echo yes || echo no):named=$(grep -cF '/.grok/lsp.json: a project LSP server' "$_S25/lr.err" || true):wt=$( [ -e "$_S25/lh-leases/s25lr" ] && echo kept || echo gone):branch=$(git branch --list lease/s25lr | grep -c . || true)"
+  R=0; lease_create s25lb builder >/dev/null 2>&1 || R=$?
+  echo "lease-surface-builder:rc=${R}:row=$(_ledger_get s25lb state 2>/dev/null || echo none)"
+  cd "$_S25/dg" || exit 0
+  export TRIFORGE_LEASE_ROOT="$_S25/dg-leases"
+  lease_create s25dr reviewer >/dev/null 2>&1 || { echo "lease-surface-dispatch:create-failed"; exit 0; }
+  WT=$(_ledger_get s25dr worktree 2>/dev/null)
+  mkdir -p "$WT/.grok/hooks" && printf '{}\n' > "$WT/.grok/hooks/h.json"
+  lease_dispatch s25dr "probe review S25 dispatch" 60 >/dev/null 2>&1 || { echo "lease-surface-dispatch:dispatch-failed"; exit 0; }
+  _self_wait_rc s25dr
+  OUT=$(_ledger_get s25dr output_file 2>/dev/null)
+  echo "lease-surface-dispatch:rc=$(cat "${OUT}.rc" 2>/dev/null || true):ran=$( [ -f "$L/s25dr.argv" ] && echo yes || echo no):named=$(grep -cF '/.grok/hooks: project hooks' "$OUT" 2>/dev/null || true)" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect lease-surface "$O" '^lease-surface-reviewer:rc=1:row=none:ran=no:named=1:wt=gone:branch=0$' '^lease-surface-builder:rc=0:row=leased$' \
+  '^lease-surface-dispatch:rc=94:ran=no:named=1$')"
+
+# a reviewer lease made under a clean user tier, then dispatched: with a user
+# hook inspect reports by then, the compose refuses it (rc 94, the hook
+# named), grok never runs; with a user MCP server added by then, the run's
+# .grok/config.toml shadows it too, keeps the shadows made at provisioning
+# (which inspect no longer lists) and holds one [plugins] table
+_self_repo "$_S25/du" "$_S25/home" sprint/s25du "$_S25_ROSTER"
+O=$( cd "$_S25/du" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/du-leases" \
+       XAI_API_KEY=s25-stub-key CLAUDECODE=1 && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  L="$_S25/log"
+  for T in s25uh:userhook s25ul:lateserver; do
+    K=${T%%:*}
+    rm -f "$_S25/inspect-mode"
+    lease_create "$K" reviewer >/dev/null 2>&1 || { echo "lease-usertier-${T#*:}:create-failed"; continue; }
+    printf '%s\n' "${T#*:}" > "$_S25/inspect-mode"
+    lease_dispatch "$K" "probe review S25 user tier" 60 >/dev/null 2>&1 || { echo "lease-usertier-${T#*:}:dispatch-failed"; continue; }
+    _self_wait_rc "$K"
+    rm -f "$_S25/inspect-mode"
+    OUT=$(_ledger_get "$K" output_file 2>/dev/null)
+    if [ "$K" = s25uh ]; then
+      echo "lease-usertier-userhook:rc=$(cat "${OUT}.rc" 2>/dev/null || true):ran=$( [ -f "$L/$K.argv" ] && echo yes || echo no):noted=$(grep -c '^grok: NOTE ' "${OUT}.log" 2>/dev/null || true):named=$(grep -cF '/.grok/hooks (hooks: session_start)' "${OUT}.log" 2>/dev/null || true)"
+    else
+      C="$L/$K.toml"
+      echo "lease-usertier-lateserver:rc=$(cat "${OUT}.rc" 2>/dev/null || true):late=$(grep -cxF '[mcp_servers."s25-late-server"]' "$C" 2>/dev/null || true):kept=$(grep -cxE '\[mcp_servers\."s25-(claude|grok|json)-server"\]' "$C" 2>/dev/null || true):plugins=$(grep -cx '\[plugins\]' "$C" 2>/dev/null || true):disabled=$(grep -cE '^disabled = \[.*"s25-claude-plugin", "s25-grok-plugin", "s25-installed-plugin"\]$' "$C" 2>/dev/null || true)"
+    fi
+  done
+  # a reviewer lease made where the user has an Orca-style hook: leased, the
+  # hook named on lease_create's stderr
+  _s25_orca; printf 'orca\n' > "$_S25/inspect-mode"
+  R=0; lease_create s25uo reviewer >/dev/null 2> "$_S25/uo.err" || R=$?
+  rm -f "$_S25/inspect-mode"; rm -rf "$_S25/home/.grok/hooks"
+  echo "lease-usertier-create-orca:rc=${R}:row=$(_ledger_get s25uo state 2>/dev/null || echo none):noted=$(grep -c '^grok: NOTE ' "$_S25/uo.err" || true):named=$(grep -cF '/.grok/hooks/orca-status.json (hooks: session_start, stop)' "$_S25/uo.err" || true)" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect lease-usertier "$O" '^lease-usertier-userhook:rc=0:ran=yes:noted=1:named=1$' \
+  '^lease-usertier-lateserver:rc=0:late=1:kept=3:plugins=1:disabled=1$' '^lease-usertier-create-orca:rc=0:row=leased:noted=1:named=1$')"
+
+# grok_read_isolation_check (at-setup's question before a read role): rc 0
+# and an OK line under a clean user tier; rc 0, the OK line and a NOTE line
+# naming the user hook when inspect reports one; rc 1 and the file named when
+# a user config layer does not parse; each time nothing left in TMPDIR,
+# nothing written under HOME
+O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  _home() { find "$_S25/home" 2>/dev/null | LC_ALL=C sort | cksum; }
+  for T in "full:/.grok/hooks (hooks: session_start)" "userhook:/.grok/hooks (hooks: session_start)" "broken:/gh-broken/config.toml: the file does not parse"; do
+    M=${T%%:*}; P=${T#*:}
+    H=$(_home)
+    if [ "$M" = broken ]; then export GROK_HOME="$_S25/gh-broken"; else printf '%s\n' "$M" > "$_S25/inspect-mode"; fi
+    R=0; grok_read_isolation_check > "$_S25/rc-$M.out" 2>&1 || R=$?
+    rm -f "$_S25/inspect-mode"; unset GROK_HOME
+    echo "readcheck-${M}:rc=${R}:ok=$(grep -c '^grok: OK' "$_S25/rc-$M.out" || true):noted=$(grep -c '^grok: NOTE ' "$_S25/rc-$M.out" || true):named=$(grep -cF -- "$P" "$_S25/rc-$M.out" || true):left=$(ls -d "$_S25/tmp"/triforge-grok-check.* 2>/dev/null | grep -c . || true):home=$( [ "$(_home)" = "$H" ] && echo same || echo changed)"
+  done )
+_S25_FAIL="${_S25_FAIL}$(_self_expect readcheck "$O" '^readcheck-full:rc=0:ok=1:noted=0:named=0:left=0:home=same$' '^readcheck-userhook:rc=0:ok=1:noted=1:named=1:left=0:home=same$' \
+  '^readcheck-broken:rc=1:ok=0:noted=0:named=1:left=0:home=same$')"
+
+# the lead's integrity check before any checkout (a stub that refuses, and a
+# real baseline mismatch: a filter driver planted in .git/config after the
+# first lease), and a scratch checkout that runs no filter in a project never
+# leased
+_self_repo "$_S25/ir" "$_S25/home" sprint/s25ir "$_S25_ROSTER"
+_self_repo "$_S25/ff" "$_S25/home" sprint/s25ff "$_S25_ROSTER"
+( cd "$_S25/ff" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 && printf '*.txt filter=s25smudge\n*.dat filter=s25proc\n' > .gitattributes \
+    && echo s25-committed > a.txt && echo s25-data > b.dat && git add -A && git commit -qm filters ) >/dev/null 2>&1 || true
+git -C "$_S25/ff" config filter.s25smudge.smudge "sh -c 'touch $_S25/ff-smudge; cat'"
+git -C "$_S25/ff" config filter.s25proc.process "sh -c 'touch $_S25/ff-process; exit 1'"
+O=$( cd "$_S25/ir" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/ir-leases" \
+       XAI_API_KEY=s25-stub-key CLAUDECODE=1 && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  L="$_S25/log"
+  _c() { grep -c "$@" 2>/dev/null || true; }
+  lease_create s25ir builder >/dev/null 2>&1 || echo "fg-integrity-real:create-failed"
+  lease_rebaseline >/dev/null 2>&1 || echo "fg-integrity-real:rebaseline-failed"
+  git config filter.s25smudge.smudge "sh -c 'touch $_S25/ir-smudge; cat'"
+  mkdir -p .git/info && printf '* filter=s25smudge\n' >> .git/info/attributes
+  rm -f "$L"/wt.*
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 integrity" "$_S25/ir.out" 60 >/dev/null 2> "$_S25/ir.err" || R=$?
+  echo "fg-integrity-real:rc=${R}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$( [ -f "$L/wt.argv" ] && echo yes || echo no):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .):filter=$( [ -e "$_S25/ir-smudge" ] && echo ran || echo no):named=$(_c -F '.git/config changed' "$_S25/ir.err")"
+  cd "$_S25/ff" || exit 0
+  export TRIFORGE_LEASE_ROOT="$_S25/ff-leases"
+  rm -f "$L"/wt.*
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 filter" "$_S25/ff.out" 60 >/dev/null 2>&1 || R=$?
+  echo "fg-filter:rc=${R}:status=$(_lease_parse_status "$_S25/ff.out"):smudge=$( [ -e "$_S25/ff-smudge" ] && echo ran || echo no):process=$( [ -e "$_S25/ff-process" ] && echo ran || echo no):atxt=$(cat "$L/wt.atxt" 2>/dev/null || true):ledger=$( [ -e ops/leases.toml ] && echo yes || echo none):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)"
+  cd "$_S25/ir" || exit 0
+  export TRIFORGE_LEASE_ROOT="$_S25/ir-leases"
+  _lead_integrity_check() { echo "S25 integrity stub: refused" >&2; return 44; }
+  rm -f "$L"/wt.*
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 integrity stub" "$_S25/is.out" 60 >/dev/null 2> "$_S25/is.err" || R=$?
+  echo "fg-integrity-stub:rc=${R}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$( [ -f "$L/wt.argv" ] && echo yes || echo no):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .):named=$(_c -F 'failed the integrity check' "$_S25/is.err")" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-integrity "$O" '^fg-integrity-real:rc=44:reason=integrity:ran=no:left=0:filter=no:named=1$' '^fg-integrity-stub:rc=44:reason=integrity:ran=no:left=0:named=1$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-filter "$O" '^fg-filter:rc=0:status=DONE:smudge=no:process=no:atxt=s25-committed:ledger=none:left=0$')"
+
+# the retry meets the lead's git state as the first run left it: an open
+# lease, a fresh rebaseline, then a run that changed .git/config
+_self_repo "$_S25/rt" "$_S25/home" sprint/s25rt "$_S25_ROSTER"
+O=$( cd "$_S25/rt" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/rt-leases" \
+       XAI_API_KEY=s25-stub-key CLAUDECODE=1 && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  L="$_S25/log"
+  _c() { grep -c "$@" 2>/dev/null || true; }
+  lease_create s25rt builder >/dev/null 2>&1 || echo "fg-recheck-integrity:create-failed"
+  lease_rebaseline >/dev/null 2>&1 || echo "fg-recheck-integrity:rebaseline-failed"
+  rm -f "$L"/wt.*; : > "$L/runs"
+  printf '%s\n' "$PWD/.git" > "$_S25/taint-git"
+  printf 'transient-taint\n' > "$_S25/mode"
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 taint" "$_S25/rt.out" 60 >/dev/null 2> "$_S25/rt.err" || R=$?
+  rm -f "$_S25/mode"
+  echo "fg-recheck-integrity:rc=${R}:reason=${_INVOKE_FAILURE_REASON:-}:runs=$(_c . "$L/runs"):named=$(_c -F '.git/config changed' "$_S25/rt.err"):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-recheck "$O" '^fg-recheck-integrity:rc=44:reason=integrity:runs=1:named=1:left=0$')"
+
+# _grok_run_in's traps: TERM to its subshell alone while the provisioning
+# inspect sleeps stops the inspect and removes the scratch directory
+O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/fg-leases" \
+       XAI_API_KEY=s25-stub-key && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  _lease_ctx 2>/dev/null || { echo "trap:no-checkout"; exit 0; }
+  S=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null) || { echo "trap:no-head"; exit 0; }
+  TO=$(_timeout_tool) || { echo "trap:no-timeout"; exit 0; }
+  _grok_argv read grok-4.7 "" || { echo "trap:no-argv"; exit 0; }
+  rm -f "$_S25/inspect.pid"; printf 'sleep\n' > "$_S25/inspect-mode"
+  _grok_run_in "$S" "$TO" 60 "probe trap S25" "$_S25/trap.ready" > /dev/null 2>&1 &
+  J=$!
+  N=0
+  while [ ! -s "$_S25/inspect.pid" ] && [ "$N" -lt 150 ]; do sleep 0.1; N=$((N + 1)); done
+  SP=$(cat "$_S25/inspect.pid" 2>/dev/null || true)
+  B=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | grep -c . || true)
+  # the subshell that holds the traps is the background job's child
+  for P in $(pgrep -P "$J" 2>/dev/null || true); do kill -TERM "$P" 2>/dev/null || true; done
+  wait "$J" 2>/dev/null || true
+  N=0
+  while [ "$N" -lt 50 ] && { { [ -n "$SP" ] && kill -0 "$SP" 2>/dev/null; } || ls -d "$_S25/tmp"/triforge-grok.* >/dev/null 2>&1; }; do sleep 0.1; N=$((N + 1)); done
+  echo "trap:started=$( [ -n "$SP" ] && echo yes || echo no):before=${B}:dirs=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | grep -c . || true):stub=$( [ -n "$SP" ] && kill -0 "$SP" 2>/dev/null && echo left || echo gone)"
+  if [ -n "$SP" ]; then kill -TERM "$SP" 2>/dev/null || true; fi
+  rm -f "$_S25/inspect-mode" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect trap "$O" '^trap:started=yes:before=1:dirs=0:stub=gone$')"
+
+_S25_CAP="Grok Build's lane: the permission class by role (a reviewer or analyst read-only, with Edit, Write and Bash denied over any imported Claude allow rule, and MCP tools denied in every class; grok takes builder, reviewer and analyst, and edits only in a lease), the env prefix and include_only overlay pinned, a report only from an end_turn run, the provisioned .grok/config.toml that disables every plugin and shadows every MCP server, the user's own included (never merged, never without a full inspect, refused when it can't be proven), no read-class run where the project supplies code grok would start, while the user's own grok hooks and settings run with one NOTE line naming each (checked again, and the tables rebuilt, at every read-class dispatch; asked by at-setup through grok_read_isolation_check), the builder's sandbox profile closing GROK_HOME's code and instruction paths (rewritten before each dispatch), and invoke_grok's read class in a removed scratch checkout under env -i, after the roster and integrity checks before every attempt, with no filter or hook run and a TERM that leaves nothing behind (R23)"
+if [ -z "$_S25_FAIL" ]; then
+  row "SELF-25" "grok" "$_S25_CAP" "PASS" "class: builder/tester/documenter edit, reviewer/analyst/empty read; lane: edit -> triforge-edit + Edit/Write/Bash, MCP denied; read and empty -> read-only, Edit/Write/Bash/MCP denied; env prefix: every GROK_CLAUDE_*/GROK_CURSOR_* switch, GROK_FOLDER_TRUST=0, the overlay's literal include_only; builder lease: .grok/config.toml disables the 3 plugins and shadows the 3 servers (the user's ~/.grok/config.toml one included), inspect with the Claude switches off, config and profile provisioned, a weakened profile written back before the run (all 17 GROK_HOME denies), triforge-edit, builder brief, collect -> review, snapshot without .grok/; reviewer lease (project allows Edit/Write/npm): read-only, the denies, reviewer brief, no profile, review; Status: DONE then max_tokens, no end, or the turn cap -> report missing (rc 80), the stop named; tracked: [permission] and [mcp_servers.team] files take the tables (tomllib-proven); [plugins], inline mcp_servers, a server named like a ~/.claude.json one, a symlinked .grok and an ignored overlay refused, file unchanged and named; a project server named like the user's grok one gets no shadow; user tier (read class): a user hook, a user LSP server, an unlisted plugin's hook, an auth provider command, notification hooks, config-layer [hooks], a requirements-layer MCP server and an Orca-style hook file accepted, each named with its file in one NOTE line (the .bak copy not); an unparsable config.toml and project hooks beside the Orca hook refused, nothing written; the listed user plugin's hook and LSP accepted with no note (plugin disabled, user server shadowed); the edit class takes a user hook with no note and writes the profile; profile: one table, extends workspace, exactly the 17 literal denies, config.toml not denied; a same-named user profile and a symlinked file refused, nothing written; surface (read class): .grok/hooks, .grok/lsp.json, .grok/plugins, .claude/plugins, a project MCP server and an inspect-reported project hook refused, named, nothing written; Claude/Cursor hooks, .mcp.json (shadowed), an agent, a skill and a sandbox.toml accepted; edit class takes .grok/hooks; inspect: empty, cut-off, failed and partial refused; roles: tester and documenter on grok rc 5; lease_create refused, no row, grok never run; a read lease over .grok/lsp.json refused, a builder lease made, .grok/hooks added after create refused at compose (rc 94); a reviewer lease made under a clean user tier: a user hook by dispatch time runs (rc 0, named in the builder log's NOTE), a new user MCP server by then shadowed in the run's config with the provisioning's 3 shadows kept and one [plugins]; a reviewer lease made beside the Orca hook: leased, the file named on stderr; grok_read_isolation_check: clean -> rc 0 OK, a user hook -> rc 0 OK and a NOTE naming it, an unparsable config.toml -> rc 1 named, no scratch left, HOME unchanged; invoke_grok: reviewer from a scratch checkout with the config, env -i (no canary, no CLAUDECODE), the denies and the checkout note, then removed, no ledger written; tester and an edit agent name rc 69, grok never run; an empty end_turn -> rc 80 no-answer; an interrupted run (exit 130) -> rc 130 interrupted, run once, no retry; a retry after the first run declined grok in the roster -> rc 5 role, run once; a retry after the first run changed .git/config (lease open, fresh rebaseline) -> rc 44 integrity, run once; an unisolable project, project hooks or a bad inspect -> rc 69, grok never run; beside an Orca-style user hook -> rc 0, DONE, read-only, one NOTE naming the hook file; integrity refused (stub, and a smudge filter in .git/config with .git/info/attributes planted after a fresh rebaseline, a lease open) -> rc 44, no checkout, the filter never run; a never-leased project's smudge and process filters never run; TERM to _grok_run_in's subshell during the provisioning inspect -> the inspect stopped, no scratch left" "static"
+else
+  row "SELF-25" "grok" "$_S25_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S25_FAIL"):$(printf '%s' "$_S25_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S25"
+
+# SELF-26 (R23, R24, KTD18): at-review's blocks, run verbatim against stub
+# CLIs. Each block is extracted from its skill file at run time (SKILL.md's
+# preflight; references/review-package.md, dispatch.md's dispatch block, which
+# runs the learnings gate, and optional-lanes.md), so a later edit to the
+# skill is what runs here, and each runs under /bin/bash from a fixture repo,
+# as the lead runs it. The stubs (codex, grok, and one script for opencode,
+# kimi, cursor-agent and devin) answer from per-CLI files and record every
+# lane run: its argv, its longest argument, and how many lanes had started
+# when a barrier released it (the barrier holds a run until N lanes have
+# started, 10 s at most, so a serial dispatch shows fewer than N). The
+# personas the dispatch block starts are SELF-23's to run: here one line
+# sourced right after the block's own helper load replaces persona_spawn,
+# persona_wait and persona_stop with recorders (log/persona), so no persona
+# CLI starts, and the cases read what each persona was handed. The optional
+# block gets the run directory the dispatch block printed, or, where no
+# dispatch block ran, an empty one the case makes. Every expected value below
+# is a literal.
+#   integrity     an open lease and a fresh lease_rebaseline, then a clean
+#                 filter and an fsmonitor planted in .git/config (the filter
+#                 applied to every file by .git/info/attributes, a tracked file
+#                 changed), with the skill laid out as a Claude Code lead runs
+#                 it and as a Codex lead does (a project-tier copy, the locator
+#                 resolving through the plugin-root pointer): the preflight
+#                 passes; the package block stops with rc 44 naming .git/config
+#                 and leaves no package; the dispatch block (with its
+#                 learnings gate) and the optional block then refuse; no lane
+#                 or persona ran, no run directory was made, and neither the
+#                 filter nor the fsmonitor ran
+#   never-leased  the package block in a project never leased: rc 0, no
+#                 ledger, and the lease root's lead dir holds only the trusted
+#                 git config capture
+#   main          the analyst on cursor, the reviewer on codex, five optional
+#                 members. Package: the untracked file listed by name, the
+#                 header saying untracked files are not diffed. Learnings gate:
+#                 a solutions entry matched through that untracked path, and
+#                 the learnings-researcher started on it. Personas: the five
+#                 specialists each started on the package (package.md as the
+#                 input, the brief naming full.diff), the same run directory
+#                 for all six. Core:
+#                 both lanes released together; REVIEW_ANTIGRAVITY from cursor;
+#                 REVIEW_CODEX with the codex prose and verdict although its
+#                 transcript quotes Status: BLOCKED (the last-message file is
+#                 the answer); cursor's prompt holds the package. Optional: all
+#                 five released together, each prompt holding the committed and
+#                 uncommitted changes, the [R] row, the untracked name, the
+#                 inventory and the diff markers; REVIEW files for cursor,
+#                 devin and kimi only; opencode (Status: DONE, exit 1) and grok
+#                 (Status: DONE, then max_tokens) reported FAILED
+#   codex-noschema  codex with the output schema switched off: the
+#                 last-message file still written (-o on every attempt),
+#                 REVIEW_CODEX promoted, the quoted Status: BLOCKED ignored;
+#                 an answer that ends in Status: BLOCKED not promoted, named;
+#                 with the schema on, a first run that wrote its verdict and
+#                 failed as a retry may fix, then a retry answering BLOCKED:
+#                 two runs, not promoted (the retry's answer, not the stale
+#                 verdict)
+#   core-quote    the analyst on agy, whose answer quotes "Status: BLOCKED" in
+#                 a finding: promoted; one whose last line is Status: BLOCKED:
+#                 not promoted, named
+#   interrupted   invoke_antigravity, invoke_codex, invoke_opencode,
+#                 invoke_kimi and invoke_cursor with their stub exiting 130:
+#                 rc 130, deterministic, reason interrupted, one run each
+#   rows          each [R] task in the package with its indented fields (at
+#                 six and at two spaces), no line of an unmarked task, and the
+#                 header naming ops/TASKS.md and ops/CONTRACTS.md by absolute
+#                 path
+#   codex-lease   a codex builder lease on the real lane, -o <out>.last in its
+#                 argv, a Status line quoted in the transcript after the
+#                 answer: an answer saying DONE -> review, though the quote
+#                 says BLOCKED; an answer with no Status line -> report
+#                 missing (rc 80), though the quote says DONE
+#   core-blocked  the analyst on opencode (DONE), the reviewer on devin
+#                 (BLOCKED): REVIEW_ANTIGRAVITY only, the BLOCKED named;
+#                 devin's prompt holds the package
+#   big           40 added files, a diff over the cap: the inventory names all
+#                 40, the inline diff is cut and names full.diff, which holds
+#                 all 40; the package stays within 116000 bytes and the kimi
+#                 lane's longest argument under 120000
+#   base          REVIEW_BASE naming no commit, and a base blob git cannot read
+#                 (git diff rc 128): the package block stops (rc 1) naming the
+#                 base or the git rc and leaves no package, the optional block
+#                 refuses, no lane ran; REVIEW_BASE=main is named in the range
+_S26="${WORK}/self26"
+mkdir -p "$_S26/bin" "$_S26/log" "$_S26/cfg" "$_S26/blocks" "$_S26/started" "$_S26/home/.grok"
+printf '{"key":"s26-stub"}\n' > "$_S26/home/.grok/auth.json"
+_S26_TAB=$(printf '\t')
+_S26_SH=/bin/bash
+if [ ! -x "$_S26_SH" ]; then _S26_SH=$(command -v bash); fi
+for _T in pre:SKILL.md pkg:references/review-package.md opt:references/optional-lanes.md; do
+  awk '/^```bash$/{f=1; next} /^```$/{f=0} f' "${REPO_ROOT}/skills/at-review/${_T#*:}" > "$_S26/blocks/${_T%%:*}.sh" 2>/dev/null || true
+done
+# core: dispatch.md's first block (the dispatch block; the wait block after it
+# collects personas, SELF-23's part), with the persona recorders sourced on
+# the line after its helper load
+awk -v S="$_S26/s26-persona.sh" '/^```bash$/ { n++; if (n == 1) { f = 1; next } } /^```$/ { f = 0 }
+  f { print; if (!d && index($0, "source \"$ROOT/scripts/invoke-external.sh\"")) { print ". \"" S "\""; d = 1 } }' \
+  "${REPO_ROOT}/skills/at-review/references/dispatch.md" > "$_S26/blocks/core.sh" 2>/dev/null || true
+{ printf '# SELF-26 persona recorders (sourced by the dispatch block after its helper load)\n_S26P_D=%s\n' "'$_S26'"; cat <<'EOF'
+# persona_spawn logs its arguments, one per line, to log/persona.<n> and
+# leaves <run-dir>/<name>.pid as a started run does; no persona CLI starts
+persona_spawn() {
+  local K
+  K=$(ls "$_S26P_D/log" | grep -c '^persona\.[0-9]*$' || true)
+  printf '%s\n' "$@" > "$_S26P_D/log/persona.$K"
+  : > "$1/$2.pid"
+  return 0
+}
+persona_wait() { echo "persona_wait $*" >> "$_S26P_D/log/persona-calls"; return 0; }
+persona_stop() { echo "persona_stop $*" >> "$_S26P_D/log/persona-calls"; return 0; }
+EOF
+} > "$_S26/s26-persona.sh"
+cat > "$_S26/bin/s26-record" <<'EOF'
+# The stub recorder (SELF-26), sourced with D and N set: the argv, the
+# longest argument, one line in log/runs, and the barrier
+K=$(ls "$D/log" | grep -c "^$N\.[0-9]*\.argv$")
+printf '%s\n' "$@" > "$D/log/$N.$K.argv"
+L=0
+for A in "$@"; do
+  C=$(printf '%s' "$A" | wc -c | tr -d ' ')
+  if [ "$C" -gt "$L" ]; then L=$C; fi
+done
+echo "$L" > "$D/log/$N.$K.longest"
+echo "$N" >> "$D/log/runs"
+if [ -f "$D/cfg/barrier" ]; then
+  : > "$D/started/$N"
+  I=0
+  while [ "$(ls "$D/started" | wc -l | tr -d ' ')" -lt "$(cat "$D/cfg/barrier")" ] && [ "$I" -lt 100 ]; do sleep 0.1; I=$((I + 1)); done
+  ls "$D/started" | wc -l | tr -d ' ' > "$D/log/$N.$K.seen"
+fi
+EOF
+{ printf '#!/bin/sh\n# SELF-26 lane stub: opencode, kimi, cursor-agent or devin, by its name\nD=%s\n' "'$_S26'"; cat <<'EOF'
+N=$(basename "$0")
+case "$1" in
+  --version|-V)
+    case "$N" in opencode) echo 1.4.0 ;; kimi) echo "kimi 1.0.0" ;; cursor-agent) echo 2026.10.01-abc1234 ;; *) echo "devin 3000.11.3" ;; esac
+    exit 0 ;;
+  status) echo "Logged in as stub"; exit 0 ;;
+  auth) echo "Logged in (via Devin)."; echo openrouter; exit 0 ;;
+esac
+. "$D/bin/s26-record"
+cat "$D/cfg/$N.ans" 2>/dev/null
+exit "$(cat "$D/cfg/$N.rc" 2>/dev/null || echo 0)"
+EOF
+} > "$_S26/bin/opencode"
+for _T in kimi cursor-agent devin; do cp "$_S26/bin/opencode" "$_S26/bin/$_T"; done
+# codex: the transcript (stderr) quotes an earlier report's Status: BLOCKED;
+# the answer (stdout; cfg/codex.ans when set) has no Status line, and the -o
+# file gets it too, or a JSON verdict under --output-schema. cfg/codex.tail
+# goes to stderr after the answer; cfg/codex.fail-first fails the first run
+# (after its -o file is written) as a retry may fix; cfg/codex.rc is the exit
+{ printf '#!/bin/sh\n# SELF-26 codex stub\nD=%s\nN=codex\n' "'$_S26'"; cat <<'EOF'
+case "$1" in
+  --version) echo "codex-cli 0.0.0-s26"; exit 0 ;;
+  features) cat "$D/cfg/codex.features" 2>/dev/null; exit 0 ;;
+esac
+. "$D/bin/s26-record"
+O=""; P=""; SCH=0
+for A in "$@"; do
+  if [ "$P" = -o ]; then O=$A; fi
+  if [ "$A" = --output-schema ]; then SCH=1; fi
+  P=$A
+done
+echo "exec: sed -n 1,5p ops/old-review.md" >&2
+echo "Status: BLOCKED" >&2
+echo "(an earlier report, quoted by a tool call)" >&2
+ANS=$(cat "$D/cfg/codex.ans" 2>/dev/null || printf 'Reviewed the package.\n[P3] calc.py:3 S26-CODEX-FINDING')
+printf '%s\n' "$ANS"
+if [ -n "$O" ] && [ "$SCH" = 1 ]; then printf '{"findings":[],"summary":"S26-VERDICT","review_scope":"package"}\n' > "$O"
+elif [ -n "$O" ]; then printf '%s\n' "$ANS" > "$O"; fi
+if [ -f "$D/cfg/codex.tail" ]; then cat "$D/cfg/codex.tail" >&2; fi
+if [ -f "$D/cfg/codex.fail-first" ] && [ ! -f "$D/log/codex.failed" ]; then
+  : > "$D/log/codex.failed"; echo "Error: connection reset by peer" >&2; exit 1
+fi
+exit "$(cat "$D/cfg/codex.rc" 2>/dev/null || echo 0)"
+EOF
+} > "$_S26/bin/codex"
+# agy: the JSON envelope in cfg/agy.ans, exit cfg/agy.rc
+{ printf '#!/bin/sh\n# SELF-26 agy stub\nD=%s\nN=agy\n' "'$_S26'"; cat <<'EOF'
+case "$1" in --version|-V) echo "agy 1.2.0"; exit 0 ;; esac
+. "$D/bin/s26-record"
+cat "$D/cfg/agy.ans" 2>/dev/null
+exit "$(cat "$D/cfg/agy.rc" 2>/dev/null || echo 0)"
+EOF
+} > "$_S26/bin/agy"
+{ printf '#!/bin/sh\n# SELF-26 grok stub\nD=%s\nN=grok\n' "'$_S26'"; cat <<'EOF'
+case "$1" in --version|-V) echo "grok 1.0.34"; exit 0 ;; esac
+for A in "$@"; do
+  if [ "$A" = inspect ]; then
+    echo '{"configSources":{"layers":[{"role":"env_overlay","note":"shell_environment_policy toolset"}]},"plugins":[],"mcpServers":[],"hooks":[],"lspServers":[]}'
+    exit 0
+  fi
+done
+. "$D/bin/s26-record"
+cat "$D/cfg/grok.ans" 2>/dev/null
+exit 0
+EOF
+} > "$_S26/bin/grok"
+for _T in ig ic; do printf '#!/bin/sh\ntouch %s/%s-fsmon\n' "$_S26" "$_T" > "$_S26/fsmon-$_T.sh"; done
+chmod +x "$_S26/bin/opencode" "$_S26/bin/kimi" "$_S26/bin/cursor-agent" "$_S26/bin/devin" "$_S26/bin/codex" "$_S26/bin/agy" "$_S26/bin/grok" "$_S26/fsmon-ig.sh" "$_S26/fsmon-ic.sh"
+_S26_PATH="${_S26}/bin:${_SELF_STUBS}:${PATH}"
+_S26_DONE='Reviewed.\nStatus: DONE\nFiles changed: none\nTests: none\nConcerns: None\nDiscoveries for later tasks: None\n'
+_S26_KIMI='[members.kimi]\nenabled = true\nmodel = "kimi-code/k3"\n'
+_S26_MEMBERS='[members.opencode]\nenabled = true\nmodel = "openrouter/z-ai/glm-5.3"\n[members.cursor]\nenabled = true\nmodel = "cursor-grok-4.6-xhigh"\n[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\nconsent = "user 2026-10-07T00:00:00Z via=tty"\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n'
+_S26_ANALYST_CURSOR='[roles.analyst]\ncli = "cursor"\nfallbacks = ["antigravity"]\n\n'
+printf '%b' "$_S26_DONE" > "$_S26/cfg/opencode.ans"; echo 1 > "$_S26/cfg/opencode.rc"
+printf '%b' "$_S26_DONE" > "$_S26/cfg/devin.ans"; echo 0 > "$_S26/cfg/devin.rc"
+printf '%s\n' '{"role":"assistant","content":"Reviewed.\nStatus: DONE\nFiles changed: none"}' > "$_S26/cfg/kimi.ans"
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Reviewed.\nStatus: DONE\nFiles changed: none"}' > "$_S26/cfg/cursor-agent.ans"
+printf '%s\n' '{"type":"text","data":"Reviewed half the diff.\nStatus: DONE\nFiles changed: none\n"}' '{"type":"end","stopReason":"max_tokens","num_turns":1}' > "$_S26/cfg/grok.ans"
+: > "$_S26/cfg/codex.features"
+
+# _s26_fixture <dir> <roster, %b escapes> — main holds calc.py, an
+# ops/TASKS.md with no [R] row and ops/solutions/s26-note.md (which names only
+# the untracked file below); sprint/s26 adds one commit to calc.py.
+# _s26_dirty <dir> adds an uncommitted edit, an uncommitted [R] row and an
+# untracked file.
+_s26_fixture() {
+  ( mkdir -p "$1/ops/solutions" && cd "$1" && export HOME="$_S26/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
+      && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
+      && printf '%b' "$2" > ops/roster.toml && printf 'def add(a, b):\n    return a + b\n' > calc.py \
+      && printf '# Tasks\n' > ops/TASKS.md && printf 'Gotcha: s26-untracked.py must stay pure.\n' > ops/solutions/s26-note.md \
+      && git add -A && git commit -qm init && git checkout -q -b sprint/s26 \
+      && printf '# S26-COMMITTED\n' >> calc.py && git commit -qam sprint ) >/dev/null 2>&1 || true
+}
+_s26_dirty() {
+  ( cd "$1" && printf '# S26-UNCOMMITTED\n' >> calc.py && printf -- '- [R] T1 S26-ROW calc\n' >> ops/TASKS.md \
+      && printf 'x = 1\n' > s26-untracked.py ) >/dev/null 2>&1 || true
+}
+# _s26_run <case> <fixture> <block> <VAR=value>... — run one extracted block
+# under /bin/bash from <fixture>, the stubs first on PATH, its own TMPDIR and
+# lease root per case (a VAR=value given overrides these); stdout and stderr
+# in $_S26/<case>.<block>.out/.err. Prints the block's rc.
+_s26_run() {
+  local C=$1 FX=$2 B=$3 RC=0
+  shift 3
+  mkdir -p "$_S26/tmp-$C"
+  ( cd "$FX" && env PATH="$_S26_PATH" HOME="$_S26/home" TMPDIR="$_S26/tmp-$C" TRIFORGE_LEASE_ROOT="$_S26/leases-$C" \
+      OPENROUTER_API_KEY=s26-stub XAI_API_KEY=s26-stub SKILL_DIR="${REPO_ROOT}/skills/at-review" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" "$@" \
+      "$_S26_SH" "$_S26/blocks/$B.sh" < /dev/null > "$_S26/$C.$B.out" 2> "$_S26/$C.$B.err" ) || RC=$?
+  echo "$RC"
+}
+_s26_pkg() { sed -n 's/^REVIEW_PKG=//p' "$_S26/$1.pkg.out" 2>/dev/null | tail -1 || true; }
+# _s26_rundir <case> — the run directory the case's dispatch block printed
+_s26_rundir() { sed -n 's/^review: run directory \([^ ]*\) .*/\1/p' "$_S26/$1.core.out" 2>/dev/null | head -1 || true; }
+# _s26_emptyrun <name> — a run directory with an empty lane list, for an
+# optional block run where no dispatch block ran
+_s26_emptyrun() { mkdir -p "$_S26/run-$1" && : > "$_S26/run-$1/lanes"; echo "$_S26/run-$1"; }
+# _s26_personas <pkg dir> <run dir> — what the recorded persona_spawn calls
+# were handed: how many, how many on package.md, how many briefs naming
+# full.diff, how many learnings-researcher, and whether all used <run dir>
+_s26_personas() {
+  local F N=0 PK=0 BR=0 LR=0 RD=same
+  for F in "$_S26/log"/persona.*; do
+    [ -f "$F" ] || continue
+    N=$((N + 1))
+    if [ "$(sed -n 4p "$F")" = "$1/package.md" ]; then PK=$((PK + 1)); fi
+    if grep -qF -- "$1/full.diff" "$F" 2>/dev/null; then BR=$((BR + 1)); fi
+    if [ "$(sed -n 3p "$F")" = learnings-researcher ]; then LR=$((LR + 1)); fi
+    if [ "$(sed -n 1p "$F")" != "$2" ]; then RD=differ; fi
+  done
+  echo "spawns=${N}:pkg=${PK}:brief=${BR}:learn=${LR}:run=${RD}"
+}
+_s26_reset() { rm -rf "$_S26/log" "$_S26/started" "$_S26/cfg/barrier"; mkdir -p "$_S26/log" "$_S26/started"; }
+_s26_runs() { cat "$_S26/log/runs" 2>/dev/null | grep -c . || true; }
+_s26_pkgdirs() { ls -d "$_S26/tmp-$1"/triforge-review.* 2>/dev/null | grep -c . || true; }
+_s26_files() { ls "$1/ops" 2>/dev/null | grep '^REVIEW_' | sed 's/\.md$//' | sort | paste -sd, - || true; }
+# _s26_argv <stub> <text> — the first recorded argv of <stub> holding <text>
+_s26_argv() {
+  local F
+  for F in "$_S26/log/$1".*.argv; do
+    if [ -f "$F" ] && grep -qF -- "$2" "$F" 2>/dev/null; then echo "$F"; return 0; fi
+  done
+  echo "$_S26/log/none"
+}
+# _s26_marks <argv file> — what of the package one recorded prompt holds
+_s26_marks() {
+  echo "begin=$(grep -c -- '----- BEGIN DIFF -----' "$1" 2>/dev/null || true):committed=$(grep -c 'S26-COMMITTED' "$1" 2>/dev/null || true):uncommitted=$(grep -c 'S26-UNCOMMITTED' "$1" 2>/dev/null || true):row=$(grep -c 'S26-ROW' "$1" 2>/dev/null || true):untracked=$(grep -cx "?${_S26_TAB}s26-untracked.py" "$1" 2>/dev/null || true):inventory=$(grep -cx "M${_S26_TAB}calc.py" "$1" 2>/dev/null || true)"
+}
+_S26_FAIL=""
+
+# integrity: an open lease, a fresh rebaseline, then the plant. ig runs the
+# skill as a Claude Code lead does (CLAUDE_PLUGIN_ROOT set); ic as a Codex lead
+# does: no CLAUDE_PLUGIN_ROOT, a project-tier copy of the skill under
+# .agents/skills/, the locator resolving through the plugin-root pointer (its
+# git ls-files reads the index, which queries core.fsmonitor)
+O=""
+for _T in ig ic; do
+  _s26_fixture "$_S26/$_T" "${_S26_ANALYST_CURSOR}${_S26_KIMI}"
+  O="${O}$( cd "$_S26/$_T" && export HOME="$_S26/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S26_PATH" TMPDIR="$_S26/tmp-$_T" TRIFORGE_LEASE_ROOT="$_S26/leases-$_T" \
+         && mkdir -p "$TMPDIR" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "integrity-${_T}:load-failed"; exit 0; }
+    lease_create "s26$_T" builder >/dev/null 2>&1 || echo "integrity-${_T}:create-failed"
+    lease_rebaseline >/dev/null 2>&1 || echo "integrity-${_T}:rebaseline-failed"
+    exit 0 )"
+  _s26_dirty "$_S26/$_T"
+  git -C "$_S26/$_T" config filter.s26.clean "sh -c 'touch $_S26/$_T-filter; cat'" || true
+  git -C "$_S26/$_T" config core.fsmonitor "$_S26/fsmon-$_T.sh" || true
+  printf '* filter=s26\n' >> "$_S26/$_T/.git/info/attributes" || true
+done
+mkdir -p "$_S26/ic/.agents/skills"
+cp -R "${REPO_ROOT}/skills/at-review" "$_S26/ic/.agents/skills/" 2>/dev/null || true
+printf '%s\n' "$REPO_ROOT" > "$_S26/ic/.agents/triforge-plugin-root.local"
+_s26_reset
+for _T in ig ic; do
+  _S26_LEAD="CLAUDE_PLUGIN_ROOT=$REPO_ROOT"
+  if [ "$_T" = ic ]; then _S26_LEAD="CLAUDE_PLUGIN_ROOT="; fi
+  O="${O}
+$( SD="SKILL_DIR=${REPO_ROOT}/skills/at-review"
+   if [ "$_T" = ic ]; then SD="SKILL_DIR=$_S26/ic/.agents/skills/at-review"; fi
+   R1=$(_s26_run "$_T" "$_S26/$_T" pre REVIEW_PKG= "$SD" "$_S26_LEAD")
+   # the preflight's triforge_bootstrap installs the agy pack (agy plugin and
+   # agents calls the stub records); the count below is the review's alone
+   _s26_reset
+   R2=$(_s26_run "$_T" "$_S26/$_T" pkg REVIEW_PKG= "$SD" "$_S26_LEAD"); P=$(_s26_pkg "$_T")
+   R4=$(_s26_run "$_T" "$_S26/$_T" core REVIEW_PKG="$P" "$SD" "$_S26_LEAD"); ER=$(_s26_emptyrun "$_T"); R5=$(_s26_run "$_T" "$_S26/$_T" opt REVIEW_PKG="$P" REVIEW_RUN="$ER" "$SD" "$_S26_LEAD")
+   echo "integrity-${_T}:pre=${R1}:pkg=${R2}:named=$(grep -c '\.git/config changed' "$_S26/$_T.pkg.err" 2>/dev/null || true):stopped=$(grep -c '^review: STOPPED' "$_S26/$_T.pkg.err" 2>/dev/null || true):pkgdir=$(_s26_pkgdirs "$_T"):core=${R4}:nopkg=$(grep -c '^review: no review package' "$_S26/$_T.core.err" 2>/dev/null || true):opt=${R5}:lanes=$(grep -c . "$ER/lanes" 2>/dev/null || true):runs=$(_s26_runs):personas=$(ls "$_S26/log" | grep -c '^persona' || true):filter=$( [ -e "$_S26/$_T-filter" ] && echo ran || echo no):fsmon=$( [ -e "$_S26/$_T-fsmon" ] && echo ran || echo no)" )"
+done
+_S26_FAIL="${_S26_FAIL}$(_self_expect integrity "$O" '^integrity-ig:pre=0:pkg=44:named=1:stopped=1:pkgdir=0:core=1:nopkg=1:opt=1:lanes=0:runs=0:personas=0:filter=no:fsmon=no$' \
+  '^integrity-ic:pre=0:pkg=44:named=1:stopped=1:pkgdir=0:core=1:nopkg=1:opt=1:lanes=0:runs=0:personas=0:filter=no:fsmon=no$')"
+
+# never-leased: the check returns 0 and writes nothing
+_s26_fixture "$_S26/nl" ""
+_s26_dirty "$_S26/nl"
+O=$( R=$(_s26_run nl "$_S26/nl" pkg REVIEW_PKG=)
+  echo "never-leased:pkg=${R}:ledger=$( [ -e "$_S26/nl/ops/leases.toml" ] && echo yes || echo none):state=$(ls "$_S26/leases-nl/lead" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect never-leased "$O" '^never-leased:pkg=0:ledger=none:state=gitconfig$')"
+
+# main: the analyst on cursor, the reviewer on codex, five optional members
+_s26_fixture "$_S26/mn" "${_S26_ANALYST_CURSOR}${_S26_KIMI}${_S26_MEMBERS}"
+_s26_dirty "$_S26/mn"
+O=$( _s26_reset
+  R=$(_s26_run mn "$_S26/mn" pre REVIEW_PKG=)
+  R=$(_s26_run mn "$_S26/mn" pkg REVIEW_PKG=); P=$(_s26_pkg mn)
+  echo "main-pkg:rc=${R}:untracked=$(grep -cx "?${_S26_TAB}s26-untracked.py" "$P/package.md" 2>/dev/null || true):said=$(grep -c 'Untracked files are listed by name only and are not in the diff' "$P/package.md" 2>/dev/null || true)"
+  echo 2 > "$_S26/cfg/barrier"
+  R=$(_s26_run mn "$_S26/mn" core REVIEW_PKG="$P"); RUN=$(_s26_rundir mn)
+  echo "main-learn:rc=${R}:spawn=$(grep -c '^learnings-researcher: dispatch' "$_S26/mn.core.out" 2>/dev/null || true):entry=$(grep -cx 'ops/solutions/s26-note.md' "$_S26/mn.core.out" 2>/dev/null || true)"
+  echo "main-persona:inject=$(grep -c 's26-persona\.sh' "$_S26/blocks/core.sh" 2>/dev/null || true):$(_s26_personas "$P" "$RUN")"
+  echo "main-core:rc=${R}:seen=$(cat "$_S26/log/cursor-agent.0.seen" 2>/dev/null || true),$(cat "$_S26/log/codex.0.seen" 2>/dev/null || true):prose=$(grep -c 'S26-CODEX-FINDING' "$_S26/mn/ops/REVIEW_CODEX.md" 2>/dev/null || true):verdict=$(grep -c 'S26-VERDICT' "$_S26/mn/ops/REVIEW_CODEX.md" 2>/dev/null || true)"
+  echo "main-core-prompt:$(_s26_marks "$(_s26_argv cursor-agent REVIEW_ANTIGRAVITY.md)")"
+  _s26_reset
+  echo 5 > "$_S26/cfg/barrier"
+  R=$(_s26_run mn "$_S26/mn" opt REVIEW_PKG="$P" REVIEW_RUN="$RUN")
+  S=""
+  for N in opencode kimi cursor-agent devin grok; do S="${S}${S:+,}$(cat "$_S26/log/$N.0.seen" 2>/dev/null || true)"; done
+  echo "main-opt:rc=${R}:seen=${S}:opencode-failed=$(grep -c '^review: opencode reviewer lane FAILED rc=1 ' "$_S26/mn.opt.err" 2>/dev/null || true):grok-failed=$(grep -c '^review: grok reviewer lane FAILED rc=' "$_S26/mn.opt.err" 2>/dev/null || true)"
+  for N in opencode kimi cursor-agent devin grok; do echo "main-opt-prompt-${N}:$(_s26_marks "$(_s26_argv "$N" 'REVIEW_<YOUR_CLI>.md')")"; done
+  echo "main-files:$(_s26_files "$_S26/mn")"
+  echo "main-lanes:$(paste -sd, "${RUN:-$_S26/none}/lanes" 2>/dev/null || true)"
+  rm -f "$_S26/cfg/barrier" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect main "$O" '^main-pkg:rc=0:untracked=1:said=1$' '^main-learn:rc=0:spawn=1:entry=1$' \
+  '^main-persona:inject=1:spawns=6:pkg=5:brief=6:learn=1:run=same$' \
+  '^main-lanes:ops/REVIEW_ANTIGRAVITY\.md,ops/REVIEW_CODEX\.md,ops/REVIEW_SECURITY_SENTINEL\.md,ops/REVIEW_PERFORMANCE_ORACLE\.md,ops/REVIEW_CODE_SIMPLICITY_REVIEWER\.md,ops/REVIEW_CONVENTION_ENFORCER\.md,ops/REVIEW_ARCHITECTURE_STRATEGIST\.md,ops/REVIEW_OPENCODE\.md,ops/REVIEW_KIMI\.md,ops/REVIEW_CURSOR\.md,ops/REVIEW_DEVIN\.md,ops/REVIEW_GROK\.md$' \
+  '^main-core:rc=0:seen=2,2:prose=1:verdict=1$' '^main-core-prompt:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
+  '^main-opt:rc=0:seen=5,5,5,5,5:opencode-failed=1:grok-failed=1$' \
+  '^main-opt-prompt-opencode:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
+  '^main-opt-prompt-kimi:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
+  '^main-opt-prompt-cursor-agent:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
+  '^main-opt-prompt-devin:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
+  '^main-opt-prompt-grok:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
+  '^main-files:REVIEW_ANTIGRAVITY,REVIEW_CODEX,REVIEW_CURSOR,REVIEW_DEVIN,REVIEW_KIMI$')"
+
+# codex-noschema: the output schema off, the last-message file still written
+# (its final answer, no Status line); codex-blocked: that answer ends in
+# Status: BLOCKED; codex-retry: the schema on, a first run that wrote its
+# verdict and then failed as a retry may fix, and a retry whose answer ends
+# in Status: BLOCKED
+printf 'output_schema\tstable\tfalse\n' > "$_S26/cfg/codex.features"
+O=$( _s26_reset
+  R=$(_s26_run mn2 "$_S26/mn" pkg REVIEW_PKG=); P=$(_s26_pkg mn2)
+  R=$(_s26_run mn2 "$_S26/mn" core REVIEW_PKG="$P")
+  echo "codex-noschema:rc=${R}:prose=$(grep -c 'S26-CODEX-FINDING' "$_S26/mn/ops/REVIEW_CODEX.md" 2>/dev/null || true):verdict=$(grep -c 'S26-VERDICT' "$_S26/mn/ops/REVIEW_CODEX.md" 2>/dev/null || true):last=$(ls "$_S26/tmp-mn2"/triforge-review.*/codex.txt.last 2>/dev/null | grep -c . || true)"
+  printf 'Could not review the package: S26-CODEX-BLOCKED.\nStatus: BLOCKED\n' > "$_S26/cfg/codex.ans"
+  R=$(_s26_run mn3 "$_S26/mn" pkg REVIEW_PKG=); P=$(_s26_pkg mn3)
+  R=$(_s26_run mn3 "$_S26/mn" core REVIEW_PKG="$P")
+  echo "codex-blocked:rc=${R}:files=$(_s26_files "$_S26/mn"):said=$(grep -c 'the codex lane reported Status: BLOCKED — not promoted' "$_S26/mn3.core.err" 2>/dev/null || true)"
+  : > "$_S26/cfg/codex.features"; : > "$_S26/cfg/codex.fail-first"; _s26_reset
+  R=$(_s26_run mn4 "$_S26/mn" pkg REVIEW_PKG=); P=$(_s26_pkg mn4)
+  R=$(_s26_run mn4 "$_S26/mn" core REVIEW_PKG="$P")
+  echo "codex-retry:rc=${R}:runs=$(grep -cx codex "$_S26/log/runs" 2>/dev/null || true):files=$(_s26_files "$_S26/mn"):said=$(grep -c 'the codex lane reported Status: BLOCKED — not promoted' "$_S26/mn4.core.err" 2>/dev/null || true)"
+  rm -f "$_S26/cfg/codex.ans" "$_S26/cfg/codex.fail-first" )
+: > "$_S26/cfg/codex.features"
+_S26_FAIL="${_S26_FAIL}$(_self_expect codex-noschema "$O" '^codex-noschema:rc=0:prose=1:verdict=0:last=1$' \
+  '^codex-blocked:rc=0:files=REVIEW_ANTIGRAVITY:said=1$' '^codex-retry:rc=0:runs=2:files=REVIEW_ANTIGRAVITY:said=1$')"
+
+# core-quote: the analyst on agy (core, no Status contract), whose answer
+# quotes a Status: BLOCKED line in a finding: promoted; core-last: an agy
+# answer whose last line is Status: BLOCKED: not promoted
+_s26_fixture "$_S26/cq" "$_S26_KIMI"
+_s26_dirty "$_S26/cq"
+O=$( _s26_reset
+  R=$(_s26_run cq "$_S26/cq" pkg REVIEW_PKG=); P=$(_s26_pkg cq)
+  printf '%s\n' '{"status":"SUCCESS","response":"Findings:\n- Status: BLOCKED is dropped without a retry hint → add one (S26-AGY-QUOTE)\n- [P3] calc.py:3 naming\nNo other findings.","denied_actions":[]}' > "$_S26/cfg/agy.ans"
+  R=$(_s26_run cq "$_S26/cq" core REVIEW_PKG="$P")
+  echo "core-quote:rc=${R}:agy=$(grep -c 'S26-AGY-QUOTE' "$_S26/cq/ops/REVIEW_ANTIGRAVITY.md" 2>/dev/null || true):said=$(grep -c 'lane reported Status' "$_S26/cq.core.err" 2>/dev/null || true)"
+  rm -f "$_S26/cq/ops/REVIEW_"*.md
+  printf '%s\n' '{"status":"SUCCESS","response":"Could not finish the review (S26-AGY-LAST).\nStatus: BLOCKED","denied_actions":[]}' > "$_S26/cfg/agy.ans"
+  R=$(_s26_run cq2 "$_S26/cq" core REVIEW_PKG="$P")
+  echo "core-last:rc=${R}:files=$(_s26_files "$_S26/cq"):said=$(grep -c 'the antigravity lane reported Status: BLOCKED — not promoted' "$_S26/cq2.core.err" 2>/dev/null || true)"
+  rm -f "$_S26/cfg/agy.ans" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect core-quote "$O" '^core-quote:rc=0:agy=1:said=0$' '^core-last:rc=0:files=REVIEW_CODEX:said=1$')"
+
+# interrupted: each helper that retries (agy, codex, opencode, kimi, cursor)
+# with its stub exiting 130, as a run a SIGINT stopped: rc 130,
+# deterministic, reason interrupted, one run
+O=$( cd "$_S26/cq" && export PATH="$_S26_PATH" HOME="$_S26/home" TMPDIR="$_S26/tmp-int" OPENROUTER_API_KEY=s26-stub \
+       && mkdir -p "$TMPDIR" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "interrupted:load-failed"; exit 0; }
+  for T in agy:invoke_antigravity:architecture-reviewer codex:invoke_codex:logic_reviewer opencode:invoke_opencode:reviewer \
+           kimi:invoke_kimi:reviewer cursor-agent:invoke_cursor:reviewer; do
+    N=${T%%:*}; F=${T#*:}; A=${F#*:}; F=${F%%:*}
+    _s26_reset
+    if [ -f "$_S26/cfg/$N.rc" ]; then mv "$_S26/cfg/$N.rc" "$_S26/cfg/$N.rc.keep"; fi
+    echo 130 > "$_S26/cfg/$N.rc"
+    R=0; INVOKE_FAILURE_CLASS=""; _INVOKE_FAILURE_REASON=""
+    "$F" "$A" "probe S26 interrupted" "$TMPDIR/$N.out" 60 > /dev/null 2>&1 || R=$?
+    echo "interrupted-${N}:rc=${R}:class=${INVOKE_FAILURE_CLASS}:reason=${_INVOKE_FAILURE_REASON}:runs=$(grep -cx "$N" "$_S26/log/runs" 2>/dev/null || true)"
+    rm -f "$_S26/cfg/$N.rc"
+    if [ -f "$_S26/cfg/$N.rc.keep" ]; then mv "$_S26/cfg/$N.rc.keep" "$_S26/cfg/$N.rc"; fi
+  done )
+_S26_FAIL="${_S26_FAIL}$(_self_expect interrupted "$O" '^interrupted-agy:rc=130:class=deterministic:reason=interrupted:runs=1$' \
+  '^interrupted-codex:rc=130:class=deterministic:reason=interrupted:runs=1$' '^interrupted-opencode:rc=130:class=deterministic:reason=interrupted:runs=1$' \
+  '^interrupted-kimi:rc=130:class=deterministic:reason=interrupted:runs=1$' '^interrupted-cursor-agent:rc=130:class=deterministic:reason=interrupted:runs=1$')"
+
+# rows: each [R] task whole in the package (its indented fields, at any
+# indent), no field of an unmarked task, and the header naming ops/TASKS.md
+# and ops/CONTRACTS.md by absolute path
+_s26_fixture "$_S26/rw" "$_S26_KIMI"
+( cd "$_S26/rw" && printf '# Contracts\nS26-CONTRACT\n' > ops/CONTRACTS.md && printf '%s\n' '# Tasks' '- [R] T1: add calc S26-ROW1' '      Role: builder' \
+    '      Accept: S26-ACCEPT1 pytest passes' '      Fails when: S26-FAILS1 any test fails' '' '- [ ] T2: unrelated S26-UNMARKED' '      Accept: S26-ACCEPT2 nothing' \
+    '- [R] T3: second S26-ROW3' '  Accept: S26-ACCEPT3 two-space indent' '- [ ] T4: next S26-NEXT' '      Accept: S26-ACCEPT4 none' > ops/TASKS.md ) || true
+O=$( _s26_reset
+  R=$(_s26_run rw "$_S26/rw" pkg REVIEW_PKG=); P=$(_s26_pkg rw)
+  RWD=$(cd "$_S26/rw" && pwd -P)
+  H=$(sed -n '1,/^## Changed files/p' "$P/package.md" 2>/dev/null || true)
+  _h() { printf '%s\n' "$H" | grep -c "$@" || true; }
+  echo "rows:rc=${R}:t1=$(_h -x -- '- \[R\] T1: add calc S26-ROW1'):accept1=$(_h -x '      Accept: S26-ACCEPT1 pytest passes'):fails1=$(_h -x '      Fails when: S26-FAILS1 any test fails'):role1=$(_h -x '      Role: builder'):accept3=$(_h -x '  Accept: S26-ACCEPT3 two-space indent'):unmarked=$(_h -E 'S26-UNMARKED|S26-ACCEPT2|S26-NEXT|S26-ACCEPT4'):tasks=$(_h -F "of ${RWD}/ops/TASKS.md with its indented fields"):contracts=$(_h -xF "The contracts these tasks rely on: ${RWD}/ops/CONTRACTS.md")" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect rows "$O" '^rows:rc=0:t1=1:accept1=1:fails1=1:role1=1:accept3=1:unmarked=0:tasks=1:contracts=1$')"
+
+# codex-lease: a codex builder lease on the real lane (the stub as codex),
+# whose transcript quotes a Status line after its answer: lease_collect takes
+# the report from the final answer (-o <out>.last) alone. done: the answer
+# says DONE, the quote BLOCKED -> review; missing: no Status in the answer,
+# the quote says DONE -> report missing (rc 80)
+_s26_fixture "$_S26/cl" '[roles.builder]\ncli = "codex"\nfallbacks = ["claude"]\n'
+O=$( cd "$_S26/cl" && export HOME="$_S26/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S26_PATH" TMPDIR="$_S26/tmp-cl" TRIFORGE_LEASE_ROOT="$_S26/leases-cl" CLAUDECODE=1 \
+       && mkdir -p "$TMPDIR" && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "codex-lease:load-failed"; exit 0; }
+  for T in s26cd:done s26cm:missing; do
+    K=${T%%:*}; M=${T#*:}
+    _s26_reset
+    if [ "$M" = done ]; then
+      printf 'Built it.\nStatus: DONE\nFiles changed: none\nTests: none\nConcerns: None\nDiscoveries for later tasks: None\n' > "$_S26/cfg/codex.ans"
+      printf 'exec: cat ops/old-report.md\nStatus: BLOCKED\n' > "$_S26/cfg/codex.tail"
+    else
+      printf 'Built it, and stopped before the report.\n' > "$_S26/cfg/codex.ans"
+      printf 'exec: cat ops/old-report.md\nStatus: DONE\n' > "$_S26/cfg/codex.tail"
+    fi
+    lease_create "$K" builder >/dev/null 2>&1 || { echo "codex-lease-${M}:create-failed"; continue; }
+    lease_dispatch "$K" "probe task S26 codex lease" 60 >/dev/null 2>&1 || { echo "codex-lease-${M}:dispatch-failed"; continue; }
+    _self_wait_rc "$K"
+    RC=0; lease_collect "$K" >/dev/null 2>&1 || RC=$?
+    OUT=$(_ledger_get "$K" output_file 2>/dev/null)
+    A=$(ls "$_S26/log"/codex.*.argv 2>/dev/null | head -1)
+    echo "codex-lease-${M}:collect=${RC}:$(_ledger_get "$K" state 2>/dev/null):report=$(_ledger_get "$K" report_status 2>/dev/null):o=$(grep -A1 -x -- -o "${A:-/none}" 2>/dev/null | tail -1 | grep -cxF "${OUT}.last" || true)"
+  done
+  rm -f "$_S26/cfg/codex.ans" "$_S26/cfg/codex.tail" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect codex-lease "$O" '^codex-lease-done:collect=0:review:report=DONE:o=1$' '^codex-lease-missing:collect=80:leased:report=MISSING:o=1$')"
+
+# core-blocked: the analyst on opencode (DONE), the reviewer on devin (BLOCKED)
+_s26_fixture "$_S26/cb" '[roles.analyst]\ncli = "opencode"\nfallbacks = ["claude"]\n\n[roles.reviewer]\ncli = "devin"\nfallbacks = ["codex"]\n\n[members.opencode]\nenabled = true\nmodel = "openrouter/z-ai/glm-5.3"\n[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\nconsent = "user 2026-10-07T00:00:00Z via=tty"\n'
+_s26_dirty "$_S26/cb"
+echo 0 > "$_S26/cfg/opencode.rc"
+printf 'Could not finish.\nStatus: BLOCKED\nFiles changed: none\nTests: none\nConcerns: S26 blocked\nDiscoveries for later tasks: None\n' > "$_S26/cfg/devin.ans"
+O=$( _s26_reset
+  R=$(_s26_run cb "$_S26/cb" pkg REVIEW_PKG=); P=$(_s26_pkg cb)
+  R=$(_s26_run cb "$_S26/cb" core REVIEW_PKG="$P")
+  echo "core-blocked:rc=${R}:files=$(_s26_files "$_S26/cb"):said=$(grep -c 'the devin lane reported Status: BLOCKED — not promoted' "$_S26/cb.core.err" 2>/dev/null || true)"
+  echo "core-blocked-prompt:$(_s26_marks "$(_s26_argv devin REVIEW_CODEX.md)")" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect core-blocked "$O" '^core-blocked:rc=0:files=REVIEW_ANTIGRAVITY:said=1$' \
+  '^core-blocked-prompt:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$')"
+
+# big: 40 added files, a diff over the cap
+_s26_fixture "$_S26/bg" "$_S26_KIMI"
+( cd "$_S26/bg" && export HOME="$_S26/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p big && python3 -c '
+for i in range(1, 41):
+    with open("big/f%02d.py" % i, "w") as f:
+        for j in range(150):
+            f.write("value_%02d_%03d = %d  # S26 filler line past the cap\n" % (i, j, j))
+' && git add big && git commit -qm big ) >/dev/null 2>&1 || true
+O=$( _s26_reset
+  R=$(_s26_run bg "$_S26/bg" pkg REVIEW_PKG=); P=$(_s26_pkg bg)
+  R2=$(_s26_run bg "$_S26/bg" opt REVIEW_PKG="$P" REVIEW_RUN="$(_s26_emptyrun bg)")
+  A=$(_s26_argv kimi 'REVIEW_<YOUR_CLI>.md')
+  FD=$(sed -n 's/.*The full diff, every file, is in \(.*full\.diff\): read it there\..*/\1/p' "$A" 2>/dev/null | head -1 || true)
+  PB=$(wc -c < "$P/package.md" 2>/dev/null | tr -d ' ' || true)
+  LG=$(cat "${A%.argv}.longest" 2>/dev/null || true)
+  echo "big:rc=${R}:opt=${R2}:inventory=$(grep -cE "^A${_S26_TAB}big/f[0-9][0-9]\.py$" "$A" 2>/dev/null || true):cut=$(grep -c '^Cut: ' "$A" 2>/dev/null || true):full=$(grep -c '^diff --git a/big/f' "${FD:-$_S26/none}" 2>/dev/null || true):pkg-under=$( [ "${PB:-999999}" -le 116000 ] 2>/dev/null && echo yes || echo no):argv-under=$( [ "${LG:-999999}" -lt 120000 ] 2>/dev/null && [ "${LG:-0}" -gt 0 ] 2>/dev/null && echo yes || echo no)" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect big "$O" '^big:rc=0:opt=0:inventory=40:cut=1:full=40:pkg-under=yes:argv-under=yes$')"
+
+# base: an explicit REVIEW_BASE naming no commit, a valid one, and a failed git diff
+_s26_fixture "$_S26/bs" "$_S26_KIMI"
+_s26_dirty "$_S26/bs"
+O=$( _s26_reset
+  R=$(_s26_run bsa "$_S26/bs" pkg REVIEW_PKG= REVIEW_BASE=s26-no-such-ref); P=$(_s26_pkg bsa)
+  R2=$(_s26_run bsa "$_S26/bs" opt REVIEW_PKG="$P" REVIEW_BASE=s26-no-such-ref REVIEW_RUN="$(_s26_emptyrun bsa)")
+  echo "base-invalid:pkg=${R}:named=$(grep -c "REVIEW_BASE='s26-no-such-ref' names no commit" "$_S26/bsa.pkg.err" 2>/dev/null || true):pkgdir=$(_s26_pkgdirs bsa):opt=${R2}:runs=$(_s26_runs)"
+  R=$(_s26_run bsb "$_S26/bs" pkg REVIEW_PKG= REVIEW_BASE=main); P=$(_s26_pkg bsb)
+  echo "base-valid:pkg=${R}:range=$(grep -c 'git diff from REVIEW_BASE main (' "$P/package.md" 2>/dev/null || true)"
+  B=$(git -C "$_S26/bs" rev-parse main:calc.py 2>/dev/null || true)
+  OBJ="$_S26/bs/.git/objects/$(printf '%s' "$B" | cut -c1-2)/$(printf '%s' "$B" | cut -c3-)"
+  chmod 000 "$OBJ" 2>/dev/null || true
+  if [ -r "$OBJ" ]; then
+    echo "base-diff-fail:unreadable-object-readable"
+  else
+    R=$(_s26_run bsc "$_S26/bs" pkg REVIEW_PKG=); P=$(_s26_pkg bsc)
+    R2=$(_s26_run bsc "$_S26/bs" opt REVIEW_PKG="$P" REVIEW_RUN="$(_s26_emptyrun bsc)")
+    echo "base-diff-fail:pkg=${R}:named=$(grep -c 'failed (git rc 128)' "$_S26/bsc.pkg.err" 2>/dev/null || true):pkgdir=$(_s26_pkgdirs bsc):opt=${R2}:runs=$(_s26_runs)"
+  fi
+  chmod 644 "$OBJ" 2>/dev/null || true )
+_S26_FAIL="${_S26_FAIL}$(_self_expect base "$O" '^base-invalid:pkg=1:named=1:pkgdir=0:opt=1:runs=0$' '^base-valid:pkg=0:range=1$' \
+  '^base-diff-fail:(pkg=1:named=1:pkgdir=0:opt=1:runs=0|unreadable-object-readable)$')"
+
+_S26_CAP="at-review's blocks run verbatim (R23, R24, KTD18): the lead's integrity check before the skill's first git call (a planted filter or fsmonitor never runs; no package, so no lane), one review package per cycle for every lane, the specialist personas included (each [R] task with its fields, the inventory with untracked files by name, the inline diff within the cap, the full diff in a file the prompt names; an invalid REVIEW_BASE or a failed git call stops the review), promotion on the CLI's final answer (an optional lane only on rc 0 and DONE; never BLOCKED in a core role, read from a core answer's last line; Codex's last-message file on every attempt, its quoted tool output ignored, in the lease lane too), no retry of an interrupted run, and the lanes in parallel"
+if [ -z "$_S26_FAIL" ]; then
+  row "SELF-26" "claude" "$_S26_CAP" "PASS" "integrity (Claude Code layout, and the Codex layout: project-tier copy, locator through the pointer): lease + rebaseline + clean filter and fsmonitor in .git/config -> preflight 0, package block rc 44 naming .git/config, no package, dispatch (learnings gate inside) and optional blocks refuse, 0 lane runs, 0 personas, no run directory, filter and fsmonitor never ran; never leased: rc 0, no ledger, lead dir = gitconfig; main: untracked file listed and the not-diffed note; learnings match through the untracked path; 5 specialists + learnings-researcher started (persona recorders) in one run directory, the specialists on package.md, every brief naming full.diff; the lane list: 2 core, 5 persona, 5 optional lanes;core lanes released together, REVIEW_ANTIGRAVITY (cursor) and REVIEW_CODEX (prose + verdict) though the codex transcript quotes Status: BLOCKED; cursor's core prompt holds the package; optional lanes released together (5/5), each prompt with both changes, the [R] row, the untracked name, the inventory and the diff; REVIEW_CURSOR/DEVIN/KIMI only, opencode (DONE, exit 1) and grok (DONE, max_tokens) FAILED; codex with the schema off still writes its last-message file and is promoted from it, an answer ending in Status: BLOCKED is not, nor a retry's BLOCKED answer after a first run that wrote a verdict (2 runs); an agy answer quoting Status: BLOCKED in a finding promoted, one ending in it not; agy, codex, opencode, kimi and cursor exiting 130 -> rc 130 interrupted, one run each; the package holds each [R] task with its indented fields, no unmarked task, and names ops/TASKS.md and ops/CONTRACTS.md by absolute path; a codex builder lease runs with -o <out>.last and lease_collect reads its report there (DONE -> review over a quoted BLOCKED, no Status -> rc 80 over a quoted DONE); devin BLOCKED as reviewer not promoted, its prompt holds the package; 40-file diff over the cap: inventory 40, cut, full.diff 40, package <= 116000, kimi argv < 120000; REVIEW_BASE naming no commit and git diff rc 128 stop the review (rc 1, no package, no lane); REVIEW_BASE=main named" "static"
+else
+  row "SELF-26" "claude" "$_S26_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S26_FAIL"):$(printf '%s' "$_S26_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S26"
+
 # SELF-22 (KTD1, KTD14 — R21, R44; U14): a Codex lead in fixtures. The hook
 # payloads are shaped as CDX-21 recorded them from codex exec 0.160 (the shell
 # tool reported as tool_name Bash with tool_input.command, apply_patch as
@@ -7261,7 +9133,12 @@ rm -rf "$_S22"
 # when named in S23_SLOW, else at once) and persona_wait returns 75 while one
 # it names has no exit code, and 64, as the real one does, for a run dir with
 # no runs or an unknown name; dispatch_role, invoke_antigravity and _scrub are
-# stubs too. Review cases: all lanes; no specialists and no learnings match
+# stubs too, and resolve_role, cli_field and _lease_parse_status answer the
+# dispatch block's promotion check for the core roles. Each review case hands
+# the dispatch block a review package directory (REVIEW_PKG: package.md and
+# the inventory its learnings gate reads); the specialists must take
+# package.md as their input and every brief must name its full.diff. Review
+# cases: all lanes; no specialists and no learnings match
 # (the lead deleted the _spec lines; no persona starts, so the wait block
 # skips persona_wait); a failing specialist and an empty one (the wait block
 # fails naming it); a core lane that wrote nothing (synthesis wait exits 3,
@@ -7336,6 +9213,12 @@ invoke_antigravity() {
   printf 'ANALYSIS of the current topic\n' > "$3"; echo SUCCESS > "$3.status"
 }
 _scrub() { cat; }
+# the review dispatch block's promotion check (_promote_ok) reads the role's
+# CLI and its tier: the shipped core roles, whose stub answers carry no
+# Status line (the real parser prints MISSING for them)
+resolve_role() { case "$1" in analyst) printf 'antigravity\t-\t-\n' ;; *) printf 'codex\t-\t-\n' ;; esac; }
+cli_field() { echo core; }
+_lease_parse_status() { echo MISSING; }
 S23STUB
 # _s23_x <md> <n> — the n-th ```bash fence of <md>
 _s23_x() {
@@ -7391,8 +9274,12 @@ _s23_review() { # _s23_review <case> <shell> [VAR=value...]
     && echo 'def widget(): return 2' > src/widget.py && git commit -qam change ) >/dev/null 2>&1 || true
   # off, offfail: no specialists and no learnings match, so the cycle starts no persona
   case "$C" in off|offfail) DB=rdispatch-off ;; *) echo 'widget.py must keep returning an int' > "$P/ops/solutions/widget.md" ;; esac
-  printf 'REVIEW PACKAGE\n' > "$P/package.md"
-  ( export S23_LOG="$P/calls" SKILL_DIR="$_S23/skill" TMPDIR="$P" REVIEW_PACKAGE="$P/package.md" "$@"
+  # the review package the review-package block would have built: package.md
+  # and the inventory the learnings gate reads (the commit's one changed file)
+  mkdir -p "$P/pkg" && chmod 700 "$P/pkg"
+  printf 'REVIEW PACKAGE\n' > "$P/pkg/package.md"
+  printf 'M\tsrc/widget.py\n' > "$P/pkg/inventory.txt"
+  ( export S23_LOG="$P/calls" SKILL_DIR="$_S23/skill" TMPDIR="$P" REVIEW_PKG="$P/pkg" "$@"
     local D W=- Y=- YW=- RUN Y2=- KEEP=-
     D=$(_s23_blk "$SH" "$DB" "$P")
     RUN=$(sed -n 's/^review: run directory \([^ ]*\) .*/\1/p' "$P/out-$DB" | head -1)
@@ -7421,6 +9308,11 @@ _s23_review() { # _s23_review <case> <shell> [VAR=value...]
       "$(grep -c 'could NOT all be stopped' "$P/out-all" 2>/dev/null || true)" "$(grep -c 'stub persona_stop: unresolved cleanup' "$P/out-all" 2>/dev/null || true)" \
       "$(grep -c 'were stopped' "$P/out-all" 2>/dev/null || true)" "$(grep -c 'no persona had started' "$P/out-all" 2>/dev/null || true)" \
       "$(grep -c '^persona_stop ' "$P/calls" 2>/dev/null || true)"
+    # pkg: specialists started on the package (package.md as the input) and
+    # briefs naming its full.diff, synthesis left out
+    printf '%s:%s:pkg:in=%s:brief=%s\n' "$C" "$(basename "$SH")" \
+      "$(grep '^persona_spawn ' "$P/calls" 2>/dev/null | grep -v ' synthesis ' | grep -cF " $P/pkg/package.md " || true)" \
+      "$(grep '^persona_spawn ' "$P/calls" 2>/dev/null | grep -v ' synthesis ' | grep -cF "$P/pkg/full.diff" || true)"
     printf '%s:%s:dispatch=%s:wait=%s:syn=%s:synwait=%s:ops=%s:gap=%s:learn=%s:partial=%s:rerun=%s:bad=%s:err=%s\n' "$C" "$(basename "$SH")" "$D" "$W" "$Y" "$YW" \
       "$(cd "$P/ops" && find . -maxdepth 1 -name 'REVIEW_*.md' | sed 's#^./REVIEW_##; s#\.md$##' | LC_ALL=C sort | paste -sd, -)" \
       "$(grep -c 'MISSING OR EMPTY' "$RUN/synthesis-input.md" 2>/dev/null || true)" \
@@ -7508,6 +9400,7 @@ for _S23_SH in $_S23_SHELLS; do
     "^dslow:${_S23_N}:swarm=0:wait=(75/)+0:syn=0:synwait=(75/)+0:failed=:analyst=0:.*:rerun=[1-9][0-9]*:bad=0$" \
     "^all:${_S23_N}:x:roles=1/1:spawns=6:syn2=-:synspawns=1:refused=0:keep=-$" \
     "^off:${_S23_N}:x:roles=1/1:spawns=0:syn2=-:synspawns=1:refused=0:keep=-$" \
+    "^all:${_S23_N}:pkg:in=5:brief=6$" "^off:${_S23_N}:pkg:in=0:brief=0$" \
     "^missing:${_S23_N}:x:roles=1/1:spawns=6:" \
     "^resyn:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=(75/)*0:${_S23_ALL}:gap=0:.*:bad=0:err=$" \
     "^resyn:${_S23_N}:x:roles=1/1:spawns=6:syn2=1:synspawns=1:refused=1:keep=1$" \

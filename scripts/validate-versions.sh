@@ -40,7 +40,10 @@
 #      the documented fields with the right types: tier core|optional, lane
 #      shell|subagent, env_keys as EXACT variable names — any wildcard other
 #      than the documented KIMI_* fails — and `lead` either {} or exactly the
-#      nine KTD1 fields. The role table is the single DEFAULTS literal
+#      nine KTD1 fields. role_limit and opt_in_roles name DEFAULTS roles,
+#      never the same role twice, opt_in_roles only beside a role_limit, and a
+#      core CLI carries neither a role_limit nor consent (every chain ends at
+#      one). The role table is the single DEFAULTS literal
 #      (_ROLE_DEFAULTS_PY) in scripts/lib/roster.sh: each role's cli must be
 #      registered, its model must equal that CLI's registry model, and its
 #      chain must end at a core member; roster.sh must splice the registry and
@@ -325,7 +328,7 @@ WILDCARDS_OK = ("KIMI_*",)
 FIELDS = {
     "name": str, "tier": str, "binary": str, "binary_env": str, "resolver": str, "version_re": str,
     "model": str, "model_env": str, "install": str, "login": str, "env_keys": list, "lane": str,
-    "egress": str, "lead": dict,
+    "egress": str, "role_limit": list, "opt_in_roles": list, "consent": bool, "lead": dict,
 }
 LEAD_FIELDS = {
     "launch_argv": str, "model_argv": str, "effort_argv": str, "full_access": bool, "wait_budget_s": int, "tool_vocab_read": str, "tool_vocab_action": str,
@@ -499,6 +502,29 @@ if src is not None:
         if copy_re.match(ln):
             fails.append(src_path + ":" + str(n) + ": literal copy of registry data (" + ln.strip()[:60] + ") — derive it from CLIS")
     if role_defaults is not None and clis is not None:
+        # role limits and opt-ins (R24): DEFAULTS roles only, opt-ins only
+        # outside a limit, and no limit or consent on a core CLI
+        lim_fail = False
+        for cli, e in clis.items():
+            lim = e.get("role_limit", []) if isinstance(e.get("role_limit"), list) else []
+            opt = e.get("opt_in_roles", []) if isinstance(e.get("opt_in_roles"), list) else []
+            where = reg_path + ": registry entry " + repr(cli)
+            for r in lim + opt:
+                if r not in role_defaults:
+                    fails.append(where + ": role " + repr(r) + " in role_limit/opt_in_roles is not a DEFAULTS role (" + ", ".join(role_defaults) + ")")
+                    lim_fail = True
+            if len(set(lim + opt)) != len(lim + opt):
+                fails.append(where + ": role_limit and opt_in_roles name a role twice")
+                lim_fail = True
+            if opt and not lim:
+                fails.append(where + ": opt_in_roles without a role_limit — an unlimited CLI takes every role already")
+                lim_fail = True
+            if e.get("tier") == "core" and (lim or e.get("consent") is True):
+                fails.append(where + ": a core CLI carries no role_limit or consent — every fallback chain ends at one")
+                lim_fail = True
+        if not lim_fail:
+            limited = [c + "(" + "+".join(e["role_limit"]) + ")" for c, e in clis.items() if e.get("role_limit")]
+            oks.append(reg_path + " role limits: " + (", ".join(limited) or "none") + "; consent: " + (", ".join(c for c, e in clis.items() if e.get("consent") is True) or "none"))
         role_fail = False
         for role, d in role_defaults.items():
             if not isinstance(d, dict):

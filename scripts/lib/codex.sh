@@ -123,9 +123,9 @@ invoke_codex() {
   # carries the Triforge-level `output_schema` key, resolve the schema file at
   # the plugin tier (`${_TRIFORGE_PLUGIN_ROOT}/codex-agents/` — nothing ever
   # deployed a project copy, and `.codex/agents/` is now Codex's role-file
-  # sweep, D-026) and pass
-  # --output-schema plus -o so the schema-valid final message lands in
-  # ${OUTPUT_FILE}.last. Feature-gated only if `codex features list` carries
+  # sweep, D-026) and pass --output-schema, so the final message -o writes to
+  # ${OUTPUT_FILE}.last (every attempt, below) is schema-valid. Feature-gated
+  # only if `codex features list` carries
   # a row named like output_schema/structured_output; 0.144.4 has no such
   # row and CDX-05 proves the flag works there, so absent a row we just
   # attempt the flag.
@@ -147,14 +147,21 @@ invoke_codex() {
     fi
   fi
 
-  # BASE_CMD carries everything retry-safe (model pin, sandbox, approval).
+  # -o: every attempt, the retry and a schema-off run included, writes its
+  # final answer to ${OUTPUT_FILE}.last, emptied before the attempt so no
+  # earlier answer survives one that writes none. ${OUTPUT_FILE} is the whole
+  # session, tool output included, so the final answer is what a caller
+  # judges (at-review's promotion reads its Status line there). -o is older
+  # than the Codex floor, 0.153.0 (CDX-05 ran it on 0.144.4).
+  # BASE_CMD carries everything retry-safe (model pin, sandbox, approval, -o).
   # Schema flags are first-attempt only: a schema-caused rejection
   # (e.g. 400 invalid_json_schema) would fail identically on retry, so the
   # retry drops agent augmentation — instructions prefix AND schema —
   # mirroring invoke_antigravity's retry-with-raw-prompt.
+  CMD+=(-o "${OUTPUT_FILE}.last")
   local BASE_CMD=("${CMD[@]}")
   if [ -n "$SCHEMA_PATH" ]; then
-    CMD+=(--output-schema "$SCHEMA_PATH" -o "${OUTPUT_FILE}.last")
+    CMD+=(--output-schema "$SCHEMA_PATH")
     SCHEMA_APPLIED=1
   fi
 
@@ -171,6 +178,7 @@ ${PROMPT}"
   # `< /dev/null` is mandatory: codex exec reads piped stdin ("Reading
   # additional input from stdin...") and hangs waiting for EOF whenever the
   # caller's stdin is not a TTY (probe record 2026-07-17).
+  : > "${OUTPUT_FILE}.last" 2>/dev/null || true
   _run_with_timeout "${TIMEOUT}" "${_HOST_SCRUB[@]}" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUTPUT_FILE" 2>&1 || EXIT_CODE=$?
 
   # KTD-9: same taxonomy as invoke_antigravity — classify before reacting;
@@ -200,6 +208,7 @@ ${PROMPT}"
         echo "invoke_codex: agent=${AGENT_NAME} exit=${EXIT_CODE} (retryable), retrying with raw prompt" >&2
         EXIT_CODE=0
         SCHEMA_APPLIED=0
+        : > "${OUTPUT_FILE}.last" 2>/dev/null || true
         _run_with_timeout "${TIMEOUT}" "${_HOST_SCRUB[@]}" "${BASE_CMD[@]}" "$PROMPT" < /dev/null > "${OUTPUT_FILE}.retry" 2>&1 || EXIT_CODE=$?
         if [ "$EXIT_CODE" -eq 0 ]; then
           mv "${OUTPUT_FILE}.retry" "$OUTPUT_FILE"

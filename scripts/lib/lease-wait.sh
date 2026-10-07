@@ -441,7 +441,9 @@ _CLAUDE_TOOLS_EDIT="Bash,Read,Edit,Write,Glob,Grep,NotebookEdit,Skill"
 _CLAUDE_ALLOW_EDIT="Bash,Skill"
 _CLAUDE_TOOLS_READ="Read,Grep,Glob"
 _CLAUDE_TOOLS_WEB="WebFetch,WebSearch"
-_CLAUDE_CRED_PATHS="~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.git-credentials ~/.config/gh ~/.config/gcloud ~/.azure ~/.kube ~/.docker/config.json ~/.codex ~/.gemini ~/.kimi-code ~/.local/share/opencode ~/.cursor ~/.grok ~/.devin ~/.config/devin ~/.claude/.credentials.json"
+# Devin CLI 3000.x keeps its token in its XDG data dir, credentials.toml
+# (~/.local/share/devin; `devin auth status` names the file; CC-25)
+_CLAUDE_CRED_PATHS="~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.git-credentials ~/.config/gh ~/.config/gcloud ~/.azure ~/.kube ~/.docker/config.json ~/.codex ~/.gemini ~/.kimi-code ~/.local/share/opencode ~/.cursor ~/.grok ~/.devin ~/.config/devin ~/.claude/.credentials.json ~/.local/share/devin"
 
 # _claude_sandbox_floor_ok — 0 when the claude worker lane may run here: its
 # sandbox is off (TRIFORGE_CLAUDE_SANDBOX=off: no OS confinement, the
@@ -601,18 +603,24 @@ _CODEX_ENV_POLICY=(-c 'shell_environment_policy.inherit="all"' -c 'shell_environ
                    -c 'shell_environment_policy.exclude=[]' -c 'shell_environment_policy.include_only=[]'
                    -c 'shell_environment_policy.set={}')
 
-# _lease_lane_argv <cli> <model> <effort> <dispatch-model> <kimi-agent-file>
+# _lease_lane_argv <cli> <model> <effort> <dispatch-model> <lane-arg>
 #   <cursor-bin> <worktree> <timeout-s> [<git-common-dir> <resume-id>] — set
 # _LEASE_LANE_ARGV to the lane's command line up to the prompt, which the
 # caller appends (agy and kimi end in
-# -p, whose value it is; the others take it as the trailing positional); rc 1
-# for a CLI with no arm. The one place each lane's argv is composed:
+# -p, whose value it is; the others take it as the trailing positional); rc 3
+# for a CLI with no arm, any other nonzero when an arm could not compose its
+# command (the devin arm names the cause in _LEASE_LANE_ERR). <lane-arg> is
+# the lane's own value from
+# lease_dispatch: codex's last-message file, kimi's agent file, devin's config
+# copy, grok's class. The
+# one place each lane's argv is composed:
 # _lease_builder_run runs it under _adapter_env, and the probe's worker-marker
 # rows (CC-13, AGY-17, OC-09, KIMI-10, CUR-13, and CDX-16, CDX-17 and SELF-15c
-# through the codex flags) read it through the loader, so they run the lane's
-# own flags. The invoke_* helpers are shell functions and can't cross env -i,
-# so each arm composes the adapter's command core directly, and the role brief
-# rides in the prompt (lease_dispatch) for every lane but kimi.
+# through the codex flags; the GRK rows and SELF-06g) read it through the
+# loader, so they run the lane's own flags. The invoke_* helpers are shell
+# functions and can't cross env -i, so each arm composes the adapter's command
+# core directly, and the role brief rides in the prompt (lease_dispatch) for
+# every lane but kimi.
 #   claude       the edit class of _claude_lane_argv (cwd IS the worktree, so
 #                no --add-dir): the lead's <git-common-dir> unwritable, the
 #                session <resume-id> on a fix cycle
@@ -622,7 +630,10 @@ _CODEX_ENV_POLICY=(-c 'shell_environment_policy.inherit="all"' -c 'shell_environ
 #                so without them a builder could cross into sibling worktrees
 #                or the lease root (R35: writes restricted to the lease
 #                worktree); the tool shell's env policy (_CODEX_ENV_POLICY);
-#                -m and model_reasoning_effort only when set
+#                -m and model_reasoning_effort only when set; -o <lane-arg> when
+#                lease_dispatch names one (<out>.last): codex's final answer
+#                alone, the file lease_collect reads the report from, since
+#                <out> also holds the tool output
 #   antigravity  always the model pin (AE2: agy's own default is a Medium
 #                variant), --add-dir the worktree, --print-timeout, the JSON
 #                envelope (KTD2, D-032), -p
@@ -642,8 +653,40 @@ _CODEX_ENV_POLICY=(-c 'shell_environment_policy.inherit="all"' -c 'shell_environ
 #                --force (edits without confirmation, inside the worktree).
 #                Confinement is the worktree and the env allowlist, not
 #                --sandbox (CUR-07: an absolute-path write escaped it)
+#   devin        _devin_argv (scripts/lib/devin.sh): --config <the lane arg,
+#                the per-dispatch copy>, the model pin, --permission-mode by
+#                the copy's class (dangerous for .edit.json, an opted-in
+#                builder; auto, read-only tools only, for a reviewer or
+#                analyst lease), workspace trust off
+#                (-p fails in an untrusted directory), -p last. SHELL never
+#                crosses env -i, so Devin imports no login-shell exports
+#                (DVN-04). A missing copy is a compose failure, never a run,
+#                and so is a read-class worktree whose .devin/ or .cognition/
+#                files would widen it (_devin_project_guard names the file);
+#                _lease_builder_run logs the command line and removes the
+#                copy after the run (Devin writes its org id into it)
+#   grok         _grok_argv (scripts/lib/grok.sh) in the class the lane arg
+#                carries (lease_dispatch: _grok_class of the lease role):
+#                edit, the triforge-edit sandbox profile (workspace with the
+#                GROK_HOME denies; lease_dispatch writes it into the worktree
+#                first) and the edit tools, for a builder, tester or
+#                documenter lease; read, the read-only sandbox with
+#                Read and Grep only and Edit, Write and Bash denied, for
+#                anything else. Either way the env prefix that turns grok's
+#                Claude Code and Cursor discovery off, the model pin, --effort
+#                when set, streaming-json, dontAsk with the allow and deny sets
+#                (every MCP tool denied), and the GROK_CONFIG overlay that
+#                keeps the tool shell to the boundary's names; -p last (the
+#                prompt is its value). The read class first runs its whole
+#                provisioning check again (_grok_lease_config <wt> read): a
+#                worktree that holds project hooks, an LSP server, plugins or
+#                MCP servers of its own, or a user config layer that does
+#                not parse, is a compose failure, never a run (the refusal
+#                names the file); the plugin and MCP tables are rebuilt from
+#                a fresh inspect, and the NOTE line naming the user's own
+#                grok hooks and settings that run goes to stderr
 _lease_lane_argv() {
-  local CLI=$1 MODEL=$2 EFFORT=$3 DMODEL=$4 KAF=$5 CBIN=$6 WT=$7 TIMEOUT=$8
+  local CLI=$1 MODEL=$2 EFFORT=$3 DMODEL=$4 LANE_ARG=$5 CBIN=$6 WT=$7 TIMEOUT=$8
   case "$CLI" in
     claude)
       _claude_lane_argv edit "$MODEL" "$EFFORT" "${10:-}" "${9:-}" || return 1
@@ -654,6 +697,7 @@ _lease_lane_argv() {
                         -c 'sandbox_workspace_write.exclude_slash_tmp=true' "${_CODEX_ENV_POLICY[@]}")
       if [ -n "$MODEL" ]; then _LEASE_LANE_ARGV+=(-m "$MODEL"); fi
       if [ -n "$EFFORT" ]; then _LEASE_LANE_ARGV+=(-c "model_reasoning_effort=\"${EFFORT}\""); fi
+      if [ -n "$LANE_ARG" ]; then _LEASE_LANE_ARGV+=(-o "$LANE_ARG"); fi
       ;;
     antigravity)
       _LEASE_LANE_ARGV=(agy --model "$DMODEL" --add-dir "$WT" --print-timeout "${TIMEOUT}s" --output-format json -p)
@@ -664,20 +708,63 @@ _lease_lane_argv() {
       ;;
     kimi)
       _LEASE_LANE_ARGV=(env KIMI_DISABLE_TELEMETRY=1 kimi --output-format stream-json -m "$DMODEL")
-      if [ -n "$KAF" ]; then _LEASE_LANE_ARGV+=(--agent-file "$KAF"); fi
+      if [ -n "$LANE_ARG" ]; then _LEASE_LANE_ARGV+=(--agent-file "$LANE_ARG"); fi
       _LEASE_LANE_ARGV+=(-p)
       ;;
     cursor)
       _LEASE_LANE_ARGV=("$CBIN" -p --output-format stream-json --model "$DMODEL" --trust --force)
       ;;
+    devin)
+      # <lane-arg> is the per-dispatch config copy (lease_dispatch); an
+      # .edit.json copy is the builder class, anything else read-only. No
+      # copy, no run: Devin never starts on a config the lane did not write
+      if [ -z "$LANE_ARG" ] || [ ! -f "$LANE_ARG" ]; then
+        _LEASE_LANE_ERR="devin config copy missing (${LANE_ARG:-none named}); lease_dispatch writes one per dispatch"
+        return 1
+      fi
+      case "$LANE_ARG" in
+        *.edit.json) _devin_argv edit "$LANE_ARG" "$DMODEL" ;;
+        *)
+          # Devin merges the worktree's .devin/ and .cognition/ files over
+          # the copy, so a read-class lease never starts on one that widens it
+          if ! _LEASE_LANE_ERR=$(_devin_project_guard "$WT"); then
+            _LEASE_LANE_ERR=${_LEASE_LANE_ERR:-"the worktree's .devin/ and .cognition/ check failed to run"}
+            return 1
+          fi
+          _devin_argv read "$LANE_ARG" "$DMODEL"
+          ;;
+      esac
+      _LEASE_LANE_ARGV=("${_DEVIN_ARGV[@]}")
+      ;;
+    grok)
+      # <lane-arg> is the class; an empty or unknown one runs read-only. A
+      # read-class lease never starts where the worktree supplies code grok
+      # would start before any permission applies: its whole provisioning
+      # check runs again here, right before the launch (_grok_lease_config
+      # <wt> read: the project guard, the user config layers, and the plugin
+      # and MCP tables rebuilt from a fresh inspect), so a project hook or a
+      # server added after the lease was made never starts in it. The check's
+      # NOTE line, naming what the user's own grok configuration runs in the
+      # session, goes to stderr (the builder log)
+      if [ "$LANE_ARG" != edit ]; then
+        if ! _LEASE_LANE_ERR=$(_grok_lease_config "$WT" read 2>&1); then
+          _LEASE_LANE_ERR=${_LEASE_LANE_ERR:-"the grok read-class isolation check failed to run"}
+          return 1
+        fi
+        if [ -n "$_LEASE_LANE_ERR" ]; then printf '%s\n' "$_LEASE_LANE_ERR" >&2; fi
+        _LEASE_LANE_ERR=""
+      fi
+      _grok_argv "${LANE_ARG:-read}" "$DMODEL" "$EFFORT" || return 1
+      _LEASE_LANE_ARGV=("${_GROK_ARGV[@]}")
+      ;;
     *)
-      return 1
+      return 3   # no arm (_lease_builder_run: not integrated)
       ;;
   esac
   return 0
 }
 
-# _lease_builder_run <cli> <model> <effort> <dispatch-model> <kimi-agent-file>
+# _lease_builder_run <cli> <model> <effort> <dispatch-model> <lane-arg>
 #   <cursor-bin> <timeout-bin> <timeout-s> <out> <worktree> <env-keys>
 #   <test-builder> <prompt> [<git-common-dir> <resume-id>]
 # The detached builder's body: from the worktree, the lane command for <cli>
@@ -691,10 +778,12 @@ _lease_lane_argv() {
 # <out>.class (no requeue). The claude lane's JSON envelope, the seam's
 # included, is split by _lease_claude_envelope into the result text (<out>)
 # and the record lease_collect reads (<out>.envelope); with no envelope, the
-# run's stderr is appended to <out>.
+# run's stderr is appended to <out>. Before any run: rc 95 for a CLI with no
+# lane arm (not integrated), rc 94 (deterministic) for an arm that could not
+# compose its command, each with its own line in <out>.
 _lease_builder_run() {
-  local CLI=$1 MODEL=$2 EFFORT=$3 DISPATCH_MODEL=$4 KIMI_AGENT_FILE=$5 CBIN=$6 TOBIN=$7 TIMEOUT=$8 OUT=$9
-  local WT=${10} TEST_BUILDER=${12} FULL_PROMPT=${13} COMMON=${14:-} RESUME=${15:-} RC=0 CLASS_SET=0 AGY_PRC=0 SBX_REFUSED=0
+  local CLI=$1 MODEL=$2 EFFORT=$3 DISPATCH_MODEL=$4 LANE_ARG=$5 CBIN=$6 TOBIN=$7 TIMEOUT=$8 OUT=$9
+  local WT=${10} TEST_BUILDER=${12} FULL_PROMPT=${13} COMMON=${14:-} RESUME=${15:-} RC=0 CLASS_SET=0 AGY_PRC=0 SBX_REFUSED=0 LRC=0
   local -a TO
   _ADAPTER_ENV_KEYS=${11}   # the registry read lease_dispatch did; _adapter_env reads none
   cd "$WT" || return 97
@@ -705,12 +794,21 @@ _lease_builder_run() {
   # ignores TERM is killed _LEASE_KILL_AFTER_S later, so the builder enforces
   # its own deadline even with no lead around.
   TO=("$TOBIN" --foreground -k "${_LEASE_KILL_AFTER_S}s" "${TIMEOUT}s")
+  if [ -z "$TEST_BUILDER" ]; then
+    _LEASE_LANE_ERR=""
+    _lease_lane_argv "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$LANE_ARG" "$CBIN" "$WT" "$TIMEOUT" "$COMMON" "$RESUME" || LRC=$?
+  fi
   if [ -n "$TEST_BUILDER" ]; then
     # Test seam (see lease_dispatch): deterministic fake builder.
     _adapter_env "$CLI" "${TO[@]}" "$TEST_BUILDER" "$FULL_PROMPT" > "$OUT" 2>&1 || RC=$?
-  elif ! _lease_lane_argv "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$KIMI_AGENT_FILE" "$CBIN" "$WT" "$TIMEOUT" "$COMMON" "$RESUME"; then
+  elif [ "$LRC" -eq 3 ]; then
     echo "lease_dispatch: ERROR builder CLI '${CLI}' has no dispatch arm here — not integrated. Registered CLIs: $(_known_clis '<registry unreadable>')." > "$OUT"
     RC=95
+  elif [ "$LRC" -ne 0 ]; then
+    # An arm that could not compose its command: its own cause (rc 94,
+    # deterministic), never "not integrated"; nothing ran
+    echo "lease_dispatch: ERROR the ${CLI} lane could not compose its command: ${_LEASE_LANE_ERR:-its argv composer failed (see ${OUT}.log)} — nothing ran" > "$OUT"
+    RC=94; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1
   else
     case "$CLI" in
       antigravity)
@@ -761,6 +859,39 @@ _lease_builder_run() {
           fi
         fi
         ;;
+      grok)
+        # A turn-cap stop exits 1 with max_turns_reached (GRK-07). Like the
+        # claude lane's error_max_turns it is the lane's cap, not a crash: the
+        # work so far stays in the worktree and the run routes as a clean exit
+        # without a report (report missing): the extractor
+        # (_lease_extract_stream: _grok_lease_text) takes a report only from a
+        # run that ended end_turn, so a Status line written before the cap, a
+        # max_tokens or any other end never makes the lease review-ready. Any
+        # other failure is classified here, where grok's own words are read
+        # (signed out, quota).
+        _adapter_env grok "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+        if [ "$RC" -ne 0 ]; then
+          _grok_classify "$RC" "$OUT"
+          if [ "$_INVOKE_FAILURE_REASON" = max-turns ]; then
+            RC=0
+          else
+            CLASS_SET=1
+          fi
+        fi
+        ;;
+      devin)
+        # The command line goes to the builder log (<out>.log) first: it
+        # names the class (--config's .read/.edit copy, --permission-mode),
+        # and the copy itself is removed after the run (below)
+        echo "lease_dispatch: devin lane: ${_LEASE_LANE_ARGV[*]}" >&2
+        _adapter_env devin "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+        ;;
+      codex)
+        # The final answer's file (-o <lane-arg>) starts empty: a run that
+        # writes no answer leaves no report, whatever its tool output quoted
+        if [ -n "$LANE_ARG" ]; then : > "$LANE_ARG" 2>/dev/null || true; fi
+        _adapter_env codex "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+        ;;
       *)
         _adapter_env "$CLI" "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
         ;;
@@ -773,6 +904,11 @@ _lease_builder_run() {
         echo "lease_dispatch: the claude builder refused to start without Claude Code's sandbox (KTD16) — on Linux install bubblewrap and socat; or set TRIFORGE_CLAUDE_SANDBOX=off in the lead's environment, and the claude builder's Bash then runs without OS confinement" >> "$OUT"
       fi
       ;;
+    devin)
+      # Devin wrote its org id into the per-dispatch config copy: it goes,
+      # as invoke_devin's own copy does after its run
+      if [ -n "$LANE_ARG" ]; then rm -f "$LANE_ARG"; fi
+      ;;
   esac
   python3 -c "$_LEASE_OWN_GROUP_PY" 2>/dev/null || true
   # Only a nonzero exit has a failure class (matches invoke_antigravity /
@@ -780,7 +916,7 @@ _lease_builder_run() {
   # spurious 'retryable' off a builder that actually succeeded.
   if [ "$RC" -eq 0 ]; then
     INVOKE_FAILURE_CLASS="none"
-    # The opencode / kimi / cursor lanes answer as a JSON event stream; the
+    # The opencode / kimi / cursor / grok lanes answer as a JSON event stream; the
     # typed `Status:` report (KTD11) lives inside it as escaped text, so a
     # line-anchored parser can never see it. Extract the prose into $OUT
     # (raw stream kept in ${OUT}.raw); an extraction miss leaves $OUT as is.

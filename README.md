@@ -28,11 +28,11 @@
 
 ## What is this?
 
-A production-grade framework that turns Claude Code into a **lead agent** orchestrating a **six-CLI builder pool**. Instead of one model doing everything — or a fixed role for each CLI — a user-editable roster ([`ops/roster.toml`](templates/ops/roster.toml)) decides which CLI, model, and effort handles each role, and any member can implement code:
+A production-grade framework that turns Claude Code into a **lead agent** orchestrating an **eight-CLI builder pool**. Instead of one model doing everything — or a fixed role for each CLI — a user-editable roster ([`ops/roster.toml`](templates/ops/roster.toml)) decides which CLI, model, and effort handles each role, and any member can implement code (Devin only if you opt in):
 
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** is the lead — it plans, resolves the roster, dispatches builders, and merges reviewed work (ladder: Fable 5.1 → Opus 5.5 → Sonnet 5.5)
 - **Core trio (required):** Claude · **[Antigravity](https://antigravity.google/cli)** (`agy`, Gemini 3.8 Flash (High) by default, 1M context) · **[Codex](https://github.com/openai/codex)** (`gpt-6-astra`, sandboxed)
-- **Optional tier (auto-detected):** **OpenCode** (OpenRouter `glm-5.3`) · **Kimi Code** (`kimi-code/k3`) · **Cursor** (Grok 4.6), enrolled through [`at-setup`](skills/at-setup/SKILL.md) and skipped cleanly when not enrolled
+- **Optional tier (auto-detected):** **OpenCode** (OpenRouter `glm-5.3`) · **Kimi Code** (`kimi-code/k3`) · **Cursor** (Grok 4.6) · **Grok Build** (`grok-4.7`; builder, reviewer or analyst), enrolled through [`at-setup`](skills/at-setup/SKILL.md) and skipped cleanly when not enrolled. **Devin** (`swe-1-6-slow`, reviewer or analyst) joins only after you record your consent in `at-setup`
 - **19 specialist personas** cover [security](personas/security-sentinel.md), [performance](personas/performance-oracle.md), [architecture](personas/architecture-strategist.md) and more. One manifest sets each persona's tools, model tier and turn budget.
 
 Every non-lead build runs under a **per-task lease in an isolated git worktree** and merges only after **cross-review by a pinned non-author reviewer** — safety is isolation + cross-review, not write-restriction. Work is tracked in shared markdown files. Reviews run in parallel. Knowledge compounds across sessions.
@@ -80,7 +80,7 @@ Follow-ups from the v3.3.0 code review (PR #8 "Unapplied review findings"), ship
 - **A lease builder cannot push.** The dispatch contract's "git stays local" is now mechanical: `_adapter_env` binds `core.hooksPath` to the shipped `scripts/lease-git-hooks/pre-push` (which refuses) and rewrites every push URL scheme to an unresolvable `no-push://` address via `url.*.pushInsteadOf` — per-process `GIT_CONFIG_*`, so `git push` fails whichever remote or path the builder names while status/log/diff keep working. New static row SELF-09 proves it against a bare remote.
 - **Quota exhaustion fails fast.** A provider usage-limit / quota error (Kimi's `403 … monthly usage limit`, or any lane's equivalent) is classified deterministic with "wait for the refresh or buy usage" guidance instead of a wasted retry; the probe record has a `QUOTA-FAIL` outcome and gates the dependent Kimi rows on the quota, not on a login.
 - **Effort-only roster overrides work.** `[roles.analyst] effort = "low"` on the shipped agy default now dispatches `Gemini 3.8 Flash (Low)` (and `cursor-grok-4.6-low` for Cursor): `resolve_role` recomposes the effort suffix when the role's model is the shipped default; an explicit roster model still wins.
-- **Smaller control-plane files.** `scripts/invoke-external.sh` is a loader over `scripts/lib/{common,antigravity,codex,opencode,kimi,cursor,roster,lease}.sh` (same 68 functions, same contracts — commands keep sourcing the one file; `validate-versions.sh` parses `lib/roster.sh`), and the probe harness's SELF-* rows live in `scripts/probe-self-tests.sh`.
+- **Smaller control-plane files.** `scripts/invoke-external.sh` is a loader over `scripts/lib/{common,antigravity,codex,opencode,kimi,cursor,roster,lease}.sh` (4.0 adds `registry`, `lease-wait`, `devin` and `grok`; same 68 functions, same contracts — commands keep sourcing the one file; `validate-versions.sh` parses `lib/roster.sh`), and the probe harness's SELF-* rows live in `scripts/probe-self-tests.sh`.
 - **Smaller fixes.** The OpenCode deny set enumerates the common bypass spellings (`rm -fr`/`-Rf`/`-r`, `command sudo`, `doas`, `git -c`/`-C … push`) in both copies (still defense-in-depth); `invoke_antigravity` leaves its diagnostic in the output file when the retry also returns an empty envelope; session-start writes `.claude/roster-detected.local.md` tmp+mv.
 
 ## What's new (v3.3.0)
@@ -159,7 +159,7 @@ The heart of v3.0.0. A wave reads [`ops/roster.toml`](templates/ops/roster.toml)
 Prefer the Pro line? Set a role's `model` to `"Gemini 3.1 Pro (High)"` (or `(Low)` — 3.1 Pro has no Medium tier) in `ops/roster.toml`; it stays the documented one-line opt-in. The July 2026 plan's never-Flash rule (AE2) is superseded by D-022 — anyone working from that plan should read the September ADR (`ops/decisions/2026-09-11-cli-deprecation-watch.md`).
 
 <p align="center">
-  <img src="docs/images/roster.svg" alt="Roster and assignment — ops/roster.toml maps each role to a CLI, model, and effort with fallback chains; six CLIs across a required core trio and an optional tier" width="82%">
+  <img src="docs/images/roster.svg" alt="Roster and assignment: ops/roster.toml maps each of the five roles to a CLI, model and effort, with a fallback chain that ends at the required core trio (Claude, Antigravity, Codex). OpenCode, Kimi and Cursor are drawn as the optional tier, enrolled per project." width="82%">
 </p>
 
 *Image note (history): `docs/images/roster.svg` was exported for v3.0.0 and still labels Codex `gpt-5.6-sol` and the agy lane "Antigravity · Pro"; regeneration is deferred — the paragraph above and the [Compatibility](#compatibility) table are authoritative.*
@@ -444,6 +444,13 @@ kimi -p "Respond with only: READY"
 # Cursor (date-versioned) — pin the suffixed Grok id, never the Auto router (`cursor-agent login`);
 # the binary is `cursor-agent` (legacy symlink) or `agent` (primary since 2026.09.10)
 cursor-agent -p --trust --model cursor-grok-4.6-xhigh "Respond with only: READY"
+
+# Devin CLI ≥ 3000.10.31 (`devin auth login`) — a reviewer and analyst; at-setup asks for your
+# consent before enrolling it, and it builds only after a separate opt-in
+devin --model swe-1-6-slow --respect-workspace-trust false -p "Respond with only: READY"
+
+# Grok Build ≥ 1.0.34 (builder, reviewer or analyst) — `grok login` (`grok login --device-code` without a browser) or XAI_API_KEY
+grok --model grok-4.7 --output-format json -p "Respond with only: READY"
 ```
 
 ### Compatibility
@@ -458,12 +465,14 @@ Re-baselined from the newest capability probe record — currently [`ops/researc
 | OpenCode (`opencode`) | optional | ≥ 1.18.20 | 1.18.30 | `opencode run --format json -m openrouter/z-ai/glm-5.3 "…"` |
 | Kimi Code (`kimi`) | optional | ≥ 0.33.0 | 0.42.0 (AUTH-FAIL on the probe host; live rows PENDING-AUTH until `kimi login`) | `kimi -p "…"` |
 | Cursor (`cursor-agent`; `agent` fallback) | optional | date-versioned | 2026.09.10 | `cursor-agent -p --trust --model cursor-grok-4.6-xhigh "…"` |
+| Devin CLI (`devin`) | optional | ≥ 3000.10.31 | 3000.11.3 | `devin --model swe-1-6-slow --respect-workspace-trust false -p "…"` |
+| Grok Build (`grok`) | optional | ≥ 1.0.34 | 1.0.34 | `grok --model grok-4.7 -p "…"` |
 
-Why these floors: Claude Code 2.1.277 is the first build that reads a root `AGENTS.md`, Triforge's only instruction file (D-037; it includes the 2.1.267 fix that honors `effort:` frontmatter on pinned-default models); a claude worker needs 2.1.285, the first build that ignores the repository settings that loosen its sandbox, and refuses to start on an older one unless `TRIFORGE_CLAUDE_SANDBOX=off` is set; every persona runs with Claude Code's `--safe-mode`, so `dispatch_persona` refuses a `claude` without the flag (rc 69) and prints the fix, `claude update`; the persona lane was tested on 2.1.289 and 2.1.291, and an exec persona, which runs Bash, also needs the 2.1.285 sandbox floor; agy 1.1.27 adds `denied_actions` to the JSON envelope that `invoke_antigravity` reads as its completion signal; Codex 0.153.0 is `gpt-6-astra`'s minimal client, and `gpt-6.1-sol`, which a role can pick, answered on Codex 0.160.0 and was refused on 0.155.1; OpenCode 1.18.20 answers subagent permission asks under `run`; Kimi 0.33.0 is the agent-core-v2 engine with `--agent-file`. The Gemini CLI floor was removed with the Antigravity migration (Google's hosted service stopped serving consumer tiers 2026-06-18); legacy Gemini users pin plugin `v2.4.3`. An absent or declined optional CLI is silently skipped — fallback chains always terminate at a core-trio member, which can't be disabled.
+Why these floors: Claude Code 2.1.277 is the first build that reads a root `AGENTS.md`, Triforge's only instruction file (D-037; it includes the 2.1.267 fix that honors `effort:` frontmatter on pinned-default models); a claude worker needs 2.1.285, the first build that ignores the repository settings that loosen its sandbox, and refuses to start on an older one unless `TRIFORGE_CLAUDE_SANDBOX=off` is set; every persona runs with Claude Code's `--safe-mode`, so `dispatch_persona` refuses a `claude` without the flag (rc 69) and prints the fix, `claude update`; the persona lane was tested on 2.1.289 and 2.1.291, and an exec persona, which runs Bash, also needs the 2.1.285 sandbox floor; agy 1.1.27 adds `denied_actions` to the JSON envelope that `invoke_antigravity` reads as its completion signal; Codex 0.153.0 is `gpt-6-astra`'s minimal client, and `gpt-6.1-sol`, which a role can pick, answered on Codex 0.160.0 and was refused on 0.155.1; OpenCode 1.18.20 answers subagent permission asks under `run`; Kimi 0.33.0 is the agent-core-v2 engine with `--agent-file`; Devin 3000.10.31 is the first build where a deny rule wins over an allow rule, which its per-run config relies on (its versions jumped from 2026.x to 3000.x in July 2026); Grok Build 1.0.34 is the build the GRK probe rows passed on (`dontAsk` with deny rules, the workspace sandbox, streaming JSON, and the switches that stop it reading Claude Code's config). The Gemini CLI floor was removed with the Antigravity migration (Google's hosted service stopped serving consumer tiers 2026-06-18); legacy Gemini users pin plugin `v2.4.3`. An absent or declined optional CLI is silently skipped — fallback chains always terminate at a core-trio member, which can't be disabled.
 
 ### Data egress and credentials
 
-Each dispatched CLI sends its task prompt and the code context it is handed to that CLI's model provider. Under the shipped defaults, your code + task context reaches **Anthropic** (Claude), **Google** (Antigravity → Gemini 3.8 Flash), and **OpenAI** (Codex) for the core trio; and, for any optional member you enroll, **Zhipu / Z.ai** (GLM, routed through the **OpenRouter** intermediary — which also sees the traffic), **Moonshot** (Kimi), and **xAI** (Grok, via Cursor). `ops/roster.toml` is the control surface: disable a member (`enabled = false`) or drop a provider's model from every role to remove that provider from the egress set (the core trio always stays). Credentials never live in the repo — each adapter reads its own from the OS / vendor store (CLI logins, `OPENROUTER_API_KEY`, `CURSOR_API_KEY`, `kimi login` OAuth-or-API-key), scoped per-adapter by the lease env allowlist; captured output is scrubbed before it lands in `ops/`, and rotation follows each vendor's own token flow (revoke + re-login/re-key, then re-run `at-setup`).
+Each dispatched CLI sends its task prompt and the code context it is handed to that CLI's model provider. Under the shipped defaults, your code + task context reaches **Anthropic** (Claude), **Google** (Antigravity → Gemini 3.8 Flash), and **OpenAI** (Codex) for the core trio; and, for any optional member you enroll, **Zhipu / Z.ai** (GLM, routed through the **OpenRouter** intermediary — which also sees the traffic), **Moonshot** (Kimi), **xAI** (Grok Build, and Grok through Cursor), and **Cognition** (Devin; a model outside Cognition's SWE family also reaches that model's provider). Cognition may train on that data unless the account opts out, so at-setup records your consent before Devin joins the roster. `ops/roster.toml` is the control surface: disable a member (`enabled = false`) or drop a provider's model from every role to remove that provider from the egress set (the core trio always stays). Credentials never live in the repo — each adapter reads its own from the OS / vendor store (CLI logins, `OPENROUTER_API_KEY`, `CURSOR_API_KEY`, `kimi login` OAuth-or-API-key, the `devin auth login` token in `~/.local/share/devin/`, `grok login` or `XAI_API_KEY`), scoped per-adapter by the lease env allowlist; captured output is scrubbed before it lands in `ops/`, and rotation follows each vendor's own token flow (revoke + re-login/re-key, then re-run `at-setup`).
 
 ### Installation
 
@@ -578,7 +587,7 @@ The 17 lead workflows are skills under [`skills/at-*/`](skills/) that only the l
 | [**`at-wrap`**](skills/at-wrap/SKILL.md) | `/at-wrap` · `$agent-triforge:at-wrap` | — | Phase 6: [compound knowledge](skills/knowledge-compounding/SKILL.md), update the `ops/` files, archive review files to `ops/archive/<today>/`, write [`STATE.md`](ops/STATE.md), print the sprint summary with its rulings, create the completion marker last. |
 | [**`at-quick`**](skills/at-quick/SKILL.md) | `/at-quick` · `$agent-triforge:at-quick` | `[change description]` | A change touching fewer than 3 files with no shared interface or protected path: TDD, self-review, no swarm; hands off to `at-review --security` / `--perf` when a lens needs it. |
 | [**`at-debug`**](skills/at-debug/SKILL.md) | `/at-debug` · `$agent-triforge:at-debug` | `[bug description or error message]` | Reproduce, root-cause with evidence, fix, find sibling instances, record in `ops/MEMORY.md` and `ops/CHANGELOG.md`; 3-attempt circuit breaker, then an escalation report. |
-| [**`at-setup`**](skills/at-setup/SKILL.md) | `/at-setup` · `$agent-triforge:at-setup` | `[opencode\|kimi\|cursor\|roles]` | Guided roster onboarding: core trio live, Codex trust detected, each optional CLI enrolled or declined, roles kept, customized or restored; closes with the status table and a verdict. Idempotent. |
+| [**`at-setup`**](skills/at-setup/SKILL.md) | `/at-setup` · `$agent-triforge:at-setup` | `[opencode\|kimi\|cursor\|devin\|grok\|roles]` | Guided roster onboarding: core trio live, Codex trust detected, each optional CLI enrolled or declined, roles kept, customized or restored; closes with the status table and a verdict. Idempotent. |
 | [**`at-deep-research`**](skills/at-deep-research/SKILL.md) | `/at-deep-research` · `$agent-triforge:at-deep-research` | `[topic or goal]` | Five parallel research lenses plus [`research-synthesizer`](personas/research-synthesizer.md), every endpoint a recorded primary source; writes `ops/RESEARCH_ANTIGRAVITY.md` and hands off to `at-plan`. |
 | [**`at-analyze`**](skills/at-analyze/SKILL.md) | `/at-analyze` · `$agent-triforge:at-analyze` | `[github-url or local-path]` | Read-only judgment of an external repo or resource: extractable patterns, prompt-engineering insights, verdict matrix, ranked recommendations. Nothing written. |
 | [**`at-status`**](skills/at-status/SKILL.md) | `/at-status` · `$agent-triforge:at-status` | — | One report from `ops/`, git and the review files: phase, task counts, blockers, recent activity, pending reviews, uncommitted changes, available workflows. Writes nothing. |
@@ -621,7 +630,7 @@ The plugin ships 27 skills in one `skills/` tree: the 10 portable skills below, 
 | [**`session-continuity`**](skills/session-continuity/SKILL.md) | Claude | Save and resume via [`STATE.md`](ops/STATE.md) across sessions |
 | [**`scope-cutting`**](skills/scope-cutting/SKILL.md) | Claude | Systematically cut scope by unblocking value and risk |
 
-### Portable skills across the six CLIs
+### Portable skills across the eight CLIs
 
 The project bootstrap (`triforge_bootstrap`, run at session start and by `at-setup`, `at-build` and `at-review`) copies the 10 portable skills from the plugin's `skills/` into `.agents/skills/`, the agentskills.io path, and refreshes the copy whenever the plugin version changes. The stamp `.agents/skills/.triforge-plugin-version` records a content digest for each directory Triforge wrote, and only Triforge's own unchanged copies are replaced or retired. An edited copy, or your own directory under a shipped name, is kept with a notice; customizations are safest in a directory with a different name. Fixture evidence from the 2026-09-11 watch cycle ([`ops/research/2026-09-11-cli-updates.md`](ops/research/2026-09-11-cli-updates.md) §3.1) shows which path each CLI reads:
 
@@ -634,7 +643,7 @@ The project bootstrap (`triforge_bootstrap`, run at session start and by `at-set
 | `.cursor/skills/` | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
 | `.kimi-code/skills/` | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
 
-Claude Code is the one CLI that does not read `.agents/skills/`; it reads the plugin's skills directly. Two harnesses outside the six, Devin (`devin skills paths`) and Pi (per its skills docs), read `.agents/skills/` too, so inside a Triforge project they see this copy. Elsewhere they install the skills [from their own manifests](#portable-skills-in-devin-and-pi).
+Claude Code is the one CLI that does not read `.agents/skills/`; it reads the plugin's skills directly. Grok Build reads `.agents/skills/` too, and a Grok Build worker gets this copy in its lease worktree (SELF-06g). Devin (`devin skills paths`), which Triforge can also enroll as a worker, and Pi (per its skills docs) read `.agents/skills/` as well, so inside a Triforge project they see this copy; a Devin worker gets it in its lease worktree like the others (SELF-06h). Elsewhere they install the skills [from their own manifests](#portable-skills-in-devin-and-pi).
 
 Each harness invokes a skill in its own form: Claude `/name` · agy `agy --add-dir "$PWD" -p "/name"` (headless expansion; `agy -p "/skills"` lists them without a model call) · Codex `$name` · OpenCode `/name` through its native `skill` tool (commands via `opencode run --command <name>` from `.opencode/command/`) · Cursor `/name` in `-p` · Kimi `/skill:name` (live verification pending `kimi login`).
 
@@ -729,7 +738,7 @@ This framework was informed by analyzing the [Claude Code Blueprint](https://git
 
 | Dimension | [Claude Code Blueprint](https://github.com/Ninety2UA/claude-code-blueprint) | This framework |
 |---|---|---|
-| **Agent model** | Homogeneous (Claude-only) | Heterogeneous six-CLI builder pool (core trio + optional OpenCode/Kimi/Cursor) |
+| **Agent model** | Homogeneous (Claude-only) | Heterogeneous eight-CLI builder pool (core trio + optional OpenCode/Kimi/Cursor/Devin/Grok Build) |
 | **Review agents** | 6 Claude subagents | 7 reviewers (2 external + 5 specialist personas) |
 | **Codebase analysis** | Claude subagent | [Antigravity CLI](https://antigravity.google/cli) (1M token context) |
 | **Test execution** | Claude subagent | [Codex CLI](https://github.com/openai/codex) (sandboxed execution) |
