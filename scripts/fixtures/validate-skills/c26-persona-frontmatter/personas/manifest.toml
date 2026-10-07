@@ -1,0 +1,5 @@
+[personas.fronted]
+class = "read"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 8

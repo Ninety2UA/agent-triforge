@@ -32,13 +32,13 @@ At sprint start print the copyable completion line from [completion gating](refe
 
 ## Lifecycle
 
-All phases run in order; [phases](references/phases.md) carries each phase's actions and the Phase 0 dispatch with its promotion guard. Sub-agents are spawned through the harness mechanism in the Claude and Codex references.
+All phases run in order; [phases](references/phases.md) carries each phase's actions and the Phase 0 dispatch with its promotion guard. Every hyphenated checker, reviewer and researcher below except `codebase-analyst` is a persona the helper starts detached, `persona_spawn <run-dir> <name> <persona> <input> <out> --brief <task>` (it runs `dispatch_persona`; the input is data, the task rides in the brief), and collects with `persona_wait <run-dir>`, rerun while it returns 75 because a persona can outlast one tool call: its manifest entry sets tools, model tier and turns, so a call pins nothing, and the never-downgrade trio (`plan-checker`, `security-sentinel`, `findings-synthesizer`) runs as top-tier Claude whichever CLI leads. Agent-team mode is the one harness-specific spawn, in the Claude and Codex references.
 
 - Phase 0: `codebase-analyst` through Antigravity (skip if unnecessary); read the updated `ops/` files after it completes. Captured output is promoted into `ops/ARCHITECTURE.md` only when non-empty with a SUCCESS status sidecar; a failed run continues without it.
 - Pre-plan: `learnings-researcher` over `ops/solutions/` and `ops/decisions/`.
 - Phase 1: `writing-plans` and `shadow-path-tracing`, `ops/CONTRACTS.md` types embedded, waves grouped, `ops/TASKS.md` written. Phase 1.1: list every critical assumption in the plan; pause for the user on any that could change the architecture or approach. Phase 1.5: `plan-checker` until APPROVED, max 3 rounds.
 - Phase 2: wave orchestration; sub-agent mode below 5 tasks, agent-team mode at 5 or more; `integration-verifier` between waves; risk scoring.
-- Phase 3: Antigravity and Codex in the background plus `security-sentinel`, `performance-oracle`, `code-simplicity-reviewer`, `convention-enforcer` and `architecture-strategist` as sub-agents, all at once. Phase 4: `findings-synthesizer`, `iterative-refinement`, fix P1 + P2, loop if needed, max 3 cycles.
+- Phase 3: Antigravity and Codex in the background plus `security-sentinel`, `performance-oracle`, `code-simplicity-reviewer`, `convention-enforcer` and `architecture-strategist` as personas, all at once. Phase 4: `findings-synthesizer`, `iterative-refinement`, fix P1 + P2, loop if needed, max 3 cycles.
 - Phase 5: `test-gap-analyzer`, then Codex writes tests with the failing test first; fix until green, max 3 cycles.
 - Phase 6: `knowledge-compounding` (to `ops/solutions/` when non-trivial), update `ops/CHANGELOG.md`, `ops/MEMORY.md`, `ops/TASKS.md`, archive review files to `ops/archive/<today>/`, `verification-before-completion`, write `ops/STATE.md`, create the marker last, then the sprint summary for the user.
 

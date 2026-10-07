@@ -93,6 +93,7 @@ resolve_role() {
 import os, re, shutil, sys
 ${_CURSOR_ID_PY}
 ${_TRIFORGE_CLIS_PY}
+${_INSTALL_FIX_PY}
 ${_ROLE_DEFAULTS_PY}
 ${_LEAD_PY}
 try:
@@ -117,8 +118,8 @@ BINARY = {c: (os.environ.get(e['binary_env']) if e['binary_env'] else None) or e
 # member is reached via fallback or chosen as an overridden primary with no
 # explicit role model. A [members.<cli>].model entry overrides it.
 CLI_DEFAULT_MODEL = {c: e['model'] for c, e in CLIS.items()}
-# G12-style install/login guidance (R21) — the same line cli_install_fix prints.
-INSTALL_FIX = {c: 'install ' + e['name'] + ' (' + e['install'] + ')' + (', then ' + e['login'] if e['login'] else '') for c, e in CLIS.items()}
+# G12-style install/login guidance (R21): install_fix, the line cli_install_fix prints.
+INSTALL_FIX = {c: install_fix(c) for c in CLIS}
 
 path = os.environ.get('ROSTER_FILE', 'ops/roster.toml')
 # A malformed roster exits 4, its TOMLDecodeError text naming the line.
@@ -559,15 +560,15 @@ def write_verified(path, new_raw, verify, who):
     os.replace(tmp, path)
 '
 
-# _lead_roster_path — the checkout's roster: <nearest ancestor holding .git>/
-# ops/roster.toml (physical path, no git run — like _lease_ctx's walk), or the
-# relative ops/roster.toml outside any repository.
-_lead_roster_path() {
+# _checkout_top — the checkout this shell stands in: the nearest directory
+# from the physical working directory up that holds a .git entry (no git run —
+# like _lease_ctx's walk), printed; rc 1 outside any repository.
+_checkout_top() {
   local D
   D=$(pwd -P 2>/dev/null) || D=""
   while [ -n "$D" ]; do
     if [ -e "${D}/.git" ] || [ -L "${D}/.git" ]; then
-      printf '%s/ops/roster.toml\n' "${D%/}"
+      printf '%s\n' "$D"
       return 0
     fi
     if [ "$D" = "/" ]; then
@@ -576,7 +577,18 @@ _lead_roster_path() {
     D=${D%/*}
     if [ -z "$D" ]; then D=/; fi
   done
-  printf 'ops/roster.toml\n'
+  return 1
+}
+
+# _lead_roster_path — the checkout's roster: <_checkout_top>/ops/roster.toml,
+# or the relative ops/roster.toml outside any repository.
+_lead_roster_path() {
+  local TOP
+  if TOP=$(_checkout_top); then
+    printf '%s/ops/roster.toml\n' "${TOP%/}"
+  else
+    printf 'ops/roster.toml\n'
+  fi
 }
 
 # _lead_read <who> <3|4> — resolve_lead's and roster_lead_entry's one read.

@@ -31,15 +31,15 @@ ensure_core_trio_live || exit 1
 
 - **Ceremony (S16):** read the `Ceremony:` line at the top of `ops/TASKS.md` before choosing lanes. `high-ceremony` forces the full swarm regardless of flags; `trivial` runs the default lanes; `standard` or no line follows the flags as given.
 - **Trust rules (S6/S7):** the review package is the diff, the task rows, the `ops/CONTRACTS.md` slice and the acceptance criteria; a dispatch never pre-judges a finding; builder output is a claim; dispositions are append-only. [Trust rules](references/trust-rules.md).
-- **Core lanes** go through `dispatch_role analyst` and `dispatch_role reviewer` so a roster override takes effect; the fresh-cycle archive, per-PID waits, promotion of captured output and the Codex structured-verdict fold are in [dispatch](references/dispatch.md).
+- **Core lanes** go through `dispatch_role analyst` and `dispatch_role reviewer` so a roster override takes effect; the fresh-cycle archive, the run directory with this cycle's lane list, the waits, promotion of captured output and the Codex structured-verdict fold are in [dispatch](references/dispatch.md).
 - **Optional lanes** run for every `[members.<cli>] enabled = true` and for an optional CLI named as the reviewer primary, each writing `ops/REVIEW_<CLI>.md` under the typed-Status promotion rule: [optional lanes](references/optional-lanes.md).
-- **Gated learnings-researcher (C4):** spawned only when an `ops/solutions/` entry names a changed module (a name-and-path grep, no model call): [learnings gate](references/learnings-gate.md).
-- **Specialist reviewers** run as sub-agents launched together in one round; the harness mechanics and the rc 40 fallback: [Claude](references/claude.md), [Codex](references/codex.md).
-- **Phase 4:** synthesis inputs, fix order, the dispositions block, convergence and the re-trigger on changed files only: [synthesis](references/synthesis.md).
+- **Gated learnings-researcher (C4):** dispatched only when an `ops/solutions/` entry names a changed module (a name-and-path grep, no model call): [learnings gate](references/learnings-gate.md).
+- **Specialist reviewers** are the personas the flags select, started detached with `persona_spawn` in the dispatch block, the same round as the core lanes, and collected by its wait block, rerun while it returns 75 (a persona can outlast one tool call). A persona's manifest entry sets its tools, model tier and turns; `security-sentinel` and `findings-synthesizer` are in the never-downgrade trio and run as top-tier Claude whichever CLI leads. Host differences and the rc 40 fallback: [Claude](references/claude.md), [Codex](references/codex.md).
+- **Phase 4:** synthesis inputs, the gap check (a dispatched lane with a missing or empty file means the cycle cannot converge), fix order, the dispositions block, convergence and the re-trigger on changed files only: [synthesis](references/synthesis.md).
 
 ## Output
 
-- `ops/REVIEW_ANTIGRAVITY.md` and `ops/REVIEW_CODEX.md` (the structured verdict appended when the Codex lane emitted one), plus `ops/REVIEW_<OPENCODE|KIMI|CURSOR>.md` for each optional lane that reported DONE; prior cycles under `ops/archive/reviews/<timestamp>-<pid>/`.
-- The learnings-gate line (the matched `ops/solutions/` entries, or "skipped") and, when spawned, the known-issue context handed to `findings-synthesizer`.
+- `ops/REVIEW_ANTIGRAVITY.md` and `ops/REVIEW_CODEX.md` (the structured verdict appended when the Codex lane emitted one), plus `ops/REVIEW_<OPENCODE|KIMI|CURSOR>.md` for each optional lane that reported DONE and `ops/REVIEW_<PERSONA>.md` for each specialist persona; prior cycles under `ops/archive/reviews/<timestamp>-<pid>/`.
+- The learnings-gate line (the matched `ops/solutions/` entries, or "skipped") and, when dispatched, the known-issue context handed to `findings-synthesizer`.
 - The synthesized report (confidence tier and priority per finding), the P1 and P2 fixes applied, P3 items logged for later.
 - `## Review dispositions — Cycle N` appended to `ops/TASKS.md`, and the convergence verdict or the escalation after 3 cycles.

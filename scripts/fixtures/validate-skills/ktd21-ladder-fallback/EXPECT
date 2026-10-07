@@ -1,0 +1,3 @@
+check: KTD21
+under-warn: warning
+message: does not parse as rungs and a never-downgrade list

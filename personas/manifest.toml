@@ -1,0 +1,140 @@
+# personas/manifest.toml — the one manifest for the persona home (KTD21, R14).
+#
+# Each personas/<name>.md is a prompt body with no frontmatter; this file is
+# where its model, tools and turn budget live. Skills name a persona and
+# dispatch_persona (scripts/lib/persona.sh) reads its entry here, so no skill
+# restates a pin. scripts/validate-skills.sh checks that every persona file
+# has an entry, every entry has a file, and every persona a skill names exists.
+#
+#   class            the tool class dispatch_persona enforces:
+#                      read        Read, Grep, Glob
+#                      read-web    read + WebFetch, WebSearch (Claude only)
+#                      exec        Bash and no edit tools, in a disposable
+#                                  worktree at the --at target: a lease's
+#                                  collect snapshot or a git ref (ref:HEAD
+#                                  by default)
+#                      lease       never run as a persona: the work goes
+#                                  through a lease (it edits code)
+#                      agent-team  Claude's agent_teams capability only, through
+#                                  the Agent tool (tools unenforced)
+#   tier             the starting rung on the model ladder: "top" for its first
+#                    rung, <model>-<effort> for each lower one. The rungs are
+#                    defined once, TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh,
+#                    and the validator and the lane read the names from there.
+#   never_downgrade  true pins the persona to `top` on Claude whichever CLI
+#                    leads; true for exactly the trio the ladder names.
+#   max_turns        the persona's turn budget.
+
+[personas.architecture-strategist]
+class = "read"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 10
+
+[personas.best-practices-researcher]
+class = "read-web"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 12
+
+[personas.bug-reproduction-validator]
+class = "exec"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 10
+
+[personas.code-simplicity-reviewer]
+class = "read"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 8
+
+[personas.continuous-reviewer]
+class = "exec"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 15
+
+[personas.convention-enforcer]
+class = "read"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 8
+
+[personas.deployment-verifier]
+class = "exec"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 12
+
+[personas.findings-synthesizer]
+class = "read"
+tier = "top"
+never_downgrade = true
+max_turns = 8
+
+[personas.framework-docs-researcher]
+class = "read-web"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 12
+
+[personas.git-history-analyzer]
+class = "exec"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 10
+
+[personas.integration-verifier]
+class = "exec"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 10
+
+[personas.learnings-researcher]
+class = "read"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 8
+
+[personas.performance-oracle]
+class = "read"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 10
+
+[personas.plan-checker]
+class = "read"
+tier = "top"
+never_downgrade = true
+max_turns = 10
+
+[personas.pr-comment-resolver]
+class = "lease"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 20
+
+[personas.research-synthesizer]
+class = "read"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 8
+
+[personas.security-sentinel]
+class = "read"
+tier = "top"
+never_downgrade = true
+max_turns = 12
+
+[personas.team-lead]
+class = "agent-team"
+tier = "top"
+never_downgrade = false
+max_turns = 30
+
+[personas.test-gap-analyzer]
+class = "exec"
+tier = "opus-xhigh"
+never_downgrade = false
+max_turns = 10
