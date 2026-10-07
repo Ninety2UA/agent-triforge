@@ -33,6 +33,13 @@
 - **Hooks receive data via stdin JSON, NOT environment variables** — `$CLAUDE_TOOL_NAME`, `$CLAUDE_STOP_ASSISTANT_MESSAGE` etc. do not exist. Parse stdin with `python3 -c "import sys,json; ..."`. See: ops/solutions/2026-03-31-hooks-stdin-json-parsing.md
 - **Every agent must have an `## Output format` section** — the calling command needs structured output to parse. team-lead was the only agent missing this.
 
+- Worker discovery (int4b, Phase 4 integration merge, 2026-10-07), UNVERIFIED, for the end-of-program review:
+
+      scripts/lib/lease-wait.sh still reads the ledger with plain open(…, "rb") + tomllib.load
+      in three places (the LR_LEDGER, LC_LEDGER and LW_LEDGER readers in lease_wait and the
+      reconcile). Phase 3's non-blocking regular-file reader (read_regular) was not applied there,
+      so a FIFO planted at ops/leases.toml could still block lease_wait. Needs its own red/green case.
+
 ## Interface proposals
 <!-- No active proposals -->
 

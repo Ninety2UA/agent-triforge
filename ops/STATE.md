@@ -1,6 +1,6 @@
 ---
-saved: 2026-10-07T14:10:00Z
-phase: 2c and 3 merged; 4 merging (no further per-phase review), then 5 and 6
+saved: 2026-10-07T15:30:00Z
+phase: 2c, 3 and 4 merged; Phase 5 (U15 at-setup) next, then 6, then the end-of-program review
 wave: 0
 tasks:
   total: 29
@@ -51,7 +51,7 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 | 2b | U9 [lead] table + resolution; U12 claude -p lane; U10 ledger lead CLI / reviewer class / approvals | **merged** — PR #18 squash 5ac2e54; final-diff re-review 5/5, Codex gpt-6-astra xhigh FIX → all applied |
 | 2c | U25 dispatch_persona lane; U8 personas home, agents/ removed | **merged**: PR #19, squash 84d3d37 (2026-10-07). Rounds 1–4 reviewed; round 5 fixed and verified under the user's "fix all, verify, merge" decision; gates green on Python 3.14 and 3.12 and in CI |
 | 3 | U14 Codex lead: bootstrap, monitors, coordinator | **merged**: PR #20, squash dd0bb14 (2026-10-07). Rounds 1–4 reviewed; round 5 fixed and verified under the user's "fix all, verify, merge" decision; the first CI run exposed a ledger-write race (SELF-18), fixed in 676af5b; gates green on Python 3.14 and 3.12 and in CI |
-| 4 | U16 Grok Build adapter; U17 Devin CLI adapter (U18 shipped in 2a) | **stopped at the review cap** — round 3: Codex FIX (2 P1), final-diff 5/5 MERGE (see Blockers) |
+| 4 | U16 Grok Build adapter; U17 Devin CLI adapter (U18 shipped in 2a) | **merged**: PR #21, squash f27e550 (2026-10-07). Rounds 1–4 reviewed; round 5 fixed and verified; user-tier grok hooks run with a NOTE (user decision); integration merge with 2c and 3 (214efa8: `_lease_uncarve`, grok readers on `read_regular`); gates green on Python 3.14 and 3.12 and in CI. No further per-phase review (user decision) |
 | 5 | U15 at-setup lead step + instruction-file detection | pending |
 | 6 | U19 watch-cycle carry-ins; U20 two-lead fixture sprint + 4.0 release | pending |
 | final | release/4.0 → main as v4.0.0 (release.yml publishes) | pending |
