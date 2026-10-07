@@ -606,12 +606,16 @@ _claude_session_ok() {
 #                (-p fails in an untrusted directory), -p last. SHELL never
 #                crosses env -i, so Devin imports no login-shell exports
 #                (DVN-04)
-#   grok         the edit class of _grok_argv (scripts/lib/grok.sh): the env
+#   grok         _grok_argv (scripts/lib/grok.sh) in the class the lane-file
+#                slot carries (lease_dispatch: _grok_class of the lease role):
+#                edit, the workspace sandbox and the edit tools, for a builder,
+#                tester or documenter lease; read, the read-only sandbox with
+#                Read and Grep only, for anything else. Either way the env
 #                prefix that turns grok's Claude Code and Cursor discovery off,
 #                the model pin, --effort when set, streaming-json, dontAsk with
-#                the allow and deny sets, the workspace sandbox, and the
-#                GROK_CONFIG overlay that keeps the tool shell to the
-#                boundary's names; -p last (the prompt is its value)
+#                the allow and deny sets, and the GROK_CONFIG overlay that
+#                keeps the tool shell to the boundary's names; -p last (the
+#                prompt is its value)
 _lease_lane_argv() {
   local CLI=$1 MODEL=$2 EFFORT=$3 DMODEL=$4 KAF=$5 CBIN=$6 WT=$7 TIMEOUT=$8
   case "$CLI" in
@@ -654,7 +658,8 @@ _lease_lane_argv() {
       _LEASE_LANE_ARGV+=(--respect-workspace-trust false -p)
       ;;
     grok)
-      _grok_argv edit "$DMODEL" "$EFFORT" lease || return 1
+      # <lane file> is the class; an empty or unknown one runs read-only
+      _grok_argv "${KAF:-read}" "$DMODEL" "$EFFORT" lease || return 1
       _LEASE_LANE_ARGV=("${_GROK_ARGV[@]}")
       ;;
     *)

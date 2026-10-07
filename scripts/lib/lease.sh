@@ -1401,9 +1401,10 @@ _lease_provision_claude_skills() {
 # _lease_provision <worktree> <builder-cli> — provision a worktree _lease_carve
 # just made (it reads _CARVE_ADMIN) and append provisioned=<the paths that
 # wrote> to _CARVE_FIELDS, the lease row's `provisioned` field (KTD9): the
-# portable skills in .agents/skills, and for a claude builder in .claude/skills
-# too. rc 1 when the list can't be read: a row without it would fall back to
-# excluding all of .agents/.
+# portable skills in .agents/skills, for a claude builder in .claude/skills
+# too, and for a grok worker the .grok/config.toml that keeps every plugin
+# from loading (_grok_lease_config). rc 1 when the list can't be read: a row
+# without it would fall back to excluding all of .agents/.
 _lease_provision() {
   local WT=$1 CLI=${2:-} LIST TRACKED=""
   local -a DIRS=(.agents/skills)
@@ -1421,6 +1422,10 @@ print(",".join(sorted(names)))
 ') || TRACKED=""
       _lease_provision_claude_skills "$WT" "$TRACKED"
       DIRS+=(.claude/skills)
+      ;;
+    grok)
+      _grok_lease_config "$WT"
+      DIRS+=(.grok)
       ;;
   esac
   LIST=$(_lease_provisioned "$WT" "$_CARVE_ADMIN" "${DIRS[@]}") || {
@@ -1917,14 +1922,23 @@ DISPATCH_ROW_EOF
   # `Status:` line lease_collect parses (a clean exit without it is "report
   # missing", never review-ready). The lane's builder brief body (opencode /
   # cursor / grok: <cli>-agents/builder.md, frontmatter stripped) is
-  # prepended here, and Devin's is the lease role's own (devin-agents/<role>.md);
-  # Kimi's arrives natively via --agent-file; claude / codex /
-  # antigravity carry no separate builder brief (their role instructions are
-  # the contract itself). Wording is CLI-neutral on purpose.
+  # prepended here; a grok reviewer or analyst lease gets
+  # grok-agents/reviewer.md, and Devin's is the lease role's own
+  # (devin-agents/<role>.md); Kimi's arrives natively via --agent-file; claude
+  # / codex / antigravity carry no separate builder brief (their role
+  # instructions are the contract itself). Wording is CLI-neutral on purpose.
   local BRIEF_BODY="" BRIEF_FILE="" BRIEF_TITLE="Builder role brief"
   case "$CLI" in
-    opencode|cursor|grok)
+    opencode|cursor)
       BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/${CLI}-agents/builder.md"
+      ;;
+    grok)
+      # A reviewer or analyst lease runs read-only (_grok_class, R23)
+      BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/grok-agents/builder.md"
+      if [ "$(_grok_class "$ROLE")" = read ]; then
+        BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/grok-agents/reviewer.md"
+        BRIEF_TITLE="Role brief (${ROLE})"
+      fi
       ;;
     devin)
       # The lease's own role: a reviewer or analyst lease runs read-only (R24)
@@ -2007,6 +2021,11 @@ ${PROMPT}"
       [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=${REG_ROW%%$'\t'*}
       KIMI_AGENT_FILE="${OUT}.devin.$(_devin_class "$ROLE").json"
       _devin_config_copy "$(_devin_class "$ROLE")" "$KIMI_AGENT_FILE" || return 1
+      ;;
+    grok)
+      # The lane-file slot carries grok's permission class (edit or read),
+      # which _lease_lane_argv turns into the sandbox and the allowed tools
+      KIMI_AGENT_FILE=$(_grok_class "$ROLE")
       ;;
   esac
   # The claude lane resumes the session its last run recorded (KTD16): a fix

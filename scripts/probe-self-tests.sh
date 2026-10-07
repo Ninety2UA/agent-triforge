@@ -353,15 +353,12 @@ fi
 # claude reads .claude/skills, not .agents/skills (CC-07b): SELF-06f runs the
 # real provisioner into a worktree of its own and the lane's own argv
 # (_self06f_row in scripts/probe-capabilities.sh, which --only SELF-06f runs too).
-# SELF-06g does the same for grok (_self06g_row, the Grok Build section).
+# SELF-06g does the same for grok (_self06g_row, the Grok Build section), and
+# SELF-06h for Devin (R24) on the lane's read-class argv (_self06h_row, which
+# --only SELF-06h runs too).
 if [ "$SELF_ONLY" != 1 ]; then
   _self06f_row
   _self06g_row
-fi
-# Devin (R24): SELF-06h runs the real provisioner (.agents/skills) and the
-# lane's read-class argv the same way (_self06h_row in
-# scripts/probe-capabilities.sh, which --only SELF-06h runs too).
-if [ "$SELF_ONLY" != 1 ]; then
   _self06h_row
 fi
 
@@ -4408,3 +4405,136 @@ else
   row "SELF-24" "devin" "$_S24_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S24_FAIL"):$(printf '%s' "$_S24_FAIL" | cut -c1-700)" "static"
 fi
 rm -rf "$_S24"
+
+# SELF-25 (R23): Grok Build's lease lane without a live CLI. A `grok` stub
+# first on PATH answers `inspect --json` with two plugins and two MCP servers,
+# one of them from grok's own config.toml (the shapes grok 1.0.34 prints;
+# GRK-06 runs the real one), recording the environment it ran in; any other
+# run records its argv, prompt included, writes a file into the worktree when
+# the run is in the workspace sandbox, and answers with a streaming-json
+# Status: DONE. A scratch HOME carries ~/.claude/plugins/installed_plugins.json
+# and ~/.claude.json, naming one more plugin and one more server.
+#   class      _grok_class: builder, tester and documenter edit; reviewer,
+#              analyst and an empty role read
+#   lane       _lease_lane_argv grok with edit in the lane-file slot: the
+#              workspace sandbox and the Edit, Write and Bash rules; with read,
+#              and with an empty slot: the read-only sandbox and none of them
+#   builder    lease_create under a claude lead host: .grok/config.toml in the
+#              worktree disables the three plugins and shadows the two servers
+#              outside grok's config (enabled = false), inspect ran with the
+#              Claude discovery switches off, `provisioned` lists the file;
+#              lease_dispatch on the real lane (the stub): the workspace
+#              sandbox and the builder brief; lease_collect -> review, and the
+#              snapshot carries the stub's file but not .grok/config.toml
+#   reviewer   the same for a reviewer lease, but the read-only sandbox, no
+#              edit rule and the reviewer brief
+#   tracked    _grok_lease_config on a project's own .grok/config.toml: its
+#              lines stay first and the tables follow; one that declares
+#              [plugins] stays byte-identical, with a warning; one that
+#              declares MCP servers gets [plugins] but no shadow, with a
+#              warning; a .grok symlinked out of the worktree is not written
+#              through
+_S25="${WORK}/self25"
+mkdir -p "$_S25/bin" "$_S25/tmp" "$_S25/log" "$_S25/home/.claude/plugins" "$_S25/outside"
+cat > "$_S25/bin/grok" <<'EOF'
+#!/bin/sh
+# SELF-25 grok stub
+D=$(cd "$(dirname "$0")/.." && pwd)
+W=$(basename "$PWD")
+if [ "$1" = inspect ]; then
+  env > "$D/log/$W.inspect-env"
+  printf '{"plugins":[{"name":"s25-claude-plugin","scope":"user","path":"%s/.claude/plugins/cache/mk/s25-claude-plugin/1.0.0","enabled":true},{"name":"s25-grok-plugin","scope":"user","path":"%s/.grok/plugins/s25-grok-plugin","enabled":true}],"mcpServers":[{"name":"s25-claude-server","transport":"stdio","source":{"type":"claudeJson","path":"%s/.claude.json"}},{"name":"s25-grok-server","transport":"stdio","source":{"type":"user","path":"%s/.grok/config.toml"}}]}\n' "$HOME" "$HOME" "$HOME" "$HOME"
+  exit 0
+fi
+if [ "$1" = --version ]; then echo "grok 1.0.34 (stub)"; exit 0; fi
+: > "$D/log/$W.argv"
+P=""
+for a in "$@"; do
+  printf '%s\n' "$a" >> "$D/log/$W.argv"
+  if [ "$P" = --sandbox ] && [ "$a" = workspace ]; then echo built > s25-built.txt; fi
+  P=$a
+done
+printf '%s\n' '{"type":"text","data":"Done.\nStatus: DONE\nFiles changed: s25-built.txt\nTests: none\nConcerns: None\nDiscoveries for later tasks: None\n"}' '{"type":"usage"}' '{"type":"end","stopReason":"end_turn","num_turns":1}'
+exit 0
+EOF
+chmod +x "$_S25/bin/grok"
+printf '{"version": 2, "plugins": {"s25-installed-plugin@mk": [{"scope": "user", "installPath": "/nowhere"}]}}\n' > "$_S25/home/.claude/plugins/installed_plugins.json"
+printf '{"mcpServers": {"s25-json-server": {"command": "true"}}}\n' > "$_S25/home/.claude.json"
+_S25_PATH="${_S25}/bin:${_SELF_STUBS}:${PATH}"
+_S25_FAIL=""
+
+# class and lane argv
+O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  C="class:"
+  for R in builder tester documenter reviewer analyst ""; do C="${C}$(_grok_class "$R" 2>/dev/null || echo missing),"; done
+  echo "$C"
+  for S in edit read ""; do
+    P=""; SB=""; N=0
+    if _lease_lane_argv grok "" high grok-4.7 "$S" "" "$_S25" 600; then
+      for A in "${_LEASE_LANE_ARGV[@]}"; do
+        if [ "$P" = --sandbox ]; then SB=$A; fi
+        if [ "$P" = --allow ] && { [ "$A" = Edit ] || [ "$A" = Write ] || [ "$A" = Bash ]; }; then N=$((N + 1)); fi
+        P=$A
+      done
+    fi
+    echo "lane-${S:-empty}:sandbox=${SB}:write=${N}:last=${P}"
+  done )
+_S25_FAIL="${_S25_FAIL}$(_self_expect class "$O" '^class:edit,edit,edit,read,read,read,$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect lane "$O" '^lane-edit:sandbox=workspace:write=3:last=-p$' '^lane-read:sandbox=read-only:write=0:last=-p$' '^lane-empty:sandbox=read-only:write=0:last=-p$')"
+
+# a builder and a reviewer lease on the real lane, the stub as grok
+_self_repo "$_S25/repo" "$_S25/home" sprint/s25 '[roles.builder]\ncli = "grok"\nfallbacks = ["claude"]\n\n[roles.reviewer]\ncli = "grok"\nfallbacks = ["codex"]\n\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n'
+_S25_SIGB=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2 && NF {print; exit}' "${REPO_ROOT}/grok-agents/builder.md" 2>/dev/null || true)
+_S25_SIGR=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2 && NF {print; exit}' "${REPO_ROOT}/grok-agents/reviewer.md" 2>/dev/null || true)
+O=$( cd "$_S25/repo" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/leases" XAI_API_KEY=s25-stub-key CLAUDECODE=1 \
+       && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for T in s25b:builder s25r:reviewer; do
+    K=${T%%:*}
+    lease_create "$K" "${T#*:}" >/dev/null 2>&1 || { echo "${K}:create-failed"; continue; }
+    WT=$(_ledger_get "$K" worktree 2>/dev/null)
+    F="$WT/.grok/config.toml"
+    CFG="$(grep -cE '^disabled = \[.*"s25-claude-plugin", "s25-grok-plugin", "s25-installed-plugin"\]$' "$F" 2>/dev/null || true)/$(grep -cE '^\[mcp_servers\."s25-(claude|json)-server"\]$' "$F" 2>/dev/null || true)/$(grep -c 's25-grok-server' "$F" 2>/dev/null || true)"
+    INS=$(grep -cE '^GROK_CLAUDE_(SKILLS|MCPS)_ENABLED=0$' "$_S25/log/${K}.inspect-env" 2>/dev/null || true)
+    PROV=no
+    if printf ' %s ' "$(_ledger_get "$K" provisioned 2>/dev/null)" | grep -qF ' .grok/config.toml '; then PROV=yes; fi
+    lease_dispatch "$K" "probe task S25" 60 >/dev/null 2>&1 || { echo "${K}:dispatch-failed"; continue; }
+    _self_wait_rc "$K"
+    RC=0; lease_collect "$K" >/dev/null 2>&1 || RC=$?
+    L="$_S25/log/${K}.argv"
+    SB=$(grep -A1 -x -- --sandbox "$L" 2>/dev/null | tail -1)
+    N=$(grep -A1 -x -- --allow "$L" 2>/dev/null | grep -cxE 'Edit|Write|Bash' || true)
+    BR=none
+    if [ -n "$_S25_SIGB" ] && grep -qF -- "$_S25_SIGB" "$L" 2>/dev/null; then BR=builder; fi
+    if [ -n "$_S25_SIGR" ] && grep -qF -- "$_S25_SIGR" "$L" 2>/dev/null; then BR=reviewer; fi
+    TREE=$(git ls-tree -r --name-only "$(_ledger_get "$K" snapshot_sha 2>/dev/null)" 2>/dev/null || true)
+    echo "${K}:cfg=${CFG}:inspect=${INS}:prov=${PROV}:sandbox=${SB}:write=${N}:brief=${BR}:collect=${RC}:$(_ledger_get "$K" state 2>/dev/null):snap-built=$(printf '%s\n' "$TREE" | grep -cx 's25-built.txt' || true):snap-cfg=$(printf '%s\n' "$TREE" | grep -c '^\.grok/' || true)"
+  done )
+_S25_FAIL="${_S25_FAIL}$(_self_expect builder "$O" '^s25b:cfg=1/2/0:inspect=2:prov=yes:sandbox=workspace:write=3:brief=builder:collect=0:review:snap-built=1:snap-cfg=0$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect reviewer "$O" '^s25r:cfg=1/2/0:inspect=2:prov=yes:sandbox=read-only:write=0:brief=reviewer:collect=0:review:snap-built=0:snap-cfg=0$')"
+
+# a project's own .grok/config.toml, and a symlinked .grok
+mkdir -p "$_S25/t1/.grok" "$_S25/t2/.grok" "$_S25/t3/.grok" "$_S25/t4"
+printf '[permission]\ndeny = ["Bash(curl *)"]\n' > "$_S25/t1/.grok/config.toml"
+printf '[plugins]\nenabled = ["team-tools"]\n' > "$_S25/t2/.grok/config.toml"
+printf '[mcp_servers.team]\ncommand = "team-mcp"\n' > "$_S25/t3/.grok/config.toml"
+ln -s "$_S25/outside" "$_S25/t4/.grok"
+_S25_T2=$(cksum < "$_S25/t2/.grok/config.toml")
+O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for T in t1 t2 t3 t4; do
+    if declare -F _grok_lease_config >/dev/null 2>&1; then _grok_lease_config "$_S25/$T" > "$_S25/$T.warn" 2>&1; else : > "$_S25/$T.warn"; fi
+  done
+  C="$_S25/t1/.grok/config.toml"
+  echo "t1:head=$(head -2 "$C" | tr '\n' '|'):plugins=$(grep -cx '\[plugins\]' "$C" || true):shadow=$(grep -c '^\[mcp_servers\."' "$C" || true)"
+  echo "t2:same=$( [ "$(cksum < "$_S25/t2/.grok/config.toml")" = "$_S25_T2" ] && echo yes || echo no):warn=$(grep -c 'already declares plugins' "$_S25/t2.warn" || true)"
+  C="$_S25/t3/.grok/config.toml"
+  echo "t3:plugins=$(grep -cx '\[plugins\]' "$C" || true):shadow=$(grep -c '^\[mcp_servers\."' "$C" || true):warn=$(grep -c 'already declares MCP servers' "$_S25/t3.warn" || true)"
+  echo "t4:outside=$(ls -A "$_S25/outside" | grep -c . || true):warn=$(grep -c 'symlink' "$_S25/t4.warn" || true)" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect tracked "$O" '^t1:head=\[permission\][|]deny = \["Bash\(curl \*\)"\][|]:plugins=1:shadow=2$' '^t2:same=yes:warn=1$' '^t3:plugins=1:shadow=0:warn=1$' '^t4:outside=0:warn=1$')"
+
+_S25_CAP="Grok Build's lease lane: the permission class by lease role (a reviewer or analyst lease read-only, with the reviewer brief), and the provisioned .grok/config.toml that disables every plugin and shadows the MCP servers outside grok's config, never merged, never clobbering a project's own (R23)"
+if [ -z "$_S25_FAIL" ]; then
+  row "SELF-25" "grok" "$_S25_CAP" "PASS" "class: builder/tester/documenter edit, reviewer/analyst/empty read; lane: edit slot -> workspace + Edit/Write/Bash, read and empty -> read-only, none of them, -p last; builder lease: .grok/config.toml disables the 3 plugins (inspect + installed_plugins.json) and shadows the 2 servers outside grok's config (inspect + ~/.claude.json), not grok's own, inspect ran with the Claude switches off, provisioned lists it; dispatch on the real lane: workspace, builder brief; collect -> review, the snapshot has the builder's file and no .grok/; reviewer lease: read-only, no edit rule, reviewer brief, review; tracked: a project's file keeps its lines with the tables appended, a [plugins] one stays byte-identical (warning), an MCP one gets no shadow (warning), a symlinked .grok is not written through" "static"
+else
+  row "SELF-25" "grok" "$_S25_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S25_FAIL"):$(printf '%s' "$_S25_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S25"

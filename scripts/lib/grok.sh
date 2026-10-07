@@ -30,17 +30,22 @@ fi
 # with `grok inspect`), along with auto-update, telemetry and cross-session
 # memory. GROK_FOLDER_TRUST=0 is process-scoped trust: a fresh lease worktree
 # is untrusted, and untrusted grok loads none of the worktree's skills
-# (SELF-06g); `--trust` would write ~/.grok/trusted_folders.toml instead. Two
-# things no switch reaches (GRK-06). The Claude Code plugins under
-# ~/.claude/plugins stay loaded, and the session still offers their skills and
-# commands (codex:review among them); `plugins.disabled` would turn them off
-# but is a config-file key only. Their hooks did not fire under -p, dontAsk
-# denies their MCP tools because no rule allows MCPTool, and --no-subagents
-# drops their agents. And grok injects the `env` block of
-# ~/.claude/settings.json into its tool shell; the lease lane keeps that block
-# out with a GROK_CONFIG overlay (_grok_shell_policy), so the tool shell keeps
-# only the names the lease boundary passes. invoke_grok runs from the lead's
-# own shell and passes the lead's environment, like the other invoke_* helpers.
+# (SELF-06g); `--trust` would write ~/.grok/trusted_folders.toml instead.
+# What no switch reaches (GRK-06). The Claude Code plugins under
+# ~/.claude/plugins load, and the session offers their skills and commands
+# (codex:review among them); and a session starts the ~/.claude.json MCP
+# servers that `grok inspect` reports off. Only config-file keys turn these
+# off (`[plugins] disabled`, a project `[mcp_servers.<name>]` with
+# enabled = false), and the GROK_CONFIG overlay drops both. So a grok lease
+# worktree gets its own .grok/config.toml (_grok_lease_config, written at
+# provisioning and never merged; GRK-06 and SELF-25). invoke_grok has no
+# worktree of its own and keeps them loaded: dontAsk denies MCP tools because
+# no rule allows MCPTool, and --no-subagents drops plugin agents. And grok
+# injects the `env` block of ~/.claude/settings.json into its tool shell; the
+# lease lane keeps that block out with a GROK_CONFIG overlay
+# (_grok_shell_policy), so the tool shell keeps only the names the lease
+# boundary passes. invoke_grok runs from the lead's own shell and passes the
+# lead's environment, like the other invoke_* helpers.
 #
 # Permissions: --permission-mode dontAsk with explicit allow rules (anything
 # not allowed is denied, MCP tools included) and the deny set _GROK_DENY
@@ -105,6 +110,16 @@ _grok_effort() {
   esac
 }
 
+# _grok_class <role> — the permission class of a grok run in <role>: edit for
+# a builder, tester or documenter, read for anything else (invoke_grok's
+# GROK_ROLE mapping; the lease lane reads it from the lease's role).
+_grok_class() {
+  case "${1:-}" in
+    builder|tester|documenter) echo edit ;;
+    *) echo read ;;
+  esac
+}
+
 # _grok_shell_policy — the GROK_CONFIG overlay a lease worker runs with: the
 # tool shell inherits what grok was started with (the env -i allowlist already
 # filtered it) and keeps only TRIFORGE_ENV_BASE and _GROK_SHELL_KEEP, which
@@ -145,6 +160,83 @@ _grok_argv() {
   fi
   for R in "${_GROK_DENY[@]}"; do _GROK_ARGV+=(--deny "$R"); done
   _GROK_ARGV+=(-p)
+}
+
+# _grok_lease_config <worktree> — the .grok/config.toml a grok lease worktree
+# runs with, the one place grok reads per project that reaches plugins and MCP
+# servers (GRK-06; the env switches and the GROK_CONFIG overlay do not, and a
+# session starts the ~/.claude.json servers that `grok inspect` reports off):
+#   [plugins] disabled  every plugin `grok inspect --json` finds from the
+#                       worktree under _GROK_ENV, plus every Claude Code plugin
+#                       ~/.claude/plugins/installed_plugins.json names (so the
+#                       list survives an inspect that fails): none of their
+#                       skills, commands, hooks, MCP servers or agents load.
+#                       Grok matches names; it has no wildcard
+#   [mcp_servers."<n>"] enabled = false for every server inspect lists that
+#                       grok's own config.toml files do not define, plus the
+#                       ~/.claude.json mcpServers: a project entry shadows the
+#                       server by name, so none starts
+# A project's own .grok/config.toml gets these appended, unless it already
+# declares plugins (then it stays as it is, with a warning: one more table
+# would make it invalid) or MCP servers (then no server is shadowed). A .grok
+# or config.toml that is a symlink, or a .grok resolving outside the worktree,
+# is never written through. Grok's own skills, .agents/skills included, are
+# not plugins and stay. _lease_provision records the file as provisioned, so
+# the snapshot never carries it (KTD9).
+_grok_lease_config() {
+  local WT=$1 INSPECT=""
+  if command -v grok >/dev/null 2>&1; then
+    INSPECT=$(cd "$WT" && _run_with_timeout 30 "${_HOST_SCRUB[@]}" "${_GROK_ENV[@]}" grok inspect --json < /dev/null 2>/dev/null) || INSPECT=""
+  fi
+  printf '%s' "$INSPECT" | GLC_WT="$WT" python3 -c '
+import json, os, re, sys
+wt = os.environ["GLC_WT"]
+plugins, servers = set(), set()
+try:
+    d = json.loads(sys.stdin.read() or "{}")
+except ValueError:
+    d = {}
+if not isinstance(d, dict):
+    d = {}
+for p in d.get("plugins") or []:
+    if isinstance(p, dict) and isinstance(p.get("name"), str) and p["name"]:
+        plugins.add(p["name"])
+for m in d.get("mcpServers") or []:
+    if isinstance(m, dict) and isinstance(m.get("name"), str) and m["name"] and ".grok/config.toml" not in json.dumps(m.get("source")):
+        servers.add(m["name"])
+for path, key, names in (("~/.claude/plugins/installed_plugins.json", "plugins", plugins), ("~/.claude.json", "mcpServers", servers)):
+    try:
+        names.update(n for n in (str(k).split("@", 1)[0] for k in (json.load(open(os.path.expanduser(path), encoding="utf-8")).get(key) or {})) if n)
+    except Exception:
+        pass
+gdir, real = os.path.join(wt, ".grok"), os.path.realpath(wt)
+cfg = os.path.join(gdir, "config.toml")
+if os.path.islink(gdir) or (os.path.lexists(gdir) and not os.path.isdir(gdir)) or not os.path.realpath(gdir).startswith(real + os.sep) \
+        or os.path.islink(cfg) or (os.path.lexists(cfg) and not os.path.isfile(cfg)):
+    print("lease: WARNING %s is a symlink or not a plain directory and file inside the worktree: not written, so Claude Code plugins and MCP servers load for the grok worker (GRK-06)" % cfg)
+    sys.exit(0)
+text = open(cfg, encoding="utf-8", errors="replace").read() if os.path.lexists(cfg) else ""
+def declares(key):
+    return re.search(r"(?m)^\s*(\[{1,2}\s*[\"\x27]?%s[\"\x27]?\s*[\].]|[\"\x27]?%s[\"\x27]?\s*[.=])" % (key, key), text)
+if declares("plugins"):
+    print("lease: WARNING %s already declares plugins: left as it is, so Claude Code plugins and MCP servers may load for the grok worker (GRK-06)" % cfg)
+    sys.exit(0)
+block = ("# Agent Triforge: this lease worktree only, never merged. No plugin and no MCP server outside grok loads for the grok worker (GRK-06).\n"
+         "[plugins]\ndisabled = [" + ", ".join(json.dumps(n) for n in sorted(plugins)) + "]\n")
+if declares("mcp_servers"):
+    if servers:
+        print("lease: WARNING %s already declares MCP servers: none shadowed, so %s may start for the grok worker (GRK-06)" % (cfg, ", ".join(sorted(servers))))
+else:
+    block += "".join("\n[mcp_servers.%s]\ncommand = \"false\"\nenabled = false\n" % json.dumps(n) for n in sorted(servers))
+if text:
+    with open(cfg, "a", encoding="utf-8") as f:
+        f.write(("" if text.endswith("\n") else "\n") + "\n" + block)
+else:
+    os.makedirs(gdir, exist_ok=True)
+    with open(cfg, "w", encoding="utf-8") as f:
+        f.write(block)
+' >&2 || echo "lease: WARNING could not write ${WT}/.grok/config.toml (Claude Code plugins and MCP servers load for the grok worker, GRK-06)" >&2
+  return 0
 }
 
 # invoke_grok <agent-name> <prompt> [output-file] [timeout-seconds] [effort]

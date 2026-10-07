@@ -2,9 +2,11 @@
 
 Grok Build's `--agent <name|path>` flag (binary `grok`, xAI) selects an agent
 profile, so Triforge expresses a role the way it does for Cursor and OpenCode.
-`invoke_grok` and the lease lane's builder dispatch read the brief here
+`invoke_grok` and the lease lane's dispatch read the brief here
 (`grok-agents/<role>.md`), strip its YAML frontmatter, and put the body in
-front of the task prompt.
+front of the task prompt. A lease takes its class from its role: a builder,
+tester or documenter lease runs in the edit class with `builder.md`, and a
+reviewer or analyst lease in the read class with `reviewer.md` (SELF-25).
 
 ## What enforces each role
 
@@ -28,19 +30,33 @@ row GRK-09).
 By default grok reads Claude Code's and Cursor's skills, rules, CLAUDE.md, MCP
 servers and hooks. Every run sets `GROK_CLAUDE_*_ENABLED=0` and
 `GROK_CURSOR_*_ENABLED=0` (row GRK-04 checks the result with `grok inspect`).
-Row GRK-06 records two things those switches do not reach. Claude Code
-plugins under `~/.claude/plugins` stay loaded, and the session still offers
-their skills and commands (`codex:review` among them). And grok copies the
-`env` block of `~/.claude/settings.json` into its tool shell. A lease worker's tool
-shell keeps only the names the lease boundary passes (a `GROK_CONFIG` overlay
-with `include_only`), so that block stays out of it.
+Those switches do not reach three things:
+
+- Claude Code plugins under `~/.claude/plugins`. They stay loaded, and the
+  session offers their skills and commands (`codex:review` among them).
+- The `~/.claude.json` MCP servers. Run with Claude Code's own environment, a
+  session started them even though `grok inspect` reported them as off.
+- The `env` block of `~/.claude/settings.json`, which grok copies into its
+  tool shell.
+
+Only config-file keys reach the first two, so each lease worktree gets its own
+`.grok/config.toml`. Its `[plugins] disabled` list names every plugin grok
+finds, and an `[mcp_servers.<name>]` entry with `enabled = false` covers each
+MCP server outside grok's own config. The file is never merged, and a
+project's own file gets these tables appended rather than replaced. Row GRK-06
+opens a session from such a worktree with no prompt and checks that no plugin
+command is offered and no MCP server starts. A lease worker's tool shell keeps
+only the names the lease boundary passes (a `GROK_CONFIG` overlay with
+`include_only`), so the settings `env` block stays out of it. `invoke_grok`
+runs outside a lease worktree, so the plugins stay loaded there.
 
 ## Files
 
 | File | Role | Injected as |
 |---|---|---|
-| `builder.md` | Optional-tier builder | prompt prefix (edit class) |
-| `reviewer.md` | Read-only cross-reviewer | prompt prefix (read class); output merged to `ops/REVIEW_GROK.md` |
+| `builder.md` | Optional-tier builder | prompt prefix (edit class); also a tester or documenter lease |
+| `reviewer.md` | Read-only cross-reviewer | prompt prefix (read class); also an analyst lease; output merged to `ops/REVIEW_GROK.md` |
 
-A role without a brief here (tester, analyst, documenter) runs the raw prompt
-in its class; `invoke_grok` prints a warning naming the briefs that exist.
+Outside a lease, a role without a brief here (tester, analyst, documenter)
+runs the raw prompt in its class; `invoke_grok` prints a warning naming the
+briefs that exist.
