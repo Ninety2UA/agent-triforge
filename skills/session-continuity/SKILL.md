@@ -4,7 +4,7 @@ description: "Use when pausing with work left, resuming existing work, or wrappi
 metadata:
   triforge-consumer: "the lead"
   triforge-phase: "session boundaries (pause, resume, wrap)"
-  version: "3.3.0"
+  version: "4.0.0"
 ---
 
 # Session Continuity
