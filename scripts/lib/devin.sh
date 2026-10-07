@@ -37,13 +37,19 @@ fi
 #         which denies push, pull, fetch, commit, rebase, checkout and switch.
 #         The no-push GIT_CONFIG backstop of the lease lane (_adapter_env)
 #         stays the mechanical block
-# --config replaces ~/.config/devin/config.json, so the user's own Devin hooks,
-# MCP servers and config never load in a worker; read_config_from keeps only
-# agents_standard (AGENTS.md) and drops Claude Code's config, which Devin
-# imports by default (CLAUDE.md, .claude hooks and skills). agents_standard
-# does not govern skills: .agents/skills, .devin/skills and ~/.agents/skills
-# load with it off too.
-# A project's own .devin/ files still merge over the copy, so a read-class run
+# --config replaces ~/.config/devin/config.json, so the user's own Devin hooks
+# and settings never load in a worker. It does not replace
+# ~/.config/devin/mcp_config.json: the read class also points XDG_CONFIG_HOME
+# where nothing exists (_DEVIN_READ_XDG), so the user's MCP servers, and the
+# skills and subagent profiles under ~/.config/devin, stay out of it.
+# read_config_from keeps only agents_standard (AGENTS.md) and drops every
+# other tool's config, which Devin imports by default (CLAUDE.md, .claude,
+# .cursor, .windsurf hooks, MCP servers and skills; .windsurf/hooks.json ran
+# with windsurf on and did not with it off, measured). agents_standard does
+# not govern skills: .agents/skills, .devin/skills and ~/.agents/skills load
+# with it off too.
+# A project's own .devin/ and .cognition/ files still merge over the copy
+# (permissions, hooks, MCP servers, required plugins), so a read-class run
 # first passes _devin_project_guard.
 # Devin WRITES into the file it is handed (org id, theme, mode 600), so every
 # run gets a fresh copy (_devin_config_copy), never the shipped file. The copy
@@ -63,10 +69,13 @@ fi
 # refuses a request, so the served model could drift from the pinned one. It
 # stays unset: env -i drops it on both lanes.
 #
-# Consent at dispatch: invoke_devin and lease_dispatch run _member_consent_ok
-# (scripts/lib/roster.sh) before anything reaches Cognition, so a roster that
-# enables devin without a recorded consent is refused even on a path that
-# reads the table without loading the roster (at-review's optional lanes).
+# Consent and role at dispatch: invoke_devin and lease_dispatch run
+# _member_consent_ok and _member_role_ok (scripts/lib/roster.sh) before
+# anything reaches Cognition, so a roster that enables devin without a
+# recorded consent is refused even on a path that reads the table without
+# loading the roster (at-review's optional lanes), and the edit class runs only
+# while the builder opt-in is on record (a lease created before it was removed
+# included).
 #
 # Model: --model "${DEVIN_MODEL:-swe-1-6-slow}" on every call. swe-1-6-slow is
 # Cognition's own model and what a Devin Free account resolves to; Free
@@ -96,13 +105,28 @@ _devin_mode() {
   esac
 }
 
+# The read class's XDG_CONFIG_HOME: a path under /dev/null, so nothing exists
+# or can be created there. --config replaces only the user's config.json;
+# Devin still reads ~/.config/devin/mcp_config.json beside it and starts those
+# MCP servers with the session, plus the user's skills and subagent profiles
+# under ~/.config/devin and ~/.config/cognition. With XDG_CONFIG_HOME here it
+# finds none of them (measured on 3000.11.3: `devin mcp list` in a scratch
+# HOME lists the HOME's server, and none with this set).
+_DEVIN_READ_XDG=/dev/null/triforge-devin-read
+
 # _devin_argv <read|edit> <config> <model> — set _DEVIN_ARGV to a devin run's
-# command line up to the prompt: the per-run config copy, the model pin, the
-# class's --permission-mode (_devin_mode), workspace trust off (-p fails in an
-# untrusted directory) and -p last. The one composer: invoke_devin and
+# command line up to the prompt: for the read class `env XDG_CONFIG_HOME=`
+# _DEVIN_READ_XDG first, then devin with the per-run config copy, the model
+# pin, the class's --permission-mode (_devin_mode), workspace trust off (-p
+# fails in an untrusted directory) and -p last. The edit class keeps the
+# user's XDG_CONFIG_HOME: its tool shell runs the project's own commands,
+# which may read their config there. The one composer: invoke_devin and
 # _lease_lane_argv (scripts/lib/lease-wait.sh) both call it.
 _devin_argv() {
   _DEVIN_ARGV=(devin --config "$2" --model "$3" --permission-mode "$(_devin_mode "$1")" --respect-workspace-trust false -p)
+  if [ "${1:-}" != edit ]; then
+    _DEVIN_ARGV=(env "XDG_CONFIG_HOME=${_DEVIN_READ_XDG}" "${_DEVIN_ARGV[@]}")
+  fi
 }
 
 # _devin_config_copy <read|edit> <dest> — copy the shipped per-class config to
@@ -118,33 +142,61 @@ _devin_config_copy() {
 }
 
 # _devin_project_guard <dir> — nothing and 0 when no project file Devin loads
-# from <dir> can widen a read-class run; else the file and the cause on stdout
-# and 1. Devin merges the .devin/ files of <dir> and of each parent up to the
-# project root (the first with .git or .jj; every parent when none has one)
-# over the --config copy. Measured on 3000.11.3 under the read-class argv:
+# from <dir> can widen a read-class run or run code as it starts; else the
+# file and the cause on stdout and 1. Devin merges the config files of <dir>
+# and of each parent up to the project root (the first with .git or .jj;
+# every parent when none has one) over the --config copy, from .devin/ and
+# from .cognition/, the legacy name it still reads in full. Measured on
+# 3000.11.3 under the read-class argv:
 #   allow      a project allow widens any tool the copy does not deny: a
 #              Fetch(...) allow ran webfetch unprompted (an exec allow stayed
 #              refused: the copy's deny wins), so any allow or ask is refused
 #   hooks      run as commands at session start, before any permission check:
-#              the "hooks" key of config.json and config.local.json, and
-#              hooks.v1.json
+#              the "hooks" key of config.json and config.local.json,
+#              hooks.v1.json, and hooks.json (its older name: a SessionStart
+#              and a UserPromptSubmit hook there both ran in a read-class -p
+#              run); any non-empty hooks*.json is refused
 #   MCP        servers start with the session: mcp_config.json and
 #              mcp_config.local.json, and (documented, not measured) the
 #              legacy mcpServers key of config.json, migrated on startup
+#   plugins    config.json's requiredPlugins: Devin fetches and installs each
+#              one unasked, signed in or not, on any command that loads
+#              skills, and activates its hooks, MCP servers, skills and
+#              subagents for the session (a local plugin measured
+#              model-free: active_plugins=1 hooks=1 mcp_servers=1).
+#              optionalPlugins installs nothing and forbiddenPlugins only
+#              blocks, so both pass
 #   imports    a project read_config_from is a documented project setting;
 #              claude = true was not honored, and any import but
 #              agents_standard left on is refused anyway
-# Fail closed too on a .devin that is a symlink, a file that is a symlink or
-# not a plain file, and text that is not JSON once // and /* */ comments are
-# dropped (Devin reads JSONC) or that repeats a key. Read class only: the edit
-# class approves every tool already.
+#   unknown    Devin's docs omit names it honors (no requiredPlugins key, no
+#              hooks.json file), so a key the guard does not know, in a config
+#              file, its permissions or an MCP file, is refused, and so is any
+#              other JSON file at the top of .devin/ or .cognition/ (skills/,
+#              agents/ and other non-JSON entries pass)
+# Fail closed too on a .devin or .cognition that is a symlink, a file that is
+# a symlink or not a plain file, and text that is not JSON once // and /* */
+# comments are dropped (Devin reads JSONC) or that repeats a key. Read class
+# only: the edit class approves every tool already. Skills and subagent
+# profiles are not refused here: the copy's deny wins over a skill's
+# allowed-tools, and a skill that asks for a subagent is rejected (DVN rows,
+# devin-agents/README.md).
 _devin_project_guard() {
   python3 - "$1" <<'DEVIN_GUARD_PY'
 import json, os, stat, sys
 
+CONFIG_FILES = ("config.json", "config.local.json", "mcp_config.json", "mcp_config.local.json")
+CONFIG_KEYS = ("permissions", "read_config_from", "hooks", "mcpServers", "requiredPlugins", "optionalPlugins", "forbiddenPlugins", "version", "$schema")
+PERMISSION_KEYS = ("allow", "ask", "deny")
+MCP_KEYS = ("mcpServers", "$schema")
+
 def refuse(path, why):
-    print("%s: %s. Devin merges a project's .devin/ files over Triforge's read-only config, so no read-class Devin run starts here (R24). Fix: remove the entry, or route the role to another roster member" % (path, why))
+    print("%s: %s. Devin merges a project's .devin/ and .cognition/ files over Triforge's read-only config, so no read-class Devin run starts here (R24). Fix: remove the entry, or route the role to another roster member" % (path, why))
     sys.exit(1)
+
+def unknown(c, known):
+    extra = sorted(k for k in c if k not in known)
+    return "an unknown key %s (the guard passes only %s)" % (json.dumps(extra[0]), ", ".join(known)) if extra else ""
 
 def jsonc(t):
     # // and /* */ comments outside strings dropped (the docs: Devin reads JSONC)
@@ -194,22 +246,32 @@ def load(path):
     return json.loads(jsonc(data.decode("utf-8")), object_pairs_hook=nodup)
 
 def widens(name, c):
-    if name == "hooks.v1.json":
+    if name.startswith("hooks"):
         return "it declares hooks, which Devin runs as commands at session start" if c else ""
     if not isinstance(c, dict):
         return "not a JSON object"
     if name.startswith("mcp_config"):
-        return "it declares MCP servers, which Devin starts with the session" if c.get("mcpServers") else ""
+        if c.get("mcpServers"):
+            return "it declares MCP servers, which Devin starts with the session"
+        return unknown(c, MCP_KEYS)
+    why = unknown(c, CONFIG_KEYS)
+    if why:
+        return why
     perms = c.get("permissions") or {}
     if not isinstance(perms, dict):
         return "permissions is not an object"
     for k in ("allow", "ask"):
         if perms.get(k):
             return "permissions.%s %s widens the read class" % (k, json.dumps(perms[k])[:120])
+    why = unknown(perms, PERMISSION_KEYS)
+    if why:
+        return "permissions has " + why
     if c.get("hooks"):
         return "it declares hooks, which Devin runs as commands at session start"
     if c.get("mcpServers"):
         return "it declares MCP servers (mcpServers), which Devin starts with the session"
+    if c.get("requiredPlugins"):
+        return "requiredPlugins %s: Devin installs those plugins unasked and starts their hooks and MCP servers with the session" % json.dumps(c["requiredPlugins"])[:120]
     rcf = c.get("read_config_from")
     if rcf is not None and not isinstance(rcf, dict):
         return "read_config_from is not an object"
@@ -220,21 +282,27 @@ def widens(name, c):
 
 d = os.path.realpath(sys.argv[1])
 while True:
-    dv = os.path.join(d, ".devin")
-    if os.path.islink(dv):
-        refuse(dv, "a symlink")
-    if os.path.isdir(dv):
-        for name in ("config.json", "config.local.json", "hooks.v1.json", "mcp_config.json", "mcp_config.local.json"):
-            p = os.path.join(dv, name)
-            if not os.path.lexists(p):
-                continue
-            try:
-                c = load(p)
-            except ValueError as e:
-                refuse(p, "could not be checked: %s" % e)
-            why = widens(name, c)
-            if why:
-                refuse(p, why)
+    for dname in (".devin", ".cognition"):
+        dv = os.path.join(d, dname)
+        if os.path.islink(dv):
+            refuse(dv, "a symlink")
+        if not os.path.isdir(dv):
+            continue
+        # Every JSON file at the top of the directory, by lowercased name (a
+        # case-insensitive volume opens HOOKS.json for hooks.json): the config
+        # files and any hooks*.json are checked, any other JSON file refused
+        for entry in sorted(os.listdir(dv)):
+            name, p = entry.lower(), os.path.join(dv, entry)
+            if name in CONFIG_FILES or (name.startswith("hooks") and name.endswith(".json")):
+                try:
+                    c = load(p)
+                except ValueError as e:
+                    refuse(p, "could not be checked: %s" % e)
+                why = widens(name, c)
+                if why:
+                    refuse(p, why)
+            elif name.endswith((".json", ".jsonc", ".json5")):
+                refuse(p, "a JSON file the guard does not know (Devin reads its config from this directory by file name, and its docs do not list every name it reads)")
     if os.path.lexists(os.path.join(d, ".git")) or os.path.lexists(os.path.join(d, ".jj")):
         break
     up = os.path.dirname(d)
@@ -282,10 +350,11 @@ REIMPORT_RECORDS
 # The role comes from DEVIN_ROLE (dispatch_role sets it), else the agent name.
 # Runs under _adapter_env devin, the lease lane's allowlist. Returns devin's
 # exit code; 80 when a clean run printed no Status line (report missing, never
-# "no findings"); 1 when it printed nothing at all; _member_consent_ok's rc
-# (5) when the roster records no consent, and 1 (deterministic,
-# project-config) when a .devin/ file here would widen the read class, both
-# before anything is sent.
+# "no findings"); 1 when it printed nothing at all; rc 5 (deterministic) when
+# the roster records no consent (_member_consent_ok, reason consent) or does
+# not allow devin the role now (_member_role_ok, reason role: the builder
+# without its opt-in), and 1 (deterministic, project-config) when a project
+# file here would widen the read class, all before anything is sent.
 invoke_devin() {
   local AGENT_NAME=$1
   local PROMPT=$2
@@ -299,16 +368,22 @@ invoke_devin() {
   INVOKE_FAILURE_CLASS="none"
   _INVOKE_FAILURE_REASON=""
 
-  # The consent rule at dispatch (R24): the refusal goes to stderr and to the
+  # The consent and role rules at dispatch (R24): the builder class needs the
+  # opt-in on record now, whoever calls. A refusal goes to stderr and to the
   # output file, so a caller that reads only the file sees why.
+  _INVOKE_FAILURE_REASON="consent"
   _member_consent_ok devin 2> "$ERR" || CRC=$?
+  if [ "$CRC" -eq 0 ]; then
+    _INVOKE_FAILURE_REASON="role"
+    _member_role_ok devin "$ROLE" 2> "$ERR" || CRC=$?
+  fi
   if [ "$CRC" -ne 0 ]; then
     cat "$ERR" >&2
     cat "$ERR" > "$OUTPUT_FILE" 2>/dev/null || true
     INVOKE_FAILURE_CLASS="deterministic"
-    _INVOKE_FAILURE_REASON="consent"
     return "$CRC"
   fi
+  _INVOKE_FAILURE_REASON=""
 
   if ! command -v devin >/dev/null 2>&1; then
     echo "invoke_devin: ERROR \`devin\` (Devin CLI) not found on PATH — cannot invoke agent '${AGENT_NAME}'. Fix: $(cli_install_fix devin 2>/dev/null || echo 'install Devin CLI, then run devin auth login'). No retry (deterministic)." >&2
@@ -323,10 +398,11 @@ invoke_devin() {
   CLASS=$(_devin_class "$ROLE")
   MODE=$(_devin_mode "$CLASS")
 
-  # Devin starts in this directory, so its .devin/ files must not widen the
-  # read class (_devin_project_guard); the refusal also goes to the output file
+  # Devin starts in this directory, so its .devin/ and .cognition/ files must
+  # not widen the read class (_devin_project_guard); the refusal also goes to
+  # the output file
   if [ "$CLASS" = read ] && ! GUARD=$(_devin_project_guard "$PWD"); then
-    GUARD="invoke_devin: ERROR ${GUARD:-the project .devin/ check failed to run}. No retry (deterministic)."
+    GUARD="invoke_devin: ERROR ${GUARD:-the project .devin/ and .cognition/ check failed to run}. No retry (deterministic)."
     echo "$GUARD" >&2
     echo "$GUARD" > "$OUTPUT_FILE" 2>/dev/null || true
     INVOKE_FAILURE_CLASS="deterministic"

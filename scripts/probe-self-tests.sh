@@ -4193,8 +4193,8 @@ rm -rf "$_S20"
 # stubs (_SELF_STUBS) put the trio on PATH.
 #   read-config devin-agents/config-read.json allows nothing (no Exec rule:
 #              git diff, log and show take --output=<file>) and denies every
-#              tool that writes, fetches or calls MCP (a skill's or the
-#              project's allow widens any tool the copy leaves undenied)
+#              tool that writes, fetches or reaches an MCP server (a skill's or
+#              the project's allow widens any tool the copy leaves undenied)
 #   readiness  `Not logged in.` with rc 0 -> roster_member_auth devin rc 1
 #              (auth-failed, naming devin auth login); `Logged in (via Devin).`
 #              -> ok
@@ -4232,14 +4232,21 @@ rm -rf "$_S20"
 #              DEVIN_REFUSAL_FALLBACK; carries the worker marker
 #   lane       _lease_lane_argv devin: the per-dispatch config copy, the model
 #              pin, --permission-mode dangerous for an .edit.json copy and auto
-#              for a .read.json one, --respect-workspace-trust false, -p last
+#              for a .read.json one, --respect-workspace-trust false, -p last;
+#              the read class only behind `env XDG_CONFIG_HOME=/dev/null/...`
+#              (the user's ~/.config/devin MCP servers stay out, DVN-07)
+#   role-rule  _member_role_ok: devin builder without the opt-in -> rc 5
+#              naming the role and at-setup, with it -> 0; devin tester ->
+#              rc 5 even with it; a reviewer, a persona name and codex as
+#              builder -> 0; a declined member (enabled = false) -> rc 5
 #   invoke     invoke_devin reviewer through the stub, consent on record: a
 #              temp copy of devin-agents/config-read.json (the shipped file
 #              unchanged after the stub wrote its copy), auto mode, the model
 #              pin, the reviewer brief in the prompt, the lease allowlist as
 #              its whole env (no SHELL, no DEVIN_REFUSAL_FALLBACK, not the
 #              TRIFORGE_TEST_SECRET planted in the parent, no name outside
-#              TRIFORGE_ENV_BASE, the marker and the no-push config), rc 0 on
+#              TRIFORGE_ENV_BASE, the marker, the no-push config and the read
+#              class's XDG_CONFIG_HOME under /dev/null), rc 0 on
 #              Status: DONE; no Status line -> rc 80; empty answer ->
 #              nonzero; "Not logged in" -> deterministic auth; "Upgrade to
 #              Pro" -> deterministic plan
@@ -4260,6 +4267,26 @@ rm -rf "$_S20"
 #              builder arm on a worktree whose config.json declares hooks ->
 #              rc 94, deterministic, the cause in its output, the stub never
 #              run, the copy removed
+#   project-surfaces  the rest of what a project can make Devin load: a
+#              requiredPlugins entry, an unknown key in config.json, in its
+#              permissions or in an MCP file, a hooks.json (Hooks.JSON too),
+#              any other JSON file in .devin/, and the legacy .cognition/
+#              directory (an allow, hooks.v1.json, mcp_config.local.json, a
+#              symlinked .cognition) each refuse, naming the file; an
+#              optionalPlugins and forbiddenPlugins config, and non-JSON
+#              entries (skills/, agents/, environment.yaml), pass;
+#              invoke_devin from a project whose .cognition/config.json allows
+#              a fetch refuses (rc 1, project-config) with the stub never run;
+#              the lease lane's read class fails to compose on a
+#              requiredPlugins config
+#   role-dispatch  a builder lease created with the opt-in on record, whose
+#              roster then moves the builder role away and drops the opt-in
+#              (consent kept, so it loads): lease_dispatch refuses (rc 5,
+#              naming the role and at-setup), the row stays leased, the seam
+#              builder never runs; invoke_devin builder without the opt-in
+#              refuses (rc 5, deterministic, reason role) with the stub never
+#              run, and with it runs in dangerous mode without the read
+#              class's XDG_CONFIG_HOME
 #   lease      the TRIFORGE_TEST_BUILDER seam with [roles.reviewer] cli =
 #              devin: lease_create <t> reviewer -> builder_cli devin, the
 #              seam builder sees a .read.json config copy during the run, the
@@ -4369,7 +4396,7 @@ O=$(python3 -c '
 import json, sys
 p = json.load(open(sys.argv[1])).get("permissions", {})
 allow, deny = p.get("allow", []), p.get("deny", [])
-need = ["exec", "edit", "write", "Write(**)", "notebook_edit", "write_to_process", "webfetch", "web_search", "Fetch(https://*)", "Fetch(http://*)", "browser_preview", "mcp_call_tool", "mcp__*"]
+need = ["exec", "edit", "write", "Write(**)", "notebook_edit", "write_to_process", "webfetch", "web_search", "Fetch(https://*)", "Fetch(http://*)", "browser_preview", "mcp_call_tool", "mcp_read_resource", "mcp_list_tools", "mcp_list_servers", "mcp__*"]
 print("read-config:allow=" + str(len(allow)) + ":exec-allow=" + str(sum(1 for a in allow if str(a).lower().startswith("exec"))) + ":deny-exec=" + str("exec" in deny).lower() + ":deny-write=" + str("Write(**)" in deny).lower() + ":deny-missing=" + ",".join(n for n in need if n not in deny))
 ' "${REPO_ROOT}/devin-agents/config-read.json" 2>&1)
 _S24_FAIL="${_S24_FAIL}$(_self_expect read-config "$O" '^read-config:allow=0:exec-allow=0:deny-exec=true:deny-write=true:deny-missing=$')"
@@ -4389,6 +4416,19 @@ O=$( cd "$_S24/w3" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_
   done
   echo "$DCL" )
 _S24_FAIL="${_S24_FAIL}$(_self_expect member-rules "$O" '^optin-drop:rc=2:same=yes$' '^decline:rc=0:builder=0/claude:reviewer=0/codex:tester=0/codex:analyst=0/antigravity:documenter=0/antigravity$')"
+
+# the role rule at dispatch, one call each: the roster as it is now decides
+_s24_roster "$_S24/rr" "[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n\n[members.opencode]\nenabled = false\n"
+O=$( cd "$_S24/rr" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  T=rr
+  for RR in devin:builder devin:reviewer devin:security-sentinel devin:tester codex:builder opencode:reviewer optin devin:builder devin:tester; do
+    if [ "$RR" = optin ]; then
+      printf '[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\n%s\nopt_in = ["builder"]\n' "$_S24_C" > ops/roster.toml; T=rr-optin; continue
+    fi
+    R=0; E=$(_member_role_ok "${RR%%:*}" "${RR#*:}" 2>&1) || R=$?
+    echo "${T}-${RR%%:*}-${RR#*:}:rc=${R}:says=$(printf '%s' "$E" | grep -c "role '${RR#*:}'.*at-setup" || true)"
+  done )
+_S24_FAIL="${_S24_FAIL}$(_self_expect role-rule "$O" '^rr-devin-builder:rc=5:says=1$' '^rr-devin-reviewer:rc=0:says=0$' '^rr-devin-security-sentinel:rc=0:says=0$' '^rr-devin-tester:rc=5:says=1$' '^rr-codex-builder:rc=0:says=0$' '^rr-opencode-reviewer:rc=5:says=1$' '^rr-optin-devin-builder:rc=0:says=0$' '^rr-optin-devin-tester:rc=5:says=1$')"
 
 # consent at dispatch: invoke_devin on a hand-written table without consent
 _s24_roster "$_S24/c1" '[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\n'
@@ -4436,7 +4476,7 @@ dr = s.get("sandbox", {}).get("filesystem", {}).get("denyRead", [])
 print("cred:read=" + str("Read(~/.local/share/devin/**)" in deny and "Read(~/.local/share/devin)" in deny).lower() + ":sandbox=" + str("~/.local/share/devin" in dr).lower())
 ' )
 _S24_FAIL="${_S24_FAIL}$(_self_expect env "$O" '^env:shell=0:fallback=0:marker=1$')"
-_S24_FAIL="${_S24_FAIL}$(_self_expect lane "$O" "^lane-edit:devin --config ${_S24}/x.devin.edit.json --model swe-1-6-slow --permission-mode dangerous --respect-workspace-trust false -p\$" "^lane-read:devin --config ${_S24}/x.devin.read.json --model swe-1-6-slow --permission-mode auto --respect-workspace-trust false -p\$")"
+_S24_FAIL="${_S24_FAIL}$(_self_expect lane "$O" "^lane-edit:devin --config ${_S24}/x.devin.edit.json --model swe-1-6-slow --permission-mode dangerous --respect-workspace-trust false -p\$" "^lane-read:env XDG_CONFIG_HOME=/dev/null/triforge-devin-read devin --config ${_S24}/x.devin.read.json --model swe-1-6-slow --permission-mode auto --respect-workspace-trust false -p\$")"
 _S24_FAIL="${_S24_FAIL}$(_self_expect cred "$O" '^cred:read=true:sandbox=true$')"
 
 # invoke_devin through the stub
@@ -4453,14 +4493,14 @@ O=$( cd "$_S24" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" SHELL=/bin/zsh DE
     if [ "$M" = done ]; then
       C=$(grep -A1 -x -- '--config' "$_S24/inv.argv" | tail -1)
       echo "inv-argv:mode=$(grep -A1 -x -- '--permission-mode' "$_S24/inv.argv" | tail -1):model=$(grep -A1 -x -- '--model' "$_S24/inv.argv" | tail -1):trust=$(grep -A1 -x -- '--respect-workspace-trust' "$_S24/inv.argv" | tail -1):p=$(grep -cx -- '-p' "$_S24/inv.argv" || true):cfg-shipped=$( [ "$C" = "${REPO_ROOT}/devin-agents/config-read.json" ] && echo yes || echo no):cfg-left=$( [ -e "$C" ] && echo yes || echo no)"
-      echo "inv-env:shell=$(grep -c '^SHELL=' "$_S24/inv.env" || true):fallback=$(grep -c '^DEVIN_REFUSAL_FALLBACK=' "$_S24/inv.env" || true)"
+      echo "inv-env:shell=$(grep -c '^SHELL=' "$_S24/inv.env" || true):fallback=$(grep -c '^DEVIN_REFUSAL_FALLBACK=' "$_S24/inv.env" || true):xdg=$(sed -n 's/^XDG_CONFIG_HOME=//p' "$_S24/inv.env")"
       # the lease allowlist is the whole env (PWD, SHLVL, OLDPWD and _ are the stub shell's own)
-      echo "inv-allow:secret=$(grep -c '^TRIFORGE_TEST_SECRET=' "$_S24/inv.env" || true):marker=$(grep -c '^TRIFORGE_LEASE_WORKER=' "$_S24/inv.env" || true):extra=$(grep -vE '^(HOME|PATH|TMPDIR|TERM|LANG|COLORTERM|USER|NO_COLOR|TRIFORGE_LEASE_WORKER|GIT_CONFIG_[A-Z0-9_]+|PWD|SHLVL|OLDPWD|_)=' "$_S24/inv.env" | cut -d= -f1 | sort -u | tr '\n' ' ')"
+      echo "inv-allow:secret=$(grep -c '^TRIFORGE_TEST_SECRET=' "$_S24/inv.env" || true):marker=$(grep -c '^TRIFORGE_LEASE_WORKER=' "$_S24/inv.env" || true):extra=$(grep -vE '^(HOME|PATH|TMPDIR|TERM|LANG|COLORTERM|USER|NO_COLOR|TRIFORGE_LEASE_WORKER|GIT_CONFIG_[A-Z0-9_]+|XDG_CONFIG_HOME|PWD|SHLVL|OLDPWD|_)=' "$_S24/inv.env" | cut -d= -f1 | sort -u | tr '\n' ' ')"
       echo "inv-brief:$(grep -qF -- "$_S24_SIG" "$_S24/inv.argv" && echo yes || echo no):task=$(grep -c 'PROMPT-S24' "$_S24/inv.argv" || true):status=$(grep -c '^Status: DONE' "$_S24/inv-done.out" || true)"
     fi
   done )
 rm -f "$_S24/tmp/dvn-run"
-_S24_FAIL="${_S24_FAIL}$(_self_expect invoke "$O" '^inv-done:rc=0:class=none' '^inv-none:rc=80:' '^inv-empty:rc=[1-9]' '^inv-auth:rc=[1-9][0-9]*:class=deterministic:reason=auth$' '^inv-plan:rc=[1-9][0-9]*:class=deterministic:reason=plan$' '^inv-argv:mode=auto:model=swe-1-6-slow:trust=false:p=1:cfg-shipped=no:cfg-left=no$' '^inv-env:shell=0:fallback=0$' '^inv-allow:secret=0:marker=1:extra=$' '^inv-brief:yes:task=1:status=1$')"
+_S24_FAIL="${_S24_FAIL}$(_self_expect invoke "$O" '^inv-done:rc=0:class=none' '^inv-none:rc=80:' '^inv-empty:rc=[1-9]' '^inv-auth:rc=[1-9][0-9]*:class=deterministic:reason=auth$' '^inv-plan:rc=[1-9][0-9]*:class=deterministic:reason=plan$' '^inv-argv:mode=auto:model=swe-1-6-slow:trust=false:p=1:cfg-shipped=no:cfg-left=no$' '^inv-env:shell=0:fallback=0:xdg=/dev/null/triforge-devin-read$' '^inv-allow:secret=0:marker=1:extra=$' '^inv-brief:yes:task=1:status=1$')"
 
 # _lease_builder_run's devin arm through the stub, in a session of its own
 # (its exit sweep reaches only its own group, as SELF-20's builder)
@@ -4474,7 +4514,7 @@ printf '%s\n' "$_S24/b" > "$_S24/tmp/dvn-log"
 ( source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 && _devin_config_copy read "$_S24/b1.out.devin.read.json" ) >/dev/null 2>&1 || true
 _s24_builder "$_S24/b1.out.devin.read.json" "$_S24/b1.out"
 _s24_builder "$_S24/b2.out.devin.read.json" "$_S24/b2.out"
-O="b-run:rc=$(cat "$_S24/b1.out.rc" 2>/dev/null):class=$(cat "$_S24/b1.out.class" 2>/dev/null):mode=$(grep -A1 -x -- '--permission-mode' "$_S24/b.argv" 2>/dev/null | tail -1):cfg=$(grep -A1 -x -- '--config' "$_S24/b.argv" 2>/dev/null | tail -1 | sed -n 's/.*\.devin\.\([a-z]*\)\.json$/\1/p'):left=$([ -e "$_S24/b1.out.devin.read.json" ] && echo yes || echo no):log=$(grep -c 'devin lane: devin --config .*\.devin\.read\.json .*--permission-mode auto' "$_S24/b1.out.log" 2>/dev/null || true)
+O="b-run:rc=$(cat "$_S24/b1.out.rc" 2>/dev/null):class=$(cat "$_S24/b1.out.class" 2>/dev/null):mode=$(grep -A1 -x -- '--permission-mode' "$_S24/b.argv" 2>/dev/null | tail -1):cfg=$(grep -A1 -x -- '--config' "$_S24/b.argv" 2>/dev/null | tail -1 | sed -n 's/.*\.devin\.\([a-z]*\)\.json$/\1/p'):left=$([ -e "$_S24/b1.out.devin.read.json" ] && echo yes || echo no):log=$(grep -c 'devin lane: env XDG_CONFIG_HOME=/dev/null/triforge-devin-read devin --config .*\.devin\.read\.json .*--permission-mode auto' "$_S24/b1.out.log" 2>/dev/null || true)
 b-missing:rc=$(cat "$_S24/b2.out.rc" 2>/dev/null):class=$(cat "$_S24/b2.out.class" 2>/dev/null):says=$(grep -c 'devin config copy missing' "$_S24/b2.out" 2>/dev/null || true):notint=$(grep -c 'not integrated' "$_S24/b2.out" 2>/dev/null || true)"
 _S24_FAIL="${_S24_FAIL}$(_self_expect builder "$O" '^b-run:rc=0:class=none:mode=auto:cfg=read:left=no:log=1$' '^b-missing:rc=94:class=deterministic:says=1:notint=0$')"
 _S24_FAIL="${_S24_FAIL}$(_self_expect shipped-config "ship:$(cksum < "${REPO_ROOT}/devin-agents/config-read.json" 2>/dev/null || echo gone)" "^ship:${_S24_SHIP}\$")"
@@ -4523,6 +4563,59 @@ O="${O}
 b-project:rc=$(cat "$_S24/b3.out.rc" 2>/dev/null):class=$(cat "$_S24/b3.out.class" 2>/dev/null):says=$(grep -c 'could not compose its command: .*/\.devin/config\.json: it declares hooks' "$_S24/b3.out" 2>/dev/null || true):ran=$([ -e "$_S24/b3.argv" ] && echo yes || echo no):left=$([ -e "$_S24/b3.out.devin.read.json" ] && echo yes || echo no)"
 _S24_FAIL="${_S24_FAIL}$(_self_expect project-config "$O" '^pc-allow:rc=1:class=deterministic:reason=project-config:ran=no:says=1$' '^pc-lane-read:rc=1:says=1$' '^pc-lane-edit:rc=0$' '^pc-hooks:rc=1:hooks\.v1\.json$' '^pc-mcp:rc=1:mcp_config\.local\.json$' '^pc-imports:rc=1:config\.local\.json$' '^pc-link:rc=1:config\.json$' '^pc-jsonc:rc=0:$' '^pc-deny-only:rc=0:ran=yes$' '^b-project:rc=94:class=deterministic:says=1:ran=no:left=no$')"
 
+# the rest of what a project can make Devin load: required plugins, keys the
+# guard does not know, and the legacy .cognition/ directory
+_s24_roster "$_S24/ps" "[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+( cd "$_S24/ps" && git init -q ) >/dev/null 2>&1
+printf '%s\n' "$_S24/ps/stub" > "$_S24/tmp/dvn-log"
+O=$( cd "$_S24/ps" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" DVN_STUB_LOG="$_S24/ps/stub" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  HERE=$(pwd -P)
+  for K in plugins unknown permkey mcpkey hooksjson hookscase otherjson nonjson cog-allow cog-hooks cog-mcp cog-link optforbid; do
+    rm -rf .devin .cognition
+    case "$K" in
+      (plugins)   mkdir .devin; printf '{ "requiredPlugins": ["acme/session-hooks"] }\n' > .devin/config.json ;;
+      (unknown)   mkdir .devin; printf '{ "permissions": { "deny": ["exec"] }, "agent": { "model": "x" } }\n' > .devin/config.json ;;
+      (permkey)   mkdir .devin; printf '{ "permissions": { "deny": ["exec"], "defaultMode": "dangerous" } }\n' > .devin/config.local.json ;;
+      (mcpkey)    mkdir .devin; printf '{ "servers": { "x": { "command": "true" } } }\n' > .devin/mcp_config.json ;;
+      (hooksjson) mkdir .devin; printf '{ "SessionStart": [ { "hooks": [ { "type": "command", "command": "true" } ] } ] }\n' > .devin/hooks.json ;;
+      (hookscase) mkdir .devin; printf '{ "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "true" } ] } ] }\n' > .devin/Hooks.JSON ;;
+      (otherjson) mkdir .devin; printf '{}\n' > .devin/settings.json ;;
+      (nonjson)   mkdir -p .devin/skills/s .devin/agents; printf 'image: x\n' > .devin/environment.yaml; printf -- '---\nname: s\n---\nSay hi.\n' > .devin/skills/s/SKILL.md ;;
+      (cog-allow) mkdir .cognition; printf '{ "permissions": { "allow": ["Fetch(domain:example.com)"] } }\n' > .cognition/config.json ;;
+      (cog-hooks) mkdir .cognition; printf '{ "SessionStart": [ { "hooks": [ { "type": "command", "command": "true" } ] } ] }\n' > .cognition/hooks.v1.json ;;
+      (cog-mcp)   mkdir .cognition; printf '{ "mcpServers": { "x": { "command": "true" } } }\n' > .cognition/mcp_config.local.json ;;
+      (cog-link)  mkdir -p "$_S24/ps-target"; ln -s "$_S24/ps-target" .cognition ;;
+      (optforbid) mkdir .devin; printf '{ "optionalPlugins": ["acme/a"], "forbiddenPlugins": ["*"], "version": 1 }\n' > .devin/config.json ;;
+    esac
+    R=0; G=$(_devin_project_guard "$PWD") || R=$?
+    echo "ps-${K}:rc=${R}:$(printf '%s' "$G" | sed "s|^${HERE}/||" | cut -c1-48)"
+  done
+  rm -rf .devin .cognition; mkdir .cognition
+  printf '{ "permissions": { "allow": ["Fetch(domain:example.com)"] } }\n' > .cognition/config.json
+  R=0; invoke_devin reviewer "PROMPT-S24" "$_S24/ps/out" 30 >/dev/null 2>&1 || R=$?
+  echo "ps-invoke:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$([ -e "$_S24/ps/stub.argv" ] && echo yes || echo no):says=$(grep -c '\.cognition/config\.json: permissions\.allow' "$_S24/ps/out" 2>/dev/null || true)"
+  rm -rf .cognition; mkdir .devin
+  printf '{ "requiredPlugins": ["acme/session-hooks"] }\n' > .devin/config.json
+  : > "$_S24/ps.devin.read.json"
+  R=0; _LEASE_LANE_ERR=""; _lease_lane_argv devin "" high swe-1-6-slow "$_S24/ps.devin.read.json" "" "$_S24/ps" 600 || R=$?
+  echo "ps-lane:rc=${R}:says=$(printf '%s' "$_LEASE_LANE_ERR" | grep -c '\.devin/config\.json: requiredPlugins' || true)" )
+_S24_FAIL="${_S24_FAIL}$(_self_expect project-surfaces "$O" \
+  '^ps-plugins:rc=1:\.devin/config\.json: requiredPlugins \["acme/' \
+  '^ps-unknown:rc=1:\.devin/config\.json: an unknown key "agent"' \
+  '^ps-permkey:rc=1:\.devin/config\.local\.json: permissions has an' \
+  '^ps-mcpkey:rc=1:\.devin/mcp_config\.json: an unknown key "servers' \
+  '^ps-hooksjson:rc=1:\.devin/hooks\.json: it declares hooks' \
+  '^ps-hookscase:rc=1:\.devin/Hooks\.JSON: it declares hooks' \
+  '^ps-otherjson:rc=1:\.devin/settings\.json: a JSON file the guard' \
+  '^ps-nonjson:rc=0:$' \
+  '^ps-cog-allow:rc=1:\.cognition/config\.json: permissions\.allow' \
+  '^ps-cog-hooks:rc=1:\.cognition/hooks\.v1\.json: it declares hooks' \
+  '^ps-cog-mcp:rc=1:\.cognition/mcp_config\.local\.json: it declares' \
+  '^ps-cog-link:rc=1:\.cognition: a symlink' \
+  '^ps-optforbid:rc=0:$' \
+  '^ps-invoke:rc=1:class=deterministic:reason=project-config:ran=no:says=1$' \
+  '^ps-lane:rc=1:says=1$')"
+
 # a reviewer lease through the seam
 _self_repo "$_S24/lease" "$_S24" sprint/s24 "[roles.reviewer]\ncli = \"devin\"\nfallbacks = [\"codex\"]\n\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
 # the seam builder records the config copy it finds during the run
@@ -4550,9 +4643,35 @@ O=$( cd "$_S24/lease2" && export HOME="$_S24" GIT_CONFIG_NOSYSTEM=1 PATH="$_S24_
   echo "consent-lease:rc=${R}:state=$(_ledger_get s24c state 2>/dev/null):ran=$([ -e "$_S24/fb-mark" ] && echo yes || echo no)" )
 _S24_FAIL="${_S24_FAIL}$(_self_expect consent-lease "$O" '^consent-lease:rc=5:state=leased:ran=no$')"
 
-_S24_CAP="Devin CLI as an optional member: readiness read from auth-status text, a read config with no command allowed, recorded consent and the builder opt-in at load, in the writers and at dispatch, no headless enrollment, the re-import flag setup reads, the lease allowlist on both lanes, the lane argv per class, invoke_devin on a config copy with the Status line as completion, the builder arm's class, copy removal and compose failure, a project's widening .devin/ files refused on both lanes, a reviewer lease to review, ~/.local/share/devin closed to a claude worker (R24, R25)"
+# the role rule at dispatch: a builder lease created with the opt-in on record
+# is not dispatched once the roster moves the builder role away and drops the
+# opt-in (consent kept, so the roster still loads)
+_self_repo "$_S24/lease3" "$_S24" sprint/s24r "[roles.builder]\ncli = \"devin\"\nfallbacks = [\"claude\"]\n\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\nopt_in = [\"builder\"]\n"
+printf '#!/bin/sh\n: > %s/fb-role\necho "Status: DONE"\n' "$_S24" > "$_S24/fb-role.sh"
+chmod +x "$_S24/fb-role.sh"
+O=$( cd "$_S24/lease3" && export HOME="$_S24" GIT_CONFIG_NOSYSTEM=1 PATH="$_S24_PATH" TMPDIR="$_S24/tmp" TRIFORGE_LEASE_ROOT="$_S24/leases3" TRIFORGE_TEST_BUILDER="$_S24/fb-role.sh" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  lease_create s24r builder >/dev/null 2>&1 || { echo "role-lease:create-failed"; exit 0; }
+  B=$(_ledger_get s24r builder_cli 2>/dev/null)
+  printf '[roles.builder]\ncli = "claude"\nfallbacks = ["codex"]\n\n[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\n%s\n' "$_S24_C" > ops/roster.toml
+  RL=0; resolve_role builder >/dev/null 2>&1 || RL=$?
+  R=0; E=$(lease_dispatch s24r "probe build: report only" 60 2>&1 >/dev/null) || R=$?
+  if [ "$R" -eq 0 ]; then _self_wait_rc s24r; fi
+  echo "role-lease:builder=${B}:loads=${RL}:rc=${R}:state=$(_ledger_get s24r state 2>/dev/null):ran=$([ -e "$_S24/fb-role" ] && echo yes || echo no):says=$(printf '%s' "$E" | grep -c "role 'builder'.*at-setup" || true)" )
+# invoke_devin builder: refused without the opt-in, dangerous mode with it
+_s24_roster "$_S24/ri" "[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+printf '%s\n' "$_S24/ri/stub" > "$_S24/tmp/dvn-log"
+O="${O}
+$( cd "$_S24/ri" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" DVN_STUB_LOG="$_S24/ri/stub" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  R=0; invoke_devin builder "PROMPT-S24" "$_S24/ri/out" 30 >/dev/null 2>&1 || R=$?
+  echo "role-invoke:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$([ -e "$_S24/ri/stub.argv" ] && echo yes || echo no):says=$(grep -c "role 'builder'.*at-setup" "$_S24/ri/out" 2>/dev/null || true)"
+  printf '[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\n%s\nopt_in = ["builder"]\n' "$_S24_C" > ops/roster.toml
+  R=0; invoke_devin builder "PROMPT-S24" "$_S24/ri/out2" 30 >/dev/null 2>&1 || R=$?
+  echo "role-invoke-optin:rc=${R}:mode=$(grep -A1 -x -- '--permission-mode' "$_S24/ri/stub.argv" 2>/dev/null | tail -1):xdg=$(sed -n 's/^XDG_CONFIG_HOME=//p' "$_S24/ri/stub.env" 2>/dev/null)" )"
+_S24_FAIL="${_S24_FAIL}$(_self_expect role-dispatch "$O" '^role-lease:builder=devin:loads=0:rc=5:state=leased:ran=no:says=1$' '^role-invoke:rc=5:class=deterministic:reason=role:ran=no:says=1$' '^role-invoke-optin:rc=0:mode=dangerous:xdg=$')"
+
+_S24_CAP="Devin CLI as an optional member: readiness read from auth-status text, a read config with no command allowed, recorded consent and the builder opt-in at load, in the writers and at dispatch, no headless enrollment, the re-import flag setup reads, the lease allowlist on both lanes, the lane argv per class, invoke_devin on a config copy with the Status line as completion, the builder arm's class, copy removal and compose failure, a project's widening .devin/ and .cognition/ files, required plugins and unknown keys refused on both lanes, the role rule at dispatch (a builder lease after its opt-in was dropped, invoke_devin builder), the read class's XDG_CONFIG_HOME, a reviewer lease to review, ~/.local/share/devin closed to a claude worker (R24, R25)"
 if [ -z "$_S24_FAIL" ]; then
-  row "SELF-24" "devin" "$_S24_CAP" "PASS" "auth: Not logged in. rc 0 -> auth-failed, Logged in (via Devin). -> ok; consent: missing -> rc 5, chain with no member table -> rc 5, recorded -> reviewer=devin; opt-in: builder primary or fallback without it -> rc 5, with it -> builder=devin, tester never; writers: role write refused without the opt-in (roster unchanged), member write refused without --consent, consent recorded via=test and kept across a model change, opt-in tester refused, decline drops both; read config: no allow, exec and Write(**) denied; member writes: opt-in drop refused rc 2 (roster unchanged), a decline keeps all five roles resolving (builder -> claude); consent at dispatch: invoke_devin rc 5 with the stub never run, lease_dispatch rc 5 with the row still leased; headless enroll rc 20, no table; re-import flag yes/no/unknown from the DVN-04 row; env: no SHELL, no DEVIN_REFUSAL_FALLBACK, worker marker; lane: dangerous for .edit.json, auto for .read.json, -p last; invoke: config copy (shipped file unchanged, copy removed), auto, the pin, reviewer brief, the allowlist as its whole env (no planted secret), Status: DONE rc 0, no Status rc 80, empty nonzero, auth and plan deterministic; builder arm: read class off the argv and the logged command line, copy removed, a missing copy rc 94 deterministic (not 'not integrated'); project .devin/: a Fetch allow -> invoke_devin rc 1 deterministic project-config naming the file with the stub never run, the lease lane's read class a compose failure naming it, the edit class composing, hooks.v1.json, mcp_config.local.json, a read_config_from import and a symlinked config.json refused, a JSONC deny-only config passing, the builder arm on a hooks config rc 94 deterministic with the stub never run and the copy removed; seam reviewer lease -> review, a read config copy during the run and none after; claude lane denies ~/.local/share/devin (Read + sandbox)" "static"
+  row "SELF-24" "devin" "$_S24_CAP" "PASS" "auth: Not logged in. rc 0 -> auth-failed, Logged in (via Devin). -> ok; consent: missing -> rc 5, chain with no member table -> rc 5, recorded -> reviewer=devin; opt-in: builder primary or fallback without it -> rc 5, with it -> builder=devin, tester never; writers: role write refused without the opt-in (roster unchanged), member write refused without --consent, consent recorded via=test and kept across a model change, opt-in tester refused, decline drops both; read config: no allow, exec and Write(**) denied; member writes: opt-in drop refused rc 2 (roster unchanged), a decline keeps all five roles resolving (builder -> claude); consent at dispatch: invoke_devin rc 5 with the stub never run, lease_dispatch rc 5 with the row still leased; headless enroll rc 20, no table; re-import flag yes/no/unknown from the DVN-04 row; env: no SHELL, no DEVIN_REFUSAL_FALLBACK, worker marker; lane: dangerous for .edit.json, auto for .read.json, -p last; invoke: config copy (shipped file unchanged, copy removed), auto, the pin, reviewer brief, the allowlist as its whole env (no planted secret), Status: DONE rc 0, no Status rc 80, empty nonzero, auth and plan deterministic; builder arm: read class off the argv and the logged command line, copy removed, a missing copy rc 94 deterministic (not 'not integrated'); project .devin/: a Fetch allow -> invoke_devin rc 1 deterministic project-config naming the file with the stub never run, the lease lane's read class a compose failure naming it, the edit class composing, hooks.v1.json, mcp_config.local.json, a read_config_from import and a symlinked config.json refused, a JSONC deny-only config passing, the builder arm on a hooks config rc 94 deterministic with the stub never run and the copy removed; requiredPlugins, an unknown key (config, permissions, MCP file), hooks.json in any case, any other JSON file and .cognition/ (allow, hooks.v1.json, mcp_config.local.json, symlink) refused naming the file, optional and forbidden plugin lists and non-JSON entries passing, invoke_devin from a .cognition allow rc 1 with the stub never run, the lane's read class a compose failure on requiredPlugins; role rule: devin builder without the opt-in, devin tester and a declined member rc 5 naming the role and at-setup, reviewer, a persona name and codex builder 0; a builder lease whose opt-in was dropped after lease_create -> lease_dispatch rc 5, row leased, seam never run; invoke_devin builder rc 5 reason role without the opt-in, dangerous mode with it; read class behind XDG_CONFIG_HOME=/dev/null/triforge-devin-read (lane argv, invoke env, builder log), edit class without it; seam reviewer lease -> review, a read config copy during the run and none after; claude lane denies ~/.local/share/devin (Read + sandbox)" "static"
 else
   row "SELF-24" "devin" "$_S24_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S24_FAIL"):$(printf '%s' "$_S24_FAIL" | cut -c1-700)" "static"
 fi

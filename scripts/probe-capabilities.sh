@@ -76,7 +76,7 @@ ONLY=""
 ONLY_ROWS="CC-09 CC-10 CC-11 CC-12 CC-13 CC-14 CC-14b CC-15 CC-16 CC-17 CC-18 CC-19 CC-20 SELF-06f CDX-12 CDX-13 CDX-14 CDX-15 CDX-15b CDX-16 CDX-17 CDX-18 CDX-19 AGY-17 AGY-18 OC-09 KIMI-10 CUR-13"
 # The Devin rows (U17) and the claude lane's Devin credential row: --only
 # selectable, and SELF-06h, which the full run records among the SELF rows
-ONLY_ROWS="$ONLY_ROWS DVN-01 DVN-02 DVN-03 DVN-04 DVN-05 DVN-06 CC-25 SELF-06h"
+ONLY_ROWS="$ONLY_ROWS DVN-01 DVN-02 DVN-03 DVN-04 DVN-05 DVN-06 DVN-07 CC-25 SELF-06h"
 # The Grok Build section (U16) runs under --only too, and so does SELF-06g.
 ONLY_ROWS="$ONLY_ROWS GRK-01 GRK-02 GRK-03 GRK-04 GRK-05 GRK-06 GRK-07 GRK-08 GRK-09 GRK-10 GRK-11 SELF-06g"
 
@@ -3146,7 +3146,7 @@ if _want CUR-13; then
   fi
 fi
 
-# --------------------------------------------- Devin CLI (U17, R24): DVN-01..06
+# --------------------------------------------- Devin CLI (U17, R24): DVN-01..07
 # Devin is an optional reviewer and analyst, a builder only with the roster's
 # opt-in, and enrolled only with the user's recorded consent. The live rows run
 # the lane's own argv (_dvn_argv: _lease_lane_argv devin on a fresh copy of the
@@ -3189,6 +3189,14 @@ fi
 #           .read config copy, --permission-mode auto), and the copy is gone
 #           after the run. Needs a lead context (the lead's tool shell or a
 #           terminal): the lease helpers refuse elsewhere, and the row says so
+#   DVN-07  model-free, signed out, in a scratch HOME: `devin mcp list` on the
+#           read class's own words (the XDG_CONFIG_HOME prefix, devin, the
+#           --config copy) does not list a server from the HOME's
+#           .config/devin/mcp_config.json, which the control without the
+#           prefix lists (--config alone does not hide it). From a project
+#           holding .cognition/mcp_config.json Devin lists that server (it
+#           reads the legacy directory in full), and _devin_project_guard
+#           refuses the file. No auth gate: nothing reaches Cognition
 #   CC-25  a claude worker on the lane's argv can't read ~/.local/share/devin,
 #           where Devin keeps credentials.toml: its sandboxed Bash can neither
 #           list the directory nor read the file (output to /dev/null, so
@@ -3200,10 +3208,11 @@ DVN_CAP03="Headless READY on the lease lane's read-class argv under env -i (--co
 DVN_CAP04="Login-shell env re-import under the lease lane's env (a .zshrc-only export visible in the tool shell?) — gates setup's disclosure"
 DVN_CAP05="Read class is read-only: a requested git show --output write is refused in the trajectory and does not land (negative)"
 DVN_CAP06="Reviewer fixture lease: lease_create <t> reviewer -> devin, dispatch, collect -> Status parsed from plain text, state review"
+DVN_CAP07="Read class loads no user MCP server (XDG_CONFIG_HOME redirect, control lists it); a project .cognition/ MCP file is read by Devin and refused by the guard (model-free)"
 DVN_CAP25="A claude worker on the lane argv can't list or read ~/.local/share/devin (Devin credentials.toml), Bash sandbox and Read deny"
-if _want DVN-01 || _want DVN-02 || _want DVN-03 || _want DVN-04 || _want DVN-05 || _want DVN-06 || _want SELF-06h; then
+if _want DVN-01 || _want DVN-02 || _want DVN-03 || _want DVN-04 || _want DVN-05 || _want DVN-06 || _want DVN-07 || _want SELF-06h; then
   if ! command -v devin >/dev/null 2>&1; then
-    _u29_rows devin UNAVAILABLE "devin not on PATH" direct "DVN-01:$DVN_CAP01" "DVN-02:$DVN_CAP02" "DVN-03:$DVN_CAP03" "DVN-04:$DVN_CAP04" "DVN-05:$DVN_CAP05" "DVN-06:$DVN_CAP06"
+    _u29_rows devin UNAVAILABLE "devin not on PATH" direct "DVN-01:$DVN_CAP01" "DVN-02:$DVN_CAP02" "DVN-03:$DVN_CAP03" "DVN-04:$DVN_CAP04" "DVN-05:$DVN_CAP05" "DVN-06:$DVN_CAP06" "DVN-07:$DVN_CAP07"
     DVN_LIVE=0
   else
     if _want DVN-01; then
@@ -3379,6 +3388,39 @@ If the shell tool is refused, try once to create the file devin-write-test.txt c
         fi
         rm -rf "$D"
       fi
+    fi
+    if _want DVN-07; then
+      # Model-free and signed out: a scratch HOME (Devin keeps its state under
+      # it), `devin mcp list` from a scratch project. The read class's own
+      # words (_dvn_argv read, up to --config <copy>) against a control without
+      # the XDG_CONFIG_HOME prefix, and a project holding .cognition/
+      H="$WORK/dvn07-home"; C="$WORK/dvn07-clean"; Q="$WORK/dvn07-cognition"; O="$WORK/dvn07"
+      rm -rf "$H" "$C" "$Q"
+      mkdir -p "$H/.config/devin" "$C" "$Q/.cognition"
+      printf '{ "mcpServers": { "dvn07-user": { "command": "true" } } }\n' > "$H/.config/devin/mcp_config.json"
+      printf '{ "mcpServers": { "dvn07-cognition": { "command": "true" } } }\n' > "$Q/.cognition/mcp_config.json"
+      (cd "$C" && git init -q) >/dev/null 2>&1; (cd "$Q" && git init -q) >/dev/null 2>&1
+      _dvn_argv read "$WORK/dvn07.read.json"
+      DVN_PRE=(); P=""
+      for A in ${DVN_ARGV[@]+"${DVN_ARGV[@]}"}; do DVN_PRE+=("$A"); if [ "$P" = --config ]; then break; fi; P=$A; done
+      if [ "$P" != --config ]; then
+        row "DVN-07" "devin" "$DVN_CAP07" "FAIL" "could not read the devin lane argv (with --config) through scripts/invoke-external.sh" "direct"
+      else
+        (cd "$C" && _rwt 30 env -i HOME="$H" PATH="$PATH" TMPDIR="$H" TERM=dumb NO_COLOR=1 devin --config "$WORK/dvn07.read.json" mcp list) > "$O.ctl" 2>&1 || true
+        (cd "$C" && _rwt 30 env -i HOME="$H" PATH="$PATH" TMPDIR="$H" TERM=dumb NO_COLOR=1 "${DVN_PRE[@]}" mcp list) > "$O.lane" 2>&1 || true
+        (cd "$Q" && _rwt 30 env -i HOME="$H" PATH="$PATH" TMPDIR="$H" TERM=dumb NO_COLOR=1 "${DVN_PRE[@]}" mcp list) > "$O.cog" 2>&1 || true
+        DVN_G=$( source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+                 R=0; G=$(_devin_project_guard "$Q") || R=$?
+                 printf 'rc=%s:%s' "$R" "$(printf '%s' "$G" | sed -n 's|.*/\(\.cognition/[a-z_.]*\): .*|\1|p')" )
+        DVN_V="control=$(grep -c 'dvn07-user' "$O.ctl" || true):lane=$(grep -c 'dvn07-user' "$O.lane" || true):cognition=$(grep -c 'dvn07-cognition' "$O.cog" || true):guard=${DVN_G}"
+        DVN_NOTE="read-class prefix: $(printf '%s ' "${DVN_PRE[@]}" | sed "s|${WORK}|<work>|g; s/ \$//")"
+        if [ "$DVN_V" = "control=1:lane=0:cognition=1:guard=rc=1:.cognition/mcp_config.json" ]; then
+          row "DVN-07" "devin" "$DVN_CAP07" "PASS" "${DVN_V}: a HOME mcp_config.json server is listed without the read class's XDG_CONFIG_HOME and not with it; Devin lists a project .cognition/mcp_config.json server, and _devin_project_guard refuses that file; ${DVN_NOTE}" "direct"
+        else
+          row "DVN-07" "devin" "$DVN_CAP07" "FAIL" "${DVN_V} (want control=1:lane=0:cognition=1:guard=rc=1:.cognition/mcp_config.json); ${DVN_NOTE}; lane: $(_evidence "$O.lane")" "direct"
+        fi
+      fi
+      rm -rf "$H" "$C" "$Q" "$O.ctl" "$O.lane" "$O.cog" "$WORK/dvn07.read.json"
     fi
   fi
 fi
@@ -4408,7 +4450,7 @@ COUNTER_MISMATCH=0
   echo "- **KIMI-03** → \`--agent-file\` carries the builder/reviewer briefs (D-024, KTD4). **KIMI-04** → \`--skills-dir\` is still present but no longer passed (D-024). **KIMI-05/KIMI-06** → stream-json capture shape; the \`kimi-code/k3\` alias. **KIMI-08/KIMI-09** → reviewer read-only allowlist + \`/skill:<name>\` expansion; PENDING-AUTH until \`kimi login\`."
   echo "- **CUR-01/CUR-03/CUR-05/CUR-12** → \`_cursor_bin\` resolution (cursor-agent first, verified \`agent\` fallback — CUR-11 is its fixture), the \`cursor-grok-4.6-xhigh\` pin, and the bare-family + effort → suffixed-id mapping (D-025, KTD3); **CUR-10** proves the bracket form is rejected."
   echo "- **CUR-06** → hook events not firing headless ⇒ no afterFileEdit attribution hook ships; lead-side ledger attribution covers it. **CUR-07/CUR-08** → sandbox + plan-mode read-only are the reviewer-role enforcement mechanisms. **CUR-09** → \`/<skill>\` expansion in \`-p\` from \`.cursor/skills/\`."
-  echo "- **DVN-01..DVN-06** → the Devin lane (U17, R24): completion is the typed Status line plus the exit code (no envelope); readiness reads \`devin auth status\` text, since it exits 0 logged out (DVN-02); DVN-03 is the live gate; **DVN-04** decides setup's disclosure: \`reimport=no\` while the lease lane's env carries no SHELL, \`reimport=yes\` means Devin re-imports the login shell's exports and sees every exported secret (\`devin_env_reimport\` reads it); DVN-05 keeps the read class read-only; DVN-06 is the reviewer fixture lease. **CC-25** → \`~/.local/share/devin\` (Devin's credentials.toml) is closed to a claude worker."
+  echo "- **DVN-01..DVN-07** → the Devin lane (U17, R24): completion is the typed Status line plus the exit code (no envelope); readiness reads \`devin auth status\` text, since it exits 0 logged out (DVN-02); DVN-03 is the live gate; **DVN-04** decides setup's disclosure: \`reimport=no\` while the lease lane's env carries no SHELL, \`reimport=yes\` means Devin re-imports the login shell's exports and sees every exported secret (\`devin_env_reimport\` reads it); DVN-05 keeps the read class read-only; DVN-06 is the reviewer fixture lease; DVN-07 shows the read class starts none of the user's MCP servers and that Devin reads a project's legacy \`.cognition/\` directory, which the project guard refuses. **CC-25** → \`~/.local/share/devin\` (Devin's credentials.toml) is closed to a claude worker."
   echo "- **CC-02** → the \`fable\` alias decides the spawn-time override for the lead + never-downgrade agents (ladder Fable 5.1 → Opus 5.5 → Sonnet 5.5, D-020/D-037; the one definition is TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh)."
   echo "- **CC-03** → best-effort (D-030): three runs, majority; \`ops/.sprint-complete\` + \`coordinate.sh\` stay the completion mechanism and \`/goal\` remains an assist composed into the prompt."
   echo "- **CC-04** → wave-orchestration may delegate 5+-task waves to dynamic workflows."

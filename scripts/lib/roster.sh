@@ -274,6 +274,9 @@ dispatch_role() {
   MODEL=$(printf '%s\n' "$RESOLVED" | cut -f2)
   EFFORT=$(printf '%s\n' "$RESOLVED" | cut -f3)
   echo "dispatch_role: role=${ROLE} -> cli=${CLI} model=${MODEL:-<default>} effort=${EFFORT} agent=${AGENT_NAME}" >&2
+  # The role rule at dispatch (R24), the same check lease_dispatch makes: the
+  # resolved member must still be allowed this role (rc 5)
+  _member_role_ok "$CLI" "$ROLE" || return $?
   # The registry's lane field decides the subagent path (claude today): review/
   # test work on a "subagent" lane runs as a native Agent-tool subagent when the
   # lead's sub-agents enforce their tools, else as `claude -p` (see above).
@@ -1658,6 +1661,52 @@ elif isinstance(m, dict):
     if isinstance(c, str) and c.strip():
         sys.exit(0)
 sys.stderr.write('dispatch: REFUSED ' + cli + ' — ' + path + ' ' + why + ', so nothing is sent to ' + e['egress'] + '. Run at-setup to ask the user; on a yes it records the consent (roster_write_member ' + cli + ' true <model> --consent user)\n')
+sys.exit(5)
+"
+}
+
+# _member_role_ok <cli> <role> [roster] — the role rule at dispatch (R24): rc 0
+# when <cli> may take <role> under <roster> (default ops/roster.toml) now: its
+# registry role_limit is empty or names the role, or the role is one of its
+# opt_in_roles and an enabled [members.<cli>] records it in opt_in. A name
+# that is not a roster role (a persona) passes: the lane gives it its default
+# class. A member the roster declines (enabled = false) takes no role. Else
+# rc 5 (resolve_role's code) with a refusal naming the role and at-setup on
+# stderr; a malformed roster fails closed (rc 4). member_rules holds every
+# chain to the same rule at load; this holds a lease whose role was resolved
+# under an earlier roster (the opt-in since removed, the role moved away
+# first so the roster still loads), and a direct invoke_<cli> call.
+# lease_dispatch, dispatch_role and invoke_devin run it before anything is sent.
+_member_role_ok() {
+  local CLI=${1:?usage: _member_role_ok <cli> <role> [roster]}
+  MR_CLI="$CLI" MR_ROLE="${2-}" MR_ROSTER="${3:-ops/roster.toml}" python3 -c "
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_ROLE_DEFAULTS_PY}
+${_LEAD_PY}
+cli, role, path = os.environ['MR_CLI'], os.environ['MR_ROLE'], os.environ['MR_ROSTER']
+e = CLIS.get(cli)
+if e is None:
+    sys.exit(0)
+members = lead_roster(lead_toml('dispatch'), path, 'dispatch').get('members', {})
+m = members.get(cli) if isinstance(members, dict) else None
+m = m if isinstance(m, dict) else {}
+lim = e['role_limit']
+fix = 'give the role to another roster member (at-setup, or roster_write_role ' + role + ' <cli> ...)'
+if m.get('enabled') is False:
+    why = path + ' declines it ([members.' + cli + '] enabled = false)'
+    fix = 'run at-setup to enroll it again, or ' + fix
+elif not lim or role in lim or role not in DEFAULTS:
+    sys.exit(0)
+elif role in e['opt_in_roles']:
+    opted = m.get('opt_in', [])
+    if isinstance(opted, list) and role in opted:
+        sys.exit(0)
+    why = path + ' records no ' + role + ' opt-in for it (' + cli + ' takes ' + ', '.join(lim) + ' by default)'
+    fix = 'run at-setup to ask the user; on a yes it records the opt-in (roster_write_member ' + cli + ' true <model> --opt-in ' + role + '), or ' + fix
+else:
+    why = cli + ' takes only ' + ', '.join(lim + e['opt_in_roles']) + (' (' + ', '.join(e['opt_in_roles']) + ' with the opt-in)' if e['opt_in_roles'] else '')
+sys.stderr.write('dispatch: REFUSED ' + cli + ' for role ' + repr(role) + ' — ' + why + ', so nothing runs. Fix: ' + fix + '\n')
 sys.exit(5)
 "
 }

@@ -610,8 +610,8 @@ _claude_session_ok() {
 #                (-p fails in an untrusted directory), -p last. SHELL never
 #                crosses env -i, so Devin imports no login-shell exports
 #                (DVN-04). A missing copy is a compose failure, never a run,
-#                and so is a read-class worktree whose .devin/ files would
-#                widen it (_devin_project_guard names the file);
+#                and so is a read-class worktree whose .devin/ or .cognition/
+#                files would widen it (_devin_project_guard names the file);
 #                _lease_builder_run logs the command line and removes the
 #                copy after the run (Devin writes its org id into it)
 #   grok         _grok_argv (scripts/lib/grok.sh) in the class the lane arg
@@ -670,10 +670,10 @@ _lease_lane_argv() {
       case "$LANE_ARG" in
         *.edit.json) _devin_argv edit "$LANE_ARG" "$DMODEL" ;;
         *)
-          # Devin merges the worktree's .devin/ files over the copy, so a
-          # read-class lease never starts on one that widens it
+          # Devin merges the worktree's .devin/ and .cognition/ files over
+          # the copy, so a read-class lease never starts on one that widens it
           if ! _LEASE_LANE_ERR=$(_devin_project_guard "$WT"); then
-            _LEASE_LANE_ERR=${_LEASE_LANE_ERR:-"the worktree's .devin/ check failed to run"}
+            _LEASE_LANE_ERR=${_LEASE_LANE_ERR:-"the worktree's .devin/ and .cognition/ check failed to run"}
             return 1
           fi
           _devin_argv read "$LANE_ARG" "$DMODEL"

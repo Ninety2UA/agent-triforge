@@ -28,6 +28,27 @@ fi
 AGY_OUT="${TMPDIR:-/tmp}/antigravity_review_$$_$(date +%s).txt"
 CODEX_OUT="${TMPDIR:-/tmp}/codex_review_$$_$(date +%s).txt"
 
+# The CLI each role resolves to, for the promotion check: an optional CLI
+# filling a core role reports through a typed `Status:` line, Codex and agy
+# through their exit code (and agy's envelope).
+ANALYST_CLI=$(resolve_role analyst 2>/dev/null | cut -f1) || ANALYST_CLI=""
+REVIEWER_CLI=$(resolve_role reviewer 2>/dev/null | cut -f1) || REVIEWER_CLI=""
+# _promote_ok <cli> <out> — whether a lane that exited 0 may become a REVIEW
+# file (a nonzero lane stops the block below before any promotion): never on
+# Status: BLOCKED or NEEDS_CONTEXT, and for a CLI outside the core trio only
+# on DONE or DONE_WITH_CONCERNS (no Status line is "report missing").
+_promote_ok() {
+  local PCLI=${1:-} POUT=${2:-} ST
+  ST=$(_lease_parse_status "$POUT" 2>/dev/null || echo MISSING)
+  case "$ST" in
+    DONE|DONE_WITH_CONCERNS) return 0 ;;
+    BLOCKED|NEEDS_CONTEXT) echo "review: the ${PCLI:-?} lane reported Status: ${ST} — not promoted; read ${POUT}" >&2; return 1 ;;
+  esac
+  if [ "$(cli_field "${PCLI:-none}" tier 2>/dev/null || true)" = core ]; then return 0; fi
+  echo "review: the ${PCLI:-?} lane's output has no final 'Status:' line — report missing, not promoted; read ${POUT}" >&2
+  return 1
+}
+
 # Core review swarm, ROSTER-DRIVEN (R19/AE4): the analyst role (shipped default
 # Antigravity, architecture-reviewer) and the reviewer role (shipped default
 # Codex, logic_reviewer). Routing through dispatch_role — instead of hardcoding
@@ -73,16 +94,17 @@ fi
 # non-empty prose AND the JSON-envelope status sidecar written by
 # invoke_antigravity reads SUCCESS (a denied/empty run leaves the file empty and
 # returns non-zero — nothing is promoted, AE2). A non-agy roster lane writes no
-# sidecar and is promoted on non-empty output as before. The header records the
+# sidecar and is promoted on non-empty output that passes _promote_ok (an
+# optional CLI's typed report must say DONE or DONE_WITH_CONCERNS). The header records the
 # resolved mode (injection|native|raw) and any denied actions so a degraded run
 # is attributable in the promoted file.
-if [ ! -f "ops/REVIEW_ANTIGRAVITY.md" ] && [ -s "$AGY_OUT" ] && { [ ! -f "${AGY_OUT}.status" ] || [ "$(cat "${AGY_OUT}.status")" = "SUCCESS" ]; }; then
+if [ ! -f "ops/REVIEW_ANTIGRAVITY.md" ] && [ -s "$AGY_OUT" ] && { [ ! -f "${AGY_OUT}.status" ] || [ "$(cat "${AGY_OUT}.status")" = "SUCCESS" ]; } && _promote_ok "$ANALYST_CLI" "$AGY_OUT"; then
   {
     echo "<!-- captured from analyst-role output; agent could not write ops/ directly (headless permission auto-deny); mode=$(cat "${AGY_OUT}.mode" 2>/dev/null || echo unknown); denied_actions=$([ -s "${AGY_OUT}.denied" ] && paste -sd, "${AGY_OUT}.denied" || echo none) -->"
     _scrub < "$AGY_OUT"
   } > ops/REVIEW_ANTIGRAVITY.md
 fi
-if [ ! -f "ops/REVIEW_CODEX.md" ] && [ -s "$CODEX_OUT" ]; then
+if [ ! -f "ops/REVIEW_CODEX.md" ] && [ -s "$CODEX_OUT" ] && _promote_ok "$REVIEWER_CLI" "$CODEX_OUT"; then
   { echo "<!-- captured from reviewer-role output; agent could not write ops/ directly (headless permission auto-deny) -->"; _scrub < "$CODEX_OUT"; } > ops/REVIEW_CODEX.md
 fi
 

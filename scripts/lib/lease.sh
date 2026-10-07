@@ -1922,10 +1922,14 @@ DISPATCH_ROW_EOF
     echo "lease_dispatch: ERROR worktree missing: ${WT}" >&2
     return 1
   fi
-  # The consent rule at dispatch (R24): a consent CLI (devin) whose roster
-  # table records no consent now, though it did at lease_create, gets nothing
-  # sent (rc 5). A CLI that needs no consent passes.
+  # The consent and role rules at dispatch (R24), against the roster as it is
+  # now, not as it was at lease_create: a consent CLI (devin) whose table
+  # records no consent any more gets nothing sent, and the lease's role must
+  # still be one its CLI may take (a builder lease whose opt-in was since
+  # removed, or a member since declined, never runs). Both rc 5; a CLI with no
+  # consent rule or role limit passes.
   _member_consent_ok "$CLI" "${_LEASE_REPO}/ops/roster.toml" || return $?
+  _member_role_ok "$CLI" "$ROLE" "${_LEASE_REPO}/ops/roster.toml" || return $?
   OUT="${_LEASE_ROOT}/${TASK_ID}.out"
   TOBIN=$(_timeout_tool) || return $?
 
