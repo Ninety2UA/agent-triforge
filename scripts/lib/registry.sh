@@ -260,6 +260,13 @@ TRIFORGE_CLAUDE_SANDBOX_FLOOR="2.1.285"
 #               by roster_write_member --consent user. An enabled member, or
 #               a role chain naming the CLI, without one fails load
 #               validation, and headless enrollment never enrolls it (R24)
+#   instructions  the instruction reader the CLI runs as a lead, a model
+#               named in scripts/lib/instructions.sh: "claude-md-shadow"
+#               (the CLAUDE.md family shadows AGENTS.md unless it imports it)
+#               or "agents-chain" (the root-to-cwd AGENTS.md chain, overrides,
+#               a byte budget, untrusted projects); "" for a CLI that cannot
+#               lead, which instruction_pointer_visibility reports as an
+#               unknown reader
 #   lead        the KTD1 static lead fields, or {} for a CLI that cannot lead
 #               (Key Decision: Claude Code or Codex only). launch_argv is one
 #               headless lead session, the prompt appended as its last word:
@@ -306,6 +313,7 @@ CLIS = {
         "role_limit": [],
         "opt_in_roles": [],
         "consent": False,
+        "instructions": "claude-md-shadow",
         "lead": {
             "launch_argv": "claude --print --permission-mode acceptEdits",
             "full_access": False,
@@ -338,6 +346,7 @@ CLIS = {
         "role_limit": [],
         "opt_in_roles": [],
         "consent": False,
+        "instructions": "",
         "lead": {},
     },
     "codex": {
@@ -357,6 +366,7 @@ CLIS = {
         "role_limit": [],
         "opt_in_roles": [],
         "consent": False,
+        "instructions": "agents-chain",
         "lead": {   # D-047 profile; the hook payload names exec_command Bash and keeps apply_patch (CDX-21)
             "launch_argv": "codex exec -s danger-full-access -c approval_policy=\"never\" -c background_terminal_max_timeout=900000",
             "full_access": True,
@@ -389,6 +399,7 @@ CLIS = {
         "role_limit": [],
         "opt_in_roles": [],
         "consent": False,
+        "instructions": "",
         "lead": {},
     },
     "kimi": {
@@ -408,6 +419,7 @@ CLIS = {
         "role_limit": [],
         "opt_in_roles": [],
         "consent": False,
+        "instructions": "",
         "lead": {},
     },
     "cursor": {
@@ -427,6 +439,7 @@ CLIS = {
         "role_limit": [],
         "opt_in_roles": [],
         "consent": False,
+        "instructions": "",
         "lead": {},
     },
     "devin": {
@@ -446,6 +459,7 @@ CLIS = {
         "role_limit": ["reviewer", "analyst"],
         "opt_in_roles": ["builder"],
         "consent": True,
+        "instructions": "",
         "lead": {},
     },
     "grok": {
@@ -468,6 +482,7 @@ CLIS = {
         "role_limit": ["builder", "reviewer", "analyst"],
         "opt_in_roles": [],
         "consent": False,
+        "instructions": "",
         "lead": {},
     },
 }

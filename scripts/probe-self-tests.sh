@@ -9438,6 +9438,392 @@ mkdir -p "$_S16"
 # --- SELF-16 section A: roster and registry helpers (U15) ---
 # --- end of SELF-16 section A ---
 # --- SELF-16 section B: instruction files (U15) ---
+# B (R9, R39, R40; scripts/lib/instructions.sh). Fixtures under $_S16/b; each
+# helper runs in a fresh bash that sources the loader, in the fixture
+# directory, under a throwaway HOME and CODEX_HOME (no user-tier file read or
+# written):
+#   detect   the five kinds in the project and in its parent with state and
+#            import line, nearest first, a grandparent's import line, the
+#            user level; HOME = the parent -> its .claude/CLAUDE.md is the
+#            user line, never above; the library alone and under zsh print
+#            the same; an exact v3.3.3 copy stale-3x-exact, an edited v3.0.0
+#            copy stale-3x-edited, a full copy as CLAUDE.local.md user-owned
+#            (release tags); FIFOs named AGENTS.md and CLAUDE.md unreadable in
+#            under 10 s, a symlinked .claude read through the link and marked,
+#            a link loop unreadable
+#   visible  claude and codex for a parent CLAUDE.md, a project CLAUDE.md
+#            without and with the import, an AGENTS.override.md in the
+#            project, an untrusted project, a chain past the budget and under
+#            a raised one; the reader is the registry's instructions field
+#            (claude-md-shadow, agents-chain, "" for the rest), and an empty
+#            field, an unregistered name or no registry in scope fails closed
+#            (hidden, rc 1, "unknown reader")
+#   writers  without --yes rc 20 and the bytes unchanged; with --yes the
+#            change; again with --yes "unchanged:", rc 0, the same bytes
+#   budget   a 30 KiB project AGENTS.md + a 2 KiB user-level one + the block
+#            -> rc 3 naming the sizes, nothing written (also without --yes);
+#            the 30 KiB file alone fits; project_doc_max_bytes 65536 and 16384
+#            honored, 16384 also through the line scan (no TOML parser)
+#   convert  an exact copy merged and removed, then "unchanged:"; an edited
+#            copy and a user file refused, untouched
+#   refuse   a symlinked CLAUDE.md, a symlinked .claude, a symlinked or FIFO
+#            AGENTS.md, the user-tier file, a lease worker: refused, untouched
+#   hook     session start names each project CLAUDE.md-family file that does
+#            not import AGENTS.md (one line, at-setup), with and without the
+#            loader, and none once the parent's file imports it
+_S16B="${_S16}/b"
+mkdir -p "$_S16B/home/.claude" "$_S16B/home/.codex" "$_S16B/w"
+_S16B_W=$(cd "$_S16B/w" && pwd -P)
+T=$(printf '\t')
+_s16b() { # _s16b <dir> <helper> [args...] — the helper, loader sourced, run in <dir> under the throwaway HOME (S16B_HOME) and CODEX_HOME (S16B_CODEX); stdout + stderr, then "rc=<n>"
+  local D=$1 R=0 O
+  shift
+  O=$(cd "$D" && HOME="${S16B_HOME:-$_S16B/home}" CODEX_HOME="${S16B_CODEX:-$_S16B/home/.codex}" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" 60} /bin/bash -c 'source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 97; shift; "$@"' _ "$REPO_ROOT" "$@" 2>&1) || R=$?
+  printf '%s\nrc=%s\n' "$O" "$R"
+}
+_s16b_sum() { # _s16b_sum <file>... — cksum of each, "absent" for a missing one
+  local F
+  for F in "$@"; do
+    if [ -e "$F" ] || [ -L "$F" ]; then cksum < "$F" 2>/dev/null || echo unreadable; else echo absent; fi
+  done
+}
+_s16b_not() { # _s16b_not <case> <output> <ERE> — " <case>(has:<ERE>)" when the output matches
+  if printf '%s\n' "$2" | grep -qE -- "$3"; then printf ' %s(has:%s)' "$1" "$3"; fi
+}
+_s16b_same() { # _s16b_same <case> <before> <after> — " <case>(changed)" when they differ
+  if [ "$2" != "$3" ]; then printf ' %s(changed)' "$1"; fi
+}
+_s16b_proj() { # _s16b_proj <dir> — a git project whose AGENTS.md holds the pointer block
+  mkdir -p "$1" && ( cd "$1" && git init -q ) >/dev/null 2>&1
+  printf '# rules\n<!-- triforge:start -->\npointer\n<!-- triforge:end -->\n' > "$1/AGENTS.md"
+}
+
+# detect: every kind in the project and in its parent, a CLAUDE.md above that
+_S16B_M="$_S16B_W/top/mid"
+_S16B_P="$_S16B_M/proj"
+mkdir -p "$_S16B_P/.claude" "$_S16B_M/.claude"
+( cd "$_S16B_P" && git init -q ) >/dev/null 2>&1
+printf '# acme\n' > "$_S16B_P/CLAUDE.md"
+printf '# local\n@../AGENTS.md\n' > "$_S16B_P/.claude/CLAUDE.md"
+printf '# notes\n' > "$_S16B_P/CLAUDE.local.md"
+printf '# acme agents\n<!-- triforge:start -->\nx\n<!-- triforge:end -->\n' > "$_S16B_P/AGENTS.md"
+printf '# override\n' > "$_S16B_P/AGENTS.override.md"
+printf '# mono\n@AGENTS.md\n' > "$_S16B_M/CLAUDE.md"
+printf '# mono local\n' > "$_S16B_M/.claude/CLAUDE.md"
+printf '@proj/AGENTS.md\n' > "$_S16B_M/CLAUDE.local.md"
+printf '# mono agents\n' > "$_S16B_M/AGENTS.md"
+printf '<!-- triforge:start -->\n<!-- triforge:end -->\n' > "$_S16B_M/AGENTS.override.md"
+printf '# top\n' > "$_S16B_W/top/CLAUDE.md"
+printf '# me\n' > "$_S16B/home/.claude/CLAUDE.md"
+printf '# codex global\n' > "$_S16B/home/.codex/AGENTS.md"
+_S16B_SUMS=$(_s16b_sum "$_S16B_P/CLAUDE.md" "$_S16B_P/.claude/CLAUDE.md" "$_S16B_P/CLAUDE.local.md" "$_S16B_P/AGENTS.md" "$_S16B_M/CLAUDE.md" "$_S16B/home/.claude/CLAUDE.md" "$_S16B/home/.codex/AGENTS.md")
+_O=$(_s16b "$_S16B_P" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-detect "$_O" \
+  "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/w/top/mid/proj/CLAUDE\.md${T}@AGENTS\.md\$" \
+  "^\.claude/CLAUDE\.md${T}project${T}imports,user-owned${T}[^${T}]*/w/top/mid/proj/\.claude/CLAUDE\.md${T}@\.\./AGENTS\.md\$" \
+  "^CLAUDE\.local\.md${T}project${T}no-import,user-owned${T}[^${T}]*/w/top/mid/proj/CLAUDE\.local\.md${T}@AGENTS\.md\$" \
+  "^AGENTS\.md${T}project${T}pointer${T}[^${T}]*/w/top/mid/proj/AGENTS\.md${T}-\$" \
+  "^AGENTS\.override\.md${T}project${T}override,no-pointer${T}[^${T}]*/w/top/mid/proj/AGENTS\.override\.md${T}-\$" \
+  "^CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/w/top/mid/CLAUDE\.md${T}@proj/AGENTS\.md\$" \
+  "^\.claude/CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/w/top/mid/\.claude/CLAUDE\.md${T}@\.\./proj/AGENTS\.md\$" \
+  "^CLAUDE\.local\.md${T}above${T}imports,user-owned${T}[^${T}]*/w/top/mid/CLAUDE\.local\.md${T}@proj/AGENTS\.md\$" \
+  "^AGENTS\.md${T}above${T}no-pointer${T}[^${T}]*/w/top/mid/AGENTS\.md${T}-\$" \
+  "^AGENTS\.override\.md${T}above${T}override,pointer${T}[^${T}]*/w/top/mid/AGENTS\.override\.md${T}-\$" \
+  "^CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/w/top/CLAUDE\.md${T}@mid/proj/AGENTS\.md\$" \
+  "^\.claude/CLAUDE\.md${T}user${T}no-import,user-owned${T}[^${T}]*/b/home/\.claude/CLAUDE\.md${T}-\$" \
+  "^AGENTS\.md${T}user${T}no-pointer${T}[^${T}]*/b/home/\.codex/AGENTS\.md${T}-\$" \
+  '^rc=0$')"
+_S16B_ORDER=$(printf '%s\n' "$_O" | grep -F "$_S16B_W/" | cut -f1,2 | tr '\t\n' ' |')
+[ "$_S16B_ORDER" = "CLAUDE.md project|.claude/CLAUDE.md project|CLAUDE.local.md project|AGENTS.md project|AGENTS.override.md project|CLAUDE.md above|.claude/CLAUDE.md above|CLAUDE.local.md above|AGENTS.md above|AGENTS.override.md above|CLAUDE.md above|" ] || _S16_FAIL="${_S16_FAIL} b-detect-order(${_S16B_ORDER})"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-detect-read-only "$_S16B_SUMS" "$(_s16b_sum "$_S16B_P/CLAUDE.md" "$_S16B_P/.claude/CLAUDE.md" "$_S16B_P/CLAUDE.local.md" "$_S16B_P/AGENTS.md" "$_S16B_M/CLAUDE.md" "$_S16B/home/.claude/CLAUDE.md" "$_S16B/home/.codex/AGENTS.md")")"
+# the library alone (the hook's path) and under zsh (a lead's shell) print the same lines
+_S16B_ALONE=$(cd "$_S16B_P" && HOME="$_S16B/home" CODEX_HOME="$_S16B/home/.codex" /bin/bash -c 'source "$1/scripts/lib/instructions.sh" && instruction_files_detect' _ "$REPO_ROOT" 2>&1; echo "rc=$?")
+[ "$_S16B_ALONE" = "$_O" ] || _S16_FAIL="${_S16_FAIL} b-detect-alone(differs)"
+if [ -x /bin/zsh ]; then
+  _S16B_ZSH=$(cd "$_S16B_P" && HOME="$_S16B/home" CODEX_HOME="$_S16B/home/.codex" /bin/zsh -fc 'set -euo pipefail; source "$1/scripts/invoke-external.sh" >/dev/null 2>&1; instruction_files_detect' _ "$REPO_ROOT" 2>&1; echo "rc=$?")
+  [ "$_S16B_ZSH" = "$_O" ] || _S16_FAIL="${_S16_FAIL} b-detect-zsh(differs)"
+fi
+# the user-tier file by identity: with HOME = the parent, its .claude/CLAUDE.md is the user line
+_O=$(S16B_HOME="$_S16B_M" _s16b "$_S16B_P" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-usertier "$_O" "^\.claude/CLAUDE\.md${T}user${T}no-import,user-owned${T}[^${T}]*/w/top/mid/\.claude/CLAUDE\.md${T}-\$" '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-usertier "$_O" "^\.claude/CLAUDE\.md${T}above")"
+# the 3.x fingerprint: an exact copy, an edited copy, a full copy under a name it never had
+_S16B_S="$_S16B_W/stale"
+mkdir -p "$_S16B_S/.claude"
+if git -C "$REPO_ROOT" show v3.3.3:templates/CLAUDE.md > "$_S16B/v333.md" 2>/dev/null \
+   && git -C "$REPO_ROOT" show v3.0.0:templates/CLAUDE.md > "$_S16B/v300.md" 2>/dev/null; then
+  cp "$_S16B/v333.md" "$_S16B_S/CLAUDE.md"
+  { cat "$_S16B/v300.md"; printf '\n## Our deploy rules\n'; } > "$_S16B_S/.claude/CLAUDE.md"
+  cp "$_S16B/v333.md" "$_S16B_S/CLAUDE.local.md"
+  _O=$(_s16b "$_S16B_S" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-stale "$_O" \
+    "^CLAUDE\.md${T}project${T}no-import,stale-3x-exact${T}[^${T}]*/w/stale/CLAUDE\.md${T}@AGENTS\.md\$" \
+    "^\.claude/CLAUDE\.md${T}project${T}no-import,stale-3x-edited${T}[^${T}]*/w/stale/\.claude/CLAUDE\.md${T}@\.\./AGENTS\.md\$" \
+    "^CLAUDE\.local\.md${T}project${T}no-import,user-owned${T}" '^rc=0$')"
+  _S16B_TAGS=1
+else
+  _S16_FAIL="${_S16_FAIL} b-stale(no-v3-release-tags:fetch-tags)"
+  _S16B_TAGS=0
+fi
+# a FIFO never stalls the walk; a symlinked .claude is read through the link; a link loop is unreadable
+_S16B_F="$_S16B_W/fifo"
+mkdir -p "$_S16B_F" "$_S16B/outside-claude"
+mkfifo "$_S16B_F/AGENTS.md" "$_S16B_F/CLAUDE.md"
+printf '# linked\n@../AGENTS.md\n' > "$_S16B/outside-claude/CLAUDE.md"
+ln -s "$_S16B/outside-claude" "$_S16B_F/.claude"
+ln -s CLAUDE.local.md "$_S16B_F/CLAUDE.local.md"
+_S16B_T0=$(date +%s)
+_O=$(_s16b "$_S16B_F" instruction_files_detect)
+_S16B_T1=$(( $(date +%s) - _S16B_T0 ))
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-fifo "$_O" \
+  "^CLAUDE\.md${T}project${T}unreadable${T}[^${T}]*/w/fifo/CLAUDE\.md${T}@AGENTS\.md\$" \
+  "^AGENTS\.md${T}project${T}unreadable${T}[^${T}]*/w/fifo/AGENTS\.md${T}-\$" \
+  "^\.claude/CLAUDE\.md${T}project${T}imports,user-owned,symlink${T}[^${T}]*/w/fifo/\.claude/CLAUDE\.md${T}@\.\./AGENTS\.md\$" \
+  "^CLAUDE\.local\.md${T}project${T}unreadable,symlink${T}" '^rc=0$')"
+[ "$_S16B_T1" -lt 10 ] || _S16_FAIL="${_S16_FAIL} b-fifo(stalled:${_S16B_T1}s)"
+
+# visibility per lead
+_S16B_V="$_S16B_W/vis"
+_s16b_proj "$_S16B_V/parent/p1"; printf '# mono\n' > "$_S16B_V/parent/CLAUDE.md"
+_s16b_proj "$_S16B_V/p2"; printf '# own\n' > "$_S16B_V/p2/CLAUDE.md"
+_s16b_proj "$_S16B_V/p3"; printf '# own\n\n@AGENTS.md\n' > "$_S16B_V/p3/CLAUDE.md"
+_s16b_proj "$_S16B_V/p4"; printf '# override\n' > "$_S16B_V/p4/AGENTS.override.md"
+_s16b_proj "$_S16B_V/p5"
+_s16b_proj "$_S16B_V/p6"
+{ head -c 32800 /dev/zero | tr '\0' 'x'; printf '\n<!-- triforge:start -->\npointer\n<!-- triforge:end -->\n'; } > "$_S16B_V/p6/AGENTS.md"
+mkdir -p "$_S16B/codex-untrusted" "$_S16B/codex-raised"
+printf '[projects."%s"]\ntrust_level = "untrusted"\n' "$(cd "$_S16B_V/p5" && pwd -P)" > "$_S16B/codex-untrusted/config.toml"
+printf 'project_doc_max_bytes = 65536\n' > "$_S16B/codex-raised/config.toml"
+_O=$(_s16b "$_S16B_V/parent/p1" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-parent-claude "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/w/vis/parent/CLAUDE\.md: this reader takes AGENTS\.md only while no CLAUDE\.md, \.claude/CLAUDE\.md or CLAUDE\.local\.md exists .*; add the line @p1/AGENTS\.md to [^ ]*/w/vis/parent/CLAUDE\.md " '^rc=1$')"
+_O=$(_s16b "$_S16B_V/parent/p1" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-parent-codex "$_O" "^codex${T}visible${T}[^ ]*/w/vis/parent/p1/AGENTS\.md is read: the pointer block ends at byte 76 of the files this reader combines, within 32768 \(the default\)\$" '^rc=0$')"
+_O=$(_s16b "$_S16B_V/p2" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-own-claude "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/w/vis/p2/CLAUDE\.md: .*; add the line @AGENTS\.md to [^ ]*/w/vis/p2/CLAUDE\.md \(instruction_add_import " '^rc=1$')"
+_O=$(_s16b "$_S16B_V/p2" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-own-codex "$_O" "^codex${T}visible${T}[^ ]*/w/vis/p2/AGENTS\.md is read: " '^rc=0$')"
+_O=$(_s16b "$_S16B_V/p3" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-import-claude "$_O" "^claude${T}visible${T}[^ ]*/w/vis/p3/CLAUDE\.md imports [^ ]*/w/vis/p3/AGENTS\.md, so it is loaded with that file\$" '^rc=0$')"
+_O=$(_s16b "$_S16B_V/p3" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-import-codex "$_O" "^codex${T}visible${T}" '^rc=0$')"
+_O=$(_s16b "$_S16B_V/p4" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-override-claude "$_O" "^claude${T}visible${T}[^ ]*/w/vis/p4/AGENTS\.md is read: no CLAUDE\.md, \.claude/CLAUDE\.md or CLAUDE\.local\.md at [^ ]*/w/vis/p4 or above\$" '^rc=0$')"
+_O=$(_s16b "$_S16B_V/p4" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-override-codex "$_O" "^codex${T}hidden${T}shadowed by [^ ]*/w/vis/p4/AGENTS\.override\.md: this reader takes it instead of [^ ]*/w/vis/p4/AGENTS\.md at that level" '^rc=1$')"
+_O=$(S16B_CODEX="$_S16B/codex-untrusted" _s16b "$_S16B_V/p5" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-untrusted "$_O" "^codex${T}hidden${T}the project [^ ]*/w/vis/p5 is marked untrusted in [^ ]*/codex-untrusted/config\.toml \(trust_level = \"untrusted\"\), so this reader takes no project AGENTS\.md\$" '^rc=1$')"
+_O=$(S16B_CODEX="$_S16B/codex-untrusted" _s16b "$_S16B_V/p5" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-untrusted-claude "$_O" "^claude${T}visible${T}" '^rc=0$')"
+_O=$(_s16b "$_S16B_V/p6" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-budget "$_O" "^codex${T}hidden${T}over budget: the pointer block in [^ ]*/w/vis/p6/AGENTS\.md ends at byte 32869 of the files this reader combines \(user-level 15 bytes first\), past 32768 \(the default\)" '^rc=1$')"
+_O=$(S16B_CODEX="$_S16B/codex-raised" _s16b "$_S16B_V/p6" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-budget-raised "$_O" "^codex${T}visible${T}[^ ]*/w/vis/p6/AGENTS\.md is read: the pointer block ends at byte 32854 of the files this reader combines, within 65536 \(project_doc_max_bytes in [^ ]*/codex-raised/config\.toml\)\$" '^rc=0$')"
+# the reader is registry data (cli_field <cli> instructions); no reader fails closed
+_O=$(_s16b "$_S16B_V/p5" cli_table all instructions)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-registry "$_O" "^claude${T}claude-md-shadow\$" "^codex${T}agents-chain\$" "^antigravity${T}\$" "^grok${T}\$" '^rc=0$')"
+_O=$(_s16b "$_S16B_V/p5" instruction_pointer_visibility antigravity)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-noreader "$_O" "^antigravity${T}hidden${T}unknown reader: the registry names no instruction reader for antigravity \(its instructions field is empty or missing\), so AGENTS\.md is not known to reach it\$" '^rc=1$')"
+_O=$(_s16b "$_S16B_V/p5" instruction_pointer_visibility nosuchcli)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-unregistered "$_O" "^nosuchcli${T}hidden${T}unknown reader: " '^rc=1$')"
+_O=$(cd "$_S16B_V/p5" && HOME="$_S16B/home" CODEX_HOME="$_S16B/home/.codex" /bin/bash -c 'source "$1/scripts/lib/instructions.sh" && instruction_pointer_visibility claude' _ "$REPO_ROOT" 2>&1; echo "rc=$?")
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-noregistry "$_O" "^claude${T}hidden${T}unknown reader: the registry names no instruction reader for claude " '^rc=1$')"
+
+# writers: the @AGENTS.md import (project file, .claude/ file, a parent's file)
+_S16B_I="$_S16B_W/wr"
+mkdir -p "$_S16B_I/.claude" "$_S16B_W/wrp/proj"
+( cd "$_S16B_I" && git init -q ) >/dev/null 2>&1
+( cd "$_S16B_W/wrp/proj" && git init -q ) >/dev/null 2>&1
+printf '# own\n' > "$_S16B_I/CLAUDE.md"
+printf '# local' > "$_S16B_I/.claude/CLAUDE.md"
+printf '# mono\n' > "$_S16B_W/wrp/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_I/CLAUDE.md")
+_O=$(_s16b "$_S16B_I" instruction_add_import CLAUDE.md)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-import-ask "$_O" '^needs-ask: would add the line @AGENTS\.md to [^ ]*/w/wr/CLAUDE\.md, so Claude Code loads ' '^  apply : instruction_add_import [^ ]*/w/wr/CLAUDE\.md --yes$' '^rc=20$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-import-ask "$_S16B_SUM" "$(_s16b_sum "$_S16B_I/CLAUDE.md")")"
+_O=$(_s16b "$_S16B_I" instruction_add_import CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-import-yes "$_O" '^changed: [^ ]*/w/wr/CLAUDE\.md: added the line @AGENTS\.md$' '^rc=0$')"
+[ "$(cat "$_S16B_I/CLAUDE.md")" = "$(printf '# own\n@AGENTS.md')" ] || _S16_FAIL="${_S16_FAIL} b-import-yes(content)"
+_S16B_SUM=$(_s16b_sum "$_S16B_I/CLAUDE.md")
+_O=$(_s16b "$_S16B_I" instruction_add_import CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-import-again "$_O" '^unchanged: [^ ]*/w/wr/CLAUDE\.md already imports [^ ]*/w/wr/AGENTS\.md$' '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-import-again "$_S16B_SUM" "$(_s16b_sum "$_S16B_I/CLAUDE.md")")"
+_O=$(_s16b "$_S16B_I" instruction_add_import --yes .claude/CLAUDE.md)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-import-dotclaude "$_O" '^changed: [^ ]*/w/wr/\.claude/CLAUDE\.md: added the line @\.\./AGENTS\.md$' '^rc=0$')"
+[ "$(cat "$_S16B_I/.claude/CLAUDE.md")" = "$(printf '# local\n@../AGENTS.md')" ] || _S16_FAIL="${_S16_FAIL} b-import-dotclaude(content)"
+_O=$(_s16b "$_S16B_W/wrp/proj" instruction_add_import ../CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-import-parent "$_O" '^changed: [^ ]*/w/wrp/CLAUDE\.md: added the line @proj/AGENTS\.md$' '^rc=0$')"
+_O=$(_s16b "$_S16B_W/wrp/proj" instruction_add_import ../CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-import-parent-again "$_O" '^unchanged: ' '^rc=0$')"
+_O=$(_s16b "$_S16B_I" instruction_add_import AGENTS.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-import-kind "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/wr/AGENTS\.md is not one of CLAUDE\.md, \.claude/CLAUDE\.md, CLAUDE\.local\.md' '^rc=2$')"
+
+# writers: the pointer block (create, append, replace, unbalanced, the override warning)
+mkdir -p "$_S16B_W/mg" "$_S16B_W/mg2" "$_S16B_W/mg3" "$_S16B_W/mg4" "$_S16B_W/mg5"
+for _S16B_D in mg mg2 mg3 mg4 mg5; do ( cd "$_S16B_W/$_S16B_D" && git init -q ) >/dev/null 2>&1; done
+printf '# ours\n\nrule one\n' > "$_S16B_W/mg2/AGENTS.md"
+printf '# ours\n<!-- triforge:start -->\nold pointer\n<!-- triforge:end -->\ntail\n' > "$_S16B_W/mg3/AGENTS.md"
+printf '<!-- triforge:start -->\nno end\n' > "$_S16B_W/mg4/AGENTS.md"
+printf '# override\n' > "$_S16B_W/mg5/AGENTS.override.md"
+_O=$(_s16b "$_S16B_W/mg" instruction_merge_pointer)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-ask "$_O" '^needs-ask: would create [^ ]*/w/mg/AGENTS\.md \(0 -> [0-9]+ bytes; the agents-chain budget: [0-9]+ of 32768 bytes\)$' '^rc=20$')"
+[ ! -e "$_S16B_W/mg/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-merge-ask(written)"
+_O=$(_s16b "$_S16B_W/mg" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-create "$_O" '^changed: [^ ]*/w/mg/AGENTS\.md: created with the Triforge pointer block ' '^rc=0$')"
+cmp -s "$REPO_ROOT/templates/AGENTS.md" "$_S16B_W/mg/AGENTS.md" || _S16_FAIL="${_S16_FAIL} b-merge-create(not-the-template)"
+_S16B_SUM=$(_s16b_sum "$_S16B_W/mg/AGENTS.md")
+_O=$(_s16b "$_S16B_W/mg" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-again "$_O" '^unchanged: [^ ]*/w/mg/AGENTS\.md already holds the current pointer block$' '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-merge-again "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/mg/AGENTS.md")")"
+_S16B_SUM=$(_s16b_sum "$_S16B_W/mg2/AGENTS.md")
+_O=$(_s16b "$_S16B_W/mg2" instruction_merge_pointer)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-append-ask "$_O" '^needs-ask: would append the Triforge pointer block to [^ ]*/w/mg2/AGENTS\.md \(17 -> ' '^rc=20$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-merge-append-ask "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/mg2/AGENTS.md")")"
+_O=$(_s16b "$_S16B_W/mg2" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-append "$_O" '^changed: [^ ]*/w/mg2/AGENTS\.md: appended the Triforge pointer block ' '^rc=0$')"
+[ "$(sed -n 1,5p "$_S16B_W/mg2/AGENTS.md")" = "$(printf '# ours\n\nrule one\n\n<!-- triforge:start -->')" ] || _S16_FAIL="${_S16_FAIL} b-merge-append(head)"
+[ "$(tail -n 1 "$_S16B_W/mg2/AGENTS.md")" = '<!-- triforge:end -->' ] || _S16_FAIL="${_S16_FAIL} b-merge-append(tail)"
+_S16B_SUM=$(_s16b_sum "$_S16B_W/mg2/AGENTS.md")
+_O=$(_s16b "$_S16B_W/mg2" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-append-again "$_O" '^unchanged: ' '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-merge-append-again "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/mg2/AGENTS.md")")"
+_O=$(_s16b "$_S16B_W/mg3" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-replace "$_O" '^changed: [^ ]*/w/mg3/AGENTS\.md: replaced the Triforge pointer block ' '^rc=0$')"
+[ "$(head -n 1 "$_S16B_W/mg3/AGENTS.md")|$(tail -n 1 "$_S16B_W/mg3/AGENTS.md")|$(grep -c 'old pointer' "$_S16B_W/mg3/AGENTS.md" || true)|$(grep -c 'triforge:start' "$_S16B_W/mg3/AGENTS.md" || true)" = '# ours|tail|0|1' ] || _S16_FAIL="${_S16_FAIL} b-merge-replace(content)"
+_S16B_SUM=$(_s16b_sum "$_S16B_W/mg4/AGENTS.md")
+_O=$(_s16b "$_S16B_W/mg4" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-unbalanced "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/w/mg4/AGENTS\.md holds 1 start and 0 end markers of the pointer block' '^rc=2$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-merge-unbalanced "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/mg4/AGENTS.md")")"
+_S16B_SUM=$(_s16b_sum "$_S16B_W/mg5/AGENTS.override.md")
+_O=$(_s16b "$_S16B_W/mg5" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-override "$_O" '^warning: [^ ]*/w/mg5/AGENTS\.override\.md exists, so the agents-chain reader takes it instead of [^ ]*/w/mg5/AGENTS\.md at this level and will not see the pointer block \(a reader without overrides, claude-md-shadow, still does\)' '^changed: [^ ]*/w/mg5/AGENTS\.md: created ' '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-merge-override "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/mg5/AGENTS.override.md")")"
+
+# budget: a 30 KiB project AGENTS.md, a 2 KiB user-level one, project_doc_max_bytes
+_S16B_B="$_S16B_W/bud"
+mkdir -p "$_S16B_B" "$_S16B/codex-2k" "$_S16B/codex-none" "$_S16B/codex-2k-raised" "$_S16B/codex-low" "$_S16B/notoml"
+( cd "$_S16B_B" && git init -q ) >/dev/null 2>&1
+{ head -c 30719 /dev/zero | tr '\0' 'u'; printf '\n'; } > "$_S16B_B/AGENTS.md"
+{ head -c 2047 /dev/zero | tr '\0' 'g'; printf '\n'; } > "$_S16B/codex-2k/AGENTS.md"
+cp "$_S16B/codex-2k/AGENTS.md" "$_S16B/codex-2k-raised/AGENTS.md"
+printf '# user-level settings\nproject_doc_max_bytes = 65536\n\n[projects."/elsewhere"]\ntrust_level = "trusted"\n' > "$_S16B/codex-2k-raised/config.toml"
+printf 'project_doc_max_bytes = 16384  # tight\n' > "$_S16B/codex-low/config.toml"
+printf 'raise ImportError("SELF-16: no TOML parser")\n' > "$_S16B/notoml/tomllib.py"
+cp "$_S16B/notoml/tomllib.py" "$_S16B/notoml/tomli.py"
+_S16B_SUM=$(_s16b_sum "$_S16B_B/AGENTS.md")
+for _S16B_Y in "" --yes; do
+  _O=$(S16B_CODEX="$_S16B/codex-2k" _s16b "$_S16B_B" instruction_merge_pointer $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-budget${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — over the agents-chain budget: with the pointer block, [^ ]*/w/bud/AGENTS\.md would be 3[0-9]{4} bytes, and the files that reader combines 3[0-9]{4} bytes \(user-level 2048 \+ the files from the project root down 0 \+ this file 3[0-9]{4}\), past 32768 \(the default\), .*nothing written\. .*raise project_doc_max_bytes yourself' '^rc=3$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_same "b-budget${_S16B_Y}" "$_S16B_SUM" "$(_s16b_sum "$_S16B_B/AGENTS.md")")"
+done
+_O=$(S16B_CODEX="$_S16B/codex-none" _s16b "$_S16B_B" instruction_merge_pointer)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-budget-alone "$_O" '^needs-ask: would append the Triforge pointer block to [^ ]*/w/bud/AGENTS\.md \(30720 -> 3[0-9]{4} bytes; the agents-chain budget: 3[0-9]{4} of 32768 bytes\)$' '^rc=20$')"
+_O=$(S16B_CODEX="$_S16B/codex-2k-raised" _s16b "$_S16B_B" instruction_merge_pointer)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-budget-raised "$_O" '^needs-ask: would append .*the agents-chain budget: 3[0-9]{4} of 65536 bytes\)$' '^rc=20$')"
+_O=$(S16B_CODEX="$_S16B/codex-low" _s16b "$_S16B_B" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-budget-low "$_O" '^instruction_merge_pointer: REFUSED — over the agents-chain budget:.*past 16384 \(project_doc_max_bytes in [^ ]*/codex-low/config\.toml\)' '^rc=3$')"
+_O=$(PYTHONPATH="$_S16B/notoml" S16B_CODEX="$_S16B/codex-low" _s16b "$_S16B_B" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-budget-linescan "$_O" '^instruction_merge_pointer: REFUSED — over the agents-chain budget:.*past 16384 \(project_doc_max_bytes in [^ ]*/codex-low/config\.toml\)' '^rc=3$')"
+_O=$(PYTHONPATH="$_S16B/notoml" S16B_CODEX="$_S16B/codex-2k-raised" _s16b "$_S16B_B" instruction_merge_pointer)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-budget-linescan-raised "$_O" 'the agents-chain budget: 3[0-9]{4} of 65536 bytes\)$' '^rc=20$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-budget-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_B/AGENTS.md")")"
+
+# convert: an exact copy, an exact .claude/ copy beside a user's CLAUDE.local.md, an edited copy, a user file
+if [ "$_S16B_TAGS" -eq 1 ]; then
+  mkdir -p "$_S16B_W/cv" "$_S16B_W/cv2/.claude" "$_S16B_W/cv3" "$_S16B_W/cv4"
+  for _S16B_D in cv cv2 cv3 cv4; do ( cd "$_S16B_W/$_S16B_D" && git init -q ) >/dev/null 2>&1; done
+  cp "$_S16B/v333.md" "$_S16B_W/cv/CLAUDE.md"
+  cp "$_S16B/v300.md" "$_S16B_W/cv2/.claude/CLAUDE.md"
+  printf '# mine\n' > "$_S16B_W/cv2/CLAUDE.local.md"
+  cp "$_S16B_S/.claude/CLAUDE.md" "$_S16B_W/cv3/CLAUDE.md"
+  printf '# just ours\n' > "$_S16B_W/cv4/CLAUDE.md"
+  _S16B_SUM=$(_s16b_sum "$_S16B_W/cv/CLAUDE.md" "$_S16B_W/cv/AGENTS.md")
+  _O=$(_s16b "$_S16B_W/cv" instruction_convert_stale CLAUDE.md)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-ask "$_O" '^needs-ask: would remove [^ ]*/w/cv/CLAUDE\.md \(an unmodified copy of the Triforge v3\.3\.3 templates/CLAUDE\.md\), so Claude Code reads AGENTS\.md natively, and create [^ ]*/w/cv/AGENTS\.md ' '^rc=20$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_same b-convert-ask "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/cv/CLAUDE.md" "$_S16B_W/cv/AGENTS.md")")"
+  _O=$(_s16b "$_S16B_W/cv" instruction_convert_stale CLAUDE.md --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-yes "$_O" '^changed: [^ ]*/w/cv/AGENTS\.md: created with the Triforge pointer block ' '^changed: [^ ]*/w/cv/CLAUDE\.md: removed \(an unmodified copy of the Triforge v3\.3\.3 template\)$' '^rc=0$')"
+  [ ! -e "$_S16B_W/cv/CLAUDE.md" ] || _S16_FAIL="${_S16_FAIL} b-convert-yes(not-removed)"
+  cmp -s "$REPO_ROOT/templates/AGENTS.md" "$_S16B_W/cv/AGENTS.md" || _S16_FAIL="${_S16_FAIL} b-convert-yes(no-pointer)"
+  _O=$(_s16b "$_S16B_W/cv" instruction_convert_stale CLAUDE.md --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-again "$_O" '^unchanged: [^ ]*/w/cv/CLAUDE\.md does not exist; nothing to convert$' '^rc=0$')"
+  _O=$(_s16b "$_S16B_W/cv2" instruction_convert_stale .claude/CLAUDE.md --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-dotclaude "$_O" '^changed: [^ ]*/w/cv2/AGENTS\.md: created ' '^changed: [^ ]*/w/cv2/\.claude/CLAUDE\.md: removed \(an unmodified copy of the Triforge v3\.0\.0 template\)$' '^note: [^ ]*/w/cv2/CLAUDE\.local\.md still exists and does not import AGENTS\.md' '^rc=0$')"
+  for _S16B_Y in "" --yes; do
+    _S16B_SUM=$(_s16b_sum "$_S16B_W/cv3/CLAUDE.md" "$_S16B_W/cv3/AGENTS.md")
+    _O=$(_s16b "$_S16B_W/cv3" instruction_convert_stale CLAUDE.md $_S16B_Y)
+    _S16_FAIL="${_S16_FAIL}$(_self_expect "b-convert-edited${_S16B_Y}" "$_O" '^instruction_convert_stale: REFUSED — [^ ]*/w/cv3/CLAUDE\.md is a Triforge 3\.x template copy with your own edits in it, so it is not removed; edit it by hand' '^rc=2$')"
+    _S16_FAIL="${_S16_FAIL}$(_s16b_same "b-convert-edited${_S16B_Y}" "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/cv3/CLAUDE.md" "$_S16B_W/cv3/AGENTS.md")")"
+  done
+  _S16B_SUM=$(_s16b_sum "$_S16B_W/cv4/CLAUDE.md")
+  _O=$(_s16b "$_S16B_W/cv4" instruction_convert_stale CLAUDE.md --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-user "$_O" '^instruction_convert_stale: REFUSED — [^ ]*/w/cv4/CLAUDE\.md is not a Triforge 3\.x template copy; nothing to convert' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_same b-convert-user "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/cv4/CLAUDE.md")")"
+fi
+
+# refusals: symlinked targets, a FIFO, the user-tier file, a lease worker
+_S16B_L="$_S16B_W/ln"
+mkdir -p "$_S16B_L" "$_S16B/outside" "$_S16B/outside-dir" "$_S16B_W/ff" "$_S16B_W/uh/proj/.git" "$_S16B_W/uh/.claude" "$_S16B_W/wk"
+printf '# outside\n' > "$_S16B/outside/CLAUDE.md"
+printf '# outside agents\n' > "$_S16B/outside/AGENTS.md"
+printf '# outside dir\n' > "$_S16B/outside-dir/CLAUDE.md"
+ln -s "$_S16B/outside/CLAUDE.md" "$_S16B_L/CLAUDE.md"
+ln -s "$_S16B/outside/AGENTS.md" "$_S16B_L/AGENTS.md"
+ln -s "$_S16B/outside-dir" "$_S16B_L/.claude"
+mkfifo "$_S16B_W/ff/AGENTS.md"
+printf '# me\n' > "$_S16B_W/uh/.claude/CLAUDE.md"
+printf '# own\n' > "$_S16B_W/wk/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B/outside/CLAUDE.md" "$_S16B/outside/AGENTS.md" "$_S16B/outside-dir/CLAUDE.md" "$_S16B_W/uh/.claude/CLAUDE.md" "$_S16B_W/wk/CLAUDE.md")
+_O=$(_s16b "$_S16B_L" instruction_add_import CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-refuse-link "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/ln/CLAUDE\.md is a symlink: ' '^rc=2$')"
+_O=$(_s16b "$_S16B_L" instruction_add_import .claude/CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-refuse-linkdir "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/ln/\.claude is a symlink: the file would be written outside ' '^rc=2$')"
+_O=$(_s16b "$_S16B_L" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-refuse-linkmerge "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/w/ln/AGENTS\.md is a symlink: ' '^rc=2$')"
+_S16B_T0=$(date +%s)
+_O=$(_s16b "$_S16B_W/ff" instruction_merge_pointer --yes)
+_S16B_T1=$(( $(date +%s) - _S16B_T0 ))
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-refuse-fifo "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/w/ff/AGENTS\.md is not a regular file' '^rc=2$')"
+[ "$_S16B_T1" -lt 10 ] || _S16_FAIL="${_S16_FAIL} b-refuse-fifo(stalled:${_S16B_T1}s)"
+[ -p "$_S16B_W/ff/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-refuse-fifo(replaced)"
+_O=$(S16B_HOME="$_S16B_W/uh" _s16b "$_S16B_W/uh/proj" instruction_add_import ../.claude/CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-refuse-usertier "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/uh/\.claude/CLAUDE\.md is your user-tier ~/\.claude/CLAUDE\.md, which Triforge reads and never writes' '^rc=2$')"
+_O=$(TRIFORGE_LEASE_WORKER=t-self16 _s16b "$_S16B_W/wk" instruction_add_import CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-refuse-worker "$_O" '^instruction_add_import: REFUSED — a lead-only helper, called from a lease worker' '^rc=45$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-refuse-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B/outside/CLAUDE.md" "$_S16B/outside/AGENTS.md" "$_S16B/outside-dir/CLAUDE.md" "$_S16B_W/uh/.claude/CLAUDE.md" "$_S16B_W/wk/CLAUDE.md")")"
+
+# hook: the own-file notice, without the loader (CLAUDE_PLUGIN_ROOT unset) and with it
+_S16B_H="$_S16B_W/hook"
+mkdir -p "$_S16B_H/proj/.claude" "$_S16B/hookbin" "$_S16B/hookhome"
+( cd "$_S16B_H/proj" && git init -q ) >/dev/null 2>&1
+printf '# acme\n' > "$_S16B_H/proj/CLAUDE.md"
+printf '# local\n' > "$_S16B_H/proj/.claude/CLAUDE.md"
+printf '# notes\n' > "$_S16B_H/proj/CLAUDE.local.md"
+printf '#!/bin/sh\n# probe stub (SELF-16 B): the floor build\ncase "${1:-}" in --version) echo 2.1.277 ;; esac\nexit 0\n' > "$_S16B/hookbin/claude"
+printf '#!/bin/sh\n# probe stub (SELF-16 B): answers the bootstrap without touching a real agy\ncase "${1:-}" in --version) echo 0.0.0-probe-stub ;; plugin) echo agent-triforge ;; agents) printf "%%s\\n" codebase-analyst architecture-reviewer targeted-researcher documentation-writer ;; esac\nexit 0\n' > "$_S16B/hookbin/agy"
+chmod +x "$_S16B/hookbin/claude" "$_S16B/hookbin/agy"
+_s16b_hook() { # _s16b_hook <project> [plugin root] — session start there, throwaway HOME, stubs first on PATH
+  if [ -n "${2:-}" ]; then
+    ( cd "$1" && HOME="$_S16B/hookhome" CLAUDE_PLUGIN_ROOT="$2" PATH="$_S16B/hookbin:$PATH" /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 )
+  else
+    ( cd "$1" && env -u CLAUDE_PLUGIN_ROOT HOME="$_S16B/hookhome" PATH="$_S16B/hookbin:$PATH" /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 )
+  fi
+}
+for _S16B_ROOT in "" "$REPO_ROOT"; do
+  _S16B_C="b-hook-own${_S16B_ROOT:+-loader}"
+  _O=$(_s16b_hook "$_S16B_H/proj" "$_S16B_ROOT")
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_C" "$_O" \
+    "^WARNING: CLAUDE\.md in this project does not import AGENTS\.md, so Claude Code reads it and skips AGENTS\.md, Triforge's only instruction file\. Run /at-setup to add the line @AGENTS\.md to it \(setup asks first\), or add it yourself — session start never edits this file\.\$" \
+    "^WARNING: \.claude/CLAUDE\.md in this project does not import AGENTS\.md, .* Run /at-setup to add the line @\.\./AGENTS\.md to it " \
+    "^WARNING: CLAUDE\.local\.md in this project does not import AGENTS\.md, .* Run /at-setup to add the line @AGENTS\.md to it " \
+    '^Multi-agent framework ready\.$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "$_S16B_C" "$_O" '^\{|hook crashed|instruction-file check did not finish|Triforge 3\.x project template')"
+done
+printf '# mono\n@proj/AGENTS.md\n' > "$_S16B_H/CLAUDE.md"
+_O=$(_s16b_hook "$_S16B_H/proj")
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-hook-parent-import "$_O" 'in this project does not import AGENTS\.md|is not loaded under a Claude lead|^\{|hook crashed')"
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-hook-parent-import "$_O" '^Multi-agent framework ready\.$')"
+_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice; "
+rm -rf "$_S16B"
 # --- end of SELF-16 section B ---
 # --- SELF-16 section C: at-setup's blocks and the headless primitives (U15) ---
 # --- end of SELF-16 section C ---
