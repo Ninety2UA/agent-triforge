@@ -33,6 +33,11 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 
 **Review flow from Phase 2b on (user, 2026-10-04):** no PR babysitting. Each phase PR is reviewed by an independent final-diff reviewer plus Codex CLI on `gpt-6-astra` at `xhigh` (read-only), findings fixed and verified, one check that `gates.yml` is green, then the squash-merge. The per-phase ce-code-review is skipped; a full review plus ce-code-review over the whole `release/4.0` diff runs once at the end, before the release PR to `main`. Every phase is still built through `/ce-work`.
 
+**Review flow from now on (user, 2026-10-07): code review happens once, at the end.** "Let's make sure that we leave code-review for the final code-review, not at every step/phase." This replaces the paragraph above and the per-PR review and 5/5 rule in the authorization, for the rest of this program:
+- Phase 4 (already through five review rounds) and Phases 5 and 6 get no per-phase review: no final-diff reviewer, no Codex review, no ce-code-review, no simplify-review pass.
+- Each phase is built through `/ce-work` and verified by its own tests: a SELF case per behavior, the full `--self-only` under Python 3.14 and 3.12, validate-skills (+ `--self-test`), validate-versions, both manifests `--strict`, `/bin/bash -n`. Then the PR, one green `gates.yml` run, and the squash-merge.
+- The one code review is the end-of-program review over `release/4.0` vs `main`: ce-code-review plus Codex CLI `gpt-6-astra` at `xhigh`, then one fix round, then the release PR (only the user approves the merge to `main`).
+
 **All work runs through `/ce-work` (user, 2026-10-06):** every phase, review-fix batch, simplify pass and the final release run inside a `/ce-work` invocation scoped to that work, following its references (triage, workspace, engine, execution strategy, implementation loop, shipping workflow) as read, never from memory. After a context compaction, re-invoke `/ce-work` for the current scope before continuing; a run started before the compaction does not carry over. Phase 2b had no `/ce-work` run of its own (its units ran under the run that finished 2a); don't repeat that.
 
 ## Program plan (PR by PR on release/4.0; each built with ce-work on Fable 5.1 @ high, reviewed on Opus 5.5 @ high)
