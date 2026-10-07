@@ -44,7 +44,11 @@
 # Each is idempotent: a run with nothing to change prints "unchanged:" and
 # returns 0 without asking. Lead-only: a lease worker or a lease root is
 # refused (rc 45, _lead_only --any-host when the loader is in scope, else the
-# worker marker). The user-tier files are read, never written.
+# worker marker). Every reader's user-level files (user_owned: the user tier
+# under HOME, the user-level file and its override in the reader home) are
+# read, never written: each writer refuses one, or any file in the directory
+# of one, before any plan and also with --yes (rc 2), by identity, or by the
+# physical path for a file that does not exist yet.
 #
 # Return codes: 0 ok · 1 hidden or an unknown reader
 # (instruction_pointer_visibility) · 2 refused input · 3 over the AGENTS.md
@@ -303,6 +307,39 @@ def is_user_tier(path):
     return lexists(path) and any(lexists(u) and same_file(path, u) for u in user_tiers())
 
 
+def user_files():
+    # (path, label) of every file a reader takes from the directories of the
+    # user, from READERS: its user tier under HOME, then its user-level file
+    # and override in its reader home ($<home_env> honored, as reader_home
+    # does)
+    files = []
+    for r in READERS.values():
+        if r["user_tier"] and home():
+            files.append((os.path.join(home(), r["user_tier"]), "user-tier ~/" + r["user_tier"]))
+        rh = reader_home(r)
+        if not rh:
+            continue
+        shown = "$" + r["home_env"] if r["home_env"] and os.environ.get(r["home_env"], "") else "~/" + r["home_default"]
+        files += [(os.path.join(rh, n), "user-level " + shown + "/" + n) for n in (r["user_level"], r["override"]) if n]
+    return files
+
+
+def user_owned(path):
+    # why no writer may write path ("" when one may): it is, or would be, one
+    # of user_files, or it sits in the directory of one. same_file
+    # compares by identity where both exist (a hard link; a link to the file
+    # or to its directory) and by physical path where one does not, so an
+    # absent target is caught too
+    files = user_files()
+    for u, label in files:
+        if same_file(path, u):
+            return path + " is your " + label + ", which Triforge reads and never writes; edit it yourself"
+    for u, label in files:
+        if same_file(os.path.dirname(path), os.path.dirname(u)):
+            return path + " is in the directory of your " + label + ", which Triforge reads and never writes; edit it yourself"
+    return ""
+
+
 def kind_names(kinds):
     return ", ".join(kinds[:-1]) + " or " + kinds[-1] if len(kinds) > 1 else "".join(kinds)
 
@@ -503,8 +540,9 @@ def target_of(fn, arg, kinds):
         kind, level = base, parent
     if kind not in kinds:
         return path, kind, level, refuse(fn, path + " is not one of " + ", ".join(kinds))
-    if is_user_tier(path):
-        return path, kind, level, refuse(fn, path + " is your user-tier ~/.claude/CLAUDE.md, which Triforge reads and never writes; edit it yourself")
+    why = user_owned(path)
+    if why:
+        return path, kind, level, refuse(fn, why)
     if islink(parent):
         return path, kind, level, refuse(fn, parent + " is a symlink: the file would be written outside the directory it is named in; pass the physical path, or edit it yourself")
     if islink(path):
@@ -601,6 +639,9 @@ def merge_plan(fn, dirarg, template):
         return refuse(fn, dirarg + " is not a directory"), None
     target = os.path.realpath(dirarg)
     path = os.path.join(target, "AGENTS.md")
+    why = user_owned(path)
+    if why:
+        return refuse(fn, why), None
     tmpl = load(template) if template else None
     if tmpl is None or not has_block(tmpl) or tmpl.count(START) != 1:
         return refuse(fn, "the pointer block template " + (template or "(no plugin root)") + " is missing or has no single marked block", 69), None
@@ -884,9 +925,10 @@ instruction_pointer_visibility() {
 # project's AGENTS.md (the working directory's) to a CLAUDE.md, .claude/CLAUDE.md
 # or CLAUDE.local.md in the project or above it. Without --yes: the planned
 # line ("needs-ask: …") and rc 20. A file that already imports it is left
-# alone ("unchanged: …", rc 0). Refused (rc 2): another kind of file, the
-# user-tier ~/.claude/CLAUDE.md, a file outside the project's directory chain,
-# a missing or non-regular file, a symlink or a symlinked directory.
+# alone ("unchanged: …", rc 0). Refused (rc 2): another kind of file, a
+# user-level file or one in its directory (~/.claude/CLAUDE.md, ~/.claude/,
+# ${CODEX_HOME:-~/.codex}/), a file outside the project's directory chain, a
+# missing or non-regular file, a symlink or a symlinked directory.
 instruction_add_import() {
   _instr_args instruction_add_import "instruction_add_import <file> [--yes]" "$@" || return $?
   if [ -z "$_INSTR_ARG" ]; then
@@ -908,8 +950,11 @@ instruction_add_import() {
 # project_doc_max_bytes from ${CODEX_HOME:-~/.codex}/config.toml, else 32768:
 # over it, rc 3 naming the sizes, nothing written. An AGENTS.override.md in
 # <dir> gets a "warning:" line (that reader takes it instead; the file is
-# never written). Refused (rc 2): a symlinked or non-regular AGENTS.md,
-# markers not in one ordered pair.
+# never written). Refused (rc 2), with or without --yes: a <dir> that is the
+# directory of a user-level file (${CODEX_HOME:-~/.codex}, ~/.claude; through
+# a link or another spelling too), an AGENTS.md that is a user-level one (a
+# hard link), a symlinked or non-regular AGENTS.md, markers not in one
+# ordered pair.
 instruction_merge_pointer() {
   _instr_args instruction_merge_pointer "instruction_merge_pointer [<dir>] [--yes]" "$@" || return $?
   _instr_writer_ok instruction_merge_pointer || return $?
@@ -921,9 +966,10 @@ instruction_merge_pointer() {
 # block into that project directory's AGENTS.md (instruction_merge_pointer's
 # plan and budget check, rc 3 over it), then remove the copy, so Claude Code
 # reads AGENTS.md natively; a "note:" line names any CLAUDE.md-family file
-# that still shadows it there. A copy with edits, or a file that is no 3.x
-# copy, is refused (rc 2) and never removed. Without --yes: the plan and rc
-# 20. A file already gone: "unchanged: …", rc 0.
+# that still shadows it there. A copy with edits, a file that is no 3.x
+# copy, or one in the directory of a user-level file, is refused (rc 2) and
+# never removed. Without --yes: the plan and rc 20. A file already gone:
+# "unchanged: …", rc 0.
 instruction_convert_stale() {
   _instr_args instruction_convert_stale "instruction_convert_stale <file> [--yes]" "$@" || return $?
   if [ -z "$_INSTR_ARG" ]; then

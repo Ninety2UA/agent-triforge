@@ -9820,6 +9820,19 @@ _S16_EV="${_S16_EV}A: one checkout-top roster from a subdirectory; egress per pr
 #            copy and a user file refused, untouched
 #   refuse   a symlinked CLAUDE.md, a symlinked .claude, a symlinked or FIFO
 #            AGENTS.md, the user-tier file, a lease worker: refused, untouched
+#   user     the user-level files and their directories, rc 2 before any
+#            plan, with and without --yes: a merge into HOME/.codex with
+#            CODEX_HOME unset (no AGENTS.md created), into $CODEX_HOME, into
+#            a link to it, into a project whose AGENTS.md is a hard link to
+#            the user-level one, and into ~/.claude; the conversion of an
+#            exact 3.x copy placed in $CODEX_HOME (the copy kept); the files
+#            byte-identical, the hard link intact; an ordinary project under
+#            the same HOME and CODEX_HOME still gets its plan
+#   race     the target changed between the plan and the write: the
+#            library's own program (the text _instr_py hands python3) with
+#            merge_plan wrapped to change the file once the plan is made ->
+#            the merge's write and the conversion's removal refused (rc 80),
+#            the changed bytes kept, no temp file left
 #   hook     session start names each project CLAUDE.md-family file that does
 #            not import AGENTS.md (one line, at-setup), with and without the
 #            loader, and none once the parent's file imports it
@@ -10143,6 +10156,97 @@ _O=$(TRIFORGE_LEASE_WORKER=t-self16 _s16b "$_S16B_W/wk" instruction_add_import C
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-refuse-worker "$_O" '^instruction_add_import: REFUSED — a lead-only helper, called from a lease worker' '^rc=45$')"
 _S16_FAIL="${_S16_FAIL}$(_s16b_same b-refuse-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B/outside/CLAUDE.md" "$_S16B/outside/AGENTS.md" "$_S16B/outside-dir/CLAUDE.md" "$_S16B_W/uh/.claude/CLAUDE.md" "$_S16B_W/wk/CLAUDE.md")")"
 
+# user level: what a reader takes from the user's own directories (the user tier under HOME,
+# AGENTS.md and AGENTS.override.md in ${CODEX_HOME:-HOME/.codex}) is never written, nor is
+# anything beside it: rc 2 before any plan, with or without --yes
+_S16B_U="$_S16B/ul"
+mkdir -p "$_S16B_U/home/.codex" "$_S16B_U/home/.claude" "$_S16B_U/cx" "$_S16B_W/ulp" "$_S16B_W/ulh"
+for _S16B_D in ulp ulh; do ( cd "$_S16B_W/$_S16B_D" && git init -q ) >/dev/null 2>&1; done
+printf '# me\n' > "$_S16B_U/home/.claude/CLAUDE.md"
+printf '# codex global rules\n' > "$_S16B_U/cx/AGENTS.md"
+ln -s "$_S16B_U/cx" "$_S16B_W/cxlink"
+ln "$_S16B_U/cx/AGENTS.md" "$_S16B_W/ulh/AGENTS.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_U/cx/AGENTS.md" "$_S16B_U/home/.claude/CLAUDE.md")
+for _S16B_Y in "" --yes; do
+  # HOME/.codex with CODEX_HOME unset (no AGENTS.md there yet), then $CODEX_HOME (one there)
+  _O=$(S16B_HOME="$_S16B_U/home" _s16b "$_S16B_W/ulp" eval 'unset CODEX_HOME; instruction_merge_pointer "$HOME/.codex" '"$_S16B_Y")
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-user-home${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/ul/home/\.codex/AGENTS\.md is your user-level ~/\.codex/AGENTS\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-user-home${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+  _O=$(S16B_CODEX="$_S16B_U/cx" _s16b "$_S16B_W/ulp" instruction_merge_pointer "$_S16B_U/cx" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-user-codexhome${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/ul/cx/AGENTS\.md is your user-level \$CODEX_HOME/AGENTS\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-user-codexhome${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+done
+[ ! -e "$_S16B_U/home/.codex/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-user-home(written)"
+# a directory linked to the reader home, a project AGENTS.md hard-linked to the user-level one, ~/.claude
+_O=$(S16B_CODEX="$_S16B_U/cx" _s16b "$_S16B_W/ulp" instruction_merge_pointer "$_S16B_W/cxlink" --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-user-link "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/ul/cx/AGENTS\.md is your user-level \$CODEX_HOME/AGENTS\.md, ' '^rc=2$')"
+_O=$(S16B_CODEX="$_S16B_U/cx" _s16b "$_S16B_W/ulh" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-user-hardlink "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/w/ulh/AGENTS\.md is your user-level \$CODEX_HOME/AGENTS\.md, ' '^rc=2$')"
+[ "$_S16B_W/ulh/AGENTS.md" -ef "$_S16B_U/cx/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-user-hardlink(link-broken)"
+_O=$(S16B_HOME="$_S16B_U/home" _s16b "$_S16B_W/ulp" instruction_merge_pointer "$_S16B_U/home/.claude" --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-user-claude "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/ul/home/\.claude/AGENTS\.md is in the directory of your user-tier ~/\.claude/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+[ ! -e "$_S16B_U/home/.claude/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-user-claude(written)"
+# the conversion of an exact 3.x copy in $CODEX_HOME: refused, the copy kept
+if [ "$_S16B_TAGS" -eq 1 ]; then
+  cp "$_S16B/v333.md" "$_S16B_U/cx/CLAUDE.md"
+  _O=$(S16B_CODEX="$_S16B_U/cx" _s16b "$_S16B_W/ulp" instruction_convert_stale "$_S16B_U/cx/CLAUDE.md" --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-user-convert "$_O" '^instruction_convert_stale: REFUSED — [^ ]*/ul/cx/CLAUDE\.md is in the directory of your user-level \$CODEX_HOME/AGENTS\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  cmp -s "$_S16B/v333.md" "$_S16B_U/cx/CLAUDE.md" || _S16_FAIL="${_S16_FAIL} b-user-convert(copy-not-kept)"
+fi
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-user-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_U/cx/AGENTS.md" "$_S16B_U/home/.claude/CLAUDE.md")")"
+# no wider than that: an ordinary project under the same HOME and CODEX_HOME still gets its plan
+_O=$(S16B_HOME="$_S16B_U/home" S16B_CODEX="$_S16B_U/cx" _s16b "$_S16B_W/ulp" instruction_merge_pointer)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-user-project "$_O" '^needs-ask: would create [^ ]*/w/ulp/AGENTS\.md ' '^rc=20$')"
+
+# race: the target changed between the plan and the write. No seam in the library: a python3
+# function takes the one call _instr_py makes (python3 -c <program> <op> <helper> <args...>)
+# and hands it to _S16B_RACE, which runs that very program: once with the op "noop" (main's
+# rc 64) to leave its definitions in a namespace, then its main with _instr_py's argv, with
+# merge_plan wrapped so $S16B_RACE_FILE changes right after the plan is made
+_S16B_RACE='
+import os, sys
+prog, argv = sys.argv[2], sys.argv[3:]
+ns = {"__name__": "__main__"}
+sys.argv = ["-c", "noop", argv[1]]
+try:
+    exec(prog, ns)
+except SystemExit as e:
+    if e.code != 64:
+        raise
+planned = ns["merge_plan"]
+
+
+def merge_plan(*args):
+    got = planned(*args)
+    with open(os.environ["S16B_RACE_FILE"], "ab") as f:
+        f.write(b"# edited while the change was planned\n")
+    return got
+
+
+ns["merge_plan"] = merge_plan
+sys.argv = ["-c"] + argv
+sys.exit(ns["main"](argv))
+'
+_S16B_RACE_FN='python3() { command python3 -c "$S16B_RACE" "$@"; }; '
+mkdir -p "$_S16B_W/race"
+( cd "$_S16B_W/race" && git init -q ) >/dev/null 2>&1
+printf '# ours\n' > "$_S16B_W/race/AGENTS.md"
+printf '# ours\n# edited while the change was planned\n' > "$_S16B/race-merge.expect"
+_O=$(S16B_RACE="$_S16B_RACE" S16B_RACE_FILE="$_S16B_W/race/AGENTS.md" _s16b "$_S16B_W/race" eval "${_S16B_RACE_FN}instruction_merge_pointer --yes")
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-race-merge "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/w/race/AGENTS\.md not written: it changed while the change was planned \(rc 80\)$' '^rc=80$')"
+cmp -s "$_S16B/race-merge.expect" "$_S16B_W/race/AGENTS.md" || _S16_FAIL="${_S16_FAIL} b-race-merge(not-the-changed-bytes)"
+[ "$(ls -A "$_S16B_W/race" | grep -c '^\.AGENTS\.md\.triforge-' || true)" = 0 ] || _S16_FAIL="${_S16_FAIL} b-race-merge(temp-left)"
+if [ "$_S16B_TAGS" -eq 1 ]; then
+  mkdir -p "$_S16B_W/racecv"
+  ( cd "$_S16B_W/racecv" && git init -q ) >/dev/null 2>&1
+  cp "$_S16B/v333.md" "$_S16B_W/racecv/CLAUDE.md"
+  { cat "$_S16B/v333.md"; printf '# edited while the change was planned\n'; } > "$_S16B/race-convert.expect"
+  _O=$(S16B_RACE="$_S16B_RACE" S16B_RACE_FILE="$_S16B_W/racecv/CLAUDE.md" _s16b "$_S16B_W/racecv" eval "${_S16B_RACE_FN}instruction_convert_stale CLAUDE.md --yes")
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-race-convert "$_O" '^instruction_convert_stale: REFUSED — [^ ]*/w/racecv/CLAUDE\.md not removed: it changed while the change was planned \(rc 80\)$' '^rc=80$')"
+  cmp -s "$_S16B/race-convert.expect" "$_S16B_W/racecv/CLAUDE.md" || _S16_FAIL="${_S16_FAIL} b-race-convert(not-the-changed-bytes)"
+  [ "$(ls -A "$_S16B_W/racecv" | grep -c '^\.AGENTS\.md\.triforge-' || true)" = 0 ] || _S16_FAIL="${_S16_FAIL} b-race-convert(temp-left)"
+fi
+
 # hook: the own-file notice, without the loader (CLAUDE_PLUGIN_ROOT unset) and with it
 _S16B_H="$_S16B_W/hook"
 mkdir -p "$_S16B_H/proj/.claude" "$_S16B/hookbin" "$_S16B/hookhome"
@@ -10174,7 +10278,7 @@ printf '# mono\n@proj/AGENTS.md\n' > "$_S16B_H/CLAUDE.md"
 _O=$(_s16b_hook "$_S16B_H/proj")
 _S16_FAIL="${_S16_FAIL}$(_s16b_not b-hook-parent-import "$_O" 'in this project does not import AGENTS\.md|is not loaded under a Claude lead|^\{|hook crashed')"
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-hook-parent-import "$_O" '^Multi-agent framework ready\.$')"
-_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice; "
+_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file); "
 rm -rf "$_S16B"
 # --- end of SELF-16 section B ---
 # --- SELF-16 section C: at-setup's blocks and the headless primitives (U15) ---
