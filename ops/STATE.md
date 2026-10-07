@@ -1,6 +1,6 @@
 ---
-saved: 2026-10-06T18:10:00Z
-phase: 2c fixing; 3 integrating
+saved: 2026-10-07T06:55:00Z
+phase: 2c, 3 and 4 stopped at the 3-review cap; awaiting the user's call (see Blockers)
 wave: 0
 tasks:
   total: 29
@@ -44,9 +44,9 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 | 1b | U7 commands → at- skills; U24 split oversized skills; U23 remove commands/ | **merged** — PR #15 squash 3e99675 |
 | 2a | U29 capability/survival probe rows; U13 detached leases + lease_wait + lead exit; U11 worker marker (+ U18 manifests, docs copy pass) | **merged** — PR #16 squash 4d4b054; ce-code-review run 20261004-175229-90f65ad6, final-diff review 5/5, Codex gpt-6-astra xhigh FIX → all applied |
 | 2b | U9 [lead] table + resolution; U12 claude -p lane; U10 ledger lead CLI / reviewer class / approvals | **merged** — PR #18 squash 5ac2e54; final-diff re-review 5/5, Codex gpt-6-astra xhigh FIX → all applied |
-| 2c | U25 dispatch_persona lane; U8 personas home, agents/ removed | **fixing, round 3** — Codex round 2 FIX (4 P1), final-diff 4/5 |
-| 3 | U14 Codex lead: bootstrap, monitors, coordinator | **pre-review** — fixes + simplify committed; `$agent-triforge:` mention sweep, then re-review |
-| 4 | U16 Grok Build adapter; U17 Devin CLI adapter (U18 shipped in 2a) | **building** — u16, u17 in parallel |
+| 2c | U25 dispatch_persona lane; U8 personas home, agents/ removed | **stopped at the review cap** — round 3: Codex FIX, final-diff 4/5 FIX (see Blockers) |
+| 3 | U14 Codex lead: bootstrap, monitors, coordinator | **stopped at the review cap** — round 3: Codex FIX, final-diff 5/5 MERGE (see Blockers) |
+| 4 | U16 Grok Build adapter; U17 Devin CLI adapter (U18 shipped in 2a) | **stopped at the review cap** — round 3: Codex FIX (2 P1), final-diff 5/5 MERGE (see Blockers) |
 | 5 | U15 at-setup lead step + instruction-file detection | pending |
 | 6 | U19 watch-cycle carry-ins; U20 two-lead fixture sprint + 4.0 release | pending |
 | final | release/4.0 → main as v4.0.0 (release.yml publishes) | pending |
@@ -69,6 +69,23 @@ Lead's triage and recommendation:
 - **Policy-relevant, recommend fixing:** (3) the HOME refusal is bypassable by path casing on macOS (`pwd -P` vs `env pwd -P`; compare filesystem identity) → user-tier writes possible; (3) deleting `ops/leases.toml` and restarting under another TMPDIR passes the coordinator's integrity check (no session should start when the anchors elsewhere can't be checked); (3) headless enrollment writes through a symlinked `ops/` and its temp file is a plain open (predates 3, reachable through the hook); (3) a roster model value can put a `{`-leading line on hook stdout via `printf '%b'`; (2c) a moved integration branch / switched HEAD before dispatch supplies the "trusted" instruction bundle (validate the recorded integration SHA first).
 - **Same-user race hardening, could be documented instead:** skills-sync parent swap after validation; the `.codex/agents` migration `mv` racing a symlink swap; non-sticky shared TMPDIR races in the hook's and coordinator's temp dirs; a FIFO planted at a monitor state path blocking the hook; persona cleanup leaving descendants of a successful run, and `persona_stop` on an orphaned run returning 0. AGENTS.md "Confinement, stated as it is" already says a worker with a shell can write anything the user can and Triforge detects rather than prevents; these extend that.
 - Phase 4 (Grok, Devin) continues independently; Phases 5–6 wait on 3 and 4.
+
+**2026-10-07 ~08:55: Phase 4 stopped at the 3-review-round cap too.** Branch `feat/v4-phase-4` at 6ec6839 (on 592688f, 14 commits). Its worktree is `mafw-wt-phase-4`, nothing is merged, and the gate is green (29 SELF rows, none FAIL). Round 1 was Codex FIX (3 P1, 5 P2) and final4 3/5. Round 2 was Codex FIX (3 P1, 5 P2) and final4b 4/5. Every round-1 and round-2 finding was fixed, with SELF cases that go red when the fix is removed (final4c: 17 of 19 mutations). Round 3 split, the same way Phase 3 did: final4c **5/5 MERGE**, Codex **FIX**. Reports are in the session scratchpad: `codex-4-r3/review.md`, `final4-r3.md`, and `phase4/notes.md`, which also holds the residuals.
+- **Codex round-3 P1s.**
+  - at-review's new review-package diff (`optional-lanes.md:40`, `_lgr diff`) runs before any integrity check, so a clean filter planted in `.git/config` runs in the lead's shell. final4c rates this P3, because the learnings gate's plain `git diff` already runs the same exposure. Its fix: one `_lead_integrity_check at-review` at the top of at-review.
+  - A grok reviewer still runs user-tier startup code from `~/.grok/config.toml` (hooks, LSP, MCP), which a grok builder's sandbox can write. This is the round-1 P3-4 residual, raised to P1. The fix would refuse or suppress user-tier hooks, LSP and MCP for the read class.
+- **Codex round-3 P2s.**
+  - The 200 KB diff cap drops whole files, with no file inventory.
+  - An optional CLI in a core role (`dispatch.md`) gets no diff. final4c P3-3 found the same.
+  - `_promote_ok` scans Codex's whole transcript, so a quoted `Status: BLOCKED` suppresses a good review.
+  - Devin's retry skips the consent, role and guard re-check.
+- **P3s.**
+  - A wrong `REVIEW_BASE` silently reviews another scope.
+  - Devin retries an interrupted run.
+  - No SELF row gates at-review's promotion rule or the scratch traps; the harnesses exist (final4c).
+  - The diff can exceed Linux's 128 KiB argument limit.
+  - R25's per-CLI case arms.
+- **Lead's recommendation:** a fourth round, scoped to the items above. Each is local: at-review's integrity check, review package and core-lane prompt; the grok read class's user-tier surfaces; Devin's retry. The live grok rows still wait on the xAI quota.
 - **Third-round final-diff verdicts (added 03:20):** final2c **4/5 FIX** at 115b9b1 — the one blocking finding is the duplicate core-lane dispatch (dispatch.md:72-90 and :143-160, the same as Codex's 2c #4); every earlier finding fixed; P3: rerunning a synthesis start block while a synthesizer runs orphans it. final3 **5/5 MERGE** at 5b50bbc — all eight Codex round-2 findings and its four P3s fixed; it did not have Codex's round-3 list, so the reviewers disagree on Phase 3 (Codex's round-3 P1s stand until checked). Reports: session scratchpad `final2c-r3.md`, `phase3/final3-r3.md`.
 
 ## Model and effort (user-approved)
