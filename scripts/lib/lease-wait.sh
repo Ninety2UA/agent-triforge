@@ -624,7 +624,10 @@ _claude_session_ok() {
 #                when set, streaming-json, dontAsk with the allow and deny sets
 #                (every MCP tool denied), and the GROK_CONFIG overlay that
 #                keeps the tool shell to the boundary's names; -p last (the
-#                prompt is its value)
+#                prompt is its value). A read-class worktree that holds
+#                project hooks, an LSP server, plugins or MCP servers of its
+#                own is a compose failure, never a run (_grok_project_guard
+#                names the file)
 _lease_lane_argv() {
   local CLI=$1 MODEL=$2 EFFORT=$3 DMODEL=$4 LANE_ARG=$5 CBIN=$6 WT=$7 TIMEOUT=$8
   case "$CLI" in
@@ -679,7 +682,14 @@ _lease_lane_argv() {
       _LEASE_LANE_ARGV=("${_DEVIN_ARGV[@]}")
       ;;
     grok)
-      # <lane-arg> is the class; an empty or unknown one runs read-only
+      # <lane-arg> is the class; an empty or unknown one runs read-only, and
+      # a read-class lease never starts where the worktree supplies code grok
+      # would start before any permission applies (checked at provisioning,
+      # and here again at dispatch)
+      if [ "$LANE_ARG" != edit ] && ! _LEASE_LANE_ERR=$(_grok_project_guard "$WT"); then
+        _LEASE_LANE_ERR=${_LEASE_LANE_ERR:-"the worktree's grok project check failed to run"}
+        return 1
+      fi
       _grok_argv "${LANE_ARG:-read}" "$DMODEL" "$EFFORT" || return 1
       _LEASE_LANE_ARGV=("${_GROK_ARGV[@]}")
       ;;

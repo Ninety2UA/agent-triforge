@@ -4560,19 +4560,26 @@ rm -rf "$_S24"
 
 # SELF-25 (R23): Grok Build's lane without a live CLI. A `grok` stub first on
 # PATH answers `inspect --json` with two plugins and two MCP servers, one of
-# them from grok's own config.toml, and a configSources env_overlay layer that
-# names the overlay's sections when GROK_CONFIG is set, else (or with the
+# them from grok's own config.toml, a Claude Code project hook marked
+# disabled (as grok 1.0.34 lists one under GROK_CLAUDE_HOOKS_ENABLED=0), an
+# empty LSP server list, and a configSources env_overlay layer that names the
+# overlay's sections when GROK_CONFIG is set, else (or with the
 # overlay-ignored flag file) "set but ignored" (the shapes grok 1.0.34 prints;
 # GRK-02 and GRK-06 run the real one), recording the environment it ran in.
+# The inspect-mode file bends that answer: empty (no output), malformed (cut
+# off), fail (exit 1), partial (no plugin list), partial-read (no hook or LSP
+# server list), projecthook (an active hook whose source is the project).
 # Any other run records its argv (prompt included), environment, working
-# directory and whether a .grok/config.toml sat there, writes a file into the
-# working directory when the run is in the workspace sandbox, and answers
-# with a streaming-json stream chosen by the mode file: done (Status: DONE,
-# end_turn), maxtokens, noend and maxturns (Status: DONE, then max_tokens, no
-# end event, or max_turns_reached and exit 1), empty (end_turn alone). A
-# scratch HOME carries ~/.claude/plugins/installed_plugins.json and
-# ~/.claude.json, naming one more plugin and one more server. Every expected
-# value below is a literal, never read from scripts/lib/grok.sh.
+# directory, whether a .grok/config.toml sat there and the a.txt it found,
+# writes a file into the working directory when the run is in the workspace
+# sandbox, and answers with a streaming-json stream chosen by the mode file:
+# done (Status: DONE, end_turn), maxtokens, noend and maxturns (Status: DONE,
+# then max_tokens, no end event, or max_turns_reached and exit 1), empty
+# (end_turn alone), interrupted (exit 130, as a grok a SIGINT stopped); each
+# run also adds a line to log/runs. A scratch HOME carries
+# ~/.claude/plugins/installed_plugins.json and ~/.claude.json, naming one more
+# plugin and one more server. Every expected value below is a literal, never
+# read from scripts/lib/grok.sh.
 #   class      _grok_class: builder, tester and documenter edit; reviewer,
 #              analyst and an empty role read
 #   lane       _lease_lane_argv grok with edit in the lane-file slot: the
@@ -4596,30 +4603,66 @@ rm -rf "$_S24"
 #   stop       a builder lease whose stream says Status: DONE and then ends
 #              with max_tokens, with no end event, or at the turn cap: report
 #              missing (rc 80, back to leased), the stop named in the output
-#   tracked    _grok_lease_config on a project's own .grok/config.toml: its
-#              lines stay first and the tables follow (a [permission] file,
-#              and an [mcp_servers.team] file, which tomllib proves still
-#              valid with the shadows); refused, the file unchanged and named:
-#              one that declares [plugins], an inline mcp_servers table, a
-#              server named like a shadowed one, a .grok symlinked out of the
-#              worktree, and an inspect that reports the overlay ignored
+#   tracked    _grok_lease_config (edit class) on a project's own
+#              .grok/config.toml: its lines stay first and the tables follow
+#              (a [permission] file, and an [mcp_servers.team] file, which
+#              tomllib proves still valid with the shadows); refused, the file
+#              unchanged and named: one that declares [plugins], an inline
+#              mcp_servers table, a server named like a shadowed one, a .grok
+#              symlinked out of the worktree, and an inspect that reports the
+#              overlay ignored
+#   surface    _grok_lease_config in the read class, refused with the file
+#              named, nothing written and (for a file) grok inspect never run:
+#              .grok/hooks/, .grok/lsp.json, .grok/plugins/, .claude/plugins/,
+#              a .grok/config.toml with an MCP server of its own, and an
+#              active project hook only inspect reports; accepted: a project
+#              with Claude Code and Cursor hooks, a .mcp.json (its server
+#              shadowed though inspect did not list it), an agent, a skill and
+#              a sandbox.toml; and the edit class takes .grok/hooks/ as it is
+#   inspect    no inspect, no file: an empty, cut-off, failed (rc 1) or
+#              partial (no plugin list) inspect refused in the edit class, one
+#              without the hook and LSP lists in the read class (the edit
+#              class takes it), each named and nothing written
+#   roles      [roles.tester] or [roles.documenter] naming grok: resolve_role
+#              rc 5; builder and analyst resolve to grok
 #   lease-refused  lease_create of a grok builder in a project whose
 #              .grok/config.toml declares [plugins]: refused, no ledger row,
 #              grok never run
+#   lease-surface  in a project with a .grok/lsp.json: a reviewer lease
+#              refused (no row, grok never run), a builder lease made; and a
+#              reviewer lease whose worktree gains .grok/hooks/ after it was
+#              made: lease_dispatch's compose refuses it (rc 94), grok never
+#              runs
 #   fg-read    invoke_grok as a reviewer, with a canary variable and
-#              CLAUDECODE in the caller's environment: grok ran from a scratch
-#              worktree that held .grok/config.toml, under env -i (no canary,
-#              no CLAUDECODE; the worker marker, GROK_FOLDER_TRUST=0 and the
-#              overlay set), with the read-class denies and the note naming
-#              the caller's checkout; rc 0, Status: DONE; the worktree is gone
-#              afterwards and git no longer lists it
-#   fg-edit    invoke_grok as a tester: grok ran from the caller's checkout,
-#              under env -i, in the workspace sandbox with only the MCP denies
+#              CLAUDECODE in the caller's environment, in a project never
+#              leased: grok ran from a scratch checkout that held
+#              .grok/config.toml, under env -i (no canary, no CLAUDECODE; the
+#              worker marker, GROK_FOLDER_TRUST=0 and the overlay set), with
+#              the read-class denies and the note naming the caller's
+#              checkout; rc 0, Status: DONE; the checkout is gone afterwards,
+#              git lists no worktree, and no ledger was written
+#   fg-edit    invoke_grok as a tester, and by an agent name that reads as
+#              edit: rc 69, reason edit-outside-lease, lease_dispatch named,
+#              grok never run
 #   fg-empty   an end_turn stream with no answer text: rc 80, class retryable,
-#              reason no-answer, the output says so; the worktree is gone
+#              reason no-answer, the output says so; the checkout is gone
+#   fg-interrupt  a run that exits 130 (a grok a SIGINT stopped): rc 130,
+#              class deterministic, reason interrupted, one run (no retry),
+#              no scratch left
 #   fg-refused invoke_grok as a reviewer in a project whose .grok/config.toml
-#              declares [plugins]: rc 69, reason isolation, grok never run,
-#              no scratch worktree left
+#              declares [plugins], in one that holds .grok/hooks/, and with an
+#              empty, cut-off or partial inspect: rc 69, reason isolation,
+#              grok never run, no scratch left
+#   fg-integrity  invoke_grok as a reviewer with the lead's integrity check
+#              refusing (a stub returning 44), and in a project with an open
+#              lease and a fresh lease_rebaseline whose .git/config then gains
+#              a smudge filter that .git/info/attributes applies to every
+#              file: rc 44, reason integrity, grok never run, no scratch made,
+#              the filter never run
+#   fg-filter  invoke_grok as a reviewer in a project never leased whose
+#              .git/config defines a smudge and a process filter its
+#              .gitattributes names: neither runs, grok reads a.txt as
+#              committed, and no ledger is written
 _S25="${WORK}/self25"
 mkdir -p "$_S25/bin" "$_S25/tmp" "$_S25/log" "$_S25/home/.claude/plugins" "$_S25/outside"
 cat > "$_S25/bin/grok" <<'EOF'
@@ -4629,18 +4672,31 @@ D=$(cd "$(dirname "$0")/.." && pwd)
 W=$(basename "$PWD")
 if [ "$1" = inspect ]; then
   env > "$D/log/$W.inspect-env"
+  IM=$(cat "$D/inspect-mode" 2>/dev/null || echo full)
+  case "$IM" in
+    empty)     exit 0 ;;
+    malformed) echo '{"configSources":{"layers":['; exit 0 ;;
+    fail)      echo '{}'; exit 1 ;;
+  esac
   OV='{"role":"env_overlay","path":"$GROK_CONFIG (inline)","note":"sections: shell_environment_policy, toolset"}'
   if [ -z "${GROK_CONFIG:-}" ] || [ -f "$D/overlay-ignored" ]; then
     OV='{"role":"env_overlay","path":"$GROK_CONFIG / $GROK_CONFIG_PATH","note":"set but ignored (empty, malformed, or unreadable)"}'
   fi
-  printf '{"configSources":{"layers":[%s]},"plugins":[{"name":"s25-claude-plugin","scope":"user","path":"%s/.claude/plugins/cache/mk/s25-claude-plugin/1.0.0","enabled":true},{"name":"s25-grok-plugin","scope":"user","path":"%s/.grok/plugins/s25-grok-plugin","enabled":true}],"mcpServers":[{"name":"s25-claude-server","transport":"stdio","source":{"type":"claudeJson","path":"%s/.claude.json"}},{"name":"s25-grok-server","transport":"stdio","source":{"type":"user","path":"%s/.grok/config.toml"}}]}\n' "$OV" "$HOME" "$HOME" "$HOME" "$HOME"
+  HK="\"hooks\":[{\"event\":\"session_start\",\"hookType\":\"command\",\"source\":{\"type\":\"project\",\"path\":\"$PWD/.claude\"},\"vendor\":\"claude\",\"disabled\":true}],\"lspServers\":[],"
+  if [ "$IM" = projecthook ]; then HK="\"hooks\":[{\"event\":\"session_start\",\"hookType\":\"command\",\"source\":{\"type\":\"project\",\"path\":\"$PWD/.grok/hooks.d\"}}],\"lspServers\":[],"; fi
+  if [ "$IM" = partial-read ]; then HK=""; fi
+  PL="\"plugins\":[{\"name\":\"s25-claude-plugin\",\"scope\":\"user\",\"path\":\"$HOME/.claude/plugins/cache/mk/s25-claude-plugin/1.0.0\",\"enabled\":true},{\"name\":\"s25-grok-plugin\",\"scope\":\"user\",\"path\":\"$HOME/.grok/plugins/s25-grok-plugin\",\"enabled\":true}],"
+  if [ "$IM" = partial ]; then PL=""; fi
+  printf '{"configSources":{"layers":[%s]},%s%s"mcpServers":[{"name":"s25-claude-server","transport":"stdio","source":{"type":"claudeJson","path":"%s/.claude.json"}},{"name":"s25-grok-server","transport":"stdio","source":{"type":"user","path":"%s/.grok/config.toml"}}]}\n' "$OV" "$HK" "$PL" "$HOME" "$HOME"
   exit 0
 fi
 if [ "$1" = --version ]; then echo "grok 1.0.34 (stub)"; exit 0; fi
+echo run >> "$D/log/runs"
 : > "$D/log/$W.argv"
 env > "$D/log/$W.env"
 pwd -P > "$D/log/$W.pwd"
 if [ -f .grok/config.toml ]; then echo yes; else echo no; fi > "$D/log/$W.cfg"
+if [ -f a.txt ]; then cat a.txt > "$D/log/$W.atxt"; fi
 P=""
 for a in "$@"; do
   printf '%s\n' "$a" >> "$D/log/$W.argv"
@@ -4653,6 +4709,7 @@ case "$(cat "$D/mode" 2>/dev/null || echo done)" in
   noend)     printf '%s\n' "$T" '{"type":"usage"}' ;;
   maxturns)  printf '%s\n' "$T" '{"type":"usage"}' '{"type":"max_turns_reached"}' '{"type":"end","stopReason":"cancelled","num_turns":1}'; echo "Error: max turns reached" >&2; exit 1 ;;
   empty)     printf '%s\n' '{"type":"end","stopReason":"end_turn","num_turns":1}' ;;
+  interrupted) exit 130 ;;
   *)         printf '%s\n' "$T" '{"type":"usage"}' '{"type":"end","stopReason":"end_turn","num_turns":1}' ;;
 esac
 exit 0
@@ -4781,7 +4838,7 @@ O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${
   for T in t1 t2 t3 t3i t3n t4 t5; do
     if [ "$T" = t5 ]; then : > "$_S25/overlay-ignored"; fi
     R=0
-    if declare -F _grok_lease_config >/dev/null 2>&1; then _grok_lease_config "$_S25/$T" > "$_S25/$T.warn" 2>&1 || R=$?; else : > "$_S25/$T.warn"; fi
+    if declare -F _grok_lease_config >/dev/null 2>&1; then _grok_lease_config "$_S25/$T" edit > "$_S25/$T.warn" 2>&1 || R=$?; else : > "$_S25/$T.warn"; fi
     echo "$R" > "$_S25/$T.rc"
     rm -f "$_S25/overlay-ignored"
   done
@@ -4797,6 +4854,70 @@ O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${
 _S25_FAIL="${_S25_FAIL}$(_self_expect tracked "$O" '^t1:rc=0:head=\[permission\][|]deny = \["Bash\(curl \*\)"\][|]:plugins=1:shadow=2$' '^t3:rc=0:team=1:plugins=1:shadow=2$' \
   '^t2:rc=1:same=yes:named=1$' '^t3i:rc=1:same=yes:named=1$' '^t3n:rc=1:same=yes:named=1$' '^t4:rc=1:outside=0:named=1$' '^t5:rc=1:written=no:named=1$')"
 
+# what a project supplies, in the read class (refused) and the edit class
+for _T in g-hooks e-hooks g-lsp g-plug c-plug g-mcp i-hook ok-read; do mkdir -p "$_S25/sf/$_T/.grok"; done
+mkdir -p "$_S25/sf/g-hooks/.grok/hooks" "$_S25/sf/e-hooks/.grok/hooks" "$_S25/sf/g-plug/.grok/plugins/p" "$_S25/sf/c-plug/.claude/plugins/p" \
+  "$_S25/sf/ok-read/.claude" "$_S25/sf/ok-read/.cursor" "$_S25/sf/ok-read/.grok/agents" "$_S25/sf/ok-read/.grok/skills/s"
+printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"true"}]}]}}\n' > "$_S25/sf/g-hooks/.grok/hooks/h.json"
+cp "$_S25/sf/g-hooks/.grok/hooks/h.json" "$_S25/sf/e-hooks/.grok/hooks/h.json"
+printf '{"s25-lsp":{"command":"true","extensionToLanguage":{".py":"python"}}}\n' > "$_S25/sf/g-lsp/.grok/lsp.json"
+printf '{"name":"p","version":"1.0.0"}\n' > "$_S25/sf/g-plug/.grok/plugins/p/plugin.json"
+printf '{"name":"p","version":"1.0.0"}\n' > "$_S25/sf/c-plug/.claude/plugins/p/plugin.json"
+printf '[mcp_servers.team]\ncommand = "team-mcp"\n' > "$_S25/sf/g-mcp/.grok/config.toml"
+printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"true"}]}]}}\n' > "$_S25/sf/ok-read/.claude/settings.json"
+printf '{"version":1,"hooks":{"sessionStart":[{"command":"true"}]}}\n' > "$_S25/sf/ok-read/.cursor/hooks.json"
+printf '{"mcpServers":{"s25-mcpjson":{"command":"true"}}}\n' > "$_S25/sf/ok-read/.mcp.json"
+printf -- '---\nname: s25-agent\ndescription: probe\n---\nprobe\n' > "$_S25/sf/ok-read/.grok/agents/a.md"
+printf -- '---\nname: s\ndescription: probe\n---\nprobe\n' > "$_S25/sf/ok-read/.grok/skills/s/SKILL.md"
+printf '[profiles.read-only]\nextends = "workspace"\n' > "$_S25/sf/ok-read/.grok/sandbox.toml"
+O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  _sum() { { cksum < "$1"; } 2>/dev/null || echo none; }
+  for T in "g-hooks:.grok/hooks: project hooks" "g-lsp:.grok/lsp.json: a project LSP server" "g-plug:.grok/plugins: project plugins" \
+           "c-plug:.claude/plugins: project plugins" "g-mcp:.grok/config.toml: it declares MCP servers of its own" "i-hook:grok inspect reports a project hook"; do
+    N=${T%%:*}; W="$_S25/sf/$N"
+    S=$(_sum "$W/.grok/config.toml")
+    if [ "$N" = i-hook ]; then printf 'projecthook\n' > "$_S25/inspect-mode"; fi
+    R=0; _grok_lease_config "$W" read > "$_S25/sf/$N.warn" 2>&1 || R=$?
+    rm -f "$_S25/inspect-mode"
+    echo "surface-${N}:rc=${R}:same=$( [ "$(_sum "$W/.grok/config.toml")" = "$S" ] && echo yes || echo no):named=$(grep -cF -- "${T#*:}" "$_S25/sf/$N.warn" || true):inspected=$( [ -f "$_S25/log/$N.inspect-env" ] && echo yes || echo no)"
+  done
+  R=0; _grok_lease_config "$_S25/sf/ok-read" read > "$_S25/sf/ok-read.warn" 2>&1 || R=$?
+  echo "surface-ok-read:rc=${R}:mcpjson=$(grep -cx '\[mcp_servers\."s25-mcpjson"\]' "$_S25/sf/ok-read/.grok/config.toml" 2>/dev/null || true):inspected=$( [ -f "$_S25/log/ok-read.inspect-env" ] && echo yes || echo no)"
+  R=0; _grok_lease_config "$_S25/sf/e-hooks" edit > "$_S25/sf/e-hooks.warn" 2>&1 || R=$?
+  echo "surface-e-hooks:rc=${R}:cfg=$(grep -cx '\[plugins\]' "$_S25/sf/e-hooks/.grok/config.toml" 2>/dev/null || true)" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect surface "$O" '^surface-g-hooks:rc=1:same=yes:named=1:inspected=no$' '^surface-g-lsp:rc=1:same=yes:named=1:inspected=no$' \
+  '^surface-g-plug:rc=1:same=yes:named=1:inspected=no$' '^surface-c-plug:rc=1:same=yes:named=1:inspected=no$' '^surface-g-mcp:rc=1:same=yes:named=1:inspected=no$' \
+  '^surface-i-hook:rc=1:same=yes:named=1:inspected=yes$' '^surface-ok-read:rc=0:mcpjson=1:inspected=yes$' '^surface-e-hooks:rc=0:cfg=1$')"
+
+# no inspect evidence, no provisioning: the inspect-mode file bends the stub
+mkdir -p "$_S25/ig"
+O=$( export PATH="$_S25_PATH" HOME="$_S25/home" TMPDIR="$_S25/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for T in "empty:edit:gave no output" "malformed:edit:output that is not a JSON object" "fail:edit:failed or timed out (rc 1)" \
+           "partial:edit:lacks plugins, so" "partial-read:read:lacks hooks, lspServers, so" "partial-read:edit:lacks"; do
+    M=${T%%:*}; C=${T#*:}; P=${C#*:}; C=${C%%:*}
+    rm -rf "$_S25/ig/.grok"
+    printf '%s\n' "$M" > "$_S25/inspect-mode"
+    R=0; _grok_lease_config "$_S25/ig" "$C" > "$_S25/ig.warn" 2>&1 || R=$?
+    rm -f "$_S25/inspect-mode"
+    echo "inspect-${M}-${C}:rc=${R}:written=$( [ -e "$_S25/ig/.grok/config.toml" ] && echo yes || echo no):named=$(grep -cF -- "$P" "$_S25/ig.warn" || true)"
+  done )
+_S25_FAIL="${_S25_FAIL}$(_self_expect inspect "$O" '^inspect-empty-edit:rc=1:written=no:named=1$' '^inspect-malformed-edit:rc=1:written=no:named=1$' \
+  '^inspect-fail-edit:rc=1:written=no:named=1$' '^inspect-partial-edit:rc=1:written=no:named=1$' '^inspect-partial-read-read:rc=1:written=no:named=1$' \
+  '^inspect-partial-read-edit:rc=0:written=yes:named=0$')"
+
+# grok's roles: builder, reviewer and analyst; a tester or documenter chain
+# naming grok fails at roster load
+_self_repo "$_S25/rl" "$_S25/home" sprint/s25rl '[roles.builder]\ncli = "grok"\nfallbacks = ["claude"]\n\n[roles.analyst]\ncli = "grok"\nfallbacks = ["codex"]\n\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n'
+O=$( cd "$_S25/rl" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25_PATH" TMPDIR="$_S25/tmp" XAI_API_KEY=s25-stub-key \
+       && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for R in builder analyst; do echo "roles-${R}:$(resolve_role "$R" 2>/dev/null | cut -f1)"; done
+  for R in tester documenter; do
+    printf '[roles.%s]\ncli = "grok"\nfallbacks = ["codex"]\n\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n' "$R" > ops/roster.toml
+    RC=0; resolve_role "$R" > /dev/null 2> "$_S25/rl.err" || RC=$?
+    echo "roles-${R}:rc=${RC}:named=$(grep -c "names grok, which takes only builder, reviewer, analyst" "$_S25/rl.err" || true)"
+  done )
+_S25_FAIL="${_S25_FAIL}$(_self_expect roles "$O" '^roles-builder:grok$' '^roles-analyst:grok$' '^roles-tester:rc=5:named=1$' '^roles-documenter:rc=5:named=1$')"
+
 # invoke_grok outside a lease, from a project whose Claude Code settings allow
 # Edit, Write and an npm script; and a project whose own .grok/config.toml
 # declares [plugins], for invoke_grok and for a lease
@@ -4808,6 +4929,10 @@ _self_repo "$_S25/fgp" "$_S25/home" sprint/s25fgp "$_S25_ROSTER"
 ( cd "$_S25/fgp" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p .grok \
     && printf '[plugins]\nenabled = ["team-tools"]\n' > .grok/config.toml \
     && git add .grok/config.toml && git commit -qm grok-config ) >/dev/null 2>&1 || true
+_self_repo "$_S25/fgh" "$_S25/home" sprint/s25fgh "$_S25_ROSTER"
+( cd "$_S25/fgh" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p .grok/hooks \
+    && printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"true"}]}]}}\n' > .grok/hooks/h.json \
+    && git add .grok/hooks/h.json && git commit -qm grok-hooks ) >/dev/null 2>&1 || true
 O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/fg-leases" \
        XAI_API_KEY=s25-stub-key CLAUDECODE=1 S25_CANARY=leak && unset TRIFORGE_TEST_BUILDER \
        && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
@@ -4819,34 +4944,117 @@ O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25
   P=$(cat "$L/wt.pwd" 2>/dev/null || true)
   case "$P" in (*/triforge-grok.*/wt) PW=scratch ;; ("") PW=none ;; (*) PW=other ;; esac
   E="$L/wt.env"
-  echo "fg-read:rc=${R}:status=$(_lease_parse_status "$_S25/fg-read.out"):dir=${PW}:cfg=$(cat "$L/wt.cfg" 2>/dev/null || true):canary=$(_c '^S25_CANARY=' "$E"):cc=$(_c '^CLAUDECODE=' "$E"):marker=$(_c -x 'TRIFORGE_LEASE_WORKER=builder' "$E"):trust=$(_c -x 'GROK_FOLDER_TRUST=0' "$E"):overlay=$(_c '^GROK_CONFIG={' "$E"):sandbox=$(grep -A1 -x -- --sandbox "$L/wt.argv" 2>/dev/null | tail -1):deny=$(_dw "$L/wt.argv"):note=$(_c "The lead's checkout, with its uncommitted changes and ops/, is " "$L/wt.argv"):gone=$( [ -n "$P" ] && [ ! -e "$P" ] && echo yes || echo no):listed=$(git worktree list --porcelain 2>/dev/null | _c 'triforge-grok\.')"
-  rm -f "$L"/fg.*
-  R=0; GROK_ROLE=tester invoke_grok test_writer "probe tests S25" "$_S25/fg-edit.out" 60 >/dev/null 2>&1 || R=$?
-  E="$L/fg.env"
-  echo "fg-edit:rc=${R}:status=$(_lease_parse_status "$_S25/fg-edit.out"):dir=$( [ "$(cat "$L/fg.pwd" 2>/dev/null || true)" = "$(pwd -P)" ] && echo checkout || echo other):canary=$(_c '^S25_CANARY=' "$E"):cc=$(_c '^CLAUDECODE=' "$E"):marker=$(_c -x 'TRIFORGE_LEASE_WORKER=builder' "$E"):sandbox=$(grep -A1 -x -- --sandbox "$L/fg.argv" 2>/dev/null | tail -1):deny=$(_dw "$L/fg.argv")"
+  echo "fg-read:rc=${R}:status=$(_lease_parse_status "$_S25/fg-read.out"):dir=${PW}:cfg=$(cat "$L/wt.cfg" 2>/dev/null || true):canary=$(_c '^S25_CANARY=' "$E"):cc=$(_c '^CLAUDECODE=' "$E"):marker=$(_c -x 'TRIFORGE_LEASE_WORKER=builder' "$E"):trust=$(_c -x 'GROK_FOLDER_TRUST=0' "$E"):overlay=$(_c '^GROK_CONFIG={' "$E"):sandbox=$(grep -A1 -x -- --sandbox "$L/wt.argv" 2>/dev/null | tail -1):deny=$(_dw "$L/wt.argv"):note=$(_c "The lead's checkout, with its uncommitted changes and ops/, is " "$L/wt.argv"):gone=$( [ -n "$P" ] && [ ! -e "$P" ] && echo yes || echo no):listed=$(git worktree list --porcelain 2>/dev/null | _c 'triforge-grok\.'):ledger=$( [ -e ops/leases.toml ] && echo yes || echo none)"
+  rm -f "$L"/fg.* "$L"/wt.*
+  R=0; GROK_ROLE=tester invoke_grok test_writer "probe tests S25" "$_S25/fg-edit.out" 60 >/dev/null 2> "$_S25/fg-edit.err" || R=$?
+  W=${_INVOKE_FAILURE_REASON:-}
+  R2=0; invoke_grok test_writer "probe tests S25 by agent name" "$_S25/fg-edit2.out" 60 >/dev/null 2>&1 || R2=$?
+  echo "fg-edit:rc=${R}:reason=${W}:named=$(_c -F 'lease_create <task> builder, then lease_dispatch' "$_S25/fg-edit.err"):byname=${R2}:ran=$(ls "$L" | _c -xE '(fg|wt)\.argv')"
   rm -f "$L"/wt.*
   printf 'empty\n' > "$_S25/mode"
   R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 empty" "$_S25/fg-empty.out" 60 >/dev/null 2>&1 || R=$?
   rm -f "$_S25/mode"
   P=$(cat "$L/wt.pwd" 2>/dev/null || true)
   echo "fg-empty:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:said=$(_c 'no answer text' "$_S25/fg-empty.out"):gone=$( [ -n "$P" ] && [ ! -e "$P" ] && echo yes || echo no)"
+  rm -f "$L"/wt.*; : > "$L/runs"
+  printf 'interrupted\n' > "$_S25/mode"
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 interrupted" "$_S25/fg-int.out" 60 >/dev/null 2>&1 || R=$?
+  rm -f "$_S25/mode"
+  echo "fg-interrupt:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:runs=$(_c . "$L/runs"):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)"
   cd "$_S25/fgp" || exit 0
   rm -f "$L"/wt.*
   R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 refused" "$_S25/fg-refused.out" 60 >/dev/null 2> "$_S25/fg-refused.err" || R=$?
   echo "fg-refused:rc=${R}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$( [ -f "$L/wt.argv" ] && echo yes || echo no):named=$(_c 'config.toml: the project file cannot take the tables' "$_S25/fg-refused.err"):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)"
+  cd "$_S25/fgh" || exit 0
+  rm -f "$L"/wt.*
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 hooks" "$_S25/fgh.out" 60 >/dev/null 2> "$_S25/fgh.err" || R=$?
+  echo "fg-refused-hooks:rc=${R}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$( [ -f "$L/wt.argv" ] && echo yes || echo no):named=$(_c -F '/.grok/hooks: project hooks' "$_S25/fgh.err"):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)"
+  cd "$_S25/fg" || exit 0
+  for M in empty malformed partial; do
+    rm -f "$L"/wt.*
+    printf '%s\n' "$M" > "$_S25/inspect-mode"
+    R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 inspect" "$_S25/fgi.out" 60 >/dev/null 2>&1 || R=$?
+    rm -f "$_S25/inspect-mode"
+    echo "fg-refused-inspect-${M}:rc=${R}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$( [ -f "$L/wt.argv" ] && echo yes || echo no):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)"
+  done
+  cd "$_S25/fgp" || exit 0
   export TRIFORGE_LEASE_ROOT="$_S25/lp-leases"
   rm -f "$L"/s25p.*
   R=0; lease_create s25p builder >/dev/null 2> "$_S25/lp.err" || R=$?
   echo "lease-refused:rc=${R}:row=$(_ledger_get s25p state 2>/dev/null || echo none):ran=$( [ -f "$L/s25p.argv" ] && echo yes || echo no):named=$(_c 'config.toml: the project file cannot take the tables' "$_S25/lp.err")" )
-_S25_FAIL="${_S25_FAIL}$(_self_expect fg-read "$O" '^fg-read:rc=0:status=DONE:dir=scratch:cfg=yes:canary=0:cc=0:marker=1:trust=1:overlay=1:sandbox=read-only:deny=Edit[+]Write[+]Bash[+]MCPTool[(][*][)][+]mcp__[*][+]:note=1:gone=yes:listed=0$')"
-_S25_FAIL="${_S25_FAIL}$(_self_expect fg-edit "$O" '^fg-edit:rc=0:status=DONE:dir=checkout:canary=0:cc=0:marker=1:sandbox=workspace:deny=MCPTool[(][*][)][+]mcp__[*][+]$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-read "$O" '^fg-read:rc=0:status=DONE:dir=scratch:cfg=yes:canary=0:cc=0:marker=1:trust=1:overlay=1:sandbox=read-only:deny=Edit[+]Write[+]Bash[+]MCPTool[(][*][)][+]mcp__[*][+]:note=1:gone=yes:listed=0:ledger=none$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-edit "$O" '^fg-edit:rc=69:reason=edit-outside-lease:named=1:byname=69:ran=0$')"
 _S25_FAIL="${_S25_FAIL}$(_self_expect fg-empty "$O" '^fg-empty:rc=80:class=retryable:reason=no-answer:said=1:gone=yes$')"
-_S25_FAIL="${_S25_FAIL}$(_self_expect fg-refused "$O" '^fg-refused:rc=69:reason=isolation:ran=no:named=1:left=0$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-interrupt "$O" '^fg-interrupt:rc=130:class=deterministic:reason=interrupted:runs=1:left=0$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-refused "$O" '^fg-refused:rc=69:reason=isolation:ran=no:named=1:left=0$' '^fg-refused-hooks:rc=69:reason=isolation:ran=no:named=1:left=0$' \
+  '^fg-refused-inspect-empty:rc=69:reason=isolation:ran=no:left=0$' '^fg-refused-inspect-malformed:rc=69:reason=isolation:ran=no:left=0$' \
+  '^fg-refused-inspect-partial:rc=69:reason=isolation:ran=no:left=0$')"
 _S25_FAIL="${_S25_FAIL}$(_self_expect lease-refused "$O" '^lease-refused:rc=1:row=none:ran=no:named=1$')"
 
-_S25_CAP="Grok Build's lane: the permission class by role (a reviewer or analyst read-only, with Edit, Write and Bash denied over any imported Claude allow rule, and MCP tools denied in every class), the env prefix and include_only overlay pinned, a report only from an end_turn run, the provisioned .grok/config.toml that disables every plugin and shadows the MCP servers outside grok's config (never merged, refused when it can't be proven), and invoke_grok's read class in a removed scratch worktree under env -i (R23)"
+# a read-class lease over a project file grok would start: refused at
+# lease_create, and at lease_dispatch's compose when the file appears later
+_self_repo "$_S25/lh" "$_S25/home" sprint/s25lh "$_S25_ROSTER"
+( cd "$_S25/lh" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p .grok \
+    && printf '{"s25-lsp":{"command":"true","extensionToLanguage":{".py":"python"}}}\n' > .grok/lsp.json \
+    && git add .grok/lsp.json && git commit -qm grok-lsp ) >/dev/null 2>&1 || true
+_self_repo "$_S25/dg" "$_S25/home" sprint/s25dg "$_S25_ROSTER"
+O=$( cd "$_S25/lh" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/lh-leases" \
+       XAI_API_KEY=s25-stub-key CLAUDECODE=1 && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  L="$_S25/log"
+  R=0; lease_create s25lr reviewer >/dev/null 2> "$_S25/lr.err" || R=$?
+  echo "lease-surface-reviewer:rc=${R}:row=$(_ledger_get s25lr state 2>/dev/null || echo none):ran=$( [ -f "$L/s25lr.argv" ] && echo yes || echo no):named=$(grep -cF '/.grok/lsp.json: a project LSP server' "$_S25/lr.err" || true)"
+  R=0; lease_create s25lb builder >/dev/null 2>&1 || R=$?
+  echo "lease-surface-builder:rc=${R}:row=$(_ledger_get s25lb state 2>/dev/null || echo none)"
+  cd "$_S25/dg" || exit 0
+  export TRIFORGE_LEASE_ROOT="$_S25/dg-leases"
+  lease_create s25dr reviewer >/dev/null 2>&1 || { echo "lease-surface-dispatch:create-failed"; exit 0; }
+  WT=$(_ledger_get s25dr worktree 2>/dev/null)
+  mkdir -p "$WT/.grok/hooks" && printf '{}\n' > "$WT/.grok/hooks/h.json"
+  lease_dispatch s25dr "probe review S25 dispatch" 60 >/dev/null 2>&1 || { echo "lease-surface-dispatch:dispatch-failed"; exit 0; }
+  _self_wait_rc s25dr
+  OUT=$(_ledger_get s25dr output_file 2>/dev/null)
+  echo "lease-surface-dispatch:rc=$(cat "${OUT}.rc" 2>/dev/null || true):ran=$( [ -f "$L/s25dr.argv" ] && echo yes || echo no):named=$(grep -cF '/.grok/hooks: project hooks' "$OUT" 2>/dev/null || true)" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect lease-surface "$O" '^lease-surface-reviewer:rc=1:row=none:ran=no:named=1$' '^lease-surface-builder:rc=0:row=leased$' \
+  '^lease-surface-dispatch:rc=94:ran=no:named=1$')"
+
+# the lead's integrity check before any checkout (a stub that refuses, and a
+# real baseline mismatch: a filter driver planted in .git/config after the
+# first lease), and a scratch checkout that runs no filter in a project never
+# leased
+_self_repo "$_S25/ir" "$_S25/home" sprint/s25ir "$_S25_ROSTER"
+_self_repo "$_S25/ff" "$_S25/home" sprint/s25ff "$_S25_ROSTER"
+( cd "$_S25/ff" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 && printf '*.txt filter=s25smudge\n*.dat filter=s25proc\n' > .gitattributes \
+    && echo s25-committed > a.txt && echo s25-data > b.dat && git add -A && git commit -qm filters ) >/dev/null 2>&1 || true
+git -C "$_S25/ff" config filter.s25smudge.smudge "sh -c 'touch $_S25/ff-smudge; cat'"
+git -C "$_S25/ff" config filter.s25proc.process "sh -c 'touch $_S25/ff-process; exit 1'"
+O=$( cd "$_S25/ir" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/ir-leases" \
+       XAI_API_KEY=s25-stub-key CLAUDECODE=1 && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  L="$_S25/log"
+  _c() { grep -c "$@" 2>/dev/null || true; }
+  lease_create s25ir builder >/dev/null 2>&1 || echo "fg-integrity-real:create-failed"
+  lease_rebaseline >/dev/null 2>&1 || echo "fg-integrity-real:rebaseline-failed"
+  git config filter.s25smudge.smudge "sh -c 'touch $_S25/ir-smudge; cat'"
+  mkdir -p .git/info && printf '* filter=s25smudge\n' >> .git/info/attributes
+  rm -f "$L"/wt.*
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 integrity" "$_S25/ir.out" 60 >/dev/null 2> "$_S25/ir.err" || R=$?
+  echo "fg-integrity-real:rc=${R}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$( [ -f "$L/wt.argv" ] && echo yes || echo no):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .):filter=$( [ -e "$_S25/ir-smudge" ] && echo ran || echo no):named=$(_c -F '.git/config changed' "$_S25/ir.err")"
+  cd "$_S25/ff" || exit 0
+  export TRIFORGE_LEASE_ROOT="$_S25/ff-leases"
+  rm -f "$L"/wt.*
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 filter" "$_S25/ff.out" 60 >/dev/null 2>&1 || R=$?
+  echo "fg-filter:rc=${R}:status=$(_lease_parse_status "$_S25/ff.out"):smudge=$( [ -e "$_S25/ff-smudge" ] && echo ran || echo no):process=$( [ -e "$_S25/ff-process" ] && echo ran || echo no):atxt=$(cat "$L/wt.atxt" 2>/dev/null || true):ledger=$( [ -e ops/leases.toml ] && echo yes || echo none):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .)"
+  cd "$_S25/ir" || exit 0
+  export TRIFORGE_LEASE_ROOT="$_S25/ir-leases"
+  _lead_integrity_check() { echo "S25 integrity stub: refused" >&2; return 44; }
+  rm -f "$L"/wt.*
+  R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 integrity stub" "$_S25/is.out" 60 >/dev/null 2> "$_S25/is.err" || R=$?
+  echo "fg-integrity-stub:rc=${R}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$( [ -f "$L/wt.argv" ] && echo yes || echo no):left=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | _c .):named=$(_c -F 'failed the integrity check' "$_S25/is.err")" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-integrity "$O" '^fg-integrity-real:rc=44:reason=integrity:ran=no:left=0:filter=no:named=1$' '^fg-integrity-stub:rc=44:reason=integrity:ran=no:left=0:named=1$')"
+_S25_FAIL="${_S25_FAIL}$(_self_expect fg-filter "$O" '^fg-filter:rc=0:status=DONE:smudge=no:process=no:atxt=s25-committed:ledger=none:left=0$')"
+
+_S25_CAP="Grok Build's lane: the permission class by role (a reviewer or analyst read-only, with Edit, Write and Bash denied over any imported Claude allow rule, and MCP tools denied in every class; grok takes builder, reviewer and analyst, and edits only in a lease), the env prefix and include_only overlay pinned, a report only from an end_turn run, the provisioned .grok/config.toml that disables every plugin and shadows the MCP servers outside grok's config (never merged, never without a full inspect, refused when it can't be proven), no read-class run where the project supplies code grok would start, and invoke_grok's read class in a removed scratch checkout under env -i, after the lead's integrity check and with no filter or hook run (R23)"
 if [ -z "$_S25_FAIL" ]; then
-  row "SELF-25" "grok" "$_S25_CAP" "PASS" "class: builder/tester/documenter edit, reviewer/analyst/empty read; lane: edit -> workspace + Edit/Write/Bash, MCP denied; read and empty -> read-only, Edit/Write/Bash/MCP denied; env prefix: every GROK_CLAUDE_*/GROK_CURSOR_* switch, GROK_FOLDER_TRUST=0, the overlay's literal include_only; builder lease: .grok/config.toml disables the 3 plugins and shadows the 2 servers outside grok's config, inspect with the Claude switches off, provisioned, workspace, builder brief, collect -> review, snapshot without .grok/; reviewer lease (project allows Edit/Write/npm): read-only, the denies, reviewer brief, review; Status: DONE then max_tokens, no end, or the turn cap -> report missing (rc 80), the stop named; tracked: [permission] and [mcp_servers.team] files take the tables (tomllib-proven); [plugins], inline mcp_servers, a same-named server, a symlinked .grok and an ignored overlay refused, file unchanged and named; lease_create refused, no row, grok never run; invoke_grok: reviewer from a scratch worktree with the config, env -i (no canary, no CLAUDECODE), the denies and the checkout note, then removed; tester in the checkout under env -i; an empty end_turn -> rc 80 no-answer; an unisolable project -> rc 69, grok never run" "static"
+  row "SELF-25" "grok" "$_S25_CAP" "PASS" "class: builder/tester/documenter edit, reviewer/analyst/empty read; lane: edit -> workspace + Edit/Write/Bash, MCP denied; read and empty -> read-only, Edit/Write/Bash/MCP denied; env prefix: every GROK_CLAUDE_*/GROK_CURSOR_* switch, GROK_FOLDER_TRUST=0, the overlay's literal include_only; builder lease: .grok/config.toml disables the 3 plugins and shadows the 2 servers outside grok's config, inspect with the Claude switches off, provisioned, workspace, builder brief, collect -> review, snapshot without .grok/; reviewer lease (project allows Edit/Write/npm): read-only, the denies, reviewer brief, review; Status: DONE then max_tokens, no end, or the turn cap -> report missing (rc 80), the stop named; tracked: [permission] and [mcp_servers.team] files take the tables (tomllib-proven); [plugins], inline mcp_servers, a same-named server, a symlinked .grok and an ignored overlay refused, file unchanged and named; surface (read class): .grok/hooks, .grok/lsp.json, .grok/plugins, .claude/plugins, a project MCP server and an inspect-reported project hook refused, named, nothing written; Claude/Cursor hooks, .mcp.json (shadowed), an agent, a skill and a sandbox.toml accepted; edit class takes .grok/hooks; inspect: empty, cut-off, failed and partial refused; roles: tester and documenter on grok rc 5; lease_create refused, no row, grok never run; a read lease over .grok/lsp.json refused, a builder lease made, .grok/hooks added after create refused at compose (rc 94); invoke_grok: reviewer from a scratch checkout with the config, env -i (no canary, no CLAUDECODE), the denies and the checkout note, then removed, no ledger written; tester and an edit agent name rc 69, grok never run; an empty end_turn -> rc 80 no-answer; an interrupted run (exit 130) -> rc 130 interrupted, run once, no retry; an unisolable project, project hooks or a bad inspect -> rc 69, grok never run; integrity refused (stub, and a smudge filter in .git/config with .git/info/attributes planted after a fresh rebaseline, a lease open) -> rc 44, no checkout, the filter never run; a never-leased project's smudge and process filters never run" "static"
 else
   row "SELF-25" "grok" "$_S25_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S25_FAIL"):$(printf '%s' "$_S25_FAIL" | cut -c1-700)" "static"
 fi

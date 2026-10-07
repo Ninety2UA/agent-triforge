@@ -3454,9 +3454,11 @@ fi  # end of the lead capability and survival section skipped by --self-only
 #           provisioned by the real provisioner (_lease_provision <wt> grok:
 #           .agents/skills and the .grok/config.toml that disables every
 #           plugin and shadows every MCP server outside grok's own config);
-#           and invoke_grok's read-class scratch worktree of the fixture's
-#           HEAD (_grok_scratch_wt), under the env invoke_grok runs grok with
-#           (the real _adapter_env), then removed (_grok_scratch_drop). In
+#           and invoke_grok's read-class scratch checkout of the fixture's
+#           HEAD (_grok_scratch_wt: a fresh repository on the fixture's
+#           objects, provisioned for the read class), under the env
+#           invoke_grok runs grok with (the real _adapter_env), then removed
+#           (_grok_scratch_drop). In
 #           each, `grok inspect --json` and a grok session opened with no
 #           prompt (`grok agent --no-leader stdio`: initialize and
 #           session/new, so no model call and no quota). FAIL when a session
@@ -3477,7 +3479,8 @@ fi  # end of the lead capability and survival section skipped by --self-only
 #   GRK-09  the same run, through the real _adapter_env: grk-check.sh, whose
 #           pushes the deny rules never see, finds the worker marker and the
 #           no-push config in the tool shell, and both `git push --dry-run`
-#           and `git -C . push` are refused by them
+#           and `git -C . push` are refused by them (pushC=refused must be
+#           there: a run that never reached the second push FAILs)
 #   GRK-10  the workspace sandbox in a lease-shaped worktree: git status, diff
 #           and log and a write inside the worktree work; a write outside the
 #           worktree and the temp dirs is refused
@@ -3492,7 +3495,7 @@ GRK_CAP02="Every flag the lane composes is in grok --help; the env prefix turns 
 GRK_CAP03="Stream parser and failure classifier on recorded shapes (end_turn, denial, max turns, signed out, quota)"
 GRK_CAP04="With the lane's env, grok loads none of ~/.claude's own skills (~/.claude/skills), rules, user hooks or CLAUDE.md, and no ~/.claude.json MCP server (grok inspect, no model call)"
 GRK_CAP05="Headless READY under env -i on the lane argv (streaming-json, end_turn)"
-GRK_CAP06="In a provisioned grok lease worktree and in invoke_grok's read-class scratch worktree no plugin reaches the session (skills, commands, hooks, MCP servers, agents), no ~/.claude.json MCP server starts, the provisioned skills stay, imported Claude permission rules meet the read class's denies, and the ~/.claude settings env block stays out of the tool shell (no model call)"
+GRK_CAP06="In a provisioned grok lease worktree and in invoke_grok's read-class scratch checkout no plugin reaches the session (skills, commands, hooks, MCP servers, agents), no ~/.claude.json MCP server starts, the provisioned skills stay, imported Claude permission rules meet the read class's denies, and the ~/.claude settings env block stays out of the tool shell (no model call)"
 GRK_CAP07="A --max-turns stop: exit code, max_turns_reached, end.stopReason, the classifier's read"
 GRK_CAP08="A git push the deny rule matches is not executed (dontAsk + --deny), and the remote gets nothing"
 GRK_CAP09="The no-push config and the worker marker reach the tool shell through the real _adapter_env; git push and git -C . push, which no deny rule sees, are refused"
@@ -3950,7 +3953,7 @@ fi
 # _grk06_verdict <inspect.json> <session.json> <config.toml> <skills> <denies>
 # — GRK-06's verdict on one grok working directory, one line: NOSESSION, FAIL,
 # INFO or PASS, then the detail. <skills>: the provisioned names the session
-# must list (empty for invoke_grok's scratch worktree, which gets none);
+# must list (empty for invoke_grok's scratch checkout, which gets none);
 # <denies>: "ok" when the lane's read argv denies Edit, Write, Bash and MCP
 # tools and its edit argv MCP tools, else what is missing. A Claude Code
 # permission file that loads is a FAIL without those denies: grok imports its
@@ -4048,29 +4051,31 @@ if _want GRK-06; then
     # carry session data, so nothing else is read from it).
     GRK_FIRED=$(grep -oE 'hook_name=[^ :]+' "$WORK/grk-ready.debug" 2>/dev/null | sed 's/^hook_name=//' | sort -u | tr '\n' ' ')
     GRK06=$(_grk06_verdict "$WORK/grk06-inspect.json" "$WORK/grk06-session.json" "$GRK6_WT/.grok/config.toml" "$SHIPPED_SKILLS tf-agents-skill" "$GRK6_DENY")
-    # invoke_grok's read class: the scratch worktree it makes and provisions
-    # (_grok_scratch_wt, from the fixture), and the env it runs grok under
-    # (the real _adapter_env grok plus the read argv's env words), with the
-    # same inspect and session; then its removal (_grok_scratch_drop).
+    # invoke_grok's read class: the scratch checkout it makes of HEAD and
+    # provisions (_grok_scratch_wt, from the fixture), and the env it runs
+    # grok under (the real _adapter_env grok plus the read argv's env words),
+    # with the same inspect and session; then its removal (_grok_scratch_drop).
     GRK6_FG=$( cd "$FIX" && export TRIFORGE_LEASE_ROOT="$WORK/grk06-fg-leases" && source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 \
                  || { printf 'loader-failed'; exit 0; }
-      _grok_scratch_wt 2> "$WORK/grk06-fg.err" || { printf 'scratch-refused'; exit 0; }
-      _grok_argv read "$GRK_MODEL" low || { printf 'argv-unreadable'; _grok_scratch_drop "$_GROK_SCRATCH"; exit 0; }
+      { _lease_ctx 2>/dev/null && S=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null); } || { printf 'no-head'; exit 0; }
+      D=$(mktemp -d "${TMPDIR:-/tmp}/triforge-grok.XXXXXX") || { printf 'no-scratch-dir'; exit 0; }
+      _grok_scratch_wt "$D" "$S" 2> "$WORK/grk06-fg.err" || { _grok_scratch_drop "$D"; printf 'scratch-refused'; exit 0; }
+      _grok_argv read "$GRK_MODEL" low || { printf 'argv-unreadable'; _grok_scratch_drop "$D"; exit 0; }
       N=0
       for W in "${_GROK_ARGV[@]}"; do
         if [ "$W" = grok ]; then break; fi
         N=$((N + 1))
       done
-      ( cd "$_GROK_SCRATCH/wt" && _adapter_env grok "$TIMEOUT_BIN" 90s "${_GROK_ARGV[@]:0:$N}" grok inspect --json < /dev/null > "$WORK/grk06-fg-inspect.json" 2> /dev/null ) || true
-      ( cd "$_GROK_SCRATCH/wt" && _adapter_env grok "$TIMEOUT_BIN" 120s "${_GROK_ARGV[@]:0:$N}" python3 -c "$_GRK_SESSION_PY" "$_GROK_SCRATCH/wt" "$WORK/grk06-fg-session.json" < /dev/null > /dev/null 2>&1 ) || true
-      cp "$_GROK_SCRATCH/wt/.grok/config.toml" "$WORK/grk06-fg-config.toml" 2>/dev/null || true
-      _grok_scratch_drop "$_GROK_SCRATCH"
-      if [ -e "$_GROK_SCRATCH" ] || git -C "$FIX" worktree list --porcelain | grep -qF "$_GROK_SCRATCH"; then printf 'left-behind'; else printf 'removed'; fi )
+      ( cd "$D/wt" && _adapter_env grok "$TIMEOUT_BIN" 90s "${_GROK_ARGV[@]:0:$N}" grok inspect --json < /dev/null > "$WORK/grk06-fg-inspect.json" 2> /dev/null ) || true
+      ( cd "$D/wt" && _adapter_env grok "$TIMEOUT_BIN" 120s "${_GROK_ARGV[@]:0:$N}" python3 -c "$_GRK_SESSION_PY" "$D/wt" "$WORK/grk06-fg-session.json" < /dev/null > /dev/null 2>&1 ) || true
+      cp "$D/wt/.grok/config.toml" "$WORK/grk06-fg-config.toml" 2>/dev/null || true
+      _grok_scratch_drop "$D"
+      if [ -e "$D" ] || git -C "$FIX" worktree list --porcelain | grep -qF "$D"; then printf 'left-behind'; else printf 'removed'; fi )
     case "$GRK6_FG" in
       removed) GRK06F=$(_grk06_verdict "$WORK/grk06-fg-inspect.json" "$WORK/grk06-fg-session.json" "$WORK/grk06-fg-config.toml" "" "$GRK6_DENY") ;;
-      *)       GRK06F="FAIL invoke_grok's scratch worktree: ${GRK6_FG} $(_evidence "$WORK/grk06-fg.err" 2>/dev/null)" ;;
+      *)       GRK06F="FAIL invoke_grok's scratch checkout: ${GRK6_FG} $(_evidence "$WORK/grk06-fg.err" 2>/dev/null)" ;;
     esac
-    GRK06D="lease worktree: ${GRK06#* }; invoke_grok read class (scratch worktree, then removed): ${GRK06F#* }"
+    GRK06D="lease worktree: ${GRK06#* }; invoke_grok read class (scratch checkout, then removed): ${GRK06F#* }"
     case "${GRK06%% *}:${GRK06F%% *}" in
       NOSESSION:*|*:NOSESSION)
         if _auth_shaped "$WORK/grk06-session.json" || _auth_shaped "$WORK/grk06-fg-session.json"; then
@@ -4183,8 +4188,16 @@ PYEOF
         fi
       fi
       if _want GRK-09; then
+        # The explicit `git -C . push` must have run and been refused: no
+        # pushC=refused line means it never ran, which proves nothing
         if grep -qx 'pushC=allowed' "$K/repo/push-check.out" 2>/dev/null; then
           row "GRK-09" "grok" "$GRK_CAP09" "FAIL" "git -C . push was allowed: $(tr '\n' ' ' < "$K/repo/pushC.log" 2>/dev/null | cut -c1-160)" "live"
+        elif ! grep -qx 'pushC=refused' "$K/repo/push-check.out" 2>/dev/null; then
+          if _auth_shaped "$O" && [ ! -f "$K/repo/push-check.out" ]; then
+            row "GRK-09" "grok" "$GRK_CAP09" "AUTH-FAIL" "$(_evidence "$O")" "live"
+          else
+            row "GRK-09" "grok" "$GRK_CAP09" "FAIL" "the explicit git -C . push never ran (no pushC=refused in push-check.out), so the run proves no refusal; rc ${GRK_RC}, ${GRK_SUM}" "live"
+          fi
         else
           # shellcheck disable=SC2046
           _u12_nopush_verdict "GRK-09" "grok" "$GRK_CAP09" "$K" "$O" "git -C . push refused too ($(tr '\n' ' ' < "$K/repo/pushC.log" 2>/dev/null | cut -c1-90)); lane argv through the real _adapter_env, rc ${GRK_RC}" "$(_grk_userenv)"
@@ -4411,7 +4424,7 @@ COUNTER_MISMATCH=0
   echo "- **CC-14/CC-14b** → D-038: \`claude -p\` loads the root AGENTS.md when no CLAUDE.md exists, and a CLAUDE.md beside it suppresses it (the R40 upgrade notice)."
   echo "- **CC-15** → KTD16: Claude Code's Bash sandbox confines a \`claude -p\` worker on the lane's own argv (writes outside its worktree and into the lead's .git blocked, also on a requested unsandboxed retry; credential paths unreadable). PASS keeps the lane's sandbox on; a FAIL means a claude builder with Bash has no OS confinement on that host. **CC-16..CC-18** → the claude lane runs a test command with no permission denial, resumes a recorded session id on a fix cycle, and a \`--max-turns\` stop parses as subtype error_max_turns (the report-missing route). **CC-19/CDX-19/AGY-18** → the lease's no-push git config and the worker marker reach each worker's tool shell through the real \`_adapter_env\` (codex with the lane's pinned \`shell_environment_policy\`), a \`git push\` is refused, and the names each CLI adds to its tool shell are listed; headless agy runs a command only with a user-tier allow rule. **CC-20** → R2: a Codex lead's \`dispatch_role\` reviewer resolving to claude runs \`claude -p\`."
   echo "- **CDX-18** → D-048: one plugin tree serves Codex through the \`.claude-plugin/\` fallback (R20). A FAIL stops Phase 3 until a fallback, such as a schema-less \`.codex-plugin/plugin.json\`, is designed."
-  echo "- **GRK-01..GRK-11** → the Grok Build lane (U16, R23; \`scripts/lib/grok.sh\`). GRK-02 keeps the lane's flags in \`grok --help\`, its env switches in place and the GROK_CONFIG overlay applied; GRK-03 is the stream parser and classifier the lease lane and \`invoke_grok\` rely on; GRK-04 and GRK-06 are the isolation from \`~/.claude\` (GRK-06, in a lease worktree and in \`invoke_grok\`'s read-class scratch worktree, stays FAIL while Claude Code plugin skills or commands reach the session, since \`plugins.disabled\` is a config-file key only, and while a Claude permission file loads without the read class's denies); GRK-05 gates the live rows; GRK-07 routes a turn-cap stop as report missing; GRK-08 and GRK-09 are the deny rules and the no-push backstop behind them; GRK-10 the workspace sandbox in a lease worktree; GRK-11 the shared login under parallel refreshes."
+  echo "- **GRK-01..GRK-11** → the Grok Build lane (U16, R23; \`scripts/lib/grok.sh\`). GRK-02 keeps the lane's flags in \`grok --help\`, its env switches in place and the GROK_CONFIG overlay applied; GRK-03 is the stream parser and classifier the lease lane and \`invoke_grok\` rely on; GRK-04 and GRK-06 are the isolation from \`~/.claude\` (GRK-06, in a lease worktree and in \`invoke_grok\`'s read-class scratch checkout, stays FAIL while Claude Code plugin skills or commands reach the session, since \`plugins.disabled\` is a config-file key only, and while a Claude permission file loads without the read class's denies); GRK-05 gates the live rows; GRK-07 routes a turn-cap stop as report missing; GRK-08 and GRK-09 are the deny rules and the no-push backstop behind them (GRK-09 needs the explicit push's pushC=refused); GRK-10 the workspace sandbox in a lease worktree; GRK-11 the shared login under parallel refreshes."
   echo "- **RTN-01** → headless watch delivery mode; runtime preflight absorbs all three outcomes."
   echo "- **SELF-01..SELF-04** → roster chain rejection, coordinate.sh composition, adapter env allowlist, the R35 boundary. **SELF-05** → the Status-line parser seam (KTD11: DONE / MISSING / BLOCKED). **SELF-06** → lease-lane skill discovery per CLI under the env -i boundary (KTD7/R9; PASS = the probe skill is listed, shipped coverage in the evidence; SELF-06f: the claude worker lists the .claude/skills copy the real provisioner wrote, KTD16; SELF-06g: the grok worker lists the .agents/skills copy the real provisioner wrote, with folder trust on). **SELF-07** → the TRIFORGE_TEST_BUILDER lifecycle: DONE → review, report missing → never review-ready, BLOCKED → escalated (KTD11). **SELF-08** → session-start idempotence (KTD7/KTD8) and the upgrade notices: the 2.1.277 floor, a stale 3.x template copy, a CLAUDE.md above the project (R40). **SELF-08b** → the digest-stamped skills refresh: only Triforge's own unchanged copies are replaced or retired, in session start and lease provisioning alike (KTD12/R31). **SELF-09** → the no-push backstop (CS1). **SELF-10** → the protected-path lists in \`scripts/lib/registry.sh\` and the fail-closed scan in \`lease_promote\` (KTD8/R30). **SELF-13** → the \`[lead]\` table (load validation, absent = claude), the lead host check every lead-owned helper runs (the other lead's CLI refused naming at-setup lead, a terminal runs as the user, both leads' markers refused as ambiguous, no TTY and no markers refused outside the SELF seam), \`roster_write_lead\` (from a stated origin only) and its forced handover, reclaim under the other lead, and the lead's capabilities with an absent one reported once (KTD1, R1/R38/R40/R44). **SELF-14** → the ledger's lead CLI and reviewer class, the merge approval a protected snapshot needs (the lead's CLI when it did not build the task, else the user; voided by the next fix cycle), the user's promotion approval bound to the integration tree (voided by a later merge or a default-branch move), the forced-handover rule for a lead-class pin (a pre-4.0 pin classed by its own row's lead), and each approval's recorded origin (KTD2-KTD4, R5/R6/R32/R33). **SELF-18** → lead-side git hardening (\`_lead_git\`), integrity detection with restore and escalation, and snapshot-only merges (KTD18/KTD19, R46/R47/R49). **SELF-19** → detached builders (pid == pgid, a start-time fingerprint), \`lease_wait\` within the lead's \`wait_budget_s\`, and the lead-exit reconcile, the kill case under a claude and a codex lead (KTD10, R36/R38). **SELF-20** → the \`claude -p\` lane (KTD16, R2/R3): its argv and env, the JSON envelope, session resume, max-turns routed as report missing, names-only .claude/skills provisioning, \`dispatch_role\` running \`claude -p\` under a codex lead, and the Claude Code 2.1.285 floor its sandbox needs. **SELF-06h** → the Devin worker lists the .agents/skills copy the real provisioner wrote, on the lane's read-class argv (R24). **SELF-24** → Devin as an optional member without a live CLI: readiness read from \`devin auth status\` text, a read config that allows no command, the recorded consent and the builder opt-in at load, in the writers and at dispatch (\`invoke_devin\` and \`lease_dispatch\`), no headless enrollment, the re-import flag setup reads, the lease allowlist as the whole environment on both lanes, the lane argv per class, \`invoke_devin\` on a config copy with the Status line as completion, the lease builder's class, copy removal and compose failure, a reviewer lease to review, and \`~/.local/share/devin\` closed to a claude worker (R24, R25). **SELF-25** → Grok Build's lease lane without a live CLI: the permission class by lease role (a reviewer or analyst lease read-only, with the reviewer brief), and the provisioned \`.grok/config.toml\` that disables every plugin and shadows the MCP servers outside grok's own config, recorded as provisioned so the snapshot never carries it, and appended to a project's own file, never clobbering it (R23). Under \`--self-only\` these rows are the whole run and any SELF FAIL exits 3 (KTD15)."
   echo

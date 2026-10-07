@@ -33,23 +33,41 @@ fi
 # (SELF-06g); `--trust` would write ~/.grok/trusted_folders.toml instead.
 # What no switch reaches (GRK-06). The Claude Code plugins under
 # ~/.claude/plugins load, and the session offers their skills and commands
-# (codex:review among them); and a session starts the ~/.claude.json MCP
-# servers that `grok inspect` reports off. Only config-file keys turn these
-# off (`[plugins] disabled`, a project `[mcp_servers.<name>]` with
-# enabled = false), and the GROK_CONFIG overlay drops both. So every grok run
-# that can have one starts from a worktree with its own .grok/config.toml
-# (_grok_lease_config, never merged; GRK-06 and SELF-25): a lease runs in its
-# lease worktree, and invoke_grok's read class in a scratch worktree of HEAD
-# (_grok_scratch_wt), removed after the run. invoke_grok's edit class (a
-# tester or documenter that dispatch_role runs outside a lease; at-test's
-# tester step relies on it) edits the caller's checkout, so it runs there,
-# where Triforge writes nothing: the plugins load (skills and commands offered,
-# hooks run), --no-subagents drops their agents, and the MCP deny rules below
-# keep every MCP tool uncallable. And grok injects the `env` block of
-# ~/.claude/settings.json into its tool shell. Every run keeps that block out
-# with a GROK_CONFIG overlay (_grok_shell_policy) and starts under the lease
-# boundary's env -i allowlist (_adapter_env grok, invoke_grok included), so the
-# tool shell keeps only the names the boundary passes.
+# (codex:review among them); a session starts the ~/.claude.json MCP servers
+# that `grok inspect` reports off, and a project's .mcp.json servers. Only
+# config-file keys turn these off (`[plugins] disabled`, a project
+# `[mcp_servers.<name>]` with enabled = false), and the GROK_CONFIG overlay
+# drops both. So every grok run starts from a worktree with its own
+# .grok/config.toml (_grok_lease_config, never merged; GRK-06 and SELF-25): a
+# lease in its lease worktree, invoke_grok in a scratch checkout of HEAD
+# (_grok_scratch_wt), removed after the run. And grok injects the `env` block
+# of ~/.claude/settings.json into its tool shell. Every run keeps that block
+# out with a GROK_CONFIG overlay (_grok_shell_policy) and starts under the
+# lease boundary's env -i allowlist (_adapter_env grok, invoke_grok included),
+# so the tool shell keeps only the names the boundary passes.
+#
+# What the project supplies. Folder trust off ungates the project's own
+# surfaces too (10-hooks.md): a .grok/hooks/ hook, a .grok/lsp.json server and
+# an MCP server the project's .grok/config.toml declares each ran on a
+# session/new with no prompt (measured on 1.0.34), and grok also reads project
+# plugins from .grok/plugins/ and .claude/plugins/. A read-class run (a
+# reviewer or analyst lease, and every invoke_grok run) never starts where the
+# worktree holds one (_grok_project_guard), nor where `grok inspect` reports
+# an active hook, LSP server or plugin from inside it (_grok_lease_config).
+# The rest stay inert in the read class, each measured with a marker: Claude
+# Code and Cursor project hooks and Cursor MCP servers are off with their
+# GROK_CLAUDE_HOOKS / GROK_CURSOR_* switches; a .mcp.json server is shadowed
+# like any other; grok reads no hooks from a project config.toml; agent
+# definitions run only as subagents (--no-subagents); skills are prompt text;
+# and a .grok/sandbox.toml can't redefine the built-in read-only profile. The
+# edit class (a builder lease) keeps every project surface: it has a full
+# shell in its worktree already.
+#
+# Roles. The registry gives grok builder, reviewer and analyst (role_limit),
+# so a tester or documenter chain naming grok fails at roster load. invoke_grok
+# runs the read class only and refuses the edit class (rc 69): outside a lease
+# grok would edit the caller's checkout, where no provisioned config keeps the
+# plugins and servers off. A grok builder runs through lease_dispatch.
 #
 # Permissions: --permission-mode dontAsk with explicit allow rules and the
 # deny set _GROK_DENY (opencode's D-033 set in grok's rule syntax, plus every
@@ -66,11 +84,12 @@ fi
 # inside `sh ./script.sh` is not matched: the no-push git config _adapter_env
 # sets stays the push guard (GRK-09).
 #
-# Classes: edit (builder, tester, documenter) allows Read, Grep, Edit, Write
-# and Bash under --sandbox workspace, which lets the process write only the
-# working directory, ~/.grok and the temp dirs (GRK-10: git status, diff and
-# log work in a lease worktree; `git add` and commits fail when the lead's .git
-# is outside the temp dirs, and builders commit nothing). read (reviewer,
+# Classes: edit (a builder lease; tester and documenter map here too, though
+# role_limit keeps them off grok) allows Read, Grep, Edit, Write and Bash
+# under --sandbox workspace, which lets the process write only the working
+# directory, ~/.grok and the temp dirs (GRK-10: git status, diff and log work
+# in a lease worktree; `git add` and commits fail when the lead's .git is
+# outside the temp dirs, and builders commit nothing). read (reviewer,
 # analyst, and an unnamed run) allows Read and Grep under --sandbox read-only
 # and denies Edit, Write and Bash, so it has no shell at all, grok's built-in
 # read-only commands included.
@@ -183,42 +202,125 @@ _grok_argv() {
   _GROK_ARGV+=(-p)
 }
 
-# _grok_lease_config <worktree> — the .grok/config.toml a grok worker's
-# worktree runs with (a lease worktree, or invoke_grok's scratch one), the one
-# place grok reads per project that reaches plugins and MCP servers (GRK-06;
-# the env switches and the GROK_CONFIG overlay do not, and a session starts
-# the ~/.claude.json servers that `grok inspect` reports off):
+# The tail of every read-class refusal over what a project supplies
+# (_grok_project_guard, _grok_lease_config).
+_GROK_PROJECT_REFUSAL="A grok reviewer or analyst runs with folder trust off, so grok would start it before any permission applies: no read-class grok run starts here (R23). Fix: remove it from the project, or route the role to another roster member"
+
+# _grok_project_guard <dir> — nothing and 0 when <dir> (the worktree root
+# grok starts in) holds none of the project files from which grok starts code
+# before any permission applies; else the file and the cause on stdout and 1.
+# With folder trust off grok loads them from the project (measured on 1.0.34,
+# each with a marker, on a session/new with no prompt):
+#   .grok/hooks/        hooks, run as commands from session start
+#   .grok/lsp.json      LSP servers, started with the session
+#   .grok/config.toml   an MCP server it declares that is not enabled = false:
+#                       started with the session (a provisioned shadow can't
+#                       take a name the file already holds; the shadows
+#                       themselves are disabled, so the dispatch-time check
+#                       passes them)
+#   .grok/plugins/,     project plugins, whose hooks and MCP and LSP servers
+#   .claude/plugins/    grok reads (both are plugin directories to it)
+# Fails closed too on a .grok or .grok/config.toml that is a symlink, a
+# config.toml that does not parse, and no TOML parser. The read class only:
+# _grok_lease_config runs it for a reviewer or analyst lease and invoke_grok's
+# scratch, and _lease_lane_argv again at dispatch. The edit class keeps them.
+_grok_project_guard() {
+  GPG_DIR="$1" GPG_TAIL="$_GROK_PROJECT_REFUSAL" python3 -c '
+import os, sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None
+d = os.environ["GPG_DIR"]
+def refuse(rel, why):
+    print("%s: %s. %s" % (os.path.join(d, rel), why, os.environ["GPG_TAIL"]))
+    sys.exit(1)
+for rel in (".grok", ".grok/config.toml"):
+    if os.path.islink(os.path.join(d, rel)):
+        refuse(rel, "a symlink, which grok would follow")
+for rel, why in ((".grok/hooks", "project hooks, which grok runs as commands from session start"),
+                 (".grok/lsp.json", "a project LSP server, which grok starts with the session"),
+                 (".grok/plugins", "project plugins, whose hooks and MCP and LSP servers grok loads"),
+                 (".claude/plugins", "project plugins (grok reads .claude/plugins/ as a plugin directory)")):
+    if os.path.lexists(os.path.join(d, rel)):
+        refuse(rel, why)
+cfg = os.path.join(d, ".grok", "config.toml")
+if os.path.lexists(cfg):
+    if tomllib is None:
+        refuse(".grok/config.toml", "no TOML parser to check it for MCP servers (Python 3.11+ tomllib, or pip install tomli)")
+    try:
+        t = tomllib.loads(open(cfg, encoding="utf-8", errors="replace").read())
+    except Exception as e:
+        refuse(".grok/config.toml", "not valid TOML (%s)" % (str(e).splitlines() or ["parse error"])[0][:120])
+    ms = t.get("mcp_servers")
+    if ms is not None and not isinstance(ms, dict):
+        refuse(".grok/config.toml", "it declares MCP servers of its own (mcp_servers is not a table)")
+    on = sorted(n for n, v in (ms or {}).items() if not (isinstance(v, dict) and v.get("enabled") is False))
+    if on:
+        refuse(".grok/config.toml", "it declares MCP servers of its own (%s), which grok starts with the session" % ", ".join(on)[:120])
+'
+}
+
+# _grok_lease_config <worktree> [edit|read] — the .grok/config.toml a grok
+# worker's worktree runs with (a lease worktree, or invoke_grok's scratch
+# one), the one place grok reads per project that reaches plugins and MCP
+# servers (GRK-06; the env switches and the GROK_CONFIG overlay do not, and a
+# session starts the ~/.claude.json servers that `grok inspect` reports off):
 #   [plugins] disabled  every plugin `grok inspect --json` finds from the
-#                       worktree under _GROK_ENV, plus every Claude Code plugin
-#                       ~/.claude/plugins/installed_plugins.json names (so the
-#                       list survives an inspect that fails): none of their
-#                       skills, commands, hooks, MCP servers or agents load.
-#                       Grok matches names; it has no wildcard
+#                       worktree under _GROK_ENV and the overlay, plus every
+#                       Claude Code plugin ~/.claude/plugins/installed_plugins.json
+#                       names: none of their skills, commands, hooks, MCP
+#                       servers or agents load. Grok matches names; it has no
+#                       wildcard
 #   [mcp_servers."<n>"] enabled = false for every server inspect lists that
 #                       grok's own config.toml files do not define, plus the
-#                       ~/.claude.json mcpServers: a project entry shadows the
-#                       server by name, so none starts
-# A project's own .grok/config.toml keeps its lines, and the tables follow
-# them. The result is proven with tomllib before it is written: valid TOML,
+#                       ~/.claude.json mcpServers and the worktree's .mcp.json
+#                       ones: a project entry shadows the server by name, so
+#                       none starts
+# The inspect is the evidence: no inspect, no file and no run. A missing
+# grok, a failed or timed-out inspect, output that is empty or not a JSON
+# object, or one without configSources.layers or the plugin and MCP server
+# lists (for the read class, the hook and LSP server lists too) is refused;
+# the names read from ~/.claude and .mcp.json only add to a good inspect. A
+# project's own .grok/config.toml keeps its lines, and the tables follow them.
+# The result is proven with tomllib before it is written: valid TOML,
 # plugins.disabled naming every plugin, enabled = false on every shadowed
 # server. A project file that declares [plugins], or an MCP server table the
 # shadows can't join (an inline mcp_servers table, a server of the same name),
-# fails that proof. Fails closed — rc 1, nothing written, the file and the
-# reason on stderr, so the caller dispatches nothing — on a failed proof, no
-# TOML parser, a .grok or config.toml that is a symlink or not a plain
-# directory and file inside the worktree, and an inspect whose env_overlay
-# layer does not name the GROK_CONFIG overlay's sections (grok reports a
-# malformed overlay "set but ignored"; the inspect runs with the overlay, so
-# the check costs no extra grok process). Grok's own skills, .agents/skills
-# included, are not plugins and stay. _lease_provision records the file as
-# provisioned, so the snapshot never carries it (KTD9).
+# fails that proof. The read class (the default; a reviewer or analyst) first
+# passes _grok_project_guard, and is refused when inspect reports a hook, an
+# LSP server or a plugin from inside the worktree that is not disabled (what
+# a grok version loads from a place the guard does not know yet). Fails closed
+# — rc 1, nothing written, the file and the reason on stderr, so the caller
+# dispatches nothing — on any of those, no TOML parser, a .grok or
+# config.toml that is a symlink or not a plain directory and file inside the
+# worktree, and an inspect whose env_overlay layer does not name the
+# GROK_CONFIG overlay's sections (grok reports a malformed overlay "set but
+# ignored"; the inspect runs with the overlay, so the check costs no extra
+# grok process). Grok's own skills, .agents/skills included, are not plugins
+# and stay. _lease_provision records the file as provisioned, so the snapshot
+# never carries it (KTD9).
 _grok_lease_config() {
-  local WT=$1 INSPECT="" POLICY=""
-  POLICY=$(_grok_shell_policy) || return 1
-  if command -v grok >/dev/null 2>&1; then
-    INSPECT=$(cd "$WT" && _run_with_timeout 30 "${_HOST_SCRUB[@]}" "${_GROK_ENV[@]}" "GROK_CONFIG=${POLICY}" grok inspect --json < /dev/null 2>/dev/null) || INSPECT=""
+  local WT=$1 CLASS=read INSPECT="" POLICY="" GUARD="" IRC=0 TOBIN=""
+  if [ "${2:-}" = edit ]; then CLASS=edit; fi
+  if [ "$CLASS" = read ] && ! GUARD=$(_grok_project_guard "$WT"); then
+    echo "grok: ERROR ${GUARD:-the project check of ${WT} failed to run}" >&2
+    return 1
   fi
-  printf '%s' "$INSPECT" | GLC_WT="$WT" python3 -c '
+  POLICY=$(_grok_shell_policy) || return 1
+  # timeout --foreground keeps the inspect in the caller's process group, so
+  # an interrupt that reaches the caller's group stops it too
+  if ! command -v grok >/dev/null 2>&1; then
+    IRC=127
+  elif ! TOBIN=$(_timeout_tool); then
+    IRC=$_RC_NO_TIMEOUT_TOOL
+  else
+    INSPECT=$(cd "$WT" && "$TOBIN" --foreground -k 10s 30s "${_HOST_SCRUB[@]}" "${_GROK_ENV[@]}" "GROK_CONFIG=${POLICY}" grok inspect --json < /dev/null 2>/dev/null) || IRC=$?
+  fi
+  printf '%s' "$INSPECT" | GLC_WT="$WT" GLC_CLASS="$CLASS" GLC_IRC="$IRC" GLC_TAIL="$_GROK_PROJECT_REFUSAL" python3 -c '
 import json, os, sys
 try:
     import tomllib
@@ -227,33 +329,55 @@ except ImportError:
         import tomli as tomllib
     except ImportError:
         tomllib = None
-wt = os.environ["GLC_WT"]
+wt, cls, irc = os.environ["GLC_WT"], os.environ["GLC_CLASS"], os.environ["GLC_IRC"]
 gdir, real = os.path.join(wt, ".grok"), os.path.realpath(wt)
 cfg = os.path.join(gdir, "config.toml")
 def refuse(why):
     print("grok: ERROR %s: %s. Nothing is dispatched to grok from %s: Claude Code plugins or MCP servers from outside grok could load for it (R23, GRK-06)" % (cfg, why, wt))
     sys.exit(1)
-plugins, servers = set(), set()
+def inside(p):
+    p = os.path.realpath(str(p)) if p else ""
+    return p == real or p.startswith(real + os.sep)
+raw = sys.stdin.read()
+if irc != "0":
+    why = {"127": "could not run: grok is not on PATH", "96": "could not run: neither timeout nor gtimeout is on PATH (brew install coreutils)"}.get(irc, "failed or timed out (rc %s)" % irc)
+    refuse("grok inspect --json %s, so nothing proves which plugins and MCP servers would load" % why)
 try:
-    d = json.loads(sys.stdin.read() or "{}")
+    d = json.loads(raw)
 except ValueError:
-    d = {}
+    d = None
 if not isinstance(d, dict):
-    d = {}
+    refuse("grok inspect --json gave %s, so nothing proves which plugins and MCP servers would load" % ("no output" if not raw.strip() else "output that is not a JSON object"))
 src = d.get("configSources")
-if isinstance(src, dict) and isinstance(src.get("layers"), list):
-    notes = [str(l.get("note") or "") for l in src["layers"] if isinstance(l, dict) and l.get("role") == "env_overlay"]
-    if not notes or not all(s in " ".join(notes) for s in ("shell_environment_policy", "toolset")):
-        refuse("grok inspect reports the GROK_CONFIG overlay %s, so the tool shell would keep the whole environment" % (("as \"%s\"" % "; ".join(notes)) if notes else "absent"))
-for p in d.get("plugins") or []:
+lacks = [k for k in ["plugins", "mcpServers"] + (["hooks", "lspServers"] if cls == "read" else []) if not isinstance(d.get(k), list)]
+if not (isinstance(src, dict) and isinstance(src.get("layers"), list)):
+    lacks.insert(0, "configSources.layers")
+if lacks:
+    refuse("grok inspect --json lacks %s, so nothing proves which plugins and MCP servers would load" % ", ".join(lacks))
+notes = [str(l.get("note") or "") for l in src["layers"] if isinstance(l, dict) and l.get("role") == "env_overlay"]
+if not notes or not all(s in " ".join(notes) for s in ("shell_environment_policy", "toolset")):
+    refuse("grok inspect reports the GROK_CONFIG overlay %s, so the tool shell would keep the whole environment" % (("as \"%s\"" % "; ".join(notes)) if notes else "absent"))
+if cls == "read":
+    for kind, items in (("hook", d["hooks"]), ("LSP server", d["lspServers"]), ("plugin", d["plugins"])):
+        for e in items:
+            if not isinstance(e, dict) or e.get("disabled") is True:
+                continue
+            s = e.get("source") if isinstance(e.get("source"), dict) else {}
+            where = s.get("path") or e.get("path") or ""
+            if s.get("type") == "project" or e.get("scope") == "project" or inside(where):
+                print("grok: ERROR %s: grok inspect reports a project %s from it (%s). %s" % (where or wt, kind, str(e.get("name") or e.get("event") or "unnamed")[:80], os.environ["GLC_TAIL"]))
+                sys.exit(1)
+plugins, servers = set(), set()
+for p in d["plugins"]:
     if isinstance(p, dict) and isinstance(p.get("name"), str) and p["name"]:
         plugins.add(p["name"])
-for m in d.get("mcpServers") or []:
+for m in d["mcpServers"]:
     if isinstance(m, dict) and isinstance(m.get("name"), str) and m["name"] and ".grok/config.toml" not in json.dumps(m.get("source")):
         servers.add(m["name"])
-for path, key, names in (("~/.claude/plugins/installed_plugins.json", "plugins", plugins), ("~/.claude.json", "mcpServers", servers)):
+for path, key, names, at in (("~/.claude/plugins/installed_plugins.json", "plugins", plugins, "@"), ("~/.claude.json", "mcpServers", servers, None),
+                             (os.path.join(wt, ".mcp.json"), "mcpServers", servers, None)):
     try:
-        names.update(n for n in (str(k).split("@", 1)[0] for k in (json.load(open(os.path.expanduser(path), encoding="utf-8")).get(key) or {})) if n)
+        names.update(n for n in (str(k).split(at, 1)[0] if at else str(k) for k in (json.load(open(os.path.expanduser(path), encoding="utf-8")).get(key) or {})) if n)
     except Exception:
         pass
 if os.path.islink(gdir) or (os.path.lexists(gdir) and not os.path.isdir(gdir)) or not os.path.realpath(gdir).startswith(real + os.sep) \
@@ -282,94 +406,168 @@ with open(cfg, "w", encoding="utf-8") as f:
 ' >&2 || return 1
 }
 
-# _grok_scratch_wt — invoke_grok's working directory for the read class
-# (R23): a detached worktree of HEAD in a fresh TMPDIR directory, added
-# through the lead's hardened git (_lgr: no hook runs) and provisioned as a
-# lease worktree is (_grok_lease_config), so the session loads no plugin and
-# starts no MCP server from outside grok. Sets _GROK_SCRATCH to the directory
-# (the worktree is its wt/). rc 1, the reason on stderr and nothing left
-# behind, when it can't: not inside a git checkout with a commit, the worktree
-# add failed, or provisioning refused. _grok_scratch_drop removes it.
+# _grok_scratch_wt <dir> <sha> — invoke_grok's working directory (R23):
+# <dir>/wt, a checkout of <sha> (the lead's HEAD) in the empty <dir> the
+# caller made, provisioned for the read class (_grok_lease_config <dir>/wt
+# read). The checkout is a fresh repository (git init with no template) that
+# borrows the lead's object store through objects/info/alternates, made by the
+# lead's hardened git (_lead_git) with an empty file for its global config:
+# git reads the new repository's own config and nothing else, so no filter
+# driver, hook or fsmonitor named in the lead's .git/config or the user's git
+# config runs (a .gitattributes filter runs only where a config defines it),
+# and the lead's .git records no worktree. rc 1, the reason on stderr, when it
+# can't be made or provisioned; the caller removes <dir> (_grok_scratch_drop).
+# Runs after _lease_ctx (it reads _LEASE_COMMON and _LEASE_REPO).
 _grok_scratch_wt() {
-  local D SHA
-  _GROK_SCRATCH=""
-  if ! _lease_ctx 2>/dev/null; then
-    echo "invoke_grok: ERROR a grok reviewer or analyst runs from a scratch worktree of HEAD, and ${PWD} is not inside a git checkout" >&2
+  local D=$1 SHA=$2 RC=0 _LEAD_CFG="${1}/gitconfig"
+  case "$SHA" in
+    ""|*[!0-9a-f]*)
+      echo "invoke_grok: ERROR no commit to check out into the scratch checkout ('${SHA}')" >&2
+      return 1
+      ;;
+  esac
+  : > "$_LEAD_CFG" || return 1
+  if [ "${#SHA}" -eq 64 ]; then
+    _lead_git init -q --template= --object-format=sha256 "${D}/wt" >/dev/null 2>&1 || RC=1
+  else
+    _lead_git init -q --template= "${D}/wt" >/dev/null 2>&1 || RC=1
+  fi
+  if [ "$RC" -eq 0 ]; then
+    printf '%s\n' "${_LEASE_COMMON}/objects" > "${D}/wt/.git/objects/info/alternates" || RC=1
+  fi
+  if [ "$RC" -eq 0 ]; then
+    _lead_git -C "${D}/wt" checkout -q --detach "$SHA" >/dev/null 2>&1 || RC=1
+  fi
+  if [ "$RC" -ne 0 ]; then
+    echo "invoke_grok: ERROR could not check ${_LEASE_REPO} out at ${SHA} into the scratch checkout ${D}/wt" >&2
     return 1
   fi
-  SHA=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null) || {
-    echo "invoke_grok: ERROR a grok reviewer or analyst runs from a scratch worktree of HEAD, and ${_LEASE_REPO} has no commit" >&2
-    return 1
-  }
-  D=$(mktemp -d "${TMPDIR:-/tmp}/triforge-grok.XXXXXX") || return 1
-  if ! _lgr worktree add --detach "${D}/wt" "$SHA" >/dev/null 2>&1; then
-    rm -rf "$D"
-    echo "invoke_grok: ERROR git worktree add failed for the scratch worktree of ${_LEASE_REPO} at HEAD" >&2
-    return 1
-  fi
-  if ! _grok_lease_config "${D}/wt"; then
-    _grok_scratch_drop "$D"
-    return 1
-  fi
-  _GROK_SCRATCH=$D
+  _grok_lease_config "${D}/wt" read
 }
 
-# _grok_scratch_drop <dir> — remove a _grok_scratch_wt directory: the
-# worktree through the lead's git, then whatever is left. No-op for "".
+# _grok_scratch_drop <dir> — remove a scratch directory _grok_run_in made.
+# Only a triforge-grok.* path is removed; anything else, "" included, is left.
 _grok_scratch_drop() {
-  if [ -z "${1:-}" ]; then return 0; fi
-  if _lease_ctx 2>/dev/null; then
-    _lgr worktree remove --force "${1}/wt" >/dev/null 2>&1 || true
-  fi
-  rm -rf "$1"
+  case "${1:-}" in
+    */triforge-grok.*) rm -rf "$1" ;;
+  esac
+  return 0
 }
 
-# _grok_run_in <dir> <scratch-or-empty> <timeout-bin> <seconds> <prompt> —
-# one invoke_grok run: _GROK_ARGV and <prompt> from <dir> under the lease
-# boundary's env (_adapter_env grok: env -i with the base allowlist, grok's
-# own keys, the worker marker and the no-push config), in a subshell whose
-# INT, TERM and HUP traps stop the run and remove <scratch> (a no-op for "")
-# before it exits, so an interrupt leaves no scratch worktree behind. The run
-# is a background job the subshell waits for: a trapped signal ends a `wait`
-# at once, while a foreground child would hold the trap until it exited, and
-# timeout(1) sits in a process group of its own, which a signal to the
-# caller's group does not reach; the trap TERMs it (it passes TERM to grok).
-# The caller's own traps are untouched.
+# _grok_run_in <sha> <timeout-bin> <seconds> <prompt> <ready-file> — one
+# invoke_grok run in a subshell that owns its scratch from the first step: its
+# INT, TERM and HUP traps are set before the scratch directory exists, so an
+# interrupt while the checkout is made, while provisioning waits on `grok
+# inspect` (up to 30 s) or while grok runs stops the step (the process tree
+# under it, _grok_run_stop) and removes the directory, and the subshell exits
+# 130, 143 or 129 (_grok_interrupted). Each step is a background job the
+# subshell waits for: a trapped signal ends a `wait` at once, while a
+# foreground child would hold the trap until it exited. Both timeouts (the
+# inspect's and the run's) are --foreground, so grok stays in the caller's
+# process group, which a terminal interrupt reaches whole. The subshell makes
+# a fresh triforge-grok.XXXXXX directory under TMPDIR, the scratch in it
+# (_grok_scratch_wt <dir> <sha>), then <ready-file>, then runs _GROK_ARGV and
+# <prompt> from the scratch under the lease boundary's env (_adapter_env grok:
+# env -i with the base allowlist, grok's own keys, the worker marker and the
+# no-push config), and removes the directory. No <ready-file> afterwards means
+# grok never ran; the reason is on stderr. The caller's own traps are
+# untouched.
 _grok_run_in() {
-  local SCR=$2
   (
+    D=""
     C=""
-    trap '_grok_run_stop "$C"; _grok_scratch_drop "$SCR"; exit 130' INT
-    trap '_grok_run_stop "$C"; _grok_scratch_drop "$SCR"; exit 143' TERM
-    trap '_grok_run_stop "$C"; _grok_scratch_drop "$SCR"; exit 129' HUP
-    cd "$1" || exit 97
-    _adapter_env grok "$3" -k 10s "${4}s" "${_GROK_ARGV[@]}" "$5" < /dev/null &
+    trap '_grok_run_stop "$C"; _grok_scratch_drop "$D"; exit 130' INT
+    trap '_grok_run_stop "$C"; _grok_scratch_drop "$D"; exit 143' TERM
+    trap '_grok_run_stop "$C"; _grok_scratch_drop "$D"; exit 129' HUP
+    D=$(mktemp -u "${TMPDIR:-/tmp}/triforge-grok.XXXXXX") || D=""
+    if [ -z "$D" ] || ! mkdir -m 700 "$D" 2>/dev/null; then
+      D=""
+      echo "invoke_grok: ERROR could not make a scratch directory under ${TMPDIR:-/tmp}" >&2
+      exit 1
+    fi
+    _grok_scratch_wt "$D" "$1" &
     C=$!
-    wait "$C"
+    R=0
+    wait "$C" || R=$?
+    C=""
+    if [ "$R" -ne 0 ] || ! : > "$5"; then
+      _grok_scratch_drop "$D"
+      exit 1
+    fi
+    cd "${D}/wt" || { _grok_scratch_drop "$D"; exit 1; }
+    _adapter_env grok "$2" --foreground -k 10s "${3}s" "${_GROK_ARGV[@]}" "$4" < /dev/null &
+    C=$!
+    R=0
+    wait "$C" || R=$?
+    C=""
+    cd / || true
+    _grok_scratch_drop "$D"
+    exit "$R"
   )
 }
 
-# _grok_run_stop <pid> — TERM a _grok_run_in job: the timeout(1) it started
-# (its child, in a process group of its own), then the job. No-op for "".
+# _grok_run_stop <pid> — TERM a _grok_run_in step and every process under it,
+# children first (pgrep -P), for a signal that reached the subshell alone (a
+# background step ignores INT, and the provisioning's timeout sits below a
+# command substitution); a TERM to timeout passes on to grok. No-op for "".
 _grok_run_stop() {
+  local P
   if [ -z "${1:-}" ]; then return 0; fi
-  pkill -TERM -P "$1" 2>/dev/null || true
+  for P in $(pgrep -P "$1" 2>/dev/null || true); do
+    _grok_run_stop "$P"
+  done
   kill -TERM "$1" 2>/dev/null || true
+}
+
+# _grok_interrupted <agent-name> <output-file> <rc> — 0 when <rc> is the exit
+# of a _grok_run_in subshell a signal stopped (129 HUP, 130 INT, 143 TERM; a
+# grok a signal killed exits the same way): the run is over and its scratch
+# removed, so invoke_grok returns <rc> and never retries (class
+# deterministic, reason interrupted); the line goes to stderr and to
+# <output-file>. 1 for any other <rc>.
+_grok_interrupted() {
+  case "$3" in
+    129|130|143) ;;
+    *) return 1 ;;
+  esac
+  echo "invoke_grok: agent=${1:-<none>} interrupted (exit ${3}); its scratch checkout is removed. No retry." >&2
+  echo "invoke_grok: interrupted (exit ${3}) — no answer" > "$2" 2>/dev/null || true
+  INVOKE_FAILURE_CLASS="deterministic"
+  _INVOKE_FAILURE_REASON="interrupted"
+  return 0
+}
+
+# _grok_unisolated <agent-name> <output-file> <why> — invoke_grok's refusal
+# when grok can't start isolated: <why> on stderr and in <output-file> (never
+# an empty file a caller could read as "no findings"), class deterministic,
+# reason isolation. The caller returns 69.
+_grok_unisolated() {
+  echo "invoke_grok: agent=${1:-<none>} not dispatched: ${3} No retry (deterministic)." >&2
+  echo "invoke_grok: not dispatched — ${3}" > "$2" 2>/dev/null || true
+  INVOKE_FAILURE_CLASS="deterministic"
+  _INVOKE_FAILURE_REASON="isolation"
 }
 
 # invoke_grok <agent-name> <prompt> [output-file] [timeout-seconds] [effort]
 # The class comes from GROK_ROLE (dispatch_role sets it from the roster role),
 # else from the agent name: *review* and *analy* read, *build*, *test* and
-# *doc* edit, anything else read. The grok-agents/<agent-name>.md brief, when
-# one exists, is prefixed onto the prompt (grok's --agent takes a profile, not
-# a role brief). Every run starts under the lease boundary's env
-# (_grok_run_in). The read class runs from a scratch worktree of HEAD
-# (_grok_scratch_wt), removed afterwards, and the prompt names the caller's
-# checkout for anything HEAD lacks (uncommitted changes, an untracked ops/);
-# the edit class runs from the caller's directory, the checkout it edits. rc 69
-# (deterministic, reason isolation, nothing dispatched) when the scratch
-# worktree can't be made or provisioned; rc 80 when a clean end_turn run gave
-# no answer text (report missing).
+# *doc* edit, anything else read. invoke_grok runs the read class only: the
+# edit class is refused (rc 69, deterministic, reason edit-outside-lease,
+# grok never run), because outside a lease grok would edit the caller's
+# checkout with nothing keeping the plugins and servers off; a grok builder
+# runs through lease_create and lease_dispatch. The grok-agents/<agent-name>.md
+# brief, when one exists, is prefixed onto the prompt (grok's --agent takes a
+# profile, not a role brief). Before anything is checked out, the lead's
+# integrity check runs, as lease_create runs it before it carves
+# (_lead_integrity_check: a git state changed outside the lead's operations
+# returns its rc, 44, and nothing runs; with no ledger there is nothing to
+# compare and nothing is written). Each run then starts from its own scratch
+# checkout of HEAD (_grok_run_in, _grok_scratch_wt; a retry gets a fresh
+# one), removed afterwards, under the lease boundary's env, and the prompt
+# names the caller's checkout for anything HEAD lacks (uncommitted changes, an
+# untracked ops/). rc 69 (deterministic, reason isolation, nothing
+# dispatched) when the scratch can't be made or provisioned; rc 80 when a
+# clean end_turn run gave no answer text (report missing).
 invoke_grok() {
   local AGENT_NAME=$1
   local PROMPT=$2
@@ -377,9 +575,10 @@ invoke_grok() {
   local TIMEOUT=${4:-600}
   local EFFORT=${5:-${GROK_EFFORT:-}}
   local MODEL="${GROK_MODEL:-grok-4.7}"
-  local CLASS="" MODE="raw" EXIT_CODE=0 STOP="" BODY="" AVAILABLE="" TOBIN="" SCR="" RUN_DIR=$PWD NOTE=""
+  local CLASS="" MODE="raw" EXIT_CODE=0 STOP="" BODY="" AVAILABLE="" TOBIN="" SHA="" NOTE="" RC=0
   local RAW="${OUTPUT_FILE}.raw"
   local ERR="${OUTPUT_FILE}.err"
+  local READY="${OUTPUT_FILE}.ready"
 
   INVOKE_FAILURE_CLASS="none"
   _INVOKE_FAILURE_REASON=""
@@ -405,6 +604,13 @@ invoke_grok() {
       esac
       ;;
   esac
+  if [ "$CLASS" = edit ]; then
+    echo "invoke_grok: ERROR agent=${AGENT_NAME:-<none>} role=${GROK_ROLE:-<none; read from the agent name>} is grok's edit class, which runs only in a lease worktree: lease_create <task> builder, then lease_dispatch. Here it would edit the caller's checkout, where no provisioned config keeps the Claude Code plugins, their hooks and the MCP servers off (R23). Not dispatched. No retry (deterministic)." >&2
+    echo "invoke_grok: not dispatched — grok edits only in a lease worktree (lease_create, then lease_dispatch)" > "$OUTPUT_FILE" 2>/dev/null || true
+    INVOKE_FAILURE_CLASS="deterministic"
+    _INVOKE_FAILURE_REASON="edit-outside-lease"
+    return 69
+  fi
 
   local FULL_PROMPT="$PROMPT"
   if [ -n "$AGENT_NAME" ] && [ -f "${_TRIFORGE_PLUGIN_ROOT}/grok-agents/${AGENT_NAME}.md" ]; then
@@ -423,24 +629,45 @@ ${PROMPT}"
     return "$_RC_NO_TIMEOUT_TOOL"
   }
   _grok_argv "$CLASS" "$MODEL" "$EFFORT" || return 1
-  if [ "$CLASS" = read ]; then
-    if ! _grok_scratch_wt; then
-      echo "invoke_grok: agent=${AGENT_NAME} not dispatched: grok's isolation could not be set up (see above). No retry (deterministic)." >&2
-      echo "invoke_grok: not dispatched — no isolated scratch worktree for the grok ${CLASS} class (see the lead's stderr)" > "$OUTPUT_FILE" 2>/dev/null || true
-      INVOKE_FAILURE_CLASS="deterministic"
-      _INVOKE_FAILURE_REASON="isolation"
-      return 69
-    fi
-    SCR=$_GROK_SCRATCH
-    RUN_DIR="${SCR}/wt"
-    NOTE="
+  # The lead's checkout, and its git state as lease_create checks it before a
+  # carve (R1, KTD18), before any checkout is made
+  if ! _lease_ctx 2>/dev/null; then
+    _grok_unisolated "$AGENT_NAME" "$OUTPUT_FILE" "a grok reviewer or analyst runs from a scratch checkout of HEAD, and ${PWD} is not inside a git checkout."
+    return 69
+  fi
+  _lead_integrity_check invoke_grok || RC=$?
+  if [ "$RC" -ne 0 ]; then
+    echo "invoke_grok: agent=${AGENT_NAME:-<none>} not dispatched: the lead's git state failed the integrity check (above), so nothing is checked out for grok (KTD18). No retry (deterministic)." >&2
+    echo "invoke_grok: not dispatched — the lead's git state failed the integrity check (rc ${RC}; see the lead's stderr)" > "$OUTPUT_FILE" 2>/dev/null || true
+    INVOKE_FAILURE_CLASS="deterministic"
+    _INVOKE_FAILURE_REASON="integrity"
+    return "$RC"
+  fi
+  SHA=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null) || SHA=""
+  if [ -z "$SHA" ]; then
+    _grok_unisolated "$AGENT_NAME" "$OUTPUT_FILE" "a grok reviewer or analyst runs from a scratch checkout of HEAD, and ${_LEASE_REPO} has no commit."
+    return 69
+  fi
+  NOTE="
 
 (Your working directory is a scratch copy of the project at HEAD. The lead's checkout, with its uncommitted changes and ops/, is ${_LEASE_REPO}: read files there by absolute path. Change nothing in either.)"
-  fi
-  echo "invoke_grok: agent=${AGENT_NAME:-<none>} mode=${MODE} class=${CLASS} model=${MODEL} effort=${EFFORT:-default} dir=${RUN_DIR}" >&2
+  echo "invoke_grok: agent=${AGENT_NAME:-<none>} mode=${MODE} class=${CLASS} model=${MODEL} effort=${EFFORT:-default} dir=<a scratch checkout of ${_LEASE_REPO} at ${SHA}>" >&2
 
-  # stdout -> RAW (the event stream), stderr -> ERR (grok's own messages).
-  _grok_run_in "$RUN_DIR" "$SCR" "$TOBIN" "$TIMEOUT" "${FULL_PROMPT}${NOTE}" > "$RAW" 2>"$ERR" || EXIT_CODE=$?
+  # stdout -> RAW (the event stream), stderr -> ERR (grok's own messages and
+  # the scratch's); no READY afterwards: the scratch was refused, grok never ran
+  rm -f "$READY"
+  _grok_run_in "$SHA" "$TOBIN" "$TIMEOUT" "${FULL_PROMPT}${NOTE}" "$READY" > "$RAW" 2>"$ERR" || EXIT_CODE=$?
+  if _grok_interrupted "$AGENT_NAME" "$OUTPUT_FILE" "$EXIT_CODE"; then
+    rm -f "$RAW" "$ERR" "$READY"
+    return "$EXIT_CODE"
+  fi
+  if [ ! -f "$READY" ]; then
+    cat "$ERR" >&2 2>/dev/null || true
+    rm -f "$RAW" "$ERR"
+    _grok_unisolated "$AGENT_NAME" "$OUTPUT_FILE" "grok's isolation could not be set up (see the lead's stderr)."
+    return 69
+  fi
+  rm -f "$READY"
 
   # A clean exit is complete only when the stream ended with end_turn: any
   # other stop (refusal, max_tokens, cancelled) fails here, deterministically.
@@ -456,10 +683,22 @@ ${PROMPT}"
 
   if [ "$INVOKE_FAILURE_CLASS" = retryable ]; then
     # Single retry: the raw prompt with the same command line (class, sandbox
-    # and rules kept; only the brief is shed, as the sibling helpers do).
+    # and rules kept; only the brief is shed, as the sibling helpers do), from
+    # a fresh scratch checkout
     echo "invoke_grok: agent=${AGENT_NAME} exit=${EXIT_CODE} (retryable), retrying once with the raw prompt" >&2
     EXIT_CODE=0
-    _grok_run_in "$RUN_DIR" "$SCR" "$TOBIN" "$TIMEOUT" "${PROMPT}${NOTE}" > "$RAW" 2>"$ERR" || EXIT_CODE=$?
+    _grok_run_in "$SHA" "$TOBIN" "$TIMEOUT" "${PROMPT}${NOTE}" "$READY" > "$RAW" 2>"$ERR" || EXIT_CODE=$?
+    if _grok_interrupted "$AGENT_NAME" "$OUTPUT_FILE" "$EXIT_CODE"; then
+      rm -f "$RAW" "$ERR" "$READY"
+      return "$EXIT_CODE"
+    fi
+    if [ ! -f "$READY" ]; then
+      cat "$ERR" >&2 2>/dev/null || true
+      rm -f "$RAW" "$ERR"
+      _grok_unisolated "$AGENT_NAME" "$OUTPUT_FILE" "grok's isolation could not be set up for the retry (see the lead's stderr)."
+      return 69
+    fi
+    rm -f "$READY"
     if [ "$EXIT_CODE" -eq 0 ]; then
       INVOKE_FAILURE_CLASS="none"
       STOP=$(_grok_stop "$RAW")
@@ -472,7 +711,6 @@ ${PROMPT}"
       echo "invoke_grok: agent=${AGENT_NAME} retry also failed, exit=${EXIT_CODE} class=${INVOKE_FAILURE_CLASS}" >&2
     fi
   fi
-  _grok_scratch_drop "$SCR"
 
   if [ "$EXIT_CODE" -ne 0 ]; then
     case "$INVOKE_FAILURE_CLASS:$_INVOKE_FAILURE_REASON" in

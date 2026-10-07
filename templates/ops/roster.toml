@@ -124,6 +124,9 @@ fallbacks = ["claude"]
 #   It reviews and analyzes by default. It builds only after you opt in:
 #   opt_in = ["builder"] (roster_write_member devin true <model> --opt-in builder).
 # [members.grok]   -> enabled = true, model = "grok-4.7"               (effort rides in --effort; `grok login` or XAI_API_KEY)
+#   Grok Build takes the builder, reviewer and analyst roles. A tester or
+#   documenter chain that names it fails to load, because those roles run
+#   outside a lease.
 
 [promotion]
 # KTD-5 user gate: when true, the lead pauses at wave end for explicit user

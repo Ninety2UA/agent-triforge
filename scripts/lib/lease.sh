@@ -1398,14 +1398,17 @@ _lease_provision_claude_skills() {
   return 0
 }
 
-# _lease_provision <worktree> <builder-cli> — provision a worktree _lease_carve
-# just made (it reads _CARVE_ADMIN) and append provisioned=<the paths that
-# wrote> to _CARVE_FIELDS, the lease row's `provisioned` field (KTD9): the
-# portable skills in .agents/skills, for a claude builder in .claude/skills
-# too, and for a grok worker the .grok/config.toml that keeps every plugin
-# from loading (_grok_lease_config). rc 1 when the list can't be read: a row
-# without it would fall back to excluding all of .agents/; and rc 1 when that
-# config can't be written as proven (a grok lease is never made without it).
+# _lease_provision <worktree> <builder-cli> [<role>] — provision a worktree
+# _lease_carve just made (it reads _CARVE_ADMIN) and append provisioned=<the
+# paths that wrote> to _CARVE_FIELDS, the lease row's `provisioned` field
+# (KTD9): the portable skills in .agents/skills, for a claude builder in
+# .claude/skills too, and for a grok worker the .grok/config.toml that keeps
+# every plugin from loading (_grok_lease_config, in the permission class of
+# <role>: a reviewer or analyst lease, or no role, is also refused where the
+# project supplies code grok would start). rc 1 when the list can't be read: a
+# row without it would fall back to excluding all of .agents/; and rc 1 when
+# that config can't be written as proven (a grok lease is never made without
+# it).
 _lease_provision() {
   local WT=$1 CLI=${2:-} LIST TRACKED=""
   local -a DIRS=(.agents/skills)
@@ -1426,7 +1429,7 @@ print(",".join(sorted(names)))
       ;;
     grok)
       # Fail closed (R23): no isolating config, no lease, so nothing dispatches
-      if ! _grok_lease_config "$WT"; then
+      if ! _grok_lease_config "$WT" "$(_grok_class "${3:-}")"; then
         echo "lease: ERROR the grok worktree ${WT} is carved but not leased (see above). Fix the cause, remove it (git worktree remove --force ${WT}; git branch -D lease/${WT##*/}), then lease again" >&2
         return 1
       fi
@@ -1767,7 +1770,7 @@ CREATE_ROW_EOF
   fi
   if _lead_resolve 2>/dev/null; then LEAD=$_LEAD_CLI; fi
   _lease_carve "$TASK_ID" "$WT" || return 1
-  _lease_provision "$WT" "$CLI" || return 1
+  _lease_provision "$WT" "$CLI" "$ROLE" || return 1
   NOW=$(date +%s)
   # lead_via from this shell's origin, read here: a cached host-check pass
   # does not set it.
@@ -2348,7 +2351,7 @@ lease_requeue() {
     return 1
   fi
   _lease_carve "$TASK_ID" "$WT" || return 1
-  _lease_provision "$WT" "$CLI" || return 1
+  _lease_provision "$WT" "$CLI" "$ROLE" || return 1
   _ledger_update "$TASK_ID" \
     state=leased builder_cli="$CLI" builder_model="$MODEL" builder_effort="$EFFORT" \
     previous_builder="$PREV" requeue_count=1 pid=0 heartbeat_deadline=0 reason="" \

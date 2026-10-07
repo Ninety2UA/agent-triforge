@@ -48,7 +48,7 @@ Offer the shipped default first (recommended):
 | kimi | `kimi-code/k3` | (no list flag) | the OAuth-managed alias; `kimi login` provisions it; offer the default |
 | cursor | `cursor-grok-4.6-xhigh` | `cursor-agent --list-models` (or `agent --list-models` when only the new binary name exists) | pin the suffixed Grok id explicitly, never the Auto router; effort rides in the `-low`, `-medium`, `-high`, `-xhigh` suffix. An unrelated `~/.grok/bin/agent` can shadow `agent`, so the helper (`_cursor_bin`) resolves `cursor-agent` first and accepts `agent` only when its `--version` matches `YYYY.MM.DD-<hex>` |
 | devin | `swe-1-6-slow` | `devin models list` | Cognition's own model, and the one a Devin Free account can run: Free answers most other models with "Upgrade to Pro". Devin has no effort flag; some model ids carry it (`swe-2-high`, `swe-2-max`) |
-| grok | `grok-4.7` | `grok models` | Triforge pins the model with `--model` and passes the roster effort as `--effort` (low, medium, high, xhigh; max runs as xhigh). The readiness check looks only for `XAI_API_KEY` or a cached `grok login` and makes no model call, so a lapsed login shows up on the first dispatch, which fails at once with "Not signed in" |
+| grok | `grok-4.7` | `grok models` | Grok builds, reviews and analyzes, and is never the tester or documenter. Triforge pins the model with `--model` and passes the roster effort as `--effort` (low, medium, high, xhigh; max runs as xhigh). The readiness check looks only for `XAI_API_KEY` or a cached `grok login` and makes no model call, so a lapsed login shows up on the first dispatch, which fails at once with "Not signed in" |
 
 Fetch a list only when the user wants to see options, for example:
 

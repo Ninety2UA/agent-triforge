@@ -397,7 +397,10 @@ CLIS = {
         "env_keys": ["XAI_API_KEY", "GROK_HOME"],
         "lane": "shell",
         "egress": "xAI",
-        "role_limit": [],
+        # a builder only in a lease: invoke_grok runs the read class alone,
+        # so a tester or documenter (dispatched outside a lease) never routes
+        # to grok (R23)
+        "role_limit": ["builder", "reviewer", "analyst"],
         "opt_in_roles": [],
         "consent": False,
         "lead": {},
