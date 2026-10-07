@@ -9575,7 +9575,10 @@ if printf '%s\n' "$O" | grep -q '^eg-both:.*\(Moonshot\|Kimi\)'; then _S16_FAIL=
 mkdir -p "$_S16A/tr/proj" "$_S16A/tr/h-none" "$_S16A/tr/h-other/.codex" "$_S16A/tr/h-path/.codex" "$_S16A/tr/h-untr/.codex" "$_S16A/tr/h-bad/.codex" \
   "$_S16A/tr/cx-trust" "$_S16A/tr/cx-empty" "$_S16A/tr/h-top/.codex"
 _S16A_D=$(cd "$_S16A/tr/proj" && pwd -P)
-_S16A_L="$_S16A/tr/link"
+# The link keeps the work dir's own (unresolved) prefix, with repeated slashes
+# squeezed: the harness's work dir sits under a TMPDIR that ends in "/", and
+# codex_trust_status prints the path as given in its normalized form.
+_S16A_L=$(printf '%s' "$_S16A/tr/link" | tr -s /)
 ln -s "$_S16A_D" "$_S16A_L" 2>/dev/null || true
 _S16A_TOP=$(cd "$_S16A/path" && pwd -P)
 printf '[projects."/elsewhere/project"]\ntrust_level = "trusted"\n' > "$_S16A/tr/h-other/.codex/config.toml"
