@@ -86,6 +86,17 @@ Lead's triage and recommendation:
   - The diff can exceed Linux's 128 KiB argument limit.
   - R25's per-CLI case arms.
 - **2026-10-07 ~09:30: the user approved the fourth round** ("continue with your recommendation"). It runs under `/ce-work` with four workers: r4-2c (`mafw-wt-phase-2c`), r4-3 (`mafw-wt-phase-3`), r4-4a (at-review side, `mafw-wt-6-fixa`) and r4-4b (grok/devin side, `mafw-wt-6-fixb`). The batches are in the session scratchpad under `round4/`. Next: round-4 reviews, then merges in the order 2c → 3 → 4.
+- **2026-10-07 ~12:45: round 4 results.**
+
+  | Phase | Independent reviewer | Codex |
+  |---|---|---|
+  | 2c | 3/5 FIX: the supervisor's `os.waitid` is missing on macOS Python ≤3.12, which CI pins | FIX: 1 P1, 4 P2 |
+  | 3 | final3d 5/5 MERGE | FIX: 1 P1, 3 P2 |
+  | 4 | final4d 5/5 MERGE | FIX: 1 P1, 1 P2 |
+
+  Gates are green on 3 and 4 under Python 3.12 and 3.14.
+- **The user then decided (AskUserQuestion: "Fix all, verify, merge").** Fix every round-4 finding in all three phases. Prove each fix with a SELF case that fails on the old head and passes on the new one. Gate under Python 3.12 and 3.14, then run gates.yml, then merge 2c → 3 → 4. There is no further external review round per phase. Codex reviews everything once, in the end-of-program review.
+- **Gotcha (2c round 4):** the local gate must also run under Python 3.12. gates.yml pins 3.12, and this host's `python3` is 3.14. Put a dir whose `python3` is uv's cpython-3.12.12 first in PATH.
 - **Lead's recommendation:** a fourth round, scoped to the items above. Each is local: at-review's integrity check, review package and core-lane prompt; the grok read class's user-tier surfaces; Devin's retry. The live grok rows still wait on the xAI quota.
 - **Third-round final-diff verdicts (added 03:20):** final2c **4/5 FIX** at 115b9b1 — the one blocking finding is the duplicate core-lane dispatch (dispatch.md:72-90 and :143-160, the same as Codex's 2c #4); every earlier finding fixed; P3: rerunning a synthesis start block while a synthesizer runs orphans it. final3 **5/5 MERGE** at 5b50bbc — all eight Codex round-2 findings and its four P3s fixed; it did not have Codex's round-3 list, so the reviewers disagree on Phase 3 (Codex's round-3 P1s stand until checked). Reports: session scratchpad `final2c-r3.md`, `phase3/final3-r3.md`.
 
