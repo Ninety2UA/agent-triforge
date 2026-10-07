@@ -65,12 +65,13 @@ PROJECT_PROTECTED = (
     "ops/roster.toml",
     # each CLI project-tier config / permission tree (agy reads .agents/hooks.json
     # and .agents/agents/, so .agents/ is protected whole, skills included; Devin
-    # loads .devin/config.json requiredPlugins with no login, and Pi reads
+    # loads .devin/config.json requiredPlugins with no login and reads the
+    # legacy .cognition/ exactly like .devin/, and Pi reads
     # .pi/settings.json packages once the project is trusted)
-    ".claude/", ".codex/", ".agents/", ".antigravity/", ".gemini/", ".opencode/", ".kimi-code/", ".cursor/", ".devin/", ".pi/",
+    ".claude/", ".codex/", ".agents/", ".antigravity/", ".gemini/", ".opencode/", ".kimi-code/", ".cursor/", ".devin/", ".cognition/", ".pi/",
     # grok reads .grok/config.toml (permission rules, MCP servers, plugins),
-    # .grok/hooks/, .grok/skills/, .grok/agents/ and .grok/sandbox.toml, and the
-    # lease lane runs it with folder trust on (GROK_FOLDER_TRUST=0)
+    # .grok/hooks/, .grok/skills/, .grok/agents/ and .grok/sandbox.toml, and
+    # every grok run turns the folder-trust gate off (GROK_FOLDER_TRUST=0)
     ".grok/",
     # project-root config files outside those trees: OpenCode reads its permission
     # config from opencode.json / opencode.jsonc, and Cursor still reads the
