@@ -183,81 +183,44 @@ if [ -z "$LEAD_FIELDS" ] || [ -z "$LAUNCH_ARGV" ]; then
   exit 1
 fi
 
-# The [lead] model and effort ride the lead's lead.model_argv and
-# lead.effort_argv ("{}" = the value), appended to launch_argv before the
-# prompt. An empty value adds nothing; a non-empty one with no such field adds
-# nothing and is named once in a note (LAUNCH_NOTES).
-MODEL_ARGV=$(cli_field "$LEAD" lead.model_argv 2>/dev/null) || MODEL_ARGV=""
-EFFORT_ARGV=$(cli_field "$LEAD" lead.effort_argv 2>/dev/null) || EFFORT_ARGV=""
-# What the registry declares about full access (true|false); unreadable counts
-# as full access below (fail closed).
-FULL_DECL=$(cli_field "$LEAD" lead.full_access 2>/dev/null) || FULL_DECL=""
-
-# The launch argv as words (shell quoting, as the human would type it), the
-# model and effort words after them, and whether the line runs the lead with
-# full access: the registry's lead.full_access, or any word the registry's
-# launch_full_access reads as full access (_LAUNCH_ACCESS_PY: sandbox modes,
-# permission modes, bypass flags, profiles, in every spelling the two lead
-# CLIs take). Either one asks for the human's --allow-full-access. One line
-# per word, then the verdict, its reasons, the extra words as typed, notes.
+# The launch line, composed by the library (_lead_launch_compose, roster.sh:
+# the one composition, which lead_launch_line prints for setup): the
+# registry's launch_argv as words (shell quoting, as the human would type
+# it), then the words lead.model_argv and lead.effort_argv add for the [lead]
+# model and effort ("{}" = the value; an empty value adds nothing, a
+# non-empty one with no such field adds nothing and is named once in a note,
+# LAUNCH_NOTES), and whether the line runs the lead with full access: the
+# registry's lead.full_access, or any word the registry's launch_full_access
+# reads as full access (_LAUNCH_ACCESS_PY: sandbox modes, permission modes,
+# bypass flags, profiles, in every spelling the two lead CLIs take). Either
+# one asks for the human's --allow-full-access. One line per word, then the
+# verdict, its reasons, the line as typed, notes.
 LAUNCH_WORDS=()
 FULL_ACCESS=0
 FULL_WHY=""
-LAUNCH_EXTRA=""
+LAUNCH_SHOWN=""
 LAUNCH_NOTES=""
 while IFS= read -r _w; do
   case "$_w" in
     "__full_access__="*) FULL_ACCESS=${_w#__full_access__=} ;;
     "__why__="*) FULL_WHY="${FULL_WHY}${FULL_WHY:+; }${_w#__why__=}" ;;
-    "__extra__="*) LAUNCH_EXTRA=${_w#__extra__=} ;;
+    "__shown__="*) LAUNCH_SHOWN=${_w#__shown__=} ;;
     "__note__="*) LAUNCH_NOTES="${LAUNCH_NOTES}${LAUNCH_NOTES:+
 }${_w#__note__=}" ;;
     *) LAUNCH_WORDS+=("$_w") ;;
   esac
 done <<COORD_ARGV_EOF
-$(CA_ARGV="$LAUNCH_ARGV" CA_NAME="$LEAD_NAME" CA_MODEL="$LEAD_MODEL" CA_EFFORT="$LEAD_EFFORT" CA_FULL="$FULL_DECL" \
-  CA_MODEL_ARGV="$MODEL_ARGV" CA_EFFORT_ARGV="$EFFORT_ARGV" python3 -c "${_LAUNCH_ACCESS_PY}"'
-import os, shlex
-e = os.environ
-words = shlex.split(e["CA_ARGV"])
-extra, notes = [], []
-for field in ("model", "effort"):
-    value, tmpl = e["CA_" + field.upper()], e["CA_" + field.upper() + "_ARGV"]
-    if not value:
-        continue
-    if "{}" not in tmpl or "\n" in value:
-        notes.append("the " + e["CA_NAME"] + " registry entry has no lead." + field + "_argv, so the [lead] " + field + " " + " ".join(value.split()) + " is not passed (the host default runs)")
-        continue
-    extra += launch_extra_words(tmpl, value)
-why = launch_full_access(words + extra)
-if e["CA_FULL"] == "true":
-    why.append("the registry declares lead.full_access = true")
-elif e["CA_FULL"] != "false":
-    why.append("no lead.full_access declaration could be read (fail closed)")
-for w in words + extra:
-    print(w)
-print("__full_access__=" + ("1" if why else "0"))
-for r in why:
-    print("__why__=" + " ".join(r.split()))
-print("__extra__=" + " ".join(shlex.quote(w) for w in extra))
-for n in notes:
-    print("__note__=" + n)
-')
+$(_lead_launch_compose "$LEAD" "$LEAD_MODEL" "$LEAD_EFFORT" headless)
 COORD_ARGV_EOF
 unset _w
-LAUNCH_SHOWN="${LAUNCH_ARGV}${LAUNCH_EXTRA:+ ${LAUNCH_EXTRA}}"
 if [ "${#LAUNCH_WORDS[@]}" -eq 0 ]; then
   echo "coordinate.sh: ERROR the ${LEAD_NAME} launch line '${LAUNCH_ARGV}' could not be split into words" >&2
   exit 1
 fi
 
-# The three statements R4 has setup and AGENTS.md make; printed beside every
-# full-access launch line.
-confinement_statements() {
-  echo "  - Confinement under either lead is Triforge's scripts plus git-integrity detection."
-  echo "  - A lease worktree limits where a worker starts, not where it writes."
-  echo "  - Recorded approval is audit, not prevention, and worker output is an injection surface for a full-access lead."
-}
+# The three statements R4 has setup and AGENTS.md make are printed beside
+# every full-access launch line by the library's confinement_statements
+# (roster.sh), the copy setup prints too.
 
 # Lease-ledger resume (KTD-4/U9): when ops/leases.toml still holds
 # non-terminal leases, the fresh session must reconstruct the wave from the

@@ -260,6 +260,13 @@ TRIFORGE_CLAUDE_SANDBOX_FLOOR="2.1.285"
 #               by roster_write_member --consent user. An enabled member, or
 #               a role chain naming the CLI, without one fails load
 #               validation, and headless enrollment never enrolls it (R24)
+#   instructions  the instruction reader the CLI runs as a lead, a model
+#               named in scripts/lib/instructions.sh: "claude-md-shadow"
+#               (the CLAUDE.md family shadows AGENTS.md unless it imports it)
+#               or "agents-chain" (the root-to-cwd AGENTS.md chain, overrides,
+#               a byte budget, untrusted projects); "" for a CLI that cannot
+#               lead, which instruction_pointer_visibility reports as an
+#               unknown reader
 #   lead        the KTD1 static lead fields, or {} for a CLI that cannot lead
 #               (Key Decision: Claude Code or Codex only). launch_argv is one
 #               headless lead session, the prompt appended as its last word:
@@ -306,6 +313,7 @@ CLIS = {
         "role_limit": [],
         "opt_in_roles": [],
         "consent": False,
+        "instructions": "claude-md-shadow",
         "lead": {
             "launch_argv": "claude --print --permission-mode acceptEdits",
             "full_access": False,
@@ -338,6 +346,7 @@ CLIS = {
         "role_limit": [],
         "opt_in_roles": [],
         "consent": False,
+        "instructions": "",
         "lead": {},
     },
     "codex": {
@@ -357,6 +366,7 @@ CLIS = {
         "role_limit": [],
         "opt_in_roles": [],
         "consent": False,
+        "instructions": "agents-chain",
         "lead": {   # D-047 profile; the hook payload names exec_command Bash and keeps apply_patch (CDX-21)
             "launch_argv": "codex exec -s danger-full-access -c approval_policy=\"never\" -c background_terminal_max_timeout=900000",
             "full_access": True,
@@ -389,6 +399,7 @@ CLIS = {
         "role_limit": [],
         "opt_in_roles": [],
         "consent": False,
+        "instructions": "",
         "lead": {},
     },
     "kimi": {
@@ -408,6 +419,7 @@ CLIS = {
         "role_limit": [],
         "opt_in_roles": [],
         "consent": False,
+        "instructions": "",
         "lead": {},
     },
     "cursor": {
@@ -427,6 +439,7 @@ CLIS = {
         "role_limit": [],
         "opt_in_roles": [],
         "consent": False,
+        "instructions": "",
         "lead": {},
     },
     "devin": {
@@ -446,6 +459,7 @@ CLIS = {
         "role_limit": ["reviewer", "analyst"],
         "opt_in_roles": ["builder"],
         "consent": True,
+        "instructions": "",
         "lead": {},
     },
     "grok": {
@@ -468,6 +482,7 @@ CLIS = {
         "role_limit": ["builder", "reviewer", "analyst"],
         "opt_in_roles": [],
         "consent": False,
+        "instructions": "",
         "lead": {},
     },
 }
@@ -488,9 +503,14 @@ CLIS = {
 # still names danger-full-access, bypassPermissions or one of the dangerous
 # flags counts too. launch_extra_words(tmpl, value): the words a
 # lead.model_argv or lead.effort_argv template adds for a value ("{}" = the
-# value). scripts/coordinate.sh splices both to decide when the human's
-# --allow-full-access is needed; scripts/validate-versions.sh runs them on each
-# shipped lead's launch line against lead.full_access. Python source like
+# value). launch_interactive(text): a lead.launch_argv without the words that
+# make it headless (LAUNCH_HEADLESS_WORDS), the line a human types to start
+# that lead in a terminal, or None for a binary with no entry there.
+# _lead_launch_compose (scripts/lib/roster.sh, which scripts/coordinate.sh
+# and lead_launch_line call) splices them to compose a lead's launch line and
+# decide when the human's --allow-full-access is needed;
+# scripts/validate-versions.sh runs the first two on each shipped lead's
+# launch line against lead.full_access. Python source like
 # _TRIFORGE_CLIS_PY: single-quoted, so no apostrophe inside.
 _LAUNCH_ACCESS_PY='
 import shlex
@@ -502,6 +522,23 @@ LAUNCH_FULL_ACCESS_NAMES = ("danger-full-access", "bypasspermissions", "dangerou
 # The binaries whose -p takes a profile name (codex exec 0.160.0: -p,
 # --profile <CONFIG_PROFILE>); for claude -p is --print and takes no value.
 LAUNCH_SHORT_PROFILE = ("codex",)
+# The words that make a launch line headless, by the binary that takes them:
+# claude -p / --print (one prompt, then exit), the codex exec subcommand. The
+# rest of the line stays as it is in a terminal: codex 0.160.0 takes -s, -c
+# and -m without exec, claude 2.1.291 --permission-mode, --model and --effort
+# without --print (their --help).
+LAUNCH_HEADLESS_WORDS = {"claude": ("--print", "-p"), "codex": ("exec",)}
+
+def launch_interactive(text):
+    words = shlex.split(text)
+    drop = LAUNCH_HEADLESS_WORDS.get(_launch_binary(words))
+    if drop is None:
+        return None
+    want = [w for w in words if w not in drop]
+    kept = " ".join(t for t in text.split() if t not in drop)
+    # the registry spelling when it still splits into the same words, else
+    # the words requoted
+    return kept if shlex.split(kept) == want else " ".join(shlex.quote(w) for w in want)
 
 def _launch_binary(words):
     for w in words:

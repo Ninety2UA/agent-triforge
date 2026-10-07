@@ -1179,7 +1179,7 @@ YOU: Review summary, check CHANGELOG, approve or request changes
 
 ### Prerequisites
 
-**Run `at-setup`** (`/at-setup` under a Claude Code lead, `$agent-triforge:at-setup` in a Codex prompt). It is the one guided path from a fresh install to a working roster: it checks that the core trio is live, walks you through each optional CLI (enroll it with a model you choose, or decline it), then offers role assignment. Keep the shipped defaults (recommended) or change any role's CLI, model and effort; `at-setup roles` jumps straight to that step. It is idempotent, so you can re-run it any time. The probes below are the checks it automates.
+**Run `at-setup`** (`/at-setup` under a Claude Code lead, `$agent-triforge:at-setup` in a Codex prompt), the one guided path from a fresh install to a working roster. It checks that the core trio is live and asks which CLI leads, Claude Code or Codex; for Codex it shows the trust entry, hook trust and the full-access launch line. Role assignment follows (keep the shipped defaults, recommended, or change any role's CLI, model and effort), then each optional CLI. Setup lists the instruction files in the project and above it, changes one only after you say yes, and shows which providers receive your code. It writes the lead last, because only the lead's own session can write roles and members. `at-setup lead` and `at-setup roles` jump straight to those steps. You can re-run it any time; it is idempotent. The probes below are the checks it automates.
 
 **Core trio (required)** — installed, authenticated, and answering a headless READY probe (floors per KTD-13):
 ```bash

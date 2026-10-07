@@ -61,6 +61,15 @@ trap _ss_on_exit EXIT
 # Code reads CLAUDE.md and AGENTS.md from. Inline, not the helper's
 # _lead_roster_path: it must work when the helper does not load.
 SS_START_DIR=$(pwd -P 2>/dev/null || pwd)
+# The instruction-file library (R9, R40) from this hook's own tree, sourced on
+# its own for the upgrade notices below, so they hold when the full loader
+# fails; found here, before the hook leaves the directory a relative path to
+# this file starts from.
+SS_INSTR_LIB=""
+SS_HOOK_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." 2>/dev/null && pwd -P) || SS_HOOK_ROOT=""
+if [ -n "$SS_HOOK_ROOT" ]; then
+  SS_INSTR_LIB="${SS_HOOK_ROOT}/scripts/lib/instructions.sh"
+fi
 SS_ANCHOR=$SS_START_DIR
 SS_D=$SS_START_DIR
 while [ -n "$SS_D" ]; do
@@ -440,11 +449,15 @@ fi
 # template for one. Claude Code reads AGENTS.md from 2.1.277, and only while no
 # CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working
 # directory or above it (the user-tier ~/.claude/CLAUDE.md does not count); a
-# CLAUDE.md that imports it (`@AGENTS.md`) loads it on every build. Three
+# CLAUDE.md that imports it (`@AGENTS.md`) loads it on every build. Four
 # states leave a Claude lead without it, and each gets one line:
 #   floor   `claude --version` below 2.1.277
 #   stale   ./CLAUDE.md or ./.claude/CLAUDE.md is a 3.x copy of the retired
 #           templates/CLAUDE.md that does not import AGENTS.md
+#   own     ./CLAUDE.md, ./.claude/CLAUDE.md or ./CLAUDE.local.md is the
+#           user's own file (no 3.x copy) and nothing in the chain imports
+#           the project's AGENTS.md: the line names at-setup, which offers
+#           the import and asks first
 #   above   a CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md in a directory
 #           above the project, with no import of the project's AGENTS.md
 #           anywhere in the chain
@@ -452,16 +465,14 @@ fi
 # session start until the state is fixed, and so — like the roster-pin and
 # timeout lines — carry no "session-start:" prefix (that prefix marks a step
 # that acted once; SELF-08 counts it for idempotence). Nothing here edits a
-# file: each line names the edit and leaves it to the user.
+# file: each line names the edit and leaves it to the user. The files are
+# found by instruction_files_detect (scripts/lib/instructions.sh, sourced
+# here on its own, so the notices hold when the full loader fails).
 CLAUDE_FLOOR="2.1.277"
 INSTRUCTION_NOTICES=""
 # These notices are about the directory the session started in (see the
 # anchor at the top); the hook goes back to the anchor after the tip below.
 cd "$SS_START_DIR" 2>/dev/null || true
-# The instruction files Claude Code reads in a directory, and this project's
-# physical path (/tmp and /var are symlinks on macOS).
-SS_INSTRUCTION_FILES="CLAUDE.md .claude/CLAUDE.md CLAUDE.local.md"
-SS_PROJECT=$(pwd -P 2>/dev/null || true)
 
 # _ss_xyz <text> — the first X.Y.Z in the text, or nothing.
 _ss_xyz() {
@@ -524,117 +535,58 @@ if command -v claude >/dev/null 2>&1; then
   fi
 fi
 
-# _ss_imports_agents <file> — 0 when the file imports THIS project's AGENTS.md.
-# An import is an `@AGENTS.md` / `@<path>/AGENTS.md` token at a line start or
-# after whitespace (a backticked mention is prose, not an import), and its path
-# is relative to the directory of the file that holds it (`~/` is the home
-# directory; an absolute path stands). So a bare `@AGENTS.md` in a parent's
-# CLAUDE.md, or in this project's .claude/CLAUDE.md, names some other
-# AGENTS.md and does not count: a token counts when its directory, resolved
-# physically, is the project's. A directory that does not exist counts for
-# nothing, and neither does a token that goes on after the name
-# (@AGENTS.md.bak, @AGENTS.md_old): only trailing punctuation or a #fragment may
-# follow it.
-SS_IMPORT_RE='^@(([^[:space:]]*/)?)AGENTS\.md([.,;:!?)]*|#[^[:space:]]*)$'
-_ss_imports_agents() {
-  local BASE WORDS WORD DIR
-  [ -f "$1" ] || return 1
-  [ -n "$SS_PROJECT" ] || return 1
-  case "$1" in
-    /*)  BASE="${1%/*}" ;;
-    */*) BASE="./${1%/*}" ;;
-    *)   BASE="." ;;
-  esac
-  WORDS=$(LC_ALL=C tr -s '[:space:]' '\n' 2>/dev/null < "$1" | LC_ALL=C grep -aE "$SS_IMPORT_RE" 2>/dev/null || true)
-  [ -n "$WORDS" ] || return 1
-  while IFS= read -r WORD; do
-    [[ "$WORD" =~ $SS_IMPORT_RE ]] || continue
-    DIR="${BASH_REMATCH[1]}"
-    case "$DIR" in
-      "~/"*)
-        case "${HOME:-}" in
-          /*) DIR="${HOME%/}/${DIR#??}" ;;
-          *)  continue ;;
-        esac
-        ;;
-      /*) ;;
-      *)  DIR="${BASE}/${DIR}" ;;
-    esac
-    DIR=$(cd "$DIR" 2>/dev/null && pwd -P 2>/dev/null) || continue
-    if [ "$DIR" = "$SS_PROJECT" ]; then return 0; fi
-  done <<SS_IMPORTS_EOF
-$WORDS
-SS_IMPORTS_EOF
-  return 1
-}
-
-# _ss_is_3x_template <file> — 0 when the file is a copy, customized or not, of
-# the 3.x templates/CLAUDE.md. Fingerprint, taken from the template at every
-# v3.* tag (v3.0.0 … v3.3.3, five distinct versions): its signature line plus
-# at least 3 of the 8 Triforge-specific section headings all of them carry, at
-# any heading level. A copy with sections removed, added or reworded still
-# matches; a CLAUDE.md that only shares section names, or only quotes the
-# signature, does not.
-_ss_is_3x_template() {
-  local HITS
-  [ -f "$1" ] || return 1
-  LC_ALL=C grep -qF 'It works with the **Agent Triforge** plugin' "$1" 2>/dev/null || return 1
-  HITS=$(LC_ALL=C grep -Ec '^#{1,6}[[:space:]]+(Multi-agent system|Four coordination modes|Shared file protocol|Execution phases|Assignment heuristic|Portable skills|Specialized agents|Agent invocation patterns)' "$1" 2>/dev/null || true)
-  [ "${HITS:-0}" -ge 3 ]
-}
-
-# _ss_import_line <name> <prefix> — set SS_IMPORT to the line that imports this
-# project's AGENTS.md from the instruction file <name> (CLAUDE.md,
-# CLAUDE.local.md or .claude/CLAUDE.md), <prefix> being the path from that
-# file's directory down to the project ("" in the project itself). An import
-# path is relative to the file that holds it, so a .claude/ file goes up one.
-_ss_import_line() {
-  case "$1" in
-    .claude/*) SS_IMPORT="@../${2}AGENTS.md" ;;
-    *)         SS_IMPORT="@${2}AGENTS.md" ;;
-  esac
-}
-
-# Stale template. Only the two locations the 3.x template was copied to are
-# fingerprinted (it was never a CLAUDE.local.md).
+# The instruction files: one read-only pass of instruction_files_detect over
+# the start directory, every directory above it up to / and the user tier, a
+# tab-separated line each (kind, where, state, path, the import line that
+# would load this project's AGENTS.md from that file). The user-tier
+# ~/.claude/CLAUDE.md is a "user" line, compared by identity, never "above".
+# One import of the project's AGENTS.md anywhere in the chain (the user-tier
+# file included: Claude Code always loads it) loads it, so it silences the
+# own and above lines; a 3.x copy without the import is named whatever else
+# imports it, since its Triforge text is stale. Only CLAUDE.md and
+# .claude/CLAUDE.md are fingerprinted (the 3.x template was never a
+# CLAUDE.local.md). A file that is not a readable regular file (a FIFO, a
+# dangling link) is "unreadable" and named in no line. A library that cannot
+# load or run (no python3) costs these lines and gets one WARNING instead.
 SS_CHAIN_IMPORTS=""
-for SS_FILE in $SS_INSTRUCTION_FILES; do
-  if _ss_imports_agents "$SS_FILE"; then SS_CHAIN_IMPORTS="yes"; fi
-done
-for SS_FILE in CLAUDE.md .claude/CLAUDE.md; do
-  if _ss_is_3x_template "$SS_FILE" && ! _ss_imports_agents "$SS_FILE"; then
-    _ss_import_line "$SS_FILE" ""
-    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}WARNING: ${SS_FILE} is a Triforge 3.x project template (a copy of the retired templates/CLAUDE.md). Triforge 4 ships AGENTS.md only, and Claude Code does not read AGENTS.md while this file exists without importing it. Add the line ${SS_IMPORT} to it, or replace its Triforge content with the pointer block in the plugin's templates/AGENTS.md — session start never edits this file."
-  fi
-done
-
-# Above the project: every parent up to /. $HOME/.claude/CLAUDE.md is the
-# user-tier file and is skipped (compared by identity, test -ef). One import
-# of the project's AGENTS.md anywhere in the chain, the project's own files
-# included, loads it, so it silences every line here.
+SS_OWN_NOTICES=""
 SS_ABOVE_NOTICES=""
-
-case "$SS_PROJECT" in
-  /*)
-    SS_DIR="$SS_PROJECT"
-    while [ -n "$SS_DIR" ] && [ "$SS_DIR" != "/" ]; do
-      SS_DIR="${SS_DIR%/*}"
-      if [ -z "$SS_DIR" ]; then SS_DIR="/"; fi
-      SS_REL="${SS_PROJECT#"${SS_DIR%/}"/}"
-      for SS_NAME in $SS_INSTRUCTION_FILES; do
-        SS_FILE="${SS_DIR%/}/${SS_NAME}"
-        [ -f "$SS_FILE" ] || continue
-        # the user-tier file, by identity (test -ef), whatever the spelling
-        if [ -n "${HOME:-}" ] && [ "$SS_FILE" -ef "${HOME%/}/.claude/CLAUDE.md" ]; then continue; fi
-        if _ss_imports_agents "$SS_FILE"; then SS_CHAIN_IMPORTS="yes"; fi
-        _ss_import_line "$SS_NAME" "${SS_REL}/"
-        SS_ABOVE_NOTICES="${SS_ABOVE_NOTICES}${SS_NL}WARNING: AGENTS.md is not loaded under a Claude lead: $(_ss_prose "$SS_FILE") sits above this project, and Claude Code reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working directory or above it. Add the line $(_ss_prose "$SS_IMPORT") to that file (an import path is relative to the file that holds it), or remove the file."
-      done
-    done
-    ;;
-esac
+SS_FOUND=""
+SS_FOUND_RC=0
+# shellcheck source=/dev/null
+if [ -f "$SS_INSTR_LIB" ] && source "$SS_INSTR_LIB" >/dev/null 2>&1; then
+  SS_FOUND=$(instruction_files_detect "$SS_START_DIR" 2>/dev/null) || SS_FOUND_RC=$?
+else
+  SS_FOUND_RC=69
+fi
+if [ "$SS_FOUND_RC" -ne 0 ]; then
+  INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}$(_ss_prose "WARNING: the instruction-file check did not finish (instruction_files_detect in ${SS_INSTR_LIB}, rc ${SS_FOUND_RC}; it needs python3), so the CLAUDE.md and 3.x template notices may be missing this session.")"
+fi
+while IFS=$'\t' read -r SS_KIND SS_WHERE SS_STATE SS_FILE SS_IMPORT; do
+  case "$SS_KIND" in
+    CLAUDE.md|.claude/CLAUDE.md|CLAUDE.local.md) ;;
+    *) continue ;;
+  esac
+  case ",${SS_STATE}," in
+    *,unreadable,*) continue ;;
+    *,imports,*) SS_CHAIN_IMPORTS="yes"; continue ;;
+  esac
+  case "${SS_WHERE},${SS_STATE}," in
+    project,*,stale-3x-*)
+      INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}WARNING: ${SS_KIND} is a Triforge 3.x project template (a copy of the retired templates/CLAUDE.md). Triforge 4 ships AGENTS.md only, and Claude Code does not read AGENTS.md while this file exists without importing it. Add the line $(_ss_prose "$SS_IMPORT") to it, or replace its Triforge content with the pointer block in the plugin's templates/AGENTS.md — session start never edits this file."
+      ;;
+    project,*,user-owned,*)
+      SS_OWN_NOTICES="${SS_OWN_NOTICES}${SS_NL}WARNING: ${SS_KIND} in this project does not import AGENTS.md, so Claude Code reads it and skips AGENTS.md, Triforge's only instruction file. Run /at-setup to add the line $(_ss_prose "$SS_IMPORT") to it (setup asks first), or add it yourself — session start never edits this file."
+      ;;
+    above,*)
+      SS_ABOVE_NOTICES="${SS_ABOVE_NOTICES}${SS_NL}WARNING: AGENTS.md is not loaded under a Claude lead: $(_ss_prose "$SS_FILE") sits above this project, and Claude Code reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working directory or above it. Add the line $(_ss_prose "$SS_IMPORT") to that file (an import path is relative to the file that holds it), or remove the file."
+      ;;
+  esac
+done <<SS_FOUND_EOF
+${SS_FOUND}
+SS_FOUND_EOF
 if [ -z "$SS_CHAIN_IMPORTS" ]; then
-  INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_ABOVE_NOTICES}"
+  INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_OWN_NOTICES}${SS_ABOVE_NOTICES}"
 fi
 
 # Pointer-block tip: a project with no root AGENTS.md carries nothing that

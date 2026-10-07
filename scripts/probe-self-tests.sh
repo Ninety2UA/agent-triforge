@@ -2150,7 +2150,7 @@ R=0; roster_write_lead codex 2>/dev/null || R=$?; echo "lead=$R"' s21 "$REPO_ROO
 _S21_OL="$_S21_OL
 target=$([ "$(cksum "$_S21/ol-out/roster.toml")" = "$_S21_SUMO" ] && echo intact || echo changed):entries=$(ls -A "$_S21/ol-out" | tr '\n' ' ')
 hook=$(printf '%s\n' "$_S21_HOOK" | grep -c 'hook crashed\|^{' || true)
-enrollnote=$(printf '%s\n' "$_S21_HOOK" | grep -c '^WARNING: [a-z-]* was detected but not enrolled (rc 6): roster_write_member: REFUSED ops is a symlink' || true)"
+enrollnote=$(printf '%s\n' "$_S21_HOOK" | grep -c '^WARNING: [a-z-]* was detected but not enrolled (rc 6): roster_write_member: REFUSED [^ ]*/proj-ol/ops is a symlink' || true)"
 _S21_FAIL="${_S21_FAIL}$(_self_expect opslink "$_S21_OL" '^member=6$' '^role=6$' '^lead=6$' '^target=intact:entries=roster\.toml $' '^hook=0$' '^enrollnote=[1-9]$')"
 # negative control: without the bootstrap line no ops/ appears
 _S21_RC=$(_s21_run neg /bin/bash "$_S21/proj-neg" "$REPO_ROOT/skills/at-setup" "$_S21/setup-neg.sh")
@@ -3923,12 +3923,14 @@ rm -rf "$_S12"
 #            writer -> lease_reclaim refuses the prune, the worktree kept; the
 #            same edited into ops/leases.toml by hand -> 44 from the integrity
 #            check lease_reclaim now runs first, the worktree kept
-#   caps     a codex lead with hooks on in a stub `codex features list`, the
-#            project trusted in a throwaway ~/.codex/config.toml and a
-#            PostToolUse hook in .codex/hooks.json -> wait_budget_s 900,
-#            hooks_trusted.PostToolUse present, SessionStart absent, one NOTE
-#            naming what is absent, none on the second call; a claude lead ->
-#            every plugin hook event present, no NOTE
+#   caps     a codex lead with hooks on in a stub `codex features list` and a
+#            stub app-server whose hooks/list reports the plugin's two
+#            PostToolUse hooks trusted (their trusted_hash in a throwaway
+#            ~/.codex/config.toml), its SessionStart hook untrusted and its
+#            PreCompact hook modified -> wait_budget_s 900,
+#            hooks_trusted.PostToolUse present, SessionStart and PreCompact
+#            absent, one NOTE naming what is absent, none on the second call;
+#            a claude lead -> every plugin hook event present, no NOTE
 _S13="${WORK}/self13"
 _S13_FAIL=""
 rm -rf "$_S13"
@@ -4226,11 +4228,30 @@ _S13_FAIL="${_S13_FAIL}$(_self_expect forged "$O" '^forged-row:rc=1:victim=kept:
 # caps: the lead's capabilities, a missing one reported once
 _s13_repo caps '[lead]\ncli = "codex"\n'
 _s13_repo capsclaude
-mkdir -p "$_S13/caps-bin" "$_S13/caps-home/.codex" "$_S13/caps/.codex"
-printf '#!/bin/sh\n# probe stub (SELF-13): codex with the hooks feature on\nif [ "${1:-}" = features ]; then printf "hooks                                stable             true\\n"; else echo "0.0.0-probe-stub"; fi\n' > "$_S13/caps-bin/codex"
+mkdir -p "$_S13/caps-bin" "$_S13/caps-home/.codex"
+cat > "$_S13/caps-bin/codex" <<'S13_CAPS_CODEX_EOF'
+#!/bin/sh
+# probe stub (SELF-13): codex with the hooks feature on; app-server answers hooks/list with the
+# plugin's hooks: SessionStart untrusted, both PostToolUse hooks trusted, PreCompact modified
+case "${1:-}" in
+  features) printf 'hooks                                stable             true\n' ;;
+  app-server)
+    while IFS= read -r l; do
+      case "$l" in
+        *'"hooks/list"'*)
+          printf '{"id": 2, "result": {"data": [{"cwd": "probe", "hooks": [%s, %s, %s, %s]}]}}\n' \
+            '{"source": "plugin", "pluginId": "agent-triforge@tf", "eventName": "sessionStart", "key": "s1", "currentHash": "hs1", "trustStatus": "untrusted"}' \
+            '{"source": "plugin", "pluginId": "agent-triforge@tf", "eventName": "postToolUse", "key": "p1", "currentHash": "hp1", "trustStatus": "trusted"}' \
+            '{"source": "plugin", "pluginId": "agent-triforge@tf", "eventName": "postToolUse", "key": "p2", "currentHash": "hp2", "trustStatus": "trusted"}' \
+            '{"source": "plugin", "pluginId": "agent-triforge@tf", "eventName": "preCompact", "key": "c1", "currentHash": "hc1", "trustStatus": "modified"}'
+          exit 0 ;;
+      esac
+    done ;;
+  *) echo "0.0.0-probe-stub" ;;
+esac
+S13_CAPS_CODEX_EOF
 chmod +x "$_S13/caps-bin/codex"
-printf '[projects."%s"]\ntrust_level = "trusted"\n' "$(cd "$_S13/caps" && pwd -P)" > "$_S13/caps-home/.codex/config.toml"
-printf '{"hooks": {"PostToolUse": [{"matcher": ".*", "hooks": [{"type": "command", "command": "true"}]}]}}\n' > "$_S13/caps/.codex/hooks.json"
+printf '[hooks.state."p1"]\ntrusted_hash = "hp1"\n\n[hooks.state."p2"]\ntrusted_hash = "hp2"\n\n[hooks.state."c1"]\ntrusted_hash = "hc1-before-an-edit"\n' > "$_S13/caps-home/.codex/config.toml"
 _S13_CAPS_STEP='
 export TRIFORGE_LEAD_PID=$$
 for N in 1 2; do
@@ -4242,12 +4263,12 @@ O=$(_s13_lead caps "export HOME=\"$_S13/caps-home\" PATH=\"$_S13/caps-bin:\$PATH
 O="${O}
 $(_s13_lead capsclaude "$_S13_CAPS_STEP")"
 _S13_FAIL="${_S13_FAIL}$(_self_expect caps "$O" '^caps-1:rc=0:caps=\[(.*;)?wait_budget_s=900;' '^caps-1:.*;hooks_trusted\.PostToolUse=present;' \
-  '^caps-1:.*;hooks_trusted\.SessionStart=absent;' '^caps-1:.*;goal_gate=;' '^caps-1:.*:notes=1:named=1$' '^caps-2:rc=0:.*;hooks_trusted\.PostToolUse=present;.*:notes=0:named=0$' \
+  '^caps-1:.*;hooks_trusted\.SessionStart=absent;' '^caps-1:.*;hooks_trusted\.PreCompact=absent;' '^caps-1:.*;goal_gate=;' '^caps-1:.*:notes=1:named=1$' '^caps-2:rc=0:.*;hooks_trusted\.PostToolUse=present;.*:notes=0:named=0$' \
   '^capsclaude-1:rc=0:caps=\[(.*;)?wait_budget_s=600;' '^capsclaude-1:.*;hooks_trusted\.SessionStart=present;hooks_trusted\.PostToolUse=present;hooks_trusted\.PreCompact=present;\]:notes=0:named=0$')"
 
 _S13_CAP="[lead] table + lead host check: load validation (exit 5), absent = claude, no-parser exit 3, the non-lead CLI refused naming at-setup lead, both leads' markers refused as ambiguous, a terminal runs as the user (via=tty) and so do the sweeps it starts, no TTY and no markers refused unless the SELF seam names the lead, the worker marker first, roster_write_lead needing a stated origin and refusing open leases, --force handing building leases over without spending requeue, reclaim under the other lead and never under a forged root, capabilities with an absent one reported once (KTD1, R1, R38, R40, R44)"
 if [ -z "$_S13_FAIL" ]; then
-  row "SELF-13" "claude" "$_S13_CAP" "PASS" "load: cursor / non-table / unknown key / bad effort -> resolve_lead and resolve_role 5 naming it; absent -> claude (default); claude + model + effort kept; codex alone -> gpt-6-astra xhigh; parser: tomllib and tomli hidden -> resolve_lead and resolve_lead_caps 3 with the parser message, never absent, lease_create 45 naming it; host: [lead] codex under CLAUDECODE -> lease_merge / lease_create / roster_write_role 45, one line naming at-setup lead, CLAUDE_CODE_ENTRYPOINT the same; CODEX_THREAD_ID -> runs, lead_via=lead-session; both families -> ambiguous, 45 naming it; no [lead] under CLAUDECODE -> runs; ambig: both families + a pty -> lease_create and roster_write_lead 45, lease_approve refused, each naming the ambiguity; tty: pty on stdin, no markers -> runs, lead_via=tty; ttysweep: from a pty, no markers -> lease_heartbeat_check collects a finished builder, lease_wait 0 on one, roster_write_lead --force adopts a building lease, no refusal; notty: 45 naming the markers, either seam variable alone 45, both (claude) -> lead_via=test, both naming codex -> 45, a cached host-check pass still records this shell's lead_via; worker: marker beside markers + seam (+ pty) -> 45 by the marker, nothing carved or written; write: cursor 2, bad effort 2, no args 64, codex -> one [lead] block, roles + comments kept, claude replaces it in place, --force with no ledger runs; origin: roster_write_lead with no origin -> 45 naming via=none, roster unchanged; from Claude Code's session, Codex's, the seam and a pty -> written; open: t1 leased -> refused naming t1 and --force, roster byte-identical, same lead new effort runs; force: from the old lead refused before writing, from the new lead both building leases adopted (reason=lead-exit, lead_exit_at, requeue 0), released -> review, requeue 0; reclaim: created under TMPDIR=A as claude, reclaimed under TMPDIR=B as codex -> pruned, no identity mismatch; forged: a planted root in a lead-written row -> prune refused, a hand-edited row -> 44, both worktrees kept; caps: codex 900 s, PostToolUse present, SessionStart absent, one NOTE then none; claude 600 s, every plugin event present, no NOTE" "static"
+  row "SELF-13" "claude" "$_S13_CAP" "PASS" "load: cursor / non-table / unknown key / bad effort -> resolve_lead and resolve_role 5 naming it; absent -> claude (default); claude + model + effort kept; codex alone -> gpt-6-astra xhigh; parser: tomllib and tomli hidden -> resolve_lead and resolve_lead_caps 3 with the parser message, never absent, lease_create 45 naming it; host: [lead] codex under CLAUDECODE -> lease_merge / lease_create / roster_write_role 45, one line naming at-setup lead, CLAUDE_CODE_ENTRYPOINT the same; CODEX_THREAD_ID -> runs, lead_via=lead-session; both families -> ambiguous, 45 naming it; no [lead] under CLAUDECODE -> runs; ambig: both families + a pty -> lease_create and roster_write_lead 45, lease_approve refused, each naming the ambiguity; tty: pty on stdin, no markers -> runs, lead_via=tty; ttysweep: from a pty, no markers -> lease_heartbeat_check collects a finished builder, lease_wait 0 on one, roster_write_lead --force adopts a building lease, no refusal; notty: 45 naming the markers, either seam variable alone 45, both (claude) -> lead_via=test, both naming codex -> 45, a cached host-check pass still records this shell's lead_via; worker: marker beside markers + seam (+ pty) -> 45 by the marker, nothing carved or written; write: cursor 2, bad effort 2, no args 64, codex -> one [lead] block, roles + comments kept, claude replaces it in place, --force with no ledger runs; origin: roster_write_lead with no origin -> 45 naming via=none, roster unchanged; from Claude Code's session, Codex's, the seam and a pty -> written; open: t1 leased -> refused naming t1 and --force, roster byte-identical, same lead new effort runs; force: from the old lead refused before writing, from the new lead both building leases adopted (reason=lead-exit, lead_exit_at, requeue 0), released -> review, requeue 0; reclaim: created under TMPDIR=A as claude, reclaimed under TMPDIR=B as codex -> pruned, no identity mismatch; forged: a planted root in a lead-written row -> prune refused, a hand-edited row -> 44, both worktrees kept; caps: codex 900 s, PostToolUse present (hooks/list trusted, trusted_hash matching), SessionStart (untrusted) and PreCompact (modified) absent, one NOTE then none; claude 600 s, every plugin event present, no NOTE" "static"
 else
   row "SELF-13" "claude" "$_S13_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S13_FAIL"):$(printf '%s' "$_S13_FAIL" | cut -c1-900)" "static"
 fi
@@ -9424,3 +9445,1020 @@ else
   row "SELF-23" "claude" "$_S23_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S23_FAIL"):$(printf '%s' "$_S23_FAIL" | cut -c1-700)" "static"
 fi
 rm -rf "$_S23"
+
+# SELF-16 (U15 — R7, R8, R9, R24, R39, R40, R43, R50): at-setup's primitives
+# and instruction-file handling, without a live CLI and with a throwaway HOME.
+# Each section adds its cases, appends a short "<section>: <what held>" note to
+# _S16_EV, and appends "<case>(<why>)" to _S16_FAIL on a mismatch. Expected
+# values are literals. A section that ran no case leaves no note, and the row
+# fails on that: an empty section is no evidence.
+_S16="${WORK}/self16"
+_S16_FAIL=""
+_S16_EV=""
+mkdir -p "$_S16"
+# --- SELF-16 section A: roster and registry helpers (U15) ---
+# Section A (R7, R8, R24, R43): each case sources the library in a fixture
+# repo with a throwaway HOME, the stub dir first on PATH, a TMPDIR of its own,
+# no host markers and the SELF seam naming the claude lead:
+#   path     from a subdirectory, roster_write_role and roster_write_member
+#            write the checkout-top roster and resolve_role, roster_role_entry,
+#            roster_has_member and _roster_member_field read it; no ops/ in
+#            the subdirectory
+#   egress   roster_egress_disclosure: the trio alone -> Anthropic, Google,
+#            OpenAI and three HOME lines; + grok -> xAI; + cursor + grok (kimi
+#            declined) -> xAI on one line naming both, no Moonshot, five HOME
+#            lines; an optional member a role chain names with no table ->
+#            counted
+#   trust    codex_trust_status: no config, no entry -> absent; trusted by the
+#            path as given, by its realpath only (called through a symlink);
+#            untrusted; CODEX_HOME relocated (its config read, HOME's not);
+#            no argument from a subdirectory -> the checkout top; an
+#            unparsable config -> unknown rc 80; every config byte-identical
+#   hooks    _lead_hooks_detect codex with a stub app-server answering
+#            hooks/list: every plugin hook trusted with a matching
+#            hooks.state trusted_hash -> present; modified, untrusted, a
+#            stale trusted_hash, only another plugin's hook -> absent naming
+#            why; the call failing, codex missing, the feature off -> absent
+#   launch   lead_launch_line: claude interactive, codex interactive (full
+#            access, model, effort; a pinned [lead]), headless unchanged
+#            from coordinate.sh's line; cursor 5, bad mode 64;
+#            confinement_statements byte for byte
+#   auth     roster_member_auth devin signed out: under CODEX_SANDBOX or
+#            CODEX_SANDBOX_NETWORK_DISABLED -> unverified naming the
+#            relaunch line, rc 80, no cache file, status unverified; neither
+#            -> auth-failed, cached, status auth-failed
+#   devin    devin_model_choices: a catalog (banner first, a duplicate, an
+#            unsafe id, a variant with no id) -> the ids once, in order; an
+#            empty catalog or a failing call -> rc 69, nothing printed; the
+#            shipped default swe-1-6-slow; a member model written with
+#            roster_write_member reaches a Devin reviewer the role step wrote
+#            with an empty model, and follows a later member model change
+_S16A="$_S16/a"
+mkdir -p "$_S16A/home" "$_S16A/bin" "$_S16A/nc-bin"
+cat > "$_S16A/bin/devin" <<'S16A_DEVIN_EOF'
+#!/bin/sh
+# probe stub (SELF-16 A): devin signed out; models list prints $S16_DEVIN_MODELS (unset: fails)
+case "${1:-} ${2:-}" in
+  "auth status") echo "Not logged in." ;;
+  "models list") if [ -n "${S16_DEVIN_MODELS:-}" ]; then cat "$S16_DEVIN_MODELS"; else echo "Error: not logged in" >&2; exit 1; fi ;;
+  *) echo "3000.11.3-probe-stub" ;;
+esac
+S16A_DEVIN_EOF
+cat > "$_S16A/bin/codex" <<'S16A_CODEX_EOF'
+#!/bin/sh
+# probe stub (SELF-16 A): codex with the hooks feature $S16_FEAT (default true); app-server
+# answers hooks/list with the hook array in $S16_HOOKS, or exits at once with S16_APPFAIL set
+case "${1:-}" in
+  features) printf 'hooks                                stable             %s\n' "${S16_FEAT:-true}" ;;
+  app-server)
+    if [ -n "${S16_APPFAIL:-}" ]; then exit 1; fi
+    while IFS= read -r l; do
+      case "$l" in *'"hooks/list"'*) printf '{"id": 2, "result": {"data": [{"cwd": "probe", "hooks": %s}]}}\n' "$(cat "$S16_HOOKS")"; exit 0 ;; esac
+    done ;;
+  *) echo "0.0.0-probe-stub" ;;
+esac
+S16A_CODEX_EOF
+chmod +x "$_S16A/bin/devin" "$_S16A/bin/codex"
+ln -s "$(command -v python3)" "$_S16A/nc-bin/python3" 2>/dev/null || true
+# _s16a <dir> <script> — <script> with the library sourced, from <dir>
+_s16a() {
+  ( cd "$1" && export HOME="$_S16A/home" PATH="$_S16A/bin:${_SELF_STUBS}:$PATH" GIT_CONFIG_NOSYSTEM=1 \
+        TMPDIR="$(mktemp -d "$_S16A/tmp.XXXXXX")" \
+      && unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID CODEX_HOME CODEX_SANDBOX CODEX_SANDBOX_NETWORK_DISABLED \
+           XAI_API_KEY TRIFORGE_LEASE_WORKER S16_FEAT S16_APPFAIL S16_HOOKS S16_DEVIN_MODELS \
+      && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && set +e && eval "$2" ) < /dev/null 2>&1 || true
+}
+
+# path
+_self_repo "$_S16A/path" "$_S16A/home" sprint/s16a "# probe roster (SELF-16 A)\n"
+mkdir -p "$_S16A/path/sub/dir"
+O=$(_s16a "$_S16A/path/sub/dir" '
+R=0; roster_write_role tester claude "" high >/dev/null 2>&1 || R=$?
+R2=0; roster_write_member opencode false "" >/dev/null 2>&1 || R2=$?
+echo "path:write=$R/$R2:resolve=$(resolve_role tester 2>/dev/null | tr "\t" "|"):entry=$(roster_role_entry tester 2>/dev/null | tr "\t" "|"):has=$(roster_has_member opencode && echo yes || echo no):field=$(_roster_member_field opencode enabled 2>/dev/null)"
+')
+O="$O
+top=$(grep -c '^\[roles\.tester\]' "$_S16A/path/ops/roster.toml" || true):$(grep -c '^\[members\.opencode\]' "$_S16A/path/ops/roster.toml" || true):sub=$(if [ -e "$_S16A/path/sub/dir/ops" ] || [ -e "$_S16A/path/sub/ops" ]; then echo made; else echo none; fi)"
+_S16_FAIL="${_S16_FAIL}$(_self_expect A-path "$O" '^path:write=0/0:resolve=claude\|\|high:entry=claude\|\|high\|codex:has=yes:field=false$' '^top=1:1:sub=none$')"
+
+# egress
+_self_repo "$_S16A/eg-trio" "$_S16A/home" sprint/s16a "# probe roster (SELF-16 A)\n"
+_self_repo "$_S16A/eg-grok" "$_S16A/home" sprint/s16a '[members.grok]\nenabled = true\nmodel = "grok-4.7"\n\n'
+_self_repo "$_S16A/eg-both" "$_S16A/home" sprint/s16a '[members.cursor]\nenabled = true\nmodel = "cursor-grok-4.6-xhigh"\n\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n\n[members.kimi]\nenabled = false\nmodel = ""\n\n'
+_self_repo "$_S16A/eg-chain" "$_S16A/home" sprint/s16a '[roles.analyst]\ncli = "opencode"\nfallbacks = ["claude"]\n\n'
+_S16A_EG='
+R=0; E=$(roster_egress_disclosure 2>&1) || R=$?
+printf "%s\n" "$E" | sed "s#^#${C}:#"
+echo "${C}:counts=rc $R egress $(printf "%s\n" "$E" | grep -c "^egress: " || true) home $(printf "%s\n" "$E" | grep -c "^home: " || true) xai $(printf "%s\n" "$E" | grep -c "^egress: .*xAI" || true)"
+'
+O=""
+for _s16_c in eg-trio eg-grok eg-both eg-chain; do
+  O="${O}$(_s16a "$_S16A/$_s16_c" "C=$_s16_c; $_S16A_EG")
+"
+done
+_S16_FAIL="${_S16_FAIL}$(_self_expect A-egress "$O" \
+  '^eg-trio:egress: Claude Code sends the prompts and code to Anthropic$' '^eg-trio:egress: Antigravity CLI sends the prompts and code to Google$' \
+  '^eg-trio:egress: Codex CLI sends the prompts and code to OpenAI$' \
+  '^eg-trio:home: Claude Code runs as you, so it can read the credential files under .*/a/home and send them to Anthropic$' \
+  '^eg-trio:home: Codex CLI runs as you, so it can read the credential files under .*/a/home and send them to OpenAI$' \
+  '^eg-trio:counts=rc 0 egress 3 home 3 xai 0$' \
+  '^eg-grok:egress: Grok Build sends the prompts and code to xAI$' '^eg-grok:home: Grok Build runs as you, .* and send them to xAI$' \
+  '^eg-grok:counts=rc 0 egress 4 home 4 xai 1$' \
+  '^eg-both:egress: Cursor CLI \(Grok, via Cursor\) and Grok Build send the prompts and code to xAI$' \
+  '^eg-both:home: Cursor CLI runs as you, .* and send them to xAI \(Grok, via Cursor\)$' '^eg-both:home: Grok Build runs as you, .* and send them to xAI$' \
+  '^eg-both:counts=rc 0 egress 4 home 5 xai 1$' \
+  '^eg-chain:egress: OpenCode sends the prompts and code to Zhipu / Z\.ai, through OpenRouter \(which also sees the traffic\)$' \
+  '^eg-chain:counts=rc 0 egress 4 home 4 xai 0$')"
+if printf '%s\n' "$O" | grep -q '^eg-both:.*\(Moonshot\|Kimi\)'; then _S16_FAIL="$_S16_FAIL A-egress(a-declined-member-listed)"; fi
+
+# trust
+mkdir -p "$_S16A/tr/proj" "$_S16A/tr/h-none" "$_S16A/tr/h-other/.codex" "$_S16A/tr/h-path/.codex" "$_S16A/tr/h-untr/.codex" "$_S16A/tr/h-bad/.codex" \
+  "$_S16A/tr/cx-trust" "$_S16A/tr/cx-empty" "$_S16A/tr/h-top/.codex"
+_S16A_D=$(cd "$_S16A/tr/proj" && pwd -P)
+# The link keeps the work dir's own (unresolved) prefix, with repeated slashes
+# squeezed: the harness's work dir sits under a TMPDIR that ends in "/", and
+# codex_trust_status prints the path as given in its normalized form.
+_S16A_L=$(printf '%s' "$_S16A/tr/link" | tr -s /)
+ln -s "$_S16A_D" "$_S16A_L" 2>/dev/null || true
+_S16A_TOP=$(cd "$_S16A/path" && pwd -P)
+printf '[projects."/elsewhere/project"]\ntrust_level = "trusted"\n' > "$_S16A/tr/h-other/.codex/config.toml"
+printf '[model_providers.x]\nname = "x"\n\n[projects."%s"]\ntrust_level = "trusted"\n' "$_S16A_D" > "$_S16A/tr/h-path/.codex/config.toml"
+printf '[projects."%s"]\ntrust_level = "untrusted"\n' "$_S16A_D" > "$_S16A/tr/h-untr/.codex/config.toml"
+printf '[projects."%s"\ntrust_level = \n' "$_S16A_D" > "$_S16A/tr/h-bad/.codex/config.toml"
+cp "$_S16A/tr/h-path/.codex/config.toml" "$_S16A/tr/cx-trust/config.toml"
+printf '[projects."%s"]\ntrust_level = "trusted"\n' "$_S16A_TOP" > "$_S16A/tr/h-top/.codex/config.toml"
+_S16A_SUM=$(cat "$_S16A"/tr/*/.codex/config.toml "$_S16A/tr/cx-trust/config.toml" | cksum)
+# _s16a_trust <label> <home> <codex-home or -> <args...>: one call, its rc and output on one line, the
+# project path shown as <D>, the symlink as <L>, the checkout top as <TOP>
+_S16A_TR='
+H=$1; X=$2; shift 2
+export HOME="$_S16A/tr/$H"
+if [ "$X" != - ]; then export CODEX_HOME="$_S16A/tr/$X"; fi
+R=0; T=$(codex_trust_status "$@" 2>&1) || R=$?
+echo "${C}:rc=$R:$(printf "%s\n" "$T" | tr "\n" "|" | sed "s#${_S16A_D}#<D>#g; s#${_S16A_L}#<L>#g; s#${_S16A_TOP}#<TOP>#g")"
+'
+_s16a_trust() {
+  local C=$1
+  shift
+  _s16a "$_S16A/path" "C=$C; set -- $(printf '%q ' "$@"); $_S16A_TR"
+}
+O="$(_s16a_trust tr-absent h-none - "$_S16A_D")
+$(_s16a_trust tr-noentry h-other - "$_S16A_D")
+$(_s16a_trust tr-path h-path - "$_S16A_D")
+$(_s16a_trust tr-real h-path - "$_S16A_L")
+$(_s16a_trust tr-untrusted h-untr - "$_S16A_D")
+$(_s16a_trust tr-codexhome h-none cx-trust "$_S16A_D")
+$(_s16a_trust tr-codexhome-empty h-path cx-empty "$_S16A_D")
+$(_s16a_trust tr-bad h-bad - "$_S16A_D")
+$(_s16a "$_S16A/path/sub/dir" "C=tr-default; set -- h-top -; $_S16A_TR")
+tr-bytes:$(if [ "$(cat "$_S16A"/tr/*/.codex/config.toml "$_S16A/tr/cx-trust/config.toml" | cksum)" = "$_S16A_SUM" ]; then echo same; else echo CHANGED; fi)"
+_S16_FAIL="${_S16_FAIL}$(_self_expect A-trust "$O" \
+  '^tr-absent:rc=0:absent\|match: none \(no .*/tr/h-none/\.codex/config\.toml\)\|\[projects\."<D>"\]\|trust_level = "trusted"\|$' \
+  '^tr-noentry:rc=0:absent\|match: none \(no entry for <D> in ' \
+  '^tr-path:rc=0:trusted\|match: path <D>\|\[projects\."<D>"\]\|trust_level = "trusted"\|$' \
+  '^tr-real:rc=0:trusted\|match: realpath <D>\|\[projects\."<L>"\]\|trust_level = "trusted"\|$' \
+  '^tr-untrusted:rc=0:untrusted\|match: path <D>\|' \
+  '^tr-codexhome:rc=0:trusted\|match: path <D>\|' '^tr-codexhome-empty:rc=0:absent\|match: none \(no .*/tr/cx-empty/config\.toml\)\|' \
+  '^tr-bad:rc=80:unknown\|match: none \(.*/tr/h-bad/\.codex/config\.toml could not be read: ' \
+  '^tr-default:rc=0:trusted\|match: path <TOP>\|\[projects\."<TOP>"\]\|' '^tr-bytes:same$')"
+
+# hooks: the plugin's own hooks as hooks/list reports them (pluginId <name>@<marketplace>)
+_s16a_hooks() { # _s16a_hooks <file> <trustStatus of k1 (sessionStart), k2 and k3 (postToolUse), k4 (preCompact)> [<plugin name>]
+  local P=${6:-agent-triforge}
+  { printf '[{"source": "plugin", "pluginId": "%s@tf", "eventName": "sessionStart", "key": "k1", "currentHash": "h1", "trustStatus": "%s"}, ' "$P" "$2"
+    printf '{"source": "plugin", "pluginId": "%s@tf", "eventName": "postToolUse", "key": "k2", "currentHash": "h2", "trustStatus": "%s"}, ' "$P" "$3"
+    printf '{"source": "plugin", "pluginId": "%s@tf", "eventName": "postToolUse", "key": "k3", "currentHash": "h3", "trustStatus": "%s"}, ' "$P" "$4"
+    printf '{"source": "plugin", "pluginId": "%s@tf", "eventName": "preCompact", "key": "k4", "currentHash": "h4", "trustStatus": "%s"}]\n' "$P" "$5"
+  } > "$1"
+}
+_s16a_hooks "$_S16A/hk-trusted.json" trusted trusted trusted trusted
+_s16a_hooks "$_S16A/hk-modified.json" trusted trusted modified trusted
+_s16a_hooks "$_S16A/hk-untrusted.json" untrusted trusted trusted trusted
+_s16a_hooks "$_S16A/hk-foreign.json" trusted trusted trusted trusted other-plugin
+python3 - "$_S16A/hk-trusted.json" "$_S16A/hk-foreign.json" "$_S16A/hk-mixed.json" <<'S16A_MIX_PY' || true
+import json, sys
+mine = [h for h in json.load(open(sys.argv[1])) if h["eventName"] != "postToolUse"]
+other = [h for h in json.load(open(sys.argv[2])) if h["eventName"] == "postToolUse"]
+json.dump(mine + other, open(sys.argv[3], "w"))
+S16A_MIX_PY
+mkdir -p "$_S16A/hk-home/.codex" "$_S16A/hk-stale/.codex"
+printf '[hooks.state."k1"]\ntrusted_hash = "h1"\n\n[hooks.state."k2"]\ntrusted_hash = "h2"\n\n[hooks.state."k3"]\ntrusted_hash = "h3"\n\n[hooks.state."k4"]\ntrusted_hash = "h4"\n' > "$_S16A/hk-home/.codex/config.toml"
+sed 's/"h4"/"h4-before-an-edit"/' "$_S16A/hk-home/.codex/config.toml" > "$_S16A/hk-stale/.codex/config.toml"
+# <label> <hooks json> <home> [env...] -> "<label>:<event>=<present|absent>:<why>" per line
+_S16A_HK='
+export HOME="$_S16A/$H" S16_HOOKS="$_S16A/$J"
+_lead_hooks_detect codex 2>&1 | awk -F "\t" -v c="$C" "{ print c \":\" \$1 \"=\" \$2 \":\" \$3 }"
+'
+O="$(_s16a "$_S16A/path" "C=hk-trusted H=hk-home J=hk-trusted.json; $_S16A_HK")
+$(_s16a "$_S16A/path" "C=hk-modified H=hk-home J=hk-modified.json; $_S16A_HK")
+$(_s16a "$_S16A/path" "C=hk-untrusted H=hk-home J=hk-untrusted.json; $_S16A_HK")
+$(_s16a "$_S16A/path" "C=hk-stale H=hk-stale J=hk-trusted.json; $_S16A_HK")
+$(_s16a "$_S16A/path" "C=hk-foreign H=hk-home J=hk-mixed.json; $_S16A_HK")
+$(_s16a "$_S16A/path" "C=hk-appfail H=hk-home J=hk-trusted.json; export S16_APPFAIL=1; $_S16A_HK")
+$(_s16a "$_S16A/path" "C=hk-featoff H=hk-home J=hk-trusted.json; export S16_FEAT=false; $_S16A_HK")
+$(_s16a "$_S16A/path" "C=hk-nocodex H=hk-home J=hk-trusted.json; export PATH=\"$_S16A/nc-bin:/usr/bin:/bin\"; $_S16A_HK")"
+_S16_FAIL="${_S16_FAIL}$(_self_expect A-hooks "$O" \
+  '^hk-trusted:hooks_trusted\.SessionStart=present:detected$' '^hk-trusted:hooks_trusted\.PostToolUse=present:detected$' '^hk-trusted:hooks_trusted\.PreCompact=present:detected$' \
+  '^hk-modified:hooks_trusted\.SessionStart=present:' '^hk-modified:hooks_trusted\.PostToolUse=absent:the agent-triforge PostToolUse hook k3 is modified ' '^hk-modified:hooks_trusted\.PreCompact=present:' \
+  '^hk-untrusted:hooks_trusted\.SessionStart=absent:the agent-triforge SessionStart hook k1 is untrusted ' '^hk-untrusted:hooks_trusted\.PostToolUse=present:' \
+  '^hk-stale:hooks_trusted\.PreCompact=absent:the agent-triforge PreCompact hook k4 has no hooks\.state trusted_hash equal to its current hash in .*/hk-stale/\.codex/config\.toml$' \
+  '^hk-stale:hooks_trusted\.SessionStart=present:' \
+  '^hk-foreign:hooks_trusted\.PostToolUse=absent:codex hooks/list lists no agent-triforge PostToolUse hook ' '^hk-foreign:hooks_trusted\.SessionStart=present:' \
+  '^hk-appfail:hooks_trusted\.SessionStart=absent:the codex app-server hooks/list call failed \(rc 69: codex app-server exited without a hooks/list answer\), so hook trust is unknown$' \
+  '^hk-appfail:hooks_trusted\.PreCompact=absent:the codex app-server hooks/list call failed' \
+  '^hk-featoff:hooks_trusted\.PostToolUse=absent:hooks is not on in codex features list$' \
+  '^hk-nocodex:hooks_trusted\.SessionStart=absent:codex is not on PATH')"
+if [ "$(printf '%s\n' "$O" | grep -c '=present:' || true)" != 11 ]; then _S16_FAIL="$_S16_FAIL A-hooks(present-count:$(printf '%s\n' "$O" | grep -c '=present:' || true))"; fi
+
+# launch
+_self_repo "$_S16A/la-claude" "$_S16A/home" sprint/s16a "# probe roster (SELF-16 A)\n"
+_self_repo "$_S16A/la-codex" "$_S16A/home" sprint/s16a '[lead]\ncli = "codex"\n\n'
+_self_repo "$_S16A/la-pin" "$_S16A/home" sprint/s16a '[lead]\ncli = "codex"\nmodel = "gpt-6-luna"\neffort = "high"\n\n'
+_self_repo "$_S16A/la-claudepin" "$_S16A/home" sprint/s16a '[lead]\ncli = "claude"\nmodel = "sonnet"\neffort = "high"\n\n'
+_S16A_LA='
+for A in "claude interactive" "codex interactive" "claude headless" "codex headless" "cursor interactive" "codex bogus"; do
+  R=0; L=$(lead_launch_line $A 2>"$TMPDIR/la.err") || R=$?
+  echo "${C}:${A% *}-${A#* }:rc=$R:[$L]:full=$(grep -c "runs the lead with full access" "$TMPDIR/la.err" || true)"
+done
+'
+O="$(_s16a "$_S16A/la-claude" "C=la-claude; $_S16A_LA")
+$(_s16a "$_S16A/la-codex" "C=la-codex; $_S16A_LA")
+$(_s16a "$_S16A/la-pin" "C=la-pin; $_S16A_LA")
+$(_s16a "$_S16A/la-claudepin" "C=la-claudepin; $_S16A_LA")
+confine:[$(_s16a "$_S16A/la-claude" 'confinement_statements' | tr '\n' '|')]"
+_S16_FAIL="${_S16_FAIL}$(_self_expect A-launch "$O" \
+  '^la-claude:claude-interactive:rc=0:\[claude --permission-mode acceptEdits\]:full=0$' \
+  '^la-claude:codex-interactive:rc=0:\[codex -s danger-full-access -c approval_policy="never" -c background_terminal_max_timeout=900000 -m gpt-6-astra -c model_reasoning_effort=xhigh\]:full=1$' \
+  '^la-claude:claude-headless:rc=0:\[claude --print --permission-mode acceptEdits\]:full=0$' \
+  '^la-claude:codex-headless:rc=0:\[codex exec -s danger-full-access -c approval_policy="never" -c background_terminal_max_timeout=900000 -m gpt-6-astra -c model_reasoning_effort=xhigh\]:full=1$' \
+  '^la-claude:cursor-interactive:rc=5:\[\]:full=0$' '^la-claude:codex-bogus:rc=64:\[\]:full=0$' \
+  '^la-codex:codex-interactive:rc=0:\[codex -s danger-full-access -c approval_policy="never" -c background_terminal_max_timeout=900000 -m gpt-6-astra -c model_reasoning_effort=xhigh\]:full=1$' \
+  '^la-pin:codex-interactive:rc=0:\[codex -s danger-full-access -c approval_policy="never" -c background_terminal_max_timeout=900000 -m gpt-6-luna -c model_reasoning_effort=high\]:full=1$' \
+  '^la-pin:codex-headless:rc=0:\[codex exec -s danger-full-access -c approval_policy="never" -c background_terminal_max_timeout=900000 -m gpt-6-luna -c model_reasoning_effort=high\]:full=1$' \
+  '^la-pin:claude-interactive:rc=0:\[claude --permission-mode acceptEdits\]:full=0$' \
+  '^la-claudepin:claude-interactive:rc=0:\[claude --permission-mode acceptEdits --model sonnet --effort high\]:full=0$' \
+  "^confine:\\[  - Confinement under either lead is Triforge's scripts plus git-integrity detection\\.\\|  - A lease worktree limits where a worker starts, not where it writes\\.\\|  - Recorded approval is audit, not prevention, and worker output is an injection surface for a full-access lead\\.\\|\\]$")"
+
+# auth
+_S16A_AU='
+R=0; L=$(roster_member_auth devin 2>&1) || R=$?
+echo "${C}:rc=$R:$L:status=$(roster_member_status devin 2>&1):cache=$(ls "$TMPDIR" | grep -c "^triforge_auth_devin_" || true)"
+'
+O="$(_s16a "$_S16A/path" "C=au-sandbox; export CODEX_SANDBOX=seatbelt; $_S16A_AU")
+$(_s16a "$_S16A/path" "C=au-net; export CODEX_SANDBOX_NETWORK_DISABLED=1; $_S16A_AU")
+$(_s16a "$_S16A/path" "C=au-none; $_S16A_AU")"
+_S16_FAIL="${_S16_FAIL}$(_self_expect A-auth "$O" \
+  '^au-sandbox:rc=80:unverified: relaunch with codex -s danger-full-access -c approval_policy="never" -c background_terminal_max_timeout=900000 -m gpt-6-astra -c model_reasoning_effort=xhigh to check devin \(.*CODEX_SANDBOX=seatbelt.*\):status=unverified:cache=0$' \
+  '^au-net:rc=80:unverified: relaunch with codex .* to check devin \(.*CODEX_SANDBOX_NETWORK_DISABLED=1.*\):status=unverified:cache=0$' \
+  "^au-none:rc=1:auth-failed: run 'devin auth login' to sign in .*:status=auth-failed:cache=1$")"
+
+# devin
+printf 'Welcome to Devin\n{"families": [{"family_uid": "swe", "variants": [{"model_uid": "swe-1-6-slow"}, {"model_uid": "swe-2-high"}]}, {"family_uid": "x", "variants": [{"model_uid": "claude-opus-5-5-high"}, {"model_uid": "swe-2-high"}, {"model_uid": "bad id;rm"}, {"label": "no uid"}]}]}\n' > "$_S16A/dv-list.json"
+printf '{"families": []}\n' > "$_S16A/dv-empty.json"
+_self_repo "$_S16A/dv-trip" "$_S16A/home" sprint/s16a "# probe roster (SELF-16 A)\n"
+_S16A_DV='
+R=0; L=$(devin_model_choices 2>"$TMPDIR/dv.err") || R=$?
+echo "${C}:rc=$R:[$(printf "%s" "$L" | tr "\n" "|")]:err=$(grep -c . "$TMPDIR/dv.err" || true)"
+'
+O="$(_s16a "$_S16A/path" "C=dv-list; export S16_DEVIN_MODELS=\"$_S16A/dv-list.json\"; $_S16A_DV")
+$(_s16a "$_S16A/path" "C=dv-empty; export S16_DEVIN_MODELS=\"$_S16A/dv-empty.json\"; $_S16A_DV")
+$(_s16a "$_S16A/path" "C=dv-fail; $_S16A_DV")
+$(_s16a "$_S16A/path" 'echo "dv-default:$(roster_member_default devin)"')
+$(_s16a "$_S16A/dv-trip" '
+R=0; roster_write_member devin true swe-2-high --consent user >/dev/null 2>&1 || R=$?
+R2=0; roster_write_role reviewer devin "" xhigh >/dev/null 2>&1 || R2=$?
+echo "dv-trip:write=$R/$R2:resolve=$(resolve_role reviewer 2>/dev/null | tr "\t" "|"):entry=$(roster_role_entry reviewer 2>/dev/null | tr "\t" "|")"
+R=0; roster_write_member devin true claude-opus-5-5-high >/dev/null 2>&1 || R=$?
+echo "dv-follow:write=$R:resolve=$(resolve_role reviewer 2>/dev/null | tr "\t" "|"):consent=$(_roster_member_field devin consent 2>/dev/null | cut -c1-5)"
+')"
+_S16_FAIL="${_S16_FAIL}$(_self_expect A-devin "$O" '^dv-list:rc=0:\[swe-1-6-slow\|swe-2-high\|claude-opus-5-5-high\]:err=0$' \
+  '^dv-empty:rc=69:\[\]:err=1$' '^dv-fail:rc=69:\[\]:err=1$' '^dv-default:swe-1-6-slow$' \
+  '^dv-trip:write=0/0:resolve=devin\|swe-2-high\|xhigh:entry=devin\|swe-2-high\|xhigh\|codex,antigravity,claude$' \
+  '^dv-follow:write=0:resolve=devin\|claude-opus-5-5-high\|xhigh:consent=user $')"
+unset _s16_c _S16A_D _S16A_L _S16A_TOP _S16A_SUM
+_S16_EV="${_S16_EV}A: one checkout-top roster from a subdirectory; egress per provider with xAI once and a HOME line per member; Codex trust by path, realpath and CODEX_HOME, read-only, unknown rc 80; hook trust only with a matching trusted_hash from hooks/list, fail closed; interactive and headless launch lines and the confinement text; unverified in a Codex sandbox, uncached; Devin model ids, rc 69, the member model reaching its roles; "
+# --- end of SELF-16 section A ---
+# --- SELF-16 section B: instruction files (U15) ---
+# B (R9, R39, R40; scripts/lib/instructions.sh). Fixtures under $_S16/b; each
+# helper runs in a fresh bash that sources the loader, in the fixture
+# directory, under a throwaway HOME and CODEX_HOME (no user-tier file read or
+# written):
+#   detect   the five kinds in the project and in its parent with state and
+#            import line, nearest first, a grandparent's import line, the
+#            user level; HOME = the parent -> its .claude/CLAUDE.md is the
+#            user line, never above; the library alone and under zsh print
+#            the same; an exact v3.3.3 copy stale-3x-exact, an edited v3.0.0
+#            copy stale-3x-edited, a full copy as CLAUDE.local.md user-owned
+#            (release tags); FIFOs named AGENTS.md and CLAUDE.md unreadable in
+#            under 10 s, a symlinked .claude read through the link and marked,
+#            a link loop unreadable
+#   visible  claude and codex for a parent CLAUDE.md, a project CLAUDE.md
+#            without and with the import, an AGENTS.override.md in the
+#            project, an untrusted project, a chain past the budget and under
+#            a raised one; the reader is the registry's instructions field
+#            (claude-md-shadow, agents-chain, "" for the rest), and an empty
+#            field, an unregistered name or no registry in scope fails closed
+#            (hidden, rc 1, "unknown reader")
+#   writers  without --yes rc 20 and the bytes unchanged; with --yes the
+#            change; again with --yes "unchanged:", rc 0, the same bytes
+#   budget   a 30 KiB project AGENTS.md + a 2 KiB user-level one + the block
+#            -> rc 3 naming the sizes, nothing written (also without --yes);
+#            the 30 KiB file alone fits; project_doc_max_bytes 65536 and 16384
+#            honored, 16384 also through the line scan (no TOML parser)
+#   convert  an exact copy merged and removed, then "unchanged:"; an edited
+#            copy and a user file refused, untouched
+#   refuse   a symlinked CLAUDE.md, a symlinked .claude, a symlinked or FIFO
+#            AGENTS.md, the user-tier file, a lease worker: refused, untouched
+#   hook     session start names each project CLAUDE.md-family file that does
+#            not import AGENTS.md (one line, at-setup), with and without the
+#            loader, and none once the parent's file imports it
+_S16B="${_S16}/b"
+mkdir -p "$_S16B/home/.claude" "$_S16B/home/.codex" "$_S16B/w"
+_S16B_W=$(cd "$_S16B/w" && pwd -P)
+T=$(printf '\t')
+_s16b() { # _s16b <dir> <helper> [args...] — the helper, loader sourced, run in <dir> under the throwaway HOME (S16B_HOME) and CODEX_HOME (S16B_CODEX); stdout + stderr, then "rc=<n>"
+  local D=$1 R=0 O
+  shift
+  O=$(cd "$D" && HOME="${S16B_HOME:-$_S16B/home}" CODEX_HOME="${S16B_CODEX:-$_S16B/home/.codex}" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" 60} /bin/bash -c 'source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 97; shift; "$@"' _ "$REPO_ROOT" "$@" 2>&1) || R=$?
+  printf '%s\nrc=%s\n' "$O" "$R"
+}
+_s16b_sum() { # _s16b_sum <file>... — cksum of each, "absent" for a missing one
+  local F
+  for F in "$@"; do
+    if [ -e "$F" ] || [ -L "$F" ]; then cksum < "$F" 2>/dev/null || echo unreadable; else echo absent; fi
+  done
+}
+_s16b_not() { # _s16b_not <case> <output> <ERE> — " <case>(has:<ERE>)" when the output matches
+  if printf '%s\n' "$2" | grep -qE -- "$3"; then printf ' %s(has:%s)' "$1" "$3"; fi
+}
+_s16b_same() { # _s16b_same <case> <before> <after> — " <case>(changed)" when they differ
+  if [ "$2" != "$3" ]; then printf ' %s(changed)' "$1"; fi
+}
+_s16b_proj() { # _s16b_proj <dir> — a git project whose AGENTS.md holds the pointer block
+  mkdir -p "$1" && ( cd "$1" && git init -q ) >/dev/null 2>&1
+  printf '# rules\n<!-- triforge:start -->\npointer\n<!-- triforge:end -->\n' > "$1/AGENTS.md"
+}
+
+# detect: every kind in the project and in its parent, a CLAUDE.md above that
+_S16B_M="$_S16B_W/top/mid"
+_S16B_P="$_S16B_M/proj"
+mkdir -p "$_S16B_P/.claude" "$_S16B_M/.claude"
+( cd "$_S16B_P" && git init -q ) >/dev/null 2>&1
+printf '# acme\n' > "$_S16B_P/CLAUDE.md"
+printf '# local\n@../AGENTS.md\n' > "$_S16B_P/.claude/CLAUDE.md"
+printf '# notes\n' > "$_S16B_P/CLAUDE.local.md"
+printf '# acme agents\n<!-- triforge:start -->\nx\n<!-- triforge:end -->\n' > "$_S16B_P/AGENTS.md"
+printf '# override\n' > "$_S16B_P/AGENTS.override.md"
+printf '# mono\n@AGENTS.md\n' > "$_S16B_M/CLAUDE.md"
+printf '# mono local\n' > "$_S16B_M/.claude/CLAUDE.md"
+printf '@proj/AGENTS.md\n' > "$_S16B_M/CLAUDE.local.md"
+printf '# mono agents\n' > "$_S16B_M/AGENTS.md"
+printf '<!-- triforge:start -->\n<!-- triforge:end -->\n' > "$_S16B_M/AGENTS.override.md"
+printf '# top\n' > "$_S16B_W/top/CLAUDE.md"
+printf '# me\n' > "$_S16B/home/.claude/CLAUDE.md"
+printf '# codex global\n' > "$_S16B/home/.codex/AGENTS.md"
+_S16B_SUMS=$(_s16b_sum "$_S16B_P/CLAUDE.md" "$_S16B_P/.claude/CLAUDE.md" "$_S16B_P/CLAUDE.local.md" "$_S16B_P/AGENTS.md" "$_S16B_M/CLAUDE.md" "$_S16B/home/.claude/CLAUDE.md" "$_S16B/home/.codex/AGENTS.md")
+_O=$(_s16b "$_S16B_P" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-detect "$_O" \
+  "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/w/top/mid/proj/CLAUDE\.md${T}@AGENTS\.md\$" \
+  "^\.claude/CLAUDE\.md${T}project${T}imports,user-owned${T}[^${T}]*/w/top/mid/proj/\.claude/CLAUDE\.md${T}@\.\./AGENTS\.md\$" \
+  "^CLAUDE\.local\.md${T}project${T}no-import,user-owned${T}[^${T}]*/w/top/mid/proj/CLAUDE\.local\.md${T}@AGENTS\.md\$" \
+  "^AGENTS\.md${T}project${T}pointer${T}[^${T}]*/w/top/mid/proj/AGENTS\.md${T}-\$" \
+  "^AGENTS\.override\.md${T}project${T}override,no-pointer${T}[^${T}]*/w/top/mid/proj/AGENTS\.override\.md${T}-\$" \
+  "^CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/w/top/mid/CLAUDE\.md${T}@proj/AGENTS\.md\$" \
+  "^\.claude/CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/w/top/mid/\.claude/CLAUDE\.md${T}@\.\./proj/AGENTS\.md\$" \
+  "^CLAUDE\.local\.md${T}above${T}imports,user-owned${T}[^${T}]*/w/top/mid/CLAUDE\.local\.md${T}@proj/AGENTS\.md\$" \
+  "^AGENTS\.md${T}above${T}no-pointer${T}[^${T}]*/w/top/mid/AGENTS\.md${T}-\$" \
+  "^AGENTS\.override\.md${T}above${T}override,pointer${T}[^${T}]*/w/top/mid/AGENTS\.override\.md${T}-\$" \
+  "^CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/w/top/CLAUDE\.md${T}@mid/proj/AGENTS\.md\$" \
+  "^\.claude/CLAUDE\.md${T}user${T}no-import,user-owned${T}[^${T}]*/b/home/\.claude/CLAUDE\.md${T}-\$" \
+  "^AGENTS\.md${T}user${T}no-pointer${T}[^${T}]*/b/home/\.codex/AGENTS\.md${T}-\$" \
+  '^rc=0$')"
+_S16B_ORDER=$(printf '%s\n' "$_O" | grep -F "$_S16B_W/" | cut -f1,2 | tr '\t\n' ' |')
+[ "$_S16B_ORDER" = "CLAUDE.md project|.claude/CLAUDE.md project|CLAUDE.local.md project|AGENTS.md project|AGENTS.override.md project|CLAUDE.md above|.claude/CLAUDE.md above|CLAUDE.local.md above|AGENTS.md above|AGENTS.override.md above|CLAUDE.md above|" ] || _S16_FAIL="${_S16_FAIL} b-detect-order(${_S16B_ORDER})"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-detect-read-only "$_S16B_SUMS" "$(_s16b_sum "$_S16B_P/CLAUDE.md" "$_S16B_P/.claude/CLAUDE.md" "$_S16B_P/CLAUDE.local.md" "$_S16B_P/AGENTS.md" "$_S16B_M/CLAUDE.md" "$_S16B/home/.claude/CLAUDE.md" "$_S16B/home/.codex/AGENTS.md")")"
+# the library alone (the hook's path) and under zsh (a lead's shell) print the same lines
+_S16B_ALONE=$(cd "$_S16B_P" && HOME="$_S16B/home" CODEX_HOME="$_S16B/home/.codex" /bin/bash -c 'source "$1/scripts/lib/instructions.sh" && instruction_files_detect' _ "$REPO_ROOT" 2>&1; echo "rc=$?")
+[ "$_S16B_ALONE" = "$_O" ] || _S16_FAIL="${_S16_FAIL} b-detect-alone(differs)"
+if [ -x /bin/zsh ]; then
+  _S16B_ZSH=$(cd "$_S16B_P" && HOME="$_S16B/home" CODEX_HOME="$_S16B/home/.codex" /bin/zsh -fc 'set -euo pipefail; source "$1/scripts/invoke-external.sh" >/dev/null 2>&1; instruction_files_detect' _ "$REPO_ROOT" 2>&1; echo "rc=$?")
+  [ "$_S16B_ZSH" = "$_O" ] || _S16_FAIL="${_S16_FAIL} b-detect-zsh(differs)"
+fi
+# the user-tier file by identity: with HOME = the parent, its .claude/CLAUDE.md is the user line
+_O=$(S16B_HOME="$_S16B_M" _s16b "$_S16B_P" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-usertier "$_O" "^\.claude/CLAUDE\.md${T}user${T}no-import,user-owned${T}[^${T}]*/w/top/mid/\.claude/CLAUDE\.md${T}-\$" '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-usertier "$_O" "^\.claude/CLAUDE\.md${T}above")"
+# the 3.x fingerprint: an exact copy, an edited copy, a full copy under a name it never had
+_S16B_S="$_S16B_W/stale"
+mkdir -p "$_S16B_S/.claude"
+if git -C "$REPO_ROOT" show v3.3.3:templates/CLAUDE.md > "$_S16B/v333.md" 2>/dev/null \
+   && git -C "$REPO_ROOT" show v3.0.0:templates/CLAUDE.md > "$_S16B/v300.md" 2>/dev/null; then
+  cp "$_S16B/v333.md" "$_S16B_S/CLAUDE.md"
+  { cat "$_S16B/v300.md"; printf '\n## Our deploy rules\n'; } > "$_S16B_S/.claude/CLAUDE.md"
+  cp "$_S16B/v333.md" "$_S16B_S/CLAUDE.local.md"
+  _O=$(_s16b "$_S16B_S" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-stale "$_O" \
+    "^CLAUDE\.md${T}project${T}no-import,stale-3x-exact${T}[^${T}]*/w/stale/CLAUDE\.md${T}@AGENTS\.md\$" \
+    "^\.claude/CLAUDE\.md${T}project${T}no-import,stale-3x-edited${T}[^${T}]*/w/stale/\.claude/CLAUDE\.md${T}@\.\./AGENTS\.md\$" \
+    "^CLAUDE\.local\.md${T}project${T}no-import,user-owned${T}" '^rc=0$')"
+  _S16B_TAGS=1
+else
+  _S16_FAIL="${_S16_FAIL} b-stale(no-v3-release-tags:fetch-tags)"
+  _S16B_TAGS=0
+fi
+# a FIFO never stalls the walk; a symlinked .claude is read through the link; a link loop is unreadable
+_S16B_F="$_S16B_W/fifo"
+mkdir -p "$_S16B_F" "$_S16B/outside-claude"
+mkfifo "$_S16B_F/AGENTS.md" "$_S16B_F/CLAUDE.md"
+printf '# linked\n@../AGENTS.md\n' > "$_S16B/outside-claude/CLAUDE.md"
+ln -s "$_S16B/outside-claude" "$_S16B_F/.claude"
+ln -s CLAUDE.local.md "$_S16B_F/CLAUDE.local.md"
+_S16B_T0=$(date +%s)
+_O=$(_s16b "$_S16B_F" instruction_files_detect)
+_S16B_T1=$(( $(date +%s) - _S16B_T0 ))
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-fifo "$_O" \
+  "^CLAUDE\.md${T}project${T}unreadable${T}[^${T}]*/w/fifo/CLAUDE\.md${T}@AGENTS\.md\$" \
+  "^AGENTS\.md${T}project${T}unreadable${T}[^${T}]*/w/fifo/AGENTS\.md${T}-\$" \
+  "^\.claude/CLAUDE\.md${T}project${T}imports,user-owned,symlink${T}[^${T}]*/w/fifo/\.claude/CLAUDE\.md${T}@\.\./AGENTS\.md\$" \
+  "^CLAUDE\.local\.md${T}project${T}unreadable,symlink${T}" '^rc=0$')"
+[ "$_S16B_T1" -lt 10 ] || _S16_FAIL="${_S16_FAIL} b-fifo(stalled:${_S16B_T1}s)"
+
+# visibility per lead
+_S16B_V="$_S16B_W/vis"
+_s16b_proj "$_S16B_V/parent/p1"; printf '# mono\n' > "$_S16B_V/parent/CLAUDE.md"
+_s16b_proj "$_S16B_V/p2"; printf '# own\n' > "$_S16B_V/p2/CLAUDE.md"
+_s16b_proj "$_S16B_V/p3"; printf '# own\n\n@AGENTS.md\n' > "$_S16B_V/p3/CLAUDE.md"
+_s16b_proj "$_S16B_V/p4"; printf '# override\n' > "$_S16B_V/p4/AGENTS.override.md"
+_s16b_proj "$_S16B_V/p5"
+_s16b_proj "$_S16B_V/p6"
+{ head -c 32800 /dev/zero | tr '\0' 'x'; printf '\n<!-- triforge:start -->\npointer\n<!-- triforge:end -->\n'; } > "$_S16B_V/p6/AGENTS.md"
+mkdir -p "$_S16B/codex-untrusted" "$_S16B/codex-raised"
+printf '[projects."%s"]\ntrust_level = "untrusted"\n' "$(cd "$_S16B_V/p5" && pwd -P)" > "$_S16B/codex-untrusted/config.toml"
+printf 'project_doc_max_bytes = 65536\n' > "$_S16B/codex-raised/config.toml"
+_O=$(_s16b "$_S16B_V/parent/p1" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-parent-claude "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/w/vis/parent/CLAUDE\.md: this reader takes AGENTS\.md only while no CLAUDE\.md, \.claude/CLAUDE\.md or CLAUDE\.local\.md exists .*; add the line @p1/AGENTS\.md to [^ ]*/w/vis/parent/CLAUDE\.md " '^rc=1$')"
+_O=$(_s16b "$_S16B_V/parent/p1" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-parent-codex "$_O" "^codex${T}visible${T}[^ ]*/w/vis/parent/p1/AGENTS\.md is read: the pointer block ends at byte 76 of the files this reader combines, within 32768 \(the default\)\$" '^rc=0$')"
+_O=$(_s16b "$_S16B_V/p2" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-own-claude "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/w/vis/p2/CLAUDE\.md: .*; add the line @AGENTS\.md to [^ ]*/w/vis/p2/CLAUDE\.md \(instruction_add_import " '^rc=1$')"
+_O=$(_s16b "$_S16B_V/p2" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-own-codex "$_O" "^codex${T}visible${T}[^ ]*/w/vis/p2/AGENTS\.md is read: " '^rc=0$')"
+_O=$(_s16b "$_S16B_V/p3" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-import-claude "$_O" "^claude${T}visible${T}[^ ]*/w/vis/p3/CLAUDE\.md imports [^ ]*/w/vis/p3/AGENTS\.md, so it is loaded with that file\$" '^rc=0$')"
+_O=$(_s16b "$_S16B_V/p3" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-import-codex "$_O" "^codex${T}visible${T}" '^rc=0$')"
+_O=$(_s16b "$_S16B_V/p4" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-override-claude "$_O" "^claude${T}visible${T}[^ ]*/w/vis/p4/AGENTS\.md is read: no CLAUDE\.md, \.claude/CLAUDE\.md or CLAUDE\.local\.md at [^ ]*/w/vis/p4 or above\$" '^rc=0$')"
+_O=$(_s16b "$_S16B_V/p4" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-override-codex "$_O" "^codex${T}hidden${T}shadowed by [^ ]*/w/vis/p4/AGENTS\.override\.md: this reader takes it instead of [^ ]*/w/vis/p4/AGENTS\.md at that level" '^rc=1$')"
+_O=$(S16B_CODEX="$_S16B/codex-untrusted" _s16b "$_S16B_V/p5" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-untrusted "$_O" "^codex${T}hidden${T}the project [^ ]*/w/vis/p5 is marked untrusted in [^ ]*/codex-untrusted/config\.toml \(trust_level = \"untrusted\"\), so this reader takes no project AGENTS\.md\$" '^rc=1$')"
+_O=$(S16B_CODEX="$_S16B/codex-untrusted" _s16b "$_S16B_V/p5" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-untrusted-claude "$_O" "^claude${T}visible${T}" '^rc=0$')"
+_O=$(_s16b "$_S16B_V/p6" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-budget "$_O" "^codex${T}hidden${T}over budget: the pointer block in [^ ]*/w/vis/p6/AGENTS\.md ends at byte 32869 of the files this reader combines \(user-level 15 bytes first\), past 32768 \(the default\)" '^rc=1$')"
+_O=$(S16B_CODEX="$_S16B/codex-raised" _s16b "$_S16B_V/p6" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-budget-raised "$_O" "^codex${T}visible${T}[^ ]*/w/vis/p6/AGENTS\.md is read: the pointer block ends at byte 32854 of the files this reader combines, within 65536 \(project_doc_max_bytes in [^ ]*/codex-raised/config\.toml\)\$" '^rc=0$')"
+# the reader is registry data (cli_field <cli> instructions); no reader fails closed
+_O=$(_s16b "$_S16B_V/p5" cli_table all instructions)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-registry "$_O" "^claude${T}claude-md-shadow\$" "^codex${T}agents-chain\$" "^antigravity${T}\$" "^grok${T}\$" '^rc=0$')"
+_O=$(_s16b "$_S16B_V/p5" instruction_pointer_visibility antigravity)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-noreader "$_O" "^antigravity${T}hidden${T}unknown reader: the registry names no instruction reader for antigravity \(its instructions field is empty or missing\), so AGENTS\.md is not known to reach it\$" '^rc=1$')"
+_O=$(_s16b "$_S16B_V/p5" instruction_pointer_visibility nosuchcli)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-unregistered "$_O" "^nosuchcli${T}hidden${T}unknown reader: " '^rc=1$')"
+_O=$(cd "$_S16B_V/p5" && HOME="$_S16B/home" CODEX_HOME="$_S16B/home/.codex" /bin/bash -c 'source "$1/scripts/lib/instructions.sh" && instruction_pointer_visibility claude' _ "$REPO_ROOT" 2>&1; echo "rc=$?")
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-noregistry "$_O" "^claude${T}hidden${T}unknown reader: the registry names no instruction reader for claude " '^rc=1$')"
+
+# writers: the @AGENTS.md import (project file, .claude/ file, a parent's file)
+_S16B_I="$_S16B_W/wr"
+mkdir -p "$_S16B_I/.claude" "$_S16B_W/wrp/proj"
+( cd "$_S16B_I" && git init -q ) >/dev/null 2>&1
+( cd "$_S16B_W/wrp/proj" && git init -q ) >/dev/null 2>&1
+printf '# own\n' > "$_S16B_I/CLAUDE.md"
+printf '# local' > "$_S16B_I/.claude/CLAUDE.md"
+printf '# mono\n' > "$_S16B_W/wrp/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_I/CLAUDE.md")
+_O=$(_s16b "$_S16B_I" instruction_add_import CLAUDE.md)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-import-ask "$_O" '^needs-ask: would add the line @AGENTS\.md to [^ ]*/w/wr/CLAUDE\.md, so Claude Code loads ' '^  apply : instruction_add_import [^ ]*/w/wr/CLAUDE\.md --yes$' '^rc=20$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-import-ask "$_S16B_SUM" "$(_s16b_sum "$_S16B_I/CLAUDE.md")")"
+_O=$(_s16b "$_S16B_I" instruction_add_import CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-import-yes "$_O" '^changed: [^ ]*/w/wr/CLAUDE\.md: added the line @AGENTS\.md$' '^rc=0$')"
+[ "$(cat "$_S16B_I/CLAUDE.md")" = "$(printf '# own\n@AGENTS.md')" ] || _S16_FAIL="${_S16_FAIL} b-import-yes(content)"
+_S16B_SUM=$(_s16b_sum "$_S16B_I/CLAUDE.md")
+_O=$(_s16b "$_S16B_I" instruction_add_import CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-import-again "$_O" '^unchanged: [^ ]*/w/wr/CLAUDE\.md already imports [^ ]*/w/wr/AGENTS\.md$' '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-import-again "$_S16B_SUM" "$(_s16b_sum "$_S16B_I/CLAUDE.md")")"
+_O=$(_s16b "$_S16B_I" instruction_add_import --yes .claude/CLAUDE.md)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-import-dotclaude "$_O" '^changed: [^ ]*/w/wr/\.claude/CLAUDE\.md: added the line @\.\./AGENTS\.md$' '^rc=0$')"
+[ "$(cat "$_S16B_I/.claude/CLAUDE.md")" = "$(printf '# local\n@../AGENTS.md')" ] || _S16_FAIL="${_S16_FAIL} b-import-dotclaude(content)"
+_O=$(_s16b "$_S16B_W/wrp/proj" instruction_add_import ../CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-import-parent "$_O" '^changed: [^ ]*/w/wrp/CLAUDE\.md: added the line @proj/AGENTS\.md$' '^rc=0$')"
+_O=$(_s16b "$_S16B_W/wrp/proj" instruction_add_import ../CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-import-parent-again "$_O" '^unchanged: ' '^rc=0$')"
+_O=$(_s16b "$_S16B_I" instruction_add_import AGENTS.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-import-kind "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/wr/AGENTS\.md is not one of CLAUDE\.md, \.claude/CLAUDE\.md, CLAUDE\.local\.md' '^rc=2$')"
+
+# writers: the pointer block (create, append, replace, unbalanced, the override warning)
+mkdir -p "$_S16B_W/mg" "$_S16B_W/mg2" "$_S16B_W/mg3" "$_S16B_W/mg4" "$_S16B_W/mg5"
+for _S16B_D in mg mg2 mg3 mg4 mg5; do ( cd "$_S16B_W/$_S16B_D" && git init -q ) >/dev/null 2>&1; done
+printf '# ours\n\nrule one\n' > "$_S16B_W/mg2/AGENTS.md"
+printf '# ours\n<!-- triforge:start -->\nold pointer\n<!-- triforge:end -->\ntail\n' > "$_S16B_W/mg3/AGENTS.md"
+printf '<!-- triforge:start -->\nno end\n' > "$_S16B_W/mg4/AGENTS.md"
+printf '# override\n' > "$_S16B_W/mg5/AGENTS.override.md"
+_O=$(_s16b "$_S16B_W/mg" instruction_merge_pointer)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-ask "$_O" '^needs-ask: would create [^ ]*/w/mg/AGENTS\.md \(0 -> [0-9]+ bytes; the agents-chain budget: [0-9]+ of 32768 bytes\)$' '^rc=20$')"
+[ ! -e "$_S16B_W/mg/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-merge-ask(written)"
+_O=$(_s16b "$_S16B_W/mg" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-create "$_O" '^changed: [^ ]*/w/mg/AGENTS\.md: created with the Triforge pointer block ' '^rc=0$')"
+cmp -s "$REPO_ROOT/templates/AGENTS.md" "$_S16B_W/mg/AGENTS.md" || _S16_FAIL="${_S16_FAIL} b-merge-create(not-the-template)"
+_S16B_SUM=$(_s16b_sum "$_S16B_W/mg/AGENTS.md")
+_O=$(_s16b "$_S16B_W/mg" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-again "$_O" '^unchanged: [^ ]*/w/mg/AGENTS\.md already holds the current pointer block$' '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-merge-again "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/mg/AGENTS.md")")"
+_S16B_SUM=$(_s16b_sum "$_S16B_W/mg2/AGENTS.md")
+_O=$(_s16b "$_S16B_W/mg2" instruction_merge_pointer)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-append-ask "$_O" '^needs-ask: would append the Triforge pointer block to [^ ]*/w/mg2/AGENTS\.md \(17 -> ' '^rc=20$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-merge-append-ask "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/mg2/AGENTS.md")")"
+_O=$(_s16b "$_S16B_W/mg2" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-append "$_O" '^changed: [^ ]*/w/mg2/AGENTS\.md: appended the Triforge pointer block ' '^rc=0$')"
+[ "$(sed -n 1,5p "$_S16B_W/mg2/AGENTS.md")" = "$(printf '# ours\n\nrule one\n\n<!-- triforge:start -->')" ] || _S16_FAIL="${_S16_FAIL} b-merge-append(head)"
+[ "$(tail -n 1 "$_S16B_W/mg2/AGENTS.md")" = '<!-- triforge:end -->' ] || _S16_FAIL="${_S16_FAIL} b-merge-append(tail)"
+_S16B_SUM=$(_s16b_sum "$_S16B_W/mg2/AGENTS.md")
+_O=$(_s16b "$_S16B_W/mg2" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-append-again "$_O" '^unchanged: ' '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-merge-append-again "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/mg2/AGENTS.md")")"
+_O=$(_s16b "$_S16B_W/mg3" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-replace "$_O" '^changed: [^ ]*/w/mg3/AGENTS\.md: replaced the Triforge pointer block ' '^rc=0$')"
+[ "$(head -n 1 "$_S16B_W/mg3/AGENTS.md")|$(tail -n 1 "$_S16B_W/mg3/AGENTS.md")|$(grep -c 'old pointer' "$_S16B_W/mg3/AGENTS.md" || true)|$(grep -c 'triforge:start' "$_S16B_W/mg3/AGENTS.md" || true)" = '# ours|tail|0|1' ] || _S16_FAIL="${_S16_FAIL} b-merge-replace(content)"
+_S16B_SUM=$(_s16b_sum "$_S16B_W/mg4/AGENTS.md")
+_O=$(_s16b "$_S16B_W/mg4" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-unbalanced "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/w/mg4/AGENTS\.md holds 1 start and 0 end markers of the pointer block' '^rc=2$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-merge-unbalanced "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/mg4/AGENTS.md")")"
+_S16B_SUM=$(_s16b_sum "$_S16B_W/mg5/AGENTS.override.md")
+_O=$(_s16b "$_S16B_W/mg5" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-merge-override "$_O" '^warning: [^ ]*/w/mg5/AGENTS\.override\.md exists, so the agents-chain reader takes it instead of [^ ]*/w/mg5/AGENTS\.md at this level and will not see the pointer block \(a reader without overrides, claude-md-shadow, still does\)' '^changed: [^ ]*/w/mg5/AGENTS\.md: created ' '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-merge-override "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/mg5/AGENTS.override.md")")"
+
+# budget: a 30 KiB project AGENTS.md, a 2 KiB user-level one, project_doc_max_bytes
+_S16B_B="$_S16B_W/bud"
+mkdir -p "$_S16B_B" "$_S16B/codex-2k" "$_S16B/codex-none" "$_S16B/codex-2k-raised" "$_S16B/codex-low" "$_S16B/notoml"
+( cd "$_S16B_B" && git init -q ) >/dev/null 2>&1
+{ head -c 30719 /dev/zero | tr '\0' 'u'; printf '\n'; } > "$_S16B_B/AGENTS.md"
+{ head -c 2047 /dev/zero | tr '\0' 'g'; printf '\n'; } > "$_S16B/codex-2k/AGENTS.md"
+cp "$_S16B/codex-2k/AGENTS.md" "$_S16B/codex-2k-raised/AGENTS.md"
+printf '# user-level settings\nproject_doc_max_bytes = 65536\n\n[projects."/elsewhere"]\ntrust_level = "trusted"\n' > "$_S16B/codex-2k-raised/config.toml"
+printf 'project_doc_max_bytes = 16384  # tight\n' > "$_S16B/codex-low/config.toml"
+printf 'raise ImportError("SELF-16: no TOML parser")\n' > "$_S16B/notoml/tomllib.py"
+cp "$_S16B/notoml/tomllib.py" "$_S16B/notoml/tomli.py"
+_S16B_SUM=$(_s16b_sum "$_S16B_B/AGENTS.md")
+for _S16B_Y in "" --yes; do
+  _O=$(S16B_CODEX="$_S16B/codex-2k" _s16b "$_S16B_B" instruction_merge_pointer $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-budget${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — over the agents-chain budget: with the pointer block, [^ ]*/w/bud/AGENTS\.md would be 3[0-9]{4} bytes, and the files that reader combines 3[0-9]{4} bytes \(user-level 2048 \+ the files from the project root down 0 \+ this file 3[0-9]{4}\), past 32768 \(the default\), .*nothing written\. .*raise project_doc_max_bytes yourself' '^rc=3$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_same "b-budget${_S16B_Y}" "$_S16B_SUM" "$(_s16b_sum "$_S16B_B/AGENTS.md")")"
+done
+_O=$(S16B_CODEX="$_S16B/codex-none" _s16b "$_S16B_B" instruction_merge_pointer)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-budget-alone "$_O" '^needs-ask: would append the Triforge pointer block to [^ ]*/w/bud/AGENTS\.md \(30720 -> 3[0-9]{4} bytes; the agents-chain budget: 3[0-9]{4} of 32768 bytes\)$' '^rc=20$')"
+_O=$(S16B_CODEX="$_S16B/codex-2k-raised" _s16b "$_S16B_B" instruction_merge_pointer)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-budget-raised "$_O" '^needs-ask: would append .*the agents-chain budget: 3[0-9]{4} of 65536 bytes\)$' '^rc=20$')"
+_O=$(S16B_CODEX="$_S16B/codex-low" _s16b "$_S16B_B" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-budget-low "$_O" '^instruction_merge_pointer: REFUSED — over the agents-chain budget:.*past 16384 \(project_doc_max_bytes in [^ ]*/codex-low/config\.toml\)' '^rc=3$')"
+_O=$(PYTHONPATH="$_S16B/notoml" S16B_CODEX="$_S16B/codex-low" _s16b "$_S16B_B" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-budget-linescan "$_O" '^instruction_merge_pointer: REFUSED — over the agents-chain budget:.*past 16384 \(project_doc_max_bytes in [^ ]*/codex-low/config\.toml\)' '^rc=3$')"
+_O=$(PYTHONPATH="$_S16B/notoml" S16B_CODEX="$_S16B/codex-2k-raised" _s16b "$_S16B_B" instruction_merge_pointer)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-budget-linescan-raised "$_O" 'the agents-chain budget: 3[0-9]{4} of 65536 bytes\)$' '^rc=20$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-budget-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_B/AGENTS.md")")"
+
+# convert: an exact copy, an exact .claude/ copy beside a user's CLAUDE.local.md, an edited copy, a user file
+if [ "$_S16B_TAGS" -eq 1 ]; then
+  mkdir -p "$_S16B_W/cv" "$_S16B_W/cv2/.claude" "$_S16B_W/cv3" "$_S16B_W/cv4"
+  for _S16B_D in cv cv2 cv3 cv4; do ( cd "$_S16B_W/$_S16B_D" && git init -q ) >/dev/null 2>&1; done
+  cp "$_S16B/v333.md" "$_S16B_W/cv/CLAUDE.md"
+  cp "$_S16B/v300.md" "$_S16B_W/cv2/.claude/CLAUDE.md"
+  printf '# mine\n' > "$_S16B_W/cv2/CLAUDE.local.md"
+  cp "$_S16B_S/.claude/CLAUDE.md" "$_S16B_W/cv3/CLAUDE.md"
+  printf '# just ours\n' > "$_S16B_W/cv4/CLAUDE.md"
+  _S16B_SUM=$(_s16b_sum "$_S16B_W/cv/CLAUDE.md" "$_S16B_W/cv/AGENTS.md")
+  _O=$(_s16b "$_S16B_W/cv" instruction_convert_stale CLAUDE.md)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-ask "$_O" '^needs-ask: would remove [^ ]*/w/cv/CLAUDE\.md \(an unmodified copy of the Triforge v3\.3\.3 templates/CLAUDE\.md\), so Claude Code reads AGENTS\.md natively, and create [^ ]*/w/cv/AGENTS\.md ' '^rc=20$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_same b-convert-ask "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/cv/CLAUDE.md" "$_S16B_W/cv/AGENTS.md")")"
+  _O=$(_s16b "$_S16B_W/cv" instruction_convert_stale CLAUDE.md --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-yes "$_O" '^changed: [^ ]*/w/cv/AGENTS\.md: created with the Triforge pointer block ' '^changed: [^ ]*/w/cv/CLAUDE\.md: removed \(an unmodified copy of the Triforge v3\.3\.3 template\)$' '^rc=0$')"
+  [ ! -e "$_S16B_W/cv/CLAUDE.md" ] || _S16_FAIL="${_S16_FAIL} b-convert-yes(not-removed)"
+  cmp -s "$REPO_ROOT/templates/AGENTS.md" "$_S16B_W/cv/AGENTS.md" || _S16_FAIL="${_S16_FAIL} b-convert-yes(no-pointer)"
+  _O=$(_s16b "$_S16B_W/cv" instruction_convert_stale CLAUDE.md --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-again "$_O" '^unchanged: [^ ]*/w/cv/CLAUDE\.md does not exist; nothing to convert$' '^rc=0$')"
+  _O=$(_s16b "$_S16B_W/cv2" instruction_convert_stale .claude/CLAUDE.md --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-dotclaude "$_O" '^changed: [^ ]*/w/cv2/AGENTS\.md: created ' '^changed: [^ ]*/w/cv2/\.claude/CLAUDE\.md: removed \(an unmodified copy of the Triforge v3\.0\.0 template\)$' '^note: [^ ]*/w/cv2/CLAUDE\.local\.md still exists and does not import AGENTS\.md' '^rc=0$')"
+  for _S16B_Y in "" --yes; do
+    _S16B_SUM=$(_s16b_sum "$_S16B_W/cv3/CLAUDE.md" "$_S16B_W/cv3/AGENTS.md")
+    _O=$(_s16b "$_S16B_W/cv3" instruction_convert_stale CLAUDE.md $_S16B_Y)
+    _S16_FAIL="${_S16_FAIL}$(_self_expect "b-convert-edited${_S16B_Y}" "$_O" '^instruction_convert_stale: REFUSED — [^ ]*/w/cv3/CLAUDE\.md is a Triforge 3\.x template copy with your own edits in it, so it is not removed; edit it by hand' '^rc=2$')"
+    _S16_FAIL="${_S16_FAIL}$(_s16b_same "b-convert-edited${_S16B_Y}" "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/cv3/CLAUDE.md" "$_S16B_W/cv3/AGENTS.md")")"
+  done
+  _S16B_SUM=$(_s16b_sum "$_S16B_W/cv4/CLAUDE.md")
+  _O=$(_s16b "$_S16B_W/cv4" instruction_convert_stale CLAUDE.md --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-user "$_O" '^instruction_convert_stale: REFUSED — [^ ]*/w/cv4/CLAUDE\.md is not a Triforge 3\.x template copy; nothing to convert' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_same b-convert-user "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/cv4/CLAUDE.md")")"
+fi
+
+# refusals: symlinked targets, a FIFO, the user-tier file, a lease worker
+_S16B_L="$_S16B_W/ln"
+mkdir -p "$_S16B_L" "$_S16B/outside" "$_S16B/outside-dir" "$_S16B_W/ff" "$_S16B_W/uh/proj/.git" "$_S16B_W/uh/.claude" "$_S16B_W/wk"
+printf '# outside\n' > "$_S16B/outside/CLAUDE.md"
+printf '# outside agents\n' > "$_S16B/outside/AGENTS.md"
+printf '# outside dir\n' > "$_S16B/outside-dir/CLAUDE.md"
+ln -s "$_S16B/outside/CLAUDE.md" "$_S16B_L/CLAUDE.md"
+ln -s "$_S16B/outside/AGENTS.md" "$_S16B_L/AGENTS.md"
+ln -s "$_S16B/outside-dir" "$_S16B_L/.claude"
+mkfifo "$_S16B_W/ff/AGENTS.md"
+printf '# me\n' > "$_S16B_W/uh/.claude/CLAUDE.md"
+printf '# own\n' > "$_S16B_W/wk/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B/outside/CLAUDE.md" "$_S16B/outside/AGENTS.md" "$_S16B/outside-dir/CLAUDE.md" "$_S16B_W/uh/.claude/CLAUDE.md" "$_S16B_W/wk/CLAUDE.md")
+_O=$(_s16b "$_S16B_L" instruction_add_import CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-refuse-link "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/ln/CLAUDE\.md is a symlink: ' '^rc=2$')"
+_O=$(_s16b "$_S16B_L" instruction_add_import .claude/CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-refuse-linkdir "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/ln/\.claude is a symlink: the file would be written outside ' '^rc=2$')"
+_O=$(_s16b "$_S16B_L" instruction_merge_pointer --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-refuse-linkmerge "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/w/ln/AGENTS\.md is a symlink: ' '^rc=2$')"
+_S16B_T0=$(date +%s)
+_O=$(_s16b "$_S16B_W/ff" instruction_merge_pointer --yes)
+_S16B_T1=$(( $(date +%s) - _S16B_T0 ))
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-refuse-fifo "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/w/ff/AGENTS\.md is not a regular file' '^rc=2$')"
+[ "$_S16B_T1" -lt 10 ] || _S16_FAIL="${_S16_FAIL} b-refuse-fifo(stalled:${_S16B_T1}s)"
+[ -p "$_S16B_W/ff/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-refuse-fifo(replaced)"
+_O=$(S16B_HOME="$_S16B_W/uh" _s16b "$_S16B_W/uh/proj" instruction_add_import ../.claude/CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-refuse-usertier "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/uh/\.claude/CLAUDE\.md is your user-tier ~/\.claude/CLAUDE\.md, which Triforge reads and never writes' '^rc=2$')"
+_O=$(TRIFORGE_LEASE_WORKER=t-self16 _s16b "$_S16B_W/wk" instruction_add_import CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-refuse-worker "$_O" '^instruction_add_import: REFUSED — a lead-only helper, called from a lease worker' '^rc=45$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-refuse-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B/outside/CLAUDE.md" "$_S16B/outside/AGENTS.md" "$_S16B/outside-dir/CLAUDE.md" "$_S16B_W/uh/.claude/CLAUDE.md" "$_S16B_W/wk/CLAUDE.md")")"
+
+# hook: the own-file notice, without the loader (CLAUDE_PLUGIN_ROOT unset) and with it
+_S16B_H="$_S16B_W/hook"
+mkdir -p "$_S16B_H/proj/.claude" "$_S16B/hookbin" "$_S16B/hookhome"
+( cd "$_S16B_H/proj" && git init -q ) >/dev/null 2>&1
+printf '# acme\n' > "$_S16B_H/proj/CLAUDE.md"
+printf '# local\n' > "$_S16B_H/proj/.claude/CLAUDE.md"
+printf '# notes\n' > "$_S16B_H/proj/CLAUDE.local.md"
+printf '#!/bin/sh\n# probe stub (SELF-16 B): the floor build\ncase "${1:-}" in --version) echo 2.1.277 ;; esac\nexit 0\n' > "$_S16B/hookbin/claude"
+printf '#!/bin/sh\n# probe stub (SELF-16 B): answers the bootstrap without touching a real agy\ncase "${1:-}" in --version) echo 0.0.0-probe-stub ;; plugin) echo agent-triforge ;; agents) printf "%%s\\n" codebase-analyst architecture-reviewer targeted-researcher documentation-writer ;; esac\nexit 0\n' > "$_S16B/hookbin/agy"
+chmod +x "$_S16B/hookbin/claude" "$_S16B/hookbin/agy"
+_s16b_hook() { # _s16b_hook <project> [plugin root] — session start there, throwaway HOME, stubs first on PATH
+  if [ -n "${2:-}" ]; then
+    ( cd "$1" && HOME="$_S16B/hookhome" CLAUDE_PLUGIN_ROOT="$2" PATH="$_S16B/hookbin:$PATH" /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 )
+  else
+    ( cd "$1" && env -u CLAUDE_PLUGIN_ROOT HOME="$_S16B/hookhome" PATH="$_S16B/hookbin:$PATH" /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 )
+  fi
+}
+for _S16B_ROOT in "" "$REPO_ROOT"; do
+  _S16B_C="b-hook-own${_S16B_ROOT:+-loader}"
+  _O=$(_s16b_hook "$_S16B_H/proj" "$_S16B_ROOT")
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_C" "$_O" \
+    "^WARNING: CLAUDE\.md in this project does not import AGENTS\.md, so Claude Code reads it and skips AGENTS\.md, Triforge's only instruction file\. Run /at-setup to add the line @AGENTS\.md to it \(setup asks first\), or add it yourself — session start never edits this file\.\$" \
+    "^WARNING: \.claude/CLAUDE\.md in this project does not import AGENTS\.md, .* Run /at-setup to add the line @\.\./AGENTS\.md to it " \
+    "^WARNING: CLAUDE\.local\.md in this project does not import AGENTS\.md, .* Run /at-setup to add the line @AGENTS\.md to it " \
+    '^Multi-agent framework ready\.$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "$_S16B_C" "$_O" '^\{|hook crashed|instruction-file check did not finish|Triforge 3\.x project template')"
+done
+printf '# mono\n@proj/AGENTS.md\n' > "$_S16B_H/CLAUDE.md"
+_O=$(_s16b_hook "$_S16B_H/proj")
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-hook-parent-import "$_O" 'in this project does not import AGENTS\.md|is not loaded under a Claude lead|^\{|hook crashed')"
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-hook-parent-import "$_O" '^Multi-agent framework ready\.$')"
+_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice; "
+rm -rf "$_S16B"
+# --- end of SELF-16 section B ---
+# --- SELF-16 section C: at-setup's blocks and the headless primitives (U15) ---
+# C (R7, R8, R9, R24, R43): at-setup's bash blocks as written in this
+# checkout's skills/at-setup/references (the first ```bash block under a named
+# heading), each run in its own /bin/bash and /bin/zsh from a fixture git
+# project holding the shipped roster template. SKILL_DIR is this checkout's
+# skills/at-setup, HOME and TMPDIR are throwaway, and CLAUDE_PLUGIN_ROOT, the
+# SELF seam and the host markers are unset unless a case names a session
+# (CLAUDECODE for Claude Code, CODEX_THREAD_ID for Codex). PATH holds stubs
+# (claude, codex, agy, devin, opencode) and python3, git and timeout, so no
+# real optional CLI answers:
+#   order     a Claude Code session, no [lead]: detect -> host, current and
+#             default claude; check with LEAD_CHOICE=codex -> LEAD-WRITE
+#             last, the full-access note, the launch line and the
+#             confinement text; the role, decline, enroll and Devin consent
+#             blocks rc 0; the lead block rc 0, [lead] cli = "codex", the
+#             interactive launch line and the confinement text. The old
+#             order (the lead block first) -> the role block refused, rc 45,
+#             naming the lead, the role left as it was
+#   headless  a Codex session: detect -> default codex; check -> LEAD-WRITE
+#             first; the primitives in that order, each rc 0, give the
+#             roster "order" wrote (bash), consent stamps and enrolled dates
+#             normalized
+#   sandbox   a Codex lead under CODEX_SANDBOX and
+#             CODEX_SANDBOX_NETWORK_DISABLED, devin and opencode signed out:
+#             the preflight says unverified with the relaunch line, the
+#             enroll and role blocks rc 0, the status table's AUTH
+#             unverified, no auth-failed anywhere, no auth cache file
+#   egress    the egress block prints roster_egress_disclosure's lines, the
+#             same as a direct call
+#   instr     detect lists the project's CLAUDE.md and the visibility per
+#             lead (no pointer block: hidden for both); apply without
+#             INSTR_YES -> rc 20 and the bytes unchanged (import, merge);
+#             INSTR_YES=yes, not --yes -> rc 64; the merge with --yes -> the
+#             template AGENTS.md, Codex visible, Claude Code shadowed by the
+#             CLAUDE.md; the import with --yes -> the line, Claude Code
+#             visible; the commit block names both and commits nothing
+#             until COMMIT_YES=yes, then exactly those two
+#   devin     the consent block prints the re-import answer and devin
+#             plugins list's output; the model block lists the account's
+#             ids and the default; the write block with no consent on record
+#             -> rc 2, nothing written; with DEVIN_CONSENT=user rc 0; a
+#             model change without it rc 0, the model changed, the consent
+#             stamp kept
+_S16C="${_S16}/c"
+_S16C_R="${REPO_ROOT}/skills/at-setup/references"
+_S16C_T=$(printf '\t')
+mkdir -p "$_S16C/home" "$_S16C/bin" "$_S16C/tools" "$_S16C/blocks" "$_S16C/tmp"
+for _s16c_x in python3 git timeout gtimeout; do
+  _s16c_p=$(command -v "$_s16c_x" 2>/dev/null || true)
+  if [ -n "$_s16c_p" ]; then ln -s "$_s16c_p" "$_S16C/tools/$_s16c_x" 2>/dev/null || true; fi
+done
+for _s16c_x in claude agy; do
+  printf '#!/bin/sh\n# probe stub (SELF-16 C): --version only\necho 0.0.0-probe-stub\n' > "$_S16C/bin/$_s16c_x"
+done
+printf '#!/bin/sh\n# probe stub (SELF-16 C): codex with the hooks feature off\ncase "${1:-}" in features) echo "hooks  stable  false" ;; *) echo 0.0.0-probe-stub ;; esac\n' > "$_S16C/bin/codex"
+cat > "$_S16C/bin/devin" <<'S16C_DEVIN_EOF'
+#!/bin/sh
+# probe stub (SELF-16 C): devin signed out; the account's model catalog and the installed plugins
+case "${1:-} ${2:-}" in
+  "auth status") echo "Not logged in." ;;
+  "models list") printf '{"families": [{"family_uid": "swe", "variants": [{"model_uid": "swe-1-6-slow"}, {"model_uid": "swe-2-high"}]}]}\n' ;;
+  "plugins list") printf 'acme-review  1.2.0  org\nlint-pack  0.4.1  user\n' ;;
+  *) echo "3000.11.3-probe-stub" ;;
+esac
+S16C_DEVIN_EOF
+printf '#!/bin/sh\n# probe stub (SELF-16 C): OpenCode V1, no provider signed in\ncase "${1:-}" in --version) echo 1.4.2 ;; auth) echo "0 credentials" ;; esac\nexit 0\n' > "$_S16C/bin/opencode"
+chmod +x "$_S16C/bin/claude" "$_S16C/bin/agy" "$_S16C/bin/codex" "$_S16C/bin/devin" "$_S16C/bin/opencode"
+# _s16c_block <reference> <heading> <name> — the first ```bash block under
+# that exact heading line, before the next "## ", into blocks/<name>.sh; rc 1
+# when there is none
+_s16c_block() {
+  python3 - "$_S16C_R/$1" "$2" > "$_S16C/blocks/$3.sh" <<'S16C_BLOCK_PY'
+import sys
+try:
+    lines = open(sys.argv[1], encoding="utf-8").read().split("\n")
+except OSError:
+    sys.exit(1)
+if sys.argv[2] not in lines:
+    sys.exit(1)
+out, inside = [], False
+for ln in lines[lines.index(sys.argv[2]) + 1:]:
+    if not inside:
+        if ln.startswith("## "):
+            sys.exit(1)
+        inside = ln.strip() == "```bash"
+        continue
+    if ln.strip() == "```":
+        print("\n".join(out))
+        sys.exit(0)
+    out.append(ln)
+sys.exit(1)
+S16C_BLOCK_PY
+}
+_S16C_NOBLOCK=""
+for _s16c_x in "lead.md|## Detect the lead|detect" "lead.md|## Check the choice|check" "lead.md|## Write the lead|lead" \
+  "roles.md|## Customize|role" "optional-members.md|## Preflight each member|pre" "optional-members.md|## Enroll or decline|member" \
+  "optional-members.md|## Devin: consent first|dconsent" "optional-members.md|## Devin: the model|dmodel" \
+  "optional-members.md|## Devin: record the answer|dwrite" "status-table.md|## Egress disclosure|egress" \
+  "status-table.md|## The closing table|table" "instruction-files.md|## Detect the files|idetect" \
+  "instruction-files.md|## Apply one change|iapply" "instruction-files.md|## Offer the commit|commit"; do
+  _s16c_f=${_s16c_x%%|*}
+  _s16c_r=${_s16c_x#*|}
+  _s16c_block "$_s16c_f" "${_s16c_r%|*}" "${_s16c_r##*|}" || _S16C_NOBLOCK="${_S16C_NOBLOCK} ${_s16c_r##*|}"
+done
+if [ -n "$_S16C_NOBLOCK" ]; then _S16_FAIL="${_S16_FAIL} c-blocks(none-for:${_S16C_NOBLOCK# })"; fi
+printf 'source "$S16C_ROOT/scripts/invoke-external.sh"; set +e\nroster_egress_disclosure\n' > "$_S16C/blocks/edirect.sh"
+cat > "$_S16C/blocks/headless.sh" <<'S16C_HEADLESS_EOF'
+source "$S16C_ROOT/scripts/invoke-external.sh"; set +e
+R=""
+roster_write_lead codex; R="$R $?"
+roster_write_role tester claude "" high; R="$R $?"
+roster_write_member kimi false ""; R="$R $?"
+roster_write_member opencode true openrouter/z-ai/glm-5.3; R="$R $?"
+roster_write_member devin true swe-2-high --consent user; R="$R $?"
+echo "rcs:$R"
+S16C_HEADLESS_EOF
+# _s16c_do <label> <shell> <dir> <block> [VAR=value...] — one block in its own
+# shell from <dir> under the environment above (the VAR=value pairs last, so
+# a case can override one): "<label>:exit=<rc>", then each output line as
+# "<label>:<line>"
+_s16c_do() {
+  local L=$1 SH=$2 D=$3 B=$4 RC=0
+  shift 4
+  ( cd "$D" && exec env -u CLAUDE_PLUGIN_ROOT -u TRIFORGE_LEASE_WORKER -u TRIFORGE_TEST_LEAD -u TRIFORGE_TEST_BUILDER \
+      -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CODEX_CI -u CODEX_THREAD_ID -u CODEX_HOME -u CODEX_SANDBOX \
+      -u CODEX_SANDBOX_NETWORK_DISABLED -u TRIFORGE_CURSOR_BIN -u XAI_API_KEY -u OPENROUTER_API_KEY -u GROK_HOME \
+      -u LEAD_CHOICE -u ROLE -u ROLE_CLI -u ROLE_MODEL -u ROLE_EFFORT -u MEMBER -u MEMBER_MODEL -u MEMBER_ENABLED \
+      -u DEVIN_MODEL -u DEVIN_CONSENT -u INSTR_OP -u INSTR_FILE -u INSTR_YES -u COMMIT_YES \
+      HOME="$_S16C/home" PATH="$_S16C/bin:$_S16C/tools:/usr/bin:/bin:/usr/sbin:/sbin" TMPDIR="$_S16C/tmp" \
+      GIT_CONFIG_NOSYSTEM=1 SKILL_DIR="$REPO_ROOT/skills/at-setup" S16C_ROOT="$REPO_ROOT" "$@" \
+      ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+120} "$SH" "$_S16C/blocks/$B.sh" ) < /dev/null > "$_S16C/out" 2>&1 || RC=$?
+  echo "${L}:exit=${RC}"
+  sed "s#^#${L}:#" "$_S16C/out"
+}
+# _s16c_repo <dir> [text appended to the roster, %b escapes] — a git project
+# (probe identity): the shipped roster template, a README, one commit
+_s16c_repo() {
+  mkdir -p "$1/ops" && cp "$REPO_ROOT/templates/ops/roster.toml" "$1/ops/roster.toml" && printf '%b' "${2:-}" >> "$1/ops/roster.toml" \
+    && echo r > "$1/README.md" \
+    && ( cd "$1" && export HOME="$_S16C/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main && git config user.email probe@triforge.local \
+         && git config user.name triforge-probe && git add -A && git commit -qm init ) >/dev/null 2>&1
+}
+_s16c_git() { ( cd "$1" && shift && HOME="$_S16C/home" GIT_CONFIG_NOSYSTEM=1 git "$@" ) 2>/dev/null; }
+# _s16c_roster <dir> — the roster's lead, tester role and three members on one line
+_s16c_roster() {
+  python3 - "$1/ops/roster.toml" <<'S16C_ROSTER_PY' 2>&1 || true
+import sys, tomllib
+d = tomllib.load(open(sys.argv[1], "rb"))
+t = d.get("roles", {}).get("tester", {})
+ms = d.get("members", {})
+def m(c):
+    x = ms.get(c)
+    if not isinstance(x, dict):
+        return "-"
+    return str(x.get("enabled")).lower() + "/" + str(x.get("model", "")) + "/" + str(x.get("consent", "-"))[:4]
+print("lead=" + str(d.get("lead", {}).get("cli", "-")) + ":tester=" + str(t.get("cli")) + "/" + str(t.get("effort"))
+      + ":kimi=" + m("kimi") + ":opencode=" + m("opencode") + ":devin=" + m("devin"))
+S16C_ROSTER_PY
+}
+# _s16c_field <dir> <member> <field> — one [members.<member>] field, "-" when absent
+_s16c_field() {
+  python3 - "$1/ops/roster.toml" "$2" "$3" <<'S16C_FIELD_PY' 2>&1 || true
+import sys, tomllib
+m = tomllib.load(open(sys.argv[1], "rb")).get("members", {}).get(sys.argv[2], {})
+print(m.get(sys.argv[3], "-") if isinstance(m, dict) else "-")
+S16C_FIELD_PY
+}
+# _s16c_same <dir> <dir> — "same:<devin's consent, normalized>" when the two
+# rosters load alike once consent times and enrolled dates are normalized
+# (table order aside), else "differ:<first>|<second>"
+_s16c_same() {
+  python3 - "$1/ops/roster.toml" "$2/ops/roster.toml" <<'S16C_SAME_PY' 2>&1 || true
+import json, re, sys, tomllib
+def norm(p):
+    d = tomllib.load(open(p, "rb"))
+    for m in (d.get("members") or {}).values():
+        if isinstance(m, dict):
+            if "consent" in m:
+                m["consent"] = re.sub(r"^user \S+ ", "user <UTC> ", m["consent"])
+            if "enrolled" in m:
+                m["enrolled"] = "<DATE>"
+    return d
+a, b = norm(sys.argv[1]), norm(sys.argv[2])
+ja, jb = json.dumps(a, sort_keys=True), json.dumps(b, sort_keys=True)
+if ja == jb:
+    print("same:consent=" + str(a.get("members", {}).get("devin", {}).get("consent", "-")))
+else:
+    print("differ:" + ja[-300:] + "|" + jb[-300:])
+S16C_SAME_PY
+}
+_S16C_SHELLS=/bin/bash
+if [ -x /bin/zsh ]; then _S16C_SHELLS="/bin/bash /bin/zsh"; fi
+_S16C_LINE='codex -s danger-full-access -c approval_policy="never" -c background_terminal_max_timeout=900000 -m gpt-6-astra -c model_reasoning_effort=xhigh'
+_S16C_LINE_RE=$(printf '%s' "$_S16C_LINE" | sed 's/[.]/\\./g')
+for _s16c_sh in $_S16C_SHELLS; do
+  N=${_s16c_sh##*/}
+  P="$_S16C/order-$N"
+  Q="$_S16C/old-$N"
+  _s16c_repo "$P" || _S16_FAIL="${_S16_FAIL} c-order-$N(fixture)"
+  _s16c_repo "$Q" || _S16_FAIL="${_S16_FAIL} c-order-$N(fixture)"
+  # order: asked first, written last; then the old order
+  O="$(_s16c_do detect "$_s16c_sh" "$P" detect CLAUDECODE=1)
+$(_s16c_do check "$_s16c_sh" "$P" check CLAUDECODE=1 LEAD_CHOICE=codex)
+$(_s16c_do role "$_s16c_sh" "$P" role CLAUDECODE=1 ROLE=tester ROLE_CLI=claude ROLE_MODEL= ROLE_EFFORT=high)
+$(_s16c_do decline "$_s16c_sh" "$P" member CLAUDECODE=1 MEMBER=kimi MEMBER_ENABLED=false)
+$(_s16c_do enroll "$_s16c_sh" "$P" member CLAUDECODE=1 MEMBER=opencode MEMBER_MODEL=openrouter/z-ai/glm-5.3)
+$(_s16c_do devin "$_s16c_sh" "$P" dwrite CLAUDECODE=1 DEVIN_MODEL=swe-2-high DEVIN_CONSENT=user)
+$(_s16c_do lead "$_s16c_sh" "$P" lead CLAUDECODE=1 LEAD_CHOICE=codex)
+roster:$(_s16c_roster "$P")
+$(_s16c_do oldlead "$_s16c_sh" "$Q" lead CLAUDECODE=1 LEAD_CHOICE=codex)
+$(_s16c_do oldrole "$_s16c_sh" "$Q" role CLAUDECODE=1 ROLE=tester ROLE_CLI=claude ROLE_MODEL= ROLE_EFFORT=high)
+oldroster:$(_s16c_roster "$Q")"
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "c-order-$N" "$O" '^detect:exit=0$' '^detect:LEAD-HOST: claude$' '^detect:LEAD-NOW: claude \(default' \
+    '^detect:LEAD-DEFAULT: claude$' '^detect:LEAD-CAN: claude codex$' \
+    '^check:exit=0$' '^check:LEAD-WRITE: last ' '^check:FULL-ACCESS: ' "^check:  ${_S16C_LINE_RE}\$" \
+    "^check:  - Confinement under either lead is Triforge's scripts plus git-integrity detection\\.\$" \
+    '^role:rc=0$' '^decline:rc=0$' '^enroll:rc=0$' '^devin:rc=0$' \
+    '^lead:rc=0$' '^lead:LEAD: Codex CLI leads this project from its next session' "^lead:  ${_S16C_LINE_RE}\$" \
+    "^lead:  - Confinement under either lead is Triforge's scripts plus git-integrity detection\\.\$" \
+    '^lead:  - A lease worktree limits where a worker starts, not where it writes\.$' \
+    '^lead:  - Recorded approval is audit, not prevention, and worker output is an injection surface for a full-access lead\.$' \
+    '^roster:lead=codex:tester=claude/high:kimi=false//-:opencode=true/openrouter/z-ai/glm-5\.3/-:devin=true/swe-2-high/user$' \
+    '^oldlead:rc=0$' '^oldrole:rc=45$' "^oldrole:roster_write_role: REFUSED — this checkout's lead is Codex CLI " \
+    '^oldroster:lead=codex:tester=codex/xhigh:kimi=-:opencode=-:devin=-$')"
+
+  # sandbox: a Codex lead in a workspace-write session, members signed out
+  P="$_S16C/sandbox-$N"
+  _s16c_repo "$P" '\n[lead]\ncli = "codex"\n' || _S16_FAIL="${_S16_FAIL} c-sandbox-$N(fixture)"
+  mkdir -p "$_S16C/tmp-sb-$N"
+  O=""
+  for _s16c_x in "predevin|pre|MEMBER=devin" "preopencode|pre|MEMBER=opencode" "enroll|member|MEMBER=opencode" \
+    "role|role|ROLE=tester" "table|table|S16C_NONE=1"; do
+    _s16c_r=${_s16c_x#*|}
+    O="${O}$(_s16c_do "${_s16c_x%%|*}" "$_s16c_sh" "$P" "${_s16c_r%%|*}" CODEX_THREAD_ID=t-s16c CODEX_SANDBOX=seatbelt CODEX_SANDBOX_NETWORK_DISABLED=1 \
+      TMPDIR="$_S16C/tmp-sb-$N" MEMBER_MODEL=openrouter/z-ai/glm-5.3 ROLE_CLI=claude ROLE_MODEL= ROLE_EFFORT=high "${_s16c_r#*|}")
+"
+  done
+  O="${O}cache:$(ls "$_S16C/tmp-sb-$N" | grep -c '^triforge_auth_' || true)"
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "c-sandbox-$N" "$O" \
+    '^predevin:needs-ask: devin installed=yes default-model=swe-1-6-slow auth=unverified: relaunch with codex -s danger-full-access .* to check devin \(the check failed inside the Codex CLI sandbox, CODEX_SANDBOX=seatbelt, CODEX_SANDBOX_NETWORK_DISABLED=1, which can block it: not a sign-out\)$' \
+    '^predevin:devin: rc=20$' '^preopencode:needs-ask: opencode installed=yes .* auth=unverified: relaunch with codex ' '^preopencode:opencode: rc=20$' \
+    '^enroll:rc=0$' '^role:rc=0$' '^table:exit=0$' '^table:devin +yes +unverified +- ' '^table:opencode +yes +unverified +openrouter/z-ai/glm-5\.3 ' \
+    '^cache:0$')"
+  if printf '%s\n' "$O" | grep -qE 'auth-failed|^table:[a-z]+ +yes +failed'; then _S16_FAIL="${_S16_FAIL} c-sandbox-$N(a-member-marked-signed-out)"; fi
+
+  # instr: each writer only after an explicit yes, then the commit offer
+  P="$_S16C/instr-$N"
+  _s16c_repo "$P" || _S16_FAIL="${_S16_FAIL} c-instr-$N(fixture)"
+  printf '# acme rules\n' > "$P/CLAUDE.md"
+  _s16c_git "$P" add CLAUDE.md >/dev/null || true
+  _s16c_git "$P" commit -qm claude >/dev/null || true
+  _S16C_SUM=$(cksum < "$P/CLAUDE.md")
+  _S16C_HEAD=$(_s16c_git "$P" rev-parse HEAD || true)
+  O="$(_s16c_do detect "$_s16c_sh" "$P" idetect CLAUDECODE=1)
+$(_s16c_do offer0 "$_s16c_sh" "$P" commit CLAUDECODE=1)
+$(_s16c_do importask "$_s16c_sh" "$P" iapply CLAUDECODE=1 INSTR_OP=import INSTR_FILE=CLAUDE.md)
+$(_s16c_do mergeask "$_s16c_sh" "$P" iapply CLAUDECODE=1 INSTR_OP=merge)
+$(_s16c_do importbad "$_s16c_sh" "$P" iapply CLAUDECODE=1 INSTR_OP=import INSTR_FILE=CLAUDE.md INSTR_YES=yes)
+untouched:$(if [ "$(cksum < "$P/CLAUDE.md")" = "$_S16C_SUM" ] && [ ! -e "$P/AGENTS.md" ]; then echo yes; else echo no; fi)
+$(_s16c_do merge "$_s16c_sh" "$P" iapply CLAUDECODE=1 INSTR_OP=merge INSTR_YES=--yes)
+$(_s16c_do detect2 "$_s16c_sh" "$P" idetect CLAUDECODE=1)
+$(_s16c_do import "$_s16c_sh" "$P" iapply CLAUDECODE=1 INSTR_OP=import INSTR_FILE=CLAUDE.md INSTR_YES=--yes)
+$(_s16c_do detect3 "$_s16c_sh" "$P" idetect CLAUDECODE=1)
+content:import=$(if [ "$(cat "$P/CLAUDE.md")" = "$(printf '# acme rules\n@AGENTS.md')" ]; then echo yes; else echo no; fi):template=$(if cmp -s "$REPO_ROOT/templates/AGENTS.md" "$P/AGENTS.md"; then echo yes; else echo no; fi)
+$(_s16c_do offer "$_s16c_sh" "$P" commit CLAUDECODE=1)
+head:$(if [ "$(_s16c_git "$P" rev-parse HEAD || true)" = "$_S16C_HEAD" ]; then echo unchanged; else echo moved; fi)
+$(_s16c_do commit "$_s16c_sh" "$P" commit CLAUDECODE=1 COMMIT_YES=yes)
+committed:$(_s16c_git "$P" show --name-only --format= HEAD | paste -sd, - || true):$(_s16c_git "$P" status --porcelain | grep -c . || true)"
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "c-instr-$N" "$O" '^detect:exit=0$' \
+    "^detect:FILE: CLAUDE\\.md${_S16C_T}project${_S16C_T}no-import,user-owned${_S16C_T}[^${_S16C_T}]*/instr-${N}/CLAUDE\\.md${_S16C_T}@AGENTS\\.md\$" \
+    "^detect:VISIBLE: claude${_S16C_T}hidden${_S16C_T}no AGENTS\\.md between / and [^ ]*/instr-${N} holds the Triforge pointer block; instruction_merge_pointer adds it\$" \
+    "^detect:VISIBLE: codex${_S16C_T}hidden${_S16C_T}no AGENTS\\.md between " \
+    "^detect2:VISIBLE: claude${_S16C_T}hidden${_S16C_T}shadowed by [^ ]*/instr-${N}/CLAUDE\\.md: " "^detect2:VISIBLE: codex${_S16C_T}visible${_S16C_T}" \
+    "^detect3:FILE: CLAUDE\\.md${_S16C_T}project${_S16C_T}imports,user-owned${_S16C_T}" "^detect3:VISIBLE: claude${_S16C_T}visible${_S16C_T}" \
+    '^offer0:COMMIT: nothing setup wrote is uncommitted$' \
+    '^importask:needs-ask: would add the line @AGENTS\.md to [^ ]*/CLAUDE\.md' '^importask:rc=20$' \
+    '^mergeask:needs-ask: would create [^ ]*/AGENTS\.md ' '^mergeask:rc=20$' '^importbad:rc=64$' '^untouched:yes$' \
+    '^import:rc=0$' '^merge:rc=0$' '^content:import=yes:template=yes$' \
+    '^offer:COMMIT: ' '^offer:  AGENTS\.md$' '^offer:  CLAUDE\.md$' '^head:unchanged$' \
+    '^commit:rc=0$' '^committed:AGENTS\.md,CLAUDE\.md:0$')"
+
+  # devin: consent, the plugins notice, the model choice
+  P="$_S16C/devin-$N"
+  _s16c_repo "$P" || _S16_FAIL="${_S16_FAIL} c-devin-$N(fixture)"
+  O="$(_s16c_do consent "$_s16c_sh" "$P" dconsent CLAUDECODE=1)
+$(_s16c_do model "$_s16c_sh" "$P" dmodel CLAUDECODE=1)
+$(_s16c_do noconsent "$_s16c_sh" "$P" dwrite CLAUDECODE=1 DEVIN_MODEL=swe-2-high)
+after-no:$(_s16c_roster "$P")
+$(_s16c_do yes "$_s16c_sh" "$P" dwrite CLAUDECODE=1 DEVIN_MODEL=swe-1-6-slow DEVIN_CONSENT=user)"
+  _S16C_STAMP=$(_s16c_field "$P" devin consent)
+  O="$O
+$(_s16c_do change "$_s16c_sh" "$P" dwrite CLAUDECODE=1 DEVIN_MODEL=swe-2-high)
+kept:model=$(_s16c_field "$P" devin model):consent=$(if [ "$(_s16c_field "$P" devin consent)" = "$_S16C_STAMP" ]; then echo kept; else echo changed; fi):$(printf '%s' "$_S16C_STAMP" | cut -c1-5)"
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "c-devin-$N" "$O" '^consent:exit=0$' '^consent:DEVIN-ENV-REIMPORT: (yes|no|unknown)$' \
+    '^consent:.*devin plugins list' '^consent:  acme-review  1\.2\.0  org$' '^consent:  lint-pack  0\.4\.1  user$' \
+    '^model:swe-1-6-slow$' '^model:swe-2-high$' '^model:rc=0$' '^model:DEFAULT: swe-1-6-slow$' \
+    '^noconsent:rc=2$' '^noconsent:roster_write_member: REFUSED — enrolling devin needs the user consent on record' '^after-no:.*:devin=-$' \
+    '^yes:rc=0$' '^change:rc=0$' '^kept:model=swe-2-high:consent=kept:user $')"
+
+  # egress: the block prints the disclosure the helper computes
+  P="$_S16C/egress-$N"
+  _s16c_repo "$P" '\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n' || _S16_FAIL="${_S16_FAIL} c-egress-$N(fixture)"
+  O="$(_s16c_do egress "$_s16c_sh" "$P" egress)"
+  _S16C_DIRECT=$(_s16c_do egress "$_s16c_sh" "$P" edirect | grep -v '^egress:exit=' || true)
+  O="$O
+same:$(if [ "$(printf '%s\n' "$O" | grep -v -e '^egress:exit=' -e '^egress:rc=' || true)" = "$_S16C_DIRECT" ]; then echo yes; else echo no; fi)"
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "c-egress-$N" "$O" '^egress:exit=0$' '^egress:rc=0$' \
+    '^egress:egress: Claude Code sends the prompts and code to Anthropic$' '^egress:egress: Antigravity CLI sends the prompts and code to Google$' \
+    '^egress:egress: Codex CLI sends the prompts and code to OpenAI$' '^egress:egress: Grok Build sends the prompts and code to xAI$' \
+    '^egress:home: Grok Build runs as you, so it can read the credential files under [^ ]*/c/home and send them to xAI$' '^same:yes$')"
+done
+
+# headless: a Codex session calls the primitives in the order the check
+# block prints; the roster matches the guided one (bash) once normalized
+P="$_S16C/headless"
+_s16c_repo "$P" || _S16_FAIL="${_S16_FAIL} c-headless(fixture)"
+O="$(_s16c_do detect /bin/bash "$P" detect CODEX_THREAD_ID=t-s16c)
+$(_s16c_do check /bin/bash "$P" check CODEX_THREAD_ID=t-s16c LEAD_CHOICE=codex)
+$(_s16c_do run /bin/bash "$P" headless CODEX_THREAD_ID=t-s16c)
+same:$(_s16c_same "$_S16C/order-bash" "$P")"
+_S16_FAIL="${_S16_FAIL}$(_self_expect c-headless "$O" '^detect:LEAD-NOW: claude \(default' '^detect:LEAD-DEFAULT: codex$' '^check:LEAD-WRITE: first ' \
+  '^run:rcs: 0 0 0 0 0$' '^same:same:consent=user <UTC> via=lead-session$')"
+_S16_EV="${_S16_EV}C: at-setup's blocks as written under ${_S16C_SHELLS}: the lead asked first and written last (the old order rc 45), the headless primitives give the guided roster, unverified in a Codex sandbox with no cache, the egress lines, instruction writers only on --yes and the commit offer, Devin consent, model and plugins; "
+unset N P Q _S16C_SUM _S16C_HEAD _S16C_STAMP _S16C_DIRECT _S16C_NOBLOCK _S16C_LINE _S16C_LINE_RE _s16c_sh _s16c_x _s16c_r _s16c_f _s16c_p
+rm -rf "$_S16C"
+# --- end of SELF-16 section C ---
+_S16_CAP="at-setup: the lead asked first and written last, one roster at the checkout top, the computed egress and HOME credential-read disclosure, Codex trust and hook trust read and never written, the launch lines, sandbox-aware auth, instruction files detected in the project and above with ask-first writers and the AGENTS.md budget, the Devin model choice (U15)"
+for _S16_SEC in A B C; do
+  case "$_S16_EV" in *"${_S16_SEC}:"*) ;; *) _S16_FAIL="${_S16_FAIL} section-${_S16_SEC}(no-case-ran)" ;; esac
+done
+if [ -z "$_S16_FAIL" ]; then
+  row "SELF-16" "claude" "$_S16_CAP" "PASS" "$(printf '%s' "$_S16_EV" | cut -c1-3000)" "static"
+else
+  row "SELF-16" "claude" "$_S16_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S16_FAIL"):$(printf '%s' "$_S16_FAIL" | cut -c1-700)" "static"
+fi
+rm -rf "$_S16"
