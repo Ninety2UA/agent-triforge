@@ -10997,6 +10997,265 @@ _S28_FAIL=""
 _S28_EV=""
 mkdir -p "$_S28"
 # --- SELF-28 cases (worker 6-watch) ---
+# blocks   the swarm and wait blocks under "## Stage 2–3" of
+#          .claude/commands/cli-watch.md and repo-watch.md, taken as written and
+#          run under /bin/bash and /bin/zsh from a fixture checkout (this
+#          checkout's scripts, personas, .claude-plugin and .claude linked in, a
+#          copy of ops/watch-registry.toml), through the real persona lane, with
+#          stub claude, gh and firecrawl first on PATH: one worker per target
+#          started by persona_spawn as the read-web persona the command names
+#          (framework-docs-researcher for CLIs, best-practices-researcher for
+#          repos); its argv the read-web class (--tools and --allowedTools
+#          Read,Grep,Glob,WebFetch,WebSearch, dontAsk, --strict-mcp-config,
+#          --safe-mode, CLAUDE_CODE_DISABLE_ATTACHMENTS=1, the worker marker
+#          persona) and the watch brief; its input the registry entry, the window
+#          and the pages the lead fetched (gh api for GitHub releases, files and
+#          repos, firecrawl for the rest); its report in <run>/<name>.md; a repo
+#          whose gh metadata answers 404 flagged, with no worker; no zsh glob,
+#          job or unset-parameter error
+#   nowrite  in every blocks run the stub persona writes a file in its own
+#          working directory, and tries the checkout (the prompt's project root)
+#          and $TMPDIR only when its --tools names a tool that can write: denied
+#          by the argv the lane gave it; after the wait block no
+#          triforge-persona.* scratch directory is left under TMPDIR (its cwd
+#          file gone with it), nothing is in TMPDIR or the checkout from it, and
+#          the checkout's listing is unchanged. Control: the same stub given an
+#          edit-class --tools writes both. A stub shows the flags the lane hands
+#          the CLI and the cleanup around the run; it cannot show that Claude
+#          Code enforces --tools under dontAsk. CC-21 is the live proof for the
+#          read class, and read-web adds only the two web tools
+#   registry every CLI the registry names (cli_table all binary tier) has a
+#          [cli.<name>] entry in ops/watch-registry.toml with the same binary
+#          and tier; every [cli.*] entry carries name, binary, tier, probe and
+#          https releases/changelog/docs URLs; [meta] counts match the tables
+mkdir -p "$_S28/co/ops" "$_S28/home" "$_S28/bin" "$_S28/log" "$_S28/blocks" "$_S28/tpl"
+for _s28_d in scripts personas .claude-plugin .claude; do ln -s "${REPO_ROOT}/${_s28_d}" "$_S28/co/${_s28_d}"; done
+cp "${REPO_ROOT}/ops/watch-registry.toml" "$_S28/co/ops/watch-registry.toml" 2>/dev/null || true
+cat > "$_S28/tpl/claude" <<'S28_CLAUDE_EOF'
+#!/bin/sh
+# SELF-28 stub claude: --version, and --help naming --safe-mode; otherwise it
+# records argv, environment, prompt and input per worker (named after its
+# input file), writes a file in its working directory, and tries the checkout
+# and $TMPDIR only when its --tools names a tool that can write
+L='@LOG@'
+case "${1:-}" in
+  --version) echo "2.1.291 (Claude Code)"; exit 0 ;;
+  --help) echo "  --safe-mode   Start with all customizations disabled"; echo "  --tools <tools...>"; exit 0 ;;
+esac
+P=""
+for a in "$@"; do P=$a; done
+IN=$(printf '%s\n' "$P" | sed -n 's/^Input: //p' | head -1)
+N=$(basename "${IN:-none}" .input.md)
+printf '%s\n' "$@" > "$L/argv.$N"
+printf '%s' "$P" > "$L/prompt.$N"
+env | LC_ALL=C sort > "$L/env.$N"
+cp "$IN" "$L/input.$N" 2>/dev/null || true
+pwd -P > "$L/cwd.$N"
+echo w > persona-cwd.txt
+ROOT=$(printf '%s\n' "$P" | sed -n "s/^Project root: \(.*\) (the lead's checkout).*/\1/p" | head -1)
+T=$(awk 'p { print; exit } $0 == "--tools" { p = 1 }' "$L/argv.$N")
+case ",$T," in
+  *,Write,* | *,Edit,* | *,MultiEdit,* | *,NotebookEdit,* | *,Bash,*)
+    echo w > "${ROOT:-.}/persona-wrote.txt"; echo w > "${TMPDIR:-/tmp}/persona-wrote.txt"; echo "granted:$T" > "$L/write.$N" ;;
+  *) echo "denied:$T" > "$L/write.$N" ;;
+esac
+python3 -c 'import json, sys; print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": sys.argv[1], "session_id": "00000000-0000-4000-8000-000000000028", "num_turns": 1}))' "REPORT for $N"
+S28_CLAUDE_EOF
+cat > "$_S28/tpl/gh" <<'S28_GH_EOF'
+#!/bin/sh
+# SELF-28 stub gh: logs each call; `gh api <endpoint>` prints one line naming
+# the endpoint, or fails as a 404 for a repo listed in the gh404 file
+L='@LOG@'
+printf '%s\n' "$*" >> "$L/gh.calls"
+EP=""
+for a in "$@"; do case "$a" in repos/*) EP=$a ;; esac; done
+if [ -f "$L/gh404" ]; then
+  while read -r R; do
+    case "$EP" in "repos/$R" | "repos/$R/"* | "repos/$R?"*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;; esac
+  done < "$L/gh404"
+fi
+echo "GH-STUB ${EP}"
+S28_GH_EOF
+cat > "$_S28/tpl/firecrawl" <<'S28_FC_EOF'
+#!/bin/sh
+# SELF-28 stub firecrawl: logs each call and prints one line naming the URL
+L='@LOG@'
+printf '%s\n' "$*" >> "$L/firecrawl.calls"
+U=""
+for a in "$@"; do case "$a" in https://*) U=$a ;; esac; done
+echo "FIRECRAWL-STUB ${U}"
+S28_FC_EOF
+for _s28_b in claude gh firecrawl; do
+  sed "s#@LOG@#${_S28}/log#" "$_S28/tpl/$_s28_b" > "$_S28/bin/$_s28_b"
+  chmod +x "$_S28/bin/$_s28_b"
+done
+# _s28_x <md> <n> — the n-th ```bash fence under the "## Stage 2" heading of <md>
+_s28_x() {
+  python3 - "$1" "$2" <<'S28_X_PY'
+import sys
+k, n, out, fence, cur, under = 0, int(sys.argv[2]), [], False, 0, False
+for l in open(sys.argv[1], encoding="utf-8").read().split("\n"):
+    s = l.strip()
+    if fence:
+        if s == "```":
+            fence = False
+        elif cur == n:
+            out.append(l)
+        continue
+    if s.startswith("```"):
+        fence, cur = True, 0
+        if under and s == "```bash":
+            k += 1
+            cur = k
+        continue
+    if l.startswith("## "):
+        under = l.startswith("## Stage 2")
+print("\n".join(out))
+S28_X_PY
+}
+for _s28_k in cli repo; do
+  _s28_x "${REPO_ROOT}/.claude/commands/${_s28_k}-watch.md" 1 > "$_S28/blocks/${_s28_k}-swarm.sh" 2>/dev/null || true
+  _s28_x "${REPO_ROOT}/.claude/commands/${_s28_k}-watch.md" 2 > "$_S28/blocks/${_s28_k}-wait.sh" 2>/dev/null || true
+done
+# _s28_blk <shell> <script> <case dir> — one block from the fixture checkout (90 s at most); prints its rc
+_s28_blk() {
+  local RC=0
+  ( cd "$_S28/co" && exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN" 90} "$1" "$2" ) > "$3/out" 2>&1 < /dev/null || RC=$?
+  cat "$3/out" >> "$3/out-all"
+  echo "$RC"
+}
+# _s28_arg <file> <flag> — the line after <flag> in a recorded argv
+_s28_arg() { awk -v f="$2" 'p { print; exit } $0 == f { p = 1 }' "$1" 2>/dev/null || true; }
+# _s28_case <shell> <cli|repo> <targets> [<repo gh answers 404 for>] — the
+# swarm block with those targets and window 2026-09-27, then the wait block
+# while it returns 75 (20 times at most), with a throwaway HOME and TMPDIR;
+# prints the case's lines
+_s28_case() {
+  local SH=$1 K=$2 NAMES=$3 G=${4:-} SN P PT S W="" R RUN N I=0 CO0 D DW
+  SN=$(basename "$SH")
+  P="$_S28/$K-$SN"
+  mkdir -p "$P/tmp"
+  PT=$(cd "$P/tmp" && pwd -P)
+  rm -f "$_S28/log/"*
+  if [ -n "$G" ]; then printf '%s\n' "$G" > "$_S28/log/gh404"; fi
+  sed -e "s#<the Stage 1 working set[^>]*>#${NAMES}#" -e 's#<the window start, YYYY-MM-DD>#2026-09-27#' "$_S28/blocks/$K-swarm.sh" > "$P/swarm.sh"
+  CO0=$(ls -la "$_S28/co" "$_S28/co/ops" 2>&1 | cksum)
+  ( export HOME="$_S28/home" PATH="$_S28/bin:$PATH" TMPDIR="$P/tmp" GIT_CONFIG_NOSYSTEM=1 TRIFORGE_LEAD_WAIT_BUDGET_S=3
+    unset CLAUDE_PLUGIN_ROOT TRIFORGE_LEASE_ROOT WATCH_RUN
+    S=$(_s28_blk "$SH" "$P/swarm.sh" "$P")
+    RUN=$(sed -n 's/^[a-z-]*: run directory \([^ ]*\) .*/\1/p' "$P/out-all" | head -1)
+    if [ -n "$RUN" ] && [ "$S" = 0 ]; then
+      export WATCH_RUN="$RUN"
+      while [ "$I" -lt 20 ]; do
+        R=$(_s28_blk "$SH" "$_S28/blocks/$K-wait.sh" "$P"); W="${W}${W:+/}${R}"
+        [ "$R" = 75 ] || break
+        I=$((I + 1)); sleep 1
+      done
+    fi
+    printf '%s:%s:swarm=%s:wait=%s:workers=%s:reports=%s:failed=%s:flagged=%s:bad=%s\n' "$K" "$SN" "$S" "${W:--}" \
+      "$(paste -sd, "$RUN/workers" 2>/dev/null || true)" \
+      "$(for N in $(cat "$RUN/workers" 2>/dev/null); do grep -l "^REPORT for $N\$" "$RUN/$N.md" 2>/dev/null; done | grep -c . || true)" \
+      "$(paste -sd, "$RUN/failed" 2>/dev/null || true)" \
+      "$(cut -f1 "$RUN/flagged" 2>/dev/null | paste -sd, - || true)" \
+      "$(grep -c -E 'no matches found|job not found|bad pattern|command not found|parameter not set|unbound variable|bad substitution' "$P/out-all" 2>/dev/null || true)"
+    for N in $(cat "$RUN/workers" 2>/dev/null); do
+      printf '%s:%s:argv:%s:tools=%s:allowed=%s:mode=%s:safe=%s:strictmcp=%s:attach=%s:worker=%s:%s\n' "$K" "$SN" "$N" \
+        "$(_s28_arg "$_S28/log/argv.$N" --tools)" "$(_s28_arg "$_S28/log/argv.$N" --allowedTools)" \
+        "$(_s28_arg "$_S28/log/argv.$N" --permission-mode)" \
+        "$(if grep -qx -- --safe-mode "$_S28/log/argv.$N" 2>/dev/null; then echo yes; else echo no; fi)" \
+        "$(if grep -qx -- --strict-mcp-config "$_S28/log/argv.$N" 2>/dev/null; then echo yes; else echo no; fi)" \
+        "$(sed -n 's/^CLAUDE_CODE_DISABLE_ATTACHMENTS=//p' "$_S28/log/env.$N" 2>/dev/null)" \
+        "$(sed -n 's/^TRIFORGE_LEASE_WORKER=//p' "$_S28/log/env.$N" 2>/dev/null)" \
+        "$(sed -n 's/^Triforge persona dispatch: persona \([^,]*\), class \([^ ]*\) .*/persona=\1:class=\2/p' "$_S28/log/prompt.$N" 2>/dev/null)"
+      printf '%s:%s:input:%s:%s\n' "$K" "$SN" "$N" \
+        "$(grep -E -o '^(GH-STUB|FIRECRAWL-STUB) [^ ?]*|^Window: [0-9-]*|^(binary|url): [^ ]*' "$_S28/log/input.$N" 2>/dev/null | tr '\n' '|')"
+      printf '%s:%s:brief:%s:%s\n' "$K" "$SN" "$N" "$(grep -c 'PRIMARY SOURCES ONLY' "$_S28/log/prompt.$N" 2>/dev/null || true)"
+      D=$(cat "$_S28/log/cwd.$N" 2>/dev/null || true)
+      DW=other
+      case "$D" in "$PT"/triforge-persona.*/cwd) DW=scratch ;; esac
+      printf '%s:%s:nowrite:%s:write=%s:cwd=%s:cwdgone=%s\n' "$K" "$SN" "$N" "$(cut -d: -f1 "$_S28/log/write.$N" 2>/dev/null)" "$DW" \
+        "$(if [ -n "$D" ] && [ ! -e "$D" ]; then echo yes; else echo no; fi)"
+    done
+    printf '%s:%s:tmp:scratch=%s:tmpfile=%s:cofile=%s:co=%s\n' "$K" "$SN" \
+      "$(find "$P/tmp" -maxdepth 1 -name 'triforge-persona.*' 2>/dev/null | grep -c . || true)" \
+      "$(if [ -e "$P/tmp/persona-wrote.txt" ]; then echo present; else echo absent; fi)" \
+      "$(if [ -e "$_S28/co/persona-wrote.txt" ]; then echo present; else echo absent; fi)" \
+      "$(if [ "$(ls -la "$_S28/co" "$_S28/co/ops" 2>&1 | cksum)" = "$CO0" ]; then echo same; else echo changed; fi)"
+  ) 2>&1 || true
+}
+_S28_SHELLS="/bin/bash"
+if [ -x /bin/zsh ]; then _S28_SHELLS="/bin/bash /bin/zsh"; else _S28_FAIL="${_S28_FAIL} zsh(no /bin/zsh: the bash half alone is no evidence for the leads' shell)"; fi
+for _S28_SH in $_S28_SHELLS; do
+  _S28_N=$(basename "$_S28_SH")
+  O=$(_s28_case "$_S28_SH" cli "claude grok")
+  _S28_ARGV="tools=Read,Grep,Glob,WebFetch,WebSearch:allowed=Read,Grep,Glob,WebFetch,WebSearch:mode=dontAsk:safe=yes:strictmcp=yes:attach=1:worker=persona"
+  _S28_FAIL="${_S28_FAIL}$(_self_expect "cli-${_S28_N}" "$O" \
+    "^cli:${_S28_N}:swarm=0:wait=(75/)*0:workers=claude,grok:reports=2:failed=:flagged=:bad=0$" \
+    "^cli:${_S28_N}:argv:claude:${_S28_ARGV}:persona=framework-docs-researcher:class=read-web$" \
+    "^cli:${_S28_N}:argv:grok:${_S28_ARGV}:persona=framework-docs-researcher:class=read-web$" \
+    "^cli:${_S28_N}:input:claude:Window: 2026-09-27\|binary: claude\|GH-STUB repos/anthropics/claude-code/releases\|GH-STUB repos/anthropics/claude-code/contents/CHANGELOG.md\|FIRECRAWL-STUB https://code.claude.com/docs\|$" \
+    "^cli:${_S28_N}:input:grok:Window: 2026-09-27\|binary: grok\|FIRECRAWL-STUB https://www.npmjs.com/package/@xai-official/grok\|FIRECRAWL-STUB https://x.ai/build/changelog\|FIRECRAWL-STUB https://docs.x.ai/build/overview\|$" \
+    "^cli:${_S28_N}:brief:claude:1$" "^cli:${_S28_N}:brief:grok:1$" \
+    "^cli:${_S28_N}:nowrite:claude:write=denied:cwd=scratch:cwdgone=yes$" "^cli:${_S28_N}:nowrite:grok:write=denied:cwd=scratch:cwdgone=yes$" \
+    "^cli:${_S28_N}:tmp:scratch=0:tmpfile=absent:cofile=absent:co=same$")"
+  O=$(_s28_case "$_S28_SH" repo "superpowers gsd-core" open-gsd/gsd-core)
+  _S28_FAIL="${_S28_FAIL}$(_self_expect "repo-${_S28_N}" "$O" \
+    "^repo:${_S28_N}:swarm=0:wait=(75/)*0:workers=superpowers:reports=1:failed=:flagged=gsd-core:bad=0$" \
+    "^repo:${_S28_N}:argv:superpowers:${_S28_ARGV}:persona=best-practices-researcher:class=read-web$" \
+    "^repo:${_S28_N}:input:superpowers:Window: 2026-09-27\|url: https://github.com/obra/superpowers\|GH-STUB repos/obra/superpowers\|GH-STUB repos/obra/superpowers/readme\|GH-STUB repos/obra/superpowers/releases\|GH-STUB repos/obra/superpowers/commits\|GH-STUB repos/obra/superpowers/contents\|$" \
+    "^repo:${_S28_N}:brief:superpowers:1$" \
+    "^repo:${_S28_N}:nowrite:superpowers:write=denied:cwd=scratch:cwdgone=yes$" \
+    "^repo:${_S28_N}:tmp:scratch=0:tmpfile=absent:cofile=absent:co=same$")"
+done
+# nowrite control: the same stub, given an edit-class tool set, writes both
+mkdir -p "$_S28/ctl/tmp" "$_S28/ctl/root" "$_S28/ctl/cwd"
+printf 'x\n' > "$_S28/ctl/x.input.md"
+rm -f "$_S28/log/"*
+( cd "$_S28/ctl/cwd" && TMPDIR="$_S28/ctl/tmp" "$_S28/bin/claude" -p --tools "Bash,Read,Edit,Write" --permission-mode acceptEdits \
+    "Project root: $_S28/ctl/root (the lead's checkout). Relative paths resolve there.
+Input: $_S28/ctl/x.input.md" ) > /dev/null 2>&1 || true
+O=$(printf 'ctl:write=%s:root=%s:tmp=%s\n' "$(cut -d: -f1 "$_S28/log/write.x" 2>/dev/null)" \
+  "$(if [ -e "$_S28/ctl/root/persona-wrote.txt" ]; then echo present; else echo absent; fi)" \
+  "$(if [ -e "$_S28/ctl/tmp/persona-wrote.txt" ]; then echo present; else echo absent; fi)")
+_S28_FAIL="${_S28_FAIL}$(_self_expect ctl "$O" '^ctl:write=granted:root=present:tmp=present$')"
+# registry: the watch registry against the CLI registry
+O=$( ( cd "$REPO_ROOT" && unset CLAUDE_PLUGIN_ROOT && source scripts/invoke-external.sh > /dev/null 2>&1 && cli_table all binary tier ) 2>/dev/null \
+  | python3 -c '
+import sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        print("reg:toml=missing")
+        sys.exit(0)
+d = tomllib.load(open(sys.argv[1], "rb"))
+cli, repo, meta = d.get("cli", {}), d.get("repo", {}), d.get("meta", {})
+miss, bad, n = [], [], 0
+for line in sys.stdin.read().splitlines():
+    name, binary, tier = (line.split("\t") + ["", "", ""])[:3]
+    n += 1
+    e = cli.get(name)
+    if e is None:
+        miss.append(name)
+    elif e.get("binary") != binary or e.get("tier") != tier:
+        bad.append(name + "(binary/tier)")
+for name, e in sorted(cli.items()):
+    for f in ("name", "binary", "tier", "probe"):
+        if f not in e:
+            bad.append(name + "." + f)
+    for f in ("releases", "changelog", "docs"):
+        if not str(e.get(f, "")).startswith("https://"):
+            bad.append(name + "." + f)
+print("reg:registry=%d:missing=%s" % (n, ",".join(miss)))
+print("reg:mismatch=" + ",".join(bad))
+print("reg:count=%d:meta=%s:repos=%d:rmeta=%s" % (len(cli), meta.get("cli_count"), len(repo), meta.get("repo_count")))
+print("reg:clis=" + ",".join(sorted(cli)))
+' "${REPO_ROOT}/ops/watch-registry.toml" 2>&1)
+_S28_FAIL="${_S28_FAIL}$(_self_expect registry "$O" '^reg:registry=8:missing=$' '^reg:mismatch=$' '^reg:count=11:meta=11:repos=7:rmeta=7$' \
+  '^reg:clis=antigravity,chrome-devtools,claude,codex,cursor,devin,firecrawl,gh,grok,kimi,opencode$')"
+_S28_EV="blocks: cli-watch and repo-watch swarm + wait blocks from this checkout under ${_S28_SHELLS}, real persona lane, stub claude/gh/firecrawl: one worker per target via persona_spawn (claude, grok -> framework-docs-researcher; superpowers -> best-practices-researcher), argv read-web (--tools/--allowedTools Read,Grep,Glob,WebFetch,WebSearch, dontAsk, strict MCP, --safe-mode, attachments off, marker persona) + the watch brief, input = registry entry + window + the lead's gh/firecrawl pages, reports in the run dir, a gh-404 repo flagged with no worker, no zsh error; nowrite: the stub's checkout and TMPDIR writes denied by that argv, its scratch dir gone (cwd file with it), no triforge-persona.* left, checkout listing unchanged (control: edit-class --tools writes both; a stub shows the flags and cleanup, CC-21 is the live proof for the read class); registry: all 8 registry CLIs in ops/watch-registry.toml with the same binary and tier, 11 [cli.*] / 7 [repo.*] matching [meta]"
 # --- end of SELF-28 cases ---
 _S28_CAP="the watch cycle: research workers through dispatch_persona read-web, a write denied, nothing left under the temp dir, the watch registry covering every registered CLI (U19)"
 if [ -z "$_S28_EV" ]; then _S28_FAIL="${_S28_FAIL} cases(no-case-ran)"; fi
