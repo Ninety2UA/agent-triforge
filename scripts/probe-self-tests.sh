@@ -1268,7 +1268,35 @@ rm -rf "$_S8B" "$_S8"
 #            directory holding a legacy context-monitor.local.md: rc 0, no
 #            crash, both targets byte-identical and nothing added to the
 #            linked directory, a WARNING naming the refused file, and in the
-#            real .claude the runtime file a regular file
+#            real .claude the runtime file a regular file. Links at the
+#            pid-free names (<file>.tmp, .new, ~) stay untouched too
+#   tmplink also plants those pid-free names beside the pointer, the
+#            .agents/.gitignore, the skills stamp and the agy stamp, and checks
+#            the mechanism statically: no code line in bootstrap.sh,
+#            session-start.sh or skills-sync.py names a predictable temp file
+#            or moves one with mv -f, and both writers create temps
+#            O_EXCL|O_NOFOLLOW under a random (token_hex) name (round 3, R6)
+#   writer   also: a symlinked parent one and two levels down refuses (rc 3,
+#            named, nothing in the target: R4); an append to a file with a
+#            second hard link refuses (rc 5, the shared inode unchanged), and
+#            a replace over one writes a new inode (R3)
+#   subdir   also names the anchor in one orientation line, "Project root:
+#            <repo> (ops/ lives there; ...)", which a session started at the
+#            root never prints (R7)
+#   home     a home directory as the project, plain and as a git repository
+#            (HOME = the working directory, PATH the stubs plus python3, git
+#            and the timeout tool): the bootstrap rc 80 with one WARNING, and
+#            session start rc 0 with one WARNING and no one-time notice; the
+#            directory byte-identical after both (R1)
+#   synctmp  skills-sync.py run directly, its pid read first: links at
+#            <stamp>.tmp.<pid>, .tmp, .new and ~ -> a HOME file stay
+#            untouched, the stamp a regular file, the portable set copied (R2)
+#   hardlink an untracked .agents/.gitignore hard-linked to a HOME file:
+#            rc 80, a WARNING about the hard links, the shared inode
+#            unchanged, no pointer (R3)
+#   lrname   a lease root named with a newline and a JSON-looking line: the
+#            refusal is one stderr line (rc 45), and no line session start
+#            prints there starts with "{" (R5)
 # Negative control: the setup block with its triforge_bootstrap line removed
 # leaves a fresh project without ops/, so the ops/ check above sees the call.
 _S21="${WORK}/self21"
@@ -1408,15 +1436,17 @@ _S21_CTL=0
 [ "$_S21_CTL" -eq 1 ] || _S21_FAIL="$_S21_FAIL build-control-without-pointer-rc=${_S21_CTL}"
 mv "$_S21/pointer.aside" "$_S21/proj/.agents/triforge-plugin-root.local" 2>/dev/null || true
 # hook: session start after the skill bootstrapped the project
-_s21_hook_quiet() { # _s21_hook_quiet <label> <dir> — session start from <dir>: rc 0, no crash, no "session-start:" line
+_s21_hook_quiet() { # _s21_hook_quiet <label> <dir> — session start from <dir>: rc 0, no crash, no "session-start:" line; output kept in <label>.hook
   local RC=0 OUT N
   OUT=$( cd "$2" && HOME="$_S21/home" TMPDIR="$_S21/tmp" PATH="$_S21/bin:$PATH" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GIT_CONFIG_NOSYSTEM=1 \
            /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" < /dev/null 2>&1 ) || RC=$?
+  printf '%s\n' "$OUT" > "$_S21/$1.hook"
   N=$(printf '%s\n' "$OUT" | grep -c '^session-start:' || true)
   { [ "$RC" -eq 0 ] && [ "$N" -eq 0 ] && ! printf '%s\n' "$OUT" | grep -q 'hook crashed'; } \
     || _S21_FAIL="$_S21_FAIL $1(rc=${RC},lines=${N}:$({ printf '%s\n' "$OUT" | grep -m1 '^session-start:\|hook crashed' || true; } | cut -c1-120))"
 }
 _s21_hook_quiet hook-after-setup "$_S21/proj"
+! grep -q '^Project root:' "$_S21/hook-after-setup.hook" || _S21_FAIL="$_S21_FAIL hook-after-setup-names-a-root-it-started-in"
 # zsh: a second fresh project bootstrapped from a zsh shell
 if [ -n "$_S21_ZSH" ]; then
   _S21_RC=$(_s21_run zsh "$_S21_ZSH" "$_S21/proj-zsh" "$REPO_ROOT/skills/at-setup" "$_S21/setup.sh")
@@ -1445,11 +1475,16 @@ _s21_until() { # _s21_until <file> — wait up to 10 s for <file> to exist
   local N=0
   while [ ! -e "$1" ] && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done
 }
-mkdir -p "$_S21/proj-tmp/.agents" "$_S21/proj-tmp/.claude"
+mkdir -p "$_S21/proj-tmp/.agents/skills" "$_S21/proj-tmp/.claude"
 _s21_git "$_S21/proj-tmp" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-tmp"
 printf '# acme agents\n' > "$_S21/proj-tmp/AGENTS.md"
 printf 'user-tier file\n' > "$_S21/home/victim.conf"
 _S21_SUMV=$(cksum "$_S21/proj-tmp/AGENTS.md" "$_S21/home/victim.conf")
+# R6: the pid-free predictable names too, beside every file the run writes
+for _s21_d in .agents/triforge-plugin-root.local .agents/.gitignore .agents/skills/.triforge-plugin-version .claude/agy-pack-version.local.md; do
+  for _s21_x in .tmp .new '~'; do ln -s "$_S21/home/victim.conf" "$_S21/proj-tmp/${_s21_d}${_s21_x}"; done
+done
+unset _s21_d _s21_x
 ( cd "$_S21/proj-tmp" && env -u CLAUDE_PLUGIN_ROOT -u TRIFORGE_LEASE_WORKER HOME="$_S21/home" PATH="$_S21/bin:$PATH" TMPDIR="$_S21/tmp" GIT_CONFIG_NOSYSTEM=1 \
     /bin/bash -c 'echo $$ > "$1"; N=0; while [ ! -e "$2" ] && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done; source "$3/scripts/invoke-external.sh"; R=0; triforge_bootstrap || R=$?; echo "rc=$R"' \
     s21 "$_S21/tmplink.pid" "$_S21/tmplink.go" "$REPO_ROOT" < /dev/null > "$_S21/tmplink.out" 2> "$_S21/tmplink.err" ) &
@@ -1465,6 +1500,21 @@ grep -qx 'rc=0' "$_S21/tmplink.out" || _S21_FAIL="$_S21_FAIL tmplink-rc($(tr '\n
 { [ -f "$_S21/proj-tmp/.agents/triforge-plugin-root.local" ] && [ ! -L "$_S21/proj-tmp/.agents/triforge-plugin-root.local" ] && [ "$(_s21_pointer "$_S21/proj-tmp")" = "$_S21_ROOT" ]; } \
   || _S21_FAIL="$_S21_FAIL tmplink-pointer-not-a-regular-file-naming-the-root"
 { [ -f "$_S21/proj-tmp/.claude/agy-pack-version.local.md" ] && [ ! -L "$_S21/proj-tmp/.claude/agy-pack-version.local.md" ]; } || _S21_FAIL="$_S21_FAIL tmplink-stamp-not-a-regular-file"
+{ [ -f "$_S21/proj-tmp/.agents/skills/.triforge-plugin-version" ] && [ ! -L "$_S21/proj-tmp/.agents/skills/.triforge-plugin-version" ]; } || _S21_FAIL="$_S21_FAIL tmplink-skills-stamp-not-a-regular-file"
+# R6, the mechanism: every write that replaces a file goes through a temp file
+# created O_CREAT|O_EXCL|O_NOFOLLOW under a random name; no code line in the
+# writers names a predictable temp file (<dest>.tmp, .tmp.<pid>) or moves one
+# into place with mv -f
+_S21_STATIC=""
+for _s21_f in scripts/lib/bootstrap.sh hooks/handlers/session-start.sh scripts/lib/skills-sync.py; do
+  _S21_HIT=$(grep -nE '\.tmp(\.|"|$)|mv -f ' "$REPO_ROOT/$_s21_f" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' | head -1 || true)
+  [ -z "$_S21_HIT" ] || _S21_STATIC="$_S21_STATIC ${_s21_f##*/}:${_S21_HIT%%:*}"
+done
+for _s21_f in scripts/lib/bootstrap.sh scripts/lib/skills-sync.py; do
+  grep -q 'O_EXCL' "$REPO_ROOT/$_s21_f" && grep -q 'O_NOFOLLOW' "$REPO_ROOT/$_s21_f" && grep -q 'token_hex' "$REPO_ROOT/$_s21_f" || _S21_STATIC="$_S21_STATIC ${_s21_f##*/}:no-exclusive-random-temp"
+done
+unset _s21_f
+[ -z "$_S21_STATIC" ] || _S21_FAIL="$_S21_FAIL tmplink-static(${_S21_STATIC# })"
 # dirlink: each per-CLI directory and ops/ is a symlink into a throwaway "HOME"
 mkdir -p "$_S21/bin-cli" "$_S21/fakehome/.gemini/antigravity-cli" "$_S21/fakehome/opencode" "$_S21/fakehome/kimi" "$_S21/fakehome/cursor" "$_S21/fakehome/ops" "$_S21/proj-link"
 for _stub in opencode kimi cursor-agent; do
@@ -1498,17 +1548,28 @@ grep -q '^triforge_bootstrap: WARNING no plugin-root pointer written: git could 
 [ "$(cksum "$_S21/proj-git/.agents/triforge-plugin-root.local")" = "$_S21_SUMP" ] || _S21_FAIL="$_S21_FAIL gitfail-tracked-pointer-rewritten"
 [ ! -e "$_S21/proj-git/.agents/.gitignore" ] || _S21_FAIL="$_S21_FAIL gitfail-wrote-.agents/.gitignore"
 # writer: the primitive itself, against a symlink at the final path
-mkdir -p "$_S21/wr/d"
+mkdir -p "$_S21/wr/d" "$_S21/wr/outside" "$_S21/wr/real"
 printf 'target\n' > "$_S21/wr/target"
 for _s21_m in new rep app; do ln -s ../target "$_S21/wr/d/$_s21_m"; done
 unset _s21_m
+ln -s outside "$_S21/wr/sub"                      # R4: a symlinked parent, one level down
+ln -s ../outside "$_S21/wr/real/lnk"              # and two levels down
+ln "$_S21/wr/target" "$_S21/wr/d/hard"            # R3: a second hard link to the target
+ln "$_S21/wr/target" "$_S21/wr/d/hard2"
 _S21_WR=$( cd "$_S21/wr" && /bin/bash -c 'source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 9
 R=0; echo x | _tb_write new . d/new || R=$?; echo "new=$R"
 R=0; echo x | _tb_write replace . d/rep || R=$?; echo "replace=$R"
 R=0; echo x | _tb_write append . d/app || R=$?; echo "append=$R"
-R=0; echo x | _tb_write new . target/x || R=$?; echo "file-parent=$R"' s21 "$REPO_ROOT" < /dev/null 2>/dev/null || true )
-_S21_FAIL="${_S21_FAIL}$(_self_expect writer "$_S21_WR" '^new=2$' '^replace=0$' '^append=1$' '^target$' '^file-parent=3$')"
+R=0; echo x | _tb_write new . target/x || R=$?; echo "file-parent=$R"
+R=0; echo x | _tb_write new . sub/x || R=$?; echo "link-parent=$R"
+R=0; echo x | _tb_write replace . real/lnk/y || R=$?; echo "deep-link-parent=$R"
+R=0; echo x | _tb_write append . d/hard || R=$?; echo "append-hardlink=$R"
+R=0; echo y | _tb_write replace . d/hard2 || R=$?; echo "replace-hardlink=$R"' s21 "$REPO_ROOT" < /dev/null 2>/dev/null || true )
+_S21_FAIL="${_S21_FAIL}$(_self_expect writer "$_S21_WR" '^new=2$' '^replace=0$' '^append=1$' '^target$' '^file-parent=3$' \
+  '^sub$' '^link-parent=3$' '^real/lnk$' '^deep-link-parent=3$' '^append-hardlink=5$' '^replace-hardlink=0$')"
 [ "$(cat "$_S21/wr/target")" = target ] || _S21_FAIL="$_S21_FAIL writer-link-target-changed"
+[ -z "$(ls -A "$_S21/wr/outside")" ] || _S21_FAIL="$_S21_FAIL writer-wrote-through-a-symlinked-parent($(ls -A "$_S21/wr/outside" | tr '\n' ' '))"
+[ "$(cat "$_S21/wr/d/hard2" 2>/dev/null || true)" = y ] || _S21_FAIL="$_S21_FAIL writer-replace-over-a-hardlink-not-written"
 { [ -L "$_S21/wr/d/new" ] && [ -L "$_S21/wr/d/app" ] && [ -f "$_S21/wr/d/rep" ] && [ ! -L "$_S21/wr/d/rep" ] && [ "$(cat "$_S21/wr/d/rep")" = x ]; } \
   || _S21_FAIL="$_S21_FAIL writer-final-path-state"
 # subdir: the block and session start from <repo>/src
@@ -1521,6 +1582,8 @@ _S21_RC=$(_s21_run subdir /bin/bash "$_S21/proj-sub/src" "$REPO_ROOT/skills/at-s
 _s21_provisioned subdir "$_S21/proj-sub"
 _s21_hook_quiet subdir-hook "$_S21/proj-sub/src"
 [ "$(_s21_list "$_S21/proj-sub/src")" = "$_S21_LS" ] || _S21_FAIL="$_S21_FAIL subdir-hook-wrote-under-src($(_s21_diff "$(_s21_list "$_S21/proj-sub/src")" "$_S21_LS"))"
+# R7: a session started below the project root is told where ops/ is
+grep -q "^Project root: .*/proj-sub [(]ops/ lives there; this session started in .*/proj-sub/src[)]" "$_S21/subdir-hook.hook" || _S21_FAIL="$_S21_FAIL subdir-hook-no-project-root-line"
 [ -f "$_S21/proj-sub/.claude/roster-detected.local.md" ] || _S21_FAIL="$_S21_FAIL subdir-hook-state-not-at-the-anchor"
 # trackgi: a committed .agents/.gitignore that does not ignore the pointer
 mkdir -p "$_S21/proj-gi/.agents"
@@ -1572,6 +1635,8 @@ unset _s21_d
 printf 'user-tier file\n' > "$_S21/home/victim2.conf"
 printf 'legacy monitor state\n' > "$_S21/claude-target/context-monitor.local.md"
 ln -s "$_S21/claude-target" "$_S21/proj-hl/.claude"
+for _s21_x in .tmp .new '~'; do ln -s "$_S21/home/victim2.conf" "$_S21/proj-ht/.claude/roster-detected.local.md${_s21_x}"; done   # R6
+unset _s21_x
 _S21_SUMH=$(cksum "$_S21/home/victim2.conf" "$_S21/claude-target/context-monitor.local.md")
 ( cd "$_S21/proj-ht" && env -u TRIFORGE_LEASE_WORKER HOME="$_S21/home" TMPDIR="$_S21/tmp" PATH="$_S21/bin:$PATH" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GIT_CONFIG_NOSYSTEM=1 \
     /bin/bash -c 'echo $$ > "$1"; N=0; while [ ! -e "$2" ] && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done; exec /bin/bash "$3"' \
@@ -1593,12 +1658,84 @@ _S21_HOOK=$( cd "$_S21/proj-hl" && env -u TRIFORGE_LEASE_WORKER HOME="$_S21/home
 printf '%s\n' "$_S21_HOOK" | grep -q '^WARNING: \.claude/roster-detected\.local\.md not written: \.claude is a symlink' || _S21_FAIL="$_S21_FAIL hookrt-link-no-warning"
 [ "$(cksum "$_S21/home/victim2.conf" "$_S21/claude-target/context-monitor.local.md" 2>/dev/null || true)" = "$_S21_SUMH" ] || _S21_FAIL="$_S21_FAIL hookrt-target-changed"
 [ "$(ls -A "$_S21/claude-target" | tr '\n' ' ')" = "context-monitor.local.md " ] || _S21_FAIL="$_S21_FAIL hookrt-wrote-into-linked-.claude($(ls -A "$_S21/claude-target" | tr '\n' ' '))"
+# home (R1): a home directory as the project, first a plain one, then one that
+# is a git repository. The bootstrap and session start refuse to provision it:
+# one WARNING each, nothing written. PATH is the stubs plus python3, git and
+# the timeout tool only, so no real CLI's own --version writes into that HOME.
+mkdir -p "$_S21/h1" "$_S21/h2" "$_S21/bin-min"
+for _s21_t in agy claude codex; do ln -s "$_S21/bin/$_s21_t" "$_S21/bin-min/$_s21_t"; done
+for _s21_t in python3 git timeout gtimeout; do
+  _S21_T=$(command -v "$_s21_t" 2>/dev/null || true)
+  [ -z "$_S21_T" ] || ln -s "$_S21_T" "$_S21/bin-min/$_s21_t"
+done
+unset _s21_t
+_s21_git "$_S21/h2" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-h2"
+for _s21_d in h1 h2; do
+  _S21_LH=$(_s21_list "$_S21/$_s21_d")
+  _S21_RC=$(_s21_run "home-$_s21_d" /bin/bash "$_S21/$_s21_d" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh" HOME="$_S21/$_s21_d" PATH="$_S21/bin-min:/usr/bin:/bin")
+  grep -qx 'rc=80' "$_S21/home-$_s21_d.out" || _S21_FAIL="$_S21_FAIL home-$_s21_d-rc($(tr '\n' ' ' < "$_S21/home-$_s21_d.out" | cut -c1-40))"
+  [ "$(grep -c '^triforge_bootstrap: WARNING .*home directory' "$_S21/home-$_s21_d.err" || true)" -eq 1 ] || _S21_FAIL="$_S21_FAIL home-$_s21_d-no-one-warning($(_s21_first "$_S21/home-$_s21_d.err" 100))"
+  [ "$(_s21_list "$_S21/$_s21_d")" = "$_S21_LH" ] || _S21_FAIL="$_S21_FAIL home-$_s21_d-wrote($(_s21_diff "$(_s21_list "$_S21/$_s21_d")" "$_S21_LH"))"
+  _S21_HOOK_RC=0
+  _S21_HOOK=$( cd "$_S21/$_s21_d" && env -u TRIFORGE_LEASE_WORKER HOME="$_S21/$_s21_d" TMPDIR="$_S21/tmp" PATH="$_S21/bin-min:/usr/bin:/bin" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GIT_CONFIG_NOSYSTEM=1 \
+                 /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" < /dev/null 2>&1 ) || _S21_HOOK_RC=$?
+  { [ "$_S21_HOOK_RC" -eq 0 ] && ! printf '%s\n' "$_S21_HOOK" | grep -q 'hook crashed\|^session-start:' \
+    && [ "$(printf '%s\n' "$_S21_HOOK" | grep -c '^WARNING: .*home directory' || true)" -eq 1 ]; } \
+    || _S21_FAIL="$_S21_FAIL home-$_s21_d-hook(rc=${_S21_HOOK_RC}:$({ printf '%s\n' "$_S21_HOOK" | grep -m1 'hook crashed\|^session-start:\|home directory' || true; } | cut -c1-100))"
+  [ "$(_s21_list "$_S21/$_s21_d")" = "$_S21_LH" ] || _S21_FAIL="$_S21_FAIL home-$_s21_d-hook-wrote($(_s21_diff "$(_s21_list "$_S21/$_s21_d")" "$_S21_LH"))"
+done
+unset _s21_d
+# synctmp (R2): skills-sync.py's stamp, run directly so the pid the old temp
+# name used is known (exec keeps it): links at <stamp>.tmp.<pid>, .tmp, .new
+# and ~ -> a HOME file stay untouched, and the stamp is a regular file
+mkdir -p "$_S21/proj-st/.agents/skills"
+printf 'user-tier file\n' > "$_S21/home/victim3.conf"
+_S21_SUM3=$(cksum "$_S21/home/victim3.conf")
+_S21_STAMP="$_S21/proj-st/.agents/skills/.triforge-plugin-version"
+for _s21_x in .tmp .new '~'; do ln -s "$_S21/home/victim3.conf" "${_S21_STAMP}${_s21_x}"; done
+unset _s21_x
+( cd "$_S21/proj-st" && env HOME="$_S21/home" TMPDIR="$_S21/tmp" PATH="$_S21/bin:$PATH" \
+    /bin/bash -c 'echo $$ > "$1"; N=0; while [ ! -e "$2" ] && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done; exec python3 "$3" sync --plugin-root "$4" --project .' \
+    s21 "$_S21/synctmp.pid" "$_S21/synctmp.go" "$REPO_ROOT/scripts/lib/skills-sync.py" "$REPO_ROOT" < /dev/null > "$_S21/synctmp.out" 2>&1 ) &
+_S21_BG=$!
+_s21_until "$_S21/synctmp.pid"
+_S21_PID=$(cat "$_S21/synctmp.pid" 2>/dev/null || true)
+ln -s "$_S21/home/victim3.conf" "${_S21_STAMP}.tmp.${_S21_PID}"
+: > "$_S21/synctmp.go"
+wait "$_S21_BG" || true
+[ "$(cksum "$_S21/home/victim3.conf")" = "$_S21_SUM3" ] || _S21_FAIL="$_S21_FAIL synctmp-wrote-through-a-planted-temp-symlink"
+{ [ -f "$_S21_STAMP" ] && [ ! -L "$_S21_STAMP" ] && grep -q '^format=2$' "$_S21_STAMP"; } || _S21_FAIL="$_S21_FAIL synctmp-stamp-not-a-regular-file"
+[ "$(_s21_count "$_S21/proj-st/.agents/skills")" -eq "$SHIPPED_COUNT" ] || _S21_FAIL="$_S21_FAIL synctmp-skills-count($(_s21_count "$_S21/proj-st/.agents/skills"))"
+# hardlink (R3): an untracked .agents/.gitignore hard-linked to a HOME file
+mkdir -p "$_S21/proj-hard/.agents"
+printf 'node_modules/\n' > "$_S21/home/gitconfig-victim"
+ln "$_S21/home/gitconfig-victim" "$_S21/proj-hard/.agents/.gitignore"
+_s21_git "$_S21/proj-hard" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-hard"
+_S21_SUMK=$(cksum "$_S21/home/gitconfig-victim")
+_S21_RC=$(_s21_run hardlink /bin/bash "$_S21/proj-hard" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+grep -qx 'rc=80' "$_S21/hardlink.out" || _S21_FAIL="$_S21_FAIL hardlink-rc($(tr '\n' ' ' < "$_S21/hardlink.out" | cut -c1-40))"
+grep -q '^triforge_bootstrap: WARNING no plugin-root pointer written: \.agents/\.gitignore has other hard links' "$_S21/hardlink.err" || _S21_FAIL="$_S21_FAIL hardlink-no-warning($({ grep -m1 'plugin-root pointer\|gitignore' "$_S21/hardlink.err" || true; } | cut -c1-100))"
+[ "$(cksum "$_S21/home/gitconfig-victim")" = "$_S21_SUMK" ] || _S21_FAIL="$_S21_FAIL hardlink-shared-inode-changed"
+[ ! -e "$_S21/proj-hard/.agents/triforge-plugin-root.local" ] || _S21_FAIL="$_S21_FAIL hardlink-pointer-written"
+# lrname (R5): a lease root whose name holds a newline and a JSON-looking line.
+# The refusal is one stderr line, and no line session start prints starts with {
+_S21_LRN="$_S21/lrn/$(printf 'odd\n{"x":1}')"
+mkdir -p "$_S21_LRN/lead" "$_S21_LRN/wt"
+printf '# Triforge trusted git config\n' > "$_S21_LRN/lead/gitconfig"
+_s21_git "$_S21_LRN/wt" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-lrn"
+_S21_RC=$(_s21_run lrname /bin/bash "$_S21_LRN/wt" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+grep -qx 'rc=45' "$_S21/lrname.out" || _S21_FAIL="$_S21_FAIL lrname-rc($(tr '\n' ' ' < "$_S21/lrname.out" | cut -c1-40))"
+{ [ "$(grep -c '' "$_S21/lrname.err" || true)" -eq 1 ] && grep -q '^triforge_bootstrap: REFUSED .*lease root' "$_S21/lrname.err"; } || _S21_FAIL="$_S21_FAIL lrname-refusal-not-one-line"
+_S21_HOOK=$( cd "$_S21_LRN/wt" && env -u TRIFORGE_LEASE_WORKER HOME="$_S21/home" TMPDIR="$_S21/tmp" PATH="$_S21/bin:$PATH" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GIT_CONFIG_NOSYSTEM=1 \
+               /bin/bash "$REPO_ROOT/hooks/handlers/session-start.sh" < /dev/null 2>/dev/null || true )
+! printf '%s\n' "$_S21_HOOK" | grep -q '^{' || _S21_FAIL="$_S21_FAIL lrname-hook-stdout-line-starts-with-brace"
+printf '%s\n' "$_S21_HOOK" | grep -q 'REFUSED .*lease root' || _S21_FAIL="$_S21_FAIL lrname-hook-no-refusal-line"
 # negative control: without the bootstrap line no ops/ appears
 _S21_RC=$(_s21_run neg /bin/bash "$_S21/proj-neg" "$REPO_ROOT/skills/at-setup" "$_S21/setup-neg.sh")
 [ ! -e "$_S21/proj-neg/ops" ] || _S21_FAIL="$_S21_FAIL negative-control(ops/-without-the-bootstrap-line)"
 _S21_CAP="the project bootstrap runs from the at- skills without any hook: at-setup's block provisions ops/, the skills copy, the per-CLI files and an untracked plugin-root pointer; at-build's preflight then loads the helpers from the pointer; idempotent under bash and zsh; refused under the worker marker and in a lease root (KTD11, R37)"
 if [ -z "$_S21_FAIL" ]; then
-  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; negative control: the block without its triforge_bootstrap line leaves no ops/" "static"
+  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; round 3: links at the pid-free temp names (.tmp, .new, ~) beside every written file untouched, and no predictable temp name or mv -f in the three writers, both creating temps O_EXCL|O_NOFOLLOW under a random name (R6); a symlinked parent one and two levels down refused, an append to a hard-linked file rc 5 with the shared inode unchanged, a replace over one a new inode (R3, R4); a home directory as the project, plain and as a repository: bootstrap rc 80 and session start rc 0, one WARNING each, the directory byte-identical (R1); skills-sync.py with links at its stamp's old temp names: untouched, the stamp a regular file (R2); a hard-linked .agents/.gitignore: rc 80, the shared inode unchanged (R3); a lease root named with a newline and a {-line: one REFUSED line, no hook stdout line starting with { (R5); a session started in <repo>/src names the project root once, one started at the root does not (R7); negative control: the block without its triforge_bootstrap line leaves no ops/" "static"
 else
   row "SELF-21" "claude" "$_S21_CAP" "FAIL" "mismatch:$(printf '%s' "$_S21_FAIL" | cut -c1-900)" "static"
 fi

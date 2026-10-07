@@ -46,8 +46,10 @@ fi
 #      45 refused: the worker marker or a lease root (one stderr line from
 #         _lead_only, nothing written)
 #      64 usage
-#      80 degraded: a step could not finish — a write failed, or _tb_write
-#         refused it because a directory on its path is a symlink or a file;
+#      80 degraded: the project directory is the home directory or contains
+#         it (nothing written); or a step could not finish — a write failed,
+#         or _tb_write refused it (a symlink or a file on its path, a
+#         hard-linked append target);
 #         the skills refresh failed or timed out; the agy pack install
 #         failed; or the pointer could not be written, sits where the locator
 #         refuses it, or git could not say whether it is tracked. The notices
@@ -63,7 +65,7 @@ fi
 # that matches nothing), no unquoted word splitting, printf for any text that
 # is not this file's own.
 triforge_bootstrap() {
-  local _TB_PREFIX="triforge_bootstrap: " _TB_DEGRADED=0 _TB_ROOT="" _TB_TIMEOUT="" _TB_ANCHOR="" _TB_CURSOR=0
+  local _TB_PREFIX="triforge_bootstrap: " _TB_DEGRADED=0 _TB_ROOT="" _TB_TIMEOUT="" _TB_ANCHOR="" _TB_CURSOR=0 _TB_REFUSAL="" _TB_RC=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --prefix)
@@ -80,7 +82,15 @@ triforge_bootstrap() {
         ;;
     esac
   done
-  _lead_only triforge_bootstrap --any-host || return $?
+  # The refusal goes out as one line with control characters dropped (Phase 3
+  # round 3, R5): it names the lease root, and a newline in that name would
+  # otherwise split it, leaving a second line that starts with whatever the
+  # name holds, a "{" included, for the hook to print.
+  _TB_REFUSAL=$(_lead_only triforge_bootstrap --any-host 2>&1 >/dev/null) || _TB_RC=$?
+  if [ "$_TB_RC" -ne 0 ]; then
+    printf '%s\n' "$(printf '%s' "$_TB_REFUSAL" | LC_ALL=C tr -d '\000-\037\177')" >&2
+    return "$_TB_RC"
+  fi
   _TB_ROOT=$_TRIFORGE_PLUGIN_ROOT
   _TB_TIMEOUT=$(_timeout_tool 2>/dev/null) || _TB_TIMEOUT=""
   # Every step works in the project anchor (_tb_anchor), not wherever the
@@ -91,6 +101,14 @@ triforge_bootstrap() {
   _TB_ANCHOR=$(_tb_anchor) || _TB_ANCHOR=""
   if [ -z "$_TB_ANCHOR" ] || [ ! -d "$_TB_ANCHOR" ]; then
     _tb_note "WARNING the project directory did not resolve, so nothing was bootstrapped (the next run retries)."
+    return 80
+  fi
+  # A home directory is not a project (Phase 3 round 3, R1): the project files
+  # written there (.codex/, .claude/, .agents/ ...) would be the user-tier
+  # config of each CLI. Refused when the anchor is the home directory or
+  # contains it, also when the home directory is itself a repository.
+  if _tb_home_anchor "$_TB_ANCHOR"; then
+    _tb_note "WARNING the project directory ${_TB_ANCHOR} is your home directory or contains it, so nothing was bootstrapped: there the project files would be each CLI's user-tier config, which Triforge never writes. Run it from a project directory."
     return 80
   fi
   if _cursor_bin >/dev/null 2>&1; then
@@ -135,6 +153,24 @@ _tb_anchor() {
   _checkout_top || pwd -P
 }
 
+# _tb_home_anchor <dir> — 0 when <dir> (a physical path) is the home
+# directory or one of its ancestors, so a project rooted there would hold the
+# user's own ~/.codex, ~/.claude and the rest. 1 when it is neither, or when
+# HOME is unset or does not resolve (then there is nothing to protect).
+_tb_home_anchor() {
+  local H=""
+  [ -n "${HOME:-}" ] || return 1
+  H=$(_tb_phys "$HOME") || return 1
+  [ -n "$H" ] || return 1
+  if [ "$1" = "/" ]; then
+    return 0
+  fi
+  case "${H%/}/" in
+    "${1%/}"/*) return 0 ;;
+  esac
+  return 1
+}
+
 # _tb_note <text> — one notice on stderr: the caller's prefix, then the text
 # with control characters dropped, so a file name or a version string read
 # from disk can never split it into a second line.
@@ -166,25 +202,35 @@ _tb_files() {
 # _tb_write <mode> <root> <dest> [<source>] — every file bootstrap.sh writes
 # goes through here, and so does session-start.sh's runtime file
 # (.claude/roster-detected.local.md). <dest> is relative to <root>,
-# or absolute under it. Each directory from <root> down to <dest>'s parent
-# must be a real directory (checked with lstat, so a symlink never passes) or
-# absent, and is then created; a symlink or a file on that path, or a parent
-# whose physical path is not under <root>, refuses the write before anything
-# is created there. The content is <source>'s bytes (with its permission
-# bits, as cp gives them), else stdin. Modes:
+# or absolute under it. The directories from <root> down to <dest>'s parent
+# are walked with directory descriptors: <root> (its physical path) is
+# opened O_DIRECTORY|O_NOFOLLOW, and each component is opened the same way
+# relative to the descriptor before it (created first when absent). A symlink
+# or a file on that path refuses the write before anything is created there,
+# and since every later step (the create, the write, the rename, the append)
+# is relative to the last descriptor, a directory swapped for a symlink after
+# it was checked can't redirect the write: the descriptor still names the
+# directory that was checked, not the path (Phase 3 round 3, R4). The content
+# is <source>'s bytes (with its permission bits, as cp gives them), else stdin.
+# Modes:
 #   new      create <dest> with O_CREAT|O_EXCL|O_NOFOLLOW: anything already
 #            there, a dangling symlink included, is left alone (rc 2)
 #   replace  create a file under an unpredictable name beside <dest> the same
-#            exclusive way, write it, then rename it over <dest>: a symlink at
-#            <dest> is replaced, never written through, and no predictable
-#            temp name exists for anyone to plant a link at
-#   append   append to an existing regular file opened O_APPEND|O_NOFOLLOW
-# rc 0 written · 1 an I/O error · 2 exists (new) · 3 refused: the path leaves
-# <root> · 4 a directory could not be created. On rc 3 and 4 stdout names the
-# directory (relative to <root>); otherwise nothing is printed, and the caller
-# words the notice.
+#            exclusive way, write it, then rename it over <dest>: a symlink or
+#            a hard link at <dest> is replaced, never written through, and no
+#            predictable temp name exists for anyone to plant a link at
+#   append   append to an existing regular file opened O_APPEND|O_NOFOLLOW,
+#            refused (rc 5) when the file has other hard links: an append
+#            would change the shared inode, so a hard link to a file outside
+#            the project (~/.gitconfig, say) could redirect it (R3)
+# rc 0 written · 1 an I/O error (a symlink at <dest> in append mode among
+# them) · 2 exists (new) · 3 refused: a directory on the path is a symlink or
+# not a directory, or the append target is not a regular file · 4 a
+# directory could not be created · 5 refused: hard-linked (append).
+# On rc 3 and 4 stdout names the directory (relative to <root>); otherwise
+# nothing is printed, and the caller words the notice.
 _TB_WRITE_PY='
-import os, secrets, stat, sys
+import errno, os, secrets, stat, sys
 mode, root, dest = sys.argv[1], os.path.realpath(sys.argv[2]), sys.argv[3]
 src = sys.argv[4] if len(sys.argv) > 4 else ""
 rel = os.path.relpath(dest, root) if os.path.isabs(dest) else os.path.normpath(dest)
@@ -192,28 +238,39 @@ parts = rel.split(os.sep)
 if rel in ("", ".") or parts[0] == "..":
     print(rel)
     sys.exit(3)
+name = parts[-1]
+nofollow = getattr(os, "O_NOFOLLOW", 0)
+dirflags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow | getattr(os, "O_CLOEXEC", 0)
+# a symlink opened O_NOFOLLOW fails ELOOP (Linux) or ENOTDIR (macOS, with
+# O_DIRECTORY) or EMLINK (FreeBSD); a file opened O_DIRECTORY fails ENOTDIR
+not_a_dir = (errno.ELOOP, errno.ENOTDIR, errno.EMLINK)
+def refuse(code, shown):
+    print(shown)
+    sys.exit(code)
 try:
-    cur, seen = root, []
+    dfd = os.open(root, dirflags)
+    seen = []
     for part in parts[:-1]:
-        cur = os.path.join(cur, part)
         seen.append(part)
         try:
-            st = os.lstat(cur)
+            nfd = os.open(part, dirflags, dir_fd=dfd)
         except FileNotFoundError:
             try:
-                os.mkdir(cur, 0o777)
+                os.mkdir(part, 0o777, dir_fd=dfd)
+            except FileExistsError:
+                pass
             except OSError:
-                print(os.sep.join(seen))
-                sys.exit(4)
-            st = os.lstat(cur)
-        if not stat.S_ISDIR(st.st_mode):
-            print(os.sep.join(seen))
-            sys.exit(3)
-    final = os.path.join(root, rel)
-    parent = os.path.realpath(os.path.dirname(final))
-    if parent != root and not parent.startswith(root + os.sep):
-        print(os.path.dirname(rel) or ".")
-        sys.exit(3)
+                refuse(4, os.sep.join(seen))
+            try:
+                nfd = os.open(part, dirflags, dir_fd=dfd)
+            except OSError:
+                refuse(3, os.sep.join(seen))
+        except OSError as exc:
+            if exc.errno in not_a_dir:
+                refuse(3, os.sep.join(seen))
+            raise
+        os.close(dfd)
+        dfd = nfd
     perm = 0o666
     if src:
         with open(src, "rb") as f:
@@ -221,27 +278,26 @@ try:
         perm = os.stat(src).st_mode & 0o777
     else:
         data = sys.stdin.buffer.read()
-    nofollow = getattr(os, "O_NOFOLLOW", 0)
-    def create(path):
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow, perm)
+    def create(nm):
+        fd = os.open(nm, os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow, perm, dir_fd=dfd)
         try:
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
         except OSError:
             try:
-                os.unlink(path)
+                os.unlink(nm, dir_fd=dfd)
             except OSError:
                 pass
             raise
     if mode == "new":
         try:
-            create(final)
+            create(name)
         except FileExistsError:
             sys.exit(2)
     elif mode == "replace":
         tmp = ""
         for _ in range(8):
-            cand = os.path.join(os.path.dirname(final), ".triforge-tmp-" + secrets.token_hex(8))
+            cand = ".triforge-tmp-" + secrets.token_hex(8)
             try:
                 create(cand)
             except FileExistsError:
@@ -251,15 +307,18 @@ try:
         if not tmp:
             sys.exit(1)
         try:
-            os.rename(tmp, final)
+            os.rename(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
         except OSError:
-            os.unlink(tmp)
+            os.unlink(tmp, dir_fd=dfd)
             raise
     elif mode == "append":
-        fd = os.open(final, os.O_WRONLY | os.O_APPEND | nofollow)
+        fd = os.open(name, os.O_WRONLY | os.O_APPEND | nofollow, dir_fd=dfd)   # a symlink there fails: rc 1
         with os.fdopen(fd, "ab") as f:
-            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            st = os.fstat(f.fileno())
+            if not stat.S_ISREG(st.st_mode):
                 sys.exit(3)
+            if st.st_nlink > 1:
+                sys.exit(5)
             f.write(data)
     else:
         sys.exit(64)
@@ -770,10 +829,18 @@ _tb_ignore_rule() {
     fi
   fi
   if [ -f "$GI" ]; then
-    if { if [ -s "$GI" ] && [ -n "$(tail -c 1 "$GI" 2>/dev/null)" ]; then printf '\n'; fi
-         printf '/triforge-plugin-root.local\n'; } | _tb_write append "$1" "$GI" > /dev/null; then
+    RC=0
+    { if [ -s "$GI" ] && [ -n "$(tail -c 1 "$GI" 2>/dev/null)" ]; then printf '\n'; fi
+      printf '/triforge-plugin-root.local\n'; } | _tb_write append "$1" "$GI" > /dev/null || RC=$?
+    if [ "$RC" -eq 0 ]; then
       printf '%s' "appended /triforge-plugin-root.local to .agents/.gitignore"
       return 0
+    fi
+    if [ "$RC" -eq 5 ]; then
+      # an append would change the shared inode, and with it a file outside
+      # the project (a hard link to ~/.gitconfig, say): _tb_write refused it
+      _tb_pointer_refused ".agents/.gitignore has other hard links, so Triforge does not append to it (the change would reach every linked copy); add the line /triforge-plugin-root.local to it yourself"
+      return 1
     fi
   elif printf '*.local\n' | _tb_write new "$1" "$GI" > /dev/null; then
     printf '%s' "created .agents/.gitignore (*.local)"

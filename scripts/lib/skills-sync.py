@@ -27,7 +27,10 @@ Safety: a symlinked .agents or .agents/skills, or one that resolves outside the
 project, is left untouched; every name must match ^[a-z0-9][a-z0-9-]*$, and
 every existing entry must be a plain directory directly inside .agents/skills.
 Copies preserve symlinks as links (never followed). The stamp is written last,
-tmp + rename, and only when every copy succeeded.
+and only when every copy succeeded, through a temporary file created
+O_CREAT|O_EXCL|O_NOFOLLOW under a random name and renamed over it; a copy in
+flight lives in a directory mkdtemp made under a random name. No temporary
+name is predictable, so a symlink planted at one is never written through.
 
 Lead workflows (KTD12, R16): a shipped skills/at-* directory is a lead workflow
 that reaches a lead only from its plugin install. It is never copied into
@@ -60,9 +63,11 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 
 STAMP_NAME = ".triforge-plugin-version"
 STAMP_FORMAT = "2"
@@ -229,9 +234,16 @@ def sync(plugin_root, project, prefix):
     written = {}
     kept, skipped, retired, failed = [], [], [], False
     for leftover in os.listdir(dest):
-        # a copy an earlier run did not finish
-        if leftover.startswith(TMP_PREFIX) and not os.path.islink(os.path.join(dest, leftover)):
-            shutil.rmtree(os.path.join(dest, leftover), ignore_errors=True)
+        # a copy (a directory) or a stamp (a file) an earlier run did not finish
+        path = os.path.join(dest, leftover)
+        if leftover.startswith(TMP_PREFIX) and not os.path.islink(path):
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
     for name, valid in shipped_entries(src_root):
         if not valid:
             skipped.append(name + "(invalid-name)")
@@ -285,18 +297,11 @@ def sync(plugin_root, project, prefix):
     else:
         body = ["version=" + version, "format=" + STAMP_FORMAT, "skills=" + ",".join(sorted(written))]
         body += ["digest " + n + " " + written[n] for n in sorted(written)]
-        tmp = stamp_path + ".tmp." + str(os.getpid())
         try:
-            with open(tmp, "w", encoding="utf-8") as fh:
-                fh.write("\n".join(body) + "\n")
-            os.replace(tmp, stamp_path)
+            replace_file(dest, STAMP_NAME, "\n".join(body) + "\n")
             note(".agents/skills refreshed to " + (version or "?") + " (Triforge replaces only its own unchanged copies, identified by content digest; keep customizations in a differently named directory; lead workflows (at-*) are not copied)"
                  + ("; retired no-longer-shipped: " + " ".join(retired) if retired else "") + ".")
         except OSError:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
             note("WARNING .agents/skills refreshed but the version stamp could not be written — the refresh re-runs next session.")
     if kept:
         note(".agents/skills kept as user-owned (content differs from Triforge's copy, so it was not replaced; the shipped version of each is not installed there): " + " ".join(kept) + ".")
@@ -322,20 +327,48 @@ def shipped_entries(src_root):
     return entries
 
 
+def replace_file(directory, name, text):
+    """Write <directory>/<name> through a temporary sibling created
+    O_CREAT|O_EXCL|O_NOFOLLOW under a random name, then renamed over it: a
+    symlink planted at a temporary name can't exist (the name is unknown in
+    advance, and an existing entry fails the exclusive create), and one at
+    <name> is replaced, never written through. Raises OSError."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    for _ in range(8):
+        tmp = os.path.join(directory, TMP_PREFIX + "file-" + secrets.token_hex(8))
+        try:
+            fd = os.open(tmp, flags, 0o666)
+        except FileExistsError:
+            continue
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            os.replace(tmp, os.path.join(directory, name))
+        except OSError:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        return
+    raise OSError(errno.EEXIST, "no free temporary name in " + directory)
+
+
 def copy_into_place(src, dest, name, replace):
     """Copy src to <dest>/<name> through a temporary sibling renamed into place:
     a copy interrupted half-way (the hook's timeout, a crash) would otherwise
     leave a partial directory that no recorded digest matches, and the next
-    refresh would keep it as the user's. replace (sync): digest the copy and
-    remove the directory already at <dest>/<name> first, and return the
-    digest; without it (add) the name must be free, and None is returned. A
-    failure removes the temporary copy and raises (OSError, shutil.Error)."""
+    refresh would keep it as the user's. The sibling is made by mkdtemp under
+    a random name, so no link can be planted at it in advance. replace (sync):
+    digest the copy and remove the directory already at <dest>/<name> first,
+    and return the digest; without it (add) the name must be free, and None is
+    returned. A failure removes the temporary copy and raises (OSError,
+    shutil.Error)."""
     target = os.path.join(dest, name)
-    tmp_dir = os.path.join(dest, TMP_PREFIX + name + "-" + str(os.getpid()))
+    tmp_dir = ""
     try:
-        if os.path.lexists(tmp_dir):
-            shutil.rmtree(tmp_dir)
-        shutil.copytree(src, tmp_dir, symlinks=True)
+        tmp_dir = tempfile.mkdtemp(prefix=TMP_PREFIX + name + "-", dir=dest)
+        shutil.copytree(src, tmp_dir, symlinks=True, dirs_exist_ok=True)
         digest = None
         if replace:
             digest = dir_digest(tmp_dir)

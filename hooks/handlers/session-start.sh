@@ -77,6 +77,27 @@ case "${CLAUDE_PLUGIN_ROOT:-}" in
 esac
 cd "$SS_ANCHOR" 2>/dev/null || SS_ANCHOR=$SS_START_DIR
 
+# A home directory is not a project (Phase 3 round 3, R1): when the anchor is
+# the home directory or contains it (a session opened in ~, or below a home
+# directory that is itself a repository), the hook writes nothing there. The
+# bootstrap, the runtime file, enrollment and the .claude cleanup are skipped,
+# and one standing WARNING says why: .claude, .codex and the rest of a home
+# directory are each CLI's user-tier config. Inline, like the anchor.
+SS_AT_HOME=""
+SS_HOME_P=""
+if [ -n "${HOME:-}" ]; then
+  SS_HOME_P=$(cd "$HOME" 2>/dev/null && env pwd -P 2>/dev/null || true)
+fi
+if [ -n "$SS_HOME_P" ]; then
+  if [ "$SS_ANCHOR" = "/" ]; then
+    SS_AT_HOME=yes
+  else
+    case "${SS_HOME_P%/}/" in
+      "${SS_ANCHOR%/}"/*) SS_AT_HOME=yes ;;
+    esac
+  fi
+fi
+
 # _ss_claude_dir — 0 when .claude is a real directory of the project (not a
 # symlink, not a file): only then does the hook touch anything under it. A
 # .claude linked elsewhere holds another place's files.
@@ -86,7 +107,7 @@ _ss_claude_dir() {
 
 # Clean stale state files from previous sessions (the context monitor keeps
 # its state under TMPDIR now; this removes a copy an older version left).
-if _ss_claude_dir; then
+if [ -z "$SS_AT_HOME" ] && _ss_claude_dir; then
   rm -f .claude/context-monitor.local.md
 fi
 
@@ -125,7 +146,7 @@ _ss_run() {
 # rc (0, or 80 when a step degraded) adds nothing the notices do not say.
 # Without the helper nothing is bootstrapped, and SS_HELPER_NOTICE says so.
 SS_BOOT_LOG=""
-if [ -n "$SS_HELPER" ]; then
+if [ -n "$SS_HELPER" ] && [ -z "$SS_AT_HOME" ]; then
   SS_BOOT_LOG="${SS_HELPER_TMP}/bootstrap"
   triforge_bootstrap --prefix "session-start: " 2> "$SS_BOOT_LOG" || true
 fi
@@ -190,7 +211,7 @@ ${CLI_NAME}_bin=${CLI_BIN}"
 done 3<<SS_OPTIONAL_EOF
 ${SS_OPTIONAL_ROWS}
 SS_OPTIONAL_EOF
-if [ -n "$SS_HELPER" ]; then
+if [ -n "$SS_HELPER" ] && [ -z "$SS_AT_HOME" ]; then
   SS_W_RC=0
   printf '%s\n' "$SS_DETECTED" | _tb_write replace . "$ROSTER_DETECTED" > /dev/null || SS_W_RC=$?
   if [ "$SS_W_RC" -eq 3 ]; then
@@ -209,7 +230,7 @@ fi
 # the helper sourced above — never a hand-rolled write here. Fast: headless
 # enrollment does no live auth probe; each helper call is tomllib-only.
 ENROLLMENT_NOTICES=""
-if [ -n "$SS_HELPER" ] && [ "${#DETECTED_OPTIONAL[@]}" -gt 0 ]; then
+if [ -n "$SS_HELPER" ] && [ -z "$SS_AT_HOME" ] && [ "${#DETECTED_OPTIONAL[@]}" -gt 0 ]; then
   for CLI_NAME in "${DETECTED_OPTIONAL[@]}"; do
     ENROLL_HAS_RC=0
     roster_has_member "$CLI_NAME" || ENROLL_HAS_RC=$?
@@ -572,6 +593,16 @@ SOLUTION_COUNT=$(find ops/solutions -name "*.md" 2>/dev/null | wc -l | tr -d ' '
 # Build orientation message
 MSG=""
 
+# Where ops/ is (Phase 3 round 3, R7): a session started below the project
+# root reads ops/ from the root, and the lead's own cwd-relative reads would
+# miss it, so the root is named once.
+if [ "$SS_START_DIR" != "$SS_ANCHOR" ]; then
+  MSG="$MSG\nProject root: $(_ss_prose "$SS_ANCHOR") (ops/ lives there; this session started in $(_ss_prose "$SS_START_DIR"))."
+fi
+if [ -n "$SS_AT_HOME" ]; then
+  MSG="$MSG\nWARNING: this session's project directory, $(_ss_prose "$SS_ANCHOR"), is your home directory or contains it, so Triforge set nothing up and wrote nothing there: the project files would be each CLI's user-tier config. Start the session in a project directory."
+fi
+
 if [ "$HAS_STATE" = "yes" ]; then
   MSG="$MSG\nPrevious session state found (ops/STATE.md). Use /at-resume to continue."
 fi
@@ -661,11 +692,20 @@ fi
 
 # Migration notices: triforge_bootstrap's, in the order it printed them (one
 # per step that acted this session, silent otherwise; a state it left alone on
-# purpose repeats until fixed). Each is one line already; _ss_prose doubles a
-# backslash so printf %b below prints it as written.
+# purpose repeats until fixed). Every captured line is sanitized on its own
+# (Phase 3 round 3, R5): _ss_prose drops control characters and doubles a
+# backslash so printf %b below prints it as written, and a line that does not
+# carry this hook's "session-start: " prefix (a refusal from a lead-only
+# check, or the tail of a message some name split) gets the fixed prose
+# prefix "Bootstrap: ", so no stdout line can start with "{".
 if [ -n "$SS_BOOT_LOG" ] && [ -s "$SS_BOOT_LOG" ]; then
   while IFS= read -r SS_LINE; do
-    if [ -n "$SS_LINE" ]; then MSG="$MSG\n$(_ss_prose "$SS_LINE")"; fi
+    [ -n "$SS_LINE" ] || continue
+    case "$SS_LINE" in
+      "session-start: "*) ;;
+      *) SS_LINE="Bootstrap: ${SS_LINE}" ;;
+    esac
+    MSG="$MSG\n$(_ss_prose "$SS_LINE")"
   done < "$SS_BOOT_LOG"
 fi
 
@@ -729,6 +769,9 @@ exit 0
 _ss_private_tmp() {
   if mktemp -d "${TMPDIR:-/tmp}/triforge-session-start.XXXXXX" 2>/dev/null; then
     return 0
+  fi
+  if [ -n "$SS_AT_HOME" ]; then
+    return 1   # never under a home directory's .claude (R1)
   fi
   if [ ! -e .claude ] && [ ! -L .claude ]; then
     mkdir .claude 2>/dev/null || return
