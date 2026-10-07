@@ -1919,6 +1919,10 @@ DISPATCH_ROW_EOF
     echo "lease_dispatch: ERROR worktree missing: ${WT}" >&2
     return 1
   fi
+  # The consent rule at dispatch (R24): a consent CLI (devin) whose roster
+  # table records no consent now, though it did at lease_create, gets nothing
+  # sent (rc 5). A CLI that needs no consent passes.
+  _member_consent_ok "$CLI" "${_LEASE_REPO}/ops/roster.toml" || return $?
   OUT="${_LEASE_ROOT}/${TASK_ID}.out"
   TOBIN=$(_timeout_tool) || return $?
 
@@ -2028,9 +2032,9 @@ ${PROMPT}"
       ;;
     devin)
       # Devin writes into the config it is handed, so each dispatch gets its
-      # own copy as the lane arg; the copy's name carries the permission class
-      # _lease_lane_argv reads (devin.sh: read for a reviewer or analyst
-      # lease, edit for a builder).
+      # own copy as the lane arg, removed after the run (_lease_builder_run);
+      # the copy's name carries the permission class _lease_lane_argv reads
+      # (devin.sh: read for a reviewer or analyst lease, edit for a builder).
       LANE_ARG="${OUT}.devin.${LCLASS}.json"
       _devin_config_copy "$LCLASS" "$LANE_ARG" || return 1
       ;;

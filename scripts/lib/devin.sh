@@ -26,8 +26,12 @@ fi
 # Two permission classes, picked from the role (_devin_class):
 #   read  reviewer, analyst and anything unnamed: --permission-mode auto (Devin
 #         approves read-only tools only; a non-interactive run cannot ask for
-#         more) + devin-agents/config-read.json, which denies Write(**) and the
-#         state-changing git commands and allows git diff/log/show/status
+#         more) + devin-agents/config-read.json, which allows nothing and
+#         denies the exec and edit tools, Write(**) and every MCP tool. No
+#         command is allowed: git diff, log and show all take --output=<file>,
+#         and Devin has no OS sandbox. A -p run ends at its first denied tool
+#         call with no answer (DVN-05), so the read briefs say to use the
+#         read, grep and glob tools only
 #   edit  builder: --permission-mode dangerous (every tool approved, as the
 #         cursor --force and kimi -p lanes) + devin-agents/config-edit.json,
 #         which denies push, pull, fetch, commit, rebase, checkout and switch.
@@ -45,13 +49,20 @@ fi
 # interactive login shell once per session and imports every variable the
 # user's profile exports into its exec tool, which defeats the env -i
 # allowlist (KTD-14). With $SHELL unset it logs "login-shell env snapshot
-# skipped" and imports nothing (DVN-04). The lease lane never forwards SHELL
-# (TRIFORGE_ENV_BASE), and invoke_devin unsets it; devin_env_reimport reads
-# DVN-04's verdict for setup's disclosure.
+# skipped" and imports nothing (DVN-04). Both lanes run Devin under
+# _adapter_env devin (env -i, TRIFORGE_ENV_BASE, which has no SHELL, and the
+# registry's env_keys, none for devin): the lease lane and invoke_devin alike,
+# so a review run sees none of the lead's own exported variables either.
+# devin_env_reimport reads DVN-04's verdict for setup's disclosure.
 #
 # Refusal fallback: DEVIN_REFUSAL_FALLBACK switches models when a provider
 # refuses a request, so the served model could drift from the pinned one. It
-# stays unset: env -i drops it in the lease lane and invoke_devin unsets it.
+# stays unset: env -i drops it on both lanes.
+#
+# Consent at dispatch: invoke_devin and lease_dispatch run _member_consent_ok
+# (scripts/lib/roster.sh) before anything reaches Cognition, so a roster that
+# enables devin without a recorded consent is refused even on a path that
+# reads the table without loading the roster (at-review's optional lanes).
 #
 # Model: --model "${DEVIN_MODEL:-swe-1-6-slow}" on every call. swe-1-6-slow is
 # Cognition's own model and what a Devin Free account resolves to; Free
@@ -138,8 +149,10 @@ REIMPORT_RECORDS
 
 # invoke_devin <agent-name> <prompt> [output-file] [timeout-seconds] [effort]
 # The role comes from DEVIN_ROLE (dispatch_role sets it), else the agent name.
-# Returns devin's exit code; 80 when a clean run printed no Status line
-# (report missing, never "no findings"); 1 when it printed nothing at all.
+# Runs under _adapter_env devin, the lease lane's allowlist. Returns devin's
+# exit code; 80 when a clean run printed no Status line (report missing, never
+# "no findings"); 1 when it printed nothing at all; _member_consent_ok's rc
+# (5) when the roster records no consent, before anything is sent.
 invoke_devin() {
   local AGENT_NAME=$1
   local PROMPT=$2
@@ -148,10 +161,21 @@ invoke_devin() {
   local EFFORT=${5:-${DEVIN_EFFORT:-}}
   local MODEL="${DEVIN_MODEL:-swe-1-6-slow}"
   local ROLE=${DEVIN_ROLE:-$AGENT_NAME}
-  local ERR="${OUTPUT_FILE}.err" CLASS MODE BRIEF_FILE="" BODY="" FULL_PROMPT CFG="" EXIT_CODE=0 ATTEMPT=1
+  local ERR="${OUTPUT_FILE}.err" CLASS MODE BRIEF_FILE="" BODY="" FULL_PROMPT CFG="" EXIT_CODE=0 ATTEMPT=1 TOBIN CRC=0
 
   INVOKE_FAILURE_CLASS="none"
   _INVOKE_FAILURE_REASON=""
+
+  # The consent rule at dispatch (R24): the refusal goes to stderr and to the
+  # output file, so a caller that reads only the file sees why.
+  _member_consent_ok devin 2> "$ERR" || CRC=$?
+  if [ "$CRC" -ne 0 ]; then
+    cat "$ERR" >&2
+    cat "$ERR" > "$OUTPUT_FILE" 2>/dev/null || true
+    INVOKE_FAILURE_CLASS="deterministic"
+    _INVOKE_FAILURE_REASON="consent"
+    return "$CRC"
+  fi
 
   if ! command -v devin >/dev/null 2>&1; then
     echo "invoke_devin: ERROR \`devin\` (Devin CLI) not found on PATH — cannot invoke agent '${AGENT_NAME}'. Fix: $(cli_install_fix devin 2>/dev/null || echo 'install Devin CLI, then run devin auth login'). No retry (deterministic)." >&2
@@ -160,6 +184,8 @@ invoke_devin() {
     _INVOKE_FAILURE_REASON="binary-missing"
     return 127
   fi
+  # env -i execs commands only, so the timeout runs as a binary (_timeout_tool)
+  TOBIN=$(_timeout_tool) || { INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="timeout-tool-missing"; return "$_RC_NO_TIMEOUT_TOOL"; }
 
   CLASS=$(_devin_class "$ROLE")
   MODE=$(_devin_mode "$CLASS")
@@ -194,8 +220,9 @@ ${PROMPT}"
     fi
     EXIT_CODE=0
     _devin_argv "$CLASS" "$CFG" "$MODEL"
-    _run_with_timeout "$TIMEOUT" "${_HOST_SCRUB[@]}" env -u SHELL -u DEVIN_REFUSAL_FALLBACK -u DEVIN_PERMISSION_MODE -u DEVIN_SANDBOX -u DEVIN_MODEL \
-      "${_DEVIN_ARGV[@]}" "$FULL_PROMPT" \
+    # The lease lane's allowlist (KTD-14): no SHELL, no DEVIN_* override, none
+    # of the lead's own exported variables
+    _adapter_env devin "$TOBIN" -k 10s "${TIMEOUT}s" "${_DEVIN_ARGV[@]}" "$FULL_PROMPT" \
       < /dev/null > "$OUTPUT_FILE" 2> "$ERR" || EXIT_CODE=$?
     rm -f "$CFG"
     if [ "$EXIT_CODE" -eq 0 ]; then

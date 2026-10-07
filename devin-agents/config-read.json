@@ -18,8 +18,8 @@
   "notify": "never",
   "show_hints": false,
   "permissions": {
-    "allow": ["Exec(git diff)", "Exec(git log)", "Exec(git show)", "Exec(git status)"],
-    "deny": ["Write(**)", "Exec(git push)", "Exec(git pull)", "Exec(git fetch)", "Exec(git commit)"],
+    "allow": [],
+    "deny": ["exec", "edit", "Write(**)", "mcp__*", "Exec(git push)", "Exec(git pull)", "Exec(git fetch)", "Exec(git commit)"],
     "ask": []
   }
 }

@@ -577,16 +577,19 @@ def write_verified(path, new_raw, verify, who):
 
 # _MEMBER_RULES_PY — the consent and role-limit rules (R24) the registry's
 # consent, role_limit and opt_in_roles fields declare, spliced into
-# resolve_role (load validation, every load) and roster_write_role (which
-# refuses what a load would), like _LEAD_PY (double quotes only inside, no
-# apostrophes). member_rules(members, chains, reject), with chains a
-# {role: [cli, ...]} map, calls reject when:
+# resolve_role (load validation, every load), roster_write_role and
+# roster_write_member (which refuse what a load would), like _LEAD_PY (double
+# quotes only inside, no apostrophes). member_rules(members, chains, reject),
+# with chains a {role: [cli, ...]} map, calls reject when:
 #   - a consent CLI has an enabled [members.<cli>] table without a consent
 #     string, or a chain names it while it has no table at all (never
 #     enrolled, so never consented; a declined table is absent everywhere);
 #   - [members.<cli>].opt_in names a role the CLI does not offer as opt-in;
 #   - a chain names a role-limited CLI for a role outside its role_limit,
-#     unless the role is one of its opt_in_roles and the table opts in.
+#     unless the role is one of its opt_in_roles and the table opts in. A
+#     disabled member is exempt: resolve_role skips it, so the chain falls
+#     through to its next member (a declined opted-in builder keeps every
+#     role resolvable).
 _MEMBER_RULES_PY='
 def member_rules(members, chains, reject):
     for cli, e in CLIS.items():
@@ -611,6 +614,8 @@ def member_rules(members, chains, reject):
             m = members.get(cli)
             if e["consent"] and not isinstance(m, dict):
                 reject("role " + repr(role) + " names " + cli + ", which needs the user consent on record first: enroll it with at-setup (roster_write_member " + cli + " true <model> --consent user)")
+            if isinstance(m, dict) and m.get("enabled") is False:
+                continue    # disabled = absent everywhere (R38): resolve_role walks past it
             lim = e["role_limit"]
             if not lim or role in lim:
                 continue
@@ -1624,6 +1629,39 @@ print('true' if v is True else ('false' if v is False else v))
 "
 }
 
+# _member_consent_ok <cli> [roster] — the consent rule at dispatch (R24): rc 0
+# when the registry asks no consent for <cli>, or when [members.<cli>] in
+# <roster> (default ops/roster.toml) is enabled with a non-empty consent
+# string; otherwise rc 5 (resolve_role's code for the same rule) with a
+# refusal naming at-setup on stderr. member_rules refuses such a roster at
+# every load; this covers the paths that read the member table without loading
+# the roster (at-review's optional lanes) and a lease whose roster changed
+# after lease_create. invoke_devin and lease_dispatch run it before anything
+# is sent. A malformed roster fails closed (rc 4), as at load.
+_member_consent_ok() {
+  local CLI=${1:?usage: _member_consent_ok <cli> [roster]}
+  MC_CLI="$CLI" MC_ROSTER="${2:-ops/roster.toml}" python3 -c "
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_LEAD_PY}
+cli, path = os.environ['MC_CLI'], os.environ['MC_ROSTER']
+e = CLIS.get(cli)
+if e is None or not e['consent']:
+    sys.exit(0)
+members = lead_roster(lead_toml('dispatch'), path, 'dispatch').get('members', {})
+m = members.get(cli) if isinstance(members, dict) else None
+why = 'records no user consent for it'
+if isinstance(m, dict) and m.get('enabled') is False:
+    why = 'declines it ([members.' + cli + '] enabled = false)'
+elif isinstance(m, dict):
+    c = m.get('consent')
+    if isinstance(c, str) and c.strip():
+        sys.exit(0)
+sys.stderr.write('dispatch: REFUSED ' + cli + ' — ' + path + ' ' + why + ', so nothing is sent to ' + e['egress'] + '. Run at-setup to ask the user; on a yes it records the consent (roster_write_member ' + cli + ' true <model> --consent user)\n')
+sys.exit(5)
+"
+}
+
 # roster_write_member <cli> <true|false> <model> [enrolled-tag] [--consent user] [--opt-in <role,...|none>]
 # The SINGLE writer of [members.<cli>] in ops/roster.toml. Text-surgical so it
 # preserves everything else in the file (roles, comments, promotion gate): it
@@ -1642,7 +1680,11 @@ print('true' if v is True else ('false' if v is False else v))
 #   --opt-in <roles> records opt_in = [...] (roles from the registry's
 #                    opt_in_roles; none clears it); left out, the table keeps
 #                    what it had
-# A decline (enabled=false) drops both: re-enabling asks again.
+# A decline (enabled=false) drops both: re-enabling asks again. A write whose
+# table the roster's role chains would reject at load (member_rules) is
+# refused (rc 2), so the roster stays resolvable: dropping the builder opt-in
+# from an enabled devin while a builder chain names it is refused; a decline
+# is not (resolve_role walks past a disabled member).
 roster_write_member() {
   _lead_only roster_write_member || return $?   # workers never write the roster (KTD9, common.sh)
   local USAGE="usage: roster_write_member <cli> <true|false> <model> [enrolled-tag] [--consent user] [--opt-in <role,...|none>]"
@@ -1676,7 +1718,9 @@ roster_write_member() {
   ROSTER_FILE="ops/roster.toml" RW_CLI="$CLI" RW_ENABLED="$ENABLED" RW_MODEL="$MODEL" RW_TAG="$TAG" RW_STAMP="$STAMP" RW_OPTIN="$OPTIN" python3 -c "
 import json, os, re, sys
 ${_TRIFORGE_CLIS_PY}
+${_ROLE_DEFAULTS_PY}
 ${_ROSTER_SPLICE_PY}
+${_MEMBER_RULES_PY}
 try:
     import tomllib
 except ImportError:
@@ -1713,11 +1757,13 @@ if stamp and not e['consent']:
 
 raw = ''
 old = {}
+data = {}
 if os.path.isfile(path):
     with open(path, 'r') as f:
         raw = f.read()
     try:
-        old = tomllib.loads(raw).get('members', {}).get(cli, {})
+        data = tomllib.loads(raw)
+        old = data.get('members', {}).get(cli, {})
     except tomllib.TOMLDecodeError as exc:
         sys.stderr.write('roster_write_member: ERROR malformed ' + path + ': ' + str(exc) + '\n')
         sys.exit(4)
@@ -1740,6 +1786,25 @@ if enabled == 'true':
         if r not in e['opt_in_roles']:
             sys.stderr.write('roster_write_member: ERROR ' + cli + ' offers no opt-in for ' + repr(r) + ' (opt-in roles: ' + (', '.join(e['opt_in_roles']) or 'none') + ')\n')
             sys.exit(2)
+
+# The written roster must still load (member_rules, R24): the new table
+# against every role's merged chain, scoped to this CLI, since this write
+# changes no other member. Refuses, for example, an opt-in dropped from an
+# enabled devin a builder chain still names; a decline always passes (a
+# disabled member is skipped in every chain).
+def refuse(msg):
+    sys.stderr.write('roster_write_member: REFUSED — the roster would not load: ' + msg + '\n')
+    sys.exit(2)
+roles = data.get('roles', {})
+roles = roles if isinstance(roles, dict) else {}
+chains = {}
+for name, dflt in DEFAULTS.items():
+    user = roles.get(name, {})
+    user = user if isinstance(user, dict) else {}
+    head, fbs = user.get('cli', dflt['cli']), user.get('fallbacks', dflt['fallbacks'])
+    chain = [head] + (list(fbs) if isinstance(fbs, list) else [])
+    chains[name] = [x for x in chain if x == cli]
+member_rules({cli: {'enabled': enabled == 'true', 'consent': consent, 'opt_in': optin}}, chains, refuse)
 
 block = ('[members.' + cli + ']\n'
          'enabled = ' + enabled + '\n'

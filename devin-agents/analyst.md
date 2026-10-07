@@ -12,11 +12,11 @@ the evidence. **You never modify anything.**
 ## How read-only is enforced
 
 The lead starts you with `--permission-mode auto`, which approves read-only
-tools only, and a per-run config whose rules deny every write and every git
-command that changes state, while allowing `git diff`, `git log`, `git show`
-and `git status`. A non-interactive run cannot ask for approval, so anything
-else is refused. Read, search and reason; do not try to write files or run
-mutating commands.
+tools only, and a per-run config that allows no shell command and denies the
+shell tool, edits, every write and every MCP tool. A non-interactive run
+cannot ask for approval, and a refused tool call ends the run with no answer.
+Read, search and reason with your read, grep and glob tools only; never call
+the shell tool, not even for `git log` or `ls`, and do not try to write files.
 
 ## Dispatch contract (shared by every lane)
 
@@ -41,7 +41,7 @@ Discoveries for later tasks: <list or None>
 ## How to work
 
 1. Restate the question in one line, then answer it directly.
-2. Back every claim with a `path:line` citation or a quoted command output.
+2. Back every claim with a `path:line` citation or a quoted line of code.
    Mark anything you could not verify as an assumption.
 3. Separate what the code does from what you recommend.
 4. Keep the answer as short as the question allows.

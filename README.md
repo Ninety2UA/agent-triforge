@@ -158,7 +158,7 @@ The heart of v3.0.0. A wave reads [`ops/roster.toml`](templates/ops/roster.toml)
 Prefer the Pro line? Set a role's `model` to `"Gemini 3.1 Pro (High)"` (or `(Low)` — 3.1 Pro has no Medium tier) in `ops/roster.toml`; it stays the documented one-line opt-in. The July 2026 plan's never-Flash rule (AE2) is superseded by D-022 — anyone working from that plan should read the September ADR (`ops/decisions/2026-09-11-cli-deprecation-watch.md`).
 
 <p align="center">
-  <img src="docs/images/roster.svg" alt="Roster and assignment — ops/roster.toml maps each role to a CLI, model, and effort with fallback chains; six CLIs across a required core trio and an optional tier" width="82%">
+  <img src="docs/images/roster.svg" alt="Roster and assignment: ops/roster.toml maps each of the five roles to a CLI, model and effort, with a fallback chain that ends at the required core trio (Claude, Antigravity, Codex). OpenCode, Kimi and Cursor are drawn as the optional tier, enrolled per project." width="82%">
 </p>
 
 *Image note (history): `docs/images/roster.svg` was exported for v3.0.0 and still labels Codex `gpt-5.6-sol` and the agy lane "Antigravity · Pro"; regeneration is deferred — the paragraph above and the [Compatibility](#compatibility) table are authoritative.*

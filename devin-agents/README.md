@@ -17,13 +17,16 @@ carries the typed report contract.
 
 Devin prints plain text and has no result envelope, so completion is the
 `Status:` line plus the exit code. A clean run with no `Status:` line is
-"report missing" (rc 80), and an empty one is a failure.
+"report missing" (rc 80), and an empty one is a failure. A `-p` run stops at
+the first refused tool call and exits 0 with no answer (probe row DVN-05), so
+the read briefs tell Devin to use only its read, grep and glob tools, never
+the shell.
 
 ## Two permission classes
 
 | Class | Roles | Flags | Config |
 |---|---|---|---|
-| read | reviewer, analyst | `--permission-mode auto` (read-only tools only; a non-interactive run cannot ask for more) | `config-read.json`: denies `Write(**)` and the git commands that change state, allows `git diff`, `git log`, `git show`, `git status` |
+| read | reviewer, analyst | `--permission-mode auto` (read-only tools only; a non-interactive run cannot ask for more) | `config-read.json`: allows no command and denies the `exec` and `edit` tools, `Write(**)` and every MCP tool. `git diff`, `git log` and `git show` can write a file through `--output`, and Devin has no OS sandbox, so the read class runs no command at all. |
 | edit | builder (opt-in) | `--permission-mode dangerous` (every tool approved, like the Cursor and Kimi builder lanes) | `config-edit.json`: denies `git push`, `pull`, `fetch`, `commit`, `rebase`, `checkout`, `switch` |
 
 Every run also passes `--respect-workspace-trust false`, because `-p` fails
@@ -45,13 +48,14 @@ When `$SHELL` is set, Devin runs it once per session as an interactive login
 shell and copies every variable the profile exports into its tool shell. That
 would undo the lease lane's environment allowlist. Without `$SHELL`, Devin
 logs "login-shell env snapshot skipped" and copies nothing. The lease lane
-never forwards `SHELL`, and `invoke_devin` unsets it. Probe row DVN-04 checks
+and `invoke_devin` both start Devin under the lease environment allowlist,
+which has no `SHELL` and none of the lead's other variables. Probe row DVN-04 checks
 this with a `.zshrc`-only variable, and `devin_env_reimport` reads its verdict
 so setup can say whether Devin sees the user's exported secrets.
 
 `DEVIN_REFUSAL_FALLBACK` would let Devin switch models when a provider refuses
-a request, so the model that answered could differ from the pinned one. Both
-lanes keep it unset.
+a request, so the model that answered could differ from the pinned one. The
+allowlist leaves it out on both lanes.
 
 ## Model
 

@@ -34,7 +34,7 @@ Devin's `needs-ask` output has a `consent: required` line, and Devin is never en
 2. Tell the user what enrolling Devin means:
    - Devin sends prompts and code to Cognition. Cognition may train on them unless the account opts out, which paid plans can do. A model outside Cognition's SWE family also sends them on to that model's provider.
    - Devin can read the credential files in the user's home directory, like every worker.
-   - On `yes` or `unknown`, add that Devin re-imports the login shell's environment and so sees every secret the shell profile exports. On `no`, say that Triforge starts Devin without `$SHELL`, so it imports none of them (probe row DVN-04).
+   - On `yes` or `unknown`, add that Devin re-imports the login shell's environment and so sees every secret the shell profile exports. On `no`, say that Triforge starts Devin with only an allowlist of environment variables and no `$SHELL`, so none of those exports reach it (probe row DVN-04).
 3. On a yes, record the consent with the write: `roster_write_member devin true "<model>" --consent user`. Without `--consent user` the write is refused. On a no, record the decline as for any member.
 4. Devin reviews and analyzes by default. It builds only after a second yes: `roster_write_member devin true "<model>" --opt-in builder`. Ask this only when the user wants Devin as a builder.
 

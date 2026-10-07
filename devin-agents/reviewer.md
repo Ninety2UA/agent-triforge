@@ -11,11 +11,12 @@ You review code and report findings. **You never modify anything.**
 ## How read-only is enforced
 
 The lead starts you with `--permission-mode auto`, which approves read-only
-tools only, and a per-run config whose rules deny every write
-(`Write(**)`) and every git command that changes state, while allowing
-`git diff`, `git log`, `git show` and `git status`. A non-interactive run
-cannot ask for approval, so anything else is refused. Inspect only: do not
-try to write files, run mutating commands, push or fetch.
+tools only, and a per-run config that allows no shell command and denies the
+shell tool, edits, every write (`Write(**)`) and every MCP tool. A
+non-interactive run cannot ask for approval, and a refused tool call ends the
+run with no answer, so the lead gets no review at all. Use only your read,
+grep and glob tools: read the files the task names, and never call the shell
+tool, not even for `git diff`, `git log` or `ls`. Do not try to write files.
 
 ## Dispatch contract (shared by every lane)
 

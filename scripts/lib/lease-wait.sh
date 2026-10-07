@@ -556,8 +556,10 @@ _claude_session_ok() {
 #   <cursor-bin> <worktree> <timeout-s> [<git-common-dir> <resume-id>] — set
 # _LEASE_LANE_ARGV to the lane's command line up to the prompt, which the
 # caller appends (agy and kimi end in
-# -p, whose value it is; the others take it as the trailing positional); rc 1
-# for a CLI with no arm. <lane-arg> is the lane's own value from
+# -p, whose value it is; the others take it as the trailing positional); rc 3
+# for a CLI with no arm, any other nonzero when an arm could not compose its
+# command (the devin arm names the cause in _LEASE_LANE_ERR). <lane-arg> is
+# the lane's own value from
 # lease_dispatch: kimi's agent file, devin's config copy, grok's class. The
 # one place each lane's argv is composed:
 # _lease_builder_run runs it under _adapter_env, and the probe's worker-marker
@@ -607,7 +609,9 @@ _claude_session_ok() {
 #                analyst lease), workspace trust off
 #                (-p fails in an untrusted directory), -p last. SHELL never
 #                crosses env -i, so Devin imports no login-shell exports
-#                (DVN-04)
+#                (DVN-04). A missing copy is a compose failure, never a run;
+#                _lease_builder_run logs the command line and removes the
+#                copy after the run (Devin writes its org id into it)
 #   grok         _grok_argv (scripts/lib/grok.sh) in the class the lane arg
 #                carries (lease_dispatch: _grok_class of the lease role):
 #                edit, the workspace sandbox and the edit tools, for a builder,
@@ -652,8 +656,12 @@ _lease_lane_argv() {
       ;;
     devin)
       # <lane-arg> is the per-dispatch config copy (lease_dispatch); an
-      # .edit.json copy is the builder class, anything else read-only
-      if [ -z "$LANE_ARG" ]; then return 1; fi
+      # .edit.json copy is the builder class, anything else read-only. No
+      # copy, no run: Devin never starts on a config the lane did not write
+      if [ -z "$LANE_ARG" ] || [ ! -f "$LANE_ARG" ]; then
+        _LEASE_LANE_ERR="devin config copy missing (${LANE_ARG:-none named}); lease_dispatch writes one per dispatch"
+        return 1
+      fi
       case "$LANE_ARG" in
         *.edit.json) _devin_argv edit "$LANE_ARG" "$DMODEL" ;;
         *)           _devin_argv read "$LANE_ARG" "$DMODEL" ;;
@@ -666,7 +674,7 @@ _lease_lane_argv() {
       _LEASE_LANE_ARGV=("${_GROK_ARGV[@]}")
       ;;
     *)
-      return 1
+      return 3   # no arm (_lease_builder_run: not integrated)
       ;;
   esac
   return 0
@@ -686,10 +694,12 @@ _lease_lane_argv() {
 # <out>.class (no requeue). The claude lane's JSON envelope, the seam's
 # included, is split by _lease_claude_envelope into the result text (<out>)
 # and the record lease_collect reads (<out>.envelope); with no envelope, the
-# run's stderr is appended to <out>.
+# run's stderr is appended to <out>. Before any run: rc 95 for a CLI with no
+# lane arm (not integrated), rc 94 (deterministic) for an arm that could not
+# compose its command, each with its own line in <out>.
 _lease_builder_run() {
   local CLI=$1 MODEL=$2 EFFORT=$3 DISPATCH_MODEL=$4 LANE_ARG=$5 CBIN=$6 TOBIN=$7 TIMEOUT=$8 OUT=$9
-  local WT=${10} TEST_BUILDER=${12} FULL_PROMPT=${13} COMMON=${14:-} RESUME=${15:-} RC=0 CLASS_SET=0 AGY_PRC=0 SBX_REFUSED=0
+  local WT=${10} TEST_BUILDER=${12} FULL_PROMPT=${13} COMMON=${14:-} RESUME=${15:-} RC=0 CLASS_SET=0 AGY_PRC=0 SBX_REFUSED=0 LRC=0
   local -a TO
   _ADAPTER_ENV_KEYS=${11}   # the registry read lease_dispatch did; _adapter_env reads none
   cd "$WT" || return 97
@@ -700,12 +710,21 @@ _lease_builder_run() {
   # ignores TERM is killed _LEASE_KILL_AFTER_S later, so the builder enforces
   # its own deadline even with no lead around.
   TO=("$TOBIN" --foreground -k "${_LEASE_KILL_AFTER_S}s" "${TIMEOUT}s")
+  if [ -z "$TEST_BUILDER" ]; then
+    _LEASE_LANE_ERR=""
+    _lease_lane_argv "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$LANE_ARG" "$CBIN" "$WT" "$TIMEOUT" "$COMMON" "$RESUME" || LRC=$?
+  fi
   if [ -n "$TEST_BUILDER" ]; then
     # Test seam (see lease_dispatch): deterministic fake builder.
     _adapter_env "$CLI" "${TO[@]}" "$TEST_BUILDER" "$FULL_PROMPT" > "$OUT" 2>&1 || RC=$?
-  elif ! _lease_lane_argv "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$LANE_ARG" "$CBIN" "$WT" "$TIMEOUT" "$COMMON" "$RESUME"; then
+  elif [ "$LRC" -eq 3 ]; then
     echo "lease_dispatch: ERROR builder CLI '${CLI}' has no dispatch arm here — not integrated. Registered CLIs: $(_known_clis '<registry unreadable>')." > "$OUT"
     RC=95
+  elif [ "$LRC" -ne 0 ]; then
+    # An arm that could not compose its command: its own cause (rc 94,
+    # deterministic), never "not integrated"; nothing ran
+    echo "lease_dispatch: ERROR the ${CLI} lane could not compose its command: ${_LEASE_LANE_ERR:-its argv composer failed (see ${OUT}.log)} — nothing ran" > "$OUT"
+    RC=94; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1
   else
     case "$CLI" in
       antigravity)
@@ -776,6 +795,13 @@ _lease_builder_run() {
           fi
         fi
         ;;
+      devin)
+        # The command line goes to the builder log (<out>.log) first: it
+        # names the class (--config's .read/.edit copy, --permission-mode),
+        # and the copy itself is removed after the run (below)
+        echo "lease_dispatch: devin lane: ${_LEASE_LANE_ARGV[*]}" >&2
+        _adapter_env devin "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
+        ;;
       *)
         _adapter_env "$CLI" "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
         ;;
@@ -787,6 +813,11 @@ _lease_builder_run() {
       if [ "$SBX_REFUSED" -eq 1 ]; then
         echo "lease_dispatch: the claude builder refused to start without Claude Code's sandbox (KTD16) — on Linux install bubblewrap and socat; or set TRIFORGE_CLAUDE_SANDBOX=off in the lead's environment, and the claude builder's Bash then runs without OS confinement" >> "$OUT"
       fi
+      ;;
+    devin)
+      # Devin wrote its org id into the per-dispatch config copy: it goes,
+      # as invoke_devin's own copy does after its run
+      if [ -n "$LANE_ARG" ]; then rm -f "$LANE_ARG"; fi
       ;;
   esac
   python3 -c "$_LEASE_OWN_GROUP_PY" 2>/dev/null || true
