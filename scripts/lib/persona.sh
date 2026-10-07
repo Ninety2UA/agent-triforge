@@ -6,8 +6,10 @@
 # The helpers it calls — _claude_lane_argv, _CLAUDE_CRED_PATHS, _CODEX_ENV_POLICY,
 # the launcher (_LEASE_LAUNCH_PY, _LEASE_GO_SH), _lease_proc_state,
 # _lease_signalable and _lead_wait_budget (lease-wait.sh), _adapter_env,
-# _lead_integrity_check, _lead_baseline_ensure, _lgr, _lgw,
-# _ledger_get_row and _lease_claude_envelope (lease.sh), _checkout_top
+# _lead_integrity_check, _lead_integration_check, _lead_branch_switched,
+# _lead_baseline_ensure, _lease_current_branch, _lease_default_branch,
+# _lease_open_rows, _lgr, _lgw, _ledger_get_row and _lease_claude_envelope
+# (lease.sh), _checkout_top
 # (roster.sh), _protected_classify and the ladder (registry.sh), _lead_only
 # (common.sh) — resolve at call time; nothing here runs at source time but
 # assignments, _PERSONA_PY's splicing registry.sh's _TRIFORGE_CLIS_PY,
@@ -89,7 +91,9 @@ fi
 #             permission profiles is refused, 69). It still reads the rest of
 #             the disk, as every codex worker does. Its working directory is an
 #             empty scratch directory (<TMPDIR>/triforge-persona.*/cwd), never a
-#             builder's worktree (KTD20, R48)
+#             builder's worktree (KTD20, R48), owned by a subshell whose traps
+#             remove it as the exec class's remove its worktree
+#             (_persona_read_run)
 #   read-web  persona-read-web: Read, Grep, Glob, WebFetch and WebSearch, no
 #             Bash; claude only
 #   exec      claude -p in the persona-exec class (the read tools and Bash,
@@ -105,8 +109,11 @@ fi
 #                              is ref:HEAD, the integration commit (committed
 #                              work only)
 #             Before the run the instruction and config files are put back to
-#             the integration branch's HEAD (a no-op at ref:HEAD), what the
-#             commit changes in them — against the lease's base, or against
+#             the integration branch's HEAD (a no-op at ref:HEAD), trusted only
+#             as the lead recorded it (_persona_trusted_head: on the recorded
+#             integration branch at the recorded SHA, as lease_merge checks
+#             it; rc 44 for a moved branch or a switched or detached HEAD),
+#             what the commit changes in them — against the lease's base, or against
 #             HEAD for a ref — is named as content under review, and the
 #             project's own CLAUDE.md, .claude/CLAUDE.md and AGENTS.md as HEAD
 #             holds them ride in the prompt (_persona_bundle), since
@@ -123,8 +130,9 @@ fi
 #             whenever the run's subshell ran, never on a mark the persona
 #             could remove. The worktree's life runs in a subshell whose EXIT,
 #             INT, TERM and HUP traps stop the CLI's process tree (TERM, up to
-#             5 s, then KILL) and reclaim the worktree on a failed setup step,
-#             set -e or a signal (_persona_exec_run)
+#             5 s, then KILL), reclaim the worktree and remove the run's
+#             scratch directory on a failed setup step, set -e or a signal
+#             (_persona_exec_run)
 #   lease     never a persona run: pr-comment-resolver works as a lease task
 #             (at-resolve-pr), its prompt from persona_prompt; refused, 64
 #   agent-team  team-lead, only under the Claude-only agent_teams capability
@@ -134,7 +142,11 @@ fi
 # instruction files from the directories above their working directory, and
 # a git working tree above it would be taken as the project, so a run refuses
 # (69) when one sits there (_persona_guard_ancestors). --timeout defaults to
-# the persona's own budget (_persona_default_timeout).
+# the persona's own budget (_persona_default_timeout). Every class starts its
+# CLI under a run supervisor (_PERSONA_RUN_PY): once the CLI ends, on its own
+# or stopped, whatever it left running in its process group or below it (a
+# test server it started) is stopped too, TERM, up to 5 s, then KILL, before
+# the worktree is reclaimed and the checks after the run start.
 
 # A persona can run longer than a lead's tool call may (Claude Code's Bash
 # tool stops a call at 600 s, a Codex lead's terminal at 900 s; a top-tier
@@ -150,9 +162,11 @@ fi
 #             waits for the named runs (none named: every <name>.pid there)
 #             for the lead's wait budget (_lead_wait_budget); never signals
 #   persona_stop <run-dir> [<name>...]
-#             stops runs: the process tree and group of each, TERM and then
-#             KILL, while the recorded process still answers (pid, pgid and
-#             start time, _lease_proc_state)
+#             stops runs: the process tree, group and session of each, TERM
+#             and then KILL, while the recorded process still answers (pid,
+#             pgid and start time, _lease_proc_state), and once it is gone,
+#             whatever is left in the session the launcher gave it; rc 80
+#             when something still runs after the KILL
 # A skill reruns its persona_wait block while it returns 75, then reads the
 # .rc files.
 
@@ -528,13 +542,15 @@ _persona_instr_paths() {
   return "$RC"
 }
 
-# _persona_restore <worktree> <admin-dir> <integration-head> <side-dir> — put
-# every path on the registry's project protected list back to the integration
-# HEAD in a persona worktree: the snapshot's copies are removed (a symlink or a
-# submodule in a directory's place included), then the HEAD's are checked out.
+# _persona_restore <worktree> <admin-dir> <commit> <integration-head>
+# <side-dir> — put every path on the registry's project protected list back to
+# the integration HEAD in a persona worktree checked out at <commit>: the
+# commit's copies are removed (a symlink or a submodule in a directory's place
+# included), then the HEAD's are checked out. Both lists come from the two
+# commit ids, never from a ref (the worktree's own HEAD included).
 _persona_restore() {
-  local WT=$1 A=$2 HEAD=$3 SIDE=$4
-  _lgw "$WT" "$A" ls-tree -r -z --name-only --full-tree HEAD > "${SIDE}/snap.ls" 2>/dev/null || return 1
+  local WT=$1 A=$2 COMMIT=$3 HEAD=$4 SIDE=$5
+  _lgw "$WT" "$A" ls-tree -r -z --name-only --full-tree "$COMMIT" > "${SIDE}/snap.ls" 2>/dev/null || return 1
   _lgw "$WT" "$A" ls-tree -r -z --name-only --full-tree "$HEAD" > "${SIDE}/head.ls" 2>/dev/null || return 1
   PR_WT="$WT" PR_SIDE="$SIDE" python3 -c '
 import os, shutil, sys
@@ -993,20 +1009,40 @@ _persona_stage() {
 # _persona_read <persona> <input> <out> <timeout> <timeout-bin> [<task>] — the
 # read and read-web run, from an empty scratch directory with the input copied
 # beside it, or with <task>'s collect-snapshot diff there (see the section
-# comment).
+# comment). The scratch directory's life runs in a subshell of its own
+# (_persona_read_run), which says "started" on fd 7 just before it starts the
+# CLI, as _persona_exec's does: with it the answer is read, without it the
+# setup step's rc is returned.
 _persona_read() {
-  local P=$1 IN=$2 OUT=$3 TIMEOUT=$4 TOBIN=$5 T=${6:-} SCR CWD RC=0 PROMPT CLASSLINE
-  local -a ARGV=()
+  local P=$1 IN=$2 OUT=$3 TIMEOUT=$4 TOBIN=$5 T=${6:-} STARTED="" RC=0
   if [ -n "$T" ]; then
     _persona_lease dispatch_persona "$T" || return $?
   fi
-  SCR=$(_persona_scratch) || return 1
-  CWD="${SCR}/cwd"
-  if ! _persona_stage "$SCR" "$IN" "$T" "$CWD"; then
-    rm -rf "$SCR"
-    return 1
-  fi
-  _persona_guard_ancestors dispatch_persona "$CWD" || { RC=$?; rm -rf "$SCR"; return "$RC"; }
+  { STARTED=$( ( _persona_read_run "$P" "$IN" "$OUT" "$TIMEOUT" "$TOBIN" "$T" ) 7>&1 1>&8 ) || RC=$?; } 8>&1
+  if [ "$STARTED" != started ]; then return "$RC"; fi
+  _persona_finish "$_PR_CLI" "$OUT" "$RC"
+}
+
+# _persona_read_run <persona> <input> <out> <timeout> <timeout-bin> [<task>]
+# — the part of a read run that owns the scratch directory, called in a
+# subshell of its own (_persona_read), so its EXIT, INT, TERM and HUP traps
+# (_persona_run_cleanup) are the subshell's: the directory is made, staged,
+# used and removed here, and a failed setup step, set -e or a signal (a
+# persona_stop) still stops the CLI and removes it. It writes "started" to
+# fd 7 just before the CLI starts (_persona_cli); the subshell's exit code is
+# the CLI's.
+_persona_read_run() {
+  local P=$1 IN=$2 OUT=$3 TIMEOUT=$4 TOBIN=$5 T=${6:-} CWD PROMPT CLASSLINE SO=$3 SE="${3}.err"
+  local -a ARGV=()
+  _PX_WT="" _PX_RUN="" _PX_SCR=""
+  trap '_persona_run_cleanup' EXIT
+  trap '_persona_run_cleanup; exit 130' INT
+  trap '_persona_run_cleanup; exit 143' TERM
+  trap '_persona_run_cleanup; exit 129' HUP
+  _PX_SCR=$(_persona_scratch) || return 1
+  CWD="${_PX_SCR}/cwd"
+  _persona_stage "$_PX_SCR" "$IN" "$T" "$CWD" || return 1
+  _persona_guard_ancestors dispatch_persona "$CWD" || return $?
   if [ "$_PR_CLI" = codex ]; then
     CLASSLINE="class read (codex exec under a read-only permission profile: you can read files and run read-only commands; credential paths are denied)"
   elif [ "$_PR_CLASS" = read-web ]; then
@@ -1014,28 +1050,25 @@ _persona_read() {
   else
     CLASSLINE="class read (Read, Grep and Glob)"
   fi
-  PROMPT=$(_persona_prompt "$P" "$CLASSLINE" "" "$_PS_INPUT" "$_PS_WHAT") || { RC=$?; rm -rf "$SCR"; return "$RC"; }
+  PROMPT=$(_persona_prompt "$P" "$CLASSLINE" "" "$_PS_INPUT" "$_PS_WHAT") || return $?
   case "$_PR_CLI" in
     claude)
       local _CLAUDE_MAX_TURNS=$_PR_TURNS
-      _claude_lane_argv "persona-${_PR_CLASS}" "$_PR_MODEL" "$_PR_EFFORT" "" "$CWD" || { rm -rf "$SCR"; return 1; }
-      ( cd "$CWD" && _ADAPTER_WORKER=persona && _adapter_env claude "$TOBIN" -k 10s "${TIMEOUT}s" "${_LEASE_LANE_ARGV[@]}" "$PROMPT" ) \
-        < /dev/null > "$OUT" 2> "${OUT}.err" || RC=$?
+      _claude_lane_argv "persona-${_PR_CLASS}" "$_PR_MODEL" "$_PR_EFFORT" "" "$CWD" || return 1
+      ARGV=("${_LEASE_LANE_ARGV[@]}")
       ;;
     codex)
       if ! _persona_codex_profile; then
         echo "dispatch_persona: ERROR no HOME to name the credential paths the codex read profile denies; nothing ran (fail closed)" >&2
-        rm -rf "$SCR"
         return 1
       fi
       ARGV=(codex exec -c 'approval_policy="never"' --skip-git-repo-check "${_CODEX_ENV_POLICY[@]}" "${_PERSONA_CODEX_PROFILE[@]}"
             -C "$CWD" -m "$_PR_MODEL" -c "model_reasoning_effort=\"${_PR_EFFORT}\"" -o "$OUT")
-      ( cd "$CWD" && _ADAPTER_WORKER=persona && _adapter_env codex "$TOBIN" -k 10s "${TIMEOUT}s" "${ARGV[@]}" "$PROMPT" ) \
-        < /dev/null > "${OUT}.log" 2>&1 || RC=$?
+      SO="${OUT}.log" SE=-
       ;;
   esac
-  rm -rf "$SCR"
-  _persona_finish "$_PR_CLI" "$OUT" "$RC"
+  printf 'started' >&7
+  _persona_cli "$CWD" "$SO" "$SE" "$_PR_CLI" "$TOBIN" -k 10s "${TIMEOUT}s" "${ARGV[@]}" "$PROMPT"
 }
 
 # _persona_target <who> <at> — the commit an exec persona runs at, after the
@@ -1097,38 +1130,80 @@ _persona_target() {
       return 64
       ;;
   esac
+  _persona_trusted_head "$WHO" || return $?
+  if [ -z "$_PT_FROM" ]; then _PT_FROM=$_PT_HEAD; fi
+}
+
+# _persona_trusted_head <who> — set _PT_HEAD to the commit an exec run's
+# instruction and config files are restored and bundled from: the integration
+# HEAD, trusted only as the lead recorded it (KTD18), since a builder shares
+# .git and can move a branch or switch the lead's checkout before a dispatch.
+# Called after the integrity check has verified the ledger and the default
+# branch. With an integration branch recorded ([baseline].integration_branch
+# and integration_sha: a sprint under way) the checkout must be on that branch
+# (another branch, the default one or a detached HEAD is refused:
+# _lead_branch_switched) at that SHA (_lead_integration_check, the check
+# lease_merge and lease_promote run), and _PT_HEAD is the recorded SHA. With
+# none recorded, HEAD is taken as found on the default branch (its SHA is in
+# the baseline the integrity check compared), or anywhere while no lease is
+# open (no builder runs, as when lease_create records a first branch); with a
+# lease open, any other HEAD is refused. Nothing is recorded here. rc 44 with
+# the refusal (lease_rebaseline accepts a switch or a commit the lead made); 1
+# when the open leases or HEAD can't be read.
+_persona_trusted_head() {
+  local WHO=$1 IB="" ISHA="" CUR ROW OPEN=""
+  _PT_HEAD=""
+  CUR=$(_lease_current_branch)
+  ROW=$(_ledger_get_row @baseline integration_branch integration_sha 2>/dev/null) || ROW=""
+  { IFS= read -r IB || true; IFS= read -r ISHA || true; } <<PERSONA_HEAD_EOF
+${ROW}
+PERSONA_HEAD_EOF
+  if [ -n "$IB" ] && [ -n "$ISHA" ]; then
+    if [ "$CUR" != "$IB" ]; then
+      _lead_branch_switched "$WHO" "$IB" "$ISHA" "$CUR"
+    elif _lead_integration_check "$WHO"; then
+      _PT_HEAD=$ISHA
+      return 0
+    fi
+    echo "${WHO}: an exec persona's instruction and config files come only from the integration branch at the commit the lead recorded; nothing ran (rc ${_RC_LEASE_INTEGRITY})" >&2
+    return "$_RC_LEASE_INTEGRITY"
+  fi
+  if [ -z "$CUR" ] || [ "$CUR" != "$(_lease_default_branch)" ]; then
+    if ! OPEN=$(_lease_open_rows "$_LEASE_LEDGER"); then
+      echo "${WHO}: ERROR could not read the open leases in ${_LEASE_LEDGER} (${OPEN}); nothing ran (fail closed)" >&2
+      return 1
+    fi
+    OPEN=$(printf '%s\n' "$OPEN" | head -1 | cut -f1)
+    if [ -n "$OPEN" ]; then
+      echo "${WHO}: REFUSED — leases are open (${OPEN}) and no integration branch is recorded, so the checkout's HEAD (${CUR:-<detached HEAD>}) is no state the lead verified: a builder shares .git and can switch the lead's checkout. If you switched it yourself, run lease_rebaseline (it records the current branch) and rerun; nothing ran (KTD18, rc ${_RC_LEASE_INTEGRITY})" >&2
+      return "$_RC_LEASE_INTEGRITY"
+    fi
+  fi
   _PT_HEAD=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null) || _PT_HEAD=""
   if [ -z "$_PT_HEAD" ]; then
     echo "${WHO}: ERROR the lead's checkout has no HEAD commit to restore instruction files from" >&2
     return 1
   fi
-  if [ -z "$_PT_FROM" ]; then _PT_FROM=$_PT_HEAD; fi
 }
 
 # _persona_exec <persona> <input> <out> <timeout> <timeout-bin> <at> [<task>]
 # — the exec run at the --at commit (see the section comment): the target and
-# the integrity check before, the input beside the worktree (with <task>, that
-# lease's collect-snapshot diff), the worktree's own life in a subshell
-# (_persona_exec_run), then the answer, the integrity check and the ref check.
-# The subshell says "started" on fd 7, captured here, just before it starts
-# the CLI (which gets no fd 7): with it the answer is read, without it the
-# setup step's rc is returned; the two checks run either way, so nothing the
-# persona can write or remove skips them.
+# the integrity check before, the worktree's own life in a subshell
+# (_persona_exec_run: the input beside it, with <task> that lease's
+# collect-snapshot diff), then the answer, the integrity check and the ref
+# check. The subshell says "started" on fd 7, captured here, just before it
+# starts the CLI (which gets no fd 7): with it the answer is read, without it
+# the setup step's rc is returned; the two checks run either way, so nothing
+# the persona can write or remove skips them.
 _persona_exec() {
-  local P=$1 IN=$2 OUT=$3 TIMEOUT=$4 TOBIN=$5 AT=$6 T=${7:-} SIDE INSTR REFS0 REFS1 CHANGED STARTED="" RC=0 FRC=0
+  local P=$1 IN=$2 OUT=$3 TIMEOUT=$4 TOBIN=$5 AT=$6 T=${7:-} INSTR REFS0 REFS1 CHANGED STARTED="" RC=0 FRC=0
   _persona_target dispatch_persona "$AT" || return $?
   if ! INSTR=$(_persona_instr_paths "$_PT_FROM" "$_PT_COMMIT"); then
     echo "dispatch_persona: ERROR could not classify the paths ${_PT_DESC} changes; nothing ran (fail closed)" >&2
     return 1
   fi
-  SIDE=$(_persona_scratch) || return 1
-  if ! _persona_stage "$SIDE" "$IN" "$T"; then
-    rm -rf "$SIDE"
-    return 1
-  fi
   REFS0=$(_persona_refs)
-  { STARTED=$( ( _persona_exec_run "$P" "$OUT" "$TIMEOUT" "$TOBIN" "$SIDE" "$_PS_INPUT" "$_PS_WHAT" "$INSTR" "$T" ) 7>&1 1>&8 ) || RC=$?; } 8>&1
-  rm -rf "$SIDE"
+  { STARTED=$( ( _persona_exec_run "$P" "$IN" "$OUT" "$TIMEOUT" "$TOBIN" "$INSTR" "$T" ) 7>&1 1>&8 ) || RC=$?; } 8>&1
   if [ "$STARTED" = started ]; then
     _persona_finish claude "$OUT" "$RC" || FRC=$?
   else
@@ -1149,14 +1224,18 @@ _persona_exec() {
   return "$FRC"
 }
 
-# _persona_exec_cleanup — stop the exec run's CLI process tree while it can
-# still be reached through its parent: TERM, up to 5 s for it to end, then
-# KILL (_persona_stop_tree), and reap it; only then reclaim the persona
-# worktree, so no CLI process outlives it into the checks after the run. Each
-# step at most once. _persona_exec_run's traps and its normal end call it.
-_persona_exec_cleanup() {
+# _persona_run_cleanup — a persona run's cleanup, from the traps of the
+# subshell that owns the run (_persona_read_run, _persona_exec_run) and from
+# its normal end: stop the CLI's process tree while it can still be reached
+# through its parent: TERM, up to 5 s for it to end, then KILL
+# (_persona_stop_tree), and reap it; only then reclaim the exec worktree
+# (_PX_WT) and remove the run's scratch directory (_PX_SCR), so no CLI process
+# outlives them into the checks after the run. Each step at most once. When
+# the CLI ended on its own, the run supervisor (_PERSONA_RUN_PY) has already
+# stopped what it left running.
+_persona_run_cleanup() {
   if [ -n "${_PX_RUN:-}" ]; then
-    _persona_stop_tree "$_PX_RUN" "" 5 >/dev/null || true
+    _persona_stop_tree "$_PX_RUN" "" "" 5 >/dev/null || true
     wait "$_PX_RUN" 2>/dev/null || true
     _PX_RUN=""
   fi
@@ -1164,30 +1243,60 @@ _persona_exec_cleanup() {
     _persona_reclaim "$_PX_WT"
     _PX_WT=""
   fi
+  if [ -n "${_PX_SCR:-}" ]; then
+    rm -rf "$_PX_SCR"
+    _PX_SCR=""
+  fi
 }
 
-# _persona_exec_run <persona> <out> <timeout> <timeout-bin> <side> <input>
-#   <what> <instruction paths> [<task>] — the part of an exec run that owns the
-# disposable worktree, called in a subshell of its own (_persona_exec), so its
-# EXIT, INT, TERM and HUP traps are the subshell's and the caller's traps never
-# change. The worktree is created, restored, used and reclaimed here; a setup
-# step that fails, set -e ending the subshell, or a signal still reaches
-# _persona_exec_cleanup. The CLI runs in the background with this shell
-# waiting on it, so a trapped signal is handled at once: a background job
-# ignores SIGINT, so after Ctrl-C the CLI is still reachable and is stopped
-# (TERM) before the worktree goes; a TERM or HUP sent to the whole process
-# group can end the CLI's parent first, and the worktree is still reclaimed
-# while the CLI then ends at its own timeout. It writes "started" to fd 7 (see
-# _persona_exec) just before the CLI starts, and the CLI gets neither fd 7 nor
-# fd 8; the subshell's exit code is the CLI's.
+# _persona_cli <cwd> <stdout> <stderr|-> <cli> <command...> — run the
+# persona's CLI command from <cwd> under _adapter_env <cli> (the worker marker
+# persona) and the run supervisor (_PERSONA_RUN_PY, 5 s grace), stdin
+# /dev/null, stdout to <stdout>, stderr to <stderr> (- for the same file). It
+# runs in the background with this shell waiting on it, so a trapped signal is
+# handled at once: a background job ignores SIGINT, so after Ctrl-C the CLI is
+# still reachable and is stopped (TERM) before the worktree or scratch
+# directory goes; a TERM or HUP sent to the whole process group can end the
+# CLI's parent first, and the supervisor, which gets it too, stops what is
+# left. _PX_RUN holds its pid meanwhile, for _persona_run_cleanup; the CLI
+# gets neither fd 7 nor fd 8. Returns the command's rc. Called from the
+# subshell that owns the run.
+_persona_cli() {
+  local CWD=$1 SO=$2 SE=$3 CLI=$4 RC=0
+  shift 4
+  if [ "$SE" = - ]; then
+    ( cd "$CWD" && _ADAPTER_WORKER=persona && _adapter_env "$CLI" python3 -c "$_PERSONA_RUN_PY" 5 "$@" ) \
+      < /dev/null > "$SO" 2>&1 7>&- 8>&- &
+  else
+    ( cd "$CWD" && _ADAPTER_WORKER=persona && _adapter_env "$CLI" python3 -c "$_PERSONA_RUN_PY" 5 "$@" ) \
+      < /dev/null > "$SO" 2> "$SE" 7>&- 8>&- &
+  fi
+  _PX_RUN=$!
+  wait "$_PX_RUN" || RC=$?
+  _PX_RUN=""
+  return "$RC"
+}
+
+# _persona_exec_run <persona> <input> <out> <timeout> <timeout-bin>
+#   <instruction paths> [<task>] — the part of an exec run that owns the
+# disposable worktree and the side directory beside it (the input, with
+# <task> that lease's collect-snapshot diff), called in a subshell of its own
+# (_persona_exec), so its EXIT, INT, TERM and HUP traps are the subshell's and
+# the caller's traps never change. Both are created, used and removed here; a
+# setup step that fails, set -e ending the subshell, or a signal still reaches
+# _persona_run_cleanup. It writes "started" to fd 7 (see _persona_exec) just
+# before the CLI starts (_persona_cli); the subshell's exit code is the CLI's.
 _persona_exec_run() {
-  local P=$1 OUT=$2 TIMEOUT=$3 TOBIN=$4 SIDE=$5 INPUT=$6 WHAT=$7 INSTR=$8 T=${9:-} ADMIN="" WHERE PROMPT L RC=0
+  local P=$1 IN=$2 OUT=$3 TIMEOUT=$4 TOBIN=$5 INSTR=$6 T=${7:-} ADMIN="" WHERE PROMPT L RC=0 SIDE
   local -a SPECS=()
-  _PX_WT="" _PX_RUN=""
-  trap '_persona_exec_cleanup' EXIT
-  trap '_persona_exec_cleanup; exit 130' INT
-  trap '_persona_exec_cleanup; exit 143' TERM
-  trap '_persona_exec_cleanup; exit 129' HUP
+  _PX_WT="" _PX_RUN="" _PX_SCR=""
+  trap '_persona_run_cleanup' EXIT
+  trap '_persona_run_cleanup; exit 130' INT
+  trap '_persona_run_cleanup; exit 143' TERM
+  trap '_persona_run_cleanup; exit 129' HUP
+  _PX_SCR=$(_persona_scratch) || return 1
+  SIDE=$_PX_SCR
+  _persona_stage "$SIDE" "$IN" "$T" || return 1
   if ! _PX_WT=$(mktemp -d "${_LEASE_ROOT}/persona-${_PT_NAME}.XXXXXX"); then
     _PX_WT=""
     echo "dispatch_persona: ERROR could not create a worktree directory under ${_LEASE_ROOT}" >&2
@@ -1198,7 +1307,7 @@ _persona_exec_run() {
     return 1
   fi
   ADMIN=$(_lead_lease_digests "$_PX_WT" 2>/dev/null | cut -f3) || ADMIN=""
-  if [ -z "$ADMIN" ] || ! _persona_restore "$_PX_WT" "$ADMIN" "$_PT_HEAD" "$SIDE"; then
+  if [ -z "$ADMIN" ] || ! _persona_restore "$_PX_WT" "$ADMIN" "$_PT_COMMIT" "$_PT_HEAD" "$SIDE"; then
     echo "dispatch_persona: ERROR could not put the instruction and config files back to the integration branch in ${_PX_WT}; the persona does not run on those versions (fail closed, KTD5)" >&2
     return 1
   fi
@@ -1220,105 +1329,188 @@ ${_PT_NONE}"
   WHERE="${WHERE}
 $(_persona_bundle "$_PT_HEAD")"
   _persona_guard_ancestors dispatch_persona "$_PX_WT" || return 69
-  PROMPT=$(_persona_prompt "$P" "class exec (Read, Grep, Glob and Bash; no edit tool)" "$WHERE" "$INPUT" "$WHAT" exec "$T") || return $?
+  PROMPT=$(_persona_prompt "$P" "class exec (Read, Grep, Glob and Bash; no edit tool)" "$WHERE" "$_PS_INPUT" "$_PS_WHAT" exec "$T") || return $?
   local _CLAUDE_MAX_TURNS=$_PR_TURNS
   _claude_lane_argv persona-exec "$_PR_MODEL" "$_PR_EFFORT" "" "$_LEASE_COMMON" || return 1
   printf 'started' >&7
-  ( cd "$_PX_WT" && _ADAPTER_WORKER=persona && _adapter_env claude "$TOBIN" -k 10s "${TIMEOUT}s" "${_LEASE_LANE_ARGV[@]}" "$PROMPT" ) \
-    < /dev/null > "$OUT" 2> "${OUT}.err" 7>&- 8>&- &
-  _PX_RUN=$!
-  wait "$_PX_RUN" || RC=$?
-  _PX_RUN=""
-  _persona_exec_cleanup
+  _persona_cli "$_PX_WT" "$OUT" "${OUT}.err" claude "$TOBIN" -k 10s "${TIMEOUT}s" "${_LEASE_LANE_ARGV[@]}" "$PROMPT" || RC=$?
+  _persona_run_cleanup
   return "$RC"
 }
 
-# _PERSONA_STOP_PY <pid> <pgid|""> <grace-s> [<start>] — stop a process tree:
-# <pid> and every process below it, plus, with a <pgid>, the members of that
-# group (never the caller's own group), each by its pid and start time as first
-# seen, so a pid the OS hands to another process meanwhile is never signalled.
-# The tree is read before any signal, since GNU timeout puts itself and the CLI
-# in a group of their own and a process whose parent died is no longer below
-# it. TERM to all, up to <grace-s> for them to end, then KILL to what is left;
-# a process one of them starts meanwhile is tracked and gets the KILL. With
-# <start> (a launch record's "<lstart> UTC"), a <pid> that runs with another
-# start time is a stranger: neither it nor its group is touched. Prints the
-# pids still running (an empty line for none); rc 1 when there are any, or
-# when ps can't be read.
-_PERSONA_STOP_PY="${_LEASE_PS_PY}"'
+# _PERSONA_STOP_DEFS — what _PERSONA_STOP_PY and _PERSONA_RUN_PY share.
+# ps_table(): pid -> (ppid, pgid, stat, lstart) from one ps read, None when ps
+# can't be read. stop(root, grp, sess, grace, want, known): stop <root> and
+# every process below it, the members of process group <grp> and of session
+# <sess> (0 for none; never the caller's own group or session) and every
+# process below those, each by its pid and start time as first seen (kept in
+# <known>, which the caller may seed), so a pid the OS hands to another
+# process meanwhile is never signalled. The tree is read before any signal,
+# since GNU timeout puts itself and the CLI in a group of their own and a
+# process whose parent died is no longer below it. TERM to all, up to <grace>
+# seconds for them to end, then KILL to what is left; a process one of them
+# starts meanwhile is tracked and gets the KILL. With <want> (a launch
+# record's "<lstart> UTC"), a <root> that runs with another start time is a
+# stranger: neither it nor its group or session is touched. Returns the pids
+# still running, or None when ps can't be read.
+_PERSONA_STOP_DEFS="${_LEASE_PS_PY}"'
 import signal, sys, time
-root, grp, grace = int(sys.argv[1]), sys.argv[2], float(sys.argv[3])
-want = " ".join(sys.argv[4].split()) if len(sys.argv) > 4 else ""
-if want.endswith(" UTC"):
-    want = want[:-4]
-me = {os.getpid(), os.getppid()}
-if grp and (not grp.isdigit() or int(grp) <= 1 or int(grp) == os.getpgid(0)):
-    grp = ""
-known = {}
-def table():
+def ps_table():
     try:
         r = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,pgid=,stat=,lstart="], capture_output=True, text=True,
                            env=dict(os.environ, LC_ALL="C", TZ="UTC0"))
     except OSError:
-        r = None
-    if r is None or r.returncode != 0:
-        print(" ".join(str(p) for p in sorted(known) or [root]))
-        sys.exit(1)
+        return None
+    if r.returncode != 0:
+        return None
     t = {}
     for l in r.stdout.splitlines():
         f = l.split()
         if len(f) >= 5 and f[0].isdigit() and f[1].isdigit() and f[2].isdigit():
-            t[int(f[0])] = (int(f[1]), f[2], f[3], " ".join(f[4:]))
+            t[int(f[0])] = (int(f[1]), int(f[2]), f[3], " ".join(f[4:]))
     return t
-def sweep(first):
-    t = table()
-    live = lambda p: p in t and t[p][3] == known[p] and not t[p][2].startswith("Z")
-    if first:
-        seeds = [root] if root > 1 and root in t else []
-    else:
-        seeds = [p for p in known if live(p)]
-    kids = {}
-    for p, r in t.items():
-        kids.setdefault(r[0], []).append(p)
-    seen = set()
-    while seeds:
-        p = seeds.pop()
-        if p in seen or p not in t:
-            continue
-        seen.add(p)
-        seeds.extend(kids.get(p, []))
-    if grp:
-        seen |= {p for p, r in t.items() if r[1] == grp}
-    for p in seen - me:
-        if p > 1 and p not in known:
-            known[p] = t[p][3]
-    return sorted(p for p in known if live(p))
-if want:
-    t = table()
-    if root in t and t[root][3] != want:
-        root, grp = 0, ""
-left = sweep(True)
-for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 2.0)):
-    if not left:
-        break
-    for p in left:
-        try:
-            os.kill(p, sig)
-        except OSError:
-            pass
-    end = time.time() + wait
-    while True:
-        left = sweep(False)
-        if not left or time.time() >= end:
+def session_of(p):
+    try:
+        return os.getsid(p)
+    except OSError:
+        return 0
+def stop(root, grp, sess, grace, want, known):
+    me = {os.getpid(), os.getppid()}
+    grp = grp if grp > 1 and grp != os.getpgid(0) else 0
+    sess = sess if sess > 1 and sess != os.getsid(0) else 0
+    want = " ".join(want.split())
+    if want.endswith(" UTC"):
+        want = want[:-4]
+    t = ps_table()
+    if t is None:
+        return None
+    if want and root in t and t[root][3] != want:
+        root, grp, sess = 0, 0, 0
+    def sweep(first):
+        live = lambda p: p in t and t[p][3] == known[p] and not t[p][2].startswith("Z")
+        seeds = [p for p in known if live(p)] + ([root] if first and root > 1 else [])
+        seeds += [p for p, r in t.items() if p > 1 and ((grp and r[1] == grp) or (sess and session_of(p) == sess))]
+        kids = {}
+        for p, r in t.items():
+            kids.setdefault(r[0], []).append(p)
+        seen = set()
+        while seeds:
+            p = seeds.pop()
+            if p in seen or p not in t:
+                continue
+            seen.add(p)
+            seeds.extend(kids.get(p, []))
+        for p in seen - me:
+            if p > 1 and p not in known:
+                known[p] = t[p][3]
+        return sorted(p for p in known if live(p))
+    left = sweep(True)
+    for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 2.0)):
+        if not left:
             break
-        time.sleep(0.1)
+        for p in left:
+            try:
+                os.kill(p, sig)
+            except OSError:
+                pass
+        end = time.time() + wait
+        while True:
+            t = ps_table()
+            if t is None:
+                return None
+            left = sweep(False)
+            if not left or time.time() >= end:
+                break
+            time.sleep(0.1)
+    return left
+'
+
+# _PERSONA_STOP_PY <pid> <pgid|""> <sid|""> <grace-s> [<start>] — stop()
+# (_PERSONA_STOP_DEFS) on <pid>'s process tree, that process group and that
+# session. Prints the pids still running (an empty line for none); rc 1 when
+# there are any, or when ps can't be read (then it prints the pids it knew
+# of, or <pid>).
+_PERSONA_STOP_PY="${_PERSONA_STOP_DEFS}"'
+num = lambda s: int(s) if s.isdigit() else 0
+known = {}
+left = stop(num(sys.argv[1]), num(sys.argv[2]), num(sys.argv[3]), float(sys.argv[4]), sys.argv[5] if len(sys.argv) > 5 else "", known)
+if left is None:
+    print(" ".join(str(p) for p in sorted(known)) or sys.argv[1])
+    sys.exit(1)
 print(" ".join(str(p) for p in left))
 sys.exit(1 if left else 0)
 '
 
-# _persona_stop_tree <pid> <pgid|""> <grace-s> [<start>] — _PERSONA_STOP_PY:
-# stop <pid>'s process tree (and group); prints the pids still running, rc 1
-# when any are.
+# _PERSONA_RUN_PY <grace-s> <command...> — the run supervisor every persona
+# CLI starts under (_persona_cli). It runs <command> (GNU timeout, which puts
+# itself and the CLI in a process group of their own) as its child and notes
+# the child's descendants once a second. Once the command ends, on its own or
+# with TERM, HUP or (unless ignored) INT sent to the supervisor, it stops what
+# is left of those descendants and of that process group (stop(): <grace-s>
+# before the KILL, 3 s on a signal), so a process the persona left running (a
+# test server) does not outlive the run. The end is read without reaping the
+# child (waitid WNOWAIT), so until the sweep is done its pid, and with it the
+# group id, can't go to another process. Exits with the command's rc (128+n
+# when a signal ended it), or 128+n for the signal that stopped the
+# supervisor; a pid still running after the KILL is named on stderr. A
+# process that leaves the group and its parent between two looks (a daemon's
+# double fork) is not seen.
+_PERSONA_RUN_PY="${_PERSONA_STOP_DEFS}"'
+grace, known, child = float(sys.argv[1]), {}, []
+def track():
+    t = ps_table()
+    if t is None or not child:
+        return
+    kids = {}
+    for q, r in t.items():
+        kids.setdefault(r[0], []).append(q)
+    seeds, seen = [child[0].pid], set()
+    while seeds:
+        q = seeds.pop()
+        if q in seen or q not in t:
+            continue
+        seen.add(q)
+        seeds.extend(kids.get(q, []))
+    for q in seen:
+        known.setdefault(q, t[q][3])
+def sweep(g):
+    left = stop(0, child[0].pid, 0, g, "", known) if child else []
+    if left is None or left:
+        sys.stderr.write("dispatch_persona: WARNING the persona CLI left " + (("pid(s) " + " ".join(str(q) for q in left)) if left else "processes ps could not list") + " running after TERM and KILL\n")
+        sys.stderr.flush()
+def on_signal(sig, frame):
+    for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(s, signal.SIG_IGN)
+    sweep(3.0)
+    os._exit(128 + sig)
+for s in (signal.SIGTERM, signal.SIGHUP):
+    signal.signal(s, on_signal)
+if signal.getsignal(signal.SIGINT) is not signal.SIG_IGN:
+    signal.signal(signal.SIGINT, on_signal)
+try:
+    child.append(subprocess.Popen(sys.argv[2:]))
+except OSError as e:
+    sys.stderr.write("dispatch_persona: could not start " + sys.argv[2] + ": " + str(e) + "\n")
+    os._exit(127)
+n = 0
+while True:
+    try:
+        if os.waitid(os.P_PID, child[0].pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is not None:
+            break
+    except ChildProcessError:
+        break
+    if n % 10 == 0:
+        track()
+    n += 1
+    time.sleep(0.1)
+sweep(grace)
+rc = child[0].wait()
+os._exit(rc if rc >= 0 else 128 - rc)
+'
+
+# _persona_stop_tree <pid> <pgid|""> <sid|""> <grace-s> [<start>] —
+# _PERSONA_STOP_PY: stop <pid>'s process tree (and group, and session);
+# prints the pids still running, rc 1 when any are.
 _persona_stop_tree() {
   python3 -c "$_PERSONA_STOP_PY" "$@"
 }
@@ -1532,31 +1724,47 @@ PERSONA_WAIT_EOF
 }
 
 # persona_stop <run-dir> [<name>...] — stop persona_spawn's runs in <run-dir>
-# (none named: every run there): for each one still running, its process tree
-# and its process group, TERM, up to 10 s (an exec run's own cleanup takes up
-# to 5 s to stop its CLI and reclaim its worktree), then KILL
-# (_persona_stop_tree), and only while the recorded process answers as itself
-# (pid, pgid and start time): a reused pid is never signalled. A stopped run
-# writes no .rc, so persona_wait reports it gone (80). stderr: one line per
-# run. rc 0 nothing of them runs any more; 1 something may (named); 45 as
+# (none named: every run there), and whatever an ended one left running: for
+# each, its process tree, its process group and the session the launcher
+# started it in (pid == pgid == session id), TERM, up to 10 s (a run's own
+# cleanup takes up to 5 s to stop its CLI and remove its worktree or scratch
+# directory), then KILL (_persona_stop_tree). A recorded process that answers
+# with another start time is a stranger, and nothing is signalled for it;
+# once the recorded process is gone, its session can only hold what the run
+# left behind (its id can't go to another process while it has members), so
+# a run whose wrapper was killed alone still has its CLI found and stopped. A
+# stopped run writes no .rc, so persona_wait reports it gone (80). stderr: one
+# line per run. rc 0 nothing of them runs any more; 80 unresolved cleanup: a
+# pid still running after TERM and KILL, ps unreadable, or a run that has not
+# ended with an rc and has no readable launch record (each named); 45 as
 # persona_wait; 64 usage, an unknown name or no runs.
 persona_stop() {
   _lead_only persona_stop || return $?
-  local N ST LEFT RC=0
+  local N ST LEFT SID RC=0
   _persona_runs persona_stop "$@" || return $?
   while IFS= read -r N; do
     [ -n "$N" ] || continue
     ST=$(_persona_run_state "$_PRUN_DIR" "$N")
-    case "$ST" in
-      done*) echo "persona_stop: ${N} already ended (rc ${ST#done })" >&2; continue ;;
-      gone) echo "persona_stop: ${N} is not running (it ended without an rc)" >&2; continue ;;
-    esac
     _persona_run_rec "$_PRUN_DIR" "$N"
-    if LEFT=$(_persona_stop_tree "$_PRR_PID" "$_PRR_PGID" 10 "$_PRR_START"); then
-      echo "persona_stop: stopped ${N} (pid ${_PRR_PID}, its process tree and process group ${_PRR_PGID})" >&2
+    if ! _lease_signalable "$_PRR_PID" "$_PRR_PGID" || [ -z "$_PRR_START" ]; then
+      case "$ST" in
+        done*) echo "persona_stop: ${N} already ended (rc ${ST#done })" >&2 ;;
+        *) echo "persona_stop: ${N}: unresolved cleanup — its launch record ${_PRUN_DIR}/${N}.pid does not read as a pid, a process group and a start time, so what it may have left running can't be found; check ${_PRUN_DIR}/${N}.log and \`ps\` by hand (rc 80)" >&2
+           RC=80 ;;
+      esac
+      continue
+    fi
+    SID=""
+    if [ "$_PRR_PGID" = "$_PRR_PID" ]; then SID=$_PRR_PGID; fi
+    if LEFT=$(_persona_stop_tree "$_PRR_PID" "$_PRR_PGID" "$SID" 10 "$_PRR_START"); then
+      case "$ST" in
+        running) echo "persona_stop: stopped ${N} (pid ${_PRR_PID}, its process tree, process group and session ${_PRR_PGID})" >&2 ;;
+        done*) echo "persona_stop: ${N} already ended (rc ${ST#done }); nothing of it runs" >&2 ;;
+        *) echo "persona_stop: ${N} had ended without an rc; nothing of it runs now (what it left in its session ${_PRR_PGID} was stopped)" >&2 ;;
+      esac
     else
-      echo "persona_stop: ${N}: pid(s) ${LEFT:-?} still run after TERM and KILL; check \`ps -o pid,pgid,command -p ${LEFT:-$_PRR_PID}\`" >&2
-      RC=1
+      echo "persona_stop: ${N}: unresolved cleanup — pid(s) ${LEFT:-?} still run after TERM and KILL (or ps could not be read); check \`ps -o pid,pgid,command -p ${LEFT:-$_PRR_PID}\` (rc 80)" >&2
+      RC=80
     fi
   done <<PERSONA_STOP_EOF
 ${_PRUN_NAMES}

@@ -69,25 +69,6 @@ if [ -d ops/solutions ] && [ -n "$CHANGED" ]; then
   sort -u -o "$MATCH_LIST" "$MATCH_LIST"
 fi
 
-# Core review swarm, ROSTER-DRIVEN (R19/AE4): the analyst role (shipped default
-# Antigravity, architecture-reviewer) and the reviewer role (shipped default
-# Codex, logic_reviewer). Routing through dispatch_role — instead of hardcoding
-# invoke_antigravity/invoke_codex — means a roster override such as
-# `[roles.reviewer] cli = "opencode"` actually takes effect here (it was
-# previously ignored for the core lane). dispatch_role returns 40 when a role
-# resolves to the CLAUDE lane (run that reviewer as a sub-agent, below);
-# any other nonzero is a real reviewer failure.
-dispatch_role analyst "architecture-reviewer" \
-  "Review scope: tasks marked [R] in ops/TASKS.md. Write findings to ops/REVIEW_ANTIGRAVITY.md if you can; otherwise return them as your response." \
-  "$AGY_OUT" 600 &
-AGY_PID=$!
-
-# If scope covers 5+ files, the reviewer CLI may spawn internal subagents.
-dispatch_role reviewer "logic_reviewer" \
-  "Review scope: tasks marked [R] in ops/TASKS.md. If scope covers 5+ files, spawn separate agents for logic review, security audit, and test coverage analysis — merge all findings into ops/REVIEW_CODEX.md. Otherwise review sequentially and write to ops/REVIEW_CODEX.md." \
-  "$CODEX_OUT" 600 &
-CODEX_PID=$!
-
 # Specialist personas, started detached before the core lanes. Keep the
 # lines the flags select and delete the rest (--full keeps all five;
 # high-ceremony forces --full). Each persona's manifest entry sets its tools,
@@ -225,13 +206,21 @@ echo "review: core lanes done; the personas run detached: run the wait block nex
 
 ## The wait block
 
-Run it after the dispatch block, and again while it returns 75. `persona_wait` waits inside the lead's budget (`wait_budget_s` in the registry, less a margin) and never stops a persona. On rc 0 every persona has an exit code, and the block promotes each specialist's report into its own `ops/REVIEW_<LANE>.md` lane.
+Run it after the dispatch block, and again while it returns 75. `persona_wait` waits inside the lead's budget (`wait_budget_s` in the registry, less a margin) and never stops a persona. On rc 0 every persona has an exit code, and the block promotes each specialist's report into its own `ops/REVIEW_<LANE>.md` lane. A cycle that started no persona skips the wait.
 
 ```bash
 set -euo pipefail
 ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
 : "${REVIEW_RUN:?set REVIEW_RUN to the run directory the dispatch block printed}"
-persona_wait "$REVIEW_RUN" || { rc=$?; [ "$rc" -eq 75 ] && echo "review: personas still running; rerun this block"; exit "$rc"; }
+[ -f "$REVIEW_RUN/specialists" ] || { echo "review: $REVIEW_RUN is not a run directory the dispatch block made (no specialists list)" >&2; exit 64; }
+# With no persona started (no specialist kept, no learnings match, no analyst
+# fallback), there is nothing to wait for. persona_wait refuses a run
+# directory with no runs (64), and every other caller keeps that refusal.
+if [ -n "$(find "$REVIEW_RUN" -maxdepth 1 -name '*.pid' 2>/dev/null)" ]; then
+  persona_wait "$REVIEW_RUN" || { rc=$?; [ "$rc" -eq 75 ] && echo "review: personas still running; rerun this block"; exit "$rc"; }
+else
+  echo "review: no personas were started this cycle; nothing to wait for"
+fi
 
 # A failed learnings-researcher is not a review failure: synthesis marks the
 # missing known-issue context.

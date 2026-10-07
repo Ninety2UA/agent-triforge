@@ -34,6 +34,15 @@ SYN_IN="$REVIEW_RUN/synthesis-input.md"
   fi
 } > "$SYN_IN"
 LANES=$(grep . "$REVIEW_RUN/lanes" | paste -sd, -)
+# persona_wait, given at most a second here, checks the recorded process (pid,
+# process group, start time) of a synthesizer this run started earlier, so a
+# running one is never orphaned. One that ended is stopped, with anything it
+# left running, before its record is cleared.
+if [ -f "$REVIEW_RUN/synthesis.pid" ]; then
+  SRC=0; TRIFORGE_LEAD_WAIT_BUDGET_S=1 persona_wait "$REVIEW_RUN" synthesis >/dev/null 2>&1 || SRC=$?
+  [ "$SRC" -ne 75 ] || { echo "review: the findings-synthesizer started earlier for $REVIEW_RUN is still running; run the synthesis wait block, or stop it first (persona_stop $REVIEW_RUN synthesis)" >&2; exit 1; }
+  persona_stop "$REVIEW_RUN" synthesis >/dev/null 2>&1 || { echo "review: the earlier findings-synthesizer left processes that could not be stopped (persona_stop $REVIEW_RUN synthesis); nothing started" >&2; exit 1; }
+fi
 rm -f "$REVIEW_RUN/synthesis.pid" "$REVIEW_RUN/synthesis.rc" "$REVIEW_RUN/synthesis.md"
 persona_spawn "$REVIEW_RUN" synthesis findings-synthesizer "$SYN_IN" "$REVIEW_RUN/synthesis.md" --brief "Synthesize review cycle $CYCLE. Read every expected lane file the input lists: $LANES. A lane the input marks MISSING OR EMPTY is a gap, never no findings: list each gap under a ### Gaps heading before the findings, and while any gap exists end the Verdict with Recommendation: FIX_AND_REREVIEW, never PROCEED. Use the known-issue context, when the input carries it, to flag findings that would undo a past fix; say so when it reports the learnings-researcher failed."
 echo "review: findings-synthesizer started; run the synthesis wait block next (REVIEW_RUN=$REVIEW_RUN)"
@@ -53,7 +62,7 @@ if [ -s "$REVIEW_RUN/gaps" ]; then
 fi
 ```
 
-1. The blocks above run `findings-synthesizer`, in the never-downgrade trio, so it runs as top-tier Claude whichever CLI leads. `$REVIEW_RUN/synthesis.md` is the synthesized report. In the wait block, exit code 75 means rerun it, 1 a failed or empty synthesis, and 3 a report printed for a cycle with gaps.
+1. The blocks above run `findings-synthesizer`, in the never-downgrade trio, so it runs as top-tier Claude whichever CLI leads. `$REVIEW_RUN/synthesis.md` is the synthesized report. In the wait block, exit code 75 means rerun it, 1 a failed or empty synthesis, and 3 a report printed for a cycle with gaps. The start block exits 1 and starts nothing while a synthesizer it started earlier for the same run is still running.
 2. It reads every expected lane (Antigravity + Codex + any optional-tier `REVIEW_OPENCODE`/`KIMI`/`CURSOR.md` + each specialist persona's `ops/REVIEW_<PERSONA>.md`), and the `learnings-researcher` report as known-issue context when there is one.
 3. It produces the synthesized report with confidence tiering (HIGH/MEDIUM/LOW) and priority (P1/P2/P3). A `[LOW]` confidence finding is never P1.
 4. Apply the `iterative-refinement` skill:
