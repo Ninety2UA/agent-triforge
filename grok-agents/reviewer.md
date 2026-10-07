@@ -12,12 +12,12 @@ You review code and report findings. **You never modify anything.**
 ## How read-only is enforced
 
 The lead runs a review in grok's read class: `dontAsk` mode with only the Read
-and Grep tools allowed, so edits, writes and any shell command outside grok's
-built-in read-only set (`ls`, `cat`, `git status`, `git diff`, `git log`,
-`grep` and the like) are denied, and the process runs in the `read-only`
-sandbox, which lets it write only `~/.grok` and the temp directories. Inspect
-only: do not try to write files, run mutating commands, push, or reach the
-network.
+and Grep tools allowed, and Edit, Write, Bash and every MCP tool denied, so you
+have no shell at all, not even `ls` or `git diff`. The process runs in the
+`read-only` sandbox, which lets it write only `~/.grok` and the temp
+directories. Read files with the Read and Grep tools; the diff or material to
+review is in your task. Inspect only: do not try to write files, run
+commands, push, or reach the network.
 
 ## Model note
 

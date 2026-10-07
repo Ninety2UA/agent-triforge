@@ -1404,7 +1404,8 @@ _lease_provision_claude_skills() {
 # portable skills in .agents/skills, for a claude builder in .claude/skills
 # too, and for a grok worker the .grok/config.toml that keeps every plugin
 # from loading (_grok_lease_config). rc 1 when the list can't be read: a row
-# without it would fall back to excluding all of .agents/.
+# without it would fall back to excluding all of .agents/; and rc 1 when that
+# config can't be written as proven (a grok lease is never made without it).
 _lease_provision() {
   local WT=$1 CLI=${2:-} LIST TRACKED=""
   local -a DIRS=(.agents/skills)
@@ -1424,7 +1425,11 @@ print(",".join(sorted(names)))
       DIRS+=(.claude/skills)
       ;;
     grok)
-      _grok_lease_config "$WT"
+      # Fail closed (R23): no isolating config, no lease, so nothing dispatches
+      if ! _grok_lease_config "$WT"; then
+        echo "lease: ERROR the grok worktree ${WT} is carved but not leased (see above). Fix the cause, remove it (git worktree remove --force ${WT}; git branch -D lease/${WT##*/}), then lease again" >&2
+        return 1
+      fi
       DIRS+=(.grok)
       ;;
   esac
@@ -1804,7 +1809,7 @@ _lease_extract_stream() {
     opencode) X=_oc_extract_text ;;
     kimi)     X=_kimi_extract_text ;;
     cursor)   X=_cursor_extract_text ;;
-    grok)     X=_grok_extract_text ;;
+    grok)     X=_grok_lease_text ;;    # a report only from an end_turn run
     *) return 0 ;;
   esac
   [ -s "$OUT" ] || return 0

@@ -16,11 +16,14 @@ them. `_grok_argv` in `scripts/lib/grok.sh` composes every grok command line:
 | Class | Roles | Allowed tools | Sandbox |
 |---|---|---|---|
 | edit | builder, tester, documenter | Read, Grep, Edit, Write, Bash | `workspace`: writes to the working directory, `~/.grok` and the temp directories |
-| read | reviewer, analyst | Read, Grep (plus grok's built-in read-only shell commands) | `read-only`: writes to `~/.grok` and the temp directories |
+| read | reviewer, analyst | Read, Grep; Edit, Write and Bash denied, so no shell at all | `read-only`: writes to `~/.grok` and the temp directories |
 
-Both classes run `--permission-mode dontAsk`, so grok denies anything not
-allowed, MCP tools and web search included. Both carry the same deny list
-(`git push` in its `-c`/`-C` forms, recursive `rm`, `sudo`, `doas`). A deny
+Both classes run `--permission-mode dontAsk`, which denies what no rule
+allows. Grok also imports allow rules from Claude Code's settings files
+(`~/.claude/settings*.json` and the project's `.claude/settings*.json`), and
+a deny rule beats any allow. So the read class denies Edit, Write and Bash
+outright, and both classes deny every MCP tool. Both carry the same deny list
+too (`git push` in its `-c`/`-C` forms, recursive `rm`, `sudo`, `doas`). A deny
 rule matches a command's prefix or whole text, so it does not see a push inside
 a script; the no-push git config the lease boundary sets refuses those (probe
 row GRK-09).
@@ -39,16 +42,25 @@ Those switches do not reach three things:
 - The `env` block of `~/.claude/settings.json`, which grok copies into its
   tool shell.
 
-Only config-file keys reach the first two, so each lease worktree gets its own
-`.grok/config.toml`. Its `[plugins] disabled` list names every plugin grok
-finds, and an `[mcp_servers.<name>]` entry with `enabled = false` covers each
-MCP server outside grok's own config. The file is never merged, and a
-project's own file gets these tables appended rather than replaced. Row GRK-06
-opens a session from such a worktree with no prompt and checks that no plugin
-command is offered and no MCP server starts. A lease worker's tool shell keeps
-only the names the lease boundary passes (a `GROK_CONFIG` overlay with
-`include_only`), so the settings `env` block stays out of it. `invoke_grok`
-runs outside a lease worktree, so the plugins stay loaded there.
+Only config-file keys reach the first two, so a grok worker runs from a
+worktree with its own `.grok/config.toml`. Its `[plugins] disabled` list names
+every plugin grok finds, and an `[mcp_servers.<name>]` entry with
+`enabled = false` covers each MCP server outside grok's own config. A lease
+uses its lease worktree. Outside a lease, `invoke_grok` runs a reviewer or
+analyst in a scratch worktree of HEAD and removes it afterwards. The file is
+never merged. A project's own file keeps its lines and gets the tables after
+them, but only if Python's `tomllib` parses the result with every plugin
+disabled and every server shadowed. Otherwise grok does not run at all:
+lease_create makes no lease, and `invoke_grok` returns 69. Row GRK-06 opens a session in both
+kinds of worktree with no prompt and checks that no plugin command is offered
+and no MCP server starts. Every grok run's tool shell keeps only the names the
+lease boundary passes (an `env -i` start and a `GROK_CONFIG` overlay with
+`include_only`), so the settings `env` block stays out of it.
+
+A tester or documenter outside a lease edits the lead's checkout, so it runs
+there. Triforge writes nothing into that checkout, so the plugins load for it:
+their skills and commands are offered and their hooks run, their MCP tools are
+denied, and `--no-subagents` drops their agents.
 
 ## Files
 

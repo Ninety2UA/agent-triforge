@@ -612,10 +612,11 @@ _claude_session_ok() {
 #                carries (lease_dispatch: _grok_class of the lease role):
 #                edit, the workspace sandbox and the edit tools, for a builder,
 #                tester or documenter lease; read, the read-only sandbox with
-#                Read and Grep only, for anything else. Either way the env
-#                prefix that turns grok's Claude Code and Cursor discovery off,
-#                the model pin, --effort when set, streaming-json, dontAsk with
-#                the allow and deny sets, and the GROK_CONFIG overlay that
+#                Read and Grep only and Edit, Write and Bash denied, for
+#                anything else. Either way the env prefix that turns grok's
+#                Claude Code and Cursor discovery off, the model pin, --effort
+#                when set, streaming-json, dontAsk with the allow and deny sets
+#                (every MCP tool denied), and the GROK_CONFIG overlay that
 #                keeps the tool shell to the boundary's names; -p last (the
 #                prompt is its value)
 _lease_lane_argv() {
@@ -661,7 +662,7 @@ _lease_lane_argv() {
       ;;
     grok)
       # <lane-arg> is the class; an empty or unknown one runs read-only
-      _grok_argv "${LANE_ARG:-read}" "$DMODEL" "$EFFORT" lease || return 1
+      _grok_argv "${LANE_ARG:-read}" "$DMODEL" "$EFFORT" || return 1
       _LEASE_LANE_ARGV=("${_GROK_ARGV[@]}")
       ;;
     *)
@@ -759,8 +760,12 @@ _lease_builder_run() {
         # A turn-cap stop exits 1 with max_turns_reached (GRK-07). Like the
         # claude lane's error_max_turns it is the lane's cap, not a crash: the
         # work so far stays in the worktree and the run routes as a clean exit
-        # without a report (report missing). Any other failure is classified
-        # here, where grok's own words are read (signed out, quota).
+        # without a report (report missing): the extractor
+        # (_lease_extract_stream: _grok_lease_text) takes a report only from a
+        # run that ended end_turn, so a Status line written before the cap, a
+        # max_tokens or any other end never makes the lease review-ready. Any
+        # other failure is classified here, where grok's own words are read
+        # (signed out, quota).
         _adapter_env grok "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "$OUT" 2>&1 || RC=$?
         if [ "$RC" -ne 0 ]; then
           _grok_classify "$RC" "$OUT"
