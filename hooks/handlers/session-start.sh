@@ -105,18 +105,27 @@ SS_HOME_P=""
 if [ -n "${HOME:-}" ]; then
   SS_HOME_P=$(cd "$HOME" 2>/dev/null && env pwd -P 2>/dev/null || true)
 fi
-SS_D=$SS_HOME_P
-while [ -n "$SS_D" ]; do
-  if [ "$SS_ANCHOR" -ef "$SS_D" ]; then
-    SS_AT_HOME=yes
-    break
-  fi
-  if [ "$SS_D" = "/" ]; then
-    break
-  fi
-  SS_D=${SS_D%/*}
-  if [ -z "$SS_D" ]; then SS_D=/; fi
-done
+# _ss_home_or_above <dir> — 0 when <dir> is the home directory or one of its
+# ancestors (test -ef against the physical HOME and each directory above it);
+# 1 otherwise, or when HOME does not resolve. The instruction-file notices
+# below use it too: a file at that level is read for every project under it.
+_ss_home_or_above() {
+  local D=$SS_HOME_P
+  while [ -n "$D" ]; do
+    if [ "$1" -ef "$D" ]; then
+      return 0
+    fi
+    if [ "$D" = "/" ]; then
+      return 1
+    fi
+    D=${D%/*}
+    if [ -z "$D" ]; then D=/; fi
+  done
+  return 1
+}
+if _ss_home_or_above "$SS_ANCHOR"; then
+  SS_AT_HOME=yes
+fi
 
 # _ss_claude_dir — 0 when .claude is a real directory of the project (not a
 # symlink, not a file): only then does the hook touch anything under it. A
@@ -480,7 +489,12 @@ fi
 #           the import and asks first
 #   above   a CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md in a directory
 #           above the project, with no import of the project's AGENTS.md
-#           anywhere in the chain
+#           anywhere in the chain: the line offers a CLAUDE.md in the project
+#           first (it loads AGENTS.md for this project only), then the import
+#           into that file, which every project under it loads too, then
+#           removing the file; for a file in HOME or a directory above it
+#           (_ss_home_or_above), the project's own CLAUDE.md alone: that file
+#           is read for every project under it, and the writers refuse it
 # These describe a standing state, not a one-time action: they print on every
 # session start until the state is fixed, and so — like the roster-pin and
 # timeout lines — carry no "session-start:" prefix (that prefix marks a step
@@ -605,7 +619,15 @@ while IFS=$'\t' read -r SS_KIND SS_WHERE SS_STATE SS_FILE SS_IMPORT; do
       SS_OWN_NOTICES="${SS_OWN_NOTICES}${SS_NL}WARNING: ${SS_KIND} in this project does not import AGENTS.md, so Claude Code reads it and skips AGENTS.md, Triforge's only instruction file. Run /at-setup to add the line $(_ss_prose "$SS_IMPORT") to it (setup asks first), or add it yourself — session start never edits this file."
       ;;
     above,*)
-      SS_ABOVE_NOTICES="${SS_ABOVE_NOTICES}${SS_NL}WARNING: AGENTS.md is not loaded under a Claude lead: $(_ss_prose "$SS_FILE") sits above this project, and Claude Code reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working directory or above it. Add the line $(_ss_prose "$SS_IMPORT") to that file (an import path is relative to the file that holds it), or remove the file."
+      SS_LEVEL=${SS_FILE%/*}
+      if [ "$SS_KIND" = .claude/CLAUDE.md ]; then SS_LEVEL=${SS_LEVEL%/*}; fi
+      SS_ABOVE_LINE="WARNING: AGENTS.md is not loaded under a Claude lead: $(_ss_prose "$SS_FILE") sits above this project, and Claude Code reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working directory or above it. Add a CLAUDE.md holding the line @AGENTS.md to this project: it loads AGENTS.md for this project only."
+      if _ss_home_or_above "${SS_LEVEL:-/}"; then
+        SS_ABOVE_LINE="${SS_ABOVE_LINE} That file is in your home directory or above it and is read for every project under it, so the fix belongs in this project, not there."
+      else
+        SS_ABOVE_LINE="${SS_ABOVE_LINE} Or add the line $(_ss_prose "$SS_IMPORT") to that file (an import path is relative to the file that holds it), which loads this project's AGENTS.md in every project under that directory too, or remove the file."
+      fi
+      SS_ABOVE_NOTICES="${SS_ABOVE_NOTICES}${SS_NL}${SS_ABOVE_LINE}"
       ;;
   esac
 done <<SS_FOUND_EOF
