@@ -1927,27 +1927,33 @@ DISPATCH_ROW_EOF
   # (devin-agents/<role>.md); Kimi's arrives natively via --agent-file; claude
   # / codex / antigravity carry no separate builder brief (their role
   # instructions are the contract itself). Wording is CLI-neutral on purpose.
-  local BRIEF_BODY="" BRIEF_FILE="" BRIEF_TITLE="Builder role brief"
+  # LCLASS is the permission class of a grok or devin lease (_grok_class,
+  # _devin_class of the lease role), read once: the brief here and the lane
+  # arg below both follow it.
+  local BRIEF_BODY="" BRIEF_FILE="" BRIEF_TITLE="Builder role brief" LCLASS=""
   case "$CLI" in
     opencode|cursor)
       BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/${CLI}-agents/builder.md"
       ;;
     grok)
-      # A reviewer or analyst lease runs read-only (_grok_class, R23)
+      # The brief follows the class: builder.md for an edit lease,
+      # reviewer.md for a read one (R23)
+      LCLASS=$(_grok_class "$ROLE")
       BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/grok-agents/builder.md"
-      if [ "$(_grok_class "$ROLE")" = read ]; then
+      if [ "$LCLASS" = read ]; then
         BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/grok-agents/reviewer.md"
         BRIEF_TITLE="Role brief (${ROLE})"
       fi
       ;;
     devin)
-      # The lease's own role: a reviewer or analyst lease runs read-only (R24)
+      # The brief is the lease role's own (R24)
+      LCLASS=$(_devin_class "$ROLE")
       BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/devin-agents/${ROLE}.md"
       BRIEF_TITLE="Role brief (${ROLE})"
       ;;
   esac
   if [ -n "$BRIEF_FILE" ] && [ -f "$BRIEF_FILE" ]; then
-    BRIEF_BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "$BRIEF_FILE")
+    BRIEF_BODY=$(_brief_body "$BRIEF_FILE")
   fi
   local FULL_PROMPT
   FULL_PROMPT="## Lease dispatch: ${TASK_ID}
@@ -1996,15 +2002,17 @@ ${PROMPT}"
   # _ADAPTER_ENV_KEYS inside the builder process, so it does not read them
   # again. The ledger records the id that was actually dispatched
   # (dispatched_model) beside the roster values (builder_model / builder_effort).
-  local KIMI_AGENT_FILE="" CBIN="" DISPATCH_MODEL="$MODEL" REG_ROW="" REG_ENV_KEYS=""
+  # LANE_ARG is the lane's own value, passed by position to _lease_lane_argv:
+  # kimi's agent file, devin's config copy, grok's class.
+  local LANE_ARG="" CBIN="" DISPATCH_MODEL="$MODEL" REG_ROW="" REG_ENV_KEYS=""
   REG_ROW=$(cli_field "$CLI" model env_keys 2>/dev/null) || REG_ROW=""
   REG_ENV_KEYS=${REG_ROW#*$'\t'}
   case "$CLI" in
-    antigravity|opencode|kimi|cursor|grok) [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=${REG_ROW%%$'\t'*} ;;
+    antigravity|opencode|kimi|cursor|devin|grok) [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=${REG_ROW%%$'\t'*} ;;
   esac
   case "$CLI" in
     kimi)
-      [ -f "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md" ] && KIMI_AGENT_FILE="${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md"
+      [ -f "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md" ] && LANE_ARG="${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md"
       ;;
     cursor)
       DISPATCH_MODEL=$(_cursor_model_for_effort "$DISPATCH_MODEL" "$EFFORT")
@@ -2015,17 +2023,16 @@ ${PROMPT}"
       ;;
     devin)
       # Devin writes into the config it is handed, so each dispatch gets its
-      # own copy, in the lane-file slot kimi uses for its agent file; the
-      # copy's name carries the permission class _lease_lane_argv reads
-      # (devin.sh: read for a reviewer or analyst lease, edit for a builder).
-      [ -n "$DISPATCH_MODEL" ] || DISPATCH_MODEL=${REG_ROW%%$'\t'*}
-      KIMI_AGENT_FILE="${OUT}.devin.$(_devin_class "$ROLE").json"
-      _devin_config_copy "$(_devin_class "$ROLE")" "$KIMI_AGENT_FILE" || return 1
+      # own copy as the lane arg; the copy's name carries the permission class
+      # _lease_lane_argv reads (devin.sh: read for a reviewer or analyst
+      # lease, edit for a builder).
+      LANE_ARG="${OUT}.devin.${LCLASS}.json"
+      _devin_config_copy "$LCLASS" "$LANE_ARG" || return 1
       ;;
     grok)
-      # The lane-file slot carries grok's permission class (edit or read),
-      # which _lease_lane_argv turns into the sandbox and the allowed tools
-      KIMI_AGENT_FILE=$(_grok_class "$ROLE")
+      # The lane arg is grok's permission class (edit or read), which
+      # _lease_lane_argv turns into the sandbox and the allowed tools
+      LANE_ARG=$LCLASS
       ;;
   esac
   # The claude lane resumes the session its last run recorded (KTD16): a fix
@@ -2043,7 +2050,7 @@ ${PROMPT}"
   # that was never exported still reaches it.
   if [ ! -x "$BASH_BIN" ]; then BASH_BIN=$(command -v bash 2>/dev/null || printf 'bash'); fi
   LAUNCH=$(python3 -c "$_LEASE_LAUNCH_PY" "${OUT}.log" "$BASH_BIN" -c "$_LEASE_BUILDER_SH" triforge-lease-builder \
-             "${_TRIFORGE_SCRIPTS_DIR}/invoke-external.sh" "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$KIMI_AGENT_FILE" \
+             "${_TRIFORGE_SCRIPTS_DIR}/invoke-external.sh" "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$LANE_ARG" \
              "$CBIN" "$TOBIN" "$TIMEOUT" "$OUT" "$WT" "$REG_ENV_KEYS" "${TRIFORGE_TEST_BUILDER:-}" "$FULL_PROMPT" \
              "$_LEASE_COMMON" "$RESUME") || LAUNCH=""
   { IFS="$TAB" read -r PID PGID PID_START || true; } <<LAUNCH_EOF

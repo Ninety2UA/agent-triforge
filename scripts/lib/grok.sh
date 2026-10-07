@@ -271,8 +271,7 @@ invoke_grok() {
   fi
 
   case "${GROK_ROLE:-}" in
-    builder|tester|documenter) CLASS=edit ;;
-    reviewer|analyst)          CLASS=read ;;
+    builder|tester|documenter|reviewer|analyst) CLASS=$(_grok_class "$GROK_ROLE") ;;
     *)
       case "$AGENT_NAME" in
         *review*|*analy*)    CLASS=read ;;
@@ -284,13 +283,13 @@ invoke_grok() {
 
   local FULL_PROMPT="$PROMPT"
   if [ -n "$AGENT_NAME" ] && [ -f "${_TRIFORGE_PLUGIN_ROOT}/grok-agents/${AGENT_NAME}.md" ]; then
-    BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "${_TRIFORGE_PLUGIN_ROOT}/grok-agents/${AGENT_NAME}.md")
+    BODY=$(_brief_body "${_TRIFORGE_PLUGIN_ROOT}/grok-agents/${AGENT_NAME}.md")
     FULL_PROMPT="${BODY}
 
 ${PROMPT}"
     MODE="injection"
   elif [ -n "$AGENT_NAME" ]; then
-    AVAILABLE=$(_list_grok_agents | paste -sd, - 2>/dev/null || echo "")
+    AVAILABLE=$(_list_plugin_briefs grok-agents | paste -sd, - 2>/dev/null || echo "")
     echo "invoke_grok: WARNING agent '${AGENT_NAME}' not found in plugin grok-agents/; running the raw prompt (no role brief applied). Available briefs: ${AVAILABLE:-<none>}" >&2
   fi
 
@@ -366,20 +365,6 @@ ${PROMPT}"
   return 0
 }
 
-# _list_grok_agents — the plugin grok-agents/ role briefs (basename without
-# .md), README excluded.
-_list_grok_agents() {
-  {
-    if [ -d "${_TRIFORGE_PLUGIN_ROOT}/grok-agents" ]; then
-      for f in "${_TRIFORGE_PLUGIN_ROOT}/grok-agents"/*.md; do
-        [ -f "$f" ] || continue
-        case "$(basename "$f" .md)" in README) continue ;; esac
-        basename "$f" .md
-      done 2>/dev/null
-    fi
-  } | sort -u
-}
-
 # _grok_extract_text <stream-file> <output-file> — the final answer of a grok
 # streaming-json capture into <output-file>: the text of the last model
 # response, then a note line for each thing the lead must see: denied tool
@@ -442,7 +427,7 @@ with open(os.environ["G_OUT"], "w", encoding="utf-8") as f:
 ' 2>/dev/null
 }
 
-# _grok_stop <stream-file> — how a grok run ended: max_turns when it hit the
+# _grok_stop <stream-file> — how a grok run ended: max-turns when it hit the
 # turn cap, else end.stopReason (end_turn, max_tokens, refusal, cancelled, ...),
 # error for an error event with no end, none when the stream has neither.
 _grok_stop() {
@@ -472,7 +457,7 @@ for line in lines:
         err = True
     elif t is None and "stopReason" in e:
         stop = str(e.get("stopReason"))
-print("max_turns" if capped else (stop or ("error" if err else "none")))
+print("max-turns" if capped else (stop or ("error" if err else "none")))
 ' 2>/dev/null || echo none
 }
 

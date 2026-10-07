@@ -4384,9 +4384,7 @@ _S24_FAIL="${_S24_FAIL}$(_self_expect invoke "$O" '^inv-done:rc=0:class=none' '^
 _S24_FAIL="${_S24_FAIL}$(_self_expect shipped-config "ship:$(cksum < "${REPO_ROOT}/devin-agents/config-read.json" 2>/dev/null || echo gone)" "^ship:${_S24_SHIP}\$")"
 
 # a reviewer lease through the seam
-mkdir -p "$_S24/lease/ops"
-printf "[roles.reviewer]\ncli = \"devin\"\nfallbacks = [\"codex\"]\n\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n" > "$_S24/lease/ops/roster.toml"
-( cd "$_S24/lease" && export HOME="$_S24" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" && echo r > README.md && git add -A && git commit -qm init && git checkout -q -b sprint/s24 ) >/dev/null 2>&1
+_self_repo "$_S24/lease" "$_S24" sprint/s24 "[roles.reviewer]\ncli = \"devin\"\nfallbacks = [\"codex\"]\n\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
 printf '#!/bin/sh\necho "reviewed"\necho "Status: DONE"\n' > "$_S24/fb-done.sh"
 chmod +x "$_S24/fb-done.sh"
 O=$( cd "$_S24/lease" && export HOME="$_S24" GIT_CONFIG_NOSYSTEM=1 PATH="$_S24_PATH" TMPDIR="$_S24/tmp" TRIFORGE_LEASE_ROOT="$_S24/leases" TRIFORGE_TEST_BUILDER="$_S24/fb-done.sh" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }

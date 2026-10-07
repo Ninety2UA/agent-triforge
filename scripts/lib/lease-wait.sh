@@ -434,10 +434,9 @@ _CLAUDE_MAX_TURNS=200
 _CLAUDE_TOOLS_EDIT="Bash,Read,Edit,Write,Glob,Grep,NotebookEdit,Skill"
 _CLAUDE_ALLOW_EDIT="Bash,Skill"
 _CLAUDE_TOOLS_READ="Read,Grep,Glob"
-_CLAUDE_CRED_PATHS="~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.git-credentials ~/.config/gh ~/.config/gcloud ~/.azure ~/.kube ~/.docker/config.json ~/.codex ~/.gemini ~/.kimi-code ~/.local/share/opencode ~/.cursor ~/.grok ~/.devin ~/.config/devin ~/.claude/.credentials.json"
 # Devin CLI 3000.x keeps its token in its XDG data dir, credentials.toml
-# (`devin auth status` names the file; CC-25)
-_CLAUDE_CRED_PATHS="${_CLAUDE_CRED_PATHS} ~/.local/share/devin"
+# (~/.local/share/devin; `devin auth status` names the file; CC-25)
+_CLAUDE_CRED_PATHS="~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.git-credentials ~/.config/gh ~/.config/gcloud ~/.azure ~/.kube ~/.docker/config.json ~/.codex ~/.gemini ~/.kimi-code ~/.local/share/opencode ~/.cursor ~/.grok ~/.devin ~/.config/devin ~/.claude/.credentials.json ~/.local/share/devin"
 
 # _claude_sandbox_floor_ok — 0 when the claude worker lane may run here: its
 # sandbox is off (TRIFORGE_CLAUDE_SANDBOX=off: no OS confinement, the
@@ -553,12 +552,14 @@ _claude_session_ok() {
   return 1
 }
 
-# _lease_lane_argv <cli> <model> <effort> <dispatch-model> <kimi-agent-file>
+# _lease_lane_argv <cli> <model> <effort> <dispatch-model> <lane-arg>
 #   <cursor-bin> <worktree> <timeout-s> [<git-common-dir> <resume-id>] — set
 # _LEASE_LANE_ARGV to the lane's command line up to the prompt, which the
 # caller appends (agy and kimi end in
 # -p, whose value it is; the others take it as the trailing positional); rc 1
-# for a CLI with no arm. The one place each lane's argv is composed:
+# for a CLI with no arm. <lane-arg> is the lane's own value from
+# lease_dispatch: kimi's agent file, devin's config copy, grok's class. The
+# one place each lane's argv is composed:
 # _lease_builder_run runs it under _adapter_env, and the probe's worker-marker
 # rows (CC-13, AGY-17, OC-09, KIMI-10, CUR-13, and CDX-16, CDX-17 and SELF-15c
 # through the codex flags; the GRK rows and SELF-06g) read it through the
@@ -599,15 +600,16 @@ _claude_session_ok() {
 #                --force (edits without confirmation, inside the worktree).
 #                Confinement is the worktree and the env allowlist, not
 #                --sandbox (CUR-07: an absolute-path write escaped it)
-#   devin        --config <the per-dispatch copy in the lane-file slot>, the
-#                model pin, --permission-mode by the copy's class (dangerous
-#                for .edit.json, an opted-in builder; auto, read-only tools
-#                only, for a reviewer or analyst lease), workspace trust off
+#   devin        _devin_argv (scripts/lib/devin.sh): --config <the lane arg,
+#                the per-dispatch copy>, the model pin, --permission-mode by
+#                the copy's class (dangerous for .edit.json, an opted-in
+#                builder; auto, read-only tools only, for a reviewer or
+#                analyst lease), workspace trust off
 #                (-p fails in an untrusted directory), -p last. SHELL never
 #                crosses env -i, so Devin imports no login-shell exports
 #                (DVN-04)
-#   grok         _grok_argv (scripts/lib/grok.sh) in the class the lane-file
-#                slot carries (lease_dispatch: _grok_class of the lease role):
+#   grok         _grok_argv (scripts/lib/grok.sh) in the class the lane arg
+#                carries (lease_dispatch: _grok_class of the lease role):
 #                edit, the workspace sandbox and the edit tools, for a builder,
 #                tester or documenter lease; read, the read-only sandbox with
 #                Read and Grep only, for anything else. Either way the env
@@ -617,7 +619,7 @@ _claude_session_ok() {
 #                keeps the tool shell to the boundary's names; -p last (the
 #                prompt is its value)
 _lease_lane_argv() {
-  local CLI=$1 MODEL=$2 EFFORT=$3 DMODEL=$4 KAF=$5 CBIN=$6 WT=$7 TIMEOUT=$8
+  local CLI=$1 MODEL=$2 EFFORT=$3 DMODEL=$4 LANE_ARG=$5 CBIN=$6 WT=$7 TIMEOUT=$8
   case "$CLI" in
     claude)
       _claude_lane_argv edit "$MODEL" "$EFFORT" "${10:-}" "${9:-}" || return 1
@@ -641,25 +643,25 @@ _lease_lane_argv() {
       ;;
     kimi)
       _LEASE_LANE_ARGV=(env KIMI_DISABLE_TELEMETRY=1 kimi --output-format stream-json -m "$DMODEL")
-      if [ -n "$KAF" ]; then _LEASE_LANE_ARGV+=(--agent-file "$KAF"); fi
+      if [ -n "$LANE_ARG" ]; then _LEASE_LANE_ARGV+=(--agent-file "$LANE_ARG"); fi
       _LEASE_LANE_ARGV+=(-p)
       ;;
     cursor)
       _LEASE_LANE_ARGV=("$CBIN" -p --output-format stream-json --model "$DMODEL" --trust --force)
       ;;
     devin)
-      # <lane file> is the per-dispatch config copy (lease_dispatch); an
+      # <lane-arg> is the per-dispatch config copy (lease_dispatch); an
       # .edit.json copy is the builder class, anything else read-only
-      if [ -z "$KAF" ]; then return 1; fi
-      case "$KAF" in
-        *.edit.json) _LEASE_LANE_ARGV=(devin --config "$KAF" --model "$DMODEL" --permission-mode dangerous) ;;
-        *)           _LEASE_LANE_ARGV=(devin --config "$KAF" --model "$DMODEL" --permission-mode auto) ;;
+      if [ -z "$LANE_ARG" ]; then return 1; fi
+      case "$LANE_ARG" in
+        *.edit.json) _devin_argv edit "$LANE_ARG" "$DMODEL" ;;
+        *)           _devin_argv read "$LANE_ARG" "$DMODEL" ;;
       esac
-      _LEASE_LANE_ARGV+=(--respect-workspace-trust false -p)
+      _LEASE_LANE_ARGV=("${_DEVIN_ARGV[@]}")
       ;;
     grok)
-      # <lane file> is the class; an empty or unknown one runs read-only
-      _grok_argv "${KAF:-read}" "$DMODEL" "$EFFORT" lease || return 1
+      # <lane-arg> is the class; an empty or unknown one runs read-only
+      _grok_argv "${LANE_ARG:-read}" "$DMODEL" "$EFFORT" lease || return 1
       _LEASE_LANE_ARGV=("${_GROK_ARGV[@]}")
       ;;
     *)
@@ -669,7 +671,7 @@ _lease_lane_argv() {
   return 0
 }
 
-# _lease_builder_run <cli> <model> <effort> <dispatch-model> <kimi-agent-file>
+# _lease_builder_run <cli> <model> <effort> <dispatch-model> <lane-arg>
 #   <cursor-bin> <timeout-bin> <timeout-s> <out> <worktree> <env-keys>
 #   <test-builder> <prompt> [<git-common-dir> <resume-id>]
 # The detached builder's body: from the worktree, the lane command for <cli>
@@ -685,7 +687,7 @@ _lease_lane_argv() {
 # and the record lease_collect reads (<out>.envelope); with no envelope, the
 # run's stderr is appended to <out>.
 _lease_builder_run() {
-  local CLI=$1 MODEL=$2 EFFORT=$3 DISPATCH_MODEL=$4 KIMI_AGENT_FILE=$5 CBIN=$6 TOBIN=$7 TIMEOUT=$8 OUT=$9
+  local CLI=$1 MODEL=$2 EFFORT=$3 DISPATCH_MODEL=$4 LANE_ARG=$5 CBIN=$6 TOBIN=$7 TIMEOUT=$8 OUT=$9
   local WT=${10} TEST_BUILDER=${12} FULL_PROMPT=${13} COMMON=${14:-} RESUME=${15:-} RC=0 CLASS_SET=0 AGY_PRC=0 SBX_REFUSED=0
   local -a TO
   _ADAPTER_ENV_KEYS=${11}   # the registry read lease_dispatch did; _adapter_env reads none
@@ -700,7 +702,7 @@ _lease_builder_run() {
   if [ -n "$TEST_BUILDER" ]; then
     # Test seam (see lease_dispatch): deterministic fake builder.
     _adapter_env "$CLI" "${TO[@]}" "$TEST_BUILDER" "$FULL_PROMPT" > "$OUT" 2>&1 || RC=$?
-  elif ! _lease_lane_argv "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$KIMI_AGENT_FILE" "$CBIN" "$WT" "$TIMEOUT" "$COMMON" "$RESUME"; then
+  elif ! _lease_lane_argv "$CLI" "$MODEL" "$EFFORT" "$DISPATCH_MODEL" "$LANE_ARG" "$CBIN" "$WT" "$TIMEOUT" "$COMMON" "$RESUME"; then
     echo "lease_dispatch: ERROR builder CLI '${CLI}' has no dispatch arm here — not integrated. Registered CLIs: $(_known_clis '<registry unreadable>')." > "$OUT"
     RC=95
   else

@@ -310,13 +310,12 @@ dispatch_role() {
       CURSOR_MODEL="$MODEL" invoke_cursor "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
       ;;
     devin)
-      # DEVIN_ROLE picks the permission class (read for reviewer and analyst,
-      # edit for an opted-in builder) and the brief a persona name lacks.
+      # DEVIN_ROLE picks the permission class (_devin_class, devin.sh) and
+      # the brief a persona name lacks.
       DEVIN_MODEL="$MODEL" DEVIN_ROLE="$ROLE" invoke_devin "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
       ;;
     grok)
-      # GROK_ROLE picks the permission class: reviewer and analyst read,
-      # tester and documenter edit (scripts/lib/grok.sh).
+      # GROK_ROLE picks the permission class (_grok_class, grok.sh).
       GROK_MODEL="$MODEL" GROK_ROLE="$ROLE" invoke_grok "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
       ;;
     *)
@@ -1272,13 +1271,16 @@ _roster_is_core() {
   [ "$(cli_field "${1:-}" tier 2>/dev/null || true)" = "core" ]
 }
 
-# latest_probe_record — print the path of the NEWEST ops/research/*-probe-record.md
-# (KTD9: "the current probe record" is always the newest file; the harness
-# writes a date-stamped record per cycle). rc 1 when none exists. Paths are
-# repo-relative when run from the repo root, absolute otherwise.
+# latest_probe_record [root] — print the path of the NEWEST
+# ops/research/*-probe-record.md under <root>, default the repo the current
+# directory is in (KTD9: "the current probe record" is always the newest file;
+# the harness writes a date-stamped record per cycle). rc 1 when none exists.
+# Paths are relative when run from that root, absolute otherwise.
 latest_probe_record() {
-  local REPO
-  REPO=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  local REPO=${1:-}
+  if [ -z "$REPO" ]; then
+    REPO=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  fi
   local NEWEST
   NEWEST=$(ls -1 "${REPO}/ops/research/"*-probe-record.md 2>/dev/null | sort | tail -1)
   if [ -z "$NEWEST" ]; then
@@ -1727,7 +1729,7 @@ if enabled == 'true':
     kept = old.get('consent') if old.get('enabled') is not False else None
     consent = stamp or (kept if isinstance(kept, str) and kept.strip() else '')
     if e['consent'] and not consent:
-        sys.stderr.write('roster_write_member: REFUSED — enrolling ' + cli + ' needs the user consent on record: ' + e['name'] + ' sends prompts and code to ' + e['egress'] + ', and Cognition may train on them unless the account opts out. Ask the user; on a yes rerun with --consent user\n')
+        sys.stderr.write('roster_write_member: REFUSED — enrolling ' + cli + ' needs the user consent on record: ' + e['name'] + ' sends prompts and code to ' + e['egress'] + ', and ' + e['egress'].split(' (', 1)[0] + ' may train on them unless the account opts out. Ask the user; on a yes rerun with --consent user\n')
         sys.exit(2)
     if optin_arg == '__keep__':
         prev = old.get('opt_in', []) if old.get('enabled') is not False else []
@@ -1964,10 +1966,14 @@ roster_enroll_member() {
   # A CLI whose registry entry asks for consent (devin, R24) is never enrolled
   # headless: a hook cannot ask, and the record must carry the user's yes.
   # Interactive, the ask adds the consent question to participate/which model.
-  local NEEDS_CONSENT=""
-  NEEDS_CONSENT=$(cli_field "$CLI" consent 2>/dev/null) || NEEDS_CONSENT=""
+  # consent and egress in one registry read (consent prints true|false, egress
+  # never holds a tab).
+  local NEEDS_CONSENT="" EGRESS="" CROW=""
+  CROW=$(cli_field "$CLI" consent egress 2>/dev/null) || CROW=""
+  NEEDS_CONSENT=${CROW%%$'\t'*}
+  EGRESS=${CROW#*$'\t'}
   if [ "$MODE" = "headless" ] && [ "$NEEDS_CONSENT" = true ]; then
-    echo "needs-consent: ${CLI} installed=yes — enrolling it needs the user's recorded consent ($(cli_field "$CLI" egress 2>/dev/null) sees the prompts and code); not enrolled headless. Run at-setup to ask."
+    echo "needs-consent: ${CLI} installed=yes — enrolling it needs the user's recorded consent (${EGRESS} sees the prompts and code); not enrolled headless. Run at-setup to ask."
     return 20
   fi
 
@@ -1988,7 +1994,7 @@ roster_enroll_member() {
   # interactive: the CALLER (setup.md) runs the ask and writes the answer.
   echo "needs-ask: ${CLI} installed=yes default-model=${DEFAULT} auth=${AUTH}"
   if [ "$NEEDS_CONSENT" = true ]; then
-    echo "  consent: required — $(cli_field "$CLI" egress 2>/dev/null) sees the prompts and code; ask the user before enrolling"
+    echo "  consent: required — ${EGRESS} sees the prompts and code; ask the user before enrolling"
     echo "  enroll : roster_write_member ${CLI} true <model> --consent user   (recommended: ${DEFAULT})"
   else
     echo "  enroll : roster_write_member ${CLI} true <model>   (recommended: ${DEFAULT})"

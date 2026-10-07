@@ -368,6 +368,17 @@ _lane_argv_words() {
   for W in "${_LEASE_LANE_ARGV[@]}"; do printf '%s\037%s\037%s\n' "$KIND" "$CLI" "$W"; done
 }
 
+# _probe_provision <worktree> <lease-root> <cli> — provision a lease-shaped
+# worktree of the fixture with the real provisioner (_lease_provision <wt>
+# <cli>, through the loader: .agents/skills, plus .claude/skills for claude and
+# .grok/config.toml for grok) and print the `provisioned` list it recorded;
+# nothing when it failed. SELF-06f, SELF-06g, SELF-06h and GRK-06 call it.
+_probe_provision() {
+  ( cd "$FIX" && unset CLAUDE_PLUGIN_ROOT && export TRIFORGE_LEASE_ROOT="$2" && source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 \
+      && _lease_ctx && _CARVE_ADMIN=$(git -C "$1" rev-parse --absolute-git-dir) && _CARVE_FIELDS=() \
+      && _lease_provision "$1" "$3" 2>/dev/null && printf '%s\n' "${_CARVE_FIELDS[@]}" | sed -n 's/^provisioned=//p' ) || true
+}
+
 # The claude lane rows (U12, KTD16) run the lane's own argv on the cheapest
 # model: _u12_argv <worktree> [<resume-id>] sets U12_ARGV from the composer the
 # lease lane runs (_lease_lane_argv claude, read through the loader), with the
@@ -403,6 +414,15 @@ $( source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 0
    _lane_argv_words argv devin "" "" "$(cli_field devin model 2>/dev/null || true)" "$2" "" "$FIX" 240 )
 DVN_ARGV_EOF
 }
+# _dvn_pending <ID> <capability> — the PENDING-AUTH / skip row of a live
+# Devin row whose gate is closed (the DVN rows and SELF-06h).
+_dvn_pending() {
+  if [ "$DVN_AUTH" = 1 ]; then
+    row "$1" "devin" "$2" "PENDING-AUTH" "DVN-02: devin auth status says Not logged in — after \`devin auth login\` rerun --only $1" "live"
+  else
+    row "$1" "devin" "$2" "$(_skip_reason)" "gated on DVN-02 / DVN-03" "live"
+  fi
+}
 
 # _self06h_row — SELF-06h (KTD12, R24): a lease-shaped worktree of the
 # fixture, provisioned by the real provisioner (_lease_provision <wt> devin,
@@ -417,19 +437,12 @@ _self06h_row() {
     row "SELF-06h" "devin" "$CAP" "UNAVAILABLE" "devin not on PATH" "live"; return 0
   fi
   if [ "$DVN_LIVE" != 1 ]; then
-    if [ "$DVN_AUTH" = 1 ]; then
-      row "SELF-06h" "devin" "$CAP" "PENDING-AUTH" "DVN-02: devin auth status says Not logged in — after \`devin auth login\` rerun --only SELF-06h" "live"
-    else
-      row "SELF-06h" "devin" "$CAP" "$(_skip_reason)" "gated on DVN-02 / DVN-03" "live"
-    fi
-    return 0
+    _dvn_pending SELF-06h "$CAP"; return 0
   fi
   if ! git -C "$FIX" worktree add -q "$WT" -b probe/self-06h >/dev/null 2>&1; then
     row "SELF-06h" "devin" "$CAP" "FAIL" "git worktree add failed in the fixture — no lease-shaped worktree to probe" "live"; return 0
   fi
-  PROV=$( cd "$FIX" && unset CLAUDE_PLUGIN_ROOT && export TRIFORGE_LEASE_ROOT="$WORK/self06h-leases" && source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 \
-            && _lease_ctx && _CARVE_ADMIN=$(git -C "$WT" rev-parse --absolute-git-dir) && _CARVE_FIELDS=() \
-            && _lease_provision "$WT" devin 2>/dev/null && printf '%s\n' "${_CARVE_FIELDS[@]}" | sed -n 's/^provisioned=//p' ) || PROV=""
+  PROV=$(_probe_provision "$WT" "$WORK/self06h-leases" devin)
   _dvn_argv read "$WORK/self06h.read.json"
   if [ "${#DVN_ARGV[@]}" -eq 0 ]; then
     echo "could not read the devin lane argv through scripts/invoke-external.sh" > "$O"
@@ -506,9 +519,7 @@ _self06f_row() {
   if ! git -C "$FIX" worktree add -q "$WT" -b probe/self-06f >/dev/null 2>&1; then
     row "SELF-06f" "claude" "$CAP" "FAIL" "git worktree add failed in the fixture — no lease-shaped worktree to probe" "live"; return 0
   fi
-  PROV=$( cd "$FIX" && unset CLAUDE_PLUGIN_ROOT && export TRIFORGE_LEASE_ROOT="$WORK/self06f-leases" && source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 \
-            && _lease_ctx && _CARVE_ADMIN=$(git -C "$WT" rev-parse --absolute-git-dir) && _CARVE_FIELDS=() \
-            && _lease_provision "$WT" claude 2>/dev/null && printf '%s\n' "${_CARVE_FIELDS[@]}" | sed -n 's/^provisioned=//p' ) || PROV=""
+  PROV=$(_probe_provision "$WT" "$WORK/self06f-leases" claude)
   _u12_argv "$WT"
   if [ "${#U12_ARGV[@]}" -eq 0 ]; then
     echo "could not read the claude lane argv through scripts/invoke-external.sh" > "$O"
@@ -667,16 +678,12 @@ echo "probe-capabilities: fixture=$FIX" >&2
 
 # Per-CLI live gate: set to 0 when the CLI's READY probe fails so remaining
 # live probes for that CLI fail fast (KTD-9 deterministic-failure posture).
-AGY_LIVE=1; CDX_LIVE=1; OC_LIVE=1; KIMI_LIVE=1; CUR_LIVE=1; CC_LIVE=1
-[ "$SKIP_LIVE" = "1" ] && { AGY_LIVE=0; CDX_LIVE=0; OC_LIVE=0; KIMI_LIVE=0; CUR_LIVE=0; CC_LIVE=0; }
-# Devin (U17): the same reset, its own line; DVN-02 (auth status text) and
-# DVN-03 (READY) close it
-DVN_LIVE=1
-[ "$SKIP_LIVE" = "1" ] && DVN_LIVE=0
-# The Grok Build gate (GRK-05 clears it); GRK_AUTH / GRK_QUOTA say why, for the
-# PENDING-AUTH and SKIPPED-GATED rows after it.
-GRK_LIVE=1; GRK_AUTH=0; GRK_QUOTA=0
-[ "$SKIP_LIVE" = "1" ] && GRK_LIVE=0
+# DVN-02 (auth status text) and DVN-03 (READY) close Devin's; GRK-05 closes
+# Grok Build's, and GRK_AUTH / GRK_QUOTA say why, for the PENDING-AUTH and
+# SKIPPED-GATED rows after it.
+AGY_LIVE=1; CDX_LIVE=1; OC_LIVE=1; KIMI_LIVE=1; CUR_LIVE=1; CC_LIVE=1; DVN_LIVE=1; GRK_LIVE=1
+GRK_AUTH=0; GRK_QUOTA=0
+[ "$SKIP_LIVE" = "1" ] && { AGY_LIVE=0; CDX_LIVE=0; OC_LIVE=0; KIMI_LIVE=0; CUR_LIVE=0; CC_LIVE=0; DVN_LIVE=0; GRK_LIVE=0; }
 
 _skip_reason() { [ "$SKIP_LIVE" = "1" ] && echo "SKIPPED" || echo "SKIPPED-GATED"; }
 
@@ -3183,15 +3190,6 @@ if _want DVN-01 || _want DVN-02 || _want DVN-03 || _want DVN-04 || _want DVN-05 
         row "DVN-02" "devin" "$DVN_CAP02" "FAIL" "scratch HOME: first line '${DVN_SCR_L1}', exit ${DVN_SCR_RC}, read as ${DVN_SCR} (want Not logged in., exit 0, not ready); this host: ${DVN_HOST}" "direct"
       fi
     fi
-    # _dvn_pending <ID> <capability> — the PENDING-AUTH / skip row of a live
-    # Devin row whose gate is closed.
-    _dvn_pending() {
-      if [ "$DVN_AUTH" = 1 ]; then
-        row "$1" "devin" "$2" "PENDING-AUTH" "DVN-02: devin auth status says Not logged in — after \`devin auth login\` rerun --only $1" "live"
-      else
-        row "$1" "devin" "$2" "$(_skip_reason)" "gated on DVN-02 / DVN-03" "live"
-      fi
-    }
     if _want DVN-03; then
       if [ "$DVN_LIVE" != 1 ]; then
         _dvn_pending DVN-03 "$DVN_CAP03"
@@ -3411,12 +3409,14 @@ GRK_CAP08="A git push the deny rule matches is not executed (dontAsk + --deny), 
 GRK_CAP09="The no-push config and the worker marker reach the tool shell through the real _adapter_env; git push and git -C . push, which no deny rule sees, are refused"
 GRK_CAP10="The workspace sandbox in a lease-shaped worktree: git status, diff, log and a write inside it work; a write outside it and the temp dirs is refused"
 GRK_CAP11="Two parallel runs refreshing the cached login leave ~/.grok/auth.json valid"
-GRK_MODEL=$( source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 && cli_field grok model 2>/dev/null ) || GRK_MODEL=""
+GRK_REG=$( source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 && cli_field grok model env_keys 2>/dev/null ) || GRK_REG=""
+GRK_MODEL=${GRK_REG%%$'\t'*}
 # The credential variables the registry forwards to grok (env_keys); the
 # probe's _lane_run carries the base allowlist only, so the live rows add them.
 GRK_KEYS=()
-if [ -n "${XAI_API_KEY+x}" ]; then GRK_KEYS+=("XAI_API_KEY=$XAI_API_KEY"); fi
-if [ -n "${GROK_HOME+x}" ]; then GRK_KEYS+=("GROK_HOME=$GROK_HOME"); fi
+for _GK in ${GRK_REG#*$'\t'}; do
+  if [ -n "${!_GK+x}" ]; then GRK_KEYS+=("${_GK}=${!_GK}"); fi
+done
 
 # _grk_argv <effort> — GRK_ARGV: the grok lane's command line up to the prompt
 # (it ends in -p, whose value the caller appends), from the composer the lease
@@ -3521,15 +3521,6 @@ except Exception:
 print(" ".join(k for k in env if isinstance(k, str)))
 ' 2>/dev/null || true
 }
-# _grk_provision <worktree> <lease-root> — provision a lease-shaped worktree of
-# the fixture with the real provisioner (_lease_provision <wt> grok, through
-# the loader: .agents/skills and .grok/config.toml) and print the
-# `provisioned` list it recorded; nothing when it failed.
-_grk_provision() {
-  ( cd "$FIX" && unset CLAUDE_PLUGIN_ROOT && export TRIFORGE_LEASE_ROOT="$2" && source "$REPO_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1 \
-      && _lease_ctx && _CARVE_ADMIN=$(git -C "$1" rev-parse --absolute-git-dir) && _CARVE_FIELDS=() \
-      && _lease_provision "$1" grok 2>/dev/null && printf '%s\n' "${_CARVE_FIELDS[@]}" | sed -n 's/^provisioned=//p' ) || true
-}
 # _GRK_SESSION_PY <cwd> <out> — open a grok session from <cwd> with no prompt
 # (`grok agent --no-leader stdio`: ACP initialize, then session/new; never
 # session/prompt, so no model call) and write to <out> the session id or the
@@ -3582,7 +3573,7 @@ p.wait()
 json.dump({"session": session, "error": err, "commands": cmds, "servers": sorted(servers)}, open(out, "w"))'
 
 # _self06g_row — SELF-06g (KTD7, R9): a lease-shaped worktree of the fixture,
-# provisioned by the real provisioner (_grk_provision: .agents/skills and the
+# provisioned by the real provisioner (_probe_provision: .agents/skills and the
 # .grok/config.toml GRK-06 reads), and a grok worker on the lane's argv and env asked
 # which of the shipped names, the fixture's tf-agents-skill and a decoy name
 # its skills carry. PASS when every shipped name and tf-agents-skill are
@@ -3606,7 +3597,7 @@ _self06g_row() {
   if ! git -C "$FIX" worktree add -q "$WT" -b probe/self-06g >/dev/null 2>&1; then
     row "SELF-06g" "grok" "$CAP" "FAIL" "git worktree add failed in the fixture — no lease-shaped worktree to probe" "live"; return 0
   fi
-  PROV=$(_grk_provision "$WT" "$WORK/self06g-leases")
+  PROV=$(_probe_provision "$WT" "$WORK/self06g-leases" grok)
   _grk_argv low
   if [ "${#GRK_ARGV[@]}" -eq 0 ]; then
     echo "could not read the grok lane argv through scripts/invoke-external.sh" > "$O"
@@ -3689,9 +3680,7 @@ except Exception:
     fi
   fi
 else
-  for r in "GRK-01:$GRK_CAP01" "GRK-02:$GRK_CAP02"; do
-    if _want "${r%%:*}"; then row "${r%%:*}" "grok" "${r#*:}" "UNAVAILABLE" "grok not on PATH" "direct"; fi
-  done
+  _u29_rows grok UNAVAILABLE "grok not on PATH" direct "GRK-01:$GRK_CAP01" "GRK-02:$GRK_CAP02"
 fi
 
 # GRK-03 needs no grok binary: recorded stream shapes through the lane's parser.
@@ -3731,7 +3720,7 @@ if _want GRK-03; then
     _grok_extract_text "$D/deny.jsonl" "$D/deny.txt" || F="$F deny:not-extracted"
     [ "$(_lease_parse_status "$D/deny.txt")" = BLOCKED ] || F="$F deny:status-not-BLOCKED"
     grep -q 'denied by the permission rules.*git push origin HEAD' "$D/deny.txt" 2>/dev/null || F="$F deny:no-denial-note"
-    [ "$(_grok_stop "$D/maxturns.jsonl")" = max_turns ] || F="$F maxturns:stop=$(_grok_stop "$D/maxturns.jsonl")"
+    [ "$(_grok_stop "$D/maxturns.jsonl")" = max-turns ] || F="$F maxturns:stop=$(_grok_stop "$D/maxturns.jsonl")"
     if _grok_extract_text "$D/maxturns.jsonl" "$D/maxturns.txt"; then F="$F maxturns:text-from-a-run-without-text"; fi
     _grok_classify 1 "$D/maxturns.jsonl"
     [ "${INVOKE_FAILURE_CLASS}:${_INVOKE_FAILURE_REASON}" = deterministic:max-turns ] || F="$F maxturns:${INVOKE_FAILURE_CLASS}:${_INVOKE_FAILURE_REASON}"
@@ -3743,7 +3732,7 @@ if _want GRK-03; then
     [ "${INVOKE_FAILURE_CLASS}" = retryable ] || F="$F neterr:${INVOKE_FAILURE_CLASS}:${_INVOKE_FAILURE_REASON}"
     printf '%s' "${F:-ok}" )
   if [ "$GRK03" = ok ]; then
-    row "GRK-03" "grok" "$GRK_CAP03" "PASS" "end_turn: the last response alone (Status: DONE), stop end_turn; denial: Status: BLOCKED plus a note naming the denied git push; max turns: stop max_turns, no text, classified deterministic:max-turns; signed out -> deterministic:auth; usage limit -> deterministic:quota; a reset connection -> retryable" "static"
+    row "GRK-03" "grok" "$GRK_CAP03" "PASS" "end_turn: the last response alone (Status: DONE), stop end_turn; denial: Status: BLOCKED plus a note naming the denied git push; max turns: stop max-turns, no text, classified deterministic:max-turns; signed out -> deterministic:auth; usage limit -> deterministic:quota; a reset connection -> retryable" "static"
   else
     row "GRK-03" "grok" "$GRK_CAP03" "FAIL" "${GRK03# }" "static"
   fi
@@ -3857,7 +3846,7 @@ if _want GRK-06; then
   elif ! git -C "$FIX" worktree add -q "$GRK6_WT" -b probe/grk-06 >/dev/null 2>&1; then
     row "GRK-06" "grok" "$GRK_CAP06" "FAIL" "git worktree add failed in the fixture — no lease-shaped worktree to probe" "static"
   else
-    GRK6_PROV=$(_grk_provision "$GRK6_WT" "$WORK/grk06-leases")
+    GRK6_PROV=$(_probe_provision "$GRK6_WT" "$WORK/grk06-leases" grok)
     (cd "$GRK6_WT" && _lane_run 90 ${GRK_KEYS[@]+"${GRK_KEYS[@]}"} env "${GRK_ENVW[@]}" grok inspect --json < /dev/null > "$WORK/grk06-inspect.json" 2> "$WORK/grk06-inspect.err") || true
     (cd "$GRK6_WT" && _lane_run 120 ${GRK_KEYS[@]+"${GRK_KEYS[@]}"} env "${GRK_ENVW[@]}" python3 -c "$_GRK_SESSION_PY" "$GRK6_WT" "$WORK/grk06-session.json" < /dev/null > /dev/null 2> "$WORK/grk06-session.err") || true
     # Hook names only, from GRK-05's debug log when it ran (the log itself may

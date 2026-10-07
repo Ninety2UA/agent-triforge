@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/devin.sh — the Devin CLI lane (optional tier, R24): invoke_devin, the auth-status reader, the per-run config copy, the login-shell re-import flag setup reads
+# scripts/lib/devin.sh — the Devin CLI lane (optional tier, R24): the argv composer the lease lane shares (_devin_argv), invoke_devin, the auth-status reader, the per-run config copy, the login-shell re-import flag setup reads
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh and scripts/lib/registry.sh.
@@ -72,6 +72,24 @@ _devin_class() {
   esac
 }
 
+# _devin_mode <read|edit> — the class's --permission-mode: dangerous for edit,
+# auto for anything else.
+_devin_mode() {
+  case "${1:-}" in
+    edit) echo dangerous ;;
+    *) echo auto ;;
+  esac
+}
+
+# _devin_argv <read|edit> <config> <model> — set _DEVIN_ARGV to a devin run's
+# command line up to the prompt: the per-run config copy, the model pin, the
+# class's --permission-mode (_devin_mode), workspace trust off (-p fails in an
+# untrusted directory) and -p last. The one composer: invoke_devin and
+# _lease_lane_argv (scripts/lib/lease-wait.sh) both call it.
+_devin_argv() {
+  _DEVIN_ARGV=(devin --config "$2" --model "$3" --permission-mode "$(_devin_mode "$1")" --respect-workspace-trust false -p)
+}
+
 # _devin_config_copy <read|edit> <dest> — copy the shipped per-class config to
 # <dest> for one run. Nonzero when the shipped file is missing (a broken
 # install: never run Devin with the user's own config instead).
@@ -108,7 +126,7 @@ $(if [ -n "${1:-}" ]; then
     printf '%s\n' "$1"   # an explicit record is the only one read
   else
     latest_probe_record 2>/dev/null || true
-    ls -1 "${_TRIFORGE_PLUGIN_ROOT}/ops/research/"*-probe-record.md 2>/dev/null | sort | tail -1
+    latest_probe_record "$_TRIFORGE_PLUGIN_ROOT" 2>/dev/null || true
   fi)
 REIMPORT_RECORDS
   case "$ROW" in
@@ -144,8 +162,7 @@ invoke_devin() {
   fi
 
   CLASS=$(_devin_class "$ROLE")
-  MODE=auto
-  if [ "$CLASS" = edit ]; then MODE=dangerous; fi
+  MODE=$(_devin_mode "$CLASS")
 
   # The brief: the agent's own (devin-agents/<agent>.md), else the role's —
   # it carries the typed report contract, so a persona name without a Devin
@@ -155,10 +172,10 @@ invoke_devin() {
   elif [ -n "$ROLE" ] && [ -f "${_TRIFORGE_PLUGIN_ROOT}/devin-agents/${ROLE}.md" ]; then
     BRIEF_FILE="${_TRIFORGE_PLUGIN_ROOT}/devin-agents/${ROLE}.md"
   elif [ -n "$AGENT_NAME" ]; then
-    echo "invoke_devin: WARNING no devin-agents/ brief for '${AGENT_NAME}' or role '${ROLE}' (Devin has no headless agent selector — injection only); raw prompt. Available briefs: $(_list_devin_agents | paste -sd, - 2>/dev/null || true)" >&2
+    echo "invoke_devin: WARNING no devin-agents/ brief for '${AGENT_NAME}' or role '${ROLE}' (Devin has no headless agent selector — injection only); raw prompt. Available briefs: $(_list_plugin_briefs devin-agents | paste -sd, - 2>/dev/null || true)" >&2
   fi
   if [ -n "$BRIEF_FILE" ]; then
-    BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "$BRIEF_FILE")
+    BODY=$(_brief_body "$BRIEF_FILE")
   fi
   FULL_PROMPT="${BODY:+${BODY}
 
@@ -176,8 +193,9 @@ ${PROMPT}"
       return 1
     fi
     EXIT_CODE=0
+    _devin_argv "$CLASS" "$CFG" "$MODEL"
     _run_with_timeout "$TIMEOUT" "${_HOST_SCRUB[@]}" env -u SHELL -u DEVIN_REFUSAL_FALLBACK -u DEVIN_PERMISSION_MODE -u DEVIN_SANDBOX -u DEVIN_MODEL \
-      devin --config "$CFG" --model "$MODEL" --permission-mode "$MODE" --respect-workspace-trust false -p "$FULL_PROMPT" \
+      "${_DEVIN_ARGV[@]}" "$FULL_PROMPT" \
       < /dev/null > "$OUTPUT_FILE" 2> "$ERR" || EXIT_CODE=$?
     rm -f "$CFG"
     if [ "$EXIT_CODE" -eq 0 ]; then
@@ -191,7 +209,7 @@ ${PROMPT}"
         INVOKE_FAILURE_CLASS="none"
         break
       fi
-    elif grep -qiE 'upgrade to (pro|max|a paid plan)|requires? a (paid|pro) plan|not available on your plan' "$ERR" "$OUTPUT_FILE" 2>/dev/null; then
+    elif grep -qiE "$_PLAN_LIMIT_RE" "$ERR" "$OUTPUT_FILE" 2>/dev/null; then
       INVOKE_FAILURE_CLASS="deterministic"
       _INVOKE_FAILURE_REASON="plan"
     elif grep -qiE 'not logged in|devin auth login|unauthorized|unauthenticated|401' "$ERR" "$OUTPUT_FILE" 2>/dev/null; then
@@ -223,15 +241,4 @@ ${PROMPT}"
     return "$_RC_DEGRADED"
   fi
   return 0
-}
-
-# _list_devin_agents — the role briefs in the plugin's devin-agents/ (basename
-# without .md), README excluded.
-_list_devin_agents() {
-  local f
-  for f in "${_TRIFORGE_PLUGIN_ROOT}/devin-agents"/*.md; do
-    [ -f "$f" ] || continue
-    case "$(basename "$f" .md)" in README) continue ;; esac
-    basename "$f" .md
-  done 2>/dev/null | sort -u
 }
