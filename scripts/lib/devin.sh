@@ -39,8 +39,12 @@ fi
 #         stays the mechanical block
 # --config replaces ~/.config/devin/config.json, so the user's own Devin hooks,
 # MCP servers and config never load in a worker; read_config_from keeps only
-# agents_standard (AGENTS.md, .agents/skills) and drops Claude Code's config,
-# which Devin imports by default (CLAUDE.md, .claude hooks and skills).
+# agents_standard (AGENTS.md) and drops Claude Code's config, which Devin
+# imports by default (CLAUDE.md, .claude hooks and skills). agents_standard
+# does not govern skills: .agents/skills, .devin/skills and ~/.agents/skills
+# load with it off too.
+# A project's own .devin/ files still merge over the copy, so a read-class run
+# first passes _devin_project_guard.
 # Devin WRITES into the file it is handed (org id, theme, mode 600), so every
 # run gets a fresh copy (_devin_config_copy), never the shipped file. The copy
 # seeds shell.setup_complete, which skips the first-run banner on stdout.
@@ -113,6 +117,133 @@ _devin_config_copy() {
   cp "$SRC" "$2" && chmod 600 "$2"
 }
 
+# _devin_project_guard <dir> — nothing and 0 when no project file Devin loads
+# from <dir> can widen a read-class run; else the file and the cause on stdout
+# and 1. Devin merges the .devin/ files of <dir> and of each parent up to the
+# project root (the first with .git or .jj; every parent when none has one)
+# over the --config copy. Measured on 3000.11.3 under the read-class argv:
+#   allow      a project allow widens any tool the copy does not deny: a
+#              Fetch(...) allow ran webfetch unprompted (an exec allow stayed
+#              refused: the copy's deny wins), so any allow or ask is refused
+#   hooks      run as commands at session start, before any permission check:
+#              the "hooks" key of config.json and config.local.json, and
+#              hooks.v1.json
+#   MCP        servers start with the session: mcp_config.json and
+#              mcp_config.local.json, and (documented, not measured) the
+#              legacy mcpServers key of config.json, migrated on startup
+#   imports    a project read_config_from is a documented project setting;
+#              claude = true was not honored, and any import but
+#              agents_standard left on is refused anyway
+# Fail closed too on a .devin that is a symlink, a file that is a symlink or
+# not a plain file, and text that is not JSON once // and /* */ comments are
+# dropped (Devin reads JSONC) or that repeats a key. Read class only: the edit
+# class approves every tool already.
+_devin_project_guard() {
+  python3 - "$1" <<'DEVIN_GUARD_PY'
+import json, os, stat, sys
+
+def refuse(path, why):
+    print("%s: %s. Devin merges a project's .devin/ files over Triforge's read-only config, so no read-class Devin run starts here (R24). Fix: remove the entry, or route the role to another roster member" % (path, why))
+    sys.exit(1)
+
+def jsonc(t):
+    # // and /* */ comments outside strings dropped (the docs: Devin reads JSONC)
+    out, i, n, q = [], 0, len(t), False
+    while i < n:
+        c = t[i]
+        if q:
+            if c == "\\":
+                out.append(t[i:i + 2])
+                i += 2
+                continue
+            if c == '"':
+                q = False
+        elif c == '"':
+            q = True
+        elif t.startswith("//", i):
+            j = t.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        elif t.startswith("/*", i):
+            j = t.find("*/", i + 2)
+            if j < 0:
+                raise ValueError("an unterminated /* comment")
+            out.append(" ")
+            i = j + 2
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+def nodup(pairs):
+    if len(pairs) != len(set(k for k, _ in pairs)):
+        raise ValueError("a repeated key")
+    return dict(pairs)
+
+def load(path):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as e:
+        raise ValueError("a symlink or unreadable (%s)" % e.strerror)
+    with os.fdopen(fd, "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise ValueError("not a plain file")
+        data = f.read(1048577)
+    if len(data) > 1048576:
+        raise ValueError("larger than 1 MiB")
+    return json.loads(jsonc(data.decode("utf-8")), object_pairs_hook=nodup)
+
+def widens(name, c):
+    if name == "hooks.v1.json":
+        return "it declares hooks, which Devin runs as commands at session start" if c else ""
+    if not isinstance(c, dict):
+        return "not a JSON object"
+    if name.startswith("mcp_config"):
+        return "it declares MCP servers, which Devin starts with the session" if c.get("mcpServers") else ""
+    perms = c.get("permissions") or {}
+    if not isinstance(perms, dict):
+        return "permissions is not an object"
+    for k in ("allow", "ask"):
+        if perms.get(k):
+            return "permissions.%s %s widens the read class" % (k, json.dumps(perms[k])[:120])
+    if c.get("hooks"):
+        return "it declares hooks, which Devin runs as commands at session start"
+    if c.get("mcpServers"):
+        return "it declares MCP servers (mcpServers), which Devin starts with the session"
+    rcf = c.get("read_config_from")
+    if rcf is not None and not isinstance(rcf, dict):
+        return "read_config_from is not an object"
+    on = sorted(k for k, v in (rcf or {}).items() if k != "agents_standard" and v is not False)
+    if on:
+        return "read_config_from turns imports on (%s)" % ", ".join(on)
+    return ""
+
+d = os.path.realpath(sys.argv[1])
+while True:
+    dv = os.path.join(d, ".devin")
+    if os.path.islink(dv):
+        refuse(dv, "a symlink")
+    if os.path.isdir(dv):
+        for name in ("config.json", "config.local.json", "hooks.v1.json", "mcp_config.json", "mcp_config.local.json"):
+            p = os.path.join(dv, name)
+            if not os.path.lexists(p):
+                continue
+            try:
+                c = load(p)
+            except ValueError as e:
+                refuse(p, "could not be checked: %s" % e)
+            why = widens(name, c)
+            if why:
+                refuse(p, why)
+    if os.path.lexists(os.path.join(d, ".git")) or os.path.lexists(os.path.join(d, ".jj")):
+        break
+    up = os.path.dirname(d)
+    if up == d:
+        break
+    d = up
+DEVIN_GUARD_PY
+}
+
 # _devin_auth_ready — 0 when `devin auth status` says "Logged in" on its first
 # non-empty line. 15 s cap, fail-closed timeout wrapper.
 _devin_auth_ready() {
@@ -152,7 +283,9 @@ REIMPORT_RECORDS
 # Runs under _adapter_env devin, the lease lane's allowlist. Returns devin's
 # exit code; 80 when a clean run printed no Status line (report missing, never
 # "no findings"); 1 when it printed nothing at all; _member_consent_ok's rc
-# (5) when the roster records no consent, before anything is sent.
+# (5) when the roster records no consent, and 1 (deterministic,
+# project-config) when a .devin/ file here would widen the read class, both
+# before anything is sent.
 invoke_devin() {
   local AGENT_NAME=$1
   local PROMPT=$2
@@ -161,7 +294,7 @@ invoke_devin() {
   local EFFORT=${5:-${DEVIN_EFFORT:-}}
   local MODEL="${DEVIN_MODEL:-swe-1-6-slow}"
   local ROLE=${DEVIN_ROLE:-$AGENT_NAME}
-  local ERR="${OUTPUT_FILE}.err" CLASS MODE BRIEF_FILE="" BODY="" FULL_PROMPT CFG="" EXIT_CODE=0 ATTEMPT=1 TOBIN CRC=0
+  local ERR="${OUTPUT_FILE}.err" CLASS MODE BRIEF_FILE="" BODY="" FULL_PROMPT CFG="" EXIT_CODE=0 ATTEMPT=1 TOBIN CRC=0 GUARD=""
 
   INVOKE_FAILURE_CLASS="none"
   _INVOKE_FAILURE_REASON=""
@@ -189,6 +322,17 @@ invoke_devin() {
 
   CLASS=$(_devin_class "$ROLE")
   MODE=$(_devin_mode "$CLASS")
+
+  # Devin starts in this directory, so its .devin/ files must not widen the
+  # read class (_devin_project_guard); the refusal also goes to the output file
+  if [ "$CLASS" = read ] && ! GUARD=$(_devin_project_guard "$PWD"); then
+    GUARD="invoke_devin: ERROR ${GUARD:-the project .devin/ check failed to run}. No retry (deterministic)."
+    echo "$GUARD" >&2
+    echo "$GUARD" > "$OUTPUT_FILE" 2>/dev/null || true
+    INVOKE_FAILURE_CLASS="deterministic"
+    _INVOKE_FAILURE_REASON="project-config"
+    return 1
+  fi
 
   # The brief: the agent's own (devin-agents/<agent>.md), else the role's —
   # it carries the typed report contract, so a persona name without a Devin

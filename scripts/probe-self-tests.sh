@@ -4248,6 +4248,17 @@ rm -rf "$_S20"
 #              line, the copy removed after the run; a missing copy -> rc 94,
 #              deterministic, "devin config copy missing", never "not
 #              integrated"
+#   project-config  a project .devin/config.json allowing Fetch(...):
+#              invoke_devin reviewer refuses (rc 1, deterministic,
+#              project-config, the file named in its output file) and the
+#              stub never runs; the lease lane's read class fails to compose
+#              naming the file, the edit class composes; hooks.v1.json,
+#              mcp_config.local.json, a read_config_from import and a
+#              symlinked config.json each refuse, naming the file; a JSONC
+#              deny-only config.json passes and the run goes ahead; the
+#              builder arm on a worktree whose config.json declares hooks ->
+#              rc 94, deterministic, the cause in its output, the stub never
+#              run, the copy removed
 #   lease      the TRIFORGE_TEST_BUILDER seam with [roles.reviewer] cli =
 #              devin: lease_create <t> reviewer -> builder_cli devin, the
 #              seam builder sees a .read.json config copy during the run, the
@@ -4466,6 +4477,50 @@ b-missing:rc=$(cat "$_S24/b2.out.rc" 2>/dev/null):class=$(cat "$_S24/b2.out.clas
 _S24_FAIL="${_S24_FAIL}$(_self_expect builder "$O" '^b-run:rc=0:class=none:mode=auto:cfg=read:left=no:log=1$' '^b-missing:rc=94:class=deterministic:says=1:notint=0$')"
 _S24_FAIL="${_S24_FAIL}$(_self_expect shipped-config "ship:$(cksum < "${REPO_ROOT}/devin-agents/config-read.json" 2>/dev/null || echo gone)" "^ship:${_S24_SHIP}\$")"
 
+# a project's .devin/ files: Devin merges them over the copy, so a read-class
+# run never starts on one that widens it
+_s24_roster "$_S24/pc" "[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
+( cd "$_S24/pc" && git init -q ) >/dev/null 2>&1
+mkdir -p "$_S24/pc/.devin"
+printf '{ "permissions": { "allow": ["Fetch(domain:example.com)"] } }\n' > "$_S24/pc/.devin/config.json"
+printf '%s\n' "$_S24/pc/stub" > "$_S24/tmp/dvn-log"
+O=$( cd "$_S24/pc" && export PATH="$_S24_PATH" TMPDIR="$_S24/tmp" DVN_STUB_LOG="$_S24/pc/stub" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  R=0; invoke_devin reviewer "PROMPT-S24" "$_S24/pc/out" 30 >/dev/null 2>&1 || R=$?
+  echo "pc-allow:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:ran=$([ -e "$_S24/pc/stub.argv" ] && echo yes || echo no):says=$(grep -c '\.devin/config\.json: permissions\.allow' "$_S24/pc/out" 2>/dev/null || true)"
+  : > "$_S24/pc.devin.read.json"; : > "$_S24/pc.devin.edit.json"
+  R=0; _LEASE_LANE_ERR=""; _lease_lane_argv devin "" high swe-1-6-slow "$_S24/pc.devin.read.json" "" "$_S24/pc" 600 || R=$?
+  echo "pc-lane-read:rc=${R}:says=$(printf '%s' "$_LEASE_LANE_ERR" | grep -c '\.devin/config\.json: permissions\.allow' || true)"
+  R=0; _lease_lane_argv devin "" high swe-1-6-slow "$_S24/pc.devin.edit.json" "" "$_S24/pc" 600 || R=$?
+  echo "pc-lane-edit:rc=${R}"
+  for K in hooks mcp imports link jsonc; do
+    rm -rf .devin; mkdir .devin
+    if [ "$K" = hooks ]; then
+      printf '{ "SessionStart": [ { "hooks": [ { "type": "command", "command": "true" } ] } ] }\n' > .devin/hooks.v1.json
+    elif [ "$K" = mcp ]; then
+      printf '{ "mcpServers": { "x": { "command": "true" } } }\n' > .devin/mcp_config.local.json
+    elif [ "$K" = imports ]; then
+      printf '{ "read_config_from": { "claude": true } }\n' > .devin/config.local.json
+    elif [ "$K" = link ]; then
+      printf '{}\n' > "$_S24/pc-target.json"; ln -s "$_S24/pc-target.json" .devin/config.json
+    else
+      printf '// team policy\n{ "permissions": { "deny": ["Exec(sudo)"] } }\n' > .devin/config.json
+    fi
+    R=0; G=$(_devin_project_guard "$PWD") || R=$?
+    echo "pc-${K}:rc=${R}:$(printf '%s' "$G" | sed -n 's|.*/\.devin/\([a-z0-9_.]*\): .*|\1|p')"
+  done
+  R=0; invoke_devin reviewer "PROMPT-S24" "$_S24/pc/out2" 30 >/dev/null 2>&1 || R=$?
+  echo "pc-deny-only:rc=${R}:ran=$([ -e "$_S24/pc/stub.argv" ] && echo yes || echo no)" )
+# the builder arm on a worktree whose config.json declares hooks
+mkdir -p "$_S24/wtb/.devin"
+printf '{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "true" } ] } ] } }\n' > "$_S24/wtb/.devin/config.json"
+printf '%s\n' "$_S24/b3" > "$_S24/tmp/dvn-log"
+( source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 && _devin_config_copy read "$_S24/b3.out.devin.read.json" ) >/dev/null 2>&1 || true
+_s24_builder "$_S24/b3.out.devin.read.json" "$_S24/b3.out"
+rm -rf "$_S24/wtb/.devin"
+O="${O}
+b-project:rc=$(cat "$_S24/b3.out.rc" 2>/dev/null):class=$(cat "$_S24/b3.out.class" 2>/dev/null):says=$(grep -c 'could not compose its command: .*/\.devin/config\.json: it declares hooks' "$_S24/b3.out" 2>/dev/null || true):ran=$([ -e "$_S24/b3.argv" ] && echo yes || echo no):left=$([ -e "$_S24/b3.out.devin.read.json" ] && echo yes || echo no)"
+_S24_FAIL="${_S24_FAIL}$(_self_expect project-config "$O" '^pc-allow:rc=1:class=deterministic:reason=project-config:ran=no:says=1$' '^pc-lane-read:rc=1:says=1$' '^pc-lane-edit:rc=0$' '^pc-hooks:rc=1:hooks\.v1\.json$' '^pc-mcp:rc=1:mcp_config\.local\.json$' '^pc-imports:rc=1:config\.local\.json$' '^pc-link:rc=1:config\.json$' '^pc-jsonc:rc=0:$' '^pc-deny-only:rc=0:ran=yes$' '^b-project:rc=94:class=deterministic:says=1:ran=no:left=no$')"
+
 # a reviewer lease through the seam
 _self_repo "$_S24/lease" "$_S24" sprint/s24 "[roles.reviewer]\ncli = \"devin\"\nfallbacks = [\"codex\"]\n\n[members.devin]\nenabled = true\nmodel = \"swe-1-6-slow\"\n${_S24_C}\n"
 # the seam builder records the config copy it finds during the run
@@ -4493,9 +4548,9 @@ O=$( cd "$_S24/lease2" && export HOME="$_S24" GIT_CONFIG_NOSYSTEM=1 PATH="$_S24_
   echo "consent-lease:rc=${R}:state=$(_ledger_get s24c state 2>/dev/null):ran=$([ -e "$_S24/fb-mark" ] && echo yes || echo no)" )
 _S24_FAIL="${_S24_FAIL}$(_self_expect consent-lease "$O" '^consent-lease:rc=5:state=leased:ran=no$')"
 
-_S24_CAP="Devin CLI as an optional member: readiness read from auth-status text, a read config with no command allowed, recorded consent and the builder opt-in at load, in the writers and at dispatch, no headless enrollment, the re-import flag setup reads, the lease allowlist on both lanes, the lane argv per class, invoke_devin on a config copy with the Status line as completion, the builder arm's class, copy removal and compose failure, a reviewer lease to review, ~/.local/share/devin closed to a claude worker (R24, R25)"
+_S24_CAP="Devin CLI as an optional member: readiness read from auth-status text, a read config with no command allowed, recorded consent and the builder opt-in at load, in the writers and at dispatch, no headless enrollment, the re-import flag setup reads, the lease allowlist on both lanes, the lane argv per class, invoke_devin on a config copy with the Status line as completion, the builder arm's class, copy removal and compose failure, a project's widening .devin/ files refused on both lanes, a reviewer lease to review, ~/.local/share/devin closed to a claude worker (R24, R25)"
 if [ -z "$_S24_FAIL" ]; then
-  row "SELF-24" "devin" "$_S24_CAP" "PASS" "auth: Not logged in. rc 0 -> auth-failed, Logged in (via Devin). -> ok; consent: missing -> rc 5, chain with no member table -> rc 5, recorded -> reviewer=devin; opt-in: builder primary or fallback without it -> rc 5, with it -> builder=devin, tester never; writers: role write refused without the opt-in (roster unchanged), member write refused without --consent, consent recorded via=test and kept across a model change, opt-in tester refused, decline drops both; read config: no allow, exec and Write(**) denied; member writes: opt-in drop refused rc 2 (roster unchanged), a decline keeps all five roles resolving (builder -> claude); consent at dispatch: invoke_devin rc 5 with the stub never run, lease_dispatch rc 5 with the row still leased; headless enroll rc 20, no table; re-import flag yes/no/unknown from the DVN-04 row; env: no SHELL, no DEVIN_REFUSAL_FALLBACK, worker marker; lane: dangerous for .edit.json, auto for .read.json, -p last; invoke: config copy (shipped file unchanged, copy removed), auto, the pin, reviewer brief, the allowlist as its whole env (no planted secret), Status: DONE rc 0, no Status rc 80, empty nonzero, auth and plan deterministic; builder arm: read class off the argv and the logged command line, copy removed, a missing copy rc 94 deterministic (not 'not integrated'); seam reviewer lease -> review, a read config copy during the run and none after; claude lane denies ~/.local/share/devin (Read + sandbox)" "static"
+  row "SELF-24" "devin" "$_S24_CAP" "PASS" "auth: Not logged in. rc 0 -> auth-failed, Logged in (via Devin). -> ok; consent: missing -> rc 5, chain with no member table -> rc 5, recorded -> reviewer=devin; opt-in: builder primary or fallback without it -> rc 5, with it -> builder=devin, tester never; writers: role write refused without the opt-in (roster unchanged), member write refused without --consent, consent recorded via=test and kept across a model change, opt-in tester refused, decline drops both; read config: no allow, exec and Write(**) denied; member writes: opt-in drop refused rc 2 (roster unchanged), a decline keeps all five roles resolving (builder -> claude); consent at dispatch: invoke_devin rc 5 with the stub never run, lease_dispatch rc 5 with the row still leased; headless enroll rc 20, no table; re-import flag yes/no/unknown from the DVN-04 row; env: no SHELL, no DEVIN_REFUSAL_FALLBACK, worker marker; lane: dangerous for .edit.json, auto for .read.json, -p last; invoke: config copy (shipped file unchanged, copy removed), auto, the pin, reviewer brief, the allowlist as its whole env (no planted secret), Status: DONE rc 0, no Status rc 80, empty nonzero, auth and plan deterministic; builder arm: read class off the argv and the logged command line, copy removed, a missing copy rc 94 deterministic (not 'not integrated'); project .devin/: a Fetch allow -> invoke_devin rc 1 deterministic project-config naming the file with the stub never run, the lease lane's read class a compose failure naming it, the edit class composing, hooks.v1.json, mcp_config.local.json, a read_config_from import and a symlinked config.json refused, a JSONC deny-only config passing, the builder arm on a hooks config rc 94 deterministic with the stub never run and the copy removed; seam reviewer lease -> review, a read config copy during the run and none after; claude lane denies ~/.local/share/devin (Read + sandbox)" "static"
 else
   row "SELF-24" "devin" "$_S24_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S24_FAIL"):$(printf '%s' "$_S24_FAIL" | cut -c1-700)" "static"
 fi
