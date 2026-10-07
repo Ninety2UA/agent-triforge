@@ -1041,6 +1041,10 @@ fi
 #          the file with its reach (every project under it), then removing it;
 #          with HOME = the parent, ~/CLAUDE.md and the two files above HOME
 #          offer the project's CLAUDE.md alone (no import, no removal)
+#   home   a session started in HOME, and one in the directory above it (a
+#          3.x copy as ~/CLAUDE.md, an own ~/CLAUDE.local.md, a CLAUDE.md above
+#          HOME, no AGENTS.md): the one home-directory warning, no file notice
+#          and no tip, the files untouched
 #   import an import path is relative to the file that holds it, so only one
 #          that RESOLVES to the project's AGENTS.md counts: `@AGENTS.md` and
 #          `@./AGENTS.md` in ./CLAUDE.md, `@../AGENTS.md` and an absolute path
@@ -1274,6 +1278,24 @@ _s8_has 'is not loaded under a Claude lead: [^ ]*/above/mid/CLAUDE\.md ' || _S8_
 _s8_has '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/above/mid/CLAUDE\.md sits above this project, .*'"$_S8_OWN"'That file is in your home directory or above it' || _S8_FAIL="$_S8_FAIL home-CLAUDE.md-notice-without-the-project-fix"
 [ "$(printf '%s\n' "$_O" | grep -c 'is not loaded under a Claude lead: .*'"$_S8_OWN"'That file is in your home directory or above it' || true)" -eq 3 ] || _S8_FAIL="$_S8_FAIL home-or-above-notices-not-3"
 printf '%s\n' "$_O" | grep -qE 'is not loaded under a Claude lead: .*(Or add the line|remove the file)' && _S8_FAIL="$_S8_FAIL home-or-above-notice-offers-the-parent-file"
+# HOME is no project: a session started in HOME, or in a directory above it, gets
+# the one home-directory warning and no file notice or tip, since each would name a
+# file there (read for every project under it, refused by the writers): a 3.x copy
+# as ~/CLAUDE.md, an own ~/CLAUDE.local.md, a CLAUDE.md above HOME, no AGENTS.md
+mkdir -p "$_S8/hh"
+_s8_template "$_S8/hh/CLAUDE.md" '# no import here'
+printf '# my notes\n' > "$_S8/hh/CLAUDE.local.md"
+printf '# shared\n' > "$_S8/CLAUDE.md"
+_S8_SUMH=$(cksum "$_S8/hh/CLAUDE.md" "$_S8/hh/CLAUDE.local.md" "$_S8/CLAUDE.md")
+for _S8_RUN in at-home above-home; do
+  if [ "$_S8_RUN" = at-home ]; then _S8_D="$_S8/hh"; else _S8_D="$_S8"; fi
+  _s8_run "$_S8_RUN" "$_S8_D" "2.1.277" "$_S8/hh"
+  [ "$(printf '%s\n' "$_O" | grep -c '^WARNING: ' || true)" -eq 1 ] || _S8_FAIL="$_S8_FAIL ${_S8_RUN}-not-one-warning"
+  _s8_has '^WARNING: this session.s project directory, .* is your home directory or contains it' || _S8_FAIL="$_S8_FAIL ${_S8_RUN}-no-home-warning"
+  printf '%s\n' "$_O" | grep -qE 'does not import AGENTS\.md|is not loaded under a Claude lead|Triforge 3\.x project template|^Tip: No AGENTS\.md' && _S8_FAIL="$_S8_FAIL ${_S8_RUN}-file-advice-at-home"
+done
+[ "$(cksum "$_S8/hh/CLAUDE.md" "$_S8/hh/CLAUDE.local.md" "$_S8/CLAUDE.md")" = "$_S8_SUMH" ] || _S8_FAIL="$_S8_FAIL at-home-files-changed"
+rm -rf "$_S8/hh" "$_S8/CLAUDE.md"
 # watchdog: with no timeout binary a hung claude is given up on after 10 s, session start exits 0 and warns about nothing
 _S8_T0=$(date +%s)
 _O=$(_s8_start_notimeout "$_S8/proj") || _S8_FAIL="$_S8_FAIL notimeout-rc-nonzero"
@@ -1451,7 +1473,7 @@ case "$_S8_FAIL" in
 esac
 _S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines), prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40), and survives a failing or absent helper loader"
 if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
-  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; versiongrace (round 1, wave 2): an optional CLI that ignores SIGTERM and never answers, through the hook's own _ss_cli_version with a 1 s bound, asked --version then -V and given up on within two calls of 1 s + the 2 s SIGKILL grace (${_S8_VER}), nothing recorded, the stub gone, stderr empty, no temp dir left; one that answers -V only gets that answer, and the watchdog run records a kimi stub's -V answer in .claude/roster-detected.local.md; every run rc 0, no crash, no line starting with {" "static"
+  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; started in HOME or the directory above it: the one home-directory warning, no file notice or tip, the files untouched; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; versiongrace (round 1, wave 2): an optional CLI that ignores SIGTERM and never answers, through the hook's own _ss_cli_version with a 1 s bound, asked --version then -V and given up on within two calls of 1 s + the 2 s SIGKILL grace (${_S8_VER}), nothing recorded, the stub gone, stderr empty, no temp dir left; one that answers -V only gets that answer, and the watchdog run records a kimi stub's -V answer in .claude/roster-detected.local.md; every run rc 0, no crash, no line starting with {" "static"
 else
   row "SELF-08" "claude" "$_S8_CAP" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160); mismatch:${_S8_FAIL:- none}" "static"
 fi
@@ -10321,7 +10343,9 @@ _S16_EV="${_S16_EV}A: one checkout-top roster from a subdirectory; egress per pr
 #            the 30 KiB file alone fits; project_doc_max_bytes 65536 and 16384
 #            honored, 16384 also through the line scan (no TOML parser)
 #   convert  an exact copy merged and removed, then "unchanged:"; an edited
-#            copy and a user file refused, untouched
+#            copy and a user file refused, untouched; an exact copy in a
+#            monorepo parent: the plan names its reach (every project under
+#            it) and the project's own CLAUDE.md, and the yes still converts
 #   refuse   a symlinked CLAUDE.md, a symlinked .claude, a symlinked or FIFO
 #            AGENTS.md, the user-tier file, a lease worker: refused, untouched
 #   user     the user-level files and their directories, rc 2 before any
@@ -10338,7 +10362,11 @@ _S16_EV="${_S16_EV}A: one checkout-top roster from a subdirectory; egress per pr
 #            and into a CLAUDE.md above HOME, the conversion of a 3.x copy at
 #            HOME; the files byte-identical. A project under HOME still gets
 #            its merge and import plans, HOME unset protects nothing, and
-#            visibility there names the project's own CLAUDE.md, no import
+#            visibility there names the project's own CLAUDE.md, no import.
+#            From HOME and from above it (no project): visibility for claude
+#            and codex hidden "not a project:" with no fix, and a writer's
+#            refusal says to start in a project directory; a pointer block put
+#            in ~/AGENTS.md by hand is never what a fix builds on
 #   race     the target changed between the plan and the write: the
 #            library's own program (the text _instr_py hands python3) with
 #            merge_plan wrapped to change the file once the plan is made ->
@@ -10621,6 +10649,7 @@ if [ "$_S16B_TAGS" -eq 1 ]; then
   _S16B_SUM=$(_s16b_sum "$_S16B_W/cv/CLAUDE.md" "$_S16B_W/cv/AGENTS.md")
   _O=$(_s16b "$_S16B_W/cv" instruction_convert_stale CLAUDE.md)
   _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-ask "$_O" '^needs-ask: would remove [^ ]*/w/cv/CLAUDE\.md \(an unmodified copy of the Triforge v3\.3\.3 templates/CLAUDE\.md\), so Claude Code reads AGENTS\.md natively, and create [^ ]*/w/cv/AGENTS\.md ' '^rc=20$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not b-convert-ask "$_O" 'every project under')"
   _S16_FAIL="${_S16_FAIL}$(_s16b_same b-convert-ask "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/cv/CLAUDE.md" "$_S16B_W/cv/AGENTS.md")")"
   _O=$(_s16b "$_S16B_W/cv" instruction_convert_stale CLAUDE.md --yes)
   _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-yes "$_O" '^changed: [^ ]*/w/cv/AGENTS\.md: created with the Triforge pointer block ' '^changed: [^ ]*/w/cv/CLAUDE\.md: removed \(an unmodified copy of the Triforge v3\.3\.3 template\)$' '^rc=0$')"
@@ -10640,6 +10669,18 @@ if [ "$_S16B_TAGS" -eq 1 ]; then
   _O=$(_s16b "$_S16B_W/cv4" instruction_convert_stale CLAUDE.md --yes)
   _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-user "$_O" '^instruction_convert_stale: REFUSED — [^ ]*/w/cv4/CLAUDE\.md is not a Triforge 3\.x template copy; nothing to convert' '^rc=2$')"
   _S16_FAIL="${_S16_FAIL}$(_s16b_same b-convert-user "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/cv4/CLAUDE.md")")"
+  # an exact copy in a monorepo parent: converting it writes the parent's AGENTS.md and removes the
+  # parent's file, which every project under it reads, so the plan names that reach and the
+  # project's own CLAUDE.md; after the yes the conversion still runs
+  mkdir -p "$_S16B_W/cvp/app"
+  ( cd "$_S16B_W/cvp/app" && git init -q ) >/dev/null 2>&1
+  cp "$_S16B/v333.md" "$_S16B_W/cvp/CLAUDE.md"
+  _S16B_SUM=$(_s16b_sum "$_S16B_W/cvp/CLAUDE.md" "$_S16B_W/cvp/AGENTS.md")
+  _O=$(_s16b "$_S16B_W/cvp/app" instruction_convert_stale ../CLAUDE.md)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-parent-ask "$_O" '^needs-ask: would remove [^ ]*/w/cvp/CLAUDE\.md \(an unmodified copy of the Triforge v3\.3\.3 templates/CLAUDE\.md\), so Claude Code reads AGENTS\.md natively, and create [^ ]*/w/cvp/AGENTS\.md \(.*\); that changes what every project under [^ ]*/w/cvp reads, not only this one; for this project alone, put the line @AGENTS\.md in [^ ]*/w/cvp/app/CLAUDE\.md instead$' '^rc=20$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_same b-convert-parent-ask "$_S16B_SUM" "$(_s16b_sum "$_S16B_W/cvp/CLAUDE.md" "$_S16B_W/cvp/AGENTS.md")")"
+  _O=$(_s16b "$_S16B_W/cvp/app" instruction_convert_stale ../CLAUDE.md --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-parent-yes "$_O" '^changed: [^ ]*/w/cvp/AGENTS\.md: created ' '^changed: [^ ]*/w/cvp/CLAUDE\.md: removed ' '^rc=0$')"
 fi
 
 # refusals: symlinked targets, a FIFO, the user-tier file, a lease worker
@@ -10755,6 +10796,31 @@ _S16_FAIL="${_S16_FAIL}$(_s16b_same b-home-untouched "$_S16B_SUM" "$(_s16b_sum "
 _O=$(S16B_HOME="$_S16B_HM/home" _s16b "$_S16B_HM/home/p2" instruction_pointer_visibility claude)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-home-vis "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/hm/home/CLAUDE\.md, [^ ]*/hm/CLAUDE\.md[:,] .*; add a CLAUDE\.md holding the line @AGENTS\.md to [^ ]*/hm/home/p2, which loads it for that project only\$" '^rc=1$')"
 _S16_FAIL="${_S16_FAIL}$(_s16b_not b-home-vis "$_O" 'instruction_add_import|add the line @')"
+# HOME is no project: started in HOME or above it, visibility says so and offers no fix, and a
+# writer's refusal says to start in a project directory. A pointer block put in ~/AGENTS.md by
+# hand is never what a fix builds on: a project under HOME is told to take the block itself
+printf '# me\n<!-- triforge:start -->\nhand-made pointer\n<!-- triforge:end -->\n' > "$_S16B_HM/home/AGENTS.md"
+mkdir -p "$_S16B_HM/home/p3"
+( cd "$_S16B_HM/home/p3" && git init -q ) >/dev/null 2>&1
+_S16B_SUM=$(_s16b_sum "$_S16B_HM/home/AGENTS.md" "$_S16B_HM/home/CLAUDE.md" "$_S16B_HM/CLAUDE.md")
+for _S16B_D in claude codex; do
+  _O=$(S16B_HOME="$_S16B_HM/home" _s16b "$_S16B_HM/home" instruction_pointer_visibility "$_S16B_D")
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-home-noproject-${_S16B_D}" "$_O" "^${_S16B_D}${T}hidden${T}not a project: [^ ]*/hm/home is your home directory or a directory above it, .*; start in a project directory\$" '^rc=1$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-home-noproject-${_S16B_D}" "$_O" 'instruction_|add a CLAUDE|add the line')"
+done
+_O=$(S16B_HOME="$_S16B_HM/home" _s16b "$_S16B_HM" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-home-noproject-above "$_O" "^claude${T}hidden${T}not a project: [^ ]*/hm is your home directory or a directory above it, " '^rc=1$')"
+_O=$(S16B_HOME="$_S16B_HM/home" _s16b "$_S16B_HM/home" instruction_merge_pointer)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-home-noproject-merge "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/hm/home/AGENTS\.md is in your home directory or a directory above it, .*; the working directory is no project: start in a project directory instead \(rc 2\)$' '^rc=2$')"
+_O=$(S16B_HOME="$_S16B_HM/home" _s16b "$_S16B_HM/home" instruction_add_import CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-home-noproject-import "$_O" '^instruction_add_import: REFUSED — [^ ]*/hm/home/CLAUDE\.md is in your home directory or a directory above it, .*; the working directory is no project: start in a project directory instead \(rc 2\)$' '^rc=2$')"
+_O=$(S16B_HOME="$_S16B_HM/home" _s16b "$_S16B_HM/home/p3" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-home-pointer-only "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/hm/home/CLAUDE\.md, .*; [^ ]*/hm/home/AGENTS\.md is in your home directory or a directory above it, which every project under it reads: put the pointer block in the AGENTS\.md of this project instead \(instruction_merge_pointer [^ ]*/hm/home/p3\)\$" '^rc=1$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-home-pointer-only "$_O" 'instruction_add_import|run from|add a CLAUDE')"
+_O=$(S16B_HOME="$_S16B_HM/home" _s16b "$_S16B_HM/home/p2" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-home-pointer-own "$_O" "^claude${T}hidden${T}.*; add a CLAUDE\.md holding the line @AGENTS\.md to [^ ]*/hm/home/p2, which loads it for that project only\$" '^rc=1$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-home-pointer-own "$_O" 'instruction_add_import|run from')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-home-noproject-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_HM/home/AGENTS.md" "$_S16B_HM/home/CLAUDE.md" "$_S16B_HM/CLAUDE.md")")"
 
 # race: the target changed between the plan and the write. No seam in the library: a python3
 # function takes the one call _instr_py makes (python3 -c <program> <op> <helper> <args...>)
@@ -10836,7 +10902,7 @@ printf '# mono\n@proj/AGENTS.md\n' > "$_S16B_H/CLAUDE.md"
 _O=$(_s16b_hook "$_S16B_H/proj")
 _S16_FAIL="${_S16_FAIL}$(_s16b_not b-hook-parent-import "$_O" 'in this project does not import AGENTS\.md|is not loaded under a Claude lead|^\{|hook crashed')"
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-hook-parent-import "$_O" '^Multi-agent framework ready\.$')"
-_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone), a monorepo parent's import plan naming its reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file); "
+_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file); "
 rm -rf "$_S16B"
 # --- end of SELF-16 section B ---
 # --- SELF-16 section C: at-setup's blocks and the headless primitives (U15) ---

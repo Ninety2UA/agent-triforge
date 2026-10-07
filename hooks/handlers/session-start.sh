@@ -573,6 +573,9 @@ fi
 #           removing the file; for a file in HOME or a directory above it
 #           (_ss_home_or_above), the project's own CLAUDE.md alone: that file
 #           is read for every project under it, and the writers refuse it
+# A session started in HOME or a directory above it gets none of the file
+# lines and no tip (SS_NO_PROJECT): that is no project, as the home-directory
+# warning says, and every file there is one the writers refuse.
 # These describe a standing state, not a one-time action: they print on every
 # session start until the state is fixed, and so — like the roster-pin and
 # timeout lines — carry no "session-start:" prefix (that prefix marks a step
@@ -637,8 +640,18 @@ SS_OWN_NOTICES=""
 SS_ABOVE_NOTICES=""
 SS_FOUND=""
 SS_FOUND_RC=0
+# A start directory that is HOME or above it is no project: no file is checked
+# there and no tip printed, since each line would name a file there, which
+# every project under it reads and the writers refuse. The anchor is then
+# HOME or above it too, so the home-directory warning below says it all.
+SS_NO_PROJECT=""
+if _ss_home_or_above "$SS_START_DIR"; then
+  SS_NO_PROJECT=yes
+fi
 # shellcheck source=/dev/null
-if [ -f "$SS_INSTR_LIB" ] && source "$SS_INSTR_LIB" >/dev/null 2>&1; then
+if [ -n "$SS_NO_PROJECT" ]; then
+  :
+elif [ -f "$SS_INSTR_LIB" ] && source "$SS_INSTR_LIB" >/dev/null 2>&1; then
   SS_FOUND=$(instruction_files_detect "$SS_START_DIR" 2>/dev/null) || SS_FOUND_RC=$?
 else
   SS_FOUND_RC=69
@@ -685,7 +698,7 @@ fi
 # tells an agent Triforge runs here. A standing tip, printed until the file
 # exists; session start does not create it.
 AGENTS_MD_TIP=""
-if [ ! -e "AGENTS.md" ] && [ ! -L "AGENTS.md" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/AGENTS.md" ]; then
+if [ -z "$SS_NO_PROJECT" ] && [ ! -e "AGENTS.md" ] && [ ! -L "AGENTS.md" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/AGENTS.md" ]; then
   AGENTS_MD_TIP="${SS_NL}Tip: No AGENTS.md in this project. Triforge's pointer block (the short section that tells every agent this project runs the framework) ships as the plugin's templates/AGENTS.md. Copy it: cp \"$(_ss_prose "$CLAUDE_PLUGIN_ROOT")/templates/AGENTS.md\" ./AGENTS.md"
 fi
 cd "$SS_ANCHOR" 2>/dev/null || true   # back to the anchor (see the top): ops/ and the rest live there
