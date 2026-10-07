@@ -12455,7 +12455,14 @@ mkdir -p "$_S29"
 #            and READY included), never a rejection; rc 0 with READY ->
 #            accepted; another nonzero rc, or rc 0 with error text ->
 #            rejected; rc 0 with neither -> ambiguous. Both rows call it,
-#            and each records its timeout as a FAIL that says so
+#            and each records its timeout as a FAIL that says so. Its
+#            timeout test, _timed_out (taken with it): 124 and 137 yes, 0,
+#            1, 125 and 143 no. The eleven rows that pass when a forbidden
+#            action left no trace (AGY-09, AGY-10, AGY-13, AGY-16, CDX-08,
+#            OC-06, OC-06b, KIMI-08, CUR-07, CUR-08, CC-14b), read as text:
+#            each resets an rc variable to 0, captures its _probe_run call's
+#            rc in it, and asks _timed_out about it on the line right before
+#            its "timed out after" FAIL row, which names that rc
 mkdir -p "$_S29/bin" "$_S29/cfg" "$_S29/home" "$_S29/tmp" "$_S29/proj"
 { printf '#!/bin/sh\n# SELF-29 agy stub: `agents` prints cfg/agents; a run logs its argv and answers by cfg/mode\nD=%s\n' "'$_S29'"; cat <<'S29_AGY_EOF'
 mkdir -p "$D/log"
@@ -12639,7 +12646,7 @@ _S29_FAIL="${_S29_FAIL}$(_self_expect rebase "$O" '^t:go=0:review$' '^merge1:rc=
   '^state=review$' '^merge2:rc=0:' '^squash=docs/s29\.txt $')"
 _S29_EV="${_S29_EV}anchors: both anchors deleted + a forged user approval -> merge 44 naming them, escalated, nothing merged; restamp: the same with the stamp naming another root that holds no digest -> 44; fakeroot: the stamp naming an attacker-made root holding the forged ledger's sha256, the record naming the real root -> 44; rebase: the lead's own deletion -> 44, lease_rebaseline t -> review, merged"
 # negverdict (round 1, wave 2)
-_S29_NV=$(awk '/^_negative_verdict\(\) \{$/ { p = 1 } p { print } p && /^}$/ { exit }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
+_S29_NV=$(awk '/^(_timed_out|_negative_verdict)\(\) \{$/ { p = 1 } p { print } p && /^}$/ { p = 0 }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
 printf 'READY\n' > "$_S29/nv-ready"
 printf 'Error: invalid model\n' > "$_S29/nv-err"
 printf 'hello\n' > "$_S29/nv-other"
@@ -12650,16 +12657,52 @@ for _s29_c in 124:empty 137:empty 124:err 137:ready 0:ready 0:err 1:empty 2:othe
 nv-${_s29_c}=$( eval "$_S29_NV" 2>/dev/null; _negative_verdict "${_s29_c%%:*}" "$_S29/nv-${_s29_c#*:}" 'error|invalid' 2>/dev/null )"
 done
 unset _s29_c
+for _s29_c in 124 137 0 1 125 143; do
+  O="$O
+to-${_s29_c}=$( eval "$_S29_NV" 2>/dev/null; if _timed_out "$_s29_c" 2>/dev/null; then echo yes; else echo no; fi )"
+done
+unset _s29_c
+_S29_ROUTE=$(python3 - "$REPO_ROOT/scripts/probe-capabilities.sh" AGY-09 AGY-10 AGY-13 AGY-16 CDX-08 OC-06 OC-06b KIMI-08 CUR-07 CUR-08 CC-14b 2>&1 <<'S29_ROUTE_PY'
+import re, sys
+lines = open(sys.argv[1], encoding="utf-8").read().split("\n")
+for rid in sys.argv[2:]:
+    why = "no-timed-out-FAIL-row"
+    for t, ln in enumerate(lines):
+        if ('row "%s" ' % rid) not in ln or '"FAIL" "timed out after ' not in ln:
+            continue
+        m = re.search(r'_timed_out "\$([A-Za-z0-9_]+)"; then$', lines[t - 1]) if t else None
+        if not m:
+            why = "no-_timed_out-before-the-row"
+        elif "(rc=$%s)" % m.group(1) not in ln:
+            why = "the-row-names-another-rc"
+        else:
+            v = m.group(1)
+            calls = [i for i in range(max(0, t - 60), t) if re.search(r"_probe_run [0-9]+ .*\|\| %s=\$\?$" % re.escape(v), lines[i])]
+            if not calls:
+                why = "no-_probe_run-call-captures-" + v
+            elif not any(lines[i].strip() == v + "=0" for i in range(max(0, calls[-1] - 3), calls[-1])):
+                why = v + "-not-reset-before-the-call"
+            else:
+                why = "routed"
+        break
+    print("%s=%s" % (rid, why))
+S29_ROUTE_PY
+)
 O="$O
 calls=$(grep -cE '_negative_verdict "\$(AGY_11C|CUR10)_RC"' "$REPO_ROOT/scripts/probe-capabilities.sh" || true)
-timeout-fail=$(grep -cE 'row "(AGY-11c|CUR-10)" .* "FAIL" "timed out after ' "$REPO_ROOT/scripts/probe-capabilities.sh" || true)"
+timeout-fail=$(grep -cE 'row "(AGY-11c|CUR-10)" .* "FAIL" "timed out after ' "$REPO_ROOT/scripts/probe-capabilities.sh" || true)
+${_S29_ROUTE}"
 _S29_FAIL="${_S29_FAIL}$(_self_expect negverdict "$O" '^nv-124:empty=timeout$' '^nv-137:empty=timeout$' '^nv-124:err=timeout$' '^nv-137:ready=timeout$' \
   '^nv-0:ready=accepted$' '^nv-0:err=rejected$' '^nv-1:empty=rejected$' '^nv-2:other=rejected$' '^nv-0:other=ambiguous$' '^nv-0:empty=ambiguous$' \
-  '^calls=2$' '^timeout-fail=2$')"
-_S29_EV="${_S29_EV}negverdict: _negative_verdict (AGY-11c and CUR-10 call it): rc 124 and 137 -> timeout with any output, error text and READY included, never a rejection; rc 0 + READY -> accepted; rc 1 or 2, or rc 0 + error text -> rejected; rc 0 with neither -> ambiguous; both rows record a timeout as a FAIL saying so. "
-unset O _S29_PICK _S29_NV
+  '^calls=2$' '^timeout-fail=2$' '^to-124=yes$' '^to-137=yes$' '^to-0=no$' '^to-1=no$' '^to-125=no$' '^to-143=no$')"
+for _s29_c in AGY-09 AGY-10 AGY-13 AGY-16 CDX-08 OC-06 OC-06b KIMI-08 CUR-07 CUR-08 CC-14b; do
+  _S29_FAIL="${_S29_FAIL}$(_self_expect negverdict "$O" "^${_s29_c}=routed\$")"
+done
+unset _s29_c
+_S29_EV="${_S29_EV}negverdict: _negative_verdict (AGY-11c and CUR-10 call it): rc 124 and 137 -> timeout with any output, error text and READY included, never a rejection; rc 0 + READY -> accepted; rc 1 or 2, or rc 0 + error text -> rejected; rc 0 with neither -> ambiguous; both rows record a timeout as a FAIL saying so. Its _timed_out: 124 and 137 yes, 0, 1, 125 and 143 no; AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08 and CC-14b each capture their _probe_run rc (reset to 0 first) and ask _timed_out right before their timed-out FAIL row, which names that rc. "
+unset O _S29_PICK _S29_NV _S29_ROUTE
 # --- end of SELF-29 cases ---
-_S29_CAP="agy routing defaults to auto and the AGY_ERROR line on exit 3 sets the failure's reason and retry (invoke_antigravity and the lease lane); the Cursor probe rows compose Grok ids through _cursor_model_for_effort; a ledger whose two anchors were deleted is a change (rc 44), and the lead's lease_rebaseline recovers (U19, S2); a negative row's call cut off by its timeout (rc 124 or 137) is never a rejection (AGY-11c, CUR-10)"
+_S29_CAP="agy routing defaults to auto and the AGY_ERROR line on exit 3 sets the failure's reason and retry (invoke_antigravity and the lease lane); the Cursor probe rows compose Grok ids through _cursor_model_for_effort; a ledger whose two anchors were deleted is a change (rc 44), and the lead's lease_rebaseline recovers (U19, S2); a negative row's call cut off by its timeout (rc 124 or 137) is never a rejection (AGY-11c, CUR-10), and a missing trace after one is no PASS (AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08, CC-14b)"
 if [ -z "$_S29_EV" ]; then _S29_FAIL="${_S29_FAIL} cases(no-case-ran)"; fi
 if [ -z "$_S29_FAIL" ]; then
   row "SELF-29" "claude" "$_S29_CAP" "PASS" "$(printf '%s' "$_S29_EV" | cut -c1-3000)" "static"
