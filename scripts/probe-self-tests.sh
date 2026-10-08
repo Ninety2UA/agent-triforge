@@ -11998,7 +11998,7 @@ _O=$(_s16b "$_S16B_SPP" instruction_pointer_visibility claude)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-space-vis "$_O" "^claude${T}hidden${T}shadowed by .*/w/sp/CLAUDE\.md: .*; add a CLAUDE\.md holding the line @AGENTS\.md to .*/w/sp/Project With Spaces, which loads it for that project only\$" '^rc=1$')"
 _S16_FAIL="${_S16_FAIL}$(_s16b_not b-space-vis "$_O" 'instruction_add_import|add the line @')"
 _O=$(_s16b_hook "$_S16B_SPP")
-_S16B_NOLINE="No import line in that file can name this project's AGENTS\.md: the path from there to this project holds whitespace or a #, where an import path ends, starts with ~, which an import reads as your home directory, or holds another character Claude Code does not read as written in an import path\. Or remove the file\."
+_S16B_NOLINE="No import line in that file can name this project's AGENTS\.md: the path from there to this project holds whitespace or a # \(an import path ends there\), starts with ~ \(an import reads that as your home directory\), or holds another character Claude Code does not read as written in an import path\. Or remove the file\."
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-space-hook "$_O" "^WARNING: AGENTS\.md is not loaded under a Claude lead: .*/w/sp/CLAUDE\.md sits above this project, .* Add a CLAUDE\.md holding the line @AGENTS\.md to this project: it loads AGENTS\.md for this project only\. ${_S16B_NOLINE}\$")"
 _S16_FAIL="${_S16_FAIL}$(_s16b_not b-space-hook "$_O" 'Or add the line @|^\{|hook crashed')"
 _S16B_WHY='\(an import path ends at whitespace or a #, one that starts with ~/ is read from your home directory, one that starts with any character but a letter, a digit, \. _ or - loads nothing, and Markdown reads a backslash, <, \[, \], or a \* or _ that pairs, in it as markup\)'
