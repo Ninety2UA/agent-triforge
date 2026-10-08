@@ -1789,7 +1789,16 @@ rm -rf "$_S8B" "$_S8"
 #            Silent: a nested checkout's roster, a symlinked roster, a
 #            symlinked ops/, no subdirectory roster; rc 0 with the warning
 #            and without it; under zsh, at-setup's block from <top>/sub of a
-#            third copy warns once (walk and scan in zsh)
+#            third copy warns once (walk and scan in zsh). Only a Triforge
+#            roster counts (review round 2): another tool's ops/roster.toml in
+#            <top>/sub (the walk) and two lookalikes, a role and a member
+#            Triforge has none of and the tables commented out (the scan):
+#            silent, under zsh too; the shipped template, a roster trimmed to
+#            one role setting only effort and one holding only a declined
+#            member (the scan): one WARNING each; the roster template a
+#            Triforge tree ships: silent from templates/ of a Triforge
+#            checkout that is not the running plugin and of the running,
+#            vendored plugin, and in the scan of the project vendoring it
 #   agypack  (fix round 1) the agy pack step's other paths, through an agy
 #            stub that logs its argv: `plugin install` failing -> the
 #            install-failed notice, rc 80, no stamp; `agents` one name short,
@@ -2465,8 +2474,44 @@ d:rosters=${_S21_SRK:-intact}:sub=$(if [ "$(_s21_list "$_S21/proj-sr1/sub")" = "
 _S21_FAIL="${_S21_FAIL}$(_self_expect subroster "$_S21_SR" '^a:rc=0 sub=1:top=1:readme=1:warnings=1:skeleton=yes$' \
   '^b:rc=0 sub=1:depth4=1:depth5=0:node_modules=0:warnings=2:skeleton=yes$' '^c-sub:rc=0:sub=1:warnings=1$' '^c-top:rc=0 warnings=0$' \
   '^hook-sub:rc=0:crash=0:lines=1:named=1$' '^e:nested=0:links=0,0:none=0:skeletons=yes$' '^f:rc=0 rc=0 $' '^d:rosters=intact:sub=untouched$')"
+# subroster-triforge (review round 2): only a Triforge roster counts. (u) from
+# <top>/sub, no ops/ at the top: another tool's roster there (the walk) and two
+# lookalikes, a role and a member Triforge has none of and the tables commented
+# out (the scan), are named by no WARNING; (k) from <top>: the shipped
+# template, a roster trimmed to one role setting only effort and one holding
+# only a declined member, one WARNING each (the scan); (t) the roster template
+# a Triforge tree ships: from templates/ of a Triforge checkout (plugin.json
+# named agent-triforge, scripts/invoke-external.sh) that is not the running
+# plugin, from templates/ of the running plugin (the vendored copy "inside"
+# bootstrapped from), and in the scan of that "inside" run: no WARNING
+mkdir -p "$_S21/proj-sru/sub/ops" "$_S21/proj-sru/look/ops" "$_S21/proj-sru/cmt/ops" \
+  "$_S21/proj-srk/full/ops" "$_S21/proj-srk/trim/ops" "$_S21/proj-srk/decl/ops" \
+  "$_S21/proj-srt/.claude-plugin" "$_S21/proj-srt/scripts" "$_S21/proj-srt/templates/ops"
+for _s21_d in sru srk srt; do
+  _s21_git "$_S21/proj-$_s21_d" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-$_s21_d"
+done
+unset _s21_d
+printf '[tool]\nname = "x"\n' > "$_S21/proj-sru/sub/ops/roster.toml"
+printf '[roles.admin]\ncli = "x"\n\n[members.alice]\nenabled = true\n' > "$_S21/proj-sru/look/ops/roster.toml"
+printf '# [roles.builder]\n# cli = "codex"\n' > "$_S21/proj-sru/cmt/ops/roster.toml"
+cp "$REPO_ROOT/templates/ops/roster.toml" "$_S21/proj-srk/full/ops/roster.toml"
+printf '[roles.reviewer]\neffort = "high"\n' > "$_S21/proj-srk/trim/ops/roster.toml"
+printf '[members.kimi]\nenabled = false\n' > "$_S21/proj-srk/decl/ops/roster.toml"
+printf '{"name": "agent-triforge"}\n' > "$_S21/proj-srt/.claude-plugin/plugin.json"
+: > "$_S21/proj-srt/scripts/invoke-external.sh"
+cp "$REPO_ROOT/templates/ops/roster.toml" "$_S21/proj-srt/templates/ops/roster.toml"
+_S21_RC=$(_s21_run sr-u /bin/bash "$_S21/proj-sru/sub" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+_S21_RC=$(_s21_run sr-k /bin/bash "$_S21/proj-srk" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+_S21_RC=$(_s21_run sr-t /bin/bash "$_S21/proj-srt/templates" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+_S21_RC=$(_s21_run sr-tv /bin/bash "$_S21/proj-in/vendor/agent-triforge/templates" "$REPO_ROOT/skills/at-setup" "$_S21/direct-in.sh")
+_S21_SRO="u:$(tr '\n' ' ' < "$_S21/sr-u.out")warnings=$(_s21_warns sr-u)
+k:$(tr '\n' ' ' < "$_S21/sr-k.out")full=$(_s21_srw sr-k "$_S21_P/proj-srk/full/ops/roster.toml"):trim=$(_s21_srw sr-k "$_S21_P/proj-srk/trim/ops/roster.toml"):decl=$(_s21_srw sr-k "$_S21_P/proj-srk/decl/ops/roster.toml"):warnings=$(_s21_warns sr-k)
+t:$(tr '\n' ' ' < "$_S21/sr-t.out")checkout=$(_s21_warns sr-t):plugin=$(_s21_srw sr-tv 'templates/ops/roster.toml'):scan=$(_s21_srw inside 'templates/ops/roster.toml')"
+_S21_FAIL="${_S21_FAIL}$(_self_expect subroster-triforge "$_S21_SRO" '^u:rc=0 warnings=0$' \
+  '^k:rc=0 full=1:trim=1:decl=1:warnings=3$' '^t:rc=0 checkout=0:plugin=0:scan=0$')"
 # under zsh: at-setup's block from <top>/sub of a third fresh copy, the walk
-# and the scan both in zsh: one WARNING, the skeleton, the roster unchanged
+# and the scan both in zsh: one WARNING, the skeleton, the roster unchanged;
+# from <top>/sub of (u) above, another tool's roster: no WARNING (the walk)
 if [ -n "$_S21_ZSH" ]; then
   mkdir -p "$_S21/proj-sr3/sub/ops"
   _s21_git "$_S21/proj-sr3" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-sr3"
@@ -2475,6 +2520,8 @@ if [ -n "$_S21_ZSH" ]; then
   _S21_RC=$(_s21_run sr-z "$_S21_ZSH" "$_S21/proj-sr3/sub" "$REPO_ROOT/skills/at-setup" "$_S21/setup.sh")
   _S21_FAIL="${_S21_FAIL}$(_self_expect subroster-zsh "rc=${_S21_RC}:sub=$(_s21_srw sr-z "$_S21_P/proj-sr3/sub/ops/roster.toml"):warnings=$(_s21_warns sr-z):skeleton=$([ -f "$_S21/proj-sr3/ops/roster.toml" ] && echo yes || echo no):roster=$([ "$(cksum < "$_S21/proj-sr3/sub/ops/roster.toml")" = "$_S21_SUMZ" ] && echo intact || echo changed)" \
     '^rc=0:sub=1:warnings=1:skeleton=yes:roster=intact$')"
+  _S21_RC=$(_s21_run sr-zu "$_S21_ZSH" "$_S21/proj-sru/sub" "$REPO_ROOT/skills/at-setup" "$_S21/setup.sh")
+  _S21_FAIL="${_S21_FAIL}$(_self_expect subroster-triforge-zsh "rc=${_S21_RC}:warnings=$(_s21_warns sr-zu)" '^rc=0:warnings=0$')"
 fi
 # agypack (fix round 1): the agy pack step's retry and failure paths. The
 # default agy stubs answer the happy path only; this one logs its argv to
@@ -2614,7 +2661,7 @@ _S21_RC=$(_s21_run neg /bin/bash "$_S21/proj-neg" "$REPO_ROOT/skills/at-setup" "
 [ ! -e "$_S21/proj-neg/ops" ] || _S21_FAIL="$_S21_FAIL negative-control(ops/-without-the-bootstrap-line)"
 _S21_CAP="the project bootstrap runs from the at- skills without any hook: at-setup's block provisions ops/, the skills copy, the per-CLI files and an untracked plugin-root pointer; at-build's preflight then loads the helpers from the pointer; idempotent under bash and zsh; refused under the worker marker and in a lease root (KTD11, R37)"
 if [ -z "$_S21_FAIL" ]; then
-  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; round 3: links at the pid-free temp names (.tmp, .new, ~) beside every written file untouched, and no predictable temp name or mv -f in the three writers, both creating temps O_EXCL|O_NOFOLLOW under a random name (R6); a symlinked parent one and two levels down refused, an append to a hard-linked file rc 5 with the shared inode unchanged, a replace over one a new inode (R3, R4); a home directory as the project, plain and as a repository: bootstrap rc 69 and session start rc 0, one WARNING each, the directory byte-identical (R1), and at-setup's block stops there with one SETUP: stopped line, nothing written; skills-sync.py with links at its stamp's old temp names: untouched, the stamp a regular file (R2); a hard-linked .agents/.gitignore: rc 80, the shared inode unchanged (R3); a lease root named with a newline and a {-line: one REFUSED line, no hook stdout line starting with { (R5); a session started in <repo>/src names the project root once, one started at the root does not (R7); round 4: the home directory by a ${_S21_HCV:-case}-variant spelling, plain and a repository: bootstrap rc 69, session start rc 0, one WARNING each naming git init, nothing written (B1); skills-sync sync and add with the parent swapped for an outside link after the checks: nothing outside (B2); .codex/agents swapped for a HOME link before the move: the user-tier file untouched (B3); ops/ linked outside: enrollment and the three roster writers write nothing there, rc 6 (B7); the three roster writers in a home directory with an ops/, one without, and a subdirectory of a home directory that is a repository: rc 6 each, nothing made or changed there, while a project under that home directory still writes its roster; round 5: the hook names each refused enrollment in a WARNING (G6); the .codex/agents move across filesystems (EXDEV) copies the user's file over, and a move that fails leaves it with no shipped default at the new name (G5); negative control: the block without its triforge_bootstrap line leaves no ops/; fix round 1 (finding #7): a 3.x roster at <top>/sub/ops/roster.toml, no ops/ at the top: the bootstrap from sub rc 0 with one WARNING naming it, <top>/ops/roster.toml and the README section, the skeleton created; a second copy from <top>: the skeleton-creation scan warns once (four levels down named, five levels down and node_modules not); again from sub, at-setup's block and session start: warned again; from <top>, the bootstrap and session start: silent; the subdirectory rosters byte-identical after each run, nothing under sub/; silent for a nested checkout's roster, a symlinked roster or ops/ and no roster; rc 0 with and without the warning; under zsh too (unless skipped above): the block from sub warns once; ${_S21_AG_NOTE}${_S21_AK_NOTE}" "static"
+  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; round 3: links at the pid-free temp names (.tmp, .new, ~) beside every written file untouched, and no predictable temp name or mv -f in the three writers, both creating temps O_EXCL|O_NOFOLLOW under a random name (R6); a symlinked parent one and two levels down refused, an append to a hard-linked file rc 5 with the shared inode unchanged, a replace over one a new inode (R3, R4); a home directory as the project, plain and as a repository: bootstrap rc 69 and session start rc 0, one WARNING each, the directory byte-identical (R1), and at-setup's block stops there with one SETUP: stopped line, nothing written; skills-sync.py with links at its stamp's old temp names: untouched, the stamp a regular file (R2); a hard-linked .agents/.gitignore: rc 80, the shared inode unchanged (R3); a lease root named with a newline and a {-line: one REFUSED line, no hook stdout line starting with { (R5); a session started in <repo>/src names the project root once, one started at the root does not (R7); round 4: the home directory by a ${_S21_HCV:-case}-variant spelling, plain and a repository: bootstrap rc 69, session start rc 0, one WARNING each naming git init, nothing written (B1); skills-sync sync and add with the parent swapped for an outside link after the checks: nothing outside (B2); .codex/agents swapped for a HOME link before the move: the user-tier file untouched (B3); ops/ linked outside: enrollment and the three roster writers write nothing there, rc 6 (B7); the three roster writers in a home directory with an ops/, one without, and a subdirectory of a home directory that is a repository: rc 6 each, nothing made or changed there, while a project under that home directory still writes its roster; round 5: the hook names each refused enrollment in a WARNING (G6); the .codex/agents move across filesystems (EXDEV) copies the user's file over, and a move that fails leaves it with no shipped default at the new name (G5); negative control: the block without its triforge_bootstrap line leaves no ops/; fix round 1 (finding #7): a 3.x roster at <top>/sub/ops/roster.toml, no ops/ at the top: the bootstrap from sub rc 0 with one WARNING naming it, <top>/ops/roster.toml and the README section, the skeleton created; a second copy from <top>: the skeleton-creation scan warns once (four levels down named, five levels down and node_modules not); again from sub, at-setup's block and session start: warned again; from <top>, the bootstrap and session start: silent; the subdirectory rosters byte-identical after each run, nothing under sub/; silent for a nested checkout's roster, a symlinked roster or ops/ and no roster; rc 0 with and without the warning; under zsh too (unless skipped above): the block from sub warns once; review round 2, only a Triforge roster: another tool's roster in sub and two lookalikes (a role and a member Triforge has none of, the tables commented out) silent, under zsh too, the shipped template, a roster trimmed to one role setting only effort and a lone declined member warned once each, the roster template a Triforge tree ships silent from templates/ of a Triforge checkout and of the running plugin and in the scan; ${_S21_AG_NOTE}${_S21_AK_NOTE}" "static"
 else
   row "SELF-21" "claude" "$_S21_CAP" "FAIL" "mismatch:$(printf '%s' "$_S21_FAIL" | cut -c1-900)" "static"
 fi
@@ -10593,6 +10640,20 @@ _S16_EV="${_S16_EV}A: one checkout-top roster from a subdirectory; egress per pr
 #   hook     session start names each project CLAUDE.md-family file that does
 #            not import AGENTS.md (one line, at-setup), with and without the
 #            loader, and none once the parent's file imports it
+#   space    (review round 2, finding #6) an import line is written or offered
+#            only when the reader reads it back as the project's import.
+#            <base>/Project With Spaces (an import path ends at whitespace)
+#            and <base>/~/proj (an import path that starts with ~/ is read
+#            from HOME), each a git project with the pointer block below a
+#            <base>/CLAUDE.md, HOME not above it: the import column of detect
+#            for that file is "-"; visibility and session start offer the
+#            project's own CLAUDE.md holding @AGENTS.md and no import there;
+#            instruction_add_import of that file, run from the project,
+#            refused rc 2 before any plan, without --yes and twice with it (a
+#            tab in a project name too), naming that CLAUDE.md; the files
+#            byte-identical. The .claude/CLAUDE.md beside the second, whose
+#            line @../~/proj/AGENTS.md is relative and reads back, keeps its
+#            import column and its plan (rc 20)
 _S16B="${_S16}/b"
 mkdir -p "$_S16B/home/.claude" "$_S16B/home/.codex" "$_S16B/w"
 _S16B_W=$(cd "$_S16B/w" && pwd -P)
@@ -11120,7 +11181,65 @@ printf '# mono\n@proj/AGENTS.md\n' > "$_S16B_H/CLAUDE.md"
 _O=$(_s16b_hook "$_S16B_H/proj")
 _S16_FAIL="${_S16_FAIL}$(_s16b_not b-hook-parent-import "$_O" 'in this project does not import AGENTS\.md|is not loaded under a Claude lead|^\{|hook crashed')"
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-hook-parent-import "$_O" '^Multi-agent framework ready\.$')"
-_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file); "
+
+# space (review round 2, finding #6): a project whose path down from a CLAUDE.md
+# holds whitespace, then one under a directory named ~. Read-only cases first,
+# then the writer: without --yes, and twice with it (the bug appended the line
+# on every approved run)
+_S16B_SP="$_S16B_W/sp"
+_S16B_SPP="$_S16B_SP/Project With Spaces"
+_s16b_proj "$_S16B_SPP"
+_s16b_proj "$_S16B_SP/Tab${T}Proj"
+printf '# mono\n' > "$_S16B_SP/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_SP/CLAUDE.md")
+_O=$(_s16b "$_S16B_SPP" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-space-detect "$_O" "^CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/w/sp/CLAUDE\.md${T}-\$" "^AGENTS\.md${T}project${T}pointer${T}[^${T}]*/w/sp/Project With Spaces/AGENTS\.md${T}-\$" '^rc=0$')"
+_O=$(_s16b "$_S16B_SPP" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-space-vis "$_O" "^claude${T}hidden${T}shadowed by .*/w/sp/CLAUDE\.md: .*; add a CLAUDE\.md holding the line @AGENTS\.md to .*/w/sp/Project With Spaces, which loads it for that project only\$" '^rc=1$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-space-vis "$_O" 'instruction_add_import|add the line @')"
+_O=$(_s16b_hook "$_S16B_SPP")
+_S16B_NOLINE="No import line in that file can name this project's AGENTS\.md: the path from there to this project holds whitespace, where an import path ends, or starts with ~, which an import reads as your home directory\. Or remove the file\."
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-space-hook "$_O" "^WARNING: AGENTS\.md is not loaded under a Claude lead: .*/w/sp/CLAUDE\.md sits above this project, .* Add a CLAUDE\.md holding the line @AGENTS\.md to this project: it loads AGENTS\.md for this project only\. ${_S16B_NOLINE}\$")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-space-hook "$_O" 'Or add the line @|^\{|hook crashed')"
+_S16B_NOREAD='which would not read back as an import of .*\(an import path ends at whitespace, and one that starts with ~/ is read from your home directory\); put the line @AGENTS\.md in '
+for _S16B_Y in "" --yes --yes; do
+  _O=$(_s16b "$_S16B_SPP" instruction_add_import "$_S16B_SP/CLAUDE.md" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-space-import${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — .*/w/sp/CLAUDE\.md would need the line @Project With Spaces/AGENTS\.md, which would not read back as an import of .*/w/sp/Project With Spaces/AGENTS\.md \(an import path ends at whitespace, and one that starts with ~/ is read from your home directory\); put the line @AGENTS\.md in .*/w/sp/Project With Spaces/CLAUDE\.md instead, which loads it for this project only \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-space-import${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+done
+_O=$(_s16b "$_S16B_SP/Tab${T}Proj" instruction_add_import ../CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-space-tab "$_O" "^instruction_add_import: REFUSED — .*/w/sp/CLAUDE\\.md would need the line @Tab\\?Proj/AGENTS\\.md, ${_S16B_NOREAD}" '^rc=2$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-space-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_SP/CLAUDE.md")")"
+# a directory named ~ on the way down: @~/proj/AGENTS.md is read from HOME (the
+# throwaway one, no proj there), so CLAUDE.md gets no import line, while the
+# .claude/CLAUDE.md beside it takes @../~/proj/AGENTS.md, which is relative
+# and reads back: its import column and its plan stay
+_S16B_TL="$_S16B_W/tl"
+_S16B_TLP="$_S16B_TL/~/proj"
+_s16b_proj "$_S16B_TLP"
+mkdir -p "$_S16B_TL/.claude"
+printf '# mono\n' > "$_S16B_TL/CLAUDE.md"
+printf '# mono local\n' > "$_S16B_TL/.claude/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_TL/CLAUDE.md" "$_S16B_TL/.claude/CLAUDE.md")
+_O=$(_s16b "$_S16B_TLP" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-tilde-detect "$_O" "^CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/w/tl/CLAUDE\.md${T}-\$" \
+  "^\.claude/CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/w/tl/\.claude/CLAUDE\.md${T}@\.\./~/proj/AGENTS\.md\$" '^rc=0$')"
+_O=$(_s16b "$_S16B_TLP" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-tilde-vis "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/w/tl/CLAUDE\.md, [^ ]*/w/tl/\.claude/CLAUDE\.md: .*; add a CLAUDE\.md holding the line @AGENTS\.md to [^ ]*/w/tl/~/proj, which loads it for that project only\$" '^rc=1$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-tilde-vis "$_O" 'instruction_add_import|add the line @')"
+_O=$(_s16b_hook "$_S16B_TLP")
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-tilde-hook "$_O" "^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/w/tl/CLAUDE\.md sits above this project, .* Add a CLAUDE\.md holding the line @AGENTS\.md to this project: it loads AGENTS\.md for this project only\. ${_S16B_NOLINE}\$" \
+  "^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/w/tl/\.claude/CLAUDE\.md sits above this project, .* Or add the line @\.\./~/proj/AGENTS\.md to that file ")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-tilde-hook "$_O" 'Or add the line @~/|^\{|hook crashed')"
+for _S16B_Y in "" --yes --yes; do
+  _O=$(_s16b "$_S16B_TLP" instruction_add_import ../../CLAUDE.md $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-tilde-import${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/tl/CLAUDE\.md would need the line @~/proj/AGENTS\.md, which would not read back as an import of [^ ]*/w/tl/~/proj/AGENTS\.md \(an import path ends at whitespace, and one that starts with ~/ is read from your home directory\); put the line @AGENTS\.md in [^ ]*/w/tl/~/proj/CLAUDE\.md instead, which loads it for this project only \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-tilde-import${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+done
+_O=$(_s16b "$_S16B_TLP" instruction_add_import ../../.claude/CLAUDE.md)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-tilde-dotclaude "$_O" '^needs-ask: would add the line @\.\./~/proj/AGENTS\.md to [^ ]*/w/tl/\.claude/CLAUDE\.md, so Claude Code loads [^ ]*/w/tl/~/proj/AGENTS\.md with it, ' '^rc=20$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-tilde-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_TL/CLAUDE.md" "$_S16B_TL/.claude/CLAUDE.md")")"
+_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file), an import line written or offered only when it reads back as the project's import (b-space-*, a project path with whitespace, a tab too; b-tilde-*, a directory named ~ on the way down: the import into the CLAUDE.md above refused rc 2 before any plan, without and twice with --yes, the files byte-identical; the import column -, visibility and session start naming the project's own CLAUDE.md alone; the .claude/CLAUDE.md beside it, whose @../~/proj/AGENTS.md reads back, still planned); "
 rm -rf "$_S16B"
 # --- end of SELF-16 section B ---
 # --- SELF-16 section C: at-setup's blocks and the headless primitives (U15) ---

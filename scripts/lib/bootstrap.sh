@@ -4,8 +4,11 @@
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/roster.sh and before scripts/lib/lease-wait.sh.
 # It calls _lead_only (common.sh), _cursor_bin (cursor.sh), _checkout_top
-# (roster.sh) and _timeout_tool (lease.sh), resolved at call time; nothing runs
-# at source time but assignments and function definitions.
+# (roster.sh), _timeout_tool (lease.sh) and the loader's
+# _triforge_is_plugin_root, resolved at call time, and splices _PY_PRELUDE
+# (common.sh), _TRIFORGE_CLIS_PY (registry.sh) and _ROLE_DEFAULTS_PY
+# (roster.sh) into its python; nothing runs at source time but assignments
+# and function definitions.
 if [ -z "${_TRIFORGE_SCRIPTS_DIR:-}" ]; then
   echo "scripts/lib/bootstrap.sh: not standalone — source scripts/invoke-external.sh" >&2
   return 2 2>/dev/null || exit 2
@@ -30,8 +33,9 @@ fi
 #   (${_TRIFORGE_PLUGIN_ROOT}). Steps:
 #     0. A roster 3.x left in a subdirectory: a WARNING naming it, on every
 #        run that starts at or below it (_tb_subroster_walk) and on the run
-#        that creates the ops/ skeleton (_tb_subroster_scan). The file is
-#        never moved or edited, and the warning leaves the rc alone.
+#        that creates the ops/ skeleton (_tb_subroster_scan). Only a Triforge
+#        roster counts, never the roster template a Triforge tree ships. The
+#        file is never moved or edited, and the warning leaves the rc alone.
 #     1. ops/ skeleton (_tb_ops) — only while ops/ does not exist.
 #     2. .agents/skills/ (_tb_skills) — the portable skills, through
 #        scripts/lib/skills-sync.py and its content-digest stamp (KTD12).
@@ -539,27 +543,95 @@ _tb_ops() {
 # until the user moves it, that leaves _TB_DEGRADED alone (a standing state,
 # like session start's 3.x CLAUDE.md warning). A roster counts only as a
 # regular file in a real ops/ directory: a symlinked one may be the top-level
-# roster under another name, and deleting through it would delete that.
+# roster under another name, and deleting through it would delete that. It
+# counts only as a Triforge roster (triforge_roster below): an ops/roster.toml
+# of another tool is not Triforge's to merge or delete. And the roster
+# template a Triforge tree ships (_tb_subroster_shipped) is no project's
+# roster: a session started in templates/ of the Triforge checkout, or of a
+# copy of the plugin, is not told to merge and delete it.
 
 # _tb_subroster_note <file> — the WARNING for one subdirectory roster.
 _tb_subroster_note() {
   _tb_note "WARNING $1 is not read: Triforge 4 reads only ${_TB_ANCHOR}/ops/roster.toml, at the top of this checkout, so the lead, roles and members in that 3.x subdirectory roster (each consent or decline included) do not apply. Move the subdirectory's ops/ files into ${_TB_ANCHOR}/ops/, merging the two rosters, then delete the subdirectory copy (README.md, \"Upgrading from 3.x\"); Triforge never moves or edits it."
 }
 
+# _tb_subroster_shipped <file> — 0 when <file> is
+# <tree>/templates/ops/roster.toml and <tree> passes the loader's Triforge-root
+# test (_triforge_is_plugin_root: plugin.json named agent-triforge and
+# scripts/invoke-external.sh), so the file is the roster template the plugin
+# ships.
+_tb_subroster_shipped() {
+  case "$1" in
+    */templates/ops/roster.toml) _triforge_is_plugin_root "${1%/templates/ops/roster.toml}" ;;
+    *) return 1 ;;
+  esac
+}
+
+# _TB_TRIFORGE_ROSTER_PY — python: the prelude, the CLI registry
+# (_TRIFORGE_CLIS_PY) and the role table (_ROLE_DEFAULTS_PY), then
+# triforge_roster(path): True when the file holds a [roles.<role>] table for
+# a role in DEFAULTS or a [members.<cli>] table for a CLI in CLIS, with a key
+# in it. Every 3.x roster holds them: the five role tables of the template it
+# was copied from (its writers edit a table in place, and a role may set only
+# effort) and a table for each member it enrolled or declined. The file is
+# read, never run: opened O_NOFOLLOW|O_NONBLOCK relative to its directory,
+# itself opened O_DIRECTORY|O_NOFOLLOW, a regular file only, its first 64 KiB,
+# by a line scan (no TOML parser: macOS /usr/bin/python3 has none).
+_TB_TRIFORGE_ROSTER_PY="${_PY_PRELUDE}${_TRIFORGE_CLIS_PY}${_ROLE_DEFAULTS_PY}"'
+import os, re, stat
+TABLE = re.compile(r"\[\s*(roles|members)\s*\.\s*(?:\"([^\"]*)\"|\x27([^\x27]*)\x27|([A-Za-z0-9_-]+))\s*\]\s*(?:#.*)?")
+KEY = re.compile(r"(?:[A-Za-z0-9_-]+|\"[^\"]*\"|\x27[^\x27]*\x27)\s*=")
+
+
+def triforge_roster(path):
+    try:
+        dfd = os.open(os.path.dirname(path), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            fd = os.open(os.path.basename(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+        finally:
+            os.close(dfd)
+        with os.fdopen(fd, "rb") as f:
+            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                return False
+            data = f.read(65536)
+    except OSError:
+        return False
+    names, ours = {"roles": DEFAULTS, "members": CLIS}, False
+    for line in data.decode("utf-8", "replace").splitlines():
+        line = line.strip()
+        m = TABLE.fullmatch(line)
+        if m:
+            ours = (m.group(2) or m.group(3) or m.group(4)) in names[m.group(1)]
+        elif line.startswith("["):
+            ours = False
+        elif ours and KEY.match(line):
+            return True
+    return False
+'
+
+# _TB_SUBROSTER_WALK_PY — rc 0 when argv[1] is a Triforge roster, else 1.
+_TB_SUBROSTER_WALK_PY="${_TB_TRIFORGE_ROSTER_PY}"'
+sys.exit(0 if triforge_roster(sys.argv[1]) else 1)
+'
+
 # _tb_subroster_walk — every run: each <dir>/ops/roster.toml from the
 # directory the caller started in (_TB_START) up to the checkout top, the top
-# itself left out. The files named are kept in _TB_SUBROSTERS, one per line,
-# so the scan does not name them again.
+# itself left out, that is a Triforge roster (one python3 under the 30 s bound
+# per file found, none on a run that finds no file) and not a Triforge tree's
+# own template. The files named are kept in _TB_SUBROSTERS, one per line, so
+# the scan does not name them again.
 _tb_subroster_walk() {
-  local D=$_TB_START
+  local D=$_TB_START F=""
   while :; do
     case "$D" in
       "${_TB_ANCHOR}/"?*) ;;
       *) return 0 ;;
     esac
-    if [ -d "${D}/ops" ] && [ ! -L "${D}/ops" ] && [ -f "${D}/ops/roster.toml" ] && [ ! -L "${D}/ops/roster.toml" ]; then
-      _tb_subroster_note "${D}/ops/roster.toml"
-      _TB_SUBROSTERS="${_TB_SUBROSTERS}${D}/ops/roster.toml
+    F="${D}/ops/roster.toml"
+    if [ -d "${D}/ops" ] && [ ! -L "${D}/ops" ] && [ -f "$F" ] && [ ! -L "$F" ] && ! _tb_subroster_shipped "$F" \
+       && _tb_run 30 python3 -c "$_TB_SUBROSTER_WALK_PY" "$F" 2>/dev/null; then
+      _tb_subroster_note "$F"
+      _TB_SUBROSTERS="${_TB_SUBROSTERS}${F}
 "
     fi
     D=${D%/*}
@@ -572,9 +644,11 @@ _tb_subroster_walk() {
 # most four levels down, at most 20000 directory entries read, no symlink
 # followed, .git and node_modules skipped, and so is any directory with a
 # .git entry of its own (a nested checkout is its own project). One python3
-# under the 30 s bound, which prints each path with control bytes dropped; a
-# scan that fails or times out names nothing.
-_TB_SUBROSTER_SCAN_PY="${_PY_PRELUDE}"'
+# under the 30 s bound, which reads each roster it finds as the walk does
+# (triforge_roster) and prints the path of each Triforge roster with control
+# bytes dropped; a Triforge tree's own template is then left out
+# (_tb_subroster_shipped). A scan that fails or times out names nothing.
+_TB_SUBROSTER_SCAN_PY="${_TB_TRIFORGE_ROSTER_PY}"'
 import os, stat, sys
 top, named = sys.argv[1], set()
 for p in sys.argv[2].split("\n"):
@@ -605,7 +679,7 @@ while todo and left > 0:
             ops, st = os.lstat(os.path.join(d, "ops")), os.lstat(f)
         except OSError:
             ops = st = None
-        if ops is not None and stat.S_ISDIR(ops.st_mode) and stat.S_ISREG(st.st_mode) and (st.st_dev, st.st_ino) not in named:
+        if ops is not None and stat.S_ISDIR(ops.st_mode) and stat.S_ISREG(st.st_mode) and (st.st_dev, st.st_ino) not in named and triforge_roster(f):
             sys.stdout.buffer.write(bytes(b for b in os.fsencode(f) if b > 31 and b != 127) + b"\n")
         if depth < 3:
             todo.append((d, depth + 1))
@@ -614,6 +688,9 @@ _tb_subroster_scan() {
   local F=""
   while IFS= read -r F; do
     [ -n "$F" ] || continue
+    if _tb_subroster_shipped "$F"; then
+      continue
+    fi
     _tb_subroster_note "$F"
   done <<TB_SCAN_EOF
 $(_tb_run 30 python3 -c "$_TB_SUBROSTER_SCAN_PY" "$_TB_ANCHOR" "$_TB_SUBROSTERS" 2>/dev/null || true)

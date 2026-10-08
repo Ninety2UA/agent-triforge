@@ -572,7 +572,12 @@ fi
 #           into that file, which every project under it loads too, then
 #           removing the file; for a file in HOME or a directory above it
 #           (_ss_home_or_above), the project's own CLAUDE.md alone: that file
-#           is read for every project under it, and the writers refuse it
+#           is read for every project under it, and the writers refuse it;
+#           for a file with no import line that reads back as the project's
+#           (the import column "-": the path down to the project holds
+#           whitespace, where an import path ends, or starts with ~, which an
+#           import reads as HOME), the project's own CLAUDE.md or removing
+#           the file; the writer refuses that import
 # A session started in HOME or a directory above it gets none of the file
 # lines and no tip (SS_NO_PROJECT): that is no project, as the home-directory
 # warning says, and every file there is one the writers refuse.
@@ -681,6 +686,8 @@ while IFS=$'\t' read -r SS_KIND SS_WHERE SS_STATE SS_FILE SS_IMPORT; do
       SS_ABOVE_LINE="WARNING: AGENTS.md is not loaded under a Claude lead: $(_ss_prose "$SS_FILE") sits above this project, and Claude Code reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working directory or above it. Add a CLAUDE.md holding the line @AGENTS.md to this project: it loads AGENTS.md for this project only."
       if _ss_home_or_above "${SS_LEVEL:-/}"; then
         SS_ABOVE_LINE="${SS_ABOVE_LINE} That file is in your home directory or above it and is read for every project under it, so the fix belongs in this project, not there."
+      elif [ "$SS_IMPORT" = "-" ]; then
+        SS_ABOVE_LINE="${SS_ABOVE_LINE} No import line in that file can name this project's AGENTS.md: the path from there to this project holds whitespace, where an import path ends, or starts with ~, which an import reads as your home directory. Or remove the file."
       else
         SS_ABOVE_LINE="${SS_ABOVE_LINE} Or add the line $(_ss_prose "$SS_IMPORT") to that file (an import path is relative to the file that holds it), which loads this project's AGENTS.md in every project under that directory too, or remove the file."
       fi
