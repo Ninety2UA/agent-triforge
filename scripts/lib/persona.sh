@@ -1101,9 +1101,11 @@ _persona_read_run() {
 # from), _PT_FROM (what the named instruction-file changes are against: the
 # lease's base, or _PT_HEAD), _PT_NAME (the worktree's tag), _PT_DESC,
 # _PT_WHAT and _PT_NONE (the prompt's words). rc 64 for an --at of another
-# shape, a ref that names no commit, a name another ref of that name (or a
-# second object it abbreviates) makes ambiguous (_persona_ref_unambiguous), or
-# a lease _persona_lease refuses.
+# shape, a ref: form the ref check can't vet (_persona_ref_form, before any git
+# call), a ref that names no commit, a name another ref of that name (or a
+# second object it abbreviates) makes ambiguous or that resolves from no source
+# the check vouches for (_persona_ref_unambiguous), or a lease _persona_lease
+# refuses.
 _persona_target() {
   local WHO=$1 AT=$2 REF
   _PT_COMMIT="" _PT_HEAD="" _PT_FROM="" _PT_NAME="" _PT_DESC="" _PT_WHAT="" _PT_NONE=""
@@ -1123,6 +1125,7 @@ _persona_target() {
           return 64
           ;;
       esac
+      _persona_ref_form "$WHO" "$REF" || return 64
       if ! _lease_ctx 2>/dev/null; then
         echo "${WHO}: an exec persona runs in a worktree of the lead's git checkout; run it from there" >&2
         return 64
@@ -1158,9 +1161,62 @@ _persona_target() {
   if [ -z "$_PT_FROM" ]; then _PT_FROM=$_PT_HEAD; fi
 }
 
-# _persona_ref_unambiguous <who> <ref> — 0 unless the name at the start of
-# <ref> (up to its first ~ ^ : or @{; a revision expression reads that name
-# too) could stand for another commit than the one git resolves it to. git
+# _persona_ref_refuse <who> <ref> <why> — the refusal of a --at ref: value the
+# ref check can't vet: why, that nothing ran, and the forms it takes.
+_persona_ref_refuse() {
+  echo "${1}: --at ref:${2} is refused: ${3}. Nothing ran; --at ref: takes a branch, HEAD or a full commit id, optionally with ~N or ^N" >&2
+}
+
+# _persona_ref_form <who> <ref> — 0 when <ref> has a form the ref check
+# (_persona_ref_unambiguous) can vet: a name (a branch, HEAD, a tag or a commit
+# id) and an optional revision suffix of ~N, ^N and ^{...} steps, which only
+# walk from that name's commit. Pure shell, so it runs before any git call;
+# otherwise the refusal (_persona_ref_refuse) and 1. Refused: any @{ (a reflog
+# or upstream form: HEAD@{1}, @{-1}, main@{u}, a@{push}), since a reflog is a
+# file a worker can write that no integrity check covers, and @{-N} then
+# resolves a branch name read from one; any ':' (a path, or :/<text>, which
+# searches the history of every ref for a commit a worker can plant); no name
+# before the suffix (^{commit} alone); and git describe output, a name whose
+# last -g is followed by 4 or more hex digits, unless it is a full ref name
+# (refs/..., which git reads as that ref; _persona_ref_unambiguous checks it
+# exists). With no ref of that whole name git reads those digits as an
+# abbreviated commit id, so a ref planted under the whole name redirects the
+# name, and which names git reads that way depends on its version (2.54
+# wants <name>-<n>-g<hex>, older releases took <name>-g<hex>), so no ref
+# comparison could vet it. A commit id stands in for every refused form.
+_persona_ref_form() {
+  local WHO=$1 REF=$2 N T WHY=""
+  N=${REF%%[~^:]*}
+  T=${N##*-g}
+  case "$REF" in
+    *@\{*) WHY="a reflog or upstream form (@{...}) is read from a reflog, a file a worker can write that no integrity check covers" ;;
+    *:*) WHY="a ':' form names a path or searches commit messages (:/<text> searches every ref's history, where a worker can plant a commit), no commit this check can vet" ;;
+    *)
+      if [ -z "$N" ]; then
+        WHY="no ref or commit is named before the revision suffix"
+      elif [ "$T" != "$N" ]; then
+        case "$N" in
+          refs/*) ;;
+          *)
+            case "$T" in
+              *[!0123456789abcdefABCDEF]*) ;;
+              ????*) WHY="it has the shape of git describe output (<name>-g<hex>), whose hex git reads as an abbreviated commit id when no ref has the whole name, so a ref planted under that name would redirect it" ;;
+            esac
+            ;;
+        esac
+      fi
+      ;;
+  esac
+  [ -n "$WHY" ] || return 0
+  _persona_ref_refuse "$WHO" "$REF" "$WHY"
+  return 1
+}
+
+# _persona_ref_unambiguous <who> <ref> — 0 unless <ref> has a form the check
+# can't vet (_persona_ref_form, first), or the name at its start (up to its
+# first ~ or ^; a revision suffix reads that name too) could stand for another
+# commit than the one git resolves it to, or that commit comes from no source
+# the check vouches for (below). git
 # reads the first of $GIT_DIR/<name>, refs/<name>, refs/tags/<name>,
 # refs/heads/<name>, refs/remotes/<name> and refs/remotes/<name>/HEAD that
 # exists, and a worker can write any of them: a tag named like the integration
@@ -1172,7 +1228,13 @@ _persona_target() {
 # abbreviation as well) that abbreviates objects (rev-parse --disambiguate)
 # passes only when it abbreviates exactly one and that one peels to the commit
 # git resolved: a ref of that name in any of the six forms, or a second object,
-# refuses. A full id lists only itself. The refusal never suggests a ref that
+# refuses. A full id lists only itself. With nothing disagreeing, the commit
+# must still come from HEAD (or @, which _persona_trusted_head verifies), from
+# a full ref name that is that ref itself, from the one object an abbreviation
+# names, or from a ref of this name under refs/; else git read a root ref
+# (ORIG_HEAD, FETCH_HEAD) or a file planted at $GIT_DIR/<name>, which a worker
+# can write and no integrity check covers, and that refuses too. The refusal
+# of an ambiguity never suggests a ref that
 # disagrees with the branch or HEAD the name stands for. For an abbreviation it
 # names git's reading and the abbreviated object(s) by full id, for the user to
 # pass the commit meant, and suggests neither: either can be a worker's (an
@@ -1182,12 +1244,14 @@ _persona_target() {
 # else it names the ref git reads, for the user to remove the one not meant.
 # Then 1.
 _persona_ref_unambiguous() {
-  local WHO=$1 REF=$2 N SUF C F FC OBJS K OC LIST BAD="" BADN="" GOT="" BR="" EXACT="" ADVICE
+  local WHO=$1 REF=$2 N SUF C F FC OBJS K OC LIST BAD="" BADN="" GOT="" BR="" EXACT="" VOUCH="" ADVICE
+  _persona_ref_form "$WHO" "$REF" || return 1
   N=${REF%%[~^:]*}
-  N=${N%%@\{*}
-  [ -n "$N" ] || return 0
   SUF=${REF#"$N"}
-  C=$(_lgr rev-parse --verify --quiet "${N}^{commit}" 2>/dev/null) || return 0
+  if ! C=$(_lgr rev-parse --verify --quiet "${N}^{commit}" 2>/dev/null); then
+    _persona_ref_refuse "$WHO" "$REF" "${N} names no commit this check can vet"
+    return 1
+  fi
   case "$N" in
     *[!0123456789abcdefABCDEF]*) ;;
     ????*)
@@ -1214,6 +1278,8 @@ _persona_ref_unambiguous() {
           echo "${WHO}: --at ref:${REF} is ambiguous: git resolves ${N} to ${C}, but ${N} also abbreviates ${LIST} (a ref of that name, which git reads ahead of an abbreviated id, or a second object with that prefix competes with the abbreviation, and a worker can write either); name the commit you mean by its full id (ref:<full id>${SUF}), or remove the ref you did not mean. Nothing ran" >&2
           return 1
         fi
+        # set only when it is the commit git resolved: the abbreviation names it
+        if [ -n "$OC" ]; then VOUCH=1; fi
       fi
       ;;
   esac
@@ -1228,7 +1294,22 @@ _persona_ref_unambiguous() {
       BADN="${BADN:+${BADN}, }${F}"
     fi
   done
-  [ -n "$BAD" ] || return 0
+  if [ -z "$BAD" ]; then
+    case "$N" in
+      HEAD | '@') return 0 ;;
+      refs/*)
+        # git reads a full name as that ref itself, when it exists
+        FC=$(_lgr show-ref --verify --hash "$N" 2>/dev/null) || FC=""
+        if [ -n "$FC" ]; then FC=$(_lgr rev-parse --verify --quiet "${FC}^{commit}" 2>/dev/null) || FC=""; fi
+        if [ "$FC" = "$C" ]; then return 0; fi
+        _persona_ref_refuse "$WHO" "$REF" "git resolves ${N} to ${C:0:12}, but no ref ${N} exists at that commit, so git read the name from another source"
+        return 1
+        ;;
+    esac
+    if [ -n "$VOUCH" ] || [ -n "$GOT" ]; then return 0; fi
+    _persona_ref_refuse "$WHO" "$REF" "git resolves ${N} to ${C:0:12} from no ref under refs/, but from a root ref (such as ORIG_HEAD or FETCH_HEAD) or a file at \$GIT_DIR/${N}, which a worker can write and no integrity check covers"
+    return 1
+  fi
   case "$N" in
     HEAD | refs/*) EXACT=1 ;;
   esac
