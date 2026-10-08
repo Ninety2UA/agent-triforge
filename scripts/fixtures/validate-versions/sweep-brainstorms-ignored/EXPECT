@@ -1,0 +1,6 @@
+# U21: a stale pin inside docs/brainstorms/ is ignored (the sweep scope skips
+# that history directory); sweep-shipped-pin is the same pin caught elsewhere.
+check: sweep
+rc: 0
+line: ok:   stale-pin sweep: no stale pins outside the excluded paths
+line: validate-versions: PASS (--only sweep)

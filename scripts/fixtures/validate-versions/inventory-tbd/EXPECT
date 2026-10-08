@@ -1,0 +1,6 @@
+# U21: an inventory row reading "TBD" fails. Row 2 cites a path this root
+# carries and the totals match, so the TBD cell is the one finding.
+check: inventory
+rc: 1
+line: FAIL: rule inventory: docs/rule-inventory.md:9: cell 3 reads TBD — TBD
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

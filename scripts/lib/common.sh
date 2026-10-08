@@ -46,15 +46,24 @@ _run_with_timeout() {
 # before it lands in a committed ops/ file (KTD-14 / R36). Reads stdin, writes
 # scrubbed stdout. Mirrors the standalone copy in probe-capabilities.sh (that
 # script is not sourced into this shell, so the two intentionally each carry
-# their own copy — keep the patterns in sync when either changes).
+# their own copy — keep the patterns in sync when either changes; SELF-26
+# feeds both the same samples and compares). github_pat_ (a fine-grained
+# GitHub token: 22 + 1 + 59 characters) runs before gh[pousr]_, which would
+# otherwise cut one short when its first part ends in ghp; xai- (an xAI key,
+# about 80 alphanumerics) and AKIA or ASIA + 16 (an AWS access key id,
+# long-term or STS) follow. The minimum lengths leave prose such as xai-org
+# or a bare github_pat_ alone.
 _scrub() {
   sed -E \
     -e 's/sk-[A-Za-z0-9_-]{8,}/[REDACTED-KEY]/g' \
     -e 's/AIza[0-9A-Za-z_-]{10,}/[REDACTED-KEY]/g' \
+    -e 's/github_pat_[A-Za-z0-9_]{22,}/[REDACTED-KEY]/g' \
     -e 's/gh[pousr]_[A-Za-z0-9]{16,}/[REDACTED-KEY]/g' \
     -e 's/xox[baprs]-[A-Za-z0-9-]{10,}/[REDACTED-KEY]/g' \
     -e 's/(Bearer|bearer) +[A-Za-z0-9._-]{12,}/Bearer [REDACTED]/g' \
-    -e 's/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9._-]{20,}/[REDACTED-JWT]/g'
+    -e 's/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9._-]{20,}/[REDACTED-JWT]/g' \
+    -e 's/xai-[A-Za-z0-9]{20,}/[REDACTED-KEY]/g' \
+    -e 's/(AKIA|ASIA)[A-Z0-9]{16}/[REDACTED-KEY]/g'
 }
 
 # _kill_tree <pid> [signal] — best-effort recursive process-tree kill, portable

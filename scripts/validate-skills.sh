@@ -24,12 +24,14 @@
 #   --self-test  Run every fixture under scripts/fixtures/validate-skills/
 #                (each holds an EXPECT file: check, the rule's severity under
 #                --warn, message substring) in both modes — default and --warn —
-#                and assert the outcome, plus two computed cases (the C10
-#                description-set budget and the C15 token guard). The cases run
-#                in-process; the conforming fixture's runs also go through this
-#                wrapper (no flag, --warn and the --strict no-op), so the flag
-#                parsing and the exit code are exercised end to end. Exit 0
-#                when every fixture behaves as named.
+#                and assert the outcome, plus three computed cases (the C10
+#                description-set budget, the C15 token guard and the C3 block
+#                structure over frontmatter shapes whose YAML verdict is
+#                known). The cases run in-process; the conforming fixture's
+#                runs also go through this wrapper (no flag, --warn and the
+#                --strict no-op), so the flag parsing and the exit code are
+#                exercised end to end. Exit 0 when every fixture behaves as
+#                named.
 #
 # The checks (ids follow ops/research/2026-09-27-repo-mining.md §3; "new" means
 # a warning under --warn and an error otherwise; the rest FAIL in both modes):
@@ -38,7 +40,11 @@
 #        duplicate keys, every line parseable
 #   C3   strict-YAML subset: no tab indentation, no unclosed quote, no unquoted
 #        value containing ': ' or ' #' or ending in ':', no unquoted leading
-#        [ { & * !                                                     (new)
+#        [ { & * !; and the block structure YAML parses: the entries of a
+#        block share one indentation, a line left of its block lines up with
+#        an enclosing one, only a key with no value takes a nested block, and
+#        a block holds keys or '- ' entries, not both (a compact sequence at
+#        its key's indentation is fine)                                (new)
 #   C4   name is ^[a-z0-9][a-z0-9-]*$ (always); 1–64 chars and
 #        ^[a-z0-9]+(-[a-z0-9]+)*$ — no leading/trailing/double hyphen (new)
 #   C5   name equals the directory name
@@ -466,9 +472,104 @@ def parse_frontmatter(lines, errs, info):
     return data, end + 1
 
 
+# C3 block structure. A key — bare or quoted — ends at a colon that ends the
+# line or comes before a space ("key:value" is one plain scalar); a block
+# sequence entry is "-" alone or "- …".
+YAML_KEY = re.compile(r"""^([A-Za-z0-9_.-]+|"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')\s*:(?:\s+(.*))?$""")
+YAML_SEQ = re.compile(r"^-(?:\s+(.*))?$")
+INDENT_REJECTED = "YAML rejects the indentation"
+
+
+def yaml_value_kind(rest):
+    """How an entry's inline value shapes the lines below it: 'open' (none, a
+    comment, or only an anchor or tag, so a nested block may follow), 'block'
+    (a | or > scalar), 'quoted' or 'plain'."""
+    rest = (rest or "").strip()
+    if not rest or rest.startswith("#") or re.match(r"^(?:[&!]\S*\s+)*[&!]\S*(?:\s+#.*)?$", rest):
+        return "open"
+    if rest in (">", ">-", ">+", "|", "|-", "|+"):
+        return "block"
+    return "quoted" if rest[0] in ('"', "'") else "plain"
+
+
+def yaml_entry(stripped, indent):
+    """(indent, kind, label, value kind, item column) for a mapping key ('map'),
+    a block sequence entry ('seq') or any other line ('text': a scalar on a
+    line of its own), the item column being where a '- key:' entry's own
+    mapping starts."""
+    seq = YAML_SEQ.match(stripped)
+    if seq:
+        content = seq.group(1) or ""
+        key = YAML_KEY.match(content)
+        if key:
+            return indent, "seq", key.group(1), yaml_value_kind(key.group(2)), indent + len(stripped) - len(content)
+        return indent, "seq", "list item", yaml_value_kind(content), None
+    key = YAML_KEY.match(stripped)
+    if key:
+        return indent, "map", key.group(1), yaml_value_kind(key.group(2)), None
+    return indent, "text", stripped[:40], "plain", None
+
+
+def block_indentation_issue(entries):
+    """The first line YAML's block structure rejects, as a C3 message; None
+    when there is none. entries: yaml_entry's tuple, numbered by frontmatter
+    line, per line that is not blank or a comment, in order (block scalar and
+    quoted continuation lines left out). The entries of one block share one
+    indentation, and a line left of its block lines up with an enclosing one.
+    A line right of the entry above it opens a nested block only when that
+    entry holds no value; after a plain scalar, a deeper text or '- …' line
+    continues the scalar, as YAML reads it, and a deeper text line under a key
+    with no value becomes its plain value. One block holds keys or '- '
+    entries, not both, except the compact form: a sequence at its key's own
+    indentation, which the next key at that indentation ends. A text line at or
+    left of its block is left to C2 (the frontmatter parser rejects it)."""
+    stack = []      # open blocks, innermost last: [indent, kind, compact]
+    above = None    # the entry above: (column a nested block must pass, value kind, kind)
+    for lineno, indent, kind, label, value, item in entries:
+        where = "frontmatter line " + str(lineno) + " is indented " + str(indent) + ", "
+        if kind == "text":
+            if above and indent > above[0] and above[1] == "open":
+                above = (above[0], "plain", above[2])
+            elif above and indent > above[0] and above[1] != "plain":
+                return (where + "deeper than the entry above it, which already holds a value (" + INDENT_REJECTED
+                        + ") — nest only under a key with no value: " + label)
+            continue
+        if above and indent > above[0]:
+            if above[1] == "open":
+                stack.append([indent, kind, False])
+            elif above[1] == "plain" and kind == "seq":
+                continue
+            else:
+                return (where + "deeper than the entry above it, which already holds a value (" + INDENT_REJECTED
+                        + ") — nest only under a key with no value: " + label)
+        elif above and indent == above[0] and above[1] == "open" and above[2] == "map" and kind == "seq":
+            stack.append([indent, kind, True])
+        else:
+            left_of = None
+            while stack and (indent < stack[-1][0] or (stack[-1][2] and indent == stack[-1][0] and kind == "map")):
+                left_of = stack.pop()[0]
+            if not stack and above is None:
+                stack.append([indent, kind, False])
+            elif not stack or indent != stack[-1][0]:
+                return (where + "left of its block's entries at " + str(left_of)
+                        + (" and right of the enclosing block's at " + str(stack[-1][0]) if stack else "")
+                        + " (" + INDENT_REJECTED + ") — give a block's entries one indentation: " + label)
+            elif kind != stack[-1][1]:
+                return (where + "in a block that holds " + ("keys" if stack[-1][1] == "map" else "'- ' entries")
+                        + " (" + INDENT_REJECTED + ") — a block holds keys or '- ' entries, not both: " + label)
+        if item is not None:
+            stack.append([item, "map", False])
+            above = (item, value, "map")
+        else:
+            above = (indent, value, kind)
+    return None
+
+
 def strict_yaml_issues(fm):
     """C3 over raw frontmatter lines (skills and agents alike)."""
     issues = []
+    entries = []    # every line yaml_entry classifies, for the block structure
+    tabbed = False
     i = 0
     while i < len(fm):
         line = fm[i]
@@ -479,7 +580,9 @@ def strict_yaml_issues(fm):
         lead = line[:len(line) - len(line.lstrip())]
         if "\t" in lead:
             issues.append("tab indentation at frontmatter line " + str(i + 1) + " (spaces only)")
+            tabbed = True
         indent = len(lead)
+        entries.append((i + 1,) + yaml_entry(stripped, indent))
         m = re.match(r"^\s*(?:-\s+)?([A-Za-z0-9_.-]+):(.*)$", line)
         if m:
             label, rest = m.group(1), m.group(2).strip()
@@ -512,6 +615,10 @@ def strict_yaml_issues(fm):
             if rest.endswith(":"):
                 issues.append("unquoted value ends with ':' — quote it: " + label)
         i += 1
+    # A tab leaves the indentation unmeasurable, and its line already fails above.
+    structure = None if tabbed else block_indentation_issue(entries)
+    if structure:
+        issues.append(structure)
     return issues
 
 
@@ -1501,6 +1608,37 @@ def self_test():
             print("self-test: ok   computed-c15-token-guard: 21,000 chars → [C15] bytes warning + '≈ 5,000 tokens' note (--warn rc 0)")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+    # Computed case 3 — C3 block structure: frontmatter shapes with the verdict
+    # yaml.safe_load (PyYAML 6) gives them. The rule must flag the ones YAML
+    # rejects for their indentation and leave the valid ones alone; most of
+    # these trip C2 or C14 too, so no single-rule fixture can carry them.
+    count += 1
+    shapes = (
+        ("metadata:\n    version: x\n  kind: p", True),      # a sibling left of its block's first entry
+        ("a:\n  b:\n    c: 1\n   d: 2", True),               # a line between two nested levels
+        ("- name: a\n value: b", True),                      # a line between a '- key:' item's columns
+        ("metadata:\n  version: 'x'\n    kind: p", True),    # a key nested under a quoted value
+        ("metadata:\n  version: x\n    kind: p", True),      # a key nested under a plain value
+        ("metadata:\n  version: 'x'\n    more", True),       # text nested under a quoted value
+        ("tools:\n  - a\n  other: b", True),                 # a key beside '- ' entries in one block
+        ("metadata:\n  consumer:\n    deep: x", False),      # nested under a key with no value
+        ("metadata:\n  version: x\n    - y", False),         # a plain scalar's continuation
+        ("tools:\n- a\n- b\nother: c", False),               # a compact sequence
+        ("- name: a\n  value: b\n- name: c", False),         # a '- key:' item's own mapping
+        ("a:\n  just text\nb: 1", False),                    # a key's value on the next line
+        ("a: |\n  x\n    y: 1\nb: 1", False),                # a block scalar's body
+        ("a: &x\n  b: 1", False),                            # an anchor before a nested block
+    )
+    wrong = [text for text, rejected in shapes
+             if any(INDENT_REJECTED in s for s in strict_yaml_issues(text.split("\n"))) != rejected]
+    if wrong:
+        failures += 1
+        print("self-test: FAIL computed-c03-block-structure: " + str(len(wrong)) + " of " + str(len(shapes))
+              + " shapes judged unlike YAML: " + "; ".join(repr(t) for t in wrong))
+    else:
+        print("self-test: ok   computed-c03-block-structure: [C03] on the " + str(sum(r for _, r in shapes)) + " of "
+              + str(len(shapes)) + " frontmatter shapes YAML rejects for their indentation, none on the rest")
 
     if failures:
         print("validate-skills --self-test: FAIL (" + str(failures) + " of " + str(count) + " cases)")

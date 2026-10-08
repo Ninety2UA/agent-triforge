@@ -55,7 +55,7 @@ Start it detached in one block, `persona_spawn "$RUN" plan-checker plan-checker 
 
 ## Phase 2: build
 
-Use wave orchestration (the `wave-orchestration` skill: every task leased from `ops/roster.toml`, merged only after a pinned non-author review, one commit per task on the integration branch). Sub-agent mode for fewer than 5 tasks, agent-team mode for 5 or more. Run the `integration-verifier` persona between waves (`--at ref:<integration branch>`). Apply risk scoring (halt at risk above 20 % or 50+ file changes).
+Use wave orchestration (the `wave-orchestration` skill: every task leased from `ops/roster.toml`, merged only after a pinned non-author review, one commit per task on the integration branch). Sub-agent mode for fewer than 5 tasks, agent-team mode for 5 or more. Run the `integration-verifier` persona between waves (`--at ref:<integration branch>`). Apply risk scoring (halt at risk above 20 % or more than 50 changed files).
 
 ## Phase 3: parallel review
 

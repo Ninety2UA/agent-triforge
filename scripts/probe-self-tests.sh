@@ -246,6 +246,12 @@ rm -rf "$_S1_DIR"
 #             there (a logging mktemp first on PATH says so; the sticky run
 #             logs one, round 5, G7 D), and lease_create refuses to derive a
 #             lease root in it; with the sticky bit -> the session runs
+#   ctxroot / ctxerror  a TRIFORGE_LEASE_ROOT whose lead/ is a directory of
+#             another user (root's /usr), and one that can't be made
+#             (/dev/null/x) -> rc 44 before any session, nothing run, the
+#             stop naming that cause (not private to you; the lease context
+#             can't be set up) after _lease_ctx's own line, never the
+#             ledger's recorded root
 #   noshell   the SELF seam unset, no TTY, no host markers (nohup, cron, CI):
 #             with a lease in the ledger and with none -> rc 45 naming the
 #             fix (a terminal or the lead's own shell), never 44, nothing run
@@ -642,6 +648,22 @@ O="$O
 made=$(grep -c 'tshare/triforge-coordinate\.' "$_S2/mktemp.log" || true)"
 _S2_FAIL="${_S2_FAIL}$(_self_expect sharedtmp-sticky "$O" 'Sprint complete at iteration 1' '^rc=0$' '^runs=1$' '^made=1$')"
 
+# ctxroot / ctxerror: a lease context _lease_ctx can't set up stops the gate
+# before any session, and the stop names that cause, never the ledger's
+# recorded root: a lease root whose lead/ is another user's directory (a link
+# to root's /usr), and one that can't be made
+_s2_repo ctxcause
+mkdir -p "$_S2/ctxroot"
+ln -s /usr "$_S2/ctxroot/lead"
+O=$(S2_ROOT="$_S2/ctxroot" _s2_run ctxcause done claude "probe goal" --max 1)
+_S2_FAIL="${_S2_FAIL}$(_self_expect ctxroot "$O" '^lease: ERROR the lease directory /usr is not a directory of this user' \
+  'STOPPED before starting a session — the lease root, or a directory it sits in, is not private to you' '^rc=44$' '^runs=0$')"
+if printf '%s\n' "$O" | grep -q 'the lease root the ledger was last written under'; then _S2_FAIL="$_S2_FAIL ctxroot(named-the-ledger-root)"; fi
+O=$(S2_ROOT=/dev/null/x _s2_run ctxcause done claude "probe goal" --max 1)
+_S2_FAIL="${_S2_FAIL}$(_self_expect ctxerror "$O" '^lease: ERROR could not set up the lease context [(]NotADirectoryError' \
+  "STOPPED before starting a session — the lead's lease context can't be set up in this checkout" '^rc=44$' '^runs=0$')"
+if printf '%s\n' "$O" | grep -q 'the lease root the ledger was last written under\|not inside a git repository'; then _S2_FAIL="$_S2_FAIL ctxerror(named-another-cause)"; fi
+
 # noshell: the lead host check runs before anything else (C6); no seam, no TTY
 _s2_repo noshell
 O=$(S2_NO_SEAM=1 _s2_run noshell done claude "probe goal" --max 1)
@@ -723,7 +745,7 @@ _S2_FAIL="${_S2_FAIL}$(_self_expect integrity "$O" '^create:rc=0:review$' 'coord
 
 _S2_CAP="coordinate.sh reads the lead's launch_argv, goal_gate, model_argv and effort_argv: /goal + claude --print under Claude Code; the D-047 codex exec line, the [lead] model and effort, a quoted \$agent-triforge:at-ship goal and no /goal under Codex; full access only with --allow-full-access (77); the integrity check before each session (44); a deterministic lead failure stops after one run (69); the lease-resume paragraph"
 if [ -z "$_S2_FAIL" ]; then
-  row "SELF-02" "claude" "$_S2_CAP" "PASS" "resume, drycodex (-m gpt-6-astra -c model_reasoning_effort=xhigh), drypin (the roster's gpt-6-luna/high), dryclaude (no model flags), claudepin (--model sonnet --effort high), nomodel (no -m), teamgoal (flags stay in the quoted goal), nofield (one note, no --effort), fullaccess (17 full-access spellings and a declared line refused, rc 77; the acceptEdits control runs), ledgerroot (a tampered ledger under another TMPDIR: rc 44, restored; its root gone: refused naming TRIFORGE_LEASE_ROOT), ledgergone (the ledger deleted under another TMPDIR: rc 44, restored from the root the lease-root record names; that root gone: refused on the record and the lease worktree, then on the worktree alone; a fresh repo runs), ledgerdetach (ledger and record deleted, the lease worktree detached: rc 44 on the worktree; at its root: restored), ledgersib (sibling checkouts with custom roots both named leases: the fresh one runs, the other refuses on its own worktree), sharedtmp (a 0777 non-sticky TMPDIR: rc 1, no run dir by the mktemp log, no lease root; sticky: runs, one run dir), noshell (no seam, no TTY: rc 45, never 44, with and without a ledger), quota (rc 69, a quota Fix line), tail (a link planted at <run log>.tail never written through), stderr (a stderr line on every python3 call: the lead still resolves), leadwet, noack (rc 77, nothing run), ack (one stub run, D-047 argv + model + effort), auth (rc 69 after one run, the login hint), integrity (rc 44, restored, escalated, no run)" "static"
+  row "SELF-02" "claude" "$_S2_CAP" "PASS" "resume, drycodex (-m gpt-6-astra -c model_reasoning_effort=xhigh), drypin (the roster's gpt-6-luna/high), dryclaude (no model flags), claudepin (--model sonnet --effort high), nomodel (no -m), teamgoal (flags stay in the quoted goal), nofield (one note, no --effort), fullaccess (17 full-access spellings and a declared line refused, rc 77; the acceptEdits control runs), ledgerroot (a tampered ledger under another TMPDIR: rc 44, restored; its root gone: refused naming TRIFORGE_LEASE_ROOT), ledgergone (the ledger deleted under another TMPDIR: rc 44, restored from the root the lease-root record names; that root gone: refused on the record and the lease worktree, then on the worktree alone; a fresh repo runs), ledgerdetach (ledger and record deleted, the lease worktree detached: rc 44 on the worktree; at its root: restored), ledgersib (sibling checkouts with custom roots both named leases: the fresh one runs, the other refuses on its own worktree), sharedtmp (a 0777 non-sticky TMPDIR: rc 1, no run dir by the mktemp log, no lease root; sticky: runs, one run dir), ctxroot / ctxerror (a lease root whose lead/ is another user's, one that can't be made: rc 44, nothing run, the stop naming that cause, not the ledger's root), noshell (no seam, no TTY: rc 45, never 44, with and without a ledger), quota (rc 69, a quota Fix line), tail (a link planted at <run log>.tail never written through), stderr (a stderr line on every python3 call: the lead still resolves), leadwet, noack (rc 77, nothing run), ack (one stub run, D-047 argv + model + effort), auth (rc 69 after one run, the login hint), integrity (rc 44, restored, escalated, no run)" "static"
 else
   row "SELF-02" "claude" "$_S2_CAP" "FAIL" "mismatch:${_S2_FAIL}" "static"
 fi
@@ -1789,7 +1811,16 @@ rm -rf "$_S8B" "$_S8"
 #            Silent: a nested checkout's roster, a symlinked roster, a
 #            symlinked ops/, no subdirectory roster; rc 0 with the warning
 #            and without it; under zsh, at-setup's block from <top>/sub of a
-#            third copy warns once (walk and scan in zsh)
+#            third copy warns once (walk and scan in zsh). Only a Triforge
+#            roster counts (review round 2): another tool's ops/roster.toml in
+#            <top>/sub (the walk) and two lookalikes, a role and a member
+#            Triforge has none of and the tables commented out (the scan):
+#            silent, under zsh too; the shipped template, a roster trimmed to
+#            one role setting only effort and one holding only a declined
+#            member (the scan): one WARNING each; the roster template a
+#            Triforge tree ships: silent from templates/ of a Triforge
+#            checkout that is not the running plugin and of the running,
+#            vendored plugin, and in the scan of the project vendoring it
 #   agypack  (fix round 1) the agy pack step's other paths, through an agy
 #            stub that logs its argv: `plugin install` failing -> the
 #            install-failed notice, rc 80, no stamp; `agents` one name short,
@@ -2465,8 +2496,44 @@ d:rosters=${_S21_SRK:-intact}:sub=$(if [ "$(_s21_list "$_S21/proj-sr1/sub")" = "
 _S21_FAIL="${_S21_FAIL}$(_self_expect subroster "$_S21_SR" '^a:rc=0 sub=1:top=1:readme=1:warnings=1:skeleton=yes$' \
   '^b:rc=0 sub=1:depth4=1:depth5=0:node_modules=0:warnings=2:skeleton=yes$' '^c-sub:rc=0:sub=1:warnings=1$' '^c-top:rc=0 warnings=0$' \
   '^hook-sub:rc=0:crash=0:lines=1:named=1$' '^e:nested=0:links=0,0:none=0:skeletons=yes$' '^f:rc=0 rc=0 $' '^d:rosters=intact:sub=untouched$')"
+# subroster-triforge (review round 2): only a Triforge roster counts. (u) from
+# <top>/sub, no ops/ at the top: another tool's roster there (the walk) and two
+# lookalikes, a role and a member Triforge has none of and the tables commented
+# out (the scan), are named by no WARNING; (k) from <top>: the shipped
+# template, a roster trimmed to one role setting only effort and one holding
+# only a declined member, one WARNING each (the scan); (t) the roster template
+# a Triforge tree ships: from templates/ of a Triforge checkout (plugin.json
+# named agent-triforge, scripts/invoke-external.sh) that is not the running
+# plugin, from templates/ of the running plugin (the vendored copy "inside"
+# bootstrapped from), and in the scan of that "inside" run: no WARNING
+mkdir -p "$_S21/proj-sru/sub/ops" "$_S21/proj-sru/look/ops" "$_S21/proj-sru/cmt/ops" \
+  "$_S21/proj-srk/full/ops" "$_S21/proj-srk/trim/ops" "$_S21/proj-srk/decl/ops" \
+  "$_S21/proj-srt/.claude-plugin" "$_S21/proj-srt/scripts" "$_S21/proj-srt/templates/ops"
+for _s21_d in sru srk srt; do
+  _s21_git "$_S21/proj-$_s21_d" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-$_s21_d"
+done
+unset _s21_d
+printf '[tool]\nname = "x"\n' > "$_S21/proj-sru/sub/ops/roster.toml"
+printf '[roles.admin]\ncli = "x"\n\n[members.alice]\nenabled = true\n' > "$_S21/proj-sru/look/ops/roster.toml"
+printf '# [roles.builder]\n# cli = "codex"\n' > "$_S21/proj-sru/cmt/ops/roster.toml"
+cp "$REPO_ROOT/templates/ops/roster.toml" "$_S21/proj-srk/full/ops/roster.toml"
+printf '[roles.reviewer]\neffort = "high"\n' > "$_S21/proj-srk/trim/ops/roster.toml"
+printf '[members.kimi]\nenabled = false\n' > "$_S21/proj-srk/decl/ops/roster.toml"
+printf '{"name": "agent-triforge"}\n' > "$_S21/proj-srt/.claude-plugin/plugin.json"
+: > "$_S21/proj-srt/scripts/invoke-external.sh"
+cp "$REPO_ROOT/templates/ops/roster.toml" "$_S21/proj-srt/templates/ops/roster.toml"
+_S21_RC=$(_s21_run sr-u /bin/bash "$_S21/proj-sru/sub" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+_S21_RC=$(_s21_run sr-k /bin/bash "$_S21/proj-srk" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+_S21_RC=$(_s21_run sr-t /bin/bash "$_S21/proj-srt/templates" "$REPO_ROOT/skills/at-setup" "$_S21/direct.sh")
+_S21_RC=$(_s21_run sr-tv /bin/bash "$_S21/proj-in/vendor/agent-triforge/templates" "$REPO_ROOT/skills/at-setup" "$_S21/direct-in.sh")
+_S21_SRO="u:$(tr '\n' ' ' < "$_S21/sr-u.out")warnings=$(_s21_warns sr-u)
+k:$(tr '\n' ' ' < "$_S21/sr-k.out")full=$(_s21_srw sr-k "$_S21_P/proj-srk/full/ops/roster.toml"):trim=$(_s21_srw sr-k "$_S21_P/proj-srk/trim/ops/roster.toml"):decl=$(_s21_srw sr-k "$_S21_P/proj-srk/decl/ops/roster.toml"):warnings=$(_s21_warns sr-k)
+t:$(tr '\n' ' ' < "$_S21/sr-t.out")checkout=$(_s21_warns sr-t):plugin=$(_s21_srw sr-tv 'templates/ops/roster.toml'):scan=$(_s21_srw inside 'templates/ops/roster.toml')"
+_S21_FAIL="${_S21_FAIL}$(_self_expect subroster-triforge "$_S21_SRO" '^u:rc=0 warnings=0$' \
+  '^k:rc=0 full=1:trim=1:decl=1:warnings=3$' '^t:rc=0 checkout=0:plugin=0:scan=0$')"
 # under zsh: at-setup's block from <top>/sub of a third fresh copy, the walk
-# and the scan both in zsh: one WARNING, the skeleton, the roster unchanged
+# and the scan both in zsh: one WARNING, the skeleton, the roster unchanged;
+# from <top>/sub of (u) above, another tool's roster: no WARNING (the walk)
 if [ -n "$_S21_ZSH" ]; then
   mkdir -p "$_S21/proj-sr3/sub/ops"
   _s21_git "$_S21/proj-sr3" init -q >/dev/null 2>&1 || _S21_FAIL="$_S21_FAIL git-init-proj-sr3"
@@ -2475,6 +2542,8 @@ if [ -n "$_S21_ZSH" ]; then
   _S21_RC=$(_s21_run sr-z "$_S21_ZSH" "$_S21/proj-sr3/sub" "$REPO_ROOT/skills/at-setup" "$_S21/setup.sh")
   _S21_FAIL="${_S21_FAIL}$(_self_expect subroster-zsh "rc=${_S21_RC}:sub=$(_s21_srw sr-z "$_S21_P/proj-sr3/sub/ops/roster.toml"):warnings=$(_s21_warns sr-z):skeleton=$([ -f "$_S21/proj-sr3/ops/roster.toml" ] && echo yes || echo no):roster=$([ "$(cksum < "$_S21/proj-sr3/sub/ops/roster.toml")" = "$_S21_SUMZ" ] && echo intact || echo changed)" \
     '^rc=0:sub=1:warnings=1:skeleton=yes:roster=intact$')"
+  _S21_RC=$(_s21_run sr-zu "$_S21_ZSH" "$_S21/proj-sru/sub" "$REPO_ROOT/skills/at-setup" "$_S21/setup.sh")
+  _S21_FAIL="${_S21_FAIL}$(_self_expect subroster-triforge-zsh "rc=${_S21_RC}:warnings=$(_s21_warns sr-zu)" '^rc=0:warnings=0$')"
 fi
 # agypack (fix round 1): the agy pack step's retry and failure paths. The
 # default agy stubs answer the happy path only; this one logs its argv to
@@ -2614,7 +2683,7 @@ _S21_RC=$(_s21_run neg /bin/bash "$_S21/proj-neg" "$REPO_ROOT/skills/at-setup" "
 [ ! -e "$_S21/proj-neg/ops" ] || _S21_FAIL="$_S21_FAIL negative-control(ops/-without-the-bootstrap-line)"
 _S21_CAP="the project bootstrap runs from the at- skills without any hook: at-setup's block provisions ops/, the skills copy, the per-CLI files and an untracked plugin-root pointer; at-build's preflight then loads the helpers from the pointer; idempotent under bash and zsh; refused under the worker marker and in a lease root (KTD11, R37)"
 if [ -z "$_S21_FAIL" ]; then
-  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; round 3: links at the pid-free temp names (.tmp, .new, ~) beside every written file untouched, and no predictable temp name or mv -f in the three writers, both creating temps O_EXCL|O_NOFOLLOW under a random name (R6); a symlinked parent one and two levels down refused, an append to a hard-linked file rc 5 with the shared inode unchanged, a replace over one a new inode (R3, R4); a home directory as the project, plain and as a repository: bootstrap rc 69 and session start rc 0, one WARNING each, the directory byte-identical (R1), and at-setup's block stops there with one SETUP: stopped line, nothing written; skills-sync.py with links at its stamp's old temp names: untouched, the stamp a regular file (R2); a hard-linked .agents/.gitignore: rc 80, the shared inode unchanged (R3); a lease root named with a newline and a {-line: one REFUSED line, no hook stdout line starting with { (R5); a session started in <repo>/src names the project root once, one started at the root does not (R7); round 4: the home directory by a ${_S21_HCV:-case}-variant spelling, plain and a repository: bootstrap rc 69, session start rc 0, one WARNING each naming git init, nothing written (B1); skills-sync sync and add with the parent swapped for an outside link after the checks: nothing outside (B2); .codex/agents swapped for a HOME link before the move: the user-tier file untouched (B3); ops/ linked outside: enrollment and the three roster writers write nothing there, rc 6 (B7); the three roster writers in a home directory with an ops/, one without, and a subdirectory of a home directory that is a repository: rc 6 each, nothing made or changed there, while a project under that home directory still writes its roster; round 5: the hook names each refused enrollment in a WARNING (G6); the .codex/agents move across filesystems (EXDEV) copies the user's file over, and a move that fails leaves it with no shipped default at the new name (G5); negative control: the block without its triforge_bootstrap line leaves no ops/; fix round 1 (finding #7): a 3.x roster at <top>/sub/ops/roster.toml, no ops/ at the top: the bootstrap from sub rc 0 with one WARNING naming it, <top>/ops/roster.toml and the README section, the skeleton created; a second copy from <top>: the skeleton-creation scan warns once (four levels down named, five levels down and node_modules not); again from sub, at-setup's block and session start: warned again; from <top>, the bootstrap and session start: silent; the subdirectory rosters byte-identical after each run, nothing under sub/; silent for a nested checkout's roster, a symlinked roster or ops/ and no roster; rc 0 with and without the warning; under zsh too (unless skipped above): the block from sub warns once; ${_S21_AG_NOTE}${_S21_AK_NOTE}" "static"
+  row "SELF-21" "claude" "$_S21_CAP" "PASS" "fresh git project, CLAUDE_PLUGIN_ROOT unset, no hook run: at-setup's block (from its SKILL.md, bash) rc 0, ${_S21_N1} notice(s), ops/ skeleton + roster.toml, ${SHIPPED_COUNT} portable skills + stamp, .codex/triforge-agents.toml, pointer = this checkout (physical), untracked, ignored, absent from git status; again under bash and zsh: rc 0, no notice, the project byte-identical (.git included); at-build's preflight from skills/at-build and from a project-tier .agents/skills/at-build copy: rc 0, root = this checkout, lease_create defined (control: that copy's locator rc 1 with the pointer moved aside); session start afterwards: rc 0, zero session-start: lines${_S21_ZSH_NOTE}; TRIFORGE_LEASE_WORKER=builder: the block exits nonzero with one REFUSED line, triforge_bootstrap rc 45, nothing written; from a lease root without the marker: rc 45 naming it, nothing written; tmplink: symlinks planted at the old temp names (<pointer>.tmp.<pid> -> AGENTS.md, <stamp>.tmp.<pid> -> a HOME file): rc 0, both targets byte-identical, pointer and stamp regular files; dirlink: .antigravity, .opencode, .kimi-code, .cursor and ops symlinked into a throwaway HOME: rc 80, a WARNING naming each refused write, nothing created there; gitfail: a tracked pointer under a malformed .git/config: rc 80, a WARNING that git could not answer, the pointer byte-identical, no .agents/.gitignore; writer: _tb_write on a symlinked final path: new rc 2 (link kept), replace swaps the link for a file, append rc 1, a file where a directory belongs rc 3 naming it, the link target unchanged; subdir: the block and session start from <repo>/src write nothing under src/ and set up <repo> (the hook's own state in <repo>/.claude, no one-time notice); trackgi: a committed .agents/.gitignore: rc 80, a WARNING naming the line, the file unmodified; refuse: .agents symlinked (git repo and plain directory), a tracked pointer, a vendored plugin root inside the project: rc 80 each with its own refusal WARNING, nothing written; hookrt: session start with a symlink planted at its old temp name and with .claude linked out of the project: rc 0, both targets byte-identical, nothing added there, a WARNING naming the refused file; round 3: links at the pid-free temp names (.tmp, .new, ~) beside every written file untouched, and no predictable temp name or mv -f in the three writers, both creating temps O_EXCL|O_NOFOLLOW under a random name (R6); a symlinked parent one and two levels down refused, an append to a hard-linked file rc 5 with the shared inode unchanged, a replace over one a new inode (R3, R4); a home directory as the project, plain and as a repository: bootstrap rc 69 and session start rc 0, one WARNING each, the directory byte-identical (R1), and at-setup's block stops there with one SETUP: stopped line, nothing written; skills-sync.py with links at its stamp's old temp names: untouched, the stamp a regular file (R2); a hard-linked .agents/.gitignore: rc 80, the shared inode unchanged (R3); a lease root named with a newline and a {-line: one REFUSED line, no hook stdout line starting with { (R5); a session started in <repo>/src names the project root once, one started at the root does not (R7); round 4: the home directory by a ${_S21_HCV:-case}-variant spelling, plain and a repository: bootstrap rc 69, session start rc 0, one WARNING each naming git init, nothing written (B1); skills-sync sync and add with the parent swapped for an outside link after the checks: nothing outside (B2); .codex/agents swapped for a HOME link before the move: the user-tier file untouched (B3); ops/ linked outside: enrollment and the three roster writers write nothing there, rc 6 (B7); the three roster writers in a home directory with an ops/, one without, and a subdirectory of a home directory that is a repository: rc 6 each, nothing made or changed there, while a project under that home directory still writes its roster; round 5: the hook names each refused enrollment in a WARNING (G6); the .codex/agents move across filesystems (EXDEV) copies the user's file over, and a move that fails leaves it with no shipped default at the new name (G5); negative control: the block without its triforge_bootstrap line leaves no ops/; fix round 1 (finding #7): a 3.x roster at <top>/sub/ops/roster.toml, no ops/ at the top: the bootstrap from sub rc 0 with one WARNING naming it, <top>/ops/roster.toml and the README section, the skeleton created; a second copy from <top>: the skeleton-creation scan warns once (four levels down named, five levels down and node_modules not); again from sub, at-setup's block and session start: warned again; from <top>, the bootstrap and session start: silent; the subdirectory rosters byte-identical after each run, nothing under sub/; silent for a nested checkout's roster, a symlinked roster or ops/ and no roster; rc 0 with and without the warning; under zsh too (unless skipped above): the block from sub warns once; review round 2, only a Triforge roster: another tool's roster in sub and two lookalikes (a role and a member Triforge has none of, the tables commented out) silent, under zsh too, the shipped template, a roster trimmed to one role setting only effort and a lone declined member warned once each, the roster template a Triforge tree ships silent from templates/ of a Triforge checkout and of the running plugin and in the scan; ${_S21_AG_NOTE}${_S21_AK_NOTE}" "static"
 else
   row "SELF-21" "claude" "$_S21_CAP" "FAIL" "mismatch:$(printf '%s' "$_S21_FAIL" | cut -c1-900)" "static"
 fi
@@ -4778,6 +4847,35 @@ rm -rf "$_S13"
 #   voidmerge a promotion approval, then one more merge -> promote 42 voided
 #   voiddef  a promotion approval, then main moves (accepted with
 #            lease_rebaseline) -> promote 42 voided
+#   trunk    no origin/HEAD and no main/master (the trunk is trunk), the
+#            integration branch touching AGENTS.md: the two-argument approval
+#            -> 1 naming the target argument; lease_promote trunk -> 42 naming
+#            lease_approve promotion:sprint/s14 user trunk; that approval
+#            records trunk and its commit, and lease_promote trunk promotes
+#   target   origin/HEAD -> main, the promotion going into develop: a third
+#            argument on task:<id> -> 64; a target that is no local branch
+#            (unknown, origin/main, develop~0) or is the integration branch
+#            itself -> 1, a lead-class one -> 1 naming the user's call with
+#            the target, and nothing recorded; the user's approval for
+#            develop -> lease_promote main 42 (approved into develop, not
+#            main) naming the call with main; develop moves -> 42 voided;
+#            approved again -> lease_promote develop promotes, main unmoved
+#   shadow   the integration branch touches .claude/settings.json and
+#            require_user_approval is off: lease_promote main -> 42; a tag
+#            main at the integration head -> still 42 naming the path, main
+#            untouched, the checkout still on sprint/s14; the same for
+#            refs/main and for a $GIT_DIR/main file; the user's approval with
+#            that file in place binds refs/heads/main and the real protected
+#            set, and lease_promote main promotes (git resolves all three
+#            ahead of refs/heads/main for a bare name)
+#   nonbranch a tag v1 at main, a commit id, origin/main and main~0 as the
+#            target -> 1 naming it no local branch, nothing touched (main, v1
+#            and origin/main unmoved, the checkout on sprint/s14, no ledger);
+#            lease_promote main promotes
+#   shadowmerge a tag sprint/s14 at a decoy commit (shadowing the integration
+#            branch) -> lease_merge merges into refs/heads/sprint/s14, the
+#            recorded integration branch stays sprint/s14, the tag stays;
+#            lease_promote main promotes the branch's commit, not the tag's
 #   handover a claude lead pins itself (lead class), then a forced handover
 #            to codex: handover_from/_to/_at on the open row; merge -> 42
 #            needing the user's approval, the codex lead's own refused (it
@@ -5030,6 +5128,120 @@ _self_try promote lease_promote main
 ')
 _S14_FAIL="${_S14_FAIL}$(_self_expect voiddef "$O" '^merge:rc=0:' '^app:rc=0:' '^moved:rc=44:' '^rebaseline:rc=0:' '^promote:rc=42:.*void.*main moved')"
 
+# trunk: no default branch to bind to; lease_approve's third argument names the target
+_s14_repo trunk claude codex
+( cd "$_S14/trunk" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git branch -m main trunk && echo "# x" > AGENTS.md && git add AGENTS.md \
+    && git commit -qm agents ) >/dev/null 2>&1
+O=$(_s14_lead trunk claude '
+_self_try twoarg lease_approve promotion:sprint/s14 user
+_self_try blocked lease_promote trunk
+_self_try app lease_approve promotion:sprint/s14 user trunk
+echo "rec=$(_ledger_get @baseline promotion_default):at-trunk=$(if [ "$(_ledger_get @baseline promotion_default_sha)" = "$(git rev-parse trunk)" ]; then echo yes; else echo no; fi)"
+_self_try promote lease_promote trunk
+echo "trunk=$(git rev-parse trunk | cut -c1-12):sprint=$(git rev-parse sprint/s14 | cut -c1-12)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect trunk "$O" '^twoarg:rc=1:.*no default branch.*lease_approve promotion:sprint/s14 user <target branch>' \
+  '^blocked:rc=42:.*AGENTS\.md.*lease_approve promotion:sprint/s14 user trunk ' '^app:rc=0:.*into trunk' '^rec=trunk:at-trunk=yes$' \
+  "^promote:rc=0:.*approved by the user.*PROMOTED 'sprint/s14' -> 'trunk'")"
+[ "$(printf '%s\n' "$O" | sed -n 's/^trunk=\([0-9a-f]*\):sprint=\([0-9a-f]*\)$/\1=\2/p' | awk -F= '$1 == $2 && $1 != "" { print "same" }')" = same ] || _S14_FAIL="${_S14_FAIL} trunk(trunk-not-at-sprint)"
+
+# target: the promotion goes into develop, not the default branch (origin/HEAD -> main)
+_s14_repo target claude codex
+( cd "$_S14/target" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git update-ref refs/remotes/origin/main main \
+    && git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main && git branch develop main && echo a > a.txt && git add a.txt \
+    && git commit -qm a && echo "# x" > AGENTS.md && git add AGENTS.md && git commit -qm agents ) >/dev/null 2>&1
+O=$(_s14_lead target claude '
+echo "default=$(_lease_default_branch)"
+_self_try taskarg lease_approve task:t user develop
+_self_try nosuch lease_approve promotion:sprint/s14 user nosuch
+_self_try remote lease_approve promotion:sprint/s14 user origin/main
+_self_try revexpr lease_approve promotion:sprint/s14 user "develop~0"
+_self_try self lease_approve promotion:sprint/s14 user sprint/s14
+_self_try leadapp lease_approve promotion:sprint/s14 claude develop
+echo "recorded=[$(_ledger_get @baseline promotion_scope 2>/dev/null)]"
+_self_try app lease_approve promotion:sprint/s14 user develop
+echo "rec=$(_ledger_get @baseline promotion_scope):$(_ledger_get @baseline promotion_default)"
+M=$(git rev-parse main)
+_self_try intomain lease_promote main
+git update-ref refs/heads/develop "$(git rev-parse sprint/s14~1)"
+_self_try moved lease_promote develop
+_self_try app2 lease_approve promotion:sprint/s14 user develop
+_self_try intodev lease_promote develop
+echo "develop=$(git rev-parse develop | cut -c1-12):sprint=$(git rev-parse sprint/s14 | cut -c1-12)"
+echo "main-moved=$(if [ "$(git rev-parse main)" = "$M" ]; then echo no; else echo yes; fi)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect target "$O" '^default=main$' '^taskarg:rc=64:.*usage' "^nosuch:rc=1:.*'nosuch' is not a local branch" \
+  "^remote:rc=1:.*'origin/main' is not a local branch" "^revexpr:rc=1:.*'develop~0' is not a local branch" '^self:rc=1:.*both the branch to promote and its target' \
+  '^leadapp:rc=1:.*lease_approve promotion:sprint/s14 user develop$' '^recorded=\[\]$' '^app:rc=0:.*into develop' '^rec=promotion:sprint/s14:develop$' \
+  '^intomain:rc=42:.*approved a promotion into develop, not main.*lease_approve promotion:sprint/s14 user main ' '^moved:rc=42:.*void: develop moved' \
+  '^app2:rc=0:' "^intodev:rc=0:.*approved by the user.*PROMOTED 'sprint/s14' -> 'develop'" '^main-moved=no$')"
+[ "$(printf '%s\n' "$O" | sed -n 's/^develop=\([0-9a-f]*\):sprint=\([0-9a-f]*\)$/\1=\2/p' | awk -F= '$1 == $2 && $1 != "" { print "same" }')" = same ] || _S14_FAIL="${_S14_FAIL} target(develop-not-at-sprint)"
+
+# shadow: a ref named like the default branch (a tag, refs/main, a $GIT_DIR/main
+# file) at the integration head can't empty the protected scan of a promotion
+_s14_repo shadow claude codex
+( cd "$_S14/shadow" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p .claude && echo "{}" > .claude/settings.json \
+    && git add -A && git commit -qm protected ) >/dev/null 2>&1
+O=$(_s14_lead shadow claude '
+M=$(git rev-parse refs/heads/main); H=$(git rev-parse refs/heads/sprint/s14)
+_s14_main() { if [ "$(git rev-parse refs/heads/main)" = "$M" ]; then echo kept; else echo moved; fi; }
+_self_try control lease_promote main
+git tag main "$H"
+_self_try tag lease_promote main
+echo "tag:main=$(_s14_main):on=$(git symbolic-ref HEAD 2>/dev/null || echo detached)"
+git tag -d main >/dev/null && git update-ref refs/main "$H"
+_self_try refs lease_promote main
+git update-ref -d refs/main && printf "%s\n" "$H" > .git/main
+_self_try gitdir lease_promote main
+echo "shadows:main=$(_s14_main):on=$(git symbolic-ref HEAD 2>/dev/null || echo detached)"
+_self_try app lease_approve promotion:sprint/s14 user
+echo "bound=$(if [ "$(_ledger_get @baseline promotion_default_sha)" = "$M" ]; then echo main; else echo other; fi)"
+_self_try promote lease_promote main
+rm -f .git/main
+echo "promoted:main=$(if [ "$(git rev-parse refs/heads/main)" = "$H" ]; then echo at-sprint; else echo other; fi)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect shadow "$O" '^control:rc=42:.*\.claude/settings\.json' '^tag:rc=42:.*\.claude/settings\.json' \
+  '^tag:main=kept:on=refs/heads/sprint/s14$' '^refs:rc=42:.*\.claude/settings\.json' '^gitdir:rc=42:.*\.claude/settings\.json' \
+  '^shadows:main=kept:on=refs/heads/sprint/s14$' '^app:rc=0:.*1 protected path\(s\): \.claude/settings\.json' '^bound=main$' \
+  "^promote:rc=0:.*approved by the user.*PROMOTED 'sprint/s14' -> 'main'.*protected-paths=1" '^promoted:main=at-sprint$')"
+
+# nonbranch: lease_promote's target is a local branch, nothing else
+_s14_repo nonbranch claude codex
+( cd "$_S14/nonbranch" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && echo n > n.txt && git add n.txt && git commit -qm n \
+    && git tag v1 main && git update-ref refs/remotes/origin/main main ) >/dev/null 2>&1
+O=$(_s14_lead nonbranch claude '
+M=$(git rev-parse refs/heads/main); H=$(git rev-parse refs/heads/sprint/s14)
+_self_try tag lease_promote v1
+_self_try sha lease_promote "$M"
+_self_try remote lease_promote origin/main
+_self_try revexpr lease_promote "main~0"
+echo "after:main=$(git rev-parse refs/heads/main | cut -c1-12):v1=$(git rev-parse refs/tags/v1 | cut -c1-12):origin=$(git rev-parse refs/remotes/origin/main | cut -c1-12):was=$(printf "%s" "$M" | cut -c1-12)"
+echo "after:on=$(git symbolic-ref HEAD 2>/dev/null || echo detached):ledger=$(if [ -e ops/leases.toml ]; then echo yes; else echo no; fi)"
+_self_try promote lease_promote main
+echo "promoted:main=$(if [ "$(git rev-parse refs/heads/main)" = "$H" ]; then echo at-sprint; else echo other; fi)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect nonbranch "$O" "^tag:rc=1:.*'v1' is not a local branch.*Nothing was touched" '^sha:rc=1:.*is not a local branch' \
+  "^remote:rc=1:.*'origin/main' is not a local branch" "^revexpr:rc=1:.*'main~0' is not a local branch" \
+  '^after:on=refs/heads/sprint/s14:ledger=no$' "^promote:rc=0:.*PROMOTED 'sprint/s14' -> 'main'" '^promoted:main=at-sprint$')"
+[ "$(printf '%s\n' "$O" | sed -n 's/^after:main=\([0-9a-f]*\):v1=\([0-9a-f]*\):origin=\([0-9a-f]*\):was=\([0-9a-f]*\)$/\1 \2 \3 \4/p' | awk '$1 == $4 && $2 == $4 && $3 == $4 && $4 != "" { print "kept" }')" = kept ] \
+  || _S14_FAIL="${_S14_FAIL} nonbranch(a-ref-moved:$(printf '%s\n' "$O" | grep '^after:main=' | head -1))"
+
+# shadowmerge: a tag named like the integration branch, at a decoy commit
+_s14_repo shadowmerge claude codex
+printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder shadowmerge
+O=$(_s14_lead shadowmerge claude '
+_self_go t
+_self_try pin lease_pin_reviewer t antigravity
+D=$(git commit-tree -p main -m decoy "main^{tree}") && git tag sprint/s14 "$D"
+_self_try merge lease_merge t antigravity
+MC=$(_ledger_get t merge_commit)
+echo "merged=$(if [ -n "$MC" ] && [ "$(git rev-parse refs/heads/sprint/s14)" = "$MC" ]; then echo branch; else echo other; fi):ib=$(_ledger_get @baseline integration_branch):tag=$(if [ "$(git rev-parse refs/tags/sprint/s14)" = "$D" ]; then echo kept; else echo moved; fi):state=$(_ledger_get t state)"
+_self_try promote lease_promote main
+echo "main=$(if [ -n "$MC" ] && [ "$(git rev-parse refs/heads/main)" = "$MC" ]; then echo at-merge; else echo other; fi):feature=[$(git show refs/heads/main:feature.txt 2>/dev/null)]"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect shadowmerge "$O" '^t:go=0:review$' '^pin:rc=0:' '^merge:rc=0:' '^merged=branch:ib=sprint/s14:tag=kept:state=merged$' \
+  "^promote:rc=0:.*PROMOTED 'sprint/s14' -> 'main'" '^main=at-merge:feature=\[feature\]$')"
+
 # handover: a lead-class pin from before a forced handover needs the user's approval
 _s14_repo handover claude codex
 printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder handover
@@ -5134,9 +5346,9 @@ echo "row=$(_ledger_get t state):by=$(_ledger_get t approval_by)"
 ')
 _S14_FAIL="${_S14_FAIL}$(_self_expect tmpdirs "$O" '^t:go=0:review$' '^pin:rc=0:' '^gone:rc=1:.*export TRIFORGE_LEASE_ROOT' '^app:rc=0:' '^merge:rc=0:' '^row=merged:by=user$')"
 
-_S14_CAP="ledger approvals: lead_cli + reviewer class per row; a protected change (base to snapshot) merges only with a lead or user merge approval bound to the snapshot, the lead's own CLI's build routed to the user; a protected or require_user_approval promotion needs the user's approval bound to the tree, voided by a later merge or a default-branch move; every approval records its origin (KTD2-KTD4, R5, R6, R32, R33)"
+_S14_CAP="ledger approvals: lead_cli + reviewer class per row; a protected change (base to snapshot) merges only with a lead or user merge approval bound to the snapshot, the lead's own CLI's build routed to the user; a protected or require_user_approval promotion needs the user's approval bound to the tree and the branch it goes into (the default branch, or the target named), voided by a later merge or a move of that branch; every approval records its origin (KTD2-KTD4, R5, R6, R32, R33)"
 if [ -z "$_S14_FAIL" ]; then
-  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused, and from the seam simulating claude; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude; a legacy claude pin after a handover to codex -> 42 needing the user, user merges; a legacy codex (worker) pin after it -> merges, class worker; tmpdirs: an approval from another TMPDIR lands beside the lead's anchors and merges, refused naming export TRIFORGE_LEASE_ROOT when the recorded root is gone" "static"
+  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused, and from the seam simulating claude; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; trunk: no origin/HEAD, main or master -> the two-argument approval 1 naming the target argument, lease_promote trunk 42 naming lease_approve promotion:<branch> user trunk, that approval records trunk and promotes; target: origin/HEAD -> main, the user's approval for develop -> lease_promote main 42 (approved into develop, not main) naming the call with main, develop moved -> 42 voided, approved again -> promotes into develop, main unmoved; a target that is no local branch (unknown, origin/main, develop~0) or the integration branch itself -> 1, a lead-class one -> 1 naming the user's call with the target, nothing recorded; a third argument on task:<id> -> 64; shadow: a protected integration diff, require_user_approval off, a tag main at the integration head -> lease_promote main still 42 naming .claude/settings.json, main untouched, still on sprint/s14, the same for refs/main and a \$GIT_DIR/main file, the user's approval with that file in place binds refs/heads/main and the real protected path and promotes; nonbranch: a tag, a commit id, origin/main and main~0 as the target -> 1, nothing touched (refs unmoved, still on sprint/s14, no ledger), main promotes; shadowmerge: a tag sprint/s14 at a decoy -> lease_merge merges into refs/heads/sprint/s14, integration branch recorded as sprint/s14, the tag kept, lease_promote main takes the branch's commit; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude; a legacy claude pin after a handover to codex -> 42 needing the user, user merges; a legacy codex (worker) pin after it -> merges, class worker; tmpdirs: an approval from another TMPDIR lands beside the lead's anchors and merges, refused naming export TRIFORGE_LEASE_ROOT when the recorded root is gone" "static"
 else
   row "SELF-14" "claude" "$_S14_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S14_FAIL"):$(printf '%s' "$_S14_FAIL" | cut -c1-900)" "static"
 fi
@@ -5648,6 +5860,16 @@ rm -rf "$_S15"
 #   objpromote3 a merged lease changed m.txt's line 5 and main moved since (line 1, accepted with lease_rebaseline), so
 #              lease_promote makes a merge commit of three versions; main's blob rewritten -> promote 44 naming it at main,
 #              main unmoved; written again -> promotes the merge of both changes
+#   objcross   (clean) the lease cut from a merge of a and b, then the integration branch rewritten as the merge of b and a
+#              (accepted with lease_rebaseline): it and the snapshot have two merge bases, a criss-cross -> merge 1 naming
+#              both bases and the recovery (lease the task again from the integration head), state review, HEAD unmoved,
+#              nothing staged, none of the object-store repair advice; lease_reclaim + the task leased again -> merges.
+#              Then main moved to another merge of a and b (accepted) -> lease_promote 1 naming both bases and git merge
+#              refs/heads/main, main unmoved; main merged into the integration branch + lease_rebaseline -> promotes
+#   perref     an exec persona's --at ref:<name> (the integration verifier's ref:<integration branch>): a tag sprint/s18
+#              at a decoy commit -> _persona_target 64 naming refs/heads/sprint/s18, also for ref:sprint/s18~0; the
+#              same for refs/sprint/s18 and for a $GIT_DIR/<name> file shadowing a branch; ref:refs/heads/sprint/s18
+#              and ref:HEAD -> the branch's commit; a tag at the branch's own commit -> passes
 #   objsha256  objblob in a sha256 repository (skipped, with a note in the evidence, where git can't create one)
 #   objgraph   writes feature.txt + AGENTS.md; a commit-graph naming a decoy tree (the snapshot without AGENTS.md) for the
 #              snapshot (_s18_graph): plain git diff sees the decoy, lease_merge still scans AGENTS.md -> 42, nothing merged
@@ -6214,6 +6436,58 @@ _S18_V=$(printf '%s\n' "$O" | sed -n 's/^blob=//p')
 _s18_expect objpromote3 "$O" 'merge-rc=0' 'rebaseline-rc=0' 'promote-rc=44' "blob ${_S18_V:-none} \\(m\\.txt at [0-9a-f]{12}\\): its content hashes to [0-9a-f]{12}" \
   '^on=sprint/s18 main-moved=no main-m=\[EVIL 2 3 4 5 \]$' 'repromote-rc=0' '^promoted=\[1h 2 3 4 5b \] on=main$'
 
+# objcross: a criss-cross history is refused without an integrity escalation,
+# naming the merge bases and the recovery that clears it; that recovery works.
+# The fixture's own commits come first: no ledger exists before the first lease.
+_s18_setup objcross
+_s18_clean objcross
+O=$(_s18_lead objcross 'git checkout -q -b xa main && echo a > a.txt && git add a.txt && git commit -qm a
+git checkout -q -b xb main && echo b > b.txt && git add b.txt && git commit -qm b
+git checkout -q -B sprint/s18 xa && git merge -q --no-edit xb
+_s18_go t; _s18_try collect lease_collect t; _s18_try pin lease_pin_reviewer t codex
+git checkout -q -B sprint/s18 xb && git merge -q --no-edit xa; _s18_try rebaseline lease_rebaseline; H=$(git rev-parse HEAD)
+echo "bases=$(git merge-base --all HEAD "$(_ledger_get t snapshot_sha)" | cut -c1-12 | tr "\n" " ")"
+_s18_try merge lease_merge t codex
+echo "state=$(_ledger_get t state) moved=$([ "$(git rev-parse HEAD)" = "$H" ] && echo no || echo yes) staged=[$(git diff --cached --name-only)]"
+_s18_try reclaim lease_reclaim t; _s18_go t; _s18_try recollect lease_collect t; _s18_try repin lease_pin_reviewer t codex; _s18_try remerge lease_merge t codex
+echo "merged=[$(git show HEAD:feature.txt 2>/dev/null)]"
+M=$(git commit-tree "$(git rev-parse "$H^{tree}")" -p xa -p xb -m "main merges a and b"); git update-ref refs/heads/main "$M"; _s18_try rebaseline2 lease_rebaseline
+echo "pbases=$(git merge-base --all main HEAD | cut -c1-12 | tr "\n" " ")"
+_s18_try promote lease_promote main
+echo "main-moved=$([ "$(git rev-parse main)" = "$M" ] && echo no || echo yes) on=$(git symbolic-ref --short HEAD)"
+git merge -q --no-edit refs/heads/main; _s18_try rebaseline3 lease_rebaseline; _s18_try repromote lease_promote main
+echo "promoted=[$(git show main:feature.txt 2>/dev/null)] on=$(git symbolic-ref --short HEAD)"')
+_S18_XB=$(printf '%s\n' "$O" | sed -n 's/^bases=//p'); _S18_XP=$(printf '%s\n' "$O" | sed -n 's/^pbases=//p')
+_s18_expect objcross "$O" 'collect-rc=0' 'rebaseline-rc=0' 'merge-rc=1' "^lease_merge: REFUSED — [0-9a-f]{12} and [0-9a-f]{12} have 2 merge bases \\([0-9a-f ]{25}\\), a criss-cross history" \
+  "^lease_merge: REFUSED — .* have 2 merge bases \\([0-9a-f ]*$(printf '%s' "$_S18_XB" | cut -d' ' -f1)" \
+  "^lease_merge: REFUSED — .* have 2 merge bases \\([0-9a-f ]*$(printf '%s' "$_S18_XB" | cut -d' ' -f2)" \
+  't stays in review \(no integrity escalation\).*Lease the task again from the integration branch.s current head: lease_reclaim t, then lease_create t builder and lease_dispatch t' \
+  '^state=review moved=no staged=\[\]$' 'reclaim-rc=0' 'recollect-rc=0' 'remerge-rc=0' '^merged=\[feature\]$' 'rebaseline2-rc=0' 'promote-rc=1' \
+  "^lease_promote: REFUSED — [0-9a-f]{12} and [0-9a-f]{12} have 2 merge bases \\([0-9a-f ]*$(printf '%s' "$_S18_XP" | cut -d' ' -f1)" \
+  "^lease_promote: REFUSED — .* have 2 merge bases \\([0-9a-f ]*$(printf '%s' "$_S18_XP" | cut -d' ' -f2)" "merge it into 'sprint/s18' in this checkout \\(git merge refs/heads/main, the full ref" \
+  '^main-moved=no on=sprint/s18$' 'rebaseline3-rc=0' 'repromote-rc=0' '^promoted=\[feature\] on=main$'
+printf '%s\n' "$O" | grep -qE 'INTEGRITY|Inspect it \(git fsck|puts the lease back in review|repair the store|^state=escalated' \
+  && _S18_FAIL="$_S18_FAIL objcross(object-store-repair-advice:$(printf '%s\n' "$O" | grep -E 'INTEGRITY|^state=' | tr '\n' '|' | cut -c1-200))"
+
+# perref: an exec persona's --at ref:<name> never follows a ref that shadows
+# the branch of that name (_persona_ref_unambiguous, scripts/lib/persona.sh)
+_s18_setup perref
+O=$(_s18_lead perref 'B=$(git rev-parse refs/heads/sprint/s18); D=$(git commit-tree -p main -m decoy "main^{tree}")
+_s18_pt() { # _s18_pt <label> <at> — _persona_target, then "<label>-rc=<n>:<branch|decoy|none>" and its stderr
+  local L=$1 R=0
+  _PT_COMMIT=""; _persona_target dispatch_persona "$2" >/dev/null 2>"$HOME/$L.err" || R=$?
+  echo "$L-rc=$R:$(if [ "$_PT_COMMIT" = "$B" ]; then echo branch; elif [ "$_PT_COMMIT" = "$D" ]; then echo decoy; else echo none; fi)"
+  cat "$HOME/$L.err"
+}
+_s18_pt plain ref:sprint/s18
+git tag sprint/s18 "$D"; _s18_pt tag ref:sprint/s18; _s18_pt expr "ref:sprint/s18~0"; _s18_pt full ref:refs/heads/sprint/s18; _s18_pt head ref:HEAD
+git tag -d sprint/s18 >/dev/null; git update-ref refs/sprint/s18 "$D"; _s18_pt refs ref:sprint/s18; git update-ref -d refs/sprint/s18
+git branch -q side "$B"; printf "%s\n" "$D" > .git/side; _s18_pt gitdir ref:side; rm -f .git/side
+git tag sprint/s18 "$B"; _s18_pt same ref:sprint/s18')
+_s18_expect perref "$O" '^plain-rc=0:branch$' '^tag-rc=64:none$' 'ref:sprint/s18 is ambiguous: git resolves sprint/s18 to [0-9a-f]{12}, but refs/heads/sprint/s18 is at [0-9a-f]{12}' \
+  'name it in full, e.g. ref:refs/heads/sprint/s18, or remove the other ref' '^expr-rc=64:none$' '^full-rc=0:branch$' '^head-rc=0:branch$' '^refs-rc=64:none$' \
+  '^gitdir-rc=64:none$' 'ref:side is ambiguous' '^same-rc=0:branch$'
+
 # objgraph: a commit-graph naming a decoy tree for the snapshot. Plain git diff
 # reads the graph (graph-diff names the decoy's one change), the squash reads the
 # commit object: the scans the lead runs must read the same tree as the squash.
@@ -6428,7 +6702,7 @@ _S18_NEG=$(_s18_git_scan "$_S18/lease-planted.sh" | cut -d: -f1 | tr '\n' ' ')
   || _S18_FAIL="$_S18_FAIL scan-negative-control(want-lines:$((_S18_N - 2)),$((_S18_N - 1)),${_S18_N};got:[${_S18_NEG% }])"
 
 if [ -z "$_S18_FAIL" ]; then
-  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer/leadcfg -> collect rc 44 naming the surface (config, hooks, ledger and the lead trusted git config restored, gitconfig.changed-* kept; marker never ran); post-checkout planted: next lease_create 44; fsmonitor, filter, post-checkout and pointer once accepted (lease_rebaseline) still never run and collect snapshots (pointer via the recorded admin dir); tampered hooks.copy -> 44, NOT restored; ledger swapped for a symlink -> 44, a regular file again; the lead's own git remote add -> 44 naming the saved copy, put back + rebaselined -> collect 0, origin kept; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; git gc after collect (writes .git/info/refs) -> merges; lead checkout switched to rogue -> merge 44 naming sprint/s18 and rogue, state review, back on sprint/s18 -> merges; lease_create on main records no integration branch, sprint/two cut after it -> lease + merge, no 44; a lead commit on the integration branch -> merge 44 (moved), lease_rebaseline -> merges on top; identity only in an [include]d ~/.gitconfig file -> the merge commit carries it; linked-worktree lead checkout whose .git pointer is rewritten to the lease admin dir -> collect 44 naming it; after review the snapshot's new blob rewritten in the object store under its own id -> merge 44 naming it, HEAD unmoved, nothing staged, the lease escalated, the blob written again from the worktree + lease_rebaseline -> merges the reviewed content (${_S18_SHA256}); a subtree rewritten to point at a decoy -> merge 44 naming the tree; the root tree rewritten -> merge 44 naming it and the lease escalated (the re-hash runs ahead of the snapshot checks, whose read-tree would refuse it with rc 1), the repair hint naming write-tree for a tree; a blob the integration branch already has, copied by the snapshot to a new path and rewritten -> merge 44 naming the blob at the new path, HEAD unmoved, nothing staged; a file the integration branch and the snapshot both changed since the base (the squash merges three versions): HEAD's blob rewritten -> merge 44 naming it at HEAD, nothing merged, written again from the lead checkout + lease_rebaseline -> merges both changes; the merge base's blob rewritten -> merge 44 naming it at the merge base, nothing merged; a gitlink that moved on the integration branch after collect -> merges (neither side of it is an object of this repository); a merged blob rewritten -> lease_promote 44, main unmoved, written again -> promotes; main moved since the sprint began (accepted), so the promotion is a merge commit of three versions of a file: main's blob rewritten -> lease_promote 44 naming it at main, main unmoved, written again -> promotes the merge of both changes; ${_S18_GRAPH}; a HOME that is itself a git repository: lease_create from it and from a directory in it, and lease_wait -> rc 1 with one ERROR line (a home directory is no project), coordinate.sh -> 44 before any session, the persona task: and ref: targets -> 64, no ~/ops, no lease root, HOME byte-identical, a project with its own repository under that HOME leases; every git call in lease.sh and lease-wait.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines in lease.sh, none in lease-wait.sh; planted { git / else git / env -u git lines caught)" "static"
+  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer/leadcfg -> collect rc 44 naming the surface (config, hooks, ledger and the lead trusted git config restored, gitconfig.changed-* kept; marker never ran); post-checkout planted: next lease_create 44; fsmonitor, filter, post-checkout and pointer once accepted (lease_rebaseline) still never run and collect snapshots (pointer via the recorded admin dir); tampered hooks.copy -> 44, NOT restored; ledger swapped for a symlink -> 44, a regular file again; the lead's own git remote add -> 44 naming the saved copy, put back + rebaselined -> collect 0, origin kept; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; git gc after collect (writes .git/info/refs) -> merges; lead checkout switched to rogue -> merge 44 naming sprint/s18 and rogue, state review, back on sprint/s18 -> merges; lease_create on main records no integration branch, sprint/two cut after it -> lease + merge, no 44; a lead commit on the integration branch -> merge 44 (moved), lease_rebaseline -> merges on top; identity only in an [include]d ~/.gitconfig file -> the merge commit carries it; linked-worktree lead checkout whose .git pointer is rewritten to the lease admin dir -> collect 44 naming it; after review the snapshot's new blob rewritten in the object store under its own id -> merge 44 naming it, HEAD unmoved, nothing staged, the lease escalated, the blob written again from the worktree + lease_rebaseline -> merges the reviewed content (${_S18_SHA256}); a subtree rewritten to point at a decoy -> merge 44 naming the tree; the root tree rewritten -> merge 44 naming it and the lease escalated (the re-hash runs ahead of the snapshot checks, whose read-tree would refuse it with rc 1), the repair hint naming write-tree for a tree; a blob the integration branch already has, copied by the snapshot to a new path and rewritten -> merge 44 naming the blob at the new path, HEAD unmoved, nothing staged; a file the integration branch and the snapshot both changed since the base (the squash merges three versions): HEAD's blob rewritten -> merge 44 naming it at HEAD, nothing merged, written again from the lead checkout + lease_rebaseline -> merges both changes; the merge base's blob rewritten -> merge 44 naming it at the merge base, nothing merged; a gitlink that moved on the integration branch after collect -> merges (neither side of it is an object of this repository); a merged blob rewritten -> lease_promote 44, main unmoved, written again -> promotes; main moved since the sprint began (accepted), so the promotion is a merge commit of three versions of a file: main's blob rewritten -> lease_promote 44 naming it at main, main unmoved, written again -> promotes the merge of both changes; the integration branch rewritten (accepted) into a criss-cross with the snapshot -> merge 1 naming both merge bases and the recovery, state review, nothing merged, no object-store repair advice, the task leased again from the integration head -> merges; main and the integration branch in a criss-cross -> lease_promote 1 naming both merge bases and git merge refs/heads/main, main unmoved, merged in + rebaselined -> promotes; an exec persona's --at ref:sprint/s18 with a tag, refs/<name> or a \$GIT_DIR/<name> file shadowing the branch -> 64 naming ref:refs/heads/<name> (also through a revision expression), the full ref and ref:HEAD take the branch's commit, a shadow at the same commit passes; ${_S18_GRAPH}; a HOME that is itself a git repository: lease_create from it and from a directory in it, and lease_wait -> rc 1 with one ERROR line (a home directory is no project), coordinate.sh -> 44 before any session, the persona task: and ref: targets -> 64, no ~/ops, no lease root, HOME byte-identical, a project with its own repository under that HOME leases; every git call in lease.sh and lease-wait.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines in lease.sh, none in lease-wait.sh; planted { git / else git / env -u git lines caught)" "static"
 else
   # the failed case names first, so a long pattern list can't cut them off
   row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "FAIL" "mismatch in $(_self_fail_cases "$_S18_FAIL"):$(printf '%s' "$_S18_FAIL" | cut -c1-500)" "static"
@@ -7268,6 +7542,11 @@ rm -rf "$_S19"
 #             ERROR line naming HOME as no project, the stub never runs, HOME
 #             byte-identical; from a project with its own repository under
 #             that HOME the tester runs, rc 0
+#   ctx       a codex lead's tester resolving to claude with a lease root
+#             that can't be made (TRIFORGE_LEASE_ROOT=/dev/null/x), so no
+#             git-dir deny: rc 69, deterministic, _lease_ctx's line and one
+#             dispatch_role ERROR line, the stub never runs; outside any git
+#             repository (no git dir to deny) the reviewer runs, rc 0
 _S20="${WORK}/self20"
 _S20_FAIL=""
 _S20_SID="7d0f3a52-1b2c-4d5e-8f90-0123456789ab"
@@ -7535,9 +7814,29 @@ _S20_FAIL="${_S20_FAIL}$(_self_expect home "$O" '^home-tester:rc=69:class=determ
   '^dispatch_role: ERROR .*/hrepo/docs is in a checkout that is your home directory or contains it, and a home directory is no project' \
   '^home-identical=yes$' '^proj-tester:rc=0:stub=ran$')"
 
-_S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON envelope (subtype, is_error, session_id), explicit tool sets, --max-turns, session resume, the sandbox settings and their Claude Code floor, the claude env arm, .claude/skills provisioning that adds names only, max-turns routed as report missing, dispatch_role running claude -p under a codex lead (KTD16, R2/R3)"
+# ctx: the claude worker's git-dir deny needs the lead's lease context; a
+# lease root that can't be made refuses like a home directory, while outside
+# any git repository there is no git dir to deny and the worker runs
+_s20_repo "$_S20/crepo" '[lead]\ncli = "codex"\n\n[roles.tester]\ncli = "claude"\n'
+mkdir -p "$_S20/nogit/ops"
+printf '[lead]\ncli = "codex"\n\n[roles.reviewer]\ncli = "claude"\n' > "$_S20/nogit/ops/roster.toml"
+printf 'tester\n' > "$_S20/tmp/s20-mode"
+rm -f "$_S20"/tmp/s20-rec.*
+# shellcheck disable=SC2086
+O=$( cd "$_S20/crepo" && export $_S20_ENV TRIFORGE_TEST_LEAD=codex && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  R=0; TRIFORGE_LEASE_ROOT=/dev/null/x dispatch_role tester test_writer "PROMPT-S20C" "$_S20/ctx.out" 30 >/dev/null 2>"$_S20/ctx.err" || R=$?
+  echo "ctx-root:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:stub=$([ -f "$_S20/tmp/s20-rec.n" ] && echo ran || echo idle):lease=$(grep -c '^lease: ERROR could not set up the lease context' "$_S20/ctx.err" || true):named=$(grep -c "^dispatch_role: ERROR the lead's lease context can't be set up" "$_S20/ctx.err" || true)"
+  cd "$_S20/nogit" || exit 0
+  if _checkout_top >/dev/null 2>&1; then echo "ctx-nogit:inside-a-repository"; exit 0; fi
+  printf 'review\n' > "$_S20/tmp/s20-mode"
+  R=0; dispatch_role reviewer logic_reviewer "PROMPT-S20N" "$_S20/nogit.out" 30 >/dev/null 2>&1 || R=$?
+  echo "ctx-nogit:rc=${R}:stub=$([ -f "$_S20/tmp/s20-rec.n" ] && echo ran || echo idle):out=$(tr '\n' ' ' < "$_S20/nogit.out" 2>/dev/null)"
+) 2>&1 || true
+_S20_FAIL="${_S20_FAIL}$(_self_expect ctx "$O" '^ctx-root:rc=69:class=deterministic:stub=idle:lease=1:named=1$' '^ctx-nogit:rc=0:stub=ran:out=REVIEW-OK no findings')"
+
+_S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON envelope (subtype, is_error, session_id), explicit tool sets, --max-turns, session resume, the sandbox settings and their Claude Code floor, the claude env arm, .claude/skills provisioning that adds names only, max-turns routed as report missing, dispatch_role running claude -p under a codex lead, never without its deny on the lead's git dir inside a git checkout (KTD16, R2/R3)"
 if [ -z "$_S20_FAIL" ]; then
-  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0" "static"
+  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0; ctx: a codex lead's tester on claude with TRIFORGE_LEASE_ROOT=/dev/null/x -> rc 69 deterministic, the lease line and one ERROR line, stub never run; outside any git repository the reviewer runs, rc 0" "static"
 else
   row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S20_FAIL"):$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"
 fi
@@ -8089,7 +8388,9 @@ rm -rf "$_S24"
 # pluginhook (a hook and an LSP server of the listed user plugin),
 # strayplugin (a hook of a plugin inspect does not list), sleep (inspect
 # records its pid and sleeps 30 s), noterm (inspect ignores TERM, records its
-# pid and sleeps until it is killed), lateserver (one more user MCP server).
+# pid and sleeps until it is killed), orphan (inspect starts a child that
+# ignores TERM, its pid in orphan.pid, then answers as full does), lateserver
+# (one more user MCP server).
 # Like grok 1.0.34, inspect lists no MCP server the working directory's
 # .grok/config.toml already shadows.
 # Any other run records its argv (prompt included), environment, working
@@ -8100,6 +8401,9 @@ rm -rf "$_S24"
 # done (Status: DONE, end_turn), maxtokens, noend and maxturns (Status: DONE,
 # then max_tokens, no end event, or max_turns_reached and exit 1), empty
 # (end_turn alone), interrupted (exit 130, as a grok a SIGINT stopped),
+# orphan and orphan-hang (a child that ignores TERM, its pid in orphan.pid,
+# then the done stream, or a sleep of 300 s), orphan-psfail (orphan, and a
+# ps-fail file the sweep case's ps stub then fails on),
 # transient-decline and transient-taint (a failure a retry may fix, exit 1,
 # after writing grok's decline into the roster named in decline-roster, or a
 # key into the git config named in taint-git); each
@@ -8235,8 +8539,39 @@ rm -rf "$_S24"
 #   trap       TERM to _grok_run_in's subshell while the provisioning inspect
 #              sleeps: the inspect stopped, no scratch directory left; with an
 #              inspect that ignores TERM (the sleeps it starts too): KILLed
-#              once the 2 s grace is out, so nothing outlives the subshell,
+#              within the stop's 5 s grace, so nothing outlives the subshell,
 #              which exits 143 with no scratch directory left
+#   sweep      invoke_grok as a reviewer whose grok leaves a child that ignores
+#              TERM: a run that then exits 0 (rc 0), one that sleeps past a
+#              2 s run timeout (rc 124, class timeout), and a provisioning
+#              inspect that leaves one (rc 0): each child gone when
+#              invoke_grok returns, no scratch directory left; with ps failing
+#              once grok has run, so the sweep can't be verified: rc 80, class
+#              deterministic, reason unresolved-cleanup, one run, the scratch
+#              directory left in place and named on stderr, the supervisor's
+#              warning naming invoke_grok and grok (no dispatch_persona); the
+#              supervisor with no label keeps the persona lane's words
+#   provision  the provisioning inspect in the lead's own shell, leaving a
+#              child that ignores TERM: grok_read_isolation_check rc 0 with its
+#              OK line, and lease_create of a reviewer leased, each child gone
+#              by the time they return; with ps failing once the inspect has
+#              run, each fails closed: the check rc 1 with no OK line, its
+#              directory kept and named; lease_create rc 1, no ledger row (so
+#              nothing to dispatch), the worktree kept and named
+#   ctx        invoke_grok's refusal (rc 69, reason isolation, grok never run)
+#              names the cause _lease_ctx found: a lease root that can't be
+#              made, one whose lead/ is another user's directory (both by
+#              _lease_ctx's own words, never "not inside a git checkout"), and
+#              outside any git repository (today's "not inside a git
+#              checkout")
+#   dispatch   dispatch_role reviewer logic_reviewer and analyst
+#              architecture-reviewer (at-review's persona names) with both
+#              roles on grok: the prompt grok gets starts with
+#              grok-agents/reviewer.md's body and holds its Status contract,
+#              in the read-only sandbox, one stderr line naming the
+#              substitution and no "not found" warning, Status: DONE; with
+#              both roles on kimi (a stub that records its argv): --agent-file
+#              <plugin root>/kimi-agents/reviewer.md, no warning
 #   fg-integrity  invoke_grok as a reviewer with the lead's integrity check
 #              refusing (a stub returning 44), and in a project with an open
 #              lease and a fresh lease_rebaseline whose .git/config then gains
@@ -8249,6 +8584,11 @@ rm -rf "$_S24"
 #              committed, and no ledger is written
 _S25="${WORK}/self25"
 mkdir -p "$_S25/bin" "$_S25/tmp" "$_S25/log" "$_S25/home/.claude/plugins" "$_S25/outside"
+# The physical path, which the helpers print (realpath, pwd -P, a cd's PWD):
+# the harness's WORK can hold a // (a TMPDIR ending in /) and sit below a
+# symlinked directory (/var on macOS), and the cases match their output
+# against this spelling.
+_S25=$(cd "$_S25" && pwd -P)
 cat > "$_S25/bin/grok" <<'EOF'
 #!/bin/sh
 # SELF-25 grok stub
@@ -8263,6 +8603,8 @@ if [ "$1" = inspect ]; then
     fail)      echo '{}'; exit 1 ;;
     sleep)     echo "$$" > "$D/inspect.pid"; exec sleep 30 ;;
     noterm)    trap '' TERM; echo "$$" > "$D/inspect.pid"; while :; do sleep 1; done ;;
+    orphan)    ( trap '' TERM; exec sleep 300 ) > /dev/null 2>&1 & echo "$!" > "$D/orphan.pid" ;;
+    orphan-psfail) ( trap '' TERM; exec sleep 300 ) > /dev/null 2>&1 & echo "$!" > "$D/orphan.pid"; : > "$D/ps-fail" ;;
   esac
   OV='{"role":"env_overlay","path":"$GROK_CONFIG (inline)","note":"sections: shell_environment_policy, toolset"}'
   if [ -z "${GROK_CONFIG:-}" ] || [ -f "$D/overlay-ignored" ]; then
@@ -8315,6 +8657,9 @@ case "$(cat "$D/mode" 2>/dev/null || echo done)" in
   maxturns)  printf '%s\n' "$T" '{"type":"usage"}' '{"type":"max_turns_reached"}' '{"type":"end","stopReason":"cancelled","num_turns":1}'; echo "Error: max turns reached" >&2; exit 1 ;;
   empty)     printf '%s\n' '{"type":"end","stopReason":"end_turn","num_turns":1}' ;;
   interrupted) exit 130 ;;
+  orphan)      ( trap '' TERM; exec sleep 300 ) & echo "$!" > "$D/orphan.pid"; printf '%s\n' "$T" '{"type":"usage"}' '{"type":"end","stopReason":"end_turn","num_turns":1}' ;;
+  orphan-hang) ( trap '' TERM; exec sleep 300 ) & echo "$!" > "$D/orphan.pid"; exec sleep 300 ;;
+  orphan-psfail) ( trap '' TERM; exec sleep 300 ) & echo "$!" > "$D/orphan.pid"; : > "$D/ps-fail"; printf '%s\n' "$T" '{"type":"usage"}' '{"type":"end","stopReason":"end_turn","num_turns":1}' ;;
   transient-decline) printf '[members.grok]\nenabled = false\n' > "$(cat "$D/decline-roster")"; echo "Error: connection reset by peer" >&2; exit 1 ;;
   transient-taint)   git --git-dir="$(cat "$D/taint-git")" config s25.taint yes; echo "Error: connection reset by peer" >&2; exit 1 ;;
   *)         printf '%s\n' "$T" '{"type":"usage"}' '{"type":"end","stopReason":"end_turn","num_turns":1}' ;;
@@ -8871,8 +9216,8 @@ O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25
   if [ -n "$SP" ]; then kill -TERM "$SP" 2>/dev/null || true; fi
   # the same with an inspect that ignores TERM, and so do the sleeps it
   # starts: gone by the time the subshell exits, at most a second later. The
-  # subshell gets 8 s (the 2 s grace and the KILL, with slack) before it
-  # counts as hung; a stub left alive is killed here, never by the gate's end
+  # subshell gets 8 s (the stop's 5 s grace and the KILL, with slack) before
+  # it counts as hung; a stub left alive is killed here, never by the gate's end
   rm -f "$_S25/inspect.pid"; printf 'noterm\n' > "$_S25/inspect-mode"
   _grok_run_in "$S" "$TO" 60 "probe trap S25 noterm" "$_S25/trap.ready" > /dev/null 2>&1 &
   J=$!
@@ -8892,9 +9237,149 @@ O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25
   rm -f "$_S25/inspect-mode" )
 _S25_FAIL="${_S25_FAIL}$(_self_expect trap "$O" '^trap:started=yes:before=1:dirs=0:stub=gone$' '^trap-noterm:started=yes:before=1:rc=143:dirs=0:stub=gone$')"
 
-_S25_CAP="Grok Build's lane: the permission class by role (a reviewer or analyst read-only, with Edit, Write and Bash denied over any imported Claude allow rule, and MCP tools denied in every class; grok takes builder, reviewer and analyst, and edits only in a lease), the env prefix and include_only overlay pinned, a report only from an end_turn run, the provisioned .grok/config.toml that disables every plugin and shadows every MCP server, the user's own included (never merged, never without a full inspect, refused when it can't be proven), no read-class run where the project supplies code grok would start, while the user's own grok hooks and settings run with one NOTE line naming each (checked again, and the tables rebuilt, at every read-class dispatch; asked by at-setup through grok_read_isolation_check), the builder's sandbox profile closing GROK_HOME's code and instruction paths (rewritten before each dispatch), and invoke_grok's read class in a removed scratch checkout under env -i, after the roster and integrity checks before every attempt, with no filter or hook run and a TERM that leaves nothing behind (R23)"
+# what grok leaves running: a child that ignores TERM, started by the run
+# (which then exits 0, or sleeps past a 2 s run timeout) and by the
+# provisioning inspect, is gone by the time invoke_grok returns (a second
+# allowed for its parent to reap it), and no scratch directory is left. With
+# ps failing once grok has run (a ps stub first on PATH that fails while
+# ps-fail exists), the sweep can't be verified: rc 80, no retry, and the
+# scratch directory stays, named on stderr. A child still alive, and that
+# directory, are removed here, never by the gate's end
+mkdir -p "$_S25/psbin"
+printf '#!/bin/sh\n# SELF-25 ps stub: fails while ps-fail exists, else the real ps\nif [ -f "%s/ps-fail" ]; then exit 1; fi\nexec "%s" "$@"\n' "$_S25" "$(command -v ps)" > "$_S25/psbin/ps"
+chmod +x "$_S25/psbin/ps"
+O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25/psbin:$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/fg-leases" \
+       XAI_API_KEY=s25-stub-key && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for M in run:orphan:60 hang:orphan-hang:2 inspect:orphan:60 unresolved:orphan-psfail:60; do
+    K=${M%%:*}; W=${M#*:}; T=${W#*:}; W=${W%%:*}
+    rm -f "$_S25/orphan.pid" "$_S25/ps-fail"; : > "$_S25/log/runs"
+    if [ "$K" = inspect ]; then printf '%s\n' "$W" > "$_S25/inspect-mode"; else printf '%s\n' "$W" > "$_S25/mode"; fi
+    R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 sweep ${K}" "$_S25/sweep-${K}.out" "$T" >/dev/null 2> "$_S25/sweep-${K}.err" || R=$?
+    rm -f "$_S25/mode" "$_S25/inspect-mode" "$_S25/ps-fail"
+    OP=$(cat "$_S25/orphan.pid" 2>/dev/null || true)
+    N=0
+    while [ "$N" -lt 10 ] && [ -n "$OP" ] && kill -0 "$OP" 2>/dev/null; do sleep 0.1; N=$((N + 1)); done
+    LEFT=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null || true)
+    echo "sweep-${K}:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:runs=$(grep -c . "$_S25/log/runs" 2>/dev/null || true):started=$( [ -n "$OP" ] && echo yes || echo no):child=$( [ -n "$OP" ] && kill -0 "$OP" 2>/dev/null && echo alive || echo gone):left=$(printf '%s' "$LEFT" | grep -c . || true):named=$(if [ -n "$LEFT" ]; then grep -F 'invoke_grok: unresolved cleanup' "$_S25/sweep-${K}.err" 2>/dev/null | grep -cF "$LEFT" || true; else echo 0; fi):label=$(grep -c '^invoke_grok: WARNING unresolved cleanup: grok left ' "$_S25/sweep-${K}.err" 2>/dev/null || true):persona=$(grep -c 'dispatch_persona' "$_S25/sweep-${K}.err" 2>/dev/null || true)"
+    if [ -n "$OP" ]; then kill -KILL "$OP" 2>/dev/null || true; fi
+    if [ -n "$LEFT" ]; then rm -rf "$_S25/tmp"/triforge-grok.*; fi
+  done
+  # with no label the run supervisor keeps the persona lane's own words
+  : > "$_S25/ps-fail"
+  DEF=$(env -u TRIFORGE_RUN_LABEL python3 -c "$_PERSONA_RUN_PY" 0 "$(_timeout_tool)" -k 1s 5s true 2>&1 >/dev/null || true)
+  rm -f "$_S25/ps-fail"
+  echo "sweep-default:persona=$(printf '%s\n' "$DEF" | grep -c '^dispatch_persona: WARNING unresolved cleanup: the persona CLI left ' || true):grok=$(printf '%s\n' "$DEF" | grep -c 'invoke_grok' || true)" )
+_S25_FAIL="${_S25_FAIL}$(_self_expect sweep "$O" '^sweep-run:rc=0:class=none:reason=:runs=1:started=yes:child=gone:left=0:named=0:label=0:persona=0$' \
+  '^sweep-hang:rc=124:class=timeout:reason=:runs=1:started=yes:child=gone:left=0:named=0:label=0:persona=0$' '^sweep-inspect:rc=0:class=none:reason=:runs=1:started=yes:child=gone:left=0:named=0:label=0:persona=0$' \
+  '^sweep-unresolved:rc=80:class=deterministic:reason=unresolved-cleanup:runs=1:started=yes:child=gone:left=1:named=1:label=1:persona=0$' '^sweep-default:persona=1:grok=0$')"
+
+# the provisioning inspect in the lead's own shell runs supervised as well:
+# at-setup's grok_read_isolation_check and lease_create of a grok reviewer,
+# each with an inspect that leaves a child ignoring TERM, pass with the child
+# gone by the time they return; with ps failing once the inspect has run (the
+# ps stub above), the sweep can't be verified and each fails closed with its
+# directory left in place and named: the check rc 1 with no OK line, and
+# lease_create rc 1 with no ledger row, so nothing can be dispatched, and the
+# worktree kept. A child still alive, and what was kept, are removed here
+_self_repo "$_S25/pv" "$_S25/home" sprint/s25pv "$_S25_ROSTER"
+O=$( cd "$_S25/pv" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25/psbin:$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/pv-leases" \
+       XAI_API_KEY=s25-stub-key CLAUDECODE=1 && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  _c() { grep -c "$@" 2>/dev/null || true; }
+  _gone() { # _gone <pid> — gone, or alive after a second allowed for the reaping
+    local N=0
+    while [ "$N" -lt 10 ] && [ -n "$1" ] && kill -0 "$1" 2>/dev/null; do sleep 0.1; N=$((N + 1)); done
+    if [ -n "$1" ] && kill -0 "$1" 2>/dev/null; then echo alive; else echo gone; fi
+  }
+  for M in orphan orphan-psfail; do
+    rm -f "$_S25/orphan.pid" "$_S25/ps-fail"; printf '%s\n' "$M" > "$_S25/inspect-mode"
+    R=0; grok_read_isolation_check > "$_S25/pv-check-$M.out" 2>&1 || R=$?
+    rm -f "$_S25/inspect-mode" "$_S25/ps-fail"
+    OP=$(cat "$_S25/orphan.pid" 2>/dev/null || true)
+    LEFT=$(ls -d "$_S25/tmp"/triforge-grok-check.* 2>/dev/null || true)
+    echo "pv-check-${M}:rc=${R}:ok=$(_c '^grok: OK' "$_S25/pv-check-$M.out"):child=$(_gone "$OP"):left=$(printf '%s' "$LEFT" | grep -c . || true):named=$(if [ -n "$LEFT" ]; then _c -F "${LEFT} stays" "$_S25/pv-check-$M.out"; else echo 0; fi)"
+    if [ -n "$OP" ]; then kill -KILL "$OP" 2>/dev/null || true; fi
+    rm -rf "$_S25/tmp"/triforge-grok-check.*
+  done
+  for T in s25pvo:orphan s25pvu:orphan-psfail; do
+    K=${T%%:*}; M=${T#*:}
+    rm -f "$_S25/orphan.pid" "$_S25/ps-fail"; printf '%s\n' "$M" > "$_S25/inspect-mode"
+    R=0; lease_create "$K" reviewer >/dev/null 2> "$_S25/pv-lease-$M.err" || R=$?
+    rm -f "$_S25/inspect-mode" "$_S25/ps-fail"
+    OP=$(cat "$_S25/orphan.pid" 2>/dev/null || true)
+    echo "pv-lease-${M}:rc=${R}:row=$(_ledger_get "$K" state 2>/dev/null || echo none):child=$(_gone "$OP"):wt=$( [ -d "$_S25/pv-leases/$K" ] && echo kept || echo gone):named=$(_c -F "unleased worktree $_S25/pv-leases/${K}, so nothing is leased" "$_S25/pv-lease-$M.err")"
+    if [ -n "$OP" ]; then kill -KILL "$OP" 2>/dev/null || true; fi
+  done
+  git worktree remove --force "$_S25/pv-leases/s25pvu" >/dev/null 2>&1 || true
+  git branch -D lease/s25pvu >/dev/null 2>&1 || true )
+_S25_FAIL="${_S25_FAIL}$(_self_expect provision "$O" '^pv-check-orphan:rc=0:ok=1:child=gone:left=0:named=0$' '^pv-check-orphan-psfail:rc=1:ok=0:child=gone:left=1:named=1$' \
+  '^pv-lease-orphan:rc=0:row=leased:child=gone:wt=kept:named=0$' '^pv-lease-orphan-psfail:rc=1:row=none:child=gone:wt=kept:named=1$')"
+
+# invoke_grok's refusal names what _lease_ctx found: a lease root that can't
+# be made, one whose lead/ is another user's directory (a link to root's
+# /usr), each by _lease_ctx's own words and never "not inside a git
+# checkout"; and outside any git repository, today's words
+mkdir -p "$_S25/ctxroot" "$_S25/ctxnogit"
+ln -s /usr "$_S25/ctxroot/lead"
+O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25_PATH" TMPDIR="$_S25/tmp" XAI_API_KEY=s25-stub-key \
+       && unset TRIFORGE_TEST_BUILDER TRIFORGE_LEASE_ROOT && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  L="$_S25/log"
+  _c() { grep -c "$@" 2>/dev/null || true; }
+  for T in "error:/dev/null/x" "root:$_S25/ctxroot" "nogit:"; do
+    K=${T%%:*}; LR=${T#*:}
+    rm -f "$L"/wt.*
+    R=0
+    if [ "$K" = nogit ]; then
+      ( cd "$_S25/ctxnogit" && GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 ctx" "$_S25/ctx-$K.out" 60 ) >/dev/null 2> "$_S25/ctx-$K.err" || R=$?
+    else
+      TRIFORGE_LEASE_ROOT=$LR GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 ctx" "$_S25/ctx-$K.out" 60 >/dev/null 2> "$_S25/ctx-$K.err" || R=$?
+    fi
+    echo "ctx-${K}:rc=${R}:ran=$( [ -f "$L/wt.argv" ] && echo yes || echo no):error=$(_c -F "lease context can't be set up from $_S25/fg (error): could not set up the lease context (NotADirectoryError" "$_S25/ctx-$K.err"):root=$(_c -F "lease context can't be set up from $_S25/fg (root): the lease directory /usr is not a directory of this user" "$_S25/ctx-$K.err"):nogit=$(_c -F "$_S25/ctxnogit is not inside a git checkout" "$_S25/ctx-$K.err"):notgit-words=$(_c 'is not inside a git checkout' "$_S25/ctx-$K.err")"
+  done )
+_S25_FAIL="${_S25_FAIL}$(_self_expect ctx "$O" '^ctx-error:rc=69:ran=no:error=1:root=0:nogit=0:notgit-words=0$' '^ctx-root:rc=69:ran=no:error=0:root=1:nogit=0:notgit-words=0$' \
+  '^ctx-nogit:rc=69:ran=no:error=0:root=0:nogit=1:notgit-words=1$')"
+
+# at-review's core lanes on optional members: dispatch_role's reviewer and
+# analyst under the persona names at-review passes, with both roles on grok,
+# then on kimi (a stub that records its argv), run with the CLI's reviewer
+# brief and so with its typed Status report
+_self_repo "$_S25/dr" "$_S25/home" sprint/s25dr '[roles.reviewer]\ncli = "grok"\nfallbacks = ["codex"]\n\n[roles.analyst]\ncli = "grok"\nfallbacks = ["claude"]\n\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n'
+_self_repo "$_S25/dk" "$_S25/home" sprint/s25dk '[roles.reviewer]\ncli = "kimi"\nfallbacks = ["codex"]\n\n[roles.analyst]\ncli = "kimi"\nfallbacks = ["claude"]\n'
+mkdir -p "$_S25/kbin"
+cat > "$_S25/kbin/kimi" <<'EOF'
+#!/bin/sh
+# SELF-25 kimi stub: records its argv, answers one assistant message
+D=$(cd "$(dirname "$0")/.." && pwd)
+: > "$D/log/kimi.argv"
+for a in "$@"; do printf '%s\n' "$a" >> "$D/log/kimi.argv"; done
+printf '%s\n' '{"role":"assistant","content":"Reviewed.\nStatus: DONE\nFiles changed: none"}'
+EOF
+chmod +x "$_S25/kbin/kimi"
+O=$( cd "$_S25/dr" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25/kbin:$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/dr-leases" \
+       XAI_API_KEY=s25-stub-key && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  L="$_S25/log"
+  _c() { grep -c "$@" 2>/dev/null || true; }
+  for T in reviewer:logic_reviewer analyst:architecture-reviewer; do
+    RO=${T%%:*}; A=${T#*:}
+    rm -f "$L"/wt.*
+    R=0; dispatch_role "$RO" "$A" "probe ${RO} S25 dispatch" "$_S25/dr-${RO}.out" 60 >/dev/null 2> "$_S25/dr-${RO}.err" || R=$?
+    F=$(awk 'f && NF { print; exit } $0 == "-p" { f = 1 }' "$L/wt.argv" 2>/dev/null || true)
+    echo "dispatch-grok-${RO}:rc=${R}:status=$(_lease_parse_status "$_S25/dr-${RO}.out"):first=$( [ -n "$_S25_SIGR" ] && [ "$F" = "$_S25_SIGR" ] && echo reviewer-brief || echo other):contract=$(_c -F 'Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT' "$L/wt.argv"):task=$(_c -F "probe ${RO} S25 dispatch" "$L/wt.argv"):sandbox=$(grep -A1 -x -- --sandbox "$L/wt.argv" 2>/dev/null | tail -1):warned=$(_c 'not found in plugin grok-agents' "$_S25/dr-${RO}.err"):named=$(_c -F "grok has no brief named '${A}'" "$_S25/dr-${RO}.err")"
+  done
+  cd "$_S25/dk" || exit 0
+  KR="$(triforge_plugin_root)/kimi-agents/reviewer.md"
+  for T in reviewer:logic_reviewer analyst:architecture-reviewer; do
+    RO=${T%%:*}; A=${T#*:}
+    rm -f "$L/kimi.argv"
+    R=0; dispatch_role "$RO" "$A" "probe ${RO} S25 kimi" "$_S25/dk-${RO}.out" 60 >/dev/null 2> "$_S25/dk-${RO}.err" || R=$?
+    echo "dispatch-kimi-${RO}:rc=${R}:status=$(_lease_parse_status "$_S25/dk-${RO}.out"):agent-file=$( [ "$(grep -A1 -x -- --agent-file "$L/kimi.argv" 2>/dev/null | tail -1)" = "$KR" ] && echo reviewer || echo other):warned=$(_c 'not found in plugin kimi-agents' "$_S25/dk-${RO}.err")"
+  done )
+_S25_FAIL="${_S25_FAIL}$(_self_expect dispatch "$O" '^dispatch-grok-reviewer:rc=0:status=DONE:first=reviewer-brief:contract=1:task=1:sandbox=read-only:warned=0:named=1$' \
+  '^dispatch-grok-analyst:rc=0:status=DONE:first=reviewer-brief:contract=1:task=1:sandbox=read-only:warned=0:named=1$' \
+  '^dispatch-kimi-reviewer:rc=0:status=DONE:agent-file=reviewer:warned=0$' '^dispatch-kimi-analyst:rc=0:status=DONE:agent-file=reviewer:warned=0$')"
+
+_S25_CAP="Grok Build's lane: the permission class by role (a reviewer or analyst read-only, with Edit, Write and Bash denied over any imported Claude allow rule, and MCP tools denied in every class; grok takes builder, reviewer and analyst, and edits only in a lease), the env prefix and include_only overlay pinned, a report only from an end_turn run, the provisioned .grok/config.toml that disables every plugin and shadows every MCP server, the user's own included (never merged, never without a full inspect, refused when it can't be proven), no read-class run where the project supplies code grok would start, while the user's own grok hooks and settings run with one NOTE line naming each (checked again, and the tables rebuilt, at every read-class dispatch; asked by at-setup through grok_read_isolation_check), the builder's sandbox profile closing GROK_HOME's code and instruction paths (rewritten before each dispatch), and invoke_grok's read class in a removed scratch checkout under env -i, after the roster and integrity checks before every attempt, with no filter or hook run, and nothing grok leaves running, nor a TERM, leaving anything behind (a scratch something may still run in is kept and named, never removed); and dispatch_role running a reviewer or analyst on an optional member with that CLI's reviewer brief and its Status contract (R23)"
 if [ -z "$_S25_FAIL" ]; then
-  row "SELF-25" "grok" "$_S25_CAP" "PASS" "class: builder/tester/documenter edit, reviewer/analyst/empty read; lane: edit -> triforge-edit + Edit/Write/Bash, MCP denied; read and empty -> read-only, Edit/Write/Bash/MCP denied; env prefix: every GROK_CLAUDE_*/GROK_CURSOR_* switch, GROK_FOLDER_TRUST=0, the overlay's literal include_only; builder lease: .grok/config.toml disables the 3 plugins and shadows the 3 servers (the user's ~/.grok/config.toml one included), inspect with the Claude switches off, config and profile provisioned, a weakened profile written back before the run (all 17 GROK_HOME denies), triforge-edit, builder brief, collect -> review, snapshot without .grok/; reviewer lease (project allows Edit/Write/npm): read-only, the denies, reviewer brief, no profile, review; Status: DONE then max_tokens, no end, or the turn cap -> report missing (rc 80), the stop named; tracked: [permission] and [mcp_servers.team] files take the tables (tomllib-proven); [plugins], inline mcp_servers, a server named like a ~/.claude.json one, a symlinked .grok and an ignored overlay refused, file unchanged and named; a project server named like the user's grok one gets no shadow; user tier (read class): a user hook, a user LSP server, an unlisted plugin's hook, an auth provider command, notification hooks, config-layer [hooks], a requirements-layer MCP server and an Orca-style hook file accepted, each named with its file in one NOTE line (the .bak copy not); an unparsable config.toml and project hooks beside the Orca hook refused, nothing written; the listed user plugin's hook and LSP accepted with no note (plugin disabled, user server shadowed); the edit class takes a user hook with no note and writes the profile; profile: one table, extends workspace, exactly the 17 literal denies, config.toml not denied; a same-named user profile and a symlinked file refused, nothing written; surface (read class): .grok/hooks, .grok/lsp.json, .grok/plugins, .claude/plugins, a project MCP server and an inspect-reported project hook refused, named, nothing written; Claude/Cursor hooks, .mcp.json (shadowed), an agent, a skill and a sandbox.toml accepted; edit class takes .grok/hooks; inspect: empty, cut-off, failed and partial refused; roles: tester and documenter on grok rc 5; lease_create refused, no row, grok never run; a read lease over .grok/lsp.json refused, a builder lease made, .grok/hooks added after create refused at compose (rc 94); a reviewer lease made under a clean user tier: a user hook by dispatch time runs (rc 0, named in the builder log's NOTE), a new user MCP server by then shadowed in the run's config with the provisioning's 3 shadows kept and one [plugins]; a reviewer lease made beside the Orca hook: leased, the file named on stderr; grok_read_isolation_check: clean -> rc 0 OK, a user hook -> rc 0 OK and a NOTE naming it, an unparsable config.toml -> rc 1 named, no scratch left, HOME unchanged; invoke_grok: reviewer from a scratch checkout with the config, env -i (no canary, no CLAUDECODE), the denies and the checkout note, then removed, no ledger written; tester and an edit agent name rc 69, grok never run; an empty end_turn -> rc 80 no-answer; an interrupted run (exit 130) -> rc 130 interrupted, run once, no retry; a retry after the first run declined grok in the roster -> rc 5 role, run once; a retry after the first run changed .git/config (lease open, fresh rebaseline) -> rc 44 integrity, run once; an unisolable project, project hooks or a bad inspect -> rc 69, grok never run; beside an Orca-style user hook -> rc 0, DONE, read-only, one NOTE naming the hook file; integrity refused (stub, and a smudge filter in .git/config with .git/info/attributes planted after a fresh rebaseline, a lease open) -> rc 44, no checkout, the filter never run; a never-leased project's smudge and process filters never run; TERM to _grok_run_in's subshell during the provisioning inspect -> the inspect stopped, no scratch left; the same with an inspect that ignores TERM -> KILLed after the 2 s grace, gone before the subshell exits 143, no scratch left" "static"
+  row "SELF-25" "grok" "$_S25_CAP" "PASS" "class: builder/tester/documenter edit, reviewer/analyst/empty read; lane: edit -> triforge-edit + Edit/Write/Bash, MCP denied; read and empty -> read-only, Edit/Write/Bash/MCP denied; env prefix: every GROK_CLAUDE_*/GROK_CURSOR_* switch, GROK_FOLDER_TRUST=0, the overlay's literal include_only; builder lease: .grok/config.toml disables the 3 plugins and shadows the 3 servers (the user's ~/.grok/config.toml one included), inspect with the Claude switches off, config and profile provisioned, a weakened profile written back before the run (all 17 GROK_HOME denies), triforge-edit, builder brief, collect -> review, snapshot without .grok/; reviewer lease (project allows Edit/Write/npm): read-only, the denies, reviewer brief, no profile, review; Status: DONE then max_tokens, no end, or the turn cap -> report missing (rc 80), the stop named; tracked: [permission] and [mcp_servers.team] files take the tables (tomllib-proven); [plugins], inline mcp_servers, a server named like a ~/.claude.json one, a symlinked .grok and an ignored overlay refused, file unchanged and named; a project server named like the user's grok one gets no shadow; user tier (read class): a user hook, a user LSP server, an unlisted plugin's hook, an auth provider command, notification hooks, config-layer [hooks], a requirements-layer MCP server and an Orca-style hook file accepted, each named with its file in one NOTE line (the .bak copy not); an unparsable config.toml and project hooks beside the Orca hook refused, nothing written; the listed user plugin's hook and LSP accepted with no note (plugin disabled, user server shadowed); the edit class takes a user hook with no note and writes the profile; profile: one table, extends workspace, exactly the 17 literal denies, config.toml not denied; a same-named user profile and a symlinked file refused, nothing written; surface (read class): .grok/hooks, .grok/lsp.json, .grok/plugins, .claude/plugins, a project MCP server and an inspect-reported project hook refused, named, nothing written; Claude/Cursor hooks, .mcp.json (shadowed), an agent, a skill and a sandbox.toml accepted; edit class takes .grok/hooks; inspect: empty, cut-off, failed and partial refused; roles: tester and documenter on grok rc 5; lease_create refused, no row, grok never run; a read lease over .grok/lsp.json refused, a builder lease made, .grok/hooks added after create refused at compose (rc 94); a reviewer lease made under a clean user tier: a user hook by dispatch time runs (rc 0, named in the builder log's NOTE), a new user MCP server by then shadowed in the run's config with the provisioning's 3 shadows kept and one [plugins]; a reviewer lease made beside the Orca hook: leased, the file named on stderr; grok_read_isolation_check: clean -> rc 0 OK, a user hook -> rc 0 OK and a NOTE naming it, an unparsable config.toml -> rc 1 named, no scratch left, HOME unchanged; invoke_grok: reviewer from a scratch checkout with the config, env -i (no canary, no CLAUDECODE), the denies and the checkout note, then removed, no ledger written; tester and an edit agent name rc 69, grok never run; an empty end_turn -> rc 80 no-answer; an interrupted run (exit 130) -> rc 130 interrupted, run once, no retry; a retry after the first run declined grok in the roster -> rc 5 role, run once; a retry after the first run changed .git/config (lease open, fresh rebaseline) -> rc 44 integrity, run once; an unisolable project, project hooks or a bad inspect -> rc 69, grok never run; beside an Orca-style user hook -> rc 0, DONE, read-only, one NOTE naming the hook file; integrity refused (stub, and a smudge filter in .git/config with .git/info/attributes planted after a fresh rebaseline, a lease open) -> rc 44, no checkout, the filter never run; a never-leased project's smudge and process filters never run; TERM to _grok_run_in's subshell during the provisioning inspect -> the inspect stopped, no scratch left; the same with an inspect that ignores TERM -> KILLed within the 5 s grace, gone before the subshell exits 143, no scratch left; a child that ignores TERM left by grok's run (exit 0 -> rc 0; past a 2 s timeout -> rc 124, timeout) or by the provisioning inspect (rc 0) -> gone when invoke_grok returns, no scratch left; ps failing once grok has run -> rc 80, deterministic unresolved-cleanup, run once, the scratch kept and named on stderr, the supervisor's warning naming invoke_grok and grok (no dispatch_persona), the persona lane's words without a label; the provisioning inspect leaving such a child in the lead's shell: grok_read_isolation_check rc 0 OK and lease_create leased, the child gone; with ps failing: the check rc 1, no OK, its directory kept and named; lease_create rc 1, no row, the worktree kept and named; invoke_grok refusing on a lease root that can't be made or one whose lead/ is another user's -> rc 69 naming _lease_ctx's cause, never \"not inside a git checkout\", which outside any repository it still says; dispatch_role reviewer logic_reviewer and analyst architecture-reviewer on grok -> the prompt starts with the reviewer brief and holds its Status contract, read-only, the substitution named, no not-found warning, Status: DONE; the same on kimi -> --agent-file <root>/kimi-agents/reviewer.md, no warning" "static"
 else
   row "SELF-25" "grok" "$_S25_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S25_FAIL"):$(printf '%s' "$_S25_FAIL" | cut -c1-700)" "static"
 fi
@@ -8982,6 +9467,13 @@ rm -rf "$_S25"
 #                 (git diff rc 128): the package block stops (rc 1) naming the
 #                 base or the git rc and leaves no package, the optional block
 #                 refuses, no lane ran; REVIEW_BASE=main is named in the range
+#   scrub         (KTD-14) the _scrub every block writes ops/REVIEW_*.md
+#                 through: a sample of each key shape (sk-, AIza, ghp_, xoxb-,
+#                 Bearer, a JWT, github_pat_ with a first part ending in ghp,
+#                 xai-, AKIA, ASIA) on a line of prose comes out of common.sh's
+#                 copy redacted whole, prose that only looks like them
+#                 (xai-org, github_pat_ alone, ASIA PACIFIC) is kept, and
+#                 probe-capabilities.sh's copy prints the same
 _S26="${WORK}/self26"
 mkdir -p "$_S26/bin" "$_S26/log" "$_S26/cfg" "$_S26/blocks" "$_S26/started" "$_S26/home/.grok"
 printf '{"key":"s26-stub"}\n' > "$_S26/home/.grok/auth.json"
@@ -9422,9 +9914,42 @@ O=$( _s26_reset
 _S26_FAIL="${_S26_FAIL}$(_self_expect base "$O" '^base-invalid:pkg=1:named=1:pkgdir=0:opt=1:runs=0$' '^base-valid:pkg=0:range=1$' \
   '^base-diff-fail:(pkg=1:named=1:pkgdir=0:opt=1:runs=0|unreadable-object-readable)$')"
 
-_S26_CAP="at-review's blocks run verbatim (R23, R24, KTD18): the lead's integrity check before the skill's first git call (a planted filter or fsmonitor never runs; no package, so no lane), one review package per cycle for every lane, the specialist personas included (each [R] task with its fields, the inventory with untracked files by name, the inline diff within the cap, the full diff in a file the prompt names; an invalid REVIEW_BASE or a failed git call stops the review), promotion on the CLI's final answer (an optional lane only on rc 0 and DONE; never BLOCKED in a core role, read from a core answer's last line; Codex's last-message file on every attempt, its quoted tool output ignored, in the lease lane too), no retry of an interrupted run, and the lanes in parallel"
+# scrub: what the blocks write into ops/REVIEW_*.md goes through _scrub. One
+# sample of every key shape it redacts, one per line of prose, and a line of
+# prose that only looks like them, through both copies: common.sh's, loaded
+# as the blocks load it, and probe-capabilities.sh's, taken by its function
+# text. The samples are built here, so no token-shaped literal sits in this
+# file; the github_pat_ one has a first part ending in ghp, which gh[pousr]_
+# would cut short if it ran first
+_s26_rep() { printf "%${2}s" "" | tr ' ' "$1"; }   # <char> <n>: the char n times
+{
+  printf 'openai sk-%s here\n' "$(_s26_rep a 24)"
+  printf 'google AIza%s here\n' "$(_s26_rep b 35)"
+  printf 'github ghp_%s here\n' "$(_s26_rep c 36)"
+  printf 'github-fine github_pat_%sghp_%s here\n' "$(_s26_rep D 19)" "$(_s26_rep e 59)"
+  printf 'slack xoxb-%s here\n' "$(_s26_rep f 24)"
+  printf 'header Bearer %s here\n' "$(_s26_rep g 32)"
+  printf 'jwt eyJ%s.%s here\n' "$(_s26_rep h 30)" "$(_s26_rep i 30)"
+  printf 'xai xai-%s here\n' "$(_s26_rep J 80)"
+  printf 'aws AKIA%s and ASIA%s here\n' "$(_s26_rep K 16)" "$(_s26_rep L 16)"
+  printf 'prose xai-org, xai-grok-pager, github_pat_ tokens, ASIA PACIFIC, AKIA alone\n'
+} > "$_S26/scrub.in"
+_S26_SCRUB=$(awk '/^_scrub\(\) \{$/ { p = 1 } p { print } p && /^}$/ { exit }' "${REPO_ROOT}/scripts/probe-capabilities.sh" 2>/dev/null || true)
+O=$( cd "$_S26" && export HOME="$_S26/home" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "scrub-lib:load-failed"; exit 0; }
+  _scrub < "$_S26/scrub.in" > "$_S26/scrub.lib" 2>/dev/null || true
+  if [ -n "$_S26_SCRUB" ]; then ( unset -f _scrub; eval "$_S26_SCRUB" && _scrub < "$_S26/scrub.in" > "$_S26/scrub.probe" ) 2>/dev/null || true; fi
+  sed 's/^/scrub-lib:/' "$_S26/scrub.lib"
+  echo "scrub-copies:$(if [ -s "$_S26/scrub.probe" ] && cmp -s "$_S26/scrub.lib" "$_S26/scrub.probe"; then echo same; else echo differ; fi)" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect scrub "$O" '^scrub-lib:openai \[REDACTED-KEY\] here$' '^scrub-lib:google \[REDACTED-KEY\] here$' \
+  '^scrub-lib:github \[REDACTED-KEY\] here$' '^scrub-lib:github-fine \[REDACTED-KEY\] here$' '^scrub-lib:slack \[REDACTED-KEY\] here$' \
+  '^scrub-lib:header Bearer \[REDACTED\] here$' '^scrub-lib:jwt \[REDACTED-JWT\] here$' '^scrub-lib:xai \[REDACTED-KEY\] here$' \
+  '^scrub-lib:aws \[REDACTED-KEY\] and \[REDACTED-KEY\] here$' \
+  '^scrub-lib:prose xai-org, xai-grok-pager, github_pat_ tokens, ASIA PACIFIC, AKIA alone$' '^scrub-copies:same$')"
+unset _S26_SCRUB
+
+_S26_CAP="at-review's blocks run verbatim (R23, R24, KTD18): the lead's integrity check before the skill's first git call (a planted filter or fsmonitor never runs; no package, so no lane), one review package per cycle for every lane, the specialist personas included (each [R] task with its fields, the inventory with untracked files by name, the inline diff within the cap, the full diff in a file the prompt names; an invalid REVIEW_BASE or a failed git call stops the review), promotion on the CLI's final answer (an optional lane only on rc 0 and DONE; never BLOCKED in a core role, read from a core answer's last line; Codex's last-message file on every attempt, its quoted tool output ignored, in the lease lane too), no retry of an interrupted run, the lanes in parallel, and every key shape scrubbed from what lands in ops/ (KTD-14, both _scrub copies alike)"
 if [ -z "$_S26_FAIL" ]; then
-  row "SELF-26" "claude" "$_S26_CAP" "PASS" "integrity (Claude Code layout, and the Codex layout: project-tier copy, locator through the pointer): lease + rebaseline + clean filter and fsmonitor in .git/config -> preflight 0, package block rc 44 naming .git/config, no package, dispatch (learnings gate inside) and optional blocks refuse, 0 lane runs, 0 personas, no run directory, filter and fsmonitor never ran; never leased: rc 0, no ledger, lead dir = gitconfig; main: untracked file listed and the not-diffed note; learnings match through the untracked path; 5 specialists + learnings-researcher started (persona recorders) in one run directory, the specialists on package.md, every brief naming full.diff; the lane list: 2 core, 5 persona, 5 optional lanes;core lanes released together, REVIEW_ANTIGRAVITY (cursor) and REVIEW_CODEX (prose + verdict) though the codex transcript quotes Status: BLOCKED; cursor's core prompt holds the package; optional lanes released together (5/5), each prompt with both changes, the [R] row, the untracked name, the inventory and the diff; REVIEW_CURSOR/DEVIN/KIMI only, opencode (DONE, exit 1) and grok (DONE, max_tokens) FAILED; codex with the schema off still writes its last-message file and is promoted from it, an answer ending in Status: BLOCKED is not, nor a retry's BLOCKED answer after a first run that wrote a verdict (2 runs); an agy answer quoting Status: BLOCKED in a finding promoted, one ending in it not; agy, codex, opencode, kimi and cursor exiting 130 -> rc 130 interrupted, one run each; the package holds each [R] task with its indented fields, no unmarked task, and names ops/TASKS.md and ops/CONTRACTS.md by absolute path; a codex builder lease runs with -o <out>.last and lease_collect reads its report there (DONE -> review over a quoted BLOCKED, no Status -> rc 80 over a quoted DONE); devin BLOCKED as reviewer not promoted, its prompt holds the package; 40-file diff over the cap: inventory 40, cut, full.diff 40, package <= 116000, kimi argv < 120000; REVIEW_BASE naming no commit and git diff rc 128 stop the review (rc 1, no package, no lane); REVIEW_BASE=main named" "static"
+  row "SELF-26" "claude" "$_S26_CAP" "PASS" "integrity (Claude Code layout, and the Codex layout: project-tier copy, locator through the pointer): lease + rebaseline + clean filter and fsmonitor in .git/config -> preflight 0, package block rc 44 naming .git/config, no package, dispatch (learnings gate inside) and optional blocks refuse, 0 lane runs, 0 personas, no run directory, filter and fsmonitor never ran; never leased: rc 0, no ledger, lead dir = gitconfig; main: untracked file listed and the not-diffed note; learnings match through the untracked path; 5 specialists + learnings-researcher started (persona recorders) in one run directory, the specialists on package.md, every brief naming full.diff; the lane list: 2 core, 5 persona, 5 optional lanes;core lanes released together, REVIEW_ANTIGRAVITY (cursor) and REVIEW_CODEX (prose + verdict) though the codex transcript quotes Status: BLOCKED; cursor's core prompt holds the package; optional lanes released together (5/5), each prompt with both changes, the [R] row, the untracked name, the inventory and the diff; REVIEW_CURSOR/DEVIN/KIMI only, opencode (DONE, exit 1) and grok (DONE, max_tokens) FAILED; codex with the schema off still writes its last-message file and is promoted from it, an answer ending in Status: BLOCKED is not, nor a retry's BLOCKED answer after a first run that wrote a verdict (2 runs); an agy answer quoting Status: BLOCKED in a finding promoted, one ending in it not; agy, codex, opencode, kimi and cursor exiting 130 -> rc 130 interrupted, one run each; the package holds each [R] task with its indented fields, no unmarked task, and names ops/TASKS.md and ops/CONTRACTS.md by absolute path; a codex builder lease runs with -o <out>.last and lease_collect reads its report there (DONE -> review over a quoted BLOCKED, no Status -> rc 80 over a quoted DONE); devin BLOCKED as reviewer not promoted, its prompt holds the package; 40-file diff over the cap: inventory 40, cut, full.diff 40, package <= 116000, kimi argv < 120000; REVIEW_BASE naming no commit and git diff rc 128 stop the review (rc 1, no package, no lane); REVIEW_BASE=main named; _scrub (common.sh's, which the blocks load, and probe-capabilities.sh's, printing the same): sk-, AIza, ghp_, xoxb-, Bearer, JWT, github_pat_ (first part ending in ghp), xai-, AKIA and ASIA samples redacted whole, look-alike prose kept" "static"
 else
   row "SELF-26" "claude" "$_S26_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S26_FAIL"):$(printf '%s' "$_S26_FAIL" | cut -c1-700)" "static"
 fi
@@ -10593,6 +11118,20 @@ _S16_EV="${_S16_EV}A: one checkout-top roster from a subdirectory; egress per pr
 #   hook     session start names each project CLAUDE.md-family file that does
 #            not import AGENTS.md (one line, at-setup), with and without the
 #            loader, and none once the parent's file imports it
+#   space    (review round 2, finding #6) an import line is written or offered
+#            only when the reader reads it back as the project's import.
+#            <base>/Project With Spaces (an import path ends at whitespace)
+#            and <base>/~/proj (an import path that starts with ~/ is read
+#            from HOME), each a git project with the pointer block below a
+#            <base>/CLAUDE.md, HOME not above it: the import column of detect
+#            for that file is "-"; visibility and session start offer the
+#            project's own CLAUDE.md holding @AGENTS.md and no import there;
+#            instruction_add_import of that file, run from the project,
+#            refused rc 2 before any plan, without --yes and twice with it (a
+#            tab in a project name too), naming that CLAUDE.md; the files
+#            byte-identical. The .claude/CLAUDE.md beside the second, whose
+#            line @../~/proj/AGENTS.md is relative and reads back, keeps its
+#            import column and its plan (rc 20)
 _S16B="${_S16}/b"
 mkdir -p "$_S16B/home/.claude" "$_S16B/home/.codex" "$_S16B/w"
 _S16B_W=$(cd "$_S16B/w" && pwd -P)
@@ -11120,7 +11659,65 @@ printf '# mono\n@proj/AGENTS.md\n' > "$_S16B_H/CLAUDE.md"
 _O=$(_s16b_hook "$_S16B_H/proj")
 _S16_FAIL="${_S16_FAIL}$(_s16b_not b-hook-parent-import "$_O" 'in this project does not import AGENTS\.md|is not loaded under a Claude lead|^\{|hook crashed')"
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-hook-parent-import "$_O" '^Multi-agent framework ready\.$')"
-_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file); "
+
+# space (review round 2, finding #6): a project whose path down from a CLAUDE.md
+# holds whitespace, then one under a directory named ~. Read-only cases first,
+# then the writer: without --yes, and twice with it (the bug appended the line
+# on every approved run)
+_S16B_SP="$_S16B_W/sp"
+_S16B_SPP="$_S16B_SP/Project With Spaces"
+_s16b_proj "$_S16B_SPP"
+_s16b_proj "$_S16B_SP/Tab${T}Proj"
+printf '# mono\n' > "$_S16B_SP/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_SP/CLAUDE.md")
+_O=$(_s16b "$_S16B_SPP" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-space-detect "$_O" "^CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/w/sp/CLAUDE\.md${T}-\$" "^AGENTS\.md${T}project${T}pointer${T}[^${T}]*/w/sp/Project With Spaces/AGENTS\.md${T}-\$" '^rc=0$')"
+_O=$(_s16b "$_S16B_SPP" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-space-vis "$_O" "^claude${T}hidden${T}shadowed by .*/w/sp/CLAUDE\.md: .*; add a CLAUDE\.md holding the line @AGENTS\.md to .*/w/sp/Project With Spaces, which loads it for that project only\$" '^rc=1$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-space-vis "$_O" 'instruction_add_import|add the line @')"
+_O=$(_s16b_hook "$_S16B_SPP")
+_S16B_NOLINE="No import line in that file can name this project's AGENTS\.md: the path from there to this project holds whitespace, where an import path ends, or starts with ~, which an import reads as your home directory\. Or remove the file\."
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-space-hook "$_O" "^WARNING: AGENTS\.md is not loaded under a Claude lead: .*/w/sp/CLAUDE\.md sits above this project, .* Add a CLAUDE\.md holding the line @AGENTS\.md to this project: it loads AGENTS\.md for this project only\. ${_S16B_NOLINE}\$")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-space-hook "$_O" 'Or add the line @|^\{|hook crashed')"
+_S16B_NOREAD='which would not read back as an import of .*\(an import path ends at whitespace, and one that starts with ~/ is read from your home directory\); put the line @AGENTS\.md in '
+for _S16B_Y in "" --yes --yes; do
+  _O=$(_s16b "$_S16B_SPP" instruction_add_import "$_S16B_SP/CLAUDE.md" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-space-import${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — .*/w/sp/CLAUDE\.md would need the line @Project With Spaces/AGENTS\.md, which would not read back as an import of .*/w/sp/Project With Spaces/AGENTS\.md \(an import path ends at whitespace, and one that starts with ~/ is read from your home directory\); put the line @AGENTS\.md in .*/w/sp/Project With Spaces/CLAUDE\.md instead, which loads it for this project only \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-space-import${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+done
+_O=$(_s16b "$_S16B_SP/Tab${T}Proj" instruction_add_import ../CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-space-tab "$_O" "^instruction_add_import: REFUSED — .*/w/sp/CLAUDE\\.md would need the line @Tab\\?Proj/AGENTS\\.md, ${_S16B_NOREAD}" '^rc=2$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-space-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_SP/CLAUDE.md")")"
+# a directory named ~ on the way down: @~/proj/AGENTS.md is read from HOME (the
+# throwaway one, no proj there), so CLAUDE.md gets no import line, while the
+# .claude/CLAUDE.md beside it takes @../~/proj/AGENTS.md, which is relative
+# and reads back: its import column and its plan stay
+_S16B_TL="$_S16B_W/tl"
+_S16B_TLP="$_S16B_TL/~/proj"
+_s16b_proj "$_S16B_TLP"
+mkdir -p "$_S16B_TL/.claude"
+printf '# mono\n' > "$_S16B_TL/CLAUDE.md"
+printf '# mono local\n' > "$_S16B_TL/.claude/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_TL/CLAUDE.md" "$_S16B_TL/.claude/CLAUDE.md")
+_O=$(_s16b "$_S16B_TLP" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-tilde-detect "$_O" "^CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/w/tl/CLAUDE\.md${T}-\$" \
+  "^\.claude/CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/w/tl/\.claude/CLAUDE\.md${T}@\.\./~/proj/AGENTS\.md\$" '^rc=0$')"
+_O=$(_s16b "$_S16B_TLP" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-tilde-vis "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/w/tl/CLAUDE\.md, [^ ]*/w/tl/\.claude/CLAUDE\.md: .*; add a CLAUDE\.md holding the line @AGENTS\.md to [^ ]*/w/tl/~/proj, which loads it for that project only\$" '^rc=1$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-tilde-vis "$_O" 'instruction_add_import|add the line @')"
+_O=$(_s16b_hook "$_S16B_TLP")
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-tilde-hook "$_O" "^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/w/tl/CLAUDE\.md sits above this project, .* Add a CLAUDE\.md holding the line @AGENTS\.md to this project: it loads AGENTS\.md for this project only\. ${_S16B_NOLINE}\$" \
+  "^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/w/tl/\.claude/CLAUDE\.md sits above this project, .* Or add the line @\.\./~/proj/AGENTS\.md to that file ")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-tilde-hook "$_O" 'Or add the line @~/|^\{|hook crashed')"
+for _S16B_Y in "" --yes --yes; do
+  _O=$(_s16b "$_S16B_TLP" instruction_add_import ../../CLAUDE.md $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-tilde-import${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/tl/CLAUDE\.md would need the line @~/proj/AGENTS\.md, which would not read back as an import of [^ ]*/w/tl/~/proj/AGENTS\.md \(an import path ends at whitespace, and one that starts with ~/ is read from your home directory\); put the line @AGENTS\.md in [^ ]*/w/tl/~/proj/CLAUDE\.md instead, which loads it for this project only \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-tilde-import${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+done
+_O=$(_s16b "$_S16B_TLP" instruction_add_import ../../.claude/CLAUDE.md)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-tilde-dotclaude "$_O" '^needs-ask: would add the line @\.\./~/proj/AGENTS\.md to [^ ]*/w/tl/\.claude/CLAUDE\.md, so Claude Code loads [^ ]*/w/tl/~/proj/AGENTS\.md with it, ' '^rc=20$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-tilde-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_TL/CLAUDE.md" "$_S16B_TL/.claude/CLAUDE.md")")"
+_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file), an import line written or offered only when it reads back as the project's import (b-space-*, a project path with whitespace, a tab too; b-tilde-*, a directory named ~ on the way down: the import into the CLAUDE.md above refused rc 2 before any plan, without and twice with --yes, the files byte-identical; the import column -, visibility and session start naming the project's own CLAUDE.md alone; the .claude/CLAUDE.md beside it, whose @../~/proj/AGENTS.md reads back, still planned); "
 rm -rf "$_S16B"
 # --- end of SELF-16 section B ---
 # --- SELF-16 section C: at-setup's blocks and the headless primitives (U15) ---
@@ -11253,7 +11850,7 @@ _s16c_do() {
       -u DEVIN_MODEL -u DEVIN_CONSENT -u INSTR_OP -u INSTR_FILE -u INSTR_YES -u COMMIT_YES \
       HOME="$_S16C/home" PATH="$_S16C/bin:$_S16C/tools:/usr/bin:/bin:/usr/sbin:/sbin" TMPDIR="$_S16C/tmp" \
       GIT_CONFIG_NOSYSTEM=1 SKILL_DIR="$REPO_ROOT/skills/at-setup" S16C_ROOT="$REPO_ROOT" "$@" \
-      ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+120} "$SH" "$_S16C/blocks/$B.sh" ) < /dev/null > "$_S16C/out" 2>&1 || RC=$?
+      ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+-k10s} ${TIMEOUT_BIN:+120} "$SH" "$_S16C/blocks/$B.sh" ) < /dev/null > "$_S16C/out" 2>&1 || RC=$?
   echo "${L}:exit=${RC}"
   sed "s#^#${L}:#" "$_S16C/out"
 }
@@ -12634,12 +13231,13 @@ mkdir -p "$_S29"
 #            rejected; rc 0 with neither -> ambiguous. Both rows call it,
 #            and each records its timeout as a FAIL that says so. Its
 #            timeout test, _timed_out (taken with it): 124 and 137 yes, 0,
-#            1, 125 and 143 no. The eleven rows that pass when a forbidden
+#            1, 125 and 143 no. The twelve rows that pass when a forbidden
 #            action left no trace (AGY-09, AGY-10, AGY-13, AGY-16, CDX-08,
-#            OC-06, OC-06b, KIMI-08, CUR-07, CUR-08, CC-14b), read as text:
-#            each resets an rc variable to 0, captures its _probe_run call's
-#            rc in it, and asks _timed_out about it on the line right before
-#            its "timed out after" FAIL row, which names that rc
+#            OC-06, OC-06b, KIMI-08, CUR-07, CUR-08, CC-14b, and CDX-16 on
+#            its untrusted lane run), read as text: each resets an rc
+#            variable to 0, captures its _probe_run (CDX-16: _lane_run)
+#            call's rc in it, and asks _timed_out about it on the line right
+#            before its "timed out after" FAIL row, which names that rc
 mkdir -p "$_S29/bin" "$_S29/cfg" "$_S29/home" "$_S29/tmp" "$_S29/proj"
 { printf '#!/bin/sh\n# SELF-29 agy stub: `agents` prints cfg/agents; a run logs its argv and answers by cfg/mode\nD=%s\n' "'$_S29'"; cat <<'S29_AGY_EOF'
 mkdir -p "$D/log"
@@ -12839,7 +13437,7 @@ for _s29_c in 124 137 0 1 125 143; do
 to-${_s29_c}=$( eval "$_S29_NV" 2>/dev/null; if _timed_out "$_s29_c" 2>/dev/null; then echo yes; else echo no; fi )"
 done
 unset _s29_c
-_S29_ROUTE=$(python3 - "$REPO_ROOT/scripts/probe-capabilities.sh" AGY-09 AGY-10 AGY-13 AGY-16 CDX-08 OC-06 OC-06b KIMI-08 CUR-07 CUR-08 CC-14b 2>&1 <<'S29_ROUTE_PY'
+_S29_ROUTE=$(python3 - "$REPO_ROOT/scripts/probe-capabilities.sh" AGY-09 AGY-10 AGY-13 AGY-16 CDX-08 OC-06 OC-06b KIMI-08 CUR-07 CUR-08 CC-14b CDX-16 2>&1 <<'S29_ROUTE_PY'
 import re, sys
 lines = open(sys.argv[1], encoding="utf-8").read().split("\n")
 for rid in sys.argv[2:]:
@@ -12854,9 +13452,9 @@ for rid in sys.argv[2:]:
             why = "the-row-names-another-rc"
         else:
             v = m.group(1)
-            calls = [i for i in range(max(0, t - 60), t) if re.search(r"_probe_run [0-9]+ .*\|\| %s=\$\?$" % re.escape(v), lines[i])]
+            calls = [i for i in range(max(0, t - 60), t) if re.search(r"_(?:probe|lane)_run [0-9]+ .*\|\| %s=\$\?$" % re.escape(v), lines[i])]
             if not calls:
-                why = "no-_probe_run-call-captures-" + v
+                why = "no-_probe_run-or-_lane_run-call-captures-" + v
             elif not any(lines[i].strip() == v + "=0" for i in range(max(0, calls[-1] - 3), calls[-1])):
                 why = v + "-not-reset-before-the-call"
             else:
@@ -12872,14 +13470,14 @@ ${_S29_ROUTE}"
 _S29_FAIL="${_S29_FAIL}$(_self_expect negverdict "$O" '^nv-124:empty=timeout$' '^nv-137:empty=timeout$' '^nv-124:err=timeout$' '^nv-137:ready=timeout$' \
   '^nv-0:ready=accepted$' '^nv-0:err=rejected$' '^nv-1:empty=rejected$' '^nv-2:other=rejected$' '^nv-0:other=ambiguous$' '^nv-0:empty=ambiguous$' \
   '^calls=2$' '^timeout-fail=2$' '^to-124=yes$' '^to-137=yes$' '^to-0=no$' '^to-1=no$' '^to-125=no$' '^to-143=no$')"
-for _s29_c in AGY-09 AGY-10 AGY-13 AGY-16 CDX-08 OC-06 OC-06b KIMI-08 CUR-07 CUR-08 CC-14b; do
+for _s29_c in AGY-09 AGY-10 AGY-13 AGY-16 CDX-08 OC-06 OC-06b KIMI-08 CUR-07 CUR-08 CC-14b CDX-16; do
   _S29_FAIL="${_S29_FAIL}$(_self_expect negverdict "$O" "^${_s29_c}=routed\$")"
 done
 unset _s29_c
-_S29_EV="${_S29_EV}negverdict: _negative_verdict (AGY-11c and CUR-10 call it): rc 124 and 137 -> timeout with any output, error text and READY included, never a rejection; rc 0 + READY -> accepted; rc 1 or 2, or rc 0 + error text -> rejected; rc 0 with neither -> ambiguous; both rows record a timeout as a FAIL saying so. Its _timed_out: 124 and 137 yes, 0, 1, 125 and 143 no; AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08 and CC-14b each capture their _probe_run rc (reset to 0 first) and ask _timed_out right before their timed-out FAIL row, which names that rc. "
+_S29_EV="${_S29_EV}negverdict: _negative_verdict (AGY-11c and CUR-10 call it): rc 124 and 137 -> timeout with any output, error text and READY included, never a rejection; rc 0 + READY -> accepted; rc 1 or 2, or rc 0 + error text -> rejected; rc 0 with neither -> ambiguous; both rows record a timeout as a FAIL saying so. Its _timed_out: 124 and 137 yes, 0, 1, 125 and 143 no; AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08 and CC-14b each capture their _probe_run rc, and CDX-16 its untrusted _lane_run rc (reset to 0 first), and ask _timed_out right before their timed-out FAIL row, which names that rc. "
 unset O _S29_PICK _S29_NV _S29_ROUTE
 # --- end of SELF-29 cases ---
-_S29_CAP="agy routing defaults to auto and the AGY_ERROR line on exit 3 sets the failure's reason and retry (invoke_antigravity and the lease lane); the Cursor probe rows compose Grok ids through _cursor_model_for_effort; a ledger whose two anchors were deleted is a change (rc 44), and the lead's lease_rebaseline recovers (U19, S2); a negative row's call cut off by its timeout (rc 124 or 137) is never a rejection (AGY-11c, CUR-10), and a missing trace after one is no PASS (AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08, CC-14b)"
+_S29_CAP="agy routing defaults to auto and the AGY_ERROR line on exit 3 sets the failure's reason and retry (invoke_antigravity and the lease lane); the Cursor probe rows compose Grok ids through _cursor_model_for_effort; a ledger whose two anchors were deleted is a change (rc 44), and the lead's lease_rebaseline recovers (U19, S2); a negative row's call cut off by its timeout (rc 124 or 137) is never a rejection (AGY-11c, CUR-10), and a missing trace after one is no PASS (AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08, CC-14b, CDX-16)"
 if [ -z "$_S29_EV" ]; then _S29_FAIL="${_S29_FAIL} cases(no-case-ran)"; fi
 if [ -z "$_S29_FAIL" ]; then
   row "SELF-29" "claude" "$_S29_CAP" "PASS" "$(printf '%s' "$_S29_EV" | cut -c1-3000)" "static"
@@ -12893,7 +13491,8 @@ rm -rf "$_S29"
 # scripts/*.sh, scripts/lib/*.sh, hooks/handlers/*.sh, skills/*/scripts/*.sh.
 # _s30_scan lexes and parses each file as bash. Comments, quoted text and
 # here-document bodies are text (an unquoted body's $( ) is still parsed);
-# $( ), ` `, <( ) and ${ } are commands wherever they sit. One line per
+# $( ), ` `, <( ) and ${ } are commands wherever they sit, in the body of a
+# $(( )) or (( )) too (bash expands it as if it were in "..."). One line per
 # finding, "<file>:<line>:<rule>":
 #   test-and-last(<fn>)  the function's last statement chains a [ ], [[ ]] or
 #                        test with && and has no || after it, on one line or
@@ -12913,7 +13512,11 @@ rm -rf "$_S29"
 #                        SIGTERM is waited on forever (review finding #6):
 #                        timeout or gtimeout, or one expansion of a variable
 #                        whose name holds TIMEOUT or TOBIN ("$TIMEOUT_BIN",
-#                        ${TOBIN}; ${NAME:+…} read as the words it holds).
+#                        ${TOBIN}). A word that is one ${NAME:+word} or
+#                        ${NAME:-word} (+ or -, with or without the colon)
+#                        is read as the words its word expands to, as the
+#                        binary, an option or the duration; a :- with an
+#                        empty word, or of such a variable, stays $NAME.
 #                        -s KILL counts as a kill-after (it can't be
 #                        ignored). _adapter_env <cli> <cmd...> runs the
 #                        word after the CLI name, so that word is read as a
@@ -12923,27 +13526,36 @@ rm -rf "$_S29"
 #                        binary as an argument adds the flags itself and is
 #                        not a command-word use; "$@" or an array where the
 #                        binary or the duration goes may hold the options
-#                        and is left undecided
+#                        and is left undecided, but a "$@" after one of
+#                        env's NAME=value words is read as more of them
+#                        (the VAR=value pairs _s16c_do passes that way)
 # A file it can't follow is "scan-error:<file>:<why>", which fails the row
 # like a hit; the last line is "files=<n>". There is no allowlist: a line a
 # rule misreads is a matcher to refine. Negative controls: a planted file with
 # each shape on a line marked want:<rule> (one line and several, mid-chain, a
 # { } and a ( ) body, the function keyword, inside $( ) and "$( )", option
-# clusters) is flagged on exactly those lines and no other, so its compliant
-# shapes pass: `[ … ] && [ … ] || return 1`, `… || true`, `[ … ] || return 1`,
-# `if [ … ] && …; then … fi` last, a bare test last, a python here-document
-# holding `x and y` and the shapes as text, a comment holding `[ -d x ] && y`,
-# the shapes in quoted strings, grep -e -P; for timeout-no-kill the literal,
-# "$TIMEOUT_BIN", "${_TB_TIMEOUT}", a "$SECS" duration (a plain $NAME the
-# lexer keeps as text), gtimeout after env, "$TOBIN" -s TERM in
-# a $( ), ${TIMEOUT_BIN:+…} after exec, a path after command and
-# "$TIMEOUT_BIN" handed to _adapter_env (with and without --foreground, in a
-# ( )) are flagged, and -k, --kill-after=5s, -k5s, -s KILL, _adapter_env with
-# --foreground -k 10s, with "$2" and -k, with "${TO[@]}" and running env,
-# git -C or python3 -c, the binary as another function's argument, the
-# shapes in a comment and in quoted strings, "$@" where the duration goes,
-# command -v timeout and a ${TIMEOUT_BIN:+…} holding -k pass; and a file
-# whose quote never closes is a scan-error.
+# clusters, grep -P in a $( ) inside $(( )) and (( ))) is flagged on exactly
+# those lines and no other, so its compliant shapes pass: `[ … ] && [ … ] ||
+# return 1`, `… || true`, `[ … ] || return 1`, `if [ … ] && …; then … fi`
+# last, a bare test last, a python here-document holding `x and y` and the
+# shapes as text, a comment holding `[ -d x ] && y`, the shapes in quoted
+# strings, grep -e -P, $(( a + 1 )), $(( $(date +%s) - T0 )); for
+# timeout-no-kill the literal, "$TIMEOUT_BIN", "${_TB_TIMEOUT}", a "$SECS"
+# duration (a plain $NAME the lexer keeps as text), gtimeout after env,
+# "$TOBIN" -s TERM in a $( ), ${TIMEOUT_BIN:+…} after exec, a path after
+# command, "$TIMEOUT_BIN" handed to _adapter_env (with and without
+# --foreground, in a ( )), timeout in a $( ) inside $(( )),
+# ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+120} after exec,
+# "$TIMEOUT_BIN" after env A=1 "$@", ${T:-timeout} and
+# ${TIMEOUT_BIN:-$(command -v gtimeout)} are flagged, and -k,
+# --kill-after=5s, -k5s, -s KILL, _adapter_env with --foreground -k 10s, with
+# "$2" and -k, with "${TO[@]}" and running env, git -C or python3 -c, the
+# binary as another function's argument, the shapes in a comment and in
+# quoted strings, "$@" where the duration goes, command -v timeout, a
+# ${TIMEOUT_BIN:+…} holding -k, the split form with a ${TIMEOUT_BIN:+-k10s}
+# word, ${KOPT:--k10s} where the options go, env "$@" with no NAME=value
+# before it and words holding two expansions pass; and a file whose quote
+# never closes is a scan-error.
 _S30="${WORK}/self30"
 _S30_FAIL=""
 mkdir -p "$_S30"
@@ -12957,9 +13569,11 @@ ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\[[^]]*\])?\+?=")
 OPTS = re.compile(r"[-+][A-Za-z]+")
 # a word that is one parameter expansion ($NAME, "${NAME}", ${NAME:+…}: the
 # name in group 2 or 3, what follows it in the braces in 4); a word that may
-# hold several ("$@", an array, ${NAME:+…}); the signal a child can't ignore
+# hold several ("$@", an array, ${NAME:+…}); a word that is "$@" alone; the
+# signal a child can't ignore
 EXPAN = re.compile(r'(")?\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)([^A-Za-z0-9_].*)?\})(?(1)")', re.S)
 UNDECIDED = re.compile(r"\$(?:[@*]|\{[@*]|\{[A-Za-z_][A-Za-z0-9_]*(?:\[[@*]\]|:?\+))")
+ARGS = re.compile(r'(")?\$(?:@|\{@\})(?(1)")')
 KILLSIG = ("KILL", "SIGKILL", "9")
 META = " \t\n;&|()<>"
 OPS = (";;&", ";;", ";&", "&&", "||", "|&", ";", "&", "|", "(", ")")
@@ -13184,7 +13798,9 @@ class Scan(object):
 
     def arith(self, i):
         # the end of the (( )) that opens at i, or -1 when its inner group
-        # closes before the outer one (a subshell's subshell, not arithmetic)
+        # closes before the outer one (a subshell's subshell, not arithmetic);
+        # bash expands an arithmetic body as if it were in "...", so its $( ),
+        # ` ` and ${ } are parsed as commands here, as dq parses them
         t, n, depth, j = self.t, self.n, 0, i + 1
         while j < n:
             if t[j] == "\\":
@@ -13194,7 +13810,10 @@ class Scan(object):
             elif t[j] == ")":
                 depth -= 1
                 if depth == 0:
-                    return j + 2 if t.startswith(")", j + 1) else -1
+                    if not t.startswith(")", j + 1):
+                        return -1
+                    Scan(t[i + 2:j], self.line_at(i + 2), self.hits).dq(None)
+                    return j + 2
             j += 1
         raise Bad("the (( at line %d never closes" % self.line_at(i))
 
@@ -13497,16 +14116,19 @@ class Scan(object):
     def run_index(self, words):
         # cmd_index, then past each env or exec in front of the command word:
         # their options (with the word env -u, -P, -S, -C or exec -a takes)
-        # and env's NAME=value words
+        # and env's NAME=value words, a "$@" after one of them read as more
+        # of them (a caller's VAR=value pairs, as _s16c_do takes them)
         k = self.cmd_index(words)
         while k < len(words) and words[k].val in ("env", "exec"):
-            arg, k = "uPSC" if words[k].val == "env" else "a", k + 1
+            arg, k, pairs = "uPSC" if words[k].val == "env" else "a", k + 1, False
             while k < len(words):
                 v = words[k].val
                 if v == "--":
                     k += 1
                     break
                 if arg == "uPSC" and (v == "-" or ASSIGN.match(words[k].raw)):
+                    pairs, k = pairs or v != "-", k + 1
+                elif pairs and ARGS.fullmatch(words[k].raw):
                     k += 1
                 elif re.fullmatch(r"-[A-Za-z0-9]+", v):
                     k += 2 if v[-1] in arg else 1
@@ -13516,33 +14138,61 @@ class Scan(object):
                     break
         return k
 
+    def param_word(self, w):
+        # (quoted, name, what follows the name) when the word is one ${NAME…}
+        # expansion, quoted or not: param() finds the brace that closes it,
+        # so "${A:-x}${B}" is not one; else None
+        m = EXPAN.fullmatch(w.raw)
+        if not m or not m.group(4):
+            return None
+        q = 1 if m.group(1) else 0
+        s = Scan(w.raw, w.line, [])
+        s.i = q + 2
+        s.param(q == 1)
+        return (q, m.group(3), m.group(4)) if s.i == len(w.raw) - q else None
+
+    def held(self, words):
+        # the words, each one ${NAME:+word} or ${NAME:-word} (+ or -, with
+        # or without the colon) read as the words its word expands to:
+        # unquoted, the words it splits into, none for an empty one; quoted,
+        # one word. A :- or - stays $NAME when its word is empty (the set -u
+        # spelling) or NAME holds TIMEOUT or TOBIN (the binary itself)
+        out = []
+        for w in words:
+            q, name, op = self.param_word(w) or (0, "", "")
+            c = 1 if op.startswith(":") else 0
+            sign, text = op[c:c + 1], op[c + 1:]
+            if sign == "+" or (sign == "-" and text and not re.search("TIMEOUT|TOBIN", name)):
+                sub = Scan('"%s"' % text if q else text, w.line, [])
+                tok = sub.lex()
+                while tok.kind == "W":
+                    out.append(tok)
+                    tok = sub.lex()
+            else:
+                out.append(w)
+        return out
+
     def timeout_args(self, words, k):
         # the words after the timeout binary words[k] runs, or None when it
         # runs none: timeout or gtimeout (a path to one too), or one
         # parameter expansion of a variable whose name holds TIMEOUT or
-        # TOBIN; an unquoted ${NAME:+…} stands for the words it holds
+        # TOBIN
         w = words[k]
         if w.val.rsplit("/", 1)[-1] in ("timeout", "gtimeout"):
             return words[k + 1:]
         m = EXPAN.fullmatch(w.raw)
         if not m or not re.search("TIMEOUT|TOBIN", m.group(2) or m.group(3)):
             return None
-        op = m.group(4) or ""
-        if op.startswith("["):
+        if (m.group(4) or "").startswith("["):
             return None
-        if m.group(1) is None and op.startswith((":+", "+")):
-            sub, alt = Scan(op[op.index("+") + 1:], w.line, []), []
-            tok = sub.lex()
-            while tok.kind == "W":
-                alt.append(tok)
-                tok = sub.lex()
-            return self.timeout_args(alt + words[k + 1:], 0) if alt else None
         return words[k + 1:]
 
     def check_timeout(self, words):
         # timeout-no-kill: a timeout binary run with a duration, and neither
-        # -k/--kill-after nor a KILL signal (-s, --signal) among its options;
-        # _adapter_env <cli> <cmd...> runs the word after the CLI name
+        # -k/--kill-after nor a KILL signal (-s, --signal) among its options,
+        # each word read as held() reads it; _adapter_env <cli> <cmd...> runs
+        # the word after the CLI name
+        words = self.held(words)
         k = self.run_index(words)
         if k + 2 < len(words) and words[k].val == "_adapter_env":
             k += 2
@@ -13702,6 +14352,13 @@ V=$("$TOBIN" -s TERM 30s cmd | head -1)   # want:timeout-no-kill
 command /usr/local/bin/gtimeout 0.5 cmd   # want:timeout-no-kill
 _adapter_env claude "$TIMEOUT_BIN" 240 claude -p x   # want:timeout-no-kill
 ( cd x && _adapter_env grok "$TIMEOUT_BIN" --foreground 90s grok inspect )   # want:timeout-no-kill
+n=$(( $(grep -Pc x /dev/null) + 1 ))   # want:grep-P
+n=$(( $(timeout 1 sleep 2; echo 0) + 1 ))   # want:timeout-no-kill
+(( $(grep -Pc x f) > 0 ))   # want:grep-P
+exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+120} sh x   # want:timeout-no-kill
+exec env A=1 "$@" "$TIMEOUT_BIN" 120 sh x   # want:timeout-no-kill
+${T:-timeout} 30 make   # want:timeout-no-kill
+${TIMEOUT_BIN:-$(command -v gtimeout)} 30 make   # want:timeout-no-kill
 ok_adapter_env() {
   _adapter_env claude "$TIMEOUT_BIN" --foreground -k 10s 240 claude -p x
   _adapter_env grok "$2" --foreground -k 10s "${3}s" grok
@@ -13722,6 +14379,12 @@ ok_timeout() {
   command -v timeout >/dev/null
   ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 60} cmd
   { "$TIMEOUT_BIN" -k 2s "${SECS}s" "$@"; } 2>/dev/null || true
+  n=$(( a + 1 ))
+  n=$(( $(date +%s) - T0 ))
+  exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+-k10s} ${TIMEOUT_BIN:+120} sh x
+  "$TIMEOUT_BIN" ${KOPT:--k10s} 60 cmd
+  exec env "$@" "$TIMEOUT_BIN" 120 sh x
+  printf '%s\n' "${A:-}${B:-}" "${C:-$D}\n${E}"
 }
 S30_PLANTED
 printf 'ok() {\n  echo %s\n}\n' "'never closed" > "$_S30/broken.sh"
@@ -13743,7 +14406,7 @@ case "$_S30_NEG" in
 esac
 _S30_CAP="the shell rules a static scan can decide hold in every shell file Triforge ships (scripts/*.sh, scripts/lib/*.sh, hooks/handlers/*.sh, skills/*/scripts/*.sh): no function ends in a [ ] or [[ ]] && chain with no ||, no grep -c … || echo, no grep -P, no associative array, no mapfile or readarray (AGENTS.md Shell), and no timeout binary run as a command without a kill-after (review finding #6)"
 if [ -z "$_S30_HITS" ] && [ -z "$_S30_FAIL" ]; then
-  row "SELF-30" "claude" "$_S30_CAP" "PASS" "${_S30_N} files parsed as bash, comments, quoted text and here-document bodies as text: 0 hits, no scan error; planted: $(printf '%s\n' "$_S30_WANT" | grep -c . || true) shapes flagged on exactly their lines (test-and-last on one line and several, mid-chain, in a { } and a ( ) body, under the function keyword; grep -c || echo in a command substitution, quoted and not; grep -P, -oP, --perl-regexp; declare, local and typeset -A; mapfile, readarray; timeout-no-kill: timeout, \"\$TIMEOUT_BIN\", \"\${_TB_TIMEOUT}\", a \"\$SECS\" duration, gtimeout after env, \"\$TOBIN\" -s TERM in a command substitution, \${TIMEOUT_BIN:+…} after exec, a gtimeout path after command, \"\$TIMEOUT_BIN\" handed to _adapter_env with and without --foreground, in a ( )) and none of the compliant ones ([ ] && [ ] || return 1, && … || true, [ ] || return 1, if [ ] && …; then … fi last, a bare test last, a python here-document holding x and y and the shapes, a comment holding [ -d x ] && y, the shapes in quoted strings, grep -e -P; timeout with -k, --kill-after=5s, -k5s or -s KILL, _adapter_env with --foreground -k 10s, with \"\$2\" and -k, with \"\${TO[@]}\" and running env, git -C or python3 -c, the binary as another function's argument, the timeout shapes in a comment and in quoted strings, \"\$@\" where the duration goes, command -v timeout, \${TIMEOUT_BIN:+…} holding -k); a quote that never closes is a scan-error" "static"
+  row "SELF-30" "claude" "$_S30_CAP" "PASS" "${_S30_N} files parsed as bash, comments, quoted text and here-document bodies as text: 0 hits, no scan error; planted: $(printf '%s\n' "$_S30_WANT" | grep -c . || true) shapes flagged on exactly their lines (test-and-last on one line and several, mid-chain, in a { } and a ( ) body, under the function keyword; grep -c || echo in a command substitution, quoted and not; grep -P, -oP, --perl-regexp, -Pc in a command substitution inside \$(( )) and (( )); declare, local and typeset -A; mapfile, readarray; timeout-no-kill: timeout, \"\$TIMEOUT_BIN\", \"\${_TB_TIMEOUT}\", a \"\$SECS\" duration, gtimeout after env, \"\$TOBIN\" -s TERM in a command substitution, \${TIMEOUT_BIN:+…} after exec, a gtimeout path after command, \"\$TIMEOUT_BIN\" handed to _adapter_env with and without --foreground, in a ( ), timeout in a command substitution inside \$(( )), \${TIMEOUT_BIN:+\"\$TIMEOUT_BIN\"} \${TIMEOUT_BIN:+120} after exec, \"\$TIMEOUT_BIN\" after env A=1 \"\$@\", \${T:-timeout}, \${TIMEOUT_BIN:-\$(command -v gtimeout)}) and none of the compliant ones ([ ] && [ ] || return 1, && … || true, [ ] || return 1, if [ ] && …; then … fi last, a bare test last, a python here-document holding x and y and the shapes, a comment holding [ -d x ] && y, the shapes in quoted strings, grep -e -P, \$(( a + 1 )), \$(( \$(date +%s) - T0 )); timeout with -k, --kill-after=5s, -k5s or -s KILL, _adapter_env with --foreground -k 10s, with \"\$2\" and -k, with \"\${TO[@]}\" and running env, git -C or python3 -c, the binary as another function's argument, the timeout shapes in a comment and in quoted strings, \"\$@\" where the duration goes, command -v timeout, \${TIMEOUT_BIN:+…} holding -k, the split form with \${TIMEOUT_BIN:+-k10s}, \${KOPT:--k10s} where the options go, env \"\$@\" with no NAME=value before it, words holding two expansions); a quote that never closes is a scan-error" "static"
 else
   row "SELF-30" "claude" "$_S30_CAP" "FAIL" "$(printf '%s' "hits: ${_S30_HITS:-none}; negative controls:${_S30_FAIL:- ok}" | cut -c1-1500)" "static"
 fi

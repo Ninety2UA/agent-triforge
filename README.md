@@ -786,7 +786,7 @@ Seven safeguards keep long sprints from dying to context limits:
 | **Analysis paralysis** | [`context-monitor.sh`](hooks/handlers/context-monitor.sh) warns at 8+ consecutive reads without writes. The lead's tool vocabulary in the registry decides what counts as a read; under a Codex lead, a shell command that only reads (`cat`, `sed -n`, `git log`) counts | Reading without producing |
 | **Tool failure monitor** | [`tool-failure-monitor.sh`](hooks/handlers/tool-failure-monitor.sh) — tracks and warns on accumulated tool failures | Silent failure accumulation |
 | **Subprocess timeouts** | Watchdog pattern on all Antigravity/Codex calls — SIGTERM after timeout, SIGKILL after 5s grace | Hung external agents blocking pipeline |
-| **Risk scoring** | Per-subagent risk accumulation — halt at >20% or 50+ file changes | Runaway subagents |
+| **Risk scoring** | Per-subagent risk accumulation — halt at >20% or more than 50 changed files | Runaway subagents |
 
 ```bash
 # Full autonomous sprint with context recovery

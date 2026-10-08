@@ -1101,7 +1101,8 @@ _persona_read_run() {
 # from), _PT_FROM (what the named instruction-file changes are against: the
 # lease's base, or _PT_HEAD), _PT_NAME (the worktree's tag), _PT_DESC,
 # _PT_WHAT and _PT_NONE (the prompt's words). rc 64 for an --at of another
-# shape, a ref that names no commit, or a lease _persona_lease refuses.
+# shape, a ref that names no commit, a ref another ref of its name shadows
+# (_persona_ref_unambiguous), or a lease _persona_lease refuses.
 _persona_target() {
   local WHO=$1 AT=$2 REF
   _PT_COMMIT="" _PT_HEAD="" _PT_FROM="" _PT_NAME="" _PT_DESC="" _PT_WHAT="" _PT_NONE=""
@@ -1138,6 +1139,10 @@ _persona_target() {
         echo "${WHO}: --at ref:${REF} names no commit in ${_LEASE_REPO}" >&2
         return 64
       fi
+      if ! _persona_ref_unambiguous "$WHO" "$REF"; then
+        _PT_COMMIT=""
+        return 64
+      fi
       _PT_NAME=ref
       _PT_DESC="commit ${_PT_COMMIT:0:12} (ref:${REF})"
       _PT_WHAT="commit ${_PT_COMMIT:0:12} changes against the integration branch"
@@ -1150,6 +1155,33 @@ _persona_target() {
   esac
   _persona_trusted_head "$WHO" || return $?
   if [ -z "$_PT_FROM" ]; then _PT_FROM=$_PT_HEAD; fi
+}
+
+# _persona_ref_unambiguous <who> <ref> — 0 unless another ref of the same name
+# holds another commit than the one git resolves the name at the start of
+# <ref> to (up to its first ~ ^ : or @{; a revision expression reads that
+# name too): refs/<name>, refs/tags/<name>, refs/heads/<name>,
+# refs/remotes/<name> or refs/remotes/<name>/HEAD. git reads $GIT_DIR/<name>,
+# refs/<name> and refs/tags/<name> ahead of refs/heads/<name>, and a worker can
+# write any of them, so a tag named like the integration branch would move
+# `--at ref:<integration branch>` to the tag's commit. Then the refusal, naming
+# the full ref to pass instead, and 1. A shadow at the same commit changes
+# nothing and passes.
+_persona_ref_unambiguous() {
+  local WHO=$1 REF=$2 N C F FC
+  N=${REF%%[~^:]*}
+  N=${N%%@\{*}
+  [ -n "$N" ] || return 0
+  C=$(_lgr rev-parse --verify --quiet "${N}^{commit}" 2>/dev/null) || return 0
+  for F in "refs/${N}" "refs/tags/${N}" "refs/heads/${N}" "refs/remotes/${N}" "refs/remotes/${N}/HEAD"; do
+    FC=$(_lgr show-ref --verify --hash "$F" 2>/dev/null) || continue
+    FC=$(_lgr rev-parse --verify --quiet "${FC}^{commit}" 2>/dev/null) || FC=""
+    if [ "$FC" != "$C" ]; then
+      echo "${WHO}: --at ref:${REF} is ambiguous: git resolves ${N} to ${C:0:12}, but ${F} is at ${FC:0:12} (git reads \$GIT_DIR/${N}, refs/${N} and refs/tags/${N} ahead of refs/heads/${N}, and a worker can write any of them); name it in full, e.g. ref:${F}${REF#"$N"}, or remove the other ref. Nothing ran" >&2
+      return 1
+    fi
+  done
+  return 0
 }
 
 # _persona_trusted_head <who> — set _PT_HEAD to the commit an exec run's
@@ -1528,10 +1560,16 @@ sys.exit(1 if left else 0)
 # named on stderr; a CLI's own 80 reads the same), or 70 when the supervisor
 # itself failed after the start (the traceback on stderr; the sweep still
 # ran). A process that leaves the group and its parent between two looks (a
-# daemon's double fork) is not seen.
+# daemon's double fork) is not seen. Its stderr lines name the helper and the
+# CLI from TRIFORGE_RUN_LABEL, "<helper>|<cli>" (invoke_grok passes
+# "invoke_grok|grok" inside the env -i command), which it takes out of the
+# environment before the command starts; unset, they read as the persona
+# lane's: "dispatch_persona" and "the persona CLI".
 _PERSONA_RUN_PY="${_PERSONA_STOP_DEFS}"'
 import select, traceback
 grace, known, child, pending = float(sys.argv[1]), {}, [], []
+who, _, cli = (os.environ.pop("TRIFORGE_RUN_LABEL", "") or "dispatch_persona|the persona CLI").partition("|")
+cli = cli or "the CLI"
 def track():
     t = ps_table()
     if t is None or not child:
@@ -1582,7 +1620,7 @@ def sweep(g):
             except OSError:
                 break
     if left is None or left:
-        sys.stderr.write("dispatch_persona: WARNING unresolved cleanup: the persona CLI left " + (("pid(s) " + " ".join(str(q) for q in left) + " running after TERM and KILL") if left else "processes ps could not list (its process group was signalled by id, unverified)") + "\n")
+        sys.stderr.write(who + ": WARNING unresolved cleanup: " + cli + " left " + (("pid(s) " + " ".join(str(q) for q in left) + " running after TERM and KILL") if left else "processes ps could not list (its process group was signalled by id, unverified)") + "\n")
         sys.stderr.flush()
         return False
     return True
@@ -1601,7 +1639,7 @@ signal.signal(signal.SIGCHLD, signal.SIG_DFL)
 try:
     child.append(subprocess.Popen(sys.argv[2:]))
 except OSError as e:
-    sys.stderr.write("dispatch_persona: could not start " + sys.argv[2] + ": " + str(e) + "\n")
+    sys.stderr.write(who + ": could not start " + sys.argv[2] + ": " + str(e) + "\n")
     os._exit(127)
 failed = True
 try:
@@ -1616,7 +1654,7 @@ try:
         n += 1
     failed = False
 except BaseException:
-    sys.stderr.write("dispatch_persona: ERROR the run supervisor failed; stopping the persona CLI\n" + traceback.format_exc())
+    sys.stderr.write(who + ": ERROR the run supervisor failed; stopping " + cli + "\n" + traceback.format_exc())
 try:
     clean = sweep(3.0 if failed else grace)
 except BaseException:

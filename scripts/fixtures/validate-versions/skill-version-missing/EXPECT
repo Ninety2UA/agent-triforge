@@ -1,0 +1,7 @@
+# A metadata block with no version key fails: the contract is that every
+# shipped skill carries metadata.version equal to plugin.json, and a missing one
+# is named with the version it should carry.
+check: skill-versions
+rc: 1
+line: FAIL: skill versions: skills/demo/SKILL.md has no metadata.version; .claude-plugin/plugin.json is "1.2.3"
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

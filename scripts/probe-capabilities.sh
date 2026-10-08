@@ -698,14 +698,19 @@ ROWS="$WORK/rows.tsv"
 : > "$ROWS"
 
 # Scrub known key/token shapes out of captured evidence (KTD-14) and flatten.
+# The same patterns as _scrub in scripts/lib/common.sh (see there; SELF-26
+# compares the two copies on the same samples).
 _scrub() {
   sed -E \
     -e 's/sk-[A-Za-z0-9_-]{8,}/[REDACTED-KEY]/g' \
     -e 's/AIza[0-9A-Za-z_-]{10,}/[REDACTED-KEY]/g' \
+    -e 's/github_pat_[A-Za-z0-9_]{22,}/[REDACTED-KEY]/g' \
     -e 's/gh[pousr]_[A-Za-z0-9]{16,}/[REDACTED-KEY]/g' \
     -e 's/xox[baprs]-[A-Za-z0-9-]{10,}/[REDACTED-KEY]/g' \
     -e 's/(Bearer|bearer) +[A-Za-z0-9._-]{12,}/Bearer [REDACTED]/g' \
-    -e 's/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9._-]{20,}/[REDACTED-JWT]/g'
+    -e 's/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9._-]{20,}/[REDACTED-JWT]/g' \
+    -e 's/xai-[A-Za-z0-9]{20,}/[REDACTED-KEY]/g' \
+    -e 's/(AKIA|ASIA)[A-Z0-9]{16}/[REDACTED-KEY]/g'
 }
 
 _evidence() { # _evidence <file> — one scrubbed, flattened, truncated line
@@ -744,8 +749,8 @@ _quota_shaped() { # _quota_shaped <output-file>
 # nothing, so no negative row reads it as a refusal: _negative_verdict asks
 # it first, and each row that passes when a forbidden action left no trace
 # (AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07,
-# CUR-08, CC-14b) asks it right after its check for the trace. SELF-29 tests
-# both helpers.
+# CUR-08, CC-14b, and CDX-16 on its untrusted lane run) asks it right after
+# its check for the trace. SELF-29 tests both helpers.
 _timed_out() {
   [ "$1" -eq 124 ] || [ "$1" -eq 137 ]
 }
@@ -2122,7 +2127,9 @@ fi  # end of the per-CLI sections skipped by --self-only
 #                    first model request, so no login is needed). The user's own
 #                    config is never touched. CDX-16 PASS needs the bypass run to
 #                    fire a hook and the untrusted lane run to fire none; hooks
-#                    firing untrusted are a FAIL that says "fires without trust"
+#                    firing untrusted are a FAIL that says "fires without trust",
+#                    and an untrusted run its timeout cut off is a FAIL that
+#                    says "timed out" (it fired none because it stopped first)
 #   CC-13 / CDX-17 / AGY-17 / OC-09 / KIMI-10 / CUR-13
 #                    a variable set at the lease boundary is visible inside each
 #                    worker CLI's tool shell, run with the lane's own argv
@@ -3391,16 +3398,20 @@ if command -v codex >/dev/null 2>&1; then
         _u29_hooks_seen "$HM"
         U29_N1=$U29_FIRED; U29_E1=$U29_HOOKS
         rm -f "$HM"/hook-*
-        (cd "$FIX" && _lane_run 120 env CODEX_HOME="$CH" "TRIFORGE_PROBE_WORKER=$U29_VAL" codex "${U29_CDX_FLAGS[@]}" --skip-git-repo-check -m "$CDX_MODEL" "Respond with only: READY" < /dev/null > "$O.2" 2>&1) || true
+        CDX16_RC=0
+        (cd "$FIX" && _lane_run 120 env CODEX_HOME="$CH" "TRIFORGE_PROBE_WORKER=$U29_VAL" codex "${U29_CDX_FLAGS[@]}" --skip-git-repo-check -m "$CDX_MODEL" "Respond with only: READY" < /dev/null > "$O.2" 2>&1) || CDX16_RC=$?
         _u29_hooks_seen "$HM"
         # PASS needs both controls: the bypass run fires a hook (positive) and
         # the lane-flags run, untrusted, fires none (negative). Hooks firing
         # without trust are a FAIL that says so: the gate the row names did
-        # not hold.
-        if [ "$U29_N1" -gt 0 ] && [ "$U29_FIRED" -eq 0 ]; then
-          row "CDX-16" "codex" "$U29_CDX16" "PASS" "with --dangerously-bypass-hook-trust: ${U29_E1}; lane flags alone (untrusted plugin hooks): ${U29_HOOKS} — plugin hooks are trust-gated, and the trust lives in the user's CODEX_HOME, which a lane worker reads through HOME; the scratch home has no login, so PreToolUse/Stop cannot fire there" "marker-file"
-        elif [ "$U29_FIRED" -gt 0 ]; then
+        # not hold. A lane-flags run the timeout cut off (_timed_out) fired
+        # none because it stopped first, so it is a FAIL too, never a PASS.
+        if [ "$U29_FIRED" -gt 0 ]; then
           row "CDX-16" "codex" "$U29_CDX16" "FAIL" "fires without trust: lane flags alone, untrusted plugin hooks: ${U29_HOOKS}; with --dangerously-bypass-hook-trust: ${U29_E1} — the trust gate did not hold, so a lane worker runs installed plugins' hooks and the worker-marker early exit (U11) is the only guard" "marker-file"
+        elif _timed_out "$CDX16_RC"; then
+          row "CDX-16" "codex" "$U29_CDX16" "FAIL" "timed out after 120 s (rc=$CDX16_RC): the timeout cut the lane-flags run off, so the hooks it did not fire show nothing; with --dangerously-bypass-hook-trust: ${U29_E1}; $(_evidence "$O.2")" "marker-file"
+        elif [ "$U29_N1" -gt 0 ]; then
+          row "CDX-16" "codex" "$U29_CDX16" "PASS" "with --dangerously-bypass-hook-trust: ${U29_E1}; lane flags alone (untrusted plugin hooks): ${U29_HOOKS} — plugin hooks are trust-gated, and the trust lives in the user's CODEX_HOME, which a lane worker reads through HOME; the scratch home has no login, so PreToolUse/Stop cannot fire there" "marker-file"
         elif _auth_shaped "$O"; then
           row "CDX-16" "codex" "$U29_CDX16" "UNAVAILABLE" "no hook fired before the scratch home's missing login stopped the run; a live check needs the plugin in the user's CODEX_HOME (user-tier, R18): $(_evidence "$O")" "marker-file"
         else

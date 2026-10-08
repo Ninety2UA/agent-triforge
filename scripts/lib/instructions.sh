@@ -18,7 +18,13 @@
 #     no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working
 #     directory or above it; ~/.claude/CLAUDE.md, the user tier, does not count.
 #     A CLAUDE.md-family file that imports AGENTS.md (an `@AGENTS.md` token,
-#     its path relative to the file holding it) loads it with the file.
+#     its path relative to the file holding it) loads it with the file. An
+#     import line is written or offered only when this reader reads it back
+#     as the project's import (reads_back): a token ends at whitespace (no
+#     escaped form is written or read here) and a path that starts with ~/
+#     is read from HOME, so a directory named with a space, or named ~,
+#     between that file and the project leaves no import line there; a
+#     CLAUDE.md in the project holding `@AGENTS.md`, no path, is the fix.
 #   agents-chain  reads ${CODEX_HOME:-~/.codex}/AGENTS.md, then one file per
 #     directory from the project root (the nearest directory holding .git)
 #     down to the working directory, AGENTS.override.md replacing AGENTS.md at
@@ -56,8 +62,10 @@
 # project, the refusal says to start in a project directory.
 #
 # Return codes: 0 ok · 1 hidden or an unknown reader
-# (instruction_pointer_visibility) · 2 refused input · 3 over the AGENTS.md
-# byte budget (instruction_merge_pointer and the merge in
+# (instruction_pointer_visibility) · 2 refused input, an import line that
+# would not read back as the project's import included
+# (instruction_add_import) · 3 over the AGENTS.md byte budget
+# (instruction_merge_pointer and the merge in
 # instruction_convert_stale) · 20 needs-ask · 45 lead-only refusal · 64 usage ·
 # 69 unavailable (no python3, no template) · 80 degraded (a write failed, or
 # the target changed while it was planned).
@@ -304,6 +312,18 @@ def import_line(kind, level, target):
     return ("@../" if kind.startswith(".claude/") else "@") + prefix + "AGENTS.md"
 
 
+def reads_back(path, line, target):
+    # True when this reader (imports) takes line, written into the file at
+    # path, as an import of <target>/AGENTS.md. A line that does not read
+    # back would be written but never seen as that import, so every approved
+    # run would append it again: a path that holds whitespace ends the
+    # import there, and one that starts with ~/ is read from HOME (a
+    # directory named ~ on the way down). No writer writes such a line, and
+    # neither a fix nor the import column of detect offers one; a line with
+    # no path (@AGENTS.md, @../AGENTS.md) always reads back
+    return imports(path, os.fsencode(line), {os.path.realpath(target)})
+
+
 def user_tiers():
     return [os.path.join(home(), r["user_tier"]) for r in READERS.values() if r["user_tier"] and home()]
 
@@ -397,7 +417,7 @@ def row(kind, where, path, level, project):
     if linked(level, kind):
         states.append("symlink")
     imp = import_line(kind, level, project) if kind in CLAUDE_KINDS and where != "user" else "-"
-    return "\t".join((kind, where, ",".join(states), clean(path), clean(imp)))
+    return "\t".join((kind, where, ",".join(states), clean(path), clean(imp if reads_back(path, imp, project) else "-")))
 
 
 def detect(fn, start):
@@ -566,13 +586,15 @@ def reach(lead, r, cwd):
                 fix = pointer + " is in your home directory or a directory above it, which every project under it reads: put the pointer block in the AGENTS.md of this project instead (instruction_merge_pointer " + cwd + ")"
             else:
                 pointer, plevel = mine[0][0], mine[0][1]
-                fix = "add the line " + import_line(kind, level, plevel) + " to " + p + " (instruction_add_import " + p + (", run from " + plevel if plevel != cwd else "") + ")"
+                line = import_line(kind, level, plevel)
+                fix = "add the line " + line + " to " + p + " (instruction_add_import " + p + (", run from " + plevel if plevel != cwd else "") + ")"
                 if level != plevel and plevel.startswith(level.rstrip("/") + "/"):
                     # a file above the project: a file in the project first; an
                     # import there reaches every project under it, and none is
-                    # offered at HOME or above (the writers refuse those)
+                    # offered at HOME or above (the writers refuse those), nor
+                    # one that would not read back (reads_back)
                     own = "add a " + CLAUDE_KINDS[0] + " holding the line " + import_line(CLAUDE_KINDS[0], plevel, plevel) + " to " + plevel + ", which loads it for that project only"
-                    fix = own if home_or_above(level) else own + "; or " + fix + ", which loads it for every project under " + level
+                    fix = own if home_or_above(level) or not reads_back(p, line, plevel) else own + "; or " + fix + ", which loads it for every project under " + level
             return say(lead, "hidden", "shadowed by " + ", ".join(s[0] for s in shadows) + ": this reader takes AGENTS.md only while no " + kind_names(r["shadow"]) + " exists in the working directory or above, and none of them imports " + pointer + "; " + fix)
     return say(lead, "visible", pointer + " is read" + tail + note)
 
@@ -671,11 +693,15 @@ def add_import(fn, arg, yes):
         out("unchanged: " + path + " already imports " + os.path.join(project, "AGENTS.md"))
         return 0
     line = import_line(kind, lev, project)
+    own = CLAUDE_KINDS[0]
+    if not reads_back(path, line, project):
+        # the line would never be seen as this import (reads_back), so it is
+        # refused before any plan, also with --yes
+        return refuse(fn, path + " would need the line " + line + ", which would not read back as an import of " + os.path.join(project, "AGENTS.md") + " (an import path ends at whitespace, and one that starts with ~/ is read from your home directory); put the line " + import_line(own, project, project) + " in " + os.path.join(project, own) + " instead, which loads it for this project only")
     new = data + (b"\n" if data and not data.endswith(b"\n") else b"") + os.fsencode(line) + b"\n"
     plan = "add the line " + line + " to " + path + ", so Claude Code loads " + os.path.join(project, "AGENTS.md") + " with it"
     if lev != project:
         # a file above the project: every project under it loads the import
-        own = CLAUDE_KINDS[0]
         plan += ", and so does every project under " + lev + ", not only this one; for this project alone, put the line " + import_line(own, project, project) + " in " + os.path.join(project, own) + " instead"
     if not lexists(os.path.join(project, "AGENTS.md")):
         plan += " (this project has no AGENTS.md yet; instruction_merge_pointer creates it)"
@@ -955,7 +981,10 @@ _instr_args() {
 #        directory, a dangling link); "symlink" last when the file or its .claude
 #        directory is a link.
 # import the line that would import <dir>'s AGENTS.md from that file (relative
-#        to it: @AGENTS.md, @../AGENTS.md, @proj/AGENTS.md), "-" otherwise.
+#        to it: @AGENTS.md, @../AGENTS.md, @proj/AGENTS.md), "-" otherwise,
+#        and "-" when that line would not read back as <dir>'s import
+#        (reads_back: its path holds whitespace or starts with ~/), so no
+#        import line there can name <dir>'s AGENTS.md.
 # Control characters in a path print as "?". rc 0; 2 <dir> is not a
 # directory; 69 no python3.
 instruction_files_detect() {
@@ -974,7 +1003,9 @@ instruction_files_detect() {
 # rc 1, the why starting "unknown reader:". From HOME or a directory above it,
 # which is no project, the line is "hidden", rc 1, the why starting "not a
 # project:" and naming no fix; elsewhere a fix never builds on a pointer block
-# in HOME or above it.
+# in HOME or above it, and never offers an import line that would not read
+# back as the project's import (a path that holds whitespace or starts with
+# ~/; the project's own CLAUDE.md is the fix then).
 instruction_pointer_visibility() {
   local LEAD=${1:-} READER=""
   if [ -z "$LEAD" ] || [ "$#" -gt 2 ]; then
@@ -995,7 +1026,11 @@ instruction_pointer_visibility() {
 # user-level file or one in its directory (~/.claude/CLAUDE.md, ~/.claude/,
 # ${CODEX_HOME:-~/.codex}/), a file in HOME or a directory above it, a file
 # outside the project's directory chain, a missing or non-regular file, a
-# symlink or a symlinked directory.
+# symlink or a symlinked directory, and, before any plan and also with --yes,
+# a file above the project whose import line would not read back as this
+# project's import (a directory named with a space, or named ~, on the way
+# down to the project): the refusal names the project's own CLAUDE.md
+# holding @AGENTS.md instead.
 instruction_add_import() {
   _instr_args instruction_add_import "instruction_add_import <file> [--yes]" "$@" || return $?
   if [ -z "$_INSTR_ARG" ]; then

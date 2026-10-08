@@ -88,7 +88,13 @@ fi
 # directory above it (a dotfiles repository) is refused before anything is
 # written, rc 1 with _LEASE_CTX_WHY=home, or its ledger would land in ~/ops.
 # Compared by identity, as _tb_home_anchor (bootstrap.sh) compares; an unset
-# HOME, or one that does not resolve, protects nothing.
+# HOME, or one that does not resolve, protects nothing. Every failure is rc 1
+# with one stderr line, and _LEASE_CTX_WHY names its kind (empty on success):
+# nogit (no .git from here up, so no checkout and no git dir to protect),
+# home, root (a lease directory or TMPDIR another user could swap), error
+# (anything else: a .git that is neither a directory nor a gitdir: file, a
+# lease root that can't be made, an exception, a failed config capture). A
+# caller that may run outside a git checkout runs past nogit alone.
 _lease_ctx() {
   local KEY="${PWD}|${TRIFORGE_LEASE_ROOT:-}|${TMPDIR:-}|${HOME:-}"
   _LEASE_CTX_WHY=""
@@ -98,6 +104,8 @@ _lease_ctx() {
   local OUT RC=0
   OUT=$(LC_ROOT="${TRIFORGE_LEASE_ROOT:-}" LC_TMP="${TMPDIR:-/tmp}" python3 -c "${_PY_PRELUDE}"'
 import hashlib, os, stat, sys
+# an exception exits 1 with its type and message on stdout, for the refusal
+sys.excepthook = lambda t, e, tb: print("%s: %s" % (t.__name__, e))
 # shared(p): another user could rename entries in directory p (owned by
 # someone else than this user or root, or group/other write without the
 # sticky bit), and with them swap the lease root and its trusted git config
@@ -117,7 +125,7 @@ d = os.path.realpath(os.getcwd())
 while not os.path.lexists(os.path.join(d, ".git")):
     parent = os.path.dirname(d)
     if parent == d:
-        sys.exit(1)
+        sys.exit(5)   # no .git from here up: not inside a git repository
     d = parent
 repo, dotgit = d, os.path.join(d, ".git")
 # the checkout is HOME or a directory above it: refused (exit 4) before any
@@ -141,8 +149,9 @@ else:
     try:
         line = open(dotgit, encoding="utf-8").read().strip()
     except OSError:
-        sys.exit(2)
+        line = ""
     if not line.startswith("gitdir:"):
+        print(dotgit + " is neither a git directory nor a readable gitdir: file")
         sys.exit(2)
     gitdir = os.path.join(repo, line[len("gitdir:"):].strip())
 common = gitdir
@@ -166,6 +175,7 @@ for p in (repo, os.path.realpath(gitdir), os.path.realpath(common), os.path.real
     print(p)
 ' 2>/dev/null) || RC=$?
   if [ "$RC" -eq 3 ]; then
+    _LEASE_CTX_WHY=root
     echo "lease: ERROR $(printf '%s' "$OUT" | LC_ALL=C tr -d '\000-\037\177') — the lease root and the lead's trusted git config would sit where another user can swap them, so no lease runs here. Set TMPDIR to a private directory (or TRIFORGE_LEASE_ROOT to one of yours) and rerun." >&2
     return 1
   fi
@@ -175,8 +185,14 @@ for p in (repo, os.path.realpath(gitdir), os.path.realpath(common), os.path.real
     echo "lease: ERROR ${OUT} is your home directory or contains it, and a home directory is no project — its ledger would land in ${OUT}/ops, so no lease runs here. Run it from the project's own repository; inside a home directory that is a git repository (a dotfiles repo), git init the project first." >&2
     return 1
   fi
-  if [ "$RC" -ne 0 ]; then
+  if [ "$RC" -eq 5 ]; then
+    _LEASE_CTX_WHY=nogit
     echo "lease: ERROR not inside a git repository — worktree leases require one (outside git the builder pool degrades to lead-only in-place execution)." >&2
+    return 1
+  fi
+  if [ "$RC" -ne 0 ]; then
+    _LEASE_CTX_WHY=error
+    echo "lease: ERROR could not set up the lease context ($(printf '%s' "${OUT:-rc ${RC}}" | LC_ALL=C tr -d '\000-\037\177')), so no lease runs here." >&2
     return 1
   fi
   _LEASE_REPO=$(printf '%s\n' "$OUT" | sed -n 1p)
@@ -188,6 +204,7 @@ for p in (repo, os.path.realpath(gitdir), os.path.realpath(common), os.path.real
   _LEASE_LEDGER="${_LEASE_REPO}/ops/leases.toml"
   _LEAD_CFG="${_LEASE_STATE}/gitconfig"
   if [ ! -f "$_LEAD_CFG" ] && ! _lead_gitconfig_capture "$_LEAD_CFG"; then
+    _LEASE_CTX_WHY=error
     echo "lease: ERROR could not capture the trusted git config into ${_LEAD_CFG}" >&2
     _LEAD_CFG=""
     return 1
@@ -293,7 +310,9 @@ print(os.path.realpath(os.environ['RP_TARGET']))
 # Repo default branch (KTD-5). origin/HEAD's target when set, else the first of
 # main/master that exists locally, else empty (a single-branch or detached repo
 # with no default-branch concept). Printed WITHOUT the refs/remotes/origin/
-# prefix. Tolerant: every probe is guarded so a repo with no remote still works.
+# prefix: a branch NAME, which every caller reads as refs/heads/<name> only
+# (_lease_branch_commit), never as a bare revision. Tolerant: every probe is
+# guarded so a repo with no remote still works.
 _lease_default_branch() {
   local REF="" B
   _lease_ctx || return 0
@@ -311,20 +330,45 @@ _lease_default_branch() {
   return 0
 }
 
+# _lease_branch_commit <name> — print the commit of the local branch <name>,
+# read as exactly refs/heads/<name> (show-ref --verify). A bare <name> is no
+# safe revision for a decision: git resolves $GIT_DIR/<name>, refs/<name> and
+# refs/tags/<name> ahead of refs/heads/<name>, and a worker can write any of
+# them (a tag named like the default branch at the integration head empties
+# the protected scan of <name>...HEAD). So every branch the lease lifecycle
+# decides on or writes is read through here, or as its full ref. rc 1, nothing
+# printed, when <name> is no local branch (a tag, a commit, a remote-tracking
+# branch or a revision expression) or its tip is no commit.
+_lease_branch_commit() {
+  local SHA
+  [ -n "${1:-}" ] || return 1
+  SHA=$(_lgr show-ref --verify --hash "refs/heads/${1}" 2>/dev/null) || return 1
+  [ -n "$SHA" ] || return 1
+  _lgr rev-parse --verify --quiet "${SHA}^{commit}" 2>/dev/null
+}
+
 # _lease_default_ref — set _LEASE_DEF (the default branch, or empty) and
 # _LEASE_DEF_SHA (its commit, or empty): what the integrity baseline records.
 _lease_default_ref() {
   _LEASE_DEF=$(_lease_default_branch)
   _LEASE_DEF_SHA=""
   if [ -n "$_LEASE_DEF" ]; then
-    _LEASE_DEF_SHA=$(_lgr rev-parse --verify --quiet "refs/heads/${_LEASE_DEF}^{commit}" 2>/dev/null || true)
+    _LEASE_DEF_SHA=$(_lease_branch_commit "$_LEASE_DEF" || true)
   fi
 }
 
-# Current checked-out branch of the main tree, or empty on detached HEAD.
+# Current checked-out branch of the main tree: the exact name under
+# refs/heads/ that HEAD points at, or empty on a detached HEAD (or a HEAD that
+# names no branch). Never git's shortened form, which turns into heads/<name>
+# when another ref shadows <name>; callers read it as refs/heads/<name>.
 _lease_current_branch() {
+  local REF
   _lease_ctx || return 0
-  _lgr symbolic-ref --quiet --short HEAD 2>/dev/null || true
+  REF=$(_lgr symbolic-ref --quiet HEAD 2>/dev/null) || REF=""
+  case "$REF" in
+    refs/heads/?*) printf '%s\n' "${REF#refs/heads/}" ;;
+  esac
+  return 0
 }
 
 # _lease_root / _lease_ledger_path — print the lease root / the ledger path.
@@ -1734,9 +1778,13 @@ _lease_provision_claude_skills() {
 # .grok/sandbox.toml, its sandbox profile). rc 1 when the list can't
 # be read: a row without it would fall back to excluding all of .agents/; and
 # rc 1 when that config or profile can't be written as proven (a grok lease is
-# never made without them).
+# never made without them). Its callers (lease_create, lease_requeue) run in
+# the lead's own shell before any builder exists, so grok's provisioning
+# inspect runs supervised (_grok_lease_config ... supervised): what it leaves
+# running is stopped before the lease goes on, and rc 80 when that stop is
+# unresolved, so the caller leaves the worktree in place (_lease_uncarve).
 _lease_provision() {
-  local WT=$1 CLI=${2:-} LIST TRACKED=""
+  local WT=$1 CLI=${2:-} LIST TRACKED="" GRC=0
   local -a DIRS=(.agents/skills)
   _lease_provision_skills "$WT"
   case "$CLI" in
@@ -1755,7 +1803,10 @@ print(",".join(sorted(names)))
       ;;
     grok)
       # Fail closed (R23): no isolating config, no lease, so nothing dispatches
-      if ! _grok_lease_config "$WT" "$(_grok_class "${3:-}")"; then
+      _grok_lease_config "$WT" "$(_grok_class "${3:-}")" supervised || GRC=$?
+      if [ "$GRC" -eq 80 ]; then
+        return 80
+      elif [ "$GRC" -ne 0 ]; then
         echo "lease: ERROR the grok worktree ${WT} could not be provisioned (see above), so it is not leased. Fix the cause, then lease again" >&2
         return 1
       fi
@@ -1858,14 +1909,21 @@ _lease_carve() {
                  session_id= resumed_session= result_subtype= result_is_error=)
 }
 
-# _lease_uncarve <op> <task_id> <worktree> — undo a _lease_carve whose lease
-# was never recorded (_lease_provision failed): the worktree and its
-# lease/<task> branch go again, through the lead's hardened git, so a refused
-# lease leaves no lease history behind; with no ledger yet, a lease worktree
-# reads as a deleted ledger (_lead_lease_evidence, rc 44). rc 1, naming the
-# commands to run by hand, when git could not remove them.
+# _lease_uncarve <op> <task_id> <worktree> [<provision-rc>] — undo a
+# _lease_carve whose lease was never recorded (_lease_provision failed): the
+# worktree and its lease/<task> branch go again, through the lead's hardened
+# git, so a refused lease leaves no lease history behind; with no ledger yet,
+# a lease worktree reads as a deleted ledger (_lead_lease_evidence, rc 44).
+# rc 1, naming the commands to run by hand, when git could not remove them.
+# With <provision-rc> 80 (what grok's provisioning inspect left could not be
+# stopped, and may still run in the worktree) nothing is removed: rc 1, the
+# worktree and branch named with the commands to remove them once it has ended.
 _lease_uncarve() {
   local OP=$1 T=$2 WT=$3
+  if [ "${4:-}" = 80 ]; then
+    echo "${OP}: ERROR unresolved cleanup — a process grok's provisioning inspect left may still be running in the unleased worktree ${WT}, so nothing is leased and the worktree and its branch lease/${T} stay; once ps shows that process has ended, remove them before the next lease (git worktree remove --force ${WT}; git branch -D lease/${T})" >&2
+    return 1
+  fi
   if _lgr worktree remove --force "$WT" >/dev/null 2>&1 && _lgr branch -D "lease/${T}" >/dev/null 2>&1; then
     echo "${OP}: the unleased worktree ${WT} and its branch lease/${T} were removed again" >&2
     return 0
@@ -1989,7 +2047,7 @@ SNAP_ROW_EOF
     [ -n "$ADMIN" ] || { echo "lease_collect: ERROR can't locate ${T}'s admin dir under ${_LEASE_COMMON}/worktrees" >&2; return 1; }
     _ledger_update "$T" admin_dir="$ADMIN" || return 1
   fi
-  TIP=$(_lgr rev-parse --verify --quiet "refs/heads/${BRANCH}^{commit}" 2>/dev/null) || {
+  TIP=$(_lease_branch_commit "$BRANCH") || {
     echo "lease_collect: ERROR lease branch ${BRANCH} is missing — escalate; the builder's work is only in ${WT}" >&2; return 1; }
   if [ -z "$BASE" ]; then
     BASE=$(_lgr merge-base HEAD "$TIP" 2>/dev/null) || { echo "lease_collect: ERROR no merge base for ${BRANCH}" >&2; return 1; }
@@ -2027,7 +2085,7 @@ _lease_verify_snapshot() {
     IFS= read -r PROV || true; } <<VERIFY_ROW_EOF
 ${ROW}
 VERIFY_ROW_EOF
-  TIP=$(_lgr rev-parse --verify --quiet "refs/heads/${BRANCH}^{commit}" 2>/dev/null || true)
+  TIP=$(_lease_branch_commit "$BRANCH" || true)
   if [ "$TIP" != "$SNAP" ]; then
     echo "lease_merge: REFUSED — ${BRANCH} is at ${TIP:-<missing>}, not the lead's recorded collect snapshot ${SNAP} (the branch moved after collect). Merging it would merge an unreviewed state (KTD19); re-collect through lease_redispatch or reclaim the lease." >&2
     return 1
@@ -2085,19 +2143,23 @@ print(" ".join(bad[:10]) + (" ..." if len(bad) > 10 else ""))
 # every path the three commits don't all agree on. One cat-file --batch reads
 # each back raw, and python hashes "<type> <size>\0<content>" by the
 # repository's object format (sha1 or sha256). A gitlink (mode 160000) names a
-# commit in another repository, not an object of this one: skipped. One merge
-# base or the check fails closed: with several, the merge would build its base
-# from them. 0 when every object matches its id; otherwise the refusal, one
-# line per object (type, id, path, and the commit for a version not <to>'s) or
-# the error that broke a list off, and _RC_LEASE_INTEGRITY, with the first line
-# in _LVO_WHY. A check that can't run fails closed the same way. The rest of
-# what <from> reaches, the paths all three agree on, is not re-hashed: git fsck
-# reads every object.
+# commit in another repository, not an object of this one: skipped. 0 when
+# every object matches its id; otherwise the refusal, one line per object
+# (type, id, path, and the commit for a version not <to>'s) or the error that
+# broke a list off, and _RC_LEASE_INTEGRITY, with the first line in _LVO_WHY.
+# A check that can't run fails closed the same way. The rest of what <from>
+# reaches, the paths all three agree on, is not re-hashed: git fsck reads
+# every object. More than one merge base (a criss-cross history) also refuses:
+# the merge would build its base out of all of them, and the reads above need
+# one. That is a shape of the history, not damage to the store, and no repair
+# of the store clears it: once the objects <to> brings in pass, rc 1 with the
+# refusal naming the merge bases (_LVO_BASES, one per line; _LVO_WHY its first
+# words), and the caller names the recovery.
 _lease_verify_objects() {
-  local OP=$1 FROM=${2:-} TO=${3:-} FMT D LIST MB LERR="" LRC=0 DERR="" DRC=0 BAD="" PRC=0 NL
+  local OP=$1 FROM=${2:-} TO=${3:-} FMT D LIST MB LERR="" LRC=0 DERR="" DRC=0 BAD="" PRC=0 NL N SHOWN
   NL='
 '
-  _LVO_WHY=""
+  _LVO_WHY=""; _LVO_BASES=""
   FMT=$(_lgr rev-parse --show-object-format 2>/dev/null) || FMT=""
   if [ -z "$FROM" ] || [ -z "$TO" ]; then
     BAD="the objects ${TO:0:12} brings in could not be listed: no commit to list them from"
@@ -2114,12 +2176,12 @@ _lease_verify_objects() {
     MB=$(_lgr merge-base --all "$FROM" "$TO" 2>/dev/null) || MB=""
     case "$MB" in
       "") DRC=1; DERR="no merge base of ${FROM:0:12} and ${TO:0:12} could be read" ;;
-      *"$NL"*) DRC=1; DERR="${FROM:0:12} and ${TO:0:12} have more than one merge base, and the merge would build its base from them" ;;
+      *"$NL"*) _LVO_BASES=$MB ;;   # refused below, once the objects <to> brings in pass
       *) { DERR=$(_lgr rev-list --no-walk=unsorted --format='tree %T' "$FROM" "$MB" 2>&1 >"${D}/roots") \
              && DERR=$(_lgr diff-tree -r -t --raw --no-renames --ignore-submodules=none -z "$FROM" "$TO" 2>&1 >"${D}/paths") \
              && DERR=$(_lgr diff-tree -r -t --raw --no-renames --ignore-submodules=none -z "$MB" "$TO" 2>&1 >"${D}/base"); } || DRC=1 ;;
     esac
-    if [ "$DRC" -eq 0 ]; then
+    if [ "$DRC" -eq 0 ] && [ -z "$_LVO_BASES" ]; then
       DERR=$(LVO_LIST="$LIST" LVO_FROM="$FROM" LVO_BASE="$MB" python3 -c "${_PY_PRELUDE}"'
 import os, sys
 p = os.environ["LVO_LIST"]
@@ -2229,6 +2291,13 @@ sys.exit(1 if bad else 0)
       BAD="the objects ${TO:0:12} brings in could not be read back (rc ${PRC})"
     fi
   fi
+  if [ -z "$BAD" ] && [ -n "$_LVO_BASES" ]; then
+    N=$(printf '%s\n' "$_LVO_BASES" | grep -c . || true)
+    SHOWN=$(printf '%s\n' "$_LVO_BASES" | awk 'NR <= 5 { printf "%s%s", (NR > 1 ? " " : ""), substr($0, 1, 12) } NR == 6 { printf " ..." }')
+    _LVO_WHY="${FROM:0:12} and ${TO:0:12} have ${N} merge bases"
+    echo "${OP}: REFUSED — ${_LVO_WHY} (${SHOWN}), a criss-cross history: a merge of the two builds its base out of all of them, and the object check (KTD18) verifies a merge from one merge base only, so the merge does not run (fail closed). The objects ${TO:0:12} brings in hash to their ids: this is no sign the object store changed." >&2
+    return 1
+  fi
   [ -n "$BAD" ] || return 0
   _LVO_WHY=$(printf '%s\n' "$BAD" | head -1)
   echo "${OP}: INTEGRITY — the objects ${TO:0:12} brings in are not all what their ids name: the object store changed outside the lead's own operations (KTD18; this is detection, not prevention):" >&2
@@ -2251,7 +2320,7 @@ lease_create() {
     echo "lease_create: ERROR invalid task id '${TASK_ID}' — want [A-Za-z0-9][A-Za-z0-9._-]* (it becomes a branch and directory name)" >&2
     return 1
   fi
-  local RESOLVED CLI MODEL EFFORT WT NOW CUR IB="" ISHA="" ROW LEAD=""
+  local RESOLVED CLI MODEL EFFORT WT NOW CUR IB="" ISHA="" ROW LEAD="" PRC=0
   _lease_ctx || return 1
   # A change a worker made since the lead's last check (a planted hook, git
   # config, a moved ref) is caught before the next worktree is carved (KTD18).
@@ -2279,8 +2348,9 @@ CREATE_ROW_EOF
   fi
   if _lead_resolve 2>/dev/null; then LEAD=$_LEAD_CLI; fi
   _lease_carve "$TASK_ID" "$WT" || return 1
-  if ! _lease_provision "$WT" "$CLI" "$ROLE"; then
-    _lease_uncarve lease_create "$TASK_ID" "$WT" || true
+  _lease_provision "$WT" "$CLI" "$ROLE" || PRC=$?
+  if [ "$PRC" -ne 0 ]; then
+    _lease_uncarve lease_create "$TASK_ID" "$WT" "$PRC" || true
     return 1
   fi
   NOW=$(date +%s)
@@ -2883,7 +2953,7 @@ lease_reclaim() {
 lease_requeue() {
   _lead_only lease_requeue || return $?
   local TASK_ID=${1:?usage: lease_requeue <task_id>}
-  local STATE RQ PREV ROLE OUT WT RESOLVED CLI MODEL EFFORT
+  local STATE RQ PREV ROLE OUT WT RESOLVED CLI MODEL EFFORT PRC=0
   _lease_ctx || return 1
   _lead_integrity_check lease_requeue || return $?
   STATE=$(_ledger_get "$TASK_ID" state) || { echo "lease_requeue: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
@@ -2914,8 +2984,9 @@ lease_requeue() {
     return 1
   fi
   _lease_carve "$TASK_ID" "$WT" || return 1
-  if ! _lease_provision "$WT" "$CLI" "$ROLE"; then
-    _lease_uncarve lease_requeue "$TASK_ID" "$WT" || true
+  _lease_provision "$WT" "$CLI" "$ROLE" || PRC=$?
+  if [ "$PRC" -ne 0 ]; then
+    _lease_uncarve lease_requeue "$TASK_ID" "$WT" "$PRC" || true
     return 1
   fi
   _ledger_update "$TASK_ID" \
@@ -3221,7 +3292,7 @@ _lease_recorded_class() {
 # Approvals (U10 — KTD2, KTD4; R5, R32, R33)
 # ---------------------------------------------------------------------------
 
-# lease_approve <scope> <approver> — record an approval in the ledger.
+# lease_approve <scope> <approver> [<target>] — record an approval in the ledger.
 #   task:<id>           a merge approval (lease_merge needs one for a protected
 #                       diff or a stale lead-class pin): <approver> is `user`,
 #                       or the current lead's CLI when that CLI did not build the
@@ -3229,13 +3300,26 @@ _lease_recorded_class() {
 #                       routes to the user). Bound to the task's collect
 #                       snapshot (approval_snapshot): the next fix cycle's
 #                       collect writes a new snapshot and voids it. Needs the
-#                       task in review.
+#                       task in review. A <target> is usage (rc 64).
 #   promotion:<branch>  a promotion approval (lease_promote needs one when its
-#                       gate is on): `user` only. Bound to <branch>'s tree, the
-#                       protected paths it changes against the default branch
-#                       and the default branch's commit, in [baseline]
-#                       (promotion_*): a later merge or a default-branch move
-#                       voids it, and lease_promote uses it once.
+#                       gate is on): `user` only. <branch> is the integration
+#                       branch and <target> the branch the promotion goes
+#                       into, as lease_promote <target> takes it: both
+#                       existing local branches, read as exactly
+#                       refs/heads/<name> (_lease_branch_commit: never a tag, a
+#                       remote-tracking branch or a revision expression such
+#                       as sprint~1), the target other than <branch>, else
+#                       rc 1. Without
+#                       it, the default branch (origin/HEAD, else main, else
+#                       master), as lease_promote without an argument; a
+#                       repository with none needs <target>. Bound to
+#                       <branch>'s tree, the protected paths it changes
+#                       against the target, and the target's name and commit,
+#                       in [baseline] (promotion_*; promotion_default and
+#                       promotion_default_sha hold the target): a later merge
+#                       or a move of the target voids it, it never covers a
+#                       promotion into another branch, and lease_promote uses
+#                       it once.
 # A worker CLI never approves. Where it runs decides the rest
 # (_lead_origin_match): a lead-class approval by <cli> comes from <cli>'s own
 # session (via=lead-session, host <cli>), a terminal (via=tty: the user
@@ -3255,14 +3339,16 @@ _lease_recorded_class() {
 # lease_merge and lease_promote run theirs, and check the record against the
 # state they act on. Audit, not prevention: any shell with the helper can
 # record a user approval, the lead's agent shell included (via=lead-session).
-# rc: 0 recorded; 1 refused (an origin, the approver, the state, or a recorded
-# lease root that is gone); 45 a worker or a lease root; 64 usage.
+# rc: 0 recorded; 1 refused (an origin, the approver, the state, a branch or
+# target that is not a local branch, or a recorded lease root that is gone);
+# 45 a worker or a lease root; 64 usage.
 lease_approve() {
   _lead_only lease_approve --any-host || return $?
-  local USAGE="lease_approve: usage: lease_approve task:<id>|promotion:<branch> user|<lead CLI>"
-  local SCOPE=${1:-} WHO=${2:-} OUT RC=0 LEADNOW CLASS STAMP T B ROW STATE SNAP BUILDER TREE PDIG M=0
+  local USAGE="lease_approve: usage: lease_approve task:<id> user|<lead CLI> | lease_approve promotion:<branch> user [<target branch>]"
+  local SCOPE=${1:-} WHO=${2:-} TGT=${3:-} OUT RC=0 LEADNOW CLASS STAMP T B BSHA ROW STATE SNAP BUILDER TREE PDIG TSHA M=0
   local TRIFORGE_LEASE_ROOT="${TRIFORGE_LEASE_ROOT:-}"   # _lease_at_ledger_root may set it
-  if [ -z "$SCOPE" ] || [ -z "$WHO" ] || [ "$#" -gt 2 ]; then
+  # A third argument, the target, only with a promotion: scope.
+  if [ -z "$SCOPE" ] || [ -z "$WHO" ] || [ "$#" -gt 3 ] || { [ "$#" -eq 3 ] && [ "${SCOPE#promotion:}" = "$SCOPE" ]; }; then
     echo "$USAGE" >&2
     return 64
   fi
@@ -3281,7 +3367,7 @@ lease_approve() {
   LEADNOW=$_LEAD_CLI
   CLASS=$(_lease_reviewer_class "$WHO")
   if [ "$CLASS" = worker ]; then
-    echo "lease_approve: REFUSED — ${WHO} is a worker CLI here (the lead is ${LEADNOW}); an approval is the lead's or the user's: lease_approve ${SCOPE} user (KTD2)" >&2
+    echo "lease_approve: REFUSED — ${WHO} is a worker CLI here (the lead is ${LEADNOW}); an approval is the lead's or the user's: lease_approve ${SCOPE} user${TGT:+ ${TGT}} (KTD2)" >&2
     return 1
   fi
   _lead_origin
@@ -3297,7 +3383,7 @@ lease_approve() {
       ;;
     1)
       if [ "$CLASS" = lead ]; then
-        echo "lease_approve: REFUSED — a ${WHO} (lead) approval comes from the ${WHO} lead's own session or a terminal; this shell runs with via=${_LEAD_VIA} host=${_LEAD_HOST}. Record the user's approval instead, on the user's say-so: lease_approve ${SCOPE} user (KTD2)" >&2
+        echo "lease_approve: REFUSED — a ${WHO} (lead) approval comes from the ${WHO} lead's own session or a terminal; this shell runs with via=${_LEAD_VIA} host=${_LEAD_HOST}. Record the user's approval instead, on the user's say-so: lease_approve ${SCOPE} user${TGT:+ ${TGT}} (KTD2)" >&2
         return 1
       fi
       ;;
@@ -3326,36 +3412,55 @@ APPROVE_ROW_EOF
     promotion:*)
       B=${SCOPE#promotion:}
       if [ "$CLASS" != user ]; then
-        echo "lease_approve: REFUSED — a promotion approval is the user's alone (KTD4); ${WHO} is the lead. Ask the user to run: lease_approve promotion:${B} user" >&2
+        echo "lease_approve: REFUSED — a promotion approval is the user's alone (KTD4); ${WHO} is the lead. Ask the user to run: lease_approve promotion:${B} user${TGT:+ ${TGT}}" >&2
         return 1
       fi
-      if [ -z "$B" ] || ! TREE=$(_lgr rev-parse --verify --quiet "refs/heads/${B}^{tree}" 2>/dev/null); then
+      # The integration branch and the target are local branches, each read as
+      # exactly refs/heads/<name> (_lease_branch_commit), so a tag, a
+      # remote-tracking branch or a revision expression of that spelling
+      # (sprint~1) never stands in for one; without a target, the default
+      # branch.
+      if ! BSHA=$(_lease_branch_commit "$B") || ! TREE=$(_lgr rev-parse --verify --quiet "${BSHA}^{tree}" 2>/dev/null); then
         echo "lease_approve: ERROR '${B}' is not a local branch (promotion:<integration branch>)" >&2
         return 1
       fi
-      _lease_default_ref
-      if [ -z "$_LEASE_DEF" ] || [ -z "$_LEASE_DEF_SHA" ]; then
-        echo "lease_approve: ERROR no default branch (origin/HEAD, main or master) to bind a promotion approval to" >&2
-        return 1
+      if [ "$#" -eq 3 ]; then
+        TSHA=$(_lease_branch_commit "$TGT" || true)
+        if [ -z "$TSHA" ]; then
+          echo "lease_approve: ERROR '${TGT}' is not a local branch; <target> is the local branch the promotion goes into (lease_promote <target>)" >&2
+          return 1
+        fi
+        if [ "$B" = "$TGT" ]; then
+          echo "lease_approve: ERROR ${B} is both the branch to promote and its target; name the integration branch and the branch it goes into: lease_approve promotion:<integration branch> user ${TGT}" >&2
+          return 1
+        fi
+      else
+        _lease_default_ref
+        TGT=$_LEASE_DEF
+        TSHA=$_LEASE_DEF_SHA
+        if [ -z "$TGT" ] || [ -z "$TSHA" ]; then
+          echo "lease_approve: ERROR no default branch (origin/HEAD, main or master) to bind a promotion approval to; name the branch the promotion goes into: lease_approve promotion:${B} user <target branch>" >&2
+          return 1
+        fi
+        if [ "$B" = "$TGT" ]; then
+          echo "lease_approve: ERROR ${B} is the default branch; approve the integration branch that lease_promote promotes into it" >&2
+          return 1
+        fi
       fi
-      if [ "$B" = "$_LEASE_DEF" ]; then
-        echo "lease_approve: ERROR ${B} is the default branch; approve the integration branch that lease_promote promotes into it" >&2
-        return 1
-      fi
-      _lease_protected_scan "$_LEASE_DEF" "${_LEASE_DEF}...refs/heads/${B}"
+      _lease_protected_scan "$TGT" "${TSHA}...${BSHA}"
       if [ -n "$_LP_ERR" ]; then
         echo "lease_approve: REFUSED — the protected-path scan could not run, so there is no protected-path set to bind the approval to: ${_LP_ERR}" >&2
         return 1
       fi
       PDIG=$(_lease_protected_digest "$_LP_HITS") || { echo "lease_approve: ERROR could not digest the protected-path set" >&2; return 1; }
       _ledger_write @baseline promotion_scope="promotion:${B}" promotion_class=user promotion_by=user promotion_tree="$TREE" \
-        promotion_default="$_LEASE_DEF" promotion_default_sha="$_LEASE_DEF_SHA" promotion_protected="$PDIG" \
+        promotion_default="$TGT" promotion_default_sha="$TSHA" promotion_protected="$PDIG" \
         promotion_via="$_LEAD_VIA" promotion_host="$_LEAD_HOST" promotion_lead_cli="$LEADNOW" promotion_at="$STAMP" promotion_voided= >/dev/null || return 1
       # A checkout with no integrity baseline yet (no lease ever ran): record
       # it now, as lease_create would, or the next check reads the lead's
       # ledger copy as a baseline that went missing.
       _lead_baseline_ensure _ledger_write >/dev/null || return 1
-      echo "lease_approve: promotion of ${B} into ${_LEASE_DEF} approved by the user: tree ${TREE:0:12}, ${_LEASE_DEF} at ${_LEASE_DEF_SHA:0:12}, ${_LP_COUNT} protected path(s)${_LP_PATHS:+: ${_LP_PATHS}}; recorded via=${_LEAD_VIA} host=${_LEAD_HOST} lead=${LEADNOW} at ${STAMP}. A later merge or a move of ${_LEASE_DEF} voids it. Audit, not prevention: any shell with the helper can record this, the lead's agent shell included (via=lead-session)." >&2
+      echo "lease_approve: promotion of ${B} into ${TGT} approved by the user: tree ${TREE:0:12}, ${TGT} at ${TSHA:0:12}, ${_LP_COUNT} protected path(s)${_LP_PATHS:+: ${_LP_PATHS}}; recorded via=${_LEAD_VIA} host=${_LEAD_HOST} lead=${LEADNOW} at ${STAMP}. It covers lease_promote ${TGT} only; a later merge or a move of ${TGT} voids it. Audit, not prevention: any shell with the helper can record this, the lead's agent shell included (via=lead-session)." >&2
       ;;
     *)
       echo "$USAGE" >&2
@@ -3454,8 +3559,10 @@ HANDOVER_EOF
 # collects") into the MAIN tree only after the integrity check, the
 # integration-branch check, the object re-hash (_lease_verify_objects: every
 # object the snapshot brings in, and every other object the squash's
-# three-way merge reads, hashes to its id, else the lease escalates, rc 44),
-# the snapshot checks (_lease_verify_snapshot: branch = base + that one
+# three-way merge reads, hashes to its id, else the lease escalates, rc 44;
+# a criss-cross history refuses with rc 1, state review, naming the
+# recovery: lease the task again from the integration head), the snapshot
+# checks (_lease_verify_snapshot: branch = base + that one
 # commit, worktree unchanged since collect, no ops/ path) and the
 # approval gate pass (_lease_merge_gate, U10: a protected diff
 # or a stale lead-class pin needs a merge approval for this snapshot, rc 42),
@@ -3556,8 +3663,20 @@ lease_merge() {
   # mismatch escalates the lease, as the integrity check does, whichever
   # object it is. The snapshot checks come after: their read-tree hashes the
   # root tree itself and would refuse a swapped one as an unreadable worktree
-  # (rc 1).
-  if ! _lease_verify_objects lease_merge "$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)" "$SNAP"; then
+  # (rc 1). A criss-cross history (rc 1, _LVO_BASES) is no integrity event:
+  # the lease stays in review, and the refusal names the only recovery, since
+  # every snapshot of this lease sits on the same base.
+  local LVO=0 XROW XBASE XROLE
+  _lease_verify_objects lease_merge "$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)" "$SNAP" || LVO=$?
+  if [ "$LVO" -eq 1 ] && [ -n "$_LVO_BASES" ]; then
+    XROW=$(_ledger_get_row "$TASK_ID" base_sha role 2>/dev/null) || XROW=""
+    { IFS= read -r XBASE || true; IFS= read -r XROLE || true; } <<MERGE_CROSS_EOF
+${XROW}
+MERGE_CROSS_EOF
+    echo "  Nothing was merged, and ${TASK_ID} stays in review (no integrity escalation), but this lease can't merge as it is: the integration branch and its snapshot crossed after the lease was cut from ${XBASE:0:12} (the integration branch was rewritten since and accepted with lease_rebaseline, or the builder committed on ${BRANCH}), and a retry, a re-collect or lease_rebaseline keeps that base. Lease the task again from the integration branch's current head: lease_reclaim ${TASK_ID}, then lease_create ${TASK_ID} ${XROLE:-<role>} and lease_dispatch ${TASK_ID} <prompt>. Until git prunes it, the reviewed work stays readable: git diff ${XBASE} ${SNAP}" >&2
+    return 1
+  fi
+  if [ "$LVO" -ne 0 ]; then
     _ledger_update "$TASK_ID" state=escalated integrity_prev_state="$STATE" reason="integrity (lease_merge): ${_LVO_WHY}" >/dev/null || true
     echo "  escalated: ${TASK_ID}. Nothing was merged: git reads an object by its id without hashing it again, so the squash would have taken content no review saw, and a worker without an OS sandbox can write the lead's .git. Inspect it (git fsck lists every damaged object). Remove each damaged loose object (.git/objects/<first 2 hex>/<rest>), then write it again where its files still are: git -C <dir> hash-object -w <path> for a blob, git -C <dir> write-tree for a tree, with <dir> the worktree ${WT} for the snapshot's (it still holds the collected files) or this checkout for the integration branch's; one only the merge base holds needs another clone. Then lease_rebaseline ${TASK_ID} puts the lease back in review and lease_merge checks again; otherwise reclaim the lease." >&2
     return "$_RC_LEASE_INTEGRITY"
@@ -3712,13 +3831,16 @@ _RC_DEGRADED=80
 # _lease_is_framework_checkout <repo> <default-branch> — 0 when <repo> is the
 # Triforge checkout, where framework_protected applies (KTD8). Reads
 # .claude-plugin/plugin.json from the working tree, HEAD and the default
-# branch: a diff that renames the plugin can't switch the framework list off,
-# because the default branch still names agent-triforge. Fail closed: a
-# manifest that exists but doesn't parse counts as the Triforge checkout.
+# branch (refs/heads/<default-branch>, _lease_branch_commit: a tag of that
+# name can't stand in for it): a diff that renames the plugin can't switch the
+# framework list off, because the default branch still names agent-triforge.
+# Fail closed: a manifest that exists but doesn't parse counts as the Triforge
+# checkout.
 _lease_is_framework_checkout() {
   local REPO=$1 DEF=${2:-} REV M
   M="${REPO}/.claude-plugin/plugin.json"
   [ -f "$M" ] && _lease_manifest_is_triforge < "$M" && return 0
+  if [ -n "$DEF" ]; then DEF=$(_lease_branch_commit "$DEF" || true); fi
   for REV in HEAD ${DEF:+"$DEF"}; do
     _lgr show "${REV}:.claude-plugin/plugin.json" 2>/dev/null | _lease_manifest_is_triforge && return 0
   done
@@ -3742,11 +3864,20 @@ sys.exit(0 if isinstance(data, dict) and data.get("name") == "agent-triforge" el
 '
 }
 
-# lease_promote [<default-branch>] — wave-end promotion of the sprint integration
-# branch to the repo default branch (KTD-5). This is the ONLY path that writes the
-# default branch; lease_merge only ever lands on the integration branch. Run it
-# from the main tree checked out ON the integration branch (where lease_merge put
-# the wave's squash commits), NOT on the default branch.
+# lease_promote [<target>] — wave-end promotion of the sprint integration
+# branch to <target>, the repo default branch when left out (KTD-5); a
+# repository with no origin/HEAD, main or master names its trunk. This is the
+# ONLY path that writes the default branch; lease_merge only ever lands on the
+# integration branch. Run it from the main tree checked out ON the integration
+# branch (where lease_merge put the wave's squash commits), NOT on the default
+# branch. <target> is a local branch, read as exactly refs/heads/<target>
+# (_lease_branch_commit): a tag, a commit, a remote-tracking branch, a revision
+# expression or a name that exists only as a tag refuses with rc 1 before
+# anything is recorded or checked out. Its commit and the integration commit
+# are read once, and every step below reads and writes those two commits, so
+# a ref planted under the same name (refs/tags/<name>, refs/<name>,
+# $GIT_DIR/<name>, which git resolves ahead of refs/heads/<name>) can't
+# redirect the scan, the re-hash, the approval check or the merge.
 #
 # Gate, in order:
 #   (0) the integrity check (KTD18) and, when a ledger exists, the
@@ -3756,14 +3887,17 @@ sys.exit(0 if isinstance(data, dict) and data.get("name") == "agent-triforge" el
 #       before anything else runs; a successful promotion clears the recorded
 #       integration branch (the sprint is done)
 #   (a) read [promotion].require_user_approval from ops/roster.toml (default false)
-#   (b) compute the integration branch's changed paths vs the default branch:
+#   (b) compute the integration branch's changed paths vs the target:
 #       git diff -z --name-only --no-renames --ignore-submodules=none
-#       <default>...HEAD — both sides of every rename, NUL-separated so no
+#       <target commit>...<integration commit> — both sides of every
+#       rename, NUL-separated so no
 #       path is quoted out of a match, and a submodule entry (a nested repo
 #       the snapshot recorded as a gitlink) listed even when .gitmodules on
 #       the integration branch says `ignore = all` — once every object the
 #       integration branch brings in, and every other object its merge reads,
-#       hashes to its id (_lease_verify_objects; a mismatch refuses with rc 44)
+#       hashes to its id (_lease_verify_objects; a mismatch refuses with rc 44,
+#       a criss-cross history with more than one merge base with rc 1, naming
+#       the merge that makes the default branch the one merge base)
 #   (c) classify them against the registry's protected-path lists (KTD8,
 #       scripts/lib/registry.sh): project_protected always, framework_protected
 #       only in the Triforge checkout (_lease_is_framework_checkout). Case-
@@ -3772,19 +3906,23 @@ sys.exit(0 if isinstance(data, dict) and data.get("name") == "agent-triforge" el
 #   (d) require_user_approval=true OR any protected path touched OR the scan
 #       failed -> the gate is on: it passes only on the user's unvoided
 #       promotion approval for exactly this state (_lease_promotion_check,
-#       KTD4: recorded by lease_approve promotion:<branch> user, bound to the
-#       integration tree, its protected-path set and the default branch's
-#       commit; a later merge or a default-branch move voids it), printing
+#       KTD4: recorded by lease_approve promotion:<branch> user [<target>],
+#       bound to the integration tree, its protected-path set and the name
+#       and commit of the branch it goes into; a later merge or a move of that
+#       branch voids it, and one for another branch never counts), printing
 #       where it was recorded. Without one (or after a failed scan, which has
 #       no set to bind to) -> BLOCK: say what is missing or void and name the
-#       lease_approve call, return _RC_PROMOTE_BLOCKED, do NOT merge
-#   (e) else fast-forward (or merge) the integration branch into the default
-#       branch and report the promotion; an approval it used is marked used.
+#       exact lease_approve call, target included, return
+#       _RC_PROMOTE_BLOCKED, do NOT merge
+#   (e) else check out <target>, which must land on refs/heads/<target> at
+#       the commit the gate checked, fast-forward (or merge) the integration
+#       commit into it by its id, and report the promotion; an approval it
+#       used is marked used.
 # Atomic where it matters: the default branch is never touched unless the gate
 # passes — the block path leaves the tree exactly as it found it.
 lease_promote() {
   _lead_only lease_promote || return $?
-  local DEFAULT_BRANCH CURRENT_BRANCH INTEGRATION_BRANCH
+  local DEFAULT_BRANCH CURRENT_BRANCH INTEGRATION_BRANCH DEF_SHA IB_SHA
   _lease_ctx || return 1
   # Promotion writes the default branch: only from a git state the lead
   # verified (KTD18) — a moved default branch, planted config or hooks, a
@@ -3794,6 +3932,18 @@ lease_promote() {
   DEFAULT_BRANCH=${1:-$(_lease_default_branch)}
   if [ -z "$DEFAULT_BRANCH" ]; then
     echo "lease_promote: ERROR could not determine the default branch (no origin/HEAD, no local main/master). Pass it explicitly: lease_promote <default-branch>." >&2
+    return 1
+  fi
+  # The target is a local branch and nothing else, read as exactly
+  # refs/heads/<target> (_lease_branch_commit). DEF_SHA is the commit the
+  # re-hash, the protected scan and the approval check read, and the one the
+  # checkout must land on before the merge: a tag, refs/<target> or
+  # $GIT_DIR/<target> named like it (which git resolves first for a bare
+  # name, and a worker can write) never stands in for it. A tag, a commit, a
+  # remote-tracking branch or a revision expression refuses here, before
+  # anything is recorded or checked out.
+  if ! DEF_SHA=$(_lease_branch_commit "$DEFAULT_BRANCH"); then
+    echo "lease_promote: ERROR '${DEFAULT_BRANCH}' is not a local branch: lease_promote promotes only into a local branch, refs/heads/<target> (never a tag, a commit, a remote-tracking branch or a revision expression). Nothing was touched. Pass the local branch: lease_promote <branch>." >&2
     return 1
   fi
   CURRENT_BRANCH=$(_lease_current_branch)
@@ -3808,6 +3958,14 @@ lease_promote() {
   INTEGRATION_BRANCH="$CURRENT_BRANCH"
   if [ -f "$_LEASE_LEDGER" ]; then
     _lead_integration_check lease_promote || return $?
+  fi
+  # The integration commit, read once from HEAD (refs/heads/<integration
+  # branch>): what the re-hash, the scan and the approval check read, and
+  # what the merge takes, by its id.
+  IB_SHA=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null) || IB_SHA=""
+  if [ -z "$IB_SHA" ]; then
+    echo "lease_promote: ERROR the integration branch '${INTEGRATION_BRANCH}' has no commit to promote." >&2
+    return 1
   fi
   # A dirty index would ride into the promotion merge — refuse it.
   if ! _lgr diff --cached --quiet --no-ext-diff 2>/dev/null; then
@@ -3846,20 +4004,25 @@ print('true' if v is True else 'false')
 " 2>/dev/null || echo "true")
   fi
 
-  # (b) changed paths of the integration branch vs the default branch, both
-  # sides of each rename (--no-renames), NUL-separated (-z) so core.quotePath
-  # can't wrap a non-ASCII path in quotes that dodge a prefix match.
-  if ! _lgr rev-parse --verify --quiet "${DEFAULT_BRANCH}^{commit}" >/dev/null 2>&1; then
-    echo "lease_promote: ERROR '${DEFAULT_BRANCH}' is not a valid branch or commit — pass the default branch explicitly: lease_promote <default-branch>." >&2
-    return 1
-  fi
+  # (b) changed paths of the integration branch vs the target, both sides of
+  # each rename (--no-renames), NUL-separated (-z) so core.quotePath can't
+  # wrap a non-ASCII path in quotes that dodge a prefix match; the target is
+  # DEF_SHA, checked above.
   # The objects the promotion brings into the default branch, and every other
   # object its merge reads, re-hashed before the protected scan reads them and
   # the merge checks them out (KTD18). A fast-forward only switches trees; a
   # default branch that moved since the sprint began (accepted by
   # lease_rebaseline) gets a merge commit, a three-way merge like lease_merge's.
-  if ! _lease_verify_objects lease_promote "$(_lgr rev-parse --verify --quiet "${DEFAULT_BRANCH}^{commit}" 2>/dev/null || true)" \
-         "$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)"; then
+  # A criss-cross history (rc 1, _LVO_BASES) is refused too: no store damage,
+  # so no fsck; one merge of the default branch into the integration branch
+  # makes the default branch the one merge base.
+  local LVO=0
+  _lease_verify_objects lease_promote "$DEF_SHA" "$IB_SHA" || LVO=$?
+  if [ "$LVO" -eq 1 ] && [ -n "$_LVO_BASES" ]; then
+    echo "  Nothing was promoted, and a retry, lease_rebaseline or git fsck won't change that. Make '${DEFAULT_BRANCH}' the one merge base: merge it into '${INTEGRATION_BRANCH}' in this checkout (git merge refs/heads/${DEFAULT_BRANCH}, the full ref, which no tag of that name can stand in for) and check the result, accept that commit with lease_rebaseline, then rerun lease_promote ${DEFAULT_BRANCH}, which then fast-forwards." >&2
+    return 1
+  fi
+  if [ "$LVO" -ne 0 ]; then
     echo "  Nothing was promoted: git reads an object by its id without hashing it again, so '${DEFAULT_BRANCH}' would have taken content no review saw, and a worker without an OS sandbox can write the lead's .git. Inspect it (git fsck lists every damaged object), repair the store, then rerun lease_promote." >&2
     return "$_RC_LEASE_INTEGRITY"
   fi
@@ -3867,13 +4030,13 @@ print('true' if v is True else 'false')
   # knob. Fail closed: an unreadable plugin manifest counts as the Triforge
   # checkout, and any diff or classifier error blocks with its message.
   local APPROVED=""
-  _lease_protected_scan "$DEFAULT_BRANCH" "${DEFAULT_BRANCH}...HEAD"
+  _lease_protected_scan "$DEFAULT_BRANCH" "${DEF_SHA}...${IB_SHA}"
 
   # (d) gated: proceed only on the user's promotion approval for exactly this
   # state (KTD4), else block. A scan that could not run has no protected set
   # to bind an approval to, so it blocks whatever is on record.
   if [ "$REQUIRE_APPROVAL" = "true" ] || [ -n "$_LP_HITS" ] || [ -n "$_LP_ERR" ]; then
-    if [ -z "$_LP_ERR" ] && _lease_promotion_check "$INTEGRATION_BRANCH" "$DEFAULT_BRANCH" "$_LP_HITS"; then
+    if [ -z "$_LP_ERR" ] && _lease_promotion_check "$INTEGRATION_BRANCH" "$DEFAULT_BRANCH" "$_LP_HITS" "$DEF_SHA" "$IB_SHA"; then
       APPROVED=$_LPC_ORIGIN
     else
       echo "lease_promote: BLOCKED — promotion of '${INTEGRATION_BRANCH}' to '${DEFAULT_BRANCH}' needs the user's approval. No merge performed." >&2
@@ -3891,26 +4054,32 @@ print('true' if v is True else 'false')
       fi
       if [ -z "$_LP_ERR" ]; then
         echo "  approval: ${_LPC_WHY}" >&2
-        echo "  Record the user's approval, bound to this tree, its protected paths and ${DEFAULT_BRANCH}'s commit: lease_approve promotion:${INTEGRATION_BRANCH} user — then rerun lease_promote. (Or, for a diff with no protected path, set [promotion].require_user_approval=false and rerun.)" >&2
+        echo "  Record the user's approval, bound to this tree, its protected paths and ${DEFAULT_BRANCH}'s commit: lease_approve promotion:${INTEGRATION_BRANCH} user ${DEFAULT_BRANCH} — then rerun lease_promote ${DEFAULT_BRANCH}. (Or, for a diff with no protected path, set [promotion].require_user_approval=false and rerun.)" >&2
       else
-        echo "  Fix the scan, then record the user's approval: lease_approve promotion:${INTEGRATION_BRANCH} user — and rerun lease_promote." >&2
+        echo "  Fix the scan, then record the user's approval: lease_approve promotion:${INTEGRATION_BRANCH} user ${DEFAULT_BRANCH} — and rerun lease_promote ${DEFAULT_BRANCH}." >&2
       fi
       return "$_RC_PROMOTE_BLOCKED"
     fi
   fi
 
-  # (e) promote: fast-forward when possible, else a merge commit.
-  if ! _lgr checkout -q "$DEFAULT_BRANCH" >&2; then
-    echo "lease_promote: ERROR could not checkout the default branch '${DEFAULT_BRANCH}'." >&2
+  # (e) promote exactly what the gate checked: the checkout must land on
+  # refs/heads/<target> at DEF_SHA (git checkout takes a local branch of that
+  # name before any other ref), and the merge takes IB_SHA by its id, never a
+  # name another ref could shadow; fast-forward when possible, else a merge
+  # commit.
+  if ! _lgr checkout -q "$DEFAULT_BRANCH" -- >&2 || [ "$(_lgr symbolic-ref --quiet HEAD 2>/dev/null || true)" != "refs/heads/${DEFAULT_BRANCH}" ] \
+     || [ "$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)" != "$DEF_SHA" ]; then
+    _lgr checkout -q "$INTEGRATION_BRANCH" -- >&2 2>/dev/null || true
+    echo "lease_promote: ERROR could not check out the local branch '${DEFAULT_BRANCH}' at ${DEF_SHA:0:12}, the commit the gate checked — back on '${INTEGRATION_BRANCH}', nothing promoted." >&2
     return 1
   fi
-  if _lgr merge -q --ff-only "$INTEGRATION_BRANCH" >&2; then
+  if _lgr merge -q --ff-only "$IB_SHA" >&2; then
     :
-  elif _lgr merge -q --no-edit "$INTEGRATION_BRANCH" >&2; then
+  elif _lgr merge -q --no-edit -m "Merge branch '${INTEGRATION_BRANCH}'" "$IB_SHA" >&2; then
     :
   else
     _lgr merge --abort 2>/dev/null || true
-    _lgr checkout -q "$INTEGRATION_BRANCH" >&2 2>/dev/null || true
+    _lgr checkout -q "$INTEGRATION_BRANCH" -- >&2 2>/dev/null || true
     echo "lease_promote: ERROR merging '${INTEGRATION_BRANCH}' into '${DEFAULT_BRANCH}' failed (conflicts) — aborted and returned to '${INTEGRATION_BRANCH}'. Resolve manually." >&2
     return 1
   fi
@@ -3949,15 +4118,20 @@ print(hashlib.sha256("\n".join(paths).encode("utf-8", "surrogateescape")).hexdig
 '
 }
 
-# _lease_promotion_check <integration-branch> <default-branch> <protected hits>
-# — 0 when [baseline] holds the user's unvoided promotion approval for exactly
-# this state (KTD4): scope promotion:<branch>, class user, the integration
-# tree (HEAD^{tree}, lease_promote runs from that branch), the default branch
-# and its commit, and the protected-path set (_lease_protected_digest of the
-# hits). Then _LPC_ORIGIN says where it was recorded and the approval line and
-# the disclosure are printed; otherwise _LPC_WHY says what is missing or void.
+# _lease_promotion_check <integration-branch> <target> <protected hits>
+# <target commit> <integration commit> — 0 when [baseline] holds the user's
+# unvoided promotion approval for exactly this state (KTD4): scope
+# promotion:<branch>, class user, the integration tree (the tree of
+# <integration commit>, the commit lease_promote checked and merges), the
+# branch the promotion goes into (<target>: lease_promote's argument, else the
+# default branch) and its commit (<target commit>, which lease_promote read as
+# refs/heads/<target>, as lease_approve bound it, and lands the merge on), and
+# the protected-path set (_lease_protected_digest of the hits). Without the
+# two commits it reads HEAD and refs/heads/<target>. Then _LPC_ORIGIN says
+# where it was recorded and the approval line and the disclosure are printed;
+# otherwise _LPC_WHY says what is missing or void.
 _lease_promotion_check() {
-  local IB=$1 DEF=$2 ROW SCOPE CLASS VOIDED TREE PDEF PDSHA PDIG VIA HOST LEAD AT NOWTREE NOWDSHA
+  local IB=$1 DEF=$2 ROW SCOPE CLASS VOIDED TREE PDEF PDSHA PDIG VIA HOST LEAD AT NOWTREE NOWDSHA=${4:-}
   _LPC_WHY=""; _LPC_ORIGIN=""
   ROW=$(_ledger_get_row @baseline promotion_scope promotion_class promotion_voided promotion_tree promotion_default promotion_default_sha promotion_protected promotion_via promotion_host promotion_lead_cli promotion_at 2>/dev/null) || ROW=""
   { IFS= read -r SCOPE || true; IFS= read -r CLASS || true; IFS= read -r VOIDED || true; IFS= read -r TREE || true
@@ -3965,8 +4139,8 @@ _lease_promotion_check() {
     IFS= read -r HOST || true; IFS= read -r LEAD || true; IFS= read -r AT || true; } <<PROMOTION_ROW_EOF
 ${ROW}
 PROMOTION_ROW_EOF
-  NOWTREE=$(_lgr rev-parse --verify --quiet 'HEAD^{tree}' 2>/dev/null || true)
-  NOWDSHA=$(_lgr rev-parse --verify --quiet "${DEF}^{commit}" 2>/dev/null || true)
+  NOWTREE=$(_lgr rev-parse --verify --quiet "${5:-HEAD}^{tree}" 2>/dev/null || true)
+  if [ -z "$NOWDSHA" ]; then NOWDSHA=$(_lease_branch_commit "$DEF" || true); fi
   if [ -z "$SCOPE" ]; then
     _LPC_WHY="none on record"
   elif [ "$SCOPE" != "promotion:${IB}" ]; then
@@ -3978,7 +4152,7 @@ PROMOTION_ROW_EOF
   elif [ "$PDEF" != "$DEF" ]; then
     _LPC_WHY="the one on record is void: it approved a promotion into ${PDEF}, not ${DEF}"
   elif [ "$PDSHA" != "$NOWDSHA" ]; then
-    _LPC_WHY="the one on record is void: the default branch ${DEF} moved ${PDSHA:0:12} -> ${NOWDSHA:0:12} since it was recorded"
+    _LPC_WHY="the one on record is void: ${DEF} moved ${PDSHA:0:12} -> ${NOWDSHA:0:12} since it was recorded"
   elif [ "$TREE" != "$NOWTREE" ]; then
     _LPC_WHY="the one on record is void: ${IB}'s tree changed since it was recorded (${TREE:0:12} -> ${NOWTREE:0:12})"
   elif [ "$PDIG" != "$(_lease_protected_digest "$3")" ]; then
