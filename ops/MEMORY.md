@@ -107,6 +107,44 @@
       rc 44 (lease history without a ledger) until the user removes it with the printed
       commands (intended, fail closed).
 
+- Worker discoveries (end-of-program review, fix round 3, 2026-10-08), UNVERIFIED, recorded by the lead from the workers' reports:
+
+      fix worker G: SELF-30 flags "$TIMEOUT_BIN" --kill-after="${X}s" 10s cmd, a compliant
+      form, because its option loop stops at a word holding an expansion and reads that
+      word as the duration (old and new scanner alike; nothing ships in that form, the
+      shipped one is -k "${_LEASE_KILL_AFTER_S}s"). SELF-29's lease-based cases need
+      tomllib (Python 3.11+) or tomli, so under /usr/bin/python3 3.9.6 they fail on the
+      base commit too. That codex exits 1 at the scratch home's missing login is taken
+      from codex exec's exit on an error, not observed live; another rc makes CDX-16 a
+      FAIL "stopped short (rc=N)", never a false PASS. The round-2 replay script
+      (scratchpad r2fix/e/cdx16-replay.sh) ends the block at the first 8-space fi, which
+      is now the new CDX16_END if/fi; r2fix/g/cdx16-replay.sh ends at the outer else.
+      fix worker F: AGENTS.md and the README still say only that the protected scan "sees
+      both sides of a rename" (still true; the merges' no-rename rule is in the design doc
+      and wave-orchestration). SELF-13's load case is fragile: its assertion depends on the
+      length of the work path (it cuts its error line at 220 characters). git prints its
+      "Diverging branches can't be fast-forwarded" hint on every non-fast-forward
+      promotion, from lease_promote's --ff-only attempt. With -X no-renames, a lease that
+      renames a file the integration branch changed since the cut conflicts (the generic
+      conflict message) instead of merging; the same holds for a promotion whose
+      integration side renamed a path the target changed (fails closed).
+      fix worker F (follow-up): when lease_rebaseline accepts an integration branch that
+      already holds a lease's change (a moved ref after its squash commit), the rerun
+      refuses with "brought no changes" and the lease stays in review with no
+      merge_commit; recording such a lease as merged would need a new helper.
+      fix worker I: a single-row run of SELF-12 needs _persona_kit, which lives in
+      probe-capabilities.sh; the scratch runner srun.sh does not load it, so SELF-12 fails
+      there on any tree (the full harness has it).
+      fix worker H: Claude Code also scans the raw text of tight list items, so
+      "- ` @AGENTS.md `" loads AGENTS.md while md_scan says no import (the safe
+      direction). md_scan's remaining conservative misses are mostly a fence opened after a
+      > or list marker on the same line and link definitions whose destination or title
+      continues on the next line; when one sits before the end of the file the writer
+      refuses and asks the user to add the line. README line 546 states the import line
+      without the code-block caveat (correct as written). The oracle (scratchpad
+      r2fix/h/oracle.mjs) is Claude Code 2.1.294's import code run on the marked 15.0.12
+      that ships with the locally installed pi-coding-agent, not the bundled build.
+
 ## Interface proposals
 <!-- No active proposals -->
 
