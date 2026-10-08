@@ -13435,7 +13435,7 @@ _self_try merge2 lease_merge t antigravity
 echo "squash=$(git diff-tree --no-commit-id --name-only -r HEAD | tr "\n" " ")"')
 _S29_FAIL="${_S29_FAIL}$(_self_expect rebase "$O" '^t:go=0:review$' '^merge1:rc=44:.*both ledger anchors' '^rebase:rc=0:.*t back to .review.' \
   '^state=review$' '^merge2:rc=0:' '^squash=docs/s29\.txt $')"
-_S29_EV="${_S29_EV}anchors: both anchors deleted + a forged user approval -> merge 44 naming them, escalated, nothing merged; restamp: the same with the stamp naming another root that holds no digest -> 44; fakeroot: the stamp naming an attacker-made root holding the forged ledger's sha256, the record naming the real root -> 44; rebase: the lead's own deletion -> 44, lease_rebaseline t -> review, merged"
+_S29_EV="${_S29_EV}anchors: both anchors deleted + a forged user approval -> merge 44 naming them, escalated, nothing merged; restamp: the same with the stamp naming another root that holds no digest -> 44; fakeroot: the stamp naming an attacker-made root holding the forged ledger's sha256, the record naming the real root -> 44; rebase: the lead's own deletion -> 44, lease_rebaseline t -> review, merged. "
 # negverdict (round 1, wave 2)
 _S29_NV=$(awk '/^(_timed_out|_negative_verdict)\(\) \{$/ { p = 1 } p { print } p && /^}$/ { p = 0 }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
 printf 'READY\n' > "$_S29/nv-ready"
