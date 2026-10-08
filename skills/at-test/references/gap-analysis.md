@@ -1,6 +1,6 @@
 # Step 1: identify test gaps
 
-The persona runs with Bash in a disposable worktree at the default `--at ref:HEAD`, which holds committed work only. When the scope has uncommitted changes (`git status --porcelain -- <scope paths>` prints anything), stop before the start and tell the user the persona sees committed HEAD only; ask them to commit the changes or name a ref for `--at`, and never commit for them. It runs detached, because a persona can outlast one tool call: the first block starts it, and you rerun the second while it returns 75. Both run the same under bash and zsh.
+The persona runs with Bash in a disposable worktree at the default `--at ref:HEAD`, which holds committed work only. When the scope has uncommitted changes (`git status --porcelain -- <scope paths>` prints anything), stop before the start and tell the user the persona sees committed HEAD only; ask them to commit the changes or name a branch or a full commit id for `--at`, and never commit for them. It runs detached, because a persona can outlast one tool call: the first block starts it, and you rerun the second while it returns 75. Both run the same under bash and zsh.
 
 ```bash
 set -euo pipefail

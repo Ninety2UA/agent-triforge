@@ -73,7 +73,7 @@ Run `findings-synthesizer` the way the `at-review` skill's synthesis does: start
 
 ## Phase 5: test
 
-Write the scope (the changed paths) to a file, start `persona_spawn "$RUN" test-gap-analyzer test-gap-analyzer <scope file> "$RUN/gaps.md" --brief "Find the untested paths in the scope the input names."` and rerun `persona_wait "$RUN"` in a separate block while it returns 75. It runs at the default `--at ref:HEAD`, which sees committed work only: when the scope has uncommitted changes, stop and ask the user to commit them or name a ref, and never commit for them. Dispatch Codex to write tests, failing test first. Fix failures until green (max 3 cycles).
+Write the scope (the changed paths) to a file, start `persona_spawn "$RUN" test-gap-analyzer test-gap-analyzer <scope file> "$RUN/gaps.md" --brief "Find the untested paths in the scope the input names."` and rerun `persona_wait "$RUN"` in a separate block while it returns 75. It runs at the default `--at ref:HEAD`, which sees committed work only: when the scope has uncommitted changes, stop and ask the user to commit them or name a branch or a full commit id, and never commit for them. Dispatch Codex to write tests, failing test first. Fix failures until green (max 3 cycles).
 
 ## Phase 6: wrap up
 

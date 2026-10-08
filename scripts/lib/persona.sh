@@ -1101,8 +1101,9 @@ _persona_read_run() {
 # from), _PT_FROM (what the named instruction-file changes are against: the
 # lease's base, or _PT_HEAD), _PT_NAME (the worktree's tag), _PT_DESC,
 # _PT_WHAT and _PT_NONE (the prompt's words). rc 64 for an --at of another
-# shape, a ref that names no commit, a ref another ref of its name shadows
-# (_persona_ref_unambiguous), or a lease _persona_lease refuses.
+# shape, a ref that names no commit, a name another ref of that name (or a
+# second object it abbreviates) makes ambiguous (_persona_ref_unambiguous), or
+# a lease _persona_lease refuses.
 _persona_target() {
   local WHO=$1 AT=$2 REF
   _PT_COMMIT="" _PT_HEAD="" _PT_FROM="" _PT_NAME="" _PT_DESC="" _PT_WHAT="" _PT_NONE=""
@@ -1157,31 +1158,91 @@ _persona_target() {
   if [ -z "$_PT_FROM" ]; then _PT_FROM=$_PT_HEAD; fi
 }
 
-# _persona_ref_unambiguous <who> <ref> — 0 unless another ref of the same name
-# holds another commit than the one git resolves the name at the start of
-# <ref> to (up to its first ~ ^ : or @{; a revision expression reads that
-# name too): refs/<name>, refs/tags/<name>, refs/heads/<name>,
-# refs/remotes/<name> or refs/remotes/<name>/HEAD. git reads $GIT_DIR/<name>,
-# refs/<name> and refs/tags/<name> ahead of refs/heads/<name>, and a worker can
-# write any of them, so a tag named like the integration branch would move
-# `--at ref:<integration branch>` to the tag's commit. Then the refusal, naming
-# the full ref to pass instead, and 1. A shadow at the same commit changes
-# nothing and passes.
+# _persona_ref_unambiguous <who> <ref> — 0 unless the name at the start of
+# <ref> (up to its first ~ ^ : or @{; a revision expression reads that name
+# too) could stand for another commit than the one git resolves it to. git
+# reads the first of $GIT_DIR/<name>, refs/<name>, refs/tags/<name>,
+# refs/heads/<name>, refs/remotes/<name> and refs/remotes/<name>/HEAD that
+# exists, and a worker can write any of them: a tag named like the integration
+# branch would move `--at ref:<integration branch>` to the tag's commit. So any
+# of the last five at another commit refuses (a planted $GIT_DIR/<name> is the
+# commit git resolves, and the ref it shadows disagrees); one at the same
+# commit changes nothing. git reads all six ahead of an abbreviated object id
+# too, so a name of 4 to 64 hex digits (a sha1 repository reads 64 as an
+# abbreviation as well) that abbreviates objects (rev-parse --disambiguate)
+# passes only when it abbreviates exactly one and that one peels to the commit
+# git resolved: a ref of that name in any of the six forms, or a second object,
+# refuses. A full id lists only itself. The refusal never suggests a ref that
+# disagrees with the branch or HEAD the name stands for. For an abbreviation it
+# names git's reading and the abbreviated object(s) by full id, for the user to
+# pass the commit meant, and suggests neither: either can be a worker's (an
+# object with a short prefix is cheap to make). Otherwise it suggests
+# ref:refs/heads/<name> when that branch exists; nothing for HEAD, a full ref
+# name or a full id, which git reads first, so the others are to be removed;
+# else it names the ref git reads, for the user to remove the one not meant.
+# Then 1.
 _persona_ref_unambiguous() {
-  local WHO=$1 REF=$2 N C F FC
+  local WHO=$1 REF=$2 N SUF C F FC OBJS K OC LIST BAD="" BADN="" GOT="" BR="" EXACT="" ADVICE
   N=${REF%%[~^:]*}
   N=${N%%@\{*}
   [ -n "$N" ] || return 0
+  SUF=${REF#"$N"}
   C=$(_lgr rev-parse --verify --quiet "${N}^{commit}" 2>/dev/null) || return 0
+  case "$N" in
+    *[!0123456789abcdefABCDEF]*) ;;
+    ????*)
+      if [ "${#N}" -le 64 ]; then
+        if ! OBJS=$(_lgr rev-parse --disambiguate="$N" 2>/dev/null); then
+          echo "${WHO}: ERROR could not list the objects ${N} abbreviates (git rev-parse --disambiguate); nothing ran (fail closed)" >&2
+          return 1
+        fi
+        K=$(printf '%s\n' "$OBJS" | grep -c . || true)
+        OC=""
+        if [ "$K" = 1 ]; then
+          OC=$(_lgr rev-parse --verify --quiet "${OBJS}^{commit}" 2>/dev/null) || OC=""
+          # a full id, in either case: git reads it as the object
+          if [ "$OBJS" = "$(printf '%s' "$N" | tr ABCDEF abcdef)" ]; then EXACT=1; fi
+        fi
+        if [ "$K" != 0 ] && [ "$OC" != "$C" ]; then
+          if [ "$K" = 1 ]; then
+            LIST=$OBJS
+          else
+            LIST=$(printf '%s\n' "$OBJS" | sed -n '1,3p' | tr '\n' ' ')
+            LIST="${K} objects: ${LIST% }"
+            if [ "$K" -gt 3 ]; then LIST="${LIST} and $((K - 3)) more"; fi
+          fi
+          echo "${WHO}: --at ref:${REF} is ambiguous: git resolves ${N} to ${C}, but ${N} also abbreviates ${LIST} (a ref of that name, which git reads ahead of an abbreviated id, or a second object with that prefix competes with the abbreviation, and a worker can write either); name the commit you mean by its full id (ref:<full id>${SUF}), or remove the ref you did not mean. Nothing ran" >&2
+          return 1
+        fi
+      fi
+      ;;
+  esac
   for F in "refs/${N}" "refs/tags/${N}" "refs/heads/${N}" "refs/remotes/${N}" "refs/remotes/${N}/HEAD"; do
     FC=$(_lgr show-ref --verify --hash "$F" 2>/dev/null) || continue
-    FC=$(_lgr rev-parse --verify --quiet "${FC}^{commit}" 2>/dev/null) || FC=""
-    if [ "$FC" != "$C" ]; then
-      echo "${WHO}: --at ref:${REF} is ambiguous: git resolves ${N} to ${C:0:12}, but ${F} is at ${FC:0:12} (git reads \$GIT_DIR/${N}, refs/${N} and refs/tags/${N} ahead of refs/heads/${N}, and a worker can write any of them); name it in full, e.g. ref:${F}${REF#"$N"}, or remove the other ref. Nothing ran" >&2
-      return 1
+    if [ "$F" = "refs/heads/${N}" ]; then BR=1; fi
+    FC=$(_lgr rev-parse --verify --quiet "${FC}^{commit}" 2>/dev/null) || FC="no commit"
+    if [ "$FC" = "$C" ]; then
+      if [ -z "$GOT" ]; then GOT=$F; fi
+    else
+      BAD="${BAD:+${BAD}, }${F} is at ${FC:0:12}"
+      BADN="${BADN:+${BADN}, }${F}"
     fi
   done
-  return 0
+  [ -n "$BAD" ] || return 0
+  case "$N" in
+    HEAD | refs/*) EXACT=1 ;;
+  esac
+  if [ -n "$EXACT" ]; then
+    ADVICE="git reads ${N} itself first, so there is no fuller name to pass: remove ${BADN} (git update-ref -d <ref>) and rerun"
+  elif [ -n "$BR" ]; then
+    ADVICE="name it in full, e.g. ref:refs/heads/${N}${SUF}, or remove the other ref"
+  else
+    # no ref listed above holds the commit git resolved: git read $GIT_DIR/<name>
+    if [ -z "$GOT" ]; then GOT="\$GIT_DIR/${N}"; fi
+    ADVICE="there is no branch of that name to pass in full: remove the ref you did not mean (git reads ${GOT}) and rerun"
+  fi
+  echo "${WHO}: --at ref:${REF} is ambiguous: git resolves ${N} to ${C:0:12}, but ${BAD} (git reads the first of \$GIT_DIR/${N}, refs/${N}, refs/tags/${N}, refs/heads/${N}, refs/remotes/${N} and refs/remotes/${N}/HEAD that exists, and a worker can write any of them); ${ADVICE}. Nothing ran" >&2
+  return 1
 }
 
 # _persona_trusted_head <who> — set _PT_HEAD to the commit an exec run's
