@@ -12039,7 +12039,71 @@ done
 _O=$(_s16b "$_S16B_TLP" instruction_add_import ../../.claude/CLAUDE.md)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-tilde-dotclaude "$_O" '^needs-ask: would add the line @\.\./~/proj/AGENTS\.md to [^ ]*/w/tl/\.claude/CLAUDE\.md, so Claude Code loads [^ ]*/w/tl/~/proj/AGENTS\.md with it, ' '^rc=20$')"
 _S16_FAIL="${_S16_FAIL}$(_s16b_same b-tilde-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_TL/CLAUDE.md" "$_S16B_TL/.claude/CLAUDE.md")")"
-_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file), an import line written or offered only when it reads back as the project's import (b-space-*, a project path with whitespace, a tab too; b-tilde-*, a directory named ~ on the way down: the import into the CLAUDE.md above refused rc 2 before any plan, without and twice with --yes, the files byte-identical; the import column -, visibility and session start naming the project's own CLAUDE.md alone; the .claude/CLAUDE.md beside it, whose @../~/proj/AGENTS.md reads back, still planned); "
+
+# fence (review round 3): Claude Code reads an import from Markdown text only,
+# so an @AGENTS.md in a fenced code block (backticks, tildes) or a padded code
+# span is none. A project CLAUDE.md whose only @AGENTS.md sits there: detect
+# says no-import, visibility hidden with the add-the-line fix, session start
+# names the file, the writer appends the real line with --yes, then says
+# unchanged. A file ending inside a fence never closed is refused rc 2 before
+# any plan, without and twice with --yes, naming that block; a .claude/CLAUDE.md
+# ending inside an HTML comment too, naming the project's own CLAUDE.md; the
+# files byte-identical. Controls: a plain @AGENTS.md line, one after a closed
+# fence and one after a fence indented under a list item still import
+_S16B_FN="$_S16B_W/fn"
+_s16b_fence() { # _s16b_fence <case> <project> <CLAUDE.md, a printf format> — the cases above for an import Claude Code does not read, in $_S16B_FN/<project>
+  local C=$1 P="$_S16B_FN/$2" O
+  _s16b_proj "$P"
+  printf "$3" > "$P/CLAUDE.md"
+  O=$(_s16b "$P" instruction_files_detect)
+  _self_expect "$C-detect" "$O" "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/w/fn/$2/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$'
+  O=$(_s16b "$P" instruction_pointer_visibility claude)
+  _self_expect "$C-vis" "$O" "^claude${T}hidden${T}shadowed by [^ ]*/w/fn/$2/CLAUDE\.md: .*; add the line @AGENTS\.md to [^ ]*/w/fn/$2/CLAUDE\.md \(instruction_add_import [^ ]*/w/fn/$2/CLAUDE\.md\)\$" '^rc=1$'
+  O=$(_s16b "$P" instruction_add_import CLAUDE.md --yes)
+  _self_expect "$C-yes" "$O" "^changed: [^ ]*/w/fn/$2/CLAUDE\.md: added the line @AGENTS\.md\$" '^rc=0$'
+  [ "$(cat "$P/CLAUDE.md")" = "$(printf "$3@AGENTS.md")" ] || printf ' %s(content)' "$C-yes"
+  O=$(_s16b "$P" instruction_add_import CLAUDE.md --yes)
+  _self_expect "$C-again" "$O" "^unchanged: [^ ]*/w/fn/$2/CLAUDE\.md already imports [^ ]*/w/fn/$2/AGENTS\.md\$" '^rc=0$'
+}
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-fence-tick tick '# own\n```\n@AGENTS.md\n```\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-fence-tilde tilde '# own\n~~~ text\n@AGENTS.md\n~~~\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-fence-span span '# own\nsee ` @AGENTS.md ` here\n')"
+_s16b_proj "$_S16B_FN/hook"
+printf '# own\n```\n@AGENTS.md\n```\n' > "$_S16B_FN/hook/CLAUDE.md"
+_O=$(_s16b_hook "$_S16B_FN/hook")
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-fence-hook "$_O" "^WARNING: CLAUDE\.md in this project does not import AGENTS\.md, .* Run /at-setup to add the line @AGENTS\.md to it ")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-fence-hook "$_O" '^\{|hook crashed')"
+_S16B_OP="$_S16B_FN/open"
+_s16b_proj "$_S16B_OP"
+mkdir -p "$_S16B_OP/.claude"
+printf '# own\n```sh\nnpm test\n' > "$_S16B_OP/CLAUDE.md"
+printf '# notes\n<!-- old rules\n' > "$_S16B_OP/.claude/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_OP/CLAUDE.md" "$_S16B_OP/.claude/CLAUDE.md")
+for _S16B_Y in "" --yes --yes; do
+  _O=$(_s16b "$_S16B_OP" instruction_add_import CLAUDE.md $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-fence-open${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/fn/open/CLAUDE\.md ends inside the fenced code block opened on line 2, which is never closed, so the line @AGENTS\.md appended there would not read back as an import of [^ ]*/w/fn/open/AGENTS\.md \(Claude Code reads an import from Markdown text only\); close it first, or add the line yourself outside it \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-fence-open${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+done
+_O=$(_s16b "$_S16B_OP" instruction_add_import .claude/CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-fence-html "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/fn/open/\.claude/CLAUDE\.md ends inside the HTML block that starts on line 2, so the line @\.\./AGENTS\.md appended there would not read back as an import of [^ ]*/w/fn/open/AGENTS\.md .*; or put the line @AGENTS\.md in [^ ]*/w/fn/open/CLAUDE\.md instead, which loads it for this project only \(rc 2\)$' '^rc=2$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-fence-open-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_OP/CLAUDE.md" "$_S16B_OP/.claude/CLAUDE.md")")"
+_s16b_proj "$_S16B_FN/plain"
+printf '# own\n@AGENTS.md\n' > "$_S16B_FN/plain/CLAUDE.md"
+_s16b_proj "$_S16B_FN/after"
+printf '# own\n```\n`x` @AGENTS.md\n```\n@AGENTS.md\n' > "$_S16B_FN/after/CLAUDE.md"
+_s16b_proj "$_S16B_FN/nested"
+printf '# own\n1. Build:\n\n    ```sh\n    make @AGENTS.md\n    ```\n\n@AGENTS.md\n' > "$_S16B_FN/nested/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_FN/plain/CLAUDE.md" "$_S16B_FN/after/CLAUDE.md" "$_S16B_FN/nested/CLAUDE.md")
+for _S16B_D in plain after nested; do
+  _O=$(_s16b "$_S16B_FN/$_S16B_D" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-fence-$_S16B_D" "$_O" "^CLAUDE\.md${T}project${T}imports,user-owned${T}" '^rc=0$')"
+  _O=$(_s16b "$_S16B_FN/$_S16B_D" instruction_pointer_visibility claude)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-fence-$_S16B_D-vis" "$_O" "^claude${T}visible${T}[^ ]*/w/fn/$_S16B_D/CLAUDE\.md imports " '^rc=0$')"
+  _O=$(_s16b "$_S16B_FN/$_S16B_D" instruction_add_import CLAUDE.md --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-fence-$_S16B_D-import" "$_O" '^unchanged: ' '^rc=0$')"
+done
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-fence-controls-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_FN/plain/CLAUDE.md" "$_S16B_FN/after/CLAUDE.md" "$_S16B_FN/nested/CLAUDE.md")")"
+_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file), an import line written or offered only when it reads back as the project's import (b-space-*, a project path with whitespace, a tab too; b-tilde-*, a directory named ~ on the way down: the import into the CLAUDE.md above refused rc 2 before any plan, without and twice with --yes, the files byte-identical; the import column -, visibility and session start naming the project's own CLAUDE.md alone; the .claude/CLAUDE.md beside it, whose @../~/proj/AGENTS.md reads back, still planned), an import counted in Markdown text only (b-fence-*: one in a backtick or tilde fence or a padded code span is none: no-import, hidden with the add-the-line fix, named at session start, the real line appended, then unchanged; a file ending in an unclosed fence or HTML comment refused rc 2 before any plan, unchanged; a plain line and one after a closed or list-indented fence import); "
 rm -rf "$_S16B"
 # --- end of SELF-16 section B ---
 # --- SELF-16 section C: at-setup's blocks and the headless primitives (U15) ---
