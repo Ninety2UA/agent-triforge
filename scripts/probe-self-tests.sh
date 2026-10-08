@@ -9029,6 +9029,13 @@ rm -rf "$_S25"
 #                 (git diff rc 128): the package block stops (rc 1) naming the
 #                 base or the git rc and leaves no package, the optional block
 #                 refuses, no lane ran; REVIEW_BASE=main is named in the range
+#   scrub         (KTD-14) the _scrub every block writes ops/REVIEW_*.md
+#                 through: a sample of each key shape (sk-, AIza, ghp_, xoxb-,
+#                 Bearer, a JWT, github_pat_ with a first part ending in ghp,
+#                 xai-, AKIA, ASIA) on a line of prose comes out of common.sh's
+#                 copy redacted whole, prose that only looks like them
+#                 (xai-org, github_pat_ alone, ASIA PACIFIC) is kept, and
+#                 probe-capabilities.sh's copy prints the same
 _S26="${WORK}/self26"
 mkdir -p "$_S26/bin" "$_S26/log" "$_S26/cfg" "$_S26/blocks" "$_S26/started" "$_S26/home/.grok"
 printf '{"key":"s26-stub"}\n' > "$_S26/home/.grok/auth.json"
@@ -9469,9 +9476,42 @@ O=$( _s26_reset
 _S26_FAIL="${_S26_FAIL}$(_self_expect base "$O" '^base-invalid:pkg=1:named=1:pkgdir=0:opt=1:runs=0$' '^base-valid:pkg=0:range=1$' \
   '^base-diff-fail:(pkg=1:named=1:pkgdir=0:opt=1:runs=0|unreadable-object-readable)$')"
 
-_S26_CAP="at-review's blocks run verbatim (R23, R24, KTD18): the lead's integrity check before the skill's first git call (a planted filter or fsmonitor never runs; no package, so no lane), one review package per cycle for every lane, the specialist personas included (each [R] task with its fields, the inventory with untracked files by name, the inline diff within the cap, the full diff in a file the prompt names; an invalid REVIEW_BASE or a failed git call stops the review), promotion on the CLI's final answer (an optional lane only on rc 0 and DONE; never BLOCKED in a core role, read from a core answer's last line; Codex's last-message file on every attempt, its quoted tool output ignored, in the lease lane too), no retry of an interrupted run, and the lanes in parallel"
+# scrub: what the blocks write into ops/REVIEW_*.md goes through _scrub. One
+# sample of every key shape it redacts, one per line of prose, and a line of
+# prose that only looks like them, through both copies: common.sh's, loaded
+# as the blocks load it, and probe-capabilities.sh's, taken by its function
+# text. The samples are built here, so no token-shaped literal sits in this
+# file; the github_pat_ one has a first part ending in ghp, which gh[pousr]_
+# would cut short if it ran first
+_s26_rep() { printf "%${2}s" "" | tr ' ' "$1"; }   # <char> <n>: the char n times
+{
+  printf 'openai sk-%s here\n' "$(_s26_rep a 24)"
+  printf 'google AIza%s here\n' "$(_s26_rep b 35)"
+  printf 'github ghp_%s here\n' "$(_s26_rep c 36)"
+  printf 'github-fine github_pat_%sghp_%s here\n' "$(_s26_rep D 19)" "$(_s26_rep e 59)"
+  printf 'slack xoxb-%s here\n' "$(_s26_rep f 24)"
+  printf 'header Bearer %s here\n' "$(_s26_rep g 32)"
+  printf 'jwt eyJ%s.%s here\n' "$(_s26_rep h 30)" "$(_s26_rep i 30)"
+  printf 'xai xai-%s here\n' "$(_s26_rep J 80)"
+  printf 'aws AKIA%s and ASIA%s here\n' "$(_s26_rep K 16)" "$(_s26_rep L 16)"
+  printf 'prose xai-org, xai-grok-pager, github_pat_ tokens, ASIA PACIFIC, AKIA alone\n'
+} > "$_S26/scrub.in"
+_S26_SCRUB=$(awk '/^_scrub\(\) \{$/ { p = 1 } p { print } p && /^}$/ { exit }' "${REPO_ROOT}/scripts/probe-capabilities.sh" 2>/dev/null || true)
+O=$( cd "$_S26" && export HOME="$_S26/home" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "scrub-lib:load-failed"; exit 0; }
+  _scrub < "$_S26/scrub.in" > "$_S26/scrub.lib" 2>/dev/null || true
+  if [ -n "$_S26_SCRUB" ]; then ( unset -f _scrub; eval "$_S26_SCRUB" && _scrub < "$_S26/scrub.in" > "$_S26/scrub.probe" ) 2>/dev/null || true; fi
+  sed 's/^/scrub-lib:/' "$_S26/scrub.lib"
+  echo "scrub-copies:$(if [ -s "$_S26/scrub.probe" ] && cmp -s "$_S26/scrub.lib" "$_S26/scrub.probe"; then echo same; else echo differ; fi)" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect scrub "$O" '^scrub-lib:openai \[REDACTED-KEY\] here$' '^scrub-lib:google \[REDACTED-KEY\] here$' \
+  '^scrub-lib:github \[REDACTED-KEY\] here$' '^scrub-lib:github-fine \[REDACTED-KEY\] here$' '^scrub-lib:slack \[REDACTED-KEY\] here$' \
+  '^scrub-lib:header Bearer \[REDACTED\] here$' '^scrub-lib:jwt \[REDACTED-JWT\] here$' '^scrub-lib:xai \[REDACTED-KEY\] here$' \
+  '^scrub-lib:aws \[REDACTED-KEY\] and \[REDACTED-KEY\] here$' \
+  '^scrub-lib:prose xai-org, xai-grok-pager, github_pat_ tokens, ASIA PACIFIC, AKIA alone$' '^scrub-copies:same$')"
+unset _S26_SCRUB
+
+_S26_CAP="at-review's blocks run verbatim (R23, R24, KTD18): the lead's integrity check before the skill's first git call (a planted filter or fsmonitor never runs; no package, so no lane), one review package per cycle for every lane, the specialist personas included (each [R] task with its fields, the inventory with untracked files by name, the inline diff within the cap, the full diff in a file the prompt names; an invalid REVIEW_BASE or a failed git call stops the review), promotion on the CLI's final answer (an optional lane only on rc 0 and DONE; never BLOCKED in a core role, read from a core answer's last line; Codex's last-message file on every attempt, its quoted tool output ignored, in the lease lane too), no retry of an interrupted run, the lanes in parallel, and every key shape scrubbed from what lands in ops/ (KTD-14, both _scrub copies alike)"
 if [ -z "$_S26_FAIL" ]; then
-  row "SELF-26" "claude" "$_S26_CAP" "PASS" "integrity (Claude Code layout, and the Codex layout: project-tier copy, locator through the pointer): lease + rebaseline + clean filter and fsmonitor in .git/config -> preflight 0, package block rc 44 naming .git/config, no package, dispatch (learnings gate inside) and optional blocks refuse, 0 lane runs, 0 personas, no run directory, filter and fsmonitor never ran; never leased: rc 0, no ledger, lead dir = gitconfig; main: untracked file listed and the not-diffed note; learnings match through the untracked path; 5 specialists + learnings-researcher started (persona recorders) in one run directory, the specialists on package.md, every brief naming full.diff; the lane list: 2 core, 5 persona, 5 optional lanes;core lanes released together, REVIEW_ANTIGRAVITY (cursor) and REVIEW_CODEX (prose + verdict) though the codex transcript quotes Status: BLOCKED; cursor's core prompt holds the package; optional lanes released together (5/5), each prompt with both changes, the [R] row, the untracked name, the inventory and the diff; REVIEW_CURSOR/DEVIN/KIMI only, opencode (DONE, exit 1) and grok (DONE, max_tokens) FAILED; codex with the schema off still writes its last-message file and is promoted from it, an answer ending in Status: BLOCKED is not, nor a retry's BLOCKED answer after a first run that wrote a verdict (2 runs); an agy answer quoting Status: BLOCKED in a finding promoted, one ending in it not; agy, codex, opencode, kimi and cursor exiting 130 -> rc 130 interrupted, one run each; the package holds each [R] task with its indented fields, no unmarked task, and names ops/TASKS.md and ops/CONTRACTS.md by absolute path; a codex builder lease runs with -o <out>.last and lease_collect reads its report there (DONE -> review over a quoted BLOCKED, no Status -> rc 80 over a quoted DONE); devin BLOCKED as reviewer not promoted, its prompt holds the package; 40-file diff over the cap: inventory 40, cut, full.diff 40, package <= 116000, kimi argv < 120000; REVIEW_BASE naming no commit and git diff rc 128 stop the review (rc 1, no package, no lane); REVIEW_BASE=main named" "static"
+  row "SELF-26" "claude" "$_S26_CAP" "PASS" "integrity (Claude Code layout, and the Codex layout: project-tier copy, locator through the pointer): lease + rebaseline + clean filter and fsmonitor in .git/config -> preflight 0, package block rc 44 naming .git/config, no package, dispatch (learnings gate inside) and optional blocks refuse, 0 lane runs, 0 personas, no run directory, filter and fsmonitor never ran; never leased: rc 0, no ledger, lead dir = gitconfig; main: untracked file listed and the not-diffed note; learnings match through the untracked path; 5 specialists + learnings-researcher started (persona recorders) in one run directory, the specialists on package.md, every brief naming full.diff; the lane list: 2 core, 5 persona, 5 optional lanes;core lanes released together, REVIEW_ANTIGRAVITY (cursor) and REVIEW_CODEX (prose + verdict) though the codex transcript quotes Status: BLOCKED; cursor's core prompt holds the package; optional lanes released together (5/5), each prompt with both changes, the [R] row, the untracked name, the inventory and the diff; REVIEW_CURSOR/DEVIN/KIMI only, opencode (DONE, exit 1) and grok (DONE, max_tokens) FAILED; codex with the schema off still writes its last-message file and is promoted from it, an answer ending in Status: BLOCKED is not, nor a retry's BLOCKED answer after a first run that wrote a verdict (2 runs); an agy answer quoting Status: BLOCKED in a finding promoted, one ending in it not; agy, codex, opencode, kimi and cursor exiting 130 -> rc 130 interrupted, one run each; the package holds each [R] task with its indented fields, no unmarked task, and names ops/TASKS.md and ops/CONTRACTS.md by absolute path; a codex builder lease runs with -o <out>.last and lease_collect reads its report there (DONE -> review over a quoted BLOCKED, no Status -> rc 80 over a quoted DONE); devin BLOCKED as reviewer not promoted, its prompt holds the package; 40-file diff over the cap: inventory 40, cut, full.diff 40, package <= 116000, kimi argv < 120000; REVIEW_BASE naming no commit and git diff rc 128 stop the review (rc 1, no package, no lane); REVIEW_BASE=main named; _scrub (common.sh's, which the blocks load, and probe-capabilities.sh's, printing the same): sk-, AIza, ghp_, xoxb-, Bearer, JWT, github_pat_ (first part ending in ghp), xai-, AKIA and ASIA samples redacted whole, look-alike prose kept" "static"
 else
   row "SELF-26" "claude" "$_S26_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S26_FAIL"):$(printf '%s' "$_S26_FAIL" | cut -c1-700)" "static"
 fi
@@ -11372,7 +11412,7 @@ _s16c_do() {
       -u DEVIN_MODEL -u DEVIN_CONSENT -u INSTR_OP -u INSTR_FILE -u INSTR_YES -u COMMIT_YES \
       HOME="$_S16C/home" PATH="$_S16C/bin:$_S16C/tools:/usr/bin:/bin:/usr/sbin:/sbin" TMPDIR="$_S16C/tmp" \
       GIT_CONFIG_NOSYSTEM=1 SKILL_DIR="$REPO_ROOT/skills/at-setup" S16C_ROOT="$REPO_ROOT" "$@" \
-      ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+120} "$SH" "$_S16C/blocks/$B.sh" ) < /dev/null > "$_S16C/out" 2>&1 || RC=$?
+      ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+-k10s} ${TIMEOUT_BIN:+120} "$SH" "$_S16C/blocks/$B.sh" ) < /dev/null > "$_S16C/out" 2>&1 || RC=$?
   echo "${L}:exit=${RC}"
   sed "s#^#${L}:#" "$_S16C/out"
 }
@@ -12753,12 +12793,13 @@ mkdir -p "$_S29"
 #            rejected; rc 0 with neither -> ambiguous. Both rows call it,
 #            and each records its timeout as a FAIL that says so. Its
 #            timeout test, _timed_out (taken with it): 124 and 137 yes, 0,
-#            1, 125 and 143 no. The eleven rows that pass when a forbidden
+#            1, 125 and 143 no. The twelve rows that pass when a forbidden
 #            action left no trace (AGY-09, AGY-10, AGY-13, AGY-16, CDX-08,
-#            OC-06, OC-06b, KIMI-08, CUR-07, CUR-08, CC-14b), read as text:
-#            each resets an rc variable to 0, captures its _probe_run call's
-#            rc in it, and asks _timed_out about it on the line right before
-#            its "timed out after" FAIL row, which names that rc
+#            OC-06, OC-06b, KIMI-08, CUR-07, CUR-08, CC-14b, and CDX-16 on
+#            its untrusted lane run), read as text: each resets an rc
+#            variable to 0, captures its _probe_run (CDX-16: _lane_run)
+#            call's rc in it, and asks _timed_out about it on the line right
+#            before its "timed out after" FAIL row, which names that rc
 mkdir -p "$_S29/bin" "$_S29/cfg" "$_S29/home" "$_S29/tmp" "$_S29/proj"
 { printf '#!/bin/sh\n# SELF-29 agy stub: `agents` prints cfg/agents; a run logs its argv and answers by cfg/mode\nD=%s\n' "'$_S29'"; cat <<'S29_AGY_EOF'
 mkdir -p "$D/log"
@@ -12958,7 +12999,7 @@ for _s29_c in 124 137 0 1 125 143; do
 to-${_s29_c}=$( eval "$_S29_NV" 2>/dev/null; if _timed_out "$_s29_c" 2>/dev/null; then echo yes; else echo no; fi )"
 done
 unset _s29_c
-_S29_ROUTE=$(python3 - "$REPO_ROOT/scripts/probe-capabilities.sh" AGY-09 AGY-10 AGY-13 AGY-16 CDX-08 OC-06 OC-06b KIMI-08 CUR-07 CUR-08 CC-14b 2>&1 <<'S29_ROUTE_PY'
+_S29_ROUTE=$(python3 - "$REPO_ROOT/scripts/probe-capabilities.sh" AGY-09 AGY-10 AGY-13 AGY-16 CDX-08 OC-06 OC-06b KIMI-08 CUR-07 CUR-08 CC-14b CDX-16 2>&1 <<'S29_ROUTE_PY'
 import re, sys
 lines = open(sys.argv[1], encoding="utf-8").read().split("\n")
 for rid in sys.argv[2:]:
@@ -12973,9 +13014,9 @@ for rid in sys.argv[2:]:
             why = "the-row-names-another-rc"
         else:
             v = m.group(1)
-            calls = [i for i in range(max(0, t - 60), t) if re.search(r"_probe_run [0-9]+ .*\|\| %s=\$\?$" % re.escape(v), lines[i])]
+            calls = [i for i in range(max(0, t - 60), t) if re.search(r"_(?:probe|lane)_run [0-9]+ .*\|\| %s=\$\?$" % re.escape(v), lines[i])]
             if not calls:
-                why = "no-_probe_run-call-captures-" + v
+                why = "no-_probe_run-or-_lane_run-call-captures-" + v
             elif not any(lines[i].strip() == v + "=0" for i in range(max(0, calls[-1] - 3), calls[-1])):
                 why = v + "-not-reset-before-the-call"
             else:
@@ -12991,14 +13032,14 @@ ${_S29_ROUTE}"
 _S29_FAIL="${_S29_FAIL}$(_self_expect negverdict "$O" '^nv-124:empty=timeout$' '^nv-137:empty=timeout$' '^nv-124:err=timeout$' '^nv-137:ready=timeout$' \
   '^nv-0:ready=accepted$' '^nv-0:err=rejected$' '^nv-1:empty=rejected$' '^nv-2:other=rejected$' '^nv-0:other=ambiguous$' '^nv-0:empty=ambiguous$' \
   '^calls=2$' '^timeout-fail=2$' '^to-124=yes$' '^to-137=yes$' '^to-0=no$' '^to-1=no$' '^to-125=no$' '^to-143=no$')"
-for _s29_c in AGY-09 AGY-10 AGY-13 AGY-16 CDX-08 OC-06 OC-06b KIMI-08 CUR-07 CUR-08 CC-14b; do
+for _s29_c in AGY-09 AGY-10 AGY-13 AGY-16 CDX-08 OC-06 OC-06b KIMI-08 CUR-07 CUR-08 CC-14b CDX-16; do
   _S29_FAIL="${_S29_FAIL}$(_self_expect negverdict "$O" "^${_s29_c}=routed\$")"
 done
 unset _s29_c
-_S29_EV="${_S29_EV}negverdict: _negative_verdict (AGY-11c and CUR-10 call it): rc 124 and 137 -> timeout with any output, error text and READY included, never a rejection; rc 0 + READY -> accepted; rc 1 or 2, or rc 0 + error text -> rejected; rc 0 with neither -> ambiguous; both rows record a timeout as a FAIL saying so. Its _timed_out: 124 and 137 yes, 0, 1, 125 and 143 no; AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08 and CC-14b each capture their _probe_run rc (reset to 0 first) and ask _timed_out right before their timed-out FAIL row, which names that rc. "
+_S29_EV="${_S29_EV}negverdict: _negative_verdict (AGY-11c and CUR-10 call it): rc 124 and 137 -> timeout with any output, error text and READY included, never a rejection; rc 0 + READY -> accepted; rc 1 or 2, or rc 0 + error text -> rejected; rc 0 with neither -> ambiguous; both rows record a timeout as a FAIL saying so. Its _timed_out: 124 and 137 yes, 0, 1, 125 and 143 no; AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08 and CC-14b each capture their _probe_run rc, and CDX-16 its untrusted _lane_run rc (reset to 0 first), and ask _timed_out right before their timed-out FAIL row, which names that rc. "
 unset O _S29_PICK _S29_NV _S29_ROUTE
 # --- end of SELF-29 cases ---
-_S29_CAP="agy routing defaults to auto and the AGY_ERROR line on exit 3 sets the failure's reason and retry (invoke_antigravity and the lease lane); the Cursor probe rows compose Grok ids through _cursor_model_for_effort; a ledger whose two anchors were deleted is a change (rc 44), and the lead's lease_rebaseline recovers (U19, S2); a negative row's call cut off by its timeout (rc 124 or 137) is never a rejection (AGY-11c, CUR-10), and a missing trace after one is no PASS (AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08, CC-14b)"
+_S29_CAP="agy routing defaults to auto and the AGY_ERROR line on exit 3 sets the failure's reason and retry (invoke_antigravity and the lease lane); the Cursor probe rows compose Grok ids through _cursor_model_for_effort; a ledger whose two anchors were deleted is a change (rc 44), and the lead's lease_rebaseline recovers (U19, S2); a negative row's call cut off by its timeout (rc 124 or 137) is never a rejection (AGY-11c, CUR-10), and a missing trace after one is no PASS (AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08, CC-14b, CDX-16)"
 if [ -z "$_S29_EV" ]; then _S29_FAIL="${_S29_FAIL} cases(no-case-ran)"; fi
 if [ -z "$_S29_FAIL" ]; then
   row "SELF-29" "claude" "$_S29_CAP" "PASS" "$(printf '%s' "$_S29_EV" | cut -c1-3000)" "static"
@@ -13012,7 +13053,8 @@ rm -rf "$_S29"
 # scripts/*.sh, scripts/lib/*.sh, hooks/handlers/*.sh, skills/*/scripts/*.sh.
 # _s30_scan lexes and parses each file as bash. Comments, quoted text and
 # here-document bodies are text (an unquoted body's $( ) is still parsed);
-# $( ), ` `, <( ) and ${ } are commands wherever they sit. One line per
+# $( ), ` `, <( ) and ${ } are commands wherever they sit, in the body of a
+# $(( )) or (( )) too (bash expands it as if it were in "..."). One line per
 # finding, "<file>:<line>:<rule>":
 #   test-and-last(<fn>)  the function's last statement chains a [ ], [[ ]] or
 #                        test with && and has no || after it, on one line or
@@ -13032,7 +13074,11 @@ rm -rf "$_S29"
 #                        SIGTERM is waited on forever (review finding #6):
 #                        timeout or gtimeout, or one expansion of a variable
 #                        whose name holds TIMEOUT or TOBIN ("$TIMEOUT_BIN",
-#                        ${TOBIN}; ${NAME:+…} read as the words it holds).
+#                        ${TOBIN}). A word that is one ${NAME:+word} or
+#                        ${NAME:-word} (+ or -, with or without the colon)
+#                        is read as the words its word expands to, as the
+#                        binary, an option or the duration; a :- with an
+#                        empty word, or of such a variable, stays $NAME.
 #                        -s KILL counts as a kill-after (it can't be
 #                        ignored). _adapter_env <cli> <cmd...> runs the
 #                        word after the CLI name, so that word is read as a
@@ -13042,27 +13088,36 @@ rm -rf "$_S29"
 #                        binary as an argument adds the flags itself and is
 #                        not a command-word use; "$@" or an array where the
 #                        binary or the duration goes may hold the options
-#                        and is left undecided
+#                        and is left undecided, but a "$@" after one of
+#                        env's NAME=value words is read as more of them
+#                        (the VAR=value pairs _s16c_do passes that way)
 # A file it can't follow is "scan-error:<file>:<why>", which fails the row
 # like a hit; the last line is "files=<n>". There is no allowlist: a line a
 # rule misreads is a matcher to refine. Negative controls: a planted file with
 # each shape on a line marked want:<rule> (one line and several, mid-chain, a
 # { } and a ( ) body, the function keyword, inside $( ) and "$( )", option
-# clusters) is flagged on exactly those lines and no other, so its compliant
-# shapes pass: `[ … ] && [ … ] || return 1`, `… || true`, `[ … ] || return 1`,
-# `if [ … ] && …; then … fi` last, a bare test last, a python here-document
-# holding `x and y` and the shapes as text, a comment holding `[ -d x ] && y`,
-# the shapes in quoted strings, grep -e -P; for timeout-no-kill the literal,
-# "$TIMEOUT_BIN", "${_TB_TIMEOUT}", a "$SECS" duration (a plain $NAME the
-# lexer keeps as text), gtimeout after env, "$TOBIN" -s TERM in
-# a $( ), ${TIMEOUT_BIN:+…} after exec, a path after command and
-# "$TIMEOUT_BIN" handed to _adapter_env (with and without --foreground, in a
-# ( )) are flagged, and -k, --kill-after=5s, -k5s, -s KILL, _adapter_env with
-# --foreground -k 10s, with "$2" and -k, with "${TO[@]}" and running env,
-# git -C or python3 -c, the binary as another function's argument, the
-# shapes in a comment and in quoted strings, "$@" where the duration goes,
-# command -v timeout and a ${TIMEOUT_BIN:+…} holding -k pass; and a file
-# whose quote never closes is a scan-error.
+# clusters, grep -P in a $( ) inside $(( )) and (( ))) is flagged on exactly
+# those lines and no other, so its compliant shapes pass: `[ … ] && [ … ] ||
+# return 1`, `… || true`, `[ … ] || return 1`, `if [ … ] && …; then … fi`
+# last, a bare test last, a python here-document holding `x and y` and the
+# shapes as text, a comment holding `[ -d x ] && y`, the shapes in quoted
+# strings, grep -e -P, $(( a + 1 )), $(( $(date +%s) - T0 )); for
+# timeout-no-kill the literal, "$TIMEOUT_BIN", "${_TB_TIMEOUT}", a "$SECS"
+# duration (a plain $NAME the lexer keeps as text), gtimeout after env,
+# "$TOBIN" -s TERM in a $( ), ${TIMEOUT_BIN:+…} after exec, a path after
+# command, "$TIMEOUT_BIN" handed to _adapter_env (with and without
+# --foreground, in a ( )), timeout in a $( ) inside $(( )),
+# ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+120} after exec,
+# "$TIMEOUT_BIN" after env A=1 "$@", ${T:-timeout} and
+# ${TIMEOUT_BIN:-$(command -v gtimeout)} are flagged, and -k,
+# --kill-after=5s, -k5s, -s KILL, _adapter_env with --foreground -k 10s, with
+# "$2" and -k, with "${TO[@]}" and running env, git -C or python3 -c, the
+# binary as another function's argument, the shapes in a comment and in
+# quoted strings, "$@" where the duration goes, command -v timeout, a
+# ${TIMEOUT_BIN:+…} holding -k, the split form with a ${TIMEOUT_BIN:+-k10s}
+# word, ${KOPT:--k10s} where the options go, env "$@" with no NAME=value
+# before it and words holding two expansions pass; and a file whose quote
+# never closes is a scan-error.
 _S30="${WORK}/self30"
 _S30_FAIL=""
 mkdir -p "$_S30"
@@ -13076,9 +13131,11 @@ ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\[[^]]*\])?\+?=")
 OPTS = re.compile(r"[-+][A-Za-z]+")
 # a word that is one parameter expansion ($NAME, "${NAME}", ${NAME:+…}: the
 # name in group 2 or 3, what follows it in the braces in 4); a word that may
-# hold several ("$@", an array, ${NAME:+…}); the signal a child can't ignore
+# hold several ("$@", an array, ${NAME:+…}); a word that is "$@" alone; the
+# signal a child can't ignore
 EXPAN = re.compile(r'(")?\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)([^A-Za-z0-9_].*)?\})(?(1)")', re.S)
 UNDECIDED = re.compile(r"\$(?:[@*]|\{[@*]|\{[A-Za-z_][A-Za-z0-9_]*(?:\[[@*]\]|:?\+))")
+ARGS = re.compile(r'(")?\$(?:@|\{@\})(?(1)")')
 KILLSIG = ("KILL", "SIGKILL", "9")
 META = " \t\n;&|()<>"
 OPS = (";;&", ";;", ";&", "&&", "||", "|&", ";", "&", "|", "(", ")")
@@ -13303,7 +13360,9 @@ class Scan(object):
 
     def arith(self, i):
         # the end of the (( )) that opens at i, or -1 when its inner group
-        # closes before the outer one (a subshell's subshell, not arithmetic)
+        # closes before the outer one (a subshell's subshell, not arithmetic);
+        # bash expands an arithmetic body as if it were in "...", so its $( ),
+        # ` ` and ${ } are parsed as commands here, as dq parses them
         t, n, depth, j = self.t, self.n, 0, i + 1
         while j < n:
             if t[j] == "\\":
@@ -13313,7 +13372,10 @@ class Scan(object):
             elif t[j] == ")":
                 depth -= 1
                 if depth == 0:
-                    return j + 2 if t.startswith(")", j + 1) else -1
+                    if not t.startswith(")", j + 1):
+                        return -1
+                    Scan(t[i + 2:j], self.line_at(i + 2), self.hits).dq(None)
+                    return j + 2
             j += 1
         raise Bad("the (( at line %d never closes" % self.line_at(i))
 
@@ -13616,16 +13678,19 @@ class Scan(object):
     def run_index(self, words):
         # cmd_index, then past each env or exec in front of the command word:
         # their options (with the word env -u, -P, -S, -C or exec -a takes)
-        # and env's NAME=value words
+        # and env's NAME=value words, a "$@" after one of them read as more
+        # of them (a caller's VAR=value pairs, as _s16c_do takes them)
         k = self.cmd_index(words)
         while k < len(words) and words[k].val in ("env", "exec"):
-            arg, k = "uPSC" if words[k].val == "env" else "a", k + 1
+            arg, k, pairs = "uPSC" if words[k].val == "env" else "a", k + 1, False
             while k < len(words):
                 v = words[k].val
                 if v == "--":
                     k += 1
                     break
                 if arg == "uPSC" and (v == "-" or ASSIGN.match(words[k].raw)):
+                    pairs, k = pairs or v != "-", k + 1
+                elif pairs and ARGS.fullmatch(words[k].raw):
                     k += 1
                 elif re.fullmatch(r"-[A-Za-z0-9]+", v):
                     k += 2 if v[-1] in arg else 1
@@ -13635,33 +13700,61 @@ class Scan(object):
                     break
         return k
 
+    def param_word(self, w):
+        # (quoted, name, what follows the name) when the word is one ${NAME…}
+        # expansion, quoted or not: param() finds the brace that closes it,
+        # so "${A:-x}${B}" is not one; else None
+        m = EXPAN.fullmatch(w.raw)
+        if not m or not m.group(4):
+            return None
+        q = 1 if m.group(1) else 0
+        s = Scan(w.raw, w.line, [])
+        s.i = q + 2
+        s.param(q == 1)
+        return (q, m.group(3), m.group(4)) if s.i == len(w.raw) - q else None
+
+    def held(self, words):
+        # the words, each one ${NAME:+word} or ${NAME:-word} (+ or -, with
+        # or without the colon) read as the words its word expands to:
+        # unquoted, the words it splits into, none for an empty one; quoted,
+        # one word. A :- or - stays $NAME when its word is empty (the set -u
+        # spelling) or NAME holds TIMEOUT or TOBIN (the binary itself)
+        out = []
+        for w in words:
+            q, name, op = self.param_word(w) or (0, "", "")
+            c = 1 if op.startswith(":") else 0
+            sign, text = op[c:c + 1], op[c + 1:]
+            if sign == "+" or (sign == "-" and text and not re.search("TIMEOUT|TOBIN", name)):
+                sub = Scan('"%s"' % text if q else text, w.line, [])
+                tok = sub.lex()
+                while tok.kind == "W":
+                    out.append(tok)
+                    tok = sub.lex()
+            else:
+                out.append(w)
+        return out
+
     def timeout_args(self, words, k):
         # the words after the timeout binary words[k] runs, or None when it
         # runs none: timeout or gtimeout (a path to one too), or one
         # parameter expansion of a variable whose name holds TIMEOUT or
-        # TOBIN; an unquoted ${NAME:+…} stands for the words it holds
+        # TOBIN
         w = words[k]
         if w.val.rsplit("/", 1)[-1] in ("timeout", "gtimeout"):
             return words[k + 1:]
         m = EXPAN.fullmatch(w.raw)
         if not m or not re.search("TIMEOUT|TOBIN", m.group(2) or m.group(3)):
             return None
-        op = m.group(4) or ""
-        if op.startswith("["):
+        if (m.group(4) or "").startswith("["):
             return None
-        if m.group(1) is None and op.startswith((":+", "+")):
-            sub, alt = Scan(op[op.index("+") + 1:], w.line, []), []
-            tok = sub.lex()
-            while tok.kind == "W":
-                alt.append(tok)
-                tok = sub.lex()
-            return self.timeout_args(alt + words[k + 1:], 0) if alt else None
         return words[k + 1:]
 
     def check_timeout(self, words):
         # timeout-no-kill: a timeout binary run with a duration, and neither
-        # -k/--kill-after nor a KILL signal (-s, --signal) among its options;
-        # _adapter_env <cli> <cmd...> runs the word after the CLI name
+        # -k/--kill-after nor a KILL signal (-s, --signal) among its options,
+        # each word read as held() reads it; _adapter_env <cli> <cmd...> runs
+        # the word after the CLI name
+        words = self.held(words)
         k = self.run_index(words)
         if k + 2 < len(words) and words[k].val == "_adapter_env":
             k += 2
@@ -13821,6 +13914,13 @@ V=$("$TOBIN" -s TERM 30s cmd | head -1)   # want:timeout-no-kill
 command /usr/local/bin/gtimeout 0.5 cmd   # want:timeout-no-kill
 _adapter_env claude "$TIMEOUT_BIN" 240 claude -p x   # want:timeout-no-kill
 ( cd x && _adapter_env grok "$TIMEOUT_BIN" --foreground 90s grok inspect )   # want:timeout-no-kill
+n=$(( $(grep -Pc x /dev/null) + 1 ))   # want:grep-P
+n=$(( $(timeout 1 sleep 2; echo 0) + 1 ))   # want:timeout-no-kill
+(( $(grep -Pc x f) > 0 ))   # want:grep-P
+exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+120} sh x   # want:timeout-no-kill
+exec env A=1 "$@" "$TIMEOUT_BIN" 120 sh x   # want:timeout-no-kill
+${T:-timeout} 30 make   # want:timeout-no-kill
+${TIMEOUT_BIN:-$(command -v gtimeout)} 30 make   # want:timeout-no-kill
 ok_adapter_env() {
   _adapter_env claude "$TIMEOUT_BIN" --foreground -k 10s 240 claude -p x
   _adapter_env grok "$2" --foreground -k 10s "${3}s" grok
@@ -13841,6 +13941,12 @@ ok_timeout() {
   command -v timeout >/dev/null
   ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 60} cmd
   { "$TIMEOUT_BIN" -k 2s "${SECS}s" "$@"; } 2>/dev/null || true
+  n=$(( a + 1 ))
+  n=$(( $(date +%s) - T0 ))
+  exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+-k10s} ${TIMEOUT_BIN:+120} sh x
+  "$TIMEOUT_BIN" ${KOPT:--k10s} 60 cmd
+  exec env "$@" "$TIMEOUT_BIN" 120 sh x
+  printf '%s\n' "${A:-}${B:-}" "${C:-$D}\n${E}"
 }
 S30_PLANTED
 printf 'ok() {\n  echo %s\n}\n' "'never closed" > "$_S30/broken.sh"
@@ -13862,7 +13968,7 @@ case "$_S30_NEG" in
 esac
 _S30_CAP="the shell rules a static scan can decide hold in every shell file Triforge ships (scripts/*.sh, scripts/lib/*.sh, hooks/handlers/*.sh, skills/*/scripts/*.sh): no function ends in a [ ] or [[ ]] && chain with no ||, no grep -c … || echo, no grep -P, no associative array, no mapfile or readarray (AGENTS.md Shell), and no timeout binary run as a command without a kill-after (review finding #6)"
 if [ -z "$_S30_HITS" ] && [ -z "$_S30_FAIL" ]; then
-  row "SELF-30" "claude" "$_S30_CAP" "PASS" "${_S30_N} files parsed as bash, comments, quoted text and here-document bodies as text: 0 hits, no scan error; planted: $(printf '%s\n' "$_S30_WANT" | grep -c . || true) shapes flagged on exactly their lines (test-and-last on one line and several, mid-chain, in a { } and a ( ) body, under the function keyword; grep -c || echo in a command substitution, quoted and not; grep -P, -oP, --perl-regexp; declare, local and typeset -A; mapfile, readarray; timeout-no-kill: timeout, \"\$TIMEOUT_BIN\", \"\${_TB_TIMEOUT}\", a \"\$SECS\" duration, gtimeout after env, \"\$TOBIN\" -s TERM in a command substitution, \${TIMEOUT_BIN:+…} after exec, a gtimeout path after command, \"\$TIMEOUT_BIN\" handed to _adapter_env with and without --foreground, in a ( )) and none of the compliant ones ([ ] && [ ] || return 1, && … || true, [ ] || return 1, if [ ] && …; then … fi last, a bare test last, a python here-document holding x and y and the shapes, a comment holding [ -d x ] && y, the shapes in quoted strings, grep -e -P; timeout with -k, --kill-after=5s, -k5s or -s KILL, _adapter_env with --foreground -k 10s, with \"\$2\" and -k, with \"\${TO[@]}\" and running env, git -C or python3 -c, the binary as another function's argument, the timeout shapes in a comment and in quoted strings, \"\$@\" where the duration goes, command -v timeout, \${TIMEOUT_BIN:+…} holding -k); a quote that never closes is a scan-error" "static"
+  row "SELF-30" "claude" "$_S30_CAP" "PASS" "${_S30_N} files parsed as bash, comments, quoted text and here-document bodies as text: 0 hits, no scan error; planted: $(printf '%s\n' "$_S30_WANT" | grep -c . || true) shapes flagged on exactly their lines (test-and-last on one line and several, mid-chain, in a { } and a ( ) body, under the function keyword; grep -c || echo in a command substitution, quoted and not; grep -P, -oP, --perl-regexp, -Pc in a command substitution inside \$(( )) and (( )); declare, local and typeset -A; mapfile, readarray; timeout-no-kill: timeout, \"\$TIMEOUT_BIN\", \"\${_TB_TIMEOUT}\", a \"\$SECS\" duration, gtimeout after env, \"\$TOBIN\" -s TERM in a command substitution, \${TIMEOUT_BIN:+…} after exec, a gtimeout path after command, \"\$TIMEOUT_BIN\" handed to _adapter_env with and without --foreground, in a ( ), timeout in a command substitution inside \$(( )), \${TIMEOUT_BIN:+\"\$TIMEOUT_BIN\"} \${TIMEOUT_BIN:+120} after exec, \"\$TIMEOUT_BIN\" after env A=1 \"\$@\", \${T:-timeout}, \${TIMEOUT_BIN:-\$(command -v gtimeout)}) and none of the compliant ones ([ ] && [ ] || return 1, && … || true, [ ] || return 1, if [ ] && …; then … fi last, a bare test last, a python here-document holding x and y and the shapes, a comment holding [ -d x ] && y, the shapes in quoted strings, grep -e -P, \$(( a + 1 )), \$(( \$(date +%s) - T0 )); timeout with -k, --kill-after=5s, -k5s or -s KILL, _adapter_env with --foreground -k 10s, with \"\$2\" and -k, with \"\${TO[@]}\" and running env, git -C or python3 -c, the binary as another function's argument, the timeout shapes in a comment and in quoted strings, \"\$@\" where the duration goes, command -v timeout, \${TIMEOUT_BIN:+…} holding -k, the split form with \${TIMEOUT_BIN:+-k10s}, \${KOPT:--k10s} where the options go, env \"\$@\" with no NAME=value before it, words holding two expansions); a quote that never closes is a scan-error" "static"
 else
   row "SELF-30" "claude" "$_S30_CAP" "FAIL" "$(printf '%s' "hits: ${_S30_HITS:-none}; negative controls:${_S30_FAIL:- ok}" | cut -c1-1500)" "static"
 fi
