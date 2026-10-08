@@ -44,7 +44,16 @@
 # Each is idempotent: a run with nothing to change prints "unchanged:" and
 # returns 0 without asking. Lead-only: a lease worker or a lease root is
 # refused (rc 45, _lead_only --any-host when the loader is in scope, else the
-# worker marker). The user-tier files are read, never written.
+# worker marker). Every reader's user-level files (user_owned: the user tier
+# under HOME, the user-level file and its override in the reader home) are
+# read, never written: each writer refuses one, or any file in the directory
+# of one, before any plan and also with --yes (rc 2), by identity, or by the
+# physical path for a file that does not exist yet. HOME and every directory
+# above it are refused the same way (home_why: same_file against the physical
+# HOME and its ancestors, as _tb_home_anchor in bootstrap.sh compares), since
+# an instruction file there is read for every project under it; HOME unset or
+# not a directory protects nothing. Run from HOME or above it, which is no
+# project, the refusal says to start in a project directory.
 #
 # Return codes: 0 ok · 1 hidden or an unknown reader
 # (instruction_pointer_visibility) · 2 refused input · 3 over the AGENTS.md
@@ -303,6 +312,71 @@ def is_user_tier(path):
     return lexists(path) and any(lexists(u) and same_file(path, u) for u in user_tiers())
 
 
+def user_files():
+    # (path, label) of every file a reader takes from the directories of the
+    # user, from READERS: its user tier under HOME, then its user-level file
+    # and override in its reader home ($<home_env> honored, as reader_home
+    # does)
+    files = []
+    for r in READERS.values():
+        if r["user_tier"] and home():
+            files.append((os.path.join(home(), r["user_tier"]), "user-tier ~/" + r["user_tier"]))
+        rh = reader_home(r)
+        if not rh:
+            continue
+        shown = "$" + r["home_env"] if r["home_env"] and os.environ.get(r["home_env"], "") else "~/" + r["home_default"]
+        files += [(os.path.join(rh, n), "user-level " + shown + "/" + n) for n in (r["user_level"], r["override"]) if n]
+    return files
+
+
+def user_owned(path):
+    # why no writer may write path ("" when one may): it is, or would be, one
+    # of user_files, or it sits in the directory of one. same_file
+    # compares by identity where both exist (a hard link; a link to the file
+    # or to its directory) and by physical path where one does not, so an
+    # absent target is caught too
+    files = user_files()
+    for u, label in files:
+        if same_file(path, u):
+            return path + " is your " + label + ", which Triforge reads and never writes; edit it yourself"
+    for u, label in files:
+        if same_file(os.path.dirname(path), os.path.dirname(u)):
+            return path + " is in the directory of your " + label + ", which Triforge reads and never writes; edit it yourself"
+    return ""
+
+
+def home_or_above(level):
+    # True when level is HOME or a directory above it: same_file against the
+    # physical HOME and each directory above it, the identity test
+    # _tb_home_anchor (bootstrap.sh) makes, so a link or another spelling of
+    # HOME is caught. HOME unset or no directory: nothing to protect
+    h = home()
+    if not h or not os.path.isdir(h):
+        return False
+    return any(same_file(level, d) for d in levels_up(os.path.realpath(h)))
+
+
+def here():
+    # the working directory, physical ("" when it is gone)
+    try:
+        return os.path.realpath(os.getcwd())
+    except OSError:
+        return ""
+
+
+def home_why(path, level):
+    # why no writer may write path ("" when one may): its level is HOME or a
+    # directory above it, where every project under it reads the file. Run
+    # from there, the way out is a project directory, never a file there
+    if not home_or_above(level):
+        return ""
+    why = path + " is in your home directory or a directory above it, where an instruction file is read for every project under it, so Triforge never writes one there; "
+    if here() and home_or_above(here()):
+        return why + "the working directory is no project: start in a project directory instead"
+    own = CLAUDE_KINDS[0]
+    return why + "scope it to the project instead: the pointer block in the AGENTS.md of the project itself, and a " + own + " beside it holding the line " + import_line(own, "/", "/") + ", which loads that AGENTS.md for that project only"
+
+
 def kind_names(kinds):
     return ", ".join(kinds[:-1]) + " or " + kinds[-1] if len(kinds) > 1 else "".join(kinds)
 
@@ -423,6 +497,9 @@ def visibility(fn, lead, reader, start):
     if not os.path.isdir(start):
         err(fn + ": REFUSED — " + clean(start) + " is not a directory (rc 2)")
         return 2
+    if home_or_above(start):
+        # no project, so no fix: every file there is one the writers refuse
+        return say(lead, "hidden", "not a project: " + os.path.realpath(start) + " is your home directory or a directory above it, and an instruction file there is read for every project under it; start in a project directory")
     r = READERS.get(reader)
     if r is None:
         named = "names no instruction reader for " + lead + " (its instructions field is empty or missing)" if not reader else "names the reader " + reader + " for " + lead + ", which this library does not know"
@@ -482,7 +559,20 @@ def reach(lead, r, cwd):
                 if d is not None and imports(p, d, set(l for _, l, _ in pointers)):
                     return say(lead, "visible", p + " imports " + pointer + ", so it is loaded with that file" + note)
             p, kind, level = shadows[0]
-            fix = "add the line " + import_line(kind, level, plevel) + " to " + p + " (instruction_add_import " + p + (", run from " + plevel if plevel != cwd else "") + ")"
+            # a fix builds only on a pointer block below HOME: one in HOME or
+            # above it is read for every project, and the writers refuse it
+            mine = [x for x in pointers if not home_or_above(x[1])]
+            if not mine:
+                fix = pointer + " is in your home directory or a directory above it, which every project under it reads: put the pointer block in the AGENTS.md of this project instead (instruction_merge_pointer " + cwd + ")"
+            else:
+                pointer, plevel = mine[0][0], mine[0][1]
+                fix = "add the line " + import_line(kind, level, plevel) + " to " + p + " (instruction_add_import " + p + (", run from " + plevel if plevel != cwd else "") + ")"
+                if level != plevel and plevel.startswith(level.rstrip("/") + "/"):
+                    # a file above the project: a file in the project first; an
+                    # import there reaches every project under it, and none is
+                    # offered at HOME or above (the writers refuse those)
+                    own = "add a " + CLAUDE_KINDS[0] + " holding the line " + import_line(CLAUDE_KINDS[0], plevel, plevel) + " to " + plevel + ", which loads it for that project only"
+                    fix = own if home_or_above(level) else own + "; or " + fix + ", which loads it for every project under " + level
             return say(lead, "hidden", "shadowed by " + ", ".join(s[0] for s in shadows) + ": this reader takes AGENTS.md only while no " + kind_names(r["shadow"]) + " exists in the working directory or above, and none of them imports " + pointer + "; " + fix)
     return say(lead, "visible", pointer + " is read" + tail + note)
 
@@ -503,8 +593,9 @@ def target_of(fn, arg, kinds):
         kind, level = base, parent
     if kind not in kinds:
         return path, kind, level, refuse(fn, path + " is not one of " + ", ".join(kinds))
-    if is_user_tier(path):
-        return path, kind, level, refuse(fn, path + " is your user-tier ~/.claude/CLAUDE.md, which Triforge reads and never writes; edit it yourself")
+    why = user_owned(path) or home_why(path, level)
+    if why:
+        return path, kind, level, refuse(fn, why)
     if islink(parent):
         return path, kind, level, refuse(fn, parent + " is a symlink: the file would be written outside the directory it is named in; pass the physical path, or edit it yourself")
     if islink(path):
@@ -582,6 +673,10 @@ def add_import(fn, arg, yes):
     line = import_line(kind, lev, project)
     new = data + (b"\n" if data and not data.endswith(b"\n") else b"") + os.fsencode(line) + b"\n"
     plan = "add the line " + line + " to " + path + ", so Claude Code loads " + os.path.join(project, "AGENTS.md") + " with it"
+    if lev != project:
+        # a file above the project: every project under it loads the import
+        own = CLAUDE_KINDS[0]
+        plan += ", and so does every project under " + lev + ", not only this one; for this project alone, put the line " + import_line(own, project, project) + " in " + os.path.join(project, own) + " instead"
     if not lexists(os.path.join(project, "AGENTS.md")):
         plan += " (this project has no AGENTS.md yet; instruction_merge_pointer creates it)"
     if not yes:
@@ -601,6 +696,9 @@ def merge_plan(fn, dirarg, template):
         return refuse(fn, dirarg + " is not a directory"), None
     target = os.path.realpath(dirarg)
     path = os.path.join(target, "AGENTS.md")
+    why = user_owned(path) or home_why(path, target)
+    if why:
+        return refuse(fn, why), None
     tmpl = load(template) if template else None
     if tmpl is None or not has_block(tmpl) or tmpl.count(START) != 1:
         return refuse(fn, "the pointer block template " + (template or "(no plugin root)") + " is missing or has no single marked block", 69), None
@@ -712,6 +810,11 @@ def convert(fn, arg, template, yes):
     if rc:
         return rc
     then = "" if plan["old"] == plan["new"] else ", and " + describe(plan)
+    project, lev = here(), os.path.realpath(level)
+    if project.startswith(lev.rstrip("/") + "/"):
+        # a copy above the project: every project under it reads the change
+        own = CLAUDE_KINDS[0]
+        then += "; that changes what every project under " + lev + " reads, not only this one; for this project alone, put the line " + import_line(own, project, project) + " in " + os.path.join(project, own) + " instead"
     if not yes:
         out("needs-ask: would remove " + path + " (an unmodified copy of the Triforge " + version + " templates/CLAUDE.md), so Claude Code reads AGENTS.md natively" + then)
         out("  apply : instruction_convert_stale " + path + " --yes")
@@ -735,7 +838,6 @@ def convert(fn, arg, template, yes):
     finally:
         os.close(dfd)
     out("changed: " + path + ": removed (an unmodified copy of the Triforge " + version + " template)")
-    lev = os.path.realpath(level)
     for k in CLAUDE_KINDS:
         p = os.path.join(lev, k)
         d = load(p) if lexists(p) else None
@@ -869,7 +971,10 @@ instruction_files_detect() {
 # (the CLAUDE.md family shadows AGENTS.md unless one imports it) or
 # agents-chain (an untrusted project, an AGENTS.override.md at the block's
 # level, the byte budget). An empty or unknown reader fails closed: "hidden",
-# rc 1, the why starting "unknown reader:".
+# rc 1, the why starting "unknown reader:". From HOME or a directory above it,
+# which is no project, the line is "hidden", rc 1, the why starting "not a
+# project:" and naming no fix; elsewhere a fix never builds on a pointer block
+# in HOME or above it.
 instruction_pointer_visibility() {
   local LEAD=${1:-} READER=""
   if [ -z "$LEAD" ] || [ "$#" -gt 2 ]; then
@@ -883,10 +988,14 @@ instruction_pointer_visibility() {
 # instruction_add_import <file> [--yes] — add the line that imports this
 # project's AGENTS.md (the working directory's) to a CLAUDE.md, .claude/CLAUDE.md
 # or CLAUDE.local.md in the project or above it. Without --yes: the planned
-# line ("needs-ask: …") and rc 20. A file that already imports it is left
-# alone ("unchanged: …", rc 0). Refused (rc 2): another kind of file, the
-# user-tier ~/.claude/CLAUDE.md, a file outside the project's directory chain,
-# a missing or non-regular file, a symlink or a symlinked directory.
+# line ("needs-ask: …") and rc 20; for a file above the project the plan says
+# every project under that directory loads the import too, and names the
+# project's own CLAUDE.md instead. A file that already imports it is left
+# alone ("unchanged: …", rc 0). Refused (rc 2): another kind of file, a
+# user-level file or one in its directory (~/.claude/CLAUDE.md, ~/.claude/,
+# ${CODEX_HOME:-~/.codex}/), a file in HOME or a directory above it, a file
+# outside the project's directory chain, a missing or non-regular file, a
+# symlink or a symlinked directory.
 instruction_add_import() {
   _instr_args instruction_add_import "instruction_add_import <file> [--yes]" "$@" || return $?
   if [ -z "$_INSTR_ARG" ]; then
@@ -908,8 +1017,11 @@ instruction_add_import() {
 # project_doc_max_bytes from ${CODEX_HOME:-~/.codex}/config.toml, else 32768:
 # over it, rc 3 naming the sizes, nothing written. An AGENTS.override.md in
 # <dir> gets a "warning:" line (that reader takes it instead; the file is
-# never written). Refused (rc 2): a symlinked or non-regular AGENTS.md,
-# markers not in one ordered pair.
+# never written). Refused (rc 2), with or without --yes: a <dir> that is the
+# directory of a user-level file (${CODEX_HOME:-~/.codex}, ~/.claude; through
+# a link or another spelling too), a <dir> that is HOME or a directory above
+# it (the same way), an AGENTS.md that is a user-level one (a hard link), a
+# symlinked or non-regular AGENTS.md, markers not in one ordered pair.
 instruction_merge_pointer() {
   _instr_args instruction_merge_pointer "instruction_merge_pointer [<dir>] [--yes]" "$@" || return $?
   _instr_writer_ok instruction_merge_pointer || return $?
@@ -921,9 +1033,12 @@ instruction_merge_pointer() {
 # block into that project directory's AGENTS.md (instruction_merge_pointer's
 # plan and budget check, rc 3 over it), then remove the copy, so Claude Code
 # reads AGENTS.md natively; a "note:" line names any CLAUDE.md-family file
-# that still shadows it there. A copy with edits, or a file that is no 3.x
-# copy, is refused (rc 2) and never removed. Without --yes: the plan and rc
-# 20. A file already gone: "unchanged: …", rc 0.
+# that still shadows it there. A copy with edits, a file that is no 3.x
+# copy, one in the directory of a user-level file, or one in HOME or a
+# directory above it, is refused (rc 2) and never removed. Without --yes: the
+# plan and rc 20; for a copy above the project the plan says that changes what
+# every project under that directory reads, and names the project's own
+# CLAUDE.md instead. A file already gone: "unchanged: …", rc 0.
 instruction_convert_stale() {
   _instr_args instruction_convert_stale "instruction_convert_stale <file> [--yes]" "$@" || return $?
   if [ -z "$_INSTR_ARG" ]; then

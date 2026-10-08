@@ -20,6 +20,10 @@
 #      "### <date> — vX.Y.Z: <title>" entry: scripts/release-notes.sh turns it
 #      into the GitHub release title + body when the bump lands on main
 #      (.github/workflows/release.yml), so a missing entry fails here, not there.
+#      Every shipped skill's frontmatter metadata.version (skills/*/SKILL.md;
+#      the repo-local .claude/skills are not shipped) equals that version too:
+#      each skill whose metadata.version differs or is missing fails, named
+#      with both versions.
 #   2. Ladder one-definition (KTD22, R26) — the model ladder is defined exactly
 #      once, as the TRIFORGE_MODEL_LADDER literal in scripts/lib/registry.sh
 #      (triforge_ladder prints it). A definition is a line carrying the phrase
@@ -234,6 +238,71 @@ if awk -v v="$PLUGIN_V" '
   ok "release notes: README Recent changes carries the v$PLUGIN_V entry (GitHub release body source)"
 else
   fail "release notes: README.md '## Recent changes' has no '### <date> — v$PLUGIN_V: <title>' entry — scripts/release-notes.sh needs it for the GitHub release"
+fi
+# Skill versions: each shipped skill's frontmatter metadata.version moves with
+# the plugin. The frontmatter is read as validate-skills.sh reads it: metadata
+# is one level of indented key: value lines, a quoted value is unquoted, and an
+# unquoted one loses a trailing " # comment".
+SKILLV_RC=0
+VV_PLUGIN_V="$PLUGIN_V" python3 - <<'PYEOF' || SKILLV_RC=$?
+import glob
+import os
+import re
+import sys
+
+want = os.environ["VV_PLUGIN_V"]
+
+
+def unquote(value):
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return re.sub(r"\s+#.*$", "", value)
+
+
+def meta_version(path):
+    """metadata.version in the frontmatter of path; None without one."""
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.read().split("\n")
+    if lines[0].strip() != "---":
+        return None
+    found, in_meta, base = None, False, None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return found
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            in_meta, base = re.match(r"^metadata:\s*$", line) is not None, None
+        elif in_meta:
+            base = indent if base is None else base
+            m = re.match(r"^version:(.*)$", line.strip())
+            if m and indent == base:
+                found = unquote(m.group(1))
+    return None    # no closing ---, so no frontmatter
+
+
+skills = sorted(glob.glob("skills/*/SKILL.md"))
+fails = [] if skills else ["no skills/*/SKILL.md found"]
+for path in skills:
+    try:
+        have = meta_version(path)
+    except (OSError, UnicodeDecodeError) as exc:
+        fails.append(path + " unreadable (" + str(exc) + ")")
+        continue
+    if have is None:
+        fails.append(path + " has no metadata.version; .claude-plugin/plugin.json is \"" + want + "\"")
+    elif have != want:
+        fails.append(path + " metadata.version is \"" + have + "\"; .claude-plugin/plugin.json is \"" + want + "\"")
+for line in fails:
+    print("FAIL: skill versions: " + line)
+if fails:
+    sys.exit(1)
+print("ok:   skill versions: all " + str(len(skills)) + " skills/*/SKILL.md carry metadata.version " + want + " (= .claude-plugin/plugin.json)")
+PYEOF
+if [ "$SKILLV_RC" -ne 0 ]; then
+  FAILED_CHECKS=$((FAILED_CHECKS + 1))
 fi
 
 # --- 2. ladder one-definition (KTD22) ----------------------------------------

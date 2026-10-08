@@ -33,27 +33,35 @@
 - **Hooks receive data via stdin JSON, NOT environment variables** — `$CLAUDE_TOOL_NAME`, `$CLAUDE_STOP_ASSISTANT_MESSAGE` etc. do not exist. Parse stdin with `python3 -c "import sys,json; ..."`. See: ops/solutions/2026-03-31-hooks-stdin-json-parsing.md
 - **Every agent must have an `## Output format` section** — the calling command needs structured output to parse. team-lead was the only agent missing this.
 
-- Worker discovery (int4b, Phase 4 integration merge, 2026-10-07), UNVERIFIED, for the end-of-program review:
+- Worker discoveries (end-of-program review, fix round 1, 2026-10-08), UNVERIFIED, recorded by the lead from the workers' reports:
 
-      scripts/lib/lease-wait.sh still reads the ledger with plain open(…, "rb") + tomllib.load
-      in three places (the LR_LEDGER, LC_LEDGER and LW_LEDGER readers in lease_wait and the
-      reconcile). Phase 3's non-blocking regular-file reader (read_regular) was not applied there,
-      so a FIFO planted at ops/leases.toml could still block lease_wait. Needs its own red/green case.
-
-- Worker discovery (u15-instr, Phase 5, 2026-10-07; extended by the Phase 6 gap analysis), MEASURED mechanism, helper-level exposure from source reading:
-
-      Inline `python3 -c` / `python3 -` programs put the cwd first on sys.path, so a planted
-      json.py / tomllib.py / hashlib.py / re.py / subprocess.py there runs on import (measured with
-      a planted tomllib.py, Python 3.14). Lead-side parsers run from a builder's worktree after it
-      exits (_lease_builder_run cds into $WT; the envelope/extract parsers import json), and
-      session-start runs from the user's project root. Only scripts/lib/instructions.sh drops the cwd.
-      Phase 6 fixes this with one shared prelude for every inline program, proven by a SELF case.
+      fix worker B: _run_with_timeout (scripts/lib/common.sh) runs `timeout -k 10s` with no
+      braces, so when the KILL fires bash prints a "Killed: 9" job line on the caller's stderr,
+      which can land in captured output. Low severity.
+      fix worker D: lease_merge/lease_promote re-hash the objects they bring in, but a worker
+      process still running can swap an object between the check and the squash (detection, not
+      prevention). Git calls outside _lead_git still read the commit-graph: bootstrap.sh's own
+      git, scripts/skill-locator/locate-triforge.sh, plain git in at-* skill blocks.
+      _persona_diff could run the same object check before review, to refuse earlier.
+      fix worker A: CLAUDE_CONFIG_DIR is modeled nowhere (READERS has no home_env for the
+      claude-md-shadow reader); whether Claude Code reads its user memory from there is unverified.
+      The user-level refusal follows the CODEX_HOME of the shell that runs the check.
+      fix worker E: SELF-30 rule (a) could also check the last statement inside a trailing if or
+      case (0 hits today). The scanner does not look inside single-quoted eval strings,
+      printf-written stubs, $( ) inside $(( )), or a grep run through a variable. SELF rows can't be
+      selected with --only (only SELF-06f/g/h); the --only comment in probe-capabilities.sh says
+      it runs no SELF row.
+      fix worker F: ops/research/2026-09-probe-record.md line 111 still says AGY-08 did not fire
+      on 1.2.1 "(this row)" under a PASS row; the next regeneration prints the neutral footnote.
+      The footnote's guardrail sentence still asserts "AGY-09/AGY-10 stay FAIL".
 
 ## Interface proposals
 <!-- No active proposals -->
 
 ## Archived (superseded)
 <!-- Moved here 2026-10-01 (U3). Kept as history; each line says what superseded it. -->
+- Worker discovery (int4b, 2026-10-07): lease-wait.sh's three ledger readers used plain open() and could block on a FIFO. — Fixed in Phase 6: they read through read_regular (47878ac, SELF-27 "FIFO ledger").
+- Worker discovery (u15-instr, 2026-10-07): inline `python3 -c` programs imported from the cwd. — Fixed in Phase 6 (S1): every inline program starts with `_PY_PRELUDE` (47878ac, SELF-27).
 - Completion promise: Only emit `<promise>DONE</promise>` after verification checklist passes. — Superseded by the `ops/.sprint-complete` sentinel that `scripts/coordinate.sh` detects (D-030); the `/goal` checklist is best-effort.
 - ship-loop.sh (Stop hook) only blocks the session that activated it — uses session_id from stdin JSON for isolation. — ship-loop.sh was retired with the sentinel-based completion signal (D-030); not coming back.
 - ship-loop.sh outputs JSON `{decision, reason, systemMessage}` to match Blueprint visual format — reason contains the original goal prompt re-injected on each iteration. — Retired with ship-loop.sh (D-030); hook stdout now never starts with `{` (D-031c).

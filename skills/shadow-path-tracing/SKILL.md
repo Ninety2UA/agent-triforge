@@ -4,7 +4,7 @@ description: "Use when planning or validating tasks that touch inputs, external 
 metadata:
   triforge-consumer: "the lead"
   triforge-phase: "1b (planning); 1.5 (plan validation)"
-  version: "3.3.0"
+  version: "4.0.0"
 ---
 
 # Shadow Path Tracing

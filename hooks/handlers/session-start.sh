@@ -56,9 +56,11 @@ trap _ss_on_exit EXIT
 # helpers put ops/), else the working directory. The hook runs there, as
 # triforge_bootstrap does, so a session
 # opened in a monorepo subdirectory reads and writes the one ops/, roster and
-# runtime state the helpers use. Only the instruction-file notices (R40)
-# look at the directory the session started in, because that is where Claude
-# Code reads CLAUDE.md and AGENTS.md from. Inline, not the helper's
+# runtime state the helpers use. Only the instruction-file notices (R40) and
+# triforge_bootstrap's warning about a 3.x roster left in a subdirectory look
+# at the directory the session started in: Claude Code reads CLAUDE.md and
+# AGENTS.md from there, and the warning walks up from it (the bootstrap is
+# called from there and anchors itself). Inline, not the helper's
 # _lead_roster_path: it must work when the helper does not load.
 SS_START_DIR=$(pwd -P 2>/dev/null || pwd)
 # The instruction-file library (R9, R40) from this hook's own tree, sourced on
@@ -103,24 +105,33 @@ SS_HOME_P=""
 if [ -n "${HOME:-}" ]; then
   SS_HOME_P=$(cd "$HOME" 2>/dev/null && env pwd -P 2>/dev/null || true)
 fi
-SS_D=$SS_HOME_P
-while [ -n "$SS_D" ]; do
-  if [ "$SS_ANCHOR" -ef "$SS_D" ]; then
-    SS_AT_HOME=yes
-    break
-  fi
-  if [ "$SS_D" = "/" ]; then
-    break
-  fi
-  SS_D=${SS_D%/*}
-  if [ -z "$SS_D" ]; then SS_D=/; fi
-done
+# _ss_home_or_above <dir> — 0 when <dir> is the home directory or one of its
+# ancestors (test -ef against the physical HOME and each directory above it);
+# 1 otherwise, or when HOME does not resolve. The instruction-file notices
+# below use it too: a file at that level is read for every project under it.
+_ss_home_or_above() {
+  local D=$SS_HOME_P
+  while [ -n "$D" ]; do
+    if [ "$1" -ef "$D" ]; then
+      return 0
+    fi
+    if [ "$D" = "/" ]; then
+      return 1
+    fi
+    D=${D%/*}
+    if [ -z "$D" ]; then D=/; fi
+  done
+  return 1
+}
+if _ss_home_or_above "$SS_ANCHOR"; then
+  SS_AT_HOME=yes
+fi
 
 # _ss_claude_dir — 0 when .claude is a real directory of the project (not a
 # symlink, not a file): only then does the hook touch anything under it. A
 # .claude linked elsewhere holds another place's files.
 _ss_claude_dir() {
-  [ -d .claude ] && [ ! -L .claude ]
+  [ -d .claude ] && [ ! -L .claude ] || return 1
 }
 
 # The orientation message is lines joined by real newlines and printed with
@@ -194,6 +205,34 @@ _ss_claude_private() {
   _ss_tmp_ok "$SS_ANCHOR"
 }
 
+# _ss_private_tmp — print a private temp dir (mktemp -d: a random name, mode
+# 0700) under TMPDIR when no other user can rename entries in it (_ss_tmp_ok,
+# B5), else under the project's own .claude (at the anchor, wherever the hook
+# stands) when no other user can rename entries there either
+# (_ss_claude_private, G2); .claude is created here, without group or other
+# write, when it is missing. On failure, a nonzero rc and one line saying why (or
+# mktemp's error): the caller skips the step that needed the temp dir and
+# shows that line in its notice.
+_ss_private_tmp() {
+  local T="${TMPDIR:-/tmp}"
+  if _ss_tmp_ok "$T" && mktemp -d "${T}/triforge-session-start.XXXXXX" 2>/dev/null; then
+    return 0
+  fi
+  if [ -n "$SS_AT_HOME" ]; then
+    echo "no private temp dir: TMPDIR ${T} is shared, and a home directory's .claude is never used"
+    return 1   # never under a home directory's .claude (R1)
+  fi
+  if [ ! -e "${SS_ANCHOR}/.claude" ] && [ ! -L "${SS_ANCHOR}/.claude" ]; then
+    # the user's umask, with group and other write taken off it
+    ( umask "$(printf '%04o' $(( 8#$(umask) | 8#022 )))" && mkdir "${SS_ANCHOR}/.claude" ) 2>/dev/null || true
+  fi
+  if ! _ss_claude_private; then
+    echo "no private temp dir: TMPDIR ${T} is shared (another user could rename entries in it), and so is ${SS_ANCHOR}/.claude or the project directory (a symlink, another user's, or group or other writable without the sticky bit)"
+    return 1
+  fi
+  mktemp -d "${SS_ANCHOR}/.claude/triforge-session-start.XXXXXX" 2>&1
+}
+
 # Clean stale state files from previous sessions (the context monitor keeps
 # its state under TMPDIR now; this removes a copy an older version left).
 if [ -z "$SS_AT_HOME" ] && _ss_claude_dir; then
@@ -201,8 +240,9 @@ if [ -z "$SS_AT_HOME" ] && _ss_claude_dir; then
 fi
 
 # Timeout binary (GNU coreutils `timeout`, or `gtimeout` on macOS). The
-# optional-CLI version probes below run under it when it exists (unbounded
-# without it), and `claude --version` under it or a watchdog (_ss_bounded).
+# optional-CLI version probes and `claude --version` below run under it, or
+# under a watchdog without one (_ss_bounded), so a CLI that never answers is
+# given up on either way.
 # triforge_bootstrap and _cursor_bin find their own: without one the agy pack
 # check is skipped and the Cursor `agent` probes refuse (fail-closed, as
 # invoke-external.sh is — a hung CLI must not stall session start), and the
@@ -214,6 +254,60 @@ TIMEOUT_MISSING_WARNING=""
 if [ -z "$TIMEOUT_BIN" ]; then
   TIMEOUT_MISSING_WARNING="WARNING: neither \`timeout\` nor \`gtimeout\` found on PATH — invoke-external.sh is fail-closed and will refuse to run Antigravity/Codex invocations (this hook also skipped its agy and cursor probes). On macOS, install with: brew install coreutils"
 fi
+
+# _ss_bounded <seconds> <dir> <command…> — the command's stdout, the command
+# given up on after <seconds>: under the timeout binary when there is one, and
+# on a host without one (stock macOS) under a watchdog — the command runs in
+# the background, a second background subshell kills it when the time is up,
+# and the watchdog is killed as soon as the command returns. The answer
+# travels through a file in <dir>, a private temp dir the caller made
+# (_ss_private_tmp: never one other users can rename entries in, B5, G2) and
+# this removes; the watchdog's stdio is /dev/null, so nothing a killed command
+# leaves running holds the caller's command substitution open; each `wait`
+# swallows bash's "Terminated" or "Killed" line. Giving up is a SIGTERM, then
+# a SIGKILL 2 s later if the command is still running (`-k 2s`, or the
+# watchdog's second kill), so the call returns within <seconds> + 2 s even
+# when the command ignores SIGTERM. timeout sends its SIGKILL to its whole
+# process group, itself included; the braces around it swallow the "Killed"
+# line bash prints for that.
+_ss_bounded() {
+  local SECS="$1" OUT_DIR="$2" OUT CMD_PID DOG_PID
+  shift 2
+  if [ -n "$TIMEOUT_BIN" ]; then
+    { "$TIMEOUT_BIN" -k 2s "${SECS}s" "$@"; } 2>/dev/null || true
+    return 0
+  fi
+  OUT="${OUT_DIR}/out"
+  "$@" </dev/null >"$OUT" 2>/dev/null &
+  CMD_PID=$!
+  ( sleep "$SECS"; kill "$CMD_PID" && sleep 2 && kill -9 "$CMD_PID" || true ) </dev/null >/dev/null 2>&1 &
+  DOG_PID=$!
+  wait "$CMD_PID" 2>/dev/null || true
+  kill "$DOG_PID" 2>/dev/null || true
+  wait "$DOG_PID" 2>/dev/null || true
+  cat "$OUT" 2>/dev/null || true
+  rm -rf "$OUT_DIR"
+}
+
+# _ss_cli_version <seconds> <binary> — the first line the binary prints for
+# --version, or for -V when --version prints nothing. Each call goes through
+# _ss_bounded (given up on after <seconds>, killed 2 s later if it ignores
+# SIGTERM); without a timeout binary each call gets a private temp dir of its
+# own, since _ss_bounded removes the one it is given. Nothing when neither
+# call answers; a call with no private temp dir for it is skipped.
+_ss_cli_version() {
+  local SECS="$1" BIN="$2" FLAG DIR V=""
+  for FLAG in --version -V; do
+    DIR=""
+    if [ -n "$TIMEOUT_BIN" ] || DIR=$(_ss_private_tmp); then
+      V=$(_ss_bounded "$SECS" "$DIR" "$BIN" "$FLAG" | head -1 || true)
+    fi
+    if [ -n "$V" ]; then
+      break
+    fi
+  done
+  printf '%s' "$V"
+}
 
 # _ss_run — the rest of this hook, from the project bootstrap to the orientation
 # message, as one function: it runs inside the subshell that sources the helper
@@ -234,10 +328,15 @@ _ss_run() {
 # are collected in SS_BOOT_LOG and printed with the migration notices; its
 # rc (0, or 80 when a step degraded) adds nothing the notices do not say.
 # Without the helper nothing is bootstrapped, and SS_HELPER_NOTICE says so.
+# It is called from the start directory, so its walk up from there finds a
+# 3.x roster left in a subdirectory; the log is opened here first, at the
+# anchor, which a relative TMPDIR is relative to.
 SS_BOOT_LOG=""
 if [ -n "$SS_HELPER" ] && [ -z "$SS_AT_HOME" ]; then
   SS_BOOT_LOG="${SS_HELPER_TMP}/bootstrap"
-  triforge_bootstrap --prefix "session-start: " 2> "$SS_BOOT_LOG" || true
+  { cd "$SS_START_DIR" 2>/dev/null || true
+    triforge_bootstrap --prefix "session-start: " || true
+    cd "$SS_ANCHOR" 2>/dev/null || true; } 2> "$SS_BOOT_LOG" || true
 fi
 
 # Optional-CLI detection (roster tier): presence + version for every optional
@@ -276,23 +375,18 @@ fi
 # (_registry_binary, no further read) and probed with command -v before
 # anything else runs. resolver stays last: it is empty for most CLIs, and
 # IFS=$'\t' folds an empty middle field into the next (consent always prints
-# true or false). The rows arrive on fd 3 so the version probes keep the
-# hook's stdin.
+# true or false). The rows arrive on fd 3, not stdin, so a version probe
+# that reads its stdin can't consume them.
 while IFS=$'\t' read -r -u 3 CLI_NAME CLI_BIN CLI_CONSENT CLI_RESOLVER; do
   [ -n "$CLI_NAME" ] || continue
   CLI_BIN=$(_registry_binary "$CLI_NAME" "$CLI_BIN" "$CLI_RESOLVER" 2>/dev/null || true)
   [ -n "$CLI_BIN" ] || continue
   if command -v "$CLI_BIN" >/dev/null 2>&1; then
-    # Version capture is best-effort: --version first, -V fallback, 10s cap
-    # each; a CLI that answers neither is still recorded as present.
-    CLI_VERSION=""
-    if [ -n "$TIMEOUT_BIN" ]; then
-      CLI_VERSION=$("$TIMEOUT_BIN" 10s "$CLI_BIN" --version 2>/dev/null | head -1 || true)
-      [ -z "$CLI_VERSION" ] && CLI_VERSION=$("$TIMEOUT_BIN" 10s "$CLI_BIN" -V 2>/dev/null | head -1 || true)
-    else
-      CLI_VERSION=$("$CLI_BIN" --version 2>/dev/null | head -1 || true)
-      [ -z "$CLI_VERSION" ] && CLI_VERSION=$("$CLI_BIN" -V 2>/dev/null | head -1 || true)
-    fi
+    # Version capture is best-effort (_ss_cli_version): --version first, -V
+    # fallback, each given up on after 10 s and killed 2 s later if it
+    # ignores SIGTERM, timeout binary or not; a CLI that answers neither is
+    # still recorded as present.
+    CLI_VERSION=$(_ss_cli_version 10 "$CLI_BIN" || true)
     [ -z "$CLI_VERSION" ] && CLI_VERSION="unknown"
     SS_DETECTED="${SS_DETECTED}
 ${CLI_NAME}|${CLI_VERSION}|$(date +%Y-%m-%d)"
@@ -473,7 +567,15 @@ fi
 #           the import and asks first
 #   above   a CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md in a directory
 #           above the project, with no import of the project's AGENTS.md
-#           anywhere in the chain
+#           anywhere in the chain: the line offers a CLAUDE.md in the project
+#           first (it loads AGENTS.md for this project only), then the import
+#           into that file, which every project under it loads too, then
+#           removing the file; for a file in HOME or a directory above it
+#           (_ss_home_or_above), the project's own CLAUDE.md alone: that file
+#           is read for every project under it, and the writers refuse it
+# A session started in HOME or a directory above it gets none of the file
+# lines and no tip (SS_NO_PROJECT): that is no project, as the home-directory
+# warning says, and every file there is one the writers refuse.
 # These describe a standing state, not a one-time action: they print on every
 # session start until the state is fixed, and so — like the roster-pin and
 # timeout lines — carry no "session-start:" prefix (that prefix marks a step
@@ -501,36 +603,8 @@ SS_XYZ_EOF
   echo $(( 10#$A * 1000000000000 + 10#$B * 1000000 + 10#$C ))
 }
 
-# _ss_bounded <seconds> <dir> <command…> — the command's stdout, the command
-# given up on after <seconds>: under the timeout binary when there is one, and
-# on a host without one (stock macOS) under a watchdog — the command runs in
-# the background, a second background subshell kills it when the time is up,
-# and the watchdog is killed as soon as the command returns. The answer
-# travels through a file in <dir>, a private temp dir the caller made
-# (_ss_private_tmp: never one other users can rename entries in, B5, G2) and
-# this removes; the watchdog's stdio is /dev/null, so nothing a killed command
-# leaves running holds the caller's command substitution open; each `wait`
-# swallows bash's "Terminated" line.
-_ss_bounded() {
-  local SECS="$1" OUT_DIR="$2" OUT CMD_PID DOG_PID
-  shift 2
-  if [ -n "$TIMEOUT_BIN" ]; then
-    "$TIMEOUT_BIN" "${SECS}s" "$@" 2>/dev/null || true
-    return 0
-  fi
-  OUT="${OUT_DIR}/out"
-  "$@" </dev/null >"$OUT" 2>/dev/null &
-  CMD_PID=$!
-  ( sleep "$SECS"; kill "$CMD_PID" ) </dev/null >/dev/null 2>&1 &
-  DOG_PID=$!
-  wait "$CMD_PID" 2>/dev/null || true
-  kill "$DOG_PID" 2>/dev/null || true
-  wait "$DOG_PID" 2>/dev/null || true
-  cat "$OUT" 2>/dev/null || true
-  rm -rf "$OUT_DIR"
-}
-
-# Floor. The answer is read with a 10 s bound, timeout binary or not — a hung
+# Floor. The answer is read with a 10 s bound (12 s for a `claude` that
+# ignores SIGTERM: SIGKILL follows 2 s later), timeout binary or not — a hung
 # `claude` must not stall session start. A missing `claude`, one that does not
 # answer in time, or an answer with no X.Y.Z in it warns about nothing.
 if command -v claude >/dev/null 2>&1; then
@@ -566,8 +640,18 @@ SS_OWN_NOTICES=""
 SS_ABOVE_NOTICES=""
 SS_FOUND=""
 SS_FOUND_RC=0
+# A start directory that is HOME or above it is no project: no file is checked
+# there and no tip printed, since each line would name a file there, which
+# every project under it reads and the writers refuse. The anchor is then
+# HOME or above it too, so the home-directory warning below says it all.
+SS_NO_PROJECT=""
+if _ss_home_or_above "$SS_START_DIR"; then
+  SS_NO_PROJECT=yes
+fi
 # shellcheck source=/dev/null
-if [ -f "$SS_INSTR_LIB" ] && source "$SS_INSTR_LIB" >/dev/null 2>&1; then
+if [ -n "$SS_NO_PROJECT" ]; then
+  :
+elif [ -f "$SS_INSTR_LIB" ] && source "$SS_INSTR_LIB" >/dev/null 2>&1; then
   SS_FOUND=$(instruction_files_detect "$SS_START_DIR" 2>/dev/null) || SS_FOUND_RC=$?
 else
   SS_FOUND_RC=69
@@ -592,7 +676,15 @@ while IFS=$'\t' read -r SS_KIND SS_WHERE SS_STATE SS_FILE SS_IMPORT; do
       SS_OWN_NOTICES="${SS_OWN_NOTICES}${SS_NL}WARNING: ${SS_KIND} in this project does not import AGENTS.md, so Claude Code reads it and skips AGENTS.md, Triforge's only instruction file. Run /at-setup to add the line $(_ss_prose "$SS_IMPORT") to it (setup asks first), or add it yourself — session start never edits this file."
       ;;
     above,*)
-      SS_ABOVE_NOTICES="${SS_ABOVE_NOTICES}${SS_NL}WARNING: AGENTS.md is not loaded under a Claude lead: $(_ss_prose "$SS_FILE") sits above this project, and Claude Code reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working directory or above it. Add the line $(_ss_prose "$SS_IMPORT") to that file (an import path is relative to the file that holds it), or remove the file."
+      SS_LEVEL=${SS_FILE%/*}
+      if [ "$SS_KIND" = .claude/CLAUDE.md ]; then SS_LEVEL=${SS_LEVEL%/*}; fi
+      SS_ABOVE_LINE="WARNING: AGENTS.md is not loaded under a Claude lead: $(_ss_prose "$SS_FILE") sits above this project, and Claude Code reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working directory or above it. Add a CLAUDE.md holding the line @AGENTS.md to this project: it loads AGENTS.md for this project only."
+      if _ss_home_or_above "${SS_LEVEL:-/}"; then
+        SS_ABOVE_LINE="${SS_ABOVE_LINE} That file is in your home directory or above it and is read for every project under it, so the fix belongs in this project, not there."
+      else
+        SS_ABOVE_LINE="${SS_ABOVE_LINE} Or add the line $(_ss_prose "$SS_IMPORT") to that file (an import path is relative to the file that holds it), which loads this project's AGENTS.md in every project under that directory too, or remove the file."
+      fi
+      SS_ABOVE_NOTICES="${SS_ABOVE_NOTICES}${SS_NL}${SS_ABOVE_LINE}"
       ;;
   esac
 done <<SS_FOUND_EOF
@@ -606,7 +698,7 @@ fi
 # tells an agent Triforge runs here. A standing tip, printed until the file
 # exists; session start does not create it.
 AGENTS_MD_TIP=""
-if [ ! -e "AGENTS.md" ] && [ ! -L "AGENTS.md" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/AGENTS.md" ]; then
+if [ -z "$SS_NO_PROJECT" ] && [ ! -e "AGENTS.md" ] && [ ! -L "AGENTS.md" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/templates/AGENTS.md" ]; then
   AGENTS_MD_TIP="${SS_NL}Tip: No AGENTS.md in this project. Triforge's pointer block (the short section that tells every agent this project runs the framework) ships as the plugin's templates/AGENTS.md. Copy it: cp \"$(_ss_prose "$CLAUDE_PLUGIN_ROOT")/templates/AGENTS.md\" ./AGENTS.md"
 fi
 cd "$SS_ANCHOR" 2>/dev/null || true   # back to the anchor (see the top): ops/ and the rest live there
@@ -833,34 +925,6 @@ echo ""
 echo 'Lead workflows (/at-<name> here, $agent-triforge:at-<name> in a Codex prompt): at-setup at-ship at-plan at-build at-review at-test at-debug at-quick at-deep-research at-analyze at-coordinate at-resolve-pr at-status at-pause at-resume at-wrap at-compound'
 
 exit 0
-}
-
-# _ss_private_tmp — print a private temp dir (mktemp -d: a random name, mode
-# 0700) under TMPDIR when no other user can rename entries in it (_ss_tmp_ok,
-# B5), else under the project's own .claude (at the anchor, wherever the hook
-# stands) when no other user can rename entries there either
-# (_ss_claude_private, G2); .claude is created here, without group or other
-# write, when it is missing. On failure, a nonzero rc and one line saying why (or
-# mktemp's error): the caller skips the step that needed the temp dir and
-# shows that line in its notice.
-_ss_private_tmp() {
-  local T="${TMPDIR:-/tmp}"
-  if _ss_tmp_ok "$T" && mktemp -d "${T}/triforge-session-start.XXXXXX" 2>/dev/null; then
-    return 0
-  fi
-  if [ -n "$SS_AT_HOME" ]; then
-    echo "no private temp dir: TMPDIR ${T} is shared, and a home directory's .claude is never used"
-    return 1   # never under a home directory's .claude (R1)
-  fi
-  if [ ! -e "${SS_ANCHOR}/.claude" ] && [ ! -L "${SS_ANCHOR}/.claude" ]; then
-    # the user's umask, with group and other write taken off it
-    ( umask "$(printf '%04o' $(( 8#$(umask) | 8#022 )))" && mkdir "${SS_ANCHOR}/.claude" ) 2>/dev/null || true
-  fi
-  if ! _ss_claude_private; then
-    echo "no private temp dir: TMPDIR ${T} is shared (another user could rename entries in it), and so is ${SS_ANCHOR}/.claude or the project directory (a symlink, another user's, or group or other writable without the sticky bit)"
-    return 1
-  fi
-  mktemp -d "${SS_ANCHOR}/.claude/triforge-session-start.XXXXXX" 2>&1
 }
 
 # The helper (scripts/invoke-external.sh) — sourced ONCE, in the subshell that

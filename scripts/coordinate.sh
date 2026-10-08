@@ -432,13 +432,19 @@ stop_fix() {
 # refuses, naming TRIFORGE_LEASE_ROOT. With no ledger the root comes from the
 # checkout's lease-root record (in its git dir, outside TMPDIR), and a missing
 # ledger beside lease history (that record, lease worktrees) refuses rather
-# than start a session as on a fresh checkout (Phase 3 round 4, B4).
+# than start a session as on a fresh checkout (Phase 3 round 4, B4). A
+# checkout that is the home directory or contains it (a dotfiles repository)
+# is no project: _lease_ctx refuses it, and the gate stops on that too.
 integrity_gate() {
   local RC=0
   local TRIFORGE_LEASE_ROOT="${TRIFORGE_LEASE_ROOT:-}"   # _lease_at_ledger_root may set it
   _checkout_top >/dev/null || return 0
   if ! _lease_ctx || ! _lease_at_ledger_root coordinate.sh; then
-    echo "coordinate.sh: STOPPED before starting a session — the lease root the ledger was last written under can't be used from this shell (above). Point TRIFORGE_LEASE_ROOT at the lead's lease root and rerun; an unattended session never starts on a ledger it can't check." >&2
+    if [ "${_LEASE_CTX_WHY:-}" = home ]; then
+      echo "coordinate.sh: STOPPED before starting a session — this checkout is your home directory or contains it, and a home directory is no project (above). Run coordinate.sh from the project's own repository." >&2
+    else
+      echo "coordinate.sh: STOPPED before starting a session — the lease root the ledger was last written under can't be used from this shell (above). Point TRIFORGE_LEASE_ROOT at the lead's lease root and rerun; an unattended session never starts on a ledger it can't check." >&2
+    fi
     exit 44
   fi
   _lead_integrity_check coordinate.sh || RC=$?

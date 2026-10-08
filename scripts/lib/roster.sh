@@ -352,7 +352,11 @@ dispatch_role() {
 # and on stderr). The envelope's result text lands in <output-file>
 # (the envelope itself beside it, <output-file>.raw and .envelope); a run that
 # returns no envelope leaves the CLI's own output there. Returns the CLI's
-# exit code, with INVOKE_FAILURE_CLASS set as the invoke_* helpers set it.
+# exit code, with INVOKE_FAILURE_CLASS set as the invoke_* helpers set it. A
+# checkout that is the home directory or contains it is no project
+# (_lease_ctx refuses it, _LEASE_CTX_WHY=home): there the worker would run
+# without the git-dir deny, so nothing runs, rc 69 and deterministic, as
+# invoke_grok refuses the same case.
 _dispatch_role_claude() {
   local ROLE=$1 AGENT_NAME=$2 PROMPT=$3 OUT=$4 TIMEOUT=$5 MODEL=$6 EFFORT=$7 CLASS=read RC=0 TOBIN
   local -a DENY=()
@@ -373,6 +377,10 @@ _dispatch_role_claude() {
   if _lease_ctx 2>/dev/null; then
     DENY+=("$_LEASE_COMMON")
     if [ "$CLASS" = edit ]; then DENY+=("$_LEASE_LEDGER"); fi
+  elif [ "${_LEASE_CTX_WHY:-}" = home ]; then
+    echo "dispatch_role: ERROR $(pwd -P | LC_ALL=C tr -d '\000-\037\177') is in a checkout that is your home directory or contains it, and a home directory is no project — cannot run '${AGENT_NAME}' there. Run it from the project's own repository (inside a home directory that is a git repository, git init the project first). No retry (deterministic)." >&2
+    INVOKE_FAILURE_CLASS="deterministic"
+    return 69
   fi
   if [ "$CLASS" = read ]; then DENY+=("$(pwd -P)"); fi
   # Expanded only when set: outside a git repository the edit class has none.
@@ -545,13 +553,16 @@ def lead_load(roster, reject):
 # raises when it does not hold the intended values; only then does it replace
 # path. On a failure it removes the temporary file and exits 4. The roster is
 # <project>/ops/roster.toml, and only there (Phase 3 round 4, B7): the project
-# directory is opened, ops/ is opened relative to it without following a link,
-# and the temporary file (created O_EXCL|O_NOFOLLOW under a random name), the
-# read-back and the rename all go through that descriptor, so an ops/ that is
-# a symlink to another directory (another checkout, a home directory) gets no
-# write, nor does one swapped in after the check. ops/ that is a symlink or not
-# a directory, or ops/roster.toml that is a symlink or not a regular file,
-# exits 6 with a refusal naming it.
+# directory is opened, ops/ is made in it when absent and opened relative to it
+# without following a link, and the temporary file (created O_EXCL|O_NOFOLLOW
+# under a random name), the read-back and the rename all go through that
+# descriptor, so an ops/ that is a symlink to another directory (another
+# checkout, a home directory) gets no write, nor does one swapped in after the
+# check. ops/ that is a symlink or not a directory, or ops/roster.toml that is
+# a symlink or not a regular file, exits 6 with a refusal naming it; so does a
+# project directory that is HOME or a directory above it (home_or_above, by
+# identity), before anything is made there: a home directory is no project,
+# and no writer makes ops/ anywhere but here, after that check.
 _ROSTER_SPLICE_PY='
 def splice_table(raw, header_re, block, keep_trailing_comments):
     lines = raw.splitlines(keepends=True)
@@ -586,16 +597,41 @@ def splice_table(raw, header_re, block, keep_trailing_comments):
         new_raw += "\n"
     return new_raw + suffix
 
+def home_or_above(d):
+    # True when d is HOME or a directory above it: os.path.samefile against
+    # the physical HOME and each directory above it, the identity test of
+    # _tb_home_anchor (bootstrap.sh). HOME unset or no directory: False
+    h = os.environ.get("HOME", "")
+    if not h.startswith("/") or not os.path.isdir(h):
+        return False
+    up = os.path.realpath(h)
+    while True:
+        try:
+            if os.path.samefile(d, up):
+                return True
+        except OSError:
+            pass
+        if up == "/":
+            return False
+        up = os.path.dirname(up)
+
 def write_verified(path, new_raw, verify, who):
     import errno, secrets, stat
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     ops_path = os.path.dirname(path) or "."
     name = os.path.basename(path)
-    def refuse(what):
-        sys.stderr.write(who + ": REFUSED " + what + ", so the roster is not written there (Triforge writes the roster only as a regular file in the real ops/ directory of the project)\n")
+    def refuse(what, why="Triforge writes the roster only as a regular file in the real ops/ directory of the project"):
+        sys.stderr.write(who + ": REFUSED " + what + ", so the roster is not written there (" + why + ")\n")
         sys.exit(6)
+    project = os.path.realpath(os.path.dirname(os.path.abspath(ops_path)))
+    if home_or_above(project):
+        refuse(project + " is your home directory or a directory above it", "that is no project: start in a project directory")
     try:
-        top = os.open(os.path.realpath(os.path.dirname(os.path.abspath(ops_path))), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        top = os.open(project, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.mkdir(os.path.basename(os.path.abspath(ops_path)), 0o777, dir_fd=top)
+        except FileExistsError:
+            pass
         ops = os.open(os.path.basename(os.path.abspath(ops_path)), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow, dir_fd=top)
     except OSError as exc:
         if exc.errno in (errno.ELOOP, errno.ENOTDIR, errno.EMLINK):
@@ -1405,8 +1441,9 @@ confinement_statements() {
 # are. The same CLI with a new model or effort is not a switch.
 # rc: 0 written; 1 refused (open leases, a forced handover from elsewhere than
 # the new lead, an unreadable ledger); 2 invalid argument; 3/4 roster
-# unreadable; 45 a worker, a lease root, no stated origin or ambiguous host
-# markers; 64 usage; after a write, the sweep's own rc.
+# unreadable; 6 refused by write_verified (ops/ a symlink, or the project
+# directory HOME or above it); 45 a worker, a lease root, no stated origin or
+# ambiguous host markers; 64 usage; after a write, the sweep's own rc.
 roster_write_lead() {
   _lead_only roster_write_lead --any-host || return $?   # never from a worker or a lease root (KTD9)
   local CLI="" MODEL=__default__ EFFORT=__default__ FORCE=0 N=0 A TAB CAPABLE CUR RC=0 CUR_CLI="" ROSTER LEDGER OPEN="" SUMMARY="" IDS="" LIST="" NB=0 M=0 NL='
@@ -1532,9 +1569,6 @@ block = ('[lead]\n'
          'effort = ' + json.dumps(effort) + '\n')
 new_raw = splice_table(raw, r'^\[lead\][ \t]*$', block, True)
 
-d = os.path.dirname(path)
-if d:
-    os.makedirs(d, exist_ok=True)
 # The roster must still parse and load to these values: verify the tmp file
 # BEFORE it replaces the live roster.
 def fail(msg):
@@ -1743,6 +1777,8 @@ print(str(entry['cli']) + '\t' + str(entry['model']) + '\t' + str(entry['effort'
 # (the displaced primary becomes the first fallback) and 'claude' is appended
 # if the result would not terminate at a core member. Model may be empty
 # (the claude -p builder lane runs Claude Code's own default model by design).
+# rc 6: refused by write_verified (ops/ a symlink, or the project directory
+# HOME or above it), nothing written.
 roster_write_role() {
   _lead_only roster_write_role || return $?   # workers never write the roster (KTD9, common.sh)
   local ROLE=${1:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
@@ -1750,8 +1786,7 @@ roster_write_role() {
   local MODEL=${3-}
   local EFFORT=${4:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
   local FALLBACKS=${5-__derive__} ROSTER
-  ROSTER=$(_lead_roster_path)
-  mkdir -p "${ROSTER%/*}"
+  ROSTER=$(_lead_roster_path)   # ops/ is made by write_verified, after its HOME check
   # Current merged chain from the sibling read surface — also surfaces an
   # unknown role (rc 2) or malformed roster (rc 4) with its precise error
   # before we touch the file.
@@ -2083,7 +2118,9 @@ sys.exit(5)
 # table the roster's role chains would reject at load (member_rules) is
 # refused (rc 2), so the roster stays resolvable: dropping the builder opt-in
 # from an enabled devin while a builder chain names it is refused; a decline
-# is not (resolve_role walks past a disabled member).
+# is not (resolve_role walks past a disabled member). rc 6: refused by
+# write_verified (ops/ a symlink, or the project directory HOME or above it),
+# nothing written.
 roster_write_member() {
   _lead_only roster_write_member || return $?   # workers never write the roster (KTD9, common.sh)
   local USAGE="usage: roster_write_member <cli> <true|false> <model> [enrolled-tag] [--consent user] [--opt-in <role,...|none>]"
@@ -2114,8 +2151,7 @@ roster_write_member() {
     STAMP="user $(date -u +%Y-%m-%dT%H:%M:%SZ) via=${_LEAD_VIA}"
   fi
   local ROSTER
-  ROSTER=$(_lead_roster_path)
-  mkdir -p "${ROSTER%/*}"
+  ROSTER=$(_lead_roster_path)   # ops/ is made by write_verified, after its HOME check
   ROSTER_FILE="$ROSTER" RW_CLI="$CLI" RW_ENABLED="$ENABLED" RW_MODEL="$MODEL" RW_TAG="$TAG" RW_STAMP="$STAMP" RW_OPTIN="$OPTIN" python3 -c "${_PY_PRELUDE}
 import json, os, re, sys
 ${_TRIFORGE_CLIS_PY}

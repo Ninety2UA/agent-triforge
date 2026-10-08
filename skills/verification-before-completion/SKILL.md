@@ -4,7 +4,7 @@ description: "Use before claiming a task, wave or sprint done, or reporting Stat
 metadata:
   triforge-consumer: "every role"
   triforge-phase: "every task completion; 6 (wrap-up)"
-  version: "3.3.0"
+  version: "4.0.0"
 ---
 
 # Verification Before Completion

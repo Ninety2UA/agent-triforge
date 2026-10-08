@@ -1,6 +1,6 @@
 ---
-saved: 2026-10-07T20:30:00Z
-phase: Phases 0–6 merged on release/4.0 (v4.0.0); the end-of-program review (ce-code-review + Codex, looping until 5/5) is next, then the release PR to main (user approval)
+saved: 2026-10-08T00:30:00Z
+phase: End-of-program review round 1 done (Ready with fixes, no P0/P1); its fixes are landing on fix/v4-final-r1; then gates, PR to release/4.0, review round 2, and the release PR to main (user approval)
 wave: 0
 tasks:
   total: 29
@@ -54,16 +54,18 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 | 4 | U16 Grok Build adapter; U17 Devin CLI adapter (U18 shipped in 2a) | **merged**: PR #21, squash f27e550 (2026-10-07). Rounds 1–4 reviewed; round 5 fixed and verified; user-tier grok hooks run with a NOTE (user decision); integration merge with 2c and 3 (214efa8: `_lease_uncarve`, grok readers on `read_regular`); gates green on Python 3.14 and 3.12 and in CI. No further per-phase review (user decision) |
 | 5 | U15 at-setup lead step + instruction-file detection | **merged**: PR #22, squash c2a054d (2026-10-07). Units A (roster helpers), B (instructions.sh) and C (the skill) built by parallel workers; SELF-16 new; gates green on Python 3.14 and 3.12 and in CI. No per-phase review (user decision) |
 | 6 | U19 watch-cycle carry-ins; U20 two-lead fixture sprint + 4.0 release | **merged**: PR #23, squash 47878ac (2026-10-07). S1 inline-python prelude (SELF-27), watch cycle on the persona lane (SELF-28), two-lead sprint + 3.3.x upgrade fix (SELF-17), agy auto + AGY_ERROR, Cursor 4.7, S2 deleted-anchors alarm with a record-gated vouch (SELF-29), 4.0.0 docs/hero/diagrams/version; gates green on Python 3.14 and 3.12 and in CI. Next: the end-of-program review |
+| review r1 | End-of-program review: ce-code-review run 20261007-221650-10a4e988 (8 local reviewers + Codex `gpt-6-astra` `xhigh` requested, actual unverified) over release/4.0 b5de4ae vs main 79db9c0 | Verdict "Ready with fixes", no P0/P1. Confirmed: #3 instruction writers could write the Codex user-level AGENTS.md; #6 session start's `claude --version` bound had no SIGKILL; #7 a 3.x subdirectory roster is orphaned silently; #10 `[ ] &&` as a function's last statement. #11 (keep ops/ at the checkout top) decided: ops/decisions/2026-10-07-ops-at-checkout-top.md. Fixes by workers A–F and wave 2 on `fix/v4-final-r1`, then a PR to release/4.0 and review round 2 |
 | final | release/4.0 → main as v4.0.0 (release.yml publishes) | pending |
 
 Update this table and the frontmatter at every PR boundary; the plan is `docs/plans/2026-09-28-1946-feat-lead-choice-v4-plan.md`.
 
 ## Next actions
 
-1. Phase 2c: collect u25's L1–L9, commit it in its worktree and cherry-pick onto `feat/v4-phase-2c`; rebase onto `release/4.0` (`--onto origin/release/4.0 2e9e57a`); full gate both ways plus `--only CC-21,CC-22,CC-23,CDX-20`; a re-review by final2c and Codex of the fixes; ce-simplify-code; PR → `release/4.0` (ce-commit-push-pr, branding:on, babysit:off); one gates check; squash-merge; remove the `mafw-wt-2c-*` worktrees.
-2. Phase 3: collect u14-coord's model/effort follow-up; commit it and cherry-pick onto `feat/v4-phase-3` (one conflict: `SELF_EXPECTED` needs both SELF-21 and SELF-22); add the gitconfig-capture ADR; rebase onto `release/4.0` after 2c (expect probe-self-tests.sh conflicts with 2b's simplify helpers: `_SELF_PTY`, `_self_repo`, `_self_wait_rc`); gate; final-diff review + Codex; simplify; PR; merge.
-3. Phases 4–6 per the table, each started with `/ce-work`. U15 (Phase 5) inherits: hook-trust detection by `hooks.state` trusted_hash, the live `$at-ship` vs `$agent-triforge:at-ship` check (needs a human-logged-in CODEX_HOME), the interactive launch line apart from the headless `launch_argv`, user-tier auth not reaching claude workers, agy builders needing a user-tier allow rule. **Devin (user, 2026-10-07):** the user chooses the Devin model. `swe-1-6-slow` stays the shipped default because it works on every account, Devin Free included. When Devin is enrolled, at-setup offers the models `devin models list` prints and writes the choice into the roster's `model` field for Devin's roles. at-setup also tells the user that Devin plugins they or their org installed load in every Devin run, read class included, and prints `devin plugins list` (fix5d). The consent and opt-in writers from U17 already exist (`roster_write_member --consent user --opt-in`).
-4. End of program: full review + ce-code-review over `release/4.0` vs `main`, then the release PR (only the user approves the merge to `main`).
+1. Round-1 fixes on `fix/v4-final-r1` (worktree `mafw-wt-final`), committed by the lead: F 5816af1 (release consistency), B 23a378f (#6), A a798301 (#3), E 1bc55e7 (#10 + SELF-30 shell rules + grok stop), D 7d93444 (object re-hash + commit-graph off), 2de7dbf (AGENTS.md lockstep). Still to land: C (`mafw-wt-r1-boot`, #7 warning + agy pack tests), W2b (`mafw-wt-r1-instr2`: writers refuse HOME and above, the above-file advice scoped to the project, SELF-08's vacuous 3.0.0 check), W2c (`mafw-wt-r1-lease2`: re-hash reused blobs at changed paths, object check before the snapshot check), then W2a after C (session start's optional-CLI probes and bootstrap's `_tb_run` get a kill-after and a bound; SELF-30 rule for a timeout without `-k`; the `--only` comment).
+2. Gate the branch: `--self-only` under Python 3.14 and 3.12, validate-skills (+ `--self-test`, + `.claude/skills`), validate-versions, both manifests `--strict`, `bash -n` and `zsh -n`. Copy pass (/no-ai-slop, /humanizer) over the round's doc prose.
+3. PR → `release/4.0` (ce-commit-push-pr, branding:on, babysit:off), one green gates.yml, squash-merge.
+4. Review round 2: ce-code-review + Codex over the updated release/4.0 vs main. Loop until 5/5.
+5. Release PR release/4.0 → main (body from `scripts/release-notes.sh`; date the Recent changes heading for the release day), wait for gates.yml, and stop for the user's approval. Never merge to main.
 
 ## Blockers recorded for the user
 
