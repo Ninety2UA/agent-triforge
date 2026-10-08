@@ -8584,6 +8584,11 @@ rm -rf "$_S24"
 #              committed, and no ledger is written
 _S25="${WORK}/self25"
 mkdir -p "$_S25/bin" "$_S25/tmp" "$_S25/log" "$_S25/home/.claude/plugins" "$_S25/outside"
+# The physical path, which the helpers print (realpath, pwd -P, a cd's PWD):
+# the harness's WORK can hold a // (a TMPDIR ending in /) and sit below a
+# symlinked directory (/var on macOS), and the cases match their output
+# against this spelling.
+_S25=$(cd "$_S25" && pwd -P)
 cat > "$_S25/bin/grok" <<'EOF'
 #!/bin/sh
 # SELF-25 grok stub
