@@ -38,7 +38,9 @@
 #      Every shipped skill's frontmatter metadata.version (skills/*/SKILL.md;
 #      the repo-local .claude/skills are not shipped) equals that version too:
 #      each skill whose metadata.version differs or is missing fails, named
-#      with both versions.
+#      with both versions, and so does one whose metadata block's indentation
+#      YAML rejects (an entry left of the block's first entry, a key nested
+#      under an entry that holds a value), which carries no version to read.
 #   2. Ladder one-definition (KTD22, R26) — the model ladder is defined exactly
 #      once, as the TRIFORGE_MODEL_LADDER literal in scripts/lib/registry.sh
 #      (triforge_ladder prints it). A definition is a line carrying the phrase
@@ -488,7 +490,8 @@ fi
 # Skill versions: each shipped skill's frontmatter metadata.version moves with
 # the plugin. The frontmatter is read as validate-skills.sh reads it: metadata
 # is one level of indented key: value lines, a quoted value is unquoted, and an
-# unquoted one loses a trailing " # comment".
+# unquoted one loses a trailing " # comment". A block whose indentation YAML
+# rejects (C3 there) fails here too rather than yield a guessed version.
 if _selected skill-versions; then
   SKILLV_RC=0
   VV_PLUGIN_V="$PLUGIN_V" python3 - <<'PYEOF' || SKILLV_RC=$?
@@ -508,13 +511,17 @@ def unquote(value):
 
 
 def meta_version(path):
-    """metadata.version in the frontmatter of path; None without one."""
+    """metadata.version in the frontmatter of path; None without one. Raises
+    ValueError when the metadata block's indentation is one YAML rejects, as
+    validate-skills.sh C3 does: an entry left of the block's first entry, or a
+    key nested under an entry that already holds a value. YAML reads no version
+    from such a frontmatter, so there is none to compare."""
     with open(path, encoding="utf-8") as fh:
         lines = fh.read().split("\n")
     if lines[0].strip() != "---":
         return None
-    found, in_meta, base = None, False, None
-    for line in lines[1:]:
+    found, in_meta, base, holds = None, False, None, False
+    for n, line in enumerate(lines[1:], 1):
         if line.strip() == "---":
             return found
         if not line.strip() or line.lstrip().startswith("#"):
@@ -523,10 +530,17 @@ def meta_version(path):
         if indent == 0:
             in_meta, base = re.match(r"^metadata:\s*$", line) is not None, None
         elif in_meta:
+            where = "frontmatter line " + str(n) + " is indented " + str(indent) + ", "
+            if base is not None and indent < base:
+                raise ValueError(where + "left of the metadata block's first entry at " + str(base))
+            if base is not None and indent > base and holds and re.match(r"^[A-Za-z0-9_.-]+:(\s|$)", line.strip()):
+                raise ValueError(where + "a key nested under an entry that already holds a value")
             base = indent if base is None else base
-            m = re.match(r"^version:(.*)$", line.strip())
-            if m and indent == base:
-                found = unquote(m.group(1))
+            if indent == base:
+                holds = re.match(r"^[A-Za-z0-9_.-]+:\s*(#.*)?$", line.strip()) is None
+                m = re.match(r"^version:(.*)$", line.strip())
+                if m:
+                    found = unquote(m.group(1))
     return None    # no closing ---, so no frontmatter
 
 
@@ -537,6 +551,10 @@ for path in skills:
         have = meta_version(path)
     except (OSError, UnicodeDecodeError) as exc:
         fails.append(path + " unreadable (" + str(exc) + ")")
+        continue
+    except ValueError as exc:   # after UnicodeDecodeError, which is one
+        fails.append(path + " metadata block does not parse as YAML (" + str(exc) + "), so it has no metadata.version; "
+                     + ".claude-plugin/plugin.json is \"" + want + "\"")
         continue
     if have is None:
         fails.append(path + " has no metadata.version; .claude-plugin/plugin.json is \"" + want + "\"")
