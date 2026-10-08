@@ -4895,6 +4895,47 @@ rm -rf "$_S13"
 #            anchors and the merge under A succeeds with it; with A's
 #            lead/gitconfig away, that approval is refused naming export
 #            TRIFORGE_LEASE_ROOT
+#   renamed  a merge follows no rename: leases mv (docs/hooks.json to
+#            .claude/hooks.json, merged on the lead's approval), ed (edits
+#            docs/hooks.json) and rn (notes.txt to guide.txt), all cut before
+#            mv merged: lease_merge ed -> 1 naming docs/hooks.json and the
+#            recovery (lease it again), state review, the integration branch,
+#            .claude/hooks.json and the index unchanged; the same through a
+#            git that drops -X no-renames (followgit) -> 1 naming
+#            .claude/hooks.json, which its scan never listed; rn's own rename
+#            (a three-way squash) -> merges, both sides in the squash
+#   rewound  lease p merges, lease q is cut after it, then the integration
+#            branch is rewound to before p and that accepted
+#            (lease_rebaseline): lease_merge q -> 1 before the squash (the
+#            integration head no longer descends from q's base, so the squash
+#            would replay p), naming the recovery, nothing merged or staged;
+#            with p adding .claude/settings.json (outside q's diff), and
+#            (rewoundin) with p and q both appending to feature.txt (inside
+#            it, where no path check sees the replay)
+#   renamedpromote main renames docs/hooks.json to .claude/hooks.json after
+#            sprint/s14 forked, and sprint/s14 edits docs/hooks.json:
+#            lease_promote main -> 1 naming docs/hooks.json, main unmoved,
+#            back on sprint/s14, no merge in progress, nothing dirty; through
+#            followgit -> 1 naming .claude/hooks.json, the same state; main
+#            merged into sprint/s14 by hand (the recovery it names) -> 42
+#            naming .claude/hooks.json, and the user's approval promotes
+#   race*    a worker moves refs/heads/main to a decoy commit between the
+#            promotion's merge and its record (a wrapped library function,
+#            race-seam.sh): read back as what the promotion made
+#            (raceverify), read by the baseline write (racerecord), moved
+#            during a promotion into develop (raceother) -> 44 naming both
+#            commits, the baseline and the ledger unchanged, the integration
+#            branch still recorded; main put back, lease_promote main records
+#            the verified result
+#   racemerge* a worker moves refs/heads/sprint/s14 right after lease_merge's
+#            squash commit (a wrapped _lgr, race-seam.sh): to a commit on the
+#            squash's parent with that parent's tree (racemergetree) or on
+#            top of the squash commit (racemergeon) -> 44 naming both
+#            commits, nothing recorded (the ledger byte-identical, the lease
+#            in review with its worktree); the branch put back with git reset
+#            --hard -> the rerun merges once; the branch accepted with
+#            lease_rebaseline -> the rerun stages nothing (rc 1), the change
+#            on the branch once
 _S14="${WORK}/self14"
 _S14_FAIL=""
 rm -rf "$_S14"
@@ -5346,9 +5387,238 @@ echo "row=$(_ledger_get t state):by=$(_ledger_get t approval_by)"
 ')
 _S14_FAIL="${_S14_FAIL}$(_self_expect tmpdirs "$O" '^t:go=0:review$' '^pin:rc=0:' '^gone:rc=1:.*export TRIFORGE_LEASE_ROOT' '^app:rc=0:' '^merge:rc=0:' '^row=merged:by=user$')"
 
-_S14_CAP="ledger approvals: lead_cli + reviewer class per row; a protected change (base to snapshot) merges only with a lead or user merge approval bound to the snapshot, the lead's own CLI's build routed to the user; a protected or require_user_approval promotion needs the user's approval bound to the tree and the branch it goes into (the default branch, or the target named), voided by a later merge or a move of that branch; every approval records its origin (KTD2-KTD4, R5, R6, R32, R33)"
+# followgit: the real git minus each "-X no-renames", so a merge follows
+# renames again; what lease_merge and lease_promote hold the merged tree to
+# (_lease_merge_scope) must refuse that on its own
+mkdir -p "$_S14/followgit"
+printf '#!/bin/sh\n# probe wrapper (SELF-14): the real git, minus each "-X no-renames"\nn=$#\nwhile [ "$n" -gt 0 ]; do\n  a=$1; shift; n=$((n - 1))\n  if [ "$a" = -X ] && [ "$n" -gt 0 ] && [ "$1" = no-renames ]; then shift; n=$((n - 1)); continue; fi\n  set -- "$@" "$a"\ndone\nexec "%s" "$@"\n' \
+  "$(command -v git)" > "$_S14/followgit/git"
+chmod +x "$_S14/followgit/git"
+
+# renamed: a merge follows no rename. sprint/s14 holds docs/hooks.json and
+# notes.txt; leases mv (docs/hooks.json to .claude/hooks.json), ed (edits
+# docs/hooks.json) and rn (notes.txt to guide.txt) are all cut there, and mv
+# merges first, on its approval
+_s14_repo renamed claude codex
+( cd "$_S14/renamed" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p docs && printf '{"v":1}\n' > docs/hooks.json && echo n > notes.txt \
+    && git add -A && git commit -qm docs ) >/dev/null 2>&1
+_s14_builder renamed <<'S14_RENAMED_EOF'
+#!/bin/sh
+case "$(basename "$PWD")" in
+  mv) mkdir -p .claude && mv docs/hooks.json .claude/hooks.json ;;
+  ed) printf '{"v":2}\n' > docs/hooks.json ;;
+  rn) mv notes.txt guide.txt ;;
+esac
+echo "Status: DONE"
+S14_RENAMED_EOF
+O=$(_s14_lead renamed claude '
+_self_go mv; _self_go ed; _self_go rn
+for T in mv ed rn; do lease_pin_reviewer "$T" antigravity >/dev/null 2>&1; done
+_self_try mvbare lease_merge mv antigravity
+_self_try mvapp lease_approve task:mv claude
+_self_try mvmerge lease_merge mv antigravity
+H=$(git rev-parse refs/heads/sprint/s14)
+_self_try edmerge lease_merge ed antigravity
+(export PATH="$_S14/followgit:$PATH"; _self_try edfollow lease_merge ed antigravity)
+echo "ed=$(_ledger_get ed state):head=$(if [ "$(git rev-parse refs/heads/sprint/s14)" = "$H" ]; then echo kept; else echo moved; fi):hooks=$(git show HEAD:.claude/hooks.json)$(cat .claude/hooks.json):staged=[$(git diff --cached --name-only)]:old=$(if [ -e docs/hooks.json ]; then echo present; else echo gone; fi)"
+_self_try rnmerge lease_merge rn antigravity
+echo "rnsquash=$(git diff-tree --no-commit-id --name-only --no-renames -r HEAD | tr "\n" " ")"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect renamed "$O" '^mv:go=0:review$' '^ed:go=0:review$' '^rn:go=0:review$' '^mvbare:rc=42:.*\.claude/hooks\.json' '^mvapp:rc=0:' '^mvmerge:rc=0:' \
+  '^edmerge:rc=1:.*renamed or deleted docs/hooks\.json since ed was cut.*lease_reclaim ed, then lease_create ed builder' '^edfollow:rc=1:.*would also change \.claude/hooks\.json' \
+  '^ed=review:head=kept:hooks=\{"v":1\}\{"v":1\}:staged=\[\]:old=gone$' '^rnmerge:rc=0:' '^rnsquash=guide\.txt notes\.txt $')"
+
+# rewound, rewoundin: the integration branch rewound past a lease's base.
+# Lease p merges (on the lead's approval), lease q is cut after it, then the
+# integration branch is rewound to before p and that accepted
+# (lease_rebaseline), so q's squash would replay p as well. rewound: p adds
+# .claude/settings.json and q writes feature.txt, so the replay is a path
+# outside q's own diff; rewoundin: p and q both append to feature.txt, so it is
+# inside it, where no path check sees it
+_s14_builder rewound <<'S14_REWOUND_EOF'
+#!/bin/sh
+case "$(basename "$PWD")" in
+  p) mkdir -p .claude && echo "{}" > .claude/settings.json ;;
+  q) echo feature > feature.txt ;;
+esac
+echo "Status: DONE"
+S14_REWOUND_EOF
+_s14_builder rewoundin <<'S14_REWOUNDIN_EOF'
+#!/bin/sh
+basename "$PWD" >> feature.txt
+echo "Status: DONE"
+S14_REWOUNDIN_EOF
+_s14_repo rewound claude codex
+_s14_repo rewoundin claude codex
+( cd "$_S14/rewoundin" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && echo base > feature.txt && git add -A && git commit -qm base ) >/dev/null 2>&1
+for _s14_c in rewound rewoundin; do
+  O=$(_s14_lead "$_s14_c" claude '
+H0=$(git rev-parse refs/heads/sprint/s14)
+_self_go p
+lease_pin_reviewer p antigravity >/dev/null 2>&1; lease_approve task:p claude >/dev/null 2>&1
+_self_try pmerge lease_merge p antigravity
+_self_go q
+lease_pin_reviewer q antigravity >/dev/null 2>&1
+git reset -q --hard "$H0"
+_self_try rebaseline lease_rebaseline
+_self_try qmerge lease_merge q antigravity
+echo "q=$(_ledger_get q state):head=$(if [ "$(git rev-parse refs/heads/sprint/s14)" = "$H0" ]; then echo kept; else echo moved; fi):settings=$(if [ -e .claude/settings.json ]; then echo present; else echo absent; fi):feature=[$(cat feature.txt 2>/dev/null | tr "\n" " ")]:staged=[$(git diff --cached --name-only)]"
+')
+  if [ "$_s14_c" = rewound ]; then _S14_FEAT=''; else _S14_FEAT='base '; fi
+  _S14_FAIL="${_S14_FAIL}$(_self_expect "$_s14_c" "$O" '^p:go=0:review$' '^pmerge:rc=0:' '^q:go=0:review$' '^rebaseline:rc=0:' \
+    '^qmerge:rc=1:.*REFUSED — the integration branch no longer holds q.s base [0-9a-f]{12}: its head [0-9a-f]{12} does not descend from it.*Nothing was merged, the index is untouched.*lease_reclaim q, then lease_create q builder' \
+    "^q=review:head=kept:settings=absent:feature=\\[${_S14_FEAT}\\]:staged=\\[\\]\$")"
+done
+unset _s14_c
+
+# renamedpromote: a promotion follows no rename either. main renames
+# docs/hooks.json to .claude/hooks.json after sprint/s14 forked, and
+# sprint/s14 edits docs/hooks.json (plain commits, no ledger yet)
+_s14_repo renamedpromote claude codex
+( cd "$_S14/renamedpromote" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git checkout -q main && mkdir -p docs && printf '{"v":1}\n' > docs/hooks.json \
+    && git add -A && git commit -qm docs && git checkout -q -B sprint/s14 main && printf '{"v":2}\n' > docs/hooks.json && git commit -qam edit \
+    && git checkout -q main && mkdir -p .claude && git mv docs/hooks.json .claude/hooks.json && git commit -qm rename && git checkout -q sprint/s14 ) >/dev/null 2>&1
+O=$(_s14_lead renamedpromote claude '
+M=$(git rev-parse refs/heads/main)
+_s14_at() { echo "$1:main=$(if [ "$(git rev-parse refs/heads/main)" = "$M" ]; then echo kept; else echo moved; fi):on=$(git symbolic-ref HEAD 2>/dev/null || echo detached):merging=$(if [ -e .git/MERGE_HEAD ]; then echo yes; else echo no; fi):dirty=[$(git status --porcelain | tr "\n" " ")]"; }
+_self_try conflict lease_promote main
+_s14_at conflict
+(export PATH="$_S14/followgit:$PATH"; _self_try follow lease_promote main)
+_s14_at follow
+git merge -q --no-edit refs/heads/main
+_self_try recovered lease_promote main
+_self_try app lease_approve promotion:sprint/s14 user
+_self_try promote lease_promote main
+echo "promoted:hooks=$(git show refs/heads/main:.claude/hooks.json):old=$(if git cat-file -e refs/heads/main:docs/hooks.json 2>/dev/null; then echo present; else echo gone; fi)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect renamedpromote "$O" "^conflict:rc=1:.*'main' renamed or deleted docs/hooks\\.json, which 'sprint/s14' edits" \
+  '^conflict:main=kept:on=refs/heads/sprint/s14:merging=no:dirty=\[\]$' '^follow:rc=1:.*would also change \.claude/hooks\.json' \
+  '^follow:main=kept:on=refs/heads/sprint/s14:merging=no:dirty=\[\]$' '^recovered:rc=42:.*\.claude/hooks\.json' '^app:rc=0:' \
+  "^promote:rc=0:.*PROMOTED 'sprint/s14' -> 'main'" '^promoted:hooks=\{"v":2\}:old=gone$')"
+
+# race*: a worker moves refs/heads/main to a decoy commit X between the
+# promotion's merge and its record. race-seam.sh wraps one library function
+# so that its first call once the checkout left sprint/s14 (lease_promote
+# checked out its target) moves the ref: raceverify wraps the read of what the
+# promotion made (_lease_branch_commit), racerecord and raceother the read the
+# baseline write makes (_lease_default_ref), raceother promoting into develop
+cat > "$_S14/race-seam.sh" <<'S14_RACE_EOF'
+# probe seam (SELF-14 race*): _s14_seam <function> wraps <function>; its first
+# call once HEAD left refs/heads/sprint/s14 moves refs/heads/main to $S14_X,
+# then every call runs the function as before
+_s14_seam() {
+  eval "_s14_was$1() $(declare -f "$1" | sed 1d)"
+  eval "$1() { _s14_move; _s14_was$1 \"\$@\"; }"
+}
+_s14_move() {
+  if [ -z "${S14_MOVED:-}" ] && [ "$(git symbolic-ref -q HEAD)" != refs/heads/sprint/s14 ]; then
+    S14_MOVED=1
+    git update-ref refs/heads/main "$S14_X"
+  fi
+}
+# _s14_seam_after <function> <word> wraps <function>; once a call whose first
+# argument is <word> returns 0, _s14_decoy runs (once): a worker moving
+# refs/heads/sprint/s14 right after it, to a commit on $S14_H with that
+# commit's tree (S14_MODE=tree) or to a commit on top of HEAD (otherwise),
+# whose id it writes to $S14_XF
+_s14_seam_after() {
+  eval "_s14_was$1() $(declare -f "$1" | sed 1d)"
+  eval "$1() { local R=0; _s14_was$1 \"\$@\" || R=\$?; if [ \"\$R\" -eq 0 ] && [ \"\${1:-}\" = $2 ]; then _s14_decoy; fi; return \"\$R\"; }"
+}
+_s14_decoy() {
+  local X
+  if [ -n "${S14_MOVED:-}" ]; then return 0; fi
+  S14_MOVED=1
+  if [ "${S14_MODE:-}" = tree ]; then
+    X=$(git commit-tree -p "$S14_H" -m "a worker commit" "$S14_H^{tree}")
+  else
+    X=$(git commit-tree -p HEAD -m "a worker commit" "HEAD^{tree}")
+  fi
+  git update-ref refs/heads/sprint/s14 "$X"
+  printf '%s\n' "$X" > "$S14_XF"
+}
+S14_RACE_EOF
+while read -r _s14_c _s14_f _s14_t; do
+  [ -n "$_s14_c" ] || continue
+  _s14_repo "$_s14_c" claude codex
+  ( cd "$_S14/$_s14_c" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git branch develop main ) >/dev/null 2>&1
+  printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder "$_s14_c"
+  O=$(_s14_lead "$_s14_c" claude '
+source "$_S14/race-seam.sh"
+_self_go t
+lease_pin_reviewer t antigravity >/dev/null 2>&1
+_self_try merge lease_merge t antigravity
+M=$(git rev-parse refs/heads/main); D=$(git rev-parse refs/heads/develop); H=$(git rev-parse refs/heads/sprint/s14)
+X=$(git commit-tree -p "$H" -m "a worker commit" "$H^{tree}")
+echo "ids:m=$(printf "%s" "$M" | cut -c1-12):h=$(printf "%s" "$H" | cut -c1-12):x=$(printf "%s" "$X" | cut -c1-12)"
+cp ops/leases.toml "$_S14/$S14_CASE.ledger"
+(export S14_X="$X"; _s14_seam '"$_s14_f"'; _self_try race lease_promote '"$_s14_t"')
+S=$(_ledger_get @baseline default_sha)
+echo "after:def=$(if [ "$S" = "$M" ]; then echo kept; elif [ "$S" = "$X" ]; then echo DECOY; else echo other; fi):ib=$(_ledger_get @baseline integration_branch):ledger=$(if cmp -s ops/leases.toml "$_S14/$S14_CASE.ledger"; then echo unchanged; else echo CHANGED; fi)"
+git update-ref refs/heads/main "$M"; git update-ref refs/heads/develop "$D"; git checkout -q sprint/s14
+_self_try promote lease_promote main
+echo "promoted:def=$(if [ "$(_ledger_get @baseline default_sha)" = "$H" ]; then echo at-sprint; else echo other; fi):main=$(if [ "$(git rev-parse refs/heads/main)" = "$H" ]; then echo at-sprint; else echo other; fi):ib=[$(_ledger_get @baseline integration_branch)]"
+')
+  _S14_M=$(printf '%s\n' "$O" | sed -n 's/^ids:m=\([0-9a-f]*\):.*/\1/p'); _S14_H=$(printf '%s\n' "$O" | sed -n 's/^ids:.*:h=\([0-9a-f]*\):.*/\1/p')
+  _S14_X=$(printf '%s\n' "$O" | sed -n 's/^ids:.*:x=\([0-9a-f]*\)$/\1/p')
+  case "$_s14_c" in
+    raceverify) _S14_RACE="^race:rc=44:.*INTEGRITY — after the promotion refs/heads/main is at ${_S14_X:-none} and HEAD at ${_S14_H:-none}, not the fast-forward to ${_S14_H:-none}: a ref moved" ;;
+    racerecord) _S14_RACE="^race:rc=44:.*INTEGRITY — refs/heads/main moved ${_S14_H:-none} -> ${_S14_X:-none} once the promotion was verified" ;;
+    *)          _S14_RACE="^race:rc=44:.*INTEGRITY — the default branch 'main' moved ${_S14_M:-none} -> ${_S14_X:-none} during the promotion into 'develop'" ;;
+  esac
+  _S14_FAIL="${_S14_FAIL}$(_self_expect "$_s14_c" "$O" '^t:go=0:review$' '^merge:rc=0:' "$_S14_RACE" '^after:def=kept:ib=sprint/s14:ledger=unchanged$' \
+    "^promote:rc=0:.*PROMOTED 'sprint/s14' -> 'main'" '^promoted:def=at-sprint:main=at-sprint:ib=\[\]$')"
+done <<'S14_RACE_CASES_EOF'
+raceverify _lease_branch_commit main
+racerecord _lease_default_ref main
+raceother _lease_default_ref develop
+S14_RACE_CASES_EOF
+unset _s14_c _s14_f _s14_t
+
+# racemerge*: a worker moves refs/heads/sprint/s14 right after lease_merge's
+# squash commit, before anything records it (race-seam.sh's _s14_seam_after on
+# _lgr, firing once its commit call returns). racemergetree: the decoy stands
+# on the squash commit's parent with that parent's tree (the lease's change
+# gone); the branch then put back (git reset --hard, as the refusal says) and
+# lease_merge rerun -> merges, the change on the branch once. racemergeon: the
+# decoy is a commit on top of the squash commit; the branch then accepted
+# (lease_rebaseline) and lease_merge rerun -> stages nothing, rc 1, the change
+# on the branch once
+for _s14_c in racemergetree racemergeon; do
+  _s14_repo "$_s14_c" claude codex
+  printf '#!/bin/sh\necho feature >> feature.txt\necho "Status: DONE"\n' | _s14_builder "$_s14_c"
+  if [ "$_s14_c" = racemergetree ]; then _S14_MODE=tree; _S14_FIX='git reset -q --hard "$H"'; else _S14_MODE=on; _S14_FIX='_self_try rebaseline lease_rebaseline'; fi
+  O=$(_s14_lead "$_s14_c" claude '
+source "$_S14/race-seam.sh"
+_self_go t
+lease_pin_reviewer t antigravity >/dev/null 2>&1
+H=$(git rev-parse refs/heads/sprint/s14)
+cp ops/leases.toml "$_S14/$S14_CASE.ledger"
+(export S14_H="$H" S14_XF="$_S14/$S14_CASE.x" S14_MODE='"$_S14_MODE"'; _s14_seam_after _lgr commit; _self_try race lease_merge t antigravity)
+X=$(cat "$_S14/$S14_CASE.x" 2>/dev/null)
+echo "ids:h=$(printf "%s" "$H" | cut -c1-12):x=$(printf "%s" "$X" | cut -c1-12)"
+echo "after:state=$(_ledger_get t state):mc=[$(_ledger_get t merge_commit)]:isha=$(if [ "$(_ledger_get @baseline integration_sha)" = "$H" ]; then echo kept; else echo other; fi):wt=$(if [ -d "$(_ledger_get t worktree)" ]; then echo kept; else echo gone; fi):ledger=$(if cmp -s ops/leases.toml "$_S14/$S14_CASE.ledger"; then echo unchanged; else echo CHANGED; fi)"
+'"$_S14_FIX"'
+_self_try rerun lease_merge t antigravity
+MC=$(_ledger_get t merge_commit)
+echo "rerun:state=$(_ledger_get t state):parent=$(if [ -z "$MC" ]; then echo none; elif [ "$(git rev-parse "$MC^")" = "$H" ] && [ "$(git rev-parse refs/heads/sprint/s14)" = "$MC" ]; then echo head; else echo other; fi):feature=$(git show HEAD:feature.txt 2>/dev/null | grep -c "^feature$" || true)"
+')
+  _S14_H=$(printf '%s\n' "$O" | sed -n 's/^ids:h=\([0-9a-f]*\):.*/\1/p'); _S14_X=$(printf '%s\n' "$O" | sed -n 's/^ids:.*:x=\([0-9a-f]*\)$/\1/p')
+  _S14_FAIL="${_S14_FAIL}$(_self_expect "$_s14_c" "$O" '^t:go=0:review$' \
+    "^race:rc=44:.*INTEGRITY — after the squash commit refs/heads/sprint/s14 is at ${_S14_X:-none} and HEAD at ${_S14_X:-none}, not a commit of tree [0-9a-f]{12} whose only parent is ${_S14_H:-none}, the head the squash went onto" \
+    '^race:rc=44:.*Nothing was recorded: t stays in review with its worktree' '^after:state=review:mc=\[\]:isha=kept:wt=kept:ledger=unchanged$')"
+  if [ "$_s14_c" = racemergetree ]; then
+    _S14_FAIL="${_S14_FAIL}$(_self_expect "$_s14_c" "$O" '^rerun:rc=0:' '^rerun:state=merged:parent=head:feature=1$')"
+  else
+    _S14_FAIL="${_S14_FAIL}$(_self_expect "$_s14_c" "$O" '^rebaseline:rc=0:' \
+      '^rerun:rc=1:.*brought no changes \(the builder produced nothing, or the integration branch holds them already\)' '^rerun:state=review:parent=none:feature=1$')"
+  fi
+done
+unset _s14_c _S14_MODE _S14_FIX
+
+_S14_CAP="ledger approvals: lead_cli + reviewer class per row; a protected change (base to snapshot) merges only with a lead or user merge approval bound to the snapshot, the lead's own CLI's build routed to the user; a protected or require_user_approval promotion needs the user's approval bound to the tree and the branch it goes into (the default branch, or the target named), voided by a later merge or a move of that branch; every approval records its origin; a merge applies exactly the lease's diff (its base an ancestor of the integration head) and a merge or promotion changes only the paths its protected scan listed (rename detection off, the merged tree held to the scan) and records only the result it verified (KTD2-KTD4, KTD18, R5, R6, R32, R33)"
 if [ -z "$_S14_FAIL" ]; then
-  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused, and from the seam simulating claude; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; trunk: no origin/HEAD, main or master -> the two-argument approval 1 naming the target argument, lease_promote trunk 42 naming lease_approve promotion:<branch> user trunk, that approval records trunk and promotes; target: origin/HEAD -> main, the user's approval for develop -> lease_promote main 42 (approved into develop, not main) naming the call with main, develop moved -> 42 voided, approved again -> promotes into develop, main unmoved; a target that is no local branch (unknown, origin/main, develop~0) or the integration branch itself -> 1, a lead-class one -> 1 naming the user's call with the target, nothing recorded; a third argument on task:<id> -> 64; shadow: a protected integration diff, require_user_approval off, a tag main at the integration head -> lease_promote main still 42 naming .claude/settings.json, main untouched, still on sprint/s14, the same for refs/main and a \$GIT_DIR/main file, the user's approval with that file in place binds refs/heads/main and the real protected path and promotes; nonbranch: a tag, a commit id, origin/main and main~0 as the target -> 1, nothing touched (refs unmoved, still on sprint/s14, no ledger), main promotes; shadowmerge: a tag sprint/s14 at a decoy -> lease_merge merges into refs/heads/sprint/s14, integration branch recorded as sprint/s14, the tag kept, lease_promote main takes the branch's commit; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude; a legacy claude pin after a handover to codex -> 42 needing the user, user merges; a legacy codex (worker) pin after it -> merges, class worker; tmpdirs: an approval from another TMPDIR lands beside the lead's anchors and merges, refused naming export TRIFORGE_LEASE_ROOT when the recorded root is gone" "static"
+  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused, and from the seam simulating claude; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; trunk: no origin/HEAD, main or master -> the two-argument approval 1 naming the target argument, lease_promote trunk 42 naming lease_approve promotion:<branch> user trunk, that approval records trunk and promotes; target: origin/HEAD -> main, the user's approval for develop -> lease_promote main 42 (approved into develop, not main) naming the call with main, develop moved -> 42 voided, approved again -> promotes into develop, main unmoved; a target that is no local branch (unknown, origin/main, develop~0) or the integration branch itself -> 1, a lead-class one -> 1 naming the user's call with the target, nothing recorded; a third argument on task:<id> -> 64; shadow: a protected integration diff, require_user_approval off, a tag main at the integration head -> lease_promote main still 42 naming .claude/settings.json, main untouched, still on sprint/s14, the same for refs/main and a \$GIT_DIR/main file, the user's approval with that file in place binds refs/heads/main and the real protected path and promotes; nonbranch: a tag, a commit id, origin/main and main~0 as the target -> 1, nothing touched (refs unmoved, still on sprint/s14, no ledger), main promotes; shadowmerge: a tag sprint/s14 at a decoy -> lease_merge merges into refs/heads/sprint/s14, integration branch recorded as sprint/s14, the tag kept, lease_promote main takes the branch's commit; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude; a legacy claude pin after a handover to codex -> 42 needing the user, user merges; a legacy codex (worker) pin after it -> merges, class worker; tmpdirs: an approval from another TMPDIR lands beside the lead's anchors and merges, refused naming export TRIFORGE_LEASE_ROOT when the recorded root is gone; renamed: the integration branch renamed docs/hooks.json to .claude/hooks.json after lease ed (editing docs/hooks.json) was cut -> lease_merge ed 1 naming docs/hooks.json and the recovery, state review, the integration branch, .claude/hooks.json and the index unchanged; through a git that drops -X no-renames -> 1 naming .claude/hooks.json (outside its scan); a lease's own rename merges three-way, both sides in the squash; rewound, rewoundin: the integration branch rewound past lease q's base (accepted) -> lease_merge q 1 before the squash (no longer holds q's base), nothing merged or staged, for a replay outside q's diff (.claude/settings.json) and inside it (feature.txt); renamedpromote: main renamed docs/hooks.json to .claude/hooks.json, sprint/s14 edits it -> lease_promote main 1 naming it, main unmoved, back on sprint/s14, clean; through the -X-dropping git -> 1 naming .claude/hooks.json; main merged in by hand -> 42 naming .claude/hooks.json, the user's approval promotes; race: main moved to a decoy between the promotion's merge and its record (the result read back, the baseline read, a promotion into develop) -> 44 naming both commits, baseline and ledger unchanged, then lease_promote main records the verified result; racemerge: the integration branch moved right after lease_merge's squash commit (onto its parent with the parent's tree, or on top of it) -> 44 naming both commits, nothing recorded, the lease in review with its worktree; put back with git reset --hard -> the rerun merges once; accepted with lease_rebaseline -> the rerun stages nothing (rc 1), the change on the branch once" "static"
 else
   row "SELF-14" "claude" "$_S14_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S14_FAIL"):$(printf '%s' "$_S14_FAIL" | cut -c1-900)" "static"
 fi
@@ -5869,7 +6139,20 @@ rm -rf "$_S15"
 #   perref     an exec persona's --at ref:<name> (the integration verifier's ref:<integration branch>): a tag sprint/s18
 #              at a decoy commit -> _persona_target 64 naming refs/heads/sprint/s18, also for ref:sprint/s18~0; the
 #              same for refs/sprint/s18 and for a $GIT_DIR/<name> file shadowing a branch; ref:refs/heads/sprint/s18
-#              and ref:HEAD -> the branch's commit; a tag at the branch's own commit -> passes
+#              and ref:HEAD -> the branch's commit; a tag at the branch's own commit -> passes. A refs/remotes/sprint/s18
+#              below the branch -> 64 still suggesting ref:refs/heads/sprint/s18; a refs/tags/HEAD -> ref:HEAD 64 naming
+#              it to remove, no full name suggested; a refs/v1 over a tag v1 (no branch v1) -> 64 naming refs/v1 as the
+#              ref git reads, nothing suggested. A tag, then a $GIT_DIR file, named like the branch head's 7-digit
+#              abbreviation, at the decoy -> ref:<abbrev> 64 naming the decoy git reads and the branch commit the
+#              abbreviation names, both in full, nothing suggested, also for ref:<abbrev>~0; ref:<abbrev> alone,
+#              ref:<full id> and a hex branch name no object starts with -> the branch's commit; a refs/tags/<full id>
+#              at the decoy -> ref:<full id> 64 naming it to remove, nothing suggested (git reads a full id as the
+#              object). No refusal suggests anything but the branch in full, nor names the decoy as a ref: to pass.
+#              Forms the check can't vet -> 64, nothing run, the refusal naming the forms --at ref: takes:
+#              ref:HEAD@{1}, ref:@{-1}, ref::/decoy, ref:^{commit}, the describe name v9-3-g<abbrev> (with a tag of
+#              that name at the decoy, and with none), ref:ORIG_HEAD written at the decoy, and ref:refs/heads/nope
+#              with only refs/refs/heads/nope (at the decoy) planted; ref:HEAD~0 and
+#              ref:refs/heads/sprint/s18^{commit} -> the branch's commit
 #   objsha256  objblob in a sha256 repository (skipped, with a note in the evidence, where git can't create one)
 #   objgraph   writes feature.txt + AGENTS.md; a commit-graph naming a decoy tree (the snapshot without AGENTS.md) for the
 #              snapshot (_s18_graph): plain git diff sees the decoy, lease_merge still scans AGENTS.md -> 42, nothing merged
@@ -6470,9 +6753,12 @@ printf '%s\n' "$O" | grep -qE 'INTEGRITY|Inspect it \(git fsck|puts the lease ba
   && _S18_FAIL="$_S18_FAIL objcross(object-store-repair-advice:$(printf '%s\n' "$O" | grep -E 'INTEGRITY|^state=' | tr '\n' '|' | cut -c1-200))"
 
 # perref: an exec persona's --at ref:<name> never follows a ref that shadows
-# the branch of that name (_persona_ref_unambiguous, scripts/lib/persona.sh)
+# the branch of that name, or one named like an abbreviated commit id, and its
+# refusal never suggests a ref that disagrees with the branch or HEAD the name
+# stands for (_persona_ref_unambiguous, scripts/lib/persona.sh)
 _s18_setup perref
-O=$(_s18_lead perref 'B=$(git rev-parse refs/heads/sprint/s18); D=$(git commit-tree -p main -m decoy "main^{tree}")
+O=$(_s18_lead perref 'B=$(git rev-parse refs/heads/sprint/s18); D=$(git commit-tree -p main -m decoy "main^{tree}"); A=$(printf "%s" "$B" | cut -c1-7)
+echo "perref-ids=$B $D"
 _s18_pt() { # _s18_pt <label> <at> — _persona_target, then "<label>-rc=<n>:<branch|decoy|none>" and its stderr
   local L=$1 R=0
   _PT_COMMIT=""; _persona_target dispatch_persona "$2" >/dev/null 2>"$HOME/$L.err" || R=$?
@@ -6482,11 +6768,47 @@ _s18_pt() { # _s18_pt <label> <at> — _persona_target, then "<label>-rc=<n>:<br
 _s18_pt plain ref:sprint/s18
 git tag sprint/s18 "$D"; _s18_pt tag ref:sprint/s18; _s18_pt expr "ref:sprint/s18~0"; _s18_pt full ref:refs/heads/sprint/s18; _s18_pt head ref:HEAD
 git tag -d sprint/s18 >/dev/null; git update-ref refs/sprint/s18 "$D"; _s18_pt refs ref:sprint/s18; git update-ref -d refs/sprint/s18
+git update-ref refs/remotes/sprint/s18 "$D"; _s18_pt remote ref:sprint/s18; git update-ref -d refs/remotes/sprint/s18
+git update-ref refs/tags/HEAD "$D"; _s18_pt headtag ref:HEAD; git update-ref -d refs/tags/HEAD
+git tag v1 "$B"; git update-ref refs/v1 "$D"; _s18_pt other ref:v1; git update-ref -d refs/v1; git tag -d v1 >/dev/null
 git branch -q side "$B"; printf "%s\n" "$D" > .git/side; _s18_pt gitdir ref:side; rm -f .git/side
+_s18_pt abbrevok "ref:$A"; git tag "$A" "$D"; _s18_pt abbrev "ref:$A"; _s18_pt abbrevx "ref:$A~0"; _s18_pt fullid "ref:$B"; git tag -d "$A" >/dev/null
+printf "%s\n" "$D" > ".git/$A"; _s18_pt abbrevgd "ref:$A"; rm -f ".git/$A"
+git update-ref "refs/tags/$B" "$D" 2>/dev/null; _s18_pt fullidtag "ref:$B"; git update-ref -d "refs/tags/$B"
+git branch -q deadbeef "$B"; _s18_pt hexbranch ref:deadbeef
+_s18_pt reflog "ref:HEAD@{1}"; _s18_pt prior "ref:@{-1}"; _s18_pt search "ref::/decoy"; _s18_pt noname "ref:^{commit}"
+git tag "v9-3-g$A" "$D"; _s18_pt describe "ref:v9-3-g$A"; git tag -d "v9-3-g$A" >/dev/null; _s18_pt describeok "ref:v9-3-g$A"
+printf "%s\n" "$D" > .git/ORIG_HEAD; _s18_pt rootref ref:ORIG_HEAD; rm -f .git/ORIG_HEAD
+git update-ref refs/refs/heads/nope "$D"; _s18_pt fullnope ref:refs/heads/nope; git update-ref -d refs/refs/heads/nope
+_s18_pt headx "ref:HEAD~0"; _s18_pt fullx "ref:refs/heads/sprint/s18^{commit}"
 git tag sprint/s18 "$B"; _s18_pt same ref:sprint/s18')
+_S18_PB=$(printf '%s\n' "$O" | sed -n 's/^perref-ids=\([0-9a-f]*\) .*/\1/p'); _S18_PD=$(printf '%s\n' "$O" | sed -n 's/^perref-ids=[0-9a-f]* //p')
+_S18_PA=$(printf '%s' "$_S18_PB" | cut -c1-7)
 _s18_expect perref "$O" '^plain-rc=0:branch$' '^tag-rc=64:none$' 'ref:sprint/s18 is ambiguous: git resolves sprint/s18 to [0-9a-f]{12}, but refs/heads/sprint/s18 is at [0-9a-f]{12}' \
   'name it in full, e.g. ref:refs/heads/sprint/s18, or remove the other ref' '^expr-rc=64:none$' '^full-rc=0:branch$' '^head-rc=0:branch$' '^refs-rc=64:none$' \
-  '^gitdir-rc=64:none$' 'ref:side is ambiguous' '^same-rc=0:branch$'
+  '^gitdir-rc=64:none$' 'ref:side is ambiguous' '^same-rc=0:branch$' \
+  '^remote-rc=64:none$' 'but refs/remotes/sprint/s18 is at [0-9a-f]{12} .*; name it in full, e.g. ref:refs/heads/sprint/s18, or remove the other ref' \
+  '^headtag-rc=64:none$' 'ref:HEAD is ambiguous: git resolves HEAD to [0-9a-f]{12}, but refs/tags/HEAD is at [0-9a-f]{12} .*; git reads HEAD itself first, so there is no fuller name to pass: remove refs/tags/HEAD ' \
+  '^other-rc=64:none$' 'ref:v1 is ambiguous: .*, but refs/tags/v1 is at [0-9a-f]{12} .*; there is no branch of that name to pass in full: remove the ref you did not mean \(git reads refs/v1\)' \
+  '^abbrevok-rc=0:branch$' '^abbrev-rc=64:none$' '^abbrevx-rc=64:none$' '^fullid-rc=0:branch$' '^abbrevgd-rc=64:none$' '^hexbranch-rc=0:branch$' \
+  "ref:${_S18_PA} is ambiguous: git resolves ${_S18_PA} to ${_S18_PD}, but ${_S18_PA} also abbreviates ${_S18_PB} .*; name the commit you mean by its full id \\(ref:<full id>\\), or remove the ref you did not mean" \
+  "ref:${_S18_PA}~0 is ambiguous: git resolves ${_S18_PA} to ${_S18_PD}, .*; name the commit you mean by its full id \\(ref:<full id>~0\\), or remove the ref you did not mean" \
+  '^fullidtag-rc=64:none$' "ref:${_S18_PB} is ambiguous: git resolves ${_S18_PB} to [0-9a-f]{12}, but refs/tags/${_S18_PB} is at [0-9a-f]{12} .*; git reads ${_S18_PB} itself first, so there is no fuller name to pass: remove refs/tags/${_S18_PB} "
+# the forms the check can't vet: 64, nothing run, each refusal naming the forms it takes
+_S18_RF='Nothing ran; --at ref: takes a branch, HEAD or a full commit id, optionally with ~N or \^N$'
+_s18_expect perref "$O" '^reflog-rc=64:none$' '^prior-rc=64:none$' '^search-rc=64:none$' '^noname-rc=64:none$' '^describe-rc=64:none$' \
+  '^describeok-rc=64:none$' '^rootref-rc=64:none$' '^fullnope-rc=64:none$' '^headx-rc=0:branch$' '^fullx-rc=0:branch$' \
+  "ref:HEAD@\\{1\\} is refused: a reflog or upstream form .*${_S18_RF}" "ref:@\\{-1\\} is refused: a reflog or upstream form .*${_S18_RF}" \
+  "ref::/decoy is refused: a ':' form names a path or searches commit messages .*${_S18_RF}" \
+  "ref:\\^\\{commit\\} is refused: no ref or commit is named before the revision suffix\\. ${_S18_RF}" \
+  "ref:ORIG_HEAD is refused: git resolves ORIG_HEAD to [0-9a-f]{12} from no ref under refs/, but from a root ref .*${_S18_RF}" \
+  "ref:refs/heads/nope is refused: git resolves refs/heads/nope to [0-9a-f]{12}, but no ref refs/heads/nope exists at that commit.*${_S18_RF}"
+# both describe cases print the refusal: with the tag at the decoy, and with no tag
+_S18_DN=$(printf '%s\n' "$O" | grep -cE "ref:v9-3-g${_S18_PA:-no-abbrev} is refused: it has the shape of git describe output .*${_S18_RF}" || true)
+[ "$_S18_DN" = 2 ] || _S18_FAIL="$_S18_FAIL perref(describe-refusals:${_S18_DN}-of-2)"
+# no refusal suggests anything but the branch in full: never a ref that disagrees with it, never the decoy commit
+_S18_SUG=$(printf '%s\n' "$O" | grep -oE "e\\.g\\. ref:[^ ,]+|ref:${_S18_PD:-no-decoy-id}" | grep -vE '^e\.g\. ref:refs/heads/(sprint/s18|side)(~0)?$' | tr '\n' ' ')
+[ -z "$_S18_SUG" ] || _S18_FAIL="$_S18_FAIL perref(suggests:${_S18_SUG% })"
 
 # objgraph: a commit-graph naming a decoy tree for the snapshot. Plain git diff
 # reads the graph (graph-diff names the decoy's one change), the squash reads the
@@ -6702,7 +7024,7 @@ _S18_NEG=$(_s18_git_scan "$_S18/lease-planted.sh" | cut -d: -f1 | tr '\n' ' ')
   || _S18_FAIL="$_S18_FAIL scan-negative-control(want-lines:$((_S18_N - 2)),$((_S18_N - 1)),${_S18_N};got:[${_S18_NEG% }])"
 
 if [ -z "$_S18_FAIL" ]; then
-  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer/leadcfg -> collect rc 44 naming the surface (config, hooks, ledger and the lead trusted git config restored, gitconfig.changed-* kept; marker never ran); post-checkout planted: next lease_create 44; fsmonitor, filter, post-checkout and pointer once accepted (lease_rebaseline) still never run and collect snapshots (pointer via the recorded admin dir); tampered hooks.copy -> 44, NOT restored; ledger swapped for a symlink -> 44, a regular file again; the lead's own git remote add -> 44 naming the saved copy, put back + rebaselined -> collect 0, origin kept; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; git gc after collect (writes .git/info/refs) -> merges; lead checkout switched to rogue -> merge 44 naming sprint/s18 and rogue, state review, back on sprint/s18 -> merges; lease_create on main records no integration branch, sprint/two cut after it -> lease + merge, no 44; a lead commit on the integration branch -> merge 44 (moved), lease_rebaseline -> merges on top; identity only in an [include]d ~/.gitconfig file -> the merge commit carries it; linked-worktree lead checkout whose .git pointer is rewritten to the lease admin dir -> collect 44 naming it; after review the snapshot's new blob rewritten in the object store under its own id -> merge 44 naming it, HEAD unmoved, nothing staged, the lease escalated, the blob written again from the worktree + lease_rebaseline -> merges the reviewed content (${_S18_SHA256}); a subtree rewritten to point at a decoy -> merge 44 naming the tree; the root tree rewritten -> merge 44 naming it and the lease escalated (the re-hash runs ahead of the snapshot checks, whose read-tree would refuse it with rc 1), the repair hint naming write-tree for a tree; a blob the integration branch already has, copied by the snapshot to a new path and rewritten -> merge 44 naming the blob at the new path, HEAD unmoved, nothing staged; a file the integration branch and the snapshot both changed since the base (the squash merges three versions): HEAD's blob rewritten -> merge 44 naming it at HEAD, nothing merged, written again from the lead checkout + lease_rebaseline -> merges both changes; the merge base's blob rewritten -> merge 44 naming it at the merge base, nothing merged; a gitlink that moved on the integration branch after collect -> merges (neither side of it is an object of this repository); a merged blob rewritten -> lease_promote 44, main unmoved, written again -> promotes; main moved since the sprint began (accepted), so the promotion is a merge commit of three versions of a file: main's blob rewritten -> lease_promote 44 naming it at main, main unmoved, written again -> promotes the merge of both changes; the integration branch rewritten (accepted) into a criss-cross with the snapshot -> merge 1 naming both merge bases and the recovery, state review, nothing merged, no object-store repair advice, the task leased again from the integration head -> merges; main and the integration branch in a criss-cross -> lease_promote 1 naming both merge bases and git merge refs/heads/main, main unmoved, merged in + rebaselined -> promotes; an exec persona's --at ref:sprint/s18 with a tag, refs/<name> or a \$GIT_DIR/<name> file shadowing the branch -> 64 naming ref:refs/heads/<name> (also through a revision expression), the full ref and ref:HEAD take the branch's commit, a shadow at the same commit passes; ${_S18_GRAPH}; a HOME that is itself a git repository: lease_create from it and from a directory in it, and lease_wait -> rc 1 with one ERROR line (a home directory is no project), coordinate.sh -> 44 before any session, the persona task: and ref: targets -> 64, no ~/ops, no lease root, HOME byte-identical, a project with its own repository under that HOME leases; every git call in lease.sh and lease-wait.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines in lease.sh, none in lease-wait.sh; planted { git / else git / env -u git lines caught)" "static"
+  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer/leadcfg -> collect rc 44 naming the surface (config, hooks, ledger and the lead trusted git config restored, gitconfig.changed-* kept; marker never ran); post-checkout planted: next lease_create 44; fsmonitor, filter, post-checkout and pointer once accepted (lease_rebaseline) still never run and collect snapshots (pointer via the recorded admin dir); tampered hooks.copy -> 44, NOT restored; ledger swapped for a symlink -> 44, a regular file again; the lead's own git remote add -> 44 naming the saved copy, put back + rebaselined -> collect 0, origin kept; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; git gc after collect (writes .git/info/refs) -> merges; lead checkout switched to rogue -> merge 44 naming sprint/s18 and rogue, state review, back on sprint/s18 -> merges; lease_create on main records no integration branch, sprint/two cut after it -> lease + merge, no 44; a lead commit on the integration branch -> merge 44 (moved), lease_rebaseline -> merges on top; identity only in an [include]d ~/.gitconfig file -> the merge commit carries it; linked-worktree lead checkout whose .git pointer is rewritten to the lease admin dir -> collect 44 naming it; after review the snapshot's new blob rewritten in the object store under its own id -> merge 44 naming it, HEAD unmoved, nothing staged, the lease escalated, the blob written again from the worktree + lease_rebaseline -> merges the reviewed content (${_S18_SHA256}); a subtree rewritten to point at a decoy -> merge 44 naming the tree; the root tree rewritten -> merge 44 naming it and the lease escalated (the re-hash runs ahead of the snapshot checks, whose read-tree would refuse it with rc 1), the repair hint naming write-tree for a tree; a blob the integration branch already has, copied by the snapshot to a new path and rewritten -> merge 44 naming the blob at the new path, HEAD unmoved, nothing staged; a file the integration branch and the snapshot both changed since the base (the squash merges three versions): HEAD's blob rewritten -> merge 44 naming it at HEAD, nothing merged, written again from the lead checkout + lease_rebaseline -> merges both changes; the merge base's blob rewritten -> merge 44 naming it at the merge base, nothing merged; a gitlink that moved on the integration branch after collect -> merges (neither side of it is an object of this repository); a merged blob rewritten -> lease_promote 44, main unmoved, written again -> promotes; main moved since the sprint began (accepted), so the promotion is a merge commit of three versions of a file: main's blob rewritten -> lease_promote 44 naming it at main, main unmoved, written again -> promotes the merge of both changes; the integration branch rewritten (accepted) into a criss-cross with the snapshot -> merge 1 naming both merge bases and the recovery, state review, nothing merged, no object-store repair advice, the task leased again from the integration head -> merges; main and the integration branch in a criss-cross -> lease_promote 1 naming both merge bases and git merge refs/heads/main, main unmoved, merged in + rebaselined -> promotes; an exec persona's --at ref:sprint/s18 with a tag, refs/<name> or a \$GIT_DIR/<name> file shadowing the branch, or a refs/remotes/<name> below it -> 64 naming ref:refs/heads/<name> (also through a revision expression), a refs/tags/HEAD -> ref:HEAD 64 naming it to remove with no full name suggested, a refs/v1 over a tag v1 -> 64 naming refs/v1 as git's reading with nothing suggested, a tag or \$GIT_DIR file named like the branch head's 7-digit abbreviation -> ref:<abbrev> 64 naming the decoy git reads and the branch commit the abbreviation names, both in full, for the user to pass the one meant (also through a revision expression), a refs/tags/<full id> -> ref:<full id> 64 naming it to remove with nothing suggested; the full ref, ref:HEAD, ref:<abbrev> alone, ref:<full id> and a hex branch name no object starts with take the branch's commit, a shadow at the same commit passes, and no refusal suggests a ref that disagrees with the branch or the decoy commit; the forms the check can't vet (HEAD@{1}, @{-1}, :/decoy, ^{commit} alone, a describe name with a tag of that name at the decoy and with none, ORIG_HEAD written at the decoy, a full branch name only refs/refs/<name> holds) -> 64 naming the forms --at ref: takes, nothing run, while HEAD~0 and refs/heads/<name>^{commit} take the branch's commit; ${_S18_GRAPH}; a HOME that is itself a git repository: lease_create from it and from a directory in it, and lease_wait -> rc 1 with one ERROR line (a home directory is no project), coordinate.sh -> 44 before any session, the persona task: and ref: targets -> 64, no ~/ops, no lease root, HOME byte-identical, a project with its own repository under that HOME leases; every git call in lease.sh and lease-wait.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines in lease.sh, none in lease-wait.sh; planted { git / else git / env -u git lines caught)" "static"
 else
   # the failed case names first, so a long pattern list can't cut them off
   row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "FAIL" "mismatch in $(_self_fail_cases "$_S18_FAIL"):$(printf '%s' "$_S18_FAIL" | cut -c1-500)" "static"
@@ -11676,13 +11998,14 @@ _O=$(_s16b "$_S16B_SPP" instruction_pointer_visibility claude)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-space-vis "$_O" "^claude${T}hidden${T}shadowed by .*/w/sp/CLAUDE\.md: .*; add a CLAUDE\.md holding the line @AGENTS\.md to .*/w/sp/Project With Spaces, which loads it for that project only\$" '^rc=1$')"
 _S16_FAIL="${_S16_FAIL}$(_s16b_not b-space-vis "$_O" 'instruction_add_import|add the line @')"
 _O=$(_s16b_hook "$_S16B_SPP")
-_S16B_NOLINE="No import line in that file can name this project's AGENTS\.md: the path from there to this project holds whitespace, where an import path ends, or starts with ~, which an import reads as your home directory\. Or remove the file\."
+_S16B_NOLINE="No import line in that file can name this project's AGENTS\.md: the path from there to this project holds whitespace or a # \(an import path ends there\), starts with ~ \(an import reads that as your home directory\), or holds another character Claude Code does not read as written in an import path\. Or remove the file\."
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-space-hook "$_O" "^WARNING: AGENTS\.md is not loaded under a Claude lead: .*/w/sp/CLAUDE\.md sits above this project, .* Add a CLAUDE\.md holding the line @AGENTS\.md to this project: it loads AGENTS\.md for this project only\. ${_S16B_NOLINE}\$")"
 _S16_FAIL="${_S16_FAIL}$(_s16b_not b-space-hook "$_O" 'Or add the line @|^\{|hook crashed')"
-_S16B_NOREAD='which would not read back as an import of .*\(an import path ends at whitespace, and one that starts with ~/ is read from your home directory\); put the line @AGENTS\.md in '
+_S16B_WHY='\(an import path ends at whitespace or a #, one that starts with ~/ is read from your home directory, one that starts with any character but a letter, a digit, \. _ or - loads nothing, and Markdown reads a backslash, <, \[, \], or a \* or _ that pairs, in it as markup\)'
+_S16B_NOREAD='which would not read back as an import of .*'"$_S16B_WHY"'; put the line @AGENTS\.md in '
 for _S16B_Y in "" --yes --yes; do
   _O=$(_s16b "$_S16B_SPP" instruction_add_import "$_S16B_SP/CLAUDE.md" $_S16B_Y)
-  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-space-import${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — .*/w/sp/CLAUDE\.md would need the line @Project With Spaces/AGENTS\.md, which would not read back as an import of .*/w/sp/Project With Spaces/AGENTS\.md \(an import path ends at whitespace, and one that starts with ~/ is read from your home directory\); put the line @AGENTS\.md in .*/w/sp/Project With Spaces/CLAUDE\.md instead, which loads it for this project only \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-space-import${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — .*/w/sp/CLAUDE\.md would need the line @Project With Spaces/AGENTS\.md, which would not read back as an import of .*/w/sp/Project With Spaces/AGENTS\.md '"$_S16B_WHY"'; put the line @AGENTS\.md in .*/w/sp/Project With Spaces/CLAUDE\.md instead, which loads it for this project only \(rc 2\)$' '^rc=2$')"
   _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-space-import${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
 done
 _O=$(_s16b "$_S16B_SP/Tab${T}Proj" instruction_add_import ../CLAUDE.md --yes)
@@ -11711,13 +12034,126 @@ _S16_FAIL="${_S16_FAIL}$(_self_expect b-tilde-hook "$_O" "^WARNING: AGENTS\.md i
 _S16_FAIL="${_S16_FAIL}$(_s16b_not b-tilde-hook "$_O" 'Or add the line @~/|^\{|hook crashed')"
 for _S16B_Y in "" --yes --yes; do
   _O=$(_s16b "$_S16B_TLP" instruction_add_import ../../CLAUDE.md $_S16B_Y)
-  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-tilde-import${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/tl/CLAUDE\.md would need the line @~/proj/AGENTS\.md, which would not read back as an import of [^ ]*/w/tl/~/proj/AGENTS\.md \(an import path ends at whitespace, and one that starts with ~/ is read from your home directory\); put the line @AGENTS\.md in [^ ]*/w/tl/~/proj/CLAUDE\.md instead, which loads it for this project only \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-tilde-import${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/tl/CLAUDE\.md would need the line @~/proj/AGENTS\.md, which would not read back as an import of [^ ]*/w/tl/~/proj/AGENTS\.md '"$_S16B_WHY"'; put the line @AGENTS\.md in [^ ]*/w/tl/~/proj/CLAUDE\.md instead, which loads it for this project only \(rc 2\)$' '^rc=2$')"
   _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-tilde-import${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
 done
 _O=$(_s16b "$_S16B_TLP" instruction_add_import ../../.claude/CLAUDE.md)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-tilde-dotclaude "$_O" '^needs-ask: would add the line @\.\./~/proj/AGENTS\.md to [^ ]*/w/tl/\.claude/CLAUDE\.md, so Claude Code loads [^ ]*/w/tl/~/proj/AGENTS\.md with it, ' '^rc=20$')"
 _S16_FAIL="${_S16_FAIL}$(_s16b_same b-tilde-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_TL/CLAUDE.md" "$_S16B_TL/.claude/CLAUDE.md")")"
-_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file), an import line written or offered only when it reads back as the project's import (b-space-*, a project path with whitespace, a tab too; b-tilde-*, a directory named ~ on the way down: the import into the CLAUDE.md above refused rc 2 before any plan, without and twice with --yes, the files byte-identical; the import column -, visibility and session start naming the project's own CLAUDE.md alone; the .claude/CLAUDE.md beside it, whose @../~/proj/AGENTS.md reads back, still planned); "
+
+# fence (review round 3): Claude Code reads an import from Markdown text only,
+# so an @AGENTS.md in a fenced code block (backticks, tildes) or a padded code
+# span is none. A project CLAUDE.md whose only @AGENTS.md sits there: detect
+# says no-import, visibility hidden with the add-the-line fix, session start
+# names the file, the writer appends the real line with --yes, then says
+# unchanged. A file ending inside a fence never closed is refused rc 2 before
+# any plan, without and twice with --yes, naming that block; a .claude/CLAUDE.md
+# ending inside an HTML comment too, naming the project's own CLAUDE.md; the
+# files byte-identical. Controls: a plain @AGENTS.md line, one after a closed
+# fence and one after a fence indented under a list item still import
+_S16B_FN="$_S16B_W/fn"
+_s16b_fence() { # _s16b_fence <case> <project> <CLAUDE.md, a printf format> — the cases above for an import Claude Code does not read, in $_S16B_FN/<project>
+  local C=$1 P="$_S16B_FN/$2" O
+  _s16b_proj "$P"
+  printf "$3" > "$P/CLAUDE.md"
+  O=$(_s16b "$P" instruction_files_detect)
+  _self_expect "$C-detect" "$O" "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/w/fn/$2/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$'
+  O=$(_s16b "$P" instruction_pointer_visibility claude)
+  _self_expect "$C-vis" "$O" "^claude${T}hidden${T}shadowed by [^ ]*/w/fn/$2/CLAUDE\.md: .*; add the line @AGENTS\.md to [^ ]*/w/fn/$2/CLAUDE\.md \(instruction_add_import [^ ]*/w/fn/$2/CLAUDE\.md\)\$" '^rc=1$'
+  O=$(_s16b "$P" instruction_add_import CLAUDE.md --yes)
+  _self_expect "$C-yes" "$O" "^changed: [^ ]*/w/fn/$2/CLAUDE\.md: added the line @AGENTS\.md\$" '^rc=0$'
+  [ "$(cat "$P/CLAUDE.md")" = "$(printf "$3@AGENTS.md")" ] || printf ' %s(content)' "$C-yes"
+  O=$(_s16b "$P" instruction_add_import CLAUDE.md --yes)
+  _self_expect "$C-again" "$O" "^unchanged: [^ ]*/w/fn/$2/CLAUDE\.md already imports [^ ]*/w/fn/$2/AGENTS\.md\$" '^rc=0$'
+}
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-fence-tick tick '# own\n```\n@AGENTS.md\n```\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-fence-tilde tilde '# own\n~~~ text\n@AGENTS.md\n~~~\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-fence-span span '# own\nsee ` @AGENTS.md ` here\n')"
+_s16b_proj "$_S16B_FN/hook"
+printf '# own\n```\n@AGENTS.md\n```\n' > "$_S16B_FN/hook/CLAUDE.md"
+_O=$(_s16b_hook "$_S16B_FN/hook")
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-fence-hook "$_O" "^WARNING: CLAUDE\.md in this project does not import AGENTS\.md, .* Run /at-setup to add the line @AGENTS\.md to it ")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-fence-hook "$_O" '^\{|hook crashed')"
+_S16B_OP="$_S16B_FN/open"
+_s16b_proj "$_S16B_OP"
+mkdir -p "$_S16B_OP/.claude"
+printf '# own\n```sh\nnpm test\n' > "$_S16B_OP/CLAUDE.md"
+printf '# notes\n<!-- old rules\n' > "$_S16B_OP/.claude/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_OP/CLAUDE.md" "$_S16B_OP/.claude/CLAUDE.md")
+for _S16B_Y in "" --yes --yes; do
+  _O=$(_s16b "$_S16B_OP" instruction_add_import CLAUDE.md $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-fence-open${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/fn/open/CLAUDE\.md ends inside the fenced code block opened on line 2, which is never closed, so the line @AGENTS\.md appended there would not read back as an import of [^ ]*/w/fn/open/AGENTS\.md \(Claude Code reads an import from Markdown text only\); close it first, or add the line yourself outside it \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-fence-open${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+done
+_O=$(_s16b "$_S16B_OP" instruction_add_import .claude/CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-fence-html "$_O" '^instruction_add_import: REFUSED — [^ ]*/w/fn/open/\.claude/CLAUDE\.md ends inside the HTML block that starts on line 2, so the line @\.\./AGENTS\.md appended there would not read back as an import of [^ ]*/w/fn/open/AGENTS\.md .*; or put the line @AGENTS\.md in [^ ]*/w/fn/open/CLAUDE\.md instead, which loads it for this project only \(rc 2\)$' '^rc=2$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-fence-open-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_OP/CLAUDE.md" "$_S16B_OP/.claude/CLAUDE.md")")"
+_s16b_proj "$_S16B_FN/plain"
+printf '# own\n@AGENTS.md\n' > "$_S16B_FN/plain/CLAUDE.md"
+_s16b_proj "$_S16B_FN/after"
+printf '# own\n```\n`x` @AGENTS.md\n```\n@AGENTS.md\n' > "$_S16B_FN/after/CLAUDE.md"
+_s16b_proj "$_S16B_FN/nested"
+printf '# own\n1. Build:\n\n    ```sh\n    make @AGENTS.md\n    ```\n\n@AGENTS.md\n' > "$_S16B_FN/nested/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_FN/plain/CLAUDE.md" "$_S16B_FN/after/CLAUDE.md" "$_S16B_FN/nested/CLAUDE.md")
+for _S16B_D in plain after nested; do
+  _O=$(_s16b "$_S16B_FN/$_S16B_D" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-fence-$_S16B_D" "$_O" "^CLAUDE\.md${T}project${T}imports,user-owned${T}" '^rc=0$')"
+  _O=$(_s16b "$_S16B_FN/$_S16B_D" instruction_pointer_visibility claude)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-fence-$_S16B_D-vis" "$_O" "^claude${T}visible${T}[^ ]*/w/fn/$_S16B_D/CLAUDE\.md imports " '^rc=0$')"
+  _O=$(_s16b "$_S16B_FN/$_S16B_D" instruction_add_import CLAUDE.md --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-fence-$_S16B_D-import" "$_O" '^unchanged: ' '^rc=0$')"
+done
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-fence-controls-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_FN/plain/CLAUDE.md" "$_S16B_FN/after/CLAUDE.md" "$_S16B_FN/nested/CLAUDE.md")")"
+
+# name (review round 3, follow-up): Claude Code takes the whole import word up
+# to a # as the path, and reads the path only when Markdown leaves it whole.
+# A project CLAUDE.md whose only import word is Read @AGENTS.md. or
+# (see @AGENTS.md) (they name AGENTS.md. and AGENTS.md)): detect no-import,
+# visibility hidden with the add-the-line fix, the real line appended, then
+# unchanged. A parent CLAUDE.md holding @c#app/AGENTS.md (a # ends the path)
+# for the project c#app: no-import, the import column -, visibility and
+# session start naming the project's own CLAUDE.md alone, the import refused
+# rc 2 before any plan, without and twice with --yes; the project app[1]
+# under a parent with no line: the column - and the same refusal; the files
+# byte-identical. Control: @AGENTS.md#setup still imports
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-name-dot dot '# own\nRead @AGENTS.md.\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-name-paren paren '# own\n(see @AGENTS.md)\n')"
+_S16B_PC="$_S16B_W/pc"
+_S16B_PB="$_S16B_W/pb"
+_s16b_proj "$_S16B_PC/c#app"
+_s16b_proj "$_S16B_PB/app[1]"
+printf '# mono\n@c#app/AGENTS.md\n' > "$_S16B_PC/CLAUDE.md"
+printf '# mono\n' > "$_S16B_PB/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_PC/CLAUDE.md" "$_S16B_PB/CLAUDE.md")
+_O=$(_s16b "$_S16B_PC/c#app" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-name-hash-detect "$_O" "^CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/w/pc/CLAUDE\.md${T}-\$" '^rc=0$')"
+_O=$(_s16b "$_S16B_PC/c#app" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-name-hash-vis "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/w/pc/CLAUDE\.md: .*; add a CLAUDE\.md holding the line @AGENTS\.md to [^ ]*/w/pc/c#app, which loads it for that project only\$" '^rc=1$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-name-hash-vis "$_O" 'instruction_add_import|add the line @')"
+_O=$(_s16b_hook "$_S16B_PC/c#app")
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-name-hash-hook "$_O" "^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/w/pc/CLAUDE\.md sits above this project, .* ${_S16B_NOLINE}\$")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-name-hash-hook "$_O" 'Or add the line @|^\{|hook crashed')"
+for _S16B_Y in "" --yes --yes; do
+  _O=$(_s16b "$_S16B_PC/c#app" instruction_add_import ../CLAUDE.md $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-name-hash${_S16B_Y}" "$_O" "^instruction_add_import: REFUSED — [^ ]*/w/pc/CLAUDE\\.md would need the line @c#app/AGENTS\\.md, ${_S16B_NOREAD}[^ ]*/w/pc/c#app/CLAUDE\\.md instead" '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-name-hash${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+done
+_O=$(_s16b "$_S16B_PB/app[1]" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-name-bracket-detect "$_O" "^CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/w/pb/CLAUDE\.md${T}-\$" '^rc=0$')"
+_O=$(_s16b "$_S16B_PB/app[1]" instruction_add_import ../CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-name-bracket "$_O" "^instruction_add_import: REFUSED — [^ ]*/w/pb/CLAUDE\\.md would need the line @app\\[1\\]/AGENTS\\.md, ${_S16B_NOREAD}" '^rc=2$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-name-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_PC/CLAUDE.md" "$_S16B_PB/CLAUDE.md")")"
+_s16b_proj "$_S16B_FN/frag"
+printf '# own\nSee @AGENTS.md#setup first.\n' > "$_S16B_FN/frag/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_FN/frag/CLAUDE.md")
+_O=$(_s16b "$_S16B_FN/frag" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-name-frag "$_O" "^CLAUDE\.md${T}project${T}imports,user-owned${T}" '^rc=0$')"
+_O=$(_s16b "$_S16B_FN/frag" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-name-frag-vis "$_O" "^claude${T}visible${T}[^ ]*/w/fn/frag/CLAUDE\.md imports " '^rc=0$')"
+_O=$(_s16b "$_S16B_FN/frag" instruction_add_import CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-name-frag-import "$_O" '^unchanged: ' '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-name-frag-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_FN/frag/CLAUDE.md")")"
+_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file), an import line written or offered only when it reads back as the project's import (b-space-*, a project path with whitespace, a tab too; b-tilde-*, a directory named ~ on the way down: the import into the CLAUDE.md above refused rc 2 before any plan, without and twice with --yes, unchanged; the import column -, visibility and session start naming the project's own CLAUDE.md alone; the .claude/CLAUDE.md beside it, whose @../~/proj/AGENTS.md reads back, still planned), an import read in Markdown text, its path whole (b-fence-*, b-name-*: one in a fence or padded code span, Read @AGENTS.md. or (see @AGENTS.md) is none: no-import, hidden with the fix, the line appended, then unchanged; a file ending in an open fence or comment, an import of c#app or app[1] from above: rc 2, unchanged; a plain line, one after a closed or list-indented fence, @AGENTS.md#setup import); "
 rm -rf "$_S16B"
 # --- end of SELF-16 section B ---
 # --- SELF-16 section C: at-setup's blocks and the headless primitives (U15) ---
@@ -13175,7 +13611,7 @@ else
 fi
 rm -rf "$_S17"
 
-# SELF-29 (U19, S2 — R27, R28, R29, KTD18: agy's auto default and its AGY_ERROR line, the Cursor probe rows' Grok ids, a ledger whose anchors were both deleted, a negative row's timeout verdict). Cases go between the markers; each appends
+# SELF-29 (U19, S2 — R27, R28, R29, KTD18: agy's auto default and its AGY_ERROR line, the Cursor probe rows' Grok ids, a ledger whose anchors were both deleted, a negative row's timeout verdict, CDX-16's verdict chain). Cases go between the markers; each appends
 # "<case>(<why>)" to _S29_FAIL on a mismatch (_self_expect does this) and, once
 # they ran, one short note to _S29_EV. Expected values are literals. A row whose
 # cases never ran fails: no note is no evidence.
@@ -13238,6 +13674,22 @@ mkdir -p "$_S29"
 #            variable to 0, captures its _probe_run (CDX-16: _lane_run)
 #            call's rc in it, and asks _timed_out about it on the line right
 #            before its "timed out after" FAIL row, which names that rc
+#   cdx16    (round 3) CDX-16's verdict chain, run: its block from the bypass
+#            run's line to the else of the plugin-install branch, with
+#            _auth_shaped and _u29_hooks_seen, taken from scripts/probe-
+#            capabilities.sh by their text (_timed_out with negverdict's),
+#            over a stub _lane_run that fires the hooks and ends each run as
+#            the scenario says, and a stub row; a stub codex first on PATH
+#            logs any run the block makes past them (none). With the bypass
+#            run's hook and none from the untrusted run, PASS needs that run
+#            to end at its READY answer (rc 0, a line of its own after the
+#            echoed prompt) or the scratch home's missing login (rc 1,
+#            auth-shaped), the evidence naming which; rc 0 with only the
+#            echo, rc 1 without auth text, and 2, 125, 126, 127, 129, 130 and
+#            143 with it -> FAIL "stopped short (rc=<n>)"; 124 and 137 ->
+#            "timed out after"; a hook fired untrusted -> "fires without
+#            trust"; no bypass hook -> UNAVAILABLE on an auth-shaped bypass
+#            run, else FAIL
 mkdir -p "$_S29/bin" "$_S29/cfg" "$_S29/home" "$_S29/tmp" "$_S29/proj"
 { printf '#!/bin/sh\n# SELF-29 agy stub: `agents` prints cfg/agents; a run logs its argv and answers by cfg/mode\nD=%s\n' "'$_S29'"; cat <<'S29_AGY_EOF'
 mkdir -p "$D/log"
@@ -13419,7 +13871,7 @@ _self_try merge2 lease_merge t antigravity
 echo "squash=$(git diff-tree --no-commit-id --name-only -r HEAD | tr "\n" " ")"')
 _S29_FAIL="${_S29_FAIL}$(_self_expect rebase "$O" '^t:go=0:review$' '^merge1:rc=44:.*both ledger anchors' '^rebase:rc=0:.*t back to .review.' \
   '^state=review$' '^merge2:rc=0:' '^squash=docs/s29\.txt $')"
-_S29_EV="${_S29_EV}anchors: both anchors deleted + a forged user approval -> merge 44 naming them, escalated, nothing merged; restamp: the same with the stamp naming another root that holds no digest -> 44; fakeroot: the stamp naming an attacker-made root holding the forged ledger's sha256, the record naming the real root -> 44; rebase: the lead's own deletion -> 44, lease_rebaseline t -> review, merged"
+_S29_EV="${_S29_EV}anchors: both anchors deleted + a forged user approval -> merge 44 naming them, escalated, nothing merged; restamp: the same with the stamp naming another root that holds no digest -> 44; fakeroot: the stamp naming an attacker-made root holding the forged ledger's sha256, the record naming the real root -> 44; rebase: the lead's own deletion -> 44, lease_rebaseline t -> review, merged. "
 # negverdict (round 1, wave 2)
 _S29_NV=$(awk '/^(_timed_out|_negative_verdict)\(\) \{$/ { p = 1 } p { print } p && /^}$/ { p = 0 }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
 printf 'READY\n' > "$_S29/nv-ready"
@@ -13475,9 +13927,62 @@ for _s29_c in AGY-09 AGY-10 AGY-13 AGY-16 CDX-08 OC-06 OC-06b KIMI-08 CUR-07 CUR
 done
 unset _s29_c
 _S29_EV="${_S29_EV}negverdict: _negative_verdict (AGY-11c and CUR-10 call it): rc 124 and 137 -> timeout with any output, error text and READY included, never a rejection; rc 0 + READY -> accepted; rc 1 or 2, or rc 0 + error text -> rejected; rc 0 with neither -> ambiguous; both rows record a timeout as a FAIL saying so. Its _timed_out: 124 and 137 yes, 0, 1, 125 and 143 no; AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08 and CC-14b each capture their _probe_run rc, and CDX-16 its untrusted _lane_run rc (reset to 0 first), and ask _timed_out right before their timed-out FAIL row, which names that rc. "
-unset O _S29_PICK _S29_NV _S29_ROUTE
+# cdx16 (round 3)
+_S29_C16=$(awk '/--dangerously-bypass-hook-trust "Respond with only: READY"/ { p = 1 } p && /^      else$/ { exit } p { print }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
+_S29_C16H=$(awk '/^(_auth_shaped|_u29_hooks_seen)\(\) \{/ { p = 1 } p { print } p && /^}$/ { p = 0 }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
+mkdir -p "$_S29/c16/bin" "$_S29/c16/fix" "$_S29/c16/hm"
+printf '#!/bin/sh\n# SELF-29 stub codex: logs a run the CDX-16 block must never make\necho run >> %s/codex.log\nexit 99\n' "'$_S29/c16'" > "$_S29/c16/bin/codex"
+chmod +x "$_S29/c16/bin/codex"
+# _s29_c16 <bypass>:<untrusted>:<rc>:<output> — "<outcome>:<evidence>", the
+# row CDX-16's block records for that scenario, run in a subshell so its
+# stub _lane_run and row never reach the harness's
+_s29_c16() (
+  S16_B=${1%%:*}; S16=${1#*:}; S16_L=${S16%%:*}; S16=${S16#*:}; S16_RC=${S16%%:*}; S16_OUT=${S16#*:}
+  PATH="$_S29/c16/bin:$PATH"
+  FIX="$_S29/c16/fix"; CH="$_S29/c16/home"; HM="$_S29/c16/hm"; O="$_S29/c16/out"
+  U29_VAL=triforge-probe-s29; U29_CDX16="CDX-16 (SELF-29 replay)"; CDX_MODEL=gpt-s29; U29_CDX_FLAGS=(exec)
+  rm -f "$HM"/hook-* "$O" "$O.2"
+  eval "$_S29_NV"
+  eval "$_S29_C16H"
+  _lane_run() {
+    local A
+    for A in "$@"; do
+      if [ "$A" = --dangerously-bypass-hook-trust ]; then
+        if [ "$S16_B" = y ]; then printf 'probe_var=%s lease_worker=builder plugin_root=set\n' "$U29_VAL" > "$HM/hook-SessionStart"; fi
+        if [ "$S16_B" = a ]; then echo "ERROR: unexpected status 401 Unauthorized"; else echo "bypass run output"; fi
+        return 1
+      fi
+    done
+    if [ "$S16_L" = y ]; then printf 'probe_var=%s lease_worker=builder plugin_root=set\n' "$U29_VAL" > "$HM/hook-SessionStart"; fi
+    printf 'user\nRespond with only: READY\n'
+    if [ "$S16_OUT" = ready ]; then printf 'codex\nREADY\n'; fi
+    if [ "$S16_OUT" = login ]; then echo "ERROR: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header"; fi
+    return "$S16_RC"
+  }
+  row() { printf '%s:%s' "$4" "$5" | tr '\n' ' '; }
+  eval "$_S29_C16"
+)
+O=""
+for _s29_c in y:n:0:ready y:n:1:login y:n:0:echo y:n:1:echo y:n:2:login y:n:125:login y:n:126:login y:n:127:login y:n:129:login \
+  y:n:130:login y:n:143:login y:n:124:login y:n:137:ready y:y:1:login a:n:1:login n:n:1:login; do
+  O="$O
+c16-${_s29_c}=$(_s29_c16 "$_s29_c" 2>&1)"
+done
+O="$O
+c16-codex=$(_s29_n "$_S29/c16/codex.log")"
+_S29_FAIL="${_S29_FAIL}$(_self_expect cdx16 "$O" '^c16-y:n:0:ready=PASS:.*, ended at its READY answer \(rc 0\): fired: none' \
+  '^c16-y:n:1:login=PASS:.*, ended at the scratch home.s missing login \(rc 1, auth-shaped output\): fired: none' \
+  '^c16-y:n:124:login=FAIL:timed out after 120 s \(rc=124\)' '^c16-y:n:137:ready=FAIL:timed out after 120 s \(rc=137\)' \
+  '^c16-y:y:1:login=FAIL:fires without trust' '^c16-a:n:1:login=UNAVAILABLE:no hook fired before' \
+  '^c16-n:n:1:login=FAIL:no plugin hook fired even with' '^c16-codex=0$')"
+for _s29_c in 0:echo 1:echo 2:login 125:login 126:login 127:login 129:login 130:login 143:login; do
+  _S29_FAIL="${_S29_FAIL}$(_self_expect cdx16 "$O" "^c16-y:n:${_s29_c}=FAIL:stopped short \\(rc=${_s29_c%%:*}\\): ")"
+done
+unset _s29_c
+_S29_EV="${_S29_EV}cdx16: CDX-16's verdict chain, run from its text on stub runs: with the bypass run's hook, PASS only when the untrusted run fired none and ended at its READY answer (rc 0, a line of its own: the echoed prompt is not one) or the scratch home's missing login (rc 1, auth-shaped), its evidence naming which; rc 0 with only the echo, rc 1 without auth text, and 2, 125, 126, 127, 129, 130 and 143 with it -> FAIL stopped short naming the rc; 124 and 137 -> timed out; a hook fired untrusted -> fires without trust; no bypass hook -> UNAVAILABLE on an auth-shaped bypass run, else FAIL. "
+unset O _S29_PICK _S29_NV _S29_ROUTE _S29_C16 _S29_C16H
 # --- end of SELF-29 cases ---
-_S29_CAP="agy routing defaults to auto and the AGY_ERROR line on exit 3 sets the failure's reason and retry (invoke_antigravity and the lease lane); the Cursor probe rows compose Grok ids through _cursor_model_for_effort; a ledger whose two anchors were deleted is a change (rc 44), and the lead's lease_rebaseline recovers (U19, S2); a negative row's call cut off by its timeout (rc 124 or 137) is never a rejection (AGY-11c, CUR-10), and a missing trace after one is no PASS (AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08, CC-14b, CDX-16)"
+_S29_CAP="agy routing defaults to auto and the AGY_ERROR line on exit 3 sets the failure's reason and retry (invoke_antigravity and the lease lane); the Cursor probe rows compose Grok ids through _cursor_model_for_effort; a ledger whose two anchors were deleted is a change (rc 44), and the lead's lease_rebaseline recovers (U19, S2); a negative row's call cut off by its timeout (rc 124 or 137) is never a rejection (AGY-11c, CUR-10), and a missing trace after one is no PASS (AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08, CC-14b, CDX-16); CDX-16 passes only when its untrusted run ended at its READY answer or the scratch home's missing login, past the point where a trusted hook fires"
 if [ -z "$_S29_EV" ]; then _S29_FAIL="${_S29_FAIL} cases(no-case-ran)"; fi
 if [ -z "$_S29_FAIL" ]; then
   row "SELF-29" "claude" "$_S29_CAP" "PASS" "$(printf '%s' "$_S29_EV" | cut -c1-3000)" "static"
@@ -13518,7 +14023,11 @@ rm -rf "$_S29"
 #                        binary, an option or the duration; a :- with an
 #                        empty word, or of such a variable, stays $NAME.
 #                        -s KILL counts as a kill-after (it can't be
-#                        ignored). _adapter_env <cli> <cmd...> runs the
+#                        ignored); a -k or --kill-after whose value is a
+#                        literal zero (0, 0s, 0.0s) does not, since timeout
+#                        reads a zero duration as no kill-after, while a
+#                        value in a variable ("$KA", "${KA_S}s") still does.
+#                        _adapter_env <cli> <cmd...> runs the
 #                        word after the CLI name, so that word is read as a
 #                        command word: a timeout binary there needs the
 #                        kill-after too, while env, git or python3 there
@@ -13546,9 +14055,12 @@ rm -rf "$_S29"
 # command, "$TIMEOUT_BIN" handed to _adapter_env (with and without
 # --foreground, in a ( )), timeout in a $( ) inside $(( )),
 # ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+120} after exec,
-# "$TIMEOUT_BIN" after env A=1 "$@", ${T:-timeout} and
-# ${TIMEOUT_BIN:-$(command -v gtimeout)} are flagged, and -k,
-# --kill-after=5s, -k5s, -s KILL, _adapter_env with --foreground -k 10s, with
+# "$TIMEOUT_BIN" after env A=1 "$@", ${T:-timeout},
+# ${TIMEOUT_BIN:-$(command -v gtimeout)} and a zero kill-after (-k 0, -k0,
+# -k 0s, -k "0", --kill-after=0, --kill-after=0s, --kill-after 0.0s) are
+# flagged, and -k, --kill-after=5s, -k5s, -k 10s, -k5, -k 0.5,
+# --kill-after 10, -k "$KA", -k "${KA_S}s", -s KILL (with -k 0 too),
+# _adapter_env with --foreground -k 10s, with
 # "$2" and -k, with "${TO[@]}" and running env, git -C or python3 -c, the
 # binary as another function's argument, the shapes in a comment and in
 # quoted strings, "$@" where the duration goes, command -v timeout, a
@@ -13570,11 +14082,13 @@ OPTS = re.compile(r"[-+][A-Za-z]+")
 # a word that is one parameter expansion ($NAME, "${NAME}", ${NAME:+…}: the
 # name in group 2 or 3, what follows it in the braces in 4); a word that may
 # hold several ("$@", an array, ${NAME:+…}); a word that is "$@" alone; the
-# signal a child can't ignore
+# signal a child can't ignore; a literal zero duration (0, 0s, 0.0, .0m),
+# which timeout reads as no kill-after at all
 EXPAN = re.compile(r'(")?\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)([^A-Za-z0-9_].*)?\})(?(1)")', re.S)
 UNDECIDED = re.compile(r"\$(?:[@*]|\{[@*]|\{[A-Za-z_][A-Za-z0-9_]*(?:\[[@*]\]|:?\+))")
 ARGS = re.compile(r'(")?\$(?:@|\{@\})(?(1)")')
 KILLSIG = ("KILL", "SIGKILL", "9")
+ZERO = re.compile(r"(?:0+\.?0*|\.0+)[smhd]?")
 META = " \t\n;&|()<>"
 OPS = (";;&", ";;", ";&", "&&", "||", "|&", ";", "&", "|", "(", ")")
 REDIRS = ("<<<", "<<-", "&>>", "<<", "<>", "<&", ">>", ">&", ">|", "&>", "<", ">")
@@ -14190,8 +14704,9 @@ class Scan(object):
     def check_timeout(self, words):
         # timeout-no-kill: a timeout binary run with a duration, and neither
         # -k/--kill-after nor a KILL signal (-s, --signal) among its options,
-        # each word read as held() reads it; _adapter_env <cli> <cmd...> runs
-        # the word after the CLI name
+        # each word read as held() reads it; a kill-after whose value is a
+        # literal zero (ZERO) is none, while one held in a variable counts;
+        # _adapter_env <cli> <cmd...> runs the word after the CLI name
         words = self.held(words)
         k = self.run_index(words)
         if k + 2 < len(words) and words[k].val == "_adapter_env":
@@ -14210,14 +14725,17 @@ class Scan(object):
                     continue
                 if not eq and j < len(rest):
                     arg, j = rest[j].val, j + 1
-                kill = kill or "kill-after".startswith(name) or arg.upper() in KILLSIG
+                if "kill-after".startswith(name):
+                    kill = kill or not ZERO.fullmatch(arg)
+                else:
+                    kill = kill or arg.upper() in KILLSIG
                 continue
             for x, ch in enumerate(v[1:]):
                 if ch in "ks":
                     arg = v[x + 2:]
                     if not arg and j < len(rest):
                         arg, j = rest[j].val, j + 1
-                    kill = kill or ch == "k" or arg.upper() in KILLSIG
+                    kill = kill or (not ZERO.fullmatch(arg) if ch == "k" else arg.upper() in KILLSIG)
                     break
         if kill or j >= len(rest) or UNDECIDED.search(rest[j].raw):
             return
@@ -14359,6 +14877,13 @@ exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+120} sh x   # want:timeout-no
 exec env A=1 "$@" "$TIMEOUT_BIN" 120 sh x   # want:timeout-no-kill
 ${T:-timeout} 30 make   # want:timeout-no-kill
 ${TIMEOUT_BIN:-$(command -v gtimeout)} 30 make   # want:timeout-no-kill
+timeout -k 0 1 cmd   # want:timeout-no-kill
+timeout -k0 1 cmd   # want:timeout-no-kill
+timeout -k 0s 1 cmd   # want:timeout-no-kill
+"$TIMEOUT_BIN" -k "0" 30 cmd   # want:timeout-no-kill
+"$TIMEOUT_BIN" --kill-after=0 5 cmd   # want:timeout-no-kill
+timeout --kill-after=0s 1 cmd   # want:timeout-no-kill
+gtimeout --kill-after 0.0s 5 cmd   # want:timeout-no-kill
 ok_adapter_env() {
   _adapter_env claude "$TIMEOUT_BIN" --foreground -k 10s 240 claude -p x
   _adapter_env grok "$2" --foreground -k 10s "${3}s" grok
@@ -14384,6 +14909,13 @@ ok_timeout() {
   exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+-k10s} ${TIMEOUT_BIN:+120} sh x
   "$TIMEOUT_BIN" ${KOPT:--k10s} 60 cmd
   exec env "$@" "$TIMEOUT_BIN" 120 sh x
+  timeout -k 10s 1 cmd
+  timeout -k5 1 cmd
+  timeout -k 0.5 1 cmd
+  gtimeout --kill-after 10 5 cmd
+  timeout -k "$KA" 10s cmd
+  "$TIMEOUT_BIN" -k "${KA_S}s" 10s cmd
+  timeout -s KILL -k 0 10s cmd
   printf '%s\n' "${A:-}${B:-}" "${C:-$D}\n${E}"
 }
 S30_PLANTED
@@ -14404,9 +14936,9 @@ case "$_S30_NEG" in
   *"scan-error:broken.sh:"*) ;;
   *) _S30_FAIL="$_S30_FAIL broken(no-scan-error)" ;;
 esac
-_S30_CAP="the shell rules a static scan can decide hold in every shell file Triforge ships (scripts/*.sh, scripts/lib/*.sh, hooks/handlers/*.sh, skills/*/scripts/*.sh): no function ends in a [ ] or [[ ]] && chain with no ||, no grep -c … || echo, no grep -P, no associative array, no mapfile or readarray (AGENTS.md Shell), and no timeout binary run as a command without a kill-after (review finding #6)"
+_S30_CAP="the shell rules a static scan can decide hold in every shell file Triforge ships (scripts/*.sh, scripts/lib/*.sh, hooks/handlers/*.sh, skills/*/scripts/*.sh): no function ends in a [ ] or [[ ]] && chain with no ||, no grep -c … || echo, no grep -P, no associative array, no mapfile or readarray (AGENTS.md Shell), and no timeout binary run as a command without a kill-after (review finding #6), a literal zero one counting as none"
 if [ -z "$_S30_HITS" ] && [ -z "$_S30_FAIL" ]; then
-  row "SELF-30" "claude" "$_S30_CAP" "PASS" "${_S30_N} files parsed as bash, comments, quoted text and here-document bodies as text: 0 hits, no scan error; planted: $(printf '%s\n' "$_S30_WANT" | grep -c . || true) shapes flagged on exactly their lines (test-and-last on one line and several, mid-chain, in a { } and a ( ) body, under the function keyword; grep -c || echo in a command substitution, quoted and not; grep -P, -oP, --perl-regexp, -Pc in a command substitution inside \$(( )) and (( )); declare, local and typeset -A; mapfile, readarray; timeout-no-kill: timeout, \"\$TIMEOUT_BIN\", \"\${_TB_TIMEOUT}\", a \"\$SECS\" duration, gtimeout after env, \"\$TOBIN\" -s TERM in a command substitution, \${TIMEOUT_BIN:+…} after exec, a gtimeout path after command, \"\$TIMEOUT_BIN\" handed to _adapter_env with and without --foreground, in a ( ), timeout in a command substitution inside \$(( )), \${TIMEOUT_BIN:+\"\$TIMEOUT_BIN\"} \${TIMEOUT_BIN:+120} after exec, \"\$TIMEOUT_BIN\" after env A=1 \"\$@\", \${T:-timeout}, \${TIMEOUT_BIN:-\$(command -v gtimeout)}) and none of the compliant ones ([ ] && [ ] || return 1, && … || true, [ ] || return 1, if [ ] && …; then … fi last, a bare test last, a python here-document holding x and y and the shapes, a comment holding [ -d x ] && y, the shapes in quoted strings, grep -e -P, \$(( a + 1 )), \$(( \$(date +%s) - T0 )); timeout with -k, --kill-after=5s, -k5s or -s KILL, _adapter_env with --foreground -k 10s, with \"\$2\" and -k, with \"\${TO[@]}\" and running env, git -C or python3 -c, the binary as another function's argument, the timeout shapes in a comment and in quoted strings, \"\$@\" where the duration goes, command -v timeout, \${TIMEOUT_BIN:+…} holding -k, the split form with \${TIMEOUT_BIN:+-k10s}, \${KOPT:--k10s} where the options go, env \"\$@\" with no NAME=value before it, words holding two expansions); a quote that never closes is a scan-error" "static"
+  row "SELF-30" "claude" "$_S30_CAP" "PASS" "${_S30_N} files parsed as bash, comments, quoted text and here-document bodies as text: 0 hits, no scan error; planted: $(printf '%s\n' "$_S30_WANT" | grep -c . || true) shapes flagged on exactly their lines (test-and-last on one line and several, mid-chain, in a { } and a ( ) body, under the function keyword; grep -c || echo in a command substitution, quoted and not; grep -P, -oP, --perl-regexp, -Pc in a command substitution inside \$(( )) and (( )); declare, local and typeset -A; mapfile, readarray; timeout-no-kill: timeout, \"\$TIMEOUT_BIN\", \"\${_TB_TIMEOUT}\", a \"\$SECS\" duration, gtimeout after env, \"\$TOBIN\" -s TERM in a command substitution, \${TIMEOUT_BIN:+…} after exec, a gtimeout path after command, \"\$TIMEOUT_BIN\" handed to _adapter_env with and without --foreground, in a ( ), timeout in a command substitution inside \$(( )), \${TIMEOUT_BIN:+\"\$TIMEOUT_BIN\"} \${TIMEOUT_BIN:+120} after exec, \"\$TIMEOUT_BIN\" after env A=1 \"\$@\", \${T:-timeout}, \${TIMEOUT_BIN:-\$(command -v gtimeout)}, a zero kill-after: -k 0, -k0, -k 0s, -k \"0\", --kill-after=0, --kill-after=0s, --kill-after 0.0s) and none of the compliant ones ([ ] && [ ] || return 1, && … || true, [ ] || return 1, if [ ] && …; then … fi last, a bare test last, a python here-document holding x and y and the shapes, a comment holding [ -d x ] && y, the shapes in quoted strings, grep -e -P, \$(( a + 1 )), \$(( \$(date +%s) - T0 )); timeout with -k, --kill-after=5s, -k5s, -k 10s, -k5, -k 0.5, --kill-after 10, -k \"\$KA\", -k \"\${KA_S}s\" or -s KILL (with -k 0 too), _adapter_env with --foreground -k 10s, with \"\$2\" and -k, with \"\${TO[@]}\" and running env, git -C or python3 -c, the binary as another function's argument, the timeout shapes in a comment and in quoted strings, \"\$@\" where the duration goes, command -v timeout, \${TIMEOUT_BIN:+…} holding -k, the split form with \${TIMEOUT_BIN:+-k10s}, \${KOPT:--k10s} where the options go, env \"\$@\" with no NAME=value before it, words holding two expansions); a quote that never closes is a scan-error" "static"
 else
   row "SELF-30" "claude" "$_S30_CAP" "FAIL" "$(printf '%s' "hits: ${_S30_HITS:-none}; negative controls:${_S30_FAIL:- ok}" | cut -c1-1500)" "static"
 fi

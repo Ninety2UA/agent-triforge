@@ -575,9 +575,10 @@ fi
 #           is read for every project under it, and the writers refuse it;
 #           for a file with no import line that reads back as the project's
 #           (the import column "-": the path down to the project holds
-#           whitespace, where an import path ends, or starts with ~, which an
-#           import reads as HOME), the project's own CLAUDE.md or removing
-#           the file; the writer refuses that import
+#           whitespace or a #, where an import path ends, starts with ~,
+#           which an import reads as HOME, or holds another character Claude
+#           Code does not read as written there), the project's own
+#           CLAUDE.md or removing the file; the writer refuses that import
 # A session started in HOME or a directory above it gets none of the file
 # lines and no tip (SS_NO_PROJECT): that is no project, as the home-directory
 # warning says, and every file there is one the writers refuse.
@@ -687,7 +688,7 @@ while IFS=$'\t' read -r SS_KIND SS_WHERE SS_STATE SS_FILE SS_IMPORT; do
       if _ss_home_or_above "${SS_LEVEL:-/}"; then
         SS_ABOVE_LINE="${SS_ABOVE_LINE} That file is in your home directory or above it and is read for every project under it, so the fix belongs in this project, not there."
       elif [ "$SS_IMPORT" = "-" ]; then
-        SS_ABOVE_LINE="${SS_ABOVE_LINE} No import line in that file can name this project's AGENTS.md: the path from there to this project holds whitespace, where an import path ends, or starts with ~, which an import reads as your home directory. Or remove the file."
+        SS_ABOVE_LINE="${SS_ABOVE_LINE} No import line in that file can name this project's AGENTS.md: the path from there to this project holds whitespace or a # (an import path ends there), starts with ~ (an import reads that as your home directory), or holds another character Claude Code does not read as written in an import path. Or remove the file."
       else
         SS_ABOVE_LINE="${SS_ABOVE_LINE} Or add the line $(_ss_prose "$SS_IMPORT") to that file (an import path is relative to the file that holds it), which loads this project's AGENTS.md in every project under that directory too, or remove the file."
       fi

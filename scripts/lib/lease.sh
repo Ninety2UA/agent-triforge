@@ -1973,19 +1973,30 @@ PROVISIONED_EOF
   printf '%s\n' "$TREE"
 }
 
+# _lease_diff_paths <git diff args...> — the paths a diff changes, as the
+# protected-path scan classifies them and as a merge's staged result is held
+# to them (_lease_merge_scope): both sides of every rename (--no-renames),
+# NUL-separated (-z) so core.quotePath can't wrap a path in quotes that dodge
+# a prefix match, no external diff, and a submodule entry listed whatever
+# .gitmodules says (--ignore-submodules=none).
+_lease_diff_paths() {
+  _lgr diff -z --name-only --no-renames --no-ext-diff --ignore-submodules=none "$@"
+}
+
 # _lease_protected_scan <default-branch> <git diff revs...> — classify the
-# paths a diff changes against the registry's protected lists (KTD8): both
-# sides of every rename (--no-renames), NUL-separated (-z) so core.quotePath
-# can't wrap a path in quotes that dodge a prefix match, a submodule entry
-# listed whatever .gitmodules says (--ignore-submodules=none), and
-# framework_protected only in the Triforge checkout
+# paths a diff changes (_lease_diff_paths: both sides of every rename,
+# NUL-separated, every submodule entry) against the registry's protected
+# lists (KTD8), framework_protected only in the Triforge checkout
 # (_lease_is_framework_checkout, which reads <default-branch> too). Sets
 # _LP_HITS ("<list><TAB><path>" lines, empty for none), _LP_COUNT (how many)
 # and _LP_ERR (why the scan could not run, empty when it ran): a caller reads a
 # non-empty _LP_ERR as protected, so the scan fails closed. Also sets the lease
 # row's values: _LP_STATUS (yes, no or unknown) and _LP_PATHS (the first ten
-# paths, or the error). lease_promote scans <default>...HEAD; lease_collect and
-# lease_merge scan base to snapshot (KTD3, U10).
+# paths, or the error). lease_promote scans <target commit>...<integration
+# commit>; lease_collect and lease_merge scan base to snapshot (KTD3, U10).
+# The merges change only the paths their scan listed: rename detection off
+# (-X no-renames), and what they staged checked against the same list before
+# they commit (_lease_merge_scope).
 _lease_protected_scan() {
   local DEF=$1 D FRAMEWORK=0
   shift
@@ -1995,7 +2006,7 @@ _lease_protected_scan() {
     _LP_PATHS=$_LP_ERR
     return 0
   fi
-  if ! _lgr diff -z --name-only --no-renames --no-ext-diff --ignore-submodules=none "$@" > "${D}/changed" 2> "${D}/err"; then
+  if ! _lease_diff_paths "$@" > "${D}/changed" 2> "${D}/err"; then
     _LP_ERR="git diff $* failed: $(head -c 300 "${D}/err" | tr '\n' ' ')"
   else
     if _lease_is_framework_checkout "$_LEASE_REPO" "$DEF"; then FRAMEWORK=1; fi
@@ -2018,6 +2029,75 @@ _lease_protected_scan() {
     if [ "$_LP_COUNT" -gt 10 ]; then _LP_PATHS="${_LP_PATHS} (+$((_LP_COUNT - 10)) more)"; fi
   fi
   return 0
+}
+
+# _lease_merge_scope <from> <tree> <scan revs...> — run once a merge stopped
+# short of its commit (lease_merge's squash, lease_promote's merge commit),
+# with <tree> the tree it staged (git write-tree) and <from> the commit it
+# lands on: 0 when every path <from>..<tree> changes is one the protected-path
+# scan of <scan revs> lists (_lease_diff_paths, the same diff). With rename
+# detection off, and lease_merge refusing a base the integration head does not
+# descend from before its squash, a merge stages no other path; this check
+# holds the line when something else would (a git whose merge follows a rename
+# after all). Otherwise 1, and the caller undoes
+# the merge: _LMS_PATHS names the paths outside the scan (the first ten,
+# characters that don't print shown as ?), or _LMS_ERR why the check could not
+# run (fails closed; an empty <tree> is a write-tree that failed).
+_lease_merge_scope() {
+  local FROM=$1 TO=$2 D
+  shift 2
+  _LMS_PATHS=""; _LMS_ERR=""
+  if [ -z "$TO" ]; then
+    _LMS_ERR="git write-tree wrote no tree of what the merge staged"
+    return 1
+  fi
+  if ! D=$(mktemp -d "${TMPDIR:-/tmp}/triforge-merge-scope.XXXXXX"); then
+    _LMS_ERR="no temp dir for the check"
+    return 1
+  fi
+  if ! _lease_diff_paths "$@" > "${D}/scanned" 2> "${D}/err"; then
+    _LMS_ERR="git diff $* failed: $(head -c 300 "${D}/err" | tr '\n' ' ')"
+  elif ! _lease_diff_paths "$FROM" "$TO" > "${D}/staged" 2> "${D}/err"; then
+    _LMS_ERR="git diff ${FROM} ${TO} failed: $(head -c 300 "${D}/err" | tr '\n' ' ')"
+  elif ! _LMS_PATHS=$(python3 -c "${_PY_PRELUDE}"'
+import sys
+def paths(p):
+    return [x for x in open(p, "rb").read().split(b"\0") if x]
+def text(b):
+    return "".join(c if c.isprintable() else "?" for c in b.decode("utf-8", "replace"))
+scanned = set(paths(sys.argv[1]))
+out = [p for p in paths(sys.argv[2]) if p not in scanned]
+print(" ".join(text(p) for p in out[:10]) + (" (+%d more)" % (len(out) - 10) if len(out) > 10 else ""))
+' "${D}/scanned" "${D}/staged" 2> "${D}/err"); then
+    _LMS_PATHS=""
+    _LMS_ERR="the path comparison failed: $(tail -c 300 "${D}/err" | tr '\n' ' ')"
+  fi
+  rm -rf "$D"
+  if [ -n "$_LMS_PATHS" ] || [ -n "$_LMS_ERR" ]; then return 1; fi
+  return 0
+}
+
+# _lease_conflict_deleted — once a merge stopped on conflicts, before it is
+# undone: the conflicted paths the receiving side (HEAD) deleted and the side
+# merged in changed (stages 1 and 3 in the index, no stage 2), space-separated,
+# the first ten (characters that don't print shown as ?). With rename
+# detection off, a path the receiving branch renamed reads so: the edit stays
+# on the old path, the one its protected scan classified, and conflicts there.
+# Empty for none, or when the index can't be read.
+_lease_conflict_deleted() {
+  _lgr ls-files -u -z 2>/dev/null | python3 -c "${_PY_PRELUDE}"'
+import sys
+stages = {}
+for entry in sys.stdin.buffer.read().split(b"\0"):
+    # "<mode> <object> <stage><TAB><path>"
+    meta, tab, path = entry.partition(b"\t")
+    if tab:
+        stages.setdefault(path, set()).add(meta.split(b" ")[-1])
+gone = [p for p, s in stages.items() if s == {b"1", b"3"}]
+def text(b):
+    return "".join(c if c.isprintable() else "?" for c in b.decode("utf-8", "replace"))
+print(" ".join(text(p) for p in gone[:10]) + (" (+%d more)" % (len(gone) - 10) if len(gone) > 10 else ""))
+' 2>/dev/null || true
 }
 
 # _lease_snapshot <task_id> — the lead's collect-time snapshot (KTD3): the
@@ -3571,7 +3651,18 @@ HANDOVER_EOF
 # (lease_attribution), then reclaims via the safe-prune
 # path. Every git call runs through _lead_git, so no repository hook runs on
 # the merge commit. Squash conflicts leave a dirty index: reset --merge, state
-# stays review, the lead resolves manually.
+# stays review, the lead resolves manually. The squash applies exactly the
+# lease's diff, base to snapshot, and changes only the paths the protected
+# scan listed: an integration head that no longer descends from the lease's
+# base (rewritten since the lease was cut) refuses before it, since the squash
+# would replay the commits in between too; rename detection is off, so an
+# edit of a path the integration branch renamed (or deleted) since then
+# conflicts; and the tree it staged is held to the scan's list before the
+# commit (_lease_merge_scope). Each is rc 1, state review, naming the paths
+# and the recovery (lease the task again from the integration head). The
+# merge is recorded only once HEAD and the integration branch are verified to
+# hold the commit it made, and from those values: a ref moved in between is
+# rc 44 with nothing recorded.
 lease_merge() {
   _lead_only lease_merge || return $?
   local TASK_ID=${1:?usage: lease_merge <task_id> <reviewer-identity>}
@@ -3665,9 +3756,12 @@ lease_merge() {
   # root tree itself and would refuse a swapped one as an unreadable worktree
   # (rc 1). A criss-cross history (rc 1, _LVO_BASES) is no integrity event:
   # the lease stays in review, and the refusal names the only recovery, since
-  # every snapshot of this lease sits on the same base.
-  local LVO=0 XROW XBASE XROLE
-  _lease_verify_objects lease_merge "$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)" "$SNAP" || LVO=$?
+  # every snapshot of this lease sits on the same base. IHEAD, the integration
+  # head read once here, is what the base check below and the check of the
+  # squash commit after it hold the merge to.
+  local LVO=0 XROW XBASE XROLE IHEAD ANC=0
+  IHEAD=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)
+  _lease_verify_objects lease_merge "$IHEAD" "$SNAP" || LVO=$?
   if [ "$LVO" -eq 1 ] && [ -n "$_LVO_BASES" ]; then
     XROW=$(_ledger_get_row "$TASK_ID" base_sha role 2>/dev/null) || XROW=""
     { IFS= read -r XBASE || true; IFS= read -r XROLE || true; } <<MERGE_CROSS_EOF
@@ -3682,6 +3776,27 @@ MERGE_CROSS_EOF
     return "$_RC_LEASE_INTEGRITY"
   fi
   _lease_verify_snapshot "$TASK_ID" || return 1
+  # The squash replays exactly the reviewed diff only from the lease's own
+  # base: the snapshot's one parent is that base (checked just above), so with
+  # the base an ancestor of the integration head the squash's merge base is
+  # the base itself. An integration branch rewritten past it (accepted with
+  # lease_rebaseline) would have the squash replay the commits in between as
+  # well, on the paths inside the lease's diff too, where no path check sees
+  # them: rc 1 before the squash, nothing merged, the index untouched, state
+  # review; and before the approval gate, which no approval would get past.
+  XROW=$(_ledger_get_row "$TASK_ID" base_sha role 2>/dev/null) || XROW=""
+  { IFS= read -r XBASE || true; IFS= read -r XROLE || true; } <<MERGE_BASE_EOF
+${XROW}
+MERGE_BASE_EOF
+  if [ -n "$XBASE" ] && [ -n "$IHEAD" ]; then _lgr merge-base --is-ancestor "$XBASE" "$IHEAD" 2>/dev/null || ANC=$?; else ANC=2; fi
+  if [ "$ANC" -eq 1 ]; then
+    echo "lease_merge: REFUSED — the integration branch no longer holds ${TASK_ID}'s base ${XBASE:0:12}: its head ${IHEAD:0:12} does not descend from it (rewritten since the lease was cut, and accepted with lease_rebaseline), so the squash of the snapshot ${SNAP:0:12} would replay the commits in between as well, not only the diff the review and the protected scan saw. Nothing was merged, the index is untouched, and ${TASK_ID} stays in review. Lease the task again from the integration branch's current head: lease_reclaim ${TASK_ID}, then lease_create ${TASK_ID} ${XROLE:-<role>} and lease_dispatch ${TASK_ID} <prompt>. Until git prunes it, the reviewed work stays readable: git diff ${XBASE} ${SNAP}" >&2
+    return 1
+  fi
+  if [ "$ANC" -ne 0 ]; then
+    echo "lease_merge: REFUSED — whether the integration head ${IHEAD:-<none>} descends from ${TASK_ID}'s base ${XBASE:-<none>} could not be read (rc ${ANC}), so nothing was merged (fails closed); ${TASK_ID} stays in review." >&2
+    return 1
+  fi
   # Who stands behind this merge (U10): the protected check over the lease's
   # full diff, base to the verified snapshot, at every merge, and the merge
   # approval it then needs; a stale lead-class pin needs the user's.
@@ -3693,13 +3808,37 @@ MERGE_CROSS_EOF
     echo "lease_merge: ERROR main tree index has staged changes — commit or unstage them first; the lease commit must contain only ${TASK_ID}'s work" >&2
     return 1
   fi
-  if ! _lgr merge --squash "$SNAP" >&2; then
+  # Nor anything beyond the paths the protected scan listed (base to snapshot,
+  # both sides of each rename): rename detection off (-X no-renames), so an
+  # edit of a path the integration branch renamed since the lease was cut
+  # conflicts instead of landing at the new name, which no scan classified;
+  # then the tree the squash staged is held to that list (_lease_merge_scope)
+  # before anything is committed.
+  local GONE MTREE LROLE
+  if ! _lgr merge --squash -X no-renames "$SNAP" >&2; then
+    GONE=$(_lease_conflict_deleted)
     _lgr reset --merge >&2 || true
-    echo "lease_merge: CONFLICT squash-merging ${TASK_ID}'s snapshot ${SNAP:0:12} into the main tree — index reset, state stays review. The lead resolves manually (rebase the work onto HEAD and re-collect), then reruns lease_merge." >&2
+    if [ -n "$GONE" ]; then
+      LROLE=$(_ledger_get "$TASK_ID" role 2>/dev/null || true)
+      echo "lease_merge: CONFLICT — the integration branch renamed or deleted ${GONE} since ${TASK_ID} was cut, and ${TASK_ID}'s snapshot ${SNAP:0:12} edits it; a merge never follows a rename (the protected scan classified the path the edit is on, not where a rename put it). Index reset, nothing merged, state stays review. Lease the task again from the integration branch's current head: lease_reclaim ${TASK_ID}, then lease_create ${TASK_ID} ${LROLE:-<role>} and lease_dispatch ${TASK_ID} <prompt>. Until git prunes it, the reviewed work stays readable: git diff ${_LMG_BASE} ${SNAP}" >&2
+    else
+      echo "lease_merge: CONFLICT squash-merging ${TASK_ID}'s snapshot ${SNAP:0:12} into the main tree — index reset, state stays review. The lead resolves manually (rebase the work onto HEAD and re-collect), then reruns lease_merge." >&2
+    fi
+    return 1
+  fi
+  MTREE=$(_lgr write-tree 2>/dev/null || true)
+  if ! _lease_merge_scope HEAD "$MTREE" "$_LMG_BASE" "$SNAP"; then
+    _lgr reset --merge >&2 || true
+    if [ -n "$_LMS_ERR" ]; then
+      echo "lease_merge: REFUSED — what the squash of ${TASK_ID}'s snapshot ${SNAP:0:12} staged could not be held to its protected scan (${_LMS_ERR}); index reset, nothing merged (fails closed), state stays review." >&2
+    else
+      LROLE=$(_ledger_get "$TASK_ID" role 2>/dev/null || true)
+      echo "lease_merge: REFUSED — the squash of ${TASK_ID}'s snapshot ${SNAP:0:12} would also change ${_LMS_PATHS}, which its own diff (base ${_LMG_BASE:0:12} to the snapshot: what the review and the protected scan saw) does not touch; a merge changes only the paths its scan listed (fails closed). Index reset, nothing merged, state stays review. Lease the task again from the integration branch's current head: lease_reclaim ${TASK_ID}, then lease_create ${TASK_ID} ${LROLE:-<role>} and lease_dispatch ${TASK_ID} <prompt>." >&2
+    fi
     return 1
   fi
   if _lgr diff --cached --quiet --no-ext-diff 2>/dev/null; then
-    echo "lease_merge: ERROR ${TASK_ID}'s snapshot brought no changes (builder produced nothing?) — state stays review" >&2
+    echo "lease_merge: ERROR ${TASK_ID}'s snapshot brought no changes (the builder produced nothing, or the integration branch holds them already) — state stays review" >&2
     return 1
   fi
   if ! _lgr commit -q -m "lease(${TASK_ID}): merged from ${BUILDER}, reviewed by ${REVIEWER}" >&2; then
@@ -3707,7 +3846,31 @@ MERGE_CROSS_EOF
     echo "lease_merge: ERROR commit failed — index reset, state stays review" >&2
     return 1
   fi
-  SHA=$(_lgr rev-parse HEAD)
+  # What the merge made, verified before anything records it (KTD18): HEAD,
+  # and refs/heads/<integration branch> (read as exactly that; a detached
+  # checkout has HEAD alone), at a commit whose only parent is IHEAD, the head
+  # the squash went onto, and whose tree is MTREE, the one the path check
+  # passed. A worker can move the ref, or HEAD, in between: rc 44 with nothing
+  # recorded, the lease left in review with its worktree, and the integration
+  # branch on record still IHEAD, so the next lease_* call reports the move. A
+  # rerun applies the squash once: onto IHEAD again once the branch is put
+  # back there, or onto an accepted head (lease_rebaseline), where it stages
+  # nothing if that head holds the squash's changes already. The record below
+  # is written from these values, never a fresh read.
+  local GOT WREF=HEAD
+  SHA=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)
+  GOT=$SHA
+  if [ -n "$CURRENT_BRANCH" ]; then
+    WREF="refs/heads/${CURRENT_BRANCH}"
+    GOT=$(_lease_branch_commit "$CURRENT_BRANCH" || true)
+  fi
+  if [ -z "$SHA" ] || [ "$GOT" != "$SHA" ] \
+     || [ "$(_lgr rev-list --parents -n 1 "$SHA" 2>/dev/null || true)" != "${SHA} ${IHEAD}" ] \
+     || [ "$(_lgr rev-parse --verify --quiet "${SHA}^{tree}" 2>/dev/null || true)" != "$MTREE" ]; then
+    GOT=${GOT:-<missing>}; SHA=${SHA:-<none>}
+    echo "lease_merge: INTEGRITY — after the squash commit ${WREF} is at ${GOT:0:12} and HEAD at ${SHA:0:12}, not a commit of tree ${MTREE:0:12} whose only parent is ${IHEAD:0:12}, the head the squash went onto: a ref moved outside the lead's own operations (KTD18; this is detection, not prevention). Nothing was recorded: ${TASK_ID} stays in review with its worktree, and the integration branch on record is still at ${IHEAD:0:12}. Inspect it (git reflog ${WREF} lists the squash commit). To merge again, put the branch back (git reset --hard ${IHEAD}, in this checkout) and rerun lease_merge ${TASK_ID} ${REVIEWER}, which squashes once more onto it; to keep the branch as it is, accept it with lease_rebaseline, and a rerun squashes onto that head, staging nothing where it holds the squash's changes already." >&2
+    return "$_RC_LEASE_INTEGRITY"
+  fi
   _ledger_update "$TASK_ID" state=merged reviewer="$REVIEWER" pinned_reviewer="$REVIEWER" merge_commit="$SHA" \
     reviewer_class="$_LMG_CLASS" protected="$_LP_STATUS" protected_paths="$_LP_PATHS" merge_approval="$_LMG_APPROVAL" || return 1
   # The lead's own merge moves the integration branch: that is the new state
@@ -3721,7 +3884,7 @@ MERGE_PROMOTION_EOF
   if [ -n "$PSCOPE" ] && [ -z "$PVOIDED" ]; then
     VOID="$(date -u +%Y-%m-%dT%H:%M:%SZ) by lease_merge ${TASK_ID} (${SHA:0:12})"
   fi
-  _ledger_update @baseline integration_branch="$(_lease_current_branch)" integration_sha="$SHA" ${VOID:+"promotion_voided=${VOID}"} >/dev/null || return 1
+  _ledger_update @baseline integration_branch="$CURRENT_BRANCH" integration_sha="$SHA" ${VOID:+"promotion_voided=${VOID}"} >/dev/null || return 1
   echo "lease_merge: ${TASK_ID} merged as ${SHA} (builder ${BUILDER}, reviewer ${REVIEWER}) — reclaiming worktree" >&2
   if [ -n "$VOID" ]; then
     echo "lease_merge: the promotion approval on record is void now (the tree it bound to changed): ${PSCOPE}" >&2
@@ -3749,7 +3912,9 @@ MERGE_PROMOTION_EOF
 # recorded with none, derived from the row's own lead, _lease_recorded_class),
 # _LMG_APPROVAL (a valid approval for this
 # snapshot, needed or not, "<class>:<by> via=<via> host=<host> lead=<lead>
-# at=<UTC>", else none) and the _LP_* values of the scan.
+# at=<UTC>", else none) and the _LP_* values of the scan; and _LMG_BASE, the
+# base the scan read, which the squash is held to with the same snapshot
+# (_lease_merge_scope).
 _lease_merge_gate() {
   local T=$1 B=$2 P=$3 SNAP=$4 DEF=${5:-} ROW BASE CLASS PINHO HO HOFROM ACLASS ABY ASNAP AVIA AHOST ALEAD AAT RLEAD
   local WHY="" USER_ONLY=0 NEED=0 VALID=0 RECORD="" BLEAD=0
@@ -3759,6 +3924,7 @@ _lease_merge_gate() {
     IFS= read -r AHOST || true; IFS= read -r ALEAD || true; IFS= read -r AAT || true; IFS= read -r RLEAD || true; } <<MERGE_GATE_EOF
 ${ROW}
 MERGE_GATE_EOF
+  _LMG_BASE=$BASE
   if [ -z "$CLASS" ]; then CLASS=$(_lease_recorded_class "$P" "$RLEAD"); fi
   _LMG_CLASS=$CLASS
   _LMG_APPROVAL=none
@@ -3917,7 +4083,18 @@ sys.exit(0 if isinstance(data, dict) and data.get("name") == "agent-triforge" el
 #   (e) else check out <target>, which must land on refs/heads/<target> at
 #       the commit the gate checked, fast-forward (or merge) the integration
 #       commit into it by its id, and report the promotion; an approval it
-#       used is marked used.
+#       used is marked used. A merge commit changes only the paths the scan
+#       listed: rename detection off, and the tree it staged held to the
+#       scan's list before it commits (_lease_merge_scope); a conflict (a path
+#       the target renamed that the integration branch edits is one) or a path
+#       outside the list aborts it, back on the integration branch, rc 1
+#   (f) the result is verified before anything records it: refs/heads/<target>
+#       and HEAD at the fast-forward's commit, or at a merge commit whose
+#       parents are exactly the target commit and the integration commit and
+#       whose tree is the one (e) checked; the baseline is written from those
+#       values, and the default branch must still resolve to the one on record
+#       at that commit (or, for another target, at the commit on record). A
+#       ref moved meanwhile refuses with rc 44 and records nothing.
 # Atomic where it matters: the default branch is never touched unless the gate
 # passes — the block path leaves the tree exactly as it found it.
 lease_promote() {
@@ -4066,36 +4243,109 @@ print('true' if v is True else 'false')
   # refs/heads/<target> at DEF_SHA (git checkout takes a local branch of that
   # name before any other ref), and the merge takes IB_SHA by its id, never a
   # name another ref could shadow; fast-forward when possible, else a merge
-  # commit.
+  # commit. Either changes only the paths the scan listed. A fast-forward
+  # changes exactly those (with the target an ancestor of the integration
+  # commit, <target>...<integration> is <target>..<integration>), or nothing
+  # when the target already holds the integration commit. The merge commit
+  # runs with rename detection off (-X no-renames: an integration-side edit
+  # of a path the target renamed conflicts instead of following the rename to
+  # a path no scan classified) and stops before its commit, which it makes
+  # only once the tree it staged changes no other path (_lease_merge_scope).
   if ! _lgr checkout -q "$DEFAULT_BRANCH" -- >&2 || [ "$(_lgr symbolic-ref --quiet HEAD 2>/dev/null || true)" != "refs/heads/${DEFAULT_BRANCH}" ] \
      || [ "$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)" != "$DEF_SHA" ]; then
     _lgr checkout -q "$INTEGRATION_BRANCH" -- >&2 2>/dev/null || true
     echo "lease_promote: ERROR could not check out the local branch '${DEFAULT_BRANCH}' at ${DEF_SHA:0:12}, the commit the gate checked — back on '${INTEGRATION_BRANCH}', nothing promoted." >&2
     return 1
   fi
+  local MWHY="" GONE="" MTREE="" WANT="" SHA="" GOT="" MADE=""
   if _lgr merge -q --ff-only "$IB_SHA" >&2; then
-    :
-  elif _lgr merge -q --no-edit -m "Merge branch '${INTEGRATION_BRANCH}'" "$IB_SHA" >&2; then
-    :
+    WANT=$IB_SHA
+    if _lgr merge-base --is-ancestor "$IB_SHA" "$DEF_SHA" 2>/dev/null; then WANT=$DEF_SHA; fi
+  elif ! _lgr merge -q --no-ff --no-commit -X no-renames "$IB_SHA" >&2; then
+    MWHY=conflict
+    GONE=$(_lease_conflict_deleted)
   else
+    MTREE=$(_lgr write-tree 2>/dev/null || true)
+    if ! _lease_merge_scope "$DEF_SHA" "$MTREE" "${DEF_SHA}...${IB_SHA}"; then
+      MWHY=scope
+    elif ! _lgr commit -q -m "Merge branch '${INTEGRATION_BRANCH}'" >&2; then
+      MWHY=commit
+    fi
+  fi
+  if [ -n "$MWHY" ]; then
     _lgr merge --abort 2>/dev/null || true
     _lgr checkout -q "$INTEGRATION_BRANCH" -- >&2 2>/dev/null || true
-    echo "lease_promote: ERROR merging '${INTEGRATION_BRANCH}' into '${DEFAULT_BRANCH}' failed (conflicts) — aborted and returned to '${INTEGRATION_BRANCH}'. Resolve manually." >&2
+    if [ "$MWHY" = conflict ]; then
+      echo "lease_promote: ERROR merging '${INTEGRATION_BRANCH}' into '${DEFAULT_BRANCH}' failed (conflicts) — aborted and returned to '${INTEGRATION_BRANCH}'. Resolve manually." >&2
+      if [ -n "$GONE" ]; then
+        echo "  '${DEFAULT_BRANCH}' renamed or deleted ${GONE}, which '${INTEGRATION_BRANCH}' edits; a merge never follows a rename (the protected scan classified the path the edit is on, not where a rename put it). Merge refs/heads/${DEFAULT_BRANCH} into '${INTEGRATION_BRANCH}' in this checkout, carrying the edit to the new path, and check the result; accept that commit with lease_rebaseline, then rerun lease_promote ${DEFAULT_BRANCH}, whose scan then lists the new path." >&2
+      fi
+    elif [ "$MWHY" = scope ] && [ -n "$_LMS_ERR" ]; then
+      echo "lease_promote: REFUSED — what merging '${INTEGRATION_BRANCH}' into '${DEFAULT_BRANCH}' staged could not be held to the protected scan (${_LMS_ERR}) — aborted and returned to '${INTEGRATION_BRANCH}', nothing promoted (fails closed)." >&2
+    elif [ "$MWHY" = scope ]; then
+      echo "lease_promote: REFUSED — merging '${INTEGRATION_BRANCH}' into '${DEFAULT_BRANCH}' would also change ${_LMS_PATHS}, which the protected scan of ${DEF_SHA:0:12}...${IB_SHA:0:12} did not list; a merge changes only the paths its scan listed (fails closed) — aborted and returned to '${INTEGRATION_BRANCH}', nothing promoted." >&2
+    else
+      echo "lease_promote: ERROR the merge commit of '${INTEGRATION_BRANCH}' into '${DEFAULT_BRANCH}' failed — aborted and returned to '${INTEGRATION_BRANCH}', nothing promoted." >&2
+    fi
     return 1
   fi
-  local SHA
-  SHA=$(_lgr rev-parse HEAD)
-  # The lead's own promotion moves the default branch: record it, so the next
-  # check compares against this state rather than escalating it (KTD18). The
-  # record is the default branch as the check resolves it (_lease_default_ref),
-  # not the argument, so an explicit <default-branch> that differs from
-  # origin/HEAD or main/master can't leave a baseline the next check disagrees
-  # with. That sprint's integration branch is done: clear it, and the next
-  # lease_create (or merge) records the new one.
+  # (f) What the promotion made, verified before anything records it (KTD18):
+  # refs/heads/<target> (read as exactly that) and HEAD at the fast-forward's
+  # commit, or at a merge commit whose parents are exactly DEF_SHA then IB_SHA
+  # and whose tree is MTREE, the one the scope check passed. A worker can move
+  # the ref, or HEAD, in between: rc 44, nothing recorded, the checkout left
+  # on <target>, and the next lease_* call reports the moved default branch.
+  SHA=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)
+  GOT=$(_lease_branch_commit "$DEFAULT_BRANCH" || true)
+  if [ -n "$WANT" ]; then
+    if [ "$GOT" != "$WANT" ] || [ "$SHA" != "$WANT" ]; then MADE="the fast-forward to ${WANT:0:12}"; fi
+  elif [ -z "$SHA" ] || [ "$GOT" != "$SHA" ] \
+       || [ "$(_lgr rev-list --parents -n 1 "$SHA" 2>/dev/null || true)" != "${SHA} ${DEF_SHA} ${IB_SHA}" ] \
+       || [ "$(_lgr rev-parse --verify --quiet "${SHA}^{tree}" 2>/dev/null || true)" != "$MTREE" ]; then
+    MADE="its merge commit of ${DEF_SHA:0:12} and ${IB_SHA:0:12} with tree ${MTREE:0:12}"
+  fi
+  if [ -n "$MADE" ]; then
+    GOT=${GOT:-<missing>}; SHA=${SHA:-<none>}
+    echo "lease_promote: INTEGRITY — after the promotion refs/heads/${DEFAULT_BRANCH} is at ${GOT:0:12} and HEAD at ${SHA:0:12}, not ${MADE}: a ref moved outside the lead's own operations (KTD18; this is detection, not prevention). Nothing was recorded, and the checkout stays on '${DEFAULT_BRANCH}'. Inspect it (git reflog refs/heads/${DEFAULT_BRANCH} lists the promotion); put the branch where it belongs, then accept that state with lease_rebaseline." >&2
+    return "$_RC_LEASE_INTEGRITY"
+  fi
+  # The lead's own promotion moves the target: record it, so the next check
+  # compares against this state rather than escalating it (KTD18), from the
+  # values verified above, never a fresh read. The record is the default branch
+  # as the check resolves it (_lease_default_ref), not the argument, so an
+  # explicit <target> that differs from origin/HEAD or main/master can't leave
+  # a baseline the next check disagrees with: a promotion into the default
+  # branch records it at SHA; into another branch, the default branch keeps the
+  # commit on record. Either way it must still resolve to the branch on record,
+  # at that commit: a promotion never re-records a default branch someone else
+  # moved (rc 44, nothing recorded). That sprint's integration branch is done:
+  # clear it, and the next lease_create (or merge) records the new one.
   # A promotion approval is used once: mark it consumed with the record.
   if [ -f "$_LEASE_LEDGER" ]; then
-    _lease_default_ref
-    _ledger_update @baseline default_branch="$_LEASE_DEF" default_sha="$_LEASE_DEF_SHA" integration_branch="" integration_sha="" \
+    local RROW RNAME="" RSHA="" DSHA="" WAS NOW
+    if ! RROW=$(_ledger_get_row @baseline default_branch default_sha 2>/dev/null); then
+      MADE="the default branch on record could not be read back"
+    else
+      { IFS= read -r RNAME || true; IFS= read -r RSHA || true; } <<PROMOTE_BASE_EOF
+${RROW}
+PROMOTE_BASE_EOF
+      _lease_default_ref
+      WAS=${RSHA:-<none>}; NOW=${_LEASE_DEF_SHA:-<none>}
+      if [ -n "$RNAME" ] && [ "$_LEASE_DEF" != "$RNAME" ]; then
+        MADE="the default branch now resolves to '${_LEASE_DEF:-<none>}', not '${RNAME}' as on record"
+      elif [ "$_LEASE_DEF" = "$DEFAULT_BRANCH" ]; then
+        DSHA=$SHA
+        if [ "$_LEASE_DEF_SHA" != "$SHA" ]; then MADE="refs/heads/${DEFAULT_BRANCH} moved ${SHA:0:12} -> ${NOW:0:12} once the promotion was verified"; fi
+      else
+        DSHA=$RSHA
+        if [ "$_LEASE_DEF_SHA" != "$RSHA" ]; then MADE="the default branch '${_LEASE_DEF}' moved ${WAS:0:12} -> ${NOW:0:12} during the promotion into '${DEFAULT_BRANCH}'"; fi
+      fi
+    fi
+    if [ -n "$MADE" ]; then
+      echo "lease_promote: INTEGRITY — ${MADE} (KTD18; this is detection, not prevention): a promotion never records a default branch someone else moved. '${INTEGRATION_BRANCH}' went into '${DEFAULT_BRANCH}' (HEAD ${SHA:0:12}), but nothing was recorded, so the next lease_* call reports the move. Inspect it; once the branches hold what you want, accept that state with lease_rebaseline." >&2
+      return "$_RC_LEASE_INTEGRITY"
+    fi
+    _ledger_update @baseline default_branch="$_LEASE_DEF" default_sha="$DSHA" integration_branch="" integration_sha="" \
       ${APPROVED:+"promotion_voided=$(date -u +%Y-%m-%dT%H:%M:%SZ) used by lease_promote (${SHA:0:12})"} >/dev/null || true
   fi
   if [ -n "$APPROVED" ]; then
