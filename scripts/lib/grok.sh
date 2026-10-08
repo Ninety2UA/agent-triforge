@@ -972,7 +972,11 @@ ${PROMPT}"
   # The lead's checkout, and its git state as lease_create checks it before a
   # carve (R1, KTD18), before any checkout is made
   if ! _lease_ctx 2>/dev/null; then
-    _grok_unisolated "$AGENT_NAME" "$OUTPUT_FILE" "a grok reviewer or analyst runs from a scratch checkout of HEAD, and ${PWD} is not inside a git checkout."
+    if [ "${_LEASE_CTX_WHY:-}" = home ]; then
+      _grok_unisolated "$AGENT_NAME" "$OUTPUT_FILE" "a grok reviewer or analyst runs from a scratch checkout of HEAD, and ${PWD} is in a checkout that is your home directory or contains it, which is no project."
+    else
+      _grok_unisolated "$AGENT_NAME" "$OUTPUT_FILE" "a grok reviewer or analyst runs from a scratch checkout of HEAD, and ${PWD} is not inside a git checkout."
+    fi
     return 69
   fi
   _grok_recheck "$AGENT_NAME" "$ROLE" "$OUTPUT_FILE" || RC=$?

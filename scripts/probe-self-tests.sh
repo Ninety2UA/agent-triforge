@@ -5631,6 +5631,10 @@ rm -rf "$_S15"
 #   objgraph   writes feature.txt + AGENTS.md; a commit-graph naming a decoy tree (the snapshot without AGENTS.md) for the
 #              snapshot (_s18_graph): plain git diff sees the decoy, lease_merge still scans AGENTS.md -> 42, nothing merged
 #              (a git whose own diff reads no tree from the graph is noted in the evidence, not failed)
+#   homerepo   the case's HOME is itself a git repository (a dotfiles repo): lease_create from HOME and from a directory
+#              in it, and lease_wait -> rc 1 with one ERROR line; coordinate.sh -> 44 before any session (its stub lead
+#              never runs); the persona lane's task: and ref: targets -> 64; no ~/ops, no lease root, HOME
+#              byte-identical (_s18_tree_digest); a project with its own repository under that HOME leases and collects
 # plus a static check that every git call in scripts/lib/lease.sh and
 # scripts/lib/lease-wait.sh goes through _lead_git (review finding #23).
 # _s18_git_scan lexes each file as shell,
@@ -6211,6 +6215,69 @@ _S18_GRAPH="a commit-graph naming a decoy tree for the snapshot (plain git diff 
 printf '%s\n' "$O" | grep -q '^graph-diff=\[feature\.txt \]$' \
   || _S18_GRAPH="a commit-graph naming a decoy tree for the snapshot -> lease_merge 42 (this git's own diff did not read the graph's tree either)"
 
+# homerepo: a home directory is no project. The case's HOME is a dotfiles
+# repository with a project of its own repository in it (proj); a lease helper
+# run from HOME or from a directory in it refuses before it writes anything.
+# _s18_tree_digest <dir> — one sha256 over every name, type, link target and
+# file content under <dir>: equal before and after = byte-identical.
+_s18_tree_digest() {
+  S18_D="$1" python3 -c '
+import hashlib, os
+root, h = os.environ["S18_D"], hashlib.sha256()
+for d, dirs, files in os.walk(root):
+    dirs.sort()
+    for n in sorted(dirs + files):
+        p = os.path.join(d, n)
+        h.update(os.path.relpath(p, root).encode("utf-8", "surrogateescape") + b"\0")
+        if os.path.islink(p):
+            h.update(b"L" + os.readlink(p).encode("utf-8", "surrogateescape"))
+        elif os.path.isfile(p):
+            h.update(b"F" + open(p, "rb").read())
+        else:
+            h.update(b"D")
+print(h.hexdigest())'
+}
+_s18_setup homerepo
+_s18_clean homerepo
+( cd "$_S18/homerepo/home" && export HOME="$_S18/homerepo/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main . \
+    && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" && mkdir -p docs/deep && echo dot > .zshrc \
+    && echo d > docs/deep/d.txt && git add -A && git commit -qm dotfiles && mkdir proj && cd proj && git init -q -b main . \
+    && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" && mkdir ops \
+    && printf '[roles.builder]\ncli = "claude"\n' > ops/roster.toml && echo r > README.md && git add -A && git commit -qm init \
+    && git checkout -q -b sprint/home ) >/dev/null 2>&1
+_S18_HD0=$(_s18_tree_digest "$_S18/homerepo/home")
+# not _s18_try, which keeps each call's stderr in $HOME: captured here instead
+O=$(_s18_lead homerepo 'R=0; E=$(lease_create t builder 2>&1 >/dev/null) || R=$?; printf "fromhome-rc=%s\n%s\n" "$R" "$E"
+echo "ops-made=$([ -e ops ] && echo yes || echo no) root-made=$([ -e "$TRIFORGE_LEASE_ROOT" ] && echo yes || echo no)"' home)
+_s18_expect homerepo "$O" 'fromhome-rc=1' "^lease: ERROR .*/homerepo/home is your home directory or contains it, and a home directory is no project" \
+  'git init the project first\.$' '^ops-made=no root-made=no$'
+[ "$(printf '%s\n' "$O" | grep -c .)" = 3 ] || _S18_FAIL="$_S18_FAIL homerepo(not-one-ERROR-line:$(printf '%s' "$O" | tr '\n' '|' | cut -c1-200))"
+O=$(_s18_lead homerepo 'R=0; E=$(lease_create t builder 2>&1 >/dev/null) || R=$?; printf "fromsub-rc=%s\n%s\n" "$R" "$E"
+R=0; E=$(lease_wait --budget 1 2>&1 >/dev/null) || R=$?; printf "wait-rc=%s\n%s\n" "$R" "$E"
+echo "ops-made=$([ -e ../../ops ] && echo yes || echo no) root-made=$([ -e "$TRIFORGE_LEASE_ROOT" ] && echo yes || echo no)"' home/docs/deep)
+_s18_expect homerepo-sub "$O" 'fromsub-rc=1' "^lease: ERROR .*/homerepo/home is your home directory or contains it" 'wait-rc=1' '^ops-made=no root-made=no$'
+# coordinate.sh's integrity gate stops before any session (its stub lead
+# never runs), and the persona lane's task: and ref: targets refuse
+mkdir -p "$_S18/homerepo/bin" "$_S18/homerepo/tmp" && chmod 700 "$_S18/homerepo/tmp"
+printf '#!/bin/sh\necho ran >> "%s/lead.log"\nexit 0\n' "$_S18/homerepo" > "$_S18/homerepo/bin/claude"
+printf '#!/bin/sh\nexit 0\n' > "$_S18/homerepo/bin/osascript"
+cp "$_S18/homerepo/bin/osascript" "$_S18/homerepo/bin/notify-send"
+chmod +x "$_S18/homerepo/bin/claude" "$_S18/homerepo/bin/osascript" "$_S18/homerepo/bin/notify-send"
+O=$( cd "$_S18/homerepo/home/docs" && env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CODEX_CI -u CODEX_THREAD_ID -u NOTIFY_WEBHOOK_URL -u CLAUDE_PLUGIN_ROOT \
+       HOME="$_S18/homerepo/home" TMPDIR="$_S18/homerepo/tmp" GIT_CONFIG_NOSYSTEM=1 TRIFORGE_LEASE_ROOT="$_S18/homerepo/leases" \
+       PATH="$_S18/homerepo/bin:$PATH" TRIFORGE_TEST_LEAD=claude TRIFORGE_TEST_BUILDER="$_S18/homerepo/fb.sh" \
+       bash "${_SELF_DIR}/coordinate.sh" "probe goal" --max 1 < /dev/null 2>&1; echo "coord-rc=$?"
+     echo "lead-ran=$([ -f "$_S18/homerepo/lead.log" ] && echo yes || echo no)" )
+O="$O
+$(_s18_lead homerepo 'R=0; _persona_target dispatch_persona task:t >/dev/null 2>&1 || R=$?; echo "persona-task-rc=$R"
+R=0; _persona_target dispatch_persona ref:HEAD >/dev/null 2>&1 || R=$?; echo "persona-ref-rc=$R"' home)"
+_s18_expect homerepo-coord "$O" 'coord-rc=44' '^coordinate\.sh: STOPPED before starting a session — this checkout is your home directory or contains it' \
+  '^lead-ran=no$' '^persona-task-rc=64$' '^persona-ref-rc=64$'
+[ "$(_s18_tree_digest "$_S18/homerepo/home")" = "$_S18_HD0" ] || _S18_FAIL="$_S18_FAIL homerepo(home-changed)"
+[ ! -e "$_S18/homerepo/leases" ] || _S18_FAIL="$_S18_FAIL homerepo(lease-root-made)"
+O=$(_s18_lead homerepo '_s18_go t; _s18_try collect lease_collect t; echo "state=$(_ledger_get t state) ledger=$([ -f ops/leases.toml ] && echo yes || echo no)"' home/proj)
+_s18_expect homerepo-proj "$O" 'collect-rc=0' '^state=review ledger=yes$'
+
 # static: every git call in lease.sh and lease-wait.sh goes through _lead_git
 # _s18_git_scan <file> [noallow] — one line per finding: "<line>:<source line>"
 # for a git call outside the allowlist, "allowlist-unused:<entry>", or
@@ -6359,7 +6426,7 @@ _S18_NEG=$(_s18_git_scan "$_S18/lease-planted.sh" | cut -d: -f1 | tr '\n' ' ')
   || _S18_FAIL="$_S18_FAIL scan-negative-control(want-lines:$((_S18_N - 2)),$((_S18_N - 1)),${_S18_N};got:[${_S18_NEG% }])"
 
 if [ -z "$_S18_FAIL" ]; then
-  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer/leadcfg -> collect rc 44 naming the surface (config, hooks, ledger and the lead trusted git config restored, gitconfig.changed-* kept; marker never ran); post-checkout planted: next lease_create 44; fsmonitor, filter, post-checkout and pointer once accepted (lease_rebaseline) still never run and collect snapshots (pointer via the recorded admin dir); tampered hooks.copy -> 44, NOT restored; ledger swapped for a symlink -> 44, a regular file again; the lead's own git remote add -> 44 naming the saved copy, put back + rebaselined -> collect 0, origin kept; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; git gc after collect (writes .git/info/refs) -> merges; lead checkout switched to rogue -> merge 44 naming sprint/s18 and rogue, state review, back on sprint/s18 -> merges; lease_create on main records no integration branch, sprint/two cut after it -> lease + merge, no 44; a lead commit on the integration branch -> merge 44 (moved), lease_rebaseline -> merges on top; identity only in an [include]d ~/.gitconfig file -> the merge commit carries it; linked-worktree lead checkout whose .git pointer is rewritten to the lease admin dir -> collect 44 naming it; after review the snapshot's new blob rewritten in the object store under its own id -> merge 44 naming it, HEAD unmoved, nothing staged, the lease escalated, the blob written again from the worktree + lease_rebaseline -> merges the reviewed content (${_S18_SHA256}); a subtree rewritten to point at a decoy -> merge 44 naming the tree; the root tree rewritten -> merge 44 naming it and the lease escalated (the re-hash runs ahead of the snapshot checks, whose read-tree would refuse it with rc 1), the repair hint naming write-tree for a tree; a blob the integration branch already has, copied by the snapshot to a new path and rewritten -> merge 44 naming the blob at the new path, HEAD unmoved, nothing staged; a file the integration branch and the snapshot both changed since the base (the squash merges three versions): HEAD's blob rewritten -> merge 44 naming it at HEAD, nothing merged, written again from the lead checkout + lease_rebaseline -> merges both changes; the merge base's blob rewritten -> merge 44 naming it at the merge base, nothing merged; a gitlink that moved on the integration branch after collect -> merges (neither side of it is an object of this repository); a merged blob rewritten -> lease_promote 44, main unmoved, written again -> promotes; main moved since the sprint began (accepted), so the promotion is a merge commit of three versions of a file: main's blob rewritten -> lease_promote 44 naming it at main, main unmoved, written again -> promotes the merge of both changes; ${_S18_GRAPH}; every git call in lease.sh and lease-wait.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines in lease.sh, none in lease-wait.sh; planted { git / else git / env -u git lines caught)" "static"
+  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer/leadcfg -> collect rc 44 naming the surface (config, hooks, ledger and the lead trusted git config restored, gitconfig.changed-* kept; marker never ran); post-checkout planted: next lease_create 44; fsmonitor, filter, post-checkout and pointer once accepted (lease_rebaseline) still never run and collect snapshots (pointer via the recorded admin dir); tampered hooks.copy -> 44, NOT restored; ledger swapped for a symlink -> 44, a regular file again; the lead's own git remote add -> 44 naming the saved copy, put back + rebaselined -> collect 0, origin kept; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; git gc after collect (writes .git/info/refs) -> merges; lead checkout switched to rogue -> merge 44 naming sprint/s18 and rogue, state review, back on sprint/s18 -> merges; lease_create on main records no integration branch, sprint/two cut after it -> lease + merge, no 44; a lead commit on the integration branch -> merge 44 (moved), lease_rebaseline -> merges on top; identity only in an [include]d ~/.gitconfig file -> the merge commit carries it; linked-worktree lead checkout whose .git pointer is rewritten to the lease admin dir -> collect 44 naming it; after review the snapshot's new blob rewritten in the object store under its own id -> merge 44 naming it, HEAD unmoved, nothing staged, the lease escalated, the blob written again from the worktree + lease_rebaseline -> merges the reviewed content (${_S18_SHA256}); a subtree rewritten to point at a decoy -> merge 44 naming the tree; the root tree rewritten -> merge 44 naming it and the lease escalated (the re-hash runs ahead of the snapshot checks, whose read-tree would refuse it with rc 1), the repair hint naming write-tree for a tree; a blob the integration branch already has, copied by the snapshot to a new path and rewritten -> merge 44 naming the blob at the new path, HEAD unmoved, nothing staged; a file the integration branch and the snapshot both changed since the base (the squash merges three versions): HEAD's blob rewritten -> merge 44 naming it at HEAD, nothing merged, written again from the lead checkout + lease_rebaseline -> merges both changes; the merge base's blob rewritten -> merge 44 naming it at the merge base, nothing merged; a gitlink that moved on the integration branch after collect -> merges (neither side of it is an object of this repository); a merged blob rewritten -> lease_promote 44, main unmoved, written again -> promotes; main moved since the sprint began (accepted), so the promotion is a merge commit of three versions of a file: main's blob rewritten -> lease_promote 44 naming it at main, main unmoved, written again -> promotes the merge of both changes; ${_S18_GRAPH}; a HOME that is itself a git repository: lease_create from it and from a directory in it, and lease_wait -> rc 1 with one ERROR line (a home directory is no project), coordinate.sh -> 44 before any session, the persona task: and ref: targets -> 64, no ~/ops, no lease root, HOME byte-identical, a project with its own repository under that HOME leases; every git call in lease.sh and lease-wait.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines in lease.sh, none in lease-wait.sh; planted { git / else git / env -u git lines caught)" "static"
 else
   # the failed case names first, so a long pattern list can't cut them off
   row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "FAIL" "mismatch in $(_self_fail_cases "$_S18_FAIL"):$(printf '%s' "$_S18_FAIL" | cut -c1-500)" "static"

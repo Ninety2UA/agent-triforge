@@ -82,9 +82,16 @@ fi
 # directories (group and other write are taken away), and a derived root
 # needs a TMPDIR no other user can rename entries in: else rc 1 with a
 # refusal, since whoever can swap those directories chooses the trusted git
-# config every lead-side git call reads (Phase 3 round 4, B5).
+# config every lead-side git call reads (Phase 3 round 4, B5). A home
+# directory is no project, as the bootstrap, the roster writers and the
+# instruction writers hold: a checkout that is the home directory or a
+# directory above it (a dotfiles repository) is refused before anything is
+# written, rc 1 with _LEASE_CTX_WHY=home, or its ledger would land in ~/ops.
+# Compared by identity, as _tb_home_anchor (bootstrap.sh) compares; an unset
+# HOME, or one that does not resolve, protects nothing.
 _lease_ctx() {
-  local KEY="${PWD}|${TRIFORGE_LEASE_ROOT:-}|${TMPDIR:-}"
+  local KEY="${PWD}|${TRIFORGE_LEASE_ROOT:-}|${TMPDIR:-}|${HOME:-}"
+  _LEASE_CTX_WHY=""
   if [ "${_LEASE_CTX_KEY:-}" = "$KEY" ] && [ -n "${_LEAD_CFG:-}" ] && [ -f "${_LEAD_CFG}" ]; then
     return 0
   fi
@@ -113,6 +120,21 @@ while not os.path.lexists(os.path.join(d, ".git")):
         sys.exit(1)
     d = parent
 repo, dotgit = d, os.path.join(d, ".git")
+# the checkout is HOME or a directory above it: refused (exit 4) before any
+# write; the same identity test as _tb_home_anchor, HOME and each parent
+home = os.environ.get("HOME", "")
+if home:
+    try:
+        top, h = os.stat(repo), os.path.realpath(home)
+        while True:
+            if os.path.samestat(top, os.stat(h)):
+                print(repo)
+                sys.exit(4)
+            if os.path.dirname(h) == h:
+                break
+            h = os.path.dirname(h)
+    except OSError:
+        pass
 if os.path.isdir(dotgit) and not os.path.islink(dotgit):
     gitdir = dotgit
 else:
@@ -145,6 +167,12 @@ for p in (repo, os.path.realpath(gitdir), os.path.realpath(common), os.path.real
 ' 2>/dev/null) || RC=$?
   if [ "$RC" -eq 3 ]; then
     echo "lease: ERROR $(printf '%s' "$OUT" | LC_ALL=C tr -d '\000-\037\177') — the lease root and the lead's trusted git config would sit where another user can swap them, so no lease runs here. Set TMPDIR to a private directory (or TRIFORGE_LEASE_ROOT to one of yours) and rerun." >&2
+    return 1
+  fi
+  if [ "$RC" -eq 4 ]; then
+    _LEASE_CTX_WHY=home
+    OUT=$(printf '%s' "$OUT" | LC_ALL=C tr -d '\000-\037\177')
+    echo "lease: ERROR ${OUT} is your home directory or contains it, and a home directory is no project — its ledger would land in ${OUT}/ops, so no lease runs here. Run it from the project's own repository; inside a home directory that is a git repository (a dotfiles repo), git init the project first." >&2
     return 1
   fi
   if [ "$RC" -ne 0 ]; then
@@ -2224,7 +2252,7 @@ lease_create() {
     return 1
   fi
   local RESOLVED CLI MODEL EFFORT WT NOW CUR IB="" ISHA="" ROW LEAD=""
-  _lease_ctx || { echo "lease_create: ERROR not inside a git repository" >&2; return 1; }
+  _lease_ctx || return 1
   # A change a worker made since the lead's last check (a planted hook, git
   # config, a moved ref) is caught before the next worktree is carved (KTD18).
   _lead_integrity_check lease_create || return $?
@@ -3757,7 +3785,7 @@ sys.exit(0 if isinstance(data, dict) and data.get("name") == "agent-triforge" el
 lease_promote() {
   _lead_only lease_promote || return $?
   local DEFAULT_BRANCH CURRENT_BRANCH INTEGRATION_BRANCH
-  _lease_ctx || { echo "lease_promote: ERROR not inside a git repository" >&2; return 1; }
+  _lease_ctx || return 1
   # Promotion writes the default branch: only from a git state the lead
   # verified (KTD18) — a moved default branch, planted config or hooks, a
   # switched checkout, or an unrecorded commit on the integration branch
