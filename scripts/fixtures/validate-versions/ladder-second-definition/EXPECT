@@ -1,0 +1,7 @@
+# U21: a second ladder definition anywhere fails. docs/notes.md restates the
+# ladder from another rung with markup before the colon (a definition) beside a
+# pointer line with " — " after the phrase (not one): 2 definitions, not 3.
+check: ladder
+rc: 1
+line: FAIL: ladder: 2 definitions (expected exactly 1: TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh) — every line with the phrase followed by a colon counts, whichever rung it starts at; replace the others with pointers (see file:line:text above)
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

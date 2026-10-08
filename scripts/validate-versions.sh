@@ -6,11 +6,26 @@
 # completeness check (R11)).
 #
 # Usage:
-#   bash scripts/validate-versions.sh [--no-sweep] [--no-counts]
+#   bash scripts/validate-versions.sh [--no-sweep] [--no-counts] [--only <check>[,<check>…]] [--root <dir>]
+#   bash scripts/validate-versions.sh --self-test
 #
 #   --no-sweep   skip check 4 (stale-pin sweep) — useful mid-sprint while docs
 #                units are still rewriting pins
 #   --no-counts  skip check 5 (surface counts)
+#   --only       run only the named checks: lockstep and skill-versions (1),
+#                ladder (2), drift (3), sweep (4), counts (5), budget (6),
+#                inventory (7), retired (8), workflows (9), manifests (10),
+#                halt (11). An unknown or empty name is a usage error (exit 2),
+#                so a typo never passes by running nothing.
+#   --root       run the checks against <dir> instead of this checkout (the
+#                self-test's fixture roots); paths print relative to <dir>.
+#   --self-test  run every fixture under scripts/fixtures/validate-versions/ —
+#                a minimal root plus an EXPECT file naming the checks to run,
+#                the exit code, and every ok:/FAIL:/skip: line and the summary
+#                in order — and the computed cases (the AGENTS.md budget
+#                boundaries, --only usage errors), each through this script
+#                with --root and --only. Exit 0 when every case behaves as
+#                named; it takes no other flag.
 #
 # Checks (each prints "ok:" or "FAIL:" lines; the summary is the last line):
 #   1. Version lockstep — .claude-plugin/plugin.json .version ==
@@ -33,9 +48,9 @@
 #      sit between the phrase and the colon). The instruction files,
 #      personas/team-lead.md and skills/wave-orchestration/SKILL.md point at the
 #      registry with " — " after the phrase instead. The sweep scope of check 4
-#      applies (history directories, the README ledger and this script are not
-#      shipped surfaces); any second match, or a single match outside the
-#      registry literal, fails.
+#      applies (history directories, the self-test's fixtures, the README
+#      ledger and this script are not shipped surfaces); any second match, or a
+#      single match outside the registry literal, fails.
 #   3. Registry drift (KTD7, R41) — the CLI registry is the _TRIFORGE_CLIS_PY
 #      literal in scripts/lib/registry.sh (one entry per CLI; parsed with
 #      ast.literal_eval, so comments and spacing do not matter) plus
@@ -74,7 +89,9 @@
 #      2026-07-probe-record, and
 #      "Gemini 3.1 Pro (High)" ONLY on lines that also say "default" (so the
 #      documented opt-in survives). Excluded: ops/research/, ops/decisions/,
-#      docs/plans/, docs/brainstorms/, ops/solutions/, docs/images/, .git/,
+#      docs/plans/, docs/brainstorms/, ops/solutions/, docs/images/,
+#      scripts/fixtures/validate-versions/ (the self-test's planted stale pins
+#      and second ladder), .git/,
 #      the gitignored deploy copies (.agents/ .gemini/ .antigravity/),
 #      node_modules/, the two validator scripts, lines marked as history
 #      ("history" or "was <word>"), and README.md at or below its
@@ -163,41 +180,265 @@
 #      Devin loads from a plugin root besides skills (AGENTS.md, rules/,
 #      agents/, hooks.json, hooks/, .mcp.json, …): from the repo root Devin
 #      would also load this AGENTS.md as an always-on rule and run hooks/.
+#  11. Halt threshold — a builder halts at MORE THAN 50 changed files
+#      (AGENTS.md §Delegation), so a task touching exactly 50 goes on. In
+#      skills/, AGENTS.md, README.md (above its "## Recent changes" ledger),
+#      docs/index.html and docs/agent-triforge.md, a 50-file threshold written
+#      inclusively fails: 50+, 50 or more (or above, and up, …), 50 files or
+#      more, at least 50, ≥ / >= / => 50 before file(s), changed files or file
+#      changes, file changes ≥ / >= 50, and "halt … at 50 files" within one
+#      clause. HTML tags, entities and * _ ` markup are dropped first, and a
+#      phrase may wrap across lines. "more than 50", "over 50", "> 50" and "file changes > 50"
+#      pass and are counted; a count with no comparator ("50 files", "look at
+#      50 files") is prose, not a threshold.
 #
-# Exit codes: 0 every check passed; 1 at least one check failed; 2 bad flag.
+# Exit codes: 0 every check passed (--self-test: every case behaved as named);
+# 1 at least one check failed (--self-test: a case did not); 2 bad flag.
 set -euo pipefail
+ORIG_PWD="$PWD"
 cd "$(dirname "$0")/.."
+VV_HOME="$PWD"   # this checkout: the default --root, and where --self-test finds its fixtures
 
 NO_SWEEP=0
 NO_COUNTS=0
+ONLY=""
+ROOT=""
+SELF_TEST=0
+# The names --only takes, in run order (the header numbers the checks).
+VV_CHECKS="lockstep skill-versions ladder drift sweep counts budget inventory retired workflows manifests halt"
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-sweep)  NO_SWEEP=1 ;;
     --no-counts) NO_COUNTS=1 ;;
+    --self-test) SELF_TEST=1 ;;
+    --only)
+      shift
+      [ -n "${1:-}" ] || { echo "validate-versions: ERROR --only needs a check name (one of: $VV_CHECKS)" >&2; exit 2; }
+      ONLY="$1"
+      ;;
+    --root)
+      shift
+      [ -n "${1:-}" ] || { echo "validate-versions: ERROR --root needs a directory" >&2; exit 2; }
+      ROOT=$(cd "$ORIG_PWD" && cd "$1" 2>/dev/null && pwd -P) \
+        || { echo "validate-versions: ERROR root directory not found: $1" >&2; exit 2; }
+      ;;
     -h|--help)
       sed -n '2,/^set -euo pipefail/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *)
-      echo "validate-versions: unknown flag '$1' (accepted: --no-sweep --no-counts)" >&2
+      echo "validate-versions: unknown flag '$1' (accepted: --no-sweep --no-counts --only <check>[,<check>…] --root <dir> --self-test)" >&2
       exit 2 ;;
   esac
   shift
 done
+if [ "$SELF_TEST" -eq 1 ] && [ "$ONLY$ROOT$NO_SWEEP$NO_COUNTS" != "00" ]; then
+  echo "validate-versions: ERROR --self-test runs alone (each case sets its own --root and --only)" >&2
+  exit 2
+fi
+# --only: every name must be a check, and at least one must be given — an
+# unknown name would otherwise select nothing and pass.
+if [ -n "$ONLY" ]; then
+  case "$ONLY" in
+    *[!a-z,-]*)
+      echo "validate-versions: ERROR --only takes check names separated by commas (one of: $VV_CHECKS), got '$ONLY'" >&2
+      exit 2 ;;
+  esac
+  VV_ONLY_COUNT=0
+  for VV_NAME in $(printf '%s' "$ONLY" | tr ',' ' '); do
+    case " $VV_CHECKS " in
+      *" $VV_NAME "*) VV_ONLY_COUNT=$((VV_ONLY_COUNT + 1)) ;;
+      *)
+        echo "validate-versions: ERROR --only names an unknown check '$VV_NAME' (one of: $VV_CHECKS)" >&2
+        exit 2 ;;
+    esac
+  done
+  if [ "$VV_ONLY_COUNT" -eq 0 ]; then
+    echo "validate-versions: ERROR --only needs a check name (one of: $VV_CHECKS)" >&2
+    exit 2
+  fi
+fi
+# _selected <check>: true when this run includes <check> — every check unless
+# --only names a set.
+_selected() {
+  case ",${ONLY:-$1}," in
+    *",$1,"*) return 0 ;;
+  esac
+  return 1
+}
+
+# --- self-test: the planted fixtures and the computed cases ------------------
+if [ "$SELF_TEST" -eq 1 ]; then
+  VV_SCRIPT="$VV_HOME/scripts/validate-versions.sh" VV_FIXTURES="$VV_HOME/scripts/fixtures/validate-versions" \
+  VV_BASH="$BASH" python3 - <<'PYEOF'
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+SCRIPT = os.environ["VV_SCRIPT"]
+BASH = os.environ["VV_BASH"]
+FX_ROOT = os.environ["VV_FIXTURES"]
+# The lines a case asserts, in order: every check's verdict lines and the
+# summary. The file:line:text hits a check prints above its FAIL line are left
+# out (GNU grep prefixes ./, BSD grep does not).
+STATUS = ("ok:", "FAIL:", "skip:", "validate-versions:")
+SUMMARY_FAIL = "validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)"
+
+
+def run(root, only):
+    """One case through this script: (rc, stdout, stderr)."""
+    p = subprocess.run([BASH, SCRIPT, "--root", root, "--only", only], capture_output=True, text=True)
+    return p.returncode, p.stdout, p.stderr
+
+
+def assess(rc_want, lines_want, rc, out, err):
+    """Problems with one run: the exit code, the status lines in order, and a
+    silent stderr (a check that crashes still exits 1)."""
+    problems = []
+    got = [ln for ln in out.split("\n") if ln.startswith(STATUS)]
+    if rc != rc_want:
+        problems.append("expected rc " + str(rc_want) + ", got " + str(rc))
+    if got != lines_want:
+        problems.append("status lines differ")
+    if err.strip():
+        problems.append("stderr is not empty")
+    return problems
+
+
+def report(name, outcome, problems, lines_want, out, err):
+    if not problems:
+        print("self-test: ok   " + name + ": " + outcome)
+        return 0
+    print("self-test: FAIL " + name + ": " + "; ".join(problems))
+    for ln in lines_want:
+        print("    expected> " + ln)
+    for ln in (out + err).strip().split("\n"):
+        print("    got> " + ln)
+    return 1
+
+
+def scratch_run(name, files, only, rc_want, lines_want):
+    """A computed case: write files into a scratch root, run, assess."""
+    tmp = tempfile.mkdtemp(prefix="vv-selftest-")
+    try:
+        for rel, content in files.items():
+            with open(os.path.join(tmp, rel), "w", encoding="utf-8", newline="") as fh:
+                fh.write(content)
+        rc, out, err = run(tmp, only)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    outcome = "[" + only + "] rc " + str(rc) + ", " + str(len(lines_want)) + " status line(s) as named"
+    return report(name, outcome, assess(rc_want, lines_want, rc, out, err), lines_want, out, err)
+
+
+count = 0
+failures = 0
+for entry in sorted(os.listdir(FX_ROOT)):
+    src = os.path.join(FX_ROOT, entry)
+    expect_path = os.path.join(src, "EXPECT")
+    if not os.path.isfile(expect_path):
+        continue
+    count += 1
+    check, rc_want, lines_want, bad = "", None, [], []
+    with open(expect_path, encoding="utf-8") as fh:
+        for raw in fh.read().split("\n"):
+            if not raw.strip() or raw.startswith("#"):
+                continue
+            key, _, value = raw.partition(":")
+            key, value = key.strip(), value.strip()
+            if key == "check":
+                check = value
+            elif key == "rc" and value.isdigit():
+                rc_want = int(value)
+            elif key == "line":
+                lines_want.append(value)
+            else:
+                bad.append(raw)
+    if not check or rc_want is None or not lines_want or bad:
+        failures += report(entry, "", ["EXPECT needs check:, rc: and line: entries" + (" (unreadable: " + "; ".join(bad) + ")" if bad else "")], [], "", "")
+        continue
+    # The case runs on a copy without its EXPECT, so the expected lines are
+    # never part of the tree the checks scan.
+    tmp = tempfile.mkdtemp(prefix="vv-selftest-")
+    try:
+        root = os.path.join(tmp, "root")
+        shutil.copytree(src, root, ignore=shutil.ignore_patterns("EXPECT"))
+        rc, out, err = run(root, check)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    outcome = "[" + check + "] rc " + str(rc) + ", " + str(len(lines_want)) + " status line(s) as named"
+    failures += report(entry, outcome, assess(rc_want, lines_want, rc, out, err), lines_want, out, err)
+
+# Computed cases — the AGENTS.md budget (check 6) at and past its two limits.
+# Generated rather than committed: a fixture AGENTS.md would be an instruction
+# file at depth that agents load when they work in its directory.
+edge = "x" * 81 + "\n"                      # 199 × 82 bytes + a 66-byte line = 16,384
+boundary = edge * 199 + "y" * 65 + "\n"
+assert len(boundary.encode("utf-8")) == 16384 and boundary.count("\n") == 200
+budget = (
+    ("computed-budget-at-limits", boundary, 0,
+     ["ok:   AGENTS.md budget: 200 lines (max 200), 16384 bytes (max 16384)",
+      "validate-versions: PASS (--only budget)"]),
+    ("computed-budget-201-lines", "x\n" * 201, 1,
+     ["FAIL: AGENTS.md budget: 201 lines (max 200), 402 bytes (max 16384) — over budget (R10)", SUMMARY_FAIL]),
+    ("computed-budget-16385-bytes", boundary[:-1] + "y\n", 1,
+     ["FAIL: AGENTS.md budget: 200 lines (max 200), 16385 bytes (max 16384) — over budget (R10)", SUMMARY_FAIL]),
+    # wc -l would count 200: the final line has no newline, and it still counts
+    ("computed-budget-unterminated-201st-line", "x\n" * 200 + "x", 1,
+     ["FAIL: AGENTS.md budget: 201 lines (max 200), 401 bytes (max 16384) — over budget (R10)", SUMMARY_FAIL]),
+)
+for name, content, rc_want, lines_want in budget:
+    count += 1
+    failures += scratch_run(name, {"AGENTS.md": content}, "budget", rc_want, lines_want)
+
+# Computed cases — --only refuses what would select nothing (exit 2, no check runs).
+for name, only, needle in (
+    ("computed-only-unknown-check", "budget,nosuch", "unknown check 'nosuch'"),
+    ("computed-only-no-name", ",", "--only needs a check name"),
+    ("computed-only-empty", "", "--only needs a check name"),
+):
+    count += 1
+    tmp = tempfile.mkdtemp(prefix="vv-selftest-")
+    try:
+        rc, out, err = run(tmp, only)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    problems = []
+    if rc != 2:
+        problems.append("expected rc 2, got " + str(rc))
+    if out.strip():
+        problems.append("expected no check to run, stdout is not empty")
+    if needle not in err:
+        problems.append("stderr does not name " + repr(needle))
+    failures += report(name, "--only " + repr(only) + " → rc " + str(rc) + ", " + needle, problems, [], out, err)
+
+if failures:
+    print("validate-versions --self-test: FAIL (" + str(failures) + " of " + str(count) + " cases)")
+    sys.exit(1)
+print("validate-versions --self-test: " + str(count) + " cases OK")
+PYEOF
+  exit 0
+fi
+if [ -n "$ROOT" ]; then
+  cd "$ROOT"
+fi
 
 FAILED_CHECKS=0
 fail() { printf 'FAIL: %s\n' "$1"; FAILED_CHECKS=$((FAILED_CHECKS + 1)); }
 ok()   { printf 'ok:   %s\n' "$1"; }
 
 # Shipped-surface scope, shared by checks 2 and 4 (and the README ledger
-# boundary by check 5). GNU grep prints ./path, BSD grep prints path — the RE
-# accepts both prefixes.
-SWEEP_EXCLUDE_RE='^(\./)?(ops/research|ops/decisions|docs/plans|docs/brainstorms|ops/solutions|docs/images|\.git|\.agents|\.gemini|\.antigravity|node_modules)/'
+# boundary by checks 5 and 11). GNU grep prints ./path, BSD grep prints path —
+# the RE accepts both prefixes. The self-test's fixtures plant a second ladder
+# and stale pins on purpose, so the checkout's own run skips them.
+SWEEP_EXCLUDE_RE='^(\./)?(ops/research|ops/decisions|docs/plans|docs/brainstorms|ops/solutions|docs/images|scripts/fixtures/validate-versions|\.git|\.agents|\.gemini|\.antigravity|node_modules)/'
 # Whole directories are pruned at walk time (grep never descends into .git's
 # object store or a node_modules tree); the path-scoped exclusions above are
 # applied on the output, where the RE also re-covers the pruned names.
 SWEEP_EXCLUDE_DIRS=(--exclude-dir=.git --exclude-dir=.agents --exclude-dir=.gemini --exclude-dir=.antigravity --exclude-dir=node_modules)
 SWEEP_SELF_RE='^(\./)?scripts/validate-(versions|skills)\.sh:'
-README_HISTORY_START=$(grep -n '^## Recent changes' README.md | head -1 | cut -d: -f1 || true)
+README_HISTORY_START=$(grep -n '^## Recent changes' README.md 2>/dev/null | head -1 | cut -d: -f1 || true)
 README_HISTORY_START="${README_HISTORY_START:-0}"
 # _shipped_surfaces: filter grep -rn output (file:line:text) down to the
 # shipped surfaces — drops the excluded paths, this script, and README.md at
@@ -214,37 +455,43 @@ _shipped_surfaces() {
 json_version() {
   VV_FILE="$1" python3 -c 'import json, os; print(json.load(open(os.environ["VV_FILE"]))["version"])'
 }
-PLUGIN_V=$(json_version .claude-plugin/plugin.json)
-AGY_V=$(json_version antigravity-agents/plugin.json)
-# The marketplace manifest carries the version twice (metadata + the one
-# plugin entry); both must move with plugin.json.
-MKT_V=$(VV_FILE=.claude-plugin/marketplace.json python3 -c 'import json, os; d = json.load(open(os.environ["VV_FILE"])); m = d.get("metadata", {}).get("version", ""); p = [x.get("version", "") for x in d.get("plugins", []) if x.get("name") == "agent-triforge"]; print(m if p == [m] else "mismatch(metadata=" + m + ",plugin=" + ",".join(p) + ")")' 2>/dev/null || echo "unreadable")
-README_V=$(grep -m1 -E "^## What's new \(v[0-9]+\.[0-9]+\.[0-9]+\)" README.md \
-  | sed -E "s/^## What's new \(v([0-9]+\.[0-9]+\.[0-9]+)\).*/\1/" || true)
-if [ -z "$README_V" ]; then
-  fail "version lockstep: README.md has no '## What's new (vX.Y.Z)' heading"
-elif [ "$PLUGIN_V" = "$AGY_V" ] && [ "$PLUGIN_V" = "$README_V" ] && [ "$PLUGIN_V" = "$MKT_V" ]; then
-  ok "version lockstep: $PLUGIN_V (.claude-plugin/plugin.json, .claude-plugin/marketplace.json, antigravity-agents/plugin.json, README What's new)"
-else
-  fail "version lockstep: .claude-plugin/plugin.json=$PLUGIN_V .claude-plugin/marketplace.json=$MKT_V antigravity-agents/plugin.json=$AGY_V README What's new=$README_V"
+PLUGIN_V=""
+if _selected lockstep || _selected skill-versions; then
+  PLUGIN_V=$(json_version .claude-plugin/plugin.json)
 fi
-# Release-notes source: literal "v<version>:" on a "### " heading below
-# "## Recent changes" (the colon keeps v3.3.1 from matching v3.3.10).
-if awk -v v="$PLUGIN_V" '
-      /^## Recent changes/ { led = 1; next }
-      led && /^### / && index($0, "v" v ":") > 0 { found = 1; exit }
-      END { exit !found }
-    ' README.md; then
-  ok "release notes: README Recent changes carries the v$PLUGIN_V entry (GitHub release body source)"
-else
-  fail "release notes: README.md '## Recent changes' has no '### <date> — v$PLUGIN_V: <title>' entry — scripts/release-notes.sh needs it for the GitHub release"
+if _selected lockstep; then
+  AGY_V=$(json_version antigravity-agents/plugin.json)
+  # The marketplace manifest carries the version twice (metadata + the one
+  # plugin entry); both must move with plugin.json.
+  MKT_V=$(VV_FILE=.claude-plugin/marketplace.json python3 -c 'import json, os; d = json.load(open(os.environ["VV_FILE"])); m = d.get("metadata", {}).get("version", ""); p = [x.get("version", "") for x in d.get("plugins", []) if x.get("name") == "agent-triforge"]; print(m if p == [m] else "mismatch(metadata=" + m + ",plugin=" + ",".join(p) + ")")' 2>/dev/null || echo "unreadable")
+  README_V=$(grep -m1 -E "^## What's new \(v[0-9]+\.[0-9]+\.[0-9]+\)" README.md \
+    | sed -E "s/^## What's new \(v([0-9]+\.[0-9]+\.[0-9]+)\).*/\1/" || true)
+  if [ -z "$README_V" ]; then
+    fail "version lockstep: README.md has no '## What's new (vX.Y.Z)' heading"
+  elif [ "$PLUGIN_V" = "$AGY_V" ] && [ "$PLUGIN_V" = "$README_V" ] && [ "$PLUGIN_V" = "$MKT_V" ]; then
+    ok "version lockstep: $PLUGIN_V (.claude-plugin/plugin.json, .claude-plugin/marketplace.json, antigravity-agents/plugin.json, README What's new)"
+  else
+    fail "version lockstep: .claude-plugin/plugin.json=$PLUGIN_V .claude-plugin/marketplace.json=$MKT_V antigravity-agents/plugin.json=$AGY_V README What's new=$README_V"
+  fi
+  # Release-notes source: literal "v<version>:" on a "### " heading below
+  # "## Recent changes" (the colon keeps v3.3.1 from matching v3.3.10).
+  if awk -v v="$PLUGIN_V" '
+        /^## Recent changes/ { led = 1; next }
+        led && /^### / && index($0, "v" v ":") > 0 { found = 1; exit }
+        END { exit !found }
+      ' README.md; then
+    ok "release notes: README Recent changes carries the v$PLUGIN_V entry (GitHub release body source)"
+  else
+    fail "release notes: README.md '## Recent changes' has no '### <date> — v$PLUGIN_V: <title>' entry — scripts/release-notes.sh needs it for the GitHub release"
+  fi
 fi
 # Skill versions: each shipped skill's frontmatter metadata.version moves with
 # the plugin. The frontmatter is read as validate-skills.sh reads it: metadata
 # is one level of indented key: value lines, a quoted value is unquoted, and an
 # unquoted one loses a trailing " # comment".
-SKILLV_RC=0
-VV_PLUGIN_V="$PLUGIN_V" python3 - <<'PYEOF' || SKILLV_RC=$?
+if _selected skill-versions; then
+  SKILLV_RC=0
+  VV_PLUGIN_V="$PLUGIN_V" python3 - <<'PYEOF' || SKILLV_RC=$?
 import glob
 import os
 import re
@@ -301,54 +548,58 @@ if fails:
     sys.exit(1)
 print("ok:   skill versions: all " + str(len(skills)) + " skills/*/SKILL.md carry metadata.version " + want + " (= .claude-plugin/plugin.json)")
 PYEOF
-if [ "$SKILLV_RC" -ne 0 ]; then
-  FAILED_CHECKS=$((FAILED_CHECKS + 1))
+  if [ "$SKILLV_RC" -ne 0 ]; then
+    FAILED_CHECKS=$((FAILED_CHECKS + 1))
+  fi
 fi
 
 # --- 2. ladder one-definition (KTD22) ----------------------------------------
 LADDER_SOURCE='scripts/lib/registry.sh'
 LADDER_VAR='TRIFORGE_MODEL_LADDER'
-# A definition is the phrase followed by a colon, whatever rungs come after it
-# (a restatement that starts at `opus` is still a second definition); pointer
-# lines put " — " after the phrase, so only the registry literal matches.
-# Case-insensitive, and markup or spaces between the phrase and the colon do
-# not hide a definition. (This script is filtered out by _shipped_surfaces.)
-LADDER_DEF_RE='Downgrade ladder for narrow runtime tasks[[:space:]*_`]*:'
-LADDER_DEFS=$(
-  grep -rnIiE "${SWEEP_EXCLUDE_DIRS[@]}" -e "$LADDER_DEF_RE" . \
-    | _shipped_surfaces \
-    | sort -t: -k1,1 -k2,2n -u || true
-)
-LADDER_DEF_COUNT=$(printf '%s\n' "$LADDER_DEFS" | grep -c . || true)
-LADDER_DEF_FILE=$(printf '%s\n' "$LADDER_DEFS" | head -1 | cut -d: -f1 | sed 's#^\./##')
-LADDER_DEF_LINE=$(printf '%s\n' "$LADDER_DEFS" | head -1 | cut -d: -f2)
-LADDER_DEF_TEXT=$(printf '%s\n' "$LADDER_DEFS" | head -1 | cut -d: -f3-)
-# The one match must be the registry assignment itself, not a comment there.
-LADDER_IS_LITERAL=0
-case "$LADDER_DEF_TEXT" in
-  "${LADDER_VAR}='"*) LADDER_IS_LITERAL=1 ;;
-esac
-if [ "$LADDER_DEF_COUNT" -eq 1 ] && [ "$LADDER_DEF_FILE" = "$LADDER_SOURCE" ] && [ "$LADDER_IS_LITERAL" -eq 1 ]; then
-  ok "ladder: one definition ($LADDER_SOURCE:$LADDER_DEF_LINE $LADDER_VAR)"
-elif [ "$LADDER_DEF_COUNT" -eq 0 ]; then
-  fail "ladder: no definition — $LADDER_SOURCE must set $LADDER_VAR to the ladder text (the phrase 'Downgrade ladder for narrow runtime tasks', a colon, the rungs)"
-elif [ "$LADDER_DEF_COUNT" -eq 1 ] && [ "$LADDER_DEF_FILE" = "$LADDER_SOURCE" ]; then
-  printf '%s\n' "$LADDER_DEFS"
-  fail "ladder: $LADDER_SOURCE:$LADDER_DEF_LINE carries the ladder text but is not the $LADDER_VAR='...' assignment (a comment or another variable)"
-elif [ "$LADDER_DEF_COUNT" -eq 1 ]; then
-  printf '%s\n' "$LADDER_DEFS"
-  fail "ladder: the single definition is in $LADDER_DEF_FILE:$LADDER_DEF_LINE, not the $LADDER_VAR literal in $LADDER_SOURCE"
-else
-  printf '%s\n' "$LADDER_DEFS"
-  fail "ladder: $LADDER_DEF_COUNT definitions (expected exactly 1: $LADDER_VAR in $LADDER_SOURCE) — every line with the phrase followed by a colon counts, whichever rung it starts at; replace the others with pointers (see file:line:text above)"
+if _selected ladder; then
+  # A definition is the phrase followed by a colon, whatever rungs come after it
+  # (a restatement that starts at `opus` is still a second definition); pointer
+  # lines put " — " after the phrase, so only the registry literal matches.
+  # Case-insensitive, and markup or spaces between the phrase and the colon do
+  # not hide a definition. (This script is filtered out by _shipped_surfaces.)
+  LADDER_DEF_RE='Downgrade ladder for narrow runtime tasks[[:space:]*_`]*:'
+  LADDER_DEFS=$(
+    grep -rnIiE "${SWEEP_EXCLUDE_DIRS[@]}" -e "$LADDER_DEF_RE" . \
+      | _shipped_surfaces \
+      | sort -t: -k1,1 -k2,2n -u || true
+  )
+  LADDER_DEF_COUNT=$(printf '%s\n' "$LADDER_DEFS" | grep -c . || true)
+  LADDER_DEF_FILE=$(printf '%s\n' "$LADDER_DEFS" | head -1 | cut -d: -f1 | sed 's#^\./##')
+  LADDER_DEF_LINE=$(printf '%s\n' "$LADDER_DEFS" | head -1 | cut -d: -f2)
+  LADDER_DEF_TEXT=$(printf '%s\n' "$LADDER_DEFS" | head -1 | cut -d: -f3-)
+  # The one match must be the registry assignment itself, not a comment there.
+  LADDER_IS_LITERAL=0
+  case "$LADDER_DEF_TEXT" in
+    "${LADDER_VAR}='"*) LADDER_IS_LITERAL=1 ;;
+  esac
+  if [ "$LADDER_DEF_COUNT" -eq 1 ] && [ "$LADDER_DEF_FILE" = "$LADDER_SOURCE" ] && [ "$LADDER_IS_LITERAL" -eq 1 ]; then
+    ok "ladder: one definition ($LADDER_SOURCE:$LADDER_DEF_LINE $LADDER_VAR)"
+  elif [ "$LADDER_DEF_COUNT" -eq 0 ]; then
+    fail "ladder: no definition — $LADDER_SOURCE must set $LADDER_VAR to the ladder text (the phrase 'Downgrade ladder for narrow runtime tasks', a colon, the rungs)"
+  elif [ "$LADDER_DEF_COUNT" -eq 1 ] && [ "$LADDER_DEF_FILE" = "$LADDER_SOURCE" ]; then
+    printf '%s\n' "$LADDER_DEFS"
+    fail "ladder: $LADDER_SOURCE:$LADDER_DEF_LINE carries the ladder text but is not the $LADDER_VAR='...' assignment (a comment or another variable)"
+  elif [ "$LADDER_DEF_COUNT" -eq 1 ]; then
+    printf '%s\n' "$LADDER_DEFS"
+    fail "ladder: the single definition is in $LADDER_DEF_FILE:$LADDER_DEF_LINE, not the $LADDER_VAR literal in $LADDER_SOURCE"
+  else
+    printf '%s\n' "$LADDER_DEFS"
+    fail "ladder: $LADDER_DEF_COUNT definitions (expected exactly 1: $LADDER_VAR in $LADDER_SOURCE) — every line with the phrase followed by a colon counts, whichever rung it starts at; replace the others with pointers (see file:line:text above)"
+  fi
 fi
 
 # --- 3. registry drift (KTD7) ------------------------------------------------
-DRIFT_RC=0
-VV_REGISTRY="scripts/lib/registry.sh" VV_SRC="scripts/lib/roster.sh" VV_ROSTER="templates/ops/roster.toml" \
-VV_HOOK="hooks/handlers/session-start.sh" VV_LEASE="scripts/lib/lease.sh" VV_LEASE_WAIT="scripts/lib/lease-wait.sh" VV_PROBE="scripts/probe-capabilities.sh" \
-VV_LOADER="scripts/invoke-external.sh" VV_LOCATOR="scripts/skill-locator/locate-triforge.sh" \
-VV_LIBDIR="scripts/lib" python3 - <<'PYEOF' || DRIFT_RC=$?
+if _selected drift; then
+  DRIFT_RC=0
+  VV_REGISTRY="scripts/lib/registry.sh" VV_SRC="scripts/lib/roster.sh" VV_ROSTER="templates/ops/roster.toml" \
+  VV_HOOK="hooks/handlers/session-start.sh" VV_LEASE="scripts/lib/lease.sh" VV_LEASE_WAIT="scripts/lib/lease-wait.sh" VV_PROBE="scripts/probe-capabilities.sh" \
+  VV_LOADER="scripts/invoke-external.sh" VV_LOCATOR="scripts/skill-locator/locate-triforge.sh" \
+  VV_LIBDIR="scripts/lib" python3 - <<'PYEOF' || DRIFT_RC=$?
 import ast
 import glob
 import os
@@ -781,41 +1032,44 @@ for line in fails:
     print("FAIL: drift: " + line)
 sys.exit(1 if fails else 0)
 PYEOF
-if [ "$DRIFT_RC" -ne 0 ]; then
-  FAILED_CHECKS=$((FAILED_CHECKS + 1))
+  if [ "$DRIFT_RC" -ne 0 ]; then
+    FAILED_CHECKS=$((FAILED_CHECKS + 1))
+  fi
 fi
 
 # --- 4. scoped stale-pin sweep (KTD12) ---------------------------------------
-if [ "$NO_SWEEP" -eq 1 ]; then
-  echo "skip: stale-pin sweep (--no-sweep)"
-else
-  SWEEP_HITS=$(
-    {
-      grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" \
-        -e 'gpt-5\.6-sol' \
-        -e 'grok-4\.5' \
-        -e 'glm-5\.2' \
-        -e 'kimi-k3' \
-        -e 'Fable 5 →' \
-        -e 'Opus 4\.8' \
-        -e 'Opus 5\.5 → Sonnet 5[^.]' \
-        -e 'Opus 5\.5 → Sonnet 5$' \
-        -e 'Sonnet 5)' \
-        -e 'Sonnet&nbsp;5[^.]' \
-        -e '2026-07-probe-record' \
-        . || true
-      grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" 'Gemini 3\.1 Pro (High)' . | grep -i 'default' || true
-    } \
-      | grep -v 'history\|was [a-z]' \
-      | _shipped_surfaces \
-      | sort -t: -k1,1 -k2,2n -u || true
-  )
-  if [ -n "$SWEEP_HITS" ]; then
-    printf '%s\n' "$SWEEP_HITS"
-    SWEEP_COUNT=$(printf '%s\n' "$SWEEP_HITS" | grep -c . || true)
-    fail "stale-pin sweep: $SWEEP_COUNT hit(s) on shipped surfaces (see file:line:text above)"
+if _selected sweep; then
+  if [ "$NO_SWEEP" -eq 1 ]; then
+    echo "skip: stale-pin sweep (--no-sweep)"
   else
-    ok "stale-pin sweep: no stale pins outside the excluded paths"
+    SWEEP_HITS=$(
+      {
+        grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" \
+          -e 'gpt-5\.6-sol' \
+          -e 'grok-4\.5' \
+          -e 'glm-5\.2' \
+          -e 'kimi-k3' \
+          -e 'Fable 5 →' \
+          -e 'Opus 4\.8' \
+          -e 'Opus 5\.5 → Sonnet 5[^.]' \
+          -e 'Opus 5\.5 → Sonnet 5$' \
+          -e 'Sonnet 5)' \
+          -e 'Sonnet&nbsp;5[^.]' \
+          -e '2026-07-probe-record' \
+          . || true
+        grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" 'Gemini 3\.1 Pro (High)' . | grep -i 'default' || true
+      } \
+        | grep -v 'history\|was [a-z]' \
+        | _shipped_surfaces \
+        | sort -t: -k1,1 -k2,2n -u || true
+    )
+    if [ -n "$SWEEP_HITS" ]; then
+      printf '%s\n' "$SWEEP_HITS"
+      SWEEP_COUNT=$(printf '%s\n' "$SWEEP_HITS" | grep -c . || true)
+      fail "stale-pin sweep: $SWEEP_COUNT hit(s) on shipped surfaces (see file:line:text above)"
+    else
+      ok "stale-pin sweep: no stale pins outside the excluded paths"
+    fi
   fi
 fi
 
@@ -824,12 +1078,13 @@ PERSONA_COUNT=$(ls personas/*.md 2>/dev/null | grep -c . || true)
 SKILL_COUNT=$(ls skills/*/SKILL.md 2>/dev/null | grep -c . || true)
 WORKFLOW_COUNT=$(ls skills/at-*/SKILL.md 2>/dev/null | grep -c . || true)
 PORTABLE_COUNT=$((SKILL_COUNT - WORKFLOW_COUNT))
-if [ "$NO_COUNTS" -eq 1 ]; then
-  echo "skip: surface counts (--no-counts; shipped: $PERSONA_COUNT personas, $SKILL_COUNT skills: $PORTABLE_COUNT portable, $WORKFLOW_COUNT lead workflows)"
-else
-  COUNTS_RC=0
-  VV_PERSONAS="$PERSONA_COUNT" VV_SKILLS="$SKILL_COUNT" VV_PORTABLE="$PORTABLE_COUNT" VV_WORKFLOWS="$WORKFLOW_COUNT" \
-  VV_README_HISTORY_START="$README_HISTORY_START" python3 - <<'PYEOF' || COUNTS_RC=$?
+if _selected counts; then
+  if [ "$NO_COUNTS" -eq 1 ]; then
+    echo "skip: surface counts (--no-counts; shipped: $PERSONA_COUNT personas, $SKILL_COUNT skills: $PORTABLE_COUNT portable, $WORKFLOW_COUNT lead workflows)"
+  else
+    COUNTS_RC=0
+    VV_PERSONAS="$PERSONA_COUNT" VV_SKILLS="$SKILL_COUNT" VV_PORTABLE="$PORTABLE_COUNT" VV_WORKFLOWS="$WORKFLOW_COUNT" \
+    VV_README_HISTORY_START="$README_HISTORY_START" python3 - <<'PYEOF' || COUNTS_RC=$?
 import os
 import re
 import sys
@@ -933,8 +1188,9 @@ print(
     + str(actual["portable skill"]) + " portable, " + str(actual["lead workflow"]) + " lead workflows)"
 )
 PYEOF
-  if [ "$COUNTS_RC" -ne 0 ]; then
-    FAILED_CHECKS=$((FAILED_CHECKS + 1))
+    if [ "$COUNTS_RC" -ne 0 ]; then
+      FAILED_CHECKS=$((FAILED_CHECKS + 1))
+    fi
   fi
 fi
 
@@ -942,24 +1198,27 @@ fi
 AGENTS_MD='AGENTS.md'
 AGENTS_MD_MAX_LINES=200
 AGENTS_MD_MAX_BYTES=16384
-if [ -f "$AGENTS_MD" ]; then
-  # awk counts a final line without a trailing newline; wc -l would not.
-  AGENTS_MD_LINES=$(awk 'END { print NR }' "$AGENTS_MD")
-  AGENTS_MD_BYTES=$(wc -c < "$AGENTS_MD" | tr -d ' ')
-  if [ "$AGENTS_MD_LINES" -le "$AGENTS_MD_MAX_LINES" ] && [ "$AGENTS_MD_BYTES" -le "$AGENTS_MD_MAX_BYTES" ]; then
-    ok "AGENTS.md budget: $AGENTS_MD_LINES lines (max $AGENTS_MD_MAX_LINES), $AGENTS_MD_BYTES bytes (max $AGENTS_MD_MAX_BYTES)"
+if _selected budget; then
+  if [ -f "$AGENTS_MD" ]; then
+    # awk counts a final line without a trailing newline; wc -l would not.
+    AGENTS_MD_LINES=$(awk 'END { print NR }' "$AGENTS_MD")
+    AGENTS_MD_BYTES=$(wc -c < "$AGENTS_MD" | tr -d ' ')
+    if [ "$AGENTS_MD_LINES" -le "$AGENTS_MD_MAX_LINES" ] && [ "$AGENTS_MD_BYTES" -le "$AGENTS_MD_MAX_BYTES" ]; then
+      ok "AGENTS.md budget: $AGENTS_MD_LINES lines (max $AGENTS_MD_MAX_LINES), $AGENTS_MD_BYTES bytes (max $AGENTS_MD_MAX_BYTES)"
+    else
+      fail "AGENTS.md budget: $AGENTS_MD_LINES lines (max $AGENTS_MD_MAX_LINES), $AGENTS_MD_BYTES bytes (max $AGENTS_MD_MAX_BYTES) — over budget (R10)"
+    fi
   else
-    fail "AGENTS.md budget: $AGENTS_MD_LINES lines (max $AGENTS_MD_MAX_LINES), $AGENTS_MD_BYTES bytes (max $AGENTS_MD_MAX_BYTES) — over budget (R10)"
+    echo "skip: AGENTS.md budget (no root $AGENTS_MD yet)"
   fi
-else
-  echo "skip: AGENTS.md budget (no root $AGENTS_MD yet)"
 fi
 
 # --- 7. rule-inventory completeness (R11) ------------------------------------
 INVENTORY_MD='docs/rule-inventory.md'
-if [ -f "$INVENTORY_MD" ]; then
-  INVENTORY_RC=0
-  VV_INVENTORY="$INVENTORY_MD" python3 - <<'PYEOF' || INVENTORY_RC=$?
+if _selected inventory; then
+  if [ -f "$INVENTORY_MD" ]; then
+    INVENTORY_RC=0
+    VV_INVENTORY="$INVENTORY_MD" python3 - <<'PYEOF' || INVENTORY_RC=$?
 import glob
 import html
 import os
@@ -1133,11 +1392,12 @@ if fails:
 print("ok:   rule inventory: " + path + " — " + str(rows) + " rows in " + str(tables) + " table(s), matching the declared Totals for each of " + str(len(declared))
       + " sources; every row has a destination, no TBD cell, every cited destination path exists (" + str(len(cited)) + " distinct)")
 PYEOF
-  if [ "$INVENTORY_RC" -ne 0 ]; then
-    FAILED_CHECKS=$((FAILED_CHECKS + 1))
+    if [ "$INVENTORY_RC" -ne 0 ]; then
+      FAILED_CHECKS=$((FAILED_CHECKS + 1))
+    fi
+  else
+    echo "skip: rule-inventory completeness (no $INVENTORY_MD yet)"
   fi
-else
-  echo "skip: rule-inventory completeness (no $INVENTORY_MD yet)"
 fi
 
 # --- 8. retired commands/ and agents/ (U23, U8) ------------------------------
@@ -1146,27 +1406,30 @@ fi
 # plugin host auto-loads them from the plugin root, so a lease re-creating
 # commands/*.md (a live command) or agents/*.md (a live subagent with its own
 # tools) must hit the gate.
-for RETIRED in commands agents; do
-  case "$RETIRED" in
-    commands) RETIRED_KIND="command"; RETIRED_NOW="the lead workflows are skills/at-*/" ;;
-    *)        RETIRED_KIND="subagent"; RETIRED_NOW="the personas are personas/*.md" ;;
-  esac
-  RETIRED_MD=$(ls "$RETIRED"/*.md 2>/dev/null | grep -c . || true)
-  if [ "$RETIRED_MD" -ne 0 ]; then
-    ls "$RETIRED"/*.md
-    fail "$RETIRED/: $RETIRED_MD $RETIRED/*.md in the plugin checkout — 4.0 ships none ($RETIRED_NOW); the plugin host auto-loads $RETIRED/, so each stray file is a live $RETIRED_KIND (see the paths above)"
-  elif ! grep -qE "^[[:space:]]*\"[^\"]*\",?[[:space:]]*.*\"$RETIRED/\"," scripts/lib/registry.sh && ! grep -qE "^[[:space:]]*\"$RETIRED/\"," scripts/lib/registry.sh; then
-    fail "$RETIRED/: \"$RETIRED/\" is not on FRAMEWORK_PROTECTED in scripts/lib/registry.sh — the directory ships empty but the plugin host auto-loads it, so a lease that re-creates $RETIRED/*.md must hit the promotion gate (rc 42)"
-  else
-    ok "$RETIRED/: no $RETIRED/*.md in the plugin checkout (4.0 ships none); \"$RETIRED/\" stays on FRAMEWORK_PROTECTED (the plugin host auto-loads the directory)"
-  fi
-done
+if _selected retired; then
+  for RETIRED in commands agents; do
+    case "$RETIRED" in
+      commands) RETIRED_KIND="command"; RETIRED_NOW="the lead workflows are skills/at-*/" ;;
+      *)        RETIRED_KIND="subagent"; RETIRED_NOW="the personas are personas/*.md" ;;
+    esac
+    RETIRED_MD=$(ls "$RETIRED"/*.md 2>/dev/null | grep -c . || true)
+    if [ "$RETIRED_MD" -ne 0 ]; then
+      ls "$RETIRED"/*.md
+      fail "$RETIRED/: $RETIRED_MD $RETIRED/*.md in the plugin checkout — 4.0 ships none ($RETIRED_NOW); the plugin host auto-loads $RETIRED/, so each stray file is a live $RETIRED_KIND (see the paths above)"
+    elif ! grep -qE "^[[:space:]]*\"[^\"]*\",?[[:space:]]*.*\"$RETIRED/\"," scripts/lib/registry.sh && ! grep -qE "^[[:space:]]*\"$RETIRED/\"," scripts/lib/registry.sh; then
+      fail "$RETIRED/: \"$RETIRED/\" is not on FRAMEWORK_PROTECTED in scripts/lib/registry.sh — the directory ships empty but the plugin host auto-loads it, so a lease that re-creates $RETIRED/*.md must hit the promotion gate (rc 42)"
+    else
+      ok "$RETIRED/: no $RETIRED/*.md in the plugin checkout (4.0 ships none); \"$RETIRED/\" stays on FRAMEWORK_PROTECTED (the plugin host auto-loads the directory)"
+    fi
+  done
+fi
 
 # --- 9. lead-workflow surfaces (the at- prefix and the enumerated names) ------
-LEADWF_RC=0
-VV_SYNC="scripts/lib/skills-sync.py" VV_PROBE="scripts/probe-capabilities.sh" VV_VSKILLS="scripts/validate-skills.sh" \
-VV_SELF="scripts/validate-versions.sh" VV_HOOK="hooks/handlers/session-start.sh" \
-VV_STATUS="skills/at-status/references/status-template.md" python3 - <<'PYEOF' || LEADWF_RC=$?
+if _selected workflows; then
+  LEADWF_RC=0
+  VV_SYNC="scripts/lib/skills-sync.py" VV_PROBE="scripts/probe-capabilities.sh" VV_VSKILLS="scripts/validate-skills.sh" \
+  VV_SELF="scripts/validate-versions.sh" VV_HOOK="hooks/handlers/session-start.sh" \
+  VV_STATUS="skills/at-status/references/status-template.md" python3 - <<'PYEOF' || LEADWF_RC=$?
 import os
 import re
 import sys
@@ -1241,26 +1504,28 @@ for line in fails:
     print("FAIL: lead workflows: " + line)
 sys.exit(1 if fails else 0)
 PYEOF
-if [ "$LEADWF_RC" -ne 0 ]; then
-  FAILED_CHECKS=$((FAILED_CHECKS + 1))
-fi
-BARE_MENTIONS=$(
-  grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" -e '\$at-' . 2>/dev/null \
-    | grep -vE '^(\./)?(ops/|scripts/fixtures/validate-skills/c24-bare-mention/)' \
-    | _shipped_surfaces \
-    | sort -t: -k1,1 -k2,2n || true
-)
-if [ -n "$BARE_MENTIONS" ]; then
-  printf '%s\n' "$BARE_MENTIONS"
-  BARE_COUNT=$(printf '%s\n' "$BARE_MENTIONS" | grep -c . || true)
-  fail "lead workflows: $BARE_COUNT bare \$at- mention(s) on shipped surfaces (listed above as file:line:text). Codex attaches a plugin skill only as \$agent-triforge:at-<name>; a bare \$at-<name> attaches nothing."
-else
-  ok "lead workflows: no bare \$at- mention on shipped surfaces (Codex form: \$agent-triforge:at-<name>)"
+  if [ "$LEADWF_RC" -ne 0 ]; then
+    FAILED_CHECKS=$((FAILED_CHECKS + 1))
+  fi
+  BARE_MENTIONS=$(
+    grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" -e '\$at-' . 2>/dev/null \
+      | grep -vE '^(\./)?(ops/|scripts/fixtures/validate-skills/c24-bare-mention/)' \
+      | _shipped_surfaces \
+      | sort -t: -k1,1 -k2,2n || true
+  )
+  if [ -n "$BARE_MENTIONS" ]; then
+    printf '%s\n' "$BARE_MENTIONS"
+    BARE_COUNT=$(printf '%s\n' "$BARE_MENTIONS" | grep -c . || true)
+    fail "lead workflows: $BARE_COUNT bare \$at- mention(s) on shipped surfaces (listed above as file:line:text). Codex attaches a plugin skill only as \$agent-triforge:at-<name>; a bare \$at-<name> attaches nothing."
+  else
+    ok "lead workflows: no bare \$at- mention on shipped surfaces (Codex form: \$agent-triforge:at-<name>)"
+  fi
 fi
 
 # --- 10. other-harness skill manifests (R22) ---------------------------------
-MANIFESTS_RC=0
-python3 - <<'PYEOF' || MANIFESTS_RC=$?
+if _selected manifests; then
+  MANIFESTS_RC=0
+  python3 - <<'PYEOF' || MANIFESTS_RC=$?
 import json
 import os
 import re
@@ -1366,12 +1631,89 @@ if fails:
 print("ok:   skill manifests: " + DEVIN + " (Devin) and " + PI + " pi.skills (Pi) list exactly the " + str(len(portable))
       + " portable skill directories, no at-* workflow, metadata and skills only; no root .devin-plugin/, nothing else Devin loads under skills/")
 PYEOF
-if [ "$MANIFESTS_RC" -ne 0 ]; then
-  FAILED_CHECKS=$((FAILED_CHECKS + 1))
+  if [ "$MANIFESTS_RC" -ne 0 ]; then
+    FAILED_CHECKS=$((FAILED_CHECKS + 1))
+  fi
+fi
+
+# --- 11. halt threshold ------------------------------------------------------
+if _selected halt; then
+  HALT_RC=0
+  VV_README_HISTORY_START="$README_HISTORY_START" python3 - <<'PYEOF' || HALT_RC=$?
+import html
+import os
+import re
+import sys
+
+# A builder halts at MORE THAN 50 changed files (AGENTS.md §Delegation). Each
+# INCLUSIVE alternative is a phrasing under which 50 itself halts; EXCLUSIVE
+# lists the phrasings of the rule, counted for the ok line. Both need a
+# comparator, so a bare count ("50 files") never matches.
+FILES = r"(?:changed\s+|modified\s+)?files?(?:\s+changes?)?\b"
+EDGE = r"(?<![\w.,])"           # 50 itself: not 150, 2.50 or 1,50
+END = r"(?!\w|[.,]\d)"          # 50 itself: not 500 or 50.5; a full stop may follow
+INCLUSIVE = re.compile(
+    EDGE + r"50\s*\+\s*" + FILES                                                    # 50+ file changes
+    + r"|" + EDGE + r"50\s+(?:or|and)\s+(?:more|above|over|greater|up)\s+" + FILES  # 50 or more files
+    + r"|" + EDGE + r"50\s+" + FILES + r"\s+or\s+(?:more|above|over|greater)\b"     # 50 files or more
+    + r"|\b(?:at\s+least|no\s+fewer\s+than|not\s+fewer\s+than)\s+50\s+" + FILES      # at least 50 files
+    + r"|\bhalt\w*\s+(?:[^\s.;:!?]+\s+){0,12}?at\s+50\s+" + FILES                   # halt … at 50 files, in one clause
+    + r"|(?:≥|>=|=>)\s*50\s+" + FILES                                                # >= 50 changed files
+    + r"|\bfiles?(?:\s+changes?)?\s*(?:≥|>=|=>)\s*50" + END,                         # file changes >= 50
+    re.I,
+)
+EXCLUSIVE = re.compile(
+    r"\b(?:more\s+than|over|above)\s+50\s+" + FILES                                  # more than 50 changed files
+    + r"|(?<![=>≥])>\s*50\s+" + FILES                                                # > 50 files
+    + r"|\bfiles?(?:\s+changes?)?\s*>(?!=)\s*50" + END,                              # file changes > 50
+    re.I,
+)
+# Markup that renders as nothing is dropped first; a removed tag keeps its
+# newlines, so line numbers hold.
+TAG = re.compile(r"<!--.*?(?:-->|$)|</?[A-Za-z][A-Za-z0-9-]*(?:\s[^>]*)?/?>", re.S)
+EMPHASIS = re.compile(r"[*_`]")
+SCOPE = "skills/, AGENTS.md, README.md, docs/index.html, docs/agent-triforge.md"
+
+readme_history_start = int(os.environ["VV_README_HISTORY_START"] or "0")
+paths = [p for p in ("AGENTS.md", "README.md", "docs/index.html", "docs/agent-triforge.md") if os.path.isfile(p)]
+for top, dirs, names in os.walk("skills"):
+    dirs.sort()
+    paths.extend(os.path.join(top, n) for n in sorted(names))
+
+fails = []
+stated = 0
+for path in paths:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except (OSError, UnicodeDecodeError):
+        continue    # not text: states no threshold (grep -I skips it too)
+    if path == "README.md" and readme_history_start:
+        # the release ledger names what each past release did
+        text = "\n".join(text.split("\n")[:readme_history_start - 1])
+    text = TAG.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+    text = EMPHASIS.sub("", html.unescape(text))
+    for m in INCLUSIVE.finditer(text):
+        fails.append(path + ":" + str(text.count("\n", 0, m.start()) + 1) + ": \"" + " ".join(m.group(0).split())
+                     + "\" halts at 50 itself — the threshold is more than 50 changed files (AGENTS.md §Delegation)")
+    stated += len(EXCLUSIVE.findall(text))
+
+for line in fails:
+    print("FAIL: halt threshold: " + line)
+if fails:
+    sys.exit(1)
+print("ok:   halt threshold: " + str(stated) + " statement(s) of more than 50 changed files and none that halts at 50 itself (50+, 50 or more, at least 50, >= 50) in " + SCOPE)
+PYEOF
+  if [ "$HALT_RC" -ne 0 ]; then
+    FAILED_CHECKS=$((FAILED_CHECKS + 1))
+  fi
 fi
 
 # --- summary -----------------------------------------------------------------
-if [ "$FAILED_CHECKS" -eq 0 ]; then
+if [ "$FAILED_CHECKS" -eq 0 ] && [ -n "$ONLY" ]; then
+  echo "validate-versions: PASS (--only $ONLY)"
+  exit 0
+elif [ "$FAILED_CHECKS" -eq 0 ]; then
   echo "validate-versions: PASS — plugin $PLUGIN_V, ladder: one definition ($LADDER_SOURCE), $PERSONA_COUNT personas / $SKILL_COUNT skills ($PORTABLE_COUNT portable, $WORKFLOW_COUNT lead workflows)"
   exit 0
 fi

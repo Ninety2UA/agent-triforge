@@ -61,7 +61,7 @@ Start it detached in one block, `persona_spawn "$RUN" plan-checker plan-checker 
 - Fewer than 5 independent tasks → sub-agent mode with wave orchestration.
 - 5 or more tasks, or interdependent tasks, or `--team` → agent-team mode with the `team-lead` persona.
 - Approved merges land as one commit per task on the sprint integration branch (`lease_merge` refuses the default branch); the `integration-verifier` persona runs against that branch between waves (`--at ref:<integration branch>`), then the lead promotes to the main branch with `lease_promote`, which honors `[promotion]` and BLOCKS on protected-path diffs (they force the gate on).
-- Apply risk scoring (halt at risk above 20 % or 50+ file changes).
+- Apply risk scoring (halt at risk above 20 % or more than 50 changed files).
 
 ## Phase 3: parallel review
 

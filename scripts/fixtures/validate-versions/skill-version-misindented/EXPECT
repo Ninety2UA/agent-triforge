@@ -1,0 +1,7 @@
+# A version line indented deeper than its metadata siblings is not
+# metadata.version (YAML would not read it as one either), so the skill fails as
+# having none, even though the value itself equals plugin.json.
+check: skill-versions
+rc: 1
+line: FAIL: skill versions: skills/demo/SKILL.md has no metadata.version; .claude-plugin/plugin.json is "1.2.3"
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)
