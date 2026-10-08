@@ -25,6 +25,7 @@
 - ops/TASKS.md is generated at runtime, not committed — don't link to it in README.
 
 - **grep -oP is NOT portable** — BSD grep on macOS lacks -P flag. Use `sed -n 's/pattern/\1/p'` instead. See: ops/solutions/2026-03-26-grep-posix-portability.md
+- **A SELF case compares against the physical work path** — the harness's `WORK` is `"${TMPDIR}/triforge-probes.XXXXXX"`; macOS's `TMPDIR` ends in `/` and sits below the `/var` symlink, so a case that greps a helper's output (realpath, `pwd -P`, a `cd`'s `$PWD`) for the raw `"$WORK/..."` fails only under `--self-only`. Resolve the row's directory with `pwd -P` right after making it (SELF-16, SELF-25) and run new cases once with a single-row runner given the harness's `WORK` (review round 2, 910a117).
 - **Hooks are registered in `hooks/hooks.json` (plugin)** — hook commands use `${CLAUDE_PLUGIN_ROOT}/hooks/handlers/` paths. Each entry needs `{ "matcher": "...", "hooks": [{ "type": "command", "command": "..." }] }`. The flat format `{ "command": "...", "timeout": ... }` causes Claude Code to skip the entire config. See: ops/solutions/2026-03-26-settings-json-required-for-hooks.md
 - context-monitor.sh state file (`.claude/context-monitor.local.md`) must be cleaned between sessions — session-start.sh does this via `rm -f` on startup. The `.claude/` directory is created by `mkdir -p .claude` in both session-start.sh and context-monitor.sh.
 - context-monitor.sh: unknown tools should reset the read counter (not increment it) to avoid false paralysis warnings.
