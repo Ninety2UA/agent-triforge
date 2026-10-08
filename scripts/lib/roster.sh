@@ -352,7 +352,11 @@ dispatch_role() {
 # and on stderr). The envelope's result text lands in <output-file>
 # (the envelope itself beside it, <output-file>.raw and .envelope); a run that
 # returns no envelope leaves the CLI's own output there. Returns the CLI's
-# exit code, with INVOKE_FAILURE_CLASS set as the invoke_* helpers set it.
+# exit code, with INVOKE_FAILURE_CLASS set as the invoke_* helpers set it. A
+# checkout that is the home directory or contains it is no project
+# (_lease_ctx refuses it, _LEASE_CTX_WHY=home): there the worker would run
+# without the git-dir deny, so nothing runs, rc 69 and deterministic, as
+# invoke_grok refuses the same case.
 _dispatch_role_claude() {
   local ROLE=$1 AGENT_NAME=$2 PROMPT=$3 OUT=$4 TIMEOUT=$5 MODEL=$6 EFFORT=$7 CLASS=read RC=0 TOBIN
   local -a DENY=()
@@ -373,6 +377,10 @@ _dispatch_role_claude() {
   if _lease_ctx 2>/dev/null; then
     DENY+=("$_LEASE_COMMON")
     if [ "$CLASS" = edit ]; then DENY+=("$_LEASE_LEDGER"); fi
+  elif [ "${_LEASE_CTX_WHY:-}" = home ]; then
+    echo "dispatch_role: ERROR $(pwd -P | LC_ALL=C tr -d '\000-\037\177') is in a checkout that is your home directory or contains it, and a home directory is no project — cannot run '${AGENT_NAME}' there. Run it from the project's own repository (inside a home directory that is a git repository, git init the project first). No retry (deterministic)." >&2
+    INVOKE_FAILURE_CLASS="deterministic"
+    return 69
   fi
   if [ "$CLASS" = read ]; then DENY+=("$(pwd -P)"); fi
   # Expanded only when set: outside a git repository the edit class has none.

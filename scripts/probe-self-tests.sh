@@ -95,6 +95,27 @@ _self_repo() {
       && git add -A && git commit -qm init && git checkout -q -b "$3" ) >/dev/null 2>&1
 }
 
+# _self_tree_digest <dir> — one sha256 over every name, type, link target and
+# file content under <dir>: equal before and after = byte-identical (the HOME
+# cases of SELF-18 and SELF-20).
+_self_tree_digest() {
+  S_TD="$1" python3 -c '
+import hashlib, os
+root, h = os.environ["S_TD"], hashlib.sha256()
+for d, dirs, files in os.walk(root):
+    dirs.sort()
+    for n in sorted(dirs + files):
+        p = os.path.join(d, n)
+        h.update(os.path.relpath(p, root).encode("utf-8", "surrogateescape") + b"\0")
+        if os.path.islink(p):
+            h.update(b"L" + os.readlink(p).encode("utf-8", "surrogateescape"))
+        elif os.path.isfile(p):
+            h.update(b"F" + open(p, "rb").read())
+        else:
+            h.update(b"D")
+print(h.hexdigest())'
+}
+
 # _self_wait_rc <task> — wait for the builder's exit record (<output_file>.rc)
 # of <task>, 30 s at most. Needs the library sourced.
 _self_wait_rc() {
@@ -5634,7 +5655,7 @@ rm -rf "$_S15"
 #   homerepo   the case's HOME is itself a git repository (a dotfiles repo): lease_create from HOME and from a directory
 #              in it, and lease_wait -> rc 1 with one ERROR line; coordinate.sh -> 44 before any session (its stub lead
 #              never runs); the persona lane's task: and ref: targets -> 64; no ~/ops, no lease root, HOME
-#              byte-identical (_s18_tree_digest); a project with its own repository under that HOME leases and collects
+#              byte-identical (_self_tree_digest); a project with its own repository under that HOME leases and collects
 # plus a static check that every git call in scripts/lib/lease.sh and
 # scripts/lib/lease-wait.sh goes through _lead_git (review finding #23).
 # _s18_git_scan lexes each file as shell,
@@ -6218,25 +6239,6 @@ printf '%s\n' "$O" | grep -q '^graph-diff=\[feature\.txt \]$' \
 # homerepo: a home directory is no project. The case's HOME is a dotfiles
 # repository with a project of its own repository in it (proj); a lease helper
 # run from HOME or from a directory in it refuses before it writes anything.
-# _s18_tree_digest <dir> — one sha256 over every name, type, link target and
-# file content under <dir>: equal before and after = byte-identical.
-_s18_tree_digest() {
-  S18_D="$1" python3 -c '
-import hashlib, os
-root, h = os.environ["S18_D"], hashlib.sha256()
-for d, dirs, files in os.walk(root):
-    dirs.sort()
-    for n in sorted(dirs + files):
-        p = os.path.join(d, n)
-        h.update(os.path.relpath(p, root).encode("utf-8", "surrogateescape") + b"\0")
-        if os.path.islink(p):
-            h.update(b"L" + os.readlink(p).encode("utf-8", "surrogateescape"))
-        elif os.path.isfile(p):
-            h.update(b"F" + open(p, "rb").read())
-        else:
-            h.update(b"D")
-print(h.hexdigest())'
-}
 _s18_setup homerepo
 _s18_clean homerepo
 ( cd "$_S18/homerepo/home" && export HOME="$_S18/homerepo/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main . \
@@ -6245,7 +6247,7 @@ _s18_clean homerepo
     && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" && mkdir ops \
     && printf '[roles.builder]\ncli = "claude"\n' > ops/roster.toml && echo r > README.md && git add -A && git commit -qm init \
     && git checkout -q -b sprint/home ) >/dev/null 2>&1
-_S18_HD0=$(_s18_tree_digest "$_S18/homerepo/home")
+_S18_HD0=$(_self_tree_digest "$_S18/homerepo/home")
 # not _s18_try, which keeps each call's stderr in $HOME: captured here instead
 O=$(_s18_lead homerepo 'R=0; E=$(lease_create t builder 2>&1 >/dev/null) || R=$?; printf "fromhome-rc=%s\n%s\n" "$R" "$E"
 echo "ops-made=$([ -e ops ] && echo yes || echo no) root-made=$([ -e "$TRIFORGE_LEASE_ROOT" ] && echo yes || echo no)"' home)
@@ -6273,7 +6275,7 @@ $(_s18_lead homerepo 'R=0; _persona_target dispatch_persona task:t >/dev/null 2>
 R=0; _persona_target dispatch_persona ref:HEAD >/dev/null 2>&1 || R=$?; echo "persona-ref-rc=$R"' home)"
 _s18_expect homerepo-coord "$O" 'coord-rc=44' '^coordinate\.sh: STOPPED before starting a session — this checkout is your home directory or contains it' \
   '^lead-ran=no$' '^persona-task-rc=64$' '^persona-ref-rc=64$'
-[ "$(_s18_tree_digest "$_S18/homerepo/home")" = "$_S18_HD0" ] || _S18_FAIL="$_S18_FAIL homerepo(home-changed)"
+[ "$(_self_tree_digest "$_S18/homerepo/home")" = "$_S18_HD0" ] || _S18_FAIL="$_S18_FAIL homerepo(home-changed)"
 [ ! -e "$_S18/homerepo/leases" ] || _S18_FAIL="$_S18_FAIL homerepo(lease-root-made)"
 O=$(_s18_lead homerepo '_s18_go t; _s18_try collect lease_collect t; echo "state=$(_ledger_get t state) ledger=$([ -f ops/leases.toml ] && echo yes || echo no)"' home/proj)
 _s18_expect homerepo-proj "$O" 'collect-rc=0' '^state=review ledger=yes$'
@@ -7261,6 +7263,11 @@ rm -rf "$_S19"
 #             under a codex lead the stub runs as claude -p with the read-only
 #             tool set and dontAsk, and the result text lands in the output
 #             file, rc 0
+#   home      a codex lead's tester (and reviewer) resolving to claude, from a
+#             HOME that is itself a git repository: rc 69, deterministic, one
+#             ERROR line naming HOME as no project, the stub never runs, HOME
+#             byte-identical; from a project with its own repository under
+#             that HOME the tester runs, rc 0
 _S20="${WORK}/self20"
 _S20_FAIL=""
 _S20_SID="7d0f3a52-1b2c-4d5e-8f90-0123456789ab"
@@ -7501,9 +7508,36 @@ O=$( cd "$_S20/clead" && export $_S20_ENV && source "${_SELF_DIR}/invoke-externa
 ) 2>&1 || true
 _S20_FAIL="${_S20_FAIL}$(_self_expect dispatch "$O" '^clead:rc=40:stub=idle:out=DISPATCH_ROLE_CLAUDE$' '^xlead:rc=0:out=REVIEW-OK no findings' '^xlead-argv:p=1:json=json:mode=dontAsk:edit=0:last=PROMPT-S20R$')"
 
+# home: a HOME that is itself a git repository is no project. Its own
+# ops/roster.toml (a codex lead, tester and reviewer on claude) routes both
+# roles to _dispatch_role_claude, which refuses there before the worker runs;
+# the project of its own repository under that HOME runs the tester
+_S20_H="$_S20/hrepo"
+_self_repo "$_S20_H" "$_S20_H" dots '[lead]\ncli = "codex"\n\n[roles.tester]\ncli = "claude"\n\n[roles.reviewer]\ncli = "claude"\n'
+_self_repo "$_S20_H/proj" "$_S20_H" sprint/s20 '[lead]\ncli = "codex"\n\n[roles.tester]\ncli = "claude"\n'
+mkdir -p "$_S20_H/docs"
+printf 'tester\n' > "$_S20/tmp/s20-mode"
+rm -f "$_S20"/tmp/s20-rec.*
+_S20_HD0=$(_self_tree_digest "$_S20_H")
+# shellcheck disable=SC2086
+O=$( cd "$_S20_H/docs" && export $_S20_ENV HOME="$_S20_H" TRIFORGE_TEST_LEAD=codex && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for ROLE in tester reviewer; do
+    R=0; dispatch_role "$ROLE" test_writer "PROMPT-S20H" "$_S20/home-${ROLE}.out" 30 >/dev/null 2>"$_S20/home-${ROLE}.err" || R=$?
+    echo "home-${ROLE}:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:stub=$([ -f "$_S20/tmp/s20-rec.n" ] && echo ran || echo idle)"
+    grep '^dispatch_role: ERROR' "$_S20/home-${ROLE}.err" || true
+  done
+  echo "home-identical=$([ "$(_self_tree_digest "$_S20_H")" = "$_S20_HD0" ] && echo yes || echo no)"
+  cd "$_S20_H/proj" || exit 0
+  R=0; dispatch_role tester test_writer "PROMPT-S20P" "$_S20/proj-tester.out" 30 >/dev/null 2>&1 || R=$?
+  echo "proj-tester:rc=${R}:stub=$([ -f "$_S20/tmp/s20-rec.n" ] && echo ran || echo idle)"
+) 2>&1 || true
+_S20_FAIL="${_S20_FAIL}$(_self_expect home "$O" '^home-tester:rc=69:class=deterministic:stub=idle$' '^home-reviewer:rc=69:class=deterministic:stub=idle$' \
+  '^dispatch_role: ERROR .*/hrepo/docs is in a checkout that is your home directory or contains it, and a home directory is no project' \
+  '^home-identical=yes$' '^proj-tester:rc=0:stub=ran$')"
+
 _S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON envelope (subtype, is_error, session_id), explicit tool sets, --max-turns, session resume, the sandbox settings and their Claude Code floor, the claude env arm, .claude/skills provisioning that adds names only, max-turns routed as report missing, dispatch_role running claude -p under a codex lead (KTD16, R2/R3)"
 if [ -z "$_S20_FAIL" ]; then
-  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools)" "static"
+  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0" "static"
 else
   row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S20_FAIL"):$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"
 fi
