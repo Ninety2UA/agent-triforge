@@ -57,7 +57,10 @@ its lease worktree. Outside a lease, `invoke_grok` runs a reviewer or analyst
 in a scratch checkout of HEAD and removes it afterwards, also on an interrupt.
 Before the checkout goes, anything grok or its `grok inspect` left running
 (a hook, an LSP server) is stopped, at the timeout too. If something can't be
-stopped, the checkout stays and the error names it.
+stopped, the checkout stays and the error names it. The inspects that
+`lease_create` and at-setup's check run are handled the same way: if what
+one left can't be stopped, nothing is leased (or the check fails), and the
+worktree (or the check's directory) stays and is named.
 That checkout is a new repository that borrows the lead's objects, and git
 reads no config but its own while making it. So no filter or hook named in
 the lead's `.git/config` runs, and the lead's `.git` gets no worktree entry.

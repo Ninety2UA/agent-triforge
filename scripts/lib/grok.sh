@@ -374,11 +374,11 @@ with os.fdopen(fd, "w", encoding="utf-8") as out:
 
 # _grok_lease_config <worktree> [edit|read] [supervised] — the
 # .grok/config.toml a grok worker's worktree runs with (a lease worktree, or
-# invoke_grok's scratch one, which passes "supervised": its inspect then runs
-# under the run supervisor, below), the one place grok reads per project that
-# reaches plugins and MCP servers (GRK-06; the env switches and the
-# GROK_CONFIG overlay do not, and a session starts the ~/.claude.json servers
-# that `grok inspect` reports off):
+# invoke_grok's scratch one; a caller in the lead's own shell passes
+# "supervised", and the inspect then runs under the run supervisor, below),
+# the one place grok reads per project that reaches plugins and MCP servers
+# (GRK-06; the env switches and the GROK_CONFIG overlay do not, and a session
+# starts the ~/.claude.json servers that `grok inspect` reports off):
 #   [plugins] disabled  every plugin `grok inspect --json` finds from the
 #                       worktree under _GROK_ENV and the overlay, plus every
 #                       Claude Code plugin ~/.claude/plugins/installed_plugins.json
@@ -433,9 +433,9 @@ with os.fdopen(fd, "w", encoding="utf-8") as out:
 # own skills, .agents/skills included, are not plugins and stay. The edit
 # class (a builder lease) prints no NOTE, then writes its sandbox profile
 # (_grok_sandbox_profile); rc 1 when that fails, the config written. A
-# supervised inspect whose leftovers its supervisor could not stop is refused
-# with rc 80: one of them may still run in <worktree>, which the caller then
-# leaves in place.
+# supervised inspect whose leftovers its supervisor could not stop or list is
+# refused with rc 80: one of them may still run in <worktree>, which every
+# caller then leaves in place and names.
 # _lease_provision records both files as provisioned, so the snapshot never
 # carries them (KTD9).
 _grok_lease_config() {
@@ -446,14 +446,19 @@ _grok_lease_config() {
     return 1
   fi
   POLICY=$(_grok_shell_policy) || return 1
-  # timeout --foreground keeps the inspect in the caller's process group, so
-  # an interrupt, or a stop of a lease builder's group, that reaches the
-  # caller stops it too. "supervised" (invoke_grok's scratch, from the lead's
-  # own shell, where no group stop follows) runs it as invoke_grok runs grok:
-  # under the run supervisor (_PERSONA_RUN_PY) with a timeout that is not
-  # --foreground, so whatever the inspect leaves running in its process group
-  # or below it is stopped when it ends, at the deadline too, before the
-  # scratch goes (an unresolved stop: refused, rc 80)
+  # "supervised" (each caller in the lead's own shell, where no group stop
+  # follows: invoke_grok's scratch, grok_read_isolation_check, and lease_create
+  # and lease_requeue through _lease_provision) runs the inspect as invoke_grok
+  # runs grok: under the run supervisor (_PERSONA_RUN_PY) with a timeout that
+  # is not --foreground, so whatever it leaves running in its process group or
+  # below it is stopped when it ends, at the deadline too, before the caller
+  # goes on (an unresolved stop: refused, rc 80). Without it (the check
+  # _lease_lane_argv runs before each read-class dispatch, inside the detached
+  # builder) timeout --foreground keeps the inspect in the builder's process
+  # group, where the builder's exit sweep (_LEASE_OWN_GROUP_PY) and the lead's
+  # stop of that group (TERM, then KILL a second later: _lease_kill_builder)
+  # reach it; a supervised inspect would sit in a group of its own, whose 3 s
+  # sweep that KILL would cut short
   if ! command -v grok >/dev/null 2>&1; then
     IRC=127
   elif ! TOBIN=$(_timeout_tool); then
@@ -666,14 +671,23 @@ if found:
 # rc 1 and the refusal on stdout: a user config layer that does not parse,
 # grok absent, or an inspect that fails, since no read-class run would start
 # then either. It runs `grok inspect --json` and reads the config layers; it
-# never writes under GROK_HOME.
+# never writes under GROK_HOME. The inspect runs supervised, as invoke_grok's
+# does (_grok_lease_config ... supervised): what it leaves running is stopped
+# before the directory goes, and when that stop is unresolved the check fails
+# (rc 1) with the directory left in place and named, since a process of the
+# inspect may still run in it.
 grok_read_isolation_check() {
   local D OUT="" RC=0
   D=$(mktemp -d "${TMPDIR:-/tmp}/triforge-grok-check.XXXXXX") || {
     echo "grok: could not make a scratch directory under ${TMPDIR:-/tmp} to run the check from"
     return 1
   }
-  OUT=$(_grok_lease_config "$D" read 2>&1) || RC=$?
+  OUT=$(_grok_lease_config "$D" read supervised 2>&1) || RC=$?
+  if [ "$RC" -eq 80 ]; then
+    printf '%s\n' "$OUT"
+    echo "grok: unresolved cleanup — a process the check's grok inspect left may still be running, so its scratch directory ${D} stays; remove it (rm -rf) once ps shows that process has ended"
+    return 1
+  fi
   rm -rf "$D"
   if [ "$RC" -ne 0 ]; then
     printf '%s\n' "${OUT:-grok: the read-class check failed to run}"
@@ -795,7 +809,7 @@ _grok_run_in() {
       exit 1
     fi
     cd "${D}/wt" || { _grok_scratch_drop "$D"; exit 1; }
-    _adapter_env grok python3 -c "$_PERSONA_RUN_PY" 5 "$2" -k 10s "${3}s" "${_GROK_ARGV[@]}" "$4" < /dev/null &
+    _adapter_env grok env "TRIFORGE_RUN_LABEL=invoke_grok|grok" python3 -c "$_PERSONA_RUN_PY" 5 "$2" -k 10s "${3}s" "${_GROK_ARGV[@]}" "$4" < /dev/null &
     C=$!
     R=0
     wait "$C" || R=$?
@@ -958,7 +972,7 @@ invoke_grok() {
   local EFFORT=${5:-${GROK_EFFORT:-}}
   local MODEL="${GROK_MODEL:-grok-4.7}"
   local ROLE=${GROK_ROLE:-$AGENT_NAME}
-  local CLASS="" MODE="raw" EXIT_CODE=0 STOP="" BODY="" AVAILABLE="" TOBIN="" SHA="" NOTE="" RC=0
+  local CLASS="" MODE="raw" EXIT_CODE=0 STOP="" BODY="" AVAILABLE="" TOBIN="" SHA="" NOTE="" RC=0 CTX=""
   local RAW="${OUTPUT_FILE}.raw"
   local ERR="${OUTPUT_FILE}.err"
   local READY="${OUTPUT_FILE}.ready"
@@ -1013,15 +1027,21 @@ ${PROMPT}"
   }
   _grok_argv "$CLASS" "$MODEL" "$EFFORT" || return 1
   # The lead's checkout, and its git state as lease_create checks it before a
-  # carve (R1, KTD18), before any checkout is made
-  if ! _lease_ctx 2>/dev/null; then
-    if [ "${_LEASE_CTX_WHY:-}" = home ]; then
-      _grok_unisolated "$AGENT_NAME" "$OUTPUT_FILE" "a grok reviewer or analyst runs from a scratch checkout of HEAD, and ${PWD} is in a checkout that is your home directory or contains it, which is no project."
-    else
-      _grok_unisolated "$AGENT_NAME" "$OUTPUT_FILE" "a grok reviewer or analyst runs from a scratch checkout of HEAD, and ${PWD} is not inside a git checkout."
-    fi
+  # carve (R1, KTD18), before any checkout is made. The refusal names the
+  # cause _lease_ctx found (_LEASE_CTX_WHY): a lease root or .git it can't use
+  # by _lease_ctx's own line, which goes to the .err file meanwhile
+  _LEASE_CTX_WHY=""
+  if ! _lease_ctx 2> "$ERR"; then
+    case "$_LEASE_CTX_WHY" in
+      home)  CTX="${PWD} is in a checkout that is your home directory or contains it, which is no project." ;;
+      nogit) CTX="${PWD} is not inside a git checkout." ;;
+      *)     CTX="the lead's lease context can't be set up from ${PWD} (${_LEASE_CTX_WHY:-unwritable ${ERR}}): $(sed -n 's/^lease: ERROR //p' "$ERR" 2>/dev/null | head -1 | LC_ALL=C tr -d '\000-\037\177' || true)" ;;
+    esac
+    rm -f "$ERR"
+    _grok_unisolated "$AGENT_NAME" "$OUTPUT_FILE" "a grok reviewer or analyst runs from a scratch checkout of HEAD, and ${CTX}"
     return 69
   fi
+  rm -f "$ERR"
   _grok_recheck "$AGENT_NAME" "$ROLE" "$OUTPUT_FILE" || RC=$?
   if [ "$RC" -ne 0 ]; then
     return "$RC"

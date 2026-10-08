@@ -1560,10 +1560,16 @@ sys.exit(1 if left else 0)
 # named on stderr; a CLI's own 80 reads the same), or 70 when the supervisor
 # itself failed after the start (the traceback on stderr; the sweep still
 # ran). A process that leaves the group and its parent between two looks (a
-# daemon's double fork) is not seen.
+# daemon's double fork) is not seen. Its stderr lines name the helper and the
+# CLI from TRIFORGE_RUN_LABEL, "<helper>|<cli>" (invoke_grok passes
+# "invoke_grok|grok" inside the env -i command), which it takes out of the
+# environment before the command starts; unset, they read as the persona
+# lane's: "dispatch_persona" and "the persona CLI".
 _PERSONA_RUN_PY="${_PERSONA_STOP_DEFS}"'
 import select, traceback
 grace, known, child, pending = float(sys.argv[1]), {}, [], []
+who, _, cli = (os.environ.pop("TRIFORGE_RUN_LABEL", "") or "dispatch_persona|the persona CLI").partition("|")
+cli = cli or "the CLI"
 def track():
     t = ps_table()
     if t is None or not child:
@@ -1614,7 +1620,7 @@ def sweep(g):
             except OSError:
                 break
     if left is None or left:
-        sys.stderr.write("dispatch_persona: WARNING unresolved cleanup: the persona CLI left " + (("pid(s) " + " ".join(str(q) for q in left) + " running after TERM and KILL") if left else "processes ps could not list (its process group was signalled by id, unverified)") + "\n")
+        sys.stderr.write(who + ": WARNING unresolved cleanup: " + cli + " left " + (("pid(s) " + " ".join(str(q) for q in left) + " running after TERM and KILL") if left else "processes ps could not list (its process group was signalled by id, unverified)") + "\n")
         sys.stderr.flush()
         return False
     return True
@@ -1633,7 +1639,7 @@ signal.signal(signal.SIGCHLD, signal.SIG_DFL)
 try:
     child.append(subprocess.Popen(sys.argv[2:]))
 except OSError as e:
-    sys.stderr.write("dispatch_persona: could not start " + sys.argv[2] + ": " + str(e) + "\n")
+    sys.stderr.write(who + ": could not start " + sys.argv[2] + ": " + str(e) + "\n")
     os._exit(127)
 failed = True
 try:
@@ -1648,7 +1654,7 @@ try:
         n += 1
     failed = False
 except BaseException:
-    sys.stderr.write("dispatch_persona: ERROR the run supervisor failed; stopping the persona CLI\n" + traceback.format_exc())
+    sys.stderr.write(who + ": ERROR the run supervisor failed; stopping " + cli + "\n" + traceback.format_exc())
 try:
     clean = sweep(3.0 if failed else grace)
 except BaseException:

@@ -434,17 +434,25 @@ stop_fix() {
 # ledger beside lease history (that record, lease worktrees) refuses rather
 # than start a session as on a fresh checkout (Phase 3 round 4, B4). A
 # checkout that is the home directory or contains it (a dotfiles repository)
-# is no project: _lease_ctx refuses it, and the gate stops on that too.
+# is no project: _lease_ctx refuses it, and the gate stops on that too. The
+# stop names the cause _lease_ctx found (_LEASE_CTX_WHY: home, a lease root
+# another user could swap, one that can't be set up); with none,
+# _lease_at_ledger_root refused the ledger's recorded root.
 integrity_gate() {
   local RC=0
   local TRIFORGE_LEASE_ROOT="${TRIFORGE_LEASE_ROOT:-}"   # _lease_at_ledger_root may set it
   _checkout_top >/dev/null || return 0
   if ! _lease_ctx || ! _lease_at_ledger_root coordinate.sh; then
-    if [ "${_LEASE_CTX_WHY:-}" = home ]; then
-      echo "coordinate.sh: STOPPED before starting a session — this checkout is your home directory or contains it, and a home directory is no project (above). Run coordinate.sh from the project's own repository." >&2
-    else
-      echo "coordinate.sh: STOPPED before starting a session — the lease root the ledger was last written under can't be used from this shell (above). Point TRIFORGE_LEASE_ROOT at the lead's lease root and rerun; an unattended session never starts on a ledger it can't check." >&2
-    fi
+    case "${_LEASE_CTX_WHY:-}" in
+      home)
+        echo "coordinate.sh: STOPPED before starting a session — this checkout is your home directory or contains it, and a home directory is no project (above). Run coordinate.sh from the project's own repository." >&2 ;;
+      root)
+        echo "coordinate.sh: STOPPED before starting a session — the lease root, or a directory it sits in, is not private to you, so another user could swap it and the lead's trusted git config with it (above). Point TMPDIR or TRIFORGE_LEASE_ROOT at a private directory of yours and rerun; an unattended session never starts on a ledger it can't check." >&2 ;;
+      nogit|error)
+        echo "coordinate.sh: STOPPED before starting a session — the lead's lease context can't be set up in this checkout (above: the lease root or the .git it names). Fix that and rerun; an unattended session never starts on a ledger it can't check." >&2 ;;
+      *)
+        echo "coordinate.sh: STOPPED before starting a session — the lease root the ledger was last written under can't be used from this shell (above). Point TRIFORGE_LEASE_ROOT at the lead's lease root and rerun; an unattended session never starts on a ledger it can't check." >&2 ;;
+    esac
     exit 44
   fi
   _lead_integrity_check coordinate.sh || RC=$?

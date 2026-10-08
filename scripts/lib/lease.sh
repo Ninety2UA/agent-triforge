@@ -1778,9 +1778,13 @@ _lease_provision_claude_skills() {
 # .grok/sandbox.toml, its sandbox profile). rc 1 when the list can't
 # be read: a row without it would fall back to excluding all of .agents/; and
 # rc 1 when that config or profile can't be written as proven (a grok lease is
-# never made without them).
+# never made without them). Its callers (lease_create, lease_requeue) run in
+# the lead's own shell before any builder exists, so grok's provisioning
+# inspect runs supervised (_grok_lease_config ... supervised): what it leaves
+# running is stopped before the lease goes on, and rc 80 when that stop is
+# unresolved, so the caller leaves the worktree in place (_lease_uncarve).
 _lease_provision() {
-  local WT=$1 CLI=${2:-} LIST TRACKED=""
+  local WT=$1 CLI=${2:-} LIST TRACKED="" GRC=0
   local -a DIRS=(.agents/skills)
   _lease_provision_skills "$WT"
   case "$CLI" in
@@ -1799,7 +1803,10 @@ print(",".join(sorted(names)))
       ;;
     grok)
       # Fail closed (R23): no isolating config, no lease, so nothing dispatches
-      if ! _grok_lease_config "$WT" "$(_grok_class "${3:-}")"; then
+      _grok_lease_config "$WT" "$(_grok_class "${3:-}")" supervised || GRC=$?
+      if [ "$GRC" -eq 80 ]; then
+        return 80
+      elif [ "$GRC" -ne 0 ]; then
         echo "lease: ERROR the grok worktree ${WT} could not be provisioned (see above), so it is not leased. Fix the cause, then lease again" >&2
         return 1
       fi
@@ -1902,14 +1909,21 @@ _lease_carve() {
                  session_id= resumed_session= result_subtype= result_is_error=)
 }
 
-# _lease_uncarve <op> <task_id> <worktree> — undo a _lease_carve whose lease
-# was never recorded (_lease_provision failed): the worktree and its
-# lease/<task> branch go again, through the lead's hardened git, so a refused
-# lease leaves no lease history behind; with no ledger yet, a lease worktree
-# reads as a deleted ledger (_lead_lease_evidence, rc 44). rc 1, naming the
-# commands to run by hand, when git could not remove them.
+# _lease_uncarve <op> <task_id> <worktree> [<provision-rc>] — undo a
+# _lease_carve whose lease was never recorded (_lease_provision failed): the
+# worktree and its lease/<task> branch go again, through the lead's hardened
+# git, so a refused lease leaves no lease history behind; with no ledger yet,
+# a lease worktree reads as a deleted ledger (_lead_lease_evidence, rc 44).
+# rc 1, naming the commands to run by hand, when git could not remove them.
+# With <provision-rc> 80 (what grok's provisioning inspect left could not be
+# stopped, and may still run in the worktree) nothing is removed: rc 1, the
+# worktree and branch named with the commands to remove them once it has ended.
 _lease_uncarve() {
   local OP=$1 T=$2 WT=$3
+  if [ "${4:-}" = 80 ]; then
+    echo "${OP}: ERROR unresolved cleanup — a process grok's provisioning inspect left may still be running in the unleased worktree ${WT}, so nothing is leased and the worktree and its branch lease/${T} stay; once ps shows that process has ended, remove them before the next lease (git worktree remove --force ${WT}; git branch -D lease/${T})" >&2
+    return 1
+  fi
   if _lgr worktree remove --force "$WT" >/dev/null 2>&1 && _lgr branch -D "lease/${T}" >/dev/null 2>&1; then
     echo "${OP}: the unleased worktree ${WT} and its branch lease/${T} were removed again" >&2
     return 0
@@ -2306,7 +2320,7 @@ lease_create() {
     echo "lease_create: ERROR invalid task id '${TASK_ID}' — want [A-Za-z0-9][A-Za-z0-9._-]* (it becomes a branch and directory name)" >&2
     return 1
   fi
-  local RESOLVED CLI MODEL EFFORT WT NOW CUR IB="" ISHA="" ROW LEAD=""
+  local RESOLVED CLI MODEL EFFORT WT NOW CUR IB="" ISHA="" ROW LEAD="" PRC=0
   _lease_ctx || return 1
   # A change a worker made since the lead's last check (a planted hook, git
   # config, a moved ref) is caught before the next worktree is carved (KTD18).
@@ -2334,8 +2348,9 @@ CREATE_ROW_EOF
   fi
   if _lead_resolve 2>/dev/null; then LEAD=$_LEAD_CLI; fi
   _lease_carve "$TASK_ID" "$WT" || return 1
-  if ! _lease_provision "$WT" "$CLI" "$ROLE"; then
-    _lease_uncarve lease_create "$TASK_ID" "$WT" || true
+  _lease_provision "$WT" "$CLI" "$ROLE" || PRC=$?
+  if [ "$PRC" -ne 0 ]; then
+    _lease_uncarve lease_create "$TASK_ID" "$WT" "$PRC" || true
     return 1
   fi
   NOW=$(date +%s)
@@ -2938,7 +2953,7 @@ lease_reclaim() {
 lease_requeue() {
   _lead_only lease_requeue || return $?
   local TASK_ID=${1:?usage: lease_requeue <task_id>}
-  local STATE RQ PREV ROLE OUT WT RESOLVED CLI MODEL EFFORT
+  local STATE RQ PREV ROLE OUT WT RESOLVED CLI MODEL EFFORT PRC=0
   _lease_ctx || return 1
   _lead_integrity_check lease_requeue || return $?
   STATE=$(_ledger_get "$TASK_ID" state) || { echo "lease_requeue: ERROR no lease row for '${TASK_ID}'" >&2; return 1; }
@@ -2969,8 +2984,9 @@ lease_requeue() {
     return 1
   fi
   _lease_carve "$TASK_ID" "$WT" || return 1
-  if ! _lease_provision "$WT" "$CLI" "$ROLE"; then
-    _lease_uncarve lease_requeue "$TASK_ID" "$WT" || true
+  _lease_provision "$WT" "$CLI" "$ROLE" || PRC=$?
+  if [ "$PRC" -ne 0 ]; then
+    _lease_uncarve lease_requeue "$TASK_ID" "$WT" "$PRC" || true
     return 1
   fi
   _ledger_update "$TASK_ID" \

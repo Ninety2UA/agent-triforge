@@ -746,7 +746,10 @@ _lease_lane_argv() {
       # and MCP tables rebuilt from a fresh inspect), so a project hook or a
       # server added after the lease was made never starts in it. The check's
       # NOTE line, naming what the user's own grok configuration runs in the
-      # session, goes to stderr (the builder log)
+      # session, goes to stderr (the builder log). Unlike lease_create's, this
+      # check runs inside the detached builder, so its inspect is not
+      # "supervised": it stays in the builder's process group, which the
+      # builder's exit sweep and lease_stop reach (_grok_lease_config says why)
       if [ "$LANE_ARG" != edit ]; then
         if ! _LEASE_LANE_ERR=$(_grok_lease_config "$WT" read 2>&1); then
           _LEASE_LANE_ERR=${_LEASE_LANE_ERR:-"the grok read-class isolation check failed to run"}
