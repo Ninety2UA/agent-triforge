@@ -2036,10 +2036,10 @@ _lease_protected_scan() {
 # with <tree> the tree it staged (git write-tree) and <from> the commit it
 # lands on: 0 when every path <from>..<tree> changes is one the protected-path
 # scan of <scan revs> lists (_lease_diff_paths, the same diff). With rename
-# detection off a merge stages no other path; this check holds when something
-# else would, such as a squash whose merge base is not the lease's base (an
-# integration branch rewritten past it and accepted with lease_rebaseline),
-# which replays the commits in between too. Otherwise 1, and the caller undoes
+# detection off, and lease_merge refusing a base the integration head does not
+# descend from before its squash, a merge stages no other path; this check
+# holds the line when something else would (a git whose merge follows a rename
+# after all). Otherwise 1, and the caller undoes
 # the merge: _LMS_PATHS names the paths outside the scan (the first ten,
 # characters that don't print shown as ?), or _LMS_ERR why the check could not
 # run (fails closed; an empty <tree> is a write-tree that failed).
@@ -3651,13 +3651,18 @@ HANDOVER_EOF
 # (lease_attribution), then reclaims via the safe-prune
 # path. Every git call runs through _lead_git, so no repository hook runs on
 # the merge commit. Squash conflicts leave a dirty index: reset --merge, state
-# stays review, the lead resolves manually. The squash changes only the paths
-# the protected scan listed: rename detection is off, so an edit of a path the
-# integration branch renamed (or deleted) since the lease was cut conflicts,
-# rc 1 naming the path and the recovery (lease the task again from the
-# integration head); and what it staged is held to the scan's list before the
-# commit (_lease_merge_scope), so a squash that would change another path (an
-# integration branch rewritten past the lease's base) refuses the same way.
+# stays review, the lead resolves manually. The squash applies exactly the
+# lease's diff, base to snapshot, and changes only the paths the protected
+# scan listed: an integration head that no longer descends from the lease's
+# base (rewritten since the lease was cut) refuses before it, since the squash
+# would replay the commits in between too; rename detection is off, so an
+# edit of a path the integration branch renamed (or deleted) since then
+# conflicts; and the tree it staged is held to the scan's list before the
+# commit (_lease_merge_scope). Each is rc 1, state review, naming the paths
+# and the recovery (lease the task again from the integration head). The
+# merge is recorded only once HEAD and the integration branch are verified to
+# hold the commit it made, and from those values: a ref moved in between is
+# rc 44 with nothing recorded.
 lease_merge() {
   _lead_only lease_merge || return $?
   local TASK_ID=${1:?usage: lease_merge <task_id> <reviewer-identity>}
@@ -3751,9 +3756,12 @@ lease_merge() {
   # root tree itself and would refuse a swapped one as an unreadable worktree
   # (rc 1). A criss-cross history (rc 1, _LVO_BASES) is no integrity event:
   # the lease stays in review, and the refusal names the only recovery, since
-  # every snapshot of this lease sits on the same base.
-  local LVO=0 XROW XBASE XROLE
-  _lease_verify_objects lease_merge "$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)" "$SNAP" || LVO=$?
+  # every snapshot of this lease sits on the same base. IHEAD, the integration
+  # head read once here, is what the base check below and the check of the
+  # squash commit after it hold the merge to.
+  local LVO=0 XROW XBASE XROLE IHEAD ANC=0
+  IHEAD=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)
+  _lease_verify_objects lease_merge "$IHEAD" "$SNAP" || LVO=$?
   if [ "$LVO" -eq 1 ] && [ -n "$_LVO_BASES" ]; then
     XROW=$(_ledger_get_row "$TASK_ID" base_sha role 2>/dev/null) || XROW=""
     { IFS= read -r XBASE || true; IFS= read -r XROLE || true; } <<MERGE_CROSS_EOF
@@ -3768,6 +3776,27 @@ MERGE_CROSS_EOF
     return "$_RC_LEASE_INTEGRITY"
   fi
   _lease_verify_snapshot "$TASK_ID" || return 1
+  # The squash replays exactly the reviewed diff only from the lease's own
+  # base: the snapshot's one parent is that base (checked just above), so with
+  # the base an ancestor of the integration head the squash's merge base is
+  # the base itself. An integration branch rewritten past it (accepted with
+  # lease_rebaseline) would have the squash replay the commits in between as
+  # well, on the paths inside the lease's diff too, where no path check sees
+  # them: rc 1 before the squash, nothing merged, the index untouched, state
+  # review; and before the approval gate, which no approval would get past.
+  XROW=$(_ledger_get_row "$TASK_ID" base_sha role 2>/dev/null) || XROW=""
+  { IFS= read -r XBASE || true; IFS= read -r XROLE || true; } <<MERGE_BASE_EOF
+${XROW}
+MERGE_BASE_EOF
+  if [ -n "$XBASE" ] && [ -n "$IHEAD" ]; then _lgr merge-base --is-ancestor "$XBASE" "$IHEAD" 2>/dev/null || ANC=$?; else ANC=2; fi
+  if [ "$ANC" -eq 1 ]; then
+    echo "lease_merge: REFUSED — the integration branch no longer holds ${TASK_ID}'s base ${XBASE:0:12}: its head ${IHEAD:0:12} does not descend from it (rewritten since the lease was cut, and accepted with lease_rebaseline), so the squash of the snapshot ${SNAP:0:12} would replay the commits in between as well, not only the diff the review and the protected scan saw. Nothing was merged, the index is untouched, and ${TASK_ID} stays in review. Lease the task again from the integration branch's current head: lease_reclaim ${TASK_ID}, then lease_create ${TASK_ID} ${XROLE:-<role>} and lease_dispatch ${TASK_ID} <prompt>. Until git prunes it, the reviewed work stays readable: git diff ${XBASE} ${SNAP}" >&2
+    return 1
+  fi
+  if [ "$ANC" -ne 0 ]; then
+    echo "lease_merge: REFUSED — whether the integration head ${IHEAD:-<none>} descends from ${TASK_ID}'s base ${XBASE:-<none>} could not be read (rc ${ANC}), so nothing was merged (fails closed); ${TASK_ID} stays in review." >&2
+    return 1
+  fi
   # Who stands behind this merge (U10): the protected check over the lease's
   # full diff, base to the verified snapshot, at every merge, and the merge
   # approval it then needs; a stale lead-class pin needs the user's.
@@ -3804,12 +3833,12 @@ MERGE_CROSS_EOF
       echo "lease_merge: REFUSED — what the squash of ${TASK_ID}'s snapshot ${SNAP:0:12} staged could not be held to its protected scan (${_LMS_ERR}); index reset, nothing merged (fails closed), state stays review." >&2
     else
       LROLE=$(_ledger_get "$TASK_ID" role 2>/dev/null || true)
-      echo "lease_merge: REFUSED — the squash of ${TASK_ID}'s snapshot ${SNAP:0:12} would also change ${_LMS_PATHS}, which its own diff (base ${_LMG_BASE:0:12} to the snapshot: what the review and the protected scan saw) does not touch; a merge changes only the paths its scan listed (fails closed). Index reset, nothing merged, state stays review. A squash replays more than the lease's diff when the integration branch no longer holds the lease's base (rewritten since and accepted with lease_rebaseline); lease the task again from its current head: lease_reclaim ${TASK_ID}, then lease_create ${TASK_ID} ${LROLE:-<role>} and lease_dispatch ${TASK_ID} <prompt>." >&2
+      echo "lease_merge: REFUSED — the squash of ${TASK_ID}'s snapshot ${SNAP:0:12} would also change ${_LMS_PATHS}, which its own diff (base ${_LMG_BASE:0:12} to the snapshot: what the review and the protected scan saw) does not touch; a merge changes only the paths its scan listed (fails closed). Index reset, nothing merged, state stays review. Lease the task again from the integration branch's current head: lease_reclaim ${TASK_ID}, then lease_create ${TASK_ID} ${LROLE:-<role>} and lease_dispatch ${TASK_ID} <prompt>." >&2
     fi
     return 1
   fi
   if _lgr diff --cached --quiet --no-ext-diff 2>/dev/null; then
-    echo "lease_merge: ERROR ${TASK_ID}'s snapshot brought no changes (builder produced nothing?) — state stays review" >&2
+    echo "lease_merge: ERROR ${TASK_ID}'s snapshot brought no changes (the builder produced nothing, or the integration branch holds them already) — state stays review" >&2
     return 1
   fi
   if ! _lgr commit -q -m "lease(${TASK_ID}): merged from ${BUILDER}, reviewed by ${REVIEWER}" >&2; then
@@ -3817,7 +3846,31 @@ MERGE_CROSS_EOF
     echo "lease_merge: ERROR commit failed — index reset, state stays review" >&2
     return 1
   fi
-  SHA=$(_lgr rev-parse HEAD)
+  # What the merge made, verified before anything records it (KTD18): HEAD,
+  # and refs/heads/<integration branch> (read as exactly that; a detached
+  # checkout has HEAD alone), at a commit whose only parent is IHEAD, the head
+  # the squash went onto, and whose tree is MTREE, the one the path check
+  # passed. A worker can move the ref, or HEAD, in between: rc 44 with nothing
+  # recorded, the lease left in review with its worktree, and the integration
+  # branch on record still IHEAD, so the next lease_* call reports the move. A
+  # rerun applies the squash once: onto IHEAD again once the branch is put
+  # back there, or onto an accepted head (lease_rebaseline), where it stages
+  # nothing if that head holds the squash's changes already. The record below
+  # is written from these values, never a fresh read.
+  local GOT WREF=HEAD
+  SHA=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)
+  GOT=$SHA
+  if [ -n "$CURRENT_BRANCH" ]; then
+    WREF="refs/heads/${CURRENT_BRANCH}"
+    GOT=$(_lease_branch_commit "$CURRENT_BRANCH" || true)
+  fi
+  if [ -z "$SHA" ] || [ "$GOT" != "$SHA" ] \
+     || [ "$(_lgr rev-list --parents -n 1 "$SHA" 2>/dev/null || true)" != "${SHA} ${IHEAD}" ] \
+     || [ "$(_lgr rev-parse --verify --quiet "${SHA}^{tree}" 2>/dev/null || true)" != "$MTREE" ]; then
+    GOT=${GOT:-<missing>}; SHA=${SHA:-<none>}
+    echo "lease_merge: INTEGRITY — after the squash commit ${WREF} is at ${GOT:0:12} and HEAD at ${SHA:0:12}, not a commit of tree ${MTREE:0:12} whose only parent is ${IHEAD:0:12}, the head the squash went onto: a ref moved outside the lead's own operations (KTD18; this is detection, not prevention). Nothing was recorded: ${TASK_ID} stays in review with its worktree, and the integration branch on record is still at ${IHEAD:0:12}. Inspect it (git reflog ${WREF} lists the squash commit). To merge again, put the branch back (git reset --hard ${IHEAD}, in this checkout) and rerun lease_merge ${TASK_ID} ${REVIEWER}, which squashes once more onto it; to keep the branch as it is, accept it with lease_rebaseline, and a rerun squashes onto that head, staging nothing where it holds the squash's changes already." >&2
+    return "$_RC_LEASE_INTEGRITY"
+  fi
   _ledger_update "$TASK_ID" state=merged reviewer="$REVIEWER" pinned_reviewer="$REVIEWER" merge_commit="$SHA" \
     reviewer_class="$_LMG_CLASS" protected="$_LP_STATUS" protected_paths="$_LP_PATHS" merge_approval="$_LMG_APPROVAL" || return 1
   # The lead's own merge moves the integration branch: that is the new state
@@ -3831,7 +3884,7 @@ MERGE_PROMOTION_EOF
   if [ -n "$PSCOPE" ] && [ -z "$PVOIDED" ]; then
     VOID="$(date -u +%Y-%m-%dT%H:%M:%SZ) by lease_merge ${TASK_ID} (${SHA:0:12})"
   fi
-  _ledger_update @baseline integration_branch="$(_lease_current_branch)" integration_sha="$SHA" ${VOID:+"promotion_voided=${VOID}"} >/dev/null || return 1
+  _ledger_update @baseline integration_branch="$CURRENT_BRANCH" integration_sha="$SHA" ${VOID:+"promotion_voided=${VOID}"} >/dev/null || return 1
   echo "lease_merge: ${TASK_ID} merged as ${SHA} (builder ${BUILDER}, reviewer ${REVIEWER}) — reclaiming worktree" >&2
   if [ -n "$VOID" ]; then
     echo "lease_merge: the promotion approval on record is void now (the tree it bound to changed): ${PSCOPE}" >&2
