@@ -372,11 +372,13 @@ with os.fdopen(fd, "w", encoding="utf-8") as out:
 ' >&2 || return 1
 }
 
-# _grok_lease_config <worktree> [edit|read] — the .grok/config.toml a grok
-# worker's worktree runs with (a lease worktree, or invoke_grok's scratch
-# one), the one place grok reads per project that reaches plugins and MCP
-# servers (GRK-06; the env switches and the GROK_CONFIG overlay do not, and a
-# session starts the ~/.claude.json servers that `grok inspect` reports off):
+# _grok_lease_config <worktree> [edit|read] [supervised] — the
+# .grok/config.toml a grok worker's worktree runs with (a lease worktree, or
+# invoke_grok's scratch one, which passes "supervised": its inspect then runs
+# under the run supervisor, below), the one place grok reads per project that
+# reaches plugins and MCP servers (GRK-06; the env switches and the
+# GROK_CONFIG overlay do not, and a session starts the ~/.claude.json servers
+# that `grok inspect` reports off):
 #   [plugins] disabled  every plugin `grok inspect --json` finds from the
 #                       worktree under _GROK_ENV and the overlay, plus every
 #                       Claude Code plugin ~/.claude/plugins/installed_plugins.json
@@ -430,7 +432,10 @@ with os.fdopen(fd, "w", encoding="utf-8") as out:
 # runs with the overlay, so the check costs no extra grok process). Grok's
 # own skills, .agents/skills included, are not plugins and stay. The edit
 # class (a builder lease) prints no NOTE, then writes its sandbox profile
-# (_grok_sandbox_profile); rc 1 when that fails, the config written.
+# (_grok_sandbox_profile); rc 1 when that fails, the config written. A
+# supervised inspect whose leftovers its supervisor could not stop is refused
+# with rc 80: one of them may still run in <worktree>, which the caller then
+# leaves in place.
 # _lease_provision records both files as provisioned, so the snapshot never
 # carries them (KTD9).
 _grok_lease_config() {
@@ -442,11 +447,20 @@ _grok_lease_config() {
   fi
   POLICY=$(_grok_shell_policy) || return 1
   # timeout --foreground keeps the inspect in the caller's process group, so
-  # an interrupt that reaches the caller's group stops it too
+  # an interrupt, or a stop of a lease builder's group, that reaches the
+  # caller stops it too. "supervised" (invoke_grok's scratch, from the lead's
+  # own shell, where no group stop follows) runs it as invoke_grok runs grok:
+  # under the run supervisor (_PERSONA_RUN_PY) with a timeout that is not
+  # --foreground, so whatever the inspect leaves running in its process group
+  # or below it is stopped when it ends, at the deadline too, before the
+  # scratch goes (an unresolved stop: refused, rc 80)
   if ! command -v grok >/dev/null 2>&1; then
     IRC=127
   elif ! TOBIN=$(_timeout_tool); then
     IRC=$_RC_NO_TIMEOUT_TOOL
+  elif [ "${3:-}" = supervised ]; then
+    INSPECT=$(cd "$WT" && "${_HOST_SCRUB[@]}" "${_GROK_ENV[@]}" "GROK_CONFIG=${POLICY}" python3 -c "$_PERSONA_RUN_PY" 5 "$TOBIN" -k 10s 30s grok inspect --json < /dev/null 2>/dev/null) || IRC=$?
+    if [ "$IRC" -eq 80 ]; then IRC=unresolved; fi
   else
     INSPECT=$(cd "$WT" && "$TOBIN" --foreground -k 10s 30s "${_HOST_SCRUB[@]}" "${_GROK_ENV[@]}" "GROK_CONFIG=${POLICY}" grok inspect --json < /dev/null 2>/dev/null) || IRC=$?
   fi
@@ -470,7 +484,8 @@ def inside(p):
     return p == real or p.startswith(real + os.sep)
 raw = sys.stdin.read()
 if irc != "0":
-    why = {"127": "could not run: grok is not on PATH", "96": "could not run: neither timeout nor gtimeout is on PATH (brew install coreutils)"}.get(irc, "failed or timed out (rc %s)" % irc)
+    why = {"127": "could not run: grok is not on PATH", "96": "could not run: neither timeout nor gtimeout is on PATH (brew install coreutils)",
+           "unresolved": "left processes its run supervisor could not stop or list (rc 80)"}.get(irc, "failed or timed out (rc %s)" % irc)
     refuse("grok inspect --json %s, so nothing proves which plugins and MCP servers would load" % why)
 try:
     d = json.loads(raw)
@@ -632,7 +647,7 @@ with open(cfg, "w", encoding="utf-8") as f:
 if found:
     print("grok: NOTE this grok reviewer or analyst session runs these user-level grok settings, as every grok session on this machine does: %s. Project-level hooks, LSP servers, plugins and MCP servers stay refused, and MCP tools denied (R23)"
           % "; ".join("%s (%s)" % (w, "; ".join(k + (": " + ", ".join(v) if v else "") for k, v in found[w].items())) for w in sorted(found)))
-' >&2 || return 1
+' >&2 || { if [ "$IRC" = unresolved ]; then return 80; fi; return 1; }
   # The edit class runs under its own sandbox profile (_grok_argv edit)
   if [ "$CLASS" = edit ]; then
     _grok_sandbox_profile "$WT" || return 1
@@ -682,9 +697,12 @@ grok_read_isolation_check() {
 # git reads the new repository's own config and nothing else, so no filter
 # driver, hook or fsmonitor named in the lead's .git/config or the user's git
 # config runs (a .gitattributes filter runs only where a config defines it),
-# and the lead's .git records no worktree. rc 1, the reason on stderr, when it
-# can't be made or provisioned; the caller removes <dir> (_grok_scratch_drop).
-# Runs after _lease_ctx (it reads _LEASE_COMMON and _LEASE_REPO).
+# and the lead's .git records no worktree. The provisioning's inspect runs
+# supervised (_grok_lease_config <dir>/wt read supervised). rc 1, the reason on
+# stderr, when it can't be made or provisioned; the caller removes <dir>
+# (_grok_scratch_drop). rc 80 when what the inspect left could not be stopped:
+# the caller leaves <dir> (_grok_scratch_left). Runs after _lease_ctx (it reads
+# _LEASE_COMMON and _LEASE_REPO).
 _grok_scratch_wt() {
   local D=$1 SHA=$2 RC=0 _LEAD_CFG="${1}/gitconfig"
   case "$SHA" in
@@ -709,7 +727,7 @@ _grok_scratch_wt() {
     echo "invoke_grok: ERROR could not check ${_LEASE_REPO} out at ${SHA} into the scratch checkout ${D}/wt" >&2
     return 1
   fi
-  _grok_lease_config "${D}/wt" read
+  _grok_lease_config "${D}/wt" read supervised
 }
 
 # _grok_scratch_drop <dir> — remove a scratch directory _grok_run_in made.
@@ -723,30 +741,42 @@ _grok_scratch_drop() {
 
 # _grok_run_in <sha> <timeout-bin> <seconds> <prompt> <ready-file> — one
 # invoke_grok run in a subshell that owns its scratch from the first step: its
-# INT, TERM and HUP traps are set before the scratch directory exists, so an
-# interrupt while the checkout is made, while provisioning waits on `grok
-# inspect` (up to 30 s) or while grok runs stops the step (the process tree
-# under it, _grok_run_stop) and removes the directory, and the subshell exits
-# 130, 143 or 129 (_grok_interrupted). Each step is a background job the
+# INT, TERM and HUP traps (_grok_run_end) are set before the scratch directory
+# exists, so an interrupt while the checkout is made, while provisioning waits
+# on `grok inspect` (up to 30 s) or while grok runs stops the step (the process
+# tree under it, _grok_run_stop) and removes the directory, and the subshell
+# exits 130, 143 or 129 (_grok_interrupted). Each step is a background job the
 # subshell waits for: a trapped signal ends a `wait` at once, while a
-# foreground child would hold the trap until it exited. Both timeouts (the
-# inspect's and the run's) are --foreground, so grok stays in the caller's
-# process group, which a terminal interrupt reaches whole. The subshell makes
+# foreground child would hold the trap until it exited. The inspect and the
+# run each go through the run supervisor the persona lane starts its CLIs
+# under (_PERSONA_RUN_PY), with a timeout that is not --foreground: timeout
+# puts itself and grok in a process group of their own, and once grok ends, on
+# its own or at the deadline, the supervisor stops what it left running there
+# or below it (a hook, an LSP server, a tool shell; timeout --foreground would
+# time out grok alone, and they would outlive the scratch) before the step
+# returns, so before C is cleared and the directory goes. Being out of the
+# caller's group, grok gets no terminal interrupt itself: the subshell gets
+# it, and its traps stop the step, as in the persona lane. The subshell makes
 # a fresh triforge-grok.XXXXXX directory under TMPDIR, the scratch in it
 # (_grok_scratch_wt <dir> <sha>), then <ready-file>, which holds what the
 # provisioning printed (the user-tier NOTE line, or nothing), then runs
 # _GROK_ARGV and <prompt> from the scratch under the lease boundary's env
 # (_adapter_env grok: env -i with the base allowlist, grok's own keys, the
-# worker marker and the no-push config), and removes the directory. No
-# <ready-file> afterwards means grok never ran; the reason is on stderr. The
-# caller's own traps are untouched.
+# worker marker and the no-push config), and removes the directory. Its exit
+# code is grok's (124, or 137 after the KILL, at the deadline), or the
+# supervisor's 80 when it could not stop or list what grok left: then, as when
+# a trap's stop leaves something running, the directory stays and is named on
+# stderr (_grok_scratch_left), never removed under a live process. grok's own
+# exit 80 would read the same, and keeping the directory is the safe reading.
+# No <ready-file> afterwards means grok never ran; the reason is on stderr.
+# The caller's own traps are untouched.
 _grok_run_in() {
   (
     D=""
     C=""
-    trap '_grok_run_stop "$C"; _grok_scratch_drop "$D"; exit 130' INT
-    trap '_grok_run_stop "$C"; _grok_scratch_drop "$D"; exit 143' TERM
-    trap '_grok_run_stop "$C"; _grok_scratch_drop "$D"; exit 129' HUP
+    trap '_grok_run_end 130 "$C" "$D"' INT
+    trap '_grok_run_end 143 "$C" "$D"' TERM
+    trap '_grok_run_end 129 "$C" "$D"' HUP
     D=$(mktemp -u "${TMPDIR:-/tmp}/triforge-grok.XXXXXX") || D=""
     if [ -z "$D" ] || ! mkdir -m 700 "$D" 2>/dev/null; then
       D=""
@@ -761,72 +791,80 @@ _grok_run_in() {
     if [ "$R" -ne 0 ] || ! cat "${D}/provision.err" > "$5"; then
       cat "${D}/provision.err" >&2 2>/dev/null || true
       rm -f "$5"
-      _grok_scratch_drop "$D"
+      if [ "$R" -eq 80 ]; then _grok_scratch_left "$D"; else _grok_scratch_drop "$D"; fi
       exit 1
     fi
     cd "${D}/wt" || { _grok_scratch_drop "$D"; exit 1; }
-    _adapter_env grok "$2" --foreground -k 10s "${3}s" "${_GROK_ARGV[@]}" "$4" < /dev/null &
+    _adapter_env grok python3 -c "$_PERSONA_RUN_PY" 5 "$2" -k 10s "${3}s" "${_GROK_ARGV[@]}" "$4" < /dev/null &
     C=$!
     R=0
     wait "$C" || R=$?
     C=""
     cd / || true
-    _grok_scratch_drop "$D"
+    if [ "$R" -eq 80 ]; then _grok_scratch_left "$D"; else _grok_scratch_drop "$D"; fi
     exit "$R"
   )
 }
 
+# _grok_run_end <rc> <pid> <dir> — _grok_run_in's INT, TERM and HUP trap: stop
+# the step <pid> still running ("" for none, _grok_run_stop), then remove
+# <dir>, or leave it, named on stderr, when the stop left something running
+# (_grok_scratch_left), and exit <rc>.
+_grok_run_end() {
+  if _grok_run_stop "$2"; then
+    _grok_scratch_drop "$3"
+  else
+    _grok_scratch_left "$3"
+  fi
+  exit "$1"
+}
+
 # _grok_run_stop <pid> — stop a _grok_run_in step and every process under it,
 # for a signal that reached the subshell alone (a background step ignores
-# INT, and the provisioning's timeout sits below a command substitution):
-# TERM to each, children first (_grok_run_tree; a TERM to timeout passes on
-# to grok), then up to 2 s, polled with kill -0, for all of them to go, then
-# KILL, children first, to each one still there and to what it started since
-# (_kill_tree). One that ignores TERM would otherwise keep running against the
-# scratch directory the trap removes next. A process already gone is skipped.
-# No-op for "".
+# INT, and the provisioning's timeout sits below a command substitution), as
+# the persona lane's cleanup stops its CLI (_persona_stop_tree): TERM to the
+# tree, up to 5 s for all of it to end, then KILL to what is left and to what
+# it started meanwhile, each pid checked by its start time. A run supervisor
+# in the tree (the run's or the inspect's) takes the TERM as its cue to stop
+# grok's process group (3 s, then its KILL), which the 5 s leave room for. One
+# process that ignores TERM would otherwise keep running against the scratch
+# directory the trap removes next. 0 when nothing of the tree runs any more,
+# "" included; 1 when something may (a pid still running after the KILL, or
+# ps unreadable).
 _grok_run_stop() {
-  local P N=0 LEFT=yes
   if [ -z "${1:-}" ]; then return 0; fi
-  set -- $(_grok_run_tree "$1")
-  for P in "$@"; do
-    kill -TERM "$P" 2>/dev/null || true
-  done
-  while [ -n "$LEFT" ] && [ "$N" -lt 20 ]; do
-    LEFT=""
-    for P in "$@"; do
-      if kill -0 "$P" 2>/dev/null; then LEFT=$P; break; fi
-    done
-    if [ -n "$LEFT" ]; then sleep 0.1; N=$((N + 1)); fi
-  done
-  for P in "$@"; do
-    if kill -0 "$P" 2>/dev/null; then _kill_tree "$P" KILL; fi
-  done
+  _persona_stop_tree "$1" "" "" 5 >/dev/null
+}
+
+# _grok_scratch_left <dir> — a scratch directory a process of the run may
+# still use (the run supervisor's sweep, or a trap's stop, could not stop or
+# list everything): left in place and named on stderr for removal by hand, as
+# the persona lane leaves its own. No-op for "".
+_grok_scratch_left() {
+  if [ -n "${1:-}" ]; then
+    echo "invoke_grok: unresolved cleanup — a process of the grok run may still be running, so its scratch directory ${1} stays; remove it (rm -rf) once ps shows that process has ended" >&2
+  fi
   return 0
 }
 
-# _grok_run_tree <pid> — <pid> and every process under it, children first
-# (pgrep -P), one per line.
-_grok_run_tree() {
-  local P
-  for P in $(pgrep -P "$1" 2>/dev/null || true); do
-    _grok_run_tree "$P"
-  done
-  echo "$1"
-}
-
-# _grok_interrupted <agent-name> <output-file> <rc> — 0 when <rc> is the exit
-# of a _grok_run_in subshell a signal stopped (129 HUP, 130 INT, 143 TERM; a
-# grok a signal killed exits the same way): the run is over and its scratch
-# removed, so invoke_grok returns <rc> and never retries (class
-# deterministic, reason interrupted); the line goes to stderr and to
-# <output-file>. 1 for any other <rc>.
+# _grok_interrupted <agent-name> <output-file> <rc> <stderr-file> — 0 when
+# <rc> is the exit of a _grok_run_in subshell a signal stopped (129 HUP, 130
+# INT, 143 TERM; a grok a signal killed exits the same way): the run is over,
+# so invoke_grok returns <rc> and never retries (class deterministic, reason
+# interrupted); the line goes to stderr and to <output-file>. Its scratch is
+# removed, unless the stop left something running: then the subshell's line
+# naming it (_grok_scratch_left, in <stderr-file>) goes to stderr first. 1
+# for any other <rc>.
 _grok_interrupted() {
   case "$3" in
     129|130|143) ;;
     *) return 1 ;;
   esac
-  echo "invoke_grok: agent=${1:-<none>} interrupted (exit ${3}); its scratch checkout is removed. No retry." >&2
+  if grep '^invoke_grok: unresolved cleanup' "${4:-/dev/null}" >&2 2>/dev/null; then
+    echo "invoke_grok: agent=${1:-<none>} interrupted (exit ${3}); its scratch checkout stays (above). No retry." >&2
+  else
+    echo "invoke_grok: agent=${1:-<none>} interrupted (exit ${3}); its scratch checkout is removed. No retry." >&2
+  fi
   echo "invoke_grok: interrupted (exit ${3}) — no answer" > "$2" 2>/dev/null || true
   INVOKE_FAILURE_CLASS="deterministic"
   _INVOKE_FAILURE_REASON="interrupted"
@@ -892,21 +930,26 @@ _grok_unisolated() {
 # checkout with nothing keeping the plugins and servers off; a grok builder
 # runs through lease_create and lease_dispatch. The grok-agents/<agent-name>.md
 # brief, when one exists, is prefixed onto the prompt (grok's --agent takes a
-# profile, not a role brief). Before each attempt, the first and the retry,
-# nothing is checked out until _grok_recheck passes: the roster's consent and
-# role rules now (rc 5, reason consent or role: a declined member runs no
-# more) and the lead's integrity check, as lease_create runs it before it
+# profile, not a role brief; dispatch_role hands a reviewer or analyst whose
+# persona name has none here the reviewer brief's name, _dispatch_role_brief),
+# else the prompt runs raw with a warning. Before each attempt, the first and
+# the retry, nothing is checked out until _grok_recheck passes: the roster's
+# consent and role rules now (rc 5, reason consent or role: a declined member
+# runs no more) and the lead's integrity check, as lease_create runs it before it
 # carves (_lead_integrity_check: a git state changed outside the lead's
 # operations returns its rc, 44, and nothing runs; with no ledger there is
 # nothing to compare and nothing is written). Each run then starts from its
 # own scratch checkout of HEAD (_grok_run_in, _grok_scratch_wt, the project
 # checks included, and the NOTE line naming the user's own grok
 # configuration that runs, passed on to stderr; a retry gets a fresh one),
-# removed afterwards, under the lease boundary's env, and the prompt
-# names the caller's checkout for anything HEAD lacks (uncommitted changes, an
-# untracked ops/). rc 69 (deterministic, reason isolation, nothing
-# dispatched) when the scratch can't be made or provisioned; rc 80 when a
-# clean end_turn run gave no answer text (report missing).
+# removed afterwards, once what grok left running is stopped, under the lease
+# boundary's env, and the prompt names the caller's checkout for anything HEAD
+# lacks (uncommitted changes, an untracked ops/). rc 69 (deterministic, reason
+# isolation, nothing dispatched) when the scratch can't be made or
+# provisioned; rc 80 when a clean end_turn run gave no answer text (report
+# missing), and rc 80 (deterministic, reason unresolved-cleanup, no retry) when
+# what grok left running could not be stopped or listed: the scratch checkout
+# stays, named on stderr, and the answer written to <output-file> is untrusted.
 invoke_grok() {
   local AGENT_NAME=$1
   local PROMPT=$2
@@ -997,7 +1040,7 @@ ${PROMPT}"
   # the scratch's); no READY afterwards: the scratch was refused, grok never ran
   rm -f "$READY"
   _grok_run_in "$SHA" "$TOBIN" "$TIMEOUT" "${FULL_PROMPT}${NOTE}" "$READY" > "$RAW" 2>"$ERR" || EXIT_CODE=$?
-  if _grok_interrupted "$AGENT_NAME" "$OUTPUT_FILE" "$EXIT_CODE"; then
+  if _grok_interrupted "$AGENT_NAME" "$OUTPUT_FILE" "$EXIT_CODE" "$ERR"; then
     rm -f "$RAW" "$ERR" "$READY"
     return "$EXIT_CODE"
   fi
@@ -1020,6 +1063,10 @@ ${PROMPT}"
       end_turn) : ;;
       *) EXIT_CODE=1; INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="stopped:${STOP}" ;;
     esac
+  elif [ "$EXIT_CODE" -eq 80 ]; then
+    # _grok_run_in's 80: what grok left runs on, beside its scratch checkout;
+    # a retry would start another grok next to it
+    INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="unresolved-cleanup"
   else
     _grok_classify "$EXIT_CODE" "$RAW" "$ERR"
   fi
@@ -1038,7 +1085,7 @@ ${PROMPT}"
     fi
     EXIT_CODE=0
     _grok_run_in "$SHA" "$TOBIN" "$TIMEOUT" "${PROMPT}${NOTE}" "$READY" > "$RAW" 2>"$ERR" || EXIT_CODE=$?
-    if _grok_interrupted "$AGENT_NAME" "$OUTPUT_FILE" "$EXIT_CODE"; then
+    if _grok_interrupted "$AGENT_NAME" "$OUTPUT_FILE" "$EXIT_CODE" "$ERR"; then
       rm -f "$RAW" "$ERR" "$READY"
       return "$EXIT_CODE"
     fi
@@ -1057,6 +1104,8 @@ ${PROMPT}"
         end_turn) : ;;
         *) EXIT_CODE=1; INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="stopped:${STOP}" ;;
       esac
+    elif [ "$EXIT_CODE" -eq 80 ]; then
+      INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="unresolved-cleanup"
     else
       _grok_classify "$EXIT_CODE" "$RAW" "$ERR"
       echo "invoke_grok: agent=${AGENT_NAME} retry also failed, exit=${EXIT_CODE} class=${INVOKE_FAILURE_CLASS}" >&2
@@ -1073,6 +1122,9 @@ ${PROMPT}"
         echo "invoke_grok: agent=${AGENT_NAME} exit=${EXIT_CODE} stopped at the turn cap (--max-turns ${_GROK_MAX_TURNS}) before a final answer. No retry (deterministic)." >&2 ;;
       deterministic:stopped:*)
         echo "invoke_grok: agent=${AGENT_NAME} the run ended with stopReason=${_INVOKE_FAILURE_REASON#stopped:}, not end_turn — the answer is incomplete. No retry (deterministic)." >&2 ;;
+      deterministic:unresolved-cleanup)
+        grep 'unresolved cleanup' "$ERR" >&2 2>/dev/null || true
+        echo "invoke_grok: agent=${AGENT_NAME} exit=${EXIT_CODE} grok left processes its run supervisor could not stop or list (above), so its scratch checkout stays and its answer in ${OUTPUT_FILE} is untrusted. No retry (deterministic)." >&2 ;;
       timeout:*)
         echo "invoke_grok: agent=${AGENT_NAME} timed out after ${TIMEOUT}s (exit=${EXIT_CODE}). Requeue policy belongs to the caller (lease layer), not this helper." >&2 ;;
       *)

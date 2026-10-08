@@ -55,6 +55,9 @@ it already replaces a user server of the same name. The lists come from
 If it fails, times out or leaves out a list, grok does not run. A lease uses
 its lease worktree. Outside a lease, `invoke_grok` runs a reviewer or analyst
 in a scratch checkout of HEAD and removes it afterwards, also on an interrupt.
+Before the checkout goes, anything grok or its `grok inspect` left running
+(a hook, an LSP server) is stopped, at the timeout too. If something can't be
+stopped, the checkout stays and the error names it.
 That checkout is a new repository that borrows the lead's objects, and git
 reads no config but its own while making it. So no filter or hook named in
 the lead's `.git/config` runs, and the lead's `.git` gets no worktree entry.
@@ -158,5 +161,9 @@ with a shell and no OS sandbox.
 | `builder.md` | Optional-tier builder | prompt prefix (edit class, a builder lease) |
 | `reviewer.md` | Read-only cross-reviewer | prompt prefix (read class); also an analyst lease; output merged to `ops/REVIEW_GROK.md` |
 
-Outside a lease, an analyst has no brief here and runs the raw prompt in the
-read class; `invoke_grok` prints a warning naming the briefs that exist.
+Outside a lease, `dispatch_role` gives a reviewer or an analyst whose agent
+name has no brief here `reviewer.md` instead (at-review names its core lanes
+`logic_reviewer` and `architecture-reviewer`), so the answer ends with the
+`Status:` line at-review promotes on. A direct `invoke_grok` call with such a
+name runs the raw prompt in the read class and prints a warning naming the
+briefs that exist.

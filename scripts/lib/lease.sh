@@ -88,7 +88,13 @@ fi
 # directory above it (a dotfiles repository) is refused before anything is
 # written, rc 1 with _LEASE_CTX_WHY=home, or its ledger would land in ~/ops.
 # Compared by identity, as _tb_home_anchor (bootstrap.sh) compares; an unset
-# HOME, or one that does not resolve, protects nothing.
+# HOME, or one that does not resolve, protects nothing. Every failure is rc 1
+# with one stderr line, and _LEASE_CTX_WHY names its kind (empty on success):
+# nogit (no .git from here up, so no checkout and no git dir to protect),
+# home, root (a lease directory or TMPDIR another user could swap), error
+# (anything else: a .git that is neither a directory nor a gitdir: file, a
+# lease root that can't be made, an exception, a failed config capture). A
+# caller that may run outside a git checkout runs past nogit alone.
 _lease_ctx() {
   local KEY="${PWD}|${TRIFORGE_LEASE_ROOT:-}|${TMPDIR:-}|${HOME:-}"
   _LEASE_CTX_WHY=""
@@ -98,6 +104,8 @@ _lease_ctx() {
   local OUT RC=0
   OUT=$(LC_ROOT="${TRIFORGE_LEASE_ROOT:-}" LC_TMP="${TMPDIR:-/tmp}" python3 -c "${_PY_PRELUDE}"'
 import hashlib, os, stat, sys
+# an exception exits 1 with its type and message on stdout, for the refusal
+sys.excepthook = lambda t, e, tb: print("%s: %s" % (t.__name__, e))
 # shared(p): another user could rename entries in directory p (owned by
 # someone else than this user or root, or group/other write without the
 # sticky bit), and with them swap the lease root and its trusted git config
@@ -117,7 +125,7 @@ d = os.path.realpath(os.getcwd())
 while not os.path.lexists(os.path.join(d, ".git")):
     parent = os.path.dirname(d)
     if parent == d:
-        sys.exit(1)
+        sys.exit(5)   # no .git from here up: not inside a git repository
     d = parent
 repo, dotgit = d, os.path.join(d, ".git")
 # the checkout is HOME or a directory above it: refused (exit 4) before any
@@ -141,8 +149,9 @@ else:
     try:
         line = open(dotgit, encoding="utf-8").read().strip()
     except OSError:
-        sys.exit(2)
+        line = ""
     if not line.startswith("gitdir:"):
+        print(dotgit + " is neither a git directory nor a readable gitdir: file")
         sys.exit(2)
     gitdir = os.path.join(repo, line[len("gitdir:"):].strip())
 common = gitdir
@@ -166,6 +175,7 @@ for p in (repo, os.path.realpath(gitdir), os.path.realpath(common), os.path.real
     print(p)
 ' 2>/dev/null) || RC=$?
   if [ "$RC" -eq 3 ]; then
+    _LEASE_CTX_WHY=root
     echo "lease: ERROR $(printf '%s' "$OUT" | LC_ALL=C tr -d '\000-\037\177') — the lease root and the lead's trusted git config would sit where another user can swap them, so no lease runs here. Set TMPDIR to a private directory (or TRIFORGE_LEASE_ROOT to one of yours) and rerun." >&2
     return 1
   fi
@@ -175,8 +185,14 @@ for p in (repo, os.path.realpath(gitdir), os.path.realpath(common), os.path.real
     echo "lease: ERROR ${OUT} is your home directory or contains it, and a home directory is no project — its ledger would land in ${OUT}/ops, so no lease runs here. Run it from the project's own repository; inside a home directory that is a git repository (a dotfiles repo), git init the project first." >&2
     return 1
   fi
-  if [ "$RC" -ne 0 ]; then
+  if [ "$RC" -eq 5 ]; then
+    _LEASE_CTX_WHY=nogit
     echo "lease: ERROR not inside a git repository — worktree leases require one (outside git the builder pool degrades to lead-only in-place execution)." >&2
+    return 1
+  fi
+  if [ "$RC" -ne 0 ]; then
+    _LEASE_CTX_WHY=error
+    echo "lease: ERROR could not set up the lease context ($(printf '%s' "${OUT:-rc ${RC}}" | LC_ALL=C tr -d '\000-\037\177')), so no lease runs here." >&2
     return 1
   fi
   _LEASE_REPO=$(printf '%s\n' "$OUT" | sed -n 1p)
@@ -188,6 +204,7 @@ for p in (repo, os.path.realpath(gitdir), os.path.realpath(common), os.path.real
   _LEASE_LEDGER="${_LEASE_REPO}/ops/leases.toml"
   _LEAD_CFG="${_LEASE_STATE}/gitconfig"
   if [ ! -f "$_LEAD_CFG" ] && ! _lead_gitconfig_capture "$_LEAD_CFG"; then
+    _LEASE_CTX_WHY=error
     echo "lease: ERROR could not capture the trusted git config into ${_LEAD_CFG}" >&2
     _LEAD_CFG=""
     return 1

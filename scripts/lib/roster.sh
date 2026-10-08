@@ -267,7 +267,9 @@ _RC_DISPATCH_ROLE_CLAUDE=40
 # claude is an ordinary worker there: _dispatch_role_claude runs `claude -p`
 # and writes its output file. Every other lane invokes its helper and returns
 # the helper's own exit code (INVOKE_FAILURE_CLASS stays visible for a
-# synchronous, same-shell caller).
+# synchronous, same-shell caller). A reviewer or analyst on an optional-tier
+# CLI whose agent name has no brief there runs with one of that CLI's own
+# (_dispatch_role_brief), so its answer carries the typed Status report.
 #
 # Callers MUST invoke this in a context that ignores set -e (e.g.
 # `dispatch_role ... || RC=$?`), exactly like the invoke_* helpers — otherwise a
@@ -300,6 +302,15 @@ dispatch_role() {
     _dispatch_role_claude "$ROLE" "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$MODEL" "$EFFORT"
     return $?
   fi
+  # A reviewer or analyst on an optional-tier CLI runs with one of that CLI's
+  # own briefs, which carry the typed Status report (_dispatch_role_brief)
+  case "$ROLE" in
+    reviewer|analyst)
+      if [ "$(cli_field "$CLI" tier 2>/dev/null || true)" = optional ]; then
+        AGENT_NAME=$(_dispatch_role_brief "$CLI" "$ROLE" "$AGENT_NAME")
+      fi
+      ;;
+  esac
   case "$CLI" in
     antigravity)
       AGY_MODEL="$MODEL" invoke_antigravity "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT"
@@ -323,8 +334,8 @@ dispatch_role() {
       CURSOR_MODEL="$MODEL" invoke_cursor "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
       ;;
     devin)
-      # DEVIN_ROLE picks the permission class (_devin_class, devin.sh) and
-      # the brief a persona name lacks.
+      # DEVIN_ROLE picks the permission class (_devin_class, devin.sh); the
+      # brief is the one _dispatch_role_brief named above.
       DEVIN_MODEL="$MODEL" DEVIN_ROLE="$ROLE" invoke_devin "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
       ;;
     grok)
@@ -336,6 +347,36 @@ dispatch_role() {
       return 1
       ;;
   esac
+}
+
+# _dispatch_role_brief <cli> <role> <agent-name> — the agent name dispatch_role
+# hands an optional-tier CLI's helper for a reviewer or analyst. at-review
+# names its core lanes by persona (architecture-reviewer, logic_reviewer), and
+# no optional CLI ships a brief by those names: its helper would run the raw
+# prompt, whose answer carries no Status line, and at-review promotes an
+# optional CLI's answer only on Status: DONE or DONE_WITH_CONCERNS (report
+# missing, every cycle). Prints <agent-name> when the CLI has a brief by that
+# name (<cli>-agents/<agent-name>.md in the plugin; for opencode also the
+# project's .opencode/agents/<agent-name>.md, which invoke_opencode reads
+# first), else <role> when <cli>-agents/<role>.md exists (devin's analyst.md),
+# else reviewer when <cli>-agents/reviewer.md does (every optional CLI ships
+# one: read-only, with the typed report), else <agent-name> unchanged (the
+# helper warns and runs the raw prompt). One stderr line names a
+# substitution. invoke_devin keeps its own role fallback for direct callers.
+_dispatch_role_brief() {
+  local CLI=$1 ROLE=$2 AGENT=$3 DIR="${_TRIFORGE_PLUGIN_ROOT}/${1}-agents" B
+  if [ -f "${DIR}/${AGENT}.md" ] || { [ "$CLI" = opencode ] && [ -f ".opencode/agents/${AGENT}.md" ]; }; then
+    printf '%s\n' "$AGENT"
+    return 0
+  fi
+  for B in "$ROLE" reviewer; do
+    if [ -f "${DIR}/${B}.md" ]; then
+      echo "dispatch_role: ${CLI} has no brief named '${AGENT}'; the ${ROLE} runs with its ${B} brief (${CLI}-agents/${B}.md), which carries the typed Status report" >&2
+      printf '%s\n' "$B"
+      return 0
+    fi
+  done
+  printf '%s\n' "$AGENT"
 }
 
 # _dispatch_role_claude <role> <agent-name> <prompt> <output-file> <timeout>
@@ -352,11 +393,15 @@ dispatch_role() {
 # and on stderr). The envelope's result text lands in <output-file>
 # (the envelope itself beside it, <output-file>.raw and .envelope); a run that
 # returns no envelope leaves the CLI's own output there. Returns the CLI's
-# exit code, with INVOKE_FAILURE_CLASS set as the invoke_* helpers set it. A
-# checkout that is the home directory or contains it is no project
-# (_lease_ctx refuses it, _LEASE_CTX_WHY=home): there the worker would run
-# without the git-dir deny, so nothing runs, rc 69 and deterministic, as
-# invoke_grok refuses the same case.
+# exit code, with INVOKE_FAILURE_CLASS set as the invoke_* helpers set it. The
+# git-dir deny (and the ledger's) needs the lead's lease context: wherever
+# _lease_ctx refuses, the worker would run without it, so nothing runs, rc 69
+# and deterministic, as invoke_grok refuses the same cases. A checkout that is
+# the home directory or contains it is no project (_LEASE_CTX_WHY=home); any
+# other refusal (a lease root or TMPDIR another user could swap, a lease root
+# that can't be made, an unreadable .git) is named by _lease_ctx's own line.
+# Outside any git repository (nogit) there is no git dir to deny, and the
+# worker runs.
 _dispatch_role_claude() {
   local ROLE=$1 AGENT_NAME=$2 PROMPT=$3 OUT=$4 TIMEOUT=$5 MODEL=$6 EFFORT=$7 CLASS=read RC=0 TOBIN
   local -a DENY=()
@@ -374,11 +419,21 @@ _dispatch_role_claude() {
     return 1
   fi
   case "$ROLE" in tester|documenter) CLASS=edit ;; esac
-  if _lease_ctx 2>/dev/null; then
+  # _lease_ctx's line goes to <output-file>.err (the claude run's stderr
+  # replaces it): printed only for a refusal, since outside a git repository
+  # it says ERROR while the worker runs. Reset first, so a .err that can't be
+  # written (nothing ran) refuses too
+  _LEASE_CTX_WHY=""
+  if _lease_ctx 2> "${OUT}.err"; then
     DENY+=("$_LEASE_COMMON")
     if [ "$CLASS" = edit ]; then DENY+=("$_LEASE_LEDGER"); fi
-  elif [ "${_LEASE_CTX_WHY:-}" = home ]; then
+  elif [ "$_LEASE_CTX_WHY" = home ]; then
     echo "dispatch_role: ERROR $(pwd -P | LC_ALL=C tr -d '\000-\037\177') is in a checkout that is your home directory or contains it, and a home directory is no project — cannot run '${AGENT_NAME}' there. Run it from the project's own repository (inside a home directory that is a git repository, git init the project first). No retry (deterministic)." >&2
+    INVOKE_FAILURE_CLASS="deterministic"
+    return 69
+  elif [ "$_LEASE_CTX_WHY" != nogit ]; then
+    cat "${OUT}.err" >&2 2>/dev/null || true
+    echo "dispatch_role: ERROR the lead's lease context can't be set up from $(pwd -P | LC_ALL=C tr -d '\000-\037\177') (${_LEASE_CTX_WHY:-unwritable ${OUT}.err}; above), and without it the claude worker would run with no deny on the lead's git dir — cannot run '${AGENT_NAME}' there. No retry (deterministic)." >&2
     INVOKE_FAILURE_CLASS="deterministic"
     return 69
   fi

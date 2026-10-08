@@ -7315,6 +7315,11 @@ rm -rf "$_S19"
 #             ERROR line naming HOME as no project, the stub never runs, HOME
 #             byte-identical; from a project with its own repository under
 #             that HOME the tester runs, rc 0
+#   ctx       a codex lead's tester resolving to claude with a lease root
+#             that can't be made (TRIFORGE_LEASE_ROOT=/dev/null/x), so no
+#             git-dir deny: rc 69, deterministic, _lease_ctx's line and one
+#             dispatch_role ERROR line, the stub never runs; outside any git
+#             repository (no git dir to deny) the reviewer runs, rc 0
 _S20="${WORK}/self20"
 _S20_FAIL=""
 _S20_SID="7d0f3a52-1b2c-4d5e-8f90-0123456789ab"
@@ -7582,9 +7587,29 @@ _S20_FAIL="${_S20_FAIL}$(_self_expect home "$O" '^home-tester:rc=69:class=determ
   '^dispatch_role: ERROR .*/hrepo/docs is in a checkout that is your home directory or contains it, and a home directory is no project' \
   '^home-identical=yes$' '^proj-tester:rc=0:stub=ran$')"
 
-_S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON envelope (subtype, is_error, session_id), explicit tool sets, --max-turns, session resume, the sandbox settings and their Claude Code floor, the claude env arm, .claude/skills provisioning that adds names only, max-turns routed as report missing, dispatch_role running claude -p under a codex lead (KTD16, R2/R3)"
+# ctx: the claude worker's git-dir deny needs the lead's lease context; a
+# lease root that can't be made refuses like a home directory, while outside
+# any git repository there is no git dir to deny and the worker runs
+_s20_repo "$_S20/crepo" '[lead]\ncli = "codex"\n\n[roles.tester]\ncli = "claude"\n'
+mkdir -p "$_S20/nogit/ops"
+printf '[lead]\ncli = "codex"\n\n[roles.reviewer]\ncli = "claude"\n' > "$_S20/nogit/ops/roster.toml"
+printf 'tester\n' > "$_S20/tmp/s20-mode"
+rm -f "$_S20"/tmp/s20-rec.*
+# shellcheck disable=SC2086
+O=$( cd "$_S20/crepo" && export $_S20_ENV TRIFORGE_TEST_LEAD=codex && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  R=0; TRIFORGE_LEASE_ROOT=/dev/null/x dispatch_role tester test_writer "PROMPT-S20C" "$_S20/ctx.out" 30 >/dev/null 2>"$_S20/ctx.err" || R=$?
+  echo "ctx-root:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:stub=$([ -f "$_S20/tmp/s20-rec.n" ] && echo ran || echo idle):lease=$(grep -c '^lease: ERROR could not set up the lease context' "$_S20/ctx.err" || true):named=$(grep -c "^dispatch_role: ERROR the lead's lease context can't be set up" "$_S20/ctx.err" || true)"
+  cd "$_S20/nogit" || exit 0
+  if _checkout_top >/dev/null 2>&1; then echo "ctx-nogit:inside-a-repository"; exit 0; fi
+  printf 'review\n' > "$_S20/tmp/s20-mode"
+  R=0; dispatch_role reviewer logic_reviewer "PROMPT-S20N" "$_S20/nogit.out" 30 >/dev/null 2>&1 || R=$?
+  echo "ctx-nogit:rc=${R}:stub=$([ -f "$_S20/tmp/s20-rec.n" ] && echo ran || echo idle):out=$(tr '\n' ' ' < "$_S20/nogit.out" 2>/dev/null)"
+) 2>&1 || true
+_S20_FAIL="${_S20_FAIL}$(_self_expect ctx "$O" '^ctx-root:rc=69:class=deterministic:stub=idle:lease=1:named=1$' '^ctx-nogit:rc=0:stub=ran:out=REVIEW-OK no findings')"
+
+_S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON envelope (subtype, is_error, session_id), explicit tool sets, --max-turns, session resume, the sandbox settings and their Claude Code floor, the claude env arm, .claude/skills provisioning that adds names only, max-turns routed as report missing, dispatch_role running claude -p under a codex lead, never without its deny on the lead's git dir inside a git checkout (KTD16, R2/R3)"
 if [ -z "$_S20_FAIL" ]; then
-  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0" "static"
+  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0; ctx: a codex lead's tester on claude with TRIFORGE_LEASE_ROOT=/dev/null/x -> rc 69 deterministic, the lease line and one ERROR line, stub never run; outside any git repository the reviewer runs, rc 0" "static"
 else
   row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S20_FAIL"):$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"
 fi
@@ -8136,7 +8161,9 @@ rm -rf "$_S24"
 # pluginhook (a hook and an LSP server of the listed user plugin),
 # strayplugin (a hook of a plugin inspect does not list), sleep (inspect
 # records its pid and sleeps 30 s), noterm (inspect ignores TERM, records its
-# pid and sleeps until it is killed), lateserver (one more user MCP server).
+# pid and sleeps until it is killed), orphan (inspect starts a child that
+# ignores TERM, its pid in orphan.pid, then answers as full does), lateserver
+# (one more user MCP server).
 # Like grok 1.0.34, inspect lists no MCP server the working directory's
 # .grok/config.toml already shadows.
 # Any other run records its argv (prompt included), environment, working
@@ -8147,6 +8174,9 @@ rm -rf "$_S24"
 # done (Status: DONE, end_turn), maxtokens, noend and maxturns (Status: DONE,
 # then max_tokens, no end event, or max_turns_reached and exit 1), empty
 # (end_turn alone), interrupted (exit 130, as a grok a SIGINT stopped),
+# orphan and orphan-hang (a child that ignores TERM, its pid in orphan.pid,
+# then the done stream, or a sleep of 300 s), orphan-psfail (orphan, and a
+# ps-fail file the sweep case's ps stub then fails on),
 # transient-decline and transient-taint (a failure a retry may fix, exit 1,
 # after writing grok's decline into the roster named in decline-roster, or a
 # key into the git config named in taint-git); each
@@ -8282,8 +8312,24 @@ rm -rf "$_S24"
 #   trap       TERM to _grok_run_in's subshell while the provisioning inspect
 #              sleeps: the inspect stopped, no scratch directory left; with an
 #              inspect that ignores TERM (the sleeps it starts too): KILLed
-#              once the 2 s grace is out, so nothing outlives the subshell,
+#              within the stop's 5 s grace, so nothing outlives the subshell,
 #              which exits 143 with no scratch directory left
+#   sweep      invoke_grok as a reviewer whose grok leaves a child that ignores
+#              TERM: a run that then exits 0 (rc 0), one that sleeps past a
+#              2 s run timeout (rc 124, class timeout), and a provisioning
+#              inspect that leaves one (rc 0): each child gone when
+#              invoke_grok returns, no scratch directory left; with ps failing
+#              once grok has run, so the sweep can't be verified: rc 80, class
+#              deterministic, reason unresolved-cleanup, one run, the scratch
+#              directory left in place and named on stderr
+#   dispatch   dispatch_role reviewer logic_reviewer and analyst
+#              architecture-reviewer (at-review's persona names) with both
+#              roles on grok: the prompt grok gets starts with
+#              grok-agents/reviewer.md's body and holds its Status contract,
+#              in the read-only sandbox, one stderr line naming the
+#              substitution and no "not found" warning, Status: DONE; with
+#              both roles on kimi (a stub that records its argv): --agent-file
+#              <plugin root>/kimi-agents/reviewer.md, no warning
 #   fg-integrity  invoke_grok as a reviewer with the lead's integrity check
 #              refusing (a stub returning 44), and in a project with an open
 #              lease and a fresh lease_rebaseline whose .git/config then gains
@@ -8310,6 +8356,7 @@ if [ "$1" = inspect ]; then
     fail)      echo '{}'; exit 1 ;;
     sleep)     echo "$$" > "$D/inspect.pid"; exec sleep 30 ;;
     noterm)    trap '' TERM; echo "$$" > "$D/inspect.pid"; while :; do sleep 1; done ;;
+    orphan)    ( trap '' TERM; exec sleep 300 ) > /dev/null 2>&1 & echo "$!" > "$D/orphan.pid" ;;
   esac
   OV='{"role":"env_overlay","path":"$GROK_CONFIG (inline)","note":"sections: shell_environment_policy, toolset"}'
   if [ -z "${GROK_CONFIG:-}" ] || [ -f "$D/overlay-ignored" ]; then
@@ -8362,6 +8409,9 @@ case "$(cat "$D/mode" 2>/dev/null || echo done)" in
   maxturns)  printf '%s\n' "$T" '{"type":"usage"}' '{"type":"max_turns_reached"}' '{"type":"end","stopReason":"cancelled","num_turns":1}'; echo "Error: max turns reached" >&2; exit 1 ;;
   empty)     printf '%s\n' '{"type":"end","stopReason":"end_turn","num_turns":1}' ;;
   interrupted) exit 130 ;;
+  orphan)      ( trap '' TERM; exec sleep 300 ) & echo "$!" > "$D/orphan.pid"; printf '%s\n' "$T" '{"type":"usage"}' '{"type":"end","stopReason":"end_turn","num_turns":1}' ;;
+  orphan-hang) ( trap '' TERM; exec sleep 300 ) & echo "$!" > "$D/orphan.pid"; exec sleep 300 ;;
+  orphan-psfail) ( trap '' TERM; exec sleep 300 ) & echo "$!" > "$D/orphan.pid"; : > "$D/ps-fail"; printf '%s\n' "$T" '{"type":"usage"}' '{"type":"end","stopReason":"end_turn","num_turns":1}' ;;
   transient-decline) printf '[members.grok]\nenabled = false\n' > "$(cat "$D/decline-roster")"; echo "Error: connection reset by peer" >&2; exit 1 ;;
   transient-taint)   git --git-dir="$(cat "$D/taint-git")" config s25.taint yes; echo "Error: connection reset by peer" >&2; exit 1 ;;
   *)         printf '%s\n' "$T" '{"type":"usage"}' '{"type":"end","stopReason":"end_turn","num_turns":1}' ;;
@@ -8918,8 +8968,8 @@ O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25
   if [ -n "$SP" ]; then kill -TERM "$SP" 2>/dev/null || true; fi
   # the same with an inspect that ignores TERM, and so do the sleeps it
   # starts: gone by the time the subshell exits, at most a second later. The
-  # subshell gets 8 s (the 2 s grace and the KILL, with slack) before it
-  # counts as hung; a stub left alive is killed here, never by the gate's end
+  # subshell gets 8 s (the stop's 5 s grace and the KILL, with slack) before
+  # it counts as hung; a stub left alive is killed here, never by the gate's end
   rm -f "$_S25/inspect.pid"; printf 'noterm\n' > "$_S25/inspect-mode"
   _grok_run_in "$S" "$TO" 60 "probe trap S25 noterm" "$_S25/trap.ready" > /dev/null 2>&1 &
   J=$!
@@ -8939,9 +8989,79 @@ O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25
   rm -f "$_S25/inspect-mode" )
 _S25_FAIL="${_S25_FAIL}$(_self_expect trap "$O" '^trap:started=yes:before=1:dirs=0:stub=gone$' '^trap-noterm:started=yes:before=1:rc=143:dirs=0:stub=gone$')"
 
-_S25_CAP="Grok Build's lane: the permission class by role (a reviewer or analyst read-only, with Edit, Write and Bash denied over any imported Claude allow rule, and MCP tools denied in every class; grok takes builder, reviewer and analyst, and edits only in a lease), the env prefix and include_only overlay pinned, a report only from an end_turn run, the provisioned .grok/config.toml that disables every plugin and shadows every MCP server, the user's own included (never merged, never without a full inspect, refused when it can't be proven), no read-class run where the project supplies code grok would start, while the user's own grok hooks and settings run with one NOTE line naming each (checked again, and the tables rebuilt, at every read-class dispatch; asked by at-setup through grok_read_isolation_check), the builder's sandbox profile closing GROK_HOME's code and instruction paths (rewritten before each dispatch), and invoke_grok's read class in a removed scratch checkout under env -i, after the roster and integrity checks before every attempt, with no filter or hook run and a TERM that leaves nothing behind (R23)"
+# what grok leaves running: a child that ignores TERM, started by the run
+# (which then exits 0, or sleeps past a 2 s run timeout) and by the
+# provisioning inspect, is gone by the time invoke_grok returns (a second
+# allowed for its parent to reap it), and no scratch directory is left. With
+# ps failing once grok has run (a ps stub first on PATH that fails while
+# ps-fail exists), the sweep can't be verified: rc 80, no retry, and the
+# scratch directory stays, named on stderr. A child still alive, and that
+# directory, are removed here, never by the gate's end
+mkdir -p "$_S25/psbin"
+printf '#!/bin/sh\n# SELF-25 ps stub: fails while ps-fail exists, else the real ps\nif [ -f "%s/ps-fail" ]; then exit 1; fi\nexec "%s" "$@"\n' "$_S25" "$(command -v ps)" > "$_S25/psbin/ps"
+chmod +x "$_S25/psbin/ps"
+O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25/psbin:$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/fg-leases" \
+       XAI_API_KEY=s25-stub-key && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for M in run:orphan:60 hang:orphan-hang:2 inspect:orphan:60 unresolved:orphan-psfail:60; do
+    K=${M%%:*}; W=${M#*:}; T=${W#*:}; W=${W%%:*}
+    rm -f "$_S25/orphan.pid" "$_S25/ps-fail"; : > "$_S25/log/runs"
+    if [ "$K" = inspect ]; then printf '%s\n' "$W" > "$_S25/inspect-mode"; else printf '%s\n' "$W" > "$_S25/mode"; fi
+    R=0; GROK_ROLE=reviewer invoke_grok reviewer "probe review S25 sweep ${K}" "$_S25/sweep-${K}.out" "$T" >/dev/null 2> "$_S25/sweep-${K}.err" || R=$?
+    rm -f "$_S25/mode" "$_S25/inspect-mode" "$_S25/ps-fail"
+    OP=$(cat "$_S25/orphan.pid" 2>/dev/null || true)
+    N=0
+    while [ "$N" -lt 10 ] && [ -n "$OP" ] && kill -0 "$OP" 2>/dev/null; do sleep 0.1; N=$((N + 1)); done
+    LEFT=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null || true)
+    echo "sweep-${K}:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:reason=${_INVOKE_FAILURE_REASON:-}:runs=$(grep -c . "$_S25/log/runs" 2>/dev/null || true):started=$( [ -n "$OP" ] && echo yes || echo no):child=$( [ -n "$OP" ] && kill -0 "$OP" 2>/dev/null && echo alive || echo gone):left=$(printf '%s' "$LEFT" | grep -c . || true):named=$(if [ -n "$LEFT" ]; then grep -F 'invoke_grok: unresolved cleanup' "$_S25/sweep-${K}.err" 2>/dev/null | grep -cF "$LEFT" || true; else echo 0; fi)"
+    if [ -n "$OP" ]; then kill -KILL "$OP" 2>/dev/null || true; fi
+    if [ -n "$LEFT" ]; then rm -rf "$_S25/tmp"/triforge-grok.*; fi
+  done )
+_S25_FAIL="${_S25_FAIL}$(_self_expect sweep "$O" '^sweep-run:rc=0:class=none:reason=:runs=1:started=yes:child=gone:left=0:named=0$' \
+  '^sweep-hang:rc=124:class=timeout:reason=:runs=1:started=yes:child=gone:left=0:named=0$' '^sweep-inspect:rc=0:class=none:reason=:runs=1:started=yes:child=gone:left=0:named=0$' \
+  '^sweep-unresolved:rc=80:class=deterministic:reason=unresolved-cleanup:runs=1:started=yes:child=gone:left=1:named=1$')"
+
+# at-review's core lanes on optional members: dispatch_role's reviewer and
+# analyst under the persona names at-review passes, with both roles on grok,
+# then on kimi (a stub that records its argv), run with the CLI's reviewer
+# brief and so with its typed Status report
+_self_repo "$_S25/dr" "$_S25/home" sprint/s25dr '[roles.reviewer]\ncli = "grok"\nfallbacks = ["codex"]\n\n[roles.analyst]\ncli = "grok"\nfallbacks = ["claude"]\n\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n'
+_self_repo "$_S25/dk" "$_S25/home" sprint/s25dk '[roles.reviewer]\ncli = "kimi"\nfallbacks = ["codex"]\n\n[roles.analyst]\ncli = "kimi"\nfallbacks = ["claude"]\n'
+mkdir -p "$_S25/kbin"
+cat > "$_S25/kbin/kimi" <<'EOF'
+#!/bin/sh
+# SELF-25 kimi stub: records its argv, answers one assistant message
+D=$(cd "$(dirname "$0")/.." && pwd)
+: > "$D/log/kimi.argv"
+for a in "$@"; do printf '%s\n' "$a" >> "$D/log/kimi.argv"; done
+printf '%s\n' '{"role":"assistant","content":"Reviewed.\nStatus: DONE\nFiles changed: none"}'
+EOF
+chmod +x "$_S25/kbin/kimi"
+O=$( cd "$_S25/dr" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25/kbin:$_S25_PATH" TMPDIR="$_S25/tmp" TRIFORGE_LEASE_ROOT="$_S25/dr-leases" \
+       XAI_API_KEY=s25-stub-key && unset TRIFORGE_TEST_BUILDER && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  L="$_S25/log"
+  _c() { grep -c "$@" 2>/dev/null || true; }
+  for T in reviewer:logic_reviewer analyst:architecture-reviewer; do
+    RO=${T%%:*}; A=${T#*:}
+    rm -f "$L"/wt.*
+    R=0; dispatch_role "$RO" "$A" "probe ${RO} S25 dispatch" "$_S25/dr-${RO}.out" 60 >/dev/null 2> "$_S25/dr-${RO}.err" || R=$?
+    F=$(awk 'f && NF { print; exit } $0 == "-p" { f = 1 }' "$L/wt.argv" 2>/dev/null || true)
+    echo "dispatch-grok-${RO}:rc=${R}:status=$(_lease_parse_status "$_S25/dr-${RO}.out"):first=$( [ -n "$_S25_SIGR" ] && [ "$F" = "$_S25_SIGR" ] && echo reviewer-brief || echo other):contract=$(_c -F 'Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT' "$L/wt.argv"):task=$(_c -F "probe ${RO} S25 dispatch" "$L/wt.argv"):sandbox=$(grep -A1 -x -- --sandbox "$L/wt.argv" 2>/dev/null | tail -1):warned=$(_c 'not found in plugin grok-agents' "$_S25/dr-${RO}.err"):named=$(_c -F "grok has no brief named '${A}'" "$_S25/dr-${RO}.err")"
+  done
+  cd "$_S25/dk" || exit 0
+  KR="$(triforge_plugin_root)/kimi-agents/reviewer.md"
+  for T in reviewer:logic_reviewer analyst:architecture-reviewer; do
+    RO=${T%%:*}; A=${T#*:}
+    rm -f "$L/kimi.argv"
+    R=0; dispatch_role "$RO" "$A" "probe ${RO} S25 kimi" "$_S25/dk-${RO}.out" 60 >/dev/null 2> "$_S25/dk-${RO}.err" || R=$?
+    echo "dispatch-kimi-${RO}:rc=${R}:status=$(_lease_parse_status "$_S25/dk-${RO}.out"):agent-file=$( [ "$(grep -A1 -x -- --agent-file "$L/kimi.argv" 2>/dev/null | tail -1)" = "$KR" ] && echo reviewer || echo other):warned=$(_c 'not found in plugin kimi-agents' "$_S25/dk-${RO}.err")"
+  done )
+_S25_FAIL="${_S25_FAIL}$(_self_expect dispatch "$O" '^dispatch-grok-reviewer:rc=0:status=DONE:first=reviewer-brief:contract=1:task=1:sandbox=read-only:warned=0:named=1$' \
+  '^dispatch-grok-analyst:rc=0:status=DONE:first=reviewer-brief:contract=1:task=1:sandbox=read-only:warned=0:named=1$' \
+  '^dispatch-kimi-reviewer:rc=0:status=DONE:agent-file=reviewer:warned=0$' '^dispatch-kimi-analyst:rc=0:status=DONE:agent-file=reviewer:warned=0$')"
+
+_S25_CAP="Grok Build's lane: the permission class by role (a reviewer or analyst read-only, with Edit, Write and Bash denied over any imported Claude allow rule, and MCP tools denied in every class; grok takes builder, reviewer and analyst, and edits only in a lease), the env prefix and include_only overlay pinned, a report only from an end_turn run, the provisioned .grok/config.toml that disables every plugin and shadows every MCP server, the user's own included (never merged, never without a full inspect, refused when it can't be proven), no read-class run where the project supplies code grok would start, while the user's own grok hooks and settings run with one NOTE line naming each (checked again, and the tables rebuilt, at every read-class dispatch; asked by at-setup through grok_read_isolation_check), the builder's sandbox profile closing GROK_HOME's code and instruction paths (rewritten before each dispatch), and invoke_grok's read class in a removed scratch checkout under env -i, after the roster and integrity checks before every attempt, with no filter or hook run, and nothing grok leaves running, nor a TERM, leaving anything behind (a scratch something may still run in is kept and named, never removed); and dispatch_role running a reviewer or analyst on an optional member with that CLI's reviewer brief and its Status contract (R23)"
 if [ -z "$_S25_FAIL" ]; then
-  row "SELF-25" "grok" "$_S25_CAP" "PASS" "class: builder/tester/documenter edit, reviewer/analyst/empty read; lane: edit -> triforge-edit + Edit/Write/Bash, MCP denied; read and empty -> read-only, Edit/Write/Bash/MCP denied; env prefix: every GROK_CLAUDE_*/GROK_CURSOR_* switch, GROK_FOLDER_TRUST=0, the overlay's literal include_only; builder lease: .grok/config.toml disables the 3 plugins and shadows the 3 servers (the user's ~/.grok/config.toml one included), inspect with the Claude switches off, config and profile provisioned, a weakened profile written back before the run (all 17 GROK_HOME denies), triforge-edit, builder brief, collect -> review, snapshot without .grok/; reviewer lease (project allows Edit/Write/npm): read-only, the denies, reviewer brief, no profile, review; Status: DONE then max_tokens, no end, or the turn cap -> report missing (rc 80), the stop named; tracked: [permission] and [mcp_servers.team] files take the tables (tomllib-proven); [plugins], inline mcp_servers, a server named like a ~/.claude.json one, a symlinked .grok and an ignored overlay refused, file unchanged and named; a project server named like the user's grok one gets no shadow; user tier (read class): a user hook, a user LSP server, an unlisted plugin's hook, an auth provider command, notification hooks, config-layer [hooks], a requirements-layer MCP server and an Orca-style hook file accepted, each named with its file in one NOTE line (the .bak copy not); an unparsable config.toml and project hooks beside the Orca hook refused, nothing written; the listed user plugin's hook and LSP accepted with no note (plugin disabled, user server shadowed); the edit class takes a user hook with no note and writes the profile; profile: one table, extends workspace, exactly the 17 literal denies, config.toml not denied; a same-named user profile and a symlinked file refused, nothing written; surface (read class): .grok/hooks, .grok/lsp.json, .grok/plugins, .claude/plugins, a project MCP server and an inspect-reported project hook refused, named, nothing written; Claude/Cursor hooks, .mcp.json (shadowed), an agent, a skill and a sandbox.toml accepted; edit class takes .grok/hooks; inspect: empty, cut-off, failed and partial refused; roles: tester and documenter on grok rc 5; lease_create refused, no row, grok never run; a read lease over .grok/lsp.json refused, a builder lease made, .grok/hooks added after create refused at compose (rc 94); a reviewer lease made under a clean user tier: a user hook by dispatch time runs (rc 0, named in the builder log's NOTE), a new user MCP server by then shadowed in the run's config with the provisioning's 3 shadows kept and one [plugins]; a reviewer lease made beside the Orca hook: leased, the file named on stderr; grok_read_isolation_check: clean -> rc 0 OK, a user hook -> rc 0 OK and a NOTE naming it, an unparsable config.toml -> rc 1 named, no scratch left, HOME unchanged; invoke_grok: reviewer from a scratch checkout with the config, env -i (no canary, no CLAUDECODE), the denies and the checkout note, then removed, no ledger written; tester and an edit agent name rc 69, grok never run; an empty end_turn -> rc 80 no-answer; an interrupted run (exit 130) -> rc 130 interrupted, run once, no retry; a retry after the first run declined grok in the roster -> rc 5 role, run once; a retry after the first run changed .git/config (lease open, fresh rebaseline) -> rc 44 integrity, run once; an unisolable project, project hooks or a bad inspect -> rc 69, grok never run; beside an Orca-style user hook -> rc 0, DONE, read-only, one NOTE naming the hook file; integrity refused (stub, and a smudge filter in .git/config with .git/info/attributes planted after a fresh rebaseline, a lease open) -> rc 44, no checkout, the filter never run; a never-leased project's smudge and process filters never run; TERM to _grok_run_in's subshell during the provisioning inspect -> the inspect stopped, no scratch left; the same with an inspect that ignores TERM -> KILLed after the 2 s grace, gone before the subshell exits 143, no scratch left" "static"
+  row "SELF-25" "grok" "$_S25_CAP" "PASS" "class: builder/tester/documenter edit, reviewer/analyst/empty read; lane: edit -> triforge-edit + Edit/Write/Bash, MCP denied; read and empty -> read-only, Edit/Write/Bash/MCP denied; env prefix: every GROK_CLAUDE_*/GROK_CURSOR_* switch, GROK_FOLDER_TRUST=0, the overlay's literal include_only; builder lease: .grok/config.toml disables the 3 plugins and shadows the 3 servers (the user's ~/.grok/config.toml one included), inspect with the Claude switches off, config and profile provisioned, a weakened profile written back before the run (all 17 GROK_HOME denies), triforge-edit, builder brief, collect -> review, snapshot without .grok/; reviewer lease (project allows Edit/Write/npm): read-only, the denies, reviewer brief, no profile, review; Status: DONE then max_tokens, no end, or the turn cap -> report missing (rc 80), the stop named; tracked: [permission] and [mcp_servers.team] files take the tables (tomllib-proven); [plugins], inline mcp_servers, a server named like a ~/.claude.json one, a symlinked .grok and an ignored overlay refused, file unchanged and named; a project server named like the user's grok one gets no shadow; user tier (read class): a user hook, a user LSP server, an unlisted plugin's hook, an auth provider command, notification hooks, config-layer [hooks], a requirements-layer MCP server and an Orca-style hook file accepted, each named with its file in one NOTE line (the .bak copy not); an unparsable config.toml and project hooks beside the Orca hook refused, nothing written; the listed user plugin's hook and LSP accepted with no note (plugin disabled, user server shadowed); the edit class takes a user hook with no note and writes the profile; profile: one table, extends workspace, exactly the 17 literal denies, config.toml not denied; a same-named user profile and a symlinked file refused, nothing written; surface (read class): .grok/hooks, .grok/lsp.json, .grok/plugins, .claude/plugins, a project MCP server and an inspect-reported project hook refused, named, nothing written; Claude/Cursor hooks, .mcp.json (shadowed), an agent, a skill and a sandbox.toml accepted; edit class takes .grok/hooks; inspect: empty, cut-off, failed and partial refused; roles: tester and documenter on grok rc 5; lease_create refused, no row, grok never run; a read lease over .grok/lsp.json refused, a builder lease made, .grok/hooks added after create refused at compose (rc 94); a reviewer lease made under a clean user tier: a user hook by dispatch time runs (rc 0, named in the builder log's NOTE), a new user MCP server by then shadowed in the run's config with the provisioning's 3 shadows kept and one [plugins]; a reviewer lease made beside the Orca hook: leased, the file named on stderr; grok_read_isolation_check: clean -> rc 0 OK, a user hook -> rc 0 OK and a NOTE naming it, an unparsable config.toml -> rc 1 named, no scratch left, HOME unchanged; invoke_grok: reviewer from a scratch checkout with the config, env -i (no canary, no CLAUDECODE), the denies and the checkout note, then removed, no ledger written; tester and an edit agent name rc 69, grok never run; an empty end_turn -> rc 80 no-answer; an interrupted run (exit 130) -> rc 130 interrupted, run once, no retry; a retry after the first run declined grok in the roster -> rc 5 role, run once; a retry after the first run changed .git/config (lease open, fresh rebaseline) -> rc 44 integrity, run once; an unisolable project, project hooks or a bad inspect -> rc 69, grok never run; beside an Orca-style user hook -> rc 0, DONE, read-only, one NOTE naming the hook file; integrity refused (stub, and a smudge filter in .git/config with .git/info/attributes planted after a fresh rebaseline, a lease open) -> rc 44, no checkout, the filter never run; a never-leased project's smudge and process filters never run; TERM to _grok_run_in's subshell during the provisioning inspect -> the inspect stopped, no scratch left; the same with an inspect that ignores TERM -> KILLed within the 5 s grace, gone before the subshell exits 143, no scratch left; a child that ignores TERM left by grok's run (exit 0 -> rc 0; past a 2 s timeout -> rc 124, timeout) or by the provisioning inspect (rc 0) -> gone when invoke_grok returns, no scratch left; ps failing once grok has run -> rc 80, deterministic unresolved-cleanup, run once, the scratch kept and named on stderr; dispatch_role reviewer logic_reviewer and analyst architecture-reviewer on grok -> the prompt starts with the reviewer brief and holds its Status contract, read-only, the substitution named, no not-found warning, Status: DONE; the same on kimi -> --agent-file <root>/kimi-agents/reviewer.md, no warning" "static"
 else
   row "SELF-25" "grok" "$_S25_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S25_FAIL"):$(printf '%s' "$_S25_FAIL" | cut -c1-700)" "static"
 fi
