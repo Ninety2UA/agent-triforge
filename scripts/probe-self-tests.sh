@@ -4895,6 +4895,35 @@ rm -rf "$_S13"
 #            anchors and the merge under A succeeds with it; with A's
 #            lead/gitconfig away, that approval is refused naming export
 #            TRIFORGE_LEASE_ROOT
+#   renamed  a merge follows no rename: leases mv (docs/hooks.json to
+#            .claude/hooks.json, merged on the lead's approval), ed (edits
+#            docs/hooks.json) and rn (notes.txt to guide.txt), all cut before
+#            mv merged: lease_merge ed -> 1 naming docs/hooks.json and the
+#            recovery (lease it again), state review, the integration branch,
+#            .claude/hooks.json and the index unchanged; the same through a
+#            git that drops -X no-renames (followgit) -> 1 naming
+#            .claude/hooks.json, which its scan never listed; rn's own rename
+#            (a three-way squash) -> merges, both sides in the squash
+#   rewound  lease p adds .claude/settings.json and merges on its approval,
+#            lease q is cut after it, then the integration branch is rewound
+#            to before p and that accepted (lease_rebaseline): lease_merge q
+#            -> 1 naming .claude/settings.json (the squash would replay p),
+#            nothing merged or staged
+#   renamedpromote main renames docs/hooks.json to .claude/hooks.json after
+#            sprint/s14 forked, and sprint/s14 edits docs/hooks.json:
+#            lease_promote main -> 1 naming docs/hooks.json, main unmoved,
+#            back on sprint/s14, no merge in progress, nothing dirty; through
+#            followgit -> 1 naming .claude/hooks.json, the same state; main
+#            merged into sprint/s14 by hand (the recovery it names) -> 42
+#            naming .claude/hooks.json, and the user's approval promotes
+#   race*    a worker moves refs/heads/main to a decoy commit between the
+#            promotion's merge and its record (a wrapped library function,
+#            race-seam.sh): read back as what the promotion made
+#            (raceverify), read by the baseline write (racerecord), moved
+#            during a promotion into develop (raceother) -> 44 naming both
+#            commits, the baseline and the ledger unchanged, the integration
+#            branch still recorded; main put back, lease_promote main records
+#            the verified result
 _S14="${WORK}/self14"
 _S14_FAIL=""
 rm -rf "$_S14"
@@ -5346,9 +5375,161 @@ echo "row=$(_ledger_get t state):by=$(_ledger_get t approval_by)"
 ')
 _S14_FAIL="${_S14_FAIL}$(_self_expect tmpdirs "$O" '^t:go=0:review$' '^pin:rc=0:' '^gone:rc=1:.*export TRIFORGE_LEASE_ROOT' '^app:rc=0:' '^merge:rc=0:' '^row=merged:by=user$')"
 
-_S14_CAP="ledger approvals: lead_cli + reviewer class per row; a protected change (base to snapshot) merges only with a lead or user merge approval bound to the snapshot, the lead's own CLI's build routed to the user; a protected or require_user_approval promotion needs the user's approval bound to the tree and the branch it goes into (the default branch, or the target named), voided by a later merge or a move of that branch; every approval records its origin (KTD2-KTD4, R5, R6, R32, R33)"
+# followgit: the real git minus each "-X no-renames", so a merge follows
+# renames again; what lease_merge and lease_promote hold the merged tree to
+# (_lease_merge_scope) must refuse that on its own
+mkdir -p "$_S14/followgit"
+printf '#!/bin/sh\n# probe wrapper (SELF-14): the real git, minus each "-X no-renames"\nn=$#\nwhile [ "$n" -gt 0 ]; do\n  a=$1; shift; n=$((n - 1))\n  if [ "$a" = -X ] && [ "$n" -gt 0 ] && [ "$1" = no-renames ]; then shift; n=$((n - 1)); continue; fi\n  set -- "$@" "$a"\ndone\nexec "%s" "$@"\n' \
+  "$(command -v git)" > "$_S14/followgit/git"
+chmod +x "$_S14/followgit/git"
+
+# renamed: a merge follows no rename. sprint/s14 holds docs/hooks.json and
+# notes.txt; leases mv (docs/hooks.json to .claude/hooks.json), ed (edits
+# docs/hooks.json) and rn (notes.txt to guide.txt) are all cut there, and mv
+# merges first, on its approval
+_s14_repo renamed claude codex
+( cd "$_S14/renamed" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p docs && printf '{"v":1}\n' > docs/hooks.json && echo n > notes.txt \
+    && git add -A && git commit -qm docs ) >/dev/null 2>&1
+_s14_builder renamed <<'S14_RENAMED_EOF'
+#!/bin/sh
+case "$(basename "$PWD")" in
+  mv) mkdir -p .claude && mv docs/hooks.json .claude/hooks.json ;;
+  ed) printf '{"v":2}\n' > docs/hooks.json ;;
+  rn) mv notes.txt guide.txt ;;
+esac
+echo "Status: DONE"
+S14_RENAMED_EOF
+O=$(_s14_lead renamed claude '
+_self_go mv; _self_go ed; _self_go rn
+for T in mv ed rn; do lease_pin_reviewer "$T" antigravity >/dev/null 2>&1; done
+_self_try mvbare lease_merge mv antigravity
+_self_try mvapp lease_approve task:mv claude
+_self_try mvmerge lease_merge mv antigravity
+H=$(git rev-parse refs/heads/sprint/s14)
+_self_try edmerge lease_merge ed antigravity
+(export PATH="$_S14/followgit:$PATH"; _self_try edfollow lease_merge ed antigravity)
+echo "ed=$(_ledger_get ed state):head=$(if [ "$(git rev-parse refs/heads/sprint/s14)" = "$H" ]; then echo kept; else echo moved; fi):hooks=$(git show HEAD:.claude/hooks.json)$(cat .claude/hooks.json):staged=[$(git diff --cached --name-only)]:old=$(if [ -e docs/hooks.json ]; then echo present; else echo gone; fi)"
+_self_try rnmerge lease_merge rn antigravity
+echo "rnsquash=$(git diff-tree --no-commit-id --name-only --no-renames -r HEAD | tr "\n" " ")"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect renamed "$O" '^mv:go=0:review$' '^ed:go=0:review$' '^rn:go=0:review$' '^mvbare:rc=42:.*\.claude/hooks\.json' '^mvapp:rc=0:' '^mvmerge:rc=0:' \
+  '^edmerge:rc=1:.*renamed or deleted docs/hooks\.json since ed was cut.*lease_reclaim ed, then lease_create ed builder' '^edfollow:rc=1:.*would also change \.claude/hooks\.json' \
+  '^ed=review:head=kept:hooks=\{"v":1\}\{"v":1\}:staged=\[\]:old=gone$' '^rnmerge:rc=0:' '^rnsquash=guide\.txt notes\.txt $')"
+
+# rewound: a squash whose merge base is not the lease's base. Lease p adds
+# .claude/settings.json and merges on its approval; lease q, cut after it,
+# writes feature.txt; the integration branch is then rewound to before p
+# (accepted with lease_rebaseline), so q's squash would replay p as well
+_s14_repo rewound claude codex
+_s14_builder rewound <<'S14_REWOUND_EOF'
+#!/bin/sh
+case "$(basename "$PWD")" in
+  p) mkdir -p .claude && echo "{}" > .claude/settings.json ;;
+  q) echo feature > feature.txt ;;
+esac
+echo "Status: DONE"
+S14_REWOUND_EOF
+O=$(_s14_lead rewound claude '
+H0=$(git rev-parse refs/heads/sprint/s14)
+_self_go p
+lease_pin_reviewer p antigravity >/dev/null 2>&1; lease_approve task:p claude >/dev/null 2>&1
+_self_try pmerge lease_merge p antigravity
+_self_go q
+lease_pin_reviewer q antigravity >/dev/null 2>&1
+git reset -q --hard "$H0"
+_self_try rebaseline lease_rebaseline
+_self_try qmerge lease_merge q antigravity
+echo "q=$(_ledger_get q state):head=$(if [ "$(git rev-parse refs/heads/sprint/s14)" = "$H0" ]; then echo kept; else echo moved; fi):settings=$(if [ -e .claude/settings.json ]; then echo present; else echo absent; fi):staged=[$(git diff --cached --name-only)]"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect rewound "$O" '^p:go=0:review$' '^pmerge:rc=0:' '^q:go=0:review$' '^rebaseline:rc=0:' \
+  '^qmerge:rc=1:.*would also change \.claude/settings\.json, which its own diff' '^q=review:head=kept:settings=absent:staged=\[\]$')"
+
+# renamedpromote: a promotion follows no rename either. main renames
+# docs/hooks.json to .claude/hooks.json after sprint/s14 forked, and
+# sprint/s14 edits docs/hooks.json (plain commits, no ledger yet)
+_s14_repo renamedpromote claude codex
+( cd "$_S14/renamedpromote" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git checkout -q main && mkdir -p docs && printf '{"v":1}\n' > docs/hooks.json \
+    && git add -A && git commit -qm docs && git checkout -q -B sprint/s14 main && printf '{"v":2}\n' > docs/hooks.json && git commit -qam edit \
+    && git checkout -q main && mkdir -p .claude && git mv docs/hooks.json .claude/hooks.json && git commit -qm rename && git checkout -q sprint/s14 ) >/dev/null 2>&1
+O=$(_s14_lead renamedpromote claude '
+M=$(git rev-parse refs/heads/main)
+_s14_at() { echo "$1:main=$(if [ "$(git rev-parse refs/heads/main)" = "$M" ]; then echo kept; else echo moved; fi):on=$(git symbolic-ref HEAD 2>/dev/null || echo detached):merging=$(if [ -e .git/MERGE_HEAD ]; then echo yes; else echo no; fi):dirty=[$(git status --porcelain | tr "\n" " ")]"; }
+_self_try conflict lease_promote main
+_s14_at conflict
+(export PATH="$_S14/followgit:$PATH"; _self_try follow lease_promote main)
+_s14_at follow
+git merge -q --no-edit refs/heads/main
+_self_try recovered lease_promote main
+_self_try app lease_approve promotion:sprint/s14 user
+_self_try promote lease_promote main
+echo "promoted:hooks=$(git show refs/heads/main:.claude/hooks.json):old=$(if git cat-file -e refs/heads/main:docs/hooks.json 2>/dev/null; then echo present; else echo gone; fi)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect renamedpromote "$O" "^conflict:rc=1:.*'main' renamed or deleted docs/hooks\\.json, which 'sprint/s14' edits" \
+  '^conflict:main=kept:on=refs/heads/sprint/s14:merging=no:dirty=\[\]$' '^follow:rc=1:.*would also change \.claude/hooks\.json' \
+  '^follow:main=kept:on=refs/heads/sprint/s14:merging=no:dirty=\[\]$' '^recovered:rc=42:.*\.claude/hooks\.json' '^app:rc=0:' \
+  "^promote:rc=0:.*PROMOTED 'sprint/s14' -> 'main'" '^promoted:hooks=\{"v":2\}:old=gone$')"
+
+# race*: a worker moves refs/heads/main to a decoy commit X between the
+# promotion's merge and its record. race-seam.sh wraps one library function
+# so that its first call once the checkout left sprint/s14 (lease_promote
+# checked out its target) moves the ref: raceverify wraps the read of what the
+# promotion made (_lease_branch_commit), racerecord and raceother the read the
+# baseline write makes (_lease_default_ref), raceother promoting into develop
+cat > "$_S14/race-seam.sh" <<'S14_RACE_EOF'
+# probe seam (SELF-14 race*): _s14_seam <function> wraps <function>; its first
+# call once HEAD left refs/heads/sprint/s14 moves refs/heads/main to $S14_X,
+# then every call runs the function as before
+_s14_seam() {
+  eval "_s14_was$1() $(declare -f "$1" | sed 1d)"
+  eval "$1() { _s14_move; _s14_was$1 \"\$@\"; }"
+}
+_s14_move() {
+  if [ -z "${S14_MOVED:-}" ] && [ "$(git symbolic-ref -q HEAD)" != refs/heads/sprint/s14 ]; then
+    S14_MOVED=1
+    git update-ref refs/heads/main "$S14_X"
+  fi
+}
+S14_RACE_EOF
+while read -r _s14_c _s14_f _s14_t; do
+  [ -n "$_s14_c" ] || continue
+  _s14_repo "$_s14_c" claude codex
+  ( cd "$_S14/$_s14_c" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git branch develop main ) >/dev/null 2>&1
+  printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder "$_s14_c"
+  O=$(_s14_lead "$_s14_c" claude '
+source "$_S14/race-seam.sh"
+_self_go t
+lease_pin_reviewer t antigravity >/dev/null 2>&1
+_self_try merge lease_merge t antigravity
+M=$(git rev-parse refs/heads/main); D=$(git rev-parse refs/heads/develop); H=$(git rev-parse refs/heads/sprint/s14)
+X=$(git commit-tree -p "$H" -m "a worker commit" "$H^{tree}")
+echo "ids:m=$(printf "%s" "$M" | cut -c1-12):h=$(printf "%s" "$H" | cut -c1-12):x=$(printf "%s" "$X" | cut -c1-12)"
+cp ops/leases.toml "$_S14/$S14_CASE.ledger"
+(export S14_X="$X"; _s14_seam '"$_s14_f"'; _self_try race lease_promote '"$_s14_t"')
+S=$(_ledger_get @baseline default_sha)
+echo "after:def=$(if [ "$S" = "$M" ]; then echo kept; elif [ "$S" = "$X" ]; then echo DECOY; else echo other; fi):ib=$(_ledger_get @baseline integration_branch):ledger=$(if cmp -s ops/leases.toml "$_S14/$S14_CASE.ledger"; then echo unchanged; else echo CHANGED; fi)"
+git update-ref refs/heads/main "$M"; git update-ref refs/heads/develop "$D"; git checkout -q sprint/s14
+_self_try promote lease_promote main
+echo "promoted:def=$(if [ "$(_ledger_get @baseline default_sha)" = "$H" ]; then echo at-sprint; else echo other; fi):main=$(if [ "$(git rev-parse refs/heads/main)" = "$H" ]; then echo at-sprint; else echo other; fi):ib=[$(_ledger_get @baseline integration_branch)]"
+')
+  _S14_M=$(printf '%s\n' "$O" | sed -n 's/^ids:m=\([0-9a-f]*\):.*/\1/p'); _S14_H=$(printf '%s\n' "$O" | sed -n 's/^ids:.*:h=\([0-9a-f]*\):.*/\1/p')
+  _S14_X=$(printf '%s\n' "$O" | sed -n 's/^ids:.*:x=\([0-9a-f]*\)$/\1/p')
+  case "$_s14_c" in
+    raceverify) _S14_RACE="^race:rc=44:.*INTEGRITY — after the promotion refs/heads/main is at ${_S14_X:-none} and HEAD at ${_S14_H:-none}, not the fast-forward to ${_S14_H:-none}: a ref moved" ;;
+    racerecord) _S14_RACE="^race:rc=44:.*INTEGRITY — refs/heads/main moved ${_S14_H:-none} -> ${_S14_X:-none} once the promotion was verified" ;;
+    *)          _S14_RACE="^race:rc=44:.*INTEGRITY — the default branch 'main' moved ${_S14_M:-none} -> ${_S14_X:-none} during the promotion into 'develop'" ;;
+  esac
+  _S14_FAIL="${_S14_FAIL}$(_self_expect "$_s14_c" "$O" '^t:go=0:review$' '^merge:rc=0:' "$_S14_RACE" '^after:def=kept:ib=sprint/s14:ledger=unchanged$' \
+    "^promote:rc=0:.*PROMOTED 'sprint/s14' -> 'main'" '^promoted:def=at-sprint:main=at-sprint:ib=\[\]$')"
+done <<'S14_RACE_CASES_EOF'
+raceverify _lease_branch_commit main
+racerecord _lease_default_ref main
+raceother _lease_default_ref develop
+S14_RACE_CASES_EOF
+unset _s14_c _s14_f _s14_t
+
+_S14_CAP="ledger approvals: lead_cli + reviewer class per row; a protected change (base to snapshot) merges only with a lead or user merge approval bound to the snapshot, the lead's own CLI's build routed to the user; a protected or require_user_approval promotion needs the user's approval bound to the tree and the branch it goes into (the default branch, or the target named), voided by a later merge or a move of that branch; every approval records its origin; a merge or promotion changes only the paths its protected scan listed (rename detection off, the merged tree held to the scan) and a promotion records only the result it verified (KTD2-KTD4, KTD18, R5, R6, R32, R33)"
 if [ -z "$_S14_FAIL" ]; then
-  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused, and from the seam simulating claude; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; trunk: no origin/HEAD, main or master -> the two-argument approval 1 naming the target argument, lease_promote trunk 42 naming lease_approve promotion:<branch> user trunk, that approval records trunk and promotes; target: origin/HEAD -> main, the user's approval for develop -> lease_promote main 42 (approved into develop, not main) naming the call with main, develop moved -> 42 voided, approved again -> promotes into develop, main unmoved; a target that is no local branch (unknown, origin/main, develop~0) or the integration branch itself -> 1, a lead-class one -> 1 naming the user's call with the target, nothing recorded; a third argument on task:<id> -> 64; shadow: a protected integration diff, require_user_approval off, a tag main at the integration head -> lease_promote main still 42 naming .claude/settings.json, main untouched, still on sprint/s14, the same for refs/main and a \$GIT_DIR/main file, the user's approval with that file in place binds refs/heads/main and the real protected path and promotes; nonbranch: a tag, a commit id, origin/main and main~0 as the target -> 1, nothing touched (refs unmoved, still on sprint/s14, no ledger), main promotes; shadowmerge: a tag sprint/s14 at a decoy -> lease_merge merges into refs/heads/sprint/s14, integration branch recorded as sprint/s14, the tag kept, lease_promote main takes the branch's commit; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude; a legacy claude pin after a handover to codex -> 42 needing the user, user merges; a legacy codex (worker) pin after it -> merges, class worker; tmpdirs: an approval from another TMPDIR lands beside the lead's anchors and merges, refused naming export TRIFORGE_LEASE_ROOT when the recorded root is gone" "static"
+  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused, and from the seam simulating claude; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; trunk: no origin/HEAD, main or master -> the two-argument approval 1 naming the target argument, lease_promote trunk 42 naming lease_approve promotion:<branch> user trunk, that approval records trunk and promotes; target: origin/HEAD -> main, the user's approval for develop -> lease_promote main 42 (approved into develop, not main) naming the call with main, develop moved -> 42 voided, approved again -> promotes into develop, main unmoved; a target that is no local branch (unknown, origin/main, develop~0) or the integration branch itself -> 1, a lead-class one -> 1 naming the user's call with the target, nothing recorded; a third argument on task:<id> -> 64; shadow: a protected integration diff, require_user_approval off, a tag main at the integration head -> lease_promote main still 42 naming .claude/settings.json, main untouched, still on sprint/s14, the same for refs/main and a \$GIT_DIR/main file, the user's approval with that file in place binds refs/heads/main and the real protected path and promotes; nonbranch: a tag, a commit id, origin/main and main~0 as the target -> 1, nothing touched (refs unmoved, still on sprint/s14, no ledger), main promotes; shadowmerge: a tag sprint/s14 at a decoy -> lease_merge merges into refs/heads/sprint/s14, integration branch recorded as sprint/s14, the tag kept, lease_promote main takes the branch's commit; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude; a legacy claude pin after a handover to codex -> 42 needing the user, user merges; a legacy codex (worker) pin after it -> merges, class worker; tmpdirs: an approval from another TMPDIR lands beside the lead's anchors and merges, refused naming export TRIFORGE_LEASE_ROOT when the recorded root is gone; renamed: the integration branch renamed docs/hooks.json to .claude/hooks.json after lease ed (editing docs/hooks.json) was cut -> lease_merge ed 1 naming docs/hooks.json and the recovery, state review, the integration branch, .claude/hooks.json and the index unchanged; through a git that drops -X no-renames -> 1 naming .claude/hooks.json (outside its scan); a lease's own rename merges three-way, both sides in the squash; rewound: the integration branch rewound past lease q's base (accepted) -> lease_merge q 1 naming .claude/settings.json, which the squash would replay, nothing merged; renamedpromote: main renamed docs/hooks.json to .claude/hooks.json, sprint/s14 edits it -> lease_promote main 1 naming it, main unmoved, back on sprint/s14, clean; through the -X-dropping git -> 1 naming .claude/hooks.json; main merged in by hand -> 42 naming .claude/hooks.json, the user's approval promotes; race: main moved to a decoy between the promotion's merge and its record (the result read back, the baseline read, a promotion into develop) -> 44 naming both commits, baseline and ledger unchanged, then lease_promote main records the verified result" "static"
 else
   row "SELF-14" "claude" "$_S14_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S14_FAIL"):$(printf '%s' "$_S14_FAIL" | cut -c1-900)" "static"
 fi
