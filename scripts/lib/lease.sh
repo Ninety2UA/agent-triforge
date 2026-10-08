@@ -310,7 +310,9 @@ print(os.path.realpath(os.environ['RP_TARGET']))
 # Repo default branch (KTD-5). origin/HEAD's target when set, else the first of
 # main/master that exists locally, else empty (a single-branch or detached repo
 # with no default-branch concept). Printed WITHOUT the refs/remotes/origin/
-# prefix. Tolerant: every probe is guarded so a repo with no remote still works.
+# prefix: a branch NAME, which every caller reads as refs/heads/<name> only
+# (_lease_branch_commit), never as a bare revision. Tolerant: every probe is
+# guarded so a repo with no remote still works.
 _lease_default_branch() {
   local REF="" B
   _lease_ctx || return 0
@@ -328,20 +330,45 @@ _lease_default_branch() {
   return 0
 }
 
+# _lease_branch_commit <name> — print the commit of the local branch <name>,
+# read as exactly refs/heads/<name> (show-ref --verify). A bare <name> is no
+# safe revision for a decision: git resolves $GIT_DIR/<name>, refs/<name> and
+# refs/tags/<name> ahead of refs/heads/<name>, and a worker can write any of
+# them (a tag named like the default branch at the integration head empties
+# the protected scan of <name>...HEAD). So every branch the lease lifecycle
+# decides on or writes is read through here, or as its full ref. rc 1, nothing
+# printed, when <name> is no local branch (a tag, a commit, a remote-tracking
+# branch or a revision expression) or its tip is no commit.
+_lease_branch_commit() {
+  local SHA
+  [ -n "${1:-}" ] || return 1
+  SHA=$(_lgr show-ref --verify --hash "refs/heads/${1}" 2>/dev/null) || return 1
+  [ -n "$SHA" ] || return 1
+  _lgr rev-parse --verify --quiet "${SHA}^{commit}" 2>/dev/null
+}
+
 # _lease_default_ref — set _LEASE_DEF (the default branch, or empty) and
 # _LEASE_DEF_SHA (its commit, or empty): what the integrity baseline records.
 _lease_default_ref() {
   _LEASE_DEF=$(_lease_default_branch)
   _LEASE_DEF_SHA=""
   if [ -n "$_LEASE_DEF" ]; then
-    _LEASE_DEF_SHA=$(_lgr rev-parse --verify --quiet "refs/heads/${_LEASE_DEF}^{commit}" 2>/dev/null || true)
+    _LEASE_DEF_SHA=$(_lease_branch_commit "$_LEASE_DEF" || true)
   fi
 }
 
-# Current checked-out branch of the main tree, or empty on detached HEAD.
+# Current checked-out branch of the main tree: the exact name under
+# refs/heads/ that HEAD points at, or empty on a detached HEAD (or a HEAD that
+# names no branch). Never git's shortened form, which turns into heads/<name>
+# when another ref shadows <name>; callers read it as refs/heads/<name>.
 _lease_current_branch() {
+  local REF
   _lease_ctx || return 0
-  _lgr symbolic-ref --quiet --short HEAD 2>/dev/null || true
+  REF=$(_lgr symbolic-ref --quiet HEAD 2>/dev/null) || REF=""
+  case "$REF" in
+    refs/heads/?*) printf '%s\n' "${REF#refs/heads/}" ;;
+  esac
+  return 0
 }
 
 # _lease_root / _lease_ledger_path — print the lease root / the ledger path.
@@ -2006,7 +2033,7 @@ SNAP_ROW_EOF
     [ -n "$ADMIN" ] || { echo "lease_collect: ERROR can't locate ${T}'s admin dir under ${_LEASE_COMMON}/worktrees" >&2; return 1; }
     _ledger_update "$T" admin_dir="$ADMIN" || return 1
   fi
-  TIP=$(_lgr rev-parse --verify --quiet "refs/heads/${BRANCH}^{commit}" 2>/dev/null) || {
+  TIP=$(_lease_branch_commit "$BRANCH") || {
     echo "lease_collect: ERROR lease branch ${BRANCH} is missing — escalate; the builder's work is only in ${WT}" >&2; return 1; }
   if [ -z "$BASE" ]; then
     BASE=$(_lgr merge-base HEAD "$TIP" 2>/dev/null) || { echo "lease_collect: ERROR no merge base for ${BRANCH}" >&2; return 1; }
@@ -2044,7 +2071,7 @@ _lease_verify_snapshot() {
     IFS= read -r PROV || true; } <<VERIFY_ROW_EOF
 ${ROW}
 VERIFY_ROW_EOF
-  TIP=$(_lgr rev-parse --verify --quiet "refs/heads/${BRANCH}^{commit}" 2>/dev/null || true)
+  TIP=$(_lease_branch_commit "$BRANCH" || true)
   if [ "$TIP" != "$SNAP" ]; then
     echo "lease_merge: REFUSED — ${BRANCH} is at ${TIP:-<missing>}, not the lead's recorded collect snapshot ${SNAP} (the branch moved after collect). Merging it would merge an unreviewed state (KTD19); re-collect through lease_redispatch or reclaim the lease." >&2
     return 1
@@ -3259,11 +3286,14 @@ _lease_recorded_class() {
 #                       collect writes a new snapshot and voids it. Needs the
 #                       task in review. A <target> is usage (rc 64).
 #   promotion:<branch>  a promotion approval (lease_promote needs one when its
-#                       gate is on): `user` only. <target> names the branch the
-#                       promotion goes into, as lease_promote <target> does: an
-#                       existing local branch (exactly refs/heads/<target>,
-#                       never a tag, a remote-tracking branch or a revision
-#                       expression) other than <branch>, else rc 1. Without
+#                       gate is on): `user` only. <branch> is the integration
+#                       branch and <target> the branch the promotion goes
+#                       into, as lease_promote <target> takes it: both
+#                       existing local branches, read as exactly
+#                       refs/heads/<name> (_lease_branch_commit: never a tag, a
+#                       remote-tracking branch or a revision expression such
+#                       as sprint~1), the target other than <branch>, else
+#                       rc 1. Without
 #                       it, the default branch (origin/HEAD, else main, else
 #                       master), as lease_promote without an argument; a
 #                       repository with none needs <target>. Bound to
@@ -3299,7 +3329,7 @@ _lease_recorded_class() {
 lease_approve() {
   _lead_only lease_approve --any-host || return $?
   local USAGE="lease_approve: usage: lease_approve task:<id> user|<lead CLI> | lease_approve promotion:<branch> user [<target branch>]"
-  local SCOPE=${1:-} WHO=${2:-} TGT=${3:-} OUT RC=0 LEADNOW CLASS STAMP T B ROW STATE SNAP BUILDER TREE PDIG TSHA M=0
+  local SCOPE=${1:-} WHO=${2:-} TGT=${3:-} OUT RC=0 LEADNOW CLASS STAMP T B BSHA ROW STATE SNAP BUILDER TREE PDIG TSHA M=0
   local TRIFORGE_LEASE_ROOT="${TRIFORGE_LEASE_ROOT:-}"   # _lease_at_ledger_root may set it
   # A third argument, the target, only with a promotion: scope.
   if [ -z "$SCOPE" ] || [ -z "$WHO" ] || [ "$#" -gt 3 ] || { [ "$#" -eq 3 ] && [ "${SCOPE#promotion:}" = "$SCOPE" ]; }; then
@@ -3369,18 +3399,17 @@ APPROVE_ROW_EOF
         echo "lease_approve: REFUSED — a promotion approval is the user's alone (KTD4); ${WHO} is the lead. Ask the user to run: lease_approve promotion:${B} user${TGT:+ ${TGT}}" >&2
         return 1
       fi
-      if [ -z "$B" ] || ! TREE=$(_lgr rev-parse --verify --quiet "refs/heads/${B}^{tree}" 2>/dev/null); then
+      # The integration branch and the target are local branches, each read as
+      # exactly refs/heads/<name> (_lease_branch_commit), so a tag, a
+      # remote-tracking branch or a revision expression of that spelling
+      # (sprint~1) never stands in for one; without a target, the default
+      # branch.
+      if ! BSHA=$(_lease_branch_commit "$B") || ! TREE=$(_lgr rev-parse --verify --quiet "${BSHA}^{tree}" 2>/dev/null); then
         echo "lease_approve: ERROR '${B}' is not a local branch (promotion:<integration branch>)" >&2
         return 1
       fi
-      # The target: the local branch named, read as refs/heads/<target> only,
-      # so a tag, a remote-tracking branch or a revision expression of that
-      # spelling never stands in for it; without one, the default branch.
       if [ "$#" -eq 3 ]; then
-        TSHA=""
-        if [ -n "$TGT" ] && _lgr show-ref --verify --quiet "refs/heads/${TGT}" 2>/dev/null; then
-          TSHA=$(_lgr rev-parse --verify --quiet "refs/heads/${TGT}^{commit}" 2>/dev/null || true)
-        fi
+        TSHA=$(_lease_branch_commit "$TGT" || true)
         if [ -z "$TSHA" ]; then
           echo "lease_approve: ERROR '${TGT}' is not a local branch; <target> is the local branch the promotion goes into (lease_promote <target>)" >&2
           return 1
@@ -3402,7 +3431,7 @@ APPROVE_ROW_EOF
           return 1
         fi
       fi
-      _lease_protected_scan "$TGT" "refs/heads/${TGT}...refs/heads/${B}"
+      _lease_protected_scan "$TGT" "${TSHA}...${BSHA}"
       if [ -n "$_LP_ERR" ]; then
         echo "lease_approve: REFUSED — the protected-path scan could not run, so there is no protected-path set to bind the approval to: ${_LP_ERR}" >&2
         return 1
@@ -3628,7 +3657,7 @@ lease_merge() {
     { IFS= read -r XBASE || true; IFS= read -r XROLE || true; } <<MERGE_CROSS_EOF
 ${XROW}
 MERGE_CROSS_EOF
-    echo "  Nothing was merged, and ${TASK_ID} stays in review (no integrity escalation), but this lease can't merge as it is: the integration branch and its snapshot crossed after the lease was cut from ${XBASE:0:12} (the integration branch was rewritten since and accepted with lease_rebaseline, or the builder committed on ${BRANCH}), and a retry, a re-collect or lease_rebaseline keeps that base. Lease the task again from the integration branch's current head: lease_reclaim ${TASK_ID}, then lease_create ${TASK_ID} ${XROLE:-<role>} and lease_dispatch ${TASK_ID} <prompt>. Until git prunes it, the reviewed work stays readable: git diff ${XBASE:0:12} ${SNAP:0:12}" >&2
+    echo "  Nothing was merged, and ${TASK_ID} stays in review (no integrity escalation), but this lease can't merge as it is: the integration branch and its snapshot crossed after the lease was cut from ${XBASE:0:12} (the integration branch was rewritten since and accepted with lease_rebaseline, or the builder committed on ${BRANCH}), and a retry, a re-collect or lease_rebaseline keeps that base. Lease the task again from the integration branch's current head: lease_reclaim ${TASK_ID}, then lease_create ${TASK_ID} ${XROLE:-<role>} and lease_dispatch ${TASK_ID} <prompt>. Until git prunes it, the reviewed work stays readable: git diff ${XBASE} ${SNAP}" >&2
     return 1
   fi
   if [ "$LVO" -ne 0 ]; then
@@ -3786,13 +3815,16 @@ _RC_DEGRADED=80
 # _lease_is_framework_checkout <repo> <default-branch> — 0 when <repo> is the
 # Triforge checkout, where framework_protected applies (KTD8). Reads
 # .claude-plugin/plugin.json from the working tree, HEAD and the default
-# branch: a diff that renames the plugin can't switch the framework list off,
-# because the default branch still names agent-triforge. Fail closed: a
-# manifest that exists but doesn't parse counts as the Triforge checkout.
+# branch (refs/heads/<default-branch>, _lease_branch_commit: a tag of that
+# name can't stand in for it): a diff that renames the plugin can't switch the
+# framework list off, because the default branch still names agent-triforge.
+# Fail closed: a manifest that exists but doesn't parse counts as the Triforge
+# checkout.
 _lease_is_framework_checkout() {
   local REPO=$1 DEF=${2:-} REV M
   M="${REPO}/.claude-plugin/plugin.json"
   [ -f "$M" ] && _lease_manifest_is_triforge < "$M" && return 0
+  if [ -n "$DEF" ]; then DEF=$(_lease_branch_commit "$DEF" || true); fi
   for REV in HEAD ${DEF:+"$DEF"}; do
     _lgr show "${REV}:.claude-plugin/plugin.json" 2>/dev/null | _lease_manifest_is_triforge && return 0
   done
@@ -3822,7 +3854,14 @@ sys.exit(0 if isinstance(data, dict) and data.get("name") == "agent-triforge" el
 # ONLY path that writes the default branch; lease_merge only ever lands on the
 # integration branch. Run it from the main tree checked out ON the integration
 # branch (where lease_merge put the wave's squash commits), NOT on the default
-# branch.
+# branch. <target> is a local branch, read as exactly refs/heads/<target>
+# (_lease_branch_commit): a tag, a commit, a remote-tracking branch, a revision
+# expression or a name that exists only as a tag refuses with rc 1 before
+# anything is recorded or checked out. Its commit and the integration commit
+# are read once, and every step below reads and writes those two commits, so
+# a ref planted under the same name (refs/tags/<name>, refs/<name>,
+# $GIT_DIR/<name>, which git resolves ahead of refs/heads/<name>) can't
+# redirect the scan, the re-hash, the approval check or the merge.
 #
 # Gate, in order:
 #   (0) the integrity check (KTD18) and, when a ledger exists, the
@@ -3832,9 +3871,10 @@ sys.exit(0 if isinstance(data, dict) and data.get("name") == "agent-triforge" el
 #       before anything else runs; a successful promotion clears the recorded
 #       integration branch (the sprint is done)
 #   (a) read [promotion].require_user_approval from ops/roster.toml (default false)
-#   (b) compute the integration branch's changed paths vs the default branch:
+#   (b) compute the integration branch's changed paths vs the target:
 #       git diff -z --name-only --no-renames --ignore-submodules=none
-#       <default>...HEAD — both sides of every rename, NUL-separated so no
+#       <target commit>...<integration commit> — both sides of every
+#       rename, NUL-separated so no
 #       path is quoted out of a match, and a submodule entry (a nested repo
 #       the snapshot recorded as a gitlink) listed even when .gitmodules on
 #       the integration branch says `ignore = all` — once every object the
@@ -3858,13 +3898,15 @@ sys.exit(0 if isinstance(data, dict) and data.get("name") == "agent-triforge" el
 #       no set to bind to) -> BLOCK: say what is missing or void and name the
 #       exact lease_approve call, target included, return
 #       _RC_PROMOTE_BLOCKED, do NOT merge
-#   (e) else fast-forward (or merge) the integration branch into <target>
-#       and report the promotion; an approval it used is marked used.
+#   (e) else check out <target>, which must land on refs/heads/<target> at
+#       the commit the gate checked, fast-forward (or merge) the integration
+#       commit into it by its id, and report the promotion; an approval it
+#       used is marked used.
 # Atomic where it matters: the default branch is never touched unless the gate
 # passes — the block path leaves the tree exactly as it found it.
 lease_promote() {
   _lead_only lease_promote || return $?
-  local DEFAULT_BRANCH CURRENT_BRANCH INTEGRATION_BRANCH
+  local DEFAULT_BRANCH CURRENT_BRANCH INTEGRATION_BRANCH DEF_SHA IB_SHA
   _lease_ctx || return 1
   # Promotion writes the default branch: only from a git state the lead
   # verified (KTD18) — a moved default branch, planted config or hooks, a
@@ -3874,6 +3916,18 @@ lease_promote() {
   DEFAULT_BRANCH=${1:-$(_lease_default_branch)}
   if [ -z "$DEFAULT_BRANCH" ]; then
     echo "lease_promote: ERROR could not determine the default branch (no origin/HEAD, no local main/master). Pass it explicitly: lease_promote <default-branch>." >&2
+    return 1
+  fi
+  # The target is a local branch and nothing else, read as exactly
+  # refs/heads/<target> (_lease_branch_commit). DEF_SHA is the commit the
+  # re-hash, the protected scan and the approval check read, and the one the
+  # checkout must land on before the merge: a tag, refs/<target> or
+  # $GIT_DIR/<target> named like it (which git resolves first for a bare
+  # name, and a worker can write) never stands in for it. A tag, a commit, a
+  # remote-tracking branch or a revision expression refuses here, before
+  # anything is recorded or checked out.
+  if ! DEF_SHA=$(_lease_branch_commit "$DEFAULT_BRANCH"); then
+    echo "lease_promote: ERROR '${DEFAULT_BRANCH}' is not a local branch: lease_promote promotes only into a local branch, refs/heads/<target> (never a tag, a commit, a remote-tracking branch or a revision expression). Nothing was touched. Pass the local branch: lease_promote <branch>." >&2
     return 1
   fi
   CURRENT_BRANCH=$(_lease_current_branch)
@@ -3888,6 +3942,14 @@ lease_promote() {
   INTEGRATION_BRANCH="$CURRENT_BRANCH"
   if [ -f "$_LEASE_LEDGER" ]; then
     _lead_integration_check lease_promote || return $?
+  fi
+  # The integration commit, read once from HEAD (refs/heads/<integration
+  # branch>): what the re-hash, the scan and the approval check read, and
+  # what the merge takes, by its id.
+  IB_SHA=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null) || IB_SHA=""
+  if [ -z "$IB_SHA" ]; then
+    echo "lease_promote: ERROR the integration branch '${INTEGRATION_BRANCH}' has no commit to promote." >&2
+    return 1
   fi
   # A dirty index would ride into the promotion merge — refuse it.
   if ! _lgr diff --cached --quiet --no-ext-diff 2>/dev/null; then
@@ -3926,13 +3988,10 @@ print('true' if v is True else 'false')
 " 2>/dev/null || echo "true")
   fi
 
-  # (b) changed paths of the integration branch vs the default branch, both
-  # sides of each rename (--no-renames), NUL-separated (-z) so core.quotePath
-  # can't wrap a non-ASCII path in quotes that dodge a prefix match.
-  if ! _lgr rev-parse --verify --quiet "${DEFAULT_BRANCH}^{commit}" >/dev/null 2>&1; then
-    echo "lease_promote: ERROR '${DEFAULT_BRANCH}' is not a valid branch or commit — pass the default branch explicitly: lease_promote <default-branch>." >&2
-    return 1
-  fi
+  # (b) changed paths of the integration branch vs the target, both sides of
+  # each rename (--no-renames), NUL-separated (-z) so core.quotePath can't
+  # wrap a non-ASCII path in quotes that dodge a prefix match; the target is
+  # DEF_SHA, checked above.
   # The objects the promotion brings into the default branch, and every other
   # object its merge reads, re-hashed before the protected scan reads them and
   # the merge checks them out (KTD18). A fast-forward only switches trees; a
@@ -3942,10 +4001,9 @@ print('true' if v is True else 'false')
   # so no fsck; one merge of the default branch into the integration branch
   # makes the default branch the one merge base.
   local LVO=0
-  _lease_verify_objects lease_promote "$(_lgr rev-parse --verify --quiet "${DEFAULT_BRANCH}^{commit}" 2>/dev/null || true)" \
-    "$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)" || LVO=$?
+  _lease_verify_objects lease_promote "$DEF_SHA" "$IB_SHA" || LVO=$?
   if [ "$LVO" -eq 1 ] && [ -n "$_LVO_BASES" ]; then
-    echo "  Nothing was promoted, and a retry, lease_rebaseline or git fsck won't change that. Make '${DEFAULT_BRANCH}' the one merge base: merge it into '${INTEGRATION_BRANCH}' in this checkout (git merge ${DEFAULT_BRANCH}) and check the result, accept that commit with lease_rebaseline, then rerun lease_promote ${DEFAULT_BRANCH}, which then fast-forwards." >&2
+    echo "  Nothing was promoted, and a retry, lease_rebaseline or git fsck won't change that. Make '${DEFAULT_BRANCH}' the one merge base: merge it into '${INTEGRATION_BRANCH}' in this checkout (git merge refs/heads/${DEFAULT_BRANCH}, the full ref, which no tag of that name can stand in for) and check the result, accept that commit with lease_rebaseline, then rerun lease_promote ${DEFAULT_BRANCH}, which then fast-forwards." >&2
     return 1
   fi
   if [ "$LVO" -ne 0 ]; then
@@ -3956,13 +4014,13 @@ print('true' if v is True else 'false')
   # knob. Fail closed: an unreadable plugin manifest counts as the Triforge
   # checkout, and any diff or classifier error blocks with its message.
   local APPROVED=""
-  _lease_protected_scan "$DEFAULT_BRANCH" "${DEFAULT_BRANCH}...HEAD"
+  _lease_protected_scan "$DEFAULT_BRANCH" "${DEF_SHA}...${IB_SHA}"
 
   # (d) gated: proceed only on the user's promotion approval for exactly this
   # state (KTD4), else block. A scan that could not run has no protected set
   # to bind an approval to, so it blocks whatever is on record.
   if [ "$REQUIRE_APPROVAL" = "true" ] || [ -n "$_LP_HITS" ] || [ -n "$_LP_ERR" ]; then
-    if [ -z "$_LP_ERR" ] && _lease_promotion_check "$INTEGRATION_BRANCH" "$DEFAULT_BRANCH" "$_LP_HITS"; then
+    if [ -z "$_LP_ERR" ] && _lease_promotion_check "$INTEGRATION_BRANCH" "$DEFAULT_BRANCH" "$_LP_HITS" "$DEF_SHA" "$IB_SHA"; then
       APPROVED=$_LPC_ORIGIN
     else
       echo "lease_promote: BLOCKED — promotion of '${INTEGRATION_BRANCH}' to '${DEFAULT_BRANCH}' needs the user's approval. No merge performed." >&2
@@ -3988,18 +4046,24 @@ print('true' if v is True else 'false')
     fi
   fi
 
-  # (e) promote: fast-forward when possible, else a merge commit.
-  if ! _lgr checkout -q "$DEFAULT_BRANCH" >&2; then
-    echo "lease_promote: ERROR could not checkout the default branch '${DEFAULT_BRANCH}'." >&2
+  # (e) promote exactly what the gate checked: the checkout must land on
+  # refs/heads/<target> at DEF_SHA (git checkout takes a local branch of that
+  # name before any other ref), and the merge takes IB_SHA by its id, never a
+  # name another ref could shadow; fast-forward when possible, else a merge
+  # commit.
+  if ! _lgr checkout -q "$DEFAULT_BRANCH" -- >&2 || [ "$(_lgr symbolic-ref --quiet HEAD 2>/dev/null || true)" != "refs/heads/${DEFAULT_BRANCH}" ] \
+     || [ "$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)" != "$DEF_SHA" ]; then
+    _lgr checkout -q "$INTEGRATION_BRANCH" -- >&2 2>/dev/null || true
+    echo "lease_promote: ERROR could not check out the local branch '${DEFAULT_BRANCH}' at ${DEF_SHA:0:12}, the commit the gate checked — back on '${INTEGRATION_BRANCH}', nothing promoted." >&2
     return 1
   fi
-  if _lgr merge -q --ff-only "$INTEGRATION_BRANCH" >&2; then
+  if _lgr merge -q --ff-only "$IB_SHA" >&2; then
     :
-  elif _lgr merge -q --no-edit "$INTEGRATION_BRANCH" >&2; then
+  elif _lgr merge -q --no-edit -m "Merge branch '${INTEGRATION_BRANCH}'" "$IB_SHA" >&2; then
     :
   else
     _lgr merge --abort 2>/dev/null || true
-    _lgr checkout -q "$INTEGRATION_BRANCH" >&2 2>/dev/null || true
+    _lgr checkout -q "$INTEGRATION_BRANCH" -- >&2 2>/dev/null || true
     echo "lease_promote: ERROR merging '${INTEGRATION_BRANCH}' into '${DEFAULT_BRANCH}' failed (conflicts) — aborted and returned to '${INTEGRATION_BRANCH}'. Resolve manually." >&2
     return 1
   fi
@@ -4038,17 +4102,20 @@ print(hashlib.sha256("\n".join(paths).encode("utf-8", "surrogateescape")).hexdig
 '
 }
 
-# _lease_promotion_check <integration-branch> <target> <protected hits> — 0
-# when [baseline] holds the user's unvoided promotion approval for exactly
-# this state (KTD4): scope promotion:<branch>, class user, the integration
-# tree (HEAD^{tree}, lease_promote runs from that branch), the branch the
-# promotion goes into (<target>: lease_promote's argument, else the default
-# branch) and its commit, read as refs/heads/<target> as lease_approve bound
-# it, and the protected-path set (_lease_protected_digest of the hits). Then
-# _LPC_ORIGIN says where it was recorded and the approval line and the
-# disclosure are printed; otherwise _LPC_WHY says what is missing or void.
+# _lease_promotion_check <integration-branch> <target> <protected hits>
+# <target commit> <integration commit> — 0 when [baseline] holds the user's
+# unvoided promotion approval for exactly this state (KTD4): scope
+# promotion:<branch>, class user, the integration tree (the tree of
+# <integration commit>, the commit lease_promote checked and merges), the
+# branch the promotion goes into (<target>: lease_promote's argument, else the
+# default branch) and its commit (<target commit>, which lease_promote read as
+# refs/heads/<target>, as lease_approve bound it, and lands the merge on), and
+# the protected-path set (_lease_protected_digest of the hits). Without the
+# two commits it reads HEAD and refs/heads/<target>. Then _LPC_ORIGIN says
+# where it was recorded and the approval line and the disclosure are printed;
+# otherwise _LPC_WHY says what is missing or void.
 _lease_promotion_check() {
-  local IB=$1 DEF=$2 ROW SCOPE CLASS VOIDED TREE PDEF PDSHA PDIG VIA HOST LEAD AT NOWTREE NOWDSHA
+  local IB=$1 DEF=$2 ROW SCOPE CLASS VOIDED TREE PDEF PDSHA PDIG VIA HOST LEAD AT NOWTREE NOWDSHA=${4:-}
   _LPC_WHY=""; _LPC_ORIGIN=""
   ROW=$(_ledger_get_row @baseline promotion_scope promotion_class promotion_voided promotion_tree promotion_default promotion_default_sha promotion_protected promotion_via promotion_host promotion_lead_cli promotion_at 2>/dev/null) || ROW=""
   { IFS= read -r SCOPE || true; IFS= read -r CLASS || true; IFS= read -r VOIDED || true; IFS= read -r TREE || true
@@ -4056,8 +4123,8 @@ _lease_promotion_check() {
     IFS= read -r HOST || true; IFS= read -r LEAD || true; IFS= read -r AT || true; } <<PROMOTION_ROW_EOF
 ${ROW}
 PROMOTION_ROW_EOF
-  NOWTREE=$(_lgr rev-parse --verify --quiet 'HEAD^{tree}' 2>/dev/null || true)
-  NOWDSHA=$(_lgr rev-parse --verify --quiet "refs/heads/${DEF}^{commit}" 2>/dev/null || true)
+  NOWTREE=$(_lgr rev-parse --verify --quiet "${5:-HEAD}^{tree}" 2>/dev/null || true)
+  if [ -z "$NOWDSHA" ]; then NOWDSHA=$(_lease_branch_commit "$DEF" || true); fi
   if [ -z "$SCOPE" ]; then
     _LPC_WHY="none on record"
   elif [ "$SCOPE" != "promotion:${IB}" ]; then

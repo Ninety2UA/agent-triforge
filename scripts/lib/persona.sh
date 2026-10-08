@@ -1101,7 +1101,8 @@ _persona_read_run() {
 # from), _PT_FROM (what the named instruction-file changes are against: the
 # lease's base, or _PT_HEAD), _PT_NAME (the worktree's tag), _PT_DESC,
 # _PT_WHAT and _PT_NONE (the prompt's words). rc 64 for an --at of another
-# shape, a ref that names no commit, or a lease _persona_lease refuses.
+# shape, a ref that names no commit, a ref another ref of its name shadows
+# (_persona_ref_unambiguous), or a lease _persona_lease refuses.
 _persona_target() {
   local WHO=$1 AT=$2 REF
   _PT_COMMIT="" _PT_HEAD="" _PT_FROM="" _PT_NAME="" _PT_DESC="" _PT_WHAT="" _PT_NONE=""
@@ -1138,6 +1139,10 @@ _persona_target() {
         echo "${WHO}: --at ref:${REF} names no commit in ${_LEASE_REPO}" >&2
         return 64
       fi
+      if ! _persona_ref_unambiguous "$WHO" "$REF"; then
+        _PT_COMMIT=""
+        return 64
+      fi
       _PT_NAME=ref
       _PT_DESC="commit ${_PT_COMMIT:0:12} (ref:${REF})"
       _PT_WHAT="commit ${_PT_COMMIT:0:12} changes against the integration branch"
@@ -1150,6 +1155,33 @@ _persona_target() {
   esac
   _persona_trusted_head "$WHO" || return $?
   if [ -z "$_PT_FROM" ]; then _PT_FROM=$_PT_HEAD; fi
+}
+
+# _persona_ref_unambiguous <who> <ref> — 0 unless another ref of the same name
+# holds another commit than the one git resolves the name at the start of
+# <ref> to (up to its first ~ ^ : or @{; a revision expression reads that
+# name too): refs/<name>, refs/tags/<name>, refs/heads/<name>,
+# refs/remotes/<name> or refs/remotes/<name>/HEAD. git reads $GIT_DIR/<name>,
+# refs/<name> and refs/tags/<name> ahead of refs/heads/<name>, and a worker can
+# write any of them, so a tag named like the integration branch would move
+# `--at ref:<integration branch>` to the tag's commit. Then the refusal, naming
+# the full ref to pass instead, and 1. A shadow at the same commit changes
+# nothing and passes.
+_persona_ref_unambiguous() {
+  local WHO=$1 REF=$2 N C F FC
+  N=${REF%%[~^:]*}
+  N=${N%%@\{*}
+  [ -n "$N" ] || return 0
+  C=$(_lgr rev-parse --verify --quiet "${N}^{commit}" 2>/dev/null) || return 0
+  for F in "refs/${N}" "refs/tags/${N}" "refs/heads/${N}" "refs/remotes/${N}" "refs/remotes/${N}/HEAD"; do
+    FC=$(_lgr show-ref --verify --hash "$F" 2>/dev/null) || continue
+    FC=$(_lgr rev-parse --verify --quiet "${FC}^{commit}" 2>/dev/null) || FC=""
+    if [ "$FC" != "$C" ]; then
+      echo "${WHO}: --at ref:${REF} is ambiguous: git resolves ${N} to ${C:0:12}, but ${F} is at ${FC:0:12} (git reads \$GIT_DIR/${N}, refs/${N} and refs/tags/${N} ahead of refs/heads/${N}, and a worker can write any of them); name it in full, e.g. ref:${F}${REF#"$N"}, or remove the other ref. Nothing ran" >&2
+      return 1
+    fi
+  done
+  return 0
 }
 
 # _persona_trusted_head <who> — set _PT_HEAD to the commit an exec run's

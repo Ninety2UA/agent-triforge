@@ -4838,6 +4838,22 @@ rm -rf "$_S13"
 #            develop -> lease_promote main 42 (approved into develop, not
 #            main) naming the call with main; develop moves -> 42 voided;
 #            approved again -> lease_promote develop promotes, main unmoved
+#   shadow   the integration branch touches .claude/settings.json and
+#            require_user_approval is off: lease_promote main -> 42; a tag
+#            main at the integration head -> still 42 naming the path, main
+#            untouched, the checkout still on sprint/s14; the same for
+#            refs/main and for a $GIT_DIR/main file; the user's approval with
+#            that file in place binds refs/heads/main and the real protected
+#            set, and lease_promote main promotes (git resolves all three
+#            ahead of refs/heads/main for a bare name)
+#   nonbranch a tag v1 at main, a commit id, origin/main and main~0 as the
+#            target -> 1 naming it no local branch, nothing touched (main, v1
+#            and origin/main unmoved, the checkout on sprint/s14, no ledger);
+#            lease_promote main promotes
+#   shadowmerge a tag sprint/s14 at a decoy commit (shadowing the integration
+#            branch) -> lease_merge merges into refs/heads/sprint/s14, the
+#            recorded integration branch stays sprint/s14, the tag stays;
+#            lease_promote main promotes the branch's commit, not the tag's
 #   handover a claude lead pins itself (lead class), then a forced handover
 #            to codex: handover_from/_to/_at on the open row; merge -> 42
 #            needing the user's approval, the codex lead's own refused (it
@@ -5139,6 +5155,71 @@ _S14_FAIL="${_S14_FAIL}$(_self_expect target "$O" '^default=main$' '^taskarg:rc=
   '^app2:rc=0:' "^intodev:rc=0:.*approved by the user.*PROMOTED 'sprint/s14' -> 'develop'" '^main-moved=no$')"
 [ "$(printf '%s\n' "$O" | sed -n 's/^develop=\([0-9a-f]*\):sprint=\([0-9a-f]*\)$/\1=\2/p' | awk -F= '$1 == $2 && $1 != "" { print "same" }')" = same ] || _S14_FAIL="${_S14_FAIL} target(develop-not-at-sprint)"
 
+# shadow: a ref named like the default branch (a tag, refs/main, a $GIT_DIR/main
+# file) at the integration head can't empty the protected scan of a promotion
+_s14_repo shadow claude codex
+( cd "$_S14/shadow" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p .claude && echo "{}" > .claude/settings.json \
+    && git add -A && git commit -qm protected ) >/dev/null 2>&1
+O=$(_s14_lead shadow claude '
+M=$(git rev-parse refs/heads/main); H=$(git rev-parse refs/heads/sprint/s14)
+_s14_main() { if [ "$(git rev-parse refs/heads/main)" = "$M" ]; then echo kept; else echo moved; fi; }
+_self_try control lease_promote main
+git tag main "$H"
+_self_try tag lease_promote main
+echo "tag:main=$(_s14_main):on=$(git symbolic-ref HEAD 2>/dev/null || echo detached)"
+git tag -d main >/dev/null && git update-ref refs/main "$H"
+_self_try refs lease_promote main
+git update-ref -d refs/main && printf "%s\n" "$H" > .git/main
+_self_try gitdir lease_promote main
+echo "shadows:main=$(_s14_main):on=$(git symbolic-ref HEAD 2>/dev/null || echo detached)"
+_self_try app lease_approve promotion:sprint/s14 user
+echo "bound=$(if [ "$(_ledger_get @baseline promotion_default_sha)" = "$M" ]; then echo main; else echo other; fi)"
+_self_try promote lease_promote main
+rm -f .git/main
+echo "promoted:main=$(if [ "$(git rev-parse refs/heads/main)" = "$H" ]; then echo at-sprint; else echo other; fi)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect shadow "$O" '^control:rc=42:.*\.claude/settings\.json' '^tag:rc=42:.*\.claude/settings\.json' \
+  '^tag:main=kept:on=refs/heads/sprint/s14$' '^refs:rc=42:.*\.claude/settings\.json' '^gitdir:rc=42:.*\.claude/settings\.json' \
+  '^shadows:main=kept:on=refs/heads/sprint/s14$' '^app:rc=0:.*1 protected path\(s\): \.claude/settings\.json' '^bound=main$' \
+  "^promote:rc=0:.*approved by the user.*PROMOTED 'sprint/s14' -> 'main'.*protected-paths=1" '^promoted:main=at-sprint$')"
+
+# nonbranch: lease_promote's target is a local branch, nothing else
+_s14_repo nonbranch claude codex
+( cd "$_S14/nonbranch" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && echo n > n.txt && git add n.txt && git commit -qm n \
+    && git tag v1 main && git update-ref refs/remotes/origin/main main ) >/dev/null 2>&1
+O=$(_s14_lead nonbranch claude '
+M=$(git rev-parse refs/heads/main); H=$(git rev-parse refs/heads/sprint/s14)
+_self_try tag lease_promote v1
+_self_try sha lease_promote "$M"
+_self_try remote lease_promote origin/main
+_self_try revexpr lease_promote "main~0"
+echo "after:main=$(git rev-parse refs/heads/main | cut -c1-12):v1=$(git rev-parse refs/tags/v1 | cut -c1-12):origin=$(git rev-parse refs/remotes/origin/main | cut -c1-12):was=$(printf "%s" "$M" | cut -c1-12)"
+echo "after:on=$(git symbolic-ref HEAD 2>/dev/null || echo detached):ledger=$(if [ -e ops/leases.toml ]; then echo yes; else echo no; fi)"
+_self_try promote lease_promote main
+echo "promoted:main=$(if [ "$(git rev-parse refs/heads/main)" = "$H" ]; then echo at-sprint; else echo other; fi)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect nonbranch "$O" "^tag:rc=1:.*'v1' is not a local branch.*Nothing was touched" '^sha:rc=1:.*is not a local branch' \
+  "^remote:rc=1:.*'origin/main' is not a local branch" "^revexpr:rc=1:.*'main~0' is not a local branch" \
+  '^after:on=refs/heads/sprint/s14:ledger=no$' "^promote:rc=0:.*PROMOTED 'sprint/s14' -> 'main'" '^promoted:main=at-sprint$')"
+[ "$(printf '%s\n' "$O" | sed -n 's/^after:main=\([0-9a-f]*\):v1=\([0-9a-f]*\):origin=\([0-9a-f]*\):was=\([0-9a-f]*\)$/\1 \2 \3 \4/p' | awk '$1 == $4 && $2 == $4 && $3 == $4 && $4 != "" { print "kept" }')" = kept ] \
+  || _S14_FAIL="${_S14_FAIL} nonbranch(a-ref-moved:$(printf '%s\n' "$O" | grep '^after:main=' | head -1))"
+
+# shadowmerge: a tag named like the integration branch, at a decoy commit
+_s14_repo shadowmerge claude codex
+printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder shadowmerge
+O=$(_s14_lead shadowmerge claude '
+_self_go t
+_self_try pin lease_pin_reviewer t antigravity
+D=$(git commit-tree -p main -m decoy "main^{tree}") && git tag sprint/s14 "$D"
+_self_try merge lease_merge t antigravity
+MC=$(_ledger_get t merge_commit)
+echo "merged=$(if [ -n "$MC" ] && [ "$(git rev-parse refs/heads/sprint/s14)" = "$MC" ]; then echo branch; else echo other; fi):ib=$(_ledger_get @baseline integration_branch):tag=$(if [ "$(git rev-parse refs/tags/sprint/s14)" = "$D" ]; then echo kept; else echo moved; fi):state=$(_ledger_get t state)"
+_self_try promote lease_promote main
+echo "main=$(if [ -n "$MC" ] && [ "$(git rev-parse refs/heads/main)" = "$MC" ]; then echo at-merge; else echo other; fi):feature=[$(git show refs/heads/main:feature.txt 2>/dev/null)]"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect shadowmerge "$O" '^t:go=0:review$' '^pin:rc=0:' '^merge:rc=0:' '^merged=branch:ib=sprint/s14:tag=kept:state=merged$' \
+  "^promote:rc=0:.*PROMOTED 'sprint/s14' -> 'main'" '^main=at-merge:feature=\[feature\]$')"
+
 # handover: a lead-class pin from before a forced handover needs the user's approval
 _s14_repo handover claude codex
 printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder handover
@@ -5245,7 +5326,7 @@ _S14_FAIL="${_S14_FAIL}$(_self_expect tmpdirs "$O" '^t:go=0:review$' '^pin:rc=0:
 
 _S14_CAP="ledger approvals: lead_cli + reviewer class per row; a protected change (base to snapshot) merges only with a lead or user merge approval bound to the snapshot, the lead's own CLI's build routed to the user; a protected or require_user_approval promotion needs the user's approval bound to the tree and the branch it goes into (the default branch, or the target named), voided by a later merge or a move of that branch; every approval records its origin (KTD2-KTD4, R5, R6, R32, R33)"
 if [ -z "$_S14_FAIL" ]; then
-  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused, and from the seam simulating claude; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; trunk: no origin/HEAD, main or master -> the two-argument approval 1 naming the target argument, lease_promote trunk 42 naming lease_approve promotion:<branch> user trunk, that approval records trunk and promotes; target: origin/HEAD -> main, the user's approval for develop -> lease_promote main 42 (approved into develop, not main) naming the call with main, develop moved -> 42 voided, approved again -> promotes into develop, main unmoved; a target that is no local branch (unknown, origin/main, develop~0) or the integration branch itself -> 1, a lead-class one -> 1 naming the user's call with the target, nothing recorded; a third argument on task:<id> -> 64; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude; a legacy claude pin after a handover to codex -> 42 needing the user, user merges; a legacy codex (worker) pin after it -> merges, class worker; tmpdirs: an approval from another TMPDIR lands beside the lead's anchors and merges, refused naming export TRIFORGE_LEASE_ROOT when the recorded root is gone" "static"
+  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused, and from the seam simulating claude; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; trunk: no origin/HEAD, main or master -> the two-argument approval 1 naming the target argument, lease_promote trunk 42 naming lease_approve promotion:<branch> user trunk, that approval records trunk and promotes; target: origin/HEAD -> main, the user's approval for develop -> lease_promote main 42 (approved into develop, not main) naming the call with main, develop moved -> 42 voided, approved again -> promotes into develop, main unmoved; a target that is no local branch (unknown, origin/main, develop~0) or the integration branch itself -> 1, a lead-class one -> 1 naming the user's call with the target, nothing recorded; a third argument on task:<id> -> 64; shadow: a protected integration diff, require_user_approval off, a tag main at the integration head -> lease_promote main still 42 naming .claude/settings.json, main untouched, still on sprint/s14, the same for refs/main and a \$GIT_DIR/main file, the user's approval with that file in place binds refs/heads/main and the real protected path and promotes; nonbranch: a tag, a commit id, origin/main and main~0 as the target -> 1, nothing touched (refs unmoved, still on sprint/s14, no ledger), main promotes; shadowmerge: a tag sprint/s14 at a decoy -> lease_merge merges into refs/heads/sprint/s14, integration branch recorded as sprint/s14, the tag kept, lease_promote main takes the branch's commit; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude; a legacy claude pin after a handover to codex -> 42 needing the user, user merges; a legacy codex (worker) pin after it -> merges, class worker; tmpdirs: an approval from another TMPDIR lands beside the lead's anchors and merges, refused naming export TRIFORGE_LEASE_ROOT when the recorded root is gone" "static"
 else
   row "SELF-14" "claude" "$_S14_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S14_FAIL"):$(printf '%s' "$_S14_FAIL" | cut -c1-900)" "static"
 fi
@@ -5762,7 +5843,11 @@ rm -rf "$_S15"
 #              both bases and the recovery (lease the task again from the integration head), state review, HEAD unmoved,
 #              nothing staged, none of the object-store repair advice; lease_reclaim + the task leased again -> merges.
 #              Then main moved to another merge of a and b (accepted) -> lease_promote 1 naming both bases and git merge
-#              main, main unmoved; main merged into the integration branch + lease_rebaseline -> promotes
+#              refs/heads/main, main unmoved; main merged into the integration branch + lease_rebaseline -> promotes
+#   perref     an exec persona's --at ref:<name> (the integration verifier's ref:<integration branch>): a tag sprint/s18
+#              at a decoy commit -> _persona_target 64 naming refs/heads/sprint/s18, also for ref:sprint/s18~0; the
+#              same for refs/sprint/s18 and for a $GIT_DIR/<name> file shadowing a branch; ref:refs/heads/sprint/s18
+#              and ref:HEAD -> the branch's commit; a tag at the branch's own commit -> passes
 #   objsha256  objblob in a sha256 repository (skipped, with a note in the evidence, where git can't create one)
 #   objgraph   writes feature.txt + AGENTS.md; a commit-graph naming a decoy tree (the snapshot without AGENTS.md) for the
 #              snapshot (_s18_graph): plain git diff sees the decoy, lease_merge still scans AGENTS.md -> 42, nothing merged
@@ -6348,7 +6433,7 @@ M=$(git commit-tree "$(git rev-parse "$H^{tree}")" -p xa -p xb -m "main merges a
 echo "pbases=$(git merge-base --all main HEAD | cut -c1-12 | tr "\n" " ")"
 _s18_try promote lease_promote main
 echo "main-moved=$([ "$(git rev-parse main)" = "$M" ] && echo no || echo yes) on=$(git symbolic-ref --short HEAD)"
-git merge -q --no-edit main; _s18_try rebaseline3 lease_rebaseline; _s18_try repromote lease_promote main
+git merge -q --no-edit refs/heads/main; _s18_try rebaseline3 lease_rebaseline; _s18_try repromote lease_promote main
 echo "promoted=[$(git show main:feature.txt 2>/dev/null)] on=$(git symbolic-ref --short HEAD)"')
 _S18_XB=$(printf '%s\n' "$O" | sed -n 's/^bases=//p'); _S18_XP=$(printf '%s\n' "$O" | sed -n 's/^pbases=//p')
 _s18_expect objcross "$O" 'collect-rc=0' 'rebaseline-rc=0' 'merge-rc=1' "^lease_merge: REFUSED — [0-9a-f]{12} and [0-9a-f]{12} have 2 merge bases \\([0-9a-f ]{25}\\), a criss-cross history" \
@@ -6357,10 +6442,29 @@ _s18_expect objcross "$O" 'collect-rc=0' 'rebaseline-rc=0' 'merge-rc=1' "^lease_
   't stays in review \(no integrity escalation\).*Lease the task again from the integration branch.s current head: lease_reclaim t, then lease_create t builder and lease_dispatch t' \
   '^state=review moved=no staged=\[\]$' 'reclaim-rc=0' 'recollect-rc=0' 'remerge-rc=0' '^merged=\[feature\]$' 'rebaseline2-rc=0' 'promote-rc=1' \
   "^lease_promote: REFUSED — [0-9a-f]{12} and [0-9a-f]{12} have 2 merge bases \\([0-9a-f ]*$(printf '%s' "$_S18_XP" | cut -d' ' -f1)" \
-  "^lease_promote: REFUSED — .* have 2 merge bases \\([0-9a-f ]*$(printf '%s' "$_S18_XP" | cut -d' ' -f2)" "merge it into 'sprint/s18' in this checkout \\(git merge main\\)" \
+  "^lease_promote: REFUSED — .* have 2 merge bases \\([0-9a-f ]*$(printf '%s' "$_S18_XP" | cut -d' ' -f2)" "merge it into 'sprint/s18' in this checkout \\(git merge refs/heads/main, the full ref" \
   '^main-moved=no on=sprint/s18$' 'rebaseline3-rc=0' 'repromote-rc=0' '^promoted=\[feature\] on=main$'
 printf '%s\n' "$O" | grep -qE 'INTEGRITY|Inspect it \(git fsck|puts the lease back in review|repair the store|^state=escalated' \
   && _S18_FAIL="$_S18_FAIL objcross(object-store-repair-advice:$(printf '%s\n' "$O" | grep -E 'INTEGRITY|^state=' | tr '\n' '|' | cut -c1-200))"
+
+# perref: an exec persona's --at ref:<name> never follows a ref that shadows
+# the branch of that name (_persona_ref_unambiguous, scripts/lib/persona.sh)
+_s18_setup perref
+O=$(_s18_lead perref 'B=$(git rev-parse refs/heads/sprint/s18); D=$(git commit-tree -p main -m decoy "main^{tree}")
+_s18_pt() { # _s18_pt <label> <at> — _persona_target, then "<label>-rc=<n>:<branch|decoy|none>" and its stderr
+  local L=$1 R=0
+  _PT_COMMIT=""; _persona_target dispatch_persona "$2" >/dev/null 2>"$HOME/$L.err" || R=$?
+  echo "$L-rc=$R:$(if [ "$_PT_COMMIT" = "$B" ]; then echo branch; elif [ "$_PT_COMMIT" = "$D" ]; then echo decoy; else echo none; fi)"
+  cat "$HOME/$L.err"
+}
+_s18_pt plain ref:sprint/s18
+git tag sprint/s18 "$D"; _s18_pt tag ref:sprint/s18; _s18_pt expr "ref:sprint/s18~0"; _s18_pt full ref:refs/heads/sprint/s18; _s18_pt head ref:HEAD
+git tag -d sprint/s18 >/dev/null; git update-ref refs/sprint/s18 "$D"; _s18_pt refs ref:sprint/s18; git update-ref -d refs/sprint/s18
+git branch -q side "$B"; printf "%s\n" "$D" > .git/side; _s18_pt gitdir ref:side; rm -f .git/side
+git tag sprint/s18 "$B"; _s18_pt same ref:sprint/s18')
+_s18_expect perref "$O" '^plain-rc=0:branch$' '^tag-rc=64:none$' 'ref:sprint/s18 is ambiguous: git resolves sprint/s18 to [0-9a-f]{12}, but refs/heads/sprint/s18 is at [0-9a-f]{12}' \
+  'name it in full, e.g. ref:refs/heads/sprint/s18, or remove the other ref' '^expr-rc=64:none$' '^full-rc=0:branch$' '^head-rc=0:branch$' '^refs-rc=64:none$' \
+  '^gitdir-rc=64:none$' 'ref:side is ambiguous' '^same-rc=0:branch$'
 
 # objgraph: a commit-graph naming a decoy tree for the snapshot. Plain git diff
 # reads the graph (graph-diff names the decoy's one change), the squash reads the
@@ -6576,7 +6680,7 @@ _S18_NEG=$(_s18_git_scan "$_S18/lease-planted.sh" | cut -d: -f1 | tr '\n' ' ')
   || _S18_FAIL="$_S18_FAIL scan-negative-control(want-lines:$((_S18_N - 2)),$((_S18_N - 1)),${_S18_N};got:[${_S18_NEG% }])"
 
 if [ -z "$_S18_FAIL" ]; then
-  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer/leadcfg -> collect rc 44 naming the surface (config, hooks, ledger and the lead trusted git config restored, gitconfig.changed-* kept; marker never ran); post-checkout planted: next lease_create 44; fsmonitor, filter, post-checkout and pointer once accepted (lease_rebaseline) still never run and collect snapshots (pointer via the recorded admin dir); tampered hooks.copy -> 44, NOT restored; ledger swapped for a symlink -> 44, a regular file again; the lead's own git remote add -> 44 naming the saved copy, put back + rebaselined -> collect 0, origin kept; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; git gc after collect (writes .git/info/refs) -> merges; lead checkout switched to rogue -> merge 44 naming sprint/s18 and rogue, state review, back on sprint/s18 -> merges; lease_create on main records no integration branch, sprint/two cut after it -> lease + merge, no 44; a lead commit on the integration branch -> merge 44 (moved), lease_rebaseline -> merges on top; identity only in an [include]d ~/.gitconfig file -> the merge commit carries it; linked-worktree lead checkout whose .git pointer is rewritten to the lease admin dir -> collect 44 naming it; after review the snapshot's new blob rewritten in the object store under its own id -> merge 44 naming it, HEAD unmoved, nothing staged, the lease escalated, the blob written again from the worktree + lease_rebaseline -> merges the reviewed content (${_S18_SHA256}); a subtree rewritten to point at a decoy -> merge 44 naming the tree; the root tree rewritten -> merge 44 naming it and the lease escalated (the re-hash runs ahead of the snapshot checks, whose read-tree would refuse it with rc 1), the repair hint naming write-tree for a tree; a blob the integration branch already has, copied by the snapshot to a new path and rewritten -> merge 44 naming the blob at the new path, HEAD unmoved, nothing staged; a file the integration branch and the snapshot both changed since the base (the squash merges three versions): HEAD's blob rewritten -> merge 44 naming it at HEAD, nothing merged, written again from the lead checkout + lease_rebaseline -> merges both changes; the merge base's blob rewritten -> merge 44 naming it at the merge base, nothing merged; a gitlink that moved on the integration branch after collect -> merges (neither side of it is an object of this repository); a merged blob rewritten -> lease_promote 44, main unmoved, written again -> promotes; main moved since the sprint began (accepted), so the promotion is a merge commit of three versions of a file: main's blob rewritten -> lease_promote 44 naming it at main, main unmoved, written again -> promotes the merge of both changes; the integration branch rewritten (accepted) into a criss-cross with the snapshot -> merge 1 naming both merge bases and the recovery, state review, nothing merged, no object-store repair advice, the task leased again from the integration head -> merges; main and the integration branch in a criss-cross -> lease_promote 1 naming both merge bases and git merge main, main unmoved, merged in + rebaselined -> promotes; ${_S18_GRAPH}; a HOME that is itself a git repository: lease_create from it and from a directory in it, and lease_wait -> rc 1 with one ERROR line (a home directory is no project), coordinate.sh -> 44 before any session, the persona task: and ref: targets -> 64, no ~/ops, no lease root, HOME byte-identical, a project with its own repository under that HOME leases; every git call in lease.sh and lease-wait.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines in lease.sh, none in lease-wait.sh; planted { git / else git / env -u git lines caught)" "static"
+  row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "PASS" "fsmonitor/hooks/ledger/mainref/filter/pointer/leadcfg -> collect rc 44 naming the surface (config, hooks, ledger and the lead trusted git config restored, gitconfig.changed-* kept; marker never ran); post-checkout planted: next lease_create 44; fsmonitor, filter, post-checkout and pointer once accepted (lease_rebaseline) still never run and collect snapshots (pointer via the recorded admin dir); tampered hooks.copy -> 44, NOT restored; ledger swapped for a symlink -> 44, a regular file again; the lead's own git remote add -> 44 naming the saved copy, put back + rebaselined -> collect 0, origin kept; builder commit and ops/TASKS.md refused at merge by name; worktree edited after collect refused; clean lease merges, discoveries stay an indented literal block; lease_rebaseline resumes an escalated lease; git gc after collect (writes .git/info/refs) -> merges; lead checkout switched to rogue -> merge 44 naming sprint/s18 and rogue, state review, back on sprint/s18 -> merges; lease_create on main records no integration branch, sprint/two cut after it -> lease + merge, no 44; a lead commit on the integration branch -> merge 44 (moved), lease_rebaseline -> merges on top; identity only in an [include]d ~/.gitconfig file -> the merge commit carries it; linked-worktree lead checkout whose .git pointer is rewritten to the lease admin dir -> collect 44 naming it; after review the snapshot's new blob rewritten in the object store under its own id -> merge 44 naming it, HEAD unmoved, nothing staged, the lease escalated, the blob written again from the worktree + lease_rebaseline -> merges the reviewed content (${_S18_SHA256}); a subtree rewritten to point at a decoy -> merge 44 naming the tree; the root tree rewritten -> merge 44 naming it and the lease escalated (the re-hash runs ahead of the snapshot checks, whose read-tree would refuse it with rc 1), the repair hint naming write-tree for a tree; a blob the integration branch already has, copied by the snapshot to a new path and rewritten -> merge 44 naming the blob at the new path, HEAD unmoved, nothing staged; a file the integration branch and the snapshot both changed since the base (the squash merges three versions): HEAD's blob rewritten -> merge 44 naming it at HEAD, nothing merged, written again from the lead checkout + lease_rebaseline -> merges both changes; the merge base's blob rewritten -> merge 44 naming it at the merge base, nothing merged; a gitlink that moved on the integration branch after collect -> merges (neither side of it is an object of this repository); a merged blob rewritten -> lease_promote 44, main unmoved, written again -> promotes; main moved since the sprint began (accepted), so the promotion is a merge commit of three versions of a file: main's blob rewritten -> lease_promote 44 naming it at main, main unmoved, written again -> promotes the merge of both changes; the integration branch rewritten (accepted) into a criss-cross with the snapshot -> merge 1 naming both merge bases and the recovery, state review, nothing merged, no object-store repair advice, the task leased again from the integration head -> merges; main and the integration branch in a criss-cross -> lease_promote 1 naming both merge bases and git merge refs/heads/main, main unmoved, merged in + rebaselined -> promotes; an exec persona's --at ref:sprint/s18 with a tag, refs/<name> or a \$GIT_DIR/<name> file shadowing the branch -> 64 naming ref:refs/heads/<name> (also through a revision expression), the full ref and ref:HEAD take the branch's commit, a shadow at the same commit passes; ${_S18_GRAPH}; a HOME that is itself a git repository: lease_create from it and from a directory in it, and lease_wait -> rc 1 with one ERROR line (a home directory is no project), coordinate.sh -> 44 before any session, the persona task: and ref: targets -> 64, no ~/ops, no lease root, HOME byte-identical, a project with its own repository under that HOME leases; every git call in lease.sh and lease-wait.sh goes through _lead_git (quote-aware scan, 3 allowlisted lines in lease.sh, none in lease-wait.sh; planted { git / else git / env -u git lines caught)" "static"
 else
   # the failed case names first, so a long pattern list can't cut them off
   row "SELF-18" "claude" "lead git hardening + integrity + snapshot-only merge: planted config/hooks/filter/pointer never run and escalate, ledger forgery restored, builder commits and ops/ edits refused, moved main blocks promotion (KTD18/KTD19)" "FAIL" "mismatch in $(_self_fail_cases "$_S18_FAIL"):$(printf '%s' "$_S18_FAIL" | cut -c1-500)" "static"
