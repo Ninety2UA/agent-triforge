@@ -22,15 +22,20 @@
 #     token counts only in Markdown text, where Claude Code reads imports:
 #     never in a code block (fenced or indented), a code span, HTML, a link
 #     destination or front matter (md_scan, which counts what it cannot
-#     place as no import). An import line is written or offered only when
-#     this reader reads it back as the project's import (reads_back): a
-#     token ends at whitespace (no escaped form is written or read here) and
-#     a path that starts with ~/ is read from HOME, so a directory named with
-#     a space, or named ~, between that file and the project leaves no
-#     import line there; a CLAUDE.md in the project holding `@AGENTS.md`, no
-#     path, is the fix. The writer also reads back the whole file with the
-#     line appended, and refuses a file that ends inside a code block, an
-#     HTML block or another place no import is read, naming it.
+#     place as no import). Claude Code takes the whole token up to a # as
+#     the path (@AGENTS.md. names AGENTS.md.), and a path it does not read
+#     whole is none (path_ok, emphasis). An import line is written or
+#     offered only when this reader reads it back as the project's import
+#     (reads_back): a token ends at whitespace (no escaped form is written or
+#     read here), a path that starts with ~/ is read from HOME, and a #, a
+#     backslash, <, [, ], a * or _ that may pair, or a first character
+#     other than a letter, a digit, . _ or - keeps it from being read whole,
+#     so a directory named that way, or named ~, between that file and the
+#     project leaves no import line there; a CLAUDE.md in the project
+#     holding `@AGENTS.md`, no path, is the fix. The writer also reads back
+#     the whole file with the line appended, and refuses a file that ends
+#     inside a code block, an HTML block or another place no import is
+#     read, naming it.
 #   agents-chain  reads ${CODEX_HOME:-~/.codex}/AGENTS.md, then one file per
 #     directory from the project root (the nearest directory holding .git)
 #     down to the working directory, AGENTS.override.md replacing AGENTS.md at
@@ -140,9 +145,12 @@ EXACT_3X = {
     "4390b47bfb21d327508cf4e2f43fecd7f08fa7fd774baf7d5ee57b6c84dbda5e": "v3.3.3",
 }
 # an import: a whitespace-separated word @AGENTS.md or @<path>/AGENTS.md in
-# the Markdown text md_scan finds; only trailing punctuation or a #fragment
-# may follow the name, so @AGENTS.md.bak names another file
-IMPORT = re.compile(rb"@((?:\S*/)?)AGENTS\.md(?:[.,;:!?)]*|#\S*)")
+# the Markdown text md_scan finds. Claude Code takes the whole word up to a #
+# as the path, so only a #fragment may follow the name: the word @AGENTS.md.
+# names the file AGENTS.md., the word @AGENTS.md) (as in "see @AGENTS.md)")
+# names AGENTS.md), and @AGENTS.md.bak another file. path_ok and emphasis
+# hold the <path> part to what Claude Code reads whole
+IMPORT = re.compile(rb"@((?:\S*/)?)AGENTS\.md(?:#\S*)?")
 START = b"<!-- triforge:start -->"
 END = b"<!-- triforge:end -->"
 # Claude Code (its memory loader, read in the 2.1.294 build) reads an import
@@ -173,6 +181,19 @@ INLINE = re.compile(rb"<(!--|\?|!\[CDATA\[|!(?=[A-Za-z])|/?(?=[A-Za-z]))|\]\(")
 CLOSE = {b"!--": b"-->", b"?": b"?>", b"![CDATA[": b"]]>", b"!": b">"}
 TAG = re.compile(rb"</?[A-Za-z][\w:-]*(?:\s+[A-Za-z:_][\w.:-]*(?:\s*=\s*(?:\"[^\"]*\"|\x27[^\x27]*\x27|[^\s\"\x27=<>`]+))?)*?\s*/?>")
 LINK = re.compile(rb"\s*(?:<(?:\\.|[^\n<>\\])+>|[^\s\x00-\x1f]*?)(?:\s+(?:\"(?:\\.|[^\"\\])*\"|\x27(?:\\.|[^\x27\\])*\x27|\((?:\\.|[^)\\])*\)))??\s*\)")
+# the <path> part of an import (path_ok): Claude Code ends the path at a #,
+# a backslash or a JavaScript space, and marked may read a <, [ or ] in it as
+# HTML or a link (PATH_CUT); it keeps a path only when it starts with ./, ~/,
+# / or one of A-Z a-z 0-9 . _ - (PATH_HEAD), and drops a special absolute
+# one (sP in its build: // or ?? at the start, a first directory net or
+# network, the macOS /.vol, /.file, /.nofollow, /.resolve; PATH_ROOTS is
+# wider), its first directory compared without zero-width characters
+PATH_CUT = re.compile(rb"[#\\<\[\]]|\xc2\xa0|\xe1\x9a\x80|\xe2\x80[\x80-\x8a\xa8\xa9\xaf]|\xe2\x81\x9f|\xe3\x80\x80|\xef\xbb\xbf")
+PATH_HEAD = re.compile(rb"~/|/|[A-Za-z0-9._-]")
+PATH_ROOTS = (b"net", b"network", b"system", b".vol", b".file", b".nofollow", b".resolve")
+ZERO_WIDTH = re.compile(rb"\xe2\x80[\x8c-\x8f\xaa-\xae]|\xe2\x81[\xaa-\xaf]|\xef\xbb\xbf")
+ALNUM = re.compile(rb"[A-Za-z0-9]")
+SPACE = (b"", b" ", b"\t", b"\n", b"\r", b"\x0b", b"\x0c")
 # The instruction readers a lead can run, named by its registry field
 # "instructions" (KTD1). Data only, keyed by reader, never by CLI:
 #   shadow       the files at the cwd or above (up to /) that hide AGENTS.md
@@ -441,13 +462,61 @@ def code_spans(text, starts, held):
     return spanned
 
 
+def path_ok(d):
+    # True when Claude Code reads the import path d + AGENTS.md whole (d is
+    # the <path> part of IMPORT, "" for none): none of PATH_CUT in it, a
+    # PATH_HEAD start, and no special absolute path. A * or _ in d is held
+    # against its paragraph (emphasis)
+    if not d:
+        return True
+    if PATH_CUT.search(d) or not PATH_HEAD.match(d):
+        return False
+    if d[:1] != b"/":
+        return True
+    if d[:2] == b"//" or b"??" in d:
+        return False
+    # Claude Code tests the first directory at each step of its walk down
+    # the path, so /.vol/../x is dropped although it ends outside /.vol
+    parts = []
+    for c in d.split(b"/"):
+        if c == b"..":
+            parts[-1:] = []
+        elif c not in (b"", b"."):
+            parts.append(c)
+            if ZERO_WIDTH.sub(b"", parts[0]).lower() in PATH_ROOTS:
+                return False
+    return True
+
+
+def emphasis(text):
+    # paired(a, b): True when a * or _ run in text[a:b] may pair with another
+    # run of its character in text, lines marked may read as one paragraph,
+    # as emphasis that splits the import word there. Wider than marked: a run
+    # opens unless a space, tab or line end follows it, any run closes, and
+    # only an _ between two ASCII letters or digits does neither
+    first, last, runs = {}, {}, []
+    for m in re.finditer(rb"\*+|_+", text):
+        s, e, ch = m.start(), m.end(), m.group()[:1]
+        if ch == b"_" and ALNUM.fullmatch(text[s - 1:s]) and ALNUM.fullmatch(text[e:e + 1]):
+            continue
+        runs.append((s, ch))
+        if text[e:e + 1] not in SPACE:
+            first.setdefault(ch, s)
+        last[ch] = s
+
+    def paired(a, b):
+        return any(first.get(ch, len(text)) < s or last[ch] > s for s, ch in runs if a <= s < b)
+    return paired
+
+
 def md_scan(data):
     # (found, open): the IMPORT matches Claude Code reads as text in data,
     # and the construct still open at its end ("" for none), which a line
     # appended to data lands in. A fenced code block or a blank line (spaces
-    # only) ends a paragraph, and an import word with no backtick in it
-    # counts on a line no block hides, past its markers, outside every
-    # inline construct and code span of its paragraph
+    # only) ends a paragraph, and an import word with no backtick in it and a
+    # path Claude Code reads whole (path_ok, emphasis) counts on a line no
+    # block hides, past its markers, outside every inline construct and code
+    # span of its paragraph
     if len(data) > MD_MAX:
         return [], ""
     prefix, body = md_body(data)
@@ -458,27 +527,34 @@ def md_scan(data):
     fence, rest, opened, deftail, listed = None, "", "", False, False
 
     def flush():
-        # the import words of the paragraph in chunk that are text
-        text = b"\n".join(ln for ln, _ in chunk)
+        # the import words of the paragraph in chunk that are text. chunk
+        # holds each line as marked reads it in a paragraph (past its
+        # blockquote and list markers, which marked strips too; an indented
+        # line, which may continue the paragraph as text, past its indent
+        # only) and whether its words may count
+        text = b"\n".join(piece for piece, _ in chunk)
         words, starts, at = [], [], 0
-        for ln, off in chunk:
+        for piece, counts in chunk:
             starts.append(at)
-            if off is not None:
-                for w in re.finditer(rb"\S+", ln[off:]):
+            if counts:
+                for w in re.finditer(rb"\S+", piece):
                     m = IMPORT.fullmatch(w.group())
-                    if m and b"`" not in w.group():
-                        words.append((at + off + w.start(), m))
-            at += len(ln) + 1
+                    if m and b"`" not in w.group() and path_ok(m.group(1)):
+                        words.append((at + w.start(), m))
+            at += len(piece) + 1
         if words:
             held = inline_held(text)
             spanned = code_spans(text, starts, held)
-            found.extend(m for p, m in words if not held(p) and not spanned(p))
+            paired = emphasis(text)
+            found.extend(m for p, m in words if not held(p) and not spanned(p) and not paired(p + 1, p + 1 + len(m.group(1))))
         del chunk[:]
 
     for i, ln in enumerate(lines):
         line = "line " + str(first + i)
         s = ln.lstrip(b" \t")
         ws = ln[:len(ln) - len(s)]
+        content, marked, code = inner(ln)
+        piece = s if code else content
         if fence:
             # a fenced code block: a closing fence (the opening run, then
             # backticks or tildes, then spaces) ends it. One opened k >= 2
@@ -502,36 +578,35 @@ def md_scan(data):
                 rest = "the fenced code block opened on " + at + ", which may run to the end of the file (a list item may hold it)"
                 fence = None
             if soft or rest:
-                chunk.append((ln, None))
+                chunk.append((piece, False))
             continue
         if rest:
             # nothing after is text for certain; the paragraph of the line
             # that set rest still bounds the code spans before it
             if not ln.strip(b" "):
                 break
-            chunk.append((ln, None))
+            chunk.append((piece, False))
             continue
         title, deftail = deftail, False
-        content, marked, code = inner(ln)
         # an indented line opens no block unless a list item may hold it
         look = not code or listed
         listed = listed or bool(LIST.match(ln))
         f = FENCE.match(content) if look else None
         if f and (marked or ends or code and b"\t" in ws):
             rest = "the fence on " + line + " in a quote, a list item or an HTML block, which may run to the end of the file"
-            chunk.append((ln, None))
+            chunk.append((piece, False))
             continue
         if f and not code and i == len(lines) - 1 and not nl:
             # an unterminated last line may be paragraph text; a line
             # appended after it makes it an opening fence
             opened = "the fenced code block its last line (" + line + ") opens"
-            chunk.append((ln, None))
+            chunk.append((piece, False))
             continue
         if f:
             # a soft one (indented, under a list) may be text that continues
             # the paragraph, so it and its lines stay in it
             if code:
-                chunk.append((ln, None))
+                chunk.append((piece, False))
             else:
                 flush()
             fence = (f.group(), len(ws), line, code)
@@ -550,7 +625,7 @@ def md_scan(data):
                 del ends[stop]
             if e is not None and (not e or e not in after.lower()):
                 ends.setdefault(e, line)
-            chunk.append((ln, None))
+            chunk.append((piece, False))
             continue
         d = DEF.match(content) if look else None
         tail = d.group(2) if d else content if title else b""
@@ -562,9 +637,9 @@ def md_scan(data):
             if d and not d.group(1) or close and close not in tail[1:]:
                 rest = "the link reference definition on " + line + ", whose title may run to the end of the file"
             deftail = bool(d) and not tail
-            chunk.append((ln, None))
+            chunk.append((piece, False))
             continue
-        chunk.append((ln, None if code else len(ln) - len(content)))
+        chunk.append((piece, not code))
     flush()
     if fence and not fence[3]:
         opened = "the fenced code block opened on " + fence[2] + ", which is never closed"
@@ -605,12 +680,13 @@ def reads_back(path, line, target):
     # path, as an import of <target>/AGENTS.md. A line that does not read
     # back would be written but never seen as that import, so every approved
     # run would append it again: a path that holds whitespace ends the
-    # import there, and one that starts with ~/ is read from HOME (a
-    # directory named ~ on the way down). No writer writes such a line, and
-    # neither a fix nor the import column of detect offers one; a line with
-    # no path (@AGENTS.md, @../AGENTS.md) always reads back. The line is
-    # judged alone here; add_import also reads back the whole file with the
-    # line appended, which a file ending inside a code block fails
+    # import there, one that starts with ~/ is read from HOME (a directory
+    # named ~ on the way down), and one holding a character Claude Code
+    # does not read whole (path_ok, emphasis) is none. No writer writes such
+    # a line, and neither a fix nor the import column of detect offers one;
+    # a line with no path (@AGENTS.md, @../AGENTS.md) always reads back. The
+    # line is judged alone here; add_import also reads back the whole file
+    # with the line appended, which a file ending inside a code block fails
     return imports(path, os.fsencode(line), {os.path.realpath(target)})
 
 
@@ -987,7 +1063,7 @@ def add_import(fn, arg, yes):
     if not reads_back(path, line, project):
         # the line would never be seen as this import (reads_back), so it is
         # refused before any plan, also with --yes
-        return refuse(fn, path + " would need the line " + line + ", which would not read back as an import of " + os.path.join(project, "AGENTS.md") + " (an import path ends at whitespace, and one that starts with ~/ is read from your home directory); put the line " + import_line(own, project, project) + " in " + os.path.join(project, own) + " instead, which loads it for this project only")
+        return refuse(fn, path + " would need the line " + line + ", which would not read back as an import of " + os.path.join(project, "AGENTS.md") + " (an import path ends at whitespace or a #, one that starts with ~/ is read from your home directory, one that starts with any character but a letter, a digit, . _ or - loads nothing, and Markdown reads a backslash, <, [, ], or a * or _ that pairs, in it as markup); put the line " + import_line(own, project, project) + " in " + os.path.join(project, own) + " instead, which loads it for this project only")
     new = data + (b"\n" if data and not data.endswith(b"\n") else b"") + os.fsencode(line) + b"\n"
     if not imports(path, new, {project}):
         # the line reads back alone, but appended it lands where Claude Code
@@ -999,7 +1075,7 @@ def add_import(fn, arg, yes):
         where = md_scan(data)[1]
         if where:
             return refuse(fn, path + " ends inside " + where + ", so the line " + line + " appended there would not read back as an import of " + agents + " (Claude Code reads an import from Markdown text only); close it first, or add the line yourself outside it" + alt)
-        return refuse(fn, path + " would not read back the line " + line + ", appended at its end, as an import of " + agents + " (Claude Code reads an import from Markdown text only, never from front matter, a code span or inline HTML, and reads no file over " + str(MD_MAX) + " bytes); add the line yourself where Claude Code reads it" + alt)
+        return refuse(fn, path + " would not read back the line " + line + ", appended at its end, as an import of " + agents + " (Claude Code reads an import from Markdown text only, never from front matter, a code span or inline HTML, nor one whose * or _ pairs with another in its paragraph, and reads no file over " + str(MD_MAX) + " bytes); add the line yourself where Claude Code reads it" + alt)
     plan = "add the line " + line + " to " + path + ", so Claude Code loads " + os.path.join(project, "AGENTS.md") + " with it"
     if lev != project:
         # a file above the project: every project under it loads the import
@@ -1286,8 +1362,9 @@ _instr_args() {
 # import the line that would import <dir>'s AGENTS.md from that file (relative
 #        to it: @AGENTS.md, @../AGENTS.md, @proj/AGENTS.md), "-" otherwise,
 #        and "-" when that line would not read back as <dir>'s import
-#        (reads_back: its path holds whitespace or starts with ~/), so no
-#        import line there can name <dir>'s AGENTS.md.
+#        (reads_back: its path holds whitespace, starts with ~/, or holds a
+#        character Claude Code does not read whole there, such as a #), so
+#        no import line there can name <dir>'s AGENTS.md.
 # Control characters in a path print as "?". rc 0; 2 <dir> is not a
 # directory; 69 no python3.
 instruction_files_detect() {
@@ -1307,8 +1384,9 @@ instruction_files_detect() {
 # which is no project, the line is "hidden", rc 1, the why starting "not a
 # project:" and naming no fix; elsewhere a fix never builds on a pointer block
 # in HOME or above it, and never offers an import line that would not read
-# back as the project's import (a path that holds whitespace or starts with
-# ~/; the project's own CLAUDE.md is the fix then).
+# back as the project's import (a path that holds whitespace, starts with ~/
+# or holds a character Claude Code does not read whole there; the project's
+# own CLAUDE.md is the fix then).
 instruction_pointer_visibility() {
   local LEAD=${1:-} READER=""
   if [ -z "$LEAD" ] || [ "$#" -gt 2 ]; then
@@ -1331,8 +1409,9 @@ instruction_pointer_visibility() {
 # outside the project's directory chain, a missing or non-regular file, a
 # symlink or a symlinked directory, and, before any plan and also with --yes,
 # a file above the project whose import line would not read back as this
-# project's import (a directory named with a space, or named ~, on the way
-# down to the project): the refusal names the project's own CLAUDE.md
+# project's import (a directory on the way down to the project named ~, or
+# with a space or a character Claude Code does not read whole in an import
+# path, such as a #): the refusal names the project's own CLAUDE.md
 # holding @AGENTS.md instead; and, the same way, a file that would not read
 # the line back once it is appended at its end (the file ends inside a
 # fenced code block never closed, an HTML block, or another place Claude
