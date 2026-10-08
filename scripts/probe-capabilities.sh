@@ -2126,10 +2126,15 @@ fi  # end of the per-CLI sections skipped by --self-only
 #                    where SessionStart and UserPromptSubmit fire before the
 #                    first model request, so no login is needed). The user's own
 #                    config is never touched. CDX-16 PASS needs the bypass run to
-#                    fire a hook and the untrusted lane run to fire none; hooks
-#                    firing untrusted are a FAIL that says "fires without trust",
-#                    and an untrusted run its timeout cut off is a FAIL that
-#                    says "timed out" (it fired none because it stopped first)
+#                    fire a hook and the untrusted lane run to fire none after
+#                    it reached its READY answer (rc 0) or the scratch home's
+#                    missing login (rc 1, auth-shaped output), both past the
+#                    point where a trusted hook fires; hooks firing untrusted
+#                    are a FAIL that says "fires without trust", an untrusted
+#                    run its timeout cut off is a FAIL that says "timed out",
+#                    and one that ended any other way (a launch failure, a
+#                    signal, another rc or output) is a FAIL that says
+#                    "stopped short" (it may have stopped before a hook fires)
 #   CC-13 / CDX-17 / AGY-17 / OC-09 / KIMI-10 / CUR-13
 #                    a variable set at the lease boundary is visible inside each
 #                    worker CLI's tool shell, run with the lane's own argv
@@ -3402,16 +3407,33 @@ if command -v codex >/dev/null 2>&1; then
         (cd "$FIX" && _lane_run 120 env CODEX_HOME="$CH" "TRIFORGE_PROBE_WORKER=$U29_VAL" codex "${U29_CDX_FLAGS[@]}" --skip-git-repo-check -m "$CDX_MODEL" "Respond with only: READY" < /dev/null > "$O.2" 2>&1) || CDX16_RC=$?
         _u29_hooks_seen "$HM"
         # PASS needs both controls: the bypass run fires a hook (positive) and
-        # the lane-flags run, untrusted, fires none (negative). Hooks firing
-        # without trust are a FAIL that says so: the gate the row names did
-        # not hold. A lane-flags run the timeout cut off (_timed_out) fired
-        # none because it stopped first, so it is a FAIL too, never a PASS.
+        # the lane-flags run, untrusted, fires none (negative) after it got as
+        # far as a trusted hook fires. Its end shows that, and CDX16_END names
+        # it: its READY answer (rc 0 and a line holding READY alone, since
+        # codex echoes the prompt into the output) or the scratch home's
+        # missing login, which stops the run after SessionStart and
+        # UserPromptSubmit (rc 1, codex exec's exit on an error, with
+        # auth-shaped output). Hooks firing without trust are a FAIL that says
+        # so: the gate the row names did not hold. A lane-flags run that ended
+        # any other way may have stopped before a hook could fire, so the
+        # hooks it did not fire show nothing, and it is a FAIL, never a PASS:
+        # one the timeout cut off (_timed_out) says "timed out", and a launch
+        # failure (125-127), a signal (128+n) or any other rc or output says
+        # "stopped short", naming the rc.
+        CDX16_END=""
+        if [ "$CDX16_RC" -eq 0 ] && grep -qixE '[[:space:][:punct:]]*READY[[:space:][:punct:]]*' "$O.2" 2>/dev/null; then
+          CDX16_END="its READY answer (rc 0)"
+        elif [ "$CDX16_RC" -eq 1 ] && _auth_shaped "$O.2"; then
+          CDX16_END="the scratch home's missing login (rc 1, auth-shaped output)"
+        fi
         if [ "$U29_FIRED" -gt 0 ]; then
           row "CDX-16" "codex" "$U29_CDX16" "FAIL" "fires without trust: lane flags alone, untrusted plugin hooks: ${U29_HOOKS}; with --dangerously-bypass-hook-trust: ${U29_E1} — the trust gate did not hold, so a lane worker runs installed plugins' hooks and the worker-marker early exit (U11) is the only guard" "marker-file"
         elif _timed_out "$CDX16_RC"; then
           row "CDX-16" "codex" "$U29_CDX16" "FAIL" "timed out after 120 s (rc=$CDX16_RC): the timeout cut the lane-flags run off, so the hooks it did not fire show nothing; with --dangerously-bypass-hook-trust: ${U29_E1}; $(_evidence "$O.2")" "marker-file"
+        elif [ "$U29_N1" -gt 0 ] && [ -n "$CDX16_END" ]; then
+          row "CDX-16" "codex" "$U29_CDX16" "PASS" "with --dangerously-bypass-hook-trust: ${U29_E1}; lane flags alone (untrusted plugin hooks), ended at ${CDX16_END}: ${U29_HOOKS} — plugin hooks are trust-gated, and the trust lives in the user's CODEX_HOME, which a lane worker reads through HOME; the scratch home has no login, so PreToolUse/Stop cannot fire there" "marker-file"
         elif [ "$U29_N1" -gt 0 ]; then
-          row "CDX-16" "codex" "$U29_CDX16" "PASS" "with --dangerously-bypass-hook-trust: ${U29_E1}; lane flags alone (untrusted plugin hooks): ${U29_HOOKS} — plugin hooks are trust-gated, and the trust lives in the user's CODEX_HOME, which a lane worker reads through HOME; the scratch home has no login, so PreToolUse/Stop cannot fire there" "marker-file"
+          row "CDX-16" "codex" "$U29_CDX16" "FAIL" "stopped short (rc=$CDX16_RC): the lane-flags run ended neither at its READY answer (rc 0) nor at the scratch home's missing login (rc 1, auth-shaped output), the two ends past the point where a trusted hook fires, so the hooks it did not fire show nothing; with --dangerously-bypass-hook-trust: ${U29_E1}; $(_evidence "$O.2")" "marker-file"
         elif _auth_shaped "$O"; then
           row "CDX-16" "codex" "$U29_CDX16" "UNAVAILABLE" "no hook fired before the scratch home's missing login stopped the run; a live check needs the plugin in the user's CODEX_HOME (user-tier, R18): $(_evidence "$O")" "marker-file"
         else
@@ -5378,7 +5400,7 @@ COUNTER_MISMATCH=0
   echo "- **CC-10/CDX-13** → the same builder survives a terminal hangup of the lead (pty closed mid-turn), the headless stand-in for a closed TUI (U13's lead-exit path)."
   echo "- **CC-11/CDX-15/CDX-15b** → the host markers \`lead_host_detect\` reads (U9): the names each lead adds to its tool shell. Workers of the same CLI carry the same names (CC-13/CDX-17 evidence), so only the worker marker tells a worker from a lead. CDX-15b (danger-full-access) needs a human-launched lead (R50)."
   echo "- **CDX-14** → TMPDIR under a Codex lead: lease paths and per-session caches keyed on it resolve the same in the lead's tool shell as in its caller."
-  echo "- **CC-12/CDX-16** → plugin hooks fire in env -i workers, so the shipped hook handlers must exit early under the worker marker (U11, KTD9); Codex plugin hooks are trust-gated (CDX-16 PASS: the bypass run fires a hook and the untrusted lane run fires none; a FAIL that says \"fires without trust\" means the worker-marker exit is the only guard)."
+  echo "- **CC-12/CDX-16** → plugin hooks fire in env -i workers, so the shipped hook handlers must exit early under the worker marker (U11, KTD9); Codex plugin hooks are trust-gated (CDX-16 PASS: the bypass run fires a hook and the untrusted lane run, which reached its READY answer or the scratch home's missing login, fires none; a FAIL that says \"fires without trust\" means the worker-marker exit is the only guard)."
   echo "- **CC-13/CDX-17/AGY-17/OC-09/KIMI-10/CUR-13** → a variable set at the lease boundary reaches each worker CLI's tool shell, which is where U11's worker marker has to be seen (KTD9)."
   echo "- **CC-14/CC-14b** → D-038: \`claude -p\` loads the root AGENTS.md when no CLAUDE.md exists, and a CLAUDE.md beside it suppresses it (the R40 upgrade notice)."
   echo "- **CC-15** → KTD16: Claude Code's Bash sandbox confines a \`claude -p\` worker on the lane's own argv (writes outside its worktree and into the lead's .git blocked, also on a requested unsandboxed retry; credential paths unreadable). PASS keeps the lane's sandbox on; a FAIL means a claude builder with Bash has no OS confinement on that host. **CC-16..CC-18** → the claude lane runs a test command with no permission denial, resumes a recorded session id on a fix cycle, and a \`--max-turns\` stop parses as subtype error_max_turns (the report-missing route). **CC-19/CDX-19/AGY-18** → the lease's no-push git config and the worker marker reach each worker's tool shell through the real \`_adapter_env\` (codex with the lane's pinned \`shell_environment_policy\`), a \`git push\` is refused, and the names each CLI adds to its tool shell are listed; headless agy runs a command only with a user-tier allow rule. **CC-20** → R2: a Codex lead's \`dispatch_role\` reviewer resolving to claude runs \`claude -p\`."

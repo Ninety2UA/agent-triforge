@@ -13175,7 +13175,7 @@ else
 fi
 rm -rf "$_S17"
 
-# SELF-29 (U19, S2 — R27, R28, R29, KTD18: agy's auto default and its AGY_ERROR line, the Cursor probe rows' Grok ids, a ledger whose anchors were both deleted, a negative row's timeout verdict). Cases go between the markers; each appends
+# SELF-29 (U19, S2 — R27, R28, R29, KTD18: agy's auto default and its AGY_ERROR line, the Cursor probe rows' Grok ids, a ledger whose anchors were both deleted, a negative row's timeout verdict, CDX-16's verdict chain). Cases go between the markers; each appends
 # "<case>(<why>)" to _S29_FAIL on a mismatch (_self_expect does this) and, once
 # they ran, one short note to _S29_EV. Expected values are literals. A row whose
 # cases never ran fails: no note is no evidence.
@@ -13238,6 +13238,22 @@ mkdir -p "$_S29"
 #            variable to 0, captures its _probe_run (CDX-16: _lane_run)
 #            call's rc in it, and asks _timed_out about it on the line right
 #            before its "timed out after" FAIL row, which names that rc
+#   cdx16    (round 3) CDX-16's verdict chain, run: its block from the bypass
+#            run's line to the else of the plugin-install branch, with
+#            _auth_shaped and _u29_hooks_seen, taken from scripts/probe-
+#            capabilities.sh by their text (_timed_out with negverdict's),
+#            over a stub _lane_run that fires the hooks and ends each run as
+#            the scenario says, and a stub row; a stub codex first on PATH
+#            logs any run the block makes past them (none). With the bypass
+#            run's hook and none from the untrusted run, PASS needs that run
+#            to end at its READY answer (rc 0, a line of its own after the
+#            echoed prompt) or the scratch home's missing login (rc 1,
+#            auth-shaped), the evidence naming which; rc 0 with only the
+#            echo, rc 1 without auth text, and 2, 125, 126, 127, 129, 130 and
+#            143 with it -> FAIL "stopped short (rc=<n>)"; 124 and 137 ->
+#            "timed out after"; a hook fired untrusted -> "fires without
+#            trust"; no bypass hook -> UNAVAILABLE on an auth-shaped bypass
+#            run, else FAIL
 mkdir -p "$_S29/bin" "$_S29/cfg" "$_S29/home" "$_S29/tmp" "$_S29/proj"
 { printf '#!/bin/sh\n# SELF-29 agy stub: `agents` prints cfg/agents; a run logs its argv and answers by cfg/mode\nD=%s\n' "'$_S29'"; cat <<'S29_AGY_EOF'
 mkdir -p "$D/log"
@@ -13475,9 +13491,62 @@ for _s29_c in AGY-09 AGY-10 AGY-13 AGY-16 CDX-08 OC-06 OC-06b KIMI-08 CUR-07 CUR
 done
 unset _s29_c
 _S29_EV="${_S29_EV}negverdict: _negative_verdict (AGY-11c and CUR-10 call it): rc 124 and 137 -> timeout with any output, error text and READY included, never a rejection; rc 0 + READY -> accepted; rc 1 or 2, or rc 0 + error text -> rejected; rc 0 with neither -> ambiguous; both rows record a timeout as a FAIL saying so. Its _timed_out: 124 and 137 yes, 0, 1, 125 and 143 no; AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08 and CC-14b each capture their _probe_run rc, and CDX-16 its untrusted _lane_run rc (reset to 0 first), and ask _timed_out right before their timed-out FAIL row, which names that rc. "
-unset O _S29_PICK _S29_NV _S29_ROUTE
+# cdx16 (round 3)
+_S29_C16=$(awk '/--dangerously-bypass-hook-trust "Respond with only: READY"/ { p = 1 } p && /^      else$/ { exit } p { print }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
+_S29_C16H=$(awk '/^(_auth_shaped|_u29_hooks_seen)\(\) \{/ { p = 1 } p { print } p && /^}$/ { p = 0 }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
+mkdir -p "$_S29/c16/bin" "$_S29/c16/fix" "$_S29/c16/hm"
+printf '#!/bin/sh\n# SELF-29 stub codex: logs a run the CDX-16 block must never make\necho run >> %s/codex.log\nexit 99\n' "'$_S29/c16'" > "$_S29/c16/bin/codex"
+chmod +x "$_S29/c16/bin/codex"
+# _s29_c16 <bypass>:<untrusted>:<rc>:<output> — "<outcome>:<evidence>", the
+# row CDX-16's block records for that scenario, run in a subshell so its
+# stub _lane_run and row never reach the harness's
+_s29_c16() (
+  S16_B=${1%%:*}; S16=${1#*:}; S16_L=${S16%%:*}; S16=${S16#*:}; S16_RC=${S16%%:*}; S16_OUT=${S16#*:}
+  PATH="$_S29/c16/bin:$PATH"
+  FIX="$_S29/c16/fix"; CH="$_S29/c16/home"; HM="$_S29/c16/hm"; O="$_S29/c16/out"
+  U29_VAL=triforge-probe-s29; U29_CDX16="CDX-16 (SELF-29 replay)"; CDX_MODEL=gpt-s29; U29_CDX_FLAGS=(exec)
+  rm -f "$HM"/hook-* "$O" "$O.2"
+  eval "$_S29_NV"
+  eval "$_S29_C16H"
+  _lane_run() {
+    local A
+    for A in "$@"; do
+      if [ "$A" = --dangerously-bypass-hook-trust ]; then
+        if [ "$S16_B" = y ]; then printf 'probe_var=%s lease_worker=builder plugin_root=set\n' "$U29_VAL" > "$HM/hook-SessionStart"; fi
+        if [ "$S16_B" = a ]; then echo "ERROR: unexpected status 401 Unauthorized"; else echo "bypass run output"; fi
+        return 1
+      fi
+    done
+    if [ "$S16_L" = y ]; then printf 'probe_var=%s lease_worker=builder plugin_root=set\n' "$U29_VAL" > "$HM/hook-SessionStart"; fi
+    printf 'user\nRespond with only: READY\n'
+    if [ "$S16_OUT" = ready ]; then printf 'codex\nREADY\n'; fi
+    if [ "$S16_OUT" = login ]; then echo "ERROR: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header"; fi
+    return "$S16_RC"
+  }
+  row() { printf '%s:%s' "$4" "$5" | tr '\n' ' '; }
+  eval "$_S29_C16"
+)
+O=""
+for _s29_c in y:n:0:ready y:n:1:login y:n:0:echo y:n:1:echo y:n:2:login y:n:125:login y:n:126:login y:n:127:login y:n:129:login \
+  y:n:130:login y:n:143:login y:n:124:login y:n:137:ready y:y:1:login a:n:1:login n:n:1:login; do
+  O="$O
+c16-${_s29_c}=$(_s29_c16 "$_s29_c" 2>&1)"
+done
+O="$O
+c16-codex=$(_s29_n "$_S29/c16/codex.log")"
+_S29_FAIL="${_S29_FAIL}$(_self_expect cdx16 "$O" '^c16-y:n:0:ready=PASS:.*, ended at its READY answer \(rc 0\): fired: none' \
+  '^c16-y:n:1:login=PASS:.*, ended at the scratch home.s missing login \(rc 1, auth-shaped output\): fired: none' \
+  '^c16-y:n:124:login=FAIL:timed out after 120 s \(rc=124\)' '^c16-y:n:137:ready=FAIL:timed out after 120 s \(rc=137\)' \
+  '^c16-y:y:1:login=FAIL:fires without trust' '^c16-a:n:1:login=UNAVAILABLE:no hook fired before' \
+  '^c16-n:n:1:login=FAIL:no plugin hook fired even with' '^c16-codex=0$')"
+for _s29_c in 0:echo 1:echo 2:login 125:login 126:login 127:login 129:login 130:login 143:login; do
+  _S29_FAIL="${_S29_FAIL}$(_self_expect cdx16 "$O" "^c16-y:n:${_s29_c}=FAIL:stopped short \\(rc=${_s29_c%%:*}\\): ")"
+done
+unset _s29_c
+_S29_EV="${_S29_EV}cdx16: CDX-16's verdict chain, run from its text on stub runs: with the bypass run's hook, PASS only when the untrusted run fired none and ended at its READY answer (rc 0, a line of its own: the echoed prompt is not one) or the scratch home's missing login (rc 1, auth-shaped), its evidence naming which; rc 0 with only the echo, rc 1 without auth text, and 2, 125, 126, 127, 129, 130 and 143 with it -> FAIL stopped short naming the rc; 124 and 137 -> timed out; a hook fired untrusted -> fires without trust; no bypass hook -> UNAVAILABLE on an auth-shaped bypass run, else FAIL. "
+unset O _S29_PICK _S29_NV _S29_ROUTE _S29_C16 _S29_C16H
 # --- end of SELF-29 cases ---
-_S29_CAP="agy routing defaults to auto and the AGY_ERROR line on exit 3 sets the failure's reason and retry (invoke_antigravity and the lease lane); the Cursor probe rows compose Grok ids through _cursor_model_for_effort; a ledger whose two anchors were deleted is a change (rc 44), and the lead's lease_rebaseline recovers (U19, S2); a negative row's call cut off by its timeout (rc 124 or 137) is never a rejection (AGY-11c, CUR-10), and a missing trace after one is no PASS (AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08, CC-14b, CDX-16)"
+_S29_CAP="agy routing defaults to auto and the AGY_ERROR line on exit 3 sets the failure's reason and retry (invoke_antigravity and the lease lane); the Cursor probe rows compose Grok ids through _cursor_model_for_effort; a ledger whose two anchors were deleted is a change (rc 44), and the lead's lease_rebaseline recovers (U19, S2); a negative row's call cut off by its timeout (rc 124 or 137) is never a rejection (AGY-11c, CUR-10), and a missing trace after one is no PASS (AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08, CC-14b, CDX-16); CDX-16 passes only when its untrusted run ended at its READY answer or the scratch home's missing login, past the point where a trusted hook fires"
 if [ -z "$_S29_EV" ]; then _S29_FAIL="${_S29_FAIL} cases(no-case-ran)"; fi
 if [ -z "$_S29_FAIL" ]; then
   row "SELF-29" "claude" "$_S29_CAP" "PASS" "$(printf '%s' "$_S29_EV" | cut -c1-3000)" "static"
@@ -13518,7 +13587,11 @@ rm -rf "$_S29"
 #                        binary, an option or the duration; a :- with an
 #                        empty word, or of such a variable, stays $NAME.
 #                        -s KILL counts as a kill-after (it can't be
-#                        ignored). _adapter_env <cli> <cmd...> runs the
+#                        ignored); a -k or --kill-after whose value is a
+#                        literal zero (0, 0s, 0.0s) does not, since timeout
+#                        reads a zero duration as no kill-after, while a
+#                        value in a variable ("$KA", "${KA_S}s") still does.
+#                        _adapter_env <cli> <cmd...> runs the
 #                        word after the CLI name, so that word is read as a
 #                        command word: a timeout binary there needs the
 #                        kill-after too, while env, git or python3 there
@@ -13546,9 +13619,12 @@ rm -rf "$_S29"
 # command, "$TIMEOUT_BIN" handed to _adapter_env (with and without
 # --foreground, in a ( )), timeout in a $( ) inside $(( )),
 # ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+120} after exec,
-# "$TIMEOUT_BIN" after env A=1 "$@", ${T:-timeout} and
-# ${TIMEOUT_BIN:-$(command -v gtimeout)} are flagged, and -k,
-# --kill-after=5s, -k5s, -s KILL, _adapter_env with --foreground -k 10s, with
+# "$TIMEOUT_BIN" after env A=1 "$@", ${T:-timeout},
+# ${TIMEOUT_BIN:-$(command -v gtimeout)} and a zero kill-after (-k 0, -k0,
+# -k 0s, -k "0", --kill-after=0, --kill-after=0s, --kill-after 0.0s) are
+# flagged, and -k, --kill-after=5s, -k5s, -k 10s, -k5, -k 0.5,
+# --kill-after 10, -k "$KA", -k "${KA_S}s", -s KILL (with -k 0 too),
+# _adapter_env with --foreground -k 10s, with
 # "$2" and -k, with "${TO[@]}" and running env, git -C or python3 -c, the
 # binary as another function's argument, the shapes in a comment and in
 # quoted strings, "$@" where the duration goes, command -v timeout, a
@@ -13570,11 +13646,13 @@ OPTS = re.compile(r"[-+][A-Za-z]+")
 # a word that is one parameter expansion ($NAME, "${NAME}", ${NAME:+…}: the
 # name in group 2 or 3, what follows it in the braces in 4); a word that may
 # hold several ("$@", an array, ${NAME:+…}); a word that is "$@" alone; the
-# signal a child can't ignore
+# signal a child can't ignore; a literal zero duration (0, 0s, 0.0, .0m),
+# which timeout reads as no kill-after at all
 EXPAN = re.compile(r'(")?\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)([^A-Za-z0-9_].*)?\})(?(1)")', re.S)
 UNDECIDED = re.compile(r"\$(?:[@*]|\{[@*]|\{[A-Za-z_][A-Za-z0-9_]*(?:\[[@*]\]|:?\+))")
 ARGS = re.compile(r'(")?\$(?:@|\{@\})(?(1)")')
 KILLSIG = ("KILL", "SIGKILL", "9")
+ZERO = re.compile(r"(?:0+\.?0*|\.0+)[smhd]?")
 META = " \t\n;&|()<>"
 OPS = (";;&", ";;", ";&", "&&", "||", "|&", ";", "&", "|", "(", ")")
 REDIRS = ("<<<", "<<-", "&>>", "<<", "<>", "<&", ">>", ">&", ">|", "&>", "<", ">")
@@ -14190,8 +14268,9 @@ class Scan(object):
     def check_timeout(self, words):
         # timeout-no-kill: a timeout binary run with a duration, and neither
         # -k/--kill-after nor a KILL signal (-s, --signal) among its options,
-        # each word read as held() reads it; _adapter_env <cli> <cmd...> runs
-        # the word after the CLI name
+        # each word read as held() reads it; a kill-after whose value is a
+        # literal zero (ZERO) is none, while one held in a variable counts;
+        # _adapter_env <cli> <cmd...> runs the word after the CLI name
         words = self.held(words)
         k = self.run_index(words)
         if k + 2 < len(words) and words[k].val == "_adapter_env":
@@ -14210,14 +14289,17 @@ class Scan(object):
                     continue
                 if not eq and j < len(rest):
                     arg, j = rest[j].val, j + 1
-                kill = kill or "kill-after".startswith(name) or arg.upper() in KILLSIG
+                if "kill-after".startswith(name):
+                    kill = kill or not ZERO.fullmatch(arg)
+                else:
+                    kill = kill or arg.upper() in KILLSIG
                 continue
             for x, ch in enumerate(v[1:]):
                 if ch in "ks":
                     arg = v[x + 2:]
                     if not arg and j < len(rest):
                         arg, j = rest[j].val, j + 1
-                    kill = kill or ch == "k" or arg.upper() in KILLSIG
+                    kill = kill or (not ZERO.fullmatch(arg) if ch == "k" else arg.upper() in KILLSIG)
                     break
         if kill or j >= len(rest) or UNDECIDED.search(rest[j].raw):
             return
@@ -14359,6 +14441,13 @@ exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+120} sh x   # want:timeout-no
 exec env A=1 "$@" "$TIMEOUT_BIN" 120 sh x   # want:timeout-no-kill
 ${T:-timeout} 30 make   # want:timeout-no-kill
 ${TIMEOUT_BIN:-$(command -v gtimeout)} 30 make   # want:timeout-no-kill
+timeout -k 0 1 cmd   # want:timeout-no-kill
+timeout -k0 1 cmd   # want:timeout-no-kill
+timeout -k 0s 1 cmd   # want:timeout-no-kill
+"$TIMEOUT_BIN" -k "0" 30 cmd   # want:timeout-no-kill
+"$TIMEOUT_BIN" --kill-after=0 5 cmd   # want:timeout-no-kill
+timeout --kill-after=0s 1 cmd   # want:timeout-no-kill
+gtimeout --kill-after 0.0s 5 cmd   # want:timeout-no-kill
 ok_adapter_env() {
   _adapter_env claude "$TIMEOUT_BIN" --foreground -k 10s 240 claude -p x
   _adapter_env grok "$2" --foreground -k 10s "${3}s" grok
@@ -14384,6 +14473,13 @@ ok_timeout() {
   exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+-k10s} ${TIMEOUT_BIN:+120} sh x
   "$TIMEOUT_BIN" ${KOPT:--k10s} 60 cmd
   exec env "$@" "$TIMEOUT_BIN" 120 sh x
+  timeout -k 10s 1 cmd
+  timeout -k5 1 cmd
+  timeout -k 0.5 1 cmd
+  gtimeout --kill-after 10 5 cmd
+  timeout -k "$KA" 10s cmd
+  "$TIMEOUT_BIN" -k "${KA_S}s" 10s cmd
+  timeout -s KILL -k 0 10s cmd
   printf '%s\n' "${A:-}${B:-}" "${C:-$D}\n${E}"
 }
 S30_PLANTED
@@ -14404,9 +14500,9 @@ case "$_S30_NEG" in
   *"scan-error:broken.sh:"*) ;;
   *) _S30_FAIL="$_S30_FAIL broken(no-scan-error)" ;;
 esac
-_S30_CAP="the shell rules a static scan can decide hold in every shell file Triforge ships (scripts/*.sh, scripts/lib/*.sh, hooks/handlers/*.sh, skills/*/scripts/*.sh): no function ends in a [ ] or [[ ]] && chain with no ||, no grep -c … || echo, no grep -P, no associative array, no mapfile or readarray (AGENTS.md Shell), and no timeout binary run as a command without a kill-after (review finding #6)"
+_S30_CAP="the shell rules a static scan can decide hold in every shell file Triforge ships (scripts/*.sh, scripts/lib/*.sh, hooks/handlers/*.sh, skills/*/scripts/*.sh): no function ends in a [ ] or [[ ]] && chain with no ||, no grep -c … || echo, no grep -P, no associative array, no mapfile or readarray (AGENTS.md Shell), and no timeout binary run as a command without a kill-after (review finding #6), a literal zero one counting as none"
 if [ -z "$_S30_HITS" ] && [ -z "$_S30_FAIL" ]; then
-  row "SELF-30" "claude" "$_S30_CAP" "PASS" "${_S30_N} files parsed as bash, comments, quoted text and here-document bodies as text: 0 hits, no scan error; planted: $(printf '%s\n' "$_S30_WANT" | grep -c . || true) shapes flagged on exactly their lines (test-and-last on one line and several, mid-chain, in a { } and a ( ) body, under the function keyword; grep -c || echo in a command substitution, quoted and not; grep -P, -oP, --perl-regexp, -Pc in a command substitution inside \$(( )) and (( )); declare, local and typeset -A; mapfile, readarray; timeout-no-kill: timeout, \"\$TIMEOUT_BIN\", \"\${_TB_TIMEOUT}\", a \"\$SECS\" duration, gtimeout after env, \"\$TOBIN\" -s TERM in a command substitution, \${TIMEOUT_BIN:+…} after exec, a gtimeout path after command, \"\$TIMEOUT_BIN\" handed to _adapter_env with and without --foreground, in a ( ), timeout in a command substitution inside \$(( )), \${TIMEOUT_BIN:+\"\$TIMEOUT_BIN\"} \${TIMEOUT_BIN:+120} after exec, \"\$TIMEOUT_BIN\" after env A=1 \"\$@\", \${T:-timeout}, \${TIMEOUT_BIN:-\$(command -v gtimeout)}) and none of the compliant ones ([ ] && [ ] || return 1, && … || true, [ ] || return 1, if [ ] && …; then … fi last, a bare test last, a python here-document holding x and y and the shapes, a comment holding [ -d x ] && y, the shapes in quoted strings, grep -e -P, \$(( a + 1 )), \$(( \$(date +%s) - T0 )); timeout with -k, --kill-after=5s, -k5s or -s KILL, _adapter_env with --foreground -k 10s, with \"\$2\" and -k, with \"\${TO[@]}\" and running env, git -C or python3 -c, the binary as another function's argument, the timeout shapes in a comment and in quoted strings, \"\$@\" where the duration goes, command -v timeout, \${TIMEOUT_BIN:+…} holding -k, the split form with \${TIMEOUT_BIN:+-k10s}, \${KOPT:--k10s} where the options go, env \"\$@\" with no NAME=value before it, words holding two expansions); a quote that never closes is a scan-error" "static"
+  row "SELF-30" "claude" "$_S30_CAP" "PASS" "${_S30_N} files parsed as bash, comments, quoted text and here-document bodies as text: 0 hits, no scan error; planted: $(printf '%s\n' "$_S30_WANT" | grep -c . || true) shapes flagged on exactly their lines (test-and-last on one line and several, mid-chain, in a { } and a ( ) body, under the function keyword; grep -c || echo in a command substitution, quoted and not; grep -P, -oP, --perl-regexp, -Pc in a command substitution inside \$(( )) and (( )); declare, local and typeset -A; mapfile, readarray; timeout-no-kill: timeout, \"\$TIMEOUT_BIN\", \"\${_TB_TIMEOUT}\", a \"\$SECS\" duration, gtimeout after env, \"\$TOBIN\" -s TERM in a command substitution, \${TIMEOUT_BIN:+…} after exec, a gtimeout path after command, \"\$TIMEOUT_BIN\" handed to _adapter_env with and without --foreground, in a ( ), timeout in a command substitution inside \$(( )), \${TIMEOUT_BIN:+\"\$TIMEOUT_BIN\"} \${TIMEOUT_BIN:+120} after exec, \"\$TIMEOUT_BIN\" after env A=1 \"\$@\", \${T:-timeout}, \${TIMEOUT_BIN:-\$(command -v gtimeout)}, a zero kill-after: -k 0, -k0, -k 0s, -k \"0\", --kill-after=0, --kill-after=0s, --kill-after 0.0s) and none of the compliant ones ([ ] && [ ] || return 1, && … || true, [ ] || return 1, if [ ] && …; then … fi last, a bare test last, a python here-document holding x and y and the shapes, a comment holding [ -d x ] && y, the shapes in quoted strings, grep -e -P, \$(( a + 1 )), \$(( \$(date +%s) - T0 )); timeout with -k, --kill-after=5s, -k5s, -k 10s, -k5, -k 0.5, --kill-after 10, -k \"\$KA\", -k \"\${KA_S}s\" or -s KILL (with -k 0 too), _adapter_env with --foreground -k 10s, with \"\$2\" and -k, with \"\${TO[@]}\" and running env, git -C or python3 -c, the binary as another function's argument, the timeout shapes in a comment and in quoted strings, \"\$@\" where the duration goes, command -v timeout, \${TIMEOUT_BIN:+…} holding -k, the split form with \${TIMEOUT_BIN:+-k10s}, \${KOPT:--k10s} where the options go, env \"\$@\" with no NAME=value before it, words holding two expansions); a quote that never closes is a scan-error" "static"
 else
   row "SELF-30" "claude" "$_S30_CAP" "FAIL" "$(printf '%s' "hits: ${_S30_HITS:-none}; negative controls:${_S30_FAIL:- ok}" | cut -c1-1500)" "static"
 fi
