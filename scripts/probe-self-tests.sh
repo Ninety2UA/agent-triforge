@@ -14023,10 +14023,17 @@ rm -rf "$_S29"
 #                        binary, an option or the duration; a :- with an
 #                        empty word, or of such a variable, stays $NAME.
 #                        -s KILL counts as a kill-after (it can't be
-#                        ignored); a -k or --kill-after whose value is a
-#                        literal zero (0, 0s, 0.0s) does not, since timeout
-#                        reads a zero duration as no kill-after, while a
-#                        value in a variable ("$KA", "${KA_S}s") still does.
+#                        ignored). A literal -k or --kill-after value is
+#                        read by value, as timeout's own parser reads it
+#                        (DURATION), and counts only when it is finite and
+#                        above zero: a zero (0, +0, -0, 0e0, 0x0, " 0",
+#                        0.0e0s) disables the KILL, inf never sends it, and
+#                        timeout refuses a negative or a text it can't read
+#                        ('5 ', nan); a value in a variable ("$KA",
+#                        "${KA_S}s") still counts. The duration is a word
+#                        DURATION reads (1e1, +5, 0x10, " 5", inf) or one
+#                        from an expansion; any other word in its place is
+#                        no duration, and the line is not flagged.
 #                        _adapter_env <cli> <cmd...> runs the
 #                        word after the CLI name, so that word is read as a
 #                        command word: a timeout binary there needs the
@@ -14056,11 +14063,16 @@ rm -rf "$_S29"
 # --foreground, in a ( )), timeout in a $( ) inside $(( )),
 # ${TIMEOUT_BIN:+"$TIMEOUT_BIN"} ${TIMEOUT_BIN:+120} after exec,
 # "$TIMEOUT_BIN" after env A=1 "$@", ${T:-timeout},
-# ${TIMEOUT_BIN:-$(command -v gtimeout)} and a zero kill-after (-k 0, -k0,
-# -k 0s, -k "0", --kill-after=0, --kill-after=0s, --kill-after 0.0s) are
+# ${TIMEOUT_BIN:-$(command -v gtimeout)}, a kill-after timeout reads as zero
+# (-k 0, -k0, -k 0s, -k "0", --kill-after=0, --kill-after=0s,
+# --kill-after 0.0s, -k +0, -k 0e0, -k 0x0, --kill-after=-0, -k 0.0e0s,
+# -k " 0"), one that never fires (-k inf), ones it refuses (-k -5,
+# -k '5 ') and durations spelled otherwise (1e1, +5, 0x10, " 5", inf) are
 # flagged, and -k, --kill-after=5s, -k5s, -k 10s, -k5, -k 0.5,
-# --kill-after 10, -k "$KA", -k "${KA_S}s", -s KILL (with -k 0 too),
-# _adapter_env with --foreground -k 10s, with
+# --kill-after 10, -k 1e1, -k 0x1, -k +5, -k " 5", -k "$KA", -k "${KA_S}s",
+# -s KILL (with -k 0 too), those five durations with -k 5, a word timeout
+# refuses in the duration's place (5x, infinite), _adapter_env with
+# --foreground -k 10s, with
 # "$2" and -k, with "${TO[@]}" and running env, git -C or python3 -c, the
 # binary as another function's argument, the shapes in a comment and in
 # quoted strings, "$@" where the duration goes, command -v timeout, a
@@ -14082,13 +14094,18 @@ OPTS = re.compile(r"[-+][A-Za-z]+")
 # a word that is one parameter expansion ($NAME, "${NAME}", ${NAME:+…}: the
 # name in group 2 or 3, what follows it in the braces in 4); a word that may
 # hold several ("$@", an array, ${NAME:+…}); a word that is "$@" alone; the
-# signal a child can't ignore; a literal zero duration (0, 0s, 0.0, .0m),
-# which timeout reads as no kill-after at all
+# signal a child can't ignore; a duration as timeout reads one (strtod in the
+# C locale, then at most one of s, m, h, d, each unit's seconds in UNIT):
+# leading whitespace, a sign, then decimal digits with an e exponent, 0x hex
+# digits with a p exponent, or inf or infinity in any case. Timeout refuses
+# anything else, nan and trailing whitespace included
 EXPAN = re.compile(r'(")?\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)([^A-Za-z0-9_].*)?\})(?(1)")', re.S)
 UNDECIDED = re.compile(r"\$(?:[@*]|\{[@*]|\{[A-Za-z_][A-Za-z0-9_]*(?:\[[@*]\]|:?\+))")
 ARGS = re.compile(r'(")?\$(?:@|\{@\})(?(1)")')
 KILLSIG = ("KILL", "SIGKILL", "9")
-ZERO = re.compile(r"(?:0+\.?0*|\.0+)[smhd]?")
+DURATION = re.compile(r"[ \t\n\v\f\r]*(?P<sign>[+-]?)(?:0[xX](?P<hex>(?:[0-9a-fA-F]+\.?[0-9a-fA-F]*|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?)"
+                      r"|(?P<dec>(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)|(?P<inf>[iI][nN][fF](?:[iI][nN][iI][tT][yY])?))(?P<unit>[smhd]?)")
+UNIT = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 META = " \t\n;&|()<>"
 OPS = (";;&", ";;", ";&", "&&", "||", "|&", ";", "&", "|", "(", ")")
 REDIRS = ("<<<", "<<-", "&>>", "<<", "<>", "<&", ">>", ">&", ">|", "&>", "<", ">")
@@ -14701,12 +14718,40 @@ class Scan(object):
             return None
         return words[k + 1:]
 
+    def expands(self, w):
+        # the word's value comes from an expansion: $( ), ${ }, ` ` ("\0" in
+        # its text) or a plain $NAME, $1, $@ or $*, which the lexer leaves as
+        # text (single-quoted text left out)
+        return "\0" in w.val or bool(re.search(r"\$[A-Za-z0-9_@*]", re.sub(r"'[^']*'", "", w.raw)))
+
+    def kill_after(self, text, w):
+        # whether timeout sends the KILL given text, from the word w, as its
+        # -k/--kill-after. A value from an expansion may, so it counts; a
+        # literal counts only when DURATION reads it as finite and above
+        # zero. Zero is read on the significand's digits, so 0e5, -0 and
+        # 0x0p3s are zero (and 1e-400 is not: timeout reads its underflow
+        # as above zero); timeout refuses a negative or a text DURATION does
+        # not read, and inf, or a value that overflows to it, never fires
+        if self.expands(w):
+            return True
+        m = DURATION.fullmatch(text)
+        if not m or m.group("inf"):
+            return False
+        num = m.group("hex") or m.group("dec")
+        if m.group("sign") == "-" or not re.search(r"[1-9a-fA-F]", re.split(r"[pP]" if m.group("hex") else r"[eE]", num)[0]):
+            return False
+        try:
+            secs = (float.fromhex(num) if m.group("hex") else float(num)) * UNIT[m.group("unit")]
+        except OverflowError:
+            return False
+        return secs < float("inf")
+
     def check_timeout(self, words):
         # timeout-no-kill: a timeout binary run with a duration, and neither
         # -k/--kill-after nor a KILL signal (-s, --signal) among its options,
-        # each word read as held() reads it; a kill-after whose value is a
-        # literal zero (ZERO) is none, while one held in a variable counts;
-        # _adapter_env <cli> <cmd...> runs the word after the CLI name
+        # each word read as held() reads it; a kill-after counts as
+        # kill_after() reads it; _adapter_env <cli> <cmd...> runs the word
+        # after the CLI name
         words = self.held(words)
         k = self.run_index(words)
         if k + 2 < len(words) and words[k].val == "_adapter_env":
@@ -14723,27 +14768,28 @@ class Scan(object):
                 name, eq, arg = v[2:].partition("=")
                 if not name or not ("kill-after".startswith(name) or "signal".startswith(name)):
                     continue
+                w = rest[j - 1]
                 if not eq and j < len(rest):
-                    arg, j = rest[j].val, j + 1
+                    arg, w, j = rest[j].val, rest[j], j + 1
                 if "kill-after".startswith(name):
-                    kill = kill or not ZERO.fullmatch(arg)
+                    kill = kill or self.kill_after(arg, w)
                 else:
                     kill = kill or arg.upper() in KILLSIG
                 continue
             for x, ch in enumerate(v[1:]):
                 if ch in "ks":
-                    arg = v[x + 2:]
+                    arg, w = v[x + 2:], rest[j - 1]
                     if not arg and j < len(rest):
-                        arg, j = rest[j].val, j + 1
-                    kill = kill or (not ZERO.fullmatch(arg) if ch == "k" else arg.upper() in KILLSIG)
+                        arg, w, j = rest[j].val, rest[j], j + 1
+                    kill = kill or (self.kill_after(arg, w) if ch == "k" else arg.upper() in KILLSIG)
                     break
         if kill or j >= len(rest) or UNDECIDED.search(rest[j].raw):
             return
-        # the duration: a number with an optional unit, or a word holding an
-        # expansion — $( ), ${ }, ` ` ("\0" in its text) or a plain $NAME or
-        # $1, which the lexer leaves as text (single-quoted text left out)
+        # the duration: a word DURATION reads, as timeout's parser does (1e1,
+        # +5, 0x10, " 5" and inf too), or one whose value comes from an
+        # expansion (expands()); any other word there is not one
         d = rest[j]
-        if "\0" in d.val or re.search(r"\$[A-Za-z0-9_]", re.sub(r"'[^']*'", "", d.raw)) or re.fullmatch(r"[0-9]*\.?[0-9]+[smhd]?", d.val):
+        if self.expands(d) or DURATION.fullmatch(d.val):
             self.hits.append((words[k].line, "timeout-no-kill"))
 
     def check_or_echo(self, pipes, ops):
@@ -14884,6 +14930,20 @@ timeout -k 0s 1 cmd   # want:timeout-no-kill
 "$TIMEOUT_BIN" --kill-after=0 5 cmd   # want:timeout-no-kill
 timeout --kill-after=0s 1 cmd   # want:timeout-no-kill
 gtimeout --kill-after 0.0s 5 cmd   # want:timeout-no-kill
+timeout -k +0 1 cmd   # want:timeout-no-kill
+timeout -k 0e0 1 cmd   # want:timeout-no-kill
+"$TIMEOUT_BIN" -k 0x0 30 cmd   # want:timeout-no-kill
+timeout --kill-after=-0 1 cmd   # want:timeout-no-kill
+timeout -k 0.0e0s 1 cmd   # want:timeout-no-kill
+timeout -k " 0" 1 cmd   # want:timeout-no-kill
+gtimeout -k inf 5 cmd   # want:timeout-no-kill
+timeout -k -5 1 cmd   # want:timeout-no-kill
+timeout -k '5 ' 1 cmd   # want:timeout-no-kill
+timeout 1e1 make   # want:timeout-no-kill
+timeout +5 make   # want:timeout-no-kill
+timeout 0x10 make   # want:timeout-no-kill
+timeout " 5" make   # want:timeout-no-kill
+timeout inf make   # want:timeout-no-kill
 ok_adapter_env() {
   _adapter_env claude "$TIMEOUT_BIN" --foreground -k 10s 240 claude -p x
   _adapter_env grok "$2" --foreground -k 10s "${3}s" grok
@@ -14916,6 +14976,17 @@ ok_timeout() {
   timeout -k "$KA" 10s cmd
   "$TIMEOUT_BIN" -k "${KA_S}s" 10s cmd
   timeout -s KILL -k 0 10s cmd
+  timeout -k 1e1 1 cmd
+  timeout -k 0x1 1 cmd
+  timeout -k +5 1 cmd
+  timeout -k " 5" 1 cmd
+  timeout -k 5 1e1 make
+  timeout -k 5 +5 make
+  timeout -k 5 0x10 make
+  timeout -k 5 " 5" make
+  timeout -k 5 inf make
+  timeout 5x make
+  timeout infinite make
   printf '%s\n' "${A:-}${B:-}" "${C:-$D}\n${E}"
 }
 S30_PLANTED
@@ -14936,9 +15007,9 @@ case "$_S30_NEG" in
   *"scan-error:broken.sh:"*) ;;
   *) _S30_FAIL="$_S30_FAIL broken(no-scan-error)" ;;
 esac
-_S30_CAP="the shell rules a static scan can decide hold in every shell file Triforge ships (scripts/*.sh, scripts/lib/*.sh, hooks/handlers/*.sh, skills/*/scripts/*.sh): no function ends in a [ ] or [[ ]] && chain with no ||, no grep -c … || echo, no grep -P, no associative array, no mapfile or readarray (AGENTS.md Shell), and no timeout binary run as a command without a kill-after (review finding #6), a literal zero one counting as none"
+_S30_CAP="the shell rules a static scan can decide hold in every shell file Triforge ships (scripts/*.sh, scripts/lib/*.sh, hooks/handlers/*.sh, skills/*/scripts/*.sh): no function ends in a [ ] or [[ ]] && chain with no ||, no grep -c … || echo, no grep -P, no associative array, no mapfile or readarray (AGENTS.md Shell), and no timeout binary run as a command without a kill-after (review finding #6), a literal one counting only when timeout reads it as a finite duration above zero"
 if [ -z "$_S30_HITS" ] && [ -z "$_S30_FAIL" ]; then
-  row "SELF-30" "claude" "$_S30_CAP" "PASS" "${_S30_N} files parsed as bash, comments, quoted text and here-document bodies as text: 0 hits, no scan error; planted: $(printf '%s\n' "$_S30_WANT" | grep -c . || true) shapes flagged on exactly their lines (test-and-last on one line and several, mid-chain, in a { } and a ( ) body, under the function keyword; grep -c || echo in a command substitution, quoted and not; grep -P, -oP, --perl-regexp, -Pc in a command substitution inside \$(( )) and (( )); declare, local and typeset -A; mapfile, readarray; timeout-no-kill: timeout, \"\$TIMEOUT_BIN\", \"\${_TB_TIMEOUT}\", a \"\$SECS\" duration, gtimeout after env, \"\$TOBIN\" -s TERM in a command substitution, \${TIMEOUT_BIN:+…} after exec, a gtimeout path after command, \"\$TIMEOUT_BIN\" handed to _adapter_env with and without --foreground, in a ( ), timeout in a command substitution inside \$(( )), \${TIMEOUT_BIN:+\"\$TIMEOUT_BIN\"} \${TIMEOUT_BIN:+120} after exec, \"\$TIMEOUT_BIN\" after env A=1 \"\$@\", \${T:-timeout}, \${TIMEOUT_BIN:-\$(command -v gtimeout)}, a zero kill-after: -k 0, -k0, -k 0s, -k \"0\", --kill-after=0, --kill-after=0s, --kill-after 0.0s) and none of the compliant ones ([ ] && [ ] || return 1, && … || true, [ ] || return 1, if [ ] && …; then … fi last, a bare test last, a python here-document holding x and y and the shapes, a comment holding [ -d x ] && y, the shapes in quoted strings, grep -e -P, \$(( a + 1 )), \$(( \$(date +%s) - T0 )); timeout with -k, --kill-after=5s, -k5s, -k 10s, -k5, -k 0.5, --kill-after 10, -k \"\$KA\", -k \"\${KA_S}s\" or -s KILL (with -k 0 too), _adapter_env with --foreground -k 10s, with \"\$2\" and -k, with \"\${TO[@]}\" and running env, git -C or python3 -c, the binary as another function's argument, the timeout shapes in a comment and in quoted strings, \"\$@\" where the duration goes, command -v timeout, \${TIMEOUT_BIN:+…} holding -k, the split form with \${TIMEOUT_BIN:+-k10s}, \${KOPT:--k10s} where the options go, env \"\$@\" with no NAME=value before it, words holding two expansions); a quote that never closes is a scan-error" "static"
+  row "SELF-30" "claude" "$_S30_CAP" "PASS" "${_S30_N} files parsed as bash, comments, quoted text and here-document bodies as text: 0 hits, no scan error; planted: $(printf '%s\n' "$_S30_WANT" | grep -c . || true) shapes flagged on exactly their lines (test-and-last on one line and several, mid-chain, in a { } and a ( ) body, under the function keyword; grep -c || echo in a command substitution, quoted and not; grep -P, -oP, --perl-regexp, -Pc in a command substitution inside \$(( )) and (( )); declare, local and typeset -A; mapfile, readarray; timeout-no-kill: timeout, \"\$TIMEOUT_BIN\", \"\${_TB_TIMEOUT}\", a \"\$SECS\" duration, gtimeout after env, \"\$TOBIN\" -s TERM in a command substitution, \${TIMEOUT_BIN:+…} after exec, a gtimeout path after command, \"\$TIMEOUT_BIN\" handed to _adapter_env with and without --foreground, in a ( ), timeout in a command substitution inside \$(( )), \${TIMEOUT_BIN:+\"\$TIMEOUT_BIN\"} \${TIMEOUT_BIN:+120} after exec, \"\$TIMEOUT_BIN\" after env A=1 \"\$@\", \${T:-timeout}, \${TIMEOUT_BIN:-\$(command -v gtimeout)}, a kill-after timeout reads as zero: -k 0, -k0, -k 0s, -k \"0\", --kill-after=0, --kill-after=0s, --kill-after 0.0s, -k +0, -k 0e0, -k 0x0, --kill-after=-0, -k 0.0e0s, -k \" 0\", one that never fires: -k inf, ones it refuses: -k -5, -k '5 ', durations spelled otherwise: 1e1, +5, 0x10, \" 5\", inf) and none of the compliant ones ([ ] && [ ] || return 1, && … || true, [ ] || return 1, if [ ] && …; then … fi last, a bare test last, a python here-document holding x and y and the shapes, a comment holding [ -d x ] && y, the shapes in quoted strings, grep -e -P, \$(( a + 1 )), \$(( \$(date +%s) - T0 )); timeout with -k, --kill-after=5s, -k5s, -k 10s, -k5, -k 0.5, --kill-after 10, -k 1e1, -k 0x1, -k +5, -k \" 5\", -k \"\$KA\", -k \"\${KA_S}s\" or -s KILL (with -k 0 too), those five durations with -k 5, 5x or infinite in the duration's place, _adapter_env with --foreground -k 10s, with \"\$2\" and -k, with \"\${TO[@]}\" and running env, git -C or python3 -c, the binary as another function's argument, the timeout shapes in a comment and in quoted strings, \"\$@\" where the duration goes, command -v timeout, \${TIMEOUT_BIN:+…} holding -k, the split form with \${TIMEOUT_BIN:+-k10s}, \${KOPT:--k10s} where the options go, env \"\$@\" with no NAME=value before it, words holding two expansions); a quote that never closes is a scan-error" "static"
 else
   row "SELF-30" "claude" "$_S30_CAP" "FAIL" "$(printf '%s' "hits: ${_S30_HITS:-none}; negative controls:${_S30_FAIL:- ok}" | cut -c1-1500)" "static"
 fi
