@@ -65,6 +65,26 @@ set -uo pipefail
 # --------------------------------------------------------------------------
 
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# PROBE_PY_PRELUDE — python: the first lines of every program this harness
+# runs. Python puts the working directory first on sys.path, and many of these
+# programs run in a fixture or a worktree a CLI under test has just written
+# to, so a json.py left there would be imported in place of the module; these
+# lines drop it and every relative entry before anything else is imported. The
+# same lines as _PY_PRELUDE in scripts/lib/common.sh, inline because the
+# harness itself runs without that library (it loads it only in subshells);
+# SELF-27 compares the copies. PROBE_PY_STDIN runs a heredoc program after
+# them: python3 -c "$PROBE_PY_STDIN" <<'PYEOF' compiles the heredoc from its
+# bytes, as python3 - reads them.
+PROBE_PY_PRELUDE='
+import os, sys
+try:
+    _tf_here = os.path.realpath(os.getcwd())
+except OSError:
+    _tf_here = None
+sys.path[:] = [_p for _p in sys.path if os.path.isabs(_p) and os.path.realpath(_p) != _tf_here]
+del _tf_here
+'
+PROBE_PY_STDIN="${PROBE_PY_PRELUDE}"'exec(compile(sys.stdin.buffer.read(), "<stdin>", "exec"))'
 # KTD9: date-stamped default so the newest ops/research/*-probe-record.md is
 # always the current record; the title below derives from the basename.
 RECORD="$REPO_ROOT/ops/research/$(date -u +%Y-%m)-probe-record.md"
@@ -477,7 +497,7 @@ _dvn03() {
 # a tool that can write (exec, edit, write, notebook_edit) whose result is a
 # refusal, as "<tool> <arguments> => <result>"; nothing when there is none.
 _dvn_denied() {
-  python3 - "$1" <<'DVN_DENIED_PY' 2>/dev/null || true
+  python3 -c "$PROBE_PY_STDIN" "$1" <<'DVN_DENIED_PY' 2>/dev/null || true
 import json, re, sys
 try:
     steps = json.load(open(sys.argv[1])).get("steps", [])
@@ -541,7 +561,7 @@ _u12_sandbox() {
   local P="" W
   for W in "${U12_ARGV[@]:-}"; do
     if [ "$P" = --settings ]; then
-      printf '%s' "$W" | python3 -c '
+      printf '%s' "$W" | python3 -c "${PROBE_PY_PRELUDE}"'
 import json, sys
 s = json.load(sys.stdin).get("sandbox", {})
 v = s.get("enabled") if isinstance(s, dict) else None
@@ -556,7 +576,7 @@ print("on" if v is True else ("off" if v is False else ""))
 # to one line (empty when the file holds none); permission_denials prints its
 # length.
 _u12_json() {
-  U12_IN="$1" U12_K="$2" python3 -c '
+  U12_IN="$1" U12_K="$2" python3 -c "${PROBE_PY_PRELUDE}"'
 import json, os
 src = open(os.environ["U12_IN"], encoding="utf-8", errors="replace").read()
 i = src.find("{")
@@ -776,7 +796,7 @@ _negative_verdict() {
 # _agy_text <in> <out> — unwrap an agy --output-format json envelope to its
 # `response` text; copies the file through when it is not such an envelope.
 _agy_text() {
-  if ! AGY_IN="$1" AGY_OUT="$2" python3 - <<'PYEOF' 2>/dev/null
+  if ! AGY_IN="$1" AGY_OUT="$2" python3 -c "$PROBE_PY_STDIN" <<'PYEOF' 2>/dev/null
 import json, os, sys
 src = open(os.environ['AGY_IN'], encoding='utf-8', errors='replace').read()
 i = src.find('{')
@@ -800,7 +820,7 @@ PYEOF
 # ("status=… response_len=… denied=<names|none> keys=…"), or nothing (rc 1)
 # when the file carries no JSON object with a `status` key (AGY-15, KTD2).
 _agy_envelope() {
-  AGY_IN="$1" python3 - <<'PYEOF' 2>/dev/null
+  AGY_IN="$1" python3 -c "$PROBE_PY_STDIN" <<'PYEOF' 2>/dev/null
 import json, os, sys
 src = open(os.environ['AGY_IN'], encoding='utf-8', errors='replace').read()
 i = src.find('{')
@@ -1350,7 +1370,7 @@ EOF
 }
 EOF
     if (cd "$FIX" && _probe_run 240 codex exec -C "$FIX" -s read-only -c 'approval_policy="never"' -m "$CDX_MODEL" --output-schema "$WORK/verdict.schema.json" -o "$LAST" "Assess whether 2+2=4 and report your verdict." < /dev/null > "$O" 2>&1) \
-       && SCHEMA_LAST="$LAST" python3 -c "import json,os; d=json.load(open(os.environ['SCHEMA_LAST'])); assert 'verdict' in d" 2>/dev/null; then
+       && SCHEMA_LAST="$LAST" python3 -c "${PROBE_PY_PRELUDE}import json,os; d=json.load(open(os.environ['SCHEMA_LAST'])); assert 'verdict' in d" 2>/dev/null; then
       row "CDX-05" "codex" "--output-schema constrains final message to schema-valid JSON ($CDX_MODEL)" "PASS" "$(_evidence "$LAST")" "live"
     else
       row "CDX-05" "codex" "--output-schema constrains final message to schema-valid JSON ($CDX_MODEL)" "FAIL" "$(_evidence "$O")" "live"
@@ -1431,7 +1451,7 @@ EOF
     grep -qF "$CDX_MARK_DOT" "$LAST" 2>/dev/null && CDX_SEEN="$CDX_SEEN .codex/AGENTS.md"
     rm -f "$FIX/.codex/AGENTS.md" "$FIX/AGENTS.md"
     CDX_CFG="${HOME:-}/.codex/config.toml"
-    FIX_REAL=$(RP_TARGET="$FIX" python3 -c 'import os; print(os.path.realpath(os.environ["RP_TARGET"]))')
+    FIX_REAL=$(RP_TARGET="$FIX" python3 -c "${PROBE_PY_PRELUDE}"'import os; print(os.path.realpath(os.environ["RP_TARGET"]))')
     CDX_TRUST="none"
     if [ -f "$CDX_CFG" ]; then
       for P in "$FIX" "$FIX_REAL"; do
@@ -1519,7 +1539,7 @@ if command -v opencode >/dev/null 2>&1; then
   if [ "$OC_LIVE" = "1" ]; then
     O="$WORK/oc-ready.txt"
     if (cd "$FIX" && _probe_run 240 opencode run --format json "Respond with only: READY" > "$O" 2>&1) && _contains_ci "$O" "READY"; then
-      if OC_OUT="$O" python3 - <<'EOF' 2>/dev/null
+      if OC_OUT="$O" python3 -c "$PROBE_PY_STDIN" <<'EOF' 2>/dev/null
 import json, os, sys
 ok = False
 for line in open(os.environ['OC_OUT']):
@@ -1666,7 +1686,7 @@ if command -v kimi >/dev/null 2>&1; then
     O="$WORK/kimi-ready.txt"
     E="$WORK/kimi-ready-err.txt"
     if (cd "$FIX" && _probe_run 240 env KIMI_DISABLE_TELEMETRY=1 kimi --output-format stream-json -p "Respond with only: READY" > "$O" 2>"$E") && _contains_ci "$O" "READY"; then
-      if KIMI_OUT="$O" python3 - <<'EOF' 2>/dev/null
+      if KIMI_OUT="$O" python3 -c "$PROBE_PY_STDIN" <<'EOF' 2>/dev/null
 import json, os, sys
 ok = False
 for line in open(os.environ['KIMI_OUT']):
@@ -2250,7 +2270,7 @@ _u29_tmpdir() {
 # credentials), plus a count of every other added name (user profile, settings
 # env, plugin SessionStart exports).
 _u29_markers() {
-  U29_IN="$1" U29_BASE="$U29_BOUNDARY" python3 - <<'PYEOF' 2>/dev/null | _scrub
+  U29_IN="$1" U29_BASE="$U29_BOUNDARY" python3 -c "$PROBE_PY_STDIN" <<'PYEOF' 2>/dev/null | _scrub
 import os, re
 base = set(os.environ['U29_BASE'].split())
 shown = {'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'AI_AGENT', 'CODEX_CI', 'CODEX_SANDBOX',
@@ -2512,7 +2532,7 @@ _u29_hooks_seen() {
 # _u29_claude_json <file> — "<num_turns><TAB><result>" from claude -p
 # --output-format json output (empty when it does not parse).
 _u29_claude_json() {
-  U29_IN="$1" python3 - <<'PYEOF' 2>/dev/null
+  U29_IN="$1" python3 -c "$PROBE_PY_STDIN" <<'PYEOF' 2>/dev/null
 import json, os
 src = open(os.environ['U29_IN'], encoding='utf-8', errors='replace').read()
 obj, _end = json.JSONDecoder().raw_decode(src[src.find('{'):])
@@ -2938,7 +2958,7 @@ if _want CC-19; then
     O="$WORK/u12-np-cc.out"
     # The names in the user tier's settings env block (read, never written):
     # --setting-sources project,local must keep every one out of the worker.
-    U12_USERENV=$(python3 -c '
+    U12_USERENV=$(python3 -c "${PROBE_PY_PRELUDE}"'
 import json, os
 try:
     env = json.load(open(os.path.expanduser("~/.claude/settings.json"))).get("env") or {}
@@ -3470,12 +3490,12 @@ if command -v codex >/dev/null 2>&1; then
   if _want CDX-18; then
     CH="$WORK/u29-cdx-home-d048"; E18="$WORK/u29-cdx18-empty"; O="$WORK/u29-cdx18.txt"
     mkdir -p "$CH" "$E18"
-    U29_PLUGIN=$(U29_IN="$REPO_ROOT/.claude-plugin/plugin.json" python3 -c 'import json, os; print(json.load(open(os.environ["U29_IN"]))["name"])' 2>/dev/null)
+    U29_PLUGIN=$(U29_IN="$REPO_ROOT/.claude-plugin/plugin.json" python3 -c "${PROBE_PY_PRELUDE}"'import json, os; print(json.load(open(os.environ["U29_IN"]))["name"])' 2>/dev/null)
     U29_MANIFEST=".claude-plugin/plugin.json (no .codex-plugin/)"
     if [ -e "$REPO_ROOT/.codex-plugin/plugin.json" ]; then U29_MANIFEST=".codex-plugin/plugin.json present — Codex reads it before the .claude-plugin/ fallback"; fi
     U29_MKT=""
     if (cd "$E18" && _rwt 60 env CODEX_HOME="$CH" codex plugin marketplace add "$REPO_ROOT" --json) > "$O.mkt" 2>&1; then
-      U29_MKT=$(U29_IN="$O.mkt" python3 -c 'import json, os; s = open(os.environ["U29_IN"]).read(); print(json.loads(s[s.find("{"):])["marketplaceName"])' 2>/dev/null)
+      U29_MKT=$(U29_IN="$O.mkt" python3 -c "${PROBE_PY_PRELUDE}"'import json, os; s = open(os.environ["U29_IN"]).read(); print(json.loads(s[s.find("{"):])["marketplaceName"])' 2>/dev/null)
     fi
     if [ -z "$U29_MKT" ] || [ -z "$U29_PLUGIN" ]; then
       row "CDX-18" "codex" "$U29_CDX18" "FAIL" "codex plugin marketplace add $REPO_ROOT did not register a marketplace (plugin name: ${U29_PLUGIN:-unreadable}): $(_evidence "$O.mkt") — Phase 3 stops until a fallback is designed" "static"
@@ -3515,7 +3535,7 @@ print(json.dumps({str(k): v for k, v in got.items()}))
 PYEOF
       (cd "$E18" && _rwt 60 env CODEX_HOME="$CH" python3 "$WORK/u29-appsrv.py" "$E18" 45) > "$O.app" 2> "$O.app.err" || true
       (cd "$E18" && _rwt 60 env CODEX_HOME="$CH" codex debug prompt-input) > "$O.prompt" 2>/dev/null || true
-      U29_V=$(U29_APP="$O.app" U29_PROMPT="$O.prompt" U29_PID="${U29_PLUGIN}@${U29_MKT}" U29_NAME="$U29_PLUGIN" U29_WANT="$SHIPPED_LEAD_WORKFLOWS" python3 - <<'PYEOF' 2>/dev/null
+      U29_V=$(U29_APP="$O.app" U29_PROMPT="$O.prompt" U29_PID="${U29_PLUGIN}@${U29_MKT}" U29_NAME="$U29_PLUGIN" U29_WANT="$SHIPPED_LEAD_WORKFLOWS" python3 -c "$PROBE_PY_STDIN" <<'PYEOF' 2>/dev/null
 import json, os, re
 pid, name = os.environ['U29_PID'], os.environ['U29_NAME']
 want = os.environ['U29_WANT'].split()
@@ -3618,7 +3638,7 @@ EOF
 3. Create the file $D/made.txt containing the word hi with your patch tool (apply_patch), not the shell
 4. Run the shell command: false" < /dev/null > "$O" 2>&1) || true
       rm -f "$FIX/.codex/hooks.json"
-      U14_V=$(U14_DUMP="$D/dump" python3 - <<'PYEOF' 2>/dev/null
+      U14_V=$(U14_DUMP="$D/dump" python3 -c "$PROBE_PY_STDIN" <<'PYEOF' 2>/dev/null
 import glob, json, os, re
 d = os.environ['U14_DUMP']
 shell, patch, fail, keys, env, first = [], [], None, [], set(), ''
@@ -4404,7 +4424,7 @@ _grk_with() {
 # turns=<n> model=<ids> cost=<usd|n/a> denied=<n>" from a streaming-json
 # capture (python, read-only).
 _grk_summary() {
-  GRK_IN="$1" python3 - <<'PYEOF' 2>/dev/null || echo "stop=<unparsed>"
+  GRK_IN="$1" python3 -c "$PROBE_PY_STDIN" <<'PYEOF' 2>/dev/null || echo "stop=<unparsed>"
 import json, os
 stop, mt, turns, models, cost, denied = "none", "no", "?", "", "n/a", 0
 for line in open(os.environ["GRK_IN"], encoding="utf-8", errors="replace"):
@@ -4453,7 +4473,7 @@ _grk_inspect() {
 # never written): grok injects them into its tool shell, and the lane's
 # include_only list must keep every one out (GRK-06, GRK-09).
 _grk_userenv() {
-  python3 -c '
+  python3 -c "${PROBE_PY_PRELUDE}"'
 import json, os
 try:
     env = json.load(open(os.path.expanduser("~/.claude/settings.json"))).get("env") or {}
@@ -4468,7 +4488,7 @@ print(" ".join(k for k in env if isinstance(k, str)))
 # error, every command the session offers with its source path and plugin
 # (_meta), and the MCP servers it announces or reports a status for (it tried
 # to start them); the agent is killed once the updates go quiet.
-_GRK_SESSION_PY='import json, os, select, subprocess, sys, time
+_GRK_SESSION_PY="${PROBE_PY_PRELUDE}"'import json, os, select, subprocess, sys, time
 cwd, out = sys.argv[1], sys.argv[2]
 p = subprocess.Popen(["grok", "agent", "--no-leader", "stdio"], cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 def send(o):
@@ -4578,7 +4598,7 @@ if command -v grok >/dev/null 2>&1; then
     # (cached for GRK-04) names its sections in the env_overlay layer.
     GRK_OV="inspect-unreadable"
     if _grk_inspect; then
-      GRK_OV=$(python3 -c '
+      GRK_OV=$(python3 -c "${PROBE_PY_PRELUDE}"'
 import json, sys
 try:
     layers = json.load(open(sys.argv[1])).get("configSources", {}).get("layers") or []
@@ -4622,7 +4642,7 @@ else:
       done
       # The tool shell keeps exactly the boundary's names: include_only names
       # every base key, the worker marker, NO_COLOR and the no-push GIT_CONFIG_*.
-      GRK_KEEP=$(printf '%s\n' "${GRK_ENVW[@]-}" | sed -n 's/^GROK_CONFIG=//p' | python3 -c '
+      GRK_KEEP=$(printf '%s\n' "${GRK_ENVW[@]-}" | sed -n 's/^GROK_CONFIG=//p' | python3 -c "${PROBE_PY_PRELUDE}"'
 import json, sys
 try:
     p = json.load(sys.stdin).get("shell_environment_policy", {})
@@ -4709,7 +4729,7 @@ if _want GRK-04; then
   elif ! _grk_inspect; then
     row "GRK-04" "grok" "$GRK_CAP04" "FAIL" "grok inspect --json under the lane's env gave nothing (lane argv unreadable, or: $(_evidence "$WORK/grk-inspect.err"))" "static"
   else
-    GRK04=$(GRK_IN="$WORK/grk-inspect.json" python3 - <<'PYEOF' 2>&1
+    GRK04=$(GRK_IN="$WORK/grk-inspect.json" python3 -c "$PROBE_PY_STDIN" <<'PYEOF' 2>&1
 import json, os
 d = json.load(open(os.environ["GRK_IN"]))
 home = os.path.expanduser("~")
@@ -4809,7 +4829,7 @@ fi
 # permission file that loads is a FAIL without those denies: grok imports its
 # allow rules, and only a deny outranks them.
 _grk06_verdict() {
-  GRK_IN="$1" GRK_SESS="$2" GRK_CFG="$3" GRK_SHIPPED="$4" GRK_DENYOK="$5" GRK_ENVN="$(_grk_userenv)" GRK_FIRED="$GRK_FIRED" python3 - <<'PYEOF' 2>&1
+  GRK_IN="$1" GRK_SESS="$2" GRK_CFG="$3" GRK_SHIPPED="$4" GRK_DENYOK="$5" GRK_ENVN="$(_grk_userenv)" GRK_FIRED="$GRK_FIRED" python3 -c "$PROBE_PY_STDIN" <<'PYEOF' 2>&1
 import json, os, re
 home = os.path.expanduser("~")
 cdir = home + "/.claude/"
@@ -4996,7 +5016,7 @@ if _want GRK-12; then
       row "GRK-12" "grok" "$GRK_CAP12" "FAIL" "no profile to measure: edit argv --sandbox '${GRK12_SBX:-<none>}'; $(_evidence "$K/profile.err")" "static"
     else
       ( cd "$K/proj" && "$TIMEOUT_BIN" -k 10s 120s env -i HOME="$H" GROK_HOME="$H/.grok" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" TERM=dumb LANG="${LANG:-en_US.UTF-8}" \
-          ${USER:+USER="$USER"} ${GRK_ENVW[@]+"${GRK_ENVW[@]}"} GROK_SANDBOX="$GRK12_SBX" GROK_AUTH_PROVIDER_COMMAND="$K/token.sh" python3 -c '
+          ${USER:+USER="$USER"} ${GRK_ENVW[@]+"${GRK_ENVW[@]}"} GROK_SANDBOX="$GRK12_SBX" GROK_AUTH_PROVIDER_COMMAND="$K/token.sh" python3 -c "${PROBE_PY_PRELUDE}"'
 import json, os, select, subprocess, sys, time
 cwd, out = sys.argv[1], sys.argv[2]
 ef = open(out + ".err", "w+b")
@@ -5038,7 +5058,7 @@ p.wait()
 ef.seek(0)
 json.dump({"session": session, "error": err, "stderr": ef.read().decode("utf-8", "replace")[-400:]}, open(out, "w"))
 ' "$K/proj" "$K/session.json" ) < /dev/null > /dev/null 2>&1 || true
-      GRK12=$(GRK12_DENY="$GRK12_DENY" python3 -c '
+      GRK12=$(GRK12_DENY="$GRK12_DENY" python3 -c "${PROBE_PY_PRELUDE}"'
 import json, os, sys
 s = {}
 try:
@@ -5137,7 +5157,7 @@ if { _want GRK-08 || _want GRK-09; }; then
       GRK_SUM=$(_grk_summary "$O")
       GRK_REFS=$(git -C "$K/remote.git" for-each-ref 2>/dev/null | wc -l | tr -d ' ')
       if _want GRK-08; then
-        GRK_DENY=$(GRK_IN="$O" python3 - <<'PYEOF' 2>/dev/null
+        GRK_DENY=$(GRK_IN="$O" python3 -c "$PROBE_PY_STDIN" <<'PYEOF' 2>/dev/null
 import json, os
 calls, out = {}, ""
 for line in open(os.environ["GRK_IN"], encoding="utf-8", errors="replace"):
@@ -5236,7 +5256,7 @@ if _want GRK-11 && ! _grk_live_skip GRK-11 "$GRK_CAP11"; then
   GRK_AUTHF="${GROK_HOME:-$HOME/.grok}/auth.json"
   # The latest expires_at in the cached login (timestamps only are read).
   _grk_expiry() {
-    GRK_AF="$GRK_AUTHF" python3 -c '
+    GRK_AF="$GRK_AUTHF" python3 -c "${PROBE_PY_PRELUDE}"'
 import json, os, datetime
 d = json.load(open(os.environ["GRK_AF"]))
 best = None

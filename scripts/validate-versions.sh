@@ -201,6 +201,26 @@ ORIG_PWD="$PWD"
 cd "$(dirname "$0")/.."
 VV_HOME="$PWD"   # this checkout: the default --root, and where --self-test finds its fixtures
 
+# VV_PY_PRELUDE — python: the first lines of every program this script runs.
+# Python puts the working directory (this checkout, or --root) first on
+# sys.path, so a json.py or re.py left there would be imported in place of the
+# module; these lines drop it and every relative entry before anything else is
+# imported. The same lines as _PY_PRELUDE in scripts/lib/common.sh, inline
+# because this validator runs without that library; SELF-27 compares the
+# copies. VV_PY_STDIN runs a heredoc program after them: python3 -c
+# "$VV_PY_STDIN" <<'PYEOF' compiles the heredoc from its bytes, as python3 -
+# reads them.
+VV_PY_PRELUDE='
+import os, sys
+try:
+    _tf_here = os.path.realpath(os.getcwd())
+except OSError:
+    _tf_here = None
+sys.path[:] = [_p for _p in sys.path if os.path.isabs(_p) and os.path.realpath(_p) != _tf_here]
+del _tf_here
+'
+VV_PY_STDIN="${VV_PY_PRELUDE}"'exec(compile(sys.stdin.buffer.read(), "<stdin>", "exec"))'
+
 NO_SWEEP=0
 NO_COUNTS=0
 ONLY=""
@@ -271,7 +291,7 @@ _selected() {
 # --- self-test: the planted fixtures and the computed cases ------------------
 if [ "$SELF_TEST" -eq 1 ]; then
   VV_SCRIPT="$VV_HOME/scripts/validate-versions.sh" VV_FIXTURES="$VV_HOME/scripts/fixtures/validate-versions" \
-  VV_BASH="$BASH" python3 - <<'PYEOF'
+  VV_BASH="$BASH" python3 -c "$VV_PY_STDIN" <<'PYEOF'
 import os
 import shutil
 import subprocess
@@ -455,7 +475,7 @@ _shipped_surfaces() {
 
 # --- 1. version lockstep -----------------------------------------------------
 json_version() {
-  VV_FILE="$1" python3 -c 'import json, os; print(json.load(open(os.environ["VV_FILE"]))["version"])'
+  VV_FILE="$1" python3 -c "${VV_PY_PRELUDE}"'import json, os; print(json.load(open(os.environ["VV_FILE"]))["version"])'
 }
 PLUGIN_V=""
 if _selected lockstep || _selected skill-versions; then
@@ -465,7 +485,7 @@ if _selected lockstep; then
   AGY_V=$(json_version antigravity-agents/plugin.json)
   # The marketplace manifest carries the version twice (metadata + the one
   # plugin entry); both must move with plugin.json.
-  MKT_V=$(VV_FILE=.claude-plugin/marketplace.json python3 -c 'import json, os; d = json.load(open(os.environ["VV_FILE"])); m = d.get("metadata", {}).get("version", ""); p = [x.get("version", "") for x in d.get("plugins", []) if x.get("name") == "agent-triforge"]; print(m if p == [m] else "mismatch(metadata=" + m + ",plugin=" + ",".join(p) + ")")' 2>/dev/null || echo "unreadable")
+  MKT_V=$(VV_FILE=.claude-plugin/marketplace.json python3 -c "${VV_PY_PRELUDE}"'import json, os; d = json.load(open(os.environ["VV_FILE"])); m = d.get("metadata", {}).get("version", ""); p = [x.get("version", "") for x in d.get("plugins", []) if x.get("name") == "agent-triforge"]; print(m if p == [m] else "mismatch(metadata=" + m + ",plugin=" + ",".join(p) + ")")' 2>/dev/null || echo "unreadable")
   README_V=$(grep -m1 -E "^## What's new \(v[0-9]+\.[0-9]+\.[0-9]+\)" README.md \
     | sed -E "s/^## What's new \(v([0-9]+\.[0-9]+\.[0-9]+)\).*/\1/" || true)
   if [ -z "$README_V" ]; then
@@ -494,7 +514,7 @@ fi
 # rejects (C3 there) fails here too rather than yield a guessed version.
 if _selected skill-versions; then
   SKILLV_RC=0
-  VV_PLUGIN_V="$PLUGIN_V" python3 - <<'PYEOF' || SKILLV_RC=$?
+  VV_PLUGIN_V="$PLUGIN_V" python3 -c "$VV_PY_STDIN" <<'PYEOF' || SKILLV_RC=$?
 import glob
 import os
 import re
@@ -617,7 +637,7 @@ if _selected drift; then
   VV_REGISTRY="scripts/lib/registry.sh" VV_SRC="scripts/lib/roster.sh" VV_ROSTER="templates/ops/roster.toml" \
   VV_HOOK="hooks/handlers/session-start.sh" VV_LEASE="scripts/lib/lease.sh" VV_LEASE_WAIT="scripts/lib/lease-wait.sh" VV_PROBE="scripts/probe-capabilities.sh" \
   VV_LOADER="scripts/invoke-external.sh" VV_LOCATOR="scripts/skill-locator/locate-triforge.sh" \
-  VV_LIBDIR="scripts/lib" python3 - <<'PYEOF' || DRIFT_RC=$?
+  VV_LIBDIR="scripts/lib" python3 -c "$VV_PY_STDIN" <<'PYEOF' || DRIFT_RC=$?
 import ast
 import glob
 import os
@@ -1102,7 +1122,7 @@ if _selected counts; then
   else
     COUNTS_RC=0
     VV_PERSONAS="$PERSONA_COUNT" VV_SKILLS="$SKILL_COUNT" VV_PORTABLE="$PORTABLE_COUNT" VV_WORKFLOWS="$WORKFLOW_COUNT" \
-    VV_README_HISTORY_START="$README_HISTORY_START" python3 - <<'PYEOF' || COUNTS_RC=$?
+    VV_README_HISTORY_START="$README_HISTORY_START" python3 -c "$VV_PY_STDIN" <<'PYEOF' || COUNTS_RC=$?
 import os
 import re
 import sys
@@ -1236,7 +1256,7 @@ INVENTORY_MD='docs/rule-inventory.md'
 if _selected inventory; then
   if [ -f "$INVENTORY_MD" ]; then
     INVENTORY_RC=0
-    VV_INVENTORY="$INVENTORY_MD" python3 - <<'PYEOF' || INVENTORY_RC=$?
+    VV_INVENTORY="$INVENTORY_MD" python3 -c "$VV_PY_STDIN" <<'PYEOF' || INVENTORY_RC=$?
 import glob
 import html
 import os
@@ -1447,7 +1467,7 @@ if _selected workflows; then
   LEADWF_RC=0
   VV_SYNC="scripts/lib/skills-sync.py" VV_PROBE="scripts/probe-capabilities.sh" VV_VSKILLS="scripts/validate-skills.sh" \
   VV_SELF="scripts/validate-versions.sh" VV_HOOK="hooks/handlers/session-start.sh" \
-  VV_STATUS="skills/at-status/references/status-template.md" python3 - <<'PYEOF' || LEADWF_RC=$?
+  VV_STATUS="skills/at-status/references/status-template.md" python3 -c "$VV_PY_STDIN" <<'PYEOF' || LEADWF_RC=$?
 import os
 import re
 import sys
@@ -1543,7 +1563,7 @@ fi
 # --- 10. other-harness skill manifests (R22) ---------------------------------
 if _selected manifests; then
   MANIFESTS_RC=0
-  python3 - <<'PYEOF' || MANIFESTS_RC=$?
+  python3 -c "$VV_PY_STDIN" <<'PYEOF' || MANIFESTS_RC=$?
 import json
 import os
 import re
@@ -1657,7 +1677,7 @@ fi
 # --- 11. halt threshold ------------------------------------------------------
 if _selected halt; then
   HALT_RC=0
-  VV_README_HISTORY_START="$README_HISTORY_START" python3 - <<'PYEOF' || HALT_RC=$?
+  VV_README_HISTORY_START="$README_HISTORY_START" python3 -c "$VV_PY_STDIN" <<'PYEOF' || HALT_RC=$?
 import html
 import os
 import re

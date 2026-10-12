@@ -200,10 +200,28 @@ if [ -n "$SKILLS_DIR" ] && [ -z "$FIXTURE" ] && [ ! -d "$SKILLS_DIR" ]; then
   exit 2
 fi
 
-# Inputs cross into python as prefixed env vars, never interpolated.
+# VS_PY_PRELUDE — python: the first lines of the program below. Python puts
+# the working directory first on sys.path, so a json.py or re.py left in this
+# checkout would be imported in place of the module; these lines drop it and
+# every relative entry before anything else is imported. The same lines as
+# _PY_PRELUDE in scripts/lib/common.sh, inline because this validator runs
+# without that library; SELF-27 compares the copies.
+VS_PY_PRELUDE='
+import os, sys
+try:
+    _tf_here = os.path.realpath(os.getcwd())
+except OSError:
+    _tf_here = None
+sys.path[:] = [_p for _p in sys.path if os.path.isabs(_p) and os.path.realpath(_p) != _tf_here]
+del _tf_here
+'
+
+# Inputs cross into python as prefixed env vars, never interpolated. The
+# heredoc is the program, compiled from its bytes (as python3 - reads them)
+# and run after VS_PY_PRELUDE.
 VS_STRICT="$STRICT" VS_FIXTURE="$FIXTURE" VS_SELF_TEST="$SELF_TEST" \
 VS_SKILLS_DIR="$SKILLS_DIR" VS_SCRIPT="$PWD/scripts/validate-skills.sh" \
-python3 - <<'PYEOF'
+python3 -c "${VS_PY_PRELUDE}"'exec(compile(sys.stdin.buffer.read(), "<stdin>", "exec"))' <<'PYEOF'
 import contextlib
 import glob
 import io

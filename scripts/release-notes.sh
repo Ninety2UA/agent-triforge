@@ -23,6 +23,22 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# RN_PY_PRELUDE — python: the first lines of every program this script runs.
+# python3 -c puts the working directory first on sys.path, so a json.py left in
+# this checkout would be imported in place of the module; these lines drop it
+# and every relative entry before anything else is imported. The same lines as
+# _PY_PRELUDE in scripts/lib/common.sh, inline because this script runs
+# without that library; SELF-27 compares the copies.
+RN_PY_PRELUDE='
+import os, sys
+try:
+    _tf_here = os.path.realpath(os.getcwd())
+except OSError:
+    _tf_here = None
+sys.path[:] = [_p for _p in sys.path if os.path.isabs(_p) and os.path.realpath(_p) != _tf_here]
+del _tf_here
+'
+
 REPO_URL="https://github.com/Ninety2UA/agent-triforge"
 REPO_SLUG="${REPO_URL#https://github.com/}"   # owner/repo: the form `codex plugin marketplace add` takes
 MODE="body"
@@ -41,7 +57,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 if [ -z "$VERSION" ]; then
-  VERSION=$(python3 -c 'import json; print(json.load(open(".claude-plugin/plugin.json"))["version"])')
+  VERSION=$(python3 -c "${RN_PY_PRELUDE}"'import json; print(json.load(open(".claude-plugin/plugin.json"))["version"])')
 fi
 case "$VERSION" in
   [0-9]*.[0-9]*.[0-9]*) ;;

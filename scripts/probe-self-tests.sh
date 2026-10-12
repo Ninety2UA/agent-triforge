@@ -13209,6 +13209,12 @@ mkdir -p "$_S27"
 #            lease.sh copy with one program's prelude dropped and planted
 #            programs appended, and a session-start.sh copy whose prelude
 #            differs, are flagged by line and by name
+#   maint    the same scan over the maintainer tools, which run without the
+#            library: scripts/*.sh outside scripts/lib/ (the validators, the
+#            release notes, the probe harness) and scripts/skill-locator/.
+#            Every program runs its tool's copy of the prelude first, each
+#            copy equals the library's, and a file that still has a program
+#            without it is named
 #   lead     from a lead checkout holding planted modules: resolve_role,
 #            roster_write_role and lease_create import none of them
 #   msg      roster_write_role's line names the model dispatch runs for an
@@ -13486,7 +13492,9 @@ for f, (raw, mk) in texts.items():
         if why:
             out.append(where + ":" + why)
 copies = 0
-for other, base in (("SS_PY_PRELUDE", "_PY_PRELUDE"), ("SS_READ_PY", "_READ_REGULAR_PY"), ("_INSTR_READ_PY", "_READ_REGULAR_PY")):
+for other, base in (("SS_PY_PRELUDE", "_PY_PRELUDE"), ("SS_READ_PY", "_READ_REGULAR_PY"), ("_INSTR_READ_PY", "_READ_REGULAR_PY"),
+                    ("VS_PY_PRELUDE", "_PY_PRELUDE"), ("VV_PY_PRELUDE", "_PY_PRELUDE"), ("RN_PY_PRELUDE", "_PY_PRELUDE"),
+                    ("PROBE_PY_PRELUDE", "_PY_PRELUDE")):
     if other in defs:
         copies += 1
         a, b = expand(other), expand(base)
@@ -13546,6 +13554,19 @@ _S27_FAIL="${_S27_FAIL}$(_self_expect static-negative "$O" '^drift:SS_PY_PRELUDE
 [ "$(printf '%s\n' "$O" | grep -c '^session-start\.sh:[0-9]*:no-prelude' || true)" = 4 ] \
   || _S27_FAIL="${_S27_FAIL} static-negative(want-4-session-start-programs-flagged;got:$(printf '%s\n' "$O" | grep -c '^session-start\.sh:' || true))"
 _S27_EV="${_S27_EV}static: ${_S27_N:-?} programs, every one prelude-first, 6 file runs, 3 copies equal; the planted lease.sh lines and the changed session-start.sh copy flagged; "
+
+# maint: the maintainer tools. coordinate.sh loads the library and is in the
+# static list above. probe-self-tests.sh is not scanned: its programs are the
+# SELF cases' own code and run on fixtures the cases create.
+( cd "$REPO_ROOT" && { printf '%s\n' scripts/lib/common.sh; ls scripts/*.sh scripts/skill-locator/*.sh | grep -vx -e scripts/coordinate.sh -e scripts/probe-self-tests.sh; } ) > "$_S27/maint"
+O=$(_s27_scan "$REPO_ROOT" "$_S27/maint")
+_S27_N=$(printf '%s\n' "$O" | sed -n 's/^files=[0-9]* programs=\([0-9]*\) .*/\1/p')
+_S27_GOT=$(printf '%s\n' "$O" | grep -v '^files=' | sed 's/^\(scripts\/[^:]*\):.*/\1/' | awk '!s[$0]++' | tr '\n()' ' []' | cut -c1-500)
+if [ -n "$_S27_GOT" ] || [ "${_S27_N:-0}" -lt 40 ]; then
+  _S27_FAIL="${_S27_FAIL} maint(want-40+-programs-every-one-prelude-first;got-${_S27_N:-?}-programs,flagged:${_S27_GOT% })"
+fi
+_S27_FAIL="${_S27_FAIL}$(_self_expect maint "$O" '^files=[0-9]+ programs=[0-9]+ file-runs=4 copies=4$')"
+_S27_EV="${_S27_EV}maint: ${_S27_N:-?} programs in the validators, the release notes and the probe harness, every one after its tool's prelude copy, 4 file runs, 4 copies equal; "
 
 # _s27_plant <dir> <marker> <module>... — a module per name that appends
 # "<name> <cwd>" to <marker> when imported
@@ -13707,7 +13728,7 @@ if printf '%s\n' "$O" | grep -q 'hook crashed'; then _S27_FAIL="${_S27_FAIL} hoo
 _S27_EV="${_S27_EV}hook: session start and pre-compact in a project holding 16 planted modules: rc 0, the member count, the active-lease line and the lease snapshot printed, no marker"
 unset O R L _S27_N _S27_M _S27_L _S27_GOT _S27_WANT _S27_MODS
 # --- end of SELF-27 cases ---
-_S27_CAP="inline python ignores modules planted in the cwd: every inline program starts with the shared prelude, the lease lane parsers run after a builder planted json.py in its worktree, session start in a project with a planted tomllib.py, the ledger readers on a FIFO (S1, Phase 6)"
+_S27_CAP="inline python ignores modules planted in the cwd: every inline program starts with the shared prelude (the maintainer tools' too), the lease lane parsers run after a builder planted json.py in its worktree, session start in a project with a planted tomllib.py, the ledger readers on a FIFO (S1, Phase 6)"
 if [ -z "$_S27_EV" ]; then _S27_FAIL="${_S27_FAIL} cases(no-case-ran)"; fi
 if [ -z "$_S27_FAIL" ]; then
   row "SELF-27" "claude" "$_S27_CAP" "PASS" "$(printf '%s' "$_S27_EV" | cut -c1-3000)" "static"
