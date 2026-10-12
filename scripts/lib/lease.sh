@@ -3893,7 +3893,7 @@ MERGE_BASE_EOF
   # before anything is committed, compared with IHEAD, the integration head
   # read above, never HEAD read again: a commit someone else added to the
   # integration branch since then shows as paths outside the list.
-  local GONE MTREE LROLE
+  local GONE MTREE LROLE NOWHEAD
   if ! _lgr merge --squash -X no-renames "$SNAP" >&2; then
     GONE=$(_lease_conflict_deleted)
     _lgr reset --merge >&2 || true
@@ -3911,8 +3911,18 @@ MERGE_BASE_EOF
     if [ -n "$_LMS_ERR" ]; then
       echo "lease_merge: REFUSED — what the squash of ${TASK_ID}'s snapshot ${SNAP:0:12} staged could not be held to its protected scan (${_LMS_ERR}); index reset, nothing merged (fails closed), state stays review." >&2
     else
-      LROLE=$(_ledger_get "$TASK_ID" role 2>/dev/null || true)
-      echo "lease_merge: REFUSED — the squash of ${TASK_ID}'s snapshot ${SNAP:0:12} would also change ${_LMS_PATHS}, which its own diff (base ${_LMG_BASE:0:12} to the snapshot: what the review and the protected scan saw) does not touch; a merge changes only the paths its scan listed (fails closed). Index reset, nothing merged, state stays review. Lease the task again from the integration branch's current head: lease_reclaim ${TASK_ID}, then lease_create ${TASK_ID} ${LROLE:-<role>} and lease_dispatch ${TASK_ID} <prompt>." >&2
+      # HEAD is read again here only to name the cause: the scope was held to
+      # IHEAD, so a head moved since (a commit added during the merge) puts
+      # that commit's paths outside the scan, and leasing the task again would
+      # not help.
+      NOWHEAD=$(_lgr rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)
+      if [ "$NOWHEAD" != "$IHEAD" ]; then
+        NOWHEAD=${NOWHEAD:-<none>}
+        echo "lease_merge: REFUSED — the squash of ${TASK_ID}'s snapshot ${SNAP:0:12} would also change ${_LMS_PATHS}: the integration branch gained a commit during the merge (HEAD moved ${IHEAD:0:12} -> ${NOWHEAD:0:12} after lease_merge read it), made outside the lead's own operations, and those paths are its changes, not the snapshot's (fails closed). Index reset, nothing merged, state stays review. The next lease_merge or lease_promote refuses on that commit with rc 44 (KTD18). Inspect it (git log ${IHEAD:0:12}..HEAD): if it is yours, accept it with lease_rebaseline and rerun lease_merge ${TASK_ID} ${REVIEWER}; if not, put the branch back (git reset --hard ${IHEAD}, in this checkout) and rerun." >&2
+      else
+        LROLE=$(_ledger_get "$TASK_ID" role 2>/dev/null || true)
+        echo "lease_merge: REFUSED — the squash of ${TASK_ID}'s snapshot ${SNAP:0:12} would also change ${_LMS_PATHS}, which its own diff (base ${_LMG_BASE:0:12} to the snapshot: what the review and the protected scan saw) does not touch; a merge changes only the paths its scan listed (fails closed). Index reset, nothing merged, state stays review. Lease the task again from the integration branch's current head: lease_reclaim ${TASK_ID}, then lease_create ${TASK_ID} ${LROLE:-<role>} and lease_dispatch ${TASK_ID} <prompt>." >&2
+      fi
     fi
     return 1
   fi
