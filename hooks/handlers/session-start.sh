@@ -639,8 +639,14 @@ fi
 # imports it, since its Triforge text is stale. Only CLAUDE.md and
 # .claude/CLAUDE.md are fingerprinted (the 3.x template was never a
 # CLAUDE.local.md). A file that is not a readable regular file (a FIFO, a
-# dangling link) is "unreadable" and named in no line. A library that cannot
-# load or run (no python3) costs these lines and gets one WARNING instead.
+# dangling link) is "unreadable" and named in no line. The pass reads each
+# CLAUDE.md-family file whole, up to Claude Code's 4 MiB cutoff, so it gets
+# the 10 s the version check gets, then SIGKILL 2 s later (_INSTR_SECS, which
+# _instr_py in that library honors with the timeout binary or a watchdog): a
+# project's files take milliseconds, and the slowest 4 MiB file the linear
+# reader can be handed under 4 s, so only a stalled pass or a far slower
+# host reaches it. A library that cannot load or run (no python3), or a pass
+# given up on, costs these lines and gets one WARNING instead.
 SS_CHAIN_IMPORTS=""
 SS_OWN_NOTICES=""
 SS_ABOVE_NOTICES=""
@@ -658,12 +664,12 @@ fi
 if [ -n "$SS_NO_PROJECT" ]; then
   :
 elif [ -f "$SS_INSTR_LIB" ] && source "$SS_INSTR_LIB" >/dev/null 2>&1; then
-  SS_FOUND=$(instruction_files_detect "$SS_START_DIR" 2>/dev/null) || SS_FOUND_RC=$?
+  SS_FOUND=$(_INSTR_SECS=10 instruction_files_detect "$SS_START_DIR" 2>/dev/null) || SS_FOUND_RC=$?
 else
   SS_FOUND_RC=69
 fi
 if [ "$SS_FOUND_RC" -ne 0 ]; then
-  INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}$(_ss_prose "WARNING: the instruction-file check did not finish (instruction_files_detect in ${SS_INSTR_LIB}, rc ${SS_FOUND_RC}; it needs python3), so the CLAUDE.md and 3.x template notices may be missing this session.")"
+  INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}$(_ss_prose "WARNING: the instruction-file check did not finish (instruction_files_detect in ${SS_INSTR_LIB}, rc ${SS_FOUND_RC}; it needs python3 and stops after 10 s), so the CLAUDE.md and 3.x template notices may be missing this session.")"
 fi
 while IFS=$'\t' read -r SS_KIND SS_WHERE SS_STATE SS_FILE SS_IMPORT; do
   case "$SS_KIND" in

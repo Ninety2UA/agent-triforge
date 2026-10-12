@@ -145,6 +145,33 @@
       r2fix/h/oracle.mjs) is Claude Code 2.1.294's import code run on the marked 15.0.12
       that ships with the locally installed pi-coding-agent, not the bundled build.
 
+- Worker discoveries (end-of-program review, fix round 4, 2026-10-09), UNVERIFIED, recorded by the lead from the workers' reports:
+
+      fix worker G: on macOS, gtimeout cannot arm a timer longer than about 1e8 seconds;
+      `gtimeout 2e8 true` and `gtimeout inf true` warn "setitimer: Invalid argument" and run
+      with no timeout, so a kill-after such as -k 2e8 never fires there although SELF-30
+      counts it (finite and above zero). The limit is platform-dependent and nothing ships
+      like that. Still open from round 3: an option word with an attached expansion
+      (--kill-after="${X}s", -k`...`) stops SELF-30's option loop and is read as the
+      duration, a false positive; nothing ships in that form.
+
+      fix worker J2: Claude Code scans a list item's text raw, code spans included, so an
+      @AGENTS.md in a code span inside a tight list item loads; md_scan keeps it as no
+      import (a miss, the safe direction) so at-setup's stated rule holds. marked itself is
+      quadratic on some shapes (many "a" / "***" line pairs), so Claude Code's own memory
+      loader is slow on them. The full --self-only gate took 919 s on an idle copy of the
+      tree (AGENTS.md says about 3 minutes).
+
+- How md_scan is checked (lead, 2026-10-12): differentially, against an oracle that runs
+  Claude Code's import extraction (copied from the 2.1.294 bundle; 2.1.296's is the same
+  apart from renamed identifiers) on marked 15.0.12, with generators of random,
+  container-heavy, mutated-realistic and port-drift documents, and token by token against
+  marked's own block tokens. Hand-written SELF cases missed every family the fuzzing
+  found. The tools live outside the repo in ~/projects/_tools/mdscan-difftest/ (the
+  oracle holds code copied from Claude Code's bundle): runall.sh <prog> runs the lead's
+  three generators, J2's tokall.sh the token comparison, srun.sh one SELF row on a
+  throwaway copy of a tree. A change to md_scan should reach UNSAFE 0 there before review.
+
 ## Interface proposals
 <!-- No active proposals -->
 

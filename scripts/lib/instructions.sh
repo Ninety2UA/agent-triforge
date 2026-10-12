@@ -20,9 +20,11 @@
 #     A CLAUDE.md-family file that imports AGENTS.md (an `@AGENTS.md` token,
 #     its path relative to the file holding it) loads it with the file. The
 #     token counts only in Markdown text, where Claude Code reads imports:
-#     never in a code block (fenced or indented), a code span, HTML, a link
-#     destination or front matter (md_scan, which counts what it cannot
-#     place as no import). Claude Code takes the whole token up to a # as
+#     never in a code block (fenced or indented), a code span, HTML (bar the
+#     rest of the line after a comment that opens an HTML block, which Claude
+#     Code reads), a link destination or title or front matter (md_scan,
+#     which reads the blocks as marked does and counts what it cannot place
+#     as no import). Claude Code takes the whole token up to a # as
 #     the path (@AGENTS.md. names AGENTS.md.), and a path it does not read
 #     whole is none (path_ok, emphasis). An import line is written or
 #     offered only when this reader reads it back as the project's import
@@ -156,31 +158,89 @@ END = b"<!-- triforge:end -->"
 # Claude Code (its memory loader, read in the 2.1.294 build) reads an import
 # from Markdown text alone: it skips a file over MD_MAX bytes, drops a BOM
 # with the front matter block it starts (FRONT, its own pattern, \s as in
-# JavaScript), lexes the rest with marked (GFM off) and scans the text
-# tokens only, so an import in a code block (fenced or indented), a code
+# JavaScript), lexes the rest with marked 15.0.12 (GFM off) and scans the
+# text tokens, so an import in a code block (fenced or indented), a code
 # span, HTML, a link destination or title, an image description or a link
-# reference definition loads nothing. md_scan reads a file the same way and
-# keeps to what is text for certain: what it cannot place counts as not
-# text, so its error is "hidden, offer the fix", never an import reported
-# that is not loaded. The patterns follow marked: MARK a blockquote or list
-# marker, LIST a line that may start a list item, FENCE an opening fence
-# (backticks with none after them, or tildes), HTML the start of an HTML
-# block of types 1 to 6 (html_start), DEF a link reference definition and
-# TITLE the quotes of its title, INLINE the inline HTML and link
-# destination openings, closed by CLOSE, a complete TAG or the LINK rest
+# reference definition loads nothing, nor does a word that an earlier path
+# takes in (joined). md_scan reads a file the same way. Its block side is
+# marked itself: MdLexer is Lexer.blockTokens and the block tokenizers it
+# calls, line for line (their quirks included: the lazy lines of a quote
+# lexed as blocks of their own, the list item that ends after its first
+# line, a tag name that ends its line, a label or title over lines), on the
+# text as the UTF-16 code units marked counts (js_text). Its patterns are
+# marked block rules (MK_*) with the JavaScript \s (JS_SPACE), dot (JS_DOT,
+# no line terminator), $ (\Z) and multiline ^ (JS_BOL); lheading answers
+# from a table of the lines that end its scan, so no rule rescans a line.
+# Work, steps and nesting are bounded, and a file past a bound counts no
+# import (md_scan says where). The inline side keeps to what is text for
+# certain (text_words): what it cannot place counts as not text, so its
+# error is "hidden, offer the fix", never an import reported that is not
+# loaded. Its patterns: TITLE the quotes of a link title, INLINE the
+# inline HTML and link destination openings, closed by CLOSE, a complete TAG
+# or the rest of a link (link_ends): \s* (WS, the JavaScript \s in UTF-8),
+# the destination <...> (ANGLE, whose backslash takes no line end) or a run
+# of all but space, tab, newline and controls (RUN, cut at a parenthesis
+# PAREN finds unbalanced), a title after [ \t]* and at most one newline
+# (SEP), \s* and ")"
 MD_MAX = 4194304
 JS_SPACE = r"[\t\n\x0b\x0c\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
 FRONT = re.compile(r"---" + JS_SPACE + r"*\n[\s\S]*?---" + JS_SPACE + r"*\n?")
-MARK = re.compile(rb"([ \t]*)(?:>|(?:[*+-]|[0-9]{1,9}[.)])(?=[ \t]|$))")
-LIST = re.compile(rb"[ \t>]*(?:[*+-]|[0-9]{1,9}[.)])(?:[ \t]|$)")
-FENCE = re.compile(rb"`{3,}(?=[^`]*$)|~{3,}")
-HTML = re.compile(rb"<(?:(script|pre|style|textarea)(?=[\s>]|$)|(!--)|(\?)|(!\[CDATA\[)|(!)[A-Za-z]|/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[ \t]|/?>|$))", re.I)
-DEF = re.compile(rb"\[(?:\\.|[^\[\]\\])+\]:[ \t]*(<.*?>|\S*)[ \t]*(.*)")
+JS_TRIM = "\t\n\x0b\x0c\r \xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+JS_WS = "\t\n\x0b\x0c\r \xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+JS_DOT = "[^\n\r\u2028\u2029]"
+JS_BOL = "(?:\\A|(?<=[\n\r\u2028\u2029]))"
+ASTRAL = re.compile("[\U00010000-\U0010ffff]")
+MK_TAGS = "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
+MK_HR_SRC = " {0,3}((?:-[\t ]*){3,}|(?:_[ \t]*){3,}|(?:\\*[ \t]*){3,})(?:\n+|\\Z)"
+MK_PARA_SRC = ("[^\n]+(?:\n(?!" + MK_HR_SRC + "| {0,3}#{1,6}(?:" + JS_SPACE + "|\\Z)| {0,3}>| {0,3}(?:`{3,}(?=[^`\n]*\n)|~{3,})[^\n]*\n"
+               "| {0,3}(?:[*+-]|1[.)]) |</?(?:" + MK_TAGS + ")(?: +|\n|/?>)|<(?:script|pre|style|textarea|!--)| +\n)[^\n]+)*")
+MK_NEWLINE = re.compile("(?:[ \t]*(?:\n|\\Z))+")
+MK_CODE = re.compile("(?:(?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|\\Z))*)?)+")
+MK_FENCES = re.compile(" {0,3}(`{3,}(?=[^`\n]*(?:\n|\\Z))|~{3,})([^\n]*)(?:\n|\\Z)(?:|([\\s\\S]*?)(?:\n|\\Z))(?: {0,3}\\1[~`]* *(?=\n|\\Z)|\\Z)")
+MK_FENCES_SHUT = re.compile(" {0,3}(`{3,}(?=[^`\n]*(?:\n|\\Z))|~{3,})([^\n]*)(?:\n|\\Z)(?:|([\\s\\S]*?)(?:\n|\\Z))(?: {0,3}\\1[~`]* *(?=\n|\\Z))")
+MK_HEADING = re.compile(" {0,3}(#{1,6})(?=" + JS_SPACE + "|\\Z)(" + JS_DOT + "*)(?:\n+|\\Z)")
+MK_HR = re.compile(MK_HR_SRC)
+MK_QUOTE = re.compile("(?: {0,3}> ?(?:" + MK_PARA_SRC + "|[^\n]*)(?:\n|\\Z))+")
+MK_LIST = re.compile("( {0,3}(?:[*+-]|[0-9]{1,9}[.)]))(?:[ \t][^\n]+?)?(?:\n|\\Z)")
+MK_HTML = re.compile(
+    " {0,3}(?:<(script|pre|style|textarea)[" + JS_WS + ">][\\s\\S]*?(?:</\\1>[^\n]*\n+|\\Z)"
+    "|<!--(?:-?>|[\\s\\S]*?(?:-->|\\Z))[^\n]*(\n+|\\Z)|<\\?[\\s\\S]*?(?:\\?>\n*|\\Z)|<![A-Z][\\s\\S]*?(?:>\n*|\\Z)"
+    "|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>\n*|\\Z)|</?(" + MK_TAGS + ")(?: +|\n|/?>)[\\s\\S]*?(?:(?:\n[ \t]*)+\n|\\Z)"
+    "|<(?!script|pre|style|textarea)([a-z][\\w-]*)(?: +[a-zA-Z:_][\\w.:-]*(?: *= *\"[^\"\n]*\"| *= *\x27[^\x27\n]*\x27| *= *[^" + JS_WS + "\"\x27=<>`]+)?)*? */?>(?=[ \t]*(?:\n|\\Z))[\\s\\S]*?(?:(?:\n[ \t]*)+\n|\\Z)"
+    "|</(?!script|pre|style|textarea)[a-z][\\w-]*" + JS_SPACE + "*>(?=[ \t]*(?:\n|\\Z))[\\s\\S]*?(?:(?:\n[ \t]*)+\n|\\Z))", re.I | re.A)
+MK_DEF = re.compile(" {0,3}\\[((?!" + JS_SPACE + "*\\])(?:\\\\" + JS_DOT + "|[^\\[\\]\\\\])+)\\]: *(?:\n[ \t]*)?([^<" + JS_WS + "][^" + JS_WS + "]*|<" + JS_DOT + "*?>)"
+                    "(?:(?: +(?:\n[ \t]*)?| *\n[ \t]*)((?:\"(?:\\\\\"?|[^\"\\\\])*\"|\x27[^\x27\n]*(?:\n[^\x27\n]+)*\n?\x27|\\([^()]*\\))))? *(?:\n+|\\Z)")
+MK_PARAGRAPH = re.compile(MK_PARA_SRC)
+MK_TEXT = re.compile("[^\n]+")
+# lheading: a first line that may open none of MK_LH_OPEN, then lines up to
+# the first one that is an underline (a match), opens one of them or is
+# blank before a newline, or holds a line terminator other than \n (no match)
+MK_LH_OPEN = "(?:[*+-]|[0-9]{1,9}[.)]) |(?: {4}| {0,3}\t)| {0,3}(?:`{3,}|~{3,})| {0,3}>| {0,3}#{1,6}| {0,3}<[^\n>]+>\n"
+MK_LH_FIRST = re.compile(MK_LH_OPEN)
+MK_LH_EVENT = re.compile("^(?:( {0,3}(?:=+|-+) *(?=\n|\\Z))|" + JS_SPACE + "*?\n|" + MK_LH_OPEN + "|[^\n]*[\r\u2028\u2029])", re.M)
+MK_LH_UNDER = re.compile(" {0,3}(?:=+|-+) *(?:\n+|\\Z)")
+MK_LH_STOP = re.compile("[\r\u2028\u2029]")
+MK_CODE_INDENT = re.compile(JS_BOL + "(?: {1,4}| {0,3}\t)")
+MK_QUOTE_START = re.compile(" {0,3}>")
+MK_QUOTE_SETEXT = re.compile("\n {0,3}((?:=+|-+) *)(?=\n|\\Z)")
+MK_QUOTE_MARK = re.compile(JS_BOL + " {0,3}>[ \t]?")
+MK_BLANK = re.compile("[ \t]*\\Z")
+MK_NONSPACE = re.compile("[^ ]")
+MK_TABS = re.compile("^\t+")
+# what Claude Code reads in an HTML block that opens with a comment: the rest
+# outside its comments (MK_COMMENT), each @ at its start or after a
+# JavaScript space and the path after it (MK_AT)
+MK_COMMENT = re.compile("<!--[\\s\\S]*?-->")
+MK_AT = re.compile("(?:^|" + JS_SPACE + ")@((?:[^" + JS_WS + "\\\\]|\\\\ )+)")
 TITLE = {b"\"": b"\"", b"\x27": b"\x27", b"(": b")"}
 INLINE = re.compile(rb"<(!--|\?|!\[CDATA\[|!(?=[A-Za-z])|/?(?=[A-Za-z]))|\]\(")
 CLOSE = {b"!--": b"-->", b"?": b"?>", b"![CDATA[": b"]]>", b"!": b">"}
 TAG = re.compile(rb"</?[A-Za-z][\w:-]*(?:\s+[A-Za-z:_][\w.:-]*(?:\s*=\s*(?:\"[^\"]*\"|\x27[^\x27]*\x27|[^\s\"\x27=<>`]+))?)*?\s*/?>")
-LINK = re.compile(rb"\s*(?:<(?:\\.|[^\n<>\\])+>|[^\s\x00-\x1f]*?)(?:\s+(?:\"(?:\\.|[^\"\\])*\"|\x27(?:\\.|[^\x27\\])*\x27|\((?:\\.|[^)\\])*\)))??\s*\)")
+WS = re.compile(rb"(?:[\t\n\x0b\x0c\r ]|\xc2\xa0|\xe1\x9a\x80|\xe2\x80[\x80-\x8a\xa8\xa9\xaf]|\xe2\x81\x9f|\xe3\x80\x80|\xef\xbb\xbf)*")
+ANGLE = re.compile(rb"<(?:\\(?!\xe2\x80[\xa8\xa9])[^\n\r]|[^\n<>\\])+>")
+RUN = re.compile(rb"[^ \t\n\x00-\x1f]*")
+SEP = re.compile(rb"[ \t]*(?:\n[ \t]*)?")
+PAREN = re.compile(rb"(?<!\\)(\\*)([()])")
 # the <path> part of an import (path_ok): Claude Code ends the path at a #,
 # a backslash or a JavaScript space, and marked may read a <, [ or ] in it as
 # HTML or a link (PATH_CUT); it keeps a path only when it starts with ./, ~/,
@@ -194,6 +254,12 @@ PATH_ROOTS = (b"net", b"network", b"system", b".vol", b".file", b".nofollow", b"
 ZERO_WIDTH = re.compile(rb"\xe2\x80[\x8c-\x8f\xaa-\xae]|\xe2\x81[\xaa-\xaf]|\xef\xbb\xbf")
 ALNUM = re.compile(rb"[A-Za-z0-9]")
 SPACE = (b"", b" ", b"\t", b"\n", b"\r", b"\x0b", b"\x0c")
+# where a path may start (joined): marked may begin a text token after the
+# last character of a code span, an HTML tag, a link or emphasis, after the
+# [ of a link label and the * or _ that opens emphasis (TOKEN_EDGE), and
+# after an escape, a backslash and one of PUNCT
+TOKEN_EDGE = b"`>)][*_"
+PUNCT = re.compile(rb"[!-/:-@\[-`{-~]")
 # The instruction readers a lead can run, named by its registry field
 # "instructions" (KTD1). Data only, keyed by reader, never by CLI:
 #   shadow       the files at the cwd or above (up to /) that hide AGENTS.md
@@ -350,33 +416,405 @@ def md_body(data):
     return data[:cut], data[cut:].replace(b"\r\n", b"\n").replace(b"\r", b"\n")
 
 
-def inner(ln):
-    # (content, marked, code): ln past the blockquote and list markers in
-    # front of it and the space after each, whether it had one, and whether
-    # that content is indented code for some reading of it (4 columns
-    # before the first marker or 5 after one, or a tab there)
-    marked = code = False
-    while True:
-        m = MARK.match(ln)
-        lead = m.group(1) if m else ln[:len(ln) - len(ln.lstrip(b" \t"))]
-        code = code or b"\t" in lead or len(lead) >= (5 if marked else 4)
+def js_text(body):
+    # body as the JavaScript string marked lexes: UTF-16 code units (a
+    # character past U+FFFF as its two surrogates, an invalid byte as
+    # U+FFFD), so every offset and length is the one marked computes
+    return ASTRAL.sub(lambda m: chr(0xd7c0 + (ord(m.group()) >> 10)) + chr(0xdc00 + (ord(m.group()) & 0x3ff)), body.decode("utf-8", "replace"))
+
+
+def js_bytes(text):
+    # the UTF-8 bytes of a js_text string (its surrogate pairs joined)
+    return text.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "surrogatepass").encode("utf-8", "surrogatepass")
+
+
+def js_search(s, rx):
+    # String.prototype.search: the offset of the first match, -1 for none
+    m = rx.search(s)
+    return m.start() if m else -1
+
+
+class MdStop(Exception):
+    # md_scan stops reading: a bound passed, or marked would throw
+    pass
+
+
+class MdTok:
+    # a marked block token: its type, raw and text (lists of parts, joined
+    # when read), the tokens of a blockquote, the items of a list ([raw,
+    # text, tokens] each), its offset in the source it was lexed from, and
+    # for a fenced code block whether no closing fence ends it
+    __slots__ = ("type", "rp", "tp", "tokens", "items", "at", "open")
+
+    def __init__(self, kind, at, raw, text=None, tokens=None):
+        self.type, self.at, self.rp, self.tp, self.tokens, self.items, self.open = kind, at, [raw], None if text is None else [text], tokens, None, False
+
+    @property
+    def raw(self):
+        if len(self.rp) > 1:
+            self.rp = ["".join(self.rp)]
+        return self.rp[0]
+
+    @property
+    def text(self):
+        if len(self.tp) > 1:
+            self.tp = ["".join(self.tp)]
+        return self.tp[0]
+
+
+class MdLexer:
+    # marked Lexer.blockTokens (GFM and pedantic off, no extensions) and the
+    # tokenizers it calls, line for line: state.top, the merge of a code
+    # block, a definition or the next line into the paragraph or text before
+    # it, the merge of the first paragraph of a quote group into the last
+    # one (lastParagraphClipped), a list or blockquote token consuming its
+    # raw (so a quote ends at a code block and its lazy lines are lexed again
+    # outside it). Bounded: work (characters lexed and scanned, nested
+    # sources again) and steps (blocks, list lines, quote groups) grow with
+    # the file, nesting stops at 40; past one MdStop
+    def __init__(self, size):
+        self.top = True
+        self.work, self.steps, self.depth = 0, 0, 0
+        self.max_work, self.max_steps = 12 * size + 4000000, 300000 + size // 8
+        self.lh, self.rules = {}, {}
+
+    def charge(self, n):
+        self.work += n
+        if self.work > self.max_work:
+            raise MdStop("more Markdown than Triforge reads in time")
+
+    def step(self):
+        self.steps += 1
+        if self.steps > self.max_steps:
+            raise MdStop("more Markdown blocks than Triforge reads in time")
+
+    def block(self, src, tokens, clipped=False):
+        self.depth += 1
+        if self.depth > 40:
+            raise MdStop("Markdown nested more than 40 quotes and lists deep")
+        self.charge(len(src))
+        pos, n = 0, len(src)
+        while pos < n:
+            self.step()
+            at, last = pos, tokens[-1] if tokens else None
+            m = MK_NEWLINE.match(src, pos)
+            if m and m.end() > pos:
+                pos = m.end()
+                if pos - at == 1 and last is not None:
+                    last.rp.append("\n")
+                else:
+                    tokens.append(MdTok("space", at, m.group()))
+                continue
+            m = MK_CODE.match(src, pos)
+            if m:
+                pos, raw = m.end(), m.group()
+                text = MK_CODE_INDENT.sub("", raw).rstrip("\n")
+                if last is not None and last.type in ("paragraph", "text"):
+                    last.rp += ["\n", raw]
+                    last.tp += ["\n", text]
+                else:
+                    tokens.append(MdTok("code", at, raw, text))
+                continue
+            m = MK_FENCES.match(src, pos)
+            if m:
+                pos = m.end()
+                tokens.append(MdTok("code", at, m.group()))
+                tokens[-1].open = MK_FENCES_SHUT.match(src, at) is None
+                continue
+            m = MK_HEADING.match(src, pos)
+            if m:
+                pos, text = m.end(), m.group(2).strip(JS_TRIM)
+                if text.endswith("#"):
+                    trimmed = text.rstrip("#")
+                    if not trimmed or trimmed.endswith(" "):
+                        text = trimmed.strip(JS_TRIM)
+                tokens.append(MdTok("heading", at, m.group(), text))
+                continue
+            m = MK_HR.match(src, pos)
+            if m:
+                raw = m.group().rstrip("\n")
+                pos += len(raw)
+                tokens.append(MdTok("hr", at, raw))
+                continue
+            t = self.blockquote(src, pos)
+            if t is None:
+                t = self.list(src, pos)
+            if t is not None:
+                pos += len(t.raw)
+                tokens.append(t)
+                continue
+            m = MK_HTML.match(src, pos)
+            if m:
+                pos = m.end()
+                tokens.append(MdTok("html", at, m.group()))
+                continue
+            m = MK_DEF.match(src, pos)
+            if m:
+                pos = m.end()
+                if last is not None and last.type in ("paragraph", "text"):
+                    last.rp += ["\n", m.group()]
+                    last.tp += ["\n", m.group()]
+                continue
+            end = self.lheading(src, pos)
+            if end:
+                pos = end[0]
+                tokens.append(MdTok("heading", at, src[at:pos], end[1]))
+                continue
+            m = MK_PARAGRAPH.match(src, pos) if self.top else None
+            if m:
+                pos, raw = m.end(), m.group()
+                text = raw[:-1] if raw.endswith("\n") else raw
+                if clipped and last is not None and last.type == "paragraph":
+                    last.rp += ["\n", raw]
+                    last.tp += ["\n", text]
+                else:
+                    tokens.append(MdTok("paragraph", at, raw, text))
+                clipped = False
+                continue
+            m = MK_TEXT.match(src, pos)
+            if not m:
+                raise MdStop("Markdown marked cannot lex")
+            pos = m.end()
+            if last is not None and last.type == "text":
+                last.rp += ["\n", m.group()]
+                last.tp += ["\n", m.group()]
+            else:
+                tokens.append(MdTok("text", at, m.group(), m.group()))
+        self.top = True
+        self.depth -= 1
+        return tokens
+
+    def lheading(self, src, pos):
+        # (end, text) where the lheading rule matches at pos, else None. Its
+        # lazy scan reads up to the first line that ends it (MK_LH_EVENT) at
+        # every attempt, which is quadratic; the same outcome from a table of
+        # those lines, made once per source and bisected
+        if MK_LH_FIRST.match(src, pos):
+            return None
+        eol = src.find("\n", pos)
+        if eol < 0 or MK_LH_STOP.search(src, pos, eol):
+            return None
+        tab = self.lh.get(id(src))
+        if tab is None or tab[0] is not src:
+            self.charge(len(src))
+            starts, under = [], []
+            for e in MK_LH_EVENT.finditer(src):
+                starts.append(e.start())
+                under.append(e.group(1) is not None)
+            tab = self.lh[id(src)] = (src, starts, under)
+        k = bisect.bisect_left(tab[1], eol + 1)
+        if k == len(tab[1]) or not tab[2][k]:
+            return None
+        return MK_LH_UNDER.match(src, tab[1][k]).end(), src[pos:tab[1][k] - 1]
+
+    def blockquote(self, src, pos):
+        # Tokenizer.blockquote: the lines MK_QUOTE takes, lexed in groups (a
+        # run of lazy lines, then the > lines after it, their markers
+        # stripped), a nested quote or list token at a group end lexed again
+        # with the lines left, a code block ending it
+        m = MK_QUOTE.match(src, pos)
         if not m:
-            return ln[len(lead):], marked, code
-        ln, marked = ln[m.end():], True
+            return None
+        self.charge(m.end() - pos)
+        lines, k = m.group().rstrip("\n").split("\n"), 0
+        raw, size, tokens = [], 0, []
+        while k < len(lines):
+            self.step()
+            inside, i = False, k
+            while k < len(lines):
+                if MK_QUOTE_START.match(lines[k]):
+                    inside = True
+                elif inside:
+                    break
+                k += 1
+            craw = "\n".join(lines[i:k])
+            # raw, kept as parts: the groups joined by newlines (the first
+            # group is never empty, so neither is raw after it). The text
+            # marked keeps beside it feeds no token, so it is not kept
+            raw += ["\n", craw] if size else [craw]
+            size += len(craw) + (1 if size else 0)
+            top, self.top = self.top, True
+            self.block(MK_QUOTE_MARK.sub("", MK_QUOTE_SETEXT.sub("\n    \\1", craw)), tokens, True)
+            self.top = top
+            last = tokens[-1] if tokens else None
+            if k == len(lines) or last is not None and last.type == "code":
+                break
+            if last is not None and last.type in ("blockquote", "list"):
+                # the nested token lexed again with every line left, which
+                # marked rebuilds at each such group: charged, so a quote of
+                # many of them stops at the work bound
+                again = last.raw + "\n" + "\n".join(lines[k:])
+                self.charge(len(again) + size)
+                new = self.blockquote(again, 0) if last.type == "blockquote" else self.list(again, 0)
+                if new is None:
+                    raise MdStop("Markdown marked cannot lex")
+                tokens[-1] = new
+                raw = ["".join(raw)[:max(0, size - len(last.raw))] + new.raw]
+                size = len(raw[0])
+                if last.type == "blockquote":
+                    break
+                lines, k = again[len(new.raw):].split("\n"), 0
+        return MdTok("blockquote", pos, "".join(raw), None, tokens)
+
+    def item_rules(self, indent):
+        # the lines that end a list item of that content indent (list)
+        r = self.rules.get(indent)
+        if r is None:
+            k = " {0," + str(min(3, indent - 1)) + "}"
+            r = self.rules[indent] = (re.compile(k + "(?:[*+-]|[0-9]{1,9}[.)])(?:(?:[ \t][^\n]*)?(?:\n|\\Z))"),
+                                      re.compile(k + "(?:(?:- *){3,}|(?:_ *){3,}|(?:\\* *){3,})(?:\n+|\\Z)"),
+                                      re.compile(k + "(?:```|~~~)"), re.compile(k + "#"),
+                                      re.compile(k + "<(?:[a-z]" + JS_DOT + "*>|!--)", re.I | re.A))
+        return r
+
+    def list(self, src, pos):
+        # Tokenizer.list: items of the first bullet type, each line of an item
+        # tested as marked tests it (tabs read as 4 spaces, the first line
+        # with its own indent), the last item and the list trimmed at the
+        # end, then each item text lexed with state.top off
+        m = MK_LIST.match(src, pos)
+        if not m:
+            return None
+        bull = m.group(1).strip(JS_TRIM)
+        item = re.compile("( {0,3}" + ("[0-9]{1,9}\\" + bull[-1] if len(bull) > 1 else "\\" + bull) + ")((?:[\t ][^\n]*)?(?:\n|\\Z))")
+        items, p, n = [], pos, len(src)
+        while p < n:
+            self.step()
+            cap = item.match(src, p)
+            if not cap or MK_HR.match(src, p):
+                break
+            raw, p, c2 = [cap.group()], cap.end(), cap.group(2)
+            line = MK_TABS.sub(lambda t: "   " * len(t.group()), c2.split("\n", 1)[0])
+            e = src.find("\n", p)
+            nxt = src[p:e if e >= 0 else n]
+            blank, body = not line.strip(JS_TRIM), []
+            if blank:
+                indent = len(cap.group(1)) + 1
+            else:
+                indent = js_search(c2, MK_NONSPACE)
+                indent = 1 if indent > 4 else indent
+                body.append(line[indent:])
+                indent += len(cap.group(1))
+            if blank and MK_BLANK.match(nxt):
+                raw.append(nxt + "\n")
+                p = min(n, p + len(nxt) + 1)
+            else:
+                bullet, hr, fence, heading, html = self.item_rules(indent)
+                while p < n:
+                    self.step()
+                    e = src.find("\n", p)
+                    nxt = src[p:e if e >= 0 else n]
+                    wide = nxt.replace("\t", "    ")
+                    if fence.match(nxt) or heading.match(nxt) or html.match(nxt) or bullet.match(nxt) or hr.match(nxt):
+                        break
+                    if js_search(wide, MK_NONSPACE) >= indent or not nxt.strip(JS_TRIM):
+                        body.append("\n" + wide[indent:])
+                    elif blank or js_search(line.replace("\t", "    "), MK_NONSPACE) >= 4 or fence.match(line) or heading.match(line) or hr.match(line):
+                        break
+                    else:
+                        body.append("\n" + nxt)
+                    blank = blank or not nxt.strip(JS_TRIM)
+                    raw.append(nxt + "\n")
+                    p = min(n, p + len(nxt) + 1)
+                    line = wide[indent:]
+            raw = "".join(raw)
+            self.charge(len(raw))
+            items.append([raw, "".join(body), None])
+        if not items:
+            return None
+        t = MdTok("list", pos, "".join(i[0] for i in items).rstrip(JS_TRIM))
+        items[-1][0] = items[-1][0].rstrip(JS_TRIM)
+        items[-1][1] = items[-1][1].rstrip(JS_TRIM)
+        for i in items:
+            self.top = False
+            i[2] = self.block(i[1], [])
+        t.items = items
+        return t
 
 
-def html_start(content):
-    # (end, after) for the HTML block content starts, marked rules: what
-    # ends it (its closing tag or marker; b"" a blank line) and the text
-    # after its opening, where it may end on the same line. (None, b"") for
-    # none: HTML holds the starts of types 1 to 6, a complete TAG alone on
-    # its line is type 7
-    m = HTML.match(content)
-    if not m:
-        return (b"", b"") if TAG.fullmatch(content.rstrip(b" \t")) else (None, b"")
-    if m.group(1):
-        return b"</" + m.group(1).lower() + b">", content[m.end():]
-    return b"-->" if m.group(2) else b"?>" if m.group(3) else b"]]>" if m.group(4) else b">" if m.group(5) else b"", content[m.end():]
+def link_ends(text):
+    # end(h): where marked ends a link whose label closes at the ]( just
+    # before h, as its link rule matches: ANGLE first, else the longest RUN
+    # that a title or ")" can follow (it backtracks from the end of the run,
+    # so a ")" in the run stays in it), and a title read greedily, to its
+    # first closer no backslash escapes, else to the last escaped one a ")"
+    # follows. A destination that does not start with < then ends at its
+    # first ")" that closes no "(" (findClosingBracket: escaped ones never
+    # count), and the link with it. The end of text + 1 when the rule
+    # places none (the opening then holds up to the last ")"). marked may
+    # drop the link, and a paragraph of fewer lines ends it no later, so no
+    # reading ends it past end(h). The calls come in the order of h: a run
+    # is walked once for all of its openings, closers are found by bisecting
+    # their positions, and each ")" test is kept, so this stays linear
+    big = len(text) + 1
+    marks = [m.start() for m in re.finditer(rb"[\"\x27()]", text)]
+    # cur: the run the last opening fell in: its end, the last place in it
+    # a link ends (None: none) and that end, then unbalanced() of it
+    plain, good, after, cur = {}, {}, {}, [-1, None, big, [], [None]]
+
+    def paren(k):
+        # the end of \s* and ")" at k, None without one
+        if k not in after:
+            p = WS.match(text, k).end()
+            after[k] = p + 1 if text[p:p + 1] == b")" else None
+        return after[k]
+
+    def title(t):
+        # the end of the ")" after the title that opens at t, None without one
+        c = TITLE[text[t:t + 1]]
+        if c not in plain:
+            plain[c] = [m.start() for m in re.finditer(rb"(?<!\\)" + re.escape(c), text)]
+            good[c] = [m.start() for m in re.finditer(rb"(?<=\\)" + re.escape(c), text) if paren(m.end())]
+        k = bisect.bisect_left(plain[c], t + 1)
+        first = plain[c][k] if k < len(plain[c]) else big
+        j = bisect.bisect_left(good[c], first) - 1
+        e = paren(first + 1) if first < big else None
+        return e or (paren(good[c][j] + 1) if j >= 0 and good[c][j] > t + 1 else None)
+
+    def rest(q):
+        # the end of the title and ")" after a destination that ends at q
+        t = SEP.match(text, q).end()
+        return (title(t) if text[t:t + 1] in TITLE else None) or paren(q)
+
+    def unbalanced(lo, hi):
+        # the parentheses in text[lo:hi] no backslash escapes, and from each
+        # the first ")" that closes no "(" after it (None: none)
+        at = [m.end() - 1 for m in PAREN.finditer(text, lo, hi) if len(m.group(1)) % 2 == 0]
+        pair, stack = {}, []
+        for k, p in enumerate(at):
+            if text[p] == 40:
+                stack.append(k)
+            elif stack:
+                pair[stack.pop()] = k
+        first = [None] * (len(at) + 1)
+        for k in range(len(at) - 1, -1, -1):
+            first[k] = at[k] if text[at[k]] == 41 else first[pair[k] + 1] if k in pair else None
+        return at, first
+
+    def end(h):
+        w = WS.match(text, h).end()
+        a = ANGLE.match(text, w) if text[w:w + 1] == b"<" else None
+        e = rest(a.end()) if a else None
+        if e:
+            return e
+        if w >= cur[0]:
+            # a new run: from its end down to w, the first place a title or
+            # ")" follows, which holds for every opening up to it
+            q = RUN.match(text, w).end()
+            cur[:] = [q, None, big, [], [None]]
+            i = bisect.bisect_left(marks, q)
+            while q >= w:
+                e = rest(q)
+                if e:
+                    cur[1:] = [q, e] + list(unbalanced(w, q))
+                    break
+                i -= 1
+                q = marks[i] if i >= 0 else -1
+        if cur[1] is None or w > cur[1]:
+            return big
+        p = cur[4][bisect.bisect_left(cur[3], w)] if text[w:w + 1] != b"<" else None
+        return p + 1 if p is not None else cur[2]
+    return end
 
 
 def inline_held(text):
@@ -385,36 +823,57 @@ def inline_held(text):
     # an image description (an ![ before pos and a ] after it), an HTML tag,
     # comment, processing instruction, declaration or CDATA section, or a
     # link destination or title. One opening before pos holds it unless its
-    # first possible end comes before pos, or nothing after pos can end it
-    image, bracket, by = text.find(b"!["), text.rfind(b"]"), {}
+    # end (link_ends for a link) comes before pos, or nothing after pos can
+    # end it. Linear: a closing marker is found by bisecting its positions,
+    # and an opening that ends no later than one before it adds nothing (so
+    # none is read once one of its kind runs to the end)
+    image, bracket, big = text.find(b"!["), text.rfind(b"]"), len(text) + 1
+    link = link_ends(text) if b"](" in text else None
+    places, by = {}, {}
     for m in INLINE.finditer(text):
-        kind, big = m.group(1), len(text) + 1
+        kind = m.group(1)
+        close = b")" if kind is None else CLOSE.get(kind, b">")
+        heads, ends = by.setdefault(close, ([], []))
+        if ends and ends[-1] == big:
+            continue
         if kind is None:
-            close, x = b")", LINK.match(text, m.end())
+            end = link(m.end())
         elif kind in CLOSE:
-            close, x = CLOSE[kind], None
-            g = text.find(close, m.end())
-            big = g + len(close) if g >= 0 else big
+            if close not in places:
+                places[close] = [x.start() for x in re.finditer(b"(?=" + re.escape(close) + b")", text)]
+            k = bisect.bisect_left(places[close], m.end())
+            end = places[close][k] + len(close) if k < len(places[close]) else big
         else:
-            close, x = b">", TAG.match(text, m.start())
-        by.setdefault(close, []).append((m.end(), x.end() if x else big))
-    tables = []
-    for close, items in by.items():
-        peak, top = [], 0
-        for _, e in items:
-            top = max(top, e)
-            peak.append(top)
-        tables.append((text.rfind(close), [a for a, _ in items], peak))
+            x = TAG.match(text, m.start())
+            end = x.end() if x else big
+        if not ends or end > ends[-1]:
+            heads.append(m.end())
+            ends.append(end)
+    tables = [(text.rfind(close), heads, ends) for close, (heads, ends) in by.items()]
 
     def held(pos):
         if 0 <= image <= pos - 2 and bracket >= pos:
             return True
-        for last, heads, peak in tables:
+        for last, heads, ends in tables:
             k = bisect.bisect_right(heads, pos)
-            if k and peak[k - 1] > pos and last >= pos:
+            if k and ends[k - 1] > pos and last >= pos:
                 return True
         return False
     return held
+
+
+def cover(pairs):
+    # inside(pos): True when a < pos < b for one of the (a, b) in pairs
+    pairs = sorted(pairs)
+    heads, peak, top = [a for a, _ in pairs], [], -1
+    for _, b in pairs:
+        top = max(top, b)
+        peak.append(top)
+
+    def inside(pos):
+        k = bisect.bisect_left(heads, pos)
+        return k > 0 and peak[k - 1] > pos
+    return inside
 
 
 def code_spans(text, starts, held):
@@ -424,9 +883,13 @@ def code_spans(text, starts, held):
     # (after an odd number of backslashes its first backtick is escaped, so
     # it opens one shorter) and leaves an unpaired run literal; the pairing
     # from every start counts (their walks merge, so this stays linear).
-    # Past a run an inline construct may hold (held), any run before pos
-    # with a run of its length after pos counts
-    runs = [(m.start(2), len(m.group(2)) - len(m.group(1)) % 2, len(m.group(2))) for m in re.finditer(rb"(\\*)(`+)", text)]
+    # Past a run an inline construct may hold (held), or one emphasis may
+    # take into its token (a * or _ run that may open it before the run, a
+    # run of that character after it: the run then pairs inside the token
+    # only, which frees a later run to pair across pos), any run before pos
+    # with a run of its length after pos counts. A backslash run is matched
+    # from its start only, and both tests bisect (cover)
+    runs = [(m.start(2), len(m.group(2)) - len(m.group(1)) % 2, len(m.group(2))) for m in re.finditer(rb"(?<!\\)(\\*)(`+)", text)]
     heads = [r[0] for r in runs]
     nxt, seen = [None] * len(runs), {}
     for i in range(len(runs) - 1, -1, -1):
@@ -443,22 +906,26 @@ def code_spans(text, starts, held):
             else:
                 spans.append((runs[i][0], runs[j][0]))
                 i = j + 1
-    spans.sort()
-    span_heads, peak, top = [a for a, _ in spans], [], -1
-    for _, b in spans:
-        top = max(top, b)
-        peak.append(top)
-    owned = next((r[0] for r in runs if held(r[0])), len(text) + 1)
+    within = cover(spans)
+    # the * and _ runs as emphasis reads them: the first that may open,
+    # the last of each character (an _ between letters or digits is none)
+    first, last = {}, {}
+    for m in re.finditer(rb"\*+|_+", text):
+        s, e, ch = m.start(), m.end(), m.group()[:1]
+        if ch == b"_" and ALNUM.fullmatch(text[s - 1:s]) and ALNUM.fullmatch(text[e:e + 1]):
+            continue
+        if text[e:e + 1] not in SPACE:
+            first.setdefault(ch, s)
+        last[ch] = s
+    owned = next((r[0] for r in runs if held(r[0]) or any(first[ch] < r[0] < last[ch] for ch in first)), len(text) + 1)
     opens, closes = {}, {}
     for r in runs:
         opens.setdefault(r[1], r[0])
         closes[r[2]] = r[0]
+    wide = cover((opens[n], closes[n]) for n in opens if n and n in closes)
 
     def spanned(pos):
-        if owned < pos:
-            return any(n and opens[n] < pos < closes.get(n, -1) for n in opens)
-        k = bisect.bisect_left(span_heads, pos)
-        return k > 0 and peak[k - 1] > pos
+        return wide(pos) if owned < pos else within(pos)
     return spanned
 
 
@@ -488,12 +955,39 @@ def path_ok(d):
     return True
 
 
+def joined(piece, s):
+    # True when the word at s in piece may sit in the path of an earlier
+    # import: Claude Code takes a backslash and a space into a path, so
+    # @x\ @AGENTS.md is the one path "x @AGENTS.md", and it starts a path
+    # after whitespace or where a text token of marked may begin. Back from
+    # the "\ " before s, over what a path holds (no other whitespace or
+    # backslash; every byte past ASCII, which may be a JavaScript space,
+    # held as path, and a backslash before [ or ], which marked drops from
+    # a link label), an @ at the start of the line, after whitespace, after
+    # TOKEN_EDGE or after a backslash and one of PUNCT joins it
+    k = s - 2
+    if piece[k:s] != b"\\ ":
+        return False
+    while k > 0:
+        c, prev = piece[k - 1:k], piece[max(k - 2, 0):k - 1]
+        if c == b"@" and (not prev or prev.isspace() or prev >= b"\x80" or prev in TOKEN_EDGE or PUNCT.fullmatch(prev) and piece[max(k - 3, 0):k - 2] == b"\\"):
+            return True
+        if c == b" " and prev == b"\\":
+            k -= 2
+        elif c.isspace() or c == b"\\" and piece[k:k + 1] not in (b"[", b"]"):
+            return False
+        else:
+            k -= 1
+    return False
+
+
 def emphasis(text):
     # paired(a, b): True when a * or _ run in text[a:b] may pair with another
     # run of its character in text, lines marked may read as one paragraph,
     # as emphasis that splits the import word there. Wider than marked: a run
     # opens unless a space, tab or line end follows it, any run closes, and
-    # only an _ between two ASCII letters or digits does neither
+    # only an _ between two ASCII letters or digits does neither. The runs in
+    # text[a:b] are found by bisecting their starts
     first, last, runs = {}, {}, []
     for m in re.finditer(rb"\*+|_+", text):
         s, e, ch = m.start(), m.end(), m.group()[:1]
@@ -503,149 +997,113 @@ def emphasis(text):
         if text[e:e + 1] not in SPACE:
             first.setdefault(ch, s)
         last[ch] = s
+    heads = [s for s, _ in runs]
 
     def paired(a, b):
-        return any(first.get(ch, len(text)) < s or last[ch] > s for s, ch in runs if a <= s < b)
+        return any(first.get(ch, len(text)) < s or last[ch] > s for s, ch in runs[bisect.bisect_left(heads, a):bisect.bisect_left(heads, b)])
     return paired
 
 
-def md_scan(data):
-    # (found, open): the IMPORT matches Claude Code reads as text in data,
-    # and the construct still open at its end ("" for none), which a line
-    # appended to data lands in. A fenced code block or a blank line (spaces
-    # only) ends a paragraph, and an import word with no backtick in it and a
-    # path Claude Code reads whole (path_ok, emphasis) counts on a line no
-    # block hides, past its markers, outside every inline construct and code
-    # span of its paragraph
+def text_words(text):
+    # the IMPORT matches in text, the inline source of a paragraph, a heading
+    # or the text of a list item (bytes), that are text for certain: an
+    # import word with no backtick in it, a path Claude Code reads whole
+    # (path_ok, emphasis) and no earlier path that takes it in (joined),
+    # outside every inline construct and code span. A code span is paired
+    # from every line start, which is wider than the one start marked uses
+    words, starts, at = [], [], 0
+    for piece in text.split(b"\n"):
+        starts.append(at)
+        for w in re.finditer(rb"\S+", piece):
+            m = IMPORT.fullmatch(w.group())
+            if m and b"`" not in w.group() and path_ok(m.group(1)) and not joined(piece, w.start()):
+                words.append((at + w.start(), m))
+        at += len(piece) + 1
+    if not words:
+        return []
+    held = inline_held(text)
+    spanned = code_spans(text, starts, held)
+    paired = emphasis(text)
+    return [m for p, m in words if not held(p) and not spanned(p) and not paired(p + 1, p + 1 + len(m.group(1)))]
+
+
+def html_words(raw):
+    # the IMPORT matches Claude Code reads in an HTML block (raw, its marked
+    # source): only in one that opens with a comment and closes one, outside
+    # its comments (MK_COMMENT), each path after an @ at the start or after a
+    # JavaScript space (MK_AT), read whole (path_ok), no backslash in it
+    lead = raw.lstrip(JS_TRIM)
+    if not lead.startswith("<!--") or "-->" not in lead:
+        return []
+    rest = MK_COMMENT.sub("", raw)
+    found = []
+    for w in MK_AT.finditer(rest):
+        m = None if "\\" in w.group(1) else IMPORT.fullmatch(b"@" + js_bytes(w.group(1)))
+        if m and path_ok(m.group(1)):
+            found.append(m)
+    return found
+
+
+def md_walk(tokens, found):
+    # the imports in marked block tokens, as Claude Code walks them: the
+    # inline source of each paragraph, heading and list item text, the HTML
+    # blocks, the tokens of each quote and list item; code blocks never
+    for t in tokens:
+        if t.type in ("paragraph", "heading", "text"):
+            found.extend(text_words(js_bytes(t.text)))
+        elif t.type == "html":
+            found.extend(html_words(t.raw))
+        elif t.type == "blockquote":
+            md_walk(t.tokens, found)
+        elif t.type == "list":
+            for item in t.items:
+                md_walk(item[2], found)
+
+
+def md_scan(data, where=False):
+    # (found, open): the IMPORT matches Claude Code reads as text in data
+    # (md_walk over the tokens MdLexer reads, none when it stops), and with
+    # where the construct a line appended to data lands in when it is no
+    # text there ("" for none or without where): the top-level block that
+    # takes the line @AGENTS.md appended, read the same way
     if len(data) > MD_MAX:
         return [], ""
     prefix, body = md_body(data)
-    nl = body.endswith(b"\n")
-    lines = body.split(b"\n")[:-1] if nl else body.split(b"\n")
-    first = prefix.count(b"\n") + 1
-    found, chunk, ends = [], [], {}
-    fence, rest, opened, deftail, listed = None, "", "", False, False
-
-    def flush():
-        # the import words of the paragraph in chunk that are text. chunk
-        # holds each line as marked reads it in a paragraph (past its
-        # blockquote and list markers, which marked strips too; an indented
-        # line, which may continue the paragraph as text, past its indent
-        # only) and whether its words may count
-        text = b"\n".join(piece for piece, _ in chunk)
-        words, starts, at = [], [], 0
-        for piece, counts in chunk:
-            starts.append(at)
-            if counts:
-                for w in re.finditer(rb"\S+", piece):
-                    m = IMPORT.fullmatch(w.group())
-                    if m and b"`" not in w.group() and path_ok(m.group(1)):
-                        words.append((at + w.start(), m))
-            at += len(piece) + 1
-        if words:
-            held = inline_held(text)
-            spanned = code_spans(text, starts, held)
-            paired = emphasis(text)
-            found.extend(m for p, m in words if not held(p) and not spanned(p) and not paired(p + 1, p + 1 + len(m.group(1))))
-        del chunk[:]
-
-    for i, ln in enumerate(lines):
-        line = "line " + str(first + i)
-        s = ln.lstrip(b" \t")
-        ws = ln[:len(ln) - len(s)]
-        content, marked, code = inner(ln)
-        piece = s if code else content
-        if fence:
-            # a fenced code block: a closing fence (the opening run, then
-            # backticks or tildes, then spaces) ends it. One opened k >= 2
-            # spaces deep may sit in a list item, whose content column is 2
-            # or more, at most k and at least k - 3; one indented 4 or more
-            # under a list (soft) may also be indented code or text. Where
-            # the readings part (a line less deep than the fence, which
-            # marked may carry into the item and so into the block; a
-            # closing fence some of them take), nothing after is text for
-            # certain
-            run, k, at, soft = fence
-            if not s:
-                if soft and not ln.strip(b" "):
-                    flush()
-                continue
-            x = -1 if b"\t" in ws else len(ws)
-            closes = re.fullmatch(re.escape(run) + rb"[~`]* *", s)
-            if closes and (k <= x <= max(5, k) if soft else 0 <= x <= 3 and (x >= k or k < 2)):
-                fence = None
-            elif (soft or k >= 2) and (x < k or closes and x <= k + 3):
-                rest = "the fenced code block opened on " + at + ", which may run to the end of the file (a list item may hold it)"
-                fence = None
-            if soft or rest:
-                chunk.append((piece, False))
-            continue
-        if rest:
-            # nothing after is text for certain; the paragraph of the line
-            # that set rest still bounds the code spans before it
-            if not ln.strip(b" "):
+    src, found = js_text(body), []
+    try:
+        md_walk(MdLexer(len(src)).block(src, []), found)
+    except (MdStop, RecursionError) as e:
+        return [], (str(e) + ", from which Triforge reads no import") if where else ""
+    if not where:
+        return found, ""
+    tail = src + ("\n" if src and not src.endswith("\n") else "") + "@AGENTS.md\n"
+    try:
+        tokens = MdLexer(len(tail)).block(tail, [])
+    except (MdStop, RecursionError) as e:
+        return found, str(e)
+    at = len(tail) - len("@AGENTS.md\n")
+    t = ([None] + [t for t in tokens if t.at <= at])[-1]
+    if t is None or t.at + len(t.raw) <= at:
+        # no token reaches the line: a link reference definition, the one
+        # block marked keeps no token for, took it in
+        return found, "a link reference definition, which takes the line in as its destination or title"
+    line = "line " + str(prefix.count(b"\n") + 1 + tail.count("\n", 0, t.at))
+    if t.type == "code" and t.open:
+        return found, "the fenced code block opened on " + line + ", which is never closed"
+    if t.type == "html":
+        return found, "the HTML block that starts on " + line
+    if t.type in ("blockquote", "list"):
+        # the line joins the last block of the quote or list item: named
+        # when it is a fenced code block or HTML block left open there
+        kind, inner = "quote" if t.type == "blockquote" else "list", t
+        while inner.type in ("blockquote", "list"):
+            sub = inner.tokens if inner.type == "blockquote" else inner.items[-1][2]
+            if not sub:
                 break
-            chunk.append((piece, False))
-            continue
-        title, deftail = deftail, False
-        # an indented line opens no block unless a list item may hold it
-        look = not code or listed
-        listed = listed or bool(LIST.match(ln))
-        f = FENCE.match(content) if look else None
-        if f and (marked or ends or code and b"\t" in ws):
-            rest = "the fence on " + line + " in a quote, a list item or an HTML block, which may run to the end of the file"
-            chunk.append((piece, False))
-            continue
-        if f and not code and i == len(lines) - 1 and not nl:
-            # an unterminated last line may be paragraph text; a line
-            # appended after it makes it an opening fence
-            opened = "the fenced code block its last line (" + line + ") opens"
-            chunk.append((piece, False))
-            continue
-        if f:
-            # a soft one (indented, under a list) may be text that continues
-            # the paragraph, so it and its lines stay in it
-            if code:
-                chunk.append((piece, False))
-            else:
-                flush()
-            fence = (f.group(), len(ws), line, code)
-            continue
-        if not s:
-            ends.pop(b"", None)
-            if not ln.strip(b" "):
-                flush()
-                continue
-        e, after = html_start(content) if look else (None, b"")
-        if ends or e is not None:
-            # an HTML block runs to its closing marker (to the end of the
-            # file without one) or to a blank line; any start may open one,
-            # so each stays open until its own end
-            for stop in [stop for stop in ends if stop and stop in ln.lower()]:
-                del ends[stop]
-            if e is not None and (not e or e not in after.lower()):
-                ends.setdefault(e, line)
-            chunk.append((piece, False))
-            continue
-        d = DEF.match(content) if look else None
-        tail = d.group(2) if d else content if title else b""
-        close = TITLE.get(tail[:1])
-        if d or close:
-            # a link reference definition, or the title of one on the next
-            # line: one with no destination, or a title left open, may run
-            # on over every line after it
-            if d and not d.group(1) or close and close not in tail[1:]:
-                rest = "the link reference definition on " + line + ", whose title may run to the end of the file"
-            deftail = bool(d) and not tail
-            chunk.append((piece, False))
-            continue
-        chunk.append((piece, not code))
-    flush()
-    if fence and not fence[3]:
-        opened = "the fenced code block opened on " + fence[2] + ", which is never closed"
-    elif ends:
-        opened = "the HTML block that starts on " + min(ends.values(), key=lambda v: int(v[5:]))
-    return found, rest or opened
+            inner = sub[-1]
+        what = "the fenced code block in " if inner.type == "code" and inner.open else "the HTML block in " if inner.type == "html" else ""
+        return found, what + "the " + kind + " that starts on " + line + ", which may take the line in"
+    return found, ""
 
 
 def imports(path, data, targets):
@@ -1072,7 +1530,7 @@ def add_import(fn, arg, yes):
         # refused before any plan, also with --yes, naming where
         alt = "" if same_file(path, os.path.join(project, own)) else "; or put the line " + import_line(own, project, project) + " in " + os.path.join(project, own) + " instead, which loads it for this project only"
         agents = os.path.join(project, "AGENTS.md")
-        where = md_scan(data)[1]
+        where = md_scan(data, True)[1]
         if where:
             return refuse(fn, path + " ends inside " + where + ", so the line " + line + " appended there would not read back as an import of " + agents + " (Claude Code reads an import from Markdown text only); close it first, or add the line yourself outside it" + alt)
         return refuse(fn, path + " would not read back the line " + line + ", appended at its end, as an import of " + agents + " (Claude Code reads an import from Markdown text only, never from front matter, a code span or inline HTML, nor one whose * or _ pairs with another in its paragraph, and reads no file over " + str(MD_MAX) + " bytes); add the line yourself where Claude Code reads it" + alt)
@@ -1272,13 +1730,42 @@ except OSError as e:
 '
 
 # _instr_py <op> <helper> <args...> — run _INSTR_PY (rc 69 without python3).
+# With _INSTR_SECS set (session start sets it for its detect pass, which a
+# file it is handed must not stall), python3 is given up on after that many
+# seconds, as the hook bounds its other steps: a SIGTERM, then a SIGKILL 2 s
+# later, under timeout or gtimeout (-k 2s) when one is on PATH, else under a
+# watchdog that signals the python3 it started in the background (a launcher
+# that execs keeps that pid; a sleep that fails signals nothing) and whose
+# stdio is /dev/null, so it holds no pipe of the caller open. A run given up
+# on returns nonzero: 124 or 137 from the timeout binary, 143 or 137 from the
+# watchdog. The braces take the line bash prints when the SIGKILL timeout
+# sends its process group ends timeout too; python3 writes to the caller's
+# stderr through fd 3.
 _instr_py() {
+  local P T PID DOG RC=0
   if ! command -v python3 >/dev/null 2>&1; then
     printf '%s: python3 not found — the instruction-file helpers need it (rc 69)\n' "$2" >&2
     return 69
   fi
-  python3 -c "${_READ_REGULAR_PY:-$_INSTR_READ_PY}
-${_INSTR_PY}" "$@"
+  P="${_READ_REGULAR_PY:-$_INSTR_READ_PY}
+${_INSTR_PY}"
+  if [ -z "${_INSTR_SECS:-}" ]; then
+    python3 -c "$P" "$@"
+    return $?
+  fi
+  T=$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)
+  if [ -n "$T" ]; then
+    { "$T" -k 2s "${_INSTR_SECS}s" python3 -c "$P" "$@" 2>&3; } 3>&2 2>/dev/null
+    return $?
+  fi
+  python3 -c "$P" "$@" </dev/null &
+  PID=$!
+  ( sleep "$_INSTR_SECS" && kill "$PID" && sleep 2 && kill -9 "$PID" ) </dev/null >/dev/null 2>&1 &
+  DOG=$!
+  wait "$PID" 2>/dev/null || RC=$?
+  kill "$DOG" 2>/dev/null || true
+  wait "$DOG" 2>/dev/null || true
+  return "$RC"
 }
 
 # _instr_writer_ok <helper> — 0 in a lead context: _lead_only --any-host when
