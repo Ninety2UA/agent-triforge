@@ -12409,6 +12409,144 @@ for _S16B_D in $_S16B_MKC; do
 done
 # shellcheck disable=SC2086
 _S16_FAIL="${_S16_FAIL}$(_s16b_same b-mk-controls-untouched "$_S16B_SUM" "$(_s16b_sum $_S16B_MKF)")"
+
+# bounds (review round 5, R5-B): md_scan reads no import past a bound and
+# counts none it found ahead of one: a file over MD_MAX (4194304 bytes) is
+# not lexed, and MdLexer stops past 40 nested quotes or list levels, past its
+# step bound and past its work bound. Each CLAUDE.md past a bound holds
+# @AGENTS.md on its second line, ahead of what trips it: detect no-import,
+# visibility hidden, instruction_add_import --yes refused rc 2 naming the
+# bound in a sentence of its own (no block to close there), the file
+# unchanged. A file of MD_MAX bytes with no import, which the line would take
+# past MD_MAX: the same, the refusal naming the size it would reach. Each
+# control, just under its bound (40 quotes, 40 list levels, MD_MAX bytes, 1%
+# under the steps, 4% under the work), imports: detect imports, visibility
+# visible, the import unchanged
+_S16B_CP="$_S16B_W/cap"
+_s16b_capmk() { # _s16b_capmk <project> — a project in $_S16B_CP whose CLAUDE.md holds "# own", @AGENTS.md and a blank line, then stdin
+  _s16b_proj "$_S16B_CP/$1"
+  { printf '# own\n@AGENTS.md\n\n'; cat; } > "$_S16B_CP/$1/CLAUDE.md"
+}
+_s16b_cap() { # _s16b_cap <case> <project> <ERE of the refusal after "<CLAUDE.md path> "> — the checks above for a CLAUDE.md in $_S16B_CP/<project> past a bound
+  local C=$1 P="$_S16B_CP/$2" O S
+  S=$(_s16b_sum "$P/CLAUDE.md")
+  O=$(_s16b "$P" instruction_files_detect)
+  _self_expect "$C-detect" "$O" "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/w/cap/$2/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$'
+  O=$(_s16b "$P" instruction_pointer_visibility claude)
+  _self_expect "$C-vis" "$O" "^claude${T}hidden${T}shadowed by [^ ]*/w/cap/$2/CLAUDE\.md: " '^rc=1$'
+  O=$(_s16b "$P" instruction_add_import CLAUDE.md --yes)
+  _self_expect "$C-yes" "$O" "^instruction_add_import: REFUSED — [^ ]*/w/cap/$2/CLAUDE\\.md $3" '^rc=2$'
+  _s16b_not "$C-yes" "$O" '^(needs-ask|changed|unchanged):'
+  _s16b_same "$C-untouched" "$S" "$(_s16b_sum "$P/CLAUDE.md")"
+}
+_s16b_capok() { # _s16b_capok <case> <project> — a control just under its bound in $_S16B_CP/<project>: imports, visible, the import unchanged, the file untouched
+  local C=$1 P="$_S16B_CP/$2" O S
+  S=$(_s16b_sum "$P/CLAUDE.md")
+  O=$(_s16b "$P" instruction_files_detect)
+  _self_expect "$C" "$O" "^CLAUDE\.md${T}project${T}imports,user-owned${T}[^${T}]*/w/cap/$2/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$'
+  O=$(_s16b "$P" instruction_pointer_visibility claude)
+  _self_expect "$C-vis" "$O" "^claude${T}visible${T}[^ ]*/w/cap/$2/CLAUDE\.md imports " '^rc=0$'
+  O=$(_s16b "$P" instruction_add_import CLAUDE.md --yes)
+  _self_expect "$C-import" "$O" '^unchanged: ' '^rc=0$'
+  _s16b_same "$C-untouched" "$S" "$(_s16b_sum "$P/CLAUDE.md")"
+}
+{ head -c 41 /dev/zero | tr '\0' '>'; printf ' x\n'; } | _s16b_capmk quote
+{ head -c 40 /dev/zero | tr '\0' '>'; printf ' x\n'; } | _s16b_capmk quote-ctl
+{ yes '- ' | head -n 41 | tr -d '\n'; printf 'x\n'; } | _s16b_capmk list
+{ yes '- ' | head -n 40 | tr -d '\n'; printf 'x\n'; } | _s16b_capmk list-ctl
+{ printf '```\n'; head -c 4194278 /dev/zero | tr '\0' x; printf '\n```\n'; } | _s16b_capmk size
+{ printf '```\n'; head -c 4194277 /dev/zero | tr '\0' x; printf '\n```\n'; } | _s16b_capmk size-ctl
+yes '#' | head -n 404000 | _s16b_capmk steps
+yes '#' | head -n 396000 | _s16b_capmk steps-ctl
+awk 'BEGIN { for (i = 0; i < 921; i++) printf ">     c\nl\n" }' | _s16b_capmk work
+awk 'BEGIN { for (i = 0; i < 885; i++) printf ">     c\nl\n" }' | _s16b_capmk work-ctl
+_s16b_proj "$_S16B_CP/size-line"
+{ printf '# own\n\n```\n'; head -c 4194288 /dev/zero | tr '\0' x; printf '\n```\n'; } > "$_S16B_CP/size-line/CLAUDE.md"
+_S16B_N="$(wc -c < "$_S16B_CP/size/CLAUDE.md" | tr -d ' ') $(wc -c < "$_S16B_CP/size-ctl/CLAUDE.md" | tr -d ' ') $(wc -c < "$_S16B_CP/size-line/CLAUDE.md" | tr -d ' ')"
+[ "$_S16B_N" = "4194305 4194304 4194304" ] || _S16_FAIL="${_S16_FAIL} b-cap-size(built:${_S16B_N})"
+_S16B_CAPB=', and Triforge reads no import from such a file, so the line would not read back as an import of [^ ]*/AGENTS\.md there; add the line yourself where Claude Code reads it \(rc 2\)$'
+_S16B_CAPS=' the 4194304 bytes Claude Code reads an import from, and Triforge reads no import from such a file either, so the line @AGENTS\.md would not read back as an import of [^ ]*/AGENTS\.md there; shorten the file, or add the line yourself where Claude Code reads it \(rc 2\)$'
+_S16_FAIL="${_S16_FAIL}$(_s16b_cap b-cap-quote quote "with the line @AGENTS\\.md appended holds Markdown nested more than 40 quotes and lists deep${_S16B_CAPB}")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_cap b-cap-list list "with the line @AGENTS\\.md appended holds Markdown nested more than 40 quotes and lists deep${_S16B_CAPB}")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_cap b-cap-size size "is more than${_S16B_CAPS}")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_cap b-cap-size-line size-line "would be 4194315 bytes with the line @AGENTS\\.md appended, more than${_S16B_CAPS}")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_cap b-cap-steps steps "with the line @AGENTS\\.md appended holds more Markdown blocks than Triforge reads in time${_S16B_CAPB}")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_cap b-cap-work work "with the line @AGENTS\\.md appended holds more Markdown than Triforge reads in time${_S16B_CAPB}")"
+for _S16B_D in quote-ctl list-ctl size-ctl steps-ctl work-ctl; do
+  _S16_FAIL="${_S16_FAIL}$(_s16b_capok "b-cap-$_S16B_D" "$_S16B_D")"
+done
+
+# the read cap (review round 5, R5-B): a CLAUDE.md-family file is read to
+# MD_MAX + 1 bytes at most (load_md), as no import is read past MD_MAX and
+# the import refuses such a file, so a huge one is never read whole. A sparse
+# 256 MiB CLAUDE.md holding @AGENTS.md on its second line: detect no-import,
+# visibility hidden, instruction_add_import --yes refused rc 2 naming the
+# size, the file unchanged, each of the three under 128 MiB resident where
+# /usr/bin/time -l reports it (reading the whole file takes 256 MiB)
+if /usr/bin/time -l true >/dev/null 2>&1; then _S16B_TIMEL=1; else _S16B_TIMEL=0; fi
+_s16b_rss() { # _s16b_rss <dir> <helper> [args...] — _s16b under /usr/bin/time -l (plain _s16b without one): its lines, "rc=<n>", then "rss=<bytes>", empty when not reported
+  local D=$1 R=0 O
+  shift
+  if [ "$_S16B_TIMEL" != 1 ]; then
+    _s16b "$D" "$@"
+    echo "rss="
+    return 0
+  fi
+  O=$(cd "$D" && HOME="$_S16B/home" CODEX_HOME="$_S16B/home/.codex" /usr/bin/time -l ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 60} /bin/bash -c 'source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 97; shift; "$@"' _ "$REPO_ROOT" "$@" 2>&1) || R=$?
+  printf '%s\nrc=%s\nrss=%s\n' "$O" "$R" "$(printf '%s\n' "$O" | sed -n 's/^ *\([0-9][0-9]*\)  *maximum resident set size.*$/\1/p' | head -n 1)"
+}
+_s16b_rssok() { # _s16b_rssok <case> <output of _s16b_rss> — " <case>(rss:<bytes>)" over 128 MiB, " <case>(rss:none)" when time -l ran and reported none
+  local R
+  R=$(printf '%s\n' "$2" | sed -n 's/^rss=//p' | tail -n 1)
+  if [ "$_S16B_TIMEL" = 1 ] && [ -z "$R" ]; then
+    printf ' %s(rss:none)' "$1"
+  elif [ -n "$R" ] && [ "$R" -gt 134217728 ]; then
+    printf ' %s(rss:%s)' "$1" "$R"
+  fi
+}
+_s16b_proj "$_S16B_CP/huge"
+dd if=/dev/zero of="$_S16B_CP/huge/CLAUDE.md" bs=1 count=0 seek=268435456 2>/dev/null
+printf '# own\n@AGENTS.md\n' | dd of="$_S16B_CP/huge/CLAUDE.md" conv=notrunc 2>/dev/null
+_S16B_SUM=$(_s16b_sum "$_S16B_CP/huge/CLAUDE.md")
+_O=$(_s16b_rss "$_S16B_CP/huge" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-detect "$_O" "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/w/cap/huge/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$')$(_s16b_rssok b-cap-huge-detect "$_O")"
+_S16B_RSSV="detect $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+_O=$(_s16b_rss "$_S16B_CP/huge" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-vis "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/w/cap/huge/CLAUDE\.md: " '^rc=1$')$(_s16b_rssok b-cap-huge-vis "$_O")"
+_S16B_RSSV="${_S16B_RSSV}, visibility $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+_O=$(_s16b_rss "$_S16B_CP/huge" instruction_add_import CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-yes "$_O" "^instruction_add_import: REFUSED — [^ ]*/w/cap/huge/CLAUDE\\.md is more than${_S16B_CAPS}" '^rc=2$')$(_s16b_rssok b-cap-huge-yes "$_O")"
+_S16B_RSSV="${_S16B_RSSV}, import $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-cap-huge-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_CP/huge/CLAUDE.md")")"
+rm -f "$_S16B_CP/huge/CLAUDE.md"
+[ "$_S16B_TIMEL" = 1 ] || _S16B_RSSV="SKIPPED (no /usr/bin/time -l)"
+
+# linear at 1 MiB (review round 5, R5-B): the shapes the reader took
+# quadratic time on at 5fcb6e0, each a 1 MiB CLAUDE.md importing AGENTS.md
+# ahead of it: front matter that never closes (--- then 1 MiB of newlines),
+# a fence opened by 1 MiB of ~ and never closed, a paragraph whose last line
+# is 1 MiB of ~ with no newline, a <script> block whose last line holds
+# 116508 </script> and no newline, and a comment block whose line holds
+# 262144 more <!--. detect reads each import within 20 s, under the harness
+# timeout (-k 5), so a quadratic reader fails here in 20 s a file instead of
+# holding the gate for hours
+_S16B_LIN="$_S16B_W/lin"
+for _S16B_D in front fence para script comment; do _s16b_proj "$_S16B_LIN/$_S16B_D"; done
+{ printf '%s' '---'; head -c 1048576 /dev/zero | tr '\0' '\n'; printf '@AGENTS.md\n'; } > "$_S16B_LIN/front/CLAUDE.md"
+{ printf '# own\n@AGENTS.md\n\n'; head -c 1048576 /dev/zero | tr '\0' '~'; printf '\n'; } > "$_S16B_LIN/fence/CLAUDE.md"
+{ printf '# own\n@AGENTS.md\n'; head -c 1048576 /dev/zero | tr '\0' '~'; } > "$_S16B_LIN/para/CLAUDE.md"
+{ printf '# own\n@AGENTS.md\n\n<script>'; yes '</script>' | head -n 116508 | tr -d '\n'; } > "$_S16B_LIN/script/CLAUDE.md"
+{ printf '# own\n@AGENTS.md\n\n<!-- -->'; yes '<!--' | head -n 262144 | tr -d '\n'; printf '\n'; } > "$_S16B_LIN/comment/CLAUDE.md"
+_S16B_LINS=""
+for _S16B_D in front fence para script comment; do
+  _S16B_T0=$(date +%s)
+  _O=$(cd "$_S16B_LIN/$_S16B_D" && HOME="$_S16B/home" CODEX_HOME="$_S16B/home/.codex" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/bash -c 'source "$1/scripts/lib/instructions.sh" && instruction_files_detect' _ "$REPO_ROOT" 2>&1; echo "rc=$?")
+  _S16B_T1=$(( $(date +%s) - _S16B_T0 ))
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-lin-$_S16B_D" "$_O" "^CLAUDE\.md${T}project${T}imports,user-owned${T}[^${T}]*/w/lin/$_S16B_D/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$')"
+  [ "$_S16B_T1" -lt 20 ] || _S16_FAIL="${_S16_FAIL} b-lin-$_S16B_D(stalled:${_S16B_T1}s)"
+  _S16B_LINS="${_S16B_LINS} ${_S16B_D} ${_S16B_T1}s"
+done
+_S16_EV="${_S16_EV}B bounds and time (b-cap-*: past 40 nested quotes, past 40 list levels, a file of 4194305 bytes, one of 4194304 the line would take past that, past the step and the work bounds, @AGENTS.md ahead of each: no-import, hidden, the import refused rc 2 naming the bound, unchanged; 40 quotes, 40 levels, 4194304 bytes, 1% under the steps and 4% under the work import; a sparse 256 MiB CLAUDE.md read to 4194305 bytes, resident bytes: ${_S16B_RSSV}; b-lin-*: 1 MiB of front matter never closed, of ~ opening a fence, of ~ ending a paragraph, of </script> and of <!-- on a last line, each read whole and importing in${_S16B_LINS}); "
 _S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file), an import line written or offered only when it reads back as the project's import (b-space-*, a project path with whitespace, a tab too; b-tilde-*, a directory named ~ on the way down: the import into the CLAUDE.md above refused rc 2 before any plan, without and twice with --yes, unchanged; the import column -, visibility and session start naming the project's own CLAUDE.md alone; the .claude/CLAUDE.md beside it, whose @../~/proj/AGENTS.md reads back, still planned), an import read in Markdown text, its path whole (b-fence-*, b-name-*: one in a fence or padded code span, Read @AGENTS.md. or (see @AGENTS.md) is none: no-import, hidden with the fix, the line appended, then unchanged; a file ending in an open fence or comment, an import of c#app or app[1] from above: rc 2, unchanged; a plain line, one after a closed or list-indented fence, @AGENTS.md#setup import), an import in a link title is none (b-title-*: [x](a(b) \"t @AGENTS.md \"), [x](a\\) ..., the Markdown_(syntax) link, the image form, a (title), a title on the next line: no-import, hidden with the fix, the line appended, then unchanged; see @AGENTS.md and one after [y](a(b)c) import), one whose _ may pair as emphasis is none (b-emphasis-*: @_app/AGENTS.md with z_ in its paragraph no-import, hidden; in another paragraph imports, visible), the reader is linear (b-slow: 100 KB of ](, a 40 KB backslash run and 3000 <? before the import, read in ${_S16B_SLOW}s of the 20 s allowed) and bounded (b-bound: _INSTR_SECS=1 gives up on a python3 that ignores SIGTERM in 1 s + the 2 s SIGKILL grace, rc 137, nothing printed, the stub gone, under ${_S16B_BOUND} and the watchdog), an import a path takes in or a block hides is none (b-join-*: @x\\ @AGENTS.md; b-tail-*: <?x?><div>, <!x y><a>, two lines, a quote; b-tab-*: >\\t<div>, -\\t<div>: no-import, hidden, appended, unchanged; controls import), the block structure as marked lexes it (b-mk-*: a tag name ending its line, a > stripped from a code line, a lazy HTML line in a quote, a lazy fence ending a quote in a list item, a 2. after paragraph text, a closing tag over lines, an item ended before a definition title, a definition label over lines: no-import, hidden, appended, unchanged; one control per family imports); "
 rm -rf "$_S16B"
 # --- end of SELF-16 section B ---

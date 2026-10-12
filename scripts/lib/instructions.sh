@@ -185,7 +185,11 @@ END = b"<!-- triforge:end -->"
 # (SEP), \s* and ")"
 MD_MAX = 4194304
 JS_SPACE = r"[\t\n\x0b\x0c\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
-FRONT = re.compile(r"---" + JS_SPACE + r"*\n[\s\S]*?---" + JS_SPACE + r"*\n?")
+# the front matter pattern of Claude Code, ---\s*\n[\s\S]*?---\s*\n?, with
+# its first \s*\n taken once in a lookahead (no search re-enters one): a
+# shorter run gains nothing, as no --- starts in it, and retrying each one is
+# quadratic in a long run
+FRONT = re.compile(r"---(?=(" + JS_SPACE + r"*\n))\1[\s\S]*?---" + JS_SPACE + r"*\n?")
 JS_TRIM = "\t\n\x0b\x0c\r \xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 JS_WS = "\t\n\x0b\x0c\r \xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 JS_DOT = "[^\n\r\u2028\u2029]"
@@ -193,18 +197,25 @@ JS_BOL = "(?:\\A|(?<=[\n\r\u2028\u2029]))"
 ASTRAL = re.compile("[\U00010000-\U0010ffff]")
 MK_TAGS = "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
 MK_HR_SRC = " {0,3}((?:-[\t ]*){3,}|(?:_[ \t]*){3,}|(?:\\*[ \t]*){3,})(?:\n+|\\Z)"
-MK_PARA_SRC = ("[^\n]+(?:\n(?!" + MK_HR_SRC + "| {0,3}#{1,6}(?:" + JS_SPACE + "|\\Z)| {0,3}>| {0,3}(?:`{3,}(?=[^`\n]*\n)|~{3,})[^\n]*\n"
+# the fence that interrupts a paragraph is ~{3,}[^\n]*\n in marked: ~{3} and
+# [^\n]*\n match the same lines, and in a lookahead only whether one does
+# counts, while ~{3,} retries every shorter run on a last line of ~ with no
+# newline, which is quadratic in it
+MK_PARA_SRC = ("[^\n]+(?:\n(?!" + MK_HR_SRC + "| {0,3}#{1,6}(?:" + JS_SPACE + "|\\Z)| {0,3}>| {0,3}(?:`{3,}(?=[^`\n]*\n)|~{3})[^\n]*\n"
                "| {0,3}(?:[*+-]|1[.)]) |</?(?:" + MK_TAGS + ")(?: +|\n|/?>)|<(?:script|pre|style|textarea|!--)| +\n)[^\n]+)*")
 MK_NEWLINE = re.compile("(?:[ \t]*(?:\n|\\Z))+")
 MK_CODE = re.compile("(?:(?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|\\Z))*)?)+")
-MK_FENCES = re.compile(" {0,3}(`{3,}(?=[^`\n]*(?:\n|\\Z))|~{3,})([^\n]*)(?:\n|\\Z)(?:|([\\s\\S]*?)(?:\n|\\Z))(?: {0,3}\\1[~`]* *(?=\n|\\Z)|\\Z)")
-MK_FENCES_SHUT = re.compile(" {0,3}(`{3,}(?=[^`\n]*(?:\n|\\Z))|~{3,})([^\n]*)(?:\n|\\Z)(?:|([\\s\\S]*?)(?:\n|\\Z))(?: {0,3}\\1[~`]* *(?=\n|\\Z))")
+MK_FENCES = re.compile(" {0,3}(`{3,}(?=[^`\n]*(?:\n|\\Z))|~{3,})([^\n]*)(?:\n|\\Z)(?:|([\\s\\S]*?)(?:\n|\\Z))(?:( {0,3}\\1[~`]* *)(?=\n|\\Z)|\\Z)")
 MK_HEADING = re.compile(" {0,3}(#{1,6})(?=" + JS_SPACE + "|\\Z)(" + JS_DOT + "*)(?:\n+|\\Z)")
 MK_HR = re.compile(MK_HR_SRC)
 MK_QUOTE = re.compile("(?: {0,3}> ?(?:" + MK_PARA_SRC + "|[^\n]*)(?:\n|\\Z))+")
 MK_LIST = re.compile("( {0,3}(?:[*+-]|[0-9]{1,9}[.)]))(?:[ \t][^\n]+?)?(?:\n|\\Z)")
+# an HTML block of type 1 ends after the line of its first closing tag that a
+# newline follows, marked reading </\1>[^\n]*\n+ there: tried from each such
+# tag only up to the next one on its line, the end is the same, and a last
+# line of them with no newline is no longer read again from each of them
 MK_HTML = re.compile(
-    " {0,3}(?:<(script|pre|style|textarea)[" + JS_WS + ">][\\s\\S]*?(?:</\\1>[^\n]*\n+|\\Z)"
+    " {0,3}(?:<(script|pre|style|textarea)[" + JS_WS + ">][\\s\\S]*?(?:</\\1>(?:(?!</\\1>)[^\n])*\n+|\\Z)"
     "|<!--(?:-?>|[\\s\\S]*?(?:-->|\\Z))[^\n]*(\n+|\\Z)|<\\?[\\s\\S]*?(?:\\?>\n*|\\Z)|<![A-Z][\\s\\S]*?(?:>\n*|\\Z)"
     "|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>\n*|\\Z)|</?(" + MK_TAGS + ")(?: +|\n|/?>)[\\s\\S]*?(?:(?:\n[ \t]*)+\n|\\Z)"
     "|<(?!script|pre|style|textarea)([a-z][\\w-]*)(?: +[a-zA-Z:_][\\w.:-]*(?: *= *\"[^\"\n]*\"| *= *\x27[^\x27\n]*\x27| *= *[^" + JS_WS + "\"\x27=<>`]+)?)*? */?>(?=[ \t]*(?:\n|\\Z))[\\s\\S]*?(?:(?:\n[ \t]*)+\n|\\Z)"
@@ -229,9 +240,8 @@ MK_BLANK = re.compile("[ \t]*\\Z")
 MK_NONSPACE = re.compile("[^ ]")
 MK_TABS = re.compile("^\t+")
 # what Claude Code reads in an HTML block that opens with a comment: the rest
-# outside its comments (MK_COMMENT), each @ at its start or after a
+# outside its comments (uncomment), each @ at its start or after a
 # JavaScript space and the path after it (MK_AT)
-MK_COMMENT = re.compile("<!--[\\s\\S]*?-->")
 MK_AT = re.compile("(?:^|" + JS_SPACE + ")@((?:[^" + JS_WS + "\\\\]|\\\\ )+)")
 TITLE = {b"\"": b"\"", b"\x27": b"\x27", b"(": b")"}
 INLINE = re.compile(rb"<(!--|\?|!\[CDATA\[|!(?=[A-Za-z])|/?(?=[A-Za-z]))|<()(?=[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@)|\]\(")
@@ -348,6 +358,25 @@ def load(p):
         return None
 
 
+def load_md(p):
+    # a CLAUDE.md-family file as md_scan needs it: no more than its first
+    # MD_MAX + 1 bytes, which already tell a file over MD_MAX (no import is
+    # read from it, and add_import refuses it before any write), so a huge
+    # file is never read whole. read_regular reads to the end, so its checks
+    # are made here the same way: O_NONBLOCK (a FIFO never stalls), a regular
+    # file only; None when unreadable. The 3.x fingerprint reads the same
+    # bytes: no file over MD_MAX is an exact copy (exact_3x), and is_3x looks
+    # for the template lines in the first MD_MAX + 1 bytes
+    try:
+        fd = os.open(p, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+        with os.fdopen(fd, "rb") as f:
+            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                return None
+            return f.read(MD_MAX + 1)
+    except (OSError, ValueError):
+        return None
+
+
 def level_file(r, level, name="AGENTS.md"):
     # the one file the reader takes from a directory: its override over <name>
     for n in ([r["override"]] if r["override"] else []) + [name]:
@@ -443,6 +472,13 @@ class MdStop(Exception):
     pass
 
 
+class MdBound(str):
+    # the where of md_scan when it read no import because a bound stopped
+    # it (the file size, work, steps or nesting): the reason, which
+    # add_import names in a sentence of its own (no block holds the line)
+    pass
+
+
 class MdTok:
     # a marked block token: its type, raw and text (lists of parts, joined
     # when read), the tokens of a blockquote, the items of a list ([raw,
@@ -475,7 +511,7 @@ class MdLexer:
     # raw (so a quote ends at a code block and its lazy lines are lexed again
     # outside it). Bounded: work (characters lexed and scanned, nested
     # sources again) and steps (blocks, list lines, quote groups) grow with
-    # the file, nesting stops at 40; past one MdStop
+    # the file, nesting stops past 40 quotes and lists; past one MdStop
     def __init__(self, size):
         self.top = True
         self.work, self.steps, self.depth = 0, 0, 0
@@ -493,8 +529,9 @@ class MdLexer:
             raise MdStop("more Markdown blocks than Triforge reads in time")
 
     def block(self, src, tokens, clipped=False):
+        # depth: the top level, then one per quote or list item around src
         self.depth += 1
-        if self.depth > 40:
+        if self.depth > 41:
             raise MdStop("Markdown nested more than 40 quotes and lists deep")
         self.charge(len(src))
         pos, n = 0, len(src)
@@ -521,9 +558,13 @@ class MdLexer:
                 continue
             m = MK_FENCES.match(src, pos)
             if m:
+                # open: the match ended at the end of src, not at a closing
+                # fence (group 4), as marked reads it; a second search for a
+                # close would retry every shorter opening run, which is
+                # quadratic in a long one
                 pos = m.end()
                 tokens.append(MdTok("code", at, m.group()))
-                tokens[-1].open = MK_FENCES_SHUT.match(src, at) is None
+                tokens[-1].open = m.group(4) is None
                 continue
             m = MK_HEADING.match(src, pos)
             if m:
@@ -1120,15 +1161,31 @@ def text_words(text):
     return [m for p, m in words if not held(p) and not spanned(p) and not paired(p + 1, p + 1 + len(m.group(1)))]
 
 
+def uncomment(raw):
+    # raw with its comments dropped, as Claude Code replaces <!--[\s\S]*?-->
+    # throughout: each <!-- to the first --> after it. A <!-- with no -->
+    # after it ends the search, since no later one has one either (the
+    # regex would scan to the end again from each of them)
+    parts, at = [], 0
+    while True:
+        s = raw.find("<!--", at)
+        e = raw.find("-->", s + 4) if s >= 0 else -1
+        if e < 0:
+            parts.append(raw[at:])
+            return "".join(parts)
+        parts.append(raw[at:s])
+        at = e + 3
+
+
 def html_words(raw):
     # the IMPORT matches Claude Code reads in an HTML block (raw, its marked
     # source): only in one that opens with a comment and closes one, outside
-    # its comments (MK_COMMENT), each path after an @ at the start or after a
+    # its comments (uncomment), each path after an @ at the start or after a
     # JavaScript space (MK_AT), read whole (path_ok), no backslash in it
     lead = raw.lstrip(JS_TRIM)
     if not lead.startswith("<!--") or "-->" not in lead:
         return []
-    rest = MK_COMMENT.sub("", raw)
+    rest = uncomment(raw)
     found = []
     for w in MK_AT.finditer(rest):
         m = None if "\\" in w.group(1) else IMPORT.fullmatch(b"@" + js_bytes(w.group(1)))
@@ -1153,27 +1210,33 @@ def md_walk(tokens, found):
                 md_walk(item[2], found)
 
 
+def md_stop(e):
+    # the MdBound for what stopped MdLexer
+    return MdBound(str(e) if isinstance(e, MdStop) else "Markdown nested deeper than Triforge reads")
+
+
 def md_scan(data, where=False):
     # (found, open): the IMPORT matches Claude Code reads as text in data
     # (md_walk over the tokens MdLexer reads, none when it stops), and with
     # where the construct a line appended to data lands in when it is no
     # text there ("" for none or without where): the top-level block that
-    # takes the line @AGENTS.md appended, read the same way
+    # takes the line @AGENTS.md appended, read the same way, or an MdBound
+    # when a bound stops the reading of data, or of data with that line
     if len(data) > MD_MAX:
-        return [], ""
+        return [], MdBound("more than " + str(MD_MAX) + " bytes") if where else ""
     prefix, body = md_body(data)
     src, found = js_text(body), []
     try:
         md_walk(MdLexer(len(src)).block(src, []), found)
     except (MdStop, RecursionError) as e:
-        return [], (str(e) + ", from which Triforge reads no import") if where else ""
+        return [], md_stop(e) if where else ""
     if not where:
         return found, ""
     tail = src + ("\n" if src and not src.endswith("\n") else "") + "@AGENTS.md\n"
     try:
         tokens = MdLexer(len(tail)).block(tail, [])
     except (MdStop, RecursionError) as e:
-        return found, str(e)
+        return found, md_stop(e)
     at = len(tail) - len("@AGENTS.md\n")
     t = ([None] + [t for t in tokens if t.at <= at])[-1]
     if t is None or t.at + len(t.raw) <= at:
@@ -1319,7 +1382,7 @@ def kind_names(kinds):
 
 
 def row(kind, where, path, level, project):
-    data = load(path)
+    data = load_md(path) if kind in CLAUDE_KINDS else load(path)
     if data is None:
         states = ["unreadable"]
     elif kind in CLAUDE_KINDS:
@@ -1492,7 +1555,7 @@ def reach(lead, r, cwd):
             tail += ": no " + kind_names(r["shadow"]) + " at " + cwd + " or above"
         else:
             for p in [s[0] for s in shadows] + [u for u in user_tiers() if lexists(u)]:
-                d = load(p)
+                d = load_md(p)
                 if d is not None and imports(p, d, set(l for _, l, _ in pointers)):
                     return say(lead, "visible", p + " imports " + pointer + ", so it is loaded with that file" + note)
             p, kind, level = shadows[0]
@@ -1558,7 +1621,9 @@ def write_file(dirpath, name, old, new):
                 st = os.fstat(f.fileno())
                 if not stat.S_ISREG(st.st_mode):
                     return "it is no longer a regular file"
-                cur, mode = f.read(), stat.S_IMODE(st.st_mode)
+                # one byte past old at most: a longer file differs from old
+                # all the same, and a huge one is never read whole
+                cur, mode = f.read(0 if old is None else len(old) + 1), stat.S_IMODE(st.st_mode)
         if cur != old:
             return "it changed while the change was planned"
         for _ in range(8):
@@ -1603,7 +1668,7 @@ def add_import(fn, arg, yes):
         return refuse(fn, path + " is neither in this project (" + project + ") nor above it, so it never shadows its AGENTS.md")
     if not lexists(path):
         return refuse(fn, path + " does not exist; nothing shadows AGENTS.md there")
-    data = load(path)
+    data = load_md(path)
     if data is None:
         return refuse(fn, path + " is not a regular file")
     if imports(path, data, {project}):
@@ -1623,10 +1688,19 @@ def add_import(fn, arg, yes):
         # refused before any plan, also with --yes, naming where
         alt = "" if same_file(path, os.path.join(project, own)) else "; or put the line " + import_line(own, project, project) + " in " + os.path.join(project, own) + " instead, which loads it for this project only"
         agents = os.path.join(project, "AGENTS.md")
+        if len(new) > MD_MAX:
+            # a size bound: Claude Code reads no import from the file, and
+            # data may be only its first MD_MAX + 1 bytes (load_md)
+            size = "is more than" if len(data) > MD_MAX else "would be " + str(len(new)) + " bytes with the line " + line + " appended, more than"
+            return refuse(fn, path + " " + size + " the " + str(MD_MAX) + " bytes Claude Code reads an import from, and Triforge reads no import from such a file either, so the line " + line + " would not read back as an import of " + agents + " there; shorten the file, or add the line yourself where Claude Code reads it" + alt)
         where = md_scan(data, True)[1]
+        if isinstance(where, MdBound):
+            # another bound: the file holds more, or deeper, Markdown than
+            # MdLexer reads, so no import is read from it, the line included
+            return refuse(fn, path + " with the line " + line + " appended holds " + where + ", and Triforge reads no import from such a file, so the line would not read back as an import of " + agents + " there; add the line yourself where Claude Code reads it" + alt)
         if where:
             return refuse(fn, path + " ends inside " + where + ", so the line " + line + " appended there would not read back as an import of " + agents + " (Claude Code reads an import from Markdown text only); close it first, or add the line yourself outside it" + alt)
-        return refuse(fn, path + " would not read back the line " + line + ", appended at its end, as an import of " + agents + " (Claude Code reads an import from Markdown text only, never from front matter, a code span or inline HTML, nor one whose * or _ pairs with another in its paragraph, and reads no file over " + str(MD_MAX) + " bytes); add the line yourself where Claude Code reads it" + alt)
+        return refuse(fn, path + " would not read back the line " + line + ", appended at its end, as an import of " + agents + " (Claude Code reads an import from Markdown text only, never from front matter, a code span or inline HTML, nor one whose * or _ pairs with another in its paragraph); add the line yourself where Claude Code reads it" + alt)
     plan = "add the line " + line + " to " + path + ", so Claude Code loads " + os.path.join(project, "AGENTS.md") + " with it"
     if lev != project:
         # a file above the project: every project under it loads the import
@@ -1749,7 +1823,7 @@ def convert(fn, arg, template, yes):
     if not lexists(path):
         out("unchanged: " + path + " does not exist; nothing to convert")
         return 0
-    data = load(path)
+    data = load_md(path)
     if data is None:
         return refuse(fn, path + " is not a regular file")
     version = exact_3x(data)
@@ -1783,7 +1857,8 @@ def convert(fn, arg, template, yes):
         try:
             fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
             with os.fdopen(fd, "rb") as f:
-                cur = f.read() if stat.S_ISREG(os.fstat(f.fileno()).st_mode) else None
+                # one byte past data at most, as write_file reads
+                cur = f.read(len(data) + 1) if stat.S_ISREG(os.fstat(f.fileno()).st_mode) else None
         except OSError:
             cur = None
         if cur != data:
@@ -1794,7 +1869,7 @@ def convert(fn, arg, template, yes):
     out("changed: " + path + ": removed (an unmodified copy of the Triforge " + version + " template)")
     for k in CLAUDE_KINDS:
         p = os.path.join(lev, k)
-        d = load(p) if lexists(p) else None
+        d = load_md(p) if lexists(p) else None
         if d is not None and not imports(p, d, {lev}):
             out("note: " + p + " still exists and does not import AGENTS.md, so Claude Code still skips AGENTS.md here; instruction_add_import " + p + " offers the line")
     return 0
