@@ -1,6 +1,6 @@
 # The PR gates (KTD15): shell syntax, both release-gate validators and their
 # fixture self-tests, and the SELF-row gate, on every pull request to main or
-# release/4.0.
+# a release/ branch (release/4.0, release/4.1, ...).
 #
 # macOS runner on purpose: the hook handlers and helper libraries run under
 # /bin/bash 3.2 (macOS), so every script runs under /bin/bash here. No live
@@ -14,7 +14,7 @@ name: gates
 
 on:
   pull_request:
-    branches: [main, "release/4.0"]
+    branches: [main, "release/**"]
   workflow_dispatch:
 
 permissions:
