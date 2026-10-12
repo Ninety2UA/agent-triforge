@@ -10,8 +10,8 @@
 # codex-agents/agents.toml — so non-Claude adapters can read their own role.
 #
 # Override semantics: any field left unset inherits the shipped default
-# (mirrored as built-in defaults inside resolve_role in
-# scripts/invoke-external.sh — deleting this file entirely is safe). A role
+# (the role table in scripts/lib/roster.sh plus the per-CLI registry in
+# scripts/lib/registry.sh — deleting this file entirely is safe). A role
 # overriding only `effort` keeps the default cli + model. The shipped posture
 # is the builder pool: Claude leads builds, Codex reviews and tests,
 # Antigravity analyzes and documents, and validated fallback chains degrade
@@ -21,8 +21,8 @@
 # each chain must terminate at a core-trio member (claude, antigravity,
 # codex), and the core trio cannot be disabled.
 #
-# Guided editing: /setup walks member enrollment AND role assignment (accept
-# the shipped defaults or customize per role) — `/setup roles` jumps straight
+# Guided editing: at-setup walks member enrollment AND role assignment (accept
+# the shipped defaults or customize per role) — `at-setup roles` jumps straight
 # to the role step. Guided role writes go through roster_write_role, which
 # enforces the load rules above before every write; hand-editing this file
 # stays valid too.
@@ -39,7 +39,11 @@
 #     medium -> Medium, high/xhigh/max -> High; families without a (Medium)
 #     variant, such as 3.1 Pro, map medium to (Low)). `agy models` prints the
 #     live catalog.
-#   - Codex pins gpt-6-astra at xhigh (D-021; CDX-03 PASS 2026-09-11).
+#   - Codex pins gpt-6-astra at xhigh (D-021; CDX-03 PASS 2026-09-11). A role
+#     can run another Codex model, e.g. model = "gpt-6.1-sol" (the newest
+#     workhorse, close to Astra at lower cost; it answered on codex 0.160.0
+#     and was refused on 0.155.1),
+#     "gpt-6-sol" or "gpt-6-luna". Codex's /model picker lists the catalog.
 #   - Cursor pins cursor-grok-4.6-xhigh explicitly — the shipped defaults never
 #     select the Auto router. Cursor's effort control is the model-id SUFFIX
 #     (cursor-grok-4.6-low|medium|high|xhigh — D-025, CUR-12), so `effort`
@@ -80,9 +84,25 @@ model = "Gemini 3.8 Flash (High)"   # (High) suffix = agy effort control (see he
 effort = "high"
 fallbacks = ["claude"]
 
+# --- Lead --------------------------------------------------------------------
+# [lead] names the CLI that leads this checkout. The lead plans the work, runs
+# the leases, reviews and merges. Claude Code or Codex can lead; with no [lead]
+# table, Claude Code leads. The lease and roster helpers refuse to run under
+# the other CLI. Switch from either CLI with `at-setup lead`, or with
+# `roster_write_lead <cli>` from scripts/invoke-external.sh. The switch refuses
+# while leases are open; --force hands them to the new lead without spending a
+# requeue.
+#
+# To make Codex the lead, uncomment:
+# [lead]
+# cli = "codex"          # claude | codex
+# model = "gpt-6-astra"  # left out: the CLI's shipped pin (claude: your session's model)
+# effort = "xhigh"       # left out: xhigh for codex, your session's setting for claude
+
 # --- Optional members --------------------------------------------------------
-# Optional members (opencode, kimi, cursor) are enrolled on first detection —
-# the session-start enrollment trigger or /setup writes their entries. They
+# Optional members (opencode, kimi, cursor, devin, grok) are enrolled on first
+# detection — the session-start enrollment trigger or at-setup writes their
+# entries; devin only through at-setup, because it needs your consent first. They
 # must NOT appear as live entries in this shipped template: an existing
 # [members.<cli>] entry is exactly what suppresses the enrollment ask, and a
 # decline persists as `enabled = false` (disabled = absent everywhere — the
@@ -98,6 +118,15 @@ fallbacks = ["claude"]
 # Shipped defaults for the other optional members, same shape:
 # [members.kimi]   -> enabled = true, model = "kimi-code/k3"          (the OAuth-managed alias; `kimi login` provisions it)
 # [members.cursor] -> enabled = true, model = "cursor-grok-4.6-xhigh"  (explicit suffixed pin — NEVER the Auto router)
+# [members.devin]  -> enabled = true, model = "swe-1-6-slow", consent = "user <UTC time> via=<origin>"
+#   Devin CLI sends prompts and code to Cognition, so it is enrolled only with your
+#   consent on record (at-setup asks and writes it; a table without it fails to load).
+#   It reviews and analyzes by default. It builds only after you opt in:
+#   opt_in = ["builder"] (roster_write_member devin true <model> --opt-in builder).
+# [members.grok]   -> enabled = true, model = "grok-4.7"               (effort rides in --effort; `grok login` or XAI_API_KEY)
+#   Grok Build takes the builder, reviewer and analyst roles. A tester or
+#   documenter chain that names it fails to load, because those roles run
+#   outside a lease.
 
 [promotion]
 # KTD-5 user gate: when true, the lead pauses at wave end for explicit user

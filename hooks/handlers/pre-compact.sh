@@ -17,6 +17,14 @@
 #   Audited 2026-09-11: this handler writes ops/STATE.md and prints nothing to
 #   stdout.
 
+# Worker marker (KTD9, R34): in a lease worker or persona (TRIFORGE_LEASE_WORKER
+# set by _adapter_env) this hook does nothing and prints nothing — a worker's
+# CLI may load the plugin's hooks, and they must not write state into its
+# worktree.
+if [ -n "${TRIFORGE_LEASE_WORKER:-}" ]; then
+  exit 0
+fi
+
 set -euo pipefail
 
 _pc_on_exit() {
@@ -83,10 +91,20 @@ EOF
 # Lease snapshot (KTD-4/U9): with an active ledger, a post-compaction resume
 # must reconstruct wave state from ops/leases.toml instead of restarting the
 # wave. Single tolerant python3 pass — a malformed ledger reports itself in
-# the snapshot rather than breaking the checkpoint (must stay fast).
+# the snapshot rather than breaking the checkpoint (must stay fast). It runs
+# from the project root, so it starts with the lines of _PY_PRELUDE
+# (scripts/lib/common.sh), inline as this hook loads no helper: the working
+# directory leaves sys.path before tomllib is imported (SELF-27 compares them).
 if [ -f "ops/leases.toml" ]; then
   LEASE_SNAPSHOT=$(python3 -c "
-import sys
+import os, sys
+try:
+    _tf_here = os.path.realpath(os.getcwd())
+except OSError:
+    _tf_here = None
+sys.path[:] = [_p for _p in sys.path if os.path.isabs(_p) and os.path.realpath(_p) != _tf_here]
+del _tf_here
+import os, stat, sys
 try:
     import tomllib
 except ImportError:
@@ -96,8 +114,14 @@ except ImportError:
         print('- ledger present but no TOML parser available')
         sys.exit(0)
 try:
-    with open('ops/leases.toml', 'rb') as f:
-        data = tomllib.load(f)
+    # opened O_NONBLOCK and checked regular: a FIFO planted at the ledger fails
+    # here at once instead of blocking the checkpoint (Phase 3 round 5, G3; the
+    # read_regular of scripts/lib/common.sh, inline: this hook loads no helper)
+    fd = os.open('ops/leases.toml', os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0))
+    with os.fdopen(fd, 'rb') as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise OSError('not a regular file')
+        data = tomllib.loads(f.read().decode('utf-8'))
 except Exception as exc:
     print('- ledger present but unparseable: ' + str(exc))
     sys.exit(0)

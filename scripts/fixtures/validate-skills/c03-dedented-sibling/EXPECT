@@ -1,0 +1,3 @@
+check: C03
+under-warn: warning
+message: left of its block's entries at 4

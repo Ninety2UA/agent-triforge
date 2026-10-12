@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "shell": {
+    "setup_complete": true
+  },
+  "read_config_from": {
+    "agents_standard": true,
+    "claude": false,
+    "cursor": false,
+    "windsurf": false,
+    "copilot": false,
+    "opencode": false,
+    "zed": false
+  },
+  "subagents_enabled": false,
+  "attribution": false,
+  "auto_update": false,
+  "notify": "never",
+  "show_hints": false,
+  "permissions": {
+    "allow": [],
+    "deny": ["exec", "edit", "write", "Write(**)", "notebook_edit", "write_to_process", "webfetch", "web_search", "Fetch(https://*)", "Fetch(http://*)", "browser_preview", "mcp_call_tool", "mcp_read_resource", "mcp_list_tools", "mcp_list_servers", "mcp__*", "Exec(git push)", "Exec(git pull)", "Exec(git fetch)", "Exec(git commit)"],
+    "ask": []
+  }
+}

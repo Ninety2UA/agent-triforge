@@ -1,6 +1,6 @@
 {
   "type": "object",
-  "description": "Structured review verdict for logic_reviewer (passed via codex exec --output-schema). Vocabulary matches agents/findings-synthesizer.md: confidence tiers HIGH/MEDIUM/LOW, priority ranks P1/P2/P3. OpenAI strict rules: every property listed in required, additionalProperties false, at every level.",
+  "description": "Structured review verdict for logic_reviewer (passed via codex exec --output-schema). Vocabulary matches personas/findings-synthesizer.md: confidence tiers HIGH/MEDIUM/LOW, priority ranks P1/P2/P3. OpenAI strict rules: every property listed in required, additionalProperties false, at every level.",
   "properties": {
     "findings": {
       "type": "array",

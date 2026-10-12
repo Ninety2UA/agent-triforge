@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/codex.sh — the Codex lane: invoke_codex (triforge-agents.toml replay, --output-schema, hooks-under-exec)
+# scripts/lib/codex.sh — the Codex lane: invoke_codex (triforge-agents.toml replay, --output-schema)
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh. Every function keeps the name and
@@ -23,7 +23,7 @@ fi
 # first (D-026: Codex >= 0.147 sweeps `.codex/agents/*.toml` as standalone role
 # files and warns on this multi-agent file, so session-start deploys it under a
 # name outside that sweep), then the plugin template
-# `${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml`.
+# `${_TRIFORGE_PLUGIN_ROOT}/codex-agents/agents.toml`.
 invoke_codex() {
   local AGENT_NAME=$1
   local PROMPT=$2
@@ -45,8 +45,8 @@ invoke_codex() {
   local AGENT_TOML=""
   if [ -f ".codex/triforge-agents.toml" ]; then
     AGENT_TOML=".codex/triforge-agents.toml"
-  elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml" ]; then
-    AGENT_TOML="${CLAUDE_PLUGIN_ROOT}/codex-agents/agents.toml"
+  elif [ -f "${_TRIFORGE_PLUGIN_ROOT}/codex-agents/agents.toml" ]; then
+    AGENT_TOML="${_TRIFORGE_PLUGIN_ROOT}/codex-agents/agents.toml"
   fi
 
   local AGENT_MODEL="" AGENT_SANDBOX="" AGENT_APPROVAL="" AGENT_INSTR_B64="" AGENT_OUTPUT_SCHEMA="" AGENT_EFFORT=""
@@ -116,28 +116,16 @@ invoke_codex() {
   else
     CMD+=(-c "approval_policy=\"never\"")
   fi
-
-  # Hooks trust (probe CDX-04, ADR 2026-07-18-codex-hooks-under-exec): hooks
-  # fire under `codex exec` when (a) the project ships .codex/hooks.json and
-  # (b) --dangerously-bypass-hook-trust is passed — codex does not persist
-  # project trust for arbitrary dirs, and the flag is the documented
-  # automation path (0.131.0+). Triforge ships and vets these hooks itself
-  # (trusted-pipeline posture, same rationale as approval_policy="never" —
-  # see the security model in .claude/CLAUDE.md), so bypassing the
-  # interactive trust prompt does not widen what the pipeline already accepts.
-  local HOOKS_MODE="off"
-  if [ -f ".codex/hooks.json" ] && _codex_feature_enabled hooks; then
-    CMD+=(--dangerously-bypass-hook-trust)
-    HOOKS_MODE="on"
-  fi
+  # No --dangerously-bypass-hook-trust: project and plugin hooks go through
+  # Codex's own trust under exec (the shipped .codex/hooks.json has none).
 
   # Structured output (probe CDX-05): when the agent's agents.toml entry
   # carries the Triforge-level `output_schema` key, resolve the schema file at
-  # the plugin tier (`${CLAUDE_PLUGIN_ROOT}/codex-agents/` — nothing ever
+  # the plugin tier (`${_TRIFORGE_PLUGIN_ROOT}/codex-agents/` — nothing ever
   # deployed a project copy, and `.codex/agents/` is now Codex's role-file
-  # sweep, D-026) and pass
-  # --output-schema plus -o so the schema-valid final message lands in
-  # ${OUTPUT_FILE}.last. Feature-gated only if `codex features list` carries
+  # sweep, D-026) and pass --output-schema, so the final message -o writes to
+  # ${OUTPUT_FILE}.last (every attempt, below) is schema-valid. Feature-gated
+  # only if `codex features list` carries
   # a row named like output_schema/structured_output; 0.144.4 has no such
   # row and CDX-05 proves the flag works there, so absent a row we just
   # attempt the flag.
@@ -151,22 +139,29 @@ invoke_codex() {
       fi
     fi
     if [ "$SCHEMA_GATE" -eq 1 ]; then
-      if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/codex-agents/${AGENT_OUTPUT_SCHEMA}" ]; then
-        SCHEMA_PATH="${CLAUDE_PLUGIN_ROOT}/codex-agents/${AGENT_OUTPUT_SCHEMA}"
+      if [ -f "${_TRIFORGE_PLUGIN_ROOT}/codex-agents/${AGENT_OUTPUT_SCHEMA}" ]; then
+        SCHEMA_PATH="${_TRIFORGE_PLUGIN_ROOT}/codex-agents/${AGENT_OUTPUT_SCHEMA}"
       else
-        echo "invoke_codex: WARNING agent '${AGENT_NAME}' requests output_schema '${AGENT_OUTPUT_SCHEMA}' but no such file in the plugin's codex-agents/ (CLAUDE_PLUGIN_ROOT unset or file missing) — running without --output-schema" >&2
+        echo "invoke_codex: WARNING agent '${AGENT_NAME}' requests output_schema '${AGENT_OUTPUT_SCHEMA}' but no such file under ${_TRIFORGE_PLUGIN_ROOT}/codex-agents/ — running without --output-schema" >&2
       fi
     fi
   fi
 
-  # BASE_CMD carries everything retry-safe (model pin, sandbox, approval,
-  # hooks). Schema flags are first-attempt only: a schema-caused rejection
+  # -o: every attempt, the retry and a schema-off run included, writes its
+  # final answer to ${OUTPUT_FILE}.last, emptied before the attempt so no
+  # earlier answer survives one that writes none. ${OUTPUT_FILE} is the whole
+  # session, tool output included, so the final answer is what a caller
+  # judges (at-review's promotion reads its Status line there). -o is older
+  # than the Codex floor, 0.153.0 (CDX-05 ran it on 0.144.4).
+  # BASE_CMD carries everything retry-safe (model pin, sandbox, approval, -o).
+  # Schema flags are first-attempt only: a schema-caused rejection
   # (e.g. 400 invalid_json_schema) would fail identically on retry, so the
   # retry drops agent augmentation — instructions prefix AND schema —
   # mirroring invoke_antigravity's retry-with-raw-prompt.
+  CMD+=(-o "${OUTPUT_FILE}.last")
   local BASE_CMD=("${CMD[@]}")
   if [ -n "$SCHEMA_PATH" ]; then
-    CMD+=(--output-schema "$SCHEMA_PATH" -o "${OUTPUT_FILE}.last")
+    CMD+=(--output-schema "$SCHEMA_PATH")
     SCHEMA_APPLIED=1
   fi
 
@@ -178,11 +173,12 @@ invoke_codex() {
 ${PROMPT}"
   fi
 
-  echo "invoke_codex: agent=${AGENT_NAME} model=${AGENT_MODEL:-session-default} effort=${AGENT_EFFORT:-session-default} sandbox=${AGENT_SANDBOX:-session-default} approval=${AGENT_APPROVAL:-session-default} hooks=${HOOKS_MODE} schema=${SCHEMA_PATH:-none} agents-toml=${AGENT_TOML:-none}" >&2
+  echo "invoke_codex: agent=${AGENT_NAME} model=${AGENT_MODEL:-session-default} effort=${AGENT_EFFORT:-session-default} sandbox=${AGENT_SANDBOX:-session-default} approval=${AGENT_APPROVAL:-session-default} schema=${SCHEMA_PATH:-none} agents-toml=${AGENT_TOML:-none}" >&2
 
   # `< /dev/null` is mandatory: codex exec reads piped stdin ("Reading
   # additional input from stdin...") and hangs waiting for EOF whenever the
   # caller's stdin is not a TTY (probe record 2026-07-17).
+  : > "${OUTPUT_FILE}.last" 2>/dev/null || true
   _run_with_timeout "${TIMEOUT}" "${_HOST_SCRUB[@]}" "${CMD[@]}" "$FULL_PROMPT" < /dev/null > "$OUTPUT_FILE" 2>&1 || EXIT_CODE=$?
 
   # KTD-9: same taxonomy as invoke_antigravity — classify before reacting;
@@ -212,6 +208,7 @@ ${PROMPT}"
         echo "invoke_codex: agent=${AGENT_NAME} exit=${EXIT_CODE} (retryable), retrying with raw prompt" >&2
         EXIT_CODE=0
         SCHEMA_APPLIED=0
+        : > "${OUTPUT_FILE}.last" 2>/dev/null || true
         _run_with_timeout "${TIMEOUT}" "${_HOST_SCRUB[@]}" "${BASE_CMD[@]}" "$PROMPT" < /dev/null > "${OUTPUT_FILE}.retry" 2>&1 || EXIT_CODE=$?
         if [ "$EXIT_CODE" -eq 0 ]; then
           mv "${OUTPUT_FILE}.retry" "$OUTPUT_FILE"
@@ -224,14 +221,13 @@ ${PROMPT}"
     esac
   fi
 
-  # Codex prints two advisory lines into the captured stream that would
-  # otherwise be promoted verbatim into ops/REVIEW_CODEX.md (commands/review.md
-  # consumer): the --dangerously-bypass-hook-trust warning and, when a stale
-  # .codex/agents/agents.toml is still present, "Ignoring malformed agent role
-  # definition". Strip them from OUTPUT_FILE; the raw stream is not otherwise
-  # altered.
+  # Codex prints an advisory line into the captured stream that would
+  # otherwise be promoted verbatim into ops/REVIEW_CODEX.md (the at-review
+  # consumer) when a stale .codex/agents/agents.toml is still present:
+  # "Ignoring malformed agent role definition". Strip it from OUTPUT_FILE; the
+  # raw stream is not otherwise altered.
   if [ -f "$OUTPUT_FILE" ]; then
-    grep -vE '^(warning|WARN|WARNING):? .*bypass-hook-trust|Ignoring malformed agent role definition' "$OUTPUT_FILE" > "${OUTPUT_FILE}.clean" 2>/dev/null || true
+    grep -v 'Ignoring malformed agent role definition' "$OUTPUT_FILE" > "${OUTPUT_FILE}.clean" 2>/dev/null || true
     mv "${OUTPUT_FILE}.clean" "$OUTPUT_FILE" 2>/dev/null || true
   fi
 
@@ -239,7 +235,7 @@ ${PROMPT}"
   # as JSON; valid → pretty-printed to ${OUTPUT_FILE}.verdict.json, invalid →
   # warn and leave the raw output as the source of truth.
   if [ "$EXIT_CODE" -eq 0 ] && [ "$SCHEMA_APPLIED" -eq 1 ]; then
-    if [ -f "${OUTPUT_FILE}.last" ] && VERDICT_IN="${OUTPUT_FILE}.last" VERDICT_OUT="${OUTPUT_FILE}.verdict.json" python3 -c "
+    if [ -f "${OUTPUT_FILE}.last" ] && VERDICT_IN="${OUTPUT_FILE}.last" VERDICT_OUT="${OUTPUT_FILE}.verdict.json" python3 -c "${_PY_PRELUDE}
 import json, os
 with open(os.environ['VERDICT_IN']) as f:
     data = json.load(f)

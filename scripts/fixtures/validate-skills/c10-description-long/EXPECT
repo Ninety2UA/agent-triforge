@@ -1,0 +1,3 @@
+check: C10
+under-warn: warning
+message: keep it ≤ 300

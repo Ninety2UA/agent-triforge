@@ -1,0 +1,5 @@
+[personas.plan-checker]
+class = "read"
+tier = "top"
+never_downgrade = true
+max_turns = 10

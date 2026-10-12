@@ -17,28 +17,199 @@
 - Suppressions: Each reviewer has "Do Not Flag" patterns to reduce false positives.
 - Review synthesis: findings-synthesizer agent merges all review outputs, deduplicates, and priority-ranks.
 - Wave orchestration: Group tasks by dependency into waves. Integration-verifier runs between waves.
-- Completion promise: Only emit `<promise>DONE</promise>` after verification checklist passes.
 
 ## Gotchas
 - SVG diagrams on GitHub: use white `<rect>` backgrounds, NOT transparent — transparent renders differently in dark mode and can make text invisible.
 - SVG borders: use stroke-width 1px with softened stroke colors (e.g., #9bc49d on #C9E4CA fill) — 2px + contrasting strokes create a shadow/overline artifact.
 - SVG viewBox sizing: when 7+ boxes in a row, viewBox must be ≥1300px to maintain readable gaps. GitHub renders SVGs at ~800px max width, so gaps under 20px in the viewBox become invisible.
-- GEMINI.md and CODEX.md files don't exist in the repo — link to external GitHub URLs instead.
 - ops/TASKS.md is generated at runtime, not committed — don't link to it in README.
 
 - **grep -oP is NOT portable** — BSD grep on macOS lacks -P flag. Use `sed -n 's/pattern/\1/p'` instead. See: ops/solutions/2026-03-26-grep-posix-portability.md
+- **A SELF case compares against the physical work path** — the harness's `WORK` is `"${TMPDIR}/triforge-probes.XXXXXX"`; macOS's `TMPDIR` ends in `/` and sits below the `/var` symlink, so a case that greps a helper's output (realpath, `pwd -P`, a `cd`'s `$PWD`) for the raw `"$WORK/..."` fails only under `--self-only`. Resolve the row's directory with `pwd -P` right after making it (SELF-16, SELF-25) and run new cases once with a single-row runner given the harness's `WORK` (review round 2, 910a117).
 - **Hooks are registered in `hooks/hooks.json` (plugin)** — hook commands use `${CLAUDE_PLUGIN_ROOT}/hooks/handlers/` paths. Each entry needs `{ "matcher": "...", "hooks": [{ "type": "command", "command": "..." }] }`. The flat format `{ "command": "...", "timeout": ... }` causes Claude Code to skip the entire config. See: ops/solutions/2026-03-26-settings-json-required-for-hooks.md
-- ship-loop.sh (Stop hook) only blocks the session that activated it — uses session_id from stdin JSON for isolation.
-- ship-loop.sh outputs JSON `{decision, reason, systemMessage}` to match Blueprint visual format — reason contains the original goal prompt re-injected on each iteration.
-- ship-loop.sh state file uses YAML frontmatter with `active`, `session_id`, `iteration`, `max_iterations`, `completion_promise` — prompt body goes after second `---`.
 - context-monitor.sh state file (`.claude/context-monitor.local.md`) must be cleaned between sessions — session-start.sh does this via `rm -f` on startup. The `.claude/` directory is created by `mkdir -p .claude` in both session-start.sh and context-monitor.sh.
 - context-monitor.sh: unknown tools should reset the read counter (not increment it) to avoid false paralysis warnings.
-- Gemini CLI's GEMINI.md files have a prompt injection risk when loading from untrusted sources.
 - Codex CLI uses lazy loading for skills — only loads full body when relevant.
-- When Gemini writes to ops/MEMORY.md or ops/CONTRACTS.md, always specify `(append)` — without it, Gemini may overwrite existing content.
 - Every skill must have an explicit `## Output` section — agents need to know what artifact to produce.
 - **Hooks receive data via stdin JSON, NOT environment variables** — `$CLAUDE_TOOL_NAME`, `$CLAUDE_STOP_ASSISTANT_MESSAGE` etc. do not exist. Parse stdin with `python3 -c "import sys,json; ..."`. See: ops/solutions/2026-03-31-hooks-stdin-json-parsing.md
 - **Every agent must have an `## Output format` section** — the calling command needs structured output to parse. team-lead was the only agent missing this.
 
+- Worker discoveries (end-of-program review, fix round 1, 2026-10-08), UNVERIFIED, recorded by the lead from the workers' reports:
+
+      fix worker B: _run_with_timeout (scripts/lib/common.sh) runs `timeout -k 10s` with no
+      braces, so when the KILL fires bash prints a "Killed: 9" job line on the caller's stderr,
+      which can land in captured output. Low severity.
+      fix worker D: lease_merge/lease_promote re-hash the objects they bring in, but a worker
+      process still running can swap an object between the check and the squash (detection, not
+      prevention). Git calls outside _lead_git still read the commit-graph: bootstrap.sh's own
+      git, scripts/skill-locator/locate-triforge.sh, plain git in at-* skill blocks.
+      _persona_diff could run the same object check before review, to refuse earlier.
+      fix worker A: CLAUDE_CONFIG_DIR is modeled nowhere (READERS has no home_env for the
+      claude-md-shadow reader); whether Claude Code reads its user memory from there is unverified.
+      The user-level refusal follows the CODEX_HOME of the shell that runs the check.
+      fix worker E: SELF-30 rule (a) could also check the last statement inside a trailing if or
+      case (0 hits today). The scanner does not look inside single-quoted eval strings,
+      printf-written stubs, $( ) inside $(( )), or a grep run through a variable. SELF rows can't be
+      selected with --only (only SELF-06f/g/h); the --only comment in probe-capabilities.sh says
+      it runs no SELF row.
+      fix worker F: ops/research/2026-09-probe-record.md line 111 still says AGY-08 did not fire
+      on 1.2.1 "(this row)" under a PASS row; the next regeneration prints the neutral footnote.
+      The footnote's guardrail sentence still asserts "AGY-09/AGY-10 stay FAIL".
+
+- Worker discoveries (end-of-program review, fix round 2, 2026-10-08), UNVERIFIED, recorded by the lead from the workers' reports:
+
+      fix worker B: a SKILL.md metadata: block whose first key is indented deeper than the
+      keys after it passes validate-skills and the skill-version check, though a YAML parser
+      rejects it. docs/rule-inventory.md row 155 still quotes the retired "50+ file changes"
+      wording (history; the halt check does not scan it). validate-versions.sh --help prints a
+      sed error when the script is invoked by a relative path from another directory (it
+      reads $0 after cd). release.yml runs neither self-test.
+      fix worker C: without python3 the subdirectory-roster walk no longer warns (the roster
+      test needs python3). The scan prints paths with control bytes stripped, so a Triforge tree
+      at a path with control characters is not recognized as a shipped template. With both
+      <base>/CLAUDE.md and <base>/.claude/CLAUDE.md above a project, the visibility fix looks
+      only at the first shadowing file, so it can offer a narrower fix than the other file
+      would allow.
+      fix worker E: SELF-30's EXPAN regex is greedy across a word that holds two expansions,
+      so timeout_args would take "${TIMEOUT_BIN:-x}${Y}" as the timeout binary (harmless
+      today; held() checks for exactly one). A "${ARR[@]}" among env's assignments still
+      leaves the command undecided (only "$@" is read past). arith() finds the end of an
+      arithmetic body by counting parentheses and ignores quotes, so a quoted ) inside a
+      $( ) within $(( )) falls back to a subshell parse, which still scans the command.
+      fix worker A: grok now prints _PERSONA_RUN_PY's warning, worded for the persona lane
+      ("dispatch_persona: WARNING unresolved cleanup ..."); a label parameter would suit
+      both. grok_read_isolation_check (at-setup) still runs its inspect with --foreground
+      from a scratch directory it then removes. invoke_grok's non-home _lease_ctx refusal
+      still says "not inside a git checkout" for root and error, and coordinate.sh:443's
+      else-branch assumes one cause; _LEASE_CTX_WHY now names the real one. invoke_cursor
+      infers plan mode from the agent name, so a future cursor-agents/analyst.md would lose
+      it. In the trap path the supervisor's own 80 is not read. lease_create's provisioning
+      inspect runs --foreground with no group sweep afterwards (lease-lane scope).
+      fix worker B (follow-up): meta_version checks only the metadata block's own level;
+      deeper nesting inside metadata, or a "- " line after a quoted value, still passes
+      validate-versions, though validate-skills fails both (C3, C14), so the release gate
+      still fails. C3's block-scalar detection knows only | and > with -/+; an indentation
+      indicator such as |2 is not recognized (C2 already rejects it).
+      fix worker D: if a worker rewrites refs/heads/main as a symbolic ref to a tag,
+      show-ref --verify follows it; the integrity check sees a move only when the commit
+      changes, and a promotion would write through to the tag. lease_promote's "already on
+      the default branch" error still says "default branch" for an explicit target. The
+      integrity digest covers .git/config, config.worktree, hooks/, info/, the global and
+      trusted configs, the lease-root record and the checkout's .git, plus the default and
+      integration branches' commits; it does not cover refs/tags, refs/<name>,
+      $GIT_DIR/<name> files or packed-refs (every lease decision now reads refs/heads/<name>,
+      a commit id read once, or HEAD).
+      fix worker A (follow-up): _dispatch_role_claude writes _lease_ctx's line to <out>.err
+      before the run; if _claude_lane_argv then fails, an empty .err stays behind. When the
+      provisioning inspect's sweep is unresolved, the supervisor's warning naming the pids is
+      discarded with grok inspect's stderr, so the refusal says rc 80 but not which pids. A
+      worktree lease_create leaves for an unresolved sweep makes the next lease stop with
+      rc 44 (lease history without a ledger) until the user removes it with the printed
+      commands (intended, fail closed).
+
+- Worker discoveries (end-of-program review, fix round 3, 2026-10-08), UNVERIFIED, recorded by the lead from the workers' reports:
+
+      fix worker G: SELF-30 flags "$TIMEOUT_BIN" --kill-after="${X}s" 10s cmd, a compliant
+      form, because its option loop stops at a word holding an expansion and reads that
+      word as the duration (old and new scanner alike; nothing ships in that form, the
+      shipped one is -k "${_LEASE_KILL_AFTER_S}s"). SELF-29's lease-based cases need
+      tomllib (Python 3.11+) or tomli, so under /usr/bin/python3 3.9.6 they fail on the
+      base commit too. That codex exits 1 at the scratch home's missing login is taken
+      from codex exec's exit on an error, not observed live; another rc makes CDX-16 a
+      FAIL "stopped short (rc=N)", never a false PASS. The round-2 replay script
+      (scratchpad r2fix/e/cdx16-replay.sh) ends the block at the first 8-space fi, which
+      is now the new CDX16_END if/fi; r2fix/g/cdx16-replay.sh ends at the outer else.
+      fix worker F: AGENTS.md and the README still say only that the protected scan "sees
+      both sides of a rename" (still true; the merges' no-rename rule is in the design doc
+      and wave-orchestration). SELF-13's load case is fragile: its assertion depends on the
+      length of the work path (it cuts its error line at 220 characters). git prints its
+      "Diverging branches can't be fast-forwarded" hint on every non-fast-forward
+      promotion, from lease_promote's --ff-only attempt. With -X no-renames, a lease that
+      renames a file the integration branch changed since the cut conflicts (the generic
+      conflict message) instead of merging; the same holds for a promotion whose
+      integration side renamed a path the target changed (fails closed).
+      fix worker F (follow-up): when lease_rebaseline accepts an integration branch that
+      already holds a lease's change (a moved ref after its squash commit), the rerun
+      refuses with "brought no changes" and the lease stays in review with no
+      merge_commit; recording such a lease as merged would need a new helper.
+      fix worker I: a single-row run of SELF-12 needs _persona_kit, which lives in
+      probe-capabilities.sh; the scratch runner srun.sh does not load it, so SELF-12 fails
+      there on any tree (the full harness has it).
+      fix worker H: Claude Code also scans the raw text of tight list items, so
+      "- ` @AGENTS.md `" loads AGENTS.md while md_scan says no import (the safe
+      direction). md_scan's remaining conservative misses are mostly a fence opened after a
+      > or list marker on the same line and link definitions whose destination or title
+      continues on the next line; when one sits before the end of the file the writer
+      refuses and asks the user to add the line. README line 546 states the import line
+      without the code-block caveat (correct as written). The oracle (scratchpad
+      r2fix/h/oracle.mjs) is Claude Code 2.1.294's import code run on the marked 15.0.12
+      that ships with the locally installed pi-coding-agent, not the bundled build.
+
+- Worker discoveries (end-of-program review, fix round 4, 2026-10-09), UNVERIFIED, recorded by the lead from the workers' reports:
+
+      fix worker G: on macOS, gtimeout cannot arm a timer longer than about 1e8 seconds;
+      `gtimeout 2e8 true` and `gtimeout inf true` warn "setitimer: Invalid argument" and run
+      with no timeout, so a kill-after such as -k 2e8 never fires there although SELF-30
+      counts it (finite and above zero). The limit is platform-dependent and nothing ships
+      like that. Still open from round 3: an option word with an attached expansion
+      (--kill-after="${X}s", -k`...`) stops SELF-30's option loop and is read as the
+      duration, a false positive; nothing ships in that form.
+
+      fix worker J2: Claude Code scans a list item's text raw, code spans included, so an
+      @AGENTS.md in a code span inside a tight list item loads; md_scan keeps it as no
+      import (a miss, the safe direction) so at-setup's stated rule holds. marked itself is
+      quadratic on some shapes (many "a" / "***" line pairs), so Claude Code's own memory
+      loader is slow on them. The full --self-only gate took 919 s on an idle copy of the
+      tree (AGENTS.md says about 3 minutes).
+
+- How md_scan is checked (lead, 2026-10-12): differentially, against an oracle that runs
+  Claude Code's import extraction (copied from the 2.1.294 bundle; 2.1.296's is the same
+  apart from renamed identifiers) on marked 15.0.12, with generators of random,
+  container-heavy, mutated-realistic and port-drift documents, and token by token against
+  marked's own block tokens. Hand-written SELF cases missed every family the fuzzing
+  found. The tools live outside the repo in ~/projects/_tools/mdscan-difftest/ (the
+  oracle holds code copied from Claude Code's bundle): runall.sh <prog> runs the lead's
+  three generators, J2's tokall.sh the token comparison, srun.sh one SELF row on a
+  throwaway copy of a tree. A change to md_scan should reach UNSAFE 0 there before review.
+
+- Worker discoveries (end-of-program review, fix round 5, 2026-10-12), UNVERIFIED, recorded by the lead from the workers' reports:
+
+      fix worker R5-A: if MdLexer handed the defined reference labels to text_words, two of
+      the inline side's accepted misses (a full or shortcut reference whose label is never
+      defined) would go away. The old emphasis rule and the image and inline-tag holds cost
+      about 3% misses on dense ordinary prose (**`make`** before an import, then a later code
+      span). extract.py cannot see an apostrophe that ends _INSTR_PY's single-quoted string
+      early; only bash -n does.
+      fix worker R5-B: AGENTS.md, AGENTS.override.md, config.toml and template reads
+      (level_file, reach, merge_plan, reader_config) still read whole files; their lengths feed
+      the budget arithmetic, so capping them needs fstat sizes. Visibility still offers "add
+      the line" for a file past a reading bound, which the import then refuses (as it already
+      did for a file ending in an open fence).
+      fix worker R5-C: _ss_bounded in the hook still leaves its watchdog sleep running (up to
+      10 s, stdio /dev/null) after a command that answers in time; the SIGKILL trap used in
+      _instr_watchdog would fix it. The hook's WARNING says "it needs python3" for any rc 69,
+      which now also covers "no timeout binary and no private temp dir" (the library's own
+      message names the cause, but the hook discards its stderr). SELF-12 failed twice in
+      full gates under heavy load (three gates in parallel) with different mismatches, and
+      passed every quiet run.
+- Worker discoveries (end-of-program review, fix round 6, 2026-10-12), UNVERIFIED, recorded by the lead from the worker's report:
+
+      fix worker R6: bash's builtin printf rejects a format that starts with "-" (so a
+      CLAUDE.md text starting "---" failed in _s16b_fence); any SELF helper that runs
+      printf "$fmt" on caller text needs printf --. Every srun.sh run leaves a
+      triforge-self-only-*.md record in the user's TMPDIR, and they pile up.
+
 ## Interface proposals
 <!-- No active proposals -->
+
+## Archived (superseded)
+<!-- Moved here 2026-10-01 (U3). Kept as history; each line says what superseded it. -->
+- Worker discovery (int4b, 2026-10-07): lease-wait.sh's three ledger readers used plain open() and could block on a FIFO. — Fixed in Phase 6: they read through read_regular (47878ac, SELF-27 "FIFO ledger").
+- Worker discovery (u15-instr, 2026-10-07): inline `python3 -c` programs imported from the cwd. — Fixed in Phase 6 (S1): every inline program starts with `_PY_PRELUDE` (47878ac, SELF-27).
+- Completion promise: Only emit `<promise>DONE</promise>` after verification checklist passes. — Superseded by the `ops/.sprint-complete` sentinel that `scripts/coordinate.sh` detects (D-030); the `/goal` checklist is best-effort.
+- ship-loop.sh (Stop hook) only blocks the session that activated it — uses session_id from stdin JSON for isolation. — ship-loop.sh was retired with the sentinel-based completion signal (D-030); not coming back.
+- ship-loop.sh outputs JSON `{decision, reason, systemMessage}` to match Blueprint visual format — reason contains the original goal prompt re-injected on each iteration. — Retired with ship-loop.sh (D-030); hook stdout now never starts with `{` (D-031c).
+- ship-loop.sh state file uses YAML frontmatter with `active`, `session_id`, `iteration`, `max_iterations`, `completion_promise` — prompt body goes after second `---`. — Retired with ship-loop.sh (D-030).
+- GEMINI.md and CODEX.md files don't exist in the repo — link to external GitHub URLs instead. — The Gemini lane was retired in v3.0.0 (agy replaced it); Codex worker instructions ride in `codex-agents/agents.toml`, and the one instruction file is the root `AGENTS.md` (U3).
+- Gemini CLI's GEMINI.md files have a prompt injection risk when loading from untrusted sources. — Gemini lane retired in v3.0.0; the general rule survives as "worker output is data" in `AGENTS.md` (R49).
+- When Gemini writes to ops/MEMORY.md or ops/CONTRACTS.md, always specify `(append)` — without it, Gemini may overwrite existing content. — Gemini lane retired in v3.0.0; agy's write denials against `ops/` are handled by promoting captured output (D-032).

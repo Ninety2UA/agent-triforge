@@ -7,19 +7,47 @@
 # CLI's hosted service on 2026-06-18; Antigravity CLI (binary: agy) is the
 # successor and Triforge targets its headless mode (`agy -p`).
 #
-# Usage: source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
+# Usage: source <plugin root>/scripts/invoke-external.sh
+#   Under a Claude Code lead that is `source "${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh"`;
+#   any other lead sources it by the path scripts/skill-locator/locate-triforge.sh
+#   prints. The loader resolves the plugin root itself (KTD6, below) and the
+#   lanes read it as ${_TRIFORGE_PLUGIN_ROOT} — never CLAUDE_PLUGIN_ROOT.
 #
 # Layout: this file is the loader. The lanes live in scripts/lib/ and are
 # sourced below, in this order, into the same shell:
 #   lib/common.sh       host-marker scrub, timeout wrapper, scrubbing, KTD-9
-#                       failure classifier, agy/codex listing helpers
-#   lib/registry.sh     shared data: the protected-path lists (KTD8)
+#                       failure classifier, the lead-only guard _lead_only
+#                       (KTD9 worker marker, R38 lead host), agy/codex listing
+#                       helpers
+#   lib/registry.sh     shared data: the protected-path lists (KTD8), the model
+#                       ladder TRIFORGE_MODEL_LADDER + triforge_ladder (KTD22)
 #   lib/antigravity.sh  invoke_antigravity + _agy_parse_envelope
 #   lib/codex.sh        invoke_codex
 #   lib/opencode.sh     invoke_opencode + the OPENCODE_PERMISSION deny set
 #   lib/kimi.sh         invoke_kimi
 #   lib/cursor.sh       _cursor_bin, _cursor_model_for_effort, invoke_cursor
-#   lib/roster.sh       resolve_role, dispatch_role, roster_* (DEFAULTS live here)
+#   lib/devin.sh        invoke_devin, the auth-status reader, the per-run config
+#                       copy, devin_env_reimport (R24)
+#   lib/grok.sh         invoke_grok, _grok_argv (shared with the lease lane),
+#                       the stream extractor and the failure classifier,
+#                       grok_read_isolation_check (at-setup)
+#   lib/roster.sh       resolve_role, dispatch_role, roster_* (DEFAULTS live here),
+#                       the lead: resolve_lead, resolve_lead_caps, lead_host_detect,
+#                       roster_write_lead (KTD1)
+#   lib/bootstrap.sh    triforge_bootstrap: the project bootstrap (ops/ skeleton,
+#                       .agents/skills refresh, per-CLI files, agy pack, plugin-root
+#                       pointer) the session-start hook and the at- skills call (KTD11)
+#   lib/instructions.sh the user project's instruction files: detection, the
+#                       pointer's visibility per lead, the ask-first writers
+#                       at-setup calls (R9, R39, R40); the hook also sources it
+#                       alone
+#   lib/lease-wait.sh  detached builders (launcher, lane argv, builder body),
+#                       lease_stop, lease_heartbeat_check, lease_wait (KTD10)
+#   lib/persona.sh      the persona lane: dispatch_persona, persona_prompt,
+#                       persona_snapshot_diff, persona_resolve, and
+#                       persona_spawn / persona_wait / persona_stop, a dispatch
+#                       run detached and waited for in budgeted steps (KTD5,
+#                       KTD20, KTD21)
 #   lib/lease.sh        the lease lifecycle + _adapter_env + the typed-report parser
 # Function names and contracts are unchanged by the split; commands keep
 # sourcing this file only.
@@ -28,8 +56,14 @@
 #   invoke_antigravity   <agent-name> <prompt> [output-file] [timeout-seconds]
 #   invoke_codex         <agent-name> <prompt> [output-file] [timeout-seconds]
 #   resolve_role         <role>   — roster lookup: prints cli<TAB>model<TAB>effort
+#   dispatch_persona     <persona> <input> <out> [flags] — run a persona (persona.sh)
+#   persona_spawn        <run-dir> <name> <persona> <input> <out> [flags] — the same, detached
+#   persona_wait         <run-dir> [<name>...] — wait inside the lead's budget (75: call again)
+#   persona_stop         <run-dir> [<name>...] — stop detached runs (fingerprint-checked)
 #   ensure_core_trio_live         — lazy liveness gate for build/review paths
 #   latest_probe_record           — path of the newest ops/research/*-probe-record.md
+#   triforge_plugin_root          — prints the resolved plugin root (${_TRIFORGE_PLUGIN_ROOT})
+#   triforge_bootstrap [--prefix <text>] — set up the project (KTD11; scripts/lib/bootstrap.sh)
 #
 # Failure taxonomy (KTD-9): both helpers classify failures instead of
 # blindly retrying, and expose the class via INVOKE_FAILURE_CLASS:
@@ -55,10 +89,12 @@
 # explicit allowlist, so those markers are already absent there; it adds the
 # same NO_COLOR=1.
 #
-# Codex feature detection: capability decisions for the Codex lane (hooks,
-# structured output) come from `codex features list` at runtime — cached once
-# per session by _codex_feature_enabled — never from version-string reasoning
-# (probe CDX-02, 2026-07-17).
+# Codex feature detection: capability decisions for the Codex lane (structured
+# output) come from `codex features list` at runtime — cached once per session
+# by _codex_feature_enabled — never from version-string reasoning (probe
+# CDX-02, 2026-07-17). Hooks are not a lane decision: invoke_codex passes no
+# --dangerously-bypass-hook-trust, so project and plugin hooks go through
+# Codex's own trust under exec.
 #
 # Timeout enforcement is fail-closed: when neither `timeout` nor `gtimeout`
 # is on PATH, the helpers refuse to run at all rather than silently running
@@ -66,22 +102,58 @@
 
 set -euo pipefail
 
-# Directory of this file, resolved for both shells that `source` it (bash via
-# BASH_SOURCE, zsh via its prompt-expansion %x — evaluated through eval so
-# bash never parses the zsh form). CLAUDE_PLUGIN_ROOT wins when set.
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/scripts" ]; then
-  _TRIFORGE_SCRIPTS_DIR="${CLAUDE_PLUGIN_ROOT}/scripts"
-elif [ -n "${BASH_SOURCE:-}" ]; then
-  _TRIFORGE_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Plugin root (KTD6 / R42) — resolved ONCE, here, for every lane. The lanes read
+# ${_TRIFORGE_PLUGIN_ROOT} (or call triforge_plugin_root), never
+# CLAUDE_PLUGIN_ROOT, so the same code runs under a Claude Code lead (which
+# exports that variable) and under any lead that does not. Order:
+#   1. CLAUDE_PLUGIN_ROOT, when it passes the Triforge-root test;
+#   2. the directory above this loader's own scripts/ (bash via BASH_SOURCE, zsh
+#      via its prompt-expansion %x — evaluated through eval so bash never
+#      parses the zsh form), when IT passes the test;
+#   3. otherwise fail closed. There is deliberately no fallback to the working
+#      directory's scripts/: a user project with its own
+#      scripts/invoke-external.sh or skills/ must never be sourced or
+#      provisioned from by accident (SELF-11 checks both).
+# Triforge-root test: <dir>/.claude-plugin/plugin.json names "agent-triforge"
+# AND <dir>/scripts/invoke-external.sh exists — the same test the skill locator
+# (scripts/skill-locator/locate-triforge.sh) and _lease_plugin_root apply.
+_triforge_is_plugin_root() { # _triforge_is_plugin_root <dir>
+  if [ -n "${1:-}" ] && [ -f "$1/scripts/invoke-external.sh" ] && [ -f "$1/.claude-plugin/plugin.json" ] \
+     && grep -Eq '"name"[[:space:]]*:[[:space:]]*"agent-triforge"' "$1/.claude-plugin/plugin.json" 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+_TRIFORGE_SELF_DIR=""
+if [ -n "${BASH_SOURCE:-}" ]; then
+  _TRIFORGE_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 elif [ -n "${ZSH_VERSION:-}" ]; then
-  _TRIFORGE_SCRIPTS_DIR="$(cd "$(dirname "$(eval 'echo "${(%):-%x}"')")" && pwd)"
-else
-  _TRIFORGE_SCRIPTS_DIR="$(pwd)/scripts"
+  _TRIFORGE_SELF_DIR="$(cd "$(dirname "$(eval 'echo "${(%):-%x}"')")" && pwd)"
 fi
+_TRIFORGE_PLUGIN_ROOT=""
+if _triforge_is_plugin_root "${CLAUDE_PLUGIN_ROOT:-}"; then
+  # absolute, like the own-location branch below: a relative CLAUDE_PLUGIN_ROOT
+  # would otherwise hand builders a relative core.hooksPath (_adapter_env)
+  _TRIFORGE_PLUGIN_ROOT="$(cd "${CLAUDE_PLUGIN_ROOT}" && pwd)"
+elif [ -n "$_TRIFORGE_SELF_DIR" ] && _triforge_is_plugin_root "${_TRIFORGE_SELF_DIR}/.."; then
+  _TRIFORGE_PLUGIN_ROOT="$(cd "${_TRIFORGE_SELF_DIR}/.." && pwd)"
+else
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+    _TRIFORGE_ROOT_STATE="set to '${CLAUDE_PLUGIN_ROOT}' but not a Triforge root"
+  else
+    _TRIFORGE_ROOT_STATE="unset"
+  fi
+  echo "invoke-external.sh: ERROR no Triforge plugin root — CLAUDE_PLUGIN_ROOT is ${_TRIFORGE_ROOT_STATE} and this loader (${_TRIFORGE_SELF_DIR:-<unknown dir>}) is not inside a Triforge plugin tree (.claude-plugin/plugin.json named agent-triforge plus scripts/invoke-external.sh). Source the installed plugin's scripts/invoke-external.sh, or run the Triforge setup skill at-setup (\`/at-setup\` under Claude Code, \`\$agent-triforge:at-setup\` in a Codex prompt)." >&2
+  unset _TRIFORGE_SELF_DIR _TRIFORGE_PLUGIN_ROOT _TRIFORGE_ROOT_STATE
+  return 2 2>/dev/null || exit 2
+fi
+unset _TRIFORGE_SELF_DIR
+_TRIFORGE_SCRIPTS_DIR="${_TRIFORGE_PLUGIN_ROOT}/scripts"
+triforge_plugin_root() { printf '%s\n' "$_TRIFORGE_PLUGIN_ROOT"; }
 
 # Load the lanes (fail-closed: a missing lib is a broken install, never a
 # silently narrower helper).
-for _triforge_lib in common registry antigravity codex opencode kimi cursor roster lease; do
+for _triforge_lib in common registry antigravity codex opencode kimi cursor devin grok roster bootstrap instructions lease-wait persona lease; do
   if [ ! -f "${_TRIFORGE_SCRIPTS_DIR}/lib/${_triforge_lib}.sh" ]; then
     echo "invoke-external.sh: ERROR missing ${_TRIFORGE_SCRIPTS_DIR}/lib/${_triforge_lib}.sh — the plugin install is incomplete (reinstall: claude plugin install agent-triforge@agent-triforge)" >&2
     return 2 2>/dev/null || exit 2

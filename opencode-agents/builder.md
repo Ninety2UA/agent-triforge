@@ -76,6 +76,5 @@ shared memory.
 
 Portable methodology skills are provisioned into `.agents/skills/` in your
 worktree, a native OpenCode skills tier. Invoke one as `/<skill-name>` in the
-prompt — `/test-driven-development`, `/systematic-debugging`,
-`/verification-before-completion` — which triggers OpenCode's native `skill`
-tool; consult them when they apply.
+prompt — for example `/verification-before-completion` — which triggers
+OpenCode's native `skill` tool; consult them when they apply.

@@ -1,0 +1,7 @@
+# The first metadata key sits deeper than the key after it. The old reader took
+# the first key's indentation as the block's and read version 1.2.3; YAML
+# rejects the frontmatter, so the check fails as validate-skills' C3 does.
+check: skill-versions
+rc: 1
+line: FAIL: skill versions: skills/demo/SKILL.md metadata block does not parse as YAML (frontmatter line 5 is indented 2, left of the metadata block's first entry at 4), so it has no metadata.version; .claude-plugin/plugin.json is "1.2.3"
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

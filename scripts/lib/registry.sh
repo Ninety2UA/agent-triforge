@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/registry.sh — data the other lanes read from one place (KTD7). In 3.3.3: the two protected-path lists and their match rule (KTD8)
+# scripts/lib/registry.sh — data the other lanes read from one place (KTD7): the CLI registry (one literal per CLI — tier, binary, model, install hint, env allowlist keys, lane, egress, role limits and consent, the KTD1 lead fields; R24/R25/R41), the two protected-path lists and their match rule (KTD8), and the model ladder (KTD22)
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh and before scripts/lib/lease.sh.
@@ -34,21 +34,30 @@ fi
 #
 # _PROTECTED_PY is spliced into the python that classifies paths (the
 # _CURSOR_ID_PY pattern in cursor.sh); SELF-10 checks the protected-path list
-# in .claude/CLAUDE.md against it. A new control-plane file joins the right
+# in the root AGENTS.md against it. A new control-plane file joins the right
 # list in the commit that creates it.
 _PROTECTED_PY='
 FRAMEWORK_PROTECTED = (
-    # enforcement code: the helper, its lanes, the no-push hook, the outer loop
-    "scripts/lib/", "scripts/lease-git-hooks/", "scripts/invoke-external.sh", "scripts/coordinate.sh",
+    # enforcement code: the helper, its lanes, the no-push hook, the outer loop,
+    # the skill locator every at- skill carries a copy of (KTD6)
+    "scripts/lib/", "scripts/lease-git-hooks/", "scripts/skill-locator/", "scripts/fixtures/", "scripts/invoke-external.sh", "scripts/coordinate.sh",
     # the probe harness and the release gates
     "scripts/probe-capabilities.sh", "scripts/probe-self-tests.sh",
     "scripts/validate-skills.sh", "scripts/validate-versions.sh", "scripts/release-notes.sh",
-    # lifecycle hooks, the lead-facing workflows and the persona home
-    "hooks/", "skills/", "commands/", "personas/",
+    # lifecycle hooks, the lead-facing workflows and the persona home. commands/
+    # and agents/ ship empty since 4.0 (the workflows are skills/at-*/, the
+    # personas personas/*.md) but stay gated: the plugin host auto-loads both
+    # plugin-root directories, so a lease that re-creates commands/*.md or
+    # agents/*.md must hit the gate (validate-versions.sh check 8)
+    "hooks/", "skills/", "commands/", "agents/", "personas/",
     # shipped agent configs, one directory per CLI
-    "agents/", "antigravity-agents/", "codex-agents/", "opencode-agents/", "kimi-agents/", "cursor-agents/",
-    # manifests, plugin settings, and the templates copied into user projects
-    ".claude-plugin/", "settings.json", "templates/",
+    "antigravity-agents/", "codex-agents/", "opencode-agents/", "kimi-agents/", "cursor-agents/",
+    "devin-agents/", "grok-agents/",
+    # manifests, plugin settings, and the templates copied into user projects.
+    # Pi reads its skill list from the root package.json; the Devin manifest is
+    # skills/.devin-plugin/ (covered by skills/), and a root .devin-plugin/
+    # would outrank .claude-plugin/ for a Devin install of the repo root
+    ".claude-plugin/", ".devin-plugin/", "package.json", "settings.json", "templates/",
     # CI plumbing (.gitmodules is on PROJECT_PROTECTED: every project)
     ".github/",
 )
@@ -56,8 +65,15 @@ FRAMEWORK_PROTECTED_ANY_DEPTH = (".gitattributes",)
 PROJECT_PROTECTED = (
     "ops/roster.toml",
     # each CLI project-tier config / permission tree (agy reads .agents/hooks.json
-    # and .agents/agents/, so .agents/ is protected whole, skills included)
-    ".claude/", ".codex/", ".agents/", ".antigravity/", ".gemini/", ".opencode/", ".kimi-code/", ".cursor/",
+    # and .agents/agents/, so .agents/ is protected whole, skills included; Devin
+    # loads .devin/config.json requiredPlugins with no login and reads the
+    # legacy .cognition/ exactly like .devin/, and Pi reads
+    # .pi/settings.json packages once the project is trusted)
+    ".claude/", ".codex/", ".agents/", ".antigravity/", ".gemini/", ".opencode/", ".kimi-code/", ".cursor/", ".devin/", ".cognition/", ".pi/",
+    # grok reads .grok/config.toml (permission rules, MCP servers, plugins),
+    # .grok/hooks/, .grok/skills/, .grok/agents/ and .grok/sandbox.toml, and
+    # every grok run turns the folder-trust gate off (GROK_FOLDER_TRUST=0)
+    ".grok/",
     # project-root config files outside those trees: OpenCode reads its permission
     # config from opencode.json / opencode.jsonc, and Cursor still reads the
     # legacy root instruction file .cursorrules
@@ -100,7 +116,7 @@ def protected_match(path, framework):
 # Nonzero, with the python error on stderr, when the classifier itself fails:
 # callers treat that as a hit (fail closed), never as "nothing protected".
 _protected_classify() {
-  PC_FRAMEWORK="${1:-0}" python3 -c "
+  PC_FRAMEWORK="${1:-0}" python3 -c "${_PY_PRELUDE}
 import os, sys
 ${_PROTECTED_PY}
 framework = os.environ['PC_FRAMEWORK'] == '1'
@@ -113,4 +129,617 @@ for item in raw.split(b'\0'):
     if hit:
         sys.stdout.write(hit + '\t' + path.encode('utf-8', 'surrogateescape').decode('utf-8', 'replace') + '\n')
 "
+}
+
+# ---------------------------------------------------------------------------
+# Model ladder (KTD22, R26)
+# ---------------------------------------------------------------------------
+#
+# The one definition of the downgrade ladder for narrow runtime tasks. The
+# instruction file (the root AGENTS.md), personas/team-lead.md and
+# skills/wave-orchestration/SKILL.md point here with a one-line summary
+# instead of restating the rungs; scripts/validate-versions.sh (check 2) fails
+# when any other shipped file carries the phrase, a colon, and the rung list
+# again. The `opus` rung names Opus 5.5 with its Claude Code floor (D-037).
+# Callers print the text with triforge_ladder.
+TRIFORGE_MODEL_LADDER='Downgrade ladder for narrow runtime tasks: `fable`+`max` (lead + never-downgrade tier when available; otherwise latest `opus` at `max` — the model steps down, the effort does not) → `opus` (Opus 5.5, Claude Code ≥ 2.1.280) + `xhigh` → `opus`+`high` → `sonnet` (Sonnet 5.5) + `high`. Never downgrade security-sentinel, plan-checker, or findings-synthesizer.'
+
+# triforge_ladder — print the ladder text (one line, newline-terminated).
+triforge_ladder() {
+  printf '%s\n' "$TRIFORGE_MODEL_LADDER"
+}
+
+# _LADDER_PY — the one reading of the ladder and the persona manifest rules
+# (KTD21, KTD22): spliced into the persona lane's resolution (_PERSONA_PY in
+# persona.sh) and executed by scripts/validate-skills.sh (KTD21), so a ladder
+# or a manifest entry the validator passes is one every dispatch takes.
+# ladder_parse(text) returns (rungs, trio) or None: the rungs are separated by
+# arrows, each naming its model and its effort as its first two backticked
+# words; the first is the tier "top" and also names its fallback model at the
+# same effort, every other is <model>-<effort>; the trio is the "Never
+# downgrade" sentence. A manifest entry holds PERSONA_KEYS only, a class from
+# PERSONA_CLASSES, and, for a runnable class or wherever it is set, a tier
+# from the rungs and a max_turns persona_turns_ok accepts. Single-quoted:
+# double quotes only inside.
+_LADDER_PY='
+import re
+from collections import namedtuple
+
+Rung = namedtuple("Rung", "name model effort fallback")
+PERSONA_CLASSES = ("read", "read-web", "exec", "lease", "agent-team")
+PERSONA_RUNNABLE = ("read", "read-web", "exec")
+PERSONA_KEYS = ("class", "tier", "never_downgrade", "max_turns")
+PERSONA_MAX_TURNS = 1000
+
+def persona_turns_ok(v):
+    return isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= PERSONA_MAX_TURNS
+
+def ladder_parse(text):
+    body = text.partition(":")[2]
+    rungs_text, sep, never = body.partition("Never downgrade")
+    rungs = []
+    for i, r in enumerate(rungs_text.split("→")):
+        ticks = re.findall(r"`([^`]+)`", r)
+        if len(ticks) < 2 or (i == 0 and (len(ticks) < 4 or ticks[3] != ticks[1])):
+            return None
+        rungs.append(Rung("top" if i == 0 else ticks[0] + "-" + ticks[1], ticks[0], ticks[1], ticks[2] if i == 0 else ""))
+    trio = [n.strip() for n in re.split(r",|\bor\b", never.strip().rstrip(".")) if n.strip()]
+    names = [r.name for r in rungs]
+    if not sep or len(rungs) < 2 or len(set(names)) != len(names) or not trio or not all(re.fullmatch(r"[a-z0-9][a-z0-9-]*", n) for n in trio):
+        return None
+    return rungs, trio
+'
+
+# The first Claude Code build the sandboxed claude worker lane (KTD16) runs
+# on. The lane's --settings turn off the unsandboxed retry, which makes the
+# sandbox admin-required: from 2.1.285 Claude Code then ignores every setting
+# in a repository's .claude/settings*.json that loosens it (excludedCommands,
+# network.allowedDomains, filesystem.allowWrite, ...); 2.1.282 to 2.1.284
+# ignore only excludedCommands, and older builds none, so a repository could
+# take a command out of the sandbox. _claude_sandbox_floor_ok (lease-wait.sh)
+# reads it for the lease builder and dispatch_role's claude arm; the one copy.
+TRIFORGE_CLAUDE_SANDBOX_FLOOR="2.1.285"
+
+# ---------------------------------------------------------------------------
+# CLI registry (KTD7, R25, R41)
+# ---------------------------------------------------------------------------
+#
+# ONE literal per CLI. Adding a CLI is one entry here plus its lane file, probe
+# rows, setup entry and egress line (R25); nothing else carries a copy:
+# scripts/lib/roster.sh (resolution, enrollment, the core-trio set, install
+# hints), scripts/lib/lease.sh (_adapter_env, dispatch defaults),
+# scripts/lib/common.sh (_is_known_cli), hooks/handlers/session-start.sh (the
+# optional-CLI detection and the roster-pin notice), scripts/validate-versions.sh
+# (check 3 — the drift check parses this literal and compares every remaining
+# copy with it) and scripts/probe-capabilities.sh (_lane_run, the live gates)
+# all read it. Python source, like _PROTECTED_PY and _CURSOR_ID_PY: spliced
+# into the python that resolves roles and writes the roster, and read by the
+# shell accessors below through python3. Single-quoted: strings inside use
+# double quotes only, never a '; a value containing " escapes it as \" (the
+# codex launch line). The validator parses it with ast.literal_eval, so it
+# must stay a pure literal — comments are fine, expressions are not.
+#
+# Fields — every entry carries all of them (check 3 enforces the shape):
+#   name        display name for messages ("Antigravity CLI")
+#   tier        "core" (required, never disabled, every fallback chain ends at
+#               one) | "optional" (enrolled via setup; skipped clean when absent)
+#   binary      the executable looked up on PATH
+#   binary_env  variable that, when set, replaces `binary` with a resolved
+#               absolute path ("" = none): cursor's TRIFORGE_CURSOR_BIN, which
+#               _cursor_bin exports after accepting an `agent` whose --version
+#               matches version_re
+#   resolver    shell function that resolves the binary ("" = plain `binary`);
+#               _registry_binary calls it when it is defined
+#   version_re  the --version shape an alternate binary name must match ("")
+#   model       shipped default model; "" for claude (the claude -p lane then
+#               runs Claude Code's own default, user-tier settings unread; the
+#               ladder is the lead's spawn choice — see TRIFORGE_MODEL_LADDER)
+#   model_env   the override variable the CLI's dispatch lane honors ("" for
+#               claude: a roster model rides the claude -p lane's --model)
+#   install     the official install command — PRINTED for the user, never run
+#               (R18/R21); `login` is the step printed after it ("" when none)
+#   env_keys    variables _adapter_env forwards into a lease besides the base
+#               allowlist TRIFORGE_ENV_BASE: EXACT names only; the one
+#               documented wildcard is kimi's "KIMI_*" (check 3 fails any other)
+#   lane        how a role dispatch reaches the CLI: "shell" (its invoke_*
+#               helper, or a command composed under env -i in lease_dispatch)
+#               | "subagent" (review and test work on the claude lane: a native
+#               Agent-tool subagent when the lead's lead.native_subagents_
+#               enforced_tools is true — dispatch_role returns 40 — else a
+#               claude -p worker that dispatch_role runs itself, KTD16)
+#   egress      the model provider that receives the prompt and the code (R36)
+#   role_limit  the roles the CLI takes by default; [] = every role. A role
+#               chain naming it for another role fails load validation
+#               (resolve_role rc 5) and roster_write_role refuses it. Never
+#               set on a core CLI: every chain ends at one
+#   opt_in_roles  roles outside role_limit the CLI takes only once the
+#               roster records the opt-in: [members.<cli>] opt_in = [...],
+#               written by roster_write_member --opt-in (devin: builder)
+#   consent     True when enrolling needs the user's recorded consent:
+#               [members.<cli>] consent = "user <UTC> via=<origin>", written
+#               by roster_write_member --consent user. An enabled member, or
+#               a role chain naming the CLI, without one fails load
+#               validation, and headless enrollment never enrolls it (R24)
+#   instructions  the instruction reader the CLI runs as a lead, a model
+#               named in scripts/lib/instructions.sh: "claude-md-shadow"
+#               (the CLAUDE.md family shadows AGENTS.md unless it imports it)
+#               or "agents-chain" (the root-to-cwd AGENTS.md chain, overrides,
+#               a byte budget, untrusted projects); "" for a CLI that cannot
+#               lead, which instruction_pointer_visibility reports as an
+#               unknown reader
+#   lead        the KTD1 static lead fields, or {} for a CLI that cannot lead
+#               (Key Decision: Claude Code or Codex only). launch_argv is one
+#               headless lead session, the prompt appended as its last word:
+#               what scripts/coordinate.sh runs, or prints for the human to
+#               type when it asks for full access (R50); model_argv and
+#               effort_argv the flags that pass [lead] model and effort, "{}"
+#               standing for the value (shell words, as launch_argv; an empty
+#               value adds nothing), appended to launch_argv before the
+#               prompt (claude: --model, --effort; codex exec has no effort
+#               flag, so -c model_reasoning_effort=, whose header reports the
+#               value as given); full_access whether launch_argv runs the
+#               lead with full access (no sandbox, no approval prompts):
+#               coordinate.sh asks for the human's --allow-full-access when
+#               this says so or launch_full_access (below) reads it from the
+#               words, and validate-versions fails when the two disagree for a
+#               shipped lead; wait_budget_s the
+#               longest single wait the lead's shell tool allows; the two
+#               tool_vocab_* lists are the tool names the lead's PostToolUse
+#               hook payload carries, read and action (what the paralysis
+#               monitor classifies; a name in neither counts as an action, and
+#               "<tool>(read)" is a shell tool whose command only reads);
+#               goal_gate the
+#               completion-gate command ("" = none, the ops/.sprint-complete
+#               sentinel alone); ask_user the question tool ("" = none);
+#               plugin_root_env the variable the host exports for the plugin
+#               root ("" = none — the skill locator finds it). hooks_trusted
+#               is runtime (detected per session), not registry data.
+_TRIFORGE_CLIS_PY='
+CLIS = {
+    "claude": {
+        "name": "Claude Code",
+        "tier": "core",
+        "binary": "claude",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "",
+        "model_env": "",
+        "install": "npm install -g @anthropic-ai/claude-code",
+        "login": "run `claude` once and /login",
+        "env_keys": [],
+        "lane": "subagent",
+        "egress": "Anthropic",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
+        "instructions": "claude-md-shadow",
+        "lead": {
+            "launch_argv": "claude --print --permission-mode acceptEdits",
+            "full_access": False,
+            "model_argv": "--model {}",
+            "effort_argv": "--effort {}",
+            "wait_budget_s": 600,
+            "tool_vocab_read": "Read Grep Glob LS WebFetch WebSearch TaskList TaskGet NotebookRead",
+            "tool_vocab_action": "Edit Write Bash NotebookEdit Agent Skill",
+            "goal_gate": "/goal",
+            "ask_user": "AskUserQuestion",
+            "native_subagents_enforced_tools": True,
+            "agent_teams": True,
+            "plugin_root_env": "CLAUDE_PLUGIN_ROOT",
+        },
+    },
+    "antigravity": {
+        "name": "Antigravity CLI",
+        "tier": "core",
+        "binary": "agy",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "Gemini 3.8 Flash (High)",
+        "model_env": "AGY_MODEL",
+        "install": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+        "login": "run `agy` interactively once to complete login",
+        "env_keys": [],
+        "lane": "shell",
+        "egress": "Google",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
+        "instructions": "",
+        "lead": {},
+    },
+    "codex": {
+        "name": "Codex CLI",
+        "tier": "core",
+        "binary": "codex",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "gpt-6-astra",
+        "model_env": "CODEX_MODEL",
+        "install": "npm install -g @openai/codex (or brew install codex)",
+        "login": "run `codex login`",
+        "env_keys": [],
+        "lane": "shell",
+        "egress": "OpenAI",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
+        "instructions": "agents-chain",
+        "lead": {   # D-047 profile; the hook payload names exec_command Bash and keeps apply_patch (CDX-21)
+            "launch_argv": "codex exec -s danger-full-access -c approval_policy=\"never\" -c background_terminal_max_timeout=900000",
+            "full_access": True,
+            "model_argv": "-m {}",
+            "effort_argv": "-c model_reasoning_effort={}",
+            "wait_budget_s": 900,
+            "tool_vocab_read": "Bash(read)",
+            "tool_vocab_action": "Bash apply_patch",
+            "goal_gate": "",
+            "ask_user": "",
+            "native_subagents_enforced_tools": False,
+            "agent_teams": False,
+            "plugin_root_env": "",
+        },
+    },
+    "opencode": {
+        "name": "OpenCode",
+        "tier": "optional",
+        "binary": "opencode",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "openrouter/z-ai/glm-5.3",
+        "model_env": "OPENCODE_MODEL",
+        "install": "curl -fsSL https://opencode.ai/install | bash",
+        "login": "set OPENROUTER_API_KEY, or run `opencode auth login` and connect the openrouter provider",
+        "env_keys": ["OPENROUTER_API_KEY"],
+        "lane": "shell",
+        "egress": "Zhipu / Z.ai, through OpenRouter (which also sees the traffic)",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
+        "instructions": "",
+        "lead": {},
+    },
+    "kimi": {
+        "name": "Kimi Code",
+        "tier": "optional",
+        "binary": "kimi",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "kimi-code/k3",
+        "model_env": "KIMI_MODEL",
+        "install": "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
+        "login": "run `kimi login`",
+        "env_keys": ["KIMI_*"],
+        "lane": "shell",
+        "egress": "Moonshot",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
+        "instructions": "",
+        "lead": {},
+    },
+    "cursor": {
+        "name": "Cursor CLI",
+        "tier": "optional",
+        "binary": "cursor-agent",
+        "binary_env": "TRIFORGE_CURSOR_BIN",
+        "resolver": "_cursor_bin",
+        "version_re": "^[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[0-9a-f]+",
+        "model": "cursor-grok-4.6-xhigh",
+        "model_env": "CURSOR_MODEL",
+        "install": "curl https://cursor.com/install -fsS | bash",
+        "login": "run `cursor-agent login`",
+        "env_keys": ["CURSOR_API_KEY"],
+        "lane": "shell",
+        "egress": "xAI (Grok, via Cursor)",
+        "role_limit": [],
+        "opt_in_roles": [],
+        "consent": False,
+        "instructions": "",
+        "lead": {},
+    },
+    "devin": {
+        "name": "Devin CLI",
+        "tier": "optional",
+        "binary": "devin",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "swe-1-6-slow",   # what a Devin Free account resolves; DVN-03
+        "model_env": "DEVIN_MODEL",
+        "install": "brew install --cask devin-cli (or curl -fsSL https://cli.devin.ai/install.sh | bash)",
+        "login": "run `devin auth login`",
+        "env_keys": [],
+        "lane": "shell",
+        "egress": "Cognition (a model outside its SWE family also reaches the provider of that model)",
+        "role_limit": ["reviewer", "analyst"],
+        "opt_in_roles": ["builder"],
+        "consent": True,
+        "instructions": "",
+        "lead": {},
+    },
+    "grok": {
+        "name": "Grok Build",
+        "tier": "optional",
+        "binary": "grok",
+        "binary_env": "",
+        "resolver": "",
+        "version_re": "",
+        "model": "grok-4.7",
+        "model_env": "GROK_MODEL",
+        "install": "curl -fsSL https://x.ai/cli/install.sh | bash",
+        "login": "run `grok login` (`grok login --device-code` on a host without a browser), or set XAI_API_KEY",
+        "env_keys": ["XAI_API_KEY", "GROK_HOME"],
+        "lane": "shell",
+        "egress": "xAI",
+        # a builder only in a lease: invoke_grok runs the read class alone,
+        # so a tester or documenter (dispatched outside a lease) never routes
+        # to grok (R23)
+        "role_limit": ["builder", "reviewer", "analyst"],
+        "opt_in_roles": [],
+        "consent": False,
+        "instructions": "",
+        "lead": {},
+    },
+}
+'
+
+# _LAUNCH_ACCESS_PY — launch_full_access(words): the words of a launch line (as
+# shlex.split gives them, the [lead] model and effort words included) that run
+# a lead with full access, empty when none does. Read by the forms both lead
+# CLIs take (claude 2.1.289 and codex exec 0.160.0 --help): -s<v>, -s <v>,
+# -s=<v> and --sandbox[= ]<v> naming danger-full-access; -c/--config (also
+# -c<kv>, --config=<kv>) setting sandbox_mode to it, quotes stripped, or
+# setting profile; --permission-mode[= ]bypassPermissions;
+# --dangerously-skip-permissions, --allow-dangerously-skip-permissions,
+# --dangerously-bypass-approvals-and-sandbox and --yolo; --profile[= ]<name>,
+# since a profile can set any sandbox, and -p <name> / -p<name> where the
+# launch line's binary takes -p as its profile flag (LAUNCH_SHORT_PROFILE:
+# codex exec; claude -p is --print). It fails closed: any other word that
+# still names danger-full-access, bypassPermissions or one of the dangerous
+# flags counts too. launch_extra_words(tmpl, value): the words a
+# lead.model_argv or lead.effort_argv template adds for a value ("{}" = the
+# value). launch_interactive(text): a lead.launch_argv without the words that
+# make it headless (LAUNCH_HEADLESS_WORDS), the line a human types to start
+# that lead in a terminal, or None for a binary with no entry there.
+# _lead_launch_compose (scripts/lib/roster.sh, which scripts/coordinate.sh
+# and lead_launch_line call) splices them to compose a lead's launch line and
+# decide when the human's --allow-full-access is needed;
+# scripts/validate-versions.sh runs the first two on each shipped lead's
+# launch line against lead.full_access. Python source like
+# _TRIFORGE_CLIS_PY: single-quoted, so no apostrophe inside.
+_LAUNCH_ACCESS_PY='
+import shlex
+
+LAUNCH_FULL_ACCESS_FLAGS = ("--dangerously-skip-permissions", "--allow-dangerously-skip-permissions",
+                            "--dangerously-bypass-approvals-and-sandbox", "--yolo")
+LAUNCH_FULL_ACCESS_NAMES = ("danger-full-access", "bypasspermissions", "dangerously-skip-permissions",
+                            "dangerously-bypass-approvals-and-sandbox")
+# The binaries whose -p takes a profile name (codex exec 0.160.0: -p,
+# --profile <CONFIG_PROFILE>); for claude -p is --print and takes no value.
+LAUNCH_SHORT_PROFILE = ("codex",)
+# The words that make a launch line headless, by the binary that takes them:
+# claude -p / --print (one prompt, then exit), the codex exec subcommand. The
+# rest of the line stays as it is in a terminal: codex 0.160.0 takes -s, -c
+# and -m without exec, claude 2.1.291 --permission-mode, --model and --effort
+# without --print (their --help).
+LAUNCH_HEADLESS_WORDS = {"claude": ("--print", "-p"), "codex": ("exec",)}
+
+def launch_interactive(text):
+    words = shlex.split(text)
+    drop = LAUNCH_HEADLESS_WORDS.get(_launch_binary(words))
+    if drop is None:
+        return None
+    want = [w for w in words if w not in drop]
+    kept = " ".join(t for t in text.split() if t not in drop)
+    # the registry spelling when it still splits into the same words, else
+    # the words requoted
+    return kept if shlex.split(kept) == want else " ".join(shlex.quote(w) for w in want)
+
+def _launch_binary(words):
+    for w in words:
+        if w == "env" or ("=" in w and not w.startswith("-")):
+            continue
+        return w.rsplit("/", 1)[-1]
+    return ""
+
+def launch_extra_words(tmpl, value):
+    return [w.replace("{}", value) for w in shlex.split(tmpl)]
+
+def _launch_unquote(v):
+    v = str(v).strip()
+    while len(v) >= 2 and v[0] == v[-1] and v[0] in (chr(34), chr(39)):
+        v = v[1:-1].strip()
+    return v
+
+def launch_full_access(words):
+    why = []
+    words = [str(w) for w in words]
+    short = ("-s", "-c", "-p") if _launch_binary(words) in LAUNCH_SHORT_PROFILE else ("-s", "-c")
+    i, n = 0, len(words)
+    while i < n:
+        w = words[i]
+        key, val, shown = "", None, w
+        if w in LAUNCH_FULL_ACCESS_FLAGS:
+            why.append(w)
+        elif w in ("-s", "--sandbox", "--permission-mode", "-c", "--config", "--profile") or (w == "-p" and "-p" in short):
+            key, val = w, (words[i + 1] if i + 1 < n else "")
+            shown = w + " " + val
+            i += 1
+        elif w.startswith("--") and "=" in w:
+            key, val = w.split("=", 1)
+        elif len(w) > 2 and w[:2] in short and not w.startswith("--"):
+            key, val = w[:2], w[2:]
+            if key in ("-s", "-p") and val.startswith("="):
+                val = val[1:]
+        if key == "-p":
+            key = "--profile"
+        if key in ("-c", "--config") and val is not None:
+            k, _, v = val.partition("=")
+            k = _launch_unquote(k)
+            if k == "sandbox_mode":
+                key, val = "-s", v
+            elif k == "profile":
+                key, val = "--profile", v
+        if key in ("-s", "--sandbox") and _launch_unquote(val).lower() == "danger-full-access":
+            why.append(shown)
+        elif key == "--permission-mode" and _launch_unquote(val).lower() == "bypasspermissions":
+            why.append(shown)
+        elif key == "--profile" and val is not None:
+            why.append(shown + " (a profile can set any sandbox)")
+        i += 1
+    for w in words:
+        low = _launch_unquote(w).lower()
+        if any(name in low for name in LAUNCH_FULL_ACCESS_NAMES) and not any(w in r for r in why):
+            why.append(w)
+    return why
+'
+
+# The base env allowlist every lease builder gets (KTD-14) — identity and
+# terminal, no credentials: USER is what lets `claude -p` find its keychain
+# account under env -i. _adapter_env (scripts/lib/lease.sh) and its mirror
+# _lane_run (scripts/probe-capabilities.sh) both read this list; a CLI's own
+# credential variables are its env_keys entry above.
+TRIFORGE_ENV_BASE="HOME PATH TMPDIR TERM LANG COLORTERM USER"
+
+# cli_list [core|optional|all] — the registered CLI names, registry order,
+# space-separated on one line (default: all).
+cli_list() {
+  CL_TIER="${1:-all}" python3 -c "${_PY_PRELUDE}
+import os
+${_TRIFORGE_CLIS_PY}
+t = os.environ['CL_TIER']
+print(' '.join(c for c, e in CLIS.items() if t == 'all' or e['tier'] == t))
+"
+}
+
+# _CLI_FIELD_PY — the lookup the two accessors below share, spliced into their
+# python like _TRIFORGE_CLIS_PY (single-quoted: double quotes only inside).
+# cli_value(who, cli, entry, field) walks a dotted field name into the entry and
+# formats the value — a list space-joined, a boolean as true|false, a table as
+# its key names (an empty table formats as nothing) — or exits 2 with
+# "<who>: <cli> has no field '<field>'", so a typo never reads as "".
+_CLI_FIELD_PY='
+def cli_value(who, cli, entry, field):
+    v = entry
+    for k in field.split("."):
+        if not isinstance(v, dict) or k not in v:
+            sys.stderr.write(who + ": " + cli + " has no field " + repr(field) + "\n")
+            sys.exit(2)
+        v = v[k]
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (list, tuple)):
+        return " ".join(str(x) for x in v)
+    if isinstance(v, dict):
+        return " ".join(v)
+    return str(v)
+'
+
+# cli_field <cli> <field>[.<subfield>]... — print the registry values of one
+# CLI, tab-separated on one line (one field: the value alone; cli_field codex
+# lead -> the KTD1 field names). rc 2 with a message for an unknown CLI or
+# field. Two fields in one call is one python3 fork instead of two
+# (_registry_binary, lease_dispatch); the fields ride in as the argument list.
+cli_field() {
+  CF_ARGS="$*" CF_CLI="${1:?usage: cli_field <cli> <field>[.<subfield>]}" CF_FIELD="${2:?usage: cli_field <cli> <field>[.<subfield>]}" python3 -c "${_PY_PRELUDE}
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_CLI_FIELD_PY}
+cli = os.environ['CF_CLI']
+if cli not in CLIS:
+    sys.stderr.write('cli_field: unknown cli ' + repr(cli) + ' (registered: ' + ' '.join(CLIS) + ')\n')
+    sys.exit(2)
+fields = [os.environ['CF_FIELD']] + os.environ['CF_ARGS'].split()[2:]
+print('\t'.join(cli_value('cli_field', cli, CLIS[cli], f) for f in fields))
+"
+}
+
+# cli_table <core|optional|all> <field>[.<subfield>]... — one line per registered
+# CLI of that tier, registry order: the name, then each field, tab-separated and
+# formatted as cli_field prints them. One python3 fork where a cli_list +
+# cli_field loop forks once per lookup (ensure_core_trio_live, the session-start
+# detection loop). rc 2 with a message for an unknown tier or field.
+cli_table() {
+  CT_ARGS="$*" CT_TIER="${1:?usage: cli_table <core|optional|all> <field>[.<subfield>]...}" CT_FIELD="${2:?usage: cli_table <core|optional|all> <field>[.<subfield>]...}" python3 -c "${_PY_PRELUDE}
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_CLI_FIELD_PY}
+t = os.environ['CT_TIER']
+if t not in ('core', 'optional', 'all'):
+    sys.stderr.write('cli_table: unknown tier ' + repr(t) + ' (core|optional|all)\n')
+    sys.exit(2)
+fields = [os.environ['CT_FIELD']] + os.environ['CT_ARGS'].split()[2:]
+for cli, e in CLIS.items():
+    if t == 'all' or e['tier'] == t:
+        print('\t'.join([cli] + [cli_value('cli_table', cli, e, f) for f in fields]))
+"
+}
+
+# _INSTALL_FIX_PY — install_fix(cli), the one-line install-then-login fix the
+# helpers print on a deterministic failure (R21 wording): "install <name>
+# (<install>), then <login>". Spliced after _TRIFORGE_CLIS_PY wherever python
+# composes it: cli_install_fix below, resolve_role's chain-exhausted error
+# (roster.sh) and the persona lane's missing-CLI refusals (_PERSONA_PY in
+# persona.sh). Single-quoted: double quotes only inside.
+_INSTALL_FIX_PY='
+def install_fix(cli):
+    e = CLIS[cli]
+    return "install " + e["name"] + " (" + e["install"] + ")" + (", then " + e["login"] if e["login"] else "")
+'
+
+# cli_install_fix <cli> — print install_fix(<cli>) (_INSTALL_FIX_PY); rc 2 for
+# an unknown CLI.
+cli_install_fix() {
+  CF_CLI="${1:?usage: cli_install_fix <cli>}" python3 -c "${_PY_PRELUDE}
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_INSTALL_FIX_PY}
+cli = os.environ['CF_CLI']
+if cli not in CLIS:
+    sys.stderr.write('cli_install_fix: unknown cli ' + repr(cli) + '\n')
+    sys.exit(2)
+print(install_fix(cli))
+"
+}
+
+# _registry_binary <cli> [<binary> <resolver>] — the binary to look up on PATH:
+# the entry's resolver's answer when the registry names one and the function is
+# defined (cursor: _cursor_bin, which prints the verified absolute path), else
+# the plain `binary` name. The two fields are one registry read (cli_field)
+# unless the caller hands them over from a cli_table row (the session-start
+# detection loop: one read for the whole tier). rc 2 for an unknown CLI.
+_registry_binary() {
+  local CLI=${1:?usage: _registry_binary <cli>} BIN=${2:-} RESOLVER=${3:-} ROW="" OUT=""
+  if [ $# -lt 3 ]; then
+    ROW=$(cli_field "$CLI" binary resolver 2>/dev/null) || return 2
+    BIN=${ROW%%$'\t'*}
+    RESOLVER=${ROW#*$'\t'}
+  fi
+  if [ -n "$RESOLVER" ] && command -v "$RESOLVER" >/dev/null 2>&1 && OUT=$("$RESOLVER" 2>/dev/null) && [ -n "$OUT" ]; then
+    printf '%s\n' "$OUT"
+    return 0
+  fi
+  printf '%s\n' "$BIN"
+}
+
+# _known_clis [<text when unreadable>] — the registered CLI names as one
+# space-separated line (cli_list all), for the identity checks (_is_known_cli
+# in common.sh) and the "one of: …" error messages in lease.sh and roster.sh.
+# Read on first use and cached in _KNOWN_CLIS, so loading the helper forks no
+# python; empty (every identity check fails closed) only when python3 is
+# missing, which resolve_role refuses on anyway — the optional argument is
+# printed in place of that empty list.
+_KNOWN_CLIS=""
+_KNOWN_CLIS_READ=""
+_known_clis() {
+  if [ -z "$_KNOWN_CLIS_READ" ]; then
+    _KNOWN_CLIS=$(cli_list all 2>/dev/null) || _KNOWN_CLIS=""
+    _KNOWN_CLIS_READ=1
+  fi
+  printf '%s\n' "${_KNOWN_CLIS:-${1:-}}"
 }

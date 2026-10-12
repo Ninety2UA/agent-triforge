@@ -1,0 +1,3 @@
+check: C05
+under-warn: error
+message: does not match directory

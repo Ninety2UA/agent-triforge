@@ -103,7 +103,7 @@ _cursor_bin() {
       printf '%s\n' "$CAND"; return 0
     fi
   done <<AGENTS
-$(python3 -c "
+$(python3 -c "${_PY_PRELUDE}
 import os
 seen = set()
 for d in os.environ.get('PATH', '').split(os.pathsep):
@@ -164,7 +164,7 @@ _CURSOR_EFFORT_NOTE=""
 _cursor_model_for_effort() {
   local M=${1:-} E=${2:-}
   _CURSOR_EFFORT_NOTE="in model id"
-  CM_MODEL="$M" CM_EFFORT="$E" python3 -c "
+  CM_MODEL="$M" CM_EFFORT="$E" python3 -c "${_PY_PRELUDE}
 import os, sys
 ${_CURSOR_ID_PY}
 m = os.environ['CM_MODEL']; e = os.environ['CM_EFFORT']
@@ -211,7 +211,7 @@ invoke_cursor() {
     echo "invoke_cursor: ERROR no Cursor CLI on PATH (\`cursor-agent\`, or an \`agent\` whose --version matches YYYY.MM.DD-<hex>) — cannot invoke agent '${AGENT_NAME}'. Fix: install it (curl https://cursor.com/install -fsS | bash), then run \`cursor-agent login\`. No retry (deterministic)." >&2
     # Write the guidance to OUTPUT_FILE too: a caller (e.g. a review fan-out)
     # that only reads the file must not mistake an empty file for "no findings"
-    # (the exact trap CLAUDE.md warns about).
+    # (the exact trap AGENTS.md warns about).
     echo "invoke_cursor: cursor-agent CLI not on PATH — install: curl https://cursor.com/install -fsS | bash" > "$OUTPUT_FILE" 2>/dev/null || true
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="binary-missing"
@@ -241,9 +241,9 @@ invoke_cursor() {
   # else raw with a warning naming the available briefs. An empty AGENT_NAME is a
   # deliberate raw run (the READY plumbing probe).
   local FULL_PROMPT="$PROMPT"
-  if [ -n "$AGENT_NAME" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/cursor-agents/${AGENT_NAME}.md" ]; then
+  if [ -n "$AGENT_NAME" ] && [ -f "${_TRIFORGE_PLUGIN_ROOT}/cursor-agents/${AGENT_NAME}.md" ]; then
     local BODY
-    BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "${CLAUDE_PLUGIN_ROOT}/cursor-agents/${AGENT_NAME}.md")
+    BODY=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "${_TRIFORGE_PLUGIN_ROOT}/cursor-agents/${AGENT_NAME}.md")
     FULL_PROMPT="${BODY}
 
 ${PROMPT}"
@@ -369,8 +369,8 @@ ${PROMPT}"
 # selectors, so they are not enumerated here.
 _list_cursor_agents() {
   {
-    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/cursor-agents" ]; then
-      for f in "${CLAUDE_PLUGIN_ROOT}/cursor-agents"/*.md; do
+    if [ -d "${_TRIFORGE_PLUGIN_ROOT}/cursor-agents" ]; then
+      for f in "${_TRIFORGE_PLUGIN_ROOT}/cursor-agents"/*.md; do
         [ -f "$f" ] || continue
         case "$(basename "$f" .md)" in README) continue ;; esac
         basename "$f" .md
@@ -387,7 +387,7 @@ _list_cursor_agents() {
 # builders answer in the same stream shape — the typed `Status:` report
 # (KTD11) is only parseable from the extracted prose.
 _cursor_extract_text() {
-  C_RAW="$1" C_OUT="$2" python3 -c '
+  C_RAW="$1" C_OUT="$2" python3 -c "${_PY_PRELUDE}"'
 import json, os, sys
 raw = open(os.environ["C_RAW"], "r", errors="replace").read()
 

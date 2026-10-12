@@ -1,0 +1,7 @@
+# U21: a drifted marketplace.json version fails — both of its version fields
+# read 1.2.2 while plugin.json, the agy pack and README What's new read 1.2.3.
+check: lockstep
+rc: 1
+line: FAIL: version lockstep: .claude-plugin/plugin.json=1.2.3 .claude-plugin/marketplace.json=1.2.2 antigravity-agents/plugin.json=1.2.3 README What's new=1.2.3
+line: ok:   release notes: README Recent changes carries the v1.2.3 entry (GitHub release body source)
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

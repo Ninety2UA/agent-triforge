@@ -1,10 +1,10 @@
 ---
 name: review-synthesis
-description: "Merge, deduplicate, and prioritize findings from parallel reviewers into one report with confidence tiers, priorities, and an explicit contradictions section. Use when two or more review outputs (ops/REVIEW_*.md, subagent reviews) exist for the same change and the lead needs a single actionable list. Not for deciding what to fix or when to stop; that is iterative-refinement, which consumes this report."
+description: "Use when two or more review outputs exist for one change: merge, dedupe, tier confidence, flag contradictions."
 metadata:
-  triforge-consumer: "Claude (lead)"
+  triforge-consumer: "the lead"
   triforge-phase: "4 (process reviews)"
-  version: "3.3.0"
+  version: "4.0.0"
 ---
 
 # Review Synthesis
@@ -16,7 +16,7 @@ When processing findings from multiple reviewers (Antigravity, Codex, Claude sub
 Read all review outputs:
 - `ops/REVIEW_ANTIGRAVITY.md` (architecture, design, documentation)
 - `ops/REVIEW_CODEX.md` (logic, security, tests)
-- Any subagent review outputs (security-sentinel, performance-oracle, etc.)
+- Any specialist persona outputs (security-sentinel, performance-oracle, etc.)
 
 ## Step 2: Normalize format
 

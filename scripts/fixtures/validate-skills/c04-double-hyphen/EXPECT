@@ -1,0 +1,3 @@
+check: C04
+under-warn: warning
+message: double hyphen

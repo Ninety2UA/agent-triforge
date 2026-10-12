@@ -273,7 +273,7 @@ Restructured, no scope change: R3 is hardening of the existing `claude -p` lane.
 
   Chosen over one list, which either misses the framework's own code or force-gates users' `scripts/` and `skills/`. Governs R30.
 - KTD9. **Worker marker as an accident guard; exclusions by provisioned path.**
-  - `_adapter_env` exports `TRIFORGE_LEASE_WORKER=1`, and `dispatch_persona` exports it as `persona`.
+  - `_adapter_env` exports `TRIFORGE_LEASE_WORKER=builder`, and `dispatch_persona` exports it as `persona` (the guards treat any non-empty value as the marker; built in U11).
   - Hook handlers exit 0 at once under the marker.
   - `lease_create`, `lease_dispatch`, `lease_merge`, `lease_promote`, `lease_approve` and the `roster_write_*` writers refuse under it, or when `$PWD` is inside the lease root.
   - The squash excludes only paths Triforge provisioned into that worktree, recorded in the lease row at create. Tracked edits under `.claude/`, `.codex/` or `.agents/` merge normally and trip the protected check.

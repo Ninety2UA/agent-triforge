@@ -83,7 +83,7 @@ invoke_kimi() {
     echo "invoke_kimi: ERROR \`kimi\` (Kimi Code CLI) not found on PATH — cannot invoke agent '${AGENT_NAME}'. Fix: install it (curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash), then run \`kimi login\`. No retry (deterministic)." >&2
     # Write the guidance to OUTPUT_FILE too: a caller (e.g. a review fan-out)
     # that only reads the file must not mistake an empty file for "no findings"
-    # (the exact trap CLAUDE.md warns about).
+    # (the exact trap AGENTS.md warns about).
     echo "invoke_kimi: kimi CLI not on PATH — install: curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash" > "$OUTPUT_FILE" 2>/dev/null || true
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="binary-missing"
@@ -98,8 +98,8 @@ invoke_kimi() {
   # available definitions. An empty AGENT_NAME is a deliberate raw run (the
   # READY plumbing probe and lease_dispatch's direct builder command).
   local FULL_PROMPT="$PROMPT"
-  if [ -n "$AGENT_NAME" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/kimi-agents/${AGENT_NAME}.md" ]; then
-    AGENT_FILE="${CLAUDE_PLUGIN_ROOT}/kimi-agents/${AGENT_NAME}.md"
+  if [ -n "$AGENT_NAME" ] && [ -f "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/${AGENT_NAME}.md" ]; then
+    AGENT_FILE="${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/${AGENT_NAME}.md"
     MODE="agent-file"
   elif [ -n "$AGENT_NAME" ]; then
     local AVAILABLE
@@ -250,8 +250,8 @@ invoke_kimi() {
 # both scan it with incompatible vocabularies).
 _list_kimi_agents() {
   {
-    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/kimi-agents" ]; then
-      for f in "${CLAUDE_PLUGIN_ROOT}/kimi-agents"/*.md; do
+    if [ -d "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents" ]; then
+      for f in "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents"/*.md; do
         [ -f "$f" ] || continue
         case "$(basename "$f" .md)" in README) continue ;; esac
         basename "$f" .md
@@ -268,7 +268,7 @@ _list_kimi_agents() {
 # builders answer in the same stream shape — the typed `Status:` report
 # (KTD11) is only parseable from the extracted prose.
 _kimi_extract_text() {
-  K_RAW="$1" K_OUT="$2" python3 -c '
+  K_RAW="$1" K_OUT="$2" python3 -c "${_PY_PRELUDE}"'
 import json, os, sys
 raw = open(os.environ["K_RAW"], "r", errors="replace").read()
 

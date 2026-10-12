@@ -1,0 +1,3 @@
+check: KTD6
+under-warn: warning
+message: cwd-relative locator call

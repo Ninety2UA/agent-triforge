@@ -127,7 +127,7 @@ one-sentence summary so it slots straight into the synthesized report.
 Triforge's portable skills are provisioned into `.agents/skills/` in the
 worktree, which Kimi discovers natively (project tier: `.kimi-code/skills/`,
 `.agents/skills/`; user tier: `~/.kimi-code/skills/`, `~/.agents/skills/`).
-Invoke one as `/skill:<name>` — `/skill:systematic-debugging`,
+Invoke one as `/skill:<name>` — for example
 `/skill:verification-before-completion` — when it applies. The merged skill list
 follows.
 

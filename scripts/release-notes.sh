@@ -24,6 +24,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 REPO_URL="https://github.com/Ninety2UA/agent-triforge"
+REPO_SLUG="${REPO_URL#https://github.com/}"   # owner/repo: the form `codex plugin marketplace add` takes
 MODE="body"
 VERSION=""
 while [ $# -gt 0 ]; do
@@ -120,7 +121,8 @@ case "$MODE" in
     fi
     prev=$(previous_tag)
     printf '%s\n\n---\n\n' "$body"
-    printf '**Install / update:** `claude plugin marketplace add %s` · `claude plugin install agent-triforge@agent-triforge` · `claude plugin update agent-triforge`\n\n' "$REPO_URL"
+    printf '**Install / update (Claude Code):** `claude plugin marketplace add %s` · `claude plugin install agent-triforge@agent-triforge` · `claude plugin update agent-triforge`\n\n' "$REPO_URL"
+    printf '**Install (Codex):** `codex plugin marketplace add %s` · `codex plugin add agent-triforge@agent-triforge`\n\n' "$REPO_SLUG"
     if [ -n "$prev" ]; then
       printf '**Full changelog:** [%s...%s](%s/compare/%s...%s) · ' "$prev" "$TAG" "$REPO_URL" "$prev" "$TAG"
     else

@@ -1,0 +1,7 @@
+# The control for sweep-brainstorms-ignored: the same stale pin in
+# docs/brainstorms/ and in docs/guide.md is exactly 1 hit — the shipped page
+# fails, the brainstorm is still skipped.
+check: sweep
+rc: 1
+line: FAIL: stale-pin sweep: 1 hit(s) on shipped surfaces (see file:line:text above)
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

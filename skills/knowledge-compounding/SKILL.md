@@ -1,10 +1,10 @@
 ---
 name: knowledge-compounding
-description: "Counterfactual-gated capture of solved problems and decisions into ops/solutions/ and ops/decisions/. Use when a task completes and a future agent without a note would plausibly repeat the mistake or re-derive the decision, or when a wrap-up must confirm nothing that cleared that bar was skipped. Not for trivial fixes whose reasoning is recoverable from the diff; those produce no note, and this skill says why."
+description: "Use when a task completes and a future agent without a note would repeat the mistake or re-derive the decision."
 metadata:
-  triforge-consumer: "Claude (lead)"
+  triforge-consumer: "the lead"
   triforge-phase: "task completion (lease_collect); 6 (wrap-up)"
-  version: "3.3.0"
+  version: "4.0.0"
 ---
 
 # Knowledge Compounding
@@ -117,7 +117,7 @@ If nothing clears the counterfactual bar, write nothing and say so in one line n
 
 ## How compounded knowledge is used
 
-Before planning (Phase 1), the learnings-researcher agent searches `ops/solutions/` and `ops/decisions/` for patterns relevant to the current goal. This prevents:
+Before planning (Phase 1), the learnings-researcher persona searches `ops/solutions/` and `ops/decisions/` for patterns relevant to the current goal. This prevents:
 - Re-investigating known issues
 - Repeating rejected approaches
 - Missing established conventions

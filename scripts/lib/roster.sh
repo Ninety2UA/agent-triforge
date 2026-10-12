@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/roster.sh — roster resolution (KTD-2) and enrollment (R37/R39): resolve_role, dispatch_role, ensure_core_trio_live, latest_probe_record, roster_* helpers. scripts/validate-versions.sh parses the DEFAULTS / CLI_DEFAULT_MODEL literals here
+# scripts/lib/roster.sh — roster resolution (KTD-2) and enrollment (R37/R39): resolve_role, dispatch_role, ensure_core_trio_live, latest_probe_record, roster_* helpers. The role table is the DEFAULTS literal here (_ROLE_DEFAULTS_PY, parsed by scripts/validate-versions.sh check 3); every per-CLI value — binary, model, tier, install hint — comes from the CLI registry in scripts/lib/registry.sh (KTD7)
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh. Every function keeps the name and
@@ -14,15 +14,38 @@ fi
 # Roster resolution (KTD-2) — ops/roster.toml decides who does what
 # ---------------------------------------------------------------------------
 
+# The role table — the ONE copy of the shipped role defaults, spliced into
+# resolve_role and roster_role_entry (python source, like _TRIFORGE_CLIS_PY in
+# scripts/lib/registry.sh, which supplies everything per-CLI). Mirrors
+# templates/ops/roster.toml; scripts/validate-versions.sh check 3 parses this
+# literal, requires each role's model to equal its CLI's registry model, and
+# diffs the template against it. builder model "" means: the claude -p lease
+# lane runs Claude Code's own default model (no --model pin; the lane reads no
+# user-tier settings, KTD16); the Fable/downgrade ladder is the lead's
+# spawn-time choice, never this lane's.
+# Single-quoted shell literal: python strings inside use double quotes only.
+_ROLE_DEFAULTS_PY='
+DEFAULTS = {
+    "builder":    {"cli": "claude",      "model": "",                        "effort": "max",   "fallbacks": ["codex", "antigravity"]},
+    "reviewer":   {"cli": "codex",       "model": "gpt-6-astra",             "effort": "xhigh", "fallbacks": ["antigravity", "claude"]},
+    "tester":     {"cli": "codex",       "model": "gpt-6-astra",             "effort": "xhigh", "fallbacks": ["claude"]},
+    "analyst":    {"cli": "antigravity", "model": "Gemini 3.8 Flash (High)", "effort": "high",  "fallbacks": ["claude"]},
+    "documenter": {"cli": "antigravity", "model": "Gemini 3.8 Flash (High)", "effort": "high",  "fallbacks": ["claude"]},
+}
+'
+
 # resolve_role <role> — map a task-type role (builder | reviewer | tester |
 # analyst | documenter) to the member that should handle it right now.
 # Prints one line on success:   cli<TAB>model<TAB>effort
-# (builder's model field is empty by design: the shell `claude -p` builder lane
-# runs the host's default Claude Code model with no --model pin, so the roster
-# has no model to carry there. The Fable/downgrade ladder is an Agent-tool
-# subagent concern — the Agent tool's `model` parameter — NOT this shell lane.)
+# (builder's model field is empty by design: the `claude -p` builder lane runs
+# Claude Code's own default model with no --model pin, so the roster has no
+# model to carry there. The Fable/downgrade ladder is the lead's spawn-time
+# choice — the Agent tool's `model` parameter under a Claude lead — NOT this
+# shell lane.)
 #
-# Sources of truth, in order: ops/roster.toml when present, overlaid
+# Sources of truth, in order: the checkout's ops/roster.toml
+# (_lead_roster_path: the same file from any subdirectory, as for every
+# roster reader and writer here) when present, overlaid
 # PER-FIELD onto built-in defaults — a role overriding only effort keeps the
 # default cli + model; no roster file at all resolves to the shipped
 # builder-pool posture. Load-time validation runs on EVERY load, not just for
@@ -31,6 +54,11 @@ fi
 #   - each role's chain ([cli] + fallbacks) must terminate at a core-trio
 #     member — a chain resolving entirely to optional members cannot ship
 #   - [members.<core-trio>] enabled=false is rejected (cannot be disabled)
+#   - a [lead] table must name a CLI that can lead, with valid fields (KTD1;
+#     lead_load in _LEAD_PY, below)
+#   - a consent CLI (devin) needs a recorded consent before it is enabled or
+#     named in a chain, and a role-limited CLI takes another role only through
+#     its recorded opt-in (R24; member_rules in _MEMBER_RULES_PY, below)
 # The resolution walk tries the primary cli, then fallbacks in order; a
 # member is SKIPPED when its binary is absent from PATH or its
 # [members.<cli>] entry says enabled=false (R38: disabled = absent
@@ -60,15 +88,21 @@ resolve_role() {
   # fallback chain pick the next CLI, instead of failing the role on every
   # task. Only a roster that names opencode can put it in a chain (no shipped
   # default chain does), so a stock roster never pays for the version probe.
-  local RR_EXCLUDE=${RESOLVE_ROLE_EXCLUDE:-}
-  if [ -f ops/roster.toml ] && grep -q 'opencode' ops/roster.toml 2>/dev/null \
+  local RR_EXCLUDE=${RESOLVE_ROLE_EXCLUDE:-} RR_ROSTER
+  RR_ROSTER=$(_lead_roster_path)
+  if [ -f "$RR_ROSTER" ] && grep -q 'opencode' "$RR_ROSTER" 2>/dev/null \
      && command -v opencode >/dev/null 2>&1 && ! _opencode_v2_check opencode; then
     RR_EXCLUDE="${RR_EXCLUDE:+${RR_EXCLUDE},}opencode"
     echo "resolve_role: WARNING opencode skipped in every role's chain — version ${_OPENCODE_VERSION:-unreadable} is unsupported or unconfirmed (D-049); pin V1 with: ${_OPENCODE_V1_PIN}" >&2
   fi
-  RESOLVE_ROLE_EXCLUDE="$RR_EXCLUDE" ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
+  RESOLVE_ROLE_EXCLUDE="$RR_EXCLUDE" ROLE="$ROLE" ROSTER_FILE="$RR_ROSTER" python3 -c "${_PY_PRELUDE}
 import os, re, shutil, sys
 ${_CURSOR_ID_PY}
+${_TRIFORGE_CLIS_PY}
+${_INSTALL_FIX_PY}
+${_ROLE_DEFAULTS_PY}
+${_LEAD_PY}
+${_MEMBER_RULES_PY}
 try:
     import tomllib
 except ImportError:
@@ -78,61 +112,25 @@ except ImportError:
         sys.stderr.write('resolve_role: ERROR no TOML parser available. Fix: use Python 3.11+ (tomllib) or run: pip install tomli\n')
         sys.exit(3)
 
-# Built-in defaults — the single source of truth in this function; mirrors
-# templates/ops/roster.toml (keep the two in sync). builder model '' means: the
-# shell claude -p lease lane runs the host default Claude model (no --model pin);
-# the Fable/downgrade ladder is an Agent-tool subagent concern, not this lane.
-DEFAULTS = {
-    'builder':    {'cli': 'claude',      'model': '',                      'effort': 'max',   'fallbacks': ['codex', 'antigravity']},
-    'reviewer':   {'cli': 'codex',       'model': 'gpt-6-astra',           'effort': 'xhigh', 'fallbacks': ['antigravity', 'claude']},
-    'tester':     {'cli': 'codex',       'model': 'gpt-6-astra',           'effort': 'xhigh', 'fallbacks': ['claude']},
-    'analyst':    {'cli': 'antigravity', 'model': 'Gemini 3.8 Flash (High)', 'effort': 'high',  'fallbacks': ['claude']},
-    'documenter': {'cli': 'antigravity', 'model': 'Gemini 3.8 Flash (High)', 'effort': 'high',  'fallbacks': ['claude']},
-}
-CORE_TRIO = ('claude', 'antigravity', 'codex')
-# cli name -> binary looked up on PATH
-BINARY = {'claude': 'claude', 'antigravity': 'agy', 'codex': 'codex',
-          'opencode': 'opencode', 'kimi': 'kimi',
-          # cursor: cursor-agent first; _cursor_bin (KTD3 / D-025) exports the
-          # verified fallback path (an agent binary whose --version matches the
-          # Cursor YYYY.MM.DD-<hex> format) as TRIFORGE_CURSOR_BIN for this map.
-          'cursor': os.environ.get('TRIFORGE_CURSOR_BIN') or 'cursor-agent'}
-# Shipped per-CLI default model, used when a member is reached via fallback
-# or chosen as an overridden primary with no explicit role model. Policy
-# (D-022, user-directed 2026-09-11): agy pins the NEWEST Gemini model at its
-# highest thinking level, Pro or Flash — currently Gemini 3.8 Flash (High)
-# (AGY-05 PASS 2026-09-11; Gemini 3.1 Pro (High) stays a documented roster
-# opt-in); codex gpt-6-astra (D-021, CDX-03); opencode glm-5.3 (D-023);
-# kimi kimi-code/k3 (D-024, the OAuth-managed alias); cursor
-# cursor-grok-4.6-xhigh (D-025 — effort rides in the model-id suffix, never
-# the Auto router). Keep in sync with roster_member_default and
-# templates/ops/roster.toml; scripts/validate-versions.sh diffs the copies.
-# A [members.<cli>].model entry overrides the shipped default.
-CLI_DEFAULT_MODEL = {
-    'claude': '',
-    'antigravity': 'Gemini 3.8 Flash (High)',
-    'codex': 'gpt-6-astra',
-    'opencode': 'openrouter/z-ai/glm-5.3',
-    'kimi': 'kimi-code/k3',
-    'cursor': 'cursor-grok-4.6-xhigh',
-}
-# G12-style install/login guidance (R21), matching the invoke_* wording.
-INSTALL_FIX = {
-    'claude': 'install Claude Code (npm install -g @anthropic-ai/claude-code), then run claude once and /login',
-    'antigravity': 'install it (curl -fsSL https://antigravity.google/cli/install.sh | bash), then run agy interactively once to complete login',
-    'codex': 'install it (npm install -g @openai/codex or brew install codex), then run codex login',
-}
+# DEFAULTS (the role table, _ROLE_DEFAULTS_PY above) and CLIS (the CLI
+# registry, scripts/lib/registry.sh) are the two spliced literals; everything
+# per-CLI below is derived from CLIS, never written out here.
+CORE_TRIO = tuple(c for c, e in CLIS.items() if e['tier'] == 'core')
+# cli name -> binary looked up on PATH. A registry binary_env (cursor:
+# TRIFORGE_CURSOR_BIN, which _cursor_bin exports after accepting an agent
+# binary whose --version matches the Cursor YYYY.MM.DD-<hex> format — KTD3 /
+# D-025) replaces the plain name when set.
+BINARY = {c: (os.environ.get(e['binary_env']) if e['binary_env'] else None) or e['binary'] for c, e in CLIS.items()}
+# Shipped per-CLI default model (the registry's model field), used when a
+# member is reached via fallback or chosen as an overridden primary with no
+# explicit role model. A [members.<cli>].model entry overrides it.
+CLI_DEFAULT_MODEL = {c: e['model'] for c, e in CLIS.items()}
+# G12-style install/login guidance (R21): install_fix, the line cli_install_fix prints.
+INSTALL_FIX = {c: install_fix(c) for c in CLIS}
 
 path = os.environ.get('ROSTER_FILE', 'ops/roster.toml')
-roster = {}
-if os.path.isfile(path):
-    try:
-        with open(path, 'rb') as f:
-            roster = tomllib.load(f)
-    except tomllib.TOMLDecodeError as exc:
-        # TOMLDecodeError text names the line ('... at line N, column M').
-        sys.stderr.write('resolve_role: ERROR malformed ' + path + ': ' + str(exc) + '\n')
-        sys.exit(4)
+# A malformed roster exits 4, its TOMLDecodeError text naming the line.
+roster = lead_roster(tomllib, path, 'resolve_role')
 
 user_roles = roster.get('roles', {})
 user_roles = user_roles if isinstance(user_roles, dict) else {}
@@ -152,6 +150,8 @@ for name, entry in members.items():
         reject('unknown member ' + repr(name) + ' (known CLIs: ' + ', '.join(BINARY) + ')')
     if name in CORE_TRIO and isinstance(entry, dict) and entry.get('enabled') is False:
         reject('[members.' + name + '] enabled = false — the core trio cannot be disabled')
+# [lead] (KTD1): a lead that cannot load fails every load, like a bad role.
+lead_load(roster, reject)
 
 merged = {}
 for name, dflt in DEFAULTS.items():
@@ -172,8 +172,10 @@ for name, dflt in DEFAULTS.items():
         if cli not in BINARY:
             reject('role ' + repr(name) + ' names unknown CLI ' + repr(cli) + ' (known: ' + ', '.join(BINARY) + ')')
     if chain[-1] not in CORE_TRIO:
-        reject('role ' + repr(name) + ' fallback chain ' + repr(chain) + ' does not terminate at a core-trio member (claude, antigravity, codex) — a chain resolving entirely to optional members cannot ship')
+        reject('role ' + repr(name) + ' fallback chain ' + repr(chain) + ' does not terminate at a core-trio member (' + ', '.join(CORE_TRIO) + ') — a chain resolving entirely to optional members cannot ship')
     merged[name] = entry
+# Consent and role limits (R24, _MEMBER_RULES_PY): every role's chain, every load.
+member_rules(members, {n: [e['cli']] + list(e['fallbacks']) for n, e in merged.items()}, reject)
 
 # --- Resolution walk -------------------------------------------------------
 role = os.environ.get('ROLE', '')
@@ -199,6 +201,12 @@ for idx, cli in enumerate(chain):
     if idx == 0 and (entry['user_model'] or cli == DEFAULTS[role]['cli']):
         model = entry['model']      # explicit role model, or default primary
     else:
+        model = ''
+    # An empty model (a role written with model = \"\", or reached by fallback)
+    # is the member's model, else the CLI's shipped default: the model chosen at
+    # enrollment flows to every role naming the member. claude's shipped default
+    # is empty, so its lane still runs Claude Code's own default.
+    if not model:
         model = m.get('model', '') or CLI_DEFAULT_MODEL[cli]
     # An effort-only override on a role whose model is the shipped default:
     # agy and Cursor carry effort IN the model id, so the default's suffix
@@ -242,20 +250,26 @@ _RC_DISPATCH_ROLE_CLAUDE=40
 # picks the cli+model+effort for the role; this then case-dispatches to the
 # resolved cli's invoke_* helper, threading the resolved model/effort through
 # that helper's override env var (AGY_MODEL / OPENCODE_MODEL / KIMI_MODEL /
-# CURSOR_MODEL) so a roster override actually reaches the CLI. This is what
-# makes the optional invoke_opencode/invoke_kimi/invoke_cursor helpers LIVE and
-# lets a [roles.tester] cli="opencode" override run opencode instead of codex —
-# without it, resolve_role only drove the builder lane (lease_create) and the
-# review/test phases hardcoded codex/antigravity.
+# CURSOR_MODEL / DEVIN_MODEL / GROK_MODEL) so a roster override actually reaches
+# the CLI. This is what makes the optional invoke_opencode/invoke_kimi/
+# invoke_cursor/invoke_devin/invoke_grok helpers LIVE and lets a [roles.tester]
+# cli="opencode" override run opencode instead of codex — without it,
+# resolve_role only drove the builder lane (lease_create) and the review/test
+# phases hardcoded codex/antigravity.
 #
-# The claude lane is special: review/test work assigned to claude runs as a
-# NATIVE Claude Agent-tool subagent (a subagent has the ops/ context and tool
-# surface the shell CLIs lack), not a shell helper. So for cli=claude this prints
+# The claude lane depends on the lead (R2, KTD16). A lead whose native
+# sub-agents enforce their tool lists (the registry's
+# lead.native_subagents_enforced_tools: Claude Code) runs review/test work
+# assigned to claude as a NATIVE Agent-tool subagent, so this prints
 #   DISPATCH_ROLE_CLAUDE <agent-name> <output-file>
 # to stdout and returns _RC_DISPATCH_ROLE_CLAUDE (40), signalling the calling
-# command to spawn a Claude subagent instead of a background CLI. Every other
-# lane invokes its helper and returns the helper's own exit code
-# (INVOKE_FAILURE_CLASS stays visible for a synchronous, same-shell caller).
+# command to spawn one. Any other lead (Codex) has no such sub-agent, and
+# claude is an ordinary worker there: _dispatch_role_claude runs `claude -p`
+# and writes its output file. Every other lane invokes its helper and returns
+# the helper's own exit code (INVOKE_FAILURE_CLASS stays visible for a
+# synchronous, same-shell caller). A reviewer or analyst on an optional-tier
+# CLI whose agent name has no brief there runs with one of that CLI's own
+# (_dispatch_role_brief), so its answer carries the typed Status report.
 #
 # Callers MUST invoke this in a context that ignores set -e (e.g.
 # `dispatch_role ... || RC=$?`), exactly like the invoke_* helpers — otherwise a
@@ -272,6 +286,31 @@ dispatch_role() {
   MODEL=$(printf '%s\n' "$RESOLVED" | cut -f2)
   EFFORT=$(printf '%s\n' "$RESOLVED" | cut -f3)
   echo "dispatch_role: role=${ROLE} -> cli=${CLI} model=${MODEL:-<default>} effort=${EFFORT} agent=${AGENT_NAME}" >&2
+  # The role rule at dispatch (R24), the same check lease_dispatch makes: the
+  # resolved member must still be allowed this role (rc 5)
+  _member_role_ok "$CLI" "$ROLE" || return $?
+  # The registry's lane field decides the subagent path (claude today): review/
+  # test work on a "subagent" lane runs as a native Agent-tool subagent when the
+  # lead's sub-agents enforce their tools, else as `claude -p` (see above).
+  if [ "$(cli_field "$CLI" lane 2>/dev/null || true)" = "subagent" ]; then
+    local NATIVE=""
+    NATIVE=$(lead_field lead.native_subagents_enforced_tools) || return $?
+    if [ "$NATIVE" = true ]; then
+      printf 'DISPATCH_ROLE_CLAUDE %s %s\n' "$AGENT_NAME" "$OUTPUT_FILE"
+      return "$_RC_DISPATCH_ROLE_CLAUDE"
+    fi
+    _dispatch_role_claude "$ROLE" "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$MODEL" "$EFFORT"
+    return $?
+  fi
+  # A reviewer or analyst on an optional-tier CLI runs with one of that CLI's
+  # own briefs, which carry the typed Status report (_dispatch_role_brief)
+  case "$ROLE" in
+    reviewer|analyst)
+      if [ "$(cli_field "$CLI" tier 2>/dev/null || true)" = optional ]; then
+        AGENT_NAME=$(_dispatch_role_brief "$CLI" "$ROLE" "$AGENT_NAME")
+      fi
+      ;;
+  esac
   case "$CLI" in
     antigravity)
       AGY_MODEL="$MODEL" invoke_antigravity "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT"
@@ -294,17 +333,125 @@ dispatch_role() {
     cursor)
       CURSOR_MODEL="$MODEL" invoke_cursor "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
       ;;
-    claude)
-      # Review/test on the claude lane runs as a native Agent-tool subagent, not
-      # a shell helper — signal the caller to spawn one (see function comment).
-      printf 'DISPATCH_ROLE_CLAUDE %s %s\n' "$AGENT_NAME" "$OUTPUT_FILE"
-      return "$_RC_DISPATCH_ROLE_CLAUDE"
+    devin)
+      # DEVIN_ROLE picks the permission class (_devin_class, devin.sh); the
+      # brief is the one _dispatch_role_brief named above.
+      DEVIN_MODEL="$MODEL" DEVIN_ROLE="$ROLE" invoke_devin "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
+      ;;
+    grok)
+      # GROK_ROLE picks the permission class (_grok_class, grok.sh).
+      GROK_MODEL="$MODEL" GROK_ROLE="$ROLE" invoke_grok "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT" "$EFFORT"
       ;;
     *)
-      echo "dispatch_role: ERROR role '${ROLE}' resolved to unknown cli '${CLI}' — not integrated. Known lanes: claude, codex, antigravity, opencode, kimi, cursor." >&2
+      echo "dispatch_role: ERROR role '${ROLE}' resolved to cli '${CLI}', which has no shell dispatch arm here — not integrated. Registered CLIs: $(_known_clis '<registry unreadable>')." >&2
       return 1
       ;;
   esac
+}
+
+# _dispatch_role_brief <cli> <role> <agent-name> — the agent name dispatch_role
+# hands an optional-tier CLI's helper for a reviewer or analyst. at-review
+# names its core lanes by persona (architecture-reviewer, logic_reviewer), and
+# no optional CLI ships a brief by those names: its helper would run the raw
+# prompt, whose answer carries no Status line, and at-review promotes an
+# optional CLI's answer only on Status: DONE or DONE_WITH_CONCERNS (report
+# missing, every cycle). Prints <agent-name> when the CLI has a brief by that
+# name (<cli>-agents/<agent-name>.md in the plugin; for opencode also the
+# project's .opencode/agents/<agent-name>.md, which invoke_opencode reads
+# first), else <role> when <cli>-agents/<role>.md exists (devin's analyst.md),
+# else reviewer when <cli>-agents/reviewer.md does (every optional CLI ships
+# one: read-only, with the typed report), else <agent-name> unchanged (the
+# helper warns and runs the raw prompt). One stderr line names a
+# substitution. invoke_devin keeps its own role fallback for direct callers.
+_dispatch_role_brief() {
+  local CLI=$1 ROLE=$2 AGENT=$3 DIR="${_TRIFORGE_PLUGIN_ROOT}/${1}-agents" B
+  if [ -f "${DIR}/${AGENT}.md" ] || { [ "$CLI" = opencode ] && [ -f ".opencode/agents/${AGENT}.md" ]; }; then
+    printf '%s\n' "$AGENT"
+    return 0
+  fi
+  for B in "$ROLE" reviewer; do
+    if [ -f "${DIR}/${B}.md" ]; then
+      echo "dispatch_role: ${CLI} has no brief named '${AGENT}'; the ${ROLE} runs with its ${B} brief (${CLI}-agents/${B}.md), which carries the typed Status report" >&2
+      printf '%s\n' "$B"
+      return 0
+    fi
+  done
+  printf '%s\n' "$AGENT"
+}
+
+# _dispatch_role_claude <role> <agent-name> <prompt> <output-file> <timeout>
+#   <model> <effort> — dispatch_role's claude arm under a lead without native,
+# tool-enforcing sub-agents (R2, KTD16): `claude -p` from the caller's
+# directory under _adapter_env (the env allowlist, the worker marker, the
+# no-push config, the claude values), composed by _claude_lane_argv. A
+# reviewer or an analyst gets the read class: read tools, dontAsk, and Bash
+# only inside the sandbox with the working directory unwritable; a tester or a
+# documenter the edit class, the ledger unwritable. Both keep the lead's git
+# common dir unwritable. A Claude Code below TRIFORGE_CLAUDE_SANDBOX_FLOOR, or
+# one whose version can't be read, is refused with the sandbox on
+# (_claude_sandbox_floor_ok: rc 1, deterministic, the reason in <output-file>
+# and on stderr). The envelope's result text lands in <output-file>
+# (the envelope itself beside it, <output-file>.raw and .envelope); a run that
+# returns no envelope leaves the CLI's own output there. Returns the CLI's
+# exit code, with INVOKE_FAILURE_CLASS set as the invoke_* helpers set it. The
+# git-dir deny (and the ledger's) needs the lead's lease context: wherever
+# _lease_ctx refuses, the worker would run without it, so nothing runs, rc 69
+# and deterministic, as invoke_grok refuses the same cases. A checkout that is
+# the home directory or contains it is no project (_LEASE_CTX_WHY=home); any
+# other refusal (a lease root or TMPDIR another user could swap, a lease root
+# that can't be made, an unreadable .git) is named by _lease_ctx's own line.
+# Outside any git repository (nogit) there is no git dir to deny, and the
+# worker runs.
+_dispatch_role_claude() {
+  local ROLE=$1 AGENT_NAME=$2 PROMPT=$3 OUT=$4 TIMEOUT=$5 MODEL=$6 EFFORT=$7 CLASS=read RC=0 TOBIN
+  local -a DENY=()
+  INVOKE_FAILURE_CLASS="none"
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "dispatch_role: ERROR \`claude\` (Claude Code) not found on PATH — cannot run '${AGENT_NAME}'. Fix: $(cli_install_fix claude 2>/dev/null || true). No retry (deterministic)." >&2
+    INVOKE_FAILURE_CLASS="deterministic"
+    return 127
+  fi
+  TOBIN=$(_timeout_tool) || { INVOKE_FAILURE_CLASS="deterministic"; return "$_RC_NO_TIMEOUT_TOOL"; }
+  if ! _claude_sandbox_floor_ok; then
+    _claude_sandbox_refusal dispatch_role >&2
+    _claude_sandbox_refusal dispatch_role > "$OUT" 2>/dev/null || true
+    INVOKE_FAILURE_CLASS="deterministic"
+    return 1
+  fi
+  case "$ROLE" in tester|documenter) CLASS=edit ;; esac
+  # _lease_ctx's line goes to <output-file>.err (the claude run's stderr
+  # replaces it): printed only for a refusal, since outside a git repository
+  # it says ERROR while the worker runs. Reset first, so a .err that can't be
+  # written (nothing ran) refuses too
+  _LEASE_CTX_WHY=""
+  if _lease_ctx 2> "${OUT}.err"; then
+    DENY+=("$_LEASE_COMMON")
+    if [ "$CLASS" = edit ]; then DENY+=("$_LEASE_LEDGER"); fi
+  elif [ "$_LEASE_CTX_WHY" = home ]; then
+    echo "dispatch_role: ERROR $(pwd -P | LC_ALL=C tr -d '\000-\037\177') is in a checkout that is your home directory or contains it, and a home directory is no project — cannot run '${AGENT_NAME}' there. Run it from the project's own repository (inside a home directory that is a git repository, git init the project first). No retry (deterministic)." >&2
+    INVOKE_FAILURE_CLASS="deterministic"
+    return 69
+  elif [ "$_LEASE_CTX_WHY" != nogit ]; then
+    cat "${OUT}.err" >&2 2>/dev/null || true
+    echo "dispatch_role: ERROR the lead's lease context can't be set up from $(pwd -P | LC_ALL=C tr -d '\000-\037\177') (${_LEASE_CTX_WHY:-unwritable ${OUT}.err}; above), and without it the claude worker would run with no deny on the lead's git dir — cannot run '${AGENT_NAME}' there. No retry (deterministic)." >&2
+    INVOKE_FAILURE_CLASS="deterministic"
+    return 69
+  fi
+  if [ "$CLASS" = read ]; then DENY+=("$(pwd -P)"); fi
+  # Expanded only when set: outside a git repository the edit class has none.
+  if [ "${#DENY[@]}" -gt 0 ]; then
+    _claude_lane_argv "$CLASS" "$MODEL" "$EFFORT" "" "${DENY[@]}" || return 1
+  else
+    _claude_lane_argv "$CLASS" "$MODEL" "$EFFORT" "" || return 1
+  fi
+  echo "dispatch_role: claude -p (${CLASS} class) agent=${AGENT_NAME} model=${MODEL:-<default>} effort=${EFFORT:-<default>}" >&2
+  _adapter_env claude "$TOBIN" -k 10s "${TIMEOUT}s" "${_LEASE_LANE_ARGV[@]}" "$PROMPT" < /dev/null > "$OUT" 2> "${OUT}.err" || RC=$?
+  _lease_claude_envelope "$OUT" "${OUT}.err" || true
+  if [ "$RC" -ne 0 ]; then
+    _classify_invoke_failure "$RC" "$OUT"
+    echo "dispatch_role: claude -p agent=${AGENT_NAME} exit=${RC} class=${INVOKE_FAILURE_CLASS} (see ${OUT})" >&2
+  fi
+  return "$RC"
 }
 
 # Cache file for ensure_core_trio_live — bash keeps $$ at the sourcing
@@ -317,36 +464,1192 @@ _TRIO_LIVE_CACHE="${TMPDIR:-/tmp}/triforge_trio_live_$$"
 # Success is cached in _TRIO_LIVE_CACHE so repeat calls are free; failures
 # are re-probed each call so a mid-session fix is picked up.
 # NOT called at session start — a /status-only session must never trigger
-# it. Call sites live in the /build and /review preambles.
+# it. Call sites live in the at-build and at-review preambles.
 # On failure: hard error listing exactly which member failed and its
 # install/login fix (KTD-9 wording), return 1.
 ensure_core_trio_live() {
   [ -f "$_TRIO_LIVE_CACHE" ] && return 0
   local FAILED=0
-  local PAIR NAME BIN FIX
-  for PAIR in "claude:claude" "antigravity:agy" "codex:codex"; do
-    NAME=${PAIR%%:*}
-    BIN=${PAIR##*:}
-    case "$NAME" in
-      claude)      FIX="install Claude Code (npm install -g @anthropic-ai/claude-code), then run \`claude\` once and /login" ;;
-      antigravity) FIX="install it (curl -fsSL https://antigravity.google/cli/install.sh | bash), then run \`agy\` interactively once to complete login" ;;
-      codex)       FIX="install it (npm install -g @openai/codex or brew install codex), then run \`codex login\`" ;;
-    esac
+  local ROWS CORE="" NAME BIN FIX
+  # The core set and each member's binary come from the CLI registry
+  # (scripts/lib/registry.sh) in one read — cli_table, one line per member —
+  # and the install fix is composed only when a member fails, so the happy path
+  # costs one lookup for the whole trio. The rows arrive on fd 3 so the probed
+  # commands keep the caller's stdin.
+  ROWS=$(cli_table core binary) || return 1
+  while IFS=$'\t' read -r -u 3 NAME BIN; do
+    [ -n "$NAME" ] || continue
+    CORE="${CORE:+${CORE} }${NAME}"
     if ! command -v "$BIN" >/dev/null 2>&1; then
+      FIX=$(cli_install_fix "$NAME" 2>/dev/null || true)
       echo "ensure_core_trio_live: ERROR core member ${NAME} — \`${BIN}\` not found on PATH. Fix: ${FIX}. No retry (deterministic)." >&2
       FAILED=1
     elif ! _run_with_timeout 15 "$BIN" --version >/dev/null; then
       # stderr stays visible so the fail-closed timeout-tool message (or the
       # CLI's own complaint) names the real cause, not a generic wrapper line.
+      FIX=$(cli_install_fix "$NAME" 2>/dev/null || true)
       echo "ensure_core_trio_live: ERROR core member ${NAME} — \`${BIN} --version\` failed its 15s liveness check (broken install or hung binary). Fix: ${FIX}. No retry (deterministic)." >&2
       FAILED=1
     fi
-  done
+  done 3<<TRIO_ROWS_EOF
+${ROWS}
+TRIO_ROWS_EOF
   if [ "$FAILED" -ne 0 ]; then
-    echo "ensure_core_trio_live: the core trio (claude, antigravity/agy, codex) must be live before /build or /review can dispatch — see fixes above." >&2
+    echo "ensure_core_trio_live: the core trio (${CORE// /, }) must be live before at-build or at-review can dispatch — see fixes above." >&2
     return 1
   fi
   : > "$_TRIO_LIVE_CACHE"
+  return 0
+}
+
+
+# ---------------------------------------------------------------------------
+# The lead (KTD1 — R1, R38, R40, R44) — [lead] in ops/roster.toml
+# ---------------------------------------------------------------------------
+#
+# [lead] names the CLI that leads this checkout: cli, model, effort. A CLI can
+# lead when its registry entry carries the KTD1 lead fields
+# (scripts/lib/registry.sh: Claude Code and Codex, the Key Decision), and no
+# [lead] table means claude (R40). Lead behavior is those fields plus the
+# runtime capabilities resolve_lead_caps prints: outside this file and
+# registry.sh, code reads fields (lead_field) and never branches on the lead's
+# name (the KTD1 gate in scripts/validate-skills.sh). The CLI-specific facts
+# left — which host markers each lead sets, how each one runs hooks — are
+# decided here.
+#
+# The table is read from the checkout's roster: ops/roster.toml under the
+# nearest ancestor holding .git (_lead_roster_path), the same directory whose
+# ops/leases.toml the lease helpers use, so a helper run from a subdirectory
+# sees the same lead. The readers exit as resolve_role does: 3 no TOML parser,
+# 4 malformed roster, 5 an invalid [lead] (a CLI that cannot lead, a value that
+# is not a table, an unknown key, an effort outside the enum).
+
+# _LEAD_PY — the python the readers, resolve_role's load validation and the
+# writer splice (single-quoted: double quotes only inside, no apostrophes).
+# lead_load(roster, reject) returns (cli, model, effort, explicit). A [lead]
+# that leaves out model gets its CLI's registry model; one that leaves out
+# effort gets LEAD_DEFAULT_EFFORT (Codex runs at xhigh, D-021; a Claude lead
+# keeps the session default, "").
+# lead_roster reads the roster through read_regular (_READ_REGULAR_PY,
+# common.sh): a roster path that is there but not a regular file (a FIFO, a
+# directory, a dangling link) is refused like a malformed roster (rc 4),
+# promptly, never read as "no roster" (Phase 3 round 5, G3).
+_LEAD_PY="${_READ_REGULAR_PY}"'
+LEAD_DEFAULT_CLI = "claude"
+LEAD_DEFAULT_EFFORT = {"codex": "xhigh"}
+LEAD_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+LEAD_KEYS = ("cli", "model", "effort")
+
+def lead_capable():
+    return [c for c, e in CLIS.items() if isinstance(e.get("lead"), dict) and e["lead"]]
+
+def lead_toml(who):
+    try:
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib
+        except ImportError:
+            sys.stderr.write(who + ": ERROR no TOML parser available, so ops/roster.toml and its [lead] table cannot be read (a missing parser, not a missing lead capability). Fix: use Python 3.11+ (tomllib) or run: pip install tomli\n")
+            sys.exit(3)
+    return tomllib
+
+def lead_roster(tomllib, path, who):
+    if not os.path.lexists(path):
+        return {}
+    try:
+        raw = read_regular(path)
+    except OSError as exc:
+        sys.stderr.write(who + ": ERROR cannot read " + path + " as a regular file (" + str(exc) + ")\n")
+        sys.exit(4)
+    try:
+        return tomllib.loads(raw.decode("utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        sys.stderr.write(who + ": ERROR malformed " + path + ": " + str(exc) + "\n")
+        sys.exit(4)
+
+def lead_reject(who, path, msg):
+    sys.stderr.write(who + ": ERROR invalid " + path + ": " + msg + "\n")
+    sys.exit(5)
+
+def lead_load(roster, reject):
+    if "lead" not in roster:
+        return LEAD_DEFAULT_CLI, CLIS[LEAD_DEFAULT_CLI]["model"], LEAD_DEFAULT_EFFORT.get(LEAD_DEFAULT_CLI, ""), False
+    t = roster["lead"]
+    if not isinstance(t, dict):
+        reject("[lead] must be a table (cli, model, effort), got a " + type(t).__name__)
+    for k in t:
+        if k not in LEAD_KEYS:
+            reject("[lead] has an unknown key " + repr(k) + " (valid: " + ", ".join(LEAD_KEYS) + ")")
+    cli = t.get("cli", LEAD_DEFAULT_CLI)
+    capable = lead_capable()
+    if not isinstance(cli, str) or cli not in capable:
+        reject("[lead] cli = " + repr(cli) + " cannot lead: the lead is one of " + ", ".join(capable) + " (the CLIs with enforceable headless hooks and permission control)")
+    model = t.get("model", CLIS[cli]["model"])
+    if not isinstance(model, str):
+        reject("[lead] model must be a string, got a " + type(model).__name__)
+    effort = t.get("effort", LEAD_DEFAULT_EFFORT.get(cli, ""))
+    if not isinstance(effort, str) or (effort and effort not in LEAD_EFFORTS):
+        reject("[lead] effort must be one of " + "|".join(LEAD_EFFORTS) + " or empty (the host default), got " + repr(effort))
+    return cli, model, effort, True
+'
+
+# _ROSTER_SPLICE_PY — the text surgery behind the three roster writers
+# (roster_write_lead, roster_write_role, roster_write_member), spliced like
+# _LEAD_PY (single-quoted: double quotes only inside, no apostrophes).
+# splice_table(raw, header_re, block, keep_trailing_comments) replaces the
+# first table whose header line matches header_re (an uncommented header: the
+# scan for where it ends uses the same rule, so a comment never ends a table)
+# with block, up to the next line that starts with [, or appends block after a
+# blank line when there is none. keep_trailing_comments keeps the standalone
+# comment and blank lines that end the old table: they document what follows.
+# write_verified(path, new_raw, verify, who) writes new_raw beside path, loads
+# it with the caller's module-level tomllib and hands it to verify, which
+# raises when it does not hold the intended values; only then does it replace
+# path. On a failure it removes the temporary file and exits 4. The roster is
+# <project>/ops/roster.toml, and only there (Phase 3 round 4, B7): the project
+# directory is opened, ops/ is made in it when absent and opened relative to it
+# without following a link, and the temporary file (created O_EXCL|O_NOFOLLOW
+# under a random name), the read-back and the rename all go through that
+# descriptor, so an ops/ that is a symlink to another directory (another
+# checkout, a home directory) gets no write, nor does one swapped in after the
+# check. ops/ that is a symlink or not a directory, or ops/roster.toml that is
+# a symlink or not a regular file, exits 6 with a refusal naming it; so does a
+# project directory that is HOME or a directory above it (home_or_above, by
+# identity), before anything is made there: a home directory is no project,
+# and no writer makes ops/ anywhere but here, after that check.
+_ROSTER_SPLICE_PY='
+def splice_table(raw, header_re, block, keep_trailing_comments):
+    lines = raw.splitlines(keepends=True)
+    hdr = re.compile(header_re)
+    top = re.compile(r"^\[")
+    start = None
+    for i, ln in enumerate(lines):
+        if hdr.match(ln):
+            start = i
+            break
+    if start is None:
+        new_raw = raw
+        if new_raw and not new_raw.endswith("\n"):
+            new_raw += "\n"
+        if new_raw and not new_raw.endswith("\n\n"):
+            new_raw += "\n"
+        return new_raw + block
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if top.match(lines[j]):
+            end = j
+            break
+    if keep_trailing_comments:
+        while end > start + 1 and (lines[end - 1].strip() == "" or lines[end - 1].lstrip().startswith("#")):
+            end -= 1
+    prefix = "".join(lines[:start])
+    suffix = "".join(lines[end:])
+    if prefix and not prefix.endswith("\n"):
+        prefix += "\n"
+    new_raw = prefix + block
+    if suffix.strip() and not suffix.startswith("\n"):
+        new_raw += "\n"
+    return new_raw + suffix
+
+def home_or_above(d):
+    # True when d is HOME or a directory above it: os.path.samefile against
+    # the physical HOME and each directory above it, the identity test of
+    # _tb_home_anchor (bootstrap.sh). HOME unset or no directory: False
+    h = os.environ.get("HOME", "")
+    if not h.startswith("/") or not os.path.isdir(h):
+        return False
+    up = os.path.realpath(h)
+    while True:
+        try:
+            if os.path.samefile(d, up):
+                return True
+        except OSError:
+            pass
+        if up == "/":
+            return False
+        up = os.path.dirname(up)
+
+def write_verified(path, new_raw, verify, who):
+    import errno, secrets, stat
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    ops_path = os.path.dirname(path) or "."
+    name = os.path.basename(path)
+    def refuse(what, why="Triforge writes the roster only as a regular file in the real ops/ directory of the project"):
+        sys.stderr.write(who + ": REFUSED " + what + ", so the roster is not written there (" + why + ")\n")
+        sys.exit(6)
+    project = os.path.realpath(os.path.dirname(os.path.abspath(ops_path)))
+    if home_or_above(project):
+        refuse(project + " is your home directory or a directory above it", "that is no project: start in a project directory")
+    try:
+        top = os.open(project, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.mkdir(os.path.basename(os.path.abspath(ops_path)), 0o777, dir_fd=top)
+        except FileExistsError:
+            pass
+        ops = os.open(os.path.basename(os.path.abspath(ops_path)), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow, dir_fd=top)
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR, errno.EMLINK):
+            refuse(ops_path + " is a symlink or not a directory")
+        sys.stderr.write(who + ": ERROR could not open " + ops_path + ": " + str(exc) + "\n")
+        sys.exit(4)
+    try:
+        st = os.stat(name, dir_fd=ops, follow_symlinks=False)
+        if not stat.S_ISREG(st.st_mode):
+            refuse(path + " is a symlink or not a regular file")
+    except FileNotFoundError:
+        pass
+    tmp, fd = "", -1
+    for _ in range(8):
+        tmp = "." + name + ".triforge-tmp-" + secrets.token_hex(8)
+        try:
+            fd = os.open(tmp, os.O_RDWR | os.O_CREAT | os.O_EXCL | nofollow, 0o666, dir_fd=ops)
+            break
+        except FileExistsError:
+            continue
+    if fd < 0:
+        sys.stderr.write(who + ": ERROR no free temporary name beside " + path + "\n")
+        sys.exit(4)
+    try:
+        with os.fdopen(fd, "w+b") as f:
+            f.write(new_raw.encode("utf-8"))
+            f.flush()
+            f.seek(0)
+            data = tomllib.load(f)
+        verify(data)
+    except Exception as exc:
+        try:
+            os.unlink(tmp, dir_fd=ops)
+        except OSError:
+            pass
+        sys.stderr.write(who + ": ERROR serialized roster failed round-trip verify: " + str(exc) + "\n")
+        sys.exit(4)
+    os.rename(tmp, name, src_dir_fd=ops, dst_dir_fd=ops)
+'
+
+# _MEMBER_RULES_PY — the consent and role-limit rules (R24) the registry's
+# consent, role_limit and opt_in_roles fields declare, spliced into
+# resolve_role (load validation, every load), roster_write_role and
+# roster_write_member (which refuse what a load would), like _LEAD_PY (double
+# quotes only inside, no apostrophes). member_rules(members, chains, reject),
+# with chains a {role: [cli, ...]} map, calls reject when:
+#   - a consent CLI has an enabled [members.<cli>] table without a consent
+#     string, or a chain names it while it has no table at all (never
+#     enrolled, so never consented; a declined table is absent everywhere);
+#   - [members.<cli>].opt_in names a role the CLI does not offer as opt-in;
+#   - a chain names a role-limited CLI for a role outside its role_limit,
+#     unless the role is one of its opt_in_roles and the table opts in. A
+#     disabled member is exempt: resolve_role skips it, so the chain falls
+#     through to its next member (a declined opted-in builder keeps every
+#     role resolvable).
+_MEMBER_RULES_PY='
+def member_rules(members, chains, reject):
+    for cli, e in CLIS.items():
+        m = members.get(cli)
+        if not isinstance(m, dict):
+            continue
+        opted = m.get("opt_in", [])
+        if not isinstance(opted, list) or not all(isinstance(r, str) for r in opted):
+            reject("[members." + cli + "] opt_in must be an array of role names")
+        for r in opted:
+            if r not in e["opt_in_roles"]:
+                reject("[members." + cli + "] opt_in names " + repr(r) + ", which " + cli + " does not offer as an opt-in (" + (", ".join(e["opt_in_roles"]) or "none") + ")")
+        if e["consent"] and m.get("enabled") is not False:
+            c = m.get("consent")
+            if not (isinstance(c, str) and c.strip()):
+                reject("[members." + cli + "] is enabled without a recorded consent: " + e["name"] + " sends prompts and code to " + e["egress"] + ". Ask the user, then record the yes with roster_write_member " + cli + " true <model> --consent user (at-setup asks)")
+    for role, chain in chains.items():
+        for cli in chain:
+            e = CLIS.get(cli)
+            if e is None:
+                continue
+            m = members.get(cli)
+            if e["consent"] and not isinstance(m, dict):
+                reject("role " + repr(role) + " names " + cli + ", which needs the user consent on record first: enroll it with at-setup (roster_write_member " + cli + " true <model> --consent user)")
+            if isinstance(m, dict) and m.get("enabled") is False:
+                continue    # disabled = absent everywhere (R38): resolve_role walks past it
+            lim = e["role_limit"]
+            if not lim or role in lim:
+                continue
+            opted = m.get("opt_in", []) if isinstance(m, dict) else []
+            if role in e["opt_in_roles"]:
+                if role not in opted:
+                    reject("role " + repr(role) + " names " + cli + ", which takes " + ", ".join(lim) + " by default; " + role + " needs the opt-in on record: roster_write_member " + cli + " true <model> --opt-in " + role)
+            else:
+                reject("role " + repr(role) + " names " + cli + ", which takes only " + ", ".join(lim + e["opt_in_roles"]) + (" (" + ", ".join(e["opt_in_roles"]) + " with the opt-in)" if e["opt_in_roles"] else ""))
+'
+
+# _checkout_top — the checkout this shell stands in: the nearest directory
+# from the physical working directory up that holds a .git entry (no git run —
+# like _lease_ctx's walk), printed; rc 1 outside any repository.
+_checkout_top() {
+  local D
+  D=$(pwd -P 2>/dev/null) || D=""
+  while [ -n "$D" ]; do
+    if [ -e "${D}/.git" ] || [ -L "${D}/.git" ]; then
+      printf '%s\n' "$D"
+      return 0
+    fi
+    if [ "$D" = "/" ]; then
+      break
+    fi
+    D=${D%/*}
+    if [ -z "$D" ]; then D=/; fi
+  done
+  return 1
+}
+
+# _lead_roster_path — the checkout's roster: <_checkout_top>/ops/roster.toml,
+# or the relative ops/roster.toml outside any repository.
+_lead_roster_path() {
+  local TOP
+  if TOP=$(_checkout_top); then
+    printf '%s/ops/roster.toml\n' "${TOP%/}"
+  else
+    printf 'ops/roster.toml\n'
+  fi
+}
+
+# _lead_read <who> <3|4> [<cli>] — the one read behind resolve_lead,
+# roster_lead_entry and lead_resolve_as. With <cli>, the row is <cli> as the
+# lead: rc 5 first when it cannot lead, then the roster's model and effort when
+# it is this checkout's lead, else its own lead defaults.
+_lead_read() {
+  RL_WHO="$1" RL_COLS="$2" RL_AS="${3:-}" RL_ROSTER="$(_lead_roster_path)" python3 -c "${_PY_PRELUDE}
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_LEAD_PY}
+who, path, want = os.environ['RL_WHO'], os.environ['RL_ROSTER'], os.environ['RL_AS']
+if want and want not in lead_capable():
+    sys.stderr.write(who + ': ERROR ' + repr(want) + ' cannot lead: the lead is one of ' + ', '.join(lead_capable()) + '\n')
+    sys.exit(5)
+roster = lead_roster(lead_toml(who), path, who)
+cli, model, effort, explicit = lead_load(roster, lambda msg: lead_reject(who, path, msg))
+if want and cli != want:
+    cli, model, effort = want, CLIS[want]['model'], LEAD_DEFAULT_EFFORT.get(want, '')
+cols = [cli, model, effort]
+if os.environ['RL_COLS'] == '4':
+    cols.append('roster' if explicit else 'default')
+print('\t'.join(cols))
+"
+}
+
+# _lead_resolve — set _LEAD_RESOLVED to resolve_lead's line and _LEAD_CLI to
+# its first column, with resolve_lead's rc and stderr. Call it directly, never
+# in $(...): what it keeps would leave with the subshell. A success is kept for
+# this shell under what decides it: the directory, the roster's path and bytes
+# (_lead_roster_sig, read before and after python reads the roster, and kept
+# only when the two agree), PATH and PYTHONPATH (which python and which TOML
+# parser read it). While that key holds, resolve_lead, lead_field, lead_is and
+# the lead host check use the kept line instead of starting python again. A
+# failure is never kept: each call reads the roster again and reports it again.
+_LEAD_RESOLVED=""
+_LEAD_CLI=""
+_LEAD_RESOLVED_KEY=""
+_lead_resolve() {
+  local R S K="" RC=0
+  R=$(_lead_roster_path)
+  S=$(_lead_roster_sig "$R")
+  if [ -n "$S" ]; then K="${PWD}|${R}|${S}|${PATH:-}|${PYTHONPATH:-}"; fi
+  if [ -n "$K" ] && [ "$K" = "$_LEAD_RESOLVED_KEY" ]; then
+    return 0
+  fi
+  _LEAD_RESOLVED_KEY=""
+  _LEAD_RESOLVED=$(_lead_read resolve_lead 3) || RC=$?
+  if [ "$RC" -ne 0 ]; then
+    _LEAD_RESOLVED=""
+    _LEAD_CLI=""
+    return "$RC"
+  fi
+  _LEAD_CLI=${_LEAD_RESOLVED%%$'\t'*}
+  if [ -n "$K" ] && [ "$(_lead_roster_sig "$R")" = "$S" ]; then
+    _LEAD_RESOLVED_KEY=$K
+  fi
+  return 0
+}
+
+# _lead_roster_sig <roster> — the roster's cksum, "absent" when there is no
+# roster, nothing when one exists but can't be read (_lead_resolve then keeps
+# nothing, and the reader refuses it). cksum reads only a regular file: a FIFO
+# planted there would block the redirect, and with it every hook and helper
+# that resolves the lead (Phase 3 round 5, G3). bash can't open a file
+# O_NONBLOCK, so a same-user process that swaps the file for a FIFO between
+# the test and the redirect can still stall it: a residual, documented.
+_lead_roster_sig() {
+  if [ -f "$1" ]; then
+    cksum 2>/dev/null < "$1" || true
+  elif [ ! -e "$1" ] && [ ! -L "$1" ]; then
+    echo absent
+  fi
+}
+
+# resolve_lead — the lead of this checkout: cli<TAB>model<TAB>effort ([lead]
+# overlaid on the defaults; no [lead] prints claude, an empty model and
+# effort). rc 3 / 4 / 5 as described above; nothing on stderr on success.
+resolve_lead() {
+  _lead_resolve || return $?
+  printf '%s\n' "$_LEAD_RESOLVED"
+}
+
+# lead_resolve_as <cli> — cli<TAB>model<TAB>effort for <cli> as the lead: the
+# roster's [lead] model and effort when <cli> is this checkout's lead, else
+# <cli>'s own lead defaults (its registry model, LEAD_DEFAULT_EFFORT), the
+# values a [lead] naming only cli would resolve to. rc 5 for a CLI that cannot
+# lead; otherwise resolve_lead's rc. coordinate.sh --dry-run --lead composes
+# another lead's launch line with it.
+lead_resolve_as() {
+  _lead_read lead_resolve_as 3 "${1:?usage: lead_resolve_as <cli>}"
+}
+
+# roster_lead_entry — what the roster configures, for at-setup:
+# cli<TAB>model<TAB>effort<TAB>roster|default (default: no [lead] table, the
+# claude default). Same rc as resolve_lead.
+roster_lead_entry() {
+  _lead_read roster_lead_entry 4
+}
+
+# lead_field <field>... — the lead's registry values, as cli_field prints them
+# for the resolved lead (lead_field lead.wait_budget_s; lead_field name
+# lead.wait_budget_s for both on one line). How code outside this file reads a
+# lead fact without naming the lead (KTD1). rc: resolve_lead's, then
+# cli_field's.
+lead_field() {
+  _lead_resolve || return $?
+  cli_field "$_LEAD_CLI" "$@"
+}
+
+# lead_is <cli> — 0 when <cli> is this checkout's lead, 1 when it is not or the
+# lead can't be resolved, so a caller asking "is this review the lead's?" fails
+# closed. The lease helpers' one comparison with the lead's CLI (U10, KTD2: a
+# lead-class pin or approval counts only while its CLI is the current lead),
+# kept here with the other lead facts (KTD1).
+lead_is() {
+  _lead_resolve 2>/dev/null || return 1
+  if [ -n "${1:-}" ] && [ "$_LEAD_CLI" = "$1" ]; then
+    return 0
+  fi
+  return 1
+}
+
+# The lead of a ledger row written before 4.0, which recorded none: 3.3.x had
+# only the Claude Code lead, so such a row reads as claude (U10).
+_LEAD_LEGACY_CLI=claude
+
+# The host markers each lead CLI puts in its tool shell (U29: CC-11, CDX-15),
+# as the refusal messages name them; _lead_host_read tests these four names.
+_LEAD_HOST_MARKERS='CLAUDECODE or CLAUDE_CODE_ENTRYPOINT for Claude Code, CODEX_THREAD_ID or CODEX_CI for Codex'
+
+# _lead_host_read — set _LEAD_HOST (no subshell) to the lead CLI this shell
+# runs under, from the host markers: claude for CLAUDECODE or
+# CLAUDE_CODE_ENTRYPOINT (Claude Code's hooks see both as well), codex for
+# CODEX_THREAD_ID or CODEX_CI, none for neither, ambiguous for both (one CLI
+# started from inside the other: neither can be told to lead). A worker of the
+# same CLI carries the same names, which is why _lead_only tests the worker
+# marker first.
+_lead_host_read() {
+  local C="" X=""
+  if [ -n "${CLAUDECODE:-}" ] || [ -n "${CLAUDE_CODE_ENTRYPOINT:-}" ]; then C=claude; fi
+  if [ -n "${CODEX_THREAD_ID:-}" ] || [ -n "${CODEX_CI:-}" ]; then X=codex; fi
+  if [ -n "$C" ] && [ -n "$X" ]; then
+    _LEAD_HOST=ambiguous
+  else
+    _LEAD_HOST=${C:-${X:-none}}
+  fi
+}
+
+# _lead_sandbox_read — set _LEAD_SANDBOX (no subshell) to the lead CLI whose
+# sandbox this shell runs in, empty for none, and _LEAD_SANDBOX_WHY to the
+# markers that say so. Codex sets CODEX_SANDBOX (seatbelt on macOS) in the
+# tool shell of a sandboxed session, and CODEX_SANDBOX_NETWORK_DISABLED when
+# that sandbox has no network (workspace-write, read-only); a
+# danger-full-access session sets neither. Claude Code's sandbox sets no such
+# marker in its Bash tool.
+_lead_sandbox_read() {
+  _LEAD_SANDBOX=""
+  _LEAD_SANDBOX_WHY=""
+  if [ -n "${CODEX_SANDBOX:-}" ]; then _LEAD_SANDBOX_WHY="CODEX_SANDBOX=${CODEX_SANDBOX}"; fi
+  if [ -n "${CODEX_SANDBOX_NETWORK_DISABLED:-}" ]; then
+    _LEAD_SANDBOX_WHY="${_LEAD_SANDBOX_WHY}${_LEAD_SANDBOX_WHY:+, }CODEX_SANDBOX_NETWORK_DISABLED=${CODEX_SANDBOX_NETWORK_DISABLED}"
+  fi
+  if [ -n "$_LEAD_SANDBOX_WHY" ]; then _LEAD_SANDBOX=codex; fi
+}
+
+# lead_host_detect — print _lead_host_read's answer: claude, codex, none or
+# ambiguous.
+lead_host_detect() {
+  local _LEAD_HOST
+  _lead_host_read
+  printf '%s\n' "$_LEAD_HOST"
+}
+
+# _lead_origin — set _LEAD_VIA and _LEAD_HOST for this shell (call it
+# directly, never in $(...)): ambiguous and ambiguous when both marker
+# families are set, before any other source can settle it; lead-session and
+# the host when one family is; tty and none when stdin is a terminal (a person
+# running the helper); test and TRIFORGE_TEST_LEAD when neither but the SELF
+# harness set both TRIFORGE_TEST_BUILDER and TRIFORGE_TEST_LEAD; none and none
+# otherwise. lease_create records _LEAD_VIA in the row (lead_via); U10's
+# approval helper stamps its records with it.
+_lead_origin() {
+  _lead_host_read
+  case "$_LEAD_HOST" in
+    ambiguous) _LEAD_VIA=ambiguous ;;
+    none)
+      if [ -t 0 ]; then
+        _LEAD_VIA=tty
+      elif [ -n "${TRIFORGE_TEST_BUILDER:-}" ] && [ -n "${TRIFORGE_TEST_LEAD:-}" ]; then
+        _LEAD_VIA=test
+        _LEAD_HOST=$TRIFORGE_TEST_LEAD
+      else
+        _LEAD_VIA=none
+      fi
+      ;;
+    *) _LEAD_VIA=lead-session ;;
+  esac
+}
+
+# _lead_origin_match <via> <host> <cli> — whether an origin (_lead_origin's,
+# or one a ledger record carries) can stand for <cli>'s lead: 0 for via=tty (a
+# person at a terminal) or via=lead-session / via=test whose host (the
+# markers' CLI, the seam's simulated lead) is <cli>; 1 for another host; 2 for
+# no origin (via=none or empty); 3 for ambiguous markers. The one origin rule
+# behind the lead host check, roster_write_lead and lease_approve (and the
+# merge gate's reading of a recorded approval); each caller words its own
+# refusal.
+_lead_origin_match() {
+  case "${1:-}" in
+    ambiguous) return 3 ;;
+    tty) return 0 ;;
+    lead-session|test)
+      if [ -n "${3:-}" ] && [ "${2:-}" = "${3:-}" ]; then return 0; fi
+      return 1
+      ;;
+  esac
+  return 2
+}
+
+# _lead_ambiguous_note — the reason every refusal of ambiguous markers gives.
+_lead_ambiguous_note() {
+  printf '%s' "both lead host marker families are set (${_LEAD_HOST_MARKERS}): one CLI was started from inside the other, so which lead this shell runs under is ambiguous, and a terminal or the SELF seam does not settle it; run it from the lead's own tool shell, or unset the other CLI's markers"
+}
+
+# _lead_host_gate <helper> — R38, called by _lead_only (common.sh) after the
+# worker-marker and lease-root checks: 0 when this shell may run a lead-owned
+# helper, else one stderr line and _RC_LEAD_ONLY. It runs under the lead's own
+# host markers, from a terminal (as the user, lead_via=tty), or under the SELF
+# seam when TRIFORGE_TEST_LEAD names the lead (_lead_origin_match). It refuses
+# under the other lead's markers (naming at-setup lead and roster_write_lead
+# <cli>, the writer it runs), under both leads' markers at once, with no
+# markers and no terminal, and when the lead can't be resolved (fail closed,
+# with the resolver's message, read by running resolve_lead once more). A pass
+# is cached in this shell for the same directory, roster bytes and origin
+# (_lead_origin's via and host: the decision's whole input), so the nested
+# calls (every _ledger_update) cost one cksum.
+_lead_host_gate() {
+  local OP=$1 ROSTER SIG="" KEY OUT RC=0 LEAD LNAME HNAME SEAM="" M=0
+  ROSTER=$(_lead_roster_path)
+  if [ -f "$ROSTER" ]; then SIG=$(cksum < "$ROSTER" 2>/dev/null || true); fi
+  _lead_origin
+  KEY="${PWD}|${ROSTER}|${SIG}|${_LEAD_VIA}|${_LEAD_HOST}"
+  if [ -n "${_LEAD_GATE_KEY:-}" ] && [ "$_LEAD_GATE_KEY" = "$KEY" ]; then
+    return 0
+  fi
+  _lead_resolve 2>/dev/null || RC=$?
+  if [ "$RC" -ne 0 ]; then
+    OUT=$(resolve_lead 2>&1) || true   # for its message; RC is the first call's
+    echo "${OP}: REFUSED — the lead could not be resolved (rc ${RC}), so whether this shell may run a lead-owned helper is unknown; fail closed (KTD1, rc ${_RC_LEAD_ONLY}): $(printf '%s' "$OUT" | tail -1)" >&2
+    return "$_RC_LEAD_ONLY"
+  fi
+  LEAD=$_LEAD_CLI
+  _lead_origin_match "$_LEAD_VIA" "$_LEAD_HOST" "$LEAD" || M=$?
+  case "$M" in
+    0) ;;
+    1)
+      LNAME=$(cli_field "$LEAD" name 2>/dev/null) || LNAME=$LEAD
+      HNAME=$(cli_field "$_LEAD_HOST" name 2>/dev/null) || HNAME=$_LEAD_HOST
+      if [ "$_LEAD_VIA" = test ]; then SEAM=" (simulated: TRIFORGE_TEST_LEAD)"; fi
+      echo "${OP}: REFUSED — this checkout's lead is ${LNAME} ([lead] cli = \"${LEAD}\" in ${ROSTER}), but this shell runs under ${HNAME}${SEAM}; run it from the ${LNAME} lead, or make ${HNAME} the lead first with at-setup lead or roster_write_lead ${_LEAD_HOST} (R38, rc ${_RC_LEAD_ONLY})" >&2
+      return "$_RC_LEAD_ONLY"
+      ;;
+    3)
+      echo "${OP}: REFUSED — $(_lead_ambiguous_note) (R38, rc ${_RC_LEAD_ONLY})" >&2
+      return "$_RC_LEAD_ONLY"
+      ;;
+    *)
+      echo "${OP}: REFUSED — no lead host markers (${_LEAD_HOST_MARKERS}) and no terminal on stdin, so nothing says this shell is the ${LEAD} lead; run it from the lead's tool shell or from a terminal (KTD1, R38, rc ${_RC_LEAD_ONLY})" >&2
+      return "$_RC_LEAD_ONLY"
+      ;;
+  esac
+  _LEAD_GATE_KEY=$KEY
+  return 0
+}
+
+# _lead_session_key — a file-name-safe key for the lead session: the lead
+# process and its start time (_lease_lead_proc in lease-wait.sh: the parent of
+# the tool shell's process group leader, so one key spans every tool call of a
+# Claude Code or Codex session) and the checkout; this shell's pid when the
+# lead process can't be read.
+_lead_session_key() {
+  local K
+  _LEAD_PID=0
+  _LEAD_STARTED=""
+  if command -v _lease_lead_proc >/dev/null 2>&1; then _lease_lead_proc; fi
+  if [ "${_LEAD_PID:-0}" -gt 0 ] 2>/dev/null; then
+    K="${_LEAD_PID}-$(printf '%s' "$_LEAD_STARTED" | cksum | cut -d' ' -f1)"
+  else
+    K="sh$$"
+  fi
+  printf '%s-%s\n' "$K" "$(_lead_roster_path | cksum | cut -d' ' -f1)"
+}
+
+# _CODEX_HOOKS_LIST_PY — python: argv <dir> <seconds>. Asks `codex app-server`
+# (JSON-RPC over stdio, no login, no model) for hooks/list in <dir>, the call
+# probe CDX-22 reads trust from, and prints the hooks it lists as one JSON
+# array (each with source, pluginId, eventName, key, currentHash and
+# trustStatus); exit 69 with the reason on stdout instead when the server
+# can't start, answers with an error or gives no answer in <seconds>. The
+# server is killed on every way out, a SIGTERM from the timeout included.
+# Single-quoted: no apostrophe inside.
+_CODEX_HOOKS_LIST_PY="${_PY_PRELUDE}"'
+import json, select, signal, subprocess, sys, time
+signal.signal(signal.SIGTERM, lambda *a: sys.exit(124))
+cwd, secs = sys.argv[1], float(sys.argv[2])
+def fail(why):
+    print(why)
+    sys.exit(69)
+try:
+    p = subprocess.Popen(["codex", "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, cwd=cwd)
+except OSError as exc:
+    fail("codex app-server did not start: " + str(exc))
+got = None
+try:
+    try:
+        for m in ({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "triforge", "version": "0"}}},
+                  {"method": "initialized"}, {"id": 2, "method": "hooks/list", "params": {"cwds": [cwd]}}):
+            p.stdin.write((json.dumps(m) + "\n").encode())
+        p.stdin.flush()
+    except OSError:
+        pass
+    deadline = time.time() + secs
+    while got is None and time.time() < deadline:
+        r, _, _ = select.select([p.stdout], [], [], 0.5)
+        if not r:
+            continue
+        line = p.stdout.readline()
+        if not line:
+            fail("codex app-server exited without a hooks/list answer")
+        try:
+            o = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(o, dict) and o.get("id") == 2:
+            got = o
+finally:
+    try:
+        p.kill()
+        p.wait()
+    except OSError:
+        pass
+if got is None:
+    fail("codex app-server gave no hooks/list answer in " + sys.argv[2] + " s")
+if "error" in got or not isinstance(got.get("result"), dict):
+    fail("codex app-server answered hooks/list with an error: " + json.dumps(got.get("error"))[:200])
+hooks = []
+for ent in got["result"].get("data") or []:
+    if isinstance(ent, dict):
+        hooks += [h for h in ent.get("hooks") or [] if isinstance(h, dict)]
+print(json.dumps(hooks))
+'
+
+# _lead_hooks_detect <cli> — "hooks_trusted.<event><TAB>present|absent<TAB>why"
+# for each event the plugin's hooks/hooks.json declares (one
+# "hooks_trusted<TAB>absent<TAB>why" line when it declares none or can't be
+# read): the runtime half of KTD1. A Claude Code lead runs an enabled plugin's
+# hooks, headless too (CC-12), so a declared event is present. A Codex lead
+# runs a plugin hook only once the user trusted it (CDX-22): hooks.state.<key>
+# .trusted_hash in the Codex config (CODEX_HOME's, read here, never written)
+# equal to the hash Codex computes for the hook now. So an event is present
+# only when `codex features list` has hooks on and `codex app-server`'s
+# hooks/list (_CODEX_HOOKS_LIST_PY, 30 s cap) lists this plugin's hooks for it
+# (pluginId <plugin name>@<marketplace>), each with trustStatus trusted and a
+# config trusted_hash equal to its currentHash. Anything else is absent with
+# the first unmet condition as the reason, fail closed: codex missing, the
+# call failing or timing out, a hook untrusted or modified since it was
+# trusted, a hash the config does not hold. Another plugin's hooks and the
+# project's own .codex/hooks.json do not count: they are not this plugin's
+# monitors.
+_lead_hooks_detect() {
+  local CLI=${1:-} FEAT=0 ROSTER ROOT LIST="" LRC=0
+  ROSTER=$(_lead_roster_path)
+  case "$ROSTER" in
+    /*) ROOT=${ROSTER%/ops/roster.toml} ;;
+    *)  ROOT=$(pwd -P 2>/dev/null || pwd) ;;
+  esac
+  if [ "$CLI" = codex ]; then
+    if ! command -v codex >/dev/null 2>&1; then
+      FEAT=missing
+    elif _codex_feature_enabled hooks; then
+      FEAT=1
+      LIST=$(_run_with_timeout 30 python3 -c "$_CODEX_HOOKS_LIST_PY" "${ROOT:-/}" 20 2>/dev/null) || LRC=$?
+    fi
+  fi
+  LH_CLI="$CLI" LH_FEAT="$FEAT" LH_LIST="$LIST" LH_LRC="$LRC" LH_PLUGIN="${_TRIFORGE_PLUGIN_ROOT:-}" \
+  LH_CODEX_CFG="${CODEX_HOME:-${HOME:-}/.codex}/config.toml" python3 -c "${_READ_REGULAR_PY}
+import json, os, sys
+
+def declared(path):
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    hooks = data.get('hooks') if isinstance(data, dict) else None
+    return [e for e, v in hooks.items() if v] if isinstance(hooks, dict) else []
+
+def codex_why(events, plugin, cfg_path):
+    # {event: reason} for every event that is not trusted, or one reason for all
+    if os.environ['LH_FEAT'] == 'missing':
+        return 'codex is not on PATH, so its hook trust can not be read', {}
+    if os.environ['LH_FEAT'] != '1':
+        return 'hooks is not on in codex features list', {}
+    if os.environ['LH_LRC'] != '0':
+        return 'the codex app-server hooks/list call failed (rc ' + os.environ['LH_LRC'] + ': ' + (' '.join(os.environ['LH_LIST'].split()) or 'no answer')[:200] + '), so hook trust is unknown', {}
+    try:
+        hooks = json.loads(os.environ['LH_LIST'])
+    except ValueError:
+        hooks = None
+    if not isinstance(hooks, list):
+        return 'codex app-server hooks/list printed no hook list, so hook trust is unknown', {}
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        cfg = tomllib.loads(read_regular(cfg_path).decode('utf-8')) if os.path.lexists(cfg_path) else {}
+        state = cfg.get('hooks', {}).get('state', {})
+    except Exception as exc:
+        return cfg_path + ' could not be read (' + ' '.join(str(exc).split())[:120] + '), so no trusted_hash is known', {}
+    if not isinstance(state, dict):
+        return 'hooks.state in ' + cfg_path + ' is not a table, so no trusted_hash is known', {}
+    why = {}
+    mine = [h for h in hooks if isinstance(h, dict) and h.get('source') == 'plugin' and str(h.get('pluginId', '')).split('@', 1)[0] == plugin]
+    for e in events:
+        on = [h for h in mine if h.get('eventName') == e[:1].lower() + e[1:]]
+        if not on:
+            why[e] = 'codex hooks/list lists no ' + plugin + ' ' + e + ' hook (the plugin is not installed or not enabled in this CODEX_HOME)'
+        for h in on:
+            key, now = str(h.get('key')), h.get('currentHash')
+            st = state.get(key)
+            if h.get('trustStatus') != 'trusted':
+                why[e] = 'the ' + plugin + ' ' + e + ' hook ' + key + ' is ' + str(h.get('trustStatus')) + ' (trust it in the Codex hook review, which records hooks.state in ' + cfg_path + ')'
+            elif not now or not isinstance(st, dict) or st.get('trusted_hash') != now:
+                why[e] = 'the ' + plugin + ' ' + e + ' hook ' + key + ' has no hooks.state trusted_hash equal to its current hash in ' + cfg_path
+            else:
+                continue
+            break
+    return '', why
+
+events = declared(os.path.join(os.environ['LH_PLUGIN'], 'hooks', 'hooks.json'))
+if not events:
+    print('hooks_trusted\tabsent\tthe plugin hooks/hooks.json declares no event or could not be read')
+    sys.exit(0)
+cli = os.environ['LH_CLI']
+every, why = '', {}
+if cli == 'claude':
+    pass
+elif cli == 'codex':
+    try:
+        with open(os.path.join(os.environ['LH_PLUGIN'], '.claude-plugin', 'plugin.json'), encoding='utf-8') as f:
+            plugin = json.load(f).get('name') or ''
+    except (OSError, ValueError, AttributeError):
+        plugin = ''
+    if not plugin:
+        every = 'the plugin name could not be read from .claude-plugin/plugin.json'
+    else:
+        every, why = codex_why(events, plugin, os.environ['LH_CODEX_CFG'])
+else:
+    every = 'no hook detection for this lead'
+for e in events:
+    r = every or why.get(e, '')
+    print('hooks_trusted.' + e + '\t' + ('absent' if r else 'present') + '\t' + (r or 'detected'))
+"
+}
+
+# resolve_lead_caps — the lead's capabilities, one "<name><TAB><value>" line
+# each: the registry's KTD1 lead fields as cli_field formats them
+# (launch_argv, model_argv, effort_argv, full_access, wait_budget_s, tool_vocab_read,
+# tool_vocab_action, goal_gate,
+# ask_user, native_subagents_enforced_tools, agent_teams, plugin_root_env),
+# then hooks_trusted.<event> present|absent, detected at runtime
+# (_lead_hooks_detect) and cached for the lead session (_lead_session_key) in
+# TMPDIR. The first read in a session names every capability that is empty,
+# false or absent in one stderr NOTE; later reads in that session stay quiet
+# (R44: reported once, never skipped silently). rc: resolve_lead's (3 no TOML
+# parser, 4, 5); 2 when the registry can't be read.
+resolve_lead_caps() {
+  local LEAD TAB STATIC HOOKS KEY CACHE CACHE_TMP="" NEW=0 N V R MISS="" HMISS="" GROUP="" GR="" LNAME
+  TAB=$(printf '\t')
+  _lead_resolve || return $?
+  LEAD=$_LEAD_CLI
+  STATIC=$(RC_LEAD="$LEAD" python3 -c "${_PY_PRELUDE}
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_CLI_FIELD_PY}
+cli = os.environ['RC_LEAD']
+for f in CLIS[cli]['lead']:
+    print(f + '\t' + cli_value('resolve_lead_caps', cli, CLIS[cli], 'lead.' + f))
+") || return 2
+  KEY=$(_lead_session_key)
+  CACHE="${TMPDIR:-/tmp}/triforge_lead_caps_${LEAD}_${KEY}"
+  # The cache is read only when it is a regular file of this user (-O; not a
+  # link, so not a FIFO either), and written through a file mktemp creates
+  # exclusively under a random name, then renamed into place (Phase 3 round
+  # 4, B7's class): a name another user planted in a shared TMPDIR is neither
+  # trusted nor written through.
+  if [ -f "$CACHE" ] && [ ! -L "$CACHE" ] && [ -O "$CACHE" ]; then
+    HOOKS=$(cat "$CACHE" 2>/dev/null || true)
+  else
+    HOOKS=$(_lead_hooks_detect "$LEAD") || HOOKS=""
+    NEW=1
+    CACHE_TMP=$(mktemp "${CACHE}.XXXXXXXX" 2>/dev/null) || CACHE_TMP=""
+    if [ -n "$CACHE_TMP" ]; then
+      if printf '%s\n' "$HOOKS" > "$CACHE_TMP" 2>/dev/null; then
+        mv -f "$CACHE_TMP" "$CACHE" 2>/dev/null || rm -f "$CACHE_TMP"
+      else
+        rm -f "$CACHE_TMP"
+      fi
+    fi
+  fi
+  printf '%s\n' "$STATIC"
+  # Absent hook events that share a reason (the usual case: one unmet
+  # condition) are named together, the reason once.
+  while IFS="$TAB" read -r N V R; do
+    if [ -z "$N" ]; then continue; fi
+    printf '%s\t%s\n' "$N" "$V"
+    if [ "$V" = present ]; then continue; fi
+    R=${R:-not detected}
+    if [ -n "$GROUP" ] && [ "$R" = "$GR" ]; then
+      GROUP="${GROUP}, ${N}"
+    else
+      if [ -n "$GROUP" ]; then HMISS="${HMISS}${HMISS:+, }${GROUP} (${GR})"; fi
+      GROUP=$N
+      GR=$R
+    fi
+  done <<LEAD_HOOKS_EOF
+${HOOKS}
+LEAD_HOOKS_EOF
+  if [ -n "$GROUP" ]; then HMISS="${HMISS}${HMISS:+, }${GROUP} (${GR})"; fi
+  if [ "$NEW" -eq 0 ]; then
+    return 0
+  fi
+  # full_access is a property of the launch line, not a capability: false is
+  # the safe value and never "missing".
+  while IFS="$TAB" read -r N V; do
+    if [ "$N" = full_access ]; then continue; fi
+    case "$V" in
+      ""|false) if [ -n "$N" ]; then MISS="${MISS}${MISS:+, }${N}"; fi ;;
+    esac
+  done <<LEAD_STATIC_EOF
+${STATIC}
+LEAD_STATIC_EOF
+  MISS="${MISS}${MISS:+${HMISS:+, }}${HMISS}"
+  if [ -n "$MISS" ]; then
+    LNAME=$(cli_field "$LEAD" name 2>/dev/null) || LNAME=$LEAD
+    echo "resolve_lead_caps: NOTE the ${LNAME} lead runs without: ${MISS} — reported once per lead session (R44)" >&2
+  fi
+  return 0
+}
+
+# _lead_launch_compose <cli> <model> <effort> <headless|interactive> — the one
+# composition of a lead's launch line, read from <cli>'s registry lead fields
+# (scripts/coordinate.sh runs it, lead_launch_line prints it). headless is
+# lead.launch_argv, interactive the same line without the words that make it
+# headless (launch_interactive, scripts/lib/registry.sh); then the words
+# lead.model_argv and lead.effort_argv add for <model> and <effort> ("{}" =
+# the value; an empty value adds nothing, a value with no template is named in
+# a note). Prints one line per word, as the line runs, then
+# __full_access__=0|1 (1 when launch_full_access reads full access in the
+# words, when lead.full_access says so, or when it can't be read: fail
+# closed), one __why__= per reason, __shown__= the line as typed (the
+# registry spelling, then the added words shell-quoted) and one __note__= per
+# note. rc 5 when <cli> has no launch_argv (it cannot lead), 69 when no
+# interactive form of its line is known.
+_lead_launch_compose() {
+  LL_CLI="${1:-}" LL_MODEL="${2:-}" LL_EFFORT="${3:-}" LL_MODE="${4:-headless}" python3 -c "${_PY_PRELUDE}
+import os, shlex, sys
+${_TRIFORGE_CLIS_PY}
+${_LAUNCH_ACCESS_PY}
+e = os.environ
+cli, mode = e['LL_CLI'], e['LL_MODE']
+entry = CLIS.get(cli, {})
+lead = entry.get('lead') if isinstance(entry.get('lead'), dict) else {}
+argv = lead.get('launch_argv') if isinstance(lead.get('launch_argv'), str) else ''
+name = entry.get('name', cli)
+if not argv:
+    sys.stderr.write('lead launch line: ' + repr(cli) + ' has no lead.launch_argv in scripts/lib/registry.sh, so it cannot lead\n')
+    sys.exit(5)
+text = argv if mode != 'interactive' else launch_interactive(argv)
+if text is None:
+    sys.stderr.write('lead launch line: no interactive form of the ' + name + ' launch line is known (LAUNCH_HEADLESS_WORDS, scripts/lib/registry.sh)\n')
+    sys.exit(69)
+words = shlex.split(text)
+extra, notes = [], []
+for field in ('model', 'effort'):
+    value = e['LL_' + field.upper()]
+    tmpl = lead.get(field + '_argv', '')
+    tmpl = tmpl if isinstance(tmpl, str) else ''
+    if not value:
+        continue
+    if '{}' not in tmpl or '\n' in value:
+        notes.append('the ' + name + ' registry entry has no lead.' + field + '_argv, so the [lead] ' + field + ' ' + ' '.join(value.split()) + ' is not passed (the host default runs)')
+        continue
+    extra += launch_extra_words(tmpl, value)
+why = launch_full_access(words + extra)
+if lead.get('full_access') is True:
+    why.append('the registry declares lead.full_access = true')
+elif lead.get('full_access') is not False:
+    why.append('no lead.full_access declaration could be read (fail closed)')
+for w in words + extra:
+    print(w)
+print('__full_access__=' + ('1' if why else '0'))
+for r in why:
+    print('__why__=' + ' '.join(r.split()))
+print('__shown__=' + text + ''.join(' ' + shlex.quote(w) for w in extra))
+for n in notes:
+    print('__note__=' + n)
+"
+}
+
+# lead_launch_line <cli> interactive|headless — the line that starts <cli> as
+# this checkout's lead, with the roster's [lead] model and effort when <cli> is
+# the lead, else its lead defaults (lead_resolve_as). headless is the line
+# scripts/coordinate.sh runs, the prompt appended to it as one more word;
+# interactive is what the human types in a terminal: for Codex, the
+# danger-full-access line of R4 without exec (AGENTS.md: launching a lead with
+# full access is the human's step). stdout: the line. stderr: each note on the
+# model and effort flags, and, when the line runs the lead with full access,
+# one line saying so and why (print confinement_statements beside it). rc:
+# lead_resolve_as's (5 a CLI that cannot lead, 3, 4), 64 usage, 69 no
+# interactive form known.
+lead_launch_line() {
+  local CLI=${1:-} MODE=${2:-} ROW REST MODEL EFFORT OUT LINE SHOWN="" FULL=0 WHY="" TAB
+  case "$MODE" in
+    interactive|headless) ;;
+    *) echo "lead_launch_line: usage: lead_launch_line <cli> interactive|headless" >&2; return 64 ;;
+  esac
+  if [ -z "$CLI" ]; then
+    echo "lead_launch_line: usage: lead_launch_line <cli> interactive|headless" >&2
+    return 64
+  fi
+  TAB=$(printf '\t')
+  ROW=$(lead_resolve_as "$CLI") || return $?
+  REST=${ROW#*"$TAB"}
+  MODEL=${REST%%"$TAB"*}
+  EFFORT=${REST#*"$TAB"}
+  OUT=$(_lead_launch_compose "$CLI" "$MODEL" "$EFFORT" "$MODE") || return $?
+  while IFS= read -r LINE; do
+    case "$LINE" in
+      "__shown__="*) SHOWN=${LINE#__shown__=} ;;
+      "__full_access__="*) FULL=${LINE#__full_access__=} ;;
+      "__why__="*) WHY="${WHY}${WHY:+; }${LINE#__why__=}" ;;
+      "__note__="*) echo "lead_launch_line: note: ${LINE#__note__=}" >&2 ;;
+    esac
+  done <<LEAD_LAUNCH_EOF
+${OUT}
+LEAD_LAUNCH_EOF
+  if [ "$FULL" = 1 ]; then
+    echo "lead_launch_line: this line runs the lead with full access, no sandbox and no approval prompts (${WHY})" >&2
+  fi
+  printf '%s\n' "$SHOWN"
+}
+
+# confinement_statements — the three statements R4 has setup, the root
+# AGENTS.md and scripts/coordinate.sh make beside every full-access launch
+# line, one per line. The one copy: setup and coordinate.sh print it.
+confinement_statements() {
+  echo "  - Confinement under either lead is Triforge's scripts plus git-integrity detection."
+  echo "  - A lease worktree limits where a worker starts, not where it writes."
+  echo "  - Recorded approval is audit, not prevention, and worker output is an injection surface for a full-access lead."
+}
+
+# roster_write_lead <cli> [<model> [<effort>]] [--force]
+# The single writer of [lead] (R1, R38), with roster_write_role's text surgery
+# (_ROSTER_SPLICE_PY): the [lead] block is replaced in place (a trailing
+# comment block kept) or appended, and the result must parse and load to the
+# intended values before an atomic tmp+mv. Model left out: the CLI's registry model;
+# effort left out: the lead default (xhigh for codex, the session default for
+# claude); an explicit "" is written as given.
+#
+# It runs from either lead CLI's session, a terminal or the SELF seam, never
+# from a worker or a lease root (_lead_only --any-host), and never from a
+# shell with no stated origin (via=none) or with both leads' host markers
+# (_lead_origin_match): switching the lead is the user's call in at-setup, and
+# a lead-owned helper refused under the other CLI points here. A
+# switch to another CLI refuses while the ledger holds an open lease (every
+# state but merged and failed), naming each. --force hands them over: it runs
+# only from the new lead or a terminal, stamps handover_from and handover_at on
+# every open row (_lease_mark_handover, U10), writes the table, then runs U13's
+# lead-exit sweep (lease_heartbeat_check --lead-exit) as the new lead, which
+# adopts each live builder and collects each finished one with reason=lead-exit
+# and requeue_count untouched; leases that are not building carry over as they
+# are. The same CLI with a new model or effort is not a switch.
+# rc: 0 written; 1 refused (open leases, a forced handover from elsewhere than
+# the new lead, an unreadable ledger); 2 invalid argument; 3/4 roster
+# unreadable; 6 refused by write_verified (ops/ a symlink, or the project
+# directory HOME or above it); 45 a worker, a lease root, no stated origin or
+# ambiguous host markers; 64 usage; after a write, the sweep's own rc.
+roster_write_lead() {
+  _lead_only roster_write_lead --any-host || return $?   # never from a worker or a lease root (KTD9)
+  local CLI="" MODEL=__default__ EFFORT=__default__ FORCE=0 N=0 A TAB CAPABLE CUR RC=0 CUR_CLI="" ROSTER LEDGER OPEN="" SUMMARY="" IDS="" LIST="" NB=0 M=0 NL='
+'
+  local TRIFORGE_LEASE_ROOT="${TRIFORGE_LEASE_ROOT:-}"   # _lease_at_ledger_root may set it for the handover
+  local USAGE="roster_write_lead: usage: roster_write_lead <cli> [<model> [<effort>]] [--force]"
+  TAB=$(printf '\t')
+  for A in "$@"; do
+    case "$A" in
+      --force) FORCE=1 ;;
+      *)
+        N=$((N + 1))
+        case "$N" in
+          1) CLI=$A ;;
+          2) MODEL=$A ;;
+          3) EFFORT=$A ;;
+          *) echo "$USAGE" >&2; return 64 ;;
+        esac
+        ;;
+    esac
+  done
+  if [ -z "$CLI" ]; then
+    echo "$USAGE" >&2
+    return 64
+  fi
+  CAPABLE=$(cli_table all lead 2>/dev/null | awk -F'\t' '$2 != "" { printf "%s%s", s, $1; s = " " }') || CAPABLE=""
+  case " ${CAPABLE} " in
+    *" ${CLI} "*) ;;
+    *)
+      echo "roster_write_lead: ERROR '${CLI}' cannot lead — the lead is one of: ${CAPABLE// /, } (the CLIs with enforceable headless hooks and permission control)" >&2
+      return 2
+      ;;
+  esac
+  case "$EFFORT" in
+    __default__|""|low|medium|high|xhigh|max) ;;
+    *)
+      echo "roster_write_lead: ERROR effort must be one of low|medium|high|xhigh|max, or empty for the host default; got '${EFFORT}'" >&2
+      return 2
+      ;;
+  esac
+  # Where this runs (R38): either lead's session, a terminal or the SELF seam
+  # may switch the lead (M 0 or 1); a forced handover with open leases needs
+  # the new lead's (M 0, below).
+  _lead_origin
+  _lead_origin_match "$_LEAD_VIA" "$_LEAD_HOST" "$CLI" || M=$?
+  case "$M" in
+    3)
+      echo "roster_write_lead: REFUSED — $(_lead_ambiguous_note) (R38, rc ${_RC_LEAD_ONLY})" >&2
+      return "$_RC_LEAD_ONLY"
+      ;;
+    2)
+      echo "roster_write_lead: REFUSED — via=none: no lead host markers (${_LEAD_HOST_MARKERS}), no terminal on stdin and no SELF seam, so nothing says a lead or the user is switching the lead; run it from either lead's tool shell or from a terminal (R38, rc ${_RC_LEAD_ONLY})" >&2
+      return "$_RC_LEAD_ONLY"
+      ;;
+  esac
+  CUR=$(roster_lead_entry 2>&1) || RC=$?
+  case "$RC" in
+    0) CUR_CLI=${CUR%%"$TAB"*} ;;
+    5) echo "roster_write_lead: NOTE the current [lead] does not load ($(printf '%s' "$CUR" | tail -1)); this write replaces it" >&2 ;;
+    *) printf '%s\n' "$CUR" >&2; return "$RC" ;;
+  esac
+  ROSTER=$(_lead_roster_path)
+  if [ "$CLI" != "$CUR_CLI" ]; then
+    LEDGER="${ROSTER%roster.toml}leases.toml"
+    if ! OPEN=$(_lease_open_rows "$LEDGER"); then
+      echo "roster_write_lead: REFUSED — the lead can't switch while the lease ledger can't be read (${OPEN}); fail closed (R38)" >&2
+      return 1
+    fi
+    SUMMARY=${OPEN%%"$NL"*}
+    IDS=${OPEN#"$SUMMARY"}
+    IDS=${IDS#"$NL"}
+    LIST=${SUMMARY%%"$TAB"*}
+    NB=${SUMMARY#*"$TAB"}
+    case "$NB" in ''|*[!0-9]*) NB=0 ;; esac
+    if [ -n "$LIST" ] && [ "$FORCE" -eq 0 ]; then
+      echo "roster_write_lead: REFUSED — switching the lead from ${CUR_CLI:-an invalid [lead]} to ${CLI} while leases are open: ${LIST}. Finish or reclaim them first, or hand them over with --force from the ${CLI} lead (R38)" >&2
+      return 1
+    fi
+    if [ -n "$LIST" ] && [ "$M" -ne 0 ]; then
+      echo "roster_write_lead: REFUSED — a forced handover runs from the new lead (${CLI}) or a terminal, so the new lead adopts the building leases; this shell runs under ${_LEAD_HOST} (R38)" >&2
+      return 1
+    fi
+    if [ -n "$LIST" ]; then
+      # Every open row records the handover before [lead] changes (U10, KTD2):
+      # a lead-class pin made before it then needs the user's merge approval,
+      # with no re-pin. A stamp that can't be written stops the switch. The
+      # stamp and the lead-exit sweep below run under the lease root the
+      # ledger was last written under, beside the lead's integrity anchors.
+      _lease_ctx || return 1
+      _lease_at_ledger_root roster_write_lead || return 1
+      _lease_mark_handover "${CUR_CLI:-unknown}" "$CLI" "$IDS" || return 1
+    fi
+  fi
+  WL_ROSTER="$ROSTER" WL_CLI="$CLI" WL_MODEL="$MODEL" WL_EFFORT="$EFFORT" python3 -c "${_PY_PRELUDE}
+import json, os, re, sys
+${_TRIFORGE_CLIS_PY}
+${_LEAD_PY}
+${_ROSTER_SPLICE_PY}
+who = 'roster_write_lead'
+tomllib = lead_toml(who)
+path = os.environ['WL_ROSTER']
+cli = os.environ['WL_CLI']
+model = os.environ['WL_MODEL']
+effort = os.environ['WL_EFFORT']
+# cli and effort were checked above, before any handover stamp.
+if model == '__default__':
+    model = CLIS[cli]['model']
+if effort == '__default__':
+    effort = LEAD_DEFAULT_EFFORT.get(cli, '')
+
+raw = ''
+if os.path.isfile(path):
+    raw = read_regular(path, True)
+    try:
+        tomllib.loads(raw)
+    except tomllib.TOMLDecodeError as exc:
+        sys.stderr.write(who + ': ERROR malformed ' + path + ': ' + str(exc) + '\n')
+        sys.exit(4)
+
+block = ('[lead]\n'
+         'cli = ' + json.dumps(cli) + '\n'
+         'model = ' + json.dumps(model) + '\n'
+         'effort = ' + json.dumps(effort) + '\n')
+new_raw = splice_table(raw, r'^\[lead\][ \t]*$', block, True)
+
+# The roster must still parse and load to these values: verify the tmp file
+# BEFORE it replaces the live roster.
+def fail(msg):
+    raise ValueError(msg)
+def verify(data):
+    got = lead_load(data, fail)
+    assert got == (cli, model, effort, True), 'the written [lead] loads as ' + repr(got)
+write_verified(path, new_raw, verify, who)
+sys.stderr.write(who + ': [lead] cli=' + cli + ' model=' + (model or '<host default>') + ' effort=' + (effort or '<host default>') + '\n')
+" || return $?
+  if [ "$FORCE" -eq 0 ]; then
+    return 0
+  fi
+  if [ "$CLI" = "$CUR_CLI" ]; then
+    echo "roster_write_lead: --force: the lead stays ${CLI}, nothing to hand over" >&2
+    return 0
+  elif [ -z "$LIST" ]; then
+    echo "roster_write_lead: --force: no open lease to hand over" >&2
+    return 0
+  fi
+  if [ "$NB" -eq 0 ]; then
+    echo "roster_write_lead: --force: no lease is building; the open ones carry over to the ${CLI} lead as they are: ${LIST}" >&2
+  else
+    echo "roster_write_lead: --force: handing ${NB} building lease(s) over to the ${CLI} lead (lease_heartbeat_check --lead-exit); the open ones: ${LIST}" >&2
+    lease_heartbeat_check --lead-exit || return $?
+  fi
   return 0
 }
 
@@ -359,9 +1662,9 @@ ensure_core_trio_live() {
 #   - R37 first-detection: hooks/handlers/session-start.sh, after optional-CLI
 #     detection, calls roster_enroll_member <cli> headless for each newly
 #     detected optional member. A hook cannot prompt, so headless silently
-#     enrolls the shipped default (KTD-8); a later /setup then shows the member
+#     enrolls the shipped default (KTD-8); a later at-setup then shows the member
 #     as already-enrolled instead of re-asking.
-#   - R39 guided walk: commands/setup.md drives the interactive ask (participate?
+#   - R39 guided walk: skills/at-setup/SKILL.md drives the interactive ask (participate?
 #     + which model) and records the answer through roster_write_member.
 #
 # The [members.<cli>] table in ops/roster.toml is BOTH the enrollment record and
@@ -372,64 +1675,44 @@ ensure_core_trio_live() {
 # tmp+mv with a tomllib round-trip verify, so it preserves the rest of the file
 # — role tables, comments, promotion gate — byte-for-byte.
 #
-# Shipped optional defaults (KTD-8, session-settled; MUST match CLI_DEFAULT_MODEL
-# in resolve_role): opencode -> openrouter/z-ai/glm-5.3 ; kimi -> kimi-code/k3 ;
-# cursor -> cursor-grok-4.6-xhigh (explicit suffixed pin — effort rides in the
-# suffix — NEVER the Auto router). The core trio (claude/antigravity/codex) is
-# required, never enrolled.
+# Shipped optional defaults (KTD-8, session-settled) are the registry's model
+# field (scripts/lib/registry.sh): opencode -> openrouter/z-ai/glm-5.3 ; kimi
+# -> kimi-code/k3 ; grok -> grok-4.7 ; cursor -> cursor-grok-4.6-xhigh
+# (explicit suffixed pin — effort rides in the suffix — NEVER the Auto
+# router). The core trio (tier
+# "core" in the registry) is required, never enrolled. The binary per member
+# is _registry_binary (cursor through _cursor_bin), and the official install
+# command — PRINTED by setup for the user to run, never executed by Triforge —
+# is the registry's install field (the surface /cli-watch re-checks each cycle).
 
-# cli name -> binary looked up on PATH (mirrors resolve_role's BINARY map).
-_roster_binary() {
-  case "${1:-}" in
-    claude)      echo "claude" ;;
-    antigravity) echo "agy" ;;
-    codex)       echo "codex" ;;
-    opencode)    echo "opencode" ;;
-    kimi)        echo "kimi" ;;
-    cursor)      _cursor_bin 2>/dev/null || echo "cursor-agent" ;;
-    *) return 2 ;;
-  esac
-}
-
-# Pinned install matrix — OFFICIAL installers only, last verified 2026-07-18.
-# /setup PRINTS these for the user to run themselves; Triforge NEVER executes an
-# installer. The optional-three URLs are the surface /cli-watch (U14) re-checks
-# each cycle — keep the two in sync when an upstream installer URL moves.
-_roster_install_cmd() {
-  case "${1:-}" in
-    opencode)    echo "curl -fsSL https://opencode.ai/install | bash" ;;
-    kimi)        echo "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash" ;;
-    cursor)      echo "curl https://cursor.com/install -fsS | bash" ;;
-    claude)      echo "npm install -g @anthropic-ai/claude-code" ;;
-    antigravity) echo "curl -fsSL https://antigravity.google/cli/install.sh | bash" ;;
-    codex)       echo "npm install -g @openai/codex   (or: brew install codex)" ;;
-    *) return 2 ;;
-  esac
-}
-
-# roster_member_default <cli> — print the shipped default model (D-020..D-025).
-# Mirrors CLI_DEFAULT_MODEL in resolve_role; claude is intentionally empty (the
-# shell claude -p lane runs the host default model; the Fable/ladder override is
-# an Agent-tool subagent concern, not this lane).
+# roster_member_default <cli> — print the shipped default model (D-020..D-025):
+# the registry's model field; claude is intentionally empty (the claude -p
+# lane runs Claude Code's own default model; the Fable/ladder override is the
+# lead's spawn-time choice, not this lane's). rc 2 for an unknown cli.
 roster_member_default() {
-  case "${1:?usage: roster_member_default <cli>}" in
-    claude)      echo "" ;;
-    antigravity) echo "Gemini 3.8 Flash (High)" ;;
-    codex)       echo "gpt-6-astra" ;;
-    opencode)    echo "openrouter/z-ai/glm-5.3" ;;
-    kimi)        echo "kimi-code/k3" ;;
-    cursor)      echo "cursor-grok-4.6-xhigh" ;;
-    *) echo "roster_member_default: ERROR unknown cli '${1}'" >&2; return 2 ;;
-  esac
+  local CLI=${1:?usage: roster_member_default <cli>} MODEL=""
+  if ! MODEL=$(cli_field "$CLI" model 2>/dev/null); then
+    echo "roster_member_default: ERROR unknown cli '${CLI}'" >&2
+    return 2
+  fi
+  printf '%s\n' "$MODEL"
 }
 
-# latest_probe_record — print the path of the NEWEST ops/research/*-probe-record.md
-# (KTD9: "the current probe record" is always the newest file; the harness
-# writes a date-stamped record per cycle). rc 1 when none exists. Paths are
-# repo-relative when run from the repo root, absolute otherwise.
+# _roster_is_core <cli> — 0 when the registry lists the CLI as tier "core".
+_roster_is_core() {
+  [ "$(cli_field "${1:-}" tier 2>/dev/null || true)" = "core" ]
+}
+
+# latest_probe_record [root] — print the path of the NEWEST
+# ops/research/*-probe-record.md under <root>, default the repo the current
+# directory is in (KTD9: "the current probe record" is always the newest file;
+# the harness writes a date-stamped record per cycle). rc 1 when none exists.
+# Paths are relative when run from that root, absolute otherwise.
 latest_probe_record() {
-  local REPO
-  REPO=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  local REPO=${1:-}
+  if [ -z "$REPO" ]; then
+    REPO=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  fi
   local NEWEST
   NEWEST=$(ls -1 "${REPO}/ops/research/"*-probe-record.md 2>/dev/null | sort | tail -1)
   if [ -z "$NEWEST" ]; then
@@ -446,16 +1729,18 @@ latest_probe_record() {
 #   cli<TAB>model<TAB>effort<TAB>fallbacks-csv
 # Shipped defaults overlaid per-field by any [roles.<role>] entry in
 # ops/roster.toml, WITHOUT the liveness walk: this reports what is configured
-# (for the /setup role table), not which member would answer right now. The
+# (for the at-setup role table), not which member would answer right now. The
 # model column follows resolve_role's primary-model rule — an explicit role
 # model always wins, and a cli-only override displays that CLI's member/shipped
 # default (what dispatch would actually run), never the role-default model of a
 # different CLI. Nonzero on unknown role (rc 2) or unparseable roster (rc 4).
 roster_role_entry() {
   local ROLE=${1:?usage: roster_role_entry <role>}
-  RE_ROLE="$ROLE" ROSTER_FILE="ops/roster.toml" python3 -c "
+  RE_ROLE="$ROLE" ROSTER_FILE="$(_lead_roster_path)" python3 -c "${_READ_REGULAR_PY}
 import os, sys, re
 ${_CURSOR_ID_PY}
+${_TRIFORGE_CLIS_PY}
+${_ROLE_DEFAULTS_PY}
 try:
     import tomllib
 except ImportError:
@@ -465,22 +1750,9 @@ except ImportError:
         sys.stderr.write('roster_role_entry: ERROR no TOML parser available. Fix: use Python 3.11+ (tomllib) or run: pip install tomli\n')
         sys.exit(3)
 
-# Mirrors DEFAULTS and CLI_DEFAULT_MODEL in resolve_role (keep in sync).
-DEFAULTS = {
-    'builder':    {'cli': 'claude',      'model': '',                      'effort': 'max',   'fallbacks': ['codex', 'antigravity']},
-    'reviewer':   {'cli': 'codex',       'model': 'gpt-6-astra',           'effort': 'xhigh', 'fallbacks': ['antigravity', 'claude']},
-    'tester':     {'cli': 'codex',       'model': 'gpt-6-astra',           'effort': 'xhigh', 'fallbacks': ['claude']},
-    'analyst':    {'cli': 'antigravity', 'model': 'Gemini 3.8 Flash (High)', 'effort': 'high',  'fallbacks': ['claude']},
-    'documenter': {'cli': 'antigravity', 'model': 'Gemini 3.8 Flash (High)', 'effort': 'high',  'fallbacks': ['claude']},
-}
-CLI_DEFAULT_MODEL = {
-    'claude': '',
-    'antigravity': 'Gemini 3.8 Flash (High)',
-    'codex': 'gpt-6-astra',
-    'opencode': 'openrouter/z-ai/glm-5.3',
-    'kimi': 'kimi-code/k3',
-    'cursor': 'cursor-grok-4.6-xhigh',
-}
+# DEFAULTS is the spliced role table (_ROLE_DEFAULTS_PY); the per-CLI default
+# model is the registry's model field — the same two sources resolve_role reads.
+CLI_DEFAULT_MODEL = {c: e['model'] for c, e in CLIS.items()}
 role = os.environ['RE_ROLE']
 if role not in DEFAULTS:
     sys.stderr.write('roster_role_entry: ERROR unknown role ' + repr(role) + ' (valid: ' + ', '.join(DEFAULTS) + ')\n')
@@ -490,8 +1762,7 @@ roster = {}
 user = {}
 if os.path.isfile(path):
     try:
-        with open(path, 'rb') as f:
-            roster = tomllib.load(f)
+        roster = tomllib.loads(read_regular(path).decode('utf-8'))
     except tomllib.TOMLDecodeError as exc:
         sys.stderr.write('roster_role_entry: ERROR malformed ' + path + ': ' + str(exc) + '\n')
         sys.exit(4)
@@ -511,7 +1782,9 @@ for field in ('cli', 'model', 'effort', 'fallbacks'):
 # cli-only override must show the model dispatch would use for that CLI —
 # [members.<cli>].model, else the CLI's shipped default — not the role-default
 # model that belongs to a different CLI.
-if 'model' not in user and str(entry['cli']) != DEFAULTS[role]['cli']:
+# An empty model shows the member model, else the shipped default, as
+# resolve_role dispatches it.
+if ('model' not in user and str(entry['cli']) != DEFAULTS[role]['cli']) or not entry['model']:
     m = roster.get('members', {})
     m = m.get(str(entry['cli']), {}) if isinstance(m, dict) else {}
     m = m if isinstance(m, dict) else {}
@@ -546,9 +1819,10 @@ print(str(entry['cli']) + '\t' + str(entry['model']) + '\t' + str(entry['effort'
 # the result parses AND reflects the intended values before an atomic tmp+mv.
 #
 # Validation is a strict SUPERSET of resolve_role's load-time rules, so a
-# written roster always still loads: unknown role/CLI rejected and the chain
-# (cli + fallbacks) must terminate at a core-trio member (both mirrored from
-# resolve_role's load validation), plus writer-only checks resolve_role does
+# written roster always still loads: unknown role/CLI rejected, the chain
+# (cli + fallbacks) must terminate at a core-trio member, and the chain obeys
+# the consent and role-limit rules (member_rules: devin as builder only with
+# its recorded opt-in; all mirrored from resolve_role's load validation), plus writer-only checks resolve_role does
 # not run at load — the effort enum (low|medium|high|xhigh|max) and the agy
 # effort→(High)/(Low) model-suffix normalization below.
 #
@@ -557,14 +1831,17 @@ print(str(entry['cli']) + '\t' + str(entry['model']) + '\t' + str(entry['effort'
 # function carries no defaults copy of its own): the new primary is removed
 # (the displaced primary becomes the first fallback) and 'claude' is appended
 # if the result would not terminate at a core member. Model may be empty
-# (builder's shell lane runs the host default Claude model by design).
+# (the claude -p builder lane runs Claude Code's own default model by design).
+# rc 6: refused by write_verified (ops/ a symlink, or the project directory
+# HOME or above it), nothing written.
 roster_write_role() {
+  _lead_only roster_write_role || return $?   # workers never write the roster (KTD9, common.sh)
   local ROLE=${1:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
   local CLI=${2:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
   local MODEL=${3-}
   local EFFORT=${4:?usage: roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]}
-  local FALLBACKS=${5-__derive__}
-  mkdir -p ops
+  local FALLBACKS=${5-__derive__} ROSTER
+  ROSTER=$(_lead_roster_path)   # ops/ is made by write_verified, after its HOME check
   # Current merged chain from the sibling read surface — also surfaces an
   # unknown role (rc 2) or malformed roster (rc 4) with its precise error
   # before we touch the file.
@@ -572,9 +1849,13 @@ roster_write_role() {
   CUR=$(roster_role_entry "$ROLE") || return $?
   CUR_CLI=$(printf '%s' "$CUR" | cut -f1)
   CUR_FB=$(printf '%s' "$CUR" | cut -f4)
-  ROSTER_FILE="ops/roster.toml" WR_ROLE="$ROLE" WR_CLI="$CLI" WR_MODEL="$MODEL" WR_EFFORT="$EFFORT" WR_FALLBACKS="$FALLBACKS" WR_CUR_CLI="$CUR_CLI" WR_CUR_FB="$CUR_FB" python3 -c "
+  ROSTER_FILE="$ROSTER" WR_ROLE="$ROLE" WR_CLI="$CLI" WR_MODEL="$MODEL" WR_EFFORT="$EFFORT" WR_FALLBACKS="$FALLBACKS" WR_CUR_CLI="$CUR_CLI" WR_CUR_FB="$CUR_FB" python3 -c "${_PY_PRELUDE}
 import json, os, re, sys
 ${_CURSOR_ID_PY}
+${_TRIFORGE_CLIS_PY}
+${_LEAD_PY}
+${_ROSTER_SPLICE_PY}
+${_MEMBER_RULES_PY}
 try:
     import tomllib
 except ImportError:
@@ -584,12 +1865,13 @@ except ImportError:
         sys.stderr.write('roster_write_role: ERROR no TOML parser available. Fix: use Python 3.11+ (tomllib) or run: pip install tomli\n')
         sys.exit(3)
 
-# Mirrors CORE_TRIO/KNOWN in resolve_role (keep in sync). Role names are
+# The known CLIs and the core set come from the spliced registry (CLIS), the
+# same source resolve_role validates against; the effort enum is _LEAD_PY's
+# (LEAD_EFFORTS), the one roster_write_lead writes against. Role names are
 # validated by the roster_role_entry call in the shell wrapper; the current
 # merged chain arrives via WR_CUR_* so no role-defaults copy lives here.
-CORE_TRIO = ('claude', 'antigravity', 'codex')
-KNOWN = ('claude', 'antigravity', 'codex', 'opencode', 'kimi', 'cursor')
-EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
+CORE_TRIO = tuple(c for c, e in CLIS.items() if e['tier'] == 'core')
+KNOWN = tuple(CLIS)
 
 path = os.environ['ROSTER_FILE']
 role = os.environ['WR_ROLE']
@@ -601,15 +1883,14 @@ fb_arg = os.environ['WR_FALLBACKS']
 if cli not in KNOWN:
     sys.stderr.write('roster_write_role: ERROR unknown CLI ' + repr(cli) + ' (known: ' + ', '.join(KNOWN) + ')\n')
     sys.exit(2)
-if effort not in EFFORTS:
-    sys.stderr.write('roster_write_role: ERROR effort must be one of ' + '|'.join(EFFORTS) + ', got ' + repr(effort) + '\n')
+if effort not in LEAD_EFFORTS:
+    sys.stderr.write('roster_write_role: ERROR effort must be one of ' + '|'.join(LEAD_EFFORTS) + ', got ' + repr(effort) + '\n')
     sys.exit(2)
 
 raw = ''
 roster = {}
 if os.path.isfile(path):
-    with open(path, 'r') as f:
-        raw = f.read()
+    raw = read_regular(path, True)
     try:
         roster = tomllib.loads(raw)
     except tomllib.TOMLDecodeError as exc:
@@ -632,8 +1913,15 @@ for x in fallbacks:
         sys.exit(2)
 chain = [cli] + fallbacks
 if chain[-1] not in CORE_TRIO:
-    sys.stderr.write('roster_write_role: ERROR chain ' + repr(chain) + ' does not terminate at a core-trio member (claude, antigravity, codex) — a chain resolving entirely to optional members cannot ship\n')
+    sys.stderr.write('roster_write_role: ERROR chain ' + repr(chain) + ' does not terminate at a core-trio member (' + ', '.join(CORE_TRIO) + ') — a chain resolving entirely to optional members cannot ship\n')
     sys.exit(2)
+# Consent and role limits (R24): the load rule for this chain, so the devin
+# builder without its opt-in is refused here, not at the next load.
+def refuse(msg):
+    sys.stderr.write('roster_write_role: ERROR ' + msg + '\n')
+    sys.exit(2)
+members = roster.get('members', {})
+member_rules(members if isinstance(members, dict) else {}, {role: chain}, refuse)
 
 # agy's effort control IS the (Low)/(Medium)/(High) model-variant suffix (see
 # the roster template header): normalize the written pair so it cannot
@@ -698,79 +1986,48 @@ block = ('[roles.' + role + ']\n'
          'effort = ' + json.dumps(effort) + '\n'
          'fallbacks = ' + json.dumps(fallbacks) + '\n')
 
-lines = raw.splitlines(keepends=True)
-hdr = re.compile(r'^\[roles\.' + re.escape(role) + r'\][ \t]*$')
-top = re.compile(r'^\[')
-start = None
-for i, ln in enumerate(lines):
-    if hdr.match(ln):
-        start = i
-        break
+# Trailing standalone comment/blank lines after the table's last key are
+# documentation for what FOLLOWS (e.g. the optional-members guidance block
+# after [roles.documenter]): they survive the replace.
+new_raw = splice_table(raw, r'^\[roles\.' + re.escape(role) + r'\][ \t]*$', block, True)
 
-if start is not None:
-    end = len(lines)
-    for j in range(start + 1, len(lines)):
-        if top.match(lines[j]):
-            end = j
-            break
-    # Trailing standalone comment/blank lines after the table's last key are
-    # documentation for what FOLLOWS (e.g. the optional-members guidance block
-    # after [roles.documenter]) — walk end back so they survive the replace.
-    while end > start + 1 and (lines[end - 1].strip() == '' or lines[end - 1].lstrip().startswith('#')):
-        end -= 1
-    prefix = ''.join(lines[:start])
-    suffix = ''.join(lines[end:])
-    if prefix and not prefix.endswith('\n'):
-        prefix += '\n'
-    new_raw = prefix + block
-    if suffix.strip():
-        if not suffix.startswith('\n'):
-            new_raw += '\n'
-        new_raw += suffix
-    else:
-        new_raw += suffix
-else:
-    new_raw = raw
-    if new_raw and not new_raw.endswith('\n'):
-        new_raw += '\n'
-    if new_raw and not new_raw.endswith('\n\n'):
-        new_raw += '\n'
-    new_raw += block
-
-tmp = path + '.tmp.' + str(os.getpid())
-with open(tmp, 'w') as f:
-    f.write(new_raw)
 # The roster MUST stay tomllib-parseable AND reflect our values after every
 # write — verify the tmp file BEFORE it replaces the live roster.
-try:
-    with open(tmp, 'rb') as f:
-        data = tomllib.load(f)
+def verify(data):
     r = data.get('roles', {}).get(role, {})
     assert isinstance(r, dict), 'roles.' + role + ' is not a table after write'
     assert r.get('cli') == cli, 'cli mismatch after write'
     assert str(r.get('model', '')) == model, 'model mismatch after write'
     assert r.get('effort') == effort, 'effort mismatch after write'
     assert r.get('fallbacks') == fallbacks, 'fallbacks mismatch after write'
-except Exception as exc:
-    try:
-        os.unlink(tmp)
-    except OSError:
-        pass
-    sys.stderr.write('roster_write_role: ERROR serialized roster failed round-trip verify: ' + str(exc) + '\n')
-    sys.exit(4)
-os.replace(tmp, path)
-sys.stderr.write('roster_write_role: [roles.' + role + '] cli=' + cli + ' model=' + (model or '<host default>') + ' effort=' + effort + ' fallbacks=' + ','.join(fallbacks) + '\n')
+write_verified(path, new_raw, verify, 'roster_write_role')
+# An empty model is not the host's default: dispatch runs the member's model,
+# else the registry's shipped one (resolve_role); only a CLI whose registry
+# model is empty (claude) runs its own default.
+shown = model
+if not shown:
+    mm = members.get(cli, {}) if isinstance(members, dict) else {}
+    mm = mm if isinstance(mm, dict) else {}
+    if mm.get('model'):
+        shown = '\"\" (dispatch runs the member model ' + str(mm['model']) + ')'
+    elif CLIS[cli]['model']:
+        shown = '\"\" (dispatch runs the shipped default ' + CLIS[cli]['model'] + ')'
+    else:
+        shown = '\"\" (dispatch runs the default model of ' + CLIS[cli]['name'] + ')'
+sys.stderr.write('roster_write_role: [roles.' + role + '] cli=' + cli + ' model=' + shown + ' effort=' + effort + ' fallbacks=' + ','.join(fallbacks) + '\n')
 "
 }
 
 # roster_has_member <cli> — 0 when ops/roster.toml carries a [members.<cli>]
 # table, 1 when it does not (or the file is absent — the writer will create it),
 # 2 when the file exists but is unparseable. Cheap (tomllib only, no live probe)
-# so the session-start trigger stays fast.
+# so the session-start trigger stays fast. Like every reader and writer here,
+# it reads the checkout's roster (_lead_roster_path), from any subdirectory.
 roster_has_member() {
-  local CLI=${1:?usage: roster_has_member <cli>}
-  [ -f "ops/roster.toml" ] || return 1
-  ROSTER_FILE="ops/roster.toml" RH_CLI="$CLI" python3 -c "
+  local CLI=${1:?usage: roster_has_member <cli>} ROSTER
+  ROSTER=$(_lead_roster_path)
+  [ -f "$ROSTER" ] || return 1
+  ROSTER_FILE="$ROSTER" RH_CLI="$CLI" python3 -c "${_READ_REGULAR_PY}
 import os, sys
 try:
     import tomllib
@@ -780,8 +2037,7 @@ except ImportError:
     except ImportError:
         sys.exit(2)
 try:
-    with open(os.environ['ROSTER_FILE'], 'rb') as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular(os.environ['ROSTER_FILE']).decode('utf-8'))
 except Exception:
     sys.exit(2)
 m = data.get('members', {})
@@ -792,9 +2048,10 @@ sys.exit(0 if isinstance(m, dict) and isinstance(m.get(os.environ['RH_CLI']), di
 # _roster_member_field <cli> <field> — print one field of [members.<cli>]
 # (enabled printed as true|false). Nonzero when the entry is absent/unparseable.
 _roster_member_field() {
-  local CLI=${1:?} FIELD=${2:?}
-  [ -f "ops/roster.toml" ] || return 1
-  ROSTER_FILE="ops/roster.toml" RF_CLI="$CLI" RF_FIELD="$FIELD" python3 -c "
+  local CLI=${1:?} FIELD=${2:?} ROSTER
+  ROSTER=$(_lead_roster_path)
+  [ -f "$ROSTER" ] || return 1
+  ROSTER_FILE="$ROSTER" RF_CLI="$CLI" RF_FIELD="$FIELD" python3 -c "${_READ_REGULAR_PY}
 import os, sys
 try:
     import tomllib
@@ -804,8 +2061,7 @@ except ImportError:
     except ImportError:
         sys.exit(1)
 try:
-    with open(os.environ['ROSTER_FILE'], 'rb') as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(read_regular(os.environ['ROSTER_FILE']).decode('utf-8'))
 except Exception:
     sys.exit(1)
 m = data.get('members', {}).get(os.environ['RF_CLI'], {})
@@ -816,7 +2072,86 @@ print('true' if v is True else ('false' if v is False else v))
 "
 }
 
-# roster_write_member <cli> <true|false> <model> [enrolled-tag]
+# _member_consent_ok <cli> [roster] — the consent rule at dispatch (R24): rc 0
+# when the registry asks no consent for <cli>, or when [members.<cli>] in
+# <roster> (default the checkout's, _lead_roster_path) is enabled with a non-empty consent
+# string; otherwise rc 5 (resolve_role's code for the same rule) with a
+# refusal naming at-setup on stderr. member_rules refuses such a roster at
+# every load; this covers the paths that read the member table without loading
+# the roster (at-review's optional lanes) and a lease whose roster changed
+# after lease_create. invoke_devin and lease_dispatch run it before anything
+# is sent. A malformed roster fails closed (rc 4), as at load.
+_member_consent_ok() {
+  local CLI=${1:?usage: _member_consent_ok <cli> [roster]}
+  MC_CLI="$CLI" MC_ROSTER="${2:-$(_lead_roster_path)}" python3 -c "${_PY_PRELUDE}
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_LEAD_PY}
+cli, path = os.environ['MC_CLI'], os.environ['MC_ROSTER']
+e = CLIS.get(cli)
+if e is None or not e['consent']:
+    sys.exit(0)
+members = lead_roster(lead_toml('dispatch'), path, 'dispatch').get('members', {})
+m = members.get(cli) if isinstance(members, dict) else None
+why = 'records no user consent for it'
+if isinstance(m, dict) and m.get('enabled') is False:
+    why = 'declines it ([members.' + cli + '] enabled = false)'
+elif isinstance(m, dict):
+    c = m.get('consent')
+    if isinstance(c, str) and c.strip():
+        sys.exit(0)
+sys.stderr.write('dispatch: REFUSED ' + cli + ' — ' + path + ' ' + why + ', so nothing is sent to ' + e['egress'] + '. Run at-setup to ask the user; on a yes it records the consent (roster_write_member ' + cli + ' true <model> --consent user)\n')
+sys.exit(5)
+"
+}
+
+# _member_role_ok <cli> <role> [roster] — the role rule at dispatch (R24): rc 0
+# when <cli> may take <role> under <roster> (default the checkout's) now: its
+# registry role_limit is empty or names the role, or the role is one of its
+# opt_in_roles and an enabled [members.<cli>] records it in opt_in. A name
+# that is not a roster role (a persona) passes: the lane gives it its default
+# class. A member the roster declines (enabled = false) takes no role. Else
+# rc 5 (resolve_role's code) with a refusal naming the role and at-setup on
+# stderr; a malformed roster fails closed (rc 4). member_rules holds every
+# chain to the same rule at load; this holds a lease whose role was resolved
+# under an earlier roster (the opt-in since removed, the role moved away
+# first so the roster still loads), and a direct invoke_<cli> call.
+# lease_dispatch, dispatch_role and invoke_devin run it before anything is sent.
+_member_role_ok() {
+  local CLI=${1:?usage: _member_role_ok <cli> <role> [roster]}
+  MR_CLI="$CLI" MR_ROLE="${2-}" MR_ROSTER="${3:-$(_lead_roster_path)}" python3 -c "${_PY_PRELUDE}
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_ROLE_DEFAULTS_PY}
+${_LEAD_PY}
+cli, role, path = os.environ['MR_CLI'], os.environ['MR_ROLE'], os.environ['MR_ROSTER']
+e = CLIS.get(cli)
+if e is None:
+    sys.exit(0)
+members = lead_roster(lead_toml('dispatch'), path, 'dispatch').get('members', {})
+m = members.get(cli) if isinstance(members, dict) else None
+m = m if isinstance(m, dict) else {}
+lim = e['role_limit']
+fix = 'give the role to another roster member (at-setup, or roster_write_role ' + role + ' <cli> ...)'
+if m.get('enabled') is False:
+    why = path + ' declines it ([members.' + cli + '] enabled = false)'
+    fix = 'run at-setup to enroll it again, or ' + fix
+elif not lim or role in lim or role not in DEFAULTS:
+    sys.exit(0)
+elif role in e['opt_in_roles']:
+    opted = m.get('opt_in', [])
+    if isinstance(opted, list) and role in opted:
+        sys.exit(0)
+    why = path + ' records no ' + role + ' opt-in for it (' + cli + ' takes ' + ', '.join(lim) + ' by default)'
+    fix = 'run at-setup to ask the user; on a yes it records the opt-in (roster_write_member ' + cli + ' true <model> --opt-in ' + role + '), or ' + fix
+else:
+    why = cli + ' takes only ' + ', '.join(lim + e['opt_in_roles']) + (' (' + ', '.join(e['opt_in_roles']) + ' with the opt-in)' if e['opt_in_roles'] else '')
+sys.stderr.write('dispatch: REFUSED ' + cli + ' for role ' + repr(role) + ' — ' + why + ', so nothing runs. Fix: ' + fix + '\n')
+sys.exit(5)
+"
+}
+
+# roster_write_member <cli> <true|false> <model> [enrolled-tag] [--consent user] [--opt-in <role,...|none>]
 # The SINGLE writer of [members.<cli>] in ops/roster.toml. Text-surgical so it
 # preserves everything else in the file (roles, comments, promotion gate): it
 # replaces an existing [members.<cli>] block in place, or appends a new one,
@@ -824,14 +2159,61 @@ print('true' if v is True else ('false' if v is False else v))
 # before an atomic tmp+mv. Refuses unknown CLIs and refuses to disable a
 # core-trio member (mirrors resolve_role's load-time rule so the roster stays
 # resolvable). enrolled-tag defaults to today's date.
+# Consent and opt-in (R24), for the CLIs whose registry entry asks for them:
+#   --consent user   the user said yes to the egress (at-setup asked): records
+#                    consent = "user <UTC> via=<origin>", the origin from
+#                    _lead_origin as lease_approve stamps it (via=none and
+#                    ambiguous markers are refused). Enabling a consent CLI
+#                    without one, and with none already on record, is refused
+#                    (rc 2); a rewrite that leaves the flag out keeps the record
+#   --opt-in <roles> records opt_in = [...] (roles from the registry's
+#                    opt_in_roles; none clears it); left out, the table keeps
+#                    what it had
+# A decline (enabled=false) drops both: re-enabling asks again. A write whose
+# table the roster's role chains would reject at load (member_rules) is
+# refused (rc 2), so the roster stays resolvable: dropping the builder opt-in
+# from an enabled devin while a builder chain names it is refused; a decline
+# is not (resolve_role walks past a disabled member). rc 6: refused by
+# write_verified (ops/ a symlink, or the project directory HOME or above it),
+# nothing written.
 roster_write_member() {
-  local CLI=${1:?usage: roster_write_member <cli> <true|false> <model> [enrolled-tag]}
-  local ENABLED=${2:?usage: roster_write_member <cli> <true|false> <model> [enrolled-tag]}
+  _lead_only roster_write_member || return $?   # workers never write the roster (KTD9, common.sh)
+  local USAGE="usage: roster_write_member <cli> <true|false> <model> [enrolled-tag] [--consent user] [--opt-in <role,...|none>]"
+  local CLI=${1:?$USAGE}
+  local ENABLED=${2:?$USAGE}
   local MODEL=${3-}
-  local TAG=${4:-$(date +%Y-%m-%d)}
-  mkdir -p ops
-  ROSTER_FILE="ops/roster.toml" RW_CLI="$CLI" RW_ENABLED="$ENABLED" RW_MODEL="$MODEL" RW_TAG="$TAG" python3 -c "
+  local TAG="" CONSENT="" OPTIN="__keep__" STAMP=""
+  shift 3 2>/dev/null || shift $#
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --consent) CONSENT=${2-}; shift 2 2>/dev/null || { echo "roster_write_member: $USAGE" >&2; return 64; } ;;
+      --opt-in)  OPTIN=${2-};   shift 2 2>/dev/null || { echo "roster_write_member: $USAGE" >&2; return 64; } ;;
+      --*)       echo "roster_write_member: unknown option '$1' — $USAGE" >&2; return 64 ;;
+      *)         TAG=$1; shift ;;
+    esac
+  done
+  [ -n "$TAG" ] || TAG=$(date +%Y-%m-%d)
+  if [ -n "$CONSENT" ]; then
+    if [ "$CONSENT" != user ]; then
+      echo "roster_write_member: ERROR --consent takes 'user' (the user said yes; a lead cannot consent for them), got '${CONSENT}'" >&2
+      return 2
+    fi
+    _lead_origin
+    case "$_LEAD_VIA" in
+      ambiguous) echo "roster_write_member: REFUSED — $(_lead_ambiguous_note); a consent records where it was given" >&2; return 2 ;;
+      none|"")   echo "roster_write_member: REFUSED — via=none: no lead host markers and no terminal, so the consent record could not say where it was given. Run it from the lead's tool shell or a terminal" >&2; return 2 ;;
+    esac
+    STAMP="user $(date -u +%Y-%m-%dT%H:%M:%SZ) via=${_LEAD_VIA}"
+  fi
+  local ROSTER
+  ROSTER=$(_lead_roster_path)   # ops/ is made by write_verified, after its HOME check
+  ROSTER_FILE="$ROSTER" RW_CLI="$CLI" RW_ENABLED="$ENABLED" RW_MODEL="$MODEL" RW_TAG="$TAG" RW_STAMP="$STAMP" RW_OPTIN="$OPTIN" python3 -c "${_PY_PRELUDE}
 import json, os, re, sys
+${_TRIFORGE_CLIS_PY}
+${_ROLE_DEFAULTS_PY}
+${_ROSTER_SPLICE_PY}
+${_MEMBER_RULES_PY}
+${_READ_REGULAR_PY}
 try:
     import tomllib
 except ImportError:
@@ -846,9 +2228,12 @@ cli = os.environ['RW_CLI']
 enabled = os.environ['RW_ENABLED']
 model = os.environ['RW_MODEL']
 tag = os.environ['RW_TAG']
+stamp = os.environ['RW_STAMP']
+optin_arg = os.environ['RW_OPTIN']
 
-CORE = ('claude', 'antigravity', 'codex')
-KNOWN = ('claude', 'antigravity', 'codex', 'opencode', 'kimi', 'cursor')
+# Known CLIs and the core set from the spliced registry (CLIS).
+CORE = tuple(c for c, e in CLIS.items() if e['tier'] == 'core')
+KNOWN = tuple(CLIS)
 if cli not in KNOWN:
     sys.stderr.write('roster_write_member: ERROR unknown CLI ' + repr(cli) + ' (known: ' + ', '.join(KNOWN) + ')\n')
     sys.exit(2)
@@ -858,90 +2243,110 @@ if enabled not in ('true', 'false'):
 if cli in CORE and enabled == 'false':
     sys.stderr.write('roster_write_member: ERROR [members.' + cli + '] enabled=false rejected — the core trio cannot be disabled\n')
     sys.exit(2)
+e = CLIS[cli]
+if stamp and not e['consent']:
+    sys.stderr.write('roster_write_member: ERROR ' + cli + ' takes no consent record (only a registry entry with consent = True does)\n')
+    sys.exit(2)
+
+raw = ''
+old = {}
+data = {}
+if os.path.isfile(path):
+    raw = read_regular(path, True)
+    try:
+        data = tomllib.loads(raw)
+        old = data.get('members', {}).get(cli, {})
+    except tomllib.TOMLDecodeError as exc:
+        sys.stderr.write('roster_write_member: ERROR malformed ' + path + ': ' + str(exc) + '\n')
+        sys.exit(4)
+    old = old if isinstance(old, dict) else {}
+
+consent = ''
+optin = []
+if enabled == 'true':
+    kept = old.get('consent') if old.get('enabled') is not False else None
+    consent = stamp or (kept if isinstance(kept, str) and kept.strip() else '')
+    if e['consent'] and not consent:
+        sys.stderr.write('roster_write_member: REFUSED — enrolling ' + cli + ' needs the user consent on record: ' + e['name'] + ' sends prompts and code to ' + e['egress'] + ', and ' + e['egress'].split(' (', 1)[0] + ' may train on them unless the account opts out. Ask the user; on a yes rerun with --consent user\n')
+        sys.exit(2)
+    if optin_arg == '__keep__':
+        prev = old.get('opt_in', []) if old.get('enabled') is not False else []
+        optin = [r for r in prev if isinstance(r, str)] if isinstance(prev, list) else []
+    elif optin_arg not in ('', 'none'):
+        optin = [r.strip() for r in optin_arg.split(',') if r.strip()]
+    for r in optin:
+        if r not in e['opt_in_roles']:
+            sys.stderr.write('roster_write_member: ERROR ' + cli + ' offers no opt-in for ' + repr(r) + ' (opt-in roles: ' + (', '.join(e['opt_in_roles']) or 'none') + ')\n')
+            sys.exit(2)
+
+# The written roster must still load (member_rules, R24): the new table
+# against every role's merged chain, scoped to this CLI, since this write
+# changes no other member. Refuses, for example, an opt-in dropped from an
+# enabled devin a builder chain still names; a decline always passes (a
+# disabled member is skipped in every chain).
+def refuse(msg):
+    sys.stderr.write('roster_write_member: REFUSED — the roster would not load: ' + msg + '\n')
+    sys.exit(2)
+roles = data.get('roles', {})
+roles = roles if isinstance(roles, dict) else {}
+chains = {}
+for name, dflt in DEFAULTS.items():
+    user = roles.get(name, {})
+    user = user if isinstance(user, dict) else {}
+    head, fbs = user.get('cli', dflt['cli']), user.get('fallbacks', dflt['fallbacks'])
+    chain = [head] + (list(fbs) if isinstance(fbs, list) else [])
+    chains[name] = [x for x in chain if x == cli]
+member_rules({cli: {'enabled': enabled == 'true', 'consent': consent, 'opt_in': optin}}, chains, refuse)
 
 block = ('[members.' + cli + ']\n'
          'enabled = ' + enabled + '\n'
          'model = ' + json.dumps(model) + '\n'
-         'enrolled = ' + json.dumps(tag) + '\n')
+         'enrolled = ' + json.dumps(tag) + '\n'
+         + ('consent = ' + json.dumps(consent) + '\n' if consent else '')
+         + ('opt_in = ' + json.dumps(optin) + '\n' if optin else ''))
 
-raw = ''
-if os.path.isfile(path):
-    with open(path, 'r') as f:
-        raw = f.read()
-lines = raw.splitlines(keepends=True)
+# The whole old table goes, its trailing comment lines included.
+new_raw = splice_table(raw, r'^\[members\.' + re.escape(cli) + r'\][ \t]*$', block, False)
 
-# An UNcommented header only: '# [members.x]' must not match (top scan below
-# uses the same rule so a comment never ends a block).
-hdr = re.compile(r'^\[members\.' + re.escape(cli) + r'\][ \t]*$')
-top = re.compile(r'^\[')
-start = None
-for i, ln in enumerate(lines):
-    if hdr.match(ln):
-        start = i
-        break
-
-if start is not None:
-    end = len(lines)
-    for j in range(start + 1, len(lines)):
-        if top.match(lines[j]):
-            end = j
-            break
-    prefix = ''.join(lines[:start])
-    suffix = ''.join(lines[end:])
-    if prefix and not prefix.endswith('\n'):
-        prefix += '\n'
-    new_raw = prefix + block
-    if suffix.strip():
-        if not suffix.startswith('\n'):
-            new_raw += '\n'
-        new_raw += suffix
-    else:
-        new_raw += suffix
-else:
-    new_raw = raw
-    if new_raw and not new_raw.endswith('\n'):
-        new_raw += '\n'
-    if new_raw and not new_raw.endswith('\n\n'):
-        new_raw += '\n'
-    new_raw += block
-
-tmp = path + '.tmp.' + str(os.getpid())
-with open(tmp, 'w') as f:
-    f.write(new_raw)
 # The roster MUST stay tomllib-parseable AND reflect our values after every
 # write — verify the tmp file BEFORE it replaces the live roster.
-try:
-    with open(tmp, 'rb') as f:
-        data = tomllib.load(f)
+def verify(data):
     m = data.get('members', {}).get(cli, {})
     assert isinstance(m, dict), 'members.' + cli + ' is not a table after write'
     assert m.get('enabled') == (enabled == 'true'), 'enabled mismatch after write'
     assert str(m.get('model', '')) == model, 'model mismatch after write'
-except Exception as exc:
-    try:
-        os.unlink(tmp)
-    except OSError:
-        pass
-    sys.stderr.write('roster_write_member: ERROR serialized roster failed round-trip verify: ' + str(exc) + '\n')
-    sys.exit(4)
-os.replace(tmp, path)
-sys.stderr.write('roster_write_member: [members.' + cli + '] enabled=' + enabled + ' model=' + (model or '<none>') + ' enrolled=' + tag + '\n')
+    assert m.get('consent', '') == consent, 'consent mismatch after write'
+    assert m.get('opt_in', []) == optin, 'opt_in mismatch after write'
+write_verified(path, new_raw, verify, 'roster_write_member')
+sys.stderr.write('roster_write_member: [members.' + cli + '] enabled=' + enabled + ' model=' + (model or '<none>') + ' enrolled=' + tag + (' consent=' + consent if consent else '') + (' opt_in=' + ','.join(optin) if optin else '') + '\n')
 "
 }
 
 # roster_member_auth <cli> — readiness (login) check for an OPTIONAL member.
 # Prints 'ok' (return 0) or 'auth-failed: <exact fix>' (return 1). Prints
 # 'unknown: ...' (return 2) for the core trio (their liveness is
-# ensure_core_trio_live's job) or an unknown cli. The result is cached per
+# ensure_core_trio_live's job) or an unknown cli, and 'unverified: ...'
+# (return 80) for a failure inside a lead's sandbox (below). The result is cached per
 # shell ($$ stays the sourcing shell's PID across subshells) so a status table
 # that queries the same cli twice probes only once.
 #   cursor   -> cursor-agent status         (pure auth query, no tokens)
 #   opencode -> OPENROUTER_API_KEY set, else `opencode auth list` names openrouter
+#   devin    -> devin auth status, its first line (it exits 0 logged out)
 #   kimi     -> bounded headless probe. kimi doctor validates CONFIG only and
 #               PASSES when signed out (probe KIMI-02 PASS vs KIMI-05 AUTH-FAIL),
 #               so login state needs a real headless call. Signed-out fails fast
 #               (no model configured, before any network round-trip) so the cap
 #               is cheap; signed-in answers the trivial READY quickly.
+#   grok     -> XAI_API_KEY set, else a cached login in $GROK_HOME/auth.json
+#               (default ~/.grok). No call: grok has no status command (`grok
+#               models` says "not authenticated" when signed in), and a READY
+#               costs tokens. A lapsed login surfaces on the first dispatch,
+#               which fails at once with "Not signed in" (deterministic).
+# Inside a lead's sandbox (_lead_sandbox_read: Codex's workspace-write, for
+# one), a failed check proves nothing: the sandbox can block the network or
+# the CLI's own state files. Such a failure prints 'unverified: relaunch with
+# <the lead's interactive line> to check <cli> (...)' and returns 80, and
+# nothing is cached, so the member is never marked logged out for the shell.
 roster_member_auth() {
   local CLI=${1:?usage: roster_member_auth <cli>}
   local CACHE="${TMPDIR:-/tmp}/triforge_auth_${CLI}_$$"
@@ -955,6 +2360,13 @@ roster_member_auth() {
     esac
   fi
   local LINE="" RC=0 OUT=""
+  # A core member's readiness is ensure_core_trio_live's job (registry tier).
+  if _roster_is_core "$CLI"; then
+    LINE="unknown: core member (readiness via ensure_core_trio_live)"
+    printf '%s\n' "$LINE" > "$CACHE" 2>/dev/null || true
+    printf '%s\n' "$LINE"
+    return 2
+  fi
   case "$CLI" in
     cursor)
       local CBIN_AUTH=""
@@ -975,6 +2387,13 @@ roster_member_auth() {
         LINE="auth-failed: set OPENROUTER_API_KEY, or run 'opencode auth login' and connect the openrouter provider (the openrouter/z-ai/glm-5.3 default needs it)"; RC=1
       fi
       ;;
+    grok)
+      if [ -n "${XAI_API_KEY:-}" ] || [ -s "${GROK_HOME:-$HOME/.grok}/auth.json" ]; then
+        LINE="ok"
+      else
+        LINE="auth-failed: run 'grok login' ('grok login --device-code' on a host without a browser), or set XAI_API_KEY"; RC=1
+      fi
+      ;;
     kimi)
       local KERR="${TMPDIR:-/tmp}/triforge_kimi_auth_err_$$"
       OUT=$(_run_with_timeout 45 env KIMI_DISABLE_TELEMETRY=1 kimi --output-format stream-json -p "Respond with only: READY" 2>"$KERR") || true
@@ -987,25 +2406,43 @@ roster_member_auth() {
         LINE="ok"   # inconclusive (no READY, no auth-shaped error) — do not block on an ambiguous probe
       fi
       ;;
-    claude|antigravity|codex)
-      LINE="unknown: core member (readiness via ensure_core_trio_live)"; RC=2
+    devin)
+      # `devin auth status` exits 0 logged out too ("Not logged in."), so the
+      # first line decides (_devin_auth_ready, devin.sh), never the exit code.
+      if _devin_auth_ready; then
+        LINE="ok"
+      else
+        LINE="auth-failed: run 'devin auth login' to sign in (\`devin auth status\` says Not logged in.)"; RC=1
+      fi
       ;;
     *)
       LINE="unknown: cli '${CLI}'"; RC=2
       ;;
   esac
+  if [ "$RC" -eq 1 ]; then
+    local _LEAD_SANDBOX _LEAD_SANDBOX_WHY RELAUNCH="" SNAME=""
+    _lead_sandbox_read
+    if [ -n "$_LEAD_SANDBOX" ]; then
+      RELAUNCH=$(lead_launch_line "$_LEAD_SANDBOX" interactive 2>/dev/null) || RELAUNCH=""
+      SNAME=$(cli_field "$_LEAD_SANDBOX" name 2>/dev/null) || SNAME=$_LEAD_SANDBOX
+      printf '%s\n' "unverified: relaunch with ${RELAUNCH:-the lead outside its sandbox} to check ${CLI} (the check failed inside the ${SNAME} sandbox, ${_LEAD_SANDBOX_WHY}, which can block it: not a sign-out)"
+      return "$_RC_DEGRADED"
+    fi
+  fi
   printf '%s\n' "$LINE" > "$CACHE" 2>/dev/null || true
   printf '%s\n' "$LINE"
   return $RC
 }
 
-# roster_member_status <cli> — single-token status for the /setup table:
+# roster_member_status <cli> — single-token status for the at-setup table:
 #   core                 core-trio member present (required, never enrolled)
 #   not-installed        binary absent from PATH
 #   enrolled(<model>)    [members.<cli>] enabled=true
 #   declined             [members.<cli>] enabled=false (shown "skipped" in table)
 #   detected-unenrolled  binary present, no entry, readiness ok
 #   auth-failed          binary present, no entry, readiness check failed
+#   unverified           binary present, no entry, the check failed inside a
+#                        lead's sandbox (roster_member_auth rc 80)
 #   unsupported-version(<ver>)  OpenCode V2 binary, or <ver> = unreadable when
 #                        `opencode --version` can't be read (D-049) — enrolled or not;
 #                        every dispatch refuses it, so never shown as enrolled
@@ -1014,13 +2451,11 @@ roster_member_auth() {
 # intent, not a live login.
 roster_member_status() {
   local CLI=${1:?usage: roster_member_status <cli>}
-  local BIN; BIN=$(_roster_binary "$CLI") || { echo "unknown-cli"; return 2; }
-  case "$CLI" in
-    claude|antigravity|codex)
-      if command -v "$BIN" >/dev/null 2>&1; then echo "core"; else echo "not-installed"; fi
-      return 0
-      ;;
-  esac
+  local BIN; BIN=$(_registry_binary "$CLI") || { echo "unknown-cli"; return 2; }
+  if _roster_is_core "$CLI"; then
+    if command -v "$BIN" >/dev/null 2>&1; then echo "core"; else echo "not-installed"; fi
+    return 0
+  fi
   if ! command -v "$BIN" >/dev/null 2>&1; then echo "not-installed"; return 0; fi
   if [ "$CLI" = opencode ] && ! _opencode_v2_check "$BIN"; then
     if [ "$_OPENCODE_CHECK" = unreadable ]; then
@@ -1039,7 +2474,13 @@ roster_member_status() {
     if [ "$ENABLED" = "false" ]; then echo "declined"; else echo "enrolled(${MODEL})"; fi
     return 0
   fi
-  if roster_member_auth "$CLI" >/dev/null 2>&1; then echo "detected-unenrolled"; else echo "auth-failed"; fi
+  local ARC=0
+  roster_member_auth "$CLI" >/dev/null 2>&1 || ARC=$?
+  case "$ARC" in
+    0) echo "detected-unenrolled" ;;
+    "$_RC_DEGRADED") echo "unverified" ;;
+    *) echo "auth-failed" ;;
+  esac
   return 0
 }
 
@@ -1051,22 +2492,22 @@ roster_member_status() {
 #   2  invalid       unknown cli, core-trio cli, or bad mode
 #   4  roster-error  ops/roster.toml exists but is unparseable
 #   10 not-installed binary absent — the OFFICIAL install command is PRINTED
-#                    (never run); /setup shows the row as "not installed"
+#                    (never run); at-setup shows the row as "not installed"
 #   20 needs-ask     interactive + installed + unenrolled — the CALLER runs the
-#                    participate?/which-model ask, then roster_write_member
+#                    participate?/which-model ask, then roster_write_member;
+#                    also headless for a consent CLI (devin), which is never
+#                    enrolled without the user's recorded yes
 #   30 unsupported   installed but an unsupported line (OpenCode V2, D-049) —
 #                    the V1 pin is PRINTED; nothing is recorded, never enrolled
 roster_enroll_member() {
   local CLI=${1:?usage: roster_enroll_member <cli> <interactive|headless>}
   local MODE=${2:?usage: roster_enroll_member <cli> <interactive|headless>}
   local BIN DEFAULT
-  BIN=$(_roster_binary "$CLI") || { echo "roster_enroll_member: unknown cli '${CLI}'" >&2; return 2; }
-  case "$CLI" in
-    claude|antigravity|codex)
-      echo "roster_enroll_member: '${CLI}' is core-trio (required, never enrolled) — nothing to do" >&2
-      return 2
-      ;;
-  esac
+  BIN=$(_registry_binary "$CLI") || { echo "roster_enroll_member: unknown cli '${CLI}'" >&2; return 2; }
+  if _roster_is_core "$CLI"; then
+    echo "roster_enroll_member: '${CLI}' is core-trio (required, never enrolled) — nothing to do" >&2
+    return 2
+  fi
   case "$MODE" in
     interactive|headless) : ;;
     *) echo "roster_enroll_member: ERROR mode must be interactive|headless, got '${MODE}'" >&2; return 2 ;;
@@ -1074,7 +2515,7 @@ roster_enroll_member() {
   DEFAULT=$(roster_member_default "$CLI")
 
   # OpenCode V2 (D-049): unsupported, so never offered for enrollment (and never
-  # auto-enrolled headless). Checked before the idempotency gate so /setup also
+  # auto-enrolled headless). Checked before the idempotency gate so at-setup also
   # flags an already-enrolled V1 member whose binary was upgraded to V2 —
   # dispatches to it refuse until the V1 pin is restored. Nothing is recorded.
   if [ "$CLI" = "opencode" ] && command -v "$BIN" >/dev/null 2>&1 && ! _opencode_v2_check "$BIN"; then
@@ -1083,7 +2524,7 @@ roster_enroll_member() {
   fi
 
   # Idempotency (AE6): any existing entry — enrolled OR declined — suppresses
-  # the ask. This is what makes /setup and first-detection re-runnable.
+  # the ask. This is what makes at-setup and first-detection re-runnable.
   local HAS_RC=0
   roster_has_member "$CLI" || HAS_RC=$?
   if [ "$HAS_RC" -eq 0 ]; then
@@ -1099,8 +2540,22 @@ roster_enroll_member() {
   # it) and return the not-installed code so the caller shows "not installed".
   if ! command -v "$BIN" >/dev/null 2>&1; then
     echo "not-installed: ${CLI} (binary '${BIN}' absent). Install it yourself — Triforge never runs installers for you:"
-    echo "    $(_roster_install_cmd "$CLI")"
+    echo "    $(cli_field "$CLI" install)"
     return 10
+  fi
+
+  # A CLI whose registry entry asks for consent (devin, R24) is never enrolled
+  # headless: a hook cannot ask, and the record must carry the user's yes.
+  # Interactive, the ask adds the consent question to participate/which model.
+  # consent and egress in one registry read (consent prints true|false, egress
+  # never holds a tab).
+  local NEEDS_CONSENT="" EGRESS="" CROW=""
+  CROW=$(cli_field "$CLI" consent egress 2>/dev/null) || CROW=""
+  NEEDS_CONSENT=${CROW%%$'\t'*}
+  EGRESS=${CROW#*$'\t'}
+  if [ "$MODE" = "headless" ] && [ "$NEEDS_CONSENT" = true ]; then
+    echo "needs-consent: ${CLI} installed=yes — enrolling it needs the user's recorded consent (${EGRESS} sees the prompts and code); not enrolled headless. Run at-setup to ask."
+    return 20
   fi
 
   # Auth/READY check names the exact fix on failure. Skipped in headless mode
@@ -1119,7 +2574,135 @@ roster_enroll_member() {
 
   # interactive: the CALLER (setup.md) runs the ask and writes the answer.
   echo "needs-ask: ${CLI} installed=yes default-model=${DEFAULT} auth=${AUTH}"
-  echo "  enroll : roster_write_member ${CLI} true <model>   (recommended: ${DEFAULT})"
+  if [ "$NEEDS_CONSENT" = true ]; then
+    echo "  consent: required — ${EGRESS} sees the prompts and code; ask the user before enrolling"
+    echo "  enroll : roster_write_member ${CLI} true <model> --consent user   (recommended: ${DEFAULT})"
+  else
+    echo "  enroll : roster_write_member ${CLI} true <model>   (recommended: ${DEFAULT})"
+  fi
   echo "  decline: roster_write_member ${CLI} false \"\""
   return 20
+}
+
+# roster_egress_disclosure — what leaves this machine (R43), computed from the
+# checkout's roster and the registry's egress field, for setup to print. The
+# members counted: the core trio, every optional member whose
+# [members.<cli>] table does not decline it (enabled = false), and every
+# optional member a role chain names with no table at all (resolve_role
+# dispatches to it once its binary is there). Prints one "egress: " line per
+# provider that receives prompts and code, registry order; members whose
+# egress names the same provider (the text before " (") share its line, the
+# provider named once and each member's own qualifier beside its name (xAI,
+# for Cursor's Grok route and Grok Build). Then one "home: " line per
+# member: it runs as the user, so it can read the credential files under
+# HOME and send them to its provider. rc 0; 3 no TOML parser; 4 a roster
+# that can't be read or parsed.
+roster_egress_disclosure() {
+  ED_ROSTER="$(_lead_roster_path)" ED_HOME="${HOME:-}" python3 -c "${_PY_PRELUDE}
+import os, sys
+${_TRIFORGE_CLIS_PY}
+${_ROLE_DEFAULTS_PY}
+${_LEAD_PY}
+who = 'roster_egress_disclosure'
+roster = lead_roster(lead_toml(who), os.environ['ED_ROSTER'], who)
+members = roster.get('members', {})
+members = members if isinstance(members, dict) else {}
+roles = roster.get('roles', {})
+roles = roles if isinstance(roles, dict) else {}
+named = set()
+for role, dflt in DEFAULTS.items():
+    user = roles.get(role, {})
+    user = user if isinstance(user, dict) else {}
+    fbs = user.get('fallbacks', dflt['fallbacks'])
+    named.update([user.get('cli', dflt['cli'])] + (list(fbs) if isinstance(fbs, list) else []))
+
+def counted(cli, e):
+    m = members.get(cli)
+    if e['tier'] == 'core':
+        return True
+    if isinstance(m, dict):
+        return m.get('enabled') is not False
+    return cli in named
+
+def listed(names):
+    return names[0] if len(names) == 1 else ', '.join(names[:-1]) + ' and ' + names[-1]
+
+on = [(c, e) for c, e in CLIS.items() if counted(c, e)]
+groups = []
+for c, e in on:
+    head, sep, rest = e['egress'].partition(' (')
+    qual = rest[:-1] if sep and rest.endswith(')') else ''
+    for g in groups:
+        if g[0] == head:
+            g[1].append((e['name'], qual, e['egress']))
+            break
+    else:
+        groups.append((head, [(e['name'], qual, e['egress'])]))
+for head, ms in groups:
+    if len(ms) == 1:
+        print('egress: ' + ms[0][0] + ' sends the prompts and code to ' + ms[0][2])
+    else:
+        print('egress: ' + listed([n + (' (' + q + ')' if q else '') for n, q, _ in ms]) + ' send the prompts and code to ' + head)
+home = os.environ['ED_HOME'] or 'your home directory'
+for c, e in on:
+    print('home: ' + e['name'] + ' runs as you, so it can read the credential files under ' + home + ' and send them to ' + e['egress'])
+"
+}
+
+# codex_trust_status [<dir>] — whether Codex trusts <dir> (default: this
+# checkout's top, else the working directory) as a project, read from
+# ${CODEX_HOME:-$HOME/.codex}/config.toml through read_regular and never
+# written (R8, R18: the user adds the entry). Codex looks up the path it is
+# given (CDX-22: a /var/... and a /private/var/... spelling are two keys), so
+# the [projects."<key>"] entry for <dir> as given decides, else the one for
+# its physical path. Prints the state on the first line: trusted, untrusted
+# (the entry says so: Codex then also skips the root AGENTS.md, D-045),
+# absent (no entry, or no config) or unknown; then "match: path <p>",
+# "match: realpath <p>" or "match: none" with the reason; then the block the
+# user adds to that file for <dir> as given (absolute). rc 0; 80 with unknown
+# when the config can't be read or parsed, no TOML parser is there, or the
+# entry's trust_level is neither trusted nor untrusted.
+codex_trust_status() {
+  local DIR=${1:-}
+  if [ -z "$DIR" ]; then
+    DIR=$(_checkout_top) || DIR=$(pwd -P 2>/dev/null || pwd)
+  fi
+  CT_DIR="$DIR" CT_CFG="${CODEX_HOME:-${HOME:-}/.codex}/config.toml" python3 -c "${_READ_REGULAR_PY}
+import json, os, sys
+given = os.path.abspath(os.environ['CT_DIR'])
+real = os.path.realpath(given)
+cfg = os.environ['CT_CFG']
+
+def out(state, match, rc):
+    print(state)
+    print('match: ' + match)
+    print('[projects.' + json.dumps(given, ensure_ascii=False) + ']')
+    print('trust_level = ' + json.dumps('trusted'))
+    sys.exit(rc)
+
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        out('unknown', 'none (no TOML parser: use Python 3.11+ or pip install tomli)', 80)
+if not os.path.lexists(cfg):
+    out('absent', 'none (no ' + cfg + ')', 0)
+try:
+    data = tomllib.loads(read_regular(cfg).decode('utf-8'))
+except Exception as exc:
+    out('unknown', 'none (' + cfg + ' could not be read: ' + ' '.join(str(exc).split())[:160] + ')', 80)
+projects = data.get('projects', {})
+if not isinstance(projects, dict):
+    out('unknown', 'none ([projects] in ' + cfg + ' is not a table)', 80)
+for kind, key in (('path', given), ('realpath', real)):
+    if key in projects:
+        entry = projects[key]
+        level = entry.get('trust_level') if isinstance(entry, dict) else None
+        if level in ('trusted', 'untrusted'):
+            out(level, kind + ' ' + key, 0)
+        out('unknown', kind + ' ' + key + ' (its trust_level ' + repr(level) + ' is neither trusted nor untrusted)', 80)
+out('absent', 'none (no entry for ' + given + (' or ' + real if real != given else '') + ' in ' + cfg + ')', 0)
+"
 }

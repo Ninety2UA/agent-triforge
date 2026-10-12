@@ -1,5 +1,6 @@
-# The PR gates (KTD15): shell syntax, both release-gate validators, and the
-# SELF-row gate, on every pull request to main or release/4.0.
+# The PR gates (KTD15): shell syntax, both release-gate validators and their
+# fixture self-tests, and the SELF-row gate, on every pull request to main or
+# release/4.0.
 #
 # macOS runner on purpose: the hook handlers and helper libraries run under
 # /bin/bash 3.2 (macOS), so every script runs under /bin/bash here. No live
@@ -8,7 +9,7 @@
 # ops/research/ record), and exits 3 on any SELF FAIL. The last step proves the
 # gate can fail: it breaks one invariant in a scratch copy and requires exit 3.
 # `claude plugin validate --strict` needs Claude Code and stays a local release
-# gate (.claude/CLAUDE.md "Release checklist").
+# gate (AGENTS.md "Checks to run" and "Release").
 name: gates
 
 on:
@@ -51,8 +52,14 @@ jobs:
       - name: validate-versions
         run: /bin/bash scripts/validate-versions.sh
 
-      - name: validate-skills
+      - name: validate-skills # warnings are errors by default (U23); --warn is the relaxed run
         run: /bin/bash scripts/validate-skills.sh
+
+      - name: validate-skills self-test # every fixture under scripts/fixtures/validate-skills/, both modes (default and --warn)
+        run: /bin/bash scripts/validate-skills.sh --self-test
+
+      - name: validate-versions self-test # every fixture under scripts/fixtures/validate-versions/ plus the computed AGENTS.md budget and --only cases
+        run: /bin/bash scripts/validate-versions.sh --self-test
 
       - name: SELF gate
         run: /bin/bash scripts/probe-capabilities.sh --self-only

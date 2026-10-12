@@ -1,0 +1,3 @@
+check: C02
+under-warn: error
+message: duplicate frontmatter key: name

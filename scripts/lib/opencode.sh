@@ -63,7 +63,7 @@ _OPENCODE_PERMISSION_DEFAULT='{"bash":{"*":"allow","rm -rf*":"deny","rm -fr*":"d
 # would be silently dropped, and it defaults to a shared per-user background
 # service that ignores the caller's env -i environment. Until the V2 port lands
 # (deferred — its own sprint), every OpenCode entry point refuses a V2 binary:
-# invoke_opencode, the lease opencode) arm (scripts/lib/lease.sh), and /setup's
+# invoke_opencode, the lease opencode) arm (scripts/lib/lease.sh), and at-setup's
 # enrollment preflight (roster_enroll_member). The fix is the V1 pin below —
 # never the npm package `opencode2`, a third-party decoy.
 _OPENCODE_V1_PIN='npm i -g opencode-ai@1'
@@ -113,7 +113,7 @@ _opencode_v2_refusal() {
 # builders answer in the same stream shape — the typed `Status:` report
 # (KTD11) is only parseable from the extracted prose.
 _oc_extract_text() {
-  OC_RAW="$1" OC_OUT="$2" python3 -c '
+  OC_RAW="$1" OC_OUT="$2" python3 -c "${_PY_PRELUDE}"'
 import json, os, sys
 raw = open(os.environ["OC_RAW"], "r", errors="replace").read()
 
@@ -223,7 +223,7 @@ invoke_opencode() {
     echo "invoke_opencode: ERROR \`opencode\` (OpenCode CLI) not found on PATH — cannot invoke agent '${AGENT_NAME}'. Fix: install it (curl -fsSL https://opencode.ai/install | bash). No retry (deterministic)." >&2
     # Write the guidance to OUTPUT_FILE too: a caller (e.g. a review fan-out)
     # that only reads the file must not mistake an empty file for "no findings"
-    # (the exact trap CLAUDE.md warns about).
+    # (the exact trap AGENTS.md warns about).
     echo "invoke_opencode: opencode CLI not on PATH — install: curl -fsSL https://opencode.ai/install | bash" > "$OUTPUT_FILE" 2>/dev/null || true
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="binary-missing"
@@ -274,7 +274,7 @@ invoke_opencode() {
   # the READY plumbing probe and lease_dispatch's direct builder command).
   local BASE=(env "OPENCODE_PERMISSION=${OC_PERM}" opencode run --format json -m "$MODEL")
   local CMD=("${BASE[@]}")
-  if [ -n "$AGENT_NAME" ] && { [ -f ".opencode/agents/${AGENT_NAME}.md" ] || { [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/opencode-agents/${AGENT_NAME}.md" ]; }; }; then
+  if [ -n "$AGENT_NAME" ] && { [ -f ".opencode/agents/${AGENT_NAME}.md" ] || { [ -f "${_TRIFORGE_PLUGIN_ROOT}/opencode-agents/${AGENT_NAME}.md" ]; }; }; then
     CMD+=(--agent "$AGENT_NAME")
     MODE="agent"
   elif [ -n "$AGENT_NAME" ]; then
@@ -371,8 +371,8 @@ _list_opencode_agents() {
         [ -f "$f" ] && basename "$f" .md
       done 2>/dev/null
     fi
-    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/opencode-agents" ]; then
-      for f in "${CLAUDE_PLUGIN_ROOT}/opencode-agents"/*.md; do
+    if [ -d "${_TRIFORGE_PLUGIN_ROOT}/opencode-agents" ]; then
+      for f in "${_TRIFORGE_PLUGIN_ROOT}/opencode-agents"/*.md; do
         [ -f "$f" ] && basename "$f" .md
       done 2>/dev/null
     fi

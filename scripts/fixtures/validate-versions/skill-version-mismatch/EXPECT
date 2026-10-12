@@ -1,0 +1,5 @@
+# A double-quoted metadata.version that differs from plugin.json fails, naming both.
+check: skill-versions
+rc: 1
+line: FAIL: skill versions: skills/demo/SKILL.md metadata.version is "1.2.4"; .claude-plugin/plugin.json is "1.2.3"
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

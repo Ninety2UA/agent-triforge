@@ -1,0 +1,3 @@
+check: KTD1
+under-warn: warning
+message: case over the lead's CLI value

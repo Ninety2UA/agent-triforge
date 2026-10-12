@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/common.sh — shared helpers: the host-marker scrub, the fail-closed timeout wrapper, output scrubbing, the KTD-9 failure classifier, and the agy/codex listing + feature-detection helpers
+# scripts/lib/common.sh — shared helpers: the host-marker scrub, the fail-closed timeout wrapper, output scrubbing, the KTD-9 failure classifier, the lead-only guard (_lead_only: worker marker, lease root, lead host), the role-brief helpers (_list_plugin_briefs, _brief_body), and the agy/codex listing + feature-detection helpers
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, after scripts/lib/common.sh. Every function keeps the name and
@@ -46,15 +46,24 @@ _run_with_timeout() {
 # before it lands in a committed ops/ file (KTD-14 / R36). Reads stdin, writes
 # scrubbed stdout. Mirrors the standalone copy in probe-capabilities.sh (that
 # script is not sourced into this shell, so the two intentionally each carry
-# their own copy — keep the patterns in sync when either changes).
+# their own copy — keep the patterns in sync when either changes; SELF-26
+# feeds both the same samples and compares). github_pat_ (a fine-grained
+# GitHub token: 22 + 1 + 59 characters) runs before gh[pousr]_, which would
+# otherwise cut one short when its first part ends in ghp; xai- (an xAI key,
+# about 80 alphanumerics) and AKIA or ASIA + 16 (an AWS access key id,
+# long-term or STS) follow. The minimum lengths leave prose such as xai-org
+# or a bare github_pat_ alone.
 _scrub() {
   sed -E \
     -e 's/sk-[A-Za-z0-9_-]{8,}/[REDACTED-KEY]/g' \
     -e 's/AIza[0-9A-Za-z_-]{10,}/[REDACTED-KEY]/g' \
+    -e 's/github_pat_[A-Za-z0-9_]{22,}/[REDACTED-KEY]/g' \
     -e 's/gh[pousr]_[A-Za-z0-9]{16,}/[REDACTED-KEY]/g' \
     -e 's/xox[baprs]-[A-Za-z0-9-]{10,}/[REDACTED-KEY]/g' \
     -e 's/(Bearer|bearer) +[A-Za-z0-9._-]{12,}/Bearer [REDACTED]/g' \
-    -e 's/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9._-]{20,}/[REDACTED-JWT]/g'
+    -e 's/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9._-]{20,}/[REDACTED-JWT]/g' \
+    -e 's/xai-[A-Za-z0-9]{20,}/[REDACTED-KEY]/g' \
+    -e 's/(AKIA|ASIA)[A-Z0-9]{16}/[REDACTED-KEY]/g'
 }
 
 # _kill_tree <pid> [signal] — best-effort recursive process-tree kill, portable
@@ -73,20 +82,40 @@ _kill_tree() {
   kill -"$SIG" "$ROOT" 2>/dev/null || true
 }
 
-# The six integrated adapter identities. A valid reviewer/builder identity is
-# exactly one of these — canonicalizing against this set (rather than accepting
-# any free-form label) is what closes fabricated reviewer names like
-# "codex-reviewer", which would otherwise pass lease_merge's plain != builder
-# string compare (AE3) while no real review ran.
-_KNOWN_CLIS="claude antigravity codex opencode kimi cursor"
+# The registered adapter identities (_known_clis — scripts/lib/registry.sh,
+# sourced after this file, reads them from the CLI registry on first use and
+# caches them in _KNOWN_CLIS; called here, not in a $(...), so the cache lands in
+# this shell). A valid reviewer/builder identity is exactly one of these —
+# canonicalizing against the registry (rather than accepting any free-form
+# label) is what closes fabricated reviewer names like "codex-reviewer", which
+# would otherwise pass lease_merge's plain != builder string compare (AE3) while
+# no real review ran. An empty list (python3 missing) fails every identity closed.
 _is_known_cli() {
-  case " ${_KNOWN_CLIS} " in *" ${1:-} "*) return 0 ;; *) return 1 ;; esac
+  _known_clis >/dev/null
+  case " ${_KNOWN_CLIS:-} " in *" ${1:-} "*) return 0 ;; *) return 1 ;; esac
 }
+
+# _approver_ok <name> — 0 when <name> can stand behind a review or an approval
+# (U10, KTD2): `user`, the person, or a registered CLI (_is_known_cli). `user`
+# is not a CLI and never joins _KNOWN_CLIS, so no builder, roster role or
+# resolve_role can name it; only lease_pin_reviewer, lease_merge and
+# lease_approve accept it, through this check.
+_approver_ok() {
+  case "${1:-}" in
+    user) return 0 ;;
+  esac
+  _is_known_cli "${1:-}"
+}
+
+# The account's plan does not include the pinned model (Devin Free: "Upgrade
+# to Pro to access this model"): _classify_invoke_failure's plan branch and
+# invoke_devin's own pre-check (devin.sh) read it with grep -iE.
+_PLAN_LIMIT_RE='upgrade to (pro|max|a paid plan)|requires? a (paid|pro) plan|not available on your plan'
 
 # Classify a failed external-CLI invocation (KTD-9). Shared so future per-CLI
 # helpers reuse one taxonomy instead of reinventing bare retry-once. Sets:
 #   INVOKE_FAILURE_CLASS    deterministic | timeout | retryable
-#   _INVOKE_FAILURE_REASON  binary-missing | timeout-tool-missing | auth | quota | ""
+#   _INVOKE_FAILURE_REASON  binary-missing | interrupted | timeout-tool-missing | auth | quota | plan | ""
 # Args: <exit-code> [output-file] — the output file is scanned for
 # auth-shaped patterns when present.
 _classify_invoke_failure() {
@@ -99,6 +128,12 @@ _classify_invoke_failure() {
   elif [ "$RC" -eq 127 ]; then
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="binary-missing"
+  elif [ "$RC" -eq 129 ] || [ "$RC" -eq 130 ] || [ "$RC" -eq 143 ]; then
+    # 128 + HUP, INT, TERM: someone stopped the run, and a retry would start
+    # it again behind their back. Every helper's retry and the lease lane's
+    # requeue key off this class, so none of them restarts an interrupted run.
+    INVOKE_FAILURE_CLASS="deterministic"
+    _INVOKE_FAILURE_REASON="interrupted"
   elif [ "$RC" -eq "$_RC_NO_TIMEOUT_TOOL" ] && ! command -v timeout >/dev/null 2>&1 && ! command -v gtimeout >/dev/null 2>&1; then
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="timeout-tool-missing"
@@ -107,12 +142,163 @@ _classify_invoke_failure() {
     # second timeout window; the fix is a refreshed cycle or purchased usage.
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="quota"
+  elif [ -n "$OUT" ] && [ -f "$OUT" ] && grep -qiE "$_PLAN_LIMIT_RE" "$OUT" 2>/dev/null; then
+    # The plan does not include the pinned model: a retry cannot help.
+    INVOKE_FAILURE_CLASS="deterministic"
+    _INVOKE_FAILURE_REASON="plan"
   elif [ -n "$OUT" ] && [ -f "$OUT" ] && grep -qiE 'not logged in|login required|unauthorized|401|credential|authentication (failed|required|expired)' "$OUT" 2>/dev/null; then
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="auth"
   else
     INVOKE_FAILURE_CLASS="retryable"
   fi
+}
+
+# ---------------------------------------------------------------------------
+# Worker marker (KTD9, R34) — lead-owned helpers refuse inside a worker
+# ---------------------------------------------------------------------------
+#
+# _adapter_env (scripts/lib/lease.sh) puts TRIFORGE_LEASE_WORKER into every
+# lease worker's environment: `builder` for a lease build, `persona` for a
+# persona dispatch (dispatch_persona in persona.sh sets _ADAPTER_WORKER=persona).
+# Any non-empty value counts as the marker. The hook handlers exit at once
+# under it, and every helper that carves, dispatches, collects, merges,
+# promotes or writes the ledger or the roster (lease.sh, roster.sh) starts with
+# _lead_only, which refuses under the marker, when the current directory is
+# inside a lease root, and (R38) when this shell is not the lead's: the lead
+# host check, _lead_host_gate in roster.sh. It lives here, loaded before both.
+# It guards against accidents (a worker that sources this library and runs
+# lease_create in its worktree; a session of the CLI that is not the lead); it
+# is not a security boundary. A worker that unsets the variable and leaves its
+# worktree passes the first two checks, and what it then writes is caught only
+# after the fact, by the integrity check and the snapshot-only merge.
+_RC_LEAD_ONLY=45
+
+# The first line of every lease root's lead/gitconfig: lease.sh's
+# _lead_gitconfig_capture writes it, _is_lease_root recognizes a lease root by
+# it. Keep the bytes.
+_LEAD_GITCONFIG_SIGNATURE='# Triforge trusted git config'
+
+# _PY_PRELUDE — python: the first lines of every inline program (python3 -c,
+# python3 -). Under -c and -, sys.path[0] is the working directory, so a module
+# not loaded at startup (json, re, tomllib, subprocess, …) is imported from
+# there first: from a builder's worktree, an exec persona's snapshot, the user
+# project. These lines drop every relative entry and the working directory
+# from sys.path using only os and sys, both loaded at startup, before anything
+# else is imported (Phase 6, S1). -P and PYTHONSAFEPATH need 3.11, and macOS
+# /usr/bin/python3 is 3.9; -I would drop the user site, where tomli lives.
+# A program that splices _READ_REGULAR_PY first has it already. The hooks that
+# run without this library carry the same lines (SS_PY_PRELUDE in
+# session-start.sh, _INSTR_READ_PY in instructions.sh, pre-compact.sh's
+# reader); SELF-27 scans every program for them and compares the copies.
+_PY_PRELUDE='
+import os, sys
+try:
+    _tf_here = os.path.realpath(os.getcwd())
+except OSError:
+    _tf_here = None
+sys.path[:] = [_p for _p in sys.path if os.path.isabs(_p) and os.path.realpath(_p) != _tf_here]
+del _tf_here
+'
+
+# _READ_REGULAR_PY — python: the prelude, then read_regular(path[, text]), the
+# bytes (or, with text, the str open(path, "r") reads) of a regular file.
+# Opened O_NONBLOCK, so a FIFO a worker planted at ops/roster.toml or
+# ops/leases.toml fails at once instead of blocking the reader before its type
+# is known; anything but a regular file raises OSError. Every python reader of
+# the roster and the ledger in roster.sh, lease.sh, lease-wait.sh and
+# coordinate.sh reads through it (Phase 3 round 5, G3); the hooks, which may
+# run without this library, carry the same lines.
+_READ_REGULAR_PY="${_PY_PRELUDE}"'
+def read_regular(p, text=False):
+    import os, stat
+    fd = os.open(p, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+    with os.fdopen(fd, "r" if text else "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise OSError("not a regular file: " + p)
+        return f.read()
+'
+
+# _lead_only <helper> [--any-host] — 0 in a lead context; otherwise one stderr
+# line naming the reason and rc _RC_LEAD_ONLY. In order: the worker marker, the
+# lease root, then the lead host check (_lead_host_gate, roster.sh): this shell
+# runs under [lead].cli, or a person runs it from a terminal, or the SELF
+# harness names the lead. --any-host skips only that last check: the lead
+# switch (roster_write_lead) runs from either lead CLI, and the approval
+# helper (lease_approve) records where it ran (_lead_origin); each runs its
+# own origin check instead (_lead_origin_match, roster.sh: no stated origin
+# and ambiguous host markers refused), and both write the ledger through
+# _ledger_write, the ledger writer's own --any-host form. The marker
+# and the lease root come first, so neither host markers nor the SELF seam
+# (TRIFORGE_TEST_BUILDER + TRIFORGE_TEST_LEAD) ever let a worker through.
+_lead_only() {
+  local ROOT
+  if [ -n "${TRIFORGE_LEASE_WORKER:-}" ]; then
+    echo "${1}: REFUSED — a lead-only helper, called from a lease worker (TRIFORGE_LEASE_WORKER=${TRIFORGE_LEASE_WORKER}); a worker reports back in its final report and the lead runs the lease and roster helpers (KTD9, rc ${_RC_LEAD_ONLY})" >&2
+    return "$_RC_LEAD_ONLY"
+  fi
+  if ROOT=$(_lease_root_above); then
+    echo "${1}: REFUSED — a lead-only helper, called from inside the lease root ${ROOT} (a lease worktree); run it from the lead's checkout (KTD9, rc ${_RC_LEAD_ONLY})" >&2
+    return "$_RC_LEAD_ONLY"
+  fi
+  if [ "${2:-}" = --any-host ]; then
+    return 0
+  fi
+  _lead_host_gate "$1"
+}
+
+# _is_lease_root <dir> — 0 when <dir>/lead/gitconfig's first line starts with
+# _LEAD_GITCONFIG_SIGNATURE: the signature test behind _lease_root_above and
+# lease.sh's _lease_root_valid. The pattern is quoted, so it matches literally
+# under bash and zsh (where an unquoted # is a glob operator).
+_is_lease_root() {
+  local H=""
+  if [ -f "${1}/lead/gitconfig" ]; then
+    IFS= read -r H 2>/dev/null < "${1}/lead/gitconfig" || true
+  fi
+  case "$H" in "${_LEAD_GITCONFIG_SIGNATURE}"*) return 0 ;; esac
+  return 1
+}
+
+# _lease_root_above — print the lease root the current directory is inside,
+# rc 1 when it is in none: the nearest ancestor (physical path) that is one
+# (_is_lease_root). Found by that file, not by the root's path, so it holds
+# whatever TMPDIR or TRIFORGE_LEASE_ROOT say now; and without git, which from
+# a lease worktree answers for the worktree, not the lead.
+_lease_root_above() {
+  local D
+  D=$(pwd -P 2>/dev/null) || return 1
+  while :; do
+    if _is_lease_root "$D"; then
+      printf '%s\n' "${D:-/}"
+      return 0
+    fi
+    if [ -z "$D" ] || [ "$D" = "/" ]; then
+      return 1
+    fi
+    D=${D%/*}
+  done
+}
+
+# _list_plugin_briefs <dir> — the role briefs in the plugin's <dir>
+# (grok-agents, devin-agents): each *.md basename without .md, README
+# excluded, sorted and unique; nothing when the directory is missing.
+_list_plugin_briefs() {
+  {
+    if [ -d "${_TRIFORGE_PLUGIN_ROOT}/${1}" ]; then
+      for f in "${_TRIFORGE_PLUGIN_ROOT}/${1}"/*.md; do
+        [ -f "$f" ] || continue
+        case "$(basename "$f" .md)" in README) continue ;; esac
+        basename "$f" .md
+      done 2>/dev/null
+    fi
+  } | sort -u
+}
+
+# _brief_body <file> — a role brief without its frontmatter: every line after
+# the second `---` line.
+_brief_body() {
+  awk '/^---[[:space:]]*$/{skip++; next} skip>=2{print}' "$1"
 }
 
 # Raw `agy agents` listing (native agents come from installed agy plugins
@@ -133,8 +319,8 @@ _agy_agents_listing() {
 # header is dropped).
 _list_antigravity_agents() {
   {
-    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents" ]; then
-      for f in "${CLAUDE_PLUGIN_ROOT}/antigravity-agents/agents"/*.md; do
+    if [ -d "${_TRIFORGE_PLUGIN_ROOT}/antigravity-agents/agents" ]; then
+      for f in "${_TRIFORGE_PLUGIN_ROOT}/antigravity-agents/agents"/*.md; do
         [ -f "$f" ] && basename "$f" .md
       done 2>/dev/null
     fi
@@ -190,7 +376,7 @@ _codex_feature_row_present() {
 _extract_codex_agent_config() {
   local AGENT_TOML=$1
   local AGENT_NAME=$2
-  AGENT_TOML="$AGENT_TOML" AGENT_NAME="$AGENT_NAME" python3 -c "
+  AGENT_TOML="$AGENT_TOML" AGENT_NAME="$AGENT_NAME" python3 -c "${_PY_PRELUDE}
 import sys, os, json, base64
 try:
     import tomllib
@@ -226,7 +412,7 @@ _list_codex_agents() {
   local AGENT_TOML=$1
   [ -z "$AGENT_TOML" ] && return
   [ -f "$AGENT_TOML" ] || return
-  AGENT_TOML="$AGENT_TOML" python3 -c "
+  AGENT_TOML="$AGENT_TOML" python3 -c "${_PY_PRELUDE}
 import sys, os
 try:
     import tomllib

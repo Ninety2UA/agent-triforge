@@ -25,10 +25,11 @@ versions produced this change.
 
 ## Verification
 
-- [ ] `claude plugin validate --strict .` passes (warnings are errors)
-- [ ] `bash scripts/validate-skills.sh` exits 0
-- [ ] `bash scripts/validate-versions.sh` exits 0 — ladder hash: `<paste the hash it prints>`
-- [ ] `bash -n scripts/*.sh hooks/handlers/*.sh` exits 0
+- [ ] `claude plugin validate --strict .claude-plugin/plugin.json` and `claude plugin validate --strict .claude-plugin/marketplace.json` pass (warnings are errors)
+- [ ] `bash scripts/validate-skills.sh` exits 0 (warnings are errors; `--warn` is the relaxed run), and its `--self-test` reports every fixture OK
+- [ ] `bash scripts/validate-versions.sh` exits 0 — summary line: `<paste it: ladder: one definition (scripts/lib/registry.sh)>` — and its `--self-test` reports every case OK
+- [ ] `bash scripts/probe-capabilities.sh --self-only` exits 0 (the SELF gate)
+- [ ] `/bin/bash -n` passes on `scripts/*.sh`, `scripts/lib/*.sh` and `hooks/handlers/*.sh`
 - [ ] Probe record regenerated and cited: `ops/research/<YYYY-MM>-probe-record.md` — rows: <!-- e.g. AGY-05, CDX-03 -->
 - [ ] Version bump PRs only: README "Recent changes" has the `### <date> — v<version>: <title>` entry — it becomes the GitHub release when this merges (`.github/workflows/release.yml`; preview with `bash scripts/release-notes.sh --body`)
 
@@ -36,13 +37,13 @@ versions produced this change.
 
 <!-- The protected-path lists live in scripts/lib/registry.sh. In every project:
 ops/roster.toml (incl. [promotion]); each CLI's config and permission tree (.claude/,
-.codex/, .agents/, .antigravity/, .gemini/, .opencode/, .kimi-code/, .cursor/, plus
-opencode.json, opencode.jsonc, .cursorrules and .gitmodules at the root); and every AGENTS.md,
+.codex/, .agents/, .antigravity/, .gemini/, .opencode/, .kimi-code/, .cursor/, .devin/, .pi/,
+.grok/, plus opencode.json, opencode.jsonc, .cursorrules and .gitmodules at the root); and every AGENTS.md,
 AGENTS.override.md, CLAUDE.md, CLAUDE.local.md and .mcp.json at any depth. In this
 repo (the Triforge checkout) also the framework's control plane: the enforcement,
-probe and release scripts, hooks/, skills/, commands/, the shipped agent configs,
+probe and release scripts, hooks/, skills/, commands/ (ships empty), the shipped agent configs,
 .claude-plugin/, settings.json, templates/, personas/, .github/ and every
-.gitattributes (full list in the "Protected paths" bullet of .claude/CLAUDE.md).
+.gitattributes (full list in the "Protected paths" bullet of AGENTS.md, "Do not touch").
 The lease_promote scan is case-folded, sees both sides of a rename, and fails
 closed (rc 42). -->
 
@@ -60,10 +61,10 @@ closed (rc 42). -->
   READY
   ```
 
-- [ ] Roster default: `[members.<cli>]` shape documented in `templates/ops/roster.toml`; `CLI_DEFAULT_MODEL` (both copies) and `roster_member_default` carry the pin
+- [ ] Roster default: `[members.<cli>]` shape documented in `templates/ops/roster.toml`; the CLI's registry entry (`model` in `scripts/lib/registry.sh`) carries the pin — `validate-versions.sh` check 3 keeps `DEFAULTS`, the template and the lane defaults in line with it
 - [ ] Env allowlist entry: `_adapter_env` case arm in `scripts/invoke-external.sh` hands the adapter only its own provider key (KTD-14)
 - [ ] Probe rows added to `scripts/probe-capabilities.sh` and present in the regenerated record: <!-- IDs -->
-- [ ] Compatibility table and provider data-egress list updated in `.claude/CLAUDE.md` and `README.md`
+- [ ] Compatibility table and provider data-egress list updated in `README.md` (and the moved notes in `docs/agent-triforge.md`); `AGENTS.md` still within budget (`validate-versions.sh` check 6)
 
 ## Unapplied review findings
 

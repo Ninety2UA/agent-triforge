@@ -1,0 +1,6 @@
+# An unquoted metadata.version with a trailing " # comment" parses as the
+# version alone (YAML drops the comment), so it matches plugin.json and passes.
+check: skill-versions
+rc: 0
+line: ok:   skill versions: all 1 skills/*/SKILL.md carry metadata.version 1.2.3 (= .claude-plugin/plugin.json)
+line: validate-versions: PASS (--only skill-versions)

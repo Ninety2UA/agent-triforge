@@ -1,0 +1,14 @@
+# The clean root every negative fixture differs from by one defect: each check
+# it runs prints its ok line, so a planted defect is what fails the others.
+# README.md carries "50+ file changes" below its "## Recent changes" ledger,
+# which the halt check skips.
+check: lockstep,skill-versions,ladder,sweep,inventory,halt
+rc: 0
+line: ok:   version lockstep: 1.2.3 (.claude-plugin/plugin.json, .claude-plugin/marketplace.json, antigravity-agents/plugin.json, README What's new)
+line: ok:   release notes: README Recent changes carries the v1.2.3 entry (GitHub release body source)
+line: ok:   skill versions: all 1 skills/*/SKILL.md carry metadata.version 1.2.3 (= .claude-plugin/plugin.json)
+line: ok:   ladder: one definition (scripts/lib/registry.sh:2 TRIFORGE_MODEL_LADDER)
+line: ok:   stale-pin sweep: no stale pins outside the excluded paths
+line: ok:   rule inventory: docs/rule-inventory.md — 2 rows in 1 table(s), matching the declared Totals for each of 1 sources; every row has a destination, no TBD cell, every cited destination path exists (2 distinct)
+line: ok:   halt threshold: 2 statement(s) of more than 50 changed files and none that halts at 50 itself (50+, 50 or more, at least 50, >= 50) in skills/, AGENTS.md, README.md, docs/index.html, docs/agent-triforge.md
+line: validate-versions: PASS (--only lockstep,skill-versions,ladder,sweep,inventory,halt)

@@ -1,0 +1,3 @@
+check: C15
+under-warn: warning
+message: max 8000
