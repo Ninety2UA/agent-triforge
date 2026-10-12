@@ -172,6 +172,27 @@
   three generators, J2's tokall.sh the token comparison, srun.sh one SELF row on a
   throwaway copy of a tree. A change to md_scan should reach UNSAFE 0 there before review.
 
+- Worker discoveries (end-of-program review, fix round 5, 2026-10-12), UNVERIFIED, recorded by the lead from the workers' reports:
+
+      fix worker R5-A: if MdLexer handed the defined reference labels to text_words, two of
+      the inline side's accepted misses (a full or shortcut reference whose label is never
+      defined) would go away. The old emphasis rule and the image and inline-tag holds cost
+      about 3% misses on dense ordinary prose (**`make`** before an import, then a later code
+      span). extract.py cannot see an apostrophe that ends _INSTR_PY's single-quoted string
+      early; only bash -n does.
+      fix worker R5-B: AGENTS.md, AGENTS.override.md, config.toml and template reads
+      (level_file, reach, merge_plan, reader_config) still read whole files; their lengths feed
+      the budget arithmetic, so capping them needs fstat sizes. Visibility still offers "add
+      the line" for a file past a reading bound, which the import then refuses (as it already
+      did for a file ending in an open fence).
+      fix worker R5-C: _ss_bounded in the hook still leaves its watchdog sleep running (up to
+      10 s, stdio /dev/null) after a command that answers in time; the SIGKILL trap used in
+      _instr_watchdog would fix it. The hook's WARNING says "it needs python3" for any rc 69,
+      which now also covers "no timeout binary and no private temp dir" (the library's own
+      message names the cause, but the hook discards its stderr). SELF-12 failed twice in
+      full gates under heavy load (three gates in parallel) with different mismatches, and
+      passed every quiet run.
+
 ## Interface proposals
 <!-- No active proposals -->
 

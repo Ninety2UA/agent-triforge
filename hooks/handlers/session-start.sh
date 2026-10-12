@@ -256,20 +256,19 @@ if [ -z "$TIMEOUT_BIN" ]; then
 fi
 
 # _ss_bounded <seconds> <dir> <command…> — the command's stdout, the command
-# given up on after <seconds>: under the timeout binary when there is one, and
-# on a host without one (stock macOS) under a watchdog — the command runs in
-# the background, a second background subshell kills it when the time is up,
-# and the watchdog is killed as soon as the command returns. The answer
-# travels through a file in <dir>, a private temp dir the caller made
-# (_ss_private_tmp: never one other users can rename entries in, B5, G2) and
-# this removes; the watchdog's stdio is /dev/null, so nothing a killed command
-# leaves running holds the caller's command substitution open; each `wait`
-# swallows bash's "Terminated" or "Killed" line. Giving up is a SIGTERM, then
-# a SIGKILL 2 s later if the command is still running (`-k 2s`, or the
-# watchdog's second kill), so the call returns within <seconds> + 2 s even
-# when the command ignores SIGTERM. timeout sends its SIGKILL to its whole
-# process group, itself included; the braces around it swallow the "Killed"
-# line bash prints for that.
+# given up on after <seconds>: under the timeout binary when there is one,
+# else (stock macOS) under a watchdog — the command runs in the background, a
+# second background subshell kills it when the time is up, and that subshell
+# is killed as soon as the command returns. The answer travels through a file
+# in <dir>, a private temp dir the caller made (_ss_private_tmp: never one
+# other users can rename entries in, B5, G2) and this removes; the watchdog's
+# stdio is /dev/null, so nothing a killed command leaves running holds the
+# caller's command substitution open; each `wait` swallows bash's
+# "Terminated" or "Killed" line. Giving up is a SIGTERM, then a SIGKILL 2 s
+# later (`-k 2s`, or the watchdog's second kill): back within <seconds> + 2 s
+# even when the command ignores SIGTERM. timeout's SIGKILL goes to its whole
+# process group, itself included; the braces swallow bash's "Killed" line for
+# it. _instr_watchdog in scripts/lib/instructions.sh does this for the library.
 _ss_bounded() {
   local SECS="$1" OUT_DIR="$2" OUT CMD_PID DOG_PID
   shift 2
@@ -629,24 +628,18 @@ if command -v claude >/dev/null 2>&1; then
 fi
 
 # The instruction files: one read-only pass of instruction_files_detect over
-# the start directory, every directory above it up to / and the user tier, a
-# tab-separated line each (kind, where, state, path, the import line that
-# would load this project's AGENTS.md from that file). The user-tier
-# ~/.claude/CLAUDE.md is a "user" line, compared by identity, never "above".
-# One import of the project's AGENTS.md anywhere in the chain (the user-tier
-# file included: Claude Code always loads it) loads it, so it silences the
-# own and above lines; a 3.x copy without the import is named whatever else
-# imports it, since its Triforge text is stale. Only CLAUDE.md and
-# .claude/CLAUDE.md are fingerprinted (the 3.x template was never a
-# CLAUDE.local.md). A file that is not a readable regular file (a FIFO, a
-# dangling link) is "unreadable" and named in no line. The pass reads each
-# CLAUDE.md-family file whole, up to Claude Code's 4 MiB cutoff, so it gets
-# the 10 s the version check gets, then SIGKILL 2 s later (_INSTR_SECS, which
-# _instr_py in that library honors with the timeout binary or a watchdog): a
-# project's files take milliseconds, and the slowest 4 MiB file the linear
-# reader can be handed under 4 s, so only a stalled pass or a far slower
-# host reaches it. A library that cannot load or run (no python3), or a pass
-# given up on, costs these lines and gets one WARNING instead.
+# the start directory, each directory above it and the user tier, a line each
+# (kind, where, state, path, the import line that would load this project's
+# AGENTS.md; ~/.claude/CLAUDE.md is "user", by identity, never "above"). One
+# import of the project's AGENTS.md in the chain (the user tier too: Claude
+# Code always loads it) silences the own and above lines; a 3.x copy without
+# it is named anyway, its Triforge text stale. Only CLAUDE.md and .claude/
+# CLAUDE.md are fingerprinted (no 3.x template was a CLAUDE.local.md); an
+# unreadable file (a FIFO, a dangling link) is named in no line. The pass
+# gets 10 s, then SIGKILL 2 s later (_INSTR_SECS): a project's files take
+# milliseconds, the slowest file the reader parses (none over Claude Code's
+# 4 MiB cutoff) under 4 s. A library that can't load or run (no python3), or
+# a pass given up on (its partial rows dropped), gets one WARNING instead.
 SS_CHAIN_IMPORTS=""
 SS_OWN_NOTICES=""
 SS_ABOVE_NOTICES=""
@@ -669,6 +662,7 @@ else
   SS_FOUND_RC=69
 fi
 if [ "$SS_FOUND_RC" -ne 0 ]; then
+  SS_FOUND=""
   INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}$(_ss_prose "WARNING: the instruction-file check did not finish (instruction_files_detect in ${SS_INSTR_LIB}, rc ${SS_FOUND_RC}; it needs python3 and stops after 10 s), so the CLAUDE.md and 3.x template notices may be missing this session.")"
 fi
 while IFS=$'\t' read -r SS_KIND SS_WHERE SS_STATE SS_FILE SS_IMPORT; do

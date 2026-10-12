@@ -1132,7 +1132,27 @@ fi
 #          call runs the real one), session start returns rc 0 in under
 #          25 s with the WARNING that the check did not finish and its rc,
 #          the stub gone, no line starting with `{`. Under the harness
-#          timeout (30 s, -k 5), so an unbounded pass fails there
+#          timeout (30 s, -k 5), so an unbounded pass fails there. Round 5:
+#          the stub prints one project no-import row before it stalls, and
+#          a pass given up on drops its rows: the WARNING, no own-file notice
+#   detectfork (round 5) the same pass with no timeout binary on PATH (the
+#          library's watchdog; /usr/bin and /bin hold none on macOS) and a
+#          python3 launcher that forks: it prints that row, starts a child
+#          that ignores SIGTERM and holds stdout for 60 s, and ignores
+#          SIGTERM itself. Session start is back in under 25 s (rc 0, the
+#          WARNING, no own-file notice), the launcher gone, its child still
+#          running then under the watchdog (killed here)
+#   detectwatch (round 5) the library on its own under bash and zsh, set -u,
+#          a python3 stub and a logging sleep first on PATH. The watchdog
+#          (PATH = the stubs and dirname only: no timeout binary) leaves no
+#          sleep of its own running after a pass that answers in 0.5 s
+#          under _INSTR_SECS=30. With no _INSTR_SECS (_INSTR_READ_SECS, which
+#          ships as 30, set to 1 here) detect, visibility and a writer's plan
+#          give up on a python3 that never answers: one "gave up after 1 s"
+#          line and its rc (124, 137 or 143), under the timeout binary and
+#          the watchdog. A writer with --yes is never bounded: with
+#          _INSTR_SECS=1 and a python3 2 s slow it still writes, rc 0, no
+#          temp file left
 _S8="${WORK}/self08"
 mkdir -p "$_S8/proj" "$_S8/bin" "$_S8/home"
 cat > "$_S8/bin/agy" <<'EOF'
@@ -1522,36 +1542,163 @@ case "$_S8_FAIL" in
     ;;
 esac
 # detectbound (round 4, J): the whole hook in its own project, a python3 stub
-# first on PATH that writes its pid and sleeps 60 s for the detect pass
+# first on PATH that prints one project no-import row (round 5), writes its
+# pid and sleeps 60 s for the detect pass
 _S8_PY=$(command -v python3 || true)
 mkdir -p "$_S8/pystub" "$_S8/proj-detect"
 ( cd "$_S8/proj-detect" && git init -q 2>/dev/null ) || true
 printf '# own\n' > "$_S8/proj-detect/CLAUDE.md"
-printf '#!/bin/sh\n# probe stub (SELF-08 detectbound): a python3 that never answers the instruction-file pass; the real one for every other call\nif [ "${3:-}" = detect ] && [ "${4:-}" = instruction_files_detect ]; then echo $$ > "$S8_DPID"; exec sleep 60; fi\nexec %s "$@"\n' "$_S8_PY" > "$_S8/pystub/python3"
+{ cat <<'EOF'
+#!/bin/sh
+# probe stub (SELF-08 detectbound): for the instruction-file pass, one project no-import row, then a python3 that never answers; the real one for every other call
+if [ "${3:-}" = detect ] && [ "${4:-}" = instruction_files_detect ]; then
+  printf 'CLAUDE.md\tproject\tno-import,user-owned\t%s/CLAUDE.md\t@AGENTS.md\n' "$PWD"
+  echo $$ > "$S8_DPID"
+  exec sleep 60
+fi
+EOF
+  printf 'exec %s "$@"\n' "$_S8_PY"; } > "$_S8/pystub/python3"
 chmod +x "$_S8/pystub/python3"
 _S8_T0=$(date +%s)
 _O=$( cd "$_S8/proj-detect" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/pystub:$_S8/bin:$PATH" S8_DPID="$_S8/pystub/pid" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 30} bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ) || _S8_FAIL="$_S8_FAIL detectbound-rc-nonzero"
 _S8_DET=$(( $(date +%s) - _S8_T0 ))
 _s8_sane detectbound "$_O"
 [ "$_S8_DET" -lt 25 ] || _S8_FAIL="$_S8_FAIL detectbound-slow(${_S8_DET}s)"
-_s8_has '^WARNING: the instruction-file check did not finish (instruction_files_detect in .*/scripts/lib/instructions\.sh, rc [0-9][0-9]*; it needs python3 and stops after 10 s), so the CLAUDE\.md and 3\.x template notices may be missing this session\.$' || _S8_FAIL="$_S8_FAIL detectbound-no-warning"
-_S8_DPID=$(cat "$_S8/pystub/pid" 2>/dev/null || true)
-_s8_n=0
-while [ -n "$_S8_DPID" ] && kill -0 "$_S8_DPID" 2>/dev/null && [ "$_s8_n" -lt 10 ]; do sleep 0.1; _s8_n=$((_s8_n + 1)); done
-if [ -z "$_S8_DPID" ]; then
-  _S8_FAIL="$_S8_FAIL detectbound-stub-never-ran"
-elif kill -0 "$_S8_DPID" 2>/dev/null; then
-  _S8_FAIL="$_S8_FAIL detectbound-stub-left-running"
-  kill -9 "$_S8_DPID" 2>/dev/null || true
+_S8_WARN_RE='^WARNING: the instruction-file check did not finish (instruction_files_detect in .*/scripts/lib/instructions\.sh, rc [0-9][0-9]*; it needs python3 and stops after 10 s), so the CLAUDE\.md and 3\.x template notices may be missing this session\.$'
+_s8_has "$_S8_WARN_RE" || _S8_FAIL="$_S8_FAIL detectbound-no-warning"
+_s8_has 'does not import AGENTS\.md' && _S8_FAIL="$_S8_FAIL detectbound-partial-row-used"
+_s8_gone() { # _s8_gone <label> <pid file> — the pid in it has exited within a second (else killed and recorded)
+  local S N=0
+  S=$(cat "$2" 2>/dev/null || true)
+  while [ -n "$S" ] && kill -0 "$S" 2>/dev/null && [ "$N" -lt 10 ]; do sleep 0.1; N=$((N + 1)); done
+  if [ -z "$S" ]; then
+    _S8_FAIL="$_S8_FAIL $1-stub-never-ran"
+  elif kill -0 "$S" 2>/dev/null; then
+    _S8_FAIL="$_S8_FAIL $1-stub-left-running"
+    kill -9 "$S" 2>/dev/null || true
+  fi
+}
+_s8_gone detectbound "$_S8/pystub/pid"
+# detectfork (round 5): the whole hook with no timeout binary on PATH, so the
+# library's watchdog bounds the pass, and a python3 launcher that forks a
+# child holding stdout. Without one in /usr/bin or /bin the child outlives the
+# hook (the call must not wait for it), and is killed here
+_S8_FWD=$(PATH=/usr/bin:/bin; command -v timeout || command -v gtimeout || true)
+mkdir -p "$_S8/pyfork"
+{ cat <<'EOF'
+#!/bin/sh
+# probe stub (SELF-08 detectfork): a python3 launcher that forks. For the instruction-file pass: one project no-import row, a child that ignores SIGTERM and holds stdout for 60 s (its pid in $S8_FPID.child), and the launcher ignores SIGTERM too (its pid in $S8_FPID); the real python3 for every other call
+if [ "${3:-}" = detect ] && [ "${4:-}" = instruction_files_detect ]; then
+  printf 'CLAUDE.md\tproject\tno-import,user-owned\t%s/CLAUDE.md\t@AGENTS.md\n' "$PWD"
+  /bin/sh -c 'echo $$ > "$S8_FPID.child"; trap "" TERM; exec /bin/sleep 60' &
+  echo $$ > "$S8_FPID"
+  trap '' TERM
+  N=0
+  while [ "$N" -lt 150 ]; do /bin/sleep 0.2; N=$((N + 1)); done
+  exit 0
 fi
-unset _s8_n
+EOF
+  printf 'exec %s "$@"\n' "$_S8_PY"; } > "$_S8/pyfork/python3"
+chmod +x "$_S8/pyfork/python3"
+_S8_T0=$(date +%s)
+_O=$( cd "$_S8/proj-detect" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/pyfork:$_S8/bin:/usr/bin:/bin" S8_FPID="$_S8/pyfork/pid" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 30} bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ) || _S8_FAIL="$_S8_FAIL detectfork-rc-nonzero"
+_S8_FORK=$(( $(date +%s) - _S8_T0 ))
+_s8_sane detectfork "$_O"
+[ "$_S8_FORK" -lt 25 ] || _S8_FAIL="$_S8_FAIL detectfork-slow(${_S8_FORK}s)"
+_s8_has "$_S8_WARN_RE" || _S8_FAIL="$_S8_FAIL detectfork-no-warning"
+_s8_has 'does not import AGENTS\.md' && _S8_FAIL="$_S8_FAIL detectfork-partial-row-used"
+_s8_gone detectfork "$_S8/pyfork/pid"
+_S8_FCHILD=$(cat "$_S8/pyfork/pid.child" 2>/dev/null || true)
+if [ -z "$_S8_FCHILD" ]; then
+  _S8_FAIL="$_S8_FAIL detectfork-child-never-ran"
+elif kill -0 "$_S8_FCHILD" 2>/dev/null; then
+  kill -9 "$_S8_FCHILD" 2>/dev/null || true
+elif [ -z "$_S8_FWD" ]; then
+  _S8_FAIL="$_S8_FAIL detectfork-child-gone-before-the-hook-returned"
+fi
+if [ -n "$_S8_FWD" ]; then _S8_FWD="under ${_S8_FWD}, which /usr/bin or /bin holds"; else _S8_FWD="under the watchdog"; fi
+# detectwatch (round 5): the library on its own, sourced in bash and zsh under
+# set -u in a project of its own; $_S8/watch/wd holds the python3 stub, a
+# sleep that logs its pid and dirname, and nothing else (no timeout binary)
+mkdir -p "$_S8/watch/wd" "$_S8/proj-watch" "$_S8/home/.codex"
+( cd "$_S8/proj-watch" && git init -q 2>/dev/null ) || true
+printf '# own\n' > "$_S8/proj-watch/CLAUDE.md"
+{ cat <<'EOF'
+#!/bin/sh
+# probe stub (SELF-08 detectwatch): S8_PYMODE=hang never answers; half answers through the real python3 after 0.5 s, slow after 2 s; the real python3 otherwise
+case "${S8_PYMODE:-}" in
+  hang) exec /bin/sleep 60 ;;
+  half) /bin/sleep 0.5 ;;
+  slow) /bin/sleep 2 ;;
+esac
+EOF
+  printf 'exec %s "$@"\n' "$_S8_PY"; } > "$_S8/watch/wd/python3"
+printf '#!/bin/sh\n# probe stub (SELF-08 detectwatch): a sleep that logs its pid to $S8_SLOG\necho $$ >> "$S8_SLOG"\nexec /bin/sleep "$@"\n' > "$_S8/watch/wd/sleep"
+chmod +x "$_S8/watch/wd/python3" "$_S8/watch/wd/sleep"
+ln -s "$(command -v dirname)" "$_S8/watch/wd/dirname" 2>/dev/null || true
+_s8_lib() { # _s8_lib <bash|zsh> <PATH> <script> [NAME=value...] — the library alone, sourced under set -u in $_S8/proj-watch with the throwaway HOME, the script, then "rc=<n>"; stdout + stderr, under the harness timeout (20 s)
+  local SH=$1 PP=$2 SC='set -u; source "$0/scripts/lib/instructions.sh" >/dev/null 2>&1; R=0; '"$3"' || R=$?; echo "rc=$R"'
+  shift 3
+  if [ "$SH" = zsh ]; then
+    ( cd "$_S8/proj-watch" && env HOME="$_S8/home" CODEX_HOME="$_S8/home/.codex" PATH="$PP" "$@" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/zsh -fc "$SC" "$REPO_ROOT" 2>&1 )
+  else
+    ( cd "$_S8/proj-watch" && env HOME="$_S8/home" CODEX_HOME="$_S8/home/.codex" PATH="$PP" "$@" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/bash -c "$SC" "$REPO_ROOT" 2>&1 )
+  fi
+}
+_S8_WSH="bash"
+if [ -x /bin/zsh ]; then _S8_WSH="bash zsh"; fi
+_s8_cases="watchdog"
+_S8_WMODES="the watchdog (timeout binary SKIPPED: none on PATH)"
+if [ -n "$TIMEOUT_BIN" ]; then
+  _s8_cases="timeout watchdog"
+  _S8_WMODES="$(basename "$TIMEOUT_BIN") and the watchdog"
+fi
+_s8_t=$(printf '\t')
+_S8_WROW="^CLAUDE\.md${_s8_t}project${_s8_t}no-import,user-owned${_s8_t}[^${_s8_t}]*/proj-watch/CLAUDE\.md${_s8_t}@AGENTS\.md\$"
+for _s8_sh in $_S8_WSH; do
+  # a pass that answers: the watchdog's own sleep is gone once the call returns
+  : > "$_S8/watch/sleeps-$_s8_sh"
+  _O=$(_s8_lib "$_s8_sh" "$_S8/watch/wd" '_INSTR_SECS=30 instruction_files_detect' S8_PYMODE=half S8_SLOG="$_S8/watch/sleeps-$_s8_sh")
+  printf '%s\n' "$_O" | grep -q "$_S8_WROW" || _S8_FAIL="$_S8_FAIL detectwatch-${_s8_sh}-no-row($(printf '%s' "$_O" | tr '\n' ' ' | cut -c1-80))"
+  _s8_has '^rc=0$' || _S8_FAIL="$_S8_FAIL detectwatch-${_s8_sh}-rc($(printf '%s' "$_O" | tail -1))"
+  [ -s "$_S8/watch/sleeps-$_s8_sh" ] || _S8_FAIL="$_S8_FAIL detectwatch-${_s8_sh}-no-watchdog-sleep"
+  sleep 0.3
+  for _s8_p in $(cat "$_S8/watch/sleeps-$_s8_sh" 2>/dev/null); do
+    if kill -0 "$_s8_p" 2>/dev/null; then
+      _S8_FAIL="$_S8_FAIL detectwatch-${_s8_sh}-sleep-left-running"
+      kill -9 "$_s8_p" 2>/dev/null || true
+    fi
+  done
+  # the default bound: a python3 that never answers, given up on with one line
+  for _s8_c in $_s8_cases; do
+    _s8_pp="$_S8/watch/wd"
+    if [ "$_s8_c" = timeout ]; then _s8_pp="$_S8/watch/wd:$PATH"; fi
+    for _s8_call in "instruction_files_detect" "instruction_pointer_visibility claude" "instruction_merge_pointer"; do
+      _s8_fn=${_s8_call%% *}
+      _S8_T0=$(date +%s)
+      _O=$(_s8_lib "$_s8_sh" "$_s8_pp" "_INSTR_READ_SECS=1; $_s8_call" S8_PYMODE=hang S8_SLOG="$_S8/watch/sleeps-hang")
+      _S8_T=$(( $(date +%s) - _S8_T0 ))
+      _s8_l="detectwatch-${_s8_sh}-${_s8_c}-${_s8_fn}"
+      printf '%s\n' "$_O" | grep -Eq "^${_s8_fn}: gave up after 1 s \(rc (124|137|143)\): an ordinary project's instruction files are read in well under a second, .*nothing was written\$" || _S8_FAIL="$_S8_FAIL ${_s8_l}-no-gave-up-line($(printf '%s' "$_O" | tr '\n' ' ' | cut -c1-80))"
+      [ "$(printf '%s\n' "$_O" | grep -c . || true)" -eq 2 ] && printf '%s\n' "$_O" | tail -1 | grep -Eq '^rc=(124|137|143)$' || _S8_FAIL="$_S8_FAIL ${_s8_l}-output($(printf '%s' "$_O" | tail -1))"
+      [ "$_S8_T" -lt 6 ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-slow(${_S8_T}s)"
+    done
+  done
+done
+unset _s8_sh _s8_p _s8_c _s8_cases _s8_pp _s8_call _s8_fn _s8_l _s8_t
+_O=$(_s8_lib bash "$_S8/watch/wd" 'echo "default=$_INSTR_READ_SECS"' S8_SLOG="$_S8/watch/sleeps-hang")
+_s8_has '^default=30$' || _S8_FAIL="$_S8_FAIL detectwatch-default-not-30($(printf '%s' "$_O" | head -1))"
+# a writer with --yes is never bounded, _INSTR_SECS or not: it writes, and no temp file is left
+_O=$(_s8_lib bash "$_S8/watch/wd" '_INSTR_SECS=1 instruction_merge_pointer --yes' S8_PYMODE=slow S8_SLOG="$_S8/watch/sleeps-hang")
+_s8_has '^changed: [^ ]*/proj-watch/AGENTS\.md: created with the Triforge pointer block' && _s8_has '^rc=0$' || _S8_FAIL="$_S8_FAIL detectwatch-writer-bounded($(printf '%s' "$_O" | tr '\n' ' ' | cut -c1-80))"
+[ -z "$(ls -A "$_S8/proj-watch" | grep -F '.triforge-' || true)" ] || _S8_FAIL="$_S8_FAIL detectwatch-writer-temp-file-left"
 _S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines), prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40), and survives a failing or absent helper loader"
 if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
-  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; started in HOME or the directory above it: the one home-directory warning, no file notice or tip, the files untouched; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; versiongrace (round 1, wave 2): an optional CLI that ignores SIGTERM and never answers, through the hook's own _ss_cli_version with a 1 s bound, asked --version then -V and given up on within two calls of 1 s + the 2 s SIGKILL grace (${_S8_VER}), nothing recorded, the stub gone, stderr empty, no temp dir left; one that answers -V only gets that answer, and the watchdog run records a kimi stub's -V answer in .claude/roster-detected.local.md; detectbound (round 4, J): a python3 that never answers the instruction-file pass, session start back in ${_S8_DET}s (the 10 s bound) with the WARNING that the check did not finish, the stub gone; every run rc 0, no crash, no line starting with {" "static"
+  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; started in HOME or the directory above it: the one home-directory warning, no file notice or tip, the files untouched; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; versiongrace (round 1, wave 2): an optional CLI that ignores SIGTERM and never answers, through the hook's own _ss_cli_version with a 1 s bound, asked --version then -V and given up on within two calls of 1 s + the 2 s SIGKILL grace (${_S8_VER}), nothing recorded, the stub gone, stderr empty, no temp dir left; one that answers -V only gets that answer, and the watchdog run records a kimi stub's -V answer in .claude/roster-detected.local.md; detectbound (round 4, J): a python3 that prints one project no-import row (round 5) and never answers the instruction-file pass, session start back in ${_S8_DET}s (the 10 s bound) with the WARNING that the check did not finish and no own-file notice from the partial row, the stub gone; detectfork (round 5): with no timeout binary on PATH (${_S8_FWD}), a python3 launcher that prints that row, forks a child that ignores SIGTERM and holds stdout for 60 s, and ignores SIGTERM itself: session start back in ${_S8_FORK}s with the WARNING and no own-file notice, the launcher gone; detectwatch (round 5): the library alone under set -u (${_S8_WSH}), PATH = a python3 stub, a sleep that logs its pid and dirname: a pass that answers in 0.5 s under _INSTR_SECS=30 leaves no watchdog sleep running; with no _INSTR_SECS (_INSTR_READ_SECS, shipped as 30, set to 1) detect, visibility and a writer's plan on a python3 that never answers print one gave-up line and rc 124, 137 or 143 within 6 s, under ${_S8_WMODES}; a writer with --yes, _INSTR_SECS=1 and a python3 2 s slow still writes, rc 0, no temp file left; every run rc 0, no crash, no line starting with {" "static"
 else
   row "SELF-08" "claude" "$_S8_CAP" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160); mismatch:${_S8_FAIL:- none}" "static"
 fi
-rm -rf "$_S8/proj" "$_S8/proj-degraded" "$_S8/proj-pin" "$_S8/proj-detect" "$_S8_BAD" "$_S8/home" "$_S8A" "$_S8/skeleton.md" "$_S8/template.md" "$_S8/deaf" "$_S8/vstub" "$_S8/pystub" "$_S8"/vg-*   # keep $_S8/bin (the stub agy + claude) for SELF-08b; removed there
+rm -rf "$_S8/proj" "$_S8/proj-degraded" "$_S8/proj-pin" "$_S8/proj-detect" "$_S8/proj-watch" "$_S8_BAD" "$_S8/home" "$_S8A" "$_S8/skeleton.md" "$_S8/template.md" "$_S8/deaf" "$_S8/vstub" "$_S8/pystub" "$_S8/pyfork" "$_S8/watch" "$_S8"/vg-*   # keep $_S8/bin (the stub agy + claude) for SELF-08b; removed there
 
 # SELF-08b (KTD12 / R31 / CWE-59): the skills refresh touches only what it can
 # prove it wrote. Session start (CLAUDE_PLUGIN_ROOT = this checkout) on:
@@ -12316,6 +12463,52 @@ for _S16B_D in tail-ctl join-ctl tab-ctl; do
 done
 _S16_FAIL="${_S16_FAIL}$(_s16b_same b-tail-join-tab-controls-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_FN/tail-ctl/CLAUDE.md" "$_S16B_FN/join-ctl/CLAUDE.md" "$_S16B_FN/tab-ctl/CLAUDE.md")")"
 
+# labels (review round 5, R5-A): marked lexes the label of a link, of a full
+# or shortcut reference link and of a reference apart from the text around
+# it, so a backtick run in the label pairs inside it only and the next two
+# runs after the link make the code span that holds the @AGENTS.md (a link,
+# a full and a shortcut reference, a bracket nested in the label, the same in
+# a quote); it never lexes the reference of a full reference link; an email
+# autolink takes the backticks in it; it lexes a label holding \[ with that
+# read as a bracket. Each alone in a project CLAUDE.md: detect no-import,
+# visibility hidden with the add-the-line fix, the real line appended with
+# --yes, then unchanged. Controls still import: backticks paired inside the
+# label, no code span after the link, a code span holding [ and a later one
+# holding ], an email autolink with no backtick, brackets escaped outside a
+# label, the import after a full reference link
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-link label-link '# own\n[`` a](u) `` @AGENTS.md ``\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-full label-full '# own\n[`` a][r] `` @AGENTS.md ``\n\n[r]: /u\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-short label-short '# own\n[`` a] `` @AGENTS.md ``\n\n[`` a]: /u\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-nested label-nested '# own\n[a [``] b](u) `` @AGENTS.md ``\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-quote label-quote '# own\n> [`` a](u) `` @AGENTS.md ``\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-ref label-ref '# own\n[x][ @AGENTS.md ]\n\n[ @AGENTS.md ]: /u\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-escaped label-escaped '# own\n[\\[`` a\\](u) `` @AGENTS.md ``](v)\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-autolink label-autolink '# own\n<``@a.bc> `` @AGENTS.md ``\n\n')"
+_S16B_LBC="label-pair-ctl label-after-ctl label-spans-ctl label-autolink-ctl label-escaped-ctl label-ref-ctl"
+for _S16B_D in $_S16B_LBC; do _s16b_proj "$_S16B_FN/$_S16B_D"; done
+printf '# own\n[``a``](u) `` @AGENTS.md\n' > "$_S16B_FN/label-pair-ctl/CLAUDE.md"
+printf '# own\n[`` a](u) @AGENTS.md\n' > "$_S16B_FN/label-after-ctl/CLAUDE.md"
+printf '# own\nx `[` y `]` Read @AGENTS.md z `w`\n' > "$_S16B_FN/label-spans-ctl/CLAUDE.md"
+printf '# own\n<1@a.bc> @AGENTS.md\n' > "$_S16B_FN/label-autolink-ctl/CLAUDE.md"
+printf '# own\n\\[`x`\\] @AGENTS.md `y`\n' > "$_S16B_FN/label-escaped-ctl/CLAUDE.md"
+printf '# own\n[x][r] @AGENTS.md\n\n[r]: /u\n' > "$_S16B_FN/label-ref-ctl/CLAUDE.md"
+_S16B_LBF=""
+for _S16B_D in $_S16B_LBC; do _S16B_LBF="$_S16B_LBF $_S16B_FN/$_S16B_D/CLAUDE.md"; done
+# _S16B_LBF: the control files, split on purpose (no whitespace in the paths)
+# shellcheck disable=SC2086
+_S16B_SUM=$(_s16b_sum $_S16B_LBF)
+for _S16B_D in $_S16B_LBC; do
+  _O=$(_s16b "$_S16B_FN/$_S16B_D" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-$_S16B_D" "$_O" "^CLAUDE\.md${T}project${T}imports,user-owned${T}" '^rc=0$')"
+  _O=$(_s16b "$_S16B_FN/$_S16B_D" instruction_pointer_visibility claude)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-$_S16B_D-vis" "$_O" "^claude${T}visible${T}[^ ]*/w/fn/$_S16B_D/CLAUDE\.md imports " '^rc=0$')"
+  _O=$(_s16b "$_S16B_FN/$_S16B_D" instruction_add_import CLAUDE.md --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-$_S16B_D-import" "$_O" '^unchanged: ' '^rc=0$')"
+done
+# shellcheck disable=SC2086
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-label-controls-untouched "$_S16B_SUM" "$(_s16b_sum $_S16B_LBF)")"
+_S16_EV="${_S16_EV}B (review round 5): an import in a code span the backtick runs of a label leave is none, as marked lexes a link or reference label apart, never lexes the reference of a full reference link, takes the backticks of an email autolink in and reads \\[ in a label as a bracket (b-label-*: a link, a full and a shortcut reference, a nested bracket, a quote, the import in a reference, an escaped bracket in a label, an autolink: no-import, hidden with the fix, the line appended, then unchanged; controls import: backticks paired inside the label, no code span after the link, code spans holding [ and ], an autolink with no backtick, brackets escaped outside a label, the import after a full reference link); "
+
 # marked's blocks (review round 4, J2): md_scan reads the block structure with
 # a port of marked's own block lexer, so eight more places Claude Code reads
 # no import are none: a tag name that ends its line (the HTML block runs past
@@ -12363,6 +12556,144 @@ for _S16B_D in $_S16B_MKC; do
 done
 # shellcheck disable=SC2086
 _S16_FAIL="${_S16_FAIL}$(_s16b_same b-mk-controls-untouched "$_S16B_SUM" "$(_s16b_sum $_S16B_MKF)")"
+
+# bounds (review round 5, R5-B): md_scan reads no import past a bound and
+# counts none it found ahead of one: a file over MD_MAX (4194304 bytes) is
+# not lexed, and MdLexer stops past 40 nested quotes or list levels, past its
+# step bound and past its work bound. Each CLAUDE.md past a bound holds
+# @AGENTS.md on its second line, ahead of what trips it: detect no-import,
+# visibility hidden, instruction_add_import --yes refused rc 2 naming the
+# bound in a sentence of its own (no block to close there), the file
+# unchanged. A file of MD_MAX bytes with no import, which the line would take
+# past MD_MAX: the same, the refusal naming the size it would reach. Each
+# control, just under its bound (40 quotes, 40 list levels, MD_MAX bytes, 1%
+# under the steps, 4% under the work), imports: detect imports, visibility
+# visible, the import unchanged
+_S16B_CP="$_S16B_W/cap"
+_s16b_capmk() { # _s16b_capmk <project> — a project in $_S16B_CP whose CLAUDE.md holds "# own", @AGENTS.md and a blank line, then stdin
+  _s16b_proj "$_S16B_CP/$1"
+  { printf '# own\n@AGENTS.md\n\n'; cat; } > "$_S16B_CP/$1/CLAUDE.md"
+}
+_s16b_cap() { # _s16b_cap <case> <project> <ERE of the refusal after "<CLAUDE.md path> "> — the checks above for a CLAUDE.md in $_S16B_CP/<project> past a bound
+  local C=$1 P="$_S16B_CP/$2" O S
+  S=$(_s16b_sum "$P/CLAUDE.md")
+  O=$(_s16b "$P" instruction_files_detect)
+  _self_expect "$C-detect" "$O" "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/w/cap/$2/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$'
+  O=$(_s16b "$P" instruction_pointer_visibility claude)
+  _self_expect "$C-vis" "$O" "^claude${T}hidden${T}shadowed by [^ ]*/w/cap/$2/CLAUDE\.md: " '^rc=1$'
+  O=$(_s16b "$P" instruction_add_import CLAUDE.md --yes)
+  _self_expect "$C-yes" "$O" "^instruction_add_import: REFUSED — [^ ]*/w/cap/$2/CLAUDE\\.md $3" '^rc=2$'
+  _s16b_not "$C-yes" "$O" '^(needs-ask|changed|unchanged):'
+  _s16b_same "$C-untouched" "$S" "$(_s16b_sum "$P/CLAUDE.md")"
+}
+_s16b_capok() { # _s16b_capok <case> <project> — a control just under its bound in $_S16B_CP/<project>: imports, visible, the import unchanged, the file untouched
+  local C=$1 P="$_S16B_CP/$2" O S
+  S=$(_s16b_sum "$P/CLAUDE.md")
+  O=$(_s16b "$P" instruction_files_detect)
+  _self_expect "$C" "$O" "^CLAUDE\.md${T}project${T}imports,user-owned${T}[^${T}]*/w/cap/$2/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$'
+  O=$(_s16b "$P" instruction_pointer_visibility claude)
+  _self_expect "$C-vis" "$O" "^claude${T}visible${T}[^ ]*/w/cap/$2/CLAUDE\.md imports " '^rc=0$'
+  O=$(_s16b "$P" instruction_add_import CLAUDE.md --yes)
+  _self_expect "$C-import" "$O" '^unchanged: ' '^rc=0$'
+  _s16b_same "$C-untouched" "$S" "$(_s16b_sum "$P/CLAUDE.md")"
+}
+{ head -c 41 /dev/zero | tr '\0' '>'; printf ' x\n'; } | _s16b_capmk quote
+{ head -c 40 /dev/zero | tr '\0' '>'; printf ' x\n'; } | _s16b_capmk quote-ctl
+{ yes '- ' | head -n 41 | tr -d '\n'; printf 'x\n'; } | _s16b_capmk list
+{ yes '- ' | head -n 40 | tr -d '\n'; printf 'x\n'; } | _s16b_capmk list-ctl
+{ printf '```\n'; head -c 4194278 /dev/zero | tr '\0' x; printf '\n```\n'; } | _s16b_capmk size
+{ printf '```\n'; head -c 4194277 /dev/zero | tr '\0' x; printf '\n```\n'; } | _s16b_capmk size-ctl
+yes '#' | head -n 404000 | _s16b_capmk steps
+yes '#' | head -n 396000 | _s16b_capmk steps-ctl
+awk 'BEGIN { for (i = 0; i < 921; i++) printf ">     c\nl\n" }' | _s16b_capmk work
+awk 'BEGIN { for (i = 0; i < 885; i++) printf ">     c\nl\n" }' | _s16b_capmk work-ctl
+_s16b_proj "$_S16B_CP/size-line"
+{ printf '# own\n\n```\n'; head -c 4194288 /dev/zero | tr '\0' x; printf '\n```\n'; } > "$_S16B_CP/size-line/CLAUDE.md"
+_S16B_N="$(wc -c < "$_S16B_CP/size/CLAUDE.md" | tr -d ' ') $(wc -c < "$_S16B_CP/size-ctl/CLAUDE.md" | tr -d ' ') $(wc -c < "$_S16B_CP/size-line/CLAUDE.md" | tr -d ' ')"
+[ "$_S16B_N" = "4194305 4194304 4194304" ] || _S16_FAIL="${_S16_FAIL} b-cap-size(built:${_S16B_N})"
+_S16B_CAPB=', and Triforge reads no import from such a file, so the line would not read back as an import of [^ ]*/AGENTS\.md there; add the line yourself where Claude Code reads it \(rc 2\)$'
+_S16B_CAPS=' the 4194304 bytes Claude Code reads an import from, and Triforge reads no import from such a file either, so the line @AGENTS\.md would not read back as an import of [^ ]*/AGENTS\.md there; shorten the file, or add the line yourself where Claude Code reads it \(rc 2\)$'
+_S16_FAIL="${_S16_FAIL}$(_s16b_cap b-cap-quote quote "with the line @AGENTS\\.md appended holds Markdown nested more than 40 quotes and lists deep${_S16B_CAPB}")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_cap b-cap-list list "with the line @AGENTS\\.md appended holds Markdown nested more than 40 quotes and lists deep${_S16B_CAPB}")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_cap b-cap-size size "is more than${_S16B_CAPS}")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_cap b-cap-size-line size-line "would be 4194315 bytes with the line @AGENTS\\.md appended, more than${_S16B_CAPS}")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_cap b-cap-steps steps "with the line @AGENTS\\.md appended holds more Markdown blocks than Triforge reads in time${_S16B_CAPB}")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_cap b-cap-work work "with the line @AGENTS\\.md appended holds more Markdown than Triforge reads in time${_S16B_CAPB}")"
+for _S16B_D in quote-ctl list-ctl size-ctl steps-ctl work-ctl; do
+  _S16_FAIL="${_S16_FAIL}$(_s16b_capok "b-cap-$_S16B_D" "$_S16B_D")"
+done
+
+# the read cap (review round 5, R5-B): a CLAUDE.md-family file is read to
+# MD_MAX + 1 bytes at most (load_md), as no import is read past MD_MAX and
+# the import refuses such a file, so a huge one is never read whole. A sparse
+# 256 MiB CLAUDE.md holding @AGENTS.md on its second line: detect no-import,
+# visibility hidden, instruction_add_import --yes refused rc 2 naming the
+# size, the file unchanged, each of the three under 128 MiB resident where
+# /usr/bin/time -l reports it (reading the whole file takes 256 MiB)
+if /usr/bin/time -l true >/dev/null 2>&1; then _S16B_TIMEL=1; else _S16B_TIMEL=0; fi
+_s16b_rss() { # _s16b_rss <dir> <helper> [args...] — _s16b under /usr/bin/time -l (plain _s16b without one): its lines, "rc=<n>", then "rss=<bytes>", empty when not reported
+  local D=$1 R=0 O
+  shift
+  if [ "$_S16B_TIMEL" != 1 ]; then
+    _s16b "$D" "$@"
+    echo "rss="
+    return 0
+  fi
+  O=$(cd "$D" && HOME="$_S16B/home" CODEX_HOME="$_S16B/home/.codex" /usr/bin/time -l ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 60} /bin/bash -c 'source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 97; shift; "$@"' _ "$REPO_ROOT" "$@" 2>&1) || R=$?
+  printf '%s\nrc=%s\nrss=%s\n' "$O" "$R" "$(printf '%s\n' "$O" | sed -n 's/^ *\([0-9][0-9]*\)  *maximum resident set size.*$/\1/p' | head -n 1)"
+}
+_s16b_rssok() { # _s16b_rssok <case> <output of _s16b_rss> — " <case>(rss:<bytes>)" over 128 MiB, " <case>(rss:none)" when time -l ran and reported none
+  local R
+  R=$(printf '%s\n' "$2" | sed -n 's/^rss=//p' | tail -n 1)
+  if [ "$_S16B_TIMEL" = 1 ] && [ -z "$R" ]; then
+    printf ' %s(rss:none)' "$1"
+  elif [ -n "$R" ] && [ "$R" -gt 134217728 ]; then
+    printf ' %s(rss:%s)' "$1" "$R"
+  fi
+}
+_s16b_proj "$_S16B_CP/huge"
+dd if=/dev/zero of="$_S16B_CP/huge/CLAUDE.md" bs=1 count=0 seek=268435456 2>/dev/null
+printf '# own\n@AGENTS.md\n' | dd of="$_S16B_CP/huge/CLAUDE.md" conv=notrunc 2>/dev/null
+_S16B_SUM=$(_s16b_sum "$_S16B_CP/huge/CLAUDE.md")
+_O=$(_s16b_rss "$_S16B_CP/huge" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-detect "$_O" "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/w/cap/huge/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$')$(_s16b_rssok b-cap-huge-detect "$_O")"
+_S16B_RSSV="detect $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+_O=$(_s16b_rss "$_S16B_CP/huge" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-vis "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/w/cap/huge/CLAUDE\.md: " '^rc=1$')$(_s16b_rssok b-cap-huge-vis "$_O")"
+_S16B_RSSV="${_S16B_RSSV}, visibility $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+_O=$(_s16b_rss "$_S16B_CP/huge" instruction_add_import CLAUDE.md --yes)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-yes "$_O" "^instruction_add_import: REFUSED — [^ ]*/w/cap/huge/CLAUDE\\.md is more than${_S16B_CAPS}" '^rc=2$')$(_s16b_rssok b-cap-huge-yes "$_O")"
+_S16B_RSSV="${_S16B_RSSV}, import $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-cap-huge-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_CP/huge/CLAUDE.md")")"
+rm -f "$_S16B_CP/huge/CLAUDE.md"
+[ "$_S16B_TIMEL" = 1 ] || _S16B_RSSV="SKIPPED (no /usr/bin/time -l)"
+
+# linear at 1 MiB (review round 5, R5-B): the shapes the reader took
+# quadratic time on at 5fcb6e0, each a 1 MiB CLAUDE.md importing AGENTS.md
+# ahead of it: front matter that never closes (--- then 1 MiB of newlines),
+# a fence opened by 1 MiB of ~ and never closed, a paragraph whose last line
+# is 1 MiB of ~ with no newline, a <script> block whose last line holds
+# 116508 </script> and no newline, and a comment block whose line holds
+# 262144 more <!--. detect reads each import within 20 s, under the harness
+# timeout (-k 5), so a quadratic reader fails here in 20 s a file instead of
+# holding the gate for hours
+_S16B_LIN="$_S16B_W/lin"
+for _S16B_D in front fence para script comment; do _s16b_proj "$_S16B_LIN/$_S16B_D"; done
+{ printf '%s' '---'; head -c 1048576 /dev/zero | tr '\0' '\n'; printf '@AGENTS.md\n'; } > "$_S16B_LIN/front/CLAUDE.md"
+{ printf '# own\n@AGENTS.md\n\n'; head -c 1048576 /dev/zero | tr '\0' '~'; printf '\n'; } > "$_S16B_LIN/fence/CLAUDE.md"
+{ printf '# own\n@AGENTS.md\n'; head -c 1048576 /dev/zero | tr '\0' '~'; } > "$_S16B_LIN/para/CLAUDE.md"
+{ printf '# own\n@AGENTS.md\n\n<script>'; yes '</script>' | head -n 116508 | tr -d '\n'; } > "$_S16B_LIN/script/CLAUDE.md"
+{ printf '# own\n@AGENTS.md\n\n<!-- -->'; yes '<!--' | head -n 262144 | tr -d '\n'; printf '\n'; } > "$_S16B_LIN/comment/CLAUDE.md"
+_S16B_LINS=""
+for _S16B_D in front fence para script comment; do
+  _S16B_T0=$(date +%s)
+  _O=$(cd "$_S16B_LIN/$_S16B_D" && HOME="$_S16B/home" CODEX_HOME="$_S16B/home/.codex" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/bash -c 'source "$1/scripts/lib/instructions.sh" && instruction_files_detect' _ "$REPO_ROOT" 2>&1; echo "rc=$?")
+  _S16B_T1=$(( $(date +%s) - _S16B_T0 ))
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-lin-$_S16B_D" "$_O" "^CLAUDE\.md${T}project${T}imports,user-owned${T}[^${T}]*/w/lin/$_S16B_D/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$')"
+  [ "$_S16B_T1" -lt 20 ] || _S16_FAIL="${_S16_FAIL} b-lin-$_S16B_D(stalled:${_S16B_T1}s)"
+  _S16B_LINS="${_S16B_LINS} ${_S16B_D} ${_S16B_T1}s"
+done
+_S16_EV="${_S16_EV}B bounds and time (b-cap-*: past 40 nested quotes, past 40 list levels, a file of 4194305 bytes, one of 4194304 the line would take past that, past the step and the work bounds, @AGENTS.md ahead of each: no-import, hidden, the import refused rc 2 naming the bound, unchanged; 40 quotes, 40 levels, 4194304 bytes, 1% under the steps and 4% under the work import; a sparse 256 MiB CLAUDE.md read to 4194305 bytes, resident bytes: ${_S16B_RSSV}; b-lin-*: 1 MiB of front matter never closed, of ~ opening a fence, of ~ ending a paragraph, of </script> and of <!-- on a last line, each read whole and importing in${_S16B_LINS}); "
 _S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file), an import line written or offered only when it reads back as the project's import (b-space-*, a project path with whitespace, a tab too; b-tilde-*, a directory named ~ on the way down: the import into the CLAUDE.md above refused rc 2 before any plan, without and twice with --yes, unchanged; the import column -, visibility and session start naming the project's own CLAUDE.md alone; the .claude/CLAUDE.md beside it, whose @../~/proj/AGENTS.md reads back, still planned), an import read in Markdown text, its path whole (b-fence-*, b-name-*: one in a fence or padded code span, Read @AGENTS.md. or (see @AGENTS.md) is none: no-import, hidden with the fix, the line appended, then unchanged; a file ending in an open fence or comment, an import of c#app or app[1] from above: rc 2, unchanged; a plain line, one after a closed or list-indented fence, @AGENTS.md#setup import), an import in a link title is none (b-title-*: [x](a(b) \"t @AGENTS.md \"), [x](a\\) ..., the Markdown_(syntax) link, the image form, a (title), a title on the next line: no-import, hidden with the fix, the line appended, then unchanged; see @AGENTS.md and one after [y](a(b)c) import), one whose _ may pair as emphasis is none (b-emphasis-*: @_app/AGENTS.md with z_ in its paragraph no-import, hidden; in another paragraph imports, visible), the reader is linear (b-slow: 100 KB of ](, a 40 KB backslash run and 3000 <? before the import, read in ${_S16B_SLOW}s of the 20 s allowed) and bounded (b-bound: _INSTR_SECS=1 gives up on a python3 that ignores SIGTERM in 1 s + the 2 s SIGKILL grace, rc 137, nothing printed, the stub gone, under ${_S16B_BOUND} and the watchdog), an import a path takes in or a block hides is none (b-join-*: @x\\ @AGENTS.md; b-tail-*: <?x?><div>, <!x y><a>, two lines, a quote; b-tab-*: >\\t<div>, -\\t<div>: no-import, hidden, appended, unchanged; controls import), the block structure as marked lexes it (b-mk-*: a tag name ending its line, a > stripped from a code line, a lazy HTML line in a quote, a lazy fence ending a quote in a list item, a 2. after paragraph text, a closing tag over lines, an item ended before a definition title, a definition label over lines: no-import, hidden, appended, unchanged; one control per family imports); "
 rm -rf "$_S16B"
 # --- end of SELF-16 section B ---
@@ -14237,11 +14568,14 @@ rm -rf "$_S29"
 #                        read by value, as timeout's own parser reads it
 #                        (DURATION), and counts only when it is finite and
 #                        above zero: a zero (0, +0, -0, 0e0, 0x0, " 0",
-#                        0.0e0s) disables the KILL, inf never sends it, and
+#                        0.0e0s, 0x0p3s) disables the KILL, inf, infinity
+#                        and 1e999 (it overflows to inf) never send it, and
 #                        timeout refuses a negative or a text it can't read
-#                        ('5 ', nan); a value in a variable ("$KA",
-#                        "${KA_S}s") still counts. The duration is a word
-#                        DURATION reads (1e1, +5, 0x10, " 5", inf) or one
+#                        ('5 ', nan); 1e-400 still kills (timeout reads its
+#                        underflow as above zero), and so does 0x1p-2. A
+#                        value in a variable ("$KA", "${KA_S}s") still
+#                        counts. The duration is a word DURATION reads (1e1,
+#                        +5, 0x10, " 5", inf, infinity) or one
 #                        from an expansion; any other word in its place is
 #                        no duration, and the line is not flagged.
 #                        _adapter_env <cli> <cmd...> runs the
@@ -14276,11 +14610,12 @@ rm -rf "$_S29"
 # ${TIMEOUT_BIN:-$(command -v gtimeout)}, a kill-after timeout reads as zero
 # (-k 0, -k0, -k 0s, -k "0", --kill-after=0, --kill-after=0s,
 # --kill-after 0.0s, -k +0, -k 0e0, -k 0x0, --kill-after=-0, -k 0.0e0s,
-# -k " 0"), one that never fires (-k inf), ones it refuses (-k -5,
-# -k '5 ') and durations spelled otherwise (1e1, +5, 0x10, " 5", inf) are
-# flagged, and -k, --kill-after=5s, -k5s, -k 10s, -k5, -k 0.5,
-# --kill-after 10, -k 1e1, -k 0x1, -k +5, -k " 5", -k "$KA", -k "${KA_S}s",
-# -s KILL (with -k 0 too), those five durations with -k 5, a word timeout
+# -k " 0", -k 0x0p3s), ones that never fire (-k inf, -k infinity,
+# -k 1e999), ones it refuses (-k -5, -k '5 ', -k nan) and durations spelled
+# otherwise (1e1, +5, 0x10, " 5", inf, infinity) are flagged, and -k,
+# --kill-after=5s, -k5s, -k 10s, -k5, -k 0.5, --kill-after 10, -k 1e1,
+# -k 0x1, -k +5, -k " 5", -k 1e-400, -k 0x1p-2, -k "$KA", -k "${KA_S}s",
+# -s KILL (with -k 0 too), those six durations with -k 5, a word timeout
 # refuses in the duration's place (5x, infinite), _adapter_env with
 # --foreground -k 10s, with
 # "$2" and -k, with "${TO[@]}" and running env, git -C or python3 -c, the
@@ -15146,14 +15481,19 @@ timeout -k 0e0 1 cmd   # want:timeout-no-kill
 timeout --kill-after=-0 1 cmd   # want:timeout-no-kill
 timeout -k 0.0e0s 1 cmd   # want:timeout-no-kill
 timeout -k " 0" 1 cmd   # want:timeout-no-kill
+timeout -k 0x0p3s 1 cmd   # want:timeout-no-kill
 gtimeout -k inf 5 cmd   # want:timeout-no-kill
+timeout -k infinity 1 cmd   # want:timeout-no-kill
+timeout -k 1e999 1 cmd   # want:timeout-no-kill
 timeout -k -5 1 cmd   # want:timeout-no-kill
 timeout -k '5 ' 1 cmd   # want:timeout-no-kill
+timeout -k nan 1 cmd   # want:timeout-no-kill
 timeout 1e1 make   # want:timeout-no-kill
 timeout +5 make   # want:timeout-no-kill
 timeout 0x10 make   # want:timeout-no-kill
 timeout " 5" make   # want:timeout-no-kill
 timeout inf make   # want:timeout-no-kill
+timeout infinity make   # want:timeout-no-kill
 ok_adapter_env() {
   _adapter_env claude "$TIMEOUT_BIN" --foreground -k 10s 240 claude -p x
   _adapter_env grok "$2" --foreground -k 10s "${3}s" grok
@@ -15190,11 +15530,14 @@ ok_timeout() {
   timeout -k 0x1 1 cmd
   timeout -k +5 1 cmd
   timeout -k " 5" 1 cmd
+  timeout -k 1e-400 1 cmd
+  timeout -k 0x1p-2 1 cmd
   timeout -k 5 1e1 make
   timeout -k 5 +5 make
   timeout -k 5 0x10 make
   timeout -k 5 " 5" make
   timeout -k 5 inf make
+  timeout -k 5 infinity make
   timeout 5x make
   timeout infinite make
   printf '%s\n' "${A:-}${B:-}" "${C:-$D}\n${E}"
@@ -15219,7 +15562,7 @@ case "$_S30_NEG" in
 esac
 _S30_CAP="the shell rules a static scan can decide hold in every shell file Triforge ships (scripts/*.sh, scripts/lib/*.sh, hooks/handlers/*.sh, skills/*/scripts/*.sh): no function ends in a [ ] or [[ ]] && chain with no ||, no grep -c … || echo, no grep -P, no associative array, no mapfile or readarray (AGENTS.md Shell), and no timeout binary run as a command without a kill-after (review finding #6), a literal one counting only when timeout reads it as a finite duration above zero"
 if [ -z "$_S30_HITS" ] && [ -z "$_S30_FAIL" ]; then
-  row "SELF-30" "claude" "$_S30_CAP" "PASS" "${_S30_N} files parsed as bash, comments, quoted text and here-document bodies as text: 0 hits, no scan error; planted: $(printf '%s\n' "$_S30_WANT" | grep -c . || true) shapes flagged on exactly their lines (test-and-last on one line and several, mid-chain, in a { } and a ( ) body, under the function keyword; grep -c || echo in a command substitution, quoted and not; grep -P, -oP, --perl-regexp, -Pc in a command substitution inside \$(( )) and (( )); declare, local and typeset -A; mapfile, readarray; timeout-no-kill: timeout, \"\$TIMEOUT_BIN\", \"\${_TB_TIMEOUT}\", a \"\$SECS\" duration, gtimeout after env, \"\$TOBIN\" -s TERM in a command substitution, \${TIMEOUT_BIN:+…} after exec, a gtimeout path after command, \"\$TIMEOUT_BIN\" handed to _adapter_env with and without --foreground, in a ( ), timeout in a command substitution inside \$(( )), \${TIMEOUT_BIN:+\"\$TIMEOUT_BIN\"} \${TIMEOUT_BIN:+120} after exec, \"\$TIMEOUT_BIN\" after env A=1 \"\$@\", \${T:-timeout}, \${TIMEOUT_BIN:-\$(command -v gtimeout)}, a kill-after timeout reads as zero: -k 0, -k0, -k 0s, -k \"0\", --kill-after=0, --kill-after=0s, --kill-after 0.0s, -k +0, -k 0e0, -k 0x0, --kill-after=-0, -k 0.0e0s, -k \" 0\", one that never fires: -k inf, ones it refuses: -k -5, -k '5 ', durations spelled otherwise: 1e1, +5, 0x10, \" 5\", inf) and none of the compliant ones ([ ] && [ ] || return 1, && … || true, [ ] || return 1, if [ ] && …; then … fi last, a bare test last, a python here-document holding x and y and the shapes, a comment holding [ -d x ] && y, the shapes in quoted strings, grep -e -P, \$(( a + 1 )), \$(( \$(date +%s) - T0 )); timeout with -k, --kill-after=5s, -k5s, -k 10s, -k5, -k 0.5, --kill-after 10, -k 1e1, -k 0x1, -k +5, -k \" 5\", -k \"\$KA\", -k \"\${KA_S}s\" or -s KILL (with -k 0 too), those five durations with -k 5, 5x or infinite in the duration's place, _adapter_env with --foreground -k 10s, with \"\$2\" and -k, with \"\${TO[@]}\" and running env, git -C or python3 -c, the binary as another function's argument, the timeout shapes in a comment and in quoted strings, \"\$@\" where the duration goes, command -v timeout, \${TIMEOUT_BIN:+…} holding -k, the split form with \${TIMEOUT_BIN:+-k10s}, \${KOPT:--k10s} where the options go, env \"\$@\" with no NAME=value before it, words holding two expansions); a quote that never closes is a scan-error" "static"
+  row "SELF-30" "claude" "$_S30_CAP" "PASS" "${_S30_N} files parsed as bash, comments, quoted text and here-document bodies as text: 0 hits, no scan error; planted: $(printf '%s\n' "$_S30_WANT" | grep -c . || true) shapes flagged on exactly their lines (test-and-last on one line and several, mid-chain, in a { } and a ( ) body, under the function keyword; grep -c || echo in a command substitution, quoted and not; grep -P, -oP, --perl-regexp, -Pc in a command substitution inside \$(( )) and (( )); declare, local and typeset -A; mapfile, readarray; timeout-no-kill: timeout, \"\$TIMEOUT_BIN\", \"\${_TB_TIMEOUT}\", a \"\$SECS\" duration, gtimeout after env, \"\$TOBIN\" -s TERM in a command substitution, \${TIMEOUT_BIN:+…} after exec, a gtimeout path after command, \"\$TIMEOUT_BIN\" handed to _adapter_env with and without --foreground, in a ( ), timeout in a command substitution inside \$(( )), \${TIMEOUT_BIN:+\"\$TIMEOUT_BIN\"} \${TIMEOUT_BIN:+120} after exec, \"\$TIMEOUT_BIN\" after env A=1 \"\$@\", \${T:-timeout}, \${TIMEOUT_BIN:-\$(command -v gtimeout)}, a kill-after timeout reads as zero: -k 0, -k0, -k 0s, -k \"0\", --kill-after=0, --kill-after=0s, --kill-after 0.0s, -k +0, -k 0e0, -k 0x0, --kill-after=-0, -k 0.0e0s, -k \" 0\", -k 0x0p3s, ones that never fire: -k inf, -k infinity, -k 1e999, ones it refuses: -k -5, -k '5 ', -k nan, durations spelled otherwise: 1e1, +5, 0x10, \" 5\", inf, infinity) and none of the compliant ones ([ ] && [ ] || return 1, && … || true, [ ] || return 1, if [ ] && …; then … fi last, a bare test last, a python here-document holding x and y and the shapes, a comment holding [ -d x ] && y, the shapes in quoted strings, grep -e -P, \$(( a + 1 )), \$(( \$(date +%s) - T0 )); timeout with -k, --kill-after=5s, -k5s, -k 10s, -k5, -k 0.5, --kill-after 10, -k 1e1, -k 0x1, -k +5, -k \" 5\", -k 1e-400 (timeout's underflow still kills), -k 0x1p-2, -k \"\$KA\", -k \"\${KA_S}s\" or -s KILL (with -k 0 too), those six durations with -k 5, 5x or infinite in the duration's place, _adapter_env with --foreground -k 10s, with \"\$2\" and -k, with \"\${TO[@]}\" and running env, git -C or python3 -c, the binary as another function's argument, the timeout shapes in a comment and in quoted strings, \"\$@\" where the duration goes, command -v timeout, \${TIMEOUT_BIN:+…} holding -k, the split form with \${TIMEOUT_BIN:+-k10s}, \${KOPT:--k10s} where the options go, env \"\$@\" with no NAME=value before it, words holding two expansions); a quote that never closes is a scan-error" "static"
 else
   row "SELF-30" "claude" "$_S30_CAP" "FAIL" "$(printf '%s' "hits: ${_S30_HITS:-none}; negative controls:${_S30_FAIL:- ok}" | cut -c1-1500)" "static"
 fi

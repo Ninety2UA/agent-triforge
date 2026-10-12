@@ -80,8 +80,10 @@
 # (instruction_add_import) · 3 over the AGENTS.md byte budget
 # (instruction_merge_pointer and the merge in
 # instruction_convert_stale) · 20 needs-ask · 45 lead-only refusal · 64 usage ·
-# 69 unavailable (no python3, no template) · 80 degraded (a write failed, or
-# the target changed while it was planned).
+# 69 unavailable (no python3, no template, no private temp dir for the
+# watchdog) · 80 degraded (a write failed, or the target changed while it was
+# planned) · 124, 137 or 143 a read-only run given up on (_instr_py: 30 s
+# unless the caller sets _INSTR_SECS; a writer with --yes is never bounded).
 
 # The plugin root this file belongs to, for templates/AGENTS.md when the
 # loader's _TRIFORGE_PLUGIN_ROOT is not in scope (the hook sources this file
@@ -176,15 +178,20 @@ END = b"<!-- triforge:end -->"
 # certain (text_words): what it cannot place counts as not text, so its
 # error is "hidden, offer the fix", never an import reported that is not
 # loaded. Its patterns: TITLE the quotes of a link title, INLINE the
-# inline HTML and link destination openings, closed by CLOSE, a complete TAG
-# or the rest of a link (link_ends): \s* (WS, the JavaScript \s in UTF-8),
+# inline HTML, email autolink (its local part and @, where no other opening
+# matches) and link destination openings, closed by CLOSE, a complete TAG or
+# the rest of a link (link_ends): \s* (WS, the JavaScript \s in UTF-8),
 # the destination <...> (ANGLE, whose backslash takes no line end) or a run
 # of all but space, tab, newline and controls (RUN, cut at a parenthesis
 # PAREN finds unbalanced), a title after [ \t]* and at most one newline
 # (SEP), \s* and ")"
 MD_MAX = 4194304
 JS_SPACE = r"[\t\n\x0b\x0c\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
-FRONT = re.compile(r"---" + JS_SPACE + r"*\n[\s\S]*?---" + JS_SPACE + r"*\n?")
+# the front matter pattern of Claude Code, ---\s*\n[\s\S]*?---\s*\n?, with
+# its first \s*\n taken once in a lookahead (no search re-enters one): a
+# shorter run gains nothing, as no --- starts in it, and retrying each one is
+# quadratic in a long run
+FRONT = re.compile(r"---(?=(" + JS_SPACE + r"*\n))\1[\s\S]*?---" + JS_SPACE + r"*\n?")
 JS_TRIM = "\t\n\x0b\x0c\r \xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 JS_WS = "\t\n\x0b\x0c\r \xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 JS_DOT = "[^\n\r\u2028\u2029]"
@@ -192,18 +199,25 @@ JS_BOL = "(?:\\A|(?<=[\n\r\u2028\u2029]))"
 ASTRAL = re.compile("[\U00010000-\U0010ffff]")
 MK_TAGS = "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
 MK_HR_SRC = " {0,3}((?:-[\t ]*){3,}|(?:_[ \t]*){3,}|(?:\\*[ \t]*){3,})(?:\n+|\\Z)"
-MK_PARA_SRC = ("[^\n]+(?:\n(?!" + MK_HR_SRC + "| {0,3}#{1,6}(?:" + JS_SPACE + "|\\Z)| {0,3}>| {0,3}(?:`{3,}(?=[^`\n]*\n)|~{3,})[^\n]*\n"
+# the fence that interrupts a paragraph is ~{3,}[^\n]*\n in marked: ~{3} and
+# [^\n]*\n match the same lines, and in a lookahead only whether one does
+# counts, while ~{3,} retries every shorter run on a last line of ~ with no
+# newline, which is quadratic in it
+MK_PARA_SRC = ("[^\n]+(?:\n(?!" + MK_HR_SRC + "| {0,3}#{1,6}(?:" + JS_SPACE + "|\\Z)| {0,3}>| {0,3}(?:`{3,}(?=[^`\n]*\n)|~{3})[^\n]*\n"
                "| {0,3}(?:[*+-]|1[.)]) |</?(?:" + MK_TAGS + ")(?: +|\n|/?>)|<(?:script|pre|style|textarea|!--)| +\n)[^\n]+)*")
 MK_NEWLINE = re.compile("(?:[ \t]*(?:\n|\\Z))+")
 MK_CODE = re.compile("(?:(?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|\\Z))*)?)+")
-MK_FENCES = re.compile(" {0,3}(`{3,}(?=[^`\n]*(?:\n|\\Z))|~{3,})([^\n]*)(?:\n|\\Z)(?:|([\\s\\S]*?)(?:\n|\\Z))(?: {0,3}\\1[~`]* *(?=\n|\\Z)|\\Z)")
-MK_FENCES_SHUT = re.compile(" {0,3}(`{3,}(?=[^`\n]*(?:\n|\\Z))|~{3,})([^\n]*)(?:\n|\\Z)(?:|([\\s\\S]*?)(?:\n|\\Z))(?: {0,3}\\1[~`]* *(?=\n|\\Z))")
+MK_FENCES = re.compile(" {0,3}(`{3,}(?=[^`\n]*(?:\n|\\Z))|~{3,})([^\n]*)(?:\n|\\Z)(?:|([\\s\\S]*?)(?:\n|\\Z))(?:( {0,3}\\1[~`]* *)(?=\n|\\Z)|\\Z)")
 MK_HEADING = re.compile(" {0,3}(#{1,6})(?=" + JS_SPACE + "|\\Z)(" + JS_DOT + "*)(?:\n+|\\Z)")
 MK_HR = re.compile(MK_HR_SRC)
 MK_QUOTE = re.compile("(?: {0,3}> ?(?:" + MK_PARA_SRC + "|[^\n]*)(?:\n|\\Z))+")
 MK_LIST = re.compile("( {0,3}(?:[*+-]|[0-9]{1,9}[.)]))(?:[ \t][^\n]+?)?(?:\n|\\Z)")
+# an HTML block of type 1 ends after the line of its first closing tag that a
+# newline follows, marked reading </\1>[^\n]*\n+ there: tried from each such
+# tag only up to the next one on its line, the end is the same, and a last
+# line of them with no newline is no longer read again from each of them
 MK_HTML = re.compile(
-    " {0,3}(?:<(script|pre|style|textarea)[" + JS_WS + ">][\\s\\S]*?(?:</\\1>[^\n]*\n+|\\Z)"
+    " {0,3}(?:<(script|pre|style|textarea)[" + JS_WS + ">][\\s\\S]*?(?:</\\1>(?:(?!</\\1>)[^\n])*\n+|\\Z)"
     "|<!--(?:-?>|[\\s\\S]*?(?:-->|\\Z))[^\n]*(\n+|\\Z)|<\\?[\\s\\S]*?(?:\\?>\n*|\\Z)|<![A-Z][\\s\\S]*?(?:>\n*|\\Z)"
     "|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>\n*|\\Z)|</?(" + MK_TAGS + ")(?: +|\n|/?>)[\\s\\S]*?(?:(?:\n[ \t]*)+\n|\\Z)"
     "|<(?!script|pre|style|textarea)([a-z][\\w-]*)(?: +[a-zA-Z:_][\\w.:-]*(?: *= *\"[^\"\n]*\"| *= *\x27[^\x27\n]*\x27| *= *[^" + JS_WS + "\"\x27=<>`]+)?)*? */?>(?=[ \t]*(?:\n|\\Z))[\\s\\S]*?(?:(?:\n[ \t]*)+\n|\\Z)"
@@ -228,13 +242,15 @@ MK_BLANK = re.compile("[ \t]*\\Z")
 MK_NONSPACE = re.compile("[^ ]")
 MK_TABS = re.compile("^\t+")
 # what Claude Code reads in an HTML block that opens with a comment: the rest
-# outside its comments (MK_COMMENT), each @ at its start or after a
+# outside its comments (uncomment), each @ at its start or after a
 # JavaScript space and the path after it (MK_AT)
-MK_COMMENT = re.compile("<!--[\\s\\S]*?-->")
 MK_AT = re.compile("(?:^|" + JS_SPACE + ")@((?:[^" + JS_WS + "\\\\]|\\\\ )+)")
 TITLE = {b"\"": b"\"", b"\x27": b"\x27", b"(": b")"}
-INLINE = re.compile(rb"<(!--|\?|!\[CDATA\[|!(?=[A-Za-z])|/?(?=[A-Za-z]))|\]\(")
-CLOSE = {b"!--": b"-->", b"?": b"?>", b"![CDATA[": b"]]>", b"!": b">"}
+INLINE = re.compile(rb"<(!--|\?|!\[CDATA\[|!(?=[A-Za-z])|/?(?=[A-Za-z]))|<()(?=[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@)|\]\(")
+CLOSE = {b"!--": b"-->", b"?": b"?>", b"![CDATA[": b"]]>", b"!": b">", b"@": b">"}
+# what a link label is read over (labels): its brackets, backslashes and
+# backticks
+LABEL_AT = re.compile(rb"[\[\]\\`]")
 TAG = re.compile(rb"</?[A-Za-z][\w:-]*(?:\s+[A-Za-z:_][\w.:-]*(?:\s*=\s*(?:\"[^\"]*\"|\x27[^\x27]*\x27|[^\s\"\x27=<>`]+))?)*?\s*/?>")
 WS = re.compile(rb"(?:[\t\n\x0b\x0c\r ]|\xc2\xa0|\xe1\x9a\x80|\xe2\x80[\x80-\x8a\xa8\xa9\xaf]|\xe2\x81\x9f|\xe3\x80\x80|\xef\xbb\xbf)*")
 ANGLE = re.compile(rb"<(?:\\(?!\xe2\x80[\xa8\xa9])[^\n\r]|[^\n<>\\])+>")
@@ -344,6 +360,25 @@ def load(p):
         return None
 
 
+def load_md(p):
+    # a CLAUDE.md-family file as md_scan needs it: no more than its first
+    # MD_MAX + 1 bytes, which already tell a file over MD_MAX (no import is
+    # read from it, and add_import refuses it before any write), so a huge
+    # file is never read whole. read_regular reads to the end, so its checks
+    # are made here the same way: O_NONBLOCK (a FIFO never stalls), a regular
+    # file only; None when unreadable. The 3.x fingerprint reads the same
+    # bytes: no file over MD_MAX is an exact copy (exact_3x), and is_3x looks
+    # for the template lines in the first MD_MAX + 1 bytes
+    try:
+        fd = os.open(p, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+        with os.fdopen(fd, "rb") as f:
+            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                return None
+            return f.read(MD_MAX + 1)
+    except (OSError, ValueError):
+        return None
+
+
 def level_file(r, level, name="AGENTS.md"):
     # the one file the reader takes from a directory: its override over <name>
     for n in ([r["override"]] if r["override"] else []) + [name]:
@@ -439,6 +474,13 @@ class MdStop(Exception):
     pass
 
 
+class MdBound(str):
+    # the where of md_scan when it read no import because a bound stopped
+    # it (the file size, work, steps or nesting): the reason, which
+    # add_import names in a sentence of its own (no block holds the line)
+    pass
+
+
 class MdTok:
     # a marked block token: its type, raw and text (lists of parts, joined
     # when read), the tokens of a blockquote, the items of a list ([raw,
@@ -471,7 +513,7 @@ class MdLexer:
     # raw (so a quote ends at a code block and its lazy lines are lexed again
     # outside it). Bounded: work (characters lexed and scanned, nested
     # sources again) and steps (blocks, list lines, quote groups) grow with
-    # the file, nesting stops at 40; past one MdStop
+    # the file, nesting stops past 40 quotes and lists; past one MdStop
     def __init__(self, size):
         self.top = True
         self.work, self.steps, self.depth = 0, 0, 0
@@ -489,8 +531,9 @@ class MdLexer:
             raise MdStop("more Markdown blocks than Triforge reads in time")
 
     def block(self, src, tokens, clipped=False):
+        # depth: the top level, then one per quote or list item around src
         self.depth += 1
-        if self.depth > 40:
+        if self.depth > 41:
             raise MdStop("Markdown nested more than 40 quotes and lists deep")
         self.charge(len(src))
         pos, n = 0, len(src)
@@ -517,9 +560,13 @@ class MdLexer:
                 continue
             m = MK_FENCES.match(src, pos)
             if m:
+                # open: the match ended at the end of src, not at a closing
+                # fence (group 4), as marked reads it; a second search for a
+                # close would retry every shorter opening run, which is
+                # quadratic in a long one
                 pos = m.end()
                 tokens.append(MdTok("code", at, m.group()))
-                tokens[-1].open = MK_FENCES_SHUT.match(src, at) is None
+                tokens[-1].open = m.group(4) is None
                 continue
             m = MK_HEADING.match(src, pos)
             if m:
@@ -817,11 +864,13 @@ def link_ends(text):
     return end
 
 
-def inline_held(text):
+def inline_held(text, refs):
     # held(pos): True when an inline construct whose words marked never
     # scans may hold pos in text, lines marked may read as one paragraph:
-    # an image description (an ![ before pos and a ] after it), an HTML tag,
-    # comment, processing instruction, declaration or CDATA section, or a
+    # an image description (an ![ before pos and a ] after it), the
+    # reference of a full reference link (one of refs, from labels), an
+    # HTML tag, comment, processing instruction, declaration or CDATA
+    # section, an email autolink (its backticks, * and _ taken in), or a
     # link destination or title. One opening before pos holds it unless its
     # end (link_ends for a link) comes before pos, or nothing after pos can
     # end it. Linear: a closing marker is found by bisecting its positions,
@@ -829,9 +878,12 @@ def inline_held(text):
     # none is read once one of its kind runs to the end)
     image, bracket, big = text.find(b"!["), text.rfind(b"]"), len(text) + 1
     link = link_ends(text) if b"](" in text else None
+    in_ref = cover(refs)
     places, by = {}, {}
     for m in INLINE.finditer(text):
-        kind = m.group(1)
+        # an email autolink ends at the first > after its <, as a
+        # declaration does (CLOSE "@")
+        kind = b"@" if m.group(2) is not None else m.group(1)
         close = b")" if kind is None else CLOSE.get(kind, b">")
         heads, ends = by.setdefault(close, ([], []))
         if ends and ends[-1] == big:
@@ -852,7 +904,7 @@ def inline_held(text):
     tables = [(text.rfind(close), heads, ends) for close, (heads, ends) in by.items()]
 
     def held(pos):
-        if 0 <= image <= pos - 2 and bracket >= pos:
+        if 0 <= image <= pos - 2 and bracket >= pos or in_ref(pos):
             return True
         for last, heads, ends in tables:
             k = bisect.bisect_right(heads, pos)
@@ -876,7 +928,65 @@ def cover(pairs):
     return inside
 
 
-def code_spans(text, starts, held):
+def labels(text):
+    # (regions, refs): the (start, end) of each [ and ] in text that marked
+    # may read as the label of a link, an image or a reference link, which
+    # it lexes apart from the text around it (regions), or as the reference
+    # of a full reference link [label][ref], which it never lexes (refs).
+    # From every [, whether marked reaches it or not: the label of a link or
+    # a full reference link runs over the atoms of its rule to the first ]
+    # between two of them (a [...] with no [ in it, a backslash and a
+    # character that ends no line, a backtick and all up to the next one,
+    # any other character), and an ( or a [ follows that ]; the label of a
+    # shortcut reference link, and a reference, runs to the first [ or ] no
+    # backslash escapes, which must be a ]. Only labels with something in
+    # them are kept. One pass from the end over what a label is read over
+    # (LABEL_AT), from the first [ to the last ], each step from the ones
+    # after it. marked lexes the text of a label again with each \[ and \]
+    # in it read as a bracket, which no pass over the raw text places: a
+    # label with one in it is held whole, as a reference is (one of refs)
+    f, z = text.find(b"["), text.rfind(b"]")
+    if f < 0 or z < f:
+        return [], []
+    at = [m.start() for m in LABEL_AT.finditer(text, f, z + 1)]
+    n = len(at)
+    # inner[k], label[k]: the index in at of the bracket where a shortcut
+    # label and a link label read from at[k] stop (-1: they fail there)
+    inner, label, tick = [-1] * (n + 1), [-1] * (n + 1), n
+    for k in range(n - 1, -1, -1):
+        p, c = at[k], text[at[k]]
+        if c == 91 or c == 93:
+            inner[k] = k
+            q = inner[k + 1]
+            label[k] = k if c == 93 else label[q + 1] if q >= 0 and text[at[q]] == 93 else -1
+        elif c == 92:
+            if text[p + 1:p + 2] in (b"", b"\n", b"\r") or text[p + 1:p + 4] in (b"\xe2\x80\xa8", b"\xe2\x80\xa9"):
+                inner[k] = label[k] = -1
+            else:
+                j = k + 2 if k + 1 < n and at[k + 1] == p + 1 else k + 1
+                inner[k], label[k] = inner[j], label[j]
+        else:
+            inner[k], label[k], tick = inner[k + 1], label[tick + 1] if tick < n else -1, k
+    regions, refs = [], []
+    for k in range(n):
+        if text[at[k]] != 91:
+            continue
+        q = label[k + 1]
+        if q >= 0 and text[at[q] + 1:at[q] + 2] in (b"(", b"["):
+            if at[q] > at[k] + 1:
+                regions.append((at[k], at[q]))
+            r = inner[q + 2] if q + 1 < n and at[q + 1] == at[q] + 1 else -1
+            if r >= 0 and text[at[r]] == 93 and at[r] > at[q] + 2:
+                refs.append((at[q] + 1, at[r]))
+        q = inner[k + 1]
+        if q >= 0 and text[at[q]] == 93 and at[q] > at[k] + 1:
+            regions.append((at[k], at[q]))
+    esc = [m.start() for m in re.finditer(rb"\\[\[\]]", text)]
+    refs += [(a, b) for a, b in regions if bisect.bisect_right(esc, b - 2) > bisect.bisect_left(esc, a + 1)]
+    return regions, refs
+
+
+def code_spans(text, starts, held, regions, delims):
     # spanned(pos): True when pos may sit in a code span of text, lines
     # marked may read as one paragraph that begins at any of starts.
     # CommonMark pairs each backtick run with the next run of its length
@@ -885,10 +995,13 @@ def code_spans(text, starts, held):
     # from every start counts (their walks merge, so this stays linear).
     # Past a run an inline construct may hold (held), or one emphasis may
     # take into its token (a * or _ run that may open it before the run, a
-    # run of that character after it: the run then pairs inside the token
-    # only, which frees a later run to pair across pos), any run before pos
-    # with a run of its length after pos counts. A backslash run is matched
-    # from its start only, and both tests bisect (cover)
+    # run of that character after it, of delims), or past the first run of
+    # a label (regions, from labels) when a walk reaches that run outside
+    # every span and one of its spans runs past the end of the label (marked
+    # lexes the label apart: the run pairs inside the token only, which
+    # frees a later run to pair across pos), any run before pos with a run
+    # of its length after pos counts. A backslash run is matched from its
+    # start only, and the tests bisect (cover)
     runs = [(m.start(2), len(m.group(2)) - len(m.group(1)) % 2, len(m.group(2))) for m in re.finditer(rb"(?<!\\)(\\*)(`+)", text)]
     heads = [r[0] for r in runs]
     nxt, seen = [None] * len(runs), {}
@@ -907,17 +1020,29 @@ def code_spans(text, starts, held):
                 spans.append((runs[i][0], runs[j][0]))
                 i = j + 1
     within = cover(spans)
-    # the * and _ runs as emphasis reads them: the first that may open,
-    # the last of each character (an _ between letters or digits is none)
-    first, last = {}, {}
-    for m in re.finditer(rb"\*+|_+", text):
-        s, e, ch = m.start(), m.end(), m.group()[:1]
-        if ch == b"_" and ALNUM.fullmatch(text[s - 1:s]) and ALNUM.fullmatch(text[e:e + 1]):
-            continue
-        if text[e:e + 1] not in SPACE:
-            first.setdefault(ch, s)
-        last[ch] = s
-    owned = next((r[0] for r in runs if held(r[0]) or any(first[ch] < r[0] < last[ch] for ch in first)), len(text) + 1)
+    # a label (a, b) of regions: a walk that reaches its first run i0 is
+    # outside every span at a, and it pairs a run inside the label past b
+    # when it never reaches i1, the first run after b. Each walk steps from
+    # run i to up[i] > i, so the steps form a tree rooted past the last run,
+    # and the walk from i reaches k when i is under k: the size[k] runs
+    # under k, k with them, are numbered from order[k] on (the runs from the
+    # last back, each taking the next free number under the run it steps to)
+    big, nr = len(text) + 1, len(runs)
+    cross = big
+    if regions and runs:
+        up = [i + 1 if nxt[i] is None else nxt[i] + 1 for i in range(nr)]
+        size, order, free = [1] * (nr + 1), [0] * (nr + 1), [0] * nr + [1]
+        for i in range(nr):
+            size[up[i]] += size[i]
+        for i in range(nr - 1, -1, -1):
+            order[i], free[up[i]] = free[up[i]], free[up[i]] + size[i]
+            free[i] = order[i] + 1
+        for a, b in regions:
+            i0, i1 = bisect.bisect_right(heads, a), bisect.bisect_right(heads, b)
+            if i0 < i1 and i0 in done and not order[i1] <= order[i0] < order[i1] + size[i1]:
+                cross = min(cross, heads[i0])
+    _, first, last = delims
+    owned = next((r[0] for r in runs if r[0] >= cross or held(r[0]) or any(first[ch] < r[0] < last[ch] for ch in first)), big)
     opens, closes = {}, {}
     for r in runs:
         opens.setdefault(r[1], r[0])
@@ -981,13 +1106,13 @@ def joined(piece, s):
     return False
 
 
-def emphasis(text):
-    # paired(a, b): True when a * or _ run in text[a:b] may pair with another
-    # run of its character in text, lines marked may read as one paragraph,
-    # as emphasis that splits the import word there. Wider than marked: a run
-    # opens unless a space, tab or line end follows it, any run closes, and
-    # only an _ between two ASCII letters or digits does neither. The runs in
-    # text[a:b] are found by bisecting their starts
+def delim_runs(text):
+    # (runs, first, last): the * and _ runs of text as emphasis and
+    # code_spans read them, each as its start and character, and per
+    # character the start of the first run that may open emphasis and of
+    # the last run. Wider than marked: a run opens unless a space, tab or
+    # line end follows it, any run closes, and only an _ between two ASCII
+    # letters or digits does neither (it is no run here)
     first, last, runs = {}, {}, []
     for m in re.finditer(rb"\*+|_+", text):
         s, e, ch = m.start(), m.end(), m.group()[:1]
@@ -997,6 +1122,15 @@ def emphasis(text):
         if text[e:e + 1] not in SPACE:
             first.setdefault(ch, s)
         last[ch] = s
+    return runs, first, last
+
+
+def emphasis(text, delims):
+    # paired(a, b): True when a * or _ run in text[a:b] may pair with another
+    # run of its character in text, lines marked may read as one paragraph,
+    # as emphasis that splits the import word there (delims, from
+    # delim_runs). The runs in text[a:b] are found by bisecting their starts
+    runs, first, last = delims
     heads = [s for s, _ in runs]
 
     def paired(a, b):
@@ -1021,21 +1155,39 @@ def text_words(text):
         at += len(piece) + 1
     if not words:
         return []
-    held = inline_held(text)
-    spanned = code_spans(text, starts, held)
-    paired = emphasis(text)
+    regions, refs = labels(text)
+    held = inline_held(text, refs)
+    delims = delim_runs(text)
+    spanned = code_spans(text, starts, held, regions, delims)
+    paired = emphasis(text, delims)
     return [m for p, m in words if not held(p) and not spanned(p) and not paired(p + 1, p + 1 + len(m.group(1)))]
+
+
+def uncomment(raw):
+    # raw with its comments dropped, as Claude Code replaces <!--[\s\S]*?-->
+    # throughout: each <!-- to the first --> after it. A <!-- with no -->
+    # after it ends the search, since no later one has one either (the
+    # regex would scan to the end again from each of them)
+    parts, at = [], 0
+    while True:
+        s = raw.find("<!--", at)
+        e = raw.find("-->", s + 4) if s >= 0 else -1
+        if e < 0:
+            parts.append(raw[at:])
+            return "".join(parts)
+        parts.append(raw[at:s])
+        at = e + 3
 
 
 def html_words(raw):
     # the IMPORT matches Claude Code reads in an HTML block (raw, its marked
     # source): only in one that opens with a comment and closes one, outside
-    # its comments (MK_COMMENT), each path after an @ at the start or after a
+    # its comments (uncomment), each path after an @ at the start or after a
     # JavaScript space (MK_AT), read whole (path_ok), no backslash in it
     lead = raw.lstrip(JS_TRIM)
     if not lead.startswith("<!--") or "-->" not in lead:
         return []
-    rest = MK_COMMENT.sub("", raw)
+    rest = uncomment(raw)
     found = []
     for w in MK_AT.finditer(rest):
         m = None if "\\" in w.group(1) else IMPORT.fullmatch(b"@" + js_bytes(w.group(1)))
@@ -1060,27 +1212,33 @@ def md_walk(tokens, found):
                 md_walk(item[2], found)
 
 
+def md_stop(e):
+    # the MdBound for what stopped MdLexer
+    return MdBound(str(e) if isinstance(e, MdStop) else "Markdown nested deeper than Triforge reads")
+
+
 def md_scan(data, where=False):
     # (found, open): the IMPORT matches Claude Code reads as text in data
     # (md_walk over the tokens MdLexer reads, none when it stops), and with
     # where the construct a line appended to data lands in when it is no
     # text there ("" for none or without where): the top-level block that
-    # takes the line @AGENTS.md appended, read the same way
+    # takes the line @AGENTS.md appended, read the same way, or an MdBound
+    # when a bound stops the reading of data, or of data with that line
     if len(data) > MD_MAX:
-        return [], ""
+        return [], MdBound("more than " + str(MD_MAX) + " bytes") if where else ""
     prefix, body = md_body(data)
     src, found = js_text(body), []
     try:
         md_walk(MdLexer(len(src)).block(src, []), found)
     except (MdStop, RecursionError) as e:
-        return [], (str(e) + ", from which Triforge reads no import") if where else ""
+        return [], md_stop(e) if where else ""
     if not where:
         return found, ""
     tail = src + ("\n" if src and not src.endswith("\n") else "") + "@AGENTS.md\n"
     try:
         tokens = MdLexer(len(tail)).block(tail, [])
     except (MdStop, RecursionError) as e:
-        return found, str(e)
+        return found, md_stop(e)
     at = len(tail) - len("@AGENTS.md\n")
     t = ([None] + [t for t in tokens if t.at <= at])[-1]
     if t is None or t.at + len(t.raw) <= at:
@@ -1226,7 +1384,7 @@ def kind_names(kinds):
 
 
 def row(kind, where, path, level, project):
-    data = load(path)
+    data = load_md(path) if kind in CLAUDE_KINDS else load(path)
     if data is None:
         states = ["unreadable"]
     elif kind in CLAUDE_KINDS:
@@ -1399,7 +1557,7 @@ def reach(lead, r, cwd):
             tail += ": no " + kind_names(r["shadow"]) + " at " + cwd + " or above"
         else:
             for p in [s[0] for s in shadows] + [u for u in user_tiers() if lexists(u)]:
-                d = load(p)
+                d = load_md(p)
                 if d is not None and imports(p, d, set(l for _, l, _ in pointers)):
                     return say(lead, "visible", p + " imports " + pointer + ", so it is loaded with that file" + note)
             p, kind, level = shadows[0]
@@ -1465,7 +1623,9 @@ def write_file(dirpath, name, old, new):
                 st = os.fstat(f.fileno())
                 if not stat.S_ISREG(st.st_mode):
                     return "it is no longer a regular file"
-                cur, mode = f.read(), stat.S_IMODE(st.st_mode)
+                # one byte past old at most: a longer file differs from old
+                # all the same, and a huge one is never read whole
+                cur, mode = f.read(0 if old is None else len(old) + 1), stat.S_IMODE(st.st_mode)
         if cur != old:
             return "it changed while the change was planned"
         for _ in range(8):
@@ -1510,7 +1670,7 @@ def add_import(fn, arg, yes):
         return refuse(fn, path + " is neither in this project (" + project + ") nor above it, so it never shadows its AGENTS.md")
     if not lexists(path):
         return refuse(fn, path + " does not exist; nothing shadows AGENTS.md there")
-    data = load(path)
+    data = load_md(path)
     if data is None:
         return refuse(fn, path + " is not a regular file")
     if imports(path, data, {project}):
@@ -1530,10 +1690,19 @@ def add_import(fn, arg, yes):
         # refused before any plan, also with --yes, naming where
         alt = "" if same_file(path, os.path.join(project, own)) else "; or put the line " + import_line(own, project, project) + " in " + os.path.join(project, own) + " instead, which loads it for this project only"
         agents = os.path.join(project, "AGENTS.md")
+        if len(new) > MD_MAX:
+            # a size bound: Claude Code reads no import from the file, and
+            # data may be only its first MD_MAX + 1 bytes (load_md)
+            size = "is more than" if len(data) > MD_MAX else "would be " + str(len(new)) + " bytes with the line " + line + " appended, more than"
+            return refuse(fn, path + " " + size + " the " + str(MD_MAX) + " bytes Claude Code reads an import from, and Triforge reads no import from such a file either, so the line " + line + " would not read back as an import of " + agents + " there; shorten the file, or add the line yourself where Claude Code reads it" + alt)
         where = md_scan(data, True)[1]
+        if isinstance(where, MdBound):
+            # another bound: the file holds more, or deeper, Markdown than
+            # MdLexer reads, so no import is read from it, the line included
+            return refuse(fn, path + " with the line " + line + " appended holds " + where + ", and Triforge reads no import from such a file, so the line would not read back as an import of " + agents + " there; add the line yourself where Claude Code reads it" + alt)
         if where:
             return refuse(fn, path + " ends inside " + where + ", so the line " + line + " appended there would not read back as an import of " + agents + " (Claude Code reads an import from Markdown text only); close it first, or add the line yourself outside it" + alt)
-        return refuse(fn, path + " would not read back the line " + line + ", appended at its end, as an import of " + agents + " (Claude Code reads an import from Markdown text only, never from front matter, a code span or inline HTML, nor one whose * or _ pairs with another in its paragraph, and reads no file over " + str(MD_MAX) + " bytes); add the line yourself where Claude Code reads it" + alt)
+        return refuse(fn, path + " would not read back the line " + line + ", appended at its end, as an import of " + agents + " (Claude Code reads an import from Markdown text only, never from front matter, a code span or inline HTML, nor one whose * or _ pairs with another in its paragraph); add the line yourself where Claude Code reads it" + alt)
     plan = "add the line " + line + " to " + path + ", so Claude Code loads " + os.path.join(project, "AGENTS.md") + " with it"
     if lev != project:
         # a file above the project: every project under it loads the import
@@ -1656,7 +1825,7 @@ def convert(fn, arg, template, yes):
     if not lexists(path):
         out("unchanged: " + path + " does not exist; nothing to convert")
         return 0
-    data = load(path)
+    data = load_md(path)
     if data is None:
         return refuse(fn, path + " is not a regular file")
     version = exact_3x(data)
@@ -1690,7 +1859,8 @@ def convert(fn, arg, template, yes):
         try:
             fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
             with os.fdopen(fd, "rb") as f:
-                cur = f.read() if stat.S_ISREG(os.fstat(f.fileno()).st_mode) else None
+                # one byte past data at most, as write_file reads
+                cur = f.read(len(data) + 1) if stat.S_ISREG(os.fstat(f.fileno()).st_mode) else None
         except OSError:
             cur = None
         if cur != data:
@@ -1701,7 +1871,7 @@ def convert(fn, arg, template, yes):
     out("changed: " + path + ": removed (an unmodified copy of the Triforge " + version + " template)")
     for k in CLAUDE_KINDS:
         p = os.path.join(lev, k)
-        d = load(p) if lexists(p) else None
+        d = load_md(p) if lexists(p) else None
         if d is not None and not imports(p, d, {lev}):
             out("note: " + p + " still exists and does not import AGENTS.md, so Claude Code still skips AGENTS.md here; instruction_add_import " + p + " offers the line")
     return 0
@@ -1729,42 +1899,144 @@ except OSError as e:
     sys.exit(80)
 '
 
-# _instr_py <op> <helper> <args...> — run _INSTR_PY (rc 69 without python3).
-# With _INSTR_SECS set (session start sets it for its detect pass, which a
-# file it is handed must not stall), python3 is given up on after that many
-# seconds, as the hook bounds its other steps: a SIGTERM, then a SIGKILL 2 s
-# later, under timeout or gtimeout (-k 2s) when one is on PATH, else under a
-# watchdog that signals the python3 it started in the background (a launcher
-# that execs keeps that pid; a sleep that fails signals nothing) and whose
-# stdio is /dev/null, so it holds no pipe of the caller open. A run given up
-# on returns nonzero: 124 or 137 from the timeout binary, 143 or 137 from the
-# watchdog. The braces take the line bash prints when the SIGKILL timeout
-# sends its process group ends timeout too; python3 writes to the caller's
-# stderr through fd 3.
+# _INSTR_READ_SECS — the bound a read-only run gets when its caller sets no
+# _INSTR_SECS (at-setup's detect, visibility and plan calls): 30 s. An
+# ordinary project's pass takes well under a second (this checkout's detect
+# 0.04 s, a project whose CLAUDE.md is 4 MiB of prose 0.4 s), so only a file
+# built to slow the reader, or a python3 that hangs, reaches it; and setup's
+# detect block, three such calls (detect, then visibility for each CLI that
+# can lead), stays inside the 2 minutes Claude Code gives a shell call by
+# default even when every one is given up on (3 x 32 s).
+_INSTR_READ_SECS=30
+
+# _instr_tmp_ok <dir> — 0 when no other user can rename entries in <dir>: it
+# is owned by this user or root, and has no group or other write unless the
+# sticky bit is set (the rule _ss_tmp_ok applies in session-start.sh, B5).
+_instr_tmp_ok() {
+  local W
+  [ -d "$1" ] || return 1
+  if [ ! -O "$1" ]; then
+    W=$(find -H "$1" -maxdepth 0 -user 0 2>/dev/null) || return 1
+    [ -n "$W" ] || return 1
+  fi
+  W=$(find -H "$1" -maxdepth 0 \( -perm -020 -o -perm -002 \) ! -perm -1000 2>/dev/null) || return 1
+  [ -z "$W" ]
+}
+
+# _instr_watchdog <seconds> <program> <op> <helper> <args...> — python3 -c
+# <program> <op> <helper> <args...> where neither timeout nor gtimeout is on
+# PATH, given up on after <seconds>: a SIGTERM, then a SIGKILL 2 s later.
+# _ss_bounded in hooks/handlers/session-start.sh does the same for the hook's
+# own calls (a hook function, which this library cannot call). A subshell, so
+# its fds, traps and PATH stay its own. python3's stdout and stderr go to two
+# files in a private temp dir (mktemp -d, mode 0700, under TMPDIR, else /tmp,
+# whichever passes _instr_tmp_ok); each file is opened for writing and for
+# reading before the dir is removed, so nothing is left on disk on any path,
+# and the two are printed (stdout, then stderr) only once python3 is gone. A
+# python3 launcher that forks instead of exec'ing, and leaves a child holding
+# what it was handed, so holds no pipe of the caller's open. The watchdog is
+# a background subshell whose stdio is /dev/null; killed as soon as python3
+# returns, it first SIGKILLs its own sleep, so none outlives the call (a TERM
+# could land before the sleep's exec, where the forked copy of the trap would
+# swallow it). Its TERM trap starts as a flag, so a TERM before the sleep
+# exists is not lost; a sleep that fails signals nothing. Each `wait`
+# swallows bash's "Terminated" or "Killed" line. mktemp, find, rm, cat and
+# sleep are looked up on PATH, then in /usr/bin and /bin. rc 69, nothing run,
+# with no private temp dir.
+_instr_watchdog() (
+  SECS=$1
+  P=$2
+  shift 2
+  PATH="${PATH:+$PATH:}/usr/bin:/bin"
+  D=""
+  for T in "${TMPDIR:-/tmp}" /tmp; do
+    if _instr_tmp_ok "$T" && D=$(mktemp -d "${T%/}/triforge-instr.XXXXXX" 2>/dev/null); then
+      break
+    fi
+    D=""
+  done
+  if [ -n "$D" ] && ! { exec 4>"$D/out" 5<"$D/out" 6>"$D/err" 7<"$D/err"; } 2>/dev/null; then
+    rm -rf "$D"
+    D=""
+  fi
+  if [ -z "$D" ]; then
+    printf '%s: neither timeout nor gtimeout is on PATH, and the watchdog that bounds python3 without them has no private temp dir (TMPDIR and /tmp are shared without the sticky bit, or mktemp failed); nothing was run (rc 69)\n' "$2" >&2
+    exit 69
+  fi
+  rm -rf "$D"
+  python3 -c "$P" "$@" </dev/null >&4 2>&6 4>&- 5<&- 6>&- 7<&- &
+  PID=$!
+  ( K=""
+    trap 'K=1' TERM
+    sleep "$SECS" &
+    trap 'kill -9 "$!" 2>/dev/null || true; exit 0' TERM
+    if [ -n "$K" ]; then
+      kill -9 "$!" 2>/dev/null || true
+      exit 0
+    fi
+    wait "$!" || exit 0
+    kill "$PID" 2>/dev/null || exit 0
+    sleep 2 &
+    wait "$!" || exit 0
+    kill -9 "$PID" 2>/dev/null || true
+    exit 0
+  ) </dev/null >/dev/null 2>&1 4>&- 5<&- 6>&- 7<&- &
+  DOG=$!
+  RC=0
+  wait "$PID" 2>/dev/null || RC=$?
+  kill "$DOG" 2>/dev/null || true
+  wait "$DOG" 2>/dev/null || true
+  cat <&5
+  cat <&7 >&2
+  exit "$RC"
+)
+
+# _instr_py <read|write> <op> <helper> <args...> — run _INSTR_PY (rc 69
+# without python3). A read run (detect, visibility, a writer without --yes,
+# which only plans) is given up on after _INSTR_SECS seconds when the caller
+# sets it (session start: 10 s for its detect pass, and its own WARNING),
+# else after _INSTR_READ_SECS, with a "gave up" line on stderr: a SIGTERM,
+# then a SIGKILL 2 s later, under timeout or gtimeout (-k 2s) when one is on
+# PATH, else under _instr_watchdog. A run given up on returns 124 or 137
+# under the timeout binary, 143 or 137 under the watchdog. A write run (a
+# writer with --yes) is never bounded, _INSTR_SECS or not: write_file puts
+# the change in a temp file beside the target before it renames it over the
+# target, and a SIGTERM or SIGKILL landing after that would leave the temp
+# file behind (python runs no cleanup for either); its reading is the plan
+# run's, linear in the files' size. The braces take the line bash prints when
+# the SIGKILL timeout sends its process group ends timeout too; python3
+# writes to the caller's stderr through fd 3.
 _instr_py() {
-  local P T PID DOG RC=0
+  local MODE=$1 P SECS="" TELL="" T RC=0
+  shift
   if ! command -v python3 >/dev/null 2>&1; then
     printf '%s: python3 not found — the instruction-file helpers need it (rc 69)\n' "$2" >&2
     return 69
   fi
   P="${_READ_REGULAR_PY:-$_INSTR_READ_PY}
 ${_INSTR_PY}"
-  if [ -z "${_INSTR_SECS:-}" ]; then
+  if [ "$MODE" = read ]; then
+    SECS=${_INSTR_SECS:-}
+    if [ -z "$SECS" ]; then
+      SECS=$_INSTR_READ_SECS
+      TELL=yes
+    fi
+  fi
+  if [ -z "$SECS" ]; then
     python3 -c "$P" "$@"
     return $?
   fi
   T=$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)
   if [ -n "$T" ]; then
-    { "$T" -k 2s "${_INSTR_SECS}s" python3 -c "$P" "$@" 2>&3; } 3>&2 2>/dev/null
-    return $?
+    { "$T" -k 2s "${SECS}s" python3 -c "$P" "$@" 2>&3; } 3>&2 2>/dev/null || RC=$?
+  else
+    _instr_watchdog "$SECS" "$P" "$@" || RC=$?
   fi
-  python3 -c "$P" "$@" </dev/null &
-  PID=$!
-  ( sleep "$_INSTR_SECS" && kill "$PID" && sleep 2 && kill -9 "$PID" ) </dev/null >/dev/null 2>&1 &
-  DOG=$!
-  wait "$PID" 2>/dev/null || RC=$?
-  kill "$DOG" 2>/dev/null || true
-  wait "$DOG" 2>/dev/null || true
+  case "${TELL},${RC}" in
+    yes,124|yes,137|yes,143)
+      printf '%s: gave up after %s s (rc %s): an ordinary project'"'"'s instruction files are read in well under a second, so a file this reads (a CLAUDE.md, .claude/CLAUDE.md, CLAUDE.local.md or AGENTS.md in the project, above it or at the user level) may be built to slow the reader, or python3 hung; nothing was written\n' "$2" "$SECS" "$RC" >&2
+      ;;
+  esac
   return "$RC"
 }
 
@@ -1802,15 +2074,21 @@ _instr_template() {
 }
 
 # _instr_args <helper> <usage> <args...> — parse "<one path> [--yes]" in any
-# order into _INSTR_ARG and _INSTR_YES (0|1); rc 64 with the usage line.
+# order into _INSTR_ARG and _INSTR_YES (0|1), and _INSTR_RUN for _instr_py
+# (read without --yes: the writer only plans; write with it); rc 64 with the
+# usage line.
 _instr_args() {
   local FN=$1 USAGE=$2 A
   shift 2
   _INSTR_ARG=""
   _INSTR_YES=0
+  _INSTR_RUN=read
   for A in "$@"; do
     case "$A" in
-      --yes) _INSTR_YES=1 ;;
+      --yes)
+        _INSTR_YES=1
+        _INSTR_RUN=write
+        ;;
       --*)
         printf '%s: usage: %s (unknown flag %s)\n' "$FN" "$USAGE" "$A" >&2
         return 64
@@ -1853,16 +2131,17 @@ _instr_args() {
 #        character Claude Code does not read whole there, such as a #), so
 #        no import line there can name <dir>'s AGENTS.md.
 # Control characters in a path print as "?". rc 0; 2 <dir> is not a
-# directory; 69 no python3.
+# directory; 69 no python3; 124, 137 or 143 given up on (_instr_py).
 instruction_files_detect() {
-  _instr_py detect instruction_files_detect "${1:-.}"
+  _instr_py read detect instruction_files_detect "${1:-.}"
 }
 
 # instruction_pointer_visibility <lead> [<dir>] — whether Triforge's AGENTS.md
 # (the one holding the pointer block) reaches <lead> started in <dir> (default
 # the working directory), and why: one line "<lead> TAB visible|hidden TAB
 # <why>", the why naming the fix. rc 0 visible, 1 hidden, 2 <dir> is not a
-# directory, 64 usage, 69 no python3. The lead's reader is registry data
+# directory, 64 usage, 69 no python3, 124, 137 or 143 given up on
+# (_instr_py). The lead's reader is registry data
 # (KTD1, `cli_field <lead> instructions`), one of READERS: claude-md-shadow
 # (the CLAUDE.md family shadows AGENTS.md unless one imports it) or
 # agents-chain (an untrusted project, an AGENTS.override.md at the block's
@@ -1881,7 +2160,7 @@ instruction_pointer_visibility() {
     return 64
   fi
   READER=$(_instr_reader "$LEAD") || READER=""
-  _instr_py visibility instruction_pointer_visibility "$LEAD" "$READER" "${2:-.}"
+  _instr_py read visibility instruction_pointer_visibility "$LEAD" "$READER" "${2:-.}"
 }
 
 # instruction_add_import <file> [--yes] — add the line that imports this
@@ -1911,7 +2190,7 @@ instruction_add_import() {
     return 64
   fi
   _instr_writer_ok instruction_add_import || return $?
-  _instr_py add-import instruction_add_import "$_INSTR_ARG" "$_INSTR_YES"
+  _instr_py "$_INSTR_RUN" add-import instruction_add_import "$_INSTR_ARG" "$_INSTR_YES"
 }
 
 # instruction_merge_pointer [<dir>] [--yes] — put templates/AGENTS.md's marked
@@ -1933,7 +2212,7 @@ instruction_add_import() {
 instruction_merge_pointer() {
   _instr_args instruction_merge_pointer "instruction_merge_pointer [<dir>] [--yes]" "$@" || return $?
   _instr_writer_ok instruction_merge_pointer || return $?
-  _instr_py merge instruction_merge_pointer "${_INSTR_ARG:-.}" "$(_instr_template)" "$_INSTR_YES"
+  _instr_py "$_INSTR_RUN" merge instruction_merge_pointer "${_INSTR_ARG:-.}" "$(_instr_template)" "$_INSTR_YES"
 }
 
 # instruction_convert_stale <file> [--yes] — for a CLAUDE.md or .claude/CLAUDE.md
@@ -1954,5 +2233,5 @@ instruction_convert_stale() {
     return 64
   fi
   _instr_writer_ok instruction_convert_stale || return $?
-  _instr_py convert instruction_convert_stale "$_INSTR_ARG" "$(_instr_template)" "$_INSTR_YES"
+  _instr_py "$_INSTR_RUN" convert instruction_convert_stale "$_INSTR_ARG" "$(_instr_template)" "$_INSTR_YES"
 }

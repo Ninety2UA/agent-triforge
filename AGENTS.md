@@ -19,7 +19,7 @@ bash scripts/validate-skills.sh   # 26 conformance checks + the KTD gates over s
 bash scripts/validate-skills.sh --self-test   # its fixtures, scripts/fixtures/validate-skills/
 bash scripts/validate-versions.sh   # lockstep, ladder, drift, stale pins, counts, AGENTS.md budget, inventory + cited paths, commands/ empty, at- surfaces, skill manifests, halt threshold
 bash scripts/validate-versions.sh --self-test   # its fixtures, scripts/fixtures/validate-versions/
-bash scripts/probe-capabilities.sh --self-only   # the SELF gate: static rows only, ~3 min, exit 3 on any SELF FAIL
+bash scripts/probe-capabilities.sh --self-only   # the SELF gate: static rows only, ~15 min, exit 3 on any SELF FAIL
 for f in scripts/*.sh scripts/lib/*.sh hooks/handlers/*.sh; do /bin/bash -n "$f" || echo "SYNTAX $f"; done
 ```
 
