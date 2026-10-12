@@ -12315,7 +12315,55 @@ for _S16B_D in tail-ctl join-ctl tab-ctl; do
   _S16_FAIL="${_S16_FAIL}$(_self_expect "b-$_S16B_D-import" "$_O" '^unchanged: ' '^rc=0$')"
 done
 _S16_FAIL="${_S16_FAIL}$(_s16b_same b-tail-join-tab-controls-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_FN/tail-ctl/CLAUDE.md" "$_S16B_FN/join-ctl/CLAUDE.md" "$_S16B_FN/tab-ctl/CLAUDE.md")")"
-_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file), an import line written or offered only when it reads back as the project's import (b-space-*, a project path with whitespace, a tab too; b-tilde-*, a directory named ~ on the way down: the import into the CLAUDE.md above refused rc 2 before any plan, without and twice with --yes, unchanged; the import column -, visibility and session start naming the project's own CLAUDE.md alone; the .claude/CLAUDE.md beside it, whose @../~/proj/AGENTS.md reads back, still planned), an import read in Markdown text, its path whole (b-fence-*, b-name-*: one in a fence or padded code span, Read @AGENTS.md. or (see @AGENTS.md) is none: no-import, hidden with the fix, the line appended, then unchanged; a file ending in an open fence or comment, an import of c#app or app[1] from above: rc 2, unchanged; a plain line, one after a closed or list-indented fence, @AGENTS.md#setup import), an import in a link title is none (b-title-*: [x](a(b) \"t @AGENTS.md \"), [x](a\\) ..., the Markdown_(syntax) link, the image form, a (title), a title on the next line: no-import, hidden with the fix, the line appended, then unchanged; see @AGENTS.md and one after [y](a(b)c) import), one whose _ may pair as emphasis is none (b-emphasis-*: @_app/AGENTS.md with z_ in its paragraph no-import, hidden; in another paragraph imports, visible), the reader is linear (b-slow: 100 KB of ](, a 40 KB backslash run and 3000 <? before the import, read in ${_S16B_SLOW}s of the 20 s allowed) and bounded (b-bound: _INSTR_SECS=1 gives up on a python3 that ignores SIGTERM in 1 s + the 2 s SIGKILL grace, rc 137, nothing printed, the stub gone, under ${_S16B_BOUND} and the watchdog), an import a path takes in or a block hides is none (b-join-*: @x\\ @AGENTS.md; b-tail-*: <?x?><div>, <!x y><a>, two lines, a quote; b-tab-*: >\\t<div>, -\\t<div>: no-import, hidden, appended, unchanged; controls import); "
+
+# marked's blocks (review round 4, J2): md_scan reads the block structure with
+# a port of marked's own block lexer, so eight more places Claude Code reads
+# no import are none: a tag name that ends its line (the HTML block runs past
+# the blank line after it), a > marked strips from a line it lexes as code, a
+# lazy line in a quote that opens an HTML block, a lazy fence line ending a
+# quote in a list item, a list marker that cannot interrupt a paragraph (2.),
+# a closing tag over lines, a list item that ends after its first line before
+# a definition whose title runs on, a definition label over lines (a blank
+# line in it too). Each alone in a project CLAUDE.md, hiding the @AGENTS.md:
+# detect no-import, visibility hidden with the add-the-line fix, the real
+# line appended with --yes, then unchanged. Controls, one per family, still
+# import: a space after the tag name, a "> " line, a blank line before the
+# HTML, no quote, a 1. marker, a blank line after the tag, three spaces after
+# the marker, a label closed on its line
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-mk-tagname mk-tagname '# own\n<div\n\n@AGENTS.md\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-mk-quote-tab mk-quote-tab '# own\n>-<!x\n>\t\n@AGENTS.md >\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-mk-quote-lazy mk-quote-lazy '# own\n>`\n<!y\n>\n>@AGENTS.md\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-mk-item-fence mk-item-fence '# own\n- >y\n  (``` @AGENTS.md\n  ```\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-mk-marker mk-marker '# own\nx\n2. >@AGENTS.md\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-mk-closetag mk-closetag '# own\n</x\n>\n@AGENTS.md\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-mk-item-def mk-item-def '# own\n1)    <!--\n[a]:u (-->\n@AGENTS.md )\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-mk-label mk-label '# own\n[r\n\n@AGENTS.md\nef]: /u\n\n')"
+_S16B_MKC="mk-tagname-ctl mk-quote-tab-ctl mk-quote-lazy-ctl mk-item-fence-ctl mk-marker-ctl mk-closetag-ctl mk-item-def-ctl mk-label-ctl"
+for _S16B_D in $_S16B_MKC; do _s16b_proj "$_S16B_FN/$_S16B_D"; done
+printf '# own\n<div \n\n@AGENTS.md\n' > "$_S16B_FN/mk-tagname-ctl/CLAUDE.md"
+printf '# own\n>-<!x\n> \n@AGENTS.md >\n' > "$_S16B_FN/mk-quote-tab-ctl/CLAUDE.md"
+printf '# own\n>`\n\n<!y\n>\n>@AGENTS.md\n' > "$_S16B_FN/mk-quote-lazy-ctl/CLAUDE.md"
+printf '# own\n- y\n  (``` @AGENTS.md\n  ```\n' > "$_S16B_FN/mk-item-fence-ctl/CLAUDE.md"
+printf '# own\nx\n1. >@AGENTS.md\n' > "$_S16B_FN/mk-marker-ctl/CLAUDE.md"
+printf '# own\n</x\n>\n\n@AGENTS.md\n' > "$_S16B_FN/mk-closetag-ctl/CLAUDE.md"
+printf '# own\n1)   <!--\n[a]:u (-->\n@AGENTS.md )\n' > "$_S16B_FN/mk-item-def-ctl/CLAUDE.md"
+printf '# own\n[r]\n\n@AGENTS.md\nef]: /u\n' > "$_S16B_FN/mk-label-ctl/CLAUDE.md"
+_S16B_MKF=""
+for _S16B_D in $_S16B_MKC; do _S16B_MKF="$_S16B_MKF $_S16B_FN/$_S16B_D/CLAUDE.md"; done
+# _S16B_MKF: the control files, split on purpose (no whitespace in the paths)
+# shellcheck disable=SC2086
+_S16B_SUM=$(_s16b_sum $_S16B_MKF)
+for _S16B_D in $_S16B_MKC; do
+  _O=$(_s16b "$_S16B_FN/$_S16B_D" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-$_S16B_D" "$_O" "^CLAUDE\.md${T}project${T}imports,user-owned${T}" '^rc=0$')"
+  _O=$(_s16b "$_S16B_FN/$_S16B_D" instruction_pointer_visibility claude)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-$_S16B_D-vis" "$_O" "^claude${T}visible${T}[^ ]*/w/fn/$_S16B_D/CLAUDE\.md imports " '^rc=0$')"
+  _O=$(_s16b "$_S16B_FN/$_S16B_D" instruction_add_import CLAUDE.md --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-$_S16B_D-import" "$_O" '^unchanged: ' '^rc=0$')"
+done
+# shellcheck disable=SC2086
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-mk-controls-untouched "$_S16B_SUM" "$(_s16b_sum $_S16B_MKF)")"
+_S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file), an import line written or offered only when it reads back as the project's import (b-space-*, a project path with whitespace, a tab too; b-tilde-*, a directory named ~ on the way down: the import into the CLAUDE.md above refused rc 2 before any plan, without and twice with --yes, unchanged; the import column -, visibility and session start naming the project's own CLAUDE.md alone; the .claude/CLAUDE.md beside it, whose @../~/proj/AGENTS.md reads back, still planned), an import read in Markdown text, its path whole (b-fence-*, b-name-*: one in a fence or padded code span, Read @AGENTS.md. or (see @AGENTS.md) is none: no-import, hidden with the fix, the line appended, then unchanged; a file ending in an open fence or comment, an import of c#app or app[1] from above: rc 2, unchanged; a plain line, one after a closed or list-indented fence, @AGENTS.md#setup import), an import in a link title is none (b-title-*: [x](a(b) \"t @AGENTS.md \"), [x](a\\) ..., the Markdown_(syntax) link, the image form, a (title), a title on the next line: no-import, hidden with the fix, the line appended, then unchanged; see @AGENTS.md and one after [y](a(b)c) import), one whose _ may pair as emphasis is none (b-emphasis-*: @_app/AGENTS.md with z_ in its paragraph no-import, hidden; in another paragraph imports, visible), the reader is linear (b-slow: 100 KB of ](, a 40 KB backslash run and 3000 <? before the import, read in ${_S16B_SLOW}s of the 20 s allowed) and bounded (b-bound: _INSTR_SECS=1 gives up on a python3 that ignores SIGTERM in 1 s + the 2 s SIGKILL grace, rc 137, nothing printed, the stub gone, under ${_S16B_BOUND} and the watchdog), an import a path takes in or a block hides is none (b-join-*: @x\\ @AGENTS.md; b-tail-*: <?x?><div>, <!x y><a>, two lines, a quote; b-tab-*: >\\t<div>, -\\t<div>: no-import, hidden, appended, unchanged; controls import), the block structure as marked lexes it (b-mk-*: a tag name ending its line, a > stripped from a code line, a lazy HTML line in a quote, a lazy fence ending a quote in a list item, a 2. after paragraph text, a closing tag over lines, an item ended before a definition title, a definition label over lines: no-import, hidden, appended, unchanged; one control per family imports); "
 rm -rf "$_S16B"
 # --- end of SELF-16 section B ---
 # --- SELF-16 section C: at-setup's blocks and the headless primitives (U15) ---
