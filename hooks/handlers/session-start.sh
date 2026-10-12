@@ -256,35 +256,35 @@ if [ -z "$TIMEOUT_BIN" ]; then
 fi
 
 # _ss_bounded <seconds> <dir> <command…> — the command's stdout, the command
-# given up on after <seconds>: under the timeout binary when there is one,
-# else (stock macOS) under a watchdog — the command runs in the background, a
-# second background subshell kills it when the time is up, and that subshell
-# is killed as soon as the command returns. The answer travels through a file
-# in <dir>, a private temp dir the caller made (_ss_private_tmp: never one
-# other users can rename entries in, B5, G2) and this removes; the watchdog's
-# stdio is /dev/null, so nothing a killed command leaves running holds the
-# caller's command substitution open; each `wait` swallows bash's
-# "Terminated" or "Killed" line. Giving up is a SIGTERM, then a SIGKILL 2 s
-# later (`-k 2s`, or the watchdog's second kill): back within <seconds> + 2 s
-# even when the command ignores SIGTERM. timeout's SIGKILL goes to its whole
-# process group, itself included; the braces swallow bash's "Killed" line for
-# it. _instr_watchdog in scripts/lib/instructions.sh does this for the library.
+# given up on after <seconds>: a SIGTERM, then a SIGKILL 2 s later. Under the
+# timeout binary when there is one (-k 2s; its SIGKILL takes its process group,
+# itself too, and the braces swallow bash's "Killed" line), else under the same
+# watchdog as _instr_watchdog in scripts/lib/instructions.sh, the library's:
+# the answer goes to <dir>/out (a private temp dir from _ss_private_tmp, B5, G2,
+# removed here), and a background subshell on /dev/null (holding no pipe of the
+# caller's) kills the command at the bound; killed once the command returns, it
+# SIGKILLs its own sleep from its TERM trap (a flag until that sleep exists), so
+# none outlives the call. Each `wait` swallows a "Terminated" or "Killed" line.
 _ss_bounded() {
-  local SECS="$1" OUT_DIR="$2" OUT CMD_PID DOG_PID
+  local SECS="$1" OUT_DIR="$2" CMD_PID DOG_PID
   shift 2
   if [ -n "$TIMEOUT_BIN" ]; then
     { "$TIMEOUT_BIN" -k 2s "${SECS}s" "$@"; } 2>/dev/null || true
     return 0
   fi
-  OUT="${OUT_DIR}/out"
-  "$@" </dev/null >"$OUT" 2>/dev/null &
+  "$@" </dev/null >"$OUT_DIR/out" 2>/dev/null &
   CMD_PID=$!
-  ( sleep "$SECS"; kill "$CMD_PID" && sleep 2 && kill -9 "$CMD_PID" || true ) </dev/null >/dev/null 2>&1 &
+  ( K=""; trap 'K=1' TERM; sleep "$SECS" &
+    trap 'kill -9 "$!" 2>/dev/null || true; exit 0' TERM
+    if [ -n "$K" ]; then kill -9 "$!" 2>/dev/null || true; exit 0; fi
+    wait "$!" || exit 0; kill "$CMD_PID" 2>/dev/null || exit 0
+    sleep 2 & wait "$!" || exit 0; kill -9 "$CMD_PID" 2>/dev/null || true
+  ) </dev/null >/dev/null 2>&1 &
   DOG_PID=$!
   wait "$CMD_PID" 2>/dev/null || true
   kill "$DOG_PID" 2>/dev/null || true
   wait "$DOG_PID" 2>/dev/null || true
-  cat "$OUT" 2>/dev/null || true
+  cat "$OUT_DIR/out" 2>/dev/null || true
   rm -rf "$OUT_DIR"
 }
 
