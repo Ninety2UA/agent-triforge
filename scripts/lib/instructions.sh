@@ -80,8 +80,10 @@
 # (instruction_add_import) · 3 over the AGENTS.md byte budget
 # (instruction_merge_pointer and the merge in
 # instruction_convert_stale) · 20 needs-ask · 45 lead-only refusal · 64 usage ·
-# 69 unavailable (no python3, no template) · 80 degraded (a write failed, or
-# the target changed while it was planned).
+# 69 unavailable (no python3, no template, no private temp dir for the
+# watchdog) · 80 degraded (a write failed, or the target changed while it was
+# planned) · 124, 137 or 143 a read-only run given up on (_instr_py: 30 s
+# unless the caller sets _INSTR_SECS; a writer with --yes is never bounded).
 
 # The plugin root this file belongs to, for templates/AGENTS.md when the
 # loader's _TRIFORGE_PLUGIN_ROOT is not in scope (the hook sources this file
@@ -1897,42 +1899,144 @@ except OSError as e:
     sys.exit(80)
 '
 
-# _instr_py <op> <helper> <args...> — run _INSTR_PY (rc 69 without python3).
-# With _INSTR_SECS set (session start sets it for its detect pass, which a
-# file it is handed must not stall), python3 is given up on after that many
-# seconds, as the hook bounds its other steps: a SIGTERM, then a SIGKILL 2 s
-# later, under timeout or gtimeout (-k 2s) when one is on PATH, else under a
-# watchdog that signals the python3 it started in the background (a launcher
-# that execs keeps that pid; a sleep that fails signals nothing) and whose
-# stdio is /dev/null, so it holds no pipe of the caller open. A run given up
-# on returns nonzero: 124 or 137 from the timeout binary, 143 or 137 from the
-# watchdog. The braces take the line bash prints when the SIGKILL timeout
-# sends its process group ends timeout too; python3 writes to the caller's
-# stderr through fd 3.
+# _INSTR_READ_SECS — the bound a read-only run gets when its caller sets no
+# _INSTR_SECS (at-setup's detect, visibility and plan calls): 30 s. An
+# ordinary project's pass takes well under a second (this checkout's detect
+# 0.04 s, a project whose CLAUDE.md is 4 MiB of prose 0.4 s), so only a file
+# built to slow the reader, or a python3 that hangs, reaches it; and setup's
+# detect block, three such calls (detect, then visibility for each CLI that
+# can lead), stays inside the 2 minutes Claude Code gives a shell call by
+# default even when every one is given up on (3 x 32 s).
+_INSTR_READ_SECS=30
+
+# _instr_tmp_ok <dir> — 0 when no other user can rename entries in <dir>: it
+# is owned by this user or root, and has no group or other write unless the
+# sticky bit is set (the rule _ss_tmp_ok applies in session-start.sh, B5).
+_instr_tmp_ok() {
+  local W
+  [ -d "$1" ] || return 1
+  if [ ! -O "$1" ]; then
+    W=$(find -H "$1" -maxdepth 0 -user 0 2>/dev/null) || return 1
+    [ -n "$W" ] || return 1
+  fi
+  W=$(find -H "$1" -maxdepth 0 \( -perm -020 -o -perm -002 \) ! -perm -1000 2>/dev/null) || return 1
+  [ -z "$W" ]
+}
+
+# _instr_watchdog <seconds> <program> <op> <helper> <args...> — python3 -c
+# <program> <op> <helper> <args...> where neither timeout nor gtimeout is on
+# PATH, given up on after <seconds>: a SIGTERM, then a SIGKILL 2 s later.
+# _ss_bounded in hooks/handlers/session-start.sh does the same for the hook's
+# own calls (a hook function, which this library cannot call). A subshell, so
+# its fds, traps and PATH stay its own. python3's stdout and stderr go to two
+# files in a private temp dir (mktemp -d, mode 0700, under TMPDIR, else /tmp,
+# whichever passes _instr_tmp_ok); each file is opened for writing and for
+# reading before the dir is removed, so nothing is left on disk on any path,
+# and the two are printed (stdout, then stderr) only once python3 is gone. A
+# python3 launcher that forks instead of exec'ing, and leaves a child holding
+# what it was handed, so holds no pipe of the caller's open. The watchdog is
+# a background subshell whose stdio is /dev/null; killed as soon as python3
+# returns, it first SIGKILLs its own sleep, so none outlives the call (a TERM
+# could land before the sleep's exec, where the forked copy of the trap would
+# swallow it). Its TERM trap starts as a flag, so a TERM before the sleep
+# exists is not lost; a sleep that fails signals nothing. Each `wait`
+# swallows bash's "Terminated" or "Killed" line. mktemp, find, rm, cat and
+# sleep are looked up on PATH, then in /usr/bin and /bin. rc 69, nothing run,
+# with no private temp dir.
+_instr_watchdog() (
+  SECS=$1
+  P=$2
+  shift 2
+  PATH="${PATH:+$PATH:}/usr/bin:/bin"
+  D=""
+  for T in "${TMPDIR:-/tmp}" /tmp; do
+    if _instr_tmp_ok "$T" && D=$(mktemp -d "${T%/}/triforge-instr.XXXXXX" 2>/dev/null); then
+      break
+    fi
+    D=""
+  done
+  if [ -n "$D" ] && ! { exec 4>"$D/out" 5<"$D/out" 6>"$D/err" 7<"$D/err"; } 2>/dev/null; then
+    rm -rf "$D"
+    D=""
+  fi
+  if [ -z "$D" ]; then
+    printf '%s: neither timeout nor gtimeout is on PATH, and the watchdog that bounds python3 without them has no private temp dir (TMPDIR and /tmp are shared without the sticky bit, or mktemp failed); nothing was run (rc 69)\n' "$2" >&2
+    exit 69
+  fi
+  rm -rf "$D"
+  python3 -c "$P" "$@" </dev/null >&4 2>&6 4>&- 5<&- 6>&- 7<&- &
+  PID=$!
+  ( K=""
+    trap 'K=1' TERM
+    sleep "$SECS" &
+    trap 'kill -9 "$!" 2>/dev/null || true; exit 0' TERM
+    if [ -n "$K" ]; then
+      kill -9 "$!" 2>/dev/null || true
+      exit 0
+    fi
+    wait "$!" || exit 0
+    kill "$PID" 2>/dev/null || exit 0
+    sleep 2 &
+    wait "$!" || exit 0
+    kill -9 "$PID" 2>/dev/null || true
+    exit 0
+  ) </dev/null >/dev/null 2>&1 4>&- 5<&- 6>&- 7<&- &
+  DOG=$!
+  RC=0
+  wait "$PID" 2>/dev/null || RC=$?
+  kill "$DOG" 2>/dev/null || true
+  wait "$DOG" 2>/dev/null || true
+  cat <&5
+  cat <&7 >&2
+  exit "$RC"
+)
+
+# _instr_py <read|write> <op> <helper> <args...> — run _INSTR_PY (rc 69
+# without python3). A read run (detect, visibility, a writer without --yes,
+# which only plans) is given up on after _INSTR_SECS seconds when the caller
+# sets it (session start: 10 s for its detect pass, and its own WARNING),
+# else after _INSTR_READ_SECS, with a "gave up" line on stderr: a SIGTERM,
+# then a SIGKILL 2 s later, under timeout or gtimeout (-k 2s) when one is on
+# PATH, else under _instr_watchdog. A run given up on returns 124 or 137
+# under the timeout binary, 143 or 137 under the watchdog. A write run (a
+# writer with --yes) is never bounded, _INSTR_SECS or not: write_file puts
+# the change in a temp file beside the target before it renames it over the
+# target, and a SIGTERM or SIGKILL landing after that would leave the temp
+# file behind (python runs no cleanup for either); its reading is the plan
+# run's, linear in the files' size. The braces take the line bash prints when
+# the SIGKILL timeout sends its process group ends timeout too; python3
+# writes to the caller's stderr through fd 3.
 _instr_py() {
-  local P T PID DOG RC=0
+  local MODE=$1 P SECS="" TELL="" T RC=0
+  shift
   if ! command -v python3 >/dev/null 2>&1; then
     printf '%s: python3 not found — the instruction-file helpers need it (rc 69)\n' "$2" >&2
     return 69
   fi
   P="${_READ_REGULAR_PY:-$_INSTR_READ_PY}
 ${_INSTR_PY}"
-  if [ -z "${_INSTR_SECS:-}" ]; then
+  if [ "$MODE" = read ]; then
+    SECS=${_INSTR_SECS:-}
+    if [ -z "$SECS" ]; then
+      SECS=$_INSTR_READ_SECS
+      TELL=yes
+    fi
+  fi
+  if [ -z "$SECS" ]; then
     python3 -c "$P" "$@"
     return $?
   fi
   T=$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)
   if [ -n "$T" ]; then
-    { "$T" -k 2s "${_INSTR_SECS}s" python3 -c "$P" "$@" 2>&3; } 3>&2 2>/dev/null
-    return $?
+    { "$T" -k 2s "${SECS}s" python3 -c "$P" "$@" 2>&3; } 3>&2 2>/dev/null || RC=$?
+  else
+    _instr_watchdog "$SECS" "$P" "$@" || RC=$?
   fi
-  python3 -c "$P" "$@" </dev/null &
-  PID=$!
-  ( sleep "$_INSTR_SECS" && kill "$PID" && sleep 2 && kill -9 "$PID" ) </dev/null >/dev/null 2>&1 &
-  DOG=$!
-  wait "$PID" 2>/dev/null || RC=$?
-  kill "$DOG" 2>/dev/null || true
-  wait "$DOG" 2>/dev/null || true
+  case "${TELL},${RC}" in
+    yes,124|yes,137|yes,143)
+      printf '%s: gave up after %s s (rc %s): an ordinary project'"'"'s instruction files are read in well under a second, so a file this reads (a CLAUDE.md, .claude/CLAUDE.md, CLAUDE.local.md or AGENTS.md in the project, above it or at the user level) may be built to slow the reader, or python3 hung; nothing was written\n' "$2" "$SECS" "$RC" >&2
+      ;;
+  esac
   return "$RC"
 }
 
@@ -1970,15 +2074,21 @@ _instr_template() {
 }
 
 # _instr_args <helper> <usage> <args...> — parse "<one path> [--yes]" in any
-# order into _INSTR_ARG and _INSTR_YES (0|1); rc 64 with the usage line.
+# order into _INSTR_ARG and _INSTR_YES (0|1), and _INSTR_RUN for _instr_py
+# (read without --yes: the writer only plans; write with it); rc 64 with the
+# usage line.
 _instr_args() {
   local FN=$1 USAGE=$2 A
   shift 2
   _INSTR_ARG=""
   _INSTR_YES=0
+  _INSTR_RUN=read
   for A in "$@"; do
     case "$A" in
-      --yes) _INSTR_YES=1 ;;
+      --yes)
+        _INSTR_YES=1
+        _INSTR_RUN=write
+        ;;
       --*)
         printf '%s: usage: %s (unknown flag %s)\n' "$FN" "$USAGE" "$A" >&2
         return 64
@@ -2021,16 +2131,17 @@ _instr_args() {
 #        character Claude Code does not read whole there, such as a #), so
 #        no import line there can name <dir>'s AGENTS.md.
 # Control characters in a path print as "?". rc 0; 2 <dir> is not a
-# directory; 69 no python3.
+# directory; 69 no python3; 124, 137 or 143 given up on (_instr_py).
 instruction_files_detect() {
-  _instr_py detect instruction_files_detect "${1:-.}"
+  _instr_py read detect instruction_files_detect "${1:-.}"
 }
 
 # instruction_pointer_visibility <lead> [<dir>] — whether Triforge's AGENTS.md
 # (the one holding the pointer block) reaches <lead> started in <dir> (default
 # the working directory), and why: one line "<lead> TAB visible|hidden TAB
 # <why>", the why naming the fix. rc 0 visible, 1 hidden, 2 <dir> is not a
-# directory, 64 usage, 69 no python3. The lead's reader is registry data
+# directory, 64 usage, 69 no python3, 124, 137 or 143 given up on
+# (_instr_py). The lead's reader is registry data
 # (KTD1, `cli_field <lead> instructions`), one of READERS: claude-md-shadow
 # (the CLAUDE.md family shadows AGENTS.md unless one imports it) or
 # agents-chain (an untrusted project, an AGENTS.override.md at the block's
@@ -2049,7 +2160,7 @@ instruction_pointer_visibility() {
     return 64
   fi
   READER=$(_instr_reader "$LEAD") || READER=""
-  _instr_py visibility instruction_pointer_visibility "$LEAD" "$READER" "${2:-.}"
+  _instr_py read visibility instruction_pointer_visibility "$LEAD" "$READER" "${2:-.}"
 }
 
 # instruction_add_import <file> [--yes] — add the line that imports this
@@ -2079,7 +2190,7 @@ instruction_add_import() {
     return 64
   fi
   _instr_writer_ok instruction_add_import || return $?
-  _instr_py add-import instruction_add_import "$_INSTR_ARG" "$_INSTR_YES"
+  _instr_py "$_INSTR_RUN" add-import instruction_add_import "$_INSTR_ARG" "$_INSTR_YES"
 }
 
 # instruction_merge_pointer [<dir>] [--yes] — put templates/AGENTS.md's marked
@@ -2101,7 +2212,7 @@ instruction_add_import() {
 instruction_merge_pointer() {
   _instr_args instruction_merge_pointer "instruction_merge_pointer [<dir>] [--yes]" "$@" || return $?
   _instr_writer_ok instruction_merge_pointer || return $?
-  _instr_py merge instruction_merge_pointer "${_INSTR_ARG:-.}" "$(_instr_template)" "$_INSTR_YES"
+  _instr_py "$_INSTR_RUN" merge instruction_merge_pointer "${_INSTR_ARG:-.}" "$(_instr_template)" "$_INSTR_YES"
 }
 
 # instruction_convert_stale <file> [--yes] — for a CLAUDE.md or .claude/CLAUDE.md
@@ -2122,5 +2233,5 @@ instruction_convert_stale() {
     return 64
   fi
   _instr_writer_ok instruction_convert_stale || return $?
-  _instr_py convert instruction_convert_stale "$_INSTR_ARG" "$(_instr_template)" "$_INSTR_YES"
+  _instr_py "$_INSTR_RUN" convert instruction_convert_stale "$_INSTR_ARG" "$(_instr_template)" "$_INSTR_YES"
 }
