@@ -1534,7 +1534,7 @@ _O=$( cd "$_S8/proj-detect" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" 
 _S8_DET=$(( $(date +%s) - _S8_T0 ))
 _s8_sane detectbound "$_O"
 [ "$_S8_DET" -lt 25 ] || _S8_FAIL="$_S8_FAIL detectbound-slow(${_S8_DET}s)"
-_s8_has '^WARNING: the instruction-file check did not finish (instruction_files_detect in .*/scripts/lib/instructions\.sh, rc [0-9][0-9]*; it needs python3 and is given up on after 10 s), so the CLAUDE\.md and 3\.x template notices may be missing this session\.$' || _S8_FAIL="$_S8_FAIL detectbound-no-warning"
+_s8_has '^WARNING: the instruction-file check did not finish (instruction_files_detect in .*/scripts/lib/instructions\.sh, rc [0-9][0-9]*; it needs python3 and stops after 10 s), so the CLAUDE\.md and 3\.x template notices may be missing this session\.$' || _S8_FAIL="$_S8_FAIL detectbound-no-warning"
 _S8_DPID=$(cat "$_S8/pystub/pid" 2>/dev/null || true)
 _s8_n=0
 while [ -n "$_S8_DPID" ] && kill -0 "$_S8_DPID" 2>/dev/null && [ "$_s8_n" -lt 10 ]; do sleep 0.1; _s8_n=$((_s8_n + 1)); done

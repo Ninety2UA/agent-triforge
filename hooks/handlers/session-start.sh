@@ -669,7 +669,7 @@ else
   SS_FOUND_RC=69
 fi
 if [ "$SS_FOUND_RC" -ne 0 ]; then
-  INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}$(_ss_prose "WARNING: the instruction-file check did not finish (instruction_files_detect in ${SS_INSTR_LIB}, rc ${SS_FOUND_RC}; it needs python3 and is given up on after 10 s), so the CLAUDE.md and 3.x template notices may be missing this session.")"
+  INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}$(_ss_prose "WARNING: the instruction-file check did not finish (instruction_files_detect in ${SS_INSTR_LIB}, rc ${SS_FOUND_RC}; it needs python3 and stops after 10 s), so the CLAUDE.md and 3.x template notices may be missing this session.")"
 fi
 while IFS=$'\t' read -r SS_KIND SS_WHERE SS_STATE SS_FILE SS_IMPORT; do
   case "$SS_KIND" in

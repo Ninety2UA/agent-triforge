@@ -55,7 +55,7 @@ echo "rc=$?"
 - `rc=20`: the plan; nothing was written.
 - `rc=3`: over Codex's instruction budget. With the pointer block, the files Codex combines (the user-level `AGENTS.md`, then one per directory from the project root down) would pass 32,768 bytes, or the `project_doc_max_bytes` the user set. Nothing was written. Relay the sizes; the user trims a file or raises `project_doc_max_bytes` in their own Codex config.
 - A `warning:` line about `AGENTS.override.md`: pass it on, as above.
-- `rc=2`: refused, with the reason (for `import`, also a file that ends inside a code block or an HTML block, where an appended line would not be read: relay the block it names; the user closes it or adds the line outside it); `rc=64`: `INSTR_YES` held something other than `--yes`, or `INSTR_OP` was not set; `rc=45`: a lease worker or a lease root; `rc=80`: the file changed while the plan was made, so run the block again.
+- `rc=2`: refused, with the reason (for `import`, also a file where a line appended at its end would not be read as an import: one that ends inside a code block, an HTML block, a quote or list item that takes the line in, or a link reference definition, or one too large or too deeply nested for Triforge to read in time. Relay what the refusal names; the user then closes the block or adds the line where Claude Code reads it); `rc=64`: `INSTR_YES` held something other than `--yes`, or `INSTR_OP` was not set; `rc=45`: a lease worker or a lease root; `rc=80`: the file changed while the plan was made, so run the block again.
 
 ## Offer the commit
 
