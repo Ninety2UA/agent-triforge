@@ -23,7 +23,7 @@ bash scripts/probe-capabilities.sh --self-only   # the SELF gate: static rows on
 for f in scripts/*.sh scripts/lib/*.sh hooks/handlers/*.sh; do /bin/bash -n "$f" || echo "SYNTAX $f"; done
 ```
 
-`.github/workflows/gates.yml` runs the last six on macOS for PRs to `main` and `release/4.0`; the two manifest validations need Claude Code and stay local. A release also needs the steps under "Release".
+`.github/workflows/gates.yml` runs the last six on macOS for PRs to `main` and `release/*`; the two manifest validations need Claude Code and stay local. A release also needs the steps under "Release".
 
 ## Expensive operations
 
