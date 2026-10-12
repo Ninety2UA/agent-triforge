@@ -192,6 +192,12 @@
       message names the cause, but the hook discards its stderr). SELF-12 failed twice in
       full gates under heavy load (three gates in parallel) with different mismatches, and
       passed every quiet run.
+- Worker discoveries (end-of-program review, fix round 6, 2026-10-12), UNVERIFIED, recorded by the lead from the worker's report:
+
+      fix worker R6: bash's builtin printf rejects a format that starts with "-" (so a
+      CLAUDE.md text starting "---" failed in _s16b_fence); any SELF helper that runs
+      printf "$fmt" on caller text needs printf --. Every srun.sh run leaves a
+      triforge-self-only-*.md record in the user's TMPDIR, and they pile up.
 
 ## Interface proposals
 <!-- No active proposals -->
