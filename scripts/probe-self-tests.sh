@@ -12316,6 +12316,52 @@ for _S16B_D in tail-ctl join-ctl tab-ctl; do
 done
 _S16_FAIL="${_S16_FAIL}$(_s16b_same b-tail-join-tab-controls-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_FN/tail-ctl/CLAUDE.md" "$_S16B_FN/join-ctl/CLAUDE.md" "$_S16B_FN/tab-ctl/CLAUDE.md")")"
 
+# labels (review round 5, R5-A): marked lexes the label of a link, of a full
+# or shortcut reference link and of a reference apart from the text around
+# it, so a backtick run in the label pairs inside it only and the next two
+# runs after the link make the code span that holds the @AGENTS.md (a link,
+# a full and a shortcut reference, a bracket nested in the label, the same in
+# a quote); it never lexes the reference of a full reference link; an email
+# autolink takes the backticks in it; it lexes a label holding \[ with that
+# read as a bracket. Each alone in a project CLAUDE.md: detect no-import,
+# visibility hidden with the add-the-line fix, the real line appended with
+# --yes, then unchanged. Controls still import: backticks paired inside the
+# label, no code span after the link, a code span holding [ and a later one
+# holding ], an email autolink with no backtick, brackets escaped outside a
+# label, the import after a full reference link
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-link label-link '# own\n[`` a](u) `` @AGENTS.md ``\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-full label-full '# own\n[`` a][r] `` @AGENTS.md ``\n\n[r]: /u\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-short label-short '# own\n[`` a] `` @AGENTS.md ``\n\n[`` a]: /u\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-nested label-nested '# own\n[a [``] b](u) `` @AGENTS.md ``\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-quote label-quote '# own\n> [`` a](u) `` @AGENTS.md ``\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-ref label-ref '# own\n[x][ @AGENTS.md ]\n\n[ @AGENTS.md ]: /u\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-escaped label-escaped '# own\n[\\[`` a\\](u) `` @AGENTS.md ``](v)\n\n')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_fence b-label-autolink label-autolink '# own\n<``@a.bc> `` @AGENTS.md ``\n\n')"
+_S16B_LBC="label-pair-ctl label-after-ctl label-spans-ctl label-autolink-ctl label-escaped-ctl label-ref-ctl"
+for _S16B_D in $_S16B_LBC; do _s16b_proj "$_S16B_FN/$_S16B_D"; done
+printf '# own\n[``a``](u) `` @AGENTS.md\n' > "$_S16B_FN/label-pair-ctl/CLAUDE.md"
+printf '# own\n[`` a](u) @AGENTS.md\n' > "$_S16B_FN/label-after-ctl/CLAUDE.md"
+printf '# own\nx `[` y `]` Read @AGENTS.md z `w`\n' > "$_S16B_FN/label-spans-ctl/CLAUDE.md"
+printf '# own\n<1@a.bc> @AGENTS.md\n' > "$_S16B_FN/label-autolink-ctl/CLAUDE.md"
+printf '# own\n\\[`x`\\] @AGENTS.md `y`\n' > "$_S16B_FN/label-escaped-ctl/CLAUDE.md"
+printf '# own\n[x][r] @AGENTS.md\n\n[r]: /u\n' > "$_S16B_FN/label-ref-ctl/CLAUDE.md"
+_S16B_LBF=""
+for _S16B_D in $_S16B_LBC; do _S16B_LBF="$_S16B_LBF $_S16B_FN/$_S16B_D/CLAUDE.md"; done
+# _S16B_LBF: the control files, split on purpose (no whitespace in the paths)
+# shellcheck disable=SC2086
+_S16B_SUM=$(_s16b_sum $_S16B_LBF)
+for _S16B_D in $_S16B_LBC; do
+  _O=$(_s16b "$_S16B_FN/$_S16B_D" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-$_S16B_D" "$_O" "^CLAUDE\.md${T}project${T}imports,user-owned${T}" '^rc=0$')"
+  _O=$(_s16b "$_S16B_FN/$_S16B_D" instruction_pointer_visibility claude)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-$_S16B_D-vis" "$_O" "^claude${T}visible${T}[^ ]*/w/fn/$_S16B_D/CLAUDE\.md imports " '^rc=0$')"
+  _O=$(_s16b "$_S16B_FN/$_S16B_D" instruction_add_import CLAUDE.md --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-$_S16B_D-import" "$_O" '^unchanged: ' '^rc=0$')"
+done
+# shellcheck disable=SC2086
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-label-controls-untouched "$_S16B_SUM" "$(_s16b_sum $_S16B_LBF)")"
+_S16_EV="${_S16_EV}B (review round 5): an import in a code span the backtick runs of a label leave is none, as marked lexes a link or reference label apart, never lexes the reference of a full reference link, takes the backticks of an email autolink in and reads \\[ in a label as a bracket (b-label-*: a link, a full and a shortcut reference, a nested bracket, a quote, the import in a reference, an escaped bracket in a label, an autolink: no-import, hidden with the fix, the line appended, then unchanged; controls import: backticks paired inside the label, no code span after the link, code spans holding [ and ], an autolink with no backtick, brackets escaped outside a label, the import after a full reference link); "
+
 # marked's blocks (review round 4, J2): md_scan reads the block structure with
 # a port of marked's own block lexer, so eight more places Claude Code reads
 # no import are none: a tag name that ends its line (the HTML block runs past

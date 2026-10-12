@@ -176,8 +176,9 @@ END = b"<!-- triforge:end -->"
 # certain (text_words): what it cannot place counts as not text, so its
 # error is "hidden, offer the fix", never an import reported that is not
 # loaded. Its patterns: TITLE the quotes of a link title, INLINE the
-# inline HTML and link destination openings, closed by CLOSE, a complete TAG
-# or the rest of a link (link_ends): \s* (WS, the JavaScript \s in UTF-8),
+# inline HTML, email autolink (its local part and @, where no other opening
+# matches) and link destination openings, closed by CLOSE, a complete TAG or
+# the rest of a link (link_ends): \s* (WS, the JavaScript \s in UTF-8),
 # the destination <...> (ANGLE, whose backslash takes no line end) or a run
 # of all but space, tab, newline and controls (RUN, cut at a parenthesis
 # PAREN finds unbalanced), a title after [ \t]* and at most one newline
@@ -233,8 +234,11 @@ MK_TABS = re.compile("^\t+")
 MK_COMMENT = re.compile("<!--[\\s\\S]*?-->")
 MK_AT = re.compile("(?:^|" + JS_SPACE + ")@((?:[^" + JS_WS + "\\\\]|\\\\ )+)")
 TITLE = {b"\"": b"\"", b"\x27": b"\x27", b"(": b")"}
-INLINE = re.compile(rb"<(!--|\?|!\[CDATA\[|!(?=[A-Za-z])|/?(?=[A-Za-z]))|\]\(")
-CLOSE = {b"!--": b"-->", b"?": b"?>", b"![CDATA[": b"]]>", b"!": b">"}
+INLINE = re.compile(rb"<(!--|\?|!\[CDATA\[|!(?=[A-Za-z])|/?(?=[A-Za-z]))|<()(?=[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@)|\]\(")
+CLOSE = {b"!--": b"-->", b"?": b"?>", b"![CDATA[": b"]]>", b"!": b">", b"@": b">"}
+# what a link label is read over (labels): its brackets, backslashes and
+# backticks
+LABEL_AT = re.compile(rb"[\[\]\\`]")
 TAG = re.compile(rb"</?[A-Za-z][\w:-]*(?:\s+[A-Za-z:_][\w.:-]*(?:\s*=\s*(?:\"[^\"]*\"|\x27[^\x27]*\x27|[^\s\"\x27=<>`]+))?)*?\s*/?>")
 WS = re.compile(rb"(?:[\t\n\x0b\x0c\r ]|\xc2\xa0|\xe1\x9a\x80|\xe2\x80[\x80-\x8a\xa8\xa9\xaf]|\xe2\x81\x9f|\xe3\x80\x80|\xef\xbb\xbf)*")
 ANGLE = re.compile(rb"<(?:\\(?!\xe2\x80[\xa8\xa9])[^\n\r]|[^\n<>\\])+>")
@@ -817,11 +821,13 @@ def link_ends(text):
     return end
 
 
-def inline_held(text):
+def inline_held(text, refs):
     # held(pos): True when an inline construct whose words marked never
     # scans may hold pos in text, lines marked may read as one paragraph:
-    # an image description (an ![ before pos and a ] after it), an HTML tag,
-    # comment, processing instruction, declaration or CDATA section, or a
+    # an image description (an ![ before pos and a ] after it), the
+    # reference of a full reference link (one of refs, from labels), an
+    # HTML tag, comment, processing instruction, declaration or CDATA
+    # section, an email autolink (its backticks, * and _ taken in), or a
     # link destination or title. One opening before pos holds it unless its
     # end (link_ends for a link) comes before pos, or nothing after pos can
     # end it. Linear: a closing marker is found by bisecting its positions,
@@ -829,9 +835,12 @@ def inline_held(text):
     # none is read once one of its kind runs to the end)
     image, bracket, big = text.find(b"!["), text.rfind(b"]"), len(text) + 1
     link = link_ends(text) if b"](" in text else None
+    in_ref = cover(refs)
     places, by = {}, {}
     for m in INLINE.finditer(text):
-        kind = m.group(1)
+        # an email autolink ends at the first > after its <, as a
+        # declaration does (CLOSE "@")
+        kind = b"@" if m.group(2) is not None else m.group(1)
         close = b")" if kind is None else CLOSE.get(kind, b">")
         heads, ends = by.setdefault(close, ([], []))
         if ends and ends[-1] == big:
@@ -852,7 +861,7 @@ def inline_held(text):
     tables = [(text.rfind(close), heads, ends) for close, (heads, ends) in by.items()]
 
     def held(pos):
-        if 0 <= image <= pos - 2 and bracket >= pos:
+        if 0 <= image <= pos - 2 and bracket >= pos or in_ref(pos):
             return True
         for last, heads, ends in tables:
             k = bisect.bisect_right(heads, pos)
@@ -876,7 +885,65 @@ def cover(pairs):
     return inside
 
 
-def code_spans(text, starts, held):
+def labels(text):
+    # (regions, refs): the (start, end) of each [ and ] in text that marked
+    # may read as the label of a link, an image or a reference link, which
+    # it lexes apart from the text around it (regions), or as the reference
+    # of a full reference link [label][ref], which it never lexes (refs).
+    # From every [, whether marked reaches it or not: the label of a link or
+    # a full reference link runs over the atoms of its rule to the first ]
+    # between two of them (a [...] with no [ in it, a backslash and a
+    # character that ends no line, a backtick and all up to the next one,
+    # any other character), and an ( or a [ follows that ]; the label of a
+    # shortcut reference link, and a reference, runs to the first [ or ] no
+    # backslash escapes, which must be a ]. Only labels with something in
+    # them are kept. One pass from the end over what a label is read over
+    # (LABEL_AT), from the first [ to the last ], each step from the ones
+    # after it. marked lexes the text of a label again with each \[ and \]
+    # in it read as a bracket, which no pass over the raw text places: a
+    # label with one in it is held whole, as a reference is (one of refs)
+    f, z = text.find(b"["), text.rfind(b"]")
+    if f < 0 or z < f:
+        return [], []
+    at = [m.start() for m in LABEL_AT.finditer(text, f, z + 1)]
+    n = len(at)
+    # inner[k], label[k]: the index in at of the bracket where a shortcut
+    # label and a link label read from at[k] stop (-1: they fail there)
+    inner, label, tick = [-1] * (n + 1), [-1] * (n + 1), n
+    for k in range(n - 1, -1, -1):
+        p, c = at[k], text[at[k]]
+        if c == 91 or c == 93:
+            inner[k] = k
+            q = inner[k + 1]
+            label[k] = k if c == 93 else label[q + 1] if q >= 0 and text[at[q]] == 93 else -1
+        elif c == 92:
+            if text[p + 1:p + 2] in (b"", b"\n", b"\r") or text[p + 1:p + 4] in (b"\xe2\x80\xa8", b"\xe2\x80\xa9"):
+                inner[k] = label[k] = -1
+            else:
+                j = k + 2 if k + 1 < n and at[k + 1] == p + 1 else k + 1
+                inner[k], label[k] = inner[j], label[j]
+        else:
+            inner[k], label[k], tick = inner[k + 1], label[tick + 1] if tick < n else -1, k
+    regions, refs = [], []
+    for k in range(n):
+        if text[at[k]] != 91:
+            continue
+        q = label[k + 1]
+        if q >= 0 and text[at[q] + 1:at[q] + 2] in (b"(", b"["):
+            if at[q] > at[k] + 1:
+                regions.append((at[k], at[q]))
+            r = inner[q + 2] if q + 1 < n and at[q + 1] == at[q] + 1 else -1
+            if r >= 0 and text[at[r]] == 93 and at[r] > at[q] + 2:
+                refs.append((at[q] + 1, at[r]))
+        q = inner[k + 1]
+        if q >= 0 and text[at[q]] == 93 and at[q] > at[k] + 1:
+            regions.append((at[k], at[q]))
+    esc = [m.start() for m in re.finditer(rb"\\[\[\]]", text)]
+    refs += [(a, b) for a, b in regions if bisect.bisect_right(esc, b - 2) > bisect.bisect_left(esc, a + 1)]
+    return regions, refs
+
+
+def code_spans(text, starts, held, regions, delims):
     # spanned(pos): True when pos may sit in a code span of text, lines
     # marked may read as one paragraph that begins at any of starts.
     # CommonMark pairs each backtick run with the next run of its length
@@ -885,10 +952,13 @@ def code_spans(text, starts, held):
     # from every start counts (their walks merge, so this stays linear).
     # Past a run an inline construct may hold (held), or one emphasis may
     # take into its token (a * or _ run that may open it before the run, a
-    # run of that character after it: the run then pairs inside the token
-    # only, which frees a later run to pair across pos), any run before pos
-    # with a run of its length after pos counts. A backslash run is matched
-    # from its start only, and both tests bisect (cover)
+    # run of that character after it, of delims), or past the first run of
+    # a label (regions, from labels) when a walk reaches that run outside
+    # every span and one of its spans runs past the end of the label (marked
+    # lexes the label apart: the run pairs inside the token only, which
+    # frees a later run to pair across pos), any run before pos with a run
+    # of its length after pos counts. A backslash run is matched from its
+    # start only, and the tests bisect (cover)
     runs = [(m.start(2), len(m.group(2)) - len(m.group(1)) % 2, len(m.group(2))) for m in re.finditer(rb"(?<!\\)(\\*)(`+)", text)]
     heads = [r[0] for r in runs]
     nxt, seen = [None] * len(runs), {}
@@ -907,17 +977,29 @@ def code_spans(text, starts, held):
                 spans.append((runs[i][0], runs[j][0]))
                 i = j + 1
     within = cover(spans)
-    # the * and _ runs as emphasis reads them: the first that may open,
-    # the last of each character (an _ between letters or digits is none)
-    first, last = {}, {}
-    for m in re.finditer(rb"\*+|_+", text):
-        s, e, ch = m.start(), m.end(), m.group()[:1]
-        if ch == b"_" and ALNUM.fullmatch(text[s - 1:s]) and ALNUM.fullmatch(text[e:e + 1]):
-            continue
-        if text[e:e + 1] not in SPACE:
-            first.setdefault(ch, s)
-        last[ch] = s
-    owned = next((r[0] for r in runs if held(r[0]) or any(first[ch] < r[0] < last[ch] for ch in first)), len(text) + 1)
+    # a label (a, b) of regions: a walk that reaches its first run i0 is
+    # outside every span at a, and it pairs a run inside the label past b
+    # when it never reaches i1, the first run after b. Each walk steps from
+    # run i to up[i] > i, so the steps form a tree rooted past the last run,
+    # and the walk from i reaches k when i is under k: the size[k] runs
+    # under k, k with them, are numbered from order[k] on (the runs from the
+    # last back, each taking the next free number under the run it steps to)
+    big, nr = len(text) + 1, len(runs)
+    cross = big
+    if regions and runs:
+        up = [i + 1 if nxt[i] is None else nxt[i] + 1 for i in range(nr)]
+        size, order, free = [1] * (nr + 1), [0] * (nr + 1), [0] * nr + [1]
+        for i in range(nr):
+            size[up[i]] += size[i]
+        for i in range(nr - 1, -1, -1):
+            order[i], free[up[i]] = free[up[i]], free[up[i]] + size[i]
+            free[i] = order[i] + 1
+        for a, b in regions:
+            i0, i1 = bisect.bisect_right(heads, a), bisect.bisect_right(heads, b)
+            if i0 < i1 and i0 in done and not order[i1] <= order[i0] < order[i1] + size[i1]:
+                cross = min(cross, heads[i0])
+    _, first, last = delims
+    owned = next((r[0] for r in runs if r[0] >= cross or held(r[0]) or any(first[ch] < r[0] < last[ch] for ch in first)), big)
     opens, closes = {}, {}
     for r in runs:
         opens.setdefault(r[1], r[0])
@@ -981,13 +1063,13 @@ def joined(piece, s):
     return False
 
 
-def emphasis(text):
-    # paired(a, b): True when a * or _ run in text[a:b] may pair with another
-    # run of its character in text, lines marked may read as one paragraph,
-    # as emphasis that splits the import word there. Wider than marked: a run
-    # opens unless a space, tab or line end follows it, any run closes, and
-    # only an _ between two ASCII letters or digits does neither. The runs in
-    # text[a:b] are found by bisecting their starts
+def delim_runs(text):
+    # (runs, first, last): the * and _ runs of text as emphasis and
+    # code_spans read them, each as its start and character, and per
+    # character the start of the first run that may open emphasis and of
+    # the last run. Wider than marked: a run opens unless a space, tab or
+    # line end follows it, any run closes, and only an _ between two ASCII
+    # letters or digits does neither (it is no run here)
     first, last, runs = {}, {}, []
     for m in re.finditer(rb"\*+|_+", text):
         s, e, ch = m.start(), m.end(), m.group()[:1]
@@ -997,6 +1079,15 @@ def emphasis(text):
         if text[e:e + 1] not in SPACE:
             first.setdefault(ch, s)
         last[ch] = s
+    return runs, first, last
+
+
+def emphasis(text, delims):
+    # paired(a, b): True when a * or _ run in text[a:b] may pair with another
+    # run of its character in text, lines marked may read as one paragraph,
+    # as emphasis that splits the import word there (delims, from
+    # delim_runs). The runs in text[a:b] are found by bisecting their starts
+    runs, first, last = delims
     heads = [s for s, _ in runs]
 
     def paired(a, b):
@@ -1021,9 +1112,11 @@ def text_words(text):
         at += len(piece) + 1
     if not words:
         return []
-    held = inline_held(text)
-    spanned = code_spans(text, starts, held)
-    paired = emphasis(text)
+    regions, refs = labels(text)
+    held = inline_held(text, refs)
+    delims = delim_runs(text)
+    spanned = code_spans(text, starts, held, regions, delims)
+    paired = emphasis(text, delims)
     return [m for p, m in words if not held(p) and not spanned(p) and not paired(p + 1, p + 1 + len(m.group(1)))]
 
 
