@@ -904,7 +904,7 @@ After solving a non-trivial problem, <a href="skills/at-compound/SKILL.md"><code
 
 ## Recent changes
 
-### 2026-10-07 — v4.0.0: lead choice (Claude Code or Codex), at- lead workflows, personas, AGENTS.md, Grok Build and Devin
+### 2026-10-12 — v4.0.0: lead choice (Claude Code or Codex), at- lead workflows, personas, AGENTS.md, Grok Build and Devin
 
 Triforge's lead is now a choice between Claude Code and Codex, recorded in the `[lead]` table of `ops/roster.toml`; a roster without the table keeps Claude Code. Scripts branch on registry fields, never on a CLI's name (KTD1). SELF-17 runs one two-task fixture sprint under each lead, one task under `scripts/lib/`, and the two ledgers differ only in the lead CLI and the reviewer class (U20).
 

@@ -2034,7 +2034,7 @@ ${_INSTR_PY}"
   fi
   case "${TELL},${RC}" in
     yes,124|yes,137|yes,143)
-      printf '%s: gave up after %s s (rc %s): an ordinary project'"'"'s instruction files are read in well under a second, so a file this reads (a CLAUDE.md, .claude/CLAUDE.md, CLAUDE.local.md or AGENTS.md in the project, above it or at the user level) may be built to slow the reader, or python3 hung; nothing was written\n' "$2" "$SECS" "$RC" >&2
+      printf '%s: gave up after %s s (rc %s): an ordinary project'"'"'s instruction files are read in well under a second, so a file this reads (a CLAUDE.md, .claude/CLAUDE.md, CLAUDE.local.md or AGENTS.md in the project, above it or at the user level) may be built to slow the reader, or python3 hung or was killed (an out-of-memory kill also returns rc 137); nothing was written\n' "$2" "$SECS" "$RC" >&2
       ;;
   esac
   return "$RC"
