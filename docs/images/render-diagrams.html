@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<!--
+  render-diagrams.html — the source of the README's light diagrams. Each
+  <div class="diagram" id="..."> renders to docs/images/<id>.png at 2x:
+    node docs/images/render-diagrams.js            (all, and the source stamp)
+    node docs/images/render-diagrams.js --only roster
+
+  The website (docs/index.html) embeds dark twins of three of these facts:
+  builder-pool.svg, roster.svg and lease-lifecycle.svg. When a name, count,
+  pin or flow changes here, change those three SVGs too.
+
+  validate-versions scans this file for stale model pins, surface counts and
+  bare Codex skill mentions, so keep its text current with the code.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: #f8fafc;
+    color: #0f172a;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .diagram {
+    width: 880px;
+    padding: 48px 44px;
+    margin: 60px auto;
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    font-size: 15px;
+    line-height: 1.4;
+  }
+
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  /* ── SHARED PARTS ──────────────────────────────────── */
+  /* Navy title block with a gradient icon, and the command pill under it. */
+  .head { text-align: center; margin-bottom: 24px; }
+  .head-label {
+    display: inline-flex; align-items: center; gap: 12px;
+    background: #0f172a; color: #fff;
+    padding: 14px 26px; border-radius: 12px;
+    font-size: 20px; font-weight: 700; letter-spacing: -0.2px;
+  }
+  .head-icon {
+    width: 30px; height: 30px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; color: #fff;
+  }
+  .head-sub { font-weight: 500; color: #cbd5e1; font-size: 17px; }
+  .cmd {
+    display: inline-block; margin-top: 12px;
+    font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 600;
+    padding: 5px 14px; border-radius: 7px;
+    background: #f1f5f9; color: #334155;
+  }
+
+  /* Spaced uppercase caption; .lined adds the rules on both sides. */
+  .cap {
+    text-align: center; color: #64748b;
+    font-size: 15px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase;
+    margin: 4px 0 14px;
+  }
+  .cap.lined::before, .cap.lined::after {
+    content: ''; display: inline-block; width: 48px; height: 1.5px;
+    background: #e2e8f0; vertical-align: middle; margin: 0 14px;
+  }
+  .cap .mono, .sub-label .mono { text-transform: none; letter-spacing: 0; }
+
+  .group { border: 1.5px dashed #cbd5e1; background: #f8fafc; border-radius: 14px; padding: 18px 20px 20px; }
+  .sub-label {
+    color: #64748b; font-size: 15px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase;
+    padding-top: 10px; margin: 16px 0 12px; border-top: 1.5px dashed #e2e8f0;
+  }
+  .sub-label.first { border-top: none; padding-top: 0; margin-top: 0; }
+  .group-foot { margin-top: 14px; text-align: center; color: #475569; font-size: 15px; }
+
+  /* Rows of uniform boxes: .row stretches them equally, .wrap keeps a fixed
+     width so a short last line stays centered and the same size. */
+  .row { display: flex; gap: 12px; align-items: stretch; }
+  .row > .box { flex: 1 1 0; min-width: 0; }
+  .wrap { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
+  .wrap.w3 > .box { width: calc((100% - 24px) / 3); }
+  .wrap.w5 > .box { width: calc((100% - 48px) / 5); }
+
+  .box { border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 14px 14px; text-align: center; background: #fff; }
+  .box-name { font-size: 17px; font-weight: 700; letter-spacing: -0.2px; line-height: 1.3; }
+  .box-id { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 600; margin-top: 4px; overflow-wrap: anywhere; }
+  .box-sub { font-size: 15px; font-weight: 500; margin-top: 4px; line-height: 1.4; opacity: 0.85; }
+  .box-tag { font-size: 15px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; opacity: 0.75; margin-bottom: 4px; }
+  .box.slim { padding: 11px 10px; }
+
+  .arrow-r { display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 22px; flex: 0 0 22px; }
+  .arrow-d { text-align: center; color: #94a3b8; font-size: 26px; line-height: 1; margin: 14px 0; }
+  .out-label {
+    font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 600;
+    color: #64748b; text-align: center; margin-bottom: 10px;
+  }
+  .note { margin-top: 24px; text-align: center; font-size: 15px; color: #475569; line-height: 1.55; }
+  .note code, .note .mono { font-family: 'JetBrains Mono', monospace; color: #0f172a; }
+
+  /* Result card with a heavy border and a round gradient icon. */
+  .result { text-align: center; }
+  .result-card {
+    display: inline-flex; align-items: center; gap: 12px;
+    padding: 14px 28px; border-radius: 12px; border: 2.5px solid;
+    font-size: 18px; font-weight: 700;
+  }
+  .result-icon {
+    width: 30px; height: 30px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; color: #fff;
+  }
+
+  /* ── HUES ──────────────────────────────────────────── */
+  /* Each CLI keeps its identity hue, in light form. */
+  .h-claude   { background: #fff7ed; border-color: #fdba74; color: #9a3412; }
+  .h-agy      { background: #eff6ff; border-color: #93c5fd; color: #1e40af; }
+  .h-codex    { background: #ecfdf5; border-color: #6ee7b7; color: #065f46; }
+  .h-opencode { background: #f5f3ff; border-color: #c4b5fd; color: #5b21b6; }
+  .h-kimi     { background: #fdf2f8; border-color: #f9a8d4; color: #9d174d; }
+  .h-cursor   { background: #ecfeff; border-color: #67e8f9; color: #155e75; }
+  .h-devin    { background: #fffbeb; border-color: #fcd34d; color: #92400e; }
+  .h-grok     { background: #f8fafc; border-color: #cbd5e1; color: #334155; }
+  /* Personas, and the plain step hues. */
+  .h-persona  { background: #eef2ff; border-color: #c7d2fe; color: #3730a3; }
+  .h-slate    { background: #f8fafc; border-color: #cbd5e1; color: #1e293b; }
+  .h-amber    { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+  .h-blue     { background: #eff6ff; border-color: #93c5fd; color: #1e40af; }
+  .h-green    { background: #ecfdf5; border-color: #6ee7b7; color: #065f46; }
+  .h-violet   { background: #f5f3ff; border-color: #c4b5fd; color: #5b21b6; }
+  .h-pink     { background: #fdf2f8; border-color: #f9a8d4; color: #9d174d; }
+  .h-rose     { background: #fff1f2; border-color: #fda4af; color: #9f1239; }
+  .h-red      { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
+  .h-teal     { background: #f0fdfa; border-color: #5eead4; color: #115e59; }
+
+  .g-claude { background: linear-gradient(135deg, #fb923c, #ea580c); }
+  .g-agy    { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+  .g-codex  { background: linear-gradient(135deg, #10b981, #059669); }
+  .g-indigo { background: linear-gradient(135deg, #6366f1, #4f46e5); }
+  .g-violet { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+  .g-amber  { background: linear-gradient(135deg, #f59e0b, #d97706); }
+  .g-blue   { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+  .g-green  { background: linear-gradient(135deg, #10b981, #059669); }
+  .g-rose   { background: linear-gradient(135deg, #f43f5e, #e11d48); }
+  .g-slate  { background: linear-gradient(135deg, #64748b, #475569); }
+  .g-teal   { background: linear-gradient(135deg, #14b8a6, #0d9488); }
+
+  /* ── BUILDER POOL ──────────────────────────────────── */
+  .bp-lease .box-tag { opacity: 1; }
+  .bp-steps .box { padding: 14px 10px; }
+
+  /* ── ROSTER ────────────────────────────────────────── */
+  .ro-file {
+    display: flex; align-items: center; justify-content: space-between;
+    background: #0f172a; color: #fff; border-radius: 12px; padding: 14px 22px; margin-bottom: 18px;
+  }
+  .ro-file-name { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 700; }
+  .ro-lead { font-size: 15px; color: #cbd5e1; }
+  .ro-lead .mono { color: #fff; font-weight: 600; }
+  .ro-grid { display: grid; grid-template-columns: 124px 132px 1fr 92px 190px; border: 1.5px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+  .ro-grid > div { padding: 11px 14px; border-top: 1px solid #eef2f6; display: flex; align-items: center; }
+  .ro-grid > .ro-h { border-top: none; background: #f8fafc; color: #64748b; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+  .ro-role { font-family: 'JetBrains Mono', monospace; font-weight: 700; }
+  .ro-model { font-family: 'JetBrains Mono', monospace; font-weight: 500; color: #334155; }
+  .ro-model.prose { font-family: 'Inter', sans-serif; font-style: italic; color: #64748b; }
+  .ro-eff { font-family: 'JetBrains Mono', monospace; color: #334155; }
+  .ro-fb { color: #475569; font-weight: 500; }
+  .chip { display: inline-block; border: 1.5px solid; border-radius: 999px; padding: 2px 11px; font-weight: 700; white-space: nowrap; }
+  .ro-tier { margin-top: 20px; }
+
+  /* ── KNOWLEDGE LOOP ────────────────────────────────── */
+  #knowledge-loop { padding: 48px 28px 40px; }
+  #knowledge-loop .row { gap: 8px; }
+  .loop-back svg { display: block; width: 100%; height: 52px; margin-top: 10px; }
+
+  /* ── SPRINT LIFECYCLE ──────────────────────────────── */
+  #sprint-lifecycle { padding: 48px 32px; }
+  .sl-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; }
+  .sl-step { position: relative; }
+  .sl-step .box { height: 100%; padding: 16px 9px 14px; }
+  .sl-step .arr { position: absolute; right: -15px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 16px; z-index: 2; }
+  .num {
+    min-width: 36px; height: 36px; border-radius: 18px; padding: 0 9px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 15px; font-weight: 800; margin-bottom: 8px;
+  }
+  .sl-wf { margin-top: 14px; }
+  .sl-wf > div {
+    text-align: center; font-family: 'JetBrains Mono', monospace; font-weight: 600;
+    border-radius: 8px; padding: 7px 4px; border-top: 3px solid;
+  }
+  .sl-ship {
+    margin-top: 14px; display: flex; align-items: center; gap: 14px;
+    background: #0f172a; color: #e2e8f0; border-radius: 12px; padding: 13px 18px;
+  }
+  .sl-ship .mono { background: #f5f3ff; color: #5b21b6; border-radius: 7px; padding: 4px 12px; font-weight: 700; }
+
+  /* ── WAVE ORCHESTRATION ────────────────────────────── */
+  .wo-head { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+  .wo-badge { min-width: 92px; text-align: center; padding: 7px 14px; border-radius: 8px; color: #fff; font-size: 16px; font-weight: 700; }
+  .wo-desc { color: #64748b; font-style: italic; font-weight: 500; }
+  .wo-tasks { padding-left: 10px; }
+  .wo-tasks .box { padding: 16px 12px; }
+  .wo-verifier { display: flex; align-items: center; gap: 12px; margin: 18px 0; }
+  .wo-line { flex: 1; height: 1.5px; background: repeating-linear-gradient(90deg, #94a3b8 0, #94a3b8 6px, transparent 6px, transparent 10px); }
+  .wo-card {
+    display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0;
+    padding: 9px 20px; border-radius: 10px; border: 2px solid #059669; background: #f0fdf4; color: #065f46;
+    font-weight: 700;
+  }
+  .wo-card .mono { font-weight: 600; }
+  .wo-card small { font-size: 15px; font-weight: 500; color: #047857; }
+  .wo-icon { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 13px; }
+
+  /* ── QUALITY GATES ─────────────────────────────────── */
+  #quality-gates { padding: 48px 24px; }
+  .qg-row { display: flex; gap: 0; }
+  .qg-gate { flex: 1 1 0; min-width: 0; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 22px 7px 18px; text-align: center; }
+  .qg-shield { width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 17px; font-weight: 800; margin: 0 auto 14px; }
+  .qg-rule { font-size: 16px; font-weight: 700; line-height: 1.4; margin-bottom: 12px; }
+  .qg-skill { font-family: 'JetBrains Mono', monospace; font-size: 15px; color: #475569; background: #f1f5f9; display: inline-block; padding: 4px 5px; border-radius: 5px; line-height: 1.45; }
+  .qg-more { margin-top: 8px; color: #64748b; font-weight: 500; }
+  .qg-conn { display: flex; align-items: center; justify-content: center; width: 20px; color: #cbd5e1; font-size: 18px; flex-shrink: 0; }
+
+  /* ── CONTEXT RECOVERY ──────────────────────────────── */
+  .cr-loop {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    background: #0f172a; color: #cbd5e1; border-radius: 12px; padding: 15px 22px;
+  }
+  .cr-loop-name { color: #fff; font-size: 18px; font-weight: 700; }
+  .cr-loop .mono { color: #fff; font-weight: 600; }
+  .cr-loop-sub { margin-top: 3px; }
+  .cr-guard { margin-top: 8px; font-size: 15px; font-weight: 600; opacity: 0.9; }
+  .cr-guard::before { content: 'guards: '; font-weight: 700; }
+  .cr-loop .cr-guard { color: #94a3b8; margin-top: 0; text-align: right; }
+  .cr-loop .cr-guard::before { color: #cbd5e1; }
+  #context-recovery .wrap .box { text-align: left; padding: 14px 16px; }
+</style>
+</head>
+<body>
+
+<!-- ════════════ BUILDER POOL ════════════ -->
+<div class="diagram" id="builder-pool">
+  <div class="head">
+    <div class="head-label">
+      <div class="head-icon g-claude">&#x25B2;</div>
+      The lead <span class="head-sub">Claude Code or Codex</span>
+    </div>
+    <br>
+    <div class="cmd">ops/roster.toml names each task's builder</div>
+  </div>
+
+  <div class="cap lined">one lease per task, each in its own git worktree</div>
+
+  <div class="group">
+    <div class="row bp-lease">
+      <div class="box h-claude">
+        <div class="box-tag">Claude Code</div>
+        <div class="box-name">Task 1</div>
+        <div class="box-sub">lease, branch, worktree</div>
+      </div>
+      <div class="box h-codex">
+        <div class="box-tag">Codex</div>
+        <div class="box-name">Task 2</div>
+        <div class="box-sub">lease, branch, worktree</div>
+      </div>
+      <div class="box h-opencode">
+        <div class="box-tag">OpenCode</div>
+        <div class="box-name">Task 3</div>
+        <div class="box-sub">lease, branch, worktree</div>
+      </div>
+    </div>
+    <div class="group-foot">Any roster member can build; Devin only after you opt in.<br>A builder commits nothing; its report ends with a <span class="mono">Status:</span> line.</div>
+  </div>
+
+  <div class="arrow-d">&#x2193;</div>
+
+  <div class="row bp-steps">
+    <div class="box h-amber">
+      <div class="box-name">Cross-review</div>
+      <div class="box-sub">pinned, never the builder; up to 3 fix cycles</div>
+    </div>
+    <div class="arrow-r">&#x2192;</div>
+    <div class="box h-blue">
+      <div class="box-name">Integration branch</div>
+      <div class="box-sub">one squash commit per task, in wave order</div>
+    </div>
+    <div class="arrow-r">&#x2192;</div>
+    <div class="box h-green">
+      <div class="box-name">Wave check</div>
+      <div class="box-sub">tests, build and lint on the merged wave</div>
+    </div>
+    <div class="arrow-r">&#x2192;</div>
+    <div class="box h-violet">
+      <div class="box-name">Promote to main</div>
+      <div class="box-sub">a protected path waits for your approval</div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════ ROSTER ════════════ -->
+<div class="diagram" id="roster">
+  <div class="ro-file">
+    <span class="ro-file-name">ops/roster.toml</span>
+    <span class="ro-lead"><span class="mono">[lead]</span> Claude Code or Codex</span>
+  </div>
+
+  <div class="cap">five roles, shipped defaults</div>
+  <div class="ro-grid">
+    <div class="ro-h">Role</div><div class="ro-h">CLI</div><div class="ro-h">Model</div><div class="ro-h">Effort</div><div class="ro-h">Fallbacks</div>
+
+    <div class="ro-role">builder</div>
+    <div><span class="chip h-claude">Claude</span></div>
+    <div class="ro-model prose">Claude Code's own default</div>
+    <div class="ro-eff">max</div>
+    <div class="ro-fb">Codex &#x2192; Antigravity</div>
+
+    <div class="ro-role">reviewer</div>
+    <div><span class="chip h-codex">Codex</span></div>
+    <div class="ro-model">gpt-6-astra</div>
+    <div class="ro-eff">xhigh</div>
+    <div class="ro-fb">Antigravity &#x2192; Claude</div>
+
+    <div class="ro-role">tester</div>
+    <div><span class="chip h-codex">Codex</span></div>
+    <div class="ro-model">gpt-6-astra</div>
+    <div class="ro-eff">xhigh</div>
+    <div class="ro-fb">Claude</div>
+
+    <div class="ro-role">analyst</div>
+    <div><span class="chip h-agy">Antigravity</span></div>
+    <div class="ro-model">Gemini 3.8 Flash (High)</div>
+    <div class="ro-eff">high</div>
+    <div class="ro-fb">Claude</div>
+
+    <div class="ro-role">documenter</div>
+    <div><span class="chip h-agy">Antigravity</span></div>
+    <div class="ro-model">Gemini 3.8 Flash (High)</div>
+    <div class="ro-eff">high</div>
+    <div class="ro-fb">Claude</div>
+  </div>
+
+  <div class="ro-tier">
+    <div class="cap lined">core trio, required: every fallback chain ends here</div>
+    <div class="row">
+      <div class="box h-claude slim"><div class="box-name">Claude</div><div class="box-sub">leads, builds</div></div>
+      <div class="box h-agy slim"><div class="box-name">Antigravity</div><div class="box-sub">analyzes, documents</div></div>
+      <div class="box h-codex slim"><div class="box-name">Codex</div><div class="box-sub">leads, reviews, tests</div></div>
+    </div>
+  </div>
+
+  <div class="ro-tier">
+    <div class="cap lined">optional, enrolled per project</div>
+    <div class="wrap w3">
+      <div class="box h-opencode slim"><div class="box-name">OpenCode</div><div class="box-id">glm-5.3</div><div class="box-sub">any role, via OpenRouter</div></div>
+      <div class="box h-kimi slim"><div class="box-name">Kimi Code</div><div class="box-id">kimi-code/k3</div><div class="box-sub">any role</div></div>
+      <div class="box h-cursor slim"><div class="box-name">Cursor</div><div class="box-id">cursor-grok-4.6-xhigh</div><div class="box-sub">any role</div></div>
+      <div class="box h-grok slim"><div class="box-name">Grok Build</div><div class="box-id">grok-4.7</div><div class="box-sub">builds, reviews, analyzes</div></div>
+      <div class="box h-devin slim"><div class="box-name">Devin</div><div class="box-id">swe-1-6-slow</div><div class="box-sub">reviews, analyzes; needs consent</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════ KNOWLEDGE LOOP ════════════ -->
+<div class="diagram" id="knowledge-loop">
+  <div class="row">
+    <div class="box h-blue">
+      <div class="box-name">Solve</div>
+      <div class="box-sub">a task or a bug fix lands</div>
+    </div>
+    <div class="arrow-r">&#x2192;</div>
+    <div class="box h-amber">
+      <div class="box-name">Compound</div>
+      <div class="box-id">at-compound</div>
+      <div class="box-sub">a note, only when the reasoning would be lost</div>
+    </div>
+    <div class="arrow-r">&#x2192;</div>
+    <div class="box h-green">
+      <div class="box-name">Store</div>
+      <div class="box-id">ops/solutions/</div>
+      <div class="box-id">ops/decisions/</div>
+    </div>
+    <div class="arrow-r">&#x2192;</div>
+    <div class="box h-persona">
+      <div class="box-name">Search</div>
+      <div class="box-id">learnings-<wbr>researcher</div>
+      <div class="box-sub">reads them before the next plan</div>
+    </div>
+  </div>
+  <div class="loop-back">
+    <svg viewBox="0 0 824 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="klArrow" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
+          <path d="M 9 1 L 1 5 L 9 9" fill="none" stroke="#94a3b8" stroke-width="1.6"/>
+        </marker>
+      </defs>
+      <path d="M 744 4 C 792 4, 808 18, 808 28 C 808 40, 792 48, 744 48 L 80 48 C 32 48, 16 40, 16 28 C 16 18, 32 4, 80 4" stroke="#94a3b8" stroke-width="1.6" stroke-dasharray="6 4" fill="none" marker-start="url(#klArrow)"/>
+      <rect x="232" y="13" width="360" height="28" rx="14" fill="#f1f5f9"/>
+      <text x="412" y="32" text-anchor="middle" font-family="Inter, sans-serif" font-size="15" font-weight="600" fill="#475569">each sprint makes the next one easier</text>
+    </svg>
+  </div>
+</div>
+
+<!-- ════════════ SPRINT LIFECYCLE ════════════ -->
+<div class="diagram" id="sprint-lifecycle">
+  <div class="sl-row">
+    <div class="sl-step">
+      <div class="box h-blue">
+        <div class="num g-blue">0</div>
+        <div class="box-name">Analyze</div>
+        <div class="box-sub">Antigravity maps the repo</div>
+      </div>
+      <div class="arr">&#x25B6;</div>
+    </div>
+    <div class="sl-step">
+      <div class="box h-amber">
+        <div class="num g-amber">1</div>
+        <div class="box-name">Plan</div>
+        <div class="box-sub">tasks in waves, validated</div>
+      </div>
+      <div class="arr">&#x25B6;</div>
+    </div>
+    <div class="sl-step">
+      <div class="box h-claude">
+        <div class="num g-claude">2</div>
+        <div class="box-name">Build</div>
+        <div class="box-sub">leased builders, cross-review</div>
+      </div>
+      <div class="arr">&#x25B6;</div>
+    </div>
+    <div class="sl-step">
+      <div class="box h-green">
+        <div class="num g-green">3&#x2013;4</div>
+        <div class="box-name">Review</div>
+        <div class="box-sub">5 lanes, then synthesis</div>
+      </div>
+      <div class="arr">&#x25B6;</div>
+    </div>
+    <div class="sl-step">
+      <div class="box h-violet">
+        <div class="num g-violet">5</div>
+        <div class="box-name">Test</div>
+        <div class="box-sub">gaps, then failing test first</div>
+      </div>
+      <div class="arr">&#x25B6;</div>
+    </div>
+    <div class="sl-step">
+      <div class="box h-teal">
+        <div class="num g-teal">6</div>
+        <div class="box-name">Wrap</div>
+        <div class="box-sub">compound, verify, hand off</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cap" style="margin: 22px 0 0;">one lead workflow per phase</div>
+  <div class="sl-row sl-wf">
+    <div class="h-amber" style="grid-column: span 2;">at-plan</div>
+    <div class="h-claude">at-build</div>
+    <div class="h-green">at-review</div>
+    <div class="h-violet">at-test</div>
+    <div class="h-teal">at-wrap</div>
+  </div>
+
+  <div class="sl-ship">
+    <span class="mono">at-ship</span>
+    <span>runs phases 0 to 6 unattended and creates <span class="mono" style="background:none;color:#fff;padding:0;font-weight:600;">ops/.sprint-complete</span> last</span>
+  </div>
+</div>
+
+<!-- ════════════ PLANNING FLOW ════════════ -->
+<div class="diagram" id="planning-flow">
+  <div class="head">
+    <div class="head-label">
+      <div class="head-icon g-amber">&#x270E;</div>
+      Planning
+    </div>
+    <br>
+    <div class="cmd">at-plan</div>
+  </div>
+
+  <div class="cap lined">ceremony first: trivial, standard or high-ceremony</div>
+
+  <div class="row">
+    <div class="box h-persona">
+      <div class="box-tag">Pre-plan</div>
+      <div class="box-name">Learnings Researcher</div>
+      <div class="box-sub">past solutions and decisions in <span class="mono">ops/</span></div>
+    </div>
+    <div class="box h-agy">
+      <div class="box-tag">Phase 0 &#xB7; Antigravity</div>
+      <div class="box-name">Codebase Analyst</div>
+      <div class="box-sub">maps the repo into <span class="mono">ops/ARCHITECTURE.md</span>; skipped for a small fix</div>
+    </div>
+  </div>
+
+  <div class="arrow-d">&#x2193;</div>
+
+  <div class="row">
+    <div class="box h-amber">
+      <div class="box-tag">Phase 1</div>
+      <div class="box-name">Plan</div>
+      <div class="box-sub">atomic tasks, shadow paths, error maps, waves</div>
+    </div>
+    <div class="arrow-r">&#x2192;</div>
+    <div class="box h-pink">
+      <div class="box-tag">Phase 1.1</div>
+      <div class="box-name">Assumptions</div>
+      <div class="box-sub">the 3 most critical, confirmed by you</div>
+    </div>
+    <div class="arrow-r">&#x2192;</div>
+    <div class="box h-violet">
+      <div class="box-tag">Phase 1.5</div>
+      <div class="box-name">Plan Checker</div>
+      <div class="box-sub">fix and resubmit, up to 3 rounds</div>
+    </div>
+  </div>
+
+  <div class="arrow-d">&#x2193;</div>
+
+  <div class="result">
+    <div class="out-label">approved, ready for at-build</div>
+    <div class="result-card h-green" style="border-color:#059669;">
+      <div class="result-icon g-green">&#x2713;</div>
+      <span class="mono">ops/TASKS.md</span>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════ WAVE ORCHESTRATION ════════════ -->
+<div class="diagram" id="wave-orchestration">
+  <div class="wo-wave">
+    <div class="wo-head">
+      <div class="wo-badge g-amber">Wave 1</div>
+      <div class="wo-desc">no dependencies; tasks that touch the same file never share a wave</div>
+    </div>
+    <div class="row wo-tasks">
+      <div class="box h-amber"><div class="box-name">User model</div><div class="box-sub">own lease and worktree</div></div>
+      <div class="box h-amber"><div class="box-name">DB migration</div><div class="box-sub">own lease and worktree</div></div>
+      <div class="box h-amber"><div class="box-name">JWT helpers</div><div class="box-sub">own lease and worktree</div></div>
+    </div>
+  </div>
+
+  <div class="wo-verifier">
+    <div class="wo-line"></div>
+    <div class="wo-card"><div class="wo-icon g-green">&#x2713;</div><span class="mono">integration-verifier</span> <small>tests, build, lint</small></div>
+    <div class="wo-line"></div>
+  </div>
+
+  <div class="wo-wave">
+    <div class="wo-head">
+      <div class="wo-badge g-blue">Wave 2</div>
+      <div class="wo-desc">depends on Wave 1</div>
+    </div>
+    <div class="row wo-tasks">
+      <div class="box h-blue"><div class="box-name">Login endpoint</div><div class="box-sub">own lease and worktree</div></div>
+      <div class="box h-blue"><div class="box-name">Signup endpoint</div><div class="box-sub">own lease and worktree</div></div>
+      <div class="box h-blue"><div class="box-name">Auth middleware</div><div class="box-sub">own lease and worktree</div></div>
+    </div>
+  </div>
+
+  <div class="wo-verifier">
+    <div class="wo-line"></div>
+    <div class="wo-card"><div class="wo-icon g-green">&#x2713;</div><span class="mono">integration-verifier</span> <small>tests, build, lint</small></div>
+    <div class="wo-line"></div>
+  </div>
+
+  <div class="wo-wave">
+    <div class="wo-head">
+      <div class="wo-badge g-violet">Wave 3</div>
+      <div class="wo-desc">depends on Wave 2</div>
+    </div>
+    <div class="row wo-tasks">
+      <div class="box h-violet"><div class="box-name">Protect routes</div><div class="box-sub">own lease and worktree</div></div>
+      <div class="box h-violet"><div class="box-name">Refresh-token rotation</div><div class="box-sub">own lease and worktree</div></div>
+    </div>
+  </div>
+
+  <div class="note">Each task merges after a pinned non-author review, as one squash commit, in wave order.<br>After the check, <span class="mono">lease_promote</span> takes the wave to main through the promotion gate.</div>
+</div>
+
+<!-- ════════════ REVIEW SWARM ════════════ -->
+<div class="diagram" id="review-swarm">
+  <div class="head">
+    <div class="head-label">
+      <div class="head-icon g-green">&#x2726;</div>
+      Review Swarm
+    </div>
+    <br>
+    <div class="cmd">at-review</div>
+  </div>
+
+  <div class="cap lined">every lane runs at once</div>
+
+  <div class="group">
+    <div class="sub-label first">Core lanes, every run</div>
+    <div class="row">
+      <div class="box h-agy slim"><div class="box-tag">Antigravity</div><div class="box-id">architecture-reviewer</div><div class="box-sub">architecture, design</div></div>
+      <div class="box h-codex slim"><div class="box-tag">Codex</div><div class="box-id">logic_reviewer</div><div class="box-sub">logic, security, tests</div></div>
+    </div>
+
+    <div class="sub-label">Every enrolled optional member</div>
+    <div class="row">
+      <div class="box h-opencode slim"><div class="box-name">OpenCode</div></div>
+      <div class="box h-kimi slim"><div class="box-name">Kimi Code</div></div>
+      <div class="box h-cursor slim"><div class="box-name">Cursor</div></div>
+      <div class="box h-grok slim"><div class="box-name">Grok Build</div></div>
+      <div class="box h-devin slim"><div class="box-name">Devin</div></div>
+    </div>
+
+    <div class="sub-label">Specialist personas by flag; <span class="mono">--full</span> runs all five</div>
+    <div class="row">
+      <div class="box h-persona slim"><div class="box-name">Security</div><div class="box-id">--security</div></div>
+      <div class="box h-persona slim"><div class="box-name">Performance</div><div class="box-id">--perf</div></div>
+      <div class="box h-persona slim"><div class="box-name">Simplicity</div><div class="box-id">--simple</div></div>
+      <div class="box h-persona slim"><div class="box-name">Conventions</div><div class="box-id">--conventions</div></div>
+      <div class="box h-persona slim"><div class="box-name">Architecture</div><div class="box-id">--full</div></div>
+    </div>
+
+    <div class="sub-label" style="margin-bottom:0;">Learnings Researcher, when <span class="mono">ops/solutions/</span> names a changed module</div>
+  </div>
+
+  <div class="arrow-d">&#x2193;</div>
+
+  <div class="result">
+    <div class="out-label">merges and dedupes every ops/REVIEW_*.md</div>
+    <div class="result-card h-green" style="border-color:#059669;">
+      <div class="result-icon g-green">&#x2728;</div>
+      Findings Synthesizer
+    </div>
+    <div class="out-label" style="margin: 10px 0 0;">confidence HIGH, MEDIUM, LOW &#xB7; priority P1, P2, P3</div>
+  </div>
+
+  <div class="arrow-d">&#x2193;</div>
+
+  <div class="result">
+    <div class="result-card h-slate" style="border-width:1.5px;font-size:17px;">Fix P1 and P2, log P3 &#xB7; up to 3 cycles, then escalate to you</div>
+  </div>
+</div>
+
+<!-- ════════════ RESEARCH SWARM ════════════ -->
+<div class="diagram" id="research-swarm">
+  <div class="head">
+    <div class="head-label">
+      <div class="head-icon g-violet">&#x2726;</div>
+      Research Swarm
+    </div>
+    <br>
+    <div class="cmd">at-deep-research</div>
+  </div>
+
+  <div class="cap lined">five lenses in parallel</div>
+
+  <div class="group">
+    <div class="wrap w3">
+      <div class="box h-persona"><div class="box-name">Learnings Researcher</div><div class="box-sub">past solutions and decisions</div></div>
+      <div class="box h-persona"><div class="box-name">Framework Docs</div><div class="box-sub">current docs for the stack</div></div>
+      <div class="box h-persona"><div class="box-name">Git History</div><div class="box-sub">how the code evolved</div></div>
+      <div class="box h-agy"><div class="box-name">Antigravity</div><div class="box-sub">targeted codebase analysis</div></div>
+      <div class="box h-persona"><div class="box-name">Best Practices</div><div class="box-sub">industry practice, trade-offs</div></div>
+    </div>
+  </div>
+
+  <div class="arrow-d">&#x2193;</div>
+
+  <div class="result">
+    <div class="out-label">merges all five</div>
+    <div class="result-card h-violet" style="border-color:#7c3aed;">
+      <div class="result-icon g-violet">&#x2728;</div>
+      Research Synthesizer
+    </div>
+    <div class="out-label" style="margin: 10px 0 0;">seven sections &#xB7; contradictions listed, not resolved &#xB7; next: at-plan</div>
+  </div>
+</div>
+
+<!-- ════════════ TESTING FLOW ════════════ -->
+<div class="diagram" id="testing-flow">
+  <div class="head">
+    <div class="head-label">
+      <div class="head-icon g-codex">&#x2713;</div>
+      Test Pipeline
+    </div>
+    <br>
+    <div class="cmd">at-test</div>
+  </div>
+
+  <div class="row">
+    <div class="box h-slate">
+      <div class="box-tag">Scope</div>
+      <div class="box-name">Changed code</div>
+      <div class="box-sub">or the files you name</div>
+    </div>
+    <div class="arrow-r">&#x2192;</div>
+    <div class="box h-persona">
+      <div class="box-tag">Gaps</div>
+      <div class="box-name">Test Gap Analyzer</div>
+      <div class="box-sub">untested paths, edge and error cases, weak assertions</div>
+    </div>
+    <div class="arrow-r">&#x2192;</div>
+    <div class="box h-codex">
+      <div class="box-tag">Tester role</div>
+      <div class="box-name">Codex</div>
+      <div class="box-sub"><span class="mono">test_writer</span> writes the tests</div>
+    </div>
+  </div>
+
+  <div class="arrow-d">&#x2193;</div>
+
+  <div class="group">
+    <div class="cap" style="margin-top:0;">failing test first</div>
+    <div class="row">
+      <div class="box h-red"><div class="box-name">Red</div><div class="box-sub">a test that names the behavior, and fails</div></div>
+      <div class="arrow-r">&#x2192;</div>
+      <div class="box h-green"><div class="box-name">Green</div><div class="box-sub">the least code that passes</div></div>
+      <div class="arrow-r">&#x2192;</div>
+      <div class="box h-blue"><div class="box-name">Refactor</div><div class="box-sub">clean up while the suite stays green</div></div>
+    </div>
+  </div>
+
+  <div class="arrow-d">&#x2193;</div>
+
+  <div class="out-label"><span style="color:#0f172a;">ops/TEST_RESULTS.md</span> quotes the red run and the green run</div>
+  <div class="row">
+    <div class="box h-green"><div class="box-name">All green</div><div class="box-sub">report the coverage</div></div>
+    <div class="box h-rose"><div class="box-name">Failures</div><div class="box-sub">fix and rerun, up to 3 cycles, then escalate</div></div>
+  </div>
+</div>
+
+<!-- ════════════ DEBUG FLOW ════════════ -->
+<div class="diagram" id="debug-flow">
+  <div class="head">
+    <div class="head-label">
+      <div class="head-icon g-rose">&#x2691;</div>
+      Debugging
+    </div>
+    <br>
+    <div class="cmd">at-debug</div>
+  </div>
+
+  <div class="cap lined">no fix before the root cause</div>
+
+  <div class="row">
+    <div class="box h-persona">
+      <div class="box-name">Reproduce</div>
+      <div class="box-sub">Bug Reproduction Validator writes a failing test</div>
+    </div>
+    <div class="arrow-r">&#x2192;</div>
+    <div class="box h-amber">
+      <div class="box-name">Diagnose</div>
+      <div class="box-sub">error class, bisection, five whys</div>
+    </div>
+    <div class="arrow-r">&#x2192;</div>
+    <div class="box h-blue">
+      <div class="box-name">Fix</div>
+      <div class="box-sub">the root cause, not the symptom</div>
+    </div>
+    <div class="arrow-r">&#x2192;</div>
+    <div class="box h-green">
+      <div class="box-name">Verify</div>
+      <div class="box-sub">the test passes, the suite is green</div>
+    </div>
+  </div>
+
+  <div class="cap lined" style="margin-top:24px;">where it stops</div>
+
+  <div class="row">
+    <div class="box h-slate">
+      <div class="box-tag">Stops early</div>
+      <div class="box-sub"><span class="mono">NOT_REPRODUCIBLE</span>: asks you for details<br><span class="mono">ALREADY_FIXED</span>: names the commit</div>
+    </div>
+    <div class="box h-rose">
+      <div class="box-tag">Circuit breaker</div>
+      <div class="box-sub">2 failed fixes: re-check the assumption<br>3rd failure on one error: stop and escalate</div>
+    </div>
+  </div>
+
+  <div class="note">After the fix: the same pattern is checked elsewhere, and the cause goes to <span class="mono">ops/MEMORY.md</span>,<br><span class="mono">ops/CHANGELOG.md</span> and, when it earned a note, <span class="mono">ops/solutions/</span>.</div>
+</div>
+
+<!-- ════════════ QUALITY GATES ════════════ -->
+<div class="diagram" id="quality-gates">
+  <div class="qg-row">
+    <div class="qg-gate" style="border-color:#bfdbfe;">
+      <div class="qg-shield g-blue">1</div>
+      <div class="qg-rule">No build without a validated plan</div>
+      <div class="qg-skill">plan-checker</div>
+      <div class="qg-more">up to 3 rounds</div>
+    </div>
+    <div class="qg-conn">&#x2192;</div>
+    <div class="qg-gate" style="border-color:#fde68a;">
+      <div class="qg-shield g-amber">2</div>
+      <div class="qg-rule">No production code without a failing test first</div>
+      <div class="qg-skill">at-test</div>
+      <div class="qg-more">Codex <span class="mono">test_writer</span></div>
+    </div>
+    <div class="qg-conn">&#x2192;</div>
+    <div class="qg-gate" style="border-color:#a7f3d0;">
+      <div class="qg-shield g-green">3</div>
+      <div class="qg-rule">No fix without a root cause</div>
+      <div class="qg-skill">at-debug</div>
+      <div class="qg-more">Codex <span class="mono">debugger</span></div>
+    </div>
+    <div class="qg-conn">&#x2192;</div>
+    <div class="qg-gate" style="border-color:#c4b5fd;">
+      <div class="qg-shield g-violet">4</div>
+      <div class="qg-rule">No completion claim without fresh evidence</div>
+      <div class="qg-skill">verification-<br>before-<br>completion</div>
+    </div>
+    <div class="qg-conn">&#x2192;</div>
+    <div class="qg-gate" style="border-color:#fecdd3;">
+      <div class="qg-shield g-rose">5</div>
+      <div class="qg-rule">No merge without code review</div>
+      <div class="qg-skill">at-review</div>
+      <div class="qg-more">up to 3 cycles</div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════ CONTEXT RECOVERY ════════════ -->
+<div class="diagram" id="context-recovery">
+  <div class="cr-loop">
+    <div>
+      <div class="cr-loop-name">Outer loop</div>
+      <div class="cr-loop-sub"><span class="mono">coordinate.sh</span> starts a fresh lead session each iteration</div>
+    </div>
+    <div class="cr-guard">a full context window</div>
+  </div>
+
+  <div class="arrow-d">&#x2193;</div>
+
+  <div class="group">
+    <div class="cap" style="margin-top:0;">inside each session</div>
+    <div class="wrap w3">
+      <div class="box h-violet">
+        <div class="box-name">PreCompact</div>
+        <div class="box-id">pre-compact.sh</div>
+        <div class="box-sub">checkpoints <span class="mono">ops/STATE.md</span> before compaction</div>
+        <div class="cr-guard">lost state</div>
+      </div>
+      <div class="box h-amber">
+        <div class="box-name">Analysis paralysis</div>
+        <div class="box-id">context-monitor.sh</div>
+        <div class="box-sub">warns after 8 reads in a row with no write</div>
+        <div class="cr-guard">reading, not producing</div>
+      </div>
+      <div class="box h-rose">
+        <div class="box-name">Tool failures</div>
+        <div class="box-id">tool-failure-monitor.sh</div>
+        <div class="box-sub">warns at 5 failures in a row, or 10 in a session</div>
+        <div class="cr-guard">unseen failures</div>
+      </div>
+      <div class="box h-teal">
+        <div class="box-name">Timeouts</div>
+        <div class="box-id">timeout -k 10s</div>
+        <div class="box-sub">every external CLI call: SIGTERM at its limit, SIGKILL 10 s later</div>
+        <div class="cr-guard">a hung CLI</div>
+      </div>
+      <div class="box h-slate">
+        <div class="box-name">Risk scoring</div>
+        <div class="box-id">lease_stop</div>
+        <div class="box-sub">halts a builder at risk above 20 % or more than 50 changed files</div>
+        <div class="cr-guard">runaway builders</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-d">&#x2193;</div>
+
+  <div class="result">
+    <div class="out-label">created last, after the verification checklist passes; the loop stops on it</div>
+    <div class="result-card h-green" style="border-color:#059669;">
+      <div class="result-icon g-green">&#x2713;</div>
+      <span>Completion gate <span class="mono" style="font-weight:600;">ops/.sprint-complete</span></span>
+    </div>
+    <div class="out-label" style="margin: 10px 0 0;">guards: declaring victory early &#xB7; no marker: the next session picks up</div>
+  </div>
+</div>
+
+</body>
+</html>
