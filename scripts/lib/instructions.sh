@@ -244,7 +244,10 @@ MK_TAGS = "address|article|aside|base|basefont|blockquote|body|caption|center|co
 # from where it stopped while it moves (runs), or read off a run of one
 # character (blank_end); a rule that backtracks into such a group is
 # followed step by step in code (quote_end, html_end, def_end), each the
-# same match as the marked rule it names
+# same match as the marked rule it names. No such group holds another:
+# their bounds multiply (two at REP took 1.5 GiB in one match over 4 MiB),
+# so the blank lines after a line of code are a run of one character
+# (MK_CODE_RUN), and the lines of a quote one pass each (MK_QUOTE_RUN)
 REP = "{0,1024}"
 # a thematic break: three of its character, then any more of it, spaces and
 # tabs, which are the lines (?:-[\t ]*){3,} matches
@@ -260,15 +263,23 @@ MK_INTERRUPT = (MK_HR_SRC + "| {0,3}#{1,6}(?:" + JS_SPACE + "|\\Z)| {0,3}>| {0,3
 MK_PARA_MORE = re.compile("(?:\n(?!" + MK_INTERRUPT + ")[^\n]+)" + REP)
 MK_BLANKS = re.compile("[ \t\n]*")
 MK_NEWLINES = re.compile("\n+")
-# lines of indented code, each with the blank lines after it, REP of each
-MK_CODE_RUN = re.compile("(?:(?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|\\Z))" + REP + ")?)" + REP)
+# lines of indented code, REP of them, each with the blank lines after it,
+# (?:[ \t]*(?:\n|\Z))*: the spaces, tabs and newlines there up to the last
+# newline, then the spaces and tabs that end the text
+MK_CODE_RUN = re.compile("(?:(?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t\n]*\n)?(?:[ \t]*\\Z)?)?)" + REP)
 MK_FENCES = re.compile(" {0,3}(`{3,}(?=[^`\n]*(?:\n|\\Z))|~{3,})([^\n]*)(?:\n|\\Z)(?:|([\\s\\S]*?)(?:\n|\\Z))(?:( {0,3}\\1[~`]* *)(?=\n|\\Z)|\\Z)")
 MK_HEADING = re.compile(" {0,3}(#{1,6})(?=" + JS_SPACE + "|\\Z)(" + JS_DOT + "*)(?:\n+|\\Z)")
 MK_HR = re.compile(MK_HR_SRC)
-# the lines of a quote, REP of them: a > line whose text after "> ?" is not
-# empty with the paragraph lines after it (REP of them), or an empty one
-MK_QUOTE_RUN = re.compile("(?: {0,3}>(?: [^\n]|[^ \n])[^\n]*(?:\n(?!" + MK_INTERRUPT + ")[^\n]+)" + REP + "(?:\n|\\Z)| {0,3}> ?(?:\n|\\Z))" + REP)
-MK_QUOTE_OPEN = re.compile(" {0,3}> ?")
+# the lines of a quote, REP of them, one pass each: a > line whose text
+# after "> ?" is not empty, which starts a paragraph; a line that may join
+# a paragraph (marked paragraph), as each line of a run is in one but an
+# empty > line; an empty > line, where no such line follows it (a > line,
+# a blank line, the end or MK_INTERRUPT does, the > line tried first). A
+# run starts at a > line, and the empty > line it stops at ends the quote
+# (quote_end)
+MK_QUOTE_RUN = re.compile("(?: {0,3}>(?:(?: [^\n]|[^ \n])[^\n]*(?:\n|\\Z)| ?(?:\n|\\Z)(?= {0,3}>|\n|\\Z|" + MK_INTERRUPT + "))"
+                          "|(?!" + MK_INTERRUPT + ")[^\n]+(?:\n|\\Z))" + REP)
+MK_QUOTE_EMPTY = re.compile(" {0,3}> ?(?:\n|\\Z)")
 MK_LIST = re.compile("( {0,3}(?:[*+-]|[0-9]{1,9}[.)]))(?:[ \t][^\n]+?)?(?:\n|\\Z)")
 # the HTML block rule of marked, by its kinds (html_end): type 1 (script,
 # pre, style, textarea), the comment, processing instruction, declaration
@@ -679,28 +690,22 @@ def runs(rx, s, p):
         p = e
 
 
-def blank_end(src, pos, one):
-    # the end of the blank lines at pos, (?:[ \t]*(?:\n|\Z))+ (one: at least
-    # one, else -1; marked newline) or * (the blank lines a line of code
-    # takes): from the run of spaces, tabs and newlines there, its last
-    # newline, or the end of src when the run reaches it
+def blank_end(src, pos):
+    # the end of the blank lines at pos, (?:[ \t]*(?:\n|\Z))+ (marked
+    # newline), -1 for none: from the run of spaces, tabs and newlines there,
+    # its last newline, or the end of src when the run reaches it
     q = MK_BLANKS.match(src, pos).end()
     if q == len(src):
         return q
     k = src.rfind("\n", pos, q)
-    return k + 1 if k >= 0 else -1 if one else pos
+    return k + 1 if k >= 0 else -1
 
 
 def code_end(src, pos):
     # the end of marked code, (?:(?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|\Z))*)?)+,
-    # at pos, -1 for none: MK_CODE_RUN again while it moves, each run then
-    # taking the blank lines its last line of code took past REP
-    p = pos
-    while True:
-        e = MK_CODE_RUN.match(src, p).end()
-        if e == p:
-            return p if p > pos else -1
-        p = blank_end(src, e, False)
+    # at pos, -1 for none: MK_CODE_RUN again while it moves
+    e = runs(MK_CODE_RUN, src, pos)
+    return e if e > pos else -1
 
 
 def para_end(src, pos):
@@ -712,26 +717,14 @@ def para_end(src, pos):
 
 def quote_end(src, pos):
     # the end of marked blockquote, (?: {0,3}> ?(?:PARAGRAPH|[^\n]*)(?:\n|\Z))+,
-    # at pos, -1 for none: MK_QUOTE_RUN again while it moves. A run stops at
-    # a line that is no > line, or past REP paragraph lines; the paragraph
-    # goes on there when the line before is a > line whose text is not
-    # empty, or one of its own lines, and this line may join it
-    n, p = len(src), pos
-    while True:
-        e = runs(MK_QUOTE_RUN, src, p)
-        if e == p:
-            return p if p > pos else -1
-        if e == n or src[e - 1] != "\n":
-            return e
-        ls = max(p, src.rfind("\n", p, e - 1) + 1)
-        if MK_QUOTE_START.match(src, ls) and MK_QUOTE_OPEN.match(src, ls).end() == e - 1:
-            return e
-        f = runs(MK_PARA_MORE, src, e - 1)
-        if f == e - 1:
-            return e
-        if f == n:
-            return n
-        p = f + 1
+    # at pos, -1 for none: from a > line, MK_QUOTE_RUN again while it moves,
+    # then the empty > line it stopped at, if any (the paragraph line after
+    # it is no line of the quote)
+    if not MK_QUOTE_START.match(src, pos):
+        return -1
+    e = runs(MK_QUOTE_RUN, src, pos)
+    m = MK_QUOTE_EMPTY.match(src, e)
+    return m.end() if m else e
 
 
 def html_end(src, pos):
@@ -942,7 +935,7 @@ class MdLexer:
         while pos < n:
             self.step()
             at, last = pos, tokens[-1] if tokens else None
-            e = blank_end(src, pos, True)
+            e = blank_end(src, pos)
             if e > pos:
                 pos = e
                 if pos - at == 1 and last is not None:

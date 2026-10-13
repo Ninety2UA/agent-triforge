@@ -13619,13 +13619,13 @@ _s16b_rss() { # _s16b_rss <dir> <helper> [args...] — _s16b under /usr/bin/time
   O=$(cd "$D" && HOME="$_S16B/home" CODEX_HOME="$_S16B/home/.codex" /usr/bin/time -l ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 60} /bin/bash -c 'source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 97; shift; "$@"' _ "$REPO_ROOT" "$@" 2>&1) || R=$?
   printf '%s\nrc=%s\nrss=%s\n' "$O" "$R" "$(printf '%s\n' "$O" | sed -n 's/^ *\([0-9][0-9]*\)  *maximum resident set size.*$/\1/p' | head -n 1)"
 }
-_s16b_rssok() { # _s16b_rssok <case> <output of _s16b_rss> — " <case>(rss:<bytes>)" over 128 MiB, " <case>(rss:none)" when time -l ran and reported none
-  local R
+_s16b_rssok() { # _s16b_rssok <case> <output of _s16b_rss> [limit] — " <case>(rss:<bytes> over <limit>)" over <limit> bytes (128 MiB when none is given), " <case>(rss:none)" when time -l ran and reported none
+  local R L=${3:-134217728}
   R=$(printf '%s\n' "$2" | sed -n 's/^rss=//p' | tail -n 1)
   if [ "$_S16B_TIMEL" = 1 ] && [ -z "$R" ]; then
     printf ' %s(rss:none)' "$1"
-  elif [ -n "$R" ] && [ "$R" -gt 134217728 ]; then
-    printf ' %s(rss:%s)' "$1" "$R"
+  elif [ -n "$R" ] && [ "$R" -gt "$L" ]; then
+    printf ' %s(rss:%s over %s)' "$1" "$R" "$L"
   fi
 }
 _s16b_proj "$_S16B_CP/huge"
@@ -13678,19 +13678,84 @@ rm -f "$_S16B/home/.codex/config.toml"
 # the reader's memory (4.1): md_scan once held a frame per iteration of a
 # repeated regex group, up to 2.4 GB on a crafted 4 MiB CLAUDE.md (indented
 # code, then 4 MiB of blank lines, then indented code); its patterns now
-# read long spans in bounded chunks. b-mem-*: detect on that shape and on
-# nested quote and list lines repeated to 4 MiB, each under 128 MiB resident
+# read long spans in bounded chunks, no bounded repeat inside another (at
+# 939e494, one bounded at REP inside another took 769 MiB on a line of code
+# with 1024 blank lines after it, repeated to 4 MiB, and 305 MiB on a >
+# line with 1023 lazy lines after it). b-mem-*: detect on that first shape,
+# on nested quote and list lines repeated to 4 MiB, and on those two, whose
+# last line imports AGENTS.md (after the code, and as a lazy line of the
+# quote), each under _S16B_MEMMAX bytes resident (100 MiB; the most any
+# took on Python 3.12 and 3.14 was 76 MiB, the nested quote and list lines)
+_S16B_MEMMAX=104857600
 _s16b_proj "$_S16B_CP/mem-code"
 python3 -c 'import sys; M = 4194304; open(sys.argv[1], "w").write("    x\n" + "\n" * (M - 20) + "    y\n")' "$_S16B_CP/mem-code/CLAUDE.md"
 _s16b_proj "$_S16B_CP/mem-quote"
 python3 -c 'import sys; M = 4194304; u = ">> - a\n> b\n"; open(sys.argv[1], "w").write(u * ((M - 16) // len(u)))' "$_S16B_CP/mem-quote/CLAUDE.md"
-for _S16B_D in mem-code mem-quote; do
+_s16b_proj "$_S16B_CP/mem-codegap"
+python3 -c 'import sys; M = 4194304; u = "    x\n" + "\n" * 1024; t = "@AGENTS.md\n"; open(sys.argv[1], "w").write(u * ((M - len(t)) // len(u)) + t)' "$_S16B_CP/mem-codegap/CLAUDE.md"
+_s16b_proj "$_S16B_CP/mem-lazy"
+python3 -c 'import sys; M = 4194304; u = "> q\n" + "p\n" * 1023; t = "    @AGENTS.md\n"; open(sys.argv[1], "w").write(u * ((M - len(t)) // len(u)) + t)' "$_S16B_CP/mem-lazy/CLAUDE.md"
+for _S16B_D in mem-code mem-quote mem-codegap mem-lazy; do
+  case $_S16B_D in
+    mem-code|mem-quote) _S16B_A=no-import ;;
+    *) _S16B_A=imports ;;
+  esac
   _O=$(_s16b_rss "$_S16B_CP/$_S16B_D" instruction_files_detect)
-  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-$_S16B_D" "$_O" "^CLAUDE\.md${T}project${T}no-import,user-owned" '^rc=0$')$(_s16b_rssok "b-$_S16B_D" "$_O")"
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-$_S16B_D" "$_O" "^CLAUDE\.md${T}project${T}${_S16B_A},user-owned" '^rc=0$')$(_s16b_rssok "b-$_S16B_D" "$_O" "$_S16B_MEMMAX")"
   _S16B_RSSV="${_S16B_RSSV}; ${_S16B_D}: detect $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
   rm -f "$_S16B_CP/$_S16B_D/CLAUDE.md"
 done
 [ "$_S16B_TIMEL" = 1 ] || _S16B_RSSV="SKIPPED (no /usr/bin/time -l)"
+# the chunk bounds (4.1): md_scan reads the lines of a quote (> lines, empty
+# > lines and lazy lines alike), lines of code and the lines of a paragraph
+# 1024 at a time (REP), going on from where a chunk stopped. b-rep-*:
+# imports whose answer turns on a quote going on across that bound, two
+# files a project (CLAUDE.md, CLAUDE.local.md), each answer the one Claude
+# Code's own import code gives: a > line holding the import indented after
+# 1023, 1024, 1025 or 2049 > lines; the import indented after 511 or 512
+# pairs of a > line and a lazy line, and after a > line and 1022, 1023,
+# 1024, 1025, 2047 or 2049 lazy lines: each a lazy line of the paragraph in
+# the quote, imports (where the import is line 1025, a quote stopped at the
+# bound would leave it code). Controls: the same after an empty > line is
+# code in the quote, no-import; after 1024 lines of code imports, and
+# indented after a line of code and 1025 blank lines no-import;
+# b-mem-codegap's and b-mem-lazy's shapes three times over (the last at the
+# bound three times), then the import: imports, but indented after the code
+# no-import
+_S16B_RP="$_S16B_W/rep"
+_S16B_RPS="q1023 q1025 alt lazy1022 lazy1024 lazy1025 empty code codegap lazygap"
+for _S16B_D in $_S16B_RPS; do _s16b_proj "$_S16B_RP/$_S16B_D"; done
+python3 -c '
+import sys
+I = "    @AGENTS.md\n"
+def q(n):
+    return "> q\n" * n + "> " + I
+def z(n):
+    return "> q\n" + "p\n" * n + I
+def a(n):
+    return "> q\np\n" * n + I
+def e(n):
+    return "> q\n" * n + ">\n> " + I
+F = {"q1023": (q(1023), q(1024)), "q1025": (q(1025), q(2049)), "alt": (a(511), a(512)),
+     "lazy1022": (z(1022), z(1023)), "lazy1024": (z(1024), z(2047)), "lazy1025": (z(1025), z(2049)),
+     "empty": (e(1023), e(1024)),
+     "code": ("    c\n" * 1024 + "@AGENTS.md\n", "    c\n" + "\n" * 1025 + I),
+     "codegap": (("    x\n" + "\n" * 1024) * 3 + "@AGENTS.md\n", ("    x\n" + "\n" * 1024) * 3 + I),
+     "lazygap": (("> q\n" + "p\n" * 1023) * 3 + I, ("> q\n" + "p\n" * 1024) * 3 + I)}
+for k, (x, y) in F.items():
+    open(sys.argv[1] + "/" + k + "/CLAUDE.md", "w").write(x)
+    open(sys.argv[1] + "/" + k + "/CLAUDE.local.md", "w").write(y)
+' "$_S16B_RP"
+for _S16B_D in $_S16B_RPS; do
+  case $_S16B_D in
+    empty) _S16B_A=no-import _S16B_B=no-import ;;
+    code|codegap) _S16B_A=imports _S16B_B=no-import ;;
+    *) _S16B_A=imports _S16B_B=imports ;;
+  esac
+  _O=$(_s16b "$_S16B_RP/$_S16B_D" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-rep-$_S16B_D" "$_O" "^CLAUDE\.md${T}project${T}${_S16B_A},user-owned${T}" "^CLAUDE\.local\.md${T}project${T}${_S16B_B},user-owned${T}" '^rc=0$')"
+done
+_S16_EV="${_S16_EV}B (4.1, rep): an import read only when a quote goes on across the 1024-line chunk bound (b-rep-*: after 1023 to 2049 > lines a > line holding it indented, after 511 and 512 pairs of a > line and a lazy line and after a > line and 1022 to 2049 lazy lines it indented: imports; after an empty > line: code, no-import; after 1024 lines of code imports, indented after 1025 blank lines no-import; the b-mem-codegap and b-mem-lazy shapes three times over, then it), each as Claude Code reads it; "
 
 # linear at 1 MiB (review round 5, R5-B): the shapes the reader took
 # quadratic time on at 5fcb6e0, each a 1 MiB CLAUDE.md importing AGENTS.md
@@ -13717,7 +13782,7 @@ for _S16B_D in front fence para script comment; do
   [ "$_S16B_T1" -lt 20 ] || _S16_FAIL="${_S16_FAIL} b-lin-$_S16B_D(stalled:${_S16B_T1}s)"
   _S16B_LINS="${_S16B_LINS} ${_S16B_D} ${_S16B_T1}s"
 done
-_S16_EV="${_S16_EV}B bounds and time (b-cap-*: past 40 nested quotes, past 40 list levels, a file of 4194305 bytes, one of 4194304 the line would take past that, past the step and the work bounds, @AGENTS.md ahead of each: no-import,past-bound with the import column -, hidden naming the bound and offering no line, the import refused rc 2 naming the bound, unchanged; b-cap-agents and b-cap-config (4.1): a sparse 256 MiB AGENTS.md and Codex config.toml read to 4194305 bytes, the merge refused naming the size, Codex's visibility hidden for a config it cannot read whole; b-mem-* (4.1): detect on 4 MiB of code and blank lines and of nested quote and list lines under 128 MiB resident; 40 quotes, 40 levels, 4194304 bytes, 1% under the steps and 4% under the work import; a sparse 256 MiB CLAUDE.md read to 4194305 bytes, resident bytes: ${_S16B_RSSV}; b-lin-*: 1 MiB of front matter never closed, of ~ opening a fence, of ~ ending a paragraph, of </script> and of <!-- on a last line, each read whole and importing in${_S16B_LINS}); "
+_S16_EV="${_S16_EV}B bounds and time (b-cap-*: past 40 nested quotes, past 40 list levels, a file of 4194305 bytes, one of 4194304 the line would take past that, past the step and the work bounds, @AGENTS.md ahead of each: no-import,past-bound with the import column -, hidden naming the bound and offering no line, the import refused rc 2 naming the bound, unchanged; b-cap-agents and b-cap-config (4.1): a sparse 256 MiB AGENTS.md and Codex config.toml read to 4194305 bytes, the merge refused naming the size, Codex's visibility hidden for a config it cannot read whole; b-mem-* (4.1): detect on 4 MiB of code and blank lines, of nested quote and list lines, of a line of code with 1024 blank lines after it and of a > line with 1023 lazy lines after it (those two importing on their last line), each under ${_S16B_MEMMAX} bytes resident; 40 quotes, 40 levels, 4194304 bytes, 1% under the steps and 4% under the work import; a sparse 256 MiB CLAUDE.md read to 4194305 bytes, resident bytes: ${_S16B_RSSV}; b-lin-*: 1 MiB of front matter never closed, of ~ opening a fence, of ~ ending a paragraph, of </script> and of <!-- on a last line, each read whole and importing in${_S16B_LINS}); "
 
 # rewrites (review round 6): round 5 rewrote five patterns for linear time,
 # each meant to match exactly what it matched before: FRONT, the ~~~ line
