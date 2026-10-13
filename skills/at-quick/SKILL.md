@@ -5,7 +5,7 @@ argument-hint: "[change description]"
 disable-model-invocation: true
 metadata:
   triforge-consumer: "lead"
-  version: "4.1.0"
+  version: "4.1.1"
 ---
 
 # Quick

@@ -41,17 +41,14 @@ Every implementation task, the lead's own included, is built under a per-task le
 When the lead solves a problem whose reasoning would otherwise be lost, it writes a note to [`ops/solutions/`](ops/solutions/), or to [`ops/decisions/`](ops/decisions/) for an architectural decision. The [`learnings-researcher`](personas/learnings-researcher.md) persona searches both before new work is planned ([the knowledge loop](#the-knowledge-loop-at-compound)).
 
 <a name="whats-new"></a>
-## What's new (v4.1.0)
+## What's new (v4.1.1)
 
-This release fixes what the 4.0 review left open, and what the review of those fixes found. Nothing changes in how you run Triforge.
+This release changes the documentation and the release tooling. Nothing changes in how you run Triforge.
 
-- **The import reader stays small.** On a CLAUDE.md built to stress it, the check that asks whether a file imports `AGENTS.md` used up to 2.4 GB; it now stays under 100 MiB on every hostile 4 MiB shape in the tests, with the same answers (4.5 million generated documents compared against 4.0's reader and 6.6 million more after the review's fixes, 1.4 million token by token against marked). Setup and session start read each such file once.
-- **No instruction file is read whole.** `AGENTS.md`, `AGENTS.override.md`, Codex's `config.toml` and the pointer template are read to 4 MiB at most, and their sizes come from the file itself. A `CLAUDE.md` past a reading bound is named as such (`past-bound` in setup's file list, its own line at session start) instead of being offered an import that would then be refused.
-- **A time bound stops everything a command started.** When setup or session start runs a command under a time bound, nothing the command started outlives the call. At the bound its whole process group is stopped, and so is anything it left running when it returns early, with or without the `timeout` binary. The watchdog's temp directory never stays behind. Session start's warning names the real reason a check did not finish.
-- **Promotion targets are watched.** A promotion into a branch other than the default one records that branch when you approve it, and a move of it stops the next lease call (rc 44); an approval refuses to drop or replace a watched branch that moved. A default branch that appears where none was on record (a `git checkout main` that creates it, say) also stops the next lease call until `lease_rebaseline` accepts it. A merge whose integration branch moved during it says so, and the recovery steps it prints keep your uncommitted edits (`git reset --keep` or `--merge`, never `--hard`).
-- **`CLAUDE_CONFIG_DIR` is honored.** When you move Claude Code's config home with `CLAUDE_CONFIG_DIR` (an absolute path outside the project), setup reads your user-level `CLAUDE.md` from there, never writes it, keeps a claude worker on the same config home, and denies its `.credentials.json` to the read-only lanes. Unset, `~/.claude` as before. Set to anything else (empty, relative or inside the project), setup lists that `CLAUDE.md` as a project file but never writes it or any file beside it.
-- **The maintainer tools ignore planted modules**, like the rest of the helpers since 4.0: the validators, the release notes and the probe harness.
-- **Five diagrams redrawn** so no arrow crosses a label.
+- **The README follows agent-blueprint's order.** It starts with what Triforge is, then covers install for either lead, getting started, unattended runs, upgrading from 3.x and updating, and ends with the reference sections. It shows only the latest What's new; older releases are in the collapsed [Release history](#recent-changes).
+- **The diagrams are light.** The 13 dark diagrams became 15 light ones that read on GitHub's light and dark themes, and on a phone a tap opens each one full size. Two are new: the install routes and the unattended-run loop. Checking every label against the code corrected a few stale facts: there are five quality gates, at-ship reviews in five lanes, the kill grace is 10 s, and test fix cycles stop at 3.
+- **Each release has its own notes file.** A version's notes live in `docs/releases/v<version>.md`, and the release workflow publishes that file as the GitHub release.
+- **The maintainer gates are stricter.** `validate-versions.sh` fails a version bump that has no notes file and rejects Liquid delimiters under `docs/`, which break the GitHub Pages build. It also fails when a diagram source changed without a re-render, or when a diagram names a stale pin, a wrong count or a Codex invocation without its `agent-triforge:` prefix.
 
 ---
 
@@ -882,6 +879,7 @@ Each version's full notes are one file in [`docs/releases/`](docs/releases/), an
 
 | Version | Date | Summary |
 |---|---|---|
+| [v4.1.1](docs/releases/v4.1.1.md) | 2026-10-13 | The README in agent-blueprint's order, light diagrams, release notes per version |
 | [v4.1.0](docs/releases/v4.1.0.md) | 2026-10-13 | The 4.0 review's residuals fixed: a small reader, bounded reads, process-group time bounds, watched promotion targets, CLAUDE_CONFIG_DIR |
 | [v4.0.0](docs/releases/v4.0.0.md) | 2026-10-12 | Lead choice (Claude Code or Codex), at- lead workflows, personas, AGENTS.md, Grok Build and Devin |
 | [v3.3.3](docs/releases/v3.3.3.md) | 2026-10-01 | Protected-path registry, digest-stamped skills, lead git integrity |

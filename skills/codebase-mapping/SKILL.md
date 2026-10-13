@@ -4,7 +4,7 @@ description: "Use when mapping an unfamiliar or changed codebase (Phase 0): stru
 metadata:
   triforge-consumer: "the analyst role"
   triforge-phase: "0 (codebase analysis)"
-  version: "4.1.0"
+  version: "4.1.1"
 ---
 
 # Codebase Mapping
