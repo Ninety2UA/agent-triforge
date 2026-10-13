@@ -1923,62 +1923,74 @@ _instr_tmp_ok() {
   [ -z "$W" ]
 }
 
-# _instr_watchdog <seconds> <program> <op> <helper> <args...> — python3 -c
-# <program> <op> <helper> <args...> where neither timeout nor gtimeout is on
-# PATH, given up on after <seconds>: a SIGTERM, then a SIGKILL 2 s later.
+# _instr_watchdog <dir> <seconds> <program> <op> <helper> <args...> — python3
+# -c <program> <op> <helper> <args...> where neither timeout nor gtimeout is
+# on PATH, given up on after <seconds>: a SIGTERM, then a SIGKILL 2 s later.
 # _ss_bounded in hooks/handlers/session-start.sh does the same for the hook's
 # own calls (a hook function, which this library cannot call). A subshell, so
-# its fds, traps and PATH stay its own. python3's stdout and stderr go to two
-# files in a private temp dir (mktemp -d, mode 0700, under TMPDIR, else /tmp,
-# whichever passes _instr_tmp_ok); each file is opened for writing and for
-# reading before the dir is removed, so nothing is left on disk on any path,
-# and the two are printed (stdout, then stderr) only once python3 is gone. A
-# python3 launcher that forks instead of exec'ing, and leaves a child holding
-# what it was handed, so holds no pipe of the caller's open. The watchdog is
-# a background subshell whose stdio is /dev/null; killed as soon as python3
-# returns, it first SIGKILLs its own sleep, so none outlives the call (a TERM
-# could land before the sleep's exec, where the forked copy of the trap would
-# swallow it). Its TERM trap starts as a flag, so a TERM before the sleep
-# exists is not lost; a sleep that fails signals nothing. Each `wait`
-# swallows bash's "Terminated" or "Killed" line. mktemp, find, rm, cat and
-# sleep are looked up on PATH, then in /usr/bin and /bin. rc 69, nothing run,
-# with no private temp dir.
+# its fds, traps and PATH stay its own. <dir> is the private temp dir
+# _instr_py made for this call and removes once it returns, so the dir is gone
+# even when this subshell is SIGKILLed (a SIGKILL of _instr_py's own shell can
+# still leave it). python3's stdout and stderr go to two files there; each is
+# opened for writing and for reading before the dir is removed, so nothing is
+# on disk while python3 runs, and the two are printed (stdout, then stderr)
+# only once python3 is gone. A python3 launcher that forks instead of
+# exec'ing, and leaves a child holding what it was handed, so holds no pipe
+# of the caller's open. perl, when there is one (a stock macOS has
+# /usr/bin/perl), starts python3 as the leader of a process group of its own
+# (setpgrp, then exec), so the bound stops what python3 forks too; without
+# perl it stops python3 alone. PERL_BADLANG=0, in that call's environment
+# only, keeps perl from adding a "perl: warning" about a locale the system
+# lacks to the caller's stderr. The watchdog is a background subshell whose
+# stdio is /dev/null. Killed as soon as python3 returns before the bound, it
+# first SIGKILLs its own sleep, so none outlives the call (a TERM could land
+# before the sleep's exec, where the forked copy of the trap would swallow
+# it); its TERM trap starts as a flag, so a TERM before the sleep exists is
+# not lost, and a sleep that fails signals nothing. At the bound it TERMs the
+# group, checks every 0.1 s whether a member is left, and KILLs the group
+# after 2 s if one is; the call waits for it, so nothing of python3's group
+# outlives the call either. A group signal goes out only right after a check
+# that a member still carries the group's id (members keep the id from being
+# reused), and python3's pid alone is signalled only until the call has
+# reaped it (the call's TERM tells the watchdog so). Each `wait` swallows
+# bash's "Terminated" or "Killed" line. rm, cat, perl and sleep are looked up
+# on PATH, then in /usr/bin and /bin. rc 69, nothing run, with _instr_py's
+# no-private-temp-dir line, when the two files cannot be opened in <dir>.
 _instr_watchdog() (
-  SECS=$1
-  P=$2
-  shift 2
+  D=$1
+  SECS=$2
+  P=$3
+  shift 3
   PATH="${PATH:+$PATH:}/usr/bin:/bin"
-  D=""
-  for T in "${TMPDIR:-/tmp}" /tmp; do
-    if _instr_tmp_ok "$T" && D=$(mktemp -d "${T%/}/triforge-instr.XXXXXX" 2>/dev/null); then
-      break
-    fi
-    D=""
-  done
-  if [ -n "$D" ] && ! { exec 4>"$D/out" 5<"$D/out" 6>"$D/err" 7<"$D/err"; } 2>/dev/null; then
-    rm -rf "$D"
-    D=""
-  fi
-  if [ -z "$D" ]; then
+  if ! { exec 4>"$D/out" 5<"$D/out" 6>"$D/err" 7<"$D/err"; } 2>/dev/null; then
     printf '%s: neither timeout nor gtimeout is on PATH, and the watchdog that bounds python3 without them has no private temp dir (TMPDIR and /tmp are shared without the sticky bit, or mktemp failed); nothing was run (rc 69)\n' "$2" >&2
     exit 69
   fi
   rm -rf "$D"
-  python3 -c "$P" "$@" </dev/null >&4 2>&6 4>&- 5<&- 6>&- 7<&- &
+  PL=$(command -v perl 2>/dev/null || true)
+  PG='setpgrp(0, 0); exec { $ARGV[0] } @ARGV; exit 127'
+  PERL_BADLANG=0 ${PL:+"$PL"} ${PL:+-e} ${PL:+"$PG"} ${PL:+--} python3 -c "$P" "$@" </dev/null >&4 2>&6 4>&- 5<&- 6>&- 7<&- &
   PID=$!
-  ( K=""
-    trap 'K=1' TERM
+  ( R=""
+    trap 'R=1' TERM
     sleep "$SECS" &
     trap 'kill -9 "$!" 2>/dev/null || true; exit 0' TERM
-    if [ -n "$K" ]; then
+    if [ -n "$R" ]; then
       kill -9 "$!" 2>/dev/null || true
       exit 0
     fi
     wait "$!" || exit 0
-    kill "$PID" 2>/dev/null || exit 0
-    sleep 2 &
-    wait "$!" || exit 0
-    kill -9 "$PID" 2>/dev/null || true
+    trap 'R=1' TERM
+    kill -- -"$PID" 2>/dev/null || kill "$PID" 2>/dev/null || exit 0
+    N=0
+    while { kill -0 -- -"$PID" || { [ -z "$R" ] && kill -0 "$PID"; }; } 2>/dev/null; do
+      if [ "$N" -ge 20 ]; then
+        kill -9 -- -"$PID" 2>/dev/null || { [ -z "$R" ] && kill -9 "$PID" 2>/dev/null; } || true
+        exit 0
+      fi
+      sleep 0.1
+      N=$((N + 1))
+    done
     exit 0
   ) </dev/null >/dev/null 2>&1 4>&- 5<&- 6>&- 7<&- &
   DOG=$!
@@ -1997,17 +2009,27 @@ _instr_watchdog() (
 # sets it (session start: 10 s for its detect pass, and its own WARNING),
 # else after _INSTR_READ_SECS, with a "gave up" line on stderr: a SIGTERM,
 # then a SIGKILL 2 s later, under timeout or gtimeout (-k 2s) when one is on
-# PATH, else under _instr_watchdog. A run given up on returns 124 or 137
+# PATH, else under _instr_watchdog, in a private temp dir made here (mktemp
+# -d, mode 0700, under TMPDIR, else /tmp, whichever passes _instr_tmp_ok;
+# mktemp, find and rm looked up on PATH, then in /usr/bin and /bin) and
+# removed here once the watchdog returns, whatever ended it (rc 69, nothing
+# run, with no such dir). A run given up on returns 124 or 137
 # under the timeout binary, 143 or 137 under the watchdog. A write run (a
 # writer with --yes) is never bounded, _INSTR_SECS or not: write_file puts
 # the change in a temp file beside the target before it renames it over the
 # target, and a SIGTERM or SIGKILL landing after that would leave the temp
 # file behind (python runs no cleanup for either); its reading is the plan
-# run's, linear in the files' size. The braces take the line bash prints when
-# the SIGKILL timeout sends its process group ends timeout too; python3
-# writes to the caller's stderr through fd 3.
+# run's, linear in the files' size. The timeout binary runs in the
+# background, stdin /dev/null, so its pid is known: GNU timeout makes a
+# process group of its own, that pid, and runs python3 in it. It never KILLs
+# a child that ignores SIGTERM once the SIGTERM has ended python3, and such a
+# child would hold the caller's stdout; so once timeout has given up (rc 124
+# or 137), what is left of its group gets a TERM, then a KILL 2 s later, each
+# right after a check that a member still holds the group's id, as
+# _instr_watchdog does; the call returns once the group is empty. `wait`
+# swallows the line bash prints when the SIGKILL ends timeout too.
 _instr_py() {
-  local MODE=$1 P SECS="" TELL="" T RC=0
+  local MODE=$1 P SECS="" TELL="" T D TP RC=0
   shift
   if ! command -v python3 >/dev/null 2>&1; then
     printf '%s: python3 not found — the instruction-file helpers need it (rc 69)\n' "$2" >&2
@@ -2028,9 +2050,36 @@ ${_INSTR_PY}"
   fi
   T=$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)
   if [ -n "$T" ]; then
-    { "$T" -k 2s "${SECS}s" python3 -c "$P" "$@" 2>&3; } 3>&2 2>/dev/null || RC=$?
+    "$T" -k 2s "${SECS}s" python3 -c "$P" "$@" </dev/null &
+    TP=$!
+    wait "$TP" 2>/dev/null || RC=$?
+    case "$RC" in
+      124|137)
+        ( PATH="${PATH:+$PATH:}/usr/bin:/bin"
+          N=0
+          while kill -0 -- -"$TP" 2>/dev/null; do
+            case "$N" in
+              0) kill -- -"$TP" 2>/dev/null || true ;;
+              20) kill -9 -- -"$TP" 2>/dev/null || true; exit 0 ;;
+            esac
+            sleep 0.1
+            N=$((N + 1))
+          done )
+        ;;
+    esac
   else
-    _instr_watchdog "$SECS" "$P" "$@" || RC=$?
+    D=$(PATH="${PATH:+$PATH:}/usr/bin:/bin"
+      for T in "${TMPDIR:-/tmp}" /tmp; do
+        if _instr_tmp_ok "$T" && mktemp -d "${T%/}/triforge-instr.XXXXXX" 2>/dev/null; then
+          break
+        fi
+      done) || D=""
+    if [ -z "$D" ]; then
+      printf '%s: neither timeout nor gtimeout is on PATH, and the watchdog that bounds python3 without them has no private temp dir (TMPDIR and /tmp are shared without the sticky bit, or mktemp failed); nothing was run (rc 69)\n' "$2" >&2
+      return 69
+    fi
+    _instr_watchdog "$D" "$SECS" "$P" "$@" || RC=$?
+    PATH="${PATH:+$PATH:}/usr/bin:/bin" rm -rf "$D"
   fi
   case "${TELL},${RC}" in
     yes,124|yes,137|yes,143)

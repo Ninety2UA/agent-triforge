@@ -239,14 +239,10 @@ if [ -z "$SS_AT_HOME" ] && _ss_claude_dir; then
   rm -f .claude/context-monitor.local.md
 fi
 
-# Timeout binary (GNU coreutils `timeout`, or `gtimeout` on macOS). The
-# optional-CLI version probes and `claude --version` below run under it, or
-# under a watchdog without one (_ss_bounded), so a CLI that never answers is
-# given up on either way.
-# triforge_bootstrap and _cursor_bin find their own: without one the agy pack
-# check is skipped and the Cursor `agent` probes refuse (fail-closed, as
-# invoke-external.sh is — a hung CLI must not stall session start), and the
-# warning is appended to the orientation message.
+# Timeout binary (GNU `timeout`, or `gtimeout` on macOS): the CLI version
+# probes below run under it, or under _ss_bounded's watchdog without one.
+# triforge_bootstrap and _cursor_bin find their own; without one the agy pack
+# check is skipped and the Cursor `agent` probes refuse, as the warning says.
 TIMEOUT_BIN=""
 command -v timeout >/dev/null 2>&1 && TIMEOUT_BIN="timeout"
 [ -z "$TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && TIMEOUT_BIN="gtimeout"
@@ -256,29 +252,33 @@ if [ -z "$TIMEOUT_BIN" ]; then
 fi
 
 # _ss_bounded <seconds> <dir> <command…> — the command's stdout, the command
-# given up on after <seconds>: a SIGTERM, then a SIGKILL 2 s later. Under the
-# timeout binary when there is one (-k 2s; its SIGKILL takes its process group,
-# itself too, and the braces swallow bash's "Killed" line), else under the same
-# watchdog as _instr_watchdog in scripts/lib/instructions.sh, the library's:
-# the answer goes to <dir>/out (a private temp dir from _ss_private_tmp, B5, G2,
-# removed here), and a background subshell on /dev/null (holding no pipe of the
-# caller's) kills the command at the bound; killed once the command returns, it
-# SIGKILLs its own sleep from its TERM trap (a flag until that sleep exists), so
-# none outlives the call. Each `wait` swallows a "Terminated" or "Killed" line.
+# given up on after <seconds>: a SIGTERM, then a SIGKILL 2 s later, under the
+# timeout binary (-k 2s) when there is one, else the watchdog, as _instr_py
+# and _instr_watchdog in scripts/lib/instructions.sh run them (their comments
+# say why each step is there), so the bound stops the command's process group
+# and what is left of it; the answer goes to <dir>/out (watchdog only: a
+# private temp dir from _ss_private_tmp, B5, G2, removed here).
 _ss_bounded() {
-  local SECS="$1" OUT_DIR="$2" CMD_PID DOG_PID
+  local SECS="$1" OUT_DIR="$2" CMD_PID DOG_PID PL N=0 PG='setpgrp(0, 0); exec { $ARGV[0] } @ARGV; exit 127'
   shift 2
   if [ -n "$TIMEOUT_BIN" ]; then
-    { "$TIMEOUT_BIN" -k 2s "${SECS}s" "$@"; } 2>/dev/null || true
+    "$TIMEOUT_BIN" -k 2s "${SECS}s" "$@" </dev/null 2>/dev/null & CMD_PID=$!
+    wait "$CMD_PID" 2>/dev/null || N=$?
+    case "$N" in 124|137) N=0; while kill -0 -- -"$CMD_PID" 2>/dev/null; do
+      case "$N" in 0) kill -- -"$CMD_PID" 2>/dev/null || true ;; 20) kill -9 -- -"$CMD_PID" 2>/dev/null || true; break ;; esac
+      sleep 0.1; N=$((N + 1)); done ;; esac
     return 0
   fi
-  "$@" </dev/null >"$OUT_DIR/out" 2>/dev/null &
+  PL=$(command -v perl 2>/dev/null || true)
+  PERL_BADLANG=0 ${PL:+"$PL"} ${PL:+-e} ${PL:+"$PG"} ${PL:+--} "$@" </dev/null >"$OUT_DIR/out" 2>/dev/null &
   CMD_PID=$!
-  ( K=""; trap 'K=1' TERM; sleep "$SECS" &
+  ( R=""; trap 'R=1' TERM; sleep "$SECS" &
     trap 'kill -9 "$!" 2>/dev/null || true; exit 0' TERM
-    if [ -n "$K" ]; then kill -9 "$!" 2>/dev/null || true; exit 0; fi
-    wait "$!" || exit 0; kill "$CMD_PID" 2>/dev/null || exit 0
-    sleep 2 & wait "$!" || exit 0; kill -9 "$CMD_PID" 2>/dev/null || true
+    if [ -n "$R" ]; then kill -9 "$!" 2>/dev/null || true; exit 0; fi
+    wait "$!" || exit 0; trap 'R=1' TERM; N=0; kill -- -"$CMD_PID" 2>/dev/null || kill "$CMD_PID" 2>/dev/null || exit 0
+    while { kill -0 -- -"$CMD_PID" || { [ -z "$R" ] && kill -0 "$CMD_PID"; }; } 2>/dev/null; do
+      if [ "$N" -ge 20 ]; then kill -9 -- -"$CMD_PID" 2>/dev/null || { [ -z "$R" ] && kill -9 "$CMD_PID" 2>/dev/null; } || true; exit 0; fi
+      sleep 0.1; N=$((N + 1)); done
   ) </dev/null >/dev/null 2>&1 &
   DOG_PID=$!
   wait "$CMD_PID" 2>/dev/null || true
@@ -289,11 +289,8 @@ _ss_bounded() {
 }
 
 # _ss_cli_version <seconds> <binary> — the first line the binary prints for
-# --version, or for -V when --version prints nothing. Each call goes through
-# _ss_bounded (given up on after <seconds>, killed 2 s later if it ignores
-# SIGTERM); without a timeout binary each call gets a private temp dir of its
-# own, since _ss_bounded removes the one it is given. Nothing when neither
-# call answers; a call with no private temp dir for it is skipped.
+# --version, else for -V, each call through _ss_bounded (without a timeout
+# binary, with a private temp dir of its own, or skipped with none); or nothing.
 _ss_cli_version() {
   local SECS="$1" BIN="$2" FLAG DIR V=""
   for FLAG in --version -V; do
@@ -564,30 +561,26 @@ fi
 #           user's own file (no 3.x copy) and nothing in the chain imports
 #           the project's AGENTS.md: the line names at-setup, which offers
 #           the import and asks first
-#   above   a CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md in a directory
-#           above the project, with no import of the project's AGENTS.md
-#           anywhere in the chain: the line offers a CLAUDE.md in the project
+#   above   such a file above the project, and no import of the project's
+#           AGENTS.md in the chain: the line offers a CLAUDE.md in the project
 #           first (it loads AGENTS.md for this project only), then the import
-#           into that file, which every project under it loads too, then
-#           removing the file; for a file in HOME or a directory above it
-#           (_ss_home_or_above), the project's own CLAUDE.md alone: that file
-#           is read for every project under it, and the writers refuse it;
-#           for a file with no import line that reads back as the project's
-#           (the import column "-": the path down to the project holds
-#           whitespace or a #, where an import path ends, starts with ~,
-#           which an import reads as HOME, or holds another character Claude
-#           Code does not read as written there), the project's own
-#           CLAUDE.md or removing the file; the writer refuses that import
+#           into that file (every project under it loads it too), then
+#           removing it; for a file in HOME or above it (_ss_home_or_above),
+#           the project's CLAUDE.md alone (every project under it reads it,
+#           and the writers refuse it); with import column "-" (no import line
+#           there reads back as the project's: the path holds whitespace or a
+#           #, starts with ~, or holds a character Claude Code does not read
+#           as written), the project's CLAUDE.md or removing it
+# An own or above file read only up to a bound (state past-bound, import "-")
+# may import further down: its line says session start cannot tell.
 # A session started in HOME or a directory above it gets none of the file
 # lines and no tip (SS_NO_PROJECT): that is no project, as the home-directory
-# warning says, and every file there is one the writers refuse.
-# These describe a standing state, not a one-time action: they print on every
-# session start until the state is fixed, and so — like the roster-pin and
-# timeout lines — carry no "session-start:" prefix (that prefix marks a step
-# that acted once; SELF-08 counts it for idempotence). Nothing here edits a
-# file: each line names the edit and leaves it to the user. The files are
-# found by instruction_files_detect (scripts/lib/instructions.sh, sourced
-# here on its own, so the notices hold when the full loader fails).
+# warning says. These describe a standing state: they print on every session
+# start until it is fixed, so (like the roster-pin and timeout lines) they
+# carry no "session-start:" prefix, which marks a step that acted once
+# (SELF-08 counts it). Nothing here edits a file. The files are found by
+# instruction_files_detect (scripts/lib/instructions.sh, sourced here on its
+# own, so the notices hold when the full loader fails).
 CLAUDE_FLOOR="2.1.277"
 INSTRUCTION_NOTICES=""
 # These notices are about the directory the session started in (see the
@@ -608,10 +601,8 @@ SS_XYZ_EOF
   echo $(( 10#$A * 1000000000000 + 10#$B * 1000000 + 10#$C ))
 }
 
-# Floor. The answer is read with a 10 s bound (12 s for a `claude` that
-# ignores SIGTERM: SIGKILL follows 2 s later), timeout binary or not — a hung
-# `claude` must not stall session start. A missing `claude`, one that does not
-# answer in time, or an answer with no X.Y.Z in it warns about nothing.
+# Floor, read with a 10 s bound (SIGKILL 2 s later): a hung `claude` must not
+# stall session start. No `claude`, no answer in time or no X.Y.Z: no warning.
 if command -v claude >/dev/null 2>&1; then
   SS_CLAUDE_XYZ=""
   SS_BOUND_DIR=""
@@ -636,10 +627,9 @@ fi
 # it is named anyway, its Triforge text stale. Only CLAUDE.md and .claude/
 # CLAUDE.md are fingerprinted (no 3.x template was a CLAUDE.local.md); an
 # unreadable file (a FIFO, a dangling link) is named in no line. The pass
-# gets 10 s, then SIGKILL 2 s later (_INSTR_SECS): a project's files take
-# milliseconds, the slowest file the reader parses (none over Claude Code's
-# 4 MiB cutoff) under 4 s. A library that can't load or run (no python3), or
-# a pass given up on (its partial rows dropped), gets one WARNING instead.
+# gets 10 s, then SIGKILL 2 s later (_INSTR_SECS); a project's files take
+# milliseconds. A library that can't load or run, or a pass given up on (its
+# partial rows dropped), gets one WARNING instead, naming why.
 SS_CHAIN_IMPORTS=""
 SS_OWN_NOTICES=""
 SS_ABOVE_NOTICES=""
@@ -658,12 +648,17 @@ if [ -n "$SS_NO_PROJECT" ]; then
   :
 elif [ -f "$SS_INSTR_LIB" ] && source "$SS_INSTR_LIB" >/dev/null 2>&1; then
   SS_FOUND=$(_INSTR_SECS=10 instruction_files_detect "$SS_START_DIR" 2>/dev/null) || SS_FOUND_RC=$?
+  case "$SS_FOUND_RC" in   # with python3 on PATH, the library's only other rc 69 is the watchdog's
+    69) SS_WHY="python3 is not on PATH"; ! command -v python3 >/dev/null 2>&1 || SS_WHY="neither timeout nor gtimeout is on PATH, and the watchdog that stands in for them found no private temp dir (TMPDIR and /tmp are shared without the sticky bit, or mktemp failed)" ;;
+    124|137|143) SS_WHY="given up on after 10 s" ;;
+    *) SS_WHY="the reader stopped with an error" ;;
+  esac
 else
-  SS_FOUND_RC=69
+  SS_FOUND_RC=69 SS_WHY="the library did not load"
 fi
 if [ "$SS_FOUND_RC" -ne 0 ]; then
   SS_FOUND=""
-  INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}$(_ss_prose "WARNING: the instruction-file check did not finish (instruction_files_detect in ${SS_INSTR_LIB}, rc ${SS_FOUND_RC}; it needs python3 and stops after 10 s), so the CLAUDE.md and 3.x template notices may be missing this session.")"
+  INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}$(_ss_prose "WARNING: the instruction-file check did not finish (instruction_files_detect in ${SS_INSTR_LIB}, rc ${SS_FOUND_RC}: ${SS_WHY}), so the CLAUDE.md and 3.x template notices may be missing this session.")"
 fi
 while IFS=$'\t' read -r SS_KIND SS_WHERE SS_STATE SS_FILE SS_IMPORT; do
   case "$SS_KIND" in
@@ -675,6 +670,11 @@ while IFS=$'\t' read -r SS_KIND SS_WHERE SS_STATE SS_FILE SS_IMPORT; do
     *,imports,*) SS_CHAIN_IMPORTS="yes"; continue ;;
   esac
   case "${SS_WHERE},${SS_STATE}," in
+    project,*,past-bound,*)
+      SS_LINE=@AGENTS.md; if [ "$SS_KIND" = .claude/CLAUDE.md ]; then SS_LINE=@../AGENTS.md; fi
+      SS_OWN_NOTICES="${SS_OWN_NOTICES}${SS_NL}WARNING: ${SS_KIND} in this project is past the size or nesting Triforge reads, so session start cannot tell whether it imports AGENTS.md, and Claude Code skips AGENTS.md while this file exists without importing it. Shorten it, or add the line ${SS_LINE} to it yourself where Claude Code reads imports (not inside a code block). Session start never edits this file." ;;
+    above,*,past-bound,*)
+      SS_ABOVE_NOTICES="${SS_ABOVE_NOTICES}${SS_NL}WARNING: $(_ss_prose "$SS_FILE") sits above this project and is past the size or nesting Triforge reads, so session start cannot tell whether it imports this project's AGENTS.md, and a Claude lead skips AGENTS.md while that file exists without importing it. Add a CLAUDE.md holding the line @AGENTS.md to this project: it loads AGENTS.md for this project only." ;;
     project,*,stale-3x-*)
       INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}WARNING: ${SS_KIND} is a Triforge 3.x project template (a copy of the retired templates/CLAUDE.md). Triforge 4 ships AGENTS.md only, and Claude Code does not read AGENTS.md while this file exists without importing it. Add the line $(_ss_prose "$SS_IMPORT") to it, or replace its Triforge content with the pointer block in the plugin's templates/AGENTS.md — session start never edits this file."
       ;;
