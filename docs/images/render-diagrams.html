@@ -5,6 +5,11 @@
     node docs/images/render-diagrams.js            (all, and the source stamp)
     node docs/images/render-diagrams.js --only roster
 
+  The last three cards (install-routes, coordinate-loop, lease-lifecycle) show
+  an Excalidraw SVG instead: excalidraw/<id>.svg, exported with its fonts
+  embedded from excalidraw/<id>.excalidraw. Edit the source on the canvas,
+  export it again, then rerender.
+
   The website (docs/index.html) embeds dark twins of three of these facts:
   builder-pool.svg, roster.svg and lease-lifecycle.svg. When a name, count,
   pin or flow changes here, change those three SVGs too.
@@ -244,6 +249,11 @@
   .cr-loop .cr-guard { color: #94a3b8; margin-top: 0; text-align: right; }
   .cr-loop .cr-guard::before { color: #cbd5e1; }
   #context-recovery .wrap .box { text-align: left; padding: 14px 16px; }
+
+  /* ── EXCALIDRAW ────────────────────────────────────── */
+  /* A free-form diagram drawn in Excalidraw (excalidraw/<id>.excalidraw, its
+     SVG export beside it), shown at the card's content width. */
+  .ex-img { display: block; width: 100%; height: auto; }
 </style>
 </head>
 <body>
@@ -883,6 +893,21 @@
     </div>
     <div class="out-label" style="margin: 10px 0 0;">guards: declaring victory early &#xB7; no marker: the next session picks up</div>
   </div>
+</div>
+
+<!-- ════════════ INSTALL ROUTES (Excalidraw) ════════════ -->
+<div class="diagram" id="install-routes">
+  <img class="ex-img" src="excalidraw/install-routes.svg" alt="Install routes: the Claude Code and Codex plugin installs both lead to at-setup, which checks the core trio, enrolls optional CLIs and writes ops/roster.toml; Devin CLI and Pi can install the portable skills only">
+</div>
+
+<!-- ════════════ COORDINATE LOOP (Excalidraw) ════════════ -->
+<div class="diagram" id="coordinate-loop">
+  <img class="ex-img" src="excalidraw/coordinate-loop.svg" alt="coordinate.sh runs a fresh lead session per iteration until the session creates ops/.sprint-complete">
+</div>
+
+<!-- ════════════ LEASE LIFECYCLE (Excalidraw) ════════════ -->
+<div class="diagram" id="lease-lifecycle">
+  <img class="ex-img" src="excalidraw/lease-lifecycle.svg" alt="One task's lease: create, dispatch, wait, collect, pinned review, squash merge and promotion, with the escalation paths">
 </div>
 
 </body>
