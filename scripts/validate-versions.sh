@@ -103,9 +103,11 @@
 #      documented opt-in survives). Excluded: ops/research/, ops/decisions/,
 #      docs/plans/, docs/brainstorms/, docs/releases/ (each release's notes
 #      name the pins of its day), ops/solutions/, docs/images/ except
-#      docs/images/render-diagrams.html (KTD6's carve-out: the PNGs are
-#      rendered from it, so a model bump that leaves a diagram stale fails
-#      here), scripts/fixtures/validate-versions/ (the
+#      docs/images/render-diagrams.html and the visible text of each
+#      docs/images/excalidraw/*.svg it embeds, read one <text> element per
+#      line as <path>#text:<n> (KTD6's carve-out: the PNGs are rendered from
+#      them, so a model bump that leaves a diagram stale fails here),
+#      scripts/fixtures/validate-versions/ (the
 #      self-test's planted stale pins and second ladder), .git/,
 #      the gitignored deploy copies (.agents/ .gemini/ .antigravity/),
 #      node_modules/, the two validator scripts, lines marked as history
@@ -118,7 +120,8 @@
 #      AGENTS.md, templates/AGENTS.md, README.md (outside its
 #      "## Release history" section, as in check 4), docs/index.html,
 #      docs/agent-triforge.md, .claude-plugin/plugin.json and, when it
-#      exists, docs/images/render-diagrams.html (the diagram source).
+#      exists, docs/images/render-diagrams.html and the text of the
+#      docs/images/excalidraw/*.svg it embeds (the diagram source).
 #      The vocabulary: "<N> skills" is every skill, "<N> portable skills" the
 #      portable set, "<N> lead workflows" the at-* set, and "<N> [up to three
 #      words] personas" the persona count ("agents|subagents" still counts
@@ -176,7 +179,8 @@
 #      the names the session-start banner (hooks/handlers/session-start.sh)
 #      and skills/at-status/references/status-template.md enumerate equal the
 #      set of skills/at-*/ directories (the diff is printed). No shipped
-#      surface (check 4's scope with its diagram source, minus ops/) carries
+#      surface (check 4's scope with its diagram source and the SVG text,
+#      minus ops/) carries
 #      a bare $at- mention,
 #      because Codex attaches a plugin skill only as
 #      $agent-triforge:at-<name> (codex-cli 0.160.0, U14). The check skips
@@ -225,7 +229,8 @@
 #      stamp line for a file that no longer exists, or any other difference
 #      fails, naming the command, so a source edited without a re-render
 #      cannot pass with stale PNGs. Prints a "skip:" line while the HTML is
-#      absent. Checks 4, 5 and 9 read the HTML too (the carve-out above).
+#      absent. Checks 4, 5 and 9 read the HTML and the SVGs' text too (the
+#      carve-out above).
 #
 # Exit codes: 0 every check passed (--self-test: every case behaved as named);
 # 1 at least one check failed (--self-test: a case did not); 2 bad flag.
@@ -496,6 +501,25 @@ SWEEP_SELF_RE='^(\./)?scripts/validate-(versions|skills)\.sh:'
 # The diagram source the PNGs are rendered from: checks 4, 5 and 9 read it
 # although docs/images/ stays excluded (KTD6), and check 13 holds its stamp.
 DIAGRAM_SOURCE='docs/images/render-diagrams.html'
+# _diagram_svg_lines: the visible text of each Excalidraw SVG the diagram
+# source embeds (docs/images/excalidraw/*.svg), one "<path>#text:<n>:<text>"
+# line per <text> element, n counting from 1. Each SVG is one long line that
+# also carries its font, so checks 4, 5 and 9 read these lines instead of the
+# file; one element's words then never hide another's (a "history" in one
+# label would drop the whole file's line from the sweep).
+_diagram_svg_lines() {
+  python3 -c "$VV_PY_STDIN" <<'PYEOF'
+import glob
+import html
+import re
+
+for path in sorted(glob.glob("docs/images/excalidraw/*.svg")):
+    with open(path, encoding="utf-8") as fh:
+        svg = fh.read()
+    for n, m in enumerate(re.finditer(r"<text\b[^>]*>(.*?)</text>", svg, re.S), 1):
+        print(path + "#text:" + str(n) + ":" + " ".join(html.unescape(m.group(1)).split()))
+PYEOF
+}
 # README.md's release history: its "## Release history" heading up to the line
 # before the next "## " heading (END 0: to the end of the file). Checks 2, 4,
 # 5, 9 and 11 skip only that section, so FAQ, Contributing and License after
@@ -509,19 +533,20 @@ if [ "$README_HISTORY_START" -gt 0 ]; then
 fi
 # _shipped_surfaces [diagrams]: filter grep -rn output (file:line:text) down to
 # the shipped surfaces — drops the excluded paths, this script, and README.md's
-# release history section; with "diagrams" it keeps DIAGRAM_SOURCE's lines.
+# release history section; with "diagrams" it keeps the lines of
+# DIAGRAM_SOURCE and of _diagram_svg_lines (the SVGs' text, not their files).
 # The REs reach awk through the environment: -v would read their backslashes
 # as string escapes.
 _shipped_surfaces() {
-  local keep=""
+  local keep_re=""
   if [ "${1:-}" = diagrams ]; then
-    keep="$DIAGRAM_SOURCE"
+    keep_re='^docs/images/(render-diagrams\.html|excalidraw/[^/:]+\.svg#text)$'
   fi
-  VV_EXCLUDE_RE="$SWEEP_EXCLUDE_RE" VV_SELF_RE="$SWEEP_SELF_RE" VV_KEEP="$keep" \
+  VV_EXCLUDE_RE="$SWEEP_EXCLUDE_RE" VV_SELF_RE="$SWEEP_SELF_RE" VV_KEEP_RE="$keep_re" \
     awk -F: -v start="$README_HISTORY_START" -v end="$README_HISTORY_END" '
       { f = $1; sub(/^\.\//, "", f); n = $2 + 0 }
       $0 ~ ENVIRON["VV_SELF_RE"] { next }
-      $0 ~ ENVIRON["VV_EXCLUDE_RE"] && f != ENVIRON["VV_KEEP"] { next }
+      $0 ~ ENVIRON["VV_EXCLUDE_RE"] && !(ENVIRON["VV_KEEP_RE"] != "" && f ~ ENVIRON["VV_KEEP_RE"]) { next }
       f == "README.md" && start > 0 && n >= start && (end == 0 || n < end) { next }
       { print }
     ' || true
@@ -1205,22 +1230,25 @@ if _selected sweep; then
   if [ "$NO_SWEEP" -eq 1 ]; then
     echo "skip: stale-pin sweep (--no-sweep)"
   else
+    SWEEP_PATTERNS=(
+      -e 'gpt-5\.6-sol'
+      -e 'grok-4\.5'
+      -e 'glm-5\.2'
+      -e 'kimi-k3'
+      -e 'Fable 5 →'
+      -e 'Opus 4\.8'
+      -e 'Opus 5\.5 → Sonnet 5[^.]'
+      -e 'Opus 5\.5 → Sonnet 5$'
+      -e 'Sonnet 5)'
+      -e 'Sonnet&nbsp;5[^.]'
+      -e '2026-07-probe-record'
+    )
     SWEEP_HITS=$(
       {
-        grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" \
-          -e 'gpt-5\.6-sol' \
-          -e 'grok-4\.5' \
-          -e 'glm-5\.2' \
-          -e 'kimi-k3' \
-          -e 'Fable 5 →' \
-          -e 'Opus 4\.8' \
-          -e 'Opus 5\.5 → Sonnet 5[^.]' \
-          -e 'Opus 5\.5 → Sonnet 5$' \
-          -e 'Sonnet 5)' \
-          -e 'Sonnet&nbsp;5[^.]' \
-          -e '2026-07-probe-record' \
-          . || true
+        grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" "${SWEEP_PATTERNS[@]}" . || true
         grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" 'Gemini 3\.1 Pro (High)' . | grep -i 'default' || true
+        _diagram_svg_lines | grep "${SWEEP_PATTERNS[@]}" || true
+        _diagram_svg_lines | grep 'Gemini 3\.1 Pro (High)' | grep -i 'default' || true
       } \
         | grep -v 'history\|was [a-z]' \
         | _shipped_surfaces diagrams \
@@ -1248,7 +1276,7 @@ if _selected counts; then
     COUNTS_RC=0
     VV_PERSONAS="$PERSONA_COUNT" VV_SKILLS="$SKILL_COUNT" VV_PORTABLE="$PORTABLE_COUNT" VV_WORKFLOWS="$WORKFLOW_COUNT" \
     VV_README_HISTORY_START="$README_HISTORY_START" VV_README_HISTORY_END="$README_HISTORY_END" \
-    VV_DIAGRAM_SOURCE="$DIAGRAM_SOURCE" python3 -c "$VV_PY_STDIN" <<'PYEOF' || COUNTS_RC=$?
+    VV_DIAGRAM_SOURCE="$DIAGRAM_SOURCE" VV_DIAGRAM_TEXT="$(_diagram_svg_lines)" python3 -c "$VV_PY_STDIN" <<'PYEOF' || COUNTS_RC=$?
 import os
 import re
 import sys
@@ -1296,6 +1324,33 @@ HISTORY = re.compile(r"history|\bwas\b|previously", re.I)
 
 mismatches = []
 claims = 0
+
+
+def scan(path, lineno, raw):
+    global claims
+    line = re.sub(r"\(was \d+\)", "", raw)
+    if HISTORY.search(line):
+        return
+    for m in CLAIM.finditer(line):
+        if m.group("pre"):
+            continue
+        mods = {w.lower() for w in m.group("mods").split()}
+        if mods & SUBSET_WORDS:
+            continue
+        if not (mods & SURFACE_MODS) and not SURFACE_LINE.search(line):
+            continue
+        kind = KIND.get(m.group("kind").lower(), m.group("kind").lower())
+        if kind == "skill" and "portable" in mods:
+            kind = "portable skill"
+        n = int(m.group("n"))
+        claims += 1
+        if n != actual[kind]:
+            mismatches.append(
+                path + ":" + str(lineno) + ": says " + str(n) + " " + kind + "s, shipped "
+                + str(actual[kind]) + " — " + m.group(0).strip()
+            )
+
+
 for path in files:
     if not os.path.exists(path):
         mismatches.append(path + ": file missing")
@@ -1305,27 +1360,11 @@ for path in files:
             if (path == "README.md" and readme_history_start and lineno >= readme_history_start
                     and not (readme_history_end and lineno >= readme_history_end)):
                 continue
-            line = re.sub(r"\(was \d+\)", "", raw)
-            if HISTORY.search(line):
-                continue
-            for m in CLAIM.finditer(line):
-                if m.group("pre"):
-                    continue
-                mods = {w.lower() for w in m.group("mods").split()}
-                if mods & SUBSET_WORDS:
-                    continue
-                if not (mods & SURFACE_MODS) and not SURFACE_LINE.search(line):
-                    continue
-                kind = KIND.get(m.group("kind").lower(), m.group("kind").lower())
-                if kind == "skill" and "portable" in mods:
-                    kind = "portable skill"
-                n = int(m.group("n"))
-                claims += 1
-                if n != actual[kind]:
-                    mismatches.append(
-                        path + ":" + str(lineno) + ": says " + str(n) + " " + kind + "s, shipped "
-                        + str(actual[kind]) + " — " + m.group(0).strip()
-                    )
+            scan(path, lineno, raw)
+# The embedded Excalidraw SVGs, one <text> element per line ("<path>#text:<n>:<text>").
+for entry in os.environ["VV_DIAGRAM_TEXT"].splitlines():
+    path, n, raw = entry.split(":", 2)
+    scan(path, int(n), raw)
 
 # Landing-page hero counters carry the number in a data-target attribute and
 # the surface name in the next span, so the prose CLAIM regex never sees them.
@@ -1677,7 +1716,10 @@ PYEOF
     FAILED_CHECKS=$((FAILED_CHECKS + 1))
   fi
   BARE_MENTIONS=$(
-    grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" -e '\$at-' . 2>/dev/null \
+    {
+      grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" -e '\$at-' . 2>/dev/null || true
+      _diagram_svg_lines | grep -e '\$at-' || true
+    } \
       | grep -vE '^(\./)?(ops/|scripts/fixtures/validate-skills/c24-bare-mention/)' \
       | _shipped_surfaces diagrams \
       | sort -t: -k1,1 -k2,2n || true

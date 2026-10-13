@@ -878,7 +878,7 @@ Multi-model coordination, portable skill injection into external agents, agent t
 Each version's full notes are one file in [`docs/releases/`](docs/releases/), and the release workflow publishes that file as the GitHub release.
 
 <details>
-<summary>All releases (19)</summary>
+<summary>All releases</summary>
 
 | Version | Date | Summary |
 |---|---|---|
