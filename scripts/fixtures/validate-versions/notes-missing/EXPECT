@@ -4,5 +4,5 @@
 check: lockstep
 rc: 1
 line: ok:   version lockstep: 1.2.3 (.claude-plugin/plugin.json, .claude-plugin/marketplace.json, antigravity-agents/plugin.json, README What's new)
-line: FAIL: release notes: docs/releases/v1.2.3.md is missing — scripts/release-notes.sh builds the GitHub release from it: first line '# <YYYY-MM-DD> — v1.2.3: <title>', then the notes, starting with README What's new (v1.2.3)
+line: FAIL: release notes: docs/releases/v1.2.3.md is missing — scripts/release-notes.sh builds the GitHub release from it; write it with the first line '# <YYYY-MM-DD> — v1.2.3: <title>', then the notes, starting with the README What's new (v1.2.3) text
 line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

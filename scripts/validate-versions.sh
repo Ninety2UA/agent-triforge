@@ -35,14 +35,15 @@
 #      version's notes file docs/releases/vX.Y.Z.md must exist:
 #      scripts/release-notes.sh turns it into the GitHub release title + body
 #      when the bump lands on main (.github/workflows/release.yml), so a
-#      missing file fails here, not there. Its first line is the heading
-#      "# <YYYY-MM-DD> — vX.Y.Z: <title>" with a title after the first ": ",
-#      a non-blank line follows it, and every non-blank line of the README
-#      "## What's new (vX.Y.Z)" block (to the next "## " heading or "---"
-#      line) is a whole line of the file once its links read as the notes file
-#      carries them — (#x) as (../../README.md#x), a repo path as
-#      (../../<path>), a URL unchanged — so the What's new text survives the
-#      next release replacing it in the README.
+#      missing file fails here, before the release workflow runs. Its first
+#      line is the heading "# <YYYY-MM-DD> — vX.Y.Z: <title>" with a title
+#      after the first ": ", a non-blank line follows it, and every non-blank
+#      line of the README "## What's new (vX.Y.Z)" block (to the next "## "
+#      heading or "---" line) is a whole line of the file after its links are
+#      rewritten as the notes file carries them: (#x) becomes
+#      (../../README.md#x), a repo path (../../<path>), and a URL stays as it
+#      is. That way the What's new text survives when the next release
+#      replaces it in the README.
 #      Every shipped skill's frontmatter metadata.version (skills/*/SKILL.md;
 #      the repo-local .claude/skills are not shipped) equals that version too:
 #      each skill whose metadata.version differs or is missing fails, named
@@ -102,9 +103,9 @@
 #      documented opt-in survives). Excluded: ops/research/, ops/decisions/,
 #      docs/plans/, docs/brainstorms/, docs/releases/ (each release's notes
 #      name the pins of its day), ops/solutions/, docs/images/ except
-#      docs/images/render-diagrams.html (the diagram source the PNGs are
-#      rendered from: KTD6's carve-out, so a model bump that leaves a diagram
-#      stale fails here), scripts/fixtures/validate-versions/ (the
+#      docs/images/render-diagrams.html (KTD6's carve-out: the PNGs are
+#      rendered from it, so a model bump that leaves a diagram stale fails
+#      here), scripts/fixtures/validate-versions/ (the
 #      self-test's planted stale pins and second ladder), .git/,
 #      the gitignored deploy copies (.agents/ .gemini/ .antigravity/),
 #      node_modules/, the two validator scripts, lines marked as history
@@ -213,7 +214,7 @@
 #      docs/brainstorms/ and docs/releases/ included) holds "{{" or "{%":
 #      GitHub Pages builds docs/ with Jekyll, which reads either as Liquid,
 #      and one such delimiter renders the page wrong or stops the site from
-#      updating. Each hit is named by file and line.
+#      updating. Each hit names its file and line.
 #  13. Diagram render stamp (KTD6) — when docs/images/render-diagrams.html
 #      exists, docs/images/render-diagrams.sha256 must be the text a full
 #      render (node docs/images/render-diagrams.js) writes: one line per
@@ -577,8 +578,8 @@ try:
     with open(path, encoding="utf-8") as fh:
         notes = fh.read().split("\n")
 except FileNotFoundError:
-    print("FAIL: release notes: " + path + " is missing — scripts/release-notes.sh builds the GitHub release from it: first line '"
-          + heading + "', then the notes, starting with README " + block)
+    print("FAIL: release notes: " + path + " is missing — scripts/release-notes.sh builds the GitHub release from it; write it with the first line '"
+          + heading + "', then the notes, starting with the README " + block + " text")
     sys.exit(1)
 except (OSError, UnicodeDecodeError) as exc:
     print("FAIL: release notes: " + path + " unreadable (" + str(exc) + ")")
@@ -1908,7 +1909,7 @@ for top, dirs, names in os.walk("docs"):
             found = [d for d in DELIMITERS if d in line]
             if found:
                 fails.append(path + ":" + str(lineno) + " holds " + " and ".join(found) + " — GitHub Pages builds docs/ with Jekyll,"
-                             + " which reads it as Liquid: the page renders wrong or the site stops updating; reword it")
+                             + " which reads it as Liquid, so the page renders wrong or the site stops updating; reword it")
 
 for line in fails:
     print("FAIL: liquid: " + line)

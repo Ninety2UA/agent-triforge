@@ -4,6 +4,6 @@
 # lone brace, a brace set and the closing forms, which pass.
 check: liquid
 rc: 1
-line: FAIL: liquid: docs/plans/plan.md:3 holds {% — GitHub Pages builds docs/ with Jekyll, which reads it as Liquid: the page renders wrong or the site stops updating; reword it
-line: FAIL: liquid: docs/releases/v1.2.3.md:5 holds {{ — GitHub Pages builds docs/ with Jekyll, which reads it as Liquid: the page renders wrong or the site stops updating; reword it
+line: FAIL: liquid: docs/plans/plan.md:3 holds {% — GitHub Pages builds docs/ with Jekyll, which reads it as Liquid, so the page renders wrong or the site stops updating; reword it
+line: FAIL: liquid: docs/releases/v1.2.3.md:5 holds {{ — GitHub Pages builds docs/ with Jekyll, which reads it as Liquid, so the page renders wrong or the site stops updating; reword it
 line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

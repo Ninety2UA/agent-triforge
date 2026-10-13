@@ -6,8 +6,8 @@
 # and whose body (every line after it) starts with that version's "## What's new".
 # This script is the one place that turns that file into the GitHub release, so
 # the notes on the Releases page are the file's body plus an install/compare
-# footer, with each repo-relative link "](../../<path>)" rewritten to
-# "](https://github.com/Ninety2UA/agent-triforge/blob/v<X.Y.Z>/<path>)" so it
+# footer. Each repo-relative link "](../../<path>)" becomes
+# "](https://github.com/Ninety2UA/agent-triforge/blob/v<X.Y.Z>/<path>)", so it
 # resolves on the release page. Consumed by .github/workflows/release.yml on
 # every version bump that lands on main; runnable by hand for a preview.
 #
@@ -18,13 +18,14 @@
 #   --title    "v<version> — <title>": the heading's text after its first ": ",
 #              first letter capitalized ("v<version>" when the title is empty)
 #   --body     the notes file's body + the install / compare footer  (default);
-#              the footer links the notes file at the tag when the tag (or,
-#              before it exists, the --target commit) holds it, else at main
+#              the footer links the notes file at the tag when the tag holds
+#              it (or, before the tag exists, the --target commit does), else
+#              at main
 #   --target   the commit that first set .claude-plugin/plugin.json to <version> — the tag target
 #
 # Exit codes: 0 ok · 1 no notes file, a first line that is not its
 # "# <date> — v<version>: <title>" heading, or an empty body (a release never
-# ships without notes — write docs/releases/v<version>.md first), or no bump
+# ships without notes; write docs/releases/v<version>.md first), or no bump
 # commit found · 2 usage. Bash 3.2-compatible (macOS /bin/bash); BSD and GNU
 # awk/sed/grep/sort.
 set -euo pipefail
