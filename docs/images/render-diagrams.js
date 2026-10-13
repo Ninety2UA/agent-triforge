@@ -36,7 +36,6 @@ const outDir = path.resolve(getArg('--out', DIR));
 // Playwright from this folder's resolution, then the global npm root, then the
 // copy the global @playwright/cli carries.
 function loadPlaywright() {
-  const tried = ['playwright'];
   const candidates = ['playwright'];
   try {
     const root = execFileSync('npm', ['root', '-g'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
@@ -51,10 +50,9 @@ function loadPlaywright() {
       return require(c);
     } catch (e) {
       if (e.code !== 'MODULE_NOT_FOUND') throw e;
-      if (!tried.includes(c)) tried.push(c);
     }
   }
-  throw new Error(`Playwright not found (tried ${tried.join(', ')}). Install it with: npm install -g playwright`);
+  throw new Error(`Playwright not found (tried ${candidates.join(', ')}). Install it with: npm install -g playwright`);
 }
 
 // Minimal static server for this folder, excalidraw/ included.

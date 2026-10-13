@@ -152,16 +152,14 @@ case "$MODE" in
     # The notes file at the tag once the tag holds it (or, before the tag
     # exists, the commit it will be created at); tags older than docs/releases/
     # link it on main.
-    ref=main
     if git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null; then
-      if git cat-file -e "$TAG:$NOTES" 2>/dev/null; then
-        ref="$TAG"
-      fi
+      at="$TAG"
     else
-      target=$(bump_commit)
-      if [ -n "$target" ] && git cat-file -e "$target:$NOTES" 2>/dev/null; then
-        ref="$TAG"
-      fi
+      at=$(bump_commit)
+    fi
+    ref=main
+    if [ -n "$at" ] && git cat-file -e "$at:$NOTES" 2>/dev/null; then
+      ref="$TAG"
     fi
     printf '%s\n\n---\n\n' "$body"
     printf '**Install / update (Claude Code):** `claude plugin marketplace add %s` · `claude plugin install agent-triforge@agent-triforge` · `claude plugin update agent-triforge`\n\n' "$REPO_URL"

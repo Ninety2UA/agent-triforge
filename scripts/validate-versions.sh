@@ -513,7 +513,11 @@ fi
 # The REs reach awk through the environment: -v would read their backslashes
 # as string escapes.
 _shipped_surfaces() {
-  VV_EXCLUDE_RE="$SWEEP_EXCLUDE_RE" VV_SELF_RE="$SWEEP_SELF_RE" VV_KEEP="${1:+$DIAGRAM_SOURCE}" \
+  local keep=""
+  if [ "${1:-}" = diagrams ]; then
+    keep="$DIAGRAM_SOURCE"
+  fi
+  VV_EXCLUDE_RE="$SWEEP_EXCLUDE_RE" VV_SELF_RE="$SWEEP_SELF_RE" VV_KEEP="$keep" \
     awk -F: -v start="$README_HISTORY_START" -v end="$README_HISTORY_END" '
       { f = $1; sub(/^\.\//, "", f); n = $2 + 0 }
       $0 ~ ENVIRON["VV_SELF_RE"] { next }
