@@ -13387,6 +13387,40 @@ _S16_FAIL="${_S16_FAIL}$(_s16b_cap b-cap-work work "with the line @AGENTS\\.md a
 for _S16B_D in quote-ctl list-ctl size-ctl steps-ctl work-ctl; do
   _S16_FAIL="${_S16_FAIL}$(_s16b_capok "b-cap-$_S16B_D" "$_S16B_D")"
 done
+# one read a file (4.1, review #2): detect read each no-import CLAUDE.md-
+# family file three times, once for its row and twice more to tell whether a
+# bound stops its import line (import_bound by way of appended: the file with
+# the line appended, then the file again, gone from md_read's cache by then).
+# Two files of lazy quote lines just under MD_MAX, about 2 s a read on an idle
+# Apple M5 Max, took 12 s and overran the 10 s session start gives detect
+# (rc 124, the rows dropped). b-cap-two-one times one read: detect in a
+# project whose only such file is a user tier of that shape (no import line
+# is offered there, so it is read once). b-cap-two: detect in a project
+# holding CLAUDE.md and CLAUDE.local.md of that shape, under _INSTR_SECS of
+# four reads' time (at least 3 s), so the gate counts reads on any host,
+# fast, slow or loaded, and session start's 10 s holds wherever two reads
+# fit: rc 0, both rows no-import,user-owned,past-bound with the import column
+# -. Two reads fit with room to spare; six do not
+_s16b_t0() { python3 -c 'import time; print(time.time())'; }
+_s16b_dt() { python3 -c 'import sys, time; print("%.1f" % (time.time() - float(sys.argv[1])))' "$1"; }
+_S16B_TW="$_S16B_W/two"
+_s16b_proj "$_S16B_TW/one"
+_s16b_proj "$_S16B_TW/proj"
+mkdir -p "$_S16B_TW/home/.claude"
+python3 -c 'import sys; u = b"> a\nb\nc\nd\n"; d = u * ((4194304 - 64) // len(u))
+for p in sys.argv[1:]:
+    open(p, "wb").write(d)' "$_S16B_TW/home/.claude/CLAUDE.md" "$_S16B_TW/proj/CLAUDE.md" "$_S16B_TW/proj/CLAUDE.local.md"
+_S16B_T0=$(_s16b_t0)
+_O=$(S16B_HOME="$_S16B_TW/home" _s16b "$_S16B_TW/one" instruction_files_detect)
+_S16B_ONE=$(_s16b_dt "$_S16B_T0")
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-two-one "$_O" "^\.claude/CLAUDE\.md${T}user${T}no-import,user-owned${T}[^${T}]*/w/two/home/\.claude/CLAUDE\.md${T}-\$" '^rc=0$')"
+_S16B_SECS=$(awk -v t="$_S16B_ONE" 'BEGIN { s = int(4 * t) + 1; print (s > 3 ? s : 3) }')
+_S16B_T0=$(_s16b_t0)
+_O=$(_INSTR_SECS="$_S16B_SECS" _s16b "$_S16B_TW/proj" instruction_files_detect)
+_S16B_TWO=$(_s16b_dt "$_S16B_T0")
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-two "$_O" "^CLAUDE\.md${T}project${T}no-import,user-owned,past-bound${T}[^${T}]*/w/two/proj/CLAUDE\.md${T}-\$" "^CLAUDE\.local\.md${T}project${T}no-import,user-owned,past-bound${T}[^${T}]*/w/two/proj/CLAUDE\.local\.md${T}-\$" '^rc=0$')"
+rm -f "$_S16B_TW/home/.claude/CLAUDE.md" "$_S16B_TW/proj/CLAUDE.md" "$_S16B_TW/proj/CLAUDE.local.md"
+_S16_EV="${_S16_EV}B (4.1, review #2): detect reads each CLAUDE.md-family file once (b-cap-two: a 4 MiB file of lazy quote lines read in ${_S16B_ONE}s, two in a project under _INSTR_SECS ${_S16B_SECS} in ${_S16B_TWO}s, rc 0, both rows past-bound); "
 
 # the read cap (review round 5, R5-B): a CLAUDE.md-family file is read to
 # MD_MAX + 1 bytes at most (load_md), as no import is read past MD_MAX and

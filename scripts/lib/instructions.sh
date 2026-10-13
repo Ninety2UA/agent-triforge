@@ -1783,7 +1783,7 @@ def md_stop(e):
 
 
 # what md_read made of the bytes of the last two calls: imports, add_import
-# and import_bound read the same bytes of a file more than once
+# and import_bound (md_bound) read the same bytes of a file more than once
 SCANS = []
 
 
@@ -1802,6 +1802,17 @@ def md_read(data, src):
         found, stop = [], md_stop(e)
     SCANS[:] = SCANS[-1:] + [(data, (found, stop))]
     return found, stop
+
+
+def md_bound(data):
+    # the MdBound that stopped md_read on data, None when none did: from the
+    # scan md_read keeps of data, else from a new one (md_scan). data is no
+    # more than MD_MAX bytes, as md_scan reads none past that
+    for d, got in SCANS:
+        if d is data:
+            return got[1]
+    md_scan(data)
+    return SCANS[-1][1][1]
 
 
 def md_scan(data, where=False):
@@ -2182,25 +2193,27 @@ def reach(lead, r, cwd):
         if not shadows:
             tail += ": no " + kind_names(r["shadow"]) + " at " + cwd + " or above"
         else:
-            loaded = {}
-            for p in [s[0] for s in shadows] + [u for u in user_tiers(cwd) if lexists(u)]:
-                d = loaded[p] = load_md(p)
-                if d is not None and imports(p, d, set(l for _, l, _ in pointers)):
-                    return say(lead, "visible", p + " imports " + pointer + ", so it is loaded with that file" + note)
             p, kind, level = shadows[0]
             # a fix builds only on a pointer block below HOME: one in HOME or
             # above it is read for every project, and the writers refuse it
             mine = [x for x in pointers if not home_or_above(x[1])]
+            line = import_line(kind, level, mine[0][1]) if mine else ""
+            bound = ""
+            for i, q in enumerate([s[0] for s in shadows] + [u for u in user_tiers(cwd) if lexists(u)]):
+                d = load_md(q)
+                if d is not None and imports(q, d, set(l for _, l, _ in pointers)):
+                    return say(lead, "visible", q + " imports " + pointer + ", so it is loaded with that file" + note)
+                if i == 0 and line:
+                    # an import a reading bound would stop (import_bound) is
+                    # never offered: the bound is named instead, in the words
+                    # instruction_add_import refuses it with. Told here, while
+                    # md_read still holds the scan imports just made of p
+                    bound = import_bound(p, d, line, mine[0][1])
             if not mine:
                 fix = pointer + " is in your home directory or a directory above it, which every project under it reads: put the pointer block in the AGENTS.md of this project instead (instruction_merge_pointer " + cwd + ")"
             else:
                 pointer, plevel = mine[0][0], mine[0][1]
-                line = import_line(kind, level, plevel)
                 fix = "add the line " + line + " to " + p + " (instruction_add_import " + p + (", run from " + plevel if plevel != cwd else "") + ")"
-                # an import a reading bound would stop (import_bound) is
-                # never offered: the bound is named instead, in the words
-                # instruction_add_import refuses it with
-                bound = import_bound(p, loaded.get(p), line, plevel)
                 if level != plevel and plevel.startswith(level.rstrip("/") + "/"):
                     # a file above the project: a file in the project first; an
                     # import there reaches every project under it, and none is
@@ -2299,29 +2312,38 @@ def current_umask():
     return u
 
 
+def bound_why(path, data, line, project, size, where):
+    # the MdBound naming the reading bound that stops the line, appended to
+    # the CLAUDE.md-family file at path (data, as load_md read it), from
+    # reading back as an import of <project>/AGENTS.md: the bytes Claude
+    # Code reads an import from, when size (the bytes of the file with the
+    # line) is past them, else where when it is an MdBound of md_scan (the
+    # work, steps or nesting it reads); None for neither. The sentence
+    # instruction_add_import refuses with and visibility and detect name
+    agents = os.path.join(project, "AGENTS.md")
+    if size > MD_MAX:
+        # a size bound: Claude Code reads no import from the file, and data
+        # may be only its first MD_MAX + 1 bytes (load_md)
+        what = "is more than" if len(data) > MD_MAX else "would be " + str(size) + " bytes with the line " + line + " appended, more than"
+        return MdBound(path + " " + what + " the " + str(MD_MAX) + " bytes Claude Code reads an import from, and Triforge reads no import from such a file either, so the line " + line + " would not read back as an import of " + agents + " there; shorten the file, or add the line yourself where Claude Code reads it")
+    if isinstance(where, MdBound):
+        # another bound: the file holds more, or deeper, Markdown than
+        # MdLexer reads, so no import is read from it, the line included
+        return MdBound(path + " with the line " + line + " appended holds " + where + ", and Triforge reads no import from such a file, so the line would not read back as an import of " + agents + " there; add the line yourself where Claude Code reads it")
+    return None
+
+
 def appended(path, data, line, project):
     # (new, why) for the line appended to the CLAUDE.md-family file at path
     # (data, as load_md read it): new, its bytes then; why, None when this
     # reader reads new back as an import of <project>/AGENTS.md, an MdBound
-    # when a reading bound stops it there (the bytes Claude Code reads an
-    # import from, the work, steps or nesting md_scan reads), the sentence
-    # instruction_add_import refuses with and visibility and detect name,
-    # else where md_scan says the line lands ("" for no block)
+    # when a reading bound stops it there (bound_why), else where md_scan
+    # says the line lands ("" for no block)
     new = data + (b"\n" if data and not data.endswith(b"\n") else b"") + os.fsencode(line) + b"\n"
     if imports(path, new, {project}):
         return new, None
-    agents = os.path.join(project, "AGENTS.md")
-    if len(new) > MD_MAX:
-        # a size bound: Claude Code reads no import from the file, and data
-        # may be only its first MD_MAX + 1 bytes (load_md)
-        size = "is more than" if len(data) > MD_MAX else "would be " + str(len(new)) + " bytes with the line " + line + " appended, more than"
-        return new, MdBound(path + " " + size + " the " + str(MD_MAX) + " bytes Claude Code reads an import from, and Triforge reads no import from such a file either, so the line " + line + " would not read back as an import of " + agents + " there; shorten the file, or add the line yourself where Claude Code reads it")
-    where = md_scan(data, True)[1]
-    if isinstance(where, MdBound):
-        # another bound: the file holds more, or deeper, Markdown than
-        # MdLexer reads, so no import is read from it, the line included
-        return new, MdBound(path + " with the line " + line + " appended holds " + where + ", and Triforge reads no import from such a file, so the line would not read back as an import of " + agents + " there; add the line yourself where Claude Code reads it")
-    return new, where
+    where = md_scan(data, True)[1] if len(new) <= MD_MAX else ""
+    return new, bound_why(path, data, line, project, len(new), where) or where
 
 
 def import_bound(path, data, line, project):
@@ -2329,11 +2351,20 @@ def import_bound(path, data, line, project):
     # line in the CLAUDE.md-family file at path (data, as load_md read it)
     # from reading back as an import of <project>/AGENTS.md; "" when the
     # file imports it already, the line reads back, or something else keeps
-    # it from that (instruction_add_import names that itself)
+    # it from that (instruction_add_import names that itself). Told from
+    # what the scan of data alone knows, so detect and visibility read each
+    # file once (appended reads it twice more): the size of the file with
+    # the line appended, counted, then the bound that stopped that scan
+    # (md_bound). This takes the line to move no file across a bound: a
+    # file read within the bounds alone that the line appended would take
+    # past one is not named here (instruction_add_import, which reads the
+    # file with the line appended, still refuses it naming the bound), and
+    # one a bound stops alone is named, though the few bytes of the line
+    # raise the work and steps bounds a little too
     if data is None or imports(path, data, {project}):
         return ""
-    why = appended(path, data, line, project)[1]
-    return why if isinstance(why, MdBound) else ""
+    size = len(data) + (1 if data and not data.endswith(b"\n") else 0) + len(os.fsencode(line)) + 1
+    return bound_why(path, data, line, project, size, md_bound(data) if size <= MD_MAX else None) or ""
 
 
 def add_import(fn, arg, yes):

@@ -627,9 +627,9 @@ fi
 # it is named anyway, its Triforge text stale. Only CLAUDE.md and .claude/
 # CLAUDE.md are fingerprinted (no 3.x template was a CLAUDE.local.md); an
 # unreadable file (a FIFO, a dangling link) is named in no line. The pass
-# gets 10 s, then SIGKILL 2 s later (_INSTR_SECS); a project's files take
-# milliseconds. A library that can't load or run, or a pass given up on (its
-# partial rows dropped), gets one WARNING instead, naming why.
+# gets 10 s, then SIGKILL 2 s later (_INSTR_SECS), reading each file once (the
+# slowest measured, 4 MiB of lazy quote lines: 2 s on an Apple M5 Max); a pass
+# given up on (rows dropped) or a library that can't load or run gets a WARNING.
 SS_CHAIN_IMPORTS=""
 SS_OWN_NOTICES=""
 SS_ABOVE_NOTICES=""
