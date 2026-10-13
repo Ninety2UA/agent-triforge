@@ -3859,7 +3859,10 @@ rm -rf "$_S11"
 #            sandbox-floor refusal, no worktree, no run; a read persona runs
 #   guard2   $TMPDIR/.claude/CLAUDE.md -> 69; a scratch dir inside a git
 #            working tree with no instruction file in it -> 69 naming the tree;
-#            $HOME/.claude/CLAUDE.md is skipped
+#            $HOME/.claude/CLAUDE.md is skipped. CLAUDE_CONFIG_DIR (fix round,
+#            finding #19): set to an absolute directory, or empty,
+#            $HOME/.claude/CLAUDE.md above -> 69 naming it; the CLAUDE.md in an
+#            absolute one above is skipped
 #   cleanup  a failing digest helper during exec setup, called normally
 #            and under set -e, and a SIGINT to the run's process group: no
 #            persona worktree left, git worktree list clean
@@ -4251,6 +4254,11 @@ rm -rf "$_S12/tmp/.claude"
 ( mkdir -p "$_S12/plainrepo/tmp" && git init -q "$_S12/plainrepo" && export TMPDIR="$_S12/plainrepo/tmp"; _s12_mode answer; _self_try ingit dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-g.out" )
 ( mkdir -p "$_S12/h2/.claude" "$_S12/h2/tmp" && printf "user memory\n" > "$_S12/h2/.claude/CLAUDE.md" && export HOME="$_S12/h2" TMPDIR="$_S12/h2/tmp"
   _s12_mode answer; _self_try homeskip dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-g.out" )
+( mkdir -p "$_S12/h3/.claude" "$_S12/h3/tmp" "$_S12/h3cfg" && printf "user memory\n" > "$_S12/h3/.claude/CLAUDE.md" && export HOME="$_S12/h3" TMPDIR="$_S12/h3/tmp"
+  ( export CLAUDE_CONFIG_DIR="$_S12/h3cfg"; _s12_mode answer; _self_try ccdhome dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-g.out" )
+  ( export CLAUDE_CONFIG_DIR=""; _s12_mode answer; _self_try ccdempty dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-g.out" ) )
+( mkdir -p "$_S12/h4/cfg/tmp" && printf "user memory\n" > "$_S12/h4/cfg/CLAUDE.md" && export HOME="$_S12/h4" TMPDIR="$_S12/h4/cfg/tmp" CLAUDE_CONFIG_DIR="$_S12/h4/cfg"
+  _s12_mode answer; _self_try ccdskip dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-g.out" )
 _s12_mode hooks "session-start context-monitor tool-failure-monitor pre-compact"
 _self_try hooks dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-hk.out"
 echo "hooks-out=$(cat "$_S12/rd-hk.out" 2>/dev/null)"
@@ -4270,7 +4278,8 @@ _S12_FAIL="${_S12_FAIL}$(_self_expect read "$O" '^read:rc=0:' '^out=PERSONA-ANSW
 _S12_FAIL="${_S12_FAIL}$(_self_expect root "$O" '^root-line=1:relative=1$' '^add-dir=0:safe=1$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect frame "$O" '^frame=1:notask=1:taskblock=0$' '^brief-frame=taskblock:1:notask:0:after-block:1$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect timeout "$O" '^read:rc=0:.*timeout=840s' '^trio:rc=0:.*timeout=1800s' '^web:rc=0:.*timeout=600s' '^tmo:rc=0:.*timeout=42s')"
-_S12_FAIL="${_S12_FAIL}$(_self_expect guard2 "$O" '^dotclaude:rc=69:.*\.claude/CLAUDE\.md' "^ingit:rc=69:.*git working tree ${_S12P}/plainrepo" '^homeskip:rc=0:')"
+_S12_FAIL="${_S12_FAIL}$(_self_expect guard2 "$O" '^dotclaude:rc=69:.*\.claude/CLAUDE\.md' "^ingit:rc=69:.*git working tree ${_S12P}/plainrepo" '^homeskip:rc=0:' \
+  '^ccdhome:rc=69:.*/h3/\.claude/CLAUDE\.md sits above ' '^ccdempty:rc=69:.*/h3/\.claude/CLAUDE\.md sits above ' '^ccdskip:rc=0:')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect web "$O" '^web:rc=0:' \
   '^web-tools=Read,Grep,Glob,WebFetch,WebSearch allowed=Read,Grep,Glob,WebFetch,WebSearch model=sonnet effort=high turns=5$' \
   '^brief:rc=0:' '^brief-in-prompt=1$' '^sbxoff-read=Read,Grep,Glob$' '^sbxoff-web=Read,Grep,Glob,WebFetch,WebSearch$' '^web-safe=1$')"
@@ -5021,7 +5030,7 @@ fi
 
 _S12_CAP="persona lane: dispatch_persona under the worker boundary with enforced tool classes, the trio at the top rung, a lead-controlled cwd, exec in a restored disposable snapshot worktree with integrity checks (KTD5, KTD20, KTD21, KTD22; R14, R35, R48)"
 if [ -z "$_S12_FAIL" ]; then
-  row "SELF-12" "claude" "$_S12_CAP" "PASS" "resolve: tiers from the ladder, max_turns from the manifest, --model rung or id; trio opus/max (no record), fable/max (CC-02 PASS), opus/max (CC-02 FAIL); ladder-named plan-checker -> top; trio sonnet / lower rung / codex -> 64; lease + agent-team -> 64 naming at-resolve-pr / agent_teams (unenforced); unknown / path-shaped / bad CLI -> 64; manifest bad tier (lists the ladder tiers) / unknown key / not TOML -> 70, missing -> 69; corrupted ladder -> 70; persona_prompt: bodies by name (lease + agent-team too), unknown 64, no body 70, no manifest 69, bad entry 70, worker marker 45; read: claude -p Read,Grep,Glob (no Bash) dontAsk strict-mcp project+local opus/high turns 7, --brief in the prompt, denyWrite = the empty scratch cwd (gone after), the input file copied beside it, marker persona + no-push, planted key dropped; web: + WebFetch,WebSearch (no Bash) sonnet/high; neither gains Bash with the sandbox off; task:dirty read: the snapshot diff as input, AGENTS.md + .mcp.json named; codex (flags after the positionals): exec under the triforge_persona permission profile (extends :read-only, every credential path denied, no -s), approval never, --skip-git-repo-check, env policy pinned, gpt-6-astra/high, -o <out>; a codex without permission profiles 69; trio argv fable/max with CC-02 PASS, opus/max without, --model sonnet refused before any CLI; noclaude: read falls back to codex (NOTE), trio/read-web/exec -> 69 naming the install fix, neither -> 69; exec --at task:dirty: detached snapshot worktree under the lease root, the brief (input) seen, the feature change seen, AGENTS.md from the integration branch, no .mcp.json, its write gone with the worktree, lease_merge from inside -> 45 (marker persona), no edit tool, denyWrite the lead git dir, AGENTS.md + .mcp.json named as content under review; no --at = ref:HEAD (integration commit, nothing named), --at ref:other (its change seen, AGENTS.md restored and named, reclaimed); bare dirty / task:dirty as input = --at task:dirty with the lease diff as input; task: + --at 64; persona_snapshot_diff writes the recorded snapshot's diff byte-equal to base..snapshot_sha after the lease tip moved past it (the tip's diff has the extra file, the written one not), unknown / fix cycle / dir / usage 64, marker 45; poison: read on the clean / dirty snapshot diffs (the dirty one's AGENTS.md + .mcp.json named as content under review) and exec at task:dirty report the finding, no MCP marker (control from the builder worktree: no findings + marker); ledger: a persona-forged user promotion approval -> dispatch 44 naming ops/leases.toml, gone, promote 42; a straggler's -> promote 44; the lead's own -> promoted; guard: marker / lease worktree 45, missing input / directory input / --at on read / --at without task:|ref: / unknown ref / dash ref / unknown task 64, no body 70, empty answer 80, AGENTS.md above the cwd 69, a ledger repointed at another snapshot 44 before the run (restored), a ledger changed before a ref:HEAD run 44, a lease in a fix cycle 64, a directory as <out> 64, a failing protected-path classifier without pipefail 1 before any run; hooks inert inside a persona (control without the marker writes); round 3: persona_spawn returns at once with <name>.pid, persona_wait 75 under a 3 s budget then 0 with the rc, a stopped or killed run 80, persona_stop ends the whole tree, marker 45 for all three, usage / unknown run 64; every claude run under CLAUDE_CODE_DISABLE_ATTACHMENTS=1 and the trusted bundle's @ written as (at); a dropped [baseline].config with re-anchored digests and a poisoned .git/config 44 before any run; a persona deleting a run marker and moving a tag 44; a TERM-ignoring CLI KILLed before its worktree is reclaimed; a lease_merge mid-run 0, a persona moving the integration branch 44 naming HEAD and the branch; round 4: a builder moving the integration branch, switching or detaching the lead's HEAD before a dispatch 44 with no CLI run, a switched HEAD with a lease open and no integration branch recorded 44, the controls 0; a background child the CLI leaves stopped once the run ends (read and exec), the in-group ledger straggler stopped before it writes (promote 42), a daemonized one still caught (promote 44); persona_stop on a run whose wrapper alone was killed stops its CLI (0) or says unresolved cleanup (80, ps failing); a stopped read or exec run leaves no scratch directory or worktree; round 5: main moved after the integrity check and back during the run -> the instructions from the recorded default_sha; on main mid-sprint an exec persona runs (0) and the integration branch stays; a detached HEAD -> 44 advising to check the branch out again; the run supervisor without os.waitid and with a TERM before its child is noted still stops the child; ps unreadable mid-run -> 80, worktree and scratch left; an old record never reaches a stranger's session; shipped manifest: ${_S12_SHIPPED}" "static"
+  row "SELF-12" "claude" "$_S12_CAP" "PASS" "resolve: tiers from the ladder, max_turns from the manifest, --model rung or id; trio opus/max (no record), fable/max (CC-02 PASS), opus/max (CC-02 FAIL); ladder-named plan-checker -> top; trio sonnet / lower rung / codex -> 64; lease + agent-team -> 64 naming at-resolve-pr / agent_teams (unenforced); unknown / path-shaped / bad CLI -> 64; manifest bad tier (lists the ladder tiers) / unknown key / not TOML -> 70, missing -> 69; corrupted ladder -> 70; persona_prompt: bodies by name (lease + agent-team too), unknown 64, no body 70, no manifest 69, bad entry 70, worker marker 45; read: claude -p Read,Grep,Glob (no Bash) dontAsk strict-mcp project+local opus/high turns 7, --brief in the prompt, denyWrite = the empty scratch cwd (gone after), the input file copied beside it, marker persona + no-push, planted key dropped; web: + WebFetch,WebSearch (no Bash) sonnet/high; neither gains Bash with the sandbox off; task:dirty read: the snapshot diff as input, AGENTS.md + .mcp.json named; codex (flags after the positionals): exec under the triforge_persona permission profile (extends :read-only, every credential path denied, no -s), approval never, --skip-git-repo-check, env policy pinned, gpt-6-astra/high, -o <out>; a codex without permission profiles 69; trio argv fable/max with CC-02 PASS, opus/max without, --model sonnet refused before any CLI; noclaude: read falls back to codex (NOTE), trio/read-web/exec -> 69 naming the install fix, neither -> 69; exec --at task:dirty: detached snapshot worktree under the lease root, the brief (input) seen, the feature change seen, AGENTS.md from the integration branch, no .mcp.json, its write gone with the worktree, lease_merge from inside -> 45 (marker persona), no edit tool, denyWrite the lead git dir, AGENTS.md + .mcp.json named as content under review; no --at = ref:HEAD (integration commit, nothing named), --at ref:other (its change seen, AGENTS.md restored and named, reclaimed); bare dirty / task:dirty as input = --at task:dirty with the lease diff as input; task: + --at 64; persona_snapshot_diff writes the recorded snapshot's diff byte-equal to base..snapshot_sha after the lease tip moved past it (the tip's diff has the extra file, the written one not), unknown / fix cycle / dir / usage 64, marker 45; poison: read on the clean / dirty snapshot diffs (the dirty one's AGENTS.md + .mcp.json named as content under review) and exec at task:dirty report the finding, no MCP marker (control from the builder worktree: no findings + marker); ledger: a persona-forged user promotion approval -> dispatch 44 naming ops/leases.toml, gone, promote 42; a straggler's -> promote 44; the lead's own -> promoted; guard: marker / lease worktree 45, missing input / directory input / --at on read / --at without task:|ref: / unknown ref / dash ref / unknown task 64, no body 70, empty answer 80, AGENTS.md above the cwd 69, ~/.claude/CLAUDE.md above it 69 once CLAUDE_CONFIG_DIR is set (absolute or empty) and the CLAUDE.md of an absolute one skipped, a ledger repointed at another snapshot 44 before the run (restored), a ledger changed before a ref:HEAD run 44, a lease in a fix cycle 64, a directory as <out> 64, a failing protected-path classifier without pipefail 1 before any run; hooks inert inside a persona (control without the marker writes); round 3: persona_spawn returns at once with <name>.pid, persona_wait 75 under a 3 s budget then 0 with the rc, a stopped or killed run 80, persona_stop ends the whole tree, marker 45 for all three, usage / unknown run 64; every claude run under CLAUDE_CODE_DISABLE_ATTACHMENTS=1 and the trusted bundle's @ written as (at); a dropped [baseline].config with re-anchored digests and a poisoned .git/config 44 before any run; a persona deleting a run marker and moving a tag 44; a TERM-ignoring CLI KILLed before its worktree is reclaimed; a lease_merge mid-run 0, a persona moving the integration branch 44 naming HEAD and the branch; round 4: a builder moving the integration branch, switching or detaching the lead's HEAD before a dispatch 44 with no CLI run, a switched HEAD with a lease open and no integration branch recorded 44, the controls 0; a background child the CLI leaves stopped once the run ends (read and exec), the in-group ledger straggler stopped before it writes (promote 42), a daemonized one still caught (promote 44); persona_stop on a run whose wrapper alone was killed stops its CLI (0) or says unresolved cleanup (80, ps failing); a stopped read or exec run leaves no scratch directory or worktree; round 5: main moved after the integrity check and back during the run -> the instructions from the recorded default_sha; on main mid-sprint an exec persona runs (0) and the integration branch stays; a detached HEAD -> 44 advising to check the branch out again; the run supervisor without os.waitid and with a TERM before its child is noted still stops the child; ps unreadable mid-run -> 80, worktree and scratch left; an old record never reaches a stranger's session; shipped manifest: ${_S12_SHIPPED}" "static"
 else
   row "SELF-12" "claude" "$_S12_CAP" "FAIL" "mismatch:$(printf '%s' "$_S12_FAIL" | cut -c1-900)" "static"
 fi
@@ -8829,7 +8838,9 @@ rm -rf "$_S19"
 #             reaches none. The .credentials.json in an absolute one is denied
 #             like ~/.claude/.credentials.json: a Read rule rooted with //, the
 #             path in the sandbox's denyRead, and a deny entry in the codex
-#             read persona's profile; a relative one adds nothing
+#             read persona's profile; a relative one adds nothing. Set to
+#             HOME's .claude, or a link to it: the profile's filesystem table
+#             parses as TOML and names each credential path once
 #   builder   _lease_builder_run's claude arm against the stub, in a session of
 #             its own: the result text in <out> (its Status line parses), the
 #             envelope in <out>.raw, subtype, is_error and session_id in
@@ -9018,6 +9029,43 @@ _S20_FAIL="${_S20_FAIL}$(_self_expect ccd "$O" '^abs-env:claude=1:codex=0:grok=0
   '^rel-deny:read=Read\(//[^|]*/cfg/\.credentials\.json\)\|Read\(//[^|]*/cfg/\.credentials\.json/\*\*\).*:sbx=/[^|:]*/cfg/\.credentials\.json.*:home=1:codex=0:codexcfg=[12]$' \
   '^empty-deny:read=:sbx=:home=1:codex=0:codexcfg=0$' \
   '^link-deny:read=Read\(//[^|]*/ccdlink/cfg/\.credentials\.json\)\|Read\(//[^|]*/ccdlink/cfg/\.credentials\.json/\*\*\)\|Read\(//[^|]*/ccdreal/cfg/\.credentials\.json\)\|Read\(//[^|]*/ccdreal/cfg/\.credentials\.json/\*\*\):sbx=/[^|]*/ccdlink/cfg/\.credentials\.json\|/[^|]*/ccdreal/cfg/\.credentials\.json:home=1:codex=0:codexcfg=2$')"
+# ccd, the default home (fix round, finding #10): CLAUDE_CONFIG_DIR set to HOME's .claude, and
+# to a link to it, names ~/.claude/.credentials.json a second time. The codex read persona's
+# filesystem table parses as TOML (tomllib, 3.11 and later; a key given twice does not parse)
+# and names each credential path once, the link's own spelling beside it
+mkdir -p "$_S20/home/.claude" && ln -s "$(cd "$_S20/home" && pwd -P)/.claude" "$_S20/ccdhome" 2>/dev/null || true
+O=$( export TMPDIR="$_S20/tmp" HOME="$(cd "$_S20/home" && pwd -P)" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for C in default link; do
+    case "$C" in
+      (default) export CLAUDE_CONFIG_DIR="$HOME/.claude" ;;
+      (link) export CLAUDE_CONFIG_DIR="$_S20/ccdhome" ;;
+    esac
+    _PERSONA_CODEX_PROFILE=()
+    _persona_codex_profile || true
+    printf '%s-profile:%s\n' "$C" "$(S20_P="${_PERSONA_CODEX_PROFILE[*]:-}" S20_H="$HOME" S20_L="$_S20/ccdhome" python3 -c '
+import json, os, re
+m = re.search(r"permissions\.triforge_persona\.filesystem=(\{.*\})$", os.environ["S20_P"])
+if not m:
+    print("no-table")
+    raise SystemExit(0)
+v = m.group(1)
+# every key, a duplicate kept: each is a JSON string followed by ="deny"
+keys = [k for k, _ in json.loads(v.replace("=\"deny\"", ":\"deny\""), object_pairs_hook=list)]
+try:
+    import tomllib
+except ImportError:
+    toml = "ok" if len(keys) == len(set(keys)) else "invalid"
+else:
+    try:
+        tomllib.loads("f = " + v)
+        toml = "ok"
+    except tomllib.TOMLDecodeError:
+        toml = "invalid"
+print("toml=%s:once=%d:home=%d:link=%d" % (toml, len(keys) == len(set(keys)), keys.count(os.environ["S20_H"] + "/.claude/.credentials.json"),
+      keys.count(os.environ["S20_L"] + "/.credentials.json")))')"
+  done
+) 2>&1 || true
+_S20_FAIL="${_S20_FAIL}$(_self_expect ccd-default "$O" '^default-profile:toml=ok:once=1:home=1:link=0$' '^link-profile:toml=ok:once=1:home=1:link=1$')"
 
 # builder: the real claude arm against the stub, the builder process in a
 # session of its own (its exit sweep reaches only its own group)
@@ -9201,7 +9249,7 @@ _S20_FAIL="${_S20_FAIL}$(_self_expect ctx "$O" '^ctx-root:rc=69:class=determinis
 
 _S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON envelope (subtype, is_error, session_id), explicit tool sets, --max-turns, session resume, the sandbox settings and their Claude Code floor, the claude env arm, .claude/skills provisioning that adds names only, max-turns routed as report missing, dispatch_role running claude -p under a codex lead, never without its deny on the lead's git dir inside a git checkout (KTD16, R2/R3)"
 if [ -z "$_S20_FAIL" ]; then
-  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0; ctx: a codex lead's tester on claude with TRIFORGE_LEASE_ROOT=/dev/null/x -> rc 69 deterministic, the lease line and one ERROR line, stub never run; outside any git repository the reviewer runs, rc 0; ccd (4.1): an absolute CLAUDE_CONFIG_DIR (with a space) reaches the claude worker as set, never codex or grok, and its .credentials.json is denied (Read rule rooted with //, sandbox denyRead, the codex read persona's profile); a relative or empty one reaches no worker and adds no deny" "static"
+  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0; ctx: a codex lead's tester on claude with TRIFORGE_LEASE_ROOT=/dev/null/x -> rc 69 deterministic, the lease line and one ERROR line, stub never run; outside any git repository the reviewer runs, rc 0; ccd (4.1): an absolute CLAUDE_CONFIG_DIR (with a space) reaches the claude worker as set, never codex or grok, and its .credentials.json is denied (Read rule rooted with //, sandbox denyRead, the codex read persona's profile); a relative or empty one reaches no worker and adds no deny; set to HOME's .claude or a link to it, the codex profile parses as TOML and names each credential path once" "static"
 else
   row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S20_FAIL"):$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"
 fi
@@ -12478,8 +12526,22 @@ _S16_EV="${_S16_EV}A: one checkout-top roster from a subdirectory; egress per pr
 #            without --yes, and still refuse ~/.claude; the files
 #            byte-identical. Unset: HOME's .claude/CLAUDE.md is the user line,
 #            as before. Empty, relative, or the project itself: no user line,
-#            HOME's .claude/CLAUDE.md above, the pointer hidden, and the
-#            project's own files still get their plans
+#            HOME's .claude/CLAUDE.md above, the pointer hidden. Empty: the
+#            project's own files still get their plans. The writers refuse
+#            the file any set value names, wherever it lies, and its
+#            directory, rc 2 before any plan, with and without --yes (fix
+#            round, finding #7): relative cfg names <project>/cfg/CLAUDE.md,
+#            the project's own files keeping their plans; the project itself
+#            names its own CLAUDE.md, so its CLAUDE.md and AGENTS.md are
+#            refused. <project>/.claude, absolute and relative: detect lists
+#            .claude/CLAUDE.md as a project file, the writers refuse it and
+#            its directory, the project's CLAUDE.md and AGENTS.md keep their
+#            plans. Siblings: a config home beside the project whose name
+#            extends it (proj2 beside proj) and the other way round is the
+#            user line, its import makes the pointer visible, the writers
+#            refuse it. A working directory deleted first: an absolute
+#            config home still refused, a relative one refuses every write
+#            naming CLAUDE_CONFIG_DIR. The files byte-identical
 #   home     HOME and the directories above it, rc 2 before any plan, with
 #            and without --yes, naming the project's own CLAUDE.md: a merge
 #            into HOME and through a link to it, the import into ~/CLAUDE.md
@@ -12896,14 +12958,16 @@ _S16_FAIL="${_S16_FAIL}$(_self_expect b-user-project "$_O" '^needs-ask: would cr
 
 # ccd: CLAUDE_CONFIG_DIR moves the user tier. A project under HOME with its own CLAUDE.md and
 # the pointer block, HOME's .claude/CLAUDE.md, and a config home outside both whose CLAUDE.md
-# imports the project's AGENTS.md by its absolute path
+# imports the project's AGENTS.md by its absolute path; the project's cfg/CLAUDE.md is the
+# file the relative value cfg names from there
 _S16B_CC="$_S16B/cc"
-mkdir -p "$_S16B_CC/home/.claude" "$_S16B_CC/home/.codex" "$_S16B_CC/cfg"
+mkdir -p "$_S16B_CC/home/.claude" "$_S16B_CC/home/.codex" "$_S16B_CC/cfg" "$_S16B_CC/home/proj/cfg"
 _s16b_proj "$_S16B_CC/home/proj"
 printf '# me\n' > "$_S16B_CC/home/.claude/CLAUDE.md"
 printf '# own\n' > "$_S16B_CC/home/proj/CLAUDE.md"
 printf '# moved\n@%s/AGENTS.md\n' "$(cd "$_S16B_CC/home/proj" && pwd -P)" > "$_S16B_CC/cfg/CLAUDE.md"
-_S16B_SUM=$(_s16b_sum "$_S16B_CC/cfg/CLAUDE.md" "$_S16B_CC/home/.claude/CLAUDE.md" "$_S16B_CC/home/proj/CLAUDE.md")
+printf '# moved here\n' > "$_S16B_CC/home/proj/cfg/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_CC/cfg/CLAUDE.md" "$_S16B_CC/home/.claude/CLAUDE.md" "$_S16B_CC/home/proj/CLAUDE.md" "$_S16B_CC/home/proj/AGENTS.md" "$_S16B_CC/home/proj/cfg/CLAUDE.md")
 _s16b_cc() { # _s16b_cc <CLAUDE_CONFIG_DIR, or - for unset> <dir> <helper> [args...] — _s16b under the cc HOME with that CLAUDE_CONFIG_DIR exported
   local C=$1
   shift
@@ -12929,14 +12993,37 @@ for _S16B_Y in "" --yes; do
   _O=$(_s16b_cc "$_S16B_CC/cfg" "$_S16B_CC/home/proj" instruction_merge_pointer "$_S16B_CC/home/.claude" $_S16B_Y)
   _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-home${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/home/\.claude/AGENTS\.md is in the directory of your user-tier ~/\.claude/CLAUDE\.md, ' '^rc=2$')"
 done
+# from a working directory deleted before the helper starts (fix round, finding #7): the
+# absolute config home is still refused, its file and its directory; a relative value names
+# no file without a working directory, so every write is refused, naming the variable
+_s16b_gone() { # _s16b_gone <CLAUDE_CONFIG_DIR> <helper> [args...] — _s16b_cc's run, from a working directory removed before the helper starts
+  local C=$1 R=0 O
+  shift
+  mkdir -p "$_S16B_CC/gone"
+  O=$(cd "$_S16B_CC/gone" && rmdir "$_S16B_CC/gone" && export CLAUDE_CONFIG_DIR="$C" &&
+      HOME="$_S16B_CC/home" CODEX_HOME="$_S16B_CC/home/.codex" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 60} /bin/bash -c 'source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 97; shift; "$@"' _ "$REPO_ROOT" "$@" 2>&1) || R=$?
+  printf '%s\nrc=%s\n' "$O" "$R"
+}
+for _S16B_Y in "" --yes; do
+  _O=$(_s16b_gone "$_S16B_CC/cfg" instruction_add_import "$_S16B_CC/cfg/CLAUDE.md" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-gone-import${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/cfg/CLAUDE\.md is your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _O=$(_s16b_gone "$_S16B_CC/cfg" instruction_merge_pointer "$_S16B_CC/cfg" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-gone-merge${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/cfg/AGENTS\.md is in the directory of your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-ccd-gone-merge${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+  _O=$(_s16b_gone cfg instruction_add_import "$_S16B_CC/cfg/CLAUDE.md" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-gone-relative${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/cfg/CLAUDE\.md may be your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md or a file beside it, which Triforge never writes: \$CLAUDE_CONFIG_DIR is the relative path cfg, and the working directory it is relative to is gone, ' '^rc=2$')"
+  _O=$(_s16b_gone cfg instruction_merge_pointer "$_S16B_CC/cfg" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-gone-relative${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/cfg/AGENTS\.md may be your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md or a file beside it, .* or set CLAUDE_CONFIG_DIR to an absolute path \(rc 2\)$' '^rc=2$')"
+done
 [ ! -e "$_S16B_CC/cfg/AGENTS.md" ] && [ ! -e "$_S16B_CC/home/.claude/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-ccd-merge(written)"
 # unset: HOME's .claude/CLAUDE.md is the user line, as before
 _O=$(_s16b_cc - "$_S16B_CC/home/proj" instruction_files_detect)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-ccd-unset "$_O" "^\.claude/CLAUDE\.md${T}user${T}no-import,user-owned${T}[^${T}]*/cc/home/\.claude/CLAUDE\.md${T}-\$" '^rc=0$')"
 _S16_FAIL="${_S16_FAIL}$(_s16b_not b-ccd-unset "$_O" '/cc/cfg/')"
-# empty, relative, or the project itself: no user tier, so no project file is taken for the
-# user's and HOME's .claude/CLAUDE.md is a file above; the pointer stays hidden, and the
-# project's own files still get their plans
+# empty, relative, or the project itself: no user tier for detect and visibility, so no
+# project file is taken for the user's and HOME's .claude/CLAUDE.md is a file above; the
+# pointer stays hidden. The project's own files still get their plans where no set value
+# names their directory: empty, and relative cfg, which names <project>/cfg/CLAUDE.md
 for _S16B_D in "" cfg "$_S16B_CC/home/proj"; do
   case "$_S16B_D" in "") _S16B_N=b-ccd-empty ;; cfg) _S16B_N=b-ccd-relative ;; *) _S16B_N=b-ccd-inproject ;; esac
   _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_files_detect)
@@ -12946,12 +13033,81 @@ for _S16B_D in "" cfg "$_S16B_CC/home/proj"; do
   _S16_FAIL="${_S16_FAIL}$(_s16b_not "$_S16B_N" "$_O" "^(CLAUDE\.md|\.claude/CLAUDE\.md)${T}user${T}")"
   _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_pointer_visibility claude)
   _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/cc/home/proj/CLAUDE\.md, [^ ]*/cc/home/\.claude/CLAUDE\.md[:,] " '^rc=1$')"
+  case "$_S16B_N" in b-ccd-inproject) continue ;; esac
   _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_add_import CLAUDE.md)
   _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" '^needs-ask: would add the line @AGENTS\.md to [^ ]*/cc/home/proj/CLAUDE\.md, ' '^rc=20$')"
   _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_merge_pointer)
   _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" '^needs-ask: would replace the Triforge pointer block in [^ ]*/cc/home/proj/AGENTS\.md ' '^rc=20$')"
 done
-_S16_FAIL="${_S16_FAIL}$(_s16b_same b-ccd-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_CC/cfg/CLAUDE.md" "$_S16B_CC/home/.claude/CLAUDE.md" "$_S16B_CC/home/proj/CLAUDE.md")")"
+# the writers refuse the file a set value names wherever it lies, and every file beside it,
+# rc 2 before any plan, with and without --yes (fix round, finding #7): relative cfg names
+# <project>/cfg/CLAUDE.md (from the working directory); the project itself names its own
+# CLAUDE.md, so its CLAUDE.md and AGENTS.md are refused
+for _S16B_Y in "" --yes; do
+  _O=$(_s16b_cc cfg "$_S16B_CC/home/proj" instruction_add_import "$_S16B_CC/home/proj/cfg/CLAUDE.md" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-relative${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/home/proj/cfg/CLAUDE\.md is your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _O=$(_s16b_cc cfg "$_S16B_CC/home/proj" instruction_merge_pointer "$_S16B_CC/home/proj/cfg" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-relative${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/home/proj/cfg/AGENTS\.md is in the directory of your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-ccd-relative${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+  _O=$(_s16b_cc "$_S16B_CC/home/proj" "$_S16B_CC/home/proj" instruction_add_import CLAUDE.md $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-inproject${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/home/proj/CLAUDE\.md is your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-ccd-inproject${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+  _O=$(_s16b_cc "$_S16B_CC/home/proj" "$_S16B_CC/home/proj" instruction_merge_pointer $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-inproject${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/home/proj/AGENTS\.md is in the directory of your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-ccd-inproject${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+done
+[ ! -e "$_S16B_CC/home/proj/cfg/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-ccd-relative(written)"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-ccd-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_CC/cfg/CLAUDE.md" "$_S16B_CC/home/.claude/CLAUDE.md" "$_S16B_CC/home/proj/CLAUDE.md" "$_S16B_CC/home/proj/AGENTS.md" "$_S16B_CC/home/proj/cfg/CLAUDE.md")")"
+# below the project: <project>/.claude, absolute and relative (testing gap #15). Detect still
+# lists .claude/CLAUDE.md as a project file with its import line (tier_home leaves a config
+# home in the project out); the writers refuse it and its directory, rc 2 before any plan,
+# with and without --yes, and the project's CLAUDE.md and AGENTS.md keep their plans
+_s16b_proj "$_S16B_CC/home/pb"
+mkdir -p "$_S16B_CC/home/pb/.claude"
+printf '# own\n' > "$_S16B_CC/home/pb/CLAUDE.md"
+printf '# tier\n' > "$_S16B_CC/home/pb/.claude/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_CC/home/pb/CLAUDE.md" "$_S16B_CC/home/pb/.claude/CLAUDE.md" "$_S16B_CC/home/pb/AGENTS.md")
+for _S16B_D in "$_S16B_CC/home/pb/.claude" .claude; do
+  case "$_S16B_D" in .claude) _S16B_N=b-ccd-below-rel ;; *) _S16B_N=b-ccd-below ;; esac
+  _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/pb" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" "^\.claude/CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/cc/home/pb/\.claude/CLAUDE\.md${T}@\.\./AGENTS\.md\$" '^rc=0$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "$_S16B_N" "$_O" "^(CLAUDE\.md|\.claude/CLAUDE\.md)${T}user${T}")"
+  for _S16B_Y in "" --yes; do
+    _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/pb" instruction_add_import "$_S16B_CC/home/pb/.claude/CLAUDE.md" $_S16B_Y)
+    _S16_FAIL="${_S16_FAIL}$(_self_expect "${_S16B_N}${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/home/pb/\.claude/CLAUDE\.md is your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+    _S16_FAIL="${_S16_FAIL}$(_s16b_not "${_S16B_N}${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+    _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/pb" instruction_merge_pointer "$_S16B_CC/home/pb/.claude" $_S16B_Y)
+    _S16_FAIL="${_S16_FAIL}$(_self_expect "${_S16B_N}${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/home/pb/\.claude/AGENTS\.md is in the directory of your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+    _S16_FAIL="${_S16_FAIL}$(_s16b_not "${_S16B_N}${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+  done
+  _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/pb" instruction_add_import CLAUDE.md)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" '^needs-ask: would add the line @AGENTS\.md to [^ ]*/cc/home/pb/CLAUDE\.md, ' '^rc=20$')"
+  _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/pb" instruction_merge_pointer)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" '^needs-ask: would replace the Triforge pointer block in [^ ]*/cc/home/pb/AGENTS\.md ' '^rc=20$')"
+done
+[ ! -e "$_S16B_CC/home/pb/.claude/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-ccd-below(written)"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-ccd-below-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_CC/home/pb/CLAUDE.md" "$_S16B_CC/home/pb/.claude/CLAUDE.md" "$_S16B_CC/home/pb/AGENTS.md")")"
+# siblings: a config home beside the project whose name extends the project's (proj2 beside
+# proj, which the trailing / in tier_home decides) is not in the project, nor is proj beside
+# proj2: its CLAUDE.md is the user line, its import makes the pointer visible, and the
+# writers refuse it
+_s16b_proj "$_S16B_CC/sib/proj"
+_s16b_proj "$_S16B_CC/sib/proj2"
+printf '# own\n@%s/AGENTS.md\n' "$(cd "$_S16B_CC/sib/proj2" && pwd -P)" > "$_S16B_CC/sib/proj/CLAUDE.md"
+printf '# own\n@%s/AGENTS.md\n' "$(cd "$_S16B_CC/sib/proj" && pwd -P)" > "$_S16B_CC/sib/proj2/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_CC/sib/proj/CLAUDE.md" "$_S16B_CC/sib/proj2/CLAUDE.md")
+for _S16B_D in proj2 proj; do
+  case "$_S16B_D" in proj2) _S16B_SIBP=proj _S16B_N=b-ccd-sibling ;; *) _S16B_SIBP=proj2 _S16B_N=b-ccd-sibling2 ;; esac
+  _O=$(_s16b_cc "$_S16B_CC/sib/$_S16B_D" "$_S16B_CC/sib/$_S16B_SIBP" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" \
+    "^CLAUDE\.md${T}user${T}imports,user-owned${T}[^${T}]*/cc/sib/${_S16B_D}/CLAUDE\.md${T}-\$" \
+    "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/cc/sib/${_S16B_SIBP}/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$')"
+  _O=$(_s16b_cc "$_S16B_CC/sib/$_S16B_D" "$_S16B_CC/sib/$_S16B_SIBP" instruction_pointer_visibility claude)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" "^claude${T}visible${T}[^ ]*/cc/sib/${_S16B_D}/CLAUDE\.md imports [^ ]*/cc/sib/${_S16B_SIBP}/AGENTS\.md, so it is loaded with that file\$" '^rc=0$')"
+  _O=$(_s16b_cc "$_S16B_CC/sib/$_S16B_D" "$_S16B_CC/sib/$_S16B_SIBP" instruction_add_import "$_S16B_CC/sib/$_S16B_D/CLAUDE.md" --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" "^instruction_add_import: REFUSED — [^ ]*/cc/sib/${_S16B_D}/CLAUDE\.md is your user-tier \\\$CLAUDE_CONFIG_DIR/CLAUDE\.md, " '^rc=2$')"
+done
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-ccd-sibling-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_CC/sib/proj/CLAUDE.md" "$_S16B_CC/sib/proj2/CLAUDE.md")")"
 
 # home: a file in HOME or a directory above it is read for every project under it, so no
 # writer touches one there: rc 2 before any plan, with and without --yes, compared by
@@ -13647,8 +13803,10 @@ rm -f "$_S16B_CP/huge/CLAUDE.md"
 # and the pointer block template are read to FILE_MAX + 1 bytes at most
 # (load), their sizes from fstat on the descriptor read, so no huge file is
 # read whole. b-cap-agents: a sparse 256 MiB AGENTS.md whose first bytes hold
-# the pointer block: detect lists it with the pointer, Codex's visibility
-# answers, each under 128 MiB resident, and the merge plan is refused rc 2
+# the pointer block: detect lists it with the pointer, Codex's visibility is
+# visible (the block ends in the first bytes, within 32768; with the block
+# written from byte 40000 instead, hidden over budget), each under 128 MiB
+# resident, and the merge plan is refused rc 2
 # naming the size (no writer writes a file it has not read whole), the file
 # unchanged. b-cap-config: a sparse 256 MiB config.toml in CODEX_HOME:
 # Codex's visibility is hidden, naming the size and that whether it marks
@@ -13661,13 +13819,41 @@ _O=$(_s16b_rss "$_S16B_CP/agents" instruction_files_detect)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-agents-detect "$_O" "^AGENTS\.md${T}project${T}pointer${T}[^${T}]*/w/cap/agents/AGENTS\.md${T}-\$" '^rc=0$')$(_s16b_rssok b-cap-agents-detect "$_O")"
 _S16B_RSSV="${_S16B_RSSV}; a sparse 256 MiB AGENTS.md: detect $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
 _O=$(_s16b_rss "$_S16B_CP/agents" instruction_pointer_visibility codex)
-_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-agents-vis "$_O" "^codex${T}(visible|hidden)${T}" '^rc=[01]$')$(_s16b_rssok b-cap-agents-vis "$_O")"
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-agents-vis "$_O" "^codex${T}visible${T}[^ ]*/w/cap/agents/AGENTS\.md is read: the pointer block ends at byte [0-9]{2,3} of the files this reader combines, within 32768 \(the default\)\$" '^rc=0$')$(_s16b_rssok b-cap-agents-vis "$_O")"
 _S16B_RSSV="${_S16B_RSSV}, visibility $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
 _O=$(_s16b_rss "$_S16B_CP/agents" instruction_merge_pointer)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-agents-merge "$_O" "^instruction_merge_pointer: REFUSED — [^ ]*/w/cap/agents/AGENTS\.md is more than the 4194304 bytes Triforge reads from an AGENTS\.md, and Triforge writes no file it has not read whole" '^rc=2$')$(_s16b_rssok b-cap-agents-merge "$_O")"
 _S16B_RSSV="${_S16B_RSSV}, merge $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
 _S16_FAIL="${_S16_FAIL}$(_s16b_same b-cap-agents-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_CP/agents/AGENTS.md")")"
 rm -f "$_S16B_CP/agents/AGENTS.md"
+# the mirror (fix round, finding #11): the same sparse file with the block written from byte
+# 40000, inside the bytes read but past the 32768 default: hidden, over budget, rc 1
+dd if=/dev/zero of="$_S16B_CP/agents/AGENTS.md" bs=1 count=0 seek=268435456 2>/dev/null
+printf '# rules\n<!-- triforge:start -->\npointer\n<!-- triforge:end -->\n' | dd of="$_S16B_CP/agents/AGENTS.md" bs=1 seek=40000 conv=notrunc 2>/dev/null
+_O=$(_s16b_rss "$_S16B_CP/agents" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-agents-late "$_O" "^codex${T}hidden${T}over budget: the pointer block in [^ ]*/w/cap/agents/AGENTS\.md ends at byte 400[0-9]{2} of the files this reader combines \(user-level [0-9]+ bytes first\), past 32768 \(the default\), where it stops reading\$" '^rc=1$')$(_s16b_rssok b-cap-agents-late "$_O")"
+rm -f "$_S16B_CP/agents/AGENTS.md"
+# the budget sums each file at its true size (fix round, testing gap #4): a monorepo root
+# holding a sparse 256 MiB AGENTS.md without the block, read to FILE_MAX + 1 bytes, and a
+# CODEX_HOME whose config.toml sets project_doc_max_bytes = 10000000, between the bytes read
+# and the true size. From a project under the root holding the block: hidden, over budget,
+# the block ending past 268435456 (rc 1); from a sibling project with no AGENTS.md: the merge
+# refused rc 3 naming 268435456 bytes above it, with and without --yes, nothing created
+_S16B_MO="$_S16B_CP/mono"
+mkdir -p "$_S16B_MO/proj" "$_S16B_MO/sib" "$_S16B_CP/cxb"
+( cd "$_S16B_MO" && git init -q ) >/dev/null 2>&1
+printf 'project_doc_max_bytes = 10000000\n' > "$_S16B_CP/cxb/config.toml"
+dd if=/dev/zero of="$_S16B_MO/AGENTS.md" bs=1 count=0 seek=268435456 2>/dev/null
+printf '# mono\n' | dd of="$_S16B_MO/AGENTS.md" conv=notrunc 2>/dev/null
+printf '# rules\n<!-- triforge:start -->\npointer\n<!-- triforge:end -->\n' > "$_S16B_MO/proj/AGENTS.md"
+_O=$(S16B_CODEX="$_S16B_CP/cxb" _s16b "$_S16B_MO/proj" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-sum-vis "$_O" "^codex${T}hidden${T}over budget: the pointer block in [^ ]*/w/cap/mono/proj/AGENTS\.md ends at byte 268435517 of the files this reader combines \(user-level 0 bytes first\), past 10000000 \(project_doc_max_bytes in [^ ]*/w/cap/cxb/config\.toml\), where it stops reading\$" '^rc=1$')"
+for _S16B_Y in "" --yes; do
+  _O=$(S16B_CODEX="$_S16B_CP/cxb" _s16b "$_S16B_MO/sib" instruction_merge_pointer $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-cap-sum-merge${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — over the agents-chain budget: with the pointer block, [^ ]*/w/cap/mono/sib/AGENTS\.md would be [0-9]+ bytes, and the files that reader combines [0-9]+ bytes \(user-level 0 \+ the files from the project root down 268435456 \+ this file [0-9]+\), past 10000000 \(project_doc_max_bytes in [^ ]*/w/cap/cxb/config\.toml\), ' '^rc=3$')"
+done
+[ ! -e "$_S16B_MO/sib/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-cap-sum-merge(written)"
+rm -f "$_S16B_MO/AGENTS.md"
 mkdir -p "$_S16B/home/.codex"
 dd if=/dev/zero of="$_S16B/home/.codex/config.toml" bs=1 count=0 seek=268435456 2>/dev/null
 _s16b_proj "$_S16B_CP/config"
@@ -13782,7 +13968,7 @@ for _S16B_D in front fence para script comment; do
   [ "$_S16B_T1" -lt 20 ] || _S16_FAIL="${_S16_FAIL} b-lin-$_S16B_D(stalled:${_S16B_T1}s)"
   _S16B_LINS="${_S16B_LINS} ${_S16B_D} ${_S16B_T1}s"
 done
-_S16_EV="${_S16_EV}B bounds and time (b-cap-*: past 40 nested quotes, past 40 list levels, a file of 4194305 bytes, one of 4194304 the line would take past that, past the step and the work bounds, @AGENTS.md ahead of each: no-import,past-bound with the import column -, hidden naming the bound and offering no line, the import refused rc 2 naming the bound, unchanged; b-cap-agents and b-cap-config (4.1): a sparse 256 MiB AGENTS.md and Codex config.toml read to 4194305 bytes, the merge refused naming the size, Codex's visibility hidden for a config it cannot read whole; b-mem-* (4.1): detect on 4 MiB of code and blank lines, of nested quote and list lines, of a line of code with 1024 blank lines after it and of a > line with 1023 lazy lines after it (those two importing on their last line), each under ${_S16B_MEMMAX} bytes resident; 40 quotes, 40 levels, 4194304 bytes, 1% under the steps and 4% under the work import; a sparse 256 MiB CLAUDE.md read to 4194305 bytes, resident bytes: ${_S16B_RSSV}; b-lin-*: 1 MiB of front matter never closed, of ~ opening a fence, of ~ ending a paragraph, of </script> and of <!-- on a last line, each read whole and importing in${_S16B_LINS}); "
+_S16_EV="${_S16_EV}B bounds and time (b-cap-*: past 40 nested quotes, past 40 list levels, a file of 4194305 bytes, one of 4194304 the line would take past that, past the step and the work bounds, @AGENTS.md ahead of each: no-import,past-bound with the import column -, hidden naming the bound and offering no line, the import refused rc 2 naming the bound, unchanged; b-cap-agents and b-cap-config (4.1): a sparse 256 MiB AGENTS.md and Codex config.toml read to 4194305 bytes, the merge refused naming the size, Codex's visibility visible for the block in its first bytes and hidden over budget for one from byte 40000, hidden for a config it cannot read whole; b-cap-sum: one at a monorepo root counted at its true size under project_doc_max_bytes 10000000, hidden past byte 268435456 and a sibling's merge refused rc 3; b-mem-* (4.1): detect on 4 MiB of code and blank lines, of nested quote and list lines, of a line of code with 1024 blank lines after it and of a > line with 1023 lazy lines after it (those two importing on their last line), each under ${_S16B_MEMMAX} bytes resident; 40 quotes, 40 levels, 4194304 bytes, 1% under the steps and 4% under the work import; a sparse 256 MiB CLAUDE.md read to 4194305 bytes, resident bytes: ${_S16B_RSSV}; b-lin-*: 1 MiB of front matter never closed, of ~ opening a fence, of ~ ending a paragraph, of </script> and of <!-- on a last line, each read whole and importing in${_S16B_LINS}); "
 
 # rewrites (review round 6): round 5 rewrote five patterns for linear time,
 # each meant to match exactly what it matched before: FRONT, the ~~~ line
@@ -13849,7 +14035,7 @@ done
 _S16_FAIL="${_S16_FAIL}$(_s16b_same b-rw-controls-untouched "$_S16B_SUM" "$(_s16b_sum $_S16B_RWF)")"
 _S16_EV="${_S16_EV}B (review round 6): the five round-5 rewrites match what they matched before (b-rw-*: closed front matter, front matter with blank lines before its closing ---, a <script> block whose closing line holds three </script>, a ~~~ line ending a paragraph, an import in a second comment closed on the last line of a comment-opened HTML block: no-import, hidden with the fix, the line appended, then unchanged; a ~~~~ fence a ~~~ line cannot close: the import refused rc 2 naming the fence opened on line 2, unchanged; controls import: a --- block closed by --, the same front matter after a heading, the line after the </script> line, ~~, the import after the comment's end on its last line and after a <!-- left open there, a ~~~~ fence closed by ~~~~~); "
 _S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file), an import line written or offered only when it reads back as the project's import (b-space-*, a project path with whitespace, a tab too; b-tilde-*, a directory named ~ on the way down: the import into the CLAUDE.md above refused rc 2 before any plan, without and twice with --yes, unchanged; the import column -, visibility and session start naming the project's own CLAUDE.md alone; the .claude/CLAUDE.md beside it, whose @../~/proj/AGENTS.md reads back, still planned), an import read in Markdown text, its path whole (b-fence-*, b-name-*: one in a fence or padded code span, Read @AGENTS.md. or (see @AGENTS.md) is none: no-import, hidden with the fix, the line appended, then unchanged; a file ending in an open fence or comment, an import of c#app or app[1] from above: rc 2, unchanged; a plain line, one after a closed or list-indented fence, @AGENTS.md#setup import), an import in a link title is none (b-title-*: [x](a(b) \"t @AGENTS.md \"), [x](a\\) ..., the Markdown_(syntax) link, the image form, a (title), a title on the next line: no-import, hidden with the fix, the line appended, then unchanged; see @AGENTS.md and one after [y](a(b)c) import), one whose _ may pair as emphasis is none (b-emphasis-*: @_app/AGENTS.md with z_ in its paragraph no-import, hidden; in another paragraph imports, visible), the reader is linear (b-slow: 100 KB of ](, a 40 KB backslash run and 3000 <? before the import, read in ${_S16B_SLOW}s of the 20 s allowed) and bounded (b-bound: _INSTR_SECS=1 gives up on a python3 that ignores SIGTERM in 1 s + the 2 s SIGKILL grace, rc 137, nothing printed, the stub gone, under ${_S16B_BOUND} and the watchdog), an import a path takes in or a block hides is none (b-join-*: @x\\ @AGENTS.md; b-tail-*: <?x?><div>, <!x y><a>, two lines, a quote; b-tab-*: >\\t<div>, -\\t<div>: no-import, hidden, appended, unchanged; controls import), the block structure as marked lexes it (b-mk-*: a tag name ending its line, a > stripped from a code line, a lazy HTML line in a quote, a lazy fence ending a quote in a list item, a 2. after paragraph text, a closing tag over lines, an item ended before a definition title, a definition label over lines: no-import, hidden, appended, unchanged; one control per family imports); "
-_S16_EV="${_S16_EV}B (4.1, ccd): an absolute CLAUDE_CONFIG_DIR outside the project holds the user line (kind CLAUDE.md), its import makes the pointer visible, HOME's .claude/CLAUDE.md is above, the writers refuse it, its directory and ~/.claude (rc 2, with and without --yes); unset: HOME's .claude/CLAUDE.md the user line; empty, relative or the project: no user line, the pointer hidden, the project's plans kept; "
+_S16_EV="${_S16_EV}B (4.1, ccd): an absolute CLAUDE_CONFIG_DIR outside the project holds the user line (kind CLAUDE.md), its import makes the pointer visible, HOME's .claude/CLAUDE.md is above, the writers refuse it, its directory and ~/.claude (rc 2, with and without --yes), from a deleted working directory too; unset: HOME's .claude/CLAUDE.md the user line; empty, relative or the project: no user line, the pointer hidden; the writers refuse the file a set value names wherever it lies and its directory (relative cfg, the project itself, <project>/.claude absolute and relative), the project's other plans kept; a relative value with the working directory gone refuses every write; siblings proj and proj2 each the user line of the other; "
 rm -rf "$_S16B"
 # --- end of SELF-16 section B ---
 # --- SELF-16 section C: at-setup's blocks and the headless primitives (U15) ---
