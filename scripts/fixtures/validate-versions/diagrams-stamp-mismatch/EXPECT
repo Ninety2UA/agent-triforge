@@ -1,0 +1,9 @@
+# The stamp was written before three changes: render-diagrams.html was edited,
+# excalidraw/added.svg was added and excalidraw/gone.svg was deleted. Each is
+# named with the command that re-renders; kept.svg still matches.
+check: diagrams
+rc: 1
+line: FAIL: diagram render stamp: docs/images/render-diagrams.html changed since the last render — run node docs/images/render-diagrams.js
+line: FAIL: diagram render stamp: docs/images/excalidraw/added.svg is not in docs/images/render-diagrams.sha256 — run node docs/images/render-diagrams.js
+line: FAIL: diagram render stamp: docs/images/render-diagrams.sha256 names docs/images/excalidraw/gone.svg, which no longer exists — run node docs/images/render-diagrams.js
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

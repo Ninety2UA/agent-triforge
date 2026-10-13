@@ -1,0 +1,10 @@
+# One non-blank line of README What's new (v1.2.3) is not a line of the notes
+# file, so the next release's What's new would replace it with nothing kept.
+# The link line matches once its links are rewritten as the notes file carries
+# them ((#x) to ../../README.md#x, a repo path to ../../<path>, a URL as is),
+# and the block stops at the next "## " heading: the v1.2.2 line is not read.
+check: lockstep
+rc: 1
+line: ok:   version lockstep: 1.2.3 (.claude-plugin/plugin.json, .claude-plugin/marketplace.json, antigravity-agents/plugin.json, README What's new)
+line: FAIL: release notes: README.md:8 in What's new (v1.2.3) is not a line of docs/releases/v1.2.3.md — copy it there (links as ../../<path> and ../../README.md#<anchor>): - **Dropped.** This line never reached the notes file.
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

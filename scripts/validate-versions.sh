@@ -15,8 +15,9 @@
 #   --only       run only the named checks: lockstep and skill-versions (1),
 #                ladder (2), drift (3), sweep (4), counts (5), budget (6),
 #                inventory (7), retired (8), workflows (9), manifests (10),
-#                halt (11). An unknown or empty name is a usage error (exit 2),
-#                so a typo never passes by running nothing.
+#                halt (11), liquid (12), diagrams (13). An unknown or empty
+#                name is a usage error (exit 2), so a typo never passes by
+#                running nothing.
 #   --root       run the checks against <dir> instead of this checkout (the
 #                self-test's fixture roots); paths print relative to <dir>.
 #   --self-test  run every fixture under scripts/fixtures/validate-versions/ —
@@ -30,11 +31,18 @@
 # Checks (each prints "ok:" or "FAIL:" lines; the summary is the last line):
 #   1. Version lockstep — .claude-plugin/plugin.json .version ==
 #      antigravity-agents/plugin.json .version == the version in the NEWEST
-#      (first in file order) README "## What's new (vX.Y.Z)" heading. The
-#      README "## Recent changes" ledger must also carry that version's
-#      "### <date> — vX.Y.Z: <title>" entry: scripts/release-notes.sh turns it
-#      into the GitHub release title + body when the bump lands on main
-#      (.github/workflows/release.yml), so a missing entry fails here, not there.
+#      (first in file order) README "## What's new (vX.Y.Z)" heading. That
+#      version's notes file docs/releases/vX.Y.Z.md must exist:
+#      scripts/release-notes.sh turns it into the GitHub release title + body
+#      when the bump lands on main (.github/workflows/release.yml), so a
+#      missing file fails here, not there. Its first line is the heading
+#      "# <YYYY-MM-DD> — vX.Y.Z: <title>" with a title after the first ": ",
+#      a non-blank line follows it, and every non-blank line of the README
+#      "## What's new (vX.Y.Z)" block (to the next "## " heading or "---"
+#      line) is a whole line of the file once its links read as the notes file
+#      carries them — (#x) as (../../README.md#x), a repo path as
+#      (../../<path>), a URL unchanged — so the What's new text survives the
+#      next release replacing it in the README.
 #      Every shipped skill's frontmatter metadata.version (skills/*/SKILL.md;
 #      the repo-local .claude/skills are not shipped) equals that version too:
 #      each skill whose metadata.version differs or is missing fails, named
@@ -51,8 +59,9 @@
 #      personas/team-lead.md and skills/wave-orchestration/SKILL.md point at the
 #      registry with " — " after the phrase instead. The sweep scope of check 4
 #      applies (history directories, the self-test's fixtures, the README
-#      ledger and this script are not shipped surfaces); any second match, or a
-#      single match outside the registry literal, fails.
+#      release history and this script are not shipped surfaces; the diagram
+#      source carve-out does not apply here); any second match, or a single
+#      match outside the registry literal, fails.
 #   3. Registry drift (KTD7, R41) — the CLI registry is the _TRIFORGE_CLIS_PY
 #      literal in scripts/lib/registry.sh (one entry per CLI; parsed with
 #      ast.literal_eval, so comments and spacing do not matter) plus
@@ -91,19 +100,24 @@
 #      2026-07-probe-record, and
 #      "Gemini 3.1 Pro (High)" ONLY on lines that also say "default" (so the
 #      documented opt-in survives). Excluded: ops/research/, ops/decisions/,
-#      docs/plans/, docs/brainstorms/, ops/solutions/, docs/images/,
-#      scripts/fixtures/validate-versions/ (the self-test's planted stale pins
-#      and second ladder), .git/,
+#      docs/plans/, docs/brainstorms/, docs/releases/ (each release's notes
+#      name the pins of its day), ops/solutions/, docs/images/ except
+#      docs/images/render-diagrams.html (the diagram source the PNGs are
+#      rendered from: KTD6's carve-out, so a model bump that leaves a diagram
+#      stale fails here), scripts/fixtures/validate-versions/ (the
+#      self-test's planted stale pins and second ladder), .git/,
 #      the gitignored deploy copies (.agents/ .gemini/ .antigravity/),
 #      node_modules/, the two validator scripts, lines marked as history
-#      ("history" or "was <word>"), and README.md at or below its
-#      "## Recent changes" heading (the release ledger: past entries name the
-#      pins they adopted at the time).
+#      ("history" or "was <word>"), and README.md from its
+#      "## Release history" heading to the next "## " heading (the table of
+#      past releases); FAQ, Contributing and License after it are swept.
 #   5. Surface counts — personas/*.md and skills/*/SKILL.md, the skills counted
 #      three ways (every skill; the portable set, whose names do not start
 #      with at-; the at-* lead workflows), must match every count claim in
-#      AGENTS.md, templates/AGENTS.md, README.md (above "## Recent changes"),
-#      docs/index.html, docs/agent-triforge.md, .claude-plugin/plugin.json.
+#      AGENTS.md, templates/AGENTS.md, README.md (outside its
+#      "## Release history" section, as in check 4), docs/index.html,
+#      docs/agent-triforge.md, .claude-plugin/plugin.json and, when it
+#      exists, docs/images/render-diagrams.html (the diagram source).
 #      The vocabulary: "<N> skills" is every skill, "<N> portable skills" the
 #      portable set, "<N> lead workflows" the at-* set, and "<N> [up to three
 #      words] personas" the persona count ("agents|subagents" still counts
@@ -161,7 +175,8 @@
 #      the names the session-start banner (hooks/handlers/session-start.sh)
 #      and skills/at-status/references/status-template.md enumerate equal the
 #      set of skills/at-*/ directories (the diff is printed). No shipped
-#      surface (check 4's scope, minus ops/) carries a bare $at- mention,
+#      surface (check 4's scope with its diagram source, minus ops/) carries
+#      a bare $at- mention,
 #      because Codex attaches a plugin skill only as
 #      $agent-triforge:at-<name> (codex-cli 0.160.0, U14). The check skips
 #      the validate-skills fixture c24-bare-mention/, which carries one on
@@ -184,7 +199,8 @@
 #      would also load this AGENTS.md as an always-on rule and run hooks/.
 #  11. Halt threshold — a builder halts at MORE THAN 50 changed files
 #      (AGENTS.md §Delegation), so a task touching exactly 50 goes on. In
-#      skills/, AGENTS.md, README.md (above its "## Recent changes" ledger),
+#      skills/, AGENTS.md, README.md (outside its "## Release history"
+#      section, whose lines are blanked so later ones keep their numbers),
 #      docs/index.html and docs/agent-triforge.md, a 50-file threshold written
 #      inclusively fails: 50+, 50 or more (or above, and up, …), 50 files or
 #      more, at least 50, ≥ / >= / => 50 before file(s), changed files or file
@@ -193,6 +209,22 @@
 #      phrase may wrap across lines. "more than 50", "over 50", "> 50" and "file changes > 50"
 #      pass and are counted; a count with no comparator ("50 files", "look at
 #      50 files") is prose, not a threshold.
+#  12. Liquid delimiters — no Markdown file under docs/ (docs/plans/,
+#      docs/brainstorms/ and docs/releases/ included) holds "{{" or "{%":
+#      GitHub Pages builds docs/ with Jekyll, which reads either as Liquid,
+#      and one such delimiter renders the page wrong or stops the site from
+#      updating. Each hit is named by file and line.
+#  13. Diagram render stamp (KTD6) — when docs/images/render-diagrams.html
+#      exists, docs/images/render-diagrams.sha256 must be the text a full
+#      render (node docs/images/render-diagrams.js) writes: one line per
+#      source as shasum -a 256 prints it ("<64 lowercase hex>  <path>"), the
+#      HTML first, then each docs/images/excalidraw/*.svg sorted by path (byte
+#      order), a newline after the last line and nothing else. A missing
+#      stamp, a source whose hash differs, a source absent from the stamp, a
+#      stamp line for a file that no longer exists, or any other difference
+#      fails, naming the command, so a source edited without a re-render
+#      cannot pass with stale PNGs. Prints a "skip:" line while the HTML is
+#      absent. Checks 4, 5 and 9 read the HTML too (the carve-out above).
 #
 # Exit codes: 0 every check passed (--self-test: every case behaved as named);
 # 1 at least one check failed (--self-test: a case did not); 2 bad flag.
@@ -227,7 +259,7 @@ ONLY=""
 ROOT=""
 SELF_TEST=0
 # The names --only takes, in run order (the header numbers the checks).
-VV_CHECKS="lockstep skill-versions ladder drift sweep counts budget inventory retired workflows manifests halt"
+VV_CHECKS="lockstep skill-versions ladder drift sweep counts budget inventory retired workflows manifests halt liquid diagrams"
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-sweep)  NO_SWEEP=1 ;;
@@ -450,27 +482,44 @@ FAILED_CHECKS=0
 fail() { printf 'FAIL: %s\n' "$1"; FAILED_CHECKS=$((FAILED_CHECKS + 1)); }
 ok()   { printf 'ok:   %s\n' "$1"; }
 
-# Shipped-surface scope, shared by checks 2 and 4 (and the README ledger
-# boundary by checks 5 and 11). GNU grep prints ./path, BSD grep prints path —
-# the RE accepts both prefixes. The self-test's fixtures plant a second ladder
-# and stale pins on purpose, so the checkout's own run skips them.
-SWEEP_EXCLUDE_RE='^(\./)?(ops/research|ops/decisions|docs/plans|docs/brainstorms|ops/solutions|docs/images|scripts/fixtures/validate-versions|\.git|\.agents|\.gemini|\.antigravity|node_modules)/'
+# Shipped-surface scope, shared by checks 2, 4 and 9 (and the README release
+# history boundary by checks 5 and 11). GNU grep prints ./path, BSD grep prints
+# path — the RE accepts both prefixes. The self-test's fixtures plant a second
+# ladder and stale pins on purpose, so the checkout's own run skips them.
+SWEEP_EXCLUDE_RE='^(\./)?(ops/research|ops/decisions|docs/plans|docs/brainstorms|docs/releases|ops/solutions|docs/images|scripts/fixtures/validate-versions|\.git|\.agents|\.gemini|\.antigravity|node_modules)/'
 # Whole directories are pruned at walk time (grep never descends into .git's
 # object store or a node_modules tree); the path-scoped exclusions above are
 # applied on the output, where the RE also re-covers the pruned names.
 SWEEP_EXCLUDE_DIRS=(--exclude-dir=.git --exclude-dir=.agents --exclude-dir=.gemini --exclude-dir=.antigravity --exclude-dir=node_modules)
 SWEEP_SELF_RE='^(\./)?scripts/validate-(versions|skills)\.sh:'
-README_HISTORY_START=$(grep -n '^## Recent changes' README.md 2>/dev/null | head -1 | cut -d: -f1 || true)
+# The diagram source the PNGs are rendered from: checks 4, 5 and 9 read it
+# although docs/images/ stays excluded (KTD6), and check 13 holds its stamp.
+DIAGRAM_SOURCE='docs/images/render-diagrams.html'
+# README.md's release history: its "## Release history" heading up to the line
+# before the next "## " heading (END 0: to the end of the file). Checks 2, 4,
+# 5, 9 and 11 skip only that section, so FAQ, Contributing and License after
+# it stay checked.
+README_HISTORY_START=$(grep -n '^## Release history' README.md 2>/dev/null | head -1 | cut -d: -f1 || true)
 README_HISTORY_START="${README_HISTORY_START:-0}"
-# _shipped_surfaces: filter grep -rn output (file:line:text) down to the
-# shipped surfaces — drops the excluded paths, this script, and README.md at
-# or below its release ledger.
+README_HISTORY_END=0
+if [ "$README_HISTORY_START" -gt 0 ]; then
+  README_HISTORY_END=$(awk -v s="$README_HISTORY_START" 'NR > s && /^## / { print NR; exit }' README.md)
+  README_HISTORY_END="${README_HISTORY_END:-0}"
+fi
+# _shipped_surfaces [diagrams]: filter grep -rn output (file:line:text) down to
+# the shipped surfaces — drops the excluded paths, this script, and README.md's
+# release history section; with "diagrams" it keeps DIAGRAM_SOURCE's lines.
+# The REs reach awk through the environment: -v would read their backslashes
+# as string escapes.
 _shipped_surfaces() {
-  grep -vE "$SWEEP_EXCLUDE_RE" \
-    | grep -vE "$SWEEP_SELF_RE" \
-    | awk -F: -v start="$README_HISTORY_START" \
-        '!( (($1 == "README.md") || ($1 == "./README.md")) && start > 0 && ($2 + 0) >= start )' \
-    || true
+  VV_EXCLUDE_RE="$SWEEP_EXCLUDE_RE" VV_SELF_RE="$SWEEP_SELF_RE" VV_KEEP="${1:+$DIAGRAM_SOURCE}" \
+    awk -F: -v start="$README_HISTORY_START" -v end="$README_HISTORY_END" '
+      { f = $1; sub(/^\.\//, "", f); n = $2 + 0 }
+      $0 ~ ENVIRON["VV_SELF_RE"] { next }
+      $0 ~ ENVIRON["VV_EXCLUDE_RE"] && f != ENVIRON["VV_KEEP"] { next }
+      f == "README.md" && start > 0 && n >= start && (end == 0 || n < end) { next }
+      { print }
+    ' || true
 }
 
 # --- 1. version lockstep -----------------------------------------------------
@@ -495,16 +544,87 @@ if _selected lockstep; then
   else
     fail "version lockstep: .claude-plugin/plugin.json=$PLUGIN_V .claude-plugin/marketplace.json=$MKT_V antigravity-agents/plugin.json=$AGY_V README What's new=$README_V"
   fi
-  # Release-notes source: literal "v<version>:" on a "### " heading below
-  # "## Recent changes" (the colon keeps v3.3.1 from matching v3.3.10).
-  if awk -v v="$PLUGIN_V" '
-        /^## Recent changes/ { led = 1; next }
-        led && /^### / && index($0, "v" v ":") > 0 { found = 1; exit }
-        END { exit !found }
-      ' README.md; then
-    ok "release notes: README Recent changes carries the v$PLUGIN_V entry (GitHub release body source)"
-  else
-    fail "release notes: README.md '## Recent changes' has no '### <date> — v$PLUGIN_V: <title>' entry — scripts/release-notes.sh needs it for the GitHub release"
+  # Release-notes source: docs/releases/v<version>.md, headed
+  # "# <date> — v<version>: <title>", with a body, holding every line of the
+  # README What's new block for the version.
+  NOTES_RC=0
+  VV_PLUGIN_V="$PLUGIN_V" python3 -c "$VV_PY_STDIN" <<'PYEOF' || NOTES_RC=$?
+import os
+import re
+import sys
+
+v = os.environ["VV_PLUGIN_V"]
+path = "docs/releases/v" + v + ".md"
+heading = "# <YYYY-MM-DD> — v" + v + ": <title>"
+block = "What's new (v" + v + ")"
+LINK = re.compile(r"\]\(([^()\s]+)\)")
+
+
+def as_notes(line):
+    """A README line as the notes file carries it: (#x) as (../../README.md#x),
+    a repo path as (../../<path>), a URL unchanged."""
+    def one(m):
+        target = m.group(1)
+        if target.startswith("#"):
+            return "](../../README.md" + target + ")"
+        if re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", target):
+            return m.group(0)
+        return "](../../" + target + ")"
+    return LINK.sub(one, line)
+
+
+try:
+    with open(path, encoding="utf-8") as fh:
+        notes = fh.read().split("\n")
+except FileNotFoundError:
+    print("FAIL: release notes: " + path + " is missing — scripts/release-notes.sh builds the GitHub release from it: first line '"
+          + heading + "', then the notes, starting with README " + block)
+    sys.exit(1)
+except (OSError, UnicodeDecodeError) as exc:
+    print("FAIL: release notes: " + path + " unreadable (" + str(exc) + ")")
+    sys.exit(1)
+
+fails = []
+first = notes[0]
+if not first.startswith("# ") or ("v" + v + ": ") not in first:
+    fails.append(path + " line 1 is not the heading '" + heading + "' — scripts/release-notes.sh takes the release title from it")
+elif not first.split(": ", 1)[1].strip():
+    fails.append(path + " has no title after 'v" + v + ": ' — the GitHub release would be titled v" + v + " alone")
+if not any(ln.strip() for ln in notes[1:]):
+    fails.append(path + " has nothing after its heading — the GitHub release body would be empty")
+
+# The README block: the lines after its heading, to the next "## " heading or
+# "---" line. Each non-blank one must be a whole line of the notes file.
+try:
+    with open("README.md", encoding="utf-8") as fh:
+        readme = fh.read().split("\n")
+except (OSError, UnicodeDecodeError):
+    readme = []     # the lockstep line above already failed on README.md
+have = set(notes[1:])
+compared = 0
+start = next((i for i, ln in enumerate(readme) if ln.startswith("## " + block)), None)
+if start is not None:
+    for i in range(start + 1, len(readme)):
+        ln = readme[i]
+        if ln.startswith("## ") or re.match(r"---[ \t]*$", ln):
+            break
+        if not ln.strip():
+            continue
+        compared += 1
+        if as_notes(ln) not in have:
+            shown = ln if len(ln) <= 100 else ln[:99] + "…"
+            fails.append("README.md:" + str(i + 1) + " in " + block + " is not a line of " + path
+                         + " — copy it there (links as ../../<path> and ../../README.md#<anchor>): " + shown)
+
+for line in fails:
+    print("FAIL: release notes: " + line)
+if fails:
+    sys.exit(1)
+print("ok:   release notes: " + path + " carries the v" + v + " heading, a title, a body and all " + str(compared)
+      + " line(s) of README " + block + " (scripts/release-notes.sh builds the GitHub release from it)")
+PYEOF
+  if [ "$NOTES_RC" -ne 0 ]; then
+    FAILED_CHECKS=$((FAILED_CHECKS + 1))
   fi
 fi
 # Skill versions: each shipped skill's frontmatter metadata.version moves with
@@ -1098,7 +1218,7 @@ if _selected sweep; then
         grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" 'Gemini 3\.1 Pro (High)' . | grep -i 'default' || true
       } \
         | grep -v 'history\|was [a-z]' \
-        | _shipped_surfaces \
+        | _shipped_surfaces diagrams \
         | sort -t: -k1,1 -k2,2n -u || true
     )
     if [ -n "$SWEEP_HITS" ]; then
@@ -1122,7 +1242,8 @@ if _selected counts; then
   else
     COUNTS_RC=0
     VV_PERSONAS="$PERSONA_COUNT" VV_SKILLS="$SKILL_COUNT" VV_PORTABLE="$PORTABLE_COUNT" VV_WORKFLOWS="$WORKFLOW_COUNT" \
-    VV_README_HISTORY_START="$README_HISTORY_START" python3 -c "$VV_PY_STDIN" <<'PYEOF' || COUNTS_RC=$?
+    VV_README_HISTORY_START="$README_HISTORY_START" VV_README_HISTORY_END="$README_HISTORY_END" \
+    VV_DIAGRAM_SOURCE="$DIAGRAM_SOURCE" python3 -c "$VV_PY_STDIN" <<'PYEOF' || COUNTS_RC=$?
 import os
 import re
 import sys
@@ -1139,6 +1260,7 @@ actual = {
 # A claim's surface word, lowercased and singular, to the count it checks.
 KIND = {"agent": "persona"}
 readme_history_start = int(os.environ["VV_README_HISTORY_START"] or "0")
+readme_history_end = int(os.environ["VV_README_HISTORY_END"] or "0")
 files = [
     "AGENTS.md",
     "templates/AGENTS.md",
@@ -1147,6 +1269,9 @@ files = [
     "docs/agent-triforge.md",
     ".claude-plugin/plugin.json",
 ]
+# The diagram source (KTD6) is read when it exists.
+if os.path.isfile(os.environ["VV_DIAGRAM_SOURCE"]):
+    files.append(os.environ["VV_DIAGRAM_SOURCE"])
 CLAIM = re.compile(
     r"(?P<pre>(?:\+|\ball|of the|the other|\bother)\s+)?"
     r"\b(?P<n>\d+)\s+(?P<mods>(?:[A-Za-z-]+\s+){0,3}?)(?P<sub>sub)?(?P<kind>agent|persona|skill|lead workflow)s?\b",
@@ -1172,8 +1297,9 @@ for path in files:
         continue
     with open(path, encoding="utf-8") as fh:
         for lineno, raw in enumerate(fh, 1):
-            if path == "README.md" and readme_history_start and lineno >= readme_history_start:
-                break
+            if (path == "README.md" and readme_history_start and lineno >= readme_history_start
+                    and not (readme_history_end and lineno >= readme_history_end)):
+                continue
             line = re.sub(r"\(was \d+\)", "", raw)
             if HISTORY.search(line):
                 continue
@@ -1548,7 +1674,7 @@ PYEOF
   BARE_MENTIONS=$(
     grep -rnI "${SWEEP_EXCLUDE_DIRS[@]}" -e '\$at-' . 2>/dev/null \
       | grep -vE '^(\./)?(ops/|scripts/fixtures/validate-skills/c24-bare-mention/)' \
-      | _shipped_surfaces \
+      | _shipped_surfaces diagrams \
       | sort -t: -k1,1 -k2,2n || true
   )
   if [ -n "$BARE_MENTIONS" ]; then
@@ -1677,7 +1803,8 @@ fi
 # --- 11. halt threshold ------------------------------------------------------
 if _selected halt; then
   HALT_RC=0
-  VV_README_HISTORY_START="$README_HISTORY_START" python3 -c "$VV_PY_STDIN" <<'PYEOF' || HALT_RC=$?
+  VV_README_HISTORY_START="$README_HISTORY_START" VV_README_HISTORY_END="$README_HISTORY_END" \
+    python3 -c "$VV_PY_STDIN" <<'PYEOF' || HALT_RC=$?
 import html
 import os
 import re
@@ -1713,6 +1840,7 @@ EMPHASIS = re.compile(r"[*_`]")
 SCOPE = "skills/, AGENTS.md, README.md, docs/index.html, docs/agent-triforge.md"
 
 readme_history_start = int(os.environ["VV_README_HISTORY_START"] or "0")
+readme_history_end = int(os.environ["VV_README_HISTORY_END"] or "0")
 paths = [p for p in ("AGENTS.md", "README.md", "docs/index.html", "docs/agent-triforge.md") if os.path.isfile(p)]
 for top, dirs, names in os.walk("skills"):
     dirs.sort()
@@ -1727,8 +1855,12 @@ for path in paths:
     except (OSError, UnicodeDecodeError):
         continue    # not text: states no threshold (grep -I skips it too)
     if path == "README.md" and readme_history_start:
-        # the release ledger names what each past release did
-        text = "\n".join(text.split("\n")[:readme_history_start - 1])
+        # the release history names what each past release did; its lines are
+        # blanked, so the sections after it keep their line numbers
+        lines = text.split("\n")
+        stop = readme_history_end - 1 if readme_history_end else len(lines)
+        lines[readme_history_start - 1:stop] = [""] * len(lines[readme_history_start - 1:stop])
+        text = "\n".join(lines)
     text = TAG.sub(lambda m: "\n" * m.group(0).count("\n"), text)
     text = EMPHASIS.sub("", html.unescape(text))
     for m in INCLUSIVE.finditer(text):
@@ -1744,6 +1876,115 @@ print("ok:   halt threshold: " + str(stated) + " statement(s) of more than 50 ch
 PYEOF
   if [ "$HALT_RC" -ne 0 ]; then
     FAILED_CHECKS=$((FAILED_CHECKS + 1))
+  fi
+fi
+
+# --- 12. Liquid delimiters in docs/ -------------------------------------------
+if _selected liquid; then
+  LIQUID_RC=0
+  python3 -c "$VV_PY_STDIN" <<'PYEOF' || LIQUID_RC=$?
+import os
+import sys
+
+# GitHub Pages builds docs/ with Jekyll: a doubled opening brace opens a Liquid
+# output, a brace and a percent sign a Liquid tag.
+DELIMITERS = ("{{", "{%")
+fails = []
+count = 0
+for top, dirs, names in os.walk("docs"):
+    dirs.sort()
+    for name in sorted(names):
+        if not name.endswith(".md"):
+            continue
+        path = os.path.join(top, name)
+        count += 1
+        try:
+            with open(path, encoding="utf-8", errors="surrogateescape") as fh:
+                text = fh.read()
+        except OSError as exc:
+            fails.append(path + " unreadable (" + str(exc) + ")")
+            continue
+        for lineno, line in enumerate(text.split("\n"), 1):
+            found = [d for d in DELIMITERS if d in line]
+            if found:
+                fails.append(path + ":" + str(lineno) + " holds " + " and ".join(found) + " — GitHub Pages builds docs/ with Jekyll,"
+                             + " which reads it as Liquid: the page renders wrong or the site stops updating; reword it")
+
+for line in fails:
+    print("FAIL: liquid: " + line)
+if fails:
+    sys.exit(1)
+print("ok:   liquid: no Liquid delimiter ({{ or {%) in the " + str(count) + " Markdown file(s) under docs/ (GitHub Pages builds docs/ with Jekyll)")
+PYEOF
+  if [ "$LIQUID_RC" -ne 0 ]; then
+    FAILED_CHECKS=$((FAILED_CHECKS + 1))
+  fi
+fi
+
+# --- 13. diagram render stamp (KTD6) ------------------------------------------
+if _selected diagrams; then
+  if [ -f "$DIAGRAM_SOURCE" ]; then
+    DIAGRAMS_RC=0
+    VV_DIAGRAM_SOURCE="$DIAGRAM_SOURCE" python3 -c "$VV_PY_STDIN" <<'PYEOF' || DIAGRAMS_RC=$?
+import glob
+import hashlib
+import os
+import re
+import sys
+
+SOURCE = os.environ["VV_DIAGRAM_SOURCE"]
+STAMP = "docs/images/render-diagrams.sha256"
+FIX = " — run node docs/images/render-diagrams.js"
+
+
+def digest(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+# The text a full render writes: shasum -a 256 lines, the HTML first, then the
+# SVG sources sorted by path in byte order.
+sources = [SOURCE] + sorted(glob.glob("docs/images/excalidraw/*.svg"))
+want = {p: digest(p) for p in sources}
+expected = "".join(want[p] + "  " + p + "\n" for p in sources)
+if not os.path.isfile(STAMP):
+    print("FAIL: diagram render stamp: " + STAMP + " is missing" + FIX)
+    sys.exit(1)
+with open(STAMP, "rb") as fh:
+    stamp = fh.read().decode("utf-8", errors="replace")
+if stamp == expected:
+    print("ok:   diagram render stamp: " + STAMP + " matches " + SOURCE + " and " + str(len(sources) - 1)
+          + " docs/images/excalidraw/*.svg file(s)")
+    sys.exit(0)
+have = {}
+for line in stamp.split("\n"):
+    m = re.match(r"([0-9a-f]{64})  (\S.*)$", line)
+    if m:
+        have.setdefault(m.group(2), m.group(1))
+fails = []
+for p in sources:
+    if p not in have:
+        fails.append(p + " is not in " + STAMP)
+    elif have[p] != want[p]:
+        fails.append(p + " changed since the last render")
+for p in have:
+    if p not in want and not os.path.exists(p):
+        fails.append(STAMP + " names " + p + ", which no longer exists")
+if not fails:
+    fails.append(STAMP + " is not the text a render writes (one '<sha256>  <path>' line per source, " + SOURCE
+                 + " first, then the SVGs sorted by path, nothing else)")
+for line in fails:
+    print("FAIL: diagram render stamp: " + line + FIX)
+sys.exit(1)
+PYEOF
+    if [ "$DIAGRAMS_RC" -ne 0 ]; then
+      FAILED_CHECKS=$((FAILED_CHECKS + 1))
+    fi
+  else
+    echo "skip: diagram render stamp (no $DIAGRAM_SOURCE yet)"
   fi
 fi
 

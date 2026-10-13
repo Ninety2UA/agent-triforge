@@ -1,0 +1,8 @@
+# The versions agree, but docs/releases/v1.2.3.md does not exist: the release
+# workflow would have no title or body to publish, so the release-notes part of
+# the lockstep check fails here, before the bump reaches main.
+check: lockstep
+rc: 1
+line: ok:   version lockstep: 1.2.3 (.claude-plugin/plugin.json, .claude-plugin/marketplace.json, antigravity-agents/plugin.json, README What's new)
+line: FAIL: release notes: docs/releases/v1.2.3.md is missing — scripts/release-notes.sh builds the GitHub release from it: first line '# <YYYY-MM-DD> — v1.2.3: <title>', then the notes, starting with README What's new (v1.2.3)
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

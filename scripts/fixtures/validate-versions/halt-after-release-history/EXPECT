@@ -1,0 +1,7 @@
+# The halt check skips README.md only from "## Release history" to the next
+# "## " heading: the 50+ line in the history passes, the same rule under the
+# "## FAQ" after it fails with its own line number.
+check: halt
+rc: 1
+line: FAIL: halt threshold: README.md:16: "50+ changed files" halts at 50 itself — the threshold is more than 50 changed files (AGENTS.md §Delegation)
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

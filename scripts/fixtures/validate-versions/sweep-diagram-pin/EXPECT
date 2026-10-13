@@ -1,0 +1,8 @@
+# docs/images/render-diagrams.html is the source of the rendered diagrams, so
+# the sweep reads it even though the rest of docs/images/ stays excluded: its
+# stale pin is the 1 hit. The same pin in docs/images/legacy.svg and the two in
+# docs/releases/v1.0.0.md (old notes keep the pins of their day) are skipped.
+check: sweep
+rc: 1
+line: FAIL: stale-pin sweep: 1 hit(s) on shipped surfaces (see file:line:text above)
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

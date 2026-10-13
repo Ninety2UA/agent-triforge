@@ -3,5 +3,5 @@
 check: lockstep
 rc: 1
 line: FAIL: version lockstep: .claude-plugin/plugin.json=1.2.3 .claude-plugin/marketplace.json=1.2.2 antigravity-agents/plugin.json=1.2.3 README What's new=1.2.3
-line: ok:   release notes: README Recent changes carries the v1.2.3 entry (GitHub release body source)
+line: ok:   release notes: docs/releases/v1.2.3.md carries the v1.2.3 heading, a title, a body and all 1 line(s) of README What's new (v1.2.3) (scripts/release-notes.sh builds the GitHub release from it)
 line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

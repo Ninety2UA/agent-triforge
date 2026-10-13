@@ -1,0 +1,6 @@
+# The diagram source exists but no render has stamped it, so the PNGs cannot
+# be shown to match their sources.
+check: diagrams
+rc: 1
+line: FAIL: diagram render stamp: docs/images/render-diagrams.sha256 is missing — run node docs/images/render-diagrams.js
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

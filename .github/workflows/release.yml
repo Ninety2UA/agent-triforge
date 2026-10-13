@@ -4,8 +4,8 @@
 # .claude-plugin/plugin.json) or by hand (workflow_dispatch). Idempotent: an
 # existing release for v<version> is left alone, an existing tag is released
 # as-is, and a missing tag is created at the commit that set the version.
-# Title and notes come from README.md's "## Recent changes" entry for the
-# version via scripts/release-notes.sh — the README stays the one ledger.
+# Title and notes come from the version's notes file, docs/releases/v<version>.md,
+# via scripts/release-notes.sh — docs/releases/ is the one ledger.
 # Both release-gate validators run first, so a release never ships with a
 # lockstep or ledger drift.
 name: release

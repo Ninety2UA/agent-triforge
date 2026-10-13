@@ -51,7 +51,7 @@ for f in scripts/*.sh scripts/lib/*.sh hooks/handlers/*.sh; do /bin/bash -n "$f"
 - **Model pins.** agy always gets an explicit `--model` (its own default is a `(Medium)` variant; the shipped pin is the newest Gemini at its highest thinking level). Cursor runs a suffixed id `cursor-grok-4.6-<effort>`, never the Auto router. Codex runs `gpt-6-astra` at `xhigh`. Roster model overrides ride each CLI's registry `model_env`; the claude lane follows the ladder instead.
 - **Completion signals.** agy is judged by its JSON envelope (`status`, `denied_actions`), never by its exit code: an empty response is a failure. A Codex review without `--output-schema` support falls back to raw output. Reviewers write separate `ops/REVIEW_*.md` files, so parallel review is safe. A `[LOW]` confidence finding is never P1.
 - **Growing the control plane.** A new lib file joins the loader list in `scripts/invoke-external.sh` ahead of `lease.sh`; a new control-plane file joins the registry in the commit that creates it; every `_adapter_env` change updates the `_lane_run` mirror in `scripts/probe-capabilities.sh`; `.agents/skills/` directories under shipped names are Triforge-owned while their digest matches, so customizations go under a different name.
-- **Versions.** `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` (both fields), `antigravity-agents/plugin.json` and every skill's `metadata.version` move in lockstep. The README "Recent changes" heading `### <YYYY-MM-DD> — v<version>: <title>` becomes the GitHub release; `scripts/release-notes.sh --title` / `--body` previews it.
+- **Versions.** `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` (both fields), `antigravity-agents/plugin.json` and every skill's `metadata.version` move in lockstep. `docs/releases/v<version>.md`, headed `# <YYYY-MM-DD> — v<version>: <title>`, becomes the GitHub release; `scripts/release-notes.sh --title` / `--body` previews it.
 - **Knowledge.** Write to `ops/solutions/` or `ops/decisions/` only when a future agent without the note would repeat the mistake or re-derive the decision; include sprint, task, agent, evidence files and related decisions. Stale history stays in git, not in this file.
 
 ## Delegation
@@ -88,5 +88,5 @@ for f in scripts/*.sh scripts/lib/*.sh hooks/handlers/*.sh; do /bin/bash -n "$f"
 
 1. Every check above exits 0 (warnings are errors); the doc-consistency greps from the active plan pass.
 2. The probe record is regenerated, committed and cited by the release notes.
-3. Version bumped in the lockstep files; README "What's new" and "Recent changes" entries added.
-4. Merge to `main`. `.github/workflows/release.yml` tags `v<version>` at the commit that set it and publishes the release from the ledger entry (idempotent). Confirm with `gh release view v<version>`; if the run was skipped, fix the cause and `gh workflow run release.yml`. Never create the release by hand first.
+3. Version bumped in the lockstep files; README "What's new" and `docs/releases/v<version>.md` added.
+4. Merge to `main`. `.github/workflows/release.yml` tags `v<version>` at the commit that set it and publishes the release from the notes file (idempotent). Confirm with `gh release view v<version>`; if the run was skipped, fix the cause and `gh workflow run release.yml`. Never create the release by hand first.
