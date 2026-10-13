@@ -73,13 +73,28 @@ unset _stub
 
 # _self_expect <case> <output> <pattern...> — print " <case>(no:<pattern>)" for
 # each pattern (ERE) the output does not contain; the caller appends what it
-# prints to its own FAIL variable.
+# prints to its own FAIL variable. grep reads the output from a here-document,
+# not a pipe: grep -q stops at its first match, and under the harness's
+# pipefail a printf still writing into the pipe then fails the check (write
+# error: Broken pipe) although the pattern is there. That happens whenever the
+# pipe holds less than the whole output, as it did on a heavily loaded host
+# for SELF-12 outputs of 6 to 9 KB
 _self_expect() {
   local C=$1 O=$2 P
   shift 2
   for P in "$@"; do
-    printf '%s\n' "$O" | grep -qE -- "$P" || printf ' %s(no:%s)' "$C" "$P"
+    grep -qE -- "$P" <<SELF_EXPECT_EOF || printf ' %s(no:%s)' "$C" "$P"
+$O
+SELF_EXPECT_EOF
   done
+}
+
+# _self_warm <command...> — run a stub a case has just written once, quietly,
+# before a bounded call runs it: macOS checks an executable file the first time
+# it runs (about 0.1 s on an idle host, more than a second on one busy creating
+# files), which inside a 1 s bound can stop a stub before its first line runs
+_self_warm() {
+  "$@" </dev/null >/dev/null 2>&1 || true
 }
 
 # _self_fail_cases <fail> — the case names in a FAIL variable _self_expect
@@ -1122,37 +1137,41 @@ fi
 #          notice one line with its fixed start, no line starting with `{`
 #   killgrace (round 1, #6) the hook's own _ss_bounded text with a 1 s bound
 #          on a claude that ignores SIGTERM, under the timeout binary (skipped,
-#          and said so, without one) and under the watchdog: back in under 6 s
-#          (1 s + the 2 s SIGKILL grace + slack), the stub gone, nothing on
-#          stderr; a call still running at 10 s is killed and recorded as hung
+#          and said so, without one) and under the watchdog: back in under 15 s
+#          (1 s + the 2 s SIGKILL grace, and room for a loaded host; the stub
+#          alone runs 30 s, so a bound that never sends the SIGKILL still
+#          fails), the stub gone, nothing on stderr; a call still running at
+#          25 s is killed and recorded as hung
 #   versiongrace (round 1, wave 2) the optional-CLI version probe, the hook's
 #          own _ss_cli_version text (with _ss_bounded and _ss_private_tmp and
 #          the checks it calls), with a 1 s bound instead of the hook's 10 s,
 #          so a run costs seconds, not 2 x 12 s: an optional CLI that ignores
 #          SIGTERM and never answers is asked --version, then -V, and given
-#          up on in under 9 s (two calls of 1 s + the 2 s SIGKILL grace +
-#          slack), nothing recorded, the stub gone, nothing on stderr, no
-#          temp dir left; one that answers -V only gets that answer recorded.
-#          Under the timeout binary (skipped, and said so, without one) and
-#          under the watchdog, side by side; a case still running at 15 s is
-#          killed and recorded as hung. The watchdog run above also carries
+#          up on in under 20 s (two calls of 1 s + the 2 s SIGKILL grace, and
+#          room for a loaded host; the stub alone runs 30 s a call), nothing
+#          recorded, the stub gone, nothing on stderr, no temp dir left; one
+#          that answers -V only gets that answer recorded. Under the timeout
+#          binary (skipped, and said so, without one) and under the
+#          watchdog, side by side; a case still running at 30 s is killed
+#          and recorded as hung. The watchdog run above also carries
 #          a kimi stub that answers -V only: the hook records that answer in
 #          .claude/roster-detected.local.md
 #   detectbound (round 4, J) the instruction-file pass gets 10 s, then
 #          SIGKILL 2 s later (_INSTR_SECS, which _instr_py honors): with a
 #          python3 first on PATH that never answers that pass (every other
 #          call runs the real one), session start returns rc 0 in under
-#          25 s with the WARNING that the check did not finish, its rc and
-#          (4.1) its cause, given up on after 10 s, the stub gone, no line
-#          starting with `{`. Under the harness
-#          timeout (30 s, -k 5), so an unbounded pass fails there. Round 5:
+#          40 s (the 10 s bound, 2 s grace, and room for a loaded host) with
+#          the WARNING that the check did not finish, its rc and (4.1) its
+#          cause, given up on after 10 s, the stub gone, no line starting
+#          with `{`. Under the harness timeout (50 s, -k 5, short of the
+#          stub's 60 s), so an unbounded pass fails there. Round 5:
 #          the stub prints one project no-import row before it stalls, and
 #          a pass given up on drops its rows: the WARNING, no own-file notice
 #   detectfork (round 5) the same pass with no timeout binary on PATH (the
 #          library's watchdog; /usr/bin and /bin hold none on macOS) and a
 #          python3 launcher that forks: it prints that row, starts a child
 #          that ignores SIGTERM and holds stdout for 60 s, and ignores
-#          SIGTERM itself. Session start is back in under 25 s (rc 0, the
+#          SIGTERM itself. Session start is back in under 40 s (rc 0, the
 #          WARNING, no own-file notice), the launcher gone and (4.1) its
 #          child too: the watchdog stops the command's process group
 #   detect69 (4.1) an rc 69 from that pass names its cause in the WARNING:
@@ -1177,8 +1196,9 @@ fi
 #          ships as 30, set to 1 here) detect, visibility and a writer's plan
 #          give up on a python3 that never answers: one "gave up after 1 s"
 #          line (round 6: naming python3 hung or killed) and its rc (124,
-#          137 or 143), under the timeout binary and
-#          the watchdog. A writer with --yes is never bounded: with
+#          137 or 143) within 15 s, under the timeout binary and the
+#          watchdog; an unbounded call runs into the harness timeout (20 s).
+#          A writer with --yes is never bounded: with
 #          _INSTR_SECS=1 and a python3 2 s slow it still writes, rc 0, no
 #          temp file left
 #   watchtmp (round 6) the library alone under bash and zsh with no timeout
@@ -1192,11 +1212,13 @@ fi
 #   forkwatch (4.1) the library alone under bash and zsh with no timeout
 #          binary and a python3 launcher that forks a child ignoring SIGTERM,
 #          then sleeps until SIGTERM ends it: given up on after 1 s
-#          (_INSTR_SECS=1), the call returns rc 143 in under 6 s with the
+#          (_INSTR_SECS=1), the call returns rc 143 in under 15 s with the
 #          launcher and its child both gone. The same with the timeout binary
-#          (skipped, and said so, without one): rc 124 in under 6 s, neither
+#          (skipped, and said so, without one): rc 124 in under 15 s, neither
 #          left, though timeout itself never KILLs a child whose launcher
-#          SIGTERM ended, and the child (12 s here) holds the caller's stdout
+#          SIGTERM ended, and the child holds the caller's stdout. The child
+#          holds it for 40 s, past the harness timeout (20 s), so a bound
+#          that stops the launcher alone comes back at 20 s or later and fails
 #   perllocale (4.1) the library alone under bash and zsh with no timeout
 #          binary and LANG and LC_ALL set to a locale the system lacks: the
 #          pass prints its rows and rc 0, no "perl: warning" line
@@ -1212,9 +1234,9 @@ fi
 #          watchdog's is left running once the call returns, nor an output dir
 #   boundfork (4.1) the same _ss_bounded with a 1 s bound on a command that
 #          forks a child ignoring SIGTERM, then sleeps until SIGTERM ends
-#          it: the call returns in under 6 s with the command and its child
-#          both gone, under the watchdog and the timeout binary (skipped,
-#          and said so, without one)
+#          it: the call returns in under 15 s with the command and its child
+#          (40 s, as in forkwatch) both gone, under the watchdog and the
+#          timeout binary (skipped, and said so, without one)
 _S8="${WORK}/self08"
 mkdir -p "$_S8/proj" "$_S8/bin" "$_S8/home"
 cat > "$_S8/bin/agy" <<'EOF'
@@ -1454,12 +1476,13 @@ for _S8_RUN in at-home above-home; do
 done
 [ "$(cksum "$_S8/hh/CLAUDE.md" "$_S8/hh/CLAUDE.local.md" "$_S8/CLAUDE.md")" = "$_S8_SUMH" ] || _S8_FAIL="$_S8_FAIL at-home-files-changed"
 rm -rf "$_S8/hh" "$_S8/CLAUDE.md"
-# watchdog: with no timeout binary a hung claude is given up on after 10 s, session start exits 0 and warns about nothing
+# watchdog: with no timeout binary a hung claude is given up on after 10 s, session start exits 0 and warns about nothing;
+# back in under 25 s on a loaded host, while a claude left unbounded holds it 30 s
 _S8_T0=$(date +%s)
 _O=$(_s8_start_notimeout "$_S8/proj") || _S8_FAIL="$_S8_FAIL notimeout-rc-nonzero"
 _S8_T1=$(( $(date +%s) - _S8_T0 ))
 _s8_sane notimeout "$_O"
-[ "$_S8_T1" -lt 20 ] || _S8_FAIL="$_S8_FAIL notimeout-hung-claude-not-bounded(${_S8_T1}s)"
+[ "$_S8_T1" -lt 25 ] || _S8_FAIL="$_S8_FAIL notimeout-hung-claude-not-bounded(${_S8_T1}s)"
 _s8_has 'below Triforge' && _S8_FAIL="$_S8_FAIL notimeout-floor-warning-without-an-answer"
 grep -q '^kimi|kimi-probe-stub 1\.2\.3|' "$_S8/proj/.claude/roster-detected.local.md" 2>/dev/null || _S8_FAIL="$_S8_FAIL notimeout-kimi-V-answer-not-recorded"
 # fixed: the parent file now imports the project's AGENTS.md
@@ -1514,13 +1537,14 @@ printf '%s\n' "$_O" | grep -Fq "WARNING: the Triforge helper did not load (CLAUD
 _s8_has '^Multi-agent framework ready\.$' || _S8_FAIL="$_S8_FAIL unset-root-orientation-missing"
 # killgrace (round 1, #6): _ss_bounded as the hook ships it (its text, from
 # `_ss_bounded() {` to the closing brace at column 0), evaluated in a
-# background subshell under an outer 10 s deadline, so a call that never
+# background subshell under an outer 25 s deadline, so a call that never
 # returns cannot hang the gate. The stub writes its pid and prints nothing.
 _S8_BOUNDED=$(sed -n '/^_ss_bounded() {$/,/^}$/p' "$REPO_ROOT/hooks/handlers/session-start.sh")
 [ -n "$_S8_BOUNDED" ] || _S8_FAIL="$_S8_FAIL killgrace-no-_ss_bounded-in-the-hook"
 mkdir -p "$_S8/deaf"
-printf '#!/bin/sh\n# probe stub (SELF-08): a claude that ignores SIGTERM and never answers; writes its pid to $1\necho $$ > "$1"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S8/deaf/claude"
+printf '#!/bin/sh\n# probe stub (SELF-08): a claude that ignores SIGTERM and never answers; writes its pid to $1 (no $1: exits, the warm-up run)\n[ -n "${1:-}" ] || exit 0\necho $$ > "$1"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S8/deaf/claude"
 chmod +x "$_S8/deaf/claude"
+_self_warm "$_S8/deaf/claude"
 _S8_KILL=""
 _s8_bounded() { # _s8_bounded <label> <TIMEOUT_BIN, empty: the watchdog> — one 1 s bounded call on the stub; its seconds into _S8_KILL, mismatches into _S8_FAIL
   local D="$_S8/deaf/$1" P S T0 T N=0
@@ -1528,12 +1552,12 @@ _s8_bounded() { # _s8_bounded <label> <TIMEOUT_BIN, empty: the watchdog> — one
   T0=$(date +%s)
   ( TIMEOUT_BIN="$2"; eval "$_S8_BOUNDED"; _ss_bounded 1 "$D/out" "$_S8/deaf/claude" "$D/pid" >/dev/null || true; : > "$D/done" ) </dev/null >/dev/null 2>"$D/err" &
   P=$!
-  while [ ! -f "$D/done" ] && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done
+  while [ ! -f "$D/done" ] && [ "$(( $(date +%s) - T0 ))" -lt 25 ]; do sleep 0.1; done
   T=$(( $(date +%s) - T0 ))
   if [ ! -f "$D/done" ]; then
     _S8_FAIL="$_S8_FAIL killgrace-$1-hung(${T}s)"
     kill -9 "$P" 2>/dev/null || true
-  elif [ "$T" -ge 6 ]; then
+  elif [ "$T" -ge 15 ]; then
     _S8_FAIL="$_S8_FAIL killgrace-$1-slow(${T}s)"
   fi
   wait "$P" 2>/dev/null || true
@@ -1559,7 +1583,7 @@ _s8_bounded watchdog ""
 # versiongrace (round 1, wave 2): _ss_cli_version as the hook ships it, with
 # what it calls (each function's text, from its `name() {` line to the
 # closing brace at column 0), evaluated in background subshells, one per
-# branch, side by side, under an outer 15 s deadline. Each subshell's TMPDIR
+# branch, side by side, under an outer 30 s deadline. Each subshell's TMPDIR
 # is a private dir of its own, empty again afterwards. The stubs log the
 # flag they were asked; the deaf one also its pid.
 _S8_VFN=""
@@ -1571,9 +1595,11 @@ for _s8_f in _ss_tmp_ok _ss_claude_private _ss_private_tmp _ss_bounded _ss_cli_v
 done
 unset _s8_f _S8_T
 mkdir -p "$_S8/vstub"
-printf '#!/bin/sh\n# probe stub (SELF-08 versiongrace): an optional CLI that ignores SIGTERM and never answers; logs its flag to $S8_VLOG, its pid to $S8_VLOG.pid\necho "$1" >> "$S8_VLOG"\necho $$ >> "$S8_VLOG.pid"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S8/vstub/deaf"
-printf '#!/bin/sh\n# probe stub (SELF-08 versiongrace): an optional CLI that answers -V only; logs its flag to $S8_VLOG\necho "$1" >> "$S8_VLOG"\ncase "${1:-}" in -V) echo "vonly-probe-stub 1.2.3" ;; esac\nexit 0\n' > "$_S8/vstub/vonly"
+printf '#!/bin/sh\n# probe stub (SELF-08 versiongrace): an optional CLI that ignores SIGTERM and never answers; logs its flag to $S8_VLOG, its pid to $S8_VLOG.pid (no flag: exits, the warm-up run)\n[ -n "${1:-}" ] || exit 0\necho "$1" >> "$S8_VLOG"\necho $$ >> "$S8_VLOG.pid"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S8/vstub/deaf"
+printf '#!/bin/sh\n# probe stub (SELF-08 versiongrace): an optional CLI that answers -V only; logs its flag to $S8_VLOG (no flag: exits, the warm-up run)\n[ -n "${1:-}" ] || exit 0\necho "$1" >> "$S8_VLOG"\ncase "${1:-}" in -V) echo "vonly-probe-stub 1.2.3" ;; esac\nexit 0\n' > "$_S8/vstub/vonly"
 chmod +x "$_S8/vstub/deaf" "$_S8/vstub/vonly"
+_self_warm "$_S8/vstub/deaf"
+_self_warm "$_S8/vstub/vonly"
 _s8_vstart() { # _s8_vstart <label> <TIMEOUT_BIN, empty: the watchdog> — both stubs through _ss_cli_version with a 1 s bound, in the background; results in $_S8/vg-<label>
   local D="$_S8/vg-$1"
   mkdir -p "$D/tmp"
@@ -1587,14 +1613,14 @@ _s8_vstart() { # _s8_vstart <label> <TIMEOUT_BIN, empty: the watchdog> — both 
   echo "$!" > "$D/bg"
 }
 _S8_VER=""
-_s8_vcheck() { # _s8_vcheck <label> — wait for the case (to 15 s after _S8_VT0), then check it; its seconds into _S8_VER, mismatches into _S8_FAIL
+_s8_vcheck() { # _s8_vcheck <label> — wait for the case (to 30 s after _S8_VT0), then check it; its seconds into _S8_VER, mismatches into _S8_FAIL
   local D="$_S8/vg-$1" N=0 T S
-  while [ ! -f "$D/done" ] && [ "$(( $(date +%s) - _S8_VT0 ))" -lt 15 ]; do sleep 0.1; done
+  while [ ! -f "$D/done" ] && [ "$(( $(date +%s) - _S8_VT0 ))" -lt 30 ]; do sleep 0.1; done
   T=$(( $(date +%s) - _S8_VT0 ))
   if [ ! -f "$D/done" ]; then
     _S8_FAIL="$_S8_FAIL versiongrace-$1-hung(${T}s)"
     kill -9 "$(cat "$D/bg")" 2>/dev/null || true
-  elif [ "$T" -ge 9 ]; then
+  elif [ "$T" -ge 20 ]; then
     _S8_FAIL="$_S8_FAIL versiongrace-$1-slow(${T}s)"
   fi
   wait "$(cat "$D/bg")" 2>/dev/null || true
@@ -1631,8 +1657,13 @@ case "$_S8_FAIL" in
 esac
 # detectbound (round 4, J): the whole hook in its own project, a python3 stub
 # first on PATH that prints one project no-import row (round 5), writes its
-# pid and sleeps 60 s for the detect pass
+# pid and sleeps 60 s for the detect pass. PATH is the stubs, $_S8/tbin
+# (the timeout binary alone) and /usr/bin and /bin: an optional CLI installed
+# on the host would otherwise be asked for its version inside the timed run,
+# up to 2 x 12 s each on a loaded host
 _S8_PY=$(command -v python3 || true)
+mkdir -p "$_S8/tbin"
+if [ -n "$TIMEOUT_BIN" ]; then ln -s "$TIMEOUT_BIN" "$_S8/tbin/$(basename "$TIMEOUT_BIN")" 2>/dev/null || true; fi
 mkdir -p "$_S8/pystub" "$_S8/proj-detect"
 ( cd "$_S8/proj-detect" && git init -q 2>/dev/null ) || true
 printf '# own\n' > "$_S8/proj-detect/CLAUDE.md"
@@ -1648,10 +1679,10 @@ EOF
   printf 'exec %s "$@"\n' "$_S8_PY"; } > "$_S8/pystub/python3"
 chmod +x "$_S8/pystub/python3"
 _S8_T0=$(date +%s)
-_O=$( cd "$_S8/proj-detect" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/pystub:$_S8/bin:$PATH" S8_DPID="$_S8/pystub/pid" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 30} bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ) || _S8_FAIL="$_S8_FAIL detectbound-rc-nonzero"
+_O=$( cd "$_S8/proj-detect" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/pystub:$_S8/bin:$_S8/tbin:/usr/bin:/bin" S8_DPID="$_S8/pystub/pid" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 50} bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ) || _S8_FAIL="$_S8_FAIL detectbound-rc-nonzero"
 _S8_DET=$(( $(date +%s) - _S8_T0 ))
 _s8_sane detectbound "$_O"
-[ "$_S8_DET" -lt 25 ] || _S8_FAIL="$_S8_FAIL detectbound-slow(${_S8_DET}s)"
+[ "$_S8_DET" -lt 40 ] || _S8_FAIL="$_S8_FAIL detectbound-slow(${_S8_DET}s)"
 _S8_WARN_RE='^WARNING: the instruction-file check did not finish (instruction_files_detect in .*/scripts/lib/instructions\.sh, rc [0-9][0-9]*: given up on after 10 s), so the CLAUDE\.md and 3\.x template notices may be missing this session\.$'
 _s8_has "$_S8_WARN_RE" || _S8_FAIL="$_S8_FAIL detectbound-no-warning"
 _s8_has 'does not import AGENTS\.md' && _S8_FAIL="$_S8_FAIL detectbound-partial-row-used"
@@ -1690,10 +1721,10 @@ EOF
   printf 'exec %s "$@"\n' "$_S8_PY"; } > "$_S8/pyfork/python3"
 chmod +x "$_S8/pyfork/python3"
 _S8_T0=$(date +%s)
-_O=$( cd "$_S8/proj-detect" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/pyfork:$_S8/bin:/usr/bin:/bin" S8_FPID="$_S8/pyfork/pid" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 30} bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ) || _S8_FAIL="$_S8_FAIL detectfork-rc-nonzero"
+_O=$( cd "$_S8/proj-detect" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/pyfork:$_S8/bin:/usr/bin:/bin" S8_FPID="$_S8/pyfork/pid" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 50} bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ) || _S8_FAIL="$_S8_FAIL detectfork-rc-nonzero"
 _S8_FORK=$(( $(date +%s) - _S8_T0 ))
 _s8_sane detectfork "$_O"
-[ "$_S8_FORK" -lt 25 ] || _S8_FAIL="$_S8_FAIL detectfork-slow(${_S8_FORK}s)"
+[ "$_S8_FORK" -lt 40 ] || _S8_FAIL="$_S8_FAIL detectfork-slow(${_S8_FORK}s)"
 _s8_has "$_S8_WARN_RE" || _S8_FAIL="$_S8_FAIL detectfork-no-warning"
 _s8_has 'does not import AGENTS\.md' && _S8_FAIL="$_S8_FAIL detectfork-partial-row-used"
 _s8_gone detectfork "$_S8/pyfork/pid"
@@ -1726,7 +1757,8 @@ _s8_d69 detect69-nolib "$_S8/libless/hooks/handlers/session-start.sh" "$_S8/bin:
 # whether the file imports AGENTS.md, never "add the line -". A python3 first
 # on PATH answers the pass with such rows for ./CLAUDE.md, ./.claude/CLAUDE.md
 # and the CLAUDE.md above the project; the real one answers every other call.
-# The project is $_S8/pb/up/proj, so the directory above it is not above HOME
+# The project is $_S8/pb/up/proj, so the directory above it is not above HOME.
+# PATH as in detectbound: no CLI of the host's is probed under the harness timeout
 mkdir -p "$_S8/pybound" "$_S8/pb/up/proj"
 ( cd "$_S8/pb/up/proj" && git init -q 2>/dev/null ) || true
 { cat <<'EOF'
@@ -1740,7 +1772,7 @@ fi
 EOF
   printf 'exec %s "$@"\n' "$_S8_PY"; } > "$_S8/pybound/python3"
 chmod +x "$_S8/pybound/python3"
-_O=$( cd "$_S8/pb/up/proj" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/pybound:$_S8/bin:$PATH" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 30} bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ) || _S8_FAIL="$_S8_FAIL pastbound-rc-nonzero"
+_O=$( cd "$_S8/pb/up/proj" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/pybound:$_S8/bin:$_S8/tbin:/usr/bin:/bin" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 30} bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ) || _S8_FAIL="$_S8_FAIL pastbound-rc-nonzero"
 _s8_sane pastbound "$_O"
 _s8_has '^WARNING: CLAUDE\.md in this project is past the size or nesting Triforge reads, so session start cannot tell whether it imports AGENTS\.md.* add the line @AGENTS\.md to it yourself ' || _S8_FAIL="$_S8_FAIL pastbound-own-line"
 _s8_has '^WARNING: \.claude/CLAUDE\.md in this project is past the size or nesting Triforge reads, .* add the line @\.\./AGENTS\.md to it yourself ' || _S8_FAIL="$_S8_FAIL pastbound-own-dotclaude-line"
@@ -1766,6 +1798,8 @@ EOF
 printf '#!/bin/sh\n# probe stub (SELF-08 detectwatch): a sleep that logs its pid to $S8_SLOG\necho $$ >> "$S8_SLOG"\nexec /bin/sleep "$@"\n' > "$_S8/watch/wd/sleep"
 chmod +x "$_S8/watch/wd/python3" "$_S8/watch/wd/sleep"
 ln -s "$(command -v dirname)" "$_S8/watch/wd/dirname" 2>/dev/null || true
+_self_warm "$_S8/watch/wd/python3" -c pass
+_self_warm env S8_SLOG=/dev/null "$_S8/watch/wd/sleep" 0
 _s8_lib() { # _s8_lib <bash|zsh> <PATH> <script> [NAME=value...] — the library alone, sourced under set -u in $_S8/proj-watch with the throwaway HOME, the script, then "rc=<n>"; stdout + stderr, under the harness timeout (20 s)
   local SH=$1 PP=$2 SC='set -u; source "$0/scripts/lib/instructions.sh" >/dev/null 2>&1; R=0; '"$3"' || R=$?; echo "rc=$R"'
   shift 3
@@ -1811,7 +1845,7 @@ for _s8_sh in $_S8_WSH; do
       _s8_l="detectwatch-${_s8_sh}-${_s8_c}-${_s8_fn}"
       printf '%s\n' "$_O" | grep -Eq "^${_s8_fn}: gave up after 1 s \(rc (124|137|143)\): an ordinary project's instruction files are read in well under a second, .* may be built to slow the reader, or python3 hung or was killed \(an out-of-memory kill also returns rc 137\); nothing was written\$" || _S8_FAIL="$_S8_FAIL ${_s8_l}-no-gave-up-line($(printf '%s' "$_O" | tr '\n' ' ' | cut -c1-80))"
       [ "$(printf '%s\n' "$_O" | grep -c . || true)" -eq 2 ] && printf '%s\n' "$_O" | tail -1 | grep -Eq '^rc=(124|137|143)$' || _S8_FAIL="$_S8_FAIL ${_s8_l}-output($(printf '%s' "$_O" | tail -1))"
-      [ "$_S8_T" -lt 6 ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-slow(${_S8_T}s)"
+      [ "$_S8_T" -lt 15 ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-slow(${_S8_T}s)"
     done
   done
 done
@@ -1859,9 +1893,11 @@ done
 # forkwatch (4.1): the watchdog stops the command's process group, not the
 # command alone. $_S8/watch/fork holds a python3 launcher and dirname (no
 # timeout binary): the launcher forks a child that ignores SIGTERM and holds
-# stdout for 12 s, then sleeps until SIGTERM ends it. Given up on after 1 s,
+# stdout for 40 s, then sleeps until SIGTERM ends it. Given up on after 1 s,
 # neither is left, under the watchdog and (PATH = $_S8/watch/fork, then the
-# harness's) under the timeout binary
+# harness's) under the timeout binary. The child outlasts the harness timeout
+# (20 s), so a bound that stops the launcher alone is back at 20 s or later,
+# well past the 15 s allowed here
 mkdir -p "$_S8/watch/fork"
 { cat <<'EOF'
 #!/bin/sh
@@ -1875,6 +1911,7 @@ EOF
   printf 'exec %s "$@"\n' "$_S8_PY"; } > "$_S8/watch/fork/python3"
 chmod +x "$_S8/watch/fork/python3"
 ln -s "$(command -v dirname)" "$_S8/watch/fork/dirname" 2>/dev/null || true
+_self_warm "$_S8/watch/fork/python3" -c pass
 _s8_fcases="watchdog"
 _S8_FMODES="the watchdog (timeout binary SKIPPED: none on PATH)"
 if [ -n "$TIMEOUT_BIN" ]; then
@@ -1889,10 +1926,10 @@ for _s8_sh in $_S8_WSH; do
     if [ "$_s8_c" = timeout ]; then _s8_pp="$_S8/watch/fork:$PATH"; _s8_rc=124; fi
     rm -f "$_S8/watch/fork/pid" "$_S8/watch/fork/pid.child"
     _S8_T0=$(date +%s)
-    _O=$(_s8_lib "$_s8_sh" "$_s8_pp" '_INSTR_SECS=1 instruction_files_detect' S8_FPID="$_S8/watch/fork/pid" S8_CSECS=12)
+    _O=$(_s8_lib "$_s8_sh" "$_s8_pp" '_INSTR_SECS=1 instruction_files_detect' S8_FPID="$_S8/watch/fork/pid" S8_CSECS=40)
     _S8_T=$(( $(date +%s) - _S8_T0 ))
     _s8_has "^rc=${_s8_rc}\$" || _S8_FAIL="$_S8_FAIL ${_s8_l}-rc($(printf '%s' "$_O" | tail -1))"
-    [ "$_S8_T" -lt 6 ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-slow(${_S8_T}s)"
+    [ "$_S8_T" -lt 15 ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-slow(${_S8_T}s)"
     _s8_gone "$_s8_l" "$_S8/watch/fork/pid"
     _s8_gone "${_s8_l}-child" "$_S8/watch/fork/pid.child"
   done
@@ -1946,6 +1983,7 @@ if [ -n "$_S8_BOUNDED" ]; then
   mkdir -p "$_S8/bsl/bin"
   printf '#!/bin/sh\n# probe stub (SELF-08 boundsleep): a sleep that logs its pid to $S8_SLOG\necho $$ >> "$S8_SLOG"\nexec /bin/sleep "$@"\n' > "$_S8/bsl/bin/sleep"
   chmod +x "$_S8/bsl/bin/sleep"
+  _self_warm env S8_SLOG=/dev/null "$_S8/bsl/bin/sleep" 0
   for _s8_sh in $_S8_WSH; do
     _s8_l="boundsleep-${_s8_sh}"
     : > "$_S8/bsl/half-$_s8_sh"
@@ -1968,23 +2006,26 @@ rc=0" ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-now${_s8_n}($(printf '%s' "$_O" | tr '\n
     done
   done
   # boundfork (4.1): a 1 s bound on a command that forks a child ignoring
-  # SIGTERM and holding stdout for 12 s, then sleeps until SIGTERM ends it:
-  # neither is left, under the watchdog and under the timeout binary
+  # SIGTERM and holding stdout for 40 s, then sleeps until SIGTERM ends it:
+  # neither is left, under the watchdog and under the timeout binary, back
+  # within 15 s (as in forkwatch, the child outlasts the harness timeout)
   cat > "$_S8/bsl/fork" <<'EOF'
 #!/bin/sh
-# probe stub (SELF-08 boundfork): forks a child that ignores SIGTERM for $S8_CSECS s (its pid in $1.child), then sleeps until SIGTERM (its pid in $1)
+# probe stub (SELF-08 boundfork): forks a child that ignores SIGTERM for $S8_CSECS s (its pid in $1.child), then sleeps until SIGTERM (its pid in $1); no $1: exits, the warm-up run
+[ -n "${1:-}" ] || exit 0
 /bin/sh -c 'echo $$ > "$1.child"; trap "" TERM; exec /bin/sleep "${S8_CSECS:-60}"' _ "$1" &
 echo $$ > "$1"
 exec /bin/sleep 60
 EOF
   chmod +x "$_S8/bsl/fork"
+  _self_warm "$_S8/bsl/fork"
   _s8_bfork() { # _s8_bfork <bash|zsh> <pid file> [timeout binary] — the hook's _ss_bounded, a 1 s bound, on the fork stub, under the timeout binary when one is given, else the watchdog (in an output dir of its own); then "rc=<n>"
     local D="" SC='set -eu; TIMEOUT_BIN=$S8_TB; eval "$1"; shift; R=0; _ss_bounded "$@" || R=$?; echo "rc=$R"'
     if [ -z "${3:-}" ]; then D=$(mktemp -d "$_S8/bsl/out.XXXXXX") || return 0; fi
     if [ "$1" = zsh ]; then
-      env S8_TB="${3:-}" S8_CSECS=12 ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/zsh -fc "$SC" _ "$_S8_BOUNDED" 1 "$D" "$_S8/bsl/fork" "$2" 2>&1
+      env S8_TB="${3:-}" S8_CSECS=40 ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/zsh -fc "$SC" _ "$_S8_BOUNDED" 1 "$D" "$_S8/bsl/fork" "$2" 2>&1
     else
-      env S8_TB="${3:-}" S8_CSECS=12 ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/bash -c "$SC" _ "$_S8_BOUNDED" 1 "$D" "$_S8/bsl/fork" "$2" 2>&1
+      env S8_TB="${3:-}" S8_CSECS=40 ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/bash -c "$SC" _ "$_S8_BOUNDED" 1 "$D" "$_S8/bsl/fork" "$2" 2>&1
     fi
   }
   for _s8_sh in $_S8_WSH; do
@@ -1997,7 +2038,7 @@ EOF
       _O=$(_s8_bfork "$_s8_sh" "$_S8/bsl/fpid" "$_s8_tb")
       _S8_T=$(( $(date +%s) - _S8_T0 ))
       [ "$_O" = "rc=0" ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-output($(printf '%s' "$_O" | tr '\n' ' ' | cut -c1-80))"
-      [ "$_S8_T" -lt 6 ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-slow(${_S8_T}s)"
+      [ "$_S8_T" -lt 15 ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-slow(${_S8_T}s)"
       _s8_gone "$_s8_l" "$_S8/bsl/fpid"
       _s8_gone "${_s8_l}-child" "$_S8/bsl/fpid.child"
     done
@@ -2007,7 +2048,7 @@ fi
 unset _s8_sh _s8_l _s8_p _s8_n
 _S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines), prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40), and survives a failing or absent helper loader"
 if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
-  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; started in HOME or the directory above it: the one home-directory warning, no file notice or tip, the files untouched; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; versiongrace (round 1, wave 2): an optional CLI that ignores SIGTERM and never answers, through the hook's own _ss_cli_version with a 1 s bound, asked --version then -V and given up on within two calls of 1 s + the 2 s SIGKILL grace (${_S8_VER}), nothing recorded, the stub gone, stderr empty, no temp dir left; one that answers -V only gets that answer, and the watchdog run records a kimi stub's -V answer in .claude/roster-detected.local.md; detectbound (round 4, J): a python3 that prints one project no-import row (round 5) and never answers the instruction-file pass, session start back in ${_S8_DET}s (the 10 s bound) with the WARNING that the check did not finish, given up on after 10 s (4.1), and no own-file notice from the partial row, the stub gone; detectfork (round 5): with no timeout binary on PATH (${_S8_FWD}), a python3 launcher that prints that row, forks a child that ignores SIGTERM and holds stdout for 60 s, and ignores SIGTERM itself: session start back in ${_S8_FORK}s with the WARNING and no own-file notice, the launcher and (4.1) its child gone; detect69 (4.1): an rc 69 WARNING names its cause, one line each: python3 not on PATH, no timeout binary and no private temp dir for the watchdog, a library that did not load; pastbound (4.1): past-bound rows (import -) for ./CLAUDE.md, ./.claude/CLAUDE.md and a CLAUDE.md above get a line saying session start cannot tell whether they import AGENTS.md, offering @AGENTS.md, @../AGENTS.md and the project's CLAUDE.md, never the line -; detectwatch (round 5): the library alone under set -u (${_S8_WSH}), PATH = a python3 stub, a sleep that logs its pid and dirname: a pass that answers in 0.5 s under _INSTR_SECS=30 leaves no watchdog sleep running; with no _INSTR_SECS (_INSTR_READ_SECS, shipped as 30, set to 1) detect, visibility and a writer's plan on a python3 that never answers print one gave-up line naming python3 hung or killed and rc 124, 137 or 143 within 6 s, under ${_S8_WMODES}; a writer with --yes, _INSTR_SECS=1 and a python3 2 s slow still writes, rc 0, no temp file left; watchtmp (round 6): with no timeout binary (${_S8_WSH}), a TMPDIR of mode 0777 without the sticky bit is never asked for the watchdog's temp dir, the pass answering through /tmp, and with mktemp failing for /tmp too the call returns rc 69 with its line alone, python3 never started, nothing left in that TMPDIR; forkwatch (4.1): under ${_S8_FMODES} (${_S8_WSH}), a python3 launcher that forks a child ignoring SIGTERM and holding stdout for 12 s, given up on after 1 s: rc 143 (124 under the timeout binary) within 6 s, neither left; perllocale (4.1): with LANG and LC_ALL xx_XX.bogus the watchdog's pass prints its rows and rc 0, no perl warning; watchkill (4.1): the watchdog's subshell SIGKILLed while its private temp dir exists: rc 137, nothing left in TMPDIR; boundsleep (round 6): the hook's own _ss_bounded with no timeout binary (${_S8_WSH}) leaves no watchdog sleep running after a command that answers in 0.5 s or at once (three times); boundfork (4.1): the same _ss_bounded with a 1 s bound, under ${_S8_FMODES}, on a command that forks a child ignoring SIGTERM and holding stdout for 12 s: back within 6 s, neither left; ccd (4.1): with CLAUDE_CONFIG_DIR absolute or relative, HOME's .claude/CLAUDE.md is named as a file above the project and the moved CLAUDE.md never; one whose CLAUDE.md imports the project's AGENTS.md silences the own and above notices; unset, the user tier stays unnamed; every run rc 0, no crash, no line starting with {" "static"
+  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; started in HOME or the directory above it: the one home-directory warning, no file notice or tip, the files untouched; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; versiongrace (round 1, wave 2): an optional CLI that ignores SIGTERM and never answers, through the hook's own _ss_cli_version with a 1 s bound, asked --version then -V and given up on within two calls of 1 s + the 2 s SIGKILL grace (${_S8_VER}), nothing recorded, the stub gone, stderr empty, no temp dir left; one that answers -V only gets that answer, and the watchdog run records a kimi stub's -V answer in .claude/roster-detected.local.md; detectbound (round 4, J): a python3 that prints one project no-import row (round 5) and never answers the instruction-file pass, session start back in ${_S8_DET}s (the 10 s bound) with the WARNING that the check did not finish, given up on after 10 s (4.1), and no own-file notice from the partial row, the stub gone; detectfork (round 5): with no timeout binary on PATH (${_S8_FWD}), a python3 launcher that prints that row, forks a child that ignores SIGTERM and holds stdout for 60 s, and ignores SIGTERM itself: session start back in ${_S8_FORK}s with the WARNING and no own-file notice, the launcher and (4.1) its child gone; detect69 (4.1): an rc 69 WARNING names its cause, one line each: python3 not on PATH, no timeout binary and no private temp dir for the watchdog, a library that did not load; pastbound (4.1): past-bound rows (import -) for ./CLAUDE.md, ./.claude/CLAUDE.md and a CLAUDE.md above get a line saying session start cannot tell whether they import AGENTS.md, offering @AGENTS.md, @../AGENTS.md and the project's CLAUDE.md, never the line -; detectwatch (round 5): the library alone under set -u (${_S8_WSH}), PATH = a python3 stub, a sleep that logs its pid and dirname: a pass that answers in 0.5 s under _INSTR_SECS=30 leaves no watchdog sleep running; with no _INSTR_SECS (_INSTR_READ_SECS, shipped as 30, set to 1) detect, visibility and a writer's plan on a python3 that never answers print one gave-up line naming python3 hung or killed and rc 124, 137 or 143 within 15 s, under ${_S8_WMODES}; a writer with --yes, _INSTR_SECS=1 and a python3 2 s slow still writes, rc 0, no temp file left; watchtmp (round 6): with no timeout binary (${_S8_WSH}), a TMPDIR of mode 0777 without the sticky bit is never asked for the watchdog's temp dir, the pass answering through /tmp, and with mktemp failing for /tmp too the call returns rc 69 with its line alone, python3 never started, nothing left in that TMPDIR; forkwatch (4.1): under ${_S8_FMODES} (${_S8_WSH}), a python3 launcher that forks a child ignoring SIGTERM and holding stdout for 40 s, given up on after 1 s: rc 143 (124 under the timeout binary) within 15 s, neither left; perllocale (4.1): with LANG and LC_ALL xx_XX.bogus the watchdog's pass prints its rows and rc 0, no perl warning; watchkill (4.1): the watchdog's subshell SIGKILLed while its private temp dir exists: rc 137, nothing left in TMPDIR; boundsleep (round 6): the hook's own _ss_bounded with no timeout binary (${_S8_WSH}) leaves no watchdog sleep running after a command that answers in 0.5 s or at once (three times); boundfork (4.1): the same _ss_bounded with a 1 s bound, under ${_S8_FMODES}, on a command that forks a child ignoring SIGTERM and holding stdout for 40 s: back within 15 s, neither left; ccd (4.1): with CLAUDE_CONFIG_DIR absolute or relative, HOME's .claude/CLAUDE.md is named as a file above the project and the moved CLAUDE.md never; one whose CLAUDE.md imports the project's AGENTS.md silences the own and above notices; unset, the user tier stays unnamed; every run rc 0, no crash, no line starting with {" "static"
 else
   row "SELF-08" "claude" "$_S8_CAP" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160); mismatch:${_S8_FAIL:- none}" "static"
 fi
@@ -2322,11 +2363,13 @@ rm -rf "$_S8B" "$_S8"
 #            skills sync and the subdirectory-roster scan, on an agy stub
 #            that ignores SIGTERM on `agy agents`, prints one stderr line and
 #            never answers, with a 1 s bound (the steps use 30 s and 60 s),
-#            under bash and zsh: back within 1 s + the 5 s SIGKILL grace +
-#            slack with rc 137, nothing on stdout but the rc, the stub's own
-#            stderr line passed through and no "Killed" line (bash's report
-#            of the kill), the stub gone; a run still going at 15 s is killed
-#            and recorded as hung. Needs a timeout tool, as the step does
+#            under bash and zsh: back within 20 s (1 s + the 5 s SIGKILL
+#            grace, the loader's load, and room for a loaded host; the stub
+#            alone runs 30 s) with rc 137, nothing on stdout but the rc, the
+#            stub's own stderr line passed through and no "Killed" line
+#            (bash's report of the kill), the stub gone; a run still going at
+#            25 s is killed and recorded as hung. Needs a timeout tool, as
+#            the step does
 # Negative control: the setup block with its triforge_bootstrap line removed
 # leaves a fresh project without ops/, so the ops/ check above sees the call.
 _S21="${WORK}/self21"
@@ -3083,7 +3126,7 @@ fi
 # `agy agents`. _tb_run takes its bound as an argument, so the case calls it
 # with 1 s from a shell that sourced the loader, _TB_TIMEOUT set the way
 # triforge_bootstrap sets it; bash and zsh side by side, in the background,
-# under an outer 15 s deadline. The stub writes its pid and one stderr line.
+# under an outer 25 s deadline. The stub writes its pid and one stderr line.
 if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
   mkdir -p "$_S21/bin-deaf"
   cat > "$_S21/bin-deaf/agy" <<'EOF'
@@ -3101,6 +3144,7 @@ esac
 exit 0
 EOF
   chmod +x "$_S21/bin-deaf/agy"
+  _self_warm "$_S21/bin-deaf/agy" --version
   printf 'source "%s/scripts/invoke-external.sh"\n_TB_TIMEOUT=$(_timeout_tool 2>/dev/null)\nR=0; _tb_run 1 agy agents || R=$?\necho "rc=$R"\n' "$REPO_ROOT" > "$_S21/agykill.sh"
   _S21_KL=""
   _S21_KN=""
@@ -3114,12 +3158,12 @@ EOF
   done
   for _s21_kv in $_S21_KL; do
     _s21_l=${_s21_kv%%:*}
-    while [ ! -f "$_S21/agykill-$_s21_l.done" ] && [ "$(( $(date +%s) - _S21_KT0 ))" -lt 15 ]; do sleep 0.1; done
+    while [ ! -f "$_S21/agykill-$_s21_l.done" ] && [ "$(( $(date +%s) - _S21_KT0 ))" -lt 25 ]; do sleep 0.1; done
     _S21_KT=$(( $(date +%s) - _S21_KT0 ))
     if [ ! -f "$_S21/agykill-$_s21_l.done" ]; then
       _S21_FAIL="$_S21_FAIL agykill-$_s21_l-hung(${_S21_KT}s)"
       kill -9 "${_s21_kv#*:}" 2>/dev/null || true
-    elif [ "$_S21_KT" -ge 10 ]; then
+    elif [ "$_S21_KT" -ge 20 ]; then
       _S21_FAIL="$_S21_FAIL agykill-$_s21_l-slow(${_S21_KT}s)"
     fi
     wait "${_s21_kv#*:}" 2>/dev/null || true
@@ -3874,9 +3918,14 @@ case "$MODE" in
     ANS="moved $ARG" ;;
   setref) git update-ref "refs/heads/$ARG" "$ARG3"; ANS="set $ARG" ;;
   psleft)
-    # a child in a process group of its own, then ps made unreadable
-    python3 -c 'import os; os.setpgid(0, 0); os.execvp("sleep", ["sleep", "300"])' < /dev/null > /dev/null 2>&1 &
-    echo $! > "$L/bgchild"; : > "$L/psfail"
+    # a child in a process group of its own, then ps made unreadable: only
+    # once the child has left this group (bgchild.grouped, 30 s at most), so a
+    # slow python3 start can't leave it in the group the run's sweep stops
+    rm -f "$L/bgchild.grouped"
+    python3 -c 'import os, sys; os.setpgid(0, 0); open(sys.argv[1], "w").close(); os.execvp("sleep", ["sleep", "300"])' "$L/bgchild.grouped" < /dev/null > /dev/null 2>&1 &
+    echo $! > "$L/bgchild"
+    N=0; while [ ! -f "$L/bgchild.grouped" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
+    : > "$L/psfail"
     ANS="left a child in a group of its own" ;;
   late)
     # a daemon: its own session, its parent gone at once (setsid, double fork)
@@ -3928,6 +3977,8 @@ S12_CODEX_EOF
 for _s12_b in claude codex; do
   sed -e "s#@LOG@#${_S12}/log#" -e "s#@HOOKS@#${REPO_ROOT}/hooks/handlers#" "$_S12/tpl/$_s12_b" > "$_S12/bin/$_s12_b"
   chmod +x "$_S12/bin/$_s12_b"
+  # the lane asks each for --help under a 10 s or 15 s bound: its first run happens here
+  _self_warm "$_S12/bin/$_s12_b" --version
 done
 # PATH without claude (nobin: the tools the lane needs, plus the codex stub)
 # and without either CLI (nobin2)
@@ -3936,6 +3987,7 @@ for _s12_b in python3 git timeout gtimeout; do
   if [ -n "$_s12_p" ]; then ln -s "$_s12_p" "$_S12/nobin/$_s12_b"; ln -s "$_s12_p" "$_S12/nobin2/$_s12_b"; fi
 done
 cp "$_S12/bin/codex" "$_S12/nobin/codex"
+_self_warm "$_S12/nobin/codex" --version
 unset _s12_b _s12_p
 _S12_NOCLAUDE="$_S12/nobin:/usr/bin:/bin:/usr/sbin:/sbin"
 _S12_NOCLI="$_S12/nobin2:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -4203,18 +4255,25 @@ _s12_repo r3
 O=$(_s12_lead r3 "$_S12_KIT" '
 export TRIFORGE_CLAUDE_SANDBOX=off
 _r3w() { local L=$1 R=0 X; shift; X=$("$@" 2>&1) || R=$?; echo "$L:rc=$R:$(printf "%s" "$X" | tr "\n" " " | cut -c1-400)"; }
-_r3s() { local N=0; while [ ! -s "$_S12/log/sleeping" ] && [ "$N" -lt 150 ]; do sleep 0.1; N=$((N + 1)); done; }
+# the stub starts once its run is set up: under a second on an idle host, about
+# 5 s for an exec run when each python3 start costs 0.25 s more, so every wait
+# for a stub to start in this row allows 30 s
+_r3s() { local N=0; while [ ! -s "$_S12/log/sleeping" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done; }
+# gone: ps lists no such process, or a zombie (exited, its parent not yet
+# reaping it, which kill -0 would still count)
+_r3alive() { case "$(ps -o stat= -p "${1:-0}" 2>/dev/null | tr -d " ")" in ""|Z*) echo gone ;; *) echo alive ;; esac; }
 RUN="$_S12/r3runs"
 _s12_mode sleep
 T0=$(date +%s)
 _r3w spawn persona_spawn "$RUN" slow probe-reader "$_S12/review.diff" "$_S12/r3-slow.out"
-echo "spawn-quick=$(( $(date +%s) - T0 < 5 )):pid=$(if [ -s "$RUN/slow.pid" ]; then echo yes; else echo no; fi):rc=$(if [ -f "$RUN/slow.rc" ]; then echo yes; else echo no; fi)"
+# at once: well under the 30 s the stub sleeps, which a spawn that waited for its run would take
+echo "spawn-quick=$(( $(date +%s) - T0 < 20 )):pid=$(if [ -s "$RUN/slow.pid" ]; then echo yes; else echo no; fi):rc=$(if [ -f "$RUN/slow.rc" ]; then echo yes; else echo no; fi)"
 _r3s
 STUB=$(cat "$_S12/log/sleeping" 2>/dev/null || true)
 ( export TRIFORGE_LEAD_WAIT_BUDGET_S=3; _r3w wait75 persona_wait "$RUN" slow )
 _r3w stop persona_stop "$RUN" slow
-sleep 0.5
-if [ -n "$STUB" ] && kill -0 "$STUB" 2>/dev/null; then echo "stop-tree=stub-alive"; else echo "stop-tree=gone"; fi
+N=0; while [ -n "$STUB" ] && [ "$(_r3alive "$STUB")" = alive ] && [ "$N" -lt 50 ]; do sleep 0.1; N=$((N + 1)); done
+if [ -n "$STUB" ] && [ "$(_r3alive "$STUB")" = alive ]; then echo "stop-tree=stub-alive"; else echo "stop-tree=gone"; fi
 _r3w afterstop persona_wait "$RUN" slow
 _s12_mode sleep
 _r3w spawnk persona_spawn "$RUN" killed probe-reader "$_S12/review.diff" "$_S12/r3-k.out"
@@ -4224,7 +4283,7 @@ sleep 0.5
 _r3w killedwait persona_wait "$RUN" killed
 _s12_mode answer
 _r3w spawnf persona_spawn "$RUN" fast probe-reader "$_S12/review.diff" "$_S12/r3-f.out"
-( export TRIFORGE_LEAD_WAIT_BUDGET_S=40; _r3w waitf persona_wait "$RUN" fast )
+( export TRIFORGE_LEAD_WAIT_BUDGET_S=120; _r3w waitf persona_wait "$RUN" fast )
 echo "fast-rc=$(cat "$RUN/fast.rc" 2>/dev/null):out=$(cat "$_S12/r3-f.out" 2>/dev/null)"
 echo "fast-env=$(grep -cx CLAUDE_CODE_DISABLE_ATTACHMENTS=1 "$_S12/log/last.env" || true)"
 ( export TRIFORGE_LEASE_WORKER=persona; _r3w mspawn persona_spawn "$RUN" m probe-reader "$_S12/review.diff" "$_S12/r3-m.out"; _r3w mwait persona_wait "$RUN" fast; _r3w mstop persona_stop "$RUN" fast )
@@ -4249,7 +4308,6 @@ TSTUB=$(cat "$_S12/log/sleeping" 2>/dev/null || true)
 TDIRS=$(ls -d "$_S12/r3.leases"/persona-* 2>/dev/null | wc -l | tr -d " ")
 kill -INT -- "-$SIGPID" 2>/dev/null || true
 N=0; while [ -n "$(ls -d "$_S12/r3.leases"/persona-* 2>/dev/null)" ] && [ "$N" -lt 300 ]; do sleep 0.05; N=$((N + 1)); done
-_r3alive() { case "$(ps -o stat= -p "${1:-0}" 2>/dev/null | tr -d " ")" in ""|Z*) echo gone ;; *) echo alive ;; esac; }
 TAT=$(_r3alive "$TSTUB")
 wait "$SIGPID" 2>/dev/null || true
 echo "termkill=running-dirs:${TDIRS}:at-reclaim:${TAT}:stub:$(_r3alive "$TSTUB"):dirs=$(ls -d "$_S12/r3.leases"/persona-* 2>/dev/null | wc -l | tr -d " ")"
@@ -4285,7 +4343,7 @@ _self_try pin lease_pin_reviewer m1 codex
 _s12_mode waitgo
 ( R=0; dispatch_persona probe-tester "$_S12/brief.txt" "$_S12/lm.out" > /dev/null 2> "$_S12/lm.err" || R=$?; echo "$R" > "$_S12/lm.rc" ) &
 BG=$!
-N=0; while [ ! -f "$_S12/log/sleeping" ] && [ "$N" -lt 150 ]; do sleep 0.1; N=$((N + 1)); done
+N=0; while [ ! -f "$_S12/log/sleeping" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
 _self_try merge lease_merge m1 codex
 touch "$_S12/log/go"
 wait "$BG" 2>/dev/null || true
@@ -4359,7 +4417,7 @@ O=$(_s12_lead bg "$_S12_KIT" '
 export TRIFORGE_CLAUDE_SANDBOX=off TMPDIR="$_S12/tmp-bg"
 _r4alive() { case "$(ps -o stat= -p "${1:-0}" 2>/dev/null | tr -d " ")" in ""|Z*) echo gone ;; *) echo alive ;; esac; }
 _r4n() { ls -d "$@" 2>/dev/null | wc -l | tr -d " "; }
-_r4s() { local N=0; while [ ! -s "$_S12/log/sleeping" ] && [ "$N" -lt 150 ]; do sleep 0.1; N=$((N + 1)); done; cat "$_S12/log/sleeping" 2>/dev/null || true; }
+_r4s() { local N=0; while [ ! -s "$_S12/log/sleeping" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done; cat "$_S12/log/sleeping" 2>/dev/null || true; }
 _r4c() { local C; C=$(cat "$_S12/log/bgchild" 2>/dev/null || true); rm -f "$_S12/log/bgchild"; printf "%s" "$C"; }
 _s12_mode bgchild
 _self_try bgread dispatch_persona probe-reader "$_S12/review.diff" "$_S12/bg-r.out"
@@ -4695,7 +4753,7 @@ _s12_wts() { echo "dirs=$(ls -d "$_S12/px.leases"/persona-* 2>/dev/null | wc -l 
 _s12_mode sleep
 python3 -c "import os, signal, sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])" /bin/bash -c ". \"\$CLAUDE_PLUGIN_ROOT/scripts/invoke-external.sh\" >/dev/null 2>&1 && dispatch_persona probe-tester \"$_S12/brief.txt\" \"$_S12/px-sig.out\" --at task:dirty" >/dev/null 2>&1 &
 SIGPID=$!
-N=0; while [ ! -f "$_S12/log/sleeping" ] && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done
+N=0; while [ ! -f "$_S12/log/sleeping" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
 echo "sig-running=$(if [ -f "$_S12/log/sleeping" ]; then ls -d "$_S12/px.leases"/persona-* 2>/dev/null | wc -l | tr -d " "; else echo never; fi)"
 T0=$(date +%s)
 kill -INT -- "-$SIGPID" 2>/dev/null || true
@@ -4800,7 +4858,7 @@ O=$(_s12_lead lt "$_S12_KIT" "$_S12_LEDGER_PRE"'
 _s12_mode late "$_S12/lt.forge"
 _self_try late dispatch_persona probe-tester "$_S12/brief.txt" "$_S12/lt.out" --at task:t
 touch "$_S12/log/go"
-N=0; while [ ! -f "$_S12/log/late.done" ] && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done
+N=0; while [ ! -f "$_S12/log/late.done" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
 if [ -f "$_S12/log/late.done" ]; then echo "late-done=yes"; else echo "late-done=no"; fi
 _self_try promote lease_promote
 if [ "$(git rev-parse main)" = "$M0" ]; then echo "main-moved=no"; else echo "main-moved=yes"; fi
@@ -7646,9 +7704,13 @@ rm -rf "$_S18"
 #   wait    lease_dispatch records pid == pgid, a start time, the lead process
 #           and the lease root, and a heartbeat_deadline 60 s + the 30 s slack
 #           out; lease_wait --budget 30 returns rc 0 in under
-#           10 s when a 1 s builder finishes, printing "q review"; on a held
-#           builder --budget 3 returns rc 75 "still building: g" in 1.5-3 s,
-#           and TRIFORGE_LEAD_WAIT_BUDGET_S=4 caps --budget 60 below 4 s; under
+#           20 s when a 1 s builder finishes, printing "q review"; on a held
+#           builder --budget 3 returns rc 75 "still building: g" after 1.5 s
+#           at least and 10 s at most, having polled the ledger at most 3
+#           times (a poll a second, stopping a second before the budget; a
+#           wait that polls up to the budget itself polls 4 times, and a
+#           loaded host only polls fewer), and TRIFORGE_LEAD_WAIT_BUDGET_S=4
+#           caps --budget 60 the same way (4 s less its 1 s of headroom); under
 #           the worker marker 45; --budget x 64; released, rc 0 "g review"
 #   ledger  no ledger -> rc 1 "LEDGER ERROR"; one that doesn't parse -> rc 1
 #           "LEDGER ERROR ... does not parse"
@@ -7674,9 +7736,11 @@ rm -rf "$_S18"
 #           pid, no pgid key, no start time) past its deadline:
 #           lease_heartbeat_check expires it "NOT signalled", requeued;
 #           neither signals the stranger
-#   gitcfg  a builder sets core.fsmonitor in .git/config 2 s into lease_wait
-#           --budget 5 -> rc 44 naming .git/config, the setting restored, the
-#           lease escalated, the fsmonitor command never run
+#   gitcfg  a builder sets core.fsmonitor in .git/config once lease_wait
+#           --budget 20 has polled (a shim around _lease_sweep_one marks the
+#           first poll, so the change lands mid-wait however long the
+#           dispatch took) -> rc 44 naming .git/config, the setting restored,
+#           the lease escalated, the fsmonitor command never run
 #   locale  dispatched under TZ=Asia/Tokyo and LC_ALL=de_DE.UTF-8 (C when that
 #           locale is absent; the zone half always runs): the recorded start
 #           time is the pinned " UTC" form, the builder reads alive under
@@ -7685,11 +7749,14 @@ rm -rf "$_S18"
 #           still reads alive in its own locale and zone
 #   unver   a building row with no output_file beside a 1 s builder: lease_wait
 #           on both -> rc 0 "v review|still building: u"; on u alone -> rc 80
-#           within 3 s, "still building: u", one stderr line naming u;
+#           after its first poll (a wait that polled on to its 6 s budget
+#           polls again), "still building: u", one stderr line naming u;
 #           lease_heartbeat_check u -> 80
 #   tamper  (ledgertamper) a builder overwrites ops/leases.toml with TOML that
-#           doesn't parse 2 s into lease_wait --budget 6 -> rc 44, the ledger
-#           parses again, the lease escalated, stdout "k escalated"
+#           doesn't parse once lease_wait --budget 20 has polled (as in
+#           gitcfg; a fixed delay could land before the dispatch had written
+#           its own row) -> rc 44, the ledger parses again, the lease
+#           escalated, stdout "k escalated"
 #   tentry  (ledgertamper-entry) the same with the ledger corrupt before the
 #           call -> rc 44, restored, escalated, stdout "k2 escalated"
 #   stop    lease_stop on a held builder that started a child in its group:
@@ -7710,8 +7777,9 @@ rm -rf "$_S18"
 #           but the exiting leader is left in the group (_LEASE_OWN_GROUP_PY),
 #           the group empty once the leader exits; lease_wait -> "x review"
 #   lanetimeout a builder that waits on a backgrounded sleep 600 past a 1 s
-#           lease timeout: <out>.rc holds 124 with class timeout 1-8 s after
-#           the dispatch, the child and the group as in endrun; lease_wait ->
+#           lease timeout: <out>.rc holds 124 with class timeout 1-20 s after
+#           the dispatch (one without the timeout leaves none in the 30 s
+#           the case waits), the child and the group as in endrun; lease_wait ->
 #           "t requeued"
 #   leadexit lease_heartbeat_check --lead-exit with the dispatching lead alive:
 #           the held builder adopted (building, reason=lead-exit, lead_exit_at
@@ -7722,8 +7790,11 @@ rm -rf "$_S18"
 #   budget  with the action limit passed, a finished lease's poll sweep is
 #           deferred (still building); the next lease_wait collects it; a real
 #           lease_wait --budget 2 sets the action limit its poll sweeps see
-#           2.0-2.9 s after the call (a recording shim around
-#           _lease_sweep_one), not at the lead's 585 s; a limit that runs out
+#           (a recording shim around _lease_sweep_one) 2 s after the call's
+#           start: at least 2.0 s after a time read just before the call, and
+#           no later than 2 s after its entry integrity check began (a shim
+#           notes when), so a limit counted from after the checks fails
+#           however slow the host is; not at the lead's 585 s; a limit that runs out
 #           during the per-action integrity check (a shim) defers the expiry
 #           of a held builder past its deadline: still building, alive
 #   guards  kill and _kill_tree are recording stubs (the pid-1 calls run only
@@ -7791,6 +7862,12 @@ _s19_held() {
   } > "$_S19/$1-held.sh"
   chmod +x "$_S19/$1-held.sh"
 }
+# _s19_after_poll <case> — sh for a held builder's lines: wait until the lead's
+# lease_wait has polled once (<case>.polled, which the case's shim around
+# _lease_sweep_one writes; 30 s at most)
+_s19_after_poll() {
+  printf 'N=0; while [ ! -f "%s" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done; ' "$_S19/$1.polled"
+}
 _s19_reap() { # _s19_reap <case> — release the case's builders, kill any group still answering as recorded
   : > "$_S19/$1.release"
   _s19_lead "$1" '
@@ -7821,33 +7898,46 @@ chmod +x "$_S19/wait-quick.sh"
 _s19_held wait
 O=$(_s19_lead wait '
 export TRIFORGE_TEST_BUILDER="$_S19/wait-quick.sh"
+B=$(date +%s)
 lease_create q builder >/dev/null 2>&1; lease_dispatch q "probe task" 60 >/dev/null 2>&1
+A=$(date +%s)
 ROW=$(_ledger_get_row q pid pgid pid_started lead_pid lease_root)
 { IFS= read -r P || true; IFS= read -r G || true; IFS= read -r S || true; IFS= read -r L || true; IFS= read -r LR || true; } <<S19_ROW_EOF
 ${ROW}
 S19_ROW_EOF
 echo "row:pidpgid=$([ -n "$P" ] && [ "$P" = "$G" ] && echo same || echo diff):start=$([ -n "$S" ] && echo yes || echo no):lead=$([ "${L:-0}" -gt 0 ] 2>/dev/null && echo yes || echo no):root=$([ "$LR" = "$_LEASE_ROOT" ] && echo yes || echo no)"
-echo "deadline=+$(( $(_ledger_get q heartbeat_deadline) - $(_ledger_get q updated) ))"
+# 60 s + the 30 s slack from the moment lease_dispatch read the clock, which lies between B and A however long the calls took
+D=$(_ledger_get q heartbeat_deadline)
+if [ "$((D - B))" -ge 90 ] && [ "$((D - A))" -le 90 ]; then echo "deadline=+90"; else echo "deadline=off:$((D - B)):$((D - A))"; fi
 T=$(_s19_t0); R=0; OUT=$(lease_wait --budget 30 q 2>/dev/null) || R=$?
 echo "finish:rc=$R:secs=$(_s19_dt "$T"):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
 export TRIFORGE_TEST_BUILDER="$_S19/wait-held.sh"
 lease_create g builder >/dev/null 2>&1; lease_dispatch g "probe task" 60 >/dev/null 2>&1
+# each poll of a wait, counted (one lease watched: one _lease_sweep_one call a poll)
+eval "_s19_sweep_poll() $(declare -f _lease_sweep_one | sed 1d)"
+_lease_sweep_one() {
+  if [ "${4:-}" = poll ]; then echo poll >> "$HOME/wait.polls"; fi
+  _s19_sweep_poll "$@"
+}
+_s19_polls() { grep -c . "$HOME/wait.polls" 2>/dev/null || true; rm -f "$HOME/wait.polls"; }
+rm -f "$HOME/wait.polls"
 T=$(_s19_t0); R=0; OUT=$(lease_wait --budget 3 g 2>/dev/null) || R=$?
-echo "expiry:rc=$R:secs=$(_s19_dt "$T"):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+echo "expiry:rc=$R:secs=$(_s19_dt "$T"):polls=$(_s19_polls):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
 T=$(_s19_t0); R=0; OUT=$(TRIFORGE_LEAD_WAIT_BUDGET_S=4 lease_wait --budget 60 g 2>/dev/null) || R=$?
-echo "cap:rc=$R:secs=$(_s19_dt "$T"):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+echo "cap:rc=$R:secs=$(_s19_dt "$T"):polls=$(_s19_polls):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+eval "_lease_sweep_one() $(declare -f _s19_sweep_poll | sed 1d)"
 R=0; (export TRIFORGE_LEASE_WORKER=builder; lease_wait g) >/dev/null 2>&1 || R=$?; echo "marker:rc=$R"
 R=0; lease_wait --budget x g >/dev/null 2>&1 || R=$?; echo "usage:rc=$R"
 : > "$_S19/wait.release"
 R=0; OUT=$(lease_wait --budget 30 g 2>/dev/null) || R=$?
 echo "released:rc=$R:out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
 ')
-_S19_FAIL="${_S19_FAIL}$(_self_expect wait "$O" '^row:pidpgid=same:start=yes:lead=yes:root=yes$' '^deadline=\+(88|89|90|91)$' '^finish:rc=0:.*:out=\[q review\]$' \
-  '^expiry:rc=75:.*:out=\[still building: g\]$' '^cap:rc=75:.*:out=\[still building: g\]$' '^marker:rc=45$' '^usage:rc=64$' \
+_S19_FAIL="${_S19_FAIL}$(_self_expect wait "$O" '^row:pidpgid=same:start=yes:lead=yes:root=yes$' '^deadline=\+90$' '^finish:rc=0:.*:out=\[q review\]$' \
+  '^expiry:rc=75:.*:polls=[123]:out=\[still building: g\]$' '^cap:rc=75:.*:polls=[123]:out=\[still building: g\]$' '^marker:rc=45$' '^usage:rc=64$' \
   '^released:rc=0:out=\[g review\]$')"
-_s19_secs wait "$O" finish 0 10
-_s19_secs wait "$O" expiry 1.5 3.0
-_s19_secs wait "$O" cap 0 3.9
+_s19_secs wait "$O" finish 0 20
+_s19_secs wait "$O" expiry 1.5 10
+_s19_secs wait "$O" cap 0 10
 _s19_reap wait
 
 # ledger
@@ -7973,11 +8063,17 @@ _s19_reap legacy
 _s19_repo gitcfg
 printf '#!/bin/sh\ntouch "%s/gitcfg.MARKER"\nexit 0\n' "$_S19" > "$_S19/gitcfg-mark.sh"
 chmod +x "$_S19/gitcfg-mark.sh"
-_s19_held gitcfg "sleep 2; git config core.fsmonitor \"$_S19/gitcfg-mark.sh\""
+_s19_held gitcfg "$(_s19_after_poll gitcfg)git config core.fsmonitor \"$_S19/gitcfg-mark.sh\""
 O=$(_s19_lead gitcfg '
 export TRIFORGE_TEST_BUILDER="$_S19/gitcfg-held.sh"
 lease_create c builder >/dev/null 2>&1; lease_dispatch c "probe task" 60 >/dev/null 2>&1
-R=0; OUT=$(lease_wait --budget 5 c 2>"$HOME/gitcfg.err") || R=$?
+eval "_s19_sweep_poll() $(declare -f _lease_sweep_one | sed 1d)"
+_lease_sweep_one() {
+  if [ "${4:-}" = poll ]; then : > "$_S19/gitcfg.polled"; fi
+  _s19_sweep_poll "$@"
+}
+R=0; OUT=$(lease_wait --budget 20 c 2>"$HOME/gitcfg.err") || R=$?
+eval "_lease_sweep_one() $(declare -f _s19_sweep_poll | sed 1d)"
 echo "gitcfg:rc=$R:state=$(_ledger_get c state):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
 echo "named=$(grep -c "\.git/config changed" "$HOME/gitcfg.err" || true):left=$(grep -c fsmonitor .git/config || true)"
 ')
@@ -8026,21 +8122,33 @@ lease_create v builder >/dev/null 2>&1; lease_dispatch v "probe task" 60 >/dev/n
 _ledger_update u output_file= >/dev/null 2>&1
 R=0; OUT=$(lease_wait --budget 20 u v 2>/dev/null) || R=$?
 echo "mixed:rc=$R:out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+# each poll of the wait on u alone, counted (one lease watched: one _lease_sweep_one call a poll)
+eval "_s19_sweep_poll() $(declare -f _lease_sweep_one | sed 1d)"
+_lease_sweep_one() {
+  if [ "${4:-}" = poll ]; then echo poll >> "$HOME/unver.polls"; fi
+  _s19_sweep_poll "$@"
+}
 T=$(_s19_t0); R=0; OUT=$(lease_wait --budget 6 u 2>"$HOME/unver.err") || R=$?
-echo "alone:rc=$R:secs=$(_s19_dt "$T"):out=[$(printf "%s" "$OUT" | tr "\n" "|")]:named=$(grep -c "^lease_wait: u: building, but .*can.t be verified" "$HOME/unver.err" || true):lines=$(grep -c . "$HOME/unver.err" || true)"
+echo "alone:rc=$R:secs=$(_s19_dt "$T"):polls=$(grep -c . "$HOME/unver.polls" 2>/dev/null || true):out=[$(printf "%s" "$OUT" | tr "\n" "|")]:named=$(grep -c "^lease_wait: u: building, but .*can.t be verified" "$HOME/unver.err" || true):lines=$(grep -c . "$HOME/unver.err" || true)"
+eval "_lease_sweep_one() $(declare -f _s19_sweep_poll | sed 1d)"
 R=0; lease_heartbeat_check u >/dev/null 2>&1 || R=$?; echo "heartbeat:rc=$R"
 ')
-_S19_FAIL="${_S19_FAIL}$(_self_expect unver "$O" '^mixed:rc=0:out=\[v review\|still building: u\]$' '^alone:rc=80:.*:out=\[still building: u\]:named=1:lines=1$' '^heartbeat:rc=80$')"
-_s19_secs unver "$O" alone 0 3
+_S19_FAIL="${_S19_FAIL}$(_self_expect unver "$O" '^mixed:rc=0:out=\[v review\|still building: u\]$' '^alone:rc=80:.*:polls=1:out=\[still building: u\]:named=1:lines=1$' '^heartbeat:rc=80$')"
 _s19_reap unver
 
 # tamper: a builder corrupts the ledger mid-wait
 _s19_repo tamper
-_s19_held tamper "sleep 2; printf '[lease.k]\\nstate = \\n' > \"$_S19/tamper/ops/leases.toml\""
+_s19_held tamper "$(_s19_after_poll tamper)printf '[lease.k]\\nstate = \\n' > \"$_S19/tamper/ops/leases.toml\""
 O=$(_s19_lead tamper '
 export TRIFORGE_TEST_BUILDER="$_S19/tamper-held.sh"
 lease_create k builder >/dev/null 2>&1; lease_dispatch k "probe task" 60 >/dev/null 2>&1
-R=0; OUT=$(lease_wait --budget 6 k 2>"$HOME/tamper.err") || R=$?
+eval "_s19_sweep_poll() $(declare -f _lease_sweep_one | sed 1d)"
+_lease_sweep_one() {
+  if [ "${4:-}" = poll ]; then : > "$_S19/tamper.polled"; fi
+  _s19_sweep_poll "$@"
+}
+R=0; OUT=$(lease_wait --budget 20 k 2>"$HOME/tamper.err") || R=$?
+eval "_lease_sweep_one() $(declare -f _s19_sweep_poll | sed 1d)"
 echo "tamper:rc=$R:state=$(_ledger_get k state):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
 echo "parses=$(python3 -c "import tomllib; tomllib.load(open(\"ops/leases.toml\", \"rb\")); print(\"yes\")" 2>/dev/null || echo no):named=$(grep -c "leases.toml changed outside the lead writes" "$HOME/tamper.err" || true)"
 ')
@@ -8170,7 +8278,7 @@ ROW=$(_ledger_get_row t pid pgid output_file)
 ${ROW}
 S19_LANETIMEOUT_EOF
 echo "$G" > "$_S19/lanetimeout.pgid"
-N=0; while [ ! -f "${OT}.rc" ] && [ "$N" -lt 300 ]; do sleep 0.05; N=$((N + 1)); done
+N=0; while [ ! -f "${OT}.rc" ] && [ "$N" -lt 600 ]; do sleep 0.05; N=$((N + 1)); done
 LEFT=$(_s19_group "$G" "$P"); C=$(cat "$_S19/lanetimeout.child" 2>/dev/null || true)
 echo "record:rc=$(cat "${OT}.rc" 2>/dev/null || true):class=$(cat "${OT}.class" 2>/dev/null || true):child=$(if [ -n "$C" ]; then _s19_alive "$C"; else echo unrecorded; fi):left=$LEFT:secs=$(_s19_dt "$T")"
 N=0; while [ "$(_s19_alive "$P")" = alive ] && [ "$N" -lt 40 ]; do sleep 0.05; N=$((N + 1)); done
@@ -8179,7 +8287,7 @@ R=0; OUT=$(lease_wait --budget 10 t 2>/dev/null) || R=$?
 echo "collect:rc=$R:state=$(_ledger_get t state):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
 ')
 _S19_FAIL="${_S19_FAIL}$(_self_expect lanetimeout "$O" '^record:rc=124:class=timeout:child=gone:left=0:secs=' '^after:group=0$' '^collect:rc=0:state=requeued:out=\[t requeued\]$')"
-_s19_secs lanetimeout "$O" record 1 8
+_s19_secs lanetimeout "$O" record 1 20
 _s19_unreaped lanetimeout
 _s19_reap lanetimeout
 
@@ -8246,10 +8354,20 @@ _lease_sweep_one() {
   if [ "${4:-}" = poll ]; then echo "${_LS_ACT_STOP_MS:-unset}" >> "$HOME/budget.limits"; fi
   _s19_sweep_one "$@"
 }
+# the limit counts from the call: 2 s after T at least, and from no later
+# than the entry integrity check of the wait (noted as it starts), however
+# long the steps before it take on a loaded host
+eval "_s19_check_first() $(declare -f _lead_integrity_check | sed 1d)"
+_lead_integrity_check() {
+  if [ ! -s "$HOME/budget.check" ]; then python3 -c "import time; print(int(time.time() * 1000))" > "$HOME/budget.check"; fi
+  _s19_check_first "$@"
+}
 T=$(python3 -c "import time; print(int(time.time() * 1000))")
 R=0; lease_wait --budget 2 b >/dev/null 2>&1 || R=$?
+eval "_lead_integrity_check() $(declare -f _s19_check_first | sed 1d)"
 L=$(sed -n 1p "$HOME/budget.limits" 2>/dev/null || true)
-echo "limit:rc=$R:secs=$(python3 -c "import sys; print(\"%.3f\" % ((int(sys.argv[1]) - int(sys.argv[2])) / 1000.0))" "$L" "$T" 2>/dev/null || echo none)"
+C=$(cat "$HOME/budget.check" 2>/dev/null || true)
+echo "limit:rc=$R:secs=$(python3 -c "import sys; print(\"%.3f\" % ((int(sys.argv[1]) - int(sys.argv[2])) / 1000.0))" "$L" "$T" 2>/dev/null || echo none):from=$(python3 -c "import sys; print(\"call\" if int(sys.argv[1]) - 2000 <= int(sys.argv[2]) else \"after-check\")" "$L" "$C" 2>/dev/null || echo none)"
 _ledger_update b heartbeat_deadline=1 >/dev/null 2>&1
 eval "_s19_integrity_check() $(declare -f _lead_integrity_check | sed 1d)"
 _lead_integrity_check() { # the check passes, and the action limit runs out while it does
@@ -8264,9 +8382,9 @@ _lease_sweep_one lease_wait b 0 poll "$ROW" < /dev/null
 _LS_ACT_STOP_MS=0
 echo "midcheck:result=$_LS_RESULT:state=$(_ledger_get b state):builder=$(_lease_proc_state "$(_ledger_get b pid)" "$(_ledger_get b pid_started)" "$(_ledger_get b pgid)")"
 ')
-_S19_FAIL="${_S19_FAIL}$(_self_expect budget "$O" '^past:result=deferred:state=building$' '^next:rc=0:out=\[d review\]$' '^limit:rc=75:secs=' \
+_S19_FAIL="${_S19_FAIL}$(_self_expect budget "$O" '^past:result=deferred:state=building$' '^next:rc=0:out=\[d review\]$' '^limit:rc=75:secs=[0-9.]*:from=call$' \
   '^midcheck:result=deferred:state=building:builder=alive$')"
-_s19_secs budget "$O" limit 2.0 2.9
+_s19_secs budget "$O" limit 2.0 60
 _s19_reap budget
 
 # guards: never the caller's own process group, never pid or pgid 1. kill and
@@ -8407,7 +8525,7 @@ fi
 
 _S19_CAP="detached builders + lease_wait + lease_stop + lead-exit reconcile (under a claude and a codex lead): pid == pgid with a start time read in one locale and zone, lease_wait returns on a finish / at the budget (rc 75) within wait_budget_s / degraded (rc 80), ledger errors and ledger tampering, a killed lead's builders survive and are collected with requeue_count 0 and reason=lead-exit, a reused pid is never taken for the builder or signalled, nor are the caller's own process group and pid / pgid 1, a .git/config change during the wait or the heartbeat escalates, nothing of a builder runs once its exit record appears (a backgrounded child, a lane timeout: rc 124, class timeout) (KTD10, R36/R38)"
 if [ -z "$_S19_FAIL" ]; then
-  row "SELF-19" "claude" "$_S19_CAP" "PASS" "row pid==pgid + start time + lead + lease root recorded; finish -> rc 0 'q review'; held -> --budget 3 rc 75 'still building: g' in 1.5-3 s, TRIFORGE_LEAD_WAIT_BUDGET_S=4 caps --budget 60 below 4 s; marker 45, usage 64; released -> rc 0 'g review'; no / unparseable ledger -> rc 1 LEDGER ERROR; kill: lead group SIGKILLed mid-wait, both builders alive as recorded, heartbeat a adopts (reason=lead-exit), released both exit 0, heartbeat collects both: review, requeue_count 0, reason=lead-exit, --budget 2000 capped at 585 s (Claude Code 600 s); killcodex: the same under [lead] = codex, capped at 885 s (Codex CLI 900 s); reuse: rows given a stranger's pid + pgid (start time differs, deadline past) -> heartbeat and lease_wait orphan + requeue, stranger never signalled; legacy: a finished row given a stranger's pid with no start time or pgid -> lease_collect 0, review, and a 3.3.x-shaped building row (no pgid, no start time) past its deadline -> heartbeat expires it unsignalled, requeued; the stranger never signalled; gitcfg: core.fsmonitor planted mid-wait -> rc 44 naming .git/config, restored, escalated, never ran; deadline = timeout + 30 s slack; locale: dispatched under TZ=Asia/Tokyo LC_ALL=${_S19_LOC} -> pinned UTC start, alive under TZ=UTC and America/New_York, lease_wait keeps it building (75), an old local-form row alive in its own zone; unver: rc 80 within 3 s naming u once (mixed with a finisher: rc 0), heartbeat 80; ledgertamper: ledger corrupted mid-wait -> 44, restored, escalated, stdout names it; ledgertamper-entry: corrupted before the call -> the same; stop: lease_stop kills the builder group (child too), state untouched, 45/64/1, a stranger with the pid never signalled, no start time -> 1; relaunch: launch record written, removed once recorded, a stale one stopped by the next lease_dispatch; expire: held builder past its deadline -> group killed, requeued, worktree pruned; endrun: a builder that backgrounds a child and exits 0 -> <out>.rc 0 / class none with the child gone and nothing but the exiting leader in its group, group empty after, review; lanetimeout: a 1 s lease timeout on a builder waiting on a child -> <out>.rc 124 / class timeout in 1-8 s, child gone, group empty, requeued; leadexit: --lead-exit with the lead alive adopts the live builder and collects the finished one, reason=lead-exit, requeue_count 0; multi: two named -> 'q review|still building: g', none named watches all; budget: past the action limit the collect is deferred, the next call takes it, and lease_wait --budget 2 sets the limit 2.0-2.9 s after the call, and a limit spent during the per-action integrity check defers the expiry; guards (stubbed kill): this shell's own pid + pgid + start time -> nothing signalled, refused; pid 1 / pgid 1 -> refused, nothing signalled, lease_stop's stop rc 1; no start time -> refused; the KILL retry re-validated (none after a reuse, none to an emptied group); dispatchfail: the recording ledger write refused -> lease_dispatch 1, leased, the launched builder gone; hbcfg: .git/config planted during the heartbeat's sweep -> 44 on return, restored, escalated, never ran; rootnote: escaped, no export line, not printed when the check fails; ${_S19_ZSH}" "static"
+  row "SELF-19" "claude" "$_S19_CAP" "PASS" "row pid==pgid + start time + lead + lease root recorded; finish -> rc 0 'q review' within 20 s; held -> --budget 3 rc 75 'still building: g' in 1.5-10 s after 3 polls at most, TRIFORGE_LEAD_WAIT_BUDGET_S=4 caps --budget 60 the same way; marker 45, usage 64; released -> rc 0 'g review'; no / unparseable ledger -> rc 1 LEDGER ERROR; kill: lead group SIGKILLed mid-wait, both builders alive as recorded, heartbeat a adopts (reason=lead-exit), released both exit 0, heartbeat collects both: review, requeue_count 0, reason=lead-exit, --budget 2000 capped at 585 s (Claude Code 600 s); killcodex: the same under [lead] = codex, capped at 885 s (Codex CLI 900 s); reuse: rows given a stranger's pid + pgid (start time differs, deadline past) -> heartbeat and lease_wait orphan + requeue, stranger never signalled; legacy: a finished row given a stranger's pid with no start time or pgid -> lease_collect 0, review, and a 3.3.x-shaped building row (no pgid, no start time) past its deadline -> heartbeat expires it unsignalled, requeued; the stranger never signalled; gitcfg: core.fsmonitor planted mid-wait -> rc 44 naming .git/config, restored, escalated, never ran; deadline = timeout + 30 s slack; locale: dispatched under TZ=Asia/Tokyo LC_ALL=${_S19_LOC} -> pinned UTC start, alive under TZ=UTC and America/New_York, lease_wait keeps it building (75), an old local-form row alive in its own zone; unver: rc 80 after one poll naming u once (mixed with a finisher: rc 0), heartbeat 80; ledgertamper: ledger corrupted mid-wait -> 44, restored, escalated, stdout names it; ledgertamper-entry: corrupted before the call -> the same; stop: lease_stop kills the builder group (child too), state untouched, 45/64/1, a stranger with the pid never signalled, no start time -> 1; relaunch: launch record written, removed once recorded, a stale one stopped by the next lease_dispatch; expire: held builder past its deadline -> group killed, requeued, worktree pruned; endrun: a builder that backgrounds a child and exits 0 -> <out>.rc 0 / class none with the child gone and nothing but the exiting leader in its group, group empty after, review; lanetimeout: a 1 s lease timeout on a builder waiting on a child -> <out>.rc 124 / class timeout in 1-20 s, child gone, group empty, requeued; leadexit: --lead-exit with the lead alive adopts the live builder and collects the finished one, reason=lead-exit, requeue_count 0; multi: two named -> 'q review|still building: g', none named watches all; budget: past the action limit the collect is deferred, the next call takes it, and lease_wait --budget 2 sets the limit 2 s after the call's start (2.0 s or more after a time read before it, no later than 2 s after its entry check began), and a limit spent during the per-action integrity check defers the expiry; guards (stubbed kill): this shell's own pid + pgid + start time -> nothing signalled, refused; pid 1 / pgid 1 -> refused, nothing signalled, lease_stop's stop rc 1; no start time -> refused; the KILL retry re-validated (none after a reuse, none to an emptied group); dispatchfail: the recording ledger write refused -> lease_dispatch 1, leased, the launched builder gone; hbcfg: .git/config planted during the heartbeat's sweep -> 44 on return, restored, escalated, never ran; rootnote: escaped, no export line, not printed when the check fails; ${_S19_ZSH}" "static"
 else
   row "SELF-19" "claude" "$_S19_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S19_FAIL"):$(printf '%s' "$_S19_FAIL" | cut -c1-600)" "static"
 fi
@@ -10193,8 +10311,9 @@ O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25
   if [ -n "$SP" ]; then kill -TERM "$SP" 2>/dev/null || true; fi
   # the same with an inspect that ignores TERM, and so do the sleeps it
   # starts: gone by the time the subshell exits, at most a second later. The
-  # subshell gets 8 s (the stop's 5 s grace and the KILL, with slack) before
-  # it counts as hung; a stub left alive is killed here, never by the gate's end
+  # subshell gets 20 s (the stop's 5 s grace and the KILL, with room for a
+  # loaded host; the inspect alone never ends) before it counts as hung; a
+  # stub left alive is killed here, never by the gate's end
   rm -f "$_S25/inspect.pid"; printf 'noterm\n' > "$_S25/inspect-mode"
   _grok_run_in "$S" "$TO" 60 "probe trap S25 noterm" "$_S25/trap.ready" > /dev/null 2>&1 &
   J=$!
@@ -10204,7 +10323,7 @@ O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25
   B=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | grep -c . || true)
   for P in $(pgrep -P "$J" 2>/dev/null || true); do kill -TERM "$P" 2>/dev/null || true; done
   N=0
-  while [ "$N" -lt 80 ] && kill -0 "$J" 2>/dev/null; do sleep 0.1; N=$((N + 1)); done
+  while [ "$N" -lt 200 ] && kill -0 "$J" 2>/dev/null; do sleep 0.1; N=$((N + 1)); done
   R=hung
   if kill -0 "$J" 2>/dev/null; then _kill_tree "$J" KILL; else R=0; wait "$J" 2>/dev/null || R=$?; fi
   N=0
@@ -11445,8 +11564,10 @@ rm -rf "$_S22"
 # The at-review dispatch, wait, synthesis and synthesis-wait blocks and the
 # at-deep-research swarm, wait, synthesis and synthesis-wait blocks are taken
 # from this checkout's skills as written and run under /bin/zsh and /bin/bash
-# against a stub library: persona_spawn starts a stub persona detached (2 s
-# when named in S23_SLOW, else at once) and persona_wait returns 75 while one
+# against a stub library: persona_spawn starts a stub persona detached (one
+# named in S23_SLOW runs until a persona_wait has found it running, so a wait
+# block sees it running however slowly the host runs the blocks; any other
+# ends at once) and persona_wait returns 75 while one
 # it names has no exit code, and 64, as the real one does, for a run dir with
 # no runs or an unknown name; dispatch_role, invoke_antigravity and _scrub are
 # stubs too, and resolve_role, cli_field and _lease_parse_status answer the
@@ -11488,9 +11609,11 @@ persona_spawn() {
   [ -f "$IN" ] || { echo "stub persona_spawn: input $IN is not a file" >&2; return 64; }
   if _s23_in "$P" "${S23_SPAWNFAIL:-}"; then echo "stub persona_spawn: could not start $P" >&2; return 1; fi
   : > "$D/$N.pid"
-  if _s23_in "$P" "${S23_SLOW:-}"; then T=2; fi
+  if _s23_in "$P" "${S23_SLOW:-}"; then T=1; fi
   ( trap '' HUP
-    sleep "$T"
+    # a slow persona runs until a persona_wait has found it running ($N.waited), 60 s at most
+    I=0
+    while [ "$T" = 1 ] && [ ! -f "$D/$N.waited" ] && [ "$I" -lt 600 ]; do sleep 0.1; I=$((I + 1)); done
     if _s23_in "$P" "${S23_FAIL:-}"; then echo "PARTIAL report from $P" > "$OUT"; echo 3 > "$D/$N.rc"; exit 0; fi
     if _s23_in "$P" "${S23_EMPTY:-}"; then : > "$OUT"; echo 0 > "$D/$N.rc"; exit 0; fi
     printf 'REPORT from %s\n' "$P" > "$OUT"; echo 0 > "$D/$N.rc" ) </dev/null >/dev/null 2>&1 &
@@ -11504,10 +11627,10 @@ persona_wait() { # as the real one: 64 for a run dir with no runs or an unknown 
   if [ $# -gt 0 ]; then
     for N in "$@"; do
       [ -f "$D/$N.pid" ] || { echo "stub persona_wait: no run named $N in $D" >&2; return 64; }
-      [ -f "$D/$N.rc" ] || MISSING="$MISSING $N"
+      [ -f "$D/$N.rc" ] || { MISSING="$MISSING $N"; : > "$D/$N.waited"; }
     done
   else
-    for F in $(find "$D" -maxdepth 1 -name '*.pid'); do RUNS=1; N=$(basename "$F" .pid); [ -f "$D/$N.rc" ] || MISSING="$MISSING $N"; done
+    for F in $(find "$D" -maxdepth 1 -name '*.pid'); do RUNS=1; N=$(basename "$F" .pid); [ -f "$D/$N.rc" ] || { MISSING="$MISSING $N"; : > "$D/$N.waited"; }; done
     [ -n "$RUNS" ] || { echo "stub persona_wait: no runs in $D" >&2; return 64; }
   fi
   if [ -n "$MISSING" ]; then echo "still running:$MISSING"; return 75; fi
@@ -12943,21 +13066,23 @@ _S16_FAIL="${_S16_FAIL}$(_self_expect b-slow "$_O" "^CLAUDE\.md${T}project${T}im
 # _instr_py gives up on python3. A python3 first on PATH that ignores SIGTERM
 # and never answers, with a 1 s bound: under the timeout binary, and under
 # the watchdog (a PATH with the stub, sleep and dirname only, no timeout or
-# gtimeout), rc 137 and nothing else printed within 1 s + the 2 s SIGKILL
-# grace + slack, the stub gone. Under the harness timeout (-k 5), so a
-# library without the bound fails here in 15 s
+# gtimeout), rc 137 and nothing else printed within 15 s (1 s + the 2 s
+# SIGKILL grace, and room for a loaded host; the stub alone runs 30 s), the
+# stub gone. Under the harness timeout (20 s, -k 5), so a library without
+# the bound fails here in 20 s
 mkdir -p "$_S16B/pystub/wd"
-printf '#!/bin/sh\n# probe stub (SELF-16 B bound): a python3 that ignores SIGTERM and never answers; writes its pid to $S16B_PYPID\necho $$ > "$S16B_PYPID"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S16B/pystub/python3"
+printf '#!/bin/sh\n# probe stub (SELF-16 B bound): a python3 that ignores SIGTERM and never answers; writes its pid to $S16B_PYPID (none set: exits, the warm-up run)\n[ -n "${S16B_PYPID:-}" ] || exit 0\necho $$ > "$S16B_PYPID"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S16B/pystub/python3"
 chmod +x "$_S16B/pystub/python3"
+_self_warm env -u S16B_PYPID "$_S16B/pystub/python3"
 ln -s "$_S16B/pystub/python3" "$_S16B/pystub/wd/python3"
 for _S16B_D in sleep dirname; do ln -s "$(command -v "$_S16B_D")" "$_S16B/pystub/wd/$_S16B_D"; done
 _s16b_bound() { # _s16b_bound <label> <PATH> — instruction_files_detect with a 1 s bound on the stub; mismatches printed
   local O T0 T S N=0
   T0=$(date +%s)
-  O=$(cd "$_S16B_P" && HOME="$_S16B/home" PATH="$2" S16B_PYPID="$_S16B/pystub/pid-$1" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 15} /bin/bash -c 'source "$1/scripts/lib/instructions.sh" >/dev/null 2>&1; _INSTR_SECS=1 instruction_files_detect; echo "rc=$?"' _ "$REPO_ROOT" 2>&1)
+  O=$(cd "$_S16B_P" && HOME="$_S16B/home" PATH="$2" S16B_PYPID="$_S16B/pystub/pid-$1" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/bash -c 'source "$1/scripts/lib/instructions.sh" >/dev/null 2>&1; _INSTR_SECS=1 instruction_files_detect; echo "rc=$?"' _ "$REPO_ROOT" 2>&1)
   T=$(( $(date +%s) - T0 ))
   [ "$O" = "rc=137" ] || printf ' b-bound-%s(%s)' "$1" "$(printf '%s' "$O" | tr '\n' ' ' | cut -c1-80)"
-  [ "$T" -lt 6 ] || printf ' b-bound-%s(slow:%ss)' "$1" "$T"
+  [ "$T" -lt 15 ] || printf ' b-bound-%s(slow:%ss)' "$1" "$T"
   # gone: a stub killed with its timeout process is reaped by init, so give it a second
   S=$(cat "$_S16B/pystub/pid-$1" 2>/dev/null || true)
   while [ -n "$S" ] && kill -0 "$S" 2>/dev/null && [ "$N" -lt 10 ]; do sleep 0.1; N=$((N + 1)); done
@@ -13729,7 +13854,9 @@ mkdir -p "$_S27"
 #            marker, both leases reach review
 #   persona  an exec persona at that lease's snapshot (the planted modules in
 #            its worktree): the run supervisor imports none, rc 0
-#   fifo     a builder swaps the ledger for a FIFO while lease_wait polls:
+#   fifo     a builder swaps the ledger for a FIFO once lease_wait has polled
+#            (a shim marks the first poll, so the swap lands mid-wait, never
+#            before the dispatch wrote its own row, however slow the host):
 #            rc 44 within the bound, not a block; the root notice, the state
 #            read and the ledger check on a FIFO each return
 #   hook     session start and pre-compact in a project holding planted
@@ -14104,14 +14231,15 @@ S27_CLAUDE_EOF
 printf '#!/bin/sh\necho "0.0.0-probe-stub"\n' > "$_S27/bin/kimi"
 # The fake builder: plants the modules in its worktree, then reports — as a
 # kimi stream for "s27-stream", after swapping the lead's ledger for a FIFO
-# for "s27-fifo" (lease_wait polls meanwhile)
+# for "s27-fifo" once the lead's lease_wait has polled (tmp/s27-fifo.polled, 30 s at most)
 cat > "$_S27/fb.sh" <<S27_FB_EOF
 #!/bin/sh
 # probe builder (SELF-27)
 cp "$_S27/plant-wt/"*.py .
 case "\$1" in
   *s27-stream*) printf '%s\n' '{"role":"assistant","id":"m1","content":"Done.\\n\\nStatus: DONE\\nFiles changed: json.py\\nTests: none\\nConcerns: None\\nDiscoveries for later tasks: None\\n"}' ;;
-  *s27-fifo*) sleep 2; L="$_S27/ff/ops/leases.toml"; mv "\$L" "\$L.s27"; mkfifo "\$L"; sleep 3; echo "Status: DONE" ;;
+  *s27-fifo*) N=0; while [ ! -f "$_S27/tmp/s27-fifo.polled" ] && [ "\$N" -lt 300 ]; do sleep 0.1; N=\$((N + 1)); done
+    L="$_S27/ff/ops/leases.toml"; mv "\$L" "\$L.s27"; mkfifo "\$L"; sleep 3; echo "Status: DONE" ;;
   *) echo "planted"; echo "Status: DONE" ;;
 esac
 S27_FB_EOF
@@ -14186,7 +14314,9 @@ _s27_fifo_off() { # put the saved ledger back where a FIFO stands (a blocked rea
 }
 O=$(_s27_bounded 20 'lease_create f1 builder >/dev/null 2>&1 && lease_dispatch f1 "s27-fifo probe" 60 >/dev/null 2>&1; echo "dispatch:rc=$?"')
 O="$O
-$(_s27_bounded 40 'S=$(date +%s); R=0; lease_wait f1 --budget 25 >/dev/null 2>"$TMPDIR/s27-wait.err" || R=$?; echo "wait:rc=$R:secs=$(( $(date +%s) - S )):named=$(grep -c "ops/leases.toml" "$TMPDIR/s27-wait.err" || true)"')"
+$(_s27_bounded 40 'eval "_s27_sweep_poll() $(declare -f _lease_sweep_one | sed 1d)"
+_lease_sweep_one() { if [ "${4:-}" = poll ]; then : > "$TMPDIR/s27-fifo.polled"; fi; _s27_sweep_poll "$@"; }
+S=$(date +%s); R=0; lease_wait f1 --budget 25 >/dev/null 2>"$TMPDIR/s27-wait.err" || R=$?; echo "wait:rc=$R:secs=$(( $(date +%s) - S )):named=$(grep -c "ops/leases.toml" "$TMPDIR/s27-wait.err" || true)"')"
 _s27_fifo_off
 _s27_lead "$_S27/ff" '_self_wait_rc f1' >/dev/null
 L="$_S27/ff/ops/leases.toml"
