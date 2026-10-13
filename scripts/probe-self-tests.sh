@@ -12968,9 +12968,10 @@ _s16b_cap() { # _s16b_cap <case> <project> <ERE of the refusal after "<CLAUDE.md
   local C=$1 P="$_S16B_CP/$2" O S
   S=$(_s16b_sum "$P/CLAUDE.md")
   O=$(_s16b "$P" instruction_files_detect)
-  _self_expect "$C-detect" "$O" "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/w/cap/$2/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$'
+  _self_expect "$C-detect" "$O" "^CLAUDE\.md${T}project${T}no-import,user-owned,past-bound${T}[^${T}]*/w/cap/$2/CLAUDE\.md${T}-\$" '^rc=0$'
   O=$(_s16b "$P" instruction_pointer_visibility claude)
-  _self_expect "$C-vis" "$O" "^claude${T}hidden${T}shadowed by [^ ]*/w/cap/$2/CLAUDE\.md: " '^rc=1$'
+  _self_expect "$C-vis" "$O" "^claude${T}hidden${T}shadowed by [^ ]*/w/cap/$2/CLAUDE\.md: .*[^ ]*/w/cap/$2/CLAUDE\.md .*Triforge reads no import from such a file" '^rc=1$'
+  _s16b_not "$C-vis" "$O" '\(instruction_add_import '
   O=$(_s16b "$P" instruction_add_import CLAUDE.md --yes)
   _self_expect "$C-yes" "$O" "^instruction_add_import: REFUSED — [^ ]*/w/cap/$2/CLAUDE\\.md $3" '^rc=2$'
   _s16b_not "$C-yes" "$O" '^(needs-ask|changed|unchanged):'
@@ -13046,16 +13047,63 @@ dd if=/dev/zero of="$_S16B_CP/huge/CLAUDE.md" bs=1 count=0 seek=268435456 2>/dev
 printf '# own\n@AGENTS.md\n' | dd of="$_S16B_CP/huge/CLAUDE.md" conv=notrunc 2>/dev/null
 _S16B_SUM=$(_s16b_sum "$_S16B_CP/huge/CLAUDE.md")
 _O=$(_s16b_rss "$_S16B_CP/huge" instruction_files_detect)
-_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-detect "$_O" "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/w/cap/huge/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$')$(_s16b_rssok b-cap-huge-detect "$_O")"
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-detect "$_O" "^CLAUDE\.md${T}project${T}no-import,user-owned,past-bound${T}[^${T}]*/w/cap/huge/CLAUDE\.md${T}-\$" '^rc=0$')$(_s16b_rssok b-cap-huge-detect "$_O")"
 _S16B_RSSV="detect $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
 _O=$(_s16b_rss "$_S16B_CP/huge" instruction_pointer_visibility claude)
-_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-vis "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/w/cap/huge/CLAUDE\.md: " '^rc=1$')$(_s16b_rssok b-cap-huge-vis "$_O")"
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-vis "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/w/cap/huge/CLAUDE\.md: .*[^ ]*/w/cap/huge/CLAUDE\.md is more than the 4194304 bytes" '^rc=1$')$(_s16b_not b-cap-huge-vis "$_O" '\(instruction_add_import ')$(_s16b_rssok b-cap-huge-vis "$_O")"
 _S16B_RSSV="${_S16B_RSSV}, visibility $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
 _O=$(_s16b_rss "$_S16B_CP/huge" instruction_add_import CLAUDE.md --yes)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-yes "$_O" "^instruction_add_import: REFUSED — [^ ]*/w/cap/huge/CLAUDE\\.md is more than${_S16B_CAPS}" '^rc=2$')$(_s16b_rssok b-cap-huge-yes "$_O")"
 _S16B_RSSV="${_S16B_RSSV}, import $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
 _S16_FAIL="${_S16_FAIL}$(_s16b_same b-cap-huge-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_CP/huge/CLAUDE.md")")"
 rm -f "$_S16B_CP/huge/CLAUDE.md"
+# capped reads (4.1): AGENTS.md, AGENTS.override.md, the Codex config.toml
+# and the pointer block template are read to FILE_MAX + 1 bytes at most
+# (load), their sizes from fstat on the descriptor read, so no huge file is
+# read whole. b-cap-agents: a sparse 256 MiB AGENTS.md whose first bytes hold
+# the pointer block: detect lists it with the pointer, Codex's visibility
+# answers, each under 128 MiB resident, and the merge plan is refused rc 2
+# naming the size (no writer writes a file it has not read whole), the file
+# unchanged. b-cap-config: a sparse 256 MiB config.toml in CODEX_HOME:
+# Codex's visibility is hidden, naming the size and that whether it marks
+# the project untrusted is not known, under 128 MiB resident.
+_s16b_proj "$_S16B_CP/agents"
+dd if=/dev/zero of="$_S16B_CP/agents/AGENTS.md" bs=1 count=0 seek=268435456 2>/dev/null
+printf '# rules\n<!-- triforge:start -->\npointer\n<!-- triforge:end -->\n' | dd of="$_S16B_CP/agents/AGENTS.md" conv=notrunc 2>/dev/null
+_S16B_SUM=$(_s16b_sum "$_S16B_CP/agents/AGENTS.md")
+_O=$(_s16b_rss "$_S16B_CP/agents" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-agents-detect "$_O" "^AGENTS\.md${T}project${T}pointer${T}[^${T}]*/w/cap/agents/AGENTS\.md${T}-\$" '^rc=0$')$(_s16b_rssok b-cap-agents-detect "$_O")"
+_S16B_RSSV="${_S16B_RSSV}; a sparse 256 MiB AGENTS.md: detect $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+_O=$(_s16b_rss "$_S16B_CP/agents" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-agents-vis "$_O" "^codex${T}(visible|hidden)${T}" '^rc=[01]$')$(_s16b_rssok b-cap-agents-vis "$_O")"
+_S16B_RSSV="${_S16B_RSSV}, visibility $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+_O=$(_s16b_rss "$_S16B_CP/agents" instruction_merge_pointer)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-agents-merge "$_O" "^instruction_merge_pointer: REFUSED — [^ ]*/w/cap/agents/AGENTS\.md is more than the 4194304 bytes Triforge reads from an AGENTS\.md, and Triforge writes no file it has not read whole" '^rc=2$')$(_s16b_rssok b-cap-agents-merge "$_O")"
+_S16B_RSSV="${_S16B_RSSV}, merge $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-cap-agents-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_CP/agents/AGENTS.md")")"
+rm -f "$_S16B_CP/agents/AGENTS.md"
+mkdir -p "$_S16B/home/.codex"
+dd if=/dev/zero of="$_S16B/home/.codex/config.toml" bs=1 count=0 seek=268435456 2>/dev/null
+_s16b_proj "$_S16B_CP/config"
+_O=$(_s16b_rss "$_S16B_CP/config" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-config "$_O" "^codex${T}hidden${T}[^ ]*/home/\.codex/config\.toml is more than the 4194304 bytes Triforge reads from the reader config, so whether it marks this project untrusted" '^rc=1$')$(_s16b_rssok b-cap-config "$_O")"
+_S16B_RSSV="${_S16B_RSSV}; a sparse 256 MiB config.toml: visibility $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+rm -f "$_S16B/home/.codex/config.toml"
+# the reader's memory (4.1): md_scan once held a frame per iteration of a
+# repeated regex group, up to 2.4 GB on a crafted 4 MiB CLAUDE.md (indented
+# code, then 4 MiB of blank lines, then indented code); its patterns now
+# read long spans in bounded chunks. b-mem-*: detect on that shape and on
+# nested quote and list lines repeated to 4 MiB, each under 128 MiB resident
+_s16b_proj "$_S16B_CP/mem-code"
+python3 -c 'import sys; M = 4194304; open(sys.argv[1], "w").write("    x\n" + "\n" * (M - 20) + "    y\n")' "$_S16B_CP/mem-code/CLAUDE.md"
+_s16b_proj "$_S16B_CP/mem-quote"
+python3 -c 'import sys; M = 4194304; u = ">> - a\n> b\n"; open(sys.argv[1], "w").write(u * ((M - 16) // len(u)))' "$_S16B_CP/mem-quote/CLAUDE.md"
+for _S16B_D in mem-code mem-quote; do
+  _O=$(_s16b_rss "$_S16B_CP/$_S16B_D" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-$_S16B_D" "$_O" "^CLAUDE\.md${T}project${T}no-import,user-owned" '^rc=0$')$(_s16b_rssok "b-$_S16B_D" "$_O")"
+  _S16B_RSSV="${_S16B_RSSV}; ${_S16B_D}: detect $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+  rm -f "$_S16B_CP/$_S16B_D/CLAUDE.md"
+done
 [ "$_S16B_TIMEL" = 1 ] || _S16B_RSSV="SKIPPED (no /usr/bin/time -l)"
 
 # linear at 1 MiB (review round 5, R5-B): the shapes the reader took
@@ -13083,7 +13131,7 @@ for _S16B_D in front fence para script comment; do
   [ "$_S16B_T1" -lt 20 ] || _S16_FAIL="${_S16_FAIL} b-lin-$_S16B_D(stalled:${_S16B_T1}s)"
   _S16B_LINS="${_S16B_LINS} ${_S16B_D} ${_S16B_T1}s"
 done
-_S16_EV="${_S16_EV}B bounds and time (b-cap-*: past 40 nested quotes, past 40 list levels, a file of 4194305 bytes, one of 4194304 the line would take past that, past the step and the work bounds, @AGENTS.md ahead of each: no-import, hidden, the import refused rc 2 naming the bound, unchanged; 40 quotes, 40 levels, 4194304 bytes, 1% under the steps and 4% under the work import; a sparse 256 MiB CLAUDE.md read to 4194305 bytes, resident bytes: ${_S16B_RSSV}; b-lin-*: 1 MiB of front matter never closed, of ~ opening a fence, of ~ ending a paragraph, of </script> and of <!-- on a last line, each read whole and importing in${_S16B_LINS}); "
+_S16_EV="${_S16_EV}B bounds and time (b-cap-*: past 40 nested quotes, past 40 list levels, a file of 4194305 bytes, one of 4194304 the line would take past that, past the step and the work bounds, @AGENTS.md ahead of each: no-import,past-bound with the import column -, hidden naming the bound and offering no line, the import refused rc 2 naming the bound, unchanged; b-cap-agents and b-cap-config (4.1): a sparse 256 MiB AGENTS.md and Codex config.toml read to 4194305 bytes, the merge refused naming the size, Codex's visibility hidden for a config it cannot read whole; b-mem-* (4.1): detect on 4 MiB of code and blank lines and of nested quote and list lines under 128 MiB resident; 40 quotes, 40 levels, 4194304 bytes, 1% under the steps and 4% under the work import; a sparse 256 MiB CLAUDE.md read to 4194305 bytes, resident bytes: ${_S16B_RSSV}; b-lin-*: 1 MiB of front matter never closed, of ~ opening a fence, of ~ ending a paragraph, of </script> and of <!-- on a last line, each read whole and importing in${_S16B_LINS}); "
 
 # rewrites (review round 6): round 5 rewrote five patterns for linear time,
 # each meant to match exactly what it matched before: FRONT, the ~~~ line

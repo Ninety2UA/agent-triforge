@@ -133,7 +133,7 @@ _INSTR_PY='
 # runs after the read_regular lines, whose prelude dropped the working
 # directory (the user project) from sys.path: a hashlib.py or re.py planted
 # there never runs
-import bisect, hashlib, os, re, stat, sys
+import array, bisect, hashlib, mmap, os, re, stat, sys
 
 CLAUDE_KINDS = ("CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md")
 AGENTS_KINDS = ("AGENTS.md", "AGENTS.override.md")
@@ -155,6 +155,29 @@ EXACT_3X = {
 # names AGENTS.md), and @AGENTS.md.bak another file. path_ok and emphasis
 # hold the <path> part to what Claude Code reads whole
 IMPORT = re.compile(rb"@((?:\S*/)?)AGENTS\.md(?:#\S*)?")
+WORD = re.compile(rb"\S*")
+
+
+class Found(bytes):
+    # an import md_scan found: its word, which group() gives, with its
+    # <path> part as group(1), as an IMPORT match does. One object per word
+    # (found_word), so a file of many imports holds each word once
+    __slots__ = ()
+
+    def group(self, i=0):
+        return self if i == 0 else IMPORT.fullmatch(self).group(1)
+
+
+FOUND = {}
+
+
+def found_word(m):
+    # the Found for an IMPORT match
+    w = m.group()
+    f = FOUND.get(w)
+    if f is None:
+        f = FOUND[w] = Found(w)
+    return f
 START = b"<!-- triforge:start -->"
 END = b"<!-- triforge:end -->"
 # Claude Code (its memory loader, read in the 2.1.294 build) reads an import
@@ -186,6 +209,13 @@ END = b"<!-- triforge:end -->"
 # PAREN finds unbalanced), a title after [ \t]* and at most one newline
 # (SEP), \s* and ")"
 MD_MAX = 4194304
+# what Triforge reads of an AGENTS.md or AGENTS.override.md, the reader
+# config and the pointer block template (load): their first FILE_MAX + 1
+# bytes at most, which hold all it looks for in any it writes or reads
+# whole (the pointer block, a budget key or trust entry); a longer file
+# counts at its full size in a budget, and no writer writes it (it was not
+# read whole), nor is anything past FILE_MAX in it known
+FILE_MAX = MD_MAX
 JS_SPACE = r"[\t\n\x0b\x0c\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
 # the front matter pattern of Claude Code, ---\s*\n[\s\S]*?---\s*\n?, with
 # its first \s*\n taken once in a lookahead (no search re-enters one): a
@@ -197,34 +227,70 @@ JS_WS = "\t\n\x0b\x0c\r \xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\uf
 JS_DOT = "[^\n\r\u2028\u2029]"
 JS_BOL = "(?:\\A|(?<=[\n\r\u2028\u2029]))"
 ASTRAL = re.compile("[\U00010000-\U0010ffff]")
+SURROGATE = re.compile("[\ud800-\udfff]")
 MK_TAGS = "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
-MK_HR_SRC = " {0,3}((?:-[\t ]*){3,}|(?:_[ \t]*){3,}|(?:\\*[ \t]*){3,})(?:\n+|\\Z)"
-# the fence that interrupts a paragraph is ~{3,}[^\n]*\n in marked: ~{3} and
-# [^\n]*\n match the same lines, and in a lookahead only whether one does
-# counts, while ~{3,} retries every shorter run on a last line of ~ with no
-# newline, which is quadratic in it
-MK_PARA_SRC = ("[^\n]+(?:\n(?!" + MK_HR_SRC + "| {0,3}#{1,6}(?:" + JS_SPACE + "|\\Z)| {0,3}>| {0,3}(?:`{3,}(?=[^`\n]*\n)|~{3})[^\n]*\n"
-               "| {0,3}(?:[*+-]|1[.)]) |</?(?:" + MK_TAGS + ")(?: +|\n|/?>)|<(?:script|pre|style|textarea|!--)| +\n)[^\n]+)*")
-MK_NEWLINE = re.compile("(?:[ \t]*(?:\n|\\Z))+")
-MK_CODE = re.compile("(?:(?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|\\Z))*)?)+")
+# The regex engine keeps a frame, a few hundred bytes, for every pass of a
+# repeated group (one character repeated keeps none), and macOS keeps those
+# pages resident from one match to the next: marked rules such as its
+# paragraph, (?:\n(?!...)[^\n]+)*, matched over 4 MiB took GBs. So each
+# repeated group that can run long is bounded at REP passes, matched again
+# from where it stopped while it moves (runs), or read off a run of one
+# character (blank_end); a rule that backtracks into such a group is
+# followed step by step in code (quote_end, html_end, def_end), each the
+# same match as the marked rule it names
+REP = "{0,1024}"
+# a thematic break: three of its character, then any more of it, spaces and
+# tabs, which are the lines (?:-[\t ]*){3,} matches
+MK_HR_SRC = " {0,3}(-[\t ]*-[\t ]*-[-\t ]*|_[ \t]*_[ \t]*_[_ \t]*|\\*[ \t]*\\*[ \t]*\\*[* \t]*)(?:\n+|\\Z)"
+# the lines that end a paragraph (marked paragraph, its (?!...)). The fence
+# that interrupts one is ~{3,}[^\n]*\n in marked: ~{3} and [^\n]*\n match the
+# same lines, and in a lookahead only whether one does counts, while ~{3,}
+# retries every shorter run on a last line of ~ with no newline, which is
+# quadratic in it
+MK_INTERRUPT = (MK_HR_SRC + "| {0,3}#{1,6}(?:" + JS_SPACE + "|\\Z)| {0,3}>| {0,3}(?:`{3,}(?=[^`\n]*\n)|~{3})[^\n]*\n"
+                "| {0,3}(?:[*+-]|1[.)]) |</?(?:" + MK_TAGS + ")(?: +|\n|/?>)|<(?:script|pre|style|textarea|!--)| +\n")
+# the lines of a paragraph after its first ([^\n]+), REP of them
+MK_PARA_MORE = re.compile("(?:\n(?!" + MK_INTERRUPT + ")[^\n]+)" + REP)
+MK_BLANKS = re.compile("[ \t\n]*")
+MK_NEWLINES = re.compile("\n+")
+# lines of indented code, each with the blank lines after it, REP of each
+MK_CODE_RUN = re.compile("(?:(?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|\\Z))" + REP + ")?)" + REP)
 MK_FENCES = re.compile(" {0,3}(`{3,}(?=[^`\n]*(?:\n|\\Z))|~{3,})([^\n]*)(?:\n|\\Z)(?:|([\\s\\S]*?)(?:\n|\\Z))(?:( {0,3}\\1[~`]* *)(?=\n|\\Z)|\\Z)")
 MK_HEADING = re.compile(" {0,3}(#{1,6})(?=" + JS_SPACE + "|\\Z)(" + JS_DOT + "*)(?:\n+|\\Z)")
 MK_HR = re.compile(MK_HR_SRC)
-MK_QUOTE = re.compile("(?: {0,3}> ?(?:" + MK_PARA_SRC + "|[^\n]*)(?:\n|\\Z))+")
+# the lines of a quote, REP of them: a > line whose text after "> ?" is not
+# empty with the paragraph lines after it (REP of them), or an empty one
+MK_QUOTE_RUN = re.compile("(?: {0,3}>(?: [^\n]|[^ \n])[^\n]*(?:\n(?!" + MK_INTERRUPT + ")[^\n]+)" + REP + "(?:\n|\\Z)| {0,3}> ?(?:\n|\\Z))" + REP)
+MK_QUOTE_OPEN = re.compile(" {0,3}> ?")
 MK_LIST = re.compile("( {0,3}(?:[*+-]|[0-9]{1,9}[.)]))(?:[ \t][^\n]+?)?(?:\n|\\Z)")
-# an HTML block of type 1 ends after the line of its first closing tag that a
-# newline follows, marked reading </\1>[^\n]*\n+ there: tried from each such
-# tag only up to the next one on its line, the end is the same, and a last
-# line of them with no newline is no longer read again from each of them
-MK_HTML = re.compile(
-    " {0,3}(?:<(script|pre|style|textarea)[" + JS_WS + ">][\\s\\S]*?(?:</\\1>(?:(?!</\\1>)[^\n])*\n+|\\Z)"
-    "|<!--(?:-?>|[\\s\\S]*?(?:-->|\\Z))[^\n]*(\n+|\\Z)|<\\?[\\s\\S]*?(?:\\?>\n*|\\Z)|<![A-Z][\\s\\S]*?(?:>\n*|\\Z)"
-    "|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>\n*|\\Z)|</?(" + MK_TAGS + ")(?: +|\n|/?>)[\\s\\S]*?(?:(?:\n[ \t]*)+\n|\\Z)"
-    "|<(?!script|pre|style|textarea)([a-z][\\w-]*)(?: +[a-zA-Z:_][\\w.:-]*(?: *= *\"[^\"\n]*\"| *= *\x27[^\x27\n]*\x27| *= *[^" + JS_WS + "\"\x27=<>`]+)?)*? */?>(?=[ \t]*(?:\n|\\Z))[\\s\\S]*?(?:(?:\n[ \t]*)+\n|\\Z)"
-    "|</(?!script|pre|style|textarea)[a-z][\\w-]*" + JS_SPACE + "*>(?=[ \t]*(?:\n|\\Z))[\\s\\S]*?(?:(?:\n[ \t]*)+\n|\\Z))", re.I | re.A)
-MK_DEF = re.compile(" {0,3}\\[((?!" + JS_SPACE + "*\\])(?:\\\\" + JS_DOT + "|[^\\[\\]\\\\])+)\\]: *(?:\n[ \t]*)?([^<" + JS_WS + "][^" + JS_WS + "]*|<" + JS_DOT + "*?>)"
-                    "(?:(?: +(?:\n[ \t]*)?| *\n[ \t]*)((?:\"(?:\\\\\"?|[^\"\\\\])*\"|\x27[^\x27\n]*(?:\n[^\x27\n]+)*\n?\x27|\\([^()]*\\))))? *(?:\n+|\\Z)")
-MK_PARAGRAPH = re.compile(MK_PARA_SRC)
+# the HTML block rule of marked, by its kinds (html_end): type 1 (script,
+# pre, style, textarea), the comment, processing instruction, declaration
+# and CDATA kinds, a block tag, any other open tag alone on its line with
+# its attributes (REP of them), a closing tag alone on its line
+MK_HTML_PRE = re.compile(" {0,3}<(script|pre|style|textarea)[" + JS_WS + ">]", re.I | re.A)
+MK_HTML_DECL = re.compile(" {0,3}(?:<!--(?:-?>|[\\s\\S]*?(?:-->|\\Z))[^\n]*(\n+|\\Z)|<\\?[\\s\\S]*?(?:\\?>\n*|\\Z)|<![A-Z][\\s\\S]*?(?:>\n*|\\Z)"
+                          "|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>\n*|\\Z))", re.I | re.A)
+MK_HTML_BLOCK = re.compile(" {0,3}</?(?:" + MK_TAGS + ")(?: +|\n|/?>)", re.I | re.A)
+MK_HTML_OPEN = re.compile(" {0,3}<(?!script|pre|style|textarea)[a-z][\\w-]*", re.I | re.A)
+MK_HTML_ATTRS = re.compile("(?: +[a-zA-Z:_][\\w.:-]*(?: *= *\"[^\"\n]*\"| *= *\x27[^\x27\n]*\x27| *= *[^" + JS_WS + "\"\x27=<>`]+)?)" + REP, re.I | re.A)
+MK_HTML_SHUT = re.compile(" */?>(?=[ \t]*(?:\n|\\Z))", re.I | re.A)
+MK_HTML_CLOSE = re.compile(" {0,3}</(?!script|pre|style|textarea)[a-z][\\w-]*" + JS_SPACE + "*>(?=[ \t]*(?:\n|\\Z))", re.I | re.A)
+MK_HTML_GAP = re.compile("\n[ \t]*\n")
+# the link reference definition rule of marked, by its parts (def_end): the
+# [ and the label (REP of its characters), what may follow the ]: before the
+# destination, the destination, a title of each kind, the end of its line
+MK_DEF_OPEN = re.compile(" {0,3}\\[(?!" + JS_SPACE + "*\\])")
+MK_DEF_LABEL = re.compile("(?:\\\\" + JS_DOT + "|[^\\[\\]\\\\])" + REP)
+MK_DEF_GAP = re.compile(" *(?:\n[ \t]*)?")
+MK_DEF_DEST = re.compile("[^<" + JS_WS + "][^" + JS_WS + "]*")
+# a > that a space, a newline or the end follows (no other can end the
+# destination of a definition the rest of it matches), or a line end (one
+# of the characters JS_DOT leaves out)
+MK_DEF_ANGLE = re.compile(">(?=[ \n]|\\Z)|" + JS_DOT.replace("[^", "["))
+MK_DEF_SEP = re.compile("( *)(?:\n[ \t]*)?")
+MK_DEF_QUOTE = re.compile("(?<!\\\\)\"")
+MK_DEF_PAREN = re.compile("\\([^()]*\\)")
+MK_DEF_END = re.compile(" *(?:\n+|\\Z)")
 MK_TEXT = re.compile("[^\n]+")
 # lheading: a first line that may open none of MK_LH_OPEN, then lines up to
 # the first one that is an underline (a match), opens one of them or is
@@ -243,17 +309,27 @@ MK_NONSPACE = re.compile("[^ ]")
 MK_TABS = re.compile("^\t+")
 # what Claude Code reads in an HTML block that opens with a comment: the rest
 # outside its comments (uncomment), each @ at its start or after a
-# JavaScript space and the path after it (MK_AT)
-MK_AT = re.compile("(?:^|" + JS_SPACE + ")@((?:[^" + JS_WS + "\\\\]|\\\\ )+)")
+# JavaScript space and the path after it, (?:^|\s)@((?:[^\s\\]|\\ )+) with
+# \s as in JavaScript (MK_AT: at_paths, the path REP characters at a time)
+MK_AT_OPEN = re.compile("(?:^|" + JS_SPACE + ")@(?=[^" + JS_WS + "\\\\]|\\\\ )")
+MK_AT_PATH = re.compile("(?:[^" + JS_WS + "\\\\]|\\\\ )" + REP)
 TITLE = {b"\"": b"\"", b"\x27": b"\x27", b"(": b")"}
 INLINE = re.compile(rb"<(!--|\?|!\[CDATA\[|!(?=[A-Za-z])|/?(?=[A-Za-z]))|<()(?=[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@)|\]\(")
 CLOSE = {b"!--": b"-->", b"?": b"?>", b"![CDATA[": b"]]>", b"!": b">", b"@": b">"}
 # what a link label is read over (labels): its brackets, backslashes and
 # backticks
 LABEL_AT = re.compile(rb"[\[\]\\`]")
-TAG = re.compile(rb"</?[A-Za-z][\w:-]*(?:\s+[A-Za-z:_][\w.:-]*(?:\s*=\s*(?:\"[^\"]*\"|\x27[^\x27]*\x27|[^\s\"\x27=<>`]+))?)*?\s*/?>")
-WS = re.compile(rb"(?:[\t\n\x0b\x0c\r ]|\xc2\xa0|\xe1\x9a\x80|\xe2\x80[\x80-\x8a\xa8\xa9\xaf]|\xe2\x81\x9f|\xe3\x80\x80|\xef\xbb\xbf)*")
-ANGLE = re.compile(rb"<(?:\\(?!\xe2\x80[\xa8\xa9])[^\n\r]|[^\n<>\\])+>")
+INLINE_ANY = re.compile(rb"[\[\]<`*_]")
+TICKS = re.compile(rb"`+")
+# TAG, WS and ANGLE, each a repeated group, REP passes at a time (tag_end,
+# ws_end, angle_end): an HTML tag, </?[A-Za-z][\w:-]* and its attributes
+# (?:\s+[A-Za-z:_][\w.:-]*(?:\s*=\s*(?:"[^"]*"|\x27[^\x27]*\x27|[^\s"\x27=<>`]+))?)*?
+# then \s*/?>; the JavaScript \s in UTF-8; the characters of <...>
+TAG = re.compile(rb"</?[A-Za-z][\w:-]*")
+TAG_ATTRS = re.compile(rb"(?:\s+[A-Za-z:_][\w.:-]*(?:\s*=\s*(?:\"[^\"]*\"|\x27[^\x27]*\x27|[^\s\"\x27=<>`]+))?)" + REP.encode())
+TAG_SHUT = re.compile(rb"\s*/?>")
+WS = re.compile(rb"(?:[\t\n\x0b\x0c\r ]|\xc2\xa0|\xe1\x9a\x80|\xe2\x80[\x80-\x8a\xa8\xa9\xaf]|\xe2\x81\x9f|\xe3\x80\x80|\xef\xbb\xbf)" + REP.encode())
+ANGLE = re.compile(rb"(?:\\(?!\xe2\x80[\xa8\xa9])[^\n\r]|[^\n<>\\])" + REP.encode())
 RUN = re.compile(rb"[^ \t\n\x00-\x1f]*")
 SEP = re.compile(rb"[ \t]*(?:\n[ \t]*)?")
 PAREN = re.compile(rb"(?<!\\)(\\*)([()])")
@@ -353,40 +429,49 @@ def islink(p):
         return False
 
 
-def load(p):
+def load(p, cap=FILE_MAX):
+    # (bytes, size) of the regular file at p: no more than its first cap + 1
+    # bytes, so a huge file is never read whole, and its length: those bytes
+    # when they are all of it, else the fstat size of the descriptor read
+    # (the file opened, not one put there meanwhile), past cap; (None, 0)
+    # when unreadable. read_regular reads to the end, so its checks are made
+    # here the same way: O_NONBLOCK (a FIFO never stalls), a regular file
     try:
-        return read_regular(p)
+        fd = os.open(p, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+        with os.fdopen(fd, "rb") as f:
+            st = os.fstat(f.fileno())
+            if not stat.S_ISREG(st.st_mode):
+                return None, 0
+            data = f.read(cap + 1)
+            return data, len(data) if len(data) <= cap else max(st.st_size, len(data))
     except (OSError, ValueError):
-        return None
+        return None, 0
+
+
+def readable(p):
+    # True when p is a regular file load can read, none of it read
+    return load(p, 0)[0] is not None
 
 
 def load_md(p):
     # a CLAUDE.md-family file as md_scan needs it: no more than its first
     # MD_MAX + 1 bytes, which already tell a file over MD_MAX (no import is
-    # read from it, and add_import refuses it before any write), so a huge
-    # file is never read whole. read_regular reads to the end, so its checks
-    # are made here the same way: O_NONBLOCK (a FIFO never stalls), a regular
-    # file only; None when unreadable. The 3.x fingerprint reads the same
-    # bytes: no file over MD_MAX is an exact copy (exact_3x), and is_3x looks
-    # for the template lines in the first MD_MAX + 1 bytes
-    try:
-        fd = os.open(p, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
-        with os.fdopen(fd, "rb") as f:
-            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
-                return None
-            return f.read(MD_MAX + 1)
-    except (OSError, ValueError):
-        return None
+    # read from it, and add_import refuses it before any write); None when
+    # unreadable. The 3.x fingerprint reads the same bytes: no file over
+    # MD_MAX is an exact copy (exact_3x), and is_3x looks for the template
+    # lines in the first MD_MAX + 1 bytes
+    return load(p, MD_MAX)[0]
 
 
 def level_file(r, level, name="AGENTS.md"):
-    # the one file the reader takes from a directory: its override over <name>
+    # (path, bytes, size) of the one file the reader takes from a directory
+    # (load): its override over <name>
     for n in ([r["override"]] if r["override"] else []) + [name]:
         p = os.path.join(level, n)
-        d = load(p) if level and lexists(p) else None
+        d, size = load(p) if level and lexists(p) else (None, 0)
         if d is not None:
-            return p, d
-    return None, None
+            return p, d, size
+    return None, None, 0
 
 
 def linked(level, kind):
@@ -445,8 +530,11 @@ def md_body(data):
     # the BOM stays, where it keeps the first line from opening a block),
     # and the rest with each \r\n and \r read as \n, as marked reads it
     bom = 3 if data.startswith(b"\xef\xbb\xbf") else 0
-    text = data[bom:].decode("utf-8", "surrogateescape")
-    m = FRONT.match(text)
+    m = None
+    if data.startswith(b"---", bom):
+        # only then may FRONT match, so only then is data decoded for it
+        text = data[bom:].decode("utf-8", "surrogateescape")
+        m = FRONT.match(text)
     cut = bom + len(text[:m.end()].encode("utf-8", "surrogateescape")) if m else 0
     return data[:cut], data[cut:].replace(b"\r\n", b"\n").replace(b"\r", b"\n")
 
@@ -454,19 +542,277 @@ def md_body(data):
 def js_text(body):
     # body as the JavaScript string marked lexes: UTF-16 code units (a
     # character past U+FFFF as its two surrogates, an invalid byte as
-    # U+FFFD), so every offset and length is the one marked computes
-    return ASTRAL.sub(lambda m: chr(0xd7c0 + (ord(m.group()) >> 10)) + chr(0xdc00 + (ord(m.group()) & 0x3ff)), body.decode("utf-8", "replace"))
+    # U+FFFD), so every offset and length is the one marked computes. The
+    # characters past U+FFFF are replaced 65536 characters at a time, so
+    # their pieces stay few
+    text = body.decode("utf-8", "replace")
+    if not ASTRAL.search(text):
+        return text
+    return "".join(ASTRAL.sub(lambda m: chr(0xd7c0 + (ord(m.group()) >> 10)) + chr(0xdc00 + (ord(m.group()) & 0x3ff)), text[i:i + 65536]) for i in range(0, len(text), 65536))
 
 
 def js_bytes(text):
-    # the UTF-8 bytes of a js_text string (its surrogate pairs joined)
-    return text.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "surrogatepass").encode("utf-8", "surrogatepass")
+    # the UTF-8 bytes of a js_text string (its surrogate pairs joined): one
+    # with no surrogate is the same as its own UTF-8, else 65536 code units
+    # at a time, a piece never ending between the two of a pair
+    if not SURROGATE.search(text):
+        return text.encode("utf-8")
+    out, a, n = [], 0, len(text)
+    while a < n:
+        b = min(n, a + 65536)
+        while b < n and "\ud800" <= text[b - 1] <= "\udbff":
+            b += 1
+        out.append(text[a:b].encode("utf-16-le", "surrogatepass").decode("utf-16-le", "surrogatepass").encode("utf-8", "surrogatepass"))
+        a = b
+    return b"".join(out)
 
 
 def js_search(s, rx):
     # String.prototype.search: the offset of the first match, -1 for none
     m = rx.search(s)
     return m.start() if m else -1
+
+
+def ints(n, fill=0, kind="i"):
+    # n numbers, each fill: ints of 4 bytes, or bytes (kind "B"). Past 65536
+    # of them, an anonymous mmap viewed as such, which goes back to the
+    # system once dropped: malloc on macOS keeps a large block it frees,
+    # often for no later one of another size, so the arrays of one pass
+    # after another would stay resident together
+    if n < 65536:
+        return array.array(kind, [fill]) * n
+    size = n * (4 if kind == "i" else 1)
+    m = mmap.mmap(-1, size)
+    if fill:
+        block = (array.array(kind, [fill]) * (65536 // (4 if kind == "i" else 1))).tobytes()
+        for i in range(0, size, 65536):
+            m[i:min(size, i + 65536)] = block[:min(65536, size - i)]
+    return memoryview(m).cast(kind)
+
+
+class Chunk(str):
+    # parts of a string joined by grow
+    __slots__ = ()
+
+
+def grow(parts, *more):
+    # parts, a string kept as a list of its parts, with more appended: at
+    # 8192 parts, those after the chunks (Chunk) joined into one more chunk,
+    # so a token or quote that grows by many small parts holds no object for
+    # each, and no chunk is joined again before the end (macOS keeps each
+    # larger string built of the same parts resident)
+    parts.extend(more)
+    if len(parts) >= 8192:
+        c = 0
+        while c < len(parts) and type(parts[c]) is Chunk:
+            c += 1
+        parts[c:] = [Chunk("".join(parts[c:]))]
+
+
+def cut(parts, size, n):
+    # parts, a string of size characters kept as its parts, cut to its first
+    # n characters in place
+    while parts and size - len(parts[-1]) >= n:
+        size -= len(parts.pop())
+    if size > n:
+        parts[-1] = parts[-1][:len(parts[-1]) - (size - n)]
+
+
+def by_lines(f, text):
+    # f(text), f a substitution by rules that match within a line and never
+    # at a newline (the marks of a quote, a setext line in one, the indent of
+    # code), 65536 characters at a time, each piece after the first starting
+    # at a newline: the same text, while sub keeps no list of all its pieces
+    if len(text) <= 65536:
+        return f(text)
+    out, a, n = [], 0, len(text)
+    while a < n:
+        b = text.find("\n", a + 65536)
+        b = n if b < 0 else b
+        out.append(f(text[a:b]))
+        a = b
+    return "".join(out)
+
+
+def quote_text(craw):
+    # the text marked lexes for a group of quote lines
+    return MK_QUOTE_MARK.sub("", MK_QUOTE_SETEXT.sub("\n    \\1", craw))
+
+
+def code_text(raw):
+    # the text of an indented code block
+    return MK_CODE_INDENT.sub("", raw)
+
+
+def runs(rx, s, p):
+    # the end of rx, a repeat bounded at REP passes, matched again from where
+    # it stopped while it moves: the end the unbounded repeat reaches, as
+    # nothing follows it and each pass matches the same from where it starts
+    while True:
+        e = rx.match(s, p).end()
+        if e == p:
+            return p
+        p = e
+
+
+def blank_end(src, pos, one):
+    # the end of the blank lines at pos, (?:[ \t]*(?:\n|\Z))+ (one: at least
+    # one, else -1; marked newline) or * (the blank lines a line of code
+    # takes): from the run of spaces, tabs and newlines there, its last
+    # newline, or the end of src when the run reaches it
+    q = MK_BLANKS.match(src, pos).end()
+    if q == len(src):
+        return q
+    k = src.rfind("\n", pos, q)
+    return k + 1 if k >= 0 else -1 if one else pos
+
+
+def code_end(src, pos):
+    # the end of marked code, (?:(?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|\Z))*)?)+,
+    # at pos, -1 for none: MK_CODE_RUN again while it moves, each run then
+    # taking the blank lines its last line of code took past REP
+    p = pos
+    while True:
+        e = MK_CODE_RUN.match(src, p).end()
+        if e == p:
+            return p if p > pos else -1
+        p = blank_end(src, e, False)
+
+
+def para_end(src, pos):
+    # the end of marked paragraph, [^\n]+(?:\n(?!MK_INTERRUPT)[^\n]+)*, at
+    # pos, -1 for none
+    m = MK_TEXT.match(src, pos)
+    return runs(MK_PARA_MORE, src, m.end()) if m else -1
+
+
+def quote_end(src, pos):
+    # the end of marked blockquote, (?: {0,3}> ?(?:PARAGRAPH|[^\n]*)(?:\n|\Z))+,
+    # at pos, -1 for none: MK_QUOTE_RUN again while it moves. A run stops at
+    # a line that is no > line, or past REP paragraph lines; the paragraph
+    # goes on there when the line before is a > line whose text is not
+    # empty, or one of its own lines, and this line may join it
+    n, p = len(src), pos
+    while True:
+        e = runs(MK_QUOTE_RUN, src, p)
+        if e == p:
+            return p if p > pos else -1
+        if e == n or src[e - 1] != "\n":
+            return e
+        ls = max(p, src.rfind("\n", p, e - 1) + 1)
+        if MK_QUOTE_START.match(src, ls) and MK_QUOTE_OPEN.match(src, ls).end() == e - 1:
+            return e
+        f = runs(MK_PARA_MORE, src, e - 1)
+        if f == e - 1:
+            return e
+        if f == n:
+            return n
+        p = f + 1
+
+
+def html_end(src, pos):
+    # the end of marked html at pos, its kinds in its order, -1 for none.
+    # Type 1 ends after the line of its first closing tag that a newline
+    # follows, and those newlines (marked reads </\1>[^\n]*\n+ there: tried
+    # from each such tag only up to the next one on its line, the end is the
+    # same), else at the end of src. A block tag, an open tag (the attributes
+    # REP at a time: none fits where " */?>" does, so the end is the one the
+    # lazy repeat finds) and a closing tag end at the first blank line after
+    # them with the blank lines that follow ((?:\n[ \t]*)+\n), else at the end
+    m = MK_HTML_PRE.match(src, pos)
+    if m:
+        c = re.compile("</" + m.group(1).lower() + ">", re.I | re.A).search(src, m.end())
+        e = src.find("\n", c.end()) if c else -1
+        return len(src) if e < 0 else MK_NEWLINES.match(src, e).end()
+    m = MK_HTML_DECL.match(src, pos)
+    if m:
+        return m.end()
+    m = MK_HTML_BLOCK.match(src, pos)
+    if not m:
+        m = MK_HTML_OPEN.match(src, pos)
+        if m:
+            m = MK_HTML_SHUT.match(src, runs(MK_HTML_ATTRS, src, m.end()))
+    if not m:
+        m = MK_HTML_CLOSE.match(src, pos)
+    if not m:
+        return -1
+    g = MK_HTML_GAP.search(src, m.end())
+    if not g:
+        return len(src)
+    return src.rfind("\n", g.start(), MK_BLANKS.match(src, g.start()).end()) + 1
+
+
+def def_end(src, pos):
+    # the end of marked def at pos, -1 for none, its backtracking followed:
+    # the label is its longest run, the only one a ] can follow; then each
+    # destination in turn (a run of characters, or <...> to each > on its
+    # line), and for each a title when spaces or a newline lead to one,
+    # then none: the first that the end of the line follows (MK_DEF_END)
+    m = MK_DEF_OPEN.match(src, pos)
+    if not m:
+        return -1
+    b = runs(MK_DEF_LABEL, src, m.end())
+    if b == m.end() or not src.startswith("]:", b):
+        return -1
+    for d in def_dests(src, MK_DEF_GAP.match(src, b + 2).end()):
+        s = MK_DEF_SEP.match(src, d).end()
+        if s > d:
+            for t in def_titles(src, s):
+                e = MK_DEF_END.match(src, t)
+                if e:
+                    return e.end()
+        e = MK_DEF_END.match(src, d)
+        if e:
+            return e.end()
+    return -1
+
+
+def def_dests(src, d):
+    # the ends of the destination of a definition at d, in the order marked
+    # tries them: a run of characters ([^<\s][^\s]*, one end), or <.*?> to
+    # each > on its line that a space, a newline or the end follows (after
+    # any other, def_end finds neither a separator nor the end of the line)
+    if src[d:d + 1] != "<":
+        m = MK_DEF_DEST.match(src, d)
+        if m:
+            yield m.end()
+        return
+    q = d + 1
+    while True:
+        a = MK_DEF_ANGLE.search(src, q)
+        if not a or a.group() != ">":
+            return
+        q = a.end()
+        yield q
+
+
+def def_titles(src, t):
+    # the ends of a title at t, in the order marked tries them: "..." to its
+    # first " no backslash comes before, then to each " a backslash comes
+    # before, the last first ("(?:\\"?|[^"\\])*" backtracking); \x27...\x27
+    # to its first \x27 with no blank line before it; (...) with no ( or )
+    # in it
+    c = src[t:t + 1]
+    if c == "\"":
+        # (only those a space, a newline or the end follows, as no other
+        # can be followed by the end of the line, MK_DEF_END)
+        m = MK_DEF_QUOTE.search(src, t + 1)
+        hi = m.start() if m else len(src)
+        if m:
+            yield hi + 1
+        q = src.rfind("\"", t + 1, hi)
+        while q >= 0:
+            if src[q + 1:q + 2] in (" ", "\n", ""):
+                yield q + 1
+            q = src.rfind("\"", t + 1, q)
+    elif c == "\x27":
+        q = src.find("\x27", t + 1)
+        if q >= 0 and src.find("\n\n", t + 1, q) < 0:
+            yield q + 1
+    elif c == "(":
+        m = MK_DEF_PAREN.match(src, t)
+        if m:
+            yield m.end()
 
 
 class MdStop(Exception):
@@ -484,12 +830,13 @@ class MdBound(str):
 class MdTok:
     # a marked block token: its type, raw and text (lists of parts, joined
     # when read), the tokens of a blockquote, the items of a list ([raw,
-    # text, tokens] each), its offset in the source it was lexed from, and
-    # for a fenced code block whether no closing fence ends it
-    __slots__ = ("type", "rp", "tp", "tokens", "items", "at", "open")
+    # text, tokens] each), its offset in the source it was lexed from, for
+    # a fenced code block whether no closing fence ends it, and for a list
+    # read in a scan what md_walk reads from the items it dropped (later)
+    __slots__ = ("type", "rp", "tp", "tokens", "items", "at", "open", "later")
 
     def __init__(self, kind, at, raw, text=None, tokens=None):
-        self.type, self.at, self.rp, self.tp, self.tokens, self.items, self.open = kind, at, [raw], None if text is None else [text], tokens, None, False
+        self.type, self.at, self.rp, self.tp, self.tokens, self.items, self.open, self.later = kind, at, [raw], None if text is None else [text], tokens, None, False, None
 
     @property
     def raw(self):
@@ -504,6 +851,29 @@ class MdTok:
         return self.tp[0]
 
 
+class MdList(list):
+    # the tokens of one source in a scan (MdLexer with keep off): a token
+    # that is no longer the last one never changes again (a merge, or a
+    # quote lexing its last token again, takes the last one only), so what
+    # md_walk reads from it goes to later when walk is on (md_later), and it
+    # is dropped; only the last token is kept. With upto (the top level of
+    # the where of md_scan), the last token that starts at upto or before
+    # it is kept too, with all after it: a quote may end past upto, and the
+    # tokens come in the order of their starts
+    __slots__ = ("later", "walk", "upto")
+
+    def __init__(self, walk, upto=None):
+        list.__init__(self)
+        self.later, self.walk, self.upto = [], walk, upto
+
+    def append(self, t):
+        if self and (self.upto is None or t.at <= self.upto):
+            if self.walk:
+                md_later(self[-1:], self.later)
+            del self[:]
+        list.append(self, t)
+
+
 class MdLexer:
     # marked Lexer.blockTokens (GFM and pedantic off, no extensions) and the
     # tokenizers it calls, line for line: state.top, the merge of a code
@@ -513,12 +883,20 @@ class MdLexer:
     # raw (so a quote ends at a code block and its lazy lines are lexed again
     # outside it). Bounded: work (characters lexed and scanned, nested
     # sources again) and steps (blocks, list lines, quote groups) grow with
-    # the file, nesting stops past 40 quotes and lists; past one MdStop
-    def __init__(self, size):
+    # the file, nesting stops past 40 quotes and lists; past one MdStop.
+    # keep off (md_scan): each token list an MdList, which reads (walk on)
+    # and drops what can no longer change, the same lexing in the same
+    # order, so a file of many blocks holds a few tokens at a time
+    def __init__(self, size, keep=True, walk=False):
         self.top = True
         self.work, self.steps, self.depth = 0, 0, 0
         self.max_work, self.max_steps = 12 * size + 4000000, 300000 + size // 8
         self.lh, self.rules = {}, {}
+        self.keep, self.walk = keep, walk
+
+    def tokens(self):
+        # a new list for the tokens of a source
+        return [] if self.keep else MdList(self.walk)
 
     def charge(self, n):
         self.work += n
@@ -540,21 +918,21 @@ class MdLexer:
         while pos < n:
             self.step()
             at, last = pos, tokens[-1] if tokens else None
-            m = MK_NEWLINE.match(src, pos)
-            if m and m.end() > pos:
-                pos = m.end()
+            e = blank_end(src, pos, True)
+            if e > pos:
+                pos = e
                 if pos - at == 1 and last is not None:
-                    last.rp.append("\n")
+                    grow(last.rp, "\n")
                 else:
-                    tokens.append(MdTok("space", at, m.group()))
+                    tokens.append(MdTok("space", at, src[at:pos]))
                 continue
-            m = MK_CODE.match(src, pos)
-            if m:
-                pos, raw = m.end(), m.group()
-                text = MK_CODE_INDENT.sub("", raw).rstrip("\n")
+            e = code_end(src, pos)
+            if e >= 0:
+                pos, raw = e, src[at:e]
+                text = by_lines(code_text, raw).rstrip("\n")
                 if last is not None and last.type in ("paragraph", "text"):
-                    last.rp += ["\n", raw]
-                    last.tp += ["\n", text]
+                    grow(last.rp, "\n", raw)
+                    grow(last.tp, "\n", text)
                 else:
                     tokens.append(MdTok("code", at, raw, text))
                 continue
@@ -590,30 +968,30 @@ class MdLexer:
                 pos += len(t.raw)
                 tokens.append(t)
                 continue
-            m = MK_HTML.match(src, pos)
-            if m:
-                pos = m.end()
-                tokens.append(MdTok("html", at, m.group()))
+            e = html_end(src, pos)
+            if e >= 0:
+                pos = e
+                tokens.append(MdTok("html", at, src[at:e]))
                 continue
-            m = MK_DEF.match(src, pos)
-            if m:
-                pos = m.end()
+            e = def_end(src, pos)
+            if e >= 0:
+                pos, raw = e, src[at:e]
                 if last is not None and last.type in ("paragraph", "text"):
-                    last.rp += ["\n", m.group()]
-                    last.tp += ["\n", m.group()]
+                    grow(last.rp, "\n", raw)
+                    grow(last.tp, "\n", raw)
                 continue
             end = self.lheading(src, pos)
             if end:
                 pos = end[0]
                 tokens.append(MdTok("heading", at, src[at:pos], end[1]))
                 continue
-            m = MK_PARAGRAPH.match(src, pos) if self.top else None
-            if m:
-                pos, raw = m.end(), m.group()
+            e = para_end(src, pos) if self.top else -1
+            if e >= 0:
+                pos, raw = e, src[at:e]
                 text = raw[:-1] if raw.endswith("\n") else raw
                 if clipped and last is not None and last.type == "paragraph":
-                    last.rp += ["\n", raw]
-                    last.tp += ["\n", text]
+                    grow(last.rp, "\n", raw)
+                    grow(last.tp, "\n", text)
                 else:
                     tokens.append(MdTok("paragraph", at, raw, text))
                 clipped = False
@@ -621,12 +999,16 @@ class MdLexer:
             m = MK_TEXT.match(src, pos)
             if not m:
                 raise MdStop("Markdown marked cannot lex")
-            pos = m.end()
+            pos, raw = m.end(), m.group()
             if last is not None and last.type == "text":
-                last.rp += ["\n", m.group()]
-                last.tp += ["\n", m.group()]
+                grow(last.rp, "\n", raw)
+                grow(last.tp, "\n", raw)
             else:
-                tokens.append(MdTok("text", at, m.group(), m.group()))
+                tokens.append(MdTok("text", at, raw, raw))
+        # no source is lexed twice, so its lheading table goes with it
+        tab = self.lh.pop(id(src), None)
+        if tab is not None and tab[0] is not src:
+            self.lh[id(src)] = tab
         self.top = True
         self.depth -= 1
         return tokens
@@ -644,7 +1026,9 @@ class MdLexer:
         tab = self.lh.get(id(src))
         if tab is None or tab[0] is not src:
             self.charge(len(src))
-            starts, under = [], []
+            # the table as an array of offsets and a bytearray of flags, five
+            # bytes a line; block drops it once src is lexed
+            starts, under = array.array("i"), bytearray()
             for e in MK_LH_EVENT.finditer(src):
                 starts.append(e.start())
                 under.append(e.group(1) is not None)
@@ -659,48 +1043,57 @@ class MdLexer:
         # run of lazy lines, then the > lines after it, their markers
         # stripped), a nested quote or list token at a group end lexed again
         # with the lines left, a code block ending it
-        m = MK_QUOTE.match(src, pos)
-        if not m:
+        e = quote_end(src, pos)
+        if e < 0:
             return None
-        self.charge(m.end() - pos)
-        lines, k = m.group().rstrip("\n").split("\n"), 0
-        raw, size, tokens = [], 0, []
-        while k < len(lines):
+        self.charge(e - pos)
+        # the lines marked splits the quote into, as offsets in s up to b (the
+        # newline that ends the quote dropped, as marked trims it): k the
+        # start of the next one, past b once the last one is read
+        s, k, b = src, pos, e - 1 if src[e - 1:e] == "\n" else e
+        raw, size, tokens = [], 0, self.tokens()
+        while k <= b:
             self.step()
             inside, i = False, k
-            while k < len(lines):
-                if MK_QUOTE_START.match(lines[k]):
+            while k <= b:
+                le = s.find("\n", k, b)
+                le = b if le < 0 else le
+                if MK_QUOTE_START.match(s, k, le):
                     inside = True
                 elif inside:
                     break
-                k += 1
-            craw = "\n".join(lines[i:k])
+                k = le + 1
+            craw = s[i:k - 1]
             # raw, kept as parts: the groups joined by newlines (the first
             # group is never empty, so neither is raw after it). The text
             # marked keeps beside it feeds no token, so it is not kept
-            raw += ["\n", craw] if size else [craw]
+            grow(raw, *(["\n", craw] if size else [craw]))
             size += len(craw) + (1 if size else 0)
             top, self.top = self.top, True
-            self.block(MK_QUOTE_MARK.sub("", MK_QUOTE_SETEXT.sub("\n    \\1", craw)), tokens, True)
+            self.block(by_lines(quote_text, craw), tokens, True)
             self.top = top
             last = tokens[-1] if tokens else None
-            if k == len(lines) or last is not None and last.type == "code":
+            if k > b or last is not None and last.type == "code":
                 break
             if last is not None and last.type in ("blockquote", "list"):
                 # the nested token lexed again with every line left, which
                 # marked rebuilds at each such group: charged, so a quote of
                 # many of them stops at the work bound
-                again = last.raw + "\n" + "\n".join(lines[k:])
+                again = last.raw + "\n" + s[k:b]
                 self.charge(len(again) + size)
                 new = self.blockquote(again, 0) if last.type == "blockquote" else self.list(again, 0)
                 if new is None:
                     raise MdStop("Markdown marked cannot lex")
                 tokens[-1] = new
-                raw = ["".join(raw)[:max(0, size - len(last.raw))] + new.raw]
-                size = len(raw[0])
+                # raw cut to its first size - len(last.raw) characters, then
+                # new.raw, without joining it again
+                cut(raw, size, max(0, size - len(last.raw)))
+                size = max(0, size - len(last.raw))
+                grow(raw, new.raw)
+                size += len(new.raw)
                 if last.type == "blockquote":
                     break
-                lines, k = again[len(new.raw):].split("\n"), 0
+                s, k, b = again, len(new.raw), len(again)
         return MdTok("blockquote", pos, "".join(raw), None, tokens)
 
     def item_rules(self, indent):
@@ -709,7 +1102,7 @@ class MdLexer:
         if r is None:
             k = " {0," + str(min(3, indent - 1)) + "}"
             r = self.rules[indent] = (re.compile(k + "(?:[*+-]|[0-9]{1,9}[.)])(?:(?:[ \t][^\n]*)?(?:\n|\\Z))"),
-                                      re.compile(k + "(?:(?:- *){3,}|(?:_ *){3,}|(?:\\* *){3,})(?:\n+|\\Z)"),
+                                      re.compile(k + "(?:- *- *-[- ]*|_ *_ *_[_ ]*|\\* *\\* *\\*[* ]*)(?:\n+|\\Z)"),
                                       re.compile(k + "(?:```|~~~)"), re.compile(k + "#"),
                                       re.compile(k + "<(?:[a-z]" + JS_DOT + "*>|!--)", re.I | re.A))
         return r
@@ -724,13 +1117,15 @@ class MdLexer:
             return None
         bull = m.group(1).strip(JS_TRIM)
         item = re.compile("( {0,3}" + ("[0-9]{1,9}\\" + bull[-1] if len(bull) > 1 else "\\" + bull) + ")((?:[\t ][^\n]*)?(?:\n|\\Z))")
-        items, p, n = [], pos, len(src)
+        raws, texts, p, n, tail = [], [], pos, len(src), ""
         while p < n:
             self.step()
             cap = item.match(src, p)
             if not cap or MK_HR.match(src, p):
                 break
-            raw, p, c2 = [cap.group()], cap.end(), cap.group(2)
+            # raw: from start to p, and a newline after the last line when src
+            # ends without one (marked appends each line with a newline)
+            start, p, c2, tail = p, cap.end(), cap.group(2), ""
             line = MK_TABS.sub(lambda t: "   " * len(t.group()), c2.split("\n", 1)[0])
             e = src.find("\n", p)
             nxt = src[p:e if e >= 0 else n]
@@ -743,7 +1138,7 @@ class MdLexer:
                 body.append(line[indent:])
                 indent += len(cap.group(1))
             if blank and MK_BLANK.match(nxt):
-                raw.append(nxt + "\n")
+                tail = "" if e >= 0 else "\n"
                 p = min(n, p + len(nxt) + 1)
             else:
                 bullet, hr, fence, heading, html = self.item_rules(indent)
@@ -755,27 +1150,41 @@ class MdLexer:
                     if fence.match(nxt) or heading.match(nxt) or html.match(nxt) or bullet.match(nxt) or hr.match(nxt):
                         break
                     if js_search(wide, MK_NONSPACE) >= indent or not nxt.strip(JS_TRIM):
-                        body.append("\n" + wide[indent:])
+                        grow(body, "\n" + wide[indent:])
                     elif blank or js_search(line.replace("\t", "    "), MK_NONSPACE) >= 4 or fence.match(line) or heading.match(line) or hr.match(line):
                         break
                     else:
-                        body.append("\n" + nxt)
+                        grow(body, "\n" + nxt)
                     blank = blank or not nxt.strip(JS_TRIM)
-                    raw.append(nxt + "\n")
+                    tail = "" if e >= 0 else "\n"
                     p = min(n, p + len(nxt) + 1)
                     line = wide[indent:]
-            raw = "".join(raw)
-            self.charge(len(raw))
-            items.append([raw, "".join(body), None])
-        if not items:
+            self.charge(p - start + len(tail))
+            if self.keep:
+                raws.append(src[start:p] + tail)
+            texts.append("".join(body))
+        if not texts:
             return None
-        t = MdTok("list", pos, "".join(i[0] for i in items).rstrip(JS_TRIM))
-        items[-1][0] = items[-1][0].rstrip(JS_TRIM)
-        items[-1][1] = items[-1][1].rstrip(JS_TRIM)
-        for i in items:
+        # the items lie end to end from pos, and only the last can end with
+        # the newline src lacks, so their raws joined are src[pos:p] + tail
+        t = MdTok("list", pos, (src[pos:p] + tail).rstrip(JS_TRIM))
+        texts[-1] = texts[-1].rstrip(JS_TRIM)
+        if self.keep:
+            raws[-1] = raws[-1].rstrip(JS_TRIM)
+            t.items = [[r, x, None] for r, x in zip(raws, texts)]
+            for i in t.items:
+                self.top = False
+                i[2] = self.block(i[1], [])
+            return t
+        # a scan: each item taken into later (walk on) and dropped once the
+        # next one is lexed, the last one kept, with no raw or text
+        t.later, toks = [], None
+        for k in range(len(texts)):
             self.top = False
-            i[2] = self.block(i[1], [])
-        t.items = items
+            if toks is not None and self.walk:
+                md_later(toks, t.later)
+            toks, texts[k] = self.block(texts[k], self.tokens()), None
+        t.items = [[None, None, toks]]
         return t
 
 
@@ -793,25 +1202,27 @@ def link_ends(text):
     # reading ends it past end(h). The calls come in the order of h: a run
     # is walked once for all of its openings, closers are found by bisecting
     # their positions, and each ")" test is kept, so this stays linear
+    # Positions are kept in arrays ("i", -1 for none), and each ")" test in
+    # one array over text (0 not made yet, 1 none, else its end + 2)
     big = len(text) + 1
-    marks = [m.start() for m in re.finditer(rb"[\"\x27()]", text)]
+    marks = array.array("i", (m.start() for m in re.finditer(rb"[\"\x27()]", text)))
     # cur: the run the last opening fell in: its end, the last place in it
     # a link ends (None: none) and that end, then unbalanced() of it
-    plain, good, after, cur = {}, {}, {}, [-1, None, big, [], [None]]
+    plain, good, after, cur = {}, {}, array.array("i", [0]) * (len(text) + 2), [-1, None, big, array.array("i"), array.array("i", [-1])]
 
     def paren(k):
         # the end of \s* and ")" at k, None without one
-        if k not in after:
-            p = WS.match(text, k).end()
-            after[k] = p + 1 if text[p:p + 1] == b")" else None
-        return after[k]
+        if not after[k]:
+            p = runs(WS, text, k)
+            after[k] = p + 3 if text[p:p + 1] == b")" else 1
+        return after[k] - 2 if after[k] > 1 else None
 
     def title(t):
         # the end of the ")" after the title that opens at t, None without one
         c = TITLE[text[t:t + 1]]
         if c not in plain:
-            plain[c] = [m.start() for m in re.finditer(rb"(?<!\\)" + re.escape(c), text)]
-            good[c] = [m.start() for m in re.finditer(rb"(?<=\\)" + re.escape(c), text) if paren(m.end())]
+            plain[c] = array.array("i", (m.start() for m in re.finditer(rb"(?<!\\)" + re.escape(c), text)))
+            good[c] = array.array("i", (m.start() for m in re.finditer(rb"(?<=\\)" + re.escape(c), text) if paren(m.end())))
         k = bisect.bisect_left(plain[c], t + 1)
         first = plain[c][k] if k < len(plain[c]) else big
         j = bisect.bisect_left(good[c], first) - 1
@@ -825,30 +1236,30 @@ def link_ends(text):
 
     def unbalanced(lo, hi):
         # the parentheses in text[lo:hi] no backslash escapes, and from each
-        # the first ")" that closes no "(" after it (None: none)
-        at = [m.end() - 1 for m in PAREN.finditer(text, lo, hi) if len(m.group(1)) % 2 == 0]
-        pair, stack = {}, []
+        # the first ")" that closes no "(" after it (-1: none)
+        at = array.array("i", (m.end() - 1 for m in PAREN.finditer(text, lo, hi) if len(m.group(1)) % 2 == 0))
+        pair, stack = array.array("i", [-1]) * len(at), array.array("i")
         for k, p in enumerate(at):
             if text[p] == 40:
                 stack.append(k)
             elif stack:
                 pair[stack.pop()] = k
-        first = [None] * (len(at) + 1)
+        first = array.array("i", [-1]) * (len(at) + 1)
         for k in range(len(at) - 1, -1, -1):
-            first[k] = at[k] if text[at[k]] == 41 else first[pair[k] + 1] if k in pair else None
+            first[k] = at[k] if text[at[k]] == 41 else first[pair[k] + 1] if pair[k] >= 0 else -1
         return at, first
 
     def end(h):
-        w = WS.match(text, h).end()
-        a = ANGLE.match(text, w) if text[w:w + 1] == b"<" else None
-        e = rest(a.end()) if a else None
+        w = runs(WS, text, h)
+        a = angle_end(text, w) if text[w:w + 1] == b"<" else -1
+        e = rest(a) if a >= 0 else None
         if e:
             return e
         if w >= cur[0]:
             # a new run: from its end down to w, the first place a title or
             # ")" follows, which holds for every opening up to it
             q = RUN.match(text, w).end()
-            cur[:] = [q, None, big, [], [None]]
+            cur[:] = [q, None, big, array.array("i"), array.array("i", [-1])]
             i = bisect.bisect_left(marks, q)
             while q >= w:
                 e = rest(q)
@@ -859,9 +1270,25 @@ def link_ends(text):
                 q = marks[i] if i >= 0 else -1
         if cur[1] is None or w > cur[1]:
             return big
-        p = cur[4][bisect.bisect_left(cur[3], w)] if text[w:w + 1] != b"<" else None
-        return p + 1 if p is not None else cur[2]
+        p = cur[4][bisect.bisect_left(cur[3], w)] if text[w:w + 1] != b"<" else -1
+        return p + 1 if p >= 0 else cur[2]
     return end
+
+
+def angle_end(text, w):
+    # the end of ANGLE, <...>, at w (a <), -1 for none: its characters REP
+    # at a time, the only run a > can follow being the longest
+    p = runs(ANGLE, text, w + 1)
+    return p + 1 if p > w + 1 and text[p:p + 1] == b">" else -1
+
+
+def tag_end(text, p):
+    # the end of the HTML tag at p (its attributes REP at a time: none fits
+    # where \s*/?> does, so the end is the one the lazy repeat finds), -1 for
+    # none
+    m = TAG.match(text, p)
+    m = TAG_SHUT.match(text, runs(TAG_ATTRS, text, m.end())) if m else None
+    return m.end() if m else -1
 
 
 def inline_held(text, refs):
@@ -878,26 +1305,26 @@ def inline_held(text, refs):
     # none is read once one of its kind runs to the end)
     image, bracket, big = text.find(b"!["), text.rfind(b"]"), len(text) + 1
     link = link_ends(text) if b"](" in text else None
-    in_ref = cover(refs)
+    in_ref = cover(*refs)
     places, by = {}, {}
     for m in INLINE.finditer(text):
         # an email autolink ends at the first > after its <, as a
         # declaration does (CLOSE "@")
         kind = b"@" if m.group(2) is not None else m.group(1)
         close = b")" if kind is None else CLOSE.get(kind, b">")
-        heads, ends = by.setdefault(close, ([], []))
+        heads, ends = by.setdefault(close, (array.array("i"), array.array("i")))
         if ends and ends[-1] == big:
             continue
         if kind is None:
             end = link(m.end())
         elif kind in CLOSE:
             if close not in places:
-                places[close] = [x.start() for x in re.finditer(b"(?=" + re.escape(close) + b")", text)]
+                places[close] = array.array("i", (x.start() for x in re.finditer(b"(?=" + re.escape(close) + b")", text)))
             k = bisect.bisect_left(places[close], m.end())
             end = places[close][k] + len(close) if k < len(places[close]) else big
         else:
-            x = TAG.match(text, m.start())
-            end = x.end() if x else big
+            end = tag_end(text, m.start())
+            end = big if end < 0 else end
         if not ends or end > ends[-1]:
             heads.append(m.end())
             ends.append(end)
@@ -914,17 +1341,24 @@ def inline_held(text, refs):
     return held
 
 
-def cover(pairs):
-    # inside(pos): True when a < pos < b for one of the (a, b) in pairs
-    pairs = sorted(pairs)
-    heads, peak, top = [a for a, _ in pairs], [], -1
-    for _, b in pairs:
-        top = max(top, b)
-        peak.append(top)
+def cover(*pairs):
+    # inside(pos): True when a < pos < b for one of the pairs (a, b), given
+    # as sets of two arrays, their a in order and their b: in a set, the
+    # largest b of those whose a comes before pos, found by bisecting
+    sets = []
+    for heads, ends in pairs:
+        peak, top = ints(len(heads)), -1
+        for k, b in enumerate(ends):
+            top = max(top, b)
+            peak[k] = top
+        sets.append((heads, peak))
 
     def inside(pos):
-        k = bisect.bisect_left(heads, pos)
-        return k > 0 and peak[k - 1] > pos
+        for heads, peak in sets:
+            k = bisect.bisect_left(heads, pos)
+            if k > 0 and peak[k - 1] > pos:
+                return True
+        return False
     return inside
 
 
@@ -944,15 +1378,22 @@ def labels(text):
     # (LABEL_AT), from the first [ to the last ], each step from the ones
     # after it. marked lexes the text of a label again with each \[ and \]
     # in it read as a bracket, which no pass over the raw text places: a
-    # label with one in it is held whole, as a reference is (one of refs)
+    # label with one in it is held whole, as a reference is (one of refs).
+    # Each set of pairs is two arrays, the starts in order and the ends:
+    # regions in the order of their [, the references by the ] that ends
+    # their label (one end each, the largest, all cover reads), the regions
+    # held whole in the order of their [, so none needs a sort
     f, z = text.find(b"["), text.rfind(b"]")
+    none = array.array("i")
     if f < 0 or z < f:
-        return [], []
-    at = [m.start() for m in LABEL_AT.finditer(text, f, z + 1)]
-    n = len(at)
+        return (none, none), ((none, none), (none, none))
+    n = sum(text.count(c, f, z + 1) for c in (b"[", b"]", b"\\", b"`"))
+    at = ints(n)
+    for k, m in enumerate(LABEL_AT.finditer(text, f, z + 1)):
+        at[k] = m.start()
     # inner[k], label[k]: the index in at of the bracket where a shortcut
     # label and a link label read from at[k] stop (-1: they fail there)
-    inner, label, tick = [-1] * (n + 1), [-1] * (n + 1), n
+    inner, label, tick = ints(n + 1, -1), ints(n + 1, -1), n
     for k in range(n - 1, -1, -1):
         p, c = at[k], text[at[k]]
         if c == 91 or c == 93:
@@ -967,28 +1408,86 @@ def labels(text):
                 inner[k], label[k] = inner[j], label[j]
         else:
             inner[k], label[k], tick = inner[k + 1], label[tick + 1] if tick < n else -1, k
-    regions, refs = [], []
+    # the regions are kept only when text holds a backtick (code_spans
+    # reads them then alone), those with an escaped bracket in them as they
+    # come; a reference is marked at the ] that ends its label (ref), its
+    # end being that of the [ after it (inner), the same each time
+    ticks, ref = b"`" in text, ints(n + 1, 0, "B")
+    esc = array.array("i", (m.start() for m in re.finditer(rb"\\[\[\]]", text)))
+    ra, rb, ea, eb = array.array("i"), array.array("i"), array.array("i"), array.array("i")
     for k in range(n):
         if text[at[k]] != 91:
             continue
         q = label[k + 1]
         if q >= 0 and text[at[q] + 1:at[q] + 2] in (b"(", b"["):
             if at[q] > at[k] + 1:
-                regions.append((at[k], at[q]))
+                region(ra, rb, ea, eb, ticks, esc, at[k], at[q])
             r = inner[q + 2] if q + 1 < n and at[q + 1] == at[q] + 1 else -1
             if r >= 0 and text[at[r]] == 93 and at[r] > at[q] + 2:
-                refs.append((at[q] + 1, at[r]))
+                ref[q] = 1
         q = inner[k + 1]
         if q >= 0 and text[at[q]] == 93 and at[q] > at[k] + 1:
-            regions.append((at[k], at[q]))
-    esc = [m.start() for m in re.finditer(rb"\\[\[\]]", text)]
-    refs += [(a, b) for a, b in regions if bisect.bisect_right(esc, b - 2) > bisect.bisect_left(esc, a + 1)]
-    return regions, refs
+            region(ra, rb, ea, eb, ticks, esc, at[k], at[q])
+    del label
+    fa, fb = array.array("i"), array.array("i")
+    for q in range(n):
+        if ref[q]:
+            fa.append(at[q] + 1)
+            fb.append(at[inner[q + 2]])
+    return (ra, rb), ((fa, fb), (ea, eb))
 
 
-def code_spans(text, starts, held, regions, delims):
+def region(ra, rb, ea, eb, ticks, esc, a, b):
+    # a label region (a, b) of labels: kept when ticks, and held whole when
+    # an escaped bracket (esc) lies in it
+    if ticks:
+        ra.append(a)
+        rb.append(b)
+    if bisect.bisect_right(esc, b - 2) > bisect.bisect_left(esc, a + 1):
+        ea.append(a)
+        eb.append(b)
+
+
+def tick_run(text, h):
+    # (the length a backtick run at h opens with, its length): one shorter
+    # after an odd number of backslashes, the last of which escapes its first
+    n = TICKS.match(text, h).end() - h
+    b = h
+    while b > 0 and text[b - 1] == 92:
+        b -= 1
+    return n - (h - b) % 2, n
+
+
+def tick_walk(text, starts):
+    # the backtick runs of text and the walks code_spans reads (it says
+    # how): their starts (heads), the next run each pairs with (nxt), the
+    # runs a walk from one of starts reaches (done), the first run of each
+    # length a run opens with and the last of each length (wide)
+    heads, nr = ints(text.count(b"`")), 0
+    for m in re.finditer(rb"(?<!\\)(\\*)(`+)", text):
+        heads[nr] = m.start(2)
+        nr += 1
+    heads = heads[:nr]
+    nxt, seen, open_at, close_at = ints(nr, -1), {}, {}, {}
+    for i in range(nr - 1, -1, -1):
+        opens, size = tick_run(text, heads[i])
+        nxt[i] = seen.get(opens, -1) if opens else -1
+        seen[size] = i
+        open_at[opens] = heads[i]
+        close_at.setdefault(size, heads[i])
+    done = ints(nr, 0, "B")
+    for s in starts:
+        i = bisect.bisect_left(heads, s)
+        while i < nr and not done[i]:
+            done[i] = 1
+            j = nxt[i]
+            i = i + 1 if j < 0 else j + 1
+    return heads, nxt, done, open_at, close_at
+
+
+def code_spans(text, walk, held, regions, delims):
     # spanned(pos): True when pos may sit in a code span of text, lines
-    # marked may read as one paragraph that begins at any of starts.
+    # marked may read as one paragraph that begins at any line start.
     # CommonMark pairs each backtick run with the next run of its length
     # (after an odd number of backslashes its first backtick is escaped, so
     # it opens one shorter) and leaves an unpaired run literal; the pairing
@@ -1001,25 +1500,13 @@ def code_spans(text, starts, held, regions, delims):
     # lexes the label apart: the run pairs inside the token only, which
     # frees a later run to pair across pos), any run before pos with a run
     # of its length after pos counts. A backslash run is matched from its
-    # start only, and the tests bisect (cover)
-    runs = [(m.start(2), len(m.group(2)) - len(m.group(1)) % 2, len(m.group(2))) for m in re.finditer(rb"(?<!\\)(\\*)(`+)", text)]
-    heads = [r[0] for r in runs]
-    nxt, seen = [None] * len(runs), {}
-    for i in range(len(runs) - 1, -1, -1):
-        nxt[i] = seen.get(runs[i][1]) if runs[i][1] else None
-        seen[runs[i][2]] = i
-    spans, done = [], set()
-    for s in starts:
-        i = bisect.bisect_left(heads, s)
-        while i < len(runs) and i not in done:
-            done.add(i)
-            j = nxt[i]
-            if j is None:
-                i += 1
-            else:
-                spans.append((runs[i][0], runs[j][0]))
-                i = j + 1
-    within = cover(spans)
+    # start only, and the tests bisect (cover). The runs are an array of
+    # their starts (heads), the lengths of each read again where needed
+    # (tick_run); a walk spans from each run it reaches (done) to the next
+    # one it pairs with (nxt), so the spans need no array of their own
+    # (walk, from tick_walk)
+    heads, nxt, done, open_at, close_at = walk
+    nr = len(heads)
     # a label (a, b) of regions: a walk that reaches its first run i0 is
     # outside every span at a, and it pairs a run inside the label past b
     # when it never reaches i1, the first run after b. Each walk steps from
@@ -1027,27 +1514,31 @@ def code_spans(text, starts, held, regions, delims):
     # and the walk from i reaches k when i is under k: the size[k] runs
     # under k, k with them, are numbered from order[k] on (the runs from the
     # last back, each taking the next free number under the run it steps to)
-    big, nr = len(text) + 1, len(runs)
+    big = len(text) + 1
     cross = big
-    if regions and runs:
-        up = [i + 1 if nxt[i] is None else nxt[i] + 1 for i in range(nr)]
-        size, order, free = [1] * (nr + 1), [0] * (nr + 1), [0] * nr + [1]
+    ra, rb = regions
+    if ra and nr:
+        # up[i], the run a walk at i steps to: nxt[i] + 1 when it pairs, else i + 1
+        size, order, free = ints(nr + 1, 1), ints(nr + 1), ints(nr + 1)
+        free[nr] = 1
         for i in range(nr):
-            size[up[i]] += size[i]
+            size[i + 1 if nxt[i] < 0 else nxt[i] + 1] += size[i]
         for i in range(nr - 1, -1, -1):
-            order[i], free[up[i]] = free[up[i]], free[up[i]] + size[i]
+            u = i + 1 if nxt[i] < 0 else nxt[i] + 1
+            order[i], free[u] = free[u], free[u] + size[i]
             free[i] = order[i] + 1
-        for a, b in regions:
+        del free
+        for a, b in zip(ra, rb):
             i0, i1 = bisect.bisect_right(heads, a), bisect.bisect_right(heads, b)
-            if i0 < i1 and i0 in done and not order[i1] <= order[i0] < order[i1] + size[i1]:
+            if i0 < i1 and done[i0] and not order[i1] <= order[i0] < order[i1] + size[i1]:
                 cross = min(cross, heads[i0])
+        del size, order
+    within = cover((heads, (heads[nxt[i]] if done[i] and nxt[i] >= 0 else -1 for i in range(nr))))
+    del nxt
     _, first, last = delims
-    owned = next((r[0] for r in runs if r[0] >= cross or held(r[0]) or any(first[ch] < r[0] < last[ch] for ch in first)), big)
-    opens, closes = {}, {}
-    for r in runs:
-        opens.setdefault(r[1], r[0])
-        closes[r[2]] = r[0]
-    wide = cover((opens[n], closes[n]) for n in opens if n and n in closes)
+    owned = next((h for h in heads if h >= cross or held(h) or any(first[ch] < h < last[ch] for ch in first)), big)
+    pairs = sorted((open_at[n], close_at[n]) for n in open_at if n and n in close_at)
+    wide = cover((array.array("i", (a for a, _ in pairs)), array.array("i", (b for _, b in pairs))))
 
     def spanned(pos):
         return wide(pos) if owned < pos else within(pos)
@@ -1080,26 +1571,27 @@ def path_ok(d):
     return True
 
 
-def joined(piece, s):
-    # True when the word at s in piece may sit in the path of an earlier
-    # import: Claude Code takes a backslash and a space into a path, so
-    # @x\ @AGENTS.md is the one path "x @AGENTS.md", and it starts a path
-    # after whitespace or where a text token of marked may begin. Back from
-    # the "\ " before s, over what a path holds (no other whitespace or
-    # backslash; every byte past ASCII, which may be a JavaScript space,
-    # held as path, and a backslash before [ or ], which marked drops from
-    # a link label), an @ at the start of the line, after whitespace, after
-    # TOKEN_EDGE or after a backslash and one of PUNCT joins it
+def joined(text, ls, s):
+    # True when the word at s in text, on the line that starts at ls, may sit
+    # in the path of an earlier import: Claude Code takes a backslash and a
+    # space into a path, so @x\ @AGENTS.md is the one path "x @AGENTS.md",
+    # and it starts a path after whitespace or where a text token of marked
+    # may begin. Back from the "\ " before s, over what a path holds (no
+    # other whitespace or backslash; every byte past ASCII, which may be a
+    # JavaScript space, held as path, and a backslash before [ or ], which
+    # marked drops from a link label), an @ at the start of the line, after
+    # whitespace, after TOKEN_EDGE or after a backslash and one of PUNCT
+    # joins it
     k = s - 2
-    if piece[k:s] != b"\\ ":
+    if k < ls or text[k:s] != b"\\ ":
         return False
-    while k > 0:
-        c, prev = piece[k - 1:k], piece[max(k - 2, 0):k - 1]
-        if c == b"@" and (not prev or prev.isspace() or prev >= b"\x80" or prev in TOKEN_EDGE or PUNCT.fullmatch(prev) and piece[max(k - 3, 0):k - 2] == b"\\"):
+    while k > ls:
+        c, prev = text[k - 1:k], text[max(k - 2, ls):k - 1]
+        if c == b"@" and (not prev or prev.isspace() or prev >= b"\x80" or prev in TOKEN_EDGE or PUNCT.fullmatch(prev) and text[max(k - 3, ls):k - 2] == b"\\"):
             return True
         if c == b" " and prev == b"\\":
             k -= 2
-        elif c.isspace() or c == b"\\" and piece[k:k + 1] not in (b"[", b"]"):
+        elif c.isspace() or c == b"\\" and text[k:k + 1] not in (b"[", b"]"):
             return False
         else:
             k -= 1
@@ -1113,16 +1605,18 @@ def delim_runs(text):
     # the last run. Wider than marked: a run opens unless a space, tab or
     # line end follows it, any run closes, and only an _ between two ASCII
     # letters or digits does neither (it is no run here)
-    first, last, runs = {}, {}, []
+    # The runs are two arrays, the starts and the characters
+    first, last, starts, chars = {}, {}, array.array("i"), bytearray()
     for m in re.finditer(rb"\*+|_+", text):
-        s, e, ch = m.start(), m.end(), m.group()[:1]
+        s, e, ch = m.start(), m.end(), text[m.start():m.start() + 1]
         if ch == b"_" and ALNUM.fullmatch(text[s - 1:s]) and ALNUM.fullmatch(text[e:e + 1]):
             continue
-        runs.append((s, ch))
+        starts.append(s)
+        chars += ch
         if text[e:e + 1] not in SPACE:
             first.setdefault(ch, s)
         last[ch] = s
-    return runs, first, last
+    return (starts, chars), first, last
 
 
 def emphasis(text, delims):
@@ -1130,11 +1624,10 @@ def emphasis(text, delims):
     # run of its character in text, lines marked may read as one paragraph,
     # as emphasis that splits the import word there (delims, from
     # delim_runs). The runs in text[a:b] are found by bisecting their starts
-    runs, first, last = delims
-    heads = [s for s, _ in runs]
+    (heads, chars), first, last = delims
 
     def paired(a, b):
-        return any(first.get(ch, len(text)) < s or last[ch] > s for s, ch in runs[bisect.bisect_left(heads, a):bisect.bisect_left(heads, b)])
+        return any(first.get(ch, len(text)) < s or last[ch] > s for s, ch in ((heads[i], b"*" if chars[i] == 42 else b"_") for i in range(bisect.bisect_left(heads, a), bisect.bisect_left(heads, b))))
     return paired
 
 
@@ -1144,23 +1637,41 @@ def text_words(text):
     # import word with no backtick in it, a path Claude Code reads whole
     # (path_ok, emphasis) and no earlier path that takes it in (joined),
     # outside every inline construct and code span. A code span is paired
-    # from every line start, which is wider than the one start marked uses
-    words, starts, at = [], [], 0
-    for piece in text.split(b"\n"):
-        starts.append(at)
-        for w in re.finditer(rb"\S+", piece):
-            m = IMPORT.fullmatch(w.group())
-            if m and b"`" not in w.group() and path_ok(m.group(1)) and not joined(piece, w.start()):
-                words.append((at + w.start(), m))
-        at += len(piece) + 1
-    if not words:
+    # from every line start, which is wider than the one start marked uses.
+    # Only a word holding AGENTS.md can be an import, so the words are those
+    # around each AGENTS.md, in order, each with the start of its line
+    if b"AGENTS.md" not in text:
         return []
+    at, words, ls, end = array.array("i"), [], 0, 0
+    i = text.find(b"AGENTS.md")
+    while i >= 0:
+        s = max(end, max(text.rfind(c, end, i) for c in SPACE[1:]) + 1)
+        ls = max(ls, text.rfind(b"\n", end, s) + 1)
+        end = WORD.match(text, i).end()
+        m = IMPORT.fullmatch(text, s, end)
+        if m and b"`" not in text[s:end] and path_ok(m.group(1)) and not joined(text, ls, s):
+            at.append(s)
+            words.append(found_word(m))
+        i = text.find(b"AGENTS.md", end)
+    if not words or not INLINE_ANY.search(text):
+        # with no [, ], <, backtick, * or _ in text, no construct holds a
+        # word (held needs a bracket or a <), no code span, no emphasis
+        return words
     regions, refs = labels(text)
     held = inline_held(text, refs)
-    delims = delim_runs(text)
-    spanned = code_spans(text, starts, held, regions, delims)
-    paired = emphasis(text, delims)
-    return [m for p, m in words if not held(p) and not spanned(p) and not paired(p + 1, p + 1 + len(m.group(1)))]
+    # with no backtick no code span, with no * or _ (and none) no emphasis
+    ticks = b"`" in text
+    delims = delim_runs(text) if ticks or b"*" in text or b"_" in text else None
+    spanned = code_spans(text, tick_walk(text, line_starts(text)), held, regions, delims) if ticks else None
+    paired = emphasis(text, delims) if delims else None
+    return [w for p, w in zip(at, words) if not held(p) and not (spanned and spanned(p)) and not (paired and paired(p + 1, p + 1 + len(w.group(1))))]
+
+
+def line_starts(text):
+    # the offset of each line of text, in order
+    yield 0
+    for m in re.finditer(b"\n", text):
+        yield m.end()
 
 
 def uncomment(raw):
@@ -1175,7 +1686,7 @@ def uncomment(raw):
         if e < 0:
             parts.append(raw[at:])
             return "".join(parts)
-        parts.append(raw[at:s])
+        grow(parts, raw[at:s])
         at = e + 3
 
 
@@ -1183,33 +1694,63 @@ def html_words(raw):
     # the IMPORT matches Claude Code reads in an HTML block (raw, its marked
     # source): only in one that opens with a comment and closes one, outside
     # its comments (uncomment), each path after an @ at the start or after a
-    # JavaScript space (MK_AT), read whole (path_ok), no backslash in it
+    # JavaScript space (at_paths), read whole (path_ok), no backslash in it
     lead = raw.lstrip(JS_TRIM)
     if not lead.startswith("<!--") or "-->" not in lead:
         return []
     rest = uncomment(raw)
     found = []
-    for w in MK_AT.finditer(rest):
-        m = None if "\\" in w.group(1) else IMPORT.fullmatch(b"@" + js_bytes(w.group(1)))
+    for w in at_paths(rest):
+        m = None if "\\" in w else IMPORT.fullmatch(b"@" + js_bytes(w))
         if m and path_ok(m.group(1)):
-            found.append(m)
+            found.append(found_word(m))
     return found
 
 
+def at_paths(rest):
+    # the path of each MK_AT match in rest, as finditer gives them: an @ at
+    # the start or after a JavaScript space (MK_AT_OPEN, at least one path
+    # character after it), then the path, MK_AT_PATH again while it moves
+    p = 0
+    while True:
+        m = MK_AT_OPEN.search(rest, p)
+        if not m:
+            return
+        p = runs(MK_AT_PATH, rest, m.end())
+        yield rest[m.end():p]
+
+
 def md_walk(tokens, found):
-    # the imports in marked block tokens, as Claude Code walks them: the
-    # inline source of each paragraph, heading and list item text, the HTML
-    # blocks, the tokens of each quote and list item; code blocks never
+    # the imports in marked block tokens, as Claude Code walks them: what
+    # each holds that may have one (md_later), then read
+    later = []
+    md_later(tokens, later)
+    for x in later:
+        found.extend(text_words(js_bytes(x)) if isinstance(x, str) else html_words(x[0]))
+
+
+def md_later(tokens, later):
+    # what md_walk reads from tokens, in order: what an MdList took from the
+    # tokens it dropped, then from each token the inline source of a
+    # paragraph, heading or list item text, and an HTML block (as a 1-tuple),
+    # when it holds AGENTS.md (no import is read from one without), the
+    # tokens of a quote and of each list item (what a scan took from the
+    # items it dropped first); from a code block nothing
+    if isinstance(tokens, MdList):
+        later.extend(tokens.later)
     for t in tokens:
         if t.type in ("paragraph", "heading", "text"):
-            found.extend(text_words(js_bytes(t.text)))
+            if "AGENTS.md" in t.text:
+                later.append(t.text)
         elif t.type == "html":
-            found.extend(html_words(t.raw))
+            if "AGENTS.md" in t.raw:
+                later.append((t.raw,))
         elif t.type == "blockquote":
-            md_walk(t.tokens, found)
+            md_later(t.tokens, later)
         elif t.type == "list":
+            later.extend(t.later or ())
             for item in t.items:
-                md_walk(item[2], found)
+                md_later(item[2], later)
 
 
 def md_stop(e):
@@ -1217,29 +1758,55 @@ def md_stop(e):
     return MdBound(str(e) if isinstance(e, MdStop) else "Markdown nested deeper than Triforge reads")
 
 
+# what md_read made of the bytes of the last two calls: imports, add_import
+# and import_bound read the same bytes of a file more than once
+SCANS = []
+
+
+def md_read(data, src):
+    # (found, stop) for data, its text src: the imports md_walk reads from
+    # the tokens MdLexer reads, or none and the MdBound of what stopped it.
+    # A scan (keep off): every token read as soon as it can no longer
+    # change, then dropped
+    for d, got in SCANS:
+        if d is data:
+            return got
+    found, stop = [], None
+    try:
+        md_walk(MdLexer(len(src), False, True).block(src, MdList(True)), found)
+    except (MdStop, RecursionError) as e:
+        found, stop = [], md_stop(e)
+    SCANS[:] = SCANS[-1:] + [(data, (found, stop))]
+    return found, stop
+
+
 def md_scan(data, where=False):
     # (found, open): the IMPORT matches Claude Code reads as text in data
-    # (md_walk over the tokens MdLexer reads, none when it stops), and with
-    # where the construct a line appended to data lands in when it is no
-    # text there ("" for none or without where): the top-level block that
-    # takes the line @AGENTS.md appended, read the same way, or an MdBound
-    # when a bound stops the reading of data, or of data with that line
+    # (md_read, none when MdLexer stops), and with where the construct a
+    # line appended to data lands in when it is no text there ("" for none
+    # or without where): the top-level block that takes the line @AGENTS.md
+    # appended, read the same way, or an MdBound when a bound stops the
+    # reading of data, or of data with that line
     if len(data) > MD_MAX:
         return [], MdBound("more than " + str(MD_MAX) + " bytes") if where else ""
     prefix, body = md_body(data)
-    src, found = js_text(body), []
-    try:
-        md_walk(MdLexer(len(src)).block(src, []), found)
-    except (MdStop, RecursionError) as e:
-        return [], md_stop(e) if where else ""
+    src = js_text(body)
+    del body
+    found, stop = md_read(data, src)
+    if stop is not None:
+        return [], stop if where else ""
     if not where:
         return found, ""
+    # the line appended read with nothing kept but what the where below
+    # reads: the last token of each list, and at the top level the last
+    # that starts at the line or before it (MdList upto)
     tail = src + ("\n" if src and not src.endswith("\n") else "") + "@AGENTS.md\n"
+    del src
+    at = len(tail) - len("@AGENTS.md\n")
     try:
-        tokens = MdLexer(len(tail)).block(tail, [])
+        tokens = MdLexer(len(tail), False, False).block(tail, MdList(False, at))
     except (MdStop, RecursionError) as e:
         return found, md_stop(e)
-    at = len(tail) - len("@AGENTS.md\n")
     t = ([None] + [t for t in tokens if t.at <= at])[-1]
     if t is None or t.at + len(t.raw) <= at:
         # no token reaches the line: a link reference definition, the one
@@ -1271,7 +1838,7 @@ def imports(path, data, targets):
     # file holding it, ~/ is HOME, an absolute path stands, ".." collapses
     # lexically (as cd does) before symlinks resolve.
     base = os.path.dirname(path)
-    for m in md_scan(data)[0]:
+    for m in dict.fromkeys(md_scan(data)[0]):
         d = os.fsdecode(m.group(1))
         if d.startswith("~/"):
             if not home():
@@ -1384,7 +1951,7 @@ def kind_names(kinds):
 
 
 def row(kind, where, path, level, project):
-    data = load_md(path) if kind in CLAUDE_KINDS else load(path)
+    data = load_md(path) if kind in CLAUDE_KINDS else load(path)[0]
     if data is None:
         states = ["unreadable"]
     elif kind in CLAUDE_KINDS:
@@ -1399,7 +1966,15 @@ def row(kind, where, path, level, project):
     if linked(level, kind):
         states.append("symlink")
     imp = import_line(kind, level, project) if kind in CLAUDE_KINDS and where != "user" else "-"
-    return "\t".join((kind, where, ",".join(states), clean(path), clean(imp if reads_back(path, imp, project) else "-")))
+    imp = imp if reads_back(path, imp, project) else "-"
+    if imp != "-" and states[0] == "no-import" and import_bound(path, data, imp, project):
+        # a line a reading bound stops (import_bound): no line can import
+        # AGENTS.md from this file as Triforge reads it, so the column is -
+        # and the state says why (past-bound); visibility and
+        # instruction_add_import name the bound. Session start reads both.
+        imp = "-"
+        states.append("past-bound")
+    return "\t".join((kind, where, ",".join(states), clean(path), clean(imp)))
 
 
 def detect(fn, start):
@@ -1468,13 +2043,16 @@ def toml_load(data, r):
 
 
 def reader_config(r):
-    # (settings, path, state) of <reader home>/<config>; state absent | read | unreadable
+    # (settings, path, state) of <reader home>/<config>; state absent | read |
+    # unreadable | cut (more than FILE_MAX bytes: nothing past them known)
     rh = reader_home(r)
     path = os.path.join(rh, r["config"]) if rh and r["config"] else ""
     empty = {"max": None, "trust": {}}
     if not path or not lexists(path):
         return empty, path, "absent"
-    data = load(path)
+    data, size = load(path)
+    if data is not None and size > FILE_MAX:
+        return empty, path, "cut"
     cfg = toml_load(data, r) if data is not None else None
     if cfg is None:
         return empty, path, "unreadable"
@@ -1489,9 +2067,14 @@ def budget_of(r, cfg, path):
 
 
 def user_level(r):
-    # (path, bytes) of the file the reader takes from its home first
+    # (path, bytes, size) of the file the reader takes from its home first
     rh = reader_home(r) if r["user_level"] else ""
-    return level_file(r, rh, r["user_level"]) if rh else (None, None)
+    return level_file(r, rh, r["user_level"]) if rh else (None, None, 0)
+
+
+def too_long(path, what):
+    # the clause that names the FILE_MAX bound a file passes
+    return path + " is more than the " + str(FILE_MAX) + " bytes Triforge reads from " + what
 
 
 def visibility(fn, lead, reader, start):
@@ -1520,27 +2103,36 @@ def reach(lead, r, cwd):
     # its override over AGENTS.md), the budget, the shadow files
     levels = read_levels(r, cwd)
     cfg, cfg_path, cfg_state = reader_config(r)
+    if cfg_state == "cut":
+        # a trust entry past the bytes read may mark this project untrusted
+        return say(lead, "hidden", too_long(cfg_path, "the reader config") + ", so whether it marks this project " + r["untrusted"] + " or sets " + r["budget_key"] + " is not known, nor whether AGENTS.md reaches this reader; shorten it")
     for key, value in cfg["trust"].items():
         if r["untrusted"] and value == r["untrusted"] and isinstance(key, str) and os.path.realpath(key) in (levels[0], cwd):
             return say(lead, "hidden", "the project " + key + " is marked " + value + " in " + cfg_path + " (" + r["trust_key"] + " = \"" + value + "\"), so this reader takes no project AGENTS.md")
     budget, source = budget_of(r, cfg, cfg_path)
     note = " (" + cfg_path + " is unreadable, so the default applies)" if cfg_state == "unreadable" else ""
-    up, ud = user_level(r)
-    used = user = len(ud) if ud is not None else 0
-    pointers = []
+    # each file counts at its size (load), its pointer block found in the
+    # bytes read; one in the working directory longer than them and with no
+    # block in them is cut, which instruction_merge_pointer does not write
+    up, ud, user = user_level(r)
+    used, pointers, cut = user, [], ""
     for level in levels:
-        p, d = level_file(r, level)
+        p, d, size = level_file(r, level)
         if d is None:
             continue
         if has_block(d):
             pointers.append((p, level, used + block_end(d)))
-        used += len(d)
+        elif size > FILE_MAX and level == cwd:
+            cut = p
+        used += size
     if not pointers:
         for level in levels:
             a, o = os.path.join(level, "AGENTS.md"), os.path.join(level, r["override"] or "AGENTS.md")
-            d = load(a) if r["override"] and lexists(a) else None
-            if d is not None and has_block(d) and load(o) is not None:
+            d = load(a)[0] if r["override"] and lexists(a) else None
+            if d is not None and has_block(d) and readable(o):
                 return say(lead, "hidden", "shadowed by " + o + ": this reader takes it instead of " + a + " at that level; merge the pointer block into it by hand, or remove it")
+        if cut:
+            return say(lead, "hidden", "no AGENTS.md between " + levels[0] + " and " + cwd + " holds the Triforge pointer block in the bytes Triforge reads; " + too_long(cut, "an AGENTS.md") + ", so instruction_merge_pointer does not write it: shorten it, or add the block yourself")
         return say(lead, "hidden", "no AGENTS.md between " + levels[0] + " and " + cwd + " holds the Triforge pointer block; instruction_merge_pointer adds it")
     pointer, plevel, end = pointers[0]
     if r["budget_key"] and end > budget:
@@ -1556,8 +2148,9 @@ def reach(lead, r, cwd):
         if not shadows:
             tail += ": no " + kind_names(r["shadow"]) + " at " + cwd + " or above"
         else:
+            loaded = {}
             for p in [s[0] for s in shadows] + [u for u in user_tiers() if lexists(u)]:
-                d = load_md(p)
+                d = loaded[p] = load_md(p)
                 if d is not None and imports(p, d, set(l for _, l, _ in pointers)):
                     return say(lead, "visible", p + " imports " + pointer + ", so it is loaded with that file" + note)
             p, kind, level = shadows[0]
@@ -1570,13 +2163,25 @@ def reach(lead, r, cwd):
                 pointer, plevel = mine[0][0], mine[0][1]
                 line = import_line(kind, level, plevel)
                 fix = "add the line " + line + " to " + p + " (instruction_add_import " + p + (", run from " + plevel if plevel != cwd else "") + ")"
+                # an import a reading bound would stop (import_bound) is
+                # never offered: the bound is named instead, in the words
+                # instruction_add_import refuses it with
+                bound = import_bound(p, loaded.get(p), line, plevel)
                 if level != plevel and plevel.startswith(level.rstrip("/") + "/"):
                     # a file above the project: a file in the project first; an
                     # import there reaches every project under it, and none is
                     # offered at HOME or above (the writers refuse those), nor
                     # one that would not read back (reads_back)
                     own = "add a " + CLAUDE_KINDS[0] + " holding the line " + import_line(CLAUDE_KINDS[0], plevel, plevel) + " to " + plevel + ", which loads it for that project only"
-                    fix = own if home_or_above(level) or not reads_back(p, line, plevel) else own + "; or " + fix + ", which loads it for every project under " + level
+                    if home_or_above(level) or not reads_back(p, line, plevel):
+                        fix = own
+                    elif bound:
+                        fix = own + "; " + bound
+                    else:
+                        fix = own + "; or " + fix + ", which loads it for every project under " + level
+                elif bound:
+                    own = CLAUDE_KINDS[0]
+                    fix = bound + ("" if same_file(p, os.path.join(plevel, own)) else "; or put the line " + import_line(own, plevel, plevel) + " in " + os.path.join(plevel, own) + " instead, which loads it for this project only")
             return say(lead, "hidden", "shadowed by " + ", ".join(s[0] for s in shadows) + ": this reader takes AGENTS.md only while no " + kind_names(r["shadow"]) + " exists in the working directory or above, and none of them imports " + pointer + "; " + fix)
     return say(lead, "visible", pointer + " is read" + tail + note)
 
@@ -1660,6 +2265,43 @@ def current_umask():
     return u
 
 
+def appended(path, data, line, project):
+    # (new, why) for the line appended to the CLAUDE.md-family file at path
+    # (data, as load_md read it): new, its bytes then; why, None when this
+    # reader reads new back as an import of <project>/AGENTS.md, an MdBound
+    # when a reading bound stops it there (the bytes Claude Code reads an
+    # import from, the work, steps or nesting md_scan reads), the sentence
+    # instruction_add_import refuses with and visibility and detect name,
+    # else where md_scan says the line lands ("" for no block)
+    new = data + (b"\n" if data and not data.endswith(b"\n") else b"") + os.fsencode(line) + b"\n"
+    if imports(path, new, {project}):
+        return new, None
+    agents = os.path.join(project, "AGENTS.md")
+    if len(new) > MD_MAX:
+        # a size bound: Claude Code reads no import from the file, and data
+        # may be only its first MD_MAX + 1 bytes (load_md)
+        size = "is more than" if len(data) > MD_MAX else "would be " + str(len(new)) + " bytes with the line " + line + " appended, more than"
+        return new, MdBound(path + " " + size + " the " + str(MD_MAX) + " bytes Claude Code reads an import from, and Triforge reads no import from such a file either, so the line " + line + " would not read back as an import of " + agents + " there; shorten the file, or add the line yourself where Claude Code reads it")
+    where = md_scan(data, True)[1]
+    if isinstance(where, MdBound):
+        # another bound: the file holds more, or deeper, Markdown than
+        # MdLexer reads, so no import is read from it, the line included
+        return new, MdBound(path + " with the line " + line + " appended holds " + where + ", and Triforge reads no import from such a file, so the line would not read back as an import of " + agents + " there; add the line yourself where Claude Code reads it")
+    return new, where
+
+
+def import_bound(path, data, line, project):
+    # the sentence of appended that names a reading bound, when it stops the
+    # line in the CLAUDE.md-family file at path (data, as load_md read it)
+    # from reading back as an import of <project>/AGENTS.md; "" when the
+    # file imports it already, the line reads back, or something else keeps
+    # it from that (instruction_add_import names that itself)
+    if data is None or imports(path, data, {project}):
+        return ""
+    why = appended(path, data, line, project)[1]
+    return why if isinstance(why, MdBound) else ""
+
+
 def add_import(fn, arg, yes):
     path, kind, level, rc = target_of(fn, arg, CLAUDE_KINDS)
     if rc is not None:
@@ -1682,26 +2324,19 @@ def add_import(fn, arg, yes):
         # the line would never be seen as this import (reads_back), so it is
         # refused before any plan, also with --yes
         return refuse(fn, path + " would need the line " + line + ", which would not read back as an import of " + os.path.join(project, "AGENTS.md") + " (an import path ends at whitespace or a #, one that starts with ~/ is read from your home directory, one that starts with any character but a letter, a digit, . _ or - loads nothing, and Markdown reads a backslash, <, [, ], or a * or _ that pairs, in it as markup); put the line " + import_line(own, project, project) + " in " + os.path.join(project, own) + " instead, which loads it for this project only")
-    new = data + (b"\n" if data and not data.endswith(b"\n") else b"") + os.fsencode(line) + b"\n"
-    if not imports(path, new, {project}):
+    new, why = appended(path, data, line, project)
+    if why is not None:
         # the line reads back alone, but appended it lands where Claude Code
         # reads no import (md_scan: the file ends inside a fenced code block
         # never closed, say), so every approved run would append it again:
-        # refused before any plan, also with --yes, naming where
+        # refused before any plan, also with --yes, naming where, or the
+        # reading bound that stops Triforge there
         alt = "" if same_file(path, os.path.join(project, own)) else "; or put the line " + import_line(own, project, project) + " in " + os.path.join(project, own) + " instead, which loads it for this project only"
         agents = os.path.join(project, "AGENTS.md")
-        if len(new) > MD_MAX:
-            # a size bound: Claude Code reads no import from the file, and
-            # data may be only its first MD_MAX + 1 bytes (load_md)
-            size = "is more than" if len(data) > MD_MAX else "would be " + str(len(new)) + " bytes with the line " + line + " appended, more than"
-            return refuse(fn, path + " " + size + " the " + str(MD_MAX) + " bytes Claude Code reads an import from, and Triforge reads no import from such a file either, so the line " + line + " would not read back as an import of " + agents + " there; shorten the file, or add the line yourself where Claude Code reads it" + alt)
-        where = md_scan(data, True)[1]
-        if isinstance(where, MdBound):
-            # another bound: the file holds more, or deeper, Markdown than
-            # MdLexer reads, so no import is read from it, the line included
-            return refuse(fn, path + " with the line " + line + " appended holds " + where + ", and Triforge reads no import from such a file, so the line would not read back as an import of " + agents + " there; add the line yourself where Claude Code reads it" + alt)
-        if where:
-            return refuse(fn, path + " ends inside " + where + ", so the line " + line + " appended there would not read back as an import of " + agents + " (Claude Code reads an import from Markdown text only); close it first, or add the line yourself outside it" + alt)
+        if isinstance(why, MdBound):
+            return refuse(fn, why + alt)
+        if why:
+            return refuse(fn, path + " ends inside " + why + ", so the line " + line + " appended there would not read back as an import of " + agents + " (Claude Code reads an import from Markdown text only); close it first, or add the line yourself outside it" + alt)
         return refuse(fn, path + " would not read back the line " + line + ", appended at its end, as an import of " + agents + " (Claude Code reads an import from Markdown text only, never from front matter, a code span or inline HTML, nor one whose * or _ pairs with another in its paragraph); add the line yourself where Claude Code reads it" + alt)
     plan = "add the line " + line + " to " + path + ", so Claude Code loads " + os.path.join(project, "AGENTS.md") + " with it"
     if lev != project:
@@ -1729,7 +2364,9 @@ def merge_plan(fn, dirarg, template):
     why = user_owned(path) or home_why(path, target)
     if why:
         return refuse(fn, why), None
-    tmpl = load(template) if template else None
+    tmpl, size = load(template) if template else (None, 0)
+    if tmpl is not None and size > FILE_MAX:
+        return refuse(fn, too_long(template, "the pointer block template"), 69), None
     if tmpl is None or not has_block(tmpl) or tmpl.count(START) != 1:
         return refuse(fn, "the pointer block template " + (template or "(no plugin root)") + " is missing or has no single marked block", 69), None
     block = tmpl[tmpl.find(START):block_end(tmpl)]
@@ -1737,9 +2374,13 @@ def merge_plan(fn, dirarg, template):
         return refuse(fn, path + " is a symlink: Triforge replaces a regular file in place and never writes through a link; merge the block into the link target yourself"), None
     old = None
     if lexists(path):
-        old = load(path)
+        old, size = load(path)
         if old is None:
             return refuse(fn, path + " is not a regular file"), None
+        if size > FILE_MAX:
+            # what follows the bytes read would be lost, or the block put
+            # in twice: no writer writes a file it has not read whole
+            return refuse(fn, too_long(path, "an AGENTS.md") + ", and Triforge writes no file it has not read whole, so the pointer block is not merged into it; shorten it, or merge the block yourself"), None
         ns, ne = old.count(START), old.count(END)
         if ns == 0 and ne == 0:
             new = old + (b"\n" if old and not old.endswith(b"\n") else b"") + (b"\n" if old else b"") + block + b"\n"
@@ -1755,20 +2396,22 @@ def merge_plan(fn, dirarg, template):
     # the files the budgeted reader would combine with the new AGENTS.md: its
     # user-level file, one per directory from its root down to the parent of
     # <dir>, then this one
+    # (each at its size, load), checked against the budget the reader config
+    # sets, which a config longer than the bytes read leaves unknown
     r = READERS[BUDGETED]
-    cfg, cfg_path, _ = reader_config(r)
+    cfg, cfg_path, cfg_state = reader_config(r)
+    if cfg_state == "cut":
+        return refuse(fn, too_long(cfg_path, "the reader config") + ", so the " + r["budget_key"] + " it sets is not known and the budget of the files the " + BUDGETED + " reader combines cannot be checked; nothing written. Shorten it"), None
     budget, source = budget_of(r, cfg, cfg_path)
-    up, ud = user_level(r)
-    user = len(ud) if ud is not None else 0
+    up, ud, user = user_level(r)
     above = 0
     for level in read_levels(r, target)[:-1]:
-        p, d = level_file(r, level)
-        above += len(d) if d is not None else 0
+        above += level_file(r, level)[2]
     total = user + above + len(new)
     override = os.path.join(target, r["override"]) if r["override"] else ""
     return 0, {"path": path, "target": target, "old": old, "new": new, "action": action,
                "budget": budget, "source": source, "key": r["budget_key"], "user": user, "above": above,
-               "total": total, "override": override if override and load(override) is not None else ""}
+               "total": total, "override": override if override and readable(override) else ""}
 
 
 def merge_check(fn, plan):
