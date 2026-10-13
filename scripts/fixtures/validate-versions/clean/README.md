@@ -4,8 +4,13 @@
 
 - A builder halts at more than 50 changed files.
 
-## Recent changes
+---
 
-### 2026-01-01 — v1.2.3: clean fixture
+<a name="recent-changes"></a>
+## Release history
 
-- The ledger keeps what each release said, so an entry about 50+ file changes stays.
+- The release history keeps what each release said, so an entry about 50+ file changes stays.
+
+## FAQ
+
+- A builder halts at more than 50 changed files, so a task touching exactly 50 goes on.

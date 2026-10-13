@@ -1,0 +1,12 @@
+{
+  "name": "vv-fixture",
+  "metadata": {
+    "version": "1.2.3"
+  },
+  "plugins": [
+    {
+      "name": "agent-triforge",
+      "version": "1.2.3"
+    }
+  ]
+}

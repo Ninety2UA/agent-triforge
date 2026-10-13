@@ -1,25 +1,33 @@
 #!/usr/bin/env bash
 # release-notes.sh — GitHub release title / body / tag target for a plugin version.
 #
-# README.md is the release ledger: every shipped version has a "## Recent changes"
-# entry headed "### <YYYY-MM-DD> — v<X.Y.Z>: <title>" (the "## What's new (vX.Y.Z)"
-# summary block is the fallback source). This script is the one place that turns
-# that entry into the GitHub release, so the notes on the Releases page are the
-# README entry verbatim plus an install/compare footer. Consumed by
-# .github/workflows/release.yml on every version bump that lands on main;
-# runnable by hand for a preview.
+# docs/releases/ is the release ledger: every shipped version has a notes file
+# docs/releases/v<X.Y.Z>.md whose first line is "# <YYYY-MM-DD> — v<X.Y.Z>: <title>"
+# and whose body (every line after it) starts with that version's "## What's new".
+# This script is the one place that turns that file into the GitHub release, so
+# the notes on the Releases page are the file's body plus an install/compare
+# footer. Each repo-relative link "](../../<path>)" becomes
+# "](https://github.com/Ninety2UA/agent-triforge/blob/v<X.Y.Z>/<path>)", so it
+# resolves on the release page. Consumed by .github/workflows/release.yml on
+# every version bump that lands on main; runnable by hand for a preview.
 #
 # Usage:
 #   bash scripts/release-notes.sh [--title | --body | --target] [version]
 #
 #   version    defaults to .claude-plugin/plugin.json's "version"
-#   --title    "v<version> — <Recent changes title>"  ("v<version>" when the entry has no title)
-#   --body     the ledger entry's markdown + the install / compare footer  (default)
+#   --title    "v<version> — <title>": the heading's text after its first ": ",
+#              first letter capitalized ("v<version>" when the title is empty)
+#   --body     the notes file's body + the install / compare footer  (default);
+#              the footer links the notes file at the tag when the tag holds
+#              it (or, before the tag exists, the --target commit does), else
+#              at main
 #   --target   the commit that first set .claude-plugin/plugin.json to <version> — the tag target
 #
-# Exit codes: 0 ok · 1 no README entry (a release never ships with empty notes —
-# add the "### <date> — v<version>: <title>" entry first) or no bump commit found ·
-# 2 usage. Bash 3.2-compatible (macOS /bin/bash); BSD and GNU awk/sed/grep/sort.
+# Exit codes: 0 ok · 1 no notes file, a first line that is not its
+# "# <date> — v<version>: <title>" heading, or an empty body (a release never
+# ships without notes; write docs/releases/v<version>.md first), or no bump
+# commit found · 2 usage. Bash 3.2-compatible (macOS /bin/bash); BSD and GNU
+# awk/sed/grep/sort.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -64,42 +72,48 @@ case "$VERSION" in
   *) echo "release-notes: version must be X.Y.Z (got '$VERSION')" >&2; exit 2 ;;
 esac
 TAG="v$VERSION"
+NOTES="docs/releases/$TAG.md"
 
-# The ledger entry's heading title, or empty. Literal substring match on
-# "v<version>:" — the colon keeps v3.3.1 from matching v3.3.10.
-ledger_title() {
-  awk -v v="$VERSION" '
-    /^## Recent changes/ { led = 1; next }
-    led && /^### / && index($0, "v" v ":") > 0 {
-      sub(/^### [^:]*: */, ""); print; exit
-    }
-  ' README.md
+# Exits 1 unless the notes file exists and its first line is the heading
+# "# <date> — v<version>: <title>". Literal substring match on "v<version>:" —
+# the colon keeps v3.3.1 from matching v3.3.10.
+require_notes() {
+  if [ ! -f "$NOTES" ]; then
+    echo "release-notes: no notes file $NOTES — write it before releasing: first line '# <YYYY-MM-DD> — $TAG: <title>', then the notes, starting with '## What's new'" >&2
+    exit 1
+  fi
+  if ! awk -v v="$VERSION" 'NR == 1 { if (/^# / && index($0, "v" v ":") > 0) found = 1; exit } END { exit !found }' "$NOTES"; then
+    echo "release-notes: $NOTES does not start with its heading '# <YYYY-MM-DD> — $TAG: <title>'" >&2
+    exit 1
+  fi
 }
 
-# The ledger entry's body: the lines after its heading up to the next heading
-# or "---" separator. Empty when the version has no entry.
-ledger_body() {
-  awk -v v="$VERSION" '
-    /^## Recent changes/ { led = 1; next }
-    led && /^### / {
-      if (inentry) exit
-      if (index($0, "v" v ":") > 0) inentry = 1
-      next
-    }
-    led && inentry {
-      if ($0 ~ /^---[ \t]*$/ || $0 ~ /^## /) exit
-      print
-    }
-  ' README.md
+# The heading's title: its text after the first ": " (empty when there is none).
+notes_title() {
+  awk 'NR == 1 { i = index($0, ": "); if (i > 0) { t = substr($0, i + 2); sub(/^ */, "", t); print t } exit }' "$NOTES"
 }
 
-# Fallback: the "## What's new (v<version>)" summary block.
-whats_new_body() {
-  awk -v hdr="## What's new (v$VERSION)" '
-    index($0, hdr) == 1 { inb = 1; next }
-    inb && (/^## / || /^### /) { exit }
-    inb { print }
-  ' README.md
+# The notes file's body: every line after its heading, each repo-relative link
+# "](../../<path>)" rewritten to the file in the repository at the tag. index()
+# and substr() only, so mawk, gawk and BSD awk agree.
+notes_body() {
+  awk -v base="$REPO_URL/blob/$TAG/" '
+    NR == 1 { next }
+    {
+      out = ""; rest = $0
+      while ((i = index(rest, "](../../")) > 0) {
+        out = out substr(rest, 1, i + 1) base
+        rest = substr(rest, i + 8)
+      }
+      print out rest
+    }
+  ' "$NOTES"
+}
+
+# Oldest commit on the current history that introduced this exact version
+# string — the bump commit, whether a direct push or a squash merge.
+bump_commit() {
+  git log --format=%H -S"\"version\": \"$VERSION\"" -- .claude-plugin/plugin.json | tail -1
 }
 
 # Drop leading and trailing blank lines, keep interior ones.
@@ -118,7 +132,8 @@ previous_tag() {
 
 case "$MODE" in
   title)
-    t=$(ledger_title)
+    require_notes
+    t=$(notes_title)
     if [ -n "$t" ]; then
       first=$(printf '%s' "${t:0:1}" | tr '[:lower:]' '[:upper:]')
       printf '%s — %s%s\n' "$TAG" "$first" "${t:1}"
@@ -127,15 +142,25 @@ case "$MODE" in
     fi
     ;;
   body)
-    body=$(ledger_body | trim_blank_lines)
+    require_notes
+    body=$(notes_body | trim_blank_lines)
     if [ -z "$body" ]; then
-      body=$(whats_new_body | trim_blank_lines)
-    fi
-    if [ -z "$body" ]; then
-      echo "release-notes: README.md has no '## Recent changes' entry '### <date> — $TAG: <title>' (nor a '## What's new ($TAG)' block) — add it before releasing" >&2
+      echo "release-notes: $NOTES has nothing after its heading — write the notes before releasing" >&2
       exit 1
     fi
     prev=$(previous_tag)
+    # The notes file at the tag once the tag holds it (or, before the tag
+    # exists, the commit it will be created at); tags older than docs/releases/
+    # link it on main.
+    if git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null; then
+      at="$TAG"
+    else
+      at=$(bump_commit)
+    fi
+    ref=main
+    if [ -n "$at" ] && git cat-file -e "$at:$NOTES" 2>/dev/null; then
+      ref="$TAG"
+    fi
     printf '%s\n\n---\n\n' "$body"
     printf '**Install / update (Claude Code):** `claude plugin marketplace add %s` · `claude plugin install agent-triforge@agent-triforge` · `claude plugin update agent-triforge`\n\n' "$REPO_URL"
     printf '**Install (Codex):** `codex plugin marketplace add %s` · `codex plugin add agent-triforge@agent-triforge`\n\n' "$REPO_SLUG"
@@ -144,12 +169,10 @@ case "$MODE" in
     else
       printf '**Full changelog:** '
     fi
-    printf '[README › Recent changes](%s/blob/%s/README.md#recent-changes)\n' "$REPO_URL" "$TAG"
+    printf '[%s](%s/blob/%s/%s)\n' "$NOTES" "$REPO_URL" "$ref" "$NOTES"
     ;;
   target)
-    # Oldest commit on the current history that introduced this exact version
-    # string — the bump commit, whether a direct push or a squash merge.
-    target=$(git log --format=%H -S"\"version\": \"$VERSION\"" -- .claude-plugin/plugin.json | tail -1)
+    target=$(bump_commit)
     if [ -z "$target" ]; then
       echo "release-notes: no commit sets .claude-plugin/plugin.json to $VERSION on this history" >&2
       exit 1

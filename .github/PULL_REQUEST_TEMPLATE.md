@@ -31,7 +31,7 @@ versions produced this change.
 - [ ] `bash scripts/probe-capabilities.sh --self-only` exits 0 (the SELF gate)
 - [ ] `/bin/bash -n` passes on `scripts/*.sh`, `scripts/lib/*.sh` and `hooks/handlers/*.sh`
 - [ ] Probe record regenerated and cited: `ops/research/<YYYY-MM>-probe-record.md` — rows: <!-- e.g. AGY-05, CDX-03 -->
-- [ ] Version bump PRs only: README "Recent changes" has the `### <date> — v<version>: <title>` entry — it becomes the GitHub release when this merges (`.github/workflows/release.yml`; preview with `bash scripts/release-notes.sh --body`)
+- [ ] Version bump PRs only: `docs/releases/v<version>.md` exists, starts with `# <date> — v<version>: <title>` and holds the README "What's new" text — it becomes the GitHub release when this merges (`.github/workflows/release.yml`; preview with `bash scripts/release-notes.sh --body`)
 
 ## Protected paths touched?
 

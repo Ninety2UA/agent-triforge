@@ -7,46 +7,40 @@
 </p>
 
 <p align="center">
-  <a href="#what-is-this">Overview</a> ·
-  <a href="#recent-changes">Recent changes</a> ·
-  <a href="#project-structure">Structure</a> ·
-  <a href="#sprint-pipeline-at-ship">Pipeline</a> ·
-  <a href="#planning-pipeline-at-plan">Plan</a> ·
-  <a href="#deep-research-at-deep-research">Research</a> ·
-  <a href="#wave-orchestration-at-build">Build</a> ·
-  <a href="#review-swarm-at-review">Review</a> ·
-  <a href="#test-pipeline-at-test">Test</a> ·
-  <a href="#debugging-at-debug">Debug</a> ·
-  <a href="#quality-gates">Gates</a> ·
-  <a href="#context-recovery">Context</a> ·
-  <a href="#getting-started">Quick Start</a> ·
+  <a href="#whats-new">What's new</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#getting-started">Getting started</a> ·
+  <a href="#unattended-runs">Unattended runs</a> ·
+  <a href="#upgrading-from-3x">Upgrading from 3.x</a> ·
+  <a href="#workflow">Workflow</a> ·
+  <a href="#team-work-and-swarms">Team work</a> ·
+  <a href="#model-and-effort">Model and effort</a> ·
   <a href="#lead-workflows-reference">Workflows</a> ·
+  <a href="#skills-reference">Skills</a> ·
+  <a href="#personas-reference">Personas</a> ·
+  <a href="#compatibility">Compatibility</a> ·
+  <a href="#recent-changes">Release history</a> ·
   <a href="#faq">FAQ</a>
 </p>
 
 ---
 
-## What is this?
+## Why Agent Triforge
 
-A production-grade framework in which one AI coding CLI leads an **eight-CLI builder pool**. Instead of one model doing everything — or a fixed role for each CLI — a user-editable roster ([`ops/roster.toml`](templates/ops/roster.toml)) decides which CLI, model, and effort handles each role, and any member can implement code (Devin only if you opt in):
+Agent Triforge puts several AI coding CLIs on one sprint. One CLI leads an eight-CLI builder pool, and a roster you can edit, [`ops/roster.toml`](templates/ops/roster.toml), gives each role a CLI, a model and an effort. Any member can implement code; Devin builds only if you opt in.
 
-- **The lead** is **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** or **[Codex](https://github.com/openai/codex)**, chosen in [`at-setup`](skills/at-setup/SKILL.md) and recorded in the roster's `[lead]` table (Claude Code when the table is absent). It plans, resolves the roster, dispatches builders and merges reviewed work. Claude's model ladder is Fable 5.1 → Opus 5.5 → Sonnet 5.5.
-- **Core trio (required):** Claude · **[Antigravity](https://antigravity.google/cli)** (`agy`, Gemini 3.8 Flash (High) by default, 1M context) · **[Codex](https://github.com/openai/codex)** (`gpt-6-astra`, sandboxed)
-- **Optional tier (auto-detected):** **OpenCode** (OpenRouter `glm-5.3`) · **Kimi Code** (`kimi-code/k3`) · **Cursor** (Grok 4.6) · **Grok Build** (`grok-4.7`; builder, reviewer or analyst), enrolled through [`at-setup`](skills/at-setup/SKILL.md) and skipped cleanly when not enrolled. **Devin** (`swe-1-6-slow`, reviewer or analyst) joins only after you record your consent in `at-setup`
-- **19 specialist personas** cover [security](personas/security-sentinel.md), [performance](personas/performance-oracle.md), [architecture](personas/architecture-strategist.md) and more. One manifest sets each persona's tools, model tier and turn budget.
+- The lead is [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Codex](https://github.com/openai/codex). You choose it in [`at-setup`](skills/at-setup/SKILL.md), which records it in the roster's `[lead]` table; without the table, Claude Code leads. The lead plans, resolves the roster, dispatches builders and merges reviewed work. Claude's model ladder is Fable 5.1 → Opus 5.5 → Sonnet 5.5.
+- The core trio is required: Claude, [Antigravity](https://antigravity.google/cli) (`agy`, Gemini 3.8 Flash (High) by default, 1M context) and [Codex](https://github.com/openai/codex) (`gpt-6-astra`, sandboxed).
+- The optional tier is detected automatically: OpenCode (OpenRouter `glm-5.3`), Kimi Code (`kimi-code/k3`), Cursor (Grok 4.6) and Grok Build (`grok-4.7`; builder, reviewer or analyst). You enroll them through [`at-setup`](skills/at-setup/SKILL.md), and one you don't enroll is skipped cleanly. Devin (`swe-1-6-slow`, reviewer or analyst) joins only after you record your consent in `at-setup`.
+- 19 specialist personas cover [security](personas/security-sentinel.md), [performance](personas/performance-oracle.md), [architecture](personas/architecture-strategist.md) and more. One manifest sets each persona's tools, model tier and turn budget.
 
-Every non-lead build runs under a **per-task lease in an isolated git worktree** and merges only after **cross-review by a pinned non-author reviewer** — safety is isolation + cross-review, not write-restriction. Work is tracked in shared markdown files. Reviews run in parallel. Knowledge compounds across sessions.
+Every implementation task, the lead's own included, is built under a per-task lease in its own git worktree and merges only after a pinned reviewer, never its builder, has cross-reviewed it. Safety comes from that isolation and cross-review; any member may write code. Work is tracked in shared markdown files under `ops/`, reviews run in parallel, and what one sprint learns is written down for the next.
 
-> *Each sprint should make the next sprint easier — not harder.*
+> *Each sprint should make the next sprint easier.*
 
-The framework achieves this through **institutional knowledge compounding**: every non-trivial problem solved gets documented in [`ops/solutions/`](ops/solutions/), every architectural decision in [`ops/decisions/`](ops/decisions/), and a [`learnings-researcher`](personas/learnings-researcher.md) persona searches these before planning new work.
+When the lead solves a problem whose reasoning would otherwise be lost, it writes a note to [`ops/solutions/`](ops/solutions/), or to [`ops/decisions/`](ops/decisions/) for an architectural decision. The [`learnings-researcher`](personas/learnings-researcher.md) persona searches both before new work is planned ([the knowledge loop](#the-knowledge-loop-at-compound)).
 
-<p align="center">
-  <img src="docs/images/knowledge-loop.svg" alt="Knowledge compounding loop — solve, compound, search, plan, repeat" width="80%">
-</p>
-
----
-
+<a name="whats-new"></a>
 ## What's new (v4.1.0)
 
 This release fixes what the 4.0 review left open, and what the review of those fixes found. Nothing changes in how you run Triforge.
@@ -59,155 +53,330 @@ This release fixes what the 4.0 review left open, and what the review of those f
 - **The maintainer tools ignore planted modules**, like the rest of the helpers since 4.0: the validators, the release notes and the probe harness.
 - **Five diagrams redrawn** so no arrow crosses a label.
 
-## What's new (v4.0.0)
+---
 
-Codex can lead a Triforge project now. You pick the lead in `at-setup`, which records it in a `[lead]` table in `ops/roster.toml`; a project without that table keeps Claude Code. The scripts, skills and templates read the lead from that table and the CLI registry; outside the registry and the roster loader, no script branches on the lead's name (KTD1). The work followed `docs/plans/2026-09-28-1946-feat-lead-choice-v4-plan.md`, Phases 0 to 6.
+## Install
 
-- **Codex can lead.** `triforge_bootstrap` sets up a project from either lead, before you have trusted the plugin's hooks. `scripts/coordinate.sh` runs the lead's launch line from the registry with the `[lead]` model and effort, and the context and tool-failure monitors read the lead's own tool names. In a Codex prompt the lead workflows are `$agent-triforge:at-<name>`. SELF-17 runs the same two-task fixture sprint under each lead, and the two ledgers differ only in the lead CLI and the reviewer class.
-- **The slash commands are lead workflows.** Each 3.x command is now an `at-` skill (`/at-ship` under Claude Code, `$agent-triforge:at-ship` in a Codex prompt), and `commands/` ships empty. The 17 lead workflows share one `skills/` tree with the 10 portable skills. A plugin-root resolver and a skill locator find the plugin from either lead, and `scripts/validate-skills.sh` checks every skill in strict mode. The [command map](#command-map) lists each 3.x command and its 4.0 name.
-- **`AGENTS.md` replaces the `CLAUDE.md` files.** The plugin ships no `CLAUDE.md`, and [`docs/rule-inventory.md`](docs/rule-inventory.md) shows where each retired rule went. The Claude Code floor rises to 2.1.277, the first build that reads a root `AGENTS.md`. Session start warns when Claude Code is older than that, or when a project still carries a 3.x `CLAUDE.md`.
-- **One CLI registry.** `scripts/lib/registry.sh` holds one entry per CLI with its tier, binary, model, install hint, environment allowlist, lane, egress and lead fields. Every other script reads it, and `validate-versions.sh` fails when one keeps a copy.
-- **The 19 agents are personas.** Each is a prompt file in `personas/`, and `personas/manifest.toml` sets its tools, model tier and turn budget. `dispatch_persona` runs them the same way under either lead, and `agents/` ships empty.
-- **Builders outlive the lead's turn.** Lease builders run detached. `lease_wait` waits on them within a time budget, and on resume `lease_heartbeat_check` collects the builders that finished and adopts the ones still running. A worker marker keeps workers out of the lead-only helpers (rc 45). The `claude -p` worker lane runs Bash in Claude Code's sandbox and needs 2.1.285 or later. Each ledger row records the lead CLI, the reviewer class and the approvals given for it.
-- **Grok Build and Devin join the optional tier.** Grok Build builds, reviews or analyzes. Devin reviews and analyzes once you consent to Cognition seeing your code, and builds only after a separate opt-in. `at-review` checks the change's integrity first and then gives every lane the same review package.
-- **`at-setup` asks who leads.** It also lists the instruction files in the project and the directories above it, and changes one only after you say yes. Before it writes the lead, it shows which providers will receive your code, and it lets you pick Devin's model.
-- **Lead-side Python ignores the working directory.** Inline Python in the helpers no longer imports modules from the directory it runs in. A builder could have planted a `json.py` in its worktree, and the lead's output parser would have run it outside the builder's sandbox.
-- **Two lease-integrity fixes.** A lease left open by 3.3.x now merges after the upgrade; 3.3.3 read it as a deleted baseline and escalated it on the first lease call. A ledger whose digest and saved copy were both deleted stops the next lease call with rc 44, so a worker can't delete them and then forge an approval into the ledger.
-- **Watch-cycle carry-ins.** The watch cycle's research workers run through the persona lane in the `read-web` class. Antigravity routing defaults to `auto` (D-042), and the `AGY_ERROR` line agy prints on exit 3 now feeds the failure class (D-043). The Cursor probe rows compose Grok 4.7 model ids with the same helper dispatch uses.
+<p align="center">
+  <img src="docs/images/install-routes.png" alt="Claude Code and Codex each install the plugin from the same repository, then run at-setup. Devin CLI and Pi install only the 10 portable skills." width="90%">
+</p>
 
-Upgrading: read [Upgrading from 3.x](#upgrading-from-3x) first. It maps each 3.x command to its workflow, lists what changes in a project, and explains how to [go back to 3.3.3](#rolling-back-to-333). v4.0.0 ships without a regenerated probe record. The newest one is still [`ops/research/2026-09-probe-record.md`](ops/research/2026-09-probe-record.md) from 2026-09-27. The new rows for the persona lane, the Codex lead, Devin and Grok Build ran live during development with `--only`, and [Compatibility](#compatibility) lists them.
+Triforge installs as a plugin into the CLI that leads: one command adds the marketplace, one installs the plugin. The same repository serves both leads, because Codex also reads the `.claude-plugin/` manifests (D-048).
 
-## What's new (v3.3.3)
+If you are coming from Triforge 3.x, read [Upgrading from 3.x](#upgrading-from-3x) first. The slash commands are now `at-` workflows, and a `CLAUDE.md` left from the 3.x template hides the project's `AGENTS.md` from Claude Code.
 
-A safety hotfix, shipped before the lead-choice redesign (plan `docs/plans/2026-09-28-1946-feat-lead-choice-v4-plan.md`, Phase H):
+### Prerequisites
 
-- **Promotion catches every control-plane change.** `lease_promote`'s protected list missed `scripts/lib/`, `scripts/lease-git-hooks/` and `scripts/probe-self-tests.sh`, saw only the new name of a renamed file, and read a scan error as "nothing protected". The lists now live in `scripts/lib/registry.sh`: a framework list that applies only in the Triforge checkout, and a project list that applies everywhere (`ops/roster.toml`, `.claude/`, `.codex/`, `.agents/` and the other CLI config trees, and every `AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`, `CLAUDE.local.md` and `.mcp.json` at any depth). The scan is case-folded, sees both sides of a rename, and blocks promotion (rc 42) when it can't run.
-- **Your own skills survive the refresh.** Session start used to delete any `.agents/skills/` directory whose name matched a shipped skill. The stamp now records a content digest for each directory Triforge wrote, and a directory is replaced or retired only while it still matches. An edited copy, or your own directory under a shipped name, is kept with a notice. A 3.3.0–3.3.2 stamp is migrated against the digests of every released copy (`scripts/lib/skill-digests.txt`). Lease worktrees follow the same rule and no longer write through a committed `.agents/skills` symlink.
-- **A builder can't steer the lead's git.** A worktree limits where a builder starts, not where it writes. Every git call in the lease lifecycle now goes through `_lead_git`: system config off, a trusted global config captured on first use, and hooks, fsmonitor, the global attributes file, signing and pager turned off. Before the lease functions act, they compare `.git/config`, `.git/config.worktree`, `.git/hooks/`, `.git/info/`, the global git config, the ledger, the default branch and each lease's worktree pointer with the lead's recorded baseline. A change the lead didn't make is restored where possible, the open leases are escalated, and the call returns 44. `lease_rebaseline` accepts a change you made yourself. This is detection, not prevention.
-- **Only the lead's snapshot merges.** `lease_collect` now takes the snapshot (one lead-made commit on the recorded base) that the review and the merge bind to. `lease_merge` squashes that SHA and refuses, by name, a builder's own commit, an edit to `ops/`, or a worktree changed after collect. It also refuses when the integration branch moved since the lead's last merge.
-- **The SELF rows are a gate.** `bash scripts/probe-capabilities.sh --self-only` runs only the static SELF rows, writes its record to a scratch path, and exits 3 on any SELF FAIL. `.github/workflows/gates.yml` runs it with both validators on macOS for every PR to `main` and `release/4.0`. New rows: SELF-10 (protected paths) and SELF-18 (lead git integrity); SELF-08b covers the digest refresh.
+You need the core trio installed and logged in, Python 3, and on macOS GNU coreutils. The commands below are the READY probes [`at-setup`](skills/at-setup/SKILL.md) runs for you; run them yourself to check a CLI before you install the plugin. Floors and tested versions are under [Compatibility](#compatibility).
 
-Upgrading: open 3.3.x leases keep working. A lease collected by 3.3.2 has no collect snapshot, so it is snapshotted at merge under the new checks; review its worktree as it stands at merge time. Behavior changes to know about:
+Core trio:
 
-- `lease_merge`'s commit no longer runs repository hooks and is never GPG-signed (`_lead_git` turns hooks, fsmonitor and signing off), so a branch-protection rule that requires signed commits needs the squash signed by hand.
-- If you commit on the integration branch between merges, switch the lead's checkout to another branch, or promote by hand after a blocked `lease_promote`, the next lease call refuses with rc 44 until you run `lease_rebaseline`. A `.git/config` or hook change you made yourself (`git remote add`, `pre-commit install`) is also reverted at the next lease call and saved as `<lease root>/lead/<name>.changed-<UTC time>`: copy it back, then run `lease_rebaseline`. Each acceptance is recorded in `ops/leases.toml` `[baseline]`.
-- More promotions are gated in user projects. `lease_promote` now blocks (rc 42, lead or user cross-review required) on any change under `.claude/`, `.codex/`, `.agents/`, `.antigravity/`, `.gemini/`, `.opencode/`, `.kimi-code/` or `.cursor/`, on the root `opencode.json`, `opencode.jsonc`, `.cursorrules` and `.gitmodules`, on `ops/roster.toml`, and on any `AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`, `CLAUDE.local.md` or `.mcp.json` at any depth — paths 3.3.2 promoted without a gate. A submodule entry recorded at one of those paths is listed even when `.gitmodules` says `ignore = all`.
-- Deleting an integrity anchor is a change, not a reset: a missing ledger digest, a ledger whose `[baseline]` table is gone, or a deleted `ops/leases.toml` while `<lease root>/lead/` still holds the lead's copies refuses with rc 44 and names the recovery (`lease_rebaseline`, or removing the lead state dir when you removed the ledger on purpose).
+```bash
+# Claude Code ≥ 2.1.277 — the first build that reads a root AGENTS.md (D-037);
+# 2.1.267 first honored `effort:` frontmatter on pinned-default models and the
+# `fable` alias resolves to Fable 5.1 from 2.1.257
+claude --version
 
-## What's new (v3.3.2)
+# Antigravity CLI ≥ 1.1.27 — https://antigravity.google/cli (run `agy` once interactively to log in)
+agy --model "Gemini 3.8 Flash (High)" -p "Respond with only: READY"   # pin the model — agy's own default is a (Medium) variant
 
-A hotfix from the 2026-09-27 watch cycle (D-039, D-049, D-050, S28), shipped before the lead-choice redesign:
+# Codex CLI ≥ 0.153.0 (gpt-6-astra's minimal client version) — https://github.com/openai/codex
+codex exec "Respond with only: READY"
 
-- **The release gate is green again.** Claude Code 2.1.281 started warning on an unquoted `${CLAUDE_PLUGIN_ROOT}` in shell-form hooks, and `--strict` turns warnings into errors. All four commands in `hooks/hooks.json` now read `bash "${CLAUDE_PLUGIN_ROOT}/hooks/handlers/<name>.sh"`. Probe CC-06 reported PASS while the gate was red, because `validate --strict <repo>` checks only the marketplace manifest. It now validates `plugin.json` and `marketplace.json` separately and passes only when both do.
-- **OpenCode V2 is refused.** V2 (npm `@opencode/cli`, same `opencode` binary) does not read `OPENCODE_PERMISSION`, so Triforge's deny set would be silently dropped. `invoke_opencode` and the lease `opencode)` arm refuse when `opencode --version` is 2.x or later, as a deterministic failure that names the V1 pin (`npm i -g opencode-ai@1`). The check fails closed: an OpenCode whose version can't be read is refused the same way. Every role's fallback chain skips a refused OpenCode and moves to the next CLI, and `/setup` reports it as unsupported instead of offering enrollment. Porting to V2 comes later.
-- **Cursor model ids follow the Grok family.** Grok 4.7 ids carry no `cursor-` prefix (`grok-4.7-xhigh`), while 4.6 ids do (`cursor-grok-4.6-xhigh`). Every composer used to emit `cursor-<family>-<effort>`. All four composers (dispatch, `resolve_role`, the `/setup` role table, and `roster_write_role`) now take the prefix from one shared family table. The shipped pin stays `cursor-grok-4.6-xhigh`.
-- **`/setup` has no positional tokens.** Claude Code substitutes `$0`, `$1`, … in a command body before the model reads it, code blocks included. `/setup`'s ROLES helper now takes the CLI name as a named variable.
+# Python 3 (used by hook handlers for JSON parsing)
+python3 --version
 
-## What's new (v3.3.1)
+# GNU timeout (on macOS: brew install coreutils, which provides gtimeout); without one
+# the helper refuses to call an external CLI (rc 96) and session start warns
+command -v timeout || command -v gtimeout
+```
 
-Follow-ups from the v3.3.0 code review (PR #8 "Unapplied review findings"), shipped 2026-09-12:
+Optional tier. You can add these later through `at-setup` to use them as builders or reviewers; an absent one is skipped cleanly in every roster fallback chain:
 
-- **A lease builder cannot push.** The dispatch contract's "git stays local" is now mechanical: `_adapter_env` binds `core.hooksPath` to the shipped `scripts/lease-git-hooks/pre-push` (which refuses) and rewrites every push URL scheme to an unresolvable `no-push://` address via `url.*.pushInsteadOf` — per-process `GIT_CONFIG_*`, so `git push` fails whichever remote or path the builder names while status/log/diff keep working. New static row SELF-09 proves it against a bare remote.
-- **Quota exhaustion fails fast.** A provider usage-limit / quota error (Kimi's `403 … monthly usage limit`, or any lane's equivalent) is classified deterministic with "wait for the refresh or buy usage" guidance instead of a wasted retry; the probe record has a `QUOTA-FAIL` outcome and gates the dependent Kimi rows on the quota, not on a login.
-- **Effort-only roster overrides work.** `[roles.analyst] effort = "low"` on the shipped agy default now dispatches `Gemini 3.8 Flash (Low)` (and `cursor-grok-4.6-low` for Cursor): `resolve_role` recomposes the effort suffix when the role's model is the shipped default; an explicit roster model still wins.
-- **Smaller control-plane files.** `scripts/invoke-external.sh` is a loader over `scripts/lib/{common,antigravity,codex,opencode,kimi,cursor,roster,lease}.sh` (4.0 adds `registry`, `lease-wait`, `devin` and `grok`; same 68 functions, same contracts — commands keep sourcing the one file; `validate-versions.sh` parses `lib/roster.sh`), and the probe harness's SELF-* rows live in `scripts/probe-self-tests.sh`.
-- **Smaller fixes.** The OpenCode deny set enumerates the common bypass spellings (`rm -fr`/`-Rf`/`-r`, `command sudo`, `doas`, `git -c`/`-C … push`) in both copies (still defense-in-depth); `invoke_antigravity` leaves its diagnostic in the output file when the retry also returns an empty envelope; session-start writes `.claude/roster-detected.local.md` tmp+mv.
+```bash
+# OpenCode ≥ 1.18.20 — needs the OpenRouter provider connected (OPENROUTER_API_KEY or `opencode auth login`)
+opencode run --format json -m openrouter/z-ai/glm-5.3 "Respond with only: READY"
 
-## What's new (v3.3.0)
+# Kimi Code ≥ 0.33.0 — OAuth device-code or API key (`kimi login`)
+kimi -p "Respond with only: READY"
 
-**Install route fixed.** The plugin now installs on current Claude Code: the repository ships a single-plugin marketplace manifest (`.claude-plugin/marketplace.json`) so `claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge` + `claude plugin install agent-triforge@agent-triforge` works (the old `claude plugin add <url>` form is no longer a Claude Code command), and `plugin.json` no longer names `hooks/hooks.json` — Claude Code auto-loads that path and rejected the duplicate, which made the installed plugin fail to load. Verified from an installed project: all twelve skills discoverable headless, `/<skill>` expands, the session-start hook fires.
+# Cursor (date-versioned) — pin the suffixed Grok id, never the Auto router (`cursor-agent login`);
+# the binary is `cursor-agent` (legacy symlink) or `agent` (primary since 2026.09.10)
+cursor-agent -p --trust --model cursor-grok-4.6-xhigh "Respond with only: READY"
 
-**Every lane runs on the September 2026 generation, and every headless run reports a completion signal the lead can trust.** The shipped pins moved in lockstep — Claude **Fable 5.1 → Opus 5 → Sonnet 5** ladder, Codex **`gpt-6-astra`** at `xhigh`, Antigravity **`Gemini 3.8 Flash (High)`** (the new policy: the newest Gemini at its highest thinking level, Pro or Flash; `Gemini 3.1 Pro (High)` stays the one-line opt-in), OpenCode `openrouter/z-ai/glm-5.3`, Kimi `kimi-code/k3`, Cursor `cursor-grok-4.6-xhigh` (effort now rides in Cursor's model-id suffix, like agy's `(High)`). `invoke_antigravity` reads agy's JSON envelope (`status`, `response`, `denied_actions`) instead of the exit code, and every lease carries one dispatch contract with a typed `Status:` report that `lease_collect` parses — a clean exit without one is "report missing", never review-ready. The Antigravity agent pack ships in agy's Markdown-agent format (native `--agent` behind `TRIFORGE_AGY_MODE`; injection remains the shipped mode), Kimi roles load natively through `--agent-file`, the Codex declarations deploy as `.codex/triforge-agents.toml`, and `.agents/skills/` refreshes on every plugin version change so all six CLIs see the current skills in their own invocation form (`/name`, `$name`, the `skill` tool, `/skill:name`). Two new release gates — `scripts/validate-skills.sh` and `scripts/validate-versions.sh` — and the Tier-1 process patterns from the September repo mining (a counterfactual bar for compounding, `Accept:`/`Fails when:` task fields, rulings-not-stalls, review dispositions, evidence-gated verification) round it out. Details in [Recent changes](#recent-changes); floors and tested versions in [Compatibility](#compatibility).
+# Devin CLI ≥ 3000.10.31 (`devin auth login`) — a reviewer and analyst; at-setup asks for your
+# consent before enrolling it, and it builds only after a separate opt-in
+devin --model swe-1-6-slow --respect-workspace-trust false -p "Respond with only: READY"
 
-### v3.2.0 — the watch cycle became repo-local maintainer tooling
+# Grok Build ≥ 1.0.34 (builder, reviewer or analyst) — `grok login` (`grok login --device-code` without a browser) or XAI_API_KEY
+grok --model grok-4.7 --output-format json -p "Respond with only: READY"
+```
 
-**The plugin got leaner: the watch cycle is now repo-local maintainer tooling.** `/cli-watch` and `/repo-watch` — the monthly cycles that keep Triforge itself current against its six CLIs and four reference repos — never belonged in the shipped command set. They now live in this checkout's `.claude/commands/`, with the `watch-cycle` skill in `.claude/skills/` and the watch registry tracked at `ops/watch-registry.toml`. At this release the plugin shipped 17 commands and 12 skills (previously 19 and 13), and `session-start.sh` no longer copies a watch registry into your `ops/`. Run the watches from a clone of this repo (see [Keeping the framework current](#keeping-the-framework-current-cli-watch-repo-watch--maintainers)); nothing changes for `/setup`, `/ship`, or any other command.
+### Installation
 
-### v3.1.0 — role customization in guided onboarding
+1. Check the [prerequisites](#prerequisites) above.
 
-**The roster is now yours to shape from onboarding.** `/setup` gained a role-assignment step: see the current role table (role → CLI · model · effort · fallbacks), then keep it, customize any role, or restore the shipped defaults — every write validated so the roster always still loads. Backed by new single-writer helpers (`roster_role_entry`, `roster_write_role`), roster model overrides that now reach every external-CLI dispatch lane (`CODEX_MODEL` joined its siblings), agy effort→`(High)`/`(Low)` suffix normalization, and a content-level roster guard that makes a broken `ops/roster.toml` loud instead of quietly rendering clean-looking tables. Hardened across three multi-agent review iterations (local roster + independent cross-model adversarial passes) — details in [Recent changes](#recent-changes).
+2. Install the plugin into the CLI that leads.
 
-Also new at the time (history — superseded by v3.3.0's D-022 policy, which pins the newest Gemini at its highest thinking level): the 2026-07-21 **Gemini 3.6 Flash** release was recorded in the model watch; the v3.1.0 pins stayed on `Gemini 3.1 Pro`, with 3.6 Flash as the explicit per-role opt-in.
+   Claude Code leads:
 
-### v3.0.0 — the builder-pool foundation
+   ```bash
+   # Register the repository as a single-plugin marketplace once (it ships .claude-plugin/marketplace.json)
+   claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge
 
-**The biggest release since the plugin conversion.** Triforge moved from a fixed Claude + Gemini + Codex trio to a **six-CLI builder pool** coordinated by a roster, per-task leases, and mandatory cross-review — and swapped the retired Gemini CLI lane for Antigravity. The coordination model and the CLI surface both changed, so this was a major version.
+   # User scope (available in all your projects)
+   claude plugin install agent-triforge@agent-triforge
 
-#### Headline changes
+   # Or project scope (shared with team via .claude/settings.json)
+   claude plugin install agent-triforge@agent-triforge --scope project
+   ```
 
-- **Builder pool (default).** All six supported CLIs — the core trio (Claude, Antigravity, Codex) plus enrolled optional members (OpenCode, Kimi, Cursor) — are eligible builders. [`ops/roster.toml`](templates/ops/roster.toml) assigns each role; every build runs under a per-task lease in an isolated worktree and merges only after cross-review by a pinned non-author reviewer. The single-writer rule is retired.
-- **Gemini → Antigravity.** Google shut down the hosted Gemini CLI service for consumer tiers on 2026-06-18; the analyst / reviewer / documenter lane is now **Antigravity (`agy`)** — running Gemini 3.1 Pro (High) at the time (history: v3.3.0 moved the shipped pin to Gemini 3.8 Flash (High), D-022), invoked via `invoke_antigravity`.
-- **Guided onboarding ([`/setup`](commands/setup.md)).** One idempotent command takes a fresh install to a working roster: gate the core trio, enroll or decline each optional CLI, then accept the shipped role defaults or customize who does what (CLI · model · effort per role).
-- **Self-maintenance ([`/cli-watch`](.claude/commands/cli-watch.md), [`/repo-watch`](.claude/commands/repo-watch.md)).** Scheduled or manual watch cycles keep the framework current against primary sources.
-- **Native-first runtime.** Completion gating moved from the retired `ship-loop.sh` promise gate to Claude Code's native `/goal` + an `ops/.sprint-complete` sentinel; Codex ran `gpt-5.6-sol` (history: `gpt-6-astra` at `xhigh` since v3.3.0) with structured `--output-schema` verdicts and hooks under `codex exec`.
+   Codex leads. Codex reads the same `.claude-plugin/` manifests:
 
-#### Migrating from v2.4.x
+   ```bash
+   codex plugin marketplace add Ninety2UA/agent-triforge
+   codex plugin add agent-triforge@agent-triforge
+   ```
 
-- **(a) Builder-pool default.** External CLIs are now eligible builders, not review-only. To restore the old reviewer-only posture, edit `ops/roster.toml` and take the external CLIs off the `builder` role (leave them on `reviewer` / `tester` / `analyst` / `documenter`, or set `[members.<cli>] enabled = false`). The core trio can't be disabled, and every fallback chain must still terminate at a core member.
-- **(b) Gemini → Antigravity.** The Gemini lane is gone. **Former Gemini-API-key users:** install Antigravity and run `/setup` to authenticate the `agy` lane (the old `GEMINI_API_KEY` is no longer used). **Users who must stay on legacy Gemini:** pin plugin **`v2.4.3`** — the last release with the Gemini lane.
-- **(c) Raised floors (KTD-13).** New enforcement floors at v3.0.0 (history — v3.3.0 re-baselined them; the current matrix is in [Compatibility](#compatibility)): Claude Code ≥ 2.1.212, Codex ≥ 0.144.0, Antigravity `agy` ≥ 1.1.3; optional tier OpenCode ≥ 1.18, Kimi Code ≥ 0.15 (re-baselined to the tested version — the plan's aspirational ≥ 0.27 predated the probe host, and Kimi's near-daily cadence makes the tested floor the honest one), Cursor (date-versioned). Full matrix with tested-against versions + READY probes in [Compatibility](#compatibility).
-- **(d) Retired mechanisms.** `ship-loop.sh` promise gate (`<promise>DONE</promise>`) → `/goal` + `ops/.sprint-complete` sentinel; single-writer rule → lease + cross-review. The historical changelog entries below keep the retired names on purpose — they record what past releases shipped, and are not rewritten.
+   Claude Code registers the hooks, the env vars in `settings.json` and the skills (the 10 portable skills and the 17 lead workflows) on its own. Codex registers the skills and the hooks, and runs the hooks only after you trust them in Codex; `at-setup` checks that and names the step. Nothing else needs configuring by hand.
 
-### Also recent (history)
+3. Codex leads: trust the project. Since Codex 0.147.0, `codex exec` reads a project's own `.codex/` files (`config.toml`, `hooks.json`, `.rules`) only in a trusted project. Add this entry to `~/.codex/config.toml` yourself, with the project's absolute path:
 
-v2.4.3 sequential downgrade ladder; v2.4.0–v2.4.2 framework self-audits; v2.2.0 Opus-max-effort + reliability patterns; v2.0.0 plugin conversion — full detail in [Recent changes](#recent-changes).
+   ```toml
+   [projects."/absolute/path/to/your-project"]
+   trust_level = "trusted"
+   ```
 
-### One plugin for either lead
+   `at-setup` checks for the entry and prints it, with the path filled in, when it is missing. Triforge never writes your user-level config. Without the entry the root `AGENTS.md` still loads, but Codex skips the project's `.codex/` files; a project you mark `untrusted` loses the root `AGENTS.md` as well. [`templates/.codex/config.toml`](templates/.codex/config.toml) is the project file that entry unlocks.
 
-The framework installs as a plugin into the CLI that leads, with one command to add the marketplace and one to install. The same repository serves both leads, because Codex also reads the `.claude-plugin/` manifests (D-048). There is no git clone, no file copying by hand and no `.claude/settings.json` to edit.
+4. Start the lead (`claude` or `codex`) in your project. The first session bootstraps the project's `ops/` directory ([Automatic project bootstrapping](#automatic-project-bootstrapping)).
+
+5. Run `/at-setup` (`$agent-triforge:at-setup` in a Codex prompt). After checking that the core trio is live (it names the fix for any CLI that isn't), it asks which CLI leads the project, Claude Code or Codex. For Codex it shows the project trust entry, the hook trust and the full-access launch line, which you type yourself. Role assignment comes next: keep the shipped defaults (recommended) or change any role's CLI, model and effort. You then enroll each optional CLI with a model you choose, or decline it. Setup lists the instruction files in the project and the directories above it. It offers to add the pointer block from [`templates/AGENTS.md`](templates/AGENTS.md) to the project's root `AGENTS.md` (Triforge ships no `CLAUDE.md`), and when a `CLAUDE.md` would hide `AGENTS.md` from Claude Code, it also offers the `@AGENTS.md` import line. It changes a file only after you say yes. Before it writes the lead, it lists which providers receive your code. It is idempotent, so you can rerun it any time.
+
+### Portable skills in Devin and Pi
+
+Devin CLI and Pi can install the 10 portable skills straight from this repository. They get the skills only: no lead workflow (`at-*`), hook or agent. One of them, `wave-orchestration`, calls Triforge's lease helpers, which come only with the Triforge plugin. Without the plugin its wave rules still work as a manual method, but no lease, pinned review or integrity check runs. Installing the skills does not enroll the CLI, because `ops/roster.toml` assigns roles only to the CLIs in [the builder pool](#the-builder-pool).
+
+| Harness | Install | Manifest | Invoke |
+|---|---|---|---|
+| Devin CLI | `devin plugins install Ninety2UA/agent-triforge#skills` (from a clone: `devin plugins install --local ./agent-triforge/skills`) | [`skills/.devin-plugin/plugin.json`](skills/.devin-plugin/plugin.json), plugin root `skills/` | `/agent-triforge:<name>` |
+| Pi | `pi install git:github.com/Ninety2UA/agent-triforge` (`-l` writes the project's `.pi/settings.json` instead of `~/.pi/agent/settings.json`) | [`package.json`](package.json), the `pi.skills` list | `/skill:<name>` |
+
+Run `devin auth login` before any `devin plugins` command. Install the Devin plugin from `#skills`, not from the repository root: at the root, Devin falls back to `.claude-plugin/plugin.json` and also loads the 17 lead workflows, this repository's `AGENTS.md` as an always-on rule, and the Claude Code hooks.
+
+### Verify installation
+
+Start Claude Code in a project. The session-start banner lists the lead workflows, and `/at-status` prints the sprint report:
+
+```bash
+claude
+
+# You should see:
+# "Multi-agent framework ready."
+# "Lead workflows (/at-<name> here, $agent-triforge:at-<name> in a Codex prompt): at-setup at-ship at-plan ..."
+
+/at-status
+```
+
+Under a Codex lead the banner appears once you have trusted the plugin's hooks. `$agent-triforge:at-status` prints the same report either way, because every `at-` workflow runs the project bootstrap itself.
+
+## Getting started
+
+From nothing to a first sprint in five steps:
+
+1. Install the core trio (Claude Code, Antigravity `agy` and Codex) and log in to each. The version floors and READY probes are under [Prerequisites](#prerequisites).
+2. Install the plugin: `claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge`, then `claude plugin install agent-triforge@agent-triforge` ([Installation](#installation)).
+3. Start `claude` in your project. The first session bootstraps `ops/`.
+4. Run `/at-setup`. It checks the core trio, asks which CLI leads the project, lets you keep or change the role assignments in `ops/roster.toml`, and offers each optional CLI. It also offers to add Triforge's pointer block to the project's root `AGENTS.md`, and it changes that file or a `CLAUDE.md` only after you say yes.
+5. Run `/at-ship <goal>` for an autonomous sprint, or run the phases one at a time ([Typical session flow](#typical-session-flow)).
+
+To lead from Codex instead, install the plugin with the Codex lines under [Installation](#installation), add the project trust entry, start `codex` in the project, and run `$agent-triforge:at-setup` and then `$agent-triforge:at-ship <goal>` in a Codex prompt. Setup prints the full-access launch line for a Codex lead, and you type it yourself.
+
+If you are upgrading from 3.x, the slash commands are now `at-` workflows (`/ship` is `/at-ship`); see [Upgrading from 3.x](#upgrading-from-3x).
+
+### Typical session flow
+
+In a supervised session you run each phase and check its output before the next:
+
+```bash
+claude
+> /at-plan add user authentication      # Phase 0-1.5: analyze, research, plan, validate
+> /at-build                              # Phase 2: wave orchestration
+> /at-review                             # Phase 3-4: parallel review + synthesis
+> /at-test                               # Phase 5: Codex TDD
+> /at-compound JWT session handling      # Document solution for future sprints
+> /at-wrap                               # Phase 6: compound knowledge, write STATE.md
+```
+
+In an autonomous run one command runs every phase, in one session:
+
+```bash
+claude
+> /at-ship add user authentication with JWT refresh tokens
+```
+
+To run the sprint from a terminal across fresh sessions, with recovery when a context window fills up, use `scripts/coordinate.sh` ([Unattended runs](#unattended-runs)).
+
+In a Codex prompt the same workflows are `$agent-triforge:at-<name>`. From a shell, wrap the prompt in single quotes so the shell leaves `$agent-triforge:at-ship` alone: `codex exec '$agent-triforge:at-ship add user authentication'`.
+
+## Unattended runs
+
+<p align="center">
+  <img src="docs/images/coordinate-loop.png" alt="coordinate.sh starts a fresh lead session each iteration until one creates ops/.sprint-complete. It stops early without --allow-full-access, on an integrity change, or when the lead fails." width="90%">
+</p>
+
+A sprint can run with nobody watching in two ways. `at-ship` runs every phase in one lead session. [`scripts/coordinate.sh`](scripts/coordinate.sh) drives the same sprint from a terminal through as many fresh lead sessions as it needs, so a full context window doesn't end the run. Either way the sprint is done only when `ops/.sprint-complete` exists. The lead creates that file as its last step, after the verification checklist passes.
+
+### In one session: `at-ship`
+
+Run `/at-ship <goal>` under Claude Code or `$agent-triforge:at-ship <goal>` in a Codex prompt. `--convergence` sets when review stops: `fast` once no P1 finding is left, `standard` (the default) once no P1 or P2 is left, and `deep` once, on top of that, fewer than 3 P3 findings remain. `--team` builds in agent-team mode, for 5 or more tasks or interdependent ones.
+
+At the start `at-ship` prints a copyable completion line. Under Claude Code it is a `/goal` gate: type it, and Claude Code holds the session to the checklist. A Codex lead has no `/goal`, so it completes on the marker alone. The checklist:
+
+1. Every phase is done, or skipped with a stated reason.
+2. The `verification-before-completion` checklist passes with evidence.
+3. `ops/STATE.md` is written for the next session.
+4. Temporary review files are archived to `ops/archive/`.
+5. `ops/.sprint-complete` is created last, only after 1 to 4 hold.
+
+If any item fails, the lead creates no marker and records the blocker in `ops/TASKS.md` and `ops/STATE.md`.
+
+### Across sessions: `scripts/coordinate.sh`
+
+1. Open a terminal in the project's top directory. The script ships in the plugin install, and session start records that path as the last line of `.agents/triforge-plugin-root.local`:
+
+   ```bash
+   TRIFORGE="$(tail -n 1 .agents/triforge-plugin-root.local)"
+   ```
+
+2. Preview the run. `--dry-run` prints the lead's launch line and the prompt for the first session, and runs nothing; add `--lead codex` or `--lead claude` to compose it for the other lead:
+
+   ```bash
+   bash "$TRIFORGE/scripts/coordinate.sh" "Build the authentication module" --dry-run
+   ```
+
+3. Start it. `--max N` caps the sessions (default 5), and `--convergence` and `--team` pass through to the sprint:
+
+   ```bash
+   # Full autonomous sprint with context recovery
+   bash "$TRIFORGE/scripts/coordinate.sh" "Build the authentication module" --max 5 --convergence deep --team
+
+   # With completion notification via webhook
+   NOTIFY_WEBHOOK_URL="https://hooks.slack.com/..." bash "$TRIFORGE/scripts/coordinate.sh" "Build auth" --max 5
+
+   # Under a Codex lead: preview the launch line and prompt, then run with full access acknowledged
+   bash "$TRIFORGE/scripts/coordinate.sh" "Build auth" --dry-run --lead codex
+   bash "$TRIFORGE/scripts/coordinate.sh" "Build auth" --max 5 --allow-full-access
+   ```
+
+Run it from a terminal or from the lead's own shell. Under nohup, cron or CI there is no terminal, so the script stops with exit 45 before any session starts.
+
+### What the loop does
+
+1. It resolves the lead from `[lead]` in `ops/roster.toml`, checks that the lead's CLI is on `PATH` and that `TMPDIR` is private, and deletes any stale `ops/.sprint-complete`.
+2. Before every session it runs the lead's git integrity check. When `.git/config`, the hooks, the refs, a worktree pointer or the lease ledger changed in a way the lead did not make, it restores what it can, escalates the open leases and stops with exit 44 before the session starts. Check the change, accept it with `lease_rebaseline` if you made it, then rerun.
+3. Each session is a fresh lead process started with the registry's launch line plus the `[lead]` model and effort. Under Claude Code the prompt opens with the `/goal` checklist. Under Codex it opens with `$agent-triforge:at-ship` and carries the checklist as text. The session reads `ops/STATE.md` first. When `ops/leases.toml` still holds open leases, the prompt tells the session to rebuild the wave from the ledger instead of starting it again, and to bring up any failed or escalated lease for a decision.
+4. After each session the loop looks for `ops/.sprint-complete`. If it exists, the sprint is complete. If the session failed in a way every new session would repeat (not logged in, quota spent, binary missing), the loop stops with exit 69 and prints the fix. Otherwise it starts the next session.
+5. When the sprint completes, stops on a failure or runs out of sessions, the loop posts a message to `NOTIFY_WEBHOOK_URL` when you set one, and shows a desktop notification (`osascript` on macOS, `notify-send` on Linux).
+
+### Under a Codex lead
+
+A Codex lead's launch line runs with full access: `-s danger-full-access` and no approval prompts. `coordinate.sh` runs it only when you pass `--allow-full-access`. Without the flag it prints the line and the statements of what confines it, then exits 77 having run nothing. `at-setup` prints the same line for an interactive session, and typing it is your step. The "Confinement, stated as it is" section of [`AGENTS.md`](AGENTS.md) says what confines a full-access lead and what doesn't.
+
+### When a run stops
+
+| Exit | Meaning |
+|---|---|
+| 0 | The sprint is complete, the dry run printed, or the sessions ran out without completion (the closing lines say which) |
+| 1 | Usage error, a lead that can't be resolved, its CLI not on `PATH`, the helper library missing, or a `TMPDIR` other users could change |
+| 44 | The integrity check found a change before a session (restored and escalated; inspect it, then `lease_rebaseline`) or could not run |
+| 45 | This shell may not run the lead's loop: another CLI's shell, or no terminal (nohup, cron, CI) |
+| 69 | The lead failed in a way that would repeat (not logged in, quota spent, binary missing); the fix is printed |
+| 77 | The launch line needs full access and `--allow-full-access` was not given; nothing ran |
+
+When the sessions run out, `ops/STATE.md` and `ops/TASKS.md` hold the progress. Run the script again to continue, or review by hand.
+
+## Upgrading from 3.x
+
+- Each 3.x slash command is now a lead workflow with an `at-` prefix: `/setup` became `/at-setup`, `/ship` became `/at-ship`, and so on for the whole set (`$agent-triforge:at-setup`, `$agent-triforge:at-ship` in a Codex prompt). The plugin no longer ships a `commands/` directory. The [command map](#command-map) below pairs each one with its new name, and the [Lead workflows reference](#lead-workflows-reference) describes every workflow.
+- Triforge 4 ships no `CLAUDE.md`. The project's instruction file is its root `AGENTS.md`, which Claude Code reads from 2.1.277, and only while no `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` sits in the project or above it. If your project kept a `CLAUDE.md` from the 3.x template, add an import line to it (`@AGENTS.md` in a root `CLAUDE.md`, `@../AGENTS.md` in `.claude/CLAUDE.md`), or replace its Triforge content with the pointer block from [`templates/AGENTS.md`](templates/AGENTS.md). Session start prints a warning naming the exact line on every session until you do; it never edits the file.
+- The `test-driven-development` and `systematic-debugging` skills are gone. Their rules now sit inline in `at-test`, `at-quick`, `at-debug` and the Codex `test_writer` and `debugger` agents.
+- If your project's `.codex/hooks.json` is still the unchanged 3.x copy, the first 4.0 session replaces it with the empty 4.0 template and prints a notice naming the file. The 3.x hook appended a line to `ops/CHANGELOG.md` from every Codex session, lease workers included; attribution now comes from the lease ledger. Session start leaves a copy you edited alone ([decision record](ops/decisions/2026-10-04-codex-hook-trust-bypass-retired.md)).
+- The 19 agents are now personas: prompt files in [`personas/`](personas/) with no frontmatter. Their tools, model tier and turn budget live in [`personas/manifest.toml`](personas/manifest.toml). The plugin ships no `agents/` directory, so Claude Code's agent list no longer shows them. The workflows run them through `dispatch_persona` under either lead. PR comment resolution now runs as a lease and lands as one reviewed commit on the PR branch.
+- On resume, `lease_heartbeat_check` now collects the builders that finished while no lead was watching and adopts the ones still running; builders run detached in 4.0 and outlive the lead's turn. In 3.x it printed `run: lease_collect <task>` and left the collect to you.
+- Triforge now sets up the project in the repository's top directory, the nearest one above that holds `.git`, wherever the session starts. A project that 3.x bootstrapped in a subdirectory of a larger repository keeps its `<subdir>/ops/`, and the first 4.0 session creates a new skeleton at the top. The lease ledger and the `[lead]` table already live in the top-level `ops/`, so move your other `ops/` files there and delete the subdirectory copy. Until you move it, session start and `at-setup` warn about the subdirectory's `ops/roster.toml` each time they run from that subdirectory or below it, and on the run that creates the top-level skeleton.
+
+### Command map
+
+A 3.x command also ran in its namespaced form, `/agent-triforge:<name>`. From a shell, put the Codex form in single quotes so the shell leaves the `$` alone: `codex exec '$agent-triforge:at-ship <goal>'`.
+
+| 3.x command | 4.0 under Claude Code | 4.0 in a Codex prompt |
+|---|---|---|
+| `/analyze` | `/at-analyze` | `$agent-triforge:at-analyze` |
+| `/build` | `/at-build` | `$agent-triforge:at-build` |
+| `/compound` | `/at-compound` | `$agent-triforge:at-compound` |
+| `/coordinate` | `/at-coordinate` | `$agent-triforge:at-coordinate` |
+| `/debug` | `/at-debug` | `$agent-triforge:at-debug` |
+| `/deep-research` | `/at-deep-research` | `$agent-triforge:at-deep-research` |
+| `/pause` | `/at-pause` | `$agent-triforge:at-pause` |
+| `/plan` | `/at-plan` | `$agent-triforge:at-plan` |
+| `/quick` | `/at-quick` | `$agent-triforge:at-quick` |
+| `/resolve-pr` | `/at-resolve-pr` | `$agent-triforge:at-resolve-pr` |
+| `/resume` | `/at-resume` | `$agent-triforge:at-resume` |
+| `/review` | `/at-review` | `$agent-triforge:at-review` |
+| `/setup` | `/at-setup` | `$agent-triforge:at-setup` |
+| `/ship` | `/at-ship` | `$agent-triforge:at-ship` |
+| `/status` | `/at-status` | `$agent-triforge:at-status` |
+| `/test` | `/at-test` | `$agent-triforge:at-test` |
+| `/wrap` | `/at-wrap` | `$agent-triforge:at-wrap` |
+
+### Rolling back to 3.3.3
+
+Settle every open lease while 4.0 is still installed. A 4.0 builder runs detached, and 3.3.3's heartbeat check can't match the start time 4.0 records for it, so 3.3.3 would take a builder that is still running for dead and remove its worktree. Run `lease_wait` until it prints no `still building:` line (`lease_stop <task>` stops a builder you don't want to wait for), then merge each lease or reclaim it with `lease_reclaim`. 3.3.3 can't merge a lease whose pinned reviewer is Devin or Grok Build, and it doesn't read the approvals recorded with `lease_approve`.
+
+Then reinstall 3.3.3 from a checkout of its tag:
+
+```bash
+git clone --branch v3.3.3 https://github.com/Ninety2UA/agent-triforge.git agent-triforge-3.3.3
+claude plugin uninstall agent-triforge@agent-triforge
+claude plugin marketplace remove agent-triforge
+claude plugin marketplace add ./agent-triforge-3.3.3
+claude plugin install agent-triforge@agent-triforge
+```
+
+If you installed at project scope, pass the same `--scope` to `uninstall` and `install`. 3.3.3 has no Codex lead, so also remove a Codex install with `codex plugin remove agent-triforge@agent-triforge`. To return to the current release later, remove the local marketplace and add the GitHub URL again.
+
+Last, check what 4.0 left in each project:
+
+- `ops/roster.toml`: 3.3.3 ignores the `[lead]` table and always leads from Claude Code. It rejects `[members.devin]` and `[members.grok]` as unknown members, and that error stops every role from resolving, so delete both tables and take `devin` and `grok` out of every role and fallback chain.
+- The instruction file: 3.3.3's session start looks only for `CLAUDE.md` and `.claude/CLAUDE.md`. When it finds neither, it prints a `cp` line for its `templates/CLAUDE.md`, and once that file exists Claude Code stops reading `AGENTS.md`. The pointer block in your `AGENTS.md` names the 4.0 `at-` workflows, which 3.3.3 doesn't have. Restore the project's 3.x `CLAUDE.md` from git history or run the printed copy line, and move anything you still need from `AGENTS.md` into it.
+- `personas/`: nothing to undo. Personas live in the plugin, not in your project, and 3.3.3 brings back its 19 subagents in `agents/`.
+- `.codex/hooks.json`: if 4.0 replaced it with the empty template, 3.3.3 keeps the empty file, because it copies its template only where none exists. Delete the file and the next session restores the 3.x hook, which logs every Codex session to `ops/CHANGELOG.md`.
+- `.agents/skills/`: nothing to do. 3.3.3's session start sees the version change, adds `test-driven-development` and `systematic-debugging` back, and replaces only the copies that still match their recorded digest.
+- `ops/` itself: 3.3.3 sets up the project in the directory where the session starts, so start Claude Code in the repository's top directory, where 4.0 keeps `ops/`.
+
+## Update
+
+| Install route | How to update |
+|---|---|
+| Claude Code plugin | `claude plugin marketplace update agent-triforge`, then `claude plugin update agent-triforge`. Start a new Claude Code session to load the new version. |
+| Codex plugin | `codex plugin marketplace upgrade agent-triforge`, then `codex plugin add agent-triforge@agent-triforge`, which installs the version the refreshed marketplace carries. When an update changes a hook, Codex asks you to review the hooks again (`/hooks`). |
 
 ```bash
 # Claude Code leads
-claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge
-claude plugin install agent-triforge@agent-triforge
+claude plugin marketplace update agent-triforge
+claude plugin update agent-triforge
 
 # Codex leads
-codex plugin marketplace add Ninety2UA/agent-triforge
+codex plugin marketplace upgrade agent-triforge
 codex plugin add agent-triforge@agent-triforge
 ```
 
-The skills (the 10 portable skills and the 17 lead workflows) and the hooks register automatically, and the first session in a project bootstraps its `ops/` directory. Codex runs the plugin's hooks only after you trust them in Codex; `at-setup` tells you how.
+Each project picks up the new version at its next session: session start refreshes the portable skills in `.agents/skills/` when the plugin version changes, and keeps any copy you edited ([Portable skills across the eight CLIs](#portable-skills-across-the-eight-clis)). Before you move to a new major version, read its notes in [Release history](#recent-changes); from 3.x, read [Upgrading from 3.x](#upgrading-from-3x).
 
-### Automatic project bootstrapping
+## What you get
 
-Triforge sets up a project through one helper, `triforge_bootstrap` (`scripts/lib/bootstrap.sh`). The `session-start.sh` hook runs it at the start of every session, and `at-setup`, `at-build` and `at-review` run it too, so a project led from Codex is set up before you trust the plugin's hooks. Each run only fills in what is missing. It works in the repository's top directory, the nearest one above that holds `.git`, so a run from a subdirectory sets up the repository. It refuses to set up your home directory or any directory that contains it, and the roster writers and the lease helpers refuse such a project too. It:
-- Creates `ops/solutions/`, `ops/decisions/` and `ops/archive/`, copies the skeleton `MEMORY.md`, `CHANGELOG.md`, `AGENTS.md` and `GOALS.md` from the plugin templates into `ops/`, and adds `ops/roster.toml`
-- Copies the 10 portable skills into `.agents/skills/` and each CLI's project files (`.codex/` always; `.opencode/`, `.kimi-code/` and `.cursor/` for the CLIs you have installed)
-- Writes `.agents/triforge-plugin-root.local`, a per-user file naming the plugin's install path, which the `at-` skills read when the lead does not export one. If no ignore rule covers the file, Triforge adds one to `.agents/.gitignore` so git never tracks it. If git tracks `.agents/.gitignore`, Triforge leaves it alone and prints the line to add instead
-
-The hook also keeps its session state in `.claude/` (it writes nothing through a `.claude` that is a symlink) and prints a `cp` command for Triforge's pointer block when the project has no root `AGENTS.md`.
-
-Your project's own instruction file is its root `AGENTS.md`. Add the marked pointer block from [`templates/AGENTS.md`](templates/AGENTS.md) to it yourself; session start never writes into an existing `AGENTS.md`. The plugin ships no `CLAUDE.md`, because a `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` in or above the project stops Claude Code from reading `AGENTS.md`.
-
----
-
-## The builder pool
-
-The heart of v3.0.0. A wave reads [`ops/roster.toml`](templates/ops/roster.toml), leases each task to a builder CLI in its own isolated git worktree, and merges only after a pinned non-author reviewer approves — then promotes the sprint integration branch to `main` through a protected-path gate.
-
-<p align="center">
-  <img src="docs/images/builder-pool.svg" alt="Builder-pool wave — roster resolves each task to a builder CLI in an isolated worktree lease, cross-reviewed by a pinned non-author reviewer, squash-merged onto a sprint integration branch, then promoted to main through a gated check" width="100%">
-</p>
-
-**The roster decides who does what.** Five roles — builder, reviewer, tester, analyst, documenter — each map to a CLI + model + effort with an ordered fallback chain that must terminate at a core-trio member. Optional members carry an `enabled` flag and are absent everywhere when off. Model choice is yours per role: the shipped defaults pin the newest Gemini model at its highest thinking level for `agy` — `"Gemini 3.8 Flash (High)"` today, Pro or Flash, whichever is newest (D-022) — and `cursor-grok-4.6-xhigh` for Cursor (effort rides in the model-id suffix), and a role's `model` entry selects any other variant when you explicitly want it. Since v3.1.0 you don't have to hand-edit the file: `at-setup`'s role step walks keep-current / customize / restore-shipped-defaults with validated writes.
-
-Prefer the Pro line? Set a role's `model` to `"Gemini 3.1 Pro (High)"` (or `(Low)` — 3.1 Pro has no Medium tier) in `ops/roster.toml`; it stays the documented one-line opt-in. The July 2026 plan's never-Flash rule (AE2) is superseded by D-022 — anyone working from that plan should read the September ADR (`ops/decisions/2026-09-11-cli-deprecation-watch.md`).
-
-<p align="center">
-  <img src="docs/images/roster.svg" alt="Roster and assignment: ops/roster.toml maps each of the five roles to a default CLI, model and effort (builder Claude, reviewer and tester Codex gpt-6-astra, analyst and documenter Antigravity Gemini 3.8 Flash (High)), with a fallback chain that ends at the required core trio (Claude, Antigravity, Codex). Its [lead] table names Claude Code or Codex. OpenCode, Kimi, Cursor, Grok Build and Devin are drawn as the optional tier, enrolled per project." width="82%">
-</p>
-
-**Every builder runs under a lease.** The lead-owned ledger `ops/leases.toml` (runtime state) tracks each task through its lifecycle — with heartbeat-based orphan detection, a single requeue to a *different* builder, and escalation when a task can't converge.
-
-<p align="center">
-  <img src="docs/images/lease-lifecycle.svg" alt="Lease lifecycle state machine — leased, building, review, merged; with orphaned, requeued to a different builder, failed, and escalated paths" width="82%">
-</p>
-
-Safety comes from three mechanisms working together, not from restricting who may write code: **per-task worktrees with lead-side checks** (a builder starts in its own worktree and is contracted to stay out of the canonical `ops/` tree; the worktree limits where it starts, not where it writes, so the lead detects changes to git state and the ledger, and merges only its own collect snapshot — detection, not prevention; a write elsewhere in the main checkout is not detected), a **per-adapter environment allowlist** (no builder receives another provider's credential environment variables; credential files under `$HOME` are shared), and **mandatory cross-review** before any merge (no agent merges its own build).
-
----
-
-## Project structure
+### Project structure
 
 The plugin provides personas, skills and hooks. Your project gets an `ops/` directory for state:
 
@@ -254,9 +423,21 @@ agent-triforge/ checkout            (maintainers only — not installed with the
 └── ops/watch-registry.toml           Watch targets: eight CLIs + three research tools + seven reference repos
 ```
 
+### Automatic project bootstrapping
+
+Triforge sets up a project through one helper, `triforge_bootstrap` (`scripts/lib/bootstrap.sh`). The `session-start.sh` hook runs it at the start of every session, and `at-setup`, `at-build` and `at-review` run it too, so a project led from Codex is set up before you trust the plugin's hooks. Each run only fills in what is missing. It works in the repository's top directory, the nearest one above that holds `.git`, so a run from a subdirectory sets up the repository. It refuses to set up your home directory or any directory that contains it, and the roster writers and the lease helpers refuse such a project too. It:
+
+- Creates `ops/solutions/`, `ops/decisions/` and `ops/archive/`, copies the skeleton `MEMORY.md`, `CHANGELOG.md`, `AGENTS.md` and `GOALS.md` from the plugin templates into `ops/`, and adds `ops/roster.toml`
+- Copies the 10 portable skills into `.agents/skills/` and each CLI's project files (`.codex/` always; `.opencode/`, `.kimi-code/` and `.cursor/` for the CLIs you have installed)
+- Writes `.agents/triforge-plugin-root.local`, a per-user file naming the plugin's install path, which the `at-` skills read when the lead does not export one. If no ignore rule covers the file, Triforge adds one to `.agents/.gitignore` so git never tracks it. If git tracks `.agents/.gitignore`, Triforge leaves it alone and prints the line to add instead
+
+The hook also keeps its session state in `.claude/` (it writes nothing through a `.claude` that is a symlink) and prints a `cp` command for Triforge's pointer block when the project has no root `AGENTS.md`.
+
+Your project's own instruction file is its root `AGENTS.md`. Add the marked pointer block from [`templates/AGENTS.md`](templates/AGENTS.md) to it yourself, or let `at-setup` add it after you say yes; session start never writes into an existing `AGENTS.md`. The plugin ships no `CLAUDE.md`, because a `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` in or above the project stops Claude Code from reading `AGENTS.md`.
+
 ### Shared file protocol
 
-All agents coordinate through markdown files in [`ops/`](ops/). This is the source of truth:
+All agents coordinate through markdown files in [`ops/`](ops/), the source of truth:
 
 | File | Purpose | Owner |
 |---|---|---|
@@ -265,403 +446,198 @@ All agents coordinate through markdown files in [`ops/`](ops/). This is the sour
 | [`GOALS.md`](templates/ops/GOALS.md) | High-level product goals for sprint planning | Manual |
 | [`MEMORY.md`](ops/MEMORY.md) | Architectural decisions, patterns, interface proposals | All agents append |
 | [`CHANGELOG.md`](ops/CHANGELOG.md) | Audit trail with `[agent-name]` attribution | All agents append |
-| [`STATE.md`](ops/STATE.md) | Session continuity — current phase, progress, next actions | The lead writes on pause/wrap |
+| [`STATE.md`](ops/STATE.md) | Session continuity: current phase, progress, next actions | The lead writes on pause/wrap |
 | [`solutions/`](ops/solutions/) | Documented solved problems for institutional knowledge | The lead writes via [`at-compound`](skills/at-compound/SKILL.md) |
 | [`decisions/`](ops/decisions/) | Architecture decision records (ADRs) | The lead writes via [`at-compound`](skills/at-compound/SKILL.md) |
 
----
+## Workflow
 
-## Sprint Pipeline (`at-ship`)
+Every goal goes through the same phases, and each phase has a lead workflow.
 
-Every goal goes through the phases below. Run [`at-ship`](skills/at-ship/SKILL.md) (`/at-ship <goal>` under a Claude Code lead, `$agent-triforge:at-ship <goal>` in a Codex prompt) to run them all autonomously, or run each phase's lead workflow yourself.
+### Sprint Pipeline (`at-ship`)
+
+Run [`at-ship`](skills/at-ship/SKILL.md) (`/at-ship <goal>` under a Claude Code lead, `$agent-triforge:at-ship <goal>` in a Codex prompt) to run every phase autonomously, or run each phase's lead workflow yourself.
 
 <p align="center">
-  <img src="docs/images/sprint-lifecycle.svg" alt="Sprint pipeline — Plan, Build, Review, Test, Ship stages with agents" width="80%">
+  <img src="docs/images/sprint-lifecycle.png" alt="The sprint phases, Analyze, Plan, Build, Review, Test and Wrap, each with its lead workflow; at-ship runs them all." width="90%">
 </p>
 
-| Phase | What happens | Agent(s) | Lead workflow |
+| Phase | What happens | Agents | Lead workflow |
 |:---|:---|:---|:---|
-| **0 — Analyze** | Full-repo scan: architecture, patterns, contracts, debt | Antigravity CLI + [`codebase-mapping`](skills/codebase-mapping/SKILL.md) | [`at-plan`](skills/at-plan/SKILL.md) |
-| **Pre-Plan** | Search institutional knowledge for relevant past solutions | [`learnings-researcher`](personas/learnings-researcher.md) | [`at-plan`](skills/at-plan/SKILL.md) |
-| **1 — Plan** | Decompose goal into tasks with shadow paths and error maps | Lead + [`writing-plans`](skills/writing-plans/SKILL.md) | [`at-plan`](skills/at-plan/SKILL.md) |
-| **1.5 — Validate** | Validate assignments, dependencies, scope, shadow paths | [`plan-checker`](personas/plan-checker.md) | [`at-plan`](skills/at-plan/SKILL.md) |
-| **1.1 — Ambiguity** | Surface top 3 unverified assumptions, ask user to confirm/correct | Lead | [`at-plan`](skills/at-plan/SKILL.md), [`at-ship`](skills/at-ship/SKILL.md) |
-| **2 — Build** | Wave orchestration with integration verification between waves | Leased builders, or the [`team-lead`](personas/team-lead.md) persona | [`at-build`](skills/at-build/SKILL.md) |
-| **3–4 — Review** | Up to 7 parallel reviewers, synthesized with confidence tiering | Antigravity + Codex + [review agents](#review-specialists-6) | [`at-review`](skills/at-review/SKILL.md) |
-| **5 — Test** | TDD test writing, gap analysis, fix cycle until green | Codex CLI ([`test_writer`](codex-agents/agents.toml)) | [`at-test`](skills/at-test/SKILL.md) |
-| **6 — Ship** | Document solutions, archive reviews, write STATE.md | Lead + [`knowledge-compounding`](skills/knowledge-compounding/SKILL.md) | [`at-wrap`](skills/at-wrap/SKILL.md) |
+| 0, Analyze | Full-repo scan: architecture, patterns, contracts, debt | Antigravity CLI + [`codebase-mapping`](skills/codebase-mapping/SKILL.md) | [`at-plan`](skills/at-plan/SKILL.md) |
+| Pre-plan | Search institutional knowledge for relevant past solutions | [`learnings-researcher`](personas/learnings-researcher.md) | [`at-plan`](skills/at-plan/SKILL.md) |
+| 1, Plan | Decompose the goal into tasks with shadow paths and error maps, grouped into waves | Lead + [`writing-plans`](skills/writing-plans/SKILL.md) | [`at-plan`](skills/at-plan/SKILL.md) |
+| 1.1, Ambiguity | Surface the 3 most critical unverified assumptions and ask you to confirm or correct them | Lead | [`at-plan`](skills/at-plan/SKILL.md), [`at-ship`](skills/at-ship/SKILL.md) |
+| 1.5, Validate | Validate assignments, dependencies, scope and shadow paths, up to 3 rounds | [`plan-checker`](personas/plan-checker.md) | [`at-plan`](skills/at-plan/SKILL.md) |
+| 2, Build | Wave orchestration over leased builders, with integration verification between waves | Leased builders, or the [`team-lead`](personas/team-lead.md) persona | [`at-build`](skills/at-build/SKILL.md) |
+| 3 and 4, Review | Five lanes at once (Antigravity, Codex, `security-sentinel`, `performance-oracle`, `code-simplicity-reviewer`), then synthesis with confidence tiers; up to 3 cycles | Antigravity + Codex + three [review personas](#review-specialists-6) | [`at-review`](skills/at-review/SKILL.md) |
+| 5, Test | Gap analysis, tests written failing first, up to 3 fix cycles, then escalation to you | Codex CLI ([`test_writer`](codex-agents/agents.toml)) | [`at-test`](skills/at-test/SKILL.md) |
+| 6, Wrap | Document solutions, archive reviews, verify, write STATE.md, create `ops/.sprint-complete` last | Lead + [`knowledge-compounding`](skills/knowledge-compounding/SKILL.md) | [`at-wrap`](skills/at-wrap/SKILL.md) |
 
----
+### Planning Pipeline (`at-plan`)
 
-## Planning Pipeline (`at-plan`)
-
-Analyzes the full codebase with Antigravity's 1M-token context, searches institutional knowledge, decomposes the goal with shadow paths and error maps, then validates via [`plan-checker`](personas/plan-checker.md).
+[`at-plan`](skills/at-plan/SKILL.md) analyzes the full codebase with Antigravity's 1M-token context, searches institutional knowledge, decomposes the goal with shadow paths and error maps, asks you to confirm the riskiest assumptions, and then validates the plan with [`plan-checker`](personas/plan-checker.md). It writes `ops/TASKS.md` with its `Ceremony:` line.
 
 <p align="center">
-  <img src="docs/images/planning-flow.svg" alt="Planning pipeline — Antigravity scan, learnings research, shadow path planning, plan validation" width="80%">
+  <img src="docs/images/planning-flow.png" alt="Planning with at-plan: knowledge search and codebase analysis, then the plan, your check of its riskiest assumptions and plan-checker's validation, ending in ops/TASKS.md." width="90%">
 </p>
 
----
+### Test Pipeline (`at-test`)
 
-## Deep Research (`at-deep-research`)
-
-Spawns 5 research agents in parallel before planning, then synthesizes findings into a unified research brief.
+[`test-gap-analyzer`](personas/test-gap-analyzer.md) finds the untested code paths, then the roster's tester (Codex by default) writes and runs the tests in its sandbox, starting each one with a failing test. `ops/TEST_RESULTS.md` quotes the red run and the green run. Failures go through up to 3 fix cycles, and what still fails after that is escalated to you.
 
 <p align="center">
-  <img src="docs/images/research-swarm.svg" alt="Research swarm — 5 parallel research agents feeding into research-synthesizer" width="75%">
+  <img src="docs/images/testing-flow.png" alt="The test pipeline: gap analysis, Codex writing each test to fail first, red-green-refactor, and up to 3 fix cycles before escalation." width="90%">
 </p>
 
----
+### Debugging (`at-debug`)
 
-## Wave Orchestration (`at-build`)
-
-Groups plan tasks by dependency into waves. Independent tasks within each wave run in parallel; an [`integration-verifier`](personas/integration-verifier.md) validates between waves.
+[`at-debug`](skills/at-debug/SKILL.md) reproduces the bug first, finds the root cause with evidence, and only then fixes it. A report it can't reproduce goes back to you with a request for details, and a bug that is already fixed is reported with the fixing commit. A circuit breaker limits the attempts. After two failed fixes the agent stops and re-checks the assumption behind them; after a third failure on the same error it stops and writes an escalation report (the error signature, what was tried, a suggested next step).
 
 <p align="center">
-  <img src="docs/images/wave-orchestration.svg" alt="Wave orchestration — 3 waves with parallel tasks and integration verification" width="80%">
+  <img src="docs/images/debug-flow.png" alt="Debugging with at-debug: reproduce, diagnose, fix the root cause and verify, plus the early stops and the circuit breaker." width="90%">
 </p>
 
----
+### Quality Gates
 
-## Four coordination modes
+Five gates hold at every stage:
+
+<p align="center">
+  <img src="docs/images/quality-gates.png" alt="The five quality gates, each with what enforces it: a validated plan, a failing test first, a root cause, fresh evidence and a code review." width="90%">
+</p>
+
+| Gate | Enforced by | Rule |
+|---|---|---|
+| 1, Plan validated | [`plan-checker`](personas/plan-checker.md) persona | No build without a validated plan (max 3 iterations) |
+| 2, Failing test first | [`at-test`](skills/at-test/SKILL.md) workflow, Codex [`test_writer`](codex-agents/agents.toml) | No production code without a failing test |
+| 3, Root cause first | [`at-debug`](skills/at-debug/SKILL.md) workflow, Codex [`debugger`](codex-agents/agents.toml) | No fix without diagnosis |
+| 4, Evidence first | [`verification-before-completion`](skills/verification-before-completion/SKILL.md) skill | No "done" without proof |
+| 5, Review first | [`at-review`](skills/at-review/SKILL.md) workflow, which merges findings with the [`review-synthesis`](skills/review-synthesis/SKILL.md) skill | No merge without code review (max 3 cycles) |
+
+## Team work and swarms
+
+Work fans out in two shapes. In team work each task goes to one builder in its own lease and worktree, and the lead merges the results one task at a time. In a swarm several read-only lanes look at the same input through different lenses, and a synthesizer merges what they report.
+
+### The builder pool
+
+A wave reads [`ops/roster.toml`](templates/ops/roster.toml), leases each task to a builder CLI in its own git worktree, and merges a task only after a pinned reviewer who did not build it approves. The lead then promotes the sprint integration branch to `main` through a protected-path gate.
+
+<p align="center">
+  <img src="docs/images/builder-pool.png" alt="The builder pool: the lead leases each task to a roster builder in its own worktree, then cross-review, the integration branch, a wave check and promotion to main." width="90%">
+</p>
+
+The roster decides who does what. Five roles (builder, reviewer, tester, analyst, documenter) each map to a CLI, a model and an effort, with an ordered fallback chain that must end at a core-trio member. The shipped posture has Claude building, Codex reviewing and testing, and Antigravity analyzing and documenting; the roster can override any of it. Optional members carry an `enabled` flag and are absent everywhere when it is off. The shipped pins put the newest Gemini at its highest thinking level on `agy` (`"Gemini 3.8 Flash (High)"` today, Pro or Flash, whichever is newest; D-022) and `cursor-grok-4.6-xhigh` on Cursor. [Model and effort](#model-and-effort) has every pin and how to change it, and `at-setup`'s role step walks keep current, customize or restore the shipped defaults with validated writes.
+
+Every builder runs under a lease. The lead-owned ledger `ops/leases.toml` (runtime state) tracks each task through its lifecycle, with heartbeat-based orphan detection, a single requeue to a different builder, and escalation when a task can't converge. The pinned reviewer gets at most 3 fix cycles with the builder before the task escalates to you, and an approved task lands as one squash commit of the lead's own snapshot on the sprint integration branch.
+
+<p align="center">
+  <img src="docs/images/lease-lifecycle.png" alt="One task's lease from lease_create to lease_promote: dispatch, wait, collect, a pinned review and the squash merge, with the points where it escalates." width="90%">
+</p>
+
+Three mechanisms keep this safe, and none of them restricts who may write code:
+
+- Per-task worktrees with lead-side checks. A builder starts in its own worktree and is contracted to stay out of the canonical `ops/` tree. The worktree limits where it starts, not where it writes, so the lead detects changes to git state and the ledger and merges only its own collect snapshot. It detects those changes without preventing them, and it does not see a write elsewhere in the main checkout.
+- A per-adapter environment allowlist. No builder receives another provider's credential environment variables; credential files under `$HOME` are shared.
+- Mandatory cross-review before any merge. No agent merges its own build.
+
+### Four coordination modes
 
 | Mode | Mechanism | When to use |
 |---|---|---|
-| **File-based** | Shared markdown in [`ops/`](ops/) | Persistent state across sessions, audit trails |
-| **Direct invocation** | `agy -p` / `codex exec` via bash | Real-time external agent delegation |
-| **Personas** | `dispatch_persona` runs a [`personas/`](personas/) prompt with the tools, model and turn budget its manifest entry sets | Reviews, research, verification |
-| **Agent teams** | Multi-Claude with shared task lists ([`team-lead`](personas/team-lead.md)) | Complex builds with 5+ interdependent tasks |
+| File-based | Shared markdown in [`ops/`](ops/) | Persistent state across sessions, audit trails |
+| Direct invocation | `agy -p` / `codex exec` via bash | Real-time external agent delegation |
+| Personas | `dispatch_persona` runs a [`personas/`](personas/) prompt with the tools, model and turn budget its manifest entry sets | Reviews, research, verification |
+| Agent teams | Multi-Claude with shared task lists ([`team-lead`](personas/team-lead.md)) | Complex builds with 5+ interdependent tasks |
 
-### Portable skill injection
+### Wave Orchestration (`at-build`)
 
-Skills are model-agnostic markdown files that ANY agent can consume. This decouples *what methodology to use* from *which model executes it*:
+[`at-build`](skills/at-build/SKILL.md) groups the plan's tasks by dependency into waves. Independent tasks within a wave run in parallel, each in its own lease and worktree, and tasks that modify the same files never share a wave. An [`integration-verifier`](personas/integration-verifier.md) runs the tests, build and lint between waves. Each task merges after its pinned review as one squash commit, in wave order, and after the check `lease_promote` takes the result to the main branch through the promotion gate.
 
-```bash
-# All external-agent invocations go through the unified helper
-source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
+<p align="center">
+  <img src="docs/images/wave-orchestration.png" alt="Three dependency-ordered waves of leased tasks, with an integration-verifier check between waves and promotion to main after the last one." width="90%">
+</p>
 
-# Antigravity via native agent definition (skill embedded in the agent body)
-invoke_antigravity "codebase-analyst" \
-  "Analyze the full codebase. Write findings to ops/ARCHITECTURE.md." \
-  "$AGY_OUT" 600
+### Review Swarm (`at-review`)
 
-# Codex via native agent definition (skill embedded in the agent body)
-invoke_codex "test_writer" \
-  "Write tests for changed files." \
-  "$CODEX_OUT" 900
-```
+[`at-review`](skills/at-review/SKILL.md) starts every lane at once. The two core lanes always run: Antigravity's `architecture-reviewer` (architecture, design) and Codex's `logic_reviewer` (logic, security, tests). Every optional member you have enrolled reviews too. The flags add specialist personas: `--security`, `--perf`, `--simple` and `--conventions` add one each, and `--full` runs all five, with [`architecture-strategist`](personas/architecture-strategist.md) as the fifth. [`learnings-researcher`](personas/learnings-researcher.md) joins when an `ops/solutions/` entry names a changed module. A [`findings-synthesizer`](personas/findings-synthesizer.md) then merges and deduplicates every `ops/REVIEW_*.md`, giving each finding a confidence tier and a priority (P1, P2, P3). The lead fixes P1 and P2, logs P3, and escalates to you after 3 cycles without convergence.
 
-The helper's Antigravity routing is governed by `TRIFORGE_AGY_MODE` (`injection` | `native` | `auto`; default `auto` since 4.0). The agent pack (`antigravity-agents/`) now ships the agy Markdown-agent format (`mainAgent`/`subagent`/`commandExecutionPolicy`, agy tool names) and is reinstalled by session start whenever the plugin version changes; `native` passes `--agent <name>` when `agy agents` lists it, `auto` goes native only when listed, and `injection` prepends the agent body (with its embedded skill) to the prompt. The default became `auto` after the native round-trip (AGY-12) and the native-mode negative (AGY-16) passed in two consecutive probe records (D-042); a regression in either row reverts it. Codex definitions deploy as `.codex/triforge-agents.toml` — never under `.codex/agents/`, which Codex ≥ 0.147 sweeps as standalone role files.
+<p align="center">
+  <img src="docs/images/review-swarm.png" alt="The review swarm: core lanes, enrolled optional members and flagged specialists review at once, then findings-synthesizer merges and ranks what they found." width="90%">
+</p>
+
+#### Confidence tiering
+
+Every finding gets a confidence score, so nobody spends time on phantom issues:
+
+| Tier | Criteria | Rule |
+|---|---|---|
+| HIGH | Verified in codebase via grep/read. Deterministic. | Can be any priority |
+| MEDIUM | Pattern-aggregated detection. Some false positive risk. | Can be any priority |
+| LOW | Requires intent verification. Heuristic-only. | Can never be P1 |
+
+#### Suppressions
+
+Each reviewer has a "Do Not Flag" list to reduce noise: readability-aiding redundancy, documented thresholds, sufficient test assertions, consistency-only style changes, and issues already addressed in the current diff. Each persona file in [`personas/`](personas/) lists its own suppressions.
+
+### Deep Research (`at-deep-research`)
+
+[`at-deep-research`](skills/at-deep-research/SKILL.md) runs five research lenses in parallel before planning: past solutions and decisions, current framework docs for the stack, git history, Antigravity's targeted codebase analysis, and industry practice. [`research-synthesizer`](personas/research-synthesizer.md) merges them into one research brief that lists contradictions without resolving them, and hands off to `at-plan`.
+
+<p align="center">
+  <img src="docs/images/research-swarm.png" alt="The research swarm: five lenses research in parallel, and research-synthesizer merges them into one brief for at-plan." width="90%">
+</p>
+
+### The knowledge loop (`at-compound`)
+
+After a non-trivial problem is solved, [`at-compound`](skills/at-compound/SKILL.md) records it in [`ops/solutions/`](ops/solutions/), or a decision in [`ops/decisions/`](ops/decisions/), when it clears the counterfactual bar: a future agent without the note would repeat the mistake or work the decision out again. Otherwise it says in one line why it wrote nothing. Before new work is planned, [`learnings-researcher`](personas/learnings-researcher.md) searches both directories.
+
+<p align="center">
+  <img src="docs/images/knowledge-loop.png" alt="The knowledge loop: solve a problem, record it with at-compound, store it in ops/, and search it before the next plan." width="90%">
+</p>
+
+## Model and effort
+
+Each role's CLI, model and effort come from `ops/roster.toml`. A field you leave unset inherits the shipped default (the role table in `scripts/lib/roster.sh` and the CLI registry in `scripts/lib/registry.sh`), so deleting the file is safe. `at-setup`'s role step edits it for you (`at-setup roles` jumps straight there), and a hand edit is checked when the roster loads.
+
+<p align="center">
+  <img src="docs/images/roster.png" alt="ops/roster.toml: the lead, the five roles with their shipped CLI, model, effort and fallbacks, the required core trio and the optional members." width="90%">
+</p>
+
+| Role | CLI | Model | Effort | Fallbacks |
+|---|---|---|---|---|
+| builder | Claude | Claude Code's own default (the roster's `model` is empty) | `max` | Codex → Antigravity |
+| reviewer | Codex | `gpt-6-astra` | `xhigh` | Antigravity → Claude |
+| tester | Codex | `gpt-6-astra` | `xhigh` | Claude |
+| analyst | Antigravity | `Gemini 3.8 Flash (High)` | `high` | Claude |
+| documenter | Antigravity | `Gemini 3.8 Flash (High)` | `high` | Claude |
+
+How each CLI takes its model and effort:
+
+- Antigravity always gets an explicit `--model`, because its own default is a (Medium) variant. The shipped pin is the newest Gemini at its highest thinking level, Pro or Flash (D-022). The suffix is agy's effort control, so a role's `effort` maps into it: `low` to (Low), `medium` to (Medium), `high`, `xhigh` and `max` to (High).
+- To run the Pro line, set a role's `model` to `"Gemini 3.1 Pro (High)"` (or `(Low)`; 3.1 Pro has no Medium tier). It stays the documented one-line opt-in.
+- The July 2026 plan's never-Flash rule (AE2) is superseded by D-022; if you work from that plan, read the September ADR (`ops/decisions/2026-09-11-cli-deprecation-watch.md`).
+- Codex runs `gpt-6-astra` at `xhigh` (D-021). A role can pick another Codex model, such as `gpt-6.1-sol`, which answered on Codex 0.160.0 and was refused on 0.155.1.
+- Cursor runs a suffixed Grok id, `cursor-grok-4.6-xhigh`, never the Auto router. Its effort is the id's suffix (`low`, `medium`, `high`, `xhigh`).
+- The claude builder lane runs Claude Code's own default model at `max` effort. Claude personas and sub-agents follow the ladder below.
+- The optional members' pins are OpenCode `openrouter/z-ai/glm-5.3`, Kimi `kimi-code/k3`, Devin `swe-1-6-slow` and Grok Build `grok-4.7` (its effort rides in `--effort`).
+- A role that sets only `effort` keeps its default CLI and model. Roster model overrides reach each CLI through its registry `model_env`.
+
+The lead takes its model and effort from the `[lead]` table (`cli`, `model`, `effort`). Left out, a Codex lead runs `gpt-6-astra` at `xhigh`, and a Claude Code lead runs your session's model and effort setting. `coordinate.sh` and the launch line `at-setup` prints add them as flags.
+
+Claude personas and sub-agents step down one ladder for narrow runtime tasks: Fable 5.1 at `max` for the lead and the never-downgrade tier (the latest Opus at `max` where Fable isn't available), then Opus 5.5 at `xhigh` (Claude Code ≥ 2.1.280), Opus 5.5 at `high`, and Sonnet 5.5 at `high`. `security-sentinel`, `plan-checker` and `findings-synthesizer` are never downgraded. Each persona's starting tier is in [`personas/manifest.toml`](personas/manifest.toml). The ladder has one definition, `TRIFORGE_MODEL_LADDER` in [`scripts/lib/registry.sh`](scripts/lib/registry.sh); `triforge_ladder` prints it, and `validate-versions.sh` fails when another file restates it.
 
 ### Assignment heuristic
 
-Roles come from `ops/roster.toml` (`resolve_role <role>`); the defaults below are the shipped posture, not a write-restriction — any member can be the builder, and every build merges only after cross-review.
+Roles come from `ops/roster.toml` (`resolve_role <role>`). The defaults below are the shipped posture and restrict no one: any member can be the builder, and every build merges only after cross-review.
 
 | Question | Role (default; roster-assignable) |
 |---|---|
-| Produces code? | builder role — default Claude, assignable to any member; built under a lease and cross-reviewed before merge |
+| Produces code? | builder role: default Claude, assignable to any member; built under a lease and cross-reviewed before merge |
 | Evaluates existing code? | reviewer role ([Codex](https://github.com/openai/codex) + [Antigravity](https://antigravity.google/cli)) + [review personas](#review-specialists-6) in parallel |
 | Runs/executes something? | tester role (default [Codex CLI](https://github.com/openai/codex)) |
 | Produces documentation? | documenter role (default [Antigravity CLI](https://antigravity.google/cli)) |
 | Touches shared interfaces? | builder implements under a lease → pinned non-author reviewer cross-reviews → tester validates |
 | Ambiguous? | the lead takes it as builder, flags for parallel review |
-
----
-
-## Review Swarm (`at-review`)
-
-Up to 7 reviewers analyze the same code simultaneously through different lenses (2 external CLIs + 5 specialist personas with `--full`), then a [`findings-synthesizer`](personas/findings-synthesizer.md) merges, deduplicates, and priority-ranks all findings.
-
-<p align="center">
-  <img src="docs/images/review-swarm.svg" alt="Review swarm — 7 parallel reviewers feeding into findings-synthesizer" width="80%">
-</p>
-
-### Confidence tiering
-
-Every finding gets a confidence score to prevent wasting time on phantom issues:
-
-| Tier | Criteria | Rule |
-|---|---|---|
-| **HIGH** | Verified in codebase via grep/read. Deterministic. | Can be any priority |
-| **MEDIUM** | Pattern-aggregated detection. Some false positive risk. | Can be any priority |
-| **LOW** | Requires intent verification. Heuristic-only. | **Can NEVER be P1** |
-
-### Suppressions
-
-Each reviewer has a "Do Not Flag" list to reduce noise — readability-aiding redundancy, documented thresholds, sufficient test assertions, consistency-only style changes, and issues already addressed in the current diff. Each persona file in [`personas/`](personas/) lists its own suppressions.
-
----
-
-## Test Pipeline (`at-test`)
-
-[`test-gap-analyzer`](personas/test-gap-analyzer.md) finds the untested code paths, then [Codex CLI](https://github.com/openai/codex) writes and runs the tests in its sandbox, starting each one with a failing test.
-
-<p align="center">
-  <img src="docs/images/testing-flow.svg" alt="Test pipeline — gap analysis, Codex TDD, fix cycle" width="80%">
-</p>
-
----
-
-## Debugging (`at-debug`)
-
-[`at-debug`](skills/at-debug/SKILL.md) reproduces the bug first, finds the root cause with evidence, and only then fixes it. A **circuit breaker** caps each issue at 3 attempts: if the same error comes back after 3 consecutive fixes, the agent stops looping and writes an escalation report.
-
-<p align="center">
-  <img src="docs/images/debug-flow.svg" alt="Debugging — reproduce, diagnose, fix" width="80%">
-</p>
-
----
-
-## Quality Gates
-
-Six checkpoints, enforced at every stage:
-
-<p align="center">
-  <img src="docs/images/quality-gates.svg" alt="Five quality gates — plan validated, failing test first, root cause first, evidence first, review first" width="80%">
-</p>
-
-| Gate | Enforced by | Rule |
-|---|---|---|
-| **1 — Plan validated** | [`plan-checker`](personas/plan-checker.md) persona | No build without validated plan (max 3 iterations) |
-| **2 — Failing test first** | [`at-test`](skills/at-test/SKILL.md) workflow, Codex [`test_writer`](codex-agents/agents.toml) | No production code without a failing test |
-| **3 — Root cause first** | [`at-debug`](skills/at-debug/SKILL.md) workflow, Codex [`debugger`](codex-agents/agents.toml) | No fix without diagnosis |
-| **4 — Evidence first** | [`verification-before-completion`](skills/verification-before-completion/SKILL.md) skill | No "done" without proof |
-| **5 — Review first** | [`review-synthesis`](skills/review-synthesis/SKILL.md) skill | No merge without code review (max 3 cycles) |
-| **6 — Circuit breaker** | [`at-debug`](skills/at-debug/SKILL.md) workflow, Codex [`debugger`](codex-agents/agents.toml) | 3-attempt ceiling per issue, then escalation report |
-
----
-
-## Getting started
-
-From nothing to a first sprint in five steps:
-
-1. Install the core trio (Claude Code, Antigravity `agy` and Codex) and log in to each. The version floors and READY probes are under [Prerequisites](#prerequisites).
-2. Install the plugin: `claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge`, then `claude plugin install agent-triforge@agent-triforge` ([Installation](#installation)).
-3. Start `claude` in your project. The first session bootstraps `ops/`.
-4. Run `/at-setup`. It checks the core trio, asks which CLI leads the project, lets you keep or change the role assignments in `ops/roster.toml`, and offers each optional CLI. It also offers to add Triforge's pointer block to the project's root `AGENTS.md`, and it changes that file or a `CLAUDE.md` only after you say yes.
-5. Run `/at-ship <goal>` for an autonomous sprint, or run the phases one at a time ([Typical session flow](#typical-session-flow)).
-
-To lead from Codex instead, install the plugin with the Codex lines under [One plugin for either lead](#one-plugin-for-either-lead), start `codex` in the project, and run `$agent-triforge:at-setup` and then `$agent-triforge:at-ship <goal>` in a Codex prompt. Setup prints the full-access launch line for a Codex lead, and you type it yourself.
-
-If you are upgrading from 3.x, the slash commands are now `at-` workflows (`/ship` is `/at-ship`); see [Upgrading from 3.x](#upgrading-from-3x).
-
-### Prerequisites
-
-[`at-setup`](skills/at-setup/SKILL.md) is the guided path from a fresh install to a working roster (`/at-setup` under a Claude Code lead, `$agent-triforge:at-setup` in a Codex prompt). After checking that the core trio is live, it asks which CLI leads the project, Claude Code or Codex. For Codex it shows the project trust entry, hook trust and the full-access launch line, which you type yourself. Role assignment comes next: keep the shipped defaults (recommended) or change any role's CLI, model and effort. You then enroll each optional CLI with a model you choose, or decline it. Setup lists the instruction files in the project and the directories above it, and changes one only after you say yes. Before it writes the lead, it lists which providers receive your code. It is idempotent, so you can re-run it any time. The commands below are the probes it automates; run them yourself to check a CLI before you install the plugin.
-
-**Core trio (required):**
-
-```bash
-# Claude Code ≥ 2.1.277 — the first build that reads a root AGENTS.md (D-037);
-# 2.1.267 first honored `effort:` frontmatter on pinned-default models and the
-# `fable` alias resolves to Fable 5.1 from 2.1.257
-claude --version
-
-# Antigravity CLI ≥ 1.1.27 — https://antigravity.google/cli (run `agy` once interactively to log in)
-agy --model "Gemini 3.8 Flash (High)" -p "Respond with only: READY"   # pin the model — agy's own default is a (Medium) variant
-
-# Codex CLI ≥ 0.153.0 (gpt-6-astra's minimal client version) — https://github.com/openai/codex
-codex exec "Respond with only: READY"
-
-# Python 3 (used by hook handlers for JSON parsing)
-python3 --version
-```
-
-**Optional tier.** Enroll these through `at-setup` to use them as builders or reviewers. An absent one is skipped cleanly in every roster fallback chain:
-
-```bash
-# OpenCode ≥ 1.18.20 — needs the OpenRouter provider connected (OPENROUTER_API_KEY or `opencode auth login`)
-opencode run --format json -m openrouter/z-ai/glm-5.3 "Respond with only: READY"
-
-# Kimi Code ≥ 0.33.0 — OAuth device-code or API key (`kimi login`)
-kimi -p "Respond with only: READY"
-
-# Cursor (date-versioned) — pin the suffixed Grok id, never the Auto router (`cursor-agent login`);
-# the binary is `cursor-agent` (legacy symlink) or `agent` (primary since 2026.09.10)
-cursor-agent -p --trust --model cursor-grok-4.6-xhigh "Respond with only: READY"
-
-# Devin CLI ≥ 3000.10.31 (`devin auth login`) — a reviewer and analyst; at-setup asks for your
-# consent before enrolling it, and it builds only after a separate opt-in
-devin --model swe-1-6-slow --respect-workspace-trust false -p "Respond with only: READY"
-
-# Grok Build ≥ 1.0.34 (builder, reviewer or analyst) — `grok login` (`grok login --device-code` without a browser) or XAI_API_KEY
-grok --model grok-4.7 --output-format json -p "Respond with only: READY"
-```
-
-### Compatibility
-
-Floors and tested versions come from the newest capability probe record, [`ops/research/2026-09-probe-record.md`](ops/research/2026-09-probe-record.md), generated 2026-09-27; "the current record" always means the newest `ops/research/*-probe-record.md`. v4.0.0 ships without a regenerated record. During 4.0 development these new rows ran live with `probe-capabilities.sh --only`: DVN-01 to DVN-07, CC-21 to CC-25, CDX-20 to CDX-23, GRK-02 to GRK-12 and SELF-06g. Where the table says "dev-time rows", it gives the version those rows ran on. A full run would currently record Grok Build as QUOTA-FAIL (the xAI quota ran out) and Kimi as AUTH-FAIL. Core trio required; optional tier enrolled via `at-setup`. Supersedes the July 2026 baseline (D-034).
-
-| CLI | Tier | Floor (KTD-13) | Tested | READY probe |
-|---|---|---|---|---|
-| Claude Code (`claude`) | core | ≥ 2.1.277 (a claude worker: ≥ 2.1.285; a persona: a build with `--safe-mode`) | 2.1.283; dev-time rows on 2.1.289 and 2.1.291 | `claude --version` |
-| Antigravity (`agy`) | core | ≥ 1.1.27 | 1.2.12 | `agy --model "Gemini 3.8 Flash (High)" -p "Respond with only: READY"` |
-| Codex (`codex`) | core | ≥ 0.153.0 | 0.155.1; dev-time rows on 0.160.0 | `codex exec "Respond with only: READY"` |
-| OpenCode (`opencode`) | optional | ≥ 1.18.20 | 1.18.30 | `opencode run --format json -m openrouter/z-ai/glm-5.3 "…"` |
-| Kimi Code (`kimi`) | optional | ≥ 0.33.0 | 0.42.0 (AUTH-FAIL on the probe host; live rows PENDING-AUTH until `kimi login`) | `kimi -p "…"` |
-| Cursor (`cursor-agent`; `agent` fallback) | optional | date-versioned | 2026.09.10 | `cursor-agent -p --trust --model cursor-grok-4.6-xhigh "…"` |
-| Devin CLI (`devin`) | optional | ≥ 3000.10.31 | 3000.11.3 (dev-time rows) | `devin --model swe-1-6-slow --respect-workspace-trust false -p "…"` |
-| Grok Build (`grok`) | optional | ≥ 1.0.34 | 1.0.34 (dev-time rows) | `grok --model grok-4.7 -p "…"` |
-
-Why these floors: Claude Code 2.1.277 is the first build that reads a root `AGENTS.md`, Triforge's only instruction file (D-037; it includes the 2.1.267 fix that honors `effort:` frontmatter on pinned-default models); a claude worker needs 2.1.285, the first build that ignores the repository settings that loosen its sandbox, and refuses to start on an older one unless `TRIFORGE_CLAUDE_SANDBOX=off` is set; every persona runs with Claude Code's `--safe-mode`, so `dispatch_persona` refuses a `claude` without the flag (rc 69) and prints the fix, `claude update`; the persona lane was tested on 2.1.289 and 2.1.291, and an exec persona, which runs Bash, also needs the 2.1.285 sandbox floor; agy 1.1.27 adds `denied_actions` to the JSON envelope that `invoke_antigravity` reads as its completion signal; Codex 0.153.0 is `gpt-6-astra`'s minimal client, and `gpt-6.1-sol`, which a role can pick, answered on Codex 0.160.0 and was refused on 0.155.1; OpenCode 1.18.20 answers subagent permission asks under `run`; Kimi 0.33.0 is the agent-core-v2 engine with `--agent-file`; Devin 3000.10.31 is the first build where a deny rule wins over an allow rule, which its per-run config relies on (its versions jumped from 2026.x to 3000.x in July 2026); Grok Build 1.0.34 is the build the GRK probe rows passed on (`dontAsk` with deny rules, the workspace sandbox, streaming JSON, and the switches that stop it reading Claude Code's config). The Gemini CLI floor was removed with the Antigravity migration (Google's hosted service stopped serving consumer tiers 2026-06-18); legacy Gemini users pin plugin `v2.4.3`. An absent or declined optional CLI is silently skipped — fallback chains always terminate at a core-trio member, which can't be disabled.
-
-### Data egress and credentials
-
-Each dispatched CLI sends its task prompt and the code context it is handed to that CLI's model provider. Under the shipped defaults, your code + task context reaches **Anthropic** (Claude), **Google** (Antigravity → Gemini 3.8 Flash), and **OpenAI** (Codex) for the core trio; and, for any optional member you enroll, **Zhipu / Z.ai** (GLM, routed through the **OpenRouter** intermediary — which also sees the traffic), **Moonshot** (Kimi), **xAI** (Grok Build, and Grok through Cursor), and **Cognition** (Devin; a model outside Cognition's SWE family also reaches that model's provider). Cognition may train on that data unless the account opts out, so at-setup records your consent before Devin joins the roster. `ops/roster.toml` is the control surface: disable a member (`enabled = false`) or drop a provider's model from every role to remove that provider from the egress set (the core trio always stays). Credentials never live in the repo — each adapter reads its own from the OS / vendor store (CLI logins, `OPENROUTER_API_KEY`, `CURSOR_API_KEY`, `kimi login` OAuth-or-API-key, the `devin auth login` token in `~/.local/share/devin/`, `grok login` or `XAI_API_KEY`), scoped per-adapter by the lease env allowlist; captured output is scrubbed before it lands in `ops/`, and rotation follows each vendor's own token flow (revoke + re-login/re-key, then re-run `at-setup`).
-
-### Installation
-
-**Install as a Claude Code plugin** (Claude Code leads):
-
-```bash
-# Register the repository as a single-plugin marketplace once (it ships .claude-plugin/marketplace.json)
-claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge
-
-# User scope (available in all your projects)
-claude plugin install agent-triforge@agent-triforge
-
-# Or project scope (shared with team via .claude/settings.json)
-claude plugin install agent-triforge@agent-triforge --scope project
-```
-
-**Install as a Codex plugin** (Codex leads). Codex reads the same `.claude-plugin/` manifests:
-
-```bash
-codex plugin marketplace add Ninety2UA/agent-triforge
-codex plugin add agent-triforge@agent-triforge
-```
-
-Claude Code registers the hooks, the env vars in `settings.json` and the skills (the portable skills and the lead workflows) automatically, and Codex registers the skills and hooks. Nothing needs configuring by hand. A Codex lead runs the plugin's hooks once you have trusted them in Codex, and `at-setup` checks that for you.
-
-The first session in a project bootstraps its `ops/` directory. Then run `/at-setup` (`$agent-triforge:at-setup` in a Codex prompt; see [Prerequisites](#prerequisites)). It offers to add the pointer block from [`templates/AGENTS.md`](templates/AGENTS.md) to the project's root `AGENTS.md` (Triforge ships no `CLAUDE.md`). When a `CLAUDE.md` would hide `AGENTS.md` from Claude Code, it also offers the `@AGENTS.md` import line. Neither is written until you say yes.
-
-#### Portable skills in Devin and Pi
-
-Devin CLI and Pi can install the 10 portable skills straight from this repository. They get the skills only: no lead workflow (`at-*`), hook or agent. One of them, `wave-orchestration`, calls Triforge's lease helpers, which come only with the Triforge plugin. Without the plugin its wave rules still work as a manual method, but no lease, pinned review or integrity check runs. Installing the skills does not enroll the CLI, because `ops/roster.toml` assigns roles only to the CLIs in [the builder pool](#the-builder-pool).
-
-| Harness | Install | Manifest | Invoke |
-|---|---|---|---|
-| Devin CLI | `devin plugins install Ninety2UA/agent-triforge#skills` (from a clone: `devin plugins install --local ./agent-triforge/skills`) | [`skills/.devin-plugin/plugin.json`](skills/.devin-plugin/plugin.json), plugin root `skills/` | `/agent-triforge:<name>` |
-| Pi | `pi install git:github.com/Ninety2UA/agent-triforge` (`-l` writes the project's `.pi/settings.json` instead of `~/.pi/agent/settings.json`) | [`package.json`](package.json), the `pi.skills` list | `/skill:<name>` |
-
-Run `devin auth login` before any `devin plugins` command. Install the Devin plugin from `#skills`, not from the repository root: at the root, Devin falls back to `.claude-plugin/plugin.json` and also loads the 17 lead workflows, this repository's `AGENTS.md` as an always-on rule, and the Claude Code hooks.
-
-### Update
-
-```bash
-claude plugin update agent-triforge
-```
-
-### Upgrading from 3.x
-
-- Each 3.x slash command is now a lead workflow with an `at-` prefix: `/setup` became `/at-setup`, `/ship` became `/at-ship`, and so on for the whole set (`$agent-triforge:at-setup`, `$agent-triforge:at-ship` in a Codex prompt). The plugin no longer ships a `commands/` directory. The [command map](#command-map) below pairs each one with its new name, and the [Lead workflows reference](#lead-workflows-reference) describes every workflow.
-- Triforge 4 ships no `CLAUDE.md`. The project's instruction file is its root `AGENTS.md`, which Claude Code reads from 2.1.277, and only while no `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` sits in the project or above it. If your project kept a `CLAUDE.md` from the 3.x template, add an import line to it (`@AGENTS.md` in a root `CLAUDE.md`, `@../AGENTS.md` in `.claude/CLAUDE.md`), or replace its Triforge content with the pointer block from [`templates/AGENTS.md`](templates/AGENTS.md). Session start prints a warning naming the exact line on every session until you do; it never edits the file.
-- The `test-driven-development` and `systematic-debugging` skills are gone. Their rules now sit inline in `at-test`, `at-quick`, `at-debug` and the Codex `test_writer` and `debugger` agents.
-- If your project's `.codex/hooks.json` is still the unchanged 3.x copy, the first 4.0 session replaces it with the empty 4.0 template and prints a notice naming the file. The 3.x hook appended a line to `ops/CHANGELOG.md` from every Codex session, lease workers included; attribution now comes from the lease ledger. Session start leaves a copy you edited alone ([decision record](ops/decisions/2026-10-04-codex-hook-trust-bypass-retired.md)).
-- The 19 agents are now personas: prompt files in [`personas/`](personas/) with no frontmatter. Their tools, model tier and turn budget live in [`personas/manifest.toml`](personas/manifest.toml). The plugin ships no `agents/` directory, so Claude Code's agent list no longer shows them. The workflows run them through `dispatch_persona` under either lead. PR comment resolution now runs as a lease and lands as one reviewed commit on the PR branch.
-- On resume, `lease_heartbeat_check` now collects the builders that finished while no lead was watching and adopts the ones still running; builders run detached in 4.0 and outlive the lead's turn. In 3.x it printed `run: lease_collect <task>` and left the collect to you.
-- Triforge now sets up the project in the repository's top directory, the nearest one above that holds `.git`, wherever the session starts. A project that 3.x bootstrapped in a subdirectory of a larger repository keeps its `<subdir>/ops/`, and the first 4.0 session creates a new skeleton at the top. The lease ledger and the `[lead]` table already live in the top-level `ops/`, so move your other `ops/` files there and delete the subdirectory copy. Until you move it, session start and `at-setup` warn about the subdirectory's `ops/roster.toml` each time they run from that subdirectory or below it, and on the run that creates the top-level skeleton.
-
-#### Command map
-
-A 3.x command also ran in its namespaced form, `/agent-triforge:<name>`. From a shell, put the Codex form in single quotes so the shell leaves the `$` alone: `codex exec '$agent-triforge:at-ship <goal>'`.
-
-| 3.x command | 4.0 under Claude Code | 4.0 in a Codex prompt |
-|---|---|---|
-| `/analyze` | `/at-analyze` | `$agent-triforge:at-analyze` |
-| `/build` | `/at-build` | `$agent-triforge:at-build` |
-| `/compound` | `/at-compound` | `$agent-triforge:at-compound` |
-| `/coordinate` | `/at-coordinate` | `$agent-triforge:at-coordinate` |
-| `/debug` | `/at-debug` | `$agent-triforge:at-debug` |
-| `/deep-research` | `/at-deep-research` | `$agent-triforge:at-deep-research` |
-| `/pause` | `/at-pause` | `$agent-triforge:at-pause` |
-| `/plan` | `/at-plan` | `$agent-triforge:at-plan` |
-| `/quick` | `/at-quick` | `$agent-triforge:at-quick` |
-| `/resolve-pr` | `/at-resolve-pr` | `$agent-triforge:at-resolve-pr` |
-| `/resume` | `/at-resume` | `$agent-triforge:at-resume` |
-| `/review` | `/at-review` | `$agent-triforge:at-review` |
-| `/setup` | `/at-setup` | `$agent-triforge:at-setup` |
-| `/ship` | `/at-ship` | `$agent-triforge:at-ship` |
-| `/status` | `/at-status` | `$agent-triforge:at-status` |
-| `/test` | `/at-test` | `$agent-triforge:at-test` |
-| `/wrap` | `/at-wrap` | `$agent-triforge:at-wrap` |
-
-#### Rolling back to 3.3.3
-
-Settle every open lease while 4.0 is still installed. A 4.0 builder runs detached, and 3.3.3's heartbeat check can't match the start time 4.0 records for it, so 3.3.3 would take a builder that is still running for dead and remove its worktree. Run `lease_wait` until it prints no `still building:` line (`lease_stop <task>` stops a builder you don't want to wait for), then merge each lease or reclaim it with `lease_reclaim`. 3.3.3 can't merge a lease whose pinned reviewer is Devin or Grok Build, and it doesn't read the approvals recorded with `lease_approve`.
-
-Then reinstall 3.3.3 from a checkout of its tag:
-
-```bash
-git clone --branch v3.3.3 https://github.com/Ninety2UA/agent-triforge.git agent-triforge-3.3.3
-claude plugin uninstall agent-triforge@agent-triforge
-claude plugin marketplace remove agent-triforge
-claude plugin marketplace add ./agent-triforge-3.3.3
-claude plugin install agent-triforge@agent-triforge
-```
-
-If you installed at project scope, pass the same `--scope` to `uninstall` and `install`. 3.3.3 has no Codex lead, so also remove a Codex install with `codex plugin remove agent-triforge@agent-triforge`. To return to the current release later, remove the local marketplace and add the GitHub URL again.
-
-Last, check what 4.0 left in each project:
-
-- `ops/roster.toml`: 3.3.3 ignores the `[lead]` table and always leads from Claude Code. It rejects `[members.devin]` and `[members.grok]` as unknown members, and that error stops every role from resolving, so delete both tables and take `devin` and `grok` out of every role and fallback chain.
-- The instruction file: 3.3.3's session start looks only for `CLAUDE.md` and `.claude/CLAUDE.md`. When it finds neither, it prints a `cp` line for its `templates/CLAUDE.md`, and once that file exists Claude Code stops reading `AGENTS.md`. The pointer block in your `AGENTS.md` names the 4.0 `at-` workflows, which 3.3.3 doesn't have. Restore the project's 3.x `CLAUDE.md` from git history or run the printed copy line, and move anything you still need from `AGENTS.md` into it.
-- `personas/`: nothing to undo. Personas live in the plugin, not in your project, and 3.3.3 brings back its 19 subagents in `agents/`.
-- `.codex/hooks.json`: if 4.0 replaced it with the empty template, 3.3.3 keeps the empty file, because it copies its template only where none exists. Delete the file and the next session restores the 3.x hook, which logs every Codex session to `ops/CHANGELOG.md`.
-- `.agents/skills/`: nothing to do. 3.3.3's session start sees the version change, adds `test-driven-development` and `systematic-debugging` back, and replaces only the copies that still match their recorded digest.
-- `ops/` itself: 3.3.3 sets up the project in the directory where the session starts, so start Claude Code in the repository's top directory, where 4.0 keeps `ops/`.
-
-### Development (for contributors)
-
-```bash
-git clone https://github.com/Ninety2UA/agent-triforge.git
-claude --plugin-dir ./agent-triforge
-```
-
-CI cuts the releases. When a version bump lands on `main`, [`release.yml`](.github/workflows/release.yml) tags `v<version>` and publishes the GitHub release, using this README's matching "Recent changes" entry as the notes; `bash scripts/release-notes.sh --body` previews them. The short checklist is under "Release" in [`AGENTS.md`](AGENTS.md), the full one under "Release checklist" in [`docs/agent-triforge.md`](docs/agent-triforge.md).
-
-### Verify installation
-
-Start Claude Code in a project. The session-start banner lists the lead workflows, and `/at-status` prints the sprint report:
-
-```bash
-claude
-
-# You should see:
-# "Multi-agent framework ready."
-# "Lead workflows (/at-<name> here, $agent-triforge:at-<name> in a Codex prompt): at-setup at-ship at-plan ..."
-
-/at-status
-```
-
-### Typical session flow
-
-**Supervised (human in the loop).** You run each phase and check its output before the next:
-
-```bash
-claude
-> /at-plan add user authentication      # Phase 0-1.5: analyze, research, plan, validate
-> /at-build                              # Phase 2: wave orchestration
-> /at-review                             # Phase 3-4: parallel review + synthesis
-> /at-test                               # Phase 5: Codex TDD
-> /at-compound JWT session handling      # Document solution for future sprints
-> /at-wrap                               # Phase 6: compound knowledge, write STATE.md
-```
-
-**Autonomous (fire and forget).** One command runs every phase:
-
-```bash
-# Inside Claude — single session, won't stop until done
-claude
-> /at-ship add user authentication with JWT refresh tokens
-
-# From terminal — with context-exhaustion recovery
-./scripts/coordinate.sh "add user authentication" --max 5 --team
-```
-
-In a Codex prompt the same workflows are `$agent-triforge:at-<name>`. From a shell, wrap the prompt in single quotes so the shell leaves `$agent-triforge:at-ship` alone: `codex exec '$agent-triforge:at-ship add user authentication'`.
-
----
 
 ## Lead workflows reference
 
@@ -669,40 +645,23 @@ The 17 lead workflows are skills under [`skills/at-*/`](skills/) that only the l
 
 | Lead workflow | Claude Code · Codex | Arguments | What it does |
 |---|---|---|---|
-| [**`at-ship`**](skills/at-ship/SKILL.md) | `/at-ship` · `$agent-triforge:at-ship` | `<goal> [--convergence fast\|standard\|deep] [--team]` | Fully autonomous sprint: analyze, plan, build, review, test, wrap; prints a copyable completion line (the `/goal` gate under Claude Code) at the start and creates `ops/.sprint-complete` last. `fast` = P1 only, `deep` = P1 + P2 + P3 below 3; `--team` for 5+ or interdependent tasks. |
-| [**`at-coordinate`**](skills/at-coordinate/SKILL.md) | `/at-coordinate` · `$agent-triforge:at-coordinate` | `<goal>` | The plain Phase 0–6 sprint cycle that [`scripts/coordinate.sh`](scripts/coordinate.sh) drives across fresh sessions; same pipeline as `at-ship` without convergence or team flags. |
-| [**`at-plan`**](skills/at-plan/SKILL.md) | `/at-plan` · `$agent-triforge:at-plan` | `[goal]` | Phases 0 → 1.5: codebase analysis, knowledge search, shadow paths, waves, the three-assumption ambiguity check, [`plan-checker`](personas/plan-checker.md) validation. Writes `ops/TASKS.md` with its `Ceremony:` line. |
-| [**`at-build`**](skills/at-build/SKILL.md) | `/at-build` · `$agent-triforge:at-build` | `[--team] [--wave N]` | Phase 2: [wave orchestration](skills/wave-orchestration/SKILL.md) over leased builder-pool tasks, cross-review by a pinned reviewer, one squash commit per task, `integration-verifier` per wave, the `[promotion]` gate. |
-| [**`at-review`**](skills/at-review/SKILL.md) | `/at-review` · `$agent-triforge:at-review` | `[--full] [--security] [--perf] [--simple] [--conventions]` | Phases 3–4: parallel roster lanes plus the selected specialists, [synthesis](personas/findings-synthesizer.md), P1/P2 fixes, `## Review dispositions — Cycle N` in `ops/TASKS.md`; escalates after 3 cycles. |
-| [**`at-test`**](skills/at-test/SKILL.md) | `/at-test` · `$agent-triforge:at-test` | `[--gaps-only] [scope]` | Phase 5: [gap analysis](personas/test-gap-analyzer.md), tests from the roster tester with the failing run first, fix cycle to green in `ops/TEST_RESULTS.md`. `--gaps-only` stops after the report. |
-| [**`at-wrap`**](skills/at-wrap/SKILL.md) | `/at-wrap` · `$agent-triforge:at-wrap` | — | Phase 6: [compound knowledge](skills/knowledge-compounding/SKILL.md), update the `ops/` files, archive review files to `ops/archive/<today>/`, write [`STATE.md`](ops/STATE.md), print the sprint summary with its rulings, create the completion marker last. |
-| [**`at-quick`**](skills/at-quick/SKILL.md) | `/at-quick` · `$agent-triforge:at-quick` | `[change description]` | A change touching fewer than 3 files with no shared interface or protected path: TDD, self-review, no swarm; hands off to `at-review --security` / `--perf` when a lens needs it. |
-| [**`at-debug`**](skills/at-debug/SKILL.md) | `/at-debug` · `$agent-triforge:at-debug` | `[bug description or error message]` | Reproduce, root-cause with evidence, fix, find sibling instances, record in `ops/MEMORY.md` and `ops/CHANGELOG.md`; 3-attempt circuit breaker, then an escalation report. |
-| [**`at-setup`**](skills/at-setup/SKILL.md) | `/at-setup` · `$agent-triforge:at-setup` | `[lead\|opencode\|kimi\|cursor\|devin\|grok\|roles]` | Guided project setup: lead chosen, core trio live, Codex trust detected, roles kept, customized or restored, each optional CLI enrolled or declined, instruction files checked and changed only on a yes, egress listed; closes with the status table and a verdict. Idempotent. |
-| [**`at-deep-research`**](skills/at-deep-research/SKILL.md) | `/at-deep-research` · `$agent-triforge:at-deep-research` | `[topic or goal]` | Five parallel research lenses plus [`research-synthesizer`](personas/research-synthesizer.md), every endpoint a recorded primary source; writes `ops/RESEARCH_ANTIGRAVITY.md` and hands off to `at-plan`. |
-| [**`at-analyze`**](skills/at-analyze/SKILL.md) | `/at-analyze` · `$agent-triforge:at-analyze` | `[github-url or local-path]` | Read-only judgment of an external repo or resource: extractable patterns, prompt-engineering insights, verdict matrix, ranked recommendations. Nothing written. |
-| [**`at-status`**](skills/at-status/SKILL.md) | `/at-status` · `$agent-triforge:at-status` | — | One report from `ops/`, git and the review files: phase, task counts, blockers, recent activity, pending reviews, uncommitted changes, available workflows. Writes nothing. |
-| [**`at-pause`**](skills/at-pause/SKILL.md) | `/at-pause` · `$agent-triforge:at-pause` | — | Write the [`STATE.md`](ops/STATE.md) checkpoint a later session resumes from, and nothing else. |
-| [**`at-resume`**](skills/at-resume/SKILL.md) | `/at-resume` · `$agent-triforge:at-resume` | — | Restore [`STATE.md`](ops/STATE.md), re-prove the baseline when HEAD moved, summarize, continue the recorded phase. |
-| [**`at-compound`**](skills/at-compound/SKILL.md) | `/at-compound` · `$agent-triforge:at-compound` | `[solution \| decision] <description>` | Record a solved problem in [`ops/solutions/`](ops/solutions/) or a decision in [`ops/decisions/`](ops/decisions/) when it clears the counterfactual bar; otherwise one line saying why nothing was written. |
-| [**`at-resolve-pr`**](skills/at-resolve-pr/SKILL.md) | `/at-resolve-pr` · `$agent-triforge:at-resolve-pr` | `<PR number or URL>` | Work through GitHub PR review comments via [`pr-comment-resolver`](personas/pr-comment-resolver.md): implement, answer or defer each, run the tests, update `ops/CHANGELOG.md`. |
-
-### Keeping the framework current (`/cli-watch`, `/repo-watch` — maintainers)
-
-Two **repo-local** commands keep the framework current instead of hand-running audits. They are maintainer tooling, not plugin features: they live in [`.claude/commands/`](.claude/commands/) of this checkout, so they are available when you run Claude Code inside a clone of this repo and are never installed into your projects. Both read [`ops/watch-registry.toml`](ops/watch-registry.toml) — a seeded, editable registry of watch targets — and share the [`watch-cycle`](.claude/skills/watch-cycle/SKILL.md) methodology: primary-source research window → per-target changelog → gap table vs current Triforge → adopt/defer ADR with revisit triggers → verification probes.
-
-| Command | Targets | Produces |
-|---|---|---|
-| [**`/cli-watch`**](.claude/commands/cli-watch.md) | the eight CLIs + three research tools (`[cli.*]`) | Gap report + adopt/defer ADR + a re-run of [`probe-capabilities.sh`](scripts/probe-capabilities.sh) |
-| [**`/repo-watch`**](.claude/commands/repo-watch.md) | seven external repos (`[repo.*]`) | Prioritized adopt/defer recommendations (Why / Concrete change / Verification). **Recommends only** — never implements. |
-
-**The registry is the only thing you edit to add a target** — a new `[cli.<name>]` or `[repo.<name>]` block is picked up with no command changes. Targets must be public HTTPS URLs (loopback, private, and link-local addresses are rejected before *and* after redirects); fetched pages are treated as untrusted evidence, never as instructions; a dead or renamed entry is flagged in the report, never silently dropped.
-
-**Manual:** run `/cli-watch` or `/repo-watch` any time — the report and ADR land in [`ops/research/`](ops/research/) and [`ops/decisions/`](ops/decisions/).
-
-**Monthly (headless):** schedule either as a Claude Code cloud Routine — `/schedule` → prompt `/cli-watch` (or `/repo-watch`) → monthly cron (Routines run at a **minimum 1-hour** interval). A scheduled run preflights its environment and self-selects delivery: it commits the report to a branch and opens a **PR** when a pushable checkout exists; falls back to the Routine's **output artifact** with landing instructions when there is no pushable checkout; and opens a **draft PR** with auth-dependent probes marked pending when vendor auth is absent. A Routine missing a required binary, auth, or research tool emits a diagnostic artifact naming the gap — never a silent success.
-
----
+| [`at-ship`](skills/at-ship/SKILL.md) | `/at-ship` · `$agent-triforge:at-ship` | `<goal> [--convergence fast\|standard\|deep] [--team]` | Fully autonomous sprint: analyze, plan, build, review, test, wrap; prints a copyable completion line (the `/goal` gate under Claude Code) at the start and creates `ops/.sprint-complete` last. `fast` = P1 only, `deep` = P1 + P2 + P3 below 3; `--team` for 5+ or interdependent tasks. |
+| [`at-coordinate`](skills/at-coordinate/SKILL.md) | `/at-coordinate` · `$agent-triforge:at-coordinate` | `<goal>` | The plain Phase 0 to 6 sprint cycle that [`scripts/coordinate.sh`](scripts/coordinate.sh) drives across fresh sessions; same pipeline as `at-ship` without convergence or team flags. |
+| [`at-plan`](skills/at-plan/SKILL.md) | `/at-plan` · `$agent-triforge:at-plan` | `[goal]` | Phases 0 → 1.5: codebase analysis, knowledge search, shadow paths, waves, the three-assumption ambiguity check, [`plan-checker`](personas/plan-checker.md) validation. Writes `ops/TASKS.md` with its `Ceremony:` line. |
+| [`at-build`](skills/at-build/SKILL.md) | `/at-build` · `$agent-triforge:at-build` | `[--team] [--wave N]` | Phase 2: [wave orchestration](skills/wave-orchestration/SKILL.md) over leased builder-pool tasks, cross-review by a pinned reviewer, one squash commit per task, `integration-verifier` per wave, the `[promotion]` gate. |
+| [`at-review`](skills/at-review/SKILL.md) | `/at-review` · `$agent-triforge:at-review` | `[--full] [--security] [--perf] [--simple] [--conventions]` | Phases 3 and 4: parallel roster lanes plus the selected specialists, [synthesis](personas/findings-synthesizer.md), P1/P2 fixes, `## Review dispositions — Cycle N` in `ops/TASKS.md`; escalates after 3 cycles. |
+| [`at-test`](skills/at-test/SKILL.md) | `/at-test` · `$agent-triforge:at-test` | `[--gaps-only] [scope]` | Phase 5: [gap analysis](personas/test-gap-analyzer.md), tests from the roster tester with the failing run first, results in `ops/TEST_RESULTS.md`, up to 3 fix cycles, then escalation to you. `--gaps-only` stops after the report. |
+| [`at-wrap`](skills/at-wrap/SKILL.md) | `/at-wrap` · `$agent-triforge:at-wrap` | (none) | Phase 6: [compound knowledge](skills/knowledge-compounding/SKILL.md), update the `ops/` files, archive review files to `ops/archive/<today>/`, write [`STATE.md`](ops/STATE.md), print the sprint summary with its rulings, create the completion marker last. |
+| [`at-quick`](skills/at-quick/SKILL.md) | `/at-quick` · `$agent-triforge:at-quick` | `[change description]` | A change touching fewer than 3 files with no shared interface or protected path: TDD, self-review, no swarm; hands off to `at-review --security` / `--perf` when a lens needs it. |
+| [`at-debug`](skills/at-debug/SKILL.md) | `/at-debug` · `$agent-triforge:at-debug` | `[bug description or error message]` | Reproduce, root-cause with evidence, fix, find sibling instances, record in `ops/MEMORY.md` and `ops/CHANGELOG.md`; after two failed fixes it re-checks the assumption, and a third failure on the same error ends in an escalation report. |
+| [`at-setup`](skills/at-setup/SKILL.md) | `/at-setup` · `$agent-triforge:at-setup` | `[lead\|opencode\|kimi\|cursor\|devin\|grok\|roles]` | Guided project setup: lead chosen, core trio live, Codex trust detected, roles kept, customized or restored, each optional CLI enrolled or declined, instruction files checked and changed only on a yes, egress listed; closes with the status table and a verdict. Idempotent. |
+| [`at-deep-research`](skills/at-deep-research/SKILL.md) | `/at-deep-research` · `$agent-triforge:at-deep-research` | `[topic or goal]` | Five parallel research lenses plus [`research-synthesizer`](personas/research-synthesizer.md), every endpoint a recorded primary source; writes `ops/RESEARCH_ANTIGRAVITY.md` and hands off to `at-plan`. |
+| [`at-analyze`](skills/at-analyze/SKILL.md) | `/at-analyze` · `$agent-triforge:at-analyze` | `[github-url or local-path]` | Read-only judgment of an external repo or resource: extractable patterns, prompt-engineering insights, verdict matrix, ranked recommendations. Nothing written. |
+| [`at-status`](skills/at-status/SKILL.md) | `/at-status` · `$agent-triforge:at-status` | (none) | One report from `ops/`, git and the review files: phase, task counts, blockers, recent activity, pending reviews, uncommitted changes, available workflows. Writes nothing. |
+| [`at-pause`](skills/at-pause/SKILL.md) | `/at-pause` · `$agent-triforge:at-pause` | (none) | Write the [`STATE.md`](ops/STATE.md) checkpoint a later session resumes from, and nothing else. |
+| [`at-resume`](skills/at-resume/SKILL.md) | `/at-resume` · `$agent-triforge:at-resume` | (none) | Restore [`STATE.md`](ops/STATE.md), re-prove the baseline when HEAD moved, summarize, continue the recorded phase. |
+| [`at-compound`](skills/at-compound/SKILL.md) | `/at-compound` · `$agent-triforge:at-compound` | `[solution \| decision] <description>` | Record a solved problem in [`ops/solutions/`](ops/solutions/) or a decision in [`ops/decisions/`](ops/decisions/) when it clears the counterfactual bar; otherwise one line saying why nothing was written. |
+| [`at-resolve-pr`](skills/at-resolve-pr/SKILL.md) | `/at-resolve-pr` · `$agent-triforge:at-resolve-pr` | `<PR number or URL>` | Work through GitHub PR review comments via [`pr-comment-resolver`](personas/pr-comment-resolver.md): implement, answer or defer each, run the tests, update `ops/CHANGELOG.md`. |
 
 ## Skills reference
 
@@ -710,16 +669,16 @@ The plugin ships 27 skills in one `skills/` tree: the 10 portable skills below, 
 
 | Skill | Primary consumer | What it teaches the agent |
 |---|---|---|
-| [**`codebase-mapping`**](skills/codebase-mapping/SKILL.md) | [Antigravity](https://antigravity.google/cli) (Phase 0) | Full-repo analysis: structure, data flow, patterns, debt |
-| [**`writing-plans`**](skills/writing-plans/SKILL.md) | Lead (Phase 1) | Task decomposition with shadow paths, error maps, interface context |
-| [**`shadow-path-tracing`**](skills/shadow-path-tracing/SKILL.md) | Lead (Phase 1) | Enumerate every failure path alongside the happy path |
-| [**`wave-orchestration`**](skills/wave-orchestration/SKILL.md) | Lead (Phase 2) | Dependency-grouped parallel execution with integration checks |
-| [**`iterative-refinement`**](skills/iterative-refinement/SKILL.md) | Lead (Phase 4) | Review-fix-review loops with convergence modes |
-| [**`review-synthesis`**](skills/review-synthesis/SKILL.md) | Lead (Phase 4) | Merge multi-reviewer findings with confidence tiering |
-| [**`verification-before-completion`**](skills/verification-before-completion/SKILL.md) | All agents | Evidence-based completion checklist |
-| [**`knowledge-compounding`**](skills/knowledge-compounding/SKILL.md) | Lead (Phase 6) | Document solutions to [`ops/solutions/`](ops/solutions/) for future sprints |
-| [**`session-continuity`**](skills/session-continuity/SKILL.md) | Lead | Save and resume via [`STATE.md`](ops/STATE.md) across sessions |
-| [**`scope-cutting`**](skills/scope-cutting/SKILL.md) | Lead | Systematically cut scope by unblocking value and risk |
+| [`codebase-mapping`](skills/codebase-mapping/SKILL.md) | [Antigravity](https://antigravity.google/cli) (Phase 0) | Full-repo analysis: structure, data flow, patterns, debt |
+| [`writing-plans`](skills/writing-plans/SKILL.md) | Lead (Phase 1) | Task decomposition with shadow paths, error maps, interface context |
+| [`shadow-path-tracing`](skills/shadow-path-tracing/SKILL.md) | Lead (Phase 1) | Enumerate every failure path alongside the happy path |
+| [`wave-orchestration`](skills/wave-orchestration/SKILL.md) | Lead (Phase 2) | Dependency-grouped parallel execution with integration checks |
+| [`iterative-refinement`](skills/iterative-refinement/SKILL.md) | Lead (Phase 4) | Review-fix-review loops with convergence modes |
+| [`review-synthesis`](skills/review-synthesis/SKILL.md) | Lead (Phase 4) | Merge multi-reviewer findings with confidence tiering |
+| [`verification-before-completion`](skills/verification-before-completion/SKILL.md) | All agents | Evidence-based completion checklist |
+| [`knowledge-compounding`](skills/knowledge-compounding/SKILL.md) | Lead (Phase 6) | Document solutions to [`ops/solutions/`](ops/solutions/) for future sprints |
+| [`session-continuity`](skills/session-continuity/SKILL.md) | Lead | Save and resume via [`STATE.md`](ops/STATE.md) across sessions |
+| [`scope-cutting`](skills/scope-cutting/SKILL.md) | Lead | Systematically cut scope by unblocking value and risk |
 
 ### Portable skills across the eight CLIs
 
@@ -740,8 +699,6 @@ Each harness invokes a skill in its own form: Claude `/name` · agy `agy --add-d
 
 The 17 lead workflows (`skills/at-*/`) are not in this copy. A lead gets them only from its plugin install (KTD12) and runs them as `/at-<name>` under Claude Code or `$agent-triforge:at-<name>` in a Codex prompt. They are skills rather than slash commands because slash commands are per-harness: Codex custom prompts are deprecated and not expanded under `codex exec`. Agent definitions are never deployed into `.agents/agents/`, because agy and Kimi both scan it with incompatible tool vocabularies; agy stays on `agy plugin install`, and Kimi loads its definitions through `--agent-file`.
 
----
-
 ## Personas reference
 
 19 personas in [`personas/`](personas/). A persona is a prompt with no frontmatter. Its entry in [`personas/manifest.toml`](personas/manifest.toml) sets a tool class (`read`, `read-web` or `exec`), a starting model tier and a turn budget, and `dispatch_persona` enforces all three. Each persona runs in its own context. The never-downgrade trio (`plan-checker`, `security-sentinel`, `findings-synthesizer`) always runs as top-tier Claude, whichever CLI leads.
@@ -750,97 +707,154 @@ The 17 lead workflows (`skills/at-*/`) are not in this copy. A lead gets them on
 
 | Persona | Phase | What it does |
 |---|---|---|
-| [**`plan-checker`**](personas/plan-checker.md) | 1.5 | Validates task plans for completeness, assignments, dependencies |
-| [**`findings-synthesizer`**](personas/findings-synthesizer.md) | 4 | Merges review outputs with deduplication and confidence tiering |
-| [**`integration-verifier`**](personas/integration-verifier.md) | 2 | Runs build, tests, lint between waves |
-| [**`learnings-researcher`**](personas/learnings-researcher.md) | Pre-1 | Searches [`ops/solutions/`](ops/solutions/) and [`ops/decisions/`](ops/decisions/) for relevant patterns |
-| [**`team-lead`**](personas/team-lead.md) | 2 | Orchestrates agent team workers with file ownership and quality gates |
-| [**`research-synthesizer`**](personas/research-synthesizer.md) | 0 | Merges parallel research outputs into unified analysis |
-| [**`continuous-reviewer`**](personas/continuous-reviewer.md) | 2 | Per-task quality gate during team builds — auto-reviews every completed task |
+| [`plan-checker`](personas/plan-checker.md) | 1.5 | Validates task plans for completeness, assignments, dependencies |
+| [`findings-synthesizer`](personas/findings-synthesizer.md) | 4 | Merges review outputs with deduplication and confidence tiering |
+| [`integration-verifier`](personas/integration-verifier.md) | 2 | Runs build, tests, lint between waves |
+| [`learnings-researcher`](personas/learnings-researcher.md) | Pre-1 | Searches [`ops/solutions/`](ops/solutions/) and [`ops/decisions/`](ops/decisions/) for relevant patterns |
+| [`team-lead`](personas/team-lead.md) | 2 | Orchestrates agent team workers with file ownership and quality gates |
+| [`research-synthesizer`](personas/research-synthesizer.md) | 0 | Merges parallel research outputs into unified analysis |
+| [`continuous-reviewer`](personas/continuous-reviewer.md) | 2 | Per-task quality gate during team builds; reviews every completed task |
 
 ### Review specialists (6)
 
 | Persona | Lens | What it catches |
 |---|---|---|
-| [**`security-sentinel`**](personas/security-sentinel.md) | Security | SQL injection, XSS, auth bypass, data exposure, OWASP |
-| [**`performance-oracle`**](personas/performance-oracle.md) | Performance | O(n²) loops, N+1 queries, memory leaks, scalability |
-| [**`code-simplicity-reviewer`**](personas/code-simplicity-reviewer.md) | Complexity | Over-engineering, YAGNI violations, unnecessary abstraction |
-| [**`convention-enforcer`**](personas/convention-enforcer.md) | Conventions | Naming, file organization, code style consistency |
-| [**`architecture-strategist`**](personas/architecture-strategist.md) | Structure | SOLID principles, coupling/cohesion, module boundaries |
-| [**`test-gap-analyzer`**](personas/test-gap-analyzer.md) | Coverage | Untested code paths, missing edge cases, weak assertions |
+| [`security-sentinel`](personas/security-sentinel.md) | Security | SQL injection, XSS, auth bypass, data exposure, OWASP |
+| [`performance-oracle`](personas/performance-oracle.md) | Performance | O(n²) loops, N+1 queries, memory leaks, scalability |
+| [`code-simplicity-reviewer`](personas/code-simplicity-reviewer.md) | Complexity | Over-engineering, YAGNI violations, unnecessary abstraction |
+| [`convention-enforcer`](personas/convention-enforcer.md) | Conventions | Naming, file organization, code style consistency |
+| [`architecture-strategist`](personas/architecture-strategist.md) | Structure | SOLID principles, coupling/cohesion, module boundaries |
+| [`test-gap-analyzer`](personas/test-gap-analyzer.md) | Coverage | Untested code paths, missing edge cases, weak assertions |
 
 ### Research and verification (6)
 
 | Persona | What it does |
 |---|---|
-| [**`best-practices-researcher`**](personas/best-practices-researcher.md) | Industry-wide patterns, anti-patterns, tradeoff analysis |
-| [**`framework-docs-researcher`**](personas/framework-docs-researcher.md) | Current documentation for specific frameworks and libraries |
-| [**`git-history-analyzer`**](personas/git-history-analyzer.md) | Code evolution and architectural decisions via git history |
-| [**`bug-reproduction-validator`**](personas/bug-reproduction-validator.md) | Validates bugs are reproducible before fixes begin |
-| [**`deployment-verifier`**](personas/deployment-verifier.md) | Post-deployment health checks, smoke tests, error monitoring |
-| [**`pr-comment-resolver`**](personas/pr-comment-resolver.md) | Reads GitHub PR review comments and implements changes, as a lease builder |
+| [`best-practices-researcher`](personas/best-practices-researcher.md) | Industry-wide patterns, anti-patterns, tradeoff analysis |
+| [`framework-docs-researcher`](personas/framework-docs-researcher.md) | Current documentation for specific frameworks and libraries |
+| [`git-history-analyzer`](personas/git-history-analyzer.md) | Code evolution and architectural decisions via git history |
+| [`bug-reproduction-validator`](personas/bug-reproduction-validator.md) | Validates bugs are reproducible before fixes begin |
+| [`deployment-verifier`](personas/deployment-verifier.md) | Post-deployment health checks, smoke tests, error monitoring |
+| [`pr-comment-resolver`](personas/pr-comment-resolver.md) | Reads GitHub PR review comments and implements changes, as a lease builder |
 
----
+## Customization
 
-## Context Recovery
+| To change | Do this |
+|---|---|
+| A role's CLI, model or effort | Run `at-setup roles` to keep, customize or restore the shipped defaults with validated writes, or edit `[roles.<role>]` in `ops/roster.toml`. [Model and effort](#model-and-effort) lists the pins and the opt-ins. |
+| Which optional CLIs take part | Run `at-setup` (or `at-setup opencode`, `kimi`, `cursor`, `devin`, `grok`) to enroll or decline each. `enabled = false` under `[members.<cli>]` removes a member from every role and fallback chain, and setting it back to `true` restores it. The core trio can't be disabled. |
+| Devin's role | Devin joins only with your consent on record, and reviews and analyzes by default. It builds only after a separate opt-in: `opt_in = ["builder"]` in `[members.devin]`. |
+| Which CLI leads | Run `at-setup lead`. The switch refuses while leases are open; `--force` hands them to the new lead without spending a requeue. |
+| Whether promotion waits for you | Set `require_user_approval = true` under `[promotion]` in `ops/roster.toml`, and the lead pauses at the end of each wave for your approval before promoting to `main`. A diff that touches a protected path needs that approval regardless. |
+| A portable skill | Copy it to a directory with a different name under `.agents/skills/`. Triforge refreshes only its own unchanged copies, so an edited copy under a shipped name is kept with a notice but no longer updated. You can delete any skill directory you don't want. |
+| Your project's instructions | Edit the project's root `AGENTS.md`. Keep Triforge's marked pointer block from [`templates/AGENTS.md`](templates/AGENTS.md) in it. |
+| Agent-team builds | Set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"` in Claude Code's `settings.json` ([What are Agent Teams?](#faq)). |
+
+## How it works under the hood
+
+### Portable skill injection
+
+Skills are model-agnostic markdown files that any agent can consume, so the methodology an agent follows is decoupled from the model that executes it:
+
+```bash
+# All external-agent invocations go through the unified helper
+source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh
+
+# Antigravity via native agent definition (skill embedded in the agent body)
+invoke_antigravity "codebase-analyst" \
+  "Analyze the full codebase. Write findings to ops/ARCHITECTURE.md." \
+  "$AGY_OUT" 600
+
+# Codex via native agent definition (skill embedded in the agent body)
+invoke_codex "test_writer" \
+  "Write tests for changed files." \
+  "$CODEX_OUT" 900
+```
+
+`TRIFORGE_AGY_MODE` (`injection` | `native` | `auto`; default `auto` since 4.0) governs how the helper routes Antigravity. The agent pack (`antigravity-agents/`) ships in agy's Markdown-agent format (`mainAgent`/`subagent`/`commandExecutionPolicy`, agy tool names), and session start reinstalls it whenever the plugin version changes. `native` passes `--agent <name>` when `agy agents` lists it, `auto` goes native only when it is listed, and `injection` prepends the agent body (with its embedded skill) to the prompt. The default became `auto` after the native round-trip (AGY-12) and the native-mode negative (AGY-16) passed in two consecutive probe records (D-042); a regression in either row reverts it. Codex definitions deploy as `.codex/triforge-agents.toml`, never under `.codex/agents/`, which Codex ≥ 0.147 sweeps as standalone role files.
+
+### Context Recovery
 
 Seven safeguards keep long sprints from dying to context limits:
 
 <p align="center">
-  <img src="docs/images/context-recovery.svg" alt="Context recovery — completion gate, outer loop, analysis paralysis detection" width="80%">
+  <img src="docs/images/context-recovery.png" alt="Context recovery: the coordinate.sh outer loop, the in-session monitors, timeouts and risk scoring, and the ops/.sprint-complete gate the loop stops on." width="90%">
 </p>
 
 | Layer | Mechanism | Guards against |
 |---|---|---|
-| **Completion gating** | The `ops/.sprint-complete` sentinel, created only after verification passes, is the authoritative signal. Under a Claude Code lead the native `/goal` checklist adds a best-effort gate: [`coordinate.sh`](scripts/coordinate.sh) leads every session prompt with it and `at-ship` / `at-coordinate` print a copyable `/goal` line, but headless gating is flaky (probe CC-03 1 of 3, D-030). A Codex lead has no `/goal`, so its sessions complete on the sentinel alone | The lead declaring victory early |
-| **Outer loop** | [`scripts/coordinate.sh`](scripts/coordinate.sh) starts a fresh lead session per iteration and runs the lead's launch line from the registry with the `[lead]` model and effort. It runs the git integrity check before each session, stops after one session on a login or quota failure, detects completion via the `ops/.sprint-complete` sentinel, and notifies on completion. A Codex lead's launch line runs with full access, so the script runs it only when you pass `--allow-full-access`; without the flag it prints the line and exits 77. Run it from a terminal or from the lead's own shell; under nohup, cron or CI it exits 45 | Context window filling up |
-| **PreCompact** | [`pre-compact.sh`](hooks/handlers/pre-compact.sh) — auto-checkpoints `STATE.md` before context compaction | State loss during mid-sprint compaction |
-| **Analysis paralysis** | [`context-monitor.sh`](hooks/handlers/context-monitor.sh) warns at 8+ consecutive reads without writes. The lead's tool vocabulary in the registry decides what counts as a read; under a Codex lead, a shell command that only reads (`cat`, `sed -n`, `git log`) counts | Reading without producing |
-| **Tool failure monitor** | [`tool-failure-monitor.sh`](hooks/handlers/tool-failure-monitor.sh) — tracks and warns on accumulated tool failures | Silent failure accumulation |
-| **Subprocess timeouts** | Watchdog pattern on all Antigravity/Codex calls — SIGTERM after timeout, SIGKILL after 5s grace | Hung external agents blocking pipeline |
-| **Risk scoring** | Per-subagent risk accumulation — halt at >20% or more than 50 changed files | Runaway subagents |
-
-```bash
-# Full autonomous sprint with context recovery
-./scripts/coordinate.sh "Build the authentication module" --max 5 --convergence deep --team
-
-# With completion notification via webhook
-NOTIFY_WEBHOOK_URL="https://hooks.slack.com/..." ./scripts/coordinate.sh "Build auth" --max 5
-
-# Under a Codex lead: preview the launch line and prompt, then run with full access acknowledged
-./scripts/coordinate.sh "Build auth" --dry-run --lead codex
-./scripts/coordinate.sh "Build auth" --max 5 --allow-full-access
-```
+| Completion gating | The `ops/.sprint-complete` sentinel, created only after verification passes, is the authoritative signal. Under a Claude Code lead the native `/goal` checklist adds a best-effort gate: [`coordinate.sh`](scripts/coordinate.sh) leads every session prompt with it and `at-ship` / `at-coordinate` print a copyable `/goal` line, but headless gating is flaky (probe CC-03 1 of 3, D-030). A Codex lead has no `/goal`, so its sessions complete on the sentinel alone | The lead declaring victory early |
+| Outer loop | [`scripts/coordinate.sh`](scripts/coordinate.sh) starts a fresh lead session per iteration with the lead's registry launch line and the `[lead]` model and effort, runs the git integrity check before each session, stops after one session on a login or quota failure, detects completion through the sentinel, and notifies you. A Codex lead's launch line needs `--allow-full-access` (otherwise it prints the line and exits 77), and under nohup, cron or CI the script exits 45. [Unattended runs](#unattended-runs) walks through it | Context window filling up |
+| PreCompact | [`pre-compact.sh`](hooks/handlers/pre-compact.sh) checkpoints `STATE.md` before context compaction | State loss during mid-sprint compaction |
+| Analysis paralysis | [`context-monitor.sh`](hooks/handlers/context-monitor.sh) warns at 8+ consecutive reads without writes. The lead's tool vocabulary in the registry decides what counts as a read; under a Codex lead, a shell command that only reads (`cat`, `sed -n`, `git log`) counts | Reading without producing |
+| Tool failure monitor | [`tool-failure-monitor.sh`](hooks/handlers/tool-failure-monitor.sh) warns at 5 consecutive or 10 total tool failures in a session | Silent failure accumulation |
+| Subprocess timeouts | Every Antigravity and Codex call runs under `timeout -k 10s`: SIGTERM at its limit, SIGKILL 10 s later | Hung external agents blocking the pipeline |
+| Risk scoring | Per-builder risk accumulation; a builder is halted at risk above 20 % or more than 50 changed files | Runaway builders |
 
 ### Key constraints
 
-- `CONTRACTS.md` is never modified directly during review — changes must be proposed in [`MEMORY.md`](ops/MEMORY.md) first
-- Any roster member is an eligible builder — the single-writer rule is retired. Safety is per-task leases + worktree isolation + mandatory cross-review by a pinned non-author reviewer, not write-restriction; no agent self-merges, and the lead promotes to the main branch only after the wave's integration check
-- Parallel reviews are safe because reviewers write to separate `ops/REVIEW_*.md` files
-- Maximum 3 review cycles per task before escalating to user
-- Phase 0 can be skipped for small bug fixes, same-session continuations, or unchanged codebases (use [`at-quick`](skills/at-quick/SKILL.md))
-- Completion requires creating the `ops/.sprint-complete` runtime marker only after the [verification checklist](skills/verification-before-completion/SKILL.md) passes
+- `CONTRACTS.md` is never modified directly during review; changes are proposed in [`MEMORY.md`](ops/MEMORY.md) first.
+- Any roster member is an eligible builder, and the single-writer rule is retired. Safety comes from per-task leases, worktree isolation and mandatory cross-review by a pinned non-author reviewer. No agent self-merges, and the lead promotes to the main branch only after the wave's integration check.
+- Parallel reviews are safe because reviewers write to separate `ops/REVIEW_*.md` files.
+- A task gets at most 3 review cycles before it escalates to you.
+- Phase 0 can be skipped for small bug fixes, same-session continuations, or unchanged codebases (use [`at-quick`](skills/at-quick/SKILL.md)).
+- Completion requires creating the `ops/.sprint-complete` runtime marker only after the [verification checklist](skills/verification-before-completion/SKILL.md) passes.
 
----
+### Data egress and credentials
+
+Each dispatched CLI sends its task prompt and the code context it is handed to that CLI's model provider. Under the shipped defaults, your code and task context reach Anthropic (Claude), Google (Antigravity, Gemini 3.8 Flash) and OpenAI (Codex) for the core trio. Each optional member you enroll adds its provider: Zhipu / Z.ai for GLM, routed through the OpenRouter intermediary, which also sees the traffic; Moonshot for Kimi; xAI for Grok Build, and for Grok through Cursor; and Cognition for Devin (a model outside Cognition's SWE family also reaches that model's provider). Cognition may train on that data unless the account opts out, so `at-setup` records your consent before Devin joins the roster.
+
+`ops/roster.toml` is the control surface: disable a member (`enabled = false`) or drop a provider's model from every role to take that provider out of the egress set. The core trio always stays.
+
+Credentials never live in the repo. Each adapter reads its own from the OS or vendor store: CLI logins, `OPENROUTER_API_KEY`, `CURSOR_API_KEY`, `kimi login` (OAuth or API key), the `devin auth login` token in `~/.local/share/devin/`, `grok login` or `XAI_API_KEY`. The lease environment allowlist scopes them per adapter, and captured output is scrubbed before it lands in `ops/`. Rotation follows each vendor's own token flow: revoke, log in again or set a new key, then rerun `at-setup`.
+
+## Compatibility
+
+Floors and tested versions come from the newest capability probe record, [`ops/research/2026-09-probe-record.md`](ops/research/2026-09-probe-record.md), generated 2026-09-27. "The current record" always means the newest `ops/research/*-probe-record.md`. No full probe run has been recorded since. The rows added after that record ran live during development with `probe-capabilities.sh --only`: DVN-01 to DVN-07, CC-21 to CC-25, CDX-20 to CDX-23, GRK-02 to GRK-12 and SELF-06g. Where the table says "dev-time rows", it gives the version those rows ran on. A full run would currently record Grok Build as QUOTA-FAIL (the xAI quota ran out) and Kimi as AUTH-FAIL. The core trio is required, and the optional tier is enrolled through `at-setup`. This baseline supersedes the July 2026 one (D-034).
+
+| CLI | Tier | Floor (KTD-13) | Tested | READY probe |
+|---|---|---|---|---|
+| Claude Code (`claude`) | core | ≥ 2.1.277 (a claude worker: ≥ 2.1.285; a persona: a build with `--safe-mode`) | 2.1.283; dev-time rows on 2.1.289 and 2.1.291 | `claude --version` |
+| Antigravity (`agy`) | core | ≥ 1.1.27 | 1.2.12 | `agy --model "Gemini 3.8 Flash (High)" -p "Respond with only: READY"` |
+| Codex (`codex`) | core | ≥ 0.153.0 | 0.155.1; dev-time rows on 0.160.0 | `codex exec "Respond with only: READY"` |
+| OpenCode (`opencode`) | optional | ≥ 1.18.20 | 1.18.30 | `opencode run --format json -m openrouter/z-ai/glm-5.3 "…"` |
+| Kimi Code (`kimi`) | optional | ≥ 0.33.0 | 0.42.0 (AUTH-FAIL on the probe host; live rows PENDING-AUTH until `kimi login`) | `kimi -p "…"` |
+| Cursor (`cursor-agent`; `agent` fallback) | optional | date-versioned | 2026.09.10 | `cursor-agent -p --trust --model cursor-grok-4.6-xhigh "…"` |
+| Devin CLI (`devin`) | optional | ≥ 3000.10.31 | 3000.11.3 (dev-time rows) | `devin --model swe-1-6-slow --respect-workspace-trust false -p "…"` |
+| Grok Build (`grok`) | optional | ≥ 1.0.34 | 1.0.34 (dev-time rows) | `grok --model grok-4.7 -p "…"` |
+
+Why these floors:
+
+- Claude Code 2.1.277 is the first build that reads a root `AGENTS.md`, Triforge's only instruction file (D-037). It includes the 2.1.267 fix that honors `effort:` frontmatter on pinned-default models.
+- A claude worker needs 2.1.285, the first build that ignores the repository settings that loosen its sandbox. It refuses to start on an older one unless `TRIFORGE_CLAUDE_SANDBOX=off` is set.
+- Every persona runs with Claude Code's `--safe-mode`, so `dispatch_persona` refuses a `claude` without the flag (rc 69) and prints the fix, `claude update`. The persona lane was tested on 2.1.289 and 2.1.291, and an exec persona, which runs Bash, also needs the 2.1.285 sandbox floor.
+- agy 1.1.27 adds `denied_actions` to the JSON envelope that `invoke_antigravity` reads as its completion signal.
+- Codex 0.153.0 is `gpt-6-astra`'s minimal client. `gpt-6.1-sol`, which a role can pick, answered on Codex 0.160.0 and was refused on 0.155.1.
+- OpenCode 1.18.20 answers subagent permission asks under `run`.
+- Kimi 0.33.0 is the agent-core-v2 engine with `--agent-file`.
+- Devin 3000.10.31 is the first build where a deny rule wins over an allow rule, which its per-run config relies on. Its versions jumped from 2026.x to 3000.x in July 2026.
+- Grok Build 1.0.34 is the build the GRK probe rows passed on: `dontAsk` with deny rules, the workspace sandbox, streaming JSON, and the switches that stop it reading Claude Code's config.
+
+The Gemini CLI floor was removed with the Antigravity migration, after Google's hosted service stopped serving consumer tiers on 2026-06-18; legacy Gemini users pin plugin `v2.4.3`. An absent or declined optional CLI is skipped silently, because every fallback chain ends at a core-trio member, which can't be disabled.
 
 ## How it compares
 
-This framework was informed by analyzing the [Claude Code Blueprint](https://github.com/Ninety2UA/claude-code-blueprint) and selectively adopting patterns that complement our heterogeneous multi-model architecture.
+Triforge's design drew on an analysis of the Claude Code Blueprint, now [Agent Blueprint](https://github.com/Ninety2UA/agent-blueprint), and adopted the patterns that suit a multi-model team.
 
-| Dimension | [Claude Code Blueprint](https://github.com/Ninety2UA/claude-code-blueprint) | This framework |
+| Dimension | [Agent Blueprint](https://github.com/Ninety2UA/agent-blueprint) | This framework |
 |---|---|---|
-| **Agent model** | Homogeneous (Claude-only) | Heterogeneous eight-CLI builder pool (core trio + optional OpenCode/Kimi/Cursor/Devin/Grok Build) |
-| **Review agents** | 6 Claude subagents | 7 reviewers (2 external + 5 specialist personas) |
-| **Codebase analysis** | Claude subagent | [Antigravity CLI](https://antigravity.google/cli) (1M token context) |
-| **Test execution** | Claude subagent | [Codex CLI](https://github.com/openai/codex) (sandboxed execution) |
-| **Coordination** | Native subagents + git | File protocol + bash + personas + teams |
-| **Skills** | Claude-only | Portable across all roster CLIs via [injection](#portable-skill-injection) |
-| **Dependencies** | Zero (markdown only) | Core trio required (Claude + Antigravity + Codex); optional tier adds OpenCode/Kimi/Cursor/Devin/Grok Build |
+| Agent model | One CLI per run, with its own subagents as helpers; the same skills install in eight CLIs | Heterogeneous eight-CLI builder pool (core trio + optional OpenCode/Kimi/Cursor/Devin/Grok Build) in one sprint |
+| Review | A review swarm of helper prompts in the session's CLI, validated and synthesized | Two core CLI lanes, every enrolled optional member, specialist personas by flag and a gated learnings researcher, synthesized with confidence tiers |
+| Codebase analysis | A helper in the session's CLI | [Antigravity CLI](https://antigravity.google/cli) (1M token context) |
+| Test execution | The session's CLI | [Codex CLI](https://github.com/openai/codex) (sandboxed execution) |
+| Coordination | Task ledger, waves, file ownership or worktrees, lead-only commits | File protocol + per-task leases + personas + teams |
+| Skills | One skill set, installed natively in each CLI | Portable skills shared by every roster CLI via [injection](#portable-skill-injection), plus lead workflows for the lead |
+| Dependencies | Any one of its eight supported CLIs | Core trio required (Claude + Antigravity + Codex); optional tier adds OpenCode/Kimi/Cursor/Devin/Grok Build |
 
 <details>
 <summary><strong>What we adopted from Blueprint</strong></summary>
 
-Confidence tiering, suppressions lists, review synthesis, wave orchestration, quality gates, institutional knowledge compounding, dual-loop context management, risk scoring, shadow path tracing, session continuity. The Blueprint's completion-promise pattern and ship-loop Stop-hook architecture were also adopted, then retired in 2026-07 when Claude Code's native `/goal` gating covered them (probe CC-03) — completion is now signaled via the `ops/.sprint-complete` sentinel.
+Confidence tiering, suppressions lists, review synthesis, wave orchestration, quality gates, institutional knowledge compounding, dual-loop context management, risk scoring, shadow path tracing, session continuity. The Blueprint's completion-promise pattern and ship-loop Stop-hook architecture were also adopted, then retired in 2026-07 when Claude Code's native `/goal` gating covered them (probe CC-03); the `ops/.sprint-complete` sentinel now signals completion.
 </details>
 
 <details>
@@ -849,18 +863,46 @@ Confidence tiering, suppressions lists, review synthesis, wave orchestration, qu
 Multi-model coordination, portable skill injection into external agents, agent teams as a build mode, Antigravity Phase 0 analysis with 1M token context, Codex sandboxed testing, file-based coordination protocol for cross-model state sharing.
 </details>
 
----
-
 ## When NOT to use this framework
 
 | Situation | What to do instead |
 |---|---|
-| Trivial task (< 30 minutes) | Just use Claude Code directly, or [`at-quick`](skills/at-quick/SKILL.md) |
+| Trivial task (< 30 minutes) | Use Claude Code directly, or [`at-quick`](skills/at-quick/SKILL.md) |
 | Pure exploration / brainstorming | Single agent conversation |
 | Tight deadline, no tests needed | Claude Code solo, skip review + test |
 | Non-code deliverables | [Antigravity CLI](https://antigravity.google/cli) solo with its large context |
 
----
+<a name="recent-changes"></a>
+## Release history
+
+Each version's full notes are one file in [`docs/releases/`](docs/releases/), and the release workflow publishes that file as the GitHub release.
+
+<details>
+<summary>All releases</summary>
+
+| Version | Date | Summary |
+|---|---|---|
+| [v4.1.0](docs/releases/v4.1.0.md) | 2026-10-13 | The 4.0 review's residuals fixed: a small reader, bounded reads, process-group time bounds, watched promotion targets, CLAUDE_CONFIG_DIR |
+| [v4.0.0](docs/releases/v4.0.0.md) | 2026-10-12 | Lead choice (Claude Code or Codex), at- lead workflows, personas, AGENTS.md, Grok Build and Devin |
+| [v3.3.3](docs/releases/v3.3.3.md) | 2026-10-01 | Protected-path registry, digest-stamped skills, lead git integrity |
+| [v3.3.2](docs/releases/v3.3.2.md) | 2026-09-28 | Release gate green, OpenCode V2 guard, Cursor Grok 4.7 ids |
+| [v3.3.1](docs/releases/v3.3.1.md) | 2026-09-12 | Mechanical no-push backstop, quota failure class, split control-plane files |
+| [v3.3.0](docs/releases/v3.3.0.md) | 2026-09-11 | September 2026 models, trustworthy completion signals, native agent formats |
+| [v3.2.0](docs/releases/v3.2.0.md) | 2026-09-11 | Watch commands become repo-local maintainer tooling |
+| [v3.1.0](docs/releases/v3.1.0.md) | 2026-07-22 | Role customization in guided onboarding |
+| [v3.0.1](docs/releases/v3.0.1.md) | 2026-07-21 | Landing-page copy + release hygiene |
+| [v3.0.0](docs/releases/v3.0.0.md) | 2026-07-18 | CLI modernization + six-CLI builder pool |
+| [v2.4.3](docs/releases/v2.4.3.md) | 2026-05-12 | Sequential downgrade ladder for narrow runtime tasks |
+| [v2.4.2](docs/releases/v2.4.2.md) | 2026-05-12 | Third audit pass — both prior passes missed siblings of the same anti-pattern |
+| [v2.4.1](docs/releases/v2.4.1.md) | 2026-05-12 | Second audit pass — surviving blocker + 27 findings actioned |
+| [v2.4.0](docs/releases/v2.4.0.md) | 2026-04-20 | Framework self-audit — two blockers + four HIGH fixes |
+| [v2.3.0](docs/releases/v2.3.0.md) | 2026-04-20 | Subagent hardening pass (Gemini + Codex docs alignment) |
+| [v2.2.0](docs/releases/v2.2.0.md) | 2026-04-06 | Opus max effort, reliability patterns, and framework audit |
+| [unversioned](docs/releases/2026-04-02-reliability-hardening-and-tactical-enhancements.md) | 2026-04-02 | Reliability hardening and tactical enhancements |
+| [v2.0.0](docs/releases/v2.0.0.md) | 2026-03-31 | Claude Code plugin conversion |
+| [unversioned](docs/releases/2026-03-31-four-pass-audit-and-blueprint-alignment.md) | 2026-03-31 | Four-pass audit and Blueprint alignment |
+
+</details>
 
 ## FAQ
 
@@ -873,7 +915,7 @@ Yes. Install the plugin as described under <a href="#installation">Installation<
 <details>
 <summary><strong>Do I need all the CLIs?</strong></summary>
 
-The <strong>core trio</strong> (Claude, Antigravity, Codex) is the supported baseline; run <a href="skills/at-setup/SKILL.md"><code>at-setup</code></a> to get them live. The <strong>optional tier</strong> (OpenCode, Kimi, Cursor, Devin, Grok Build) is optional: enroll any subset through <code>at-setup</code>, and an absent one is skipped cleanly in every roster fallback chain. Claude alone can still run the pipeline in a degraded mode, without the multi-model review, test and analysis lanes.
+The core trio (Claude, Antigravity, Codex) is the supported baseline; run <a href="skills/at-setup/SKILL.md"><code>at-setup</code></a> to get them live. From the optional tier (OpenCode, Kimi, Cursor, Devin, Grok Build) you enroll any subset through <code>at-setup</code>, and an absent one is skipped cleanly in every roster fallback chain. Claude alone can still run the pipeline in a degraded mode, without the multi-model review, test and analysis lanes.
 </details>
 
 <details>
@@ -885,13 +927,13 @@ No. Skills activate contextually. If you never cut scope, the <a href="skills/sc
 <details>
 <summary><strong>How do personas differ from skills?</strong></summary>
 
-<strong>Skills</strong> are methodology documents that guide an agent's behavior. <strong>Personas</strong> are separate processes that <code>dispatch_persona</code> starts, each with its own context and only the tools its manifest entry allows. Skills can be injected into any agent (including external ones like Antigravity and Codex).
+Skills are methodology documents that guide an agent's behavior. Personas are separate processes that <code>dispatch_persona</code> starts, each with its own context and only the tools its manifest entry allows. Skills can be injected into any agent (including external ones like Antigravity and Codex).
 </details>
 
 <details>
 <summary><strong>What are Agent Teams?</strong></summary>
 
-<a href="personas/team-lead.md">Agent Teams</a> spawn multiple Claude Code instances that collaborate through a shared task list and messaging. Unlike review swarms (read-only analysis), Agent Teams are peers that divide file ownership and coordinate builds. Enable with <code>CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"</code> in settings.json.
+<a href="personas/team-lead.md">Agent Teams</a> spawn multiple Claude Code instances that collaborate through a shared task list and messaging. Review swarms only analyze; Agent Teams are peers that divide file ownership and coordinate builds. Enable them with <code>CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"</code> in settings.json.
 </details>
 
 <details>
@@ -901,9 +943,15 @@ No. Use <a href="skills/at-quick/SKILL.md"><code>at-quick</code></a> for changes
 </details>
 
 <details>
+<summary><strong>Can a sprint run with nobody watching?</strong></summary>
+
+Yes. <code>at-ship</code> runs every phase in one session, and <code>scripts/coordinate.sh</code> runs the sprint from a terminal across fresh sessions until <code>ops/.sprint-complete</code> exists or the session limit is reached. A Codex lead needs your <code>--allow-full-access</code> on the command line. See <a href="#unattended-runs">Unattended runs</a>.
+</details>
+
+<details>
 <summary><strong>How does context exhaustion recovery work?</strong></summary>
 
-Two layers. <strong>Inside</strong> a session, the <code>ops/.sprint-complete</code> sentinel is the authoritative completion signal — created only after the verification checklist passes. Under a Claude Code lead, the native <code>/goal</code> checklist is a best-effort assist on top: <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> leads every composed prompt with a <code>/goal</code> line, and <code>at-ship</code>/<code>at-coordinate</code> print a copyable one for interactive runs, but headless gating is model-behavior-dependent (probe CC-03 passed 1 of 3 runs in the 2026-09 cycle, D-030), so nothing relies on it. <strong>Outside</strong> a session, <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> spawns fresh lead processes with clean context windows, detecting completion via the sentinel; state persists via git and <code>ops/STATE.md</code>. A PreCompact hook auto-checkpoints STATE.md before context compaction.
+Two layers. Inside a session, the <code>ops/.sprint-complete</code> sentinel is the authoritative completion signal, created only after the verification checklist passes. Under a Claude Code lead, the native <code>/goal</code> checklist is a best-effort assist on top: <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> leads every composed prompt with a <code>/goal</code> line, and <code>at-ship</code>/<code>at-coordinate</code> print a copyable one for interactive runs, but headless gating depends on model behavior (probe CC-03 passed 1 of 3 runs in the 2026-09 cycle, D-030), so nothing relies on it. Outside a session, <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> spawns fresh lead processes with clean context windows and detects completion through the sentinel; state persists via git and <code>ops/STATE.md</code>. A PreCompact hook checkpoints STATE.md before context compaction.
 </details>
 
 <details>
@@ -912,527 +960,45 @@ Two layers. <strong>Inside</strong> a session, the <code>ops/.sprint-complete</c
 After solving a non-trivial problem, <a href="skills/at-compound/SKILL.md"><code>at-compound</code></a> saves it as a structured document in <a href="ops/solutions/"><code>ops/solutions/</code></a>. Later <a href="skills/at-plan/SKILL.md"><code>at-plan</code></a> and <a href="skills/at-deep-research/SKILL.md"><code>at-deep-research</code></a> runs search this directory before they start new work.
 </details>
 
----
-
-## Recent changes
-
-### 2026-10-13 — v4.1.0: the 4.0 review's residuals fixed: a small reader, bounded reads, process-group time bounds, watched promotion targets, CLAUDE_CONFIG_DIR
-
-The import reader (`md_scan`) reads its long-span patterns in bounded chunks, and no bounded repeat holds another: peak memory on a crafted 4 MiB `CLAUDE.md` drops from up to 2.4 GB to under 100 MiB, with 0 answer differences from 4.0's reader on 4,500,000 generated documents, 0 from the pre-review 4.1 reader on 6,640,000 more, and 0 token differences from marked on 1,400,000. `instruction_files_detect` and visibility read each `CLAUDE.md`-family file once. `AGENTS.md`, `AGENTS.override.md`, Codex's `config.toml` and the pointer template are read to 4 MiB + 1 byte at most, sized by `fstat`, and the budget sums true sizes; past that, visibility and the merge fail closed. A `CLAUDE.md` read only up to a bound gets `-` and the state `past-bound` in `instruction_files_detect`, and visibility names the bound instead of offering an import (SELF-16 b-cap-*, b-cap-two, b-cap-sum-*, b-mem-*, b-rep-*).
-
-Both watchdogs, and both `timeout` paths, stop the command's process group at the bound and sweep what is left of it when the command returns first (SELF-08 forkwatch, forkexit, boundfork, boundexit); `_instr_py` owns the watchdog's temp dir (watchkill); session start's warning names its cause (detect69) and gives a past-bound file its own notice (pastbound). `lease_approve` records an explicit promotion target in the integrity baseline (rc 44 on a move) and refuses to clear or replace one that moved; a default branch that appears where the baseline recorded none is reported (rc 44); `lease_merge` holds its scope to the integration head it read, and its recovery steps say `git reset --keep` or `--merge` (SELF-14 target, targetsym, targetmoved, targetgone, targetswitch, defappear, defrace, trunkmain, racemergehead). `CLAUDE_CONFIG_DIR` is modeled where Triforge reads or protects Claude Code's user tier: an absolute value outside the project moves the user-level `CLAUDE.md` (detect and visibility), the writers refuse the `CLAUDE.md` in any set value (an empty or relative one taken from the working directory, in the project too), the claude lane's and the codex read persona's credential deny rules gain its `.credentials.json` (each path once, as given and with its symlinks resolved), the persona guard exempts that `CLAUDE.md` in place of `~/.claude`'s, and `_adapter_env` hands an absolute value to claude workers (SELF-08, SELF-12, SELF-16 b-ccd-*, SELF-20 ccd). The maintainer tools run their Python after the prelude (SELF-27 maint). Five diagrams no longer have arrows over text.
-
-The probe record was not regenerated for this release (user decision); the newest is `ops/research/2026-09-probe-record.md` (2026-09-27).
-
-### 2026-10-12 — v4.0.0: lead choice (Claude Code or Codex), at- lead workflows, personas, AGENTS.md, Grok Build and Devin
-
-Triforge's lead is now a choice between Claude Code and Codex, recorded in the `[lead]` table of `ops/roster.toml`; a roster without the table keeps Claude Code. Scripts branch on registry fields, never on a CLI's name (KTD1). SELF-17 runs one two-task fixture sprint under each lead, one task under `scripts/lib/`, and the two ledgers differ only in the lead CLI and the reviewer class (U20).
-
-Phases 0 and 1 replaced the `CLAUDE.md` files with a root `AGENTS.md` and a rule inventory, `docs/rule-inventory.md` (U3, U4). They raised the Claude Code floor to 2.1.277, with session-start notices for an older build and for a stale 3.x `CLAUDE.md` (U22). They added a plugin-root resolver and skill locator (U5), one CLI registry in `scripts/lib/registry.sh` (U26) and a strict skill validator (U6), then turned the 17 commands into `at-` lead workflows beside the 10 portable skills; `commands/` ships empty (U7, U23, U24).
-
-Phase 2 added the lead capability and builder survival probe rows (U29), detached leases with `lease_wait` and a reconcile when the lead exits (U13), the worker marker (U11), the Devin and Pi skill manifests (U18), the `[lead]` table (U9) and the sandboxed `claude -p` lane (U12). Ledger rows record the lead CLI, the reviewer class and each approval (U10). Personas run through one lane, `dispatch_persona`, and the 19 personas live in `personas/`, so `agents/` ships empty (U25, U8).
-
-Phase 3 lets Codex lead. `triforge_bootstrap` sets up a project from either lead, `scripts/coordinate.sh` runs either lead's launch line, the monitors read the lead's own tool names, and Codex invokes the workflows as `$agent-triforge:at-<name>` (U14).
-
-Phase 4 enrolled Grok Build and Devin as optional members, Devin only with recorded consent (U16, U17), and `at-review` now gives every lane one review package after an integrity check. Phase 5 rebuilt `at-setup` around the lead step, instruction-file detection with writers that ask first, the egress disclosure and Devin's model choice (U15, SELF-16).
-
-Phase 6 stopped inline Python from importing modules out of the working directory, where a builder could plant one (S1, SELF-27). The watch cycle's research workers run through the persona lane (U19, SELF-28). agy routing defaults to `auto`, its `AGY_ERROR` line sets a failed run's reason and whether it is retried (D-042, D-043), and the Cursor probe rows compose Grok 4.7 ids (SELF-29). A ledger whose digest and copy were both deleted now stops the next lease call with rc 44 instead of being adopted as found (S2, SELF-29).
-
-The probe record was not regenerated for this release. The newest is `ops/research/2026-09-probe-record.md` (2026-09-27); DVN-01 to DVN-07, CC-21 to CC-25, CDX-20 to CDX-23, GRK-02 to GRK-12 and SELF-06g ran live during development under `--only`. README "Upgrading from 3.x" has the command map and the steps back to 3.3.3.
-
-### 2026-10-01 — v3.3.3: protected-path registry, digest-stamped skills, lead git integrity
-
-A safety hotfix ahead of the lead-choice redesign (Phase H of `docs/plans/2026-09-28-1946-feat-lead-choice-v4-plan.md`). `lease_promote` classifies the integration diff against two lists in `scripts/lib/registry.sh`: framework paths in the Triforge checkout only, and project paths everywhere. The scan is case-folded, includes instruction files at any depth and both sides of a rename, and fails closed with rc 42 (U1, SELF-10). The `.agents/skills/` refresh and lease provisioning replace only directories whose content digest matches the stamp, and a 3.3.0–3.3.2 stamp is migrated against the released digests (U2, SELF-08b). Every lease git call goes through `_lead_git`. A planted config, hook, filter, ref, pointer redirect or ledger edit is restored where possible and escalated with rc 44 (`lease_rebaseline` accepts your own change). `lease_merge` squashes only the snapshot `lease_collect` recorded, refusing builder commits, `ops/` edits and post-collect changes (U27, SELF-18). `probe-capabilities.sh --self-only` is the SELF gate (exit 3 on a SELF FAIL), and `.github/workflows/gates.yml` runs it with both validators on macOS for PRs to `main` and `release/4.0` (U28). `lease_merge`'s commit no longer runs repository hooks. Ladder hash unchanged (`24a7ee2039c8c2e4907472e4cf82fdfd`); the probe record is not regenerated for this hotfix, and the SELF gate passes (17 SELF rows, none FAIL).
-
-### 2026-09-28 — v3.3.2: release gate green, OpenCode V2 guard, Cursor Grok 4.7 ids
-
-A hotfix from the 2026-09-27 watch cycle. The four hook commands quote `"${CLAUDE_PLUGIN_ROOT}"`, so `claude plugin validate --strict` passes on both manifests on Claude Code 2.1.283. Probe CC-06 validates `plugin.json` and `marketplace.json` separately (D-039). `invoke_opencode`, the lease `opencode)` arm, and `/setup` refuse OpenCode V2, which ignores the deny set, or an OpenCode whose version can't be read, and name the V1 pin `npm i -g opencode-ai@1`; `resolve_role` skips a refused OpenCode so the fallback chain moves on (D-049). The Cursor id composers take the `cursor-` prefix from the Grok family through one shared helper: `grok-4.7` → `grok-4.7-xhigh`, while `grok-4.6` still gives `cursor-grok-4.6-xhigh`, which stays the shipped pin (D-050). `/setup`'s ROLES helper drops a positional `$1` that Claude Code would have substituted (S28).
-
-### 2026-09-12 — v3.3.1: mechanical no-push backstop, quota failure class, split control-plane files
-
-The v3.3.0 review residuals, applied: a lease builder's `git push` is refused by shipped git config (pre-push hook + `no-push://` URL rewrite; SELF-09); provider quota exhaustion is a deterministic failure class with a `QUOTA-FAIL` probe outcome; effort-only roster overrides recompose the agy/Cursor effort suffix; `scripts/invoke-external.sh` became a loader over `scripts/lib/*.sh` and the probe harness's SELF-* rows moved to `scripts/probe-self-tests.sh` (behavior unchanged); the OpenCode deny set enumerates the common bypass spellings.
-
-### 2026-09-11 — v3.3.0: September 2026 models, trustworthy completion signals, native agent formats
-
-**Install route fixed.** The plugin installs on current Claude Code again: the repository ships a single-plugin marketplace manifest (`.claude-plugin/marketplace.json`) so `claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge` + `claude plugin install agent-triforge@agent-triforge` works (the old `claude plugin add <url>` form is no longer a Claude Code command), and `plugin.json` no longer names `hooks/hooks.json` — Claude Code auto-loads that path and rejected the duplicate, which made the installed plugin fail to load. Verified from an installed project: all twelve skills discoverable headless, `/<skill>` expands, the session-start hook fires.
-
-**Model pins (D-020..D-025, user-directed).** Ladder `fable`+`max` → `opus` (Opus 5) + `xhigh` → `opus`+`high` → `sonnet` (Sonnet 5) + `high` (the `fable`/`opus` aliases resolve to Fable 5.1 / Opus 5 from Claude Code 2.1.257 / 2.1.219; floor raised to ≥ 2.1.267 so `effort:` frontmatter is honored). Codex `gpt-6-astra` at `xhigh` on all three roles, with `model_reasoning_effort` now replayed on every `codex exec` (roster `effort` reaches Codex). Antigravity `Gemini 3.8 Flash (High)` under the new policy "newest Gemini at its highest thinking level, Pro or Flash" — `Gemini 3.1 Pro (High)` is the documented opt-in and the roster writer normalizes effort into the `(Low)/(Medium)/(High)` suffix (3.1 Pro has no Medium). OpenCode `openrouter/z-ai/glm-5.3`; Kimi `kimi-code/k3` (the OAuth-managed alias — the old `kimi-k3` fails on OAuth hosts); Cursor `cursor-grok-4.6-xhigh`, effort composed into the model-id suffix from a bare `grok-4.6` (the documented bracket form is rejected headless), binary `cursor-agent` first with an `agent` fallback accepted only when its `--version` matches Cursor's build-id format.
-
-**Completion signals (D-032, KTD2/KTD11).** `invoke_antigravity` runs `--output-format json`: an empty `response` with `denied_actions` is a deterministic failure naming the user-tier `permissions.allow` rule (research lanes need `read_url(*)` since agy 1.1.28), sidecars `.status`/`.denied`/`.mode` ride beside the output file, and the six commands promote only non-empty `SUCCESS` output. Every lease carries one CLI-neutral dispatch contract (no sub-dispatch, git stays local, typed final report); `lease_collect` routes `DONE`/`DONE_WITH_CONCERNS` to review (copying "Discoveries for later tasks" into `ops/MEMORY.md`), `BLOCKED`/`NEEDS_CONTEXT` to escalation, and a clean exit with no `Status:` line to "report missing" (rc 80, stays building). Foreground helpers scrub the lead's harness markers and set `NO_COLOR=1`.
-
-**Native agent formats (D-024, D-026, D-027).** The four `antigravity-agents/agents/*.md` use agy's Markdown-agent frontmatter (`mainAgent`, `subagent: false`, `commandExecutionPolicy`, `model: inherit`) and agy tool names; `TRIFORGE_AGY_MODE=injection|native|auto` governs native `--agent` selection (default injection until AGY-12 and the new AGY-16 negative pass for a full cycle); deny intent is written in agy action syntax (`command(rm -rf)` …); session start reinstalls the pack on version change. Kimi builder/reviewer are `--agent-file` definitions extending Kimi's prompt (`${base_prompt}`, `${skills}`, `${agents_md}`, `subagents: []`, a read-only `tools` allowlist on the reviewer), `--skills-dir` is gone (Kimi discovers `.agents/skills/` natively), and the project `config.toml` is documented as not read. Codex declarations deploy as `.codex/triforge-agents.toml` (Codex ≥ 0.147 sweeps `.codex/agents/*.toml` as role files), `include_plan_tool` (never a Codex key) is gone, `--full-auto` is documented as removed, and `/setup` detects — never writes — the user-tier project trust entry.
-
-**Skills everywhere (D-029).** `.agents/skills/` is refreshed under a version stamp (`.agents/skills/.triforge-plugin-version`; shipped-name directories are Triforge-owned, customizations go in differently named directories; names and symlinks validated before any replace). The six-harness discovery matrix — which path each CLI reads and its invocation form — is documented in `.claude/CLAUDE.md` "Portable skills"; agent definitions are never deployed into `.agents/agents/`.
-
-**Probe harness and record (D-028).** Date-stamped record path/title, AGY-08 rewritten to agy's documented `.agents/hooks.json` named-hook shape (hooks fired on agy 1.2.0 — the July finding was a probe-shape error — but FAIL again on 1.2.1, the version the shipped record was captured on: an open watch, not a settled pass), Astra rows, `cursor-grok-4.6-xhigh`, `kimi-code/k3`, OC-06 with `OPENCODE_PERMISSION`, and new rows for headless skill expansion per CLI (AGY-14, CDX-09, OC-07, CUR-09), the agy denied-actions envelope (AGY-15), the native-mode negative (AGY-16), Codex project trust (CDX-10/11), lifecycle and idempotence self-checks (SELF-05..08). Fresh record: `ops/research/2026-09-probe-record.md`; `latest_probe_record` in `scripts/invoke-external.sh` resolves "the current record" everywhere.
-
-**Release gates and process patterns.** `scripts/validate-skills.sh` (portable frontmatter, sequential steps, `## Output`) and `scripts/validate-versions.sh` (manifest/README lockstep, ladder md5 across the four files, DEFAULTS drift between the duplicated constant blocks, the scoped stale-pin sweep, surface counts) join `claude plugin validate --strict .`; `.github/PULL_REQUEST_TEMPLATE.md` lands. Skills gained portable `metadata:` frontmatter and "Use when" triggers, an evidence-gated verification rewrite with `Excuse | Reality` tables, `writing-good-tests.md`, the counterfactual compounding bar, rulings-not-stalls with the four hard stops, `Accept:`/`Fails when:`/`Precondition:`/`Reversibility:` task fields, `verification_baseline` in STATE.md, review dispositions; commands and agents gained ceremony classification, reviewer trust rules, the gated `learnings-researcher`, outbound-endpoint hygiene, Codex spawn hygiene; all four hook handlers declare `ON_CRASH: ALLOW` and an exit-code note. `settings.json` sets `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`. Compatibility floors: Claude Code ≥ 2.1.267, agy ≥ 1.1.27, Codex ≥ 0.153.0, OpenCode ≥ 1.18.20, Kimi ≥ 0.33.0, Cursor date-versioned.
-
-**Deferred (recorded, not dropped).** Kimi live rows stay PENDING-AUTH until `kimi login`; the `TRIFORGE_AGY_MODE` default flip; the mechanical no-push backstop in lease worktrees; `docs/images/roster.svg` regeneration (its labels still read `gpt-5.6-sol` / "Antigravity · Pro"); OC-06 (deny vs `--auto`) as an open watch; the Tier-2 repo-mining items.
-
----
-
-### 2026-09-11 — v3.2.0: Watch commands become repo-local maintainer tooling
-
-**`/cli-watch` + `/repo-watch` moved out of the plugin.** Both commands, the `watch-cycle` skill, and the watch registry are framework self-maintenance, not features for your projects. They now live in this checkout only: [`.claude/commands/`](.claude/commands/) (Claude Code discovers them when run from the repo root), [`.claude/skills/watch-cycle/`](.claude/skills/watch-cycle/SKILL.md), and the tracked registry [`ops/watch-registry.toml`](ops/watch-registry.toml). The commands read only that registry — the fallback through plugin templates is gone.
-
-**Plugin surface.** 17 shipped commands (was 19) and 12 portable skills (was 13). `session-start.sh` no longer bootstraps `ops/watch-registry.toml` into user projects and no longer lists the two commands in its orientation line. If you were running `/cli-watch` from an installed plugin, run it from a clone of this repo instead.
-
-**Docs.** README, `.claude/CLAUDE.md`, `templates/CLAUDE.md`, `docs/agent-triforge.md`, and the landing page updated to the new counts and paths; README's watch section renamed "Keeping the framework current".
-
----
-
-### 2026-07-22 — v3.1.0: Role customization in guided onboarding
-
-**`/setup` now covers who does what.** After the core-trio gate and optional-member enrollment, a new role step shows the current assignment table (role → CLI · model · effort · fallbacks) and asks one question: proceed with the shipped defaults (recommended) or customize. Customizing walks CLI, model, and effort per chosen role; `/setup roles` jumps straight to that step on re-runs. The closing status table now derives each CLI's roles from the live roster instead of hardcoding the shipped posture.
-
-**New single-writer helpers.** `roster_role_entry <role>` prints a role's merged configuration (shipped defaults overlaid per-field by `ops/roster.toml`, no liveness walk; the model column shows what dispatch would actually run, even for a hand-edited cli-only override); `roster_write_role <role> <cli> <model> <effort> [fallbacks-csv]` is the validated single writer for `[roles.*]` — it enforces a strict superset of `resolve_role`'s load rules (known role/CLI and core-trio chain terminus, plus writer-only checks: the effort enum and agy effort→(High)/(Low) suffix normalization), derives a valid fallback chain when none is given (the displaced primary becomes the first fallback), and round-trip-verifies before an atomic replace, preserving comments elsewhere in the file.
-
-**Roster model overrides now reach every external-CLI dispatch lane.** `invoke_codex` gained a `CODEX_MODEL` override (same pattern as `AGY_MODEL`/`OPENCODE_MODEL`/`KIMI_MODEL`/`CURSOR_MODEL`), and `dispatch_role`'s codex lane passes the resolved roster model through it — a customized reviewer/tester model actually reaches `codex exec -m` instead of silently deferring to the `agents.toml` pin. The shipped default matches the pin, so behavior is unchanged until a user customizes. (The claude lane stays ladder-governed by design: work resolved to claude runs as a native Agent-tool subagent, whose model comes from the Fable/downgrade ladder, not the roster.)
-
-**Review-hardened across three multi-agent iterations** (full local roster + independent cross-model adversarial pass per round, every fix re-verified by execution in the next round): the roster guard runs `resolve_role`'s full load validation, so TOML-valid-but-content-invalid rosters (typo'd CLI, chain with no core-trio terminus, non-table shapes) are LOUD instead of rendering clean-looking tables; a missing TOML parser (rc 3) is distinguished from roster errors with its own fix; the closing verdict warns when any role chain contains an auth-failed member (dispatch never skips them — as a primary it breaks the role outright, as a fallback it blocks recovery exactly when the primary degrades); the role ask is truthful on re-runs (keep-current / customize / restore-shipped-defaults); agy writes normalize the effort→`(High)`/`(Low)` suffix and auto-fill an empty model with the effort-matched Pro pin. Deliberately-accepted residuals are recorded in [`docs/residual-review-findings/`](docs/residual-review-findings/feat-setup-role-customization.md).
-
-**Model watch — Gemini 3.6 Flash (released 2026-07-21).** Recorded in [`ops/research/2026-07-22-gemini-3.6-flash.md`](ops/research/2026-07-22-gemini-3.6-flash.md) and verified against the live `agy models` catalog: no new Pro shipped, so the `Gemini 3.1 Pro (High)`/`(Low)` pins remain the latest Pro and all defaults hold; `"Gemini 3.6 Flash (High|Medium|Low)"` is now the named per-role Flash opt-in example. Next Pro release (Gemini 4 teased) moves the pins under the latest-Pro policy.
-
----
-
-### 2026-07-21 — v3.0.1: Landing-page copy + release hygiene
-
-**Messaging fixes.** The "Three AI models" tagline (page title, hero, footer, README, plugin manifest) now reads "a core trio of AI coding CLIs" — the old count clashed with the six-CLI builder pool introduced in v3.0.0. The Antigravity model wording on the landing page softened from "never Flash" to "Gemini 3.1 Pro by default, Flash opt-in": the shipped defaults still pin Pro on every `agy` path, but a `[roles.*] model` entry in `ops/roster.toml` (or `AGY_MODEL`) can select a Flash variant when a user explicitly wants one.
-
-**Rolls up post-v3.0.0 fixes.** v3.0.0 review hardening (#2) and the 2026-07-20 capability-record refresh (#3), which landed after the `v3.0.0` tag.
-
----
-
-### 2026-07-18 — v3.0.0: CLI modernization + six-CLI builder pool
-
-The largest release since the plugin conversion — the coordination model and the CLI surface both changed.
-
-**Six-CLI builder pool.** The fixed single-writer trio is retired. All six supported CLIs — core trio (Claude, Antigravity, Codex) plus enrolled optional members (OpenCode, Kimi, Cursor) — are eligible builders assigned from [`ops/roster.toml`](templates/ops/roster.toml) (`resolve_role`). Every implementation task runs under a per-task lease (`ops/leases.toml` + isolated worktree) and merges only after cross-review by a pinned non-author reviewer; approved work lands one squash commit per task on a sprint integration branch, and the lead promotes to main honoring a `[promotion]` gate. Safety is leases + worktree isolation + cross-review, not write-restriction.
-
-**Gemini → Antigravity.** Google shut down the hosted Gemini CLI service for consumer tiers (2026-06-18). The analyst / reviewer / documenter lane migrated to **Antigravity (`agy`)** running Gemini 3.1 Pro (High): `invoke_gemini` → `invoke_antigravity`, `gemini-agents/` → `antigravity-agents/` (a valid agy plugin), `ops/REVIEW_GEMINI.md` → `ops/REVIEW_ANTIGRAVITY.md`. Legacy Gemini users pin `v2.4.3`.
-
-**Native-first runtime.** Completion gating moved from the retired `ship-loop.sh` Stop hook and its `<promise>DONE</promise>` convention to Claude Code's native `/goal` gate + an `ops/.sprint-complete` sentinel (probe CC-03). Wave orchestration delegates 5+-task waves to dynamic workflows. Claude runs a Fable-5-topped downgrade ladder (`fable`/`max` → `opus`/`xhigh` → `opus`/`high` → `sonnet`/`high`) with a spawn-time Fable override for the lead and the never-downgrade trio.
-
-**Codex modernization.** `gpt-5.6-sol` at `xhigh` (was `gpt-5.4`), structured `--output-schema` review verdicts, and hooks under `codex exec` (D-004 reversed — probe CDX-04; see [`ops/decisions/2026-07-18-codex-hooks-under-exec.md`](ops/decisions/2026-07-18-codex-hooks-under-exec.md)).
-
-**Onboarding + self-maintenance.** New [`/setup`](commands/setup.md) guides a fresh install to a live roster via first-detection enrollment. New [`/cli-watch`](.claude/commands/cli-watch.md) + [`/repo-watch`](.claude/commands/repo-watch.md) run watch cycles over [`ops/watch-registry.toml`](ops/watch-registry.toml) using the `watch-cycle` skill (since relocated to repo-local maintainer tooling — see [Keeping the framework current](#keeping-the-framework-current-cli-watch-repo-watch--maintainers)).
-
-**Raised floors (KTD-13).** Claude Code ≥ 2.1.212, Codex ≥ 0.144.0, Antigravity `agy` ≥ 1.1.3; optional OpenCode ≥ 1.18, Kimi Code ≥ 0.15, Cursor (date-versioned). See [Compatibility](#compatibility).
-
-**Docs.** Full refresh across README, `.claude/CLAUDE.md`, `templates/CLAUDE.md`, `docs/agent-triforge.md`, `docs/index.html`; single-writer statements reframed to the lease/cross-review contract; drift fixes (Codex `--full-auto` is deprecated-not-removed; `max` effort is not Opus-only). Known cosmetic gap: `docs/images/*.svg` still render "Gemini" labels (image assets, deferred).
-
----
-
-> **Historical note (2026-07):** entries below predate the Gemini → Antigravity migration and intentionally keep retired names (`Gemini CLI`, `invoke_gemini`, `gemini-agents/`, `ops/REVIEW_GEMINI.md`, `ops/RESEARCH_GEMINI.md`) as an accurate record of what those releases shipped. The live lane is Antigravity (`agy`, `invoke_antigravity`, `antigravity-agents/`, `ops/REVIEW_ANTIGRAVITY.md`, `ops/RESEARCH_ANTIGRAVITY.md`); legacy Gemini users pin plugin v2.4.3. Some file links in these historical entries point at paths that have since moved or been removed by v3.0.0 (`CLAUDE.md` → `.claude/CLAUDE.md`; `gemini-agents/` → `antigravity-agents/`; `hooks/handlers/ship-loop.sh` retired) — they document where the file lived at that release, not the current tree.
-
-### 2026-05-12 — v2.4.3: Sequential downgrade ladder for narrow runtime tasks
-
-**Tiered downgrade ladder for the team-lead and lead agent.** The previous single-step downgrade (`opus`/`max` → `sonnet`/`high`) was a big leap that skipped past two cheaper same-family reductions. New ladder lets the orchestrator step down one notch at a time: `opus`/`max` → `opus`/`xhigh` → `opus`/`high` → `sonnet`/`high`. Locked agents (security-sentinel, plan-checker, findings-synthesizer) remain hardwired to `opus`/`max`. Documentation-only change — runtime behavior is unchanged; the team-lead's allowed move set widens. Also fixed a doc-drift bug in `CLAUDE.md`: the documented effort values were missing `xhigh` (a valid Claude Code value per the v2.2.0 audit at `README.md:654`).
-
 <details>
-<summary><strong>Files changed (6 files)</strong></summary>
+<summary><strong>How do I update Triforge?</strong></summary>
 
-| File | Change |
-|---|---|
-| `CLAUDE.md` | Architecture line references new ladder; effort field values corrected to include `xhigh` |
-| `templates/CLAUDE.md` | Architecture line references new ladder |
-| `agents/team-lead.md` | "Model routing discretion" block rewritten as a 3-tier ladder table |
-| `skills/wave-orchestration/SKILL.md` | Mirrors the team-lead.md rewrite |
-| `README.md` | v2.2.0 changelog reference refreshed; this entry; "What's new" + version refs bumped |
-| `.claude-plugin/plugin.json` | Bumped to 2.4.3 |
-| `docs/index.html` | Hero badge + terminal version bumped to v2.4.3 |
-
+Refresh the marketplace, then update the plugin: <code>claude plugin marketplace update agent-triforge</code> and <code>claude plugin update agent-triforge</code> under Claude Code, or <code>codex plugin marketplace upgrade agent-triforge</code> and <code>codex plugin add agent-triforge@agent-triforge</code> under Codex. See <a href="#update">Update</a>.
 </details>
 
----
-
-### 2026-05-12 — v2.4.2: Third audit pass — both prior passes missed siblings of the same anti-pattern
-
-A third adversarial audit on top of v2.4.0 and v2.4.1 — three parallel Explore agents covered shell safety + hooks + scripts, agent definitions + security model, and docs + commands + skills + templates. **Surfaced 1 MEDIUM + 3 doc-drift fixes plus one bonus bug uncovered during verification.** The audit agents collectively reported four BLOCKER/HIGH findings; every one was verified false against the actual code. The framework is converging.
-
-**[MEDIUM] Two surviving `|| echo "0"` siblings in [`session-start.sh:138, 174`](hooks/handlers/session-start.sh)** — v2.4.0 fixed three `grep -c || echo "0"` instances; v2.4.1 fixed a fourth `grep -c` instance both the team-lead pass and its consolidation step missed; this pass found that both prior audits only ever checked `grep -c` and never the `find … | wc -l` siblings. `SOLUTION_COUNT` (line 138) and `GEMINI_AGENT_COUNT` (line 174) both used the same broken `|| echo "0"` tail. Triggered whenever `ops/solutions/` or `.gemini/agents/` is missing (e.g., user manually deletes the directory after bootstrap, or bootstrap is skipped because `ops/` already exists) — `wc -l` already emits `0`, then `echo "0"` appends another `0`, and the downstream `[ "$VAR" -gt "0" ]` comparison errors with `integer expression expected` under `set -euo pipefail`. The handler dies before printing the orientation banner. **Fix:** `|| echo "0"` → `|| true` on both lines.
-
-**[LOW, bonus] Codex agent count off-by-3 in [`session-start.sh:193`](hooks/handlers/session-start.sh)** — Caught when the verification reproducer for the previous fix ran in an empty test project and the orientation banner reported "External agent definitions loaded: 4 Gemini + 6 Codex" when there are only 3 Codex agents. The Python fast path did `len(data.get('agents', {}))`, but the `[agents]` table in `codex-agents/agents.toml` holds three scalar runtime caps (`max_depth`, `max_threads`, `job_max_runtime_seconds`) alongside the three agent subtables (`logic_reviewer`, `test_writer`, `debugger`) — so `len()` returned 6. The fallback `grep -c '^\[agents\.'` would have been correct (it matches only the dotted subtable headers), but the Python path wins whenever `tomllib` is available. **Fix:** filter to dict values only — `sum(1 for v in data.get('agents', {}).values() if isinstance(v, dict))` — mirroring the [`_list_codex_agents`](scripts/invoke-external.sh) helper which already had the correct pattern. Re-verified: "4 Gemini + 3 Codex".
-
-**[LOW] `CLAUDE.md` Context-management section omitted 2 of 5 hook handlers** — The Hook-safety subsection said "All 5 hook handlers use `set -euo pipefail`" but the Context-management subsection only named 3 (`ship-loop.sh`, `coordinate.sh`, `context-monitor.sh`). The two missing handlers were `pre-compact.sh` (auto-snapshots `ops/STATE.md` before context compaction, both already wired in `hooks/hooks.json`) and `tool-failure-monitor.sh` (tracks consecutive + total tool failures, warns at 5 consecutive / 10 total per session). **Fix:** both handlers now listed with one-line descriptions of what they do and when they fire.
-
-**[LOW] `codex-agents/agents.toml` top-comment explained `max_threads` only** — Sets three caps (`max_depth = 2`, `max_threads = 4`, `job_max_runtime_seconds = 1800`) but the inline comment only described the `max_depth` fallback issue and `max_threads`'s fan-out role. `max_depth = 2`'s actual semantics — raising the cap by exactly one level so a single spawn round is allowed but recursive spawn-of-spawn is blocked (runaway protection) — was invisible to anyone reading the TOML in isolation. **Fix:** comment now explains both `max_depth` and `max_threads` properly.
-
-**[NIT] `CLAUDE.md` agent-frontmatter-fields list was Claude-only without saying so** — Section listed `name/description/model/effort/tools/maxTurns/skills/mcpServers/hooks/memory/background/isolation/color/permissionMode` — all Claude conventions. Gemini definitions use `max_turns`/`timeout_mins` plus lowercase tool names; Codex uses `model_reasoning_effort`/`sandbox_mode`/`approval_policy`/`include_plan_tool`. **Fix:** one trailing sentence cross-references both CLIs' conventions so readers know where to look.
-
-**False alarms verified and rejected** — For the record so they're not re-raised next pass: (1) "BLOCKER path injection in `ship-loop.sh:131`" — `SHIP_STATE_FILE` is the hardcoded constant `.claude/ship-loop.local.md` declared at line 22, never user-controlled; (2) "BLOCKER JSON/command injection in `coordinate.sh:69,72` `notify()`" — only ever called from lines 122 and 134 with hardcoded `title="Agent Triforge"` and integer-templated bodies (`"converged in $ITERATION iterations"`); no user-controlled text flows through; (3) "HIGH approval_policy injection in `invoke-external.sh:157-161`" — values come from project-controlled `agents.toml`, parsed via `tomllib`, serialized via `json.dumps`; the auditor walked the claim back mid-analysis; (4) "HIGH `NEXT_ITERATION` arithmetic needs validation" — `ITERATION` is already validated as `^[0-9]+$` at `ship-loop.sh:60` before the `$((ITERATION + 1))` at line 124. Severity inflation is a real failure mode; manual cross-check against the actual code is non-negotiable.
-
-**Verified** — `grep -rn '|| echo "0"' hooks/ scripts/` returns only the cautionary comment at `pre-compact.sh:18` (which references the anti-pattern by name); `bash -n hooks/handlers/session-start.sh` clean; reproducer in `/tmp/empty/ops/` (where `ops/solutions/` and `.gemini/agents/` are missing) ran cleanly under the fixed handler with no `integer expression expected` errors and correct "4 Gemini + 3 Codex" count.
-
 <details>
-<summary><strong>Files changed (6 files)</strong></summary>
+<summary><strong>How do I move a project from 3.x?</strong></summary>
 
-| File | Change |
-|---|---|
-| `hooks/handlers/session-start.sh` | Two `\|\| echo "0"` → `\|\| true` fixes (lines 138, 174); Codex agent count filtered to dict values only (line 193) |
-| `CLAUDE.md` | Context-management section now names all 5 hook handlers; frontmatter-fields section cross-references Gemini/Codex conventions |
-| `codex-agents/agents.toml` | Top-comment extended to explain `max_depth = 2` recursion cap |
-| `.claude-plugin/plugin.json` | Bumped to 2.4.2 |
-| `README.md` | This changelog entry; What's new bumped to v2.4.2 |
-| `docs/index.html` | Hero badge + terminal version bumped to v2.4.2 |
-
+Follow <a href="#upgrading-from-3x">Upgrading from 3.x</a>: the slash commands became <code>at-</code> workflows (<a href="#command-map">command map</a>), the project's instruction file is now its root <code>AGENTS.md</code>, and the agents became personas. <a href="#rolling-back-to-333">Rolling back to 3.3.3</a> covers the way back.
 </details>
 
----
+## Contributing
 
-### 2026-05-12 — v2.4.1: Second audit pass — surviving blocker + 27 findings actioned
+Pull requests to `main` and the `release/` branches run the gates in [`.github/workflows/gates.yml`](.github/workflows/gates.yml) on macOS: the shell syntax check, both validators and their self-tests, and the SELF probe rows. [`AGENTS.md`](AGENTS.md) lists every check to run before you open one, and the [PR template](.github/PULL_REQUEST_TEMPLATE.md) asks for an evidence table and the validator results.
 
-A second team-lead-orchestrated audit on top of v2.4.0 — **6 parallel specialist reviewers** (hooks/scripts, commands, skills, agents, plugin manifest, docs/cross-refs) plus Team Lead consolidation with spot-checks — surfaced **28 findings**: 1 BLOCKER, 1 HIGH, 13 MEDIUM, 13 LOW. The Team Lead's cross-check caught one reviewer mis-attributing a line number (proving the consolidation step earns its keep) and downgraded one reviewer-rated HIGH to MEDIUM pending independent verification.
+### Development (for contributors)
 
-**[BLOCKER] Surviving `grep -c || echo "0"` in [`session-start.sh:194`](hooks/handlers/session-start.sh)** — v2.4.0 fixed three earlier instances of the bug pattern (`pre-compact.sh:19-22` + `session-start.sh:121-123`) but missed one. The Codex-agent-count fallback chain (`python tomllib || grep -c '^\[agents\.' || echo "0"`) produced `"0\n0"` when both Python toml libs were unavailable and grep matched nothing. Line 195's `[ "$CODEX_AGENT_COUNT" -gt "0" ]` then errored with `integer expression expected` under `set -euo pipefail` — the handler died before printing the orientation banner. **Fix:** `|| echo "0"` → `|| true`.
+```bash
+git clone https://github.com/Ninety2UA/agent-triforge.git
+claude --plugin-dir ./agent-triforge
+```
 
-**[HIGH] Broken ADR reference in [`CLAUDE.md:269`](CLAUDE.md)** — Cited `ops/decisions/0001-cli-deprecation-watch.md`; the actual file is `2026-05-12-cli-deprecation-watch.md`. The link is the only documented justification for why Triforge does not auto-enable Codex hooks under `codex exec`. **Fix:** path updated to the ISO-date naming the repo already uses for its other ADR.
+CI cuts the releases. When a version bump lands on `main`, [`release.yml`](.github/workflows/release.yml) tags `v<version>` and publishes the GitHub release, using `docs/releases/v<version>.md` as the notes; `bash scripts/release-notes.sh --body` previews them. The short checklist is under "Release" in [`AGENTS.md`](AGENTS.md), the full one under "Release checklist" in [`docs/agent-triforge.md`](docs/agent-triforge.md).
 
-**[MEDIUM] `effort: max` field verified, kept as-is** — The audit raised a concern that Claude Code's agent-frontmatter schema might not recognize `effort:` and that the 19 agents' "Opus max effort" claim was unenforced. Spot-checked against the current Claude Code subagents spec: `effort` is documented (values `low`/`medium`/`high`/`xhigh`/`max`; overrides session effort while the subagent is active). All 19 declarations are honored. No change. _[Corrected in v3.0.0: `max` is not Opus-only — it is documented on Fable 5, Sonnet 5, and Opus 4.8/4.7.]_
+### Keeping the framework current (`/cli-watch`, `/repo-watch` — maintainers)
 
-**[MEDIUM] All 16 commands now declare `allowed-tools`** — Defense-in-depth narrowing; `/quick` was previously inheriting the full Claude Code tool surface despite being scoped to <3 file changes. Allowlists scoped per command's actual needs: `/status`, `/resume`, `/pause`, `/compound` are read-mostly; `/build`, `/plan`, `/ship`, `/coordinate`, `/wrap`, `/quick`, `/debug`, `/resolve-pr` get the full set; `/analyze` is read-only per its own constraint.
+Two repo-local commands keep the framework current. They are maintainer tooling that lives in [`.claude/commands/`](.claude/commands/) of this checkout, so they are available when you run Claude Code inside a clone of this repo and are never installed into your projects. Both read [`ops/watch-registry.toml`](ops/watch-registry.toml), a seeded, editable registry of watch targets, and share the [`watch-cycle`](.claude/skills/watch-cycle/SKILL.md) methodology: a primary-source research window, a per-target changelog, a gap table against current Triforge, an adopt/defer ADR with revisit triggers, and verification probes.
 
-**[MEDIUM] 7 inline bash blocks gained `set -euo pipefail`** — `commands/{build,plan,ship,coordinate,deep-research,review,test}.md` each ran multi-line `source ${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh` + parallel `invoke_gemini`/`invoke_codex` blocks without the safety flags, so a `source` failure or non-zero `wait` could fall through silently.
-
-**[MEDIUM] 4 commands gained `$ARGUMENTS` boundary guards** — `commands/{plan,ship,coordinate,deep-research,debug,resolve-pr,compound,quick}.md` (the ones that pipe user input directly into subagent prompts) now have an explicit `> **Note:**` block instructing downstream agents to treat the argument block as data, not as instructions overriding the command's own logic.
-
-**[MEDIUM] 3 commands gained "When to use" decision aids** — `commands/{build,plan,ship}.md` were missing the comparison block that `/quick` already had. New users now have a decision tree for picking between `/plan` → `/build` (manual phasing) vs `/ship` (autonomous end-to-end) vs `/coordinate` (autonomous, simpler) vs `/quick` (lightweight).
-
-**[MEDIUM] All 19 agents now carry a `color`** — Wave orchestration and team builds routinely fan out to 5+ agents at once; the parallel-swarm UI was monochrome. Categorized: planners/coordinators **blue** (`plan-checker`, `architecture-strategist`, `team-lead`); code reviewers **green** (`code-simplicity-reviewer`, `convention-enforcer`, `continuous-reviewer`); researchers + verifiers **cyan** (`learnings-researcher`, `framework-docs-researcher`, `best-practices-researcher`, `git-history-analyzer`, `integration-verifier`, `test-gap-analyzer`, `deployment-verifier`); synthesizers + resolver **magenta** (`findings-synthesizer`, `research-synthesizer`, `pr-comment-resolver`); security/perf/repro **red/yellow** (`security-sentinel`, `performance-oracle`, `bug-reproduction-validator`).
-
-**[MEDIUM] 2 skill descriptions rewritten for trigger precision** — `skills/scope-cutting` and `skills/verification-before-completion` lacked the "Primary consumer" + concrete trigger scenarios that the other 10 skills had. Both now name the consumer and the specific situations that should fire the skill.
-
-**[MEDIUM] `templates/CLAUDE.md` self-contradiction repaired** — Line 19 prose said the helper lived at `scripts/invoke-external.sh`; line 133 code block correctly used `${CLAUDE_PLUGIN_ROOT}/scripts/invoke-external.sh`. New users copying the template were being told to look for a file that doesn't exist in their own project. Prose now uses the `${CLAUDE_PLUGIN_ROOT}/` prefix. Same edit added a "this is the simplified per-project copy" preamble pointing back to the plugin's canonical `CLAUDE.md`.
-
-**[MEDIUM] `ops/research/` added to the shared-file protocol** — Both `CLAUDE.md`'s shared-file table and `templates/ops/` skeleton now include `research/`; the v2.4.0 work introduced `ops/research/cli-updates-2026-05.md` but the protocol table was never updated.
-
-**[MEDIUM] `.gitignore` `*.local.md` anchored to `.claude/*.local.md`** — Unanchored pattern was silently swallowing any `.local.md` at any depth, hiding user notes in places like `docs/notes.local.md`. Anchored; the two redundant explicit lines removed.
-
-**[MEDIUM] Root-level `.gemini/settings.json` artifact cleaned** — Running `session-start.sh` inside the plugin repo itself created a byte-identical duplicate of `templates/.gemini/settings.json` at the plugin root. Deleted the artifact and added `.gemini/` to `.gitignore` so future runs don't recreate it as an untracked file.
-
-**[LOW] Cleanup batch** — `tool-failure-monitor.sh` unicode `⚠` → ASCII `WARN:` (non-UTF8 portability); `continuous-reviewer` description picked up the `Use:` keyword to match the other 18 agents; `git-history-analyzer` and `bug-reproduction-validator` gained `WebFetch`/`WebSearch` for upstream lookups (CVE feeds, issue trackers, vendor notes); `codex-agents/agents.toml` lost the undocumented `nickname_candidates` fields; `status.md` description rewritten in prescriptive style; README TOC gained a `Recent changes` link.
-
-**Deferred** — One MEDIUM (`<example>` blocks in each agent's `description:` field, recommended by Anthropic's agent guidance for routing precision) deferred because it requires custom examples per agent's role; three LOW intentionally skipped (`context-monitor.sh` tool classifier drifts as Claude Code adds tools — kept conservative default; `knowledge-compounding` / `test-driven-development` skills don't need numbered "Step 1:" wrappers since they're already organized into cycles and templates; `templates/.codex/` directory will remain config-only until Codex hooks become viable under `codex exec`).
-
-**Verified** — Shell syntax (`bash -n` on all 5 hook handlers + 2 scripts), TOML (`codex-agents/agents.toml` still parses with all 3 agents + nesting caps intact), YAML (47 frontmatter files: 19 agents + 16 commands + 12 skills), git diff (45 files changed, +149/-20).
-
-<details>
-<summary><strong>Files changed (45 files, +149/-20)</strong></summary>
-
-| File | Change |
-|---|---|
-| `hooks/handlers/session-start.sh` | `\|\| true` fix at line 194 (the v2.4.0 audit miss) |
-| `hooks/handlers/tool-failure-monitor.sh` | Unicode `⚠` → ASCII `WARN:` for non-UTF8 portability |
-| `CLAUDE.md` | ADR reference path fixed; `research/` added to shared-file table |
-| `README.md` | `Recent changes` TOC link added; this changelog; What's new bumped to v2.4.1 |
-| `.gitignore` | `*.local.md` anchored to `.claude/*.local.md`; `.gemini/` added |
-| `templates/CLAUDE.md` | `${CLAUDE_PLUGIN_ROOT}/` prefix on helper reference; "simplified copy" preamble |
-| `templates/ops/research/.gitkeep` | New — skeleton for `ops/research/` |
-| `codex-agents/agents.toml` | `nickname_candidates` fields removed (undocumented in Codex 0.130.0 schema) |
-| `commands/{build,plan,ship,coordinate,deep-research,review,test}.md` | `set -euo pipefail` prepended to inline bash blocks |
-| `commands/*.md` (all 16) | `allowed-tools` declared in frontmatter, scoped per command |
-| `commands/{build,plan,ship}.md` | "When to use" decision-aid section added |
-| `commands/{plan,ship,coordinate,deep-research,debug,resolve-pr,compound,quick}.md` | `$ARGUMENTS` boundary guard added |
-| `commands/status.md` | Description rewritten in prescriptive style |
-| `agents/*.md` (all 19) | `color:` declared in frontmatter |
-| `agents/continuous-reviewer.md` | `Use:` keyword added to description for consistency |
-| `agents/{git-history-analyzer,bug-reproduction-validator}.md` | `WebFetch` + `WebSearch` added to `tools:` |
-| `skills/scope-cutting/SKILL.md` | Description rewritten with `Primary consumer:` + trigger scenarios |
-| `skills/verification-before-completion/SKILL.md` | Description rewritten with `Primary consumer:` + trigger scenarios |
-| `.claude-plugin/plugin.json` | Bumped to 2.4.1 |
-| `docs/index.html` | Hero badge + terminal version bumped to v2.4.1 |
-
-</details>
-
----
-
-### 2026-04-20 — v2.4.0: Framework self-audit — two blockers + four HIGH fixes
-
-A team-lead-orchestrated audit of the entire framework (hooks, commands, skills, agents, scripts, manifests, docs) surfaced **18 findings** — including 2 blockers that silently defeated core reliability invariants. Every finding was either fixed or verified as a false alarm against upstream Gemini/Codex/Claude Code specs. No functionality was added; existing behavior was corrected to match what the docs already promised.
-
-**[BLOCKER] Ship-loop guard never fired** — [`commands/ship.md`](commands/ship.md) and [`commands/coordinate.md`](commands/coordinate.md) wrote `session_id: "<current-branch-name>"` into the loop state file, but [`ship-loop.sh`](hooks/handlers/ship-loop.sh) compared that against Claude Code's runtime session UUID from hook-input JSON. Branch name ≠ UUID → the handler took the "different session — don't interfere" exit on every call. The inner loop guard (max iterations, `<promise>DONE</promise>` check, prompt re-feed) never actually blocked anything during autonomous `/ship` or `/coordinate` runs. **Fix:** removed session_id logic entirely — presence of the state file with `active: true` now indicates the loop. Cleaned the state template in both commands.
-
-**[BLOCKER] `PostToolUseFailure` hook event doesn't exist** — [`hooks/hooks.json`](hooks/hooks.json) registered [`tool-failure-monitor.sh`](hooks/handlers/tool-failure-monitor.sh) under an invented event name (`PostToolUseFailure`) that Claude Code's hook loader silently ignores. The advertised "warn at 5 consecutive or 10 total failures" feature was dead code; `.claude/tool-failures.local.md` was never written. **Fix:** merged the handler into the existing `PostToolUse` hook, with in-handler filtering on `tool_response.is_error` / `tool_response.error` so only actual failures increment the counters. Smoke-tested with both success and failure payloads.
-
-**[HIGH] Gemini `-y` (YOLO) flag silently nullified `policies.toml`** — [`scripts/invoke-external.sh`](scripts/invoke-external.sh) passed `-y` on every `gemini -p` invocation. The plugin's own [`gemini-agents/policies.toml`](gemini-agents/policies.toml) explicitly warns at the top of the file that YOLO installs a max-priority allow rule that overrides every `deny` — including the `rm -rf` / `git push` / `sudo` denylists documented in the "Security model" section of CLAUDE.md. **Fix:** `-y` is now gated on an explicit `GEMINI_YOLO=1` env var (off by default). Subagent isolation comes from the per-agent `tools` allowlist (always respected by Gemini) plus the restored policy rules.
-
-**[HIGH] `team-lead` bypassed `invoke-external.sh`** — [`agents/team-lead.md`](agents/team-lead.md) shelled out to `gemini -p "$(cat SKILL.md) ..."` / `codex exec "$(cat SKILL.md) ..."` directly, skipping policy loading, timeout enforcement, retry, and native-agent routing. Team-mode builds silently lost every piece of reliability infrastructure the rest of the framework relies on. **Fix:** migrated to `invoke_gemini` / `invoke_codex` with per-PID exit-code capture and fail-fast, matching the pattern in `/review` and `/build`.
-
-**[HIGH] Template and README docs drifted to legacy invocation** — [`templates/CLAUDE.md`](templates/CLAUDE.md) (the file `session-start.sh` offers new users as a starting template) and [`README.md`](README.md) both presented `gemini -p "$(cat ...)"` as the current invocation pattern, not the `invoke_gemini` helper. New adopters were being handed outdated guidance at first touch. **Fix:** both now document the helper as the primary path; legacy injection is labeled as the automatic fallback the helper applies when a CLI lacks native-agent support.
-
-**[MEDIUM] `grep -c … || echo "0"` produced `"0\n0"` on zero matches** — `grep -c` already prints `0` to stdout on zero matches and then exits with status `1`; pairing it with `|| echo "0"` ran the fallback and appended a second `0`, yielding a multiline `"0\n0"` value that garbled session-start's task banner and pre-compact's STATE.md checkpoint. The CLAUDE.md "Hook safety" section even documented this broken pattern as the correct one. **Fix:** switched to `|| true` in [`session-start.sh`](hooks/handlers/session-start.sh) and [`pre-compact.sh`](hooks/handlers/pre-compact.sh); rewrote the CLAUDE.md guidance to explain why.
-
-**[MEDIUM] `pre-compact.sh` `CURRENT_PHASE` default clobbered by empty sed output** — `sed -n` with no match exits `0`, so `|| echo "unknown"` never fired when `ops/STATE.md` existed but lacked a `## Current phase:` line. The heredoc then wrote a blank phase into STATE.md, breaking `/resume` heuristics. **Fix:** captures sed output into a temporary variable and falls back explicitly when empty.
-
-**[MEDIUM] Session-start commands banner stale + sed injection risk in state writes + silent timeout fallback** — the banner listed 13 of 16 commands (`/analyze`, `/coordinate`, `/resolve-pr` missing); `ship-loop.sh` and `tool-failure-monitor.sh` injected user-influenced values into `sed` patterns without escaping; [`_run_with_timeout`](scripts/invoke-external.sh) silently ran Gemini/Codex with no timeout when neither `timeout` nor `gtimeout` was on PATH. **Fix:** banner now lists all 16 commands; state-file writes switched from `sed` to `python3`; `_run_with_timeout` emits a one-shot stderr warning the first time it falls through.
-
-**[LOW] Shared-file table + coordinate.sh preflight + plugin.json cleanup** — [`targeted-researcher`](gemini-agents/targeted-researcher.md) writes to `ops/RESEARCH_GEMINI.md` but the shared-file table never mentioned it (added to both CLAUDE.md and templates/CLAUDE.md). [`scripts/coordinate.sh`](scripts/coordinate.sh) invoked `claude --print` via `|| true`, silently producing empty output if the CLI wasn't on PATH (now fails fast with an install hint). [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) declared `agents`/`skills`/`commands` path fields that are redundant under the current Claude Code plugin spec (auto-discovery handles them) — removed for clarity.
-
-**False alarms verified upstream, no change needed** — the Gemini CLI subagents spec explicitly uses snake_case `max_turns` / `timeout_mins` in its frontmatter schema, so `gemini-agents/*.md` is already correct. The Codex agent-roles source (`codex-rs/core/src/config/agent_roles.rs`) shows `nickname_candidates` is a real, documented field — not dead config. Audit flagged both for verification; both were clean.
-
-<details>
-<summary><strong>Files changed (16 files)</strong></summary>
-
-| File | Change |
-|---|---|
-| `hooks/hooks.json` | Removed non-existent `PostToolUseFailure` event; tool-failure-monitor merged into `PostToolUse` |
-| `hooks/handlers/tool-failure-monitor.sh` | Filters on `tool_response.is_error` / `tool_response.error`; resets consecutive counter on success; python3 state writes |
-| `hooks/handlers/ship-loop.sh` | Removed broken session_id comparison; switched state update from sed to python3 |
-| `hooks/handlers/session-start.sh` | `grep -c … \|\| true` fix; commands banner now lists all 16 |
-| `hooks/handlers/pre-compact.sh` | `grep -c … \|\| true` fix; `CURRENT_PHASE` fallback no longer clobbered by empty sed output |
-| `commands/ship.md` | Removed `session_id` from state template |
-| `commands/coordinate.md` | Removed `session_id` from state template |
-| `scripts/invoke-external.sh` | `-y` gated on `GEMINI_YOLO=1` env var; one-shot stderr warning when timeout fallback engages |
-| `scripts/coordinate.sh` | Preflight check for `claude` CLI availability |
-| `agents/team-lead.md` | Migrated from legacy `gemini -p`/`codex exec` to `invoke_gemini`/`invoke_codex` |
-| `templates/CLAUDE.md` | Invocation section rewritten around the helper; `RESEARCH_GEMINI.md` added to shared-file table |
-| `templates/ops/AGENTS.md` | Documents `invoke_gemini` / `invoke_codex` for new projects |
-| `CLAUDE.md` | Fixed `grep -c` guidance; `RESEARCH_GEMINI.md` added to shared-file table |
-| `README.md` | Invocation docs updated to helper-primary; this changelog |
-| `.claude-plugin/plugin.json` | Removed redundant `agents`/`skills`/`commands` path fields; bumped to 2.4.0 |
-| `docs/index.html` | Hero badge + terminal version bumped to v2.4.0 |
-</details>
-
----
-
-### 2026-04-20 — v2.3.0: Subagent hardening pass (Gemini + Codex docs alignment)
-
-Re-analyzed the [Gemini CLI subagents spec](https://geminicli.com/docs/core/subagents/) and [Codex CLI subagents spec](https://developers.openai.com/codex/subagents) against our current implementation and closed the concrete gaps. Focus: security hardening, invocation-layer parity, and observability — no new features, just making the existing integrations robust against real failure modes.
-
-**Codex per-agent `tools` allowlist** — [`logic_reviewer`](codex-agents/agents.toml) now has `tools = ["read", "grep", "glob"]` (no shell, no write); [`test_writer`](codex-agents/agents.toml) and [`debugger`](codex-agents/agents.toml) get `["read", "grep", "glob", "write", "bash"]`. Defense-in-depth pairs with the existing per-agent `sandbox_mode` — sandbox isolates the filesystem, the allowlist narrows the tool surface.
-
-**Codex nesting caps** — New top-level `[agents]` block in `codex-agents/agents.toml`: `max_depth = 2`, `max_threads = 4`, `job_max_runtime_seconds = 1800`. `logic_reviewer` and `test_writer` explicitly spawn sub-agents for 5+ file scopes — without explicit caps, nesting depth would default to 1 and silently block those spawn paths.
-
-**Codex retry parity** — [`invoke_codex`](scripts/invoke-external.sh) now retries once with a raw prompt on failure, mirroring `invoke_gemini`. Prior asymmetry meant a transient Codex failure killed the pipeline while Gemini kept going.
-
-**Parallel-wait exit-code capture** — [`/review`](commands/review.md) and [`/build`](commands/build.md) now capture per-PID exit codes (`GEMINI_RC`, `CODEX_RC`) and fail-fast when either reviewer died. Previously a silent failure would leave `ops/REVIEW_GEMINI.md` or `ops/REVIEW_CODEX.md` empty — which the [`findings-synthesizer`](agents/findings-synthesizer.md) treated as "no findings."
-
-**Loud failure paths** — `_extract_codex_agent_config` now exits 1 and emits a clear stderr warning instead of silently returning an empty config when Python's TOML parser isn't available. Both `invoke_gemini` and `invoke_codex` now log a warning listing available agents when the requested agent name doesn't resolve (instead of silently falling through to raw mode / session defaults).
-
-**Collision-safe tmp paths** — All output paths switched from `/tmp/gemini_review.txt` to `${TMPDIR:-/tmp}/gemini_review_$$_$(date +%s).txt`. Running `/review` in two tabs no longer clobbers cross-session output. Applied across all seven commands, `scripts/invoke-external.sh` defaults, `CLAUDE.md`, `templates/CLAUDE.md`, and `docs/agent-triforge.md` examples.
-
-**`include_plan_tool = false`** — All three Codex agents disable the Agents SDK plan tool. `logic_reviewer` / `test_writer` / `debugger` are focused executors; the plan tool adds cognitive overhead without value for single-purpose roles. _[Corrected in v3.3.0: `include_plan_tool` was never a Codex key. The per-agent `tools` list and the `[agents]` caps are Triforge-internal declarations carried in the developer instructions (Codex never reads the file; `sandbox_mode` + `approval_policy` are the enforced isolation); Codex's own switch is `tools.update_plan.enabled` (default false since 0.152.0), and the file is deployed as `.codex/triforge-agents.toml`.]_
-
-**macOS coreutils hint** — [`session-start.sh`](hooks/handlers/session-start.sh) emits a one-time warning when neither `timeout` nor `gtimeout` is on PATH; [`CLAUDE.md`](CLAUDE.md) prerequisites now recommend `brew install coreutils` for macOS. Without one of those, `invoke-external.sh` silently ran without timeout enforcement.
-
-**Security model documentation** — New "Security model" section in [`CLAUDE.md`](CLAUDE.md) explains the `approval_policy = "never"` trust model, the defense-in-depth between `sandbox_mode` and the `tools` allowlist, and how `gemini-agents/policies.toml` layers shell-command denylists on top.
-
-<details>
-<summary><strong>Files changed (13 files)</strong></summary>
-
-| File | Change |
-|---|---|
-| `codex-agents/agents.toml` | `[agents]` top-level block (`max_depth`, `max_threads`, `job_max_runtime_seconds`) + per-agent `tools` allowlist + `include_plan_tool = false` _[corrected in v3.3.0 — Triforge-internal declarations; see the note above]_ |
-| `scripts/invoke-external.sh` | Codex retry, loud TOML parser failure, TMPDIR-scoped default output paths, `_list_gemini_agents` + `_list_codex_agents` helpers, unknown-agent warnings |
-| `commands/review.md` | Per-PID wait with fail-fast + TMPDIR paths |
-| `commands/build.md` | Per-PID wait with fail-fast + TMPDIR paths |
-| `commands/plan.md` | TMPDIR paths |
-| `commands/test.md` | TMPDIR paths |
-| `commands/deep-research.md` | TMPDIR paths |
-| `commands/ship.md` | TMPDIR paths |
-| `commands/coordinate.md` | TMPDIR paths |
-| `hooks/handlers/session-start.sh` | One-time `gtimeout` / `timeout` missing warning |
-| `CLAUDE.md` | Security model section + `brew install coreutils` hint + updated parallel-invocation example |
-| `templates/CLAUDE.md` | TMPDIR paths in the legacy `gemini -p` / `codex exec` example |
-| `docs/agent-triforge.md` | TMPDIR paths across all illustrative examples |
-| `.claude-plugin/plugin.json` | Version bump 2.2.0 → 2.3.0 |
-</details>
-
----
-
-### 2026-04-06 — v2.2.0: Opus max effort, reliability patterns, and framework audit
-
-**All agents upgraded to Opus max effort** — All 19 agents now run at `model: opus` + `effort: max` for maximum reasoning quality. The team-lead and lead agent have runtime discretion to downgrade narrow, rubric-following tasks via model + effort override when spawning. (See v2.4.3 for the tiered ladder: `opus`/`xhigh` → `opus`/`high` → `sonnet`/`high`.)
-
-**Forced reflection on retry** — Before any retry, agents must answer: *"What specifically failed? What concrete change will fix it? Am I repeating the same broken approach?"* Applied to the ship-loop Stop hook (`systemMessage`) and wave-orchestration skill. Prevents agents from looping on the same broken approach.
-
-**Same-error kill criteria** — Error fingerprinting tracks recurring failures per executor. If the same error appears 3+ times across retries, the executor is killed and the task reassigned to a fresh agent with anti-pattern context ("Previous executor failed on X — do NOT repeat the same approach"). Added to wave-orchestration skill and team-lead agent.
-
-**Dedicated continuous-reviewer teammate** — New [`continuous-reviewer`](agents/continuous-reviewer.md) agent (19th agent, Opus max, read-only) auto-reviews every completed task during team builds for test/lint/security compliance. Spawned by team-lead at 1:3-4 ratio with builders. The lead only sees green-reviewed code — like a permanent CI gate built into the team.
-
-**Per-task reflection (conditional)** — After task completion, if the task took >3 retries, produced test failures, or modified >5 files, a structured reflection is appended to `ops/MEMORY.md` (surprise, pattern proposal, improvement suggestion). Captures non-obvious learnings while they're fresh.
-
-**Provenance-enhanced institutional memory** — Solution and decision documents now include `sprint_id`, `task_id`, `agent`, `evidence_files`, and `related_decisions` fields. The learnings-researcher agent now filters by tags, status, and follows cross-references between related documents.
-
-**Full framework audit (5th pass)** — 5 parallel reviewer agents + team lead consolidation reviewed all 52 framework components (5 hooks, 16 commands, 12 skills, 19 agents). Found and fixed:
-
-| Category | Issues found | Key fixes |
+| Command | Targets | Produces |
 |---|---|---|
-| Hooks | 1 critical, 3 warnings | Promise tag false-positive in ship-loop.sh, `set -euo pipefail` added to all handlers, atomic state writes |
-| Commands | 1 error, 2 warnings | Phase 1.1 missing from /coordinate, reviewer list cross-references, /quick cross-ref in /review |
-| Skills | Clean (0 issues) | — |
-| Agents | Clean (0 issues) | — |
-| Infrastructure | 7 errors | Agent count 18→19 in 6 files + SVG, GEMINI.md/CODEX.md phantom file references clarified, plugin.json arrays added |
+| [`/cli-watch`](.claude/commands/cli-watch.md) | the eight CLIs + three research tools (`[cli.*]`) | Gap report + adopt/defer ADR + a re-run of [`probe-capabilities.sh`](scripts/probe-capabilities.sh) |
+| [`/repo-watch`](.claude/commands/repo-watch.md) | seven external repos (`[repo.*]`) | Prioritized adopt/defer recommendations (Why / Concrete change / Verification). Recommends only; never implements. |
 
-<details>
-<summary><strong>Files changed</strong></summary>
+The registry is the only thing you edit to add a target: a new `[cli.<name>]` or `[repo.<name>]` block is picked up with no command changes. Targets must be public HTTPS URLs (loopback, private, and link-local addresses are rejected before and after redirects). Fetched pages are treated as untrusted evidence, never as instructions, and a dead or renamed entry is flagged in the report, never dropped silently.
 
-| File | Change |
-|---|---|
-| `agents/*.md` (all 19) | `model: opus` + `effort: max` |
-| `agents/team-lead.md` | Model routing discretion, continuous-reviewer spawning, reflection+kill criteria in failure protocol |
-| `agents/continuous-reviewer.md` | **New** — dedicated per-task reviewer for team builds |
-| `agents/learnings-researcher.md` | Enhanced search: tags, status, cross-references |
-| `skills/wave-orchestration/SKILL.md` | Reflection on retry, same-error kill criteria, per-task reflection, model routing discretion |
-| `skills/knowledge-compounding/SKILL.md` | Provenance fields in solution + decision templates |
-| `hooks/handlers/ship-loop.sh` | Promise tag false-positive fix, reflection in systemMessage |
-| `hooks/handlers/context-monitor.sh` | `set -euo pipefail`, `#!/usr/bin/env bash`, atomic state writes |
-| `hooks/handlers/session-start.sh` | `set -euo pipefail`, `#!/usr/bin/env bash`, quoted variable, pipeline fallback |
-| `hooks/handlers/tool-failure-monitor.sh` | `set -euo pipefail`, `#!/usr/bin/env bash` |
-| `hooks/handlers/pre-compact.sh` | `set -euo pipefail`, `#!/usr/bin/env bash` |
-| `.claude-plugin/plugin.json` | Agent count 19, version 2.2.0, agents/skills/commands path declarations |
-| `commands/coordinate.md` | Phase 1.1 added |
-| `commands/ship.md` | Phase ordering fixed (1.1 before 1.5) |
-| `commands/review.md` | /quick cross-reference note |
-| `docs/agent-triforge.md` | Agent count 19, GEMINI.md/CODEX.md reference fix, hook count fix |
-| `docs/index.html` | Agent count 19 (3 locations) |
-| `docs/images/hero-banner.svg` | Agent count 19 |
-| `CLAUDE.md` | Agent count 19, Opus max effort, phase numbering (1a/1b/1.1) |
-| `templates/CLAUDE.md` | Agent count 19, Opus max effort, phase numbering, scope-cutting reference |
-| `README.md` | Agent count 19 (3 locations), audit heading clarified, this changelog |
-</details>
+Run `/cli-watch` or `/repo-watch` any time; the report and ADR land in [`ops/research/`](ops/research/) and [`ops/decisions/`](ops/decisions/).
 
-### 2026-04-02 — Reliability hardening and tactical enhancements
-
-Informed by a deep comparative analysis against the [official Codex plugin](https://github.com/openai/codex-plugin-cc) and [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode), this update addresses operational reliability gaps and adds targeted capabilities identified through triaged review (P1/P2 findings only, no architectural changes).
-
-**Subprocess timeouts** — All 7 `wait $PID` calls for Gemini/Codex now use a watchdog pattern: a background timer sends SIGTERM after timeout (600s for review/build/plan, 900s for TDD test writing), with SIGKILL fallback after 5s grace. Normal runs are completely undisturbed — the watchdog is silently killed when the process finishes. Previously, a hung `codex exec` or `gemini -p` call would block the entire pipeline indefinitely.
-
-**Circuit breaker for debugging** — The [`systematic-debugging`](skills/systematic-debugging/SKILL.md) skill now enforces a 3-attempt ceiling per issue. If the same failing test or error recurs after 3 consecutive fix attempts, the agent stops and produces a structured escalation report (error signature, attempts summary, assumption ledger, hypothesis, suggested next step) instead of looping. The ship-loop has a session-level ceiling, but this catches per-issue repetition within a session.
-
-**Git trailer conventions** — [`/wrap`](commands/wrap.md) and the [`CLAUDE.md` template](templates/CLAUDE.md) now define structured commit trailers (`Constraint`, `Rejected`, `Confidence`, `Scope-risk`, `Not-tested`) to embed decision context directly in git history. Previously, decision rationale lived only in `ops/decisions/` files, separated from the code.
-
-**Pre-plan ambiguity resolution (Phase 1.1)** — [`/plan`](commands/plan.md) and [`/ship`](commands/ship.md) now surface the 3 most critical unverified assumptions about the goal before building, asking the user to confirm or correct. Skipped for unambiguous goals. Previously, ambiguous specs were caught by the plan-checker after a full planning pass — this catches them earlier.
-
-**PreCompact hook** — New [`pre-compact.sh`](hooks/handlers/pre-compact.sh) handler auto-checkpoints `ops/STATE.md` with task status counts and current phase before Claude Code compacts the context window. Previously, if compaction hit mid-sprint without a `/wrap`, the outer loop could restart from stale state.
-
-**PostToolUse failure tracker** — New [`tool-failure-monitor.sh`](hooks/handlers/tool-failure-monitor.sh) handler tracks tool failures in `.claude/tool-failures.local.md` and warns at 5 consecutive or 10 total failures per session. Registered under `PostToolUse` and filters on `tool_response.is_error`. Previously, tool failures during autonomous runs were silent.
-
-**Completion notifications** — [`scripts/coordinate.sh`](scripts/coordinate.sh) now sends macOS (`osascript`), Linux (`notify-send`), or webhook notifications on sprint completion and max-iteration exit. Gated on `NOTIFY_WEBHOOK_URL` env var for webhook delivery. Previously, long autonomous runs required manual polling.
-
-<details>
-<summary><strong>Files changed (14 files, 250 insertions)</strong></summary>
-
-| File | Change |
-|---|---|
-| `commands/review.md` | Watchdog timeout (600s) on Gemini + Codex wait |
-| `commands/test.md` | Watchdog timeout (900s) on Codex wait |
-| `commands/build.md` | Watchdog timeout (600s) on Gemini + Codex wait |
-| `commands/coordinate.md` | Watchdog timeout (600s) on Gemini wait |
-| `commands/ship.md` | Watchdog timeout (600s) on Gemini wait + Phase 1.1 ambiguity check |
-| `commands/plan.md` | Watchdog timeout (600s) on Gemini wait + Phase 1.1 ambiguity check |
-| `commands/deep-research.md` | Watchdog timeout (600s) on Gemini wait |
-| `commands/wrap.md` | Step 7: git trailer conventions |
-| `skills/systematic-debugging/SKILL.md` | Circuit breaker (3-attempt ceiling) |
-| `templates/CLAUDE.md` | Git trailer conventions section |
-| `hooks/hooks.json` | PostToolUse failure-tracker + PreCompact hook entries |
-| `hooks/handlers/tool-failure-monitor.sh` | **New** — failure tracking handler |
-| `hooks/handlers/pre-compact.sh` | **New** — STATE.md auto-checkpoint handler |
-| `scripts/coordinate.sh` | notify() function + completion/failure notification calls |
-</details>
-
----
-
-### 2026-03-31 — v2.0.0: Claude Code plugin conversion
-
-The framework was converted from a `git clone` + manual copy installation to a **Claude Code plugin**. This is a breaking change in how you install and update the framework.
-
-- **Install:** `claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge`, then `claude plugin install agent-triforge@agent-triforge` (the pre-3.3.0 `claude plugin add <url>` form is not a Claude Code command any more — plugins install from a marketplace, and the repository now ships its own single-plugin marketplace manifest)
-- **Update:** `claude plugin update agent-triforge@agent-triforge`
-- All components moved to root level (`agents/`, `skills/`, `commands/`, `hooks/`)
-- Plugin manifest at `.claude-plugin/plugin.json` (v2.0.0)
-- Hook registration via `hooks/hooks.json` with `${CLAUDE_PLUGIN_ROOT}` paths
-- Root `settings.json` for env vars (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`)
-- Session-start hook bootstraps `ops/` directory + copies skeleton templates on first run
-- CLAUDE.md template provided at `templates/CLAUDE.md` for user projects
-- All skill injection paths use `${CLAUDE_PLUGIN_ROOT}/skills/` (8 files updated)
-- `docs/agent-triforge.md` updated: plugin layout, hooks.json config, removed stale settings block
-- Solution docs updated for plugin hook system
-
-### 2026-03-31 — Four-pass audit and Blueprint alignment
-
-Four full audit passes (**20 parallel agents** + manual 11-point verification) reviewed all 49 framework components (5 hooks, 16 commands, 12 skills, 19 agents). Each pass caught issues the previous missed — converging to zero remaining defects.
-
-| Pass | Found | Fixed |
-|---|---|---|
-| 1st (5 agents) | 4 critical, 10 high, ~20 medium | Hooks stdin parsing, README config, coordinate.md guard, all high+medium |
-| 2nd (5 agents) | 1 critical, 8 high, 4 medium | JSON injection, PID captures, path consistency, reviewer coverage |
-| 3rd (5 agents) | 3 critical, 7 high, 6 medium | mkdir .claude in hooks, stale docs, deep-research PID, ops refs |
-| 4th (5 agents + manual) | 1 high | ship-loop.sh mkdir guard (last hook missing it) |
-
-<details>
-<summary><strong>Critical fixes</strong></summary>
-
-- **Hooks were completely non-functional** — both `ship-loop.sh` and `context-monitor.sh` read environment variables (`$CLAUDE_STOP_ASSISTANT_MESSAGE`, `$CLAUDE_TOOL_NAME`) that Claude Code does not set. Hook data arrives via stdin JSON. Both hooks now parse stdin correctly. This means completion detection and analysis paralysis detection were silently broken since the framework's creation.
-- **README shipped broken hook config** — the Getting Started section used the flat `{ "command", "timeout" }` format that Claude Code rejects. Migrated to the correct `{ "matcher", "hooks": [{ "type": "command", "command" }] }` format.
-- **`/coordinate` ran full sprints unguarded** — the command executed Phase 0–6 without activating the ship-loop Stop hook, so context exhaustion could silently kill mid-sprint. Now creates the state file and emits `<promise>DONE</promise>` on completion.
-- **Ship-loop JSON injection** (found in second pass) — the heredoc embedded raw `$PROMPT_TEXT` into JSON output. Any goal containing double quotes or newlines produced malformed JSON, silently breaking the Stop hook. Now uses `python3 json.dumps()` for safe encoding.
-</details>
-
-<details>
-<summary><strong>Ship-loop rewrite (Blueprint alignment)</strong></summary>
-
-The Stop hook was rewritten to match the [Claude Code Blueprint](https://github.com/Ninety2UA/claude-code-blueprint)'s architecture:
-
-| Before | After |
-|---|---|
-| Plain text output | JSON `{decision, reason, systemMessage}` |
-| No session isolation | Session-isolated via `session_id` matching |
-| Basic stdin grep for promise | Transcript-based JSONL promise detection |
-| `sed -i.bak` state updates | Atomic temp file + `mv` |
-| No input validation | Integer validation + `set -euo pipefail` |
-| Simple 2-field state file | Rich frontmatter: `active`, `session_id`, `iteration`, `max_iterations`, `completion_promise` + prompt body |
-| Raw shell variable in JSON | `python3 json.dumps()` for safe JSON encoding |
-</details>
-
-<details>
-<summary><strong>High-severity fixes</strong></summary>
-
-- **`session-start.sh`** now cleans stale `context-monitor.local.md` on startup (was documented but never implemented)
-- **`build.md`** replaced hardcoded `src/auth/` paths with `<scope>` placeholders in agent team examples
-- **`deep-research.md`** Gemini invocation now injects `codebase-mapping` skill (was the only Gemini call without it)
-- **`review.md`** added `wait $GEMINI_PID $CODEX_PID` before synthesis (was racing on incomplete review files)
-- **`test.md`** Codex invocation now uses proper `> /tmp/... 2>&1 &` redirect + PID capture pattern
-- **`security-sentinel.md`** removed unnecessary Bash tool (least-privilege for static analysis)
-- **`team-lead.md`** added structured output format (was the only agent without one)
-- **`wave-orchestration`** skill flagged team mode as Claude-specific + experimental
-- **`review.md --full`** now includes `architecture-strategist` (was designed for Phase 3 but never wired in)
-- **`build.md`** agent team bash block now captures PIDs and waits (was fire-and-forget)
-- **`ship.md`**, **`plan.md`**, **`coordinate.md`** Phase 0 Gemini invocations now capture `GEMINI_PID` and `wait` (were backgrounded with no wait)
-- **`coordinate.md`** Phase 3 now includes all 5 review agents (was missing `convention-enforcer` and `architecture-strategist`)
-- **`pr-comment-resolver.md`** now checks `gh auth status` before fetching PR comments (was a hard failure if `gh` CLI unavailable)
-- **All 3 hook scripts** now have `mkdir -p .claude` guards for project-local state files (`.claude/` dir no longer exists after plugin migration)
-- **`deep-research.md`** added `GEMINI_PID` capture + `wait` for background Gemini process
-- **`docs/agent-triforge.md`** rewrote repo tree + settings section for plugin layout (was still showing old structure)
-- **`ops/solutions/settings-json`** updated for plugin `hooks/hooks.json` approach
-- **Stale comment cleanup** in hook script headers (referenced old `.claude/settings.json`)
-</details>
-
-<details>
-<summary><strong>Medium-severity fixes</strong></summary>
-
-- Fixed missing `ops/` path prefixes across `ship.md`, `plan.md`, `quick.md`, `coordinate.md`
-- `plan-checker.md` now accepts "Claude subagent" as a valid assignment category
-- `git-history-analyzer.md` replaced interactive `git bisect` with non-interactive `git log -S` alternative
-- `deployment-verifier.md` added explicit "never execute rollbacks" safety rule
-- `session-start.sh` replaced `echo -e` with POSIX-portable `printf '%b\n'`
-- Fixed bare `ops/` path prefixes in `debug.md`, `review.md`, `coordinate.md`
-- `status.md` now lists all 16 commands (was missing `/coordinate`, `/analyze`, `/resolve-pr`)
-- `coordinate.md` Phase 5 now specifies max 3 fix cycles (was open-ended)
-- Standardized archive path wording to `[today's date]` across `ship.md` and `coordinate.md`
-</details>
-
-Documented solutions: [`ops/solutions/2026-03-31-hooks-stdin-json-parsing.md`](ops/solutions/2026-03-31-hooks-stdin-json-parsing.md)
-
-### Verification
-
-The framework has been validated through:
-- **20 parallel audit agents** across 4 passes (hooks, commands, skills, agents, infrastructure)
-- **Manual 11-point verification**: bash syntax, JSON validity, stale path scans, file counts, skill injection paths, executable permissions, mkdir guards, stdin parsing, agent cross-references, plugin hook paths, state file template compatibility
-- All checks pass. Runtime behavior (plugin installation, hook firing, `${CLAUDE_PLUGIN_ROOT}` expansion) requires live testing via `claude --plugin-dir .`
-
----
+To run either monthly and headless, schedule it as a Claude Code cloud Routine: `/schedule`, the prompt `/cli-watch` (or `/repo-watch`), a monthly cron (Routines run at a minimum 1-hour interval). A scheduled run preflights its environment and picks its delivery. It commits the report to a branch and opens a PR when a pushable checkout exists. With no pushable checkout it falls back to the Routine's output artifact with landing instructions. When vendor auth is absent it opens a draft PR with the auth-dependent probes marked pending. A Routine missing a required binary, auth or research tool emits a diagnostic artifact naming the gap, never a silent success.
 
 ## License
 
