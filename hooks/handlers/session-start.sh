@@ -255,37 +255,37 @@ fi
 # given up on after <seconds>: a SIGTERM, then a SIGKILL 2 s later, under the
 # timeout binary (-k 2s) when there is one, else the watchdog, as _instr_py
 # and _instr_watchdog in scripts/lib/instructions.sh run them (their comments
-# say why each step is there), so the bound stops the command's process group
-# and what is left of it; the answer goes to <dir>/out (watchdog only: a
-# private temp dir from _ss_private_tmp, B5, G2, removed here).
+# say why each step is there; _ss_sweep copies _instr_sweep), so the command's
+# process group is stopped at the bound, and what is left of it once the
+# command returns before the bound; the answer goes to <dir>/out (watchdog
+# only: a private temp dir from _ss_private_tmp, B5, G2, removed here).
 _ss_bounded() {
-  local SECS="$1" OUT_DIR="$2" CMD_PID DOG_PID PL N=0 PG='setpgrp(0, 0); exec { $ARGV[0] } @ARGV; exit 127'
+  local SECS="$1" OUT_DIR="$2" CMD_PID DOG_PID PL PG='setpgrp(0, 0); exec { $ARGV[0] } @ARGV; exit 127'
   shift 2
   if [ -n "$TIMEOUT_BIN" ]; then
     "$TIMEOUT_BIN" -k 2s "${SECS}s" "$@" </dev/null 2>/dev/null & CMD_PID=$!
-    wait "$CMD_PID" 2>/dev/null || N=$?
-    case "$N" in 124|137) N=0; while kill -0 -- -"$CMD_PID" 2>/dev/null; do
-      case "$N" in 0) kill -- -"$CMD_PID" 2>/dev/null || true ;; 20) kill -9 -- -"$CMD_PID" 2>/dev/null || true; break ;; esac
-      sleep 0.1; N=$((N + 1)); done ;; esac
-    return 0
+    wait "$CMD_PID" 2>/dev/null || true; _ss_sweep "$CMD_PID"; return 0
   fi
   PL=$(command -v perl 2>/dev/null || true)
-  PERL_BADLANG=0 ${PL:+"$PL"} ${PL:+-e} ${PL:+"$PG"} ${PL:+--} "$@" </dev/null >"$OUT_DIR/out" 2>/dev/null &
-  CMD_PID=$!
+  PERL_BADLANG=0 ${PL:+"$PL"} ${PL:+-e} ${PL:+"$PG"} ${PL:+--} "$@" </dev/null >"$OUT_DIR/out" 2>/dev/null & CMD_PID=$!
   ( R=""; trap 'R=1' TERM; sleep "$SECS" &
     trap 'kill -9 "$!" 2>/dev/null || true; exit 0' TERM
     if [ -n "$R" ]; then kill -9 "$!" 2>/dev/null || true; exit 0; fi
-    wait "$!" || exit 0; trap 'R=1' TERM; N=0; kill -- -"$CMD_PID" 2>/dev/null || kill "$CMD_PID" 2>/dev/null || exit 0
-    while { kill -0 -- -"$CMD_PID" || { [ -z "$R" ] && kill -0 "$CMD_PID"; }; } 2>/dev/null; do
-      if [ "$N" -ge 20 ]; then kill -9 -- -"$CMD_PID" 2>/dev/null || { [ -z "$R" ] && kill -9 "$CMD_PID" 2>/dev/null; } || true; exit 0; fi
-      sleep 0.1; N=$((N + 1)); done
+    wait "$!" || exit 0; trap 'R=1' TERM; _ss_sweep "$CMD_PID" "$CMD_PID"
   ) </dev/null >/dev/null 2>&1 &
   DOG_PID=$!
   wait "$CMD_PID" 2>/dev/null || true
-  kill "$DOG_PID" 2>/dev/null || true
-  wait "$DOG_PID" 2>/dev/null || true
+  kill "$DOG_PID" 2>/dev/null || true; wait "$DOG_PID" 2>/dev/null || true
+  if [ -n "$PL" ]; then _ss_sweep "$CMD_PID"; fi
   cat "$OUT_DIR/out" 2>/dev/null || true
   rm -rf "$OUT_DIR"
+}
+_ss_sweep() {
+  local N=0
+  while { kill -0 -- -"$1" || { [ -n "${2:-}" ] && [ -z "${R:-}" ] && kill -0 "$2"; }; } 2>/dev/null; do
+    case "$N" in 0) kill -- -"$1" 2>/dev/null || { [ -n "${2:-}" ] && [ -z "${R:-}" ] && kill "$2" 2>/dev/null; } || true ;;
+      20) kill -9 -- -"$1" 2>/dev/null || { [ -n "${2:-}" ] && [ -z "${R:-}" ] && kill -9 "$2" 2>/dev/null; } || true; return 0 ;; esac
+    sleep 0.1; N=$((N + 1)); done
 }
 
 # _ss_cli_version <seconds> <binary> — the first line the binary prints for

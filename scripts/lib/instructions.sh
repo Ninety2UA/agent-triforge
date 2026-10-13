@@ -2600,6 +2600,33 @@ _instr_tmp_ok() {
   [ -z "$W" ]
 }
 
+# _instr_sweep <pgid> [pid] — stop what is left of process group <pgid>, the
+# pid of a command this file started in the background (timeout, or perl's
+# setpgrp, makes it the leader of a group of its own; never the caller's
+# group): a SIGTERM, then a SIGKILL 2 s later if a member is still there; it
+# returns once the group is empty, at once when it already is. Each signal
+# goes out only right after a check that a member still carries the group's
+# id (members keep the id from being reused). With
+# <pid>, the watchdog's own sweep, that pid alone is checked and signalled
+# too, but only while R is empty: the watchdog's TERM trap sets R once the
+# call has reaped the pid. A function, not a subshell, so a TERM the
+# watchdog takes during the sweep sets the R it reads. sleep is looked up on
+# PATH (each caller appends /usr/bin and /bin).
+_instr_sweep() {
+  local N=0
+  while { kill -0 -- -"$1" || { [ -n "${2:-}" ] && [ -z "${R:-}" ] && kill -0 "$2"; }; } 2>/dev/null; do
+    case "$N" in
+      0) kill -- -"$1" 2>/dev/null || { [ -n "${2:-}" ] && [ -z "${R:-}" ] && kill "$2" 2>/dev/null; } || true ;;
+      20)
+        kill -9 -- -"$1" 2>/dev/null || { [ -n "${2:-}" ] && [ -z "${R:-}" ] && kill -9 "$2" 2>/dev/null; } || true
+        return 0
+        ;;
+    esac
+    sleep 0.1
+    N=$((N + 1))
+  done
+}
+
 # _instr_watchdog <dir> <seconds> <program> <op> <helper> <args...> — python3
 # -c <program> <op> <helper> <args...> where neither timeout nor gtimeout is
 # on PATH, given up on after <seconds>: a SIGTERM, then a SIGKILL 2 s later.
@@ -2623,13 +2650,16 @@ _instr_tmp_ok() {
 # first SIGKILLs its own sleep, so none outlives the call (a TERM could land
 # before the sleep's exec, where the forked copy of the trap would swallow
 # it); its TERM trap starts as a flag, so a TERM before the sleep exists is
-# not lost, and a sleep that fails signals nothing. At the bound it TERMs the
-# group, checks every 0.1 s whether a member is left, and KILLs the group
-# after 2 s if one is; the call waits for it, so nothing of python3's group
-# outlives the call either. A group signal goes out only right after a check
-# that a member still carries the group's id (members keep the id from being
-# reused), and python3's pid alone is signalled only until the call has
-# reaped it (the call's TERM tells the watchdog so). Each `wait` swallows
+# not lost, and a sleep that fails signals nothing. At the bound it sweeps
+# the group and python3's pid (_instr_sweep: a TERM, then a KILL 2 s later
+# if a member is left); the call waits for it, so nothing of python3's group
+# outlives the call either. python3's pid alone is signalled only until the
+# call has reaped it (the call's TERM tells the watchdog so). Once the
+# watchdog is gone, the call sweeps python3's group itself when perl made it
+# (the group alone: the pid is reaped by then), so a child that python3
+# forked and left behind by returning before the bound is stopped too, and
+# the two files hold their last output before they are printed; without
+# perl there is no group of python3's own to sweep. Each `wait` swallows
 # bash's "Terminated" or "Killed" line. rm, cat, perl and sleep are looked up
 # on PATH, then in /usr/bin and /bin. rc 69, nothing run, with _instr_py's
 # no-private-temp-dir line, when the two files cannot be opened in <dir>.
@@ -2658,16 +2688,7 @@ _instr_watchdog() (
     fi
     wait "$!" || exit 0
     trap 'R=1' TERM
-    kill -- -"$PID" 2>/dev/null || kill "$PID" 2>/dev/null || exit 0
-    N=0
-    while { kill -0 -- -"$PID" || { [ -z "$R" ] && kill -0 "$PID"; }; } 2>/dev/null; do
-      if [ "$N" -ge 20 ]; then
-        kill -9 -- -"$PID" 2>/dev/null || { [ -z "$R" ] && kill -9 "$PID" 2>/dev/null; } || true
-        exit 0
-      fi
-      sleep 0.1
-      N=$((N + 1))
-    done
+    _instr_sweep "$PID" "$PID"
     exit 0
   ) </dev/null >/dev/null 2>&1 4>&- 5<&- 6>&- 7<&- &
   DOG=$!
@@ -2675,6 +2696,9 @@ _instr_watchdog() (
   wait "$PID" 2>/dev/null || RC=$?
   kill "$DOG" 2>/dev/null || true
   wait "$DOG" 2>/dev/null || true
+  if [ -n "$PL" ]; then
+    _instr_sweep "$PID"
+  fi
   cat <&5
   cat <&7 >&2
   exit "$RC"
@@ -2698,13 +2722,14 @@ _instr_watchdog() (
 # file behind (python runs no cleanup for either); its reading is the plan
 # run's, linear in the files' size. The timeout binary runs in the
 # background, stdin /dev/null, so its pid is known: GNU timeout makes a
-# process group of its own, that pid, and runs python3 in it. It never KILLs
-# a child that ignores SIGTERM once the SIGTERM has ended python3, and such a
-# child would hold the caller's stdout; so once timeout has given up (rc 124
-# or 137), what is left of its group gets a TERM, then a KILL 2 s later, each
-# right after a check that a member still holds the group's id, as
-# _instr_watchdog does; the call returns once the group is empty. `wait`
-# swallows the line bash prints when the SIGKILL ends timeout too.
+# process group of its own, that pid, and runs python3 in it. It waits for
+# python3 alone and never KILLs a child that ignores SIGTERM once the SIGTERM
+# has ended python3, so a child python3 forked would hold the caller's stdout
+# past the bound, or past python3's own exit before it; so once timeout
+# returns, whatever ended it, what is left of its group gets a TERM, then a
+# KILL 2 s later (_instr_sweep, as _instr_watchdog does; an empty group costs
+# one check); the call returns once the group is empty. `wait` swallows the
+# line bash prints when the SIGKILL ends timeout too.
 _instr_py() {
   local MODE=$1 P SECS="" TELL="" T D TP RC=0
   shift
@@ -2730,20 +2755,8 @@ ${_INSTR_PY}"
     "$T" -k 2s "${SECS}s" python3 -c "$P" "$@" </dev/null &
     TP=$!
     wait "$TP" 2>/dev/null || RC=$?
-    case "$RC" in
-      124|137)
-        ( PATH="${PATH:+$PATH:}/usr/bin:/bin"
-          N=0
-          while kill -0 -- -"$TP" 2>/dev/null; do
-            case "$N" in
-              0) kill -- -"$TP" 2>/dev/null || true ;;
-              20) kill -9 -- -"$TP" 2>/dev/null || true; exit 0 ;;
-            esac
-            sleep 0.1
-            N=$((N + 1))
-          done )
-        ;;
-    esac
+    ( PATH="${PATH:+$PATH:}/usr/bin:/bin"
+      _instr_sweep "$TP" )
   else
     D=$(PATH="${PATH:+$PATH:}/usr/bin:/bin"
       for T in "${TMPDIR:-/tmp}" /tmp; do

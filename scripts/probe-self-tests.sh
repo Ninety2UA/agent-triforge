@@ -1219,6 +1219,14 @@ fi
 #          SIGTERM ended, and the child holds the caller's stdout. The child
 #          holds it for 40 s, past the harness timeout (20 s), so a bound
 #          that stops the launcher alone comes back at 20 s or later and fails
+#   forkexit (4.1 review, #6) as forkwatch, but the launcher prints its row
+#          and exits 0 as soon as the child ignores SIGTERM, long before a
+#          30 s bound, leaving the child behind: the call returns the row and
+#          rc 0 in under 15 s with the child gone, under the watchdog and the
+#          timeout binary (skipped, and said so, without one). The group sweep
+#          runs after every exit, not only at the bound: without it the
+#          timeout binary's call waits the child's 40 s out on stdout, and the
+#          watchdog's leaves it running
 #   perllocale (4.1) the library alone under bash and zsh with no timeout
 #          binary and LANG and LC_ALL set to a locale the system lacks: the
 #          pass prints its rows and rc 0, no "perl: warning" line
@@ -1237,6 +1245,11 @@ fi
 #          it: the call returns in under 15 s with the command and its child
 #          (40 s, as in forkwatch) both gone, under the watchdog and the
 #          timeout binary (skipped, and said so, without one)
+#   boundexit (4.1 review, #6) as boundfork, but the command prints its
+#          answer and exits as soon as the child ignores SIGTERM, under a
+#          30 s bound, leaving the child behind: the answer and rc 0 in under
+#          15 s, the child gone, under the watchdog and the timeout binary
+#          (skipped, and said so, without one)
 _S8="${WORK}/self08"
 mkdir -p "$_S8/proj" "$_S8/bin" "$_S8/home"
 cat > "$_S8/bin/agy" <<'EOF'
@@ -1536,11 +1549,12 @@ _s8_sane "unset-root" "$_O"
 printf '%s\n' "$_O" | grep -Fq "WARNING: the Triforge helper did not load (CLAUDE_PLUGIN_ROOT is unset)" || _S8_FAIL="$_S8_FAIL unset-root-no-helper-notice"
 _s8_has '^Multi-agent framework ready\.$' || _S8_FAIL="$_S8_FAIL unset-root-orientation-missing"
 # killgrace (round 1, #6): _ss_bounded as the hook ships it (its text, from
-# `_ss_bounded() {` to the closing brace at column 0), evaluated in a
-# background subshell under an outer 25 s deadline, so a call that never
-# returns cannot hang the gate. The stub writes its pid and prints nothing.
-_S8_BOUNDED=$(sed -n '/^_ss_bounded() {$/,/^}$/p' "$REPO_ROOT/hooks/handlers/session-start.sh")
-[ -n "$_S8_BOUNDED" ] || _S8_FAIL="$_S8_FAIL killgrace-no-_ss_bounded-in-the-hook"
+# `_ss_bounded() {` to the closing brace at column 0, with _ss_sweep's, which
+# it calls since the 4.1 review), evaluated in a background subshell under an
+# outer 25 s deadline, so a call that never returns cannot hang the gate. The
+# stub writes its pid and prints nothing.
+_S8_BOUNDED=$(sed -n -e '/^_ss_sweep() {$/,/^}$/p' -e '/^_ss_bounded() {$/,/^}$/p' "$REPO_ROOT/hooks/handlers/session-start.sh")
+printf '%s\n' "$_S8_BOUNDED" | grep -q '^_ss_bounded() {$' || _S8_FAIL="$_S8_FAIL killgrace-no-_ss_bounded-in-the-hook"
 mkdir -p "$_S8/deaf"
 printf '#!/bin/sh\n# probe stub (SELF-08): a claude that ignores SIGTERM and never answers; writes its pid to $1 (no $1: exits, the warm-up run)\n[ -n "${1:-}" ] || exit 0\necho $$ > "$1"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S8/deaf/claude"
 chmod +x "$_S8/deaf/claude"
@@ -1593,6 +1607,9 @@ for _s8_f in _ss_tmp_ok _ss_claude_private _ss_private_tmp _ss_bounded _ss_cli_v
   _S8_VFN="${_S8_VFN}${_S8_T}
 "
 done
+# _ss_sweep, which _ss_bounded calls (4.1 review)
+_S8_VFN="${_S8_VFN}$(sed -n '/^_ss_sweep() {$/,/^}$/p' "$REPO_ROOT/hooks/handlers/session-start.sh")
+"
 unset _s8_f _S8_T
 mkdir -p "$_S8/vstub"
 printf '#!/bin/sh\n# probe stub (SELF-08 versiongrace): an optional CLI that ignores SIGTERM and never answers; logs its flag to $S8_VLOG, its pid to $S8_VLOG.pid (no flag: exits, the warm-up run)\n[ -n "${1:-}" ] || exit 0\necho "$1" >> "$S8_VLOG"\necho $$ >> "$S8_VLOG.pid"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S8/vstub/deaf"
@@ -1934,6 +1951,48 @@ for _s8_sh in $_S8_WSH; do
     _s8_gone "${_s8_l}-child" "$_S8/watch/fork/pid.child"
   done
 done
+# forkexit (4.1 review, #6): the group sweep runs after every exit of the
+# command, not only at the bound. $_S8/watch/fexit holds a python3 launcher and
+# dirname: the launcher prints a project no-import row, forks a child that
+# ignores SIGTERM and holds stdout for 40 s, and exits 0 as soon as the child
+# ignores SIGTERM (so the sweep's SIGKILL is what ends it), long before the
+# 30 s bound. The call returns the row and rc 0 in under 15 s (the 2 s
+# SIGKILL grace, and room for a loaded host) with the child gone, under the
+# watchdog and the timeout binary. A call that skips the sweep waits the
+# child's 40 s out on stdout under the timeout binary, and leaves it running
+# under the watchdog
+mkdir -p "$_S8/watch/fexit"
+{ cat <<'EOF'
+#!/bin/sh
+# probe stub (SELF-08 forkexit): for the pass, a launcher that prints a project no-import row, forks a child ignoring SIGTERM for $S8_CSECS s (its pid in $S8_FPID.child, written once it ignores SIGTERM) and exits 0 as soon as that pid is there (its own pid in $S8_FPID); the real python3 otherwise
+if [ "${3:-}" = detect ] && [ "${4:-}" = instruction_files_detect ]; then
+  printf 'CLAUDE.md\tproject\tno-import,user-owned\t%s/CLAUDE.md\t@AGENTS.md\n' "$PWD"
+  /bin/sh -c 'trap "" TERM; echo $$ > "$S8_FPID.child"; exec /bin/sleep "${S8_CSECS:-60}"' &
+  echo $$ > "$S8_FPID"
+  N=0
+  while [ ! -s "$S8_FPID.child" ] && [ "$N" -lt 50 ]; do /bin/sleep 0.1; N=$((N + 1)); done
+  exit 0
+fi
+EOF
+  printf 'exec %s "$@"\n' "$_S8_PY"; } > "$_S8/watch/fexit/python3"
+chmod +x "$_S8/watch/fexit/python3"
+ln -s "$(command -v dirname)" "$_S8/watch/fexit/dirname" 2>/dev/null || true
+_self_warm "$_S8/watch/fexit/python3" -c pass
+for _s8_sh in $_S8_WSH; do
+  for _s8_c in $_s8_fcases; do
+    _s8_l="forkexit-${_s8_sh}-${_s8_c}"
+    _s8_pp="$_S8/watch/fexit"
+    if [ "$_s8_c" = timeout ]; then _s8_pp="$_S8/watch/fexit:$PATH"; fi
+    rm -f "$_S8/watch/fexit/pid" "$_S8/watch/fexit/pid.child"
+    _S8_T0=$(date +%s)
+    _O=$(_s8_lib "$_s8_sh" "$_s8_pp" '_INSTR_SECS=30 instruction_files_detect' S8_FPID="$_S8/watch/fexit/pid" S8_CSECS=40)
+    _S8_T=$(( $(date +%s) - _S8_T0 ))
+    printf '%s\n' "$_O" | grep -q "$_S8_WROW" && _s8_has '^rc=0$' || _S8_FAIL="$_S8_FAIL ${_s8_l}-answer($(printf '%s' "$_O" | tr '\n' ' ' | cut -c1-80))"
+    [ "$_S8_T" -lt 15 ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-slow(${_S8_T}s)"
+    _s8_gone "$_s8_l" "$_S8/watch/fexit/pid"
+    _s8_gone "${_s8_l}-child" "$_S8/watch/fexit/pid.child"
+  done
+done
 # perllocale (4.1): under a locale the system lacks (LANG and LC_ALL
 # xx_XX.bogus), perl, which starts python3 for the watchdog, adds no warning to
 # the caller's stderr: the pass prints its rows and rc 0, no perl line
@@ -2019,13 +2078,13 @@ exec /bin/sleep 60
 EOF
   chmod +x "$_S8/bsl/fork"
   _self_warm "$_S8/bsl/fork"
-  _s8_bfork() { # _s8_bfork <bash|zsh> <pid file> [timeout binary] — the hook's _ss_bounded, a 1 s bound, on the fork stub, under the timeout binary when one is given, else the watchdog (in an output dir of its own); then "rc=<n>"
+  _s8_bfork() { # _s8_bfork <bash|zsh> <pid file> [timeout binary] [stub] [bound] — the hook's _ss_bounded, a <bound> s bound (default 1), on <stub> (default the fork stub), under the timeout binary when one is given, else the watchdog (in an output dir of its own); then "rc=<n>"
     local D="" SC='set -eu; TIMEOUT_BIN=$S8_TB; eval "$1"; shift; R=0; _ss_bounded "$@" || R=$?; echo "rc=$R"'
     if [ -z "${3:-}" ]; then D=$(mktemp -d "$_S8/bsl/out.XXXXXX") || return 0; fi
     if [ "$1" = zsh ]; then
-      env S8_TB="${3:-}" S8_CSECS=40 ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/zsh -fc "$SC" _ "$_S8_BOUNDED" 1 "$D" "$_S8/bsl/fork" "$2" 2>&1
+      env S8_TB="${3:-}" S8_CSECS=40 ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/zsh -fc "$SC" _ "$_S8_BOUNDED" "${5:-1}" "$D" "${4:-$_S8/bsl/fork}" "$2" 2>&1
     else
-      env S8_TB="${3:-}" S8_CSECS=40 ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/bash -c "$SC" _ "$_S8_BOUNDED" 1 "$D" "$_S8/bsl/fork" "$2" 2>&1
+      env S8_TB="${3:-}" S8_CSECS=40 ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/bash -c "$SC" _ "$_S8_BOUNDED" "${5:-1}" "$D" "${4:-$_S8/bsl/fork}" "$2" 2>&1
     fi
   }
   for _s8_sh in $_S8_WSH; do
@@ -2043,12 +2102,45 @@ EOF
       _s8_gone "${_s8_l}-child" "$_S8/bsl/fpid.child"
     done
   done
+  # boundexit (4.1 review, #6): a command that prints its answer, forks a
+  # child ignoring SIGTERM and holding stdout for 40 s, and exits as soon as
+  # the child ignores SIGTERM, long before a 30 s bound: the answer and rc 0
+  # within 15 s, the child gone, under the watchdog and the timeout binary
+  cat > "$_S8/bsl/forkexit" <<'EOF'
+#!/bin/sh
+# probe stub (SELF-08 boundexit): prints its answer, forks a child that ignores SIGTERM for $S8_CSECS s (its pid in $1.child, written once it ignores SIGTERM) and exits as soon as that pid is there (its own pid in $1); no $1: exits, the warm-up run
+[ -n "${1:-}" ] || exit 0
+/bin/sh -c 'trap "" TERM; echo $$ > "$1.child"; exec /bin/sleep "${S8_CSECS:-60}"' _ "$1" &
+echo $$ > "$1"
+echo answered
+N=0
+while [ ! -s "$1.child" ] && [ "$N" -lt 50 ]; do /bin/sleep 0.1; N=$((N + 1)); done
+exit 0
+EOF
+  chmod +x "$_S8/bsl/forkexit"
+  _self_warm "$_S8/bsl/forkexit"
+  for _s8_sh in $_S8_WSH; do
+    for _s8_c in $_s8_fcases; do
+      _s8_l="boundexit-${_s8_sh}-${_s8_c}"
+      _s8_tb=""
+      if [ "$_s8_c" = timeout ]; then _s8_tb=$TIMEOUT_BIN; fi
+      rm -f "$_S8/bsl/epid" "$_S8/bsl/epid.child"
+      _S8_T0=$(date +%s)
+      _O=$(_s8_bfork "$_s8_sh" "$_S8/bsl/epid" "$_s8_tb" "$_S8/bsl/forkexit" 30)
+      _S8_T=$(( $(date +%s) - _S8_T0 ))
+      [ "$_O" = "answered
+rc=0" ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-output($(printf '%s' "$_O" | tr '\n' ' ' | cut -c1-80))"
+      [ "$_S8_T" -lt 15 ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-slow(${_S8_T}s)"
+      _s8_gone "$_s8_l" "$_S8/bsl/epid"
+      _s8_gone "${_s8_l}-child" "$_S8/bsl/epid.child"
+    done
+  done
   [ -z "$(ls -A "$_S8/bsl" | grep -F 'out.' || true)" ] || _S8_FAIL="$_S8_FAIL boundsleep-output-dir-left"
 fi
 unset _s8_sh _s8_l _s8_p _s8_n
 _S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines), prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40), and survives a failing or absent helper loader"
 if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
-  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; started in HOME or the directory above it: the one home-directory warning, no file notice or tip, the files untouched; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; versiongrace (round 1, wave 2): an optional CLI that ignores SIGTERM and never answers, through the hook's own _ss_cli_version with a 1 s bound, asked --version then -V and given up on within two calls of 1 s + the 2 s SIGKILL grace (${_S8_VER}), nothing recorded, the stub gone, stderr empty, no temp dir left; one that answers -V only gets that answer, and the watchdog run records a kimi stub's -V answer in .claude/roster-detected.local.md; detectbound (round 4, J): a python3 that prints one project no-import row (round 5) and never answers the instruction-file pass, session start back in ${_S8_DET}s (the 10 s bound) with the WARNING that the check did not finish, given up on after 10 s (4.1), and no own-file notice from the partial row, the stub gone; detectfork (round 5): with no timeout binary on PATH (${_S8_FWD}), a python3 launcher that prints that row, forks a child that ignores SIGTERM and holds stdout for 60 s, and ignores SIGTERM itself: session start back in ${_S8_FORK}s with the WARNING and no own-file notice, the launcher and (4.1) its child gone; detect69 (4.1): an rc 69 WARNING names its cause, one line each: python3 not on PATH, no timeout binary and no private temp dir for the watchdog, a library that did not load; pastbound (4.1): past-bound rows (import -) for ./CLAUDE.md, ./.claude/CLAUDE.md and a CLAUDE.md above get a line saying session start cannot tell whether they import AGENTS.md, offering @AGENTS.md, @../AGENTS.md and the project's CLAUDE.md, never the line -; detectwatch (round 5): the library alone under set -u (${_S8_WSH}), PATH = a python3 stub, a sleep that logs its pid and dirname: a pass that answers in 0.5 s under _INSTR_SECS=30 leaves no watchdog sleep running; with no _INSTR_SECS (_INSTR_READ_SECS, shipped as 30, set to 1) detect, visibility and a writer's plan on a python3 that never answers print one gave-up line naming python3 hung or killed and rc 124, 137 or 143 within 15 s, under ${_S8_WMODES}; a writer with --yes, _INSTR_SECS=1 and a python3 2 s slow still writes, rc 0, no temp file left; watchtmp (round 6): with no timeout binary (${_S8_WSH}), a TMPDIR of mode 0777 without the sticky bit is never asked for the watchdog's temp dir, the pass answering through /tmp, and with mktemp failing for /tmp too the call returns rc 69 with its line alone, python3 never started, nothing left in that TMPDIR; forkwatch (4.1): under ${_S8_FMODES} (${_S8_WSH}), a python3 launcher that forks a child ignoring SIGTERM and holding stdout for 40 s, given up on after 1 s: rc 143 (124 under the timeout binary) within 15 s, neither left; perllocale (4.1): with LANG and LC_ALL xx_XX.bogus the watchdog's pass prints its rows and rc 0, no perl warning; watchkill (4.1): the watchdog's subshell SIGKILLed while its private temp dir exists: rc 137, nothing left in TMPDIR; boundsleep (round 6): the hook's own _ss_bounded with no timeout binary (${_S8_WSH}) leaves no watchdog sleep running after a command that answers in 0.5 s or at once (three times); boundfork (4.1): the same _ss_bounded with a 1 s bound, under ${_S8_FMODES}, on a command that forks a child ignoring SIGTERM and holding stdout for 40 s: back within 15 s, neither left; ccd (4.1): with CLAUDE_CONFIG_DIR absolute or relative, HOME's .claude/CLAUDE.md is named as a file above the project and the moved CLAUDE.md never; one whose CLAUDE.md imports the project's AGENTS.md silences the own and above notices; unset, the user tier stays unnamed; every run rc 0, no crash, no line starting with {" "static"
+  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; started in HOME or the directory above it: the one home-directory warning, no file notice or tip, the files untouched; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; versiongrace (round 1, wave 2): an optional CLI that ignores SIGTERM and never answers, through the hook's own _ss_cli_version with a 1 s bound, asked --version then -V and given up on within two calls of 1 s + the 2 s SIGKILL grace (${_S8_VER}), nothing recorded, the stub gone, stderr empty, no temp dir left; one that answers -V only gets that answer, and the watchdog run records a kimi stub's -V answer in .claude/roster-detected.local.md; detectbound (round 4, J): a python3 that prints one project no-import row (round 5) and never answers the instruction-file pass, session start back in ${_S8_DET}s (the 10 s bound) with the WARNING that the check did not finish, given up on after 10 s (4.1), and no own-file notice from the partial row, the stub gone; detectfork (round 5): with no timeout binary on PATH (${_S8_FWD}), a python3 launcher that prints that row, forks a child that ignores SIGTERM and holds stdout for 60 s, and ignores SIGTERM itself: session start back in ${_S8_FORK}s with the WARNING and no own-file notice, the launcher and (4.1) its child gone; detect69 (4.1): an rc 69 WARNING names its cause, one line each: python3 not on PATH, no timeout binary and no private temp dir for the watchdog, a library that did not load; pastbound (4.1): past-bound rows (import -) for ./CLAUDE.md, ./.claude/CLAUDE.md and a CLAUDE.md above get a line saying session start cannot tell whether they import AGENTS.md, offering @AGENTS.md, @../AGENTS.md and the project's CLAUDE.md, never the line -; detectwatch (round 5): the library alone under set -u (${_S8_WSH}), PATH = a python3 stub, a sleep that logs its pid and dirname: a pass that answers in 0.5 s under _INSTR_SECS=30 leaves no watchdog sleep running; with no _INSTR_SECS (_INSTR_READ_SECS, shipped as 30, set to 1) detect, visibility and a writer's plan on a python3 that never answers print one gave-up line naming python3 hung or killed and rc 124, 137 or 143 within 15 s, under ${_S8_WMODES}; a writer with --yes, _INSTR_SECS=1 and a python3 2 s slow still writes, rc 0, no temp file left; watchtmp (round 6): with no timeout binary (${_S8_WSH}), a TMPDIR of mode 0777 without the sticky bit is never asked for the watchdog's temp dir, the pass answering through /tmp, and with mktemp failing for /tmp too the call returns rc 69 with its line alone, python3 never started, nothing left in that TMPDIR; forkwatch (4.1): under ${_S8_FMODES} (${_S8_WSH}), a python3 launcher that forks a child ignoring SIGTERM and holding stdout for 40 s, given up on after 1 s: rc 143 (124 under the timeout binary) within 15 s, neither left; forkexit (4.1 review, #6): the same launcher printing its row and exiting 0 at once under a 30 s bound, leaving the child behind: the row and rc 0 within 15 s, the child gone; perllocale (4.1): with LANG and LC_ALL xx_XX.bogus the watchdog's pass prints its rows and rc 0, no perl warning; watchkill (4.1): the watchdog's subshell SIGKILLed while its private temp dir exists: rc 137, nothing left in TMPDIR; boundsleep (round 6): the hook's own _ss_bounded with no timeout binary (${_S8_WSH}) leaves no watchdog sleep running after a command that answers in 0.5 s or at once (three times); boundfork (4.1): the same _ss_bounded with a 1 s bound, under ${_S8_FMODES}, on a command that forks a child ignoring SIGTERM and holding stdout for 40 s: back within 15 s, neither left; boundexit (4.1 review, #6): a command that prints its answer, forks that child and exits at once under a 30 s bound: the answer and rc 0 within 15 s, the child gone; ccd (4.1): with CLAUDE_CONFIG_DIR absolute or relative, HOME's .claude/CLAUDE.md is named as a file above the project and the moved CLAUDE.md never; one whose CLAUDE.md imports the project's AGENTS.md silences the own and above notices; unset, the user tier stays unnamed; every run rc 0, no crash, no line starting with {" "static"
 else
   row "SELF-08" "claude" "$_S8_CAP" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160); mismatch:${_S8_FAIL:- none}" "static"
 fi
