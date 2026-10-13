@@ -5494,13 +5494,27 @@ rm -rf "$_S13"
 #            lease_approve promotion:sprint/s14 user trunk; that approval
 #            records trunk and its commit, in the approval and as the
 #            baseline's promotion target, and lease_promote trunk promotes,
-#            clearing the target from the baseline
+#            clearing the target from the baseline; the next lease_create, on
+#            sprint/s15 -> 0 (a promotion with no default branch records none,
+#            and the next check agrees)
 #   trunkmain no default branch when the baseline was recorded, main created
-#            after it: lease_promote trunk promotes and records main at the
-#            commit it had when the promotion started; lease_promote trunk on
+#            after it: lease_promote trunk -> 44 naming main as the default
+#            branch that resolves now where none did, trunk unmoved;
+#            accepted with lease_rebaseline -> lease_promote trunk promotes,
+#            main kept on record at its commit; lease_promote trunk on
 #            trunk -> 1 naming the target branch trunk; the next lease_create,
 #            on sprint/s15 -> 0; lease_promote on main -> 1 naming the default
 #            branch main
+#   defappear origin/HEAD names main but no refs/heads/main exists when the
+#            baseline is recorded; a worker then creates it: lease_promote
+#            -> 44 naming refs/heads/main as appeared since the baseline, main
+#            unmoved, still on sprint/s14; accepted with lease_rebaseline ->
+#            lease_promote promotes into main and records it there
+#   defrace  the same baseline; a worker creates refs/heads/main right after
+#            lease_promote's integrity check passed (a wrapped
+#            _lead_integrity_check): the promotion goes into it but records
+#            nothing (44 naming the commit it started from and none on
+#            record), and the next lease_promote -> 44 naming main as appeared
 #   target   origin/HEAD -> main, the promotion going into develop: a third
 #            argument on task:<id> -> 64; a target that is no local branch
 #            (unknown, origin/main, develop~0) or is the integration branch
@@ -5521,6 +5535,22 @@ rm -rf "$_S13"
 #            refs/heads/develop as a symbolic ref to refs/heads/decoy, decoy
 #            unmoved, still on sprint/s14; develop put back as the branch it
 #            was -> promotes, decoy unmoved
+#   targetswitch the user's approval for develop records it; one into main
+#            (the default branch) clears target_branch and target_sha; one
+#            for develop again, then one for staging -> staging on record at
+#            its own commit
+#   targetmoved the user's approval for develop, then develop moved behind the
+#            lead's back: an approval into main -> 44 naming
+#            refs/heads/develop moved, that it would clear it, and
+#            lease_rebaseline; one into staging -> 44 naming the same move
+#            and that it would replace it; develop still on record at its
+#            old commit, the ledger byte-identical; accepted with
+#            lease_rebaseline -> the approval into main clears it
+#   targetgone the user's approval for develop, then develop deleted: the next
+#            lease call (lease_create) -> 44 naming refs/heads/develop moved
+#            <sha> -> <deleted>; an approval into main -> 44 naming the same,
+#            the ledger byte-identical; accepted with lease_rebaseline -> the
+#            approval into main clears it
 #   shadow   the integration branch touches .claude/settings.json and
 #            require_user_approval is off: lease_promote main -> 42; a tag
 #            main at the integration head -> still 42 naming the path, main
@@ -5589,12 +5619,15 @@ rm -rf "$_S13"
 #            branch still recorded; main put back, lease_promote main records
 #            the verified result
 #   racemerge* a worker moves refs/heads/sprint/s14 right after lease_merge's
-#            squash commit (a wrapped _lgr, race-seam.sh): to a commit on the
+#            squash commit (a wrapped _lgr, race-seam.sh), the lead holding an
+#            unstaged README.md edit: to a commit on the
 #            squash's parent with that parent's tree (racemergetree) or on
 #            top of the squash commit (racemergeon) -> 44 naming both
-#            commits, nothing recorded (the ledger byte-identical, the lease
-#            in review with its worktree); the branch put back with git reset
-#            --hard -> the rerun merges once; the branch accepted with
+#            commits and git reset --merge <head> as the way back, never
+#            reset --hard, nothing recorded (the ledger byte-identical, the
+#            lease in review with its worktree); the branch put back with that
+#            git reset --merge -> the rerun merges once, the README.md edit
+#            still unstaged; the branch accepted with
 #            lease_rebaseline -> the rerun stages nothing (rc 1), the change
 #            on the branch once
 #   racemergehead a worker commits worker.txt on sprint/s14 in the lead's
@@ -5608,7 +5641,10 @@ rm -rf "$_S13"
 #            with lease_rebaseline only if it is yours), never "lease the task
 #            again"; nothing committed (HEAD at the worker's commit, nothing
 #            staged), the ledger byte-identical, the lease in review; the
-#            rerun -> 44 naming the move. renamed's edfollow (the head
+#            rerun -> 44 naming the move. The refusal names git reset --keep
+#            <head> as the way back, never reset --hard: with the lead's
+#            unstaged README.md edit, that reset removes worker.txt and keeps
+#            the edit, and the next rerun merges. renamed's edfollow (the head
 #            unmoved) keeps the "lease the task again" recovery
 _S14="${WORK}/self14"
 _S14_FAIL=""
@@ -5856,15 +5892,18 @@ echo "tgt=$(_ledger_get @baseline target_branch):at-trunk=$(if [ "$(_ledger_get 
 _self_try promote lease_promote trunk
 echo "trunk=$(git rev-parse trunk | cut -c1-12):sprint=$(git rev-parse sprint/s14 | cut -c1-12)"
 echo "tgt-after=[$(_ledger_get @baseline target_branch)$(_ledger_get @baseline target_sha)]"
+git checkout -q -b sprint/s15
+_self_try next lease_create t builder
 ')
 _S14_FAIL="${_S14_FAIL}$(_self_expect trunk "$O" '^twoarg:rc=1:.*no default branch.*lease_approve promotion:sprint/s14 user <target branch>' \
   '^blocked:rc=42:.*AGENTS\.md.*lease_approve promotion:sprint/s14 user trunk ' '^app:rc=0:.*into trunk' '^rec=trunk:at-trunk=yes$' '^tgt=trunk:at-trunk=yes$' \
-  "^promote:rc=0:.*approved by the user.*PROMOTED 'sprint/s14' -> 'trunk'" '^tgt-after=\[\]$')"
+  "^promote:rc=0:.*approved by the user.*PROMOTED 'sprint/s14' -> 'trunk'" '^tgt-after=\[\]$' '^next:rc=0:')"
 [ "$(printf '%s\n' "$O" | sed -n 's/^trunk=\([0-9a-f]*\):sprint=\([0-9a-f]*\)$/\1=\2/p' | awk -F= '$1 == $2 && $1 != "" { print "same" }')" = same ] || _S14_FAIL="${_S14_FAIL} trunk(trunk-not-at-sprint)"
 
 # trunkmain: the baseline recorded with no default branch, main created after
-# it; a promotion into trunk, the next lease call, and the "already on"
-# refusals, each naming the branch as lease_promote was given it
+# it (refused until accepted); a promotion into trunk, the next lease call,
+# and the "already on" refusals, each naming the branch as lease_promote was
+# given it
 _s14_repo trunkmain claude codex
 ( cd "$_S14/trunkmain" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git branch -m main trunk && echo s > s.txt && git add s.txt \
     && git commit -qm s ) >/dev/null 2>&1
@@ -5873,6 +5912,10 @@ _self_try app lease_approve promotion:sprint/s14 user trunk
 echo "rec=[$(_ledger_get @baseline default_branch)]"
 git branch main trunk
 M=$(git rev-parse refs/heads/main)
+T=$(git rev-parse refs/heads/trunk)
+_self_try appeared lease_promote trunk
+echo "appeared:trunk=$(if [ "$(git rev-parse refs/heads/trunk)" = "$T" ]; then echo kept; else echo moved; fi):on=$(git symbolic-ref HEAD 2>/dev/null || echo detached)"
+_self_try rebaseline lease_rebaseline
 _self_try promote lease_promote trunk
 echo "after:def=$(_ledger_get @baseline default_branch):sha=$(if [ "$(_ledger_get @baseline default_sha)" = "$M" ]; then echo main; else echo other; fi):ib=[$(_ledger_get @baseline integration_branch)]:trunk=$(if [ "$(git rev-parse refs/heads/trunk)" = "$(git rev-parse refs/heads/sprint/s14)" ]; then echo at-sprint; else echo other; fi)"
 _self_try ontarget lease_promote trunk
@@ -5881,9 +5924,63 @@ _self_try next lease_create t builder
 git checkout -q main
 _self_try ondefault lease_promote
 ')
-_S14_FAIL="${_S14_FAIL}$(_self_expect trunkmain "$O" '^app:rc=0:.*into trunk' '^rec=\[\]$' "^promote:rc=0:.*PROMOTED 'sprint/s14' -> 'trunk'" \
+_S14_FAIL="${_S14_FAIL}$(_self_expect trunkmain "$O" '^app:rc=0:.*into trunk' '^rec=\[\]$' \
+  '^appeared:rc=44:.*the default branch now resolves to refs/heads/main at [0-9a-f]{12} \(none did when the baseline was recorded' \
+  '^appeared:trunk=kept:on=refs/heads/sprint/s14$' '^rebaseline:rc=0:.*accepting — the default branch now resolves to refs/heads/main' \
+  "^promote:rc=0:.*PROMOTED 'sprint/s14' -> 'trunk'" \
   '^after:def=main:sha=main:ib=\[\]:trunk=at-sprint$' "^ontarget:rc=1:.*already on the target branch 'trunk'" '^next:rc=0:' \
   "^ondefault:rc=1:.*already on the default branch 'main'")"
+
+# defappear: origin/HEAD names main, no refs/heads/main when the baseline is
+# recorded; a worker creates it (at origin/main's commit here): every lease
+# call refuses before the merge until lease_rebaseline accepts it
+_s14_repo defappear claude codex
+( cd "$_S14/defappear" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git update-ref refs/remotes/origin/main main \
+    && git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main && git branch -D main && echo a > a.txt && git add a.txt \
+    && git commit -qm a ) >/dev/null 2>&1
+O=$(_s14_lead defappear claude '
+_self_try base lease_create t builder
+echo "rec=$(_ledger_get @baseline default_branch):[$(_ledger_get @baseline default_sha)]"
+I=$(git rev-parse refs/remotes/origin/main)
+git update-ref refs/heads/main "$I"
+_self_try appeared lease_promote
+echo "appeared:main=$(if [ "$(git rev-parse refs/heads/main)" = "$I" ]; then echo kept; else echo moved; fi):on=$(git symbolic-ref HEAD 2>/dev/null || echo detached)"
+_self_try rebaseline lease_rebaseline
+_self_try promote lease_promote
+echo "after:main=$(if [ "$(git rev-parse refs/heads/main)" = "$(git rev-parse refs/heads/sprint/s14)" ]; then echo at-sprint; else echo other; fi):def=$(if [ "$(_ledger_get @baseline default_sha)" = "$(git rev-parse refs/heads/main)" ]; then echo recorded; else echo other; fi)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect defappear "$O" '^base:rc=0:' '^rec=main:\[\]$' \
+  '^appeared:rc=44:.*refs/heads/main appeared since the baseline \(it was absent\), at [0-9a-f]{12}' '^appeared:main=kept:on=refs/heads/sprint/s14$' \
+  '^rebaseline:rc=0:.*accepting — refs/heads/main appeared since the baseline' "^promote:rc=0:.*PROMOTED 'sprint/s14' -> 'main'" '^after:main=at-sprint:def=recorded$')"
+
+# defrace: the same baseline; refs/heads/main created right after
+# lease_promote's integrity check passed, before it read the default branch
+# (a wrapped _lead_integrity_check, once): nothing recorded, and the next
+# lease call reports the branch
+_s14_repo defrace claude codex
+( cd "$_S14/defrace" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git update-ref refs/remotes/origin/main main \
+    && git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main && git branch -D main && echo a > a.txt && git add a.txt \
+    && git commit -qm a ) >/dev/null 2>&1
+O=$(_s14_lead defrace claude '
+_self_try base lease_create t builder
+I=$(git rev-parse refs/remotes/origin/main)
+eval "_s14_wasic() $(declare -f _lead_integrity_check | sed 1d)"
+_lead_integrity_check() {
+  local R=0
+  _s14_wasic "$@" || R=$?
+  if [ "$R" -eq 0 ] && [ "${1:-}" = lease_promote ] && [ ! -e "$_S14/defrace.moved" ]; then
+    : > "$_S14/defrace.moved"
+    git update-ref refs/heads/main "$I"
+  fi
+  return "$R"
+}
+_self_try race lease_promote
+echo "race:def=[$(_ledger_get @baseline default_sha)]:ib=$(_ledger_get @baseline integration_branch)"
+_self_try next lease_promote
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect defrace "$O" '^base:rc=0:' \
+  '^race:rc=44:.*INTEGRITY — refs/heads/main was at [0-9a-f]{12} when the promotion started, not at <none> as on record: it moved or appeared after' \
+  '^race:def=\[\]:ib=sprint/s14$' '^next:rc=44:.*refs/heads/main appeared since the baseline \(it was absent\)')"
 
 # target: the promotion goes into develop, not the default branch (origin/HEAD -> main)
 _s14_repo target claude codex
@@ -5950,6 +6047,70 @@ _S14_FAIL="${_S14_FAIL}$(_self_expect targetsym "$O" '^app:rc=0:.*into develop.*
   '^kept:rc=44:.*refs/heads/develop \(the promotion target\) moved [0-9a-f]{12} -> [0-9a-f]{12}' '^kept:develop=at-x:tgt=at-d$' '^app3:rc=0:' \
   '^swapped:rc=44:.*refs/heads/develop \(the promotion target\) is now a symbolic ref to refs/heads/decoy' '^swapped:decoy=kept:on=refs/heads/sprint/s14$' \
   "^untouched:rc=0:.*approved by the user.*PROMOTED 'sprint/s14' -> 'develop'" '^promoted:develop=at-sprint:decoy=kept$')"
+
+# target*: an approval clears (into the default branch) or replaces (into
+# another target) the promotion target on record only while that target is
+# at the state recorded for it. develop at main's commit, staging one commit
+# ahead; _s14_tgt <label> prints the target on record and whose commit it is
+_S14_TGT_PRE='
+S14_D=$(git rev-parse refs/heads/develop); S14_S=$(git rev-parse refs/heads/staging)
+_s14_tgt() {
+  local T
+  T=$(_ledger_get @baseline target_sha)
+  echo "$1:tgt=[$(_ledger_get @baseline target_branch)]:at=$(if [ -z "$T" ]; then echo none; elif [ "$T" = "$S14_D" ]; then echo d; elif [ "$T" = "$S14_S" ]; then echo s; else echo other; fi)"
+}
+'
+for _s14_c in targetswitch targetmoved targetgone; do
+  _s14_repo "$_s14_c" claude codex
+  ( cd "$_S14/$_s14_c" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git branch develop main && git branch staging main \
+      && git checkout -q staging && echo s > s.txt && git add s.txt && git commit -qm s && git checkout -q sprint/s14 \
+      && echo a > a.txt && git add a.txt && git commit -qm a ) >/dev/null 2>&1
+done
+O=$(_s14_lead targetswitch claude "$_S14_TGT_PRE"'
+_self_try app lease_approve promotion:sprint/s14 user develop
+_s14_tgt app
+_self_try intomain lease_approve promotion:sprint/s14 user
+_s14_tgt intomain
+_self_try app2 lease_approve promotion:sprint/s14 user develop
+_self_try intostaging lease_approve promotion:sprint/s14 user staging
+_s14_tgt intostaging
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect targetswitch "$O" '^app:rc=0:.*develop is watched until then' '^app:tgt=\[develop\]:at=d$' \
+  '^intomain:rc=0:.*into main' '^intomain:tgt=\[\]:at=none$' '^app2:rc=0:' '^intostaging:rc=0:.*staging is watched until then' '^intostaging:tgt=\[staging\]:at=s$')"
+O=$(_s14_lead targetmoved claude "$_S14_TGT_PRE"'
+_self_try app lease_approve promotion:sprint/s14 user develop
+X=$(git commit-tree -p "$S14_D" -m "a worker commit" "$S14_D^{tree}") && git update-ref refs/heads/develop "$X"
+cp ops/leases.toml "$_S14/$S14_CASE.ledger"
+_self_try intomain lease_approve promotion:sprint/s14 user
+_self_try intostaging lease_approve promotion:sprint/s14 user staging
+_s14_tgt refused
+echo "refused:pdef=$(_ledger_get @baseline promotion_default):ledger=$(if cmp -s ops/leases.toml "$_S14/$S14_CASE.ledger"; then echo unchanged; else echo CHANGED; fi)"
+_self_try rebaseline lease_rebaseline
+_self_try accepted lease_approve promotion:sprint/s14 user
+_s14_tgt accepted
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect targetmoved "$O" '^app:rc=0:.*develop is watched until then' \
+  '^intomain:rc=44:.*INTEGRITY — refs/heads/develop \(the promotion target\) moved [0-9a-f]{12} -> [0-9a-f]{12} since it was recorded, and this approval into main would clear it from the integrity baseline.*Nothing was recorded.*lease_rebaseline, then rerun: lease_approve promotion:sprint/s14 user$' \
+  '^intostaging:rc=44:.*INTEGRITY — refs/heads/develop \(the promotion target\) moved [0-9a-f]{12} -> [0-9a-f]{12} since it was recorded, and this approval into staging would replace it with staging in the integrity baseline.*lease_approve promotion:sprint/s14 user staging$' \
+  '^refused:tgt=\[develop\]:at=d$' '^refused:pdef=develop:ledger=unchanged$' '^rebaseline:rc=0:.*accepting — refs/heads/develop \(the promotion target\) moved' \
+  '^accepted:rc=0:.*into main' '^accepted:tgt=\[\]:at=none$')"
+O=$(_s14_lead targetgone claude "$_S14_TGT_PRE"'
+_self_try app lease_approve promotion:sprint/s14 user develop
+git update-ref -d refs/heads/develop
+_self_try next lease_create t builder
+cp ops/leases.toml "$_S14/$S14_CASE.ledger"
+_self_try intomain lease_approve promotion:sprint/s14 user
+_s14_tgt refused
+echo "refused:ledger=$(if cmp -s ops/leases.toml "$_S14/$S14_CASE.ledger"; then echo unchanged; else echo CHANGED; fi)"
+_self_try rebaseline lease_rebaseline
+_self_try accepted lease_approve promotion:sprint/s14 user
+_s14_tgt accepted
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect targetgone "$O" '^app:rc=0:.*develop is watched until then' \
+  '^next:rc=44:.*refs/heads/develop \(the promotion target\) moved [0-9a-f]{12} -> <deleted>' \
+  '^intomain:rc=44:.*INTEGRITY — refs/heads/develop \(the promotion target\) moved [0-9a-f]{12} -> <deleted> since it was recorded, and this approval into main would clear it' \
+  '^refused:tgt=\[develop\]:at=d$' '^refused:ledger=unchanged$' '^rebaseline:rc=0:' '^accepted:rc=0:.*into main' '^accepted:tgt=\[\]:at=none$')"
+unset _s14_c _S14_TGT_PRE
 
 # shadow: a ref named like the default branch (a tag, refs/main, a $GIT_DIR/main
 # file) at the integration head can't empty the protected scan of a promotion
@@ -6315,20 +6476,22 @@ unset _s14_c _s14_f _s14_t
 # squash commit, before anything records it (race-seam.sh's _s14_seam_after on
 # _lgr, firing once its commit call returns). racemergetree: the decoy stands
 # on the squash commit's parent with that parent's tree (the lease's change
-# gone); the branch then put back (git reset --hard, as the refusal says) and
+# gone); the branch then put back (git reset --merge, as the refusal says) and
 # lease_merge rerun -> merges, the change on the branch once. racemergeon: the
 # decoy is a commit on top of the squash commit; the branch then accepted
 # (lease_rebaseline) and lease_merge rerun -> stages nothing, rc 1, the change
-# on the branch once
+# on the branch once. The lead holds an unstaged README.md edit throughout,
+# which neither recovery touches
 for _s14_c in racemergetree racemergeon; do
   _s14_repo "$_s14_c" claude codex
   printf '#!/bin/sh\necho feature >> feature.txt\necho "Status: DONE"\n' | _s14_builder "$_s14_c"
-  if [ "$_s14_c" = racemergetree ]; then _S14_MODE=tree; _S14_FIX='git reset -q --hard "$H"'; else _S14_MODE=on; _S14_FIX='_self_try rebaseline lease_rebaseline'; fi
+  if [ "$_s14_c" = racemergetree ]; then _S14_MODE=tree; _S14_FIX='git reset -q --merge "$H"'; else _S14_MODE=on; _S14_FIX='_self_try rebaseline lease_rebaseline'; fi
   O=$(_s14_lead "$_s14_c" claude '
 source "$_S14/race-seam.sh"
 _self_go t
 lease_pin_reviewer t antigravity >/dev/null 2>&1
 H=$(git rev-parse refs/heads/sprint/s14)
+echo "lead note" >> README.md
 cp ops/leases.toml "$_S14/$S14_CASE.ledger"
 (export S14_H="$H" S14_XF="$_S14/$S14_CASE.x" S14_MODE='"$_S14_MODE"'; _s14_seam_after _lgr commit; _self_try race lease_merge t antigravity)
 X=$(cat "$_S14/$S14_CASE.x" 2>/dev/null)
@@ -6338,11 +6501,14 @@ echo "after:state=$(_ledger_get t state):mc=[$(_ledger_get t merge_commit)]:isha
 _self_try rerun lease_merge t antigravity
 MC=$(_ledger_get t merge_commit)
 echo "rerun:state=$(_ledger_get t state):parent=$(if [ -z "$MC" ]; then echo none; elif [ "$(git rev-parse "$MC^")" = "$H" ] && [ "$(git rev-parse refs/heads/sprint/s14)" = "$MC" ]; then echo head; else echo other; fi):feature=$(git show HEAD:feature.txt 2>/dev/null | grep -c "^feature$" || true)"
+echo "note:$(grep -c "lead note" README.md || true)/$(git show HEAD:README.md 2>/dev/null | grep -c "lead note" || true):unstaged=[$(git diff --name-only | tr "\n" " ")]"
 ')
   _S14_H=$(printf '%s\n' "$O" | sed -n 's/^ids:h=\([0-9a-f]*\):.*/\1/p'); _S14_X=$(printf '%s\n' "$O" | sed -n 's/^ids:.*:x=\([0-9a-f]*\)$/\1/p')
   _S14_FAIL="${_S14_FAIL}$(_self_expect "$_s14_c" "$O" '^t:go=0:review$' \
     "^race:rc=44:.*INTEGRITY — after the squash commit refs/heads/sprint/s14 is at ${_S14_X:-none} and HEAD at ${_S14_X:-none}, not a commit of tree [0-9a-f]{12} whose only parent is ${_S14_H:-none}, the head the squash went onto" \
-    '^race:rc=44:.*Nothing was recorded: t stays in review with its worktree' '^after:state=review:mc=\[\]:isha=kept:wt=kept:ledger=unchanged$')"
+    '^race:rc=44:.*Nothing was recorded: t stays in review with its worktree' '^race:rc=44:.*put the branch back \(git reset --merge [0-9a-f]{40}, in this checkout: it drops the squash.s changes, keeps your unstaged edits' \
+    '^after:state=review:mc=\[\]:isha=kept:wt=kept:ledger=unchanged$' '^note:1/0:unstaged=\[README\.md \]$')"
+  printf '%s\n' "$O" | grep -q '^race:rc=44:.*reset --hard' && _S14_FAIL="${_S14_FAIL} ${_s14_c}(race-says-reset-hard)"
   if [ "$_s14_c" = racemergetree ]; then
     _S14_FAIL="${_S14_FAIL}$(_self_expect "$_s14_c" "$O" '^rerun:rc=0:' '^rerun:state=merged:parent=head:feature=1$')"
   else
@@ -6353,28 +6519,40 @@ done
 unset _s14_c _S14_MODE _S14_FIX
 
 # racemergehead: the integration head moved by a worker's commit between
-# lease_merge's read of it (and its approval gate) and the squash
+# lease_merge's read of it (and its approval gate) and the squash; the lead
+# holds an unstaged README.md edit, which the printed way back (git reset
+# --keep <head>) keeps while it drops the worker's commit
 _s14_repo racemergehead claude codex
 printf '#!/bin/sh\necho feature >> feature.txt\necho "Status: DONE"\n' | _s14_builder racemergehead
 O=$(_s14_lead racemergehead claude '
 source "$_S14/race-seam.sh"
 _self_go t
 lease_pin_reviewer t antigravity >/dev/null 2>&1
+H=$(git rev-parse refs/heads/sprint/s14)
+echo "lead note" >> README.md
 cp ops/leases.toml "$_S14/$S14_CASE.ledger"
 (export S14_XF="$_S14/$S14_CASE.x" S14_MODE=commit; _s14_seam_after _lease_merge_gate t; _self_try race lease_merge t antigravity)
 X=$(cat "$_S14/$S14_CASE.x" 2>/dev/null)
 echo "after:state=$(_ledger_get t state):mc=[$(_ledger_get t merge_commit)]:head=$(if [ -n "$X" ] && [ "$(git rev-parse HEAD)" = "$X" ] && [ "$(git rev-parse refs/heads/sprint/s14)" = "$X" ]; then echo worker; else echo other; fi):staged=[$(git diff --cached --name-only)]:ledger=$(if cmp -s ops/leases.toml "$_S14/$S14_CASE.ledger"; then echo unchanged; else echo CHANGED; fi)"
 _self_try rerun lease_merge t antigravity
+echo "ids:h=$H"
+git reset -q --keep "$H"
+_self_try rerun2 lease_merge t antigravity
+echo "kept:state=$(_ledger_get t state):worker=$(if [ -e worker.txt ]; then echo present; else echo gone; fi):note=$(grep -c "lead note" README.md || true)/$(git show HEAD:README.md 2>/dev/null | grep -c "lead note" || true):unstaged=[$(git diff --name-only | tr "\n" " ")]"
 ')
+_S14_H=$(printf '%s\n' "$O" | sed -n 's/^ids:h=\([0-9a-f]*\)$/\1/p')
 _S14_FAIL="${_S14_FAIL}$(_self_expect racemergehead "$O" '^t:go=0:review$' \
   "^race:rc=1:.*REFUSED — the squash of t's snapshot [0-9a-f]{12} would also change worker\\.txt: the integration branch gained a commit during the merge \\(HEAD moved [0-9a-f]{12} -> [0-9a-f]{12} after lease_merge read it\\)" \
   '^race:rc=1:.*The next lease_merge or lease_promote refuses on that commit with rc 44.*if it is yours, accept it with lease_rebaseline' \
-  '^after:state=review:mc=\[\]:head=worker:staged=\[\]:ledger=unchanged$' "^rerun:rc=44:.*integration branch 'sprint/s14' moved since the lead's last merge")"
+  "^race:rc=1:.*if not, put the branch back \\(git reset --keep ${_S14_H:-none}, in this checkout: it keeps your uncommitted edits, and refuses if one of them touches a file that commit changed\\) and rerun" \
+  '^after:state=review:mc=\[\]:head=worker:staged=\[\]:ledger=unchanged$' "^rerun:rc=44:.*integration branch 'sprint/s14' moved since the lead's last merge" \
+  '^rerun2:rc=0:' '^kept:state=merged:worker=gone:note=1/0:unstaged=\[README\.md \]$')"
 printf '%s\n' "$O" | grep -q '^race:rc=1:.*Lease the task again' && _S14_FAIL="${_S14_FAIL} racemergehead(race-still-says-lease-the-task-again)"
+printf '%s\n' "$O" | grep -q '^race:rc=1:.*reset --hard' && _S14_FAIL="${_S14_FAIL} racemergehead(race-says-reset-hard)"
 
 _S14_CAP="ledger approvals: lead_cli + reviewer class per row; a protected change (base to snapshot) merges only with a lead or user merge approval bound to the snapshot, the lead's own CLI's build routed to the user; a protected or require_user_approval promotion needs the user's approval bound to the tree and the branch it goes into (the default branch, or the target named, which the integrity check then watches until the promotion into it), voided by a later merge or a move of that branch; every approval records its origin; a merge applies exactly the lease's diff (its base an ancestor of the integration head) and a merge or promotion changes only the paths its protected scan listed (rename detection off, the merged tree held to the scan) and records only the result it verified (KTD2-KTD4, KTD18, R5, R6, R32, R33)"
 if [ -z "$_S14_FAIL" ]; then
-  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused, and from the seam simulating claude; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; trunk: no origin/HEAD, main or master -> the two-argument approval 1 naming the target argument, lease_promote trunk 42 naming lease_approve promotion:<branch> user trunk, that approval records trunk (also as the baseline's promotion target) and promotes, clearing the target; trunkmain: main created after a baseline recorded with no default branch -> lease_promote trunk promotes and records main at its commit, lease_promote trunk on trunk 1 naming the target branch trunk, the next lease_create 0, lease_promote on main 1 naming the default branch main; target: origin/HEAD -> main, the user's approval for develop records it as the promotion target -> lease_promote main 42 (approved into develop, not main) naming the call with main, develop moved behind the lead's back -> 44 naming refs/heads/develop, accepted with lease_rebaseline -> 42 voided, approved again -> promotes into develop, main unmoved, the target cleared; targetsym: develop moved and approved again -> 44 naming the move (the approval kept the commit on record); put back, re-approved and swapped for a symbolic ref to decoy at the same commit -> 44 naming it, decoy unmoved; put back -> promotes; a target that is no local branch (unknown, origin/main, develop~0) or the integration branch itself -> 1, a lead-class one -> 1 naming the user's call with the target, nothing recorded; a third argument on task:<id> -> 64; shadow: a protected integration diff, require_user_approval off, a tag main at the integration head -> lease_promote main still 42 naming .claude/settings.json, main untouched, still on sprint/s14, the same for refs/main and a \$GIT_DIR/main file, the user's approval with that file in place binds refs/heads/main and the real protected path and promotes; nonbranch: a tag, a commit id, origin/main and main~0 as the target -> 1, nothing touched (refs unmoved, still on sprint/s14, no ledger), main promotes; shadowmerge: a tag sprint/s14 at a decoy -> lease_merge merges into refs/heads/sprint/s14, integration branch recorded as sprint/s14, the tag kept, lease_promote main takes the branch's commit; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude; a legacy claude pin after a handover to codex -> 42 needing the user, user merges; a legacy codex (worker) pin after it -> merges, class worker; tmpdirs: an approval from another TMPDIR lands beside the lead's anchors and merges, refused naming export TRIFORGE_LEASE_ROOT when the recorded root is gone; renamed: the integration branch renamed docs/hooks.json to .claude/hooks.json after lease ed (editing docs/hooks.json) was cut -> lease_merge ed 1 naming docs/hooks.json and the recovery, state review, the integration branch, .claude/hooks.json and the index unchanged; through a git that drops -X no-renames -> 1 naming .claude/hooks.json (outside its scan); a lease's own rename merges three-way, both sides in the squash; rewound, rewoundin: the integration branch rewound past lease q's base (accepted) -> lease_merge q 1 before the squash (no longer holds q's base), nothing merged or staged, for a replay outside q's diff (.claude/settings.json) and inside it (feature.txt); renamedpromote: main renamed docs/hooks.json to .claude/hooks.json, sprint/s14 edits it -> lease_promote main 1 naming it, main unmoved, back on sprint/s14, clean; through the -X-dropping git -> 1 naming .claude/hooks.json; main merged in by hand -> 42 naming .claude/hooks.json, the user's approval promotes; race: main moved to a decoy between the promotion's merge and its record (the result read back, the baseline read, a promotion into develop) -> 44 naming both commits, baseline and ledger unchanged, then lease_promote main records the verified result; racemerge: the integration branch moved right after lease_merge's squash commit (onto its parent with the parent's tree, or on top of it) -> 44 naming both commits, nothing recorded, the lease in review with its worktree; put back with git reset --hard -> the rerun merges once; accepted with lease_rebaseline -> the rerun stages nothing (rc 1), the change on the branch once; racemergehead: a worker's commit on the integration branch after lease_merge read its head, before the squash -> 1 naming worker.txt (the staged tree held to the head lease_merge read) and the commit gained during the merge, with the rc 44 the next merge or promotion gives and lease_rebaseline only if it is yours, nothing committed or staged, the ledger byte-identical, the lease in review; the rerun -> 44" "static"
+  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused, and from the seam simulating claude; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; trunk: no origin/HEAD, main or master -> the two-argument approval 1 naming the target argument, lease_promote trunk 42 naming lease_approve promotion:<branch> user trunk, that approval records trunk (also as the baseline's promotion target) and promotes, clearing the target, the next lease_create 0; trunkmain: main created after a baseline recorded with no default branch -> lease_promote trunk 44 naming main as resolving now where none did, trunk unmoved, accepted with lease_rebaseline -> promotes and keeps main at its commit, lease_promote trunk on trunk 1 naming the target branch trunk, the next lease_create 0, lease_promote on main 1 naming the default branch main; defappear: origin/HEAD -> main with no refs/heads/main at the baseline, a worker creates it -> lease_promote 44 naming it as appeared, main unmoved, accepted with lease_rebaseline -> promotes and records it; defrace: the same, created right after the promotion's integrity check -> 44 naming the commit it started from and none on record, nothing recorded, the next lease_promote 44 naming it as appeared; target: origin/HEAD -> main, the user's approval for develop records it as the promotion target -> lease_promote main 42 (approved into develop, not main) naming the call with main, develop moved behind the lead's back -> 44 naming refs/heads/develop, accepted with lease_rebaseline -> 42 voided, approved again -> promotes into develop, main unmoved, the target cleared; targetsym: develop moved and approved again -> 44 naming the move (the approval kept the commit on record); put back, re-approved and swapped for a symbolic ref to decoy at the same commit -> 44 naming it, decoy unmoved; put back -> promotes; targetswitch: an approval into main clears the target, develop then staging records staging at its commit; targetmoved: develop moved after its approval -> an approval into main 44 (would clear it) and into staging 44 (would replace it), naming the move and lease_rebaseline, develop still on record at its old commit, the ledger byte-identical, accepted -> the approval into main clears it; targetgone: develop deleted -> the next lease_create 44 naming moved <sha> -> <deleted>, an approval into main 44 naming the same, the ledger byte-identical, accepted -> it clears; a target that is no local branch (unknown, origin/main, develop~0) or the integration branch itself -> 1, a lead-class one -> 1 naming the user's call with the target, nothing recorded; a third argument on task:<id> -> 64; shadow: a protected integration diff, require_user_approval off, a tag main at the integration head -> lease_promote main still 42 naming .claude/settings.json, main untouched, still on sprint/s14, the same for refs/main and a \$GIT_DIR/main file, the user's approval with that file in place binds refs/heads/main and the real protected path and promotes; nonbranch: a tag, a commit id, origin/main and main~0 as the target -> 1, nothing touched (refs unmoved, still on sprint/s14, no ledger), main promotes; shadowmerge: a tag sprint/s14 at a decoy -> lease_merge merges into refs/heads/sprint/s14, integration branch recorded as sprint/s14, the tag kept, lease_promote main takes the branch's commit; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude; a legacy claude pin after a handover to codex -> 42 needing the user, user merges; a legacy codex (worker) pin after it -> merges, class worker; tmpdirs: an approval from another TMPDIR lands beside the lead's anchors and merges, refused naming export TRIFORGE_LEASE_ROOT when the recorded root is gone; renamed: the integration branch renamed docs/hooks.json to .claude/hooks.json after lease ed (editing docs/hooks.json) was cut -> lease_merge ed 1 naming docs/hooks.json and the recovery, state review, the integration branch, .claude/hooks.json and the index unchanged; through a git that drops -X no-renames -> 1 naming .claude/hooks.json (outside its scan); a lease's own rename merges three-way, both sides in the squash; rewound, rewoundin: the integration branch rewound past lease q's base (accepted) -> lease_merge q 1 before the squash (no longer holds q's base), nothing merged or staged, for a replay outside q's diff (.claude/settings.json) and inside it (feature.txt); renamedpromote: main renamed docs/hooks.json to .claude/hooks.json, sprint/s14 edits it -> lease_promote main 1 naming it, main unmoved, back on sprint/s14, clean; through the -X-dropping git -> 1 naming .claude/hooks.json; main merged in by hand -> 42 naming .claude/hooks.json, the user's approval promotes; race: main moved to a decoy between the promotion's merge and its record (the result read back, the baseline read, a promotion into develop) -> 44 naming both commits, baseline and ledger unchanged, then lease_promote main records the verified result; racemerge: the integration branch moved right after lease_merge's squash commit (onto its parent with the parent's tree, or on top of it) -> 44 naming both commits and git reset --merge <head> as the way back (never --hard), nothing recorded, the lease in review with its worktree; put back with that reset -> the rerun merges once, the lead's unstaged README.md edit kept; accepted with lease_rebaseline -> the rerun stages nothing (rc 1), the change on the branch once; racemergehead: a worker's commit on the integration branch after lease_merge read its head, before the squash -> 1 naming worker.txt (the staged tree held to the head lease_merge read) and the commit gained during the merge, with the rc 44 the next merge or promotion gives and lease_rebaseline only if it is yours, nothing committed or staged, the ledger byte-identical, the lease in review, git reset --keep <head> named as the way back (never --hard); the rerun -> 44; that reset drops the worker's commit and keeps the lead's unstaged README.md edit, and the next rerun merges" "static"
 else
   row "SELF-14" "claude" "$_S14_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S14_FAIL"):$(printf '%s' "$_S14_FAIL" | cut -c1-900)" "static"
 fi
