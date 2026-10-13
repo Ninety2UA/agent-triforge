@@ -223,6 +223,26 @@
       exit; scripts must wait for the file and stop it. The Edit tool can drop a
       trailing space at the end of new_string; anchor short edits on following text.
 
+- Worker discoveries (4.1.0 review fix round, 2026-10-13), UNVERIFIED, recorded by the lead from the workers' reports:
+
+      fix worker rm: three SELF-16 runs started together on one machine (two trees)
+      all failed b-detect-zsh(differs) at its line 12316, each passing alone; some
+      state or timing is shared between concurrent SELF-16 runs. Python's re keeps a
+      frame per pass of a repeated group, so a bounded repeat inside another bounded
+      repeat multiplies the frames (1.5 GiB in one match over 4 MiB); a repeat of one
+      character class keeps none. /usr/bin/python3 3.9 lacks atomic groups.
+      fix worker rl: _self_try and srun.sh cut stderr and the mismatch list at 900
+      characters, so a long refusal or many failing cases need a debug copy to read.
+      git 2.48 and later may create a missing refs/remotes/origin/HEAD on fetch
+      (remote.<name>.followRemoteHEAD): with no default branch on record that now
+      stops lease calls with rc 44 until lease_rebaseline.
+      fix worker rc: with CLAUDE_CONFIG_DIR inside the project, detect and visibility
+      list that CLAUDE.md as a project file, so visibility can offer
+      instruction_add_import for a file the writer then refuses with rc 2.
+      lead: Claude Code 2.1.296 keeps an empty CLAUDE_CONFIG_DIR
+      (be = CLAUDE_CONFIG_DIR ?? ~/.claude), so its user memory is the CLAUDE.md in
+      its working directory; other call sites (|| and Boolean()) treat empty as unset.
+
 ## Interface proposals
 <!-- No active proposals -->
 
