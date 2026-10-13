@@ -450,12 +450,18 @@ _CLAUDE_CRED_PATHS="~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.git-credentials ~/.config
 # when CLAUDE_CONFIG_DIR moves that home out of ~/.claude: Claude Code 2.1.296
 # keeps a stored login there, not in ~/.claude, once the variable is set, so
 # the claude lane's deny rules and the codex read persona's profile deny it
-# beside _CLAUDE_CRED_PATHS. Only an absolute value: an empty
-# or relative one names a directory relative to wherever Claude Code started,
-# which a helper cannot know. Prints nothing otherwise.
+# beside _CLAUDE_CRED_PATHS. A relative value names a directory relative to
+# wherever Claude Code started, which a helper cannot know for sure: it is
+# taken from this shell's working directory, the lead's, so the deny fails
+# closed rather than open; an empty one prints nothing (~/.claude, which
+# _CLAUDE_CRED_PATHS already denies). Each consumer also denies the path with
+# every symlink resolved (os.path.realpath), since a rule on one spelling may
+# not match the other (/tmp is /private/tmp on macOS).
 _claude_config_cred() {
   case "${CLAUDE_CONFIG_DIR:-}" in
+    "") ;;
     /*) printf '%s/.credentials.json\n' "${CLAUDE_CONFIG_DIR%/}" ;;
+    *) printf '%s/%s/.credentials.json\n' "${PWD%/}" "${CLAUDE_CONFIG_DIR%/}" ;;
   esac
 }
 
@@ -578,11 +584,13 @@ cred = os.environ["CL_CRED"].split()
 deny = []
 for p in cred:
     deny += ["Read(" + p + ")", "Read(" + p + "/**)"]
-if os.environ["CL_OWN"]:
-    # an absolute path, which a Read rule spells with // (a rule with one /
-    # is relative to the settings file); the sandbox takes it as it is
-    deny += ["Read(/" + os.environ["CL_OWN"] + ")", "Read(/" + os.environ["CL_OWN"] + "/**)"]
-    cred.append(os.environ["CL_OWN"])
+for own in [p for p in os.environ["CL_OWN"].split("\n") if p]:
+    # an absolute path, as given and with its symlinks resolved, which a
+    # Read rule spells with // (a rule with one / is relative to the settings
+    # file); the sandbox takes it as it is
+    for p in dict.fromkeys([own, os.path.realpath(own)]):
+        deny += ["Read(/" + p + ")", "Read(/" + p + "/**)"]
+        cred.append(p)
 s = {"permissions": {"deny": deny}}
 if os.environ["CL_SBX"] == "on":
     s["sandbox"] = {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,

@@ -672,8 +672,10 @@ for p in os.environ["PC_CRED"].split():
             raise SystemExit(1)
         p = home + p[1:]
     out.append(json.dumps(p) + "=\"deny\"")
-if os.environ["PC_OWN"]:
-    out.append(json.dumps(os.environ["PC_OWN"]) + "=\"deny\"")
+for own in [p for p in os.environ["PC_OWN"].split("\n") if p]:
+    # as given and with its symlinks resolved (_claude_config_cred)
+    for p in dict.fromkeys([own, os.path.realpath(own)]):
+        out.append(json.dumps(p) + "=\"deny\"")
 print("{" + ",".join(out) + "}")
 ') || return 1
   _PERSONA_CODEX_PROFILE=(-c 'default_permissions="triforge_persona"' -c 'permissions.triforge_persona.extends=":read-only"'

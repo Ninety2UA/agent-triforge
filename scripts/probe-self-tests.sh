@@ -8589,11 +8589,20 @@ O=$( source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-fa
 ) 2>&1 || true
 _S20_FAIL="${_S20_FAIL}$(_self_expect env "$O" '^claude:2$' '^codex:0$' '^seam:0$' '^cdxpolicy:5$')"
 
-# ccd: CLAUDE_CONFIG_DIR absolute (with a space), relative and empty: what reaches each worker,
-# and the credential denies of the claude lane's --settings and the codex read persona's profile
+# ccd: CLAUDE_CONFIG_DIR absolute (with a space), relative, empty and through a
+# symlink: what reaches each worker, and the credential denies of the claude
+# lane's --settings and the codex read persona's profile. A relative value is
+# denied from this shell's working directory (fails closed), and each path is
+# denied as given and with its symlinks resolved (4.1)
+mkdir -p "$_S20/ccdreal/cfg" && ln -s "$_S20/ccdreal" "$_S20/ccdlink" 2>/dev/null || true
 O=$( export TMPDIR="$_S20/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
-  for C in abs rel empty; do
-    if [ "$C" = abs ]; then export CLAUDE_CONFIG_DIR="/s20/cfg home"; elif [ "$C" = rel ]; then export CLAUDE_CONFIG_DIR=cfg; else export CLAUDE_CONFIG_DIR=""; fi
+  for C in abs rel empty link; do
+    case "$C" in
+      (abs) export CLAUDE_CONFIG_DIR="/s20/cfg home" ;;
+      (rel) export CLAUDE_CONFIG_DIR=cfg ;;
+      (empty) export CLAUDE_CONFIG_DIR="" ;;
+      (link) export CLAUDE_CONFIG_DIR="$_S20/ccdlink/cfg" ;;
+    esac
     printf '%s-env:claude=%s:codex=%s:grok=%s\n' "$C" "$(_adapter_env claude env 2>/dev/null | grep -cxF "CLAUDE_CONFIG_DIR=/s20/cfg home" || true)" \
       "$(_adapter_env codex env 2>/dev/null | grep -c '^CLAUDE_CONFIG_DIR=' || true)" "$(_adapter_env grok env 2>/dev/null | grep -c '^CLAUDE_CONFIG_DIR=' || true)"
     printf '%s-any:%s\n' "$C" "$(_adapter_env claude env 2>/dev/null | grep -c '^CLAUDE_CONFIG_DIR=' || true)"
@@ -8603,21 +8612,24 @@ O=$( export TMPDIR="$_S20/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev
     fi
     _persona_codex_profile || true
     printf '%s-deny:%s\n' "$C" "$(S20_S="$S" S20_P="${_PERSONA_CODEX_PROFILE[*]:-}" python3 -c '
-import json, os
+import json, os, re
 try:
     s = json.loads(os.environ["S20_S"])
 except ValueError:
     print("no-settings")
     raise SystemExit(0)
 deny, dr = s["permissions"]["deny"], s["sandbox"]["filesystem"]["denyRead"]
-print("read=%s:sbx=%s:home=%d:codex=%d" % ("|".join(d for d in deny if "cfg" in d), "|".join(d for d in dr if "cfg" in d),
-      "Read(~/.claude/.credentials.json)" in deny and "~/.claude/.credentials.json" in dr, os.environ["S20_P"].count("\"/s20/cfg home/.credentials.json\"=\"deny\"")))')"
+print("read=%s:sbx=%s:home=%d:codex=%d:codexcfg=%d" % ("|".join(d for d in deny if "cfg" in d), "|".join(d for d in dr if "cfg" in d),
+      "Read(~/.claude/.credentials.json)" in deny and "~/.claude/.credentials.json" in dr, os.environ["S20_P"].count("\"/s20/cfg home/.credentials.json\"=\"deny\""),
+      len(re.findall(r"\"([^\"]*cfg[^\"]*)\"=\"deny\"", os.environ["S20_P"]))))')"
   done
 ) 2>&1 || true
 _S20_FAIL="${_S20_FAIL}$(_self_expect ccd "$O" '^abs-env:claude=1:codex=0:grok=0$' '^rel-env:claude=0:codex=0:grok=0$' '^empty-env:claude=0:codex=0:grok=0$' \
   '^abs-any:1$' '^rel-any:0$' '^empty-any:0$' \
-  '^abs-deny:read=Read\(//s20/cfg home/\.credentials\.json\)\|Read\(//s20/cfg home/\.credentials\.json/\*\*\):sbx=/s20/cfg home/\.credentials\.json:home=1:codex=1$' \
-  '^rel-deny:read=:sbx=:home=1:codex=0$' '^empty-deny:read=:sbx=:home=1:codex=0$')"
+  '^abs-deny:read=Read\(//s20/cfg home/\.credentials\.json\)\|Read\(//s20/cfg home/\.credentials\.json/\*\*\):sbx=/s20/cfg home/\.credentials\.json:home=1:codex=1:codexcfg=1$' \
+  '^rel-deny:read=Read\(//[^|]*/cfg/\.credentials\.json\)\|Read\(//[^|]*/cfg/\.credentials\.json/\*\*\).*:sbx=/[^|:]*/cfg/\.credentials\.json.*:home=1:codex=0:codexcfg=[12]$' \
+  '^empty-deny:read=:sbx=:home=1:codex=0:codexcfg=0$' \
+  '^link-deny:read=Read\(//[^|]*/ccdlink/cfg/\.credentials\.json\)\|Read\(//[^|]*/ccdlink/cfg/\.credentials\.json/\*\*\)\|Read\(//[^|]*/ccdreal/cfg/\.credentials\.json\)\|Read\(//[^|]*/ccdreal/cfg/\.credentials\.json/\*\*\):sbx=/[^|]*/ccdlink/cfg/\.credentials\.json\|/[^|]*/ccdreal/cfg/\.credentials\.json:home=1:codex=0:codexcfg=2$')"
 
 # builder: the real claude arm against the stub, the builder process in a
 # session of its own (its exit sweep reaches only its own group)
