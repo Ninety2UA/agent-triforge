@@ -897,17 +897,17 @@
 
 <!-- ════════════ INSTALL ROUTES (Excalidraw) ════════════ -->
 <div class="diagram" id="install-routes">
-  <img class="ex-img" src="excalidraw/install-routes.svg" alt="Install routes: the Claude Code and Codex plugin installs both lead to at-setup, which checks the core trio, enrolls optional CLIs and writes ops/roster.toml; Devin CLI and Pi can install the portable skills only">
+  <img class="ex-img" src="excalidraw/install-routes.svg" alt="Claude Code and Codex each install the plugin from the same repository, then run at-setup, which checks the core trio, enrolls optional CLIs and writes ops/roster.toml. Devin CLI and Pi can install only the 10 portable skills.">
 </div>
 
 <!-- ════════════ COORDINATE LOOP (Excalidraw) ════════════ -->
 <div class="diagram" id="coordinate-loop">
-  <img class="ex-img" src="excalidraw/coordinate-loop.svg" alt="coordinate.sh runs a fresh lead session per iteration until the session creates ops/.sprint-complete">
+  <img class="ex-img" src="excalidraw/coordinate-loop.svg" alt="coordinate.sh starts a fresh lead session each iteration until a session creates ops/.sprint-complete. It stops early with 77 on a full-access launch line without --allow-full-access, 44 on an integrity change, and 69 on a login, quota or missing-binary failure.">
 </div>
 
 <!-- ════════════ LEASE LIFECYCLE (Excalidraw) ════════════ -->
 <div class="diagram" id="lease-lifecycle">
-  <img class="ex-img" src="excalidraw/lease-lifecycle.svg" alt="One task's lease: create, dispatch, wait, collect, pinned review, squash merge and promotion, with the escalation paths">
+  <img class="ex-img" src="excalidraw/lease-lifecycle.svg" alt="The lease helpers take one task from lease_create through lease_dispatch, lease_wait, lease_collect, a pinned review, lease_merge and lease_promote. A missing report, a third review cycle, a protected path or an integrity change escalates.">
 </div>
 
 </body>
