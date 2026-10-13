@@ -1,6 +1,6 @@
 ---
-saved: 2026-10-13T05:40:00Z
-phase: 4.1.0 in progress on release/4.1 — the 4.0 review's residuals fixed (user, 2026-10-12: "Fix all, one review"); the user is asleep under the 2026-10-13 grant (the lead may merge the release PR to main only if gates, CI and the review fixes are green and an independent Fable check agrees)
+saved: 2026-10-13T11:30:00Z
+phase: v4.1.0 released 2026-10-13 (PR #32, squash 56e28b3; release.yml run 38388906430 tagged v4.1.0 at 56e28b3 and published it as Latest); nothing in progress
 wave: 0
 tasks:
   total: 29
@@ -64,19 +64,14 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 | fix r5 | Round-5 fixes, PR #28 | **merged**: squash 2214b7a (2026-10-12); gates green under Python 3.14 and 3.12 (40 SELF rows, none FAIL) and in CI (run 38264108557). Final summary sent; **the user chose the focused round 6 (2026-10-12)** |
 | review r6 | Focused review round 6, a delta review of PR #28 against 5fcb6e0: ce-code-review run 20261012-172947-3d069de4 (8 local reviewers + Codex `gpt-6-astra` `xhigh` requested, actual unverified, independence verified; Codex found nothing) | Verdict "Ready with fixes", no behavior defect: 2 confirmed. P2: #1 the five regexes round 5 rewrote have no in-repo test that they still match what they matched. P3: #3 the watchdog's no-private-temp-dir path (rc 69) has no test. Rejected: #2 (the duplication predates PR #28). Pass rule: a P2 or worse is fixed before the release PR, a P3 if cheap. Fixes by worker R6 (`mafw-wt-r6`) on `fix/v4-final-r6`, with the cheap residuals: `_ss_bounded` SIGKILLs its own sleep, SELF-30 counts `-k 1e-400` as no kill-after (GNU timeout before coreutils 9.7), the gave-up message says python3 hung or was killed, lead.md and instruction-files.md name what to do and which files to check |
 | fix r6 | Round-6 fixes, PR #29 | **merged**: squash a152326 (2026-10-12); gates green under Python 3.14 and 3.12 (40 SELF rows, none FAIL) and in CI (run 38293120192) |
-| 4.1 | release/4.1 from main 727dc04: the 4.0 review's residuals | **in progress** (see Next actions) |
+| 4.1 | release/4.1 from main 727dc04: the 4.0 review's residuals, then the one review round's fixes | **released**: PR #32 squash-merged to main as 56e28b3 (2026-10-13) by the lead under the user's 2026-10-13 grant: local gates under Python 3.14 and 3.12 (40 SELF rows, 29 PASS, none FAIL) and CI (run 38382802572) green on 05e0a63, every confirmed P0 to P2 finding of review run 20261013-082054-efd1776b fixed with SELF cases, an independent Fable check agreed; release.yml run 38388906430 tagged v4.1.0 at 56e28b3 and published it as Latest |
 | final | release/4.0 → main as v4.0.0 (release.yml publishes) | **released**: PR #30 squash-merged to main as 3c9bdfe (2026-10-12) with the user's approval; release.yml run 38301237757 tagged v4.0.0 at 3c9bdfe and published it as Latest. The user let PR #30 merge before its own gates.yml run finished: a Fable 5.1 xhigh check confirmed its tree was byte-identical to PR #29's CI-green tree, and that a squash merge was required (release-notes.sh tags the oldest commit that set the version, so a merge commit would have tagged Phase 6's 47878ac) |
 
 Update this table and the frontmatter at every PR boundary; the plan is `docs/plans/2026-09-28-1946-feat-lead-choice-v4-plan.md`.
 
 ## Next actions
 
-4.1.0 on `release/4.1` (worktree `mafw-wt-final`; briefs and lead notes in `~/projects/_tools/triforge-lead/r41/`). Workers run on Opus 5.5 at xhigh, code review on Fable at high plus Codex gpt-6-astra at xhigh (user, 2026-10-12).
-
-1. Integrated, each with SELF cases red before and green after: diagrams (ec950d8, DG), maintainer-tool prelude (3404f58, D1), lease fixes (522767f, b42c1fa, B), process-group watchdogs and the hook's causes (43b197f, A2), capped reads, past-bound rows and md_scan memory (ad57e5c, A1, finished by the lead; 4,500,000 documents with 0 answer differences, 1,400,000 with 0 token differences from marked), CLAUDE_CONFIG_DIR (9ee74bc, C, integrated by the lead from its worktree), the credential-deny fix a background security review asked for (b00c3a8), version 4.1.0 and README (8bedebe, e85dacc, d78be32). Full gate on b00c3a8 under Python 3.14: 40 rows, none FAIL.
-2. Worker E's SELF timing margins and the SELF-12 races (939e494). Full gate on 939e494 under Python 3.14 and 3.12: 40 rows, 29 PASS, none FAIL.
-3. The one ce-code-review round (run 20261013-082054-efd1776b; eight Fable reviewers at high, an in-process adversarial pass, Codex gpt-6-astra at xhigh run directly, an independent Fable validator): verdict "Ready with fixes", 10 actionable findings (1 P1, 8 P2, 1 P3), the validator confirmed all 8 it checked. Result archived in `r41/review-final/`. Fixed, each with SELF cases red before and green after, by five Opus 5.5 workers and lead review: process-group sweeps after every exit (a65914d, #6, #5), detect reads each file once (b4f883c, #2), lease approvals and the default branch (fd32682, #1 P1, #8, #9), md_scan's nested bounds (6d20e7d, #3, #12, #14; 0 answer differences on 6,640,000 documents, 0 token differences on 1,400,000), the writers and CLAUDE_CONFIG_DIR (16d5c38, #7, #10, #11, #19, gap #4), an empty CLAUDE_CONFIG_DIR taken as the working directory (lead).
-4. Gates under Python 3.14 and 3.12, release PR release/4.1 → main (squash merge only), gates.yml green, an independent Fable check, then merge under the grant, or stop at the open PR with a summary.
+None in progress. v4.1.0 is released; its open residuals, for the user's decision, are listed in PR #32 under "Unapplied review findings". Lead notes, briefs and the archived review are in `~/projects/_tools/triforge-lead/r41/`.
 
 ## Blockers recorded for the user
 
@@ -114,6 +109,7 @@ Lead's triage and recommendation:
 
   Gates are green on 3 and 4 under Python 3.12 and 3.14.
 - **The user then decided (AskUserQuestion: "Fix all, verify, merge").** Fix every round-4 finding in all three phases. Prove each fix with a SELF case that fails on the old head and passes on the new one. Gate under Python 3.12 and 3.14, then run gates.yml, then merge 2c → 3 → 4. There is no further external review round per phase. Codex reviews everything once, in the end-of-program review.
+- **User decision (2026-10-12):** v4.1.0 ships without a fresh live probe run too (the user, asked whether to run it: "No, skip it (Recommended)"); the release notes say so and cite `ops/research/2026-09-probe-record.md`.
 - **User decision (2026-10-07):** v4.0.0 ships without a fresh full live probe run. The user skipped that release step and marked it complete: Grok's rows would read QUOTA-FAIL (xAI quota) and Kimi's AUTH-FAIL (403). The release notes cite the newest existing record. They name the live rows that ran during 4.0 development under `--only` (DVN-01..07, CC-21..25, CDX-20..23, GRK-02/03/04/06/12, and GRK-05/07..11 plus SELF-06g before the quota ran out) as development evidence. They do not present any of it as a regenerated record.
 - **Gotcha (2c round 4):** the local gate must also run under Python 3.12. gates.yml pins 3.12, and this host's `python3` is 3.14. Put a dir whose `python3` is uv's cpython-3.12.12 first in PATH.
 - **Lead's recommendation:** a fourth round, scoped to the items above. Each is local: at-review's integrity check, review package and core-lane prompt; the grok read class's user-tier surfaces; Devin's retry. The live grok rows still wait on the xAI quota.
