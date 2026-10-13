@@ -70,13 +70,13 @@
 # returns 0 without asking. Lead-only: a lease worker or a lease root is
 # refused (rc 45, _lead_only --any-host when the loader is in scope, else the
 # worker marker). Every reader's user-level files (user_owned: the user tier
-# under HOME and the one in $<home_env> whenever that is set and not empty,
-# in the project too, a relative value taken from the working directory, the
+# under HOME and the one in $<home_env> whenever that is set, in the project
+# too, a relative or empty value taken from the working directory, the
 # user-level file and its override in the reader home) are
 # read, never written: each writer refuses one, or any file in the directory
 # of one, before any plan and also with --yes (rc 2), by identity, or by the
-# physical path for a file that does not exist yet; a relative $<home_env>
-# with the working directory gone refuses every write. HOME and every directory
+# physical path for a file that does not exist yet; a relative or empty
+# $<home_env> with the working directory gone refuses every write. HOME and every directory
 # above it are refused the same way (home_why: same_file against the physical
 # HOME and its ancestors, as _tb_home_anchor in bootstrap.sh compares), since
 # an instruction file there is read for every project under it; HOME unset or
@@ -1916,22 +1916,25 @@ def is_user_tier(path, project):
 def user_files(project):
     # (path, label) of every file a reader takes from the directories of the
     # user, from READERS: its user tier under HOME, which stays theirs when
-    # $<home_env> moves it, and the one in $<home_env> whenever that is set
-    # and not empty, wherever it points, the project included (the exclusions
-    # of tier_home are for detect and visibility; a writer never writes a file
-    # a reader may load as user memory): an absolute value as given, a
-    # relative one joined to project, the working directory every writer
-    # passes (here()), as _claude_config_cred (lease-wait.sh) takes it, and
-    # none with no working directory, which user_owned refuses first; then
-    # its user-level file and override in its reader home ($<home_env>
-    # honored, as reader_home does)
+    # $<home_env> moves it, and the one in $<home_env> whenever that is set,
+    # wherever it points, the project included (the exclusions of tier_home
+    # are for detect and visibility; a writer never writes a file a reader
+    # may load as user memory): an absolute value as given, a relative one
+    # joined to project, the working directory every writer passes (here()),
+    # as _claude_config_cred (lease-wait.sh) takes it, an empty one the same
+    # way (Claude Code 2.1.296 keeps it, $CLAUDE_CONFIG_DIR ?? ~/.claude, so
+    # its user memory is the CLAUDE.md where it started), and none with no
+    # working directory, which user_owned refuses first; then its user-level
+    # file and override in its reader home ($<home_env> honored, as
+    # reader_home does)
     files = []
     for r in READERS.values():
         if r["user_tier"] and home():
             files.append((os.path.join(home(), r["home_default"], r["user_tier"]), "user-tier ~/" + r["home_default"] + "/" + r["user_tier"]))
-        h = os.environ.get(r["home_env"], "") if r["user_tier"] else ""
-        if h and (h.startswith("/") or project):
-            # os.path.join drops project for an absolute h
+        h = os.environ.get(r["home_env"]) if r["user_tier"] and r["home_env"] else None
+        if h is not None and (h.startswith("/") or project):
+            # os.path.join drops project for an absolute h, and an empty h
+            # names project itself
             files.append((os.path.join(project, h, r["user_tier"]), "user-tier $" + r["home_env"] + "/" + r["user_tier"]))
         rh = reader_home(r)
         if not rh:
@@ -1946,13 +1949,13 @@ def user_owned(path, project):
     # of user_files for project, or it sits in the directory of one. same_file
     # compares by identity where both exist (a hard link; a link to the file
     # or to its directory) and by physical path where one does not, so an
-    # absent target is caught too. A relative $<home_env> with no working
-    # directory to join it to (project "") names a user tier no one can
-    # place, so every path is refused (fails closed)
+    # absent target is caught too. A relative or empty $<home_env> with no
+    # working directory to join it to (project "") names a user tier no one
+    # can place, so every path is refused (fails closed)
     for r in READERS.values():
-        h = os.environ.get(r["home_env"], "") if r["user_tier"] else ""
-        if h and not h.startswith("/") and not project:
-            return path + " may be your user-tier $" + r["home_env"] + "/" + r["user_tier"] + " or a file beside it, which Triforge never writes: $" + r["home_env"] + " is the relative path " + h + ", and the working directory it is relative to is gone, so where that file is cannot be told; run this from a directory that exists, or set " + r["home_env"] + " to an absolute path"
+        h = os.environ.get(r["home_env"]) if r["user_tier"] and r["home_env"] else None
+        if h is not None and not h.startswith("/") and not project:
+            return path + " may be your user-tier $" + r["home_env"] + "/" + r["user_tier"] + " or a file beside it, which Triforge never writes: $" + r["home_env"] + " is " + ("the relative path " + h if h else "empty, which names the working directory") + ", and the working directory it is relative to is gone, so where that file is cannot be told; run this from a directory that exists, or set " + r["home_env"] + " to an absolute path"
     files = user_files(project)
     for u, label in files:
         if same_file(path, u):
@@ -2954,8 +2957,8 @@ instruction_pointer_visibility() {
 # project's own CLAUDE.md instead. A file that already imports it is left
 # alone ("unchanged: …", rc 0). Refused (rc 2): another kind of file, a
 # user-level file or one in its directory (~/.claude/CLAUDE.md, ~/.claude/,
-# $CLAUDE_CONFIG_DIR/ whenever it is set and not empty, in the project too, a
-# relative value taken from the working directory, and every file when that
+# $CLAUDE_CONFIG_DIR/ whenever it is set, in the project too, a relative or
+# empty value taken from the working directory, and every file when that
 # directory is gone; ${CODEX_HOME:-~/.codex}/), a file in HOME or a directory above
 # it, a file outside the project's directory chain, a missing or non-regular
 # file, a symlink or a symlinked directory, and, before any plan and also with --yes,
@@ -2991,8 +2994,8 @@ instruction_add_import() {
 # <dir> gets a "warning:" line (that reader takes it instead; the file is
 # never written). Refused (rc 2), with or without --yes: a <dir> that is the
 # directory of a user-level file (${CODEX_HOME:-~/.codex}, ~/.claude, and
-# $CLAUDE_CONFIG_DIR whenever it is set and not empty, in the project too, a
-# relative value taken from the working directory, and every <dir> when that
+# $CLAUDE_CONFIG_DIR whenever it is set, in the project too, a relative or
+# empty value taken from the working directory, and every <dir> when that
 # directory is gone; through a link or another spelling too), a <dir> that is HOME or
 # a directory above it (the same way), an AGENTS.md that is a user-level one
 # (a hard link), a symlinked or non-regular AGENTS.md, markers not in one

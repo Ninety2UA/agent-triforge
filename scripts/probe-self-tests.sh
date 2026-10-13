@@ -8991,8 +8991,10 @@ _S20_FAIL="${_S20_FAIL}$(_self_expect env "$O" '^claude:2$' '^codex:0$' '^seam:0
 # ccd: CLAUDE_CONFIG_DIR absolute (with a space), relative, empty and through a
 # symlink: what reaches each worker, and the credential denies of the claude
 # lane's --settings and the codex read persona's profile. A relative value is
-# denied from this shell's working directory (fails closed), and each path is
-# denied as given and with its symlinks resolved (4.1)
+# denied from this shell's working directory (fails closed), an empty one as
+# that directory itself (Claude Code keeps an empty value, so its config home
+# is where it started), and each path is denied as given and with its
+# symlinks resolved (4.1)
 mkdir -p "$_S20/ccdreal/cfg" && ln -s "$_S20/ccdreal" "$_S20/ccdlink" 2>/dev/null || true
 O=$( export TMPDIR="$_S20/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
   for C in abs rel empty link; do
@@ -9010,7 +9012,7 @@ O=$( export TMPDIR="$_S20/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev
       for W in "${_LEASE_LANE_ARGV[@]}"; do if [ "$P" = --settings ]; then S=$W; fi; P=$W; done
     fi
     _persona_codex_profile || true
-    printf '%s-deny:%s\n' "$C" "$(S20_S="$S" S20_P="${_PERSONA_CODEX_PROFILE[*]:-}" python3 -c '
+    printf '%s-deny:%s\n' "$C" "$(S20_S="$S" S20_P="${_PERSONA_CODEX_PROFILE[*]:-}" S20_PWD="$PWD" python3 -c '
 import json, os, re
 try:
     s = json.loads(os.environ["S20_S"])
@@ -9018,17 +9020,19 @@ except ValueError:
     print("no-settings")
     raise SystemExit(0)
 deny, dr = s["permissions"]["deny"], s["sandbox"]["filesystem"]["denyRead"]
-print("read=%s:sbx=%s:home=%d:codex=%d:codexcfg=%d" % ("|".join(d for d in deny if "cfg" in d), "|".join(d for d in dr if "cfg" in d),
+c = os.environ["S20_PWD"].rstrip("/") + "/.credentials.json"
+print("read=%s:sbx=%s:home=%d:codex=%d:codexcfg=%d:cwd=%d%d%d" % ("|".join(d for d in deny if "cfg" in d), "|".join(d for d in dr if "cfg" in d),
       "Read(~/.claude/.credentials.json)" in deny and "~/.claude/.credentials.json" in dr, os.environ["S20_P"].count("\"/s20/cfg home/.credentials.json\"=\"deny\""),
-      len(re.findall(r"\"([^\"]*cfg[^\"]*)\"=\"deny\"", os.environ["S20_P"]))))')"
+      len(re.findall(r"\"([^\"]*cfg[^\"]*)\"=\"deny\"", os.environ["S20_P"])),
+      "Read(/" + c + ")" in deny, c in dr, os.environ["S20_P"].count(json.dumps(c) + "=\"deny\"")))')"
   done
 ) 2>&1 || true
 _S20_FAIL="${_S20_FAIL}$(_self_expect ccd "$O" '^abs-env:claude=1:codex=0:grok=0$' '^rel-env:claude=0:codex=0:grok=0$' '^empty-env:claude=0:codex=0:grok=0$' \
   '^abs-any:1$' '^rel-any:0$' '^empty-any:0$' \
-  '^abs-deny:read=Read\(//s20/cfg home/\.credentials\.json\)\|Read\(//s20/cfg home/\.credentials\.json/\*\*\):sbx=/s20/cfg home/\.credentials\.json:home=1:codex=1:codexcfg=1$' \
-  '^rel-deny:read=Read\(//[^|]*/cfg/\.credentials\.json\)\|Read\(//[^|]*/cfg/\.credentials\.json/\*\*\).*:sbx=/[^|:]*/cfg/\.credentials\.json.*:home=1:codex=0:codexcfg=[12]$' \
-  '^empty-deny:read=:sbx=:home=1:codex=0:codexcfg=0$' \
-  '^link-deny:read=Read\(//[^|]*/ccdlink/cfg/\.credentials\.json\)\|Read\(//[^|]*/ccdlink/cfg/\.credentials\.json/\*\*\)\|Read\(//[^|]*/ccdreal/cfg/\.credentials\.json\)\|Read\(//[^|]*/ccdreal/cfg/\.credentials\.json/\*\*\):sbx=/[^|]*/ccdlink/cfg/\.credentials\.json\|/[^|]*/ccdreal/cfg/\.credentials\.json:home=1:codex=0:codexcfg=2$')"
+  '^abs-deny:read=Read\(//s20/cfg home/\.credentials\.json\)\|Read\(//s20/cfg home/\.credentials\.json/\*\*\):sbx=/s20/cfg home/\.credentials\.json:home=1:codex=1:codexcfg=1:cwd=000$' \
+  '^rel-deny:read=Read\(//[^|]*/cfg/\.credentials\.json\)\|Read\(//[^|]*/cfg/\.credentials\.json/\*\*\).*:sbx=/[^|:]*/cfg/\.credentials\.json.*:home=1:codex=0:codexcfg=[12]:cwd=000$' \
+  '^empty-deny:read=:sbx=:home=1:codex=0:codexcfg=0:cwd=111$' \
+  '^link-deny:read=Read\(//[^|]*/ccdlink/cfg/\.credentials\.json\)\|Read\(//[^|]*/ccdlink/cfg/\.credentials\.json/\*\*\)\|Read\(//[^|]*/ccdreal/cfg/\.credentials\.json\)\|Read\(//[^|]*/ccdreal/cfg/\.credentials\.json/\*\*\):sbx=/[^|]*/ccdlink/cfg/\.credentials\.json\|/[^|]*/ccdreal/cfg/\.credentials\.json:home=1:codex=0:codexcfg=2:cwd=000$')"
 # ccd, the default home (fix round, finding #10): CLAUDE_CONFIG_DIR set to HOME's .claude, and
 # to a link to it, names ~/.claude/.credentials.json a second time. The codex read persona's
 # filesystem table parses as TOML (tomllib, 3.11 and later; a key given twice does not parse)
@@ -9249,7 +9253,7 @@ _S20_FAIL="${_S20_FAIL}$(_self_expect ctx "$O" '^ctx-root:rc=69:class=determinis
 
 _S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON envelope (subtype, is_error, session_id), explicit tool sets, --max-turns, session resume, the sandbox settings and their Claude Code floor, the claude env arm, .claude/skills provisioning that adds names only, max-turns routed as report missing, dispatch_role running claude -p under a codex lead, never without its deny on the lead's git dir inside a git checkout (KTD16, R2/R3)"
 if [ -z "$_S20_FAIL" ]; then
-  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0; ctx: a codex lead's tester on claude with TRIFORGE_LEASE_ROOT=/dev/null/x -> rc 69 deterministic, the lease line and one ERROR line, stub never run; outside any git repository the reviewer runs, rc 0; ccd (4.1): an absolute CLAUDE_CONFIG_DIR (with a space) reaches the claude worker as set, never codex or grok, and its .credentials.json is denied (Read rule rooted with //, sandbox denyRead, the codex read persona's profile); a relative or empty one reaches no worker and adds no deny; set to HOME's .claude or a link to it, the codex profile parses as TOML and names each credential path once" "static"
+  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0; ctx: a codex lead's tester on claude with TRIFORGE_LEASE_ROOT=/dev/null/x -> rc 69 deterministic, the lease line and one ERROR line, stub never run; outside any git repository the reviewer runs, rc 0; ccd (4.1): an absolute CLAUDE_CONFIG_DIR (with a space) reaches the claude worker as set, never codex or grok, and its .credentials.json is denied (Read rule rooted with //, sandbox denyRead, the codex read persona's profile); a relative or empty one reaches no worker, a relative one denied from the lead's working directory and an empty one as that directory's .credentials.json; set to HOME's .claude or a link to it, the codex profile parses as TOML and names each credential path once" "static"
 else
   row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S20_FAIL"):$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"
 fi
@@ -13014,6 +13018,8 @@ for _S16B_Y in "" --yes; do
   _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-gone-relative${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/cfg/CLAUDE\.md may be your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md or a file beside it, which Triforge never writes: \$CLAUDE_CONFIG_DIR is the relative path cfg, and the working directory it is relative to is gone, ' '^rc=2$')"
   _O=$(_s16b_gone cfg instruction_merge_pointer "$_S16B_CC/cfg" $_S16B_Y)
   _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-gone-relative${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/cfg/AGENTS\.md may be your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md or a file beside it, .* or set CLAUDE_CONFIG_DIR to an absolute path \(rc 2\)$' '^rc=2$')"
+  _O=$(_s16b_gone "" instruction_add_import "$_S16B_CC/cfg/CLAUDE.md" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-gone-empty${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/cfg/CLAUDE\.md may be your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md or a file beside it, which Triforge never writes: \$CLAUDE_CONFIG_DIR is empty, which names the working directory, and the working directory it is relative to is gone, ' '^rc=2$')"
 done
 [ ! -e "$_S16B_CC/cfg/AGENTS.md" ] && [ ! -e "$_S16B_CC/home/.claude/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-ccd-merge(written)"
 # unset: HOME's .claude/CLAUDE.md is the user line, as before
@@ -13023,7 +13029,8 @@ _S16_FAIL="${_S16_FAIL}$(_s16b_not b-ccd-unset "$_O" '/cc/cfg/')"
 # empty, relative, or the project itself: no user tier for detect and visibility, so no
 # project file is taken for the user's and HOME's .claude/CLAUDE.md is a file above; the
 # pointer stays hidden. The project's own files still get their plans where no set value
-# names their directory: empty, and relative cfg, which names <project>/cfg/CLAUDE.md
+# names their directory: relative cfg, which names <project>/cfg/CLAUDE.md (an empty value
+# names the working directory, the project, as Claude Code keeps it: refused below)
 for _S16B_D in "" cfg "$_S16B_CC/home/proj"; do
   case "$_S16B_D" in "") _S16B_N=b-ccd-empty ;; cfg) _S16B_N=b-ccd-relative ;; *) _S16B_N=b-ccd-inproject ;; esac
   _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_files_detect)
@@ -13033,7 +13040,7 @@ for _S16B_D in "" cfg "$_S16B_CC/home/proj"; do
   _S16_FAIL="${_S16_FAIL}$(_s16b_not "$_S16B_N" "$_O" "^(CLAUDE\.md|\.claude/CLAUDE\.md)${T}user${T}")"
   _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_pointer_visibility claude)
   _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/cc/home/proj/CLAUDE\.md, [^ ]*/cc/home/\.claude/CLAUDE\.md[:,] " '^rc=1$')"
-  case "$_S16B_N" in b-ccd-inproject) continue ;; esac
+  case "$_S16B_N" in b-ccd-inproject|b-ccd-empty) continue ;; esac
   _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_add_import CLAUDE.md)
   _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" '^needs-ask: would add the line @AGENTS\.md to [^ ]*/cc/home/proj/CLAUDE\.md, ' '^rc=20$')"
   _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_merge_pointer)
@@ -13042,8 +13049,15 @@ done
 # the writers refuse the file a set value names wherever it lies, and every file beside it,
 # rc 2 before any plan, with and without --yes (fix round, finding #7): relative cfg names
 # <project>/cfg/CLAUDE.md (from the working directory); the project itself names its own
-# CLAUDE.md, so its CLAUDE.md and AGENTS.md are refused
+# CLAUDE.md, so its CLAUDE.md and AGENTS.md are refused; so does an empty value, which
+# Claude Code keeps ($CLAUDE_CONFIG_DIR ?? ~/.claude), taken from the working directory
 for _S16B_Y in "" --yes; do
+  _O=$(_s16b_cc "" "$_S16B_CC/home/proj" instruction_add_import CLAUDE.md $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-empty${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/home/proj/CLAUDE\.md is your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-ccd-empty${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+  _O=$(_s16b_cc "" "$_S16B_CC/home/proj" instruction_merge_pointer $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-empty${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/home/proj/AGENTS\.md is in the directory of your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-ccd-empty${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
   _O=$(_s16b_cc cfg "$_S16B_CC/home/proj" instruction_add_import "$_S16B_CC/home/proj/cfg/CLAUDE.md" $_S16B_Y)
   _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-relative${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/home/proj/cfg/CLAUDE\.md is your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
   _O=$(_s16b_cc cfg "$_S16B_CC/home/proj" instruction_merge_pointer "$_S16B_CC/home/proj/cfg" $_S16B_Y)
@@ -14035,7 +14049,7 @@ done
 _S16_FAIL="${_S16_FAIL}$(_s16b_same b-rw-controls-untouched "$_S16B_SUM" "$(_s16b_sum $_S16B_RWF)")"
 _S16_EV="${_S16_EV}B (review round 6): the five round-5 rewrites match what they matched before (b-rw-*: closed front matter, front matter with blank lines before its closing ---, a <script> block whose closing line holds three </script>, a ~~~ line ending a paragraph, an import in a second comment closed on the last line of a comment-opened HTML block: no-import, hidden with the fix, the line appended, then unchanged; a ~~~~ fence a ~~~ line cannot close: the import refused rc 2 naming the fence opened on line 2, unchanged; controls import: a --- block closed by --, the same front matter after a heading, the line after the </script> line, ~~, the import after the comment's end on its last line and after a <!-- left open there, a ~~~~ fence closed by ~~~~~); "
 _S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file), an import line written or offered only when it reads back as the project's import (b-space-*, a project path with whitespace, a tab too; b-tilde-*, a directory named ~ on the way down: the import into the CLAUDE.md above refused rc 2 before any plan, without and twice with --yes, unchanged; the import column -, visibility and session start naming the project's own CLAUDE.md alone; the .claude/CLAUDE.md beside it, whose @../~/proj/AGENTS.md reads back, still planned), an import read in Markdown text, its path whole (b-fence-*, b-name-*: one in a fence or padded code span, Read @AGENTS.md. or (see @AGENTS.md) is none: no-import, hidden with the fix, the line appended, then unchanged; a file ending in an open fence or comment, an import of c#app or app[1] from above: rc 2, unchanged; a plain line, one after a closed or list-indented fence, @AGENTS.md#setup import), an import in a link title is none (b-title-*: [x](a(b) \"t @AGENTS.md \"), [x](a\\) ..., the Markdown_(syntax) link, the image form, a (title), a title on the next line: no-import, hidden with the fix, the line appended, then unchanged; see @AGENTS.md and one after [y](a(b)c) import), one whose _ may pair as emphasis is none (b-emphasis-*: @_app/AGENTS.md with z_ in its paragraph no-import, hidden; in another paragraph imports, visible), the reader is linear (b-slow: 100 KB of ](, a 40 KB backslash run and 3000 <? before the import, read in ${_S16B_SLOW}s of the 20 s allowed) and bounded (b-bound: _INSTR_SECS=1 gives up on a python3 that ignores SIGTERM in 1 s + the 2 s SIGKILL grace, rc 137, nothing printed, the stub gone, under ${_S16B_BOUND} and the watchdog), an import a path takes in or a block hides is none (b-join-*: @x\\ @AGENTS.md; b-tail-*: <?x?><div>, <!x y><a>, two lines, a quote; b-tab-*: >\\t<div>, -\\t<div>: no-import, hidden, appended, unchanged; controls import), the block structure as marked lexes it (b-mk-*: a tag name ending its line, a > stripped from a code line, a lazy HTML line in a quote, a lazy fence ending a quote in a list item, a 2. after paragraph text, a closing tag over lines, an item ended before a definition title, a definition label over lines: no-import, hidden, appended, unchanged; one control per family imports); "
-_S16_EV="${_S16_EV}B (4.1, ccd): an absolute CLAUDE_CONFIG_DIR outside the project holds the user line (kind CLAUDE.md), its import makes the pointer visible, HOME's .claude/CLAUDE.md is above, the writers refuse it, its directory and ~/.claude (rc 2, with and without --yes), from a deleted working directory too; unset: HOME's .claude/CLAUDE.md the user line; empty, relative or the project: no user line, the pointer hidden; the writers refuse the file a set value names wherever it lies and its directory (relative cfg, the project itself, <project>/.claude absolute and relative), the project's other plans kept; a relative value with the working directory gone refuses every write; siblings proj and proj2 each the user line of the other; "
+_S16_EV="${_S16_EV}B (4.1, ccd): an absolute CLAUDE_CONFIG_DIR outside the project holds the user line (kind CLAUDE.md), its import makes the pointer visible, HOME's .claude/CLAUDE.md is above, the writers refuse it, its directory and ~/.claude (rc 2, with and without --yes), from a deleted working directory too; unset: HOME's .claude/CLAUDE.md the user line; empty, relative or the project: no user line, the pointer hidden; the writers refuse the file a set value names wherever it lies and its directory (relative cfg, the project itself, an empty value as the working directory, <project>/.claude absolute and relative), the project's other plans kept; a relative or empty value with the working directory gone refuses every write; siblings proj and proj2 each the user line of the other; "
 rm -rf "$_S16B"
 # --- end of SELF-16 section B ---
 # --- SELF-16 section C: at-setup's blocks and the headless primitives (U15) ---

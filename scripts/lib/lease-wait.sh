@@ -453,13 +453,18 @@ _CLAUDE_CRED_PATHS="~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.git-credentials ~/.config
 # beside _CLAUDE_CRED_PATHS. A relative value names a directory relative to
 # wherever Claude Code started, which a helper cannot know for sure: it is
 # taken from this shell's working directory, the lead's, so the deny fails
-# closed rather than open; an empty one prints nothing (~/.claude, which
-# _CLAUDE_CRED_PATHS already denies). Each consumer also denies the path with
-# every symlink resolved (os.path.realpath), since a rule on one spelling may
-# not match the other (/tmp is /private/tmp on macOS).
+# closed rather than open. An empty one names that directory itself (Claude
+# Code keeps it: $CLAUDE_CONFIG_DIR ?? ~/.claude), so it is taken the same
+# way; unset prints nothing (~/.claude, which _CLAUDE_CRED_PATHS already
+# denies). Each consumer also denies the path with every symlink resolved
+# (os.path.realpath), since a rule on one spelling may not match the other
+# (/tmp is /private/tmp on macOS).
 _claude_config_cred() {
-  case "${CLAUDE_CONFIG_DIR:-}" in
-    "") ;;
+  if [ -z "${CLAUDE_CONFIG_DIR+x}" ]; then
+    return 0
+  fi
+  case "$CLAUDE_CONFIG_DIR" in
+    "") printf '%s/.credentials.json\n' "${PWD%/}" ;;
     /*) printf '%s/.credentials.json\n' "${CLAUDE_CONFIG_DIR%/}" ;;
     *) printf '%s/%s/.credentials.json\n' "${PWD%/}" "${CLAUDE_CONFIG_DIR%/}" ;;
   esac
