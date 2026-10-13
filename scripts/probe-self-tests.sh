@@ -47,6 +47,11 @@ unset TRIFORGE_LEASE_WORKER
 # dispatches a real CLI; the rows that dispatch set theirs. A row testing
 # another lead or host sets its own (SELF-13, SELF-19's killcodex).
 unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID
+# The rows take Claude Code's user tier from a throwaway HOME's .claude; a
+# CLAUDE_CONFIG_DIR the runner exported would move it (instructions.sh,
+# _adapter_env, the claude lane's deny rules), so it is dropped here, and the
+# cases that test it set their own.
+unset CLAUDE_CONFIG_DIR
 export TRIFORGE_TEST_LEAD=claude
 mkdir -p "${WORK}/self-seam"
 printf '#!/bin/sh\n# SELF seam default builder: reports and does nothing\necho "Status: BLOCKED (no fake builder named for this row)"\n' > "${WORK}/self-seam/no-builder.sh"
@@ -68,13 +73,28 @@ unset _stub
 
 # _self_expect <case> <output> <pattern...> — print " <case>(no:<pattern>)" for
 # each pattern (ERE) the output does not contain; the caller appends what it
-# prints to its own FAIL variable.
+# prints to its own FAIL variable. grep reads the output from a here-document,
+# not a pipe: grep -q stops at its first match, and under the harness's
+# pipefail a printf still writing into the pipe then fails the check (write
+# error: Broken pipe) although the pattern is there. That happens whenever the
+# pipe holds less than the whole output, as it did on a heavily loaded host
+# for SELF-12 outputs of 6 to 9 KB
 _self_expect() {
   local C=$1 O=$2 P
   shift 2
   for P in "$@"; do
-    printf '%s\n' "$O" | grep -qE -- "$P" || printf ' %s(no:%s)' "$C" "$P"
+    grep -qE -- "$P" <<SELF_EXPECT_EOF || printf ' %s(no:%s)' "$C" "$P"
+$O
+SELF_EXPECT_EOF
   done
+}
+
+# _self_warm <command...> — run a stub a case has just written once, quietly,
+# before a bounded call runs it: macOS checks an executable file the first time
+# it runs (about 0.1 s on an idle host, more than a second on one busy creating
+# files), which inside a 1 s bound can stop a stub before its first line runs
+_self_warm() {
+  "$@" </dev/null >/dev/null 2>&1 || true
 }
 
 # _self_fail_cases <fail> — the case names in a FAIL variable _self_expect
@@ -1084,6 +1104,13 @@ fi
 #          the file with its reach (every project under it), then removing it;
 #          with HOME = the parent, ~/CLAUDE.md and the two files above HOME
 #          offer the project's CLAUDE.md alone (no import, no removal)
+#   ccd    (4.1) a project under HOME whose own CLAUDE.md does not import
+#          AGENTS.md: with CLAUDE_CONFIG_DIR unset, the own notice and none
+#          for ~/.claude/CLAUDE.md (the user tier); set to a directory outside
+#          the project, or relative, ~/.claude/CLAUDE.md is a file above the
+#          project, named with the fix in this project, and the moved
+#          CLAUDE.md is never named; set to one whose CLAUDE.md imports
+#          the project's AGENTS.md, no own or above notice at all
 #   home   a session started in HOME, and one in the directory above it (a
 #          3.x copy as ~/CLAUDE.md, an own ~/CLAUDE.local.md, a CLAUDE.md above
 #          HOME, no AGENTS.md): the one home-directory warning, no file notice
@@ -1110,38 +1137,57 @@ fi
 #          notice one line with its fixed start, no line starting with `{`
 #   killgrace (round 1, #6) the hook's own _ss_bounded text with a 1 s bound
 #          on a claude that ignores SIGTERM, under the timeout binary (skipped,
-#          and said so, without one) and under the watchdog: back in under 6 s
-#          (1 s + the 2 s SIGKILL grace + slack), the stub gone, nothing on
-#          stderr; a call still running at 10 s is killed and recorded as hung
+#          and said so, without one) and under the watchdog: back in under 15 s
+#          (1 s + the 2 s SIGKILL grace, and room for a loaded host; the stub
+#          alone runs 30 s, so a bound that never sends the SIGKILL still
+#          fails), the stub gone, nothing on stderr; a call still running at
+#          25 s is killed and recorded as hung
 #   versiongrace (round 1, wave 2) the optional-CLI version probe, the hook's
 #          own _ss_cli_version text (with _ss_bounded and _ss_private_tmp and
 #          the checks it calls), with a 1 s bound instead of the hook's 10 s,
 #          so a run costs seconds, not 2 x 12 s: an optional CLI that ignores
 #          SIGTERM and never answers is asked --version, then -V, and given
-#          up on in under 9 s (two calls of 1 s + the 2 s SIGKILL grace +
-#          slack), nothing recorded, the stub gone, nothing on stderr, no
-#          temp dir left; one that answers -V only gets that answer recorded.
-#          Under the timeout binary (skipped, and said so, without one) and
-#          under the watchdog, side by side; a case still running at 15 s is
-#          killed and recorded as hung. The watchdog run above also carries
+#          up on in under 20 s (two calls of 1 s + the 2 s SIGKILL grace, and
+#          room for a loaded host; the stub alone runs 30 s a call), nothing
+#          recorded, the stub gone, nothing on stderr, no temp dir left; one
+#          that answers -V only gets that answer recorded. Under the timeout
+#          binary (skipped, and said so, without one) and under the
+#          watchdog, side by side; a case still running at 30 s is killed
+#          and recorded as hung. The watchdog run above also carries
 #          a kimi stub that answers -V only: the hook records that answer in
 #          .claude/roster-detected.local.md
 #   detectbound (round 4, J) the instruction-file pass gets 10 s, then
 #          SIGKILL 2 s later (_INSTR_SECS, which _instr_py honors): with a
 #          python3 first on PATH that never answers that pass (every other
 #          call runs the real one), session start returns rc 0 in under
-#          25 s with the WARNING that the check did not finish and its rc,
-#          the stub gone, no line starting with `{`. Under the harness
-#          timeout (30 s, -k 5), so an unbounded pass fails there. Round 5:
+#          40 s (the 10 s bound, 2 s grace, and room for a loaded host) with
+#          the WARNING that the check did not finish, its rc and (4.1) its
+#          cause, given up on after 10 s, the stub gone, no line starting
+#          with `{`. Under the harness timeout (50 s, -k 5, short of the
+#          stub's 60 s), so an unbounded pass fails there. Round 5:
 #          the stub prints one project no-import row before it stalls, and
 #          a pass given up on drops its rows: the WARNING, no own-file notice
 #   detectfork (round 5) the same pass with no timeout binary on PATH (the
 #          library's watchdog; /usr/bin and /bin hold none on macOS) and a
 #          python3 launcher that forks: it prints that row, starts a child
 #          that ignores SIGTERM and holds stdout for 60 s, and ignores
-#          SIGTERM itself. Session start is back in under 25 s (rc 0, the
-#          WARNING, no own-file notice), the launcher gone, its child still
-#          running then under the watchdog (killed here)
+#          SIGTERM itself. Session start is back in under 40 s (rc 0, the
+#          WARNING, no own-file notice), the launcher gone and (4.1) its
+#          child too: the watchdog stops the command's process group
+#   detect69 (4.1) an rc 69 from that pass names its cause in the WARNING:
+#          python3 not on PATH (PATH = the stubs and links to every command
+#          in /usr/bin and /bin but python3), no timeout binary and no
+#          private temp dir for the watchdog (a TMPDIR of mode 0777 without
+#          the sticky bit and a mktemp that fails under /tmp), and a library
+#          that did not load (a copy of the hook in a tree without
+#          scripts/lib/instructions.sh); rc 0, one line each
+#   pastbound (4.1) a python3 first on PATH answers that pass with rows the
+#          reader stopped in at a bound (state past-bound, import "-") for
+#          ./CLAUDE.md, ./.claude/CLAUDE.md and a CLAUDE.md above the
+#          project: each gets a line saying session start cannot tell whether
+#          it imports AGENTS.md, the own ones offering @AGENTS.md and
+#          @../AGENTS.md to add by hand, the above one the project's
+#          CLAUDE.md; no line offers "the line -" or explains the "-"
 #   detectwatch (round 5) the library on its own under bash and zsh, set -u,
 #          a python3 stub and a logging sleep first on PATH. The watchdog
 #          (PATH = the stubs and dirname only: no timeout binary) leaves no
@@ -1150,8 +1196,9 @@ fi
 #          ships as 30, set to 1 here) detect, visibility and a writer's plan
 #          give up on a python3 that never answers: one "gave up after 1 s"
 #          line (round 6: naming python3 hung or killed) and its rc (124,
-#          137 or 143), under the timeout binary and
-#          the watchdog. A writer with --yes is never bounded: with
+#          137 or 143) within 15 s, under the timeout binary and the
+#          watchdog; an unbounded call runs into the harness timeout (20 s).
+#          A writer with --yes is never bounded: with
 #          _INSTR_SECS=1 and a python3 2 s slow it still writes, rc 0, no
 #          temp file left
 #   watchtmp (round 6) the library alone under bash and zsh with no timeout
@@ -1162,11 +1209,47 @@ fi
 #          there); with the stub failing for /tmp too, the call returns rc 69
 #          with the "nothing was run (rc 69)" line alone, python3 never
 #          started, nothing left in the TMPDIR
+#   forkwatch (4.1) the library alone under bash and zsh with no timeout
+#          binary and a python3 launcher that forks a child ignoring SIGTERM,
+#          then sleeps until SIGTERM ends it: given up on after 1 s
+#          (_INSTR_SECS=1), the call returns rc 143 in under 15 s with the
+#          launcher and its child both gone. The same with the timeout binary
+#          (skipped, and said so, without one): rc 124 in under 15 s, neither
+#          left, though timeout itself never KILLs a child whose launcher
+#          SIGTERM ended, and the child holds the caller's stdout. The child
+#          holds it for 40 s, past the harness timeout (20 s), so a bound
+#          that stops the launcher alone comes back at 20 s or later and fails
+#   forkexit (4.1 review, #6) as forkwatch, but the launcher prints its row
+#          and exits 0 as soon as the child ignores SIGTERM, long before a
+#          30 s bound, leaving the child behind: the call returns the row and
+#          rc 0 in under 15 s with the child gone, under the watchdog and the
+#          timeout binary (skipped, and said so, without one). The group sweep
+#          runs after every exit, not only at the bound: without it the
+#          timeout binary's call waits the child's 40 s out on stdout, and the
+#          watchdog's leaves it running
+#   perllocale (4.1) the library alone under bash and zsh with no timeout
+#          binary and LANG and LC_ALL set to a locale the system lacks: the
+#          pass prints its rows and rc 0, no "perl: warning" line
+#   watchkill (4.1) the library alone under bash and zsh with no timeout
+#          binary, a TMPDIR of its own (mode 0700) and an rm whose first
+#          call SIGKILLs its parent: the watchdog's subshell, which calls rm
+#          once its output files are open. The call returns rc 137 and
+#          leaves no triforge-instr.* entry in TMPDIR
 #   boundsleep (round 6) the hook's own _ss_bounded text with no timeout
 #          binary, under bash and zsh, a sleep that logs its pid first on
 #          PATH: a command that answers in 0.5 s, and one that answers at
 #          once (three times), give their answer, and no sleep of the
 #          watchdog's is left running once the call returns, nor an output dir
+#   boundfork (4.1) the same _ss_bounded with a 1 s bound on a command that
+#          forks a child ignoring SIGTERM, then sleeps until SIGTERM ends
+#          it: the call returns in under 15 s with the command and its child
+#          (40 s, as in forkwatch) both gone, under the watchdog and the
+#          timeout binary (skipped, and said so, without one)
+#   boundexit (4.1 review, #6) as boundfork, but the command prints its
+#          answer and exits as soon as the child ignores SIGTERM, under a
+#          30 s bound, leaving the child behind: the answer and rc 0 in under
+#          15 s, the child gone, under the watchdog and the timeout binary
+#          (skipped, and said so, without one)
 _S8="${WORK}/self08"
 mkdir -p "$_S8/proj" "$_S8/bin" "$_S8/home"
 cat > "$_S8/bin/agy" <<'EOF'
@@ -1362,6 +1445,32 @@ _s8_has 'is not loaded under a Claude lead: [^ ]*/above/mid/CLAUDE\.md ' || _S8_
 _s8_has '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/above/mid/CLAUDE\.md sits above this project, .*'"$_S8_OWN"'That file is in your home directory or above it' || _S8_FAIL="$_S8_FAIL home-CLAUDE.md-notice-without-the-project-fix"
 [ "$(printf '%s\n' "$_O" | grep -c 'is not loaded under a Claude lead: .*'"$_S8_OWN"'That file is in your home directory or above it' || true)" -eq 3 ] || _S8_FAIL="$_S8_FAIL home-or-above-notices-not-3"
 printf '%s\n' "$_O" | grep -qE 'is not loaded under a Claude lead: .*(Or add the line|remove the file)' && _S8_FAIL="$_S8_FAIL home-or-above-notice-offers-the-parent-file"
+# ccd: CLAUDE_CONFIG_DIR moves the user tier out of ~/.claude (a project under HOME, its own
+# CLAUDE.md without the import; HOME's .claude/CLAUDE.md; two config homes, the second
+# importing the project's AGENTS.md)
+mkdir -p "$_S8/cch/.claude" "$_S8/cch/proj" "$_S8/ccd" "$_S8/ccd2"
+( cd "$_S8/cch/proj" && git init -q 2>/dev/null ) || true
+printf '# home tier\n' > "$_S8/cch/.claude/CLAUDE.md"
+printf '# own\n' > "$_S8/cch/proj/CLAUDE.md"
+printf '# cch agents\n' > "$_S8/cch/proj/AGENTS.md"
+printf '# moved\n' > "$_S8/ccd/CLAUDE.md"
+printf '# moved\n@%s/AGENTS.md\n' "$(cd "$_S8/cch/proj" && pwd -P)" > "$_S8/ccd2/CLAUDE.md"
+_S8_CCOWN='^WARNING: CLAUDE\.md in this project does not import AGENTS\.md'
+_S8_CCHOME='^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/self08/cch/\.claude/CLAUDE\.md sits above this project, .*That file is in your home directory or above it'
+_s8_run ccd-unset "$_S8/cch/proj" "2.1.277" "$_S8/cch"
+_s8_has "$_S8_CCOWN" || _S8_FAIL="$_S8_FAIL ccd-unset-no-own-notice"
+_s8_has '/self08/cch/\.claude/CLAUDE\.md' && _S8_FAIL="$_S8_FAIL ccd-unset-user-tier-named"
+for _S8_CCD in absolute relative; do
+  if [ "$_S8_CCD" = absolute ]; then export CLAUDE_CONFIG_DIR="$_S8/ccd"; else export CLAUDE_CONFIG_DIR=ccd; fi
+  _s8_run "ccd-${_S8_CCD}" "$_S8/cch/proj" "2.1.277" "$_S8/cch"
+  _s8_has "$_S8_CCOWN" || _S8_FAIL="$_S8_FAIL ccd-${_S8_CCD}-no-own-notice"
+  _s8_has "$_S8_CCHOME" || _S8_FAIL="$_S8_FAIL ccd-${_S8_CCD}-no-notice-for-home-.claude/CLAUDE.md"
+  _s8_has '/self08/ccd/CLAUDE\.md' && _S8_FAIL="$_S8_FAIL ccd-${_S8_CCD}-moved-tier-named"
+done
+export CLAUDE_CONFIG_DIR="$_S8/ccd2"
+_s8_run ccd-import "$_S8/cch/proj" "2.1.277" "$_S8/cch"
+printf '%s\n' "$_O" | grep -qE 'does not import AGENTS\.md|is not loaded under a Claude lead' && _S8_FAIL="$_S8_FAIL ccd-import-notice-despite-the-moved-tier-import"
+unset CLAUDE_CONFIG_DIR
 # HOME is no project: a session started in HOME, or in a directory above it, gets
 # the one home-directory warning and no file notice or tip, since each would name a
 # file there (read for every project under it, refused by the writers): a 3.x copy
@@ -1380,12 +1489,13 @@ for _S8_RUN in at-home above-home; do
 done
 [ "$(cksum "$_S8/hh/CLAUDE.md" "$_S8/hh/CLAUDE.local.md" "$_S8/CLAUDE.md")" = "$_S8_SUMH" ] || _S8_FAIL="$_S8_FAIL at-home-files-changed"
 rm -rf "$_S8/hh" "$_S8/CLAUDE.md"
-# watchdog: with no timeout binary a hung claude is given up on after 10 s, session start exits 0 and warns about nothing
+# watchdog: with no timeout binary a hung claude is given up on after 10 s, session start exits 0 and warns about nothing;
+# back in under 25 s on a loaded host, while a claude left unbounded holds it 30 s
 _S8_T0=$(date +%s)
 _O=$(_s8_start_notimeout "$_S8/proj") || _S8_FAIL="$_S8_FAIL notimeout-rc-nonzero"
 _S8_T1=$(( $(date +%s) - _S8_T0 ))
 _s8_sane notimeout "$_O"
-[ "$_S8_T1" -lt 20 ] || _S8_FAIL="$_S8_FAIL notimeout-hung-claude-not-bounded(${_S8_T1}s)"
+[ "$_S8_T1" -lt 25 ] || _S8_FAIL="$_S8_FAIL notimeout-hung-claude-not-bounded(${_S8_T1}s)"
 _s8_has 'below Triforge' && _S8_FAIL="$_S8_FAIL notimeout-floor-warning-without-an-answer"
 grep -q '^kimi|kimi-probe-stub 1\.2\.3|' "$_S8/proj/.claude/roster-detected.local.md" 2>/dev/null || _S8_FAIL="$_S8_FAIL notimeout-kimi-V-answer-not-recorded"
 # fixed: the parent file now imports the project's AGENTS.md
@@ -1439,14 +1549,16 @@ _s8_sane "unset-root" "$_O"
 printf '%s\n' "$_O" | grep -Fq "WARNING: the Triforge helper did not load (CLAUDE_PLUGIN_ROOT is unset)" || _S8_FAIL="$_S8_FAIL unset-root-no-helper-notice"
 _s8_has '^Multi-agent framework ready\.$' || _S8_FAIL="$_S8_FAIL unset-root-orientation-missing"
 # killgrace (round 1, #6): _ss_bounded as the hook ships it (its text, from
-# `_ss_bounded() {` to the closing brace at column 0), evaluated in a
-# background subshell under an outer 10 s deadline, so a call that never
-# returns cannot hang the gate. The stub writes its pid and prints nothing.
-_S8_BOUNDED=$(sed -n '/^_ss_bounded() {$/,/^}$/p' "$REPO_ROOT/hooks/handlers/session-start.sh")
-[ -n "$_S8_BOUNDED" ] || _S8_FAIL="$_S8_FAIL killgrace-no-_ss_bounded-in-the-hook"
+# `_ss_bounded() {` to the closing brace at column 0, with _ss_sweep's, which
+# it calls since the 4.1 review), evaluated in a background subshell under an
+# outer 25 s deadline, so a call that never returns cannot hang the gate. The
+# stub writes its pid and prints nothing.
+_S8_BOUNDED=$(sed -n -e '/^_ss_sweep() {$/,/^}$/p' -e '/^_ss_bounded() {$/,/^}$/p' "$REPO_ROOT/hooks/handlers/session-start.sh")
+printf '%s\n' "$_S8_BOUNDED" | grep -q '^_ss_bounded() {$' || _S8_FAIL="$_S8_FAIL killgrace-no-_ss_bounded-in-the-hook"
 mkdir -p "$_S8/deaf"
-printf '#!/bin/sh\n# probe stub (SELF-08): a claude that ignores SIGTERM and never answers; writes its pid to $1\necho $$ > "$1"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S8/deaf/claude"
+printf '#!/bin/sh\n# probe stub (SELF-08): a claude that ignores SIGTERM and never answers; writes its pid to $1 (no $1: exits, the warm-up run)\n[ -n "${1:-}" ] || exit 0\necho $$ > "$1"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S8/deaf/claude"
 chmod +x "$_S8/deaf/claude"
+_self_warm "$_S8/deaf/claude"
 _S8_KILL=""
 _s8_bounded() { # _s8_bounded <label> <TIMEOUT_BIN, empty: the watchdog> — one 1 s bounded call on the stub; its seconds into _S8_KILL, mismatches into _S8_FAIL
   local D="$_S8/deaf/$1" P S T0 T N=0
@@ -1454,12 +1566,12 @@ _s8_bounded() { # _s8_bounded <label> <TIMEOUT_BIN, empty: the watchdog> — one
   T0=$(date +%s)
   ( TIMEOUT_BIN="$2"; eval "$_S8_BOUNDED"; _ss_bounded 1 "$D/out" "$_S8/deaf/claude" "$D/pid" >/dev/null || true; : > "$D/done" ) </dev/null >/dev/null 2>"$D/err" &
   P=$!
-  while [ ! -f "$D/done" ] && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done
+  while [ ! -f "$D/done" ] && [ "$(( $(date +%s) - T0 ))" -lt 25 ]; do sleep 0.1; done
   T=$(( $(date +%s) - T0 ))
   if [ ! -f "$D/done" ]; then
     _S8_FAIL="$_S8_FAIL killgrace-$1-hung(${T}s)"
     kill -9 "$P" 2>/dev/null || true
-  elif [ "$T" -ge 6 ]; then
+  elif [ "$T" -ge 15 ]; then
     _S8_FAIL="$_S8_FAIL killgrace-$1-slow(${T}s)"
   fi
   wait "$P" 2>/dev/null || true
@@ -1485,7 +1597,7 @@ _s8_bounded watchdog ""
 # versiongrace (round 1, wave 2): _ss_cli_version as the hook ships it, with
 # what it calls (each function's text, from its `name() {` line to the
 # closing brace at column 0), evaluated in background subshells, one per
-# branch, side by side, under an outer 15 s deadline. Each subshell's TMPDIR
+# branch, side by side, under an outer 30 s deadline. Each subshell's TMPDIR
 # is a private dir of its own, empty again afterwards. The stubs log the
 # flag they were asked; the deaf one also its pid.
 _S8_VFN=""
@@ -1495,11 +1607,16 @@ for _s8_f in _ss_tmp_ok _ss_claude_private _ss_private_tmp _ss_bounded _ss_cli_v
   _S8_VFN="${_S8_VFN}${_S8_T}
 "
 done
+# _ss_sweep, which _ss_bounded calls (4.1 review)
+_S8_VFN="${_S8_VFN}$(sed -n '/^_ss_sweep() {$/,/^}$/p' "$REPO_ROOT/hooks/handlers/session-start.sh")
+"
 unset _s8_f _S8_T
 mkdir -p "$_S8/vstub"
-printf '#!/bin/sh\n# probe stub (SELF-08 versiongrace): an optional CLI that ignores SIGTERM and never answers; logs its flag to $S8_VLOG, its pid to $S8_VLOG.pid\necho "$1" >> "$S8_VLOG"\necho $$ >> "$S8_VLOG.pid"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S8/vstub/deaf"
-printf '#!/bin/sh\n# probe stub (SELF-08 versiongrace): an optional CLI that answers -V only; logs its flag to $S8_VLOG\necho "$1" >> "$S8_VLOG"\ncase "${1:-}" in -V) echo "vonly-probe-stub 1.2.3" ;; esac\nexit 0\n' > "$_S8/vstub/vonly"
+printf '#!/bin/sh\n# probe stub (SELF-08 versiongrace): an optional CLI that ignores SIGTERM and never answers; logs its flag to $S8_VLOG, its pid to $S8_VLOG.pid (no flag: exits, the warm-up run)\n[ -n "${1:-}" ] || exit 0\necho "$1" >> "$S8_VLOG"\necho $$ >> "$S8_VLOG.pid"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S8/vstub/deaf"
+printf '#!/bin/sh\n# probe stub (SELF-08 versiongrace): an optional CLI that answers -V only; logs its flag to $S8_VLOG (no flag: exits, the warm-up run)\n[ -n "${1:-}" ] || exit 0\necho "$1" >> "$S8_VLOG"\ncase "${1:-}" in -V) echo "vonly-probe-stub 1.2.3" ;; esac\nexit 0\n' > "$_S8/vstub/vonly"
 chmod +x "$_S8/vstub/deaf" "$_S8/vstub/vonly"
+_self_warm "$_S8/vstub/deaf"
+_self_warm "$_S8/vstub/vonly"
 _s8_vstart() { # _s8_vstart <label> <TIMEOUT_BIN, empty: the watchdog> — both stubs through _ss_cli_version with a 1 s bound, in the background; results in $_S8/vg-<label>
   local D="$_S8/vg-$1"
   mkdir -p "$D/tmp"
@@ -1513,14 +1630,14 @@ _s8_vstart() { # _s8_vstart <label> <TIMEOUT_BIN, empty: the watchdog> — both 
   echo "$!" > "$D/bg"
 }
 _S8_VER=""
-_s8_vcheck() { # _s8_vcheck <label> — wait for the case (to 15 s after _S8_VT0), then check it; its seconds into _S8_VER, mismatches into _S8_FAIL
+_s8_vcheck() { # _s8_vcheck <label> — wait for the case (to 30 s after _S8_VT0), then check it; its seconds into _S8_VER, mismatches into _S8_FAIL
   local D="$_S8/vg-$1" N=0 T S
-  while [ ! -f "$D/done" ] && [ "$(( $(date +%s) - _S8_VT0 ))" -lt 15 ]; do sleep 0.1; done
+  while [ ! -f "$D/done" ] && [ "$(( $(date +%s) - _S8_VT0 ))" -lt 30 ]; do sleep 0.1; done
   T=$(( $(date +%s) - _S8_VT0 ))
   if [ ! -f "$D/done" ]; then
     _S8_FAIL="$_S8_FAIL versiongrace-$1-hung(${T}s)"
     kill -9 "$(cat "$D/bg")" 2>/dev/null || true
-  elif [ "$T" -ge 9 ]; then
+  elif [ "$T" -ge 20 ]; then
     _S8_FAIL="$_S8_FAIL versiongrace-$1-slow(${T}s)"
   fi
   wait "$(cat "$D/bg")" 2>/dev/null || true
@@ -1557,8 +1674,13 @@ case "$_S8_FAIL" in
 esac
 # detectbound (round 4, J): the whole hook in its own project, a python3 stub
 # first on PATH that prints one project no-import row (round 5), writes its
-# pid and sleeps 60 s for the detect pass
+# pid and sleeps 60 s for the detect pass. PATH is the stubs, $_S8/tbin
+# (the timeout binary alone) and /usr/bin and /bin: an optional CLI installed
+# on the host would otherwise be asked for its version inside the timed run,
+# up to 2 x 12 s each on a loaded host
 _S8_PY=$(command -v python3 || true)
+mkdir -p "$_S8/tbin"
+if [ -n "$TIMEOUT_BIN" ]; then ln -s "$TIMEOUT_BIN" "$_S8/tbin/$(basename "$TIMEOUT_BIN")" 2>/dev/null || true; fi
 mkdir -p "$_S8/pystub" "$_S8/proj-detect"
 ( cd "$_S8/proj-detect" && git init -q 2>/dev/null ) || true
 printf '# own\n' > "$_S8/proj-detect/CLAUDE.md"
@@ -1574,11 +1696,11 @@ EOF
   printf 'exec %s "$@"\n' "$_S8_PY"; } > "$_S8/pystub/python3"
 chmod +x "$_S8/pystub/python3"
 _S8_T0=$(date +%s)
-_O=$( cd "$_S8/proj-detect" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/pystub:$_S8/bin:$PATH" S8_DPID="$_S8/pystub/pid" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 30} bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ) || _S8_FAIL="$_S8_FAIL detectbound-rc-nonzero"
+_O=$( cd "$_S8/proj-detect" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/pystub:$_S8/bin:$_S8/tbin:/usr/bin:/bin" S8_DPID="$_S8/pystub/pid" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 50} bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ) || _S8_FAIL="$_S8_FAIL detectbound-rc-nonzero"
 _S8_DET=$(( $(date +%s) - _S8_T0 ))
 _s8_sane detectbound "$_O"
-[ "$_S8_DET" -lt 25 ] || _S8_FAIL="$_S8_FAIL detectbound-slow(${_S8_DET}s)"
-_S8_WARN_RE='^WARNING: the instruction-file check did not finish (instruction_files_detect in .*/scripts/lib/instructions\.sh, rc [0-9][0-9]*; it needs python3 and stops after 10 s), so the CLAUDE\.md and 3\.x template notices may be missing this session\.$'
+[ "$_S8_DET" -lt 40 ] || _S8_FAIL="$_S8_FAIL detectbound-slow(${_S8_DET}s)"
+_S8_WARN_RE='^WARNING: the instruction-file check did not finish (instruction_files_detect in .*/scripts/lib/instructions\.sh, rc [0-9][0-9]*: given up on after 10 s), so the CLAUDE\.md and 3\.x template notices may be missing this session\.$'
 _s8_has "$_S8_WARN_RE" || _S8_FAIL="$_S8_FAIL detectbound-no-warning"
 _s8_has 'does not import AGENTS\.md' && _S8_FAIL="$_S8_FAIL detectbound-partial-row-used"
 _s8_gone() { # _s8_gone <label> <pid file> — the pid in it has exited within a second (else killed and recorded)
@@ -1595,8 +1717,9 @@ _s8_gone() { # _s8_gone <label> <pid file> — the pid in it has exited within a
 _s8_gone detectbound "$_S8/pystub/pid"
 # detectfork (round 5): the whole hook with no timeout binary on PATH, so the
 # library's watchdog bounds the pass, and a python3 launcher that forks a
-# child holding stdout. Without one in /usr/bin or /bin the child outlives the
-# hook (the call must not wait for it), and is killed here
+# child holding stdout. Both ignore SIGTERM; the SIGKILL 2 s after the bound
+# takes the launcher's process group (4.1), so neither is left once the hook
+# returns
 _S8_FWD=$(PATH=/usr/bin:/bin; command -v timeout || command -v gtimeout || true)
 mkdir -p "$_S8/pyfork"
 { cat <<'EOF'
@@ -1615,22 +1738,64 @@ EOF
   printf 'exec %s "$@"\n' "$_S8_PY"; } > "$_S8/pyfork/python3"
 chmod +x "$_S8/pyfork/python3"
 _S8_T0=$(date +%s)
-_O=$( cd "$_S8/proj-detect" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/pyfork:$_S8/bin:/usr/bin:/bin" S8_FPID="$_S8/pyfork/pid" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 30} bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ) || _S8_FAIL="$_S8_FAIL detectfork-rc-nonzero"
+_O=$( cd "$_S8/proj-detect" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/pyfork:$_S8/bin:/usr/bin:/bin" S8_FPID="$_S8/pyfork/pid" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 50} bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ) || _S8_FAIL="$_S8_FAIL detectfork-rc-nonzero"
 _S8_FORK=$(( $(date +%s) - _S8_T0 ))
 _s8_sane detectfork "$_O"
-[ "$_S8_FORK" -lt 25 ] || _S8_FAIL="$_S8_FAIL detectfork-slow(${_S8_FORK}s)"
+[ "$_S8_FORK" -lt 40 ] || _S8_FAIL="$_S8_FAIL detectfork-slow(${_S8_FORK}s)"
 _s8_has "$_S8_WARN_RE" || _S8_FAIL="$_S8_FAIL detectfork-no-warning"
 _s8_has 'does not import AGENTS\.md' && _S8_FAIL="$_S8_FAIL detectfork-partial-row-used"
 _s8_gone detectfork "$_S8/pyfork/pid"
-_S8_FCHILD=$(cat "$_S8/pyfork/pid.child" 2>/dev/null || true)
-if [ -z "$_S8_FCHILD" ]; then
-  _S8_FAIL="$_S8_FAIL detectfork-child-never-ran"
-elif kill -0 "$_S8_FCHILD" 2>/dev/null; then
-  kill -9 "$_S8_FCHILD" 2>/dev/null || true
-elif [ -z "$_S8_FWD" ]; then
-  _S8_FAIL="$_S8_FAIL detectfork-child-gone-before-the-hook-returned"
-fi
+_s8_gone detectfork-child "$_S8/pyfork/pid.child"
 if [ -n "$_S8_FWD" ]; then _S8_FWD="under ${_S8_FWD}, which /usr/bin or /bin holds"; else _S8_FWD="under the watchdog"; fi
+# detect69 (4.1): an rc 69 from the pass names its cause, one WARNING line
+# each. $_S8/nopy links every command in /usr/bin and /bin but python3 and
+# any timeout binary; $_S8/mk69 holds a mktemp that fails for a template under
+# /tmp/, with a TMPDIR of mode 0777 without the sticky bit; $_S8/libless holds
+# a copy of the hook and no scripts/lib/instructions.sh
+mkdir -p "$_S8/nopy" "$_S8/mk69" "$_S8/shared69" "$_S8/libless/hooks/handlers"
+chmod 777 "$_S8/shared69"
+ln -s /usr/bin/* /bin/* "$_S8/nopy/" 2>/dev/null || true
+rm -f "$_S8/nopy"/python3* "$_S8/nopy/timeout" "$_S8/nopy/gtimeout"
+printf '#!/bin/sh\n# probe stub (SELF-08 detect69): fails for a template under /tmp/, else runs the real mktemp\nfor A in "$@"; do L=$A; done\ncase "$L" in /tmp/*) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v mktemp)" > "$_S8/mk69/mktemp"
+chmod +x "$_S8/mk69/mktemp"
+cp "$REPO_ROOT/hooks/handlers/session-start.sh" "$_S8/libless/hooks/handlers/session-start.sh"
+_s8_d69() { # _s8_d69 <label> <hook> <PATH> <NAME=value> <cause> — the hook in proj-detect under the harness timeout (30 s): rc 0, no crash, and the WARNING naming <cause> (a regex)
+  local L=$1 H=$2 PP=$3 E=$4 C=$5
+  _O=$( cd "$_S8/proj-detect" && env HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$PP" "$E" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 30} /bin/bash "$H" 2>&1 ) || _S8_FAIL="$_S8_FAIL $L-rc-nonzero"
+  _s8_sane "$L" "$_O"
+  _s8_has "^WARNING: the instruction-file check did not finish (instruction_files_detect in .*/scripts/lib/instructions\.sh, rc 69: ${C}), so the CLAUDE\.md and 3\.x template notices may be missing this session\.\$" || _S8_FAIL="$_S8_FAIL $L-cause($(printf '%s\n' "$_O" | grep 'instruction-file check' | sed 's/^.*, rc /rc /' | cut -c1-80))"
+}
+_s8_d69 detect69-nopy "$REPO_ROOT/hooks/handlers/session-start.sh" "$_S8/bin:$_S8/nopy" S8_D69=nopy 'python3 is not on PATH'
+_s8_d69 detect69-notmp "$REPO_ROOT/hooks/handlers/session-start.sh" "$_S8/bin:$_S8/mk69:/usr/bin:/bin" TMPDIR="$_S8/shared69" 'neither timeout nor gtimeout is on PATH, and the watchdog that stands in for them found no private temp dir (TMPDIR and /tmp are shared without the sticky bit, or mktemp failed)'
+[ -z "$(ls -A "$_S8/shared69" | grep -F 'triforge-instr.' || true)" ] || _S8_FAIL="$_S8_FAIL detect69-notmp-shared-not-empty"
+_s8_d69 detect69-nolib "$_S8/libless/hooks/handlers/session-start.sh" "$_S8/bin:$PATH" S8_D69=nolib 'the library did not load'
+# pastbound (4.1): a CLAUDE.md-family row the reader stopped in at a bound
+# (state past-bound, import "-") gets a line saying session start cannot tell
+# whether the file imports AGENTS.md, never "add the line -". A python3 first
+# on PATH answers the pass with such rows for ./CLAUDE.md, ./.claude/CLAUDE.md
+# and the CLAUDE.md above the project; the real one answers every other call.
+# The project is $_S8/pb/up/proj, so the directory above it is not above HOME.
+# PATH as in detectbound: no CLI of the host's is probed under the harness timeout
+mkdir -p "$_S8/pybound" "$_S8/pb/up/proj"
+( cd "$_S8/pb/up/proj" && git init -q 2>/dev/null ) || true
+{ cat <<'EOF'
+#!/bin/sh
+# probe stub (SELF-08 pastbound): answers the instruction-file pass with past-bound rows (import "-") for ./CLAUDE.md, ./.claude/CLAUDE.md and ../CLAUDE.md; the real python3 for every other call
+if [ "${3:-}" = detect ] && [ "${4:-}" = instruction_files_detect ]; then
+  printf '%s\tproject\tno-import,user-owned,past-bound\t%s\t-\n' CLAUDE.md "$PWD/CLAUDE.md" .claude/CLAUDE.md "$PWD/.claude/CLAUDE.md"
+  printf 'CLAUDE.md\tabove\tno-import,user-owned,past-bound\t%s/CLAUDE.md\t-\n' "${PWD%/*}"
+  exit 0
+fi
+EOF
+  printf 'exec %s "$@"\n' "$_S8_PY"; } > "$_S8/pybound/python3"
+chmod +x "$_S8/pybound/python3"
+_O=$( cd "$_S8/pb/up/proj" && HOME="$_S8/home" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" PATH="$_S8/pybound:$_S8/bin:$_S8/tbin:/usr/bin:/bin" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 30} bash "$REPO_ROOT/hooks/handlers/session-start.sh" 2>&1 ) || _S8_FAIL="$_S8_FAIL pastbound-rc-nonzero"
+_s8_sane pastbound "$_O"
+_s8_has '^WARNING: CLAUDE\.md in this project is past the size or nesting Triforge reads, so session start cannot tell whether it imports AGENTS\.md.* add the line @AGENTS\.md to it yourself ' || _S8_FAIL="$_S8_FAIL pastbound-own-line"
+_s8_has '^WARNING: \.claude/CLAUDE\.md in this project is past the size or nesting Triforge reads, .* add the line @\.\./AGENTS\.md to it yourself ' || _S8_FAIL="$_S8_FAIL pastbound-own-dotclaude-line"
+_s8_has '^WARNING: .*/pb/up/CLAUDE\.md sits above this project and is past the size or nesting Triforge reads, so session start cannot tell whether it imports this project.s AGENTS\.md.* Add a CLAUDE\.md holding the line @AGENTS\.md to this project: ' || _S8_FAIL="$_S8_FAIL pastbound-above-line"
+_s8_has 'the line - ' && _S8_FAIL="$_S8_FAIL pastbound-dash-offered"
+_s8_has 'No import line in that file' && _S8_FAIL="$_S8_FAIL pastbound-dash-explained"
 # detectwatch (round 5): the library on its own, sourced in bash and zsh under
 # set -u in a project of its own; $_S8/watch/wd holds the python3 stub, a
 # sleep that logs its pid and dirname, and nothing else (no timeout binary)
@@ -1650,6 +1815,8 @@ EOF
 printf '#!/bin/sh\n# probe stub (SELF-08 detectwatch): a sleep that logs its pid to $S8_SLOG\necho $$ >> "$S8_SLOG"\nexec /bin/sleep "$@"\n' > "$_S8/watch/wd/sleep"
 chmod +x "$_S8/watch/wd/python3" "$_S8/watch/wd/sleep"
 ln -s "$(command -v dirname)" "$_S8/watch/wd/dirname" 2>/dev/null || true
+_self_warm "$_S8/watch/wd/python3" -c pass
+_self_warm env S8_SLOG=/dev/null "$_S8/watch/wd/sleep" 0
 _s8_lib() { # _s8_lib <bash|zsh> <PATH> <script> [NAME=value...] — the library alone, sourced under set -u in $_S8/proj-watch with the throwaway HOME, the script, then "rc=<n>"; stdout + stderr, under the harness timeout (20 s)
   local SH=$1 PP=$2 SC='set -u; source "$0/scripts/lib/instructions.sh" >/dev/null 2>&1; R=0; '"$3"' || R=$?; echo "rc=$R"'
   shift 3
@@ -1695,7 +1862,7 @@ for _s8_sh in $_S8_WSH; do
       _s8_l="detectwatch-${_s8_sh}-${_s8_c}-${_s8_fn}"
       printf '%s\n' "$_O" | grep -Eq "^${_s8_fn}: gave up after 1 s \(rc (124|137|143)\): an ordinary project's instruction files are read in well under a second, .* may be built to slow the reader, or python3 hung or was killed \(an out-of-memory kill also returns rc 137\); nothing was written\$" || _S8_FAIL="$_S8_FAIL ${_s8_l}-no-gave-up-line($(printf '%s' "$_O" | tr '\n' ' ' | cut -c1-80))"
       [ "$(printf '%s\n' "$_O" | grep -c . || true)" -eq 2 ] && printf '%s\n' "$_O" | tail -1 | grep -Eq '^rc=(124|137|143)$' || _S8_FAIL="$_S8_FAIL ${_s8_l}-output($(printf '%s' "$_O" | tail -1))"
-      [ "$_S8_T" -lt 6 ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-slow(${_S8_T}s)"
+      [ "$_S8_T" -lt 15 ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-slow(${_S8_T}s)"
     done
   done
 done
@@ -1740,6 +1907,121 @@ for _s8_sh in $_S8_WSH; do
   [ ! -s "$_S8/watch/pylog-$_s8_sh" ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-python3-started"
   [ -z "$(ls -A "$_S8/watch/shared")" ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-shared-not-empty"
 done
+# forkwatch (4.1): the watchdog stops the command's process group, not the
+# command alone. $_S8/watch/fork holds a python3 launcher and dirname (no
+# timeout binary): the launcher forks a child that ignores SIGTERM and holds
+# stdout for 40 s, then sleeps until SIGTERM ends it. Given up on after 1 s,
+# neither is left, under the watchdog and (PATH = $_S8/watch/fork, then the
+# harness's) under the timeout binary. The child outlasts the harness timeout
+# (20 s), so a bound that stops the launcher alone is back at 20 s or later,
+# well past the 15 s allowed here
+mkdir -p "$_S8/watch/fork"
+{ cat <<'EOF'
+#!/bin/sh
+# probe stub (SELF-08 forkwatch): for the pass, a launcher that forks a child ignoring SIGTERM for $S8_CSECS s (its pid in $S8_FPID.child), then sleeps until SIGTERM (its pid in $S8_FPID); the real python3 otherwise
+if [ "${3:-}" = detect ] && [ "${4:-}" = instruction_files_detect ]; then
+  /bin/sh -c 'echo $$ > "$S8_FPID.child"; trap "" TERM; exec /bin/sleep "${S8_CSECS:-60}"' &
+  echo $$ > "$S8_FPID"
+  exec /bin/sleep 60
+fi
+EOF
+  printf 'exec %s "$@"\n' "$_S8_PY"; } > "$_S8/watch/fork/python3"
+chmod +x "$_S8/watch/fork/python3"
+ln -s "$(command -v dirname)" "$_S8/watch/fork/dirname" 2>/dev/null || true
+_self_warm "$_S8/watch/fork/python3" -c pass
+_s8_fcases="watchdog"
+_S8_FMODES="the watchdog (timeout binary SKIPPED: none on PATH)"
+if [ -n "$TIMEOUT_BIN" ]; then
+  _s8_fcases="watchdog timeout"
+  _S8_FMODES="the watchdog and $(basename "$TIMEOUT_BIN")"
+fi
+for _s8_sh in $_S8_WSH; do
+  for _s8_c in $_s8_fcases; do
+    _s8_l="forkwatch-${_s8_sh}-${_s8_c}"
+    _s8_pp="$_S8/watch/fork"
+    _s8_rc=143
+    if [ "$_s8_c" = timeout ]; then _s8_pp="$_S8/watch/fork:$PATH"; _s8_rc=124; fi
+    rm -f "$_S8/watch/fork/pid" "$_S8/watch/fork/pid.child"
+    _S8_T0=$(date +%s)
+    _O=$(_s8_lib "$_s8_sh" "$_s8_pp" '_INSTR_SECS=1 instruction_files_detect' S8_FPID="$_S8/watch/fork/pid" S8_CSECS=40)
+    _S8_T=$(( $(date +%s) - _S8_T0 ))
+    _s8_has "^rc=${_s8_rc}\$" || _S8_FAIL="$_S8_FAIL ${_s8_l}-rc($(printf '%s' "$_O" | tail -1))"
+    [ "$_S8_T" -lt 15 ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-slow(${_S8_T}s)"
+    _s8_gone "$_s8_l" "$_S8/watch/fork/pid"
+    _s8_gone "${_s8_l}-child" "$_S8/watch/fork/pid.child"
+  done
+done
+# forkexit (4.1 review, #6): the group sweep runs after every exit of the
+# command, not only at the bound. $_S8/watch/fexit holds a python3 launcher and
+# dirname: the launcher prints a project no-import row, forks a child that
+# ignores SIGTERM and holds stdout for 40 s, and exits 0 as soon as the child
+# ignores SIGTERM (so the sweep's SIGKILL is what ends it), long before the
+# 30 s bound. The call returns the row and rc 0 in under 15 s (the 2 s
+# SIGKILL grace, and room for a loaded host) with the child gone, under the
+# watchdog and the timeout binary. A call that skips the sweep waits the
+# child's 40 s out on stdout under the timeout binary, and leaves it running
+# under the watchdog
+mkdir -p "$_S8/watch/fexit"
+{ cat <<'EOF'
+#!/bin/sh
+# probe stub (SELF-08 forkexit): for the pass, a launcher that prints a project no-import row, forks a child ignoring SIGTERM for $S8_CSECS s (its pid in $S8_FPID.child, written once it ignores SIGTERM) and exits 0 as soon as that pid is there (its own pid in $S8_FPID); the real python3 otherwise
+if [ "${3:-}" = detect ] && [ "${4:-}" = instruction_files_detect ]; then
+  printf 'CLAUDE.md\tproject\tno-import,user-owned\t%s/CLAUDE.md\t@AGENTS.md\n' "$PWD"
+  /bin/sh -c 'trap "" TERM; echo $$ > "$S8_FPID.child"; exec /bin/sleep "${S8_CSECS:-60}"' &
+  echo $$ > "$S8_FPID"
+  N=0
+  while [ ! -s "$S8_FPID.child" ] && [ "$N" -lt 50 ]; do /bin/sleep 0.1; N=$((N + 1)); done
+  exit 0
+fi
+EOF
+  printf 'exec %s "$@"\n' "$_S8_PY"; } > "$_S8/watch/fexit/python3"
+chmod +x "$_S8/watch/fexit/python3"
+ln -s "$(command -v dirname)" "$_S8/watch/fexit/dirname" 2>/dev/null || true
+_self_warm "$_S8/watch/fexit/python3" -c pass
+for _s8_sh in $_S8_WSH; do
+  for _s8_c in $_s8_fcases; do
+    _s8_l="forkexit-${_s8_sh}-${_s8_c}"
+    _s8_pp="$_S8/watch/fexit"
+    if [ "$_s8_c" = timeout ]; then _s8_pp="$_S8/watch/fexit:$PATH"; fi
+    rm -f "$_S8/watch/fexit/pid" "$_S8/watch/fexit/pid.child"
+    _S8_T0=$(date +%s)
+    _O=$(_s8_lib "$_s8_sh" "$_s8_pp" '_INSTR_SECS=30 instruction_files_detect' S8_FPID="$_S8/watch/fexit/pid" S8_CSECS=40)
+    _S8_T=$(( $(date +%s) - _S8_T0 ))
+    printf '%s\n' "$_O" | grep -q "$_S8_WROW" && _s8_has '^rc=0$' || _S8_FAIL="$_S8_FAIL ${_s8_l}-answer($(printf '%s' "$_O" | tr '\n' ' ' | cut -c1-80))"
+    [ "$_S8_T" -lt 15 ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-slow(${_S8_T}s)"
+    _s8_gone "$_s8_l" "$_S8/watch/fexit/pid"
+    _s8_gone "${_s8_l}-child" "$_S8/watch/fexit/pid.child"
+  done
+done
+# perllocale (4.1): under a locale the system lacks (LANG and LC_ALL
+# xx_XX.bogus), perl, which starts python3 for the watchdog, adds no warning to
+# the caller's stderr: the pass prints its rows and rc 0, no perl line
+for _s8_sh in $_S8_WSH; do
+  _O=$(_s8_lib "$_s8_sh" "$_S8/watch/wd" '_INSTR_SECS=30 instruction_files_detect' S8_SLOG="$_S8/watch/sleeps-hang" LANG=xx_XX.bogus LC_ALL=xx_XX.bogus)
+  printf '%s\n' "$_O" | grep -q "$_S8_WROW" && _s8_has '^rc=0$' || _S8_FAIL="$_S8_FAIL perllocale-${_s8_sh}-answer($(printf '%s' "$_O" | tr '\n' ' ' | cut -c1-80))"
+  _s8_has 'perl: warning' && _S8_FAIL="$_S8_FAIL perllocale-${_s8_sh}-perl-warning"
+done
+# watchkill (4.1): the watchdog's private temp dir is gone when the call
+# returns, even when the subshell that holds it is SIGKILLed. $_S8/watch/kill
+# holds python3, dirname and an rm whose first call SIGKILLs its parent (the
+# watchdog's subshell, which calls rm once its output files are open) and
+# logs that parent's pid; every later call is the real rm. TMPDIR is a dir of
+# mode 0700
+mkdir -p "$_S8/watch/kill" "$_S8/watch/ktmp"
+chmod 700 "$_S8/watch/ktmp"
+printf '#!/bin/sh\n# probe stub (SELF-08 watchkill): the first call SIGKILLs its parent and logs its pid to $S8_KLOG; every later call runs the real rm\nif [ ! -s "$S8_KLOG" ]; then echo "$PPID" > "$S8_KLOG"; kill -9 "$PPID"; exit 0; fi\nexec %s "$@"\n' "$(command -v rm)" > "$_S8/watch/kill/rm"
+chmod +x "$_S8/watch/kill/rm"
+ln -s "$_S8_PY" "$_S8/watch/kill/python3" 2>/dev/null || true
+ln -s "$(command -v dirname)" "$_S8/watch/kill/dirname" 2>/dev/null || true
+for _s8_sh in $_S8_WSH; do
+  _s8_l="watchkill-${_s8_sh}"
+  : > "$_S8/watch/klog-$_s8_sh"
+  _O=$(_s8_lib "$_s8_sh" "$_S8/watch/kill" '_INSTR_SECS=30 instruction_files_detect' TMPDIR="$_S8/watch/ktmp" S8_KLOG="$_S8/watch/klog-$_s8_sh")
+  [ -s "$_S8/watch/klog-$_s8_sh" ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-never-killed"
+  _s8_has '^rc=137$' || _S8_FAIL="$_S8_FAIL ${_s8_l}-rc($(printf '%s' "$_O" | tail -1))"
+  [ -z "$(ls -A "$_S8/watch/ktmp")" ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-temp-dir-left"
+  rm -rf "$_S8/watch/ktmp"/triforge-instr.*
+done
 # boundsleep (round 6): _ss_bounded as the hook ships it (the text killgrace
 # runs), with no timeout binary, under set -eu in bash and zsh, a sleep that
 # logs its pid first on PATH and a 30 s bound: a command that answers in
@@ -1760,6 +2042,7 @@ if [ -n "$_S8_BOUNDED" ]; then
   mkdir -p "$_S8/bsl/bin"
   printf '#!/bin/sh\n# probe stub (SELF-08 boundsleep): a sleep that logs its pid to $S8_SLOG\necho $$ >> "$S8_SLOG"\nexec /bin/sleep "$@"\n' > "$_S8/bsl/bin/sleep"
   chmod +x "$_S8/bsl/bin/sleep"
+  _self_warm env S8_SLOG=/dev/null "$_S8/bsl/bin/sleep" 0
   for _s8_sh in $_S8_WSH; do
     _s8_l="boundsleep-${_s8_sh}"
     : > "$_S8/bsl/half-$_s8_sh"
@@ -1781,16 +2064,87 @@ rc=0" ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-now${_s8_n}($(printf '%s' "$_O" | tr '\n
       fi
     done
   done
+  # boundfork (4.1): a 1 s bound on a command that forks a child ignoring
+  # SIGTERM and holding stdout for 40 s, then sleeps until SIGTERM ends it:
+  # neither is left, under the watchdog and under the timeout binary, back
+  # within 15 s (as in forkwatch, the child outlasts the harness timeout)
+  cat > "$_S8/bsl/fork" <<'EOF'
+#!/bin/sh
+# probe stub (SELF-08 boundfork): forks a child that ignores SIGTERM for $S8_CSECS s (its pid in $1.child), then sleeps until SIGTERM (its pid in $1); no $1: exits, the warm-up run
+[ -n "${1:-}" ] || exit 0
+/bin/sh -c 'echo $$ > "$1.child"; trap "" TERM; exec /bin/sleep "${S8_CSECS:-60}"' _ "$1" &
+echo $$ > "$1"
+exec /bin/sleep 60
+EOF
+  chmod +x "$_S8/bsl/fork"
+  _self_warm "$_S8/bsl/fork"
+  _s8_bfork() { # _s8_bfork <bash|zsh> <pid file> [timeout binary] [stub] [bound] — the hook's _ss_bounded, a <bound> s bound (default 1), on <stub> (default the fork stub), under the timeout binary when one is given, else the watchdog (in an output dir of its own); then "rc=<n>"
+    local D="" SC='set -eu; TIMEOUT_BIN=$S8_TB; eval "$1"; shift; R=0; _ss_bounded "$@" || R=$?; echo "rc=$R"'
+    if [ -z "${3:-}" ]; then D=$(mktemp -d "$_S8/bsl/out.XXXXXX") || return 0; fi
+    if [ "$1" = zsh ]; then
+      env S8_TB="${3:-}" S8_CSECS=40 ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/zsh -fc "$SC" _ "$_S8_BOUNDED" "${5:-1}" "$D" "${4:-$_S8/bsl/fork}" "$2" 2>&1
+    else
+      env S8_TB="${3:-}" S8_CSECS=40 ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/bash -c "$SC" _ "$_S8_BOUNDED" "${5:-1}" "$D" "${4:-$_S8/bsl/fork}" "$2" 2>&1
+    fi
+  }
+  for _s8_sh in $_S8_WSH; do
+    for _s8_c in $_s8_fcases; do
+      _s8_l="boundfork-${_s8_sh}-${_s8_c}"
+      _s8_tb=""
+      if [ "$_s8_c" = timeout ]; then _s8_tb=$TIMEOUT_BIN; fi
+      rm -f "$_S8/bsl/fpid" "$_S8/bsl/fpid.child"
+      _S8_T0=$(date +%s)
+      _O=$(_s8_bfork "$_s8_sh" "$_S8/bsl/fpid" "$_s8_tb")
+      _S8_T=$(( $(date +%s) - _S8_T0 ))
+      [ "$_O" = "rc=0" ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-output($(printf '%s' "$_O" | tr '\n' ' ' | cut -c1-80))"
+      [ "$_S8_T" -lt 15 ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-slow(${_S8_T}s)"
+      _s8_gone "$_s8_l" "$_S8/bsl/fpid"
+      _s8_gone "${_s8_l}-child" "$_S8/bsl/fpid.child"
+    done
+  done
+  # boundexit (4.1 review, #6): a command that prints its answer, forks a
+  # child ignoring SIGTERM and holding stdout for 40 s, and exits as soon as
+  # the child ignores SIGTERM, long before a 30 s bound: the answer and rc 0
+  # within 15 s, the child gone, under the watchdog and the timeout binary
+  cat > "$_S8/bsl/forkexit" <<'EOF'
+#!/bin/sh
+# probe stub (SELF-08 boundexit): prints its answer, forks a child that ignores SIGTERM for $S8_CSECS s (its pid in $1.child, written once it ignores SIGTERM) and exits as soon as that pid is there (its own pid in $1); no $1: exits, the warm-up run
+[ -n "${1:-}" ] || exit 0
+/bin/sh -c 'trap "" TERM; echo $$ > "$1.child"; exec /bin/sleep "${S8_CSECS:-60}"' _ "$1" &
+echo $$ > "$1"
+echo answered
+N=0
+while [ ! -s "$1.child" ] && [ "$N" -lt 50 ]; do /bin/sleep 0.1; N=$((N + 1)); done
+exit 0
+EOF
+  chmod +x "$_S8/bsl/forkexit"
+  _self_warm "$_S8/bsl/forkexit"
+  for _s8_sh in $_S8_WSH; do
+    for _s8_c in $_s8_fcases; do
+      _s8_l="boundexit-${_s8_sh}-${_s8_c}"
+      _s8_tb=""
+      if [ "$_s8_c" = timeout ]; then _s8_tb=$TIMEOUT_BIN; fi
+      rm -f "$_S8/bsl/epid" "$_S8/bsl/epid.child"
+      _S8_T0=$(date +%s)
+      _O=$(_s8_bfork "$_s8_sh" "$_S8/bsl/epid" "$_s8_tb" "$_S8/bsl/forkexit" 30)
+      _S8_T=$(( $(date +%s) - _S8_T0 ))
+      [ "$_O" = "answered
+rc=0" ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-output($(printf '%s' "$_O" | tr '\n' ' ' | cut -c1-80))"
+      [ "$_S8_T" -lt 15 ] || _S8_FAIL="$_S8_FAIL ${_s8_l}-slow(${_S8_T}s)"
+      _s8_gone "$_s8_l" "$_S8/bsl/epid"
+      _s8_gone "${_s8_l}-child" "$_S8/bsl/epid.child"
+    done
+  done
   [ -z "$(ls -A "$_S8/bsl" | grep -F 'out.' || true)" ] || _S8_FAIL="$_S8_FAIL boundsleep-output-dir-left"
 fi
 unset _s8_sh _s8_l _s8_p _s8_n
 _S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines), prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40), and survives a failing or absent helper loader"
 if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
-  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; started in HOME or the directory above it: the one home-directory warning, no file notice or tip, the files untouched; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; versiongrace (round 1, wave 2): an optional CLI that ignores SIGTERM and never answers, through the hook's own _ss_cli_version with a 1 s bound, asked --version then -V and given up on within two calls of 1 s + the 2 s SIGKILL grace (${_S8_VER}), nothing recorded, the stub gone, stderr empty, no temp dir left; one that answers -V only gets that answer, and the watchdog run records a kimi stub's -V answer in .claude/roster-detected.local.md; detectbound (round 4, J): a python3 that prints one project no-import row (round 5) and never answers the instruction-file pass, session start back in ${_S8_DET}s (the 10 s bound) with the WARNING that the check did not finish and no own-file notice from the partial row, the stub gone; detectfork (round 5): with no timeout binary on PATH (${_S8_FWD}), a python3 launcher that prints that row, forks a child that ignores SIGTERM and holds stdout for 60 s, and ignores SIGTERM itself: session start back in ${_S8_FORK}s with the WARNING and no own-file notice, the launcher gone; detectwatch (round 5): the library alone under set -u (${_S8_WSH}), PATH = a python3 stub, a sleep that logs its pid and dirname: a pass that answers in 0.5 s under _INSTR_SECS=30 leaves no watchdog sleep running; with no _INSTR_SECS (_INSTR_READ_SECS, shipped as 30, set to 1) detect, visibility and a writer's plan on a python3 that never answers print one gave-up line naming python3 hung or killed and rc 124, 137 or 143 within 6 s, under ${_S8_WMODES}; a writer with --yes, _INSTR_SECS=1 and a python3 2 s slow still writes, rc 0, no temp file left; watchtmp (round 6): with no timeout binary (${_S8_WSH}), a TMPDIR of mode 0777 without the sticky bit is never asked for the watchdog's temp dir, the pass answering through /tmp, and with mktemp failing for /tmp too the call returns rc 69 with its line alone, python3 never started, nothing left in that TMPDIR; boundsleep (round 6): the hook's own _ss_bounded with no timeout binary (${_S8_WSH}) leaves no watchdog sleep running after a command that answers in 0.5 s or at once (three times); every run rc 0, no crash, no line starting with {" "static"
+  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; started in HOME or the directory above it: the one home-directory warning, no file notice or tip, the files untouched; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; versiongrace (round 1, wave 2): an optional CLI that ignores SIGTERM and never answers, through the hook's own _ss_cli_version with a 1 s bound, asked --version then -V and given up on within two calls of 1 s + the 2 s SIGKILL grace (${_S8_VER}), nothing recorded, the stub gone, stderr empty, no temp dir left; one that answers -V only gets that answer, and the watchdog run records a kimi stub's -V answer in .claude/roster-detected.local.md; detectbound (round 4, J): a python3 that prints one project no-import row (round 5) and never answers the instruction-file pass, session start back in ${_S8_DET}s (the 10 s bound) with the WARNING that the check did not finish, given up on after 10 s (4.1), and no own-file notice from the partial row, the stub gone; detectfork (round 5): with no timeout binary on PATH (${_S8_FWD}), a python3 launcher that prints that row, forks a child that ignores SIGTERM and holds stdout for 60 s, and ignores SIGTERM itself: session start back in ${_S8_FORK}s with the WARNING and no own-file notice, the launcher and (4.1) its child gone; detect69 (4.1): an rc 69 WARNING names its cause, one line each: python3 not on PATH, no timeout binary and no private temp dir for the watchdog, a library that did not load; pastbound (4.1): past-bound rows (import -) for ./CLAUDE.md, ./.claude/CLAUDE.md and a CLAUDE.md above get a line saying session start cannot tell whether they import AGENTS.md, offering @AGENTS.md, @../AGENTS.md and the project's CLAUDE.md, never the line -; detectwatch (round 5): the library alone under set -u (${_S8_WSH}), PATH = a python3 stub, a sleep that logs its pid and dirname: a pass that answers in 0.5 s under _INSTR_SECS=30 leaves no watchdog sleep running; with no _INSTR_SECS (_INSTR_READ_SECS, shipped as 30, set to 1) detect, visibility and a writer's plan on a python3 that never answers print one gave-up line naming python3 hung or killed and rc 124, 137 or 143 within 15 s, under ${_S8_WMODES}; a writer with --yes, _INSTR_SECS=1 and a python3 2 s slow still writes, rc 0, no temp file left; watchtmp (round 6): with no timeout binary (${_S8_WSH}), a TMPDIR of mode 0777 without the sticky bit is never asked for the watchdog's temp dir, the pass answering through /tmp, and with mktemp failing for /tmp too the call returns rc 69 with its line alone, python3 never started, nothing left in that TMPDIR; forkwatch (4.1): under ${_S8_FMODES} (${_S8_WSH}), a python3 launcher that forks a child ignoring SIGTERM and holding stdout for 40 s, given up on after 1 s: rc 143 (124 under the timeout binary) within 15 s, neither left; forkexit (4.1 review, #6): the same launcher printing its row and exiting 0 at once under a 30 s bound, leaving the child behind: the row and rc 0 within 15 s, the child gone; perllocale (4.1): with LANG and LC_ALL xx_XX.bogus the watchdog's pass prints its rows and rc 0, no perl warning; watchkill (4.1): the watchdog's subshell SIGKILLed while its private temp dir exists: rc 137, nothing left in TMPDIR; boundsleep (round 6): the hook's own _ss_bounded with no timeout binary (${_S8_WSH}) leaves no watchdog sleep running after a command that answers in 0.5 s or at once (three times); boundfork (4.1): the same _ss_bounded with a 1 s bound, under ${_S8_FMODES}, on a command that forks a child ignoring SIGTERM and holding stdout for 40 s: back within 15 s, neither left; boundexit (4.1 review, #6): a command that prints its answer, forks that child and exits at once under a 30 s bound: the answer and rc 0 within 15 s, the child gone; ccd (4.1): with CLAUDE_CONFIG_DIR absolute or relative, HOME's .claude/CLAUDE.md is named as a file above the project and the moved CLAUDE.md never; one whose CLAUDE.md imports the project's AGENTS.md silences the own and above notices; unset, the user tier stays unnamed; every run rc 0, no crash, no line starting with {" "static"
 else
   row "SELF-08" "claude" "$_S8_CAP" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160); mismatch:${_S8_FAIL:- none}" "static"
 fi
-rm -rf "$_S8/proj" "$_S8/proj-degraded" "$_S8/proj-pin" "$_S8/proj-detect" "$_S8/proj-watch" "$_S8_BAD" "$_S8/home" "$_S8A" "$_S8/skeleton.md" "$_S8/template.md" "$_S8/deaf" "$_S8/vstub" "$_S8/pystub" "$_S8/pyfork" "$_S8/watch" "$_S8/bsl" "$_S8"/vg-*   # keep $_S8/bin (the stub agy + claude) for SELF-08b; removed there
+rm -rf "$_S8/proj" "$_S8/proj-degraded" "$_S8/proj-pin" "$_S8/proj-detect" "$_S8/proj-watch" "$_S8_BAD" "$_S8/home" "$_S8A" "$_S8/skeleton.md" "$_S8/template.md" "$_S8/deaf" "$_S8/vstub" "$_S8/pystub" "$_S8/pyfork" "$_S8/watch" "$_S8/bsl" "$_S8"/vg-* "$_S8/nopy" "$_S8/mk69" "$_S8/shared69" "$_S8/libless" "$_S8/pybound" "$_S8/pb"   # keep $_S8/bin (the stub agy + claude) for SELF-08b; removed there
 
 # SELF-08b (KTD12 / R31 / CWE-59): the skills refresh touches only what it can
 # prove it wrote. Session start (CLAUDE_PLUGIN_ROOT = this checkout) on:
@@ -2101,11 +2455,13 @@ rm -rf "$_S8B" "$_S8"
 #            skills sync and the subdirectory-roster scan, on an agy stub
 #            that ignores SIGTERM on `agy agents`, prints one stderr line and
 #            never answers, with a 1 s bound (the steps use 30 s and 60 s),
-#            under bash and zsh: back within 1 s + the 5 s SIGKILL grace +
-#            slack with rc 137, nothing on stdout but the rc, the stub's own
-#            stderr line passed through and no "Killed" line (bash's report
-#            of the kill), the stub gone; a run still going at 15 s is killed
-#            and recorded as hung. Needs a timeout tool, as the step does
+#            under bash and zsh: back within 20 s (1 s + the 5 s SIGKILL
+#            grace, the loader's load, and room for a loaded host; the stub
+#            alone runs 30 s) with rc 137, nothing on stdout but the rc, the
+#            stub's own stderr line passed through and no "Killed" line
+#            (bash's report of the kill), the stub gone; a run still going at
+#            25 s is killed and recorded as hung. Needs a timeout tool, as
+#            the step does
 # Negative control: the setup block with its triforge_bootstrap line removed
 # leaves a fresh project without ops/, so the ops/ check above sees the call.
 _S21="${WORK}/self21"
@@ -2862,7 +3218,7 @@ fi
 # `agy agents`. _tb_run takes its bound as an argument, so the case calls it
 # with 1 s from a shell that sourced the loader, _TB_TIMEOUT set the way
 # triforge_bootstrap sets it; bash and zsh side by side, in the background,
-# under an outer 15 s deadline. The stub writes its pid and one stderr line.
+# under an outer 25 s deadline. The stub writes its pid and one stderr line.
 if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
   mkdir -p "$_S21/bin-deaf"
   cat > "$_S21/bin-deaf/agy" <<'EOF'
@@ -2880,6 +3236,7 @@ esac
 exit 0
 EOF
   chmod +x "$_S21/bin-deaf/agy"
+  _self_warm "$_S21/bin-deaf/agy" --version
   printf 'source "%s/scripts/invoke-external.sh"\n_TB_TIMEOUT=$(_timeout_tool 2>/dev/null)\nR=0; _tb_run 1 agy agents || R=$?\necho "rc=$R"\n' "$REPO_ROOT" > "$_S21/agykill.sh"
   _S21_KL=""
   _S21_KN=""
@@ -2893,12 +3250,12 @@ EOF
   done
   for _s21_kv in $_S21_KL; do
     _s21_l=${_s21_kv%%:*}
-    while [ ! -f "$_S21/agykill-$_s21_l.done" ] && [ "$(( $(date +%s) - _S21_KT0 ))" -lt 15 ]; do sleep 0.1; done
+    while [ ! -f "$_S21/agykill-$_s21_l.done" ] && [ "$(( $(date +%s) - _S21_KT0 ))" -lt 25 ]; do sleep 0.1; done
     _S21_KT=$(( $(date +%s) - _S21_KT0 ))
     if [ ! -f "$_S21/agykill-$_s21_l.done" ]; then
       _S21_FAIL="$_S21_FAIL agykill-$_s21_l-hung(${_S21_KT}s)"
       kill -9 "${_s21_kv#*:}" 2>/dev/null || true
-    elif [ "$_S21_KT" -ge 10 ]; then
+    elif [ "$_S21_KT" -ge 20 ]; then
       _S21_FAIL="$_S21_FAIL agykill-$_s21_l-slow(${_S21_KT}s)"
     fi
     wait "${_s21_kv#*:}" 2>/dev/null || true
@@ -3502,7 +3859,10 @@ rm -rf "$_S11"
 #            sandbox-floor refusal, no worktree, no run; a read persona runs
 #   guard2   $TMPDIR/.claude/CLAUDE.md -> 69; a scratch dir inside a git
 #            working tree with no instruction file in it -> 69 naming the tree;
-#            $HOME/.claude/CLAUDE.md is skipped
+#            $HOME/.claude/CLAUDE.md is skipped. CLAUDE_CONFIG_DIR (fix round,
+#            finding #19): set to an absolute directory, or empty,
+#            $HOME/.claude/CLAUDE.md above -> 69 naming it; the CLAUDE.md in an
+#            absolute one above is skipped
 #   cleanup  a failing digest helper during exec setup, called normally
 #            and under set -e, and a SIGINT to the run's process group: no
 #            persona worktree left, git worktree list clean
@@ -3653,9 +4013,14 @@ case "$MODE" in
     ANS="moved $ARG" ;;
   setref) git update-ref "refs/heads/$ARG" "$ARG3"; ANS="set $ARG" ;;
   psleft)
-    # a child in a process group of its own, then ps made unreadable
-    python3 -c 'import os; os.setpgid(0, 0); os.execvp("sleep", ["sleep", "300"])' < /dev/null > /dev/null 2>&1 &
-    echo $! > "$L/bgchild"; : > "$L/psfail"
+    # a child in a process group of its own, then ps made unreadable: only
+    # once the child has left this group (bgchild.grouped, 30 s at most), so a
+    # slow python3 start can't leave it in the group the run's sweep stops
+    rm -f "$L/bgchild.grouped"
+    python3 -c 'import os, sys; os.setpgid(0, 0); open(sys.argv[1], "w").close(); os.execvp("sleep", ["sleep", "300"])' "$L/bgchild.grouped" < /dev/null > /dev/null 2>&1 &
+    echo $! > "$L/bgchild"
+    N=0; while [ ! -f "$L/bgchild.grouped" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
+    : > "$L/psfail"
     ANS="left a child in a group of its own" ;;
   late)
     # a daemon: its own session, its parent gone at once (setsid, double fork)
@@ -3707,6 +4072,8 @@ S12_CODEX_EOF
 for _s12_b in claude codex; do
   sed -e "s#@LOG@#${_S12}/log#" -e "s#@HOOKS@#${REPO_ROOT}/hooks/handlers#" "$_S12/tpl/$_s12_b" > "$_S12/bin/$_s12_b"
   chmod +x "$_S12/bin/$_s12_b"
+  # the lane asks each for --help under a 10 s or 15 s bound: its first run happens here
+  _self_warm "$_S12/bin/$_s12_b" --version
 done
 # PATH without claude (nobin: the tools the lane needs, plus the codex stub)
 # and without either CLI (nobin2)
@@ -3715,6 +4082,7 @@ for _s12_b in python3 git timeout gtimeout; do
   if [ -n "$_s12_p" ]; then ln -s "$_s12_p" "$_S12/nobin/$_s12_b"; ln -s "$_s12_p" "$_S12/nobin2/$_s12_b"; fi
 done
 cp "$_S12/bin/codex" "$_S12/nobin/codex"
+_self_warm "$_S12/nobin/codex" --version
 unset _s12_b _s12_p
 _S12_NOCLAUDE="$_S12/nobin:/usr/bin:/bin:/usr/sbin:/sbin"
 _S12_NOCLI="$_S12/nobin2:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -3886,6 +4254,11 @@ rm -rf "$_S12/tmp/.claude"
 ( mkdir -p "$_S12/plainrepo/tmp" && git init -q "$_S12/plainrepo" && export TMPDIR="$_S12/plainrepo/tmp"; _s12_mode answer; _self_try ingit dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-g.out" )
 ( mkdir -p "$_S12/h2/.claude" "$_S12/h2/tmp" && printf "user memory\n" > "$_S12/h2/.claude/CLAUDE.md" && export HOME="$_S12/h2" TMPDIR="$_S12/h2/tmp"
   _s12_mode answer; _self_try homeskip dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-g.out" )
+( mkdir -p "$_S12/h3/.claude" "$_S12/h3/tmp" "$_S12/h3cfg" && printf "user memory\n" > "$_S12/h3/.claude/CLAUDE.md" && export HOME="$_S12/h3" TMPDIR="$_S12/h3/tmp"
+  ( export CLAUDE_CONFIG_DIR="$_S12/h3cfg"; _s12_mode answer; _self_try ccdhome dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-g.out" )
+  ( export CLAUDE_CONFIG_DIR=""; _s12_mode answer; _self_try ccdempty dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-g.out" ) )
+( mkdir -p "$_S12/h4/cfg/tmp" && printf "user memory\n" > "$_S12/h4/cfg/CLAUDE.md" && export HOME="$_S12/h4" TMPDIR="$_S12/h4/cfg/tmp" CLAUDE_CONFIG_DIR="$_S12/h4/cfg"
+  _s12_mode answer; _self_try ccdskip dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-g.out" )
 _s12_mode hooks "session-start context-monitor tool-failure-monitor pre-compact"
 _self_try hooks dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-hk.out"
 echo "hooks-out=$(cat "$_S12/rd-hk.out" 2>/dev/null)"
@@ -3905,7 +4278,8 @@ _S12_FAIL="${_S12_FAIL}$(_self_expect read "$O" '^read:rc=0:' '^out=PERSONA-ANSW
 _S12_FAIL="${_S12_FAIL}$(_self_expect root "$O" '^root-line=1:relative=1$' '^add-dir=0:safe=1$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect frame "$O" '^frame=1:notask=1:taskblock=0$' '^brief-frame=taskblock:1:notask:0:after-block:1$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect timeout "$O" '^read:rc=0:.*timeout=840s' '^trio:rc=0:.*timeout=1800s' '^web:rc=0:.*timeout=600s' '^tmo:rc=0:.*timeout=42s')"
-_S12_FAIL="${_S12_FAIL}$(_self_expect guard2 "$O" '^dotclaude:rc=69:.*\.claude/CLAUDE\.md' "^ingit:rc=69:.*git working tree ${_S12P}/plainrepo" '^homeskip:rc=0:')"
+_S12_FAIL="${_S12_FAIL}$(_self_expect guard2 "$O" '^dotclaude:rc=69:.*\.claude/CLAUDE\.md' "^ingit:rc=69:.*git working tree ${_S12P}/plainrepo" '^homeskip:rc=0:' \
+  '^ccdhome:rc=69:.*/h3/\.claude/CLAUDE\.md sits above ' '^ccdempty:rc=69:.*/h3/\.claude/CLAUDE\.md sits above ' '^ccdskip:rc=0:')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect web "$O" '^web:rc=0:' \
   '^web-tools=Read,Grep,Glob,WebFetch,WebSearch allowed=Read,Grep,Glob,WebFetch,WebSearch model=sonnet effort=high turns=5$' \
   '^brief:rc=0:' '^brief-in-prompt=1$' '^sbxoff-read=Read,Grep,Glob$' '^sbxoff-web=Read,Grep,Glob,WebFetch,WebSearch$' '^web-safe=1$')"
@@ -3982,18 +4356,25 @@ _s12_repo r3
 O=$(_s12_lead r3 "$_S12_KIT" '
 export TRIFORGE_CLAUDE_SANDBOX=off
 _r3w() { local L=$1 R=0 X; shift; X=$("$@" 2>&1) || R=$?; echo "$L:rc=$R:$(printf "%s" "$X" | tr "\n" " " | cut -c1-400)"; }
-_r3s() { local N=0; while [ ! -s "$_S12/log/sleeping" ] && [ "$N" -lt 150 ]; do sleep 0.1; N=$((N + 1)); done; }
+# the stub starts once its run is set up: under a second on an idle host, about
+# 5 s for an exec run when each python3 start costs 0.25 s more, so every wait
+# for a stub to start in this row allows 30 s
+_r3s() { local N=0; while [ ! -s "$_S12/log/sleeping" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done; }
+# gone: ps lists no such process, or a zombie (exited, its parent not yet
+# reaping it, which kill -0 would still count)
+_r3alive() { case "$(ps -o stat= -p "${1:-0}" 2>/dev/null | tr -d " ")" in ""|Z*) echo gone ;; *) echo alive ;; esac; }
 RUN="$_S12/r3runs"
 _s12_mode sleep
 T0=$(date +%s)
 _r3w spawn persona_spawn "$RUN" slow probe-reader "$_S12/review.diff" "$_S12/r3-slow.out"
-echo "spawn-quick=$(( $(date +%s) - T0 < 5 )):pid=$(if [ -s "$RUN/slow.pid" ]; then echo yes; else echo no; fi):rc=$(if [ -f "$RUN/slow.rc" ]; then echo yes; else echo no; fi)"
+# at once: well under the 30 s the stub sleeps, which a spawn that waited for its run would take
+echo "spawn-quick=$(( $(date +%s) - T0 < 20 )):pid=$(if [ -s "$RUN/slow.pid" ]; then echo yes; else echo no; fi):rc=$(if [ -f "$RUN/slow.rc" ]; then echo yes; else echo no; fi)"
 _r3s
 STUB=$(cat "$_S12/log/sleeping" 2>/dev/null || true)
 ( export TRIFORGE_LEAD_WAIT_BUDGET_S=3; _r3w wait75 persona_wait "$RUN" slow )
 _r3w stop persona_stop "$RUN" slow
-sleep 0.5
-if [ -n "$STUB" ] && kill -0 "$STUB" 2>/dev/null; then echo "stop-tree=stub-alive"; else echo "stop-tree=gone"; fi
+N=0; while [ -n "$STUB" ] && [ "$(_r3alive "$STUB")" = alive ] && [ "$N" -lt 50 ]; do sleep 0.1; N=$((N + 1)); done
+if [ -n "$STUB" ] && [ "$(_r3alive "$STUB")" = alive ]; then echo "stop-tree=stub-alive"; else echo "stop-tree=gone"; fi
 _r3w afterstop persona_wait "$RUN" slow
 _s12_mode sleep
 _r3w spawnk persona_spawn "$RUN" killed probe-reader "$_S12/review.diff" "$_S12/r3-k.out"
@@ -4003,7 +4384,7 @@ sleep 0.5
 _r3w killedwait persona_wait "$RUN" killed
 _s12_mode answer
 _r3w spawnf persona_spawn "$RUN" fast probe-reader "$_S12/review.diff" "$_S12/r3-f.out"
-( export TRIFORGE_LEAD_WAIT_BUDGET_S=40; _r3w waitf persona_wait "$RUN" fast )
+( export TRIFORGE_LEAD_WAIT_BUDGET_S=120; _r3w waitf persona_wait "$RUN" fast )
 echo "fast-rc=$(cat "$RUN/fast.rc" 2>/dev/null):out=$(cat "$_S12/r3-f.out" 2>/dev/null)"
 echo "fast-env=$(grep -cx CLAUDE_CODE_DISABLE_ATTACHMENTS=1 "$_S12/log/last.env" || true)"
 ( export TRIFORGE_LEASE_WORKER=persona; _r3w mspawn persona_spawn "$RUN" m probe-reader "$_S12/review.diff" "$_S12/r3-m.out"; _r3w mwait persona_wait "$RUN" fast; _r3w mstop persona_stop "$RUN" fast )
@@ -4028,7 +4409,6 @@ TSTUB=$(cat "$_S12/log/sleeping" 2>/dev/null || true)
 TDIRS=$(ls -d "$_S12/r3.leases"/persona-* 2>/dev/null | wc -l | tr -d " ")
 kill -INT -- "-$SIGPID" 2>/dev/null || true
 N=0; while [ -n "$(ls -d "$_S12/r3.leases"/persona-* 2>/dev/null)" ] && [ "$N" -lt 300 ]; do sleep 0.05; N=$((N + 1)); done
-_r3alive() { case "$(ps -o stat= -p "${1:-0}" 2>/dev/null | tr -d " ")" in ""|Z*) echo gone ;; *) echo alive ;; esac; }
 TAT=$(_r3alive "$TSTUB")
 wait "$SIGPID" 2>/dev/null || true
 echo "termkill=running-dirs:${TDIRS}:at-reclaim:${TAT}:stub:$(_r3alive "$TSTUB"):dirs=$(ls -d "$_S12/r3.leases"/persona-* 2>/dev/null | wc -l | tr -d " ")"
@@ -4064,7 +4444,7 @@ _self_try pin lease_pin_reviewer m1 codex
 _s12_mode waitgo
 ( R=0; dispatch_persona probe-tester "$_S12/brief.txt" "$_S12/lm.out" > /dev/null 2> "$_S12/lm.err" || R=$?; echo "$R" > "$_S12/lm.rc" ) &
 BG=$!
-N=0; while [ ! -f "$_S12/log/sleeping" ] && [ "$N" -lt 150 ]; do sleep 0.1; N=$((N + 1)); done
+N=0; while [ ! -f "$_S12/log/sleeping" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
 _self_try merge lease_merge m1 codex
 touch "$_S12/log/go"
 wait "$BG" 2>/dev/null || true
@@ -4138,7 +4518,7 @@ O=$(_s12_lead bg "$_S12_KIT" '
 export TRIFORGE_CLAUDE_SANDBOX=off TMPDIR="$_S12/tmp-bg"
 _r4alive() { case "$(ps -o stat= -p "${1:-0}" 2>/dev/null | tr -d " ")" in ""|Z*) echo gone ;; *) echo alive ;; esac; }
 _r4n() { ls -d "$@" 2>/dev/null | wc -l | tr -d " "; }
-_r4s() { local N=0; while [ ! -s "$_S12/log/sleeping" ] && [ "$N" -lt 150 ]; do sleep 0.1; N=$((N + 1)); done; cat "$_S12/log/sleeping" 2>/dev/null || true; }
+_r4s() { local N=0; while [ ! -s "$_S12/log/sleeping" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done; cat "$_S12/log/sleeping" 2>/dev/null || true; }
 _r4c() { local C; C=$(cat "$_S12/log/bgchild" 2>/dev/null || true); rm -f "$_S12/log/bgchild"; printf "%s" "$C"; }
 _s12_mode bgchild
 _self_try bgread dispatch_persona probe-reader "$_S12/review.diff" "$_S12/bg-r.out"
@@ -4474,7 +4854,7 @@ _s12_wts() { echo "dirs=$(ls -d "$_S12/px.leases"/persona-* 2>/dev/null | wc -l 
 _s12_mode sleep
 python3 -c "import os, signal, sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])" /bin/bash -c ". \"\$CLAUDE_PLUGIN_ROOT/scripts/invoke-external.sh\" >/dev/null 2>&1 && dispatch_persona probe-tester \"$_S12/brief.txt\" \"$_S12/px-sig.out\" --at task:dirty" >/dev/null 2>&1 &
 SIGPID=$!
-N=0; while [ ! -f "$_S12/log/sleeping" ] && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done
+N=0; while [ ! -f "$_S12/log/sleeping" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
 echo "sig-running=$(if [ -f "$_S12/log/sleeping" ]; then ls -d "$_S12/px.leases"/persona-* 2>/dev/null | wc -l | tr -d " "; else echo never; fi)"
 T0=$(date +%s)
 kill -INT -- "-$SIGPID" 2>/dev/null || true
@@ -4579,7 +4959,7 @@ O=$(_s12_lead lt "$_S12_KIT" "$_S12_LEDGER_PRE"'
 _s12_mode late "$_S12/lt.forge"
 _self_try late dispatch_persona probe-tester "$_S12/brief.txt" "$_S12/lt.out" --at task:t
 touch "$_S12/log/go"
-N=0; while [ ! -f "$_S12/log/late.done" ] && [ "$N" -lt 100 ]; do sleep 0.1; N=$((N + 1)); done
+N=0; while [ ! -f "$_S12/log/late.done" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
 if [ -f "$_S12/log/late.done" ]; then echo "late-done=yes"; else echo "late-done=no"; fi
 _self_try promote lease_promote
 if [ "$(git rev-parse main)" = "$M0" ]; then echo "main-moved=no"; else echo "main-moved=yes"; fi
@@ -4650,7 +5030,7 @@ fi
 
 _S12_CAP="persona lane: dispatch_persona under the worker boundary with enforced tool classes, the trio at the top rung, a lead-controlled cwd, exec in a restored disposable snapshot worktree with integrity checks (KTD5, KTD20, KTD21, KTD22; R14, R35, R48)"
 if [ -z "$_S12_FAIL" ]; then
-  row "SELF-12" "claude" "$_S12_CAP" "PASS" "resolve: tiers from the ladder, max_turns from the manifest, --model rung or id; trio opus/max (no record), fable/max (CC-02 PASS), opus/max (CC-02 FAIL); ladder-named plan-checker -> top; trio sonnet / lower rung / codex -> 64; lease + agent-team -> 64 naming at-resolve-pr / agent_teams (unenforced); unknown / path-shaped / bad CLI -> 64; manifest bad tier (lists the ladder tiers) / unknown key / not TOML -> 70, missing -> 69; corrupted ladder -> 70; persona_prompt: bodies by name (lease + agent-team too), unknown 64, no body 70, no manifest 69, bad entry 70, worker marker 45; read: claude -p Read,Grep,Glob (no Bash) dontAsk strict-mcp project+local opus/high turns 7, --brief in the prompt, denyWrite = the empty scratch cwd (gone after), the input file copied beside it, marker persona + no-push, planted key dropped; web: + WebFetch,WebSearch (no Bash) sonnet/high; neither gains Bash with the sandbox off; task:dirty read: the snapshot diff as input, AGENTS.md + .mcp.json named; codex (flags after the positionals): exec under the triforge_persona permission profile (extends :read-only, every credential path denied, no -s), approval never, --skip-git-repo-check, env policy pinned, gpt-6-astra/high, -o <out>; a codex without permission profiles 69; trio argv fable/max with CC-02 PASS, opus/max without, --model sonnet refused before any CLI; noclaude: read falls back to codex (NOTE), trio/read-web/exec -> 69 naming the install fix, neither -> 69; exec --at task:dirty: detached snapshot worktree under the lease root, the brief (input) seen, the feature change seen, AGENTS.md from the integration branch, no .mcp.json, its write gone with the worktree, lease_merge from inside -> 45 (marker persona), no edit tool, denyWrite the lead git dir, AGENTS.md + .mcp.json named as content under review; no --at = ref:HEAD (integration commit, nothing named), --at ref:other (its change seen, AGENTS.md restored and named, reclaimed); bare dirty / task:dirty as input = --at task:dirty with the lease diff as input; task: + --at 64; persona_snapshot_diff writes the recorded snapshot's diff byte-equal to base..snapshot_sha after the lease tip moved past it (the tip's diff has the extra file, the written one not), unknown / fix cycle / dir / usage 64, marker 45; poison: read on the clean / dirty snapshot diffs (the dirty one's AGENTS.md + .mcp.json named as content under review) and exec at task:dirty report the finding, no MCP marker (control from the builder worktree: no findings + marker); ledger: a persona-forged user promotion approval -> dispatch 44 naming ops/leases.toml, gone, promote 42; a straggler's -> promote 44; the lead's own -> promoted; guard: marker / lease worktree 45, missing input / directory input / --at on read / --at without task:|ref: / unknown ref / dash ref / unknown task 64, no body 70, empty answer 80, AGENTS.md above the cwd 69, a ledger repointed at another snapshot 44 before the run (restored), a ledger changed before a ref:HEAD run 44, a lease in a fix cycle 64, a directory as <out> 64, a failing protected-path classifier without pipefail 1 before any run; hooks inert inside a persona (control without the marker writes); round 3: persona_spawn returns at once with <name>.pid, persona_wait 75 under a 3 s budget then 0 with the rc, a stopped or killed run 80, persona_stop ends the whole tree, marker 45 for all three, usage / unknown run 64; every claude run under CLAUDE_CODE_DISABLE_ATTACHMENTS=1 and the trusted bundle's @ written as (at); a dropped [baseline].config with re-anchored digests and a poisoned .git/config 44 before any run; a persona deleting a run marker and moving a tag 44; a TERM-ignoring CLI KILLed before its worktree is reclaimed; a lease_merge mid-run 0, a persona moving the integration branch 44 naming HEAD and the branch; round 4: a builder moving the integration branch, switching or detaching the lead's HEAD before a dispatch 44 with no CLI run, a switched HEAD with a lease open and no integration branch recorded 44, the controls 0; a background child the CLI leaves stopped once the run ends (read and exec), the in-group ledger straggler stopped before it writes (promote 42), a daemonized one still caught (promote 44); persona_stop on a run whose wrapper alone was killed stops its CLI (0) or says unresolved cleanup (80, ps failing); a stopped read or exec run leaves no scratch directory or worktree; round 5: main moved after the integrity check and back during the run -> the instructions from the recorded default_sha; on main mid-sprint an exec persona runs (0) and the integration branch stays; a detached HEAD -> 44 advising to check the branch out again; the run supervisor without os.waitid and with a TERM before its child is noted still stops the child; ps unreadable mid-run -> 80, worktree and scratch left; an old record never reaches a stranger's session; shipped manifest: ${_S12_SHIPPED}" "static"
+  row "SELF-12" "claude" "$_S12_CAP" "PASS" "resolve: tiers from the ladder, max_turns from the manifest, --model rung or id; trio opus/max (no record), fable/max (CC-02 PASS), opus/max (CC-02 FAIL); ladder-named plan-checker -> top; trio sonnet / lower rung / codex -> 64; lease + agent-team -> 64 naming at-resolve-pr / agent_teams (unenforced); unknown / path-shaped / bad CLI -> 64; manifest bad tier (lists the ladder tiers) / unknown key / not TOML -> 70, missing -> 69; corrupted ladder -> 70; persona_prompt: bodies by name (lease + agent-team too), unknown 64, no body 70, no manifest 69, bad entry 70, worker marker 45; read: claude -p Read,Grep,Glob (no Bash) dontAsk strict-mcp project+local opus/high turns 7, --brief in the prompt, denyWrite = the empty scratch cwd (gone after), the input file copied beside it, marker persona + no-push, planted key dropped; web: + WebFetch,WebSearch (no Bash) sonnet/high; neither gains Bash with the sandbox off; task:dirty read: the snapshot diff as input, AGENTS.md + .mcp.json named; codex (flags after the positionals): exec under the triforge_persona permission profile (extends :read-only, every credential path denied, no -s), approval never, --skip-git-repo-check, env policy pinned, gpt-6-astra/high, -o <out>; a codex without permission profiles 69; trio argv fable/max with CC-02 PASS, opus/max without, --model sonnet refused before any CLI; noclaude: read falls back to codex (NOTE), trio/read-web/exec -> 69 naming the install fix, neither -> 69; exec --at task:dirty: detached snapshot worktree under the lease root, the brief (input) seen, the feature change seen, AGENTS.md from the integration branch, no .mcp.json, its write gone with the worktree, lease_merge from inside -> 45 (marker persona), no edit tool, denyWrite the lead git dir, AGENTS.md + .mcp.json named as content under review; no --at = ref:HEAD (integration commit, nothing named), --at ref:other (its change seen, AGENTS.md restored and named, reclaimed); bare dirty / task:dirty as input = --at task:dirty with the lease diff as input; task: + --at 64; persona_snapshot_diff writes the recorded snapshot's diff byte-equal to base..snapshot_sha after the lease tip moved past it (the tip's diff has the extra file, the written one not), unknown / fix cycle / dir / usage 64, marker 45; poison: read on the clean / dirty snapshot diffs (the dirty one's AGENTS.md + .mcp.json named as content under review) and exec at task:dirty report the finding, no MCP marker (control from the builder worktree: no findings + marker); ledger: a persona-forged user promotion approval -> dispatch 44 naming ops/leases.toml, gone, promote 42; a straggler's -> promote 44; the lead's own -> promoted; guard: marker / lease worktree 45, missing input / directory input / --at on read / --at without task:|ref: / unknown ref / dash ref / unknown task 64, no body 70, empty answer 80, AGENTS.md above the cwd 69, ~/.claude/CLAUDE.md above it 69 once CLAUDE_CONFIG_DIR is set (absolute or empty) and the CLAUDE.md of an absolute one skipped, a ledger repointed at another snapshot 44 before the run (restored), a ledger changed before a ref:HEAD run 44, a lease in a fix cycle 64, a directory as <out> 64, a failing protected-path classifier without pipefail 1 before any run; hooks inert inside a persona (control without the marker writes); round 3: persona_spawn returns at once with <name>.pid, persona_wait 75 under a 3 s budget then 0 with the rc, a stopped or killed run 80, persona_stop ends the whole tree, marker 45 for all three, usage / unknown run 64; every claude run under CLAUDE_CODE_DISABLE_ATTACHMENTS=1 and the trusted bundle's @ written as (at); a dropped [baseline].config with re-anchored digests and a poisoned .git/config 44 before any run; a persona deleting a run marker and moving a tag 44; a TERM-ignoring CLI KILLed before its worktree is reclaimed; a lease_merge mid-run 0, a persona moving the integration branch 44 naming HEAD and the branch; round 4: a builder moving the integration branch, switching or detaching the lead's HEAD before a dispatch 44 with no CLI run, a switched HEAD with a lease open and no integration branch recorded 44, the controls 0; a background child the CLI leaves stopped once the run ends (read and exec), the in-group ledger straggler stopped before it writes (promote 42), a daemonized one still caught (promote 44); persona_stop on a run whose wrapper alone was killed stops its CLI (0) or says unresolved cleanup (80, ps failing); a stopped read or exec run leaves no scratch directory or worktree; round 5: main moved after the integrity check and back during the run -> the instructions from the recorded default_sha; on main mid-sprint an exec persona runs (0) and the integration branch stays; a detached HEAD -> 44 advising to check the branch out again; the run supervisor without os.waitid and with a TERM before its child is noted still stops the child; ps unreadable mid-run -> 80, worktree and scratch left; an old record never reaches a stranger's session; shipped manifest: ${_S12_SHIPPED}" "static"
 else
   row "SELF-12" "claude" "$_S12_CAP" "FAIL" "mismatch:$(printf '%s' "$_S12_FAIL" | cut -c1-900)" "static"
 fi
@@ -5121,15 +5501,65 @@ rm -rf "$_S13"
 #            integration branch touching AGENTS.md: the two-argument approval
 #            -> 1 naming the target argument; lease_promote trunk -> 42 naming
 #            lease_approve promotion:sprint/s14 user trunk; that approval
-#            records trunk and its commit, and lease_promote trunk promotes
+#            records trunk and its commit, in the approval and as the
+#            baseline's promotion target, and lease_promote trunk promotes,
+#            clearing the target from the baseline; the next lease_create, on
+#            sprint/s15 -> 0 (a promotion with no default branch records none,
+#            and the next check agrees)
+#   trunkmain no default branch when the baseline was recorded, main created
+#            after it: lease_promote trunk -> 44 naming main as the default
+#            branch that resolves now where none did, trunk unmoved;
+#            accepted with lease_rebaseline -> lease_promote trunk promotes,
+#            main kept on record at its commit; lease_promote trunk on
+#            trunk -> 1 naming the target branch trunk; the next lease_create,
+#            on sprint/s15 -> 0; lease_promote on main -> 1 naming the default
+#            branch main
+#   defappear origin/HEAD names main but no refs/heads/main exists when the
+#            baseline is recorded; a worker then creates it: lease_promote
+#            -> 44 naming refs/heads/main as appeared since the baseline, main
+#            unmoved, still on sprint/s14; accepted with lease_rebaseline ->
+#            lease_promote promotes into main and records it there
+#   defrace  the same baseline; a worker creates refs/heads/main right after
+#            lease_promote's integrity check passed (a wrapped
+#            _lead_integrity_check): the promotion goes into it but records
+#            nothing (44 naming the commit it started from and none on
+#            record), and the next lease_promote -> 44 naming main as appeared
 #   target   origin/HEAD -> main, the promotion going into develop: a third
 #            argument on task:<id> -> 64; a target that is no local branch
 #            (unknown, origin/main, develop~0) or is the integration branch
 #            itself -> 1, a lead-class one -> 1 naming the user's call with
 #            the target, and nothing recorded; the user's approval for
-#            develop -> lease_promote main 42 (approved into develop, not
-#            main) naming the call with main; develop moves -> 42 voided;
-#            approved again -> lease_promote develop promotes, main unmoved
+#            develop records it as the baseline's promotion target at its
+#            commit -> lease_promote main 42 (approved into develop, not
+#            main) naming the call with main; develop moved behind the lead's
+#            back -> lease_promote develop 44 naming refs/heads/develop, still
+#            on sprint/s14; accepted with lease_rebaseline -> 42 voided;
+#            approved again -> lease_promote develop promotes, main unmoved,
+#            the target cleared from the baseline
+#   targetsym the user's approval for develop says develop is watched; develop
+#            moved behind the lead's back and approved again -> lease_promote
+#            develop 44 naming the move (the second approval kept the commit
+#            on record); put back and approved, develop swapped for a
+#            symbolic ref to a branch decoy at the same commit -> 44 naming
+#            refs/heads/develop as a symbolic ref to refs/heads/decoy, decoy
+#            unmoved, still on sprint/s14; develop put back as the branch it
+#            was -> promotes, decoy unmoved
+#   targetswitch the user's approval for develop records it; one into main
+#            (the default branch) clears target_branch and target_sha; one
+#            for develop again, then one for staging -> staging on record at
+#            its own commit
+#   targetmoved the user's approval for develop, then develop moved behind the
+#            lead's back: an approval into main -> 44 naming
+#            refs/heads/develop moved, that it would clear it, and
+#            lease_rebaseline; one into staging -> 44 naming the same move
+#            and that it would replace it; develop still on record at its
+#            old commit, the ledger byte-identical; accepted with
+#            lease_rebaseline -> the approval into main clears it
+#   targetgone the user's approval for develop, then develop deleted: the next
+#            lease call (lease_create) -> 44 naming refs/heads/develop moved
+#            <sha> -> <deleted>; an approval into main -> 44 naming the same,
+#            the ledger byte-identical; accepted with lease_rebaseline -> the
+#            approval into main clears it
 #   shadow   the integration branch touches .claude/settings.json and
 #            require_user_approval is off: lease_promote main -> 42; a tag
 #            main at the integration head -> still 42 naming the path, main
@@ -5198,14 +5628,33 @@ rm -rf "$_S13"
 #            branch still recorded; main put back, lease_promote main records
 #            the verified result
 #   racemerge* a worker moves refs/heads/sprint/s14 right after lease_merge's
-#            squash commit (a wrapped _lgr, race-seam.sh): to a commit on the
+#            squash commit (a wrapped _lgr, race-seam.sh), the lead holding an
+#            unstaged README.md edit: to a commit on the
 #            squash's parent with that parent's tree (racemergetree) or on
 #            top of the squash commit (racemergeon) -> 44 naming both
-#            commits, nothing recorded (the ledger byte-identical, the lease
-#            in review with its worktree); the branch put back with git reset
-#            --hard -> the rerun merges once; the branch accepted with
+#            commits and git reset --merge <head> as the way back, never
+#            reset --hard, nothing recorded (the ledger byte-identical, the
+#            lease in review with its worktree); the branch put back with that
+#            git reset --merge -> the rerun merges once, the README.md edit
+#            still unstaged; the branch accepted with
 #            lease_rebaseline -> the rerun stages nothing (rc 1), the change
 #            on the branch once
+#   racemergehead a worker commits worker.txt on sprint/s14 in the lead's
+#            checkout after lease_merge read the integration head and passed
+#            its approval gate, before the squash (race-seam.sh's
+#            _s14_seam_after on _lease_merge_gate): the squash lands on the
+#            worker's commit, and what it staged, held to the head lease_merge
+#            read, changes worker.txt outside the scan -> 1 naming worker.txt
+#            and the head's move as a commit gained during the merge (the next
+#            lease_merge or lease_promote refuses on it with rc 44; accept it
+#            with lease_rebaseline only if it is yours), never "lease the task
+#            again"; nothing committed (HEAD at the worker's commit, nothing
+#            staged), the ledger byte-identical, the lease in review; the
+#            rerun -> 44 naming the move. The refusal names git reset --keep
+#            <head> as the way back, never reset --hard: with the lead's
+#            unstaged README.md edit, that reset removes worker.txt and keeps
+#            the edit, and the next rerun merges. renamed's edfollow (the head
+#            unmoved) keeps the "lease the task again" recovery
 _S14="${WORK}/self14"
 _S14_FAIL=""
 rm -rf "$_S14"
@@ -5448,13 +5897,99 @@ _self_try twoarg lease_approve promotion:sprint/s14 user
 _self_try blocked lease_promote trunk
 _self_try app lease_approve promotion:sprint/s14 user trunk
 echo "rec=$(_ledger_get @baseline promotion_default):at-trunk=$(if [ "$(_ledger_get @baseline promotion_default_sha)" = "$(git rev-parse trunk)" ]; then echo yes; else echo no; fi)"
+echo "tgt=$(_ledger_get @baseline target_branch):at-trunk=$(if [ "$(_ledger_get @baseline target_sha)" = "$(git rev-parse trunk)" ]; then echo yes; else echo no; fi)"
 _self_try promote lease_promote trunk
 echo "trunk=$(git rev-parse trunk | cut -c1-12):sprint=$(git rev-parse sprint/s14 | cut -c1-12)"
+echo "tgt-after=[$(_ledger_get @baseline target_branch)$(_ledger_get @baseline target_sha)]"
+git checkout -q -b sprint/s15
+_self_try next lease_create t builder
 ')
 _S14_FAIL="${_S14_FAIL}$(_self_expect trunk "$O" '^twoarg:rc=1:.*no default branch.*lease_approve promotion:sprint/s14 user <target branch>' \
-  '^blocked:rc=42:.*AGENTS\.md.*lease_approve promotion:sprint/s14 user trunk ' '^app:rc=0:.*into trunk' '^rec=trunk:at-trunk=yes$' \
-  "^promote:rc=0:.*approved by the user.*PROMOTED 'sprint/s14' -> 'trunk'")"
+  '^blocked:rc=42:.*AGENTS\.md.*lease_approve promotion:sprint/s14 user trunk ' '^app:rc=0:.*into trunk' '^rec=trunk:at-trunk=yes$' '^tgt=trunk:at-trunk=yes$' \
+  "^promote:rc=0:.*approved by the user.*PROMOTED 'sprint/s14' -> 'trunk'" '^tgt-after=\[\]$' '^next:rc=0:')"
 [ "$(printf '%s\n' "$O" | sed -n 's/^trunk=\([0-9a-f]*\):sprint=\([0-9a-f]*\)$/\1=\2/p' | awk -F= '$1 == $2 && $1 != "" { print "same" }')" = same ] || _S14_FAIL="${_S14_FAIL} trunk(trunk-not-at-sprint)"
+
+# trunkmain: the baseline recorded with no default branch, main created after
+# it (refused until accepted); a promotion into trunk, the next lease call,
+# and the "already on" refusals, each naming the branch as lease_promote was
+# given it
+_s14_repo trunkmain claude codex
+( cd "$_S14/trunkmain" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git branch -m main trunk && echo s > s.txt && git add s.txt \
+    && git commit -qm s ) >/dev/null 2>&1
+O=$(_s14_lead trunkmain claude '
+_self_try app lease_approve promotion:sprint/s14 user trunk
+echo "rec=[$(_ledger_get @baseline default_branch)]"
+git branch main trunk
+M=$(git rev-parse refs/heads/main)
+T=$(git rev-parse refs/heads/trunk)
+_self_try appeared lease_promote trunk
+echo "appeared:trunk=$(if [ "$(git rev-parse refs/heads/trunk)" = "$T" ]; then echo kept; else echo moved; fi):on=$(git symbolic-ref HEAD 2>/dev/null || echo detached)"
+_self_try rebaseline lease_rebaseline
+_self_try promote lease_promote trunk
+echo "after:def=$(_ledger_get @baseline default_branch):sha=$(if [ "$(_ledger_get @baseline default_sha)" = "$M" ]; then echo main; else echo other; fi):ib=[$(_ledger_get @baseline integration_branch)]:trunk=$(if [ "$(git rev-parse refs/heads/trunk)" = "$(git rev-parse refs/heads/sprint/s14)" ]; then echo at-sprint; else echo other; fi)"
+_self_try ontarget lease_promote trunk
+git checkout -q -b sprint/s15
+_self_try next lease_create t builder
+git checkout -q main
+_self_try ondefault lease_promote
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect trunkmain "$O" '^app:rc=0:.*into trunk' '^rec=\[\]$' \
+  '^appeared:rc=44:.*the default branch now resolves to refs/heads/main at [0-9a-f]{12} \(none did when the baseline was recorded' \
+  '^appeared:trunk=kept:on=refs/heads/sprint/s14$' '^rebaseline:rc=0:.*accepting — the default branch now resolves to refs/heads/main' \
+  "^promote:rc=0:.*PROMOTED 'sprint/s14' -> 'trunk'" \
+  '^after:def=main:sha=main:ib=\[\]:trunk=at-sprint$' "^ontarget:rc=1:.*already on the target branch 'trunk'" '^next:rc=0:' \
+  "^ondefault:rc=1:.*already on the default branch 'main'")"
+
+# defappear: origin/HEAD names main, no refs/heads/main when the baseline is
+# recorded; a worker creates it (at origin/main's commit here): every lease
+# call refuses before the merge until lease_rebaseline accepts it
+_s14_repo defappear claude codex
+( cd "$_S14/defappear" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git update-ref refs/remotes/origin/main main \
+    && git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main && git branch -D main && echo a > a.txt && git add a.txt \
+    && git commit -qm a ) >/dev/null 2>&1
+O=$(_s14_lead defappear claude '
+_self_try base lease_create t builder
+echo "rec=$(_ledger_get @baseline default_branch):[$(_ledger_get @baseline default_sha)]"
+I=$(git rev-parse refs/remotes/origin/main)
+git update-ref refs/heads/main "$I"
+_self_try appeared lease_promote
+echo "appeared:main=$(if [ "$(git rev-parse refs/heads/main)" = "$I" ]; then echo kept; else echo moved; fi):on=$(git symbolic-ref HEAD 2>/dev/null || echo detached)"
+_self_try rebaseline lease_rebaseline
+_self_try promote lease_promote
+echo "after:main=$(if [ "$(git rev-parse refs/heads/main)" = "$(git rev-parse refs/heads/sprint/s14)" ]; then echo at-sprint; else echo other; fi):def=$(if [ "$(_ledger_get @baseline default_sha)" = "$(git rev-parse refs/heads/main)" ]; then echo recorded; else echo other; fi)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect defappear "$O" '^base:rc=0:' '^rec=main:\[\]$' \
+  '^appeared:rc=44:.*refs/heads/main appeared since the baseline \(it was absent\), at [0-9a-f]{12}' '^appeared:main=kept:on=refs/heads/sprint/s14$' \
+  '^rebaseline:rc=0:.*accepting — refs/heads/main appeared since the baseline' "^promote:rc=0:.*PROMOTED 'sprint/s14' -> 'main'" '^after:main=at-sprint:def=recorded$')"
+
+# defrace: the same baseline; refs/heads/main created right after
+# lease_promote's integrity check passed, before it read the default branch
+# (a wrapped _lead_integrity_check, once): nothing recorded, and the next
+# lease call reports the branch
+_s14_repo defrace claude codex
+( cd "$_S14/defrace" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git update-ref refs/remotes/origin/main main \
+    && git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main && git branch -D main && echo a > a.txt && git add a.txt \
+    && git commit -qm a ) >/dev/null 2>&1
+O=$(_s14_lead defrace claude '
+_self_try base lease_create t builder
+I=$(git rev-parse refs/remotes/origin/main)
+eval "_s14_wasic() $(declare -f _lead_integrity_check | sed 1d)"
+_lead_integrity_check() {
+  local R=0
+  _s14_wasic "$@" || R=$?
+  if [ "$R" -eq 0 ] && [ "${1:-}" = lease_promote ] && [ ! -e "$_S14/defrace.moved" ]; then
+    : > "$_S14/defrace.moved"
+    git update-ref refs/heads/main "$I"
+  fi
+  return "$R"
+}
+_self_try race lease_promote
+echo "race:def=[$(_ledger_get @baseline default_sha)]:ib=$(_ledger_get @baseline integration_branch)"
+_self_try next lease_promote
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect defrace "$O" '^base:rc=0:' \
+  '^race:rc=44:.*INTEGRITY — refs/heads/main was at [0-9a-f]{12} when the promotion started, not at <none> as on record: it moved or appeared after' \
+  '^race:def=\[\]:ib=sprint/s14$' '^next:rc=44:.*refs/heads/main appeared since the baseline \(it was absent\)')"
 
 # target: the promotion goes into develop, not the default branch (origin/HEAD -> main)
 _s14_repo target claude codex
@@ -5473,20 +6008,118 @@ echo "recorded=[$(_ledger_get @baseline promotion_scope 2>/dev/null)]"
 _self_try app lease_approve promotion:sprint/s14 user develop
 echo "rec=$(_ledger_get @baseline promotion_scope):$(_ledger_get @baseline promotion_default)"
 M=$(git rev-parse main)
+echo "tgt=$(_ledger_get @baseline target_branch):$(if [ "$(_ledger_get @baseline target_sha)" = "$(git rev-parse refs/heads/develop)" ]; then echo at-develop; else echo other; fi)"
 _self_try intomain lease_promote main
-git update-ref refs/heads/develop "$(git rev-parse sprint/s14~1)"
+V=$(git rev-parse sprint/s14~1)
+git update-ref refs/heads/develop "$V"
 _self_try moved lease_promote develop
+echo "moved:develop=$(if [ "$(git rev-parse refs/heads/develop)" = "$V" ]; then echo kept; else echo other; fi):on=$(git symbolic-ref HEAD 2>/dev/null || echo detached)"
+_self_try rebaseline lease_rebaseline
+_self_try voided lease_promote develop
 _self_try app2 lease_approve promotion:sprint/s14 user develop
 _self_try intodev lease_promote develop
 echo "develop=$(git rev-parse develop | cut -c1-12):sprint=$(git rev-parse sprint/s14 | cut -c1-12)"
 echo "main-moved=$(if [ "$(git rev-parse main)" = "$M" ]; then echo no; else echo yes; fi)"
+echo "tgt-after=[$(_ledger_get @baseline target_branch)$(_ledger_get @baseline target_sha)]"
 ')
 _S14_FAIL="${_S14_FAIL}$(_self_expect target "$O" '^default=main$' '^taskarg:rc=64:.*usage' "^nosuch:rc=1:.*'nosuch' is not a local branch" \
   "^remote:rc=1:.*'origin/main' is not a local branch" "^revexpr:rc=1:.*'develop~0' is not a local branch" '^self:rc=1:.*both the branch to promote and its target' \
-  '^leadapp:rc=1:.*lease_approve promotion:sprint/s14 user develop$' '^recorded=\[\]$' '^app:rc=0:.*into develop' '^rec=promotion:sprint/s14:develop$' \
-  '^intomain:rc=42:.*approved a promotion into develop, not main.*lease_approve promotion:sprint/s14 user main ' '^moved:rc=42:.*void: develop moved' \
-  '^app2:rc=0:' "^intodev:rc=0:.*approved by the user.*PROMOTED 'sprint/s14' -> 'develop'" '^main-moved=no$')"
+  '^leadapp:rc=1:.*lease_approve promotion:sprint/s14 user develop$' '^recorded=\[\]$' '^app:rc=0:.*into develop' '^rec=promotion:sprint/s14:develop$' '^tgt=develop:at-develop$' \
+  '^intomain:rc=42:.*approved a promotion into develop, not main.*lease_approve promotion:sprint/s14 user main ' \
+  '^moved:rc=44:.*refs/heads/develop \(the promotion target\) moved [0-9a-f]{12} -> [0-9a-f]{12}' '^moved:develop=kept:on=refs/heads/sprint/s14$' \
+  '^rebaseline:rc=0:.*accepting — refs/heads/develop \(the promotion target\) moved' '^voided:rc=42:.*void: develop moved' \
+  '^app2:rc=0:' "^intodev:rc=0:.*approved by the user.*PROMOTED 'sprint/s14' -> 'develop'" '^main-moved=no$' '^tgt-after=\[\]$')"
 [ "$(printf '%s\n' "$O" | sed -n 's/^develop=\([0-9a-f]*\):sprint=\([0-9a-f]*\)$/\1=\2/p' | awk -F= '$1 == $2 && $1 != "" { print "same" }')" = same ] || _S14_FAIL="${_S14_FAIL} target(develop-not-at-sprint)"
+
+# targetsym: the approved target swapped for a symbolic ref to another branch
+# at the same commit, which a checkout and the promotion would follow
+_s14_repo targetsym claude codex
+( cd "$_S14/targetsym" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git branch develop main && echo "# x" > AGENTS.md && git add AGENTS.md \
+    && git commit -qm agents ) >/dev/null 2>&1
+O=$(_s14_lead targetsym claude '
+_self_try app lease_approve promotion:sprint/s14 user develop
+D=$(git rev-parse refs/heads/develop)
+X=$(git commit-tree -p "$D" -m "a worker commit" "$D^{tree}") && git update-ref refs/heads/develop "$X"
+_self_try reapp lease_approve promotion:sprint/s14 user develop
+_self_try kept lease_promote develop
+echo "kept:develop=$(if [ "$(git rev-parse refs/heads/develop)" = "$X" ]; then echo at-x; else echo other; fi):tgt=$(if [ "$(_ledger_get @baseline target_sha)" = "$D" ]; then echo at-d; else echo other; fi)"
+git update-ref refs/heads/develop "$D"
+_self_try app3 lease_approve promotion:sprint/s14 user develop
+git branch decoy "$D" && git symbolic-ref refs/heads/develop refs/heads/decoy
+_self_try swapped lease_promote develop
+echo "swapped:decoy=$(if [ "$(git rev-parse refs/heads/decoy)" = "$D" ]; then echo kept; else echo moved; fi):on=$(git symbolic-ref HEAD 2>/dev/null || echo detached)"
+git update-ref --no-deref refs/heads/develop "$D"
+_self_try untouched lease_promote develop
+echo "promoted:develop=$(if [ "$(git rev-parse refs/heads/develop)" = "$(git rev-parse refs/heads/sprint/s14)" ]; then echo at-sprint; else echo other; fi):decoy=$(if [ "$(git rev-parse refs/heads/decoy)" = "$D" ]; then echo kept; else echo moved; fi)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect targetsym "$O" '^app:rc=0:.*into develop.*develop is watched until then' '^reapp:rc=0:' \
+  '^kept:rc=44:.*refs/heads/develop \(the promotion target\) moved [0-9a-f]{12} -> [0-9a-f]{12}' '^kept:develop=at-x:tgt=at-d$' '^app3:rc=0:' \
+  '^swapped:rc=44:.*refs/heads/develop \(the promotion target\) is now a symbolic ref to refs/heads/decoy' '^swapped:decoy=kept:on=refs/heads/sprint/s14$' \
+  "^untouched:rc=0:.*approved by the user.*PROMOTED 'sprint/s14' -> 'develop'" '^promoted:develop=at-sprint:decoy=kept$')"
+
+# target*: an approval clears (into the default branch) or replaces (into
+# another target) the promotion target on record only while that target is
+# at the state recorded for it. develop at main's commit, staging one commit
+# ahead; _s14_tgt <label> prints the target on record and whose commit it is
+_S14_TGT_PRE='
+S14_D=$(git rev-parse refs/heads/develop); S14_S=$(git rev-parse refs/heads/staging)
+_s14_tgt() {
+  local T
+  T=$(_ledger_get @baseline target_sha)
+  echo "$1:tgt=[$(_ledger_get @baseline target_branch)]:at=$(if [ -z "$T" ]; then echo none; elif [ "$T" = "$S14_D" ]; then echo d; elif [ "$T" = "$S14_S" ]; then echo s; else echo other; fi)"
+}
+'
+for _s14_c in targetswitch targetmoved targetgone; do
+  _s14_repo "$_s14_c" claude codex
+  ( cd "$_S14/$_s14_c" && export HOME="$_S14/home" GIT_CONFIG_NOSYSTEM=1 && git branch develop main && git branch staging main \
+      && git checkout -q staging && echo s > s.txt && git add s.txt && git commit -qm s && git checkout -q sprint/s14 \
+      && echo a > a.txt && git add a.txt && git commit -qm a ) >/dev/null 2>&1
+done
+O=$(_s14_lead targetswitch claude "$_S14_TGT_PRE"'
+_self_try app lease_approve promotion:sprint/s14 user develop
+_s14_tgt app
+_self_try intomain lease_approve promotion:sprint/s14 user
+_s14_tgt intomain
+_self_try app2 lease_approve promotion:sprint/s14 user develop
+_self_try intostaging lease_approve promotion:sprint/s14 user staging
+_s14_tgt intostaging
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect targetswitch "$O" '^app:rc=0:.*develop is watched until then' '^app:tgt=\[develop\]:at=d$' \
+  '^intomain:rc=0:.*into main' '^intomain:tgt=\[\]:at=none$' '^app2:rc=0:' '^intostaging:rc=0:.*staging is watched until then' '^intostaging:tgt=\[staging\]:at=s$')"
+O=$(_s14_lead targetmoved claude "$_S14_TGT_PRE"'
+_self_try app lease_approve promotion:sprint/s14 user develop
+X=$(git commit-tree -p "$S14_D" -m "a worker commit" "$S14_D^{tree}") && git update-ref refs/heads/develop "$X"
+cp ops/leases.toml "$_S14/$S14_CASE.ledger"
+_self_try intomain lease_approve promotion:sprint/s14 user
+_self_try intostaging lease_approve promotion:sprint/s14 user staging
+_s14_tgt refused
+echo "refused:pdef=$(_ledger_get @baseline promotion_default):ledger=$(if cmp -s ops/leases.toml "$_S14/$S14_CASE.ledger"; then echo unchanged; else echo CHANGED; fi)"
+_self_try rebaseline lease_rebaseline
+_self_try accepted lease_approve promotion:sprint/s14 user
+_s14_tgt accepted
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect targetmoved "$O" '^app:rc=0:.*develop is watched until then' \
+  '^intomain:rc=44:.*INTEGRITY — refs/heads/develop \(the promotion target\) moved [0-9a-f]{12} -> [0-9a-f]{12} since it was recorded, and this approval into main would clear it from the integrity baseline.*Nothing was recorded.*lease_rebaseline, then rerun: lease_approve promotion:sprint/s14 user$' \
+  '^intostaging:rc=44:.*INTEGRITY — refs/heads/develop \(the promotion target\) moved [0-9a-f]{12} -> [0-9a-f]{12} since it was recorded, and this approval into staging would replace it with staging in the integrity baseline.*lease_approve promotion:sprint/s14 user staging$' \
+  '^refused:tgt=\[develop\]:at=d$' '^refused:pdef=develop:ledger=unchanged$' '^rebaseline:rc=0:.*accepting — refs/heads/develop \(the promotion target\) moved' \
+  '^accepted:rc=0:.*into main' '^accepted:tgt=\[\]:at=none$')"
+O=$(_s14_lead targetgone claude "$_S14_TGT_PRE"'
+_self_try app lease_approve promotion:sprint/s14 user develop
+git update-ref -d refs/heads/develop
+_self_try next lease_create t builder
+cp ops/leases.toml "$_S14/$S14_CASE.ledger"
+_self_try intomain lease_approve promotion:sprint/s14 user
+_s14_tgt refused
+echo "refused:ledger=$(if cmp -s ops/leases.toml "$_S14/$S14_CASE.ledger"; then echo unchanged; else echo CHANGED; fi)"
+_self_try rebaseline lease_rebaseline
+_self_try accepted lease_approve promotion:sprint/s14 user
+_s14_tgt accepted
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect targetgone "$O" '^app:rc=0:.*develop is watched until then' \
+  '^next:rc=44:.*refs/heads/develop \(the promotion target\) moved [0-9a-f]{12} -> <deleted>' \
+  '^intomain:rc=44:.*INTEGRITY — refs/heads/develop \(the promotion target\) moved [0-9a-f]{12} -> <deleted> since it was recorded, and this approval into main would clear it' \
+  '^refused:tgt=\[develop\]:at=d$' '^refused:ledger=unchanged$' '^rebaseline:rc=0:' '^accepted:rc=0:.*into main' '^accepted:tgt=\[\]:at=none$')"
+unset _s14_c _S14_TGT_PRE
 
 # shadow: a ref named like the default branch (a tag, refs/main, a $GIT_DIR/main
 # file) at the integration head can't empty the protected scan of a promotion
@@ -5695,7 +6328,7 @@ _self_try rnmerge lease_merge rn antigravity
 echo "rnsquash=$(git diff-tree --no-commit-id --name-only --no-renames -r HEAD | tr "\n" " ")"
 ')
 _S14_FAIL="${_S14_FAIL}$(_self_expect renamed "$O" '^mv:go=0:review$' '^ed:go=0:review$' '^rn:go=0:review$' '^mvbare:rc=42:.*\.claude/hooks\.json' '^mvapp:rc=0:' '^mvmerge:rc=0:' \
-  '^edmerge:rc=1:.*renamed or deleted docs/hooks\.json since ed was cut.*lease_reclaim ed, then lease_create ed builder' '^edfollow:rc=1:.*would also change \.claude/hooks\.json' \
+  '^edmerge:rc=1:.*renamed or deleted docs/hooks\.json since ed was cut.*lease_reclaim ed, then lease_create ed builder' '^edfollow:rc=1:.*would also change \.claude/hooks\.json.*Lease the task again.*lease_reclaim ed, then lease_create ed builder' \
   '^ed=review:head=kept:hooks=\{"v":1\}\{"v":1\}:staged=\[\]:old=gone$' '^rnmerge:rc=0:' '^rnsquash=guide\.txt notes\.txt $')"
 
 # rewound, rewoundin: the integration branch rewound past a lease's base.
@@ -5789,8 +6422,9 @@ _s14_move() {
 # _s14_seam_after <function> <word> wraps <function>; once a call whose first
 # argument is <word> returns 0, _s14_decoy runs (once): a worker moving
 # refs/heads/sprint/s14 right after it, to a commit on $S14_H with that
-# commit's tree (S14_MODE=tree) or to a commit on top of HEAD (otherwise),
-# whose id it writes to $S14_XF
+# commit's tree (S14_MODE=tree), to its own commit of worker.txt made in the
+# lead's checkout, index and work tree with it (S14_MODE=commit), or to a
+# commit on top of HEAD (otherwise), whose id it writes to $S14_XF
 _s14_seam_after() {
   eval "_s14_was$1() $(declare -f "$1" | sed 1d)"
   eval "$1() { local R=0; _s14_was$1 \"\$@\" || R=\$?; if [ \"\$R\" -eq 0 ] && [ \"\${1:-}\" = $2 ]; then _s14_decoy; fi; return \"\$R\"; }"
@@ -5801,6 +6435,8 @@ _s14_decoy() {
   S14_MOVED=1
   if [ "${S14_MODE:-}" = tree ]; then
     X=$(git commit-tree -p "$S14_H" -m "a worker commit" "$S14_H^{tree}")
+  elif [ "${S14_MODE:-}" = commit ]; then
+    echo worker > worker.txt && git add worker.txt && git commit -qm "a worker commit" && X=$(git rev-parse HEAD)
   else
     X=$(git commit-tree -p HEAD -m "a worker commit" "HEAD^{tree}")
   fi
@@ -5849,20 +6485,22 @@ unset _s14_c _s14_f _s14_t
 # squash commit, before anything records it (race-seam.sh's _s14_seam_after on
 # _lgr, firing once its commit call returns). racemergetree: the decoy stands
 # on the squash commit's parent with that parent's tree (the lease's change
-# gone); the branch then put back (git reset --hard, as the refusal says) and
+# gone); the branch then put back (git reset --merge, as the refusal says) and
 # lease_merge rerun -> merges, the change on the branch once. racemergeon: the
 # decoy is a commit on top of the squash commit; the branch then accepted
 # (lease_rebaseline) and lease_merge rerun -> stages nothing, rc 1, the change
-# on the branch once
+# on the branch once. The lead holds an unstaged README.md edit throughout,
+# which neither recovery touches
 for _s14_c in racemergetree racemergeon; do
   _s14_repo "$_s14_c" claude codex
   printf '#!/bin/sh\necho feature >> feature.txt\necho "Status: DONE"\n' | _s14_builder "$_s14_c"
-  if [ "$_s14_c" = racemergetree ]; then _S14_MODE=tree; _S14_FIX='git reset -q --hard "$H"'; else _S14_MODE=on; _S14_FIX='_self_try rebaseline lease_rebaseline'; fi
+  if [ "$_s14_c" = racemergetree ]; then _S14_MODE=tree; _S14_FIX='git reset -q --merge "$H"'; else _S14_MODE=on; _S14_FIX='_self_try rebaseline lease_rebaseline'; fi
   O=$(_s14_lead "$_s14_c" claude '
 source "$_S14/race-seam.sh"
 _self_go t
 lease_pin_reviewer t antigravity >/dev/null 2>&1
 H=$(git rev-parse refs/heads/sprint/s14)
+echo "lead note" >> README.md
 cp ops/leases.toml "$_S14/$S14_CASE.ledger"
 (export S14_H="$H" S14_XF="$_S14/$S14_CASE.x" S14_MODE='"$_S14_MODE"'; _s14_seam_after _lgr commit; _self_try race lease_merge t antigravity)
 X=$(cat "$_S14/$S14_CASE.x" 2>/dev/null)
@@ -5872,11 +6510,14 @@ echo "after:state=$(_ledger_get t state):mc=[$(_ledger_get t merge_commit)]:isha
 _self_try rerun lease_merge t antigravity
 MC=$(_ledger_get t merge_commit)
 echo "rerun:state=$(_ledger_get t state):parent=$(if [ -z "$MC" ]; then echo none; elif [ "$(git rev-parse "$MC^")" = "$H" ] && [ "$(git rev-parse refs/heads/sprint/s14)" = "$MC" ]; then echo head; else echo other; fi):feature=$(git show HEAD:feature.txt 2>/dev/null | grep -c "^feature$" || true)"
+echo "note:$(grep -c "lead note" README.md || true)/$(git show HEAD:README.md 2>/dev/null | grep -c "lead note" || true):unstaged=[$(git diff --name-only | tr "\n" " ")]"
 ')
   _S14_H=$(printf '%s\n' "$O" | sed -n 's/^ids:h=\([0-9a-f]*\):.*/\1/p'); _S14_X=$(printf '%s\n' "$O" | sed -n 's/^ids:.*:x=\([0-9a-f]*\)$/\1/p')
   _S14_FAIL="${_S14_FAIL}$(_self_expect "$_s14_c" "$O" '^t:go=0:review$' \
     "^race:rc=44:.*INTEGRITY — after the squash commit refs/heads/sprint/s14 is at ${_S14_X:-none} and HEAD at ${_S14_X:-none}, not a commit of tree [0-9a-f]{12} whose only parent is ${_S14_H:-none}, the head the squash went onto" \
-    '^race:rc=44:.*Nothing was recorded: t stays in review with its worktree' '^after:state=review:mc=\[\]:isha=kept:wt=kept:ledger=unchanged$')"
+    '^race:rc=44:.*Nothing was recorded: t stays in review with its worktree' '^race:rc=44:.*put the branch back \(git reset --merge [0-9a-f]{40}, in this checkout: it drops the squash.s changes, keeps your unstaged edits' \
+    '^after:state=review:mc=\[\]:isha=kept:wt=kept:ledger=unchanged$' '^note:1/0:unstaged=\[README\.md \]$')"
+  printf '%s\n' "$O" | grep -q '^race:rc=44:.*reset --hard' && _S14_FAIL="${_S14_FAIL} ${_s14_c}(race-says-reset-hard)"
   if [ "$_s14_c" = racemergetree ]; then
     _S14_FAIL="${_S14_FAIL}$(_self_expect "$_s14_c" "$O" '^rerun:rc=0:' '^rerun:state=merged:parent=head:feature=1$')"
   else
@@ -5886,9 +6527,41 @@ echo "rerun:state=$(_ledger_get t state):parent=$(if [ -z "$MC" ]; then echo non
 done
 unset _s14_c _S14_MODE _S14_FIX
 
-_S14_CAP="ledger approvals: lead_cli + reviewer class per row; a protected change (base to snapshot) merges only with a lead or user merge approval bound to the snapshot, the lead's own CLI's build routed to the user; a protected or require_user_approval promotion needs the user's approval bound to the tree and the branch it goes into (the default branch, or the target named), voided by a later merge or a move of that branch; every approval records its origin; a merge applies exactly the lease's diff (its base an ancestor of the integration head) and a merge or promotion changes only the paths its protected scan listed (rename detection off, the merged tree held to the scan) and records only the result it verified (KTD2-KTD4, KTD18, R5, R6, R32, R33)"
+# racemergehead: the integration head moved by a worker's commit between
+# lease_merge's read of it (and its approval gate) and the squash; the lead
+# holds an unstaged README.md edit, which the printed way back (git reset
+# --keep <head>) keeps while it drops the worker's commit
+_s14_repo racemergehead claude codex
+printf '#!/bin/sh\necho feature >> feature.txt\necho "Status: DONE"\n' | _s14_builder racemergehead
+O=$(_s14_lead racemergehead claude '
+source "$_S14/race-seam.sh"
+_self_go t
+lease_pin_reviewer t antigravity >/dev/null 2>&1
+H=$(git rev-parse refs/heads/sprint/s14)
+echo "lead note" >> README.md
+cp ops/leases.toml "$_S14/$S14_CASE.ledger"
+(export S14_XF="$_S14/$S14_CASE.x" S14_MODE=commit; _s14_seam_after _lease_merge_gate t; _self_try race lease_merge t antigravity)
+X=$(cat "$_S14/$S14_CASE.x" 2>/dev/null)
+echo "after:state=$(_ledger_get t state):mc=[$(_ledger_get t merge_commit)]:head=$(if [ -n "$X" ] && [ "$(git rev-parse HEAD)" = "$X" ] && [ "$(git rev-parse refs/heads/sprint/s14)" = "$X" ]; then echo worker; else echo other; fi):staged=[$(git diff --cached --name-only)]:ledger=$(if cmp -s ops/leases.toml "$_S14/$S14_CASE.ledger"; then echo unchanged; else echo CHANGED; fi)"
+_self_try rerun lease_merge t antigravity
+echo "ids:h=$H"
+git reset -q --keep "$H"
+_self_try rerun2 lease_merge t antigravity
+echo "kept:state=$(_ledger_get t state):worker=$(if [ -e worker.txt ]; then echo present; else echo gone; fi):note=$(grep -c "lead note" README.md || true)/$(git show HEAD:README.md 2>/dev/null | grep -c "lead note" || true):unstaged=[$(git diff --name-only | tr "\n" " ")]"
+')
+_S14_H=$(printf '%s\n' "$O" | sed -n 's/^ids:h=\([0-9a-f]*\)$/\1/p')
+_S14_FAIL="${_S14_FAIL}$(_self_expect racemergehead "$O" '^t:go=0:review$' \
+  "^race:rc=1:.*REFUSED — the squash of t's snapshot [0-9a-f]{12} would also change worker\\.txt: the integration branch gained a commit during the merge \\(HEAD moved [0-9a-f]{12} -> [0-9a-f]{12} after lease_merge read it\\)" \
+  '^race:rc=1:.*The next lease_merge or lease_promote refuses on that commit with rc 44.*if it is yours, accept it with lease_rebaseline' \
+  "^race:rc=1:.*if not, put the branch back \\(git reset --keep ${_S14_H:-none}, in this checkout: it keeps your uncommitted edits, and refuses if one of them touches a file that commit changed\\) and rerun" \
+  '^after:state=review:mc=\[\]:head=worker:staged=\[\]:ledger=unchanged$' "^rerun:rc=44:.*integration branch 'sprint/s14' moved since the lead's last merge" \
+  '^rerun2:rc=0:' '^kept:state=merged:worker=gone:note=1/0:unstaged=\[README\.md \]$')"
+printf '%s\n' "$O" | grep -q '^race:rc=1:.*Lease the task again' && _S14_FAIL="${_S14_FAIL} racemergehead(race-still-says-lease-the-task-again)"
+printf '%s\n' "$O" | grep -q '^race:rc=1:.*reset --hard' && _S14_FAIL="${_S14_FAIL} racemergehead(race-says-reset-hard)"
+
+_S14_CAP="ledger approvals: lead_cli + reviewer class per row; a protected change (base to snapshot) merges only with a lead or user merge approval bound to the snapshot, the lead's own CLI's build routed to the user; a protected or require_user_approval promotion needs the user's approval bound to the tree and the branch it goes into (the default branch, or the target named, which the integrity check then watches until the promotion into it), voided by a later merge or a move of that branch; every approval records its origin; a merge applies exactly the lease's diff (its base an ancestor of the integration head) and a merge or promotion changes only the paths its protected scan listed (rename detection off, the merged tree held to the scan) and records only the result it verified (KTD2-KTD4, KTD18, R5, R6, R32, R33)"
 if [ -z "$_S14_FAIL" ]; then
-  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused, and from the seam simulating claude; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; trunk: no origin/HEAD, main or master -> the two-argument approval 1 naming the target argument, lease_promote trunk 42 naming lease_approve promotion:<branch> user trunk, that approval records trunk and promotes; target: origin/HEAD -> main, the user's approval for develop -> lease_promote main 42 (approved into develop, not main) naming the call with main, develop moved -> 42 voided, approved again -> promotes into develop, main unmoved; a target that is no local branch (unknown, origin/main, develop~0) or the integration branch itself -> 1, a lead-class one -> 1 naming the user's call with the target, nothing recorded; a third argument on task:<id> -> 64; shadow: a protected integration diff, require_user_approval off, a tag main at the integration head -> lease_promote main still 42 naming .claude/settings.json, main untouched, still on sprint/s14, the same for refs/main and a \$GIT_DIR/main file, the user's approval with that file in place binds refs/heads/main and the real protected path and promotes; nonbranch: a tag, a commit id, origin/main and main~0 as the target -> 1, nothing touched (refs unmoved, still on sprint/s14, no ledger), main promotes; shadowmerge: a tag sprint/s14 at a decoy -> lease_merge merges into refs/heads/sprint/s14, integration branch recorded as sprint/s14, the tag kept, lease_promote main takes the branch's commit; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude; a legacy claude pin after a handover to codex -> 42 needing the user, user merges; a legacy codex (worker) pin after it -> merges, class worker; tmpdirs: an approval from another TMPDIR lands beside the lead's anchors and merges, refused naming export TRIFORGE_LEASE_ROOT when the recorded root is gone; renamed: the integration branch renamed docs/hooks.json to .claude/hooks.json after lease ed (editing docs/hooks.json) was cut -> lease_merge ed 1 naming docs/hooks.json and the recovery, state review, the integration branch, .claude/hooks.json and the index unchanged; through a git that drops -X no-renames -> 1 naming .claude/hooks.json (outside its scan); a lease's own rename merges three-way, both sides in the squash; rewound, rewoundin: the integration branch rewound past lease q's base (accepted) -> lease_merge q 1 before the squash (no longer holds q's base), nothing merged or staged, for a replay outside q's diff (.claude/settings.json) and inside it (feature.txt); renamedpromote: main renamed docs/hooks.json to .claude/hooks.json, sprint/s14 edits it -> lease_promote main 1 naming it, main unmoved, back on sprint/s14, clean; through the -X-dropping git -> 1 naming .claude/hooks.json; main merged in by hand -> 42 naming .claude/hooks.json, the user's approval promotes; race: main moved to a decoy between the promotion's merge and its record (the result read back, the baseline read, a promotion into develop) -> 44 naming both commits, baseline and ledger unchanged, then lease_promote main records the verified result; racemerge: the integration branch moved right after lease_merge's squash commit (onto its parent with the parent's tree, or on top of it) -> 44 naming both commits, nothing recorded, the lease in review with its worktree; put back with git reset --hard -> the rerun merges once; accepted with lease_rebaseline -> the rerun stages nothing (rc 1), the change on the branch once" "static"
+  row "SELF-14" "claude" "$_S14_CAP" "PASS" "cells: claude/codex lead x claude/codex build writing .claude/settings.json -> pin alone 42 naming it; own CLI's lead approval refused (routes to the user), user approval merges; the other CLI's build: lead approval merges; lease_attribution: builder, reviewer (class), lead, approval origin, merge commit; agents: .agents/hooks.json + .agents/skills/x/ with a worker pin -> 42, lead approval merges both; cycle: cycle-1 approval voided by the cycle-2 snapshot (42 naming it), rewritten binding 42, re-approved merges; late: protected only in cycle 2 -> lease_status no/- then yes/needed, 42 with the same pin, re-pin refused, approval merges; origin: codex lead, user approval under Codex markers via=lead-session host=codex, under Claude Code's host=claude lead=codex (a codex lead approval from there refused, and from the seam simulating claude; via=none refuses any approval), pty via=tty, worker marker and lease root 45 with the ledger unchanged, worker CLI refused; approver: user/CLI accepted, lead/fabricated/empty refused, user not a known CLI, user pin class user merges; promote: an unneeded lead approval still in the attribution, require_user_approval -> 42 naming lease_approve promotion:<branch> user, no by-hand text, lead-class approval refused under claude and codex, user approval promotes printing the origin, no-ledger codex lead records the baseline; voidmerge and voiddef: 42 voided; trunk: no origin/HEAD, main or master -> the two-argument approval 1 naming the target argument, lease_promote trunk 42 naming lease_approve promotion:<branch> user trunk, that approval records trunk (also as the baseline's promotion target) and promotes, clearing the target, the next lease_create 0; trunkmain: main created after a baseline recorded with no default branch -> lease_promote trunk 44 naming main as resolving now where none did, trunk unmoved, accepted with lease_rebaseline -> promotes and keeps main at its commit, lease_promote trunk on trunk 1 naming the target branch trunk, the next lease_create 0, lease_promote on main 1 naming the default branch main; defappear: origin/HEAD -> main with no refs/heads/main at the baseline, a worker creates it -> lease_promote 44 naming it as appeared, main unmoved, accepted with lease_rebaseline -> promotes and records it; defrace: the same, created right after the promotion's integrity check -> 44 naming the commit it started from and none on record, nothing recorded, the next lease_promote 44 naming it as appeared; target: origin/HEAD -> main, the user's approval for develop records it as the promotion target -> lease_promote main 42 (approved into develop, not main) naming the call with main, develop moved behind the lead's back -> 44 naming refs/heads/develop, accepted with lease_rebaseline -> 42 voided, approved again -> promotes into develop, main unmoved, the target cleared; targetsym: develop moved and approved again -> 44 naming the move (the approval kept the commit on record); put back, re-approved and swapped for a symbolic ref to decoy at the same commit -> 44 naming it, decoy unmoved; put back -> promotes; targetswitch: an approval into main clears the target, develop then staging records staging at its commit; targetmoved: develop moved after its approval -> an approval into main 44 (would clear it) and into staging 44 (would replace it), naming the move and lease_rebaseline, develop still on record at its old commit, the ledger byte-identical, accepted -> the approval into main clears it; targetgone: develop deleted -> the next lease_create 44 naming moved <sha> -> <deleted>, an approval into main 44 naming the same, the ledger byte-identical, accepted -> it clears; a target that is no local branch (unknown, origin/main, develop~0) or the integration branch itself -> 1, a lead-class one -> 1 naming the user's call with the target, nothing recorded; a third argument on task:<id> -> 64; shadow: a protected integration diff, require_user_approval off, a tag main at the integration head -> lease_promote main still 42 naming .claude/settings.json, main untouched, still on sprint/s14, the same for refs/main and a \$GIT_DIR/main file, the user's approval with that file in place binds refs/heads/main and the real protected path and promotes; nonbranch: a tag, a commit id, origin/main and main~0 as the target -> 1, nothing touched (refs unmoved, still on sprint/s14, no ledger), main promotes; shadowmerge: a tag sprint/s14 at a decoy -> lease_merge merges into refs/heads/sprint/s14, integration branch recorded as sprint/s14, the tag kept, lease_promote main takes the branch's commit; handover: lead-class pin then forced handover -> handover_from=claude handover_to=codex, 42 needing the user, codex lead approval refused, user merges; handback: claude -> codex -> claude, the pinned claude is the lead again and still 42 (handover stamp), its own approval does not count, user merges; legacy: 3.3.x-shaped row merges, lead read as claude; a legacy claude pin after a handover to codex -> 42 needing the user, user merges; a legacy codex (worker) pin after it -> merges, class worker; tmpdirs: an approval from another TMPDIR lands beside the lead's anchors and merges, refused naming export TRIFORGE_LEASE_ROOT when the recorded root is gone; renamed: the integration branch renamed docs/hooks.json to .claude/hooks.json after lease ed (editing docs/hooks.json) was cut -> lease_merge ed 1 naming docs/hooks.json and the recovery, state review, the integration branch, .claude/hooks.json and the index unchanged; through a git that drops -X no-renames -> 1 naming .claude/hooks.json (outside its scan); a lease's own rename merges three-way, both sides in the squash; rewound, rewoundin: the integration branch rewound past lease q's base (accepted) -> lease_merge q 1 before the squash (no longer holds q's base), nothing merged or staged, for a replay outside q's diff (.claude/settings.json) and inside it (feature.txt); renamedpromote: main renamed docs/hooks.json to .claude/hooks.json, sprint/s14 edits it -> lease_promote main 1 naming it, main unmoved, back on sprint/s14, clean; through the -X-dropping git -> 1 naming .claude/hooks.json; main merged in by hand -> 42 naming .claude/hooks.json, the user's approval promotes; race: main moved to a decoy between the promotion's merge and its record (the result read back, the baseline read, a promotion into develop) -> 44 naming both commits, baseline and ledger unchanged, then lease_promote main records the verified result; racemerge: the integration branch moved right after lease_merge's squash commit (onto its parent with the parent's tree, or on top of it) -> 44 naming both commits and git reset --merge <head> as the way back (never --hard), nothing recorded, the lease in review with its worktree; put back with that reset -> the rerun merges once, the lead's unstaged README.md edit kept; accepted with lease_rebaseline -> the rerun stages nothing (rc 1), the change on the branch once; racemergehead: a worker's commit on the integration branch after lease_merge read its head, before the squash -> 1 naming worker.txt (the staged tree held to the head lease_merge read) and the commit gained during the merge, with the rc 44 the next merge or promotion gives and lease_rebaseline only if it is yours, nothing committed or staged, the ledger byte-identical, the lease in review, git reset --keep <head> named as the way back (never --hard); the rerun -> 44; that reset drops the worker's commit and keeps the lead's unstaged README.md edit, and the next rerun merges" "static"
 else
   row "SELF-14" "claude" "$_S14_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S14_FAIL"):$(printf '%s' "$_S14_FAIL" | cut -c1-900)" "static"
 fi
@@ -7310,9 +7983,13 @@ rm -rf "$_S18"
 #   wait    lease_dispatch records pid == pgid, a start time, the lead process
 #           and the lease root, and a heartbeat_deadline 60 s + the 30 s slack
 #           out; lease_wait --budget 30 returns rc 0 in under
-#           10 s when a 1 s builder finishes, printing "q review"; on a held
-#           builder --budget 3 returns rc 75 "still building: g" in 1.5-3 s,
-#           and TRIFORGE_LEAD_WAIT_BUDGET_S=4 caps --budget 60 below 4 s; under
+#           20 s when a 1 s builder finishes, printing "q review"; on a held
+#           builder --budget 3 returns rc 75 "still building: g" after 1.5 s
+#           at least and 10 s at most, having polled the ledger at most 3
+#           times (a poll a second, stopping a second before the budget; a
+#           wait that polls up to the budget itself polls 4 times, and a
+#           loaded host only polls fewer), and TRIFORGE_LEAD_WAIT_BUDGET_S=4
+#           caps --budget 60 the same way (4 s less its 1 s of headroom); under
 #           the worker marker 45; --budget x 64; released, rc 0 "g review"
 #   ledger  no ledger -> rc 1 "LEDGER ERROR"; one that doesn't parse -> rc 1
 #           "LEDGER ERROR ... does not parse"
@@ -7338,9 +8015,11 @@ rm -rf "$_S18"
 #           pid, no pgid key, no start time) past its deadline:
 #           lease_heartbeat_check expires it "NOT signalled", requeued;
 #           neither signals the stranger
-#   gitcfg  a builder sets core.fsmonitor in .git/config 2 s into lease_wait
-#           --budget 5 -> rc 44 naming .git/config, the setting restored, the
-#           lease escalated, the fsmonitor command never run
+#   gitcfg  a builder sets core.fsmonitor in .git/config once lease_wait
+#           --budget 20 has polled (a shim around _lease_sweep_one marks the
+#           first poll, so the change lands mid-wait however long the
+#           dispatch took) -> rc 44 naming .git/config, the setting restored,
+#           the lease escalated, the fsmonitor command never run
 #   locale  dispatched under TZ=Asia/Tokyo and LC_ALL=de_DE.UTF-8 (C when that
 #           locale is absent; the zone half always runs): the recorded start
 #           time is the pinned " UTC" form, the builder reads alive under
@@ -7349,11 +8028,14 @@ rm -rf "$_S18"
 #           still reads alive in its own locale and zone
 #   unver   a building row with no output_file beside a 1 s builder: lease_wait
 #           on both -> rc 0 "v review|still building: u"; on u alone -> rc 80
-#           within 3 s, "still building: u", one stderr line naming u;
+#           after its first poll (a wait that polled on to its 6 s budget
+#           polls again), "still building: u", one stderr line naming u;
 #           lease_heartbeat_check u -> 80
 #   tamper  (ledgertamper) a builder overwrites ops/leases.toml with TOML that
-#           doesn't parse 2 s into lease_wait --budget 6 -> rc 44, the ledger
-#           parses again, the lease escalated, stdout "k escalated"
+#           doesn't parse once lease_wait --budget 20 has polled (as in
+#           gitcfg; a fixed delay could land before the dispatch had written
+#           its own row) -> rc 44, the ledger parses again, the lease
+#           escalated, stdout "k escalated"
 #   tentry  (ledgertamper-entry) the same with the ledger corrupt before the
 #           call -> rc 44, restored, escalated, stdout "k2 escalated"
 #   stop    lease_stop on a held builder that started a child in its group:
@@ -7374,8 +8056,9 @@ rm -rf "$_S18"
 #           but the exiting leader is left in the group (_LEASE_OWN_GROUP_PY),
 #           the group empty once the leader exits; lease_wait -> "x review"
 #   lanetimeout a builder that waits on a backgrounded sleep 600 past a 1 s
-#           lease timeout: <out>.rc holds 124 with class timeout 1-8 s after
-#           the dispatch, the child and the group as in endrun; lease_wait ->
+#           lease timeout: <out>.rc holds 124 with class timeout 1-20 s after
+#           the dispatch (one without the timeout leaves none in the 30 s
+#           the case waits), the child and the group as in endrun; lease_wait ->
 #           "t requeued"
 #   leadexit lease_heartbeat_check --lead-exit with the dispatching lead alive:
 #           the held builder adopted (building, reason=lead-exit, lead_exit_at
@@ -7386,8 +8069,11 @@ rm -rf "$_S18"
 #   budget  with the action limit passed, a finished lease's poll sweep is
 #           deferred (still building); the next lease_wait collects it; a real
 #           lease_wait --budget 2 sets the action limit its poll sweeps see
-#           2.0-2.9 s after the call (a recording shim around
-#           _lease_sweep_one), not at the lead's 585 s; a limit that runs out
+#           (a recording shim around _lease_sweep_one) 2 s after the call's
+#           start: at least 2.0 s after a time read just before the call, and
+#           no later than 2 s after its entry integrity check began (a shim
+#           notes when), so a limit counted from after the checks fails
+#           however slow the host is; not at the lead's 585 s; a limit that runs out
 #           during the per-action integrity check (a shim) defers the expiry
 #           of a held builder past its deadline: still building, alive
 #   guards  kill and _kill_tree are recording stubs (the pid-1 calls run only
@@ -7455,6 +8141,12 @@ _s19_held() {
   } > "$_S19/$1-held.sh"
   chmod +x "$_S19/$1-held.sh"
 }
+# _s19_after_poll <case> — sh for a held builder's lines: wait until the lead's
+# lease_wait has polled once (<case>.polled, which the case's shim around
+# _lease_sweep_one writes; 30 s at most)
+_s19_after_poll() {
+  printf 'N=0; while [ ! -f "%s" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done; ' "$_S19/$1.polled"
+}
 _s19_reap() { # _s19_reap <case> — release the case's builders, kill any group still answering as recorded
   : > "$_S19/$1.release"
   _s19_lead "$1" '
@@ -7485,33 +8177,46 @@ chmod +x "$_S19/wait-quick.sh"
 _s19_held wait
 O=$(_s19_lead wait '
 export TRIFORGE_TEST_BUILDER="$_S19/wait-quick.sh"
+B=$(date +%s)
 lease_create q builder >/dev/null 2>&1; lease_dispatch q "probe task" 60 >/dev/null 2>&1
+A=$(date +%s)
 ROW=$(_ledger_get_row q pid pgid pid_started lead_pid lease_root)
 { IFS= read -r P || true; IFS= read -r G || true; IFS= read -r S || true; IFS= read -r L || true; IFS= read -r LR || true; } <<S19_ROW_EOF
 ${ROW}
 S19_ROW_EOF
 echo "row:pidpgid=$([ -n "$P" ] && [ "$P" = "$G" ] && echo same || echo diff):start=$([ -n "$S" ] && echo yes || echo no):lead=$([ "${L:-0}" -gt 0 ] 2>/dev/null && echo yes || echo no):root=$([ "$LR" = "$_LEASE_ROOT" ] && echo yes || echo no)"
-echo "deadline=+$(( $(_ledger_get q heartbeat_deadline) - $(_ledger_get q updated) ))"
+# 60 s + the 30 s slack from the moment lease_dispatch read the clock, which lies between B and A however long the calls took
+D=$(_ledger_get q heartbeat_deadline)
+if [ "$((D - B))" -ge 90 ] && [ "$((D - A))" -le 90 ]; then echo "deadline=+90"; else echo "deadline=off:$((D - B)):$((D - A))"; fi
 T=$(_s19_t0); R=0; OUT=$(lease_wait --budget 30 q 2>/dev/null) || R=$?
 echo "finish:rc=$R:secs=$(_s19_dt "$T"):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
 export TRIFORGE_TEST_BUILDER="$_S19/wait-held.sh"
 lease_create g builder >/dev/null 2>&1; lease_dispatch g "probe task" 60 >/dev/null 2>&1
+# each poll of a wait, counted (one lease watched: one _lease_sweep_one call a poll)
+eval "_s19_sweep_poll() $(declare -f _lease_sweep_one | sed 1d)"
+_lease_sweep_one() {
+  if [ "${4:-}" = poll ]; then echo poll >> "$HOME/wait.polls"; fi
+  _s19_sweep_poll "$@"
+}
+_s19_polls() { grep -c . "$HOME/wait.polls" 2>/dev/null || true; rm -f "$HOME/wait.polls"; }
+rm -f "$HOME/wait.polls"
 T=$(_s19_t0); R=0; OUT=$(lease_wait --budget 3 g 2>/dev/null) || R=$?
-echo "expiry:rc=$R:secs=$(_s19_dt "$T"):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+echo "expiry:rc=$R:secs=$(_s19_dt "$T"):polls=$(_s19_polls):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
 T=$(_s19_t0); R=0; OUT=$(TRIFORGE_LEAD_WAIT_BUDGET_S=4 lease_wait --budget 60 g 2>/dev/null) || R=$?
-echo "cap:rc=$R:secs=$(_s19_dt "$T"):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+echo "cap:rc=$R:secs=$(_s19_dt "$T"):polls=$(_s19_polls):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+eval "_lease_sweep_one() $(declare -f _s19_sweep_poll | sed 1d)"
 R=0; (export TRIFORGE_LEASE_WORKER=builder; lease_wait g) >/dev/null 2>&1 || R=$?; echo "marker:rc=$R"
 R=0; lease_wait --budget x g >/dev/null 2>&1 || R=$?; echo "usage:rc=$R"
 : > "$_S19/wait.release"
 R=0; OUT=$(lease_wait --budget 30 g 2>/dev/null) || R=$?
 echo "released:rc=$R:out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
 ')
-_S19_FAIL="${_S19_FAIL}$(_self_expect wait "$O" '^row:pidpgid=same:start=yes:lead=yes:root=yes$' '^deadline=\+(88|89|90|91)$' '^finish:rc=0:.*:out=\[q review\]$' \
-  '^expiry:rc=75:.*:out=\[still building: g\]$' '^cap:rc=75:.*:out=\[still building: g\]$' '^marker:rc=45$' '^usage:rc=64$' \
+_S19_FAIL="${_S19_FAIL}$(_self_expect wait "$O" '^row:pidpgid=same:start=yes:lead=yes:root=yes$' '^deadline=\+90$' '^finish:rc=0:.*:out=\[q review\]$' \
+  '^expiry:rc=75:.*:polls=[123]:out=\[still building: g\]$' '^cap:rc=75:.*:polls=[123]:out=\[still building: g\]$' '^marker:rc=45$' '^usage:rc=64$' \
   '^released:rc=0:out=\[g review\]$')"
-_s19_secs wait "$O" finish 0 10
-_s19_secs wait "$O" expiry 1.5 3.0
-_s19_secs wait "$O" cap 0 3.9
+_s19_secs wait "$O" finish 0 20
+_s19_secs wait "$O" expiry 1.5 10
+_s19_secs wait "$O" cap 0 10
 _s19_reap wait
 
 # ledger
@@ -7637,11 +8342,17 @@ _s19_reap legacy
 _s19_repo gitcfg
 printf '#!/bin/sh\ntouch "%s/gitcfg.MARKER"\nexit 0\n' "$_S19" > "$_S19/gitcfg-mark.sh"
 chmod +x "$_S19/gitcfg-mark.sh"
-_s19_held gitcfg "sleep 2; git config core.fsmonitor \"$_S19/gitcfg-mark.sh\""
+_s19_held gitcfg "$(_s19_after_poll gitcfg)git config core.fsmonitor \"$_S19/gitcfg-mark.sh\""
 O=$(_s19_lead gitcfg '
 export TRIFORGE_TEST_BUILDER="$_S19/gitcfg-held.sh"
 lease_create c builder >/dev/null 2>&1; lease_dispatch c "probe task" 60 >/dev/null 2>&1
-R=0; OUT=$(lease_wait --budget 5 c 2>"$HOME/gitcfg.err") || R=$?
+eval "_s19_sweep_poll() $(declare -f _lease_sweep_one | sed 1d)"
+_lease_sweep_one() {
+  if [ "${4:-}" = poll ]; then : > "$_S19/gitcfg.polled"; fi
+  _s19_sweep_poll "$@"
+}
+R=0; OUT=$(lease_wait --budget 20 c 2>"$HOME/gitcfg.err") || R=$?
+eval "_lease_sweep_one() $(declare -f _s19_sweep_poll | sed 1d)"
 echo "gitcfg:rc=$R:state=$(_ledger_get c state):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
 echo "named=$(grep -c "\.git/config changed" "$HOME/gitcfg.err" || true):left=$(grep -c fsmonitor .git/config || true)"
 ')
@@ -7690,21 +8401,33 @@ lease_create v builder >/dev/null 2>&1; lease_dispatch v "probe task" 60 >/dev/n
 _ledger_update u output_file= >/dev/null 2>&1
 R=0; OUT=$(lease_wait --budget 20 u v 2>/dev/null) || R=$?
 echo "mixed:rc=$R:out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
+# each poll of the wait on u alone, counted (one lease watched: one _lease_sweep_one call a poll)
+eval "_s19_sweep_poll() $(declare -f _lease_sweep_one | sed 1d)"
+_lease_sweep_one() {
+  if [ "${4:-}" = poll ]; then echo poll >> "$HOME/unver.polls"; fi
+  _s19_sweep_poll "$@"
+}
 T=$(_s19_t0); R=0; OUT=$(lease_wait --budget 6 u 2>"$HOME/unver.err") || R=$?
-echo "alone:rc=$R:secs=$(_s19_dt "$T"):out=[$(printf "%s" "$OUT" | tr "\n" "|")]:named=$(grep -c "^lease_wait: u: building, but .*can.t be verified" "$HOME/unver.err" || true):lines=$(grep -c . "$HOME/unver.err" || true)"
+echo "alone:rc=$R:secs=$(_s19_dt "$T"):polls=$(grep -c . "$HOME/unver.polls" 2>/dev/null || true):out=[$(printf "%s" "$OUT" | tr "\n" "|")]:named=$(grep -c "^lease_wait: u: building, but .*can.t be verified" "$HOME/unver.err" || true):lines=$(grep -c . "$HOME/unver.err" || true)"
+eval "_lease_sweep_one() $(declare -f _s19_sweep_poll | sed 1d)"
 R=0; lease_heartbeat_check u >/dev/null 2>&1 || R=$?; echo "heartbeat:rc=$R"
 ')
-_S19_FAIL="${_S19_FAIL}$(_self_expect unver "$O" '^mixed:rc=0:out=\[v review\|still building: u\]$' '^alone:rc=80:.*:out=\[still building: u\]:named=1:lines=1$' '^heartbeat:rc=80$')"
-_s19_secs unver "$O" alone 0 3
+_S19_FAIL="${_S19_FAIL}$(_self_expect unver "$O" '^mixed:rc=0:out=\[v review\|still building: u\]$' '^alone:rc=80:.*:polls=1:out=\[still building: u\]:named=1:lines=1$' '^heartbeat:rc=80$')"
 _s19_reap unver
 
 # tamper: a builder corrupts the ledger mid-wait
 _s19_repo tamper
-_s19_held tamper "sleep 2; printf '[lease.k]\\nstate = \\n' > \"$_S19/tamper/ops/leases.toml\""
+_s19_held tamper "$(_s19_after_poll tamper)printf '[lease.k]\\nstate = \\n' > \"$_S19/tamper/ops/leases.toml\""
 O=$(_s19_lead tamper '
 export TRIFORGE_TEST_BUILDER="$_S19/tamper-held.sh"
 lease_create k builder >/dev/null 2>&1; lease_dispatch k "probe task" 60 >/dev/null 2>&1
-R=0; OUT=$(lease_wait --budget 6 k 2>"$HOME/tamper.err") || R=$?
+eval "_s19_sweep_poll() $(declare -f _lease_sweep_one | sed 1d)"
+_lease_sweep_one() {
+  if [ "${4:-}" = poll ]; then : > "$_S19/tamper.polled"; fi
+  _s19_sweep_poll "$@"
+}
+R=0; OUT=$(lease_wait --budget 20 k 2>"$HOME/tamper.err") || R=$?
+eval "_lease_sweep_one() $(declare -f _s19_sweep_poll | sed 1d)"
 echo "tamper:rc=$R:state=$(_ledger_get k state):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
 echo "parses=$(python3 -c "import tomllib; tomllib.load(open(\"ops/leases.toml\", \"rb\")); print(\"yes\")" 2>/dev/null || echo no):named=$(grep -c "leases.toml changed outside the lead writes" "$HOME/tamper.err" || true)"
 ')
@@ -7834,7 +8557,7 @@ ROW=$(_ledger_get_row t pid pgid output_file)
 ${ROW}
 S19_LANETIMEOUT_EOF
 echo "$G" > "$_S19/lanetimeout.pgid"
-N=0; while [ ! -f "${OT}.rc" ] && [ "$N" -lt 300 ]; do sleep 0.05; N=$((N + 1)); done
+N=0; while [ ! -f "${OT}.rc" ] && [ "$N" -lt 600 ]; do sleep 0.05; N=$((N + 1)); done
 LEFT=$(_s19_group "$G" "$P"); C=$(cat "$_S19/lanetimeout.child" 2>/dev/null || true)
 echo "record:rc=$(cat "${OT}.rc" 2>/dev/null || true):class=$(cat "${OT}.class" 2>/dev/null || true):child=$(if [ -n "$C" ]; then _s19_alive "$C"; else echo unrecorded; fi):left=$LEFT:secs=$(_s19_dt "$T")"
 N=0; while [ "$(_s19_alive "$P")" = alive ] && [ "$N" -lt 40 ]; do sleep 0.05; N=$((N + 1)); done
@@ -7843,7 +8566,7 @@ R=0; OUT=$(lease_wait --budget 10 t 2>/dev/null) || R=$?
 echo "collect:rc=$R:state=$(_ledger_get t state):out=[$(printf "%s" "$OUT" | tr "\n" "|")]"
 ')
 _S19_FAIL="${_S19_FAIL}$(_self_expect lanetimeout "$O" '^record:rc=124:class=timeout:child=gone:left=0:secs=' '^after:group=0$' '^collect:rc=0:state=requeued:out=\[t requeued\]$')"
-_s19_secs lanetimeout "$O" record 1 8
+_s19_secs lanetimeout "$O" record 1 20
 _s19_unreaped lanetimeout
 _s19_reap lanetimeout
 
@@ -7910,10 +8633,20 @@ _lease_sweep_one() {
   if [ "${4:-}" = poll ]; then echo "${_LS_ACT_STOP_MS:-unset}" >> "$HOME/budget.limits"; fi
   _s19_sweep_one "$@"
 }
+# the limit counts from the call: 2 s after T at least, and from no later
+# than the entry integrity check of the wait (noted as it starts), however
+# long the steps before it take on a loaded host
+eval "_s19_check_first() $(declare -f _lead_integrity_check | sed 1d)"
+_lead_integrity_check() {
+  if [ ! -s "$HOME/budget.check" ]; then python3 -c "import time; print(int(time.time() * 1000))" > "$HOME/budget.check"; fi
+  _s19_check_first "$@"
+}
 T=$(python3 -c "import time; print(int(time.time() * 1000))")
 R=0; lease_wait --budget 2 b >/dev/null 2>&1 || R=$?
+eval "_lead_integrity_check() $(declare -f _s19_check_first | sed 1d)"
 L=$(sed -n 1p "$HOME/budget.limits" 2>/dev/null || true)
-echo "limit:rc=$R:secs=$(python3 -c "import sys; print(\"%.3f\" % ((int(sys.argv[1]) - int(sys.argv[2])) / 1000.0))" "$L" "$T" 2>/dev/null || echo none)"
+C=$(cat "$HOME/budget.check" 2>/dev/null || true)
+echo "limit:rc=$R:secs=$(python3 -c "import sys; print(\"%.3f\" % ((int(sys.argv[1]) - int(sys.argv[2])) / 1000.0))" "$L" "$T" 2>/dev/null || echo none):from=$(python3 -c "import sys; print(\"call\" if int(sys.argv[1]) - 2000 <= int(sys.argv[2]) else \"after-check\")" "$L" "$C" 2>/dev/null || echo none)"
 _ledger_update b heartbeat_deadline=1 >/dev/null 2>&1
 eval "_s19_integrity_check() $(declare -f _lead_integrity_check | sed 1d)"
 _lead_integrity_check() { # the check passes, and the action limit runs out while it does
@@ -7928,9 +8661,9 @@ _lease_sweep_one lease_wait b 0 poll "$ROW" < /dev/null
 _LS_ACT_STOP_MS=0
 echo "midcheck:result=$_LS_RESULT:state=$(_ledger_get b state):builder=$(_lease_proc_state "$(_ledger_get b pid)" "$(_ledger_get b pid_started)" "$(_ledger_get b pgid)")"
 ')
-_S19_FAIL="${_S19_FAIL}$(_self_expect budget "$O" '^past:result=deferred:state=building$' '^next:rc=0:out=\[d review\]$' '^limit:rc=75:secs=' \
+_S19_FAIL="${_S19_FAIL}$(_self_expect budget "$O" '^past:result=deferred:state=building$' '^next:rc=0:out=\[d review\]$' '^limit:rc=75:secs=[0-9.]*:from=call$' \
   '^midcheck:result=deferred:state=building:builder=alive$')"
-_s19_secs budget "$O" limit 2.0 2.9
+_s19_secs budget "$O" limit 2.0 60
 _s19_reap budget
 
 # guards: never the caller's own process group, never pid or pgid 1. kill and
@@ -8071,7 +8804,7 @@ fi
 
 _S19_CAP="detached builders + lease_wait + lease_stop + lead-exit reconcile (under a claude and a codex lead): pid == pgid with a start time read in one locale and zone, lease_wait returns on a finish / at the budget (rc 75) within wait_budget_s / degraded (rc 80), ledger errors and ledger tampering, a killed lead's builders survive and are collected with requeue_count 0 and reason=lead-exit, a reused pid is never taken for the builder or signalled, nor are the caller's own process group and pid / pgid 1, a .git/config change during the wait or the heartbeat escalates, nothing of a builder runs once its exit record appears (a backgrounded child, a lane timeout: rc 124, class timeout) (KTD10, R36/R38)"
 if [ -z "$_S19_FAIL" ]; then
-  row "SELF-19" "claude" "$_S19_CAP" "PASS" "row pid==pgid + start time + lead + lease root recorded; finish -> rc 0 'q review'; held -> --budget 3 rc 75 'still building: g' in 1.5-3 s, TRIFORGE_LEAD_WAIT_BUDGET_S=4 caps --budget 60 below 4 s; marker 45, usage 64; released -> rc 0 'g review'; no / unparseable ledger -> rc 1 LEDGER ERROR; kill: lead group SIGKILLed mid-wait, both builders alive as recorded, heartbeat a adopts (reason=lead-exit), released both exit 0, heartbeat collects both: review, requeue_count 0, reason=lead-exit, --budget 2000 capped at 585 s (Claude Code 600 s); killcodex: the same under [lead] = codex, capped at 885 s (Codex CLI 900 s); reuse: rows given a stranger's pid + pgid (start time differs, deadline past) -> heartbeat and lease_wait orphan + requeue, stranger never signalled; legacy: a finished row given a stranger's pid with no start time or pgid -> lease_collect 0, review, and a 3.3.x-shaped building row (no pgid, no start time) past its deadline -> heartbeat expires it unsignalled, requeued; the stranger never signalled; gitcfg: core.fsmonitor planted mid-wait -> rc 44 naming .git/config, restored, escalated, never ran; deadline = timeout + 30 s slack; locale: dispatched under TZ=Asia/Tokyo LC_ALL=${_S19_LOC} -> pinned UTC start, alive under TZ=UTC and America/New_York, lease_wait keeps it building (75), an old local-form row alive in its own zone; unver: rc 80 within 3 s naming u once (mixed with a finisher: rc 0), heartbeat 80; ledgertamper: ledger corrupted mid-wait -> 44, restored, escalated, stdout names it; ledgertamper-entry: corrupted before the call -> the same; stop: lease_stop kills the builder group (child too), state untouched, 45/64/1, a stranger with the pid never signalled, no start time -> 1; relaunch: launch record written, removed once recorded, a stale one stopped by the next lease_dispatch; expire: held builder past its deadline -> group killed, requeued, worktree pruned; endrun: a builder that backgrounds a child and exits 0 -> <out>.rc 0 / class none with the child gone and nothing but the exiting leader in its group, group empty after, review; lanetimeout: a 1 s lease timeout on a builder waiting on a child -> <out>.rc 124 / class timeout in 1-8 s, child gone, group empty, requeued; leadexit: --lead-exit with the lead alive adopts the live builder and collects the finished one, reason=lead-exit, requeue_count 0; multi: two named -> 'q review|still building: g', none named watches all; budget: past the action limit the collect is deferred, the next call takes it, and lease_wait --budget 2 sets the limit 2.0-2.9 s after the call, and a limit spent during the per-action integrity check defers the expiry; guards (stubbed kill): this shell's own pid + pgid + start time -> nothing signalled, refused; pid 1 / pgid 1 -> refused, nothing signalled, lease_stop's stop rc 1; no start time -> refused; the KILL retry re-validated (none after a reuse, none to an emptied group); dispatchfail: the recording ledger write refused -> lease_dispatch 1, leased, the launched builder gone; hbcfg: .git/config planted during the heartbeat's sweep -> 44 on return, restored, escalated, never ran; rootnote: escaped, no export line, not printed when the check fails; ${_S19_ZSH}" "static"
+  row "SELF-19" "claude" "$_S19_CAP" "PASS" "row pid==pgid + start time + lead + lease root recorded; finish -> rc 0 'q review' within 20 s; held -> --budget 3 rc 75 'still building: g' in 1.5-10 s after 3 polls at most, TRIFORGE_LEAD_WAIT_BUDGET_S=4 caps --budget 60 the same way; marker 45, usage 64; released -> rc 0 'g review'; no / unparseable ledger -> rc 1 LEDGER ERROR; kill: lead group SIGKILLed mid-wait, both builders alive as recorded, heartbeat a adopts (reason=lead-exit), released both exit 0, heartbeat collects both: review, requeue_count 0, reason=lead-exit, --budget 2000 capped at 585 s (Claude Code 600 s); killcodex: the same under [lead] = codex, capped at 885 s (Codex CLI 900 s); reuse: rows given a stranger's pid + pgid (start time differs, deadline past) -> heartbeat and lease_wait orphan + requeue, stranger never signalled; legacy: a finished row given a stranger's pid with no start time or pgid -> lease_collect 0, review, and a 3.3.x-shaped building row (no pgid, no start time) past its deadline -> heartbeat expires it unsignalled, requeued; the stranger never signalled; gitcfg: core.fsmonitor planted mid-wait -> rc 44 naming .git/config, restored, escalated, never ran; deadline = timeout + 30 s slack; locale: dispatched under TZ=Asia/Tokyo LC_ALL=${_S19_LOC} -> pinned UTC start, alive under TZ=UTC and America/New_York, lease_wait keeps it building (75), an old local-form row alive in its own zone; unver: rc 80 after one poll naming u once (mixed with a finisher: rc 0), heartbeat 80; ledgertamper: ledger corrupted mid-wait -> 44, restored, escalated, stdout names it; ledgertamper-entry: corrupted before the call -> the same; stop: lease_stop kills the builder group (child too), state untouched, 45/64/1, a stranger with the pid never signalled, no start time -> 1; relaunch: launch record written, removed once recorded, a stale one stopped by the next lease_dispatch; expire: held builder past its deadline -> group killed, requeued, worktree pruned; endrun: a builder that backgrounds a child and exits 0 -> <out>.rc 0 / class none with the child gone and nothing but the exiting leader in its group, group empty after, review; lanetimeout: a 1 s lease timeout on a builder waiting on a child -> <out>.rc 124 / class timeout in 1-20 s, child gone, group empty, requeued; leadexit: --lead-exit with the lead alive adopts the live builder and collects the finished one, reason=lead-exit, requeue_count 0; multi: two named -> 'q review|still building: g', none named watches all; budget: past the action limit the collect is deferred, the next call takes it, and lease_wait --budget 2 sets the limit 2 s after the call's start (2.0 s or more after a time read before it, no later than 2 s after its entry check began), and a limit spent during the per-action integrity check defers the expiry; guards (stubbed kill): this shell's own pid + pgid + start time -> nothing signalled, refused; pid 1 / pgid 1 -> refused, nothing signalled, lease_stop's stop rc 1; no start time -> refused; the KILL retry re-validated (none after a reuse, none to an emptied group); dispatchfail: the recording ledger write refused -> lease_dispatch 1, leased, the launched builder gone; hbcfg: .git/config planted during the heartbeat's sweep -> 44 on return, restored, escalated, never ran; rootnote: escaped, no export line, not printed when the check fails; ${_S19_ZSH}" "static"
 else
   row "SELF-19" "claude" "$_S19_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S19_FAIL"):$(printf '%s' "$_S19_FAIL" | cut -c1-600)" "static"
 fi
@@ -8099,6 +8832,15 @@ rm -rf "$_S19"
 #             (U9's host gate reads them); the codex lane pins its tool shell's
 #             env policy (inherit all, no default excludes, no exclude,
 #             include_only or set lists — CDX-19)
+#   ccd       (4.1) CLAUDE_CONFIG_DIR, where Claude Code keeps its login once
+#             it moves the config home: an absolute one reaches the claude
+#             worker as set, and never codex or grok; a relative or empty one
+#             reaches none. The .credentials.json in an absolute one is denied
+#             like ~/.claude/.credentials.json: a Read rule rooted with //, the
+#             path in the sandbox's denyRead, and a deny entry in the codex
+#             read persona's profile; a relative one adds nothing. Set to
+#             HOME's .claude, or a link to it: the profile's filesystem table
+#             parses as TOML and names each credential path once
 #   builder   _lease_builder_run's claude arm against the stub, in a session of
 #             its own: the result text in <out> (its Status line parses), the
 #             envelope in <out>.raw, subtype, is_error and session_id in
@@ -8245,6 +8987,89 @@ O=$( source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-fa
     && printf 'cdxpolicy:%s\n' "$(printf '%s\n' "${_LEASE_LANE_ARGV[@]}" | grep -cxE 'shell_environment_policy\.(inherit="all"|ignore_default_excludes=true|exclude=\[\]|include_only=\[\]|set=\{\})' || true)"
 ) 2>&1 || true
 _S20_FAIL="${_S20_FAIL}$(_self_expect env "$O" '^claude:2$' '^codex:0$' '^seam:0$' '^cdxpolicy:5$')"
+
+# ccd: CLAUDE_CONFIG_DIR absolute (with a space), relative, empty and through a
+# symlink: what reaches each worker, and the credential denies of the claude
+# lane's --settings and the codex read persona's profile. A relative value is
+# denied from this shell's working directory (fails closed), an empty one as
+# that directory itself (Claude Code keeps an empty value, so its config home
+# is where it started), and each path is denied as given and with its
+# symlinks resolved (4.1)
+mkdir -p "$_S20/ccdreal/cfg" && ln -s "$_S20/ccdreal" "$_S20/ccdlink" 2>/dev/null || true
+O=$( export TMPDIR="$_S20/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for C in abs rel empty link; do
+    case "$C" in
+      (abs) export CLAUDE_CONFIG_DIR="/s20/cfg home" ;;
+      (rel) export CLAUDE_CONFIG_DIR=cfg ;;
+      (empty) export CLAUDE_CONFIG_DIR="" ;;
+      (link) export CLAUDE_CONFIG_DIR="$_S20/ccdlink/cfg" ;;
+    esac
+    printf '%s-env:claude=%s:codex=%s:grok=%s\n' "$C" "$(_adapter_env claude env 2>/dev/null | grep -cxF "CLAUDE_CONFIG_DIR=/s20/cfg home" || true)" \
+      "$(_adapter_env codex env 2>/dev/null | grep -c '^CLAUDE_CONFIG_DIR=' || true)" "$(_adapter_env grok env 2>/dev/null | grep -c '^CLAUDE_CONFIG_DIR=' || true)"
+    printf '%s-any:%s\n' "$C" "$(_adapter_env claude env 2>/dev/null | grep -c '^CLAUDE_CONFIG_DIR=' || true)"
+    S="" P=""
+    if _lease_lane_argv claude "" "" "" "" "" "$_S20/wtb" 60 /s20/lead/.git ""; then
+      for W in "${_LEASE_LANE_ARGV[@]}"; do if [ "$P" = --settings ]; then S=$W; fi; P=$W; done
+    fi
+    _persona_codex_profile || true
+    printf '%s-deny:%s\n' "$C" "$(S20_S="$S" S20_P="${_PERSONA_CODEX_PROFILE[*]:-}" S20_PWD="$PWD" python3 -c '
+import json, os, re
+try:
+    s = json.loads(os.environ["S20_S"])
+except ValueError:
+    print("no-settings")
+    raise SystemExit(0)
+deny, dr = s["permissions"]["deny"], s["sandbox"]["filesystem"]["denyRead"]
+c = os.environ["S20_PWD"].rstrip("/") + "/.credentials.json"
+print("read=%s:sbx=%s:home=%d:codex=%d:codexcfg=%d:cwd=%d%d%d" % ("|".join(d for d in deny if "cfg" in d), "|".join(d for d in dr if "cfg" in d),
+      "Read(~/.claude/.credentials.json)" in deny and "~/.claude/.credentials.json" in dr, os.environ["S20_P"].count("\"/s20/cfg home/.credentials.json\"=\"deny\""),
+      len(re.findall(r"\"([^\"]*cfg[^\"]*)\"=\"deny\"", os.environ["S20_P"])),
+      "Read(/" + c + ")" in deny, c in dr, os.environ["S20_P"].count(json.dumps(c) + "=\"deny\"")))')"
+  done
+) 2>&1 || true
+_S20_FAIL="${_S20_FAIL}$(_self_expect ccd "$O" '^abs-env:claude=1:codex=0:grok=0$' '^rel-env:claude=0:codex=0:grok=0$' '^empty-env:claude=0:codex=0:grok=0$' \
+  '^abs-any:1$' '^rel-any:0$' '^empty-any:0$' \
+  '^abs-deny:read=Read\(//s20/cfg home/\.credentials\.json\)\|Read\(//s20/cfg home/\.credentials\.json/\*\*\):sbx=/s20/cfg home/\.credentials\.json:home=1:codex=1:codexcfg=1:cwd=000$' \
+  '^rel-deny:read=Read\(//[^|]*/cfg/\.credentials\.json\)\|Read\(//[^|]*/cfg/\.credentials\.json/\*\*\).*:sbx=/[^|:]*/cfg/\.credentials\.json.*:home=1:codex=0:codexcfg=[12]:cwd=000$' \
+  '^empty-deny:read=:sbx=:home=1:codex=0:codexcfg=0:cwd=111$' \
+  '^link-deny:read=Read\(//[^|]*/ccdlink/cfg/\.credentials\.json\)\|Read\(//[^|]*/ccdlink/cfg/\.credentials\.json/\*\*\)\|Read\(//[^|]*/ccdreal/cfg/\.credentials\.json\)\|Read\(//[^|]*/ccdreal/cfg/\.credentials\.json/\*\*\):sbx=/[^|]*/ccdlink/cfg/\.credentials\.json\|/[^|]*/ccdreal/cfg/\.credentials\.json:home=1:codex=0:codexcfg=2:cwd=000$')"
+# ccd, the default home (fix round, finding #10): CLAUDE_CONFIG_DIR set to HOME's .claude, and
+# to a link to it, names ~/.claude/.credentials.json a second time. The codex read persona's
+# filesystem table parses as TOML (tomllib, 3.11 and later; a key given twice does not parse)
+# and names each credential path once, the link's own spelling beside it
+mkdir -p "$_S20/home/.claude" && ln -s "$(cd "$_S20/home" && pwd -P)/.claude" "$_S20/ccdhome" 2>/dev/null || true
+O=$( export TMPDIR="$_S20/tmp" HOME="$(cd "$_S20/home" && pwd -P)" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for C in default link; do
+    case "$C" in
+      (default) export CLAUDE_CONFIG_DIR="$HOME/.claude" ;;
+      (link) export CLAUDE_CONFIG_DIR="$_S20/ccdhome" ;;
+    esac
+    _PERSONA_CODEX_PROFILE=()
+    _persona_codex_profile || true
+    printf '%s-profile:%s\n' "$C" "$(S20_P="${_PERSONA_CODEX_PROFILE[*]:-}" S20_H="$HOME" S20_L="$_S20/ccdhome" python3 -c '
+import json, os, re
+m = re.search(r"permissions\.triforge_persona\.filesystem=(\{.*\})$", os.environ["S20_P"])
+if not m:
+    print("no-table")
+    raise SystemExit(0)
+v = m.group(1)
+# every key, a duplicate kept: each is a JSON string followed by ="deny"
+keys = [k for k, _ in json.loads(v.replace("=\"deny\"", ":\"deny\""), object_pairs_hook=list)]
+try:
+    import tomllib
+except ImportError:
+    toml = "ok" if len(keys) == len(set(keys)) else "invalid"
+else:
+    try:
+        tomllib.loads("f = " + v)
+        toml = "ok"
+    except tomllib.TOMLDecodeError:
+        toml = "invalid"
+print("toml=%s:once=%d:home=%d:link=%d" % (toml, len(keys) == len(set(keys)), keys.count(os.environ["S20_H"] + "/.claude/.credentials.json"),
+      keys.count(os.environ["S20_L"] + "/.credentials.json")))')"
+  done
+) 2>&1 || true
+_S20_FAIL="${_S20_FAIL}$(_self_expect ccd-default "$O" '^default-profile:toml=ok:once=1:home=1:link=0$' '^link-profile:toml=ok:once=1:home=1:link=1$')"
 
 # builder: the real claude arm against the stub, the builder process in a
 # session of its own (its exit sweep reaches only its own group)
@@ -8428,7 +9253,7 @@ _S20_FAIL="${_S20_FAIL}$(_self_expect ctx "$O" '^ctx-root:rc=69:class=determinis
 
 _S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON envelope (subtype, is_error, session_id), explicit tool sets, --max-turns, session resume, the sandbox settings and their Claude Code floor, the claude env arm, .claude/skills provisioning that adds names only, max-turns routed as report missing, dispatch_role running claude -p under a codex lead, never without its deny on the lead's git dir inside a git checkout (KTD16, R2/R3)"
 if [ -z "$_S20_FAIL" ]; then
-  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0; ctx: a codex lead's tester on claude with TRIFORGE_LEASE_ROOT=/dev/null/x -> rc 69 deterministic, the lease line and one ERROR line, stub never run; outside any git repository the reviewer runs, rc 0" "static"
+  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0; ctx: a codex lead's tester on claude with TRIFORGE_LEASE_ROOT=/dev/null/x -> rc 69 deterministic, the lease line and one ERROR line, stub never run; outside any git repository the reviewer runs, rc 0; ccd (4.1): an absolute CLAUDE_CONFIG_DIR (with a space) reaches the claude worker as set, never codex or grok, and its .credentials.json is denied (Read rule rooted with //, sandbox denyRead, the codex read persona's profile); a relative or empty one reaches no worker, a relative one denied from the lead's working directory and an empty one as that directory's .credentials.json; set to HOME's .claude or a link to it, the codex profile parses as TOML and names each credential path once" "static"
 else
   row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S20_FAIL"):$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"
 fi
@@ -9808,8 +10633,9 @@ O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25
   if [ -n "$SP" ]; then kill -TERM "$SP" 2>/dev/null || true; fi
   # the same with an inspect that ignores TERM, and so do the sleeps it
   # starts: gone by the time the subshell exits, at most a second later. The
-  # subshell gets 8 s (the stop's 5 s grace and the KILL, with slack) before
-  # it counts as hung; a stub left alive is killed here, never by the gate's end
+  # subshell gets 20 s (the stop's 5 s grace and the KILL, with room for a
+  # loaded host; the inspect alone never ends) before it counts as hung; a
+  # stub left alive is killed here, never by the gate's end
   rm -f "$_S25/inspect.pid"; printf 'noterm\n' > "$_S25/inspect-mode"
   _grok_run_in "$S" "$TO" 60 "probe trap S25 noterm" "$_S25/trap.ready" > /dev/null 2>&1 &
   J=$!
@@ -9819,7 +10645,7 @@ O=$( cd "$_S25/fg" && export HOME="$_S25/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S25
   B=$(ls -d "$_S25/tmp"/triforge-grok.* 2>/dev/null | grep -c . || true)
   for P in $(pgrep -P "$J" 2>/dev/null || true); do kill -TERM "$P" 2>/dev/null || true; done
   N=0
-  while [ "$N" -lt 80 ] && kill -0 "$J" 2>/dev/null; do sleep 0.1; N=$((N + 1)); done
+  while [ "$N" -lt 200 ] && kill -0 "$J" 2>/dev/null; do sleep 0.1; N=$((N + 1)); done
   R=hung
   if kill -0 "$J" 2>/dev/null; then _kill_tree "$J" KILL; else R=0; wait "$J" 2>/dev/null || R=$?; fi
   N=0
@@ -11060,8 +11886,10 @@ rm -rf "$_S22"
 # The at-review dispatch, wait, synthesis and synthesis-wait blocks and the
 # at-deep-research swarm, wait, synthesis and synthesis-wait blocks are taken
 # from this checkout's skills as written and run under /bin/zsh and /bin/bash
-# against a stub library: persona_spawn starts a stub persona detached (2 s
-# when named in S23_SLOW, else at once) and persona_wait returns 75 while one
+# against a stub library: persona_spawn starts a stub persona detached (one
+# named in S23_SLOW runs until a persona_wait has found it running, so a wait
+# block sees it running however slowly the host runs the blocks; any other
+# ends at once) and persona_wait returns 75 while one
 # it names has no exit code, and 64, as the real one does, for a run dir with
 # no runs or an unknown name; dispatch_role, invoke_antigravity and _scrub are
 # stubs too, and resolve_role, cli_field and _lease_parse_status answer the
@@ -11103,9 +11931,11 @@ persona_spawn() {
   [ -f "$IN" ] || { echo "stub persona_spawn: input $IN is not a file" >&2; return 64; }
   if _s23_in "$P" "${S23_SPAWNFAIL:-}"; then echo "stub persona_spawn: could not start $P" >&2; return 1; fi
   : > "$D/$N.pid"
-  if _s23_in "$P" "${S23_SLOW:-}"; then T=2; fi
+  if _s23_in "$P" "${S23_SLOW:-}"; then T=1; fi
   ( trap '' HUP
-    sleep "$T"
+    # a slow persona runs until a persona_wait has found it running ($N.waited), 60 s at most
+    I=0
+    while [ "$T" = 1 ] && [ ! -f "$D/$N.waited" ] && [ "$I" -lt 600 ]; do sleep 0.1; I=$((I + 1)); done
     if _s23_in "$P" "${S23_FAIL:-}"; then echo "PARTIAL report from $P" > "$OUT"; echo 3 > "$D/$N.rc"; exit 0; fi
     if _s23_in "$P" "${S23_EMPTY:-}"; then : > "$OUT"; echo 0 > "$D/$N.rc"; exit 0; fi
     printf 'REPORT from %s\n' "$P" > "$OUT"; echo 0 > "$D/$N.rc" ) </dev/null >/dev/null 2>&1 &
@@ -11119,10 +11949,10 @@ persona_wait() { # as the real one: 64 for a run dir with no runs or an unknown 
   if [ $# -gt 0 ]; then
     for N in "$@"; do
       [ -f "$D/$N.pid" ] || { echo "stub persona_wait: no run named $N in $D" >&2; return 64; }
-      [ -f "$D/$N.rc" ] || MISSING="$MISSING $N"
+      [ -f "$D/$N.rc" ] || { MISSING="$MISSING $N"; : > "$D/$N.waited"; }
     done
   else
-    for F in $(find "$D" -maxdepth 1 -name '*.pid'); do RUNS=1; N=$(basename "$F" .pid); [ -f "$D/$N.rc" ] || MISSING="$MISSING $N"; done
+    for F in $(find "$D" -maxdepth 1 -name '*.pid'); do RUNS=1; N=$(basename "$F" .pid); [ -f "$D/$N.rc" ] || { MISSING="$MISSING $N"; : > "$D/$N.waited"; }; done
     [ -n "$RUNS" ] || { echo "stub persona_wait: no runs in $D" >&2; return 64; }
   fi
   if [ -n "$MISSING" ]; then echo "still running:$MISSING"; return 75; fi
@@ -11691,6 +12521,31 @@ _S16_EV="${_S16_EV}A: one checkout-top roster from a subdirectory; egress per pr
 #            exact 3.x copy placed in $CODEX_HOME (the copy kept); the files
 #            byte-identical, the hard link intact; an ordinary project under
 #            the same HOME and CODEX_HOME still gets its plan
+#   ccd      (4.1) CLAUDE_CONFIG_DIR, where Claude Code 2.1.296 reads its
+#            user tier in place of ~/.claude: set to an absolute directory
+#            outside the project, its CLAUDE.md is the user line (kind
+#            CLAUDE.md, imports) and HOME's .claude/CLAUDE.md a line above;
+#            that import makes the pointer visible to claude; the writers
+#            refuse the file and its directory, rc 2 before any plan, with and
+#            without --yes, and still refuse ~/.claude; the files
+#            byte-identical. Unset: HOME's .claude/CLAUDE.md is the user line,
+#            as before. Empty, relative, or the project itself: no user line,
+#            HOME's .claude/CLAUDE.md above, the pointer hidden. Empty: the
+#            project's own files still get their plans. The writers refuse
+#            the file any set value names, wherever it lies, and its
+#            directory, rc 2 before any plan, with and without --yes (fix
+#            round, finding #7): relative cfg names <project>/cfg/CLAUDE.md,
+#            the project's own files keeping their plans; the project itself
+#            names its own CLAUDE.md, so its CLAUDE.md and AGENTS.md are
+#            refused. <project>/.claude, absolute and relative: detect lists
+#            .claude/CLAUDE.md as a project file, the writers refuse it and
+#            its directory, the project's CLAUDE.md and AGENTS.md keep their
+#            plans. Siblings: a config home beside the project whose name
+#            extends it (proj2 beside proj) and the other way round is the
+#            user line, its import makes the pointer visible, the writers
+#            refuse it. A working directory deleted first: an absolute
+#            config home still refused, a relative one refuses every write
+#            naming CLAUDE_CONFIG_DIR. The files byte-identical
 #   home     HOME and the directories above it, rc 2 before any plan, with
 #            and without --yes, naming the project's own CLAUDE.md: a merge
 #            into HOME and through a link to it, the import into ~/CLAUDE.md
@@ -12105,6 +12960,169 @@ _S16_FAIL="${_S16_FAIL}$(_s16b_same b-user-untouched "$_S16B_SUM" "$(_s16b_sum "
 _O=$(S16B_HOME="$_S16B_U/home" S16B_CODEX="$_S16B_U/cx" _s16b "$_S16B_W/ulp" instruction_merge_pointer)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-user-project "$_O" '^needs-ask: would create [^ ]*/w/ulp/AGENTS\.md ' '^rc=20$')"
 
+# ccd: CLAUDE_CONFIG_DIR moves the user tier. A project under HOME with its own CLAUDE.md and
+# the pointer block, HOME's .claude/CLAUDE.md, and a config home outside both whose CLAUDE.md
+# imports the project's AGENTS.md by its absolute path; the project's cfg/CLAUDE.md is the
+# file the relative value cfg names from there
+_S16B_CC="$_S16B/cc"
+mkdir -p "$_S16B_CC/home/.claude" "$_S16B_CC/home/.codex" "$_S16B_CC/cfg" "$_S16B_CC/home/proj/cfg"
+_s16b_proj "$_S16B_CC/home/proj"
+printf '# me\n' > "$_S16B_CC/home/.claude/CLAUDE.md"
+printf '# own\n' > "$_S16B_CC/home/proj/CLAUDE.md"
+printf '# moved\n@%s/AGENTS.md\n' "$(cd "$_S16B_CC/home/proj" && pwd -P)" > "$_S16B_CC/cfg/CLAUDE.md"
+printf '# moved here\n' > "$_S16B_CC/home/proj/cfg/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_CC/cfg/CLAUDE.md" "$_S16B_CC/home/.claude/CLAUDE.md" "$_S16B_CC/home/proj/CLAUDE.md" "$_S16B_CC/home/proj/AGENTS.md" "$_S16B_CC/home/proj/cfg/CLAUDE.md")
+_s16b_cc() { # _s16b_cc <CLAUDE_CONFIG_DIR, or - for unset> <dir> <helper> [args...] — _s16b under the cc HOME with that CLAUDE_CONFIG_DIR exported
+  local C=$1
+  shift
+  ( if [ "$C" = - ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$C"; fi
+    S16B_HOME="$_S16B_CC/home" S16B_CODEX="$_S16B_CC/home/.codex" _s16b "$@" )
+}
+# an absolute config home outside the project: its CLAUDE.md is the user line and imports the
+# project's AGENTS.md, so the pointer reaches claude; HOME's .claude/CLAUDE.md is a file above
+_O=$(_s16b_cc "$_S16B_CC/cfg" "$_S16B_CC/home/proj" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-ccd-detect "$_O" \
+  "^CLAUDE\.md${T}user${T}imports,user-owned${T}[^${T}]*/cc/cfg/CLAUDE\.md${T}-\$" \
+  "^\.claude/CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/cc/home/\.claude/CLAUDE\.md${T}" '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-ccd-detect "$_O" "^\.claude/CLAUDE\.md${T}user")"
+_O=$(_s16b_cc "$_S16B_CC/cfg" "$_S16B_CC/home/proj" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-ccd-visible "$_O" "^claude${T}visible${T}[^ ]*/cc/cfg/CLAUDE\.md imports [^ ]*/cc/home/proj/AGENTS\.md, so it is loaded with that file\$" '^rc=0$')"
+# the writers refuse that file and its directory, before any plan, and still refuse ~/.claude
+for _S16B_Y in "" --yes; do
+  _O=$(_s16b_cc "$_S16B_CC/cfg" "$_S16B_CC/home/proj" instruction_add_import "$_S16B_CC/cfg/CLAUDE.md" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-import${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/cfg/CLAUDE\.md is your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _O=$(_s16b_cc "$_S16B_CC/cfg" "$_S16B_CC/home/proj" instruction_merge_pointer "$_S16B_CC/cfg" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-merge${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/cfg/AGENTS\.md is in the directory of your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-ccd-merge${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+  _O=$(_s16b_cc "$_S16B_CC/cfg" "$_S16B_CC/home/proj" instruction_merge_pointer "$_S16B_CC/home/.claude" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-home${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/home/\.claude/AGENTS\.md is in the directory of your user-tier ~/\.claude/CLAUDE\.md, ' '^rc=2$')"
+done
+# from a working directory deleted before the helper starts (fix round, finding #7): the
+# absolute config home is still refused, its file and its directory; a relative value names
+# no file without a working directory, so every write is refused, naming the variable
+_s16b_gone() { # _s16b_gone <CLAUDE_CONFIG_DIR> <helper> [args...] — _s16b_cc's run, from a working directory removed before the helper starts
+  local C=$1 R=0 O
+  shift
+  mkdir -p "$_S16B_CC/gone"
+  O=$(cd "$_S16B_CC/gone" && rmdir "$_S16B_CC/gone" && export CLAUDE_CONFIG_DIR="$C" &&
+      HOME="$_S16B_CC/home" CODEX_HOME="$_S16B_CC/home/.codex" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 60} /bin/bash -c 'source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 97; shift; "$@"' _ "$REPO_ROOT" "$@" 2>&1) || R=$?
+  printf '%s\nrc=%s\n' "$O" "$R"
+}
+for _S16B_Y in "" --yes; do
+  _O=$(_s16b_gone "$_S16B_CC/cfg" instruction_add_import "$_S16B_CC/cfg/CLAUDE.md" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-gone-import${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/cfg/CLAUDE\.md is your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _O=$(_s16b_gone "$_S16B_CC/cfg" instruction_merge_pointer "$_S16B_CC/cfg" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-gone-merge${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/cfg/AGENTS\.md is in the directory of your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-ccd-gone-merge${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+  _O=$(_s16b_gone cfg instruction_add_import "$_S16B_CC/cfg/CLAUDE.md" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-gone-relative${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/cfg/CLAUDE\.md may be your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md or a file beside it, which Triforge never writes: \$CLAUDE_CONFIG_DIR is the relative path cfg, and the working directory it is relative to is gone, ' '^rc=2$')"
+  _O=$(_s16b_gone cfg instruction_merge_pointer "$_S16B_CC/cfg" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-gone-relative${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/cfg/AGENTS\.md may be your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md or a file beside it, .* or set CLAUDE_CONFIG_DIR to an absolute path \(rc 2\)$' '^rc=2$')"
+  _O=$(_s16b_gone "" instruction_add_import "$_S16B_CC/cfg/CLAUDE.md" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-gone-empty${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/cfg/CLAUDE\.md may be your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md or a file beside it, which Triforge never writes: \$CLAUDE_CONFIG_DIR is empty, which names the working directory, and the working directory it is relative to is gone, ' '^rc=2$')"
+done
+[ ! -e "$_S16B_CC/cfg/AGENTS.md" ] && [ ! -e "$_S16B_CC/home/.claude/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-ccd-merge(written)"
+# unset: HOME's .claude/CLAUDE.md is the user line, as before
+_O=$(_s16b_cc - "$_S16B_CC/home/proj" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-ccd-unset "$_O" "^\.claude/CLAUDE\.md${T}user${T}no-import,user-owned${T}[^${T}]*/cc/home/\.claude/CLAUDE\.md${T}-\$" '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-ccd-unset "$_O" '/cc/cfg/')"
+# empty, relative, or the project itself: no user tier for detect and visibility, so no
+# project file is taken for the user's and HOME's .claude/CLAUDE.md is a file above; the
+# pointer stays hidden. The project's own files still get their plans where no set value
+# names their directory: relative cfg, which names <project>/cfg/CLAUDE.md (an empty value
+# names the working directory, the project, as Claude Code keeps it: refused below)
+for _S16B_D in "" cfg "$_S16B_CC/home/proj"; do
+  case "$_S16B_D" in "") _S16B_N=b-ccd-empty ;; cfg) _S16B_N=b-ccd-relative ;; *) _S16B_N=b-ccd-inproject ;; esac
+  _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" \
+    "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/cc/home/proj/CLAUDE\.md${T}@AGENTS\.md\$" \
+    "^\.claude/CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/cc/home/\.claude/CLAUDE\.md${T}" '^rc=0$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "$_S16B_N" "$_O" "^(CLAUDE\.md|\.claude/CLAUDE\.md)${T}user${T}")"
+  _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_pointer_visibility claude)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/cc/home/proj/CLAUDE\.md, [^ ]*/cc/home/\.claude/CLAUDE\.md[:,] " '^rc=1$')"
+  case "$_S16B_N" in b-ccd-inproject|b-ccd-empty) continue ;; esac
+  _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_add_import CLAUDE.md)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" '^needs-ask: would add the line @AGENTS\.md to [^ ]*/cc/home/proj/CLAUDE\.md, ' '^rc=20$')"
+  _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_merge_pointer)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" '^needs-ask: would replace the Triforge pointer block in [^ ]*/cc/home/proj/AGENTS\.md ' '^rc=20$')"
+done
+# the writers refuse the file a set value names wherever it lies, and every file beside it,
+# rc 2 before any plan, with and without --yes (fix round, finding #7): relative cfg names
+# <project>/cfg/CLAUDE.md (from the working directory); the project itself names its own
+# CLAUDE.md, so its CLAUDE.md and AGENTS.md are refused; so does an empty value, which
+# Claude Code keeps ($CLAUDE_CONFIG_DIR ?? ~/.claude), taken from the working directory
+for _S16B_Y in "" --yes; do
+  _O=$(_s16b_cc "" "$_S16B_CC/home/proj" instruction_add_import CLAUDE.md $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-empty${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/home/proj/CLAUDE\.md is your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-ccd-empty${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+  _O=$(_s16b_cc "" "$_S16B_CC/home/proj" instruction_merge_pointer $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-empty${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/home/proj/AGENTS\.md is in the directory of your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-ccd-empty${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+  _O=$(_s16b_cc cfg "$_S16B_CC/home/proj" instruction_add_import "$_S16B_CC/home/proj/cfg/CLAUDE.md" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-relative${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/home/proj/cfg/CLAUDE\.md is your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _O=$(_s16b_cc cfg "$_S16B_CC/home/proj" instruction_merge_pointer "$_S16B_CC/home/proj/cfg" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-relative${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/home/proj/cfg/AGENTS\.md is in the directory of your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-ccd-relative${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+  _O=$(_s16b_cc "$_S16B_CC/home/proj" "$_S16B_CC/home/proj" instruction_add_import CLAUDE.md $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-inproject${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/home/proj/CLAUDE\.md is your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-ccd-inproject${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+  _O=$(_s16b_cc "$_S16B_CC/home/proj" "$_S16B_CC/home/proj" instruction_merge_pointer $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-inproject${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/home/proj/AGENTS\.md is in the directory of your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-ccd-inproject${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+done
+[ ! -e "$_S16B_CC/home/proj/cfg/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-ccd-relative(written)"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-ccd-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_CC/cfg/CLAUDE.md" "$_S16B_CC/home/.claude/CLAUDE.md" "$_S16B_CC/home/proj/CLAUDE.md" "$_S16B_CC/home/proj/AGENTS.md" "$_S16B_CC/home/proj/cfg/CLAUDE.md")")"
+# below the project: <project>/.claude, absolute and relative (testing gap #15). Detect still
+# lists .claude/CLAUDE.md as a project file with its import line (tier_home leaves a config
+# home in the project out); the writers refuse it and its directory, rc 2 before any plan,
+# with and without --yes, and the project's CLAUDE.md and AGENTS.md keep their plans
+_s16b_proj "$_S16B_CC/home/pb"
+mkdir -p "$_S16B_CC/home/pb/.claude"
+printf '# own\n' > "$_S16B_CC/home/pb/CLAUDE.md"
+printf '# tier\n' > "$_S16B_CC/home/pb/.claude/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_CC/home/pb/CLAUDE.md" "$_S16B_CC/home/pb/.claude/CLAUDE.md" "$_S16B_CC/home/pb/AGENTS.md")
+for _S16B_D in "$_S16B_CC/home/pb/.claude" .claude; do
+  case "$_S16B_D" in .claude) _S16B_N=b-ccd-below-rel ;; *) _S16B_N=b-ccd-below ;; esac
+  _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/pb" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" "^\.claude/CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/cc/home/pb/\.claude/CLAUDE\.md${T}@\.\./AGENTS\.md\$" '^rc=0$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "$_S16B_N" "$_O" "^(CLAUDE\.md|\.claude/CLAUDE\.md)${T}user${T}")"
+  for _S16B_Y in "" --yes; do
+    _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/pb" instruction_add_import "$_S16B_CC/home/pb/.claude/CLAUDE.md" $_S16B_Y)
+    _S16_FAIL="${_S16_FAIL}$(_self_expect "${_S16B_N}${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/home/pb/\.claude/CLAUDE\.md is your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+    _S16_FAIL="${_S16_FAIL}$(_s16b_not "${_S16B_N}${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+    _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/pb" instruction_merge_pointer "$_S16B_CC/home/pb/.claude" $_S16B_Y)
+    _S16_FAIL="${_S16_FAIL}$(_self_expect "${_S16B_N}${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/home/pb/\.claude/AGENTS\.md is in the directory of your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+    _S16_FAIL="${_S16_FAIL}$(_s16b_not "${_S16B_N}${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+  done
+  _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/pb" instruction_add_import CLAUDE.md)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" '^needs-ask: would add the line @AGENTS\.md to [^ ]*/cc/home/pb/CLAUDE\.md, ' '^rc=20$')"
+  _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/pb" instruction_merge_pointer)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" '^needs-ask: would replace the Triforge pointer block in [^ ]*/cc/home/pb/AGENTS\.md ' '^rc=20$')"
+done
+[ ! -e "$_S16B_CC/home/pb/.claude/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-ccd-below(written)"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-ccd-below-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_CC/home/pb/CLAUDE.md" "$_S16B_CC/home/pb/.claude/CLAUDE.md" "$_S16B_CC/home/pb/AGENTS.md")")"
+# siblings: a config home beside the project whose name extends the project's (proj2 beside
+# proj, which the trailing / in tier_home decides) is not in the project, nor is proj beside
+# proj2: its CLAUDE.md is the user line, its import makes the pointer visible, and the
+# writers refuse it
+_s16b_proj "$_S16B_CC/sib/proj"
+_s16b_proj "$_S16B_CC/sib/proj2"
+printf '# own\n@%s/AGENTS.md\n' "$(cd "$_S16B_CC/sib/proj2" && pwd -P)" > "$_S16B_CC/sib/proj/CLAUDE.md"
+printf '# own\n@%s/AGENTS.md\n' "$(cd "$_S16B_CC/sib/proj" && pwd -P)" > "$_S16B_CC/sib/proj2/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_CC/sib/proj/CLAUDE.md" "$_S16B_CC/sib/proj2/CLAUDE.md")
+for _S16B_D in proj2 proj; do
+  case "$_S16B_D" in proj2) _S16B_SIBP=proj _S16B_N=b-ccd-sibling ;; *) _S16B_SIBP=proj2 _S16B_N=b-ccd-sibling2 ;; esac
+  _O=$(_s16b_cc "$_S16B_CC/sib/$_S16B_D" "$_S16B_CC/sib/$_S16B_SIBP" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" \
+    "^CLAUDE\.md${T}user${T}imports,user-owned${T}[^${T}]*/cc/sib/${_S16B_D}/CLAUDE\.md${T}-\$" \
+    "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/cc/sib/${_S16B_SIBP}/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$')"
+  _O=$(_s16b_cc "$_S16B_CC/sib/$_S16B_D" "$_S16B_CC/sib/$_S16B_SIBP" instruction_pointer_visibility claude)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" "^claude${T}visible${T}[^ ]*/cc/sib/${_S16B_D}/CLAUDE\.md imports [^ ]*/cc/sib/${_S16B_SIBP}/AGENTS\.md, so it is loaded with that file\$" '^rc=0$')"
+  _O=$(_s16b_cc "$_S16B_CC/sib/$_S16B_D" "$_S16B_CC/sib/$_S16B_SIBP" instruction_add_import "$_S16B_CC/sib/$_S16B_D/CLAUDE.md" --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" "^instruction_add_import: REFUSED — [^ ]*/cc/sib/${_S16B_D}/CLAUDE\.md is your user-tier \\\$CLAUDE_CONFIG_DIR/CLAUDE\.md, " '^rc=2$')"
+done
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-ccd-sibling-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_CC/sib/proj/CLAUDE.md" "$_S16B_CC/sib/proj2/CLAUDE.md")")"
+
 # home: a file in HOME or a directory above it is read for every project under it, so no
 # writer touches one there: rc 2 before any plan, with and without --yes, compared by
 # identity (a link to HOME too). A project under HOME still gets its plans, HOME unset
@@ -12488,21 +13506,23 @@ _S16_FAIL="${_S16_FAIL}$(_self_expect b-slow "$_O" "^CLAUDE\.md${T}project${T}im
 # _instr_py gives up on python3. A python3 first on PATH that ignores SIGTERM
 # and never answers, with a 1 s bound: under the timeout binary, and under
 # the watchdog (a PATH with the stub, sleep and dirname only, no timeout or
-# gtimeout), rc 137 and nothing else printed within 1 s + the 2 s SIGKILL
-# grace + slack, the stub gone. Under the harness timeout (-k 5), so a
-# library without the bound fails here in 15 s
+# gtimeout), rc 137 and nothing else printed within 15 s (1 s + the 2 s
+# SIGKILL grace, and room for a loaded host; the stub alone runs 30 s), the
+# stub gone. Under the harness timeout (20 s, -k 5), so a library without
+# the bound fails here in 20 s
 mkdir -p "$_S16B/pystub/wd"
-printf '#!/bin/sh\n# probe stub (SELF-16 B bound): a python3 that ignores SIGTERM and never answers; writes its pid to $S16B_PYPID\necho $$ > "$S16B_PYPID"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S16B/pystub/python3"
+printf '#!/bin/sh\n# probe stub (SELF-16 B bound): a python3 that ignores SIGTERM and never answers; writes its pid to $S16B_PYPID (none set: exits, the warm-up run)\n[ -n "${S16B_PYPID:-}" ] || exit 0\necho $$ > "$S16B_PYPID"\ntrap "" TERM\nN=0\nwhile [ "$N" -lt 150 ]; do sleep 0.2; N=$((N + 1)); done\n' > "$_S16B/pystub/python3"
 chmod +x "$_S16B/pystub/python3"
+_self_warm env -u S16B_PYPID "$_S16B/pystub/python3"
 ln -s "$_S16B/pystub/python3" "$_S16B/pystub/wd/python3"
 for _S16B_D in sleep dirname; do ln -s "$(command -v "$_S16B_D")" "$_S16B/pystub/wd/$_S16B_D"; done
 _s16b_bound() { # _s16b_bound <label> <PATH> — instruction_files_detect with a 1 s bound on the stub; mismatches printed
   local O T0 T S N=0
   T0=$(date +%s)
-  O=$(cd "$_S16B_P" && HOME="$_S16B/home" PATH="$2" S16B_PYPID="$_S16B/pystub/pid-$1" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 15} /bin/bash -c 'source "$1/scripts/lib/instructions.sh" >/dev/null 2>&1; _INSTR_SECS=1 instruction_files_detect; echo "rc=$?"' _ "$REPO_ROOT" 2>&1)
+  O=$(cd "$_S16B_P" && HOME="$_S16B/home" PATH="$2" S16B_PYPID="$_S16B/pystub/pid-$1" ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 20} /bin/bash -c 'source "$1/scripts/lib/instructions.sh" >/dev/null 2>&1; _INSTR_SECS=1 instruction_files_detect; echo "rc=$?"' _ "$REPO_ROOT" 2>&1)
   T=$(( $(date +%s) - T0 ))
   [ "$O" = "rc=137" ] || printf ' b-bound-%s(%s)' "$1" "$(printf '%s' "$O" | tr '\n' ' ' | cut -c1-80)"
-  [ "$T" -lt 6 ] || printf ' b-bound-%s(slow:%ss)' "$1" "$T"
+  [ "$T" -lt 15 ] || printf ' b-bound-%s(slow:%ss)' "$1" "$T"
   # gone: a stub killed with its timeout process is reaped by init, so give it a second
   S=$(cat "$_S16B/pystub/pid-$1" 2>/dev/null || true)
   while [ -n "$S" ] && kill -0 "$S" 2>/dev/null && [ "$N" -lt 10 ]; do sleep 0.1; N=$((N + 1)); done
@@ -12670,9 +13690,10 @@ _s16b_cap() { # _s16b_cap <case> <project> <ERE of the refusal after "<CLAUDE.md
   local C=$1 P="$_S16B_CP/$2" O S
   S=$(_s16b_sum "$P/CLAUDE.md")
   O=$(_s16b "$P" instruction_files_detect)
-  _self_expect "$C-detect" "$O" "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/w/cap/$2/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$'
+  _self_expect "$C-detect" "$O" "^CLAUDE\.md${T}project${T}no-import,user-owned,past-bound${T}[^${T}]*/w/cap/$2/CLAUDE\.md${T}-\$" '^rc=0$'
   O=$(_s16b "$P" instruction_pointer_visibility claude)
-  _self_expect "$C-vis" "$O" "^claude${T}hidden${T}shadowed by [^ ]*/w/cap/$2/CLAUDE\.md: " '^rc=1$'
+  _self_expect "$C-vis" "$O" "^claude${T}hidden${T}shadowed by [^ ]*/w/cap/$2/CLAUDE\.md: .*[^ ]*/w/cap/$2/CLAUDE\.md .*Triforge reads no import from such a file" '^rc=1$'
+  _s16b_not "$C-vis" "$O" '\(instruction_add_import '
   O=$(_s16b "$P" instruction_add_import CLAUDE.md --yes)
   _self_expect "$C-yes" "$O" "^instruction_add_import: REFUSED — [^ ]*/w/cap/$2/CLAUDE\\.md $3" '^rc=2$'
   _s16b_not "$C-yes" "$O" '^(needs-ask|changed|unchanged):'
@@ -12714,6 +13735,40 @@ _S16_FAIL="${_S16_FAIL}$(_s16b_cap b-cap-work work "with the line @AGENTS\\.md a
 for _S16B_D in quote-ctl list-ctl size-ctl steps-ctl work-ctl; do
   _S16_FAIL="${_S16_FAIL}$(_s16b_capok "b-cap-$_S16B_D" "$_S16B_D")"
 done
+# one read a file (4.1, review #2): detect read each no-import CLAUDE.md-
+# family file three times, once for its row and twice more to tell whether a
+# bound stops its import line (import_bound by way of appended: the file with
+# the line appended, then the file again, gone from md_read's cache by then).
+# Two files of lazy quote lines just under MD_MAX, about 2 s a read on an idle
+# Apple M5 Max, took 12 s and overran the 10 s session start gives detect
+# (rc 124, the rows dropped). b-cap-two-one times one read: detect in a
+# project whose only such file is a user tier of that shape (no import line
+# is offered there, so it is read once). b-cap-two: detect in a project
+# holding CLAUDE.md and CLAUDE.local.md of that shape, under _INSTR_SECS of
+# four reads' time (at least 3 s), so the gate counts reads on any host,
+# fast, slow or loaded, and session start's 10 s holds wherever two reads
+# fit: rc 0, both rows no-import,user-owned,past-bound with the import column
+# -. Two reads fit with room to spare; six do not
+_s16b_t0() { python3 -c 'import time; print(time.time())'; }
+_s16b_dt() { python3 -c 'import sys, time; print("%.1f" % (time.time() - float(sys.argv[1])))' "$1"; }
+_S16B_TW="$_S16B_W/two"
+_s16b_proj "$_S16B_TW/one"
+_s16b_proj "$_S16B_TW/proj"
+mkdir -p "$_S16B_TW/home/.claude"
+python3 -c 'import sys; u = b"> a\nb\nc\nd\n"; d = u * ((4194304 - 64) // len(u))
+for p in sys.argv[1:]:
+    open(p, "wb").write(d)' "$_S16B_TW/home/.claude/CLAUDE.md" "$_S16B_TW/proj/CLAUDE.md" "$_S16B_TW/proj/CLAUDE.local.md"
+_S16B_T0=$(_s16b_t0)
+_O=$(S16B_HOME="$_S16B_TW/home" _s16b "$_S16B_TW/one" instruction_files_detect)
+_S16B_ONE=$(_s16b_dt "$_S16B_T0")
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-two-one "$_O" "^\.claude/CLAUDE\.md${T}user${T}no-import,user-owned${T}[^${T}]*/w/two/home/\.claude/CLAUDE\.md${T}-\$" '^rc=0$')"
+_S16B_SECS=$(awk -v t="$_S16B_ONE" 'BEGIN { s = int(4 * t) + 1; print (s > 3 ? s : 3) }')
+_S16B_T0=$(_s16b_t0)
+_O=$(_INSTR_SECS="$_S16B_SECS" _s16b "$_S16B_TW/proj" instruction_files_detect)
+_S16B_TWO=$(_s16b_dt "$_S16B_T0")
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-two "$_O" "^CLAUDE\.md${T}project${T}no-import,user-owned,past-bound${T}[^${T}]*/w/two/proj/CLAUDE\.md${T}-\$" "^CLAUDE\.local\.md${T}project${T}no-import,user-owned,past-bound${T}[^${T}]*/w/two/proj/CLAUDE\.local\.md${T}-\$" '^rc=0$')"
+rm -f "$_S16B_TW/home/.claude/CLAUDE.md" "$_S16B_TW/proj/CLAUDE.md" "$_S16B_TW/proj/CLAUDE.local.md"
+_S16_EV="${_S16_EV}B (4.1, review #2): detect reads each CLAUDE.md-family file once (b-cap-two: a 4 MiB file of lazy quote lines read in ${_S16B_ONE}s, two in a project under _INSTR_SECS ${_S16B_SECS} in ${_S16B_TWO}s, rc 0, both rows past-bound); "
 
 # the read cap (review round 5, R5-B): a CLAUDE.md-family file is read to
 # MD_MAX + 1 bytes at most (load_md), as no import is read past MD_MAX and
@@ -12734,13 +13789,13 @@ _s16b_rss() { # _s16b_rss <dir> <helper> [args...] — _s16b under /usr/bin/time
   O=$(cd "$D" && HOME="$_S16B/home" CODEX_HOME="$_S16B/home/.codex" /usr/bin/time -l ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 60} /bin/bash -c 'source "$1/scripts/invoke-external.sh" >/dev/null 2>&1 || exit 97; shift; "$@"' _ "$REPO_ROOT" "$@" 2>&1) || R=$?
   printf '%s\nrc=%s\nrss=%s\n' "$O" "$R" "$(printf '%s\n' "$O" | sed -n 's/^ *\([0-9][0-9]*\)  *maximum resident set size.*$/\1/p' | head -n 1)"
 }
-_s16b_rssok() { # _s16b_rssok <case> <output of _s16b_rss> — " <case>(rss:<bytes>)" over 128 MiB, " <case>(rss:none)" when time -l ran and reported none
-  local R
+_s16b_rssok() { # _s16b_rssok <case> <output of _s16b_rss> [limit] — " <case>(rss:<bytes> over <limit>)" over <limit> bytes (128 MiB when none is given), " <case>(rss:none)" when time -l ran and reported none
+  local R L=${3:-134217728}
   R=$(printf '%s\n' "$2" | sed -n 's/^rss=//p' | tail -n 1)
   if [ "$_S16B_TIMEL" = 1 ] && [ -z "$R" ]; then
     printf ' %s(rss:none)' "$1"
-  elif [ -n "$R" ] && [ "$R" -gt 134217728 ]; then
-    printf ' %s(rss:%s)' "$1" "$R"
+  elif [ -n "$R" ] && [ "$R" -gt "$L" ]; then
+    printf ' %s(rss:%s over %s)' "$1" "$R" "$L"
   fi
 }
 _s16b_proj "$_S16B_CP/huge"
@@ -12748,17 +13803,159 @@ dd if=/dev/zero of="$_S16B_CP/huge/CLAUDE.md" bs=1 count=0 seek=268435456 2>/dev
 printf '# own\n@AGENTS.md\n' | dd of="$_S16B_CP/huge/CLAUDE.md" conv=notrunc 2>/dev/null
 _S16B_SUM=$(_s16b_sum "$_S16B_CP/huge/CLAUDE.md")
 _O=$(_s16b_rss "$_S16B_CP/huge" instruction_files_detect)
-_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-detect "$_O" "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/w/cap/huge/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$')$(_s16b_rssok b-cap-huge-detect "$_O")"
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-detect "$_O" "^CLAUDE\.md${T}project${T}no-import,user-owned,past-bound${T}[^${T}]*/w/cap/huge/CLAUDE\.md${T}-\$" '^rc=0$')$(_s16b_rssok b-cap-huge-detect "$_O")"
 _S16B_RSSV="detect $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
 _O=$(_s16b_rss "$_S16B_CP/huge" instruction_pointer_visibility claude)
-_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-vis "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/w/cap/huge/CLAUDE\.md: " '^rc=1$')$(_s16b_rssok b-cap-huge-vis "$_O")"
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-vis "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/w/cap/huge/CLAUDE\.md: .*[^ ]*/w/cap/huge/CLAUDE\.md is more than the 4194304 bytes" '^rc=1$')$(_s16b_not b-cap-huge-vis "$_O" '\(instruction_add_import ')$(_s16b_rssok b-cap-huge-vis "$_O")"
 _S16B_RSSV="${_S16B_RSSV}, visibility $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
 _O=$(_s16b_rss "$_S16B_CP/huge" instruction_add_import CLAUDE.md --yes)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-huge-yes "$_O" "^instruction_add_import: REFUSED — [^ ]*/w/cap/huge/CLAUDE\\.md is more than${_S16B_CAPS}" '^rc=2$')$(_s16b_rssok b-cap-huge-yes "$_O")"
 _S16B_RSSV="${_S16B_RSSV}, import $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
 _S16_FAIL="${_S16_FAIL}$(_s16b_same b-cap-huge-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_CP/huge/CLAUDE.md")")"
 rm -f "$_S16B_CP/huge/CLAUDE.md"
+# capped reads (4.1): AGENTS.md, AGENTS.override.md, the Codex config.toml
+# and the pointer block template are read to FILE_MAX + 1 bytes at most
+# (load), their sizes from fstat on the descriptor read, so no huge file is
+# read whole. b-cap-agents: a sparse 256 MiB AGENTS.md whose first bytes hold
+# the pointer block: detect lists it with the pointer, Codex's visibility is
+# visible (the block ends in the first bytes, within 32768; with the block
+# written from byte 40000 instead, hidden over budget), each under 128 MiB
+# resident, and the merge plan is refused rc 2
+# naming the size (no writer writes a file it has not read whole), the file
+# unchanged. b-cap-config: a sparse 256 MiB config.toml in CODEX_HOME:
+# Codex's visibility is hidden, naming the size and that whether it marks
+# the project untrusted is not known, under 128 MiB resident.
+_s16b_proj "$_S16B_CP/agents"
+dd if=/dev/zero of="$_S16B_CP/agents/AGENTS.md" bs=1 count=0 seek=268435456 2>/dev/null
+printf '# rules\n<!-- triforge:start -->\npointer\n<!-- triforge:end -->\n' | dd of="$_S16B_CP/agents/AGENTS.md" conv=notrunc 2>/dev/null
+_S16B_SUM=$(_s16b_sum "$_S16B_CP/agents/AGENTS.md")
+_O=$(_s16b_rss "$_S16B_CP/agents" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-agents-detect "$_O" "^AGENTS\.md${T}project${T}pointer${T}[^${T}]*/w/cap/agents/AGENTS\.md${T}-\$" '^rc=0$')$(_s16b_rssok b-cap-agents-detect "$_O")"
+_S16B_RSSV="${_S16B_RSSV}; a sparse 256 MiB AGENTS.md: detect $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+_O=$(_s16b_rss "$_S16B_CP/agents" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-agents-vis "$_O" "^codex${T}visible${T}[^ ]*/w/cap/agents/AGENTS\.md is read: the pointer block ends at byte [0-9]{2,3} of the files this reader combines, within 32768 \(the default\)\$" '^rc=0$')$(_s16b_rssok b-cap-agents-vis "$_O")"
+_S16B_RSSV="${_S16B_RSSV}, visibility $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+_O=$(_s16b_rss "$_S16B_CP/agents" instruction_merge_pointer)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-agents-merge "$_O" "^instruction_merge_pointer: REFUSED — [^ ]*/w/cap/agents/AGENTS\.md is more than the 4194304 bytes Triforge reads from an AGENTS\.md, and Triforge writes no file it has not read whole" '^rc=2$')$(_s16b_rssok b-cap-agents-merge "$_O")"
+_S16B_RSSV="${_S16B_RSSV}, merge $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-cap-agents-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_CP/agents/AGENTS.md")")"
+rm -f "$_S16B_CP/agents/AGENTS.md"
+# the mirror (fix round, finding #11): the same sparse file with the block written from byte
+# 40000, inside the bytes read but past the 32768 default: hidden, over budget, rc 1
+dd if=/dev/zero of="$_S16B_CP/agents/AGENTS.md" bs=1 count=0 seek=268435456 2>/dev/null
+printf '# rules\n<!-- triforge:start -->\npointer\n<!-- triforge:end -->\n' | dd of="$_S16B_CP/agents/AGENTS.md" bs=1 seek=40000 conv=notrunc 2>/dev/null
+_O=$(_s16b_rss "$_S16B_CP/agents" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-agents-late "$_O" "^codex${T}hidden${T}over budget: the pointer block in [^ ]*/w/cap/agents/AGENTS\.md ends at byte 400[0-9]{2} of the files this reader combines \(user-level [0-9]+ bytes first\), past 32768 \(the default\), where it stops reading\$" '^rc=1$')$(_s16b_rssok b-cap-agents-late "$_O")"
+rm -f "$_S16B_CP/agents/AGENTS.md"
+# the budget sums each file at its true size (fix round, testing gap #4): a monorepo root
+# holding a sparse 256 MiB AGENTS.md without the block, read to FILE_MAX + 1 bytes, and a
+# CODEX_HOME whose config.toml sets project_doc_max_bytes = 10000000, between the bytes read
+# and the true size. From a project under the root holding the block: hidden, over budget,
+# the block ending past 268435456 (rc 1); from a sibling project with no AGENTS.md: the merge
+# refused rc 3 naming 268435456 bytes above it, with and without --yes, nothing created
+_S16B_MO="$_S16B_CP/mono"
+mkdir -p "$_S16B_MO/proj" "$_S16B_MO/sib" "$_S16B_CP/cxb"
+( cd "$_S16B_MO" && git init -q ) >/dev/null 2>&1
+printf 'project_doc_max_bytes = 10000000\n' > "$_S16B_CP/cxb/config.toml"
+dd if=/dev/zero of="$_S16B_MO/AGENTS.md" bs=1 count=0 seek=268435456 2>/dev/null
+printf '# mono\n' | dd of="$_S16B_MO/AGENTS.md" conv=notrunc 2>/dev/null
+printf '# rules\n<!-- triforge:start -->\npointer\n<!-- triforge:end -->\n' > "$_S16B_MO/proj/AGENTS.md"
+_O=$(S16B_CODEX="$_S16B_CP/cxb" _s16b "$_S16B_MO/proj" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-sum-vis "$_O" "^codex${T}hidden${T}over budget: the pointer block in [^ ]*/w/cap/mono/proj/AGENTS\.md ends at byte 268435517 of the files this reader combines \(user-level 0 bytes first\), past 10000000 \(project_doc_max_bytes in [^ ]*/w/cap/cxb/config\.toml\), where it stops reading\$" '^rc=1$')"
+for _S16B_Y in "" --yes; do
+  _O=$(S16B_CODEX="$_S16B_CP/cxb" _s16b "$_S16B_MO/sib" instruction_merge_pointer $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-cap-sum-merge${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — over the agents-chain budget: with the pointer block, [^ ]*/w/cap/mono/sib/AGENTS\.md would be [0-9]+ bytes, and the files that reader combines [0-9]+ bytes \(user-level 0 \+ the files from the project root down 268435456 \+ this file [0-9]+\), past 10000000 \(project_doc_max_bytes in [^ ]*/w/cap/cxb/config\.toml\), ' '^rc=3$')"
+done
+[ ! -e "$_S16B_MO/sib/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-cap-sum-merge(written)"
+rm -f "$_S16B_MO/AGENTS.md"
+mkdir -p "$_S16B/home/.codex"
+dd if=/dev/zero of="$_S16B/home/.codex/config.toml" bs=1 count=0 seek=268435456 2>/dev/null
+_s16b_proj "$_S16B_CP/config"
+_O=$(_s16b_rss "$_S16B_CP/config" instruction_pointer_visibility codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-cap-config "$_O" "^codex${T}hidden${T}[^ ]*/home/\.codex/config\.toml is more than the 4194304 bytes Triforge reads from the reader config, so whether it marks this project untrusted" '^rc=1$')$(_s16b_rssok b-cap-config "$_O")"
+_S16B_RSSV="${_S16B_RSSV}; a sparse 256 MiB config.toml: visibility $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+rm -f "$_S16B/home/.codex/config.toml"
+# the reader's memory (4.1): md_scan once held a frame per iteration of a
+# repeated regex group, up to 2.4 GB on a crafted 4 MiB CLAUDE.md (indented
+# code, then 4 MiB of blank lines, then indented code); its patterns now
+# read long spans in bounded chunks, no bounded repeat inside another (at
+# 939e494, one bounded at REP inside another took 769 MiB on a line of code
+# with 1024 blank lines after it, repeated to 4 MiB, and 305 MiB on a >
+# line with 1023 lazy lines after it). b-mem-*: detect on that first shape,
+# on nested quote and list lines repeated to 4 MiB, and on those two, whose
+# last line imports AGENTS.md (after the code, and as a lazy line of the
+# quote), each under _S16B_MEMMAX bytes resident (100 MiB; the most any
+# took on Python 3.12 and 3.14 was 76 MiB, the nested quote and list lines)
+_S16B_MEMMAX=104857600
+_s16b_proj "$_S16B_CP/mem-code"
+python3 -c 'import sys; M = 4194304; open(sys.argv[1], "w").write("    x\n" + "\n" * (M - 20) + "    y\n")' "$_S16B_CP/mem-code/CLAUDE.md"
+_s16b_proj "$_S16B_CP/mem-quote"
+python3 -c 'import sys; M = 4194304; u = ">> - a\n> b\n"; open(sys.argv[1], "w").write(u * ((M - 16) // len(u)))' "$_S16B_CP/mem-quote/CLAUDE.md"
+_s16b_proj "$_S16B_CP/mem-codegap"
+python3 -c 'import sys; M = 4194304; u = "    x\n" + "\n" * 1024; t = "@AGENTS.md\n"; open(sys.argv[1], "w").write(u * ((M - len(t)) // len(u)) + t)' "$_S16B_CP/mem-codegap/CLAUDE.md"
+_s16b_proj "$_S16B_CP/mem-lazy"
+python3 -c 'import sys; M = 4194304; u = "> q\n" + "p\n" * 1023; t = "    @AGENTS.md\n"; open(sys.argv[1], "w").write(u * ((M - len(t)) // len(u)) + t)' "$_S16B_CP/mem-lazy/CLAUDE.md"
+for _S16B_D in mem-code mem-quote mem-codegap mem-lazy; do
+  case $_S16B_D in
+    mem-code|mem-quote) _S16B_A=no-import ;;
+    *) _S16B_A=imports ;;
+  esac
+  _O=$(_s16b_rss "$_S16B_CP/$_S16B_D" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-$_S16B_D" "$_O" "^CLAUDE\.md${T}project${T}${_S16B_A},user-owned" '^rc=0$')$(_s16b_rssok "b-$_S16B_D" "$_O" "$_S16B_MEMMAX")"
+  _S16B_RSSV="${_S16B_RSSV}; ${_S16B_D}: detect $(printf '%s\n' "$_O" | sed -n 's/^rss=//p')"
+  rm -f "$_S16B_CP/$_S16B_D/CLAUDE.md"
+done
 [ "$_S16B_TIMEL" = 1 ] || _S16B_RSSV="SKIPPED (no /usr/bin/time -l)"
+# the chunk bounds (4.1): md_scan reads the lines of a quote (> lines, empty
+# > lines and lazy lines alike), lines of code and the lines of a paragraph
+# 1024 at a time (REP), going on from where a chunk stopped. b-rep-*:
+# imports whose answer turns on a quote going on across that bound, two
+# files a project (CLAUDE.md, CLAUDE.local.md), each answer the one Claude
+# Code's own import code gives: a > line holding the import indented after
+# 1023, 1024, 1025 or 2049 > lines; the import indented after 511 or 512
+# pairs of a > line and a lazy line, and after a > line and 1022, 1023,
+# 1024, 1025, 2047 or 2049 lazy lines: each a lazy line of the paragraph in
+# the quote, imports (where the import is line 1025, a quote stopped at the
+# bound would leave it code). Controls: the same after an empty > line is
+# code in the quote, no-import; after 1024 lines of code imports, and
+# indented after a line of code and 1025 blank lines no-import;
+# b-mem-codegap's and b-mem-lazy's shapes three times over (the last at the
+# bound three times), then the import: imports, but indented after the code
+# no-import
+_S16B_RP="$_S16B_W/rep"
+_S16B_RPS="q1023 q1025 alt lazy1022 lazy1024 lazy1025 empty code codegap lazygap"
+for _S16B_D in $_S16B_RPS; do _s16b_proj "$_S16B_RP/$_S16B_D"; done
+python3 -c '
+import sys
+I = "    @AGENTS.md\n"
+def q(n):
+    return "> q\n" * n + "> " + I
+def z(n):
+    return "> q\n" + "p\n" * n + I
+def a(n):
+    return "> q\np\n" * n + I
+def e(n):
+    return "> q\n" * n + ">\n> " + I
+F = {"q1023": (q(1023), q(1024)), "q1025": (q(1025), q(2049)), "alt": (a(511), a(512)),
+     "lazy1022": (z(1022), z(1023)), "lazy1024": (z(1024), z(2047)), "lazy1025": (z(1025), z(2049)),
+     "empty": (e(1023), e(1024)),
+     "code": ("    c\n" * 1024 + "@AGENTS.md\n", "    c\n" + "\n" * 1025 + I),
+     "codegap": (("    x\n" + "\n" * 1024) * 3 + "@AGENTS.md\n", ("    x\n" + "\n" * 1024) * 3 + I),
+     "lazygap": (("> q\n" + "p\n" * 1023) * 3 + I, ("> q\n" + "p\n" * 1024) * 3 + I)}
+for k, (x, y) in F.items():
+    open(sys.argv[1] + "/" + k + "/CLAUDE.md", "w").write(x)
+    open(sys.argv[1] + "/" + k + "/CLAUDE.local.md", "w").write(y)
+' "$_S16B_RP"
+for _S16B_D in $_S16B_RPS; do
+  case $_S16B_D in
+    empty) _S16B_A=no-import _S16B_B=no-import ;;
+    code|codegap) _S16B_A=imports _S16B_B=no-import ;;
+    *) _S16B_A=imports _S16B_B=imports ;;
+  esac
+  _O=$(_s16b "$_S16B_RP/$_S16B_D" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-rep-$_S16B_D" "$_O" "^CLAUDE\.md${T}project${T}${_S16B_A},user-owned${T}" "^CLAUDE\.local\.md${T}project${T}${_S16B_B},user-owned${T}" '^rc=0$')"
+done
+_S16_EV="${_S16_EV}B (4.1, rep): an import read only when a quote goes on across the 1024-line chunk bound (b-rep-*: after 1023 to 2049 > lines a > line holding it indented, after 511 and 512 pairs of a > line and a lazy line and after a > line and 1022 to 2049 lazy lines it indented: imports; after an empty > line: code, no-import; after 1024 lines of code imports, indented after 1025 blank lines no-import; the b-mem-codegap and b-mem-lazy shapes three times over, then it), each as Claude Code reads it; "
 
 # linear at 1 MiB (review round 5, R5-B): the shapes the reader took
 # quadratic time on at 5fcb6e0, each a 1 MiB CLAUDE.md importing AGENTS.md
@@ -12785,7 +13982,7 @@ for _S16B_D in front fence para script comment; do
   [ "$_S16B_T1" -lt 20 ] || _S16_FAIL="${_S16_FAIL} b-lin-$_S16B_D(stalled:${_S16B_T1}s)"
   _S16B_LINS="${_S16B_LINS} ${_S16B_D} ${_S16B_T1}s"
 done
-_S16_EV="${_S16_EV}B bounds and time (b-cap-*: past 40 nested quotes, past 40 list levels, a file of 4194305 bytes, one of 4194304 the line would take past that, past the step and the work bounds, @AGENTS.md ahead of each: no-import, hidden, the import refused rc 2 naming the bound, unchanged; 40 quotes, 40 levels, 4194304 bytes, 1% under the steps and 4% under the work import; a sparse 256 MiB CLAUDE.md read to 4194305 bytes, resident bytes: ${_S16B_RSSV}; b-lin-*: 1 MiB of front matter never closed, of ~ opening a fence, of ~ ending a paragraph, of </script> and of <!-- on a last line, each read whole and importing in${_S16B_LINS}); "
+_S16_EV="${_S16_EV}B bounds and time (b-cap-*: past 40 nested quotes, past 40 list levels, a file of 4194305 bytes, one of 4194304 the line would take past that, past the step and the work bounds, @AGENTS.md ahead of each: no-import,past-bound with the import column -, hidden naming the bound and offering no line, the import refused rc 2 naming the bound, unchanged; b-cap-agents and b-cap-config (4.1): a sparse 256 MiB AGENTS.md and Codex config.toml read to 4194305 bytes, the merge refused naming the size, Codex's visibility visible for the block in its first bytes and hidden over budget for one from byte 40000, hidden for a config it cannot read whole; b-cap-sum: one at a monorepo root counted at its true size under project_doc_max_bytes 10000000, hidden past byte 268435456 and a sibling's merge refused rc 3; b-mem-* (4.1): detect on 4 MiB of code and blank lines, of nested quote and list lines, of a line of code with 1024 blank lines after it and of a > line with 1023 lazy lines after it (those two importing on their last line), each under ${_S16B_MEMMAX} bytes resident; 40 quotes, 40 levels, 4194304 bytes, 1% under the steps and 4% under the work import; a sparse 256 MiB CLAUDE.md read to 4194305 bytes, resident bytes: ${_S16B_RSSV}; b-lin-*: 1 MiB of front matter never closed, of ~ opening a fence, of ~ ending a paragraph, of </script> and of <!-- on a last line, each read whole and importing in${_S16B_LINS}); "
 
 # rewrites (review round 6): round 5 rewrote five patterns for linear time,
 # each meant to match exactly what it matched before: FRONT, the ~~~ line
@@ -12852,6 +14049,7 @@ done
 _S16_FAIL="${_S16_FAIL}$(_s16b_same b-rw-controls-untouched "$_S16B_SUM" "$(_s16b_sum $_S16B_RWF)")"
 _S16_EV="${_S16_EV}B (review round 6): the five round-5 rewrites match what they matched before (b-rw-*: closed front matter, front matter with blank lines before its closing ---, a <script> block whose closing line holds three </script>, a ~~~ line ending a paragraph, an import in a second comment closed on the last line of a comment-opened HTML block: no-import, hidden with the fix, the line appended, then unchanged; a ~~~~ fence a ~~~ line cannot close: the import refused rc 2 naming the fence opened on line 2, unchanged; controls import: a --- block closed by --, the same front matter after a heading, the line after the </script> line, ~~, the import after the comment's end on its last line and after a <!-- left open there, a ~~~~ fence closed by ~~~~~); "
 _S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file), an import line written or offered only when it reads back as the project's import (b-space-*, a project path with whitespace, a tab too; b-tilde-*, a directory named ~ on the way down: the import into the CLAUDE.md above refused rc 2 before any plan, without and twice with --yes, unchanged; the import column -, visibility and session start naming the project's own CLAUDE.md alone; the .claude/CLAUDE.md beside it, whose @../~/proj/AGENTS.md reads back, still planned), an import read in Markdown text, its path whole (b-fence-*, b-name-*: one in a fence or padded code span, Read @AGENTS.md. or (see @AGENTS.md) is none: no-import, hidden with the fix, the line appended, then unchanged; a file ending in an open fence or comment, an import of c#app or app[1] from above: rc 2, unchanged; a plain line, one after a closed or list-indented fence, @AGENTS.md#setup import), an import in a link title is none (b-title-*: [x](a(b) \"t @AGENTS.md \"), [x](a\\) ..., the Markdown_(syntax) link, the image form, a (title), a title on the next line: no-import, hidden with the fix, the line appended, then unchanged; see @AGENTS.md and one after [y](a(b)c) import), one whose _ may pair as emphasis is none (b-emphasis-*: @_app/AGENTS.md with z_ in its paragraph no-import, hidden; in another paragraph imports, visible), the reader is linear (b-slow: 100 KB of ](, a 40 KB backslash run and 3000 <? before the import, read in ${_S16B_SLOW}s of the 20 s allowed) and bounded (b-bound: _INSTR_SECS=1 gives up on a python3 that ignores SIGTERM in 1 s + the 2 s SIGKILL grace, rc 137, nothing printed, the stub gone, under ${_S16B_BOUND} and the watchdog), an import a path takes in or a block hides is none (b-join-*: @x\\ @AGENTS.md; b-tail-*: <?x?><div>, <!x y><a>, two lines, a quote; b-tab-*: >\\t<div>, -\\t<div>: no-import, hidden, appended, unchanged; controls import), the block structure as marked lexes it (b-mk-*: a tag name ending its line, a > stripped from a code line, a lazy HTML line in a quote, a lazy fence ending a quote in a list item, a 2. after paragraph text, a closing tag over lines, an item ended before a definition title, a definition label over lines: no-import, hidden, appended, unchanged; one control per family imports); "
+_S16_EV="${_S16_EV}B (4.1, ccd): an absolute CLAUDE_CONFIG_DIR outside the project holds the user line (kind CLAUDE.md), its import makes the pointer visible, HOME's .claude/CLAUDE.md is above, the writers refuse it, its directory and ~/.claude (rc 2, with and without --yes), from a deleted working directory too; unset: HOME's .claude/CLAUDE.md the user line; empty, relative or the project: no user line, the pointer hidden; the writers refuse the file a set value names wherever it lies and its directory (relative cfg, the project itself, an empty value as the working directory, <project>/.claude absolute and relative), the project's other plans kept; a relative or empty value with the working directory gone refuses every write; siblings proj and proj2 each the user line of the other; "
 rm -rf "$_S16B"
 # --- end of SELF-16 section B ---
 # --- SELF-16 section C: at-setup's blocks and the headless primitives (U15) ---
@@ -13209,6 +14407,12 @@ mkdir -p "$_S27"
 #            lease.sh copy with one program's prelude dropped and planted
 #            programs appended, and a session-start.sh copy whose prelude
 #            differs, are flagged by line and by name
+#   maint    the same scan over the maintainer tools, which run without the
+#            library: scripts/*.sh outside scripts/lib/ (the validators, the
+#            release notes, the probe harness) and scripts/skill-locator/.
+#            Every program runs its tool's copy of the prelude first, each
+#            copy equals the library's, and a file that still has a program
+#            without it is named
 #   lead     from a lead checkout holding planted modules: resolve_role,
 #            roster_write_role and lease_create import none of them
 #   msg      roster_write_role's line names the model dispatch runs for an
@@ -13219,7 +14423,9 @@ mkdir -p "$_S27"
 #            marker, both leases reach review
 #   persona  an exec persona at that lease's snapshot (the planted modules in
 #            its worktree): the run supervisor imports none, rc 0
-#   fifo     a builder swaps the ledger for a FIFO while lease_wait polls:
+#   fifo     a builder swaps the ledger for a FIFO once lease_wait has polled
+#            (a shim marks the first poll, so the swap lands mid-wait, never
+#            before the dispatch wrote its own row, however slow the host):
 #            rc 44 within the bound, not a block; the root notice, the state
 #            read and the ledger check on a FIFO each return
 #   hook     session start and pre-compact in a project holding planted
@@ -13486,7 +14692,9 @@ for f, (raw, mk) in texts.items():
         if why:
             out.append(where + ":" + why)
 copies = 0
-for other, base in (("SS_PY_PRELUDE", "_PY_PRELUDE"), ("SS_READ_PY", "_READ_REGULAR_PY"), ("_INSTR_READ_PY", "_READ_REGULAR_PY")):
+for other, base in (("SS_PY_PRELUDE", "_PY_PRELUDE"), ("SS_READ_PY", "_READ_REGULAR_PY"), ("_INSTR_READ_PY", "_READ_REGULAR_PY"),
+                    ("VS_PY_PRELUDE", "_PY_PRELUDE"), ("VV_PY_PRELUDE", "_PY_PRELUDE"), ("RN_PY_PRELUDE", "_PY_PRELUDE"),
+                    ("PROBE_PY_PRELUDE", "_PY_PRELUDE")):
     if other in defs:
         copies += 1
         a, b = expand(other), expand(base)
@@ -13547,6 +14755,19 @@ _S27_FAIL="${_S27_FAIL}$(_self_expect static-negative "$O" '^drift:SS_PY_PRELUDE
   || _S27_FAIL="${_S27_FAIL} static-negative(want-4-session-start-programs-flagged;got:$(printf '%s\n' "$O" | grep -c '^session-start\.sh:' || true))"
 _S27_EV="${_S27_EV}static: ${_S27_N:-?} programs, every one prelude-first, 6 file runs, 3 copies equal; the planted lease.sh lines and the changed session-start.sh copy flagged; "
 
+# maint: the maintainer tools. coordinate.sh loads the library and is in the
+# static list above. probe-self-tests.sh is not scanned: its programs are the
+# SELF cases' own code and run on fixtures the cases create.
+( cd "$REPO_ROOT" && { printf '%s\n' scripts/lib/common.sh; ls scripts/*.sh scripts/skill-locator/*.sh | grep -vx -e scripts/coordinate.sh -e scripts/probe-self-tests.sh; } ) > "$_S27/maint"
+O=$(_s27_scan "$REPO_ROOT" "$_S27/maint")
+_S27_N=$(printf '%s\n' "$O" | sed -n 's/^files=[0-9]* programs=\([0-9]*\) .*/\1/p')
+_S27_GOT=$(printf '%s\n' "$O" | grep -v '^files=' | sed 's/^\(scripts\/[^:]*\):.*/\1/' | awk '!s[$0]++' | tr '\n()' ' []' | cut -c1-500)
+if [ -n "$_S27_GOT" ] || [ "${_S27_N:-0}" -lt 40 ]; then
+  _S27_FAIL="${_S27_FAIL} maint(want-40+-programs-every-one-prelude-first;got-${_S27_N:-?}-programs,flagged:${_S27_GOT% })"
+fi
+_S27_FAIL="${_S27_FAIL}$(_self_expect maint "$O" '^files=[0-9]+ programs=[0-9]+ file-runs=4 copies=4$')"
+_S27_EV="${_S27_EV}maint: ${_S27_N:-?} programs in the validators, the release notes and the probe harness, every one after its tool's prelude copy, 4 file runs, 4 copies equal; "
+
 # _s27_plant <dir> <marker> <module>... — a module per name that appends
 # "<name> <cwd>" to <marker> when imported
 _s27_plant() {
@@ -13579,14 +14800,15 @@ S27_CLAUDE_EOF
 printf '#!/bin/sh\necho "0.0.0-probe-stub"\n' > "$_S27/bin/kimi"
 # The fake builder: plants the modules in its worktree, then reports — as a
 # kimi stream for "s27-stream", after swapping the lead's ledger for a FIFO
-# for "s27-fifo" (lease_wait polls meanwhile)
+# for "s27-fifo" once the lead's lease_wait has polled (tmp/s27-fifo.polled, 30 s at most)
 cat > "$_S27/fb.sh" <<S27_FB_EOF
 #!/bin/sh
 # probe builder (SELF-27)
 cp "$_S27/plant-wt/"*.py .
 case "\$1" in
   *s27-stream*) printf '%s\n' '{"role":"assistant","id":"m1","content":"Done.\\n\\nStatus: DONE\\nFiles changed: json.py\\nTests: none\\nConcerns: None\\nDiscoveries for later tasks: None\\n"}' ;;
-  *s27-fifo*) sleep 2; L="$_S27/ff/ops/leases.toml"; mv "\$L" "\$L.s27"; mkfifo "\$L"; sleep 3; echo "Status: DONE" ;;
+  *s27-fifo*) N=0; while [ ! -f "$_S27/tmp/s27-fifo.polled" ] && [ "\$N" -lt 300 ]; do sleep 0.1; N=\$((N + 1)); done
+    L="$_S27/ff/ops/leases.toml"; mv "\$L" "\$L.s27"; mkfifo "\$L"; sleep 3; echo "Status: DONE" ;;
   *) echo "planted"; echo "Status: DONE" ;;
 esac
 S27_FB_EOF
@@ -13661,7 +14883,9 @@ _s27_fifo_off() { # put the saved ledger back where a FIFO stands (a blocked rea
 }
 O=$(_s27_bounded 20 'lease_create f1 builder >/dev/null 2>&1 && lease_dispatch f1 "s27-fifo probe" 60 >/dev/null 2>&1; echo "dispatch:rc=$?"')
 O="$O
-$(_s27_bounded 40 'S=$(date +%s); R=0; lease_wait f1 --budget 25 >/dev/null 2>"$TMPDIR/s27-wait.err" || R=$?; echo "wait:rc=$R:secs=$(( $(date +%s) - S )):named=$(grep -c "ops/leases.toml" "$TMPDIR/s27-wait.err" || true)"')"
+$(_s27_bounded 40 'eval "_s27_sweep_poll() $(declare -f _lease_sweep_one | sed 1d)"
+_lease_sweep_one() { if [ "${4:-}" = poll ]; then : > "$TMPDIR/s27-fifo.polled"; fi; _s27_sweep_poll "$@"; }
+S=$(date +%s); R=0; lease_wait f1 --budget 25 >/dev/null 2>"$TMPDIR/s27-wait.err" || R=$?; echo "wait:rc=$R:secs=$(( $(date +%s) - S )):named=$(grep -c "ops/leases.toml" "$TMPDIR/s27-wait.err" || true)"')"
 _s27_fifo_off
 _s27_lead "$_S27/ff" '_self_wait_rc f1' >/dev/null
 L="$_S27/ff/ops/leases.toml"
@@ -13707,7 +14931,7 @@ if printf '%s\n' "$O" | grep -q 'hook crashed'; then _S27_FAIL="${_S27_FAIL} hoo
 _S27_EV="${_S27_EV}hook: session start and pre-compact in a project holding 16 planted modules: rc 0, the member count, the active-lease line and the lease snapshot printed, no marker"
 unset O R L _S27_N _S27_M _S27_L _S27_GOT _S27_WANT _S27_MODS
 # --- end of SELF-27 cases ---
-_S27_CAP="inline python ignores modules planted in the cwd: every inline program starts with the shared prelude, the lease lane parsers run after a builder planted json.py in its worktree, session start in a project with a planted tomllib.py, the ledger readers on a FIFO (S1, Phase 6)"
+_S27_CAP="inline python ignores modules planted in the cwd: every inline program starts with the shared prelude (the maintainer tools' too), the lease lane parsers run after a builder planted json.py in its worktree, session start in a project with a planted tomllib.py, the ledger readers on a FIFO (S1, Phase 6)"
 if [ -z "$_S27_EV" ]; then _S27_FAIL="${_S27_FAIL} cases(no-case-ran)"; fi
 if [ -z "$_S27_FAIL" ]; then
   row "SELF-27" "claude" "$_S27_CAP" "PASS" "$(printf '%s' "$_S27_EV" | cut -c1-3000)" "static"

@@ -446,6 +446,30 @@ _CLAUDE_TOOLS_WEB="WebFetch,WebSearch"
 # (~/.local/share/devin; `devin auth status` names the file; CC-25)
 _CLAUDE_CRED_PATHS="~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.git-credentials ~/.config/gh ~/.config/gcloud ~/.azure ~/.kube ~/.docker/config.json ~/.codex ~/.gemini ~/.kimi-code ~/.local/share/opencode ~/.cursor ~/.grok ~/.devin ~/.config/devin ~/.claude/.credentials.json ~/.local/share/devin"
 
+# _claude_config_cred — the .credentials.json in Claude Code's config home
+# when CLAUDE_CONFIG_DIR moves that home out of ~/.claude: Claude Code 2.1.296
+# keeps a stored login there, not in ~/.claude, once the variable is set, so
+# the claude lane's deny rules and the codex read persona's profile deny it
+# beside _CLAUDE_CRED_PATHS. A relative value names a directory relative to
+# wherever Claude Code started, which a helper cannot know for sure: it is
+# taken from this shell's working directory, the lead's, so the deny fails
+# closed rather than open. An empty one names that directory itself (Claude
+# Code keeps it: $CLAUDE_CONFIG_DIR ?? ~/.claude), so it is taken the same
+# way; unset prints nothing (~/.claude, which _CLAUDE_CRED_PATHS already
+# denies). Each consumer also denies the path with every symlink resolved
+# (os.path.realpath), since a rule on one spelling may not match the other
+# (/tmp is /private/tmp on macOS).
+_claude_config_cred() {
+  if [ -z "${CLAUDE_CONFIG_DIR+x}" ]; then
+    return 0
+  fi
+  case "$CLAUDE_CONFIG_DIR" in
+    "") printf '%s/.credentials.json\n' "${PWD%/}" ;;
+    /*) printf '%s/.credentials.json\n' "${CLAUDE_CONFIG_DIR%/}" ;;
+    *) printf '%s/%s/.credentials.json\n' "${PWD%/}" "${CLAUDE_CONFIG_DIR%/}" ;;
+  esac
+}
+
 # _claude_sandbox_floor_ok — 0 when the claude worker lane may run here: its
 # sandbox is off (TRIFORGE_CLAUDE_SANDBOX=off: no OS confinement, the
 # disclosed opt-out), or `claude --version` reads at or above
@@ -518,7 +542,8 @@ _claude_sandbox_refusal() {
 # fail-closed when the sandbox can't start, with no unsandboxed retry;
 # <deny-write> (the lead's git common dir, which the sandbox otherwise opens to
 # a worktree's git; for the read classes the working directory itself) and the
-# credential paths are blocked, the latter also for the Read tool.
+# credential paths (_CLAUDE_CRED_PATHS, plus _claude_config_cred) are blocked,
+# the latter also for the Read tool.
 # TRIFORGE_CLAUDE_SANDBOX=off runs Bash without the sandbox, and then a claude
 # worker with Bash has no OS confinement; the read class drops Bash there,
 # while persona-exec keeps it (its working directory is a disposable worktree,
@@ -558,12 +583,19 @@ _claude_lane_argv() {
   # approves exactly that set; edit approves Bash and Skill, its edits riding
   # acceptEdits inside the working directory.
   if [ "$CLASS" = edit ]; then ALLOW=$_CLAUDE_ALLOW_EDIT; else ALLOW=$TOOLS; fi
-  SETTINGS=$(CL_SBX="$SBX" CL_CRED="$_CLAUDE_CRED_PATHS" python3 -c "${_PY_PRELUDE}"'
+  SETTINGS=$(CL_SBX="$SBX" CL_CRED="$_CLAUDE_CRED_PATHS" CL_OWN="$(_claude_config_cred)" python3 -c "${_PY_PRELUDE}"'
 import json, os, sys
 cred = os.environ["CL_CRED"].split()
 deny = []
 for p in cred:
     deny += ["Read(" + p + ")", "Read(" + p + "/**)"]
+for own in [p for p in os.environ["CL_OWN"].split("\n") if p]:
+    # an absolute path, as given and with its symlinks resolved, which a
+    # Read rule spells with // (a rule with one / is relative to the settings
+    # file); the sandbox takes it as it is
+    for p in dict.fromkeys([own, os.path.realpath(own)]):
+        deny += ["Read(/" + p + ")", "Read(/" + p + "/**)"]
+        cred.append(p)
 s = {"permissions": {"deny": deny}}
 if os.environ["CL_SBX"] == "on":
     s["sandbox"] = {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,

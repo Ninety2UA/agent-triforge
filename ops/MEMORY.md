@@ -199,6 +199,50 @@
       printf "$fmt" on caller text needs printf --. Every srun.sh run leaves a
       triforge-self-only-*.md record in the user's TMPDIR, and they pile up.
 
+- Worker discoveries (4.1.0 residual fixes, 2026-10-13), UNVERIFIED, recorded by the lead from the workers' reports:
+
+      fix worker A1: md_scan's peak memory came from Python's regex engine (a frame
+      per iteration of a repeated group, about 200 to 600 bytes, kept resident on
+      macOS), up to 5.2 GB on one 4 MiB shape; long-span patterns now read in bounded
+      chunks. Workers A1, A1c and C stopped responding mid-run, most likely on a
+      permission prompt nobody could answer overnight: an `rm -rf` on a variable path
+      and an ad-hoc `bash -c` that sources the library both ask for approval.
+      fix worker A2: GNU timeout 9.11 covers a fork only when the launcher also holds
+      out until the KILL; when the launcher dies on TERM, timeout returns 124 at once
+      and a TERM-ignoring child keeps the caller's stdout open (fixed in 4.1: both
+      timeout paths sweep the group). Without perl, both watchdogs stop the pid alone.
+      fix worker B: README.md:74 (the 3.3.3 notes) and docs/rule-inventory.md row 67
+      list the integrity surfaces without the promotion target (history). After a
+      promotion into an explicit target the checkout stays on that target, so a
+      lease_create there records the target as the integration branch (read from the
+      code, not tested).
+      fix worker D1: .github/workflows/release.yml line 51 runs python3 -c without
+      the prelude (a planted json.py would have to be committed on main); the prelude
+      comment in scripts/lib/common.sh names only the hook copies.
+      fix worker DG: Chrome 154 headless --screenshot writes the file and does not
+      exit; scripts must wait for the file and stop it. The Edit tool can drop a
+      trailing space at the end of new_string; anchor short edits on following text.
+
+- Worker discoveries (4.1.0 review fix round, 2026-10-13), UNVERIFIED, recorded by the lead from the workers' reports:
+
+      fix worker rm: three SELF-16 runs started together on one machine (two trees)
+      all failed b-detect-zsh(differs) at its line 12316, each passing alone; some
+      state or timing is shared between concurrent SELF-16 runs. Python's re keeps a
+      frame per pass of a repeated group, so a bounded repeat inside another bounded
+      repeat multiplies the frames (1.5 GiB in one match over 4 MiB); a repeat of one
+      character class keeps none. /usr/bin/python3 3.9 lacks atomic groups.
+      fix worker rl: _self_try and srun.sh cut stderr and the mismatch list at 900
+      characters, so a long refusal or many failing cases need a debug copy to read.
+      git 2.48 and later may create a missing refs/remotes/origin/HEAD on fetch
+      (remote.<name>.followRemoteHEAD): with no default branch on record that now
+      stops lease calls with rc 44 until lease_rebaseline.
+      fix worker rc: with CLAUDE_CONFIG_DIR inside the project, detect and visibility
+      list that CLAUDE.md as a project file, so visibility can offer
+      instruction_add_import for a file the writer then refuses with rc 2.
+      lead: Claude Code 2.1.296 keeps an empty CLAUDE_CONFIG_DIR
+      (be = CLAUDE_CONFIG_DIR ?? ~/.claude), so its user memory is the CLAUDE.md in
+      its working directory; other call sites (|| and Boolean()) treat empty as unset.
+
 ## Interface proposals
 <!-- No active proposals -->
 

@@ -414,13 +414,24 @@ _persona_body() {
 # instruction and settings files Claude Code and Codex take as the project's)
 # and no instruction file Claude Code or Codex reads from an ancestor
 # (AGENTS.md, AGENTS.override.md, CLAUDE.md, CLAUDE.local.md, .claude/CLAUDE.md;
-# $HOME/.claude/CLAUDE.md is the user's own memory, skipped as session start
-# skips it). Else one stderr line naming what is there, rc 69. For an exec run
-# <dir> is the worktree itself, whose own .git is expected.
+# the user's own memory is skipped, as session start skips it: the CLAUDE.md
+# in Claude Code's config home, $CLAUDE_CONFIG_DIR when that is an absolute
+# path, ~/.claude when it is unset, none when it is empty or relative, the way
+# tier_home in instructions.sh reads the variable; compared by identity, so a
+# link on the way to it matches too. Once the config home moves,
+# ~/.claude/CLAUDE.md is a file like any other). Else one stderr line naming
+# what is there, rc 69. For an exec run <dir> is the worktree itself, whose
+# own .git is expected.
 _persona_guard_ancestors() {
   local WHO=$1 D F HOME_MEM=""
   D=$(cd "$2" && pwd -P) || return 69
-  if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then HOME_MEM="$(cd "$HOME" && pwd -P)/.claude/CLAUDE.md"; fi
+  if [ -z "${CLAUDE_CONFIG_DIR+x}" ]; then
+    if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then HOME_MEM="$(cd "$HOME" && pwd -P)/.claude/CLAUDE.md"; fi
+  else
+    case "$CLAUDE_CONFIG_DIR" in
+      /*) HOME_MEM="$(cd "$CLAUDE_CONFIG_DIR" 2>/dev/null && pwd -P)/CLAUDE.md" || HOME_MEM="" ;;
+    esac
+  fi
   while [ -n "$D" ] && [ "$D" != / ]; do
     D=${D%/*}
     if [ -z "$D" ]; then D=/; fi
@@ -429,7 +440,7 @@ _persona_guard_ancestors() {
       return 69
     fi
     for F in AGENTS.md AGENTS.override.md CLAUDE.md CLAUDE.local.md .claude/CLAUDE.md; do
-      if [ -f "${D%/}/${F}" ] && [ "${D%/}/${F}" != "$HOME_MEM" ]; then
+      if [ -f "${D%/}/${F}" ] && ! [ "${D%/}/${F}" -ef "$HOME_MEM" ]; then
         echo "${WHO}: REFUSED — ${D%/}/${F} sits above the persona's working directory ($2), and Claude Code and Codex read it as instructions; remove it, or point TMPDIR (and TRIFORGE_LEASE_ROOT) somewhere without one, then rerun (KTD20)" >&2
         return 69
       fi
@@ -652,26 +663,34 @@ _persona_safe_mode_ok() {
 # sandbox on codex: a permission profile (codex 0.160: default_permissions and
 # [permissions.<name>]) that extends codex's own :read-only and denies the
 # claude lane's credential paths (_CLAUDE_CRED_PATHS, "~" spelled out from this
-# HOME, the one _adapter_env forwards), so a codex read persona reads no
-# credential file and writes nothing. It still reads the rest of the disk, as
-# every codex worker does. No -s rides with it: -s replaces the profile
+# HOME, the one _adapter_env forwards, and _claude_config_cred), so a codex
+# read persona reads no credential file and writes nothing. It still reads
+# the rest of the disk, as every codex worker does. No -s rides with it: -s
+# replaces the profile
 # (measured on 0.160: the denied file read back), while a sandbox_mode in the
 # user's config.toml does not (measured: still denied); probe row CDX-20 asks
 # the persona to read a credential file. Each path is a TOML string written by
-# json.dumps. rc 1 with no HOME to spell "~" from.
+# json.dumps, and each appears once, since a key given twice makes the table
+# invalid TOML (CLAUDE_CONFIG_DIR=~/.claude names ~/.claude/.credentials.json
+# again). rc 1 with no HOME to spell "~" from.
 _PERSONA_CODEX_PROFILE=()
 _persona_codex_profile() {
   local F
-  F=$(PC_CRED="$_CLAUDE_CRED_PATHS" PC_HOME="${HOME:-}" python3 -c "${_PY_PRELUDE}"'
+  F=$(PC_CRED="$_CLAUDE_CRED_PATHS" PC_OWN="$(_claude_config_cred)" PC_HOME="${HOME:-}" python3 -c "${_PY_PRELUDE}"'
 import json, os
-home, out = os.environ["PC_HOME"].rstrip("/"), []
+home, paths = os.environ["PC_HOME"].rstrip("/"), []
 for p in os.environ["PC_CRED"].split():
     if p.startswith("~/"):
         if not home:
             raise SystemExit(1)
         p = home + p[1:]
-    out.append(json.dumps(p) + "=\"deny\"")
-print("{" + ",".join(out) + "}")
+    paths.append(p)
+for own in [p for p in os.environ["PC_OWN"].split("\n") if p]:
+    # as given and with its symlinks resolved (_claude_config_cred)
+    paths += [own, os.path.realpath(own)]
+# each path once: a config home that is ~/.claude itself, or a link to it,
+# names ~/.claude/.credentials.json again, and TOML refuses a key given twice
+print("{" + ",".join(json.dumps(p) + "=\"deny\"" for p in dict.fromkeys(paths)) + "}")
 ') || return 1
   _PERSONA_CODEX_PROFILE=(-c 'default_permissions="triforge_persona"' -c 'permissions.triforge_persona.extends=":read-only"'
                           -c "permissions.triforge_persona.filesystem=${F}")
