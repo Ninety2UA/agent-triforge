@@ -3,7 +3,7 @@ name: at-status
 description: "Use when you need the sprint's phase, task counts, blockers, pending reviews and uncommitted changes in one report."
 metadata:
   triforge-consumer: "lead"
-  version: "4.0.0"
+  version: "4.1.0"
 ---
 
 # Sprint Status
