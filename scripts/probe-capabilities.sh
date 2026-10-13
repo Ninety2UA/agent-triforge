@@ -413,7 +413,10 @@ LANECLAUDE
 [ "${#LANE_CLAUDE[@]}" -gt 0 ] || { echo "probe-capabilities: FATAL — could not read _ADAPTER_ENV_CLAUDE from scripts/lib/lease.sh through scripts/invoke-external.sh" >&2; exit 1; }
 _lane_run_claude() { # _lane_run_claude <seconds> <cmd...>
   local SECS=$1; shift
-  _lane_run "$SECS" env "${LANE_CLAUDE[@]}" "$@"
+  # and an absolute CLAUDE_CONFIG_DIR, as _adapter_env's claude arm keeps it
+  local -a C=()
+  case "${CLAUDE_CONFIG_DIR:-}" in /*) C=("CLAUDE_CONFIG_DIR=${CLAUDE_CONFIG_DIR}") ;; esac
+  _lane_run "$SECS" env "${LANE_CLAUDE[@]}" ${C[@]+"${C[@]}"} "$@"
 }
 
 # _lane_argv_words <kind> <cli> <_lease_lane_argv arguments after the cli> —
@@ -2886,8 +2889,8 @@ fi
 # every variable present. PASS needs marker=builder, the shipped hooks path,
 # all five rewrites, the push refused and the remote without refs; the names
 # the boundary did not set are listed for the disclosure. CC-19 also fails when
-# a name from the user tier's settings env block (~/.claude/settings.json,
-# read only) reached the tool shell: the lane's --setting-sources
+# a name from the user tier's settings env block (settings.json in an
+# absolute CLAUDE_CONFIG_DIR, else ~/.claude; read only) reached the tool shell: the lane's --setting-sources
 # project,local must keep it out. These rows read the
 # user's real git config (read-only, a dry run to a local remote): the
 # boundary keeps HOME. agy auto-denies RunCommand headless without a user-tier
@@ -2958,10 +2961,13 @@ if _want CC-19; then
     O="$WORK/u12-np-cc.out"
     # The names in the user tier's settings env block (read, never written):
     # --setting-sources project,local must keep every one out of the worker.
+    # The worker's user tier is an absolute CLAUDE_CONFIG_DIR, which
+    # _adapter_env hands it, else ~/.claude.
     U12_USERENV=$(python3 -c "${PROBE_PY_PRELUDE}"'
 import json, os
+c = os.environ.get("CLAUDE_CONFIG_DIR", "")
 try:
-    env = json.load(open(os.path.expanduser("~/.claude/settings.json"))).get("env") or {}
+    env = json.load(open(os.path.join(c, "settings.json") if c.startswith("/") else os.path.expanduser("~/.claude/settings.json"))).get("env") or {}
 except Exception:
     env = {}
 print(" ".join(k for k in env if isinstance(k, str)))

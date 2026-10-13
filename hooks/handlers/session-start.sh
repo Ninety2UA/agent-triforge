@@ -551,7 +551,7 @@ fi
 # Upgrade notices (R40). Triforge 4 ships AGENTS.md only — no CLAUDE.md, no
 # template for one. Claude Code reads AGENTS.md from 2.1.277, and only while no
 # CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working
-# directory or above it (the user-tier ~/.claude/CLAUDE.md does not count); a
+# directory or above it (the user tier does not count: ~/.claude/CLAUDE.md, or the CLAUDE.md in an absolute CLAUDE_CONFIG_DIR outside the project); a
 # CLAUDE.md that imports it (`@AGENTS.md`) loads it on every build. Four
 # states leave a Claude lead without it, and each gets one line:
 #   floor   `claude --version` below 2.1.277
@@ -621,7 +621,7 @@ fi
 # The instruction files: one read-only pass of instruction_files_detect over
 # the start directory, each directory above it and the user tier, a line each
 # (kind, where, state, path, the import line that would load this project's
-# AGENTS.md; ~/.claude/CLAUDE.md is "user", by identity, never "above"). One
+# AGENTS.md; the user tier, which tier_home in instructions.sh places, is "user" by identity, never "above"). One
 # import of the project's AGENTS.md in the chain (the user tier too: Claude
 # Code always loads it) silences the own and above lines; a 3.x copy without
 # it is named anyway, its Triforge text stale. Only CLAUDE.md and .claude/

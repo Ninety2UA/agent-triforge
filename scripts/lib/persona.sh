@@ -652,9 +652,10 @@ _persona_safe_mode_ok() {
 # sandbox on codex: a permission profile (codex 0.160: default_permissions and
 # [permissions.<name>]) that extends codex's own :read-only and denies the
 # claude lane's credential paths (_CLAUDE_CRED_PATHS, "~" spelled out from this
-# HOME, the one _adapter_env forwards), so a codex read persona reads no
-# credential file and writes nothing. It still reads the rest of the disk, as
-# every codex worker does. No -s rides with it: -s replaces the profile
+# HOME, the one _adapter_env forwards, and _claude_config_cred), so a codex
+# read persona reads no credential file and writes nothing. It still reads
+# the rest of the disk, as every codex worker does. No -s rides with it: -s
+# replaces the profile
 # (measured on 0.160: the denied file read back), while a sandbox_mode in the
 # user's config.toml does not (measured: still denied); probe row CDX-20 asks
 # the persona to read a credential file. Each path is a TOML string written by
@@ -662,7 +663,7 @@ _persona_safe_mode_ok() {
 _PERSONA_CODEX_PROFILE=()
 _persona_codex_profile() {
   local F
-  F=$(PC_CRED="$_CLAUDE_CRED_PATHS" PC_HOME="${HOME:-}" python3 -c "${_PY_PRELUDE}"'
+  F=$(PC_CRED="$_CLAUDE_CRED_PATHS" PC_OWN="$(_claude_config_cred)" PC_HOME="${HOME:-}" python3 -c "${_PY_PRELUDE}"'
 import json, os
 home, out = os.environ["PC_HOME"].rstrip("/"), []
 for p in os.environ["PC_CRED"].split():
@@ -671,6 +672,8 @@ for p in os.environ["PC_CRED"].split():
             raise SystemExit(1)
         p = home + p[1:]
     out.append(json.dumps(p) + "=\"deny\"")
+if os.environ["PC_OWN"]:
+    out.append(json.dumps(os.environ["PC_OWN"]) + "=\"deny\"")
 print("{" + ",".join(out) + "}")
 ') || return 1
   _PERSONA_CODEX_PROFILE=(-c 'default_permissions="triforge_persona"' -c 'permissions.triforge_persona.extends=":read-only"'

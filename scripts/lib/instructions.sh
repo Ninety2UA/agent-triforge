@@ -16,7 +16,13 @@
 # "instructions" (KTD1), so nothing here branches on a CLI:
 #   claude-md-shadow  reads AGENTS.md (cwd and every directory above) only while
 #     no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working
-#     directory or above it; ~/.claude/CLAUDE.md, the user tier, does not count.
+#     directory or above it; the user tier does not count: CLAUDE.md in
+#     Claude Code's config home, $CLAUDE_CONFIG_DIR when that is an absolute
+#     path outside the project, ~/.claude when it is unset, and none when it
+#     is empty, relative or in the project (tier_home), so a project file is
+#     never taken for the user's. Once the config home moves, Claude Code
+#     2.1.296 loads ~/.claude/CLAUDE.md as a project file at HOME, and so it
+#     is a file above the project here too.
 #     A CLAUDE.md-family file that imports AGENTS.md (an `@AGENTS.md` token,
 #     its path relative to the file holding it) loads it with the file. The
 #     token counts only in Markdown text, where Claude Code reads imports:
@@ -64,7 +70,8 @@
 # returns 0 without asking. Lead-only: a lease worker or a lease root is
 # refused (rc 45, _lead_only --any-host when the loader is in scope, else the
 # worker marker). Every reader's user-level files (user_owned: the user tier
-# under HOME, the user-level file and its override in the reader home) are
+# under HOME and the one in $<home_env> that tier_home takes, the user-level
+# file and its override in the reader home) are
 # read, never written: each writer refuses one, or any file in the directory
 # of one, before any plan and also with --yes (rc 2), by identity, or by the
 # physical path for a file that does not exist yet. HOME and every directory
@@ -356,8 +363,8 @@ PUNCT = re.compile(rb"[!-/:-@\[-`{-~]")
 # "instructions" (KTD1). Data only, keyed by reader, never by CLI:
 #   shadow       the files at the cwd or above (up to /) that hide AGENTS.md
 #                unless one of them imports it
-#   user_tier    that family under HOME: always loaded, never a shadow, its
-#                imports count
+#   user_tier    the file of that family in the reader home (tier_home):
+#                always loaded, never a shadow, its imports count
 #   home_env, home_default  the reader home: $<home_env>, else HOME/<default>
 #   user_level   the file taken from that home before the project files
 #   override     the file that replaces AGENTS.md at its level
@@ -369,8 +376,8 @@ PUNCT = re.compile(rb"[!-/:-@\[-`{-~]")
 #                that value gets no project AGENTS.md ("": no trust rule)
 READERS = {
     "claude-md-shadow": {
-        "shadow": CLAUDE_KINDS, "user_tier": ".claude/CLAUDE.md",
-        "home_env": "", "home_default": "", "user_level": "", "override": "", "root_marker": "",
+        "shadow": CLAUDE_KINDS, "user_tier": "CLAUDE.md",
+        "home_env": "CLAUDE_CONFIG_DIR", "home_default": ".claude", "user_level": "", "override": "", "root_marker": "",
         "budget": 0, "budget_key": "", "config": "",
         "trust_table": "", "trust_key": "", "untrusted": "",
     },
@@ -412,6 +419,23 @@ def reader_home(r):
     if r["home_env"] and os.environ.get(r["home_env"], ""):
         return os.path.abspath(os.environ[r["home_env"]])
     return os.path.join(home(), r["home_default"]) if r["home_default"] and home() else ""
+
+
+def tier_home(r, project):
+    # the directory the reader takes its user tier from: $<home_env> as set
+    # when it is an absolute path that is neither project nor below it,
+    # HOME/<home_default> when it is unset, else "" (no user tier). Claude
+    # Code 2.1.296 reads CLAUDE.md from $CLAUDE_CONFIG_DIR in place of
+    # ~/.claude when the variable is set; an empty or relative value names a
+    # directory relative to where it started, and one in the project makes a
+    # project file its user memory, so neither counts: the files there stay
+    # project files (shadows the writers may plan for), and no user tier
+    # import counts
+    if r["home_env"] not in os.environ:
+        return os.path.join(home(), r["home_default"]) if r["home_default"] and home() else ""
+    h = os.environ[r["home_env"]]
+    p = os.path.realpath(h) if h.startswith("/") else ""
+    return h if p and p != project and not p.startswith(project.rstrip("/") + "/") else ""
 
 
 def lexists(p):
@@ -1873,23 +1897,27 @@ def reads_back(path, line, target):
     return imports(path, os.fsencode(line), {os.path.realpath(target)})
 
 
-def user_tiers():
-    return [os.path.join(home(), r["user_tier"]) for r in READERS.values() if r["user_tier"] and home()]
+def user_tiers(project):
+    # the user tier of each reader for project (tier_home), present or not
+    return [os.path.join(tier_home(r, project), r["user_tier"]) for r in READERS.values() if r["user_tier"] and tier_home(r, project)]
 
 
-def is_user_tier(path):
-    return lexists(path) and any(lexists(u) and same_file(path, u) for u in user_tiers())
+def is_user_tier(path, project):
+    return lexists(path) and any(lexists(u) and same_file(path, u) for u in user_tiers(project))
 
 
-def user_files():
+def user_files(project):
     # (path, label) of every file a reader takes from the directories of the
-    # user, from READERS: its user tier under HOME, then its user-level file
-    # and override in its reader home ($<home_env> honored, as reader_home
-    # does)
+    # user, from READERS: its user tier under HOME, which stays theirs when
+    # $<home_env> moves it, and the one there that tier_home takes for
+    # project; then its user-level file and override in its reader home
+    # ($<home_env> honored, as reader_home does)
     files = []
     for r in READERS.values():
         if r["user_tier"] and home():
-            files.append((os.path.join(home(), r["user_tier"]), "user-tier ~/" + r["user_tier"]))
+            files.append((os.path.join(home(), r["home_default"], r["user_tier"]), "user-tier ~/" + r["home_default"] + "/" + r["user_tier"]))
+        if r["user_tier"] and r["home_env"] in os.environ and tier_home(r, project):
+            files.append((os.path.join(tier_home(r, project), r["user_tier"]), "user-tier $" + r["home_env"] + "/" + r["user_tier"]))
         rh = reader_home(r)
         if not rh:
             continue
@@ -1898,13 +1926,13 @@ def user_files():
     return files
 
 
-def user_owned(path):
+def user_owned(path, project):
     # why no writer may write path ("" when one may): it is, or would be, one
-    # of user_files, or it sits in the directory of one. same_file
+    # of user_files for project, or it sits in the directory of one. same_file
     # compares by identity where both exist (a hard link; a link to the file
     # or to its directory) and by physical path where one does not, so an
     # absent target is caught too
-    files = user_files()
+    files = user_files(project)
     for u, label in files:
         if same_file(path, u):
             return path + " is your " + label + ", which Triforge reads and never writes; edit it yourself"
@@ -1986,12 +2014,18 @@ def detect(fn, start):
         where = "project" if level == project else "above"
         for kind in CLAUDE_KINDS + AGENTS_KINDS:
             path = os.path.join(level, kind)
-            if not lexists(path) or is_user_tier(path):
+            if not lexists(path) or is_user_tier(path, project):
                 continue
             out(row(kind, where, path, level, project))
     for r in READERS.values():
-        if r["user_tier"] and home() and lexists(os.path.join(home(), r["user_tier"])):
-            out(row(r["user_tier"], "user", os.path.join(home(), r["user_tier"]), home(), project))
+        th = tier_home(r, project) if r["user_tier"] else ""
+        if th and lexists(os.path.join(th, r["user_tier"])):
+            # named as the walk names it: ~/.claude/CLAUDE.md is the kind
+            # .claude/CLAUDE.md at HOME, $CLAUDE_CONFIG_DIR/CLAUDE.md the kind
+            # CLAUDE.md there unless that directory is a .claude too
+            sub = os.path.basename(th.rstrip("/")) + "/" + r["user_tier"]
+            kind, level = (sub, os.path.dirname(th.rstrip("/"))) if sub in CLAUDE_KINDS else (r["user_tier"], th)
+            out(row(kind, "user", os.path.join(th, r["user_tier"]), level, project))
         rh = reader_home(r) if r["user_level"] else ""
         for kind in AGENTS_KINDS:
             if rh and kind in (r["user_level"], r["override"]) and lexists(os.path.join(rh, kind)):
@@ -2143,13 +2177,13 @@ def reach(lead, r, cwd):
         for level in levels_up(cwd):
             for kind in r["shadow"]:
                 p = os.path.join(level, kind)
-                if lexists(p) and not is_user_tier(p):
+                if lexists(p) and not is_user_tier(p, cwd):
                     shadows.append((p, kind, level))
         if not shadows:
             tail += ": no " + kind_names(r["shadow"]) + " at " + cwd + " or above"
         else:
             loaded = {}
-            for p in [s[0] for s in shadows] + [u for u in user_tiers() if lexists(u)]:
+            for p in [s[0] for s in shadows] + [u for u in user_tiers(cwd) if lexists(u)]:
                 d = loaded[p] = load_md(p)
                 if d is not None and imports(p, d, set(l for _, l, _ in pointers)):
                     return say(lead, "visible", p + " imports " + pointer + ", so it is loaded with that file" + note)
@@ -2202,7 +2236,7 @@ def target_of(fn, arg, kinds):
         kind, level = base, parent
     if kind not in kinds:
         return path, kind, level, refuse(fn, path + " is not one of " + ", ".join(kinds))
-    why = user_owned(path) or home_why(path, level)
+    why = user_owned(path, here()) or home_why(path, level)
     if why:
         return path, kind, level, refuse(fn, why)
     if islink(parent):
@@ -2361,7 +2395,7 @@ def merge_plan(fn, dirarg, template):
         return refuse(fn, dirarg + " is not a directory"), None
     target = os.path.realpath(dirarg)
     path = os.path.join(target, "AGENTS.md")
-    why = user_owned(path) or home_why(path, target)
+    why = user_owned(path, here()) or home_why(path, target)
     if why:
         return refuse(fn, why), None
     tmpl, size = load(template) if template else (None, 0)
@@ -2802,10 +2836,13 @@ _instr_args() {
 # kind   CLAUDE.md | .claude/CLAUDE.md | CLAUDE.local.md | AGENTS.md |
 #        AGENTS.override.md
 # where  project (<dir>, default the working directory) | above (each
-#        directory above it, nearest first, up to /) | user (~/.claude/CLAUDE.md,
+#        directory above it, nearest first, up to /) | user (the user tier,
 #        then ${CODEX_HOME:-~/.codex}/AGENTS.md and AGENTS.override.md). The
-#        user-tier ~/.claude/CLAUDE.md is a user line wherever the walk meets it
-#        (compared by identity).
+#        user tier, ~/.claude/CLAUDE.md, or CLAUDE.md in $CLAUDE_CONFIG_DIR
+#        when that is set to an absolute path outside <dir> (kind CLAUDE.md),
+#        is a user line wherever the walk meets it (compared by identity); an
+#        empty or relative CLAUDE_CONFIG_DIR, or one in <dir>, leaves no user
+#        tier, and ~/.claude/CLAUDE.md is then an above line like any other.
 # state  comma-separated: for a CLAUDE.md-family file "imports" (it imports
 #        <dir>'s AGENTS.md, in Markdown text Claude Code reads imports from:
 #        an @AGENTS.md in a code block, a code span or HTML is none) or
@@ -2863,9 +2900,10 @@ instruction_pointer_visibility() {
 # project's own CLAUDE.md instead. A file that already imports it is left
 # alone ("unchanged: …", rc 0). Refused (rc 2): another kind of file, a
 # user-level file or one in its directory (~/.claude/CLAUDE.md, ~/.claude/,
-# ${CODEX_HOME:-~/.codex}/), a file in HOME or a directory above it, a file
-# outside the project's directory chain, a missing or non-regular file, a
-# symlink or a symlinked directory, and, before any plan and also with --yes,
+# $CLAUDE_CONFIG_DIR/ when it is an absolute path outside the working
+# directory, ${CODEX_HOME:-~/.codex}/), a file in HOME or a directory above
+# it, a file outside the project's directory chain, a missing or non-regular
+# file, a symlink or a symlinked directory, and, before any plan and also with --yes,
 # a file above the project whose import line would not read back as this
 # project's import (a directory on the way down to the project named ~, or
 # with a space or a character Claude Code does not read whole in an import
@@ -2897,10 +2935,12 @@ instruction_add_import() {
 # over it, rc 3 naming the sizes, nothing written. An AGENTS.override.md in
 # <dir> gets a "warning:" line (that reader takes it instead; the file is
 # never written). Refused (rc 2), with or without --yes: a <dir> that is the
-# directory of a user-level file (${CODEX_HOME:-~/.codex}, ~/.claude; through
-# a link or another spelling too), a <dir> that is HOME or a directory above
-# it (the same way), an AGENTS.md that is a user-level one (a hard link), a
-# symlinked or non-regular AGENTS.md, markers not in one ordered pair.
+# directory of a user-level file (${CODEX_HOME:-~/.codex}, ~/.claude, and
+# $CLAUDE_CONFIG_DIR when it is an absolute path outside the working
+# directory; through a link or another spelling too), a <dir> that is HOME or
+# a directory above it (the same way), an AGENTS.md that is a user-level one
+# (a hard link), a symlinked or non-regular AGENTS.md, markers not in one
+# ordered pair.
 instruction_merge_pointer() {
   _instr_args instruction_merge_pointer "instruction_merge_pointer [<dir>] [--yes]" "$@" || return $?
   _instr_writer_ok instruction_merge_pointer || return $?

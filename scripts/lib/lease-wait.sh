@@ -446,6 +446,19 @@ _CLAUDE_TOOLS_WEB="WebFetch,WebSearch"
 # (~/.local/share/devin; `devin auth status` names the file; CC-25)
 _CLAUDE_CRED_PATHS="~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.git-credentials ~/.config/gh ~/.config/gcloud ~/.azure ~/.kube ~/.docker/config.json ~/.codex ~/.gemini ~/.kimi-code ~/.local/share/opencode ~/.cursor ~/.grok ~/.devin ~/.config/devin ~/.claude/.credentials.json ~/.local/share/devin"
 
+# _claude_config_cred — the .credentials.json in Claude Code's config home
+# when CLAUDE_CONFIG_DIR moves that home out of ~/.claude: Claude Code 2.1.296
+# keeps a stored login there, not in ~/.claude, once the variable is set, so
+# the claude lane's deny rules and the codex read persona's profile deny it
+# beside _CLAUDE_CRED_PATHS. Only an absolute value: an empty
+# or relative one names a directory relative to wherever Claude Code started,
+# which a helper cannot know. Prints nothing otherwise.
+_claude_config_cred() {
+  case "${CLAUDE_CONFIG_DIR:-}" in
+    /*) printf '%s/.credentials.json\n' "${CLAUDE_CONFIG_DIR%/}" ;;
+  esac
+}
+
 # _claude_sandbox_floor_ok — 0 when the claude worker lane may run here: its
 # sandbox is off (TRIFORGE_CLAUDE_SANDBOX=off: no OS confinement, the
 # disclosed opt-out), or `claude --version` reads at or above
@@ -518,7 +531,8 @@ _claude_sandbox_refusal() {
 # fail-closed when the sandbox can't start, with no unsandboxed retry;
 # <deny-write> (the lead's git common dir, which the sandbox otherwise opens to
 # a worktree's git; for the read classes the working directory itself) and the
-# credential paths are blocked, the latter also for the Read tool.
+# credential paths (_CLAUDE_CRED_PATHS, plus _claude_config_cred) are blocked,
+# the latter also for the Read tool.
 # TRIFORGE_CLAUDE_SANDBOX=off runs Bash without the sandbox, and then a claude
 # worker with Bash has no OS confinement; the read class drops Bash there,
 # while persona-exec keeps it (its working directory is a disposable worktree,
@@ -558,12 +572,17 @@ _claude_lane_argv() {
   # approves exactly that set; edit approves Bash and Skill, its edits riding
   # acceptEdits inside the working directory.
   if [ "$CLASS" = edit ]; then ALLOW=$_CLAUDE_ALLOW_EDIT; else ALLOW=$TOOLS; fi
-  SETTINGS=$(CL_SBX="$SBX" CL_CRED="$_CLAUDE_CRED_PATHS" python3 -c "${_PY_PRELUDE}"'
+  SETTINGS=$(CL_SBX="$SBX" CL_CRED="$_CLAUDE_CRED_PATHS" CL_OWN="$(_claude_config_cred)" python3 -c "${_PY_PRELUDE}"'
 import json, os, sys
 cred = os.environ["CL_CRED"].split()
 deny = []
 for p in cred:
     deny += ["Read(" + p + ")", "Read(" + p + "/**)"]
+if os.environ["CL_OWN"]:
+    # an absolute path, which a Read rule spells with // (a rule with one /
+    # is relative to the settings file); the sandbox takes it as it is
+    deny += ["Read(/" + os.environ["CL_OWN"] + ")", "Read(/" + os.environ["CL_OWN"] + "/**)"]
+    cred.append(os.environ["CL_OWN"])
 s = {"permissions": {"deny": deny}}
 if os.environ["CL_SBX"] == "on":
     s["sandbox"] = {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,

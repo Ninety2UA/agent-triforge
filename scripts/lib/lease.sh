@@ -1614,12 +1614,14 @@ print(" || ".join(log[-20:]))
 # and antigravity list none — they authenticate via HOME-based stores and get
 # nothing extra — no cross-provider leakage; a CLI the registry does not know
 # gets the base allowlist alone. Two lanes add fixed values of their own:
-# claude _ADAPTER_ENV_CLAUDE, opencode its OPENCODE_PERMISSION deny set. env -i
+# claude _ADAPTER_ENV_CLAUDE, opencode its OPENCODE_PERMISSION deny set; and
+# claude keeps an absolute CLAUDE_CONFIG_DIR, its HOME-based store moved. env -i
 # execs external commands only; shell functions cannot cross it, which is why
 # the lease lane composes direct CLI commands (_lease_lane_argv,
 # scripts/lib/lease-wait.sh) instead of calling the invoke_* helpers. Mirrored
 # by _lane_run in scripts/probe-capabilities.sh, which reads the same base
-# list, and by _lane_run_claude there, which reads _ADAPTER_ENV_CLAUDE.
+# list, and by _lane_run_claude there, which reads _ADAPTER_ENV_CLAUDE and
+# keeps CLAUDE_CONFIG_DIR the same way.
 # The env_keys are one registry read here unless lease_dispatch, which already
 # read them together with the model, hands them over in _ADAPTER_ENV_KEYS (set
 # inside the detached builder process only, so the lead's shell never carries it).
@@ -1736,6 +1738,15 @@ ENVKEYS
   case "$CLI" in
     claude)
       PAIRS+=("${_ADAPTER_ENV_CLAUDE[@]}")
+      # Claude Code's config home, where its stored login lives once
+      # CLAUDE_CONFIG_DIR moves it out of ~/.claude (on macOS a keychain
+      # entry named after that path): forwarded as set, so a worker signs in
+      # with the lead's account, never another one under ~/.claude. Only an
+      # absolute value, as _claude_config_cred reads it: a relative one would
+      # name a directory in the worker's worktree
+      case "${CLAUDE_CONFIG_DIR:-}" in
+        /*) PAIRS+=("CLAUDE_CONFIG_DIR=${CLAUDE_CONFIG_DIR}") ;;
+      esac
       ;;
     opencode)
       # D-033 defense-in-depth: the shipped deny set rides as OPENCODE_PERMISSION

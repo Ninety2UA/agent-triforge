@@ -47,6 +47,11 @@ unset TRIFORGE_LEASE_WORKER
 # dispatches a real CLI; the rows that dispatch set theirs. A row testing
 # another lead or host sets its own (SELF-13, SELF-19's killcodex).
 unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID
+# The rows take Claude Code's user tier from a throwaway HOME's .claude; a
+# CLAUDE_CONFIG_DIR the runner exported would move it (instructions.sh,
+# _adapter_env, the claude lane's deny rules), so it is dropped here, and the
+# cases that test it set their own.
+unset CLAUDE_CONFIG_DIR
 export TRIFORGE_TEST_LEAD=claude
 mkdir -p "${WORK}/self-seam"
 printf '#!/bin/sh\n# SELF seam default builder: reports and does nothing\necho "Status: BLOCKED (no fake builder named for this row)"\n' > "${WORK}/self-seam/no-builder.sh"
@@ -1084,6 +1089,13 @@ fi
 #          the file with its reach (every project under it), then removing it;
 #          with HOME = the parent, ~/CLAUDE.md and the two files above HOME
 #          offer the project's CLAUDE.md alone (no import, no removal)
+#   ccd    (4.1) a project under HOME whose own CLAUDE.md does not import
+#          AGENTS.md: with CLAUDE_CONFIG_DIR unset, the own notice and none
+#          for ~/.claude/CLAUDE.md (the user tier); set to a directory outside
+#          the project, or relative, ~/.claude/CLAUDE.md is a file above the
+#          project, named with the fix in this project, and the moved
+#          CLAUDE.md is never named; set to one whose CLAUDE.md imports
+#          the project's AGENTS.md, no own or above notice at all
 #   home   a session started in HOME, and one in the directory above it (a
 #          3.x copy as ~/CLAUDE.md, an own ~/CLAUDE.local.md, a CLAUDE.md above
 #          HOME, no AGENTS.md): the one home-directory warning, no file notice
@@ -1398,6 +1410,32 @@ _s8_has 'is not loaded under a Claude lead: [^ ]*/above/mid/CLAUDE\.md ' || _S8_
 _s8_has '^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/above/mid/CLAUDE\.md sits above this project, .*'"$_S8_OWN"'That file is in your home directory or above it' || _S8_FAIL="$_S8_FAIL home-CLAUDE.md-notice-without-the-project-fix"
 [ "$(printf '%s\n' "$_O" | grep -c 'is not loaded under a Claude lead: .*'"$_S8_OWN"'That file is in your home directory or above it' || true)" -eq 3 ] || _S8_FAIL="$_S8_FAIL home-or-above-notices-not-3"
 printf '%s\n' "$_O" | grep -qE 'is not loaded under a Claude lead: .*(Or add the line|remove the file)' && _S8_FAIL="$_S8_FAIL home-or-above-notice-offers-the-parent-file"
+# ccd: CLAUDE_CONFIG_DIR moves the user tier out of ~/.claude (a project under HOME, its own
+# CLAUDE.md without the import; HOME's .claude/CLAUDE.md; two config homes, the second
+# importing the project's AGENTS.md)
+mkdir -p "$_S8/cch/.claude" "$_S8/cch/proj" "$_S8/ccd" "$_S8/ccd2"
+( cd "$_S8/cch/proj" && git init -q 2>/dev/null ) || true
+printf '# home tier\n' > "$_S8/cch/.claude/CLAUDE.md"
+printf '# own\n' > "$_S8/cch/proj/CLAUDE.md"
+printf '# cch agents\n' > "$_S8/cch/proj/AGENTS.md"
+printf '# moved\n' > "$_S8/ccd/CLAUDE.md"
+printf '# moved\n@%s/AGENTS.md\n' "$(cd "$_S8/cch/proj" && pwd -P)" > "$_S8/ccd2/CLAUDE.md"
+_S8_CCOWN='^WARNING: CLAUDE\.md in this project does not import AGENTS\.md'
+_S8_CCHOME='^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/self08/cch/\.claude/CLAUDE\.md sits above this project, .*That file is in your home directory or above it'
+_s8_run ccd-unset "$_S8/cch/proj" "2.1.277" "$_S8/cch"
+_s8_has "$_S8_CCOWN" || _S8_FAIL="$_S8_FAIL ccd-unset-no-own-notice"
+_s8_has '/self08/cch/\.claude/CLAUDE\.md' && _S8_FAIL="$_S8_FAIL ccd-unset-user-tier-named"
+for _S8_CCD in absolute relative; do
+  if [ "$_S8_CCD" = absolute ]; then export CLAUDE_CONFIG_DIR="$_S8/ccd"; else export CLAUDE_CONFIG_DIR=ccd; fi
+  _s8_run "ccd-${_S8_CCD}" "$_S8/cch/proj" "2.1.277" "$_S8/cch"
+  _s8_has "$_S8_CCOWN" || _S8_FAIL="$_S8_FAIL ccd-${_S8_CCD}-no-own-notice"
+  _s8_has "$_S8_CCHOME" || _S8_FAIL="$_S8_FAIL ccd-${_S8_CCD}-no-notice-for-home-.claude/CLAUDE.md"
+  _s8_has '/self08/ccd/CLAUDE\.md' && _S8_FAIL="$_S8_FAIL ccd-${_S8_CCD}-moved-tier-named"
+done
+export CLAUDE_CONFIG_DIR="$_S8/ccd2"
+_s8_run ccd-import "$_S8/cch/proj" "2.1.277" "$_S8/cch"
+printf '%s\n' "$_O" | grep -qE 'does not import AGENTS\.md|is not loaded under a Claude lead' && _S8_FAIL="$_S8_FAIL ccd-import-notice-despite-the-moved-tier-import"
+unset CLAUDE_CONFIG_DIR
 # HOME is no project: a session started in HOME, or in a directory above it, gets
 # the one home-directory warning and no file notice or tip, since each would name a
 # file there (read for every project under it, refused by the writers): a 3.x copy
@@ -1969,7 +2007,7 @@ fi
 unset _s8_sh _s8_l _s8_p _s8_n
 _S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines), prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40), and survives a failing or absent helper loader"
 if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
-  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; started in HOME or the directory above it: the one home-directory warning, no file notice or tip, the files untouched; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; versiongrace (round 1, wave 2): an optional CLI that ignores SIGTERM and never answers, through the hook's own _ss_cli_version with a 1 s bound, asked --version then -V and given up on within two calls of 1 s + the 2 s SIGKILL grace (${_S8_VER}), nothing recorded, the stub gone, stderr empty, no temp dir left; one that answers -V only gets that answer, and the watchdog run records a kimi stub's -V answer in .claude/roster-detected.local.md; detectbound (round 4, J): a python3 that prints one project no-import row (round 5) and never answers the instruction-file pass, session start back in ${_S8_DET}s (the 10 s bound) with the WARNING that the check did not finish, given up on after 10 s (4.1), and no own-file notice from the partial row, the stub gone; detectfork (round 5): with no timeout binary on PATH (${_S8_FWD}), a python3 launcher that prints that row, forks a child that ignores SIGTERM and holds stdout for 60 s, and ignores SIGTERM itself: session start back in ${_S8_FORK}s with the WARNING and no own-file notice, the launcher and (4.1) its child gone; detect69 (4.1): an rc 69 WARNING names its cause, one line each: python3 not on PATH, no timeout binary and no private temp dir for the watchdog, a library that did not load; pastbound (4.1): past-bound rows (import -) for ./CLAUDE.md, ./.claude/CLAUDE.md and a CLAUDE.md above get a line saying session start cannot tell whether they import AGENTS.md, offering @AGENTS.md, @../AGENTS.md and the project's CLAUDE.md, never the line -; detectwatch (round 5): the library alone under set -u (${_S8_WSH}), PATH = a python3 stub, a sleep that logs its pid and dirname: a pass that answers in 0.5 s under _INSTR_SECS=30 leaves no watchdog sleep running; with no _INSTR_SECS (_INSTR_READ_SECS, shipped as 30, set to 1) detect, visibility and a writer's plan on a python3 that never answers print one gave-up line naming python3 hung or killed and rc 124, 137 or 143 within 6 s, under ${_S8_WMODES}; a writer with --yes, _INSTR_SECS=1 and a python3 2 s slow still writes, rc 0, no temp file left; watchtmp (round 6): with no timeout binary (${_S8_WSH}), a TMPDIR of mode 0777 without the sticky bit is never asked for the watchdog's temp dir, the pass answering through /tmp, and with mktemp failing for /tmp too the call returns rc 69 with its line alone, python3 never started, nothing left in that TMPDIR; forkwatch (4.1): under ${_S8_FMODES} (${_S8_WSH}), a python3 launcher that forks a child ignoring SIGTERM and holding stdout for 12 s, given up on after 1 s: rc 143 (124 under the timeout binary) within 6 s, neither left; perllocale (4.1): with LANG and LC_ALL xx_XX.bogus the watchdog's pass prints its rows and rc 0, no perl warning; watchkill (4.1): the watchdog's subshell SIGKILLed while its private temp dir exists: rc 137, nothing left in TMPDIR; boundsleep (round 6): the hook's own _ss_bounded with no timeout binary (${_S8_WSH}) leaves no watchdog sleep running after a command that answers in 0.5 s or at once (three times); boundfork (4.1): the same _ss_bounded with a 1 s bound, under ${_S8_FMODES}, on a command that forks a child ignoring SIGTERM and holding stdout for 12 s: back within 6 s, neither left; every run rc 0, no crash, no line starting with {" "static"
+  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; started in HOME or the directory above it: the one home-directory warning, no file notice or tip, the files untouched; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; versiongrace (round 1, wave 2): an optional CLI that ignores SIGTERM and never answers, through the hook's own _ss_cli_version with a 1 s bound, asked --version then -V and given up on within two calls of 1 s + the 2 s SIGKILL grace (${_S8_VER}), nothing recorded, the stub gone, stderr empty, no temp dir left; one that answers -V only gets that answer, and the watchdog run records a kimi stub's -V answer in .claude/roster-detected.local.md; detectbound (round 4, J): a python3 that prints one project no-import row (round 5) and never answers the instruction-file pass, session start back in ${_S8_DET}s (the 10 s bound) with the WARNING that the check did not finish, given up on after 10 s (4.1), and no own-file notice from the partial row, the stub gone; detectfork (round 5): with no timeout binary on PATH (${_S8_FWD}), a python3 launcher that prints that row, forks a child that ignores SIGTERM and holds stdout for 60 s, and ignores SIGTERM itself: session start back in ${_S8_FORK}s with the WARNING and no own-file notice, the launcher and (4.1) its child gone; detect69 (4.1): an rc 69 WARNING names its cause, one line each: python3 not on PATH, no timeout binary and no private temp dir for the watchdog, a library that did not load; pastbound (4.1): past-bound rows (import -) for ./CLAUDE.md, ./.claude/CLAUDE.md and a CLAUDE.md above get a line saying session start cannot tell whether they import AGENTS.md, offering @AGENTS.md, @../AGENTS.md and the project's CLAUDE.md, never the line -; detectwatch (round 5): the library alone under set -u (${_S8_WSH}), PATH = a python3 stub, a sleep that logs its pid and dirname: a pass that answers in 0.5 s under _INSTR_SECS=30 leaves no watchdog sleep running; with no _INSTR_SECS (_INSTR_READ_SECS, shipped as 30, set to 1) detect, visibility and a writer's plan on a python3 that never answers print one gave-up line naming python3 hung or killed and rc 124, 137 or 143 within 6 s, under ${_S8_WMODES}; a writer with --yes, _INSTR_SECS=1 and a python3 2 s slow still writes, rc 0, no temp file left; watchtmp (round 6): with no timeout binary (${_S8_WSH}), a TMPDIR of mode 0777 without the sticky bit is never asked for the watchdog's temp dir, the pass answering through /tmp, and with mktemp failing for /tmp too the call returns rc 69 with its line alone, python3 never started, nothing left in that TMPDIR; forkwatch (4.1): under ${_S8_FMODES} (${_S8_WSH}), a python3 launcher that forks a child ignoring SIGTERM and holding stdout for 12 s, given up on after 1 s: rc 143 (124 under the timeout binary) within 6 s, neither left; perllocale (4.1): with LANG and LC_ALL xx_XX.bogus the watchdog's pass prints its rows and rc 0, no perl warning; watchkill (4.1): the watchdog's subshell SIGKILLed while its private temp dir exists: rc 137, nothing left in TMPDIR; boundsleep (round 6): the hook's own _ss_bounded with no timeout binary (${_S8_WSH}) leaves no watchdog sleep running after a command that answers in 0.5 s or at once (three times); boundfork (4.1): the same _ss_bounded with a 1 s bound, under ${_S8_FMODES}, on a command that forks a child ignoring SIGTERM and holding stdout for 12 s: back within 6 s, neither left; ccd (4.1): with CLAUDE_CONFIG_DIR absolute or relative, HOME's .claude/CLAUDE.md is named as a file above the project and the moved CLAUDE.md never; one whose CLAUDE.md imports the project's AGENTS.md silences the own and above notices; unset, the user tier stays unnamed; every run rc 0, no crash, no line starting with {" "static"
 else
   row "SELF-08" "claude" "$_S8_CAP" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160); mismatch:${_S8_FAIL:- none}" "static"
 fi
@@ -8397,6 +8435,13 @@ rm -rf "$_S19"
 #             (U9's host gate reads them); the codex lane pins its tool shell's
 #             env policy (inherit all, no default excludes, no exclude,
 #             include_only or set lists — CDX-19)
+#   ccd       (4.1) CLAUDE_CONFIG_DIR, where Claude Code keeps its login once
+#             it moves the config home: an absolute one reaches the claude
+#             worker as set, and never codex or grok; a relative or empty one
+#             reaches none. The .credentials.json in an absolute one is denied
+#             like ~/.claude/.credentials.json: a Read rule rooted with //, the
+#             path in the sandbox's denyRead, and a deny entry in the codex
+#             read persona's profile; a relative one adds nothing
 #   builder   _lease_builder_run's claude arm against the stub, in a session of
 #             its own: the result text in <out> (its Status line parses), the
 #             envelope in <out>.raw, subtype, is_error and session_id in
@@ -8543,6 +8588,36 @@ O=$( source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-fa
     && printf 'cdxpolicy:%s\n' "$(printf '%s\n' "${_LEASE_LANE_ARGV[@]}" | grep -cxE 'shell_environment_policy\.(inherit="all"|ignore_default_excludes=true|exclude=\[\]|include_only=\[\]|set=\{\})' || true)"
 ) 2>&1 || true
 _S20_FAIL="${_S20_FAIL}$(_self_expect env "$O" '^claude:2$' '^codex:0$' '^seam:0$' '^cdxpolicy:5$')"
+
+# ccd: CLAUDE_CONFIG_DIR absolute (with a space), relative and empty: what reaches each worker,
+# and the credential denies of the claude lane's --settings and the codex read persona's profile
+O=$( export TMPDIR="$_S20/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
+  for C in abs rel empty; do
+    if [ "$C" = abs ]; then export CLAUDE_CONFIG_DIR="/s20/cfg home"; elif [ "$C" = rel ]; then export CLAUDE_CONFIG_DIR=cfg; else export CLAUDE_CONFIG_DIR=""; fi
+    printf '%s-env:claude=%s:codex=%s:grok=%s\n' "$C" "$(_adapter_env claude env 2>/dev/null | grep -cxF "CLAUDE_CONFIG_DIR=/s20/cfg home" || true)" \
+      "$(_adapter_env codex env 2>/dev/null | grep -c '^CLAUDE_CONFIG_DIR=' || true)" "$(_adapter_env grok env 2>/dev/null | grep -c '^CLAUDE_CONFIG_DIR=' || true)"
+    printf '%s-any:%s\n' "$C" "$(_adapter_env claude env 2>/dev/null | grep -c '^CLAUDE_CONFIG_DIR=' || true)"
+    S="" P=""
+    if _lease_lane_argv claude "" "" "" "" "" "$_S20/wtb" 60 /s20/lead/.git ""; then
+      for W in "${_LEASE_LANE_ARGV[@]}"; do if [ "$P" = --settings ]; then S=$W; fi; P=$W; done
+    fi
+    _persona_codex_profile || true
+    printf '%s-deny:%s\n' "$C" "$(S20_S="$S" S20_P="${_PERSONA_CODEX_PROFILE[*]:-}" python3 -c '
+import json, os
+try:
+    s = json.loads(os.environ["S20_S"])
+except ValueError:
+    print("no-settings")
+    raise SystemExit(0)
+deny, dr = s["permissions"]["deny"], s["sandbox"]["filesystem"]["denyRead"]
+print("read=%s:sbx=%s:home=%d:codex=%d" % ("|".join(d for d in deny if "cfg" in d), "|".join(d for d in dr if "cfg" in d),
+      "Read(~/.claude/.credentials.json)" in deny and "~/.claude/.credentials.json" in dr, os.environ["S20_P"].count("\"/s20/cfg home/.credentials.json\"=\"deny\"")))')"
+  done
+) 2>&1 || true
+_S20_FAIL="${_S20_FAIL}$(_self_expect ccd "$O" '^abs-env:claude=1:codex=0:grok=0$' '^rel-env:claude=0:codex=0:grok=0$' '^empty-env:claude=0:codex=0:grok=0$' \
+  '^abs-any:1$' '^rel-any:0$' '^empty-any:0$' \
+  '^abs-deny:read=Read\(//s20/cfg home/\.credentials\.json\)\|Read\(//s20/cfg home/\.credentials\.json/\*\*\):sbx=/s20/cfg home/\.credentials\.json:home=1:codex=1$' \
+  '^rel-deny:read=:sbx=:home=1:codex=0$' '^empty-deny:read=:sbx=:home=1:codex=0$')"
 
 # builder: the real claude arm against the stub, the builder process in a
 # session of its own (its exit sweep reaches only its own group)
@@ -8726,7 +8801,7 @@ _S20_FAIL="${_S20_FAIL}$(_self_expect ctx "$O" '^ctx-root:rc=69:class=determinis
 
 _S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON envelope (subtype, is_error, session_id), explicit tool sets, --max-turns, session resume, the sandbox settings and their Claude Code floor, the claude env arm, .claude/skills provisioning that adds names only, max-turns routed as report missing, dispatch_role running claude -p under a codex lead, never without its deny on the lead's git dir inside a git checkout (KTD16, R2/R3)"
 if [ -z "$_S20_FAIL" ]; then
-  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0; ctx: a codex lead's tester on claude with TRIFORGE_LEASE_ROOT=/dev/null/x -> rc 69 deterministic, the lease line and one ERROR line, stub never run; outside any git repository the reviewer runs, rc 0" "static"
+  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0; ctx: a codex lead's tester on claude with TRIFORGE_LEASE_ROOT=/dev/null/x -> rc 69 deterministic, the lease line and one ERROR line, stub never run; outside any git repository the reviewer runs, rc 0; ccd (4.1): an absolute CLAUDE_CONFIG_DIR (with a space) reaches the claude worker as set, never codex or grok, and its .credentials.json is denied (Read rule rooted with //, sandbox denyRead, the codex read persona's profile); a relative or empty one reaches no worker and adds no deny" "static"
 else
   row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S20_FAIL"):$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"
 fi
@@ -11989,6 +12064,17 @@ _S16_EV="${_S16_EV}A: one checkout-top roster from a subdirectory; egress per pr
 #            exact 3.x copy placed in $CODEX_HOME (the copy kept); the files
 #            byte-identical, the hard link intact; an ordinary project under
 #            the same HOME and CODEX_HOME still gets its plan
+#   ccd      (4.1) CLAUDE_CONFIG_DIR, where Claude Code 2.1.296 reads its
+#            user tier in place of ~/.claude: set to an absolute directory
+#            outside the project, its CLAUDE.md is the user line (kind
+#            CLAUDE.md, imports) and HOME's .claude/CLAUDE.md a line above;
+#            that import makes the pointer visible to claude; the writers
+#            refuse the file and its directory, rc 2 before any plan, with and
+#            without --yes, and still refuse ~/.claude; the files
+#            byte-identical. Unset: HOME's .claude/CLAUDE.md is the user line,
+#            as before. Empty, relative, or the project itself: no user line,
+#            HOME's .claude/CLAUDE.md above, the pointer hidden, and the
+#            project's own files still get their plans
 #   home     HOME and the directories above it, rc 2 before any plan, with
 #            and without --yes, naming the project's own CLAUDE.md: a merge
 #            into HOME and through a link to it, the import into ~/CLAUDE.md
@@ -12402,6 +12488,65 @@ _S16_FAIL="${_S16_FAIL}$(_s16b_same b-user-untouched "$_S16B_SUM" "$(_s16b_sum "
 # no wider than that: an ordinary project under the same HOME and CODEX_HOME still gets its plan
 _O=$(S16B_HOME="$_S16B_U/home" S16B_CODEX="$_S16B_U/cx" _s16b "$_S16B_W/ulp" instruction_merge_pointer)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-user-project "$_O" '^needs-ask: would create [^ ]*/w/ulp/AGENTS\.md ' '^rc=20$')"
+
+# ccd: CLAUDE_CONFIG_DIR moves the user tier. A project under HOME with its own CLAUDE.md and
+# the pointer block, HOME's .claude/CLAUDE.md, and a config home outside both whose CLAUDE.md
+# imports the project's AGENTS.md by its absolute path
+_S16B_CC="$_S16B/cc"
+mkdir -p "$_S16B_CC/home/.claude" "$_S16B_CC/home/.codex" "$_S16B_CC/cfg"
+_s16b_proj "$_S16B_CC/home/proj"
+printf '# me\n' > "$_S16B_CC/home/.claude/CLAUDE.md"
+printf '# own\n' > "$_S16B_CC/home/proj/CLAUDE.md"
+printf '# moved\n@%s/AGENTS.md\n' "$(cd "$_S16B_CC/home/proj" && pwd -P)" > "$_S16B_CC/cfg/CLAUDE.md"
+_S16B_SUM=$(_s16b_sum "$_S16B_CC/cfg/CLAUDE.md" "$_S16B_CC/home/.claude/CLAUDE.md" "$_S16B_CC/home/proj/CLAUDE.md")
+_s16b_cc() { # _s16b_cc <CLAUDE_CONFIG_DIR, or - for unset> <dir> <helper> [args...] — _s16b under the cc HOME with that CLAUDE_CONFIG_DIR exported
+  local C=$1
+  shift
+  ( if [ "$C" = - ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$C"; fi
+    S16B_HOME="$_S16B_CC/home" S16B_CODEX="$_S16B_CC/home/.codex" _s16b "$@" )
+}
+# an absolute config home outside the project: its CLAUDE.md is the user line and imports the
+# project's AGENTS.md, so the pointer reaches claude; HOME's .claude/CLAUDE.md is a file above
+_O=$(_s16b_cc "$_S16B_CC/cfg" "$_S16B_CC/home/proj" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-ccd-detect "$_O" \
+  "^CLAUDE\.md${T}user${T}imports,user-owned${T}[^${T}]*/cc/cfg/CLAUDE\.md${T}-\$" \
+  "^\.claude/CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/cc/home/\.claude/CLAUDE\.md${T}" '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-ccd-detect "$_O" "^\.claude/CLAUDE\.md${T}user")"
+_O=$(_s16b_cc "$_S16B_CC/cfg" "$_S16B_CC/home/proj" instruction_pointer_visibility claude)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-ccd-visible "$_O" "^claude${T}visible${T}[^ ]*/cc/cfg/CLAUDE\.md imports [^ ]*/cc/home/proj/AGENTS\.md, so it is loaded with that file\$" '^rc=0$')"
+# the writers refuse that file and its directory, before any plan, and still refuse ~/.claude
+for _S16B_Y in "" --yes; do
+  _O=$(_s16b_cc "$_S16B_CC/cfg" "$_S16B_CC/home/proj" instruction_add_import "$_S16B_CC/cfg/CLAUDE.md" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-import${_S16B_Y}" "$_O" '^instruction_add_import: REFUSED — [^ ]*/cc/cfg/CLAUDE\.md is your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _O=$(_s16b_cc "$_S16B_CC/cfg" "$_S16B_CC/home/proj" instruction_merge_pointer "$_S16B_CC/cfg" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-merge${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/cfg/AGENTS\.md is in the directory of your user-tier \$CLAUDE_CONFIG_DIR/CLAUDE\.md, which Triforge reads and never writes; edit it yourself \(rc 2\)$' '^rc=2$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-ccd-merge${_S16B_Y}" "$_O" '^(needs-ask|changed|unchanged):')"
+  _O=$(_s16b_cc "$_S16B_CC/cfg" "$_S16B_CC/home/proj" instruction_merge_pointer "$_S16B_CC/home/.claude" $_S16B_Y)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-ccd-home${_S16B_Y}" "$_O" '^instruction_merge_pointer: REFUSED — [^ ]*/cc/home/\.claude/AGENTS\.md is in the directory of your user-tier ~/\.claude/CLAUDE\.md, ' '^rc=2$')"
+done
+[ ! -e "$_S16B_CC/cfg/AGENTS.md" ] && [ ! -e "$_S16B_CC/home/.claude/AGENTS.md" ] || _S16_FAIL="${_S16_FAIL} b-ccd-merge(written)"
+# unset: HOME's .claude/CLAUDE.md is the user line, as before
+_O=$(_s16b_cc - "$_S16B_CC/home/proj" instruction_files_detect)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-ccd-unset "$_O" "^\.claude/CLAUDE\.md${T}user${T}no-import,user-owned${T}[^${T}]*/cc/home/\.claude/CLAUDE\.md${T}-\$" '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-ccd-unset "$_O" '/cc/cfg/')"
+# empty, relative, or the project itself: no user tier, so no project file is taken for the
+# user's and HOME's .claude/CLAUDE.md is a file above; the pointer stays hidden, and the
+# project's own files still get their plans
+for _S16B_D in "" cfg "$_S16B_CC/home/proj"; do
+  case "$_S16B_D" in "") _S16B_N=b-ccd-empty ;; cfg) _S16B_N=b-ccd-relative ;; *) _S16B_N=b-ccd-inproject ;; esac
+  _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_files_detect)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" \
+    "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/cc/home/proj/CLAUDE\.md${T}@AGENTS\.md\$" \
+    "^\.claude/CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/cc/home/\.claude/CLAUDE\.md${T}" '^rc=0$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "$_S16B_N" "$_O" "^(CLAUDE\.md|\.claude/CLAUDE\.md)${T}user${T}")"
+  _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_pointer_visibility claude)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/cc/home/proj/CLAUDE\.md, [^ ]*/cc/home/\.claude/CLAUDE\.md[:,] " '^rc=1$')"
+  _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_add_import CLAUDE.md)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" '^needs-ask: would add the line @AGENTS\.md to [^ ]*/cc/home/proj/CLAUDE\.md, ' '^rc=20$')"
+  _O=$(_s16b_cc "$_S16B_D" "$_S16B_CC/home/proj" instruction_merge_pointer)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" '^needs-ask: would replace the Triforge pointer block in [^ ]*/cc/home/proj/AGENTS\.md ' '^rc=20$')"
+done
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-ccd-untouched "$_S16B_SUM" "$(_s16b_sum "$_S16B_CC/cfg/CLAUDE.md" "$_S16B_CC/home/.claude/CLAUDE.md" "$_S16B_CC/home/proj/CLAUDE.md")")"
 
 # home: a file in HOME or a directory above it is read for every project under it, so no
 # writer touches one there: rc 2 before any plan, with and without --yes, compared by
@@ -13198,6 +13343,7 @@ done
 _S16_FAIL="${_S16_FAIL}$(_s16b_same b-rw-controls-untouched "$_S16B_SUM" "$(_s16b_sum $_S16B_RWF)")"
 _S16_EV="${_S16_EV}B (review round 6): the five round-5 rewrites match what they matched before (b-rw-*: closed front matter, front matter with blank lines before its closing ---, a <script> block whose closing line holds three </script>, a ~~~ line ending a paragraph, an import in a second comment closed on the last line of a comment-opened HTML block: no-import, hidden with the fix, the line appended, then unchanged; a ~~~~ fence a ~~~ line cannot close: the import refused rc 2 naming the fence opened on line 2, unchanged; controls import: a --- block closed by --, the same front matter after a heading, the line after the </script> line, ~~, the import after the comment's end on its last line and after a <!-- left open there, a ~~~~ fence closed by ~~~~~); "
 _S16_EV="${_S16_EV}B: instruction files in the project, above and the user level (3.x exact/edited, FIFO, link loop, bash = zsh), visibility per registry reader (parent/own CLAUDE.md, import, override, untrusted, budget; unknown reader fails closed), writers rc 20 then idempotent, 30 KiB + 2 KiB rc 3, project_doc_max_bytes, convert, refusals, hook own-file notice, the user level never written (b-user-*: HOME/.codex with CODEX_HOME unset, \$CODEX_HOME, a link to it, a hard link to its AGENTS.md, ~/.claude, a 3.x copy converted there: rc 2 before any plan, nothing changed; an ordinary project still planned), HOME and above never written (b-home-*: a merge into HOME and through a link to it, the import into ~/CLAUDE.md and above HOME, a 3.x copy converted at HOME: rc 2 before any plan, naming the project's own CLAUDE.md, nothing changed; a project under HOME still planned, HOME unset protects nothing, visibility there names the project's CLAUDE.md alone; from HOME or above it no project: visibility hidden as not a project, naming no fix, a refusal saying to start in a project directory, a hand-made ~/AGENTS.md pointer never built on), a monorepo parent's import and conversion plans naming their reach and the project's own CLAUDE.md, a target changed after the plan rc 80 in the library's own program (b-race-merge, b-race-convert: the changed bytes kept, no temp file), an import line written or offered only when it reads back as the project's import (b-space-*, a project path with whitespace, a tab too; b-tilde-*, a directory named ~ on the way down: the import into the CLAUDE.md above refused rc 2 before any plan, without and twice with --yes, unchanged; the import column -, visibility and session start naming the project's own CLAUDE.md alone; the .claude/CLAUDE.md beside it, whose @../~/proj/AGENTS.md reads back, still planned), an import read in Markdown text, its path whole (b-fence-*, b-name-*: one in a fence or padded code span, Read @AGENTS.md. or (see @AGENTS.md) is none: no-import, hidden with the fix, the line appended, then unchanged; a file ending in an open fence or comment, an import of c#app or app[1] from above: rc 2, unchanged; a plain line, one after a closed or list-indented fence, @AGENTS.md#setup import), an import in a link title is none (b-title-*: [x](a(b) \"t @AGENTS.md \"), [x](a\\) ..., the Markdown_(syntax) link, the image form, a (title), a title on the next line: no-import, hidden with the fix, the line appended, then unchanged; see @AGENTS.md and one after [y](a(b)c) import), one whose _ may pair as emphasis is none (b-emphasis-*: @_app/AGENTS.md with z_ in its paragraph no-import, hidden; in another paragraph imports, visible), the reader is linear (b-slow: 100 KB of ](, a 40 KB backslash run and 3000 <? before the import, read in ${_S16B_SLOW}s of the 20 s allowed) and bounded (b-bound: _INSTR_SECS=1 gives up on a python3 that ignores SIGTERM in 1 s + the 2 s SIGKILL grace, rc 137, nothing printed, the stub gone, under ${_S16B_BOUND} and the watchdog), an import a path takes in or a block hides is none (b-join-*: @x\\ @AGENTS.md; b-tail-*: <?x?><div>, <!x y><a>, two lines, a quote; b-tab-*: >\\t<div>, -\\t<div>: no-import, hidden, appended, unchanged; controls import), the block structure as marked lexes it (b-mk-*: a tag name ending its line, a > stripped from a code line, a lazy HTML line in a quote, a lazy fence ending a quote in a list item, a 2. after paragraph text, a closing tag over lines, an item ended before a definition title, a definition label over lines: no-import, hidden, appended, unchanged; one control per family imports); "
+_S16_EV="${_S16_EV}B (4.1, ccd): an absolute CLAUDE_CONFIG_DIR outside the project holds the user line (kind CLAUDE.md), its import makes the pointer visible, HOME's .claude/CLAUDE.md is above, the writers refuse it, its directory and ~/.claude (rc 2, with and without --yes); unset: HOME's .claude/CLAUDE.md the user line; empty, relative or the project: no user line, the pointer hidden, the project's plans kept; "
 rm -rf "$_S16B"
 # --- end of SELF-16 section B ---
 # --- SELF-16 section C: at-setup's blocks and the headless primitives (U15) ---
