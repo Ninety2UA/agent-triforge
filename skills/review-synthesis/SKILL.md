@@ -4,7 +4,7 @@ description: "Use when two or more review outputs exist for one change: merge, d
 metadata:
   triforge-consumer: "the lead"
   triforge-phase: "4 (process reviews)"
-  version: "4.1.0"
+  version: "4.1.1"
 ---
 
 # Review Synthesis

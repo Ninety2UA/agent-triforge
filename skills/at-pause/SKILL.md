@@ -4,7 +4,7 @@ description: "Use when stopping mid-sprint: writes the ops/STATE.md checkpoint a
 disable-model-invocation: true
 metadata:
   triforge-consumer: "lead"
-  version: "4.1.0"
+  version: "4.1.1"
 ---
 
 # Pause (checkpoint)

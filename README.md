@@ -41,17 +41,14 @@ Every implementation task, the lead's own included, is built under a per-task le
 When the lead solves a problem whose reasoning would otherwise be lost, it writes a note to [`ops/solutions/`](ops/solutions/), or to [`ops/decisions/`](ops/decisions/) for an architectural decision. The [`learnings-researcher`](personas/learnings-researcher.md) persona searches both before new work is planned ([the knowledge loop](#the-knowledge-loop-at-compound)).
 
 <a name="whats-new"></a>
-## What's new (v4.1.0)
+## What's new (v4.1.1)
 
-This release fixes what the 4.0 review left open, and what the review of those fixes found. Nothing changes in how you run Triforge.
+This release changes the documentation and the release tooling. Nothing changes in how you run Triforge.
 
-- **The import reader stays small.** On a CLAUDE.md built to stress it, the check that asks whether a file imports `AGENTS.md` used up to 2.4 GB; it now stays under 100 MiB on every hostile 4 MiB shape in the tests, with the same answers (4.5 million generated documents compared against 4.0's reader and 6.6 million more after the review's fixes, 1.4 million token by token against marked). Setup and session start read each such file once.
-- **No instruction file is read whole.** `AGENTS.md`, `AGENTS.override.md`, Codex's `config.toml` and the pointer template are read to 4 MiB at most, and their sizes come from the file itself. A `CLAUDE.md` past a reading bound is named as such (`past-bound` in setup's file list, its own line at session start) instead of being offered an import that would then be refused.
-- **A time bound stops everything a command started.** When setup or session start runs a command under a time bound, nothing the command started outlives the call. At the bound its whole process group is stopped, and so is anything it left running when it returns early, with or without the `timeout` binary. The watchdog's temp directory never stays behind. Session start's warning names the real reason a check did not finish.
-- **Promotion targets are watched.** A promotion into a branch other than the default one records that branch when you approve it, and a move of it stops the next lease call (rc 44); an approval refuses to drop or replace a watched branch that moved. A default branch that appears where none was on record (a `git checkout main` that creates it, say) also stops the next lease call until `lease_rebaseline` accepts it. A merge whose integration branch moved during it says so, and the recovery steps it prints keep your uncommitted edits (`git reset --keep` or `--merge`, never `--hard`).
-- **`CLAUDE_CONFIG_DIR` is honored.** When you move Claude Code's config home with `CLAUDE_CONFIG_DIR` (an absolute path outside the project), setup reads your user-level `CLAUDE.md` from there, never writes it, keeps a claude worker on the same config home, and denies its `.credentials.json` to the read-only lanes. Unset, `~/.claude` as before. Set to anything else (empty, relative or inside the project), setup lists that `CLAUDE.md` as a project file but never writes it or any file beside it.
-- **The maintainer tools ignore planted modules**, like the rest of the helpers since 4.0: the validators, the release notes and the probe harness.
-- **Five diagrams redrawn** so no arrow crosses a label.
+- **The README follows agent-blueprint's order.** It starts with what Triforge is, then covers install for either lead, getting started, unattended runs, upgrading from 3.x and updating, and ends with the reference sections. It shows only the latest What's new; older releases are in the collapsed [Release history](#recent-changes).
+- **The diagrams are light.** The 13 dark diagrams became 15 light ones that read on GitHub's light and dark themes, and on a phone a tap opens each one full size. Two are new: the install routes and the unattended-run loop. Checking every label against the code corrected a few stale facts: there are five quality gates, at-ship reviews in five lanes, the kill grace is 10 s, and test fix cycles stop at 3.
+- **Each release has its own notes file.** A version's notes live in `docs/releases/v<version>.md`, and the release workflow publishes that file as the GitHub release.
+- **The maintainer gates are stricter.** `validate-versions.sh` fails a version bump that has no notes file and rejects Liquid delimiters under `docs/`, which break the GitHub Pages build. It also fails when a diagram source changed without a re-render, or when a diagram names a stale pin, a wrong count or a Codex invocation without its `agent-triforge:` prefix.
 
 ---
 
@@ -415,12 +412,6 @@ your-project/                       (your repo — bootstrapped on first session
 │   ├── decisions/                      Architecture decision records
 │   └── archive/                        Archived review + test files
 └── src/                              Your source code
-
-agent-triforge/ checkout            (maintainers only — not installed with the plugin)
-├── .claude/commands/                 /cli-watch + /repo-watch — framework self-maintenance
-├── .claude/skills/watch-cycle/       Shared watch methodology
-├── .github/PULL_REQUEST_TEMPLATE.md  PR template: evidence table + validator results
-└── ops/watch-registry.toml           Watch targets: eight CLIs + three research tools + seven reference repos
 ```
 
 ### Automatic project bootstrapping
@@ -837,32 +828,6 @@ Why these floors:
 
 The Gemini CLI floor was removed with the Antigravity migration, after Google's hosted service stopped serving consumer tiers on 2026-06-18; legacy Gemini users pin plugin `v2.4.3`. An absent or declined optional CLI is skipped silently, because every fallback chain ends at a core-trio member, which can't be disabled.
 
-## How it compares
-
-Triforge's design drew on an analysis of the Claude Code Blueprint, now [Agent Blueprint](https://github.com/Ninety2UA/agent-blueprint), and adopted the patterns that suit a multi-model team.
-
-| Dimension | [Agent Blueprint](https://github.com/Ninety2UA/agent-blueprint) | This framework |
-|---|---|---|
-| Agent model | One CLI per run, with its own subagents as helpers; the same skills install in eight CLIs | Heterogeneous eight-CLI builder pool (core trio + optional OpenCode/Kimi/Cursor/Devin/Grok Build) in one sprint |
-| Review | A review swarm of helper prompts in the session's CLI, validated and synthesized | Two core CLI lanes, every enrolled optional member, specialist personas by flag and a gated learnings researcher, synthesized with confidence tiers |
-| Codebase analysis | A helper in the session's CLI | [Antigravity CLI](https://antigravity.google/cli) (1M token context) |
-| Test execution | The session's CLI | [Codex CLI](https://github.com/openai/codex) (sandboxed execution) |
-| Coordination | Task ledger, waves, file ownership or worktrees, lead-only commits | File protocol + per-task leases + personas + teams |
-| Skills | One skill set, installed natively in each CLI | Portable skills shared by every roster CLI via [injection](#portable-skill-injection), plus lead workflows for the lead |
-| Dependencies | Any one of its eight supported CLIs | Core trio required (Claude + Antigravity + Codex); optional tier adds OpenCode/Kimi/Cursor/Devin/Grok Build |
-
-<details>
-<summary><strong>What we adopted from Blueprint</strong></summary>
-
-Confidence tiering, suppressions lists, review synthesis, wave orchestration, quality gates, institutional knowledge compounding, dual-loop context management, risk scoring, shadow path tracing, session continuity. The Blueprint's completion-promise pattern and ship-loop Stop-hook architecture were also adopted, then retired in 2026-07 when Claude Code's native `/goal` gating covered them (probe CC-03); the `ops/.sprint-complete` sentinel now signals completion.
-</details>
-
-<details>
-<summary><strong>What we added beyond Blueprint</strong></summary>
-
-Multi-model coordination, portable skill injection into external agents, agent teams as a build mode, Antigravity Phase 0 analysis with 1M token context, Codex sandboxed testing, file-based coordination protocol for cross-model state sharing.
-</details>
-
 ## When NOT to use this framework
 
 | Situation | What to do instead |
@@ -882,6 +847,7 @@ Each version's full notes are one file in [`docs/releases/`](docs/releases/), an
 
 | Version | Date | Summary |
 |---|---|---|
+| [v4.1.1](docs/releases/v4.1.1.md) | 2026-10-13 | The README in agent-blueprint's order, light diagrams, release notes per version |
 | [v4.1.0](docs/releases/v4.1.0.md) | 2026-10-13 | The 4.0 review's residuals fixed: a small reader, bounded reads, process-group time bounds, watched promotion targets, CLAUDE_CONFIG_DIR |
 | [v4.0.0](docs/releases/v4.0.0.md) | 2026-10-12 | Lead choice (Claude Code or Codex), at- lead workflows, personas, AGENTS.md, Grok Build and Devin |
 | [v3.3.3](docs/releases/v3.3.3.md) | 2026-10-01 | Protected-path registry, digest-stamped skills, lead git integrity |
@@ -984,21 +950,6 @@ claude --plugin-dir ./agent-triforge
 ```
 
 CI cuts the releases. When a version bump lands on `main`, [`release.yml`](.github/workflows/release.yml) tags `v<version>` and publishes the GitHub release, using `docs/releases/v<version>.md` as the notes; `bash scripts/release-notes.sh --body` previews them. The short checklist is under "Release" in [`AGENTS.md`](AGENTS.md), the full one under "Release checklist" in [`docs/agent-triforge.md`](docs/agent-triforge.md).
-
-### Keeping the framework current (`/cli-watch`, `/repo-watch` — maintainers)
-
-Two repo-local commands keep the framework current. They are maintainer tooling that lives in [`.claude/commands/`](.claude/commands/) of this checkout, so they are available when you run Claude Code inside a clone of this repo and are never installed into your projects. Both read [`ops/watch-registry.toml`](ops/watch-registry.toml), a seeded, editable registry of watch targets, and share the [`watch-cycle`](.claude/skills/watch-cycle/SKILL.md) methodology: a primary-source research window, a per-target changelog, a gap table against current Triforge, an adopt/defer ADR with revisit triggers, and verification probes.
-
-| Command | Targets | Produces |
-|---|---|---|
-| [`/cli-watch`](.claude/commands/cli-watch.md) | the eight CLIs + three research tools (`[cli.*]`) | Gap report + adopt/defer ADR + a re-run of [`probe-capabilities.sh`](scripts/probe-capabilities.sh) |
-| [`/repo-watch`](.claude/commands/repo-watch.md) | seven external repos (`[repo.*]`) | Prioritized adopt/defer recommendations (Why / Concrete change / Verification). Recommends only; never implements. |
-
-The registry is the only thing you edit to add a target: a new `[cli.<name>]` or `[repo.<name>]` block is picked up with no command changes. Targets must be public HTTPS URLs (loopback, private, and link-local addresses are rejected before and after redirects). Fetched pages are treated as untrusted evidence, never as instructions, and a dead or renamed entry is flagged in the report, never dropped silently.
-
-Run `/cli-watch` or `/repo-watch` any time; the report and ADR land in [`ops/research/`](ops/research/) and [`ops/decisions/`](ops/decisions/).
-
-To run either monthly and headless, schedule it as a Claude Code cloud Routine: `/schedule`, the prompt `/cli-watch` (or `/repo-watch`), a monthly cron (Routines run at a minimum 1-hour interval). A scheduled run preflights its environment and picks its delivery. It commits the report to a branch and opens a PR when a pushable checkout exists. With no pushable checkout it falls back to the Routine's output artifact with landing instructions. When vendor auth is absent it opens a draft PR with the auth-dependent probes marked pending. A Routine missing a required binary, auth or research tool emits a diagnostic artifact naming the gap, never a silent success.
 
 ## License
 

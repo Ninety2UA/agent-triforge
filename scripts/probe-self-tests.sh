@@ -9130,11 +9130,13 @@ rm -f "$_S20/tmp/s20-version"
 _S20_FAIL="${_S20_FAIL}$(_self_expect floor "$O" '^old:rc=1:class=deterministic:floor=[1-9][0-9]*:optout=1:ran=no$' '^unread:rc=1:class=deterministic:floor=[1-9][0-9]*:optout=1:ran=no$' \
   '^floor:rc=0:class=none:floor=0:optout=0:ran=yes$' '^optout:rc=0:class=none:floor=0:optout=0:ran=yes$' '^fdispatch:rc=1:class=deterministic:floor=[1-9][0-9]*:err=1:ran=no$')"
 
-# lifecycle + skills: a repo tracking this repo's .claude/skills/watch-cycle/
+# lifecycle + skills: a repo tracking a repo-local .claude/skills/watch-cycle/
+# (a synthetic skill: the maintainer's real one is not in the published repo)
 # and a user copy under a shipped name
 _s20_repo "$_S20/repo" '[roles.builder]\ncli = "claude"\n'
+printf -- '---\nname: watch-cycle\ndescription: Use when probing SELF-20 (a repo-local skill the project tracks).\n---\n\nrepo-local skill\n' > "$_S20/watch-cycle-SKILL.md"
 ( cd "$_S20/repo" && export HOME="$_S20/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p .claude/skills/watch-cycle ".claude/skills/${_S20_COLLIDE}" \
-    && cp "${REPO_ROOT}/.claude/skills/watch-cycle/SKILL.md" .claude/skills/watch-cycle/SKILL.md \
+    && cp "$_S20/watch-cycle-SKILL.md" .claude/skills/watch-cycle/SKILL.md \
     && printf -- '---\nname: %s\ndescription: Use when probing SELF-20 (a user copy under a shipped name).\n---\n\nuser copy\n' "$_S20_COLLIDE" > ".claude/skills/${_S20_COLLIDE}/SKILL.md" \
     && git add -A && git commit -qm "track .claude/skills" ) >/dev/null 2>&1 || _S20_FAIL="$_S20_FAIL skills(fixture-git)"
 printf '#!/bin/sh\nprintf "builder edit\\n" >> .claude/skills/watch-cycle/SKILL.md\nprintf "%%s\\n" '"'"'{"type":"result","subtype":"success","is_error":false,"num_turns":2,"session_id":"%s","result":"did it\\n\\nStatus: DONE\\nConcerns: None\\nDiscoveries for later tasks: None"}'"'"'\n' "$_S20_SID" > "$_S20/fb-done.sh"
@@ -9156,7 +9158,7 @@ O=$( cd "$_S20/repo" && export $_S20_ENV TRIFORGE_LEASE_ROOT="$_S20/leases" && s
   echo "prov-missing:${M:- none}"
   case "$PROV" in (*" .claude/skills/watch-cycle "*|*" .claude/skills/${_S20_COLLIDE} "*) echo "prov-tracked:listed" ;; (*) echo "prov-tracked:none" ;; esac
   echo "at:$(ls -d "$WT"/.claude/skills/at-*/ 2>/dev/null | grep -v '/at-skill-work/$' | wc -l | tr -d ' ')"
-  cmp -s "$WT/.claude/skills/watch-cycle/SKILL.md" "${REPO_ROOT}/.claude/skills/watch-cycle/SKILL.md" && echo "watch-cycle:intact" || echo "watch-cycle:changed"
+  cmp -s "$WT/.claude/skills/watch-cycle/SKILL.md" "$_S20/watch-cycle-SKILL.md" && echo "watch-cycle:intact" || echo "watch-cycle:changed"
   grep -q '^user copy$' "$WT/.claude/skills/${_S20_COLLIDE}/SKILL.md" 2>/dev/null && echo "collide:intact" || echo "collide:replaced"
   lease_dispatch s20a "probe task" 60 >/dev/null 2>&1 || echo "dispatch-failed"
   _self_wait_rc s20a
@@ -14948,6 +14950,10 @@ _S28="${WORK}/self28"
 _S28_FAIL=""
 _S28_EV=""
 mkdir -p "$_S28"
+# The watch cycle is maintainer tooling kept out of the published repository
+# (2026-10-13), so SELF-28 runs only in a checkout that carries it.
+if [ -f "${REPO_ROOT}/.claude/commands/cli-watch.md" ] && [ -f "${REPO_ROOT}/.claude/commands/repo-watch.md" ] \
+   && [ -f "${REPO_ROOT}/ops/watch-registry.toml" ]; then
 # --- SELF-28 cases (worker 6-watch) ---
 # blocks   the swarm and wait blocks under "## Stage 2–3" of
 #          .claude/commands/cli-watch.md and repo-watch.md, taken as written and
@@ -15215,6 +15221,9 @@ if [ -z "$_S28_FAIL" ]; then
   row "SELF-28" "claude" "$_S28_CAP" "PASS" "$(printf '%s' "$_S28_EV" | cut -c1-3000)" "static"
 else
   row "SELF-28" "claude" "$_S28_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S28_FAIL"):$(printf '%s' "$_S28_FAIL" | cut -c1-700)" "static"
+fi
+else
+  row "SELF-28" "claude" "the watch cycle (maintainer tooling)" "SKIPPED" "the maintainer watch tooling (.claude/commands/cli-watch.md, repo-watch.md, ops/watch-registry.toml) is not in this checkout; it is kept out of the published repository" "static"
 fi
 rm -rf "$_S28"
 

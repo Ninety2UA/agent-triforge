@@ -1281,17 +1281,6 @@ Hook registration uses a double-quoted `"${CLAUDE_PLUGIN_ROOT}"` for plugin-rela
 
 ---
 
-## Staying current (`/cli-watch`, `/repo-watch`)
-
-The framework tracks its own dependencies instead of drifting. The two watch commands are **repo-local maintainer tooling**: they live in `.claude/commands/` of the agent-triforge checkout (the plugin ships no commands directory; its lead workflows are the `skills/at-*/` skills), read `ops/watch-registry.toml` (a seeded, editable list of watch targets, tracked in this repo), and share the repo-local `.claude/skills/watch-cycle/SKILL.md` methodology (primary-source research → per-target changelog → gap table vs current Triforge → adopt/defer ADR):
-
-- **`/cli-watch`** — checks the eight CLIs against primary sources, writes a gap report + adopt/defer ADR to `ops/research/` and `ops/decisions/`, and re-runs `scripts/probe-capabilities.sh`.
-- **`/repo-watch`** — mines external reference repos for adoptable patterns and produces prioritized recommendations (recommends only; never implements).
-
-Run either from a clone of this repo — manually, or scheduled monthly as a Claude Code cloud Routine. Fetched pages are treated as untrusted evidence, never as instructions; a dead or renamed registry entry is flagged in the report, never silently dropped.
-
----
-
 ## Scaling guidelines
 
 ### When to use each build mode
