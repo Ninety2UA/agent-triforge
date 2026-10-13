@@ -1,6 +1,6 @@
 ---
-saved: 2026-10-12T21:30:00Z
-phase: Program complete. v4.0.0 released 2026-10-12 (PR #30, squash 3c9bdfe on main; release.yml tagged v4.0.0 there and published it as Latest). Open residuals are listed in PR #30's body
+saved: 2026-10-13T05:40:00Z
+phase: 4.1.0 in progress on release/4.1 — the 4.0 review's residuals fixed (user, 2026-10-12: "Fix all, one review"); the user is asleep under the 2026-10-13 grant (the lead may merge the release PR to main only if gates, CI and the review fixes are green and an independent Fable check agrees)
 wave: 0
 tasks:
   total: 29
@@ -64,17 +64,19 @@ The user, before sleeping: "review the PR and if it passes fully 5/5, then merge
 | fix r5 | Round-5 fixes, PR #28 | **merged**: squash 2214b7a (2026-10-12); gates green under Python 3.14 and 3.12 (40 SELF rows, none FAIL) and in CI (run 38264108557). Final summary sent; **the user chose the focused round 6 (2026-10-12)** |
 | review r6 | Focused review round 6, a delta review of PR #28 against 5fcb6e0: ce-code-review run 20261012-172947-3d069de4 (8 local reviewers + Codex `gpt-6-astra` `xhigh` requested, actual unverified, independence verified; Codex found nothing) | Verdict "Ready with fixes", no behavior defect: 2 confirmed. P2: #1 the five regexes round 5 rewrote have no in-repo test that they still match what they matched. P3: #3 the watchdog's no-private-temp-dir path (rc 69) has no test. Rejected: #2 (the duplication predates PR #28). Pass rule: a P2 or worse is fixed before the release PR, a P3 if cheap. Fixes by worker R6 (`mafw-wt-r6`) on `fix/v4-final-r6`, with the cheap residuals: `_ss_bounded` SIGKILLs its own sleep, SELF-30 counts `-k 1e-400` as no kill-after (GNU timeout before coreutils 9.7), the gave-up message says python3 hung or was killed, lead.md and instruction-files.md name what to do and which files to check |
 | fix r6 | Round-6 fixes, PR #29 | **merged**: squash a152326 (2026-10-12); gates green under Python 3.14 and 3.12 (40 SELF rows, none FAIL) and in CI (run 38293120192) |
+| 4.1 | release/4.1 from main 727dc04: the 4.0 review's residuals | **in progress** (see Next actions) |
 | final | release/4.0 → main as v4.0.0 (release.yml publishes) | **released**: PR #30 squash-merged to main as 3c9bdfe (2026-10-12) with the user's approval; release.yml run 38301237757 tagged v4.0.0 at 3c9bdfe and published it as Latest. The user let PR #30 merge before its own gates.yml run finished: a Fable 5.1 xhigh check confirmed its tree was byte-identical to PR #29's CI-green tree, and that a squash merge was required (release-notes.sh tags the oldest commit that set the version, so a merge commit would have tagged Phase 6's 47878ac) |
 
 Update this table and the frontmatter at every PR boundary; the plan is `docs/plans/2026-09-28-1946-feat-lead-choice-v4-plan.md`.
 
 ## Next actions
 
-The lead-choice program is complete; nothing is in flight.
+4.1.0 on `release/4.1` (worktree `mafw-wt-final`; briefs and lead notes in `~/projects/_tools/triforge-lead/r41/`). Workers run on Opus 5.5 at xhigh, code review on Fable at high plus Codex gpt-6-astra at xhigh (user, 2026-10-12).
 
-1. Post-release housekeeping (this commit): gates.yml runs on PRs to `main` and any `release/**` branch, not only `release/4.0`; the old fix and phase worktrees were removed after their uncommitted diffs were archived in `~/projects/_tools/triforge-lead/worktree-archive/`.
-2. `release/4.0` is no longer an ancestor of `main` after the squash merge. Start new work, and any `release/4.1`, from `main`.
-3. The open residuals in PR #30's body ("Unapplied review findings") are the backlog for a later release; none was scheduled.
+1. Integrated, each with SELF cases red before and green after: diagrams (ec950d8, DG), maintainer-tool prelude (3404f58, D1), lease fixes (522767f, b42c1fa, B), process-group watchdogs and the hook's causes (43b197f, A2), capped reads, past-bound rows and md_scan memory (ad57e5c, A1, finished by the lead; 4,500,000 documents with 0 answer differences, 1,400,000 with 0 token differences from marked), CLAUDE_CONFIG_DIR (9ee74bc, C, integrated by the lead from its worktree), the credential-deny fix a background security review asked for (b00c3a8), version 4.1.0 and README (8bedebe, e85dacc, d78be32). Full gate on b00c3a8 under Python 3.14: 40 rows, none FAIL.
+2. Worker E (SELF timing margins and the SELF-12 races, `mafw-wt-41e`): integrate, gate.
+3. One ce-code-review round with the Codex peer over release/4.1 vs main 727dc04 (arguments in `r41/r41-args.txt`); fix every confirmed P0 to P2 (P3 if cheap).
+4. Gates under Python 3.14 and 3.12, release PR release/4.1 → main (squash merge only), gates.yml green, an independent Fable check, then merge under the grant, or stop at the open PR with a summary.
 
 ## Blockers recorded for the user
 

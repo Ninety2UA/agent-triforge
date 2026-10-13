@@ -199,6 +199,30 @@
       printf "$fmt" on caller text needs printf --. Every srun.sh run leaves a
       triforge-self-only-*.md record in the user's TMPDIR, and they pile up.
 
+- Worker discoveries (4.1.0 residual fixes, 2026-10-13), UNVERIFIED, recorded by the lead from the workers' reports:
+
+      fix worker A1: md_scan's peak memory came from Python's regex engine (a frame
+      per iteration of a repeated group, about 200 to 600 bytes, kept resident on
+      macOS), up to 5.2 GB on one 4 MiB shape; long-span patterns now read in bounded
+      chunks. Workers A1, A1c and C stopped responding mid-run, most likely on a
+      permission prompt nobody could answer overnight: an `rm -rf` on a variable path
+      and an ad-hoc `bash -c` that sources the library both ask for approval.
+      fix worker A2: GNU timeout 9.11 covers a fork only when the launcher also holds
+      out until the KILL; when the launcher dies on TERM, timeout returns 124 at once
+      and a TERM-ignoring child keeps the caller's stdout open (fixed in 4.1: both
+      timeout paths sweep the group). Without perl, both watchdogs stop the pid alone.
+      fix worker B: README.md:74 (the 3.3.3 notes) and docs/rule-inventory.md row 67
+      list the integrity surfaces without the promotion target (history). After a
+      promotion into an explicit target the checkout stays on that target, so a
+      lease_create there records the target as the integration branch (read from the
+      code, not tested).
+      fix worker D1: .github/workflows/release.yml line 51 runs python3 -c without
+      the prelude (a planted json.py would have to be committed on main); the prelude
+      comment in scripts/lib/common.sh names only the hook copies.
+      fix worker DG: Chrome 154 headless --screenshot writes the file and does not
+      exit; scripts must wait for the file and stop it. The Edit tool can drop a
+      trailing space at the end of new_string; anchor short edits on following text.
+
 ## Interface proposals
 <!-- No active proposals -->
 
