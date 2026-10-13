@@ -6,3 +6,9 @@ ops/leases.toml
 /.antigravity/
 /.agents/
 __pycache__/
+# Maintainer-only watch tooling (/cli-watch, /repo-watch, the watch-cycle
+# skill and its registry): run from a local checkout, never published.
+/.claude/commands/cli-watch.md
+/.claude/commands/repo-watch.md
+/.claude/skills/watch-cycle/
+/ops/watch-registry.toml

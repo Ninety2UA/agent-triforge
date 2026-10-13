@@ -412,12 +412,6 @@ your-project/                       (your repo — bootstrapped on first session
 │   ├── decisions/                      Architecture decision records
 │   └── archive/                        Archived review + test files
 └── src/                              Your source code
-
-agent-triforge/ checkout            (maintainers only — not installed with the plugin)
-├── .claude/commands/                 /cli-watch + /repo-watch — framework self-maintenance
-├── .claude/skills/watch-cycle/       Shared watch methodology
-├── .github/PULL_REQUEST_TEMPLATE.md  PR template: evidence table + validator results
-└── ops/watch-registry.toml           Watch targets: eight CLIs + three research tools + seven reference repos
 ```
 
 ### Automatic project bootstrapping
@@ -834,32 +828,6 @@ Why these floors:
 
 The Gemini CLI floor was removed with the Antigravity migration, after Google's hosted service stopped serving consumer tiers on 2026-06-18; legacy Gemini users pin plugin `v2.4.3`. An absent or declined optional CLI is skipped silently, because every fallback chain ends at a core-trio member, which can't be disabled.
 
-## How it compares
-
-Triforge's design drew on an analysis of the Claude Code Blueprint, now [Agent Blueprint](https://github.com/Ninety2UA/agent-blueprint), and adopted the patterns that suit a multi-model team.
-
-| Dimension | [Agent Blueprint](https://github.com/Ninety2UA/agent-blueprint) | This framework |
-|---|---|---|
-| Agent model | One CLI per run, with its own subagents as helpers; the same skills install in eight CLIs | Heterogeneous eight-CLI builder pool (core trio + optional OpenCode/Kimi/Cursor/Devin/Grok Build) in one sprint |
-| Review | A review swarm of helper prompts in the session's CLI, validated and synthesized | Two core CLI lanes, every enrolled optional member, specialist personas by flag and a gated learnings researcher, synthesized with confidence tiers |
-| Codebase analysis | A helper in the session's CLI | [Antigravity CLI](https://antigravity.google/cli) (1M token context) |
-| Test execution | The session's CLI | [Codex CLI](https://github.com/openai/codex) (sandboxed execution) |
-| Coordination | Task ledger, waves, file ownership or worktrees, lead-only commits | File protocol + per-task leases + personas + teams |
-| Skills | One skill set, installed natively in each CLI | Portable skills shared by every roster CLI via [injection](#portable-skill-injection), plus lead workflows for the lead |
-| Dependencies | Any one of its eight supported CLIs | Core trio required (Claude + Antigravity + Codex); optional tier adds OpenCode/Kimi/Cursor/Devin/Grok Build |
-
-<details>
-<summary><strong>What we adopted from Blueprint</strong></summary>
-
-Confidence tiering, suppressions lists, review synthesis, wave orchestration, quality gates, institutional knowledge compounding, dual-loop context management, risk scoring, shadow path tracing, session continuity. The Blueprint's completion-promise pattern and ship-loop Stop-hook architecture were also adopted, then retired in 2026-07 when Claude Code's native `/goal` gating covered them (probe CC-03); the `ops/.sprint-complete` sentinel now signals completion.
-</details>
-
-<details>
-<summary><strong>What we added beyond Blueprint</strong></summary>
-
-Multi-model coordination, portable skill injection into external agents, agent teams as a build mode, Antigravity Phase 0 analysis with 1M token context, Codex sandboxed testing, file-based coordination protocol for cross-model state sharing.
-</details>
-
 ## When NOT to use this framework
 
 | Situation | What to do instead |
@@ -982,21 +950,6 @@ claude --plugin-dir ./agent-triforge
 ```
 
 CI cuts the releases. When a version bump lands on `main`, [`release.yml`](.github/workflows/release.yml) tags `v<version>` and publishes the GitHub release, using `docs/releases/v<version>.md` as the notes; `bash scripts/release-notes.sh --body` previews them. The short checklist is under "Release" in [`AGENTS.md`](AGENTS.md), the full one under "Release checklist" in [`docs/agent-triforge.md`](docs/agent-triforge.md).
-
-### Keeping the framework current (`/cli-watch`, `/repo-watch` — maintainers)
-
-Two repo-local commands keep the framework current. They are maintainer tooling that lives in [`.claude/commands/`](.claude/commands/) of this checkout, so they are available when you run Claude Code inside a clone of this repo and are never installed into your projects. Both read [`ops/watch-registry.toml`](ops/watch-registry.toml), a seeded, editable registry of watch targets, and share the [`watch-cycle`](.claude/skills/watch-cycle/SKILL.md) methodology: a primary-source research window, a per-target changelog, a gap table against current Triforge, an adopt/defer ADR with revisit triggers, and verification probes.
-
-| Command | Targets | Produces |
-|---|---|---|
-| [`/cli-watch`](.claude/commands/cli-watch.md) | the eight CLIs + three research tools (`[cli.*]`) | Gap report + adopt/defer ADR + a re-run of [`probe-capabilities.sh`](scripts/probe-capabilities.sh) |
-| [`/repo-watch`](.claude/commands/repo-watch.md) | seven external repos (`[repo.*]`) | Prioritized adopt/defer recommendations (Why / Concrete change / Verification). Recommends only; never implements. |
-
-The registry is the only thing you edit to add a target: a new `[cli.<name>]` or `[repo.<name>]` block is picked up with no command changes. Targets must be public HTTPS URLs (loopback, private, and link-local addresses are rejected before and after redirects). Fetched pages are treated as untrusted evidence, never as instructions, and a dead or renamed entry is flagged in the report, never dropped silently.
-
-Run `/cli-watch` or `/repo-watch` any time; the report and ADR land in [`ops/research/`](ops/research/) and [`ops/decisions/`](ops/decisions/).
-
-To run either monthly and headless, schedule it as a Claude Code cloud Routine: `/schedule`, the prompt `/cli-watch` (or `/repo-watch`), a monthly cron (Routines run at a minimum 1-hour interval). A scheduled run preflights its environment and picks its delivery. It commits the report to a branch and opens a PR when a pushable checkout exists. With no pushable checkout it falls back to the Routine's output artifact with landing instructions. When vendor auth is absent it opens a draft PR with the auth-dependent probes marked pending. A Routine missing a required binary, auth or research tool emits a diagnostic artifact naming the gap, never a silent success.
 
 ## License
 
