@@ -3,9 +3,14 @@
 // the canvas takes over once the page script runs. Labels and captions are plain words.
 import layouts from '@/data/layouts.json';
 import { CLIS, FIELD_CAPS } from '@/data/content';
+import { numberWord } from '@/lib/numbers.mjs';
 type Lay = typeof layouts.d;
 const main: Lay = layouts.d;
 const mob: Lay = layouts.m;
+// one cluster per CLI, in the roster's order; a CLI added to the registry needs a cluster in the layouts
+for (const [k, lay] of Object.entries(layouts)) {
+  if (lay.clusters.length !== CLIS.length) throw new Error(`site/src/data/layouts.json: layout ${k} has ${lay.clusters.length} clusters for ${CLIS.length} CLIs; add or remove a cluster`);
+}
 const r = (c: { opt?: number }, dx: number, dy: number) => {
   const d = Math.hypot(dx, dy);
   return c.opt ? +(0.31 - d * 0.04).toFixed(3) : +(0.45 - d * 0.055).toFixed(3);
@@ -18,7 +23,7 @@ const labels = (lay: Lay, short: boolean) => [
     return { cls: c.opt ? 'flbl opt' : 'flbl', left: ((c.x + 0.5) / lay.cols) * 100, top: ((c.y + R + 1.15) / lay.rows) * 100, name: cli.name, sub: short ? '' : (subs[cli.name] ?? 'optional') };
   }),
 ];
-const aria = 'A dot field of the eight coding agents as clusters. You give the lead, Claude Code, a goal; it splits the goal into two tasks, each in its own workspace. Claude Code builds them, Codex reviews both, and Claude Code is refused when it tries to review its own work. The lead merges both tasks onto the shared branch.';
+const aria = `A dot field of the ${numberWord(CLIS.length)} coding agents as clusters. You give the lead, Claude Code, a goal; it splits the goal into two tasks, each in its own workspace. Claude Code builds them, Codex reviews both, and Claude Code is refused when it tries to review its own work. The lead merges both tasks onto the shared branch.`;
 const sets = [{ lay: main, cls: 'lay-d', short: false }, { lay: mob, cls: 'lay-m', short: true }];
 ---
 <figure class="fig hero-art" style="margin:0">

@@ -1,7 +1,9 @@
 // The home page's hand-written copy: the headline, the install tabs and the sprint phases. Phases 0 to 6
 // are fixed text (KTD17); every skill and persona named here is checked against the repo by the site
 // gate, so a rename fails the build instead of shipping a dead name.
-import { INSTALL } from './content';
+import { INSTALL, SKILLS_ONLY } from './content';
+import { getCounts } from '@/lib/counts.mjs';
+import { numberWord } from '@/lib/numbers.mjs';
 import type { InstallTab } from '@/components/InstallTabs.astro';
 
 export const H1 = 'Put Claude Code, Codex and Antigravity on one team.';
@@ -18,10 +20,8 @@ export const installTabs: InstallTab[] = [
   { id: 'codex', label: 'Codex leads', lead: 'codex', blocks: [{ lines: INSTALL.codex, label: 'Copy the Codex install commands' }],
     note: 'A Codex lead also needs a trust entry you add by hand to `~/.codex/config.toml`. `/at-setup` prints it and never writes it.',
     art: { label: 'The trust entry, with your project path', text: '[projects."/abs/path"]\ntrust_level = "trusted"' } },
-  { id: 'skills-only', label: 'Skills only', blocks: [
-      { lines: ['devin plugins install Ninety2UA/agent-triforge#skills'], label: 'Copy the Devin command' },
-      { lines: ['pi install git:github.com/Ninety2UA/agent-triforge'], label: 'Copy the Pi command' }],
-    note: 'The ten portable skills only, for Devin or Pi: no lead workflows, hooks or agents.' },
+  { id: 'skills-only', label: 'Skills only', blocks: SKILLS_ONLY.map((s) => ({ lines: s.lines, label: `Copy the ${s.cli} command` })),
+    note: `The ${numberWord(getCounts().portableSkills)} portable skills only, for ${SKILLS_ONLY.map((s) => s.cli.replace(/ CLI$/, '')).join(' or ')}: no lead workflows, hooks or agents.` },
 ];
 
 export const PHASES = [
@@ -156,7 +156,7 @@ export const PHASES = [
         ]
       }
     ],
-    "who": "Reviewer lanes from the roster, plus three personas."
+    "who": "Reviewer lanes from the roster, plus the specialist personas."
   },
   {
     "n": "5",

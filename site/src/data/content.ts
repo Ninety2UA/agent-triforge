@@ -1,245 +1,102 @@
-// Facts for the copy, from FACTS.md only. Anything that moves (the dot field, the reviewer bench)
-// uses plain words: no code, paths, config or ids.
+// The home page's data: repo facts from the data modules (src/lib) and the hand-written phrasing around
+// them. Names, groups, providers, roles, fallbacks, install commands and counts come from the repo; the
+// home page's short descriptions are written by hand (the home copy is hand-written), keyed by name, and
+// a featured skill or persona that is no longer in the repo fails the build. A CLI added to the registry
+// shows up with a sentence generated from its roles. Anything that moves (the dot field) uses plain
+// words: no code, paths, config or ids.
+import { installCommands } from '@/lib/readme.mjs';
+import { getClis, getRoles } from '@/lib/roster.mjs';
+import { getSkills } from '@/lib/skills.mjs';
+import { getPersonas } from '@/lib/personas.mjs';
+import { numberWord } from '@/lib/numbers.mjs';
 
-export const GH = 'https://github.com/Ninety2UA/agent-triforge';
+export { GH } from '@/lib/site.mjs';
 
-export const NAV = [{"label": "Skills", "href": "/skills/"}, {"label": "Roster", "href": "/roster/"}, {"label": "Sprint", "href": "/sprint/"}, {"label": "Tutorials", "href": "/tutorials/"}, {"label": "Guides", "href": "/guides/"}, {"label": "Docs", "href": "/docs/"}, {"label": "Changelog", "href": "/changelog/"}];
+const install = installCommands();
+export const INSTALL = { claude: install.claude, codex: install.codex };
+export const SKILLS_ONLY = install.skillsOnly;
 
-export const INSTALL = {
-  "claude": [
-    "claude plugin marketplace add https://github.com/Ninety2UA/agent-triforge",
-    "claude plugin install agent-triforge@agent-triforge"
-  ],
-  "codex": [
-    "codex plugin marketplace add Ninety2UA/agent-triforge",
-    "codex plugin add agent-triforge@agent-triforge"
-  ]
+// What each core CLI does on the team by default, in a few words.
+const CLI_WORDS: Record<string, string> = {
+  claude: 'Leads by default and builds.',
+  antigravity: 'Maps the codebase and writes docs.',
+  codex: 'Reviews and tests. Can lead.',
 };
+const list = (words: string[]) => (words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} or ${words[words.length - 1]}`);
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-export const CLIS = [
-  {
-    "name": "Claude Code",
-    "tier": "core",
-    "roles": "Leads by default and builds.",
-    "provider": "Anthropic"
-  },
-  {
-    "name": "Antigravity",
-    "tier": "core",
-    "roles": "Maps the codebase and writes docs.",
-    "provider": "Google"
-  },
-  {
-    "name": "Codex",
-    "tier": "core",
-    "roles": "Reviews and tests. Can lead.",
-    "provider": "OpenAI"
-  },
-  {
-    "name": "OpenCode",
-    "tier": "opt",
-    "roles": "Any role.",
-    "provider": "Zhipu (Z.ai) via OpenRouter"
-  },
-  {
-    "name": "Kimi Code",
-    "tier": "opt",
-    "roles": "Any role.",
-    "provider": "Moonshot"
-  },
-  {
-    "name": "Cursor",
-    "tier": "opt",
-    "roles": "Any role.",
-    "provider": "xAI via Cursor"
-  },
-  {
-    "name": "Grok Build",
-    "tier": "opt",
-    "roles": "Builder, reviewer or analyst.",
-    "provider": "xAI"
-  },
-  {
-    "name": "Devin",
-    "tier": "opt",
-    "roles": "Reviewer or analyst, after your consent.",
-    "provider": "Cognition"
-  }
-];
+// core members first, then the optional ones in registry order, with a member that needs your consent last
+const ordered = getClis().map((c, i) => ({ c, i })).sort((a, b) => Number(b.c.core) - Number(a.c.core) || Number(a.c.consent) - Number(b.c.consent) || a.i - b.i).map(({ c }) => c);
+export const CLIS = ordered.map((c) => {
+  const via = c.egress.match(/\b(?:through|via) ([A-Z][\w.]+)/)?.[1];
+  const roles = c.roles.length === 5 ? 'Any role.' : `${cap(list(c.roles))}${c.consent ? ', after your consent' : ''}.`;
+  return { id: c.id, name: c.name, core: c.core, roles: CLI_WORDS[c.id] ?? roles, provider: via ? `${c.provider} via ${via}` : c.provider };
+});
 
-export const ROLES = [
-  {
-    "role": "builder",
-    "does": "Writes the code for a task",
-    "cli": "Claude Code",
-    "fallback": "Codex, then Antigravity"
-  },
-  {
-    "role": "reviewer",
-    "does": "Reviews every task it didn't build",
-    "cli": "Codex",
-    "fallback": "Antigravity, then Claude Code"
-  },
-  {
-    "role": "tester",
-    "does": "Writes the failing test first",
-    "cli": "Codex",
-    "fallback": "Claude Code"
-  },
-  {
-    "role": "analyst",
-    "does": "Maps the codebase before planning",
-    "cli": "Antigravity",
-    "fallback": "Claude Code"
-  },
-  {
-    "role": "documenter",
-    "does": "Writes the documentation",
-    "cli": "Antigravity",
-    "fallback": "Claude Code"
-  }
-];
+// What each role does, in a few words.
+const ROLE_WORDS: Record<string, string> = {
+  builder: 'Writes the code for a task',
+  reviewer: "Reviews every task it didn't build",
+  tester: 'Writes the failing test first',
+  analyst: 'Maps the codebase before planning',
+  documenter: 'Writes the documentation',
+};
+export const ROLES = getRoles().map((r) => ({
+  role: r.role,
+  does: ROLE_WORDS[r.role] ?? cap(r.role),
+  cli: r.cliName,
+  fallback: r.fallbacks.map((f) => f.cliName).join(', then '),
+}));
 
-export const LEAD_SKILLS = ["at-ship", "at-coordinate", "at-plan", "at-build", "at-review", "at-test", "at-wrap", "at-quick", "at-debug", "at-deep-research", "at-analyze", "at-status", "at-pause", "at-resume", "at-compound", "at-resolve-pr", "at-setup"];
+// The skills the home page features: what each does and when to reach for it.
+const FEATURED_WORDS: Record<string, [summary: string, use: string]> = {
+  'at-ship': ['One sprint on its own: analyze, plan, build, review, test, wrap, then mark it complete.', 'Use it when a scoped goal should ship in one run.'],
+  'at-coordinate': ['The plain Phase 0 to 6 cycle that coordinate.sh drives, session after session.', 'Use it for the same sprint without convergence or team flags.'],
+  'at-plan': ['Turns a goal into ops/TASKS.md with waves, failure paths and a plan-checker verdict.', 'Use it when you want to read the plan before anything is built.'],
+  'at-build': ['Builds tasks in waves, pins a reviewer to each and merges what passes.', 'Use it when ops/TASKS.md holds assigned tasks.'],
+  'at-review': ['Review lanes from the roster plus specialist reviewers, merged into one report.', 'Use it when built tasks need Phase 3 and 4 review.'],
+  'at-test': ['Finds untested paths, gets tests from the roster tester, fixes until green.', 'Use it when changed code needs Phase 5 testing.'],
+  'at-wrap': ['Records what was learned, archives review files, writes STATE.md, marks completion.', 'Use it when a sprint or a session ends.'],
+  'at-quick': ['A test-first change with a self-review and no swarm.', 'Use it for fewer than 3 files with no shared interface or protected path.'],
+  'at-debug': ['Reproduce, find the root cause with evidence, fix, write it down.', 'Use it when a bug report or an error needs a cause.'],
+  'wave-orchestration': ['Leases, pinned cross-review and merges in wave order.', 'Use it when a validated plan has two or more tasks.'],
+  'verification-before-completion': ['Fresh evidence behind every claim that something is done.', 'Use it before calling anything done.'],
+  'knowledge-compounding': ['Writes a note only when a future agent would repeat the mistake without it.', 'Use it when a task ends with something learned.'],
+};
+const skills = new Map(getSkills().map((s) => [s.name, s]));
+export const FEATURED = Object.entries(FEATURED_WORDS).map(([name, [summary, use]]) => {
+  const s = skills.get(name);
+  if (!s) throw new Error(`site/src/data/content.ts: the featured skill ${name} is not in skills/`);
+  return { name, group: s.group.key, groupLabel: s.group.label, lead: s.lead, summary, use };
+});
 
-export const PORTABLE = ["codebase-mapping", "writing-plans", "shadow-path-tracing", "wave-orchestration", "iterative-refinement", "review-synthesis", "verification-before-completion", "knowledge-compounding", "session-continuity", "scope-cutting"];
+// The specialist reviewers /at-ship runs, in plain words.
+const PERSONA_WORDS: Record<string, string> = {
+  'security-sentinel': 'Reviews for security and nothing else: OWASP-class issues, in depth.',
+  'performance-oracle': 'Finds bottlenecks and scaling problems, such as nested loops over the same data.',
+  'code-simplicity-reviewer': 'Flags complexity the change does not need, like an interface with one implementation.',
+  'findings-synthesizer': 'Reads every review file, removes duplicates, sets confidence tiers and writes one report.',
+  'plan-checker': 'Checks the plan before anything is built, and keeps checking until it approves.',
+};
+const personas = new Map(getPersonas().map((p) => [p.name, p]));
+export const PERSONAS = Object.entries(PERSONA_WORDS).map(([name, what]) => {
+  const p = personas.get(name);
+  if (!p) throw new Error(`site/src/data/content.ts: the featured persona ${name} is not in personas/`);
+  return { name, anchor: p.anchor, what, neverDowngraded: p.neverDowngrade };
+});
 
-export const FEATURED = [
-  {
-    "name": "at-ship",
-    "group": "sprint",
-    "groupLabel": "Full sprint",
-    "lead": true,
-    "summary": "One sprint on its own: analyze, plan, build, review, test, wrap, then mark it complete.",
-    "use": "Use it when a scoped goal should ship in one run."
-  },
-  {
-    "name": "at-coordinate",
-    "group": "sprint",
-    "groupLabel": "Full sprint",
-    "lead": true,
-    "summary": "The plain Phase 0 to 6 cycle that coordinate.sh drives, session after session.",
-    "use": "Use it for the same sprint without convergence or team flags."
-  },
-  {
-    "name": "at-plan",
-    "group": "plan",
-    "groupLabel": "Plan",
-    "lead": true,
-    "summary": "Turns a goal into ops/TASKS.md with waves, failure paths and a plan-checker verdict.",
-    "use": "Use it when you want to read the plan before anything is built."
-  },
-  {
-    "name": "at-build",
-    "group": "build",
-    "groupLabel": "Build",
-    "lead": true,
-    "summary": "Builds tasks in waves, pins a reviewer to each and merges what passes.",
-    "use": "Use it when ops/TASKS.md holds assigned tasks."
-  },
-  {
-    "name": "at-review",
-    "group": "review",
-    "groupLabel": "Review",
-    "lead": true,
-    "summary": "Review lanes from the roster plus specialist reviewers, merged into one report.",
-    "use": "Use it when built tasks need Phase 3 and 4 review."
-  },
-  {
-    "name": "at-test",
-    "group": "test",
-    "groupLabel": "Test",
-    "lead": true,
-    "summary": "Finds untested paths, gets tests from the roster tester, fixes until green.",
-    "use": "Use it when changed code needs Phase 5 testing."
-  },
-  {
-    "name": "at-wrap",
-    "group": "wrap",
-    "groupLabel": "Wrap",
-    "lead": true,
-    "summary": "Records what was learned, archives review files, writes STATE.md, marks completion.",
-    "use": "Use it when a sprint or a session ends."
-  },
-  {
-    "name": "at-quick",
-    "group": "utility",
-    "groupLabel": "Utility",
-    "lead": true,
-    "summary": "A test-first change with a self-review and no swarm.",
-    "use": "Use it for fewer than 3 files with no shared interface or protected path."
-  },
-  {
-    "name": "at-debug",
-    "group": "utility",
-    "groupLabel": "Utility",
-    "lead": true,
-    "summary": "Reproduce, find the root cause with evidence, fix, write it down.",
-    "use": "Use it when a bug report or an error needs a cause."
-  },
-  {
-    "name": "wave-orchestration",
-    "group": "portable",
-    "groupLabel": "Phase 2",
-    "lead": false,
-    "summary": "Leases, pinned cross-review and merges in wave order.",
-    "use": "Use it when a validated plan has two or more tasks."
-  },
-  {
-    "name": "verification-before-completion",
-    "group": "portable",
-    "groupLabel": "Every role",
-    "lead": false,
-    "summary": "Fresh evidence behind every claim that something is done.",
-    "use": "Use it before calling anything done."
-  },
-  {
-    "name": "knowledge-compounding",
-    "group": "portable",
-    "groupLabel": "Phase 6",
-    "lead": false,
-    "summary": "Writes a note only when a future agent would repeat the mistake without it.",
-    "use": "Use it when a task ends with something learned."
-  }
-];
-
-export const PERSONAS = [
-  {
-    "name": "security-sentinel",
-    "what": "Reviews for security and nothing else: OWASP-class issues, in depth.",
-    "neverDowngraded": true
-  },
-  {
-    "name": "performance-oracle",
-    "what": "Finds bottlenecks and scaling problems, such as nested loops over the same data.",
-    "neverDowngraded": false
-  },
-  {
-    "name": "code-simplicity-reviewer",
-    "what": "Flags complexity the change does not need, like an interface with one implementation.",
-    "neverDowngraded": false
-  },
-  {
-    "name": "findings-synthesizer",
-    "what": "Reads every review file, removes duplicates, sets confidence tiers and writes one report.",
-    "neverDowngraded": true
-  },
-  {
-    "name": "plan-checker",
-    "what": "Checks the plan before anything is built, and keeps checking until it approves.",
-    "neverDowngraded": true
-  }
-];
-
+// The dot field's captions, one per step of its story, in the film's order.
+const core = CLIS.filter((c) => c.core).map((c) => c.name);
+const optional = CLIS.length - core.length;
 export const FIELD_CAPS = [
-  "Eight coding agents. Claude Code, Antigravity and Codex are always on the team; the other five join when you add them.",
-  "You give the lead a goal. Here Claude Code leads.",
-  "The lead splits the goal into tasks, each in its own workspace.",
-  "Claude Code builds task 1.",
+  `${numberWord(CLIS.length, { capital: true })} coding agents. ${core.slice(0, -1).join(', ')} and ${core[core.length - 1]} are always on the team; the other ${numberWord(optional)} join when you add them.`,
+  'You give the lead a goal. Here Claude Code leads.',
+  'The lead splits the goal into tasks, each in its own workspace.',
+  'Claude Code builds task 1.',
   "Codex reviews task 1. It didn't write it.",
-  "The lead merges task 1 onto the shared branch.",
-  "Claude Code builds task 2.",
+  'The lead merges task 1 onto the shared branch.',
+  'Claude Code builds task 2.',
   "Claude Code tries to review its own task. An agent can't review its own work.",
-  "Codex reviews task 2 instead.",
-  "The lead merges task 2. Every change was reviewed by an agent that didn't write it."
+  'Codex reviews task 2 instead.',
+  "The lead merges task 2. Every change was reviewed by an agent that didn't write it.",
 ];

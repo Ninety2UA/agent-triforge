@@ -1,0 +1,18 @@
+---
+// A count read from the repo, in a data-claim element the site gate checks against the repo on every
+// build (KTD17). `kind` names the count in counts.mjs; `word` sets it as a word ("seventeen"), with a
+// capital first letter when it opens a sentence. Never write a count of skills, workflows, personas,
+// CLIs, roles or releases by hand: render it with this component.
+import { getCounts } from '@/lib/counts.mjs';
+import { numberWord } from '@/lib/numbers.mjs';
+
+type Kind = keyof ReturnType<typeof getCounts>;
+interface Props {
+  kind: Kind;
+  word?: boolean;
+  capital?: boolean;
+}
+const { kind, word = false, capital = false } = Astro.props;
+const n = getCounts()[kind];
+---
+<span data-claim={kind}>{word ? numberWord(n, { capital }) : n}</span>

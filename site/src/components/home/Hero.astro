@@ -6,6 +6,7 @@ import InstallTabs from '../InstallTabs.astro';
 import { buttonVariants } from '@/components/ui/button';
 import { INSTALL_HREF } from '@/data/nav';
 import { H1, LEDE, heroTabs } from '@/data/home';
+import Claim from '../Claim.astro';
 ---
 <section class="hero" aria-labelledby="h1">
   <div class="wrap hero-split">
@@ -13,7 +14,7 @@ import { H1, LEDE, heroTabs } from '@/data/home';
       <h1 id="h1">{H1}</h1>
       <p class="lede">{LEDE}</p>
       <div class="inst"><InstallTabs id="hero-lead" tabs={heroTabs} label="Which CLI leads" /></div>
-      <div class="cta-row"><a class={buttonVariants()} href={INSTALL_HREF} data-lead-href={INSTALL_HREF}>Install</a><a class={buttonVariants({ variant: 'outline' })} href="/skills/">Browse the 27 skills</a></div>
+      <div class="cta-row"><a class={buttonVariants()} href={INSTALL_HREF} data-lead-href={INSTALL_HREF}>Install</a><a class={buttonVariants({ variant: 'outline' })} href="/skills/">Browse the <Claim kind="skills" /> skills</a></div>
     </div>
     <DotField />
   </div>

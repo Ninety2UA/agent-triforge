@@ -5,7 +5,9 @@
 import Mark from './Mark.astro';
 import CodeBlock from './CodeBlock.astro';
 import { NAV } from '@/data/nav';
-import { GH, INSTALL } from '@/data/content';
+import { INSTALL } from '@/data/content';
+import { GH, VERSION, RELEASED } from '@/lib/site.mjs';
+import { sectionPages } from '@/lib/docs.mjs';
 
 const columns = [
   {
@@ -15,29 +17,8 @@ const columns = [
       { label: 'Personas', href: '/skills/personas/' },
     ],
   },
-  {
-    title: 'Docs',
-    links: [
-      { label: 'Getting started', href: '/docs/getting-started/' },
-      { label: 'How it works', href: '/docs/how-it-works/' },
-      { label: 'Workflows', href: '/docs/workflows/' },
-      { label: 'Project layout', href: '/docs/project-layout/' },
-      { label: 'Portable skills', href: '/docs/portable-skills/' },
-      { label: 'Compatibility', href: '/docs/compatibility/' },
-      { label: 'Upgrading', href: '/docs/upgrading/' },
-      { label: 'FAQ', href: '/docs/faq/' },
-    ],
-  },
-  {
-    title: 'Guides',
-    links: [
-      { label: 'Leases and cross-review', href: '/guides/leases/' },
-      { label: 'Unattended runs', href: '/guides/unattended-runs/' },
-      { label: 'Team builds', href: '/guides/team-builds/' },
-      { label: 'Models and effort', href: '/guides/models-and-effort/' },
-      { label: 'Data egress', href: '/guides/data-egress/' },
-    ],
-  },
+  { title: 'Docs', links: sectionPages('docs').map((p) => ({ label: p.title, href: p.href })) },
+  { title: 'Guides', links: sectionPages('guides').map((p) => ({ label: p.title, href: p.href })) },
   {
     title: 'Tutorials',
     links: [
@@ -73,7 +54,7 @@ const columns = [
     </div>
     <div class="ftr-bot">
       <div><CodeBlock lines={INSTALL.claude} label="Copy the Claude Code install commands" /></div>
-      <small>MIT license. Version 4.1.1, released 2026-10-13. Made by Ninety2UA.</small>
+      <small>MIT license. Version {VERSION}, released {RELEASED}. Made by Ninety2UA.</small>
     </div>
   </div>
 </footer>

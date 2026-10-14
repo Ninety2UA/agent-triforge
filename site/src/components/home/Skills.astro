@@ -1,15 +1,17 @@
 ---
 // The featured skills with their filter chips (SkillFilter island, hydrated on first use).
 import SkillFilter from '../SkillFilter';
+import Claim from '../Claim.astro';
+import { numberWord } from '@/lib/numbers.mjs';
 import { FEATURED } from '@/data/content';
 ---
 <section id="skills" aria-labelledby="skills-h" data-rv-group>
   <div class="wrap">
     <div class="sec-head" data-rv>
-      <h2 id="skills-h">Seventeen workflows, ten portable skills</h2>
-      <p>Workflows named <code>at-*</code> run in the lead. Portable skills work in any agent and usually start on their own when the context fits. Here are twelve of the 27.</p>
+      <h2 id="skills-h"><Claim kind="leadSkills" word capital /> workflows, <Claim kind="portableSkills" word /> portable skills</h2>
+      <p>Workflows named <code>at-*</code> run in the lead. Portable skills work in any agent and usually start on their own when the context fits. Here are {numberWord(FEATURED.length)} of the <Claim kind="skills" />.</p>
     </div>
     <SkillFilter client:interaction skills={FEATURED} />
-    <p class="cat-foot"><a class="more" href="/skills/">All 27 skills</a></p>
+    <p class="cat-foot"><a class="more" href="/skills/">All <Claim kind="skills" /> skills</a></p>
   </div>
 </section>
