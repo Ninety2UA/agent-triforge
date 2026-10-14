@@ -1,0 +1,10 @@
+[
+  {"label": "Goal", "start": 0},
+  {"label": "Plan", "start": 6.4},
+  {"label": "Build", "start": 12.6},
+  {"label": "Review", "start": 19.4},
+  {"label": "Merge", "start": 26.4},
+  {"label": "Test", "start": 33.0},
+  {"label": "Wrap", "start": 40.0},
+  {"label": "On its own", "start": 44.6}
+]

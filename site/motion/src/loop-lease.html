@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1200, height=750" />
+<title>Lease loop</title>
+<script src="assets/gsap.min.js"></script>
+<style>
+/*{{DS_CSS}}*/
+html, body { width: 1200px; height: 750px; }
+.ctr { text-align: center; width: 300px; }
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="8" data-width="1200" data-height="750">
+  <div id="stage" class="clip" data-start="0" data-duration="8" data-track-index="0"><canvas id="cv"></canvas><div id="type"></div></div>
+</div>
+<script>
+//{{DS_JS}}
+</script>
+<script>
+(function () {
+  // Shown at about 560 px wide: captions 44 px, names 32 px, smallest text 26 px.
+  // One task: its own workspace, built, reviewed by a different agent, merged.
+  // A second task: the builder tries to review its own work and is refused.
+  const H = HT;
+  const { disc, block, join, track, renderer, tx, seg, frame, ACC, INK, RING, EMPTY } = H;
+  function build() {
+    const D = 8;
+    const tl = gsap.timeline({ paused: true });
+    const R = renderer(document.getElementById("cv"), 1200, 750);
+    const T = document.getElementById("type");
+
+    // ---- layout ----
+    const LY = 620;                        // the shared branch
+    const CL = { x: 220, y: 330 }, CX = { x: 980, y: 330 };
+    const cell = { x: 460, y: 168, w: 280, h: 260 }, cc = { x: 600, y: 298 };
+    const start = { x: 600, y: 580 };
+
+    const line = seg(64, LY, 1136, LY, { pitch: 14, r: 4.4 });
+    const cellFrame = frame(cell.x, cell.y, cell.w, cell.h, { pitch: 12, r: 1.8 });
+    const clusterCL = disc(CL.x, CL.y, 66, { pitch: 12, rmax: 5.4 });
+    const clusterCX = disc(CX.x, CX.y, 66, { pitch: 12, rmax: 5.4 });
+    const fixed = [line, cellFrame, clusterCL, clusterCX];
+    const staticDots = { emit: (t, out) => fixed.forEach((f) => { for (let i = 0; i < f.n; i++) out.push(f.x[i], f.y[i], f.r[i], f.c[i]); }) };
+
+    const dot = (x, y, r, c) => disc(x, y, r, { pitch: 1000, rmax: r, flat: true, c: c == null ? INK : c });
+    const taskAt = (p) => dot(p.x, p.y, 15);
+    const fill = block(cell.x + 18, cell.y + 18, 21, 20, { pitch: 12, rf: (i, j) => {
+      const d = Math.hypot(cell.x + 18 + i * 12 - cc.x, cell.y + 18 + j * 12 - cc.y) / 180;
+      return Math.max(0, 4.8 * (1 - d * d * 0.8));
+    } });
+    const built = join(taskAt(cc), fill);
+    const branch = seg(cc.x, LY - 16, cc.x, cell.y + cell.h + 10, { pitch: 12, r: 2.2 });
+
+    // task one: workspace, built, reviewed, merged
+    const work1 = track([
+      { t: 0, f: taskAt(start) },
+      { t: 0.22, f: taskAt(cc), mode: "index", dur: 0.7, sweep: 0, jitter: 0, bend: 0, shrink: 0 },
+      { t: 1.45, f: built, mode: "grow", dur: 0.5, sweep: 0.5, jitter: 0.1, dir: [0, -1] },
+      { t: 3.0, f: seg(cc.x - 84, LY, cc.x + 84, LY, { pitch: 14, r: 5.4, c: ACC }), dur: 0.62, sweep: 0.2, jitter: 0.08, dir: [0, 1], shrink: 0.7, bend: 0.03 },
+      { t: 3.62, f: dot(cc.x, LY, 13, ACC), dur: 0.4, sweep: 0, jitter: 0.04, shrink: 0, bend: 0 },
+      { t: 4.15, f: dot(330, LY, 13, ACC), mode: "index", dur: 0.85, sweep: 0, jitter: 0, bend: 0, shrink: 0 },
+      { t: 7.25, f: EMPTY, dur: 0.4, sweep: 0, jitter: 0 },
+      { t: 7.4, f: taskAt(start), dur: 0.45, sweep: 0, jitter: 0 },
+    ]);
+    // task two: built, then the builder tries to review it
+    const work2 = track([
+      { t: 0, f: EMPTY },
+      { t: 4.15, f: taskAt(start), dur: 0.35, sweep: 0, jitter: 0 },
+      { t: 4.4, f: taskAt(cc), mode: "index", dur: 0.6, sweep: 0, jitter: 0, bend: 0, shrink: 0 },
+      { t: 5.05, f: built, mode: "grow", dur: 0.45, sweep: 0.45, jitter: 0.08, dir: [0, -1] },
+      { t: 7.15, f: EMPTY, dur: 0.45, sweep: 0.25, jitter: 0.1, dir: [0, 1] },
+    ]);
+    const br = track([
+      { t: 0, f: EMPTY },
+      { t: 0.3, f: branch, dur: 0.45, sweep: 0.35, jitter: 0, dir: [0, -1] },
+      { t: 3.1, f: EMPTY, dur: 0.35, sweep: 0.25, jitter: 0, dir: [0, 1] },
+      { t: 4.45, f: branch, dur: 0.4, sweep: 0.3, jitter: 0, dir: [0, -1] },
+      { t: 7.2, f: EMPTY, dur: 0.35, sweep: 0.25, jitter: 0, dir: [0, 1] },
+    ]);
+    const sub = (p, c) => disc(p.x, p.y, 36, { pitch: 10, rmax: 4.4, c: c == null ? INK : c });
+    const ix = (t, f, o) => Object.assign({ t, f, mode: "index", dur: 0.55, sweep: 0.08, jitter: 0.05, bend: 0.04 }, o || {});
+    // the builder: leaves Claude Code and dissolves into the work
+    const builder = track([
+      { t: 0, f: EMPTY },
+      { t: 0.92, f: sub(CL), dur: 0.2, sweep: 0, jitter: 0.05 },
+      ix(1.0, sub(cc), { dur: 0.6, dir: [1, -1] }),
+      { t: 1.5, f: EMPTY, dur: 0.4, sweep: 0.1, jitter: 0.1 },
+      { t: 4.62, f: sub(CL), dur: 0.2, sweep: 0, jitter: 0.05 },
+      ix(4.7, sub(cc), { dir: [1, -1] }),
+      { t: 5.1, f: EMPTY, dur: 0.4, sweep: 0.1, jitter: 0.1 },
+    ]);
+    // the reviewer: a different agent reaches the task (the accent)
+    const touch = { x: cell.x + cell.w - 4, y: cc.y };
+    const reviewer = track([
+      { t: 0, f: EMPTY },
+      { t: 1.9, f: sub(CX, ACC), dur: 0.2, sweep: 0, jitter: 0.05 },
+      ix(2.0, sub(touch, ACC), { dir: [-1, 0] }),
+      ix(2.95, sub(CX, ACC), { dir: [1, 0] }),
+      { t: 3.45, f: EMPTY, dur: 0.3, sweep: 0, jitter: 0.05 },
+    ]);
+    // the builder reaches for its own work and stops at a wall
+    const stop = { x: cell.x - 76, y: 300 };
+    const self = track([
+      { t: 0, f: EMPTY },
+      { t: 5.5, f: sub(CL), dur: 0.2, sweep: 0, jitter: 0.05 },
+      ix(5.58, sub(stop), { dur: 0.6, dir: [1, -1] }),
+      ix(7.05, sub(CL), { dur: 0.6, dir: [-1, 1] }),
+      { t: 7.55, f: EMPTY, dur: 0.3, sweep: 0, jitter: 0.05 },
+    ]);
+    const wall = track([
+      { t: 0, f: EMPTY },
+      { t: 5.98, f: seg(cell.x - 24, cell.y + 14, cell.x - 24, cell.y + cell.h - 14, { pitch: 14, r: 4.2, c: RING }), dur: 0.35, sweep: 0.2, jitter: 0, dir: [0, 1] },
+      { t: 7.0, f: EMPTY, dur: 0.3, sweep: 0.15, jitter: 0, dir: [0, 1] },
+    ]);
+    const E = [staticDots, br, work1, work2, builder, reviewer, self, wall];
+    H.drive(tl, D, (t) => R.draw(t, E));
+
+    // ---- type ----
+    tx(T, CL.x - 150, CL.y + 90, "Claude Code", "h2 ctr", 36);
+    tx(T, CX.x - 150, CX.y + 90, "Codex", "h2 ctr", 36);
+    tx(T, 64, LY + 22, "the shared branch", "lab mut", 30);
+    const refused = tx(T, cell.x - 150, cell.y - 48, "refused", "h2", 32);
+    gsap.set(refused, { opacity: 0 });
+    tl.to(refused, { opacity: 1, duration: 0.3, ease: "power2.out" }, 6.1);
+    tl.to(refused, { opacity: 0, duration: 0.25, ease: "power2.in" }, 7.0);
+
+    const caps = ["Each task gets its own workspace", "Claude Code builds it, Codex reviews it", "Then it's merged", "An agent can't review its own work"]
+      .map((c) => tx(T, 64, 44, c, "h1", 44));
+    gsap.set(caps.slice(1), { opacity: 0 });
+    const cs = (a, b, t) => { H.outLeft(tl, caps[a], t, { dx: 70 }); H.inLeft(tl, caps[b], t + 0.28, { dx: 70 }); };
+    cs(0, 1, 0.85);
+    cs(1, 2, 2.95);
+    cs(2, 3, 4.05);
+    cs(3, 0, 7.05);
+    window.__timelines["main"] = tl;
+  }
+  H.fontsReady().then(build);
+})();
+</script>
+</body>
+</html>

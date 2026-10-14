@@ -1,0 +1,31 @@
+/* Shared type for every composition, in the site's Ultramarine palette: white ground, ink text,
+   Familjen Grotesk. build.py inlines this file and copies the font next to each project. */
+@font-face {
+  font-family: "Triforge Sans";
+  src: url("assets/fonts/FamiljenGrotesk-var.woff2") format("woff2");
+  font-weight: 400 700;
+  font-display: block;
+}
+:root {
+  --ground: #ffffff;
+  --ink: #0e1012;
+  --muted: #52565a;
+  --sans: "Triforge Sans", sans-serif;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { margin: 0; overflow: hidden; background: var(--ground); }
+body { color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; font-kerning: normal; }
+#root { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--ground); }
+#stage { position: absolute; inset: 0; background: var(--ground); }
+#stage canvas { position: absolute; left: 0; top: 0; }
+#type { position: absolute; inset: 0; }
+
+/* type: absolutely placed blocks; left/top set inline */
+.tx { position: absolute; display: block; white-space: nowrap; color: var(--ink); }
+.wrap { white-space: normal; }
+.h1 { font-family: var(--sans); font-weight: 650; letter-spacing: -0.025em; line-height: 1.02; }
+.h2 { font-family: var(--sans); font-weight: 600; letter-spacing: -0.015em; line-height: 1.08; }
+.body { font-family: var(--sans); font-weight: 450; line-height: 1.3; }
+.lab { font-family: var(--sans); font-weight: 520; line-height: 1.15; }
+.mut { color: var(--muted); }
+.w { display: inline-block; }
