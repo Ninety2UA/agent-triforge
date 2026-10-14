@@ -64,7 +64,7 @@ closed (rc 42). -->
 - [ ] Roster default: `[members.<cli>]` shape documented in `templates/ops/roster.toml`; the CLI's registry entry (`model` in `scripts/lib/registry.sh`) carries the pin — `validate-versions.sh` check 3 keeps `DEFAULTS`, the template and the lane defaults in line with it
 - [ ] Env allowlist entry: `_adapter_env` case arm in `scripts/invoke-external.sh` hands the adapter only its own provider key (KTD-14)
 - [ ] Probe rows added to `scripts/probe-capabilities.sh` and present in the regenerated record: <!-- IDs -->
-- [ ] Compatibility table and provider data-egress list updated in `README.md` (and the moved notes in `docs/agent-triforge.md`); `AGENTS.md` still within budget (`validate-versions.sh` check 6)
+- [ ] Compatibility table updated in `docs/compatibility.md` and the provider data-egress list in `docs/how-it-works.md` (and the moved notes in `docs/agent-triforge.md`); `AGENTS.md` still within budget (`validate-versions.sh` check 6)
 
 ## Unapplied review findings
 

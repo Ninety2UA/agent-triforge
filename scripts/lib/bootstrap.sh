@@ -552,7 +552,7 @@ _tb_ops() {
 
 # _tb_subroster_note <file> — the WARNING for one subdirectory roster.
 _tb_subroster_note() {
-  _tb_note "WARNING $1 is not read: Triforge 4 reads only ${_TB_ANCHOR}/ops/roster.toml, at the top of this checkout, so the lead, roles and members in that 3.x subdirectory roster (each consent or decline included) do not apply. Move the subdirectory's ops/ files into ${_TB_ANCHOR}/ops/, merging the two rosters, then delete the subdirectory copy (README.md, \"Upgrading from 3.x\"); Triforge never moves or edits it."
+  _tb_note "WARNING $1 is not read: Triforge 4 reads only ${_TB_ANCHOR}/ops/roster.toml, at the top of this checkout, so the lead, roles and members in that 3.x subdirectory roster (each consent or decline included) do not apply. Move the subdirectory's ops/ files into ${_TB_ANCHOR}/ops/, merging the two rosters, then delete the subdirectory copy (Triforge's docs/upgrading.md, \"Upgrading from 3.x\"); Triforge never moves or edits it."
 }
 
 # _tb_subroster_shipped <file> — 0 when <file> is

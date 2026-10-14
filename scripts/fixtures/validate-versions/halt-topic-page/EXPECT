@@ -1,0 +1,7 @@
+# The README's topic pages under docs/ (issue #42) are read like README.md: a
+# threshold that halts at 50 itself fails on docs/team-work.md, and the
+# exclusive statement above it passes.
+check: halt
+rc: 1
+line: FAIL: halt threshold: docs/team-work.md:4: "50+ file changes" halts at 50 itself — the threshold is more than 50 changed files (AGENTS.md §Delegation)
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)
