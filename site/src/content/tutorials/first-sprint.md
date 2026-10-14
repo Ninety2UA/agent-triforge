@@ -225,7 +225,7 @@ git worktree list
 
 ### What happens
 
-The lead leases each task to the roster's builder, Claude Code by default, in its own git worktree. When the task is built, a pinned reviewer checks it. The reviewer is a different roster member from the builder, Codex by default. A task gets at most three fix cycles with the same reviewer; after that the lead asks you.
+The lead leases each task to the roster's builder, Claude Code by default, in its own git worktree. When the task is built, a pinned reviewer checks it: the roster's reviewer, Codex by default, which is never the member that built the task. A task gets at most three fix cycles with the same reviewer; after that the lead asks you.
 
 An approved task lands as one squash commit on the sprint's integration branch, made from the lead's own snapshot of the work. Between waves the `integration-verifier` persona checks what has been merged. At the end the lead promotes the integration branch to your main branch. A change to a protected path, such as `AGENTS.md` or anything under `.claude/`, waits for your approval first.
 

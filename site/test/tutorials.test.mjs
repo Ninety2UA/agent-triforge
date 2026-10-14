@@ -277,3 +277,23 @@ test('in the built site, a tutorial page shows every step, both lead tabs where 
     }
   }
 });
+
+// A tutorial that names a role's default CLI ("the roster's builder, Claude Code by default") states
+// what templates/ops/roster.toml ships, so a changed default fails here instead of going stale.
+test('every "<role>, <CLI> by default" in a tutorial matches the shipped roster', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { getRoles } = await import('../src/lib/roster.mjs');
+  const { SITE } = await import('../src/lib/repo.mjs');
+  const defaults = Object.fromEntries(getRoles().map((r) => [r.role, r.cliName]));
+  const dir = join(SITE, 'src', 'content', 'tutorials');
+  const claims = [];
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.md'))) {
+    const text = readFileSync(join(dir, file), 'utf8');
+    for (const [, role, cli] of text.matchAll(/\b(builder|reviewer|tester|analyst|documenter), ([A-Z][\w]*(?: [A-Z][\w]*)?) by default/g)) {
+      claims.push(`${file}: ${role} ${cli}`);
+      assert.equal(cli, defaults[role], `${file}: says the ${role} is ${cli} by default; the roster ships ${defaults[role]}`);
+    }
+  }
+  assert.ok(claims.length >= 3, `found ${claims.length} default claims: the pattern may no longer match`);
+});

@@ -8,6 +8,7 @@ import { NAV } from '@/data/nav';
 import { INSTALL } from '@/data/content';
 import { GH, VERSION, RELEASED } from '@/lib/site.mjs';
 import { sectionPages } from '@/lib/docs.mjs';
+import { writtenTutorials } from '@/lib/tutorials.mjs';
 
 const columns = [
   {
@@ -19,14 +20,7 @@ const columns = [
   },
   { title: 'Docs', links: sectionPages('docs').map((p) => ({ label: p.title, href: p.href })) },
   { title: 'Guides', links: sectionPages('guides').map((p) => ({ label: p.title, href: p.href })) },
-  {
-    title: 'Tutorials',
-    links: [
-      { label: 'Your first sprint', href: '/tutorials/first-sprint/' },
-      { label: 'A supervised sprint', href: '/tutorials/supervised-sprint/' },
-      { label: 'An unattended run', href: '/tutorials/unattended-run/' },
-    ],
-  },
+  { title: 'Tutorials', links: writtenTutorials().map((p) => ({ label: p.title, href: p.href })) },
   {
     title: 'Install',
     links: [
