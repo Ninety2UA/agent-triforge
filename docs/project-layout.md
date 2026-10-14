@@ -2,7 +2,7 @@
 
 # Project layout and customization
 
-What the plugin installs, what it adds to your project, and what you can change.
+The files the plugin ships, the `ops/` directory it sets up in your project, and the settings you can change.
 
 ## Project structure
 

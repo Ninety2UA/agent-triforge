@@ -2,7 +2,7 @@
 
 # Install and update
 
-What each CLI needs, the install steps for a Claude Code or a Codex lead, the portable skills for Devin and Pi, and how to check and update an install.
+Check each CLI, install Triforge under a Claude Code or Codex lead, add the portable skills to Devin or Pi, then verify and update the install.
 
 ## Prerequisites
 

@@ -66,7 +66,7 @@ codex plugin marketplace add Ninety2UA/agent-triforge
 codex plugin add agent-triforge@agent-triforge
 ```
 
-A Codex lead also needs a trust entry for the project in `~/.codex/config.toml`. [Install and update](docs/installation.md) has the version floor and READY probe for each CLI, that entry, project-scope installs, the portable skills in Devin and Pi, and how to update.
+A Codex lead also needs a trust entry for the project in `~/.codex/config.toml`. [Install and update](docs/installation.md) gives that entry, each CLI's version floor and READY probe, the project-scope install, the portable skills for Devin and Pi, and the update commands.
 
 ## Getting started
 
@@ -111,17 +111,17 @@ In a Codex prompt the same workflows are `$agent-triforge:at-<name>`. From a she
 
 | Page | What it covers |
 |---|---|
-| [Install and update](docs/installation.md) | Version floors and READY probes for all eight CLIs, the install steps for either lead, Codex project trust, the portable skills in Devin and Pi, checking and updating an install |
-| [Unattended runs](docs/unattended-runs.md) | `at-ship` in one session, `scripts/coordinate.sh` across sessions, what the loop checks, and its exit codes |
+| [Install and update](docs/installation.md) | Version floors and READY probes for all eight CLIs, install steps for either lead, Codex project trust, the portable skills in Devin and Pi, checking and updating an install |
+| [Unattended runs](docs/unattended-runs.md) | `at-ship` in one session, `scripts/coordinate.sh` across sessions, what each loop iteration does, and its exit codes |
 | [Upgrading from 3.x](docs/upgrading.md) | What changed in 4.0, the map from 3.x commands to `at-` workflows, rolling back to 3.3.3 |
 | [Workflow](docs/workflows.md) | The sprint phases, the planning, test and debugging pipelines, the five quality gates, and every lead workflow with its arguments |
 | [Team work and swarms](docs/team-work.md) | The builder pool and its leases, the coordination modes, wave orchestration, the review and research swarms, the knowledge loop |
 | [Model and effort](docs/models.md) | Each role's shipped CLI, model and effort, how each CLI takes its pin, the Claude ladder, the assignment heuristic |
-| [Skills reference](docs/skills.md) | The 10 portable skills, and which path each CLI reads them from |
-| [Personas reference](docs/personas.md) | The 19 personas in their three groups, and what the manifest sets for each |
+| [Skills reference](docs/skills.md) | The 10 portable skills and the path each CLI reads them from |
+| [Personas reference](docs/personas.md) | The 19 personas in three groups, and the tools, model tier and turn budget the manifest sets for each |
 | [Project layout and customization](docs/project-layout.md) | The plugin and project trees, what the bootstrap creates, the shared `ops/` files, and what you can change |
 | [How it works under the hood](docs/how-it-works.md) | Skill injection, the context-recovery layers, the key constraints, data egress and credentials |
-| [Compatibility](docs/compatibility.md) | The floor and tested version for each CLI, and why each floor is where it is |
+| [Compatibility](docs/compatibility.md) | Each CLI's version floor, the version it was tested on, and the reason for each floor |
 | [Design document](docs/agent-triforge.md) | The full design: phases, coordination modes, the shared `ops/` files, the security model |
 
 ## When NOT to use this framework

@@ -2,7 +2,7 @@
 
 # How it works under the hood
 
-The mechanics behind the workflows. The [design document](agent-triforge.md) covers the full design: phases, coordination modes, the shared `ops/` files and the security model.
+How the helper hands skills to each CLI, what keeps a long sprint going past a full context window, the constraints every sprint holds to, and which providers see your code. The [design document](agent-triforge.md) has the full design: phases, coordination modes, the shared `ops/` files and the security model.
 
 ## Portable skill injection
 
