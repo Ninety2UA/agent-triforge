@@ -21,7 +21,7 @@ const items = navItems(Astro.url.pathname);
     </nav>
     <div class="hdr-tools">
       <button type="button" class:list={[buttonVariants({ variant: 'outline', size: 'sm' }), 'search-btn']} data-open-search aria-label="Search the site"><Fragment set:html={IC.search} /><span class="lbl">Search</span><kbd aria-hidden="true">⌘K</kbd></button>
-      <a class={buttonVariants({ variant: 'ghost', size: 'icon' })} href={GH} aria-label="Agent Triforge on GitHub"><Fragment set:html={IC.github} /></a>
+      <a class:list={[buttonVariants({ variant: 'ghost', size: 'icon' }), 'gh-link']} href={GH} aria-label="Agent Triforge on GitHub"><Fragment set:html={IC.github} /></a>
       <button type="button" class={buttonVariants({ variant: 'ghost', size: 'icon' })} data-theme-toggle aria-label="Dark theme" aria-pressed="false"><Fragment set:html={IC.theme} /></button>
       <a class:list={[buttonVariants({ size: 'sm' }), 'btn-install']} href={INSTALL_HREF} data-lead-href={INSTALL_HREF}>Install</a>
       <span class="menu-slot"><MobileMenu client:interaction items={items} install={INSTALL_HREF} repo={GH} /></span>

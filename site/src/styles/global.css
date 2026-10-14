@@ -142,6 +142,8 @@ table { font-variant-numeric: tabular-nums; border-collapse: collapse; }
   .menu-slot { display: contents; }
 }
 @media (max-width: 560px) { .hdr .btn-install { display: none; } }
+/* the narrowest phones: GitHub stays in the menu and the footer */
+@media (max-width: 400px) { .hdr .gh-link { display: none; } }
 
 /* ---------- the copy control: shadcn InputGroup (data-cmd) with the command lines ---------- */
 [data-cmd] pre { flex: 1; min-width: 0; margin: 0; padding: 14px 0 14px 16px; font-size: 13px; line-height: 1.7; white-space: pre-wrap; color: var(--foreground); }
