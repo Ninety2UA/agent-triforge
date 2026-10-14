@@ -228,3 +228,124 @@ test('the theme toggle still switches when storage throws', () => {
 });
 
 assert.equal(typeof initThemeToggle, 'function');
+
+// ---- video figures (site/src/scripts/video.ts) ----
+
+const { initVideos } = runClientScript('scripts/video.ts');
+
+// The markup VideoFigure.astro and FilmPlayer.astro render, reduced to what the script reads.
+const loopFig = `<figure class="fig" data-vfig><div class="vid"><img class="vf-poster" alt="" loading="lazy">
+  <video muted playsinline loop preload="none" controls aria-label="Loop"><source src="/media/loop-lease.mp4" type="video/mp4"></video>
+  <button class="vf-big" type="button" data-label="the lease loop" aria-label="Play the lease loop"><span>Play</span></button></div></figure>`;
+const filmFig = `<figure class="fig film" data-vfig data-film data-duration="55"><div class="vid"><img class="vf-poster" alt="">
+  <video muted playsinline preload="none" controls aria-label="Film"><source src="/media/film.mp4" type="video/mp4"></video>
+  <button class="vf-big" type="button" data-label="the film" aria-label="Play the film"><span>Play</span></button></div>
+  <div class="film-bar"><div class="film-dots" role="slider" tabindex="0" aria-label="Film position" aria-valuemin="0" aria-valuemax="55" aria-valuenow="0"></div><span class="film-time">0:00 / 0:55</span></div>
+  <ol class="chapters"><li><button type="button" data-t="0">Goal</button></li><li><button type="button" data-t="19.4">Review</button></li></ol></figure>`;
+
+// A page with one or more figures; each video gets a media API whose play() the test settles.
+function videoPage(body, { reduced = false } = {}) {
+  const p = page(body);
+  const observers = [];
+  p.window.matchMedia = (q) => ({ matches: reduced && q === '(prefers-reduced-motion: reduce)', addEventListener() {} });
+  p.window.IntersectionObserver = class {
+    constructor(cb) { this.cb = cb; observers.push(this); }
+    observe(el) { this.el = el; }
+  };
+  p.window.innerHeight = 800;
+  p.window.requestAnimationFrame = () => 0;
+  p.window.cancelAnimationFrame = () => {};
+  const Ev = p.window.Event;
+  const videos = [...p.document.querySelectorAll('video')].map((v) => {
+    const calls = [];
+    let next = null;
+    Object.assign(v, {
+      paused: true, ended: false, currentTime: 0, duration: 55, preload: 'none',
+      play() {
+        calls.push('play');
+        const settle = next ?? { resolve: true };
+        next = null;
+        if (settle.reject) return Promise.reject(settle.reject);
+        v.paused = false;
+        v.dispatchEvent(new Ev('play'));
+        v.dispatchEvent(new Ev('playing'));
+        return Promise.resolve();
+      },
+      pause() { calls.push('pause'); v.paused = true; v.dispatchEvent(new Ev('pause')); },
+    });
+    return { v, calls, refuseNext(err) { next = { reject: err }; } };
+  });
+  initVideos(p.document, p.window);
+  // shows the figure: the observer reports it fully on screen
+  const show = (i = 0, ratio = 1) => {
+    const o = observers[i];
+    o.cb([{ isIntersecting: ratio > 0, intersectionRatio: ratio, intersectionRect: { height: 400 * ratio }, rootBounds: { height: 800 }, target: o.el }]);
+  };
+  const fig = (i = 0) => p.document.querySelectorAll('[data-vfig]')[i];
+  return { ...p, videos, show, fig };
+}
+const err = (name) => Object.assign(new Error(name), { name });
+
+test('video: a loop plays once half visible and pauses off screen; no control pauses it', async () => {
+  const p = videoPage(loopFig);
+  assert.equal(p.videos[0].v.hasAttribute('controls'), false, 'the native controls go once the script runs');
+  p.show(0, 0.3);
+  assert.deepEqual(p.videos[0].calls, []);
+  p.show(0, 0.6);
+  await settle();
+  assert.deepEqual(p.videos[0].calls, ['play']);
+  assert.equal(p.fig().classList.contains('show-big'), false);
+  p.show(0, 0);
+  assert.deepEqual(p.videos[0].calls, ['play', 'pause']);
+});
+
+test('video: when play() is refused, the Play button appears, and pressing it plays', async () => {
+  const p = videoPage(loopFig);
+  p.videos[0].refuseNext(err('NotAllowedError'));
+  p.show();
+  await settle();
+  assert.equal(p.fig().classList.contains('show-big'), true);
+  p.click(p.fig().querySelector('.vf-big'));
+  await settle();
+  assert.equal(p.videos[0].v.paused, false);
+  assert.equal(p.fig().classList.contains('show-big'), false);
+});
+
+test('video: when the video fails to load, the poster stays and the Play button appears', () => {
+  const p = videoPage(loopFig);
+  p.videos[0].v.querySelector('source').dispatchEvent(new p.window.Event('error'));
+  assert.equal(p.fig().classList.contains('show-big'), true);
+  assert.equal(p.fig().classList.contains('is-started'), false, 'the poster stays in front');
+});
+
+test('video: under reduced motion nothing starts on becoming visible; a chapter press seeks and plays', async () => {
+  const p = videoPage(loopFig + filmFig, { reduced: true });
+  p.show(0);
+  p.show(1);
+  await settle();
+  assert.deepEqual(p.videos.map((x) => x.calls), [[], []]);
+  assert.equal(p.fig(0).classList.contains('show-big'), true, 'the loop offers Play');
+  const review = p.fig(1).querySelectorAll('.chapters button')[1];
+  p.click(review);
+  await settle();
+  assert.ok(Math.abs(p.videos[1].v.currentTime - 19.4) < 0.05, `seeked to ${p.videos[1].v.currentTime}`);
+  assert.deepEqual(p.videos[1].calls, ['play']);
+});
+
+test('video: the film plays once; at its end the button offers a replay from the start', async () => {
+  const p = videoPage(filmFig);
+  const { v } = p.videos[0];
+  assert.equal(v.hasAttribute('loop'), false);
+  p.show();
+  await settle();
+  v.ended = true;
+  v.paused = true;
+  v.dispatchEvent(new p.window.Event('ended'));
+  const big = p.fig().querySelector('.vf-big');
+  assert.equal(p.fig().classList.contains('show-big'), true);
+  assert.equal(big.getAttribute('aria-label'), 'Replay the film');
+  p.click(big);
+  await settle();
+  assert.equal(v.currentTime, 0);
+  assert.equal(v.paused, false);
+});

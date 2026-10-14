@@ -1,0 +1,20 @@
+---
+// The first screen: the headline, the lead switch with the install commands, Install and the skills
+// link, and the live dot field.
+import DotField from '../DotField.astro';
+import InstallTabs from '../InstallTabs.astro';
+import { buttonVariants } from '@/components/ui/button';
+import { INSTALL_HREF } from '@/data/nav';
+import { H1, LEDE, heroTabs } from '@/data/home';
+---
+<section class="hero" aria-labelledby="h1">
+  <div class="wrap hero-split">
+    <div class="hero-copy">
+      <h1 id="h1">{H1}</h1>
+      <p class="lede">{LEDE}</p>
+      <div class="inst"><InstallTabs id="hero-lead" tabs={heroTabs} label="Which CLI leads" /></div>
+      <div class="cta-row"><a class={buttonVariants()} href={INSTALL_HREF} data-lead-href={INSTALL_HREF}>Install</a><a class={buttonVariants({ variant: 'outline' })} href="/skills/">Browse the 27 skills</a></div>
+    </div>
+    <DotField />
+  </div>
+</section>

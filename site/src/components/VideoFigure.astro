@@ -1,18 +1,33 @@
 ---
-// A loop on its print sheet: lazy poster, muted video that plays when half visible, and a
-// caption whose button plays or pauses it. Videos and posters are the motion builder's.
+// A loop on its print sheet: a lazy poster <img> behind a muted, preload="none" video (a video's own
+// poster attribute is fetched during parsing, even far below the fold), the box sized from the file's
+// own frame, a Play button that shows only when nothing else will start the video, and a caption with
+// its figure number. scripts/video.ts plays it while half visible; there is no pause control.
 import { IC } from './icons';
 import { mp4Facts, versioned } from '@/lib/media.mjs';
-interface Props { n: number; name: string; label: string; short: string; caption: string }
-const { n, name, label, short, caption } = Astro.props;
+
+interface Props {
+  /** figure number, in page order */
+  n: number;
+  /** file name under /media/ without extension: the .mp4 and its .webp poster */
+  name: string;
+  /** what the video shows, in plain words: the text alternative */
+  label: string;
+  /** names the video on the Play button, e.g. "the roster loop" */
+  short: string;
+  caption: string;
+  class?: string;
+}
+const { n, name, label, short, caption, class: cls } = Astro.props;
 const { width: w, height: h } = mp4Facts(`/media/${name}.mp4`);
 ---
-<figure class="fig" id={`fig-${name}`} data-rv>
+<figure class:list={['fig', cls]} id={`fig-${name}`} data-vfig data-rv>
   <div class="sheet">
-    <div class="vid" data-video data-name={short} style={`aspect-ratio:${w}/${h}`}>
-      <img src={versioned(`/media/${name}.webp`)} loading="lazy" width={w} height={h} alt="" />
-      <video muted playsinline loop preload="none" width={w} height={h} aria-label={label}><source src={versioned(`/media/${name}.mp4`)} type="video/mp4" /></video>
+    <div class="vid" style={`aspect-ratio:${w}/${h}`}>
+      <img class="vf-poster" src={versioned(`/media/${name}.webp`)} loading="lazy" decoding="async" width={w} height={h} alt="" />
+      <video muted playsinline loop preload="none" controls width={w} height={h} aria-label={label}><source src={versioned(`/media/${name}.mp4`)} type="video/mp4" /></video>
+      <button class="vf-big" type="button" data-label={short} aria-label={`Play ${short}`}><Fragment set:html={IC.play} /><span>Play</span></button>
     </div>
   </div>
-  <figcaption><button class="vplay" type="button" aria-label={`Play ${short}`} hidden><Fragment set:html={IC.play} /><Fragment set:html={IC.pause} /></button><b>Fig. {n}</b><span set:html={caption} /></figcaption>
+  <figcaption><b>Fig. {n}</b><span set:html={caption} /></figcaption>
 </figure>

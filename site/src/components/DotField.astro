@@ -3,11 +3,8 @@
 // the canvas takes over once the page script runs. Labels and captions are plain words.
 import layouts from '@/data/layouts.json';
 import { CLIS, FIELD_CAPS } from '@/data/content';
-import { IC } from './icons';
-interface Props { wide?: boolean }
-const { wide = false } = Astro.props;
 type Lay = typeof layouts.d;
-const main: Lay = wide ? layouts.w : layouts.d;
+const main: Lay = layouts.d;
 const mob: Lay = layouts.m;
 const r = (c: { opt?: number }, dx: number, dy: number) => {
   const d = Math.hypot(dx, dy);
@@ -22,10 +19,10 @@ const labels = (lay: Lay, short: boolean) => [
   }),
 ];
 const aria = 'A dot field of the eight coding agents as clusters. You give the lead, Claude Code, a goal; it splits the goal into two tasks, each in its own workspace. Claude Code builds them, Codex reviews both, and Claude Code is refused when it tries to review its own work. The lead merges both tasks onto the shared branch.';
-const sets = [{ lay: main, cls: wide ? 'lay-w' : 'lay-d', short: false }, { lay: mob, cls: 'lay-m', short: true }];
+const sets = [{ lay: main, cls: 'lay-d', short: false }, { lay: mob, cls: 'lay-m', short: true }];
 ---
 <figure class="fig hero-art" style="margin:0">
-  <div class="field" data-layouts={JSON.stringify(layouts)} data-captions={JSON.stringify(FIELD_CAPS)} data-wide={wide ? '' : undefined} style={`aspect-ratio:${main.cols}/${main.rows}`} role="img" aria-label={aria}>
+  <div class="field" data-layouts={JSON.stringify(layouts)} data-captions={JSON.stringify(FIELD_CAPS)} style={`aspect-ratio:${main.cols}/${main.rows}`} role="img" aria-label={aria}>
     {sets.map(({ lay, cls }) => (
       <svg class={`field-svg ${cls}`} viewBox={`0 0 ${lay.cols} ${lay.rows}`} aria-hidden="true">
         <defs><pattern id={`scr-${cls}`} width="1" height="1" patternUnits="userSpaceOnUse"><circle class="bgd" cx=".5" cy=".5" r=".06" /></pattern></defs>
@@ -44,5 +41,5 @@ const sets = [{ lay: main, cls: wide ? 'lay-w' : 'lay-d', short: false }, { lay:
       </div>
     ))}
   </div>
-  <figcaption class="field-cap"><button class="field-pause" type="button" aria-label="Pause the dot field" hidden><Fragment set:html={IC.pause} /><Fragment set:html={IC.play} /></button><p>{FIELD_CAPS[FIELD_CAPS.length - 1]}</p></figcaption>
+  <figcaption class="field-cap"><p>{FIELD_CAPS[FIELD_CAPS.length - 1]}</p></figcaption>
 </figure>

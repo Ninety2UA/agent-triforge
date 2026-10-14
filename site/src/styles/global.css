@@ -168,28 +168,26 @@ main > section { padding-block: calc(var(--sec) / 2); }
 .sheet { position: relative; background: var(--card); padding: 10px; border: 3px dotted var(--dot-frame); border-radius: 2px; }
 .vid { position: relative; overflow: hidden; }
 .vid > img, .vid > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.vid > video { opacity: 0; transition: opacity 260ms var(--ease); }
-.vid[data-playing="true"] > video, .vid[data-started="true"] > video { opacity: 1; }
+/* with the script running, the video stays behind its poster until frames arrive (scripts/video.ts);
+   without it the video and its native controls show */
+.vjs .vid > video { opacity: 0; transition: opacity 260ms var(--ease); }
+.vjs.is-started .vid > video { opacity: 1; }
+/* Play shows only when nothing else will start the video: reduced motion, a refused or failed start,
+   the end of the film. There is no pause control. */
+.vf-big { position: absolute; z-index: 1; left: 50%; top: 50%; display: none; align-items: center; gap: 8px; height: 48px; padding: 0 20px 0 16px; transform: translate(-50%, -50%); border: 0; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font: 600 15px/1 var(--font-sans-stack); cursor: pointer; transition: transform 160ms var(--ease); }
+.vf-big svg { width: 14px; height: 14px; }
+.vf-big:hover { transform: translate(-50%, -50%) scale(1.04); }
+.vf-big:active { transform: translate(-50%, -50%) scale(0.98); }
+.vjs.show-big .vf-big { display: inline-flex; }
 .fig figcaption { display: flex; gap: 12px; align-items: center; margin-top: 12px; font-size: 15px; line-height: 1.45; color: var(--muted-foreground); }
 .fig figcaption b { flex: none; font-weight: 600; color: var(--foreground); }
-.vplay { flex: none; width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid var(--input); background: transparent; color: var(--foreground); display: grid; place-items: center; cursor: pointer; transition: border-color 160ms var(--ease), background-color 160ms var(--ease); }
-.vplay[hidden] { display: none; }
-.vplay:hover { border-color: var(--foreground); }
-.vplay svg { width: 12px; height: 12px; }
-.vplay .i-play, .fig[data-playing="true"] .vplay .i-pause { display: block; }
-.vplay .i-pause, .fig[data-playing="true"] .vplay .i-play { display: none; }
 
 /* ---------- film player ---------- */
 .film-sheet { background: var(--card); padding: clamp(10px, 1.2vw, 16px); border: 3px dotted var(--dot-frame); border-radius: 2px; }
 .film-sheet .vid { aspect-ratio: 16 / 9; }
-.film-bar { display: grid; grid-template-columns: auto 1fr auto; gap: 16px; align-items: center; margin-top: 18px; }
-.film-toggle { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--primary); color: var(--primary-foreground); display: grid; place-items: center; cursor: pointer; transition: transform 160ms var(--ease); }
-.film-toggle:hover { transform: scale(1.05); }
-.film-toggle svg { width: 16px; height: 16px; }
-.film-toggle .i-pause, .film[data-playing="true"] .film-toggle .i-play { display: none; }
-.film[data-playing="true"] .film-toggle .i-pause { display: block; }
+.film-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; margin-top: 18px; }
 .film-time { font-size: 15px; font-variant-numeric: tabular-nums; color: var(--muted-foreground); white-space: nowrap; }
-.film-dots { position: relative; height: 20px; cursor: pointer; touch-action: none; }
+.film-dots { position: relative; height: 20px; cursor: pointer; touch-action: none; border-radius: 4px; }
 .film-dots svg { width: 100%; height: 20px; overflow: visible; }
 .film-dots circle { transition: r 220ms var(--ease); }
 .film-dots circle.f { fill: var(--foreground); }
@@ -203,7 +201,7 @@ main > section { padding-block: calc(var(--sec) / 2); }
 @media (max-width: 760px) {
   .chapters { grid-auto-flow: row; grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 8px; }
   .film-time { display: none; }
-  .film-bar { grid-template-columns: auto 1fr; }
+  .film-bar { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ---------- dot field ---------- */
@@ -224,18 +222,10 @@ main > section { padding-block: calc(var(--sec) / 2); }
 .flbl.opt b { font-weight: 500; color: var(--muted-foreground); }
 .flbl.cell { transform: translate(-50%, -50%); font-size: 13px; color: var(--muted-foreground); background: var(--background); padding: 0 4px; }
 .flbl.line { transform: translate(0, 0); text-align: left; font-size: 13px; font-weight: 600; color: var(--primary-text); background: var(--background); padding: 0 4px; }
-.field .lay-m, .field .lay-w { display: none; }
-.field[data-wide] .lay-d { display: none; }
-.field[data-wide] .lay-w { display: block; }
-@media (max-width: 760px) { .field .lay-d, .field[data-wide] .lay-w { display: none; } .field .lay-m, .field[data-wide] .lay-m { display: block; } }
+.field .lay-m { display: none; }
+@media (max-width: 760px) { .field .lay-d { display: none; } .field .lay-m { display: block; } }
 .field-cap { display: flex; gap: 12px; align-items: center; margin-top: 14px; min-height: 44px; }
 .field-cap p { margin: 0; font-size: 15px; line-height: 1.4; color: var(--muted-foreground); }
-.field-pause { flex: none; width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid var(--input); background: transparent; color: var(--foreground); display: grid; place-items: center; cursor: pointer; }
-.field-pause[hidden] { display: none; }
-.field-pause:hover { border-color: var(--foreground); }
-.field-pause svg { width: 12px; height: 12px; }
-.field-pause .i-play, .field[data-paused="true"] ~ .field-cap .field-pause .i-pause { display: none; }
-.field[data-paused="true"] ~ .field-cap .field-pause .i-play { display: block; }
 
 /* ---------- hero compositions ---------- */
 .hero { padding-block: clamp(40px, 6vw, 96px) clamp(72px, 9vw, 136px); }
@@ -427,6 +417,10 @@ main > section { padding-block: calc(var(--sec) / 2); }
 .close-in h2 { font-size: clamp(1.9rem, 1.2rem + 2.2vw, 3rem); }
 .close-in .lede { margin: 18px 0 24px; }
 .close-in [data-cmd] { background: var(--background); margin: 0 0 18px; }
+/* on the tinted closing field the lead switch's track is the page and the chosen tab the tint */
+.close-tabs { margin: 0 0 18px; }
+.close-in [data-slot="tabs-list"] { background: var(--background); }
+.close-in [data-slot="tabs-trigger"][data-active] { background: var(--muted); }
 .readme h3 { font-size: 17px; margin: 28px 0 8px; }
 .readme p { font-size: 15px; }
 .readme [data-cmd] { background: var(--background); }

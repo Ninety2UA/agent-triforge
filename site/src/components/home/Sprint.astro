@@ -1,0 +1,29 @@
+---
+// From goal to finished sprint: one tab per phase (Tabs markup, scripts/tabs.ts), each naming the
+// skills that run it and who does the work. The phase copy is hand-written (data/home.ts).
+import { PHASES, phaseLabel, withCode } from '@/data/home';
+---
+<section id="sprint" aria-labelledby="sprint-h" data-rv-group>
+  <div class="wrap">
+    <div class="sec-head" data-rv>
+      <h2 id="sprint-h">From goal to finished sprint</h2>
+      <p><code>/at-ship &lt;goal&gt;</code> runs every phase in one session. Choose a phase to see which skills run it and who does the work.</p>
+    </div>
+    <div class="press" data-tabs data-rv>
+      <div role="tablist" aria-label="Sprint phases">
+        {PHASES.map((p, i) => (
+          <button role="tab" type="button" id={`ph-t${i}`} aria-controls={`ph-p${i}`} aria-selected={i === 4 ? 'true' : 'false'} tabindex={i === 4 ? 0 : -1} data-active={i === 4 ? '' : undefined}>
+            <span class="n" aria-hidden="true">{p.n === 'Pre' ? 'P' : p.n.replace('+', '&')}</span><span class="d" aria-hidden="true"></span><span>{p.short}<span class="sr">, {phaseLabel(p.n)}</span></span>
+          </button>
+        ))}
+      </div>
+      {PHASES.map((p, i) => (
+        <div role="tabpanel" id={`ph-p${i}`} aria-labelledby={`ph-t${i}`} hidden={i !== 4}>
+          <div><h3>{phaseLabel(p.n)}: {p.title}</h3><p set:html={withCode(p.body)} /></div>
+          <dl>{p.rows.map((r) => <Fragment><dt>{r.k}</dt><dd>{r.v.map((v) => <code>{v}</code>)}</dd></Fragment>)}<dt>Who</dt><dd>{p.who}</dd></dl>
+        </div>
+      ))}
+    </div>
+    <p style="margin-top:28px"><a class="more" href="/sprint/">The sprint, phase by phase</a></p>
+  </div>
+</section>

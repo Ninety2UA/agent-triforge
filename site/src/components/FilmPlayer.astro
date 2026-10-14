@@ -1,22 +1,30 @@
 ---
+// The film on its print sheet. It plays once on its own when half visible (never under reduced motion);
+// a line of dots shows and sets the position, and the chapters are labelled buttons, so the film's
+// outline reads without the video and a chapter press plays from there. Chapters come from
+// public/media/film-chapters.json and the length and frame size from film.mp4 itself (media.mjs).
 import { IC } from './icons';
-import { mp4Facts, versioned } from '@/lib/media.mjs';
-interface Props { chapters: { label: string; start: number }[]; duration: number }
-const { chapters, duration } = Astro.props;
+import { clock, filmChapters, mp4Facts, versioned } from '@/lib/media.mjs';
+
+interface Props {
+  /** what the film shows, in plain words: the text alternative */
+  label: string;
+}
+const { label } = Astro.props;
+const { chapters, duration } = filmChapters();
 const { width, height } = mp4Facts('/media/film.mp4');
-const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 ---
-<div class="film" id="film-player" data-chapters={JSON.stringify(chapters)} data-duration={duration}>
+<figure class="fig film" id="film-player" data-vfig data-film data-duration={duration.toFixed(2)}>
   <div class="film-sheet">
-    <div class="vid" data-video data-film data-name="the film">
-      <img src={versioned('/media/film.webp')} srcset={`${versioned('/media/film-960.webp')} 960w, ${versioned('/media/film.webp')} 1600w`} sizes="(max-width: 1240px) 94vw, 1180px" loading="lazy" width="1600" height="900" alt="" />
-      <video muted playsinline preload="none" width={width} height={height} aria-label={`Film, about ${Math.round(duration)} seconds, no sound: an example sprint that rate-limits a login endpoint, from the goal to the finished, reviewed work, chapter by chapter.`}><source src={versioned('/media/film.mp4')} type="video/mp4" /></video>
+    <div class="vid" style={`aspect-ratio:${width}/${height}`}>
+      <img class="vf-poster" src={versioned('/media/film.webp')} srcset={`${versioned('/media/film-960.webp')} 960w, ${versioned('/media/film.webp')} 1600w`} sizes="(max-width: 1240px) 94vw, 1180px" loading="lazy" decoding="async" width={width} height={height} alt="" />
+      <video muted playsinline preload="none" controls width={width} height={height} aria-label={label}><source src={versioned('/media/film.mp4')} type="video/mp4" /></video>
+      <button class="vf-big" type="button" data-label="the film" aria-label="Play the film"><Fragment set:html={IC.play} /><span>Play</span></button>
     </div>
     <div class="film-bar">
-      <button class="film-toggle" type="button" aria-label="Play the film"><Fragment set:html={IC.play} /><Fragment set:html={IC.pause} /></button>
-      <div class="film-dots" role="slider" tabindex="0" aria-label="Film position" aria-valuemin="0" aria-valuemax={Math.floor(duration)} aria-valuenow="0"></div>
-      <span class="film-time">0:00 / {fmt(duration)}</span>
+      <div class="film-dots" role="slider" tabindex="0" aria-label="Position in the film" aria-valuemin="0" aria-valuemax={Math.floor(duration)} aria-valuenow="0" aria-valuetext={`0:00 of ${clock(duration)}`}></div>
+      <span class="film-time">0:00 / {clock(duration)}</span>
     </div>
-    <ol class="chapters" aria-label="Chapters">{chapters.map((c) => <li><button type="button">{c.label}<span>{fmt(c.start)}</span></button></li>)}</ol>
+    <ol class="chapters" aria-label="Chapters">{chapters.map((c) => <li><button type="button" data-t={c.start}>{c.label}<span>{clock(c.start)}</span></button></li>)}</ol>
   </div>
-</div>
+</figure>

@@ -58,7 +58,7 @@ const search = [
   <Font cssVariable="--font-doto" />
   {/* Without JavaScript tabs cannot switch, so every panel shows under its own name; the controls that
       would do nothing (tab lists, copy, theme, search, filter chips, video play) are hidden. */}
-  <noscript><style is:inline>[role=tabpanel][hidden]{display:block!important}[role=tabpanel]+[role=tabpanel]{margin-top:20px}.tp-name{display:block!important;font-weight:600;margin:0 0 8px}[data-tabs] [role=tablist],.press [role=tablist],.copy,[data-theme-toggle],[data-open-search],.chips,.vplay,.film-bar,.bench-ctl{display:none!important}</style></noscript>
+  <noscript><style is:inline>[role=tabpanel][hidden]{display:block!important}[role=tabpanel]+[role=tabpanel]{margin-top:20px}.tp-name{display:block!important;font-weight:600;margin:0 0 8px}[data-tabs] [role=tablist],.press [role=tablist],.copy,[data-theme-toggle],[data-open-search],.chips,.film-bar,.bench-ctl{display:none!important}</style></noscript>
 </head>
 <body>
   <Header />
@@ -73,8 +73,9 @@ const search = [
     initThemeToggle();
     initTabs();
     initCopy();
+    // the video player loads only on pages that show a figure
+    if (document.querySelector('[data-vfig]')) import('@/scripts/video').then((m) => m.initVideos());
   </script>
   <script>import '@/components/search/loader';</script>
-  <script>import '@/scripts/home.js';</script>
 </body>
 </html>

@@ -1,0 +1,52 @@
+---
+// Why it holds up: no agent merges its own work, reviews run until findings converge (Fig. 3),
+// done needs fresh evidence, and what a sprint learns the next one reads.
+import VideoFigure from '../VideoFigure.astro';
+import { pair } from './dots';
+---
+<section id="why" aria-labelledby="why-h" data-rv-group>
+  <div class="wrap">
+    <div class="sec-head" data-rv><h2 id="why-h">Why it holds up</h2></div>
+    <div class="why">
+      <div class="arg a1" data-rv>
+        <svg class="pair" viewBox="4 2.6 13.5 6.8" aria-hidden="true">{pair.map((p) => <circle cx={8 + p.dx} cy={6 + p.dy} r={p.r} />)}{pair.map((p) => <circle class="pk" cx={12.6 + p.dx} cy={6 + p.dy} r={p.r} />)}</svg>
+        <h3>No agent merges its own work</h3>
+        <p>A task merges only after a pinned reviewer approves it, and the helper refuses to pin the agent that built it. The lead's own tasks follow the same rule. After three fix cycles with the same reviewer, you decide.</p>
+      </div>
+      <div class="arg a3" data-rv>
+        <VideoFigure n={3} name="loop-review" short="the review loop"
+          label="Loop: five reviewers read the change at once, their findings are counted as critical, important and minor, the fixes go in, and on the second pass only minor findings are left, so it stops."
+          caption="Five reviewers at once, the fixes, and a second pass with only minor findings left" />
+        <h3 style="margin-top:36px">Reviews run until findings converge</h3>
+        <p>Each reviewer writes its own file, so they can all run at once. Findings are P1, P2 or P3 with a confidence tier, and a low-confidence finding is never P1. You pick where the loop stops.</p>
+        <table class="modes">
+          <thead><tr><th scope="col">Mode</th><th scope="col">Stops when</th></tr></thead>
+          <tbody><tr><th scope="row"><code>fast</code></th><td>no P1 is left</td></tr><tr><th scope="row"><code>standard</code></th><td>no P1 or P2 is left (the default)</td></tr><tr><th scope="row"><code>deep</code></th><td>no P1 or P2, and fewer than 3 P3</td></tr></tbody>
+        </table>
+      </div>
+      <div class="arg a2" data-rv>
+        <h3>Done needs fresh evidence</h3>
+        <p><code>verification-before-completion</code> asks for new evidence behind every claim. A builder's report has to end in a typed status, and a clean exit without one counts as a missing report.</p>
+        <div class="art" data-ui><span class="lbl">The last lines of a builder's report (example)</span><pre>Tests: 14 passed, 0 failed
+Concerns: the limiter's window is per process
+Discoveries for later tasks: None
+<span class="k">Status: DONE_WITH_CONCERNS</span></pre></div>
+        <p style="margin-top:18px">A sprint is done only when the lead creates <code>ops/.sprint-complete</code>, after the checklist passes.</p>
+      </div>
+      <div class="arg a4" data-rv>
+        <div>
+          <h3>What a sprint learns, the next one reads</h3>
+          <p><code>knowledge-compounding</code> writes a note only when a future agent would repeat the mistake without it. Before the next plan, <code>learnings-researcher</code> searches those notes.</p>
+        </div>
+        <div class="files">
+          <div class="art" data-ui><span class="lbl">Written at the end of a sprint (example names)</span><pre>ops/solutions/
+  login-rate-limit-window.md
+  redis-test-fixture.md</pre></div>
+          <div class="art" data-ui><span class="lbl">Read before the next plan</span><pre>ops/decisions/
+  limiter-per-ip-not-per-user.md
+ops/STATE.md</pre></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

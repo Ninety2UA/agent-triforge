@@ -1,0 +1,29 @@
+---
+// Install in two commands: the install tabs for each lead and for skills only, the prerequisites
+// and the first run.
+import InstallTabs from '../InstallTabs.astro';
+import { installTabs } from '@/data/home';
+---
+<section id="install" aria-labelledby="install-h" data-rv-group>
+  <div class="wrap install">
+    <div data-rv>
+      <h2 id="install-h" style="margin-bottom:28px">Install in two commands</h2>
+      <InstallTabs id="install-for" tabs={installTabs} label="Install for" />
+    </div>
+    <div class="side" data-rv>
+      <h3>Before you start</h3>
+      <ul>
+        <li>Claude Code, Antigravity (<code>agy</code>) and Codex installed and logged in.</li>
+        <li>Python 3.</li>
+        <li>On macOS, GNU coreutils (<code>brew install coreutils</code>). Without a <code>timeout</code> binary the helper refuses external calls.</li>
+        <li>Claude Code 2.1.277, agy 1.1.27 and Codex 0.153.0, or later.</li>
+      </ul>
+      <h3>Your first run</h3>
+      <ol>
+        <li>Start <code>claude</code> or <code>codex</code> in your project. That creates <code>ops/</code>.</li>
+        <li>Run <code>/at-setup</code> to pick the lead, check the three agents and set roles.</li>
+        <li>Run <code>/at-ship &lt;goal&gt;</code>.</li>
+      </ol>
+    </div>
+  </div>
+</section>
