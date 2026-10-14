@@ -205,7 +205,9 @@ main > section { padding-block: calc(var(--sec) / 2); }
 }
 
 /* ---------- dot field ---------- */
-.field { position: relative; width: 100%; }
+.field { position: relative; width: 100%; aspect-ratio: var(--ar-d); }
+/* each layout's own proportions from the first paint, so the live field never resizes its box */
+@media (max-width: 760px) { .field { aspect-ratio: var(--ar-m); } }
 .field canvas, .field .field-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 .field .field-svg circle { fill: var(--dot-rest); }
 .field .field-svg .bgd { fill: var(--dot-screen); }

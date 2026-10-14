@@ -1,5 +1,6 @@
-// Checks on the media in site/public/media and the README GIF: every MP4 streams from its first bytes
-// (moov before mdat) and has a poster of the same frame proportions, the media stay inside the size
+// Checks on the media in site/public/media, their posters in site/src/assets/posters (Astro's image
+// pipeline makes each poster's display widths at build time) and the README GIF: every MP4 streams from
+// its first bytes (moov before mdat) and has a poster of the same frame proportions, the media stay inside the size
 // budget (every install of the plugin copies the whole repo), the film refuses to build without its
 // chapter list, and the built pages request every media file under a content-hash URL.
 import { test } from 'node:test';
@@ -15,13 +16,15 @@ import { PUBLIC, REPO, SITE } from '../src/lib/repo.mjs';
 import { mp4Facts } from '../src/lib/media.mjs';
 
 const MEDIA = join(PUBLIC, 'media');
+const POSTERS = join(SITE, 'src', 'assets', 'posters');
 const GIF = join(REPO, 'docs', 'images', 'readme-hero.gif');
-const MEDIA_BUDGET = 8_000_000; // bytes, site/public/media in all
+const MEDIA_BUDGET = 8_000_000; // bytes, site/public/media and the poster sources in all
 const GIF_BUDGET = 500_000; // bytes
 // the videos the pages request by name
 const VIDEOS = ['film', 'loop-roster', 'loop-lease', 'loop-review', 'loop-unattended', 'readme-hero'];
 
-const mediaFiles = () => (existsSync(MEDIA) ? readdirSync(MEDIA).filter((n) => statSync(join(MEDIA, n)).isFile()) : []);
+const filesIn = (dir) => (existsSync(dir) ? readdirSync(dir).filter((n) => statSync(join(dir, n)).isFile()) : []);
+const mediaFiles = () => filesIn(MEDIA);
 
 /** The file's top-level box types in order. */
 function topBoxes(path) {
@@ -67,7 +70,7 @@ test('every MP4 has its moov box before mdat and a poster of the same proportion
     const types = topBoxes(join(MEDIA, name));
     assert.ok(types.includes('moov') && types.includes('mdat'), `${name}: boxes ${types.join(' ')}`);
     assert.ok(types.indexOf('moov') < types.indexOf('mdat'), `${name}: moov after mdat (encode with -movflags +faststart): ${types.join(' ')}`);
-    const poster = join(MEDIA, name.replace(/\.mp4$/, '.webp'));
+    const poster = join(POSTERS, name.replace(/\.mp4$/, '.webp'));
     assert.ok(existsSync(poster), `${name}: no poster ${relative(SITE, poster)}`);
     const { width, height } = mp4Facts(`/media/${name}`);
     const p = webpSize(poster);
@@ -75,10 +78,10 @@ test('every MP4 has its moov box before mdat and a poster of the same proportion
   }
 });
 
-test(`site/public/media totals at most ${MEDIA_BUDGET} bytes and the README GIF at most ${GIF_BUDGET}`, () => {
-  const total = mediaFiles().reduce((s, n) => s + statSync(join(MEDIA, n)).size, 0);
+test(`the media and their posters total at most ${MEDIA_BUDGET} bytes and the README GIF at most ${GIF_BUDGET}`, () => {
+  const total = [MEDIA, POSTERS].reduce((sum, dir) => sum + filesIn(dir).reduce((s, n) => s + statSync(join(dir, n)).size, 0), 0);
   assert.ok(total > 0, 'site/public/media is empty');
-  assert.ok(total <= MEDIA_BUDGET, `site/public/media is ${total} bytes, over the ${MEDIA_BUDGET}-byte budget`);
+  assert.ok(total <= MEDIA_BUDGET, `the media and posters are ${total} bytes, over the ${MEDIA_BUDGET}-byte budget`);
   assert.ok(existsSync(GIF), `no README GIF at ${relative(REPO, GIF)}`);
   const gif = statSync(GIF).size;
   assert.ok(gif <= GIF_BUDGET, `${relative(REPO, GIF)} is ${gif} bytes, over the ${GIF_BUDGET}-byte budget`);

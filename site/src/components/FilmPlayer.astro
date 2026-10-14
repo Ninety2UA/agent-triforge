@@ -5,6 +5,7 @@
 // public/media/film-chapters.json and the length and frame size from film.mp4 itself (media.mjs).
 import { IC } from './icons';
 import { clock, filmChapters, mp4Facts, versioned } from '@/lib/media.mjs';
+import { poster } from './poster';
 
 interface Props {
   /** what the film shows, in plain words: the text alternative */
@@ -13,11 +14,12 @@ interface Props {
 const { label } = Astro.props;
 const { chapters, duration } = filmChapters();
 const { width, height } = mp4Facts('/media/film.mp4');
+const p = await poster('film', [640, 960, 1280, 1600], '(max-width: 1240px) 94vw, 1180px');
 ---
 <figure class="fig film" id="film-player" data-vfig data-film data-duration={duration.toFixed(2)}>
   <div class="film-sheet">
     <div class="vid" style={`aspect-ratio:${width}/${height}`}>
-      <img class="vf-poster" src={versioned('/media/film.webp')} srcset={`${versioned('/media/film-960.webp')} 960w, ${versioned('/media/film.webp')} 1600w`} sizes="(max-width: 1240px) 94vw, 1180px" loading="lazy" decoding="async" width={width} height={height} alt="" />
+      <img class="vf-poster" src={p.src} srcset={p.srcset} sizes={p.sizes} loading="lazy" decoding="async" width={width} height={height} alt="" />
       <video muted playsinline preload="none" controls width={width} height={height} aria-label={label}><source src={versioned('/media/film.mp4')} type="video/mp4" /></video>
       <button class="vf-big" type="button" data-pagefind-ignore data-label="the film" aria-label="Play the film"><Fragment set:html={IC.play} /><span>Play</span></button>
     </div>

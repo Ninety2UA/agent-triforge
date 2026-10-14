@@ -76,9 +76,28 @@ export function initDotField(doc: Document = document, win: Window & typeof glob
   const goal = { x: { x: 0, v: 0 }, y: { x: -3, v: 0 } };
   const taskDots: (null | { x: Spring; y: Spring })[] = [null, null];
 
+  // the paper's dot screen never moves: drawn once into its own canvas (on setup and on a theme change)
+  // and copied in each frame, instead of a couple of thousand arcs every frame
+  const screen = doc.createElement('canvas');
+  const paintScreen = () => {
+    screen.width = cv.width;
+    screen.height = cv.height;
+    const sc = screen.getContext('2d');
+    if (!sc) return;
+    sc.setTransform(dpr, 0, 0, dpr, 0, 0);
+    sc.fillStyle = col.screen;
+    sc.beginPath();
+    for (let gx = 0; gx <= lay.cols; gx++) {
+      for (let gy = 0; gy <= lay.rows; gy++) {
+        sc.moveTo((gx + 0.5) * s + s * 0.06, (gy + 0.5) * s);
+        sc.arc((gx + 0.5) * s, (gy + 0.5) * s, s * 0.06, 0, 6.2832);
+      }
+    }
+    sc.fill();
+  };
+
   const setup = () => {
     lay = narrow.matches ? L.m : L.d;
-    field.style.aspectRatio = `${lay.cols} / ${lay.rows}`;
     const r = field.getBoundingClientRect();
     dpr = Math.min(2, win.devicePixelRatio || 1);
     W = r.width;
@@ -98,6 +117,7 @@ export function initDotField(doc: Document = document, win: Window & typeof glob
         });
       });
     });
+    paintScreen();
   };
 
   // the story in seconds, one caption per step: goal, split, build, review, merge, then a self-review
@@ -133,18 +153,10 @@ export function initDotField(doc: Document = document, win: Window & typeof glob
       cap.dataset.i = String(st.cap);
       cap.textContent = CAPS[st.cap] ?? '';
     }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(screen, 0, 0);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, W, H);
-    // the paper's dot screen
-    ctx.fillStyle = col.screen;
-    ctx.beginPath();
-    for (let gx = 0; gx <= lay.cols; gx++) {
-      for (let gy = 0; gy <= lay.rows; gy++) {
-        ctx.moveTo((gx + 0.5) * s + s * 0.06, (gy + 0.5) * s);
-        ctx.arc((gx + 0.5) * s, (gy + 0.5) * s, s * 0.06, 0, 6.2832);
-      }
-    }
-    ctx.fill();
     const rest: number[][] = [];
     const opt: number[][] = [];
     const fg: number[][] = [];
@@ -261,6 +273,7 @@ export function initDotField(doc: Document = document, win: Window & typeof glob
   });
   doc.addEventListener('themechange', () => {
     colors();
+    paintScreen();
     if (!running) draw(performance.now());
   });
   RM.addEventListener('change', () => {

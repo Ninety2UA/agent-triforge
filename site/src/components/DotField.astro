@@ -27,7 +27,7 @@ const aria = `A dot field of the ${numberWord(CLIS.length)} coding agents as clu
 const sets = [{ lay: main, cls: 'lay-d', short: false }, { lay: mob, cls: 'lay-m', short: true }];
 ---
 <figure class="fig hero-art" style="margin:0">
-  <div class="field" data-layouts={JSON.stringify(layouts)} data-captions={JSON.stringify(FIELD_CAPS)} style={`aspect-ratio:${main.cols}/${main.rows}`} role="img" aria-label={aria}>
+  <div class="field" data-layouts={JSON.stringify(layouts)} data-captions={JSON.stringify(FIELD_CAPS)} style={`--ar-d:${main.cols}/${main.rows};--ar-m:${mob.cols}/${mob.rows}`} role="img" aria-label={aria}>
     {sets.map(({ lay, cls }) => (
       <svg class={`field-svg ${cls}`} viewBox={`0 0 ${lay.cols} ${lay.rows}`} aria-hidden="true">
         <defs><pattern id={`scr-${cls}`} width="1" height="1" patternUnits="userSpaceOnUse"><circle class="bgd" cx=".5" cy=".5" r=".06" /></pattern></defs>

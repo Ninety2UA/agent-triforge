@@ -125,6 +125,9 @@ function initBench() {
   });
 }
 
-initDotField();
 initReveals();
 initBench();
+// the field's static frame is already on screen; the live one starts once the page is idle, so its
+// set-up (colours, layout, the first frame) stays out of the load
+const idle = window.requestIdleCallback ?? ((f: () => void) => window.setTimeout(f, 200));
+idle(() => initDotField(), { timeout: 1500 });

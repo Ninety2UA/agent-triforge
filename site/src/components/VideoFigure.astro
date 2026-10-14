@@ -5,6 +5,7 @@
 // its figure number. scripts/video.ts plays it while half visible; there is no pause control.
 import { IC } from './icons';
 import { mp4Facts, versioned } from '@/lib/media.mjs';
+import { poster } from './poster';
 
 interface Props {
   /** figure number, in page order */
@@ -20,11 +21,13 @@ interface Props {
 }
 const { n, name, label, short, caption, class: cls } = Astro.props;
 const { width: w, height: h } = mp4Facts(`/media/${name}.mp4`);
+// figures are about 600 px wide on a desktop and the full column on a phone
+const p = await poster(name, [400, 600, 800, 960], '(max-width: 960px) 92vw, 640px');
 ---
 <figure class:list={['fig', cls]} id={`fig-${name}`} data-vfig data-rv>
   <div class="sheet">
     <div class="vid" style={`aspect-ratio:${w}/${h}`}>
-      <img class="vf-poster" src={versioned(`/media/${name}.webp`)} loading="lazy" decoding="async" width={w} height={h} alt="" />
+      <img class="vf-poster" src={p.src} srcset={p.srcset} sizes={p.sizes} loading="lazy" decoding="async" width={w} height={h} alt="" />
       <video muted playsinline loop preload="none" controls width={w} height={h} aria-label={label}><source src={versioned(`/media/${name}.mp4`)} type="video/mp4" /></video>
       <button class="vf-big" type="button" data-pagefind-ignore data-label={short} aria-label={`Play ${short}`}><Fragment set:html={IC.play} /><span>Play</span></button>
     </div>
