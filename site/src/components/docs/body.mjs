@@ -7,11 +7,9 @@
 //                            largest candidate is always the original width, the full-size file). The
 //                            page's first image is fetched first when it sits in the opening section
 //                            (before the second H2), so it is in or near the first screen; the rest stay
-//                            lazy. A flag the typographer turned into an en dash in alt text gets its "--"
-//                            back.
+//                            lazy.
 // After render:
-//   finishBody(html, { install })  puts straight punctuation back in inline <code> (the typographer
-//                            reaches raw-HTML code), links each picture to its full-size file (a picture
+//   finishBody(html, { install })  links each picture to its full-size file (a picture
 //                            alone in its paragraph becomes a <div class="img"> block), puts each table in a box
 //                            that scrolls on its own, and replaces a code block that only repeats a lead's
 //                            install commands (already shown in the install tabs) with a link to that tab.
@@ -46,11 +44,9 @@ export function withImageOptions(html) {
     const props = JSON.parse(decodeAttr(json));
     const priority = first && offset < opening;
     first = false;
-    // the Markdown renderer's typographer turns a flag's "--" into an en dash, alt text included
-    const alt = typeof props.alt === 'string' ? props.alt.replace(/(^|\s)\u2013(?=[A-Za-z])/g, '$1--') : props.alt;
-    const webp = { ...props, alt, widths: IMAGE_WIDTHS, sizes: IMAGE_SIZES, ...(priority ? { priority: true } : {}) };
+    const webp = { ...props, widths: IMAGE_WIDTHS, sizes: IMAGE_SIZES, ...(priority ? { priority: true } : {}) };
     // the source's own src is its narrowest candidate, already in its srcset
-    const avif = { ...props, alt, format: 'avif', width: AVIF_WIDTHS[0], widths: AVIF_WIDTHS, sizes: IMAGE_SIZES };
+    const avif = { ...props, format: 'avif', width: AVIF_WIDTHS[0], widths: AVIF_WIDTHS, sizes: IMAGE_SIZES };
     return `<picture><source ${placeholder(avif)}><img${before} ${placeholder(webp)}${after}></picture>`;
   });
 }
@@ -66,14 +62,10 @@ const textOf = (html) => decodeText(html.replace(/<[^>]*>/g, ''));
  * @param {{ install?: { id: string, label: string, lines: string[] }[] }} [options]
  */
 export function finishBody(html, { install = [] } = {}) {
-  // Inline code is never typeset: the typographer reaches into raw-HTML <code> (the README's FAQ writes
-  // its code that way) and turns "--allow-full-access" into an en dash and straight quotes into curly
-  // ones. Code blocks are left alone; they hold what the repo wrote, real dashes included.
-  let out = html.replace(/(<pre\b[\s\S]*?<\/pre>)|<code\b([^>]*)>([\s\S]*?)<\/code>/g, (whole, pre, attrs, inner) => (pre ? pre : `<code${attrs}>${plainPunctuation(inner)}</code>`));
   // A picture from the pipeline opens its full-size file, the WebP <img>'s src. Its <source> keeps only
   // what a source takes (the pipeline wrote an image's attributes on it). A paragraph that holds
   // nothing but the picture becomes the picture's own block, as wide as the column.
-  out = out.replace(/<picture>\s*(<source\b[^>]*>)\s*(<img\b[^>]*>)\s*<\/picture>/g, (_, source, img) => {
+  let out = html.replace(/<picture>\s*(<source\b[^>]*>)\s*(<img\b[^>]*>)\s*<\/picture>/g, (_, source, img) => {
     const keep = ['srcset', 'sizes'].map((n) => (attr(source, n) ? ` ${n}="${attr(source, n)}"` : '')).join('');
     return `<a class="img-full" href="${attr(img, 'src')}"><picture><source type="image/avif"${keep}>${img}</picture></a>`;
   });
@@ -94,9 +86,6 @@ export function finishBody(html, { install = [] } = {}) {
   }
   return out;
 }
-
-// a dash the typographer made sits where "--" or "---" ran into a flag's name
-const plainPunctuation = (s) => s.replace(/\u2014(?=[A-Za-z])/g, '---').replace(/\u2013(?=[A-Za-z])/g, '--').replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'");
 
 /** @param {string} html */
 export function splitBeforeFirstH2(html) {

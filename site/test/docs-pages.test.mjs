@@ -47,23 +47,16 @@ test('each image becomes an AVIF source and a WebP img; the first gets priority 
   assert.equal(propsOf(late)[1].priority, undefined, 'an image after the opening section stays lazy');
 });
 
-test('alt text gets back the "--" of a flag the typographer turned into an en dash', () => {
-  const out = withImageOptions(placeholder({ src: './a.png', alt: 'It stops early without –allow-full-access, or 1–2 times', index: 0 }));
-  for (const p of propsOf(out)) assert.equal(p.alt, 'It stops early without --allow-full-access, or 1–2 times');
-});
-
-test('finishBody links images to their full-size file, wraps tables, and straightens code punctuation', () => {
+test('finishBody links images to their full-size file and wraps tables', () => {
   const out = finishBody([
     '<p><picture><source alt="D" sizes="S" loading="lazy" width="400" height="200" src="/_astro/d_400.avif" srcset="/_astro/d_400.avif 400w, /_astro/d_700.avif 700w">'
       + '<img alt="D" width="1760" height="900" src="/_astro/d_full.webp" srcset="/_astro/d_400.webp 400w, /_astro/d_full.webp 1760w"></picture></p>',
     '<table><thead><tr><th>Layer</th><th>Guards <code>x</code></th></tr></thead><tbody><tr><td>a</td><td>b</td></tr></tbody></table>',
-    '<p>A Codex lead needs <code>–allow-full-access</code> and “quotes”.</p>',
     '<pre class="astro-code"><code><span># Claude Code ≥ 2.1.277 — the first build</span></code></pre>',
   ].join('\n'));
   assert.match(out, /2\.1\.277 — the first build/, 'a code block is left as the repo wrote it');
   assert.match(out, /<div class="img"><a class="img-full" href="\/_astro\/d_full\.webp"><picture><source type="image\/avif" srcset="\/_astro\/d_400\.avif 400w, \/_astro\/d_700\.avif 700w" sizes="S"><img [^>]*><\/picture><\/a><\/div>/);
   assert.match(out, /<div class="table-wrap" role="region" tabindex="0" aria-label="Table: Layer, Guards x"><table>/);
-  assert.match(out, /<code>--allow-full-access<\/code> and “quotes”/, 'code is straightened, prose keeps its typography');
 });
 
 test('a code block holding a lead tab\'s install commands becomes a link to that tab', () => {

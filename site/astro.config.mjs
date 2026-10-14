@@ -23,7 +23,9 @@ export default defineConfig({
   },
   // Fenced code renders as plain <pre><code>, set in the page's own surface and ink (docs.css): a
   // highlighter's dark block and its per-token inline styles would weigh every docs and skill page down.
-  markdown: { syntaxHighlight: false },
+  // No typographer: the repo's Markdown writes flags and quotes as they are typed, and a CLI flag such
+  // as --allow-full-access must not turn into an en dash.
+  markdown: { syntaxHighlight: false, smartypants: false },
   // escapeSkillHtml: raw HTML in SKILL.md bodies and persona prompts renders as text, so
   // placeholders such as <base-branch> stay visible
   integrations: [
