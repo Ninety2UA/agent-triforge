@@ -1,0 +1,19 @@
+---
+// A section's pages as the sidebar lists them, the current one marked. DocsLayout shows it twice: in
+// the sticky sidebar and in the disclosure that replaces it on narrow screens.
+export interface SidebarItem {
+  label: string;
+  href: string;
+  current?: boolean;
+}
+interface Props {
+  /** the section's name, e.g. "Docs"; the nav is "<label> pages" */
+  label: string;
+  items: SidebarItem[];
+}
+const { label, items } = Astro.props;
+---
+<nav class="sb-nav" aria-label={`${label} pages`}>
+  <p class="sb-h">{label}</p>
+  <ul>{items.map((item) => <li><a href={item.href} aria-current={item.current ? 'page' : undefined}>{item.label}</a></li>)}</ul>
+</nav>

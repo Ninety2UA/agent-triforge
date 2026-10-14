@@ -6,7 +6,8 @@ import DotField from './DotField.astro';
 import VideoFigure from './VideoFigure.astro';
 import FilmPlayer from './FilmPlayer.astro';
 import CodeBlock from './CodeBlock.astro';
-import InstallTabs from './InstallTabs';
+import InstallTabs from './InstallTabs.astro';
+import { INSTALL_HREF } from '@/data/nav';
 import SkillFilter from './SkillFilter';
 import { buttonVariants } from '@/components/ui/button';
 import { IC } from './icons';
@@ -18,16 +19,16 @@ const H1 = 'Put Claude Code, Codex and Antigravity on one team.';
 const LEDE = 'One agent leads. The others build, review and test, and nothing merges until a different agent has checked it.';
 
 const heroTabs = [
-  { id: 'claude', label: 'Claude Code leads', blocks: [{ lines: INSTALL.claude, label: 'Copy the Claude Code install commands' }] },
-  { id: 'codex', label: 'Codex leads', blocks: [{ lines: INSTALL.codex, label: 'Copy the Codex install commands' }] },
+  { id: 'claude-code', label: 'Claude Code leads', lead: 'claude-code' as const, blocks: [{ lines: INSTALL.claude, label: 'Copy the Claude Code install commands' }] },
+  { id: 'codex', label: 'Codex leads', lead: 'codex' as const, blocks: [{ lines: INSTALL.codex, label: 'Copy the Codex install commands' }] },
 ];
 const installTabs = [
-  { id: 'claude', label: 'Claude Code leads', blocks: [{ lines: INSTALL.claude, label: 'Copy the Claude Code install commands' }],
+  { id: 'claude-code', label: 'Claude Code leads', lead: 'claude-code' as const, blocks: [{ lines: INSTALL.claude, label: 'Copy the Claude Code install commands' }],
     note: 'Add `--scope project` to the install line to share it with your team.' },
-  { id: 'codex', label: 'Codex leads', blocks: [{ lines: INSTALL.codex, label: 'Copy the Codex install commands' }],
+  { id: 'codex', label: 'Codex leads', lead: 'codex' as const, blocks: [{ lines: INSTALL.codex, label: 'Copy the Codex install commands' }],
     note: 'A Codex lead also needs a trust entry you add by hand to `~/.codex/config.toml`. `/at-setup` prints it and never writes it.',
     art: { label: 'The trust entry, with your project path', text: '[projects."/abs/path"]\ntrust_level = "trusted"' } },
-  { id: 'skills', label: 'Skills only', blocks: [
+  { id: 'skills-only', label: 'Skills only', blocks: [
       { lines: ['devin plugins install Ninety2UA/agent-triforge#skills'], label: 'Copy the Devin command' },
       { lines: ['pi install git:github.com/Ninety2UA/agent-triforge'], label: 'Copy the Pi command' }],
     note: 'The ten portable skills only, for Devin or Pi: no lead workflows, hooks or agents.' },
@@ -72,8 +73,8 @@ const readme = '[![Agent Triforge](https://github.com/Ninety2UA/agent-triforge/r
     <div class="hero-copy">
       <h1 id="h1">{H1}</h1>
       <p class="lede">{LEDE}</p>
-      <div class="inst"><InstallTabs client:interaction tabs={heroTabs} ariaLabel="Which CLI leads" /></div>
-      <div class="cta-row"><a class={buttonVariants()} href="/docs/getting-started/">Install</a><a class={buttonVariants({ variant: 'outline' })} href="/skills/">Browse the 27 skills</a></div>
+      <div class="inst"><InstallTabs id="hero-lead" tabs={heroTabs} label="Which CLI leads" /></div>
+      <div class="cta-row"><a class={buttonVariants()} href={INSTALL_HREF} data-lead-href={INSTALL_HREF}>Install</a><a class={buttonVariants({ variant: 'outline' })} href="/skills/">Browse the 27 skills</a></div>
     </div>
     <DotField />
   </div>
@@ -294,7 +295,7 @@ ops/STATE.md</pre></div>
   <div class="wrap install">
     <div data-rv>
       <h2 id="install-h" style="margin-bottom:28px">Install in two commands</h2>
-      <InstallTabs client:interaction tabs={installTabs} ariaLabel="Install for" />
+      <InstallTabs id="install-for" tabs={installTabs} label="Install for" />
     </div>
     <div class="side" data-rv>
       <h3>Before you start</h3>
@@ -321,7 +322,7 @@ ops/STATE.md</pre></div>
         <h2 id="start-h">Run your first sprint</h2>
         <p class="lede">Install the plugin, start Claude Code or Codex in your project, run <code>/at-setup</code>, then <code>/at-ship &lt;goal&gt;</code>.</p>
         <CodeBlock lines={INSTALL.claude} label="Copy the install commands" />
-        <div class="cta-row"><a class={buttonVariants()} href="/docs/getting-started/">Install</a><a class={buttonVariants({ variant: 'outline' })} href={GH}><Fragment set:html={IC.github} />Star on GitHub</a></div>
+        <div class="cta-row"><a class={buttonVariants()} href={INSTALL_HREF} data-lead-href={INSTALL_HREF}>Install</a><a class={buttonVariants({ variant: 'outline' })} href={GH}><Fragment set:html={IC.github} />Star on GitHub</a></div>
       </div>
       <div class="readme" data-rv>
         <figure class="fig" id="fig-readme-hero" style="margin:0">

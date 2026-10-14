@@ -33,4 +33,9 @@ addEventListener('keydown', (e) => {
   void show(focused instanceof HTMLElement && focused !== document.body ? focused : null);
 });
 
-document.querySelectorAll<HTMLElement>('[data-open-search]').forEach((b) => b.addEventListener('click', () => void show(b)));
+// search buttons anywhere (the header, the docs sidebar, the phone menu after it closes)
+document.addEventListener('click', (e) => {
+  const b = (e.target as Element | null)?.closest<HTMLElement>('[data-open-search]');
+  if (b) void show(b);
+});
+document.addEventListener('triforge:open-search', (e) => void show((e as CustomEvent<HTMLElement | null>).detail ?? null));

@@ -152,6 +152,7 @@ function InputGroupTextarea({
 export {
   InputGroup,
   InputGroupAddon,
+  inputGroupButtonVariants,
   InputGroupButton,
   InputGroupText,
   InputGroupInput,

@@ -73,3 +73,19 @@ test('every page sets its theme inline in <head>, before any stylesheet could pa
     assert.doesNotMatch(p.html, /<html[^>]*data-theme=/, `${p.url}: the server must not fix a theme`);
   }
 });
+
+test('every page has one skip link to #main and one h1', { skip }, () => {
+  for (const p of pages()) {
+    assert.equal(p.html.match(/<a class="skip" href="#main"/g)?.length, 1, `${p.url}: skip links`);
+    assert.equal(p.html.match(/<main id="main"/g)?.length, 1, `${p.url}: <main id="main">`);
+    assert.equal(p.html.match(/<h1[\s>]/g)?.length, 1, `${p.url}: h1 elements`);
+  }
+});
+
+test('the 404 page has no canonical link; every other page has one', { skip }, () => {
+  for (const p of pages()) {
+    const canonical = p.html.match(/<link rel="canonical" href="([^"]+)"/)?.[1];
+    if (p.url === '/404.html') assert.equal(canonical, undefined, '404: canonical');
+    else assert.equal(canonical, new URL(p.url, SITE_URL).href, `${p.url}: canonical`);
+  }
+});

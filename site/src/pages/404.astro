@@ -1,0 +1,26 @@
+---
+// The not-found page. Vercel serves it with status 404 for any unknown path. It has no address of
+// its own, so no canonical link, and it stays out of the sitemap and the search index.
+import Base from '@/layouts/Base.astro';
+import { buttonVariants } from '@/components/ui/button';
+import { INSTALL_HREF } from '@/data/nav';
+---
+<Base title="Page not found · Agent Triforge" description="This address has no page on the Agent Triforge site." canonical={false}>
+  <section class="nf" aria-labelledby="nf-h">
+    <div class="wrap">
+      <h1 id="nf-h">This page does not exist</h1>
+      <p class="lede">The address may be old: the site moved from GitHub Pages, and skills renamed in 4.0 have new pages. Search the site, or start from one of these.</p>
+      <div class="cta-row">
+        <button type="button" class={buttonVariants()} data-open-search>Search the site</button>
+        <a class={buttonVariants({ variant: 'outline' })} href="/skills/">All skills</a>
+        <a class={buttonVariants({ variant: 'outline' })} href={INSTALL_HREF}>Getting started</a>
+        <a class={buttonVariants({ variant: 'ghost' })} href="/">Home</a>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .nf { padding-block: clamp(72px, 10vw, 160px) clamp(48px, 6vw, 96px); }
+  .nf .lede { margin: 20px 0 32px; }
+</style>

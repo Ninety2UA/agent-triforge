@@ -34,6 +34,7 @@
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",
+    "linkedom": "0.18.13",
     "typescript": "6.0.3"
   },
   "allowScripts": {

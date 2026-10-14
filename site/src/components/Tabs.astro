@@ -1,0 +1,63 @@
+---
+// WAI-ARIA tabs in shadcn's anatomy, driven by plain script (scripts/tabs.ts), so a tab opens from a
+// link (#codex) on page load and the lead choice applies before any island hydrates. Every panel is in
+// the static HTML and inactive panels carry `hidden` from the first paint. Without JavaScript the
+// <noscript> style in Base.astro shows every panel under its own name and hides the tab list.
+//
+// Panels come from named slots, one per item id:
+//   <Tabs id="install" label="Install for" items={[{ id: 'claude-code', label: 'Claude Code leads', lead: 'claude-code' }, ...]}>
+//     <Fragment slot="claude-code">...</Fragment>
+//   </Tabs>
+//
+// With `hashTarget`, each panel's id is the bare item id, so a link to #<item id> opens that tab (the
+// footer's lead links point at /docs/getting-started/#claude-code). Only one tab group per page may use
+// it. `lead` marks a lead tab: picking one is stored and applied to every lead tab group on every page.
+import { cn } from 'cn';
+import { tabsContent, tabsListVariants, tabsRoot, tabsTrigger } from './ui/tabs';
+
+interface Item {
+  id: string;
+  label: string;
+  lead?: 'claude-code' | 'codex';
+}
+interface Props {
+  id: string;
+  /** accessible name of the tab list */
+  label: string;
+  items: Item[];
+  /** index of the tab selected on load */
+  selected?: number;
+  hashTarget?: boolean;
+  class?: string;
+  panelClass?: string;
+}
+const { id, label, items, selected = 0, hashTarget = false, class: cls, panelClass } = Astro.props;
+const panelId = (item: Item) => (hashTarget ? item.id : `${id}-${item.id}`);
+const tabId = (item: Item) => `${id}-tab-${item.id}`;
+const panels = await Promise.all(items.map((item) => Astro.slots.render(item.id)));
+---
+<div data-tabs data-slot="tabs" data-orientation="horizontal" class={cn(tabsRoot, cls)}>
+  <div role="tablist" aria-label={label} data-slot="tabs-list" data-variant="default" data-orientation="horizontal" class={tabsListVariants()}>
+    {items.map((item, i) => (
+      <button
+        type="button"
+        role="tab"
+        id={tabId(item)}
+        aria-controls={panelId(item)}
+        aria-selected={i === selected ? 'true' : 'false'}
+        tabindex={i === selected ? 0 : -1}
+        data-active={i === selected ? '' : undefined}
+        data-lead={item.lead}
+        data-slot="tabs-trigger"
+        data-orientation="horizontal"
+        class={tabsTrigger}
+      >{item.label}</button>
+    ))}
+  </div>
+  {items.map((item, i) => (
+    <div role="tabpanel" id={panelId(item)} aria-labelledby={tabId(item)} hidden={i !== selected} data-slot="tabs-content" data-orientation="horizontal" class={cn(tabsContent, panelClass)}>
+      <p class="tp-name">{item.label}</p>
+      <Fragment set:html={panels[i]} />
+    </div>
+  ))}
+</div>

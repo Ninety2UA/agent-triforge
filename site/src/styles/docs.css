@@ -1,0 +1,93 @@
+/* Docs, guides and tutorials (DocsLayout): a sticky sidebar, the page column and the on-page
+   contents, in the home page's vocabulary: muted surfaces, 2 px dotted rules, one accent dot for
+   "you are here". Loaded only by DocsLayout. */
+.portal { display: grid; grid-template-columns: 232px minmax(0, 1fr) 208px; gap: 0 clamp(28px, 3.4vw, 56px); width: 100%; max-width: var(--max); margin-inline: auto; padding-inline: var(--gut); }
+
+/* the sidebar */
+.sidebar { position: sticky; top: var(--head-h); align-self: start; max-height: calc(100dvh - var(--head-h)); overflow-y: auto; scrollbar-width: thin; padding: 28px 0 48px; }
+.sb-search { display: flex; align-items: center; gap: 8px; width: 100%; height: 40px; padding: 0 8px 0 12px; border: 1.5px solid var(--input); border-radius: var(--radius); background: var(--background); color: var(--muted-foreground); font-size: 15px; cursor: pointer; transition: border-color 160ms var(--ease); }
+.sb-search:hover { border-color: var(--foreground); }
+.sb-search svg { width: 16px; height: 16px; flex: none; }
+.sb-search span { flex: 1; text-align: left; }
+.sb-search kbd { font-size: 11.5px; padding: 2px 6px; border-radius: 4px; background: var(--muted); }
+.sb-nav { margin-top: 24px; }
+.sb-h { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--muted-foreground); }
+.sb-nav ul, .sb-toc ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.sb-nav a, .sb-toc a { position: relative; display: block; padding: 6px 10px 6px 18px; border-radius: var(--radius); font-size: 15px; line-height: 1.35; color: var(--muted-foreground); text-decoration: none; transition: color 160ms var(--ease), background-color 160ms var(--ease); }
+.sb-nav a:hover, .sb-toc a:hover { color: var(--foreground); background: var(--muted); }
+/* the current page: full ink and the accent dot at its left */
+.sb-nav a[aria-current="page"] { color: var(--foreground); font-weight: 600; }
+.sb-nav a[aria-current="page"]::before { content: ""; position: absolute; left: 4px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: var(--dot-active); }
+
+/* the page */
+.portal-main { min-width: 0; padding: 32px 0 0; }
+.doc { max-width: 760px; }
+
+/* the on-page contents */
+.toc { position: sticky; top: calc(var(--head-h) + 28px); align-self: start; max-height: calc(100dvh - var(--head-h) - 48px); overflow-y: auto; scrollbar-width: thin; padding: 32px 0 24px; }
+.toc ol { list-style: none; margin: 0; padding: 0 0 0 2px; display: grid; gap: 1px; border-left: 2px dotted var(--dot-frame); }
+.toc a { display: block; margin-left: -4px; padding: 5px 0 5px 14px; border-left: 2px solid transparent; font-size: 14px; line-height: 1.4; color: var(--muted-foreground); text-decoration: none; transition: color 160ms var(--ease), border-color 160ms var(--ease); }
+.toc a:hover { color: var(--foreground); }
+/* the section being read: ink and an accent edge, at the same weight so nothing rewraps */
+.toc a[aria-current] { color: var(--foreground); border-left-color: var(--dot-active); }
+
+/* previous and next */
+.pn { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; max-width: 760px; margin-top: clamp(56px, 6vw, 88px); }
+.pn a { display: grid; gap: 4px; padding: 16px 20px; border-radius: var(--radius); background: var(--muted); text-decoration: none; transition: background-color 200ms var(--ease); }
+.pn a:hover { background: color-mix(in oklch, var(--muted) 82%, var(--foreground)); }
+.pn .lbl { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted-foreground); }
+.pn .lbl svg { width: 14px; height: 14px; }
+.pn .pn-t { font-weight: 600; font-size: 17px; letter-spacing: -0.01em; }
+.pn-next { grid-column: 2; text-align: right; justify-items: end; }
+
+/* narrow: the sidebar and the contents fold into one disclosure above the page */
+.sb-mobile { display: none; margin-bottom: 28px; border-radius: var(--radius); background: var(--muted); }
+.sb-mobile summary { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 0 16px; font-weight: 600; font-size: 15px; cursor: pointer; list-style: none; }
+.sb-mobile summary::-webkit-details-marker { display: none; }
+.sb-mobile summary svg { width: 16px; height: 16px; transition: transform 220ms var(--ease); }
+.sb-mobile[open] summary svg { transform: rotate(90deg); }
+.sb-mobile .sb-nav, .sb-mobile .sb-toc { margin: 0; padding: 4px 8px 16px; }
+.sb-mobile .sb-toc { padding-top: 8px; border-top: 2px dotted var(--dot-frame); margin: 0 8px; padding-inline: 0; }
+
+@media (max-width: 1279px) { .portal { grid-template-columns: 232px minmax(0, 1fr); } .toc { display: none; } }
+@media (max-width: 1023px) {
+  .portal { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { display: none; }
+  .sb-mobile { display: block; }
+  .portal-main { padding-top: 20px; }
+}
+@media (max-width: 640px) { .pn { grid-template-columns: minmax(0, 1fr); } .pn-next { grid-column: 1; text-align: left; justify-items: start; } }
+
+/* ---------- prose: generated Markdown and hand-written pages ---------- */
+.doc > h1 { margin-bottom: 18px; }
+.doc .intro { font-size: clamp(1.05rem, 0.98rem + 0.25vw, 1.2rem); line-height: 1.55; max-width: 62ch; margin-bottom: 36px; text-wrap: pretty; }
+.doc h2 { font-size: clamp(1.35rem, 1.15rem + 0.7vw, 1.75rem); letter-spacing: -0.02em; margin: 56px 0 16px; scroll-margin-top: calc(var(--head-h) + 20px); }
+.doc h3 { font-size: clamp(1.08rem, 1rem + 0.3vw, 1.25rem); margin: 36px 0 12px; scroll-margin-top: calc(var(--head-h) + 20px); }
+.doc h4 { font-size: 17px; margin: 28px 0 8px; }
+.doc p, .doc li { font-size: 17px; line-height: 1.65; text-wrap: pretty; }
+.doc p { max-width: 68ch; }
+.doc ul, .doc ol { margin: 0 0 1em; padding-left: 22px; display: grid; gap: 6px; max-width: 68ch; }
+.doc li::marker { color: var(--muted-foreground); }
+.doc a { color: var(--primary-text); text-decoration-color: color-mix(in oklch, var(--primary) 45%, transparent); }
+.doc a:hover { text-decoration-color: currentColor; }
+.doc strong { font-weight: 600; }
+.doc :not(pre) > code { font-size: 0.86em; padding: 1px 5px; border-radius: 4px; background: var(--muted); white-space: normal; overflow-wrap: anywhere; }
+.doc pre { margin: 0 0 1.2em; padding: 14px 16px; border-radius: var(--radius); background: var(--muted); overflow-x: auto; font-size: 13px; line-height: 1.7; }
+.doc pre code { font-size: 1em; }
+.doc blockquote { margin: 0 0 1.2em; padding: 4px 0 4px 18px; border-left: 3px dotted var(--dot-frame); color: var(--foreground); }
+.doc hr { border: 0; border-top: 2px dotted var(--dot-frame); margin: 40px 0; }
+/* a wide table scrolls in its own box, so the page never scrolls sideways */
+.doc .table-wrap { margin: 0 0 1.4em; overflow-x: auto; }
+.doc table { width: 100%; font-size: 15px; }
+.doc th, .doc td { text-align: left; vertical-align: top; padding: 10px 14px 10px 0; }
+.doc thead th { font-size: 13px; font-weight: 500; color: var(--muted-foreground); white-space: nowrap; }
+.doc tbody tr { border-top: 2px dotted var(--dot-frame); }
+.doc td code, .doc th code { white-space: nowrap; }
+/* diagrams sit on the card ground in a dotted frame, like the motion figures */
+.doc figure, .doc .img { margin: 8px 0 1.4em; }
+.doc img { display: block; width: 100%; height: auto; background: var(--card); padding: 10px; border: 3px dotted var(--dot-frame); border-radius: 2px; }
+.doc figure > a, .doc .img > a { display: block; }
+.doc details { margin: 0 0 10px; border-radius: var(--radius); background: var(--muted); }
+.doc details > summary { padding: 14px 18px; font-weight: 600; cursor: pointer; }
+.doc details > :not(summary) { margin-inline: 18px; }
+.doc details[open] > :last-child { margin-bottom: 16px; }

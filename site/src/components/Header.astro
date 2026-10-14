@@ -1,21 +1,30 @@
 ---
-import Logo from './Logo.astro';
+// Global header: the mark (it draws itself once per page load), the seven sections with the current
+// one marked on every page under it, search, GitHub, the theme toggle and Install. Install follows the
+// stored lead (scripts/tabs.ts sets #claude-code or #codex). Below 1040 px the sections move into the
+// mobile menu island, which hydrates only when its trigger is first used.
+import Mark from './Mark.astro';
 import MobileMenu from './MobileMenu';
 import { buttonVariants } from '@/components/ui/button';
 import { IC } from './icons';
-import { NAV, GH } from '@/data/content';
+import { navItems, INSTALL_HREF } from '@/data/nav';
+import { GH } from '@/data/content';
+
+const items = navItems(Astro.url.pathname);
 ---
 <a class="skip" href="#main">Skip to content</a>
 <header class="hdr">
   <div class="wrap hdr-in">
-    <a class="brand" href="/" aria-label="Agent Triforge home"><Logo small /><span>Agent Triforge</span></a>
-    <nav class="nav" aria-label="Main">{NAV.map((n) => <a href={n.href}>{n.label}</a>)}</nav>
+    <a class="brand" href="/" aria-label="Agent Triforge home"><Mark small /><span>Agent Triforge</span></a>
+    <nav class="nav" aria-label="Main">
+      <ul>{items.map((i) => <li><a href={i.href} aria-current={i.current}>{i.label}</a></li>)}</ul>
+    </nav>
     <div class="hdr-tools">
-      <button type="button" class:list={[buttonVariants({ variant: 'outline', size: 'sm' }), 'search-btn']} data-open-search aria-label="Search the site"><Fragment set:html={IC.search} /><span class="lbl">Search</span><kbd>⌘K</kbd></button>
+      <button type="button" class:list={[buttonVariants({ variant: 'outline', size: 'sm' }), 'search-btn']} data-open-search aria-label="Search the site"><Fragment set:html={IC.search} /><span class="lbl">Search</span><kbd aria-hidden="true">⌘K</kbd></button>
       <a class={buttonVariants({ variant: 'ghost', size: 'icon' })} href={GH} aria-label="Agent Triforge on GitHub"><Fragment set:html={IC.github} /></a>
-      <button type="button" class={buttonVariants({ variant: 'ghost', size: 'icon' })} data-theme-toggle aria-label="Switch theme"><Fragment set:html={IC.theme} /></button>
-      <a class:list={[buttonVariants({ size: 'sm' }), 'btn-install']} href="/docs/getting-started/">Install</a>
-      <span class="menu-slot"><MobileMenu client:interaction items={NAV} install="/docs/getting-started/" repo={GH} /></span>
+      <button type="button" class={buttonVariants({ variant: 'ghost', size: 'icon' })} data-theme-toggle aria-label="Dark theme" aria-pressed="false"><Fragment set:html={IC.theme} /></button>
+      <a class:list={[buttonVariants({ size: 'sm' }), 'btn-install']} href={INSTALL_HREF} data-lead-href={INSTALL_HREF}>Install</a>
+      <span class="menu-slot"><MobileMenu client:interaction items={items} install={INSTALL_HREF} repo={GH} /></span>
     </div>
   </div>
 </header>
