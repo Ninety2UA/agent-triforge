@@ -1,0 +1,248 @@
+---
+// The sprint, phase by phase: each phase of the Sprint Pipeline table in docs/workflows.md with its
+// agents and lead workflow (read from the table), what it writes and who does it (from the roster),
+// then the review lanes with the review loop (Fig. 1), the convergence modes, the quality gates and the
+// completion checklist, each read from the file that states it (lib/sprint.mjs). The deeper words per
+// phase are hand-written below, keyed by phase id: a phase the table gains or loses stops the build
+// until they match. Phases, quality gates, review lanes and fix cycles are written as text (KTD17).
+import '@/styles/concept.css';
+import Base from '@/layouts/Base.astro';
+import Tabs from '@/components/Tabs.astro';
+import CodeBlock from '@/components/CodeBlock.astro';
+import VideoFigure from '@/components/VideoFigure.astro';
+import { PERSONAS } from '@/data/content';
+import { getRoles } from '@/lib/roster.mjs';
+import { completionChecklist, convergenceModes, inlineHtml, qualityGates, sprintPhases } from '@/lib/sprint.mjs';
+
+interface Notes {
+  body: string;
+  /** files the phase reads (Pre-plan) or writes */
+  files: { k: 'Reads' | 'Writes'; v: string[] };
+  /** roster roles that do the phase's work */
+  roles?: string[];
+}
+// The deeper words per phase, from skills/at-ship/SKILL.md and its references/phases.md. Backticks mark code.
+const NOTES: Record<string, Notes> = {
+  'phase-0': {
+    body: 'Antigravity reads the whole repository with the `codebase-analyst` agent definition. The lead skips the phase when the codebase has not changed or the change is a small fix. A failed run does not stop the sprint, which goes on without a fresh `ops/ARCHITECTURE.md`. Captured output is kept only when it is not empty and the run reported success.',
+    files: { k: 'Writes', v: ['ops/ARCHITECTURE.md'] },
+    roles: ['analyst'],
+  },
+  'pre-plan': {
+    body: 'The `learnings-researcher` persona searches the notes earlier sprints left for anything that bears on the goal, so a mistake one sprint wrote down is not made again in the next.',
+    files: { k: 'Reads', v: ['ops/solutions/', 'ops/decisions/'] },
+  },
+  'phase-1': {
+    body: 'The lead follows `writing-plans`, traces how each non-trivial task can fail with `shadow-path-tracing`, copies the types from `ops/CONTRACTS.md` into the task descriptions and groups the tasks into waves. Each task names the roster role that will do it.',
+    files: { k: 'Writes', v: ['ops/TASKS.md'] },
+  },
+  'phase-1-1': {
+    body: 'Each assumption comes with its other reading and what goes wrong if it is the wrong one. You confirm or correct them, and the lead revises `ops/TASKS.md`. A goal with nothing open to question skips this step.',
+    files: { k: 'Writes', v: ['ops/TASKS.md'] },
+  },
+  'phase-1-5': {
+    body: '`plan-checker` reads the plan and returns a verdict, and the lead revises until it says APPROVED. Like `security-sentinel` and `findings-synthesizer`, it always runs on top-tier Claude, whichever CLI leads. Nothing is built from a plan it has not approved.',
+    files: { k: 'Writes', v: ['ops/TASKS.md'] },
+  },
+  'phase-2': {
+    body: 'Each task is leased from the roster and built in its own worktree. A pinned reviewer, a different roster member from the builder, checks it; after three fix cycles with the same reviewer, you decide. The lead squash-merges its own snapshot of the task, one commit per task, onto the sprint\'s integration branch, and `integration-verifier` checks that branch between waves. Promotion to your main branch follows `[promotion]` in the roster and waits for your approval when the change touches a protected path. With fewer than 5 independent tasks the build runs as sub-agents; with 5 or more, with interdependent tasks or with `--team`, it runs as an agent team.',
+    files: { k: 'Writes', v: ['ops/leases.toml', 'ops/CHANGELOG.md'] },
+    roles: ['builder', 'reviewer'],
+  },
+  'phase-3-and-4': {
+    body: 'The lanes start together, and each writes its own review file, so none waits for another. `findings-synthesizer` merges the files and sets the confidence tiers; a lane that is missing or empty counts as a gap, and the cycle cannot converge on it. The lead fixes the P1 and P2 findings and records every finding as fixed, dismissed with a reason, or deferred with where it went.',
+    files: { k: 'Writes', v: ['ops/REVIEW_*.md', 'ops/TASKS.md'] },
+  },
+  'phase-5': {
+    body: '`test-gap-analyzer` finds the paths in the changed files that no test covers. It sees committed work only, so when the changes are uncommitted the lead asks you to commit them or name a branch, and never commits for you. The tester writes each test so that it fails first, and the lead fixes and reruns until the suite passes.',
+    files: { k: 'Writes', v: ['ops/TEST_RESULTS.md'] },
+    roles: ['tester'],
+  },
+  'phase-6': {
+    body: '`knowledge-compounding` writes a note to `ops/solutions/` only when a future agent would repeat a mistake without it. The lead updates the changelog, memory and task files, archives the review files to `ops/archive/<date>/`, runs `verification-before-completion` and writes `ops/STATE.md`. The completion marker comes last, and only when the checklist below holds.',
+    files: { k: 'Writes', v: ['ops/STATE.md', 'ops/archive/', 'ops/.sprint-complete'] },
+  },
+};
+
+const roleChains = new Map(getRoles().map((r) => [r.role, [r.cliName, ...r.fallbacks.map((f) => f.cliName)]]));
+const phases = sprintPhases().map((p) => {
+  const notes = NOTES[p.id];
+  if (!notes) throw new Error(`site/src/pages/sprint.astro: docs/workflows.md has the phase "${p.label}" (${p.id}), which has no notes here`);
+  const heading = !p.number ? p.name : `${p.number.includes(' and ') ? 'Phases' : 'Phase'} ${p.number}: ${p.name}`;
+  const numeral = !p.number ? 'P' : p.number.replace(' and ', '&');
+  const roles = (notes.roles ?? []).map((role) => {
+    const chain = roleChains.get(role);
+    if (!chain) throw new Error(`site/src/pages/sprint.astro: the phase ${p.id} names the role ${role}, which templates/ops/roster.toml does not have`);
+    return { role, chain };
+  });
+  return { ...p, heading, numeral, notes, roles };
+});
+for (const id of Object.keys(NOTES)) {
+  if (!phases.some((p) => p.id === id)) throw new Error(`site/src/pages/sprint.astro: notes for the phase ${id}, which docs/workflows.md no longer has`);
+}
+
+const persona = (name: string) => {
+  const p = PERSONAS.find((x) => x.name === name);
+  if (!p) throw new Error(`site/src/pages/sprint.astro: the persona ${name} has no words in site/src/data/content.ts`);
+  return p;
+};
+const LANES: { name: string; what: string; href?: string }[] = [
+  { name: 'Antigravity', what: 'Architecture and design.' },
+  { name: 'Codex', what: 'Logic, security and tests.' },
+  ...['security-sentinel', 'performance-oracle', 'code-simplicity-reviewer'].map((n) => ({ name: n, what: persona(n).what, href: `/skills/personas/#${persona(n).anchor}` })),
+];
+const synthesizer = persona('findings-synthesizer');
+const modes = convergenceModes();
+const gates = qualityGates();
+const checklist = completionChecklist();
+
+const leadTabs = [
+  { id: 'claude-code', label: 'Claude Code leads', lead: 'claude-code' as const },
+  { id: 'codex', label: 'Codex leads', lead: 'codex' as const },
+];
+const run = (prefix: string) => [`${prefix}at-plan <goal>`, `${prefix}at-build`, `${prefix}at-review`, `${prefix}at-test`, `${prefix}at-wrap`];
+---
+<Base title="Sprint · Agent Triforge" description="What happens in each phase of a sprint, from the knowledge search to the completion marker: the agents, the files, the review lanes, the convergence modes and the quality gates." search={{ section: 'Sprint', title: 'Sprint' }}>
+  <section class="c-hero" aria-labelledby="sprint-h">
+    <div class="wrap c-top">
+      <div class="c-head">
+        <h1 id="sprint-h">The sprint, phase by phase</h1>
+        <p class="lede"><code>/at-ship &lt;goal&gt;</code> runs a whole sprint in one session: it maps the code, plans, builds, reviews, tests and writes down what it learned.</p>
+        <p>Each phase also has its own lead workflow, so you can run one phase at a time and read its output before the next. <a href="/#film">Watch one sprint</a> on the home page, or run one yourself in <a href="/tutorials/first-sprint/">Your first sprint</a>.</p>
+        <ul class="c-jump" aria-label="On this page" data-pagefind-ignore>
+          <li><a href="#phases">Phases</a></li>
+          <li><a href="#review">Review</a></li>
+          <li><a href="#gates">Quality gates</a></li>
+          <li><a href="#done">Done</a></li>
+          <li><a href="#run">Run a phase</a></li>
+        </ul>
+      </div>
+      <div class="c-side c-start">
+        <h2 class="c-start-h">Start a sprint</h2>
+        <Tabs id="ship" label="Start a sprint as" items={leadTabs}>
+          <Fragment slot="claude-code"><CodeBlock lines={['/at-ship <goal>']} label="Copy the Claude Code sprint command" prompt={false} /></Fragment>
+          <Fragment slot="codex"><CodeBlock lines={['$agent-triforge:at-ship <goal>']} label="Copy the Codex sprint command" prompt={false} /></Fragment>
+        </Tabs>
+        <p class="note">Add <code>--convergence fast</code> or <code>deep</code> to change where the review stops, and <code>--team</code> to build as an agent team.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="phases" aria-labelledby="phases-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2 id="phases-h">Phases</h2>
+        <p>The phases run in this order, and the lead gives a reason for any phase it skips.</p>
+      </div>
+      <ol class="c-phases">
+        {phases.map((p) => (
+          <li id={p.id} class="c-phase">
+            <span class="c-num" aria-hidden="true">{p.numeral}</span>
+            <span class="c-dot" aria-hidden="true"></span>
+            <div class="c-ph">
+              <div class="c-ph-t">
+                <h3>{p.heading}</h3>
+                <p class="c-what" set:html={p.happensHtml} />
+                <p set:html={inlineHtml(p.notes.body)} />
+              </div>
+              <dl>
+                <dt>Agents</dt><dd set:html={p.agentsHtml} />
+                {p.roles.map((r) => <Fragment><dt>{r.role.charAt(0).toUpperCase() + r.role.slice(1)}</dt><dd>{r.chain.join(', then ')}</dd></Fragment>)}
+                <dt>{p.notes.files.k}</dt><dd>{p.notes.files.v.map((f) => <code>{f}</code>)}</dd>
+                <dt>Lead workflow</dt><dd set:html={p.workflowsHtml} />
+              </dl>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
+
+  <section id="review" aria-labelledby="review-h">
+    <div class="wrap">
+      <div class="c-top">
+        <div>
+          <div class="sec-head">
+            <h2 id="review-h">Review until it converges</h2>
+            <p>In <code>at-ship</code>, five lanes review the change at once. Each writes its own file, findings are ranked P1, P2 or P3 with a confidence tier, and a low-confidence finding is never P1.</p>
+          </div>
+          <ul class="c-lanes">
+            {LANES.map((l) => (
+              <li>
+                {l.href ? <a href={l.href}><code>{l.name}</code></a> : <b>{l.name}</b>}
+                <span>{l.what}</span>
+              </li>
+            ))}
+          </ul>
+          <p class="c-after">Then <a href={`/skills/personas/#${synthesizer.anchor}`}><code>findings-synthesizer</code></a> {synthesizer.what.charAt(0).toLowerCase() + synthesizer.what.slice(1)}</p>
+        </div>
+        <div class="c-side">
+          <VideoFigure n={1} name="loop-review" short="the review loop"
+            label="Loop: five reviewers read the change at once, their findings are counted as critical, important and minor, the fixes go in, and on the second pass only minor findings are left, so it stops."
+            caption="Five reviewers at once, the fixes, and a second pass with only minor findings left" />
+          <div class="c-modes">
+            <h3 id="convergence">Where the loop stops</h3>
+            <p>After each round of fixes the lead counts what is left. With <code>--convergence</code> you choose when that is enough; until then the reviewers go again, three cycles at most. After the third, the lead hands you the open findings, each reviewer's view, the dispositions and its recommendation, and you decide whether to ship with known issues.</p>
+            <table class="modes">
+              <thead><tr><th scope="col">Mode</th><th scope="col">Stops when</th><th scope="col">Use it for</th></tr></thead>
+              <tbody>{modes.map((m) => (
+                <tr><th scope="row"><code>{m.mode}</code>{m.isDefault && <span class="c-def"> (default)</span>}</th><td>{m.exit.replace(/ AND /g, ' and ')}</td><td>{m.use}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="gates" aria-labelledby="gates-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2 id="gates-h">Quality gates</h2>
+        <p>Five gates hold at every stage, whichever workflow runs.</p>
+      </div>
+      <ol class="c-gates">
+        {gates.map((g) => (
+          <li>
+            <h3>{g.name}</h3>
+            <p>{g.rule}.</p>
+            <p class="c-by"><span>Enforced by</span> <span set:html={g.enforcedByHtml} /></p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
+
+  <section id="done" aria-labelledby="done-h">
+    <div class="wrap c-split">
+      <div class="sec-head">
+        <h2 id="done-h">When a sprint is done</h2>
+        <p>The lead creates <code>ops/.sprint-complete</code> in Phase 6, as its last action, and only when every item on the checklist holds. <code>coordinate.sh</code> reads that file and nothing else to decide that a sprint has ended. When an item fails there is no marker, and the blocker goes into <code>ops/TASKS.md</code> and <code>ops/STATE.md</code>.</p>
+        <p>Under Claude Code, the sprint prints the checklist as a <code>/goal</code> line at the start, and typing it makes Claude Code hold the session to it. A Codex lead has no such gate and finishes on the marker alone.</p>
+      </div>
+      <div class="c-side">
+        <div class="c-check">
+          <h3>The completion checklist</h3>
+          <ol>{checklist.map((item) => <li set:html={item} />)}</ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="run" aria-labelledby="run-h">
+    <div class="wrap c-split">
+      <div class="sec-head">
+        <h2 id="run-h">Run a phase yourself</h2>
+        <p>In a supervised session you run each phase's workflow and read what it wrote before you start the next. <code>at-plan</code> covers Phases 0 to 1.5, and each later workflow takes one phase.</p>
+        <p><code>at-coordinate</code> runs the same pipeline without the convergence and team flags; it is the cycle <code>coordinate.sh</code> drives across fresh sessions. Every lead workflow is on <a href="/docs/workflows/">Workflows</a>.</p>
+      </div>
+      <div class="c-side">
+        <Tabs id="phase-run" label="Run the phases as" items={leadTabs}>
+          <Fragment slot="claude-code"><CodeBlock lines={run('/')} label="Copy the Claude Code phase commands" prompt={false} /></Fragment>
+          <Fragment slot="codex"><CodeBlock lines={run('$agent-triforge:')} label="Copy the Codex phase commands" prompt={false} /></Fragment>
+        </Tabs>
+        <p class="note">Type them one at a time, each after the one before has finished.</p>
+      </div>
+    </div>
+  </section>
+</Base>

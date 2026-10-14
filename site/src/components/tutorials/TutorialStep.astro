@@ -1,0 +1,97 @@
+---
+// One step of a tutorial: its number and title, the skills it names as chips linking to their pages,
+// what to paste (each command a copy control, the leads' versions as tabs that follow the stored lead),
+// then what happens, why it matters and the checkpoint. The Markdown parts arrive as HTML from the
+// tutorials collection (content.config.ts).
+import Tabs from '../Tabs.astro';
+import CodeBlock from '../CodeBlock.astro';
+
+type Segment = { kind: 'md'; html: string } | { kind: 'cmd'; lang: 'prompt' | 'bash'; text: string };
+type Lead = 'claude-code' | 'codex';
+interface Props {
+  n: number;
+  step: {
+    title: string;
+    id: string;
+    skills: string[];
+    common: Segment[];
+    tabs: { lead: Lead; label: string; segments: Segment[] }[] | null;
+    happens: string;
+    why: string;
+    checkpoint: string;
+  };
+}
+const { n, step } = Astro.props;
+
+const WHERE: Record<'common' | Lead, string> = {
+  common: "Type in the lead's session",
+  'claude-code': 'Type in Claude Code',
+  codex: 'Type in Codex',
+};
+const LEAD_NAME: Record<Lead, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+// Each command gets a caption and a copy label that names the step (and the lead, inside a tab).
+const commands = (segments: Segment[], where: 'common' | Lead) => {
+  const count = segments.filter((s) => s.kind === 'cmd').length;
+  let k = 0;
+  return segments.map((s) => {
+    if (s.kind === 'md') return s;
+    k += 1;
+    const shell = s.lang === 'bash';
+    const what = shell ? 'commands' : 'prompt';
+    const lead = where === 'common' ? '' : ` ${LEAD_NAME[where]}`;
+    return {
+      ...s,
+      caption: shell ? 'Run in a terminal' : WHERE[where],
+      copy: `Copy the step ${n}${lead} ${what}${count > 1 ? ` ${k}` : ''}`,
+      lines: s.text.split('\n'),
+    };
+  });
+};
+const common = commands(step.common, 'common');
+const tabs = step.tabs?.map((t) => ({ ...t, segments: commands(t.segments, t.lead) }));
+const parts = [
+  { title: 'What happens', html: step.happens, cls: 't-happens' },
+  { title: 'Why it matters', html: step.why, cls: 't-why' },
+  { title: 'Checkpoint', html: step.checkpoint, cls: 't-check' },
+];
+---
+<li class="t-step">
+  <h2 id={step.id}><span class="t-n" aria-hidden="true">{n}</span><span class="sr">Step {n}: </span>{step.title}</h2>
+  {step.skills.length > 0 && (
+    <ul class="t-skills" aria-label="Skills in this step">
+      {step.skills.map((name) => <li><a class="t-chip" href={`/skills/${name}/`}><code>{name}</code></a></li>)}
+    </ul>
+  )}
+  <div class="t-paste">
+    {common.map((s) =>
+      'lines' in s ? (
+        <div class="t-cmd"><p class="t-cap">{s.caption}</p><CodeBlock lines={s.lines} label={s.copy} prompt={s.lang === 'bash'} /></div>
+      ) : (
+        <div class="t-md" set:html={s.html} />
+      ),
+    )}
+    {tabs && (
+      <Tabs id={`step-${n}`} label={`Step ${n} for`} class="t-tabs" panelClass="t-panel" items={tabs.map(({ lead, label }) => ({ id: lead, label, lead }))}>
+        {tabs.map((t) => (
+          <Fragment slot={t.lead}>
+            {t.segments.map((s) =>
+              'lines' in s ? (
+                <div class="t-cmd"><p class="t-cap">{s.caption}</p><CodeBlock lines={s.lines} label={s.copy} prompt={s.lang === 'bash'} /></div>
+              ) : (
+                <div class="t-md" set:html={s.html} />
+              ),
+            )}
+          </Fragment>
+        ))}
+      </Tabs>
+    )}
+  </div>
+  <div class="t-parts">
+    {parts.map((p) => (
+      <section class:list={['t-part', p.cls]} aria-label={`Step ${n}: ${p.title}`}>
+        <h3>{p.title}</h3>
+        <div class="t-md" set:html={p.html} />
+      </section>
+    ))}
+  </div>
+</li>

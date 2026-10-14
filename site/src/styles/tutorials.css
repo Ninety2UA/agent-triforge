@@ -1,0 +1,54 @@
+/* Tutorials (pages/tutorials/[slug].astro) inside DocsLayout's page column: numbered steps on a dotted
+   line, each with its skill chips, what to paste (copy controls, lead tabs), then what happens, why it
+   matters and the checkpoint, which carries the accent dot: the place the reader should be. Loaded only
+   by the tutorial pages. */
+.t-intro { margin-bottom: 8px; }
+.doc .t-intro p { max-width: 62ch; }
+.t-intro > p:first-child { font-size: clamp(1.05rem, 0.98rem + 0.25vw, 1.2rem); line-height: 1.55; }
+.t-intro h3 { margin-top: 28px; }
+
+/* the steps: a numbered dot each, joined by a dotted line down the left */
+.doc .t-steps { list-style: none; margin: 56px 0 0; padding: 0; display: block; max-width: none; }
+.doc .t-step { position: relative; padding: 0 0 clamp(56px, 6vw, 80px) 56px; font-size: inherit; }
+.t-step::before { content: ""; position: absolute; left: 16px; top: 44px; bottom: 12px; border-left: 3px dotted var(--dot-frame); }
+.doc .t-step > h2 { margin: 0 0 14px; }
+.t-n { position: absolute; left: 0; top: 0; display: grid; place-items: center; width: 35px; height: 35px; border-radius: 50%; background: var(--foreground); color: var(--background); font: 600 16px/1 var(--font-sans-stack); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.t-step:has(> h2:target) .t-n { background: var(--dot-active); color: var(--primary-foreground); }
+
+/* skill chips */
+.doc .t-skills { list-style: none; margin: 0 0 20px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; max-width: none; }
+.doc .t-skills li { font-size: 15px; }
+.doc .t-chip { display: inline-flex; align-items: center; min-height: 28px; padding: 0 9px; border-radius: 4px; background: var(--muted); color: var(--foreground); text-decoration: none; transition: background-color 200ms var(--ease); }
+.doc .t-chip:hover { background: color-mix(in oklch, var(--muted) 82%, var(--foreground)); }
+.doc .t-chip code { padding: 0; background: none; font-size: 13.5px; white-space: nowrap; }
+
+/* what to paste */
+.t-paste, .t-panel { display: grid; gap: 14px; }
+.t-paste { margin: 0 0 32px; }
+.t-panel[hidden] { display: none; }
+.t-tabs { margin-top: 4px; }
+.doc .t-cap { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--muted-foreground); }
+/* short code (a skill, a path, a flag) stays on one line instead of breaking at a hyphen */
+.doc .t-intro :not(pre) > code, .doc .t-md :not(pre) > code { white-space: nowrap; overflow-wrap: normal; }
+.t-md > :last-child { margin-bottom: 0; }
+.doc .t-md ul { list-style: disc; }
+.t-md > :first-child { margin-top: 0; }
+
+/* what happens, why it matters, the checkpoint */
+.t-parts { display: grid; gap: 26px; }
+.doc .t-part h3 { margin: 0 0 8px; font-size: 17px; letter-spacing: -0.005em; }
+.t-check { padding: 18px 20px 20px; border-radius: var(--radius); background: var(--muted); }
+.t-check h3 { display: flex; align-items: center; gap: 10px; }
+.t-check h3::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-active); }
+.doc .t-check :not(pre) > code { background: var(--background); }
+
+/* the recap */
+.t-recap { margin-top: 8px; }
+.doc .t-recap h2 { margin-top: 0; }
+
+@media (max-width: 640px) {
+  .doc .t-step { padding-left: 0; }
+  .t-step::before { display: none; }
+  .doc .t-step > h2 { display: flex; align-items: flex-start; gap: 12px; }
+  .t-n { position: static; flex: none; width: 30px; height: 30px; font-size: 15px; margin-top: 1px; }
+}

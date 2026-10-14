@@ -1,0 +1,194 @@
+---
+// The roster: every CLI the registry knows (core or optional, the roles it may take, whether it can lead,
+// whether it needs your consent, and which provider sees the code), the default roles with their full
+// fallback chains, the lead, and how to change ops/roster.toml. Facts come from the data modules
+// (roster.mjs reads scripts/lib/registry.sh and templates/ops/roster.toml); the file fragments are read
+// from the template at build time. The roster loop is Fig. 1, as on the home page.
+import '@/styles/concept.css';
+import Base from '@/layouts/Base.astro';
+import Claim from '@/components/Claim.astro';
+import Tabs from '@/components/Tabs.astro';
+import CodeBlock from '@/components/CodeBlock.astro';
+import VideoFigure from '@/components/VideoFigure.astro';
+import { glyph } from '@/components/home/dots';
+import { badgeVariants } from '@/components/ui/badge';
+import { ROLES } from '@/data/content';
+import { ROLE_NAMES, getClis, getRoles } from '@/lib/roster.mjs';
+import { REPO, read } from '@/lib/repo.mjs';
+import { githubUrl } from '@/lib/routes.mjs';
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const list = (words: string[]) => (words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`);
+const orList = (words: string[]) => (words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} or ${words[words.length - 1]}`);
+
+// core members first, then the optional ones in registry order, a member that needs your consent last
+const clis = getClis()
+  .map((c, i) => ({ c, i }))
+  .sort((a, b) => Number(b.c.core) - Number(a.c.core) || Number(a.c.consent) - Number(b.c.consent) || a.i - b.i)
+  .map(({ c }) => c);
+const core = clis.filter((c) => c.core);
+const optional = clis.filter((c) => !c.core);
+const leads = clis.filter((c) => c.canLead);
+const coreNames = orList(core.map((c) => c.name));
+
+const facts = (c: (typeof clis)[number]) => [
+  { k: 'Roles', v: c.roles.length === ROLE_NAMES.length ? 'Any role' : `${cap(list(c.roles))}${c.optInRoles.length ? `; ${list(c.optInRoles)} only after you opt in` : ''}` },
+  { k: 'Code goes to', v: c.egress },
+  { k: 'Joins', v: c.core ? 'Always. It cannot be disabled.' : c.consent ? 'Only with your consent on record' : 'When you enroll it' },
+];
+
+const roles = getRoles().map((r) => {
+  const words = ROLES.find((w) => w.role === r.role);
+  if (!words) throw new Error(`site/src/data/content.ts: the role ${r.role} in templates/ops/roster.toml has no words in ROLE_WORDS`);
+  return { ...r, does: words.does, chain: [{ cli: r.cli, cliName: r.cliName }, ...r.fallbacks] };
+});
+
+// Fragments of the shipped roster file, read from the template, comments left out.
+const TEMPLATE = 'templates/ops/roster.toml';
+const template = read(REPO, TEMPLATE).split('\n');
+const table = (name: string) => {
+  const at = template.indexOf(`[${name}]`);
+  if (at === -1) throw new Error(`${TEMPLATE}: no [${name}] table; the roster page shows it`);
+  const out = [template[at]];
+  for (let i = at + 1; i < template.length && !template[i].startsWith('['); i++) {
+    const line = template[i].replace(/\s+#.*$/, '');
+    if (line.trim() && !line.trim().startsWith('#')) out.push(line);
+  }
+  return out.join('\n');
+};
+// the [lead] table is shipped commented out: its header and its cli line, uncommented
+const leadAt = template.findIndex((l) => /^#\s*\[lead\]\s*$/.test(l));
+const leadCli = template.slice(leadAt + 1).find((l) => /^#\s*cli = /.test(l));
+if (leadAt === -1 || !leadCli) throw new Error(`${TEMPLATE}: no commented [lead] example with a cli line; the roster page shows it`);
+const leadExample = `[lead]\n${leadCli.replace(/^#\s*/, '').replace(/\s+#.*$/, '')}`;
+const reviewer = table('roles.reviewer');
+const promotion = table('promotion');
+
+const leadTabs = [
+  { id: 'claude-code', label: 'Claude Code leads', lead: 'claude-code' as const },
+  { id: 'codex', label: 'Codex leads', lead: 'codex' as const },
+];
+---
+<Base title="Roster · Agent Triforge" description="Which coding agent builds, reviews, tests, analyzes and documents, who covers for a missing one, which provider sees your code, and how to change ops/roster.toml." search={{ section: 'Roster', title: 'Roster' }}>
+  <section class="c-hero" aria-labelledby="roster-h">
+    <div class="wrap c-top">
+      <div class="c-head">
+        <h1 id="roster-h">The roster</h1>
+        <p class="lede">You set which coding agent does each job in one file, <code>ops/roster.toml</code>. The lead plans the work and merges it. The roster names who builds, reviews, tests, analyzes and documents, and who covers for a missing one.</p>
+        <p>Claude Code leads by default and Codex can lead too. Setup writes the file for you, and you can edit it by hand.</p>
+        <ul class="c-jump" aria-label="On this page" data-pagefind-ignore>
+          <li><a href="#agents">Agents</a></li>
+          <li><a href="#roles">Roles and fallbacks</a></li>
+          <li><a href="#lead">Lead</a></li>
+          <li><a href="#edit">Changing it</a></li>
+        </ul>
+      </div>
+      <VideoFigure n={1} name="loop-roster" short="the roster loop"
+        label="Loop: Claude Code leads and builds, Codex reviews and tests, Antigravity analyzes and documents. When Codex is missing, the others take its work, and then Codex leads instead."
+        caption="Default roles, the others covering for a missing agent, and Codex taking the lead" />
+    </div>
+  </section>
+
+  <section id="agents" aria-labelledby="agents-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2 id="agents-h">The agents</h2>
+        <p><Claim kind="clis" word capital /> coding agents can work on a team. {list(core.map((c) => c.name))} are always on it. The others join when you enroll them, and each one sends your code to its own provider.</p>
+      </div>
+      {[{ h: 'Always on the team', id: 'core', items: core }, { h: 'Join when you add them', id: 'optional', items: optional }].map((g) => (
+        <Fragment>
+          <h3 class="c-group" id={`agents-${g.id}`}>{g.h}</h3>
+          <ul class="c-clis" aria-labelledby={`agents-${g.id}`}>
+            {g.items.map((c) => (
+              <li data-cli={c.id}>
+                <div class="c-who">
+                  <svg class:list={['cl', { opt: !c.core }]} viewBox="0 0 30 30" aria-hidden="true">{glyph(!c.core).map((d) => <circle cx={d.cx} cy={d.cy} r={d.r} />)}</svg>
+                  <div>
+                    <b>{c.name}</b>
+                    <span class="c-tags">
+                      {c.canLead && <span class={badgeVariants()}>Can lead</span>}
+                      {c.consent && <span class={badgeVariants({ variant: 'outline' })}>Needs your consent</span>}
+                    </span>
+                  </div>
+                </div>
+                <dl>{facts(c).map((f) => <Fragment><dt>{f.k}</dt><dd>{f.v}</dd></Fragment>)}</dl>
+              </li>
+            ))}
+          </ul>
+        </Fragment>
+      ))}
+      <p class="c-note">Versions, floors and the check each agent must pass are on <a href="/docs/compatibility/">Compatibility</a>. What each provider receives is on <a href="/guides/data-egress/">Data egress</a>.</p>
+    </div>
+  </section>
+
+  <section id="roles" aria-labelledby="roles-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2 id="roles-h">Roles and fallbacks</h2>
+        <p>The roster has <Claim kind="roles" word /> roles. Each names an agent, a model and an effort, and a chain of agents that take over in order when the one before is missing or disabled. Every chain ends at {coreNames}.</p>
+      </div>
+      <ol class="c-roles">
+        {roles.map((r) => (
+          <li class="c-role">
+            <div class="c-role-h">
+              <h3><code>{r.role}</code></h3>
+              <p>{r.does}.</p>
+            </div>
+            <ol class="c-chain" data-role={r.role} aria-label={`${r.role}: ${r.chain.map((c) => c.cliName).join(', then ')}`}>
+              {r.chain.map((c, i) => (
+                <li data-cli={c.cli} class:list={{ on: i === 0 }}>
+                  <span class="d" aria-hidden="true"></span>
+                  <b>{c.cliName}</b>
+                  {i === 0 ? (
+                    <span>{r.model ? <Fragment><code>{r.model}</code>, </Fragment> : `${c.cliName}'s own model, `}{r.effort} effort</span>
+                  ) : (
+                    <span>{i === 1 ? 'If it is missing' : 'Then'}</span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
+
+  <section id="lead" aria-labelledby="lead-h">
+    <div class="wrap c-split">
+      <div class="sec-head">
+        <h2 id="lead-h">The lead</h2>
+        <p>The lead plans the sprint, hands out the tasks, reviews and merges. {orList(leads.map((c) => c.name))} can lead. With no <code>[lead]</code> table in the roster, Claude Code leads.</p>
+        <p>Switch from either CLI with setup's lead step. It refuses while leases are open, so finish or hand them over first.</p>
+      </div>
+      <div class="c-side">
+        <Tabs id="lead-switch" label="Switch the lead from" items={leadTabs}>
+          <Fragment slot="claude-code"><CodeBlock lines={['/at-setup lead']} label="Copy the Claude Code lead command" prompt={false} /></Fragment>
+          <Fragment slot="codex"><CodeBlock lines={['$agent-triforge:at-setup lead']} label="Copy the Codex lead command" prompt={false} /></Fragment>
+        </Tabs>
+        <div class="art" data-ui><span class="lbl">The table that makes Codex the lead</span><pre>{leadExample}</pre></div>
+        <p class="note">A Codex lead also needs a trust entry in <code>~/.codex/config.toml</code>, which you add yourself. Setup prints it.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="edit" aria-labelledby="edit-h">
+    <div class="wrap c-split">
+      <div class="sec-head">
+        <h2 id="edit-h">Change the roster</h2>
+        <p>Setup's role step shows each role's current agent, model and effort, and lets you keep or change each one. It checks every change before it writes it.</p>
+        <p>You can also edit <code>ops/roster.toml</code> by hand. A field you leave out keeps the shipped default, so a role that sets only <code>effort</code> keeps its agent and model, and deleting the whole file is safe. Each fallback chain must end at {coreNames}, and none of them can be disabled. A file that breaks a rule fails to load.</p>
+        <p>An optional agent is enrolled the first time it is found, at session start or in setup, and Devin only through setup, after you consent. <code>enabled = false</code> on its <code>[members.&lt;name&gt;]</code> table turns it off everywhere: every chain skips it.</p>
+      </div>
+      <div class="c-side">
+        <Tabs id="roles-step" label="Change the roles from" items={leadTabs}>
+          <Fragment slot="claude-code"><CodeBlock lines={['/at-setup roles']} label="Copy the Claude Code roles command" prompt={false} /></Fragment>
+          <Fragment slot="codex"><CodeBlock lines={['$agent-triforge:at-setup roles']} label="Copy the Codex roles command" prompt={false} /></Fragment>
+        </Tabs>
+        <div class="art" data-ui><span class="lbl">One role, as the shipped roster sets it</span><pre>{reviewer}</pre></div>
+        <div class="art" data-ui><span class="lbl">The promotion gate</span><pre>{promotion}</pre></div>
+        <p class="note">With <code>require_user_approval = true</code>, the lead waits for your approval at the end of a wave before it promotes the sprint's branch to main. A change to a protected path needs your approval either way.</p>
+        <p class="note" data-pagefind-ignore><a href={githubUrl(TEMPLATE)}>The whole shipped roster file on GitHub</a></p>
+      </div>
+    </div>
+  </section>
+</Base>

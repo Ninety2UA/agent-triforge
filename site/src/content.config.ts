@@ -31,6 +31,8 @@ import { getPersonas } from './lib/personas.mjs';
 import { getReleases } from './lib/releases.mjs';
 import { REPO } from './lib/repo.mjs';
 import { getSkills } from './lib/skills.mjs';
+import { readFileSync } from 'node:fs';
+import { parseTutorial, writtenTutorials, type TutorialSegment } from './lib/tutorials.mjs';
 
 const fileURL = (repoPath: string) => pathToFileURL(join(REPO, repoPath));
 const filePathFrom = (configRoot: URL, repoPath: string) => relative(fileURLToPath(configRoot), join(REPO, repoPath)).split(sep).join('/');
@@ -143,4 +145,66 @@ const releases = defineCollection({
   }),
 });
 
-export const collections = { skills, docs, personas, releases };
+// tutorials  one entry per written tutorial (lib/tutorials.mjs writtenTutorials(): a TUTORIALS slug with
+//            src/content/tutorials/<slug>.md), id = the slug, read by parseTutorial, which stops the build
+//            naming the file and the step when the text does not follow the tutorial form. data: title,
+//            href, description, and intro, steps and recap with every Markdown part rendered to HTML. A
+//            step is { title, id, skills, common, tabs, happens, why, checkpoint }; common and each tab's
+//            segments are lists of { kind: 'md', html } and { kind: 'cmd', lang, text } (a command to
+//            paste); tabs is null or the Claude Code and Codex versions of the paste area.
+const segment = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('md'), html: z.string() }),
+  z.object({ kind: z.literal('cmd'), lang: z.enum(['prompt', 'bash']), text: z.string() }),
+]);
+export const tutorials = defineCollection({
+  loader: {
+    name: 'triforge-tutorials',
+    async load({ config, store, parseData, renderMarkdown }) {
+      store.clear();
+      for (const { slug, href, title } of writtenTutorials()) {
+        const repoPath = `site/src/content/tutorials/${slug}.md`;
+        const base = { fileURL: fileURL(repoPath) };
+        const html = async (markdown: string) => (await renderMarkdown(markdown, base)).html;
+        const segments = (list: TutorialSegment[]) =>
+          Promise.all(list.map(async (s) => (s.kind === 'md' ? { kind: s.kind, html: await html(s.md) } : s)));
+        const { meta, intro, steps, recap } = parseTutorial(readFileSync(join(REPO, repoPath), 'utf8'), repoPath);
+        const rendered = [];
+        for (const step of steps) {
+          rendered.push({
+            title: step.title,
+            id: step.id,
+            skills: step.skills,
+            common: await segments(step.common),
+            tabs: step.tabs && (await Promise.all(step.tabs.map(async (t) => ({ lead: t.lead, label: t.label, segments: await segments(t.segments) })))),
+            happens: await html(step.happens),
+            why: await html(step.why),
+            checkpoint: await html(step.checkpoint),
+          });
+        }
+        const data = await parseData({ id: slug, data: { title, href, ...meta, intro: await html(intro), steps: rendered, recap: await html(recap) } });
+        store.set({ id: slug, data, filePath: filePathFrom(config.root, repoPath) });
+      }
+    },
+  },
+  schema: z.object({
+    title: z.string(),
+    href: z.string(),
+    description: z.string(),
+    intro: z.string(),
+    steps: z.array(
+      z.object({
+        title: z.string(),
+        id: z.string(),
+        skills: z.array(z.string()),
+        common: z.array(segment),
+        tabs: z.array(z.object({ lead: z.enum(['claude-code', 'codex']), label: z.string(), segments: z.array(segment) })).nullable(),
+        happens: z.string(),
+        why: z.string(),
+        checkpoint: z.string(),
+      }),
+    ),
+    recap: z.string(),
+  }),
+});
+
+export const collections = { skills, docs, personas, releases, tutorials };
