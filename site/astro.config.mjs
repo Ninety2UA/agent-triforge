@@ -8,6 +8,7 @@ import sitemap from '@astrojs/sitemap';
 import pagefind from 'astro-pagefind';
 import tailwindcss from '@tailwindcss/vite';
 import interactionDirective from './src/directives/integration.mjs';
+import escapeSkillHtml from './src/lib/markdown/escape-skill-html.mjs';
 import { SITE_URL } from './src/lib/site.mjs';
 
 export default defineConfig({
@@ -19,11 +20,14 @@ export default defineConfig({
     // throttled phone
     inlineStylesheets: 'always',
   },
+  // escapeSkillHtml: raw HTML in SKILL.md bodies and persona prompts renders as text, so
+  // placeholders such as <base-branch> stay visible
   integrations: [
     react(),
     sitemap({ filter: (page) => !/\/404\/?$/.test(page) }),
     pagefind(),
     interactionDirective(),
+    escapeSkillHtml(),
   ],
   fonts: [
     {
