@@ -1,0 +1,48 @@
+---
+// The skills catalog (R1, R2, R4, R11): every skill as a static card in catalog order, the search box
+// and the group chips (the SkillFilter island, hydrated on first use), a live "N of total" count and an
+// empty state. The plain page script starts the filter on load, so /skills/?q=<text> and
+// ?group=<key> show filtered and "/" focuses the search box before any island loads. Without
+// JavaScript every card shows and the controls that would do nothing are hidden.
+import Base from '@/layouts/Base.astro';
+import Claim from '@/components/Claim.astro';
+import CatalogSwitch from '@/components/CatalogSwitch.astro';
+import SkillCard from '@/components/SkillCard.astro';
+import SkillFilter from '@/components/SkillFilter';
+import { buttonVariants } from '@/components/ui/button';
+import { getSkills, skillGroups } from '@/lib/skills.mjs';
+import { getCounts } from '@/lib/counts.mjs';
+import '@/styles/skills.css';
+
+const skills = getSkills();
+const groups = skillGroups();
+const counts = getCounts();
+const description = `Search all ${counts.skills} Agent Triforge skills by name or task, or filter them by group: the lead workflows you run as /at-ship or $agent-triforge:at-ship, and the portable skills any agent can load.`;
+---
+<Base title="Skills · Agent Triforge" description={description} search={{ section: 'Skills', title: 'Skills' }}>
+  <noscript><style is:inline>.sf-field{display:none!important}</style></noscript>
+  <div class="wrap cat">
+    <header class="cat-head">
+      <h1>Skills</h1>
+      <p class="lede"><Claim kind="leadSkills" word capital /> lead workflows and <Claim kind="portableSkills" word /> portable skills. A workflow is named <code>at-*</code> and runs in the agent that leads: <code>/at-ship</code> in Claude Code, <code>$agent-triforge:at-ship</code> in Codex. Portable skills load in any agent on the team and usually start on their own when the task fits.</p>
+      <CatalogSwitch current="skills" />
+    </header>
+
+    <div class="cat-body" data-catalog data-read-url>
+      <SkillFilter client:interaction groups={groups} total={skills.length} search />
+      <p class="count" id="skill-count" aria-live="polite" data-pagefind-ignore>Showing <span data-count>{skills.length}</span> of <Claim kind="skills" /> skills</p>
+      <ul class="cards" id="skill-cards">
+        {skills.map((s) => <SkillCard name={s.name} group={s.group} lead={s.lead} summary={s.summary} use={s.description} level={2} filter />)}
+      </ul>
+      <div class="cat-empty" data-empty hidden data-pagefind-ignore>
+        <p data-empty-text>No skill matches.</p>
+        <button type="button" class={buttonVariants({ variant: 'outline' })} data-filter-clear>Show every skill</button>
+      </div>
+    </div>
+  </div>
+</Base>
+
+<script>
+  import { initCatalog } from '@/components/skill-filter.mjs';
+  initCatalog();
+</script>

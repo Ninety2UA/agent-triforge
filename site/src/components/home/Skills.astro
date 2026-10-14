@@ -1,9 +1,22 @@
 ---
-// The featured skills with their filter chips (SkillFilter island, hydrated on first use).
+// The featured skills as static cards (SkillCard), with their filter chips: the SkillFilter island,
+// hydrated on first use, and the plain filter controller (skill-filter.mjs) that shows and hides the
+// cards. Without JavaScript every card shows and the chips are hidden.
 import SkillFilter from '../SkillFilter';
+import SkillCard from '../SkillCard.astro';
 import Claim from '../Claim.astro';
 import { numberWord } from '@/lib/numbers.mjs';
 import { FEATURED } from '@/data/content';
+
+// the featured groups in card order, Portable among them
+const groups: { key: string; label: string; count: number }[] = [];
+for (const s of FEATURED) {
+  const g = groups.find((x) => x.key === s.group);
+  if (g) g.count += 1;
+  else groups.push({ key: s.group, label: s.groupLabel, count: 1 });
+}
+// the hand-written lines name a few files and helpers; set them as code
+const code = (text: string) => text.replace(/(ops\/TASKS\.md|coordinate\.sh|plan-checker|STATE\.md)/g, '`$1`');
 ---
 <section id="skills" aria-labelledby="skills-h" data-rv-group>
   <div class="wrap">
@@ -11,7 +24,18 @@ import { FEATURED } from '@/data/content';
       <h2 id="skills-h"><Claim kind="leadSkills" word capital /> workflows, <Claim kind="portableSkills" word /> portable skills</h2>
       <p>Workflows named <code>at-*</code> run in the lead. Portable skills work in any agent and usually start on their own when the context fits. Here are {numberWord(FEATURED.length)} of the <Claim kind="skills" />.</p>
     </div>
-    <SkillFilter client:interaction skills={FEATURED} />
+    <div data-catalog>
+      <SkillFilter client:interaction groups={groups} total={FEATURED.length} />
+      <p class="count" aria-live="polite">Showing <span data-count>{FEATURED.length}</span> of {FEATURED.length} featured skills</p>
+      <ul class="cards">
+        {FEATURED.map((s) => <SkillCard name={s.name} group={{ key: s.group, label: s.groupLabel }} lead={s.lead} summary={code(s.summary)} use={code(s.use)} filter />)}
+      </ul>
+    </div>
     <p class="cat-foot"><a class="more" href="/skills/">All <Claim kind="skills" /> skills</a></p>
   </div>
 </section>
+
+<script>
+  import { initCatalog } from '../skill-filter.mjs';
+  initCatalog();
+</script>

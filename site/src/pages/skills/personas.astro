@@ -1,0 +1,71 @@
+---
+// The personas page (R1, R2, KTD3), built from docs/personas.md, personas/manifest.toml and the persona
+// prompts: the groups in the docs' order, each persona with its summary, tool class, starting model
+// tier, turn budget, whether it is never moved to a smaller model, and its full prompt folded away.
+// Anchors: #<persona name> for each persona, #<group> for each group heading, and the docs' own
+// heading anchor with its count (#review-specialists-6) on the group's section, so old links to
+// docs/personas.md land on the group.
+import { getCollection } from 'astro:content';
+import Base from '@/layouts/Base.astro';
+import CatalogSwitch from '@/components/CatalogSwitch.astro';
+import { badgeVariants } from '@/components/ui/badge';
+import { inlineHtml, promptHtml } from '@/components/skill-html.mjs';
+import { getPersonas, personaGroups, personasPage } from '@/lib/personas.mjs';
+import '@/styles/docs.css';
+import '@/styles/skills.css';
+
+const intro = personasPage();
+const groups = personaGroups();
+const personas = getPersonas();
+const prompts = new Map((await getCollection('personas')).map((e) => [e.id, e.rendered?.html ?? '']));
+
+// What each tool class lets a persona do (personas/manifest.toml), in a few words.
+const CLASS_WORDS: Record<string, string> = {
+  read: 'reads and searches files',
+  'read-web': 'reads files and searches the web',
+  exec: 'runs commands in a throwaway worktree without edit tools',
+  lease: 'edits code through a lease',
+  'agent-team': 'runs a Claude agent team',
+};
+---
+<Base title="Personas · Agent Triforge" description="Every Agent Triforge persona by group: what it checks, the tools it may use, the model tier it starts on, its turn budget and its full prompt." search={{ section: 'Personas', title: 'Personas' }}>
+  <div class="wrap cat">
+    <header class="cat-head">
+      <h1>Personas</h1>
+      <p class="lede" set:html={inlineHtml(intro.intro)} />
+      <CatalogSwitch current="personas" />
+    </header>
+
+    <nav class="pg-jump" aria-label="Persona groups" data-pagefind-ignore>
+      <ul>{groups.map((g) => <li><a href={`#${g.anchor}`}>{g.label}<span class="n">{g.count}</span></a></li>)}</ul>
+    </nav>
+
+    {groups.map((g) => (
+      <section class="pg" id={`${g.anchor}-${g.count}`} aria-labelledby={g.anchor}>
+        <h2 id={g.anchor}>{g.label}</h2>
+        <ul class="pl">
+          {personas.filter((p) => p.group.key === g.key).map((p) => (
+            <li class="pl-item" id={p.anchor}>
+              <div class="pl-id">
+                <h3><code>{p.name}</code></h3>
+                {p.neverDowngrade && <p class="nd">Never moved to a smaller model</p>}
+              </div>
+              <div class="pl-what">
+                <p class="pl-sum" set:html={inlineHtml(p.summary)} />
+                <dl class="pl-facts">
+                  <div><dt>Tools</dt><dd><span class={badgeVariants({ variant: 'outline' })}>{p.class}</span>{CLASS_WORDS[p.class] && <span class="pl-cls">{CLASS_WORDS[p.class]}</span>}</dd></div>
+                  <div><dt>Starting tier</dt><dd><code>{p.tier}</code></dd></div>
+                  <div><dt>Turn budget</dt><dd>{p.maxTurns}</dd></div>
+                </dl>
+                <details class="pl-prompt">
+                  <summary>Read the prompt<span class="sr"> of {p.name}</span></summary>
+                  <div class="doc" set:html={promptHtml(prompts.get(p.name) ?? '')} />
+                </details>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ))}
+  </div>
+</Base>

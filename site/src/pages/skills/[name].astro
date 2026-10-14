@@ -1,0 +1,128 @@
+---
+// One page per skill folder (R1, R2): the breadcrumb back to the catalog and the group, the name with
+// its group and its lead or portable badge, the summary and the description, how to run it in each
+// lead (or, for a portable skill, in each CLI that docs/skills.md lists), the SKILL.md body as written
+// (references link to GitHub; raw text such as <file or diff> stays visible) and the other skills of
+// its group. Everything here comes from the repo; the few sentences around it are written by hand.
+import type { MarkdownHeading } from 'astro';
+import { getCollection } from 'astro:content';
+import Base from '@/layouts/Base.astro';
+import Tabs from '@/components/Tabs.astro';
+import CodeBlock from '@/components/CodeBlock.astro';
+import SkillCard from '@/components/SkillCard.astro';
+import { IC } from '@/components/icons';
+import { badgeVariants } from '@/components/ui/badge';
+import { inlineHtml, skillBodyHtml } from '@/components/skill-html.mjs';
+import { getSkills } from '@/lib/skills.mjs';
+import { invocation, portableInvocations } from '@/lib/portable.mjs';
+import { githubUrl } from '@/lib/routes.mjs';
+import { exists, REPO } from '@/lib/repo.mjs';
+import '@/styles/docs.css';
+import '@/styles/skills.css';
+
+export async function getStaticPaths() {
+  const entries = new Map((await getCollection('skills')).map((e) => [e.id, e]));
+  return getSkills().map((skill) => {
+    const entry = entries.get(skill.name);
+    if (!entry?.rendered) throw new Error(`skills/${skill.name}/SKILL.md: no rendered entry in the skills collection`);
+    return { params: { name: skill.name }, props: { skill, html: entry.rendered.html, headings: (entry.rendered.metadata?.headings ?? []) as MarkdownHeading[] } };
+  });
+}
+
+const { skill, html, headings } = Astro.props;
+const related = getSkills().filter((s) => s.group.key === skill.group.key && s.name !== skill.name);
+const body = skillBodyHtml(html);
+const source = githubUrl(skill.path);
+const references = exists(REPO, `skills/${skill.name}/references`) ? githubUrl(`skills/${skill.name}/references/`) : null;
+
+// How to run it: the two leads for a workflow, every CLI docs/skills.md lists for a portable skill.
+const runs = skill.lead
+  ? [
+      { id: 'claude-code', label: 'Claude Code', lead: 'claude-code' as const, line: `/${skill.name}`, note: '' },
+      { id: 'codex', label: 'Codex', lead: 'codex' as const, line: `$agent-triforge:${skill.name}`, note: '' },
+    ]
+  : portableInvocations().map((f) => ({ id: f.id, label: f.name, lead: f.lead ?? undefined, line: invocation(f.form, skill.name), note: f.note }));
+const sentence = (md: string) => inlineHtml(md.charAt(0).toUpperCase() + md.slice(1) + '.');
+
+const relatedTitle = skill.lead ? `Also in ${skill.group.label}` : 'Other portable skills';
+const contents = [
+  { id: 'sk-run', text: 'Run it' },
+  ...headings.filter((h) => h.depth <= 2).map((h) => ({ id: h.slug, text: h.text })),
+  ...(related.length ? [{ id: 'sk-related', text: relatedTitle }] : []),
+];
+---
+<Base title={`${skill.name} · Agent Triforge`} description={skill.description} search={{ section: 'Skills', title: skill.name }}>
+  <div class="wrap sk">
+    <nav class="crumbs" aria-label="Breadcrumb" data-pagefind-ignore>
+      <ol>
+        <li><a href="/skills/">Skills</a></li>
+        <li><Fragment set:html={IC.chevron} /><a href={`/skills/?group=${skill.group.key}`}>{skill.group.label}</a></li>
+        <li><Fragment set:html={IC.chevron} /><span aria-current="page">{skill.name}</span></li>
+      </ol>
+    </nav>
+
+    <header class="sk-head">
+      <div class="meta">
+        <span class={badgeVariants({ variant: 'secondary' })}>{skill.group.label}</span>
+        <span class={badgeVariants()}>{skill.lead ? 'lead workflow' : 'portable skill'}</span>
+      </div>
+      <h1><code>{skill.name}</code></h1>
+      <p class="lede" set:html={inlineHtml(skill.summary)} />
+      {skill.description !== skill.summary && <p class="sk-use">{skill.description}</p>}
+      <p class="sk-src" data-pagefind-ignore>
+        <a href={source}><Fragment set:html={IC.github} />SKILL.md on GitHub</a>
+        {references && <a href={references}>Reference files on GitHub</a>}
+      </p>
+    </header>
+
+    <div class="sk-layout">
+      <div class="sk-main">
+        <section class="sk-run" id="sk-run" aria-labelledby="sk-run-h">
+          <h2 id="sk-run-h">Run it</h2>
+          <p>
+            {skill.lead
+              ? 'A workflow runs in the agent that leads. Type it in that agent’s session.'
+              : 'A portable skill usually starts on its own when the task fits. To start it by name:'}
+          </p>
+          <Tabs id="run" label="Run it in" items={runs.map(({ id, label, lead }) => ({ id, label, lead }))} panelClass="sk-run-panel">
+            {runs.map((r) => (
+              <Fragment slot={r.id}>
+                <CodeBlock lines={[r.line]} prompt={false} label={`Copy the ${r.label} command`} />
+                {r.note && <p class="note" set:html={sentence(r.note)} />}
+              </Fragment>
+            ))}
+          </Tabs>
+          {skill.argumentHint && (
+            <dl class="sk-args">
+              <dt>Arguments</dt>
+              <dd><code>{skill.argumentHint}</code></dd>
+            </dl>
+          )}
+        </section>
+
+        <details class="sb-mobile sk-toc-m">
+          <summary>On this page<Fragment set:html={IC.chevron} /></summary>
+          <nav class="sb-toc" aria-label="On this page">
+            <ul>{contents.map((c) => <li><a href={`#${c.id}`}>{c.text}</a></li>)}</ul>
+          </nav>
+        </details>
+
+        <article class="doc sk-body" set:html={body} />
+      </div>
+
+      <aside class="toc" aria-label="On this page" data-pagefind-ignore>
+        <p class="sb-h">On this page</p>
+        <ol>{contents.map((c) => <li><a href={`#${c.id}`}>{c.text}</a></li>)}</ol>
+      </aside>
+    </div>
+
+    {related.length > 0 && (
+      <section class="sk-related" id="sk-related" aria-labelledby="sk-related-h" data-pagefind-ignore>
+        <h2 id="sk-related-h">{relatedTitle}</h2>
+        <ul class="cards">
+          {related.map((s) => <SkillCard name={s.name} group={s.group} lead={s.lead} summary={s.summary} />)}
+        </ul>
+      </section>
+    )}
+  </div>
+</Base>
