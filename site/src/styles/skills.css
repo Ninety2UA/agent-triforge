@@ -10,7 +10,7 @@
 .cat-head .lede code { font-size: 0.86em; }
 .cat-switch { margin-top: 8px; }
 .cat-switch a { text-decoration: none; }
-.cat-switch .n { font-weight: 500; font-variant-numeric: tabular-nums; opacity: 0.75; }
+.cat-switch .n { font-weight: 500; font-variant-numeric: tabular-nums; }
 
 /* inline code from the repo's own lines (skill-html.mjs inlineHtml) wraps only at a space or after a
    slash: each piece is unbreakable, the code itself is not */

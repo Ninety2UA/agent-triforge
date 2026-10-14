@@ -77,11 +77,11 @@ export default function SkillFilter({ groups, total, search = false }: Props) {
         className="chips"
       >
         <ToggleGroupItem value={ALL} data-group-chip={ALL}>
-          All<span className="font-medium tabular-nums opacity-75">{total}</span>
+          All<span className="font-medium tabular-nums">{total}</span>
         </ToggleGroupItem>
         {groups.map((g) => (
           <ToggleGroupItem key={g.key} value={g.key} data-group-chip={g.key}>
-            {g.label}<span className="font-medium tabular-nums opacity-75">{g.count}</span>
+            {g.label}<span className="font-medium tabular-nums">{g.count}</span>
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
