@@ -4,6 +4,7 @@ import { buttonVariants } from '@/components/ui/button';
 import type { NavItem } from '@/data/nav';
 import { Icon } from './Icon';
 import { LEAD_KEY } from '@/scripts/tabs';
+import { requestSearch } from './search-event';
 
 interface Props {
   items: NavItem[];
@@ -48,7 +49,7 @@ export default function MobileMenu({ items, install, repo }: Props) {
         // open the search palette only once the sheet has let go of focus
         if (!isOpen && searchAfterClose.current) {
           searchAfterClose.current = false;
-          document.dispatchEvent(new CustomEvent('triforge:open-search', { detail: trigger.current }));
+          requestSearch(trigger.current);
         }
       }}
     >

@@ -44,7 +44,7 @@ const { title, description, section, sidebar, headings = [], prev, next } = Astr
           </nav>
         )}
       </details>
-      <article class="doc" data-pagefind-body>
+      <article class="doc" data-pagefind-body data-pagefind-filter={`section:${section}`}>
         <slot />
       </article>
       {(prev || next) && (

@@ -16,7 +16,7 @@ import Install from '@/components/home/Install.astro';
 import Closing from '@/components/home/Closing.astro';
 import { H1, LEDE } from '@/data/home';
 ---
-<Base title={`Agent Triforge: ${H1.replace(/\.$/, '')}`} description={LEDE}>
+<Base title={`Agent Triforge: ${H1.replace(/\.$/, '')}`} description={LEDE} search={{ section: 'Home', title: 'Home' }}>
   <Hero />
   <Roster />
   <Lease />

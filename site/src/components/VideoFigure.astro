@@ -26,8 +26,8 @@ const { width: w, height: h } = mp4Facts(`/media/${name}.mp4`);
     <div class="vid" style={`aspect-ratio:${w}/${h}`}>
       <img class="vf-poster" src={versioned(`/media/${name}.webp`)} loading="lazy" decoding="async" width={w} height={h} alt="" />
       <video muted playsinline loop preload="none" controls width={w} height={h} aria-label={label}><source src={versioned(`/media/${name}.mp4`)} type="video/mp4" /></video>
-      <button class="vf-big" type="button" data-label={short} aria-label={`Play ${short}`}><Fragment set:html={IC.play} /><span>Play</span></button>
+      <button class="vf-big" type="button" data-pagefind-ignore data-label={short} aria-label={`Play ${short}`}><Fragment set:html={IC.play} /><span>Play</span></button>
     </div>
   </div>
-  <figcaption><b>Fig. {n}</b><span set:html={caption} /></figcaption>
+  <figcaption><b data-pagefind-ignore>Fig. {n}</b><span set:html={caption} /></figcaption>
 </figure>
