@@ -46,6 +46,9 @@
 .cat .card h2 a:focus-visible { outline: none; }
 .cat .card:has(h2 a:focus-visible) { outline: 2px solid var(--ring); outline-offset: 3px; }
 .cat .card:hover h2 a { text-decoration: underline; }
+/* a card shows the skill's summary in at most four lines; the whole of it, and when to use the skill, are
+   on the skill's page (the filter still matches the text a card leaves out) */
+.cat-body .card > p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
 
 .cat-empty { display: grid; justify-items: start; gap: 16px; padding: clamp(24px, 4vw, 40px); border-radius: var(--radius); background: var(--muted); }
 .cat-empty[hidden] { display: none; }

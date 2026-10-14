@@ -15,14 +15,16 @@ interface Props {
   summary: string;
   /** a second, quieter line, Markdown like the summary */
   use?: string;
+  /** more text the catalog filter matches on, not shown on the card */
+  match?: string;
   /** heading level of the name: 2 when the cards sit under the page's h1 */
   level?: 2 | 3;
   /** mark the card for the catalog filter */
   filter?: boolean;
 }
-const { name, group, lead, summary, use, level = 3, filter = false } = Astro.props;
+const { name, group, lead, summary, use, match, level = 3, filter = false } = Astro.props;
 const Name = level === 2 ? 'h2' : 'h3';
-const text = filter ? matchText(name, group.label, lead ? 'lead workflow' : 'portable skill', summary, use ?? '') : undefined;
+const text = filter ? matchText(name, group.label, lead ? 'lead workflow' : 'portable skill', summary, use ?? '', match ?? '') : undefined;
 ---
 <li class="card" data-skill-card={filter ? '' : undefined} data-group={filter ? group.key : undefined} data-group-label={filter ? group.label : undefined} data-text={text}>
   <div class="meta">

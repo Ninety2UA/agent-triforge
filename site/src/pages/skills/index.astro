@@ -32,7 +32,7 @@ const description = `Search all ${counts.skills} Agent Triforge skills by name o
       <SkillFilter client:interaction groups={groups} total={skills.length} search />
       <p class="count" id="skill-count" aria-live="polite" data-pagefind-ignore>Showing <span data-count>{skills.length}</span> of <Claim kind="skills" /> skills</p>
       <ul class="cards" id="skill-cards">
-        {skills.map((s) => <SkillCard name={s.name} group={s.group} lead={s.lead} summary={s.summary} use={s.description} level={2} filter />)}
+        {skills.map((s) => <SkillCard name={s.name} group={s.group} lead={s.lead} summary={s.summary} match={s.description} level={2} filter />)}
       </ul>
       <div class="cat-empty" data-empty hidden data-pagefind-ignore>
         <p data-empty-text>No skill matches.</p>
