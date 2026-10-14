@@ -20,7 +20,7 @@ const { title, description, canonical } = Astro.props;
 const canonicalURL = canonical === false ? undefined : (canonical ?? new URL(Astro.url.pathname, Astro.site).href);
 // One social image for every page (public/brand/og.png).
 const ogImage = new URL('/brand/og.png', Astro.site).href;
-const ogAlt = 'Agent Triforge: three streams of dots joining one blue line, and the name.';
+const ogAlt = 'Agent Triforge: Put Claude Code, Codex and Antigravity on one team. Beside it, the coding agents as dot clusters with their roles, and the shared branch.';
 const search = [
   ...LEAD_SKILLS.map((s) => ({ title: s, kind: 'Lead workflows', href: `/skills/${s}/` })),
   ...PORTABLE.map((s) => ({ title: s, kind: 'Portable skills', href: `/skills/${s}/` })),
