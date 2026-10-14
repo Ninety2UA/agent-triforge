@@ -1,0 +1,217 @@
+---
+// The media kit at /kit/, served by `astro dev` only (kit-route.mjs, KTD15): the brand files a maintainer
+// needs, each to download. The mark in its header cut and its footer cut, on light and dark (SVG files
+// drawn from the rendered mark in the favicon's colors); the favicon; the social image; the README loop
+// as a GIF with the Markdown to embed it; the loops and the film. Every size, frame and length is read
+// from the file itself (files.mjs, media.mjs). Nothing on the public site links here, and the build,
+// the sitemap, search and llms.txt never see it. Videos have no pause control, as everywhere on the site.
+import Base from '@/layouts/Base.astro';
+import Mark from '@/components/Mark.astro';
+import CodeBlock from '@/components/CodeBlock.astro';
+import VideoFigure from '@/components/VideoFigure.astro';
+import FilmPlayer from '@/components/FilmPlayer.astro';
+import { buttonVariants } from '@/components/ui/button';
+import { filmChapters, mp4Facts } from '@/lib/media.mjs';
+import { PUBLIC } from '@/lib/repo.mjs';
+import { GH } from '@/lib/site.mjs';
+import { README_GIF, fileFacts, markColors } from './files.mjs';
+import { join } from 'node:path';
+
+const colors = markColors();
+const marks = [
+  { cut: 'small', name: 'Header and favicon cut', ground: 'light' },
+  { cut: 'small', name: 'Header and favicon cut', ground: 'dark' },
+  { cut: 'large', name: 'Footer cut', ground: 'light' },
+  { cut: 'large', name: 'Footer cut', ground: 'dark' },
+] as const;
+
+/** One row per file: a download link and what the file is, read from the file. */
+const facts = (href: string) => {
+  const file = href === README_GIF.href ? README_GIF.file : join(PUBLIC, href);
+  const f = fileFacts(file);
+  if (href.endsWith('.mp4')) {
+    const v = mp4Facts(href);
+    f.frame = `${v.width} × ${v.height}`;
+    f.length = `${v.duration.toFixed(1)} s`;
+  }
+  return { href, name: href.split('/').pop(), meta: [f.format, f.frame, f.length, f.size].filter(Boolean).join(' · ') };
+};
+
+const readme = `[![Agent Triforge](${GH}/raw/main/docs/images/readme-hero.gif)](${GH})`;
+const [gifW, gifH] = fileFacts(README_GIF.file).frame.split(' × ').map(Number);
+const ogAlt = 'Agent Triforge: Put Claude Code, Codex and Antigravity on one team. Beside it, the coding agents as dot clusters with their roles, and the shared branch.';
+
+// the loops, in the order the home page shows them, with the text alternatives it gives them
+const loops = [
+  { name: 'loop-roster', caption: 'Roles and fallbacks', short: 'the roster loop',
+    label: 'Loop: Claude Code leads and builds, Codex reviews and tests, Antigravity analyzes and documents. When Codex is missing, the others take its work, and then Codex leads instead.' },
+  { name: 'loop-lease', caption: "One task's life", short: 'the lease loop',
+    label: 'Loop: a task gets its own workspace, Claude Code builds it, Codex reviews it, and it is merged onto the shared branch. Then Claude Code tries to review its own task and is refused.' },
+  { name: 'loop-review', caption: 'Reviews until findings converge', short: 'the review loop',
+    label: 'Loop: five reviewers read the change at once, their findings are counted as critical, important and minor, the fixes go in, and on the second pass only minor findings are left, so it stops.' },
+  { name: 'loop-unattended', caption: 'Unattended runs', short: 'the unattended loop',
+    label: 'Loop: it runs on its own, one fresh lead session at a time, up to five. Each session first checks its records, and it stops once the sprint is finished and sends a notification.' },
+];
+const { duration } = filmChapters();
+---
+<Base title="Media kit · Agent Triforge" description="The Agent Triforge mark, favicon, social image, README loop, loops and film, for posts, slides and READMEs." canonical={false}>
+  <section class="kit-head" aria-labelledby="kit-h">
+    <div class="wrap">
+      <h1 id="kit-h">Media kit</h1>
+      <p class="lede">The mark, the favicon, the social image, the README loop and the films, as files to download. Only the dev server has this page; the build leaves it out.</p>
+    </div>
+  </section>
+
+  <section aria-labelledby="mark-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2 id="mark-h">The mark</h2>
+        <p>Two cuts: the small one in the header and the favicon, the large one in the footer. Each has a light and a dark version. The SVGs are drawn from the same circles as the site's mark, in the favicon's colors.</p>
+      </div>
+      <ul class="marks">
+        {marks.map((m) => {
+          const c = colors[m.ground];
+          const file = `agent-triforge-mark-${m.cut}-${m.ground}.svg`;
+          return (
+            <li>
+              <div class:list={['swatch', `swatch-${m.cut}`]} data-mark data-ink={c.ink} data-accent={c.accent} style={`background:${c.ground};color:${c.ink};--dot-active:${c.accent}`}>
+                <Mark small={m.cut === 'small'} title="Agent Triforge" />
+              </div>
+              <p class="kit-cap"><span>{m.name}, on {m.ground}</span><a class={buttonVariants({ variant: 'outline', size: 'xs' })} data-mark-file download={file}>Download SVG</a></p>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  </section>
+
+  <section aria-labelledby="brand-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2 id="brand-h">Favicon and social image</h2>
+        <p>The favicon switches to its dark colors with the system theme. Every page uses the same social image, 1200 × 630, for link previews.</p>
+      </div>
+      <div class="brand-pair">
+        <figure class="kit-fig">
+          <div class="swatch swatch-fav"><img src="/brand/favicon.svg" width="26" height="24" alt="The favicon: the small cut of the mark on its own ground" /></div>
+          <figcaption><ul class="kit-files">{['/brand/favicon.svg'].map(facts).map((f) => <li><a href={f.href} download>{f.name}</a><span>{f.meta}</span></li>)}</ul></figcaption>
+        </figure>
+        <figure class="kit-fig">
+          <div class="sheet"><img src="/brand/og.png" width="1200" height="630" loading="lazy" decoding="async" alt={ogAlt} /></div>
+          <figcaption><ul class="kit-files">{['/brand/og.png'].map(facts).map((f) => <li><a href={f.href} download>{f.name}</a><span>{f.meta}</span></li>)}</ul></figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="readme-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2 id="readme-h">README loop</h2>
+        <p>The loop from the top of the README, as a GIF for any Markdown page and as an MP4 for pages that play video. The Markdown below shows the GIF from GitHub and links back to the repository.</p>
+      </div>
+      <div class="readme-pair">
+        <figure class="kit-fig">
+          <div class="sheet"><img src={README_GIF.href} width={gifW} height={gifH} loading="lazy" decoding="async" alt="Loop: the Agent Triforge mark and name, with the line that one agent leads, the others build, review and test, and nothing merges until a different agent has checked it." /></div>
+        </figure>
+        <div>
+          <h3>Put it in your README</h3>
+          <CodeBlock lines={[readme]} label="Copy the README markdown" prompt={false} />
+          <ul class="kit-files">{[README_GIF.href, '/media/readme-hero.mp4', '/media/readme-hero.webp'].map(facts).map((f) => <li><a href={f.href} download>{f.name}</a><span>{f.meta}</span></li>)}</ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="loops-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2 id="loops-h">Loops</h2>
+        <p>The loops the site plays. Each MP4 is silent and repeats. The WebP beside it is its poster frame.</p>
+      </div>
+      <div class="loops">
+        {loops.map((l, i) => (
+          <div>
+            <VideoFigure n={i + 1} name={l.name} label={l.label} short={l.short} caption={l.caption} />
+            <ul class="kit-files">{[`/media/${l.name}.mp4`, `/media/${l.name}.webp`].map(facts).map((f) => <li><a href={f.href} download>{f.name}</a><span>{f.meta}</span></li>)}</ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="film-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2 id="film-h">Film</h2>
+        <p>One sprint from the goal to the finished work, with its chapter list as JSON for players that offer chapter jumps.</p>
+      </div>
+      <FilmPlayer label={`Film, ${Math.round(duration)} seconds, no sound: an example sprint that rate-limits a login endpoint, from the goal to the finished, reviewed work, chapter by chapter.`} />
+      <ul class="kit-files kit-files-film">{['/media/film.mp4', '/media/film.webp', '/media/film-960.webp', '/media/film-chapters.json'].map(facts).map((f) => <li><a href={f.href} download>{f.name}</a><span>{f.meta}</span></li>)}</ul>
+    </div>
+  </section>
+</Base>
+
+<script>
+  // Each mark file is the mark as drawn on this page, with its colors written in, so the SVG needs no
+  // page around it.
+  document.querySelectorAll<HTMLAnchorElement>('a[data-mark-file]').forEach((link) => {
+    const swatch = link.closest('li')?.querySelector<HTMLElement>('[data-mark]');
+    const svg = swatch?.querySelector('svg');
+    if (!swatch || !svg) return;
+    const copy = svg.cloneNode(true) as SVGSVGElement;
+    // page-only attributes go, including the source paths the dev server adds (data-astro-source-*)
+    for (const el of [copy, ...copy.querySelectorAll('*')]) {
+      for (const name of el.getAttributeNames()) if (/^(class|style|role|aria-|data-)/.test(name)) el.removeAttribute(name);
+    }
+    copy.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    // a file opened on its own shows at 240 px on its long side
+    const [, , w, h] = (copy.getAttribute('viewBox') ?? '0 0 24 24').split(/\s+/).map(Number);
+    const scale = 240 / Math.max(w, h);
+    copy.setAttribute('width', String(Math.round(w * scale)));
+    copy.setAttribute('height', String(Math.round(h * scale)));
+    const text = copy.outerHTML.replaceAll('currentColor', swatch.dataset.ink ?? '').replaceAll('var(--dot-active)', swatch.dataset.accent ?? '');
+    link.href = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`;
+  });
+</script>
+
+<style>
+  .kit-head { padding-block: clamp(40px, 6vw, 88px) 0 !important; }
+  .kit-head .lede { margin: 18px 0 0; max-width: 58ch; }
+  section { padding-block: clamp(48px, 6vw, 88px) 0 !important; }
+
+  .marks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+  .swatch { display: grid; place-items: center; aspect-ratio: 4 / 3; border: 2px dotted var(--dot-frame); border-radius: var(--radius); }
+  .swatch-small :global(svg) { width: 34%; height: auto; }
+  .swatch-large :global(svg) { width: 70%; height: auto; }
+  .swatch-fav { background: var(--muted); }
+  .swatch-fav img { width: 96px; height: auto; }
+  .kit-cap { display: grid; justify-items: start; gap: 8px; margin: 12px 0 0; font-size: 15px; color: var(--muted-foreground); }
+
+  .brand-pair { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 24px; align-items: start; }
+  .kit-fig { margin: 0; }
+  .kit-fig .sheet img { width: 100%; height: auto; }
+
+  .readme-pair { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: clamp(24px, 4vw, 56px); align-items: start; }
+  .readme-pair h3 { font-size: 17px; margin-bottom: 12px; }
+
+  .loops { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px 24px; }
+
+  .kit-files { list-style: none; margin: 14px 0 0; padding: 0; font-size: 15px; }
+  .kit-files li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 16px; padding: 8px 0; border-top: 2px dotted var(--dot-frame); }
+  .kit-files li:last-child { border-bottom: 2px dotted var(--dot-frame); }
+  .kit-files a { font-weight: 600; color: var(--primary-text); overflow-wrap: anywhere; }
+  .kit-files span { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+  .kit-files-film { margin-top: 24px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }
+  .kit-files-film li:nth-last-child(2) { border-bottom: 2px dotted var(--dot-frame); }
+
+  @media (max-width: 960px) {
+    .marks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .brand-pair, .readme-pair { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .loops, .kit-files-film { grid-template-columns: minmax(0, 1fr); }
+    .kit-files-film li:nth-last-child(2) { border-bottom: 0; }
+  }
+  @media (max-width: 420px) { .marks { grid-template-columns: minmax(0, 1fr); } }
+</style>

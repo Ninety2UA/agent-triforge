@@ -9,6 +9,7 @@ import pagefind from 'astro-pagefind';
 import tailwindcss from '@tailwindcss/vite';
 import interactionDirective from './src/directives/integration.mjs';
 import escapeSkillHtml from './src/lib/markdown/escape-skill-html.mjs';
+import kitDevRoute from './src/dev/kit-route.mjs';
 import { SITE_URL } from './src/lib/site.mjs';
 
 export default defineConfig({
@@ -28,6 +29,7 @@ export default defineConfig({
     pagefind(),
     interactionDirective(),
     escapeSkillHtml(),
+    kitDevRoute(),
   ],
   fonts: [
     {

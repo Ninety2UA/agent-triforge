@@ -1,0 +1,95 @@
+---
+// The changelog (R2): one entry per docs/releases/*.md, newest first (getReleases), each under its
+// anchor ("v4-1-1", or the date of an unversioned note) with the README release-history summary where
+// it differs from the note's title. The newest entry is open; older ones are native <details>, closed but
+// in the HTML, so they read without JavaScript and stay in the search index. A link to an older entry
+// opens it. Search labels the page "Releases" and weighs it, headings included, below current docs
+// (KTD14). Links inside the notes already point at GitHub at the release's tag (releases.mjs, KTD2).
+import { getCollection } from 'astro:content';
+
+import Base from '@/layouts/Base.astro';
+import Claim from '@/components/Claim.astro';
+import { IC } from '@/components/icons';
+import { getReleases } from '@/lib/releases.mjs';
+import { GH, VERSION } from '@/lib/site.mjs';
+import '@/styles/docs.css';
+import '@/styles/changelog.css';
+
+const releases = getReleases();
+const html = new Map((await getCollection('releases')).map((entry) => [entry.id, entry.rendered?.html ?? '']));
+const current = releases.find((r) => r.version === VERSION);
+if (!current) throw new Error(`changelog: .claude-plugin/plugin.json is at ${VERSION}, which has no docs/releases/v${VERSION}.md`);
+const oldest = releases[releases.length - 1];
+
+// Pagefind lifts headings above body text (h1 7 down to h6 2) unless a heading sets its own weight, so
+// every heading here carries half of its default, as the page body does.
+const PAGE_WEIGHT = 0.5;
+const weight = (level: number) => String((8 - level) * PAGE_WEIGHT);
+
+// A note is written as a page of its own: its headings move one level under the entry's h2 (h3 at the
+// least), its ids and in-note links take the entry's anchor as a prefix so they stay unique on this
+// page, and a table scrolls in its own box on a phone.
+function noteHtml(source: string, anchor: string) {
+  return source
+    .replace(/<(\/?)h([1-6])(?=[\s>])/g, (_, close: string, n: string) => {
+      const level = Math.min(6, Math.max(3, Number(n) + 1));
+      return close ? `</h${level}` : `<h${level} data-pagefind-weight="${weight(level)}"`;
+    })
+    .replace(/\sid="([^"]*)"/g, (_, id: string) => ` id="${anchor}-${id}"`)
+    .replace(/href="#([^"]+)"/g, (_, id: string) => `href="#${anchor}-${id}"`)
+    .replace(/<table\b/g, '<div class="table-wrap"><table')
+    .replace(/<\/table>/g, '</table></div>');
+}
+
+// "Oct 13, 2026" in the rows, "October 13, 2026" in the facts; the <time> elements carry the ISO date
+const day = (date: string, month: 'short' | 'long') =>
+  new Date(`${date}T00:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month, year: 'numeric', timeZone: 'UTC' });
+
+const description = 'The release notes for every version of Agent Triforge, newest first.';
+---
+<Base title="Changelog · Agent Triforge" description={description} search={{ section: 'Releases', weight: PAGE_WEIGHT }}>
+  <div class="wrap cl">
+    <header class="cl-head">
+      <h1 data-pagefind-weight={weight(1)}>Changelog</h1>
+      <p class="lede">What changed in each release of Agent Triforge, newest first. The newest release is open. Select an older one to read its notes.</p>
+      <dl class="cl-facts">
+        <div><dt>Current version</dt><dd><a href={`#${current.anchor}`} data-version>{VERSION}</a></dd></div>
+        <div><dt>Released</dt><dd><time datetime={current.date}>{day(current.date, 'long')}</time></dd></div>
+        <div><dt>Release notes</dt><dd><Claim kind="releases" word capital /></dd></div>
+        <div><dt>Oldest note</dt><dd><time datetime={oldest.date}>{day(oldest.date, 'long')}</time></dd></div>
+      </dl>
+      <p class="cl-gh" data-pagefind-ignore><a class="more" href={`${GH}/releases`}>All releases on GitHub</a></p>
+    </header>
+
+    <div class="cl-list">
+      {releases.map((r, i) => (
+        <details class="rel" data-release={r.anchor} open={i === 0}>
+          <summary>
+            <h2 id={r.anchor} data-pagefind-weight={weight(2)}>
+              <span class:list={['rel-v', { 'rel-cur': r.version === VERSION }]}>{r.version ? `v${r.version}` : 'Unversioned'}</span><span class="sr">: </span>
+              <span class="rel-t">{r.title}</span>
+            </h2>
+            <time class="rel-d" datetime={r.date}>{day(r.date, 'short')}</time>
+            <span class="rel-chev" aria-hidden="true"><Fragment set:html={IC.chevron} /></span>
+          </summary>
+          {r.summary !== r.title && <p class="rel-sum">{r.summary}</p>}
+          <div class="doc rel-body" set:html={noteHtml(html.get(r.anchor) ?? '', r.anchor)} />
+        </details>
+      ))}
+    </div>
+  </div>
+</Base>
+
+<script>
+  // A link to an older release, or to a heading in its notes, opens that release.
+  const reveal = () => {
+    const id = decodeURIComponent(location.hash.slice(1));
+    const target = id ? document.getElementById(id) : null;
+    const entry = target?.closest('details.rel');
+    if (!target || !(entry instanceof HTMLDetailsElement) || entry.open) return;
+    entry.open = true;
+    target.scrollIntoView();
+  };
+  reveal();
+  addEventListener('hashchange', reveal);
+</script>

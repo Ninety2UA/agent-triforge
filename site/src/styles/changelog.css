@@ -1,0 +1,55 @@
+/* The changelog (pages/changelog.astro): the page's facts in a column that stays in view, beside the
+   releases as rows divided by 2 px dotted rules. A row is a <summary>: the version in its own column,
+   the title, the date and a chevron that turns when the notes are open. The notes use the docs prose
+   (docs.css, .doc) and line up with the title. Only the current version carries the accent dot. */
+.cl { --vcol: 7rem; display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: clamp(32px, 5vw, 72px); align-items: start; padding-top: clamp(40px, 6vw, 88px); }
+
+.cl-head { position: sticky; top: calc(var(--head-h) + 32px); }
+.cl-head .lede { margin: 18px 0 0; font-size: 17px; }
+.cl-facts { display: grid; margin: 28px 0 0; font-size: 15px; }
+.cl-facts > div { display: grid; grid-template-columns: minmax(0, 8rem) minmax(0, 1fr); gap: 12px; padding: 11px 0; border-top: 2px dotted var(--dot-frame); }
+.cl-facts > div:last-child { border-bottom: 2px dotted var(--dot-frame); }
+.cl-facts dt { color: var(--muted-foreground); }
+.cl-facts dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cl-facts dd a { color: var(--primary-text); }
+.cl-gh { margin: 24px 0 0; }
+.cl-gh .more { font-size: 15px; }
+
+/* the releases */
+.cl-list { border-top: 2px dotted var(--dot-frame); }
+.rel { border-bottom: 2px dotted var(--dot-frame); }
+.rel > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto 18px; column-gap: 20px; align-items: baseline; margin-inline: -12px; padding: 16px 12px; border-radius: var(--radius); cursor: pointer; list-style: none; transition: background-color 160ms var(--ease); }
+.rel > summary::-webkit-details-marker { display: none; }
+.rel > summary:hover { background: var(--muted); }
+.rel h2 { display: grid; grid-template-columns: var(--vcol) minmax(0, 1fr); column-gap: 20px; align-items: baseline; font-size: 17px; line-height: 1.4; letter-spacing: -0.01em; text-wrap: pretty; }
+.rel-v { font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* where the plugin is now: the accent dot after the current version */
+.rel-cur::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 8px; border-radius: 50%; background: var(--dot-active); vertical-align: 0.2em; }
+.rel-t { font-weight: 600; }
+.rel-d { font-size: 15px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rel-chev { align-self: center; color: var(--muted-foreground); }
+.rel-chev svg { width: 18px; height: 18px; transition: transform 220ms var(--ease); }
+.rel[open] .rel-chev svg { transform: rotate(90deg); }
+.rel > summary:hover .rel-chev { color: var(--foreground); }
+
+/* the notes, lined up with the title */
+.rel-sum { margin: 4px 0 0 calc(var(--vcol) + 20px); font-size: 15px; color: var(--muted-foreground); max-width: 62ch; }
+.rel-body { padding: 8px 0 44px calc(var(--vcol) + 20px); }
+.rel-body > :first-child { margin-top: 0; }
+.rel-body > :last-child { margin-bottom: 0; }
+.rel-body h3 { font-size: clamp(1.05rem, 1rem + 0.2vw, 1.15rem); margin: 32px 0 10px; }
+.rel-body h4 { font-size: 17px; margin: 24px 0 8px; }
+
+@media (max-width: 1180px) {
+  .cl { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+  .cl-head { position: static; max-width: 640px; }
+}
+@media (max-width: 640px) {
+  .rel > summary { grid-template-columns: minmax(0, 1fr) 18px; row-gap: 4px; }
+  .rel h2 { grid-template-columns: minmax(0, 1fr); row-gap: 2px; }
+  .rel-v { font-size: 15px; }
+  .rel-d { grid-row: 2; grid-column: 1; }
+  .rel-chev { grid-row: 1; grid-column: 2; align-self: start; padding-top: 2px; }
+  .rel-sum { margin-left: 0; }
+  .rel-body { padding: 4px 0 36px; }
+}
