@@ -17,9 +17,6 @@
 .cat :not(pre) > code:has(> .nw), .sk :not(pre) > code:has(> .nw) { white-space: normal; }
 .cat .nw, .sk .nw { white-space: nowrap; }
 
-/* fenced code in a persona prompt sits on the prompt's muted panel, so it takes the page's ground */
-.pl-prompt .doc pre { background: var(--background); }
-
 /* ---------- the filter: search box, chips, count ---------- */
 .cat-body .sf { display: grid; gap: 14px; }
 .sf-field { align-items: center; max-width: 560px; height: 48px; }
@@ -113,7 +110,8 @@
 .pl .nd::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--dot-active); }
 .pl-what { min-width: 0; }
 .pl-sum { max-width: 62ch; margin: 0 0 14px; font-size: 17px; }
-.pl-facts { display: flex; flex-wrap: wrap; gap: 12px 32px; margin: 0 0 16px; font-size: 15px; }
+/* fixed columns for the tier and the budget, so they line up from one persona to the next */
+.pl-facts { display: grid; grid-template-columns: minmax(0, 1fr) 7.5rem 6rem; gap: 12px 24px; margin: 0 0 16px; font-size: 15px; }
 .pl-facts div { display: grid; gap: 4px; align-content: start; }
 .pl-facts dt { font-size: 13px; font-weight: 600; color: var(--muted-foreground); }
 .pl-facts dd { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-variant-numeric: tabular-nums; }
@@ -129,6 +127,12 @@
 .pl-prompt .doc h4 { font-size: 17px; margin: 24px 0 8px; }
 .pl-prompt .doc h5, .pl-prompt .doc h6 { font-size: 15px; margin: 20px 0 6px; }
 .pl-prompt .doc h6 { color: var(--muted-foreground); }
-.pl-prompt .doc :not(pre) > code, .pl-prompt .doc pre { background: var(--background); }
+/* code in a persona prompt sits on the prompt's muted panel, so it takes the page's ground */
+.pl-prompt .doc :not(pre) > code { background: var(--background); }
+.pl-prompt .doc pre { --ground: var(--background); }
 
 @media (max-width: 760px) { .pl-item { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) {
+  .pl-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pl-facts > div:first-child { grid-column: 1 / -1; }
+}

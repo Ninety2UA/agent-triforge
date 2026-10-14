@@ -76,15 +76,27 @@
 .doc :not(pre) > code { font-size: 0.86em; padding: 1px 5px; border-radius: 4px; background: var(--muted); white-space: normal; overflow-wrap: anywhere; }
 /* Markdown code blocks (not the copy control's command lines, not an artifact's [data-ui] block), set in
    the page's ink on the muted surface like the copy control; a long line scrolls inside its block */
-.doc pre:not([data-slot]):not([data-ui] pre) { max-width: 100%; margin: 0 0 1.2em; padding: 14px 16px; border-radius: var(--radius); background: var(--muted); color: var(--foreground); overflow-x: auto; font-size: 13px; line-height: 1.7; }
+.doc pre { --ground: var(--muted); }
+.doc pre:not([data-slot]):not([data-ui] pre) { max-width: 100%; margin: 0 0 1.2em; padding: 14px 16px; border-radius: var(--radius); color: var(--foreground); overflow-x: auto; font-size: 13px; line-height: 1.7; }
 .doc pre code { font-size: 1em; }
 .doc li > pre { margin-top: 10px; }
 .doc blockquote { margin: 0 0 1.2em; padding: 4px 0 4px 18px; border-left: 3px dotted var(--dot-frame); color: var(--foreground); }
 .doc hr { border: 0; border-top: 2px dotted var(--dot-frame); margin: 40px 0; }
 /* a wide table scrolls in its own box (body.mjs wraps it), so the page never scrolls sideways */
-.doc .table-wrap { margin: 0 0 1.4em; overflow-x: auto; scrollbar-width: thin; }
+.doc .table-wrap { --ground: var(--background); margin: 0 0 1.4em; overflow-x: auto; scrollbar-width: thin; }
+/* An edge that has more behind it is shaded. The two covers move with the content (local) and hide the
+   shade (scroll) once that end is reached, so a box that fits shows none. */
+.doc pre:not([data-slot]):not([data-ui] pre), .doc .table-wrap {
+  background:
+    linear-gradient(to right, var(--ground) 45%, transparent) left / 32px 100% no-repeat local,
+    linear-gradient(to left, var(--ground) 45%, transparent) right / 32px 100% no-repeat local,
+    linear-gradient(to right, var(--edge-shade), transparent) left / 16px 100% no-repeat scroll,
+    linear-gradient(to left, var(--edge-shade), transparent) right / 16px 100% no-repeat scroll,
+    var(--ground);
+}
 .doc table { width: 100%; font-size: 15px; }
 .doc th, .doc td { text-align: left; vertical-align: top; padding: 10px 14px 10px 0; }
+.doc th:first-child, .doc td:first-child { min-width: 7.5em; }
 .doc thead th { font-size: 13px; font-weight: 500; color: var(--muted-foreground); white-space: nowrap; }
 .doc tbody tr { border-top: 2px dotted var(--dot-frame); }
 .doc td code, .doc th code { white-space: nowrap; }

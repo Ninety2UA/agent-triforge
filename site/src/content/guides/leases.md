@@ -1,6 +1,6 @@
 ---
 description: How one task goes from assignment to main under a lease, with its own worktree, a reviewer who didn't build it, three fix cycles at most and the approvals left to you.
-intro: Every task in a sprint is built under a lease, the lead’s own tasks included. The lease gives the task its own git worktree and a row in the lead’s ledger, and nothing from it merges until a reviewer who didn’t build it approves.
+intro: Every task in a sprint is built under a lease, the lead's own tasks included. The lease gives the task its own git worktree and a row in the lead's ledger, and nothing from it merges until a reviewer who didn't build it approves.
 ---
 
 ## What a lease is
