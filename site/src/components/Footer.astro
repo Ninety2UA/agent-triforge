@@ -1,0 +1,19 @@
+---
+import Logo from './Logo.astro';
+import CodeBlock from './CodeBlock.astro';
+import { GH, INSTALL } from '@/data/content';
+---
+<footer class="ftr">
+  <div class="wrap">
+    <div class="ftr-top">
+      <div><Logo class="ftr-mark" title="Agent Triforge" /></div>
+      <nav aria-label="Product"><p class="fh">Product</p><ul><li><a href="/skills/">Skills</a></li><li><a href="/roster/">Roster</a></li><li><a href="/sprint/">Sprint</a></li><li><a href="/tutorials/">Tutorials</a></li><li><a href="/guides/">Guides</a></li><li><a href="/kit/">Kit</a></li><li><a href="/changelog/">Changelog</a></li></ul></nav>
+      <nav aria-label="Leads"><p class="fh">Leads</p><ul><li><a href="/docs/getting-started/#claude-code">Claude Code</a></li><li><a href="/docs/getting-started/#codex">Codex</a></li><li><a href="/docs/getting-started/#skills-only">Skills only: Devin, Pi</a></li></ul></nav>
+      <nav aria-label="Resources"><p class="fh">Resources</p><ul><li><a href={GH}>GitHub</a></li><li><a href={`${GH}/releases`}>Release notes</a></li><li><a href={`${GH}/blob/main/LICENSE`}>License</a></li><li><a href={`${GH}/blob/main/CONTRIBUTING.md`}>Contributing</a></li></ul></nav>
+    </div>
+    <div class="ftr-bot">
+      <div><CodeBlock lines={INSTALL.claude} label="Copy the install commands" /></div>
+      <small>MIT license. Version 4.1.1, released 2026-10-13. Made by Ninety2UA.</small>
+    </div>
+  </div>
+</footer>

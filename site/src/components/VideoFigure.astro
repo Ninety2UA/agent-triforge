@@ -1,0 +1,18 @@
+---
+// A loop on its print sheet: lazy poster, muted video that plays when half visible, and a
+// caption whose button plays or pauses it. Videos and posters are the motion builder's.
+import { IC } from './icons';
+import { mp4Facts, versioned } from '@/lib/media.mjs';
+interface Props { n: number; name: string; label: string; short: string; caption: string }
+const { n, name, label, short, caption } = Astro.props;
+const { width: w, height: h } = mp4Facts(`/media/${name}.mp4`);
+---
+<figure class="fig" id={`fig-${name}`} data-rv>
+  <div class="sheet">
+    <div class="vid" data-video data-name={short} style={`aspect-ratio:${w}/${h}`}>
+      <img src={versioned(`/media/${name}.webp`)} loading="lazy" width={w} height={h} alt="" />
+      <video muted playsinline loop preload="none" width={w} height={h} aria-label={label}><source src={versioned(`/media/${name}.mp4`)} type="video/mp4" /></video>
+    </div>
+  </div>
+  <figcaption><button class="vplay" type="button" aria-label={`Play ${short}`} hidden><Fragment set:html={IC.play} /><Fragment set:html={IC.pause} /></button><b>Fig. {n}</b><span set:html={caption} /></figcaption>
+</figure>

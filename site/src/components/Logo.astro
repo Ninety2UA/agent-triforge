@@ -1,0 +1,26 @@
+---
+// The mark: logo concept 1 on a strict grid, the geometry the films use. Three dot streams
+// run into one line printed in the example's accent. `small` is the header and favicon cut.
+// In the header the small cut draws itself once on load, column by column, like Blueprint's mark:
+// the three streams first, then the accent line fills left to right (--i is the column).
+interface Props { small?: boolean; title?: string; class?: string }
+const { small = false, title, class: cls } = Astro.props;
+const up = [[0, -3, .45], [1, -3, .42], [2, -3, .38], [1, -2, .40], [2, -2, .35], [3, -2, .30], [4, -1, .24]];
+const mid = [[0, 0, .45], [1, 0, .43], [2, 0, .39], [3, 0, .34], [4, 0, .27], [5, 0, .20]];
+const lo = up.map(([x, y, r]) => [x, -y, r]);
+const line = [6, 7, 8, 9, 10, 11].map((x) => [x, 0, .42]);
+const sm = [[3, 4, 2.15], [7, 8, 1.85], [3, 12, 2.15], [7, 12, 1.85], [3, 20, 2.15], [7, 16, 1.85], [11, 12, 1.6]];
+const smLine = [[15, 12, 1.95], [19, 12, 1.95], [23, 12, 1.95]];
+---
+{small ? (
+  <svg class={cls} viewBox="0 0 26 24" aria-hidden="true">
+    <g fill="currentColor">{sm.map(([x, y, r]) => <circle class="mk" style={`--i:${(x - 3) / 4}`} cx={x} cy={y} r={r} />)}</g>
+    <g fill="var(--dot-active)">{smLine.map(([x, y, r]) => <circle class="mk mk-line" style={`--i:${(x - 3) / 4}`} cx={x} cy={y} r={r} />)}</g>
+  </svg>
+) : (
+  <svg class={cls} viewBox="-0.55 -3.55 12.1 7.1" role={title ? 'img' : undefined} aria-label={title} aria-hidden={title ? undefined : 'true'}>
+    {title && <title>{title}</title>}
+    <g fill="currentColor">{[...up, ...mid, ...lo].map(([x, y, r]) => <circle cx={x} cy={y} r={r} />)}</g>
+    <g fill="var(--dot-active)">{line.map(([x, y, r]) => <circle cx={x} cy={y} r={r} />)}</g>
+  </svg>
+)}

@@ -1,0 +1,344 @@
+---
+// The home page of one example: 4A's sections in round 2's order. Nothing that moves shows code;
+// static reference sections may name real files where a reader needs them.
+import Base from '@/layouts/Base.astro';
+import DotField from './DotField.astro';
+import VideoFigure from './VideoFigure.astro';
+import FilmPlayer from './FilmPlayer.astro';
+import CodeBlock from './CodeBlock.astro';
+import InstallTabs from './InstallTabs';
+import SkillFilter from './SkillFilter';
+import { buttonVariants } from '@/components/ui/button';
+import { IC } from './icons';
+import { CLIS, ROLES, FEATURED, PHASES, PERSONAS, INSTALL, GH } from '@/data/content';
+import { filmChapters, versioned } from '@/lib/media.mjs';
+
+const { chapters, duration } = filmChapters();
+const H1 = 'Put Claude Code, Codex and Antigravity on one team.';
+const LEDE = 'One agent leads. The others build, review and test, and nothing merges until a different agent has checked it.';
+
+const heroTabs = [
+  { id: 'claude', label: 'Claude Code leads', blocks: [{ lines: INSTALL.claude, label: 'Copy the Claude Code install commands' }] },
+  { id: 'codex', label: 'Codex leads', blocks: [{ lines: INSTALL.codex, label: 'Copy the Codex install commands' }] },
+];
+const installTabs = [
+  { id: 'claude', label: 'Claude Code leads', blocks: [{ lines: INSTALL.claude, label: 'Copy the Claude Code install commands' }],
+    note: 'Add `--scope project` to the install line to share it with your team.' },
+  { id: 'codex', label: 'Codex leads', blocks: [{ lines: INSTALL.codex, label: 'Copy the Codex install commands' }],
+    note: 'A Codex lead also needs a trust entry you add by hand to `~/.codex/config.toml`. `/at-setup` prints it and never writes it.',
+    art: { label: 'The trust entry, with your project path', text: '[projects."/abs/path"]\ntrust_level = "trusted"' } },
+  { id: 'skills', label: 'Skills only', blocks: [
+      { lines: ['devin plugins install Ninety2UA/agent-triforge#skills'], label: 'Copy the Devin command' },
+      { lines: ['pi install git:github.com/Ninety2UA/agent-triforge'], label: 'Copy the Pi command' }],
+    note: 'The ten portable skills only, for Devin or Pi: no lead workflows, hooks or agents.' },
+];
+
+// cluster glyphs for the roster list, the same halftone disc as the field
+const disc = (R: number) => {
+  const pts: number[][] = [];
+  const rr = Math.ceil(R);
+  for (let dy = -rr; dy <= rr; dy++) for (let dx = -rr; dx <= rr; dx++) if (dx * dx + dy * dy <= R * R + 0.01) pts.push([dx, dy]);
+  return pts;
+};
+const glyph = (opt: boolean) => {
+  const sc = 30 / 7;
+  return disc(opt ? 1.5 : 2.3).map(([dx, dy]) => {
+    const d = Math.hypot(dx, dy);
+    return { cx: ((3.5 + dx) * sc).toFixed(1), cy: ((3.5 + dy) * sc).toFixed(1), r: ((opt ? 0.31 - d * 0.04 : 0.45 - d * 0.055) * sc).toFixed(2) };
+  });
+};
+const pair = disc(2.3).map(([dx, dy]) => ({ dx, dy, r: +(0.45 - Math.hypot(dx, dy) * 0.055).toFixed(3) }));
+
+const CODE_TOKENS = ['learnings-researcher', 'plan-checker', 'integration-verifier', 'security-sentinel', 'performance-oracle', 'code-simplicity-reviewer',
+  'findings-synthesizer', 'test-gap-analyzer', 'scope-cutting', 'at-ship', 'ops/solutions/', 'ops/archive/', 'ops/STATE.md', 'ops/.sprint-complete'];
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const withCode = (s: string) => {
+  let out = esc(s);
+  for (const t of CODE_TOKENS) out = out.replace(new RegExp(`(?<![\\w/.-])${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'g'), `<code>${t}</code>`);
+  return out;
+};
+const phaseLabel = (n: string) => (n === 'Pre' ? 'Pre-plan' : n.includes('+') ? `Phases ${n.replace('+', ' and ')}` : `Phase ${n}`);
+const coordinate = [
+  'TRIFORGE="$(tail -n 1 .agents/triforge-plugin-root.local)"',
+  'bash "$TRIFORGE/scripts/coordinate.sh" "Build auth" --dry-run',
+  'bash "$TRIFORGE/scripts/coordinate.sh" "Build auth" --max 5 --convergence deep --team',
+];
+const readme = '[![Agent Triforge](https://github.com/Ninety2UA/agent-triforge/raw/main/docs/images/readme-hero.gif)](https://github.com/Ninety2UA/agent-triforge)';
+---
+<Base title={`Agent Triforge: ${H1.replace(/\.$/, '')}`} description={LEDE}>
+
+<section class="hero" aria-labelledby="h1">
+  <div class="wrap hero-split">
+    <div class="hero-copy">
+      <h1 id="h1">{H1}</h1>
+      <p class="lede">{LEDE}</p>
+      <div class="inst"><InstallTabs client:interaction tabs={heroTabs} ariaLabel="Which CLI leads" /></div>
+      <div class="cta-row"><a class={buttonVariants()} href="/docs/getting-started/">Install</a><a class={buttonVariants({ variant: 'outline' })} href="/skills/">Browse the 27 skills</a></div>
+    </div>
+    <DotField />
+  </div>
+</section>
+
+<section id="roster" aria-labelledby="roster-h" data-rv-group>
+  <div class="wrap">
+    <div class="sec-head" data-rv>
+      <h2 id="roster-h">Each agent gets a role</h2>
+      <p>The lead plans the work, hands it out and merges it. Claude Code leads by default and Codex can lead too. The others work in the roles one editable file gives them, and every fallback ends at Claude Code, Antigravity or Codex.</p>
+    </div>
+    <div class="roster">
+      <div data-rv>
+        <h3 class="crew-h">Always on the team</h3>
+        <ul class="crew">{CLIS.slice(0, 3).map((c) => (
+          <li class="core"><svg class="cl" viewBox="0 0 30 30" aria-hidden="true">{glyph(false).map((g) => <circle cx={g.cx} cy={g.cy} r={g.r} />)}</svg><div><b>{c.name}</b><span>{c.roles}</span><span>Code goes to {c.provider}</span></div></li>
+        ))}</ul>
+        <h3 class="crew-h">Join when you add them</h3>
+        <ul class="crew">{CLIS.slice(3).map((c) => (
+          <li class="opt"><svg class="cl" viewBox="0 0 30 30" aria-hidden="true">{glyph(true).map((g) => <circle cx={g.cx} cy={g.cy} r={g.r} />)}</svg><div><b>{c.name}</b><span>{c.roles}</span><span>Code goes to {c.provider}</span></div></li>
+        ))}</ul>
+      </div>
+      <div>
+        <VideoFigure n={1} name="loop-roster" short="the roster loop"
+          label="Loop: Claude Code leads and builds, Codex reviews and tests, Antigravity analyzes and documents. When Codex is missing, the others take its work, and then Codex leads instead."
+          caption="Default roles, the others covering for a missing agent, and Codex taking the lead" />
+        <table class="roles" data-rv>
+          <caption>Default roles and who covers them</caption>
+          <thead><tr><th scope="col">Role</th><th scope="col">Does</th><th scope="col">Agent</th><th scope="col">Falls back to</th></tr></thead>
+          <tbody>{ROLES.map((r) => <tr><th scope="row"><code>{r.role}</code></th><td>{r.does}</td><td>{r.cli}</td><td>{r.fallback}</td></tr>)}</tbody>
+        </table>
+        <p style="margin-top:24px"><a class="more" href="/roster/">How the roster works</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="lease" aria-labelledby="lease-h" data-rv-group>
+  <div class="wrap">
+    <div class="lease-top">
+      <div class="sec-head" data-rv>
+        <h2 id="lease-h">One task's life</h2>
+        <p>Every task is built in its own git worktree, the lead's own tasks included. It merges only after a reviewer approves it, and the reviewer has to be a different agent from the one that built it.</p>
+        <p><a class="more" href="/guides/leases/">Read the leases guide</a></p>
+      </div>
+      <VideoFigure n={2} name="loop-lease" short="the lease loop"
+        label="Loop: a task gets its own workspace, Claude Code builds it, Codex reviews it, and it is merged onto the shared branch. Then Claude Code tries to review its own task and is refused."
+        caption="One task from its own workspace to the merge, then a self-review that is refused" />
+    </div>
+    <div class="bench" id="bench">
+      <div class="bench-ctl">
+        <fieldset>
+          <legend>Claude Code built task 1. Who reviews it?</legend>
+          <div class="radios">
+            <label><input type="radio" name="rev" value="codex" checked /><span>Codex</span></label>
+            <label><input type="radio" name="rev" value="antigravity" /><span>Antigravity</span></label>
+            <label><input type="radio" name="rev" value="claude" /><span>Claude Code itself</span></label>
+          </div>
+        </fieldset>
+        <label class="toggle"><input type="checkbox" id="prot" /> It changes a protected file</label>
+        <button type="button" class={buttonVariants({ variant: 'outline', size: 'sm' })} id="bench-run">Run it again</button>
+      </div>
+      <div class="track-wrap">
+        <ol class="track" aria-label="Task 1, step by step">
+          <li data-state="done"><h3>Assigned</h3><p>The lead gives task 1 to Claude Code, in a workspace of its own.</p></li>
+          <li data-state="done"><h3>Built</h3><p>Claude Code builds it and reports back that it's done.</p></li>
+          <li data-state="done"><h3>Reviewed</h3><p data-when="rev-codex">Codex reviews the change. It didn't write it.</p><p data-when="rev-antigravity" hidden>Antigravity reviews the change. It didn't write it.</p><p data-when="prot" hidden>A protected file: only the lead or you can review it. Claude Code leads and built it, so you do.</p><p data-when="self" hidden>Refused. An agent can't review its own work.</p></li>
+          <li data-state="done"><h3>Merged</h3><p data-when="plain">The lead merges its own copy of the change.</p><p data-when="prot" hidden>Merged after your review.</p><p data-when="self" hidden>Not reached.</p></li>
+          <li data-state="done"><h3>On main</h3><p data-when="plain">The lead moves the finished work to main.</p><p data-when="prot" hidden>Waits for your approval before it reaches main.</p><p data-when="self" hidden>Not reached.</p></li>
+        </ol>
+        <span class="tok" aria-hidden="true"></span>
+      </div>
+      <p class="verdict" id="verdict" aria-live="polite">Merged and on main. Codex reviewed what Claude Code built, and the lead merged it.</p>
+    </div>
+  </div>
+</section>
+
+<section id="film" aria-labelledby="film-h" data-rv-group>
+  <div class="wrap film-sec">
+    <div class="sec-head" data-rv>
+      <h2 id="film-h">Watch one sprint</h2>
+      <p>An example sprint, rate-limiting a login endpoint, from the goal to the finished work. {Math.round(duration)} seconds, no sound. Pick a chapter to jump to it.</p>
+    </div>
+    <FilmPlayer chapters={chapters} duration={duration} />
+  </div>
+</section>
+
+<section id="sprint" aria-labelledby="sprint-h" data-rv-group>
+  <div class="wrap">
+    <div class="sec-head" data-rv>
+      <h2 id="sprint-h">From goal to finished sprint</h2>
+      <p><code>/at-ship &lt;goal&gt;</code> runs every phase in one session. Choose a phase to see which skills run it and who does the work.</p>
+    </div>
+    <div class="press" data-rv>
+      <div role="tablist" aria-label="Sprint phases">
+        {PHASES.map((p, i) => (
+          <button role="tab" type="button" id={`ph-t${i}`} aria-controls={`ph-p${i}`} aria-selected={i === 4 ? 'true' : 'false'} data-state={i === 4 ? 'active' : 'inactive'} tabindex={i === 4 ? 0 : -1}>
+            <span class="n" aria-hidden="true">{p.n === 'Pre' ? 'P' : p.n.replace('+', '&')}</span><span class="d" aria-hidden="true"></span><span>{p.short}<span class="sr">, {phaseLabel(p.n)}</span></span>
+          </button>
+        ))}
+      </div>
+      {PHASES.map((p, i) => (
+        <div role="tabpanel" id={`ph-p${i}`} aria-labelledby={`ph-t${i}`} tabindex="0" data-state={i === 4 ? 'active' : 'inactive'} hidden={i !== 4}>
+          <div><h3>{phaseLabel(p.n)}: {p.title}</h3><p set:html={withCode(p.body)} /></div>
+          <dl>{p.rows.map((r) => <Fragment><dt>{r.k}</dt><dd>{r.v.map((v) => <code>{v}</code>)}</dd></Fragment>)}<dt>Who</dt><dd>{p.who}</dd></dl>
+        </div>
+      ))}
+    </div>
+    <p style="margin-top:28px"><a class="more" href="/sprint/">The sprint, phase by phase</a></p>
+  </div>
+</section>
+
+<section id="skills" aria-labelledby="skills-h" data-rv-group>
+  <div class="wrap">
+    <div class="sec-head" data-rv>
+      <h2 id="skills-h">Seventeen workflows, ten portable skills</h2>
+      <p>Workflows named <code>at-*</code> run in the lead. Portable skills work in any agent and usually start on their own when the context fits. Here are twelve of the 27.</p>
+    </div>
+    <SkillFilter client:interaction skills={FEATURED} />
+    <p class="cat-foot"><a class="more" href="/skills/">All 27 skills</a></p>
+  </div>
+</section>
+
+<section id="why" aria-labelledby="why-h" data-rv-group>
+  <div class="wrap">
+    <div class="sec-head" data-rv><h2 id="why-h">Why it holds up</h2></div>
+    <div class="why">
+      <div class="arg a1" data-rv>
+        <svg class="pair" viewBox="4 2.6 13.5 6.8" aria-hidden="true">{pair.map((p) => <circle cx={8 + p.dx} cy={6 + p.dy} r={p.r} />)}{pair.map((p) => <circle class="pk" cx={12.6 + p.dx} cy={6 + p.dy} r={p.r} />)}</svg>
+        <h3>No agent merges its own work</h3>
+        <p>A task merges only after a pinned reviewer approves it, and the helper refuses to pin the agent that built it. The lead's own tasks follow the same rule. After three fix cycles with the same reviewer, you decide.</p>
+      </div>
+      <div class="arg a3" data-rv>
+        <VideoFigure n={3} name="loop-review" short="the review loop"
+          label="Loop: five reviewers read the change at once, their findings are counted as critical, important and minor, the fixes go in, and on the second pass only minor findings are left, so it stops."
+          caption="Five reviewers at once, the fixes, and a second pass with only minor findings left" />
+        <h3 style="margin-top:36px">Reviews run until findings converge</h3>
+        <p>Each reviewer writes its own file, so they can all run at once. Findings are P1, P2 or P3 with a confidence tier, and a low-confidence finding is never P1. You pick where the loop stops.</p>
+        <table class="modes">
+          <thead><tr><th scope="col">Mode</th><th scope="col">Stops when</th></tr></thead>
+          <tbody><tr><th scope="row"><code>fast</code></th><td>no P1 is left</td></tr><tr><th scope="row"><code>standard</code></th><td>no P1 or P2 is left (the default)</td></tr><tr><th scope="row"><code>deep</code></th><td>no P1 or P2, and fewer than 3 P3</td></tr></tbody>
+        </table>
+      </div>
+      <div class="arg a2" data-rv>
+        <h3>Done needs fresh evidence</h3>
+        <p><code>verification-before-completion</code> asks for new evidence behind every claim. A builder's report has to end in a typed status, and a clean exit without one counts as a missing report.</p>
+        <div class="art" data-ui><span class="lbl">The last lines of a builder's report (example)</span><pre>Tests: 14 passed, 0 failed
+Concerns: the limiter's window is per process
+Discoveries for later tasks: None
+<span class="k">Status: DONE_WITH_CONCERNS</span></pre></div>
+        <p style="margin-top:18px">A sprint is done only when the lead creates <code>ops/.sprint-complete</code>, after the checklist passes.</p>
+      </div>
+      <div class="arg a4" data-rv>
+        <div>
+          <h3>What a sprint learns, the next one reads</h3>
+          <p><code>knowledge-compounding</code> writes a note only when a future agent would repeat the mistake without it. Before the next plan, <code>learnings-researcher</code> searches those notes.</p>
+        </div>
+        <div class="files">
+          <div class="art" data-ui><span class="lbl">Written at the end of a sprint (example names)</span><pre>ops/solutions/
+  login-rate-limit-window.md
+  redis-test-fixture.md</pre></div>
+          <div class="art" data-ui><span class="lbl">Read before the next plan</span><pre>ops/decisions/
+  limiter-per-ip-not-per-user.md
+ops/STATE.md</pre></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="personas" aria-labelledby="personas-h" data-rv-group>
+  <div class="wrap">
+    <div class="sec-head" data-rv>
+      <h2 id="personas-h">Specialist reviewers</h2>
+      <p>There are 19 personas, each with its own tools, starting model and turn budget. These five check the plan and review the code in <code>/at-ship</code>.</p>
+    </div>
+    <ul class="specs">{PERSONAS.map((p) => <li data-rv><code>{p.name}</code><div><p>{p.what}</p>{p.neverDowngraded && <span class="nd">Never moved to a smaller model</span>}</div></li>)}</ul>
+    <p style="margin-top:28px"><a class="more" href="/skills/#personas">All 19 personas</a></p>
+  </div>
+</section>
+
+<section id="unattended" aria-labelledby="un-h" data-rv-group>
+  <div class="wrap unatt">
+    <div data-rv>
+      <h2 id="un-h">Leave it running</h2>
+      <p class="lede" style="margin-top:18px"><code>/at-ship</code> runs a whole sprint in one session. For bigger goals, <code>coordinate.sh</code> starts fresh lead sessions until the sprint is marked done.</p>
+      <ul>
+        <li><span>Five sessions at most by default; <code>--max</code> changes it.</span></li>
+        <li><span>An integrity check runs before each session.</span></li>
+        <li><span>It stops on a login or quota failure.</span></li>
+        <li><span>It tells you through a webhook and a desktop notification.</span></li>
+      </ul>
+      <CodeBlock lines={coordinate} label="Copy the coordinate.sh commands" />
+      <p class="note">A Codex lead also needs <code>--allow-full-access</code>, which only you can pass.</p>
+      <p style="margin-top:22px"><a class="more" href="/guides/unattended/">Unattended runs</a></p>
+    </div>
+    <VideoFigure n={4} name="loop-unattended" short="the unattended loop"
+      label="Loop: it runs on its own, one fresh lead session at a time, up to five. Each session first checks its records, and it stops once the sprint is finished and sends a notification."
+      caption="One fresh session at a time, each checking its records first, until the sprint is finished" />
+  </div>
+</section>
+
+<section id="limits" aria-labelledby="limits-h" data-rv-group>
+  <div class="wrap honest">
+    <div class="sec-head" data-rv>
+      <h2 id="limits-h">What it does not do</h2>
+      <p><a class="more" href="/guides/data-egress/">Data egress and consent</a></p>
+    </div>
+    <div class="honest-list">
+      <div data-rv><h3>It does not sandbox workers.</h3><p>A worktree sets where a worker starts. A worker with a shell can still read and write anything your user account can, including other branches and the ledger.</p></div>
+      <div data-rv><h3>It detects changes, and merges only the lead's snapshot.</h3><p>Lease helpers compare git config, hooks, refs, worktree pointers and the ledger with a recorded baseline. On a change the lead did not make, they refuse with rc 44. Only the lead's own snapshot of a task is ever merged.</p></div>
+      <div data-rv><h3>Each agent's provider sees the code it is handed.</h3><p>Anthropic, Google and OpenAI for Claude Code, Antigravity and Codex, plus the provider of each optional member you add. Devin may train on data unless the account opts out, so Triforge records your consent before it joins. Captured output is scrubbed before it lands in <code>ops/</code>.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="install" aria-labelledby="install-h" data-rv-group>
+  <div class="wrap install">
+    <div data-rv>
+      <h2 id="install-h" style="margin-bottom:28px">Install in two commands</h2>
+      <InstallTabs client:interaction tabs={installTabs} ariaLabel="Install for" />
+    </div>
+    <div class="side" data-rv>
+      <h3>Before you start</h3>
+      <ul>
+        <li>Claude Code, Antigravity (<code>agy</code>) and Codex installed and logged in.</li>
+        <li>Python 3.</li>
+        <li>On macOS, GNU coreutils (<code>brew install coreutils</code>). Without a <code>timeout</code> binary the helper refuses external calls.</li>
+        <li>Claude Code 2.1.277, agy 1.1.27 and Codex 0.153.0, or later.</li>
+      </ul>
+      <h3>Your first run</h3>
+      <ol>
+        <li>Start <code>claude</code> or <code>codex</code> in your project. That creates <code>ops/</code>.</li>
+        <li>Run <code>/at-setup</code> to pick the lead, check the three agents and set roles.</li>
+        <li>Run <code>/at-ship &lt;goal&gt;</code>.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section id="start" class="closing" aria-labelledby="start-h" data-rv-group>
+  <div class="wrap">
+    <div class="close-grid">
+      <div class="close-in" data-rv>
+        <h2 id="start-h">Run your first sprint</h2>
+        <p class="lede">Install the plugin, start Claude Code or Codex in your project, run <code>/at-setup</code>, then <code>/at-ship &lt;goal&gt;</code>.</p>
+        <CodeBlock lines={INSTALL.claude} label="Copy the install commands" />
+        <div class="cta-row"><a class={buttonVariants()} href="/docs/getting-started/">Install</a><a class={buttonVariants({ variant: 'outline' })} href={GH}><Fragment set:html={IC.github} />Star on GitHub</a></div>
+      </div>
+      <div class="readme" data-rv>
+        <figure class="fig" id="fig-readme-hero" style="margin:0">
+          <div class="sheet">
+            <div class="vid" data-video data-name="the README loop" style="aspect-ratio:1280/512">
+              <img src={versioned('/media/readme-hero.webp')} loading="lazy" width="1280" height="512" alt="" />
+              <video muted playsinline loop preload="none" width="1280" height="512" aria-label="Loop: the Agent Triforge mark and name, with the line that one agent leads, the others build, review and test, and nothing merges until a different agent reviews it."><source src={versioned('/media/readme-hero.mp4')} type="video/mp4" /></video>
+            </div>
+          </div>
+          <figcaption><button class="vplay" type="button" aria-label="Play the README loop" hidden><Fragment set:html={IC.play} /><Fragment set:html={IC.pause} /></button><b>Fig. 5</b><span>The loop at the top of the README, also as a GIF</span></figcaption>
+        </figure>
+        <h3>Put it in your README</h3>
+        <p>To show the loop in your own README, with a link back to the project, paste this markdown.</p>
+        <CodeBlock lines={[readme]} label="Copy the README markdown" prompt={false} />
+      </div>
+    </div>
+  </div>
+</section>
+
+</Base>

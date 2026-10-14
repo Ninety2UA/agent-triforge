@@ -12,3 +12,10 @@ __pycache__/
 /.claude/commands/repo-watch.md
 /.claude/skills/watch-cycle/
 /ops/watch-registry.toml
+# The website (site/): dependencies, build output, Astro's generated types and data store, the
+# motion render workspace, and the Vercel CLI link (an exact line, or the CLI appends its own).
+site/node_modules/
+site/dist/
+site/.astro/
+site/motion/.work/
+.vercel

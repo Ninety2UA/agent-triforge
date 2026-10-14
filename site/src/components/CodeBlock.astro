@@ -1,0 +1,13 @@
+---
+// The copy control in static markup: shadcn InputGroup (server-rendered, no JavaScript) holding the
+// command lines and the copy Button, which is the only part that hydrates (client:interaction).
+import { InputGroup, InputGroupAddon } from '@/components/ui/input-group';
+import { CommandLine } from './Command';
+import CopyButton from './CopyButton';
+interface Props { lines: string[]; label: string; prompt?: boolean }
+const { lines, label, prompt = true } = Astro.props;
+---
+<InputGroup data-cmd="">
+  <pre data-slot="input-group-control"><code>{lines.map((l) => <CommandLine line={l} prompt={prompt} />)}</code></pre>
+  <InputGroupAddon align="inline-end"><CopyButton client:interaction text={lines.join('\n')} label={label} /></InputGroupAddon>
+</InputGroup>

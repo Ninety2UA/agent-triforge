@@ -1,0 +1,21 @@
+---
+import Logo from './Logo.astro';
+import MobileMenu from './MobileMenu';
+import { buttonVariants } from '@/components/ui/button';
+import { IC } from './icons';
+import { NAV, GH } from '@/data/content';
+---
+<a class="skip" href="#main">Skip to content</a>
+<header class="hdr">
+  <div class="wrap hdr-in">
+    <a class="brand" href="/" aria-label="Agent Triforge home"><Logo small /><span>Agent Triforge</span></a>
+    <nav class="nav" aria-label="Main">{NAV.map((n) => <a href={n.href}>{n.label}</a>)}</nav>
+    <div class="hdr-tools">
+      <button type="button" class:list={[buttonVariants({ variant: 'outline', size: 'sm' }), 'search-btn']} data-open-search aria-label="Search the site"><Fragment set:html={IC.search} /><span class="lbl">Search</span><kbd>⌘K</kbd></button>
+      <a class={buttonVariants({ variant: 'ghost', size: 'icon' })} href={GH} aria-label="Agent Triforge on GitHub"><Fragment set:html={IC.github} /></a>
+      <button type="button" class={buttonVariants({ variant: 'ghost', size: 'icon' })} data-theme-toggle aria-label="Switch theme"><Fragment set:html={IC.theme} /></button>
+      <a class:list={[buttonVariants({ size: 'sm' }), 'btn-install']} href="/docs/getting-started/">Install</a>
+      <span class="menu-slot"><MobileMenu client:interaction items={NAV} install="/docs/getting-started/" repo={GH} /></span>
+    </div>
+  </div>
+</header>
