@@ -12,7 +12,7 @@ import VideoFigure from '@/components/VideoFigure.astro';
 import FilmPlayer from '@/components/FilmPlayer.astro';
 import { buttonVariants } from '@/components/ui/button';
 import { filmChapters, mp4Facts } from '@/lib/media.mjs';
-import { PUBLIC } from '@/lib/repo.mjs';
+import { PUBLIC, SITE } from '@/lib/repo.mjs';
 import { GH } from '@/lib/site.mjs';
 import { README_GIF, fileFacts, markColors } from './files.mjs';
 import { join } from 'node:path';
@@ -25,9 +25,12 @@ const marks = [
   { cut: 'large', name: 'Footer cut', ground: 'dark' },
 ] as const;
 
+const poster = (name: string) => `/src/assets/posters/${name}.webp`;
+
 /** One row per file: a download link and what the file is, read from the file. */
 const facts = (href: string) => {
-  const file = href === README_GIF.href ? README_GIF.file : join(PUBLIC, href);
+  // posters are image-pipeline sources under src/assets/posters, which the dev server serves by path
+  const file = href === README_GIF.href ? README_GIF.file : href.startsWith('/src/') ? join(SITE, href) : join(PUBLIC, href);
   const f = fileFacts(file);
   if (href.endsWith('.mp4')) {
     const v = mp4Facts(href);
@@ -117,7 +120,7 @@ const { duration } = filmChapters();
         <div>
           <h3>Put it in your README</h3>
           <CodeBlock lines={[readme]} label="Copy the README markdown" prompt={false} />
-          <ul class="kit-files">{[README_GIF.href, '/media/readme-hero.mp4', '/media/readme-hero.webp'].map(facts).map((f) => <li><a href={f.href} download>{f.name}</a><span>{f.meta}</span></li>)}</ul>
+          <ul class="kit-files">{[README_GIF.href, '/media/readme-hero.mp4', poster('readme-hero')].map(facts).map((f) => <li><a href={f.href} download>{f.name}</a><span>{f.meta}</span></li>)}</ul>
         </div>
       </div>
     </div>
@@ -133,7 +136,7 @@ const { duration } = filmChapters();
         {loops.map((l, i) => (
           <div>
             <VideoFigure n={i + 1} name={l.name} label={l.label} short={l.short} caption={l.caption} />
-            <ul class="kit-files">{[`/media/${l.name}.mp4`, `/media/${l.name}.webp`].map(facts).map((f) => <li><a href={f.href} download>{f.name}</a><span>{f.meta}</span></li>)}</ul>
+            <ul class="kit-files">{[`/media/${l.name}.mp4`, poster(l.name)].map(facts).map((f) => <li><a href={f.href} download>{f.name}</a><span>{f.meta}</span></li>)}</ul>
           </div>
         ))}
       </div>
@@ -147,7 +150,7 @@ const { duration } = filmChapters();
         <p>One sprint from the goal to the finished work, with its chapter list as JSON for players that offer chapter jumps.</p>
       </div>
       <FilmPlayer label={`Film, ${Math.round(duration)} seconds, no sound: an example sprint that rate-limits a login endpoint, from the goal to the finished, reviewed work, chapter by chapter.`} />
-      <ul class="kit-files kit-files-film">{['/media/film.mp4', '/media/film.webp', '/media/film-960.webp', '/media/film-chapters.json'].map(facts).map((f) => <li><a href={f.href} download>{f.name}</a><span>{f.meta}</span></li>)}</ul>
+      <ul class="kit-files kit-files-film">{['/media/film.mp4', poster('film'), '/media/film-chapters.json'].map(facts).map((f) => <li><a href={f.href} download>{f.name}</a><span>{f.meta}</span></li>)}</ul>
     </div>
   </section>
 </Base>
