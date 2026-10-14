@@ -1,0 +1,8 @@
+# A stale pin in the website's build output (site/dist/) and Astro's data store
+# (site/.astro/) is ignored: both are generated locally from release notes the
+# sweep already exempts, and neither is tracked. sweep-site-build-control is the
+# same pin caught on a shipped page.
+check: sweep
+rc: 0
+line: ok:   stale-pin sweep: no stale pins outside the excluded paths
+line: validate-versions: PASS (--only sweep)
