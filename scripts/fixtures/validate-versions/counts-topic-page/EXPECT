@@ -1,0 +1,7 @@
+# The README's topic pages under docs/ (issue #42) are read like README.md: a
+# count claim on docs/skills.md that disagrees with the shipped skills fails,
+# and the matching claim above it passes.
+check: counts
+rc: 1
+line: FAIL: counts: docs/skills.md:4: says 3 skills, shipped 1 — 3 skills
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

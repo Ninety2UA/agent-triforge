@@ -119,8 +119,9 @@
 #      with at-; the at-* lead workflows), must match every count claim in
 #      AGENTS.md, templates/AGENTS.md, README.md (outside its
 #      "## Release history" section, as in check 4), docs/index.html,
-#      docs/agent-triforge.md, .claude-plugin/plugin.json and, when it
-#      exists, docs/images/render-diagrams.html and the text of the
+#      docs/agent-triforge.md, .claude-plugin/plugin.json and, when they
+#      exist, the README's topic pages (DOC_PAGES), and
+#      docs/images/render-diagrams.html and the text of the
 #      docs/images/excalidraw/*.svg it embeds (the diagram source).
 #      The vocabulary: "<N> skills" is every skill, "<N> portable skills" the
 #      portable set, "<N> lead workflows" the at-* set, and "<N> [up to three
@@ -206,6 +207,7 @@
 #      (AGENTS.md §Delegation), so a task touching exactly 50 goes on. In
 #      skills/, AGENTS.md, README.md (outside its "## Release history"
 #      section, whose lines are blanked so later ones keep their numbers),
+#      the README's topic pages (DOC_PAGES, each that exists),
 #      docs/index.html and docs/agent-triforge.md, a 50-file threshold written
 #      inclusively fails: 50+, 50 or more (or above, and up, …), 50 files or
 #      more, at least 50, ≥ / >= / => 50 before file(s), changed files or file
@@ -531,6 +533,11 @@ if [ "$README_HISTORY_START" -gt 0 ]; then
   README_HISTORY_END=$(awk -v s="$README_HISTORY_START" 'NR > s && /^## / { print NR; exit }' README.md)
   README_HISTORY_END="${README_HISTORY_END:-0}"
 fi
+# The README's topic pages (issue #42): checks 5 and 11 read each one that
+# exists, as they read README.md. A new page split out of the README joins
+# this list in the commit that creates it; checks 2, 4, 9 and 12 already read
+# every file under docs/ outside the excluded paths.
+DOC_PAGES='docs/installation.md docs/upgrading.md docs/unattended-runs.md docs/workflows.md docs/team-work.md docs/models.md docs/skills.md docs/personas.md docs/project-layout.md docs/how-it-works.md docs/compatibility.md'
 # _shipped_surfaces [diagrams]: filter grep -rn output (file:line:text) down to
 # the shipped surfaces — drops the excluded paths, this script, and README.md's
 # release history section; with "diagrams" it keeps the lines of
@@ -1275,7 +1282,7 @@ if _selected counts; then
   else
     COUNTS_RC=0
     VV_PERSONAS="$PERSONA_COUNT" VV_SKILLS="$SKILL_COUNT" VV_PORTABLE="$PORTABLE_COUNT" VV_WORKFLOWS="$WORKFLOW_COUNT" \
-    VV_README_HISTORY_START="$README_HISTORY_START" VV_README_HISTORY_END="$README_HISTORY_END" \
+    VV_README_HISTORY_START="$README_HISTORY_START" VV_README_HISTORY_END="$README_HISTORY_END" VV_DOC_PAGES="$DOC_PAGES" \
     VV_DIAGRAM_SOURCE="$DIAGRAM_SOURCE" VV_DIAGRAM_TEXT="$(_diagram_svg_lines)" python3 -c "$VV_PY_STDIN" <<'PYEOF' || COUNTS_RC=$?
 import os
 import re
@@ -1302,6 +1309,8 @@ files = [
     "docs/agent-triforge.md",
     ".claude-plugin/plugin.json",
 ]
+# The README's topic pages are read when they exist.
+files.extend(p for p in os.environ["VV_DOC_PAGES"].split() if os.path.isfile(p))
 # The diagram source (KTD6) is read when it exists.
 if os.path.isfile(os.environ["VV_DIAGRAM_SOURCE"]):
     files.append(os.environ["VV_DIAGRAM_SOURCE"])
@@ -1850,7 +1859,7 @@ fi
 # --- 11. halt threshold ------------------------------------------------------
 if _selected halt; then
   HALT_RC=0
-  VV_README_HISTORY_START="$README_HISTORY_START" VV_README_HISTORY_END="$README_HISTORY_END" \
+  VV_README_HISTORY_START="$README_HISTORY_START" VV_README_HISTORY_END="$README_HISTORY_END" VV_DOC_PAGES="$DOC_PAGES" \
     python3 -c "$VV_PY_STDIN" <<'PYEOF' || HALT_RC=$?
 import html
 import os
@@ -1884,11 +1893,12 @@ EXCLUSIVE = re.compile(
 # newlines, so line numbers hold.
 TAG = re.compile(r"<!--.*?(?:-->|$)|</?[A-Za-z][A-Za-z0-9-]*(?:\s[^>]*)?/?>", re.S)
 EMPHASIS = re.compile(r"[*_`]")
-SCOPE = "skills/, AGENTS.md, README.md, docs/index.html, docs/agent-triforge.md"
+SCOPE = "skills/, AGENTS.md, README.md and its topic pages, docs/index.html, docs/agent-triforge.md"
 
 readme_history_start = int(os.environ["VV_README_HISTORY_START"] or "0")
 readme_history_end = int(os.environ["VV_README_HISTORY_END"] or "0")
 paths = [p for p in ("AGENTS.md", "README.md", "docs/index.html", "docs/agent-triforge.md") if os.path.isfile(p)]
+paths.extend(p for p in os.environ["VV_DOC_PAGES"].split() if os.path.isfile(p))
 for top, dirs, names in os.walk("skills"):
     dirs.sort()
     paths.extend(os.path.join(top, n) for n in sorted(names))
