@@ -9,6 +9,7 @@ import Base from '@/layouts/Base.astro';
 import Mark from '@/components/Mark.astro';
 import CodeBlock from '@/components/CodeBlock.astro';
 import VideoFigure from '@/components/VideoFigure.astro';
+import { LOOP_ORDER, figure } from '@/data/loops';
 import FilmPlayer from '@/components/FilmPlayer.astro';
 import { buttonVariants } from '@/components/ui/button';
 import { filmChapters, mp4Facts } from '@/lib/media.mjs';
@@ -44,17 +45,6 @@ const readme = `[![Agent Triforge](${GH}/raw/main/docs/images/readme-hero.gif)](
 const [gifW, gifH] = fileFacts(README_GIF.file).frame.split(' × ').map(Number);
 const ogAlt = 'Agent Triforge: Put Claude Code, Codex and Antigravity on one team. Beside it, the coding agents as dot clusters with their roles, and the shared branch.';
 
-// the loops, in the order the home page shows them, with the text alternatives it gives them
-const loops = [
-  { name: 'loop-roster', caption: 'Roles and fallbacks', short: 'the roster loop',
-    label: 'Loop: Claude Code leads and builds, Codex reviews and tests, Antigravity analyzes and documents. When Codex is missing, the others take its work, and then Codex leads instead.' },
-  { name: 'loop-lease', caption: "One task's life", short: 'the lease loop',
-    label: 'Loop: a task gets its own workspace, Claude Code builds it, Codex reviews it, and it is merged onto the shared branch. Then Claude Code tries to review its own task and is refused.' },
-  { name: 'loop-review', caption: 'Reviews until findings converge', short: 'the review loop',
-    label: 'Loop: five reviewers read the change at once, their findings are counted as critical, important and minor, the fixes go in, and on the second pass only minor findings are left, so it stops.' },
-  { name: 'loop-unattended', caption: 'Unattended runs', short: 'the unattended loop',
-    label: 'Loop: it runs on its own, one fresh lead session at a time, up to five. Each session first checks its records, and it stops once the sprint is finished and sends a notification.' },
-];
 const { duration } = filmChapters();
 ---
 <Base title="Media kit · Agent Triforge" description="The Agent Triforge mark, favicon, social image, README loop, loops and film, for posts, slides and READMEs." canonical={false}>
@@ -133,9 +123,9 @@ const { duration } = filmChapters();
         <p>The loops the site plays. Each MP4 is silent and repeats. The WebP beside it is its poster frame.</p>
       </div>
       <div class="loops">
-        {loops.map((l, i) => (
+        {LOOP_ORDER.map((l, i) => (
           <div>
-            <VideoFigure n={i + 1} name={l.name} label={l.label} short={l.short} caption={l.caption} />
+            <VideoFigure n={i + 1} {...figure(l)} caption={l.title} />
             <ul class="kit-files">{[`/media/${l.name}.mp4`, poster(l.name)].map(facts).map((f) => <li><a href={f.href} download>{f.name}</a><span>{f.meta}</span></li>)}</ul>
           </div>
         ))}

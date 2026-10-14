@@ -2,6 +2,7 @@
 // One task's life: the lease loop (Fig. 2) and the reviewer bench, where a visitor picks who reviews
 // task 1 and watches it go through or get refused (home.ts runs it). Plain words, no code.
 import VideoFigure from '../VideoFigure.astro';
+import { LOOP, figure } from '@/data/loops';
 import { buttonVariants } from '@/components/ui/button';
 ---
 <section id="lease" aria-labelledby="lease-h" data-rv-group>
@@ -12,9 +13,7 @@ import { buttonVariants } from '@/components/ui/button';
         <p>Every task is built in its own git worktree, the lead's own tasks included. It merges only after a reviewer approves it, and the reviewer has to be a different agent from the one that built it.</p>
         <p><a class="more" href="/guides/leases/">Read the leases guide</a></p>
       </div>
-      <VideoFigure n={2} name="loop-lease" short="the lease loop"
-        label="Loop: a task gets its own workspace, Claude Code builds it, Codex reviews it, and it is merged onto the shared branch. Then Claude Code tries to review its own task and is refused."
-        caption="One task from its own workspace to the merge, then a self-review that is refused" />
+      <VideoFigure n={2} {...figure(LOOP.lease)} />
     </div>
     <div class="bench" id="bench">
       <div class="bench-ctl">

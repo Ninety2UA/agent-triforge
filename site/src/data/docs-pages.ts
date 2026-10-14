@@ -1,7 +1,7 @@
 // Hand-written words for the Docs and Guides pages (R3). Every other word on those pages comes from the
 // repo through the docs map. A description is written here only for a page whose source has no intro
-// paragraph to describe it; the loops are the home page's, with the same text alternative and caption
-// (components/home/Lease.astro and Unattended.astro).
+// paragraph to describe it. The loops and their words come from data/loops.ts.
+import { LOOP, figure } from './loops';
 
 /** Meta descriptions for pages whose source opens without a paragraph. */
 export const DESCRIPTIONS: Record<string, string> = {
@@ -21,17 +21,6 @@ export interface Loop {
 /** The loop a page shows, by page slug. The lease loop opens the section it shows, so on a phone it
  *  starts below the first screen and its player loads after the page has painted. */
 export const LOOPS: Record<string, Loop> = {
-  leases: {
-    under: 'one-task-start-to-finish',
-    name: 'loop-lease',
-    short: 'the lease loop',
-    label: 'Loop: a task gets its own workspace, Claude Code builds it, Codex reviews it, and it is merged onto the shared branch. Then Claude Code tries to review its own task and is refused.',
-    caption: 'One task from its own workspace to the merge, then a self-review that is refused',
-  },
-  'unattended-runs': {
-    name: 'loop-unattended',
-    short: 'the unattended loop',
-    label: 'Loop: it runs on its own, one fresh lead session at a time, up to five. Each session first checks its records, and it stops once the sprint is finished and sends a notification.',
-    caption: 'One fresh session at a time, each checking its records first, until the sprint is finished',
-  },
+  leases: { ...figure(LOOP.lease), under: 'one-task-start-to-finish' },
+  'unattended-runs': figure(LOOP.unattended),
 };

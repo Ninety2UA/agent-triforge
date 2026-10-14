@@ -10,6 +10,7 @@ import Claim from '@/components/Claim.astro';
 import Tabs from '@/components/Tabs.astro';
 import CodeBlock from '@/components/CodeBlock.astro';
 import VideoFigure from '@/components/VideoFigure.astro';
+import { LOOP, figure } from '@/data/loops';
 import { glyph } from '@/components/home/dots';
 import { badgeVariants } from '@/components/ui/badge';
 import { ROLES } from '@/data/content';
@@ -83,9 +84,7 @@ const leadTabs = [
           <li><a href="#edit">Changing it</a></li>
         </ul>
       </div>
-      <VideoFigure n={1} name="loop-roster" short="the roster loop"
-        label="Loop: Claude Code leads and builds, Codex reviews and tests, Antigravity analyzes and documents. When Codex is missing, the others take its work, and then Codex leads instead."
-        caption="Default roles, the others covering for a missing agent, and Codex taking the lead" />
+      <VideoFigure n={1} {...figure(LOOP.roster)} />
     </div>
   </section>
 

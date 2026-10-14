@@ -10,6 +10,7 @@ import Base from '@/layouts/Base.astro';
 import Tabs from '@/components/Tabs.astro';
 import CodeBlock from '@/components/CodeBlock.astro';
 import VideoFigure from '@/components/VideoFigure.astro';
+import { LOOP, figure } from '@/data/loops';
 import { PERSONAS } from '@/data/content';
 import { getRoles } from '@/lib/roster.mjs';
 import { completionChecklist, convergenceModes, inlineHtml, qualityGates, sprintPhases } from '@/lib/sprint.mjs';
@@ -177,9 +178,7 @@ const run = (prefix: string) => [`${prefix}at-plan <goal>`, `${prefix}at-build`,
           <p class="c-after">Then <a href={`/skills/personas/#${synthesizer.anchor}`}><code>findings-synthesizer</code></a> {synthesizer.what.charAt(0).toLowerCase() + synthesizer.what.slice(1)}</p>
         </div>
         <div class="c-side">
-          <VideoFigure n={1} name="loop-review" short="the review loop"
-            label="Loop: five reviewers read the change at once, their findings are counted as critical, important and minor, the fixes go in, and on the second pass only minor findings are left, so it stops."
-            caption="Five reviewers at once, the fixes, and a second pass with only minor findings left" />
+          <VideoFigure n={1} {...figure(LOOP.review)} />
           <div class="c-modes">
             <h3 id="convergence">Where the loop stops</h3>
             <p>After each round of fixes the lead counts what is left. With <code>--convergence</code> you choose when that is enough; until then the reviewers go again, three cycles at most. After the third, the lead hands you the open findings, each reviewer's view, the dispositions and its recommendation, and you decide whether to ship with known issues.</p>

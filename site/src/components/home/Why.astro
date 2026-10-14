@@ -2,6 +2,7 @@
 // Why it holds up: no agent merges its own work, reviews run until findings converge (Fig. 3),
 // done needs fresh evidence, and what a sprint learns the next one reads.
 import VideoFigure from '../VideoFigure.astro';
+import { LOOP, figure } from '@/data/loops';
 import { pair } from './dots';
 ---
 <section id="why" aria-labelledby="why-h" data-rv-group>
@@ -14,9 +15,7 @@ import { pair } from './dots';
         <p>A task merges only after a pinned reviewer approves it, and the helper refuses to pin the agent that built it. The lead's own tasks follow the same rule. After three fix cycles with the same reviewer, you decide.</p>
       </div>
       <div class="arg a3" data-rv>
-        <VideoFigure n={3} name="loop-review" short="the review loop"
-          label="Loop: five reviewers read the change at once, their findings are counted as critical, important and minor, the fixes go in, and on the second pass only minor findings are left, so it stops."
-          caption="Five reviewers at once, the fixes, and a second pass with only minor findings left" />
+        <VideoFigure n={3} {...figure(LOOP.review)} />
         <h3 style="margin-top:36px">Reviews run until findings converge</h3>
         <p>Each reviewer writes its own file, so they can all run at once. Findings are P1, P2 or P3 with a confidence tier, and a low-confidence finding is never P1. You pick where the loop stops.</p>
         <table class="modes">
