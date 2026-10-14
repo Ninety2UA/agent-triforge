@@ -271,10 +271,16 @@ export function initDotField(doc: Document = document, win: Window & typeof glob
       if (!running) draw(performance.now());
     }, 120);
   });
+  // recolour after the page has painted its new theme, so the toggle's own response is not held up by
+  // the canvas (one frame of old colours on the field is not visible)
   doc.addEventListener('themechange', () => {
-    colors();
-    paintScreen();
-    if (!running) draw(performance.now());
+    win.requestAnimationFrame(() =>
+      win.setTimeout(() => {
+        colors();
+        paintScreen();
+        if (!running) draw(performance.now());
+      }, 0),
+    );
   });
   RM.addEventListener('change', () => {
     t0 = performance.now();
