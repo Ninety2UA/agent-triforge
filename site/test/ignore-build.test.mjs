@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -66,4 +66,50 @@ test('ignore-build builds when a skill, a docs page or the site changed', () => 
       r.done();
     }
   }
+});
+
+// The input list equals what the build reads: every file the data modules open while they load the
+// repo's data must fall under one of the script's inputs, or a change to it would leave production on
+// a stale build. fs is patched before the modules load, so they bind the recording functions.
+test('every repository path the build reads outside site/ is an input of the ignored build step', async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { relative, sep } = await import('node:path');
+  const reads = new Set();
+  for (const name of ['readFileSync', 'readdirSync', 'openSync']) {
+    const real = fs[name];
+    fs[name] = function (path, ...rest) {
+      if (typeof path === 'string') reads.add(path);
+      return real.call(this, path, ...rest);
+    };
+  }
+  syncBuiltinESMExports();
+  const { REPO } = await import(`../src/lib/repo.mjs?trace=${Date.now()}`);
+  const load = async (m) => import(`../src/lib/${m}?trace=${Date.now()}`);
+  const [{ getSkills }, { getPersonas, personasPage }, { docPages }, { getReleases }, { getClis, getRoles }, readme, { getCounts }] = await Promise.all(
+    ['skills.mjs', 'personas.mjs', 'docs.mjs', 'releases.mjs', 'roster.mjs', 'readme.mjs', 'counts.mjs'].map(load),
+  );
+  getSkills();
+  getPersonas();
+  personasPage();
+  docPages();
+  getReleases();
+  getClis();
+  getRoles();
+  readme.installCommands();
+  readme.faq();
+  readme.releaseTable();
+  getCounts();
+
+  const script = readFileSync(SCRIPT, 'utf8');
+  const block = script.match(/^inputs=\([\s\S]*?^\)/m);
+  assert.ok(block, 'ignore-build.sh no longer has an inputs=( ... ) list');
+  const inputs = execFileSync('bash', ['-c', `${block[0]}\nprintf '%s\\n' "\${inputs[@]}"`], { encoding: 'utf8' })
+    .split('\n')
+    .filter(Boolean)
+    .map((p) => p.replace(/^:\//, ''));
+  const paths = [...reads].map((p) => relative(REPO, p).split(sep).join('/')).filter((p) => p && !p.startsWith('..') && !p.startsWith('site/'));
+  assert.ok(paths.includes('README.md') && paths.some((p) => p.startsWith('skills/')), 'the trace recorded no reads');
+  const covered = (p) => inputs.some((input) => p === input || p.startsWith(`${input}/`));
+  assert.deepEqual([...new Set(paths.filter((p) => !covered(p)))].sort(), [], `inputs: ${inputs.join(', ')}`);
 });

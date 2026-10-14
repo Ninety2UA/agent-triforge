@@ -104,13 +104,14 @@ export function checkLinks(dist, pages) {
       if (!ids(p.html).has(decodeURIComponent(decode(hash)))) problems.push(`${p.file}: href="#${hash}" names no id on the page`);
     }
   }
-  const vercel = join(SITE, 'vercel.json');
-  if (existsSync(vercel)) {
-    for (const r of JSON.parse(readFileSync(vercel, 'utf8')).redirects ?? []) {
-      if (!target(dist, r.destination)) problems.push(`vercel.json: the redirect from ${r.source} goes to ${r.destination}, which has no page`);
-    }
-  }
   return problems;
+}
+
+/** Every redirect lands on a page of the build. */
+export function checkRedirects(dist, redirects) {
+  return redirects
+    .filter((r) => !target(dist, r.destination))
+    .map((r) => `vercel.json: the redirect from ${r.source} goes to ${r.destination}, which has no page`);
 }
 
 export function checkMeta(pages) {
@@ -279,6 +280,7 @@ export function checkSite(dist, truth) {
     ...checkPages(dist, truth),
     ...checkClaims(pages, truth.counts),
     ...checkLinks(dist, pages),
+    ...checkRedirects(dist, truth.redirects ?? []),
     ...checkMeta(pages),
     ...checkNoSkillFiles(dist),
     ...checkOrigins(pages),
@@ -299,6 +301,7 @@ export async function repoTruth() {
     docRoutes: docPages().map((d) => ({ source: d.source, href: d.href })),
     counts: getCounts(),
     cliNames: getClis().map((c) => c.name),
+    redirects: JSON.parse(readFileSync(join(SITE, 'vercel.json'), 'utf8')).redirects ?? [],
   };
 }
 
