@@ -22,6 +22,7 @@
 // (getSkills, docPages, getPersonas, getReleases).
 
 import { defineCollection } from 'astro:content';
+import { glob } from 'astro/loaders';
 import { z } from 'astro/zod';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -207,4 +208,17 @@ export const tutorials = defineCollection({
   }),
 });
 
-export const collections = { skills, docs, personas, releases, tutorials };
+
+// guides  the hand-written guide pages (KTD4): one entry per src/content/guides/*.md, id = the page's
+//         slug in the docs map's GUIDE_PAGES (only "leases" today). data: description (the meta
+//         description) and intro (the plain-text paragraph under the title). The title and the page's
+//         place in the sidebar come from the docs map.
+export const guides = defineCollection({
+  loader: glob({ base: './src/content/guides', pattern: '*.md' }),
+  schema: z.object({
+    description: z.string(),
+    intro: z.string(),
+  }),
+});
+
+export const collections = { skills, docs, personas, releases, tutorials, guides };

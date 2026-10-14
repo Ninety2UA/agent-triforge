@@ -68,26 +68,50 @@
 .doc p { max-width: 68ch; }
 .doc ul, .doc ol { margin: 0 0 1em; padding-left: 22px; display: grid; gap: 6px; max-width: 68ch; }
 .doc li::marker { color: var(--muted-foreground); }
+/* a list item is a grid item: without this, a long code line inside one widens the page */
+.doc li { min-width: 0; }
 .doc a { color: var(--primary-text); text-decoration-color: color-mix(in oklch, var(--primary) 45%, transparent); }
 .doc a:hover { text-decoration-color: currentColor; }
 .doc strong { font-weight: 600; }
 .doc :not(pre) > code { font-size: 0.86em; padding: 1px 5px; border-radius: 4px; background: var(--muted); white-space: normal; overflow-wrap: anywhere; }
-.doc pre { margin: 0 0 1.2em; padding: 14px 16px; border-radius: var(--radius); background: var(--muted); overflow-x: auto; font-size: 13px; line-height: 1.7; }
+/* Markdown code blocks (not the copy control's command lines, not an artifact's [data-ui] block). A long
+   line scrolls inside its block. The highlighter's dark theme arrives as inline styles; the blocks are
+   set in the page's ink on the muted surface instead, with comments in the secondary ink, like the
+   copy control. */
+.doc pre:not([data-slot]):not([data-ui] pre) { max-width: 100%; margin: 0 0 1.2em; padding: 14px 16px; border-radius: var(--radius); background: var(--muted) !important; color: var(--foreground) !important; overflow-x: auto; font-size: 13px; line-height: 1.7; }
+.doc pre.astro-code span { color: inherit !important; }
+.doc pre.astro-code span[style*="#6A737D" i] { color: var(--muted-foreground) !important; }
 .doc pre code { font-size: 1em; }
+.doc li > pre { margin-top: 10px; }
 .doc blockquote { margin: 0 0 1.2em; padding: 4px 0 4px 18px; border-left: 3px dotted var(--dot-frame); color: var(--foreground); }
 .doc hr { border: 0; border-top: 2px dotted var(--dot-frame); margin: 40px 0; }
-/* a wide table scrolls in its own box, so the page never scrolls sideways */
-.doc .table-wrap { margin: 0 0 1.4em; overflow-x: auto; }
+/* a wide table scrolls in its own box (body.mjs wraps it), so the page never scrolls sideways */
+.doc .table-wrap { margin: 0 0 1.4em; overflow-x: auto; scrollbar-width: thin; }
 .doc table { width: 100%; font-size: 15px; }
 .doc th, .doc td { text-align: left; vertical-align: top; padding: 10px 14px 10px 0; }
 .doc thead th { font-size: 13px; font-weight: 500; color: var(--muted-foreground); white-space: nowrap; }
 .doc tbody tr { border-top: 2px dotted var(--dot-frame); }
 .doc td code, .doc th code { white-space: nowrap; }
-/* diagrams sit on the card ground in a dotted frame, like the motion figures */
+/* diagrams sit on the card ground in a dotted frame, like the motion figures; each opens full size */
 .doc figure, .doc .img { margin: 8px 0 1.4em; }
-.doc img { display: block; width: 100%; height: auto; background: var(--card); padding: 10px; border: 3px dotted var(--dot-frame); border-radius: 2px; }
-.doc figure > a, .doc .img > a { display: block; }
-.doc details { margin: 0 0 10px; border-radius: var(--radius); background: var(--muted); }
-.doc details > summary { padding: 14px 18px; font-weight: 600; cursor: pointer; }
+.doc .img { max-width: none; }
+.doc .img-full, .doc .img-full picture { display: block; cursor: zoom-in; }
+.doc .img-full img { display: block; width: 100%; height: auto; background: var(--card); padding: 10px; border: 3px dotted var(--dot-frame); border-radius: 2px; transition: border-color 160ms var(--ease); }
+.doc .img-full:hover img { border-color: var(--muted-foreground); }
+/* the FAQ's questions: one muted surface each, a chevron that turns as the answer opens */
+.doc details { margin: 0 0 8px; border-radius: var(--radius); background: var(--muted); }
+.doc details > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 52px; padding: 12px 18px; font-weight: 600; font-size: 17px; line-height: 1.35; cursor: pointer; list-style: none; border-radius: var(--radius); transition: background-color 160ms var(--ease); }
+.doc details > summary::-webkit-details-marker { display: none; }
+.doc details > summary:hover { background: color-mix(in oklch, var(--muted) 82%, var(--foreground)); }
+.doc details > summary strong { font-weight: 600; }
+.doc details > summary::after { content: ""; flex: none; width: 16px; height: 16px; background: currentColor; -webkit-mask: var(--chevron) center / contain no-repeat; mask: var(--chevron) center / contain no-repeat; transition: transform 220ms var(--ease); }
+.doc details[open] > summary::after { transform: rotate(90deg); }
 .doc details > :not(summary) { margin-inline: 18px; }
-.doc details[open] > :last-child { margin-bottom: 16px; }
+.doc details[open] > :last-child { margin-bottom: 18px; }
+.doc { --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 6l6 6-6 6'/%3E%3C/svg%3E"); }
+
+/* Getting started: the install tabs under the intro, the same switch as the home page's */
+.doc .doc-install { margin: 0 0 clamp(32px, 4vw, 44px); }
+.doc .note { font-size: 15px; max-width: none; }
+/* a code block the install tabs already show is replaced by a link to its tab */
+.doc .see-tab { font-size: 15px; color: var(--muted-foreground); }

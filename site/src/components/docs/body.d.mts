@@ -1,0 +1,10 @@
+export const IMAGE_SIZES: string;
+export const IMAGE_WIDTHS: number[];
+export const AVIF_WIDTHS: number[];
+export function withImageOptions(html: string): string;
+export function finishBody(html: string, options?: { install?: { id: string; label: string; lines: string[] }[] }): string;
+export function splitBeforeFirstH2(html: string): [string, string];
+export function splitAfterH2(html: string, id: string): [string, string];
+export function introText(introHtml: string): string;
+export function describe(markdown: string): string;
+export function firstParagraphText(html: string): string;

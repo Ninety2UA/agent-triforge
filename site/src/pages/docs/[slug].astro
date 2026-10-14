@@ -1,0 +1,19 @@
+---
+// The Docs pages, one per Docs entry of the docs map (KTD4): every DOC_PAGES file publishes here, and a
+// docs page added to the repo gets its page on the next build with no site edit (R2).
+import { getCollection } from 'astro:content';
+import DocPage from '@/components/docs/DocPage.astro';
+import { sectionPages } from '@/lib/docs.mjs';
+
+export async function getStaticPaths() {
+  const entries = new Map((await getCollection('docs')).map((e) => [e.id, e]));
+  return sectionPages('docs').map(({ slug, title }) => {
+    const entry = entries.get(slug);
+    if (!entry) throw new Error(`/docs/${slug}/: the docs collection has no entry for this docs-map page`);
+    return { params: { slug }, props: { slug, title, entry } };
+  });
+}
+
+const { slug, title, entry } = Astro.props;
+---
+<DocPage section="docs" slug={slug} title={title} entry={entry} />

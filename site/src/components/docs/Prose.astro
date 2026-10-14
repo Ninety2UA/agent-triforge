@@ -1,0 +1,23 @@
+---
+// A rendered page body (its <Content /> in the default slot), finished for the docs layout: images link
+// to their full-size file, tables scroll in their own box, a code block that repeats an install tab
+// links to it, and an optional loop sits under the opening section (before the first H2) or under the
+// heading its `under` names (body.mjs).
+import VideoFigure from '@/components/VideoFigure.astro';
+import type { Loop } from '@/data/docs-pages';
+import { finishBody, splitAfterH2, splitBeforeFirstH2 } from './body.mjs';
+
+interface Props {
+  /** the lead install tabs shown above the body, whose commands the body should not repeat */
+  install?: { id: string; label: string; lines: string[] }[];
+  /** the loop to show, as figure 1 */
+  figure?: Loop;
+}
+const { install, figure } = Astro.props;
+const html = finishBody(await Astro.slots.render('default'), { install });
+const [head, tail] = !figure ? [html, ''] : figure.under ? splitAfterH2(html, figure.under) : splitBeforeFirstH2(html);
+const video = figure && { name: figure.name, short: figure.short, label: figure.label, caption: figure.caption };
+---
+<Fragment set:html={head} />
+{video && <VideoFigure n={1} {...video} />}
+<Fragment set:html={tail} />

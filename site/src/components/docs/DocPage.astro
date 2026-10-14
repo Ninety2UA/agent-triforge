@@ -1,0 +1,55 @@
+---
+// One Docs or Guides page in the docs layout: the title, the intro under it, the page body and the
+// section's sidebar, previous and next links and on-page contents. A repo-backed page renders its docs
+// collection entry (the docs map, KTD4); the hand-written leases guide renders its guides entry.
+// Getting started opens with the install tabs (#claude-code, #codex and #skills-only open them).
+import { render, type CollectionEntry } from 'astro:content';
+import DocsLayout from '@/layouts/DocsLayout.astro';
+import InstallTabs from '@/components/InstallTabs.astro';
+import Prose from './Prose.astro';
+import { describe, firstParagraphText, introText, withImageOptions } from './body.mjs';
+import { sectionOrder } from '@/lib/section-order.mjs';
+import { sectionPages } from '@/lib/docs.mjs';
+import { DESCRIPTIONS, LOOPS } from '@/data/docs-pages';
+import { installTabs } from '@/data/home';
+
+type Props =
+  | { section: 'docs' | 'guides'; slug: string; title: string; entry: CollectionEntry<'docs'>; guide?: undefined }
+  | { section: 'guides'; slug: string; title: string; entry?: undefined; guide: CollectionEntry<'guides'> };
+const { section, slug, title, entry, guide } = Astro.props;
+
+const order = sectionOrder(sectionPages(section).map((p) => ({ slug: p.slug, label: p.title, href: p.href })));
+const { prev, next } = order.neighbors(slug);
+
+let Content;
+let headings;
+let description: string;
+let intro: { html: string } | { text: string } | null;
+if (entry) {
+  const html = entry.rendered?.html ?? '';
+  ({ Content, headings } = await render({ ...entry, rendered: { ...entry.rendered, html: withImageOptions(html) } }));
+  description = DESCRIPTIONS[slug] ?? (describe(entry.data.intro) || firstParagraphText(html) || `${title}, from the Agent Triforge docs.`);
+  intro = entry.data.introHtml ? { html: introText(entry.data.introHtml) } : null;
+} else {
+  ({ Content, headings } = await render(guide));
+  description = guide.data.description;
+  intro = { text: guide.data.intro };
+}
+
+const install = slug === 'getting-started' && section === 'docs';
+const leadTabs = installTabs.filter((t) => t.lead).map((t) => ({ id: t.id, label: t.label, lines: t.blocks.flatMap((b) => b.lines) }));
+---
+<DocsLayout
+  title={`${title} · Agent Triforge`}
+  description={description}
+  section={section === 'docs' ? 'Docs' : 'Guides'}
+  sidebar={order.sidebar(slug)}
+  headings={headings.filter((h) => h.depth === 2).map((h) => ({ id: h.slug, text: h.text }))}
+  prev={prev}
+  next={next}
+>
+  <h1>{title}</h1>
+  {intro && ('html' in intro ? <p class="intro" set:html={intro.html} /> : <p class="intro">{intro.text}</p>)}
+  {install && <InstallTabs id="install" tabs={installTabs} label="Install for" hashTarget class="doc-install" />}
+  <Prose install={install ? leadTabs : undefined} figure={LOOPS[slug]}><Content /></Prose>
+</DocsLayout>
