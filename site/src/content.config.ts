@@ -24,6 +24,7 @@
 import { defineCollection } from 'astro:content';
 import { glob } from 'astro/loaders';
 import { z } from 'astro/zod';
+import { readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -32,7 +33,6 @@ import { getPersonas } from './lib/personas.mjs';
 import { getReleases } from './lib/releases.mjs';
 import { REPO } from './lib/repo.mjs';
 import { getSkills } from './lib/skills.mjs';
-import { readFileSync } from 'node:fs';
 import { parseTutorial, writtenTutorials, type TutorialSegment } from './lib/tutorials.mjs';
 
 const fileURL = (repoPath: string) => pathToFileURL(join(REPO, repoPath));
