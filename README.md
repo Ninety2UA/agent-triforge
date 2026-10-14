@@ -54,7 +54,7 @@ Triforge installs as a plugin into the CLI that leads: one command adds the mark
 
 If you are coming from Triforge 3.x, read [Upgrading from 3.x](docs/upgrading.md) first. The slash commands are now `at-` workflows, and a `CLAUDE.md` left from the 3.x template hides the project's `AGENTS.md` from Claude Code.
 
-You need the core trio (Claude Code, Antigravity `agy` and Codex) installed and logged in, Python 3, and on macOS GNU coreutils. Then install the plugin into the CLI that leads:
+You need the core trio (Claude Code, Antigravity `agy` and Codex) installed and logged in, Python 3, and on macOS GNU coreutils. Then add the marketplace and install the plugin:
 
 ```bash
 # Claude Code leads
