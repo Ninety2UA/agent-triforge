@@ -10,8 +10,11 @@
   --card: oklch(1 0 0);
 }
 
+/* the film's position line and chapters sit on its white card in both themes (the videos are light
+   renders), so on the dark page they keep the light theme's ink */
 :root,
-:root[data-theme="light"] {
+:root[data-theme="light"],
+:root[data-theme="dark"] .film-sheet > :not(.vid) {
   color-scheme: light;
   --background: oklch(1 0 0);
   --foreground: oklch(0.19 0.015 264);
