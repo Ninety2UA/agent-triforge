@@ -17,11 +17,8 @@
 .cat :not(pre) > code:has(> .nw), .sk :not(pre) > code:has(> .nw) { white-space: normal; }
 .cat .nw, .sk .nw { white-space: nowrap; }
 
-/* fenced code in a SKILL.md or a prompt: the Markdown highlighter paints a dark block in its own
-   colours; here it takes the page's surface and ink, like every other code on the site */
-.sk-body .astro-code, .pl-prompt .astro-code { background-color: var(--muted) !important; color: var(--foreground) !important; }
-.sk-body .astro-code span, .pl-prompt .astro-code span { color: inherit !important; font-weight: inherit !important; font-style: inherit !important; text-decoration: none !important; }
-.pl-prompt .astro-code { background-color: var(--background) !important; }
+/* fenced code in a persona prompt sits on the prompt's muted panel, so it takes the page's ground */
+.pl-prompt .doc pre { background: var(--background); }
 
 /* ---------- the filter: search box, chips, count ---------- */
 .cat-body .sf { display: grid; gap: 14px; }
