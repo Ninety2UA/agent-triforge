@@ -82,11 +82,9 @@
 .doc li > pre { margin-top: 10px; }
 .doc blockquote { margin: 0 0 1.2em; padding: 4px 0 4px 18px; border-left: 3px dotted var(--dot-frame); color: var(--foreground); }
 .doc hr { border: 0; border-top: 2px dotted var(--dot-frame); margin: 40px 0; }
-/* a wide table scrolls in its own box (body.mjs wraps it), so the page never scrolls sideways */
-.doc .table-wrap { --ground: var(--background); margin: 0 0 1.4em; overflow-x: auto; scrollbar-width: thin; }
-/* An edge that has more behind it is shaded. The two covers move with the content (local) and hide the
-   shade (scroll) once that end is reached, so a box that fits shows none. */
-.doc pre:not([data-slot]):not([data-ui] pre), .doc .table-wrap {
+/* An edge of a code block that has more behind it is shaded. The two covers move with the content
+   (local) and hide the shade (scroll) once that end is reached, so a block that fits shows none. */
+.doc pre:not([data-slot]):not([data-ui] pre) {
   background:
     linear-gradient(to right, var(--ground) 45%, transparent) left / 32px 100% no-repeat local,
     linear-gradient(to left, var(--ground) 45%, transparent) right / 32px 100% no-repeat local,
@@ -94,12 +92,37 @@
     linear-gradient(to left, var(--edge-shade), transparent) right / 16px 100% no-repeat scroll,
     var(--ground);
 }
-.doc table { width: 100%; font-size: 15px; }
+/* A table fits its column (tables.mjs). Code in a cell wraps at a space or after a hyphen. The wrapper
+   is a size container: below the width its data-stack names (or always), the table sets each row as a
+   block of its cells, the first cell as the row's title and each other cell under its column's name.
+   The queries set only the --st-* values; every rule below falls back to the table layout without them. */
+.doc .table-wrap { margin: 0 0 1.4em; overflow-x: auto; container: tbl / inline-size; }
+.doc table { display: var(--st-block, table); width: 100%; font-size: 15px; }
+.doc thead { display: var(--st-none, table-header-group); }
+.doc tbody { display: var(--st-block, table-row-group); }
+.doc tr { display: var(--st-block, table-row); padding: var(--st-row-pad, 0); }
 .doc th, .doc td { text-align: left; vertical-align: top; padding: 10px 14px 10px 0; }
-.doc th:first-child, .doc td:first-child { min-width: 7.5em; }
-.doc thead th { font-size: 13px; font-weight: 500; color: var(--muted-foreground); white-space: nowrap; }
+.doc td { display: var(--st-block, table-cell); padding: var(--st-cell-pad, 10px 14px 10px 0); }
+.doc th:first-child, .doc td:first-child { min-width: var(--st-min, 7.5em); }
+.doc td:first-child { font-weight: var(--st-title, inherit); }
+.doc td[data-label]::before { content: attr(data-label); display: var(--st-block, none); margin-bottom: 1px; font-size: 13px; font-weight: 500; color: var(--muted-foreground); }
+.doc td:first-child::before { content: none; }
+.doc thead th { font-size: 13px; font-weight: 500; color: var(--muted-foreground); }
 .doc tbody tr { border-top: 2px dotted var(--dot-frame); }
-.doc td code, .doc th code { white-space: nowrap; }
+.doc td code, .doc th code { white-space: normal; overflow-wrap: break-word; }
+.doc td .nw, .doc th .nw { white-space: nowrap; }
+.table-wrap[data-stack="always"] > table { --st-block: block; --st-none: none; --st-row-pad: 10px 0; --st-cell-pad: 3px 0; --st-min: 0; --st-title: 600; }
+@container tbl (width < 320px) { .table-wrap[data-stack="320"] > table { --st-block: block; --st-none: none; --st-row-pad: 10px 0; --st-cell-pad: 3px 0; --st-min: 0; --st-title: 600; } }
+@container tbl (width < 360px) { .table-wrap[data-stack="360"] > table { --st-block: block; --st-none: none; --st-row-pad: 10px 0; --st-cell-pad: 3px 0; --st-min: 0; --st-title: 600; } }
+@container tbl (width < 400px) { .table-wrap[data-stack="400"] > table { --st-block: block; --st-none: none; --st-row-pad: 10px 0; --st-cell-pad: 3px 0; --st-min: 0; --st-title: 600; } }
+@container tbl (width < 440px) { .table-wrap[data-stack="440"] > table { --st-block: block; --st-none: none; --st-row-pad: 10px 0; --st-cell-pad: 3px 0; --st-min: 0; --st-title: 600; } }
+@container tbl (width < 480px) { .table-wrap[data-stack="480"] > table { --st-block: block; --st-none: none; --st-row-pad: 10px 0; --st-cell-pad: 3px 0; --st-min: 0; --st-title: 600; } }
+@container tbl (width < 520px) { .table-wrap[data-stack="520"] > table { --st-block: block; --st-none: none; --st-row-pad: 10px 0; --st-cell-pad: 3px 0; --st-min: 0; --st-title: 600; } }
+@container tbl (width < 560px) { .table-wrap[data-stack="560"] > table { --st-block: block; --st-none: none; --st-row-pad: 10px 0; --st-cell-pad: 3px 0; --st-min: 0; --st-title: 600; } }
+@container tbl (width < 600px) { .table-wrap[data-stack="600"] > table { --st-block: block; --st-none: none; --st-row-pad: 10px 0; --st-cell-pad: 3px 0; --st-min: 0; --st-title: 600; } }
+@container tbl (width < 640px) { .table-wrap[data-stack="640"] > table { --st-block: block; --st-none: none; --st-row-pad: 10px 0; --st-cell-pad: 3px 0; --st-min: 0; --st-title: 600; } }
+@container tbl (width < 680px) { .table-wrap[data-stack="680"] > table { --st-block: block; --st-none: none; --st-row-pad: 10px 0; --st-cell-pad: 3px 0; --st-min: 0; --st-title: 600; } }
+@container tbl (width < 720px) { .table-wrap[data-stack="720"] > table { --st-block: block; --st-none: none; --st-row-pad: 10px 0; --st-cell-pad: 3px 0; --st-min: 0; --st-title: 600; } }
 /* diagrams sit on the card ground in a dotted frame, like the motion figures; each opens full size */
 .doc figure, .doc .img { margin: 8px 0 1.4em; }
 .doc .img { max-width: none; }

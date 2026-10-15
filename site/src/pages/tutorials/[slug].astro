@@ -9,6 +9,7 @@ import DocsLayout from '@/layouts/DocsLayout.astro';
 import TutorialStep from '@/components/tutorials/TutorialStep.astro';
 import { sectionOrder } from '@/lib/section-order.mjs';
 import { writtenTutorials } from '@/lib/tutorials.mjs';
+import { fitTables } from '@/components/docs/tables.mjs';
 
 export function getStaticPaths() {
   return writtenTutorials().map(({ slug }) => ({ params: { slug } }));
@@ -35,6 +36,6 @@ const headings = [
   </ol>
   <section class="t-recap" aria-labelledby="recap">
     <h2 id="recap">Recap</h2>
-    <div class="table-wrap" set:html={t.recap} />
+    <Fragment set:html={fitTables(t.recap)} />
   </section>
 </DocsLayout>

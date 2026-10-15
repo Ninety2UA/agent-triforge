@@ -10,8 +10,8 @@
 //                            lazy.
 // After render:
 //   finishBody(html, { install })  links each picture to its full-size file (a picture
-//                            alone in its paragraph becomes a <div class="img"> block), puts each table in a box
-//                            that scrolls on its own, and replaces a code block that only repeats a lead's
+//                            alone in its paragraph becomes a <div class="img"> block), fits each table to the
+//                            column (tables.mjs), and replaces a code block that only repeats a lead's
 //                            install commands (already shown in the install tabs) with a link to that tab.
 //   splitBeforeFirstH2(html)       [before, rest]: where a page slots a figure under its opening section.
 //   splitAfterH2(html, id)   [before, rest]: where a page slots a figure under one section's heading.
@@ -28,6 +28,8 @@ export const IMAGE_SIZES = '(min-width: 1280px) 600px, (min-width: 820px) 734px,
 // twice the widest box, so the build never encodes a full-size AVIF.
 export const IMAGE_WIDTHS = [400, 700, 1000, 1468, 100000];
 export const AVIF_WIDTHS = [400, 700, 1000, 1468];
+
+import { fitTables } from './tables.mjs';
 
 const IMG = /<img\b([^>]*?)\s?__ASTRO_IMAGE_="([^"]+)"([^>]*)>/g;
 // Astro's own decoding of the placeholder (content/runtime.js), and its inverse
@@ -70,12 +72,7 @@ export function finishBody(html, { install = [] } = {}) {
     return `<a class="img-full" href="${attr(img, 'src')}"><picture><source type="image/avif"${keep}>${img}</picture></a>`;
   });
   out = out.replace(/<p>\s*(<a class="img-full"[^>]*><picture>[\s\S]*?<\/picture><\/a>)\s*<\/p>/g, '<div class="img">$1</div>');
-  // a table scrolls inside its own box; the box takes keyboard focus so it can scroll without a mouse
-  out = out.replace(/<table>([\s\S]*?)<\/table>/g, (table, inner) => {
-    const head = [...(inner.match(/<thead>([\s\S]*?)<\/thead>/)?.[1] ?? '').matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)].map((m) => textOf(m[1]).trim()).filter(Boolean);
-    const name = head.length ? `Table: ${head.join(', ')}` : 'Table';
-    return `<div class="table-wrap" role="region" tabindex="0" aria-label="${name.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">${table}</div>`;
-  });
+  out = fitTables(out);
   // a code block holding every command of a lead's install tab repeats that tab: link to it instead
   if (install.length) {
     out = out.replace(/<pre\b[^>]*>[\s\S]*?<\/pre>/g, (pre) => {
