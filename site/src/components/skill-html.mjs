@@ -17,9 +17,10 @@
 //                           h3 (h1 and h2 -> h4, h3 -> h5, deeper -> h6) and drop their ids, which repeat
 //                           across prompts ("Output") and are not link targets (a persona's links land on
 //                           #<name>)
-// Both fit their tables to the column (docs/tables.mjs).
+// Both fit their tables to the column (docs/tables.mjs) and label their checklist items (docs/task-lists.mjs).
 
 import { fitTables } from './docs/tables.mjs';
+import { labelTaskItems } from './docs/task-lists.mjs';
 
 /** @param {string} text */
 export function escapeHtml(text) {
@@ -52,13 +53,13 @@ export function inlineHtml(markdown) {
 
 /** @param {string} html */
 export function skillBodyHtml(html) {
-  return fitTables(html.replace(/<(\/?)h1\b/g, '<$1h2'));
+  return labelTaskItems(fitTables(html.replace(/<(\/?)h1\b/g, '<$1h2')));
 }
 
 /** @param {string} html */
 export function promptHtml(html) {
   const level = (/** @type {string} */ d) => Math.min(6, Math.max(4, Number(d) + 2));
-  return fitTables(html
+  return labelTaskItems(fitTables(html
     .replace(/<h([1-6])\b([^>]*)>/g, (_, d, attrs) => `<h${level(d)}${attrs.replace(/\s+id="[^"]*"/, '')}>`)
-    .replace(/<\/h([1-6])>/g, (_, d) => `</h${level(d)}>`));
+    .replace(/<\/h([1-6])>/g, (_, d) => `</h${level(d)}>`)));
 }

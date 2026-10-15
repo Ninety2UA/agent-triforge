@@ -119,6 +119,10 @@
 @container tbl (width < 640px) { .table-wrap[data-stack="640"] > table { --st-block: block; --st-none: none; --st-row-pad: 10px 0; --st-cell-pad: 3px 0; --st-min: 0; --st-title: 600; } }
 @container tbl (width < 680px) { .table-wrap[data-stack="680"] > table { --st-block: block; --st-none: none; --st-row-pad: 10px 0; --st-cell-pad: 3px 0; --st-min: 0; --st-title: 600; } }
 @container tbl (width < 720px) { .table-wrap[data-stack="720"] > table { --st-block: block; --st-none: none; --st-row-pad: 10px 0; --st-cell-pad: 3px 0; --st-min: 0; --st-title: 600; } }
+/* a checklist shows its boxes in place of bullets */
+.doc ul.contains-task-list { list-style: none; padding-left: 0; }
+.doc .task-list-item label { display: block; padding-left: 27px; text-indent: -27px; }
+.doc .task-list-item input { width: 16px; height: 16px; margin: 0 8px 0 0; vertical-align: -2px; accent-color: var(--primary); }
 /* diagrams sit on the card ground in a dotted frame, like the motion figures; each opens full size */
 .doc figure, .doc .img { margin: 8px 0 1.4em; }
 .doc .img { max-width: none; }

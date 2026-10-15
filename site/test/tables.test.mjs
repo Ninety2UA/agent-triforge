@@ -54,3 +54,10 @@ test('docs.css has a container query for every stack step', () => {
   }
   assert.match(css, /\.table-wrap\[data-stack="always"\] > table \{/);
 });
+
+test('a checklist item with inline content is labelled by its own text; one holding a nested list is left alone', async () => {
+  const { labelTaskItems } = await import('../src/components/docs/task-lists.mjs');
+  const out = labelTaskItems('<ul class="contains-task-list"><li class="task-list-item"><input type="checkbox" disabled> Every task has a <code>role</code></li><li class="task-list-item"><input type="checkbox" checked disabled> Nested<ul><li>x</li></ul></li></ul>');
+  assert.match(out, /<li class="task-list-item"><label><input type="checkbox" disabled> Every task has a <code>role<\/code><\/label><\/li>/);
+  assert.match(out, /<li class="task-list-item"><input type="checkbox" checked disabled> Nested<ul>/);
+});

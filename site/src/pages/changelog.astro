@@ -13,6 +13,7 @@ import { IC } from '@/components/icons';
 import { getReleases } from '@/lib/releases.mjs';
 import { GH, VERSION } from '@/lib/site.mjs';
 import { fitTables } from '@/components/docs/tables.mjs';
+import { labelTaskItems } from '@/components/docs/task-lists.mjs';
 import '@/styles/docs.css';
 import '@/styles/changelog.css';
 
@@ -30,8 +31,9 @@ const weight = (level: number) => String((8 - level) * PAGE_WEIGHT);
 // A note is written as a page of its own: its headings move one level under the entry's h2 (h3 at the
 // least), its ids and in-note links take the entry's anchor as a prefix so they stay unique on this
 // page, and a table fits the column (fitTables).
+// Checklist items are labelled (labelTaskItems) wherever they sit in the note.
 function noteHtml(source: string, anchor: string) {
-  return source
+  const html = source
     .replace(/<(\/?)h([1-6])(?=[\s>])/g, (_, close: string, n: string) => {
       const level = Math.min(6, Math.max(3, Number(n) + 1));
       return close ? `</h${level}` : `<h${level} data-pagefind-weight="${weight(level)}"`;
@@ -39,6 +41,7 @@ function noteHtml(source: string, anchor: string) {
     .replace(/\sid="([^"]*)"/g, (_, id: string) => ` id="${anchor}-${id}"`)
     .replace(/href="#([^"]+)"/g, (_, id: string) => `href="#${anchor}-${id}"`)
     .replace(/<table>[\s\S]*?<\/table>/g, (table) => fitTables(table));
+  return labelTaskItems(html);
 }
 
 // "Oct 13, 2026" in the rows, "October 13, 2026" in the facts; the <time> elements carry the ISO date
