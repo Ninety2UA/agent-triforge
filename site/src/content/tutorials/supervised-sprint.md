@@ -508,4 +508,4 @@ The summary's "Rulings I made" list holds every decision the lead made on its ow
 | `knowledge-compounding` | The notes in `ops/solutions/` and `ops/decisions/` |
 | `verification-before-completion` | Fresh evidence behind each claim of done |
 
-[Workflows](/docs/workflows/) lists every workflow with its arguments, and [Project layout](/docs/project-layout/#customization) shows what else you can change in the roster. To run a sprint with nobody watching, read [Unattended runs](/guides/unattended-runs/).
+[Workflows](/docs/workflows/) lists every workflow with its arguments, and [Project layout](/docs/project-layout/#customization) shows what else you can change in the roster. To run a sprint with nobody watching, follow [An unattended run](/tutorials/unattended-run/).
