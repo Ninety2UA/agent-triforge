@@ -4,7 +4,9 @@
 // and the version close the page.
 import Mark from './Mark.astro';
 import CodeBlock from './CodeBlock.astro';
-import { NAV } from '@/data/nav';
+import { INSTALL_HREF, NAV } from '@/data/nav';
+import { LEAD_TABS } from '@/data/leads.mjs';
+import { PERSONAS_PAGE } from '@/lib/docs-map.mjs';
 import { INSTALL } from '@/data/content';
 import { GH, VERSION, RELEASED } from '@/lib/site.mjs';
 import { sectionPages } from '@/lib/docs.mjs';
@@ -15,7 +17,7 @@ const columns = [
     title: 'Agent Triforge',
     links: [
       ...NAV.filter((n) => ['Skills', 'Roster', 'Sprint', 'Changelog'].includes(n.label)).map((n) => ({ label: n.label, href: n.href })),
-      { label: 'Personas', href: '/skills/personas/' },
+      { label: 'Personas', href: PERSONAS_PAGE.href },
     ],
   },
   { title: 'Docs', links: sectionPages('docs').map((p) => ({ label: p.title, href: p.href })) },
@@ -24,9 +26,8 @@ const columns = [
   {
     title: 'Install',
     links: [
-      { label: 'Claude Code leads', href: '/docs/getting-started/#claude-code' },
-      { label: 'Codex leads', href: '/docs/getting-started/#codex' },
-      { label: 'Skills only: Devin, Pi', href: '/docs/getting-started/#skills-only' },
+      ...LEAD_TABS.map((t) => ({ label: t.label, href: `${INSTALL_HREF}#${t.id}` })),
+      { label: 'Skills only: Devin, Pi', href: `${INSTALL_HREF}#skills-only` },
       { label: 'GitHub', href: GH },
       { label: 'License', href: `${GH}/blob/main/LICENSE` },
     ],

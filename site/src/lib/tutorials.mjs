@@ -52,6 +52,7 @@ import { join } from 'node:path';
 
 import { REPO } from './repo.mjs';
 import { githubSlug } from './text.mjs';
+import { LEAD_TABS } from '../data/leads.mjs';
 
 export const TUTORIALS = [
   { slug: 'first-sprint', title: 'Your first sprint' },
@@ -73,10 +74,6 @@ const PARTS = [
   ['What happens', 'happens'],
   ['Why it matters', 'why'],
   ['Checkpoint', 'checkpoint'],
-];
-const LEADS = [
-  { lead: 'claude-code', label: 'Claude Code leads' },
-  { lead: 'codex', label: 'Codex leads' },
 ];
 const COMMANDS = new Set(['prompt', 'bash']);
 const FENCE_OPEN = /^(`{3,}|~{3,})\s*([\w-]*)/;
@@ -190,10 +187,10 @@ export function parseTutorial(source, file) {
     let tabs = null;
     if (leadChunks.length) {
       const labels = leadChunks.map((c) => c.heading);
-      if (labels.join('|') !== LEADS.map((l) => l.label).join('|')) {
-        fail(`${where} has the lead tabs ${labels.join(', ')}; lead tabs are ${LEADS.map((l) => l.label).join(', ')}, both, in that order`);
+      if (labels.join('|') !== LEAD_TABS.map((l) => l.label).join('|')) {
+        fail(`${where} has the lead tabs ${labels.join(', ')}; lead tabs are ${LEAD_TABS.map((l) => l.label).join(', ')}, both, in that order`);
       }
-      tabs = LEADS.map(({ lead, label }, i) => {
+      tabs = LEAD_TABS.map(({ lead, label }, i) => {
         const segs = segments(leadChunks[i].lines);
         if (!hasCommand(segs)) fail(`${where}: the "${label}" tab has no \`\`\`prompt or \`\`\`bash block to paste`);
         return { lead, label, segments: segs };

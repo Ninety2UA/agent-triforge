@@ -5,8 +5,19 @@
 // picking a lead stores it, selects it in every lead tab group and points every [data-lead-href]
 // link (the Install buttons) at that lead's install tab. Storage may throw; then the choice holds
 // for this page only.
+import { isLead, type Lead } from '@/data/leads.mjs';
+
 export const LEAD_KEY = 'triforge-lead';
-const LEADS = ['claude-code', 'codex'];
+
+/** the lead a reader chose on an earlier page, or null (none stored, or storage refused) */
+export const storedLead = (win: Window = window): Lead | null => {
+  try {
+    const lead = win.localStorage.getItem(LEAD_KEY);
+    return isLead(lead) ? lead : null;
+  } catch {
+    return null;
+  }
+};
 
 export function initTabs(doc: Document = document, win: Window = window) {
   const groups = [...doc.querySelectorAll<HTMLElement>('[data-tabs]')].map((root) => {
@@ -27,23 +38,16 @@ export function initTabs(doc: Document = document, win: Window = window) {
     return { root, tabs, panelOf, select };
   });
 
-  const stored = () => {
-    try {
-      return win.localStorage.getItem(LEAD_KEY);
-    } catch {
-      return null;
-    }
-  };
-  const applyLead = (lead: string, except?: HTMLElement) => {
-    if (!LEADS.includes(lead)) return;
+  const pointInstallLinks = (lead: Lead) =>
+    doc.querySelectorAll<HTMLAnchorElement>('[data-lead-href]').forEach((a) => a.setAttribute('href', `${a.dataset.leadHref}#${lead}`));
+  const applyLead = (lead: string | undefined, except?: HTMLElement) => {
+    if (!isLead(lead)) return;
     groups.forEach((g) => {
       if (g.root === except) return;
       const tab = g.tabs.find((t) => t.dataset.lead === lead);
       if (tab) g.select(tab);
     });
-    doc.querySelectorAll<HTMLAnchorElement>('[data-lead-href]').forEach((a) => {
-      a.setAttribute('href', `${a.dataset.leadHref}#${lead}`);
-    });
+    pointInstallLinks(lead);
   };
 
   // The panel holding the hash target: the panel itself, or a panel that contains it.
@@ -102,12 +106,11 @@ export function initTabs(doc: Document = document, win: Window = window) {
   });
 
   // a link into a tab wins over the stored lead; the stored lead still sets the Install links
-  const lead = stored();
+  const lead = storedLead(win);
   const hashed = fromHash();
-  if (lead && LEADS.includes(lead)) {
-    if (hashed) {
-      doc.querySelectorAll<HTMLAnchorElement>('[data-lead-href]').forEach((a) => a.setAttribute('href', `${a.dataset.leadHref}#${lead}`));
-    } else applyLead(lead);
+  if (lead) {
+    if (hashed) pointInstallLinks(lead);
+    else applyLead(lead);
   }
   win.addEventListener('hashchange', () => void fromHash());
 }

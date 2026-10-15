@@ -13,27 +13,24 @@ import VideoFigure from '@/components/VideoFigure.astro';
 import { LOOP, figure } from '@/data/loops';
 import { glyph } from '@/components/home/dots';
 import { badgeVariants } from '@/components/ui/badge';
-import { ROLES } from '@/data/content';
-import { ROLE_NAMES, getClis, getRoles } from '@/lib/roster.mjs';
+import { CLIS_IN_ORDER, ROLES } from '@/data/content';
+import { LEAD_TABS } from '@/data/leads.mjs';
+import { capitalize, joinWords } from '@/lib/text.mjs';
+import { ROLE_NAMES, getRoles } from '@/lib/roster.mjs';
 import { REPO, read } from '@/lib/repo.mjs';
 import { githubUrl } from '@/lib/routes.mjs';
 
-const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-const list = (words: string[]) => (words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`);
-const orList = (words: string[]) => (words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} or ${words[words.length - 1]}`);
+const list = (words: string[]) => joinWords(words);
+const orList = (words: string[]) => joinWords(words, 'or');
 
-// core members first, then the optional ones in registry order, a member that needs your consent last
-const clis = getClis()
-  .map((c, i) => ({ c, i }))
-  .sort((a, b) => Number(b.c.core) - Number(a.c.core) || Number(a.c.consent) - Number(b.c.consent) || a.i - b.i)
-  .map(({ c }) => c);
+const clis = CLIS_IN_ORDER;
 const core = clis.filter((c) => c.core);
 const optional = clis.filter((c) => !c.core);
 const leads = clis.filter((c) => c.canLead);
 const coreNames = orList(core.map((c) => c.name));
 
 const facts = (c: (typeof clis)[number]) => [
-  { k: 'Roles', v: c.roles.length === ROLE_NAMES.length ? 'Any role' : `${cap(list(c.roles))}${c.optInRoles.length ? `; ${list(c.optInRoles)} only after you opt in` : ''}` },
+  { k: 'Roles', v: c.roles.length === ROLE_NAMES.length ? 'Any role' : `${capitalize(list(c.roles))}${c.optInRoles.length ? `; ${list(c.optInRoles)} only after you opt in` : ''}` },
   { k: 'Code goes to', v: c.egress },
   { k: 'Joins', v: c.core ? 'Always. It cannot be disabled.' : c.consent ? 'Only with your consent on record' : 'When you enroll it' },
 ];
@@ -65,10 +62,7 @@ const leadExample = `[lead]\n${leadCli.replace(/^#\s*/, '').replace(/\s+#.*$/, '
 const reviewer = table('roles.reviewer');
 const promotion = table('promotion');
 
-const leadTabs = [
-  { id: 'claude-code', label: 'Claude Code leads', lead: 'claude-code' as const },
-  { id: 'codex', label: 'Codex leads', lead: 'codex' as const },
-];
+const leadTabs = LEAD_TABS;
 ---
 <Base title="Roster · Agent Triforge" description="Which coding agent builds, reviews, tests, analyzes and documents, who covers for a missing one, which provider sees your code, and how to change ops/roster.toml." search={{ section: 'Roster', title: 'Roster' }}>
   <section class="c-hero" aria-labelledby="roster-h">

@@ -26,6 +26,20 @@
 //   parseToml(text, where)         the TOML the repo's manifests use: [a.b] tables and one-line
 //                                  key = "string" | 'literal' | true | false | integer | ["a", "b"].
 
+/** @param {string} text  the text with its first letter in upper case */
+export const capitalize = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/**
+ * "a, b and c" ("or" with conjunction "or"); one word alone; '' for none
+ * @param {string[]} words
+ * @param {string} [conjunction]
+ */
+export const joinWords = (words, conjunction = 'and') =>
+  words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} ${conjunction} ${words[words.length - 1]}`;
+
+/** @param {string} text  the text as a literal inside a RegExp */
+export const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const FENCE = /^\s*(`{3,}|~{3,})/;
 const HEADING = /^(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/;
 

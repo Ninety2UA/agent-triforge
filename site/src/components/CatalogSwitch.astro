@@ -4,6 +4,7 @@
 // shows it, and the current one carries aria-current="page".
 import { tabsListVariants, tabsTrigger } from './ui/tabs';
 import Claim from './Claim.astro';
+import { PERSONAS_PAGE } from '@/lib/docs-map.mjs';
 
 interface Props {
   current: 'skills' | 'personas';
@@ -11,7 +12,7 @@ interface Props {
 const { current } = Astro.props;
 const links = [
   { key: 'skills', label: 'Skills', href: '/skills/', kind: 'skills' },
-  { key: 'personas', label: 'Personas', href: '/skills/personas/', kind: 'personas' },
+  { key: 'personas', label: 'Personas', href: PERSONAS_PAGE.href, kind: 'personas' },
 ] as const;
 ---
 <nav class="cat-switch" aria-label="Skills and personas" data-pagefind-ignore>

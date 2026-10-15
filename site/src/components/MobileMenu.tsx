@@ -3,7 +3,8 @@ import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/s
 import { buttonVariants } from '@/components/ui/button';
 import type { NavItem } from '@/data/nav';
 import { Icon } from './Icon';
-import { LEAD_KEY } from '@/scripts/tabs';
+import { storedLead } from '@/scripts/tabs';
+import type { Lead } from '@/data/leads.mjs';
 import { requestSearch } from './search-event';
 
 interface Props {
@@ -20,16 +21,11 @@ export default function MobileMenu({ items, install, repo }: Props) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLAnchorElement>(null);
   const searchAfterClose = useRef(false);
-  const [lead, setLead] = useState<string | null>(null);
+  const [lead, setLead] = useState<Lead | null>(null);
 
   // the Install link follows the stored lead, as the header's does
   useEffect(() => {
-    if (!open) return;
-    try {
-      setLead(localStorage.getItem(LEAD_KEY));
-    } catch {
-      setLead(null);
-    }
+    if (open) setLead(storedLead());
   }, [open]);
 
   // the menu belongs to the narrow header; close it when the window widens past it
@@ -74,7 +70,7 @@ export default function MobileMenu({ items, install, repo }: Props) {
           </ul>
         </nav>
         <div className="mm-actions">
-          <a className={buttonVariants({ variant: 'default' })} href={lead === 'claude-code' || lead === 'codex' ? `${install}#${lead}` : install}>Install</a>
+          <a className={buttonVariants({ variant: 'default' })} href={lead ? `${install}#${lead}` : install}>Install</a>
           <a className={buttonVariants({ variant: 'outline' })} href={repo}><Icon name="github" />GitHub</a>
           <button
             type="button"

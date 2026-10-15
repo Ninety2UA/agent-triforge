@@ -12,6 +12,9 @@ import CodeBlock from '@/components/CodeBlock.astro';
 import VideoFigure from '@/components/VideoFigure.astro';
 import { LOOP, figure } from '@/data/loops';
 import { PERSONAS } from '@/data/content';
+import { LEAD_TABS } from '@/data/leads.mjs';
+import { PERSONAS_PAGE } from '@/lib/docs-map.mjs';
+import { capitalize } from '@/lib/text.mjs';
 import { getRoles } from '@/lib/roster.mjs';
 import { completionChecklist, convergenceModes, inlineHtml, qualityGates, sprintPhases } from '@/lib/sprint.mjs';
 
@@ -90,17 +93,14 @@ const persona = (name: string) => {
 const LANES: { name: string; what: string; href?: string }[] = [
   { name: 'Antigravity', what: 'Architecture and design.' },
   { name: 'Codex', what: 'Logic, security and tests.' },
-  ...['security-sentinel', 'performance-oracle', 'code-simplicity-reviewer'].map((n) => ({ name: n, what: persona(n).what, href: `/skills/personas/#${persona(n).anchor}` })),
+  ...['security-sentinel', 'performance-oracle', 'code-simplicity-reviewer'].map((n) => ({ name: n, what: persona(n).what, href: `${PERSONAS_PAGE.href}#${persona(n).anchor}` })),
 ];
 const synthesizer = persona('findings-synthesizer');
 const modes = convergenceModes();
 const gates = qualityGates();
 const checklist = completionChecklist();
 
-const leadTabs = [
-  { id: 'claude-code', label: 'Claude Code leads', lead: 'claude-code' as const },
-  { id: 'codex', label: 'Codex leads', lead: 'codex' as const },
-];
+const leadTabs = LEAD_TABS;
 const run = (prefix: string) => [`${prefix}at-plan <goal>`, `${prefix}at-build`, `${prefix}at-review`, `${prefix}at-test`, `${prefix}at-wrap`];
 ---
 <Base title="Sprint · Agent Triforge" description="What happens in each phase of a sprint, from the knowledge search to the completion marker: the agents, the files, the review lanes, the convergence modes and the quality gates." search={{ section: 'Sprint', title: 'Sprint' }}>
@@ -148,7 +148,7 @@ const run = (prefix: string) => [`${prefix}at-plan <goal>`, `${prefix}at-build`,
               </div>
               <dl>
                 <dt>Agents</dt><dd set:html={p.agentsHtml} />
-                {p.roles.map((r) => <Fragment><dt>{r.role.charAt(0).toUpperCase() + r.role.slice(1)}</dt><dd>{r.chain.join(', then ')}</dd></Fragment>)}
+                {p.roles.map((r) => <Fragment><dt>{capitalize(r.role)}</dt><dd>{r.chain.join(', then ')}</dd></Fragment>)}
                 <dt>{p.notes.files.k}</dt><dd>{p.notes.files.v.map((f) => <code>{f}</code>)}</dd>
                 <dt>Lead workflow</dt><dd set:html={p.workflowsHtml} />
               </dl>
@@ -175,7 +175,7 @@ const run = (prefix: string) => [`${prefix}at-plan <goal>`, `${prefix}at-build`,
               </li>
             ))}
           </ul>
-          <p class="c-after">Then <a href={`/skills/personas/#${synthesizer.anchor}`}><code>findings-synthesizer</code></a> {synthesizer.what.charAt(0).toLowerCase() + synthesizer.what.slice(1)}</p>
+          <p class="c-after">Then <a href={`${PERSONAS_PAGE.href}#${synthesizer.anchor}`}><code>findings-synthesizer</code></a> {synthesizer.what.charAt(0).toLowerCase() + synthesizer.what.slice(1)}</p>
         </div>
         <div class="c-side">
           <VideoFigure n={1} {...figure(LOOP.review)} />

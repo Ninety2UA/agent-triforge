@@ -12,6 +12,7 @@ import { readDocPagesList } from '../src/lib/sources.mjs';
 import { describe, finishBody, splitAfterH2, splitBeforeFirstH2, withImageOptions } from '../src/components/docs/body.mjs';
 import { runClientScript } from './client-script.mjs';
 import { page } from './dom.mjs';
+import * as leads from '../src/data/leads.mjs';
 
 const DIST = join(SITE, 'dist');
 const skip = !existsSync(join(DIST, 'index.html')) && 'site/dist is not built (run npm run build in site/)';
@@ -133,7 +134,7 @@ test('/docs/getting-started/#codex opens the Codex tab', { skip }, () => {
   const body = html('/docs/getting-started/').match(/<body>([\s\S]*)<\/body>/)[1].replace(/<script[\s\S]*?<\/script>/g, '');
   for (const [hash, id] of [['#codex', 'codex'], ['#claude-code', 'claude-code'], ['#skills-only', 'skills-only']]) {
     const p = page(body, { hash });
-    runClientScript('scripts/tabs.ts').initTabs(p.document, p.window);
+    runClientScript('scripts/tabs.ts', { imports: { '@/data/leads.mjs': leads } }).initTabs(p.document, p.window);
     for (const other of ['claude-code', 'codex', 'skills-only']) {
       assert.equal(p.document.getElementById(other).hidden, other !== id, `${hash}: panel ${other}`);
     }

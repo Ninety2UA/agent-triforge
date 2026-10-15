@@ -9,6 +9,7 @@ import { getClis, getRoles } from '@/lib/roster.mjs';
 import { getSkills } from '@/lib/skills.mjs';
 import { getPersonas } from '@/lib/personas.mjs';
 import { numberWord } from '@/lib/numbers.mjs';
+import { capitalize, joinWords } from '@/lib/text.mjs';
 
 export { GH } from '@/lib/site.mjs';
 
@@ -22,14 +23,16 @@ const CLI_WORDS: Record<string, string> = {
   antigravity: 'Maps the codebase and writes docs.',
   codex: 'Reviews and tests. Can lead.',
 };
-const list = (words: string[]) => (words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} or ${words[words.length - 1]}`);
-const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const list = (words: string[]) => joinWords(words, 'or');
 
-// core members first, then the optional ones in registry order, with a member that needs your consent last
-const ordered = getClis().map((c, i) => ({ c, i })).sort((a, b) => Number(b.c.core) - Number(a.c.core) || Number(a.c.consent) - Number(b.c.consent) || a.i - b.i).map(({ c }) => c);
-export const CLIS = ordered.map((c) => {
+/** the roster's CLIs: core members first, then the optional ones in registry order, with a member that needs your consent last */
+export const CLIS_IN_ORDER = getClis()
+  .map((c, i) => ({ c, i }))
+  .sort((a, b) => Number(b.c.core) - Number(a.c.core) || Number(a.c.consent) - Number(b.c.consent) || a.i - b.i)
+  .map(({ c }) => c);
+export const CLIS = CLIS_IN_ORDER.map((c) => {
   const via = c.egress.match(/\b(?:through|via) ([A-Z][\w.]+)/)?.[1];
-  const roles = c.roles.length === 5 ? 'Any role.' : `${cap(list(c.roles))}${c.consent ? ', after your consent' : ''}.`;
+  const roles = c.roles.length === 5 ? 'Any role.' : `${capitalize(list(c.roles))}${c.consent ? ', after your consent' : ''}.`;
   return { id: c.id, name: c.name, core: c.core, roles: CLI_WORDS[c.id] ?? roles, provider: via ? `${c.provider} via ${via}` : c.provider };
 });
 
@@ -43,7 +46,7 @@ const ROLE_WORDS: Record<string, string> = {
 };
 export const ROLES = getRoles().map((r) => ({
   role: r.role,
-  does: ROLE_WORDS[r.role] ?? cap(r.role),
+  does: ROLE_WORDS[r.role] ?? capitalize(r.role),
   cli: r.cliName,
   fallback: r.fallbacks.map((f) => f.cliName).join(', then '),
 }));

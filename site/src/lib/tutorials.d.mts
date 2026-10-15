@@ -1,5 +1,6 @@
 import type { SectionPage } from './types';
-export type Lead = 'claude-code' | 'codex';
+import type { Lead } from '../data/leads.mjs';
+export type { Lead };
 export type TutorialSegment = { kind: 'md'; md: string } | { kind: 'cmd'; lang: 'prompt' | 'bash'; text: string };
 export interface TutorialStep {
   title: string;

@@ -1,13 +1,14 @@
 ---
 // The lead switch and the install tabs: Tabs with a copy control per command block, an optional note
 // (`backticks` mark code) and an optional real file fragment. Lead tabs share the stored lead.
+import type { Lead } from '@/data/leads.mjs';
 import Tabs from './Tabs.astro';
 import CodeBlock from './CodeBlock.astro';
 
 export interface InstallTab {
   id: string;
   label: string;
-  lead?: 'claude-code' | 'codex';
+  lead?: Lead;
   blocks: { lines: string[]; label: string }[];
   note?: string;
   art?: { label: string; text: string };

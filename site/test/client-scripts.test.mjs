@@ -5,10 +5,11 @@ import assert from 'node:assert/strict';
 
 import { fakeTarget, runClientScript } from './client-script.mjs';
 import { page } from './dom.mjs';
+import * as leads from '../src/data/leads.mjs';
 
 // ---- tabs (site/src/scripts/tabs.ts) ----
 
-const { initTabs, LEAD_KEY } = runClientScript('scripts/tabs.ts');
+const { initTabs, LEAD_KEY } = runClientScript('scripts/tabs.ts', { imports: { '@/data/leads.mjs': leads } });
 
 // The markup Tabs.astro renders: one tab list, one panel per item, the first selected.
 // hashTarget groups use the bare item id as the panel id, so #codex opens the Codex tab.

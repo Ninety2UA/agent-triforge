@@ -15,11 +15,11 @@ import { glyph } from './dots';
     <div class="roster">
       <div data-rv>
         <h3 class="crew-h">Always on the team</h3>
-        <ul class="crew">{CLIS.slice(0, 3).map((c) => (
+        <ul class="crew">{CLIS.filter((c) => c.core).map((c) => (
           <li class="core"><svg class="cl" viewBox="0 0 30 30" aria-hidden="true">{glyph(false).map((g) => <circle cx={g.cx} cy={g.cy} r={g.r} />)}</svg><div><b>{c.name}</b><span>{c.roles}</span><span>Code goes to {c.provider}</span></div></li>
         ))}</ul>
         <h3 class="crew-h">Join when you add them</h3>
-        <ul class="crew">{CLIS.slice(3).map((c) => (
+        <ul class="crew">{CLIS.filter((c) => !c.core).map((c) => (
           <li class="opt"><svg class="cl" viewBox="0 0 30 30" aria-hidden="true">{glyph(true).map((g) => <circle cx={g.cx} cy={g.cy} r={g.r} />)}</svg><div><b>{c.name}</b><span>{c.roles}</span><span>Code goes to {c.provider}</span></div></li>
         ))}</ul>
       </div>

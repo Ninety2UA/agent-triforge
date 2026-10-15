@@ -6,9 +6,9 @@
 import Tabs from '../Tabs.astro';
 import CodeBlock from '../CodeBlock.astro';
 import { keepCodeWords } from '../docs/tables.mjs';
+import { LEAD_NAMES, type Lead } from '@/data/leads.mjs';
 
 type Segment = { kind: 'md'; html: string } | { kind: 'cmd'; lang: 'prompt' | 'bash'; text: string };
-type Lead = 'claude-code' | 'codex';
 interface Props {
   n: number;
   step: {
@@ -29,7 +29,6 @@ const WHERE: Record<'common' | Lead, string> = {
   'claude-code': 'Type in Claude Code',
   codex: 'Type in Codex',
 };
-const LEAD_NAME: Record<Lead, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
 // Each command gets a caption and a copy label that names the step (and the lead, inside a tab).
 const commands = (segments: Segment[], where: 'common' | Lead) => {
   const count = segments.filter((s) => s.kind === 'cmd').length;
@@ -39,7 +38,7 @@ const commands = (segments: Segment[], where: 'common' | Lead) => {
     k += 1;
     const shell = s.lang === 'bash';
     const what = shell ? 'commands' : 'prompt';
-    const lead = where === 'common' ? '' : ` ${LEAD_NAME[where]}`;
+    const lead = where === 'common' ? '' : ` ${LEAD_NAMES[where]}`;
     return {
       ...s,
       caption: shell ? 'Run in a terminal' : WHERE[where],

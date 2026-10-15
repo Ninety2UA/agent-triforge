@@ -1,3 +1,4 @@
+import type { Lead } from '../data/leads.mjs';
 export interface Invocation {
   harness: string;
   /** the command with `name` standing for the skill */
@@ -10,7 +11,7 @@ export interface PortableForm {
   id: string;
   /** the CLI's registry name */
   name: string;
-  lead: 'claude-code' | 'codex' | null;
+  lead: Lead | null;
   form: string;
   note: string;
 }

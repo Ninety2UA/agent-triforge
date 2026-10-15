@@ -28,6 +28,7 @@ import { readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { LEADS } from './data/leads.mjs';
 import { docPages } from './lib/docs.mjs';
 import { getPersonas } from './lib/personas.mjs';
 import { getReleases } from './lib/releases.mjs';
@@ -198,7 +199,7 @@ export const tutorials = defineCollection({
         id: z.string(),
         skills: z.array(z.string()),
         common: z.array(segment),
-        tabs: z.array(z.object({ lead: z.enum(['claude-code', 'codex']), label: z.string(), segments: z.array(segment) })).nullable(),
+        tabs: z.array(z.object({ lead: z.enum(LEADS), label: z.string(), segments: z.array(segment) })).nullable(),
         happens: z.string(),
         why: z.string(),
         checkpoint: z.string(),

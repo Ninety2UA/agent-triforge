@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { SITE } from '../src/lib/repo.mjs';
 import { runClientScript } from './client-script.mjs';
 import { page } from './dom.mjs';
+import * as leads from '../src/data/leads.mjs';
 
 const file = join(SITE, 'dist', 'index.html');
 const skip = !existsSync(file) && 'site/dist is not built (run npm run build in site/)';
@@ -39,7 +40,7 @@ test('the film lists its chapters as labelled buttons', { skip }, () => {
 test('switching the hero to Codex makes the hero Install link end in #codex', { skip }, () => {
   const body = html().match(/<body>([\s\S]*)<\/body>/)[1].replace(/<script[\s\S]*?<\/script>/g, '');
   const p = page(body);
-  const { initTabs } = runClientScript('scripts/tabs.ts');
+  const { initTabs } = runClientScript('scripts/tabs.ts', { imports: { '@/data/leads.mjs': leads } });
   initTabs(p.document, p.window);
   const install = () => p.document.querySelector('.hero [data-lead-href]').getAttribute('href');
   assert.equal(install(), '/docs/getting-started/');

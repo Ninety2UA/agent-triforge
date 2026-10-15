@@ -16,6 +16,8 @@ import { inlineHtml, skillBodyHtml } from '@/components/skill-html.mjs';
 import { getSkills } from '@/lib/skills.mjs';
 import { invocation, portableInvocations } from '@/lib/portable.mjs';
 import { githubUrl } from '@/lib/routes.mjs';
+import { capitalize } from '@/lib/text.mjs';
+import { LEAD_NAMES } from '@/data/leads.mjs';
 import { exists, REPO } from '@/lib/repo.mjs';
 import '@/styles/docs.css';
 import '@/styles/skills.css';
@@ -38,11 +40,11 @@ const references = exists(REPO, `skills/${skill.name}/references`) ? githubUrl(`
 // How to run it: the two leads for a workflow, every CLI docs/skills.md lists for a portable skill.
 const runs = skill.lead
   ? [
-      { id: 'claude-code', label: 'Claude Code', lead: 'claude-code' as const, line: `/${skill.name}`, note: '' },
-      { id: 'codex', label: 'Codex', lead: 'codex' as const, line: `$agent-triforge:${skill.name}`, note: '' },
+      { id: 'claude-code', label: LEAD_NAMES['claude-code'], lead: 'claude-code' as const, line: `/${skill.name}`, note: '' },
+      { id: 'codex', label: LEAD_NAMES.codex, lead: 'codex' as const, line: `$agent-triforge:${skill.name}`, note: '' },
     ]
   : portableInvocations().map((f) => ({ id: f.id, label: f.name, lead: f.lead ?? undefined, line: invocation(f.form, skill.name), note: f.note }));
-const sentence = (md: string) => inlineHtml(md.charAt(0).toUpperCase() + md.slice(1) + '.');
+const sentence = (md: string) => inlineHtml(capitalize(md) + '.');
 
 const relatedTitle = skill.lead ? `Also in ${skill.group.label}` : 'Other portable skills';
 const contents = [

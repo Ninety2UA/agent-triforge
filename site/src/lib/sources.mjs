@@ -29,7 +29,7 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { exists, read } from './repo.mjs';
-import { githubSlug, parseHeadings, parseTables } from './text.mjs';
+import { capitalize, githubSlug, parseHeadings, parseTables } from './text.mjs';
 
 export function listSkillFolders(root) {
   return readdirSync(join(root, 'skills'), { withFileTypes: true })
@@ -100,7 +100,7 @@ export function parseReleaseHeader(line, file) {
   }
   const versioned = m[2].match(/^v(\d+\.\d+\.\d+): (.*)$/);
   const title = (versioned ? versioned[2] : m[2]).trim();
-  return { date, version: versioned ? versioned[1] : null, title: title.charAt(0).toUpperCase() + title.slice(1) };
+  return { date, version: versioned ? versioned[1] : null, title: capitalize(title) };
 }
 
 export function compareVersions(a, b) {

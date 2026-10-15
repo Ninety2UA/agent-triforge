@@ -12,13 +12,14 @@
 // With `hashTarget`, each panel's id is the bare item id, so a link to #<item id> opens that tab (the
 // footer's lead links point at /docs/getting-started/#claude-code). Only one tab group per page may use
 // it. `lead` marks a lead tab: picking one is stored and applied to every lead tab group on every page.
+import type { Lead } from '@/data/leads.mjs';
 import { cn } from 'cn';
 import { tabsContent, tabsListVariants, tabsRoot, tabsTrigger } from './ui/tabs';
 
 interface Item {
   id: string;
   label: string;
-  lead?: 'claude-code' | 'codex';
+  lead?: Lead;
 }
 interface Props {
   id: string;

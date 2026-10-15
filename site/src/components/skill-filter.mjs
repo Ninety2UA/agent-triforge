@@ -31,6 +31,7 @@
 //                             key(name) -> true when it took the key (Escape with a search typed) }
 
 import { isTyping } from './search/shortcut.mjs';
+import { escapeRegExp } from '../lib/text.mjs';
 
 export const ALL = 'all';
 
@@ -62,7 +63,7 @@ export function matcher({ q, group }) {
     .map((word) => word.replace(/^[^a-z0-9]+/, ''))
     .filter(Boolean)
     // from the start of a word: "cut" finds "cutting", not "execution"
-    .map((word) => new RegExp(`(?:^|[^a-z0-9])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    .map((word) => new RegExp(`(?:^|[^a-z0-9])${escapeRegExp(word)}`));
   return (card) => (group === ALL || card.group === group) && words.every((re) => re.test(card.text));
 }
 

@@ -5,13 +5,15 @@ import { INSTALL, SKILLS_ONLY } from './content';
 import { getCounts } from '@/lib/counts.mjs';
 import { numberWord } from '@/lib/numbers.mjs';
 import type { InstallTab } from '@/components/InstallTabs.astro';
+import { LEAD_TABS } from './leads.mjs';
+import { escapeRegExp } from '@/lib/text.mjs';
 
 export const H1 = 'Put Claude Code, Codex and Antigravity on one team.';
 export const LEDE = 'One agent leads. The others build, review and test, and nothing merges until a different agent has checked it.';
 
 export const heroTabs: InstallTab[] = [
-  { id: 'claude-code', label: 'Claude Code leads', lead: 'claude-code', blocks: [{ lines: INSTALL.claude, label: 'Copy the Claude Code install commands' }] },
-  { id: 'codex', label: 'Codex leads', lead: 'codex', blocks: [{ lines: INSTALL.codex, label: 'Copy the Codex install commands' }] },
+  { ...LEAD_TABS[0], blocks: [{ lines: INSTALL.claude, label: 'Copy the Claude Code install commands' }] },
+  { ...LEAD_TABS[1], blocks: [{ lines: INSTALL.codex, label: 'Copy the Codex install commands' }] },
 ];
 
 export const installTabs: InstallTab[] = [
@@ -214,6 +216,6 @@ const CODE_TOKENS = ['learnings-researcher', 'plan-checker', 'integration-verifi
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 export const withCode = (s: string) => {
   let out = esc(s);
-  for (const t of CODE_TOKENS) out = out.replace(new RegExp(`(?<![\\w/.-])${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'g'), `<code>${t}</code>`);
+  for (const t of CODE_TOKENS) out = out.replace(new RegExp(`(?<![\\w/.-])${escapeRegExp(t)}(?![\\w-])`, 'g'), `<code>${t}</code>`);
   return out;
 };
