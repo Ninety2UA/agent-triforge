@@ -237,7 +237,7 @@ Follow <a href="docs/upgrading.md">Upgrading from 3.x</a>: the slash commands be
 
 ## Contributing
 
-Pull requests to `main` and the `release/` branches run the gates in [`.github/workflows/gates.yml`](.github/workflows/gates.yml) on macOS: the shell syntax check, both validators and their self-tests, and the SELF probe rows. [`AGENTS.md`](AGENTS.md) lists every check to run before you open one, and the [PR template](.github/PULL_REQUEST_TEMPLATE.md) asks for an evidence table and the validator results.
+Pull requests to `main` and the `release/` branches run the gates in [`.github/workflows/gates.yml`](.github/workflows/gates.yml) on macOS: the shell syntax check, both validators and their self-tests, and the SELF probe rows. The SELF rows take about 30 minutes, so they are skipped when a pull request changes only the website, `docs/`, the README or decision and solution notes; the workflow's header lists the paths. [`AGENTS.md`](AGENTS.md) lists every check to run before you open one, and the [PR template](.github/PULL_REQUEST_TEMPLATE.md) asks for an evidence table and the validator results.
 
 ### Development (for contributors)
 
