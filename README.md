@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/hero-forge.svg" alt="Agent Triforge banner. Eight forge lights take turns striking a glowing bar on an anvil. The core trio strikes first from the inner ring: Claude Code in orange, Antigravity in blue and Codex in green. Claude Code or Codex leads, and the other members build, review and test. The five optional members follow from the outer ring. OpenCode in purple, Kimi in pink and Cursor in teal join the builder pool. Grok Build in silver builds, reviews or analyzes, and Devin in gold reviews or analyzes." width="100%">
+  <img src="docs/images/readme-hero.gif" alt="Agent Triforge: the mark and the name, and the line &quot;One agent leads. The others build, review and test, and nothing merges until a different agent has checked it.&quot; Beside it, tasks fill their own workspaces one after another, and each finished task drops onto the shared branch." width="100%">
 </p>
 
 <p align="center">

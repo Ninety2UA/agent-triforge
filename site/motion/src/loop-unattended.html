@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1200, height=750" />
+<title>Unattended loop</title>
+<script src="assets/gsap.min.js"></script>
+<style>
+/*{{DS_CSS}}*/
+html, body { width: 1200px; height: 750px; }
+.ctr { text-align: center; width: 120px; }
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="8" data-width="1200" data-height="750">
+  <div id="stage" class="clip" data-start="0" data-duration="8" data-track-index="0"><canvas id="cv"></canvas><div id="type"></div></div>
+</div>
+<script>
+//{{DS_JS}}
+</script>
+<script>
+(function () {
+  // Shown at about 560 px wide: smallest text 24 px, main labels 30 px and up.
+  // Each fresh lead session assembles large in front, closes tasks, then
+  // recedes into its iteration slot while the next one assembles.
+  const H = HT;
+  const { disc, block, join, track, renderer, tx, seg, ringOf, movers, path, bez, PINK, INK, RING, RINGM, EMPTY } = H;
+  function build() {
+    const D = 8;
+    const tl = gsap.timeline({ paused: true });
+    const R = renderer(document.getElementById("cv"), 1200, 750);
+    const T = document.getElementById("type");
+    const E = [];
+
+    // ---- layout ----
+    const SC = { x: 300, y: 430 }, SR = 132;                 // the session in front
+    const slotX = [720, 810, 900, 990, 1080], slotY = 200;    // iteration slots
+    const LG = { x: 716, y: 346 };                            // its records
+    const taskY = 492, taskX = Array.from({ length: 12 }, (_, k) => 720 + k * 36);
+    const MK = { x: 732, y: 590 };                            // the marker
+    // [assemble, recede]; iteration 1 is already in front at frame 0, and the
+    // next run's iteration 1 assembles during the reset so the loop closes
+    const runs = [[-1, 1.1], [1.6, 3.0], [3.5, 4.9]];
+    const NEXT = 7.0;
+    const checks = [NEXT - 0.3, 1.3, 3.2];                   // integrity scans (iteration 1's comes before the loop point)
+
+    const slots = join(...slotX.map((x) => ringOf(x, slotY, 26, { pitch: 10, r: 1.8, c: RINGM })));
+    const ledger = block(LG.x, LG.y, 13, 3, { pitch: 12, r: 3.0 });
+    const fixed = [slots, ledger];
+    E.push({ emit: (t, out) => fixed.forEach((f) => { for (let i = 0; i < f.n; i++) out.push(f.x[i], f.y[i], f.r[i], f.c[i]); }) });
+
+    // the integrity check: a scan passes over the ledger before each session
+    E.push({ emit(t, out) {
+      checks.forEach((t0) => {
+        const u = (t - t0) / 0.32;
+        if (u < 0 || u > 1) return;
+        const x = LG.x - 10 + 170 * (1 - Math.pow(1 - u, 3)), g = Math.min(1, (1 - u) / 0.15, u / 0.08);
+        for (let j = -1; j <= 3; j++) out.push(x, LG.y + j * 12, 3.4 * g, PINK);
+      });
+    } });
+    const mark = (c) => disc(LG.x + 190, LG.y + 12, 10, { pitch: 100, rmax: 9, flat: true, c });
+    const flip = (t, c) => ({ t, f: mark(c), mode: "index", dur: 0.2, sweep: 0, jitter: 0, shrink: 0 });
+    E.push(track([{ t: 0, f: mark(INK) }, flip(1.15, RINGM), flip(1.6, INK), flip(3.05, RINGM), flip(3.5, INK), flip(6.3, RINGM), flip(NEXT - 0.02, INK)]));
+
+    // sessions: dots leave the command line, assemble large and pink, then recede
+    const src = seg(70, 118, 720, 118, { pitch: 9, r: 1.5, c: INK });
+    const big = disc(SC.x, SC.y, SR, { pitch: 12, rmax: 5.4, c: INK });
+    const small = (k) => disc(slotX[k], slotY, 20, { pitch: 7, rmax: 2.8, c: INK });
+    const assemble = (a) => [{ t: a, f: src, dur: 0.1, sweep: 0.12, jitter: 0 }, { t: a + 0.08, f: big, dur: 0.5, sweep: 0.15, jitter: 0.08, dir: [0, 1], shrink: 0.5 }];
+    const recede = (b, k) => ({ t: b, f: small(k), dur: 0.55, sweep: 0.15, jitter: 0.08, dir: [1, -1], shrink: 0.2 });
+    E.push(track([{ t: 0, f: big }, recede(runs[0][1], 0), { t: 6.3, f: EMPTY, dur: 0.3, sweep: 0.1, jitter: 0.05 }, ...assemble(NEXT)]));
+    [1, 2].forEach((k) => E.push(track([{ t: 0, f: EMPTY }, ...assemble(runs[k][0]), recede(runs[k][1], k), { t: 6.36 + k * 0.06, f: EMPTY, dur: 0.3, sweep: 0.1, jitter: 0.05 }])));
+    // tasks in ops/TASKS.md: each session closes some; a dot leaves the session for each
+    const closeAt = [0.5, 0.63, 0.76, 0.89, 2.2, 2.33, 2.46, 2.59, 2.72, 4.05, 4.2, 4.35];
+    taskX.forEach((x, k) => E.push(track([
+      { t: 0, f: disc(x, taskY, 10, { pitch: 100, rmax: 8, flat: true, c: RING }) },
+      { t: closeAt[k], f: disc(x, taskY, 10, { pitch: 100, rmax: 8, flat: true, c: INK }), mode: "index", dur: 0.2, sweep: 0, jitter: 0, shrink: 0 },
+      { t: 6.3 + k * 0.03, f: disc(x, taskY, 10, { pitch: 100, rmax: 8, flat: true, c: RING }), mode: "index", dur: 0.3, sweep: 0, jitter: 0, shrink: 0 },
+    ])));
+    E.push(movers(closeAt.map((t, k) => ({ p: path(bez([SC.x + 90, SC.y - 60 + (k % 4) * 30], [520, 420], [taskX[k] - 80, taskY - 60], [taskX[k], taskY], 30)), t0: t - 0.42, d: 0.42, r: 5, c: INK }))));
+    // iteration 3 creates the marker last
+    E.push(track([
+      { t: 0, f: disc(MK.x, MK.y, 13, { pitch: 100, rmax: 12, flat: true, c: RINGM }) },
+      { t: 4.62, f: disc(MK.x, MK.y, 13, { pitch: 100, rmax: 12, flat: true, c: PINK }), mode: "index", dur: 0.3, sweep: 0, jitter: 0, shrink: 0 },
+      { t: 6.3, f: disc(MK.x, MK.y, 13, { pitch: 100, rmax: 12, flat: true, c: RINGM }), mode: "index", dur: 0.35, sweep: 0, jitter: 0, shrink: 0 },
+    ]));
+    E.push(movers([{ p: path(bez([SC.x + 110, SC.y + 40], [520, 600], [640, MK.y], [MK.x - 4, MK.y], 30)), t0: 4.25, d: 0.4, r: 9, c: PINK }]));
+    // the notification
+    E.push(track([{ t: 0, f: EMPTY },
+      { t: 5.3, f: disc(MK.x, MK.y + 60, 8, { pitch: 100, rmax: 8, flat: true, c: PINK }), dur: 0.25, sweep: 0, jitter: 0 },
+      { t: 6.3, f: EMPTY, dur: 0.25, sweep: 0, jitter: 0 }]));
+    H.drive(tl, D, (t) => R.draw(t, E));
+
+    // ---- type ----
+    slotX.forEach((x, k) => tx(T, x - 60, slotY + 32, `${k + 1}`, "h2 ctr", 30));
+    tx(T, slotX[0] - 30, slotY - 74, "sessions, up to five", "lab mut", 28);
+    tx(T, LG.x - 2, LG.y - 46, "its records", "lab mut", 28);
+    tx(T, LG.x + 214, LG.y - 4, "checked", "lab", 30);
+    tx(T, taskX[0] - 12, taskY - 52, "tasks", "lab mut", 28);
+    tx(T, MK.x + 28, MK.y - 17, "sprint finished", "lab", 30);
+    const iter = [1, 2, 3, 1].map((n) => tx(T, 100, 234, `Session ${n} of 5`, "h1", 44));
+    const fresh = tx(T, 180, 590, "fresh lead session", "lab", 30);
+    gsap.set(iter.slice(1), { opacity: 0 });
+    tl.to(iter[0], { opacity: 0, duration: 0.2, ease: "power2.in" }, runs[0][1]);
+    [1, 2].forEach((k) => {
+      tl.to(iter[k], { opacity: 1, duration: 0.25, ease: "power2.out" }, runs[k][0] + 0.6);
+      tl.to(iter[k], { opacity: 0, duration: 0.2, ease: "power2.in" }, runs[k][1]);
+    });
+    tl.to(iter[3], { opacity: 1, duration: 0.25, ease: "power2.out" }, NEXT + 0.5);
+    tl.to(fresh, { opacity: 0, duration: 0.3 }, 4.95);
+    tl.to(fresh, { opacity: 1, duration: 0.3 }, NEXT + 0.25);
+    const note = [tx(T, MK.x + 28, MK.y + 42, "Agent Triforge", "h2", 30), tx(T, MK.x + 28, MK.y + 78, "Sprint complete", "lab", 28)];
+    gsap.set(note, { opacity: 0 });
+    tl.set(note, { y: 20 }, 0);
+    tl.to(note, { opacity: 1, y: 0, duration: 0.5, ease: "expo.out", stagger: 0.06 }, 5.3);
+    tl.to(note, { opacity: 0, duration: 0.3, ease: "power2.in" }, 6.3);
+
+    // ---- captions ----
+    const caps = [
+      "It runs on its own, one fresh session at a time",
+      "Each session first checks its records",
+      "It stops once the sprint is finished",
+      "Then it lets you know",
+    ].map((c) => tx(T, 64, 44, c, "h1", 44));
+    gsap.set(caps.slice(1), { opacity: 0 });
+    const cs = (a, b, t) => { H.outLeft(tl, caps[a], t, { dx: 70 }); H.inLeft(tl, caps[b], t + 0.28, { dx: 70 }); };
+    cs(0, 1, 1.15);
+    cs(1, 2, 4.4);
+    cs(2, 3, 5.15);
+    cs(3, 0, 6.3);
+    window.__timelines["main"] = tl;
+  }
+  H.fontsReady().then(build);
+})();
+</script>
+</body>
+</html>

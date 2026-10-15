@@ -1,0 +1,101 @@
+---
+// Docs, guides and tutorials: a sticky sidebar of the section's pages, the page itself, the on-page
+// contents (its H2s, following the reader) and previous and next links. Below 1280 px the contents go;
+// below 1024 px the sidebar and the contents fold into one <details> above the page, which opens
+// without JavaScript.
+import '@/styles/docs.css';
+import Base from './Base.astro';
+import SidebarNav, { type SidebarItem } from '@/components/docs/SidebarNav.astro';
+import { IC } from '@/components/icons';
+
+interface Link {
+  label: string;
+  href: string;
+}
+interface Props {
+  title: string;
+  description: string;
+  /** the section's name: "Docs", "Guides" or "Tutorials" */
+  section: string;
+  /** the section's pages in reading order, the current one marked (section-order.mjs sidebar()) */
+  sidebar: SidebarItem[];
+  /** the page's H2s, by the id each heading carries */
+  headings?: { id: string; text: string }[];
+  prev?: Link;
+  next?: Link;
+}
+const { title, description, section, sidebar, headings = [], prev, next } = Astro.props;
+---
+<Base title={title} description={description}>
+  <div class="portal">
+    <aside class="sidebar" aria-label={section}>
+      <button class="sb-search" type="button" data-open-search><Fragment set:html={IC.search} /><span>Search</span><kbd aria-hidden="true">⌘K</kbd></button>
+      <SidebarNav label={section} items={sidebar} />
+    </aside>
+
+    <div class="portal-main">
+      <details class="sb-mobile">
+        <summary>{section} pages{headings.length > 0 && ' and contents'}<Fragment set:html={IC.chevron} /></summary>
+        <SidebarNav label={section} items={sidebar} />
+        {headings.length > 0 && (
+          <nav class="sb-toc" aria-label="On this page">
+            <p class="sb-h">On this page</p>
+            <ul>{headings.map((h) => <li><a href={`#${h.id}`}>{h.text}</a></li>)}</ul>
+          </nav>
+        )}
+      </details>
+      <article class="doc" data-pagefind-body data-pagefind-filter={`section:${section}`}>
+        <slot />
+      </article>
+      {(prev || next) && (
+        <nav class="pn" aria-label="Previous and next page" data-pagefind-ignore>
+          {prev && <a class="pn-prev" href={prev.href}><span class="lbl"><Fragment set:html={IC.arrowL} />Previous</span><span class="pn-t">{prev.label}</span></a>}
+          {next && <a class="pn-next" href={next.href}><span class="lbl">Next<Fragment set:html={IC.arrow} /></span><span class="pn-t">{next.label}</span></a>}
+        </nav>
+      )}
+    </div>
+
+    {headings.length > 0 && (
+      <aside class="toc" aria-label="On this page">
+        <p class="sb-h">On this page</p>
+        <ol data-toc>{headings.map((h) => <li><a href={`#${h.id}`}>{h.text}</a></li>)}</ol>
+      </aside>
+    )}
+  </div>
+</Base>
+
+<script>
+  // The contents mark the section being read: the last H2 above the top third of the screen.
+  const links = [...document.querySelectorAll<HTMLAnchorElement>('[data-toc] a')];
+  const targets = links
+    .map((a) => {
+      let id = '';
+      try {
+        id = decodeURIComponent(a.hash.slice(1));
+      } catch {
+        /* a malformed fragment names no heading */
+      }
+      return { a, h: id ? document.getElementById(id) : null };
+    })
+    .filter((t): t is { a: HTMLAnchorElement; h: HTMLElement } => t.h !== null);
+  let queued = false;
+  let current: HTMLAnchorElement | undefined;
+  const mark = () => {
+    queued = false;
+    const line = window.innerHeight * 0.3;
+    let here = targets[0];
+    for (const t of targets) if (t.h.getBoundingClientRect().top <= line) here = t;
+    if (here?.a === current) return;
+    current = here?.a;
+    links.forEach((a) => (a === current ? a.setAttribute('aria-current', 'true') : a.removeAttribute('aria-current')));
+  };
+  if (targets.length) {
+    mark();
+    window.addEventListener('scroll', () => {
+      if (!queued) {
+        queued = true;
+        requestAnimationFrame(mark);
+      }
+    }, { passive: true });
+  }
+</script>

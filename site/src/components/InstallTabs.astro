@@ -1,0 +1,34 @@
+---
+// The lead switch and the install tabs: Tabs with a copy control per command block, an optional note
+// (`backticks` mark code) and an optional real file fragment. Lead tabs share the stored lead.
+import { inlineHtml } from '@/lib/inline-html.mjs';
+import type { Lead } from '@/data/leads.mjs';
+import Tabs from './Tabs.astro';
+import CodeBlock from './CodeBlock.astro';
+
+export interface InstallTab {
+  id: string;
+  label: string;
+  lead?: Lead;
+  blocks: { lines: string[]; label: string }[];
+  note?: string;
+  art?: { label: string; text: string };
+}
+interface Props {
+  id: string;
+  tabs: InstallTab[];
+  label: string;
+  hashTarget?: boolean;
+  class?: string;
+}
+const { id, tabs, label, hashTarget = false, class: cls } = Astro.props;
+---
+<Tabs id={id} label={label} items={tabs.map(({ id, label, lead }) => ({ id, label, lead }))} hashTarget={hashTarget} class={cls} panelClass="install-panel">
+  {tabs.map((t) => (
+    <Fragment slot={t.id}>
+      {t.blocks.map((b) => <CodeBlock lines={b.lines} label={b.label} />)}
+      {t.note && <p class="note" set:html={inlineHtml(t.note)} />}
+      {t.art && <div class="art" data-ui><span class="lbl">{t.art.label}</span><pre>{t.art.text}</pre></div>}
+    </Fragment>
+  ))}
+</Tabs>

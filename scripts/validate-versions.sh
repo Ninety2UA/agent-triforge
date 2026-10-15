@@ -110,7 +110,10 @@
 #      scripts/fixtures/validate-versions/ (the
 #      self-test's planted stale pins and second ladder), .git/,
 #      the gitignored deploy copies (.agents/ .gemini/ .antigravity/),
-#      node_modules/, the two validator scripts, lines marked as history
+#      node_modules/, the website's local build output (site/dist/, Astro's
+#      site/.astro/ and the Vercel CLI's .vercel/: generated from release
+#      notes the sweep already skips, and untracked), the two validator
+#      scripts, lines marked as history
 #      ("history" or "was <word>"), and README.md from its
 #      "## Release history" heading to the next "## " heading (the table of
 #      past releases); FAQ, Contributing and License after it are swept.
@@ -494,11 +497,11 @@ ok()   { printf 'ok:   %s\n' "$1"; }
 # history boundary by checks 5 and 11). GNU grep prints ./path, BSD grep prints
 # path — the RE accepts both prefixes. The self-test's fixtures plant a second
 # ladder and stale pins on purpose, so the checkout's own run skips them.
-SWEEP_EXCLUDE_RE='^(\./)?(ops/research|ops/decisions|docs/plans|docs/brainstorms|docs/releases|ops/solutions|docs/images|scripts/fixtures/validate-versions|\.git|\.agents|\.gemini|\.antigravity|node_modules)/'
+SWEEP_EXCLUDE_RE='^(\./)?(ops/research|ops/decisions|docs/plans|docs/brainstorms|docs/releases|ops/solutions|docs/images|scripts/fixtures/validate-versions|\.git|\.agents|\.gemini|\.antigravity|node_modules|site/dist|site/\.astro|\.vercel)/'
 # Whole directories are pruned at walk time (grep never descends into .git's
 # object store or a node_modules tree); the path-scoped exclusions above are
 # applied on the output, where the RE also re-covers the pruned names.
-SWEEP_EXCLUDE_DIRS=(--exclude-dir=.git --exclude-dir=.agents --exclude-dir=.gemini --exclude-dir=.antigravity --exclude-dir=node_modules)
+SWEEP_EXCLUDE_DIRS=(--exclude-dir=.git --exclude-dir=.agents --exclude-dir=.gemini --exclude-dir=.antigravity --exclude-dir=node_modules --exclude-dir=.astro --exclude-dir=.vercel)
 SWEEP_SELF_RE='^(\./)?scripts/validate-(versions|skills)\.sh:'
 # The diagram source the PNGs are rendered from: checks 4, 5 and 9 read it
 # although docs/images/ stays excluded (KTD6), and check 13 holds its stamp.

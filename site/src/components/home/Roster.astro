@@ -1,0 +1,37 @@
+---
+// Each agent gets a role: the core trio and the optional members as dot clusters, the roster loop
+// (Fig. 1) and the default roles with their fallbacks.
+import VideoFigure from '../VideoFigure.astro';
+import { LOOP, figure } from '@/data/loops';
+import { CLIS, ROLES } from '@/data/content';
+import { glyph } from './dots';
+---
+<section id="roster" aria-labelledby="roster-h" data-rv-group>
+  <div class="wrap">
+    <div class="sec-head" data-rv>
+      <h2 id="roster-h">Each agent gets a role</h2>
+      <p>The lead plans the work, hands it out and merges it. Claude Code leads by default and Codex can lead too. The others work in the roles one editable file gives them, and every fallback ends at Claude Code, Antigravity or Codex.</p>
+    </div>
+    <div class="roster">
+      <div data-rv>
+        <h3 class="crew-h">Always on the team</h3>
+        <ul class="crew">{CLIS.filter((c) => c.core).map((c) => (
+          <li class="core"><svg class="cl" viewBox="0 0 30 30" aria-hidden="true">{glyph(false).map((g) => <circle cx={g.cx} cy={g.cy} r={g.r} />)}</svg><div><b>{c.name}</b><span>{c.roles}</span><span>Code goes to {c.provider}</span></div></li>
+        ))}</ul>
+        <h3 class="crew-h">Join when you add them</h3>
+        <ul class="crew">{CLIS.filter((c) => !c.core).map((c) => (
+          <li class="opt"><svg class="cl" viewBox="0 0 30 30" aria-hidden="true">{glyph(true).map((g) => <circle cx={g.cx} cy={g.cy} r={g.r} />)}</svg><div><b>{c.name}</b><span>{c.roles}</span><span>Code goes to {c.provider}</span></div></li>
+        ))}</ul>
+      </div>
+      <div>
+        <VideoFigure n={1} {...figure(LOOP.roster)} />
+        <table class="roles" data-rv>
+          <caption>Default roles and who covers them</caption>
+          <thead><tr><th scope="col">Role</th><th scope="col">Does</th><th scope="col">Agent</th><th scope="col">Falls back to</th></tr></thead>
+          <tbody>{ROLES.map((r) => <tr><th scope="row"><code>{r.role}</code></th><td>{r.does}</td><td>{r.cli}</td><td>{r.fallback}</td></tr>)}</tbody>
+        </table>
+        <p style="margin-top:24px"><a class="more" href="/roster/">How the roster works</a></p>
+      </div>
+    </div>
+  </div>
+</section>

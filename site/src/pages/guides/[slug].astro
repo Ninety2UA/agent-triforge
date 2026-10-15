@@ -1,0 +1,22 @@
+---
+// The Guides pages, one per Guides entry of the docs map (KTD4): a guide built from a docs file renders
+// its docs collection entry; the hand-written leases guide renders src/content/guides/leases.md.
+import { getCollection } from 'astro:content';
+import DocPage from '@/components/docs/DocPage.astro';
+import { sectionPages } from '@/lib/docs.mjs';
+
+export async function getStaticPaths() {
+  const entries = new Map((await getCollection('docs')).map((e) => [e.id, e]));
+  const guides = new Map((await getCollection('guides')).map((e) => [e.id, e]));
+  return sectionPages('guides').map(({ slug, title }) => {
+    const entry = entries.get(slug);
+    const guide = guides.get(slug);
+    if (entry) return { params: { slug }, props: { slug, title, entry, guide: undefined } };
+    if (guide) return { params: { slug }, props: { slug, title, entry: undefined, guide } };
+    throw new Error(`/guides/${slug}/: no docs entry and no src/content/guides/${slug}.md`);
+  });
+}
+
+const { slug, title, entry, guide } = Astro.props;
+---
+{entry ? <DocPage section="guides" slug={slug} title={title} entry={entry} /> : <DocPage section="guides" slug={slug} title={title} guide={guide!} />}

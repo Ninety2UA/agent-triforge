@@ -1,0 +1,34 @@
+---
+// The home page, section by section. Its own scripts (the dot field, the reviewer bench, the reveals)
+// load here only; the video player loads with a dynamic import on any page with a figure.
+import Base from '@/layouts/Base.astro';
+import Hero from '@/components/home/Hero.astro';
+import Roster from '@/components/home/Roster.astro';
+import Lease from '@/components/home/Lease.astro';
+import Film from '@/components/home/Film.astro';
+import Sprint from '@/components/home/Sprint.astro';
+import Skills from '@/components/home/Skills.astro';
+import Why from '@/components/home/Why.astro';
+import Personas from '@/components/home/Personas.astro';
+import Unattended from '@/components/home/Unattended.astro';
+import Limits from '@/components/home/Limits.astro';
+import Install from '@/components/home/Install.astro';
+import Closing from '@/components/home/Closing.astro';
+import { H1, LEDE } from '@/data/home';
+---
+<Base title={`Agent Triforge: ${H1.replace(/\.$/, '')}`} description={LEDE} search={{ section: 'Home', title: 'Home' }}>
+  <Hero />
+  <Roster />
+  <Lease />
+  <Film />
+  <Sprint />
+  <Skills />
+  <Why />
+  <Personas />
+  <Unattended />
+  <Limits />
+  <Install />
+  <Closing />
+</Base>
+
+<script>import '@/scripts/home';</script>

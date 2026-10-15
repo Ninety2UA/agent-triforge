@@ -1,0 +1,41 @@
+---
+// One page per written tutorial: the intro, the numbered steps (components/tutorials/TutorialStep.astro)
+// and the recap. The text is src/content/tutorials/<slug>.md, read by the tutorials collection. Only
+// the tutorials with a content file build (lib/tutorials.mjs writtenTutorials()), and the sidebar,
+// previous and next list only those, so no link points at a tutorial that is not written yet.
+import { getEntry } from 'astro:content';
+import '@/styles/tutorials.css';
+import DocsLayout from '@/layouts/DocsLayout.astro';
+import TutorialStep from '@/components/tutorials/TutorialStep.astro';
+import { sectionOrder } from '@/lib/section-order.mjs';
+import { writtenTutorials } from '@/lib/tutorials.mjs';
+import { fitTables, keepCodeWords } from '@/components/docs/tables.mjs';
+
+export function getStaticPaths() {
+  return writtenTutorials().map(({ slug }) => ({ params: { slug } }));
+}
+
+const { slug } = Astro.params;
+const entry = await getEntry('tutorials', slug);
+if (!entry) throw new Error(`tutorials: no entry for "${slug}"; add site/src/content/tutorials/${slug}.md`);
+const t = entry.data;
+
+const order = sectionOrder(writtenTutorials().map((p) => ({ slug: p.slug, label: p.title, href: p.href })));
+const { prev, next } = order.neighbors(slug);
+const headings = [
+  { id: 'overview', text: 'Overview' },
+  ...t.steps.map((s) => ({ id: s.id, text: s.title })),
+  { id: 'recap', text: 'Recap' },
+];
+---
+<DocsLayout title={`${t.title} · Agent Triforge`} description={t.description} section="Tutorials" sidebar={order.sidebar(slug)} headings={headings} prev={prev} next={next}>
+  <h1 id="overview">{t.title}</h1>
+  <div class="t-intro" set:html={keepCodeWords(t.intro)} />
+  <ol class="t-steps">
+    {t.steps.map((step, i) => <TutorialStep n={i + 1} step={step} />)}
+  </ol>
+  <section class="t-recap" aria-labelledby="recap">
+    <h2 id="recap">Recap</h2>
+    <Fragment set:html={fitTables(t.recap)} />
+  </section>
+</DocsLayout>

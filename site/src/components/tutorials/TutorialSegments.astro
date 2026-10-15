@@ -1,0 +1,21 @@
+---
+// What to paste in a tutorial step, in order: its Markdown, and each command under its caption with a
+// copy control. TutorialStep.astro renders it once for the step and once inside each lead tab.
+import CodeBlock from '../CodeBlock.astro';
+import { keepCodeWords } from '../docs/tables.mjs';
+
+export type PasteSegment =
+  | { kind: 'md'; html: string }
+  | { kind: 'cmd'; lang: 'prompt' | 'bash'; text: string; caption: string; copy: string; lines: string[] };
+interface Props {
+  segments: PasteSegment[];
+}
+const { segments } = Astro.props;
+---
+{segments.map((s) =>
+  s.kind === 'cmd' ? (
+    <div class="t-cmd"><p class="t-cap">{s.caption}</p><CodeBlock lines={s.lines} label={s.copy} prompt={s.lang === 'bash'} /></div>
+  ) : (
+    <div class="t-md" set:html={keepCodeWords(s.html)} />
+  ),
+)}

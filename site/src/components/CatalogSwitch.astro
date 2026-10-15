@@ -1,0 +1,26 @@
+---
+// The two catalog pages, Skills and Personas, as links styled like the shadcn tabs track (KTD3). They
+// are links, not ARIA tabs: each is its own page, so the docs' links to a persona land on a page that
+// shows it, and the current one carries aria-current="page".
+import { tabsListVariants, tabsTrigger } from './ui/tabs';
+import Claim from './Claim.astro';
+import { PERSONAS_PAGE } from '@/lib/docs-map.mjs';
+
+interface Props {
+  current: 'skills' | 'personas';
+}
+const { current } = Astro.props;
+const links = [
+  { key: 'skills', label: 'Skills', href: '/skills/', kind: 'skills' },
+  { key: 'personas', label: 'Personas', href: PERSONAS_PAGE.href, kind: 'personas' },
+] as const;
+---
+<nav class="cat-switch" aria-label="Skills and personas" data-pagefind-ignore>
+  <div data-slot="tabs-list" data-variant="default" data-orientation="horizontal" class={tabsListVariants()}>
+    {links.map((l) => (
+      <a href={l.href} class={tabsTrigger} data-slot="tabs-trigger" aria-current={l.key === current ? 'page' : undefined} data-active={l.key === current ? '' : undefined}>
+        {l.label}<span class="n"><Claim kind={l.kind} /></span>
+      </a>
+    ))}
+  </div>
+</nav>

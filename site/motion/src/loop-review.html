@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1200, height=750" />
+<title>Review loop</title>
+<script src="assets/gsap.min.js"></script>
+<style>
+/*{{DS_CSS}}*/
+html, body { width: 1200px; height: 750px; }
+.num { width: 90px; text-align: center; }
+.num2 { width: 96px; text-align: center; }
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="8" data-width="1200" data-height="750">
+  <div id="stage" class="clip" data-start="0" data-duration="8" data-track-index="0"><canvas id="cv"></canvas><div id="type"></div></div>
+</div>
+<script>
+//{{DS_JS}}
+</script>
+<script>
+(function () {
+  // Shown at about 560 px wide: smallest text 24 px, main labels 30 px and up.
+  const H = HT;
+  const { disc, block, join, track, renderer, tx, seg, curve, ringOf, path, bez, movers, PINK, INK, RINGP, EMPTY } = H;
+  function build() {
+    const D = 8;
+    const tl = gsap.timeline({ paused: true });
+    const R = renderer(document.getElementById("cv"), 1200, 750);
+    const T = document.getElementById("type");
+
+    // ---- layout ----
+    const lanesY = [232, 334, 436, 538, 640];
+    const LX0 = 300, LX1 = 660, SY = 436, SX = 768;          // lanes, synthesizer
+    const OX = 208, OY = 436;                                // where the change fans out
+    const PX = 836, col = [1040, 1128], rowY = [300, 420, 540];
+
+    // the change: lines of a diff, as dot rows
+    const lens = [8, 6, 9, 5, 7, 9, 4, 6];
+    const lens2 = [8, 7, 6, 5, 9, 9, 6, 6];
+    const diff = (L, hot) => join(...L.map((n, j) => block(66, 344 + j * 26, n, 1, { pitch: 14, r: 4, c: hot && hot.includes(j) ? PINK : INK })));
+    const change = track([
+      { t: 0, f: diff(lens) },
+      { t: 3.05, f: diff(lens2), dur: 0.5, sweep: 0.3, jitter: 0.05, mode: "sortx", dir: [0, 1], bend: 0, shrink: 0.2 },
+      { t: 3.75, f: diff(lens2), dur: 0.4, sweep: 0.2, jitter: 0.05, mode: "index", dir: [0, 1], bend: 0, shrink: 0 },
+      { t: 7.1, f: diff(lens), dur: 0.5, sweep: 0.3, jitter: 0.05, mode: "sortx", dir: [0, 1], bend: 0, shrink: 0.2 },
+    ]);
+    tx(T, 60, 292, "the change", "lab mut", 30);
+
+    // lanes: fan out, run, fan in; a pass prints them pink, left to right
+    const laneF = (c) => join(...lanesY.map((y) => join(
+      curve([OX, OY], [OX + 50, OY], [LX0 - 60, y], [LX0 - 8, y], { pitch: 12, r: 2.4, c }),
+      seg(LX0, y, LX1, y, { pitch: 12, r: 2.4, c }),
+      curve([LX1 + 8, y], [LX1 + 60, y], [SX - 70, SY], [SX - 32, SY], { pitch: 12, r: 2.4, c }))));
+    const lanesInk = laneF(INK), lanesPink = laneF(PINK);
+    const pass = (t0) => [
+      { t: t0, f: lanesPink, mode: "index", dur: 0.25, sweep: 0.85, jitter: 0.02, dir: [1, 0], bend: 0, shrink: 0 },
+      { t: t0 + 1.25, f: lanesInk, mode: "index", dur: 0.25, sweep: 0.5, jitter: 0.02, dir: [1, 0], bend: 0, shrink: 0 },
+    ];
+    const lanes = track([{ t: 0, f: lanesInk }, ...pass(0.25), ...pass(3.85)]);
+    const synth = disc(SX, SY, 36, { pitch: 10, rmax: 4.8 });
+    // labels: the two CLIs and the three specialists, in plain words
+    const names = [["Antigravity", "h2", 32], ["Codex", "h2", 32], ["Security", "lab", 32], ["Performance", "lab", 32], ["Simplicity", "lab", 32]];
+    names.forEach(([n, cls, sz], k) => tx(T, LX0, lanesY[k] - 46, n, cls, sz));
+
+    // findings: dots that leave the lanes, pass through the synthesizer and land in the report
+    const fin = [];
+    const lanePath = (k) => path([[LX1 - 40, lanesY[k]], [LX1, lanesY[k]], ...bez([LX1 + 8, lanesY[k]], [LX1 + 60, lanesY[k]], [SX - 70, SY], [SX - 4, SY], 24)]);
+    const toCell = (row, c) => path(bez([SX + 4, SY], [SX + 50, SY], [col[c] - 90, rowY[row] + 30], [col[c] - 40, rowY[row] + 30], 24));
+    const from1 = [0, 0, 1, 1, 1, 2, 2, 3, 4], rows1 = [0, 1, 2, 0, 1, 2, 1, 2, 2];
+    from1.forEach((k, i) => {
+      fin.push({ p: lanePath(k), t0: 1.0 + i * 0.05, d: 0.62, r: 5.2, c: INK });
+      fin.push({ p: toCell(rows1[i], 0), t0: 1.66 + i * 0.05, d: 0.5, r: 5.2, c: INK });
+    });
+    [1, 4].forEach((k, i) => {
+      fin.push({ p: lanePath(k), t0: 4.6 + i * 0.08, d: 0.62, r: 5.2, c: INK });
+      fin.push({ p: toCell(2, 1), t0: 5.26 + i * 0.08, d: 0.5, r: 5.2, c: INK });
+    });
+    const travel = movers(fin);
+    // the pass-2 zeros for P1 and P2 are marked: the loop stops there
+    const marks = track([
+      { t: 0, f: EMPTY },
+      { t: 5.45, f: join(ringOf(col[1], rowY[0] + 38, 38, { pitch: 10, r: 2.8, c: PINK }), ringOf(col[1], rowY[1] + 38, 38, { pitch: 10, r: 2.8, c: PINK })), dur: 0.35, sweep: 0.3, jitter: 0, dir: [0, 1] },
+      { t: 7.05, f: EMPTY, dur: 0.3, sweep: 0.2, jitter: 0 },
+    ]);
+    const rule = seg(PX, 252, 1170, 252, { pitch: 10, r: 1.6 });
+    const fixed = [synth, rule];
+    const staticDots = { emit: (t, out) => fixed.forEach((f) => { for (let i = 0; i < f.n; i++) out.push(f.x[i], f.y[i], f.r[i], f.c[i]); }) };
+    const E = [staticDots, change, lanes, travel, marks];
+    H.drive(tl, D, (t) => R.draw(t, E));
+
+    // ---- report ----
+    tx(T, PX, 160, "Findings", "h2", 34);
+    tx(T, col[0] - 48, 210, "first", "lab mut num2", 28);
+    tx(T, col[1] - 48, 210, "second", "lab mut num2", 28);
+    ["Critical", "Important", "Minor"].forEach((p, k) => tx(T, PX, rowY[k] + 18, p, "lab", 32));
+    const v1 = ["2", "3", "4"].map((v, k) => tx(T, col[0] - 45, rowY[k] + 4, v, "h1 num", 64));
+    const v2 = ["0", "0", "2"].map((v, k) => tx(T, col[1] - 45, rowY[k] + 4, v, "h1 num", 64));
+    gsap.set(v1.concat(v2), { opacity: 0 });
+    v1.forEach((e, k) => tl.to(e, { opacity: 1, duration: 0.2, ease: "power2.out" }, 2.05 + k * 0.08));
+    tl.to(v2.slice(0, 2), { opacity: 1, duration: 0.25, stagger: 0.08, ease: "power2.out" }, 5.05);
+    tl.to(v2[2], { opacity: 1, duration: 0.2, ease: "power2.out" }, 5.75);
+    tl.to(v1.concat(v2), { opacity: 0, duration: 0.35, ease: "power2.in" }, 7.05);
+
+    // ---- captions ----
+    const caps = [
+      "Five reviewers read the change at once",
+      "Their findings are sorted by severity",
+      "Then the fixes go in",
+      "Only minor findings are left, so it stops",
+      "And the same five read it again",
+    ].map((a) => [tx(T, 64, 44, a, "h1", 44)]);
+    caps.forEach((c, k) => gsap.set(c, { opacity: k === 0 ? 1 : 0 }));
+    const cs = (a, b, t) => { H.outLeft(tl, caps[a], t, { dx: 70 }); H.inLeft(tl, caps[b], t + 0.28, { dx: 70 }); };
+    cs(0, 1, 1.75);
+    cs(1, 2, 2.85);
+    cs(2, 4, 3.75);
+    cs(4, 3, 5.3);
+    cs(3, 0, 7.05);
+    window.__timelines["main"] = tl;
+  }
+  H.fontsReady().then(build);
+})();
+</script>
+</body>
+</html>

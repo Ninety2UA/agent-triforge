@@ -1,0 +1,129 @@
+/* The concept pages, /roster/ and /sprint/: the home page's vocabulary taken deeper. Muted surfaces,
+   2 px dotted rules between rows, ink dots for stations, the accent dot only for "you are here" (a
+   linked phase). Loaded only by pages/roster.astro and pages/sprint.astro. */
+
+/* ---------- the opening: heading, lede and jump links beside the figure or the command ---------- */
+main > .c-hero { padding-block: clamp(40px, 6vw, 88px) clamp(40px, 5vw, 72px); }
+.c-top { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: clamp(40px, 6vw, 104px); align-items: start; }
+.c-head h1 { margin-bottom: 22px; }
+.c-head .lede { margin: 0 0 16px; max-width: 50ch; }
+.c-head p { max-width: 58ch; }
+.c-head p a, .sec-head p a, .c-note a, .note a { color: var(--primary-text); }
+.c-jump { list-style: none; margin: 28px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.c-jump a { display: inline-flex; align-items: center; min-height: 36px; padding: 0 12px; border-radius: var(--radius); background: var(--muted); font-size: 15px; font-weight: 600; text-decoration: none; transition: background-color 200ms var(--ease); }
+.c-jump a:hover { background: color-mix(in oklch, var(--muted) 82%, var(--foreground)); }
+@media (max-width: 960px) { .c-top { grid-template-columns: minmax(0, 1fr); } }
+
+/* a two-column section: the argument on the left, the command and the real file beside it */
+.c-split { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: clamp(32px, 5vw, 88px); align-items: start; }
+.c-split .sec-head { margin-bottom: 0; }
+.c-side { display: grid; gap: 14px; min-width: 0; }
+.c-side .note { margin: 0; }
+@media (max-width: 960px) { .c-split { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- roster: the agents ---------- */
+.c-group { font-size: 15px; font-weight: 600; color: var(--muted-foreground); margin: 0 0 6px; }
+.c-clis + .c-group { margin-top: 48px; }
+.c-clis { list-style: none; margin: 0; padding: 0; }
+.c-clis li { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 14px clamp(24px, 3.5vw, 64px); padding: 22px 0; align-items: start; }
+.c-clis li + li { border-top: 2px dotted var(--dot-frame); }
+.c-who { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 14px; align-items: start; }
+.c-who .cl { width: 30px; height: 30px; margin-top: 1px; }
+.c-who .cl circle { fill: var(--dot-rest); }
+.c-who .cl.opt circle { fill: var(--dot-opt); }
+.c-who b { display: block; font: 600 clamp(1.1rem, 1rem + 0.4vw, 1.3rem)/1.25 var(--font-sans-stack); letter-spacing: -0.015em; }
+.c-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.c-tags:empty { display: none; }
+.c-clis dl { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 20px; font-size: 15px; line-height: 1.5; }
+.c-clis dt { font-weight: 600; color: var(--muted-foreground); }
+.c-clis dd { margin: 0; }
+.c-note { margin: 28px 0 0; font-size: 15px; color: var(--muted-foreground); max-width: 68ch; }
+@media (max-width: 760px) { .c-clis li { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 420px) { .c-clis dl { grid-template-columns: minmax(0, 1fr); gap: 2px; } .c-clis dd { margin-bottom: 8px; } }
+
+/* ---------- roster: roles and their fallback chains, drawn as stations on a dotted line ---------- */
+.c-roles { list-style: none; margin: 0; padding: 0; }
+.c-role { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 16px clamp(24px, 3.5vw, 64px); padding: 26px 0; align-items: start; }
+.c-role + .c-role { border-top: 2px dotted var(--dot-frame); }
+.c-role-h h3 code { font-size: clamp(1.1rem, 0.95rem + 0.6vw, 1.4rem); font-weight: 500; letter-spacing: -0.02em; }
+.c-role-h p { margin: 6px 0 0; font-size: 15px; color: var(--muted-foreground); }
+.c-chain { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 18px; }
+.c-chain li { position: relative; display: grid; gap: 2px; align-content: start; padding-top: 32px; }
+.c-chain li::before { content: ""; position: absolute; top: 9px; left: 26px; right: -14px; border-top: 3px dotted var(--dot-frame); }
+.c-chain li:last-child::before { display: none; }
+.c-chain .d { position: absolute; top: 0; left: 0; width: 21px; height: 21px; border-radius: 50%; background: var(--background); border: 3px solid var(--muted-foreground); }
+.c-chain li.on .d { background: var(--foreground); border-color: var(--foreground); }
+.c-chain b { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.c-chain li:not(.on) b { font-weight: 500; }
+.c-chain span:not(.d) { font-size: 15px; line-height: 1.4; color: var(--muted-foreground); }
+.c-chain code { font-size: 0.92em; }
+@media (max-width: 760px) { .c-role { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) {
+  .c-chain { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .c-chain li { padding: 0 0 0 36px; min-height: 24px; }
+  .c-chain li::before { top: 26px; bottom: -12px; left: 9px; right: auto; border-top: 0; border-left: 3px dotted var(--dot-frame); }
+}
+
+/* ---------- sprint: the start box beside the heading ---------- */
+.c-start { background: var(--muted); border-radius: var(--radius); padding: clamp(20px, 3vw, 32px); }
+.c-start-h { font-size: 17px; letter-spacing: -0.01em; }
+.c-start [data-slot="tabs-list"] { background: var(--background); }
+.c-start [data-slot="tabs-trigger"][data-active] { background: var(--muted); }
+.c-start [data-cmd] { background: var(--background); }
+
+/* ---------- sprint: the phases as a dotted line of stations, numerals in Doto as on the home page ---------- */
+.c-phases { list-style: none; margin: 0; padding: 0; }
+.c-phase { position: relative; display: grid; grid-template-columns: 96px 24px minmax(0, 1fr); column-gap: 22px; padding-bottom: clamp(44px, 5vw, 64px); scroll-margin-top: calc(var(--head-h) + 24px); }
+.c-phase::before { content: ""; position: absolute; left: calc(96px + 22px + 10.5px); top: 40px; bottom: 8px; border-left: 3px dotted var(--dot-frame); }
+.c-phase:last-child { padding-bottom: 0; }
+.c-phase:last-child::before { display: none; }
+.c-num { font: 900 clamp(34px, 3.2vw, 46px)/0.9 var(--font-num); text-align: right; padding-top: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.c-dot { width: 24px; height: 24px; margin-top: 6px; border-radius: 50%; background: var(--background); border: 3px solid var(--foreground); transition: background-color 200ms var(--ease), border-color 200ms var(--ease); }
+/* a phase opened from a link is the one place the accent dot appears */
+.c-phase:target .c-dot { background: var(--dot-active); border-color: var(--dot-active); }
+.c-ph { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: clamp(28px, 3.5vw, 56px); align-items: start; }
+.c-ph h3 { font-size: clamp(1.25rem, 1.05rem + 0.6vw, 1.6rem); letter-spacing: -0.02em; margin-bottom: 10px; }
+.c-ph p { max-width: 68ch; text-wrap: pretty; }
+.c-ph .c-what { font-size: clamp(1.05rem, 0.98rem + 0.25vw, 1.2rem); line-height: 1.5; }
+.c-ph dl { margin: 4px 0 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px 20px; padding: 18px 20px; border-radius: var(--radius); background: var(--muted); font-size: 15px; line-height: 1.5; }
+.c-ph dt { font-weight: 600; color: var(--muted-foreground); }
+.c-ph dd { margin: 0; }
+.c-ph dd code { display: inline-block; margin: 0 6px 4px 0; padding: 1px 6px; border-radius: 4px; background: var(--background); }
+.c-ph dd a code { margin-right: 0; }
+@media (max-width: 1100px) { .c-ph { grid-template-columns: minmax(0, 1fr); } .c-ph dl { margin-top: 18px; max-width: 760px; } }
+@media (max-width: 760px) {
+  .c-phase { grid-template-columns: 24px minmax(0, 1fr); column-gap: 16px; }
+  .c-phase::before { left: 10.5px; top: 30px; }
+  .c-dot { grid-column: 1; grid-row: 1; margin-top: 0; }
+  .c-num { grid-column: 2; grid-row: 1; text-align: left; padding-top: 0; margin-bottom: 12px; }
+  .c-ph { grid-column: 2; }
+}
+@media (max-width: 420px) { .c-ph dl { grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 16px; } .c-ph dd { margin-bottom: 8px; } }
+
+/* ---------- sprint: the review lanes and the convergence modes ---------- */
+.c-lanes { list-style: none; margin: 0; padding: 0; }
+.c-lanes li { display: grid; gap: 4px; padding: 14px 0; }
+.c-lanes li + li { border-top: 2px dotted var(--dot-frame); }
+.c-lanes b, .c-lanes a { font-weight: 600; font-size: 17px; }
+.c-lanes span { font-size: 15px; line-height: 1.5; }
+.c-after { margin: 20px 0 0; font-size: 15px; max-width: 58ch; }
+.c-modes { margin-top: clamp(28px, 3.5vw, 44px); scroll-margin-top: calc(var(--head-h) + 24px); }
+.c-modes h3 { font-size: clamp(1.25rem, 1.05rem + 0.6vw, 1.6rem); letter-spacing: -0.02em; margin-bottom: 12px; }
+.c-modes p { max-width: 68ch; font-size: 17px; }
+.c-def { font-weight: 400; font-size: 13px; color: var(--muted-foreground); }
+
+/* ---------- sprint: the quality gates as rows, and the completion checklist ---------- */
+.c-gates { list-style: none; margin: 0; padding: 0; }
+.c-gates li { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 4fr) minmax(0, 5fr); gap: 6px clamp(20px, 3vw, 48px); padding: 20px 0; align-items: baseline; }
+.c-gates li + li { border-top: 2px dotted var(--dot-frame); }
+.c-gates h3 { font-size: clamp(1.1rem, 1rem + 0.4vw, 1.3rem); letter-spacing: -0.015em; }
+.c-gates p { margin: 0; font-size: 17px; }
+.c-gates .c-by { font-size: 15px; color: var(--muted-foreground); }
+.c-by > span:first-child { font-weight: 600; }
+.c-by a { color: var(--foreground); }
+@media (max-width: 860px) { .c-gates li { grid-template-columns: minmax(0, 1fr); } }
+.c-check { background: var(--muted); border-radius: var(--radius); padding: clamp(20px, 3vw, 32px); }
+.c-check h3 { font-size: 17px; margin-bottom: 14px; }
+.c-check ol { margin: 0; padding-left: 22px; display: grid; gap: 10px; font-size: 15px; line-height: 1.5; }
+.c-check li::marker { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.c-check code { white-space: normal; overflow-wrap: anywhere; }

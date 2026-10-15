@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1200, height=750" />
+<title>Roster loop</title>
+<script src="assets/gsap.min.js"></script>
+<style>
+/*{{DS_CSS}}*/
+html, body { width: 1200px; height: 750px; }
+.ctr { text-align: center; width: 360px; }
+.ctr2 { text-align: center; width: 200px; }
+.acc { color: var(--acc-text, var(--ink)); }
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="8" data-width="1200" data-height="750">
+  <div id="stage" class="clip" data-start="0" data-duration="8" data-track-index="0"><canvas id="cv"></canvas><div id="type"></div></div>
+</div>
+<script>
+//{{DS_JS}}
+</script>
+<script>
+(function () {
+  // Shown at about 560 px wide: captions 44 px, names 34 px, smallest text 24 px.
+  const H = HT;
+  const { disc, join, track, renderer, tx, ACC, INK, RINGM } = H;
+  function build() {
+    const D = 8;
+    const tl = gsap.timeline({ paused: true });
+    const R = renderer(document.getElementById("cv"), 1200, 750);
+    const T = document.getElementById("type");
+    document.documentElement.style.setProperty("--acc-text", H.C.accent);
+
+    // ---- three core clusters; the lead comes forward in the accent ----
+    const X = [250, 600, 950], Y = 318, CR = 92;
+    const dk = (x, mode) => {
+      const z = mode === "lead" ? 1.1 : mode === "out" ? 0.8 : 1;
+      return disc(x, Y, CR * z, { pitch: 12 * z, rmax: (mode === "out" ? 3.2 : 5.6) * z, c: mode === "lead" ? ACC : mode === "out" ? RINGM : INK });
+    };
+    const S = (a, b, c) => join(dk(X[0], a), dk(X[1], b), dk(X[2], c));
+    const ix = (t, f, o) => Object.assign({ t, f, mode: "index", dur: 0.6, sweep: 0.3, jitter: 0.05, dir: [1, 0] }, o || {});
+    const core = track([
+      { t: 0, f: S("lead", "on", "on") },
+      ix(2.75, S("lead", "out", "on"), { dir: [0, 1] }),
+      ix(4.75, S("lead", "on", "on"), { dir: [0, -1] }),
+      ix(5.55, S("on", "lead", "on")),
+      ix(7.0, S("lead", "on", "on"), { dir: [-1, 0] }),
+    ]);
+    // optional members: open rings, joined only when you add them
+    const OX = [400, 575, 750, 925, 1100], OYc = 652;
+    const opt = join(...OX.map((x) => disc(x, OYc, 22, { pitch: 11, rmax: 3.4, c: RINGM, flat: true })));
+    const optE = { emit: (t, out) => { for (let i = 0; i < opt.n; i++) out.push(opt.x[i], opt.y[i], opt.r[i], opt.c[i]); } };
+    H.drive(tl, D, (t) => R.draw(t, [optE, core]));
+
+    // ---- type ----
+    const names = ["Claude Code", "Codex", "Antigravity"];
+    names.forEach((n, k) => tx(T, X[k] - 180, Y + 122, n, "h2 ctr", 36));
+    const lead = tx(T, X[0] - 180, Y - CR - 66, "leads", "h2 ctr acc", 30);
+    ["OpenCode", "Kimi Code", "Cursor", "Grok Build", "Devin"].forEach((n, k) => tx(T, OX[k] - 100, OYc + 30, n, "lab mut ctr2", 28));
+    tx(T, 64, OYc - 36, "Optional, added when you choose", "lab mut wrap", 28, { width: "250px" });
+
+    // roles under each name
+    const RY = Y + 172;
+    const role = (k, text, dy) => tx(T, X[k] - 180, RY + (dy || 0), text, "body mut ctr", 30);
+    const rBuild = role(0, "builds");
+    const rReview = tx(T, X[1] - 180, RY, '<span class="rv">reviews</span> and <span class="ts">tests</span>', "body mut ctr", 30);
+    const rAgy = role(2, "analyzes and documents");
+    const roles = [rBuild, rReview, rAgy];
+    // the words that move when Codex is missing
+    const goReview = role(1, "reviews"), goTest = role(1, "tests");
+    gsap.set([...roles, goReview, goTest], { opacity: 0 });
+    tl.to(roles, { opacity: 1, duration: 0.45, stagger: 0.18, ease: "power2.out" }, 0.35);
+    // the two words start exactly where they sit inside "reviews and tests"
+    const mid = (e) => { const r = e.getBoundingClientRect(); return r.left + r.width / 2; };
+    const offR = mid(rReview.querySelector(".rv")) - mid(goReview), offT = mid(rReview.querySelector(".ts")) - mid(goTest);
+    gsap.set(goReview, { x: offR }); gsap.set(goTest, { x: offT });
+    // Codex missing: reviews moves to Antigravity, tests to Claude Code, on
+    // separate rows so they never cross
+    tl.set(rReview, { opacity: 0 }, 3.0);
+    tl.set([goReview, goTest], { opacity: 1 }, 3.0);
+    tl.to(goReview, { y: 40, duration: 0.3, ease: "power2.out" }, 3.05);
+    tl.to(goReview, { x: X[2] - X[1], duration: 0.7, ease: "power3.inOut" }, 3.2);
+    tl.to(goTest, { y: 80, duration: 0.3, ease: "power2.out" }, 3.05);
+    tl.to(goTest, { x: X[0] - X[1], duration: 0.7, ease: "power3.inOut" }, 3.2);
+    tl.to(goTest, { y: 40, duration: 0.3, ease: "power2.out" }, 3.9);
+    // Codex is back: the moved words fade and its own line returns
+    tl.to([goReview, goTest], { opacity: 0, duration: 0.3, ease: "power2.in" }, 4.75);
+    tl.to(rReview, { opacity: 1, duration: 0.35, ease: "power2.out" }, 4.9);
+    // Codex leads
+    tl.to(lead, { x: X[1] - X[0], duration: 0.7, ease: "power3.inOut" }, 5.55);
+    tl.to(lead, { x: 0, duration: 0.7, ease: "power3.inOut" }, 7.0);
+    tl.to(roles, { opacity: 0, duration: 0.35, ease: "power2.in" }, 7.05);
+
+    // ---- captions ----
+    const caps = ["Each agent on the team has a role", "If Codex is missing, the others take its work", "Claude Code or Codex can lead"]
+      .map((c) => tx(T, 64, 44, c, "h1", 44));
+    gsap.set(caps.slice(1), { opacity: 0 });
+    const cs = (a, b, t) => { H.outLeft(tl, caps[a], t, { dx: 70 }); H.inLeft(tl, caps[b], t + 0.28, { dx: 70 }); };
+    cs(0, 1, 2.5);
+    cs(1, 2, 5.3);
+    cs(2, 0, 6.9);
+    window.__timelines["main"] = tl;
+  }
+  H.fontsReady().then(build);
+})();
+</script>
+</body>
+</html>

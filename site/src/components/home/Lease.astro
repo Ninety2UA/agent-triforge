@@ -1,0 +1,44 @@
+---
+// One task's life: the lease loop (Fig. 2) and the reviewer bench, where a visitor picks who reviews
+// task 1 and watches it go through or get refused (home.ts runs it). Plain words, no code.
+import VideoFigure from '../VideoFigure.astro';
+import { LOOP, figure } from '@/data/loops';
+import { buttonVariants } from '@/components/ui/button';
+---
+<section id="lease" aria-labelledby="lease-h" data-rv-group>
+  <div class="wrap">
+    <div class="lease-top">
+      <div class="sec-head" data-rv>
+        <h2 id="lease-h">One task's life</h2>
+        <p>Every task is built in its own git worktree, the lead's own tasks included. It merges only after a reviewer approves it, and the reviewer has to be a different agent from the one that built it.</p>
+        <p><a class="more" href="/guides/leases/">Read the leases guide</a></p>
+      </div>
+      <VideoFigure n={2} {...figure(LOOP.lease)} />
+    </div>
+    <div class="bench" id="bench">
+      <div class="bench-ctl">
+        <fieldset>
+          <legend>Claude Code built task 1. Who reviews it?</legend>
+          <div class="radios">
+            <label><input type="radio" name="rev" value="codex" checked /><span>Codex</span></label>
+            <label><input type="radio" name="rev" value="antigravity" /><span>Antigravity</span></label>
+            <label><input type="radio" name="rev" value="claude" /><span>Claude Code itself</span></label>
+          </div>
+        </fieldset>
+        <label class="toggle"><input type="checkbox" id="prot" /> It changes a protected file</label>
+        <button type="button" class={buttonVariants({ variant: 'outline', size: 'sm' })} id="bench-run">Run it again</button>
+      </div>
+      <div class="track-wrap">
+        <ol class="track" aria-label="Task 1, step by step">
+          <li data-state="done"><h3>Assigned</h3><p>The lead gives task 1 to Claude Code, in a workspace of its own.</p></li>
+          <li data-state="done"><h3>Built</h3><p>Claude Code builds it and reports back that it's done.</p></li>
+          <li data-state="done"><h3>Reviewed</h3><p data-when="rev-codex">Codex reviews the change. It didn't write it.</p><p data-when="rev-antigravity" hidden>Antigravity reviews the change. It didn't write it.</p><p data-when="prot" hidden>A protected file: only the lead or you can review it. Claude Code leads and built it, so you do.</p><p data-when="self" hidden>Refused. An agent can't review its own work.</p></li>
+          <li data-state="done"><h3>Merged</h3><p data-when="plain">The lead merges its own copy of the change.</p><p data-when="prot" hidden>Merged after your review.</p><p data-when="self" hidden>Not reached.</p></li>
+          <li data-state="done"><h3>On main</h3><p data-when="plain">The lead moves the finished work to main.</p><p data-when="prot" hidden>Waits for your approval before it reaches main.</p><p data-when="self" hidden>Not reached.</p></li>
+        </ol>
+        <span class="tok" aria-hidden="true"></span>
+      </div>
+      <p class="verdict" id="verdict" aria-live="polite">Merged and on main. Codex reviewed what Claude Code built, and the lead merged it.</p>
+    </div>
+  </div>
+</section>

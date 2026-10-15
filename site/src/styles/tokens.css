@@ -1,0 +1,53 @@
+/* The approved Ultramarine palette as shadcn token roles, light and dark. Light is the default;
+   the inline theme script in Base.astro sets data-theme before first paint. One accent, used on the
+   primary action, the active cluster, the shared line and the current chapter.
+   --card is the ground the videos were rendered on, white in both themes, so a figure reads as the
+   same printed proof on either page. */
+:root {
+  --font-sans-stack: var(--font-familjen);
+  --font-mono-stack: var(--font-sometype);
+  --font-num: var(--font-doto);
+  --card: oklch(1 0 0);
+}
+
+/* the film's position line and chapters sit on its white card in both themes (the videos are light
+   renders), so on the dark page they keep the light theme's ink */
+:root,
+:root[data-theme="light"],
+:root[data-theme="dark"] .film-sheet > :not(.vid) {
+  color-scheme: light;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.19 0.015 264);
+  --muted: oklch(0.972 0.004 264);
+  --muted-foreground: oklch(0.48 0.012 264);
+  --primary: oklch(0.47 0.19 264);
+  --primary-foreground: oklch(1 0 0);
+  --primary-text: oklch(0.47 0.19 264);
+  --input: oklch(0.84 0.008 264);
+  --ring: oklch(0.47 0.19 264);
+  --dot-rest: oklch(0.19 0.015 264);
+  --dot-active: oklch(0.47 0.19 264);
+  --dot-opt: oklch(0.7 0.01 264);
+  --dot-screen: oklch(0.19 0.015 264 / 0.13);
+  --dot-frame: oklch(0.86 0.008 264);
+  --edge-shade: oklch(0.19 0.015 264 / 0.14);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: oklch(0.16 0.012 264);
+  --foreground: oklch(0.95 0.004 264);
+  --muted: oklch(0.205 0.012 264);
+  --muted-foreground: oklch(0.74 0.01 264);
+  --primary: oklch(0.68 0.15 264);
+  --primary-foreground: oklch(0.16 0.012 264);
+  --primary-text: oklch(0.74 0.13 264);
+  --input: oklch(0.36 0.012 264);
+  --ring: oklch(0.68 0.15 264);
+  --dot-rest: oklch(0.95 0.004 264);
+  --dot-active: oklch(0.68 0.15 264);
+  --dot-opt: oklch(0.52 0.012 264);
+  --dot-screen: oklch(0.95 0.004 264 / 0.12);
+  --dot-frame: oklch(0.34 0.012 264);
+  --edge-shade: oklch(0 0 0 / 0.5);
+}

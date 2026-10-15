@@ -1,0 +1,17 @@
+---
+// What it does not do: the confinement model stated as it is.
+
+---
+<section id="limits" aria-labelledby="limits-h" data-rv-group>
+  <div class="wrap honest">
+    <div class="sec-head" data-rv>
+      <h2 id="limits-h">What it does not do</h2>
+      <p><a class="more" href="/guides/data-egress/">Data egress and consent</a></p>
+    </div>
+    <div class="honest-list">
+      <div data-rv><h3>It does not sandbox workers.</h3><p>A worktree sets where a worker starts. A worker with a shell can still read and write anything your user account can, including other branches and the ledger.</p></div>
+      <div data-rv><h3>It detects changes, and merges only the lead's snapshot.</h3><p>Lease helpers compare git config, hooks, refs, worktree pointers and the ledger with a recorded baseline. On a change the lead did not make, they refuse with rc 44. Only the lead's own snapshot of a task is ever merged.</p></div>
+      <div data-rv><h3>Each agent's provider sees the code it is handed.</h3><p>Anthropic, Google and OpenAI for Claude Code, Antigravity and Codex, plus the provider of each optional member you add. Devin may train on data unless the account opts out, so Triforge records your consent before it joins. Captured output is scrubbed before it lands in <code>ops/</code>.</p></div>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,55 @@
+---
+// The footer is the site map: every section and every docs, guide and tutorial page, so without
+// JavaScript (where the phone menu is a link here) every page is reachable. The install copy control
+// and the version close the page.
+import Mark from './Mark.astro';
+import CodeBlock from './CodeBlock.astro';
+import { INSTALL_HREF, NAV } from '@/data/nav';
+import { LEAD_TABS } from '@/data/leads.mjs';
+import { PERSONAS_PAGE } from '@/lib/docs-map.mjs';
+import { INSTALL } from '@/data/content';
+import { GH, VERSION, RELEASED } from '@/lib/site.mjs';
+import { sectionPages } from '@/lib/docs.mjs';
+import { writtenTutorials } from '@/lib/tutorials.mjs';
+
+const columns = [
+  {
+    title: 'Agent Triforge',
+    links: [
+      ...NAV.filter((n) => ['Skills', 'Roster', 'Sprint', 'Changelog'].includes(n.label)).map((n) => ({ label: n.label, href: n.href })),
+      { label: 'Personas', href: PERSONAS_PAGE.href },
+    ],
+  },
+  { title: 'Docs', links: sectionPages('docs').map((p) => ({ label: p.title, href: p.href })) },
+  { title: 'Guides', links: sectionPages('guides').map((p) => ({ label: p.title, href: p.href })) },
+  { title: 'Tutorials', links: writtenTutorials().map((p) => ({ label: p.title, href: p.href })) },
+  {
+    title: 'Install',
+    links: [
+      ...LEAD_TABS.map((t) => ({ label: t.label, href: `${INSTALL_HREF}#${t.id}` })),
+      { label: 'Skills only: Devin, Pi', href: `${INSTALL_HREF}#skills-only` },
+      { label: 'GitHub', href: GH },
+      { label: 'License', href: `${GH}/blob/main/LICENSE` },
+    ],
+  },
+];
+---
+<footer class="ftr">
+  <div class="wrap">
+    <div class="ftr-top">
+      <div class="ftr-brand"><Mark class="ftr-mark" title="Agent Triforge" /></div>
+      <nav id="site-map" class="ftr-map" aria-label="Site map">
+        {columns.map((c) => (
+          <div class="ftr-col">
+            <p class="fh">{c.title}</p>
+            <ul>{c.links.map((l) => <li><a href={l.href}>{l.label}</a></li>)}</ul>
+          </div>
+        ))}
+      </nav>
+    </div>
+    <div class="ftr-bot">
+      <div><CodeBlock lines={INSTALL.claude} label="Copy the Claude Code install commands" /></div>
+      <small>MIT license. Version {VERSION}, released {RELEASED}. Made by Ninety2UA.</small>
+    </div>
+  </div>
+</footer>

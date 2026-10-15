@@ -1,0 +1,36 @@
+---
+// A loop on its print sheet: a lazy poster <img> behind a muted, preload="none" video (a video's own
+// poster attribute is fetched during parsing, even far below the fold), the box sized from the file's
+// own frame, a Play button that shows only when nothing else will start the video, and a caption with
+// its figure number. scripts/video.ts plays it while half visible; there is no pause control.
+import { IC } from './icons';
+import { mp4Facts, versioned } from '@/lib/media.mjs';
+import { poster } from './poster';
+
+interface Props {
+  /** figure number, in page order */
+  n: number;
+  /** file name under /media/ without extension: the .mp4 and its .webp poster */
+  name: string;
+  /** what the video shows, in plain words: the text alternative */
+  label: string;
+  /** names the video on the Play button, e.g. "the roster loop" */
+  short: string;
+  caption: string;
+  class?: string;
+}
+const { n, name, label, short, caption, class: cls } = Astro.props;
+const { width: w, height: h } = mp4Facts(`/media/${name}.mp4`);
+// figures are about 600 px wide on a desktop and the full column on a phone
+const p = await poster(name, [400, 600, 800, 960], '(max-width: 960px) 92vw, 640px');
+---
+<figure class:list={['fig', cls]} id={`fig-${name}`} data-vfig data-rv>
+  <div class="sheet">
+    <div class="vid" style={`aspect-ratio:${w}/${h}`}>
+      <img class="vf-poster" src={p.src} srcset={p.srcset} sizes={p.sizes} loading="lazy" decoding="async" width={w} height={h} alt="" />
+      <video muted playsinline loop preload="none" controls width={w} height={h} aria-label={label}><source src={versioned(`/media/${name}.mp4`)} type="video/mp4" /></video>
+      <button class="vf-big" type="button" data-pagefind-ignore data-label={short} aria-label={`Play ${short}`}><Fragment set:html={IC.play} /><span>Play</span></button>
+    </div>
+  </div>
+  <figcaption><b data-pagefind-ignore>Fig. {n}</b><span set:html={caption} /></figcaption>
+</figure>

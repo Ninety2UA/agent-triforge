@@ -1,0 +1,17 @@
+---
+// Watch one sprint: the film with its chapters.
+import { filmLabel } from '@/data/loops';
+import FilmPlayer from '../FilmPlayer.astro';
+import { filmChapters } from '@/lib/media.mjs';
+
+const { duration } = filmChapters();
+---
+<section id="film" aria-labelledby="film-h" data-rv-group>
+  <div class="wrap film-sec">
+    <div class="sec-head" data-rv>
+      <h2 id="film-h">Watch one sprint</h2>
+      <p>An example sprint, rate-limiting a login endpoint, from the goal to the finished work. {Math.round(duration)} seconds, no sound. Pick a chapter to jump to it.</p>
+    </div>
+    <FilmPlayer label={filmLabel(duration)} />
+  </div>
+</section>

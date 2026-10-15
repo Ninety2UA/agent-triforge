@@ -1,0 +1,16 @@
+---
+// The specialist reviewers that /at-ship runs, and a link to all of them.
+import { PERSONAS } from '@/data/content';
+import Claim from '../Claim.astro';
+import { PERSONAS_PAGE } from '@/lib/docs-map.mjs';
+---
+<section id="personas" aria-labelledby="personas-h" data-rv-group>
+  <div class="wrap">
+    <div class="sec-head" data-rv>
+      <h2 id="personas-h">Specialist reviewers</h2>
+      <p>There are <Claim kind="personas" /> personas, each with its own tools, starting model and turn budget. These five check the plan and review the code in <code>/at-ship</code>.</p>
+    </div>
+    <ul class="specs">{PERSONAS.map((p) => <li data-rv><code>{p.name}</code><div><p>{p.what}</p>{p.neverDowngraded && <span class="nd">Never moved to a smaller model</span>}</div></li>)}</ul>
+    <p style="margin-top:28px"><a class="more" href={PERSONAS_PAGE.href}>All <Claim kind="personas" /> personas</a></p>
+  </div>
+</section>

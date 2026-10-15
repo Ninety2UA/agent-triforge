@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1920, height=1080" />
+<title>Agent Triforge: one sprint</title>
+<script src="assets/gsap.min.js"></script>
+<style>
+/*{{DS_CSS}}*/
+html, body { width: 1920px; height: 1080px; }
+.col { position: absolute; left: 120px; width: 600px; display: flex; flex-direction: column; gap: 22px; }
+.col > div { position: relative; }
+.body .mono, .lab .mono, .h1 .mono { white-space: nowrap; font-size: 0.88em; }
+.ctr { text-align: center; }
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="54.8" data-width="1920" data-height="1080">
+  <div id="stage" class="clip" data-start="0" data-duration="54.8" data-track-index="0"><canvas id="cv"></canvas><div id="type"></div></div>
+</div>
+<script>
+//{{DS_JS}}
+</script>
+<script>
+(function () {
+  const H = HT;
+  const { disc, block, join, track, renderer, tx, seg, frame, ringOf, halftone, logo, path, movers, curve, clamp, lerp, PINK, INK, MUTED, RING, RINGM, EMPTY } = H;
+  function build() {
+    // The scenes are authored on their own clock (D seconds); the film plays
+    // them through a piecewise-linear time map so each chapter lands on its
+    // start in film-chapters.json. OLD = authored chapter starts, NEW = film.
+    const D = 59.6, FILM = 54.8;
+    const CH = { goal: 0, plan: 7.6, build: 14.2, review: 21.2, merge: 28.2, test: 35.0, wrap: 42.4, own: 48.2, end: 53.6 };
+    const OLD = [0, 7.6, 14.2, 21.2, 28.2, 35.0, 42.4, 48.2, 53.6, 59.6];
+    const NEW = [0, 6.4, 12.6, 19.4, 26.4, 33.0, 40.0, 44.6, 50.0, 54.8];
+    const toOld = (t) => {
+      let i = 0;
+      while (i < NEW.length - 2 && t > NEW[i + 1]) i++;
+      return OLD[i] + ((t - NEW[i]) * (OLD[i + 1] - OLD[i])) / (NEW[i + 1] - NEW[i]);
+    };
+    const tl = gsap.timeline({ paused: true });
+    const R = renderer(document.getElementById("cv"), 1920, 1080);
+    const T = document.getElementById("type");
+    const smooth = (a, b, v) => { const u = clamp((v - a) / (b - a), 0, 1); return u * u * (3 - 2 * u); };
+    const S = (f) => ({ emit(t, out) { for (let i = 0; i < f.n; i++) out.push(f.x[i], f.y[i], f.r[i], f.c[i]); } });
+    const E = [];
+
+    // =========================================================== dots
+    const tdot = (x, y, r, c) => disc(x, y, r, { pitch: 1000, rmax: r, flat: true, c: c == null ? INK : c });
+    const show = (f, t0, t1, o) => {
+      o = o || {};
+      const keys = [{ t: 0, f: EMPTY }, { t: t0, f, dur: o.din || 0.4, sweep: o.sin == null ? 0.3 : o.sin, jitter: o.jin == null ? 0.05 : o.jin, dir: o.dir || [1, 0] }];
+      if (t1 != null) keys.push({ t: t1, f: EMPTY, dur: o.dout || 0.35, sweep: o.sout == null ? 0.2 : o.sout, jitter: 0.04, dir: o.dir || [1, 0] });
+      return track(keys);
+    };
+
+    // ---- roster: big in Goal, a bar along the top from Plan on, the end card, the logo
+    const coreX = [980, 1290, 1600], coreY = 380, optX = [900, 1125, 1350, 1575, 1800], optY = 750;
+    const rosterBig = join(
+      disc(coreX[0], coreY, 92, { pitch: 12, rmax: 5.6, c: PINK }),
+      disc(coreX[1], coreY, 92, { pitch: 12, rmax: 5.6 }),
+      disc(coreX[2], coreY, 92, { pitch: 12, rmax: 5.6 }),
+      ...optX.map((x) => disc(x, optY, 36, { pitch: 11, rmax: 3.6, c: RINGM, flat: true })));
+    const barX = [960, 1290, 1620], barY = 96;
+    const bar = (act) => join(...barX.map((x, k) => disc(x, barY, 30, { pitch: 10, rmax: 4.2, c: k === act ? PINK : INK })));
+    const endCore = [620, 1000, 1380], endCoreY = 520, endOpt = [560, 780, 1000, 1220, 1440], endOptY = 780;
+    const endRows = join(...endCore.map((x, k) => disc(x, endCoreY, 60, { pitch: 12, rmax: 5.4, c: k === 0 ? PINK : INK })),
+      ...endOpt.map((x) => disc(x, endOptY, 30, { pitch: 10, rmax: 3.4, c: RINGM, flat: true })));
+    const LOGO_X = 343, LOGO_P = 34;
+    const endLogo = logo(LOGO_X, 540, LOGO_P);
+    // the opener: a printed dot field with one dot in the accent, the sprint's
+    // goal; the field gathers into the team and the goal becomes the lead
+    const fieldOpen = block(792, 168, 87, 61, { pitch: 12, rf: (i, j) => {
+      const d = Math.hypot((i - 43) / 43, (j - 30) / 30);
+      return d > 1 ? 0 : 0.7 + 2.9 * (1 - d * d);
+    } });
+    E.push(track([
+      { t: 0, f: EMPTY },
+      { t: 0.7, f: tdot(1308, 528, 24, PINK), dur: 0.5, sweep: 0, jitter: 0 },
+      { t: 2.55, f: disc(coreX[0], coreY, 92, { pitch: 12, rmax: 5.6, c: PINK }), dur: 1.0, sweep: 0.4, jitter: 0.12, dir: [-1, 0], shrink: 0.4 },
+      { t: 4.3, f: EMPTY, dur: 0.01, sweep: 0, jitter: 0 },
+    ]));
+    const ix = (t, f, o) => Object.assign({ t, f, mode: "index", dur: 0.4, sweep: 0.12, jitter: 0.05 }, o || {});
+    const main = track([
+      { t: 0, f: EMPTY },
+      { t: 0.05, f: fieldOpen, dur: 0.6, sweep: 1.0, jitter: 0.15, dir: [1, 0.3] },
+      { t: 2.55, f: rosterBig, dur: 1.1, sweep: 0.55, jitter: 0.15, dir: [1, 0], shrink: 0.5 },
+      { t: 7.65, f: bar(2), dur: 0.9, sweep: 0.3, jitter: 0.1, dir: [1, 0], shrink: 0.5 },
+      ix(10.3, bar(0)),
+      ix(21.45, bar(1)),
+      ix(28.3, bar(-1)),
+      ix(41.1, bar(1)),
+      ix(42.5, bar(0)),
+      ix(45.1, bar(-1)),
+      ix(48.3, bar(0)),
+      { t: 53.65, f: endRows, dur: 1.0, sweep: 0.35, jitter: 0.12, dir: [0, 1], shrink: 0.5 },
+      { t: 57.15, f: endLogo, dur: 1.1, sweep: 0.3, jitter: 0.1, dir: [1, 0], shrink: 0.5 },
+    ]);
+    E.push(main);
+
+    // ---- Plan: the codebase, mapped by Antigravity, condensed into four tasks
+    const fieldA = block(860, 300, 70, 38, { pitch: 12, rf: (i, j) => {
+      const seg = Math.floor(i / 7), on = H.hash(j * 97 + seg, 3) > 0.28 && (i % 7) < 3 + Math.floor(4 * H.hash(j * 31 + seg, 9));
+      return on ? 3.2 : 1.1;
+    } });
+    const module = (x, y, c, r) => block(x, y, c, r, { pitch: 12, rf: (i, j) => {
+      const d = Math.hypot((i - (c - 1) / 2) / c, (j - (r - 1) / 2) / r) * 1.6;
+      return Math.max(1.4, 4.2 * (1 - d * d * 0.7));
+    } });
+    const modules = join(module(860, 300, 32, 17), module(1292, 300, 35, 17), module(860, 552, 32, 17), module(1292, 552, 35, 17),
+      seg(1252, 396, 1280, 396, { pitch: 12, r: 3 }), seg(1252, 648, 1280, 648, { pitch: 12, r: 3 }),
+      seg(1052, 512, 1052, 540, { pitch: 12, r: 3 }), seg(1500, 512, 1500, 540, { pitch: 12, r: 3 }));
+    const taskP = [[1010, 440], [1010, 600], [1380, 440], [1380, 600]];
+    const fourTasks = join(...taskP.map(([x, y]) => tdot(x, y, 20)));
+    E.push(track([
+      { t: 0, f: EMPTY },
+      { t: 8.05, f: fieldA, dur: 0.5, sweep: 0.6, jitter: 0.1, dir: [1, 0] },
+      { t: 9.0, f: modules, dur: 0.55, sweep: 0.85, jitter: 0.05, dir: [1, 0], shrink: 0.3 },
+      { t: 10.5, f: fourTasks, dur: 1.0, sweep: 0.25, jitter: 0.12, dir: [1, 0], shrink: 0.6 },
+      { t: 13.9, f: EMPTY, dur: 0.02, sweep: 0, jitter: 0 },
+    ]));
+    const sub = (x, y, c) => disc(x, y, 30, { pitch: 10, rmax: 4.2, c: c == null ? INK : c });
+    // Antigravity sends a pink cluster that becomes the scan line
+    E.push(track([
+      { t: 0, f: EMPTY },
+      { t: 8.35, f: sub(barX[2], barY, PINK), dur: 0.1, sweep: 0, jitter: 0 },
+      { t: 8.42, f: seg(850, 290, 850, 760, { pitch: 12, r: 3.6, c: PINK }), dur: 0.5, sweep: 0.08, jitter: 0.04, dir: [-1, 1], shrink: 0.4 },
+      { t: 9.0, f: EMPTY, dur: 0.01, sweep: 0, jitter: 0 },
+    ]));
+    E.push({ emit(t, out) {
+      if (t < 9.0 || t > 9.95) return;
+      const u = (t - 9.0) / 0.95, e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+      const x = 850 + (1712 - 850) * e, g = Math.min(1, (9.95 - t) / 0.12);
+      for (let y = 290; y <= 760; y += 12) out.push(x, y, 3.6 * g, PINK);
+    } });
+    // plan-checker: a printed frame around the plan
+    E.push(show(frame(950, 362, 830, 330, { pitch: 12, r: 2.2 }), 11.85, 14.0, { din: 0.35, sin: 0.6, dir: [1, 0.2] }));
+
+    // ---- Build / Review / Merge: the yard, the integration line, four worktree cells
+    const LINE_Y = 860;
+    const CX = [960, 1200, 1440, 1680], CT = 420, CB = 640, CW = 200, CY = 530;
+    const leaseT = [14.7, 14.75, 18.7, 18.75];
+    const pourT = [29.0, 29.45, 29.9, 30.35];              // each task starts to merge
+    const FZ0 = 31.2, FZ1 = 33.35;                         // the protected task waits for you
+    const tau = (t) => (t < FZ0 ? t : t < FZ1 ? FZ0 : t - (FZ1 - FZ0));
+    const MAIN_Y = 560, LIFT = 33.75;                      // the shared branch rises into main
+    // the Test lanes print in where the branch was, then make way for the notes
+    const TL = { ox: 812, oy: 560, x0: 940, x1: 1330, sx: 1452, sy: 560 };
+    const laneYs = [380, 470, 560, 650, 740];
+    const lanesF = (c) => join(...laneYs.map((y) => join(
+      curve([TL.ox + 18, TL.oy], [TL.ox + 70, TL.oy], [TL.x0 - 70, y], [TL.x0 - 10, y], { pitch: 13, r: 2.6, c }),
+      seg(TL.x0, y, TL.x1, y, { pitch: 13, r: 2.6, c }),
+      curve([TL.x1 + 10, y], [TL.x1 + 70, y], [TL.sx - 80, TL.sy], [TL.sx - 38, TL.sy], { pitch: 13, r: 2.6, c }))),
+      disc(TL.ox, TL.oy, 16, { pitch: 8, rmax: 3.6 }), disc(TL.sx, TL.sy, 32, { pitch: 10, rmax: 4.6 }));
+    const lanesInk = lanesF(INK), lanesPink = lanesF(PINK);
+    const sheets = [{ x: 1400, y: 236, w: 420, h: 296 }, { x: 1400, y: 596, w: 420, h: 176 }];
+    const pass = (t0) => [ix(t0, lanesPink, { dur: 0.25, sweep: 0.85, jitter: 0.02, bend: 0, shrink: 0 }), ix(t0 + 1.15, lanesInk, { dur: 0.25, sweep: 0.5, jitter: 0.02, bend: 0, shrink: 0 })];
+    E.unshift(track([
+      { t: 0, f: EMPTY },
+      { t: 35.1, f: lanesInk, dur: 0.6, sweep: 0.6, jitter: 0.05, dir: [1, 0] },
+      ...pass(36.45), ...pass(39.35),
+      { t: 42.45, f: EMPTY, dur: 0.4, sweep: 0.5, jitter: 0.05, dir: [1, 0] },
+    ]));
+
+    // the shared branch, until it rises into main
+    const sharedLine = seg(780, LINE_Y, 1840, LINE_Y, { pitch: 14, r: 4.6, c: INK });
+    E.push(show(sharedLine, 14.35, LIFT, { din: 0.35, sin: 0.7, dout: 0.01, sout: 0 }));
+    // tasks: lease (the worktree unfolds from the task dot), build, review pins, merge
+    const cellFrame = (k) => frame(CX[k] - CW / 2, CT, CW, CB - CT, { pitch: 12, r: 1.8 });
+    const branchF = (k) => seg(CX[k], LINE_Y - 16, CX[k], CB + 12, { pitch: 12, r: 2.2 });
+    const fillF = (k) => block(CX[k] - CW / 2 + 16, CT + 16, 15, 16, { pitch: 12, rf: (i, j) => {
+      const d = Math.hypot(CX[k] - CW / 2 + 16 + i * 12 - CX[k], CT + 16 + j * 12 - CY) / 135;
+      return Math.max(0, 4.6 * (1 - d * d * 0.85));
+    } });
+    const leased = (k) => join(tdot(CX[k], CY, 16), cellFrame(k), branchF(k));
+    const built = (k) => join(leased(k), fillF(k));
+    const waitP = [null, null, [1440, 300], [1680, 300]];
+    const fillT = [16.0, 16.05, 19.6, 19.65];
+    // Merging a task: the built work folds into the task dot, the dot runs down
+    // its branch (used up behind it) onto the shared branch, a short ripple runs
+    // out along the branch where it lands, the empty workspace prints out, and
+    // the dot stays on the branch as the merged work until the branch rises.
+    const lineXs = Array.from({ length: sharedLine.n }, (_, i) => sharedLine.x[i]);
+    const FOLD = 0.4, DROP = 0.5;
+    const merging = (k, m, end, clock) => {
+      const fill = fillF(k), fr = cellFrame(k), st = branchF(k);
+      const d0 = m + FOLD + 0.05, land = d0 + DROP;
+      return { emit(t, out) {
+        if (clock) t = clock(t);
+        if (t < m || t >= end) return;
+        for (let i = 0; i < fr.n; i++) {
+          const g = t < land ? 1 : 1 - H.spring((t - land - (0.12 * (fr.y[i] - CT)) / (CB - CT)) / 0.3);
+          if (fr.r[i] * g > 0.15) out.push(fr.x[i], fr.y[i], fr.r[i] * g, INK);
+        }
+        const pf = H.spring((t - m) / FOLD);
+        if (pf < 1) for (let i = 0; i < fill.n; i++) {
+          const r = fill.r[i] * (1 - pf);
+          if (r > 0.15) out.push(lerp(fill.x[i], CX[k], pf), lerp(fill.y[i], CY, pf), r, INK);
+        }
+        const u = clamp((t - d0) / DROP, 0, 1), e = u * u;
+        const y = lerp(CY, LINE_Y, e);
+        if (t < land) for (let i = 0; i < st.n; i++) if (st.y[i] > y + 6) out.push(st.x[i], st.y[i], st.r[i], INK);
+        out.push(CX[k], y, lerp(16 + 2 * pf, 12, e), INK);
+        const s = t - land;
+        if (s >= 0 && s < 0.45) lineXs.forEach((x) => {
+          const dx = Math.abs(x - CX[k]);
+          if (dx < 18) return;
+          const w = Math.exp(-Math.pow((dx - 18 - 460 * s) / 26, 2)) * Math.pow(1 - s / 0.45, 1.5);
+          if (w > 0.02) out.push(x, LINE_Y, 4.6 + 2.6 * w, INK);
+        });
+      } };
+    };
+    for (let k = 0; k < 4; k++) {
+      const keys = [{ t: 0, f: EMPTY }, { t: 13.9, f: tdot(taskP[k][0], taskP[k][1], 20), dur: 0.02, sweep: 0, jitter: 0 }];
+      if (k >= 2) keys.push(ix(14.45, tdot(waitP[k][0], waitP[k][1], 16), { dur: 0.7, sweep: 0, jitter: 0, bend: 0, shrink: 0 }));
+      keys.push({ t: leaseT[k], f: leased(k), dur: 0.7, sweep: 0.2, jitter: 0.08, dir: [0, 1], shrink: 0.3 });
+      keys.push({ t: fillT[k], f: built(k), mode: "grow", dur: 0.5, sweep: 0.5, jitter: 0.1, dir: [0, -1] });
+      if (k === 2) {
+        keys.push({ t: 26.25, f: leased(k), mode: "grow", dur: 0.3, sweep: 0.25, jitter: 0.05, dir: [0, 1] });
+        keys.push({ t: 26.95, f: built(k), mode: "grow", dur: 0.45, sweep: 0.4, jitter: 0.08, dir: [0, -1] });
+      }
+      // the merge takes over the same dots at pourT[k]
+      keys.push({ t: pourT[k], f: EMPTY, dur: 0.01, sweep: 0, jitter: 0 });
+      E.push(track(keys));
+      // the protected task runs on the frozen clock: it stops on its branch until you approve
+      E.push(k === 3 ? merging(k, pourT[k], LIFT - (FZ1 - FZ0), tau) : merging(k, pourT[k], LIFT));
+    }
+    // the main branch prints in grey; the shared branch and its merged work rise
+    // into it from the left, and it prints solid where they land
+    const commitsAt = (y) => join(...CX.map((x) => tdot(x, y, 12)));
+    E.push(show(seg(780, MAIN_Y, 1840, MAIN_Y, { pitch: 14, r: 3.8, c: MUTED }), 33.45, 35.05, { din: 0.3, sin: 0.45, dir: [1, 0], dout: 0.35, sout: 0.4 }));
+    E.push(track([
+      { t: 0, f: EMPTY },
+      { t: LIFT, f: join(sharedLine, commitsAt(LINE_Y)), dur: 0.01, sweep: 0, jitter: 0 },
+      ix(LIFT + 0.02, join(seg(780, MAIN_Y, 1840, MAIN_Y, { pitch: 14, r: 4.6, c: INK }), commitsAt(MAIN_Y)), { dur: 0.45, sweep: 0.3, jitter: 0.015, dir: [1, 0], bend: 0, shrink: 0.15 }),
+      { t: 35.05, f: EMPTY, dur: 0.35, sweep: 0.4, jitter: 0.04, dir: [1, 0] },
+    ]));
+    // sub-clusters: a copy leaves a roster cluster, flies, and dissolves
+    const flight = (pts, end, o) => {
+      o = o || {};
+      const keys = [{ t: 0, f: EMPTY }, { t: pts[0][0], f: sub(pts[0][1], pts[0][2], pts[0][3]), dur: 0.12, sweep: 0, jitter: 0.04 }];
+      for (let i = 1; i < pts.length; i++) keys.push(ix(pts[i][0], sub(pts[i][1], pts[i][2], pts[i][3]), { dur: o.dur || 0.55, sweep: 0.08, jitter: 0.06, bend: 0.04, dir: [1, 1], shrink: 0.2 }));
+      keys.push({ t: end, f: EMPTY, dur: 0.3, sweep: 0.08, jitter: 0.08 });
+      return track(keys);
+    };
+    const B0 = [barX[0], barY], B1 = [barX[1], barY];
+    const touch = (k) => [CX[k] + CW / 2 - 4, CY];
+    // builders (Claude Code)
+    [[15.2, 0], [15.25, 1], [18.95, 2], [19.0, 3], [26.45, 2]].forEach(([t0, k]) =>
+      E.push(flight([[t0, ...B0], [t0 + 0.1, CX[k], CY]], t0 + (k === 2 && t0 > 20 ? 0.5 : 0.75))));
+    // reviewers (Codex, pink): touch the cell, then return
+    [[21.9, 0], [24.7, 1], [25.55, 2], [26.95, 2], [27.35, 3]].forEach(([t0, k]) =>
+      E.push(flight([[t0, ...B1, PINK], [t0 + 0.1, ...touch(k), PINK], [t0 + 0.6, ...B1, PINK]], t0 + 1.05)));
+    // the builder as its own reviewer: stopped short of its own task
+    E.push(flight([[22.85, ...B0], [22.95, 1200, 300]], 24.75, { dur: 0.55 }));
+    E.push(show(seg(1112, 374, 1288, 374, { pitch: 14, r: 4.4, c: RING }), 23.45, 24.6, { din: 0.3, sin: 0.25, dir: [1, 0] }));
+    // findings go back to the builder in the fix cycle
+    E.push(movers([0, 1, 2].map((i) => ({ p: path([[CX[2] + 60 - i * 30, CT + 40], [1200, 260], [B0[0] + 30, B0[1] + 20]]), t0: 25.95 + i * 0.07, d: 0.6, r: 5, c: PINK }))));
+    // the pinned reviewer's mark stays on the cell, through the fix cycle
+    [[22.35, 0], [25.15, 1], [25.98, 2], [27.8, 3]].forEach(([t0, k]) =>
+      E.push(show(tdot(CX[k] + CW / 2, CT, 7, PINK), t0, pourT[k], { din: 0.25, sin: 0, dout: 0.25, sout: 0 })));
+    // between waves, a check rides the shared branch
+    E.push({ emit(t, out) {
+      if (t < 17.55 || t > 18.45) return;
+      const u = (t - 17.55) / 0.9, x = 780 + 1060 * (1 - Math.pow(1 - u, 3)), g = Math.min(1, (18.45 - t) / 0.12, (t - 17.55) / 0.08);
+      for (let j = -2; j <= 2; j++) if (j) out.push(x, LINE_Y + j * 12, 3.6 * g, INK);
+    } });
+    // the protected task freezes mid-merge until you approve
+    E.push(show(ringOf(CX[3], 650, 196, { pitch: 12, r: 3.0, c: PINK }), FZ0, FZ1, { din: 0.35, sin: 0.3, dir: [0, 1], dout: 0.3 }));
+    E.push(track([{ t: 0, f: EMPTY },
+      { t: 32.75, f: tdot(CX[3], 170, 11), dur: 0.2, sweep: 0, jitter: 0 },
+      ix(32.9, tdot(CX[3], 715, 11), { dur: 0.45, sweep: 0, jitter: 0, bend: 0, shrink: 0 }),
+      { t: 33.4, f: EMPTY, dur: 0.25, sweep: 0, jitter: 0 }]));
+
+    // ---- Test: findings through the lanes into one report; the failing test first
+    const RX = 1530, col = [1722, 1812], rowY = [440, 540, 640];
+    E.push(show(seg(RX, 392, 1860, 392, { pitch: 10, r: 1.6 }), 35.4, 42.45, { din: 0.3, sin: 0.3 }));
+    const lanePath = (k) => path([[TL.x1 - 50, laneYs[k]], [TL.x1 + 10, laneYs[k]], ...H.bez([TL.x1 + 10, laneYs[k]], [TL.x1 + 70, laneYs[k]], [TL.sx - 80, TL.sy], [TL.sx - 4, TL.sy], 24)]);
+    const toCell = (row, c) => path(H.bez([TL.sx + 4, TL.sy], [TL.sx + 40, TL.sy], [col[c] - 80, rowY[row] + 30], [col[c] - 40, rowY[row] + 30], 24));
+    const fin = [];
+    [0, 0, 1, 1, 1, 2, 2, 3, 4].forEach((k, i) => {
+      const row = [0, 1, 2, 0, 1, 2, 1, 2, 2][i];
+      fin.push({ p: lanePath(k), t0: 36.95 + i * 0.05, d: 0.62, r: 5.6, c: INK });
+      fin.push({ p: toCell(row, 0), t0: 37.6 + i * 0.05, d: 0.5, r: 5.6, c: INK });
+    });
+    [1, 4].forEach((k, i) => {
+      fin.push({ p: lanePath(k), t0: 39.85 + i * 0.08, d: 0.62, r: 5.6, c: INK });
+      fin.push({ p: toCell(2, 1), t0: 40.5 + i * 0.08, d: 0.5, r: 5.6, c: INK });
+    });
+    // fixes: P1 and P2 findings go back to the change
+    [0, 1, 2, 3, 4].forEach((i) => fin.push({ p: path(H.bez([col[0] - 40, rowY[i < 2 ? 0 : 1] + 30], [1400, 300], [1000, 280], [TL.ox, TL.oy - 20], 30)), t0: 38.65 + i * 0.06, d: 0.75, r: 5, c: INK }));
+    E.push(movers(fin));
+    E.push(show(join(ringOf(col[1], rowY[0] + 36, 42, { pitch: 10, r: 2.6, c: PINK }), ringOf(col[1], rowY[1] + 36, 42, { pitch: 10, r: 2.6, c: PINK })), 41.05, 42.45, { din: 0.35, sin: 0.3, dir: [0, 1] }));
+    E.push(track([{ t: 0, f: EMPTY },
+      { t: 41.3, f: tdot(1556, 790, 15, RING), dur: 0.3, sweep: 0, jitter: 0 },
+      ix(41.85, tdot(1556, 790, 15, INK), { dur: 0.3, sweep: 0, jitter: 0, shrink: 0 }),
+      { t: 42.45, f: EMPTY, dur: 0.3, sweep: 0, jitter: 0 }]));
+
+    // ---- Wrap: the sheets are written, the marker is created last, the next sprint reads
+    const sheetText = (s, rows) => join(...Array.from({ length: rows }, (_, j) => block(s.x + 28, s.y + 34 + j * 26, Math.max(4, Math.round(((s.w - 56) / 10) * (0.55 + 0.45 * H.hash(j, s.x)))), 1, { pitch: 10, r: 2.6 })));
+    sheets.slice(0, 1).forEach((s) => {
+      E.push(show(frame(s.x, s.y, s.w, s.h, { pitch: 12, r: 1.8 }), 42.65, 48.25, { din: 0.3, sin: 0.3 }));
+      E.push(show(sheetText(s, 9), 43.05, 48.25, { din: 0.3, sin: 0.7, dir: [0, 1] }));
+    });
+    E.push(show(disc(1300, 890, 28, { pitch: 9, rmax: 4.0 }), 45.75, 48.25, { din: 0.4, sin: 0.2 }));
+    E.push(movers(Array.from({ length: 9 }, (_, i) => ({ p: path(H.bez([sheets[0].x + 40 + i * 38, sheets[0].y + 50 + (i % 4) * 56], [1500, 700], [1340, 780], [1300, 884], 30)), t0: 46.45 + i * 0.07, d: 0.75, r: 3.6, c: INK }))));
+
+    // ---- On its own: fresh sessions, a check before each, then the finish
+    const OS = { x: 1080, y: 600, r: 120 }, slotY = 860, slotX = [980, 1130, 1280, 1430, 1580];
+    const REC = { x: 1340, y: 470 }, FIN = { x: 1356, y: 620 };
+    const osRuns = [[48.75, 49.75], [50.15, 51.15], [51.55, 53.6]];
+    E.push(show(join(...slotX.map((x) => ringOf(x, slotY, 24, { pitch: 10, r: 1.8, c: RINGM }))), 48.4, 53.6, { din: 0.35, sin: 0.3 }));
+    E.push(show(block(REC.x, REC.y, 13, 3, { pitch: 12, r: 3.0 }), 48.4, 53.6, { din: 0.35, sin: 0.3 }));
+    const recMark = (c) => tdot(REC.x + 190, REC.y + 12, 10, c);
+    E.push(track([{ t: 0, f: EMPTY }, { t: 48.4, f: recMark(RINGM), dur: 0.3, sweep: 0, jitter: 0 },
+      ...osRuns.flatMap(([a], k) => [ix(a - 0.05, recMark(INK), { dur: 0.2, sweep: 0, jitter: 0, shrink: 0 }), ...(k < 2 ? [ix(osRuns[k][1] + 0.1, recMark(RINGM), { dur: 0.15, sweep: 0, jitter: 0, shrink: 0 })] : [])]),
+      { t: 53.6, f: EMPTY, dur: 0.3, sweep: 0, jitter: 0 }]));
+    E.push({ emit(t, out) {
+      osRuns.forEach(([a]) => {
+        const t0 = a - 0.35, u = (t - t0) / 0.3;
+        if (u < 0 || u > 1) return;
+        const x = REC.x - 10 + 170 * (1 - Math.pow(1 - u, 3)), g = Math.min(1, (1 - u) / 0.15, u / 0.08);
+        for (let j = -1; j <= 3; j++) out.push(x, REC.y + j * 12, 3.4 * g, PINK);
+      });
+    } });
+    const bigS = disc(OS.x, OS.y, OS.r, { pitch: 12, rmax: 5.4 });
+    const smallS = (k) => disc(slotX[k], slotY, 18, { pitch: 7, rmax: 2.8 });
+    osRuns.forEach(([a, b], k) => E.push(track([
+      { t: 0, f: EMPTY },
+      { t: a, f: disc(barX[0], barY, 26, { pitch: 10, rmax: 3.6 }), dur: 0.12, sweep: 0, jitter: 0 },
+      ix(a + 0.08, bigS, { dur: 0.5, sweep: 0.15, jitter: 0.08, dir: [0, 1], shrink: 0.5 }),
+      ...(k < 2 ? [ix(b, smallS(k), { dur: 0.45, sweep: 0.12, jitter: 0.06, dir: [1, 1], shrink: 0.2 })] : [{ t: 53.6, f: EMPTY, dur: 0.35, sweep: 0.2, jitter: 0.05 }]),
+      ...(k < 2 ? [{ t: 53.6, f: EMPTY, dur: 0.3, sweep: 0, jitter: 0.05 }] : []),
+    ])));
+    E.push(track([{ t: 0, f: EMPTY },
+      { t: 52.25, f: tdot(FIN.x, FIN.y, 14, PINK), dur: 0.35, sweep: 0, jitter: 0 },
+      { t: 53.6, f: EMPTY, dur: 0.3, sweep: 0, jitter: 0 }]));
+    E.push(track([{ t: 0, f: EMPTY },
+      { t: 52.75, f: tdot(FIN.x, FIN.y + 86, 9, PINK), dur: 0.3, sweep: 0, jitter: 0 },
+      { t: 53.6, f: EMPTY, dur: 0.3, sweep: 0, jitter: 0 }]));
+
+    // ---- the chapter rail
+    const railX = Array.from({ length: 8 }, (_, k) => 150 + (k * 1620) / 7), railY = 1002;
+    const starts = [CH.goal, CH.plan, CH.build, CH.review, CH.merge, CH.test, CH.wrap, CH.own, CH.end];
+    E.push({ emit(t, out) {
+      const g = smooth(0.3, 0.9, t) * (1 - smooth(53.6, 54.2, t));
+      if (g <= 0.01) return;
+      for (let k = 0; k < 8; k++) {
+        const a = starts[k], b = starts[k + 1];
+        if (t >= a && t < b) out.push(railX[k], railY, 9 * g, PINK);
+        else if (t >= b) out.push(railX[k], railY, 6.5 * g, INK);
+        else out.push(railX[k], railY, 6 * g, RINGM);
+        if (k < 7) {
+          const n = 16;
+          for (let i = 1; i < n; i++) {
+            const f = i / n, x = railX[k] + (railX[k + 1] - railX[k]) * f;
+            const done = t >= b || (t >= a && (t - a) / (b - a) >= f);
+            out.push(x, railY, (done ? 2.4 : 1.4) * g, done ? INK : MUTED);
+          }
+        }
+      }
+    } });
+
+    H.drive(tl, D, (t) => R.draw(t, E));
+    const film = gsap.timeline({ paused: true });
+    const clock = { t: 0 };
+    film.to(clock, { t: FILM, duration: FILM, ease: "none", onUpdate: () => tl.seek(toOld(clock.t), false) }, 0);
+
+    // =========================================================== type
+    const words = H.words;
+    const heads = {};
+    const head = (key, text, size) => {
+      const e = tx(T, 120, 120, text, "h1 wrap", size || 96, { width: "600px" });
+      heads[key] = { e, w: words(e) };
+      gsap.set(heads[key].w, { opacity: 0 });
+      return heads[key];
+    };
+    const lines = (top, items, size) => {
+      const box = document.createElement("div");
+      box.className = "col";
+      box.style.top = top + "px";
+      T.appendChild(box);
+      return items.map((h) => {
+        const d = document.createElement("div");
+        d.className = h.cls || "body";
+        d.style.fontSize = (h.size || size || 34) + "px";
+        d.innerHTML = h.html;
+        box.appendChild(d);
+        gsap.set(d, { x: 0, y: 0, force3D: false });
+        gsap.set(d, { opacity: 0 });
+        return d;
+      });
+    };
+    const cutHead = (from, to, t) => {
+      if (from) H.outLeft(tl, from.w, t, { dx: 80, st: 0.015 });
+      H.inWords(tl, to.w, t + 0.22, { hide: false, dy: 30, st: 0.04 });
+    };
+    const reveal = (els, times) => els.forEach((e, k) => H.rise(tl, e, times[k], { hide: false, dy: 16, d: 0.55 }));
+    const leave = (els, t) => H.outLeft(tl, els, t, { dx: 80, st: 0.025 });
+
+    // Goal
+    const kicker = tx(T, 120, 150, "Example sprint", "lab mut", 30);
+    const title = tx(T, 120, 192, "Rate-limit the login endpoint", "h1 wrap", 84, { width: "600px" });
+    const titleW = words(title);
+    gsap.set([kicker], { opacity: 0 });
+    gsap.set(titleW, { opacity: 0 });
+    H.rise(tl, kicker, 0.2, { hide: false, dy: 12 });
+    H.inWords(tl, titleW, 0.3, { hide: false, dy: 34, st: 0.05 });
+    const goalL = lines(440, [
+      { html: "You give the lead a goal. The lead is Claude Code or Codex." },
+      { html: "Each agent on the team has a role." },
+      { html: "Five more CLIs can join if you add them." },
+    ]);
+    reveal(goalL, [1.5, 4.2, 5.6]);
+    const coreNames = ["Claude Code", "Codex", "Antigravity"];
+    const roles = ["leads and builds", "reviews and tests", "analyzes and documents"];
+    const goalLab = [];
+    coreX.forEach((x, k) => {
+      goalLab.push(tx(T, x - 170, coreY + 114, coreNames[k], "h2 ctr", 40, { width: "340px" }));
+      goalLab.push(tx(T, x - 170, coreY + 168, roles[k], "body mut ctr", 30, { width: "340px" }));
+    });
+    ["OpenCode", "Kimi Code", "Cursor", "Grok Build", "Devin"].forEach((n, k) => goalLab.push(tx(T, optX[k] - 100, optY + 48, n, "lab mut ctr", 28, { width: "200px" })));
+    gsap.set(goalLab, { opacity: 0 });
+    tl.to(goalLab.filter((_, i) => i < 6 && i % 2 === 0), { opacity: 1, duration: 0.4, stagger: 0.12, ease: "power2.out" }, 3.4);
+    goalLab.filter((_, i) => i < 6 && i % 2 === 1).forEach((e, k) => H.rise(tl, e, 4.2 + k * 0.15, { hide: false, dy: 12 }));
+    tl.to(goalLab.slice(6), { opacity: 1, duration: 0.4, stagger: 0.08, ease: "power2.out" }, 5.6);
+    // sprint label and the roster bar names, Plan to Wrap
+    const sprint = tx(T, 120, 52, "Example sprint: Rate-limit the login endpoint", "lab mut", 28);
+    const barNames = coreNames.map((n, k) => tx(T, barX[k] + 44, barY - 18, n, "h2", 32));
+    gsap.set([sprint, ...barNames], { opacity: 0 });
+    tl.to(goalLab, { opacity: 0, duration: 0.3, ease: "power2.in" }, 7.55);
+    tl.to([sprint, ...barNames], { opacity: 1, duration: 0.4, stagger: 0.06, ease: "power2.out" }, 8.3);
+    tl.to(sprint, { opacity: 0, duration: 0.35, ease: "power2.in" }, 48.2);
+    tl.to(barNames, { opacity: 0, duration: 0.35, ease: "power2.in" }, 53.6);
+
+    // Plan
+    const hPlan = head("plan", "Plan");
+    leave([kicker], 7.55);
+    H.outLeft(tl, titleW, 7.55, { dx: 80, st: 0.015 });
+    leave(goalL, 7.6);
+    H.inWords(tl, hPlan.w, 7.8, { hide: false, dy: 30, st: 0.04 });
+    const planL = lines(270, [
+      { html: "Antigravity maps the codebase for the lead." },
+      { html: "The lead splits the goal into tasks, in waves." },
+      { html: "A checker approves the plan before any work starts." },
+    ]);
+    reveal(planL, [8.4, 10.4, 11.9]);
+    const arch = tx(T, 860, 782, "a map of the code", "lab mut", 28);
+    gsap.set(arch, { opacity: 0 });
+    tl.to(arch, { opacity: 1, duration: 0.35 }, 9.9);
+    tl.to(arch, { opacity: 0, duration: 0.3 }, 10.6);
+    const taskNames = ["Limiter", "Limit settings", "Use it in login", "Agent instructions"];
+    const planLab = [tx(T, 990, 370, "first wave", "lab mut", 28), tx(T, 1360, 370, "second wave", "lab mut", 28)];
+    taskP.forEach(([x, y], k) => planLab.push(tx(T, x + 36, y - 17, taskNames[k], "h2", 30)));
+    const approved = tx(T, 1650, 312, "approved", "h2", 30);
+    gsap.set([...planLab, approved], { opacity: 0 });
+    tl.to(planLab, { opacity: 1, duration: 0.35, stagger: 0.04, ease: "power2.out" }, 11.2);
+    tl.to(approved, { opacity: 1, duration: 0.3 }, 12.3);
+    tl.to([...planLab, approved], { opacity: 0, duration: 0.3, ease: "power2.in" }, 14.15);
+
+    // Build
+    const hBuild = head("build", "Build");
+    leave(planL, 14.15);
+    cutHead(hPlan, hBuild, 14.15);
+    const buildL = lines(270, [
+      { html: "Each task goes to the agent that has its role, in a separate workspace." },
+      { html: "The builders work in parallel." },
+      { html: "The build is checked before the next wave starts." },
+    ]);
+    reveal(buildL, [14.6, 15.6, 17.5]);
+    const lineLab = tx(T, 780, LINE_Y + 20, "the shared branch", "lab mut", 28);
+    gsap.set(lineLab, { opacity: 0 });
+    tl.to(lineLab, { opacity: 1, duration: 0.35 }, 14.7);
+    tl.to(lineLab, { opacity: 0, duration: 0.3 }, LIFT);
+
+    // Review
+    const hReview = head("review", "Review");
+    leave(buildL, 21.15);
+    cutHead(hBuild, hReview, 21.15);
+    const reviewL = lines(270, [
+      { html: "A different agent reviews every task. Codex reviews what Claude Code built." },
+      { html: "An agent can't review its own work." },
+      { html: "A task can go back for fixes up to three times, with the same reviewer." },
+    ]);
+    reveal(reviewL, [21.6, 23.4, 25.7]);
+    const refused = tx(T, 1032, 284, "refused", "h2", 30);
+    gsap.set(refused, { opacity: 0 });
+    tl.to(refused, { opacity: 1, duration: 0.3 }, 23.6);
+    tl.to(refused, { opacity: 0, duration: 0.3 }, 24.55);
+    const cycle = tx(T, CX[2] - 100, 326, "back for fixes", "lab", 30);
+    gsap.set(cycle, { opacity: 0 });
+    tl.to(cycle, { opacity: 1, duration: 0.3 }, 26.1);
+    tl.to(cycle, { opacity: 0, duration: 0.3 }, 27.9);
+
+    // Merge
+    const hMerge = head("merge", "Merge");
+    leave(reviewL, 28.15);
+    cutHead(hReview, hMerge, 28.15);
+    const mergeL = lines(270, [
+      { html: "The lead merges each approved task onto the shared branch." },
+      { html: "A change to protected files, like the agents' instructions, waits for your approval." },
+      { html: "You approve, and the work reaches the main branch." },
+    ]);
+    reveal(mergeL, [28.6, 31.1, 33.5]);
+    const waitBig = tx(T, 960, 196, "Waiting for your approval", "h1", 60);
+    const agents = tx(T, CX[3] - 110, CT - 50, "protected files", "lab", 30);
+    const userLab = tx(T, CX[3] + 26, 150, "you", "h2", 30);
+    const mainLab = tx(T, 780, MAIN_Y - 52, "main branch", "lab", 30);
+    gsap.set([waitBig, agents, userLab, mainLab], { opacity: 0 });
+    tl.to([agents, waitBig], { opacity: 1, duration: 0.3, stagger: 0.08, ease: "power2.out" }, FZ0);
+    tl.to(userLab, { opacity: 1, duration: 0.25 }, 32.75);
+    tl.to([agents, waitBig, userLab], { opacity: 0, duration: 0.3, ease: "power2.in" }, FZ1 + 0.05);
+    tl.to(mainLab, { opacity: 1, duration: 0.3 }, 33.6);
+    tl.to(mainLab, { opacity: 0, duration: 0.3 }, 35.0);
+
+    // Test
+    const hTest = head("test", "Test");
+    leave(mergeL, 34.95);
+    cutHead(hMerge, hTest, 34.95);
+    const testL = lines(270, [
+      { html: "Five reviewers check the whole change at once." },
+      { html: "Their findings are sorted by severity." },
+      { html: "Fixes run until nothing critical or important is left." },
+      { html: "Codex writes each test to fail first. Then the fix makes it pass." },
+    ]);
+    reveal(testL, [35.5, 37.7, 38.6, 41.2]);
+    const laneNames = [["Antigravity", "h2", 30], ["Codex", "h2", 30], ["Security", "lab", 30], ["Performance", "lab", 30], ["Simplicity", "lab", 30]];
+    const testLab = laneNames.map(([n, cls, sz], k) => tx(T, TL.x0, laneYs[k] - 44, n, cls, sz));
+    testLab.push(tx(T, RX, 336, "Findings", "h2", 32));
+    testLab.push(tx(T, col[0] - 50, 396, "first", "lab mut ctr", 28, { width: "100px" }));
+    testLab.push(tx(T, col[1] - 50, 396, "second", "lab mut ctr", 28, { width: "100px" }));
+    ["Critical", "Important", "Minor"].forEach((p, k) => testLab.push(tx(T, RX, rowY[k] + 18, p, "lab", 30)));
+    const failLab = tx(T, 1584, 772, "a failing test", "lab", 30);
+    const passLab = tx(T, 1584, 772, "now it passes", "lab", 30);
+    const v1 = ["2", "3", "4"].map((v, k) => tx(T, col[0] - 50, rowY[k] + 4, v, "h1 ctr", 60, { width: "100px" }));
+    const v2 = ["0", "0", "2"].map((v, k) => tx(T, col[1] - 50, rowY[k] + 4, v, "h1 ctr", 60, { width: "100px" }));
+    gsap.set([...testLab, failLab, passLab, ...v1, ...v2], { opacity: 0 });
+    tl.to(testLab, { opacity: 1, duration: 0.35, stagger: 0.04, ease: "power2.out" }, 35.8);
+    tl.to(v1, { opacity: 1, duration: 0.2, stagger: 0.08 }, 38.05);
+    tl.to(v2.slice(0, 2), { opacity: 1, duration: 0.25, stagger: 0.08 }, 40.95);
+    tl.to(v2[2], { opacity: 1, duration: 0.2 }, 41.0);
+    tl.to(failLab, { opacity: 1, duration: 0.25 }, 41.35);
+    tl.to(failLab, { opacity: 0, duration: 0.15 }, 41.85);
+    tl.to(passLab, { opacity: 1, duration: 0.25 }, 42.0);
+    tl.to([...testLab, ...v1, ...v2, passLab], { opacity: 0, duration: 0.3, ease: "power2.in" }, 42.4);
+
+    // Wrap
+    const hWrap = head("wrap", "Wrap");
+    leave(testL, 42.35);
+    cutHead(hTest, hWrap, 42.35);
+    const wrapL = lines(270, [
+      { html: "What the sprint learned is written down." },
+      { html: "The next sprint starts from it." },
+    ]);
+    reveal(wrapL, [42.8, 45.6]);
+    const wrapLab = [tx(T, sheets[0].x, sheets[0].y + sheets[0].h + 14, "what the sprint learned", "lab mut", 30)];
+    const nextLab = [tx(T, 1342, 872, "next sprint", "h2", 32)];
+    gsap.set([...wrapLab, ...nextLab], { opacity: 0 });
+    tl.to(wrapLab[0], { opacity: 1, duration: 0.3 }, 43.1);
+    tl.to(nextLab, { opacity: 1, duration: 0.3 }, 46.0);
+    tl.to([...wrapLab, ...nextLab], { opacity: 0, duration: 0.3, ease: "power2.in" }, 48.2);
+
+    // On its own
+    const hOwn = head("own", "On its own");
+    leave(wrapL, 48.15);
+    cutHead(hWrap, hOwn, 48.15);
+    const ownL = lines(270, [
+      { html: "It can also run on its own, one fresh session at a time." },
+      { html: "Each session checks its records first." },
+      { html: "It stops when the sprint is finished, then lets you know." },
+    ]);
+    reveal(ownL, [48.5, 49.6, 52.3]);
+    const sess = [1, 2, 3].map((n) => tx(T, OS.x - 170, OS.y - OS.r - 78, `Session ${n} of 5`, "h2 ctr", 40, { width: "340px" }));
+    const recLab = tx(T, REC.x - 2, REC.y - 48, "its records", "lab mut", 30);
+    const checked = tx(T, REC.x + 214, REC.y - 4, "checked", "lab", 30);
+    const finLab = tx(T, FIN.x + 30, FIN.y - 18, "sprint finished", "h2", 32);
+    const note = [tx(T, FIN.x + 30, FIN.y + 66, "Agent Triforge", "h2", 30), tx(T, FIN.x + 30, FIN.y + 102, "Sprint complete", "lab", 30)];
+    gsap.set([...sess, recLab, checked, finLab, ...note], { opacity: 0 });
+    tl.to([recLab, checked], { opacity: 1, duration: 0.3, stagger: 0.06 }, 48.45);
+    osRuns.forEach(([a, b], k) => {
+      tl.to(sess[k], { opacity: 1, duration: 0.25, ease: "power2.out" }, a + 0.45);
+      tl.to(sess[k], { opacity: 0, duration: 0.2, ease: "power2.in" }, k < 2 ? b : 53.55);
+    });
+    tl.to(finLab, { opacity: 1, duration: 0.3 }, 52.35);
+    tl.set(note, { y: 18 }, 0);
+    tl.to(note, { opacity: 1, y: 0, duration: 0.45, ease: "expo.out", stagger: 0.06 }, 52.8);
+    tl.to([recLab, checked, finLab, ...note], { opacity: 0, duration: 0.3, ease: "power2.in" }, 53.55);
+
+    // End card
+    H.outLeft(tl, hOwn.w, 53.55, { dx: 80, st: 0.015 });
+    leave(ownL, 53.55);
+    const endLine = tx(T, 240, 160, "One CLI leads. The others build, review, test, analyze and document.", "h1 wrap", 64, { width: "1380px" });
+    const endW = words(endLine);
+    gsap.set(endW, { opacity: 0 });
+    H.inWords(tl, endW, 53.95, { hide: false, dy: 30, st: 0.04 });
+    const endLab = [];
+    endCore.forEach((x, k) => endLab.push(tx(T, x - 170, endCoreY + 80, coreNames[k], "h2 ctr", 40, { width: "340px" })));
+    ["OpenCode", "Kimi Code", "Cursor", "Grok Build", "Devin"].forEach((n, k) => endLab.push(tx(T, endOpt[k] - 100, endOptY + 42, n, "lab ctr", 28, { width: "200px" })));
+    endLab.push(tx(T, 240, endCoreY - 17, "core trio", "lab mut", 28));
+    endLab.push(tx(T, 240, endOptY - 17, "optional", "lab mut", 28));
+    gsap.set(endLab, { opacity: 0 });
+    tl.to(endLab, { opacity: 1, duration: 0.35, stagger: 0.05, ease: "power2.out" }, 54.5);
+    H.outLeft(tl, endW, 57.0, { dx: 80, st: 0.012 });
+    tl.to(endLab, { opacity: 0, duration: 0.3, ease: "power2.in" }, 57.0);
+    const word = tx(T, LOGO_X + 11 * LOGO_P + 70, 466, "Agent Triforge", "h1", 124);
+    const wordW = words(word);
+    gsap.set(wordW, { opacity: 0 });
+    H.inWords(tl, wordW, 57.9, { hide: false, dy: 36, st: 0.06 });
+
+    tl.seek(0, false);
+    window.__timelines["main"] = film;
+  }
+  H.fontsReady().then(build);
+})();
+</script>
+</body>
+</html>

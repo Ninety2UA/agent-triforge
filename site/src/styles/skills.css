@@ -1,0 +1,138 @@
+/* The skills catalog (/skills/), the skill pages (/skills/<name>/) and the personas page
+   (/skills/personas/), in the home page's vocabulary: the catalog cards and chips from global.css,
+   muted surfaces, 2 px dotted rules, one accent dot. The skill body and the persona prompts are docs
+   prose (docs.css). Loaded only by the three pages. */
+
+/* ---------- the head of the catalog and the personas page ---------- */
+.cat { padding-top: clamp(40px, 6vw, 88px); }
+.cat-head { display: grid; gap: 18px; justify-items: start; margin-bottom: clamp(32px, 4vw, 48px); }
+.cat-head .lede { max-width: 64ch; margin: 0; }
+.cat-head .lede code { font-size: 0.86em; }
+.cat-switch { margin-top: 8px; }
+.cat-switch a { text-decoration: none; }
+.cat-switch .n { font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* inline code from the repo's own lines (skill-html.mjs inlineHtml) wraps only at a space or after a
+   slash: each piece is unbreakable, the code itself is not */
+.cat :not(pre) > code:has(> .nw), .sk :not(pre) > code:has(> .nw) { white-space: normal; }
+.cat .nw, .sk .nw { white-space: nowrap; }
+
+/* ---------- the filter: search box, chips, count ---------- */
+.cat-body .sf { display: grid; gap: 14px; }
+.sf-field { align-items: center; max-width: 560px; height: 48px; }
+.sf-field .sf-icon { padding-left: 14px; }
+.sf-field .sf-icon svg { width: 18px; height: 18px; }
+.sf-field .sf-input { height: 100%; padding: 0 4px; font: inherit; font-size: 17px; color: var(--foreground); }
+.sf-field .sf-input::placeholder { color: var(--muted-foreground); opacity: 1; }
+/* the browser's clear button for a search field, drawn in the page's ink instead of its own blue */
+.sf-field .sf-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; background: var(--muted-foreground); cursor: pointer;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E") center / contain no-repeat; }
+.sf-field .sf-input::-webkit-search-cancel-button:hover { background: var(--foreground); }
+.sf-field .sf-key { padding-right: 12px; }
+.sf-field kbd { font-size: 11.5px; padding: 2px 7px; border-radius: 4px; background: var(--background); color: var(--muted-foreground); }
+.cat-body .chips { margin-bottom: 0; }
+.cat-body .count { margin: 16px 0 20px; }
+
+/* every card is one link: the name's link covers the card, and the focus ring draws round the card */
+.cat .card { position: relative; }
+.cat .card h2 { font-size: 17px; line-height: 1.3; letter-spacing: -0.01em; }
+.cat .card h2 code { font-size: clamp(15px, 4vw, 16.5px); }
+.cat .card h2 a { text-decoration: none; }
+.cat .card h2 a::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius); }
+.cat .card h2 a:focus-visible { outline: none; }
+.cat .card:has(h2 a:focus-visible) { outline: 2px solid var(--ring); outline-offset: 3px; }
+.cat .card:hover h2 a { text-decoration: underline; }
+/* a card shows the skill's summary in at most four lines; the whole of it, and when to use the skill, are
+   on the skill's page (the filter still matches the text a card leaves out) */
+.cat-body .card > p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
+
+.cat-empty { display: grid; justify-items: start; gap: 16px; padding: clamp(24px, 4vw, 40px); border-radius: var(--radius); background: var(--muted); }
+.cat-empty[hidden] { display: none; }
+.cat-empty p { margin: 0; font-size: 17px; overflow-wrap: anywhere; }
+
+@media (max-width: 640px) { .sf-field .sf-key { display: none; } }
+
+/* ---------- a skill page ---------- */
+.sk { padding-top: 24px; }
+.crumbs ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 15px; color: var(--muted-foreground); }
+.crumbs li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.crumbs svg { width: 14px; height: 14px; flex: none; }
+.crumbs a { color: var(--muted-foreground); text-decoration: none; }
+.crumbs a:hover { color: var(--foreground); text-decoration: underline; }
+.crumbs [aria-current] { color: var(--foreground); overflow-wrap: anywhere; }
+
+.sk-head { display: grid; gap: 16px; justify-items: start; max-width: 860px; padding: clamp(28px, 4vw, 52px) 0 clamp(32px, 4vw, 48px); }
+.sk-head .meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.sk-head h1 code { font-size: 0.9em; font-weight: 600; letter-spacing: -0.02em; white-space: normal; }
+.sk-head .lede { max-width: 62ch; margin: 0; }
+.sk-head .lede code { font-size: 0.86em; }
+.sk-use { max-width: 62ch; margin: 0; font-size: 17px; color: var(--muted-foreground); }
+.sk-src { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 4px 0 0; font-size: 15px; }
+.sk-src a { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.sk-src svg { width: 16px; height: 16px; }
+
+.sk-layout { display: grid; grid-template-columns: minmax(0, 1fr) 208px; gap: 0 clamp(28px, 3.4vw, 56px); border-top: 2px dotted var(--dot-frame); }
+.sk-main { min-width: 0; padding-top: clamp(32px, 4vw, 48px); }
+.sk-run { max-width: 760px; }
+.sk-run h2, .sk-related h2 { font-size: clamp(1.35rem, 1.15rem + 0.7vw, 1.75rem); letter-spacing: -0.02em; margin: 0 0 12px; }
+.sk-run > p { max-width: 62ch; margin: 0 0 18px; font-size: 17px; }
+.sk-run .note { max-width: 62ch; }
+.sk-args { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 20px 0 0; font-size: 15px; }
+.sk-args dt { font-weight: 600; color: var(--muted-foreground); }
+.sk-args dd { margin: 0; }
+.sk-args code { white-space: normal; overflow-wrap: anywhere; }
+.sk-toc-m { margin: 40px 0 0; max-width: 760px; }
+.sk-layout .toc { padding-top: clamp(32px, 4vw, 48px); }
+.sk-related { padding-top: clamp(56px, 6vw, 88px); }
+.sk-related h2 { margin-bottom: 20px; }
+
+@media (max-width: 1279px) {
+  .sk-layout { grid-template-columns: minmax(0, 1fr); }
+  .sk .sb-mobile { display: block; }
+}
+@media (max-width: 420px) { .sk-args { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- the personas page ---------- */
+.pg-jump ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px 28px; }
+.pg-jump a { display: inline-flex; align-items: baseline; gap: 8px; font-weight: 600; text-decoration: none; }
+.pg-jump a:hover { text-decoration: underline; }
+.pg-jump .n { font-weight: 500; font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
+/* the space above a group is its heading's margin, which collapses through the section, so a link to
+   the section (#review-specialists-6) lands on the heading as a link to the heading does */
+.pg > h2 { margin: clamp(56px, 7vw, 96px) 0 clamp(16px, 2vw, 24px); }
+
+.pl { list-style: none; margin: 0; padding: 0; }
+.pl-item { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 10px clamp(24px, 3.5vw, 64px); padding: 26px 0; border-top: 2px dotted var(--dot-frame); }
+.pl-id h3 { font-size: clamp(1.05rem, 0.9rem + 0.6vw, 1.4rem); }
+.pl-id h3 code { font-size: 1em; font-weight: 500; letter-spacing: -0.02em; white-space: normal; }
+.pl .nd { display: inline-flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 13px; font-weight: 600; color: var(--primary-text); }
+.pl .nd::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--dot-active); }
+.pl-what { min-width: 0; }
+.pl-sum { max-width: 62ch; margin: 0 0 14px; font-size: 17px; }
+/* fixed columns for the tier and the budget, so they line up from one persona to the next */
+.pl-facts { display: grid; grid-template-columns: minmax(0, 1fr) 7.5rem 6rem; gap: 12px 24px; margin: 0 0 16px; font-size: 15px; }
+.pl-facts div { display: grid; gap: 4px; align-content: start; }
+.pl-facts dt { font-size: 13px; font-weight: 600; color: var(--muted-foreground); }
+.pl-facts dd { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-variant-numeric: tabular-nums; }
+.pl-cls { color: var(--muted-foreground); }
+
+.pl-prompt { border-radius: var(--radius); background: var(--muted); }
+.pl-prompt > summary { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 16px; font-size: 15px; font-weight: 600; cursor: pointer; list-style: none; }
+.pl-prompt > summary::-webkit-details-marker { display: none; }
+.pl-prompt > summary::before { content: ""; width: 7px; height: 7px; border-right: 1.8px solid currentColor; border-bottom: 1.8px solid currentColor; transform: rotate(-45deg); transition: transform 200ms var(--ease); }
+.pl-prompt[open] > summary::before { transform: rotate(45deg); }
+.pl-prompt > .doc { max-width: none; padding: 4px 18px 20px; }
+.pl-prompt .doc p, .pl-prompt .doc li { font-size: 15px; line-height: 1.6; }
+.pl-prompt .doc h4 { font-size: 17px; margin: 24px 0 8px; }
+.pl-prompt .doc h5, .pl-prompt .doc h6 { font-size: 15px; margin: 20px 0 6px; }
+.pl-prompt .doc h6 { color: var(--muted-foreground); }
+/* code in a persona prompt sits on the prompt's muted panel, so it takes the page's ground */
+.pl-prompt .doc :not(pre) > code { background: var(--background); }
+.pl-prompt .doc pre { --ground: var(--background); }
+
+@media (max-width: 760px) { .pl-item { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) {
+  .pl-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pl-facts > div:first-child { grid-column: 1 / -1; }
+}

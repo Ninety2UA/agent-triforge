@@ -1,0 +1,48 @@
+---
+// The hero's live dot field. The static SVG is the final frame (no JavaScript, reduced motion);
+// the canvas takes over once the page script runs. Labels and captions are plain words.
+import layouts from '@/data/layouts.json';
+import { CLIS, FIELD_CAPS } from '@/data/content';
+import { numberWord } from '@/lib/numbers.mjs';
+import { discRadius, dotRadius } from '@/components/home/dots';
+type Lay = typeof layouts.d;
+const main: Lay = layouts.d;
+const mob: Lay = layouts.m;
+// one cluster per CLI, in the roster's order; a CLI added to the registry needs a cluster in the layouts
+for (const [k, lay] of Object.entries(layouts)) {
+  if (lay.clusters.length !== CLIS.length) throw new Error(`site/src/data/layouts.json: layout ${k} has ${lay.clusters.length} clusters for ${CLIS.length} CLIs; add or remove a cluster`);
+}
+const r = (c: { opt?: number }, dx: number, dy: number) => +dotRadius(!!c.opt, Math.hypot(dx, dy)).toFixed(3);
+const subs: Record<string, string> = { 'Claude Code': 'lead, builder', Antigravity: 'analyst', Codex: 'reviewer, tester' };
+const labels = (lay: Lay, short: boolean) => [
+  ...CLIS.map((cli, i) => {
+    const c = lay.clusters[i] as { x: number; y: number; opt?: number };
+    const R = discRadius(!!c.opt);
+    return { cls: c.opt ? 'flbl opt' : 'flbl', left: ((c.x + 0.5) / lay.cols) * 100, top: ((c.y + R + 1.15) / lay.rows) * 100, name: cli.name, sub: short ? '' : (subs[cli.name] ?? 'optional') };
+  }),
+];
+const aria = `A dot field of the ${numberWord(CLIS.length)} coding agents as clusters. You give the lead, Claude Code, a goal; it splits the goal into two tasks, each in its own workspace. Claude Code builds them, Codex reviews both, and Claude Code is refused when it tries to review its own work. The lead merges both tasks onto the shared branch.`;
+const sets = [{ lay: main, cls: 'lay-d', short: false }, { lay: mob, cls: 'lay-m', short: true }];
+---
+<figure class="fig hero-art" style="margin:0">
+  <div class="field" data-layouts={JSON.stringify(layouts)} data-captions={JSON.stringify(FIELD_CAPS)} style={`--ar-d:${main.cols}/${main.rows};--ar-m:${mob.cols}/${mob.rows}`} role="img" aria-label={aria}>
+    {sets.map(({ lay, cls }) => (
+      <svg class={`field-svg ${cls}`} viewBox={`0 0 ${lay.cols} ${lay.rows}`} aria-hidden="true">
+        <defs><pattern id={`scr-${cls}`} width="1" height="1" patternUnits="userSpaceOnUse"><circle class="bgd" cx=".5" cy=".5" r=".06" /></pattern></defs>
+        <rect width={lay.cols + 1} height={lay.rows + 1} fill={`url(#scr-${cls})`} />
+        {lay.clusters.map((c: any) => c.dots.map(([dx, dy]: number[]) => <circle class={c.opt ? 'opt' : undefined} cx={c.x + dx + 0.5} cy={c.y + dy + 0.5} r={r(c, dx, dy)} />))}
+        {Array.from({ length: lay.line.x1 - lay.line.x0 + 1 }, (_, i) => <circle class="pk" cx={lay.line.x0 + i + 0.5} cy={lay.line.y + 0.5} r=".15" />)}
+        {lay.tasks.map((t) => <circle class="pk" cx={t.line[0] + 0.5} cy={t.line[1] + 0.5} r=".6" />)}
+      </svg>
+    ))}
+    <canvas aria-hidden="true"></canvas>
+    {sets.map(({ lay, cls, short }) => (
+      <div class={`flabels ${cls}`} aria-hidden="true">
+        {labels(lay, short).map((l) => <span class={l.cls} style={`left:${l.left.toFixed(2)}%;top:${l.top.toFixed(2)}%`}><b>{l.name}</b>{l.sub && <i>{l.sub}</i>}</span>)}
+        {lay.tasks.map((t, i) => <span class="flbl cell" style={`left:${(((t.cell[0] + 0.5) / lay.cols) * 100).toFixed(2)}%;top:${(((t.cell[1] + 4.5) / lay.rows) * 100).toFixed(2)}%`}>Task {i + 1}</span>)}
+        <span class="flbl line" style={`left:${(((lay.line.x0 + 0.1) / lay.cols) * 100).toFixed(2)}%;top:${(((lay.line.y + 1.25) / lay.rows) * 100).toFixed(2)}%`}>Shared branch</span>
+      </div>
+    ))}
+  </div>
+  <figcaption class="field-cap"><p>{FIELD_CAPS[FIELD_CAPS.length - 1]}</p></figcaption>
+</figure>

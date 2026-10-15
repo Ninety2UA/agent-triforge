@@ -1,0 +1,30 @@
+---
+// Leave it running: coordinate.sh and the unattended loop (Fig. 4).
+import CodeBlock from '../CodeBlock.astro';
+import VideoFigure from '../VideoFigure.astro';
+import { LOOP, figure } from '@/data/loops';
+
+const coordinate = [
+  'TRIFORGE="$(tail -n 1 .agents/triforge-plugin-root.local)"',
+  'bash "$TRIFORGE/scripts/coordinate.sh" "Build auth" --dry-run',
+  'bash "$TRIFORGE/scripts/coordinate.sh" "Build auth" --max 5 --convergence deep --team',
+];
+---
+<section id="unattended" aria-labelledby="un-h" data-rv-group>
+  <div class="wrap unatt">
+    <div data-rv>
+      <h2 id="un-h">Leave it running</h2>
+      <p class="lede" style="margin-top:18px"><code>/at-ship</code> runs a whole sprint in one session. For bigger goals, <code>coordinate.sh</code> starts fresh lead sessions until the sprint is marked done.</p>
+      <ul>
+        <li><span>Five sessions at most by default; <code>--max</code> changes it.</span></li>
+        <li><span>An integrity check runs before each session.</span></li>
+        <li><span>It stops on a login or quota failure.</span></li>
+        <li><span>It tells you through a webhook and a desktop notification.</span></li>
+      </ul>
+      <CodeBlock lines={coordinate} label="Copy the coordinate.sh commands" />
+      <p class="note">A Codex lead also needs <code>--allow-full-access</code>, which only you can pass.</p>
+      <p style="margin-top:22px"><a class="more" href="/guides/unattended-runs/">Unattended runs</a></p>
+    </div>
+    <VideoFigure n={4} {...figure(LOOP.unattended)} />
+  </div>
+</section>

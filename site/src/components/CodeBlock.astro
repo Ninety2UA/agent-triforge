@@ -1,0 +1,33 @@
+---
+// The copy control: shadcn InputGroup (server-rendered, no JavaScript of its own) holding the command
+// lines and a copy button in InputGroupButton's anatomy, driven by plain script (scripts/copy.ts) so
+// the clipboard write happens inside the real tap. Lines wrap only at spaces or after a slash, with a
+// hanging indent. Without JavaScript the button is hidden and the command stays selectable.
+import { cn } from 'cn';
+import { InputGroup, InputGroupAddon, inputGroupButtonVariants } from '@/components/ui/input-group';
+import { buttonVariants } from '@/components/ui/button';
+import { tokens } from '@/lib/cmd';
+import { IC } from './icons';
+
+interface Props {
+  lines: string[];
+  /** accessible name of the copy button, e.g. "Copy the Claude Code install commands" */
+  label: string;
+  /** show a "$ " prompt before each line (not copied) */
+  prompt?: boolean;
+}
+const { lines, label, prompt = true } = Astro.props;
+---
+<InputGroup data-cmd="">
+  <pre data-slot="input-group-control"><code>{lines.map((line) => (
+    <span class="ln">{prompt && <span class="p">$ </span>}{tokens(line).map((pieces, i) => (
+      <Fragment>{i > 0 && ' '}{pieces.map((p, j) => <Fragment>{j > 0 && <wbr />}<span class="nw">{p}</span></Fragment>)}</Fragment>
+    ))}</span>
+  ))}</code></pre>
+  <InputGroupAddon align="inline-end">
+    <button type="button" data-slot="button" data-size="xs" data-pagefind-ignore aria-label={label} data-copy={lines.join('\n')}
+      class={cn(buttonVariants({ variant: 'ghost' }), inputGroupButtonVariants({ size: 'xs' }), 'copy')}>
+      <Fragment set:html={IC.copy.replace('<svg ', '<svg class="i-copy" ')} /><Fragment set:html={IC.check.replace('<svg ', '<svg class="i-check" ')} /><span class="copy-label">Copy</span>
+    </button>
+  </InputGroupAddon>
+</InputGroup>
