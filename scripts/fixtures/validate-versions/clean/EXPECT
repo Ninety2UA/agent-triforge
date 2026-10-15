@@ -13,7 +13,7 @@ line: ok:   skill versions: all 1 skills/*/SKILL.md carry metadata.version 1.2.3
 line: ok:   ladder: one definition (scripts/lib/registry.sh:2 TRIFORGE_MODEL_LADDER)
 line: ok:   stale-pin sweep: no stale pins outside the excluded paths
 line: ok:   rule inventory: docs/rule-inventory.md — 2 rows in 1 table(s), matching the declared Totals for each of 1 sources; every row has a destination, no TBD cell, every cited destination path exists (2 distinct)
-line: ok:   halt threshold: 3 statement(s) of more than 50 changed files and none that halts at 50 itself (50+, 50 or more, at least 50, >= 50) in skills/, AGENTS.md, README.md and its topic pages, docs/index.html, docs/agent-triforge.md
+line: ok:   halt threshold: 3 statement(s) of more than 50 changed files and none that halts at 50 itself (50+, 50 or more, at least 50, >= 50) in skills/, AGENTS.md, README.md and its topic pages, docs/agent-triforge.md
 line: ok:   liquid: no Liquid delimiter ({{ or {%) in the 2 Markdown file(s) under docs/ (GitHub Pages builds docs/ with Jekyll)
 line: ok:   diagram render stamp: docs/images/render-diagrams.sha256 matches docs/images/render-diagrams.html and 1 docs/images/excalidraw/*.svg file(s)
 line: validate-versions: PASS (--only lockstep,skill-versions,ladder,sweep,inventory,halt,liquid,diagrams)

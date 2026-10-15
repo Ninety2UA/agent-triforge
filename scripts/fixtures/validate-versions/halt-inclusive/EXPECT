@@ -1,12 +1,13 @@
 # Finding #9: a 50-file halt threshold that halts at 50 itself fails, in each
-# phrasing (50+ file changes first), through HTML tags and entities and across
-# a wrapped line. The passing lines in skills/demo/SKILL.md (more than 50
+# phrasing (50+ file changes first), through HTML tags and entities (inline
+# HTML in docs/agent-triforge.md) and across a wrapped line. The passing
+# lines in skills/demo/SKILL.md (more than 50
 # changed files, file changes > 50, "50 files" and "look at 50 files" with no
 # comparator, a "halt" in an earlier sentence, 150+) print nothing.
 check: halt
 rc: 1
-line: FAIL: halt threshold: docs/index.html:2: "50+ file changes" halts at 50 itself — the threshold is more than 50 changed files (AGENTS.md §Delegation)
-line: FAIL: halt threshold: docs/index.html:3: "≥ 50 changed files" halts at 50 itself — the threshold is more than 50 changed files (AGENTS.md §Delegation)
+line: FAIL: halt threshold: docs/agent-triforge.md:2: "50+ file changes" halts at 50 itself — the threshold is more than 50 changed files (AGENTS.md §Delegation)
+line: FAIL: halt threshold: docs/agent-triforge.md:3: "≥ 50 changed files" halts at 50 itself — the threshold is more than 50 changed files (AGENTS.md §Delegation)
 line: FAIL: halt threshold: skills/demo/SKILL.md:5: "50+ file changes" halts at 50 itself — the threshold is more than 50 changed files (AGENTS.md §Delegation)
 line: FAIL: halt threshold: skills/demo/SKILL.md:6: "50 or more changed files" halts at 50 itself — the threshold is more than 50 changed files (AGENTS.md §Delegation)
 line: FAIL: halt threshold: skills/demo/SKILL.md:7: "at least 50 changed files" halts at 50 itself — the threshold is more than 50 changed files (AGENTS.md §Delegation)

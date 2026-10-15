@@ -121,7 +121,7 @@
 #      three ways (every skill; the portable set, whose names do not start
 #      with at-; the at-* lead workflows), must match every count claim in
 #      AGENTS.md, templates/AGENTS.md, README.md (outside its
-#      "## Release history" section, as in check 4), docs/index.html,
+#      "## Release history" section, as in check 4),
 #      docs/agent-triforge.md, .claude-plugin/plugin.json and, when they
 #      exist, the README's topic pages (DOC_PAGES), and
 #      docs/images/render-diagrams.html and the text of the
@@ -135,7 +135,8 @@
 #      path); subset phrasings ("+ 5 agents", "all 4 review agents", "5
 #      parallel research agents") and history lines are skipped; "(was N)" is
 #      stripped before matching so the current number on the same line is
-#      still checked.
+#      still checked. The website (site/) renders its counts from the same
+#      files, and its own build gate (site/scripts/check-site.mjs) checks them.
 #   6. AGENTS.md budget (R10) — when a root AGENTS.md exists it must be at most
 #      200 lines (a final unterminated line counts) and at most 16 KiB
 #      (16384 bytes; Codex's combined instruction budget is 32 KiB). Prints a
@@ -211,7 +212,7 @@
 #      skills/, AGENTS.md, README.md (outside its "## Release history"
 #      section, whose lines are blanked so later ones keep their numbers),
 #      the README's topic pages (DOC_PAGES, each that exists),
-#      docs/index.html and docs/agent-triforge.md, a 50-file threshold written
+#      and docs/agent-triforge.md, a 50-file threshold written
 #      inclusively fails: 50+, 50 or more (or above, and up, …), 50 files or
 #      more, at least 50, ≥ / >= / => 50 before file(s), changed files or file
 #      changes, file changes ≥ / >= 50, and "halt … at 50 files" within one
@@ -1308,7 +1309,6 @@ files = [
     "AGENTS.md",
     "templates/AGENTS.md",
     "README.md",
-    "docs/index.html",
     "docs/agent-triforge.md",
     ".claude-plugin/plugin.json",
 ]
@@ -1377,26 +1377,6 @@ for path in files:
 for entry in os.environ["VV_DIAGRAM_TEXT"].splitlines():
     path, n, raw = entry.split(":", 2)
     scan(path, int(n), raw)
-
-# Landing-page hero counters carry the number in a data-target attribute and
-# the surface name in the next span, so the prose CLAIM regex never sees them.
-HERO = re.compile(
-    r'data-target="(?P<n>\d+)">0</span>\s*<span class="hero__stat-label">(?P<kind>Personas|Agents|Skills|Portable skills|Lead workflows)</span>'
-)
-if os.path.exists("docs/index.html"):
-    with open("docs/index.html", encoding="utf-8") as fh:
-        html = fh.read()
-    for m in HERO.finditer(html):
-        kind = m.group("kind").lower().rstrip("s")
-        kind = KIND.get(kind, kind)
-        n = int(m.group("n"))
-        claims += 1
-        if n != actual[kind]:
-            lineno = html.count("\n", 0, m.start()) + 1
-            mismatches.append(
-                "docs/index.html:" + str(lineno) + ": hero counter says " + str(n) + " " + kind + "s, shipped "
-                + str(actual[kind]) + " — data-target=\"" + str(n) + "\" " + m.group("kind")
-            )
 
 for line in mismatches:
     print("FAIL: counts: " + line)
@@ -1896,11 +1876,11 @@ EXCLUSIVE = re.compile(
 # newlines, so line numbers hold.
 TAG = re.compile(r"<!--.*?(?:-->|$)|</?[A-Za-z][A-Za-z0-9-]*(?:\s[^>]*)?/?>", re.S)
 EMPHASIS = re.compile(r"[*_`]")
-SCOPE = "skills/, AGENTS.md, README.md and its topic pages, docs/index.html, docs/agent-triforge.md"
+SCOPE = "skills/, AGENTS.md, README.md and its topic pages, docs/agent-triforge.md"
 
 readme_history_start = int(os.environ["VV_README_HISTORY_START"] or "0")
 readme_history_end = int(os.environ["VV_README_HISTORY_END"] or "0")
-paths = [p for p in ("AGENTS.md", "README.md", "docs/index.html", "docs/agent-triforge.md") if os.path.isfile(p)]
+paths = [p for p in ("AGENTS.md", "README.md", "docs/agent-triforge.md") if os.path.isfile(p)]
 paths.extend(p for p in os.environ["VV_DOC_PAGES"].split() if os.path.isfile(p))
 for top, dirs, names in os.walk("skills"):
     dirs.sort()

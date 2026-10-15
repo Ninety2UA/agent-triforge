@@ -1,3 +1,3 @@
-<!doctype html>
+# Halt threshold (validate-versions fixture: inline HTML in Markdown)
 <p>Per-subagent risk accumulation — halt at &gt;20% risk or <strong>50+</strong> file changes</p>
 <p>Halt a builder at &ge; 50 changed files.</p>
