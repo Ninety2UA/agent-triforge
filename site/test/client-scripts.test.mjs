@@ -60,6 +60,15 @@ test('tabs: a stored lead of "codex" selects Codex in every lead tab group on a 
   assert.equal(p.document.querySelector('[data-lead-href]').getAttribute('href'), '/docs/getting-started/#codex');
 });
 
+test('tabs: a link into one tab opens it in its own group; the stored lead holds in every other group', () => {
+  const p = page(tabs('s1', LEADS.slice(0, 2)) + tabs('s2', LEADS.slice(0, 2)) + tabs('s3', LEADS.slice(0, 2)) + install, { stored: { [LEAD_KEY]: 'codex' }, hash: '#s2-claude-code' });
+  initTabs(p.document, p.window);
+  assert.deepEqual(selected(p.document, 's1'), ['codex']);
+  assert.deepEqual(selected(p.document, 's2'), ['claude-code'], 'the linked tab wins in its own group');
+  assert.deepEqual(selected(p.document, 's3'), ['codex']);
+  assert.equal(p.document.querySelector('[data-lead-href]').getAttribute('href'), '/docs/getting-started/#codex');
+});
+
 test('tabs: choosing a lead stores it and applies it to every lead group and Install link', () => {
   const p = page(tabs('hero', LEADS.slice(0, 2)) + tabs('inst', LEADS) + install);
   initTabs(p.document, p.window);

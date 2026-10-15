@@ -52,6 +52,9 @@ test('a link inside fenced code or inline code is left unchanged', () => {
   assert.equal(out[6], `Write \`${link}\` to link a skill.`, 'inline code changed');
   // a link whose label is code is still a link
   assert.equal(rewriteLinks('[`at-ship`](../skills/at-ship/SKILL.md)', WORKFLOWS), '[`at-ship`](/skills/at-ship/)');
+  // a titled link and a reference definition are rewritten too, their titles kept
+  assert.equal(rewriteLinks('[the guide](models.md "Model choices")', WORKFLOWS), '[the guide](/guides/models-and-effort/ "Model choices")');
+  assert.equal(rewriteLinks('[models]: models.md "Model choices"', WORKFLOWS), '[models]: /guides/models-and-effort/ "Model choices"');
 });
 
 test("the README FAQ's raw-HTML links resolve against the repo root", () => {

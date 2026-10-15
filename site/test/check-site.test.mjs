@@ -73,6 +73,33 @@ test('a script or stylesheet from another origin fails', () => {
   }
 });
 
+test('a srcset candidate or a video poster from another origin fails, as a src does', () => {
+  const s = site({
+    'index.html': page('<img src="/a.png" srcset="/a.png 1x, https://cdn.example/a2.png 2x" alt=""><video poster="https://cdn.example/p.webp"></video>'),
+    'a.png': '',
+  });
+  try {
+    assert.deepEqual(checkOrigins(s.pages()), ['index.html: <img> from https://cdn.example/a2.png', 'index.html: <video> from https://cdn.example/p.webp']);
+  } finally {
+    s.done();
+  }
+});
+
+test('a srcset candidate with no file in the build fails, and a bare relative link fails', () => {
+  const s = site({
+    'index.html': page('<img src="/a.png" srcset="/a.png 400w, /a-800.png 800w" alt=""><a href="models.md">models</a><a href="#top" id="top">top</a>'),
+    'a.png': '',
+  });
+  try {
+    assert.deepEqual(checkLinks(s.dir, s.pages()), [
+      'index.html: srcset="/a-800.png" has no file in the build',
+      'index.html: href="models.md" is a relative URL; links on the site are root-relative',
+    ]);
+  } finally {
+    s.done();
+  }
+});
+
 test('a page without a canonical link fails, and the 404 must not have one', () => {
   const s = site({ 'index.html': page('', { canonical: '' }), '404.html': page('', { canonical: 'https://agent-triforge.dbenger.com/404/' }) });
   try {

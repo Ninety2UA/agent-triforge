@@ -130,7 +130,10 @@ export function resolveImage(from, src, { imageBase = from, root = REPO } = {}) 
   return rel.startsWith('.') ? rel : `./${rel}`;
 }
 
-const MD_LINK = /(!?)\[((?:[^[\]]|\[[^\]]*\])*)\]\(([^)\s]+)\)/g;
+// [label](target) or [label](target "title"), the title kept as written
+const MD_LINK = /(!?)\[((?:[^[\]]|\[[^\]]*\])*)\]\(([^)\s]+)((?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?)\)/g;
+// a reference definition, [id]: target "title"
+const MD_DEFINITION = /^(\s{0,3}\[[^\]]+\]:\s*)(\S+)(.*)$/;
 const HTML_A = /<a\b([^>]*?)\bhref="([^"]*)"([^>]*)>([\s\S]*?)<\/a>/g;
 const HTML_SRC = /(<(?:img|source)\b[^>]*?\bsrc=")([^"]*)(")/g;
 
@@ -148,10 +151,15 @@ export function rewriteLinks(text, from, options = {}) {
       .map((line) => {
         const { text: masked, restore } = maskCode(line);
         const out = masked
-          .replace(MD_LINK, (_, bang, label, target) => {
-            if (bang) return `![${label}](${image(target)})`;
+          .replace(MD_LINK, (_, bang, label, target, title) => {
+            if (bang) return `![${label}](${image(target)}${title})`;
             const url = link(target);
-            return url === null ? label : `[${label}](${url})`;
+            return url === null ? label : `[${label}](${url}${title})`;
+          })
+          .replace(MD_DEFINITION, (_, open, target, rest) => {
+            const url = link(target);
+            // a definition for a link that does not publish (the README back-link) goes with it
+            return url === null ? '' : `${open}${url}${rest}`;
           })
           .replace(HTML_A, (_, before, href, after, inner) => {
             const url = link(href);

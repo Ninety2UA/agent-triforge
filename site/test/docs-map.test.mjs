@@ -93,6 +93,21 @@ test('a DOC_PAGES entry with no mapping gets /docs/<file name>/, its H1 as the t
   }
 });
 
+test('a new DOC_PAGES file whose name is a guide slug fails the map, naming both pages', () => {
+  const root = mkdtempSync(join(tmpdir(), 'triforge-docs-map-'));
+  try {
+    for (const path of ['README.md', '.claude-plugin', 'skills', 'personas', 'docs/releases']) cpSync(join(REPO, path), join(root, path), { recursive: true });
+    for (const file of readdirSync(join(REPO, 'docs')).filter((f) => f.endsWith('.md'))) cpSync(join(REPO, 'docs', file), join(root, 'docs', file));
+    mkdirSync(join(root, 'scripts'));
+    const validator = readFileSync(join(REPO, VALIDATOR), 'utf8').replace(/^DOC_PAGES='([^']*)'/m, "DOC_PAGES='$1 docs/leases.md'");
+    writeFileSync(join(root, VALIDATOR), validator);
+    writeFileSync(join(root, 'docs/leases.md'), '# Leases\n\nA page that takes the leases guide\'s slug.\n');
+    assert.throws(() => docsMap(root), /\/guides\/leases\/.*share the slug "leases"|share the slug "leases"/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('no generated page keeps the README back-link or a relative link, and every image resolves', () => {
   for (const page of docPages()) {
     for (const text of [page.intro, page.body]) {

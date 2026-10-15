@@ -105,12 +105,10 @@ export function initTabs(doc: Document = document, win: Window = window) {
     });
   });
 
-  // a link into a tab wins over the stored lead; the stored lead still sets the Install links
+  // The stored lead selects every lead group and points the Install links; then a link into a tab opens
+  // that tab in its own group only, so the reader's lead still holds in every other step.
   const lead = storedLead(win);
-  const hashed = fromHash();
-  if (lead) {
-    if (hashed) pointInstallLinks(lead);
-    else applyLead(lead);
-  }
+  if (lead) applyLead(lead);
+  fromHash();
   win.addEventListener('hashchange', () => void fromHash());
 }

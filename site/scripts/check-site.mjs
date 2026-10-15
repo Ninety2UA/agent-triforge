@@ -5,9 +5,9 @@
 //   pages      one page per skill folder and per DOC_PAGES entry, and no page for a skill that is gone
 //   claims     every element with data-claim="<kind>" states the repo's value: the first number in its
 //              text, a numeral or a number word ("seventeen"). Text without data-claim makes no claim.
-//   links      every root-relative href and src resolves to a file in the build (a path ending in / means
-//              its index.html), a fragment on a site page names an id on that page, and every redirect
-//              in vercel.json lands on a page
+//   links      every root-relative href, src, poster and srcset candidate resolves to a file in the build
+//              (a path ending in / means its index.html), no URL is a bare relative path, a fragment on a
+//              site page names an id on that page, and every redirect in vercel.json lands on a page
 //   meta       every page has a title, a description and a canonical link (404.html needs no canonical)
 //   no SKILL   no SKILL.md is copied into the build
 //   origins    no page loads a script, stylesheet, font, image or video from another origin
@@ -80,14 +80,28 @@ function target(dist, path) {
 
 // ---- the checks; each returns a list of problems, every one naming a file ----
 
+// Every URL a tag makes the browser fetch or follow: href, src, poster and each srcset candidate.
+const srcsetUrls = (value) => (value ?? '').split(',').map((c) => c.trim().split(/\s+/)[0]).filter(Boolean);
+const urlsOf = (tag) => [
+  ...['href', 'src', 'poster'].map((name) => [name, attr(tag, name)]),
+  ...srcsetUrls(attr(tag, 'srcset')).map((url) => ['srcset', url]),
+].filter(([, value]) => value);
+
+// A URL the site writes: root-relative, a fragment, or one with a scheme (https:, mailto:, data:). A bare
+// relative path ("models.md") resolves against the page's own folder, which is never what the repo meant.
+const isRelativeUrl = (url) => !/^(?:\/|#|[a-z][a-z0-9+.-]*:)/i.test(url);
+
 export function checkLinks(dist, pages) {
   const problems = [];
   const byFile = new Map(pages.map((p) => [join(dist, p.file), p]));
   for (const p of pages) {
     for (const [tag] of p.html.matchAll(/<(?:a|link|img|script|source|video|iframe)\b[^>]*>/g)) {
-      for (const name of ['href', 'src', 'poster']) {
-        const value = attr(tag, name);
-        if (!value || !value.startsWith('/') || value.startsWith('//')) continue;
+      for (const [name, value] of urlsOf(tag)) {
+        if (isRelativeUrl(value)) {
+          problems.push(`${p.file}: ${name}="${value}" is a relative URL; links on the site are root-relative`);
+          continue;
+        }
+        if (!value.startsWith('/') || value.startsWith('//')) continue;
         const file = target(dist, value);
         if (!file) {
           problems.push(`${p.file}: ${name}="${value}" has no file in the build`);
@@ -144,8 +158,7 @@ export function checkOrigins(pages) {
   const foreign = (url) => /^(https?:)?\/\//.test(url) && new URL(url, SITE_URL).origin !== origin;
   for (const p of pages) {
     for (const [tag, name] of p.html.matchAll(/<(script|img|video|source|iframe|audio|embed)\b[^>]*>/g)) {
-      const src = attr(tag, 'src');
-      if (src && foreign(src)) problems.push(`${p.file}: <${name}> from ${src}`);
+      for (const [, url] of urlsOf(tag)) if (foreign(url)) problems.push(`${p.file}: <${name}> from ${url}`);
     }
     for (const [tag] of p.html.matchAll(/<link\b[^>]*>/g)) {
       const rel = (attr(tag, 'rel') ?? '').toLowerCase().split(/\s+/);

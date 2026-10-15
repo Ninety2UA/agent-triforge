@@ -157,6 +157,16 @@ function buildDocsMap(root) {
     ...GUIDE_PAGES.map((p) => ({ ...p, section: 'guides', href: pageHref('guides', p.slug) })),
   ];
 
+  // Docs and Guides share one content collection keyed by slug, so a slug may appear once across both:
+  // a second page with it would replace the first one's content without an error.
+  const bySlug = new Map();
+  for (const spec of specs) {
+    const other = bySlug.get(spec.slug);
+    const files = (s) => s.parts.map((part) => part.file ?? 'README.md').join(', ');
+    if (other) throw new Error(`docs map: ${other.href} (${files(other)}) and ${spec.href} (${files(spec)}) share the slug "${spec.slug}"; rename one of the files`);
+    bySlug.set(spec.slug, spec);
+  }
+
   // Sections a page maps on their own: the whole-file part of their file leaves them out.
   const sectionPages = new Map();
   for (const spec of specs) {

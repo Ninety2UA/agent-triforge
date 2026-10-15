@@ -33,9 +33,10 @@ export function scriptBytes(html, read) {
     files.set(path, gz(code));
     // static imports: import{a}from"./x.js" and import"./x.js"
     for (const [, spec] of code.matchAll(/\bimport\s*(?:[\w${},\s*]+\s*from\s*)?["']([^"']+\.js)["']/g)) follow(new URL(spec, `https://x${path}`).pathname, seen);
-    // the video player, imported on load by pages that have a figure
+    // the video player, imported on load by pages that have a figure; the bundler writes this import
+    // with backticks (import(`./video.x.js`)), so all three quote forms count
     if (/data-vfig/.test(html)) {
-      for (const [, spec] of code.matchAll(/import\(["']([^"']*video[^"']*\.js)["']\)/g)) follow(new URL(spec, `https://x${path}`).pathname, seen);
+      for (const [, , spec] of code.matchAll(/import\((["'`])([^"'`$]*video[^"'`$]*\.js)\1\)/g)) follow(new URL(spec, `https://x${path}`).pathname, seen);
     }
   };
   const seen = new Set();
@@ -59,6 +60,20 @@ test('every page stays inside its script budget before interaction', { skip }, (
     if (total >= limit) over.push(`${p.url}: ${(total / 1024).toFixed(1)} KB gzipped (limit ${limit / 1024} KB)`);
   }
   assert.deepEqual(over, []);
+});
+
+test('the video import counts in each quote form, the backtick one the build actually writes', () => {
+  for (const q of ['"', "'", '`']) {
+    const files = { '/_astro/a.js': `if(document.querySelector("[data-vfig]"))import(${q}./video.D1.js${q})`, '/_astro/video.D1.js': 'export const v=2;' };
+    const { files: counted } = scriptBytes('<script type="module" src="/_astro/a.js"></script><figure data-vfig></figure>', (p) => files[p]);
+    assert.ok(counted.has('/_astro/video.D1.js'), `import(${q}...${q}) is followed`);
+  }
+});
+
+test('in the built site, a page with a figure counts the video player its script imports', { skip }, () => {
+  const roster = readFileSync(join(dist, 'roster', 'index.html'), 'utf8');
+  const { files } = scriptBytes(roster, readDist);
+  assert.ok([...files.keys()].some((f) => /\/video\.[\w-]+\.js$/.test(f)), [...files.keys()].join(', '));
 });
 
 test('the budget counts static imports and the on-load video import, not the palette', () => {
