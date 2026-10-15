@@ -18,7 +18,9 @@ fi
 
 # Everything the build reads (':/' anchors each path at the repository root): the site itself, the
 # skills, personas and docs pages it renders, the README (FAQ, install block, release table), the
-# plugin version, the shipped roster, and the CLI registry and DOC_PAGES list it parses.
+# plugin version, the templates (the shipped roster among them), and the CLI registry and DOC_PAGES
+# list it parses. Also every other repo file a page links to, because the build checks that each one
+# exists: AGENTS.md, the hooks, ops/, the Codex agents, Pi's package.json and two scripts.
 inputs=(
   ':/site'
   ':/skills'
@@ -26,9 +28,16 @@ inputs=(
   ':/docs'
   ':/README.md'
   ':/.claude-plugin/plugin.json'
-  ':/templates/ops/roster.toml'
+  ':/templates'
   ':/scripts/lib/registry.sh'
   ':/scripts/validate-versions.sh'
+  ':/AGENTS.md'
+  ':/hooks'
+  ':/ops'
+  ':/codex-agents'
+  ':/package.json'
+  ':/scripts/coordinate.sh'
+  ':/scripts/invoke-external.sh'
 )
 if git diff --quiet "$prev" HEAD -- "${inputs[@]}"; then
   echo "No site input changed since ${prev}: skipping the build."

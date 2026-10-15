@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 
 import { getSkills } from '../src/lib/skills.mjs';
 import { getPersonas, personaGroups } from '../src/lib/personas.mjs';
@@ -14,6 +14,7 @@ import { inlineHtml, promptHtml, skillBodyHtml } from '../src/components/skill-h
 import { shortcutAction } from '../src/components/search/shortcut.mjs';
 import { page } from './dom.mjs';
 import { DIST as dist, skip } from './built.mjs';
+import { checkNoSkillFiles } from '../scripts/check-site.mjs';
 
 const built = (path) => readFileSync(join(dist, path), 'utf8');
 // The bare Codex form, built from parts so no tracked file under site/ carries it (validate-versions
@@ -241,16 +242,7 @@ test('each skill folder has exactly one built page, and no SKILL.md is copied in
   const pages = readdirSync(join(dist, 'skills')).filter((d) => d !== 'personas' && statSync(join(dist, 'skills', d)).isDirectory()).sort();
   assert.deepEqual(pages, names);
   for (const name of names) assert.ok(existsSync(join(dist, 'skills', name, 'index.html')), `no page for ${name}`);
-  const copies = [];
-  const walk = (dir) => {
-    for (const f of readdirSync(dir)) {
-      const path = join(dir, f);
-      if (statSync(path).isDirectory()) walk(path);
-      else if (f === 'SKILL.md') copies.push(relative(dist, path));
-    }
-  };
-  walk(dist);
-  assert.deepEqual(copies, []);
+  assert.deepEqual(checkNoSkillFiles(dist), []);
 });
 
 test('the catalog carries every skill as a static card, in catalog order, with its group', { skip }, () => {

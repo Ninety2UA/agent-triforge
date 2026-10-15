@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { SITE } from '../src/lib/repo.mjs';
+import { getRoles } from '../src/lib/roster.mjs';
 import { runClientScript } from './client-script.mjs';
 import { page } from './dom.mjs';
 import * as leads from '../src/data/leads.mjs';
@@ -47,4 +48,18 @@ test('switching the hero to Codex makes the hero Install link end in #codex', { 
   p.click(p.document.getElementById('hero-lead-tab-codex'));
   assert.equal(install(), '/docs/getting-started/#codex');
   assert.equal(p.document.getElementById('install-for-tab-codex').getAttribute('aria-selected'), 'true', 'the install section follows');
+});
+
+// The home page's sprint phases name a role's default CLI ("Builder: Claude Code", "Analyst: Antigravity,
+// falling back to Claude Code"); each must be what templates/ops/roster.toml ships.
+test("every role and fallback the home page's phases name matches the shipped roster", () => {
+  const roles = Object.fromEntries(getRoles().map((r) => [r.role, r]));
+  const source = readFileSync(join(SITE, 'src', 'data', 'home.ts'), 'utf8');
+  const claims = [...source.matchAll(/(Builder|Reviewer|Tester|Analyst|Documenter): ([A-Z][\w ]*?)(?:, falling back to ([A-Z][\w ]*?))?\./g)];
+  assert.ok(claims.length >= 3, `found ${claims.length} role claims in home.ts`);
+  for (const [whole, role, cli, fallback] of claims) {
+    const r = roles[role.toLowerCase()];
+    assert.equal(cli, r.cliName, whole);
+    if (fallback) assert.equal(fallback, r.fallbacks[0]?.cliName, whole);
+  }
 });

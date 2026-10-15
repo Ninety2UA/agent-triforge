@@ -20,7 +20,7 @@
 // Exit codes: 0 the build matches the repo · 1 problems found (each printed, naming the file) ·
 // 2 the build or a ground-truth source is missing.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { extname, join, relative, sep } from 'node:path';
+import { extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { REPO, SITE } from '../src/lib/repo.mjs';
@@ -320,7 +320,7 @@ export async function repoTruth() {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const dist = process.argv[2] ? join(process.cwd(), process.argv[2]) : join(SITE, 'dist');
+  const dist = process.argv[2] ? resolve(process.argv[2]) : join(SITE, 'dist');
   try {
     const problems = checkSite(dist, await repoTruth());
     if (problems.length) {

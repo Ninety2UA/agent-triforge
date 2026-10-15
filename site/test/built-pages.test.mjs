@@ -10,7 +10,7 @@ import { getReleases } from '../src/lib/releases.mjs';
 import { REPO, SITE } from '../src/lib/repo.mjs';
 import { SITE_URL, VERSION } from '../src/lib/site.mjs';
 import { DIST as dist, skip } from './built.mjs';
-import { readPages } from '../scripts/check-site.mjs';
+import { checkOrigins, readPages } from '../scripts/check-site.mjs';
 
 // Every page Astro wrote, by its URL path. Read on first use, so a skipped run never reads site/dist.
 let built;
@@ -21,7 +21,6 @@ const attr = (tag, name) => tag.match(new RegExp(`\\s${name}="([^"]*)"`))?.[1];
 // The script budget's first rule: React islands hydrate on first interaction (never client:load or
 // client:idle), and no page pulls a script, stylesheet or font from another origin.
 test('islands hydrate on interaction; nothing loads from another origin', { skip }, () => {
-  const origin = new URL(SITE_URL).origin;
   const problems = [];
   let islands = 0;
   for (const p of pages()) {
@@ -29,23 +28,11 @@ test('islands hydrate on interaction; nothing loads from another origin', { skip
       islands += 1;
       if (attr(tag, 'client') !== 'interaction') problems.push(`${p.url}: an island with client="${attr(tag, 'client')}"`);
     }
-    for (const [tag] of p.html.matchAll(/<(script|img|video|source|iframe)\b[^>]*>/g)) {
-      const src = attr(tag, 'src');
-      if (src && new URL(src, SITE_URL).origin !== origin) problems.push(`${p.url}: ${tag.slice(1, tag.indexOf(' '))} ${src}`);
-    }
-    for (const [tag] of p.html.matchAll(/<link\b[^>]*>/g)) {
-      const rel = (attr(tag, 'rel') ?? '').toLowerCase().split(/\s+/);
-      const href = attr(tag, 'href');
-      if (href && rel.some((r) => ['stylesheet', 'preload', 'preconnect', 'dns-prefetch', 'modulepreload', 'icon'].includes(r)) && new URL(href, SITE_URL).origin !== origin) {
-        problems.push(`${p.url}: <link rel="${rel.join(' ')}"> ${href}`);
-      }
-    }
-    for (const [, url] of p.html.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/g)) {
-      if (/^https?:/.test(url) && new URL(url).origin !== origin) problems.push(`${p.url}: CSS url(${url})`);
-    }
   }
   assert.ok(islands > 0, 'no <astro-island> in the build: the header menu is one, so the pattern no longer matches');
   assert.deepEqual(problems, []);
+  // origins: the gate's own check (src, srcset, poster, link rel and CSS url)
+  assert.deepEqual(checkOrigins(pages()), []);
 });
 
 test('every page sets its theme inline in <head>, before any stylesheet could paint', { skip }, () => {

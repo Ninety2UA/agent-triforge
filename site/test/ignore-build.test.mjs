@@ -20,7 +20,7 @@ function repo() {
     writeFileSync(join(dir, path), text);
   };
   git('init', '-q');
-  for (const p of ['site/package.json', 'skills/at-ship/SKILL.md', 'docs/models.md', 'README.md', 'hooks/hooks.json']) write(p, 'one\n');
+  for (const p of ['site/package.json', 'skills/at-ship/SKILL.md', 'docs/models.md', 'README.md', 'hooks/hooks.json', 'scripts/probe-capabilities.sh']) write(p, 'one\n');
   git('add', '-A');
   git('commit', '-qm', 'base');
   const base = git('rev-parse', 'HEAD');
@@ -48,7 +48,7 @@ test('ignore-build builds when there is no previous deployment, or its commit is
 test('ignore-build skips the build when only a path outside its inputs changed', () => {
   const r = repo();
   try {
-    r.change('hooks/hooks.json');
+    r.change('scripts/probe-capabilities.sh');
     const out = r.run({ VERCEL_GIT_PREVIOUS_SHA: r.base });
     assert.equal(out.status, 0, out.stdout);
   } finally {
@@ -56,8 +56,8 @@ test('ignore-build skips the build when only a path outside its inputs changed',
   }
 });
 
-test('ignore-build builds when a skill, a docs page or the site changed', () => {
-  for (const path of ['skills/at-ship/SKILL.md', 'docs/models.md', 'site/package.json']) {
+test('ignore-build builds when a skill, a docs page, the site or a file a page links to changed', () => {
+  for (const path of ['skills/at-ship/SKILL.md', 'docs/models.md', 'site/package.json', 'hooks/hooks.json']) {
     const r = repo();
     try {
       r.change(path);
@@ -76,7 +76,8 @@ test('every repository path the build reads outside site/ is an input of the ign
   const { syncBuiltinESMExports } = await import('node:module');
   const { relative, sep } = await import('node:path');
   const reads = new Set();
-  for (const name of ['readFileSync', 'readdirSync', 'openSync']) {
+  // existsSync and statSync too: the build checks that every repo file a page links to exists
+  for (const name of ['readFileSync', 'readdirSync', 'openSync', 'existsSync', 'statSync']) {
     const real = fs[name];
     fs[name] = function (path, ...rest) {
       if (typeof path === 'string') reads.add(path);
@@ -86,8 +87,8 @@ test('every repository path the build reads outside site/ is an input of the ign
   syncBuiltinESMExports();
   const { REPO } = await import(`../src/lib/repo.mjs?trace=${Date.now()}`);
   const load = async (m) => import(`../src/lib/${m}?trace=${Date.now()}`);
-  const [{ getSkills }, { getPersonas, personasPage }, { docPages }, { getReleases }, { getClis, getRoles }, readme, { getCounts }] = await Promise.all(
-    ['skills.mjs', 'personas.mjs', 'docs.mjs', 'releases.mjs', 'roster.mjs', 'readme.mjs', 'counts.mjs'].map(load),
+  const [{ getSkills }, { getPersonas, personasPage }, { docPages }, { getReleases }, { getClis, getRoles }, readme, { getCounts }, sprint, { portableInvocations }, { writtenTutorials }] = await Promise.all(
+    ['skills.mjs', 'personas.mjs', 'docs.mjs', 'releases.mjs', 'roster.mjs', 'readme.mjs', 'counts.mjs', 'sprint.mjs', 'portable.mjs', 'tutorials.mjs'].map(load),
   );
   getSkills();
   getPersonas();
@@ -100,6 +101,12 @@ test('every repository path the build reads outside site/ is an input of the ign
   readme.faq();
   readme.releaseTable();
   getCounts();
+  sprint.sprintPhases();
+  sprint.qualityGates();
+  sprint.convergenceModes();
+  sprint.completionChecklist();
+  portableInvocations();
+  writtenTutorials();
 
   const script = readFileSync(SCRIPT, 'utf8');
   const block = script.match(/^inputs=\([\s\S]*?^\)/m);

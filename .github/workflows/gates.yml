@@ -49,7 +49,7 @@ jobs:
 
       - name: Shell syntax (/bin/bash 3.2)
         run: |
-          for f in scripts/*.sh scripts/lib/*.sh hooks/handlers/*.sh scripts/lease-git-hooks/pre-push site/scripts/ignore-build.sh; do
+          for f in scripts/*.sh scripts/lib/*.sh hooks/handlers/*.sh scripts/lease-git-hooks/pre-push site/scripts/ignore-build.sh site/motion/finish.sh; do
             /bin/bash -n "$f" || { echo "syntax error: $f"; exit 1; }
           done
 
