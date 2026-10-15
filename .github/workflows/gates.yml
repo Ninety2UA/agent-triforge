@@ -10,10 +10,24 @@
 # /bin/bash 3.2 (macOS), so every script runs under /bin/bash here. No live
 # row runs — `probe-capabilities.sh --self-only` executes only the static
 # SELF-* rows, writes its record to a scratch path (never the committed
-# ops/research/ record), and exits 3 on any SELF FAIL. The last step proves the
-# gate can fail: it breaks one invariant in a scratch copy and requires exit 3.
-# `claude plugin validate --strict` needs Claude Code and stays a local release
-# gate (AGENTS.md "Checks to run" and "Release").
+# ops/research/ record), and exits 3 on any SELF FAIL. The can-fail job proves
+# the gate can fail: it breaks one invariant in a scratch copy and requires
+# exit 3. `claude plugin validate --strict` needs Claude Code and stays a
+# local release gate (AGENTS.md "Checks to run" and "Release").
+#
+# Scope (the scope job): the SELF gate takes about 30 minutes on a hosted
+# macOS runner, so it is skipped when every file a pull request changes lies
+# where no SELF row reads: site/, docs/, README.md, LICENSE, the notes under
+# ops/decisions/ and ops/solutions/, and validate-versions.sh with its
+# fixtures, which the gates job runs itself (the rows build their own
+# throwaway repos). Not on the list: ops/research/, because the Devin lane can
+# fall back to the repo's newest probe record, and validate-skills.sh, which
+# SELF-08b runs. Any other path runs it, renames count on both sides, and a
+# scope that cannot be computed (a manual run, a failed diff) runs
+# everything. The can-fail job runs in parallel, and only when the gate's own
+# wiring changes: the probe harness, the pre-push hook SELF-09 breaks, or
+# this file. The syntax check, the validators, their self-tests and the site
+# job run on every pull request.
 name: gates
 
 on:
@@ -29,7 +43,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      self: ${{ steps.scope.outputs.self }}
+      canfail: ${{ steps.scope.outputs.canfail }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Which gates this change needs
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          self=true
+          canfail=true
+          if [ -n "$BASE_SHA" ] && [ -n "$HEAD_SHA" ] && files=$(git diff --name-only --no-renames "$BASE_SHA...$HEAD_SHA"); then
+            self=false
+            canfail=false
+            while IFS= read -r f; do
+              [ -n "$f" ] || continue
+              case "$f" in
+                site/*|docs/*|README.md|LICENSE|ops/decisions/*|ops/solutions/*|scripts/validate-versions.sh|scripts/fixtures/validate-versions/*) ;;
+                *) self=true ;;
+              esac
+              case "$f" in
+                scripts/probe-capabilities.sh|scripts/probe-self-tests.sh|scripts/lease-git-hooks/*|.github/workflows/gates.yml) canfail=true ;;
+              esac
+            done <<< "$files"
+            printf 'changed files:\n%s\n' "$files"
+          else
+            echo "no pull request diff to read: running every gate"
+          fi
+          echo "SELF gate: $self; can-fail proof: $canfail"
+          echo "self=$self" >> "$GITHUB_OUTPUT"
+          echo "canfail=$canfail" >> "$GITHUB_OUTPUT"
+
   gates:
+    needs: scope
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
@@ -66,7 +120,25 @@ jobs:
         run: /bin/bash scripts/validate-versions.sh --self-test
 
       - name: SELF gate
+        if: needs.scope.outputs.self == 'true'
         run: /bin/bash scripts/probe-capabilities.sh --self-only
+
+  self-gate-can-fail:
+    needs: scope
+    if: needs.scope.outputs.canfail == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # as in the gates job
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Tools
+        run: |
+          command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install coreutils
 
       - name: SELF gate can fail
         run: |
