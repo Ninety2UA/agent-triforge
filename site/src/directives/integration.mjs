@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 /** @returns {import('astro').AstroIntegration} */
 export default function interactionDirective() {
   return {
-    name: 'agent-blueprint:client-interaction',
+    name: 'agent-triforge:client-interaction',
     hooks: {
       'astro:config:setup': ({ addClientDirective }) => {
         addClientDirective({

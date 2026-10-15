@@ -1,5 +1,6 @@
 ---
 // Watch one sprint: the film with its chapters.
+import { filmLabel } from '@/data/loops';
 import FilmPlayer from '../FilmPlayer.astro';
 import { filmChapters } from '@/lib/media.mjs';
 
@@ -11,6 +12,6 @@ const { duration } = filmChapters();
       <h2 id="film-h">Watch one sprint</h2>
       <p>An example sprint, rate-limiting a login endpoint, from the goal to the finished work. {Math.round(duration)} seconds, no sound. Pick a chapter to jump to it.</p>
     </div>
-    <FilmPlayer label={`Film, ${Math.round(duration)} seconds, no sound: an example sprint that rate-limits a login endpoint, from the goal to the finished, reviewed work, chapter by chapter.`} />
+    <FilmPlayer label={filmLabel(duration)} />
   </div>
 </section>

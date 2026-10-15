@@ -8,7 +8,7 @@
 //   skills/at-ship/references/completion-gating.md  the completion checklist (its numbered list)
 //
 // Cells are Markdown; links resolve through the route table (routes.mjs) against their own file, and
-// inlineHtml renders the code spans and links. A table or list that is missing stops the build naming
+// cellHtml renders the code spans and links. A table or list that is missing stops the build naming
 // the file.
 //
 // Exports
@@ -21,16 +21,16 @@
 //   convergenceModes(root?)       [{ mode, exit, use, isDefault }]: mode is the flag value (fast, standard,
 //                                 deep), exit the exit criteria as the skill writes them
 //   completionChecklist(root?)    the checklist items, as inline HTML
-//   inlineHtml(markdown)          one line of Markdown as HTML: text escaped, code spans and links rendered
+//   cellHtml(markdown)            one line of Markdown as HTML: text escaped, code spans and links rendered
 import { REPO, read } from './repo.mjs';
 import { rewriteLinks } from './routes.mjs';
-import { codeSpans, githubSlug, parseHeadings, parseTables } from './text.mjs';
+import { codeSpans, escapeHtml, githubSlug, parseHeadings, parseTables } from './text.mjs';
 
 const WORKFLOWS = 'docs/workflows.md';
 const REFINEMENT = 'skills/iterative-refinement/SKILL.md';
 const GATING = 'skills/at-ship/references/completion-gating.md';
 
-const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const esc = escapeHtml;
 const CODE = /(`+)([\s\S]*?[^`])\1(?!`)/g;
 const code = (s) => {
   let out = '';
@@ -43,7 +43,7 @@ const code = (s) => {
 };
 
 /** @param {string} markdown */
-export function inlineHtml(markdown) {
+export function cellHtml(markdown) {
   const LINK = /\[((?:[^[\]]|\[[^\]]*\])*)\]\(([^)\s]+)\)/g;
   let out = '';
   let at = 0;
@@ -79,7 +79,7 @@ const once = (key, make) => {
 /** @param {string} [root] */
 export function sprintPhases(root = REPO) {
   return once(`phases:${root}`, () => {
-    const cell = (md) => inlineHtml(rewriteLinks(md, WORKFLOWS, { root }));
+    const cell = (md) => cellHtml(rewriteLinks(md, WORKFLOWS, { root }));
     return parsePipeline(read(root, WORKFLOWS)).map((row) => {
       const m = row.phase.match(/^([\d.]+(?: and [\d.]+)?), (.+)$/);
       const number = m ? m[1] : '';
@@ -105,7 +105,7 @@ export function qualityGates(root = REPO) {
     return table.rows.map(([gate, enforcedBy, rule]) => {
       const m = gate.match(/^(\d+), (.+)$/);
       if (!m) throw new Error(`${WORKFLOWS}: the quality gate "${gate}" is not "<number>, <name>"`);
-      return { number: m[1], name: m[2], enforcedByHtml: inlineHtml(rewriteLinks(enforcedBy, WORKFLOWS, { root })), rule };
+      return { number: m[1], name: m[2], enforcedByHtml: cellHtml(rewriteLinks(enforcedBy, WORKFLOWS, { root })), rule };
     });
   });
 }
@@ -126,7 +126,7 @@ export function convergenceModes(root = REPO) {
 /** @param {string} [root] */
 export function completionChecklist(root = REPO) {
   return once(`checklist:${root}`, () => {
-    const items = read(root, GATING).split('\n').filter((l) => /^\d+\. /.test(l)).map((l) => inlineHtml(l.replace(/^\d+\. /, '')));
+    const items = read(root, GATING).split('\n').filter((l) => /^\d+\. /.test(l)).map((l) => cellHtml(l.replace(/^\d+\. /, '')));
     if (!items.length) throw new Error(`${GATING}: no numbered checklist`);
     return items;
   });

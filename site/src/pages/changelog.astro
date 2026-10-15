@@ -39,9 +39,8 @@ function noteHtml(source: string, anchor: string) {
       return close ? `</h${level}` : `<h${level} data-pagefind-weight="${weight(level)}"`;
     })
     .replace(/\sid="([^"]*)"/g, (_, id: string) => ` id="${anchor}-${id}"`)
-    .replace(/href="#([^"]+)"/g, (_, id: string) => `href="#${anchor}-${id}"`)
-    .replace(/<table>[\s\S]*?<\/table>/g, (table) => fitTables(table));
-  return labelTaskItems(html);
+    .replace(/href="#([^"]+)"/g, (_, id: string) => `href="#${anchor}-${id}"`);
+  return labelTaskItems(fitTables(html));
 }
 
 // "Oct 13, 2026" in the rows, "October 13, 2026" in the facts; the <time> elements carry the ISO date

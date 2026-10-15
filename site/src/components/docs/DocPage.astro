@@ -37,7 +37,8 @@ if (entry) {
 }
 
 const install = slug === 'getting-started' && section === 'docs';
-const leadTabs = installTabs.filter((t) => t.lead).map((t) => ({ id: t.id, label: t.label, lines: t.blocks.flatMap((b) => b.lines) }));
+// the body's own copy of the install commands becomes a link to these tabs
+const leadTabs = install ? installTabs.filter((t) => t.lead).map((t) => ({ id: t.id, label: t.label, lines: t.blocks.flatMap((b) => b.lines) })) : undefined;
 ---
 <DocsLayout
   title={`${title} · Agent Triforge`}
@@ -51,5 +52,5 @@ const leadTabs = installTabs.filter((t) => t.lead).map((t) => ({ id: t.id, label
   <h1>{title}</h1>
   {intro && ('html' in intro ? <p class="intro" set:html={intro.html} /> : <p class="intro">{intro.text}</p>)}
   {install && <InstallTabs id="install" tabs={installTabs} label="Install for" hashTarget class="doc-install" />}
-  <Prose install={install ? leadTabs : undefined} figure={LOOPS[slug]}><Content /></Prose>
+  <Prose install={leadTabs} figure={LOOPS[slug]}><Content /></Prose>
 </DocsLayout>

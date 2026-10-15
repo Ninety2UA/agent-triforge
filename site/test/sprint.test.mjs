@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { REPO } from '../src/lib/repo.mjs';
-import { completionChecklist, convergenceModes, inlineHtml, parsePipeline, qualityGates, sprintPhases } from '../src/lib/sprint.mjs';
+import { completionChecklist, convergenceModes, cellHtml, parsePipeline, qualityGates, sprintPhases } from '../src/lib/sprint.mjs';
 
 const workflows = readFileSync(join(REPO, 'docs/workflows.md'), 'utf8');
 // the rows of the first table after a heading, by plain line matching
@@ -72,8 +72,8 @@ test('the completion checklist is the numbered list of completion-gating.md', ()
   assert.match(items.at(-1), /<code>ops\/.sprint-complete<\/code>/);
 });
 
-test('inlineHtml escapes text and renders code spans and links, with code inside a link label', () => {
-  assert.equal(inlineHtml('a < b & `x<y>` [`at-ship`](/skills/at-ship/) [docs](https://x.test/a?b=1&c)'),
+test('cellHtml escapes text and renders code spans and links, with code inside a link label', () => {
+  assert.equal(cellHtml('a < b & `x<y>` [`at-ship`](/skills/at-ship/) [docs](https://x.test/a?b=1&c)'),
     'a &lt; b &amp; <code>x&lt;y&gt;</code> <a href="/skills/at-ship/"><code>at-ship</code></a> <a href="https://x.test/a?b=1&amp;c">docs</a>');
 });
 

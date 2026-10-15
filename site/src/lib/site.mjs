@@ -11,5 +11,7 @@ import { GH, REPO, VERSION } from './repo.mjs';
 import { listReleaseNotes } from './sources.mjs';
 
 export const SITE_URL = 'https://agent-triforge.dbenger.com';
+/** the social image's text alternative (public/brand/og.png) */
+export const OG_IMAGE_ALT = 'Agent Triforge: Put Claude Code, Codex and Antigravity on one team. Beside it, the coding agents as dot clusters with their roles, and the shared branch.';
 export { GH, VERSION };
 export const RELEASED = listReleaseNotes(REPO)[0].date;

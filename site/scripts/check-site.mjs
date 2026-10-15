@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 
 import { REPO, SITE } from '../src/lib/repo.mjs';
 import { SITE_URL } from '../src/lib/site.mjs';
+import { decodeEntities } from '../src/lib/text.mjs';
 
 const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen',
   'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty', 'thirty', 'forty', 'fifty'];
@@ -41,9 +42,7 @@ export function firstNumber(text) {
   return b ? value(a) + value(b) : value(a);
 }
 
-const decode = (s) =>
-  s.replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
-    .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+const decode = decodeEntities;
 const attr = (tag, name) => {
   const m = tag.match(new RegExp(`\\s${name}=(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`));
   return m ? decode(m[1] ?? m[2] ?? m[3]) : undefined;

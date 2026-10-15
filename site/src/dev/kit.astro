@@ -9,12 +9,12 @@ import Base from '@/layouts/Base.astro';
 import Mark from '@/components/Mark.astro';
 import CodeBlock from '@/components/CodeBlock.astro';
 import VideoFigure from '@/components/VideoFigure.astro';
-import { LOOP_ORDER, figure } from '@/data/loops';
+import { LOOP_ORDER, figure, filmLabel } from '@/data/loops';
 import FilmPlayer from '@/components/FilmPlayer.astro';
 import { buttonVariants } from '@/components/ui/button';
 import { filmChapters, mp4Facts } from '@/lib/media.mjs';
 import { PUBLIC, SITE } from '@/lib/repo.mjs';
-import { GH } from '@/lib/site.mjs';
+import { GH, OG_IMAGE_ALT } from '@/lib/site.mjs';
 import { README_GIF, fileFacts, markColors } from './files.mjs';
 import { join } from 'node:path';
 
@@ -43,7 +43,6 @@ const facts = (href: string) => {
 
 const readme = `[![Agent Triforge](${GH}/raw/main/docs/images/readme-hero.gif)](${GH})`;
 const [gifW, gifH] = fileFacts(README_GIF.file).frame.split(' × ').map(Number);
-const ogAlt = 'Agent Triforge: Put Claude Code, Codex and Antigravity on one team. Beside it, the coding agents as dot clusters with their roles, and the shared branch.';
 
 const { duration } = filmChapters();
 ---
@@ -90,7 +89,7 @@ const { duration } = filmChapters();
           <figcaption><ul class="kit-files">{['/brand/favicon.svg'].map(facts).map((f) => <li><a href={f.href} download>{f.name}</a><span>{f.meta}</span></li>)}</ul></figcaption>
         </figure>
         <figure class="kit-fig">
-          <div class="sheet"><img src="/brand/og.png" width="1200" height="630" loading="lazy" decoding="async" alt={ogAlt} /></div>
+          <div class="sheet"><img src="/brand/og.png" width="1200" height="630" loading="lazy" decoding="async" alt={OG_IMAGE_ALT} /></div>
           <figcaption><ul class="kit-files">{['/brand/og.png'].map(facts).map((f) => <li><a href={f.href} download>{f.name}</a><span>{f.meta}</span></li>)}</ul></figcaption>
         </figure>
       </div>
@@ -139,7 +138,7 @@ const { duration } = filmChapters();
         <h2 id="film-h">Film</h2>
         <p>One sprint from the goal to the finished work, with its chapter list as JSON for players that offer chapter jumps.</p>
       </div>
-      <FilmPlayer label={`Film, ${Math.round(duration)} seconds, no sound: an example sprint that rate-limits a login endpoint, from the goal to the finished, reviewed work, chapter by chapter.`} />
+      <FilmPlayer label={filmLabel(duration)} />
       <ul class="kit-files kit-files-film">{['/media/film.mp4', poster('film'), '/media/film-chapters.json'].map(facts).map((f) => <li><a href={f.href} download>{f.name}</a><span>{f.meta}</span></li>)}</ul>
     </div>
   </section>

@@ -22,7 +22,7 @@
 // (getSkills, docPages, getPersonas, getReleases).
 
 import { defineCollection } from 'astro:content';
-import { glob } from 'astro/loaders';
+import { glob, type Loader } from 'astro/loaders';
 import { z } from 'astro/zod';
 import { readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
@@ -41,18 +41,22 @@ const filePathFrom = (configRoot: URL, repoPath: string) => relative(fileURLToPa
 
 const group = z.object({ key: z.string(), label: z.string() });
 
-const skills = defineCollection({
-  loader: {
-    name: 'triforge-skills',
-    async load({ config, store, parseData, renderMarkdown }) {
-      store.clear();
-      for (const { body, ...skill } of getSkills()) {
-        const data = await parseData({ id: skill.name, data: skill });
-        const rendered = await renderMarkdown(body, { fileURL: fileURL(skill.path) });
-        store.set({ id: skill.name, data, body, filePath: filePathFrom(config.root, skill.path), rendered });
-      }
-    },
+// A loader for repo records that carry a Markdown body (skills, personas, release notes): each record is
+// stored under its id, with its body rendered from its own file so links and images resolve from there.
+const repoLoader = <T extends { body: string }>(name: string, records: () => T[], id: (r: Omit<T, 'body'>) => string, path: (r: Omit<T, 'body'>) => string): Loader => ({
+  name,
+  async load({ config, store, parseData, renderMarkdown }) {
+    store.clear();
+    for (const { body, ...record } of records()) {
+      const data = await parseData({ id: id(record), data: record });
+      const rendered = await renderMarkdown(body, { fileURL: fileURL(path(record)) });
+      store.set({ id: id(record), data, body, filePath: filePathFrom(config.root, path(record)), rendered });
+    }
   },
+});
+
+const skills = defineCollection({
+  loader: repoLoader('triforge-skills', getSkills, (s) => s.name, (s) => s.path),
   schema: z.object({
     name: z.string(),
     lead: z.boolean(),
@@ -100,17 +104,7 @@ const docs = defineCollection({
 });
 
 const personas = defineCollection({
-  loader: {
-    name: 'triforge-personas',
-    async load({ config, store, parseData, renderMarkdown }) {
-      store.clear();
-      for (const { body, ...persona } of getPersonas()) {
-        const data = await parseData({ id: persona.name, data: persona });
-        const rendered = await renderMarkdown(body, { fileURL: fileURL(persona.path) });
-        store.set({ id: persona.name, data, body, filePath: filePathFrom(config.root, persona.path), rendered });
-      }
-    },
-  },
+  loader: repoLoader('triforge-personas', getPersonas, (p) => p.name, (p) => p.path),
   schema: z.object({
     name: z.string(),
     anchor: z.string(),
@@ -125,17 +119,7 @@ const personas = defineCollection({
 });
 
 const releases = defineCollection({
-  loader: {
-    name: 'triforge-releases',
-    async load({ config, store, parseData, renderMarkdown }) {
-      store.clear();
-      for (const { body, ...release } of getReleases()) {
-        const data = await parseData({ id: release.anchor, data: release });
-        const rendered = await renderMarkdown(body, { fileURL: fileURL(release.file) });
-        store.set({ id: release.anchor, data, body, filePath: filePathFrom(config.root, release.file), rendered });
-      }
-    },
-  },
+  loader: repoLoader('triforge-releases', getReleases, (r) => r.anchor, (r) => r.file),
   schema: z.object({
     version: z.string().nullable(),
     date: z.string(),

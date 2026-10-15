@@ -4,7 +4,7 @@
 // then what happens, why it matters and the checkpoint. The Markdown parts arrive as HTML from the
 // tutorials collection (content.config.ts).
 import Tabs from '../Tabs.astro';
-import CodeBlock from '../CodeBlock.astro';
+import TutorialSegments, { type PasteSegment } from './TutorialSegments.astro';
 import { keepCodeWords } from '../docs/tables.mjs';
 import { LEAD_NAMES, type Lead } from '@/data/leads.mjs';
 
@@ -30,7 +30,7 @@ const WHERE: Record<'common' | Lead, string> = {
   codex: 'Type in Codex',
 };
 // Each command gets a caption and a copy label that names the step (and the lead, inside a tab).
-const commands = (segments: Segment[], where: 'common' | Lead) => {
+const commands = (segments: Segment[], where: 'common' | Lead): PasteSegment[] => {
   const count = segments.filter((s) => s.kind === 'cmd').length;
   let k = 0;
   return segments.map((s) => {
@@ -63,24 +63,12 @@ const parts = [
     </ul>
   )}
   <div class="t-paste">
-    {common.map((s) =>
-      'lines' in s ? (
-        <div class="t-cmd"><p class="t-cap">{s.caption}</p><CodeBlock lines={s.lines} label={s.copy} prompt={s.lang === 'bash'} /></div>
-      ) : (
-        <div class="t-md" set:html={keepCodeWords(s.html)} />
-      ),
-    )}
+    <TutorialSegments segments={common} />
     {tabs && (
       <Tabs id={`step-${n}`} label={`Step ${n} for`} class="t-tabs" panelClass="t-panel" items={tabs.map(({ lead, label }) => ({ id: lead, label, lead }))}>
         {tabs.map((t) => (
           <Fragment slot={t.lead}>
-            {t.segments.map((s) =>
-              'lines' in s ? (
-                <div class="t-cmd"><p class="t-cap">{s.caption}</p><CodeBlock lines={s.lines} label={s.copy} prompt={s.lang === 'bash'} /></div>
-              ) : (
-                <div class="t-md" set:html={keepCodeWords(s.html)} />
-              ),
-            )}
+            <TutorialSegments segments={t.segments} />
           </Fragment>
         ))}
       </Tabs>

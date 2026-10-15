@@ -12,13 +12,13 @@
 // Exports
 //   ROLE_NAMES               the five roles, in roster order
 //   parseRegistry(text)      the registry's CLIS dict, from the Python literal in _TRIFORGE_CLIS_PY
-//   getClis(root?)           [{ id, name, tier: 'core' | 'optional', core, binary, egress, provider, model,
+//   getClis(root?)           [{ id, name, core, binary, egress, provider, model,
 //                            roles, optInRoles, consent, canLead, floor, tested, probe }] in registry order.
 //                            roles: the roles it may take (all five unless the registry limits them);
 //                            optInRoles: roles it takes only after a separate opt-in (Devin: builder);
 //                            consent: it joins only with the user's recorded consent; provider: egress up
 //                            to its first comma or parenthesis ("Zhipu / Z.ai").
-//   CORE_TRIO                the core-tier ids, in registry order
+//   coreTrio(root?)          the core-tier ids, in registry order
 //   getRoles(root?)          [{ role, cli, cliName, model, effort, fallbacks: [{ cli, cliName }] }] in the
 //                            template's order; model '' means the CLI's own default
 import { REPO, read } from './repo.mjs';
@@ -117,7 +117,6 @@ export function getClis(root = REPO) {
     return {
       id,
       name: row.cells[0].replace(/\s*\(.*$/, '').replace(/ CLI$/, '').trim(),
-      tier: cli.tier === 'core' ? 'core' : 'optional',
       core: cli.tier === 'core',
       binary: cli.binary,
       egress: cli.egress,
@@ -140,10 +139,14 @@ export function getClis(root = REPO) {
   return clis;
 }
 
-export const CORE_TRIO = getClis().filter((c) => c.core).map((c) => c.id);
+/** @param {string} [root] */
+export const coreTrio = (root = REPO) => getClis(root).filter((c) => c.core).map((c) => c.id);
+
+const rolesCache = new Map();
 
 /** @param {string} [root] */
 export function getRoles(root = REPO) {
+  if (rolesCache.has(root)) return rolesCache.get(root);
   const file = 'templates/ops/roster.toml';
   const roles = parseToml(read(root, file), file).roles ?? {};
   const names = new Map(getClis(root).map((c) => [c.id, c.name]));
@@ -151,7 +154,7 @@ export function getRoles(root = REPO) {
     if (!names.has(id)) throw new Error(`${file}: "${id}" is not a CLI in the registry`);
     return names.get(id);
   };
-  return Object.entries(roles).map(([role, r]) => ({
+  const out = Object.entries(roles).map(([role, r]) => ({
     role,
     cli: r.cli,
     cliName: nameOf(r.cli),
@@ -159,4 +162,6 @@ export function getRoles(root = REPO) {
     effort: r.effort ?? '',
     fallbacks: (r.fallbacks ?? []).map((cli) => ({ cli, cliName: nameOf(cli) })),
   }));
+  rolesCache.set(root, out);
+  return out;
 }

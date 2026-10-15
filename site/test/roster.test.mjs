@@ -7,7 +7,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { REPO } from '../src/lib/repo.mjs';
-import { CORE_TRIO, getClis, getRoles, parseRegistry } from '../src/lib/roster.mjs';
+import { coreTrio, getClis, getRoles, parseRegistry } from '../src/lib/roster.mjs';
+
+const CORE_TRIO = coreTrio();
 
 const registry = readFileSync(join(REPO, 'scripts/lib/registry.sh'), 'utf8').split("_TRIFORGE_CLIS_PY='\n")[1].split("\n'\n")[0];
 // Each CLI's block: from its 4-space-indented key to the next one.

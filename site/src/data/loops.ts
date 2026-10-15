@@ -1,5 +1,6 @@
-// The four loops the site plays and their words. Every page that shows a loop (the home page, the
-// guides, roster, sprint and the media kit) takes them from here, so a loop reads the same everywhere.
+// The four loops the site plays and their words, and the film's text alternative. Every page that
+// shows a loop (the home page, the guides, roster, sprint and the media kit) takes them from here, so a
+// loop reads the same everywhere.
 
 export interface LoopWords {
   /** file name under /media/ without extension: the .mp4 and its poster */
@@ -45,8 +46,12 @@ export const LOOP = {
   },
 } satisfies Record<string, LoopWords>;
 
+/** the film's text alternative, given its length in seconds */
+export const filmLabel = (duration: number) =>
+  `Film, ${Math.round(duration)} seconds, no sound: an example sprint that rate-limits a login endpoint, from the goal to the finished, reviewed work, chapter by chapter.`;
+
 /** in the order the home page shows them */
 export const LOOP_ORDER: LoopWords[] = [LOOP.roster, LOOP.lease, LOOP.review, LOOP.unattended];
 
 /** The props a VideoFigure takes from a loop's words. */
-export const figure = ({ name, short, label, caption }: LoopWords) => ({ name, short, label, caption });
+export const figure = ({ name, short, label, caption }: Pick<LoopWords, 'name' | 'short' | 'label' | 'caption'>) => ({ name, short, label, caption });

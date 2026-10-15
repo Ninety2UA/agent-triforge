@@ -17,6 +17,8 @@
 //                     the table's type sizes (docs.css). It ignores kerning, so it can miss by a few
 //                     pixels either way; MARGIN covers that.
 
+import { decodeEntities } from '../../lib/text.mjs';
+
 /** Container widths (px) at which a table may switch to rows; docs.css has one query per step. */
 export const STACK_STEPS = [320, 360, 400, 440, 480, 520, 560, 600, 640, 680, 720];
 const MARGIN = 12;
@@ -36,9 +38,7 @@ const FIRST_MIN = 112.5; // the first column's min-width, 7.5em
 /** A code word longer than this may break after a hyphen; a shorter one stays whole. */
 export const LONG_WORD = 24;
 
-const decode = (s) =>
-  s.replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
-    .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+const decode = decodeEntities;
 const textOf = (html) => decode(html.replace(/<[^>]*>/g, '')).trim();
 const attrText = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 const glyph = (ch) => ASCII[ch.charCodeAt(0) - 32] ?? OTHER;
@@ -106,8 +106,7 @@ export function fitTables(html) {
   return html.replace(/<table>([\s\S]*?)<\/table>/g, (_, inner) => {
     const head = inner.match(/<thead>([\s\S]*?)<\/thead>/)?.[1] ?? '';
     const labels = [...head.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)].map((m) => textOf(m[1]));
-    const rows = inner
-      .replace(/<code>([^<]*)<\/code>/g, (_, code) => `<code>${keepWords(code)}</code>`)
+    const rows = keepCodeWords(inner)
       .replace(/<(thead|tbody)>/g, '<$1 role="rowgroup">')
       .replace(/<tr>/g, '<tr role="row">')
       .replace(/<th\b/g, '<th role="columnheader"')

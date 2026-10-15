@@ -26,6 +26,19 @@
 //   parseToml(text, where)         the TOML the repo's manifests use: [a.b] tables and one-line
 //                                  key = "string" | 'literal' | true | false | integer | ["a", "b"].
 
+/** @param {string} html  text with the entities Markdown and Astro write (numeric, quot, lt, gt, amp) decoded */
+export const decodeEntities = (html) =>
+  html
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+
+/** @param {string} text  text safe inside an element or a double-quoted attribute */
+export const escapeHtml = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 /** @param {string} text  the text with its first letter in upper case */
 export const capitalize = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 

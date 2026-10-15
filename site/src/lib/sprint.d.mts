@@ -13,4 +13,4 @@ export function sprintPhases(root?: string): SprintPhase[];
 export function qualityGates(root?: string): { number: string; name: string; enforcedByHtml: string; rule: string }[];
 export function convergenceModes(root?: string): { mode: string; exit: string; use: string; isDefault: boolean }[];
 export function completionChecklist(root?: string): string[];
-export function inlineHtml(markdown: string): string;
+export function cellHtml(markdown: string): string;

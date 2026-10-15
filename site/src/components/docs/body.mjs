@@ -29,6 +29,7 @@ export const IMAGE_SIZES = '(min-width: 1280px) 600px, (min-width: 820px) 734px,
 export const IMAGE_WIDTHS = [400, 700, 1000, 1468, 100000];
 export const AVIF_WIDTHS = [400, 700, 1000, 1468];
 
+import { decodeEntities } from '../../lib/text.mjs';
 import { fitTables } from './tables.mjs';
 import { labelTaskItems } from './task-lists.mjs';
 
@@ -55,10 +56,7 @@ export function withImageOptions(html) {
 }
 
 const attr = (tag, name) => tag.match(new RegExp(`\\s${name}="([^"]*)"`))?.[1];
-const decodeText = (s) =>
-  s.replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
-    .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-const textOf = (html) => decodeText(html.replace(/<[^>]*>/g, ''));
+const textOf = (html) => decodeEntities(html.replace(/<[^>]*>/g, ''));
 
 /**
  * @param {string} html

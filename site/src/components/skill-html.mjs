@@ -19,17 +19,14 @@
 //                           #<name>)
 // Both fit their tables to the column (docs/tables.mjs) and label their checklist items (docs/task-lists.mjs).
 
-import { fitTables } from './docs/tables.mjs';
+import { escapeHtml } from '../lib/text.mjs';
+import { LONG_WORD, fitTables } from './docs/tables.mjs';
 import { labelTaskItems } from './docs/task-lists.mjs';
 
-/** @param {string} text */
-export function escapeHtml(text) {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+export { escapeHtml };
 
 const SAFE_HREF = /^(?:https?:\/\/|\/|#)/;
 
-const LONG_WORD = 24;
 
 /** @param {string} code */
 const codeHtml = (code) =>

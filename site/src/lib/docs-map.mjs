@@ -70,6 +70,9 @@ export const README_ROUTES = [
 
 const pageHref = (section, slug) => `/${section}/${slug}/`;
 
+/** where a page part comes from: the README section, a file's section, or the whole file */
+const partSource = (part) => (part.readme ? `README.md#${githubSlug(part.readme)}` : part.section ? `${part.file}#${githubSlug(part.section)}` : part.file);
+
 function imageBlocksToMarkdown(text) {
   return mapOutsideFences(text, (chunk) =>
     chunk.replace(/<p\b[^>]*>\s*<img\b([^>]*?)\/?>\s*<\/p>/g, (_, attrs) => {
@@ -195,7 +198,7 @@ function buildDocsMap(root) {
         }
       }
       const composed = composePart(src, { ...range, intro: intro === null, skip });
-      if (intro === null) intro = { source: part.section ? `${part.file}#${githubSlug(part.section)}` : part.file, text: composed.intro };
+      if (intro === null) intro = { source: partSource(part), text: composed.intro };
       return { source: part.file, ...composed };
     });
 
@@ -216,8 +219,8 @@ function buildDocsMap(root) {
       href: spec.href,
       title: spec.title,
       section: spec.section,
-      source: intro?.source ?? (readmePart ? `README.md#${githubSlug(readmePart.readme)}` : null),
-      sources: spec.parts.map((p) => (p.readme ? `README.md#${githubSlug(p.readme)}` : p.section ? `${p.file}#${githubSlug(p.section)}` : p.file)),
+      source: intro?.source ?? (readmePart ? partSource(readmePart) : null),
+      sources: spec.parts.map(partSource),
       parts: parts.map(({ source, text }) => ({ source, text })),
       intro: intro?.text ?? '',
       imageBase,

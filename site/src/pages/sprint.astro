@@ -16,7 +16,7 @@ import { LEAD_TABS } from '@/data/leads.mjs';
 import { PERSONAS_PAGE } from '@/lib/docs-map.mjs';
 import { capitalize } from '@/lib/text.mjs';
 import { getRoles } from '@/lib/roster.mjs';
-import { completionChecklist, convergenceModes, inlineHtml, qualityGates, sprintPhases } from '@/lib/sprint.mjs';
+import { completionChecklist, convergenceModes, cellHtml, qualityGates, sprintPhases } from '@/lib/sprint.mjs';
 
 interface Notes {
   body: string;
@@ -144,7 +144,7 @@ const run = (prefix: string) => [`${prefix}at-plan <goal>`, `${prefix}at-build`,
               <div class="c-ph-t">
                 <h3>{p.heading}</h3>
                 <p class="c-what" set:html={p.happensHtml} />
-                <p set:html={inlineHtml(p.notes.body)} />
+                <p set:html={cellHtml(p.notes.body)} />
               </div>
               <dl>
                 <dt>Agents</dt><dd set:html={p.agentsHtml} />

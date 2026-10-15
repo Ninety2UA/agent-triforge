@@ -34,7 +34,6 @@ export interface Persona {
 export interface Cli {
   id: string;
   name: string;
-  tier: 'core' | 'optional';
   core: boolean;
   binary: string;
   egress: string;
