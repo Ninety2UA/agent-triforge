@@ -1,7 +1,6 @@
 ---
-// The closing field: the install command, the README loop (Fig. 5) and the markdown to put it in
-// your own README.
-import CodeBlock from '../CodeBlock.astro';
+// The closing field: the install command beside the loop that opens the README (Fig. 5). The markdown
+// that embeds it in another README is in the media kit (src/dev/kit.astro), not on the site.
 import InstallTabs from '../InstallTabs.astro';
 import VideoFigure from '../VideoFigure.astro';
 import { buttonVariants } from '@/components/ui/button';
@@ -9,8 +8,6 @@ import { IC } from '../icons';
 import { INSTALL_HREF } from '@/data/nav';
 import { GH } from '@/data/content';
 import { heroTabs } from '@/data/home';
-
-const readme = '[![Agent Triforge](https://github.com/Ninety2UA/agent-triforge/raw/main/docs/images/readme-hero.gif)](https://github.com/Ninety2UA/agent-triforge)';
 ---
 <section id="start" class="closing" aria-labelledby="start-h" data-rv-group>
   <div class="wrap">
@@ -22,12 +19,9 @@ const readme = '[![Agent Triforge](https://github.com/Ninety2UA/agent-triforge/r
         <div class="cta-row"><a class={buttonVariants()} href={INSTALL_HREF} data-lead-href={INSTALL_HREF}>Install</a><a class={buttonVariants({ variant: 'outline' })} href={GH}><Fragment set:html={IC.github} />Star on GitHub</a></div>
       </div>
       <div class="readme" data-rv>
-        <VideoFigure n={5} name="readme-hero" short="the README loop" class="readme-fig"
+        <VideoFigure n={5} name="readme-hero" short="the Agent Triforge loop" class="readme-fig"
           label="Loop: the Agent Triforge mark and name, with the line that one agent leads, the others build, review and test, and nothing merges until a different agent has checked it."
-          caption="The loop at the top of the README, also as a GIF" />
-        <h3>Put it in your README</h3>
-        <p>To show the loop in your own README, with a link back to the project, paste this markdown.</p>
-        <CodeBlock lines={[readme]} label="Copy the README markdown" prompt={false} />
+          caption="Nothing merges until a different agent has checked it" />
       </div>
     </div>
   </div>

@@ -183,6 +183,7 @@ main > section { padding-block: calc(var(--sec) / 2); }
 .vjs.show-big .vf-big { display: inline-flex; }
 .fig figcaption { display: flex; gap: 12px; align-items: center; margin-top: 12px; font-size: 15px; line-height: 1.45; color: var(--muted-foreground); }
 .fig figcaption b { flex: none; font-weight: 600; color: var(--foreground); }
+.fig figcaption span { text-wrap: pretty; }
 
 /* ---------- film player ---------- */
 .film-sheet { background: var(--card); padding: clamp(10px, 1.2vw, 16px); border: 3px dotted var(--dot-frame); border-radius: 2px; }
@@ -417,7 +418,7 @@ main > section { padding-block: calc(var(--sec) / 2); }
 
 /* ---------- closing: the install and the README loop on one tinted field ---------- */
 .closing { padding-block: 0 !important; }
-.closing .close-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: clamp(32px, 5vw, 96px); align-items: start; background: var(--muted); border-radius: calc(var(--radius) + 4px); padding: clamp(28px, 4.5vw, 72px); }
+.closing .close-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: clamp(32px, 5vw, 96px); align-items: center; background: var(--muted); border-radius: calc(var(--radius) + 4px); padding: clamp(28px, 4.5vw, 72px); }
 .close-in h2 { font-size: clamp(1.9rem, 1.2rem + 2.2vw, 3rem); }
 .close-in .lede { margin: 18px 0 24px; }
 .close-in [data-cmd] { background: var(--background); margin: 0 0 18px; }
@@ -425,9 +426,6 @@ main > section { padding-block: calc(var(--sec) / 2); }
 .close-tabs { margin: 0 0 18px; }
 .close-in [data-slot="tabs-list"] { background: var(--background); }
 .close-in [data-slot="tabs-trigger"][data-active] { background: var(--muted); }
-.readme h3 { font-size: 17px; margin: 28px 0 8px; }
-.readme p { font-size: 15px; }
-.readme [data-cmd] { background: var(--background); }
 @media (max-width: 960px) { .closing .close-grid { grid-template-columns: minmax(0, 1fr); } }
 
 /* ---------- footer ---------- */

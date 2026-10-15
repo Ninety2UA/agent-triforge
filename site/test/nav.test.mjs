@@ -20,6 +20,12 @@ test('a docs page marks Docs, and its first page marks it as the page itself', (
   assert.deepEqual(current('/docs/faq'), { Docs: 'true' }, 'a path without its trailing slash');
 });
 
+test('the Workflows page marks Workflows, not Docs, though it is a docs page', () => {
+  assert.deepEqual(current('/docs/workflows/'), { Workflows: 'page' });
+  assert.deepEqual(current('/docs/workflows'), { Workflows: 'page' });
+  assert.deepEqual(current('/docs/project-layout/'), { Docs: 'true' });
+});
+
 test('the home page and the 404 mark no section', () => {
   assert.deepEqual(current('/'), {});
   assert.deepEqual(current('/404/'), {});
