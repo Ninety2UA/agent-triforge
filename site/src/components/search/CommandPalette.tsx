@@ -152,7 +152,7 @@ function PaletteBody({ initialQuery, onClose }: { initialQuery: string; onClose(
           </CommandGroup>
         ))}
       </CommandList>
-      <div className="flex justify-between gap-3 border-t border-border px-3.5 py-2.5 font-mono text-xs text-muted-foreground">
+      <div className="flex justify-between gap-3 border-t border-border px-3.5 py-2.5 text-xs text-muted-foreground">
         <span>{count ? (shownCount < count ? `${shownCount} of ${count} results` : `${count} result${count === 1 ? '' : 's'}`) : ''}</span>
         {/* key hints only where there is a keyboard row to spare; phones show the count alone */}
         <span className="hidden sm:inline">Enter to open · arrows to move</span>

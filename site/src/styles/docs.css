@@ -85,12 +85,8 @@
 /* An edge of a code block that has more behind it is shaded. The two covers move with the content
    (local) and hide the shade (scroll) once that end is reached, so a block that fits shows none. */
 .doc pre:not([data-slot]):not([data-ui] pre) {
-  background:
-    linear-gradient(to right, var(--ground) 45%, transparent) left / 32px 100% no-repeat local,
-    linear-gradient(to left, var(--ground) 45%, transparent) right / 32px 100% no-repeat local,
-    linear-gradient(to right, var(--edge-shade), transparent) left / 16px 100% no-repeat scroll,
-    linear-gradient(to left, var(--edge-shade), transparent) right / 16px 100% no-repeat scroll,
-    var(--ground);
+  /* a scroll cue, not a decorative fill */
+  background: linear-gradient(to right, var(--ground) 45%, transparent) left / 32px 100% no-repeat local, linear-gradient(to left, var(--ground) 45%, transparent) right / 32px 100% no-repeat local, linear-gradient(to right, var(--edge-shade), transparent) left / 16px 100% no-repeat scroll, linear-gradient(to left, var(--edge-shade), transparent) right / 16px 100% no-repeat scroll, var(--ground); /* taste-skill-ignore */
 }
 /* A table fits its column (tables.mjs). Code in a cell wraps at a space or after a hyphen. The wrapper
    is a size container: below the width its data-stack names (or always), the table sets each row as a
