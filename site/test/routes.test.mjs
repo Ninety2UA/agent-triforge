@@ -3,13 +3,14 @@
 // URLs are built from .claude-plugin/plugin.json, skill folders read from the tree.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { REPO } from '../src/lib/repo.mjs';
 import { githubUrl, resolveLink, rewriteLinks } from '../src/lib/routes.mjs';
+import { GH } from '../src/lib/repo.mjs';
 
-const GITHUB = JSON.parse(readFileSync(join(REPO, '.claude-plugin/plugin.json'), 'utf8')).repository.replace(/\/$/, '');
+const GITHUB = GH;
 const WORKFLOWS = 'docs/workflows.md';
 
 test('links written in docs/workflows.md resolve to their site pages', () => {

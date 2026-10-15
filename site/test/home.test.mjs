@@ -3,16 +3,16 @@
 // driven through the real built markup with the real tab script.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { SITE } from '../src/lib/repo.mjs';
 import { runClientScript } from './client-script.mjs';
 import { page } from './dom.mjs';
 import * as leads from '../src/data/leads.mjs';
+import { DIST, skip } from './built.mjs';
 
-const file = join(SITE, 'dist', 'index.html');
-const skip = !existsSync(file) && 'site/dist is not built (run npm run build in site/)';
+const file = join(DIST, 'index.html');
 const html = () => readFileSync(file, 'utf8');
 
 test('the home page has no pause or play toggle on the loops, the film or the dot field', { skip }, () => {

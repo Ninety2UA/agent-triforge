@@ -12,10 +12,10 @@ import { join } from 'node:path';
 import { REPO, SITE } from '../src/lib/repo.mjs';
 import { installCommands } from '../src/lib/readme.mjs';
 import { TUTORIALS, parseTutorial, skillTokens, tutorialPages, writtenTutorials } from '../src/lib/tutorials.mjs';
+import { DIST, skip as noBuild } from './built.mjs';
+import { getRoles } from '../src/lib/roster.mjs';
 
 const SKILLS = readdirSync(join(REPO, 'skills')).filter((d) => existsSync(join(REPO, 'skills', d, 'SKILL.md')));
-const DIST = join(SITE, 'dist');
-const noBuild = !existsSync(join(DIST, 'index.html')) && 'site/dist is not built (run npm run build in site/)';
 // a Codex invocation, built from parts so this file never holds the bare form validate-versions sweeps for
 const CODEX = (name) => ['$agent-triforge', `:${name}`].join('');
 
@@ -281,10 +281,6 @@ test('in the built site, a tutorial page shows every step, both lead tabs where 
 // A tutorial that names a role's default CLI ("the roster's builder, Claude Code by default") states
 // what templates/ops/roster.toml ships, so a changed default fails here instead of going stale.
 test('every "<role>, <CLI> by default" in a tutorial matches the shipped roster', async () => {
-  const { readdirSync, readFileSync } = await import('node:fs');
-  const { join } = await import('node:path');
-  const { getRoles } = await import('../src/lib/roster.mjs');
-  const { SITE } = await import('../src/lib/repo.mjs');
   const defaults = Object.fromEntries(getRoles().map((r) => [r.role, r.cliName]));
   const dir = join(SITE, 'src', 'content', 'tutorials');
   const claims = [];

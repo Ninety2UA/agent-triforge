@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { fakeTarget, runClientScript } from './client-script.mjs';
+import { fakeTarget, runClientScript, settle } from './client-script.mjs';
 import { page } from './dom.mjs';
 import * as leads from '../src/data/leads.mjs';
 
@@ -120,7 +120,6 @@ function copyPage({ writeText, execCommand, platform } = {}) {
   const btn = p.document.querySelector('.copy');
   return { ...p, btn, label: () => btn.querySelector('.copy-label').textContent, live: () => p.document.getElementById('live').textContent };
 }
-const settle = () => new Promise((r) => setImmediate(r));
 
 test('copy: when the clipboard write succeeds the button says "Copied"', async () => {
   const written = [];
@@ -228,7 +227,6 @@ test('the theme toggle still switches when storage throws', () => {
   assert.equal(env.button.attrs['aria-pressed'], 'false');
 });
 
-assert.equal(typeof initThemeToggle, 'function');
 
 // ---- video figures (site/src/scripts/video.ts) ----
 

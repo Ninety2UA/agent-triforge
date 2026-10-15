@@ -6,7 +6,6 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-import { SITE } from '../src/lib/repo.mjs';
 import { getSkills } from '../src/lib/skills.mjs';
 import { getPersonas, personaGroups } from '../src/lib/personas.mjs';
 import { invocation, parseInvocations, portableInvocations } from '../src/lib/portable.mjs';
@@ -14,9 +13,8 @@ import { ALL, initCatalog, matches, readState } from '../src/components/skill-fi
 import { inlineHtml, promptHtml, skillBodyHtml } from '../src/components/skill-html.mjs';
 import { shortcutAction } from '../src/components/search/shortcut.mjs';
 import { page } from './dom.mjs';
+import { DIST as dist, skip } from './built.mjs';
 
-const dist = join(SITE, 'dist');
-const skip = !existsSync(join(dist, 'index.html')) && 'site/dist is not built (run npm run build in site/)';
 const built = (path) => readFileSync(join(dist, path), 'utf8');
 // The bare Codex form, built from parts so no tracked file under site/ carries it (validate-versions
 // sweeps site/ for it): Codex attaches a plugin skill only as $agent-triforge:at-<name>.

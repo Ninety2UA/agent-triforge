@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { REPO, SITE } from '../src/lib/repo.mjs';
+import { REPO } from '../src/lib/repo.mjs';
 import { docsMap } from '../src/lib/docs-map.mjs';
 import { docPages } from '../src/lib/docs.mjs';
 import { readDocPagesList } from '../src/lib/sources.mjs';
@@ -13,9 +13,8 @@ import { describe, finishBody, splitAfterH2, splitBeforeFirstH2, withImageOption
 import { runClientScript } from './client-script.mjs';
 import { page } from './dom.mjs';
 import * as leads from '../src/data/leads.mjs';
+import { DIST, skip } from './built.mjs';
 
-const DIST = join(SITE, 'dist');
-const skip = !existsSync(join(DIST, 'index.html')) && 'site/dist is not built (run npm run build in site/)';
 const built = (href) => join(DIST, href, 'index.html');
 const html = (href) => readFileSync(built(href), 'utf8');
 const article = (h) => h.match(/<article\b[^>]*>([\s\S]*?)<\/article>/)?.[1] ?? '';

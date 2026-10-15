@@ -2,38 +2,19 @@
 // local check run them after `npm run build`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { parseHTML } from 'linkedom';
 
 import { getReleases } from '../src/lib/releases.mjs';
 import { REPO, SITE } from '../src/lib/repo.mjs';
 import { SITE_URL, VERSION } from '../src/lib/site.mjs';
-
-const dist = join(SITE, 'dist');
-const skip = !existsSync(join(dist, 'index.html')) && 'site/dist is not built (run npm run build in site/)';
+import { DIST as dist, skip } from './built.mjs';
+import { readPages } from '../scripts/check-site.mjs';
 
 // Every page Astro wrote, by its URL path. Read on first use, so a skipped run never reads site/dist.
 let built;
-export const pages = () => (built ??= readPages());
-
-function readPages() {
-  const out = [];
-  const walk = (dir) => {
-    for (const name of readdirSync(dir)) {
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) {
-        if (!['_astro', 'pagefind', 'media', 'brand'].includes(name)) walk(path);
-      } else if (name.endsWith('.html')) {
-        const rel = relative(dist, path).split(sep).join('/');
-        const url = rel === 'index.html' ? '/' : rel.endsWith('/index.html') ? `/${rel.slice(0, -'index.html'.length)}` : `/${rel}`;
-        out.push({ url, html: readFileSync(path, 'utf8') });
-      }
-    }
-  };
-  walk(dist);
-  return out;
-}
+export const pages = () => (built ??= readPages(dist));
 
 const attr = (tag, name) => tag.match(new RegExp(`\\s${name}="([^"]*)"`))?.[1];
 

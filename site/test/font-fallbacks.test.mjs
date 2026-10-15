@@ -8,13 +8,11 @@
 // overrides come out at Familjen's ascent, descent and line gap, and the built pages use these faces.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { SITE } from '../src/lib/repo.mjs';
-
-const dist = join(SITE, 'dist');
-const skip = !existsSync(join(dist, 'index.html')) && 'site/dist is not built (run npm run build in site/)';
+import { DIST as dist, skip } from './built.mjs';
 
 // FamiljenGrotesk-var.woff2: ascender 1230, descender -270, line gap 0, at 1200 units per em (hhea, OS/2 typo).
 const FAMILJEN = { ascent: 102.5, descent: 22.5, lineGap: 0 };

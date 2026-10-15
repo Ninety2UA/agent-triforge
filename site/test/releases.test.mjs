@@ -10,8 +10,9 @@ import { releaseTable } from '../src/lib/readme.mjs';
 import { getReleases, orderReleases, parseReleaseHeader, UNTAGGED } from '../src/lib/releases.mjs';
 import { REPO } from '../src/lib/repo.mjs';
 import { RELEASED, VERSION } from '../src/lib/site.mjs';
+import { GH } from '../src/lib/repo.mjs';
 
-const GITHUB = JSON.parse(readFileSync(join(REPO, '.claude-plugin/plugin.json'), 'utf8')).repository.replace(/\/$/, '');
+const GITHUB = GH;
 const notes = readdirSync(join(REPO, 'docs/releases')).filter((f) => f.endsWith('.md'));
 const header = (file) => readFileSync(join(REPO, 'docs/releases', file), 'utf8').split('\n')[0];
 

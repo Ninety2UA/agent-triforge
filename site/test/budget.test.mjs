@@ -6,15 +6,13 @@
 // built-pages.test.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { join } from 'node:path';
 
-import { SITE } from '../src/lib/repo.mjs';
 import { readPages } from '../scripts/check-site.mjs';
+import { DIST as dist, skip } from './built.mjs';
 
-const dist = join(SITE, 'dist');
-const skip = !existsSync(join(dist, 'index.html')) && 'site/dist is not built (run npm run build in site/)';
 const gz = (text) => gzipSync(Buffer.from(text), { level: 9 }).length;
 
 export const HOME_LIMIT = 25 * 1024;

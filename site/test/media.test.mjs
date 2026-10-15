@@ -9,11 +9,13 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, sep } from 'node:path';
+import { join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { PUBLIC, REPO, SITE } from '../src/lib/repo.mjs';
 import { mp4Facts } from '../src/lib/media.mjs';
+import { DIST as dist, skip } from './built.mjs';
+import { readPages } from '../scripts/check-site.mjs';
 
 const MEDIA = join(PUBLIC, 'media');
 const POSTERS = join(SITE, 'src', 'assets', 'posters');
@@ -104,20 +106,8 @@ try { filmChapters(); console.log('no error'); } catch (e) { console.log(e.messa
   }
 });
 
-const dist = join(SITE, 'dist');
-const skip = !existsSync(join(dist, 'index.html')) && 'site/dist is not built (run npm run build in site/)';
-
 test('every media URL in the built pages carries the content hash of its file', { skip }, () => {
-  const html = [];
-  const walk = (dir) => {
-    for (const name of readdirSync(dir)) {
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) {
-        if (!['_astro', 'pagefind', 'media', 'brand'].includes(name)) walk(path);
-      } else if (name.endsWith('.html')) html.push({ page: relative(dist, path).split(sep).join('/'), text: readFileSync(path, 'utf8') });
-    }
-  };
-  walk(dist);
+  const html = readPages(dist).map((p) => ({ page: p.file, text: p.html }));
   const sha = new Map();
   const hashOf = (file) => {
     if (!sha.has(file)) sha.set(file, createHash('sha1').update(readFileSync(join(MEDIA, file))).digest('hex').slice(0, 8));

@@ -8,10 +8,11 @@ import { join } from 'node:path';
 
 import { faq, installCommands, readmeSection, releaseTable } from '../src/lib/readme.mjs';
 import { REPO } from '../src/lib/repo.mjs';
+import { GH } from '../src/lib/repo.mjs';
 
 const README = readFileSync(join(REPO, 'README.md'), 'utf8');
 const PLUGIN = JSON.parse(readFileSync(join(REPO, '.claude-plugin/plugin.json'), 'utf8'));
-const GITHUB = PLUGIN.repository.replace(/\/$/, '');
+const GITHUB = GH;
 const SLUG = new URL(GITHUB).pathname.slice(1); // owner/repo
 const ID = `${PLUGIN.name}@${PLUGIN.name}`;
 

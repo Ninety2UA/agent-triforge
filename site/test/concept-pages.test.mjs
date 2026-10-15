@@ -3,15 +3,14 @@
 // site's TOML reader. Skipped without a build.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { REPO, SITE } from '../src/lib/repo.mjs';
+import { REPO } from '../src/lib/repo.mjs';
 import { getClis } from '../src/lib/roster.mjs';
 import { sprintPhases } from '../src/lib/sprint.mjs';
+import { DIST, skip } from './built.mjs';
 
-const DIST = join(SITE, 'dist');
-const skip = !existsSync(join(DIST, 'index.html')) && 'site/dist is not built (run npm run build in site/)';
 const page = (path) => readFileSync(join(DIST, path, 'index.html'), 'utf8');
 
 // [{ role, chain: [cli, ...fallbacks] }] in the template's order
