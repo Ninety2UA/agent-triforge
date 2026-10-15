@@ -9,7 +9,7 @@ import DocsLayout from '@/layouts/DocsLayout.astro';
 import TutorialStep from '@/components/tutorials/TutorialStep.astro';
 import { sectionOrder } from '@/lib/section-order.mjs';
 import { writtenTutorials } from '@/lib/tutorials.mjs';
-import { fitTables } from '@/components/docs/tables.mjs';
+import { fitTables, keepCodeWords } from '@/components/docs/tables.mjs';
 
 export function getStaticPaths() {
   return writtenTutorials().map(({ slug }) => ({ params: { slug } }));
@@ -30,7 +30,7 @@ const headings = [
 ---
 <DocsLayout title={`${t.title} · Agent Triforge`} description={t.description} section="Tutorials" sidebar={order.sidebar(slug)} headings={headings} prev={prev} next={next}>
   <h1 id="overview">{t.title}</h1>
-  <div class="t-intro" set:html={t.intro} />
+  <div class="t-intro" set:html={keepCodeWords(t.intro)} />
   <ol class="t-steps">
     {t.steps.map((step, i) => <TutorialStep n={i + 1} step={step} />)}
   </ol>

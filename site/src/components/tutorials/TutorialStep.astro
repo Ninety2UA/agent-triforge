@@ -5,6 +5,7 @@
 // tutorials collection (content.config.ts).
 import Tabs from '../Tabs.astro';
 import CodeBlock from '../CodeBlock.astro';
+import { keepCodeWords } from '../docs/tables.mjs';
 
 type Segment = { kind: 'md'; html: string } | { kind: 'cmd'; lang: 'prompt' | 'bash'; text: string };
 type Lead = 'claude-code' | 'codex';
@@ -67,7 +68,7 @@ const parts = [
       'lines' in s ? (
         <div class="t-cmd"><p class="t-cap">{s.caption}</p><CodeBlock lines={s.lines} label={s.copy} prompt={s.lang === 'bash'} /></div>
       ) : (
-        <div class="t-md" set:html={s.html} />
+        <div class="t-md" set:html={keepCodeWords(s.html)} />
       ),
     )}
     {tabs && (
@@ -78,7 +79,7 @@ const parts = [
               'lines' in s ? (
                 <div class="t-cmd"><p class="t-cap">{s.caption}</p><CodeBlock lines={s.lines} label={s.copy} prompt={s.lang === 'bash'} /></div>
               ) : (
-                <div class="t-md" set:html={s.html} />
+                <div class="t-md" set:html={keepCodeWords(s.html)} />
               ),
             )}
           </Fragment>
@@ -90,7 +91,7 @@ const parts = [
     {parts.map((p) => (
       <section class:list={['t-part', p.cls]} aria-label={`Step ${n}: ${p.title}`}>
         <h3>{p.title}</h3>
-        <div class="t-md" set:html={p.html} />
+        <div class="t-md" set:html={keepCodeWords(p.html)} />
       </section>
     ))}
   </div>

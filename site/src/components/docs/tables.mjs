@@ -11,6 +11,8 @@
 //                     keeps its columns; narrower, each row becomes a block of its cells, each cell
 //                     under its column's name (data-label). The explicit roles keep a stacked table a
 //                     table to a screen reader, which display: block would undo.
+//   keepCodeWords(html)   the same rule for code outside tables (the tutorial steps): every plain-text
+//                     <code> span's words up to LONG_WORD characters go in nowrap spans.
 //   minTableWidth(tableHtml)   that estimate in CSS pixels, from the fonts' measured advance widths at
 //                     the table's type sizes (docs.css). It ignores kerning, so it can miss by a few
 //                     pixels either way; MARGIN covers that.
@@ -95,6 +97,9 @@ export function minTableWidth(tableHtml) {
 // a code span's words, each up to LONG_WORD characters in a nowrap span (entities count as one character)
 const keepWords = (code) =>
   code.split(' ').map((w) => (w && decode(w).length <= LONG_WORD ? `<span class="nw">${w}</span>` : w)).join(' ');
+
+/** @param {string} html */
+export const keepCodeWords = (html) => html.replace(/<code>([^<]*)<\/code>/g, (_, code) => `<code>${keepWords(code)}</code>`);
 
 /** @param {string} html */
 export function fitTables(html) {
