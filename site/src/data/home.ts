@@ -1,4 +1,5 @@
-// The home page's hand-written copy: the headline, the install tabs and the sprint phases. Phases 0 to 6
+// The home page's hand-written copy: the headline, the install tabs and the sprint phases (their bodies are
+// one line of Markdown each, code in backticks, rendered by lib/inline-html.mjs). Phases 0 to 6
 // are fixed text (KTD17); every skill and persona named here is checked against the repo by the site
 // gate, so a rename fails the build instead of shipping a dead name.
 import { INSTALL, SKILLS_ONLY } from './content';
@@ -6,7 +7,6 @@ import { getCounts } from '@/lib/counts.mjs';
 import { numberWord } from '@/lib/numbers.mjs';
 import type { InstallTab } from '@/components/InstallTabs.astro';
 import { LEAD_TABS } from './leads.mjs';
-import { escapeRegExp } from '@/lib/text.mjs';
 
 export const H1 = 'Put Claude Code, Codex and Antigravity on one team.';
 export const LEDE = 'One agent leads. The others build, review and test, and nothing merges until a different agent has checked it.';
@@ -31,7 +31,7 @@ export const PHASES = [
     "n": "Pre",
     "short": "Search",
     "title": "Search what earlier sprints learned",
-    "body": "Before anything is planned, the learnings-researcher persona searches the notes earlier sprints left behind.",
+    "body": "Before anything is planned, the `learnings-researcher` persona searches the notes earlier sprints left behind.",
     "rows": [
       {
         "k": "Persona",
@@ -97,7 +97,7 @@ export const PHASES = [
     "n": "1.5",
     "short": "Validate",
     "title": "Check the plan before building",
-    "body": "plan-checker reviews the plan until it approves, three rounds at most. If the plan passes 15 tasks, scope-cutting can cut it by value.",
+    "body": "`plan-checker` reviews the plan until it approves, three rounds at most. If the plan passes 15 tasks, `scope-cutting` can cut it by value.",
     "rows": [
       {
         "k": "Persona",
@@ -118,7 +118,7 @@ export const PHASES = [
     "n": "2",
     "short": "Build",
     "title": "Build, review, merge",
-    "body": "Each task gets its own worktree. A builder writes it, a pinned reviewer from a different roster member checks it, and the lead squash-merges its own copy. integration-verifier runs between waves.",
+    "body": "Each task gets its own worktree. A builder writes it, a pinned reviewer from a different roster member checks it, and the lead squash-merges its own copy. `integration-verifier` runs between waves.",
     "rows": [
       {
         "k": "Skills",
@@ -141,7 +141,7 @@ export const PHASES = [
     "n": "3+4",
     "short": "Review",
     "title": "Review in parallel until it converges",
-    "body": "In at-ship, five lanes review at once: Antigravity, Codex, security-sentinel, performance-oracle and code-simplicity-reviewer. findings-synthesizer merges them; fixes loop at most 3 cycles.",
+    "body": "In `at-ship`, five lanes review at once: Antigravity, Codex, `security-sentinel`, `performance-oracle` and `code-simplicity-reviewer`. `findings-synthesizer` merges them; fixes loop at most 3 cycles.",
     "rows": [
       {
         "k": "Skills",
@@ -164,7 +164,7 @@ export const PHASES = [
     "n": "5",
     "short": "Test",
     "title": "Failing test first, then green",
-    "body": "test-gap-analyzer finds the untested paths. The tester writes the failing test first, and fixes run until the suite passes.",
+    "body": "`test-gap-analyzer` finds the untested paths. The tester writes the failing test first, and fixes run until the suite passes.",
     "rows": [
       {
         "k": "Skill",
@@ -185,7 +185,7 @@ export const PHASES = [
     "n": "6",
     "short": "Wrap",
     "title": "Write it down, then mark it done",
-    "body": "What the sprint learned goes to ops/solutions/, review files to ops/archive/, the checkpoint to ops/STATE.md. ops/.sprint-complete is created last, after the checklist passes.",
+    "body": "What the sprint learned goes to `ops/solutions/`, review files to `ops/archive/`, the checkpoint to `ops/STATE.md`. `ops/.sprint-complete` is created last, after the checklist passes.",
     "rows": [
       {
         "k": "Skills",
@@ -210,12 +210,3 @@ export const PHASES = [
 
 export const phaseLabel = (n: string) => (n === 'Pre' ? 'Pre-plan' : n.includes('+') ? `Phases ${n.replace('+', ' and ')}` : `Phase ${n}`);
 
-// Skill, persona and file names inside phase copy are set as code.
-const CODE_TOKENS = ['learnings-researcher', 'plan-checker', 'integration-verifier', 'security-sentinel', 'performance-oracle', 'code-simplicity-reviewer',
-  'findings-synthesizer', 'test-gap-analyzer', 'scope-cutting', 'at-ship', 'ops/solutions/', 'ops/archive/', 'ops/STATE.md', 'ops/.sprint-complete'];
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-export const withCode = (s: string) => {
-  let out = esc(s);
-  for (const t of CODE_TOKENS) out = out.replace(new RegExp(`(?<![\\w/.-])${escapeRegExp(t)}(?![\\w-])`, 'g'), `<code>${t}</code>`);
-  return out;
-};

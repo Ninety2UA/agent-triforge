@@ -18,6 +18,7 @@
 //                     pixels either way; MARGIN covers that.
 
 import { decodeEntities } from '../../lib/text.mjs';
+import { LONG_WORD } from '../../lib/inline-html.mjs';
 
 /** Container widths (px) at which a table may switch to rows; docs.css has one query per step. */
 export const STACK_STEPS = [320, 360, 400, 440, 480, 520, 560, 600, 640, 680, 720];
@@ -35,8 +36,7 @@ const CODE_PAD = 10; // a code span's padding
 const CELL_PAD = 14; // each cell's right padding
 const FIRST_MIN = 112.5; // the first column's min-width, 7.5em
 
-/** A code word longer than this may break after a hyphen; a shorter one stays whole. */
-export const LONG_WORD = 24;
+export { LONG_WORD };
 
 const decode = decodeEntities;
 const textOf = (html) => decode(html.replace(/<[^>]*>/g, '')).trim();

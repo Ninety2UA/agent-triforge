@@ -1,7 +1,8 @@
 ---
 // From goal to finished sprint: one tab per phase (Tabs markup, scripts/tabs.ts), each naming the
 // skills that run it and who does the work. The phase copy is hand-written (data/home.ts).
-import { PHASES, phaseLabel, withCode } from '@/data/home';
+import { PHASES, phaseLabel } from '@/data/home';
+import { inlineHtml } from '@/lib/inline-html.mjs';
 
 // the build phase is open when the page loads
 const OPEN = PHASES.findIndex((p) => p.n === '2');
@@ -22,7 +23,7 @@ const OPEN = PHASES.findIndex((p) => p.n === '2');
       </div>
       {PHASES.map((p, i) => (
         <div role="tabpanel" id={`ph-p${i}`} aria-labelledby={`ph-t${i}`} hidden={i !== OPEN}>
-          <div><h3>{phaseLabel(p.n)}: {p.title}</h3><p set:html={withCode(p.body)} /></div>
+          <div><h3>{phaseLabel(p.n)}: {p.title}</h3><p set:html={inlineHtml(p.body)} /></div>
           <dl>{p.rows.map((r) => <Fragment><dt>{r.k}</dt><dd>{r.v.map((v) => <code>{v}</code>)}</dd></Fragment>)}<dt>Who</dt><dd>{p.who}</dd></dl>
         </div>
       ))}

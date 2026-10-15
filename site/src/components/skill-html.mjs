@@ -3,13 +3,7 @@
 //
 // Exports
 //   escapeHtml(text)        text safe inside an element or a double-quoted attribute
-//   inlineHtml(markdown)    one line of Markdown as HTML: `code` spans and [text](href) links (http(s),
-//                           a site path or a fragment; any other link stays as written), the rest escaped.
-//                           Code wraps only at a space: each word sits in <span class="nw"> (nowrap where
-//                           skills.css loads), so --team or ops/.sprint-complete never breaks inside. A word
-//                           longer than LONG_WORD characters may also break after a slash (<wbr>), so a
-//                           long path cannot overflow a phone-width card; shorter ones stay whole, because
-//                           a <wbr> puts a space into what a screen reader reads
+//   inlineHtml(markdown)    one line of Markdown as HTML (lib/inline-html.mjs)
 //   skillBodyHtml(html)     a rendered SKILL.md for its page: the body's title (its h1) becomes an h2, a
 //                           sibling of the sections under it, so the page keeps one h1; ids are kept,
 //                           because links from the docs name them (/skills/at-build/#output)
@@ -20,33 +14,11 @@
 // Both fit their tables to the column (docs/tables.mjs) and label their checklist items (docs/task-lists.mjs).
 
 import { escapeHtml } from '../lib/text.mjs';
-import { LONG_WORD, fitTables } from './docs/tables.mjs';
+import { inlineHtml } from '../lib/inline-html.mjs';
+import { fitTables } from './docs/tables.mjs';
 import { labelTaskItems } from './docs/task-lists.mjs';
 
-export { escapeHtml };
-
-const SAFE_HREF = /^(?:https?:\/\/|\/|#)/;
-
-
-/** @param {string} code */
-const codeHtml = (code) =>
-  code
-    .split(' ')
-    .map((word) => (word.length > LONG_WORD ? word.split(/(?<=\/)/) : [word]).map((piece) => `<span class="nw">${escapeHtml(piece)}</span>`).join('<wbr>'))
-    .join(' ');
-
-/** @param {string} markdown */
-export function inlineHtml(markdown) {
-  const out = [];
-  // a link (whose text may hold code), a code span, or one plain character
-  const token = /\[((?:[^[\]`]|`[^`]*`)+)\]\(([^)\s]+)\)|`([^`]+)`|([\s\S])/g;
-  for (const [whole, linkText, href, code, char] of markdown.matchAll(token)) {
-    if (linkText !== undefined) out.push(SAFE_HREF.test(href) ? `<a href="${escapeHtml(href)}">${inlineHtml(linkText)}</a>` : escapeHtml(whole));
-    else if (code !== undefined) out.push(`<code>${codeHtml(code)}</code>`);
-    else out.push(escapeHtml(char));
-  }
-  return out.join('');
-}
+export { escapeHtml, inlineHtml };
 
 /** @param {string} html */
 export function skillBodyHtml(html) {

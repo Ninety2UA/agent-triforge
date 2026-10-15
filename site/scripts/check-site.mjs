@@ -26,10 +26,12 @@ import { fileURLToPath } from 'node:url';
 import { REPO, SITE } from '../src/lib/repo.mjs';
 import { SITE_URL } from '../src/lib/site.mjs';
 import { decodeEntities } from '../src/lib/text.mjs';
+import { ONES, TENS as TEN_WORDS } from '../src/lib/numbers.mjs';
 
-const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen',
-  'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty', 'thirty', 'forty', 'fifty'];
-const TENS = { twenty: 20, thirty: 30, forty: 40, fifty: 50 };
+// the words numbers.mjs writes counts with (zero to nineteen, then the tens), so any count a page sets as
+// a word reads back here
+const NUMBER_WORDS = [...ONES, ...TEN_WORDS.filter(Boolean)];
+const TENS = Object.fromEntries(TEN_WORDS.map((word, i) => [word, i * 10]).filter(([word]) => word));
 
 /** "seventeen" -> 17, "twenty-seven" -> 27, "27" -> 27; null when the text holds no number */
 export function firstNumber(text) {

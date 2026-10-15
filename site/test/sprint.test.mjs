@@ -8,7 +8,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { REPO } from '../src/lib/repo.mjs';
-import { completionChecklist, convergenceModes, cellHtml, parsePipeline, qualityGates, sprintPhases } from '../src/lib/sprint.mjs';
+import { completionChecklist, convergenceModes, parsePipeline, qualityGates, sprintPhases } from '../src/lib/sprint.mjs';
+import { inlineHtml } from '../src/lib/inline-html.mjs';
 
 const workflows = readFileSync(join(REPO, 'docs/workflows.md'), 'utf8');
 // the rows of the first table after a heading, by plain line matching
@@ -38,8 +39,8 @@ test('the phases are the Sprint Pipeline rows of docs/workflows.md, in order', (
 
 test('phase cells render their code and resolve their links through the route table', () => {
   const analyze = sprintPhases().find((p) => p.id === 'phase-0');
-  assert.match(analyze.agentsHtml, /<a href="\/skills\/codebase-mapping\/"><code>codebase-mapping<\/code><\/a>/);
-  assert.match(analyze.workflowsHtml, /<a href="\/skills\/at-plan\/"><code>at-plan<\/code><\/a>/);
+  assert.match(analyze.agentsHtml, /<a href="\/skills\/codebase-mapping\/"><code><span class="nw">codebase-mapping<\/span><\/code><\/a>/);
+  assert.match(analyze.workflowsHtml, /<a href="\/skills\/at-plan\/"><code><span class="nw">at-plan<\/span><\/code><\/a>/);
   for (const p of sprintPhases()) {
     for (const html of [p.happensHtml, p.agentsHtml, p.workflowsHtml]) {
       assert.ok(!/\]\(|\.\.\/|SKILL\.md/.test(html), `${p.label}: an unresolved link in ${html}`);
@@ -69,12 +70,12 @@ test('the completion checklist is the numbered list of completion-gating.md', ()
   const items = completionChecklist();
   const text = readFileSync(join(REPO, 'skills/at-ship/references/completion-gating.md'), 'utf8');
   assert.equal(items.length, text.split('\n').filter((l) => /^\d+\. /.test(l)).length);
-  assert.match(items.at(-1), /<code>ops\/.sprint-complete<\/code>/);
+  assert.match(items.at(-1), /<code><span class="nw">ops\/.sprint-complete<\/span><\/code>/);
 });
 
-test('cellHtml escapes text and renders code spans and links, with code inside a link label', () => {
-  assert.equal(cellHtml('a < b & `x<y>` [`at-ship`](/skills/at-ship/) [docs](https://x.test/a?b=1&c)'),
-    'a &lt; b &amp; <code>x&lt;y&gt;</code> <a href="/skills/at-ship/"><code>at-ship</code></a> <a href="https://x.test/a?b=1&amp;c">docs</a>');
+test('inlineHtml escapes text and renders code spans and links, with code inside a link label', () => {
+  assert.equal(inlineHtml('a < b & `x<y>` [`at-ship`](/skills/at-ship/) [docs](https://x.test/a?b=1&c)'),
+    'a &lt; b &amp; <code><span class="nw">x&lt;y&gt;</span></code> <a href="/skills/at-ship/"><code><span class="nw">at-ship</span></code></a> <a href="https://x.test/a?b=1&amp;c">docs</a>');
 });
 
 test('a missing table stops the build, naming the file', () => {

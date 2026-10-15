@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { numberWord } from '../src/lib/numbers.mjs';
 import { checkClaims, checkLinks, checkMeta, checkRedirects, checkMotion, checkOrigins, checkPages, checkSkillTokens, checkLiteralCounts, firstNumber, readPages } from '../scripts/check-site.mjs';
 
 const page = (body, { title = 'A page', canonical = 'https://agent-triforge.dbenger.com/x/' } = {}) =>
@@ -70,6 +71,13 @@ test('a script or stylesheet from another origin fails', () => {
     assert.match(problems[1], /fonts\.googleapis\.com/);
   } finally {
     s.done();
+  }
+});
+
+test('every count numbers.mjs writes as a word reads back as the same number', () => {
+  for (let n = 0; n < 100; n++) {
+    assert.equal(firstNumber(numberWord(n)), n, numberWord(n));
+    assert.equal(firstNumber(`${numberWord(n, { capital: true })} skills`), n);
   }
 });
 
