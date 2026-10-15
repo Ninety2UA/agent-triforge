@@ -7,8 +7,11 @@ const doc = document;
 const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const $$ = <T extends Element = HTMLElement>(sel: string, root: ParentNode = doc) => [...root.querySelectorAll<T>(sel)];
 
-const watch = (el: Element, cb: (on: boolean) => void, threshold: number) =>
-  new IntersectionObserver((es) => es.forEach((e) => cb(e.isIntersecting && e.intersectionRatio >= threshold)), { threshold: [0, threshold] }).observe(el);
+const watch = (el: Element, cb: (on: boolean) => void, threshold: number) => {
+  const io = new IntersectionObserver((es) => es.forEach((e) => cb(e.isIntersecting && e.intersectionRatio >= threshold)), { threshold: [0, threshold] });
+  io.observe(el);
+  return io;
+};
 
 // Section reveals: a section's parts rise into place once, as it first enters from below. Sections
 // already on screen at load are left alone, so nothing above the fold moves.
@@ -109,9 +112,11 @@ function initBench() {
   };
   $$('input', bench).forEach((i) => i.addEventListener('change', run));
   doc.getElementById('bench-run')?.addEventListener('click', run);
-  watch(bench, (on) => {
+  // the bench runs once on its own, the first time it is on screen; after that only the controls run it
+  const seen = watch(bench, (on) => {
     if (on && !started) {
       started = true;
+      seen.disconnect();
       run();
     }
   }, 0.3);

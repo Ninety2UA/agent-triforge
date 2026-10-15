@@ -20,6 +20,8 @@ function spring(p: Spring, target: number, w: number, dt: number) {
   p.x = target + (d + c2 * dt) * e;
   p.v = (c2 - w * (d + c2 * dt)) * e;
 }
+import { dotRadius } from '@/components/home/dots';
+
 const rnd = (seed: number) => {
   const x = Math.sin(seed * 9301 + 49297) * 233280;
   return x - Math.floor(x);
@@ -113,7 +115,7 @@ export function initDotField(doc: Document = document, win: Window & typeof glob
         dots.push({
           c: ci, k, hx: c.x + dx, hy: c.y + dy, px: { x: c.x + dx, v: 0 }, py: { x: c.y + dy, v: 0 },
           sx: Math.floor(rnd(seed) * lay.cols), sy: Math.floor(rnd(seed + 7) * lay.rows), opt: !!c.opt,
-          rr: c.opt ? 0.31 - dist * 0.04 : 0.45 - dist * 0.055,
+          rr: dotRadius(!!c.opt, dist),
         });
       });
     });
@@ -148,7 +150,8 @@ export function initDotField(doc: Document = document, win: Window & typeof glob
     const t = still ? 17.5 : ((now - t0) / 1000) % T;
     if (still) dt = 10;
     const st = stateAt(t);
-    field.dataset.scatter = String(st.scatter);
+    // [data-scatter] drives a CSS transition, so set it only when it changes, like the caption below
+    if (field.dataset.scatter !== String(st.scatter)) field.dataset.scatter = String(st.scatter);
     if (cap && cap.dataset.i !== String(st.cap)) {
       cap.dataset.i = String(st.cap);
       cap.textContent = CAPS[st.cap] ?? '';

@@ -79,12 +79,15 @@ const { title, description, section, sidebar, headings = [], prev, next } = Astr
     })
     .filter((t): t is { a: HTMLAnchorElement; h: HTMLElement } => t.h !== null);
   let queued = false;
+  let current: HTMLAnchorElement | undefined;
   const mark = () => {
     queued = false;
     const line = window.innerHeight * 0.3;
     let here = targets[0];
     for (const t of targets) if (t.h.getBoundingClientRect().top <= line) here = t;
-    links.forEach((a) => (a === here?.a ? a.setAttribute('aria-current', 'true') : a.removeAttribute('aria-current')));
+    if (here?.a === current) return;
+    current = here?.a;
+    links.forEach((a) => (a === current ? a.setAttribute('aria-current', 'true') : a.removeAttribute('aria-current')));
   };
   if (targets.length) {
     mark();

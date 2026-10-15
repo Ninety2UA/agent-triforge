@@ -113,6 +113,7 @@ function initFilm({ fig, v, play }: Figure, win: Window & typeof globalThis) {
   let circles: SVGCircleElement[] = [];
   let n = 0;
   let active = -1;
+  let shown = '';
   let raf = 0;
 
   const build = () => {
@@ -142,6 +143,10 @@ function initFilm({ fig, v, play }: Figure, win: Window & typeof globalThis) {
       active = i;
       chaps.forEach((c, j) => (j === i ? c.b.setAttribute('aria-current', 'step') : c.b.removeAttribute('aria-current')));
     }
+    // the readout changes once a second; the loop runs every frame, so write it only when it changes
+    const readout = `${clock(t)}|${clock(dur())}|${Math.round(t)}`;
+    if (readout === shown) return;
+    shown = readout;
     if (time) time.textContent = `${clock(t)} / ${clock(dur())}`;
     if (dots) {
       dots.setAttribute('aria-valuenow', String(Math.round(t)));

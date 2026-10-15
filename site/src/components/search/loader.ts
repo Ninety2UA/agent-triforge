@@ -11,7 +11,7 @@
 // skills catalog took for its own search box arrives here defaultPrevented.
 import { OPEN_SEARCH_EVENT, type OpenSearchDetail } from '../search-event';
 import { loadIndex } from './pagefind';
-import { shortcutAction } from './shortcut.mjs';
+import { isTyping, shortcutAction } from './shortcut.mjs';
 
 type Palette = typeof import('./mount');
 
@@ -21,8 +21,6 @@ let loading = false;
 // null when nothing waits, including after Escape cancelled it
 let request: { returnFocus: HTMLElement | null; typed: string } | null = null;
 
-const inField = (target: EventTarget | null) =>
-  target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select') !== null);
 
 function keepTyping(event: KeyboardEvent) {
   if (event.isComposing || !request) return;
@@ -84,7 +82,7 @@ async function show(returnFocus: HTMLElement | null, toggle: boolean) {
 }
 
 addEventListener('keydown', (event) => {
-  const action = shortcutAction(event, { typing: inField(event.target) });
+  const action = shortcutAction(event, { typing: isTyping(event.target) });
   if (!action) return;
   event.preventDefault();
   const focused = document.activeElement;

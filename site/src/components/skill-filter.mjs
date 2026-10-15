@@ -24,10 +24,13 @@
 //   matchText(...parts)       a card's data-text: its parts in lower case, backticks dropped
 //   matches(card, state)      true when the card is in state.group (or ALL) and every word of state.q starts
 //                             a word of its text (leading punctuation dropped, so /at-review finds at-review)
+//   matcher(state)            the same test as a function of the card, with the query read once
 //   readState(search, groups) { q, group } from a query string; a group not in `groups` reads as ALL
 //   initCatalog(doc?, win?)   the page's controller, created once per page, or null without [data-catalog]:
 //                             { getState(), subscribe(fn) -> unsubscribe, setQuery(q), setGroup(key), clear(),
 //                             key(name) -> true when it took the key (Escape with a search typed) }
+
+import { isTyping } from './search/shortcut.mjs';
 
 export const ALL = 'all';
 
@@ -42,16 +45,25 @@ export function matchText(...parts) {
  * @param {{ group: string, text: string }} card
  * @param {FilterState} state
  */
-export function matches(card, { q, group }) {
-  if (group !== ALL && card.group !== group) return false;
-  return q
+export function matches(card, state) {
+  return matcher(state)(card);
+}
+
+/**
+ * matches() for one state: the query's word patterns are built once, then tested on each card.
+ * @param {FilterState} state
+ * @returns {(card: { group: string, text: string }) => boolean}
+ */
+export function matcher({ q, group }) {
+  const words = q
     .toLowerCase()
     .split(/\s+/)
     // "/at-review" as typed in a session is the word "at-review"
     .map((word) => word.replace(/^[^a-z0-9]+/, ''))
     .filter(Boolean)
     // from the start of a word: "cut" finds "cutting", not "execution"
-    .every((word) => new RegExp(`(?:^|[^a-z0-9])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(card.text));
+    .map((word) => new RegExp(`(?:^|[^a-z0-9])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  return (card) => (group === ALL || card.group === group) && words.every((re) => re.test(card.text));
 }
 
 /**
@@ -64,9 +76,6 @@ export function readState(search, groups) {
   const group = params.get('group') ?? ALL;
   return { q: params.get('q') ?? '', group: groups.includes(group) ? group : ALL };
 }
-
-const typingIn = (/** @type {any} */ target) =>
-  Boolean(target && (target.isContentEditable || target.closest?.('input, textarea, select')));
 
 /**
  * @param {Document} [doc]
@@ -92,8 +101,9 @@ export function initCatalog(doc = document, win = window) {
 
   const apply = () => {
     let shown = 0;
+    const test = matcher(state);
     for (const card of cards) {
-      const on = matches(card, state);
+      const on = test(card);
       card.el.toggleAttribute('hidden', !on);
       if (on) shown += 1;
     }
@@ -165,7 +175,7 @@ export function initCatalog(doc = document, win = window) {
   // "/" focuses the catalog's own search box; the palette loader (on window) then skips the press
   doc.addEventListener('keydown', (event) => {
     const e = /** @type {KeyboardEvent} */ (event);
-    if (e.key !== '/' || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || typingIn(e.target)) return;
+    if (e.key !== '/' || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return;
     const box = input();
     if (!box) return;
     e.preventDefault();
