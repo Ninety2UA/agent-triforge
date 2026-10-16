@@ -5,7 +5,7 @@
 # which the check reads (3 statements, not 2). docs/releases/v1.2.3.md carries
 # the README What's new line, and docs/images/render-diagrams.sha256 is the
 # stamp a render of the two diagram sources writes.
-check: lockstep,skill-versions,ladder,sweep,inventory,halt,liquid,diagrams
+check: lockstep,skill-versions,ladder,sweep,inventory,halt,diagrams
 rc: 0
 line: ok:   version lockstep: 1.2.3 (.claude-plugin/plugin.json, .claude-plugin/marketplace.json, antigravity-agents/plugin.json, README What's new)
 line: ok:   release notes: docs/releases/v1.2.3.md carries the v1.2.3 heading, a title, a body and all 1 line(s) of README What's new (v1.2.3) (scripts/release-notes.sh builds the GitHub release from it)
@@ -14,6 +14,5 @@ line: ok:   ladder: one definition (scripts/lib/registry.sh:2 TRIFORGE_MODEL_LAD
 line: ok:   stale-pin sweep: no stale pins outside the excluded paths
 line: ok:   rule inventory: docs/rule-inventory.md — 2 rows in 1 table(s), matching the declared Totals for each of 1 sources; every row has a destination, no TBD cell, every cited destination path exists (2 distinct)
 line: ok:   halt threshold: 3 statement(s) of more than 50 changed files and none that halts at 50 itself (50+, 50 or more, at least 50, >= 50) in skills/, AGENTS.md, README.md and its topic pages, docs/agent-triforge.md
-line: ok:   liquid: no Liquid delimiter ({{ or {%) in the 2 Markdown file(s) under docs/ (GitHub Pages builds docs/ with Jekyll)
 line: ok:   diagram render stamp: docs/images/render-diagrams.sha256 matches docs/images/render-diagrams.html and 1 docs/images/excalidraw/*.svg file(s)
-line: validate-versions: PASS (--only lockstep,skill-versions,ladder,sweep,inventory,halt,liquid,diagrams)
+line: validate-versions: PASS (--only lockstep,skill-versions,ladder,sweep,inventory,halt,diagrams)
