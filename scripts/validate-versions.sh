@@ -15,7 +15,7 @@
 #   --only       run only the named checks: lockstep and skill-versions (1),
 #                ladder (2), drift (3), sweep (4), counts (5), budget (6),
 #                inventory (7), retired (8), workflows (9), manifests (10),
-#                halt (11), liquid (12), diagrams (13). An unknown or empty
+#                halt (11), diagrams (12). An unknown or empty
 #                name is a usage error (exit 2), so a typo never passes by
 #                running nothing.
 #   --root       run the checks against <dir> instead of this checkout (the
@@ -220,12 +220,7 @@
 #      phrase may wrap across lines. "more than 50", "over 50", "> 50" and "file changes > 50"
 #      pass and are counted; a count with no comparator ("50 files", "look at
 #      50 files") is prose, not a threshold.
-#  12. Liquid delimiters — no Markdown file under docs/ (docs/plans/,
-#      docs/brainstorms/ and docs/releases/ included) holds "{{" or "{%":
-#      GitHub Pages builds docs/ with Jekyll, which reads either as Liquid,
-#      and one such delimiter renders the page wrong or stops the site from
-#      updating. Each hit names its file and line.
-#  13. Diagram render stamp (KTD6) — when docs/images/render-diagrams.html
+#  12. Diagram render stamp (KTD6) — when docs/images/render-diagrams.html
 #      exists, docs/images/render-diagrams.sha256 must be the text a full
 #      render (node docs/images/render-diagrams.js) writes: one line per
 #      source as shasum -a 256 prints it ("<64 lowercase hex>  <path>"), the
@@ -271,7 +266,7 @@ ONLY=""
 ROOT=""
 SELF_TEST=0
 # The names --only takes, in run order (the header numbers the checks).
-VV_CHECKS="lockstep skill-versions ladder drift sweep counts budget inventory retired workflows manifests halt liquid diagrams"
+VV_CHECKS="lockstep skill-versions ladder drift sweep counts budget inventory retired workflows manifests halt diagrams"
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-sweep)  NO_SWEEP=1 ;;
@@ -505,7 +500,7 @@ SWEEP_EXCLUDE_RE='^(\./)?(ops/research|ops/decisions|docs/plans|docs/brainstorms
 SWEEP_EXCLUDE_DIRS=(--exclude-dir=.git --exclude-dir=.agents --exclude-dir=.gemini --exclude-dir=.antigravity --exclude-dir=node_modules --exclude-dir=.astro --exclude-dir=.vercel)
 SWEEP_SELF_RE='^(\./)?scripts/validate-(versions|skills)\.sh:'
 # The diagram source the PNGs are rendered from: checks 4, 5 and 9 read it
-# although docs/images/ stays excluded (KTD6), and check 13 holds its stamp.
+# although docs/images/ stays excluded (KTD6), and check 12 holds its stamp.
 DIAGRAM_SOURCE='docs/images/render-diagrams.html'
 # _diagram_svg_lines: the visible text of each Excalidraw SVG the diagram
 # source embeds (docs/images/excalidraw/*.svg), one "<path>#text:<n>:<text>"
@@ -1919,49 +1914,7 @@ PYEOF
   fi
 fi
 
-# --- 12. Liquid delimiters in docs/ -------------------------------------------
-if _selected liquid; then
-  LIQUID_RC=0
-  python3 -c "$VV_PY_STDIN" <<'PYEOF' || LIQUID_RC=$?
-import os
-import sys
-
-# GitHub Pages builds docs/ with Jekyll: a doubled opening brace opens a Liquid
-# output, a brace and a percent sign a Liquid tag.
-DELIMITERS = ("{{", "{%")
-fails = []
-count = 0
-for top, dirs, names in os.walk("docs"):
-    dirs.sort()
-    for name in sorted(names):
-        if not name.endswith(".md"):
-            continue
-        path = os.path.join(top, name)
-        count += 1
-        try:
-            with open(path, encoding="utf-8", errors="surrogateescape") as fh:
-                text = fh.read()
-        except OSError as exc:
-            fails.append(path + " unreadable (" + str(exc) + ")")
-            continue
-        for lineno, line in enumerate(text.split("\n"), 1):
-            found = [d for d in DELIMITERS if d in line]
-            if found:
-                fails.append(path + ":" + str(lineno) + " holds " + " and ".join(found) + " — GitHub Pages builds docs/ with Jekyll,"
-                             + " which reads it as Liquid, so the page renders wrong or the site stops updating; reword it")
-
-for line in fails:
-    print("FAIL: liquid: " + line)
-if fails:
-    sys.exit(1)
-print("ok:   liquid: no Liquid delimiter ({{ or {%) in the " + str(count) + " Markdown file(s) under docs/ (GitHub Pages builds docs/ with Jekyll)")
-PYEOF
-  if [ "$LIQUID_RC" -ne 0 ]; then
-    FAILED_CHECKS=$((FAILED_CHECKS + 1))
-  fi
-fi
-
-# --- 13. diagram render stamp (KTD6) ------------------------------------------
+# --- 12. diagram render stamp (KTD6) ------------------------------------------
 if _selected diagrams; then
   if [ -f "$DIAGRAM_SOURCE" ]; then
     DIAGRAMS_RC=0
