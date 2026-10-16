@@ -76,3 +76,15 @@ A Codex lead's launch line runs with full access: `-s danger-full-access` and no
 | 77 | The launch line needs full access and `--allow-full-access` was not given; nothing ran |
 
 When the sessions run out, `ops/STATE.md` and `ops/TASKS.md` hold the progress. Run the script again to continue, or review by hand.
+
+### Stopping a run early
+
+Press Ctrl-C in the terminal running the script. That ends the loop and the lead session it is waiting on. Builders that session started keep running, because each runs detached in its own process group, and their leases stay open in `ops/leases.toml`. Run the script again with the same goal to continue. The next session finds the open leases, collects the builders that finished and carries on with the wave.
+
+To stop the builders too, load the helpers in the same terminal (in the project's top directory, with `TRIFORGE` set as in step 1), list the leases and stop each one still running. `lease_stop` leaves the lease in the ledger, for the next session to reclaim or requeue:
+
+```bash
+source "$TRIFORGE/scripts/invoke-external.sh"
+lease_status
+lease_stop <task_id>
+```
