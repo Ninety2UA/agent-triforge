@@ -6,7 +6,7 @@ Every goal goes through the same phases, and each phase has a lead workflow.
 
 ## Sprint Pipeline (`at-ship`)
 
-Run [`at-ship`](../skills/at-ship/SKILL.md) (`/at-ship <goal>` under a Claude Code lead, `$agent-triforge:at-ship <goal>` in a Codex prompt) to run every phase autonomously, or run each phase's lead workflow yourself.
+Run [`at-ship`](../skills/at-ship/SKILL.md) (`/at-ship <goal>` under a Claude Code lead, `$agent-triforge:at-ship <goal>` in a Codex prompt) to run every phase autonomously, or run each phase's lead workflow yourself. `at-build` promotes the integration branch once, after its last wave, and writes the commit it started from as a `Build base:` line in `ops/TASKS.md`; `at-review` reviews from that commit, so a review run on its own after a build still covers the whole build.
 
 <p align="center">
   <img src="images/sprint-lifecycle.png" alt="The sprint phases, Analyze, Plan, Build, Review, Test and Wrap, each with its lead workflow; at-ship runs them all." width="90%">

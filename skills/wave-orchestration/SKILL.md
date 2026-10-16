@@ -48,7 +48,7 @@ Non-derivable facts:
 
 - `lease_collect` routes on the typed report: `Status: DONE` / `DONE_WITH_CONCERNS` → review; `BLOCKED` / `NEEDS_CONTEXT` → escalated, never review; no `Status:` line → rc 80, report-missing — re-dispatch once with the contract restated, escalate on the second miss. A clean exit alone is never review-ready.
 - The pinned reviewer is a DIFFERENT roster member than `builder_cli` (the lead is valid for a task another CLI built), pinned for all ≤ 3 fix cycles; `lease_merge` refuses self-review, an unknown reviewer identity and a merge with no pin. No non-author reviewer live → block and escalate to the user.
-- Merge in wave order, never completion order: one squash commit per task on the sprint integration branch, never on the default branch. `lease_promote` runs at wave end. A protected diff needs a lead or user approval to merge and the user's to promote (`lease_approve`; rc 42 without).
+- Merge in wave order, never completion order: one squash commit per task on the sprint integration branch, never the default branch. `lease_promote` runs after the last wave. A protected diff needs a lead or user approval to merge and the user's to promote (`lease_approve`; rc 42 without).
 - Every lease call first compares the git state with the lead's baseline; a change the lead did not make returns 44, and `lease_rebaseline` accepts only a change you have read.
 - `ops/CHANGELOG.md` rows: the line `lease_attribution <task>` prints.
 

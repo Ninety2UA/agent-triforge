@@ -60,10 +60,12 @@ Start it detached in one block, `persona_spawn "$RUN" plan-checker plan-checker 
 - Assign every task from `ops/roster.toml` and build it under a per-task lease in an isolated worktree; merge only after cross-review by a pinned non-author reviewer (the builder-pool wave protocol in the `wave-orchestration` skill). The single-writer rule is retired; safety is leases + worktree isolation + cross-review.
 - Fewer than 5 independent tasks → sub-agent mode with wave orchestration.
 - 5 or more tasks, or interdependent tasks, or `--team` → agent-team mode with the `team-lead` persona.
-- Approved merges land as one commit per task on the sprint integration branch (`lease_merge` refuses the default branch); the `integration-verifier` persona runs against that branch between waves (`--at ref:<integration branch>`), then the lead promotes to the main branch with `lease_promote`, which honors `[promotion]` and BLOCKS on protected-path diffs (they force the gate on).
+- Approved merges land as one commit per task on the sprint integration branch (`lease_merge` refuses the default branch); the `integration-verifier` persona runs against that branch between waves (`--at ref:<integration branch>`); after the last wave, the lead promotes to the main branch once with `lease_promote`, which honors `[promotion]` and BLOCKS on protected-path diffs (they force the gate on).
 - Apply risk scoring (halt at risk above 20 % or more than 50 changed files).
 
 ## Phase 3: parallel review
+
+Build the review package with `REVIEW_BASE` set to the commit on the `Build base:` line of `ops/TASKS.md`: Phase 2 has promoted, so the default base would leave only the last commit to review.
 
 Launch ALL reviewers simultaneously:
 

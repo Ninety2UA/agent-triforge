@@ -57,6 +57,22 @@ The hook also keeps its session state in `.claude/` (it writes nothing through a
 
 Your project's own instruction file is its root `AGENTS.md`. Add the marked pointer block from [`templates/AGENTS.md`](../templates/AGENTS.md) to it yourself, or let `at-setup` add it after you say yes; session start never writes into an existing `AGENTS.md`. The plugin ships no `CLAUDE.md`, because a `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` in or above the project stops Claude Code from reading `AGENTS.md`.
 
+### What to commit
+
+Commit the files the team shares:
+
+- `ops/roster.toml`, so changes to who builds and reviews go through review like any other change
+- `ops/AGENTS.md`, `ops/GOALS.md`, `ops/MEMORY.md` and `ops/CHANGELOG.md`, and the working files the lead writes as it goes (`ops/TASKS.md`, `ops/CONTRACTS.md`, `ops/STATE.md`)
+- `ops/decisions/`, `ops/solutions/` and `ops/archive/`
+
+Keep these out of git by adding them to your `.gitignore`:
+
+- `ops/leases.toml`, the lead's ledger. It is runtime state of one machine (builder process ids, worktree paths and the git baseline the lease helpers check), written by one lead at a time.
+- `ops/.sprint-complete`, the completion signal of a single `coordinate.sh` run.
+- `.agents/triforge-plugin-root.local`, which setup already ignores.
+
+The per-CLI files setup writes (the `.agents/skills/` copy, `.codex/triforge-agents.toml` and the other CLIs' folders listed above) are copies of the installed plugin's files, refreshed whenever their content changes. Commit them if teammates should get them without running `at-setup`, or leave them out if everyone runs it. This repository ignores its own `.agents/` copy, since it ships the sources.
+
 ## Shared file protocol
 
 All agents coordinate through markdown files in [`ops/`](../ops/), the source of truth:
