@@ -28,7 +28,7 @@ versions produced this change.
 - [ ] `claude plugin validate --strict .claude-plugin/plugin.json` and `claude plugin validate --strict .claude-plugin/marketplace.json` pass (warnings are errors)
 - [ ] `bash scripts/validate-skills.sh` exits 0 (warnings are errors; `--warn` is the relaxed run), and its `--self-test` reports every fixture OK
 - [ ] `bash scripts/validate-versions.sh` exits 0 — summary line: `<paste it: ladder: one definition (scripts/lib/registry.sh)>` — and its `--self-test` reports every case OK
-- [ ] `bash scripts/probe-capabilities.sh --self-only` exits 0 (the SELF gate)
+- [ ] `bash scripts/probe-capabilities.sh --self-only` exits 0 (the SELF gate; CI runs it on a PR to `main` only with the `full-ci` label)
 - [ ] `/bin/bash -n` passes on `scripts/*.sh`, `scripts/lib/*.sh` and `hooks/handlers/*.sh`
 - [ ] Probe record regenerated and cited: `ops/research/<YYYY-MM>-probe-record.md` — rows: <!-- e.g. AGY-05, CDX-03 -->
 - [ ] Version bump PRs only: `docs/releases/v<version>.md` exists, starts with `# <date> — v<version>: <title>` and holds the README "What's new" text — it becomes the GitHub release when this merges (`.github/workflows/release.yml`; preview with `bash scripts/release-notes.sh --body`)

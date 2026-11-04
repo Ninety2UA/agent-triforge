@@ -15,9 +15,13 @@
 # exit 3. `claude plugin validate --strict` needs Claude Code and stays a
 # local release gate (AGENTS.md "Checks to run" and "Release").
 #
-# Scope (the scope job): the SELF gate takes about 30 minutes on a hosted
-# macOS runner, so it is skipped when every file a pull request changes lies
-# where no SELF row reads: site/, docs/, README.md, LICENSE, the notes under
+# On request: the SELF gate takes about 30 minutes on a hosted macOS runner, so
+# a pull request to main skips it, and the can-fail job, unless it carries the
+# full-ci label. It still runs on every pull request to a release/ branch that
+# the scope below selects, nightly on main, and on a manual run.
+#
+# Scope (the scope job): on those runs the SELF gate is skipped when every file
+# a pull request changes lies where no SELF row reads: site/, docs/, README.md, LICENSE, the notes under
 # ops/decisions/ and ops/solutions/, and validate-versions.sh with its
 # fixtures, which the gates job runs itself (the rows build their own
 # throwaway repos). Not on the list: ops/research/, because the Devin lane can
@@ -33,6 +37,9 @@ name: gates
 on:
   pull_request:
     branches: [main, "release/**"]
+    types: [opened, synchronize, reopened, labeled]
+  schedule:
+    - cron: "0 3 * * *" # nightly on main, so a regression surfaces within a day
   workflow_dispatch:
 
 permissions:
@@ -58,6 +65,8 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.base_ref }}
+          FULL_CI: ${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}
         run: |
           self=true
           canfail=true
@@ -77,6 +86,16 @@ jobs:
             printf 'changed files:\n%s\n' "$files"
           else
             echo "no pull request diff to read: running every gate"
+          fi
+          # On request: a pull request to main skips the long gates unless labeled full-ci.
+          if [ -n "$BASE_REF" ]; then
+            if [ "$FULL_CI" = "true" ]; then
+              self=true
+            elif [ "${BASE_REF#release/}" = "$BASE_REF" ]; then
+              self=false
+              canfail=false
+              echo "pull request to ${BASE_REF}: add the full-ci label to run the SELF gate"
+            fi
           fi
           echo "SELF gate: $self; can-fail proof: $canfail"
           echo "self=$self" >> "$GITHUB_OUTPUT"

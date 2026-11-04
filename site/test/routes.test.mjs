@@ -39,8 +39,8 @@ test("a skill's references/ file resolves to GitHub blob/main; a folder to tree/
     assert.equal(resolveLink(`skills/${name}/SKILL.md`, 'references/claude.md'), `${GITHUB}/blob/main/skills/${name}/references/claude.md`);
   }
   assert.equal(resolveLink(WORKFLOWS, '../skills/'), `${GITHUB}/tree/main/skills`);
-  assert.equal(githubUrl('ops/solutions/'), `${GITHUB}/tree/main/ops/solutions`);
-  assert.equal(resolveLink(WORKFLOWS, '../ops/STATE.md'), `${GITHUB}/blob/main/ops/STATE.md`);
+  assert.equal(githubUrl('templates/ops/'), `${GITHUB}/tree/main/templates/ops`);
+  assert.equal(resolveLink(WORKFLOWS, '../templates/ops/MEMORY.md'), `${GITHUB}/blob/main/templates/ops/MEMORY.md`);
 });
 
 test('a link inside fenced code or inline code is left unchanged', () => {
