@@ -11,7 +11,7 @@
 # the shell layer only parses arguments; every rule lives in the python
 # program _INSTR_PY, so the two shells run the same code.
 #
-# The instruction readers (the Key Decision, ops/research/2026-09-27-cli-updates.md),
+# The instruction readers (the Key Decision),
 # kept as data in READERS (_INSTR_PY) and named per CLI by the registry field
 # "instructions" (KTD1), so nothing here branches on a CLI:
 #   claude-md-shadow  reads AGENTS.md (cwd and every directory above) only while

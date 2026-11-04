@@ -13,13 +13,13 @@ The plugin ships 27 skills in one `skills/` tree: the 10 portable skills below, 
 | [`iterative-refinement`](../skills/iterative-refinement/SKILL.md) | Lead (Phase 4) | Review-fix-review loops with convergence modes |
 | [`review-synthesis`](../skills/review-synthesis/SKILL.md) | Lead (Phase 4) | Merge multi-reviewer findings with confidence tiering |
 | [`verification-before-completion`](../skills/verification-before-completion/SKILL.md) | All agents | Evidence-based completion checklist |
-| [`knowledge-compounding`](../skills/knowledge-compounding/SKILL.md) | Lead (Phase 6) | Document solutions to [`ops/solutions/`](../ops/solutions/) for future sprints |
-| [`session-continuity`](../skills/session-continuity/SKILL.md) | Lead | Save and resume via [`STATE.md`](../ops/STATE.md) across sessions |
+| [`knowledge-compounding`](../skills/knowledge-compounding/SKILL.md) | Lead (Phase 6) | Document solutions to `ops/solutions/` for future sprints |
+| [`session-continuity`](../skills/session-continuity/SKILL.md) | Lead | Save and resume via `STATE.md` across sessions |
 | [`scope-cutting`](../skills/scope-cutting/SKILL.md) | Lead | Systematically cut scope by unblocking value and risk |
 
 ## Portable skills across the eight CLIs
 
-The project bootstrap (`triforge_bootstrap`, run at session start and by `at-setup`, `at-build` and `at-review`) copies the 10 portable skills from the plugin's `skills/` into `.agents/skills/`, the agentskills.io path, and refreshes the copy whenever the plugin version changes. The stamp `.agents/skills/.triforge-plugin-version` records a content digest for each directory Triforge wrote, and only Triforge's own unchanged copies are replaced or retired. An edited copy, or your own directory under a shipped name, is kept with a notice; customizations are safest in a directory with a different name. Fixture evidence from the 2026-09-11 watch cycle ([`ops/research/2026-09-11-cli-updates.md`](../ops/research/2026-09-11-cli-updates.md) §3.1) shows which path each CLI reads:
+The project bootstrap (`triforge_bootstrap`, run at session start and by `at-setup`, `at-build` and `at-review`) copies the 10 portable skills from the plugin's `skills/` into `.agents/skills/`, the agentskills.io path, and refreshes the copy whenever the plugin version changes. The stamp `.agents/skills/.triforge-plugin-version` records a content digest for each directory Triforge wrote, and only Triforge's own unchanged copies are replaced or retired. An edited copy, or your own directory under a shipped name, is kept with a notice; customizations are safest in a directory with a different name. Fixture evidence from the 2026-09-11 watch cycle shows which path each CLI reads:
 
 | Path | Claude Code | agy | Codex | OpenCode | Cursor | Kimi (docs) |
 |---|---|---|---|---|---|---|

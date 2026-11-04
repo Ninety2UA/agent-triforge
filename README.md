@@ -31,7 +31,7 @@ Every implementation task, the lead's own included, is built under a per-task le
 
 > *Each sprint should make the next sprint easier.*
 
-When the lead solves a problem whose reasoning would otherwise be lost, it writes a note to [`ops/solutions/`](ops/solutions/), or to [`ops/decisions/`](ops/decisions/) for an architectural decision. The [`learnings-researcher`](personas/learnings-researcher.md) persona searches both before new work is planned ([the knowledge loop](docs/team-work.md#the-knowledge-loop-at-compound)).
+When the lead solves a problem whose reasoning would otherwise be lost, it writes a note to `ops/solutions/`, or to `ops/decisions/` for an architectural decision. The [`learnings-researcher`](personas/learnings-researcher.md) persona searches both before new work is planned ([the knowledge loop](docs/team-work.md#the-knowledge-loop-at-compound)).
 
 <a name="whats-new"></a>
 ## What's new (v4.1.1)

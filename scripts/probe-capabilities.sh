@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # probe-capabilities.sh — capability probe harness (v3.0.0 U1; row set
-# extended for v3.3.0 per the 2026-09-11 watch-cycle ADR, D-028)
+# extended for v3.3.0 per the 2026-09-11 watch cycle ADR, D-028)
 #
 # Turns every vendor-unverified capability into a recorded fact before
-# design-dependent units run (KTD-6). Rerunnable — /cli-watch re-runs it on
-# every cycle and the record is rewritten idempotently.
+# design-dependent units run (KTD-6). Rerunnable: the maintainer's internal
+# watch skills re-run it on every cycle and the record is rewritten idempotently.
 #
 # Usage:
 #   bash scripts/probe-capabilities.sh [--record <path>] [--skip-live | --self-only | --only <ID>[,<ID>...]]
@@ -2111,7 +2111,8 @@ fi
 # ------------------------------------------------------------------ Routines
 # Scheduled cloud Routines: checkout/push/PR capability of the scheduled
 # environment is only observable from inside a scheduled run. The first
-# scheduled /cli-watch run creates the diagnostic Routine and amends this row;
+# scheduled run of the maintainer's internal watch skills creates the diagnostic
+# Routine and amends this row;
 # the watch command's runtime preflight (KTD-11) absorbs either outcome, so no
 # design decision is blocked on this value.
 row "RTN-01" "claude" "Scheduled Routine env: checkout, push/PR, binaries, non-interactive auth, research tools" "PENDING-U15" "resolved by the diagnostic first scheduled run; delivery mode self-selects at runtime via KTD-11 preflight (commit+PR, else draft-PR-with-pending-probes, else output artifact)" "deferred"
@@ -5365,7 +5366,7 @@ COUNTER_MISMATCH=0
 {
   echo "# $RECORD_TITLE"
   echo
-  echo "**Generated:** $RUN_TS by \`scripts/probe-capabilities.sh\` (rerunnable; \`/cli-watch\` re-runs it each cycle)"
+  echo "**Generated:** $RUN_TS by \`scripts/probe-capabilities.sh\` (rerunnable; the maintainer's internal watch skills re-run it each cycle)"
   echo "**Host:** $(uname -s) $(uname -r); timeout via \`$TIMEOUT_NAME\`"
   echo "**Mode:** $(if [ "$SELF_ONLY" = "1" ]; then echo "self-only (SELF rows only — the KTD15 gate; scratch record, not committed)"; elif [ -n "$ONLY" ]; then echo "only ${ONLY}$( [ "$SKIP_LIVE" = "1" ] && echo ", skip-live") (named lead-capability rows only; scratch record, not committed)"; elif [ "$SKIP_LIVE" = "1" ]; then echo "skip-live (no model calls)"; else echo "full (live probes)"; fi)"
   echo

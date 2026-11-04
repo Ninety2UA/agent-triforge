@@ -33,7 +33,7 @@
 #                exercised end to end. Exit 0 when every fixture behaves as
 #                named.
 #
-# The checks (ids follow ops/research/2026-09-27-repo-mining.md §3; "new" means
+# The checks (ids are this validator's own, from C1 up; "new" means
 # a warning under --warn and an error otherwise; the rest FAIL in both modes):
 #   C1   exactly one SKILL.md (uppercase) per skill directory          (new)
 #   C2   frontmatter opens and closes with ---, top level is a mapping, no

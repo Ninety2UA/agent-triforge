@@ -75,18 +75,18 @@ The per-CLI files setup writes (the `.agents/skills/` copy, `.codex/triforge-age
 
 ## Shared file protocol
 
-All agents coordinate through markdown files in [`ops/`](../ops/), the source of truth:
+All agents coordinate through markdown files in [`ops/`](../templates/ops/), the source of truth:
 
 | File | Purpose | Owner |
 |---|---|---|
 | `TASKS.md` (runtime) | Work queue with `[ ]`/`[x]` status tracking | The lead generates, all agents read |
 | [`AGENTS.md`](../templates/ops/AGENTS.md) | Master operating protocol read by all agents | Manual |
 | [`GOALS.md`](../templates/ops/GOALS.md) | High-level product goals for sprint planning | Manual |
-| [`MEMORY.md`](../ops/MEMORY.md) | Architectural decisions, patterns, interface proposals | All agents append |
-| [`CHANGELOG.md`](../ops/CHANGELOG.md) | Audit trail with `[agent-name]` attribution | All agents append |
-| [`STATE.md`](../ops/STATE.md) | Session continuity: current phase, progress, next actions | The lead writes on pause/wrap |
-| [`solutions/`](../ops/solutions/) | Documented solved problems for institutional knowledge | The lead writes via [`at-compound`](../skills/at-compound/SKILL.md) |
-| [`decisions/`](../ops/decisions/) | Architecture decision records (ADRs) | The lead writes via [`at-compound`](../skills/at-compound/SKILL.md) |
+| [`MEMORY.md`](../templates/ops/MEMORY.md) | Architectural decisions, patterns, interface proposals | All agents append |
+| [`CHANGELOG.md`](../templates/ops/CHANGELOG.md) | Audit trail with `[agent-name]` attribution | All agents append |
+| `STATE.md` | Session continuity: current phase, progress, next actions | The lead writes on pause/wrap |
+| `solutions/` | Documented solved problems for institutional knowledge | The lead writes via [`at-compound`](../skills/at-compound/SKILL.md) |
+| `decisions/` | Architecture decision records (ADRs) | The lead writes via [`at-compound`](../skills/at-compound/SKILL.md) |
 
 ## Customization
 

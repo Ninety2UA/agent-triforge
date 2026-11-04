@@ -36,7 +36,7 @@ Codex skips `.codex/hooks.json` altogether. The role instructions in
 
 Probe row CDX-04 confirmed that hooks fire under `exec` on codex 0.144.4 (2026-07-17)
 and 0.154.0 (2026-09-11); the probe passes the bypass flag in a scratch fixture to stand
-in for trust. See `ops/decisions/2026-07-18-codex-hooks-under-exec.md` and the newest
+in for trust. A probe run writes its evidence to the newest
 `ops/research/*-probe-record.md`.
 
 ## `--full-auto` is gone

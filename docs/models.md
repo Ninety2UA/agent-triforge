@@ -20,7 +20,7 @@ How each CLI takes its model and effort:
 
 - Antigravity always gets an explicit `--model`, because its own default is a (Medium) variant. The shipped pin is the newest Gemini at its highest thinking level, Pro or Flash (D-022). The suffix is agy's effort control, so a role's `effort` maps into it: `low` to (Low), `medium` to (Medium), `high`, `xhigh` and `max` to (High).
 - To run the Pro line, set a role's `model` to `"Gemini 3.1 Pro (High)"` (or `(Low)`; 3.1 Pro has no Medium tier). It stays the documented one-line opt-in.
-- The July 2026 plan's never-Flash rule (AE2) is superseded by D-022; if you work from that plan, read the September ADR (`ops/decisions/2026-09-11-cli-deprecation-watch.md`).
+- The July 2026 plan's never-Flash rule (AE2) is superseded by D-022, the September 2026 decision; if you work from that plan, D-022 wins.
 - Codex runs `gpt-6-astra` at `xhigh` (D-021). A role can pick another Codex model, such as `gpt-6.1-sol`, which answered on Codex 0.160.0 and was refused on 0.155.1.
 - Cursor runs a suffixed Grok id, `cursor-grok-4.6-xhigh`, never the Auto router. Its effort is the id's suffix (`low`, `medium`, `high`, `xhigh`).
 - The claude builder lane runs Claude Code's own default model at `max` effort. Claude personas and sub-agents follow the ladder below.

@@ -2,7 +2,7 @@
 
 # Compatibility
 
-Floors and tested versions come from the newest capability probe record, [`ops/research/2026-09-probe-record.md`](../ops/research/2026-09-probe-record.md), generated 2026-09-27. "The current record" always means the newest `ops/research/*-probe-record.md`. No full probe run has been recorded since. The rows added after that record ran live during development with `probe-capabilities.sh --only`: DVN-01 to DVN-07, CC-21 to CC-25, CDX-20 to CDX-23, GRK-02 to GRK-12 and SELF-06g. Where the table says "dev-time rows", it gives the version those rows ran on. A full run would currently record Grok Build as QUOTA-FAIL (the xAI quota ran out) and Kimi as AUTH-FAIL. The core trio is required, and the optional tier is enrolled through `at-setup`. This baseline supersedes the July 2026 one (D-034).
+Floors and tested versions come from the newest capability probe record, generated 2026-09-27 and kept in the maintainer's own records. "The current record" always means the newest `ops/research/*-probe-record.md`. No full probe run has been recorded since. The rows added after that record ran live during development with `probe-capabilities.sh --only`: DVN-01 to DVN-07, CC-21 to CC-25, CDX-20 to CDX-23, GRK-02 to GRK-12 and SELF-06g. Where the table says "dev-time rows", it gives the version those rows ran on. A full run would currently record Grok Build as QUOTA-FAIL (the xAI quota ran out) and Kimi as AUTH-FAIL. The core trio is required, and the optional tier is enrolled through `at-setup`. This baseline supersedes the July 2026 one (D-034).
 
 | CLI | Tier | Floor (KTD-13) | Tested | READY probe |
 |---|---|---|---|---|

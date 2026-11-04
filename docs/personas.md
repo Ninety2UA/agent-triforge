@@ -11,7 +11,7 @@
 | [`plan-checker`](../personas/plan-checker.md) | 1.5 | Validates task plans for completeness, assignments, dependencies |
 | [`findings-synthesizer`](../personas/findings-synthesizer.md) | 4 | Merges review outputs with deduplication and confidence tiering |
 | [`integration-verifier`](../personas/integration-verifier.md) | 2 | Runs build, tests, lint between waves |
-| [`learnings-researcher`](../personas/learnings-researcher.md) | Pre-1 | Searches [`ops/solutions/`](../ops/solutions/) and [`ops/decisions/`](../ops/decisions/) for relevant patterns |
+| [`learnings-researcher`](../personas/learnings-researcher.md) | Pre-1 | Searches `ops/solutions/` and `ops/decisions/` for relevant patterns |
 | [`team-lead`](../personas/team-lead.md) | 2 | Orchestrates agent team workers with file ownership and quality gates |
 | [`research-synthesizer`](../personas/research-synthesizer.md) | 0 | Merges parallel research outputs into unified analysis |
 | [`continuous-reviewer`](../personas/continuous-reviewer.md) | 2 | Per-task quality gate during team builds; reviews every completed task |

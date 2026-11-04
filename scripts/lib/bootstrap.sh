@@ -145,8 +145,8 @@ triforge_bootstrap() {
     _tb_optional_clis
     # ops/roster.toml — its own copy-if-absent step, outside the ops/ skeleton,
     # so an upgraded project that already has ops/ still receives it; a user's
-    # roster is never overwritten. The watch registry is not bootstrapped:
-    # /cli-watch and /repo-watch are maintainer tooling in the Triforge checkout.
+    # roster is never overwritten. The watch registry is not bootstrapped: it
+    # belongs to the maintainer's internal watch skills, which never ship.
     _bootstrap_copy "${_TB_ROOT}/templates/ops/roster.toml" "ops/roster.toml"
     _tb_pointer
     if [ "$_TB_DEGRADED" -ne 0 ]; then
@@ -914,7 +914,7 @@ _tb_dir_in_project() {
 # with ops/MEMORY.md); hooks.json ships with no hooks since 4.0 (KTD9: the 3.x
 # CHANGELOG attribution hook wrote ops/ from every Codex session, lease workers
 # included; attribution now comes from the ledger). See
-# templates/.codex/README.md and ops/decisions/2026-07-18-codex-hooks-under-exec.md.
+# templates/.codex/README.md.
 _tb_codex() {
   if ! _tb_dir_in_project ".codex"; then
     # A .codex that is a symlink or resolves outside the project: nothing below

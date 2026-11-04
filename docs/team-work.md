@@ -30,7 +30,7 @@ Three mechanisms keep this safe, and none of them restricts who may write code:
 
 | Mode | Mechanism | When to use |
 |---|---|---|
-| File-based | Shared markdown in [`ops/`](../ops/) | Persistent state across sessions, audit trails |
+| File-based | Shared markdown in [`ops/`](../templates/ops/) | Persistent state across sessions, audit trails |
 | Direct invocation | `agy -p` / `codex exec` via bash | Real-time external agent delegation |
 | Personas | `dispatch_persona` runs a [`personas/`](../personas/) prompt with the tools, model and turn budget its manifest entry sets | Reviews, research, verification |
 | Agent teams | Multi-Claude with shared task lists ([`team-lead`](../personas/team-lead.md)) | Complex builds with 5+ interdependent tasks |
@@ -75,7 +75,7 @@ Each reviewer has a "Do Not Flag" list to reduce noise: readability-aiding redun
 
 ## The knowledge loop (`at-compound`)
 
-After a non-trivial problem is solved, [`at-compound`](../skills/at-compound/SKILL.md) records it in [`ops/solutions/`](../ops/solutions/), or a decision in [`ops/decisions/`](../ops/decisions/), when it clears the counterfactual bar: a future agent without the note would repeat the mistake or work the decision out again. Otherwise it says in one line why it wrote nothing. Before new work is planned, [`learnings-researcher`](../personas/learnings-researcher.md) searches both directories.
+After a non-trivial problem is solved, [`at-compound`](../skills/at-compound/SKILL.md) records it in `ops/solutions/`, or a decision in `ops/decisions/`, when it clears the counterfactual bar: a future agent without the note would repeat the mistake or work the decision out again. Otherwise it says in one line why it wrote nothing. Before new work is planned, [`learnings-researcher`](../personas/learnings-researcher.md) searches both directories.
 
 <p align="center">
   <img src="images/knowledge-loop.png" alt="The knowledge loop: solve a problem, record it with at-compound, store it in ops/, and search it before the next plan." width="90%">

@@ -6591,13 +6591,13 @@ rm -rf "$_S14"
 #            its lease and calls lease_create is refused (45) by the marker
 #            _adapter_env gave it, and with the marker unset by its cwd.
 #   squash   a project tracking .agents/skills/my-skill/ and
-#            .claude/commands/cli-watch.md, once with .agents/ gitignored (as
+#            .claude/commands/my-command.md, once with .agents/ gitignored (as
 #            this repo does) and once without: `provisioned` lists the stamp
 #            and every shipped portable skill (in .agents/skills, and in
 #            .claude/skills for this claude builder, KTD16), never my-skill; the builder
-#            edits feature.txt, my-skill and cli-watch.md; the snapshot and the
+#            edits feature.txt, my-skill and my-command.md; the snapshot and the
 #            merged commit carry exactly those three; lease_promote blocks (42)
-#            naming my-skill and cli-watch.md.
+#            naming my-skill and my-command.md.
 #   legacy   a lease row without `provisioned` (created before 4.0) keeps the
 #            old rule — all of .agents/ left out — and collects in the
 #            gitignored project, where the old exclude pathspec made `git add`
@@ -6731,13 +6731,13 @@ _S15_NEG_MISSED=$(printf '%s\n' "$_S15_NEG" | grep ':ok$' | cut -d/ -f1 | tr '\n
 [ -z "$_S15_NEG_MISSED" ] || _S15_FAIL="$_S15_FAIL hooks-negative-control(not-flagged:${_S15_NEG_MISSED% })"
 
 # _s15_repo <dir> <ignore-agents:yes|no> — main + checked-out sprint/s15, tracking
-# .agents/skills/my-skill/SKILL.md and .claude/commands/cli-watch.md
+# .agents/skills/my-skill/SKILL.md and .claude/commands/my-command.md
 _s15_repo() {
   ( mkdir -p "$1" && cd "$1" && export HOME="$_S15/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
       && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
       && mkdir -p ops .agents/skills/my-skill .claude/commands \
       && printf '[roles.builder]\ncli = "claude"\n' > ops/roster.toml \
-      && printf 'my skill\n' > .agents/skills/my-skill/SKILL.md && printf 'cli watch\n' > .claude/commands/cli-watch.md \
+      && printf 'my skill\n' > .agents/skills/my-skill/SKILL.md && printf 'my command\n' > .claude/commands/my-command.md \
       && { [ "$2" = no ] || printf '/.agents/\n' > .gitignore; } && echo r > README.md \
       && git add -A && git add -f .agents/skills/my-skill/SKILL.md && git commit -qm init \
       && git checkout -q -b sprint/s15 ) >/dev/null 2>&1
@@ -6834,9 +6834,9 @@ _S15_RNEG=$(_s15_lead "$_S15/rf" "$_S15/fb-nested.sh" '_lead_only() { return 0; 
 printf '%s\n' "$_S15_RNEG" | grep -qx 'rneg:rc=0' || _S15_FAIL="$_S15_FAIL refuse-negative-control(guard-off-still-refused:$(printf '%s' "$_S15_RNEG" | tr '\n' ' ' | cut -c1-80))"
 
 # squash: provisioned copies stay out; tracked .agents/ and .claude/ edits merge and are protected
-printf '#!/bin/sh\necho feature > feature.txt\necho edited >> .agents/skills/my-skill/SKILL.md\necho edited >> .claude/commands/cli-watch.md\necho "Status: DONE"\n' > "$_S15/fb-edit.sh"
+printf '#!/bin/sh\necho feature > feature.txt\necho edited >> .agents/skills/my-skill/SKILL.md\necho edited >> .claude/commands/my-command.md\necho "Status: DONE"\n' > "$_S15/fb-edit.sh"
 chmod +x "$_S15/fb-edit.sh"
-_S15_WANT=".agents/skills/my-skill/SKILL.md .claude/commands/cli-watch.md feature.txt"
+_S15_WANT=".agents/skills/my-skill/SKILL.md .claude/commands/my-command.md feature.txt"
 for _s15_ign in yes no; do
   _s15_repo "$_S15/sq-$_s15_ign" "$_s15_ign"
   _S15_SQ=$(_s15_lead "$_S15/sq-$_s15_ign" "$_S15/fb-edit.sh" '
@@ -6859,7 +6859,7 @@ echo "promote=$R"; printf "%s\n" "$E" | grep "_protected)" | sed "s/^ */hit=/"
   _S15_PWANT=$(printf '%s\n' $_S15_PWANT | sort | tr '\n' ' ')
   [ "$(printf '%s\n' $_S15_PROV | sort | tr '\n' ' ')" = "$_S15_PWANT" ] || _S15_FAIL="$_S15_FAIL squash-${_s15_ign}(provisioned=[$(printf '%s' "$_S15_PROV" | cut -c1-120)])"
   _S15_FAIL="${_S15_FAIL}$(_self_expect "squash-${_s15_ign}" "$_S15_SQ" '^create=0$' '^collect=0 state=review$' "^snapshot=${_S15_WANT} \$" '^unapproved=42$' '^merge=0$' \
-    "^merged=${_S15_WANT} \$" '^promote=42$' '^hit=\.agents/skills/my-skill/SKILL\.md  \(project_protected\)$' '^hit=\.claude/commands/cli-watch\.md  \(project_protected\)$')"
+    "^merged=${_S15_WANT} \$" '^promote=42$' '^hit=\.agents/skills/my-skill/SKILL\.md  \(project_protected\)$' '^hit=\.claude/commands/my-command\.md  \(project_protected\)$')"
 done
 unset _s15_ign _s15_s
 
@@ -6874,7 +6874,7 @@ _s15_go t
 R=0; lease_collect t >/dev/null 2>&1 || R=$?; echo "collect=$R state=$(_ledger_get t state)"
 echo "snapshot=$(git diff --name-only "$(_ledger_get t base_sha)" "$(_ledger_get t snapshot_sha)" | tr "\n" " ")"
 ')
-_S15_FAIL="${_S15_FAIL}$(_self_expect legacy "$_S15_LG" '^create=0$' '^collect=0 state=review$' '^snapshot=\.claude/commands/cli-watch\.md feature\.txt $')"
+_S15_FAIL="${_S15_FAIL}$(_self_expect legacy "$_S15_LG" '^create=0$' '^collect=0 state=review$' '^snapshot=\.claude/commands/my-command\.md feature\.txt $')"
 
 # none: provisioning wrote nothing (the shipped skills are tracked at the
 # current digest, in .claude/skills too), so the snapshot excludes nothing
@@ -6936,7 +6936,7 @@ unset _s15_v _s15_run _s15_r
 
 _S15_CAP="worker marker: hooks inert, lead-only helpers refuse (rc 45) under the marker or inside a lease root, squash excludes exactly the provisioned paths (KTD9/R21/R34)"
 if [ -z "$_S15_FAIL" ]; then
-  row "SELF-15" "claude" "$_S15_CAP" "PASS" "hooks: session-start, context-monitor, tool-failure-monitor, pre-compact under TRIFORGE_LEASE_WORKER=builder and =persona -> rc 0, no stdout/stderr, nothing written in project, HOME or TMPDIR (controls without the marker: a context-monitor count under TMPDIR and ops/STATE.md written; negative control: copies without the marker block flagged on all four); refuse: lease_create/dispatch/redispatch/collect/pin_reviewer/merge/promote/requeue/reclaim/rebaseline/heartbeat_check/stop, roster_write_role/_member, _ledger_update -> 45 with one stderr line each (persona too), ledger + roster byte-identical, lease_status answers; lease_create from the lease root and from a worktree with the marker unset -> 45 naming the root; a builder sourcing the library in its lease -> 45 under the marker _adapter_env gave it (builder) and 45 by cwd with it unset, no row, nothing carved (negative control: _lead_only a no-op -> lease_create carves); squash, .agents/ gitignored and not: provisioned = stamp + ${SHIPPED_COUNT} shipped skills (never my-skill), snapshot = merged commit = ${_S15_WANT} (lease_merge 42 until a merge approval: the snapshot is protected), lease_promote 42 naming my-skill and cli-watch.md; legacy row without provisioned -> collect 0, .agents/ left out whole; none: shipped skills tracked at the current digest -> provisioned = none, the edit to a tracked shipped copy is in the snapshot; codexhook: session start replaces an unchanged 3.x .codex/hooks.json once (notice, then silent), leaves an edited copy, and writes nothing through a .codex symlinked into HOME/.codex (3.x copy kept, WARNING notice)" "static"
+  row "SELF-15" "claude" "$_S15_CAP" "PASS" "hooks: session-start, context-monitor, tool-failure-monitor, pre-compact under TRIFORGE_LEASE_WORKER=builder and =persona -> rc 0, no stdout/stderr, nothing written in project, HOME or TMPDIR (controls without the marker: a context-monitor count under TMPDIR and ops/STATE.md written; negative control: copies without the marker block flagged on all four); refuse: lease_create/dispatch/redispatch/collect/pin_reviewer/merge/promote/requeue/reclaim/rebaseline/heartbeat_check/stop, roster_write_role/_member, _ledger_update -> 45 with one stderr line each (persona too), ledger + roster byte-identical, lease_status answers; lease_create from the lease root and from a worktree with the marker unset -> 45 naming the root; a builder sourcing the library in its lease -> 45 under the marker _adapter_env gave it (builder) and 45 by cwd with it unset, no row, nothing carved (negative control: _lead_only a no-op -> lease_create carves); squash, .agents/ gitignored and not: provisioned = stamp + ${SHIPPED_COUNT} shipped skills (never my-skill), snapshot = merged commit = ${_S15_WANT} (lease_merge 42 until a merge approval: the snapshot is protected), lease_promote 42 naming my-skill and my-command.md; legacy row without provisioned -> collect 0, .agents/ left out whole; none: shipped skills tracked at the current digest -> provisioned = none, the edit to a tracked shipped copy is in the snapshot; codexhook: session start replaces an unchanged 3.x .codex/hooks.json once (notice, then silent), leaves an edited copy, and writes nothing through a .codex symlinked into HOME/.codex (3.x copy kept, WARNING notice)" "static"
 else
   row "SELF-15" "claude" "$_S15_CAP" "FAIL" "mismatch:$(printf '%s' "$_S15_FAIL" | cut -c1-700)" "static"
 fi
@@ -8858,13 +8858,13 @@ rm -rf "$_S19"
 #             (lease_redispatch) records resumed_session = that id; a max-turns
 #             envelope (exit 1, error_max_turns) -> rc 80, leased,
 #             report_missing_count 1, result_subtype error_max_turns
-#   skills    lease_create in a repo tracking this repo's
-#             .claude/skills/watch-cycle/ and a user copy under a shipped name:
+#   skills    lease_create in a repo tracking a repo-local
+#             .claude/skills/repo-local-skill/ and a user copy under a shipped name:
 #             the worktree's .claude/skills/ holds every other portable skill,
-#             byte-equal to the plugin's, and no at-* workflow; watch-cycle and
+#             byte-equal to the plugin's, and no at-* workflow; repo-local-skill and
 #             the user copy are untouched; `provisioned` lists the written
 #             .claude/skills entries and neither tracked one; the builder's
-#             edit to watch-cycle reaches the collect snapshot and the
+#             edit to repo-local-skill reaches the collect snapshot and the
 #             provisioned copies don't; a symlinked .claude is left alone
 #   dispatch  dispatch_role reviewer resolving to claude: under a claude lead
 #             (native_subagents_enforced_tools) rc 40 and the stub never runs;
@@ -9130,16 +9130,16 @@ rm -f "$_S20/tmp/s20-version"
 _S20_FAIL="${_S20_FAIL}$(_self_expect floor "$O" '^old:rc=1:class=deterministic:floor=[1-9][0-9]*:optout=1:ran=no$' '^unread:rc=1:class=deterministic:floor=[1-9][0-9]*:optout=1:ran=no$' \
   '^floor:rc=0:class=none:floor=0:optout=0:ran=yes$' '^optout:rc=0:class=none:floor=0:optout=0:ran=yes$' '^fdispatch:rc=1:class=deterministic:floor=[1-9][0-9]*:err=1:ran=no$')"
 
-# lifecycle + skills: a repo tracking a repo-local .claude/skills/watch-cycle/
-# (a synthetic skill: the maintainer's real one is not in the published repo)
+# lifecycle + skills: a repo tracking a repo-local .claude/skills/repo-local-skill/
+# (a synthetic skill)
 # and a user copy under a shipped name
 _s20_repo "$_S20/repo" '[roles.builder]\ncli = "claude"\n'
-printf -- '---\nname: watch-cycle\ndescription: Use when probing SELF-20 (a repo-local skill the project tracks).\n---\n\nrepo-local skill\n' > "$_S20/watch-cycle-SKILL.md"
-( cd "$_S20/repo" && export HOME="$_S20/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p .claude/skills/watch-cycle ".claude/skills/${_S20_COLLIDE}" \
-    && cp "$_S20/watch-cycle-SKILL.md" .claude/skills/watch-cycle/SKILL.md \
+printf -- '---\nname: repo-local-skill\ndescription: Use when probing SELF-20 (a repo-local skill the project tracks).\n---\n\nrepo-local skill\n' > "$_S20/repo-local-skill-SKILL.md"
+( cd "$_S20/repo" && export HOME="$_S20/home" GIT_CONFIG_NOSYSTEM=1 && mkdir -p .claude/skills/repo-local-skill ".claude/skills/${_S20_COLLIDE}" \
+    && cp "$_S20/repo-local-skill-SKILL.md" .claude/skills/repo-local-skill/SKILL.md \
     && printf -- '---\nname: %s\ndescription: Use when probing SELF-20 (a user copy under a shipped name).\n---\n\nuser copy\n' "$_S20_COLLIDE" > ".claude/skills/${_S20_COLLIDE}/SKILL.md" \
     && git add -A && git commit -qm "track .claude/skills" ) >/dev/null 2>&1 || _S20_FAIL="$_S20_FAIL skills(fixture-git)"
-printf '#!/bin/sh\nprintf "builder edit\\n" >> .claude/skills/watch-cycle/SKILL.md\nprintf "%%s\\n" '"'"'{"type":"result","subtype":"success","is_error":false,"num_turns":2,"session_id":"%s","result":"did it\\n\\nStatus: DONE\\nConcerns: None\\nDiscoveries for later tasks: None"}'"'"'\n' "$_S20_SID" > "$_S20/fb-done.sh"
+printf '#!/bin/sh\nprintf "builder edit\\n" >> .claude/skills/repo-local-skill/SKILL.md\nprintf "%%s\\n" '"'"'{"type":"result","subtype":"success","is_error":false,"num_turns":2,"session_id":"%s","result":"did it\\n\\nStatus: DONE\\nConcerns: None\\nDiscoveries for later tasks: None"}'"'"'\n' "$_S20_SID" > "$_S20/fb-done.sh"
 printf '#!/bin/sh\nprintf "%%s\\n" '"'"'{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":3,"session_id":"%s","result":""}'"'"'\nexit 1\n' "$_S20_SID" > "$_S20/fb-maxturns.sh"
 chmod +x "$_S20/fb-done.sh" "$_S20/fb-maxturns.sh"
 # shellcheck disable=SC2086
@@ -9156,16 +9156,16 @@ O=$( cd "$_S20/repo" && export $_S20_ENV TRIFORGE_LEASE_ROOT="$_S20/leases" && s
   done
   echo "copies:${D:- ok}"
   echo "prov-missing:${M:- none}"
-  case "$PROV" in (*" .claude/skills/watch-cycle "*|*" .claude/skills/${_S20_COLLIDE} "*) echo "prov-tracked:listed" ;; (*) echo "prov-tracked:none" ;; esac
+  case "$PROV" in (*" .claude/skills/repo-local-skill "*|*" .claude/skills/${_S20_COLLIDE} "*) echo "prov-tracked:listed" ;; (*) echo "prov-tracked:none" ;; esac
   echo "at:$(ls -d "$WT"/.claude/skills/at-*/ 2>/dev/null | grep -v '/at-skill-work/$' | wc -l | tr -d ' ')"
-  cmp -s "$WT/.claude/skills/watch-cycle/SKILL.md" "$_S20/watch-cycle-SKILL.md" && echo "watch-cycle:intact" || echo "watch-cycle:changed"
+  cmp -s "$WT/.claude/skills/repo-local-skill/SKILL.md" "$_S20/repo-local-skill-SKILL.md" && echo "repo-local-skill:intact" || echo "repo-local-skill:changed"
   grep -q '^user copy$' "$WT/.claude/skills/${_S20_COLLIDE}/SKILL.md" 2>/dev/null && echo "collide:intact" || echo "collide:replaced"
   lease_dispatch s20a "probe task" 60 >/dev/null 2>&1 || echo "dispatch-failed"
   _self_wait_rc s20a
   R=0; lease_collect s20a >/dev/null 2>&1 || R=$?
   echo "a:rc=${R}:state=$(_ledger_get s20a state 2>/dev/null):sid=$(_ledger_get s20a session_id 2>/dev/null):sub=$(_ledger_get s20a result_subtype 2>/dev/null)"
   SNAP=$(_ledger_get s20a snapshot_sha 2>/dev/null)
-  echo "snap-edit:$(git show "${SNAP:-none}:.claude/skills/watch-cycle/SKILL.md" 2>/dev/null | grep -c '^builder edit$' || true)"
+  echo "snap-edit:$(git show "${SNAP:-none}:.claude/skills/repo-local-skill/SKILL.md" 2>/dev/null | grep -c '^builder edit$' || true)"
   git cat-file -e "${SNAP:-none}:.claude/skills/${_S20_OTHER}" 2>/dev/null && echo "snap-prov:merged" || echo "snap-prov:excluded"
   lease_redispatch s20a "findings: fix the probe" 60 >/dev/null 2>&1 || echo "redispatch-failed"
   echo "fix:resumed=$(_ledger_get s20a resumed_session 2>/dev/null)"
@@ -9179,7 +9179,7 @@ O=$( cd "$_S20/repo" && export $_S20_ENV TRIFORGE_LEASE_ROOT="$_S20/leases" && s
   R=0; lease_collect s20m >/dev/null 2>&1 || R=$?
   echo "m:rc=${R}:state=$(_ledger_get s20m state 2>/dev/null):sub=$(_ledger_get s20m result_subtype 2>/dev/null):misses=$(_ledger_get s20m report_missing_count 2>/dev/null)"
 ) 2>&1 || true
-_S20_FAIL="${_S20_FAIL}$(_self_expect skills "$O" '^copies: ok$' '^prov-missing: none$' '^prov-tracked:none$' '^at:0$' '^watch-cycle:intact$' '^collide:intact$' '^snap-edit:1$' '^snap-prov:excluded$')"
+_S20_FAIL="${_S20_FAIL}$(_self_expect skills "$O" '^copies: ok$' '^prov-missing: none$' '^prov-tracked:none$' '^at:0$' '^repo-local-skill:intact$' '^collide:intact$' '^snap-edit:1$' '^snap-prov:excluded$')"
 _S20_FAIL="${_S20_FAIL}$(_self_expect lifecycle "$O" "^a:rc=0:state=review:sid=${_S20_SID}:sub=success$" "^fix:resumed=${_S20_SID}$" '^fix:rc=0:state=review$' '^m:rc=80:state=leased:sub=error_max_turns:misses=1$')"
 # a symlinked .claude: provisioning writes nothing through it
 mkdir -p "$_S20/linkwt"
@@ -9255,7 +9255,7 @@ _S20_FAIL="${_S20_FAIL}$(_self_expect ctx "$O" '^ctx-root:rc=69:class=determinis
 
 _S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON envelope (subtype, is_error, session_id), explicit tool sets, --max-turns, session resume, the sandbox settings and their Claude Code floor, the claude env arm, .claude/skills provisioning that adds names only, max-turns routed as report missing, dispatch_role running claude -p under a codex lead, never without its deny on the lead's git dir inside a git checkout (KTD16, R2/R3)"
 if [ -z "$_S20_FAIL" ]; then
-  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, watch-cycle + ${_S20_COLLIDE} user copy intact and unlisted, watch-cycle edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0; ctx: a codex lead's tester on claude with TRIFORGE_LEASE_ROOT=/dev/null/x -> rc 69 deterministic, the lease line and one ERROR line, stub never run; outside any git repository the reviewer runs, rc 0; ccd (4.1): an absolute CLAUDE_CONFIG_DIR (with a space) reaches the claude worker as set, never codex or grok, and its .credentials.json is denied (Read rule rooted with //, sandbox denyRead, the codex read persona's profile); a relative or empty one reaches no worker, a relative one denied from the lead's working directory and an empty one as that directory's .credentials.json; set to HOME's .claude or a link to it, the codex profile parses as TOML and names each credential path once" "static"
+  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, repo-local-skill + ${_S20_COLLIDE} user copy intact and unlisted, repo-local-skill edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0; ctx: a codex lead's tester on claude with TRIFORGE_LEASE_ROOT=/dev/null/x -> rc 69 deterministic, the lease line and one ERROR line, stub never run; outside any git repository the reviewer runs, rc 0; ccd (4.1): an absolute CLAUDE_CONFIG_DIR (with a space) reaches the claude worker as set, never codex or grok, and its .credentials.json is denied (Read rule rooted with //, sandbox denyRead, the codex read persona's profile); a relative or empty one reaches no worker, a relative one denied from the lead's working directory and an empty one as that directory's .credentials.json; set to HOME's .claude or a link to it, the codex profile parses as TOML and names each credential path once" "static"
 else
   row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S20_FAIL"):$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"
 fi
@@ -14950,17 +14950,22 @@ _S28="${WORK}/self28"
 _S28_FAIL=""
 _S28_EV=""
 mkdir -p "$_S28"
-# The watch cycle is maintainer tooling kept out of the published repository
-# (2026-10-13), so SELF-28 runs only in a checkout that carries it.
-if [ -f "${REPO_ROOT}/.claude/commands/cli-watch.md" ] && [ -f "${REPO_ROOT}/.claude/commands/repo-watch.md" ] \
-   && [ -f "${REPO_ROOT}/ops/watch-registry.toml" ]; then
+# The watch cycle is the maintainer's internal watch skills, kept out of the
+# published repository, so SELF-28 runs only inside the repository that carries
+# them, two levels above this product folder, and records SKIPPED everywhere else.
+_S28_SK="${REPO_ROOT}/../../.agents/skills"
+if [ -f "${_S28_SK}/at-cli-watch/scripts/swarm.sh" ] && [ -f "${_S28_SK}/at-repo-watch/scripts/swarm.sh" ] \
+   && [ -f "${_S28_SK}/at-cli-watch/assets/registry.toml" ] && [ -f "${_S28_SK}/at-repo-watch/assets/registry.toml" ] \
+   && [ -f "${_S28_SK}/at-cli-watch/SKILL.md" ] && [ -f "${_S28_SK}/at-repo-watch/SKILL.md" ]; then
 # --- SELF-28 cases (worker 6-watch) ---
-# blocks   the swarm and wait blocks under "## Stage 2–3" of
-#          .claude/commands/cli-watch.md and repo-watch.md, taken as written and
-#          run under /bin/bash and /bin/zsh from a fixture checkout (this
-#          checkout's scripts, personas, .claude-plugin and .claude linked in, a
-#          copy of ops/watch-registry.toml), through the real persona lane, with
-#          stub claude, gh and firecrawl first on PATH: one worker per target
+# blocks   the swarm.sh start and wait command lines each SKILL.md gives, taken
+#          as written and typed under /bin/bash and /bin/zsh (the script itself
+#          always runs under bash) from a fixture checkout. swarm.sh enters the
+#          product folder from its own real location, so the fixture has the
+#          real layout: each skill's scripts and assets copied under .agents/skills,
+#          and this checkout's scripts, personas, .claude-plugin and .claude
+#          linked in under products/agent-triforge. It runs through the real
+#          persona lane, with stub claude, gh and firecrawl first on PATH: one worker per target
 #          started by persona_spawn as the read-web persona the command names
 #          (framework-docs-researcher for CLIs, best-practices-researcher for
 #          repos); its argv the read-web class (--tools and --allowedTools
@@ -14971,6 +14976,8 @@ if [ -f "${REPO_ROOT}/.claude/commands/cli-watch.md" ] && [ -f "${REPO_ROOT}/.cl
 #          repos, firecrawl for the rest); its report in <run>/<name>.md; a repo
 #          whose gh metadata answers 404 flagged, with no worker; no zsh glob,
 #          job or unset-parameter error
+#   failed   a worker whose CLI exits 1 is listed in <run>/failed once the wait
+#          line returns 0, and the other worker's report still lands
 #   nowrite  in every blocks run the stub persona writes a file in its own
 #          working directory, and tries the checkout (the prompt's project root)
 #          and $TMPDIR only when its --tools names a tool that can write: denied
@@ -14983,18 +14990,24 @@ if [ -f "${REPO_ROOT}/.claude/commands/cli-watch.md" ] && [ -f "${REPO_ROOT}/.cl
 #          Code enforces --tools under dontAsk. CC-21 is the live proof for the
 #          read class, and read-web adds only the two web tools
 #   registry every CLI the registry names (cli_table all binary tier) has a
-#          [cli.<name>] entry in ops/watch-registry.toml with the same binary
-#          and tier; every [cli.*] entry carries name, binary, tier, probe and
-#          https releases/changelog/docs URLs; [meta] counts match the tables
-mkdir -p "$_S28/co/ops" "$_S28/home" "$_S28/bin" "$_S28/log" "$_S28/blocks" "$_S28/tpl"
-for _s28_d in scripts personas .claude-plugin .claude; do ln -s "${REPO_ROOT}/${_s28_d}" "$_S28/co/${_s28_d}"; done
-cp "${REPO_ROOT}/ops/watch-registry.toml" "$_S28/co/ops/watch-registry.toml" 2>/dev/null || true
+#          [cli.<name>] entry in at-cli-watch's assets/registry.toml with the
+#          same binary and tier; every [cli.*] entry carries name, binary, tier,
+#          probe and https releases/changelog/docs URLs; the [meta] of both
+#          registries counts the [cli.*] and [repo.*] tables
+_S28_PR="$_S28/co/products/agent-triforge"
+mkdir -p "$_S28_PR/ops" "$_S28/home" "$_S28/bin" "$_S28/log" "$_S28/blocks" "$_S28/tpl"
+for _s28_d in scripts personas .claude-plugin .claude; do ln -s "${REPO_ROOT}/${_s28_d}" "$_S28_PR/${_s28_d}"; done
+for _s28_k in cli repo; do
+  mkdir -p "$_S28/co/.agents/skills/at-${_s28_k}-watch"
+  cp -R "${_S28_SK}/at-${_s28_k}-watch/scripts" "${_S28_SK}/at-${_s28_k}-watch/assets" "$_S28/co/.agents/skills/at-${_s28_k}-watch/"
+done
 cat > "$_S28/tpl/claude" <<'S28_CLAUDE_EOF'
 #!/bin/sh
 # SELF-28 stub claude: --version, and --help naming --safe-mode; otherwise it
 # records argv, environment, prompt and input per worker (named after its
-# input file), writes a file in its working directory, and tries the checkout
-# and $TMPDIR only when its --tools names a tool that can write
+# input file), exits 1 for a worker named in the log's fail file, writes a file
+# in its working directory, and tries the checkout and $TMPDIR only when its
+# --tools names a tool that can write
 L='@LOG@'
 case "${1:-}" in
   --version) echo "2.1.291 (Claude Code)"; exit 0 ;;
@@ -15009,6 +15022,7 @@ printf '%s' "$P" > "$L/prompt.$N"
 env | LC_ALL=C sort > "$L/env.$N"
 cp "$IN" "$L/input.$N" 2>/dev/null || true
 pwd -P > "$L/cwd.$N"
+if [ -f "$L/fail" ] && [ "$(cat "$L/fail")" = "$N" ]; then exit 1; fi
 echo w > persona-cwd.txt
 ROOT=$(printf '%s\n' "$P" | sed -n "s/^Project root: \(.*\) (the lead's checkout).*/\1/p" | head -1)
 T=$(awk 'p { print; exit } $0 == "--tools" { p = 1 }' "$L/argv.$N")
@@ -15047,35 +15061,12 @@ for _s28_b in claude gh firecrawl; do
   sed "s#@LOG@#${_S28}/log#" "$_S28/tpl/$_s28_b" > "$_S28/bin/$_s28_b"
   chmod +x "$_S28/bin/$_s28_b"
 done
-# _s28_x <md> <n> — the n-th ```bash fence under the "## Stage 2" heading of <md>
-_s28_x() {
-  python3 - "$1" "$2" <<'S28_X_PY'
-import sys
-k, n, out, fence, cur, under = 0, int(sys.argv[2]), [], False, 0, False
-for l in open(sys.argv[1], encoding="utf-8").read().split("\n"):
-    s = l.strip()
-    if fence:
-        if s == "```":
-            fence = False
-        elif cur == n:
-            out.append(l)
-        continue
-    if s.startswith("```"):
-        fence, cur = True, 0
-        if under and s == "```bash":
-            k += 1
-            cur = k
-        continue
-    if l.startswith("## "):
-        under = l.startswith("## Stage 2")
-print("\n".join(out))
-S28_X_PY
-}
+# The two command lines of each SKILL.md, as written; the placeholders are filled per case
 for _s28_k in cli repo; do
-  _s28_x "${REPO_ROOT}/.claude/commands/${_s28_k}-watch.md" 1 > "$_S28/blocks/${_s28_k}-swarm.sh" 2>/dev/null || true
-  _s28_x "${REPO_ROOT}/.claude/commands/${_s28_k}-watch.md" 2 > "$_S28/blocks/${_s28_k}-wait.sh" 2>/dev/null || true
+  sed -n 's/.*`\(bash [^`]*scripts\/swarm\.sh start [^`]*\)`.*/\1/p' "${_S28_SK}/at-${_s28_k}-watch/SKILL.md" > "$_S28/blocks/${_s28_k}-swarm.sh" 2>/dev/null || true
+  sed -n 's/.*`\(bash [^`]*scripts\/swarm\.sh wait [^`]*\)`.*/\1/p' "${_S28_SK}/at-${_s28_k}-watch/SKILL.md" | sed 's/<run-dir>/"$WATCH_RUN"/' > "$_S28/blocks/${_s28_k}-wait.sh" 2>/dev/null || true
 done
-# _s28_blk <shell> <script> <case dir> — one block from the fixture checkout (90 s at most); prints its rc
+# _s28_blk <shell> <script> <case dir>: one command line from the fixture checkout's root (90 s at most); prints its rc
 _s28_blk() {
   local RC=0
   ( cd "$_S28/co" && exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 90} "$1" "$2" ) > "$3/out" 2>&1 < /dev/null || RC=$?
@@ -15084,20 +15075,24 @@ _s28_blk() {
 }
 # _s28_arg <file> <flag> — the line after <flag> in a recorded argv
 _s28_arg() { awk -v f="$2" 'p { print; exit } $0 == f { p = 1 }' "$1" 2>/dev/null || true; }
-# _s28_case <shell> <cli|repo> <targets> [<repo gh answers 404 for>] — the
-# swarm block with those targets and window 2026-09-27, then the wait block
+# _s28_listing: what a run must leave unchanged: the fixture's root, product
+# folder, its ops/ and the copied skills
+_s28_listing() { ls -laR "$_S28/co/.agents" 2>&1; ls -la "$_S28/co" "$_S28_PR" "$_S28_PR/ops" 2>&1; }
+# _s28_case <shell> <cli|repo> <targets> [<repo gh answers 404 for>] [<worker whose CLI fails>]
+# The start line with those targets and window 2026-09-27, then the wait line
 # while it returns 75 (20 times at most), with a throwaway HOME and TMPDIR;
 # prints the case's lines
 _s28_case() {
-  local SH=$1 K=$2 NAMES=$3 G=${4:-} SN P PT S W="" R RUN N I=0 CO0 D DW
+  local SH=$1 K=$2 NAMES=$3 G=${4:-} F=${5:-} SN P PT S W="" R RUN N I=0 CO0 D DW
   SN=$(basename "$SH")
-  P="$_S28/$K-$SN"
+  P="$_S28/$K-$SN${F:+-fail}"
   mkdir -p "$P/tmp"
   PT=$(cd "$P/tmp" && pwd -P)
   rm -f "$_S28/log/"*
   if [ -n "$G" ]; then printf '%s\n' "$G" > "$_S28/log/gh404"; fi
-  sed -e "s#<the Stage 1 working set[^>]*>#${NAMES}#" -e 's#<the window start, YYYY-MM-DD>#2026-09-27#' "$_S28/blocks/$K-swarm.sh" > "$P/swarm.sh"
-  CO0=$(ls -la "$_S28/co" "$_S28/co/ops" 2>&1 | cksum)
+  if [ -n "$F" ]; then printf '%s\n' "$F" > "$_S28/log/fail"; fi
+  sed -e "s#<name>\.\.\.#${NAMES}#" -e 's#<since>#2026-09-27#' "$_S28/blocks/$K-swarm.sh" > "$P/swarm.sh"
+  CO0=$(_s28_listing | cksum)
   ( export HOME="$_S28/home" PATH="$_S28/bin:$PATH" TMPDIR="$P/tmp" GIT_CONFIG_NOSYSTEM=1 TRIFORGE_LEAD_WAIT_BUDGET_S=3
     unset CLAUDE_PLUGIN_ROOT TRIFORGE_LEASE_ROOT WATCH_RUN
     S=$(_s28_blk "$SH" "$P/swarm.sh" "$P")
@@ -15137,8 +15132,8 @@ _s28_case() {
     printf '%s:%s:tmp:scratch=%s:tmpfile=%s:cofile=%s:co=%s\n' "$K" "$SN" \
       "$(find "$P/tmp" -maxdepth 1 -name 'triforge-persona.*' 2>/dev/null | grep -c . || true)" \
       "$(if [ -e "$P/tmp/persona-wrote.txt" ]; then echo present; else echo absent; fi)" \
-      "$(if [ -e "$_S28/co/persona-wrote.txt" ]; then echo present; else echo absent; fi)" \
-      "$(if [ "$(ls -la "$_S28/co" "$_S28/co/ops" 2>&1 | cksum)" = "$CO0" ]; then echo same; else echo changed; fi)"
+      "$(if [ -e "$_S28_PR/persona-wrote.txt" ]; then echo present; else echo absent; fi)" \
+      "$(if [ "$(_s28_listing | cksum)" = "$CO0" ]; then echo same; else echo changed; fi)"
   ) 2>&1 || true
 }
 _S28_SHELLS="/bin/bash"
@@ -15165,6 +15160,10 @@ for _S28_SH in $_S28_SHELLS; do
     "^repo:${_S28_N}:nowrite:superpowers:write=denied:cwd=scratch:cwdgone=yes$" \
     "^repo:${_S28_N}:tmp:scratch=0:tmpfile=absent:cofile=absent:co=same$")"
 done
+# failed: one worker's CLI exits 1; it is listed, the other worker's report lands
+O=$(_s28_case /bin/bash cli "claude grok" "" grok)
+_S28_FAIL="${_S28_FAIL}$(_self_expect failed "$O" \
+  "^cli:bash:swarm=0:wait=(75/)*0:workers=claude,grok:reports=1:failed=grok:flagged=:bad=0$")"
 # nowrite control: the same stub, given an edit-class tool set, writes both
 mkdir -p "$_S28/ctl/tmp" "$_S28/ctl/root" "$_S28/ctl/cwd"
 printf 'x\n' > "$_S28/ctl/x.input.md"
@@ -15176,7 +15175,7 @@ O=$(printf 'ctl:write=%s:root=%s:tmp=%s\n' "$(cut -d: -f1 "$_S28/log/write.x" 2>
   "$(if [ -e "$_S28/ctl/root/persona-wrote.txt" ]; then echo present; else echo absent; fi)" \
   "$(if [ -e "$_S28/ctl/tmp/persona-wrote.txt" ]; then echo present; else echo absent; fi)")
 _S28_FAIL="${_S28_FAIL}$(_self_expect ctl "$O" '^ctl:write=granted:root=present:tmp=present$')"
-# registry: the watch registry against the CLI registry
+# registry: each skill's registry against the CLI registry and the other's [meta]
 O=$( ( cd "$REPO_ROOT" && unset CLAUDE_PLUGIN_ROOT && source scripts/invoke-external.sh > /dev/null 2>&1 && cli_table all binary tier ) 2>/dev/null \
   | python3 -c '
 import sys
@@ -15189,7 +15188,8 @@ except ImportError:
         print("reg:toml=missing")
         sys.exit(0)
 d = tomllib.load(open(sys.argv[1], "rb"))
-cli, repo, meta = d.get("cli", {}), d.get("repo", {}), d.get("meta", {})
+r = tomllib.load(open(sys.argv[2], "rb"))
+cli, repo, meta, rmeta = d.get("cli", {}), r.get("repo", {}), d.get("meta", {}), r.get("meta", {})
 miss, bad, n = [], [], 0
 for line in sys.stdin.read().splitlines():
     name, binary, tier = (line.split("\t") + ["", "", ""])[:3]
@@ -15208,12 +15208,12 @@ for name, e in sorted(cli.items()):
             bad.append(name + "." + f)
 print("reg:registry=%d:missing=%s" % (n, ",".join(miss)))
 print("reg:mismatch=" + ",".join(bad))
-print("reg:count=%d:meta=%s:repos=%d:rmeta=%s" % (len(cli), meta.get("cli_count"), len(repo), meta.get("repo_count")))
+print("reg:cli=%d:meta=%s/%s:repo=%d:meta=%s/%s" % (len(cli), meta.get("cli_count"), rmeta.get("cli_count"), len(repo), meta.get("repo_count"), rmeta.get("repo_count")))
 print("reg:clis=" + ",".join(sorted(cli)))
-' "${REPO_ROOT}/ops/watch-registry.toml" 2>&1)
-_S28_FAIL="${_S28_FAIL}$(_self_expect registry "$O" '^reg:registry=8:missing=$' '^reg:mismatch=$' '^reg:count=11:meta=11:repos=7:rmeta=7$' \
+' "${_S28_SK}/at-cli-watch/assets/registry.toml" "${_S28_SK}/at-repo-watch/assets/registry.toml" 2>&1)
+_S28_FAIL="${_S28_FAIL}$(_self_expect registry "$O" '^reg:registry=8:missing=$' '^reg:mismatch=$' '^reg:cli=11:meta=11/11:repo=7:meta=7/7$' \
   '^reg:clis=antigravity,chrome-devtools,claude,codex,cursor,devin,firecrawl,gh,grok,kimi,opencode$')"
-_S28_EV="blocks: cli-watch and repo-watch swarm + wait blocks from this checkout under ${_S28_SHELLS}, real persona lane, stub claude/gh/firecrawl: one worker per target via persona_spawn (claude, grok -> framework-docs-researcher; superpowers -> best-practices-researcher), argv read-web (--tools/--allowedTools Read,Grep,Glob,WebFetch,WebSearch, dontAsk, strict MCP, --safe-mode, attachments off, marker persona) + the watch brief, input = registry entry + window + the lead's gh/firecrawl pages, reports in the run dir, a gh-404 repo flagged with no worker, no zsh error; nowrite: the stub's checkout and TMPDIR writes denied by that argv, its scratch dir gone (cwd file with it), no triforge-persona.* left, checkout listing unchanged (control: edit-class --tools writes both; a stub shows the flags and cleanup, CC-21 is the live proof for the read class); registry: all 8 registry CLIs in ops/watch-registry.toml with the same binary and tier, 11 [cli.*] / 7 [repo.*] matching [meta]"
+_S28_EV="blocks: the swarm.sh start and wait lines of both internal watch skills' SKILL.md, typed under ${_S28_SHELLS} from a fixture with the real layout (their scripts and assets copied, this checkout's scripts and personas linked under the product folder), real persona lane, stub claude/gh/firecrawl: one worker per target via persona_spawn (claude, grok -> framework-docs-researcher; superpowers -> best-practices-researcher), argv read-web (--tools/--allowedTools Read,Grep,Glob,WebFetch,WebSearch, dontAsk, strict MCP, --safe-mode, attachments off, marker persona) + the watch brief, input = registry entry + window + the lead's gh/firecrawl pages, reports in the run dir, a gh-404 repo flagged with no worker, no zsh error; failed: a worker whose CLI exits 1 listed in the run's failed file, the other's report landed; nowrite: the stub's checkout and TMPDIR writes denied by that argv, its scratch dir gone (cwd file with it), no triforge-persona.* left, fixture listing unchanged (control: edit-class --tools writes both; a stub shows the flags and cleanup, CC-21 is the live proof for the read class); registry: all 8 registry CLIs in the CLI skill's registry with the same binary and tier, 11 [cli.*] / 7 [repo.*] matching [meta] of both registries"
 # --- end of SELF-28 cases ---
 _S28_CAP="the watch cycle: research workers through dispatch_persona read-web, a write denied, nothing left under the temp dir, the watch registry covering every registered CLI (U19)"
 if [ -z "$_S28_EV" ]; then _S28_FAIL="${_S28_FAIL} cases(no-case-ran)"; fi
@@ -15223,7 +15223,7 @@ else
   row "SELF-28" "claude" "$_S28_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S28_FAIL"):$(printf '%s' "$_S28_FAIL" | cut -c1-700)" "static"
 fi
 else
-  row "SELF-28" "claude" "the watch cycle (maintainer tooling)" "SKIPPED" "the maintainer watch tooling (.claude/commands/cli-watch.md, repo-watch.md, ops/watch-registry.toml) is not in this checkout; it is kept out of the published repository" "static"
+  row "SELF-28" "claude" "the watch cycle (maintainer tooling)" "SKIPPED" "the maintainer's internal watch skills are not around this checkout; they are kept out of the published repository" "static"
 fi
 rm -rf "$_S28"
 

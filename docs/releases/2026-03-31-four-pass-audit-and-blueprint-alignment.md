@@ -71,7 +71,7 @@ The Stop hook was rewritten to match the [Claude Code Blueprint](https://github.
 - Standardized archive path wording to `[today's date]` across `ship.md` and `coordinate.md`
 </details>
 
-Documented solutions: [`ops/solutions/2026-03-31-hooks-stdin-json-parsing.md`](../../ops/solutions/2026-03-31-hooks-stdin-json-parsing.md)
+Documented solutions: `ops/solutions/2026-03-31-hooks-stdin-json-parsing.md`
 
 ## Verification
 

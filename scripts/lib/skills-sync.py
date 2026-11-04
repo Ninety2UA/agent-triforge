@@ -48,7 +48,7 @@ skill: never copied, digested or reported.
 Add-only copies (KTD12, KTD16): `add` writes the same portable set into
 another skills directory of a fresh lease worktree, .claude/skills for a
 claude -p worker. It adds names only: an entry already present (a tracked
-directory such as this repo's .claude/skills/watch-cycle/, or a user's own
+directory such as a repo-local skill the project keeps there, or a user's own
 copy) and every name passed in --skip (the names git tracks there) are left
 alone. It never replaces, retires or stamps anything, and walks to its
 directory the same way, by descriptors that refuse a symlink.

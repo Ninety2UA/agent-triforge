@@ -45,7 +45,7 @@ Seven safeguards keep long sprints from dying to context limits:
 
 ## Key constraints
 
-- `CONTRACTS.md` is never modified directly during review; changes are proposed in [`MEMORY.md`](../ops/MEMORY.md) first.
+- `CONTRACTS.md` is never modified directly during review; changes are proposed in [`MEMORY.md`](../templates/ops/MEMORY.md) first.
 - Any roster member is an eligible builder, and the single-writer rule is retired. Safety comes from per-task leases, worktree isolation and mandatory cross-review by a pinned non-author reviewer. No agent self-merges, and the lead promotes to the main branch only after the wave's integration check.
 - Parallel reviews are safe because reviewers write to separate `ops/REVIEW_*.md` files.
 - A task gets at most 3 review cycles before it escalates to you.

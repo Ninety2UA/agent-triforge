@@ -1683,7 +1683,8 @@ sys.stderr.write(who + ': [lead] cli=' + cli + ' model=' + (model or '<host defa
 # "core" in the registry) is required, never enrolled. The binary per member
 # is _registry_binary (cursor through _cursor_bin), and the official install
 # command — PRINTED by setup for the user to run, never executed by Triforge —
-# is the registry's install field (the surface /cli-watch re-checks each cycle).
+# is the registry's install field (the surface the maintainer's internal watch
+# skills re-check each cycle).
 
 # roster_member_default <cli> — print the shipped default model (D-020..D-025):
 # the registry's model field; claude is intentionally empty (the claude -p

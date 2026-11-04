@@ -1822,7 +1822,7 @@ _lease_provision_skills() {
 # _lease_provision_claude_skills <worktree> [<names,>] — the claude worker's
 # copy (KTD16): Claude Code reads skills from .claude/skills, not .agents/skills.
 # skills-sync.py add writes the same portable set there, names only: an entry
-# already present (a tracked one, like this repo's .claude/skills/watch-cycle/)
+# already present (a tracked one, like a repo-local skill the project keeps there)
 # and each name in <names,> (the names git tracks there) stay as they are, and
 # nothing is replaced, retired or stamped; the same symlink and realpath guards
 # apply (KTD12).
