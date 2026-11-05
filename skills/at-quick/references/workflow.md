@@ -27,7 +27,7 @@ Review your own change through these lenses:
 - Any obvious security issues? (injection, auth, data exposure)
 - Any performance concerns? (N+1, O(n²), unbounded)
 
-If any of these raise concerns, escalate to `at-review --security` or `at-review --perf` instead. If the blast radius grew past trivial while you worked, raise the ceremony rather than adding a single review lens.
+If any of these raise concerns, tell the user to run `/at-review --security` or `/at-review --perf` (`$agent-triforge:at-review` with that flag in a Codex prompt) instead. If the blast radius grew past trivial while you worked, raise the ceremony rather than adding a single review lens.
 
 ## 6. Wrap up
 

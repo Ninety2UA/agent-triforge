@@ -97,7 +97,7 @@ export const PHASES = [
     "n": "1.5",
     "short": "Validate",
     "title": "Check the plan before building",
-    "body": "`plan-checker` reviews the plan until it approves, three rounds at most. If the plan passes 15 tasks, `scope-cutting` can cut it by value.",
+    "body": "`plan-checker` reviews the plan until it approves, three rounds at most, and anything short of an explicit approval stops the plan. If the plan passes 15 tasks, `scope-cutting` can cut it by value.",
     "rows": [
       {
         "k": "Persona",
@@ -118,7 +118,7 @@ export const PHASES = [
     "n": "2",
     "short": "Build",
     "title": "Build, review, merge",
-    "body": "Each task gets its own worktree. A builder writes it, a pinned reviewer from a different roster member checks it, and the lead squash-merges its own copy. `integration-verifier` runs between waves.",
+    "body": "Each task gets its own worktree. A builder writes it, a pinned reviewer from a different roster member checks it, and the lead squash-merges its own copy. `integration-verifier` runs between waves, and only its explicit PASS moves on.",
     "rows": [
       {
         "k": "Skills",
@@ -141,7 +141,7 @@ export const PHASES = [
     "n": "3+4",
     "short": "Review",
     "title": "Review in parallel until it converges",
-    "body": "In `at-ship`, five lanes review at once: Antigravity, Codex, `security-sentinel`, `performance-oracle` and `code-simplicity-reviewer`. `findings-synthesizer` merges them; fixes loop at most 3 cycles.",
+    "body": "In `at-ship`, five lanes review at once: Antigravity, Codex, `security-sentinel`, `performance-oracle` and `code-simplicity-reviewer`. `findings-synthesizer` merges them, and a lane that reports less than complete coverage blocks convergence. Fixes loop at most 3 cycles, and a cycle with a P1 or P2 fix reviews the changed files again.",
     "rows": [
       {
         "k": "Skills",

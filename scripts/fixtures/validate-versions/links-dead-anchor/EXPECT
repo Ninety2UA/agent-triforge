@@ -1,0 +1,5 @@
+# The file exists; the section it names does not.
+check: links
+rc: 1
+line: FAIL: links: docs/page.md:3: ../README.md#rolling-back: README.md has no anchor #rolling-back
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

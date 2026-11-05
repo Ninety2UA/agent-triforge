@@ -1,0 +1,6 @@
+# The current notes link a path the published tree does not hold (ops/ never
+# publishes, so on the export this is what such a link looks like).
+check: links
+rc: 1
+line: FAIL: links: docs/releases/v1.2.3.md:3: ../../ops/DECISIONS.md: no such file
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

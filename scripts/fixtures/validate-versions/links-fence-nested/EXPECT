@@ -1,0 +1,6 @@
+# A shorter fence inside a four-backtick example does not end it: the link past
+# the example is read and reported, the one inside the example is not.
+check: links
+rc: 1
+line: FAIL: links: README.md:9: missing-after-the-example.md: no such file
+line: validate-versions: FAIL — 1 check(s) failed (see FAIL: lines above)

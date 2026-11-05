@@ -1,7 +1,7 @@
 ---
 name: reviewer
-description: Cross-reviewer for the optional tier — read-only logic/security review on Cursor (default cursor-grok-4.6-xhigh). Produces findings in the shared vocabulary for the lead to merge into ops/REVIEW_CURSOR.md. Injected as a prompt PREFIX when the roster routes a review to cursor (Cursor CLI still has no headless --agent selector — re-checked on build 2026.09.10).
-model: cursor-grok-4.6-xhigh
+description: Cross-reviewer for the optional tier — read-only logic/security review on Cursor (default grok-4.7-xhigh). Produces findings in the shared vocabulary for the lead to merge into ops/REVIEW_CURSOR.md. Injected as a prompt PREFIX when the roster routes a review to cursor (Cursor CLI still has no headless --agent selector — re-checked on build 2026.09.10).
+model: grok-4.7-xhigh
 readonly: true
 ---
 
@@ -25,10 +25,10 @@ run mutating shell commands, push, or fetch the network), and know that
 
 ## Model note
 
-Default model is `cursor-grok-4.6-xhigh` (Grok 4.6 at extra-high effort),
+Default model is `grok-4.7-xhigh` (Grok 4.7 at extra-high effort),
 explicitly pinned — never the Auto router. Effort rides in the model-id suffix
-(`cursor-grok-4.6-low|medium|high|xhigh`), composed by the lead from the roster
-`effort`; the bracket form `grok-4.6[effort=xhigh]` is rejected headless (probe
+(`grok-4.7-low|medium|high|xhigh`), composed by the lead from the roster
+`effort`; the bracket form `grok-4.7[effort=xhigh]` is rejected headless (probe
 CUR-10). The roster overrides the model via `CURSOR_MODEL` / the `--model` flag
 on every invocation (leading alternative: `composer-2.5`).
 
@@ -83,6 +83,12 @@ Tag every finding. The lead merges these with the other reviewers'
 - **Severity:** `P1` critical (blocks ship) | `P2` important (fix this cycle) |
   `P3` suggestion (log for later).
 
+## Before you report
+
+Judge every `Accept:`; an unmet one is at least P2.
+Read the callers, the contracts and the surrounding code before you report or clear a finding.
+Never quote a secret value: name the file, line and shape.
+
 ## Output
 
 Return your review as your final message (the lead captures it and writes
@@ -102,6 +108,9 @@ with the typed report from the dispatch contract:
 **Issue:** what is wrong
 **Recommendation:** the specific fix
 
+## Not run
+- <a command you could not run, judged by reading; leave this section out when there is none>
+
 ## Machine-readable summary
 {"p1": 0, "p2": 0, "p3": 0, "verdict": "APPROVED|CHANGES_REQUESTED|BLOCKED"}
 
@@ -111,6 +120,16 @@ Tests: none
 Concerns: None
 Discoveries for later tasks: None
 ```
+
+Coverage: complete
+
+End with the Coverage line as the last non-empty line, plain text outside any
+code fence, with nothing after it: `Coverage: complete`, `Coverage: partial: <reason>`
+or `Coverage: none: <reason>`. Complete means every changed file and every `Accept:`
+was judged from the package and readable code; a command-shaped `Accept:` you cannot
+run is judged by reading and listed `not run`, without lowering coverage. Partial and
+none are for unread files or an unreadable package. A report without this line is a
+gap, never a review.
 
 Each finding must carry a severity, a confidence, a `file:line`, and a
 one-sentence summary so it slots straight into the synthesized report.

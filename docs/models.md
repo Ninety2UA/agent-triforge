@@ -18,11 +18,12 @@ Each role's CLI, model and effort come from `ops/roster.toml`. A field you leave
 
 How each CLI takes its model and effort:
 
-- Antigravity always gets an explicit `--model`, because its own default is a (Medium) variant. The shipped pin is the newest Gemini at its highest thinking level, Pro or Flash (D-022). The suffix is agy's effort control, so a role's `effort` maps into it: `low` to (Low), `medium` to (Medium), `high`, `xhigh` and `max` to (High).
-- To run the Pro line, set a role's `model` to `"Gemini 3.1 Pro (High)"` (or `(Low)`; 3.1 Pro has no Medium tier). It stays the documented one-line opt-in.
+- Antigravity always gets an explicit `--model`, because its own default is a (Medium) variant. The shipped pin is the newest Gemini at its highest thinking level that every tier can run (D-022, amended by D-060). The suffix is agy's effort control, so a role's `effort` maps into it: `low` to (Low), `medium` to (Medium), `high`, `xhigh` and `max` to (High).
+- To run Gemini 4 Argon, set a role's `model` to `"Gemini 4 Argon (High)"` (or `(Medium)`, `(Low)`). It is newer than the pin, and the vendor's models page does not offer it on Free or Google AI Plus, so it stays a one-line opt-in; it answered READY live on agy 1.5.1 on 2026-11-05.
+- Gemini 3.1 Pro (`"Gemini 3.1 Pro (High)"` or `(Low)`; no Medium tier) is Enterprise only on that page. Elsewhere `agy models` does not list it and agy refuses it as an unknown model, as it did on the account that ran Argon.
 - The July 2026 plan's never-Flash rule (AE2) is superseded by D-022, the September 2026 decision; if you work from that plan, D-022 wins.
 - Codex runs `gpt-6-astra` at `xhigh` (D-021). A role can pick another Codex model, such as `gpt-6.1-sol`, which answered on Codex 0.160.0 and was refused on 0.155.1.
-- Cursor runs a suffixed Grok id, `cursor-grok-4.6-xhigh`, never the Auto router. Its effort is the id's suffix (`low`, `medium`, `high`, `xhigh`).
+- Cursor runs a suffixed Grok id, `grok-4.7-xhigh`, never the Auto router. Its effort is the id's suffix (`low`, `medium`, `high`, `xhigh`).
 - The claude builder lane runs Claude Code's own default model at `max` effort. Claude personas and sub-agents follow the ladder below.
 - The optional members' pins are OpenCode `openrouter/z-ai/glm-5.3`, Kimi `kimi-code/k3`, Devin `swe-1-6-slow` and Grok Build `grok-4.7` (its effort rides in `--effort`).
 - A role that sets only `effort` keeps its default CLI and model. Roster model overrides reach each CLI through its registry `model_env`.

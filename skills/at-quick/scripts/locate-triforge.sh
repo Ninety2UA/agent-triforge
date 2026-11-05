@@ -13,6 +13,8 @@
 # own directory, so a project's scripts/locate-triforge.sh is never the one run
 # (validate-skills.sh KTD6 rejects a cwd-relative call):
 #   ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
+# --help or -h as the first argument prints the usage below and exits 0 before
+# anything is resolved (validate-skills.sh C23 reads that text).
 # stdout: the plugin root (physical path), one line, rc 0.
 # stderr: one line saying what was tried and naming the setup skill;
 #   rc 1  no root found (no candidate passed the test, no pointer file)
@@ -55,6 +57,19 @@
 # zsh (`sh file`, `bash file`, `zsh file`, or by its shebang) — no arrays, no
 # [[ ]], no local, no bash-only expansions.
 set -eu
+
+case "${1:-}" in
+  -h|--help)
+    cat <<'USAGE'
+usage: locate-triforge.sh [--help | -h]
+Prints the Agent Triforge plugin root (a physical path, one line) on stdout.
+From a skill: ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?
+It tries CLAUDE_PLUGIN_ROOT, then this copy's own location, then the pointer
+<project>/.agents/triforge-plugin-root.local, which the at-setup skill writes.
+Exit codes: 0 found; 1 no plugin root found; 3 the pointer file was refused.
+USAGE
+    exit 0 ;;
+esac
 
 POINTER_NAME=".agents/triforge-plugin-root.local"
 SETUP_HINT='run the Triforge setup skill at-setup (`/at-setup` under Claude Code, `$agent-triforge:at-setup` in a Codex prompt)'

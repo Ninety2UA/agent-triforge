@@ -15,7 +15,7 @@
 #   --only       run only the named checks: lockstep and skill-versions (1),
 #                ladder (2), drift (3), sweep (4), counts (5), budget (6),
 #                inventory (7), retired (8), workflows (9), manifests (10),
-#                halt (11), diagrams (12). An unknown or empty
+#                halt (11), diagrams (12), links (13). An unknown or empty
 #                name is a usage error (exit 2), so a typo never passes by
 #                running nothing.
 #   --root       run the checks against <dir> instead of this checkout (the
@@ -232,6 +232,14 @@
 #      cannot pass with stale PNGs. Prints a "skip:" line while the HTML is
 #      absent. Checks 4, 5 and 9 read the HTML and the SVGs' text too (the
 #      carve-out above).
+#  13. Links: every relative link (Markdown, raw HTML href and src) in
+#      README.md, docs/*.md and the current version's notes resolves to a file
+#      and, into a .md file, to a heading or HTML anchor, by GitHub's slugs.
+#      Older notes are history (release-notes.sh points their links at the
+#      tag). docs/app-AGENTS.md publishes as AGENTS.md: it is not read from
+#      docs/, and in a source tree a link to AGENTS.md reads its anchors there.
+#      Run on the export: a link into a path .publishignore drops (ops/,
+#      docs/plans/, ...) resolves in the source tree and fails only there.
 #
 # Exit codes: 0 every check passed (--self-test: every case behaved as named);
 # 1 at least one check failed (--self-test: a case did not); 2 bad flag.
@@ -266,7 +274,7 @@ ONLY=""
 ROOT=""
 SELF_TEST=0
 # The names --only takes, in run order (the header numbers the checks).
-VV_CHECKS="lockstep skill-versions ladder drift sweep counts budget inventory retired workflows manifests halt diagrams"
+VV_CHECKS="lockstep skill-versions ladder drift sweep counts budget inventory retired workflows manifests halt diagrams links"
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-sweep)  NO_SWEEP=1 ;;
@@ -452,6 +460,12 @@ budget = (
 for name, content, rc_want, lines_want in budget:
     count += 1
     failures += scratch_run(name, {"AGENTS.md": content}, "budget", rc_want, lines_want)
+
+# Computed case: the links check (13) on the published shape: AGENTS.md at the
+# root, no docs/app-AGENTS.md. Generated for the reason the budget cases are.
+count += 1
+failures += scratch_run("computed-links-published-agents", {"README.md": "[Rule](AGENTS.md#rule)\n", "AGENTS.md": "## Rule\n"}, "links", 0,
+                        ["ok:   links: 1 relative link(s) in 1 file(s) resolve, anchors included", "validate-versions: PASS (--only links)"])
 
 # Computed cases — --only refuses what would select nothing (exit 2, no check runs).
 for name, only, needle in (
@@ -1978,6 +1992,87 @@ PYEOF
     fi
   else
     echo "skip: diagram render stamp (no $DIAGRAM_SOURCE yet)"
+  fi
+fi
+
+# --- 13. relative links and anchors -------------------------------------------
+if _selected links; then
+  LINKS_RC=0
+  python3 -c "$VV_PY_STDIN" <<'PYEOF' || LINKS_RC=$?
+import glob, json, os, re, sys
+from urllib.parse import unquote
+
+# The current notes only: older notes are history, and release-notes.sh points
+# their links at the tag. docs/app-AGENTS.md is not read: it publishes as
+# AGENTS.md, so its links are written from the root.
+try:
+    with open(".claude-plugin/plugin.json", encoding="utf-8") as fh:
+        notes = ["docs/releases/v" + json.load(fh)["version"] + ".md"]
+except (OSError, ValueError, KeyError):
+    notes = []
+scan = ["README.md"] + sorted(set(glob.glob("docs/*.md")) - {"docs/app-AGENTS.md"}) + notes
+LABEL = r"\[((?:[^\[\]]|\[[^\]]*\])*)\]\("
+LINK = re.compile(LABEL + r"\s*<?([^\s()<>]+)|<(?:a|img|source)\b[^>]*?\b(?:href|src)=\"([^\"]+)\"")
+FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
+CODE = re.compile(r"(`+)(?!`).*?[^`]\1(?!`)")
+HEADING = re.compile(r" {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
+NAMED = re.compile(r"<a\b[^>]*?\b(?:name|id)=\"([^\"]+)\"")
+
+
+def prose(path):
+    """(line number, the line, the line with inline code blanked), outside fences."""
+    fence = None    # the opening run: only its character, at least as long, closes it
+    with open(path, encoding="utf-8") as fh:
+        for n, line in enumerate(fh.read().split("\n"), 1):
+            m = FENCE.match(line)
+            run, rest = m.groups() if m else ("", "")
+            if fence is None:
+                if m and not (run[0] == "`" and "`" in rest):   # a backtick fence's info string holds none
+                    fence = run
+                else:
+                    yield n, line, CODE.sub("", line)
+            elif m and run[0] == fence[0] and len(run) >= len(fence) and not rest.strip():
+                fence = None
+
+
+def anchors(path):
+    """Heading slugs as GitHub makes them (-1, -2 on repeats) and raw HTML anchors."""
+    found, count = set(), {}
+    for _, line, bare in prose(path):
+        m = HEADING.match(line)
+        if m:
+            text = re.sub(r"<[^>]+>|[`*]", "", re.sub("!?" + LABEL + r"[^)]*\)", r"\1", m.group(1)))
+            base = re.sub(r"[^\w\- ]", "", text.strip().lower()).replace(" ", "-")
+            found.add(base + ("-" + str(count[base]) if base in count else ""))
+            count[base] = count.get(base, 0) + 1
+        found.update(NAMED.findall(bare))
+    return found
+
+
+fails, total, files = [], 0, 0
+for src in filter(os.path.isfile, scan):    # a missing notes file is the lockstep check's failure
+    files += 1
+    for n, _, bare in prose(src):
+        for m in LINK.finditer(bare):
+            href = m.group(2) or m.group(3)
+            if re.match(r"[A-Za-z][A-Za-z0-9+.-]*:|/", href):
+                continue
+            total += 1
+            path, _, frag = unquote(href).partition("#")
+            target = os.path.normpath(os.path.join(os.path.dirname(src), path)) if path else src
+            # The source tree keeps the file the published tree calls AGENTS.md here.
+            if target == "AGENTS.md" and os.path.isfile("docs/app-AGENTS.md"):
+                target = "docs/app-AGENTS.md"
+            where = "FAIL: links: " + src + ":" + str(n) + ": " + href + ": "
+            if not os.path.exists(target):
+                fails.append(where + "no such file")
+            elif frag and target.endswith(".md") and frag not in anchors(target):
+                fails.append(where + target + " has no anchor #" + frag)
+print("\n".join(fails) or "ok:   links: " + str(total) + " relative link(s) in " + str(files) + " file(s) resolve, anchors included")
+sys.exit(1 if fails else 0)
+PYEOF
+  if [ "$LINKS_RC" -ne 0 ]; then
+    FAILED_CHECKS=$((FAILED_CHECKS + 1))
   fi
 fi
 

@@ -24,7 +24,7 @@ Agent Triforge puts several AI coding CLIs on one sprint. One CLI leads an eight
 
 - The lead is [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Codex](https://github.com/openai/codex). You choose it in [`at-setup`](skills/at-setup/SKILL.md), which records it in the roster's `[lead]` table; without the table, Claude Code leads. The lead plans, resolves the roster, dispatches builders and merges reviewed work. Claude's model ladder is Fable 5.1 → Opus 5.5 → Sonnet 5.5.
 - The core trio is required: Claude, [Antigravity](https://antigravity.google/cli) (`agy`, Gemini 3.8 Flash (High) by default, 1M context) and [Codex](https://github.com/openai/codex) (`gpt-6-astra`, sandboxed).
-- The optional tier is detected automatically: OpenCode (OpenRouter `glm-5.3`), Kimi Code (`kimi-code/k3`), Cursor (Grok 4.6) and Grok Build (`grok-4.7`; builder, reviewer or analyst). You enroll them through [`at-setup`](skills/at-setup/SKILL.md), and one you don't enroll is skipped cleanly. Devin (`swe-1-6-slow`, reviewer or analyst) joins only after you record your consent in `at-setup`.
+- The optional tier is detected automatically: OpenCode (OpenRouter `glm-5.3`), Kimi Code (`kimi-code/k3`), Cursor (Grok 4.7) and Grok Build (`grok-4.7`; builder, reviewer or analyst). You enroll them through [`at-setup`](skills/at-setup/SKILL.md), and one you don't enroll is skipped cleanly. Devin (`swe-1-6-slow`, reviewer or analyst) joins only after you record your consent in `at-setup`.
 - 19 specialist personas cover [security](personas/security-sentinel.md), [performance](personas/performance-oracle.md), [architecture](personas/architecture-strategist.md) and more. One manifest sets each persona's tools, model tier and turn budget.
 
 Every implementation task, the lead's own included, is built under a per-task lease in its own git worktree and merges only after a pinned reviewer, never its builder, has cross-reviewed it. Safety comes from that isolation and cross-review; any member may write code. Work is tracked in shared markdown files under `ops/`, reviews run in parallel, and what one sprint learns is written down for the next.
@@ -34,14 +34,22 @@ Every implementation task, the lead's own included, is built under a per-task le
 When the lead solves a problem whose reasoning would otherwise be lost, it writes a note to `ops/solutions/`, or to `ops/decisions/` for an architectural decision. The [`learnings-researcher`](personas/learnings-researcher.md) persona searches both before new work is planned ([the knowledge loop](docs/team-work.md#the-knowledge-loop-at-compound)).
 
 <a name="whats-new"></a>
-## What's new (v4.1.1)
+## What's new (v4.2.0)
 
-This release changes the documentation and the release tooling. Nothing changes in how you run Triforge.
+This release brings Triforge's detection, notices, docs and probe up to date with Claude Code 2.1.318, Codex 0.166.0, agy 1.5.1 and Cursor 2026.11.05, and closes gaps in how the review cycle decides it is done.
 
-- **The README follows agent-blueprint's order.** It starts with what Triforge is, then covers install for either lead, getting started, unattended runs, upgrading from 3.x and updating, and ends with the reference sections. It shows only the latest What's new; older releases are in the collapsed [Release history](#recent-changes).
-- **The diagrams are light.** The 13 dark diagrams became 15 light ones that read on GitHub's light and dark themes, and on a phone a tap opens each one full size. Two are new: the install routes and the unattended-run loop. Checking every label against the code corrected a few stale facts: there are five quality gates, at-ship reviews in five lanes, the kill grace is 10 s, and test fix cycles stop at 3.
-- **Each release has its own notes file.** A version's notes live in `docs/releases/v<version>.md`, and the release workflow publishes that file as the GitHub release.
-- **The maintainer gates are stricter.** `validate-versions.sh` fails a version bump that has no notes file and rejects Liquid delimiters under `docs/`, which break the GitHub Pages build. It also fails when a diagram source changed without a re-render, or when a diagram names a stale pin, a wrong count or a Codex invocation without its `agent-triforge:` prefix.
+- **Claude Code's `instructionFiles` setting is read.** Whether a `CLAUDE.md` hides `AGENTS.md` depends on that user-tier setting. Setup and session start now read it and report what Claude Code loads under its mode, instead of assuming the default.
+- **Codex's content-bound hook approval is read.** Codex now ties a plugin hook's approval to the plugin's contents. Detection, setup and the probe read the new shape and the older one. Any change to the plugin's contents, this update included, asks for approval again, and until then a Codex lead runs without the plugin's hooks.
+- **An agy run that stopped early no longer passes as finished.** Any `finished_reason` marks the run incomplete, a print-timeout expiry is a timeout that is not retried, and every nonzero exit writes the status file the promotion guards read. Partial output or an error message no longer lands as a review or an architecture report, and a cut-off lease never goes to review.
+- **The default review no longer stops at agy's analyst.** On agy 1.5.1 a tool call that needs a permission prompt ends a headless turn with an empty response, so one attempted write, command or read outside the workspace lost the analyst and stopped the whole review. 4.1.1 fails the same way. The Antigravity analyst now returns its review instead of trying to write it, and a refused tool call no longer loses the run.
+- **Every review lane ends with a Coverage line.** It reads `Coverage: complete`, `Coverage: partial: <reason>` or `Coverage: none: <reason>`. A lane that reports less than complete, or omits the line, is a gap the cycle cannot converge on. Coverage is self-reported: the snapshot-bound review receipt is the first 4.3 item.
+- **Reviewers judge every `Accept:`.** An unmet one is at least P2, and one they cannot run is judged by reading and listed `not run`. They read callers, contracts and surrounding code before reporting or clearing a finding, and never quote a secret value. Convergence needs a report on the final changed snapshot: a cycle that applied a P1 or P2 fix re-reviews the changed files, and that review counts against the three-cycle cap.
+- **Plan and verify verdicts fail closed.** A new helper, `persona_verdict`, reads `plan-checker` and `integration-verifier` reports. It passes only an explicit APPROVED with no blocking issue, or an explicit PASS with a matching recommendation. Anything else, a malformed report included, stops the plan or the wave.
+- **`coordinate.sh` exits 75 when the sprint did not converge.** It now exits 75 instead of 0 when its sessions run out without `ops/.sprint-complete`, so exit 0 means the sprint completed or a dry run printed. A wrapper that treats any nonzero exit as a crash needs to handle 75 as "run again to continue".
+- **A claude worker needs Claude Code 2.1.314.** That build carries the sandbox isolation fixes. Below it a worker refuses to start and session start prints a `worker-floor` line. The lead's own floor stays 2.1.277.
+- **Codex workers no longer load your installed Codex plugins.** Foreground, lease and persona workers run with `--disable plugins`. A Codex lead keeps its own trusted plugin hooks, and skills under `.agents/skills/` still load.
+- **Cursor's default moved to Grok 4.7.** The shipped pin is `grok-4.7-xhigh`, and it answered live on Cursor 2026.11.05. A roster that pins the 4.6 id keeps working.
+- **The probe reports what it proved.** Rows that depend on a host setting pin it and report the host's value. On an OpenCode V2 host every OpenCode row reads `UNAVAILABLE` and says why, and a deny row needs a positive control before a missing marker counts. A local row installs the exported tree under both leads, and a new row proves the Codex worker flag.
 
 ---
 
@@ -53,7 +61,7 @@ This release changes the documentation and the release tooling. Nothing changes 
 
 Triforge installs as a plugin into the CLI that leads: one command adds the marketplace, one installs the plugin. The same repository serves both leads, because Codex also reads the `.claude-plugin/` manifests (D-048).
 
-If you are coming from Triforge 3.x, read [Upgrading from 3.x](docs/upgrading.md) first. The slash commands are now `at-` workflows, and a `CLAUDE.md` left from the 3.x template hides the project's `AGENTS.md` from Claude Code.
+If you are coming from Triforge 3.x, read [Upgrading from 3.x](docs/upgrading.md) first. The slash commands are now `at-` workflows, and a `CLAUDE.md` left from the 3.x template hides the project's `AGENTS.md` from Claude Code under its default `instructionFiles` mode, `claude-md-or-agents-md`; a user-tier setting changes this.
 
 You need the core trio (Claude Code, Antigravity `agy` and Codex) installed and logged in, Python 3, and on macOS GNU coreutils. Then add the marketplace and install the plugin:
 
@@ -144,6 +152,7 @@ Each version's full notes are one file in [`docs/releases/`](docs/releases/), an
 
 | Version | Date | Summary |
 |---|---|---|
+| [v4.2.0](docs/releases/v4.2.0.md) | 2026-11-05 | Today's CLIs read correctly, a Coverage line in every review lane, fail-closed verdicts, a 2.1.314 worker floor |
 | [v4.1.1](docs/releases/v4.1.1.md) | 2026-10-13 | The README in agent-blueprint's order, light diagrams, release notes per version |
 | [v4.1.0](docs/releases/v4.1.0.md) | 2026-10-13 | The 4.0 review's residuals fixed: a small reader, bounded reads, process-group time bounds, watched promotion targets, CLAUDE_CONFIG_DIR |
 | [v4.0.0](docs/releases/v4.0.0.md) | 2026-10-12 | Lead choice (Claude Code or Codex), at- lead workflows, personas, AGENTS.md, Grok Build and Devin |
@@ -214,7 +223,7 @@ Yes. <code>at-ship</code> runs every phase in one session, and <code>scripts/coo
 <details>
 <summary><strong>How does context exhaustion recovery work?</strong></summary>
 
-Two layers. Inside a session, the <code>ops/.sprint-complete</code> sentinel is the authoritative completion signal, created only after the verification checklist passes. Under a Claude Code lead, the native <code>/goal</code> checklist is a best-effort assist on top: <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> leads every composed prompt with a <code>/goal</code> line, and <code>at-ship</code>/<code>at-coordinate</code> print a copyable one for interactive runs, but headless gating depends on model behavior (probe CC-03 passed 1 of 3 runs in the 2026-09 cycle, D-030), so nothing relies on it. Outside a session, <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> spawns fresh lead processes with clean context windows and detects completion through the sentinel; state persists via git and <code>ops/STATE.md</code>. A PreCompact hook checkpoints STATE.md before context compaction.
+Two layers. Inside a session, the <code>ops/.sprint-complete</code> sentinel is the authoritative completion signal, created only after the verification checklist passes. Under a Claude Code lead, <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> leads every composed prompt with a <code>/goal</code> line, and <code>at-ship</code>/<code>at-coordinate</code> print a copyable one for interactive runs, but <code>/goal</code> is an assist (CC-03 went 0 of 3 on 2.1.318) and <code>ops/.sprint-complete</code> plus <code>coordinate.sh</code> decide completion. Outside a session, <a href="scripts/coordinate.sh"><code>coordinate.sh</code></a> spawns fresh lead processes with clean context windows and detects completion through the sentinel; state persists via git and <code>ops/STATE.md</code>. A PreCompact hook checkpoints STATE.md before context compaction.
 </details>
 
 <details>
@@ -226,7 +235,7 @@ After solving a non-trivial problem, <a href="skills/at-compound/SKILL.md"><code
 <details>
 <summary><strong>How do I update Triforge?</strong></summary>
 
-Refresh the marketplace, then update the plugin: <code>claude plugin marketplace update agent-triforge</code> and <code>claude plugin update agent-triforge</code> under Claude Code, or <code>codex plugin marketplace upgrade agent-triforge</code> and <code>codex plugin add agent-triforge@agent-triforge</code> under Codex. See <a href="docs/installation.md#update">Update</a>.
+Refresh the marketplace, then update the plugin: <code>claude plugin marketplace update agent-triforge</code> and <code>claude plugin update agent-triforge</code> under Claude Code, or <code>codex plugin marketplace upgrade agent-triforge</code> and <code>codex plugin add agent-triforge@agent-triforge</code> under Codex. Any change to the plugin's contents, this update included, asks for approval again, and until then a Codex lead runs without the plugin's hooks. See <a href="docs/installation.md#update">Update</a>.
 </details>
 
 <details>

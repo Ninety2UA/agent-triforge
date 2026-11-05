@@ -166,7 +166,7 @@ const run = (prefix: string) => [`${prefix}at-plan <goal>`, `${prefix}at-build`,
         <div>
           <div class="sec-head">
             <h2 id="review-h">Review until it converges</h2>
-            <p>In <code>at-ship</code>, five lanes review the change at once. Each writes its own file, findings are ranked P1, P2 or P3 with a confidence tier, and a low-confidence finding is never P1.</p>
+            <p>In <code>at-ship</code>, five lanes review the change at once. Each writes its own file, findings are ranked P1, P2 or P3 with a confidence tier, and a low-confidence finding is never P1. Each ends with a Coverage line, and one that reports less than complete, or omits the line, blocks convergence.</p>
           </div>
           <ul class="c-lanes">
             {LANES.map((l) => (
@@ -218,7 +218,7 @@ const run = (prefix: string) => [`${prefix}at-plan <goal>`, `${prefix}at-build`,
       <div class="sec-head">
         <h2 id="done-h">When a sprint is done</h2>
         <p>The lead creates <code>ops/.sprint-complete</code> in Phase 6, as its last action, and only when every item on the checklist holds. <code>coordinate.sh</code> reads that file and nothing else to decide that a sprint has ended. When an item fails there is no marker, and the blocker goes into <code>ops/TASKS.md</code> and <code>ops/STATE.md</code>.</p>
-        <p>Under Claude Code, the sprint prints the checklist as a <code>/goal</code> line at the start, and typing it makes Claude Code hold the session to it. A Codex lead has no such gate and finishes on the marker alone.</p>
+        <p>Under Claude Code, the sprint prints the checklist as a <code>/goal</code> line at the start. <code>/goal</code> is an assist (probe CC-03 went 0 of 3 on Claude Code 2.1.318), and <code>ops/.sprint-complete</code> plus <code>coordinate.sh</code> decide completion. A Codex lead has no <code>/goal</code> and finishes on the marker alone.</p>
       </div>
       <div class="c-side">
         <div class="c-check">

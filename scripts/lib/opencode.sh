@@ -97,7 +97,7 @@ _opencode_v2_reason() {
     echo "OpenCode version could not be read (\`opencode --version\` timed out, failed, or printed no x.y version) — refused because Triforge cannot confirm V1, and V2 does not read OPENCODE_PERMISSION (Triforge's deny set would be silently dropped; D-049). Fix: make \`opencode --version\` print a 1.x version; if it is V2, pin OpenCode V1: ${_OPENCODE_V1_PIN}."
     return 0
   fi
-  echo "OpenCode V2 detected (\`opencode --version\` = ${_OPENCODE_VERSION:-2.x}) — unsupported: V2 does not read OPENCODE_PERMISSION (Triforge's deny set would be silently dropped) and runs a shared background service outside the env -i boundary (D-049). Fix: pin OpenCode V1: ${_OPENCODE_V1_PIN} (the V2 port is deferred)."
+  echo "OpenCode V2 detected (\`opencode --version\` = ${_OPENCODE_VERSION:-2.x}) — unsupported: V2 does not read OPENCODE_PERMISSION (Triforge's deny set would be silently dropped) and runs a shared background service outside the env -i boundary (D-049). Fix: pin OpenCode V1: ${_OPENCODE_V1_PIN}; \`@opencode/cli\` and Homebrew Core track V2 (the V2 port is deferred)."
 }
 
 # _opencode_v2_refusal <caller> — the dispatch-time refusal (stderr + OUTPUT_FILE

@@ -15,10 +15,11 @@
 #                     prompt; an empty value adds nothing (a Codex lead's
 #                     defaults are gpt-6-astra at xhigh, Claude Code's empty).
 #   lead.goal_gate    non-empty (Claude Code: /goal): the prompt LEADS with
-#                     "<goal_gate> <completion checklist>", so the host
-#                     hard-gates the session natively (probe CC-03; a slash
-#                     command works only as the first line of a headless
-#                     prompt). Empty (Codex): no gate; the prompt leads with
+#                     "<goal_gate> <completion checklist>" (a slash command
+#                     works only as the first line of a headless prompt).
+#                     /goal is an assist (CC-03 went 0 of 3 on 2.1.318); the
+#                     marker and this loop decide completion. Empty (Codex):
+#                     no gate; the prompt leads with
 #                     $agent-triforge:at-ship (Codex attaches a plugin skill
 #                     only by its $<plugin>:<skill> mention), carries the
 #                     checklist as text, and the session completes on the
@@ -41,6 +42,10 @@
 # pointers or the ledger that the lead did not make is restored where
 # possible, the open leases are escalated, and the loop stops before the
 # session starts (rc 44), so no unattended session accepts it.
+#
+# When the sessions run out and none created the marker the loop exits 75 after
+# its closing lines (EX_TEMPFAIL: run it again to continue). Exit 0 means the
+# sprint completed or a dry run printed.
 #
 # Usage:
 #   ./scripts/coordinate.sh "Build the authentication module"
@@ -564,4 +569,5 @@ if [ "$DONE" = "false" ]; then
   echo "Check ${PROGRESS_FILE} for current progress."
   echo "Check ops/TASKS.md for remaining tasks."
   echo "Run again to continue, or review manually."
+  exit 75
 fi

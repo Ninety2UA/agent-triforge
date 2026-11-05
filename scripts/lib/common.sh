@@ -52,10 +52,14 @@ _run_with_timeout() {
 # otherwise cut one short when its first part ends in ghp; xai- (an xAI key,
 # about 80 alphanumerics) and AKIA or ASIA + 16 (an AWS access key id,
 # long-term or STS) follow. The minimum lengths leave prose such as xai-org
-# or a bare github_pat_ alone.
+# or a bare github_pat_ alone. sk- needs a left boundary, kept through \1: the
+# line start, a non-alphanumeric, or an encoding that ends in an alphanumeric
+# (a literal \n, \t, \r or \u0022, an ANSI colour like ESC[32m, a %3D or %22).
+# So Task-completion, risk-assessment and a literal \nrisk-assessment-material
+# are prose, while API_KEY_sk-... stays a key.
 _scrub() {
   sed -E \
-    -e 's/sk-[A-Za-z0-9_-]{8,}/[REDACTED-KEY]/g' \
+    -e 's/(^|[^A-Za-z0-9]|\\[nrt]|\\u[0-9A-Fa-f]{4}|\[[0-9;]*m|%[0-9A-Fa-f]{2})sk-[A-Za-z0-9_-]{8,}/\1[REDACTED-KEY]/g' \
     -e 's/AIza[0-9A-Za-z_-]{10,}/[REDACTED-KEY]/g' \
     -e 's/github_pat_[A-Za-z0-9_]{22,}/[REDACTED-KEY]/g' \
     -e 's/gh[pousr]_[A-Za-z0-9]{16,}/[REDACTED-KEY]/g' \
@@ -115,7 +119,7 @@ _PLAN_LIMIT_RE='upgrade to (pro|max|a paid plan)|requires? a (paid|pro) plan|not
 # Classify a failed external-CLI invocation (KTD-9). Shared so future per-CLI
 # helpers reuse one taxonomy instead of reinventing bare retry-once. Sets:
 #   INVOKE_FAILURE_CLASS    deterministic | timeout | retryable
-#   _INVOKE_FAILURE_REASON  binary-missing | interrupted | timeout-tool-missing | auth | quota | plan | ""
+#   _INVOKE_FAILURE_REASON  binary-missing | interrupted | timeout-tool-missing | auth | quota | plan | max-turns | ""
 # Args: <exit-code> [output-file] — the output file is scanned for
 # auth-shaped patterns when present.
 _classify_invoke_failure() {

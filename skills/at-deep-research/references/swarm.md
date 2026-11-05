@@ -1,6 +1,6 @@
 # Research swarm
 
-Launch ALL five lenses in ONE block for maximum parallelism, then wait for all five to complete before synthesizing. Replace `<the topic>` with the research topic.
+Launch ALL five lenses in ONE block for maximum parallelism, then wait for all five to complete before synthesizing. Replace `<the topic>` with the research topic. Only lens 1 can sit out: the block skips it when `learnings_store_empty` returns 0, because a store holding only the skeleton has nothing to search, and synthesis gets a SKIPPED marker for it.
 
 - **Lens 1, the `learnings-researcher` persona:** ops/solutions/ and ops/decisions/.
 - **Lens 2, the `framework-docs-researcher` persona:** current documentation for the technologies involved; it fetches, so the endpoint-hygiene rule binds it.
@@ -64,7 +64,11 @@ _lens() { # _lens <persona> <brief>
     exit 1
   fi
 }
-_lens learnings-researcher "Search ops/solutions/ and ops/decisions/ for patterns relevant to the topic in the input."
+if learnings_store_empty; then
+  echo "learnings-researcher skipped: the store holds only the skeleton"
+else
+  _lens learnings-researcher "Search ops/solutions/ and ops/decisions/ for patterns relevant to the topic in the input."
+fi
 _lens framework-docs-researcher "Research current documentation, best practices, and known issues for technologies relevant to the topic in the input. $HYGIENE"
 _lens git-history-analyzer "Analyze git history for code evolution, contributors, and architectural decisions related to the topic in the input."
 _lens best-practices-researcher "Research industry-wide best practices, design patterns, and anti-patterns relevant to the topic in the input. $HYGIENE"
@@ -77,12 +81,12 @@ AGY_RC=0
 invoke_antigravity "targeted-researcher" \
   "Analyze the codebase specifically for patterns, modules, and architecture related to: $TOPIC
 Focus on: existing code, dependencies, integration points, patterns for consistency, technical debt.
-Write a targeted analysis (not full ARCHITECTURE.md — just this topic) to ops/RESEARCH_ANTIGRAVITY.md if you can; otherwise return it as your response." \
+Return a targeted analysis (not full ARCHITECTURE.md, just this topic) as your final response: the lead saves that response as ops/RESEARCH_ANTIGRAVITY.md. Do not write a file and do not run a command." \
   "$AGY_OUT" 600 || AGY_RC=$?
 
-# Headless resilience: agy auto-denies permission-requiring tools in -p mode,
-# so the researcher may have returned its analysis instead of writing ops/.
-# A run whose only tool call was a denied read_url returns non-zero with an
+# The researcher returns its analysis and writes no file, though an older run or
+# another roster CLI may have written ops/. A run whose only tool call was a
+# denied read_url returns non-zero with an
 # EMPTY file and names the user-tier allow rule (permissions.allow:
 # ["read_url(*)"] in ~/.gemini/antigravity-cli/settings.json — a human
 # decision, never written by Triforge).
@@ -98,7 +102,7 @@ if [ "$AGY_RC" -eq 0 ] && [ -s ops/RESEARCH_ANTIGRAVITY.md ]; then
   cp ops/RESEARCH_ANTIGRAVITY.md "$RESEARCH_RUN/analyst.md"; ANALYST_OK=1
 elif [ "$AGY_RC" -eq 0 ] && [ -s "$AGY_OUT" ] && { [ ! -f "${AGY_OUT}.status" ] || [ "$(cat "${AGY_OUT}.status")" = "SUCCESS" ]; }; then
   {
-    echo "<!-- captured from invoke_antigravity output; agent could not write ops/ directly (headless permission auto-deny); mode=$(cat "${AGY_OUT}.mode" 2>/dev/null || echo unknown); denied_actions=$([ -s "${AGY_OUT}.denied" ] && paste -sd, "${AGY_OUT}.denied" || echo none) -->"
+    echo "<!-- captured from invoke_antigravity output; mode=$(cat "${AGY_OUT}.mode" 2>/dev/null || echo unknown); denied_actions=$([ -s "${AGY_OUT}.denied" ] && paste -sd, "${AGY_OUT}.denied" || echo none) -->"
     _scrub < "$AGY_OUT"
   } > "$RESEARCH_RUN/analyst.md"
   cp "$RESEARCH_RUN/analyst.md" ops/RESEARCH_ANTIGRAVITY.md; ANALYST_OK=1

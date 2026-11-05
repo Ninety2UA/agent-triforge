@@ -15,7 +15,7 @@
 
    # Architecture review for build scope
    invoke_antigravity "architecture-reviewer" \
-     "Review <scope> for architecture. Write to ops/REVIEW_ANTIGRAVITY.md if you can; otherwise return findings as your response." \
+     "Review <scope> for architecture. Return the whole review as your final response: the lead saves that response as ops/REVIEW_ANTIGRAVITY.md. Do not write a file and do not run a command." \
      "$AGY_OUT" 600 &
    AGY_PID=$!
 
@@ -45,7 +45,7 @@
    # is attributable in the promoted file.
    if [ ! -f "ops/REVIEW_ANTIGRAVITY.md" ] && [ -s "$AGY_OUT" ] && { [ ! -f "${AGY_OUT}.status" ] || [ "$(cat "${AGY_OUT}.status")" = "SUCCESS" ]; }; then
      {
-       echo "<!-- captured from architecture-reviewer output; agent could not write ops/ directly (headless permission auto-deny); mode=$(cat "${AGY_OUT}.mode" 2>/dev/null || echo unknown); denied_actions=$([ -s "${AGY_OUT}.denied" ] && paste -sd, "${AGY_OUT}.denied" || echo none) -->"
+       echo "<!-- captured from architecture-reviewer output; mode=$(cat "${AGY_OUT}.mode" 2>/dev/null || echo unknown); denied_actions=$([ -s "${AGY_OUT}.denied" ] && paste -sd, "${AGY_OUT}.denied" || echo none) -->"
        _scrub < "$AGY_OUT"
      } > ops/REVIEW_ANTIGRAVITY.md
    fi
@@ -53,4 +53,4 @@
 
    `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it); a teammate working elsewhere uses that same path, never one relative to its working directory.
 6. Quality gates: tests and lint must pass, and a pinned non-author reviewer must approve, before a task merges (self-review refused, AE3).
-7. The `integration-verifier` persona runs between waves against the integration branch, judging the build, test and lint output captured in the lead's checkout (the call is in sub-agent mode); after the last wave, the lead promotes to the main branch once, honoring the `[promotion]` gate.
+7. The `integration-verifier` persona runs between waves against the integration branch, judging the build, test and lint output captured in the lead's checkout (the call, and its verdict read through `persona_verdict`, are in sub-agent mode); after the last wave, the lead promotes to the main branch once, honoring the `[promotion]` gate.

@@ -92,7 +92,8 @@ test('the untagged list matches git tags', (t) => {
     t.skip('git has no tags here (a shallow clone); UNTAGGED is checked where tags exist');
     return;
   }
-  const versions = getReleases().filter((r) => r.version).map((r) => r.version);
+  // release.yml tags the version in plugin.json when its bump lands on main, so until then it has no tag and isn't UNTAGGED.
+  const versions = getReleases().filter((r) => r.version && r.version !== VERSION).map((r) => r.version);
   const missing = versions.filter((v) => !tags.includes(`v${v}`));
   assert.deepEqual([...UNTAGGED].sort(), missing.sort());
 });

@@ -2,7 +2,7 @@
 
 The sprint's completion condition is this checklist; ALL items must hold: every phase is done (or explicitly skipped with a stated reason); the `verification-before-completion` checklist passes with evidence; `ops/STATE.md` is written; review files are archived to `ops/archive/`; the runtime marker `ops/.sprint-complete` is created LAST.
 
-At sprint start, print this copyable line for the user. A skill cannot invoke it itself: under a Claude Code lead it is user-typed, or the leading line of a headless prompt, which is exactly how `$ROOT/scripts/coordinate.sh` composes its per-iteration prompt; a Codex lead has no such gate and completes on the sentinel alone (KTD14), so for a Codex lead the line is the standing checklist, printed for the record.
+At sprint start, print this copyable line for the user. A skill cannot invoke it itself: under a Claude Code lead it is user-typed, or the leading line of a headless prompt, which is exactly how `$ROOT/scripts/coordinate.sh` composes its per-iteration prompt. `/goal` is an assist (CC-03 went 0 of 3 on 2.1.318) and `ops/.sprint-complete` plus `coordinate.sh` decide completion. A Codex lead has no `/goal` and completes on the sentinel alone (KTD14), so for a Codex lead the line is the standing checklist, printed for the record.
 
 ```
 /goal Sprint complete ONLY when ALL of: every phase is done or explicitly skipped with a stated reason; the verification-before-completion checklist passes with evidence; ops/STATE.md is written; review files are archived to ops/archive/; ops/.sprint-complete is created last.

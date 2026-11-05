@@ -55,7 +55,7 @@ Triforge sets up a project through one helper, `triforge_bootstrap` (`scripts/li
 
 The hook also keeps its session state in `.claude/` (it writes nothing through a `.claude` that is a symlink) and prints a `cp` command for Triforge's pointer block when the project has no root `AGENTS.md`.
 
-Your project's own instruction file is its root `AGENTS.md`. Add the marked pointer block from [`templates/AGENTS.md`](../templates/AGENTS.md) to it yourself, or let `at-setup` add it after you say yes; session start never writes into an existing `AGENTS.md`. The plugin ships no `CLAUDE.md`, because a `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` in or above the project stops Claude Code from reading `AGENTS.md`.
+Your project's own instruction file is its root `AGENTS.md`. Add the marked pointer block from [`templates/AGENTS.md`](../templates/AGENTS.md) to it yourself, or let `at-setup` add it after you say yes; session start never writes into an existing `AGENTS.md`. The plugin ships no `CLAUDE.md`, because a `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` in or above the project stops Claude Code from reading `AGENTS.md` (under the default `instructionFiles` mode, `claude-md-or-agents-md`; a user-tier setting changes this).
 
 ### What to commit
 

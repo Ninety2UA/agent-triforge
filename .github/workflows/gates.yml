@@ -80,7 +80,7 @@ jobs:
                 *) self=true ;;
               esac
               case "$f" in
-                scripts/probe-capabilities.sh|scripts/probe-self-tests.sh|scripts/lease-git-hooks/*|.github/workflows/gates.yml) canfail=true ;;
+                scripts/probe-capabilities.sh|scripts/probe-self-tests.sh|scripts/probe-self15-live.sh|scripts/lease-git-hooks/*|.github/workflows/gates.yml) canfail=true ;;
               esac
             done <<< "$files"
             printf 'changed files:\n%s\n' "$files"

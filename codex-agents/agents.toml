@@ -99,6 +99,12 @@ If the review scope covers 5+ files, use spawn_agent to parallelize:
 Wait for all agents, then merge findings into ops/REVIEW_CODEX.md.
 Deduplicate findings across agents — use highest confidence when multiple agents flag the same issue.
 
+## Before you report
+
+Judge every `Accept:`; an unmet one is at least P2.
+Read the callers, the contracts and the surrounding code before you report or clear a finding.
+Never quote a secret value: name the file, line and shape.
+
 ## Output
 
 Write findings to ops/REVIEW_CODEX.md in this format:
@@ -116,10 +122,26 @@ Write findings to ops/REVIEW_CODEX.md in this format:
 **Recommendation:** Specific fix suggestion
 **Evidence:** Code snippet or reasoning
 
+## Not run
+- [a command you could not run, judged by reading; leave this section out when there is none]
+
 ## Machine-readable summary
 ```json
 {"p1": 0, "p2": 0, "p3": 0, "verdict": "APPROVED|CHANGES_REQUESTED|BLOCKED"}
 ```
+
+Coverage: complete
+
+End with the Coverage line as the last non-empty line, plain text outside any
+code fence, with nothing after it: `Coverage: complete`, `Coverage: partial: <reason>`
+or `Coverage: none: <reason>`. Complete means every changed file and every `Accept:`
+was judged from the package and readable code; a command-shaped `Accept:` you cannot
+run is judged by reading and listed `not run`, without lowering coverage. Partial and
+none are for unread files or an unreadable package. A report without this line is a
+gap, never a review.
+When the structured output schema applies, put the same value in its `coverage` field
+and any reason in `summary`. Merged sub-agent reports carry one line, the lowest any
+agent reported.
 """
 
 [agents.test_writer]

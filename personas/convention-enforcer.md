@@ -40,6 +40,12 @@ Read these in order:
 - Setup/teardown patterns match existing tests
 - Mock/stub patterns consistent
 
+## Before you report
+
+Whatever your focus, judge every `Accept:`; an unmet one is at least P2 (say so in the finding).
+Read the callers, the contracts and the surrounding code before you report or clear a finding.
+Never quote a secret value: name the file, line and shape.
+
 ## Output format
 
 ```markdown
@@ -54,10 +60,23 @@ Read these in order:
 ### Minor inconsistencies (should fix)
 - [file:line] — [description]
 
+### Not run
+- [a command you could not run, judged by reading; leave this section out when there is none]
+
 ### Summary
 - Violations: [count]
 - Inconsistencies: [count]
 ```
+
+Coverage: complete
+
+End with the Coverage line as the last non-empty line, plain text outside any
+code fence, with nothing after it: `Coverage: complete`, `Coverage: partial: <reason>`
+or `Coverage: none: <reason>`. Complete means every changed file and every `Accept:`
+was judged from the package and readable code; a command-shaped `Accept:` you cannot
+run is judged by reading and listed `not run`, without lowering coverage. Partial and
+none are for unread files or an unreadable package. A report without this line is a
+gap, never a review.
 
 ## Do NOT flag
 - Intentional deviations documented in MEMORY.md

@@ -104,7 +104,8 @@
 #        100 lines carries a TOC (note)                                (new)
 #   C23  scripts/*: a shebang; bash -n clean and no bash-4 features (declare -A,
 #        mapfile, readarray, ${x,,} ${x^^}, |&, ;;& ;&); --help exits 0 with
-#        stdin from /dev/null within 10 s; every command-position mention of
+#        stdin from /dev/null within 10 s and its output names the script (the
+#        locator's also names the plugin root); every command-position mention of
 #        scripts/<file> in the prose carries its interpreter          (new)
 #   C24  agents/openai.yaml, if present: keys ⊆ interface, policy,
 #        dependencies; interface strings quoted; short_description 25–64
@@ -1027,6 +1028,15 @@ def check_skill(skill_dir, sibling_names):
                                          text=True, timeout=10, cwd=skill_dir)
                     if run.returncode != 0:
                         new(sp, "C23", "--help exited " + str(run.returncode) + " (must exit 0 with stdin from /dev/null)")
+                    else:
+                        # The exit code alone proves nothing: a script that ignores its
+                        # arguments exits 0 whenever its normal run succeeds.
+                        said = run.stdout + run.stderr
+                        unnamed = [f] if f not in said else []
+                        if f == "locate-triforge.sh" and "plugin root" not in said:
+                            unnamed.append("the plugin root")
+                        if unnamed:
+                            new(sp, "C23", "--help output does not name " + " or ".join(unnamed) + " (it must print usage, not only exit 0)")
                 except subprocess.TimeoutExpired:
                     new(sp, "C23", "--help did not exit within 10 s (scripts must be non-interactive)")
             # Prose invocation: a command-position mention must carry its interpreter.

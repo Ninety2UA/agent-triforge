@@ -2,7 +2,7 @@
 
 Follow the `writing-plans` skill:
 
-1. Read `ops/GOALS.md`, `ops/ARCHITECTURE.md`, `ops/CONTRACTS.md`, `ops/MEMORY.md`, `ops/TASKS.md` and the learnings-researcher output.
+1. Read `ops/GOALS.md`, `ops/ARCHITECTURE.md`, `ops/CONTRACTS.md`, `ops/MEMORY.md`, `ops/TASKS.md` and the learnings-researcher output, when it ran.
 2. Decompose the goal into atomic tasks (1–2 hours each).
 3. Assign each task a role. `ops/roster.toml` maps role to CLI, model and effort via `resolve_role`; Phase 2 passes the role to `lease_create`:
    - Produces code → builder (the builder pool; Claude Code leads by default)

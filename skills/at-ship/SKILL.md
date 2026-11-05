@@ -5,7 +5,7 @@ argument-hint: "<goal description> [--convergence fast|standard|deep] [--team]"
 disable-model-invocation: true
 metadata:
   triforge-consumer: "lead"
-  version: "4.1.1"
+  version: "4.2.0"
 ---
 
 # Ship (autonomous sprint)
@@ -28,13 +28,13 @@ ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/s
 
 ## Completion gating
 
-At sprint start print the copyable completion line from [completion gating](references/completion-gating.md). Under a Claude Code lead it is the `/goal` gate the user types (or the leading line of a headless prompt), see [Claude](references/claude.md); a Codex lead has no such gate and completes on the sentinel alone (KTD14), see [Codex](references/codex.md). Either way, hold yourself to the checklist above and create the marker only in Phase 6.
+At sprint start print the copyable completion line from [completion gating](references/completion-gating.md). Under a Claude Code lead it is the `/goal` line the user types (or the leading line of a headless prompt), see [Claude](references/claude.md). `/goal` is an assist (CC-03 went 0 of 3 on 2.1.318) and `ops/.sprint-complete` plus `coordinate.sh` decide completion. A Codex lead has no `/goal` and completes on the sentinel alone (KTD14), see [Codex](references/codex.md). Either way, hold yourself to the checklist above and create the marker only in Phase 6.
 
 ## Pipeline
 
 All phases run in order; [phases](references/phases.md) carries each phase's actions, the Phase 0 dispatch with its promotion guard, and the review and test loops. Every hyphenated checker, reviewer and researcher below except `codebase-analyst` is a persona the helper starts detached, `persona_spawn <run-dir> <name> <persona> <input> <out> --brief <task>` (it runs `dispatch_persona`; the input is data, the task rides in the brief), and collects with `persona_wait <run-dir>`, rerun while it returns 75 because a persona can outlast one tool call: its manifest entry sets tools, model tier and turns, so a call pins nothing, and the never-downgrade trio (`plan-checker`, `security-sentinel`, `findings-synthesizer`) runs as top-tier Claude whichever CLI leads. Agent-team mode is the one harness-specific spawn, in the Claude and Codex references.
 
-- Pre-plan: `learnings-researcher` over `ops/solutions/` and `ops/decisions/`.
+- Pre-plan: `learnings-researcher` over `ops/solutions/` and `ops/decisions/`, skipped on a skeleton store.
 - Phase 0: `codebase-analyst` through Antigravity (skip when the codebase is unchanged or the fix is small); a failed run continues without a fresh `ops/ARCHITECTURE.md`, and captured output is promoted only when non-empty with a SUCCESS status sidecar.
 - Phase 1: `writing-plans` with `shadow-path-tracing` for non-trivial tasks, `ops/CONTRACTS.md` types embedded, waves grouped, `ops/TASKS.md` written. Phase 1.1: the 3 most critical unverified assumptions, each with its alternative reading and impact if wrong, confirmed with the user (skip for unambiguous goals). Phase 1.5: `plan-checker` until APPROVED, max 3 rounds.
 - Phase 2: the builder-pool wave protocol (`wave-orchestration`): every task leased from `ops/roster.toml`, merged only after a pinned non-author review, one commit per task on the integration branch (`lease_merge` refuses the default branch), `integration-verifier` between waves, `lease_promote` honoring `[promotion]` and blocking on protected-path diffs; halt at risk above 20 % or more than 50 changed files; sub-agent mode below 5 independent tasks, agent-team mode otherwise.

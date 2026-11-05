@@ -89,7 +89,8 @@ fi
 #             with no -s, which would replace the profile (--cli codex, or
 #             claude off PATH: the fallback, with a NOTE; a codex without
 #             permission profiles is refused, 69). It still reads the rest of
-#             the disk, as every codex worker does. Its working directory is an
+#             the disk, as every codex worker does, and loads no user plugin
+#             (--disable plugins, D-061). Its working directory is an
 #             empty scratch directory (<TMPDIR>/triforge-persona.*/cwd), never a
 #             builder's worktree (KTD20, R48), owned by a subshell whose traps
 #             remove it as the exec class's remove its worktree
@@ -731,7 +732,9 @@ _persona_project_root() {
 # with the same top-tier persona (opus at max) and the same 400-line diff
 # twice: 320 s over 8 turns, and once over 900 s, where one thinking turn alone
 # took 761 s; haiku persona runs took 4 to 9 s. So the budget follows the
-# effort and the persona's own turn cap.
+# effort and the persona's own turn cap, uncapped: the two researchers' 40 turns
+# at xhigh give 8000 s, and a stuck run costs the lead no more than a persona_stop,
+# since persona_wait returns inside its wait budget however long the run has.
 _persona_default_timeout() {
   local PER=60 T
   case "${1:-}" in max) PER=300 ;; xhigh) PER=200 ;; high) PER=120 ;; esac
@@ -848,14 +851,21 @@ _persona_prompt() {
   printf 'Put your complete answer in your final message: it is saved for the lead.\n'
 }
 
-# _persona_finish <cli> <out> <rc> — the persona's answer in <out>, scrubbed
-# (_scrub): from the claude envelope (_lease_claude_envelope, which keeps
-# <out>.raw and <out>.envelope beside it, or leaves the CLI's own output with
-# its stderr appended), or codex's -o file. Returns the CLI's rc with
-# INVOKE_FAILURE_CLASS set, or 80 (report missing) for a run that returned no
-# answer.
+# _PERSONA_TURNS_LINE: the start of the fixed stderr line for a turn-cap stop,
+# which persona_wait reads back from a detached run's log.
+_PERSONA_TURNS_LINE="dispatch_persona: turn budget spent:"
+
+# _persona_finish <cli> <out> <rc> [<persona>]: the persona's answer in <out>,
+# scrubbed (_scrub): from the claude envelope (_lease_claude_envelope, which
+# keeps <out>.raw and <out>.envelope beside it, or leaves the CLI's own output
+# with its stderr appended), or codex's -o file. Returns the CLI's rc with
+# INVOKE_FAILURE_CLASS set, 80 (report missing) for a run that returned no
+# answer, or 81 for a claude envelope whose subtype is error_max_turns:
+# deterministic, reason max-turns, a line naming <persona> and the manifest
+# (unlike the builder lane's lease_collect, where the work stays in a worktree
+# to resume, a persona's whole run is lost: raising the budget is the fix).
 _persona_finish() {
-  local CLI=$1 OUT=$2 RC=$3 LOG
+  local CLI=$1 OUT=$2 RC=$3 P=${4:-} LOG
   if [ "$CLI" = claude ]; then
     LOG="${OUT}.err"
     _lease_claude_envelope "$OUT" "$LOG" || true
@@ -865,6 +875,13 @@ _persona_finish() {
   fi
   if [ -f "$OUT" ] && _scrub < "$OUT" > "${OUT}.scrub" 2>/dev/null; then
     mv -f "${OUT}.scrub" "$OUT" 2>/dev/null || true
+  fi
+  if [ "$CLI" = claude ] && [ -f "${OUT}.envelope" ] \
+    && [ "$(sed -n 's/^subtype=//p' "${OUT}.envelope" 2>/dev/null | head -1)" = error_max_turns ]; then
+    INVOKE_FAILURE_CLASS="deterministic"
+    _INVOKE_FAILURE_REASON="max-turns"
+    echo "${_PERSONA_TURNS_LINE} persona ${P} stopped at its max_turns (subtype error_max_turns, reason max-turns, rc 81): raise max_turns for it in personas/manifest.toml and run it again" >&2
+    return 81
   fi
   if [ "$RC" -ne 0 ]; then
     _classify_invoke_failure "$RC" "$OUT"
@@ -899,8 +916,9 @@ _persona_finish() {
 # file above the working directory; 70 the persona home does not hold; 80 no
 # answer (report missing), or unresolved cleanup: the CLI left processes the
 # run supervisor could not stop or list, so its worktree or scratch directory
-# stays (_persona_run_cleanup); 96 no timeout tool; otherwise the CLI's exit code,
-# with INVOKE_FAILURE_CLASS set. Call it in a context that ignores set -e
+# stays (_persona_run_cleanup); 81 the claude run stopped at its turn budget
+# (error_max_turns): raise max_turns in personas/manifest.toml; 96 no timeout
+# tool; otherwise the CLI's exit code, with INVOKE_FAILURE_CLASS set. Call it in a context that ignores set -e
 # (`dispatch_persona ... || RC=$?`), like the invoke_* helpers.
 dispatch_persona() {
   _lead_only dispatch_persona || return $?
@@ -1049,7 +1067,7 @@ _persona_read() {
     _persona_left "$OUT"
     return 80
   fi
-  _persona_finish "$_PR_CLI" "$OUT" "$RC"
+  _persona_finish "$_PR_CLI" "$OUT" "$RC" "$P"
 }
 
 # _persona_left <out> — a run whose CLI left processes the run supervisor
@@ -1099,7 +1117,7 @@ _persona_read_run() {
         echo "dispatch_persona: ERROR no HOME to name the credential paths the codex read profile denies; nothing ran (fail closed)" >&2
         return 1
       fi
-      ARGV=(codex exec -c 'approval_policy="never"' --skip-git-repo-check "${_CODEX_ENV_POLICY[@]}" "${_PERSONA_CODEX_PROFILE[@]}"
+      ARGV=(codex exec --disable plugins -c 'approval_policy="never"' --skip-git-repo-check "${_CODEX_ENV_POLICY[@]}" "${_PERSONA_CODEX_PROFILE[@]}"
             -C "$CWD" -m "$_PR_MODEL" -c "model_reasoning_effort=\"${_PR_EFFORT}\"" -o "$OUT")
       SO="${OUT}.log" SE=-
       ;;
@@ -1426,7 +1444,7 @@ _persona_exec() {
     _persona_left "$OUT"
     FRC=80
   elif [ "$STARTED" = started ]; then
-    _persona_finish claude "$OUT" "$RC" || FRC=$?
+    _persona_finish claude "$OUT" "$RC" "$P" || FRC=$?
   else
     FRC=$RC
   fi
@@ -2004,15 +2022,17 @@ PERSONA_SPAWN_EOF
 # <run-dir> (none named: every run there) until each has ended or the lead's
 # wait budget is spent (_lead_wait_budget: wait_budget_s less its headroom,
 # counted from the call's start), polling once a second; it never signals a
-# run. stdout: "<name> rc=<rc>" for each run that ended, "<name> running" or
-# "<name> gone: ..." for the others. rc 0 every run ended with its .rc (read
+# run. stdout: "<name> rc=<rc>" for each run that ended (for rc 81, the turn
+# budget line of its .log after it, so a lead that sees only this output learns
+# to raise max_turns), "<name> running" or "<name> gone: ..." for the others.
+# rc 0 every run ended with its .rc (read
 # them for the persona's own rc); _RC_WAIT_BUILDING (75) the budget ran out
 # with runs still going (stderr names them: call it again); 80 every run has
 # ended, but one or more without an .rc (stopped, killed or crashed: see its
 # .log); 45 a worker, a lease root or not the lead's shell; 64 usage, an
 # unknown name or no runs.
 persona_wait() {
-  local T0 N ST LEFT GONE OUT
+  local T0 N ST LEFT GONE OUT WHY
   T0=$(date +%s)
   _lead_only persona_wait || return $?
   _persona_runs persona_wait "$@" || return $?
@@ -2023,7 +2043,12 @@ persona_wait() {
       [ -n "$N" ] || continue
       ST=$(_persona_run_state "$_PRUN_DIR" "$N")
       case "$ST" in
-        done*) OUT="${OUT}${N} rc=${ST#done }
+        done*)
+          WHY=""
+          if [ "${ST#done }" = 81 ]; then
+            WHY=$(grep -F "$_PERSONA_TURNS_LINE" "${_PRUN_DIR}/${N}.log" 2>/dev/null | tail -1) || WHY=""
+          fi
+          OUT="${OUT}${N} rc=${ST#done }${WHY:+ ${WHY}}
 " ;;
         running) LEFT="${LEFT}${LEFT:+ }${N}" OUT="${OUT}${N} running
 " ;;

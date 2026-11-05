@@ -36,17 +36,17 @@ A non-TTY `cursor-agent -p` run blocks on the workspace-trust prompt unless
 `--trust` is passed. Triforge passes `--trust` on every headless invocation. It
 bypasses only the trust prompt — it is not an "allow everything" switch.
 
-## Grok 4.6 pinned, effort in the suffix — NEVER the Auto router (CUR-03 / CUR-05 / CUR-10)
+## Grok 4.7 pinned, effort in the suffix — NEVER the Auto router (CUR-03 / CUR-05 / CUR-10)
 
-The shipped default is `cursor-grok-4.6-xhigh`, explicitly pinned with
+The shipped default is `grok-4.7-xhigh`, explicitly pinned with
 `--model` on every call. Auto is never used: ledger attribution needs a
 **named** model, and Auto resolves nondeterministically. Effort is the model-id
-**suffix** (`cursor-grok-4.6-low|medium|high|xhigh`, each also as `-fast`),
-so the roster `effort` field is live for Cursor: a bare `grok-4.6` in the
+**suffix** (`grok-4.7-low|medium|high|xhigh`, each also as `-fast`),
+so the roster `effort` field is live for Cursor: a bare `grok-4.7` in the
 roster plus the roster effort composes the suffixed id at dispatch (low→`-low`,
 medium→`-medium`, high→`-high`, xhigh/max→`-xhigh`); an explicit suffixed id
-passes through untouched. The documented bracket form `grok-4.6[effort=xhigh]`
-was **rejected** headless on build 2026.09.10 (`Cannot use this model`, probe
+passes through untouched. The documented bracket form `grok-4.7[effort=xhigh]`
+is **rejected** headless on build 2026.10.22 (`Cannot use this model`, probe
 CUR-10) — an open watch; Triforge never emits it. Override with `CURSOR_MODEL`
 (roster) — the leading alternative is `composer-2.5` (Composer 2.5).
 `cursor-agent --list-models` feeds the `at-setup` enrollment options and

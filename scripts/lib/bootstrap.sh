@@ -1019,7 +1019,7 @@ _tb_codex_agents_move() {
 #     Cursor has NO headless --agent selector, so roles ride as prompt-prefix
 #     injection from the plugin's cursor-agents/ briefs; the .cursor/agents/
 #     copies are delegation targets + documentation, and .cursor/README.md
-#     records the --trust-required / grok-4.6-pinned-never-Auto / CUR-06
+#     records the --trust-required / grok-4.7-pinned-never-Auto / CUR-06
 #     headless-hooks-dead / CUR-07 --sandbox-doesn't-confine / CUR-08
 #     --mode-plan-is-read-only facts. No afterFileEdit attribution hook is
 #     shipped (CUR-06 FAIL); builder attribution is lead-side from the lease

@@ -37,6 +37,12 @@ Think about what happens at 10x, 100x, 1000x current data:
 - Will this API endpoint handle 100x concurrent requests?
 - Will this cron job still finish within its interval at 10x data?
 
+## Before you report
+
+Whatever your focus, judge every `Accept:`; an unmet one is at least P2 (say so in the finding).
+Read the callers, the contracts and the surrounding code before you report or clear a finding.
+Never quote a secret value: name the file, line and shape.
+
 ## Output format
 
 ```markdown
@@ -58,11 +64,24 @@ Think about what happens at 10x, 100x, 1000x current data:
 - [confidence] file:line — [description]
   Improvement: [estimated impact]
 
+### Not run
+- [a command you could not run, judged by reading; leave this section out when there is none]
+
 ### Summary
 - Critical bottlenecks: [count]
 - Scaling risks: [count]
 - Optimizations: [count]
 ```
+
+Coverage: complete
+
+End with the Coverage line as the last non-empty line, plain text outside any
+code fence, with nothing after it: `Coverage: complete`, `Coverage: partial: <reason>`
+or `Coverage: none: <reason>`. Complete means every changed file and every `Accept:`
+was judged from the package and readable code; a command-shaped `Accept:` you cannot
+run is judged by reading and listed `not run`, without lowering coverage. Partial and
+none are for unread files or an unreadable package. A report without this line is a
+gap, never a review.
 
 ## Do NOT flag
 - Premature optimization suggestions where current performance is adequate

@@ -473,8 +473,9 @@ _claude_config_cred() {
 # _claude_sandbox_floor_ok — 0 when the claude worker lane may run here: its
 # sandbox is off (TRIFORGE_CLAUDE_SANDBOX=off: no OS confinement, the
 # disclosed opt-out), or `claude --version` reads at or above
-# TRIFORGE_CLAUDE_SANDBOX_FLOOR (registry.sh), the first build that ignores a
-# repository's sandbox-loosening settings under the lane's --settings. Below
+# TRIFORGE_CLAUDE_SANDBOX_FLOOR (registry.sh), the build carrying the sandbox
+# isolation fixes the lane relies on, which also ignores a repository's
+# sandbox-loosening settings under the lane's --settings. Below
 # it, or when the version can't be read (no timeout tool, a hang past 10 s,
 # no X.Y.Z in the answer), rc 1, and _claude_sandbox_refusal words why. The
 # version is read once per process for the claude on PATH (_CLAUDE_SBX_BIN /
@@ -515,7 +516,7 @@ _claude_sandbox_refusal() {
   else
     WHAT="Claude Code's version could not be read (\`claude --version\` failed, timed out, or printed no X.Y.Z), so it can't be confirmed at ${TRIFORGE_CLAUDE_SANDBOX_FLOOR} or later"
   fi
-  echo "${1:-claude}: ERROR ${WHAT} — the claude worker lane's sandbox needs ${TRIFORGE_CLAUDE_SANDBOX_FLOOR}, the first build that ignores a repository's sandbox-loosening settings (excludedCommands, network.allowedDomains, filesystem.allowWrite) under the lane's --settings; on an older build a repository's .claude/settings.json can run commands outside the sandbox. Fix: update Claude Code (\`claude update\`), or set TRIFORGE_CLAUDE_SANDBOX=off in the lead's environment, and the claude worker's Bash then runs without OS confinement. No retry (deterministic)."
+  echo "${1:-claude}: ERROR ${WHAT} — the claude worker lane's sandbox needs ${TRIFORGE_CLAUDE_SANDBOX_FLOOR}, the build carrying its isolation fixes: the shell's startup files stay inside the sandbox (fixed in 2.1.309), a worktree entered by --resume is sandboxed, and a repository's sandbox-loosening settings (excludedCommands, network.allowedDomains, filesystem.allowWrite) are ignored under the lane's --settings; on an older build commands can run outside the sandbox. Fix: update Claude Code (\`claude update\`), or set TRIFORGE_CLAUDE_SANDBOX=off in the lead's environment, and the claude worker's Bash then runs without OS confinement. No retry (deterministic)."
 }
 
 # _claude_lane_argv <edit|read|persona-read|persona-read-web|persona-exec>
@@ -657,7 +658,9 @@ _CODEX_ENV_POLICY=(-c 'shell_environment_policy.inherit="all"' -c 'shell_environ
 #   claude       the edit class of _claude_lane_argv (cwd IS the worktree, so
 #                no --add-dir): the lead's <git-common-dir> unwritable, the
 #                session <resume-id> on a fix cycle
-#   codex        exec in the workspace-write sandbox with approval never, plus
+#   codex        exec with --disable plugins (no user plugin in a worker, D-061;
+#                a Codex lead keeps its own) in the workspace-write sandbox
+#                with approval never, plus
 #                two sandbox_workspace_write excludes that drop codex's default
 #                temp-dir write allowance: lease worktrees live under TMPDIR,
 #                so without them a builder could cross into sibling worktrees
@@ -725,7 +728,7 @@ _lease_lane_argv() {
       _claude_lane_argv edit "$MODEL" "$EFFORT" "${10:-}" "${9:-}" || return 1
       ;;
     codex)
-      _LEASE_LANE_ARGV=(codex exec -s workspace-write -c 'approval_policy="never"'
+      _LEASE_LANE_ARGV=(codex exec --disable plugins -s workspace-write -c 'approval_policy="never"'
                         -c 'sandbox_workspace_write.exclude_tmpdir_env_var=true'
                         -c 'sandbox_workspace_write.exclude_slash_tmp=true' "${_CODEX_ENV_POLICY[@]}")
       if [ -n "$MODEL" ]; then _LEASE_LANE_ARGV+=(-m "$MODEL"); fi
@@ -852,10 +855,12 @@ _lease_builder_run() {
         # agy >= 1.1.20 — parse status/response/denied_actions instead. The
         # prose lands in $OUT (what lease_collect prints), the streams in
         # $OUT.raw / $OUT.err, the verdict in $OUT.status / $OUT.denied. A
-        # nonzero exit is classified as invoke_antigravity classifies it
+        # cut-off answer (finished_reason, D-057) is never a clean exit, or a
+        # partial one that says Status: DONE would reach review. A nonzero
+        # exit is classified as invoke_antigravity classifies it
         # (_agy_failure_class): on exit 3 the AGY_ERROR line's reason goes to
         # $OUT and its retryable field sets the class lease_collect routes on
-        # (D-043).
+        # (D-043), except the print-timeout expiry, class timeout (D-057).
         _adapter_env antigravity "${TO[@]}" "${_LEASE_LANE_ARGV[@]}" "$FULL_PROMPT" < /dev/null > "${OUT}.raw" 2> "${OUT}.err" || RC=$?
         if [ "$RC" -eq 0 ]; then
           _agy_parse_envelope "${OUT}.raw" "$OUT" || AGY_PRC=$?
@@ -863,12 +868,14 @@ _lease_builder_run() {
             0|12) : ;;
             10) RC=1; INVOKE_FAILURE_CLASS="deterministic"; CLASS_SET=1
                 echo "lease_dispatch: agy builder returned an empty response with denied actions: $(paste -sd, "${OUT}.denied" 2>/dev/null) — add the matching permissions.allow rule to ~/.gemini/antigravity-cli/settings.json (user tier)" >> "$OUT" ;;
+            14) RC=1; _agy_incomplete_class "$OUT"; CLASS_SET=1
+                echo "lease_dispatch: agy builder's answer was cut off (status=$(cat "${OUT}.status" 2>/dev/null)), class ${INVOKE_FAILURE_CLASS}, not review-ready" >> "$OUT" ;;
             *)  RC=1; INVOKE_FAILURE_CLASS="retryable"; CLASS_SET=1
                 echo "lease_dispatch: agy builder returned an empty response (status=$(cat "${OUT}.status" 2>/dev/null)) — treated as failure, not review-ready" >> "$OUT" ;;
           esac
         else
+          _agy_failure_class "$RC" "${OUT}.err" "${OUT}.raw" "$OUT"
           cat "${OUT}.err" "${OUT}.raw" > "$OUT" 2>/dev/null || true
-          _agy_failure_class "$RC" "${OUT}.err" "${OUT}.raw"
           CLASS_SET=1
           if [ -n "$_AGY_ERR_REASON" ]; then
             echo "lease_dispatch: agy builder exited ${RC}: ${_AGY_ERR_REASON} — class ${INVOKE_FAILURE_CLASS}" >> "$OUT"

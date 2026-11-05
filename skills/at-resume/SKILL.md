@@ -4,7 +4,7 @@ description: "Use when starting a session on existing work: restores ops/STATE.m
 disable-model-invocation: true
 metadata:
   triforge-consumer: "lead"
-  version: "4.1.1"
+  version: "4.2.0"
 ---
 
 # Resume
@@ -31,7 +31,7 @@ Summarise: sprint goal, current phase, tasks completed vs remaining, blockers or
 
 ## Step 4: Resume execution
 
-Pick up from the phase recorded in `ops/STATE.md`: mid-Phase 2 → the remaining build tasks under the wave protocol (`wave-orchestration`, driven by `at-build`); mid-Phase 3–4 → check whether the reviews are complete and process them (`at-review`); mid-Phase 5 → check the test results and fix failures (`at-test`); Phase 6 needed → `at-wrap`. Sub-agents a resumed phase needs are spawned through the lead's harness, model and effort pinned on every spawn — see [references/claude.md](references/claude.md) and [references/codex.md](references/codex.md).
+Pick up from the phase recorded in `ops/STATE.md`: mid-Phase 2 → the remaining build tasks under the wave protocol (`wave-orchestration`, driven by `at-build`); mid-Phase 3–4 → check whether the reviews are complete and process them (`at-review`); mid-Phase 5 → check the test results and fix failures (`at-test`); Phase 6 needed → `at-wrap`. Those workflows are user-only: tell the user to run the one named (`/at-build`, or `$agent-triforge:at-build` in a Codex prompt, and so on); if you must continue yourself, read its `skills/<name>/SKILL.md` under the plugin root that `bash "$SKILL_DIR/scripts/locate-triforge.sh"` prints, and follow it. Sub-agents a resumed phase needs are spawned through the lead's harness, model and effort pinned on every spawn — see [references/claude.md](references/claude.md) and [references/codex.md](references/codex.md).
 
 ## Output
 

@@ -1,0 +1,7 @@
+# Every link form the check reads resolves. A fence and inline code hold no
+# links, a URL is not read, an older notes file is history, and
+# docs/app-AGENTS.md (it publishes as AGENTS.md) is read only as a link target.
+check: links
+rc: 0
+line: ok:   links: 9 relative link(s) in 3 file(s) resolve, anchors included
+line: validate-versions: PASS (--only links)

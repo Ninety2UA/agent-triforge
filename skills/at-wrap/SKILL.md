@@ -4,7 +4,7 @@ description: "Use when a sprint or session ends: compound knowledge, archive rev
 disable-model-invocation: true
 metadata:
   triforge-consumer: "lead"
-  version: "4.1.1"
+  version: "4.2.0"
 ---
 
 # Wrap Up (Phase 6)

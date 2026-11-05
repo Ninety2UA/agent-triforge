@@ -181,7 +181,7 @@ The sprint starts with the completion checklist. Then the phases run in order, a
 - In Phase 0, Antigravity maps the codebase into `ops/ARCHITECTURE.md`. The lead skips this when the codebase has not changed or the change is small.
 - In Phase 1 the lead writes the plan to `ops/TASKS.md`: tasks in waves, each assigned a role from the roster, and for the larger ones the ways they can fail.
 
-Under Claude Code, the `/goal` line makes Claude Code hold the session to that checklist. A Codex lead has no such gate. It prints the checklist for the record, and the sprint ends when `ops/.sprint-complete` exists.
+Under Claude Code you can type that `/goal` line, but `/goal` is an assist (probe CC-03 went 0 of 3 on Claude Code 2.1.318), and `ops/.sprint-complete` plus `coordinate.sh` decide completion. A Codex lead has no `/goal`. It prints the checklist for the record, and the sprint ends when `ops/.sprint-complete` exists.
 
 ### Why it matters
 

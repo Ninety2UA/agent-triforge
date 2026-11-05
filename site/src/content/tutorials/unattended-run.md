@@ -159,14 +159,14 @@ bash "$TRIFORGE/scripts/coordinate.sh" "Add an option to wordcount that prints t
 
 The script reads the lead from the roster, composes the launch line and the prompt for the first session, prints both and exits. It starts no session and leaves `ops/` as it is.
 
-- Under Claude Code the line is `claude --print` with `--permission-mode acceptEdits`, and the prompt opens with the `/goal` completion checklist.
+- Under Claude Code the line is `claude --print` with `--permission-mode acceptEdits`, and the prompt opens with the `/goal` completion checklist, as a best-effort assist.
 - Under Codex the line starts with `codex exec -s danger-full-access` and sets the approval policy to never. Below it, the dry run notes that this line runs only with `--allow-full-access`, and that a Codex session has no goal gate and completes on `ops/.sprint-complete` alone. The prompt opens with `$agent-triforge:at-ship`, the goal in quotes and your `--convergence` and `--team` flags, and carries the checklist as text.
 
 Under either lead the prompt gives the goal, the convergence mode and the session number (`ITERATION: 1 of 5`). It tells the session to read `ops/STATE.md` first, and to create the marker as its last action, only once the checklist holds.
 
 ### Why it matters
 
-You see the launch line and every word of the first prompt before anything runs, and under Codex you see that the lead needs full access before you decide to allow it. Under Claude Code, `/goal` makes Claude Code hold the session to the checklist, but in a headless session that hold is best effort. The loop counts a sprint as complete only by the marker.
+You see the launch line and every word of the first prompt before anything runs, and under Codex you see that the lead needs full access before you decide to allow it. Under Claude Code, `/goal` is an assist (probe CC-03 went 0 of 3 on Claude Code 2.1.318), and `ops/.sprint-complete` plus `coordinate.sh` decide completion. The loop counts a sprint as complete only by the marker.
 
 ### Checkpoint
 
@@ -284,14 +284,14 @@ cat ops/STATE.md
 The loop ends in one of three ways, and its closing lines say which:
 
 - A session created `ops/.sprint-complete`. The loop prints `Sprint complete at iteration 3`, with your session number, and exits 0.
-- The sessions ran out. The loop says it reached the cap without completion, points you to `ops/STATE.md` and `ops/TASKS.md`, and also exits 0.
+- The sessions ran out. The loop says it reached the cap without completion, points you to `ops/STATE.md` and `ops/TASKS.md`, and exits 75.
 - A session failed in a way every new session would repeat: not logged in, quota spent, or the CLI missing. It prints a `Fix:` line and exits 69.
 
 Each of the three shows a desktop notification (`osascript` on macOS, `notify-send` on Linux) and posts to `NOTIFY_WEBHOOK_URL` when you set it. A stop before a session starts, such as the integrity check's exit 44, sends no notification.
 
 ### Why it matters
 
-Exit 0 alone does not mean the sprint is done, since running out of sessions exits 0 too. Look for the marker. The lead creates it as its last action, only after the completion checklist holds, and the loop reads nothing else.
+A script around the loop can tell the endings apart by the exit code: 0 for a complete sprint, 75 when the sessions ran out. Behind both is the marker. The lead creates it as its last action, only after the completion checklist holds, and the loop reads nothing else.
 
 ### Checkpoint
 
@@ -308,7 +308,7 @@ The closing lines name the cause. The common ones:
 - Exit 44: The integrity check found a change to `.git/config`, the git hooks, the refs, a worktree pointer or the lease ledger that the lead did not make. It restored what it could and escalated the open leases. Look at the change, and if you made it, accept it with `lease_rebaseline` before you go on.
 - Exit 45: The script ran without a terminal. Start it from one.
 - Exit 1: A usage error, a lead it could not resolve, the lead's CLI not on `PATH`, the helper library missing, or a `TMPDIR` other users could change.
-- The sessions ran out: The progress is in `ops/STATE.md` and `ops/TASKS.md`.
+- Exit 75: The sessions ran out. The progress is in `ops/STATE.md` and `ops/TASKS.md`.
 
 [When a run stops](/guides/unattended-runs/#when-a-run-stops) has the full table. Once the cause is fixed, run the loop again or carry on by hand.
 

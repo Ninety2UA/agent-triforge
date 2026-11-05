@@ -4,7 +4,7 @@ description: "Use when turning a goal into ops/TASKS.md, or a plan-checker verdi
 metadata:
   triforge-consumer: "the lead"
   triforge-phase: "1b (planning)"
-  version: "4.1.1"
+  version: "4.2.0"
 ---
 
 # Writing Plans

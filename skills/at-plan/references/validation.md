@@ -14,14 +14,14 @@ Skip this phase only when the goal is unambiguous (a single-file fix, explicit u
 
 ## Phase 1.5: plan validation
 
-The plan-checker runs detached, because a top-tier persona can outlast one host tool call (Claude Code stops one at 600 s, a Codex lead at 900 s). The first block starts it; rerun the second while it returns 75, then read the verdict. Both run the same under bash and zsh.
+The plan-checker runs detached, because a top-tier persona can outlast one host tool call (Claude Code stops one at 600 s, a Codex lead at 900 s). The first block starts it; rerun the second while it returns 75. It prints the report and exits with the code `persona_verdict` gives it: 0 is APPROVED; 1 is NEEDS_REVISION or APPROVED over blocking content; 2 is a malformed or missing verdict, which never counts as approval. Both run the same under bash and zsh.
 
 ```bash
 set -euo pipefail
 ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"
 PLAN_RUN=$(mktemp -d "${TMPDIR:-/tmp}/triforge-plan.XXXXXX")
 persona_spawn "$PLAN_RUN" plan-checker plan-checker ops/TASKS.md "$PLAN_RUN/verdict.md" \
-  --brief "Validate the plan in the input and end with APPROVED or NEEDS_REVISION."
+  --brief "Validate the plan in the input. Report in your output format: one ### Status: APPROVED or ### Status: NEEDS_REVISION line, and a ### Blocking issues section that says None when there are none."
 echo "plan: plan-checker started; run the wait block next (PLAN_RUN=$PLAN_RUN)"
 ```
 
@@ -33,6 +33,7 @@ persona_wait "$PLAN_RUN" || { rc=$?; [ "$rc" -eq 75 ] && echo "plan: plan-checke
 R=$(cat "$PLAN_RUN/plan-checker.rc" 2>/dev/null || echo missing)
 [ "$R" = 0 ] && [ -s "$PLAN_RUN/verdict.md" ] || { echo "plan: plan-checker failed rc=$R or wrote nothing — see $PLAN_RUN" >&2; exit 1; }
 cat "$PLAN_RUN/verdict.md"
+persona_verdict "$PLAN_RUN/verdict.md" plan || exit $?
 ```
 
 It validates:
@@ -47,4 +48,4 @@ It validates:
 
 Trivial goals skip this phase (the `Ceremony:` line at the top of `ops/TASKS.md` says so); high-ceremony goals never skip it. The plan-checker is one of the never-downgrade trio: its manifest entry pins it to top-tier Claude whichever CLI leads, and no skill or lead overrides that.
 
-A NEEDS_REVISION verdict is fixed and resubmitted, at most 3 iterations. Only an APPROVED result is reported to the user.
+An exit 1 is fixed and resubmitted and an exit 2 is run again, at most 3 iterations together. Only an exit 0 is reported to the user as APPROVED.

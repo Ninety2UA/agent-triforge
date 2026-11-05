@@ -4,7 +4,7 @@ description: "Use when two or more review outputs exist for one change: merge, d
 metadata:
   triforge-consumer: "the lead"
   triforge-phase: "4 (process reviews)"
-  version: "4.1.1"
+  version: "4.2.0"
 ---
 
 # Review Synthesis
@@ -17,6 +17,8 @@ Read all review outputs:
 - `ops/REVIEW_ANTIGRAVITY.md` (architecture, design, documentation)
 - `ops/REVIEW_CODEX.md` (logic, security, tests)
 - Any specialist persona outputs (security-sentinel, performance-oracle, etc.)
+
+A lane whose report does not end in `Coverage: complete`, as its last non-empty line and outside any code fence, is a gap: name it, and never read it as no findings.
 
 ## Step 2: Normalize format
 

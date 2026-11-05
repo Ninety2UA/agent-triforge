@@ -4,7 +4,7 @@ description: "Use when executing a validated plan of two or more tasks: leases, 
 metadata:
   triforge-consumer: "the lead"
   triforge-phase: "2 (build)"
-  version: "4.1.1"
+  version: "4.2.0"
 ---
 
 # Wave Orchestration

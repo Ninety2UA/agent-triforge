@@ -31,45 +31,10 @@ fi
 _SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SELF_ONLY=${SELF_ONLY:-0}
 
-# The rows play the lead in throwaway repos under WORK. Run by a lease builder
-# testing a framework change, the worker marker it inherited would make every
-# lead helper they call refuse (KTD9), so it is dropped here; SELF-15 sets it
-# where a case needs it, and _lane_run sets it for the live lease-lane rows.
-unset TRIFORGE_LEASE_WORKER
-
-# The lead host check (R38, _lead_host_gate in roster.sh) lets a lead-owned
-# helper run under the lead's host markers, from a terminal, or under the SELF
-# seam. The rows strip the host markers, so they see the same host from a
-# Claude Code or a Codex tool shell, a terminal and the CI runner (which has
-# no markers and no TTY), and name the simulated lead through the seam: claude,
-# the lead of a roster without [lead]. TRIFORGE_TEST_BUILDER defaults to a
-# builder that only reports BLOCKED, so a row that forgets its own never
-# dispatches a real CLI; the rows that dispatch set theirs. A row testing
-# another lead or host sets its own (SELF-13, SELF-19's killcodex).
-unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_CI CODEX_THREAD_ID
-# The rows take Claude Code's user tier from a throwaway HOME's .claude; a
-# CLAUDE_CONFIG_DIR the runner exported would move it (instructions.sh,
-# _adapter_env, the claude lane's deny rules), so it is dropped here, and the
-# cases that test it set their own.
-unset CLAUDE_CONFIG_DIR
-export TRIFORGE_TEST_LEAD=claude
-mkdir -p "${WORK}/self-seam"
-printf '#!/bin/sh\n# SELF seam default builder: reports and does nothing\necho "Status: BLOCKED (no fake builder named for this row)"\n' > "${WORK}/self-seam/no-builder.sh"
-chmod +x "${WORK}/self-seam/no-builder.sh"
-export TRIFORGE_TEST_BUILDER="${WORK}/self-seam/no-builder.sh"
-
-# Stub core-trio binaries for the rows that walk the roster (resolve_role
-# needs the builder's binary on PATH) but never run a real CLI — the fake
-# builder (TRIFORGE_TEST_BUILDER) replaces the adapter. Prepended to PATH in
-# those rows only, so the rows pass the same way on a host with no CLI
-# installed (the PR workflow's macOS runner) as on a developer machine.
-_SELF_STUBS="${WORK}/self-stubs"
-mkdir -p "$_SELF_STUBS"
-for _stub in claude codex agy; do
-  printf '#!/bin/sh\n# probe stub: answers --version; resolution only, never dispatched\necho "0.0.0-probe-stub"\nexit 0\n' > "${_SELF_STUBS}/${_stub}"
-  chmod +x "${_SELF_STUBS}/${_stub}"
-done
-unset _stub
+# The SELF seam the rows run under; --only SELF-15b,SELF-15c runs the same one.
+# shellcheck source=probe-self15-live.sh
+source "${_SELF_DIR}/probe-self15-live.sh"
+_self_seam_init
 
 # _self_expect <case> <output> <pattern...> — print " <case>(no:<pattern>)" for
 # each pattern (ERE) the output does not contain; the caller appends what it
@@ -295,6 +260,9 @@ rm -rf "$_S1_DIR"
 #             danger-full-access here)
 #   auth      the claude lead's stub prints "Not logged in" and exits 1,
 #             --max 3 -> rc 69 after one run, class=deterministic reason=auth
+#   nosentinel a session that ends without the marker, --max 1 -> rc 75 after
+#             one run, the closing lines kept (the dry run and a complete
+#             sprint stay rc 0: resume, ack, sharedtmp-sticky)
 #   integrity a lease built and collected (review; the baseline recorded),
 #             then .git/config changed -> rc 44 before any session: the stub
 #             never runs, the change is gone from .git/config, the lease
@@ -707,7 +675,7 @@ O=$(S2_TMP="$_S2/ttail" _s2_run tail tail claude "probe goal" --max 1)
 O="$O
 victim=$(cat "$_S2/tail.victim")
 planted=$(find "$_S2/ttail" -name '*.tail' -type l | wc -l | tr -d ' ')"
-_S2_FAIL="${_S2_FAIL}$(_self_expect tail "$O" 'Session exited 1 \(class=retryable\)' '^rc=0$' '^runs=1$' '^victim=victim$' '^planted=1$')"
+_S2_FAIL="${_S2_FAIL}$(_self_expect tail "$O" 'Session exited 1 \(class=retryable\)' '^rc=75$' '^runs=1$' '^victim=victim$' '^planted=1$')"
 
 # stderr: lead resolution reads only stdout (C8)
 mkdir -p "$_S2/pybin"
@@ -743,6 +711,13 @@ O=$(_s2_run auth auth claude "probe goal" --max 3)
 _S2_FAIL="${_S2_FAIL}$(_self_expect auth "$O" 'Stopped at iteration 1: the Claude Code lead failed \(exit 1, class=deterministic reason=auth\)' \
   '^Fix: not logged in: run `claude` once and /login' '^rc=69$' '^runs=1$')"
 if printf '%s\n' "$O" | grep -q '^Fix: .*install'; then _S2_FAIL="$_S2_FAIL auth(install-text)"; fi
+
+# nosentinel: the sessions run out and no session created the marker: rc 75,
+# the closing lines still printed
+_s2_repo nosentinel
+O=$(_s2_run nosentinel noop claude "probe goal" --max 1)
+_S2_FAIL="${_S2_FAIL}$(_self_expect nosentinel "$O" 'Max iterations \(1\) reached without completion' '^Check ops/STATE\.md for current progress' \
+  '^Check ops/TASKS\.md for remaining tasks' '^Run again to continue' '^rc=75$' '^runs=1$')"
 _S2_FAIL="${_S2_FAIL}$(_self_expect auth-argv "$(cat "$_S2/auth.stub")" '^claude:argc=4\|--print\|--permission-mode\|acceptEdits\|/goal Sprint complete ONLY when')"
 
 _s2_repo integrity
@@ -765,7 +740,7 @@ _S2_FAIL="${_S2_FAIL}$(_self_expect integrity "$O" '^create:rc=0:review$' 'coord
 
 _S2_CAP="coordinate.sh reads the lead's launch_argv, goal_gate, model_argv and effort_argv: /goal + claude --print under Claude Code; the D-047 codex exec line, the [lead] model and effort, a quoted \$agent-triforge:at-ship goal and no /goal under Codex; full access only with --allow-full-access (77); the integrity check before each session (44); a deterministic lead failure stops after one run (69); the lease-resume paragraph"
 if [ -z "$_S2_FAIL" ]; then
-  row "SELF-02" "claude" "$_S2_CAP" "PASS" "resume, drycodex (-m gpt-6-astra -c model_reasoning_effort=xhigh), drypin (the roster's gpt-6-luna/high), dryclaude (no model flags), claudepin (--model sonnet --effort high), nomodel (no -m), teamgoal (flags stay in the quoted goal), nofield (one note, no --effort), fullaccess (17 full-access spellings and a declared line refused, rc 77; the acceptEdits control runs), ledgerroot (a tampered ledger under another TMPDIR: rc 44, restored; its root gone: refused naming TRIFORGE_LEASE_ROOT), ledgergone (the ledger deleted under another TMPDIR: rc 44, restored from the root the lease-root record names; that root gone: refused on the record and the lease worktree, then on the worktree alone; a fresh repo runs), ledgerdetach (ledger and record deleted, the lease worktree detached: rc 44 on the worktree; at its root: restored), ledgersib (sibling checkouts with custom roots both named leases: the fresh one runs, the other refuses on its own worktree), sharedtmp (a 0777 non-sticky TMPDIR: rc 1, no run dir by the mktemp log, no lease root; sticky: runs, one run dir), ctxroot / ctxerror (a lease root whose lead/ is another user's, one that can't be made: rc 44, nothing run, the stop naming that cause, not the ledger's root), noshell (no seam, no TTY: rc 45, never 44, with and without a ledger), quota (rc 69, a quota Fix line), tail (a link planted at <run log>.tail never written through), stderr (a stderr line on every python3 call: the lead still resolves), leadwet, noack (rc 77, nothing run), ack (one stub run, D-047 argv + model + effort), auth (rc 69 after one run, the login hint), integrity (rc 44, restored, escalated, no run)" "static"
+  row "SELF-02" "claude" "$_S2_CAP" "PASS" "resume, drycodex (-m gpt-6-astra -c model_reasoning_effort=xhigh), drypin (the roster's gpt-6-luna/high), dryclaude (no model flags), claudepin (--model sonnet --effort high), nomodel (no -m), teamgoal (flags stay in the quoted goal), nofield (one note, no --effort), fullaccess (17 full-access spellings and a declared line refused, rc 77; the acceptEdits control runs), ledgerroot (a tampered ledger under another TMPDIR: rc 44, restored; its root gone: refused naming TRIFORGE_LEASE_ROOT), ledgergone (the ledger deleted under another TMPDIR: rc 44, restored from the root the lease-root record names; that root gone: refused on the record and the lease worktree, then on the worktree alone; a fresh repo runs), ledgerdetach (ledger and record deleted, the lease worktree detached: rc 44 on the worktree; at its root: restored), ledgersib (sibling checkouts with custom roots both named leases: the fresh one runs, the other refuses on its own worktree), sharedtmp (a 0777 non-sticky TMPDIR: rc 1, no run dir by the mktemp log, no lease root; sticky: runs, one run dir), ctxroot / ctxerror (a lease root whose lead/ is another user's, one that can't be made: rc 44, nothing run, the stop naming that cause, not the ledger's root), noshell (no seam, no TTY: rc 45, never 44, with and without a ledger), quota (rc 69, a quota Fix line), tail (a link planted at <run log>.tail never written through), stderr (a stderr line on every python3 call: the lead still resolves), leadwet, noack (rc 77, nothing run), ack (one stub run, D-047 argv + model + effort), auth (rc 69 after one run, the login hint), nosentinel (no marker after --max 1: rc 75, the closing lines kept), integrity (rc 44, restored, escalated, no run)" "static"
 else
   row "SELF-02" "claude" "$_S2_CAP" "FAIL" "mismatch:${_S2_FAIL}" "static"
 fi
@@ -922,23 +897,26 @@ elif [ "$_S6_OK" = 1 ]; then
     _agy_text "$O" "$T"
     _s6_record "SELF-06a" "agy" "$_S6_CAP: agy /skills" "$T" "agy --add-dir <wt> -p /skills"
   fi
-  # codex — exec, read-only, low effort
+  # codex: exec, read-only, low effort, plugins off as on a worker: a user's
+  # installed plugin could otherwise list a name the worktree lacks
   if ! command -v codex >/dev/null 2>&1; then
     row "SELF-06b" "codex" "$_S6_CAP: codex exec skill listing" "UNAVAILABLE" "codex not on PATH" "live"
   elif [ "$CDX_LIVE" != 1 ]; then
     row "SELF-06b" "codex" "$_S6_CAP: codex exec skill listing" "$(_skip_reason)" "gated on CDX-03" "live"
   else
     O="$WORK/self06-cdx.txt"; LAST="$WORK/self06-cdx-last.txt"
-    (cd "$_S6_WT" && _lane_run 240 codex exec --skip-git-repo-check -s read-only -c 'approval_policy="never"' -m "$CDX_MODEL" -c 'model_reasoning_effort="low"' -o "$LAST" "$LIST12_PROMPT" < /dev/null > "$O" 2>&1) || true
+    (cd "$_S6_WT" && _lane_run 240 codex exec --disable plugins --skip-git-repo-check -s read-only -c 'approval_policy="never"' -m "$CDX_MODEL" -c 'model_reasoning_effort="low"' -o "$LAST" "$LIST12_PROMPT" < /dev/null > "$O" 2>&1) || true
     if [ -s "$LAST" ]; then
-      _s6_record "SELF-06b" "codex" "$_S6_CAP: codex exec skill listing" "$LAST" "codex exec -s read-only -m $CDX_MODEL"
+      _s6_record "SELF-06b" "codex" "$_S6_CAP: codex exec skill listing" "$LAST" "codex exec --disable plugins -s read-only -m $CDX_MODEL"
     else
-      _s6_record "SELF-06b" "codex" "$_S6_CAP: codex exec skill listing" "$O" "codex exec -s read-only -m $CDX_MODEL; no last-message file"
+      _s6_record "SELF-06b" "codex" "$_S6_CAP: codex exec skill listing" "$O" "codex exec --disable plugins -s read-only -m $CDX_MODEL; no last-message file"
     fi
   fi
   # opencode — run --format json on the GLM pick
   if ! command -v opencode >/dev/null 2>&1; then
     row "SELF-06c" "opencode" "$_S6_CAP: opencode run skill listing" "UNAVAILABLE" "opencode not on PATH" "live"
+  elif [ -n "$OC_REFUSED" ]; then
+    row "SELF-06c" "opencode" "$_S6_CAP: opencode run skill listing" "UNAVAILABLE" "$OC_REFUSED" "live"
   elif [ "$OC_LIVE" != 1 ]; then
     row "SELF-06c" "opencode" "$_S6_CAP: opencode run skill listing" "$(_skip_reason)" "gated on OC-03" "live"
   else
@@ -1104,6 +1082,7 @@ fi
 #          the file with its reach (every project under it), then removing it;
 #          with HOME = the parent, ~/CLAUDE.md and the two files above HOME
 #          offer the project's CLAUDE.md alone (no import, no removal)
+#   mode   (D-055) the notices under each instructionFiles mode in the throwaway HOME
 #   ccd    (4.1) a project under HOME whose own CLAUDE.md does not import
 #          AGENTS.md: with CLAUDE_CONFIG_DIR unset, the own notice and none
 #          for ~/.claude/CLAUDE.md (the user tier); set to a directory outside
@@ -1121,6 +1100,10 @@ fi
 #          in ./.claude/CLAUDE.md, `@proj/AGENTS.md` in the parent -> silent;
 #          a bare `@AGENTS.md` in ./.claude/CLAUDE.md or in a parent's
 #          CLAUDE.md names some other AGENTS.md -> the notice stays
+#   wfloor below TRIFORGE_CLAUDE_SANDBOX_FLOOR (2.1.313, above the lead's floor)
+#          -> exactly one worker-floor line naming 2.1.313, 2.1.314 and the lead's
+#          2.1.277, no lead-floor warning, not a "session-start:" line; 2.1.314
+#          or TRIFORGE_CLAUDE_SANDBOX=off -> no such line
 #   repeat the floor and stale notices print again on a second run of the same
 #          unfixed project, still with zero "session-start:" lines
 #   tip    no ./AGENTS.md -> one `Tip:` line with the cp line for the pointer
@@ -1394,6 +1377,15 @@ _s8_template "$_S8/proj/.claude/CLAUDE.md" '@../AGENTS.md'
 printf '# monorepo rules\n' > "$_S8/CLAUDE.md"
 _s8_run imported "$_S8/proj" "2.1.284 (Claude Code)"
 _s8_has "below Triforge's floor" && _S8_FAIL="$_S8_FAIL floor-warning-at-2.1.284"
+# wfloor: the claude worker's floor, a line of its own above the lead's floor
+_s8_run wfloor "$_S8/proj" "2.1.313 (Claude Code)"
+_s8_has "below Triforge's floor" && _S8_FAIL="$_S8_FAIL wfloor-lead-warning-at-2.1.313"
+[ "$(printf '%s\n' "$_O" | grep -c '^worker-floor:' || true)" -eq 1 ] || _S8_FAIL="$_S8_FAIL wfloor-not-one-line"
+_s8_has '^worker-floor: Claude Code 2\.1\.313 is below 2\.1\.314.*claude update.*TRIFORGE_CLAUDE_SANDBOX=off.*from 2\.1\.277' || _S8_FAIL="$_S8_FAIL wfloor-wording"
+_s8_run wfloor-at "$_S8/proj" "2.1.314 (Claude Code)"
+_s8_has 'worker-floor' && _S8_FAIL="$_S8_FAIL wfloor-line-at-2.1.314"
+_O=$(TRIFORGE_CLAUDE_SANDBOX=off _s8_start "$_S8/proj" "2.1.313 (Claude Code)") || _S8_FAIL="$_S8_FAIL wfloor-off-rc-nonzero"
+_s8_has 'worker-floor' && _S8_FAIL="$_S8_FAIL wfloor-line-with-sandbox-off"
 _s8_has 'Triforge 3\.x project template' && _S8_FAIL="$_S8_FAIL stale-notice-for-imported-file"
 _s8_has 'self08/CLAUDE\.md' && _S8_FAIL="$_S8_FAIL parent-notice-despite-project-import"
 # the other forms that resolve to the project's AGENTS.md: ./ and an absolute path
@@ -1471,6 +1463,60 @@ export CLAUDE_CONFIG_DIR="$_S8/ccd2"
 _s8_run ccd-import "$_S8/cch/proj" "2.1.277" "$_S8/cch"
 printf '%s\n' "$_O" | grep -qE 'does not import AGENTS\.md|is not loaded under a Claude lead' && _S8_FAIL="$_S8_FAIL ccd-import-notice-despite-the-moved-tier-import"
 unset CLAUDE_CONFIG_DIR
+# instructionFiles (D-055): the notices under each mode, stubbed in this HOME's .claude/settings.json
+mkdir -p "$_S8/mh/.claude" "$_S8/mh/mid/proj" "$_S8/mh/bare" "$_S8/mh/imp" "$_S8/mh/stale"
+for _S8_D in mid/proj bare imp stale; do
+  ( cd "$_S8/mh/$_S8_D" && git init -q 2>/dev/null ) || true
+  printf '# agents\n' > "$_S8/mh/$_S8_D/AGENTS.md"
+done
+printf '# own\n' > "$_S8/mh/mid/proj/CLAUDE.md"
+printf '# mono\n' > "$_S8/mh/mid/CLAUDE.md"
+printf '# own\n\n@AGENTS.md\n' > "$_S8/mh/imp/CLAUDE.md"
+_s8_template "$_S8/mh/stale/CLAUDE.md" '# no import here'
+_s8_mode() { printf '{"pluginConfigs":{"cc-plugin-agents-md@builtin":{"options":{"instructionFiles":"%s"}}}}\n' "$1" > "$_S8/mh/.claude/settings.json"; }
+_S8_MCL='under the default mode, claude-md-or-agents-md; a user-tier instructionFiles setting changes this'
+_S8_MNOT='does not import AGENTS\.md\|sits above this project\|past the size'
+_S8_MSET='^WARNING: AGENTS\.md is not loaded under a Claude lead: the instructionFiles setting in [^ ]*/mh/\.claude/settings\.json is '
+# the default, unset and written out: today's notices, each with the clause
+for _S8_M in unset claude-md-or-agents-md; do
+  if [ "$_S8_M" = unset ]; then rm -f "$_S8/mh/.claude/settings.json"; else _s8_mode "$_S8_M"; fi
+  _s8_run "mode-${_S8_M}" "$_S8/mh/mid/proj" "2.1.277" "$_S8/mh"
+  _s8_has "^WARNING: CLAUDE\.md in this project does not import AGENTS\.md, .*${_S8_MCL}.* Run /at-setup to add the line @AGENTS\.md" || _S8_FAIL="$_S8_FAIL mode-${_S8_M}-own"
+  _s8_has "^WARNING: AGENTS\.md is not loaded under a Claude lead: [^ ]*/mh/mid/CLAUDE\.md sits above this project, .*${_S8_MCL}" || _S8_FAIL="$_S8_FAIL mode-${_S8_M}-above"
+  _s8_run "mode-${_S8_M}-stale" "$_S8/mh/stale" "2.1.277" "$_S8/mh"
+  _s8_has "^WARNING: CLAUDE\.md is a Triforge 3\.x project template .*${_S8_MCL}.* Add the line @AGENTS\.md" || _S8_FAIL="$_S8_FAIL mode-${_S8_M}-stale"
+done
+# both load: no own or above notice, and a 3.x copy is named for its stale text, no import offered
+_s8_mode claude-md-and-agents-md
+_s8_run mode-and "$_S8/mh/mid/proj" "2.1.277" "$_S8/mh"
+_s8_has "$_S8_MNOT" && _S8_FAIL="$_S8_FAIL mode-and-file-notice"
+_s8_has 'is not loaded under a Claude lead' && _S8_FAIL="$_S8_FAIL mode-and-told-hidden"
+_s8_run mode-and-stale "$_S8/mh/stale" "2.1.277" "$_S8/mh"
+_s8_has '^WARNING: CLAUDE\.md is a Triforge 3\.x project template .*its Triforge text is stale' || _S8_FAIL="$_S8_FAIL mode-and-stale"
+_s8_has 'Add the line\|does not read AGENTS\.md' && _S8_FAIL="$_S8_FAIL mode-and-stale-import"
+# claude-md: told even with no CLAUDE.md, no import offered, silent once an import loads it
+_s8_mode claude-md
+_s8_run mode-cm-bare "$_S8/mh/bare" "2.1.277" "$_S8/mh"
+_s8_has "${_S8_MSET}claude-md, so Claude Code loads no AGENTS\.md" || _S8_FAIL="$_S8_FAIL mode-cm-bare"
+_s8_run mode-cm-own "$_S8/mh/mid/proj" "2.1.277" "$_S8/mh"
+_s8_has "${_S8_MSET}claude-md, " || _S8_FAIL="$_S8_FAIL mode-cm-own"
+_s8_has "$_S8_MNOT" && _S8_FAIL="$_S8_FAIL mode-cm-own-file-notice"
+_s8_has 'the line @' && _S8_FAIL="$_S8_FAIL mode-cm-own-import"
+_s8_run mode-cm-import "$_S8/mh/imp" "2.1.277" "$_S8/mh"
+_s8_has 'is not loaded under a Claude lead' && _S8_FAIL="$_S8_FAIL mode-cm-import-told-hidden"
+# managed-only: told whatever the project holds, an import included
+_s8_mode managed-only
+for _S8_D in bare imp mid/proj; do
+  _s8_run "mode-mo-${_S8_D}" "$_S8/mh/$_S8_D" "2.1.277" "$_S8/mh"
+  _s8_has "${_S8_MSET}managed-only, " || _S8_FAIL="$_S8_FAIL mode-mo-${_S8_D}"
+  _s8_has "$_S8_MNOT" && _S8_FAIL="$_S8_FAIL mode-mo-${_S8_D}-file-notice"
+  _s8_has 'the line @' && _S8_FAIL="$_S8_FAIL mode-mo-${_S8_D}-import"
+done
+# unreadable: the default's notices
+printf '{not json\n' > "$_S8/mh/.claude/settings.json"
+_s8_run mode-unreadable "$_S8/mh/mid/proj" "2.1.277" "$_S8/mh"
+_s8_has "^WARNING: CLAUDE\.md in this project does not import AGENTS\.md, .*${_S8_MCL}" || _S8_FAIL="$_S8_FAIL mode-unreadable-own"
+# end of the instructionFiles cases
 # HOME is no project: a session started in HOME, or in a directory above it, gets
 # the one home-directory warning and no file notice or tip, since each would name a
 # file there (read for every project under it, refused by the writers): a 3.x copy
@@ -2140,7 +2186,7 @@ fi
 unset _s8_sh _s8_l _s8_p _s8_n
 _S8_CAP="session-start.sh is idempotent (second run prints zero session-start: lines), prints the floor, stale-template and CLAUDE.md-above notices and the pointer-block tip (R40), and survives a failing or absent helper loader"
 if [ "$_S8_RC2" -eq 0 ] && [ "$_S8_N2" -eq 0 ] && [ -z "$_S8_FAIL" ]; then
-  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; started in HOME or the directory above it: the one home-directory warning, no file notice or tip, the files untouched; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; versiongrace (round 1, wave 2): an optional CLI that ignores SIGTERM and never answers, through the hook's own _ss_cli_version with a 1 s bound, asked --version then -V and given up on within two calls of 1 s + the 2 s SIGKILL grace (${_S8_VER}), nothing recorded, the stub gone, stderr empty, no temp dir left; one that answers -V only gets that answer, and the watchdog run records a kimi stub's -V answer in .claude/roster-detected.local.md; detectbound (round 4, J): a python3 that prints one project no-import row (round 5) and never answers the instruction-file pass, session start back in ${_S8_DET}s (the 10 s bound) with the WARNING that the check did not finish, given up on after 10 s (4.1), and no own-file notice from the partial row, the stub gone; detectfork (round 5): with no timeout binary on PATH (${_S8_FWD}), a python3 launcher that prints that row, forks a child that ignores SIGTERM and holds stdout for 60 s, and ignores SIGTERM itself: session start back in ${_S8_FORK}s with the WARNING and no own-file notice, the launcher and (4.1) its child gone; detect69 (4.1): an rc 69 WARNING names its cause, one line each: python3 not on PATH, no timeout binary and no private temp dir for the watchdog, a library that did not load; pastbound (4.1): past-bound rows (import -) for ./CLAUDE.md, ./.claude/CLAUDE.md and a CLAUDE.md above get a line saying session start cannot tell whether they import AGENTS.md, offering @AGENTS.md, @../AGENTS.md and the project's CLAUDE.md, never the line -; detectwatch (round 5): the library alone under set -u (${_S8_WSH}), PATH = a python3 stub, a sleep that logs its pid and dirname: a pass that answers in 0.5 s under _INSTR_SECS=30 leaves no watchdog sleep running; with no _INSTR_SECS (_INSTR_READ_SECS, shipped as 30, set to 1) detect, visibility and a writer's plan on a python3 that never answers print one gave-up line naming python3 hung or killed and rc 124, 137 or 143 within 15 s, under ${_S8_WMODES}; a writer with --yes, _INSTR_SECS=1 and a python3 2 s slow still writes, rc 0, no temp file left; watchtmp (round 6): with no timeout binary (${_S8_WSH}), a TMPDIR of mode 0777 without the sticky bit is never asked for the watchdog's temp dir, the pass answering through /tmp, and with mktemp failing for /tmp too the call returns rc 69 with its line alone, python3 never started, nothing left in that TMPDIR; forkwatch (4.1): under ${_S8_FMODES} (${_S8_WSH}), a python3 launcher that forks a child ignoring SIGTERM and holding stdout for 40 s, given up on after 1 s: rc 143 (124 under the timeout binary) within 15 s, neither left; forkexit (4.1 review, #6): the same launcher printing its row and exiting 0 at once under a 30 s bound, leaving the child behind: the row and rc 0 within 15 s, the child gone; perllocale (4.1): with LANG and LC_ALL xx_XX.bogus the watchdog's pass prints its rows and rc 0, no perl warning; watchkill (4.1): the watchdog's subshell SIGKILLed while its private temp dir exists: rc 137, nothing left in TMPDIR; boundsleep (round 6): the hook's own _ss_bounded with no timeout binary (${_S8_WSH}) leaves no watchdog sleep running after a command that answers in 0.5 s or at once (three times); boundfork (4.1): the same _ss_bounded with a 1 s bound, under ${_S8_FMODES}, on a command that forks a child ignoring SIGTERM and holding stdout for 40 s: back within 15 s, neither left; boundexit (4.1 review, #6): a command that prints its answer, forks that child and exits at once under a 30 s bound: the answer and rc 0 within 15 s, the child gone; ccd (4.1): with CLAUDE_CONFIG_DIR absolute or relative, HOME's .claude/CLAUDE.md is named as a file above the project and the moved CLAUDE.md never; one whose CLAUDE.md imports the project's AGENTS.md silences the own and above notices; unset, the user tier stays unnamed; every run rc 0, no crash, no line starting with {" "static"
+  row "SELF-08" "claude" "$_S8_CAP" "PASS" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=0 (throwaway project + HOME, stub agy + claude on PATH, CLAUDE_PLUGIN_ROOT=this checkout); floor 2.1.277: warns at 2.1.276 and 2.0.300, silent at 2.1.277, 2.1.284, 3.0.0 and an unparseable version; 3.x template copy: notice for ./CLAUDE.md and ./.claude/CLAUDE.md on two runs in a row, files untouched, silent below 3 fingerprint headings or without the signature line; imports count only when they resolve to the project's AGENTS.md: silent for @AGENTS.md, @./AGENTS.md, @../AGENTS.md from .claude/ and an absolute path, notice kept for a bare @AGENTS.md in .claude/CLAUDE.md and in a parent's CLAUDE.md; CLAUDE.md above the project: 4 files over 3 levels named with their import lines, each one line under a directory named with a literal backslash-n, silent for ~/.claude/CLAUDE.md and once the chain imports the project's AGENTS.md; each line offers a CLAUDE.md in the project first, then the import with its reach (every project under that directory), then removal; with HOME = the parent, ~/CLAUDE.md and the 2 files above HOME offer the project's CLAUDE.md alone; started in HOME or the directory above it: the one home-directory warning, no file notice or tip, the files untouched; pointer-block tip without ./AGENTS.md, none with it; degraded helper load (CLAUDE_PLUGIN_ROOT = a Triforge-shaped root whose loader returns 1 after a JSON-shaped stdout line, or exits 1): rc 0, WARNING names the loader and rc 1, orientation and the Lead workflows line still printed; a loader error line and roster pins holding a backslash-n or a newline before a JSON object stay one line each (round 4, B8); killgrace (round 1, #6): a claude stub that ignores SIGTERM, through the hook's own _ss_bounded with a 1 s bound, back within 1 s + the 2 s SIGKILL grace (${_S8_KILL}), the stub gone and stderr empty after each; versiongrace (round 1, wave 2): an optional CLI that ignores SIGTERM and never answers, through the hook's own _ss_cli_version with a 1 s bound, asked --version then -V and given up on within two calls of 1 s + the 2 s SIGKILL grace (${_S8_VER}), nothing recorded, the stub gone, stderr empty, no temp dir left; one that answers -V only gets that answer, and the watchdog run records a kimi stub's -V answer in .claude/roster-detected.local.md; detectbound (round 4, J): a python3 that prints one project no-import row (round 5) and never answers the instruction-file pass, session start back in ${_S8_DET}s (the 10 s bound) with the WARNING that the check did not finish, given up on after 10 s (4.1), and no own-file notice from the partial row, the stub gone; detectfork (round 5): with no timeout binary on PATH (${_S8_FWD}), a python3 launcher that prints that row, forks a child that ignores SIGTERM and holds stdout for 60 s, and ignores SIGTERM itself: session start back in ${_S8_FORK}s with the WARNING and no own-file notice, the launcher and (4.1) its child gone; detect69 (4.1): an rc 69 WARNING names its cause, one line each: python3 not on PATH, no timeout binary and no private temp dir for the watchdog, a library that did not load; pastbound (4.1): past-bound rows (import -) for ./CLAUDE.md, ./.claude/CLAUDE.md and a CLAUDE.md above get a line saying session start cannot tell whether they import AGENTS.md, offering @AGENTS.md, @../AGENTS.md and the project's CLAUDE.md, never the line -; detectwatch (round 5): the library alone under set -u (${_S8_WSH}), PATH = a python3 stub, a sleep that logs its pid and dirname: a pass that answers in 0.5 s under _INSTR_SECS=30 leaves no watchdog sleep running; with no _INSTR_SECS (_INSTR_READ_SECS, shipped as 30, set to 1) detect, visibility and a writer's plan on a python3 that never answers print one gave-up line naming python3 hung or killed and rc 124, 137 or 143 within 15 s, under ${_S8_WMODES}; a writer with --yes, _INSTR_SECS=1 and a python3 2 s slow still writes, rc 0, no temp file left; watchtmp (round 6): with no timeout binary (${_S8_WSH}), a TMPDIR of mode 0777 without the sticky bit is never asked for the watchdog's temp dir, the pass answering through /tmp, and with mktemp failing for /tmp too the call returns rc 69 with its line alone, python3 never started, nothing left in that TMPDIR; forkwatch (4.1): under ${_S8_FMODES} (${_S8_WSH}), a python3 launcher that forks a child ignoring SIGTERM and holding stdout for 40 s, given up on after 1 s: rc 143 (124 under the timeout binary) within 15 s, neither left; forkexit (4.1 review, #6): the same launcher printing its row and exiting 0 at once under a 30 s bound, leaving the child behind: the row and rc 0 within 15 s, the child gone; perllocale (4.1): with LANG and LC_ALL xx_XX.bogus the watchdog's pass prints its rows and rc 0, no perl warning; watchkill (4.1): the watchdog's subshell SIGKILLed while its private temp dir exists: rc 137, nothing left in TMPDIR; boundsleep (round 6): the hook's own _ss_bounded with no timeout binary (${_S8_WSH}) leaves no watchdog sleep running after a command that answers in 0.5 s or at once (three times); boundfork (4.1): the same _ss_bounded with a 1 s bound, under ${_S8_FMODES}, on a command that forks a child ignoring SIGTERM and holding stdout for 40 s: back within 15 s, neither left; boundexit (4.1 review, #6): a command that prints its answer, forks that child and exits at once under a 30 s bound: the answer and rc 0 within 15 s, the child gone; ccd (4.1): with CLAUDE_CONFIG_DIR absolute or relative, HOME's .claude/CLAUDE.md is named as a file above the project and the moved CLAUDE.md never; one whose CLAUDE.md imports the project's AGENTS.md silences the own and above notices; unset, the user tier stays unnamed; every run rc 0, no crash, no line starting with {; mode (D-055): the instructionFiles setting in a throwaway HOME: unset, the default and an unreadable file keep the own, above and stale notices with the clause naming the setting, claude-md-and-agents-md drops the own and above notices and names a 3.x copy for its stale text alone, claude-md and managed-only give one line naming the setting and no import, even with no CLAUDE.md, and claude-md is silent once an import loads AGENTS.md" "static"
 else
   row "SELF-08" "claude" "$_S8_CAP" "FAIL" "run1 rc=${_S8_RC1} session-start: lines=${_S8_N1}; run2 rc=${_S8_RC2} lines=${_S8_N2}: $(printf '%s\n' "$_S8_OUT2" | grep '^session-start:' | head -3 | tr '\n' ' ' | _scrub | cut -c1-160); mismatch:${_S8_FAIL:- none}" "static"
 fi
@@ -2481,7 +2527,7 @@ esac
 exit 0
 EOF
 for _stub in claude codex; do
-  printf '#!/bin/sh\n# probe stub (SELF-21): answers --version only\ncase "${1:-}" in --version) echo "2.1.285" ;; esac\nexit 0\n' > "$_S21/bin/$_stub"
+  printf '#!/bin/sh\n# probe stub (SELF-21): answers --version only\ncase "${1:-}" in --version) echo "2.1.314" ;; esac\nexit 0\n' > "$_S21/bin/$_stub"
 done
 unset _stub
 chmod +x "$_S21/bin/agy" "$_S21/bin/claude" "$_S21/bin/codex"
@@ -3521,7 +3567,9 @@ rm -rf "$_S10" "${WORK}"/s10-*
 #                a root planted at <project>/.agents is never resolved by a
 #                project-tier copy (pointer wins, else rc 1); a pointer tracked
 #                under another letter case -> rc 3 (rc 1 on a case-sensitive
-#                filesystem, never 0); a symlinked .agents -> rc 3
+#                filesystem, never 0); a symlinked .agents -> rc 3; --help and
+#                -h from a copy that resolves nothing -> rc 0 and usage naming
+#                the script and the plugin root, under sh, bash and zsh
 #   (d) bare     only invoke-external.sh copied into a bare directory and
 #                sourced from the project's cwd -> nonzero naming at-setup and
 #                no root (a loader that fell back to the working directory's
@@ -3591,6 +3639,22 @@ case "$_S11_CX_P" in
   *"===USER PROMPT==="*S11-PROMPT) [ "${#_S11_CX_PRE}" -gt 200 ] || _S11_FAIL="$_S11_FAIL a(codex:instructions=${#_S11_CX_PRE}chars)" ;;
   *) _S11_FAIL="$_S11_FAIL a(codex:prompt-shape)" ;;
 esac
+# F4 (D-061, KTD9): a Codex worker's argv carries --disable plugins, foreground
+# and lease (the persona's is SELF-12's), and a Codex lead's two launch lines do not.
+_s11_plugins_off() { awk 'p == "--disable" && $0 == "plugins" { n++ } { p = $0 } END { print n + 0 }'; }
+[ "$(printf '%s\n' "$_S11_CX" | _s11_plugins_off)" = 1 ] || _S11_FAIL="$_S11_FAIL a(codex-foreground:no---disable-plugins)"
+_S11_LANE=$( cd "$_S11/cwd" && unset CLAUDE_PLUGIN_ROOT && source "$_S11_LOADER" 2>/dev/null \
+  && _lease_lane_argv codex "" "" "" "" "" "$_S11/cwd" 60 && printf '%s\n' "${_LEASE_LANE_ARGV[@]}" )
+[ "$(printf '%s\n' "$_S11_LANE" | _s11_plugins_off)" = 1 ] || _S11_FAIL="$_S11_FAIL a(codex-lease:no---disable-plugins)"
+for _s11_m in headless interactive; do
+  _S11_LEAD=$( cd "$_S11/cwd" && unset CLAUDE_PLUGIN_ROOT && source "$_S11_LOADER" 2>/dev/null && _lead_launch_compose codex "" "" "$_s11_m" )
+  case "$_S11_LEAD" in
+    codex*) ;;
+    *) _S11_FAIL="$_S11_FAIL a(codex-lead-$_s11_m:no-line)" ;;
+  esac
+  if printf '%s\n' "$_S11_LEAD" | grep -Eq -- '^(--disable|features\.plugins=false)$'; then _S11_FAIL="$_S11_FAIL a(codex-lead-$_s11_m:plugin-off)"; fi
+done
+unset _s11_m
 _S11_KM=$(_s11_argv "$_S11/argv/kimi")
 if ! printf '%s\n' "$_S11_KM" | grep -Fxq -- "--agent-file" || ! printf '%s\n' "$_S11_KM" | grep -Fxq -- "${_S11_ROOT_A:-/nonexistent}/kimi-agents/reviewer.md" || [ ! -s "${_S11_ROOT_A:-/nonexistent}/kimi-agents/reviewer.md" ]; then
   _S11_FAIL="$_S11_FAIL a(kimi:no-agent-file-from-root)"
@@ -3645,6 +3709,20 @@ for _sh in sh bash zsh; do
 done
 unset _sh
 _s11_loc nopointer "$_S11/proj" sh "$_S11_PLOC" 1 "at-setup"
+# --help answers before any resolution: this copy has no root to find (rc 1 just above)
+for _sh in sh bash zsh; do
+  command -v "$_sh" >/dev/null 2>&1 || continue
+  for _s11_h in --help -h; do
+    _S11_H_RC=0
+    _S11_H=$( cd "$_S11/proj" && env -u CLAUDE_PLUGIN_ROOT HOME="$_S11/home" GIT_CONFIG_NOSYSTEM=1 "$_sh" "$_S11_PLOC" "$_s11_h" 2>/dev/null ) || _S11_H_RC=$?
+    [ "$_S11_H_RC" = 0 ] || _S11_FAIL="$_S11_FAIL c:help-$_sh$_s11_h(rc=$_S11_H_RC want 0)"
+    case "$_S11_H" in
+      *locate-triforge.sh*"plugin root"*) ;;
+      *) _S11_FAIL="$_S11_FAIL c:help-$_sh$_s11_h(usage must name the script and the plugin root)" ;;
+    esac
+  done
+done
+unset _sh _s11_h
 printf '%s\n' "$_S11/proj/vendor/tri" > "$_S11_PTR"
 _s11_loc inside "$_S11/proj" sh "$_S11_PLOC" 3 "inside the project"
 printf '%s\n' "$_S11/tmp" > "$_S11_PTR"
@@ -3736,7 +3814,7 @@ _S11_E_PWD=$(grep -c 'pwd)/scripts' "$_S11_LOADER" || true)
 [ "$_S11_E_PWD" = 0 ] || _S11_FAIL="$_S11_FAIL e(pwd-fallback=$_S11_E_PWD)"
 _S11_CAP="plugin root without CLAUDE_PLUGIN_ROOT: loader + lanes resolve the plugin, never a project's scripts/ or skills/; skill locator order and pointer refusals; bare loader fails closed naming at-setup (KTD6/R16/R42)"
 if [ -z "$_S11_FAIL" ]; then
-  row "SELF-11" "claude" "$_S11_CAP" "PASS" "CLAUDE_PLUGIN_ROOT unset: loader root = this checkout; against argv-recording stubs codex passed --output-schema <root>/codex-agents/review-verdict.schema.json + a ${#_S11_CX_PRE}-char instructions prefix, kimi --agent-file <root>/kimi-agents/reviewer.md, cursor the reviewer brief prefixed onto the prompt (no empty brief); from a user project with its own scripts/invoke-external.sh + skills/user-skill: root = checkout, the project's loader never sourced, _lease_plugin_root = checkout, worktree provisioned with exactly the portable skills (${_S11_GOT% }); locator: own location resolves under sh/bash/zsh, no pointer -> rc 1 naming at-setup, pointer inside the project / to a non-root / tracked -> rc 3, untracked pointer to the checkout -> resolves, linked worktree reads the main checkout's pointer, a root planted at <project>/.agents is ignored by a project-tier copy (pointer wins, else rc 1), pointer tracked under another letter case / behind a symlinked .agents -> rc 3, a plugin root in a non-config dot directory still resolves; bare-dir loader copy sourced from the project -> rc ${_S11_D_RC} naming at-setup; scripts/lib/*.sh: 0 CLAUDE_PLUGIN_ROOT reads, loader: no pwd)/scripts fallback" "static"
+  row "SELF-11" "claude" "$_S11_CAP" "PASS" "CLAUDE_PLUGIN_ROOT unset: loader root = this checkout; against argv-recording stubs codex passed --disable plugins (the lease lane too, neither of a Codex lead's launch lines), --output-schema <root>/codex-agents/review-verdict.schema.json + a ${#_S11_CX_PRE}-char instructions prefix, kimi --agent-file <root>/kimi-agents/reviewer.md, cursor the reviewer brief prefixed onto the prompt (no empty brief); from a user project with its own scripts/invoke-external.sh + skills/user-skill: root = checkout, the project's loader never sourced, _lease_plugin_root = checkout, worktree provisioned with exactly the portable skills (${_S11_GOT% }); locator: own location resolves under sh/bash/zsh, no pointer -> rc 1 naming at-setup, pointer inside the project / to a non-root / tracked -> rc 3, untracked pointer to the checkout -> resolves, linked worktree reads the main checkout's pointer, a root planted at <project>/.agents is ignored by a project-tier copy (pointer wins, else rc 1), pointer tracked under another letter case / behind a symlinked .agents -> rc 3, a plugin root in a non-config dot directory still resolves; bare-dir loader copy sourced from the project -> rc ${_S11_D_RC} naming at-setup; scripts/lib/*.sh: 0 CLAUDE_PLUGIN_ROOT reads, loader: no pwd)/scripts fallback" "static"
 else
   row "SELF-11" "claude" "$_S11_CAP" "FAIL" "mismatch:$(printf '%s' "$_S11_FAIL" | cut -c1-700)" "static"
 fi
@@ -3783,7 +3861,7 @@ rm -rf "$_S11"
 #   web      read-web adds WebFetch and WebSearch (still no Bash); sonnet at high;
 #            with TRIFORGE_CLAUDE_SANDBOX=off neither class gains Bash
 #   codex    --cli codex (given after the positionals): codex exec -s
-#            read-only, approval never, --skip-git-repo-check, the shell env
+#            read-only, approval never, --disable plugins, --skip-git-repo-check, the shell env
 #            policy pinned, the registry model at the tier's effort, -o <out>;
 #            marker persona
 #   trio     argv --model fable --effort max with the probe record, opus at max
@@ -3855,7 +3933,7 @@ rm -rf "$_S11"
 #   noledger a project with no ledger, sandbox off: an exec persona at
 #            ref:HEAD records the integrity baseline first; one that moves a
 #            branch -> 44 naming it, one that writes .git/config -> 44, restored
-#   floor    a claude reporting 2.1.284: an exec persona -> 1 with the
+#   floor    a claude reporting 2.1.313: an exec persona -> 1 with the
 #            sandbox-floor refusal, no worktree, no run; a read persona runs
 #   guard2   $TMPDIR/.claude/CLAUDE.md -> 69; a scratch dir inside a git
 #            working tree with no instruction file in it -> 69 naming the tree;
@@ -3929,6 +4007,14 @@ rm -rf "$_S11"
 #   r5stale  (r5 F3) old records (one gone, one ended with an rc) whose
 #            numbers a stranger's session holds: persona_stop 0, the
 #            stranger's member still runs
+#   turnbudget (KTD6, R14) a stub whose envelope says error_max_turns and exits
+#            1: rc 81 on the read and the exec class, class deterministic,
+#            reason max-turns, the stderr line naming the persona and
+#            personas/manifest.toml; persona_wait prints that line beside rc=81.
+#            Control: another error subtype keeps the CLI's rc and no such
+#            line. The default timeout at 40 turns: high 4800 s, xhigh 8000 s,
+#            with no cap; the two shipped researchers resolve to 40 turns at
+#            xhigh and run with 8000 s
 #   shipped  when personas/manifest.toml ships (U8): every entry resolves, a
 #            runnable one with a non-empty body without frontmatter, the
 #            trio at the top rung, lease and agent-team refused with their path,
@@ -3957,7 +4043,7 @@ cat > "$_S12/tpl/claude" <<'S12_CLAUDE_EOF'
 # file names (line 1 the mode, lines 2-3 its arguments), recording argv, cwd,
 # environment and prompt in the log dir
 L='@LOG@'
-if [ "${1:-}" = "--version" ]; then if [ -f "$L/version" ]; then cat "$L/version"; else echo "2.1.289 (Claude Code)"; fi; exit 0; fi
+if [ "${1:-}" = "--version" ]; then if [ -f "$L/version" ]; then cat "$L/version"; else echo "2.1.314 (Claude Code)"; fi; exit 0; fi
 if [ "${1:-}" = "--help" ]; then
   if [ ! -f "$L/no-safe-mode" ]; then echo "  --safe-mode   Start with all customizations (CLAUDE.md, ...) disabled"; fi
   echo "  --tools <tools...>"
@@ -4048,6 +4134,11 @@ os.wait()' "while [ ! -f '$L/go' ]; do sleep 0.1; done; /bin/sh '$ARG' insert; t
     A=$(ls -laR "$PWD" "$HOME" "$HK"/triforge-monitors-* 2>/dev/null | cksum); W=nothing
     if [ "$A" != "$B" ]; then W=changed; fi
     ANS="worker=${TRIFORGE_LEASE_WORKER:-unset}|${R}|written=$W" ;;
+  maxturns | otherror)
+    SUB=error_max_turns
+    if [ "$MODE" = otherror ]; then SUB=error_during_execution; fi
+    printf '{"type": "result", "subtype": "%s", "is_error": true, "result": "", "session_id": "00000000-0000-4000-8000-000000000012", "num_turns": 7}\n' "$SUB"
+    exit 1 ;;
 esac
 python3 -c 'import json, sys; print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": sys.argv[1], "session_id": "00000000-0000-4000-8000-000000000012", "num_turns": 1}))' "$ANS"
 S12_CLAUDE_EOF
@@ -4225,6 +4316,7 @@ C=$(cat "$_S12/log/last.cwd" 2>/dev/null || true)
 echo "cx-out=$(cat "$_S12/rd-cx.out" 2>/dev/null)"
 echo "cx-argv=$(sed -n 1p "$_S12/log/last.argv"):s=$(_s12_arg -s):m=$(_s12_arg -m):o=$(_s12_arg -o):C=$(_s12_arg -C)"
 echo "cx-flags=$(grep -cxE -- "--skip-git-repo-check|approval_policy=\"never\"|model_reasoning_effort=\"high\"|shell_environment_policy.inherit=\"all\"" "$_S12/log/last.argv")"
+echo "cx-plugins=$(_s12_arg --disable)"
 case "$C" in "$_S12P/tmp/triforge-persona."*/cwd) echo "cx-cwd=scratch" ;; *) echo "cx-cwd=other:$C" ;; esac
 echo "cx-env=$(grep -cx TRIFORGE_LEASE_WORKER=persona "$_S12/log/last.env")"
 echo "cx-prof=$(grep -cxF -- "default_permissions=\"triforge_persona\"" "$_S12/log/last.argv" || true):$(grep -cxF -- "permissions.triforge_persona.extends=\":read-only\"" "$_S12/log/last.argv" || true):$(grep -c "^permissions\.triforge_persona\.filesystem={.*\"$HOME/\.ssh\"=\"deny\".*\"$HOME/\.codex\"=\"deny\"" "$_S12/log/last.argv" || true):noS=$(grep -cx -- -s "$_S12/log/last.argv" || true)"
@@ -4284,7 +4376,7 @@ _S12_FAIL="${_S12_FAIL}$(_self_expect web "$O" '^web:rc=0:' \
   '^web-tools=Read,Grep,Glob,WebFetch,WebSearch allowed=Read,Grep,Glob,WebFetch,WebSearch model=sonnet effort=high turns=5$' \
   '^brief:rc=0:' '^brief-in-prompt=1$' '^sbxoff-read=Read,Grep,Glob$' '^sbxoff-web=Read,Grep,Glob,WebFetch,WebSearch$' '^web-safe=1$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect codex "$O" '^cx:rc=0:' '^cx-out=CODEX-PERSONA-ANSWER$' \
-  "^cx-argv=exec:s=:m=gpt-6-astra:o=${_S12P}/rd-cx.out:C=${_S12P}/tmp/triforge-persona\\..*/cwd\$" '^cx-flags=4$' '^cx-cwd=scratch$' '^cx-env=1$' '^cx-prof=1:1:1:noS=0$')"
+  "^cx-argv=exec:s=:m=gpt-6-astra:o=${_S12P}/rd-cx.out:C=${_S12P}/tmp/triforge-persona\\..*/cwd\$" '^cx-flags=4$' '^cx-plugins=plugins$' '^cx-cwd=scratch$' '^cx-env=1$' '^cx-prof=1:1:1:noS=0$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect trio "$O" '^trio:rc=0:' '^trio-argv=model=opus effort=max turns=6$' \
   '^trio-sonnet:rc=64:.*never-downgrade' '^trio-sonnet-cli=none$')"
 _S12_FAIL="${_S12_FAIL}$(_self_expect prompt "$O" '^p-team:rc=0:PERSONA-BODY-team-lead:' '^p-resolver:rc=0:PERSONA-BODY-pr-comment-resolver:' \
@@ -4305,7 +4397,7 @@ _S12_FAIL="${_S12_FAIL}$(_self_expect trio-pass "$O" '^trio:rc=0:' '^trio-argv=m
 : > "$_S12/log/no-safe-mode"
 O=$(_s12_lead rd "$_S12_KIT" '_s12_mode answer; _self_try nosafe dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-g.out"; if [ -f "$_S12/log/last.argv" ]; then echo "nosafe-cli=ran"; else echo "nosafe-cli=none"; fi')
 rm -f "$_S12/log/no-safe-mode"
-printf '2.1.284 (Claude Code)\n' > "$_S12/log/version"
+printf '2.1.313 (Claude Code)\n' > "$_S12/log/version"
 O="${O}
 $(_s12_lead rd "$_S12_KIT" '
 _s12_mode answer
@@ -4314,7 +4406,7 @@ echo "floor-cli=$(if [ -f "$_S12/log/last.argv" ]; then echo ran; else echo none
 _self_try floor-read dispatch_persona probe-reader "$_S12/review.diff" "$_S12/rd-g.out"')"
 rm -f "$_S12/log/version"
 _S12_FAIL="${_S12_FAIL}$(_self_expect safe "$O" '^nosafe:rc=69:.*--safe-mode' '^nosafe-cli=none$')"
-_S12_FAIL="${_S12_FAIL}$(_self_expect floor "$O" '^floor:rc=1:.*2\.1\.284 is below 2\.1\.285' '^floor-cli=none:wt=0:ledger=none$' '^floor-read:rc=0:')"
+_S12_FAIL="${_S12_FAIL}$(_self_expect floor "$O" '^floor:rc=1:.*2\.1\.313 is below 2\.1\.314' '^floor-cli=none:wt=0:ledger=none$' '^floor-read:rc=0:')"
 # noledger: a project with no ledger and the sandbox off
 _s12_repo ns
 O=$(_s12_lead ns "$_S12_KIT" '
@@ -4990,6 +5082,48 @@ if [ "$(git rev-parse main)" = "$(git rev-parse sprint/s12)" ]; then echo "main-
 ')
 _S12_FAIL="${_S12_FAIL}$(_self_expect ledger-control "$O" '^merge:rc=0:' '^write:rc=0:' '^promote:rc=0:.*PROMOTED' '^main-at-sprint=yes$')"
 
+# turnbudget (KTD6, R14): a turn-cap stop through _persona_finish and persona_wait
+_s12_repo tb
+O=$(_s12_lead tb "$_S12_KIT" '
+export TRIFORGE_CLAUDE_SANDBOX=off TRIFORGE_LEAD_WAIT_BUDGET_S=120
+RUN="$_S12/tbruns"
+_s12_mode maxturns
+_self_try tb-read dispatch_persona probe-reader "$_S12/review.diff" "$_S12/tb-r.out"
+R=0; dispatch_persona probe-reader "$_S12/review.diff" "$_S12/tb-r2.out" 2>/dev/null || R=$?
+echo "tb-state=rc=$R:class=$INVOKE_FAILURE_CLASS:reason=${_INVOKE_FAILURE_REASON:-}"
+_self_try tb-exec dispatch_persona probe-tester "$_S12/brief.txt" "$_S12/tb-e.out"
+persona_spawn "$RUN" tb probe-reader "$_S12/review.diff" "$_S12/tb-s.out" 2>/dev/null
+R=0; X=$(persona_wait "$RUN" tb 2>/dev/null) || R=$?
+echo "tb-wait:rc=$R:$X"
+echo "tb-rcfile=$(cat "$RUN/tb.rc" 2>/dev/null)"
+_s12_mode otherror
+_self_try tb-other dispatch_persona probe-reader "$_S12/review.diff" "$_S12/tb-o.out"
+persona_spawn "$RUN" other probe-reader "$_S12/review.diff" "$_S12/tb-o2.out" 2>/dev/null
+R=0; X=$(persona_wait "$RUN" other 2>/dev/null) || R=$?
+echo "tb-otherwait:rc=$R:$X"
+echo "tb-timeout=high:$(_persona_default_timeout high 40):xhigh:$(_persona_default_timeout xhigh 40)"
+')
+_S12_TB_LINE="dispatch_persona: turn budget spent: persona probe-[a-z]+ stopped at its max_turns \\(subtype error_max_turns, reason max-turns, rc 81\\): raise max_turns for it in personas/manifest\\.toml"
+_S12_FAIL="${_S12_FAIL}$(_self_expect turnbudget "$O" \
+  "^tb-read:rc=81:.*${_S12_TB_LINE}" '^tb-read:rc=81:.*persona probe-reader ' \
+  '^tb-state=rc=81:class=deterministic:reason=max-turns$' \
+  "^tb-exec:rc=81:.*${_S12_TB_LINE}" '^tb-exec:rc=81:.*persona probe-tester ' \
+  "^tb-wait:rc=0:tb rc=81 ${_S12_TB_LINE}" '^tb-rcfile=81$' \
+  '^tb-other:rc=1:.*claude exit=1 class=' '^tb-otherwait:rc=0:other rc=1$' \
+  '^tb-timeout=high:4800:xhigh:8000$')"
+if printf '%s\n' "$O" | grep -E '^tb-other' | grep -q 'turn budget spent'; then _S12_FAIL="${_S12_FAIL} turnbudget(another error subtype named as a turn-cap stop)"; fi
+if [ -f "${REPO_ROOT}/personas/manifest.toml" ]; then
+  O=$(_s12_lead rd "$REPO_ROOT" '
+_s12_r tbp best-practices-researcher
+_s12_r tbf framework-docs-researcher
+_s12_mode answer
+_self_try tb-ship dispatch_persona framework-docs-researcher "$_S12/review.diff" "$_S12/tb-sh.out"
+')
+  _S12_FAIL="${_S12_FAIL}$(_self_expect turnbudget-shipped "$O" \
+    '^tbp:rc=0:read-web\|claude\|[^|]*\|xhigh\|40\|' '^tbf:rc=0:read-web\|claude\|[^|]*\|xhigh\|40\|' \
+    '^tb-ship:rc=0:.*effort=xhigh max_turns=40 timeout=8000s')"
+fi
+
 # shipped: the persona home U8 ships, when present
 _S12_SHIPPED="absent (U8 has not landed personas/manifest.toml)"
 if [ -f "${REPO_ROOT}/personas/manifest.toml" ]; then
@@ -5028,9 +5162,147 @@ done < "$_S12/shipped.names"
   if [ -n "$_S12_SHIP_BAD" ]; then _S12_FAIL="${_S12_FAIL} shipped(${_S12_SHIP_BAD% })"; fi
 fi
 
+# persona_verdict (R28, KTD11) and learnings_store_empty (R29, KTD10), the real
+# helpers from this checkout's scripts/lib/gates.sh. Verdicts: a report per case,
+# its rc and how many stderr lines it wrote (0 on a pass, one quoting the offence
+# otherwise). shape-*: each shipped persona's own output format, filled in, passes,
+# and echoed as written does not, so a format that stops carrying a required line
+# fails here. Store: a real triforge_bootstrap's ops/ is empty; a change to any of
+# the four sources is not; a store that cannot be compared with its template is
+# not; a directory with no ops/ (a run from the wrong folder) is not.
+O=$(_s12_lead rd "$REPO_ROOT" '
+_s12_v() { # _s12_v <label> <kind> <report, %b escapes>
+  local R=0
+  printf "%b" "$3" > "$_S12/verdict.md"
+  persona_verdict "$_S12/verdict.md" "$2" 2> "$_S12/v.err" || R=$?
+  echo "v:$1:rc=$R:lines=$(wc -l < "$_S12/v.err" | tr -d " "):$(head -1 "$_S12/v.err" | cut -c1-200)"
+}
+_s12_vp() { # a plan report: _s12_vp <label> <rest of the report after the status>
+  _s12_v "$1" plan "## Plan review: goal\n\n### Status: APPROVED\n\n$2"
+}
+_s12_vp ok-none "### Blocking issues (must fix before build)\nNone\n\n### Warnings (should fix)\n- tidy the names\n"
+_s12_vp ok-empty "### Blocking issues (must fix before build)\n\n### Warnings (should fix)\n- tidy the names\n"
+_s12_vp ok-empty-last "### Blocking issues\n"
+_s12_vp ok-dash "### Blocking issues\n- None\n"
+_s12_vp ok-star "### Blocking issues\n* none\n"
+_s12_vp ok-dot "### Blocking issues\nNone.\n"
+_s12_vp ok-inline "### Blocking issues: None\n"
+_s12_vp bullet "### Blocking issues (must fix before build)\n- SQL in x\n\n### Warnings (should fix)\n"
+_s12_vp prose "### Blocking issues (must fix before build)\nThe migration looks unsafe.\n"
+_s12_vp nonefound "### Blocking issues\nNone found so far\n"
+_s12_vp inline "### Blocking issues: the migration looks unsafe\n"
+_s12_vp subhead "### Blocking issues\n#### One\n"
+_s12_vp nosection "### Warnings (should fix)\n- tidy the names\n"
+_s12_vp twosections "### Blocking issues\nNone\n\n### Blocking issues\n- SQL in x\n"
+_s12_v statusonly plan "### Status: APPROVED\n"
+_s12_v needsrev plan "### Status: NEEDS_REVISION\n\n### Blocking issues\n- SQL in x\n"
+_s12_v nostatus plan "## Plan review\n\n### Blocking issues\nNone\n"
+_s12_v plainstatus plan "APPROVED\n\n### Blocking issues\nNone\n"
+_s12_v twostatus plan "### Status: APPROVED\n### Status: NEEDS_REVISION\n\n### Blocking issues\nNone\n"
+_s12_v twosame plan "### Status: APPROVED\n### Status: APPROVED\n\n### Blocking issues\nNone\n"
+_s12_v template plan "### Status: APPROVED | NEEDS_REVISION\n\n### Blocking issues\nNone\n"
+_s12_v caveats plan "### Status: APPROVED with caveats\n\n### Blocking issues\nNone\n"
+_s12_v bold plan "### Status: **APPROVED**\n\n### Blocking issues\nNone\n"
+_s12_v crlf plan "### Status: APPROVED\r\n\r\n### Blocking issues\r\nNone\r\n"
+_s12_v planpass verify "### Status: APPROVED\n\n### Blocking issues\nNone\n"
+_s12_v vok verify "## Integration verification\n\n### Status: PASS\n\n### Build: PASS\n\n### Recommendation\nPROCEED_TO_NEXT_WAVE\n"
+_s12_v vok-text verify "### Status: PASS\n\n### Recommendation\n\nPROCEED_TO_NEXT_WAVE\nNothing to fix.\n"
+_s12_v vfail verify "### Status: FAIL\n\n### Recommendation\nFIX_REQUIRED\n- the test in x\n"
+_s12_v vfail-proceed verify "### Status: FAIL\n\n### Recommendation\nPROCEED_TO_NEXT_WAVE\n"
+_s12_v vcontext verify "### Status: NEEDS_CONTEXT\n\n### Recommendation\nESCALATE\n"
+_s12_v vfix verify "### Status: PASS\n\n### Recommendation\nFIX_REQUIRED\n- the test in x\n"
+_s12_v vescalate verify "### Status: PASS\n\n### Recommendation\nESCALATE\n"
+_s12_v vnorec verify "### Status: PASS\n\n### Build: PASS\n"
+_s12_v vtemplate verify "### Status: PASS\n\n### Recommendation\n[PROCEED_TO_NEXT_WAVE | FIX_REQUIRED | ESCALATE]\n"
+_s12_v vtworec verify "### Status: PASS\n\n### Recommendation\nPROCEED_TO_NEXT_WAVE\n\n### Recommendation\nFIX_REQUIRED\n"
+_s12_v vnostatus verify "### Recommendation\nPROCEED_TO_NEXT_WAVE\n"
+_s12_v vtwostatus verify "### Status: PASS\n### Status: FAIL\n\n### Recommendation\nPROCEED_TO_NEXT_WAVE\n"
+_s12_v vbadstatus verify "### Status: PASSED\n\n### Recommendation\nPROCEED_TO_NEXT_WAVE\n"
+# a heading inside a code fence is a quoted example: fenced Status lines never
+# count, a fenced line in an open section is its content, an open fence is malformed
+_s12_B="\`\`\`"; _s12_B4="\`\`\`\`"
+_s12_v fence-only verify "report\n${_s12_B}\n### Status: PASS\n\n### Recommendation\nPROCEED_TO_NEXT_WAVE\n${_s12_B}\n"
+_s12_v fence-tilde verify "report\n~~~\n### Status: PASS\n\n### Recommendation\nPROCEED_TO_NEXT_WAVE\n~~~\n"
+_s12_v fence-long plan "report\n${_s12_B4}\n${_s12_B}\n### Status: APPROVED\n\n### Blocking issues\nNone\n${_s12_B}\n${_s12_B4}\n"
+_s12_v fence-wrapped plan "${_s12_B}markdown\n### Status: APPROVED\n\n### Blocking issues\nNone\n${_s12_B}\n"
+_s12_v fence-open plan "### Status: APPROVED\n\n### Blocking issues\nNone\n\n${_s12_B}\n### Blocking issues\n- SQL in x\n"
+_s12_v fence-second verify "### Status: FAIL\n\n### Recommendation\nFIX_REQUIRED\n\n${_s12_B}\n### Status: PASS\n${_s12_B}\n"
+_s12_v fence-quoted verify "${_s12_B}\n### Status: FAIL\n${_s12_B}\n\n### Status: PASS\n\n### Recommendation\nPROCEED_TO_NEXT_WAVE\n"
+_s12_v fence-issue plan "### Status: APPROVED\n\n### Blocking issues\n${_s12_B}\nthe real issue\n${_s12_B}\n"
+_s12_vp none-dashdot "### Blocking issues\n- None.\n"
+_s12_vp none-identified "### Blocking issues\nNone identified.\n"
+_s12_vp none-bold "### Blocking issues\n- **None**\n"
+_s12_vp none-then "### Blocking issues\n- None.\n- SQL in x\n"
+_s12_vp none-but "### Blocking issues\nNone identified, but the migration looks unsafe\n"
+_s12_v vtests-fail verify "### Status: PASS\n\n### Tests: FAIL\n- Total: 3 | Passing: 2 | Failing: 1\n\n### Recommendation\nPROCEED_TO_NEXT_WAVE\n"
+_s12_v vbuild-fail verify "### Status: PASS\n\n### Build: **FAIL**\n\n### Recommendation\nPROCEED_TO_NEXT_WAVE\n"
+_s12_v vtests-pass verify "### Status: PASS\n\n### Tests: PASS\n\n### Recommendation\nPROCEED_TO_NEXT_WAVE\n"
+_s12_v vtests-quoted verify "### Status: PASS\n\n${_s12_B}\n### Tests: FAIL\n${_s12_B}\n\n### Recommendation\nPROCEED_TO_NEXT_WAVE\n"
+R=0; persona_verdict "$_S12/no-such-verdict.md" plan 2> "$_S12/v.err" || R=$?; echo "v:absent:rc=$R:lines=$(wc -l < "$_S12/v.err" | tr -d " ")"
+: > "$_S12/verdict.md"; R=0; persona_verdict "$_S12/verdict.md" verify 2> "$_S12/v.err" || R=$?; echo "v:emptyfile:rc=$R:lines=$(wc -l < "$_S12/v.err" | tr -d " ")"
+R=0; persona_verdict "$_S12/verdict.md" other 2> "$_S12/v.err" || R=$?; echo "v:badkind:rc=$R"
+_s12_fmt() { awk "/^\`\`\`markdown\$/ { p = 1; next } /^\`\`\`\$/ { p = 0 } p" "$REPO_ROOT/personas/$1.md"; }
+_s12_fmt plan-checker > "$_S12/plan.fmt"
+_s12_fmt integration-verifier > "$_S12/verify.fmt"
+_s12_v shape-plan plan "$(sed -e "s/^### Status: .*/### Status: APPROVED/" -e "/write .None. when there are none/s/.*/None/" "$_S12/plan.fmt")\n"
+_s12_v shape-plan-echo plan "$(cat "$_S12/plan.fmt")\n"
+_s12_v shape-verify verify "$(sed -e "s/^### Status: .*/### Status: PASS/" -e "s/^\[PROCEED_TO_NEXT_WAVE .*/PROCEED_TO_NEXT_WAVE/" "$_S12/verify.fmt")\n"
+_s12_v shape-verify-echo verify "$(cat "$_S12/verify.fmt")\n"
+mkdir -p "$_S12/store/fresh" && ( cd "$_S12/store/fresh" && git init -q -b main && triforge_bootstrap >/dev/null 2>&1 ) || true
+_s12_s() { # _s12_s <label> <change, run in a copy of the fresh project>
+  local D="$_S12/store/$1" R=0
+  cp -R "$_S12/store/fresh" "$D"
+  ( cd "$D" && eval "$2" && R=0 && learnings_store_empty 2>/dev/null || R=$?; echo "store:$1:rc=$R" )
+}
+echo "store:bootstrapped:$(cd "$_S12/store/fresh" && find ops -maxdepth 1 \( -name MEMORY.md -o -name CHANGELOG.md -o -name solutions -o -name decisions \) | wc -l | tr -d " ")"
+_s12_s fresh ":"
+_s12_s memory "echo \"- a real gotcha\" >> ops/MEMORY.md"
+_s12_s changelog "echo \"- a real change\" >> ops/CHANGELOG.md"
+_s12_s solution "echo note > ops/solutions/2026-01-01-x.md"
+_s12_s decision "echo adr > ops/decisions/2026-01-01-x.md"
+_s12_s nested "mkdir ops/solutions/old && echo note > ops/solutions/old/x.md"
+_s12_s linked "ln -s \"$REPO_ROOT/README.md\" ops/solutions/x.md"
+_s12_s linkdir "rmdir ops/solutions && ln -s \"$REPO_ROOT/skills\" ops/solutions"
+_s12_s nofiles "rm ops/MEMORY.md ops/CHANGELOG.md"
+_s12_s nodirs "rmdir ops/solutions ops/decisions"
+_s12_s noops "rm -rf ops"
+_s12_sp() { # _s12_sp <label> <path to chmod> <mode>: folders only, so only the mode can say not empty
+  local D="$_S12/store/$1"
+  cp -R "$_S12/store/fresh" "$D"
+  ( cd "$D" && mkdir -p ops/solutions/old && chmod "$3" "$2"; R=0; learnings_store_empty 2>/dev/null || R=$?; chmod 755 "$2"; echo "store:$1:rc=$R" )
+}
+_s12_sp perm-control ops 755
+_s12_sp perm-ops ops 000
+_s12_sp perm-ops-noexec ops 444
+_s12_sp perm-ops-noread ops 300
+_s12_sp perm-solutions ops/solutions 000
+_s12_sp perm-child ops/solutions/old 000
+_S12_REAL_SCRIPTS=$_TRIFORGE_SCRIPTS_DIR
+_TRIFORGE_SCRIPTS_DIR="$_S12/no-templates/scripts"
+_s12_s tmpl-absent ":"
+_s12_s tmpl-absent-nofiles "rm ops/MEMORY.md ops/CHANGELOG.md"
+_TRIFORGE_SCRIPTS_DIR=$_S12_REAL_SCRIPTS
+')
+_S12_FAIL="${_S12_FAIL}$(_self_expect verdict "$O" \
+  '^v:ok-none:rc=0:lines=0:$' '^v:ok-empty:rc=0:lines=0:$' '^v:ok-empty-last:rc=0:lines=0:$' '^v:ok-dash:rc=0:lines=0:$' '^v:ok-star:rc=0:lines=0:$' '^v:ok-dot:rc=0:lines=0:$' '^v:ok-inline:rc=0:lines=0:$' \
+  '^v:bullet:rc=1:lines=1:.*SQL in x' '^v:prose:rc=1:lines=1:.*The migration looks unsafe' '^v:nonefound:rc=1:lines=1:.*None found so far' '^v:inline:rc=1:lines=1:.*the migration looks unsafe' '^v:subhead:rc=1:lines=1:.*#### One' \
+  '^v:nosection:rc=2:lines=1:.*Blocking issues' '^v:twosections:rc=2:lines=1:' '^v:statusonly:rc=2:lines=1:.*Blocking issues' \
+  '^v:needsrev:rc=1:lines=1:.*SQL in x' '^v:nostatus:rc=2:lines=1:.*Status' '^v:plainstatus:rc=2:lines=1:' '^v:twostatus:rc=2:lines=1:.*### Status: NEEDS_REVISION' '^v:twosame:rc=2:lines=1:' \
+  '^v:template:rc=2:lines=1:.*APPROVED \| NEEDS_REVISION' '^v:caveats:rc=2:lines=1:.*with caveats' '^v:bold:rc=0:lines=0:$' '^v:crlf:rc=0:lines=0:$' '^v:planpass:rc=2:lines=1:' \
+  '^v:vok:rc=0:lines=0:$' '^v:vok-text:rc=0:lines=0:$' '^v:vfail:rc=1:lines=1:.*FIX_REQUIRED' '^v:vfail-proceed:rc=1:lines=1:' '^v:vcontext:rc=1:lines=1:.*NEEDS_CONTEXT' \
+  '^v:vfix:rc=1:lines=1:.*FIX_REQUIRED' '^v:vescalate:rc=1:lines=1:.*ESCALATE' '^v:vnorec:rc=2:lines=1:.*Recommendation' '^v:vtemplate:rc=2:lines=1:.*FIX_REQUIRED \| ESCALATE' '^v:vtworec:rc=2:lines=1:' \
+  '^v:fence-only:rc=2:lines=1:.*no ### Status' '^v:fence-tilde:rc=2:lines=1:.*no ### Status' '^v:fence-long:rc=2:lines=1:.*no ### Status' '^v:fence-wrapped:rc=2:lines=1:.*no ### Status' '^v:fence-open:rc=2:lines=1:.*unterminated' \
+  '^v:fence-second:rc=1:lines=1:.*FIX_REQUIRED' '^v:fence-quoted:rc=0:lines=0:$' '^v:fence-issue:rc=1:lines=1:' '^v:none-dashdot:rc=0:lines=0:$' '^v:none-identified:rc=0:lines=0:$' '^v:none-bold:rc=0:lines=0:$' \
+  '^v:none-then:rc=1:lines=1:' '^v:none-but:rc=1:lines=1:.*migration looks unsafe' '^v:vtests-fail:rc=1:lines=1:.*### Tests: FAIL' '^v:vbuild-fail:rc=1:lines=1:.*### Build' '^v:vtests-pass:rc=0:lines=0:$' '^v:vtests-quoted:rc=0:lines=0:$' \
+  '^v:vnostatus:rc=2:lines=1:' '^v:vtwostatus:rc=2:lines=1:' '^v:vbadstatus:rc=2:lines=1:.*PASSED' '^v:absent:rc=2:lines=1$' '^v:emptyfile:rc=2:lines=1$' '^v:badkind:rc=64$' \
+  '^v:shape-plan:rc=0:' '^v:shape-plan-echo:rc=2:' '^v:shape-verify:rc=0:' '^v:shape-verify-echo:rc=2:' \
+  '^store:bootstrapped:4$' '^store:fresh:rc=0$' '^store:memory:rc=1$' '^store:changelog:rc=1$' '^store:solution:rc=1$' '^store:decision:rc=1$' '^store:nested:rc=1$' '^store:linked:rc=1$' '^store:linkdir:rc=1$' \
+  '^store:nofiles:rc=0$' '^store:nodirs:rc=0$' '^store:noops:rc=1$' \
+  '^store:perm-control:rc=0$' '^store:perm-ops:rc=1$' '^store:perm-ops-noexec:rc=1$' '^store:perm-ops-noread:rc=1$' '^store:perm-solutions:rc=1$' '^store:perm-child:rc=1$' '^store:tmpl-absent:rc=1$' '^store:tmpl-absent-nofiles:rc=0$')"
+
 _S12_CAP="persona lane: dispatch_persona under the worker boundary with enforced tool classes, the trio at the top rung, a lead-controlled cwd, exec in a restored disposable snapshot worktree with integrity checks (KTD5, KTD20, KTD21, KTD22; R14, R35, R48)"
 if [ -z "$_S12_FAIL" ]; then
-  row "SELF-12" "claude" "$_S12_CAP" "PASS" "resolve: tiers from the ladder, max_turns from the manifest, --model rung or id; trio opus/max (no record), fable/max (CC-02 PASS), opus/max (CC-02 FAIL); ladder-named plan-checker -> top; trio sonnet / lower rung / codex -> 64; lease + agent-team -> 64 naming at-resolve-pr / agent_teams (unenforced); unknown / path-shaped / bad CLI -> 64; manifest bad tier (lists the ladder tiers) / unknown key / not TOML -> 70, missing -> 69; corrupted ladder -> 70; persona_prompt: bodies by name (lease + agent-team too), unknown 64, no body 70, no manifest 69, bad entry 70, worker marker 45; read: claude -p Read,Grep,Glob (no Bash) dontAsk strict-mcp project+local opus/high turns 7, --brief in the prompt, denyWrite = the empty scratch cwd (gone after), the input file copied beside it, marker persona + no-push, planted key dropped; web: + WebFetch,WebSearch (no Bash) sonnet/high; neither gains Bash with the sandbox off; task:dirty read: the snapshot diff as input, AGENTS.md + .mcp.json named; codex (flags after the positionals): exec under the triforge_persona permission profile (extends :read-only, every credential path denied, no -s), approval never, --skip-git-repo-check, env policy pinned, gpt-6-astra/high, -o <out>; a codex without permission profiles 69; trio argv fable/max with CC-02 PASS, opus/max without, --model sonnet refused before any CLI; noclaude: read falls back to codex (NOTE), trio/read-web/exec -> 69 naming the install fix, neither -> 69; exec --at task:dirty: detached snapshot worktree under the lease root, the brief (input) seen, the feature change seen, AGENTS.md from the integration branch, no .mcp.json, its write gone with the worktree, lease_merge from inside -> 45 (marker persona), no edit tool, denyWrite the lead git dir, AGENTS.md + .mcp.json named as content under review; no --at = ref:HEAD (integration commit, nothing named), --at ref:other (its change seen, AGENTS.md restored and named, reclaimed); bare dirty / task:dirty as input = --at task:dirty with the lease diff as input; task: + --at 64; persona_snapshot_diff writes the recorded snapshot's diff byte-equal to base..snapshot_sha after the lease tip moved past it (the tip's diff has the extra file, the written one not), unknown / fix cycle / dir / usage 64, marker 45; poison: read on the clean / dirty snapshot diffs (the dirty one's AGENTS.md + .mcp.json named as content under review) and exec at task:dirty report the finding, no MCP marker (control from the builder worktree: no findings + marker); ledger: a persona-forged user promotion approval -> dispatch 44 naming ops/leases.toml, gone, promote 42; a straggler's -> promote 44; the lead's own -> promoted; guard: marker / lease worktree 45, missing input / directory input / --at on read / --at without task:|ref: / unknown ref / dash ref / unknown task 64, no body 70, empty answer 80, AGENTS.md above the cwd 69, ~/.claude/CLAUDE.md above it 69 once CLAUDE_CONFIG_DIR is set (absolute or empty) and the CLAUDE.md of an absolute one skipped, a ledger repointed at another snapshot 44 before the run (restored), a ledger changed before a ref:HEAD run 44, a lease in a fix cycle 64, a directory as <out> 64, a failing protected-path classifier without pipefail 1 before any run; hooks inert inside a persona (control without the marker writes); round 3: persona_spawn returns at once with <name>.pid, persona_wait 75 under a 3 s budget then 0 with the rc, a stopped or killed run 80, persona_stop ends the whole tree, marker 45 for all three, usage / unknown run 64; every claude run under CLAUDE_CODE_DISABLE_ATTACHMENTS=1 and the trusted bundle's @ written as (at); a dropped [baseline].config with re-anchored digests and a poisoned .git/config 44 before any run; a persona deleting a run marker and moving a tag 44; a TERM-ignoring CLI KILLed before its worktree is reclaimed; a lease_merge mid-run 0, a persona moving the integration branch 44 naming HEAD and the branch; round 4: a builder moving the integration branch, switching or detaching the lead's HEAD before a dispatch 44 with no CLI run, a switched HEAD with a lease open and no integration branch recorded 44, the controls 0; a background child the CLI leaves stopped once the run ends (read and exec), the in-group ledger straggler stopped before it writes (promote 42), a daemonized one still caught (promote 44); persona_stop on a run whose wrapper alone was killed stops its CLI (0) or says unresolved cleanup (80, ps failing); a stopped read or exec run leaves no scratch directory or worktree; round 5: main moved after the integrity check and back during the run -> the instructions from the recorded default_sha; on main mid-sprint an exec persona runs (0) and the integration branch stays; a detached HEAD -> 44 advising to check the branch out again; the run supervisor without os.waitid and with a TERM before its child is noted still stops the child; ps unreadable mid-run -> 80, worktree and scratch left; an old record never reaches a stranger's session; shipped manifest: ${_S12_SHIPPED}" "static"
+  row "SELF-12" "claude" "$_S12_CAP" "PASS" "resolve: tiers from the ladder, max_turns from the manifest, --model rung or id; trio opus/max (no record), fable/max (CC-02 PASS), opus/max (CC-02 FAIL); ladder-named plan-checker -> top; trio sonnet / lower rung / codex -> 64; lease + agent-team -> 64 naming at-resolve-pr / agent_teams (unenforced); unknown / path-shaped / bad CLI -> 64; manifest bad tier (lists the ladder tiers) / unknown key / not TOML -> 70, missing -> 69; corrupted ladder -> 70; persona_prompt: bodies by name (lease + agent-team too), unknown 64, no body 70, no manifest 69, bad entry 70, worker marker 45; read: claude -p Read,Grep,Glob (no Bash) dontAsk strict-mcp project+local opus/high turns 7, --brief in the prompt, denyWrite = the empty scratch cwd (gone after), the input file copied beside it, marker persona + no-push, planted key dropped; web: + WebFetch,WebSearch (no Bash) sonnet/high; neither gains Bash with the sandbox off; task:dirty read: the snapshot diff as input, AGENTS.md + .mcp.json named; codex (flags after the positionals): exec under the triforge_persona permission profile (extends :read-only, every credential path denied, no -s), approval never, --skip-git-repo-check, env policy pinned, gpt-6-astra/high, -o <out>; a codex without permission profiles 69; trio argv fable/max with CC-02 PASS, opus/max without, --model sonnet refused before any CLI; noclaude: read falls back to codex (NOTE), trio/read-web/exec -> 69 naming the install fix, neither -> 69; exec --at task:dirty: detached snapshot worktree under the lease root, the brief (input) seen, the feature change seen, AGENTS.md from the integration branch, no .mcp.json, its write gone with the worktree, lease_merge from inside -> 45 (marker persona), no edit tool, denyWrite the lead git dir, AGENTS.md + .mcp.json named as content under review; no --at = ref:HEAD (integration commit, nothing named), --at ref:other (its change seen, AGENTS.md restored and named, reclaimed); bare dirty / task:dirty as input = --at task:dirty with the lease diff as input; task: + --at 64; persona_snapshot_diff writes the recorded snapshot's diff byte-equal to base..snapshot_sha after the lease tip moved past it (the tip's diff has the extra file, the written one not), unknown / fix cycle / dir / usage 64, marker 45; poison: read on the clean / dirty snapshot diffs (the dirty one's AGENTS.md + .mcp.json named as content under review) and exec at task:dirty report the finding, no MCP marker (control from the builder worktree: no findings + marker); ledger: a persona-forged user promotion approval -> dispatch 44 naming ops/leases.toml, gone, promote 42; a straggler's -> promote 44; the lead's own -> promoted; guard: marker / lease worktree 45, missing input / directory input / --at on read / --at without task:|ref: / unknown ref / dash ref / unknown task 64, no body 70, empty answer 80, AGENTS.md above the cwd 69, ~/.claude/CLAUDE.md above it 69 once CLAUDE_CONFIG_DIR is set (absolute or empty) and the CLAUDE.md of an absolute one skipped, a ledger repointed at another snapshot 44 before the run (restored), a ledger changed before a ref:HEAD run 44, a lease in a fix cycle 64, a directory as <out> 64, a failing protected-path classifier without pipefail 1 before any run; hooks inert inside a persona (control without the marker writes); round 3: persona_spawn returns at once with <name>.pid, persona_wait 75 under a 3 s budget then 0 with the rc, a stopped or killed run 80, persona_stop ends the whole tree, marker 45 for all three, usage / unknown run 64; every claude run under CLAUDE_CODE_DISABLE_ATTACHMENTS=1 and the trusted bundle's @ written as (at); a dropped [baseline].config with re-anchored digests and a poisoned .git/config 44 before any run; a persona deleting a run marker and moving a tag 44; a TERM-ignoring CLI KILLed before its worktree is reclaimed; a lease_merge mid-run 0, a persona moving the integration branch 44 naming HEAD and the branch; round 4: a builder moving the integration branch, switching or detaching the lead's HEAD before a dispatch 44 with no CLI run, a switched HEAD with a lease open and no integration branch recorded 44, the controls 0; a background child the CLI leaves stopped once the run ends (read and exec), the in-group ledger straggler stopped before it writes (promote 42), a daemonized one still caught (promote 44); persona_stop on a run whose wrapper alone was killed stops its CLI (0) or says unresolved cleanup (80, ps failing); turnbudget: error_max_turns -> rc 81, deterministic, max-turns, the line naming the persona and the manifest on both classes and beside rc=81 in persona_wait, another subtype unchanged, 40 turns 4800 s at high and 8000 s at xhigh, the two researchers at 40; a stopped read or exec run leaves no scratch directory or worktree; round 5: main moved after the integrity check and back during the run -> the instructions from the recorded default_sha; on main mid-sprint an exec persona runs (0) and the integration branch stays; a detached HEAD -> 44 advising to check the branch out again; the run supervisor without os.waitid and with a TERM before its child is noted still stops the child; ps unreadable mid-run -> 80, worktree and scratch left; an old record never reaches a stranger's session; shipped manifest: ${_S12_SHIPPED}; persona_verdict: pass 0, NEEDS_REVISION, FAIL, NEEDS_CONTEXT or a contradiction 1 (a check reading FAIL under PASS too), malformed or missing 2 (a Status only inside a backtick or tilde fence, a report wrapped whole in one, an unterminated fence), fenced lines content of an open section, the None spellings clean and any real line beside them 1, the shipped formats filled in pass; learnings_store_empty: a real bootstrap is empty, any change to the four sources, a missing template, no ops/ or an ops/ or folder it cannot read or search is not" "static"
 else
   row "SELF-12" "claude" "$_S12_CAP" "FAIL" "mismatch:$(printf '%s' "$_S12_FAIL" | cut -c1-900)" "static"
 fi
@@ -5101,8 +5373,9 @@ rm -rf "$_S12"
 #            check lease_reclaim now runs first, the worktree kept
 #   caps     a codex lead with hooks on in a stub `codex features list` and a
 #            stub app-server whose hooks/list reports the plugin's two
-#            PostToolUse hooks trusted (their trusted_hash in a throwaway
-#            ~/.codex/config.toml), its SessionStart hook untrusted and its
+#            PostToolUse hooks trusted (one content-bound approval and one
+#            older trusted_hash in a throwaway ~/.codex/config.toml), its
+#            SessionStart hook untrusted and its
 #            PreCompact hook modified -> wait_budget_s 900,
 #            hooks_trusted.PostToolUse present, SessionStart and PreCompact
 #            absent, one NOTE naming what is absent, none on the second call;
@@ -5417,7 +5690,7 @@ case "${1:-}" in
         *'"hooks/list"'*)
           printf '{"id": 2, "result": {"data": [{"cwd": "probe", "hooks": [%s, %s, %s, %s]}]}}\n' \
             '{"source": "plugin", "pluginId": "agent-triforge@tf", "eventName": "sessionStart", "key": "s1", "currentHash": "hs1", "trustStatus": "untrusted"}' \
-            '{"source": "plugin", "pluginId": "agent-triforge@tf", "eventName": "postToolUse", "key": "p1", "currentHash": "hp1", "trustStatus": "trusted"}' \
+            '{"source": "plugin", "pluginId": "agent-triforge@tf", "eventName": "postToolUse", "key": "p1", "currentHash": "dp1/cp1", "trustStatus": "trusted"}' \
             '{"source": "plugin", "pluginId": "agent-triforge@tf", "eventName": "postToolUse", "key": "p2", "currentHash": "hp2", "trustStatus": "trusted"}' \
             '{"source": "plugin", "pluginId": "agent-triforge@tf", "eventName": "preCompact", "key": "c1", "currentHash": "hc1", "trustStatus": "modified"}'
           exit 0 ;;
@@ -5427,7 +5700,7 @@ case "${1:-}" in
 esac
 S13_CAPS_CODEX_EOF
 chmod +x "$_S13/caps-bin/codex"
-printf '[hooks.state."p1"]\ntrusted_hash = "hp1"\n\n[hooks.state."p2"]\ntrusted_hash = "hp2"\n\n[hooks.state."c1"]\ntrusted_hash = "hc1-before-an-edit"\n' > "$_S13/caps-home/.codex/config.toml"
+printf '[hooks.state."p1"]\ntrusted_hash = "dp1"\ntrusted_content_hash = "cp1"\n\n[hooks.state."p2"]\ntrusted_hash = "hp2"\n\n[hooks.state."c1"]\ntrusted_hash = "hc1-before-an-edit"\n' > "$_S13/caps-home/.codex/config.toml"
 _S13_CAPS_STEP='
 export TRIFORGE_LEAD_PID=$$
 for N in 1 2; do
@@ -5444,7 +5717,7 @@ _S13_FAIL="${_S13_FAIL}$(_self_expect caps "$O" '^caps-1:rc=0:caps=\[(.*;)?wait_
 
 _S13_CAP="[lead] table + lead host check: load validation (exit 5), absent = claude, no-parser exit 3, the non-lead CLI refused naming at-setup lead, both leads' markers refused as ambiguous, a terminal runs as the user (via=tty) and so do the sweeps it starts, no TTY and no markers refused unless the SELF seam names the lead, the worker marker first, roster_write_lead needing a stated origin and refusing open leases, --force handing building leases over without spending requeue, reclaim under the other lead and never under a forged root, capabilities with an absent one reported once (KTD1, R1, R38, R40, R44)"
 if [ -z "$_S13_FAIL" ]; then
-  row "SELF-13" "claude" "$_S13_CAP" "PASS" "load: cursor / non-table / unknown key / bad effort -> resolve_lead and resolve_role 5 naming it; absent -> claude (default); claude + model + effort kept; codex alone -> gpt-6-astra xhigh; parser: tomllib and tomli hidden -> resolve_lead and resolve_lead_caps 3 with the parser message, never absent, lease_create 45 naming it; host: [lead] codex under CLAUDECODE -> lease_merge / lease_create / roster_write_role 45, one line naming at-setup lead, CLAUDE_CODE_ENTRYPOINT the same; CODEX_THREAD_ID -> runs, lead_via=lead-session; both families -> ambiguous, 45 naming it; no [lead] under CLAUDECODE -> runs; ambig: both families + a pty -> lease_create and roster_write_lead 45, lease_approve refused, each naming the ambiguity; tty: pty on stdin, no markers -> runs, lead_via=tty; ttysweep: from a pty, no markers -> lease_heartbeat_check collects a finished builder, lease_wait 0 on one, roster_write_lead --force adopts a building lease, no refusal; notty: 45 naming the markers, either seam variable alone 45, both (claude) -> lead_via=test, both naming codex -> 45, a cached host-check pass still records this shell's lead_via; worker: marker beside markers + seam (+ pty) -> 45 by the marker, nothing carved or written; write: cursor 2, bad effort 2, no args 64, codex -> one [lead] block, roles + comments kept, claude replaces it in place, --force with no ledger runs; origin: roster_write_lead with no origin -> 45 naming via=none, roster unchanged; from Claude Code's session, Codex's, the seam and a pty -> written; open: t1 leased -> refused naming t1 and --force, roster byte-identical, same lead new effort runs; force: from the old lead refused before writing, from the new lead both building leases adopted (reason=lead-exit, lead_exit_at, requeue 0), released -> review, requeue 0; reclaim: created under TMPDIR=A as claude, reclaimed under TMPDIR=B as codex -> pruned, no identity mismatch; forged: a planted root in a lead-written row -> prune refused, a hand-edited row -> 44, both worktrees kept; caps: codex 900 s, PostToolUse present (hooks/list trusted, trusted_hash matching), SessionStart (untrusted) and PreCompact (modified) absent, one NOTE then none; claude 600 s, every plugin event present, no NOTE" "static"
+  row "SELF-13" "claude" "$_S13_CAP" "PASS" "load: cursor / non-table / unknown key / bad effort -> resolve_lead and resolve_role 5 naming it; absent -> claude (default); claude + model + effort kept; codex alone -> gpt-6-astra xhigh; parser: tomllib and tomli hidden -> resolve_lead and resolve_lead_caps 3 with the parser message, never absent, lease_create 45 naming it; host: [lead] codex under CLAUDECODE -> lease_merge / lease_create / roster_write_role 45, one line naming at-setup lead, CLAUDE_CODE_ENTRYPOINT the same; CODEX_THREAD_ID -> runs, lead_via=lead-session; both families -> ambiguous, 45 naming it; no [lead] under CLAUDECODE -> runs; ambig: both families + a pty -> lease_create and roster_write_lead 45, lease_approve refused, each naming the ambiguity; tty: pty on stdin, no markers -> runs, lead_via=tty; ttysweep: from a pty, no markers -> lease_heartbeat_check collects a finished builder, lease_wait 0 on one, roster_write_lead --force adopts a building lease, no refusal; notty: 45 naming the markers, either seam variable alone 45, both (claude) -> lead_via=test, both naming codex -> 45, a cached host-check pass still records this shell's lead_via; worker: marker beside markers + seam (+ pty) -> 45 by the marker, nothing carved or written; write: cursor 2, bad effort 2, no args 64, codex -> one [lead] block, roles + comments kept, claude replaces it in place, --force with no ledger runs; origin: roster_write_lead with no origin -> 45 naming via=none, roster unchanged; from Claude Code's session, Codex's, the seam and a pty -> written; open: t1 leased -> refused naming t1 and --force, roster byte-identical, same lead new effort runs; force: from the old lead refused before writing, from the new lead both building leases adopted (reason=lead-exit, lead_exit_at, requeue 0), released -> review, requeue 0; reclaim: created under TMPDIR=A as claude, reclaimed under TMPDIR=B as codex -> pruned, no identity mismatch; forged: a planted root in a lead-written row -> prune refused, a hand-edited row -> 44, both worktrees kept; caps: codex 900 s, PostToolUse present (hooks/list trusted, one trusted_hash and trusted_content_hash pair and one older trusted_hash matching), SessionStart (untrusted) and PreCompact (modified) absent, one NOTE then none; claude 600 s, every plugin event present, no NOTE" "static"
 else
   row "SELF-13" "claude" "$_S13_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S13_FAIL"):$(printf '%s' "$_S13_FAIL" | cut -c1-900)" "static"
 fi
@@ -5776,6 +6049,17 @@ echo "reviewer=$(_ledger_get t reviewer)"
 ')
 _S14_FAIL="${_S14_FAIL}$(_self_expect late "$O" '^t:go=0:review$' '^prot1=no$' '^status1=t .* no +- ' '^t:fix=0:review$' '^prot2=yes:paths=AGENTS\.md$' \
   '^status2=t .* yes +needed ' '^bare:rc=42:.*AGENTS\.md' '^repin:rc=1:.*already pinned' '^app:rc=0:' '^status3=t .* yes +lead:claude/test ' '^merge:rc=0:' '^reviewer=antigravity$')"
+
+# nopin: no pin, no merge, and the refusal says what a pin is and is not (R27)
+_s14_repo nopin claude codex
+printf '#!/bin/sh\necho feature > feature.txt\necho "Status: DONE"\n' | _s14_builder nopin
+O=$(_s14_lead nopin claude '
+_self_go t
+_self_try bare lease_merge t antigravity
+echo "state=$(_ledger_get t state)"
+')
+_S14_FAIL="${_S14_FAIL}$(_self_expect nopin "$O" '^t:go=0:review$' \
+  '^bare:rc=1:.*no reviewer is pinned for t.*the pin names the reviewer and records that the review step was reached; it does not prove the final snapshot was reviewed' '^state=review$')"
 
 # origin: where an approval was recorded, under either lead's markers, a terminal, a worker
 _s14_repo origin codex claude
@@ -6626,31 +6910,12 @@ rm -rf "$_S14"
 # the marker writes .claude/*.local.md and .codex/; codex: the 3.x hook writes
 # ops/CHANGELOG.md), so
 # a hook that never loaded can't pass. Gated on CC-02 / CDX-03; SKIPPED under
-# --self-only.
-_S15="${WORK}/self15"
+# --self-only; `--only SELF-15b,SELF-15c` runs them alone. The seam, the fixture
+# helpers (_s15_init, _s15_repo, _s15_lead) and the live rows are in
+# scripts/probe-self15-live.sh, which both paths source.
+_s15_init
 _S15_FAIL=""
 _S15_HOOKS="${_SELF_DIR}/../hooks/handlers"
-rm -rf "$_S15"
-mkdir -p "$_S15"
-# The 3.x templates/.codex/hooks.json, verbatim: it appended to ops/CHANGELOG.md
-# and wrote .claude/codex-changelog.* from every Codex session (codexhook, SELF-15c).
-cat > "$_S15/codex-hooks-3x.json" <<'S15_CDX3_EOF'
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh -c '[ -f .claude/codex-changelog.$PPID ] || { mkdir -p .claude ops; printf \"%s | codex | tool activity in session\\n\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >> ops/CHANGELOG.md && touch .claude/codex-changelog.$PPID; }'"
-          }
-        ]
-      }
-    ]
-  }
-}
-S15_CDX3_EOF
 
 _s15_listing() { # _s15_listing <dir...> — every path below the dirs with size and mtime, sorted
   python3 - "$@" <<'S15_LIST_PY'
@@ -6730,42 +6995,6 @@ _S15_NEG=$(_s15_hooks "$_S15/neg-handlers" neg builder)
 _S15_NEG_MISSED=$(printf '%s\n' "$_S15_NEG" | grep ':ok$' | cut -d/ -f1 | tr '\n' ' ' || true)
 [ -z "$_S15_NEG_MISSED" ] || _S15_FAIL="$_S15_FAIL hooks-negative-control(not-flagged:${_S15_NEG_MISSED% })"
 
-# _s15_repo <dir> <ignore-agents:yes|no> — main + checked-out sprint/s15, tracking
-# .agents/skills/my-skill/SKILL.md and .claude/commands/my-command.md
-_s15_repo() {
-  ( mkdir -p "$1" && cd "$1" && export HOME="$_S15/home" GIT_CONFIG_NOSYSTEM=1 && git init -q -b main \
-      && git config user.email "probe@triforge.local" && git config user.name "triforge-probe" \
-      && mkdir -p ops .agents/skills/my-skill .claude/commands \
-      && printf '[roles.builder]\ncli = "claude"\n' > ops/roster.toml \
-      && printf 'my skill\n' > .agents/skills/my-skill/SKILL.md && printf 'my command\n' > .claude/commands/my-command.md \
-      && { [ "$2" = no ] || printf '/.agents/\n' > .gitignore; } && echo r > README.md \
-      && git add -A && git add -f .agents/skills/my-skill/SKILL.md && git commit -qm init \
-      && git checkout -q -b sprint/s15 ) >/dev/null 2>&1
-}
-# _s15_lead <repo> <fake builder> <script> — lead-side steps from <repo> with the
-# library sourced, the case's HOME and lease root exported (as _s18_lead does)
-_s15_lead() {
-  ( cd "$1" && export HOME="$_S15/home" TRIFORGE_LEASE_ROOT="$1.leases" PATH="${_SELF_STUBS}:$PATH" TRIFORGE_TEST_BUILDER="$2" GIT_CONFIG_NOSYSTEM=1 \
-      && source "${_SELF_DIR}/invoke-external.sh" 2>/dev/null && {
-    _s15_go() { # _s15_go <task> — dispatch an existing lease and wait for its exit record
-      local N=0 OUT
-      lease_dispatch "$1" "probe task" 60 >/dev/null 2>&1 || { echo "dispatch-failed"; return 1; }
-      OUT=$(_ledger_get "$1" output_file 2>/dev/null)
-      while [ ! -f "${OUT}.rc" ] && [ "$N" -lt 300 ]; do sleep 0.1; N=$((N + 1)); done
-    }
-    _s15_snapnames() { # _s15_snapnames <task> — the paths the lead's snapshot of <task> would carry now
-      local ROW W A B P T
-      ROW=$(_ledger_get_row "$1" worktree admin_dir base_sha provisioned) || return 1
-      { IFS= read -r W || true; IFS= read -r A || true; IFS= read -r B || true; IFS= read -r P || true; } <<S15_ROW_EOF
-${ROW}
-S15_ROW_EOF
-      T=$(_lease_tree_of_worktree "$W" "$A" "$B" "$P") || return 1
-      git diff --name-only "$B" "$T" | tr '\n' ' '
-    }
-    eval "$3"
-  } ) 2>&1 || true   # the caller reads the output; a case that stops early shows as missing lines
-}
-mkdir -p "$_S15/home"
 
 # refuse
 _s15_repo "$_S15/rf" no
@@ -6941,76 +7170,8 @@ else
   row "SELF-15" "claude" "$_S15_CAP" "FAIL" "mismatch:$(printf '%s' "$_S15_FAIL" | cut -c1-700)" "static"
 fi
 
-# SELF-15b / SELF-15c — the live halves (see the SELF-15 comment)
-_S15_LCAP="live worker leaves no bootstrap residue in its worktree or squash (KTD9)"
-_s15_residue() { # _s15_residue <worktree> — new or changed bootstrap paths there (ops/, .codex/, .claude/*.local.md, .claude/codex-changelog.*)
-  git -C "$1" status --porcelain --untracked-files=all --ignored 2>/dev/null | cut -c4- \
-    | grep -E '^(ops/|\.codex/|\.claude/[^/]*\.local\.md$|\.claude/codex-changelog\.)' | tr '\n' ' ' || true
-}
-_S15_LPROMPT="Create a file named feature.txt in the current directory containing the single word ok. Then reply with exactly one line: Status: DONE"
-if [ "$SELF_ONLY" = 1 ]; then
-  row "SELF-15b" "claude" "$_S15_LCAP: claude -p" "SKIPPED" "--self-only: live rows are not part of the SELF gate (run the full probe)" "live"
-  row "SELF-15c" "codex" "$_S15_LCAP: codex exec" "SKIPPED" "--self-only: live rows are not part of the SELF gate (run the full probe)" "live"
-else
-  # stub agy only, so the control run's session start never installs the real agy pack
-  mkdir -p "$_S15/live-stubs"
-  printf '#!/bin/sh\n# probe stub (SELF-15b): answers the session-start hook without touching the real agy install\necho "0.0.0-probe-stub"\nexit 0\n' > "$_S15/live-stubs/agy"
-  chmod +x "$_S15/live-stubs/agy"
-  if ! command -v claude >/dev/null 2>&1; then
-    row "SELF-15b" "claude" "$_S15_LCAP: claude -p" "UNAVAILABLE" "claude not on PATH" "live"
-  elif [ "$CC_LIVE" != 1 ]; then
-    row "SELF-15b" "claude" "$_S15_LCAP: claude -p" "$(_skip_reason)" "gated on CC-02" "live"
-  else
-    _s15_repo "$_S15/lcc" no
-    _s15_lead "$_S15/lcc" "" 'lease_create m builder >/dev/null 2>&1; lease_create c builder >/dev/null 2>&1' >/dev/null
-    _S15_W="$_S15/lcc.leases/m"; _S15_WC="$_S15/lcc.leases/c"
-    ( cd "$_S15_W" && PATH="$_S15/live-stubs:$PATH" _lane_run 300 claude -p --plugin-dir "$REPO_ROOT" --model sonnet --permission-mode acceptEdits --output-format text "$_S15_LPROMPT" > "$_S15/lcc-m.txt" 2>&1 ) || true
-    ( cd "$_S15_WC" && PATH="$_S15/live-stubs:$PATH" _lane_run 300 env -u TRIFORGE_LEASE_WORKER claude -p --plugin-dir "$REPO_ROOT" --model sonnet --permission-mode acceptEdits --output-format text "$_S15_LPROMPT" > "$_S15/lcc-c.txt" 2>&1 ) || true
-    _S15_RES=$(_s15_residue "$_S15_W"); _S15_RESC=$(_s15_residue "$_S15_WC")
-    _S15_SQ=$(_s15_lead "$_S15/lcc" "" '_s15_snapnames m')
-    if [ ! -f "$_S15_W/feature.txt" ]; then
-      row "SELF-15b" "claude" "$_S15_LCAP: claude -p" "FAIL" "the worker wrote no feature.txt, so no tool hook ran: $(_evidence "$_S15/lcc-m.txt")" "live"
-    elif [ -z "$_S15_RESC" ]; then
-      row "SELF-15b" "claude" "$_S15_LCAP: claude -p" "FAIL" "control without the marker left no residue either — the plugin hooks did not load under --plugin-dir in env -i, so the marker run proves nothing; $(_evidence "$_S15/lcc-c.txt")" "live"
-    elif [ -n "$_S15_RES" ] || [ "${_S15_SQ% }" != "feature.txt" ]; then
-      row "SELF-15b" "claude" "$_S15_LCAP: claude -p" "FAIL" "marker run left residue: ${_S15_RES:-none}; squash: ${_S15_SQ:-<empty>}; control residue: ${_S15_RESC}" "live"
-    else
-      row "SELF-15b" "claude" "$_S15_LCAP: claude -p" "PASS" "claude -p --plugin-dir <this checkout> --model sonnet under _lane_run (marker builder) in a lease worktree: feature.txt written, no ops/.codex/.claude/*.local.md, squash = feature.txt; control without the marker left: ${_S15_RESC% }" "live"
-    fi
-  fi
-  if ! command -v codex >/dev/null 2>&1; then
-    row "SELF-15c" "codex" "$_S15_LCAP: codex exec" "UNAVAILABLE" "codex not on PATH" "live"
-  elif [ "$CDX_LIVE" != 1 ]; then
-    row "SELF-15c" "codex" "$_S15_LCAP: codex exec" "$(_skip_reason)" "gated on CDX-03" "live"
-  elif [ "${#U29_CDX_FLAGS[@]}" -eq 0 ]; then
-    row "SELF-15c" "codex" "$_S15_LCAP: codex exec" "FAIL" "could not read the codex lane flags (_lease_lane_argv codex) through scripts/invoke-external.sh" "live"
-  else
-    _s15_repo "$_S15/lcx" no
-    _s15_repo "$_S15/lcx3" no
-    ( cd "$_S15/lcx" && mkdir -p .codex && cp "$REPO_ROOT/templates/.codex/hooks.json" .codex/hooks.json && git add .codex && git commit -qm "codex hook (4.0 template)" ) >/dev/null 2>&1
-    mkdir -p "$_S15/lcx3/.codex" && cp "$_S15/codex-hooks-3x.json" "$_S15/lcx3/.codex/hooks.json"
-    ( cd "$_S15/lcx3" && git add .codex && git commit -qm "codex hook (3.x template)" ) >/dev/null 2>&1
-    _s15_lead "$_S15/lcx" "" 'lease_create m builder >/dev/null 2>&1' >/dev/null
-    _s15_lead "$_S15/lcx3" "" 'lease_create c builder >/dev/null 2>&1' >/dev/null
-    _S15_W="$_S15/lcx.leases/m"; _S15_WC="$_S15/lcx3.leases/c"
-    for _s15_w in "$_S15_W" "$_S15_WC"; do
-      ( cd "$_s15_w" && _lane_run 300 codex "${U29_CDX_FLAGS[@]}" --skip-git-repo-check \
-          --dangerously-bypass-hook-trust -m "$CDX_MODEL" -c 'model_reasoning_effort="low"' "$_S15_LPROMPT" < /dev/null > "${_s15_w}.txt" 2>&1 ) || true
-    done
-    unset _s15_w
-    _S15_RES=$(_s15_residue "$_S15_W"); _S15_RESC=$(_s15_residue "$_S15_WC")
-    _S15_SQ=$(_s15_lead "$_S15/lcx" "" '_s15_snapnames m')
-    if [ ! -f "$_S15_W/feature.txt" ]; then
-      row "SELF-15c" "codex" "$_S15_LCAP: codex exec" "FAIL" "the worker wrote no feature.txt, so no tool hook ran: $(_evidence "${_S15_W}.txt")" "live"
-    elif [ -z "$_S15_RESC" ]; then
-      row "SELF-15c" "codex" "$_S15_LCAP: codex exec" "FAIL" "control (3.x hook) left no residue either — project hooks did not fire with --dangerously-bypass-hook-trust in env -i, so the 4.0 run proves nothing; $(_evidence "${_S15_WC}.txt")" "live"
-    elif [ -n "$_S15_RES" ] || [ "${_S15_SQ% }" != "feature.txt" ]; then
-      row "SELF-15c" "codex" "$_S15_LCAP: codex exec" "FAIL" "4.0 hook run left residue: ${_S15_RES:-none}; squash: ${_S15_SQ:-<empty>}; control residue: ${_S15_RESC}" "live"
-    else
-      row "SELF-15c" "codex" "$_S15_LCAP: codex exec" "PASS" "codex exec -s workspace-write --dangerously-bypass-hook-trust -m $CDX_MODEL under _lane_run (marker builder) in a lease worktree with the shipped .codex/hooks.json: feature.txt written, no ops/.codex-changelog residue, squash = feature.txt; control with the 3.x hook left: ${_S15_RESC% }" "live"
-    fi
-  fi
-fi
+# SELF-15b / SELF-15c: the live halves (see the SELF-15 comment), in scripts/probe-self15-live.sh.
+_s15_live_rows
 rm -rf "$_S15"
 
 # SELF-18 (KTD18/KTD19 — R46, R47, R49): a builder can't make the lead's git
@@ -8848,11 +9009,11 @@ rm -rf "$_S19"
 #             worker marker, the background-task switch and the no-push config.
 #             A stub refusing for want of a sandbox -> class deterministic,
 #             naming TRIFORGE_CLAUDE_SANDBOX
-#   floor     the sandbox floor (TRIFORGE_CLAUDE_SANDBOX_FLOOR, 2.1.285): a stub
-#             answering --version 2.1.281, or no X.Y.Z -> the builder and
-#             dispatch_role refuse, class deterministic, naming 2.1.285 and
-#             TRIFORGE_CLAUDE_SANDBOX=off, the stub never run; 2.1.285 -> the
-#             builder runs; 2.1.281 with TRIFORGE_CLAUDE_SANDBOX=off -> runs
+#   floor     the sandbox floor (TRIFORGE_CLAUDE_SANDBOX_FLOOR, 2.1.314): a stub
+#             answering --version 2.1.313, or no X.Y.Z -> the builder and
+#             dispatch_role refuse, class deterministic, naming 2.1.314 and
+#             TRIFORGE_CLAUDE_SANDBOX=off, the stub never run; 2.1.314 -> the
+#             builder runs; 2.1.313 with TRIFORGE_CLAUDE_SANDBOX=off -> runs
 #   lifecycle the seam with builder = claude: an envelope ending Status: DONE ->
 #             review with session_id and result_subtype recorded; the fix cycle
 #             (lease_redispatch) records resumed_session = that id; a max-turns
@@ -8889,7 +9050,7 @@ mkdir -p "$_S20/home" "$_S20/bin" "$_S20/tmp" "$_S20/wtb" "$_S20/link-target"
 cat > "$_S20/bin/claude" <<EOF
 #!/bin/sh
 # probe stub (SELF-20): a claude -p --output-format json stand-in; records argv and env
-case "\${1:-}" in --version) cat "\${TMPDIR:?}/s20-version" 2>/dev/null || echo "2.1.289 (Claude Code)"; exit 0 ;; esac
+case "\${1:-}" in --version) cat "\${TMPDIR:?}/s20-version" 2>/dev/null || echo "2.1.314 (Claude Code)"; exit 0 ;; esac
 R="\${TMPDIR:?}/s20-rec"
 i=0
 for a in "\$@"; do i=\$((i + 1)); printf '%s' "\$a" > "\$R.\$i"; done
@@ -9098,21 +9259,21 @@ _S20_FAIL="${_S20_FAIL}$(_self_expect nosandbox "$O" '^rc=[1-9][0-9]*:class=dete
 # floor: the claude lane's sandbox floor, read from the stub's --version
 _s20_floor() { # _s20_floor <label> <out> — the builder's exit record, what <out> names, whether the stub ran
   printf '%s:rc=%s:class=%s:floor=%s:optout=%s:ran=%s\n' "$1" "$(cat "$2.rc" 2>/dev/null)" "$(cat "$2.class" 2>/dev/null)" \
-    "$(grep -c '2\.1\.285' "$2" 2>/dev/null || true)" "$(grep -c 'TRIFORGE_CLAUDE_SANDBOX=off' "$2" 2>/dev/null || true)" \
+    "$(grep -c '2\.1\.314' "$2" 2>/dev/null || true)" "$(grep -c 'TRIFORGE_CLAUDE_SANDBOX=off' "$2" 2>/dev/null || true)" \
     "$(if [ -f "$_S20/tmp/s20-rec.n" ]; then echo yes; else echo no; fi)"
 }
-printf '2.1.281 (Claude Code)\n' > "$_S20/tmp/s20-version"
+printf '2.1.313 (Claude Code)\n' > "$_S20/tmp/s20-version"
 _s20_builder done "$_S20/old.out"
 O=$(_s20_floor old "$_S20/old.out")
 printf 'Claude Code (version unknown)\n' > "$_S20/tmp/s20-version"
 _s20_builder done "$_S20/unread.out"
 O="${O}
 $(_s20_floor unread "$_S20/unread.out")"
-printf '2.1.285 (Claude Code)\n' > "$_S20/tmp/s20-version"
+printf '2.1.314 (Claude Code)\n' > "$_S20/tmp/s20-version"
 _s20_builder done "$_S20/floor.out"
 O="${O}
 $(_s20_floor floor "$_S20/floor.out")"
-printf '2.1.281 (Claude Code)\n' > "$_S20/tmp/s20-version"
+printf '2.1.313 (Claude Code)\n' > "$_S20/tmp/s20-version"
 TRIFORGE_CLAUDE_SANDBOX=off _s20_builder done "$_S20/optout.out"
 O="${O}
 $(_s20_floor optout "$_S20/optout.out")"
@@ -9122,7 +9283,7 @@ rm -f "$_S20"/tmp/s20-rec.*
 # shellcheck disable=SC2086
 _S20_FD=$( cd "$_S20/flead" && export $_S20_ENV TRIFORGE_TEST_LEAD=codex && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "load-failed"; exit 0; }
   R=0; dispatch_role reviewer logic_reviewer "PROMPT-S20F" "$_S20/flead.out" 30 >/dev/null 2>"$_S20/flead.err" || R=$?
-  echo "fdispatch:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:floor=$(grep -c '2\.1\.285' "$_S20/flead.out" 2>/dev/null || true):err=$(grep -c 'TRIFORGE_CLAUDE_SANDBOX=off' "$_S20/flead.err" 2>/dev/null || true):ran=$(if [ -f "$_S20/tmp/s20-rec.n" ]; then echo yes; else echo no; fi)"
+  echo "fdispatch:rc=${R}:class=${INVOKE_FAILURE_CLASS:-}:floor=$(grep -c '2\.1\.314' "$_S20/flead.out" 2>/dev/null || true):err=$(grep -c 'TRIFORGE_CLAUDE_SANDBOX=off' "$_S20/flead.err" 2>/dev/null || true):ran=$(if [ -f "$_S20/tmp/s20-rec.n" ]; then echo yes; else echo no; fi)"
 ) 2>&1 || true
 O="${O}
 ${_S20_FD}"
@@ -9255,7 +9416,7 @@ _S20_FAIL="${_S20_FAIL}$(_self_expect ctx "$O" '^ctx-root:rc=69:class=determinis
 
 _S20_CAP="claude -p lane as builder, reviewer and tester under either lead: JSON envelope (subtype, is_error, session_id), explicit tool sets, --max-turns, session resume, the sandbox settings and their Claude Code floor, the claude env arm, .claude/skills provisioning that adds names only, max-turns routed as report missing, dispatch_role running claude -p under a codex lead, never without its deny on the lead's git dir inside a git checkout (KTD16, R2/R3)"
 if [ -z "$_S20_FAIL" ]; then
-  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.281 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.285 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.285 runs, 2.1.281 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, repo-local-skill + ${_S20_COLLIDE} user copy intact and unlisted, repo-local-skill edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0; ctx: a codex lead's tester on claude with TRIFORGE_LEASE_ROOT=/dev/null/x -> rc 69 deterministic, the lease line and one ERROR line, stub never run; outside any git repository the reviewer runs, rc 0; ccd (4.1): an absolute CLAUDE_CONFIG_DIR (with a space) reaches the claude worker as set, never codex or grok, and its .credentials.json is denied (Read rule rooted with //, sandbox denyRead, the codex read persona's profile); a relative or empty one reaches no worker, a relative one denied from the lead's working directory and an empty one as that directory's .credentials.json; set to HOME's .claude or a link to it, the codex profile parses as TOML and names each credential path once" "static"
+  row "SELF-20" "claude" "$_S20_CAP" "PASS" "argv: -p json, project+local settings, strict MCP, acceptEdits, --tools without Agent/web, --allowedTools Bash,Skill, sandbox on + failIfUnavailable + no unsandboxed retry + credential denyRead + lead .git denyWrite, Read deny rules, --model/--effort/--resume ${_S20_SID} only when set and UUID-shaped, --max-turns last; TRIFORGE_CLAUDE_SANDBOX=off keeps the deny rules; env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS + DISABLE_AUTOUPDATER on claude only, no TRIFORGE_TEST_* in a worker, codex shell_environment_policy pinned (5 keys); builder: result -> <out> (Status DONE), envelope recorded, --resume passed, prompt last, marker + no-push config in the CLI's env; sandbox refusal -> deterministic; floor: --version 2.1.313 or unreadable -> builder and dispatch_role refuse (deterministic, naming 2.1.314 and TRIFORGE_CLAUDE_SANDBOX=off, stub never run), 2.1.314 runs, 2.1.313 with the sandbox off runs; lifecycle: review + session_id recorded, fix cycle resumed_session=${_S20_SID}, max-turns -> rc 80 leased error_max_turns; skills: portable set in .claude/skills byte-equal, no at-*, repo-local-skill + ${_S20_COLLIDE} user copy intact and unlisted, repo-local-skill edit merged, copies excluded, symlinked .claude untouched; dispatch: claude lead rc 40 (stub idle), codex lead rc 0 REVIEW-OK via claude -p (dontAsk, no edit tools); home: from a HOME that is itself a git repository, a codex lead's tester and reviewer on claude -> rc 69 deterministic, one ERROR line (a home directory is no project), stub never run, HOME byte-identical; from a project with its own repository under that HOME the tester runs, rc 0; ctx: a codex lead's tester on claude with TRIFORGE_LEASE_ROOT=/dev/null/x -> rc 69 deterministic, the lease line and one ERROR line, stub never run; outside any git repository the reviewer runs, rc 0; ccd (4.1): an absolute CLAUDE_CONFIG_DIR (with a space) reaches the claude worker as set, never codex or grok, and its .credentials.json is denied (Read rule rooted with //, sandbox denyRead, the codex read persona's profile); a relative or empty one reaches no worker, a relative one denied from the lead's working directory and an empty one as that directory's .credentials.json; set to HOME's .claude or a link to it, the codex profile parses as TOML and names each credential path once" "static"
 else
   row "SELF-20" "claude" "$_S20_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S20_FAIL"):$(printf '%s' "$_S20_FAIL" | cut -c1-700)" "static"
 fi
@@ -10845,9 +11006,13 @@ rm -rf "$_S25"
 #                 input, the brief naming full.diff), the same run directory
 #                 for all six. Core:
 #                 both lanes released together; REVIEW_ANTIGRAVITY from cursor;
-#                 REVIEW_CODEX with the codex prose and verdict although its
-#                 transcript quotes Status: BLOCKED (the last-message file is
-#                 the answer); cursor's prompt holds the package. Optional: all
+#                 REVIEW_CODEX holding the answer the last-message file holds
+#                 (the JSON verdict, then its fold) and no line of the session,
+#                 although that transcript quotes Status: BLOCKED; cursor's
+#                 prompt holds the package; each core prompt, each specialist's
+#                 brief and each optional prompt carries the Coverage rule (a
+#                 stale deployed agent file and a retry's raw prompt lean on
+#                 it). Optional: all
 #                 five released together, each prompt holding the committed and
 #                 uncommitted changes, the [R] row, the untracked name, the
 #                 inventory and the diff markers; REVIEW files for cursor,
@@ -10861,6 +11026,25 @@ rm -rf "$_S25"
 #                 failed as a retry may fix, then a retry answering BLOCKED:
 #                 two runs, not promoted (the retry's answer, not the stale
 #                 verdict)
+#   coverage      (R24) the dispatch block with no specialists, then
+#                 synthesis.md's first block on the real gates.sh; each case
+#                 reads the REVIEW files and the gaps file. codex-spoof: the
+#                 session's last line says Coverage: complete, the answer ends
+#                 partial: the gap. quote-fenced and quote-indented: a quoted
+#                 Coverage: complete at the end of the answer with no real last
+#                 line: missing. quote-above: a quoted partial above a real
+#                 complete: no gap. cov-blocked: BLOCKED followed by a Coverage
+#                 line: not promoted, the lane a bare gap. schema-complete,
+#                 schema-partial, schema-nofield: the verdict JSON's coverage
+#                 folded after the JSON; no field: missing. analyst-codex: the
+#                 analyst role on codex promoted from its answer too. optional:
+#                 an optional CLI in a core role and on its own lane, Status
+#                 then Coverage; BLOCKED then Coverage not promoted. schema:
+#                 the schema file itself stays strict. format: every reviewer
+#                 format section shows the line. unit: review_coverage's table
+#   gap-rerun     REVIEW_ONLY re-runs named lanes inside the cycle, under bash
+#                 and zsh; only theirs archived, a name off the list refused
+#   skill-pointers  $SKILL_DIR defined, no $ROOT pointer, the canonical rules
 #   core-quote    the analyst on agy, whose answer quotes "Status: BLOCKED" in
 #                 a finding: promoted; one whose last line is Status: BLOCKED:
 #                 not promoted, named
@@ -10909,6 +11093,10 @@ done
 awk -v S="$_S26/s26-persona.sh" '/^```bash$/ { n++; if (n == 1) { f = 1; next } } /^```$/ { f = 0 }
   f { print; if (!d && index($0, "source \"$ROOT/scripts/invoke-external.sh\"")) { print ". \"" S "\""; d = 1 } }' \
   "${REPO_ROOT}/skills/at-review/references/dispatch.md" > "$_S26/blocks/core.sh" 2>/dev/null || true
+grep -v -E '^_spec ' "$_S26/blocks/core.sh" > "$_S26/blocks/coreoff.sh" 2>/dev/null || true
+awk -v S="$_S26/s26-persona.sh" '/^```bash$/ { n++; if (n == 1) { f = 1; next } } /^```$/ { f = 0 }
+  f { print; if (!d && index($0, "source \"$ROOT/scripts/invoke-external.sh\"")) { print ". \"" S "\""; d = 1 } }' \
+  "${REPO_ROOT}/skills/at-review/references/synthesis.md" > "$_S26/blocks/syn.sh" 2>/dev/null || true
 { printf '# SELF-26 persona recorders (sourced by the dispatch block after its helper load)\n_S26P_D=%s\n' "'$_S26'"; cat <<'EOF'
 # persona_spawn logs its arguments, one per line, to log/persona.<n> and
 # leaves <run-dir>/<name>.pid as a started run does; no persona CLI starts
@@ -10979,7 +11167,8 @@ echo "Status: BLOCKED" >&2
 echo "(an earlier report, quoted by a tool call)" >&2
 ANS=$(cat "$D/cfg/codex.ans" 2>/dev/null || printf 'Reviewed the package.\n[P3] calc.py:3 S26-CODEX-FINDING')
 printf '%s\n' "$ANS"
-if [ -n "$O" ] && [ "$SCH" = 1 ]; then printf '{"findings":[],"summary":"S26-VERDICT","review_scope":"package"}\n' > "$O"
+if [ -n "$O" ] && [ "$SCH" = 1 ] && [ -f "$D/cfg/codex.json" ]; then cat "$D/cfg/codex.json" > "$O"
+elif [ -n "$O" ] && [ "$SCH" = 1 ]; then printf '{"findings":[],"summary":"S26-VERDICT","review_scope":"package","coverage":"complete"}\n' > "$O"
 elif [ -n "$O" ]; then printf '%s\n' "$ANS" > "$O"; fi
 if [ -f "$D/cfg/codex.tail" ]; then cat "$D/cfg/codex.tail" >&2; fi
 if [ -f "$D/cfg/codex.fail-first" ] && [ ! -f "$D/log/codex.failed" ]; then
@@ -10992,7 +11181,7 @@ EOF
 # listing the default TRIFORGE_AGY_MODE=auto consults, lists nothing and is
 # not a run (so every lane routes by injection, as before the default changed)
 { printf '#!/bin/sh\n# SELF-26 agy stub\nD=%s\nN=agy\n' "'$_S26'"; cat <<'EOF'
-case "$1" in --version|-V) echo "agy 1.2.0"; exit 0 ;; agents) exit 0 ;; esac
+case "$1" in --version|-V) echo "agy 1.2.0"; exit 0 ;; agents|--help) exit 0 ;; esac
 . "$D/bin/s26-record"
 cat "$D/cfg/agy.ans" 2>/dev/null
 exit "$(cat "$D/cfg/agy.rc" 2>/dev/null || echo 0)"
@@ -11016,7 +11205,7 @@ chmod +x "$_S26/bin/opencode" "$_S26/bin/kimi" "$_S26/bin/cursor-agent" "$_S26/b
 _S26_PATH="${_S26}/bin:${_SELF_STUBS}:${PATH}"
 _S26_DONE='Reviewed.\nStatus: DONE\nFiles changed: none\nTests: none\nConcerns: None\nDiscoveries for later tasks: None\n'
 _S26_KIMI='[members.kimi]\nenabled = true\nmodel = "kimi-code/k3"\n'
-_S26_MEMBERS='[members.opencode]\nenabled = true\nmodel = "openrouter/z-ai/glm-5.3"\n[members.cursor]\nenabled = true\nmodel = "cursor-grok-4.6-xhigh"\n[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\nconsent = "user 2026-10-07T00:00:00Z via=tty"\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n'
+_S26_MEMBERS='[members.opencode]\nenabled = true\nmodel = "openrouter/z-ai/glm-5.3"\n[members.cursor]\nenabled = true\nmodel = "grok-4.7-xhigh"\n[members.devin]\nenabled = true\nmodel = "swe-1-6-slow"\nconsent = "user 2026-10-07T00:00:00Z via=tty"\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n'
 _S26_ANALYST_CURSOR='[roles.analyst]\ncli = "cursor"\nfallbacks = ["antigravity"]\n\n'
 printf '%b' "$_S26_DONE" > "$_S26/cfg/opencode.ans"; echo 1 > "$_S26/cfg/opencode.rc"
 printf '%b' "$_S26_DONE" > "$_S26/cfg/devin.ans"; echo 0 > "$_S26/cfg/devin.rc"
@@ -11088,6 +11277,17 @@ _s26_argv() {
   done
   echo "$_S26/log/none"
 }
+# _s26_rule <argv file>: yes when one recorded prompt carries the Coverage rule
+_s26_rule() { if grep -qF 'Coverage: partial: <reason>' "$1" 2>/dev/null; then echo yes; else echo no; fi; }
+# _s26_judge <file>: how often one prompt or file says each review rule (R22,
+# R23, R26) and the not-run clause the Coverage definition carries. The brief and
+# the agent file each say it once, so an argv is 2 where the helper prefixes the
+# agent file (codex, cursor, devin, grok), 1 where the CLI loads it itself
+# (opencode, kimi) and on a retry's raw prompt.
+_s26_count() { { grep -o -F -- "$1" "$2" 2>/dev/null || true; } | grep -c . || true; }
+_s26_judge() {
+  echo "accept=$(_s26_count 'udge every `Accept:`; an unmet one is at least P2' "$1"):read=$(_s26_count 'ead the callers, the contracts and the surrounding code before you report or clear a finding' "$1"):secret=$(_s26_count 'ever quote a secret value: name the file, line and shape' "$1"):notrun=$(_s26_count 'listed `not run`' "$1")"
+}
 # _s26_marks <argv file> — what of the package one recorded prompt holds
 _s26_marks() {
   echo "begin=$(grep -c -- '----- BEGIN DIFF -----' "$1" 2>/dev/null || true):committed=$(grep -c 'S26-COMMITTED' "$1" 2>/dev/null || true):uncommitted=$(grep -c 'S26-UNCOMMITTED' "$1" 2>/dev/null || true):row=$(grep -c 'S26-ROW' "$1" 2>/dev/null || true):untracked=$(grep -cx "?${_S26_TAB}s26-untracked.py" "$1" 2>/dev/null || true):inventory=$(grep -cx "M${_S26_TAB}calc.py" "$1" 2>/dev/null || true)"
@@ -11153,26 +11353,44 @@ O=$( _s26_reset
   echo "main-persona:inject=$(grep -c 's26-persona\.sh' "$_S26/blocks/core.sh" 2>/dev/null || true):$(_s26_personas "$P" "$RUN")"
   echo "main-core:rc=${R}:seen=$(cat "$_S26/log/cursor-agent.0.seen" 2>/dev/null || true),$(cat "$_S26/log/codex.0.seen" 2>/dev/null || true):prose=$(grep -c 'S26-CODEX-FINDING' "$_S26/mn/ops/REVIEW_CODEX.md" 2>/dev/null || true):verdict=$(grep -c 'S26-VERDICT' "$_S26/mn/ops/REVIEW_CODEX.md" 2>/dev/null || true)"
   echo "main-core-prompt:$(_s26_marks "$(_s26_argv cursor-agent REVIEW_ANTIGRAVITY.md)")"
+  echo "main-rule:analyst=$(_s26_rule "$(_s26_argv cursor-agent REVIEW_ANTIGRAVITY.md)"):reviewer=$(_s26_rule "$_S26/log/codex.0.argv"):specialists=$(grep -l -F 'Coverage: partial: <reason>' "$_S26/log"/persona.* 2>/dev/null | grep -c . || true)"
+  echo "main-judge-analyst:$(_s26_judge "$(_s26_argv cursor-agent REVIEW_ANTIGRAVITY.md)")"
+  echo "main-analyst-return:final=$(grep -c 'Return the whole review as your final response' "$(_s26_argv cursor-agent REVIEW_ANTIGRAVITY.md)" 2>/dev/null || true):write=$(grep -c 'if you can' "$(_s26_argv cursor-agent REVIEW_ANTIGRAVITY.md)" 2>/dev/null || true)"
+  echo "main-judge-reviewer:$(_s26_judge "$_S26/log/codex.0.argv")"
+  # the specialists' brief, SPEC_BRIEF; the learnings-researcher's is no review lane
+  for F in "$_S26/log"/persona.*; do
+    grep -qx learnings-researcher "$F" && continue
+    echo "main-judge-specialist:$(sed -n 3p "$F"):$(_s26_judge "$F")"
+  done
   _s26_reset
   echo 5 > "$_S26/cfg/barrier"
   R=$(_s26_run mn "$_S26/mn" opt REVIEW_PKG="$P" REVIEW_RUN="$RUN")
   S=""
   for N in opencode kimi cursor-agent devin grok; do S="${S}${S:+,}$(cat "$_S26/log/$N.0.seen" 2>/dev/null || true)"; done
   echo "main-opt:rc=${R}:seen=${S}:opencode-failed=$(grep -c '^review: opencode reviewer lane FAILED rc=1 ' "$_S26/mn.opt.err" 2>/dev/null || true):grok-failed=$(grep -c '^review: grok reviewer lane FAILED rc=' "$_S26/mn.opt.err" 2>/dev/null || true)"
-  for N in opencode kimi cursor-agent devin grok; do echo "main-opt-prompt-${N}:$(_s26_marks "$(_s26_argv "$N" 'REVIEW_<YOUR_CLI>.md')")"; done
+  for N in opencode kimi cursor-agent devin grok; do echo "main-opt-prompt-${N}:$(_s26_marks "$(_s26_argv "$N" 'REVIEW_<YOUR_CLI>.md')"):rule=$(_s26_rule "$(_s26_argv "$N" 'REVIEW_<YOUR_CLI>.md')")"; done
+  for N in opencode kimi cursor-agent devin grok; do echo "main-judge-opt-${N}:$(_s26_judge "$(_s26_argv "$N" 'REVIEW_<YOUR_CLI>.md')")"; done
   echo "main-files:$(_s26_files "$_S26/mn")"
   echo "main-lanes:$(paste -sd, "${RUN:-$_S26/none}/lanes" 2>/dev/null || true)"
   rm -f "$_S26/cfg/barrier" )
 _S26_FAIL="${_S26_FAIL}$(_self_expect main "$O" '^main-pkg:rc=0:untracked=1:said=1$' '^main-learn:rc=0:spawn=1:entry=1$' \
   '^main-persona:inject=1:spawns=6:pkg=5:brief=6:learn=1:run=same$' \
   '^main-lanes:ops/REVIEW_ANTIGRAVITY\.md,ops/REVIEW_CODEX\.md,ops/REVIEW_SECURITY_SENTINEL\.md,ops/REVIEW_PERFORMANCE_ORACLE\.md,ops/REVIEW_CODE_SIMPLICITY_REVIEWER\.md,ops/REVIEW_CONVENTION_ENFORCER\.md,ops/REVIEW_ARCHITECTURE_STRATEGIST\.md,ops/REVIEW_OPENCODE\.md,ops/REVIEW_KIMI\.md,ops/REVIEW_CURSOR\.md,ops/REVIEW_DEVIN\.md,ops/REVIEW_GROK\.md$' \
-  '^main-core:rc=0:seen=2,2:prose=1:verdict=1$' '^main-core-prompt:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
+  '^main-core:rc=0:seen=2,2:prose=0:verdict=2$' '^main-core-prompt:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
+  '^main-rule:analyst=yes:reviewer=yes:specialists=5$' \
+  '^main-analyst-return:final=1:write=0$' \
+  '^main-judge-analyst:accept=2:read=2:secret=2:notrun=2$' '^main-judge-reviewer:accept=2:read=2:secret=2:notrun=2$' \
+  '^main-judge-specialist:security-sentinel:accept=1:read=1:secret=1:notrun=1$' '^main-judge-specialist:performance-oracle:accept=1:read=1:secret=1:notrun=1$' \
+  '^main-judge-specialist:code-simplicity-reviewer:accept=1:read=1:secret=1:notrun=1$' '^main-judge-specialist:convention-enforcer:accept=1:read=1:secret=1:notrun=1$' \
+  '^main-judge-specialist:architecture-strategist:accept=1:read=1:secret=1:notrun=1$' \
+  '^main-judge-opt-opencode:accept=1:read=1:secret=1:notrun=1$' '^main-judge-opt-kimi:accept=1:read=1:secret=1:notrun=1$' '^main-judge-opt-cursor-agent:accept=2:read=2:secret=2:notrun=2$' \
+  '^main-judge-opt-devin:accept=2:read=2:secret=2:notrun=2$' '^main-judge-opt-grok:accept=2:read=2:secret=2:notrun=2$' \
   '^main-opt:rc=0:seen=5,5,5,5,5:opencode-failed=1:grok-failed=1$' \
-  '^main-opt-prompt-opencode:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
-  '^main-opt-prompt-kimi:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
-  '^main-opt-prompt-cursor-agent:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
-  '^main-opt-prompt-devin:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
-  '^main-opt-prompt-grok:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$' \
+  '^main-opt-prompt-opencode:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1:rule=yes$' \
+  '^main-opt-prompt-kimi:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1:rule=yes$' \
+  '^main-opt-prompt-cursor-agent:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1:rule=yes$' \
+  '^main-opt-prompt-devin:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1:rule=yes$' \
+  '^main-opt-prompt-grok:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1:rule=yes$' \
   '^main-files:REVIEW_ANTIGRAVITY,REVIEW_CODEX,REVIEW_CURSOR,REVIEW_DEVIN,REVIEW_KIMI$')"
 
 # codex-noschema: the output schema off, the last-message file still written
@@ -11192,11 +11410,236 @@ O=$( _s26_reset
   : > "$_S26/cfg/codex.features"; : > "$_S26/cfg/codex.fail-first"; _s26_reset
   R=$(_s26_run mn4 "$_S26/mn" pkg REVIEW_PKG=); P=$(_s26_pkg mn4)
   R=$(_s26_run mn4 "$_S26/mn" core REVIEW_PKG="$P")
-  echo "codex-retry:rc=${R}:runs=$(grep -cx codex "$_S26/log/runs" 2>/dev/null || true):files=$(_s26_files "$_S26/mn"):said=$(grep -c 'the codex lane reported Status: BLOCKED — not promoted' "$_S26/mn4.core.err" 2>/dev/null || true)"
+  echo "codex-retry:rc=${R}:runs=$(grep -cx codex "$_S26/log/runs" 2>/dev/null || true):files=$(_s26_files "$_S26/mn"):said=$(grep -c 'the codex lane reported Status: BLOCKED — not promoted' "$_S26/mn4.core.err" 2>/dev/null || true):rawrule=$(_s26_rule "$_S26/log/codex.1.argv"):rawjudge=$(_s26_judge "$_S26/log/codex.1.argv")"
   rm -f "$_S26/cfg/codex.ans" "$_S26/cfg/codex.fail-first" )
 : > "$_S26/cfg/codex.features"
 _S26_FAIL="${_S26_FAIL}$(_self_expect codex-noschema "$O" '^codex-noschema:rc=0:prose=1:verdict=0:last=1$' \
-  '^codex-blocked:rc=0:files=REVIEW_ANTIGRAVITY:said=1$' '^codex-retry:rc=0:runs=2:files=REVIEW_ANTIGRAVITY:said=1$')"
+  '^codex-blocked:rc=0:files=REVIEW_ANTIGRAVITY:said=1$' '^codex-retry:rc=0:runs=2:files=REVIEW_ANTIGRAVITY:said=1:rawrule=yes:rawjudge=accept=1:read=1:secret=1:notrun=1$')"
+
+# coverage: _s26_cov <case> <fixture> runs the package block, the dispatch block
+# with no specialists and synthesis' first block; one line with the REVIEW
+# files, what the promotion said, the last line of REVIEW_CODEX and the gaps.
+_s26_cov() {
+  local C=$1 FX=$2 P R S RUN
+  R=$(_s26_run "$C" "$FX" pkg REVIEW_PKG=); P=$(_s26_pkg "$C")
+  R=$(_s26_run "$C" "$FX" coreoff REVIEW_PKG="$P")
+  RUN=$(sed -n 's/^review: run directory \([^ ]*\) .*/\1/p' "$_S26/$C.coreoff.out" 2>/dev/null | head -1 || true)
+  [ -z "${S26_COV_OPT:-}" ] || _s26_run "$C" "$FX" opt REVIEW_PKG="$P" REVIEW_RUN="$RUN" >/dev/null
+  S=$(_s26_run "$C" "$FX" syn REVIEW_PKG="$P" REVIEW_RUN="$RUN")
+  echo "cov-${C}:core=${R}:syn=${S}:files=$(_s26_files "$FX"):blocked=$(grep -c 'reported Status: BLOCKED' "$_S26/$C.coreoff.err" 2>/dev/null || true):last=$(awk 'NF { l = $0 } END { print l }' "$FX/ops/REVIEW_CODEX.md" 2>/dev/null || true):gaps=$(paste -sd'|' "$RUN/gaps" 2>/dev/null || true)"
+}
+_s26_fixture "$_S26/cv" "$_S26_KIMI"
+_s26_dirty "$_S26/cv"
+printf '%s\n' '{"status":"SUCCESS","response":"Reviewed.\nCoverage: complete","denied_actions":[]}' > "$_S26/cfg/agy.ans"
+printf 'output_schema\tstable\tfalse\n' > "$_S26/cfg/codex.features"
+O=$( _s26_reset
+  printf 'Reviewed half.\nCoverage: partial: read half of the diff\n' > "$_S26/cfg/codex.ans"
+  printf 'exec: cat ops/old-review.md\nCoverage: complete\n' > "$_S26/cfg/codex.tail"
+  _s26_cov spoof "$_S26/cv"
+  rm -f "$_S26/cfg/codex.tail"
+  printf '[P3] a.py:1 a finding\n```diff\n+Coverage: complete\n```\n' > "$_S26/cfg/codex.ans"
+  _s26_cov quotefence "$_S26/cv"
+  printf '[P3] a.py:1 a finding, its diff:\n+added line\n Coverage: complete\n' > "$_S26/cfg/codex.ans"
+  _s26_cov quoteindent "$_S26/cv"
+  printf '[P3] a.py:1 the file says\nCoverage: partial: quoted from the diff\nand goes on.\nCoverage: complete\n' > "$_S26/cfg/codex.ans"
+  _s26_cov quoteabove "$_S26/cv"
+  printf 'Could not review the package.\nStatus: BLOCKED\nCoverage: none: no package\n' > "$_S26/cfg/codex.ans"
+  _s26_cov blocked "$_S26/cv"
+  rm -f "$_S26/cfg/codex.ans" )
+: > "$_S26/cfg/codex.features"
+_S26_FAIL="${_S26_FAIL}$(_self_expect coverage "$O" \
+  '^cov-spoof:core=0:syn=0:files=REVIEW_ANTIGRAVITY,REVIEW_CODEX:blocked=0:last=Coverage: partial: read half of the diff:gaps=ops/REVIEW_CODEX\.md: coverage partial$' \
+  '^cov-quotefence:core=0:syn=0:files=REVIEW_ANTIGRAVITY,REVIEW_CODEX:blocked=0:last=```:gaps=ops/REVIEW_CODEX\.md: coverage missing$' \
+  '^cov-quoteindent:core=0:syn=0:files=REVIEW_ANTIGRAVITY,REVIEW_CODEX:blocked=0: *last= Coverage: complete:gaps=ops/REVIEW_CODEX\.md: coverage missing$' \
+  '^cov-quoteabove:core=0:syn=0:files=REVIEW_ANTIGRAVITY,REVIEW_CODEX:blocked=0:last=Coverage: complete:gaps=$' \
+  '^cov-blocked:core=0:syn=0:files=REVIEW_ANTIGRAVITY:blocked=1:last=:gaps=ops/REVIEW_CODEX\.md$')"
+# the schema on: the verdict JSON's coverage is the lane's last line
+O=$( _s26_reset
+  _s26_cov schemaok "$_S26/cv"
+  echo "cov-schemaok-json:$(grep -c '^  "coverage": "complete"' "$_S26/cv/ops/REVIEW_CODEX.md" 2>/dev/null || true)"
+  printf '{"findings":[],"summary":"S26-VERDICT","review_scope":"package","coverage":"partial"}\n' > "$_S26/cfg/codex.json"
+  _s26_cov schemapart "$_S26/cv"
+  printf '{"findings":[],"summary":"S26-VERDICT","review_scope":"package"}\n' > "$_S26/cfg/codex.json"
+  _s26_cov schemanone "$_S26/cv"
+  rm -f "$_S26/cfg/codex.json"
+  python3 -I -c 'import json, sys
+s = json.load(open(sys.argv[1]))
+c = s["properties"].get("coverage", {})
+print("cov-schema:required=%s:enum=%s:parity=%s:additional=%s" % ("coverage" in s["required"], ",".join(c.get("enum", [])), set(s["required"]) == set(s["properties"]), s["additionalProperties"]))' "${REPO_ROOT}/codex-agents/review-verdict.schema.json" 2>&1 )
+_S26_FAIL="${_S26_FAIL}$(_self_expect coverage-schema "$O" \
+  '^cov-schemaok:core=0:syn=0:files=REVIEW_ANTIGRAVITY,REVIEW_CODEX:blocked=0:last=Coverage: complete:gaps=$' '^cov-schemaok-json:1$' \
+  '^cov-schemapart:core=0:syn=0:files=REVIEW_ANTIGRAVITY,REVIEW_CODEX:blocked=0:last=Coverage: partial:gaps=ops/REVIEW_CODEX\.md: coverage partial$' \
+  '^cov-schemanone:core=0:syn=0:files=REVIEW_ANTIGRAVITY,REVIEW_CODEX:blocked=0:last=```:gaps=ops/REVIEW_CODEX\.md: coverage missing$' \
+  '^cov-schema:required=True:enum=complete,partial,none:parity=True:additional=False$')"
+# the analyst role on codex: its session is not its answer either
+_s26_fixture "$_S26/cx" '[roles.analyst]\ncli = "codex"\nfallbacks = ["claude"]\n'
+_s26_dirty "$_S26/cx"
+printf 'output_schema\tstable\tfalse\n' > "$_S26/cfg/codex.features"
+O=$( _s26_reset
+  printf 'Reviewed half.\nCoverage: partial: read half of the diff\n' > "$_S26/cfg/codex.ans"
+  printf 'exec: cat ops/old-review.md\nCoverage: complete\n' > "$_S26/cfg/codex.tail"
+  _s26_cov anacodex "$_S26/cx"
+  rm -f "$_S26/cfg/codex.ans" "$_S26/cfg/codex.tail" )
+: > "$_S26/cfg/codex.features"
+_S26_FAIL="${_S26_FAIL}$(_self_expect coverage-analyst "$O" \
+  '^cov-anacodex:core=0:syn=0:files=REVIEW_ANTIGRAVITY,REVIEW_CODEX:blocked=0:last=Coverage: partial: read half of the diff:gaps=ops/REVIEW_ANTIGRAVITY\.md: coverage partial\|ops/REVIEW_CODEX\.md: coverage partial$')"
+# every reviewer format section shows the line outside its sample's fence, so a
+# lane copying the sample passes the gate, defines the other two forms and gives
+# the not-run list a section of its own
+_s26_fenced() { ( _TRIFORGE_SCRIPTS_DIR="${REPO_ROOT}/scripts"; . "${REPO_ROOT}/scripts/lib/gates.sh" && LC_ALL=C awk "$_GATES_FENCE_AWK"'{ f = fenced($0); if ($0 == "Coverage: complete" && f) n++ } END { print n + 0 }' "$1" ) 2>/dev/null || echo unread; }
+O=$( for F in codex-agents/agents.toml cursor-agents/reviewer.md grok-agents/reviewer.md kimi-agents/reviewer.md opencode-agents/reviewer.md devin-agents/reviewer.md \
+       antigravity-agents/agents/architecture-reviewer.md personas/security-sentinel.md personas/performance-oracle.md personas/code-simplicity-reviewer.md \
+       personas/convention-enforcer.md personas/architecture-strategist.md; do
+    echo "cov-format:${F}:line=$(grep -cx 'Coverage: complete' "${REPO_ROOT}/$F" 2>/dev/null || true):rule=$(grep -c 'Coverage: partial: <reason>' "${REPO_ROOT}/$F" 2>/dev/null || true):fenced=$(_s26_fenced "${REPO_ROOT}/$F"):notrun=$(grep -cE '^#{2,3} Not run$' "${REPO_ROOT}/$F" 2>/dev/null || true)"
+  done )
+_S26_FAIL="${_S26_FAIL}$(_self_expect coverage-format "$O" 'cov-format:codex-agents/agents\.toml:line=1:rule=1:fenced=0:notrun=1$' 'cov-format:cursor-agents/reviewer\.md:line=1:rule=1:fenced=0:notrun=1$' \
+  'cov-format:grok-agents/reviewer\.md:line=1:rule=1:fenced=0:notrun=1$' 'cov-format:kimi-agents/reviewer\.md:line=1:rule=1:fenced=0:notrun=1$' 'cov-format:opencode-agents/reviewer\.md:line=1:rule=1:fenced=0:notrun=1$' \
+  'cov-format:devin-agents/reviewer\.md:line=1:rule=1:fenced=0:notrun=1$' 'cov-format:antigravity-agents/agents/architecture-reviewer\.md:line=1:rule=1:fenced=0:notrun=1$' \
+  'cov-format:personas/security-sentinel\.md:line=1:rule=1:fenced=0:notrun=1$' 'cov-format:personas/performance-oracle\.md:line=1:rule=1:fenced=0:notrun=1$' 'cov-format:personas/code-simplicity-reviewer\.md:line=1:rule=1:fenced=0:notrun=1$' \
+  'cov-format:personas/convention-enforcer\.md:line=1:rule=1:fenced=0:notrun=1$' 'cov-format:personas/architecture-strategist\.md:line=1:rule=1:fenced=0:notrun=1$')"
+# every reviewer's own file says each rule once, and the Coverage definition's
+# not-run clause is the only place that clause sits; continuous-reviewer, with
+# no Coverage line, carries it in its Accept: sentence, and names gate weakening
+O=$( for F in codex-agents/agents.toml cursor-agents/reviewer.md grok-agents/reviewer.md kimi-agents/reviewer.md opencode-agents/reviewer.md devin-agents/reviewer.md \
+       antigravity-agents/agents/architecture-reviewer.md personas/security-sentinel.md personas/performance-oracle.md personas/code-simplicity-reviewer.md \
+       personas/convention-enforcer.md personas/architecture-strategist.md personas/continuous-reviewer.md skills/at-review/references/trust-rules.md; do
+    echo "judge-file:${F}:$(_s26_judge "${REPO_ROOT}/$F")"
+  done
+  echo "judge-gates:$(_s26_count 'A deleted or skipped test, a relaxed threshold or a disabled gate is a finding' "${REPO_ROOT}/personas/continuous-reviewer.md")"
+  # one heading everywhere, no caveat exit
+  _S26_RT=""
+  for F in skills personas codex-agents cursor-agents grok-agents kimi-agents opencode-agents devin-agents antigravity-agents; do _S26_RT="$_S26_RT ${REPO_ROOT}/$F"; done
+  echo "judge-text:round=$(grep -rl 'Round N' $_S26_RT "${REPO_ROOT}"/docs/*.md 2>/dev/null | grep -c . || true):caveats=$(grep -rl 'approve with caveats' $_S26_RT "${REPO_ROOT}"/docs/*.md 2>/dev/null | grep -c . || true)" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect judge-format "$O" \
+  'judge-file:codex-agents/agents\.toml:accept=1:read=1:secret=1:notrun=1$' \
+  'judge-file:cursor-agents/reviewer\.md:accept=1:read=1:secret=1:notrun=1$' \
+  'judge-file:grok-agents/reviewer\.md:accept=1:read=1:secret=1:notrun=1$' \
+  'judge-file:kimi-agents/reviewer\.md:accept=1:read=1:secret=1:notrun=1$' \
+  'judge-file:opencode-agents/reviewer\.md:accept=1:read=1:secret=1:notrun=1$' \
+  'judge-file:devin-agents/reviewer\.md:accept=1:read=1:secret=1:notrun=1$' \
+  'judge-file:antigravity-agents/agents/architecture-reviewer\.md:accept=1:read=1:secret=1:notrun=1$' \
+  'judge-file:personas/security-sentinel\.md:accept=1:read=1:secret=1:notrun=1$' \
+  'judge-file:personas/performance-oracle\.md:accept=1:read=1:secret=1:notrun=1$' \
+  'judge-file:personas/code-simplicity-reviewer\.md:accept=1:read=1:secret=1:notrun=1$' \
+  'judge-file:personas/convention-enforcer\.md:accept=1:read=1:secret=1:notrun=1$' \
+  'judge-file:personas/architecture-strategist\.md:accept=1:read=1:secret=1:notrun=1$' \
+  'judge-file:personas/continuous-reviewer\.md:accept=1:read=1:secret=1:notrun=1$' \
+  'judge-file:skills/at-review/references/trust-rules\.md:accept=1:read=1:secret=1:notrun=1$' \
+  '^judge-gates:1$' '^judge-text:round=0:caveats=0$')"
+# review_coverage's table: only the file's last non-empty line counts
+mkdir -p "$_S26/cu"
+_S26_MARK='<!-- structured verdict (codex --output-schema, review-verdict.schema.json) -->'
+O=$( _TRIFORGE_SCRIPTS_DIR="${REPO_ROOT}/scripts"; . "${REPO_ROOT}/scripts/lib/gates.sh" || { echo "cov-unit:load-failed"; exit 0; }
+  _u() { printf "$2" > "$_S26/cu/f"; echo "cov-unit:$1=$(review_coverage "$_S26/cu/f")"; }
+  _u plain 'x\nCoverage: complete\n'
+  _u trailing 'x\nCoverage: complete  \n\n  \n'
+  _u crlf 'x\r\nCoverage: complete\r\n'
+  _u nonl 'x\nCoverage: complete'
+  _u longer 'x\nCoverage: completely\n'
+  _u suffix 'x\nCoverage: complete, mostly\n'
+  _u lower 'x\ncoverage: complete\n'
+  _u bold 'x\n**Coverage: complete**\n'
+  _u after 'Coverage: complete\nStatus: DONE\n'
+  _u blank '  \n\n'
+  _u partial 'x\nCoverage: partial: read half\n'
+  _u barepartial 'x\nCoverage: partial\n'
+  _u none 'x\nCoverage: none: the package was unreadable\n'
+  _u bogus 'x\nCoverage: full\n'
+  _u agree "x\nCoverage: partial: read half\n\n${_S26_MARK}\n\`\`\`json\n{\n  \"coverage\": \"partial\"\n}\n\`\`\`\nCoverage: partial\n"
+  _u textdiffers "x\nCoverage: partial: read half\n\n${_S26_MARK}\n\`\`\`json\n{\n  \"coverage\": \"complete\"\n}\n\`\`\`\nCoverage: complete\n"
+  _u jsondiffers "x\nCoverage: complete\n\n${_S26_MARK}\n\`\`\`json\n{\n  \"coverage\": \"partial\"\n}\n\`\`\`\nCoverage: complete\n"
+  _u notext "x\n\n${_S26_MARK}\n\`\`\`json\n{\n  \"coverage\": \"complete\"\n}\n\`\`\`\nCoverage: complete\n"
+  _u nested "x\n\n${_S26_MARK}\n\`\`\`json\n{\n  \"findings\": [{\"detail\": \"\\\\\"coverage\\\\\": \\\\\"partial\\\\\"\"}],\n  \"coverage\": \"complete\"\n}\n\`\`\`\nCoverage: complete\n"
+  # a code fence, by opening character and length: a line inside one never counts
+  _s26_B="\`\`\`"
+  _u fence-open "x\n${_s26_B}\nCoverage: complete\n"
+  _u fence-tilde "x\n~~~\nCoverage: complete\n"
+  _u fence-info "x\n${_s26_B}json\n{}\nCoverage: complete\n"
+  _u fence-short "x\n${_s26_B}\140\n${_s26_B}\nCoverage: complete\n"
+  _u fence-short-tilde "x\n~~~~\n~~~\nCoverage: complete\n"
+  _u fence-other "x\n${_s26_B}\n~~~\nCoverage: complete\n"
+  _u fence-inside "x\n${_s26_B}\nCoverage: complete\n${_s26_B}\n"
+  _u fence-closed "x\n${_s26_B}\nq\n${_s26_B}\nCoverage: complete\n"
+  _u fence-closed-long "x\n${_s26_B}\140\n${_s26_B}\n${_s26_B}\140\nCoverage: complete\n"
+  _u fence-inline "x\n${_s26_B}a${_s26_B}\nCoverage: complete\n"
+  _u fence-indented "x\n    ${_s26_B}\nCoverage: complete\n"
+  _u fence-before-fold "x\n${_s26_B}\nCoverage: complete\n\n${_S26_MARK}\n${_s26_B}json\n{\n  \"coverage\": \"partial\"\n}\n${_s26_B}\nCoverage: partial\n"
+  echo "cov-unit:absent=$(review_coverage "$_S26/cu/absent")"
+  printf 'ops/a.md\n\nops/b.md\nops/absent.md\n' > "$_S26/cu/lanes"
+  ( cd "$_S26/cu" && mkdir -p ops && printf 'x\nCoverage: complete\n' > ops/a.md && printf 'x\nCoverage: none: why\n' > ops/b.md && : > g && review_coverage_gaps lanes g && echo "cov-unit:gaps=$(paste -sd'|' g)" ) )
+_S26_FAIL="${_S26_FAIL}$(_self_expect coverage-unit "$O" '^cov-unit:plain=complete$' '^cov-unit:trailing=complete$' '^cov-unit:crlf=complete$' '^cov-unit:nonl=complete$' \
+  '^cov-unit:longer=missing$' '^cov-unit:suffix=missing$' '^cov-unit:lower=missing$' '^cov-unit:bold=missing$' '^cov-unit:after=missing$' '^cov-unit:blank=missing$' \
+  '^cov-unit:partial=partial$' '^cov-unit:barepartial=partial$' '^cov-unit:none=none$' '^cov-unit:bogus=missing$' '^cov-unit:agree=partial$' \
+  '^cov-unit:textdiffers=contradictory$' '^cov-unit:jsondiffers=contradictory$' '^cov-unit:notext=complete$' '^cov-unit:nested=complete$' \
+  '^cov-unit:fence-open=missing$' '^cov-unit:fence-tilde=missing$' '^cov-unit:fence-info=missing$' '^cov-unit:fence-short=missing$' '^cov-unit:fence-short-tilde=missing$' '^cov-unit:fence-other=missing$' '^cov-unit:fence-inside=missing$' \
+  '^cov-unit:fence-closed=complete$' '^cov-unit:fence-closed-long=complete$' '^cov-unit:fence-inline=complete$' '^cov-unit:fence-indented=complete$' '^cov-unit:fence-before-fold=partial$' \
+  '^cov-unit:absent=missing$' '^cov-unit:gaps=ops/b\.md: coverage none$')"
+
+# gap-rerun: a lane short of complete coverage re-runs inside its cycle.
+# REVIEW_ONLY runs the named lanes (core, optional, persona) on the same package
+# and run directory: every other lane's file, its captured output and the lists
+# stay, only the named files are archived, the verdict folds once, the next
+# synthesis reads the new answers. A name off the list or no run directory stops
+# before anything moves. Under both shells the blocks run in.
+_s26_gr() { # _s26_gr <case> <shell>
+  local C=$1 FX="$_S26/$1" P R1 R2 R3 R4 R5 RUN N A G1 L1 S1 H1
+  _S26_SH=$2
+  _s26_fixture "$FX" "$_S26_KIMI"
+  _s26_dirty "$FX"
+  _s26_reset
+  printf '%s\n' '{"status":"SUCCESS","response":"Reviewed.\nCoverage: complete","denied_actions":[]}' > "$_S26/cfg/agy.ans"
+  printf '{"findings":[],"summary":"S26-VERDICT","review_scope":"package","coverage":"partial"}\n' > "$_S26/cfg/codex.json"
+  printf '%s\n' '{"role":"assistant","content":"Reviewed.\nStatus: DONE\nFiles changed: none"}' > "$_S26/cfg/kimi.ans"
+  R1=$(_s26_run "$C" "$FX" pkg REVIEW_PKG=); P=$(_s26_pkg "$C")
+  R1=$(_s26_run "$C" "$FX" core REVIEW_PKG="$P"); RUN=$(_s26_rundir "$C")
+  R2=$(_s26_run "$C" "$FX" opt REVIEW_PKG="$P" REVIEW_RUN="$RUN")
+  while read -r N; do printf 'x\nCoverage: complete\n' > "$FX/ops/REVIEW_$N.md"; done < "$RUN/specialists"
+  : > "$RUN/SECURITY_SENTINEL.rc"; : > "$RUN/PERFORMANCE_ORACLE.rc"
+  _s26_run "$C" "$FX" syn REVIEW_PKG="$P" REVIEW_RUN="$RUN" >/dev/null
+  G1=$(paste -sd'|' "$RUN/gaps"); L1=$(cksum < "$RUN/lanes"); S1=$(cksum < "$RUN/specialists"); H1=$(cksum < "$FX/ops/REVIEW_ANTIGRAVITY.md")
+  echo "gr-$C:first=$R1:$R2:lanes=$(grep -c . "$RUN/lanes"):gaps=$G1"
+  _s26_reset
+  R3=$(_s26_run "$C-bad" "$FX" core REVIEW_PKG="$P" REVIEW_RUN="$RUN" REVIEW_ONLY=NOSUCH)
+  R4=$(_s26_run "$C-norun" "$FX" core REVIEW_PKG="$P" REVIEW_RUN= REVIEW_ONLY=CODEX)
+  echo "gr-$C:refused=$R3:$R4:named=$(grep -c 'NOSUCH' "$_S26/$C-bad.core.err" || true):runs=$(_s26_runs):archives=$(ls "$FX/ops/archive/reviews" 2>/dev/null | grep -c . || true)"
+  rm -f "$_S26/cfg/codex.json" "$RUN/synthesis.pid"
+  printf '%s\n' '{"role":"assistant","content":"Reviewed.\nStatus: DONE\nFiles changed: none\nCoverage: complete"}' > "$_S26/cfg/kimi.ans"
+  _s26_reset
+  R3=$(_s26_run "$C-re" "$FX" core REVIEW_PKG="$P" REVIEW_RUN="$RUN" REVIEW_ONLY="CODEX KIMI SECURITY_SENTINEL")
+  R4=$(_s26_run "$C-re" "$FX" opt REVIEW_PKG="$P" REVIEW_RUN="$RUN" REVIEW_ONLY="CODEX KIMI SECURITY_SENTINEL")
+  R5=$(_s26_run "$C-re" "$FX" syn REVIEW_PKG="$P" REVIEW_RUN="$RUN")
+  A=$(find "$FX/ops/archive/reviews" -type f -exec basename {} \; | sort | paste -sd, -)
+  echo "gr-$C:rerun=$R3:$R4:$R5:samerun=$([ "$(_s26_rundir "$C-re")" = "$RUN" ] && echo yes || echo no):runs=$(sort "$_S26/log/runs" | paste -sd, -):personas=$(grep -h -x -E 'SECURITY_SENTINEL|PERFORMANCE_ORACLE|synthesis' "$_S26"/log/persona.* 2>/dev/null | sort | paste -sd, -):archived=$A"
+  echo "gr-$C:kept=$([ "$L1" = "$(cksum < "$RUN/lanes")" ] && echo lanes):$([ "$S1" = "$(cksum < "$RUN/specialists")" ] && echo specialists):$([ "$H1" = "$(cksum < "$FX/ops/REVIEW_ANTIGRAVITY.md")" ] && echo analyst):rc=$([ -e "$RUN/SECURITY_SENTINEL.rc" ] && echo left || echo cleared):$([ -e "$RUN/PERFORMANCE_ORACLE.rc" ] && echo left || echo cleared):fold=$(grep -c 'structured verdict' "$FX/ops/REVIEW_CODEX.md" || true):last=$(awk 'NF { l = $0 } END { print l }' "$FX/ops/REVIEW_CODEX.md"):gaps=$(paste -sd'|' "$RUN/gaps")"
+  _s26_reset
+  R3=$(_s26_run "$C-re2" "$FX" core REVIEW_PKG="$P" REVIEW_RUN="$RUN" REVIEW_ONLY=KIMI)
+  echo "gr-$C:other=$R3:runs=$(_s26_runs):fold=$(grep -c 'structured verdict' "$FX/ops/REVIEW_CODEX.md" || true)"
+  rm -f "$_S26/cfg/kimi.ans" "$_S26/cfg/codex.json"
+}
+O=$( _s26_gr grb /bin/bash; _s26_gr grz /bin/zsh )
+printf '%s\n' '{"role":"assistant","content":"Reviewed.\nStatus: DONE\nFiles changed: none"}' > "$_S26/cfg/kimi.ans"
+_S26_FAIL="${_S26_FAIL}$(for _T in grb grz; do _self_expect gap-rerun "$O" \
+  "^gr-$_T:first=0:0:lanes=8:gaps=ops/REVIEW_KIMI\\.md: coverage missing\\|ops/REVIEW_CODEX\\.md: coverage partial\$|^gr-$_T:first=0:0:lanes=8:gaps=ops/REVIEW_CODEX\\.md: coverage partial\\|ops/REVIEW_KIMI\\.md: coverage missing\$" \
+  "^gr-$_T:refused=64:64:named=1:runs=0:archives=0\$" \
+  "^gr-$_T:rerun=0:0:0:samerun=yes:runs=codex,kimi:personas=SECURITY_SENTINEL,synthesis:archived=REVIEW_CODEX\\.md,REVIEW_KIMI\\.md,REVIEW_SECURITY_SENTINEL\\.md\$" \
+  "^gr-$_T:kept=lanes:specialists:analyst:rc=cleared:left:fold=1:last=Coverage: complete:gaps=ops/REVIEW_SECURITY_SENTINEL\\.md\$" \
+  "^gr-$_T:other=0:runs=0:fold=1\$"; done)"
+# the prose that points at these: at-quick says what $SKILL_DIR is, no prose
+# pointer reads $ROOT with no way to get it, and the briefs a lead writes by hand
+# carry the canonical rule variables
+O=$( for F in "${REPO_ROOT}"/skills/*/SKILL.md; do
+    if grep -qF '$SKILL_DIR' "$F" && ! grep -q 'SKILL_DIR` is the directory' "$F"; then echo "ptr:undefined:$F"; fi
+  done
+  echo "ptr:rootless=$(grep -rl 'read `\$ROOT/skills/\|read its `\$ROOT/skills/' "${REPO_ROOT}/skills" 2>/dev/null | grep -c . || true)"
+  for F in at-review/references/dispatch.md at-review/references/claude.md at-ship/references/phases.md at-coordinate/references/phases.md; do
+    echo "ptr:rules:${F}=$(grep -cF 'printf '\''%s\n%s\n'\'' "$REVIEW_JUDGE_RULE" "$REVIEW_COVERAGE_RULE"' "${REPO_ROOT}/skills/$F" || true)"
+  done
+  for F in at-ship/references/phases.md at-coordinate/references/phases.md; do echo "ptr:gaps:${F}=$(grep -cF 'review_coverage_gaps <lanes file> <gaps file>' "${REPO_ROOT}/skills/$F" || true)"; done )
+_S26_FAIL="${_S26_FAIL}$(_self_expect skill-pointers "$O" '^ptr:rootless=0$' '^ptr:rules:at-review/references/dispatch\.md=1$' '^ptr:rules:at-review/references/claude\.md=1$' \
+  '^ptr:rules:at-ship/references/phases\.md=1$' '^ptr:rules:at-coordinate/references/phases\.md=1$' '^ptr:gaps:at-ship/references/phases\.md=1$' '^ptr:gaps:at-coordinate/references/phases\.md=1$')"
+_S26_UNDEF=$(printf '%s\n' "$O" | { grep 'ptr:undefined' || true; } | tr '\n' ' ')
+if [ -n "$_S26_UNDEF" ]; then _S26_FAIL="${_S26_FAIL} skill-pointers(${_S26_UNDEF})"; fi
+unset _S26_UNDEF
 
 # core-quote: the analyst on agy (core, no Status contract), whose answer
 # quotes a Status: BLOCKED line in a finding: promoted; core-last: an agy
@@ -11237,19 +11680,60 @@ _S26_FAIL="${_S26_FAIL}$(_self_expect interrupted "$O" '^interrupted-agy:rc=130:
   '^interrupted-kimi:rc=130:class=deterministic:reason=interrupted:runs=1$' '^interrupted-cursor-agent:rc=130:class=deterministic:reason=interrupted:runs=1$')"
 
 # rows: each [R] task whole in the package (its indented fields, at any
-# indent), no field of an unmarked task, and the header naming ops/TASKS.md
-# and ops/CONTRACTS.md by absolute path
+# indent, across a blank line inside the task), no field of an unmarked task,
+# no blank line a task did not continue past and nothing after the line that
+# ended it (rows.txt compared whole), and the header naming ops/TASKS.md and
+# ops/CONTRACTS.md by absolute path
 _s26_fixture "$_S26/rw" "$_S26_KIMI"
 ( cd "$_S26/rw" && printf '# Contracts\nS26-CONTRACT\n' > ops/CONTRACTS.md && printf '%s\n' '# Tasks' '- [R] T1: add calc S26-ROW1' '      Role: builder' \
     '      Accept: S26-ACCEPT1 pytest passes' '      Fails when: S26-FAILS1 any test fails' '' '- [ ] T2: unrelated S26-UNMARKED' '      Accept: S26-ACCEPT2 nothing' \
-    '- [R] T3: second S26-ROW3' '  Accept: S26-ACCEPT3 two-space indent' '- [ ] T4: next S26-NEXT' '      Accept: S26-ACCEPT4 none' > ops/TASKS.md ) || true
+    '- [R] T3: second S26-ROW3' '  Accept: S26-ACCEPT3 two-space indent' '- [ ] T4: next S26-NEXT' '      Accept: S26-ACCEPT4 none' \
+    '- [R] T5: multiline S26-ROW5' '      Context: S26-CTX5 first paragraph' '' '        S26-CTX5B second paragraph' '' '      Accept: S26-ACCEPT5 after the blank' \
+    '      Fails when: S26-FAILS5 after the blank' '' 'S26-PROSE5 flush prose' '      S26-INDENT5 deeper, after the prose' > ops/TASKS.md ) || true
 O=$( _s26_reset
   R=$(_s26_run rw "$_S26/rw" pkg REVIEW_PKG=); P=$(_s26_pkg rw)
   RWD=$(cd "$_S26/rw" && pwd -P)
   H=$(sed -n '1,/^## Changed files/p' "$P/package.md" 2>/dev/null || true)
   _h() { printf '%s\n' "$H" | grep -c "$@" || true; }
-  echo "rows:rc=${R}:t1=$(_h -x -- '- \[R\] T1: add calc S26-ROW1'):accept1=$(_h -x '      Accept: S26-ACCEPT1 pytest passes'):fails1=$(_h -x '      Fails when: S26-FAILS1 any test fails'):role1=$(_h -x '      Role: builder'):accept3=$(_h -x '  Accept: S26-ACCEPT3 two-space indent'):unmarked=$(_h -E 'S26-UNMARKED|S26-ACCEPT2|S26-NEXT|S26-ACCEPT4'):tasks=$(_h -F "of ${RWD}/ops/TASKS.md with its indented fields"):contracts=$(_h -xF "The contracts these tasks rely on: ${RWD}/ops/CONTRACTS.md")" )
-_S26_FAIL="${_S26_FAIL}$(_self_expect rows "$O" '^rows:rc=0:t1=1:accept1=1:fails1=1:role1=1:accept3=1:unmarked=0:tasks=1:contracts=1$')"
+  echo "rows:rc=${R}:t1=$(_h -x -- '- \[R\] T1: add calc S26-ROW1'):accept1=$(_h -x '      Accept: S26-ACCEPT1 pytest passes'):fails1=$(_h -x '      Fails when: S26-FAILS1 any test fails'):role1=$(_h -x '      Role: builder'):accept3=$(_h -x '  Accept: S26-ACCEPT3 two-space indent'):accept5=$(_h -x '      Accept: S26-ACCEPT5 after the blank'):fails5=$(_h -x '      Fails when: S26-FAILS5 after the blank'):ctx5b=$(_h -x '        S26-CTX5B second paragraph'):unmarked=$(_h -E 'S26-UNMARKED|S26-ACCEPT2|S26-NEXT|S26-ACCEPT4|S26-PROSE5|S26-INDENT5'):tasks=$(_h -F "of ${RWD}/ops/TASKS.md with its indented fields"):contracts=$(_h -xF "The contracts these tasks rely on: ${RWD}/ops/CONTRACTS.md")"
+  printf '%s\n' '- [R] T1: add calc S26-ROW1' '      Role: builder' '      Accept: S26-ACCEPT1 pytest passes' '      Fails when: S26-FAILS1 any test fails' \
+    '- [R] T3: second S26-ROW3' '  Accept: S26-ACCEPT3 two-space indent' '- [R] T5: multiline S26-ROW5' '      Context: S26-CTX5 first paragraph' '' \
+    '        S26-CTX5B second paragraph' '' '      Accept: S26-ACCEPT5 after the blank' '      Fails when: S26-FAILS5 after the blank' > "$_S26/rw.rows-want"
+  echo "rows-file:$(if cmp -s "$_S26/rw.rows-want" "$P/rows.txt"; then echo same; else echo differ; fi)" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect rows "$O" '^rows:rc=0:t1=1:accept1=1:fails1=1:role1=1:accept3=1:accept5=1:fails5=1:ctx5b=1:unmarked=0:tasks=1:contracts=1$' '^rows-file:same$')"
+
+# paginate: every comment fetch at-resolve-pr names pages through all the
+# comments. Text: each of the four files names `gh api` and every mention
+# carries --paginate. Behavior: the fetch as each file writes it, run through a
+# stub gh that holds 35 comments and serves GitHub's default page of 30 unless
+# --paginate asks for the next page, comes back with all 35; the control, the
+# fetch without the flag, comes back with 30
+mkdir -p "$_S26/ghp"
+cat > "$_S26/ghp/gh" <<'S26_GH_EOF'
+#!/bin/sh
+# SELF-26 stub gh: 35 review comments, two pages; only --paginate reads page two
+P=0; EP=""
+for a in "$@"; do case "$a" in --paginate) P=1 ;; repos/*) EP=$a ;; esac; done
+case "$EP" in repos/*/pulls/*/comments) ;; *) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;; esac
+L=30; if [ "$P" = 1 ]; then L=35; fi
+i=1; while [ "$i" -le "$L" ]; do printf '{"id":%d}\n' "$i"; i=$((i + 1)); done
+S26_GH_EOF
+chmod +x "$_S26/ghp/gh"
+_S26_RP="${REPO_ROOT}/skills/at-resolve-pr"
+O=$( for F in "$_S26_RP/SKILL.md" "$_S26_RP/references/resolution-brief.md" "$_S26_RP/references/codex.md" "${REPO_ROOT}/personas/pr-comment-resolver.md"; do
+    B=$(basename "$F")
+    echo "pg-text:${B}:named=$(grep -c 'gh api' "$F" 2>/dev/null | sed 's/^[1-9][0-9]*$/yes/'):unpaged=$(grep 'gh api' "$F" 2>/dev/null | grep -vc -- '--paginate' || true)"
+  done
+  for F in "$_S26_RP/SKILL.md" "$_S26_RP/references/resolution-brief.md" "${REPO_ROOT}/personas/pr-comment-resolver.md"; do
+    C=$(grep -o 'gh api [^`]*comments' "$F" 2>/dev/null | head -1 || true)
+    # shellcheck disable=SC2086  # the words of the fetch the file writes
+    echo "pg-run:$(basename "$F"):fetch=$(printf '%s' "$C" | grep -c '^gh api' || true):comments=$(PATH="$_S26/ghp:$PATH" $C 2>/dev/null | grep -c '"id"' || true)"
+  done
+  echo "pg-control:comments=$(PATH="$_S26/ghp:$PATH" gh api repos/OWNER/REPO/pulls/1/comments | grep -c '"id"' || true)" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect paginate "$O" '^pg-text:SKILL\.md:named=yes:unpaged=0$' '^pg-text:resolution-brief\.md:named=yes:unpaged=0$' \
+  '^pg-text:codex\.md:named=yes:unpaged=0$' '^pg-text:pr-comment-resolver\.md:named=yes:unpaged=0$' '^pg-run:SKILL\.md:fetch=1:comments=35$' \
+  '^pg-run:resolution-brief\.md:fetch=1:comments=35$' '^pg-run:pr-comment-resolver\.md:fetch=1:comments=35$' '^pg-control:comments=30$')"
+unset _S26_RP
 
 # codex-lease: a codex builder lease on the real lane (the stub as codex),
 # whose transcript quotes a Status line after its answer: lease_collect takes
@@ -11292,6 +11776,23 @@ O=$( _s26_reset
   echo "core-blocked-prompt:$(_s26_marks "$(_s26_argv devin REVIEW_CODEX.md)")" )
 _S26_FAIL="${_S26_FAIL}$(_self_expect core-blocked "$O" '^core-blocked:rc=0:files=REVIEW_ANTIGRAVITY:said=1$' \
   '^core-blocked-prompt:begin=1:committed=1:uncommitted=1:row=2:untracked=1:inventory=1$')"
+
+# coverage-optional: the same fixture, Status then Coverage. The analyst on
+# opencode and its own lane end Coverage: none; the reviewer on devin and its
+# own lane answer BLOCKED then Coverage: complete: not promoted, bare gaps
+printf 'Could not read the package.\nStatus: DONE_WITH_CONCERNS\nFiles changed: none\nTests: none\nConcerns: unread\nDiscoveries for later tasks: None\n\nCoverage: none: the package was unreadable\n' > "$_S26/cfg/opencode.ans"
+printf 'Could not finish.\nStatus: BLOCKED\nFiles changed: none\nTests: none\nConcerns: S26 blocked\nDiscoveries for later tasks: None\n\nCoverage: complete\n' > "$_S26/cfg/devin.ans"
+O=$( _s26_reset; export S26_COV_OPT=1
+  _s26_cov optional "$_S26/cb" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect coverage-optional "$O" \
+  '^cov-optional:core=0:syn=0:files=REVIEW_ANTIGRAVITY,REVIEW_OPENCODE:blocked=1:last=:gaps=ops/REVIEW_CODEX\.md\|ops/REVIEW_DEVIN\.md\|ops/REVIEW_ANTIGRAVITY\.md: coverage none\|ops/REVIEW_OPENCODE\.md: coverage none$')"
+printf 'Reviewed.\nStatus: DONE\nFiles changed: none\nTests: none\nConcerns: None\nDiscoveries for later tasks: None\n\nCoverage: complete\n' > "$_S26/cfg/opencode.ans"
+printf 'Reviewed.\nStatus: DONE\nFiles changed: none\nTests: none\nConcerns: None\nDiscoveries for later tasks: None\n\nCoverage: complete\n' > "$_S26/cfg/devin.ans"
+O=$( _s26_reset; export S26_COV_OPT=1
+  _s26_cov optionalok "$_S26/cb" )
+_S26_FAIL="${_S26_FAIL}$(_self_expect coverage-optional-ok "$O" \
+  '^cov-optionalok:core=0:syn=0:files=REVIEW_ANTIGRAVITY,REVIEW_CODEX,REVIEW_DEVIN,REVIEW_OPENCODE:blocked=0:last=Coverage: complete:gaps=$')"
+rm -f "$_S26/cfg/agy.ans"
 
 # big: 40 added files, a diff over the cap
 _s26_fixture "$_S26/bg" "$_S26_KIMI"
@@ -11353,6 +11854,19 @@ _s26_rep() { printf "%${2}s" "" | tr ' ' "$1"; }   # <char> <n>: the char n time
   printf 'xai xai-%s here\n' "$(_s26_rep J 80)"
   printf 'aws AKIA%s and ASIA%s here\n' "$(_s26_rep K 16)" "$(_s26_rep L 16)"
   printf 'prose xai-org, xai-grok-pager, github_pat_ tokens, ASIA PACIFIC, AKIA alone\n'
+  printf 'prose Task-completion, risk-assessment and desk-reference-material\n'
+  printf 'sk-%s at the line start\n' "$(_s26_rep m 24)"
+  printf 'two sk-%s,sk-%s here\n' "$(_s26_rep n 24)" "$(_s26_rep o 24)"
+  printf 'joined API_KEY_sk-%s and key-sk-%s here\n' "$(_s26_rep p 24)" "$(_s26_rep q 24)"
+  # a key behind an encoding that ends in an alphanumeric (escaped JSON, an
+  # ANSI colour, a URL), and prose behind one
+  printf 'esc-n x\\nsk-%s here\n' "$(_s26_rep r 24)"
+  printf 'esc-t x\\tsk-%s here\n' "$(_s26_rep s 24)"
+  printf 'esc-u x\\u0022sk-%s here\n' "$(_s26_rep t 24)"
+  printf 'quote >sk-%s here\n' "$(_s26_rep u 24)"
+  printf 'ansi \033[32msk-%s here\n' "$(_s26_rep v 24)"
+  printf 'url key%%3Dsk-%s and %%22sk-%s here\n' "$(_s26_rep w 24)" "$(_s26_rep x 24)"
+  printf 'prose \\nrisk-assessment-material\n'
 } > "$_S26/scrub.in"
 _S26_SCRUB=$(awk '/^_scrub\(\) \{$/ { p = 1 } p { print } p && /^}$/ { exit }' "${REPO_ROOT}/scripts/probe-capabilities.sh" 2>/dev/null || true)
 O=$( cd "$_S26" && export HOME="$_S26/home" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "scrub-lib:load-failed"; exit 0; }
@@ -11364,12 +11878,17 @@ _S26_FAIL="${_S26_FAIL}$(_self_expect scrub "$O" '^scrub-lib:openai \[REDACTED-K
   '^scrub-lib:github \[REDACTED-KEY\] here$' '^scrub-lib:github-fine \[REDACTED-KEY\] here$' '^scrub-lib:slack \[REDACTED-KEY\] here$' \
   '^scrub-lib:header Bearer \[REDACTED\] here$' '^scrub-lib:jwt \[REDACTED-JWT\] here$' '^scrub-lib:xai \[REDACTED-KEY\] here$' \
   '^scrub-lib:aws \[REDACTED-KEY\] and \[REDACTED-KEY\] here$' \
-  '^scrub-lib:prose xai-org, xai-grok-pager, github_pat_ tokens, ASIA PACIFIC, AKIA alone$' '^scrub-copies:same$')"
+  '^scrub-lib:prose xai-org, xai-grok-pager, github_pat_ tokens, ASIA PACIFIC, AKIA alone$' \
+  '^scrub-lib:prose Task-completion, risk-assessment and desk-reference-material$' '^scrub-lib:\[REDACTED-KEY\] at the line start$' \
+  '^scrub-lib:two \[REDACTED-KEY\],\[REDACTED-KEY\] here$' '^scrub-lib:joined API_KEY_\[REDACTED-KEY\] and key-\[REDACTED-KEY\] here$' \
+  '^scrub-lib:esc-n x\\n\[REDACTED-KEY\] here$' '^scrub-lib:esc-t x\\t\[REDACTED-KEY\] here$' '^scrub-lib:esc-u x\\u0022\[REDACTED-KEY\] here$' \
+  '^scrub-lib:quote >\[REDACTED-KEY\] here$' '^scrub-lib:ansi .\[32m\[REDACTED-KEY\] here$' '^scrub-lib:url key%3D\[REDACTED-KEY\] and %22\[REDACTED-KEY\] here$' \
+  '^scrub-lib:prose \\nrisk-assessment-material$' '^scrub-copies:same$')"
 unset _S26_SCRUB
 
 _S26_CAP="at-review's blocks run verbatim (R23, R24, KTD18): the lead's integrity check before the skill's first git call (a planted filter or fsmonitor never runs; no package, so no lane), one review package per cycle for every lane, the specialist personas included (each [R] task with its fields, the inventory with untracked files by name, the inline diff within the cap, the full diff in a file the prompt names; an invalid REVIEW_BASE or a failed git call stops the review), promotion on the CLI's final answer (an optional lane only on rc 0 and DONE; never BLOCKED in a core role, read from a core answer's last line; Codex's last-message file on every attempt, its quoted tool output ignored, in the lease lane too), no retry of an interrupted run, the lanes in parallel, and every key shape scrubbed from what lands in ops/ (KTD-14, both _scrub copies alike)"
 if [ -z "$_S26_FAIL" ]; then
-  row "SELF-26" "claude" "$_S26_CAP" "PASS" "integrity (Claude Code layout, and the Codex layout: project-tier copy, locator through the pointer): lease + rebaseline + clean filter and fsmonitor in .git/config -> preflight 0, package block rc 44 naming .git/config, no package, dispatch (learnings gate inside) and optional blocks refuse, 0 lane runs, 0 personas, no run directory, filter and fsmonitor never ran; never leased: rc 0, no ledger, lead dir = gitconfig; main: untracked file listed and the not-diffed note; learnings match through the untracked path; 5 specialists + learnings-researcher started (persona recorders) in one run directory, the specialists on package.md, every brief naming full.diff; the lane list: 2 core, 5 persona, 5 optional lanes;core lanes released together, REVIEW_ANTIGRAVITY (cursor) and REVIEW_CODEX (prose + verdict) though the codex transcript quotes Status: BLOCKED; cursor's core prompt holds the package; optional lanes released together (5/5), each prompt with both changes, the [R] row, the untracked name, the inventory and the diff; REVIEW_CURSOR/DEVIN/KIMI only, opencode (DONE, exit 1) and grok (DONE, max_tokens) FAILED; codex with the schema off still writes its last-message file and is promoted from it, an answer ending in Status: BLOCKED is not, nor a retry's BLOCKED answer after a first run that wrote a verdict (2 runs); an agy answer quoting Status: BLOCKED in a finding promoted, one ending in it not; agy, codex, opencode, kimi and cursor exiting 130 -> rc 130 interrupted, one run each; the package holds each [R] task with its indented fields, no unmarked task, and names ops/TASKS.md and ops/CONTRACTS.md by absolute path; a codex builder lease runs with -o <out>.last and lease_collect reads its report there (DONE -> review over a quoted BLOCKED, no Status -> rc 80 over a quoted DONE); devin BLOCKED as reviewer not promoted, its prompt holds the package; 40-file diff over the cap: inventory 40, cut, full.diff 40, package <= 116000, kimi argv < 120000; REVIEW_BASE naming no commit and git diff rc 128 stop the review (rc 1, no package, no lane); REVIEW_BASE=main named; _scrub (common.sh's, which the blocks load, and probe-capabilities.sh's, printing the same): sk-, AIza, ghp_, xoxb-, Bearer, JWT, github_pat_ (first part ending in ghp), xai-, AKIA and ASIA samples redacted whole, look-alike prose kept" "static"
+  row "SELF-26" "claude" "$_S26_CAP" "PASS" "integrity (Claude Code layout, and the Codex layout: project-tier copy, locator through the pointer): lease + rebaseline + clean filter and fsmonitor in .git/config -> preflight 0, package block rc 44 naming .git/config, no package, dispatch (learnings gate inside) and optional blocks refuse, 0 lane runs, 0 personas, no run directory, filter and fsmonitor never ran; never leased: rc 0, no ledger, lead dir = gitconfig; main: untracked file listed and the not-diffed note; learnings match through the untracked path; 5 specialists + learnings-researcher started (persona recorders) in one run directory, the specialists on package.md, every brief naming full.diff; the lane list: 2 core, 5 persona, 5 optional lanes;core lanes released together, REVIEW_ANTIGRAVITY (cursor) and REVIEW_CODEX (prose + verdict) though the codex transcript quotes Status: BLOCKED; cursor's core prompt holds the package; optional lanes released together (5/5), each prompt with both changes, the [R] row, the untracked name, the inventory and the diff; REVIEW_CURSOR/DEVIN/KIMI only, opencode (DONE, exit 1) and grok (DONE, max_tokens) FAILED; codex with the schema off still writes its last-message file and is promoted from it, an answer ending in Status: BLOCKED is not, nor a retry's BLOCKED answer after a first run that wrote a verdict (2 runs); an agy answer quoting Status: BLOCKED in a finding promoted, one ending in it not; agy, codex, opencode, kimi and cursor exiting 130 -> rc 130 interrupted, one run each; the package holds each [R] task with its indented fields, also past a blank line inside the task, no unmarked task, and names ops/TASKS.md and ops/CONTRACTS.md by absolute path; every comment fetch at-resolve-pr names paginates, and each, run through a stub gh with 35 comments on two pages, returns all 35 (without the flag 30); a codex builder lease runs with -o <out>.last and lease_collect reads its report there (DONE -> review over a quoted BLOCKED, no Status -> rc 80 over a quoted DONE); devin BLOCKED as reviewer not promoted, its prompt holds the package; 40-file diff over the cap: inventory 40, cut, full.diff 40, package <= 116000, kimi argv < 120000; REVIEW_BASE naming no commit and git diff rc 128 stop the review (rc 1, no package, no lane); REVIEW_BASE=main named; _scrub (common.sh's, which the blocks load, and probe-capabilities.sh's, printing the same): sk-, AIza, ghp_, xoxb-, Bearer, JWT, github_pat_ (first part ending in ghp), xai-, AKIA and ASIA samples redacted whole, REVIEW_ONLY re-runs the lanes it names inside the cycle (core, optional, persona, under bash and zsh), archiving only theirs, with the lists, the other lanes and the single verdict fold kept, and refuses a name off the list or a missing run directory; the skills' pointers resolve; an sk- key at the line start, after a non-alphanumeric or behind a literal \\n, \\t, \\u0022, an ANSI colour, %3D or %22 too, look-alike prose (xai-org, Task-completion, risk-assessment, a literal \\nrisk-assessment-material) kept" "static"
 else
   row "SELF-26" "claude" "$_S26_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S26_FAIL"):$(printf '%s' "$_S26_FAIL" | cut -c1-700)" "static"
 fi
@@ -11749,7 +12268,7 @@ unset _S22_FD _s22_c
 mkdir -p "$_S22/tss" "$_S22/ssbin" "$_S22/ss"
 chmod 0777 "$_S22/tss"
 ( cd "$_S22/ss" && git init -q . ) >/dev/null 2>&1 || true
-printf '#!/bin/sh\n# probe stub (SELF-22): the floor check runs it mid-hook; it lists the hook'"'"'s entries in TMPDIR (or S22_SEEN_IN)\ncase "${1:-}" in --version) ls -d "${S22_SEEN_IN:-$TMPDIR}"/triforge-session-start.* > "$S22_SEEN" 2>/dev/null; echo "2.1.285" ;; esac\nexit 0\n' > "$_S22/ssbin/claude"
+printf '#!/bin/sh\n# probe stub (SELF-22): the floor check runs it mid-hook; it lists the hook'"'"'s entries in TMPDIR (or S22_SEEN_IN)\ncase "${1:-}" in --version) ls -d "${S22_SEEN_IN:-$TMPDIR}"/triforge-session-start.* > "$S22_SEEN" 2>/dev/null; echo "2.1.314" ;; esac\nexit 0\n' > "$_S22/ssbin/claude"
 printf '#!/bin/sh\n# probe stub (SELF-22): answers the agy pack check\ncase "${1:-}" in plugin) case "${2:-}" in list) echo "agent-triforge" ;; esac ;; agents) printf "%%s\\n" codebase-analyst architecture-reviewer targeted-researcher documentation-writer ;; esac\nexit 0\n' > "$_S22/ssbin/agy"
 chmod +x "$_S22/ssbin/claude" "$_S22/ssbin/agy"
 for _s22_c in python3 git timeout gtimeout; do   # PATH: the stubs, these tools and /usr/bin:/bin, so no real CLI runs
@@ -11919,7 +12438,21 @@ rm -rf "$_S22"
 # never read, marked FAILED); slow personas; the synthesis start block run
 # again while its synthesizer runs (refused, its input left as it was); a
 # lens that cannot start with persona_stop returning 80 (named, never
-# "stopped"). Every case: no zsh glob or job error.
+# "stopped"). Coverage cases (R24), on the real scripts/lib/gates.sh the stub
+# library sources: every stub lane ends Coverage: complete (so "all" exits 0
+# with an empty gaps file), and a core lane, a specialist or the analyst's rc 40
+# fallback ending partial or none or with no line, or a Codex lane whose verdict
+# JSON disagrees with its answer, makes the synthesis wait exit 3 with the gaps
+# file naming the lane and the value; the reviewer's rc 40 sub-agent file counts
+# the same way, and a command-shaped Accept: listed not run under Coverage:
+# complete converges. c6 (R25): after a P1 fix, a re-review whose lane stays
+# silent exits 3, cycle 1's file being archived, and a cycle whose lanes all
+# report converges. E4 (R29): the research cases hold a solution file so the
+# learnings lens runs; skel holds none, so the swarm skips the lens, says so, and
+# synthesis runs with a SKIPPED marker. D1 (R28): at-plan's Phase 1.5 start and
+# wait blocks with a stub verdict on each side, the real persona_verdict reading
+# it: APPROVED over None exits 0; NEEDS_REVISION and APPROVED over a blocking
+# bullet exit 1; a status-only file exits 2. Every case: no zsh glob or job error.
 _S23="${WORK}/self-23"
 mkdir -p "$_S23/root/scripts" "$_S23/skill/scripts" "$_S23/blocks"
 printf '#!/bin/sh\necho %s\n' "$_S23/root" > "$_S23/skill/scripts/locate-triforge.sh"
@@ -11940,7 +12473,11 @@ persona_spawn() {
     while [ "$T" = 1 ] && [ ! -f "$D/$N.waited" ] && [ "$I" -lt 600 ]; do sleep 0.1; I=$((I + 1)); done
     if _s23_in "$P" "${S23_FAIL:-}"; then echo "PARTIAL report from $P" > "$OUT"; echo 3 > "$D/$N.rc"; exit 0; fi
     if _s23_in "$P" "${S23_EMPTY:-}"; then : > "$OUT"; echo 0 > "$D/$N.rc"; exit 0; fi
-    printf 'REPORT from %s\n' "$P" > "$OUT"; echo 0 > "$D/$N.rc" ) </dev/null >/dev/null 2>&1 &
+    # at-plan's cases: the plan-checker's report, %b escapes
+    if [ "$P" = plan-checker ]; then printf '%b' "${S23_PLAN_REPORT:-}" > "$OUT"; echo 0 > "$D/$N.rc"; exit 0; fi
+    L='Coverage: complete'
+    if _s23_in "$P" "${S23_COVER_PERSONA:-}"; then L=${S23_COVER_LINE:-}; fi
+    printf 'REPORT from %s\n%s\n' "$P" "$L" > "$OUT"; echo 0 > "$D/$N.rc" ) </dev/null >/dev/null 2>&1 &
   return 0
 }
 persona_wait() { # as the real one: 64 for a run dir with no runs or an unknown name
@@ -11968,7 +12505,18 @@ dispatch_role() {
   _s23_log "dispatch_role $1"
   if _s23_in "$1" "${S23_SILENT:-}"; then return 0; fi
   if _s23_in "$1" "${S23_ROLEFAIL:-}"; then return 1; fi
+  if _s23_in "$1" "${S23_ROLE40:-}"; then return 40; fi
+  local L='Coverage: complete'
+  if _s23_in "$1" "${S23_COVER_ROLE:-}"; then L=${S23_COVER_LINE:-}; fi
   printf 'ROLE %s\n' "$1" > "$4"
+  # S23_NOTRUN: a command-shaped Accept: the lane could not run, judged by reading
+  if [ -n "${S23_NOTRUN:-}" ]; then printf 'Accept: `%s` not run, judged by reading: met\n' "$S23_NOTRUN" >> "$4"; fi
+  printf '%s\n' "$L" >> "$4"
+  # S23_VERDICT: the Codex lane's shape: its answer in <out>.last, its verdict JSON beside it
+  if [ -n "${S23_VERDICT:-}" ] && [ "$1" = reviewer ]; then
+    cp "$4" "$4.last"
+    printf '{\n  "findings": [],\n  "coverage": "%s"\n}\n' "$S23_VERDICT" > "$4.verdict.json"
+  fi
 }
 invoke_antigravity() {
   _s23_log "invoke_antigravity $1"
@@ -11983,6 +12531,7 @@ resolve_role() { case "$1" in analyst) printf 'antigravity\t-\t-\n' ;; *) printf
 cli_field() { echo core; }
 _lease_parse_status() { echo MISSING; }
 S23STUB
+printf '_TRIFORGE_SCRIPTS_DIR="%s"\n. "%s"\n' "${REPO_ROOT}/scripts" "${REPO_ROOT}/scripts/lib/gates.sh" >> "$_S23/root/scripts/invoke-external.sh"
 # _s23_x <md> <n> — the n-th ```bash fence of <md>
 _s23_x() {
   python3 - "$1" "$2" <<'S23PY'
@@ -12002,6 +12551,7 @@ S23PY
 }
 _S23_R="${REPO_ROOT}/skills/at-review/references"
 _S23_D="${REPO_ROOT}/skills/at-deep-research/references"
+_S23_P="${REPO_ROOT}/skills/at-plan/references"
 { _s23_x "$_S23_R/dispatch.md" 1 > "$_S23/blocks/rdispatch.sh" \
   && _s23_x "$_S23_R/dispatch.md" 2 > "$_S23/blocks/rwait.sh" \
   && _s23_x "$_S23_R/synthesis.md" 1 > "$_S23/blocks/rsyn.sh" \
@@ -12009,7 +12559,9 @@ _S23_D="${REPO_ROOT}/skills/at-deep-research/references"
   && _s23_x "$_S23_D/swarm.md" 1 | sed 's#<the topic>#widget caching#' > "$_S23/blocks/dswarm.sh" \
   && _s23_x "$_S23_D/swarm.md" 2 > "$_S23/blocks/dwait.sh" \
   && _s23_x "$_S23_D/synthesis.md" 1 > "$_S23/blocks/dsyn.sh" \
-  && _s23_x "$_S23_D/synthesis.md" 2 > "$_S23/blocks/dsynwait.sh"; } 2>/dev/null || true
+  && _s23_x "$_S23_D/synthesis.md" 2 > "$_S23/blocks/dsynwait.sh" \
+  && _s23_x "$_S23_P/validation.md" 1 > "$_S23/blocks/pstart.sh" \
+  && _s23_x "$_S23_P/validation.md" 2 > "$_S23/blocks/pwait.sh"; } 2>/dev/null || true
 grep -v -E '^_spec ' "$_S23/blocks/rdispatch.sh" > "$_S23/blocks/rdispatch-off.sh" || true
 # _s23_blk <shell> <block> <proj> — one block from <proj> (60 s at most); prints its rc
 _s23_blk() {
@@ -12017,6 +12569,16 @@ _s23_blk() {
   ( cd "$3" && exec ${TIMEOUT_BIN:+"$TIMEOUT_BIN" -k 5 60} "$1" "$_S23/blocks/$2.sh" ) > "$3/out-$2" 2>&1 < /dev/null || RC=$?
   cat "$3/out-$2" >> "$3/out-all"
   echo "$RC"
+}
+# _s23_cycle <shell> <proj> <cycle> [silent role]: one more review cycle in <proj>
+# (dispatch, wait, synthesis, synthesis wait); prints the synthesis wait's rcs
+_s23_cycle() {
+  ( export CYCLE="$3" S23_SILENT="${4:-}"
+    [ "$(_s23_blk "$1" rdispatch "$2")" = 0 ] || { echo dispatch-failed; exit 0; }
+    export REVIEW_RUN="$(sed -n 's/^review: run directory \([^ ]*\) .*/\1/p' "$2/out-rdispatch" | head -1)"
+    _s23_loop "$1" rwait "$2" >/dev/null
+    _s23_blk "$1" rsyn "$2" >/dev/null
+    _s23_loop "$1" rsynwait "$2" )
 }
 # _s23_loop <shell> <block> <proj> — rerun a wait block while it returns 75 (8 times at most); prints the rcs, /-joined
 _s23_loop() {
@@ -12036,7 +12598,7 @@ _s23_review() { # _s23_review <case> <shell> [VAR=value...]
     && mkdir -p src ops/solutions && echo 'def widget(): return 1' > src/widget.py && git add -A && git commit -qm init \
     && echo 'def widget(): return 2' > src/widget.py && git commit -qam change ) >/dev/null 2>&1 || true
   # off, offfail: no specialists and no learnings match, so the cycle starts no persona
-  case "$C" in off|offfail) DB=rdispatch-off ;; *) echo 'widget.py must keep returning an int' > "$P/ops/solutions/widget.md" ;; esac
+  case "$C" in off|offfail|fb40|sub40*) DB=rdispatch-off ;; *) echo 'widget.py must keep returning an int' > "$P/ops/solutions/widget.md" ;; esac
   # the review package the review-package block would have built: package.md
   # and the inventory the learnings gate reads (the commit's one changed file)
   mkdir -p "$P/pkg" && chmod 700 "$P/pkg"
@@ -12049,6 +12611,8 @@ _s23_review() { # _s23_review <case> <shell> [VAR=value...]
     if [ -n "$RUN" ] && [ "$D" = 0 ]; then
       export REVIEW_RUN="$RUN"
       W=$(_s23_loop "$SH" rwait "$P")
+      # sub40*: the reviewer's rc 40 sub-agent writes its file before synthesis
+      if [ -n "${S23_SUBAGENT:-}" ]; then printf 'sub-agent review\n%s\n' "$S23_SUBAGENT" > "$P/ops/REVIEW_CODEX.md"; fi
       case "$W" in */0|0) Y=$(_s23_blk "$SH" rsyn "$P")
         # resyn, regap: the synthesis start block again while its synthesizer
         # runs, after a mark in its input (and, regap, the missing lane's file
@@ -12060,12 +12624,33 @@ _s23_review() { # _s23_review <case> <shell> [VAR=value...]
           KEEP=$(grep -c MARK-SYN-INPUT "$RUN/synthesis-input.md" 2>/dev/null || true)
         fi
         YW=$(_s23_loop "$SH" rsynwait "$P") ;; esac
+      # c6 (R25): cycle 1's report does not speak for the snapshot a fix changed.
+      # The P1 fix changes a file; the re-review, cycle 2, finds cycle 1's lanes
+      # archived, so a lane that stays silent is a gap and cycle 2 cannot
+      # converge. Only a cycle whose lanes all report on the final snapshot does.
+      if [ "$C" = c6 ]; then
+        echo 'def widget(): return 3' > "$P/src/widget.py"
+        C6A=$(_s23_cycle "$SH" "$P" 2 reviewer)
+        C6B=$(_s23_cycle "$SH" "$P" 3)
+        printf 'c6:%s:cycles:one=%s:two=%s:three=%s:archived=%s:brief2=%s:brief3=%s\n' "$(basename "$SH")" "$YW" "$C6A" "$C6B" \
+          "$(find "$P/ops/archive/reviews" -name REVIEW_CODEX.md 2>/dev/null | grep -c . || true)" \
+          "$(grep -c 'Synthesize review cycle 2\.' "$P/calls" 2>/dev/null || true)" "$(grep -c 'Synthesize review cycle 3\.' "$P/calls" 2>/dev/null || true)"
+      fi
     fi
+    # synbrief: the synthesis brief names the gaps, the lane list and the verdict a gap forces
+    printf '%s:%s:synbrief:gaps=%s:lanes=%s:never=%s\n' "$C" "$(basename "$SH")" \
+      "$(grep '^persona_spawn [^ ]* synthesis ' "$P/calls" 2>/dev/null | grep -c -F '### Gaps' || true)" \
+      "$(grep '^persona_spawn [^ ]* synthesis ' "$P/calls" 2>/dev/null | grep -c -F 'ops/REVIEW_ANTIGRAVITY.md,ops/REVIEW_CODEX.md' || true)" \
+      "$(grep '^persona_spawn [^ ]* synthesis ' "$P/calls" 2>/dev/null | grep -c -F 'Recommendation: FIX_AND_REREVIEW, never PROCEED' || true)"
+    # notrun: the lane's listed Accept: reached its REVIEW file
+    printf '%s:%s:notrun:%s\n' "$C" "$(basename "$SH")" "$(grep -c 'not run, judged by reading' "$P/ops/REVIEW_CODEX.md" 2>/dev/null || true)"
     printf '%s:%s:x:roles=%s/%s:spawns=%s:syn2=%s:synspawns=%s:refused=%s:keep=%s\n' "$C" "$(basename "$SH")" \
       "$(grep -cx 'dispatch_role analyst' "$P/calls" 2>/dev/null || true)" "$(grep -cx 'dispatch_role reviewer' "$P/calls" 2>/dev/null || true)" \
       "$(grep '^persona_spawn ' "$P/calls" 2>/dev/null | grep -cv ' synthesis ' || true)" "$Y2" \
       "$(grep -c '^persona_spawn [^ ]* synthesis ' "$P/calls" 2>/dev/null || true)" \
       "$(grep -c 'is still running; run the synthesis wait block' "$P/out-all" 2>/dev/null || true)" "$KEEP"
+    # gaps: what the synthesis block's lanes loop wrote, for the coverage cases
+    printf '%s:%s:gaps:%s\n' "$C" "$(basename "$SH")" "$(paste -sd'|' "$RUN/gaps" 2>/dev/null | tr ' ' '_' || true)"
     # stop: persona_stop's rc 80 named (could NOT), its own line kept, "were stopped" said, "no persona had started" said, persona_stop calls
     printf '%s:%s:stop:%s:%s:%s:%s:%s\n' "$C" "$(basename "$SH")" \
       "$(grep -c 'could NOT all be stopped' "$P/out-all" 2>/dev/null || true)" "$(grep -c 'stub persona_stop: unresolved cleanup' "$P/out-all" 2>/dev/null || true)" \
@@ -12083,7 +12668,7 @@ _s23_review() { # _s23_review <case> <shell> [VAR=value...]
       "$(grep -c PARTIAL "$RUN/synthesis-input.md" 2>/dev/null || true)" \
       "$(grep -c 'rerun this block' "$P/out-all" 2>/dev/null || true)" \
       "$(grep -c -E 'no matches found|job not found|bad pattern|command not found|parameter not set' "$P/out-all" 2>/dev/null || true)" \
-      "$(grep -E -o 'specialist [A-Z_]+ (failed rc=[0-9a-z]+|wrote nothing)|NOT converged, lanes missing or empty: [^ ]+' "$P/out-all" 2>/dev/null | head -1 | tr ' ' '_')"
+      "$(grep -E -o 'specialist [A-Z_]+ (failed rc=[0-9a-z]+|wrote nothing)|NOT converged, lanes missing, empty or short of complete coverage: [^ ]+' "$P/out-all" 2>/dev/null | head -1 | tr ' ' '_')"
   ) 2>&1 || true
 }
 _s23_research() { # _s23_research <case> <shell> [VAR=value...]
@@ -12091,6 +12676,8 @@ _s23_research() { # _s23_research <case> <shell> [VAR=value...]
   shift 2
   P="$_S23/d-$C-$(basename "$SH")"; mkdir -p "$P/ops"
   [ "$C" = analystfail ] && printf 'STALE analysis of an older topic\n' > "$P/ops/RESEARCH_ANTIGRAVITY.md"
+  # a store with knowledge in it, so the learnings lens runs; skel: only the skeleton (E4)
+  if [ "$C" != skel ]; then mkdir -p "$P/ops/solutions"; echo 'widget caching note' > "$P/ops/solutions/s23-note.md"; fi
   ( export S23_LOG="$P/calls" SKILL_DIR="$_S23/skill" TMPDIR="$P" "$@"
     local D W=- Y=- YW=- RUN Y2=- KEEP=-
     D=$(_s23_blk "$SH" dswarm "$P")
@@ -12108,6 +12695,12 @@ _s23_research() { # _s23_research <case> <shell> [VAR=value...]
         fi
         YW=$(_s23_loop "$SH" dsynwait "$P") ;; esac
     fi
+    # learn: the learnings lens started, the skip line, the lens on the list, the marker synthesis gets
+    printf '%s:%s:learn:spawn=%s:skipped=%s:listed=%s:marker=%s\n' "d$C" "$(basename "$SH")" \
+      "$(grep -c '^persona_spawn [^ ]* learnings-researcher ' "$P/calls" 2>/dev/null || true)" \
+      "$(grep -cx 'learnings-researcher skipped: the store holds only the skeleton' "$P/out-all" 2>/dev/null || true)" \
+      "$(grep -cx learnings-researcher "$RUN/lenses" 2>/dev/null || true)" \
+      "$(grep -c '^SKIPPED: the store holds only the skeleton' "$RUN/synthesis-input.md" 2>/dev/null || true)"
     printf '%s:%s:x:syn2=%s:synspawns=%s:refused=%s:keep=%s\n' "d$C" "$(basename "$SH")" "$Y2" \
       "$(grep -c '^persona_spawn [^ ]* synthesis ' "$P/calls" 2>/dev/null || true)" \
       "$(grep -c 'is still running; run the synthesis wait block' "$P/out-all" 2>/dev/null || true)" "$KEEP"
@@ -12119,8 +12712,27 @@ _s23_research() { # _s23_research <case> <shell> [VAR=value...]
       "$(paste -sd, "$RUN/failed" 2>/dev/null || true)" "$(cat "$RUN/analyst.rc" 2>/dev/null || true)" \
       "$(grep -c STALE "$RUN/synthesis-input.md" 2>/dev/null || true)" \
       "$(grep -c 'FAILED: the analyst' "$RUN/synthesis-input.md" 2>/dev/null || true)" \
-      "$(cd "$P/ops" && find . -type f | sed 's#^\./##; s#/[0-9-]*/#/TS/#' | LC_ALL=C sort | paste -sd, -)" \
+      "$(cd "$P/ops" && find . -type f ! -path './solutions/*' | sed 's#^\./##; s#/[0-9-]*/#/TS/#' | LC_ALL=C sort | paste -sd, -)" \
       "$(grep -c 'rerun this block' "$P/out-all" 2>/dev/null || true)" \
+      "$(grep -c -E 'no matches found|job not found|bad pattern|command not found|parameter not set' "$P/out-all" 2>/dev/null || true)"
+  ) 2>&1 || true
+}
+# _s23_plan <case> <shell> <report>: at-plan's Phase 1.5 start and wait blocks, the
+# plan-checker writing <report> (%b escapes), the real persona_verdict reading it
+_s23_plan() {
+  local C=$1 SH=$2 P
+  P="$_S23/p-$C-$(basename "$SH")"; mkdir -p "$P/ops"
+  printf 'Ceremony: standard\n' > "$P/ops/TASKS.md"
+  ( export S23_LOG="$P/calls" SKILL_DIR="$_S23/skill" TMPDIR="$P" S23_PLAN_REPORT="$3" S23_SLOW=plan-checker
+    local S W=-
+    S=$(_s23_blk "$SH" pstart "$P")
+    PLAN_RUN=$(sed -n 's/.*(PLAN_RUN=\(.*\))$/\1/p' "$P/out-pstart" | head -1)
+    export PLAN_RUN
+    if [ -n "$PLAN_RUN" ] && [ "$S" = 0 ]; then W=$(_s23_loop "$SH" pwait "$P"); fi
+    printf 'p%s:%s:start=%s:wait=%s:shown=%s:brief=%s:line=%s:bad=%s\n' "$C" "$(basename "$SH")" "$S" "$W" \
+      "$(grep -c '^## Plan review' "$P/out-pwait" 2>/dev/null || true)" \
+      "$(grep '^persona_spawn [^ ]* plan-checker ' "$P/calls" 2>/dev/null | grep -c -F '### Status: APPROVED' || true)" \
+      "$(grep -c '^persona_verdict: ' "$P/out-pwait" 2>/dev/null || true)" \
       "$(grep -c -E 'no matches found|job not found|bad pattern|command not found|parameter not set' "$P/out-all" 2>/dev/null || true)"
   ) 2>&1 || true
 }
@@ -12142,19 +12754,37 @@ for _S23_SH in $_S23_SHELLS; do
        _s23_review stop80 "$_S23_SH" S23_ROLEFAIL=reviewer S23_STOP80=1
        _s23_review spawn80 "$_S23_SH" S23_SPAWNFAIL=performance-oracle S23_STOP80=1
        _s23_review offfail "$_S23_SH" S23_ROLEFAIL=analyst
+       _s23_review covpart "$_S23_SH" S23_COVER_ROLE=reviewer "S23_COVER_LINE=Coverage: partial: read half"
+       _s23_review covnone "$_S23_SH" S23_COVER_ROLE=analyst "S23_COVER_LINE=Coverage: none: the package was unreadable"
+       _s23_review covmiss "$_S23_SH" S23_COVER_ROLE=reviewer S23_COVER_LINE=
+       _s23_review covquote "$_S23_SH" S23_COVER_ROLE=reviewer "S23_COVER_LINE=+Coverage: complete"
+       _s23_review covcontra "$_S23_SH" S23_COVER_ROLE=reviewer "S23_COVER_LINE=Coverage: partial: read half" S23_VERDICT=complete
+       _s23_review covjson "$_S23_SH" S23_COVER_ROLE=reviewer "S23_COVER_LINE=Coverage: partial: read half" S23_VERDICT=partial
+       _s23_review covjsonok "$_S23_SH" S23_VERDICT=complete
+       _s23_review covspec "$_S23_SH" S23_COVER_PERSONA=security-sentinel "S23_COVER_LINE=Coverage: partial: read half"
+       _s23_review fb40 "$_S23_SH" S23_ROLE40=analyst S23_COVER_PERSONA=architecture-strategist "S23_COVER_LINE=Coverage: none: the package was unreadable"
+       _s23_review sub40ok "$_S23_SH" S23_ROLE40=reviewer "S23_SUBAGENT=Coverage: complete"
+       _s23_review sub40no "$_S23_SH" S23_ROLE40=reviewer "S23_SUBAGENT=no closing line here"
+       _s23_review notrun "$_S23_SH" "S23_NOTRUN=pytest -q"
+       _s23_review c6 "$_S23_SH"
        _s23_research all "$_S23_SH"
        _s23_research lensfail "$_S23_SH" S23_FAIL=framework-docs-researcher
        _s23_research analystfail "$_S23_SH" S23_FAIL=analyst
        _s23_research slow "$_S23_SH" "S23_SLOW=learnings-researcher research-synthesizer"
        _s23_research resyn "$_S23_SH" S23_SLOW=research-synthesizer
-       _s23_research spawn80 "$_S23_SH" S23_SPAWNFAIL=git-history-analyzer S23_STOP80=1 )
+       _s23_research spawn80 "$_S23_SH" S23_SPAWNFAIL=git-history-analyzer S23_STOP80=1
+       _s23_research skel "$_S23_SH"
+       _s23_plan ok "$_S23_SH" '## Plan review: goal\n\n### Status: APPROVED\n\n### Blocking issues (must fix before build)\nNone\n'
+       _s23_plan rev "$_S23_SH" '## Plan review: goal\n\n### Status: NEEDS_REVISION\n\n### Blocking issues (must fix before build)\n- task T1 has no Accept\n'
+       _s23_plan contra "$_S23_SH" '## Plan review: goal\n\n### Status: APPROVED\n\n### Blocking issues (must fix before build)\n- task T1 has no Accept\n'
+       _s23_plan bare "$_S23_SH" '## Plan review: goal\n\n### Status: APPROVED\n' )
   _S23_ALL='ops=ANTIGRAVITY,ARCHITECTURE_STRATEGIST,CODEX,CODE_SIMPLICITY_REVIEWER,CONVENTION_ENFORCER,PERFORMANCE_ORACLE,SECURITY_SENTINEL'
   _S23_FAIL="${_S23_FAIL}$(_self_expect "${_S23_N}" "$O" \
     "^all:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=(75/)*0:${_S23_ALL}:gap=0:learn=Known-issue_context_\[learnings-researcher\]:partial=0:rerun=[0-9]+:bad=0:err=$" \
     "^off:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=(75/)*0:ops=ANTIGRAVITY,CODEX:gap=0:.*:bad=0:err=$" \
     "^fail:${_S23_N}:dispatch=0:wait=1:syn=-:synwait=-:.*:bad=0:err=specialist_PERFORMANCE_ORACLE_failed_rc=3$" \
     "^empty:${_S23_N}:dispatch=0:wait=1:syn=-:synwait=-:.*:bad=0:err=specialist_CONVENTION_ENFORCER_wrote_nothing$" \
-    "^missing:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=3:ops=ANTIGRAVITY,ARCHITECTURE_STRATEGIST,CODE_SIMPLICITY_REVIEWER,CONVENTION_ENFORCER,PERFORMANCE_ORACLE,SECURITY_SENTINEL:gap=1:.*:bad=0:err=NOT_converged,_lanes_missing_or_empty:_ops/REVIEW_CODEX.md$" \
+    "^missing:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=3:ops=ANTIGRAVITY,ARCHITECTURE_STRATEGIST,CODE_SIMPLICITY_REVIEWER,CONVENTION_ENFORCER,PERFORMANCE_ORACLE,SECURITY_SENTINEL:gap=1:.*:bad=0:err=NOT_converged,_lanes_missing,_empty_or_short_of_complete_coverage:_ops/REVIEW_CODEX.md$" \
     "^lfail:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=(75/)*0:${_S23_ALL}:gap=0:learn=learnings-researcher_failed_\[rc_3\]:partial=0:.*:bad=0:err=$" \
     "^slow:${_S23_N}:dispatch=0:wait=(75/)+0:syn=0:synwait=(75/)+0:${_S23_ALL}:gap=0:.*:rerun=[1-9][0-9]*:bad=0:err=$" \
     "^dall:${_S23_N}:swarm=0:wait=(75/)*0:syn=0:synwait=(75/)*0:failed=:analyst=0:stale=0:analystmark=0:ops=RESEARCH_ANTIGRAVITY.md:rerun=[0-9]+:bad=0$" \
@@ -12167,22 +12797,69 @@ for _S23_SH in $_S23_SHELLS; do
     "^missing:${_S23_N}:x:roles=1/1:spawns=6:" \
     "^resyn:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=(75/)*0:${_S23_ALL}:gap=0:.*:bad=0:err=$" \
     "^resyn:${_S23_N}:x:roles=1/1:spawns=6:syn2=1:synspawns=1:refused=1:keep=1$" \
-    "^regap:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=(75/)*3:.*:gap=1:.*:bad=0:err=NOT_converged,_lanes_missing_or_empty:_ops/REVIEW_CODEX.md$" \
+    "^regap:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=(75/)*3:.*:gap=1:.*:bad=0:err=NOT_converged,_lanes_missing,_empty_or_short_of_complete_coverage:_ops/REVIEW_CODEX.md$" \
     "^regap:${_S23_N}:x:roles=1/1:spawns=6:syn2=1:synspawns=1:refused=1:keep=1$" \
     "^rolefail:${_S23_N}:dispatch=1:wait=-:" "^rolefail:${_S23_N}:stop:0:0:1:0:1$" \
     "^stop80:${_S23_N}:dispatch=1:wait=-:" "^stop80:${_S23_N}:stop:1:1:0:0:1$" \
     "^spawn80:${_S23_N}:dispatch=1:wait=-:" "^spawn80:${_S23_N}:stop:1:1:0:0:1$" \
     "^offfail:${_S23_N}:dispatch=1:wait=-:" "^offfail:${_S23_N}:stop:0:0:0:1:0$" \
-    "^all:${_S23_N}:stop:0:0:0:0:0$" \
+    "^all:${_S23_N}:stop:0:0:0:0:0$" "^all:${_S23_N}:gaps:$" "^off:${_S23_N}:gaps:$" \
+    "^covpart:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=3:.*:err=NOT_converged,_lanes_missing,_empty_or_short_of_complete_coverage:_ops/REVIEW_CODEX.md:$" "^covpart:${_S23_N}:gaps:ops/REVIEW_CODEX.md:_coverage_partial$" \
+    "^all:${_S23_N}:synbrief:gaps=1:lanes=1:never=1$" "^covpart:${_S23_N}:synbrief:gaps=1:lanes=1:never=1$" \
+    "^notrun:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=(75/)*0:${_S23_ALL}:gap=0:.*:bad=0:err=$" "^notrun:${_S23_N}:gaps:$" "^notrun:${_S23_N}:notrun:1$" \
+    "^c6:${_S23_N}:cycles:one=(75/)*0:two=(75/)*3:three=(75/)*0:archived=1:brief2=1:brief3=1$" \
+    "^covnone:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=3:" "^covnone:${_S23_N}:gaps:ops/REVIEW_ANTIGRAVITY.md:_coverage_none$" \
+    "^covmiss:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=3:" "^covmiss:${_S23_N}:gaps:ops/REVIEW_CODEX.md:_coverage_missing$" \
+    "^covquote:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=3:" "^covquote:${_S23_N}:gaps:ops/REVIEW_CODEX.md:_coverage_missing$" \
+    "^covcontra:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=3:" "^covcontra:${_S23_N}:gaps:ops/REVIEW_CODEX.md:_coverage_contradictory$" \
+    "^covjson:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=3:" "^covjson:${_S23_N}:gaps:ops/REVIEW_CODEX.md:_coverage_partial$" \
+    "^covjsonok:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=(75/)*0:" "^covjsonok:${_S23_N}:gaps:$" \
+    "^covspec:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=3:" "^covspec:${_S23_N}:gaps:ops/REVIEW_SECURITY_SENTINEL.md:_coverage_partial$" \
+    "^fb40:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=3:" "^fb40:${_S23_N}:gaps:ops/REVIEW_ANTIGRAVITY.md:_coverage_none$" \
+    "^sub40ok:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=(75/)*0:" "^sub40ok:${_S23_N}:gaps:$" \
+    "^sub40no:${_S23_N}:dispatch=0:wait=(75/)*0:syn=0:synwait=3:" "^sub40no:${_S23_N}:gaps:ops/REVIEW_CODEX.md:_coverage_missing$" \
     "^dresyn:${_S23_N}:swarm=0:wait=(75/)*0:syn=0:synwait=(75/)*0:failed=:analyst=0:.*:bad=0$" \
     "^dresyn:${_S23_N}:x:syn2=1:synspawns=1:refused=1:keep=1$" \
-    "^dspawn80:${_S23_N}:swarm=1:wait=-:" "^dspawn80:${_S23_N}:stop:1:1:0:1$")"
+    "^dspawn80:${_S23_N}:swarm=1:wait=-:" "^dspawn80:${_S23_N}:stop:1:1:0:1$" \
+    "^dall:${_S23_N}:learn:spawn=1:skipped=0:listed=1:marker=0$" \
+    "^dskel:${_S23_N}:swarm=0:wait=(75/)*0:syn=0:synwait=(75/)*0:failed=:analyst=0:.*:bad=0$" \
+    "^dskel:${_S23_N}:learn:spawn=0:skipped=1:listed=0:marker=1$" "^dskel:${_S23_N}:x:syn2=-:synspawns=1:" \
+    "^pok:${_S23_N}:start=0:wait=(75/)+0:shown=1:brief=1:line=0:bad=0$" \
+    "^prev:${_S23_N}:start=0:wait=(75/)+1:shown=1:brief=1:line=1:bad=0$" \
+    "^pcontra:${_S23_N}:start=0:wait=(75/)+1:shown=1:brief=1:line=1:bad=0$" \
+    "^pbare:${_S23_N}:start=0:wait=(75/)+2:shown=1:brief=1:line=1:bad=0$")"
 done
-_S23_CAP="persona-bearing skill blocks under zsh and bash: spawn + budgeted wait, zsh-safe fan-in, the lane gap check, the learnings and analyst failure paths (U8, KTD5)"
+# The rules a lead reads and no block runs (R25, R21): convergence, in its two
+# places, with the old size test gone, the pointers to it, and the synthesizer's
+# lane list. Each case greps one exact clause, so an edit that drops it fails here.
+_S23_C6='Convergence needs a synthesized report on the final changed snapshot; a cycle that applied any P1 or P2 fix re-reviews the changed files, and that review counts as a cycle against the cap of three.'
+O=$( _s23_sec() { sed -n "/$1/,/^##/p" "$2" 2>/dev/null | grep -c -F -- "$_S23_C6" || true; }
+  echo "c6-text:synthesis=$(sed -n '/^6\. Convergence check/p' "$_S23_R/synthesis.md" | grep -c -F -- "$_S23_C6" || true):refine=$(_s23_sec '^### Exit decision' "${REPO_ROOT}/skills/iterative-refinement/SKILL.md"):files3=$(grep -c '3+ files' "${REPO_ROOT}/skills/iterative-refinement/SKILL.md" || true)"
+  echo "c6-cap:synthesis=$(grep -c '^9\. .*third cycle that applied a P1 or P2 fix' "$_S23_R/synthesis.md" || true):refine=$(sed -n '/^### Exit decision/,/^##/p' "${REPO_ROOT}/skills/iterative-refinement/SKILL.md" | grep -c 'third cycle that applied a P1 or P2 fix' || true)"
+  echo "c6-pointer:ship=$(grep -c "iterative-refinement. skill's exit decision" "${REPO_ROOT}/skills/at-ship/references/phases.md" || true):coordinate=$(grep -c "iterative-refinement. skill's exit decision" "${REPO_ROOT}/skills/at-coordinate/references/phases.md" || true)"
+  echo "b7:authoritative=$(grep -c 'That list is authoritative' "${REPO_ROOT}/personas/findings-synthesizer.md" || true):expected=$(grep -c 'expected, not a gap' "${REPO_ROOT}/personas/findings-synthesizer.md" || true):gap=$(grep -c 'A lane on the list with no file, or an empty one, is a gap' "${REPO_ROOT}/personas/findings-synthesizer.md" || true):optional=$(grep -c '^### Gaps' "${REPO_ROOT}/personas/findings-synthesizer.md" || true)" )
+# D1, B6 and E4's prose (R20, R28, R29): every reader of a verdict names the
+# helper, the plan-checker has no caveat exit and only defined Reversibility
+# values, and each planning spawn says when it is skipped. The review gate stays.
+_S23_SKIP='learnings-researcher skipped: the store holds only the skeleton'
+_S23_S="${REPO_ROOT}/skills"
+_S23_PC="${REPO_ROOT}/personas/plan-checker.md"
+_S23_FAIL="${_S23_FAIL}$(_self_expect d1-text "$( for F in at-ship/references/phases.md at-coordinate/references/phases.md at-plan/references/validation.md at-build/references/subagent-mode.md at-build/references/team-mode.md at-build/references/lease-lifecycle.md at-build/SKILL.md; do echo "reader:$F:$(grep -c 'persona_verdict' "$_S23_S/$F" || true)"; done
+  echo "reader:team-lead:$(grep -c 'persona_verdict' "${REPO_ROOT}/personas/team-lead.md" || true)"
+  echo "b6:costly=$(grep -c 'costly' "$_S23_PC" || true):caveats=$(grep -c -i 'caveats' "$_S23_PC" || true):escalate=$(grep -c 'escalate to the user' "$_S23_PC" || true):checkpointed=$(grep -c 'Reversibility: checkpointed' "$_S23_PC" || true)"
+  for F in at-ship/references/phases.md at-coordinate/references/phases.md at-plan/SKILL.md; do echo "spawn:$F:$(grep -c 'learnings_store_empty' "$_S23_S/$F" || true):$(grep -c -F "$_S23_SKIP" "$_S23_S/$F" || true)"; done
+  echo "spawn:swarm:$(grep -c '^if learnings_store_empty; then' "$_S23_D/swarm.md" || true):$(grep -c -F "$_S23_SKIP" "$_S23_D/swarm.md" || true)"
+  echo "spawn:persona:$(grep -c 'learnings_store_empty' "${REPO_ROOT}/personas/learnings-researcher.md" || true):gate:$(grep -c 'learnings_store_empty' "$_S23_R/learnings-gate.md" || true)"
+  echo "spawn:review:$(grep -c 'learnings_store_empty' "$_S23_R/dispatch.md" || true)" )" \
+  '^reader:at-ship/references/phases\.md:2$' '^reader:at-coordinate/references/phases\.md:2$' '^reader:at-plan/references/validation\.md:[1-9]' '^reader:at-build/references/subagent-mode\.md:1$' '^reader:at-build/references/team-mode\.md:1$' '^reader:at-build/references/lease-lifecycle\.md:1$' '^reader:at-build/SKILL\.md:2$' '^reader:team-lead:1$' \
+  '^b6:costly=0:caveats=0:escalate=1:checkpointed=1$' \
+  '^spawn:at-ship/references/phases\.md:1:1$' '^spawn:at-coordinate/references/phases\.md:1:1$' '^spawn:at-plan/SKILL\.md:1:1$' '^spawn:swarm:1:1$' '^spawn:persona:1:gate:1$' '^spawn:review:0$')"
+_S23_FAIL="${_S23_FAIL}$(_self_expect c6-text "$O" '^c6-text:synthesis=1:refine=1:files3=0$' '^c6-cap:synthesis=1:refine=1$' '^c6-pointer:ship=1:coordinate=1$' '^b7:authoritative=1:expected=0:gap=1:optional=1$')"
+_S23_CAP="persona-bearing skill blocks under zsh and bash: spawn + budgeted wait, zsh-safe fan-in, the lane gap check with the Coverage line (R24), the learnings and analyst failure paths, the plan verdict's exit code (R28) and the skipped learnings lens (R29) (U8, KTD5)"
 if [ ! -x /bin/zsh ]; then
   row "SELF-23" "claude" "$_S23_CAP" "SKIPPED" "/bin/zsh not installed: the bash half alone is no evidence for the leads' shell" "static"
 elif [ -z "$_S23_FAIL" ]; then
-  row "SELF-23" "claude" "$_S23_CAP" "PASS" "at-review dispatch/wait/synthesis/synthesis-wait and at-deep-research swarm/wait/synthesis/synthesis-wait blocks from this checkout, each under /bin/zsh and /bin/bash with stub lanes (persona_spawn detached, persona_wait 75 while a run has no exit code): all lanes -> 7 ops/REVIEW_*.md, learnings context; no specialists -> the core lanes only; a failing specialist / an empty one -> wait rc 1 naming it; a core lane that wrote nothing -> synthesis wait rc 3 NOT converged naming ops/REVIEW_CODEX.md; learnings-researcher failing after a partial report -> marker in, partial out; slow personas -> wait blocks 75 until done, rerun asked; dispatch_role analyst and reviewer once each per cycle; no persona started -> the wait block skips persona_wait (the stub, like the helper, says 64 for no runs) and returns 0; the synthesis start block rerun while its synthesizer runs -> exit 1, one synthesizer, its input untouched, and with the missing lane's file arrived meanwhile the gap kept (synthesis wait 3); a core lane failing -> the personas stopped and said so, with persona_stop at 80 -> could NOT all be stopped plus its own line (also for a persona that cannot start), with none started -> no persona_stop; research: all; a failing lens named; the analyst failing beside a stale ops/RESEARCH_ANTIGRAVITY.md -> archived, never read, marked FAILED; slow -> 75 then 0; synthesis rerun while running -> exit 1, one synthesizer, its input untouched; a lens that cannot start with persona_stop at 80 -> could NOT all be stopped plus its line; no zsh glob, job or unset-parameter error in any block" "static"
+  row "SELF-23" "claude" "$_S23_CAP" "PASS" "at-review dispatch/wait/synthesis/synthesis-wait and at-deep-research swarm/wait/synthesis/synthesis-wait blocks from this checkout, each under /bin/zsh and /bin/bash with stub lanes (persona_spawn detached, persona_wait 75 while a run has no exit code): all lanes -> 7 ops/REVIEW_*.md, learnings context; no specialists -> the core lanes only; a failing specialist / an empty one -> wait rc 1 naming it; a core lane that wrote nothing -> synthesis wait rc 3 NOT converged naming ops/REVIEW_CODEX.md; learnings-researcher failing after a partial report -> marker in, partial out; slow personas -> wait blocks 75 until done, rerun asked; dispatch_role analyst and reviewer once each per cycle; no persona started -> the wait block skips persona_wait (the stub, like the helper, says 64 for no runs) and returns 0; the synthesis start block rerun while its synthesizer runs -> exit 1, one synthesizer, its input untouched, and with the missing lane's file arrived meanwhile the gap kept (synthesis wait 3); a core lane failing -> the personas stopped and said so, with persona_stop at 80 -> could NOT all be stopped plus its own line (also for a persona that cannot start), with none started -> no persona_stop; research: all; a failing lens named; the analyst failing beside a stale ops/RESEARCH_ANTIGRAVITY.md -> archived, never read, marked FAILED; slow -> 75 then 0; synthesis rerun while running -> exit 1, one synthesizer, its input untouched; a lens that cannot start with persona_stop at 80 -> could NOT all be stopped plus its line; a command-shaped Accept: listed not run under Coverage: complete converges; after a P1 fix a re-review with a silent lane exits 3 with cycle 1's file archived, and a cycle whose lanes all report exits 0; the convergence rule in synthesis.md and iterative-refinement, the third-cycle escalation, the at-ship and at-coordinate pointers, the synthesizer's authoritative lane list and the synthesis brief's gaps, lanes and forced verdict; no zsh glob, job or unset-parameter error in any block" "static"
 else
   row "SELF-23" "claude" "$_S23_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S23_FAIL"):$(printf '%s' "$_S23_FAIL" | cut -c1-700)" "static"
 fi
@@ -12221,6 +12898,11 @@ mkdir -p "$_S16"
 #            hooks.state trusted_hash -> present; modified, untrusted, a
 #            stale trusted_hash, only another plugin's hook -> absent naming
 #            why; the call failing, codex missing, the feature off -> absent
+#            content-bound (hooks/list <declaration>/<content>, Codex 0.164):
+#            trusted_hash and trusted_content_hash, mixed with older hooks, or
+#            a declaration-only approval from before 0.164 -> present; a stale
+#            content or declaration hash, or any other shape -> absent naming
+#            the hash that is unmet
 #   launch   lead_launch_line: claude interactive, codex interactive (full
 #            access, model, effort; a pinned [lead]), headless unchanged
 #            from coordinate.sh's line; cursor 5, bad mode 64;
@@ -12286,7 +12968,7 @@ _S16_FAIL="${_S16_FAIL}$(_self_expect A-path "$O" '^path:write=0/0:resolve=claud
 # egress
 _self_repo "$_S16A/eg-trio" "$_S16A/home" sprint/s16a "# probe roster (SELF-16 A)\n"
 _self_repo "$_S16A/eg-grok" "$_S16A/home" sprint/s16a '[members.grok]\nenabled = true\nmodel = "grok-4.7"\n\n'
-_self_repo "$_S16A/eg-both" "$_S16A/home" sprint/s16a '[members.cursor]\nenabled = true\nmodel = "cursor-grok-4.6-xhigh"\n\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n\n[members.kimi]\nenabled = false\nmodel = ""\n\n'
+_self_repo "$_S16A/eg-both" "$_S16A/home" sprint/s16a '[members.cursor]\nenabled = true\nmodel = "grok-4.7-xhigh"\n\n[members.grok]\nenabled = true\nmodel = "grok-4.7"\n\n[members.kimi]\nenabled = false\nmodel = ""\n\n'
 _self_repo "$_S16A/eg-chain" "$_S16A/home" sprint/s16a '[roles.analyst]\ncli = "opencode"\nfallbacks = ["claude"]\n\n'
 _S16A_EG='
 R=0; E=$(roster_egress_disclosure 2>&1) || R=$?
@@ -12412,6 +13094,47 @@ _S16_FAIL="${_S16_FAIL}$(_self_expect A-hooks "$O" \
   '^hk-nocodex:hooks_trusted\.SessionStart=absent:codex is not on PATH')"
 if [ "$(printf '%s\n' "$O" | grep -c '=present:' || true)" != 11 ]; then _S16_FAIL="$_S16_FAIL A-hooks(present-count:$(printf '%s\n' "$O" | grep -c '=present:' || true))"; fi
 
+# hooks, content-bound: from Codex 0.164 hooks/list reports a plugin hook's currentHash as
+# <declaration>/<content> and Codex's config writer persists it split (CDX-22)
+_s16a_hkc_cfg() { # _s16a_hkc_cfg <home> <key>:<trusted_hash>:<trusted_content_hash>... (an empty field is left out)
+  local H=$1 E K T C
+  shift
+  mkdir -p "$_S16A/$H/.codex"
+  for E in "$@"; do
+    K=${E%%:*}; E=${E#*:}; T=${E%%:*}; C=${E#*:}
+    printf '[hooks.state."%s"]\n' "$K"
+    if [ -n "$T" ]; then printf 'trusted_hash = "%s"\n' "$T"; fi
+    if [ -n "$C" ]; then printf 'trusted_content_hash = "%s"\n' "$C"; fi
+    printf '\n'
+  done > "$_S16A/$H/.codex/config.toml"
+}
+sed 's#"currentHash": "h\([0-9]\)"#"currentHash": "dh\1/ch\1"#g' "$_S16A/hk-trusted.json" > "$_S16A/hkc-all.json"
+sed 's#"currentHash": "h\([12]\)"#"currentHash": "dh\1/ch\1"#g' "$_S16A/hk-trusted.json" > "$_S16A/hkc-mixed.json"
+_s16a_hkc_cfg hkc-new k1:dh1:ch1 k2:dh2:ch2 k3:dh3:ch3 k4:dh4:ch4
+_s16a_hkc_cfg hkc-mixedcfg k1:dh1:ch1 k2:dh2:ch2 k3:h3: k4:h4:
+_s16a_hkc_cfg hkc-carried k1:dh1: k2:dh2: k3:dh3: k4:dh4:
+_s16a_hkc_cfg hkc-stale k1:dh1:ch1 k2:dh2:ch2 k3:dh3:ch3 k4:dh4:ch4-before-an-edit
+_s16a_hkc_cfg hkc-declstale k1:dh1:ch1 k2:dh2:ch2 k3:dh3:ch3 k4:dh4-before-an-edit:ch4
+_s16a_hkc_cfg hkc-other k1::ch1 k2:dh2/ch2: k3:dh3/ch3: k4:dh4:ch4
+O="$(_s16a "$_S16A/path" "C=hkc-new H=hkc-new J=hkc-all.json; $_S16A_HK")
+$(_s16a "$_S16A/path" "C=hkc-mixed H=hkc-mixedcfg J=hkc-mixed.json; $_S16A_HK")
+$(_s16a "$_S16A/path" "C=hkc-carried H=hkc-carried J=hkc-all.json; $_S16A_HK")
+$(_s16a "$_S16A/path" "C=hkc-stale H=hkc-stale J=hkc-all.json; $_S16A_HK")
+$(_s16a "$_S16A/path" "C=hkc-declstale H=hkc-declstale J=hkc-all.json; $_S16A_HK")
+$(_s16a "$_S16A/path" "C=hkc-other H=hkc-other J=hkc-all.json; $_S16A_HK")"
+_S16_FAIL="${_S16_FAIL}$(_self_expect A-hooks-content "$O" \
+  '^hkc-new:hooks_trusted\.SessionStart=present:detected$' '^hkc-new:hooks_trusted\.PostToolUse=present:detected$' '^hkc-new:hooks_trusted\.PreCompact=present:detected$' \
+  '^hkc-mixed:hooks_trusted\.SessionStart=present:detected$' '^hkc-mixed:hooks_trusted\.PostToolUse=present:detected$' '^hkc-mixed:hooks_trusted\.PreCompact=present:detected$' \
+  '^hkc-carried:hooks_trusted\.SessionStart=present:detected$' '^hkc-carried:hooks_trusted\.PostToolUse=present:detected$' '^hkc-carried:hooks_trusted\.PreCompact=present:detected$' \
+  '^hkc-stale:hooks_trusted\.PreCompact=absent:the agent-triforge PreCompact hook k4 has no hooks\.state trusted_content_hash equal to its current content hash in .*/hkc-stale/\.codex/config\.toml$' \
+  '^hkc-stale:hooks_trusted\.SessionStart=present:' \
+  '^hkc-declstale:hooks_trusted\.PreCompact=absent:the agent-triforge PreCompact hook k4 has no hooks\.state trusted_hash equal to its current declaration hash in .*/hkc-declstale/\.codex/config\.toml$' \
+  '^hkc-declstale:hooks_trusted\.SessionStart=present:' \
+  '^hkc-other:hooks_trusted\.SessionStart=absent:the agent-triforge SessionStart hook k1 has no hooks\.state trusted_hash equal to its current declaration hash in ' \
+  '^hkc-other:hooks_trusted\.PostToolUse=absent:the agent-triforge PostToolUse hook k2 has no hooks\.state trusted_hash equal to its current declaration hash in ' \
+  '^hkc-other:hooks_trusted\.PreCompact=present:')"
+if [ "$(printf '%s\n' "$O" | grep -c '=present:' || true)" != 14 ]; then _S16_FAIL="$_S16_FAIL A-hooks-content(present-count:$(printf '%s\n' "$O" | grep -c '=present:' || true))"; fi
+
 # launch
 _self_repo "$_S16A/la-claude" "$_S16A/home" sprint/s16a "# probe roster (SELF-16 A)\n"
 _self_repo "$_S16A/la-codex" "$_S16A/home" sprint/s16a '[lead]\ncli = "codex"\n\n'
@@ -12478,7 +13201,7 @@ _S16_FAIL="${_S16_FAIL}$(_self_expect A-devin "$O" '^dv-list:rc=0:\[swe-1-6-slow
   '^dv-trip:write=0/0:resolve=devin\|swe-2-high\|xhigh:entry=devin\|swe-2-high\|xhigh\|codex,antigravity,claude$' \
   '^dv-follow:write=0:resolve=devin\|claude-opus-5-5-high\|xhigh:consent=user $')"
 unset _s16_c _S16A_D _S16A_L _S16A_TOP _S16A_SUM
-_S16_EV="${_S16_EV}A: one checkout-top roster from a subdirectory; egress per provider with xAI once and a HOME line per member; Codex trust by path, realpath and CODEX_HOME, read-only, unknown rc 80; hook trust only with a matching trusted_hash from hooks/list, fail closed; interactive and headless launch lines and the confinement text; unverified in a Codex sandbox, uncached; Devin model ids, rc 69, the member model reaching its roles; "
+_S16_EV="${_S16_EV}A: one checkout-top roster from a subdirectory; egress per provider with xAI once and a HOME line per member; Codex trust by path, realpath and CODEX_HOME, read-only, unknown rc 80; hook trust only with an approval matching hooks/list's currentHash (content-bound, carried over from before 0.164, older trusted_hash, mixed events), a stale or other shape absent with its reason, fail closed; interactive and headless launch lines and the confinement text; unverified in a Codex sandbox, uncached; Devin model ids, rc 69, the member model reaching its roles; "
 # --- end of SELF-16 section A ---
 # --- SELF-16 section B: instruction files (U15) ---
 # B (R9, R39, R40; scripts/lib/instructions.sh). Fixtures under $_S16/b; each
@@ -12713,11 +13436,11 @@ _S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-own-claude "$_O" "^claude${T}hidden$
 _O=$(_s16b "$_S16B_V/p2" instruction_pointer_visibility codex)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-own-codex "$_O" "^codex${T}visible${T}[^ ]*/w/vis/p2/AGENTS\.md is read: " '^rc=0$')"
 _O=$(_s16b "$_S16B_V/p3" instruction_pointer_visibility claude)
-_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-import-claude "$_O" "^claude${T}visible${T}[^ ]*/w/vis/p3/CLAUDE\.md imports [^ ]*/w/vis/p3/AGENTS\.md, so it is loaded with that file\$" '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-import-claude "$_O" "^claude${T}visible${T}[^ ]*/w/vis/p3/CLAUDE\.md imports [^ ]*/w/vis/p3/AGENTS\.md, so it is loaded with that file \(under the default mode, claude-md-or-agents-md; " '^rc=0$')"
 _O=$(_s16b "$_S16B_V/p3" instruction_pointer_visibility codex)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-import-codex "$_O" "^codex${T}visible${T}" '^rc=0$')"
 _O=$(_s16b "$_S16B_V/p4" instruction_pointer_visibility claude)
-_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-override-claude "$_O" "^claude${T}visible${T}[^ ]*/w/vis/p4/AGENTS\.md is read: no CLAUDE\.md, \.claude/CLAUDE\.md or CLAUDE\.local\.md at [^ ]*/w/vis/p4 or above\$" '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-override-claude "$_O" "^claude${T}visible${T}[^ ]*/w/vis/p4/AGENTS\.md is read: no CLAUDE\.md, \.claude/CLAUDE\.md or CLAUDE\.local\.md at [^ ]*/w/vis/p4 or above \(under the default mode, claude-md-or-agents-md; " '^rc=0$')"
 _O=$(_s16b "$_S16B_V/p4" instruction_pointer_visibility codex)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-override-codex "$_O" "^codex${T}hidden${T}shadowed by [^ ]*/w/vis/p4/AGENTS\.override\.md: this reader takes it instead of [^ ]*/w/vis/p4/AGENTS\.md at that level" '^rc=1$')"
 _O=$(S16B_CODEX="$_S16B/codex-untrusted" _s16b "$_S16B_V/p5" instruction_pointer_visibility codex)
@@ -12737,6 +13460,89 @@ _O=$(_s16b "$_S16B_V/p5" instruction_pointer_visibility nosuchcli)
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-unregistered "$_O" "^nosuchcli${T}hidden${T}unknown reader: " '^rc=1$')"
 _O=$(cd "$_S16B_V/p5" && HOME="$_S16B/home" CODEX_HOME="$_S16B/home/.codex" /bin/bash -c 'source "$1/scripts/lib/instructions.sh" && instruction_pointer_visibility claude' _ "$REPO_ROOT" 2>&1; echo "rc=$?")
 _S16_FAIL="${_S16_FAIL}$(_self_expect b-vis-noregistry "$_O" "^claude${T}hidden${T}unknown reader: the registry names no instruction reader for claude " '^rc=1$')"
+
+# instructionFiles (D-055): the verdict follows the user tier's mode, four modes stubbed in a
+# throwaway HOME's .claude/settings.json; the file is read and never written
+_S16B_MD="$_S16B_W/mode"
+_S16B_MH="$_S16B/modehome"
+mkdir -p "$_S16B_MH/.claude" "$_S16B/modemoved"
+_s16b_proj "$_S16B_MD/bare"
+_s16b_proj "$_S16B_MD/plain"; printf '# own\n' > "$_S16B_MD/plain/CLAUDE.md"
+_s16b_proj "$_S16B_MD/imp"; printf '# own\n\n@AGENTS.md\n' > "$_S16B_MD/imp/CLAUDE.md"
+mkdir -p "$_S16B_MD/noblock"; ( cd "$_S16B_MD/noblock" && git init -q ) >/dev/null 2>&1; printf '# rules\n' > "$_S16B_MD/noblock/AGENTS.md"
+_s16b_set() { printf '{"pluginConfigs":{"cc-plugin-agents-md@builtin":{"options":{"instructionFiles":"%s"}}}}\n' "$2" > "$1/settings.json"; }
+_s16b_m() { S16B_HOME="$_S16B_MH" _s16b "$_S16B_MD/$1" instruction_pointer_visibility "${2:-claude}"; }
+_S16B_DEFAULT='under the default mode, claude-md-or-agents-md'
+_S16B_NOTREAD='managed settings and an active --settings are not read'
+_S16B_NOFIX='add the line|add a CLAUDE\.md|instruction_add_import|instruction_merge_pointer'
+# no settings file: the default's verdict, its fix, and the clause on the setting
+_O=$(_s16b_m plain)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-absent "$_O" "^claude${T}hidden${T}shadowed by [^ ]*/w/mode/plain/CLAUDE\.md: .*; add the line @AGENTS\.md to [^ ]*/w/mode/plain/CLAUDE\.md \(instruction_add_import " "${_S16B_DEFAULT}; a user-tier instructionFiles setting changes this" "${_S16B_NOTREAD}" '^rc=1$')"
+_O=$(_s16b_m bare)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-absent-bare "$_O" "^claude${T}visible${T}[^ ]*/w/mode/bare/AGENTS\.md is read: no CLAUDE\.md, .*${_S16B_DEFAULT}" '^rc=0$')"
+# the default written out
+_s16b_set "$_S16B_MH/.claude" claude-md-or-agents-md
+_O=$(_s16b_m plain)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-default "$_O" "^claude${T}hidden${T}shadowed by .*; add the line @AGENTS\.md to " "the instructionFiles setting in [^ ]*/modehome/\.claude/settings\.json is claude-md-or-agents-md" "${_S16B_NOTREAD}" '^rc=1$')"
+_O=$(_s16b_m imp)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-default-import "$_O" "^claude${T}visible${T}[^ ]*/w/mode/imp/CLAUDE\.md imports " '^rc=0$')"
+# both load: visible beside a CLAUDE.md, no import offered, the settings file untouched
+_s16b_set "$_S16B_MH/.claude" claude-md-and-agents-md
+_S16B_SUM=$(_s16b_sum "$_S16B_MH/.claude/settings.json")
+_O=$(_s16b_m plain)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-and "$_O" "^claude${T}visible${T}[^ ]*/w/mode/plain/AGENTS\.md is read beside " "the instructionFiles setting in [^ ]*/settings\.json is claude-md-and-agents-md" "${_S16B_NOTREAD}" '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-mode-and "$_O" "${_S16B_NOFIX}")"
+_S16_FAIL="${_S16_FAIL}$(_s16b_same b-mode-and "$_S16B_SUM" "$(_s16b_sum "$_S16B_MH/.claude/settings.json")")"
+# no pointer block is hidden whichever of these modes runs, so that why names no setting
+_O=$(_s16b_m noblock)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-and-noblock "$_O" "^claude${T}hidden${T}no AGENTS\.md between .* holds the Triforge pointer block; instruction_merge_pointer adds it\$" '^rc=1$')"
+# claude-md: no AGENTS.md of its own, an import still loads it (D-055's vendor page, CC-14c)
+_s16b_set "$_S16B_MH/.claude" claude-md
+for _S16B_MP in bare plain noblock; do
+  _O=$(_s16b_m "$_S16B_MP")
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-mode-claude-md-${_S16B_MP}" "$_O" "^claude${T}hidden${T}the instructionFiles setting in [^ ]*/settings\.json is claude-md, so " "${_S16B_NOTREAD}" '^rc=1$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-mode-claude-md-${_S16B_MP}" "$_O" "${_S16B_NOFIX}")"
+done
+_O=$(_s16b_m imp)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-claude-md-import "$_O" "^claude${T}visible${T}[^ ]*/w/mode/imp/CLAUDE\.md imports " "is claude-md" '^rc=0$')"
+_O=$(_s16b_m plain codex)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-codex "$_O" "^codex${T}visible${T}" '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_s16b_not b-mode-codex "$_O" 'instructionFiles')"
+# managed-only: nothing in the project loads, an import included
+_s16b_set "$_S16B_MH/.claude" managed-only
+for _S16B_MP in bare plain imp noblock; do
+  _O=$(_s16b_m "$_S16B_MP")
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "b-mode-managed-${_S16B_MP}" "$_O" "^claude${T}hidden${T}the instructionFiles setting in [^ ]*/settings\.json is managed-only, so " "${_S16B_NOTREAD}" '^rc=1$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not "b-mode-managed-${_S16B_MP}" "$_O" "${_S16B_NOFIX}")"
+done
+# what cannot be read gives the default's verdict, naming the file
+printf '{not json\n' > "$_S16B_MH/.claude/settings.json"
+_O=$(_s16b_m plain)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-unreadable "$_O" "^claude${T}hidden${T}shadowed by .*; add the line @AGENTS\.md to " "${_S16B_DEFAULT}: [^ ]*/modehome/\.claude/settings\.json is unreadable" '^rc=1$')"
+_O=$(_s16b_m bare)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-unreadable-bare "$_O" "^claude${T}visible${T}.*${_S16B_DEFAULT}: [^ ]*/settings\.json is unreadable" '^rc=0$')"
+_s16b_set "$_S16B_MH/.claude" no-such-mode
+_O=$(_s16b_m plain)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-unknown "$_O" "^claude${T}hidden${T}shadowed by .*; add the line @AGENTS\.md to " "${_S16B_DEFAULT}: [^ ]*/settings\.json sets instructionFiles to a value this library does not know" '^rc=1$')"
+printf '{"pluginConfigs":3}\n' > "$_S16B_MH/.claude/settings.json"
+_O=$(_s16b_m plain)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-noentry "$_O" "^claude${T}hidden${T}shadowed by " "${_S16B_DEFAULT}; a user-tier instructionFiles setting changes this" '^rc=1$')"
+rm -f "$_S16B_MH/.claude/settings.json"
+# the user tier is tier_home's: a moved config home is read, one in no usable place is not
+_s16b_set "$_S16B/modemoved" claude-md-and-agents-md
+_O=$(CLAUDE_CONFIG_DIR="$_S16B/modemoved" _s16b_m plain)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-moved "$_O" "^claude${T}visible${T}" "the instructionFiles setting in [^ ]*/modemoved/settings\.json is claude-md-and-agents-md" '^rc=0$')"
+_O=$(CLAUDE_CONFIG_DIR=relative _s16b_m plain)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-relative "$_O" "^claude${T}hidden${T}shadowed by " "${_S16B_DEFAULT}: CLAUDE_CONFIG_DIR is empty, relative or in the project" '^rc=1$')"
+# the shell helper session start reads
+_s16b_set "$_S16B_MH/.claude" claude-md
+_O=$(S16B_HOME="$_S16B_MH" _s16b "$_S16B_MD/plain" instruction_files_mode)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-helper "$_O" "^claude-md${T}imports${T}set${T}[^ ]*/modehome/\.claude/settings\.json\$" '^rc=0$')"
+rm -f "$_S16B_MH/.claude/settings.json"
+_O=$(S16B_HOME="$_S16B_MH" _s16b "$_S16B_MD/plain" instruction_files_mode)
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-mode-helper-absent "$_O" "^claude-md-or-agents-md${T}shadow${T}absent${T}[^ ]*/modehome/\.claude/settings\.json\$" '^rc=0$')"
+_S16_EV="${_S16_EV}B (D-055): the instructionFiles setting in a throwaway HOME's settings file, never written: unset and the default keep the shadow verdict and its fix, claude-md-and-agents-md is visible beside a CLAUDE.md with no import offered, claude-md is hidden with no fix unless an import loads it, managed-only is hidden even with an import, an unreadable file or unknown value gives the default's verdict naming it, a moved config home is the one read, codex lines never name the setting. "
+# end of the instructionFiles cases
 
 # writers: the @AGENTS.md import (project file, .claude/ file, a parent's file)
 _S16B_I="$_S16B_W/wr"
@@ -12865,6 +13671,15 @@ if [ "$_S16B_TAGS" -eq 1 ]; then
   _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-again "$_O" '^unchanged: [^ ]*/w/cv/CLAUDE\.md does not exist; nothing to convert$' '^rc=0$')"
   _O=$(_s16b "$_S16B_W/cv2" instruction_convert_stale .claude/CLAUDE.md --yes)
   _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-dotclaude "$_O" '^changed: [^ ]*/w/cv2/AGENTS\.md: created ' '^changed: [^ ]*/w/cv2/\.claude/CLAUDE\.md: removed \(an unmodified copy of the Triforge v3\.0\.0 template\)$' '^note: [^ ]*/w/cv2/CLAUDE\.local\.md still exists and does not import AGENTS\.md' '^rc=0$')"
+  # the note is the default mode's: both load, so the file left behind does not skip AGENTS.md (D-055)
+  mkdir -p "$_S16B_W/cv5/.claude" "$_S16B/cv5home/.claude"
+  ( cd "$_S16B_W/cv5" && git init -q ) >/dev/null 2>&1
+  cp "$_S16B/v300.md" "$_S16B_W/cv5/.claude/CLAUDE.md"
+  printf '# mine\n' > "$_S16B_W/cv5/CLAUDE.local.md"
+  printf '{"pluginConfigs":{"cc-plugin-agents-md@builtin":{"options":{"instructionFiles":"claude-md-and-agents-md"}}}}\n' > "$_S16B/cv5home/.claude/settings.json"
+  _O=$(S16B_HOME="$_S16B/cv5home" _s16b "$_S16B_W/cv5" instruction_convert_stale .claude/CLAUDE.md --yes)
+  _S16_FAIL="${_S16_FAIL}$(_self_expect b-convert-mode "$_O" '^changed: [^ ]*/w/cv5/\.claude/CLAUDE\.md: removed ' '^rc=0$')"
+  _S16_FAIL="${_S16_FAIL}$(_s16b_not b-convert-mode "$_O" '^note: ')"
   for _S16B_Y in "" --yes; do
     _S16B_SUM=$(_s16b_sum "$_S16B_W/cv3/CLAUDE.md" "$_S16B_W/cv3/AGENTS.md")
     _O=$(_s16b "$_S16B_W/cv3" instruction_convert_stale CLAUDE.md $_S16B_Y)
@@ -12988,7 +13803,7 @@ _S16_FAIL="${_S16_FAIL}$(_self_expect b-ccd-detect "$_O" \
   "^\.claude/CLAUDE\.md${T}above${T}no-import,user-owned${T}[^${T}]*/cc/home/\.claude/CLAUDE\.md${T}" '^rc=0$')"
 _S16_FAIL="${_S16_FAIL}$(_s16b_not b-ccd-detect "$_O" "^\.claude/CLAUDE\.md${T}user")"
 _O=$(_s16b_cc "$_S16B_CC/cfg" "$_S16B_CC/home/proj" instruction_pointer_visibility claude)
-_S16_FAIL="${_S16_FAIL}$(_self_expect b-ccd-visible "$_O" "^claude${T}visible${T}[^ ]*/cc/cfg/CLAUDE\.md imports [^ ]*/cc/home/proj/AGENTS\.md, so it is loaded with that file\$" '^rc=0$')"
+_S16_FAIL="${_S16_FAIL}$(_self_expect b-ccd-visible "$_O" "^claude${T}visible${T}[^ ]*/cc/cfg/CLAUDE\.md imports [^ ]*/cc/home/proj/AGENTS\.md, so it is loaded with that file \(under the default mode, claude-md-or-agents-md; " '^rc=0$')"
 # the writers refuse that file and its directory, before any plan, and still refuse ~/.claude
 for _S16B_Y in "" --yes; do
   _O=$(_s16b_cc "$_S16B_CC/cfg" "$_S16B_CC/home/proj" instruction_add_import "$_S16B_CC/cfg/CLAUDE.md" $_S16B_Y)
@@ -13119,7 +13934,7 @@ for _S16B_D in proj2 proj; do
     "^CLAUDE\.md${T}user${T}imports,user-owned${T}[^${T}]*/cc/sib/${_S16B_D}/CLAUDE\.md${T}-\$" \
     "^CLAUDE\.md${T}project${T}no-import,user-owned${T}[^${T}]*/cc/sib/${_S16B_SIBP}/CLAUDE\.md${T}@AGENTS\.md\$" '^rc=0$')"
   _O=$(_s16b_cc "$_S16B_CC/sib/$_S16B_D" "$_S16B_CC/sib/$_S16B_SIBP" instruction_pointer_visibility claude)
-  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" "^claude${T}visible${T}[^ ]*/cc/sib/${_S16B_D}/CLAUDE\.md imports [^ ]*/cc/sib/${_S16B_SIBP}/AGENTS\.md, so it is loaded with that file\$" '^rc=0$')"
+  _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" "^claude${T}visible${T}[^ ]*/cc/sib/${_S16B_D}/CLAUDE\.md imports [^ ]*/cc/sib/${_S16B_SIBP}/AGENTS\.md, so it is loaded with that file \(under the default mode, claude-md-or-agents-md; " '^rc=0$')"
   _O=$(_s16b_cc "$_S16B_CC/sib/$_S16B_D" "$_S16B_CC/sib/$_S16B_SIBP" instruction_add_import "$_S16B_CC/sib/$_S16B_D/CLAUDE.md" --yes)
   _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_N" "$_O" "^instruction_add_import: REFUSED — [^ ]*/cc/sib/${_S16B_D}/CLAUDE\.md is your user-tier \\\$CLAUDE_CONFIG_DIR/CLAUDE\.md, " '^rc=2$')"
 done
@@ -13261,7 +14076,7 @@ for _S16B_ROOT in "" "$REPO_ROOT"; do
   _S16B_C="b-hook-own${_S16B_ROOT:+-loader}"
   _O=$(_s16b_hook "$_S16B_H/proj" "$_S16B_ROOT")
   _S16_FAIL="${_S16_FAIL}$(_self_expect "$_S16B_C" "$_O" \
-    "^WARNING: CLAUDE\.md in this project does not import AGENTS\.md, so Claude Code reads it and skips AGENTS\.md, Triforge's only instruction file\. Run /at-setup to add the line @AGENTS\.md to it \(setup asks first\), or add it yourself — session start never edits this file\.\$" \
+    "^WARNING: CLAUDE\.md in this project does not import AGENTS\.md, so Claude Code reads it and skips AGENTS\.md, Triforge's only instruction file \(under the default mode, claude-md-or-agents-md; a user-tier instructionFiles setting changes this\)\. Run /at-setup to add the line @AGENTS\.md to it \(setup asks first\), or add it yourself — session start never edits this file\.\$" \
     "^WARNING: \.claude/CLAUDE\.md in this project does not import AGENTS\.md, .* Run /at-setup to add the line @\.\./AGENTS\.md to it " \
     "^WARNING: CLAUDE\.local\.md in this project does not import AGENTS\.md, .* Run /at-setup to add the line @AGENTS\.md to it " \
     '^Multi-agent framework ready\.$')"
@@ -14767,8 +15582,8 @@ _S27_GOT=$(printf '%s\n' "$O" | grep -v '^files=' | sed 's/^\(scripts\/[^:]*\):.
 if [ -n "$_S27_GOT" ] || [ "${_S27_N:-0}" -lt 40 ]; then
   _S27_FAIL="${_S27_FAIL} maint(want-40+-programs-every-one-prelude-first;got-${_S27_N:-?}-programs,flagged:${_S27_GOT% })"
 fi
-_S27_FAIL="${_S27_FAIL}$(_self_expect maint "$O" '^files=[0-9]+ programs=[0-9]+ file-runs=4 copies=4$')"
-_S27_EV="${_S27_EV}maint: ${_S27_N:-?} programs in the validators, the release notes and the probe harness, every one after its tool's prelude copy, 4 file runs, 4 copies equal; "
+_S27_FAIL="${_S27_FAIL}$(_self_expect maint "$O" '^files=[0-9]+ programs=[0-9]+ file-runs=5 copies=4$')"
+_S27_EV="${_S27_EV}maint: ${_S27_N:-?} programs in the validators, the release notes and the probe harness, every one after its tool's prelude copy, 5 file runs, 4 copies equal; "
 
 # _s27_plant <dir> <marker> <module>... — a module per name that appends
 # "<name> <cwd>" to <marker> when imported
@@ -14794,7 +15609,7 @@ _s27_plant "$_S27/plant-wt" "$_S27/mark-wt" $_S27_MODS
 cat > "$_S27/bin/claude" <<'S27_CLAUDE_EOF'
 #!/bin/sh
 case "${1:-}" in
-  --version) echo "2.1.289 (Claude Code)"; exit 0 ;;
+  --version) echo "2.1.314 (Claude Code)"; exit 0 ;;
   --help) echo "  --safe-mode   Start with all customizations (CLAUDE.md, ...) disabled"; echo "  --tools <tools...>"; exit 0 ;;
 esac
 printf '%s\n' '{"type": "result", "subtype": "success", "is_error": false, "result": "S27-PERSONA-ANSWER", "session_id": "00000000-0000-4000-8000-000000000027", "num_turns": 1}'
@@ -14912,7 +15727,7 @@ case "${1:-}" in
 esac
 exit 0
 S27_AGY_EOF
-printf '#!/bin/sh\ncase "${1:-}" in --version) echo "2.1.289 (Claude Code)" ;; esac\nexit 0\n' > "$_S27/hb/claude"
+printf '#!/bin/sh\ncase "${1:-}" in --version) echo "2.1.314 (Claude Code)" ;; esac\nexit 0\n' > "$_S27/hb/claude"
 chmod +x "$_S27/hb/agy" "$_S27/hb/claude"
 ( cd "$_S27/hp" && git init -q ) >/dev/null 2>&1
 # shellcheck disable=SC2086
@@ -14994,6 +15809,18 @@ if [ -f "${_S28_SK}/at-cli-watch/scripts/swarm.sh" ] && [ -f "${_S28_SK}/at-repo
 #          same binary and tier; every [cli.*] entry carries name, binary, tier,
 #          probe and https releases/changelog/docs URLs; the [meta] of both
 #          registries counts the [cli.*] and [repo.*] tables
+#   input    (R15) watch-input.sh alone, from the fixture's copy, under the
+#          stub gh and firecrawl and a fixture registry, window 2026-10-01: the
+#          two copies byte-identical; pages: the releases list read page by page
+#          past the window start, stopping at the first page with nothing in the
+#          window, sorted newest first; an out-of-window release or page, a
+#          changelog section older by its date or below the oldest version in
+#          the window dropped before the cap, a docs page left whole; cap:
+#          in-window releases over the 150 KB cap named NOT FETCHED by URL; a
+#          later page that fails keeps the earlier ones and is named; commits and
+#          tags under --paginate; retry: a rate-limited firecrawl answer waited
+#          out (the wait its "retry after" names), NOT FETCHED only after the
+#          third try, any other failure not retried
 _S28_PR="$_S28/co/products/agent-triforge"
 mkdir -p "$_S28_PR/ops" "$_S28/home" "$_S28/bin" "$_S28/log" "$_S28/blocks" "$_S28/tpl"
 for _s28_d in scripts personas .claude-plugin .claude; do ln -s "${REPO_ROOT}/${_s28_d}" "$_S28_PR/${_s28_d}"; done
@@ -15010,7 +15837,7 @@ cat > "$_S28/tpl/claude" <<'S28_CLAUDE_EOF'
 # --tools names a tool that can write
 L='@LOG@'
 case "${1:-}" in
-  --version) echo "2.1.291 (Claude Code)"; exit 0 ;;
+  --version) echo "2.1.314 (Claude Code)"; exit 0 ;;
   --help) echo "  --safe-mode   Start with all customizations disabled"; echo "  --tools <tools...>"; exit 0 ;;
 esac
 P=""
@@ -15046,6 +15873,21 @@ if [ -f "$L/gh404" ]; then
     case "$EP" in "repos/$R" | "repos/$R/"* | "repos/$R?"*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;; esac
   done < "$L/gh404"
 fi
+case "$EP" in
+  */releases\?*)
+    # the list watch-input reads page by page, as JSON: the page's fixture
+    # (rel.<n>, rel.<n>.fail a 504), or else one in-window release on page 1
+    PG=${EP##*page=}
+    if [ -f "$L/rel.$PG.fail" ]; then echo "gh: We could not respond in time (HTTP 504)" >&2; exit 1; fi
+    if [ -f "$L/rel.$PG" ]; then cat "$L/rel.$PG"; exit 0; fi
+    if [ "$PG" = 1 ] && [ ! -f "$L/rel.1" ]; then
+      printf '[{"tag_name": "v1.0.0", "published_at": "2026-10-01T00:00:00Z", "prerelease": false, "body": "GH-STUB %s"}]\n' "${EP%%\?*}"
+    else
+      echo '[]'
+    fi
+    exit 0 ;;
+  */contents/CHANGELOG.md*) if [ -f "$L/blob" ]; then cat "$L/blob"; exit 0; fi ;;
+esac
 echo "GH-STUB ${EP}"
 S28_GH_EOF
 cat > "$_S28/tpl/firecrawl" <<'S28_FC_EOF'
@@ -15055,6 +15897,13 @@ L='@LOG@'
 printf '%s\n' "$*" >> "$L/firecrawl.calls"
 U=""
 for a in "$@"; do case "$a" in https://*) U=$a ;; esac; done
+# fc-left: how many calls still fail, with fc-msg on stderr; fc-page: the page
+if [ -s "$L/fc-left" ] && [ "$(cat "$L/fc-left")" -gt 0 ]; then
+  echo $(( $(cat "$L/fc-left") - 1 )) > "$L/fc-left"
+  cat "$L/fc-msg" >&2
+  exit 1
+fi
+if [ -f "$L/fc-page" ]; then cat "$L/fc-page"; exit 0; fi
 echo "FIRECRAWL-STUB ${U}"
 S28_FC_EOF
 for _s28_b in claude gh firecrawl; do
@@ -15175,6 +16024,118 @@ O=$(printf 'ctl:write=%s:root=%s:tmp=%s\n' "$(cut -d: -f1 "$_S28/log/write.x" 2>
   "$(if [ -e "$_S28/ctl/root/persona-wrote.txt" ]; then echo present; else echo absent; fi)" \
   "$(if [ -e "$_S28/ctl/tmp/persona-wrote.txt" ]; then echo present; else echo absent; fi)")
 _S28_FAIL="${_S28_FAIL}$(_self_expect ctl "$O" '^ctl:write=granted:root=present:tmp=present$')"
+# input (R15): watch-input.sh alone against the stubs
+cat > "$_S28/wi.toml" <<'S28_WI_EOF'
+[cli.wi]
+name = "WI"
+binary = "wi"
+tier = "core"
+probe = true
+releases = "https://github.com/acme/wi/releases"
+changelog = "https://github.com/acme/wi/blob/main/CHANGELOG.md"
+docs = "https://docs.acme.invalid/wi"
+
+[cli.ws]
+name = "WS"
+binary = "ws"
+tier = "core"
+probe = true
+releases = "https://acme.invalid/changelog"
+changelog = "https://acme.invalid/changelog"
+docs = "https://acme.invalid/changelog"
+
+[cli.wt]
+name = "WT"
+binary = "wt"
+tier = "core"
+probe = true
+releases = "https://github.com/acme/wt/tags"
+changelog = "https://github.com/acme/wt/tags"
+docs = "https://github.com/acme/wt/tags"
+
+[repo.wr]
+name = "WR"
+url = "https://github.com/acme/wr"
+S28_WI_EOF
+# _s28_rel <file> <tag|date|body|size> ...: a releases page; a body of size > 0 is padded to that many bytes
+_s28_rel() {
+  python3 - "$@" <<'S28_REL_EOF'
+import json, sys
+out, items = sys.argv[1], sys.argv[2:]
+page = []
+for it in items:
+    tag, date, body, size = it.split("|")
+    page.append({"tag_name": tag, "published_at": date + "T00:00:00Z", "prerelease": False, "body": body + ("x" * int(size))})
+open(out, "w").write(json.dumps(page))
+S28_REL_EOF
+}
+# _s28_wi <kind> <name>: the input for one fixture entry, window 2026-10-01
+_s28_wi() {
+  ( export HOME="$_S28/home" PATH="$_S28/bin:$PATH" TMPDIR="$_S28/tmp"
+    bash "$_S28/co/.agents/skills/at-cli-watch/scripts/watch-input.sh" "$1" "$2" 2026-10-01 "$_S28/wi.toml" ) < /dev/null 2>&1 || echo "wi-rc=$?"
+}
+# _s28_has <text> <file>: yes or no
+_s28_has() { if grep -qF -- "$1" "$2" 2>/dev/null; then echo yes; else echo no; fi; }
+mkdir -p "$_S28/tmp" "$_S28/wi"
+_S28_L="$_S28/log"
+# pages: two pages in the window, out of date order, a third with nothing in it, a fourth never read
+rm -f "$_S28_L/"*
+_s28_rel "$_S28_L/rel.1" 'v3.1.0|2026-10-20|P1-NEW|0' 'v1.0.0|2026-01-01|OLD-ON-P1|200000' 'v3.0.0|2026-10-10|P1-OLDER|0'
+_s28_rel "$_S28_L/rel.2" 'v3.2.0|2026-10-25|P2-NEWEST|0' 'v2.9.0|2026-10-02|P2-LAST|0'
+_s28_rel "$_S28_L/rel.3" 'v2.0.0|2026-03-01|OLD-P3|200000'
+_s28_rel "$_S28_L/rel.4" 'v3.9.0|2026-10-30|NEVER-P4|0'
+python3 -c 'import sys; open(sys.argv[1], "w").write("# Changelog\n\n## 3.2.0\nCL-NEW\n\n## 2.9.0\nCL-FLOOR\n\n## 2.8.0\nCL-OLDVER" + "x" * 200000 + "\n\n## [0.9.0](https://x.invalid) (2026-02-02)\nCL-OLDDATE\n")' "$_S28_L/blob"
+printf '# Docs\n\n## 2020-01-01 history\nDOCS-OLD\n' > "$_S28_L/fc-page"
+_s28_wi cli wi > "$_S28/wi/pages"
+O=$(printf 'pages=%s\norder=%s\nnew=%s,%s,%s,%s\nold=%s,%s,%s\ntrunc=%s\ncl=%s,%s,%s,%s\ndocsold=%s\n' \
+  "$(sed -n 's/.*releases?per_page=[0-9]*&page=\([0-9]*\).*/\1/p' "$_S28_L/gh.calls" | paste -sd, -)" \
+  "$(awk '$1 == "###" { print $2 }' "$_S28/wi/pages" | paste -sd, -)" \
+  "$(_s28_has P1-NEW "$_S28/wi/pages")" "$(_s28_has P1-OLDER "$_S28/wi/pages")" "$(_s28_has P2-NEWEST "$_S28/wi/pages")" "$(_s28_has P2-LAST "$_S28/wi/pages")" \
+  "$(_s28_has OLD-ON-P1 "$_S28/wi/pages")" "$(_s28_has OLD-P3 "$_S28/wi/pages")" "$(_s28_has NEVER-P4 "$_S28/wi/pages")" \
+  "$(_s28_has '[truncated' "$_S28/wi/pages")" \
+  "$(_s28_has CL-NEW "$_S28/wi/pages")" "$(_s28_has CL-FLOOR "$_S28/wi/pages")" "$(_s28_has CL-OLDVER "$_S28/wi/pages")" "$(_s28_has CL-OLDDATE "$_S28/wi/pages")" \
+  "$(_s28_has DOCS-OLD "$_S28/wi/pages")")
+_S28_FAIL="${_S28_FAIL}$(_self_expect input-pages "$O" '^pages=1,2,3$' '^order=v3\.2\.0,v3\.1\.0,v3\.0\.0,v2\.9\.0$' '^new=yes,yes,yes,yes$' '^old=no,no,no$' '^trunc=no$' '^cl=yes,yes,no,no$' '^docsold=yes$')"
+# cap: in-window releases past the cap are named, whole entries kept
+rm -f "$_S28_L/"*
+_s28_rel "$_S28_L/rel.1" 'v3.0.0|2026-10-20|BODY-V3|60000' 'v2.0.0|2026-10-10|BODY-V2|60000' 'v1.0.0|2026-10-05|BODY-V1|60000'
+_s28_wi cli wi > "$_S28/wi/cap"
+O=$(printf 'kept=%s,%s\ncut=%s\ntrunc=%s\nnamed=%s\n' "$(_s28_has BODY-V3 "$_S28/wi/cap")" "$(_s28_has BODY-V2 "$_S28/wi/cap")" "$(_s28_has BODY-V1 "$_S28/wi/cap")" "$(_s28_has '[truncated' "$_S28/wi/cap")" \
+  "$(grep -c '^NOT FETCHED: https://github\.com/acme/wi/releases/tag/v1\.0\.0 (2026-10-05' "$_S28/wi/cap" || true)")
+_S28_FAIL="${_S28_FAIL}$(_self_expect input-cap "$O" '^kept=yes,yes$' '^cut=no$' '^trunc=no$' '^named=1$')"
+# a later page fails: the earlier one stays, the failed one is named
+rm -f "$_S28_L/"*
+_s28_rel "$_S28_L/rel.1" 'v3.0.0|2026-10-20|BODY-P1|0'
+: > "$_S28_L/rel.2.fail"
+_s28_wi cli wi > "$_S28/wi/fail2"
+O=$(printf 'kept=%s\nnamed=%s\n' "$(_s28_has BODY-P1 "$_S28/wi/fail2")" "$(grep -c '^NOT FETCHED: https://github\.com/acme/wi/releases, page 2 ' "$_S28/wi/fail2" || true)")
+_S28_FAIL="${_S28_FAIL}$(_self_expect input-page2 "$O" '^kept=yes$' '^named=1$')"
+# commits and tags under --paginate
+rm -f "$_S28_L/"*
+_s28_wi repo wr > "$_S28/wi/repo"
+_s28_wi cli wt > "$_S28/wi/tags"
+O=$(printf 'commits=%s\ntags=%s\n' "$(grep -c -- '--paginate repos/acme/wr/commits' "$_S28_L/gh.calls" || true)" "$(grep -c -- '--paginate repos/acme/wt/tags' "$_S28_L/gh.calls" || true)")
+_S28_FAIL="${_S28_FAIL}$(_self_expect input-paginate "$O" '^commits=1$' '^tags=1$')"
+# a dated changelog page through firecrawl, and the retry
+rm -f "$_S28_L/"*
+printf '# Changelog\n\n### Oct 5, 2026\nFC-NEW\n\n### Oct 5, 2025\nFC-OLD\n\n### Oct 2, 2026\nFC-NEXT\n' > "$_S28_L/fc-page"
+printf 'Rate limit exceeded. Consumed (req/min): 16, Remaining (req/min): 0. Please retry after 1s\n' > "$_S28_L/fc-msg"
+echo 1 > "$_S28_L/fc-left"
+_s28_wi cli ws > "$_S28/wi/retry"
+O=$(printf 'calls=%s\nfetched=%s,%s,%s\nnot=%s\n' "$(grep -c . "$_S28_L/firecrawl.calls")" "$(_s28_has FC-NEW "$_S28/wi/retry")" "$(_s28_has FC-OLD "$_S28/wi/retry")" "$(_s28_has FC-NEXT "$_S28/wi/retry")" "$(_s28_has 'NOT FETCHED' "$_S28/wi/retry")")
+_S28_FAIL="${_S28_FAIL}$(_self_expect input-retry "$O" '^calls=2$' '^fetched=yes,no,yes$' '^not=no$')"
+rm -f "$_S28_L/firecrawl.calls"
+echo 9 > "$_S28_L/fc-left"
+_s28_wi cli ws > "$_S28/wi/retry3"
+O=$(printf 'calls=%s\nnot=%s\n' "$(grep -c . "$_S28_L/firecrawl.calls")" "$(_s28_has 'NOT FETCHED: https://acme.invalid/changelog (firecrawl rc 1: Rate limit' "$_S28/wi/retry3")")
+_S28_FAIL="${_S28_FAIL}$(_self_expect input-retry3 "$O" '^calls=3$' '^not=yes$')"
+rm -f "$_S28_L/firecrawl.calls"
+printf 'Invalid URL\n' > "$_S28_L/fc-msg"
+echo 9 > "$_S28_L/fc-left"
+_s28_wi cli ws > "$_S28/wi/noretry"
+O=$(printf 'calls=%s\nnot=%s\n' "$(grep -c . "$_S28_L/firecrawl.calls")" "$(_s28_has 'NOT FETCHED' "$_S28/wi/noretry")")
+_S28_FAIL="${_S28_FAIL}$(_self_expect input-noretry "$O" '^calls=1$' '^not=yes$')"
+if ! cmp -s "${_S28_SK}/at-cli-watch/scripts/watch-input.sh" "${_S28_SK}/at-repo-watch/scripts/watch-input.sh"; then _S28_FAIL="${_S28_FAIL} input-copies(watch-input.sh differs between the two skills)"; fi
 # registry: each skill's registry against the CLI registry and the other's [meta]
 O=$( ( cd "$REPO_ROOT" && unset CLAUDE_PLUGIN_ROOT && source scripts/invoke-external.sh > /dev/null 2>&1 && cli_table all binary tier ) 2>/dev/null \
   | python3 -c '
@@ -15211,9 +16172,9 @@ print("reg:mismatch=" + ",".join(bad))
 print("reg:cli=%d:meta=%s/%s:repo=%d:meta=%s/%s" % (len(cli), meta.get("cli_count"), rmeta.get("cli_count"), len(repo), meta.get("repo_count"), rmeta.get("repo_count")))
 print("reg:clis=" + ",".join(sorted(cli)))
 ' "${_S28_SK}/at-cli-watch/assets/registry.toml" "${_S28_SK}/at-repo-watch/assets/registry.toml" 2>&1)
-_S28_FAIL="${_S28_FAIL}$(_self_expect registry "$O" '^reg:registry=8:missing=$' '^reg:mismatch=$' '^reg:cli=11:meta=11/11:repo=7:meta=7/7$' \
+_S28_FAIL="${_S28_FAIL}$(_self_expect registry "$O" '^reg:registry=8:missing=$' '^reg:mismatch=$' '^reg:cli=11:meta=11/11:repo=9:meta=9/9$' \
   '^reg:clis=antigravity,chrome-devtools,claude,codex,cursor,devin,firecrawl,gh,grok,kimi,opencode$')"
-_S28_EV="blocks: the swarm.sh start and wait lines of both internal watch skills' SKILL.md, typed under ${_S28_SHELLS} from a fixture with the real layout (their scripts and assets copied, this checkout's scripts and personas linked under the product folder), real persona lane, stub claude/gh/firecrawl: one worker per target via persona_spawn (claude, grok -> framework-docs-researcher; superpowers -> best-practices-researcher), argv read-web (--tools/--allowedTools Read,Grep,Glob,WebFetch,WebSearch, dontAsk, strict MCP, --safe-mode, attachments off, marker persona) + the watch brief, input = registry entry + window + the lead's gh/firecrawl pages, reports in the run dir, a gh-404 repo flagged with no worker, no zsh error; failed: a worker whose CLI exits 1 listed in the run's failed file, the other's report landed; nowrite: the stub's checkout and TMPDIR writes denied by that argv, its scratch dir gone (cwd file with it), no triforge-persona.* left, fixture listing unchanged (control: edit-class --tools writes both; a stub shows the flags and cleanup, CC-21 is the live proof for the read class); registry: all 8 registry CLIs in the CLI skill's registry with the same binary and tier, 11 [cli.*] / 7 [repo.*] matching [meta] of both registries"
+_S28_EV="blocks: the swarm.sh start and wait lines of both internal watch skills' SKILL.md, typed under ${_S28_SHELLS} from a fixture with the real layout (their scripts and assets copied, this checkout's scripts and personas linked under the product folder), real persona lane, stub claude/gh/firecrawl: one worker per target via persona_spawn (claude, grok -> framework-docs-researcher; superpowers -> best-practices-researcher), argv read-web (--tools/--allowedTools Read,Grep,Glob,WebFetch,WebSearch, dontAsk, strict MCP, --safe-mode, attachments off, marker persona) + the watch brief, input = registry entry + window + the lead's gh/firecrawl pages, reports in the run dir, a gh-404 repo flagged with no worker, no zsh error; failed: a worker whose CLI exits 1 listed in the run's failed file, the other's report landed; nowrite: the stub's checkout and TMPDIR writes denied by that argv, its scratch dir gone (cwd file with it), no triforge-persona.* left, fixture listing unchanged (control: edit-class --tools writes both; a stub shows the flags and cleanup, CC-21 is the live proof for the read class); input: watch-input alone against the stubs: the releases list read page by page past the window, sorted, out-of-window entries, older changelog sections and pages dropped before the cap, in-window overflow named NOT FETCHED by URL, a failed later page named, commits and tags paginated, a rate-limited firecrawl retried with its wait up to three tries, another failure not retried; registry: all 8 registry CLIs in the CLI skill's registry with the same binary and tier, 11 [cli.*] / 7 [repo.*] matching [meta] of both registries"
 # --- end of SELF-28 cases ---
 _S28_CAP="the watch cycle: research workers through dispatch_persona read-web, a write denied, nothing left under the temp dir, the watch registry covering every registered CLI (U19)"
 if [ -z "$_S28_EV" ]; then _S28_FAIL="${_S28_FAIL} cases(no-case-ran)"; fi
@@ -15290,7 +16251,7 @@ case "${1:-}" in
 esac
 exit 0
 S17_AGY_EOF
-printf '#!/bin/sh\n# probe stub (SELF-17): a Claude Code above the floor\ncase "${1:-}" in --version) echo "2.1.284 (Claude Code)" ;; esac\nexit 0\n' > "$_S17/bin/claude"
+printf '#!/bin/sh\n# probe stub (SELF-17): a Claude Code at the worker floor\ncase "${1:-}" in --version) echo "2.1.314 (Claude Code)" ;; esac\nexit 0\n' > "$_S17/bin/claude"
 printf '#!/bin/sh\n# probe stub (SELF-17): answers --version; never dispatched\necho "0.0.0-probe-stub"\nexit 0\n' > "$_S17/bin/codex"
 chmod +x "$_S17/bin/agy" "$_S17/bin/claude" "$_S17/bin/codex"
 for _s17_t in python3 git "${TIMEOUT_BIN:-timeout}"; do
@@ -15542,7 +16503,7 @@ else
 fi
 rm -rf "$_S17"
 
-# SELF-29 (U19, S2 — R27, R28, R29, KTD18: agy's auto default and its AGY_ERROR line, the Cursor probe rows' Grok ids, a ledger whose anchors were both deleted, a negative row's timeout verdict, CDX-16's verdict chain). Cases go between the markers; each appends
+# SELF-29 (U19, S2 — R27, R28, R29, KTD18: agy's auto default and its AGY_ERROR line, the Cursor probe rows' Grok ids, a ledger whose anchors were both deleted, a negative row's timeout verdict, CDX-16's and CC-14c's verdict chains). Cases go between the markers; each appends
 # "<case>(<why>)" to _S29_FAIL on a mismatch (_self_expect does this) and, once
 # they ran, one short note to _S29_EV. Expected values are literals. A row whose
 # cases never ran fails: no note is no evidence.
@@ -15568,11 +16529,45 @@ mkdir -p "$_S29"
 #            exiting 3 with the same line: <out> names the same reason, and
 #            retryable decides the class lease_collect routes on (false:
 #            deterministic, failed; true: retryable, the requeue path)
+#   expiry   (D-057, R5) agy's print-timeout expiry and finished_reason; the
+#            stub's expiry-real and intr-1 are agy 1.5.0's own output, read
+#            live 2026-11-05. invoke_antigravity: cut-off (exit 0, a partial
+#            answer that says Status: DONE, print_timeout), expiry-3 and
+#            expiry-3t (exit 3, the AGY_ERROR line alone, retryable false and
+#            true), expiry-bare (exit 3, the stderr line, AGY_ERROR with no
+#            fields), expiry-real -> class timeout, one run, .status
+#            INCOMPLETE:print_timeout; empty-expiry (an empty SUCCESS, then
+#            the retry expires) -> the same, no stale SUCCESS, two runs;
+#            intr-0, intr-1 -> deterministic, reason interrupted, one run;
+#            other-0 -> deterministic, the value as reason, one run; error-0
+#            -> retried, the retry's SUCCESS stands; error-2 -> two runs,
+#            INCOMPLETE:error; outer-124 (our own timeout's TERM, agy's
+#            envelope saying interrupted, as read live) -> class timeout, one
+#            run, EXIT-124. Each is put through the guard the six callers
+#            share, whose text is grepped: only SUCCESS or a missing .status
+#            promotes, so a failed run must leave a .status (err-false:
+#            EXIT-3) and a run with no finished_reason keeps SUCCESS. The
+#            lease lane: the timeout modes -> class timeout, the requeue
+#            path, one run, never review; intr-0, intr-1 -> deterministic,
+#            failed
 #   cursor   the composition CUR-03, CUR-05, CUR-09 and CUR-12 run
 #            (_cur_grok_pick, taken from scripts/probe-capabilities.sh) on a
 #            stub cursor-agent's --list-models: a 4.7 catalog ->
 #            grok-4.7-xhigh, no cursor- prefix; a 4.6 catalog ->
-#            cursor-grok-4.6-xhigh
+#            cursor-grok-4.6-xhigh; a catalog naming no Grok -> the default
+#            family grok-4.7 (mapped grok-4.7-xhigh, pick the bare family). The
+#            shipped pin: the registry default and roster_write_role's empty
+#            model -> grok-4.7-xhigh; the writer on the bare grok-4.7 + xhigh
+#            (CUR-12's path) -> grok-4.7-xhigh
+#   agymodels the pick AGY-02 runs (_agy_pick, taken from
+#            scripts/probe-capabilities.sh) on a stub `agy models`: Argon and
+#            Flash listed -> pin Flash (High), newest Argon (High), no Pro; a
+#            newer Pro -> the pin and the newest are that Pro; Flash alone ->
+#            the newest is the pin
+#   occontrol the positive control OC-06 and OC-06b stand on
+#            (_oc_control_gate, taken from the same file) on a stub opencode:
+#            one that runs the allowed touch -> rc 0, no row; one that doesn't
+#            (provider.no-route) -> rc 1, both rows FAIL "no positive control"
 #   anchors  (S2) a builder's lease in review: both ledger anchors deleted and
 #            a user approval bound to the snapshot forged into its row; the
 #            merge of its protected .claude/settings.json -> 44 naming both
@@ -15626,7 +16621,9 @@ mkdir -p "$_S29/bin" "$_S29/cfg" "$_S29/home" "$_S29/tmp" "$_S29/proj"
 mkdir -p "$D/log"
 case "${1:-}" in
   --version) echo "1.2.12"; exit 0 ;;
+  --help) cat "$D/cfg/help" 2>/dev/null; exit 0 ;;
   agents) echo agents >> "$D/log/agents"; cat "$D/cfg/agents" 2>/dev/null; exit 0 ;;
+  models) cat "$D/cfg/models" 2>/dev/null; exit 0 ;;
 esac
 echo run >> "$D/log/runs"
 printf '%s\n' "$@" > "$D/log/argv"
@@ -15634,6 +16631,25 @@ case "$(cat "$D/cfg/mode" 2>/dev/null)" in
   err-true)  echo 'AGY_ERROR: {"status":"RESOURCE_EXHAUSTED","code":429,"retryable":true,"id":"x"}' >&2; exit 3 ;;
   err-false) echo 'AGY_ERROR: {"status":"RESOURCE_EXHAUSTED","code":429,"retryable":false,"id":"x"}' >&2; exit 3 ;;
   err-bare)  echo 'model call failed' >&2; exit 3 ;;
+  cut-off) printf '%s\n' '{"status":"SUCCESS","response":"S29 partial\nStatus: DONE","denied_actions":[],"finished_reason":"print_timeout"}'; exit 0 ;;
+  expiry-3)  echo 'AGY_ERROR: {"short_error":"print timeout after 60s with the turn still in progress; the response is partial","status":"DEADLINE_EXCEEDED","retryable":false,"reason":"print_timeout"}' >&2; exit 3 ;;
+  expiry-3t) echo 'AGY_ERROR: {"short_error":"print timeout after 60s with the turn still in progress; the response is partial","status":"DEADLINE_EXCEEDED","retryable":true,"reason":"print_timeout"}' >&2; exit 3 ;;
+  expiry-bare) echo '[agy] print timeout after 60s with turn in progress; returning partial output' >&2; echo 'AGY_ERROR: {}' >&2; exit 3 ;;
+  expiry-real|empty-expiry)
+    if [ "$(cat "$D/cfg/mode")" = empty-expiry ] && [ "$(wc -l < "$D/log/runs")" -eq 1 ]; then
+      printf '%s\n' '{"status":"SUCCESS","response":"","denied_actions":[]}'; exit 0
+    fi
+    printf '%s\n' '{"conversation_id":"c","status":"ERROR","response":"S29 partial\nStatus: DONE","error":"print timeout after 60s with the turn still in progress; the response is partial","duration_seconds":0,"num_turns":1,"finished_reason":"print_timeout"}'
+    echo '[agy] print timeout after 60s with turn in progress; returning partial output' >&2
+    echo 'error: print timeout after 60s with the turn still in progress; the response is partial' >&2
+    echo 'AGY_ERROR: {"short_error":"print timeout after 60s with the turn still in progress; the response is partial","status":"DEADLINE_EXCEEDED","retryable":false,"reason":"print_timeout"}' >&2
+    exit 3 ;;
+  intr-0)  printf '%s\n' '{"status":"SUCCESS","response":"S29 partial\nStatus: DONE","finished_reason":"interrupted"}'; exit 0 ;;
+  intr-1)  printf '%s\n' '{"conversation_id":"c","status":"ERROR","response":"","error":"interrupted","duration_seconds":0,"num_turns":1,"finished_reason":"interrupted"}'; echo 'error: interrupted' >&2; exit 1 ;;
+  other-0) printf '%s\n' '{"status":"SUCCESS","response":"S29 partial","finished_reason":"max_tokens"}'; exit 0 ;;
+  outer-124) printf '%s\n' '{"status":"ERROR","response":"","error":"interrupted","finished_reason":"interrupted"}'; echo 'error: interrupted' >&2; exit 124 ;;
+  error-0) if [ "$(wc -l < "$D/log/runs")" -eq 1 ]; then printf '%s\n' '{"status":"SUCCESS","response":"S29 partial","finished_reason":"error"}'; exit 0; fi ;;
+  error-2) printf '%s\n' '{"status":"SUCCESS","response":"S29 partial","finished_reason":"error"}'; exit 0 ;;
 esac
 echo '{"status":"SUCCESS","response":"S29 answer","denied_actions":[]}'
 exit 0
@@ -15719,6 +16735,60 @@ _S29_FAIL="${_S29_FAIL}$(_self_expect lease "$O" '^lease-false:collect=1:class=d
   '^lease-true:collect=1:class=retryable:state=requeued:said=1$')"
 _S29_EV="${_S29_EV}lease: the agy lane's <out> names the same reason; false -> deterministic, failed; true -> retryable, requeue path. "
 
+# expiry
+# _s29_guard <label>: the .status left by _s29_invoke <label> and what the
+# six callers' shared guard does with its output file
+_s29_guard() {
+  local F="$_S29/tmp/$1.out" P=0
+  if [ -s "$F" ] && { [ ! -f "${F}.status" ] || [ "$(cat "${F}.status")" = "SUCCESS" ]; }; then P=1; fi
+  echo "$1-guard:status=$(cat "${F}.status" 2>/dev/null || echo missing):promoted=${P}"
+}
+O=""
+for _s29_m in cut-off expiry-3 expiry-3t expiry-bare expiry-real empty-expiry intr-0 intr-1 other-0 error-0 error-2 outer-124; do
+  O="$O
+$(_s29_invoke "exp-${_s29_m}" "$_s29_m")
+$(_s29_guard "exp-${_s29_m}")"
+done
+unset _s29_m
+O="$O
+$(_s29_guard agyerr-false)
+$(_s29_guard mode-unlisted)
+callers=$(for _s29_f in skills/at-review/references/dispatch.md skills/at-ship/references/phases.md skills/at-coordinate/references/phases.md skills/at-plan/references/phase-0-analysis.md skills/at-deep-research/references/swarm.md skills/at-build/references/team-mode.md; do _s29_n "$REPO_ROOT/$_s29_f" -F '{ [ ! -f "${AGY_OUT}.status" ] || [ "$(cat "${AGY_OUT}.status")" = "SUCCESS" ]; }'; done | tr -d '\n')"
+_S29_FAIL="${_S29_FAIL}$(_self_expect expiry "$O" \
+  '^exp-cut-off:rc=1:.*:class=timeout:reason=print_timeout:runs=1$' '^exp-cut-off-guard:status=INCOMPLETE:print_timeout:promoted=0$' \
+  '^exp-expiry-3:rc=3:.*:class=timeout:reason=print_timeout:runs=1$' '^exp-expiry-3-guard:status=INCOMPLETE:print_timeout:promoted=0$' \
+  '^exp-expiry-3t:rc=3:.*:class=timeout:reason=print_timeout:runs=1$' '^exp-expiry-3t-guard:status=INCOMPLETE:print_timeout:promoted=0$' \
+  '^exp-expiry-bare:rc=3:.*:class=timeout:reason=print_timeout:runs=1$' '^exp-expiry-bare-guard:status=INCOMPLETE:print_timeout:promoted=0$' \
+  '^exp-expiry-real:rc=3:.*:class=timeout:reason=print_timeout:runs=1$' '^exp-expiry-real-guard:status=INCOMPLETE:print_timeout:promoted=0$' \
+  '^exp-empty-expiry:rc=3:.*:class=timeout:reason=print_timeout:runs=2$' '^exp-empty-expiry-guard:status=INCOMPLETE:print_timeout:promoted=0$' \
+  '^exp-intr-0:rc=1:.*:class=deterministic:reason=interrupted:runs=1$' '^exp-intr-0-guard:status=INCOMPLETE:interrupted:promoted=0$' \
+  '^exp-intr-1:rc=1:.*:class=deterministic:reason=interrupted:runs=1$' '^exp-intr-1-guard:status=INCOMPLETE:interrupted:promoted=0$' \
+  '^exp-other-0:rc=1:.*:class=deterministic:reason=max_tokens:runs=1$' '^exp-other-0-guard:status=INCOMPLETE:max_tokens:promoted=0$' \
+  '^exp-error-0:rc=0:.*:class=none:reason=:runs=2$' '^exp-error-0-guard:status=SUCCESS:promoted=1$' \
+  '^exp-error-2:rc=1:.*:reason=[^:]*:runs=2$' '^exp-error-2-guard:status=INCOMPLETE:error:promoted=0$' \
+  '^exp-outer-124:rc=124:.*:class=timeout:reason=:runs=1$' '^exp-outer-124-guard:status=EXIT-124:promoted=0$' \
+  '^agyerr-false-guard:status=EXIT-3:promoted=0$' '^mode-unlisted-guard:status=SUCCESS:promoted=1$' '^callers=111111$')"
+O=$( cd "$_S29/lr" && export HOME="$_S29/home" GIT_CONFIG_NOSYSTEM=1 PATH="$_S29/bin:${_SELF_STUBS}:$PATH" TMPDIR="$_S29/tmp" TRIFORGE_LEASE_ROOT="$_S29/lr.leases" CLAUDECODE=1 \
+       && unset TRIFORGE_TEST_BUILDER TRIFORGE_AGY_MODE && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "lease:load-failed"; exit 0; }
+  for M in cut-off expiry-3 expiry-bare expiry-real intr-0 intr-1; do
+    rm -f "$_S29/log/runs"
+    printf '%s\n' "$M" > "$_S29/cfg/mode"
+    K=$(printf 's29x%s' "$M" | tr -d -- '-')
+    { lease_create "$K" builder && lease_dispatch "$K" "probe task S29" 60; } >/dev/null 2>&1 || { echo "lease-${M}:go-failed"; continue; }
+    _self_wait_rc "$K"
+    R=0; lease_collect "$K" >/dev/null 2>&1 || R=$?
+    OUT=$(_ledger_get "$K" output_file 2>/dev/null || true)
+    echo "lease-${M}:collect=${R}:class=$(cat "${OUT}.class" 2>/dev/null):state=$(_ledger_get "$K" state 2>/dev/null || true):runs=$(_s29_n "$_S29/log/runs"):status=$(cat "${OUT}.status" 2>/dev/null || echo missing)"
+  done ) < /dev/null 2>&1
+_S29_FAIL="${_S29_FAIL}$(_self_expect expiry-lease "$O" \
+  '^lease-cut-off:collect=1:class=timeout:state=requeued:runs=1:status=INCOMPLETE:print_timeout$' \
+  '^lease-expiry-3:collect=1:class=timeout:state=requeued:runs=1:status=INCOMPLETE:print_timeout$' \
+  '^lease-expiry-bare:collect=1:class=timeout:state=requeued:runs=1:status=INCOMPLETE:print_timeout$' \
+  '^lease-expiry-real:collect=1:class=timeout:state=requeued:runs=1:status=INCOMPLETE:print_timeout$' \
+  '^lease-intr-0:collect=1:class=deterministic:state=failed:runs=1:status=INCOMPLETE:interrupted$' \
+  '^lease-intr-1:collect=1:class=deterministic:state=failed:runs=1:status=INCOMPLETE:interrupted$')"
+_S29_EV="${_S29_EV}expiry: a cut-off answer and every expiry shape (agy 1.5.0's real output among them) -> class timeout, one run, INCOMPLETE:print_timeout, not promoted; interrupted -> deterministic; error -> retried; lease: requeue path or failed, never review. "
+
 # cursor
 _S29_PICK=$(awk '/^_cur_grok_pick\(\) \{$/ { p = 1 } p { print } p && /^}$/ { exit }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
 printf '%s\n' 'auto - Auto' 'grok-4.7-high - Grok 4.7  High' 'grok-4.7-xhigh - Grok 4.7  Extra High' 'grok-4.7-xhigh-fast - Grok 4.7  Extra High Fast' \
@@ -15732,7 +16802,67 @@ cursor-${_s29_c}=$( export PATH="$_S29/bin:$PATH" TMPDIR="$_S29/tmp"; cursor-age
 done
 unset _s29_c
 _S29_FAIL="${_S29_FAIL}$(_self_expect cursor "$O" '^cursor-47=grok-4\.7 grok-4\.7-xhigh grok-4\.7-xhigh$' '^cursor-46=grok-4\.6 cursor-grok-4\.6-xhigh cursor-grok-4\.6-xhigh$')"
-_S29_EV="${_S29_EV}cursor: _cur_grok_pick on a stub 4.7 catalog -> grok-4.7-xhigh, a 4.6 catalog -> cursor-grok-4.6-xhigh. "
+printf '%s\n' 'auto - Auto' 'composer-2.5 - Composer 2.5' > "$_S29/cat0"
+cp "$_S29/cat0" "$_S29/cfg/catalog"
+O="cursor-0=$( export PATH="$_S29/bin:$PATH" TMPDIR="$_S29/tmp"; cursor-agent --list-models > "$_S29/list0" 2>/dev/null; eval "$_S29_PICK" 2>/dev/null; _cur_grok_pick "$_S29/list0" 2>/dev/null )"
+mkdir -p "$_S29/curw/ops"
+( cd "$_S29/curw" && git init -q . ) >/dev/null 2>&1 || true
+O="$O
+$( cd "$_S29/curw" && export HOME="$_S29/home" PATH="$_S29/bin:$PATH" TMPDIR="$_S29/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "curw:load-failed"; exit 0; }
+  echo "cursor-default=$(roster_member_default cursor 2>/dev/null)"
+  for _s29_m in "" grok-4.7; do
+    : > ops/roster.toml
+    roster_write_role analyst cursor "$_s29_m" xhigh "claude" >/dev/null 2>&1 || echo "cursor-write-[${_s29_m}]:rc=$?"
+    echo "cursor-write-[${_s29_m}]=$(sed -n 's/^model = "\(.*\)".*/\1/p' ops/roster.toml | head -1)"
+  done )"
+_S29_FAIL="${_S29_FAIL}$(_self_expect cursor "$O" '^cursor-0=grok-4\.7 grok-4\.7-xhigh grok-4\.7$' '^cursor-default=grok-4\.7-xhigh$' '^cursor-write-\[\]=grok-4\.7-xhigh$' '^cursor-write-\[grok-4\.7\]=grok-4\.7-xhigh$')"
+_S29_EV="${_S29_EV}cursor: _cur_grok_pick on a stub 4.7 catalog -> grok-4.7-xhigh, a 4.6 catalog -> cursor-grok-4.6-xhigh, no Grok -> the default family grok-4.7; the registry default and the roster writer's empty model -> grok-4.7-xhigh, and the writer composes it from the bare grok-4.7 + xhigh. "
+
+# agymodels
+_S29_AGYPICK=$(awk '/^_agy_pick\(\) \{$/ { p = 1 } p { print } p && /^}$/ { exit }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
+_s29_agymodels() { # _s29_agymodels <label> <model line>... — one line: the pin, the Pro, the newest
+  local L=$1
+  shift
+  { echo "Fetching available models..."; printf '%s\n' "$@"; } > "$_S29/cfg/models"
+  ( export PATH="$_S29/bin:$PATH"; agy models > "$_S29/models.out" 2>/dev/null; eval "$_S29_AGYPICK"; _agy_pick "$_S29/models.out"; echo "$L:pin=${AGY_PIN}:pro=${AGY_PRO}:newest=${AGY_NEWEST}" )
+}
+_S29_ARGON1=$(printf 'gemini-4-argon-medium\tGemini 4 Argon (Medium)')
+_S29_ARGON2=$(printf 'gemini-4-argon-high\tGemini 4 Argon (High)')
+_S29_FLASH1=$(printf 'gemini-3.8-flash-high\tGemini 3.8 Flash (High)')
+_S29_FLASH2=$(printf 'gemini-3.8-flash-low\tGemini 3.8 Flash (Low)')
+_S29_OTHER=$(printf 'claude-opus-5-5-high\tClaude Opus 5.5 (High)')
+O="$(_s29_agymodels argon "$_S29_ARGON1" "$_S29_ARGON2" "$_S29_FLASH1" "$_S29_FLASH2" "$_S29_OTHER")
+$(_s29_agymodels newerpro "$_S29_ARGON2" "$_S29_FLASH1" "$(printf 'x\tGemini 5 Pro (High)')")
+$(_s29_agymodels flash "$_S29_FLASH2" "$_S29_FLASH1" "$_S29_OTHER")"
+_S29_FAIL="${_S29_FAIL}$(_self_expect agymodels "$O" '^argon:pin=Gemini 3\.8 Flash \(High\):pro=:newest=Gemini 4 Argon \(High\)$' \
+  '^newerpro:pin=Gemini 5 Pro \(High\):pro=Gemini 5 Pro \(High\):newest=Gemini 5 Pro \(High\)$' '^flash:pin=Gemini 3\.8 Flash \(High\):pro=:newest=Gemini 3\.8 Flash \(High\)$')"
+_S29_EV="${_S29_EV}agymodels: _agy_pick on a stub agy models: Argon and Flash -> pin Flash (High), newest Argon (High); a newer Pro -> pinned; Flash alone -> the newest is the pin. "
+
+# occontrol
+_S29_OCCTL=$(awk '/^_oc_control_gate\(\) \{$/ { p = 1 } p { print } p && /^}$/ { exit }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
+mkdir -p "$_S29/oc/bin" "$_S29/oc/fix"
+{ printf '#!/bin/sh\n# SELF-29 opencode stub: runs the touch the prompt names when cfg says so, else answers like provider.no-route\nD=%s\n' "'$_S29/oc'"; cat <<'S29_OC_EOF'
+if [ "$(cat "$D/mode" 2>/dev/null)" = runs ]; then touch allow-marker-oc.txt; echo '{"type":"tool_use","tool":"bash"}'; exit 0; fi
+echo '{"type":"error","error":{"name":"provider.no-route"}}'
+exit 1
+S29_OC_EOF
+} > "$_S29/oc/bin/opencode"
+chmod +x "$_S29/oc/bin/opencode"
+_s29_occtl() ( # _s29_occtl <stub mode> — what _oc_control_gate does; a subshell, so its row never reaches the harness's
+  printf '%s\n' "$1" > "$_S29/oc/mode"
+  PATH="$_S29/oc/bin:$PATH"
+  OC_CAP06=cap06 OC_CAP06B=cap06b
+  _probe_run() { shift; "$@"; }
+  row() { echo "row:$1:$4:$5"; }
+  eval "$_S29_OCCTL"
+  R=0; _oc_control_gate "$_S29/oc/fix" m '{}' "$_S29/oc/out" || R=$?
+  echo "$1:rc=$R:marker=$(if [ -e "$_S29/oc/fix/allow-marker-oc.txt" ]; then echo left; else echo none; fi)"
+)
+O="$(_s29_occtl runs)
+$(_s29_occtl absent)"
+_S29_FAIL="${_S29_FAIL}$(_self_expect occontrol "$O" '^runs:rc=0:marker=none$' '^absent:rc=1:marker=none$' '^row:OC-06:FAIL:no positive control: an allowed touch made no marker \(rc=1\)' '^row:OC-06b:FAIL:no positive control: ')"
+[ "$(printf '%s\n' "$O" | grep -c '^row:' || true)" = 2 ] || _S29_FAIL="${_S29_FAIL} occontrol(rows-not-two)"
+_S29_EV="${_S29_EV}occontrol: _oc_control_gate on a stub opencode: the allowed touch made -> rc 0, no row; not made -> rc 1, OC-06 and OC-06b FAIL no positive control. "
 
 # anchors / rebase
 # _s29_lead <name> <script> — the lead in the fixture $_S29/<name> (its fake
@@ -15860,7 +16990,7 @@ unset _s29_c
 _S29_EV="${_S29_EV}negverdict: _negative_verdict (AGY-11c and CUR-10 call it): rc 124 and 137 -> timeout with any output, error text and READY included, never a rejection; rc 0 + READY -> accepted; rc 1 or 2, or rc 0 + error text -> rejected; rc 0 with neither -> ambiguous; both rows record a timeout as a FAIL saying so. Its _timed_out: 124 and 137 yes, 0, 1, 125 and 143 no; AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08 and CC-14b each capture their _probe_run rc, and CDX-16 its untrusted _lane_run rc (reset to 0 first), and ask _timed_out right before their timed-out FAIL row, which names that rc. "
 # cdx16 (round 3)
 _S29_C16=$(awk '/--dangerously-bypass-hook-trust "Respond with only: READY"/ { p = 1 } p && /^      else$/ { exit } p { print }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
-_S29_C16H=$(awk '/^(_auth_shaped|_u29_hooks_seen)\(\) \{/ { p = 1 } p { print } p && /^}$/ { p = 0 }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
+_S29_C16H=$(awk '/^(_auth_shaped|_u29_hooks_seen|_u29_cdx_hook_flags)\(\) \{/ { p = 1 } p { print } p && /^}$/ { p = 0 }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
 mkdir -p "$_S29/c16/bin" "$_S29/c16/fix" "$_S29/c16/hm"
 printf '#!/bin/sh\n# SELF-29 stub codex: logs a run the CDX-16 block must never make\necho run >> %s/codex.log\nexit 99\n' "'$_S29/c16'" > "$_S29/c16/bin/codex"
 chmod +x "$_S29/c16/bin/codex"
@@ -15871,12 +17001,17 @@ _s29_c16() (
   S16_B=${1%%:*}; S16=${1#*:}; S16_L=${S16%%:*}; S16=${S16#*:}; S16_RC=${S16%%:*}; S16_OUT=${S16#*:}
   PATH="$_S29/c16/bin:$PATH"
   FIX="$_S29/c16/fix"; CH="$_S29/c16/home"; HM="$_S29/c16/hm"; O="$_S29/c16/out"
-  U29_VAL=triforge-probe-s29; U29_CDX16="CDX-16 (SELF-29 replay)"; CDX_MODEL=gpt-s29; U29_CDX_FLAGS=(exec)
+  U29_VAL=triforge-probe-s29; U29_CDX16="CDX-16 (SELF-29 replay)"; CDX_MODEL=gpt-s29; U29_CDX_FLAGS=(exec --disable plugins -s workspace-write)
   rm -f "$HM"/hook-* "$O" "$O.2"
   eval "$_S29_NV"
   eval "$_S29_C16H"
   _lane_run() {
     local A
+    # As on the real CLI (CDX-24): with the worker's --disable plugins no plugin
+    # hook can fire, so a row that forgets to strip it never reaches PASS.
+    case " $* " in
+      *" --disable plugins "*) echo "ERROR: unexpected status 401 Unauthorized"; return 1 ;;
+    esac
     for A in "$@"; do
       if [ "$A" = --dangerously-bypass-hook-trust ]; then
         if [ "$S16_B" = y ]; then printf 'probe_var=%s lease_worker=builder plugin_root=set\n' "$U29_VAL" > "$HM/hook-SessionStart"; fi
@@ -15911,7 +17046,57 @@ for _s29_c in 0:echo 1:echo 2:login 125:login 126:login 127:login 129:login 130:
 done
 unset _s29_c
 _S29_EV="${_S29_EV}cdx16: CDX-16's verdict chain, run from its text on stub runs: with the bypass run's hook, PASS only when the untrusted run fired none and ended at its READY answer (rc 0, a line of its own: the echoed prompt is not one) or the scratch home's missing login (rc 1, auth-shaped), its evidence naming which; rc 0 with only the echo, rc 1 without auth text, and 2, 125, 126, 127, 129, 130 and 143 with it -> FAIL stopped short naming the rc; 124 and 137 -> timed out; a hook fired untrusted -> fires without trust; no bypass hook -> UNAVAILABLE on an auth-shaped bypass run, else FAIL. "
-unset O _S29_PICK _S29_NV _S29_ROUTE _S29_C16 _S29_C16H
+# CC-14c's verdict chain, run from its text: only a read-twice check reading no
+# passes; unverified records FAIL saying no token evidence was available
+_S29_C14=$(awk '/^ *if \[ -n "\$CC14C_AUTH" \]; then$/ { p = 1 } p { print } p && /^          fi$/ { exit }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
+O=$( for _s29_c in no yes unverified; do
+    ( row() { printf 'c14-%s=%s:%s\n' "$_s29_c" "$4" "$5"; }; CC14C_AUTH=""; CC14C_NOANS=""; CC14C_MISS=""; CC14C_TWICE=$_s29_c; CC14C_NOTE=note; U29_CC14C=cap; eval "$_S29_C14" ) 2>&1
+  done )
+_S29_FAIL="${_S29_FAIL}$(_self_expect cc14c "$O" '^c14-no=PASS:' '^c14-yes=FAIL:.*read twice' '^c14-unverified=FAIL:.*no token evidence was available')"
+unset _s29_c
+_S29_EV="${_S29_EV}cc14c: CC-14c's verdict chain, run from its text: PASS only when the read-twice check reads no, yes and unverified FAIL, unverified saying no token evidence was available. "
+# The read-only lanes' session rules: on an agy whose help names --settings every
+# run, the retry too, carries the rules and the user's own; on one whose help does
+# not, the flag stays off and the run still goes. The pack and the shipped prompts
+# stay read-only.
+_s29_settings() { # _s29_settings <label>: rc, runs, and what the last run's --settings held
+  local A="$_S29/log/argv" S=""
+  S=$(awk 'p { print; exit } $0 == "--settings" { p = 1 }' "$A" 2>/dev/null || true)
+  printf '%s:%s:flag=%s:' "$1" "$(cat "$_S29/log/runs" 2>/dev/null | wc -l | tr -d ' ')" "$(_s29_n "$A" -x -- --settings)"
+  printf '%s' "$S" | S29_HOME="$_S29/home" python3 -c 'import json, os, sys
+s = sys.stdin.read()
+if not s:
+    print("none"); raise SystemExit
+p, h = json.loads(s)["permissions"], os.environ["S29_HOME"]
+print("readall=%d write=%d cmd=%d ssh=%d gemini=%d uallow=%d udeny=%d" % ("read_file(*)" in p["allow"], "write_file(*)" in p["deny"], "command(*)" in p["deny"], "read_file(%s/.ssh)" % h in p["deny"], "read_file(%s/.gemini)" % h in p["deny"], "read_url(*)" in p["allow"], "read_file(/s29-own)" in p["deny"]))'
+}
+mkdir -p "$_S29/home/.gemini/antigravity-cli"
+printf '%s\n' '{"permissions":{"allow":["read_url(*)"],"deny":["read_file(/s29-own)"]}}' > "$_S29/home/.gemini/antigravity-cli/settings.json"
+: > "$_S29/cfg/agents"
+printf '  --settings   Settings for this session only\n' > "$_S29/cfg/help"
+O="$(_s29_invoke set-on ok | cut -d: -f1,2)
+$(_s29_settings set-on)"
+O="$O
+$(_s29_invoke set-retry error-0 | cut -d: -f1,2)
+$(_s29_settings set-retry)"
+printf '  --add-dir   Add a directory\n' > "$_S29/cfg/help"
+O="$O
+$(_s29_invoke set-old ok | cut -d: -f1,2)
+$(_s29_settings set-old)"
+rm -f "$_S29/cfg/help" "$_S29/home/.gemini/antigravity-cli/settings.json"
+_S29_READALL='flag=1:readall=1 write=1 cmd=1 ssh=1 gemini=1 uallow=1 udeny=1$'
+_S29_FAIL="${_S29_FAIL}$(_self_expect lane-settings "$O" '^set-on:rc=0$' "^set-on:1:${_S29_READALL}" '^set-retry:rc=0$' "^set-retry:2:${_S29_READALL}" '^set-old:rc=0$' '^set-old:1:flag=0:none$')"
+O=$(cd "$REPO_ROOT" && for _s29_c in antigravity-agents/agents/*.md; do
+    echo "pack:$(basename "$_s29_c"):$(grep -c -E 'write_to_file|run_command' "$_s29_c" || true):$(grep -c -F 'commandExecutionPolicy: "off"' "$_s29_c" || true):$(grep -c -E '^\*\*(Write|Headless fallback)' "$_s29_c" || true)"
+  done
+  echo "prompts:$(grep -l -E 'if you can' skills/at-plan/references/phase-0-analysis.md skills/at-coordinate/references/phases.md skills/at-ship/references/phases.md skills/at-build/references/team-mode.md skills/at-deep-research/references/swarm.md personas/team-lead.md 2>/dev/null | wc -l | tr -d ' '):$(grep -c 'Write findings to ops/REVIEW_ANTIGRAVITY' skills/at-review/references/dispatch.md || true)")
+for _s29_c in architecture-reviewer codebase-analyst documentation-writer targeted-researcher; do
+  _S29_FAIL="${_S29_FAIL}$(_self_expect lane-pack "$O" "^pack:${_s29_c}\\.md:0:1:0$")"
+done
+_S29_FAIL="${_S29_FAIL}$(_self_expect lane-prompts "$O" '^prompts:0:0$')"
+unset _s29_c _S29_READALL
+_S29_EV="${_S29_EV}lane-settings: invoke_antigravity passes the read-only session rules (reads everywhere but the credential paths, no write, no command) with the user's own rules on an agy whose help names --settings, the retry too, and no flag on one whose help does not. lane-pack: no agent definition carries a write tool, a shell tool or a write instruction, and no shipped lane prompt asks for a file. "
+unset O _S29_PICK _S29_NV _S29_ROUTE _S29_C16 _S29_C16H _S29_C14
 # --- end of SELF-29 cases ---
 _S29_CAP="agy routing defaults to auto and the AGY_ERROR line on exit 3 sets the failure's reason and retry (invoke_antigravity and the lease lane); the Cursor probe rows compose Grok ids through _cursor_model_for_effort; a ledger whose two anchors were deleted is a change (rc 44), and the lead's lease_rebaseline recovers (U19, S2); a negative row's call cut off by its timeout (rc 124 or 137) is never a rejection (AGY-11c, CUR-10), and a missing trace after one is no PASS (AGY-09, AGY-10, AGY-13, AGY-16, CDX-08, OC-06, OC-06b, KIMI-08, CUR-07, CUR-08, CC-14b, CDX-16); CDX-16 passes only when its untrusted run ended at its READY answer or the scratch home's missing login, past the point where a trusted hook fires"
 if [ -z "$_S29_EV" ]; then _S29_FAIL="${_S29_FAIL} cases(no-case-ran)"; fi
@@ -16961,3 +18146,6 @@ else
 fi
 rm -rf "$_S30"
 unset _S30_OUT _S30_HITS _S30_N _S30_NEG _S30_WANT _S30_GOT _s30_r
+
+# SELF-31 (F2, D-067): the install smoke row, _self31_row in scripts/probe-capabilities.sh.
+_self31_row

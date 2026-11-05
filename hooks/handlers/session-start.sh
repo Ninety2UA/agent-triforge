@@ -552,7 +552,13 @@ fi
 # template for one. Claude Code reads AGENTS.md from 2.1.277, and only while no
 # CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working
 # directory or above it (the user tier does not count: ~/.claude/CLAUDE.md, or the CLAUDE.md in an absolute CLAUDE_CONFIG_DIR outside the project); a
-# CLAUDE.md that imports it (`@AGENTS.md`) loads it on every build. Four
+# CLAUDE.md that imports it (`@AGENTS.md`) loads it on every build. That rule
+# is the default mode of Claude Code's instructionFiles setting (D-055), which
+# the user tier can change (instruction_files_mode reads it, never writes it):
+# claude-md-and-agents-md reads AGENTS.md beside any CLAUDE.md, so the own and
+# above lines drop and a 3.x copy is named only for its stale text; claude-md
+# and managed-only load none, so one line names the setting (claude-md lets an
+# import through, which silences it) and no import is offered. Under the default, four
 # states leave a Claude lead without it, and each gets one line:
 #   floor   `claude --version` below 2.1.277
 #   stale   ./CLAUDE.md or ./.claude/CLAUDE.md is a 3.x copy of the retired
@@ -616,6 +622,18 @@ if command -v claude >/dev/null 2>&1; then
   if [ -n "$SS_CLAUDE_XYZ" ] && [ "$(_ss_xyz_key "$SS_CLAUDE_XYZ")" -lt "$(_ss_xyz_key "$CLAUDE_FLOOR")" ]; then
     INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}WARNING: Claude Code ${SS_CLAUDE_XYZ} is below Triforge's floor ${CLAUDE_FLOOR}, the first build that reads AGENTS.md — Triforge's only instruction file, which older builds do not read. Update Claude Code (\`claude update\`)."
   fi
+  # The claude worker lane's floor, a second and higher line than the lead's:
+  # the lead runs here, while a claude worker refuses to start (D-059). The
+  # value is read from registry.sh's one copy without sourcing the loader, so the
+  # line holds when the loader fails; no value read, no line.
+  SS_WORKER_FLOOR=""
+  if [ -n "$SS_HOOK_ROOT" ] && [ -f "$SS_HOOK_ROOT/scripts/lib/registry.sh" ]; then
+    SS_WORKER_FLOOR=$(_ss_xyz "$(LC_ALL=C grep -E '^TRIFORGE_CLAUDE_SANDBOX_FLOOR=' "$SS_HOOK_ROOT/scripts/lib/registry.sh" 2>/dev/null || true)")
+  fi
+  case "${TRIFORGE_CLAUDE_SANDBOX:-on}" in off|0|false|no) SS_WORKER_FLOOR="" ;; esac
+  if [ -n "$SS_CLAUDE_XYZ" ] && [ -n "$SS_WORKER_FLOOR" ] && [ "$(_ss_xyz_key "$SS_CLAUDE_XYZ")" -lt "$(_ss_xyz_key "$SS_WORKER_FLOOR")" ]; then
+    INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}worker-floor: Claude Code ${SS_CLAUDE_XYZ} is below ${SS_WORKER_FLOOR}, the floor for a claude worker (a lease builder, a dispatched role, an exec persona), which refuses to start until you update (\`claude update\`) or set TRIFORGE_CLAUDE_SANDBOX=off. A lead runs from ${CLAUDE_FLOOR}."
+  fi
 fi
 
 # The instruction files: one read-only pass of instruction_files_detect over
@@ -635,6 +653,8 @@ SS_OWN_NOTICES=""
 SS_ABOVE_NOTICES=""
 SS_FOUND=""
 SS_FOUND_RC=0
+SS_MODE="" SS_MODE_RULE=shadow SS_MODE_FILE=""
+SS_MODE_CLAUSE=" (under the default mode, claude-md-or-agents-md; a user-tier instructionFiles setting changes this)"
 # A start directory that is HOME or above it is no project: no file is checked
 # there and no tip printed, since each line would name a file there, which
 # every project under it reads and the writers refuse. The anchor is then
@@ -656,6 +676,12 @@ elif [ -f "$SS_INSTR_LIB" ] && source "$SS_INSTR_LIB" >/dev/null 2>&1; then
 else
   SS_FOUND_RC=69 SS_WHY="the library did not load"
 fi
+if [ "$SS_FOUND_RC" -eq 0 ] && [ -z "$SS_NO_PROJECT" ]; then
+  IFS=$'\t' read -r SS_MODE SS_MODE_RULE _ SS_MODE_FILE <<SS_MODE_EOF || true
+$(_INSTR_SECS=10 instruction_files_mode "$SS_START_DIR" 2>/dev/null || true)
+SS_MODE_EOF
+  case "$SS_MODE_RULE" in both|imports|none) ;; *) SS_MODE_RULE=shadow ;; esac
+fi
 if [ "$SS_FOUND_RC" -ne 0 ]; then
   SS_FOUND=""
   INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}$(_ss_prose "WARNING: the instruction-file check did not finish (instruction_files_detect in ${SS_INSTR_LIB}, rc ${SS_FOUND_RC}: ${SS_WHY}), so the CLAUDE.md and 3.x template notices may be missing this session.")"
@@ -672,19 +698,23 @@ while IFS=$'\t' read -r SS_KIND SS_WHERE SS_STATE SS_FILE SS_IMPORT; do
   case "${SS_WHERE},${SS_STATE}," in
     project,*,past-bound,*)
       SS_LINE=@AGENTS.md; if [ "$SS_KIND" = .claude/CLAUDE.md ]; then SS_LINE=@../AGENTS.md; fi
-      SS_OWN_NOTICES="${SS_OWN_NOTICES}${SS_NL}WARNING: ${SS_KIND} in this project is past the size or nesting Triforge reads, so session start cannot tell whether it imports AGENTS.md, and Claude Code skips AGENTS.md while this file exists without importing it. Shorten it, or add the line ${SS_LINE} to it yourself where Claude Code reads imports (not inside a code block). Session start never edits this file." ;;
+      SS_OWN_NOTICES="${SS_OWN_NOTICES}${SS_NL}WARNING: ${SS_KIND} in this project is past the size or nesting Triforge reads, so session start cannot tell whether it imports AGENTS.md, and Claude Code skips AGENTS.md while this file exists without importing it${SS_MODE_CLAUSE}. Shorten it, or add the line ${SS_LINE} to it yourself where Claude Code reads imports (not inside a code block). Session start never edits this file." ;;
     above,*,past-bound,*)
-      SS_ABOVE_NOTICES="${SS_ABOVE_NOTICES}${SS_NL}WARNING: $(_ss_prose "$SS_FILE") sits above this project and is past the size or nesting Triforge reads, so session start cannot tell whether it imports this project's AGENTS.md, and a Claude lead skips AGENTS.md while that file exists without importing it. Add a CLAUDE.md holding the line @AGENTS.md to this project: it loads AGENTS.md for this project only." ;;
+      SS_ABOVE_NOTICES="${SS_ABOVE_NOTICES}${SS_NL}WARNING: $(_ss_prose "$SS_FILE") sits above this project and is past the size or nesting Triforge reads, so session start cannot tell whether it imports this project's AGENTS.md, and a Claude lead skips AGENTS.md while that file exists without importing it${SS_MODE_CLAUSE}. Add a CLAUDE.md holding the line @AGENTS.md to this project: it loads AGENTS.md for this project only." ;;
     project,*,stale-3x-*)
-      INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}WARNING: ${SS_KIND} is a Triforge 3.x project template (a copy of the retired templates/CLAUDE.md). Triforge 4 ships AGENTS.md only, and Claude Code does not read AGENTS.md while this file exists without importing it. Add the line $(_ss_prose "$SS_IMPORT") to it, or replace its Triforge content with the pointer block in the plugin's templates/AGENTS.md — session start never edits this file."
+      if [ "$SS_MODE_RULE" != shadow ]; then
+        INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}WARNING: ${SS_KIND} is a Triforge 3.x project template (a copy of the retired templates/CLAUDE.md), and its Triforge text is stale. Replace its Triforge content with the pointer block in the plugin's templates/AGENTS.md, or remove the file; session start never edits this file."
+        continue
+      fi
+      INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}WARNING: ${SS_KIND} is a Triforge 3.x project template (a copy of the retired templates/CLAUDE.md). Triforge 4 ships AGENTS.md only, and Claude Code does not read AGENTS.md while this file exists without importing it${SS_MODE_CLAUSE}. Add the line $(_ss_prose "$SS_IMPORT") to it, or replace its Triforge content with the pointer block in the plugin's templates/AGENTS.md — session start never edits this file."
       ;;
     project,*,user-owned,*)
-      SS_OWN_NOTICES="${SS_OWN_NOTICES}${SS_NL}WARNING: ${SS_KIND} in this project does not import AGENTS.md, so Claude Code reads it and skips AGENTS.md, Triforge's only instruction file. Run /at-setup to add the line $(_ss_prose "$SS_IMPORT") to it (setup asks first), or add it yourself — session start never edits this file."
+      SS_OWN_NOTICES="${SS_OWN_NOTICES}${SS_NL}WARNING: ${SS_KIND} in this project does not import AGENTS.md, so Claude Code reads it and skips AGENTS.md, Triforge's only instruction file${SS_MODE_CLAUSE}. Run /at-setup to add the line $(_ss_prose "$SS_IMPORT") to it (setup asks first), or add it yourself — session start never edits this file."
       ;;
     above,*)
       SS_LEVEL=${SS_FILE%/*}
       if [ "$SS_KIND" = .claude/CLAUDE.md ]; then SS_LEVEL=${SS_LEVEL%/*}; fi
-      SS_ABOVE_LINE="WARNING: AGENTS.md is not loaded under a Claude lead: $(_ss_prose "$SS_FILE") sits above this project, and Claude Code reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working directory or above it. Add a CLAUDE.md holding the line @AGENTS.md to this project: it loads AGENTS.md for this project only."
+      SS_ABOVE_LINE="WARNING: AGENTS.md is not loaded under a Claude lead: $(_ss_prose "$SS_FILE") sits above this project, and Claude Code reads AGENTS.md only while no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md exists in the working directory or above it${SS_MODE_CLAUSE}. Add a CLAUDE.md holding the line @AGENTS.md to this project: it loads AGENTS.md for this project only."
       if _ss_home_or_above "${SS_LEVEL:-/}"; then
         SS_ABOVE_LINE="${SS_ABOVE_LINE} That file is in your home directory or above it and is read for every project under it, so the fix belongs in this project, not there."
       elif [ "$SS_IMPORT" = "-" ]; then
@@ -698,9 +728,19 @@ while IFS=$'\t' read -r SS_KIND SS_WHERE SS_STATE SS_FILE SS_IMPORT; do
 done <<SS_FOUND_EOF
 ${SS_FOUND}
 SS_FOUND_EOF
-if [ -z "$SS_CHAIN_IMPORTS" ]; then
-  INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_OWN_NOTICES}${SS_ABOVE_NOTICES}"
-fi
+case "$SS_MODE_RULE" in
+  both) ;;
+  imports|none)
+    if [ "$SS_MODE_RULE" = none ] || [ -z "$SS_CHAIN_IMPORTS" ]; then
+      INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_NL}WARNING: AGENTS.md is not loaded under a Claude lead: the instructionFiles setting in $(_ss_prose "$SS_MODE_FILE") is ${SS_MODE}, so Claude Code loads no AGENTS.md. Change it under Project instructions in /config; session start never edits your settings."
+    fi
+    ;;
+  *)
+    if [ -z "$SS_CHAIN_IMPORTS" ]; then
+      INSTRUCTION_NOTICES="${INSTRUCTION_NOTICES}${SS_OWN_NOTICES}${SS_ABOVE_NOTICES}"
+    fi
+    ;;
+esac
 
 # Pointer-block tip: a project with no root AGENTS.md carries nothing that
 # tells an agent Triforge runs here. A standing tip, printed until the file

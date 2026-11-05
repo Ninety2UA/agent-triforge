@@ -5,7 +5,7 @@ disable-model-invocation: true
 argument-hint: "[solution | decision] <description>"
 metadata:
   triforge-consumer: "lead"
-  version: "4.1.1"
+  version: "4.2.0"
 ---
 
 # Compound Knowledge

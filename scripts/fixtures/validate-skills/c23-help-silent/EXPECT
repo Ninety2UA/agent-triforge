@@ -1,0 +1,3 @@
+check: C23
+under-warn: warning
+message: does not name locate-triforge.sh or the plugin root

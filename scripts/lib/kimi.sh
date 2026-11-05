@@ -80,11 +80,11 @@ invoke_kimi() {
   # — fail fast with the exact fix (G12 install guidance) instead of burning a
   # timeout window.
   if ! command -v kimi >/dev/null 2>&1; then
-    echo "invoke_kimi: ERROR \`kimi\` (Kimi Code CLI) not found on PATH — cannot invoke agent '${AGENT_NAME}'. Fix: install it (curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash), then run \`kimi login\`. No retry (deterministic)." >&2
+    echo "invoke_kimi: ERROR \`kimi\` (Kimi Code CLI) not found on PATH — cannot invoke agent '${AGENT_NAME}'. Fix: install it (curl -fsSL https://code.kimi.ai/kimi-code/install.sh | bash), then run \`kimi login\`. No retry (deterministic)." >&2
     # Write the guidance to OUTPUT_FILE too: a caller (e.g. a review fan-out)
     # that only reads the file must not mistake an empty file for "no findings"
     # (the exact trap AGENTS.md warns about).
-    echo "invoke_kimi: kimi CLI not on PATH — install: curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash" > "$OUTPUT_FILE" 2>/dev/null || true
+    echo "invoke_kimi: kimi CLI not on PATH — install: curl -fsSL https://code.kimi.ai/kimi-code/install.sh | bash" > "$OUTPUT_FILE" 2>/dev/null || true
     INVOKE_FAILURE_CLASS="deterministic"
     _INVOKE_FAILURE_REASON="binary-missing"
     return 127
@@ -177,7 +177,7 @@ invoke_kimi() {
             echo "invoke_kimi: agent=${AGENT_NAME} exit=${EXIT_CODE} kimi could not load the agent definition ${AGENT_FILE} (see ${ERR}). The definition carries the role's tools allowlist, so it is never dropped on retry — fix the file. No retry (deterministic)." >&2
             ;;
           binary-missing)
-            echo "invoke_kimi: agent=${AGENT_NAME} exit=${EXIT_CODE} — \`kimi\` disappeared from PATH mid-run. Fix: install it (curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash), then run \`kimi login\`. No retry (deterministic)." >&2
+            echo "invoke_kimi: agent=${AGENT_NAME} exit=${EXIT_CODE} — \`kimi\` disappeared from PATH mid-run. Fix: install it (curl -fsSL https://code.kimi.ai/kimi-code/install.sh | bash), then run \`kimi login\`. No retry (deterministic)." >&2
             ;;
           *)
             echo "invoke_kimi: agent=${AGENT_NAME} exit=${EXIT_CODE} deterministic failure (${_INVOKE_FAILURE_REASON:-see error above}). No retry." >&2

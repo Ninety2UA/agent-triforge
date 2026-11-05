@@ -38,16 +38,16 @@ falls back to `agent` **only when `agent --version` matches Cursor's
 `~/.grok/bin/agent` shadows Cursor's symlink on PATH, so a bare "prefer `agent`"
 rule would misroute (probe CUR-11 covers the guard).
 
-## Model + effort — `cursor-grok-4.6-xhigh`, effort as a model-id suffix
+## Model + effort — `grok-4.7-xhigh`, effort as a model-id suffix
 
-The shipped default is `cursor-grok-4.6-xhigh`, explicitly pinned — never the
+The shipped default is `grok-4.7-xhigh`, explicitly pinned — never the
 Auto router. Cursor's headless effort control is the **suffix** of the model id
-(`cursor-grok-4.6-low|medium|high|xhigh`, each also available as `-fast`), so
+(`grok-4.7-low|medium|high|xhigh`, each also available as `-fast`), so
 the roster `effort` field is live for Cursor: the lead maps low→`-low`,
 medium→`-medium`, high→`-high`, xhigh/max→`-xhigh` when the roster names the
-bare family `grok-4.6`, and passes an explicit suffixed id through untouched
-(probe CUR-12). The documented bracket form `grok-4.6[effort=xhigh]` was
-**rejected** headless on build 2026.09.10 (`Cannot use this model` — probe
+bare family `grok-4.7`, and passes an explicit suffixed id through untouched
+(probe CUR-12). The documented bracket form `grok-4.7[effort=xhigh]` is
+**rejected** headless on build 2026.10.22 (`Cannot use this model` — probe
 CUR-10) and stays an open watch; Triforge never emits it.
 
 ## Read-only reviewer — enforced by `--mode plan`, not `readonly:`
@@ -72,7 +72,7 @@ headless (probe CUR-09).
 
 | File | Role | Injected as |
 |---|---|---|
-| `builder.md` | Optional-tier builder | prompt prefix (CURSOR_MODEL default `cursor-grok-4.6-xhigh`; invocation adds `--force`) |
+| `builder.md` | Optional-tier builder | prompt prefix (CURSOR_MODEL default `grok-4.7-xhigh`; invocation adds `--force`) |
 | `reviewer.md` | Read-only cross-reviewer | prompt prefix; invocation adds `--mode plan`; output merged to `ops/REVIEW_CURSOR.md` |
 
 Model pinning (never Auto), `--trust`, the CUR-06 headless-hooks gap, and

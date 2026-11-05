@@ -4,7 +4,7 @@ description: "Use when an external repo or resource must be judged for prompts, 
 argument-hint: "[github-url or local-path]"
 metadata:
   triforge-consumer: "lead"
-  version: "4.1.1"
+  version: "4.2.0"
 ---
 
 # Analyze

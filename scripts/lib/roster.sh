@@ -1168,15 +1168,20 @@ print(json.dumps(hooks))
 # read): the runtime half of KTD1. A Claude Code lead runs an enabled plugin's
 # hooks, headless too (CC-12), so a declared event is present. A Codex lead
 # runs a plugin hook only once the user trusted it (CDX-22): hooks.state.<key>
-# .trusted_hash in the Codex config (CODEX_HOME's, read here, never written)
-# equal to the hash Codex computes for the hook now. So an event is present
-# only when `codex features list` has hooks on and `codex app-server`'s
-# hooks/list (_CODEX_HOOKS_LIST_PY, 30 s cap) lists this plugin's hooks for it
-# (pluginId <plugin name>@<marketplace>), each with trustStatus trusted and a
-# config trusted_hash equal to its currentHash. Anything else is absent with
-# the first unmet condition as the reason, fail closed: codex missing, the
-# call failing or timing out, a hook untrusted or modified since it was
-# trusted, a hash the config does not hold. Another plugin's hooks and the
+# in the Codex config (CODEX_HOME's, read here, never written) holding the
+# hashes Codex computes for the hook now. So an event is present only when
+# `codex features list` has hooks on and `codex app-server`'s hooks/list
+# (_CODEX_HOOKS_LIST_PY, 30 s cap) lists this plugin's hooks for it (pluginId
+# <plugin name>@<marketplace>), each with trustStatus trusted and a config
+# approval for its currentHash. From Codex 0.164 a plugin hook's currentHash is
+# <declaration>/<content>, persisted as trusted_hash = <declaration> and
+# trusted_content_hash = <content>; an approval from before 0.164 holds
+# trusted_hash alone, and Codex's own trustStatus has compared the contents to
+# the baseline it pinned for that approval. Without a slash (an older Codex)
+# trusted_hash equals currentHash. Anything else is absent with the first
+# unmet condition as the reason, fail closed: codex missing, the call failing
+# or timing out, a hook untrusted or modified since it was trusted, a hash the
+# config does not hold. Another plugin's hooks and the
 # project's own .codex/hooks.json do not count: they are not this plugin's
 # monitors.
 _lead_hooks_detect() {
@@ -1206,6 +1211,17 @@ def declared(path):
         return None
     hooks = data.get('hooks') if isinstance(data, dict) else None
     return [e for e, v in hooks.items() if v] if isinstance(hooks, dict) else []
+
+def approval_unmet(st, now):
+    # what the hooks.state entry st lacks for the hooks/list currentHash now, or ''
+    declaration, bound, content = str(now).partition('/')
+    if not now or not isinstance(st, dict) or (not bound and st.get('trusted_hash') != now):
+        return 'trusted_hash equal to its current hash'
+    if bound and st.get('trusted_hash') != declaration:
+        return 'trusted_hash equal to its current declaration hash'
+    if bound and st.get('trusted_content_hash', content) != content:
+        return 'trusted_content_hash equal to its current content hash'
+    return ''
 
 def codex_why(events, plugin, cfg_path):
     # {event: reason} for every event that is not trusted, or one reason for all
@@ -1240,11 +1256,11 @@ def codex_why(events, plugin, cfg_path):
             why[e] = 'codex hooks/list lists no ' + plugin + ' ' + e + ' hook (the plugin is not installed or not enabled in this CODEX_HOME)'
         for h in on:
             key, now = str(h.get('key')), h.get('currentHash')
-            st = state.get(key)
+            unmet = approval_unmet(state.get(key), now)
             if h.get('trustStatus') != 'trusted':
                 why[e] = 'the ' + plugin + ' ' + e + ' hook ' + key + ' is ' + str(h.get('trustStatus')) + ' (trust it in the Codex hook review, which records hooks.state in ' + cfg_path + ')'
-            elif not now or not isinstance(st, dict) or st.get('trusted_hash') != now:
-                why[e] = 'the ' + plugin + ' ' + e + ' hook ' + key + ' has no hooks.state trusted_hash equal to its current hash in ' + cfg_path
+            elif unmet:
+                why[e] = 'the ' + plugin + ' ' + e + ' hook ' + key + ' has no hooks.state ' + unmet + ' in ' + cfg_path
             else:
                 continue
             break
@@ -1677,7 +1693,7 @@ sys.stderr.write(who + ': [lead] cli=' + cli + ' model=' + (model or '<host defa
 #
 # Shipped optional defaults (KTD-8, session-settled) are the registry's model
 # field (scripts/lib/registry.sh): opencode -> openrouter/z-ai/glm-5.3 ; kimi
-# -> kimi-code/k3 ; grok -> grok-4.7 ; cursor -> cursor-grok-4.6-xhigh
+# -> kimi-code/k3 ; grok -> grok-4.7 ; cursor -> grok-4.7-xhigh
 # (explicit suffixed pin — effort rides in the suffix — NEVER the Auto
 # router). The core trio (tier
 # "core" in the registry) is required, never enrolled. The binary per member
@@ -1932,8 +1948,8 @@ member_rules(members if isinstance(members, dict) else {}, {role: chain}, refuse
 # (Medium), high/xhigh/max -> (High). Families without a (Medium) variant
 # (3.1 Pro: agy lists only (Low)/(High)) collapse medium to (Low) with a NOTE.
 # An EMPTY agy model is auto-filled with the effort-matched shipped default
-# (Gemini 3.8 Flash (<want>) — D-022: newest Gemini at its highest thinking
-# level, Pro or Flash); otherwise the empty model falls back to the (High)
+# (Gemini 3.8 Flash (<want>) — D-022, D-060: newest Gemini at its highest
+# thinking level that every tier can run); otherwise the empty model falls back to the (High)
 # default at dispatch and a low/medium effort is silently lost. Models without
 # a variant suffix are written through untouched, no note. This block runs
 # AFTER every rejecting check above so its stderr NOTE is only ever emitted on
@@ -1957,8 +1973,8 @@ if cli == 'antigravity':
                 sys.stderr.write('roster_write_role: NOTE agy effort maps into the (Low)/(Medium)/(High) model suffix — model normalized to ' + repr(model) + ' to match effort=' + effort + '\n')
 
 # Cursor's effort control is likewise a model-id SUFFIX (D-025, CUR-10/12):
-# cursor-grok-4.6-low|medium|high|xhigh, grok-4.7-low|…. A bare Grok family
-# name (grok-4.6) is composed into the suffixed id from effort; an explicit
+# grok-4.7-low|medium|high|xhigh, cursor-grok-4.6-low|…. A bare Grok family
+# name (grok-4.7) is composed into the suffixed id from effort; an explicit
 # suffixed id is normalized to match the effort; anything else (composer-2.5,
 # a non-Grok id) is written through untouched. Empty model -> the shipped
 # default family. The cursor- prefix comes from the family, never from how
@@ -1969,7 +1985,7 @@ if cli == 'antigravity':
 # through the same _CURSOR_ID_PY helper.
 if cli == 'cursor':
     sfx = {'low': 'low', 'medium': 'medium', 'high': 'high'}.get(effort, 'xhigh')
-    m3 = cursor_grok_match(model or 'grok-4.6')
+    m3 = cursor_grok_match(model or 'grok-4.7')
     if m3:
         fam, had, fast = m3.group(1), m3.group(2), m3.group(3) or ''
         new_model = cursor_grok_id(fam, sfx, fast)

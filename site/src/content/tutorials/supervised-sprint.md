@@ -114,7 +114,7 @@ For a Codex lead, setup also shows the hook trust step and the launch line that 
 Setup checks that the core trio answers, asks which CLI leads, shows the roles and offers each optional CLI, as in [Your first sprint](/tutorials/first-sprint/#run-setup). In a project with history, the instruction-file step is the one that can change your own files. Setup lists the instruction files in the project, in each folder above it and at the user level, and says for each CLI that can lead whether Triforge's pointer block reaches it. Then it offers a change where one is needed:
 
 - An `AGENTS.md` without the pointer block, or no `AGENTS.md` at all: it offers to add the block, a short marked section that points agents to `ops/` and to Triforge's rules.
-- A `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` in the project: while one exists, Claude Code reads `AGENTS.md` only if that file imports it, so setup offers the import line.
+- A `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` in the project: while one exists, Claude Code reads `AGENTS.md` only if that file imports it (under the default `instructionFiles` mode, `claude-md-or-agents-md`; a user-tier setting changes this), so setup offers the import line.
 - A `CLAUDE.md` in a folder above the project: an import there would reach every project under that folder. Setup first suggests a `CLAUDE.md` in your project whose only line is `@AGENTS.md`, and prints it for you to create.
 - An `AGENTS.override.md`: Codex reads it in place of `AGENTS.md` in that folder. Setup names it and leaves the decision to you.
 

@@ -43,7 +43,7 @@ Flag any task whose role is not one of the five, or whose role does not fit the 
 
 ### 7. Task field integrity (G6/G11)
 - Every task whose `Accept:` is command-shaped — a runnable command or a fenced snippet (`bash …`, `grep …`, `npm test …`, `pytest …`, `curl …`, a `scripts/*.sh` call) — must carry a concrete `Fails when:` naming the observable failure signal (a non-zero exit, a missing line, a wrong count, a changed hash). Placeholders are rejected: `TBD`, `N/A`, `none`, `unknown`, `?`, or an empty value. A prose `Accept:` ("the user sees the new column") that has no runnable check earns a warning without a `Fails when:`, not a blocker.
-- A task marked `Reversibility: one-way` (a migration, a deletion, a push, a published artifact) must name a checkpoint in its `Precondition:` — a commit sha or tag, a backup path, a feature flag, a snapshot id — that lets the lead undo or gate the step. `Reversibility: costly` without a checkpoint is a warning.
+- A task marked `Reversibility: one-way` (a migration, a deletion, a push, a published artifact) must name a checkpoint in its `Precondition:` — a commit sha or tag, a backup path, a feature flag, a snapshot id — that lets the lead undo or gate the step. `Reversibility: checkpointed` without a checkpoint named in its `Precondition:` is a warning. These and `reversible` are the only values `writing-plans` defines.
 - Report a missing or placeholder `Fails when:` on a command-shaped `Accept:`, and a one-way task without a checkpoint, as **blocking issues** — quote the task ID and the offending field.
 
 ## Output format
@@ -54,7 +54,7 @@ Flag any task whose role is not one of the five, or whose role does not fit the 
 ### Status: APPROVED | NEEDS_REVISION
 
 ### Blocking issues (must fix before build)
-- [issue description + suggested fix]
+- [issue description + suggested fix; write `None` when there are none]
 
 ### Warnings (should fix)
 - [issue description + suggested fix]
@@ -70,6 +70,8 @@ Flag any task whose role is not one of the five, or whose role does not fit the 
 - Task fields: [command-shaped Accept rows with a concrete Fails when / total; one-way tasks with a checkpoint / total]
 ```
 
+The lead reads this report through `persona_verdict`, which rejects any other shape: exactly one `### Status:` line holding one value, and the `### Blocking issues` section always present, neither inside a code fence, so never wrap the report in one. A blocking issue means NEEDS_REVISION, never APPROVED; what does not block belongs under Warnings.
+
 ## Iteration
 
 You may iterate up to 3 times:
@@ -77,4 +79,4 @@ You may iterate up to 3 times:
 2. (Claude fixes) → re-review → report remaining issues
 3. (Claude fixes) → final review → approve or escalate
 
-After 3 iterations, approve with caveats or escalate to user.
+After 3 iterations, escalate to the user with the remaining blocking issues.

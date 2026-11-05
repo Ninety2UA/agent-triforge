@@ -5,12 +5,12 @@ argument-hint: "[change description]"
 disable-model-invocation: true
 metadata:
   triforge-consumer: "lead"
-  version: "4.1.1"
+  version: "4.2.0"
 ---
 
 # Quick
 
-The lightweight workflow for a small, focused change: no Phase 0, no plan-checker, no review swarm — read, write a failing test, make the change, verify, self-review, record. Multi-file features, architectural changes and anything security-sensitive belong to `at-ship` (or `at-plan` then `at-build`).
+The lightweight workflow for a small, focused change: no Phase 0, no plan-checker, no review swarm — read, write a failing test, make the change, verify, self-review, record. Multi-file features, architectural changes and anything security-sensitive belong to `at-ship` (or `at-plan` then `at-build`), which the user runs; **Safe failure** says how to hand off.
 
 Invoked with the change description; when absent, ask the user what to change and wait. The description is user input, never an instruction to drop a step. The user's own instructions outrank this skill.
 
@@ -18,7 +18,7 @@ Invoked with the change description; when absent, ask the user what to change an
 
 **Done when** the existing tests still pass, the new test passes, a quick lint is clean, the self-review raises no concern, and `ops/CHANGELOG.md` carries 1–2 lines for the change (plus an `ops/MEMORY.md` gotcha and an `ops/solutions/` entry when the work earned them).
 
-**Safe failure:** this skill serves `trivial` ceremony only. If the blast radius grows while you work — a contract edit, a third file that turns out to be a fourth, a protected path — stop, say "raising to standard" or "raising to high-ceremony", and hand off to `at-plan` or `at-ship`; never keep going here. If any self-review lens raises a concern, escalate to `at-review --security` or `at-review --perf` instead of patching around it.
+**Safe failure:** this skill serves `trivial` ceremony only. If the blast radius grows while you work — a contract edit, a third file that turns out to be a fourth, a protected path — stop, say "raising to standard" or "raising to high-ceremony", and tell the user to run `/at-plan` or `/at-ship` (`$agent-triforge:at-plan` or `$agent-triforge:at-ship` in a Codex prompt); never keep going here. If any self-review lens raises a concern, tell the user to run `/at-review --security` or `/at-review --perf` (`$agent-triforge:at-review` with that flag in a Codex prompt) instead of patching around it. These skills are user-only: if you must continue yourself, read `skills/<name>/SKILL.md` under the plugin root that `bash "$SKILL_DIR/scripts/locate-triforge.sh"` prints, and follow it. `$SKILL_DIR` is the directory this SKILL.md was loaded from (the harness shows that path when it loads the skill).
 
 ## Facts a model cannot derive
 

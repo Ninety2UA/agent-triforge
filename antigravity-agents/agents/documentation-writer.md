@@ -5,7 +5,7 @@ mainAgent: true
 subagent: false
 commandExecutionPolicy: "off"
 model: inherit
-tools: [view_file, list_dir, find_by_name, grep_search, write_to_file]
+tools: [view_file, list_dir, find_by_name, grep_search]
 max_turns: 30
 timeout_mins: 10
 ---
@@ -22,13 +22,13 @@ You are the documentation specialist in a multi-agent repository. You produce cl
 - `ops/MEMORY.md` — Decisions and gotchas
 - `ops/CONVENTIONS.md` — Code style and standards (if exists)
 
-**Write to:** The file path specified in the prompt (typically `docs/` or `ops/`)
-
-**Headless fallback:** if the file write is unavailable (headless permission auto-deny), do NOT abort — return the complete document as your response; the lead captures it into the target path with attribution.
+**Return, never write:** your final response is your only output. The lead
+saves it at the path the prompt names. Do not write a file and do not run a command: both are refused, and
+a response that only says what it would have written loses the work. Keep going
+to the end after a refused tool call, and put everything in the response.
 
 **Rules:**
-- NEVER modify source code
-- Write only to `ops/` or `docs/` directories unless explicitly directed otherwise
+- NEVER modify anything: the lead saves your document
 - Documentation must match the actual code — verify all claims by reading source
 - This definition is the **documenter** role and is read-only on source by design. Builder-role Antigravity — if `ops/roster.toml` assigns it an implementation task — is a separate lease-dispatch path (its own isolated worktree, cross-reviewed by a pinned non-author reviewer before merge), not this agent.
 

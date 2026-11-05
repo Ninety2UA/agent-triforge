@@ -10,9 +10,9 @@ A sprint can run with nobody watching in two ways. `at-ship` runs every phase in
 
 ## In one session: `at-ship`
 
-Run `/at-ship <goal>` under Claude Code or `$agent-triforge:at-ship <goal>` in a Codex prompt. `--convergence` sets when review stops: `fast` once no P1 finding is left, `standard` (the default) once no P1 or P2 is left, and `deep` once, on top of that, fewer than 3 P3 findings remain. `--team` builds in agent-team mode, for 5 or more tasks or interdependent ones.
+Run `/at-ship <goal>` under Claude Code or `$agent-triforge:at-ship <goal>` in a Codex prompt. `--convergence` sets when review stops: `fast` once no P1 finding is left, `standard` (the default) once no P1 or P2 is left, and `deep` once, on top of that, fewer than 3 P3 findings remain. At every level, a lane that reports less than complete coverage or omits its Coverage line blocks convergence, and a cycle that applied a P1 or P2 fix reviews the changed files again. `--team` builds in agent-team mode, for 5 or more tasks or interdependent ones.
 
-At the start `at-ship` prints a copyable completion line. Under Claude Code it is a `/goal` gate: type it, and Claude Code holds the session to the checklist. A Codex lead has no `/goal`, so it completes on the marker alone. The checklist:
+At the start `at-ship` prints a copyable completion line. Under Claude Code it is a `/goal` line you can type. `/goal` is an assist (CC-03 went 0 of 3 on 2.1.318) and `ops/.sprint-complete` plus `coordinate.sh` decide completion. A Codex lead has no `/goal`, so it completes on the marker alone. The checklist:
 
 1. Every phase is done, or skipped with a stated reason.
 2. The `verification-before-completion` checklist passes with evidence.
@@ -56,7 +56,7 @@ Run it from a terminal or from the lead's own shell. Under nohup, cron or CI the
 
 1. It resolves the lead from `[lead]` in `ops/roster.toml`, checks that the lead's CLI is on `PATH` and that `TMPDIR` is private, and deletes any stale `ops/.sprint-complete`.
 2. Before every session it runs the lead's git integrity check. When `.git/config`, the hooks, the refs, a worktree pointer or the lease ledger changed in a way the lead did not make, it restores what it can, escalates the open leases and stops with exit 44 before the session starts. Check the change, accept it with `lease_rebaseline` if you made it, then rerun.
-3. Each session is a fresh lead process started with the registry's launch line plus the `[lead]` model and effort. Under Claude Code the prompt opens with the `/goal` checklist. Under Codex it opens with `$agent-triforge:at-ship` and carries the checklist as text. The session reads `ops/STATE.md` first. When `ops/leases.toml` still holds open leases, the prompt tells the session to rebuild the wave from the ledger instead of starting it again, and to bring up any failed or escalated lease for a decision.
+3. Each session is a fresh lead process started with the registry's launch line plus the `[lead]` model and effort. Under Claude Code the prompt opens with the `/goal` checklist; `/goal` is an assist (CC-03 went 0 of 3 on 2.1.318) and `ops/.sprint-complete` plus `coordinate.sh` decide completion. Under Codex it opens with `$agent-triforge:at-ship` and carries the checklist as text. The session reads `ops/STATE.md` first. When `ops/leases.toml` still holds open leases, the prompt tells the session to rebuild the wave from the ledger instead of starting it again, and to bring up any failed or escalated lease for a decision.
 4. After each session the loop looks for `ops/.sprint-complete`. If it exists, the sprint is complete. If the session failed in a way every new session would repeat (not logged in, quota spent, binary missing), the loop stops with exit 69 and prints the fix. Otherwise it starts the next session.
 5. When the sprint completes, stops on a failure or runs out of sessions, the loop posts a message to `NOTIFY_WEBHOOK_URL` when you set one, and shows a desktop notification (`osascript` on macOS, `notify-send` on Linux).
 
@@ -68,14 +68,15 @@ A Codex lead's launch line runs with full access: `-s danger-full-access` and no
 
 | Exit | Meaning |
 |---|---|
-| 0 | The sprint is complete, the dry run printed, or the sessions ran out without completion (the closing lines say which) |
+| 0 | The sprint is complete, or the dry run printed |
 | 1 | Usage error, a lead that can't be resolved, its CLI not on `PATH`, the helper library missing, or a `TMPDIR` other users could change |
 | 44 | The integrity check found a change before a session (restored and escalated; inspect it, then `lease_rebaseline`) or could not run |
 | 45 | This shell may not run the lead's loop: another CLI's shell, or no terminal (nohup, cron, CI) |
 | 69 | The lead failed in a way that would repeat (not logged in, quota spent, binary missing); the fix is printed |
+| 75 | The sessions ran out and none created `ops/.sprint-complete`; the closing lines say so. Run the script again to continue |
 | 77 | The launch line needs full access and `--allow-full-access` was not given; nothing ran |
 
-When the sessions run out, `ops/STATE.md` and `ops/TASKS.md` hold the progress. Run the script again to continue, or review by hand.
+When the sessions run out (exit 75), `ops/STATE.md` and `ops/TASKS.md` hold the progress. Run the script again to continue, or review by hand.
 
 ### Stopping a run early
 

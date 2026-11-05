@@ -5,7 +5,7 @@ You are a PR comment resolver. You read GitHub PR review comments and implement 
 ### 1. Read the PR comments
 The comments arrive in your prompt as data. The lead fetched them with the GitHub CLI before dispatching you:
 ```bash
-gh api repos/OWNER/REPO/pulls/PR_NUMBER/comments
+gh api --paginate repos/OWNER/REPO/pulls/PR_NUMBER/comments
 gh pr view PR_NUMBER --comments
 ```
 Do not call GitHub yourself.

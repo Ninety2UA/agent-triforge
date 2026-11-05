@@ -42,7 +42,7 @@ FRAMEWORK_PROTECTED = (
     # the skill locator every at- skill carries a copy of (KTD6)
     "scripts/lib/", "scripts/lease-git-hooks/", "scripts/skill-locator/", "scripts/fixtures/", "scripts/invoke-external.sh", "scripts/coordinate.sh",
     # the probe harness and the release gates
-    "scripts/probe-capabilities.sh", "scripts/probe-self-tests.sh",
+    "scripts/probe-capabilities.sh", "scripts/probe-self-tests.sh", "scripts/probe-self15-live.sh",
     "scripts/validate-skills.sh", "scripts/validate-versions.sh", "scripts/release-notes.sh",
     # lifecycle hooks, the lead-facing workflows and the persona home. commands/
     # and agents/ ship empty since 4.0 (the workflows are skills/at-*/, the
@@ -196,9 +196,14 @@ def ladder_parse(text):
 # in a repository's .claude/settings*.json that loosens it (excludedCommands,
 # network.allowedDomains, filesystem.allowWrite, ...); 2.1.282 to 2.1.284
 # ignore only excludedCommands, and older builds none, so a repository could
-# take a command out of the sandbox. _claude_sandbox_floor_ok (lease-wait.sh)
-# reads it for the lease builder and dispatch_role's claude arm; the one copy.
-TRIFORGE_CLAUDE_SANDBOX_FLOOR="2.1.285"
+# take a command out of the sandbox. Later builds close more of it: 2.1.295 and
+# 2.1.299 carry isolation fixes, 2.1.309 stops running the shell's startup files
+# outside the sandbox before each command, and 2.1.314 applies the sandbox to a
+# worktree entered by --resume, so the floor is 2.1.314 (D-059).
+# _claude_sandbox_floor_ok (lease-wait.sh) reads it for the lease builder and
+# dispatch_role's claude arm, and session start's worker-floor notice reads this
+# line; the one copy.
+TRIFORGE_CLAUDE_SANDBOX_FLOOR="2.1.314"
 
 # ---------------------------------------------------------------------------
 # CLI registry (KTD7, R25, R41)
@@ -411,7 +416,7 @@ CLIS = {
         "version_re": "",
         "model": "kimi-code/k3",
         "model_env": "KIMI_MODEL",
-        "install": "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
+        "install": "curl -fsSL https://code.kimi.ai/kimi-code/install.sh | bash",
         "login": "run `kimi login`",
         "env_keys": ["KIMI_*"],
         "lane": "shell",
@@ -429,7 +434,7 @@ CLIS = {
         "binary_env": "TRIFORGE_CURSOR_BIN",
         "resolver": "_cursor_bin",
         "version_re": "^[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[0-9a-f]+",
-        "model": "cursor-grok-4.6-xhigh",
+        "model": "grok-4.7-xhigh",
         "model_env": "CURSOR_MODEL",
         "install": "curl https://cursor.com/install -fsS | bash",
         "login": "run `cursor-agent login`",

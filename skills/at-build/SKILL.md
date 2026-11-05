@@ -5,7 +5,7 @@ argument-hint: "[--team] [--wave N]"
 disable-model-invocation: true
 metadata:
   triforge-consumer: "lead"
-  version: "4.1.1"
+  version: "4.2.0"
 ---
 
 # Build (Phase 2)
@@ -14,7 +14,7 @@ metadata:
 
 **Done when** all waves are merged, the full test suite and a build from a clean state pass, `integration-verifier` has passed against the integration branch, the promotion gate is satisfied, and `ops/TASKS.md`, `ops/CHANGELOG.md` (one `lease_attribution` line per merged task) and `ops/CONTRACTS.md` reflect the result.
 
-**Safe failure:** a merge `lease_merge` refuses (self-review, AE3; an unknown reviewer; no pin; the checkout on the default branch) stays unmerged: fix the cause, never bypass it. A failed `integration-verifier` blocks the next wave; its NEEDS_CONTEXT (an environment gap in the lead's checkout) goes back to the lead to fix and never passes a wave. Findings re-dispatch the same lease and builder with the same pinned reviewer while the cycle is below 3; the third cycle escalates to the user. Halt a builder at risk above 20 % or more than 50 changed files. Promotion blocks when approval is required or a protected path is touched; the user approves. The user's instructions outrank this skill.
+**Safe failure:** a merge `lease_merge` refuses (self-review, AE3; an unknown reviewer; no pin; the checkout on the default branch) stays unmerged: fix the cause, never bypass it. A failed `integration-verifier` blocks the next wave, and `persona_verdict` counts a malformed or contradictory verdict as failed; its NEEDS_CONTEXT (an environment gap in the lead's checkout) goes back to the lead to fix and never passes a wave. Findings re-dispatch the same lease and builder with the same pinned reviewer while the cycle is below 3; the third cycle escalates to the user. Halt a builder at risk above 20 % or more than 50 changed files. Promotion blocks when approval is required or a protected path is touched; the user approves. The user's instructions outrank this skill.
 
 Prerequisites: `ops/TASKS.md` with assigned tasks (`at-plan` writes it) and a passed Phase 1.5 plan validation. Read `ops/TASKS.md`, `ops/CONTRACTS.md`, `ops/MEMORY.md` and `ops/ARCHITECTURE.md` first. Invoked with `--team` to force agent-team mode and `--wave N` to resume from wave N (completed waves skipped); when absent, the mode follows the task count below. Alternatives: `at-ship` runs the whole Phase 0–6 sprint; `at-quick` takes a small focused change (fewer than 3 files, obvious fix) without the review swarm.
 
@@ -35,7 +35,7 @@ ensure_core_trio_live || exit 1
 - **Mode:** fewer than 5 independent tasks → sub-agent mode (default); 5 or more tasks, cross-dependent work, or `--team` → agent-team mode with the `team-lead` persona; `--wave N` → start from wave N. Personas (`integration-verifier`, and `continuous-reviewer` in team mode) start detached through `persona_spawn` and are collected with `persona_wait`, rerun while it returns 75; each manifest entry sets tools, model tier and turns, so a call pins nothing. Agent teams are harness-specific: [Claude](references/claude.md), [Codex](references/codex.md).
 - **Per-task lease loop** (`lease_create` → `lease_dispatch` → `lease_wait` in bounded slices, collecting, until nothing builds or it returns rc 80 → `lease_pin_reviewer` → review → `lease_merge`), its refusals, the fix-cycle rule and attribution: [lease lifecycle](references/lease-lifecycle.md).
 - **Wave grouping, risk scoring and between-wave verification** in sub-agent mode: [subagent mode](references/subagent-mode.md). The team-lead flow and a teammate's own review/test dispatch with the promotion guard: [team mode](references/team-mode.md).
-- **Wave end and promotion:** the `integration-verifier` persona runs against the integration branch after every wave. Promotion happens once, after the last wave's verification and the full test suite and clean build: `lease_promote`, which reads `[promotion] require_user_approval` (default false), scans the integration diff and blocks (no merge) when approval is required or a protected path is touched (permission configs, deny rules, `ops/roster.toml`, shipped agent configs). Those diffs need the lead or the user as reviewer, never an external-CLI-only review: a merge approval per protected task, and the user's promotion approval (`lease_approve promotion:<branch> user [<target>]`, the target named when it is not the default branch).
+- **Wave end and promotion:** the `integration-verifier` persona runs against the integration branch after every wave, its verdict read through `persona_verdict`. Promotion happens once, after the last wave's verification and the full test suite and clean build: `lease_promote`, which reads `[promotion] require_user_approval` (default false), scans the integration diff and blocks (no merge) when approval is required or a protected path is touched (permission configs, deny rules, `ops/roster.toml`, shipped agent configs). Those diffs need the lead or the user as reviewer, never an external-CLI-only review: a merge approval per protected task, and the user's promotion approval (`lease_approve promotion:<branch> user [<target>]`, the target named when it is not the default branch).
 
 ## Output
 

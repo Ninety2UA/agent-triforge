@@ -103,7 +103,9 @@ invoke_codex() {
   # argument` on 0.154.0; the 2026-07 "deprecated, prints a warning" wording is
   # superseded per D-026). Its former semantics (workspace-write sandbox + never
   # approve) are supplied explicitly when an agent has no overrides.
-  local CMD=(codex exec)
+  # --disable plugins: a worker loads none of the user's Codex plugins (D-061,
+  # probe CDX-24); skills under .agents/skills/ and project hooks still load.
+  local CMD=(codex exec --disable plugins)
   [ -n "$AGENT_MODEL" ]    && CMD+=(-m "$AGENT_MODEL")
   [ -n "$AGENT_EFFORT" ]   && CMD+=(-c "model_reasoning_effort=\"${AGENT_EFFORT}\"")
   if [ -n "$AGENT_SANDBOX" ]; then
@@ -116,8 +118,8 @@ invoke_codex() {
   else
     CMD+=(-c "approval_policy=\"never\"")
   fi
-  # No --dangerously-bypass-hook-trust: project and plugin hooks go through
-  # Codex's own trust under exec (the shipped .codex/hooks.json has none).
+  # No --dangerously-bypass-hook-trust: project hooks go through Codex's own
+  # trust under exec (the shipped .codex/hooks.json has none).
 
   # Structured output (probe CDX-05): when the agent's agents.toml entry
   # carries the Triforge-level `output_schema` key, resolve the schema file at

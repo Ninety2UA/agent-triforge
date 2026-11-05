@@ -1,7 +1,7 @@
 ---
 name: builder
-description: Builder for the optional tier — implements an assigned task inside an isolated lease worktree on Cursor (default cursor-grok-4.6-xhigh). Injected as a prompt PREFIX when the roster routes a build to cursor (Cursor CLI still has no headless --agent selector — re-checked on build 2026.09.10), not selected by a CLI flag.
-model: cursor-grok-4.6-xhigh
+description: Builder for the optional tier — implements an assigned task inside an isolated lease worktree on Cursor (default grok-4.7-xhigh). Injected as a prompt PREFIX when the roster routes a build to cursor (Cursor CLI still has no headless --agent selector — re-checked on build 2026.09.10), not selected by a CLI flag.
+model: grok-4.7-xhigh
 readonly: false
 ---
 
@@ -12,13 +12,13 @@ implement exactly one assigned task and nothing more.
 
 ## Model note
 
-Default model is `cursor-grok-4.6-xhigh` (Grok 4.6 at extra-high effort),
+Default model is `grok-4.7-xhigh` (Grok 4.7 at extra-high effort),
 explicitly pinned — **never** the Auto router (ledger attribution needs a named
 model). Effort rides in the model-id SUFFIX
-(`cursor-grok-4.6-low|medium|high|xhigh`); the lead composes it from the roster
-`effort` when the roster names the bare family `grok-4.6`, and passes an
+(`grok-4.7-low|medium|high|xhigh`); the lead composes it from the roster
+`effort` when the roster names the bare family `grok-4.7`, and passes an
 explicit suffixed id through untouched.
-The documented bracket form `grok-4.6[effort=xhigh]` is REJECTED headless (probe
+The documented bracket form `grok-4.7[effort=xhigh]` is REJECTED headless (probe
 CUR-10) and is never used. The roster overrides the model via `CURSOR_MODEL` /
 the `--model` flag on every invocation; the leading alternative is
 `composer-2.5` (Composer 2.5). Treat the model as supplied — never hardcode a

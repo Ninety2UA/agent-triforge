@@ -2,11 +2,13 @@
 
 Read `ops/TASKS.md` to determine the review scope (tasks marked `[R]`). Run the dispatch block with `REVIEW_PKG` set to the directory the review-package block printed. Both core lanes get the package in their prompt, whatever CLI holds the role, and each specialist persona reads `$REVIEW_PKG/package.md` as its input. Devin and Grok in a core role run read-class with no shell, the Antigravity reviewer runs no command, and the cost to Codex is the tokens of a diff it would read anyway. Without a package no lane starts. The block prints a run directory; set `REVIEW_RUN` to it in the wait, optional-lanes and synthesis blocks, which read the list of lanes this cycle dispatched from it. Every block here runs the same under bash and zsh, the shell both leads' tools use on macOS. `$SKILL_DIR` is the directory this skill was loaded from (SKILL.md explains it).
 
+`REVIEW_ONLY`, unset on a cycle's first round, re-runs named lanes inside the cycle: synthesis, step 6, says when. It keeps `REVIEW_RUN` and its lane list, archives only those lanes' files, and starts only those lanes.
+
 The personas run detached (`persona_spawn`): a top-tier persona can outlast one host tool call, which Claude Code stops at 600 s and a Codex lead at 900 s. So the dispatch block starts them and runs the core lanes, and the wait block collects them. Rerun the wait block while it returns 75; once it returns 0 it promotes each specialist's report.
 
 ## Contents
 
-- The dispatch block (the package check, fresh-cycle guard, the run directory and its lane list, the learnings gate, the specialist personas and the gated `learnings-researcher` started detached, roster-driven dispatch of the core lanes, promotion of their captured output, the structured-verdict fold).
+- The dispatch block (the package check, `REVIEW_ONLY`, fresh-cycle guard, the run directory and its lane list, the learnings gate, the specialist personas and the gated `learnings-researcher` started detached, roster-driven dispatch of the core lanes, promotion of their captured output, the structured-verdict fold and its Coverage line).
 - The wait block (`persona_wait` in budgeted steps, then the specialists' exit codes and reports).
 - What rc 40 means.
 
@@ -28,16 +30,43 @@ fi
 REVIEW_PACKAGE="$REVIEW_PKG/package.md"
 RPKG=$(cat "$REVIEW_PACKAGE")
 
+# REVIEW_ONLY names the lanes to re-run inside this cycle, each the part of its
+# file name between REVIEW_ and .md, separated by spaces. Unset, every lane runs.
+# Set, it needs this cycle's REVIEW_RUN and only lanes on its list, so no other
+# lane's file, record or list entry is touched, the learnings-researcher included.
+REVIEW_ONLY=${REVIEW_ONLY:-}
+_lane_on() { # _lane_on <lane>: whether this round runs that lane
+  local L
+  [ -n "$REVIEW_ONLY" ] || return 0
+  for L in "$@"; do
+    case " $REVIEW_ONLY " in *" $L "*) return 0 ;; esac
+  done
+  return 1
+}
+if [ -n "$REVIEW_ONLY" ]; then
+  if [ ! -f "${REVIEW_RUN:-}/lanes" ] || [ ! -f "${REVIEW_RUN:-}/specialists" ]; then
+    echo "review: REVIEW_ONLY needs REVIEW_RUN set to this cycle's run directory (REVIEW_RUN='${REVIEW_RUN:-}'); no lane started" >&2; exit 64
+  fi
+  for L in $(printf '%s\n' "$REVIEW_ONLY"); do
+    grep -qxF "ops/REVIEW_$L.md" "$REVIEW_RUN/lanes" || { echo "review: REVIEW_ONLY names $L, not on this cycle's lane list ($REVIEW_RUN/lanes); no lane started" >&2; exit 64; }
+  done
+fi
+
 # Fresh-cycle guard (prevents stale findings surviving a fix cycle). A reviewer
-# that returns findings as stdout (headless permission auto-deny) is promoted
+# that returns findings as its answer is promoted
 # into ops/REVIEW_*.md ONLY when that file is ABSENT (the `[ ! -f ... ]` guards
 # below). Without clearing prior-cycle files first, cycle N-1's REVIEW_*.md
 # would survive and findings-synthesizer would read it as cycle N's result —
 # a green-while-red review that hides newly-introduced findings. Archive (not
 # delete) so each prior cycle stays auditable under ops/archive/reviews/.
-# find, not a glob: an unmatched glob aborts under zsh.
-if [ "$(find ops -maxdepth 1 -name 'REVIEW_*.md' 2>/dev/null | grep -c . || true)" -gt 0 ]; then
-  _REV_ARCH="ops/archive/reviews/$(date +%Y%m%d-%H%M%S)-$$"
+# find, not a glob: an unmatched glob aborts under zsh. A REVIEW_ONLY round
+# archives only its own lanes.
+_REV_ARCH="ops/archive/reviews/$(date +%Y%m%d-%H%M%S)-$$"
+if [ -n "$REVIEW_ONLY" ]; then
+  for L in $(printf '%s\n' "$REVIEW_ONLY"); do
+    if [ -f "ops/REVIEW_$L.md" ]; then mkdir -p "$_REV_ARCH"; mv "ops/REVIEW_$L.md" "$_REV_ARCH"/; fi
+  done
+elif [ "$(find ops -maxdepth 1 -name 'REVIEW_*.md' 2>/dev/null | grep -c . || true)" -gt 0 ]; then
   mkdir -p "$_REV_ARCH"
   find ops -maxdepth 1 -name 'REVIEW_*.md' -exec mv {} "$_REV_ARCH"/ \;
 fi
@@ -46,40 +75,56 @@ fi
 # plant first): the personas' outputs and exit codes, and "lanes", one
 # ops/REVIEW_*.md path per lane this cycle dispatches. Synthesis treats a lane
 # on that list whose file is missing or empty as a gap, never as no findings.
-REVIEW_RUN=$(mktemp -d "${TMPDIR:-/tmp}/triforge-review.XXXXXX")
-printf '%s\n' ops/REVIEW_ANTIGRAVITY.md ops/REVIEW_CODEX.md > "$REVIEW_RUN/lanes"
-: > "$REVIEW_RUN/specialists"
+if [ -z "$REVIEW_ONLY" ]; then
+  REVIEW_RUN=$(mktemp -d "${TMPDIR:-/tmp}/triforge-review.XXXXXX")
+  printf '%s\n' ops/REVIEW_ANTIGRAVITY.md ops/REVIEW_CODEX.md > "$REVIEW_RUN/lanes"
+  : > "$REVIEW_RUN/specialists"
+fi
 echo "review: run directory $REVIEW_RUN (set REVIEW_RUN to it in the later blocks)"
 
 AGY_OUT="$REVIEW_RUN/antigravity.txt"
 CODEX_OUT="$REVIEW_RUN/codex.txt"
+# A re-run lane starts clean: nothing its earlier run captured can be promoted or
+# folded again, and its fallback persona's record does not refuse a new start.
+if [ -n "$REVIEW_ONLY" ]; then
+  if _lane_on ANTIGRAVITY; then
+    find "$REVIEW_RUN" -maxdepth 1 \( -name 'antigravity.txt*' -o -name 'ANALYST_FALLBACK.*' \) -exec rm -f {} +
+  fi
+  if _lane_on CODEX; then find "$REVIEW_RUN" -maxdepth 1 -name 'codex.txt*' -exec rm -f {} +; fi
+fi
 
 # The CLI each role resolves to, for the promotion check: an optional CLI
 # filling a core role reports through a typed `Status:` line, Codex and agy
 # through their exit code and their answer's last line (and agy's envelope).
 ANALYST_CLI=$(resolve_role analyst 2>/dev/null | cut -f1) || ANALYST_CLI=""
 REVIEWER_CLI=$(resolve_role reviewer 2>/dev/null | cut -f1) || REVIEWER_CLI=""
+# _lane_answer <out>: the file holding a lane's final answer: <out>.last when
+# the helper writes one (invoke_codex does on every attempt: Codex's <out> is
+# the whole session, tool output included), else <out>, which every other helper
+# fills with the final answer. Promotion copies this file, never the session, so
+# a Coverage line in tool output cannot reach a REVIEW file.
+_lane_answer() {
+  local POUT=${1:-}
+  if [ -e "${POUT}.last" ]; then printf '%s\n' "${POUT}.last"; else printf '%s\n' "$POUT"; fi
+}
 # _promote_ok <cli> <out> — whether a lane that exited 0 may become a REVIEW
 # file (a nonzero lane stops the block below before any promotion). It reads
-# the CLI's final answer, never its tool output: <out>.last when the helper
-# writes one (invoke_codex does on every attempt: Codex's <out> is the whole
-# session, tool output included), else <out>, which every other helper fills
-# with the final answer (agy's envelope response, claude's result, the
-# assistant text of a stream, Devin's reply). An empty answer is never
-# promoted. A CLI outside the core trio has a Status contract: promoted only
-# on DONE or DONE_WITH_CONCERNS (no Status line is "report missing"). A core
-# CLI has none, so its answer reports a status only in its last non-empty
-# line, and BLOCKED or NEEDS_CONTEXT there stops the promotion; a finding that
-# quotes a Status line further up does not.
+# the CLI's final answer, never its tool output (_lane_answer: agy's envelope
+# response, claude's result, the assistant text of a stream, Devin's reply).
+# An empty answer is never promoted. A CLI outside the core trio has a Status
+# contract: promoted only on DONE or DONE_WITH_CONCERNS (no Status line is
+# "report missing"). A core CLI has none, so its answer reports a status only
+# in its last non-empty line above any Coverage line, and BLOCKED or
+# NEEDS_CONTEXT there stops the promotion, whatever Coverage line follows; a
+# finding that quotes a Status line further up does not.
 _promote_ok() {
   local PCLI=${1:-} POUT=${2:-} PANS ST
-  PANS=$POUT
-  if [ -e "${POUT}.last" ]; then PANS="${POUT}.last"; fi
+  PANS=$(_lane_answer "$POUT")
   if ! grep -q '[^[:space:]]' "$PANS" 2>/dev/null; then
     echo "review: the ${PCLI:-?} lane gave no final answer (${PANS} is empty) — not promoted; read ${POUT}" >&2; return 1
   fi
   if [ "$(cli_field "${PCLI:-none}" tier 2>/dev/null || true)" = core ]; then
-    ST=$(awk 'NF { l = $0 } END { print l }' "$PANS" | _lease_parse_status /dev/stdin 2>/dev/null || echo MISSING)
+    ST=$(awk 'NF && !/^Coverage:/ { l = $0 } END { print l }' "$PANS" | _lease_parse_status /dev/stdin 2>/dev/null || echo MISSING)
     case "$ST" in
       BLOCKED|NEEDS_CONTEXT) echo "review: the ${PCLI} lane reported Status: ${ST} — not promoted; read ${PANS}" >&2; return 1 ;;
     esac
@@ -129,7 +174,7 @@ fi
 # through "$@" only: Claude Code substitutes a numbered positional parameter
 # in a skill's text. A persona that cannot start stops the others: nothing is
 # left running behind a failed block.
-SPEC_BRIEF="Review the change in the input, the review package: each [R] task of ops/TASKS.md with its fields (Accept:, Fails when: and the rest), the changed files and the diff. When the input says the diff was cut, read the full diff in $REVIEW_PKG/full.diff; the complete list of changed files is $REVIEW_PKG/inventory.txt. Report findings in your output format."
+SPEC_BRIEF="Review the change in the input, the review package: each [R] task of ops/TASKS.md with its fields (Accept:, Fails when: and the rest), the changed files and the diff. When the input says the diff was cut, read the full diff in $REVIEW_PKG/full.diff; the complete list of changed files is $REVIEW_PKG/inventory.txt. Report findings in your output format. $REVIEW_JUDGE_RULE $REVIEW_COVERAGE_RULE"
 # _stop_all stops every persona this cycle started and sets STOPPED to what
 # happened. persona_stop's own lines stay on stderr, and its rc 80 (a process
 # it could not stop, or ps unreadable) is reported as incomplete cleanup.
@@ -148,8 +193,13 @@ _spec() { # _spec <persona>
   local P LANE SRC
   for P in "$@"; do
     LANE=$(printf '%s' "$P" | LC_ALL=C tr 'a-z-' 'A-Z_')
-    printf '%s\n' "$LANE" >> "$REVIEW_RUN/specialists"
-    printf 'ops/REVIEW_%s.md\n' "$LANE" >> "$REVIEW_RUN/lanes"
+    _lane_on "$LANE" || continue
+    if [ -n "$REVIEW_ONLY" ]; then
+      rm -f "$REVIEW_RUN/$LANE.pid" "$REVIEW_RUN/$LANE.rc" "$REVIEW_RUN/$LANE.md"
+    else
+      printf '%s\n' "$LANE" >> "$REVIEW_RUN/specialists"
+      printf 'ops/REVIEW_%s.md\n' "$LANE" >> "$REVIEW_RUN/lanes"
+    fi
     SRC=0
     persona_spawn "$REVIEW_RUN" "$LANE" "$P" "$REVIEW_PACKAGE" "$REVIEW_RUN/$LANE.md" --brief "$SPEC_BRIEF" || SRC=$?
     [ "$SRC" -eq 0 ] || _spawn_failed "$P" "rc=$SRC"
@@ -166,7 +216,9 @@ _spec architecture-strategist
 # (data), its task the --brief, and its report learnings.md, known-issue
 # context for synthesis rather than a review lane, so it stays off the lane
 # list.
-if [ -s "$MATCH_LIST" ]; then
+if [ -n "$REVIEW_ONLY" ]; then
+  echo "learnings-researcher: its round is over; this round re-runs only: $REVIEW_ONLY"
+elif [ -s "$MATCH_LIST" ]; then
   echo "learnings-researcher: dispatch — ops/solutions/ entries mentioning the changed modules:"
   cat "$MATCH_LIST"
   { echo "Changed paths:"; printf '%s\n' "$CHANGED"; echo; echo "ops/solutions/ entries that mention them:"; cat "$MATCH_LIST"; } > "$REVIEW_RUN/learnings-input.md"
@@ -185,21 +237,28 @@ fi
 # `[roles.reviewer] cli = "opencode"` actually takes effect here (it was
 # previously ignored for the core lane). dispatch_role returns 40 when a role
 # resolves to the CLAUDE lane (see rc 40 below); any other nonzero is a real
-# reviewer failure. Each prompt carries the package.
+# reviewer failure. Each prompt carries the package, the judging rule and the
+# Coverage rule, which a helper's retry on the raw prompt and an older deployed
+# agent file lean on.
+AGY_PID=""; CODEX_PID=""
+if _lane_on ANTIGRAVITY; then
 dispatch_role analyst "architecture-reviewer" \
-  "Review scope: tasks marked [R] in ops/TASKS.md; the review package below holds each of those tasks with its fields (Accept:, Fails when: and the rest), the changed files and the diff. Write findings to ops/REVIEW_ANTIGRAVITY.md if you can; otherwise return them as your response.
+  "Review scope: tasks marked [R] in ops/TASKS.md; the review package below holds each of those tasks with its fields (Accept:, Fails when: and the rest), the changed files and the diff. Return the whole review as your final response: the lead saves that response as ops/REVIEW_ANTIGRAVITY.md, and nothing else you do reaches it. Do not write a file and do not run a command. $REVIEW_JUDGE_RULE $REVIEW_COVERAGE_RULE
 
 ${RPKG}" \
   "$AGY_OUT" 600 &
 AGY_PID=$!
+fi
 
 # If scope covers 5+ files, the reviewer CLI may spawn internal subagents.
+if _lane_on CODEX; then
 dispatch_role reviewer "logic_reviewer" \
-  "Review scope: tasks marked [R] in ops/TASKS.md; the review package below holds each of those tasks with its fields (Accept:, Fails when: and the rest), the changed files and the diff. If scope covers 5+ files, spawn separate agents for logic review, security audit, and test coverage analysis — merge all findings into ops/REVIEW_CODEX.md. Otherwise review sequentially and write to ops/REVIEW_CODEX.md.
+  "Review scope: tasks marked [R] in ops/TASKS.md; the review package below holds each of those tasks with its fields (Accept:, Fails when: and the rest), the changed files and the diff. If scope covers 5+ files, spawn separate agents for logic review, security audit, and test coverage analysis — merge all findings into ops/REVIEW_CODEX.md, with one Coverage line, the lowest any agent reported. Otherwise review sequentially and write to ops/REVIEW_CODEX.md if you can; otherwise return the review as your response. $REVIEW_JUDGE_RULE $REVIEW_COVERAGE_RULE
 
 ${RPKG}" \
   "$CODEX_OUT" 600 &
 CODEX_PID=$!
+fi
 
 # Wait for both core lanes. A silent failure (an empty REVIEW_*.md that looks
 # like "no findings") fails fast and stops the personas too. rc 40 = the role
@@ -207,8 +266,8 @@ CODEX_PID=$!
 # here, collected by the wait block; the reviewer's is a sub-agent (rc 40
 # below).
 AGY_RC=0; CODEX_RC=0
-wait "$AGY_PID" || AGY_RC=$?
-wait "$CODEX_PID" || CODEX_RC=$?
+if [ -n "$AGY_PID" ]; then wait "$AGY_PID" || AGY_RC=$?; fi
+if [ -n "$CODEX_PID" ]; then wait "$CODEX_PID" || CODEX_RC=$?; fi
 if [ "$AGY_RC" -eq 40 ]; then
   echo "review: analyst role resolved to the claude lane — its architecture-strategist persona starts detached; the wait block promotes it" >&2
   SRC=0
@@ -225,11 +284,10 @@ elif [ "$CODEX_RC" -ne 0 ]; then
   echo "review: reviewer (logic) reviewer failed rc=$CODEX_RC — see $CODEX_OUT; $STOPPED" >&2; exit 1
 fi
 
-# Headless resilience: agy (and any optional-CLI primary) auto-denies file
-# writes in -p mode, so a reviewer may return findings as stdout instead of
-# writing ops/. Promote captured output (scrubbed) so the pipeline stays alive
-# either way — symmetric for BOTH core lanes now that the reviewer lane can be
-# any roster CLI, not just Codex-writes-directly.
+# The analyst returns its review and writes no file, whichever CLI holds the
+# role; the reviewer may have written ops/ or returned it. Promote captured
+# output (scrubbed) for both core lanes: the reviewer lane can be any roster
+# CLI, not just Codex-writes-directly.
 # Promotion guard (KTD2/D-032): promote captured agy output only when it is
 # non-empty prose AND the JSON-envelope status sidecar written by
 # invoke_antigravity reads SUCCESS (a denied/empty run leaves the file empty and
@@ -237,15 +295,16 @@ fi
 # sidecar and is promoted on non-empty output that passes _promote_ok (an
 # optional CLI's typed report must say DONE or DONE_WITH_CONCERNS). The header records the
 # resolved mode (injection|native|raw) and any denied actions so a degraded run
-# is attributable in the promoted file.
+# is attributable in the promoted file. What is copied is the lane's final
+# answer (_lane_answer), for either role: the analyst may be on Codex too.
 if [ ! -f "ops/REVIEW_ANTIGRAVITY.md" ] && [ -s "$AGY_OUT" ] && { [ ! -f "${AGY_OUT}.status" ] || [ "$(cat "${AGY_OUT}.status")" = "SUCCESS" ]; } && _promote_ok "$ANALYST_CLI" "$AGY_OUT"; then
   {
-    echo "<!-- captured from analyst-role output; agent could not write ops/ directly (headless permission auto-deny); mode=$(cat "${AGY_OUT}.mode" 2>/dev/null || echo unknown); denied_actions=$([ -s "${AGY_OUT}.denied" ] && paste -sd, "${AGY_OUT}.denied" || echo none) -->"
-    _scrub < "$AGY_OUT"
+    echo "<!-- captured from analyst-role output; mode=$(cat "${AGY_OUT}.mode" 2>/dev/null || echo unknown); denied_actions=$([ -s "${AGY_OUT}.denied" ] && paste -sd, "${AGY_OUT}.denied" || echo none) -->"
+    _scrub < "$(_lane_answer "$AGY_OUT")"
   } > ops/REVIEW_ANTIGRAVITY.md
 fi
 if [ ! -f "ops/REVIEW_CODEX.md" ] && [ -s "$CODEX_OUT" ] && _promote_ok "$REVIEWER_CLI" "$CODEX_OUT"; then
-  { echo "<!-- captured from reviewer-role output; agent could not write ops/ directly (headless permission auto-deny) -->"; _scrub < "$CODEX_OUT"; } > ops/REVIEW_CODEX.md
+  { echo "<!-- captured from reviewer-role output; agent could not write ops/ directly (headless permission auto-deny) -->"; _scrub < "$(_lane_answer "$CODEX_OUT")"; } > ops/REVIEW_CODEX.md
 fi
 
 # Codex structured verdict (R16): invoke_codex writes <out>.verdict.json when the
@@ -253,14 +312,19 @@ fi
 # review-verdict.schema.json). Fold it (scrubbed) into REVIEW_CODEX.md so
 # findings-synthesizer actually CONSUMES the structured verdict instead of it
 # being produced-but-ignored. Guarded on existence: only the Codex lane emits it,
-# so a roster override to a non-Codex reviewer simply skips this.
-if [ -f "${CODEX_OUT}.verdict.json" ]; then
+# so a roster override to a non-Codex reviewer simply skips this. The JSON's
+# coverage becomes the lane's last line (scripts/lib/gates.sh); a JSON with none
+# writes no line, so the lane reads as missing, and synthesis reports a text
+# above the fold that disagrees with it.
+if _lane_on CODEX && [ -f "${CODEX_OUT}.verdict.json" ]; then
   {
     echo ""
     echo "<!-- structured verdict (codex --output-schema, review-verdict.schema.json) -->"
     echo '```json'
     _scrub < "${CODEX_OUT}.verdict.json"
     echo '```'
+    VCOV=$(review_verdict_coverage "${CODEX_OUT}.verdict.json")
+    if [ -n "$VCOV" ]; then echo "Coverage: $VCOV"; fi
   } >> ops/REVIEW_CODEX.md 2>/dev/null || true
 fi
 echo "review: core lanes done; the personas run detached: run the wait block next (REVIEW_RUN=$REVIEW_RUN)"
@@ -315,4 +379,4 @@ echo "review: every lane collected (REVIEW_RUN=$REVIEW_RUN)"
 
 ## rc 40
 
-If `AGY_RC` or `CODEX_RC` was 40, that role resolved to the claude lane (its default CLI is absent, or the roster pins `cli = "claude"`) under a lead whose sub-agents enforce their tools; under any other lead `dispatch_role` runs `claude -p` itself and returns its exit code. For the analyst lane, the dispatch block starts `architecture-strategist` on the package itself (`persona_spawn`, name `ANALYST_FALLBACK`), and the wait block promotes its report (scrubbed) into `ops/REVIEW_ANTIGRAVITY.md`. For the reviewer lane run a logic + security review as a sub-agent against the `[R]` scope, with the review package's path in its prompt (`$REVIEW_PKG/package.md`), writing `ops/REVIEW_CODEX.md`, so `findings-synthesizer` sees both alongside the other lanes. The harness notes carry how that sub-agent is spawned.
+If `AGY_RC` or `CODEX_RC` was 40, that role resolved to the claude lane (its default CLI is absent, or the roster pins `cli = "claude"`) under a lead whose sub-agents enforce their tools; under any other lead `dispatch_role` runs `claude -p` itself and returns its exit code. For the analyst lane, the dispatch block starts `architecture-strategist` on the package itself (`persona_spawn`, name `ANALYST_FALLBACK`), and the wait block promotes its report (scrubbed) into `ops/REVIEW_ANTIGRAVITY.md`. For the reviewer lane run a logic + security review as a sub-agent against the `[R]` scope, with the review package's path in its prompt (`$REVIEW_PKG/package.md`), writing `ops/REVIEW_CODEX.md`, so `findings-synthesizer` sees both alongside the other lanes. Its brief carries `REVIEW_JUDGE_RULE` and `REVIEW_COVERAGE_RULE` word for word: a sub-agent file skips promotion, and synthesis reads only its last non-empty line. Print them from a shell that has sourced the helper, as a block here does: `printf '%s\n%s\n' "$REVIEW_JUDGE_RULE" "$REVIEW_COVERAGE_RULE"`. The harness notes carry how that sub-agent is spawned.

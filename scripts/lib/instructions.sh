@@ -44,6 +44,17 @@
 #     the whole file with the line appended, and refuses a file that ends
 #     inside a code block, an HTML block or another place no import is
 #     read, naming it.
+#     All of that is the default mode. The mode (D-055) is the user tier's
+#     instructionFiles entry (READERS mode_key, in <tier_home>/settings.json;
+#     Claude Code ignores it in project and local settings files), read here
+#     and never written: claude-md-or-agents-md is the rule above,
+#     claude-md-and-agents-md reads AGENTS.md beside any CLAUDE.md (one an
+#     import already loaded is not read twice, so no import is offered),
+#     claude-md loads none of its own (an import still loads it; none is
+#     offered), managed-only loads nothing in the project, imports included.
+#     Managed settings and an active --settings are not read, and every
+#     verdict says so; an unset, unreadable or unknown entry is the default's
+#     verdict, the why naming which (reader_mode, mode_clause).
 #   agents-chain  reads ${CODEX_HOME:-~/.codex}/AGENTS.md, then one file per
 #     directory from the project root (the nearest directory holding .git)
 #     down to the working directory, AGENTS.override.md replacing AGENTS.md at
@@ -129,6 +140,7 @@ def read_regular(p, text=False):
 # _INSTR_PY — the program: argv is <op> <helper name> <args...>.
 #   detect <dir>                         instruction_files_detect
 #   visibility <lead> <reader> <dir>     instruction_pointer_visibility
+#   mode <dir>                           instruction_files_mode
 #   add-import <file> <yes>              instruction_add_import
 #   merge <dir> <template> <yes>         instruction_merge_pointer
 #   convert <file> <template> <yes>      instruction_convert_stale
@@ -142,7 +154,7 @@ _INSTR_PY='
 # runs after the read_regular lines, whose prelude dropped the working
 # directory (the user project) from sys.path: a hashlib.py or re.py planted
 # there never runs
-import array, bisect, hashlib, mmap, os, re, stat, sys
+import array, bisect, hashlib, json, mmap, os, re, stat, sys
 
 CLAUDE_KINDS = ("CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md")
 AGENTS_KINDS = ("AGENTS.md", "AGENTS.override.md")
@@ -387,12 +399,24 @@ PUNCT = re.compile(rb"[!-/:-@\[-`{-~]")
 #                <home>/<config> that sets it ("": no budget)
 #   trust_table, trust_key, untrusted  a project whose entry there carries
 #                that value gets no project AGENTS.md ("": no trust rule)
+#   mode_file, mode_key  the JSON file in the user tier (tier_home) and the path
+#                in it of the setting that says which files the reader takes
+#                ("", (): no setting)
+#   mode_default, modes  the mode an unset or unreadable setting means, and the
+#                rule of each mode: shadow (the shadow files apply), both (they do
+#                not), imports (no AGENTS.md but through an import), none
+#   mode_ui      where a user changes the setting
 READERS = {
     "claude-md-shadow": {
         "shadow": CLAUDE_KINDS, "user_tier": "CLAUDE.md",
         "home_env": "CLAUDE_CONFIG_DIR", "home_default": ".claude", "user_level": "", "override": "", "root_marker": "",
         "budget": 0, "budget_key": "", "config": "",
         "trust_table": "", "trust_key": "", "untrusted": "",
+        "mode_file": "settings.json",
+        "mode_key": ("pluginConfigs", "cc-plugin-agents-md@builtin", "options", "instructionFiles"),
+        "mode_default": "claude-md-or-agents-md",
+        "modes": {"claude-md-or-agents-md": "shadow", "claude-md-and-agents-md": "both", "claude-md": "imports", "managed-only": "none"},
+        "mode_ui": "Project instructions in /config",
     },
     "agents-chain": {
         "shadow": (), "user_tier": "",
@@ -400,10 +424,13 @@ READERS = {
         "override": "AGENTS.override.md", "root_marker": ".git",
         "budget": 32768, "budget_key": "project_doc_max_bytes", "config": "config.toml",
         "trust_table": "projects", "trust_key": "trust_level", "untrusted": "untrusted",
+        "mode_file": "", "mode_key": (), "mode_default": "", "modes": {}, "mode_ui": "",
     },
 }
 # the reader whose byte budget instruction_merge_pointer checks: the one with a budget
 BUDGETED = [n for n, r in READERS.items() if r["budget_key"]][0]
+# the reader whose mode instruction_files_mode reports: the one with modes
+MODED = [n for n, r in READERS.items() if r["modes"]][0]
 
 
 def emit(stream, text):
@@ -450,6 +477,68 @@ def tier_home(r, project):
     h = os.environ[r["home_env"]]
     p = os.path.realpath(h) if h.startswith("/") else ""
     return h if p and p != project and not p.startswith(project.rstrip("/") + "/") else ""
+
+
+def reader_mode(r, project):
+    # (mode, rule, state, path) of the setting in the user tier (tier_home),
+    # read and never written. state: set | absent (no file, or no such entry
+    # in it) | no-tier (no user tier to read) | unreadable (not a regular file,
+    # past FILE_MAX, not JSON) | unknown (a value not in modes); all but set
+    # mean the default. A reader without modes: ("", "shadow", "set", "")
+    if not r["modes"]:
+        return "", "shadow", "set", ""
+    default = r["mode_default"], r["modes"][r["mode_default"]]
+    th = tier_home(r, project)
+    if not th:
+        return default + ("no-tier", "")
+    path = os.path.join(th, r["mode_file"])
+    if not lexists(path):
+        return default + ("absent", path)
+    data, size = load(path)
+    if data is None or size > FILE_MAX:
+        return default + ("unreadable", path)
+    try:
+        node = json.loads(data.decode("utf-8"))
+    except (ValueError, RecursionError):
+        return default + ("unreadable", path)
+    for key in r["mode_key"]:
+        node = node.get(key) if isinstance(node, dict) else None
+    if node is None:
+        return default + ("absent", path)
+    if not isinstance(node, str) or node not in r["modes"]:
+        return default + ("unknown", path)
+    return node, r["modes"][node], "set", path
+
+
+def mode_setting(r, m):
+    # the words for a setting read from the file: the setting, the file, the mode
+    return "the " + r["mode_key"][-1] + " setting in " + m[3] + " is " + m[0]
+
+
+def mode_clause(r, m):
+    # the clause on a verdict that rests on the mode: which one and how it is
+    # known ("": a reader without modes). A verdict that holds in every mode
+    # the block can reach, such as no pointer block at all, carries none
+    if not r["modes"]:
+        return ""
+    name = r["mode_key"][-1]
+    unread = "; managed settings and an active --settings are not read)"
+    fallback = " (under the default mode, " + r["mode_default"]
+    if m[2] == "set":
+        return " (" + mode_setting(r, m) + unread
+    if m[2] == "absent":
+        return fallback + "; a user-tier " + name + " setting changes this, and " + m[3] + " sets none" + unread
+    if m[2] == "no-tier":
+        return fallback + ": " + r["home_env"] + " is empty, relative or in the project, or there is no home directory, so no user-tier " + name + " setting is read" + unread
+    if m[2] == "unreadable":
+        return fallback + ": " + m[3] + " is unreadable, so its " + name + " setting is not known" + unread
+    return fallback + ": " + m[3] + " sets " + name + " to a value this library does not know" + unread
+
+
+def mode_hidden(r, m):
+    # the why of a mode that loads no AGENTS.md of its own: the setting, never an import
+    what = "this reader loads no AGENTS.md" + (" and no file in the project" if m[1] == "none" else " of its own")
+    return mode_setting(r, m) + ", so " + what + "; change it under " + r["mode_ui"] + "; managed settings and an active --settings are not read"
 
 
 def lexists(p):
@@ -2158,7 +2247,11 @@ def say(lead, verdict, why):
 def reach(lead, r, cwd):
     # every rule the reader has, in the order it applies them: an untrusted
     # project, the files it takes (the user-level one, then one per directory,
-    # its override over AGENTS.md), the budget, the shadow files
+    # its override over AGENTS.md), the budget, the mode, the shadow files
+    mode = reader_mode(r, cwd)
+    clause = mode_clause(r, mode)
+    if mode[1] == "none":
+        return say(lead, "hidden", mode_hidden(r, mode))
     levels = read_levels(r, cwd)
     cfg, cfg_path, cfg_state = reader_config(r)
     if cfg_state == "cut":
@@ -2184,6 +2277,8 @@ def reach(lead, r, cwd):
             cut = p
         used += size
     if not pointers:
+        if mode[1] == "imports":
+            return say(lead, "hidden", mode_hidden(r, mode))
         for level in levels:
             a, o = os.path.join(level, "AGENTS.md"), os.path.join(level, r["override"] or "AGENTS.md")
             d = load(a)[0] if r["override"] and lexists(a) else None
@@ -2196,6 +2291,8 @@ def reach(lead, r, cwd):
     if r["budget_key"] and end > budget:
         return say(lead, "hidden", "over budget: the pointer block in " + pointer + " ends at byte " + str(end) + " of the files this reader combines (user-level " + str(user) + " bytes first), past " + str(budget) + " (" + source + "), where it stops reading" + note)
     tail = ": the pointer block ends at byte " + str(end) + " of the files this reader combines, within " + str(budget) + " (" + source + ")" if r["budget_key"] else ""
+    if mode[1] == "both":
+        return say(lead, "visible", pointer + " is read beside any " + kind_names(r["shadow"]) + ", with no import needed" + clause)
     if r["shadow"]:
         shadows = []
         for level in levels_up(cwd):
@@ -2203,6 +2300,12 @@ def reach(lead, r, cwd):
                 p = os.path.join(level, kind)
                 if lexists(p) and not is_user_tier(p, cwd):
                     shadows.append((p, kind, level))
+        if mode[1] == "imports":
+            for q in [s[0] for s in shadows] + [u for u in user_tiers(cwd) if lexists(u)]:
+                d = load_md(q)
+                if d is not None and imports(q, d, set(l for _, l, _ in pointers)):
+                    return say(lead, "visible", q + " imports " + pointer + ", so it is loaded with that file" + clause)
+            return say(lead, "hidden", mode_hidden(r, mode))
         if not shadows:
             tail += ": no " + kind_names(r["shadow"]) + " at " + cwd + " or above"
         else:
@@ -2215,7 +2318,7 @@ def reach(lead, r, cwd):
             for i, q in enumerate([s[0] for s in shadows] + [u for u in user_tiers(cwd) if lexists(u)]):
                 d = load_md(q)
                 if d is not None and imports(q, d, set(l for _, l, _ in pointers)):
-                    return say(lead, "visible", q + " imports " + pointer + ", so it is loaded with that file" + note)
+                    return say(lead, "visible", q + " imports " + pointer + ", so it is loaded with that file" + note + clause)
                 if i == 0 and line:
                     # an import a reading bound would stop (import_bound) is
                     # never offered: the bound is named instead, in the words
@@ -2242,8 +2345,17 @@ def reach(lead, r, cwd):
                 elif bound:
                     own = CLAUDE_KINDS[0]
                     fix = bound + ("" if same_file(p, os.path.join(plevel, own)) else "; or put the line " + import_line(own, plevel, plevel) + " in " + os.path.join(plevel, own) + " instead, which loads it for this project only")
-            return say(lead, "hidden", "shadowed by " + ", ".join(s[0] for s in shadows) + ": this reader takes AGENTS.md only while no " + kind_names(r["shadow"]) + " exists in the working directory or above, and none of them imports " + pointer + "; " + fix)
-    return say(lead, "visible", pointer + " is read" + tail + note)
+            return say(lead, "hidden", "shadowed by " + ", ".join(s[0] for s in shadows) + ": this reader takes AGENTS.md only while no " + kind_names(r["shadow"]) + " exists in the working directory or above" + clause + ", and none of them imports " + pointer + "; " + fix)
+    return say(lead, "visible", pointer + " is read" + tail + note + clause)
+
+
+def show_mode(fn, start):
+    # one line: mode TAB rule TAB state TAB settings file ("-": none); reader_mode
+    if not os.path.isdir(start):
+        return refuse(fn, start + " is not a directory")
+    m = reader_mode(READERS[MODED], os.path.realpath(start))
+    out("\t".join((m[0], m[1], m[2], clean(m[3]) or "-")))
+    return 0
 
 
 def refuse(fn, why, rc=2):
@@ -2590,7 +2702,8 @@ def convert(fn, arg, template, yes):
     finally:
         os.close(dfd)
     out("changed: " + path + ": removed (an unmodified copy of the Triforge " + version + " template)")
-    for k in CLAUDE_KINDS:
+    # the note holds under the default mode: under the others the file does not make Claude Code skip AGENTS.md
+    for k in CLAUDE_KINDS if reader_mode(READERS[MODED], lev)[1] == "shadow" else ():
         p = os.path.join(lev, k)
         d = load_md(p) if lexists(p) else None
         if d is not None and not imports(p, d, {lev}):
@@ -2604,6 +2717,8 @@ def main(argv):
         return detect(fn, args[0])
     if op == "visibility":
         return visibility(fn, args[0], args[1], args[2])
+    if op == "mode":
+        return show_mode(fn, args[0])
     if op == "add-import":
         return add_import(fn, args[0], args[1] == "1")
     if op == "merge":
@@ -2922,6 +3037,15 @@ instruction_files_detect() {
   _instr_py read detect instruction_files_detect "${1:-.}"
 }
 
+# instruction_files_mode [<dir>] — the mode of Claude Code's user-tier
+# instructionFiles setting as seen from <dir> (default the working directory),
+# read and never written, for session start: one line "<mode> TAB <rule> TAB
+# <state> TAB <settings file>" (reader_mode; "-" when there is no file to name).
+# rc 0, 2 <dir> is not a directory, 69 no python3, 124, 137 or 143 given up on.
+instruction_files_mode() {
+  _instr_py read mode instruction_files_mode "${1:-.}"
+}
+
 # instruction_pointer_visibility <lead> [<dir>] — whether Triforge's AGENTS.md
 # (the one holding the pointer block) reaches <lead> started in <dir> (default
 # the working directory), and why: one line "<lead> TAB visible|hidden TAB
@@ -2929,7 +3053,9 @@ instruction_files_detect() {
 # directory, 64 usage, 69 no python3, 124, 137 or 143 given up on
 # (_instr_py). The lead's reader is registry data
 # (KTD1, `cli_field <lead> instructions`), one of READERS: claude-md-shadow
-# (the CLAUDE.md family shadows AGENTS.md unless one imports it) or
+# (under Claude Code's default instructionFiles mode the CLAUDE.md family
+# shadows AGENTS.md unless one imports it; the user tier's setting changes
+# that, the why names it, and it holds the other modes' verdicts) or
 # agents-chain (an untrusted project, an AGENTS.override.md at the block's
 # level, the byte budget). An empty or unknown reader fails closed: "hidden",
 # rc 1, the why starting "unknown reader:". From HOME or a directory above it,

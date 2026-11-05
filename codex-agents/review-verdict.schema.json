@@ -46,8 +46,13 @@
     "review_scope": {
       "type": "string",
       "description": "What was reviewed (files, diff range, or scope statement from the prompt)."
+    },
+    "coverage": {
+      "type": "string",
+      "enum": ["complete", "partial", "none"],
+      "description": "complete: every changed file and every Accept: was judged from the package and readable code; a command-shaped Accept: that cannot be run is judged by reading and listed not run, without lowering coverage. partial and none: unread files or an unreadable package; say why in summary. Anything but complete keeps the review cycle from converging."
     }
   },
-  "required": ["findings", "summary", "review_scope"],
+  "required": ["findings", "summary", "review_scope", "coverage"],
   "additionalProperties": false
 }

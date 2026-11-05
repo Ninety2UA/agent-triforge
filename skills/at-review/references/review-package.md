@@ -11,7 +11,7 @@ The core lanes, the optional lanes and the specialist sub-agents all review the 
 
 The package holds three things:
 
-1. Each `[R]` task of the lead's `ops/TASKS.md`, with the indented fields under it (`Accept:`, `Fails when:` and the rest). The header names `ops/TASKS.md`, which holds every task in full, and `ops/CONTRACTS.md`, both by absolute path.
+1. Each `[R]` task of the lead's `ops/TASKS.md`, with the indented fields under it (`Accept:`, `Fails when:` and the rest). A blank line inside a task does not end it: a task ends at the next non-blank line indented no deeper than its marked line. The header names `ops/TASKS.md`, which holds every task in full, and `ops/CONTRACTS.md`, both by absolute path.
 2. A complete inventory of changed files: every tracked change from the base to the working tree with its `git diff --name-status` letter, then every untracked file (`git ls-files --others --exclude-standard`) marked `?`. Untracked files are listed by name only. They are not in the diff, and the prompt says so.
 3. The diff from the base to the working tree, so the branch's commits and the uncommitted edits both show. The inline diff is cut so the whole package stays within 116,000 bytes. A lane's prompt then stays under 120,000 bytes, and under Linux's 131,072-byte limit on one argument even with a role brief added. When the diff is cut, the prompt says so and names `full.diff`, which holds every file.
 
@@ -95,13 +95,14 @@ if [ "$RGIT" -eq 1 ]; then
   fi
 fi
 # Each [R] task whole: the marked line, then every line after it that is
-# indented deeper (Accept:, Fails when: and the other fields), up to a blank
-# line or a line indented no deeper.
-awk 'BEGIN { b = -1 }
-  /^[[:space:]]*$/ { b = -1; next }
+# indented deeper (Accept:, Fails when: and the other fields), up to a
+# non-blank line indented no deeper. A blank line inside a task is held and
+# printed only when the next non-blank line is still deeper.
+awk 'BEGIN { b = -1; h = 0 }
+  /^[[:space:]]*$/ { if (b >= 0) h++; next }
   { i = match($0, /[^[:space:]]/) - 1 }
-  b >= 0 && i > b { print; next }
-  { b = -1 }
+  b >= 0 && i > b { for (; h > 0; h--) print ""; print; next }
+  { b = -1; h = 0 }
   index($0, "[R]") { print; b = i }' ops/TASKS.md > "$REVIEW_PKG/rows.txt" 2>/dev/null || true
 
 # package.md: the tasks, the inventory (inventory.txt holds all of it) and the

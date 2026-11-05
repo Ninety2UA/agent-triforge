@@ -8,10 +8,10 @@
 
 | Persona | Phase | What it does |
 |---|---|---|
-| [`plan-checker`](../personas/plan-checker.md) | 1.5 | Validates task plans for completeness, assignments, dependencies |
-| [`findings-synthesizer`](../personas/findings-synthesizer.md) | 4 | Merges review outputs with deduplication and confidence tiering |
-| [`integration-verifier`](../personas/integration-verifier.md) | 2 | Runs build, tests, lint between waves |
-| [`learnings-researcher`](../personas/learnings-researcher.md) | Pre-1 | Searches `ops/solutions/` and `ops/decisions/` for relevant patterns |
+| [`plan-checker`](../personas/plan-checker.md) | 1.5 | Validates task plans for completeness, assignments, dependencies. `persona_verdict` passes only an explicit APPROVED with no blocking issue |
+| [`findings-synthesizer`](../personas/findings-synthesizer.md) | 4 | Merges review outputs with deduplication and confidence tiering. The lanes it is handed are authoritative; one that is missing, empty or short of complete coverage is a gap |
+| [`integration-verifier`](../personas/integration-verifier.md) | 2 | Runs build, tests, lint between waves. `persona_verdict` passes only an explicit PASS with a matching recommendation |
+| [`learnings-researcher`](../personas/learnings-researcher.md) | Pre-1 | Searches `ops/solutions/` and `ops/decisions/` for relevant patterns. Skipped while the knowledge store holds only its skeleton |
 | [`team-lead`](../personas/team-lead.md) | 2 | Orchestrates agent team workers with file ownership and quality gates |
 | [`research-synthesizer`](../personas/research-synthesizer.md) | 0 | Merges parallel research outputs into unified analysis |
 | [`continuous-reviewer`](../personas/continuous-reviewer.md) | 2 | Per-task quality gate during team builds; reviews every completed task |

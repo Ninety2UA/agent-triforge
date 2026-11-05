@@ -4,7 +4,7 @@ description: "Use when a sprint exceeds 15 tasks, cycle 3 still has P2 findings,
 metadata:
   triforge-consumer: "the lead"
   triforge-phase: "1.5 (plan validation); mid-sprint"
-  version: "4.1.1"
+  version: "4.2.0"
 ---
 
 # Scope Cutting

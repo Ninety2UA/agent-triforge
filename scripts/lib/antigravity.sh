@@ -35,13 +35,51 @@ fi
 # Every constructed agy command pins the model: agy's own default is a
 # (Medium) variant, so --model "${AGY_MODEL:-Gemini 3.8 Flash (High)}" is
 # mandatory on every path — the newest Gemini at its highest thinking level
-# (D-022, AGY-05 PASS 2026-09-11; "Gemini 3.1 Pro (High)" is the roster
+# that every tier can run (D-022, D-060; "Gemini 4 Argon (High)" is the roster
 # opt-in). The "(Low)/(Medium)/(High)" suffix is how agy encodes thinking
 # effort (a dedicated --effort flag exists but is rejected for display names —
 # AGY-11, KTD1), and AGY_MODEL is the override hook for the roster layer.
 # Every command also passes --add-dir "$PWD": agy has no --cwd and otherwise
 # runs shell commands in its own scratch dir (~/.gemini/antigravity-cli/scratch)
 # instead of the project.
+# _agy_lane_settings: print the --settings JSON for a read-only lane, or nothing
+# on an agy without that flag (its help is the only record: its changelog never
+# names it). Read live on agy 1.5.1, 2026-11-05: a headless permission prompt
+# ends the turn at once with an empty response, so one write, command or read
+# outside the workspace loses the whole run, while a deny rule hands the model
+# a tool error and the turn goes on to its answer. So writes and commands are
+# denied, and reads are allowed everywhere but the credential paths the other
+# read-only lanes refuse (_CLAUDE_CRED_PATHS, _claude_config_cred), the reach a
+# Codex read-only sandbox has. A deny beats an allow, a path rule covers what
+# is under it, and "*" is the only wildcard agy reads in one. The session
+# object is never saved. Whether it merges with the user tier or replaces it is
+# not documented and cannot be read without writing that file, so the user's
+# own rules are carried along: either way they all still hold.
+_agy_lane_settings() {
+  local HELP=""
+  HELP=$(_run_with_timeout 10 agy --help 2>&1) || return 0
+  case "$HELP" in *--settings*) : ;; *) return 0 ;; esac
+  AS_CRED="$_CLAUDE_CRED_PATHS" AS_OWN="$(_claude_config_cred)" AS_HOME="${HOME:-}" python3 -c "${_PY_PRELUDE}"'
+import json, os
+home = os.environ["AS_HOME"].rstrip("/")
+if not home:
+    raise SystemExit(0)
+allow, deny = ["read_file(*)"], ["write_file(*)", "command(*)"]
+for p in os.environ["AS_CRED"].split():
+    deny.append("read_file(" + (home + p[1:] if p.startswith("~/") else p) + ")")
+for own in [p for p in os.environ["AS_OWN"].split("\n") if p]:
+    deny += ["read_file(" + own + ")", "read_file(" + os.path.realpath(own) + ")"]
+try:
+    with open(home + "/.gemini/antigravity-cli/settings.json", encoding="utf-8") as f:
+        user = json.load(f).get("permissions") or {}
+    allow += [r for r in user.get("allow") or [] if isinstance(r, str)]
+    deny += [r for r in user.get("deny") or [] if isinstance(r, str)]
+except (OSError, ValueError, AttributeError):
+    pass
+print(json.dumps({"permissions": {"allow": list(dict.fromkeys(allow)), "deny": list(dict.fromkeys(deny))}}))
+' 2>/dev/null || true
+}
+
 invoke_antigravity() {
   local AGENT_NAME=$1
   local PROMPT=$2
@@ -113,18 +151,33 @@ ${PROMPT}"
   # comes from (1) each agent's tools allowlist and (2) the permission
   # system's normal prompts/policies. --sandbox is likewise NOT a confinement
   # mechanism (probe: an absolute-path write outside the workspace landed).
-  # --print-timeout (go-duration) keeps agy's own headless wait (default
-  # 5m0s) inside our enforcement window.
+  # --print-timeout (go-duration; agy's default 0 waits for the turn) equals
+  # our outer window, so either may fire first: the outer one ends in rc 124
+  # (it won the one live race, 2026-11-05, agy's envelope then saying
+  # interrupted), agy's in the expiry below. Both are class timeout and neither
+  # retries (D-057).
   # --output-format json (D-032, KTD2): since agy 1.1.20/1.1.28 benign tool
-  # errors and --print-timeout expiry exit 0, and a denied tool leaves
-  # status=SUCCESS with an EMPTY response (lead probe 2026-09-11, agy 1.2.0:
+  # errors exit 0, and a denied tool leaves status=SUCCESS with an EMPTY
+  # response (lead probe 2026-09-11, agy 1.2.0:
   # {"status":"SUCCESS","response":"","denied_actions":[{"action":"read_url",...}]}).
-  # The exit code is therefore not a completion signal — the envelope is.
+  # A --print-timeout expiry exited 0 before agy 1.5.0; since then it exits 3
+  # (read live 2026-11-05, agy 1.5.0): stderr `[agy] print timeout after 2s ...`
+  # and `AGY_ERROR: {short_error, status: DEADLINE_EXCEEDED, retryable: false,
+  # reason: print_timeout}`, stdout an envelope with status ERROR, the partial
+  # response and finished_reason print_timeout. finished_reason (agy 1.4.11)
+  # is omitted on a normal finish; a Ctrl-C and a bad model exit 1 with
+  # interrupted and error (D-057).
+  # The exit code alone is therefore not a completion signal: the envelope is.
   # stdout (the JSON) goes to ${OUTPUT_FILE}.raw and stderr (progress, the
   # "jetski:" line) to ${OUTPUT_FILE}.err; _agy_parse_envelope writes the prose
   # response to OUTPUT_FILE plus the .status / .denied sidecars that background
   # call sites read (they cannot see INVOKE_FAILURE_CLASS).
   local BASE_CMD=(agy --model "$MODEL" --add-dir "$PWD" --print-timeout "${TIMEOUT}s" --output-format json)
+  # Every lane this helper runs is read-only: it returns its answer and the
+  # caller saves it. A builder goes through the lease lane, never here.
+  local LANE_SETTINGS=""
+  LANE_SETTINGS=$(_agy_lane_settings)
+  if [ -n "$LANE_SETTINGS" ]; then BASE_CMD+=(--settings "$LANE_SETTINGS"); fi
   local CMD=("${BASE_CMD[@]}")
   if [ "$MODE" = "native" ]; then
     CMD+=(--agent "$AGENT_NAME")
@@ -143,9 +196,11 @@ ${PROMPT}"
 
   # Envelope verdict on a clean exit: 0 usable prose; 11/13 empty (no denial /
   # non-SUCCESS status) -> retry once with the raw prompt; 10 denied+empty ->
-  # deterministic (retry cannot lift a permission denial). A nonzero exit is
-  # classified by _agy_failure_class: on exit 3, agy's AGY_ERROR line gives
-  # the reason and, through its retryable field, the class (D-043).
+  # deterministic (retry cannot lift a permission denial); 14 cut off ->
+  # _agy_incomplete_class (D-057). A nonzero exit is classified by
+  # _agy_failure_class: on exit 3, agy's AGY_ERROR line gives the reason and,
+  # through its retryable field, the class (D-043), unless it was the
+  # print-timeout expiry, which is class timeout (D-057).
   local PRC=0 AGY_REASON=""
   if [ "$EXIT_CODE" -eq 0 ]; then
     _agy_parse_envelope "$RAW" "$OUTPUT_FILE" || PRC=$?
@@ -154,13 +209,14 @@ ${PROMPT}"
       10) EXIT_CODE=1; INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="denied"; AGY_REASON="denied" ;;
       11) EXIT_CODE=1; INVOKE_FAILURE_CLASS="retryable"; AGY_REASON="no-output" ;;
       13) EXIT_CODE=1; INVOKE_FAILURE_CLASS="retryable"; AGY_REASON="status" ;;
+      14) EXIT_CODE=1; _agy_incomplete_class "$OUTPUT_FILE"; AGY_REASON=$(cat "${OUTPUT_FILE}.status" 2>/dev/null || true) ;;
       # Any other parser exit (an unguarded write failing inside the python
       # helper, an interpreter error) must never read as success: the output
       # file may be missing or stale. Same default the retry path carries.
       *)  EXIT_CODE=1; INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="no-output"; AGY_REASON="parser-rc-${PRC}" ;;
     esac
   else
-    _agy_failure_class "$EXIT_CODE" "$ERR" "$RAW"
+    _agy_failure_class "$EXIT_CODE" "$ERR" "$RAW" "$OUTPUT_FILE"
     AGY_REASON=$_AGY_ERR_REASON
   fi
 
@@ -186,9 +242,10 @@ ${PROMPT}"
           denied)
             # Empty response + denied_actions: the run did nothing usable. Name
             # the user-tier allow rule per denied action (Triforge never writes
-            # that file — R18). read_url is the common case since 1.1.28 made it
-            # Ask; write denials against ops/ are benign only when a response
-            # exists (then they ride the .denied sidecar into the promoted header).
+            # that file — R18). An action the lane's session rules cover never
+            # lands here on an agy with --settings; on an older agy a write or a
+            # command can, and the same rule lifts it. A denial beside a response
+            # rides the .denied sidecar into the promoted header.
             local DENIED_RULES
             DENIED_RULES=$(sed -E 's/^(.*)$/"\1(*)"/' "${OUTPUT_FILE}.denied" 2>/dev/null | paste -sd, - 2>/dev/null || true)
             echo "invoke_antigravity: agent=${AGENT_NAME} exit=${EXIT_CODE} denied — the run returned an empty response and agy denied: $(paste -sd, "${OUTPUT_FILE}.denied" 2>/dev/null). Fix (user tier, never automated): add permissions.allow: [${DENIED_RULES:-\"read_url(*)\"}] to ~/.gemini/antigravity-cli/settings.json, then re-run. No retry (deterministic)." >&2
@@ -228,6 +285,9 @@ ${PROMPT}"
             0|12) INVOKE_FAILURE_CLASS="none"; _INVOKE_FAILURE_REASON="" ;;
             10) EXIT_CODE=1; INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="denied"
                 echo "invoke_antigravity: agent=${AGENT_NAME} retry denied — empty response, agy denied: $(paste -sd, "${OUTPUT_FILE}.denied" 2>/dev/null). Add the matching permissions.allow rule to ~/.gemini/antigravity-cli/settings.json (user tier)." >&2 ;;
+            14) EXIT_CODE=1; _agy_incomplete_class "$OUTPUT_FILE"
+                echo "invoke_antigravity: agent=${AGENT_NAME} retry was cut off too (status=$(cat "${OUTPUT_FILE}.status" 2>/dev/null)), class=${INVOKE_FAILURE_CLASS}. See ${RAW} / ${ERR}." >&2
+                cat "$ERR" "$RAW" > "$OUTPUT_FILE" 2>/dev/null || true ;;
             *)  EXIT_CODE=1; INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON="no-output"
                 echo "invoke_antigravity: agent=${AGENT_NAME} retry also returned an empty response (status=$(cat "${OUTPUT_FILE}.status" 2>/dev/null)) — no-output. See ${RAW} / ${ERR}." >&2
                 # Leave the diagnostic in OUTPUT_FILE, like the first-pass branch: a
@@ -235,7 +295,7 @@ ${PROMPT}"
                 cat "$ERR" "$RAW" > "$OUTPUT_FILE" 2>/dev/null || true ;;
           esac
         else
-          _agy_failure_class "$EXIT_CODE" "${ERR}.retry" "${RAW}.retry"
+          _agy_failure_class "$EXIT_CODE" "${ERR}.retry" "${RAW}.retry" "$OUTPUT_FILE"
           echo "invoke_antigravity: agent=${AGENT_NAME} retry also failed, exit=${EXIT_CODE} class=${INVOKE_FAILURE_CLASS}${_AGY_ERR_REASON:+ (${_AGY_ERR_REASON})}" >&2
           cat "${ERR}.retry" "${RAW}.retry" > "$OUTPUT_FILE" 2>/dev/null || true
         fi
@@ -262,6 +322,11 @@ ${PROMPT}"
 #   12  not JSON — raw stream copied to <output-file>, status PARSE-FAIL
 #   13  empty response with a non-SUCCESS status (ERROR/CANCELED/INTERRUPTED/
 #       INVALID/WAITING/RUNNING)
+#   14  a non-empty finished_reason, whatever else the envelope says: the turn
+#       did not finish. .status reads INCOMPLETE:<reason>, which no caller
+#       takes for SUCCESS; a partial response still lands in <output-file>
+#       (D-057). An envelope without the key (agy < 1.4.11, or a normal
+#       finish) never returns 14.
 # python3 reads its inputs from prefixed env vars (repo convention; no jq).
 # The heredoc is the program, compiled and run after _PY_PRELUDE (common.sh):
 # the lease lane parses from the builder's worktree, where python3 - would
@@ -270,7 +335,7 @@ _agy_parse_envelope() {
   local RAW=$1 OUT=$2
   local PRC=0
   AGY_RAW="$RAW" AGY_OUT="$OUT" python3 -c "${_PY_PRELUDE}"'exec(compile(sys.stdin.read(), "<stdin>", "exec"))' <<'PYAGY' || PRC=$?
-import json, os, sys
+import json, os, re, sys
 raw_path = os.environ["AGY_RAW"]; out = os.environ["AGY_OUT"]
 try:
     raw = open(raw_path, "r", errors="replace").read()
@@ -303,6 +368,10 @@ if not isinstance(obj, dict):
     open(out + ".denied", "w").close()
     sys.exit(12)
 status = str(obj.get("status") or "").strip() or "UNKNOWN"
+fin = obj.get("finished_reason")
+fin = "" if fin is None else str(fin).strip()
+if fin:
+    status = "INCOMPLETE:" + (re.sub(r"[^A-Za-z0-9_.:-]", "", fin)[:64] or "unknown")
 resp = obj.get("response")
 if not isinstance(resp, str):
     resp = "" if resp is None else json.dumps(resp)
@@ -322,8 +391,10 @@ with open(out + ".denied", "w") as f:
 if resp.strip():
     with open(out, "w") as f:
         f.write(resp.strip() + "\n")
-    sys.exit(0)
+    sys.exit(14 if fin else 0)
 open(out, "w").close()
+if fin:
+    sys.exit(14)
 if denied:
     sys.exit(10)
 if status != "SUCCESS":
@@ -333,30 +404,73 @@ PYAGY
   return $PRC
 }
 
-# _agy_failure_class <exit> <stderr-file> [<stdout-file>] — classify a nonzero
-# agy exit (KTD-9): _classify_invoke_failure over its stderr, then over its
-# stdout while that says retryable; then, on exit 3, agy's own verdict, the
-# AGY_ERROR line (_agy_error_reason, D-043): its reason replaces
+# _agy_incomplete_class <output-file>: the class of a run whose <output-file>
+# .status reads INCOMPLETE:<reason> (D-057).
+_agy_incomplete_class() {
+  local R
+  R=$(cat "${1}.status" 2>/dev/null || true)
+  R=${R#INCOMPLETE:}
+  case "$R" in
+    print_timeout) INVOKE_FAILURE_CLASS="timeout"; _INVOKE_FAILURE_REASON="print_timeout" ;;
+    error) INVOKE_FAILURE_CLASS="retryable"; _INVOKE_FAILURE_REASON="" ;;
+    *) INVOKE_FAILURE_CLASS="deterministic"; _INVOKE_FAILURE_REASON=$R ;;
+  esac
+}
+
+# _agy_failure_class <exit> <stderr-file> <stdout-file> <output-file>: classify
+# a nonzero agy exit (KTD-9): _classify_invoke_failure over its stderr, then
+# over its stdout while that says retryable; then, on exit 3, agy's own verdict,
+# the AGY_ERROR line (_agy_error_reason, D-043): its reason replaces
 # _INVOKE_FAILURE_REASON and its retryable field sets the class (true:
 # retryable, false: deterministic; any other value keeps the text verdict).
 # The field wins over the text patterns: a status like RESOURCE_EXHAUSTED
 # matches none of them, and an id could match one by chance.
+# A print-timeout expiry (exit 3 with the stderr line `[agy] print timeout
+# after` or an AGY_ERROR naming it) is class timeout, reason print_timeout,
+# whatever its retryable field says: a retry would spend a second full window
+# on a turn that already outran one (D-057).
+# Then the stdout envelope: a finished_reason maps as _agy_incomplete_class
+# does (error keeps the verdict so far; rc 124 or 137 stays our own timeout, even
+# as agy's envelope calls our TERM interrupted).
+# Last, <output-file>.status is written, because the callers' promotion guard
+# accepts a MISSING sidecar (a non-agy lane writes none) and <output-file> is
+# about to hold the failure's streams: INCOMPLETE:<reason> for a finished_reason
+# or an expiry, else EXIT-<exit> (our own timeout included), replacing any
+# SUCCESS an earlier run left. The parser's <output-file> is scratch here: every
+# caller overwrites it next.
 # _AGY_ERR_REASON is empty unless a line was parsed. invoke_antigravity and
 # the lease lane's agy arm (_lease_builder_run, lease-wait.sh) both call it.
 _agy_failure_class() {
-  local RC=$1
+  local RC=$1 PRC=0
   _AGY_ERR_REASON=""
   _AGY_ERR_RETRYABLE=""
+  _AGY_ERR_EXPIRY=""
   _classify_invoke_failure "$RC" "$2"
   if [ "$INVOKE_FAILURE_CLASS" = "retryable" ] && [ -n "${3:-}" ]; then
     _classify_invoke_failure "$RC" "$3"
   fi
-  if [ "$RC" -eq 3 ] && _agy_error_reason "$2" "${3:-}"; then
-    _INVOKE_FAILURE_REASON=$_AGY_ERR_REASON
-    case "$_AGY_ERR_RETRYABLE" in
-      true) INVOKE_FAILURE_CLASS="retryable" ;;
-      false) INVOKE_FAILURE_CLASS="deterministic" ;;
-    esac
+  if [ "$RC" -eq 3 ]; then
+    if _agy_error_reason "$2" "${3:-}"; then
+      _INVOKE_FAILURE_REASON=$_AGY_ERR_REASON
+      case "$_AGY_ERR_RETRYABLE" in
+        true) INVOKE_FAILURE_CLASS="retryable" ;;
+        false) INVOKE_FAILURE_CLASS="deterministic" ;;
+      esac
+    fi
+    if [ "$_AGY_ERR_EXPIRY" = 1 ] || { [ -f "$2" ] && grep -q '^\[agy\] print timeout after' "$2" 2>/dev/null; }; then
+      INVOKE_FAILURE_CLASS="timeout"
+      _INVOKE_FAILURE_REASON="print_timeout"
+    fi
+  fi
+  _agy_parse_envelope "${3:-}" "$4" || PRC=$?
+  if [ "$PRC" -eq 14 ] && [ "$INVOKE_FAILURE_CLASS" != "timeout" ]; then
+    if [ "$(cat "${4}.status" 2>/dev/null)" != "INCOMPLETE:error" ]; then
+      _agy_incomplete_class "$4"
+    fi
+  elif [ "$_INVOKE_FAILURE_REASON" = "print_timeout" ]; then
+    printf 'INCOMPLETE:print_timeout\n' > "${4}.status" 2>/dev/null || true
+  else
+    printf 'EXIT-%s\n' "$RC" > "${4}.status" 2>/dev/null || true
   fi
   return 0
 }
@@ -366,8 +480,10 @@ _agy_failure_class() {
 # id}` (D-043). The last such line in the files whose JSON parses sets
 # _AGY_ERR_REASON, "agy-error <status> code=<code> retryable=<retryable>
 # id=<id>" (each value cut to 64 characters of [A-Za-z0-9_.:-], ? when
-# absent), and _AGY_ERR_RETRYABLE: true or false for a JSON boolean, empty
-# for anything else. rc 1, both empty, when no file holds one; a missing or
+# absent), _AGY_ERR_RETRYABLE: true or false for a JSON boolean, empty for
+# anything else, and _AGY_ERR_EXPIRY: 1 when the line names the print-timeout
+# expiry (agy 1.5.0: reason print_timeout, short_error `print timeout after
+# ...`), else empty. rc 1, all empty, when no file holds one; a missing or
 # empty file name is skipped. The files are read through read_regular after
 # the prelude: the lease lane parses from the builder's worktree, after the
 # builder ran.
@@ -376,6 +492,7 @@ _agy_error_reason() {
   TAB=$(printf '\t')
   _AGY_ERR_REASON=""
   _AGY_ERR_RETRYABLE=""
+  _AGY_ERR_EXPIRY=""
   OUT=$(python3 -c "${_READ_REGULAR_PY}"'
 import json, re, sys
 found = None
@@ -404,9 +521,12 @@ def clean(v):
     return re.sub(r"[^A-Za-z0-9_.:-]", "", "" if v is None else str(v))[:64] or "?"
 r = found.get("retryable")
 print("agy-error " + clean(found.get("status")) + " code=" + clean(found.get("code")) + " retryable=" + clean(r)
-      + " id=" + clean(found.get("id")) + "\t" + (clean(r) if isinstance(r, bool) else ""))
+      + " id=" + clean(found.get("id")) + "\t" + (clean(r) if isinstance(r, bool) else "")
+      + "\t" + ("1" if found.get("reason") == "print_timeout" or "print timeout" in str(found.get("short_error") or "") else ""))
 ' "$@" 2>/dev/null) || return 1
   if [ -z "$OUT" ]; then return 1; fi
   _AGY_ERR_REASON=${OUT%%"$TAB"*}
-  _AGY_ERR_RETRYABLE=${OUT#*"$TAB"}
+  OUT=${OUT#*"$TAB"}
+  _AGY_ERR_RETRYABLE=${OUT%%"$TAB"*}
+  _AGY_ERR_EXPIRY=${OUT#*"$TAB"}
 }

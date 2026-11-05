@@ -48,6 +48,10 @@
 #                       persona_spawn / persona_wait / persona_stop, a dispatch
 #                       run detached and waited for in budgeted steps (KTD5,
 #                       KTD20, KTD21)
+#   lib/gates.sh        no-model gates: at-review's Coverage line (review_coverage,
+#                       review_coverage_gaps, review_verdict_coverage; KTD5),
+#                       the plan and verify verdicts (persona_verdict) and the
+#                       planning learnings gate (learnings_store_empty)
 #   lib/lease.sh        the lease lifecycle + _adapter_env + the typed-report parser
 # Function names and contracts are unchanged by the split; commands keep
 # sourcing this file only.
@@ -153,7 +157,7 @@ triforge_plugin_root() { printf '%s\n' "$_TRIFORGE_PLUGIN_ROOT"; }
 
 # Load the lanes (fail-closed: a missing lib is a broken install, never a
 # silently narrower helper).
-for _triforge_lib in common registry antigravity codex opencode kimi cursor devin grok roster bootstrap instructions lease-wait persona lease; do
+for _triforge_lib in common registry antigravity codex opencode kimi cursor devin grok roster bootstrap instructions lease-wait persona gates lease; do
   if [ ! -f "${_TRIFORGE_SCRIPTS_DIR}/lib/${_triforge_lib}.sh" ]; then
     echo "invoke-external.sh: ERROR missing ${_TRIFORGE_SCRIPTS_DIR}/lib/${_triforge_lib}.sh — the plugin install is incomplete (reinstall: claude plugin install agent-triforge@agent-triforge)" >&2
     return 2 2>/dev/null || exit 2

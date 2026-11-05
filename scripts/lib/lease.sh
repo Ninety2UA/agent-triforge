@@ -3755,8 +3755,10 @@ HANDOVER_EOF
 # be (1) a KNOWN identity, a registered CLI or `user` (_approver_ok; a
 # fabricated label like "codex-reviewer" is rejected), (2) different from
 # builder_cli (self-review never merges), and (3)
-# already PINNED via lease_pin_reviewer — the pin is the "a review happened"
-# receipt, so a merge with no pin is refused. It squash-merges the lead's collect snapshot
+# already PINNED via lease_pin_reviewer, so a merge with no pin is refused. The
+# pin names the reviewer and records that the review step was reached; it does
+# not prove the final snapshot was reviewed: it is set before the review and
+# survives fix cycles. It squash-merges the lead's collect snapshot
 # (KTD3/KTD19 — recorded by lease_collect; "commit nothing; the lead
 # collects") into the MAIN tree only after the integrity check, the
 # integration-branch check, the object re-hash (_lease_verify_objects: every
@@ -3810,14 +3812,15 @@ lease_merge() {
     echo "lease_merge: REFUSED — reviewer '${REVIEWER}' is the builder of ${TASK_ID}; self-review never merges (AE3). Pick a non-author reviewer." >&2
     return 1
   fi
-  # Pin IS the "a review happened" receipt (KTD-10). A merge with NO pinned
+  # The pin names the reviewer and records that the review step was reached
+  # (KTD-10); it does not prove the final snapshot was reviewed. A merge with NO pinned
   # reviewer means the pin/review step (lease_pin_reviewer) never ran — refuse,
   # rather than trust a bare argument that no review backs. When a pin exists,
   # the SAME reviewer must approve every cycle: reject a mismatch so a session
   # boundary cannot swap the reviewer.
   PINNED=$(_ledger_get "$TASK_ID" pinned_reviewer 2>/dev/null || true)
   if [ -z "$PINNED" ]; then
-    echo "lease_merge: REFUSED — no reviewer is pinned for ${TASK_ID}. Pin the reviewer first: 'lease_pin_reviewer ${TASK_ID} <reviewer>' (that step records that a review happened); merging without a pin is not allowed (AE3/KTD-10)." >&2
+    echo "lease_merge: REFUSED — no reviewer is pinned for ${TASK_ID}. Pin the reviewer first: 'lease_pin_reviewer ${TASK_ID} <reviewer>' (the pin names the reviewer and records that the review step was reached; it does not prove the final snapshot was reviewed); merging without a pin is not allowed (AE3/KTD-10)." >&2
     return 1
   fi
   if [ "$PINNED" != "$REVIEWER" ]; then

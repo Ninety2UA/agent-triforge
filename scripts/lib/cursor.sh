@@ -23,10 +23,10 @@ fi
 # backstop is the copied .cursor/agents/ defs (valid cursor agent defs) plus the
 # AGENTS.md / CLAUDE.md at the repo root, which cursor reads.
 #
-# Every call pins the model with --model "${CURSOR_MODEL:-cursor-grok-4.6-xhigh}"
+# Every call pins the model with --model "${CURSOR_MODEL:-grok-4.7-xhigh}"
 # — NEVER the Auto router (CUR-03/CUR-05): ledger attribution needs a named
 # model, and Auto resolves nondeterministically. CURSOR_MODEL is the roster
-# override hook; cursor-grok-4.6-xhigh is the shipped default (D-025; Composer
+# override hook; grok-4.7-xhigh is the shipped default (D-025, D-050; Composer
 # 2.5 is the leading alternative).
 #
 # Binary (D-025): the install script now names `agent` primary and `cursor-agent`
@@ -60,8 +60,8 @@ fi
 # findings".
 #
 # Effort (D-025, CUR-10/CUR-12): cursor has no reasoning-effort flag and REJECTS
-# the documented bracket form (grok-4.6[effort=xhigh] -> "Cannot use this
-# model"); effort is the model-id SUFFIX: cursor-grok-4.6-low|medium|high|xhigh.
+# the documented bracket form (grok-4.7[effort=xhigh] -> "Cannot use this
+# model"); effort is the model-id SUFFIX: grok-4.7-low|medium|high|xhigh.
 # _cursor_model_for_effort composes the suffixed id from a bare Grok family name
 # + the roster effort (xhigh/max -> -xhigh) and keeps an explicit suffixed id's
 # suffix (effort recorded "in model id"). The cursor- prefix is the family's
@@ -145,7 +145,7 @@ def cursor_grok_id(fam, sfx, fast=""):
 '
 
 # _cursor_model_for_effort <model> <effort> — compose Cursor's suffixed model id
-# (D-025: effort rides in the id, cursor-grok-4.6-low|medium|high|xhigh; the
+# (D-025: effort rides in the id, grok-4.7-low|medium|high|xhigh; the
 # cursor- prefix comes from the family via _CURSOR_ID_PY — D-050).
 #   bare family (grok-4.6 / cursor-grok-4.6) + effort -> cursor-grok-4.6-<sfx>
 #   bare family (grok-4.7 / cursor-grok-4.7) + effort -> grok-4.7-<sfx>
@@ -191,7 +191,7 @@ invoke_cursor() {
   local OUTPUT_FILE=${3:-"${TMPDIR:-/tmp}/cursor_output_$$_$(date +%s).txt"}
   local TIMEOUT=${4:-600}
   local EFFORT=${5:-${CURSOR_EFFORT:-}}
-  local MODEL="${CURSOR_MODEL:-cursor-grok-4.6-xhigh}"
+  local MODEL="${CURSOR_MODEL:-grok-4.7-xhigh}"
   local MODE="" EXIT_CODE=0
   local RAW="${OUTPUT_FILE}.raw"
   local ERR="${OUTPUT_FILE}.err"

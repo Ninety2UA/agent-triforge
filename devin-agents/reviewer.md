@@ -69,6 +69,12 @@ the labels must match exactly:
 - **Severity:** `P1` critical (blocks ship) | `P2` important (fix this cycle) |
   `P3` suggestion (log for later).
 
+## Before you report
+
+Judge every `Accept:`; an unmet one is at least P2.
+Read the callers, the contracts and the surrounding code before you report or clear a finding.
+Never quote a secret value: name the file, line and shape.
+
 ## Output
 
 Return your review as your final message (the lead captures it and writes
@@ -87,6 +93,9 @@ Return your review as your final message (the lead captures it and writes
 **Issue:** what is wrong
 **Recommendation:** the specific fix
 
+## Not run
+- <a command you could not run, judged by reading; leave this section out when there is none>
+
 ## Machine-readable summary
 {"p1": 0, "p2": 0, "p3": 0, "verdict": "APPROVED|CHANGES_REQUESTED|BLOCKED"}
 
@@ -96,3 +105,13 @@ Tests: none
 Concerns: None
 Discoveries for later tasks: None
 ```
+
+Coverage: complete
+
+End with the Coverage line as the last non-empty line, plain text outside any
+code fence, with nothing after it: `Coverage: complete`, `Coverage: partial: <reason>`
+or `Coverage: none: <reason>`. Complete means every changed file and every `Accept:`
+was judged from the package and readable code; a command-shaped `Accept:` you cannot
+run is judged by reading and listed `not run`, without lowering coverage. Partial and
+none are for unread files or an unreadable package. A report without this line is a
+gap, never a review.

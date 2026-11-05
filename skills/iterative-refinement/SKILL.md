@@ -4,7 +4,7 @@ description: "Use when processing review findings after a build: triage, fix, di
 metadata:
   triforge-consumer: "the lead"
   triforge-phase: "4 (process reviews)"
-  version: "4.1.1"
+  version: "4.2.0"
 ---
 
 # Iterative Refinement
@@ -56,14 +56,13 @@ For each fix:
 1. Understand the root cause (not just the symptom)
 2. Make the minimal change that resolves the issue
 3. Verify existing tests still pass
-4. If the fix is substantial (touches 3+ files), flag for re-review
 
 ## Step 4: Record dispositions
 
 After the fixes of a cycle, append one block to `ops/TASKS.md` (under the task, or under a `## Review dispositions` section for a sprint-wide review). Every finding from the cycle gets a row; later cycles add new blocks and never edit earlier ones, so the ledger shows how each concern was handled across cycles.
 
 ```markdown
-## Review dispositions — Round N (<REVIEW_* snapshot commit>)
+## Review dispositions — Cycle N (<REVIEW_* snapshot commit>)
 
 | Finding | Severity | Disposition | Detail |
 |---|---|---|---|
@@ -92,15 +91,17 @@ A dismissed finding counts as resolved for convergence only when its reason is e
 - If issues persist after 3 cycles, escalate to user with:
   - Summary of remaining issues
   - All reviewers' perspectives
-  - The dispositions ledger for every round
+  - The dispositions ledger for every cycle
   - Your recommendation
   - Whether to ship with known issues or continue fixing
 
 ### Exit decision
 
-After each fix cycle:
-- Count remaining issues by priority
-- Check against convergence mode
+Convergence needs a synthesized report on the final changed snapshot; a cycle that applied any P1 or P2 fix re-reviews the changed files, and that review counts as a cycle against the cap of three. Issues counted after the fixes are not that report.
+
+After each cycle:
+- If it applied any P1 or P2 fix → not converged: re-review. A third cycle that applied a P1 or P2 fix has no report on its final snapshot, so it escalates.
+- Otherwise count the report's issues by priority and check them against the convergence mode
 - If converged → exit loop, proceed to testing
 - If not converged AND cycles < 3 → re-trigger review on changed files only
 - If not converged AND cycles = 3 → escalate
@@ -133,6 +134,6 @@ These categories are not findings:
 After each cycle, produce:
 - Remaining issue counts by priority (P1/P2/P3)
 - What was fixed this cycle with confidence level
-- The `## Review dispositions — Round N` block appended to `ops/TASKS.md`
+- The `## Review dispositions — Cycle N` block appended to `ops/TASKS.md`
 - Convergence status (converged / not converged — cycle N of 3)
 - If escalating: summary of remaining issues, all perspectives, the full dispositions ledger, and recommendation

@@ -35,7 +35,7 @@ max_turns = 10
 class = "read-web"
 tier = "opus-xhigh"
 never_downgrade = false
-max_turns = 12
+max_turns = 40
 
 [personas.bug-reproduction-validator]
 class = "exec"
@@ -77,7 +77,7 @@ max_turns = 8
 class = "read-web"
 tier = "opus-xhigh"
 never_downgrade = false
-max_turns = 12
+max_turns = 40
 
 [personas.git-history-analyzer]
 class = "exec"

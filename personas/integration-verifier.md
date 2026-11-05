@@ -71,3 +71,4 @@ Your input is the build, test and lint output the lead captured in its own check
 - Do not fix issues yourself — report them for Claude to fix
 - If build/tests fail, always include the error output
 - A failure the environment causes (a missing dependency or tool, no network) is NEEDS_CONTEXT naming what is missing, never FAIL: the lead fixes the environment and runs the checks again
+- The lead reads this report through `persona_verdict`, which rejects any other shape: exactly one `### Status:` line holding one value, and `### Recommendation` with one value alone on its first line, none of it inside a code fence, so never wrap the report in one. PASS always recommends PROCEED_TO_NEXT_WAVE, and never sits above a check reading FAIL

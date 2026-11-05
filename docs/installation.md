@@ -12,6 +12,7 @@ Core trio:
 
 ```bash
 # Claude Code ≥ 2.1.277 — the first build that reads a root AGENTS.md (D-037);
+# a claude worker, the shipped builder, needs ≥ 2.1.314 (the sandbox isolation fixes);
 # 2.1.267 first honored `effort:` frontmatter on pinned-default models and the
 # `fable` alias resolves to Fable 5.1 from 2.1.257
 claude --version
@@ -33,7 +34,8 @@ command -v timeout || command -v gtimeout
 Optional tier. You can add these later through `at-setup` to use them as builders or reviewers; an absent one is skipped cleanly in every roster fallback chain:
 
 ```bash
-# OpenCode ≥ 1.18.20 — needs the OpenRouter provider connected (OPENROUTER_API_KEY or `opencode auth login`)
+# OpenCode ≥ 1.18.20, the V1 line (`npm i -g opencode-ai@1`): the lane refuses V2 (`@opencode/cli`, Homebrew Core), D-049.
+# It needs the OpenRouter provider connected (OPENROUTER_API_KEY or `opencode auth login`)
 opencode run --format json -m openrouter/z-ai/glm-5.3 "Respond with only: READY"
 
 # Kimi Code ≥ 0.33.0 — OAuth device-code or API key (`kimi login`)
@@ -41,7 +43,7 @@ kimi -p "Respond with only: READY"
 
 # Cursor (date-versioned) — pin the suffixed Grok id, never the Auto router (`cursor-agent login`);
 # the binary is `cursor-agent` (legacy symlink) or `agent` (primary since 2026.09.10)
-cursor-agent -p --trust --model cursor-grok-4.6-xhigh "Respond with only: READY"
+cursor-agent -p --trust --model grok-4.7-xhigh "Respond with only: READY"
 
 # Devin CLI ≥ 3000.10.31 (`devin auth login`) — a reviewer and analyst; at-setup asks for your
 # consent before enrolling it, and it builds only after a separate opt-in
@@ -86,11 +88,11 @@ grok --model grok-4.7 --output-format json -p "Respond with only: READY"
    trust_level = "trusted"
    ```
 
-   `at-setup` checks for the entry and prints it, with the path filled in, when it is missing. Triforge never writes your user-level config. Without the entry the root `AGENTS.md` still loads, but Codex skips the project's `.codex/` files; a project you mark `untrusted` loses the root `AGENTS.md` as well. [`templates/.codex/config.toml`](../templates/.codex/config.toml) is the project file that entry unlocks.
+   `at-setup` checks for the entry and prints it, with the path filled in, when it is missing. Triforge never writes your user-level config. Codex can: `codex exec -s workspace-write`, which a Codex builder runs, writes this entry for the repo itself, so after the first Codex builder the project reads as trusted and its `.codex/` files apply. Without the entry the root `AGENTS.md` still loads, but Codex skips the project's `.codex/` files; a project you mark `untrusted` loses the root `AGENTS.md` as well. [`templates/.codex/config.toml`](../templates/.codex/config.toml) is the project file that entry unlocks.
 
 4. Start the lead (`claude` or `codex`) in your project. The first session bootstraps the project's `ops/` directory ([Automatic project bootstrapping](project-layout.md#automatic-project-bootstrapping)).
 
-5. Run `/at-setup` (`$agent-triforge:at-setup` in a Codex prompt). After checking that the core trio is live (it names the fix for any CLI that isn't), it asks which CLI leads the project, Claude Code or Codex. For Codex it shows the project trust entry, the hook trust and the full-access launch line, which you type yourself. Role assignment comes next: keep the shipped defaults (recommended) or change any role's CLI, model and effort. You then enroll each optional CLI with a model you choose, or decline it. Setup lists the instruction files in the project and the directories above it. It offers to add the pointer block from [`templates/AGENTS.md`](../templates/AGENTS.md) to the project's root `AGENTS.md` (Triforge ships no `CLAUDE.md`), and when a `CLAUDE.md` would hide `AGENTS.md` from Claude Code, it also offers the `@AGENTS.md` import line. It changes a file only after you say yes. Before it writes the lead, it lists which providers receive your code. It is idempotent, so you can rerun it any time.
+5. Run `/at-setup` (`$agent-triforge:at-setup` in a Codex prompt). After checking that the core trio is live (it names the fix for any CLI that isn't), it asks which CLI leads the project, Claude Code or Codex. For Codex it shows the project trust entry, the hook trust and the full-access launch line, which you type yourself. Role assignment comes next: keep the shipped defaults (recommended) or change any role's CLI, model and effort. You then enroll each optional CLI with a model you choose, or decline it. Setup lists the instruction files in the project and the directories above it. It offers to add the pointer block from [`templates/AGENTS.md`](../templates/AGENTS.md) to the project's root `AGENTS.md` (Triforge ships no `CLAUDE.md`), and when a `CLAUDE.md` would hide `AGENTS.md` from Claude Code (under the default `instructionFiles` mode, `claude-md-or-agents-md`; a user-tier setting changes this), it also offers the `@AGENTS.md` import line. It changes a file only after you say yes. Before it writes the lead, it lists which providers receive your code. It is idempotent, so you can rerun it any time.
 
 ## Portable skills in Devin and Pi
 
@@ -124,7 +126,7 @@ Under a Codex lead the banner appears once you have trusted the plugin's hooks. 
 | Install route | How to update |
 |---|---|
 | Claude Code plugin | `claude plugin marketplace update agent-triforge`, then `claude plugin update agent-triforge`. Start a new Claude Code session to load the new version. |
-| Codex plugin | `codex plugin marketplace upgrade agent-triforge`, then `codex plugin add agent-triforge@agent-triforge`, which installs the version the refreshed marketplace carries. When an update changes a hook, Codex asks you to review the hooks again (`/hooks`). |
+| Codex plugin | `codex plugin marketplace upgrade agent-triforge`, then `codex plugin add agent-triforge@agent-triforge`, which installs the version the refreshed marketplace carries. Any change to the plugin's contents, this update included, asks for approval again, and until then a Codex lead runs without the plugin's hooks: review them when Codex asks, or open `/hooks`. After a fresh install from a Git marketplace Codex asks once more at the next launch, because its first launch reinstalls the plugin, and that changes the contents the approval covers. |
 
 ```bash
 # Claude Code leads

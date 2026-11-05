@@ -11,7 +11,7 @@ source "$ROOT/scripts/invoke-external.sh"
 AGY_OUT="${TMPDIR:-/tmp}/antigravity_phase0_$$_$(date +%s).txt"
 AGY_RC=0
 invoke_antigravity "codebase-analyst" \
-  "Analyze the full codebase. Write to ops/ARCHITECTURE.md, ops/MEMORY.md (append), ops/CONTRACTS.md (append) if you can; otherwise return the complete content as your response, sectioned per target file." \
+  "Analyze the full codebase. Return the complete content as your final response, sectioned per target file (ops/ARCHITECTURE.md, ops/MEMORY.md, ops/CONTRACTS.md): the lead saves that response. Do not write a file and do not run a command." \
   "$AGY_OUT" 600 || AGY_RC=$?
 if [ "$AGY_RC" -ne 0 ]; then
   echo "phase0: codebase-analyst failed rc=$AGY_RC (see $AGY_OUT, ${AGY_OUT}.err) — continuing without a fresh ARCHITECTURE.md" >&2
@@ -26,7 +26,7 @@ fi
 # is attributable in the promoted file.
 if [ ! -f "ops/ARCHITECTURE.md" ] && [ -s "$AGY_OUT" ] && { [ ! -f "${AGY_OUT}.status" ] || [ "$(cat "${AGY_OUT}.status")" = "SUCCESS" ]; }; then
   {
-    echo "<!-- captured from codebase-analyst output; agent could not write ops/ directly (headless permission auto-deny); mode=$(cat "${AGY_OUT}.mode" 2>/dev/null || echo unknown); denied_actions=$([ -s "${AGY_OUT}.denied" ] && paste -sd, "${AGY_OUT}.denied" || echo none) -->"
+    echo "<!-- captured from codebase-analyst output; mode=$(cat "${AGY_OUT}.mode" 2>/dev/null || echo unknown); denied_actions=$([ -s "${AGY_OUT}.denied" ] && paste -sd, "${AGY_OUT}.denied" || echo none) -->"
     _scrub < "$AGY_OUT"
   } > ops/ARCHITECTURE.md
 fi

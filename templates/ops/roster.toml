@@ -29,11 +29,12 @@
 #
 # Model pins — shipped defaults; a role's `model` entry here overrides them:
 #   - Antigravity (agy) pins the NEWEST Gemini model at its highest thinking
-#     level, Pro or Flash (policy D-022, user-directed 2026-09-11): currently
+#     level that every tier can run (D-022, amended by D-060): currently
 #     "Gemini 3.8 Flash (High)" (AGY-05 PASS 2026-09-11). Set `model` on an
 #     agy-backed role to run another variant when you explicitly want it —
-#     e.g. model = "Gemini 3.1 Pro (High)" (the current Pro line, still the
-#     newest Pro; opt-in) or "Gemini 3.8 Flash (Medium)". The
+#     e.g. model = "Gemini 4 Argon (High)" (newer, not on Free or Google AI
+#     Plus; it answered READY live on agy 1.5.1 on 2026-11-05),
+#     "Gemini 3.1 Pro (High)" (Enterprise only) or "Gemini 3.8 Flash (Medium)". The
 #     (Low)/(Medium)/(High) suffix IS agy's thinking-effort control, so for
 #     agy the `effort` field maps into the model-variant suffix (low -> Low,
 #     medium -> Medium, high/xhigh/max -> High; families without a (Medium)
@@ -44,11 +45,11 @@
 #     workhorse, close to Astra at lower cost; it answered on codex 0.160.0
 #     and was refused on 0.155.1),
 #     "gpt-6-sol" or "gpt-6-luna". Codex's /model picker lists the catalog.
-#   - Cursor pins cursor-grok-4.6-xhigh explicitly — the shipped defaults never
+#   - Cursor pins grok-4.7-xhigh explicitly — the shipped defaults never
 #     select the Auto router. Cursor's effort control is the model-id SUFFIX
-#     (cursor-grok-4.6-low|medium|high|xhigh — D-025, CUR-12), so `effort`
+#     (grok-4.7-low|medium|high|xhigh — D-025, CUR-12), so `effort`
 #     maps into that suffix (xhigh/max -> -xhigh); a bare family name such as
-#     grok-4.6 is composed into the suffixed id by the roster writer.
+#     grok-4.7 is composed into the suffixed id by the roster writer.
 
 [roles.builder]
 cli = "claude"
@@ -117,7 +118,7 @@ fallbacks = ["claude"]
 #
 # Shipped defaults for the other optional members, same shape:
 # [members.kimi]   -> enabled = true, model = "kimi-code/k3"          (the OAuth-managed alias; `kimi login` provisions it)
-# [members.cursor] -> enabled = true, model = "cursor-grok-4.6-xhigh"  (explicit suffixed pin — NEVER the Auto router)
+# [members.cursor] -> enabled = true, model = "grok-4.7-xhigh"  (explicit suffixed pin — NEVER the Auto router)
 # [members.devin]  -> enabled = true, model = "swe-1-6-slow", consent = "user <UTC time> via=<origin>"
 #   Devin CLI sends prompts and code to Cognition, so it is enrolled only with your
 #   consent on record (at-setup asks and writes it; a table without it fails to load).
