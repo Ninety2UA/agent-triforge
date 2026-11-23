@@ -5,7 +5,7 @@ argument-hint: "[--gaps-only] [scope]"
 disable-model-invocation: true
 metadata:
   triforge-consumer: "lead"
-  version: "4.3.0"
+  version: "4.3.1"
 ---
 
 # Test

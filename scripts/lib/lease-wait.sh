@@ -672,7 +672,9 @@ _CODEX_ENV_POLICY=(-c 'shell_environment_policy.inherit="all"' -c 'shell_environ
 #                <out> also holds the tool output
 #   antigravity  always the model pin (AE2: agy's own default changes with
 #                the plan and the release), --add-dir the worktree, --print-timeout, the JSON
-#                envelope (KTD2, D-032), -p
+#                envelope (KTD2, D-032), --settings with the credential read
+#                denies only (_agy_lane_settings build, D-077) when agy has
+#                that flag, -p
 #   opencode     run --format json -m <model>, and --variant <effort> when an
 #                effort is set (OC-05, best effort). No --auto (OC-06: the
 #                denies do not survive it); _adapter_env opencode forwards only
@@ -739,7 +741,13 @@ _lease_lane_argv() {
       # lease_dispatch already resolved the model (D-085); this guards a direct
       # caller, and a listed model passes through
       DMODEL=$(_agy_model_for_account "$DMODEL")
-      _LEASE_LANE_ARGV=(agy --model "$DMODEL" --add-dir "$WT" --print-timeout "${TIMEOUT}s" --output-format json -p)
+      _LEASE_LANE_ARGV=(agy --model "$DMODEL" --add-dir "$WT" --print-timeout "${TIMEOUT}s" --output-format json)
+      # the credential read denies only (D-077): Auto keeps approving the
+      # builder's edits and commands; an agy without --settings runs as before
+      local AGY_BUILD_SETTINGS=""
+      AGY_BUILD_SETTINGS=$(_agy_lane_settings build)
+      if [ -n "$AGY_BUILD_SETTINGS" ]; then _LEASE_LANE_ARGV+=(--settings "$AGY_BUILD_SETTINGS"); fi
+      _LEASE_LANE_ARGV+=(-p)
       ;;
     opencode)
       _LEASE_LANE_ARGV=(opencode run --format json -m "$DMODEL")

@@ -45,7 +45,7 @@ fi
 # Every command also passes --add-dir "$PWD": agy has no --cwd and otherwise
 # runs shell commands in its own scratch dir (~/.gemini/antigravity-cli/scratch)
 # instead of the project.
-# _agy_lane_settings: print the --settings JSON for a read-only lane, or nothing
+# _agy_lane_settings [read|build]: print the --settings JSON for a lane, or nothing
 # on an agy without that flag (its help is the only record: its changelog never
 # names it). Read live on agy 1.5.1, 2026-11-05: a headless permission prompt
 # ends the turn at once with an empty response, so one write, command or read
@@ -58,16 +58,24 @@ fi
 # object is never saved. Whether it merges with the user tier or replaces it is
 # not documented and cannot be read without writing that file, so the user's
 # own rules are carried along: either way they all still hold.
+# The build class (the agy builder lease, _lease_lane_argv) keeps only the
+# credential denies: no allow, no write or command deny, so Auto still approves
+# the builder's edits and safe commands in its worktree (D-077, re-tested live
+# on agy 1.5.14, 2026-11-23: the builder wrote with the deny in place, and an
+# outside read under $HOME was refused by the rule).
 _agy_lane_settings() {
-  local HELP=""
+  local CLASS=${1:-read} HELP=""
   HELP=$(_run_with_timeout 10 agy --help 2>&1) || return 0
   case "$HELP" in *--settings*) : ;; *) return 0 ;; esac
-  AS_CRED="$_CLAUDE_CRED_PATHS" AS_OWN="$(_claude_config_cred)" AS_HOME="${HOME:-}" python3 -c "${_PY_PRELUDE}"'
+  AS_CLASS="$CLASS" AS_CRED="$_CLAUDE_CRED_PATHS" AS_OWN="$(_claude_config_cred)" AS_HOME="${HOME:-}" python3 -c "${_PY_PRELUDE}"'
 import json, os
 home = os.environ["AS_HOME"].rstrip("/")
 if not home:
     raise SystemExit(0)
-allow, deny = ["read_file(*)"], ["write_file(*)", "command(*)"]
+if os.environ["AS_CLASS"] == "build":
+    allow, deny = [], []
+else:
+    allow, deny = ["read_file(*)"], ["write_file(*)", "command(*)"]
 for p in os.environ["AS_CRED"].split():
     deny.append("read_file(" + (home + p[1:] if p.startswith("~/") else p) + ")")
 for own in [p for p in os.environ["AS_OWN"].split("\n") if p]:
@@ -79,7 +87,10 @@ try:
     deny += [r for r in user.get("deny") or [] if isinstance(r, str)]
 except (OSError, ValueError, AttributeError):
     pass
-print(json.dumps({"permissions": {"allow": list(dict.fromkeys(allow)), "deny": list(dict.fromkeys(deny))}}))
+perms = {"deny": list(dict.fromkeys(deny))}
+if allow:
+    perms = {"allow": list(dict.fromkeys(allow)), "deny": perms["deny"]}
+print(json.dumps({"permissions": perms}))
 ' 2>/dev/null || true
 }
 

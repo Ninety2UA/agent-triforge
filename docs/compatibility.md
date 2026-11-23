@@ -31,7 +31,7 @@ Why these floors:
 
 Security fixes, recorded apart from the floors (a floor is the oldest build Triforge runs on; these are the builds to be on):
 
-- agy 1.5.14: 1.5.3 to 1.5.14 fix six security issues, among them MCP custom headers forwarded to another host on a redirect (1.5.9), a sandbox proxy path bypass and ignored `mcp(...)` rules (1.5.8), and a `PreToolUse` `auto_approve` that skipped admin review (1.5.7). From 1.5.7 a headless session with no saved mode starts in Auto where the account has it, and from 1.5.14 Auto reads files outside the workspace without asking; the agy builder lane passes no `--settings`, so on such an account a builder can read files a read lane denies (D-077 records why this release does not change the lane).
+- agy 1.5.14: 1.5.3 to 1.5.14 fix six security issues, among them MCP custom headers forwarded to another host on a redirect (1.5.9), a sandbox proxy path bypass and ignored `mcp(...)` rules (1.5.8), and a `PreToolUse` `auto_approve` that skipped admin review (1.5.7). From 1.5.7 a headless session with no saved mode starts in Auto where the account has it, and from 1.5.14 Auto may read files outside the workspace without asking. The agy builder lane passes `--settings` with the same credential read denies the read lanes carry, and nothing else, so Auto still approves the builder's edits (D-077; on a Google AI Pro account, agy 1.5.14, the builder wrote in its worktree with the denies in place and an outside read was refused).
 - Cursor 2026.11.17: older builds expose the access token or API key in the process list.
 - Claude Code 2.1.325: the worker floor above.
 

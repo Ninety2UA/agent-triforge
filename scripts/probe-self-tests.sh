@@ -16555,6 +16555,52 @@ if [ -x /bin/zsh ]; then
 fi
 _S29_EV="${_S29_EV}agyaccount: _agy_model_for_account keeps Gemini 4 Neon (High) on a listing that names it; on a listing without it runs the next listed Gemini 4 family at the same level with a NOTE (Hydrogen (High) and (XHigh); Argon (High) for (XHigh), which Argon lacks), else Gemini 3.8 Flash ((XHigh) as (High)), keeps the model when no candidate is listed, and prefers the asked family at (High) for a missing level or a bare name; the shipped function gives the same answers under /bin/bash and /bin/zsh; reads no listing for a non-Gemini-4 model, and passes the model through when the listing has no model line or agy models fails; roster_write_role fills an empty agy model with Neon at the effort's level (xhigh and max -> (XHigh)) and keeps Flash at (High) for xhigh; resolve_role and roster_role_entry give an effort-only xhigh analyst Gemini 4 Neon (XHigh). "
 
+# agybuild
+# _lease_lane_argv antigravity on the stub: with --settings in agy's help the
+# builder argv carries one --settings object holding the credential read denies
+# only (no allow, no write or command deny; D-077), placed before -p, which
+# stays last; with no --settings in the help the argv has none. The read class
+# (_agy_lane_settings with no argument) keeps its allow and write/command denies
+mkdir -p "$_S29/agyb"
+rm -f "$_S29/cfg/models" "$_S29/cfg/models-fail"
+_s29_build() { # _s29_build <label> — one line describing the builder argv
+  ( cd "$_S29/agyb" && export HOME="$_S29/home" TMPDIR="$_S29/tmp" PATH="$_S29/bin:$PATH" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "$1:load-failed"; exit 0; }
+    _lease_lane_argv antigravity "" "" "Gemini 4 Neon (High)" "" "" "$_S29/agyb" 60 || { echo "$1:argv-failed"; exit 0; }
+    printf '%s\n' "${_LEASE_LANE_ARGV[@]}" > "$_S29/agyb/argv"
+    _s29_rd=$(_agy_lane_settings 2>/dev/null)
+    S29_HOME="$_S29/home" S29_RD="$_s29_rd" python3 - "$1" "$_S29/agyb/argv" <<'S29_PY_EOF'
+import json, os, sys
+label, argv = sys.argv[1], open(sys.argv[2]).read().split("\n")[:-1]
+home = os.environ["S29_HOME"]
+n = argv.count("--settings")
+out = [label, "n=%d" % n, "plast=%s" % ("yes" if argv and argv[-1] == "-p" else "no")]
+if n == 1:
+    i = argv.index("--settings")
+    perms = json.loads(argv[i + 1])["permissions"]
+    deny = perms.get("deny") or []
+    out += ["before-p=%s" % ("yes" if i < argv.index("-p") else "no"),
+            "allow=%d" % len(perms.get("allow") or []),
+            "write=%d" % sum(r in ("write_file(*)", "command(*)") for r in deny),
+            "ssh=%d" % (("read_file(%s/.ssh)" % home) in deny),
+            "gemini=%d" % (("read_file(%s/.gemini)" % home) in deny)]
+rd = os.environ["S29_RD"]
+if rd:
+    p = json.loads(rd)["permissions"]
+    out.append("read-class=%s" % ("ok" if "read_file(*)" in p.get("allow", []) and "write_file(*)" in p.get("deny", []) else "changed"))
+print(":".join(out))
+S29_PY_EOF
+  )
+}
+printf 'Usage: agy [options]\n  --settings  Session settings JSON\n  -p  print\n' > "$_S29/cfg/help"
+O="$(_s29_build build-settings)"
+printf 'Usage: agy [options]\n  -p  print\n' > "$_S29/cfg/help"
+O="$O
+$(_s29_build build-nosettings)"
+rm -f "$_S29/cfg/help"
+_S29_FAIL="${_S29_FAIL}$(_self_expect agybuild "$O" '^build-settings:n=1:plast=yes:before-p=yes:allow=0:write=0:ssh=1:gemini=1:read-class=ok$' \
+  '^build-nosettings:n=0:plast=yes$')"
+_S29_EV="${_S29_EV}agybuild: the agy builder lease argv carries --settings with the credential read denies only (no allow, no write or command deny) before -p, which stays last; an agy whose help has no --settings gets none; the read lanes' settings keep their read allow and write deny. "
+
 # occontrol
 _S29_OCCTL=$(awk '/^_oc_control_gate\(\) \{$/ { p = 1 } p { print } p && /^}$/ { exit }' "$REPO_ROOT/scripts/probe-capabilities.sh" 2>/dev/null || true)
 mkdir -p "$_S29/oc/bin" "$_S29/oc/fix"

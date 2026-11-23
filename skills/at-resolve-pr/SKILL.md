@@ -5,7 +5,7 @@ disable-model-invocation: true
 argument-hint: "<PR number or URL>"
 metadata:
   triforge-consumer: "lead"
-  version: "4.3.0"
+  version: "4.3.1"
 ---
 
 # Resolve PR Comments
